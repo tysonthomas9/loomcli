@@ -53,11 +53,23 @@ function WorkflowsSurface(): JSX.Element {
   const [isStarting, setIsStarting] = useState(false);
   const [startError, setStartError] = useState<string | null>(null);
   const [cancelingRunId, setCancelingRunId] = useState<string | null>(null);
+  const [isBatchCanceling, setIsBatchCanceling] = useState(false);
   const [cancelError, setCancelError] = useState<string | null>(null);
+  const [comparedRunIds, setComparedRunIds] = useState<Set<string>>(
+    () => new Set(),
+  );
 
   const selectedItem = useMemo(
     () => runs.find((item) => item.run.run_id === selectedRunId) ?? null,
     [runs, selectedRunId],
+  );
+  const comparedItems = useMemo(
+    () => runs.filter((item) => comparedRunIds.has(item.run.run_id)),
+    [runs, comparedRunIds],
+  );
+  const comparedLiveItems = useMemo(
+    () => comparedItems.filter((item) => isWorkflowRunLive(item.run.status)),
+    [comparedItems],
   );
   const selectedRun = selectedItem?.run ?? null;
   const selectedIsLive = selectedRun
@@ -89,6 +101,7 @@ function WorkflowsSurface(): JSX.Element {
   useEffect(() => {
     if (runs.length === 0) {
       setSelectedRunId(null);
+      setComparedRunIds(new Set());
       return;
     }
     const firstRun = runs[0]?.run;
@@ -100,6 +113,16 @@ function WorkflowsSurface(): JSX.Element {
       setSelectedRunId(firstRun.run_id);
     }
   }, [runs, selectedRunId]);
+
+  useEffect(() => {
+    setComparedRunIds((current) => {
+      const available = new Set(runs.map((item) => item.run.run_id));
+      const next = new Set(
+        [...current].filter((runId) => available.has(runId)),
+      );
+      return next.size === current.size ? current : next;
+    });
+  }, [runs]);
 
   useEffect(() => {
     if (definitions.length === 0) {
@@ -156,6 +179,42 @@ function WorkflowsSurface(): JSX.Element {
     }
   };
 
+  const handleToggleComparedRun = (runId: string, checked: boolean) => {
+    setComparedRunIds((current) => {
+      const next = new Set(current);
+      if (checked) next.add(runId);
+      else next.delete(runId);
+      return next;
+    });
+  };
+
+  const handleBatchCancel = async () => {
+    if (comparedLiveItems.length === 0) return;
+    setCancelError(null);
+    setIsBatchCanceling(true);
+    const failures: string[] = [];
+    try {
+      for (const item of comparedLiveItems) {
+        try {
+          await cancelWorkflowRun(item.run.run_id);
+        } catch (err) {
+          failures.push(
+            `${shortRunID(item.run.run_id)}: ${
+              err instanceof Error ? err.message : String(err)
+            }`,
+          );
+        }
+      }
+      if (failures.length > 0) {
+        setCancelError(`Failed to cancel ${failures.join(", ")}`);
+      }
+      refetch();
+      refetchEvents();
+    } finally {
+      setIsBatchCanceling(false);
+    }
+  };
+
   const visibleErrors = [
     error?.message,
     definitionsError?.message,
@@ -184,12 +243,21 @@ function WorkflowsSurface(): JSX.Element {
           {message}
         </div>
       ))}
+      <WorkflowComparisonBar
+        comparedItems={comparedItems}
+        liveCount={comparedLiveItems.length}
+        isCanceling={isBatchCanceling}
+        onCancelSelected={() => void handleBatchCancel()}
+        onClear={() => setComparedRunIds(new Set())}
+      />
       <div className={styles.grid}>
         <WorkflowRunList
           runs={runs}
           isLoading={isLoading}
           selectedRunId={selectedRunId}
+          comparedRunIds={comparedRunIds}
           onSelectRun={setSelectedRunId}
+          onToggleComparedRun={handleToggleComparedRun}
         />
         <WorkflowRunDetail
           run={selectedRun}
@@ -302,12 +370,16 @@ function WorkflowRunList({
   runs,
   isLoading,
   selectedRunId,
+  comparedRunIds,
   onSelectRun,
+  onToggleComparedRun,
 }: {
   runs: WorkflowRunListItem[];
   isLoading: boolean;
   selectedRunId: string | null;
+  comparedRunIds: Set<string>;
   onSelectRun: (runId: string) => void;
+  onToggleComparedRun: (runId: string, checked: boolean) => void;
 }): JSX.Element {
   if (isLoading && runs.length === 0) {
     return <div className={styles.runList} />;
@@ -322,7 +394,11 @@ function WorkflowRunList({
           key={item.run.run_id}
           item={item}
           selected={item.run.run_id === selectedRunId}
+          compared={comparedRunIds.has(item.run.run_id)}
           onSelect={() => onSelectRun(item.run.run_id)}
+          onToggleCompare={(checked) =>
+            onToggleComparedRun(item.run.run_id, checked)
+          }
         />
       ))}
     </div>
@@ -332,40 +408,129 @@ function WorkflowRunList({
 function WorkflowRunRow({
   item,
   selected,
+  compared,
   onSelect,
+  onToggleCompare,
 }: {
   item: WorkflowRunListItem;
   selected: boolean;
+  compared: boolean;
   onSelect: () => void;
+  onToggleCompare: (checked: boolean) => void;
 }): JSX.Element {
   const run = item.run;
   return (
-    <button
-      type="button"
+    <div
       className={styles.runRow}
       data-selected={selected}
       data-testid={`workflow-run-row-${run.run_id}`}
-      onClick={onSelect}
-      aria-label={`${run.workflow_name} workflow run, ${formatStatus(run.status)}`}
     >
-      <span className={styles.statusDot} data-status={run.status} />
-      <span className={styles.runMain}>
-        <span className={styles.runTop}>
-          <span className={styles.runName}>{run.workflow_name}</span>
-          <span className={styles.status}>{formatStatus(run.status)}</span>
+      <input
+        className={styles.runCheckbox}
+        type="checkbox"
+        aria-label={`Compare run ${run.run_id}`}
+        checked={compared}
+        onChange={(event) => onToggleCompare(event.target.checked)}
+      />
+      <button
+        type="button"
+        className={styles.runRowButton}
+        onClick={onSelect}
+        aria-label={`${run.workflow_name} workflow run, ${formatStatus(run.status)}`}
+      >
+        <span className={styles.statusDot} data-status={run.status} />
+        <span className={styles.runMain}>
+          <span className={styles.runTop}>
+            <span className={styles.runName}>{run.workflow_name}</span>
+            <span className={styles.status}>{formatStatus(run.status)}</span>
+          </span>
+          <span className={styles.runMeta}>
+            <span>{shortRunID(run.run_id)}</span>
+            <span>{formatTimestamp(run.created_at)}</span>
+            {item.task_runs?.length ? (
+              <span>
+                {item.task_runs.length}{" "}
+                {item.task_runs.length === 1 ? "task run" : "task runs"}
+              </span>
+            ) : null}
+          </span>
         </span>
-        <span className={styles.runMeta}>
-          <span>{shortRunID(run.run_id)}</span>
-          <span>{formatTimestamp(run.created_at)}</span>
-          {item.task_runs?.length ? (
-            <span>
-              {item.task_runs.length}{" "}
-              {item.task_runs.length === 1 ? "task run" : "task runs"}
-            </span>
-          ) : null}
+      </button>
+    </div>
+  );
+}
+
+function WorkflowComparisonBar({
+  comparedItems,
+  liveCount,
+  isCanceling,
+  onCancelSelected,
+  onClear,
+}: {
+  comparedItems: WorkflowRunListItem[];
+  liveCount: number;
+  isCanceling: boolean;
+  onCancelSelected: () => void;
+  onClear: () => void;
+}): JSX.Element | null {
+  if (comparedItems.length === 0) return null;
+  return (
+    <div className={styles.comparisonBar} data-testid="workflow-comparison-bar">
+      <div className={styles.comparisonHeader}>
+        <span className={styles.comparisonTitle}>
+          Comparing {comparedItems.length}{" "}
+          {comparedItems.length === 1 ? "run" : "runs"}
         </span>
-      </span>
-    </button>
+        <span className={styles.comparisonMeta}>
+          {liveCount} live {liveCount === 1 ? "run" : "runs"}
+        </span>
+        <button
+          type="button"
+          className={styles.secondaryButton}
+          onClick={onClear}
+        >
+          Clear
+        </button>
+        <button
+          type="button"
+          className={styles.dangerButton}
+          onClick={onCancelSelected}
+          disabled={liveCount === 0 || isCanceling}
+        >
+          {isCanceling ? "Canceling selected" : "Cancel selected live"}
+        </button>
+      </div>
+      <div className={styles.comparisonList}>
+        {comparedItems.map((item) => (
+          <div
+            key={item.run.run_id}
+            className={styles.comparisonCard}
+            data-testid={`workflow-comparison-run-${item.run.run_id}`}
+          >
+            <div className={styles.comparisonCardTop}>
+              <span
+                className={styles.statusDot}
+                data-status={item.run.status}
+              />
+              <span className={styles.runName}>{item.run.workflow_name}</span>
+              <span className={styles.status}>
+                {formatStatus(item.run.status)}
+              </span>
+            </div>
+            <div className={styles.runMeta}>
+              <span>{shortRunID(item.run.run_id)}</span>
+              <span>{formatTimestamp(item.run.created_at)}</span>
+              {item.task_runs?.length ? (
+                <span>
+                  {item.task_runs.length}{" "}
+                  {item.task_runs.length === 1 ? "task run" : "task runs"}
+                </span>
+              ) : null}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
   );
 }
 

@@ -60,6 +60,14 @@ const liveRun: WorkflowRun = {
   updated_at: "2026-01-01T00:00:00Z",
 };
 
+const waitingRun: WorkflowRun = {
+  ...liveRun,
+  run_id: "wrun-2",
+  status: "waiting",
+  created_at: "2026-01-01T00:01:00Z",
+  updated_at: "2026-01-01T00:01:00Z",
+};
+
 const routeEvent: WorkflowRunEvent = {
   workspace_key: "WS",
   event_id: "evt-1",
@@ -222,5 +230,57 @@ describe("WorkflowsPage", () => {
     fireEvent.click(screen.getByRole("button", { name: "Retry stream" }));
 
     expect(retryStream).toHaveBeenCalledTimes(1);
+  });
+
+  it("compares selected workflow runs and batch cancels live selections", async () => {
+    const refetchRuns = vi.fn();
+    const refetchEvents = vi.fn();
+    const cancelRun = vi.fn().mockResolvedValue({
+      ...liveRun,
+      status: "cancelled",
+    });
+    mockUseCancelWorkflowRun.mockReturnValue(cancelRun);
+    mockUseWorkflowRuns.mockReturnValue({
+      runs: [{ run: liveRun }, { run: waitingRun }],
+      isLoading: false,
+      error: null,
+      refetch: refetchRuns,
+    });
+    mockUseWorkflowRunEvents.mockReturnValue({
+      events: [routeEvent],
+      streamCompletion: null,
+      streamStatus: "connected",
+      reconnectCount: 0,
+      lastEventIndex: 1,
+      isStreamComplete: false,
+      isLoading: false,
+      error: null,
+      refetch: refetchEvents,
+      retryStream: vi.fn(),
+    });
+
+    render(<WorkflowsPage />);
+    fireEvent.click(screen.getByLabelText("Compare run wrun-1"));
+    fireEvent.click(screen.getByLabelText("Compare run wrun-2"));
+
+    expect(screen.getByTestId("workflow-comparison-bar")).toHaveTextContent(
+      "Comparing 2 runs",
+    );
+    expect(
+      screen.getByTestId("workflow-comparison-run-wrun-1"),
+    ).toHaveTextContent("Running");
+    expect(
+      screen.getByTestId("workflow-comparison-run-wrun-2"),
+    ).toHaveTextContent("Waiting");
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Cancel selected live" }),
+    );
+
+    await waitFor(() => expect(cancelRun).toHaveBeenCalledTimes(2));
+    expect(cancelRun).toHaveBeenCalledWith("wrun-1");
+    expect(cancelRun).toHaveBeenCalledWith("wrun-2");
+    expect(refetchRuns).toHaveBeenCalled();
+    expect(refetchEvents).toHaveBeenCalled();
   });
 });
