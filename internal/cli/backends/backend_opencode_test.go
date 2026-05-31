@@ -235,6 +235,25 @@ func TestCollectOpenCodeStreamUsage_WithUsage(t *testing.T) {
 	}
 }
 
+func TestCollectOpenCodeStreamUsage_WithStepFinishTokensAndCost(t *testing.T) {
+	t.Parallel()
+	c := usage.NewCollector("opencode", "test")
+
+	line := `{"type":"step_finish","part":{"type":"step-finish","tokens":{"total":11432,"input":11376,"output":6,"reasoning":50,"cache":{"write":0,"read":0}},"cost":0.02575}}`
+	collectOpenCodeStreamUsage(line, c)
+
+	su := c.Finalize("", "", time.Now(), time.Now(), 0)
+	if su.InputTokens != 11376 {
+		t.Errorf("InputTokens = %d, want 11376", su.InputTokens)
+	}
+	if su.OutputTokens != 6 {
+		t.Errorf("OutputTokens = %d, want 6", su.OutputTokens)
+	}
+	if su.EstimatedCostUSD != 0.02575 {
+		t.Errorf("EstimatedCostUSD = %f, want 0.02575", su.EstimatedCostUSD)
+	}
+}
+
 func TestCollectOpenCodeStreamUsage_NoUsage(t *testing.T) {
 	t.Parallel()
 	c := usage.NewCollector("opencode", "test")

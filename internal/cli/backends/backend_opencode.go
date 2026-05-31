@@ -59,7 +59,10 @@ func defaultOpenCodeInvoker(workDir, prompt, agentName string) error {
 }
 
 func defaultOpenCodeNonInteractiveInvoker(workDir, prompt, agentName string, shutdown <-chan struct{}, collector *usage.Collector) error {
-	args := append([]string{"run", "--format", "json", "--dir", workDir}, openCodeModelArgs()...)
+	args := append([]string{"run", "--format", "json", "--dir", workDir, "--dangerously-skip-permissions"}, openCodeModelArgs()...)
+	if prompt != "" {
+		args = append(args, prompt)
+	}
 
 	fmt.Println("Launching OpenCode agent (non-interactive)...")
 	fmt.Println("")
@@ -70,7 +73,7 @@ func defaultOpenCodeNonInteractiveInvoker(workDir, prompt, agentName string, shu
 		Args:       args,
 		WorkDir:    workDir,
 		Env:        buildBackendEnv(workDir, agentName),
-		Prompt:     prompt,
+		Prompt:     "",
 		// HarnessName left empty: OpenCode has no built-in classifier;
 		// the generic cost/quota classifier handles it.
 		HarnessName: "",
@@ -146,12 +149,24 @@ func openCodeModelArgs() []string {
 }
 
 // openCodeUsageEvent is the minimal structure for OpenCode --format json output.
-// Best-effort: we look for a usage object with input_tokens/output_tokens.
+// Best-effort: legacy builds emitted a top-level usage object, while current
+// builds emit token and cost data on step_finish part events.
 type openCodeUsageEvent struct {
 	Usage *struct {
 		InputTokens  int64 `json:"input_tokens"`
 		OutputTokens int64 `json:"output_tokens"`
 	} `json:"usage,omitempty"`
+	Part *struct {
+		Tokens *struct {
+			Input  int64 `json:"input"`
+			Output int64 `json:"output"`
+			Cache  struct {
+				Read  int64 `json:"read"`
+				Write int64 `json:"write"`
+			} `json:"cache"`
+		} `json:"tokens,omitempty"`
+		Cost float64 `json:"cost,omitempty"`
+	} `json:"part,omitempty"`
 }
 
 type openCodeErrorEvent struct {
@@ -198,11 +213,22 @@ func finalizeOpenCodeRun(runErr error, outputTail, streamErrMsg string) error {
 	return wrapInvocationError(runErr, outputTail)
 }
 
-// collectOpenCodeStreamUsage is best-effort: parse JSON lines for a usage field.
+// collectOpenCodeStreamUsage is best-effort: parse JSON lines for usage data.
 // If no usage data is found, the call is a no-op.
 func collectOpenCodeStreamUsage(line string, collector *usage.Collector) {
 	var event openCodeUsageEvent
 	if err := json.Unmarshal([]byte(line), &event); err != nil {
+		return
+	}
+	if event.Part != nil && event.Part.Tokens != nil {
+		collector.Accumulate(
+			"",
+			event.Part.Tokens.Input,
+			event.Part.Tokens.Output,
+			event.Part.Tokens.Cache.Read,
+			event.Part.Tokens.Cache.Write,
+		)
+		collector.SetCostUSD(event.Part.Cost)
 		return
 	}
 	if event.Usage == nil {

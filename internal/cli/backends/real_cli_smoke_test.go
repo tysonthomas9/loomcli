@@ -21,9 +21,9 @@ import (
 const defaultRealCLIPrompt = "Reply with exactly: loom real CLI smoke ok. Do not inspect files, edit files, or run tools."
 
 func TestRealCLISessionSmoke(t *testing.T) {
-	t.Setenv("GIT_DIR", "")
-	t.Setenv("GIT_WORK_TREE", "")
-	t.Setenv("GIT_INDEX_FILE", "")
+	unsetEnv(t, "GIT_DIR")
+	unsetEnv(t, "GIT_WORK_TREE")
+	unsetEnv(t, "GIT_INDEX_FILE")
 	t.Setenv("LOOM_REDACT_TRANSCRIPTS", "off")
 	if os.Getenv("LOOM_MAX_BUDGET_USD") == "" {
 		t.Setenv("LOOM_MAX_BUDGET_USD", "0.50")
@@ -255,6 +255,25 @@ func envOrDefault(key, fallback string) string {
 		return v
 	}
 	return fallback
+}
+
+func unsetEnv(t *testing.T, key string) {
+	t.Helper()
+	orig, hadOrig := os.LookupEnv(key)
+	if err := os.Unsetenv(key); err != nil {
+		t.Fatalf("unset %s: %v", key, err)
+	}
+	t.Cleanup(func() {
+		if hadOrig {
+			if err := os.Setenv(key, orig); err != nil {
+				t.Errorf("restore %s: %v", key, err)
+			}
+			return
+		}
+		if err := os.Unsetenv(key); err != nil {
+			t.Errorf("restore unset %s: %v", key, err)
+		}
+	})
 }
 
 func envBool(key string) bool {

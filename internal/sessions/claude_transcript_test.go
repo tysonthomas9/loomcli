@@ -81,6 +81,49 @@ func TestSyncLatestClaudeTranscript_ByUUID(t *testing.T) {
 	}
 }
 
+func TestSyncLatestClaudeTranscript_ResolvesSymlinkedWorkDir(t *testing.T) {
+	t.Setenv("LOOM_REDACT_TRANSCRIPTS", "off")
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	const sid = "20260417-120000-claude-abcd-0123abcd"
+	store, sessDir := newStoreWithSession(t, sid)
+
+	realParent := filepath.Join(home, "private", "var", "folders")
+	if err := os.MkdirAll(realParent, 0o755); err != nil {
+		t.Fatalf("mkdir real parent: %v", err)
+	}
+	linkParent := filepath.Join(home, "var")
+	if err := os.Symlink(filepath.Join(home, "private", "var"), linkParent); err != nil {
+		t.Skipf("symlink unsupported: %v", err)
+	}
+	workDirViaLink := filepath.Join(linkParent, "folders", "repo")
+	if err := os.MkdirAll(filepath.Join(realParent, "repo"), 0o755); err != nil {
+		t.Fatalf("mkdir repo: %v", err)
+	}
+	resolvedWorkDir, err := filepath.EvalSymlinks(workDirViaLink)
+	if err != nil {
+		t.Fatalf("eval symlinks: %v", err)
+	}
+	want := `{"type":"assistant","message":{"content":[{"type":"text","text":"hi"}]}}` + "\n"
+	writeClaudeTranscript(t, home, resolvedWorkDir, "uuid-symlinked", time.Now(), want)
+
+	got, err := store.SyncLatestClaudeTranscript(sid, workDirViaLink, "uuid-symlinked", time.Now().Add(-time.Hour))
+	if err != nil {
+		t.Fatalf("SyncLatestClaudeTranscript: %v", err)
+	}
+	if filepath.Base(got) != "uuid-symlinked.jsonl" {
+		t.Fatalf("resolved %q, want uuid-symlinked.jsonl", got)
+	}
+	data, err := os.ReadFile(filepath.Join(sessDir, NativeTranscriptFile))
+	if err != nil {
+		t.Fatalf("read dst: %v", err)
+	}
+	if string(data) != want {
+		t.Errorf("transcript content = %q, want %q", data, want)
+	}
+}
+
 func TestSyncLatestClaudeTranscript_FallbackNewestAfterSince(t *testing.T) {
 	t.Setenv("LOOM_REDACT_TRANSCRIPTS", "off")
 	home := t.TempDir()

@@ -375,6 +375,15 @@ func TestDefaultCodexNonInteractiveInvoker_UsesWrapperWithCodexHarness(t *testin
 	if !containsArg(calls[0].Args, "prompt body") {
 		t.Errorf("codex args: got %v, want prompt passed as argv for PTY-backed exec", calls[0].Args)
 	}
+	if !containsArg(calls[0].Args, "prompt body") {
+		t.Errorf("codex args: got %v, want prompt as argv", calls[0].Args)
+	}
+	if calls[0].Stdin != nil {
+		data, _ := io.ReadAll(calls[0].Stdin)
+		if string(data) != "" {
+			t.Errorf("codex stdin prompt = %q, want empty", data)
+		}
+	}
 }
 
 func TestDefaultGeminiNonInteractiveInvoker_UsesWrapperWithGeminiHarness(t *testing.T) {
@@ -429,6 +438,13 @@ func TestDefaultOpenCodeNonInteractiveInvoker_StreamErrorOverridesIdle(t *testin
 	}
 	if !strings.Contains(invErr.OutputTail, "opencode boom") {
 		t.Errorf("OutputTail %q missing 'opencode boom'", invErr.OutputTail)
+	}
+	calls := fake.Calls()
+	if len(calls) != 1 {
+		t.Fatalf("wrapperRun calls: got %d, want 1", len(calls))
+	}
+	if !containsArg(calls[0].Args, "prompt body") {
+		t.Errorf("opencode args: got %v, want prompt as argv", calls[0].Args)
 	}
 }
 

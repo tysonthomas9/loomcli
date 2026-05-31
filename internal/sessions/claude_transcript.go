@@ -31,32 +31,58 @@ func (s *Store) SyncLatestClaudeTranscript(sessionID, workDir, claudeUUID string
 	)
 	defer span.End()
 
-	projectDir := claudeProjectDir(workDir)
-	if projectDir == "" {
-		return "", nil
+	for _, projectDir := range claudeProjectDirs(workDir) {
+		srcPath := resolveClaudeTranscript(projectDir, claudeUUID, since)
+		if srcPath == "" {
+			continue
+		}
+		if err := s.SyncNativeTranscript(sessionID, srcPath, TranscriptFormatRaw); err != nil {
+			recordErr(span, err)
+			return "", err
+		}
+		return srcPath, nil
 	}
-	srcPath := resolveClaudeTranscript(projectDir, claudeUUID, since)
-	if srcPath == "" {
-		return "", nil
-	}
-	if err := s.SyncNativeTranscript(sessionID, srcPath, TranscriptFormatRaw); err != nil {
-		recordErr(span, err)
-		return "", err
-	}
-	return srcPath, nil
+	return "", nil
 }
 
 // claudeProjectDir returns ~/.claude/projects/<encoded-cwd> for workDir, or ""
 // if the home dir cannot be resolved or workDir is empty.
 func claudeProjectDir(workDir string) string {
-	if workDir == "" {
+	dirs := claudeProjectDirs(workDir)
+	if len(dirs) == 0 {
 		return ""
+	}
+	return dirs[0]
+}
+
+func claudeProjectDirs(workDir string) []string {
+	if workDir == "" {
+		return nil
 	}
 	home, err := os.UserHomeDir()
 	if err != nil || home == "" {
-		return ""
+		return nil
 	}
-	return filepath.Join(home, ".claude", "projects", encodeClaudeCWD(workDir))
+
+	candidates := []string{workDir}
+	if abs, err := filepath.Abs(workDir); err == nil {
+		candidates = append(candidates, abs)
+	}
+	if resolved, err := filepath.EvalSymlinks(workDir); err == nil {
+		candidates = append(candidates, resolved)
+	}
+
+	seen := make(map[string]bool)
+	dirs := make([]string, 0, len(candidates))
+	for _, candidate := range candidates {
+		candidate = strings.TrimSpace(candidate)
+		if candidate == "" || seen[candidate] {
+			continue
+		}
+		seen[candidate] = true
+		dirs = append(dirs, filepath.Join(home, ".claude", "projects", encodeClaudeCWD(candidate)))
+	}
+	return dirs
 }
 
 // claudeCWDSanitize matches every character Claude Code rewrites when it names
