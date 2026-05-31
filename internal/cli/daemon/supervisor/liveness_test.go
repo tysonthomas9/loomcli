@@ -169,6 +169,57 @@ func TestAgentWaitHeartbeatKeepsTickFresh(t *testing.T) {
 	}
 }
 
+// TestWatchdogScanReBaselinesAfterSuspend is the regression guard for the
+// host-sleep daemon crash: when the machine suspends, every tick (and the
+// watchdog's own loop) freezes, so on wake the ticks look minutes stale. The
+// watchdog must treat the ballooned loop gap as a suspend — re-baseline and
+// skip the check — not FATAL-kill the daemon.
+func TestWatchdogScanReBaselinesAfterSuspend(t *testing.T) {
+	s := newHarnessSupervisor()
+	s.RegisterTick(GoroutineHealthChecker)
+	setTickForTest(s, GoroutineHealthChecker, time.Now().Add(-15*time.Minute))
+
+	now := time.Now()
+	// The watchdog's own loop also froze: prev is far older than the interval.
+	prev := now.Add(-(livenessScanInterval + suspendGracePeriod + time.Minute))
+
+	s.watchdogScan(now, prev)
+
+	select {
+	case err := <-s.FatalChannel():
+		t.Fatalf("watchdogScan FATALed on a process suspend: %v", err)
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	last, ok := s.LoadTick(GoroutineHealthChecker)
+	if !ok || time.Since(last) > time.Second {
+		t.Fatalf("tick not re-baselined after suspend: ok=%v age=%s", ok, time.Since(last))
+	}
+}
+
+// TestWatchdogScanFlagsGenuineHangAtNormalCadence guards the other half: a
+// genuinely wedged goroutine does not stretch the watchdog's loop, so at normal
+// cadence a stale tick must still trip the fatal path.
+func TestWatchdogScanFlagsGenuineHangAtNormalCadence(t *testing.T) {
+	s := newHarnessSupervisor()
+	s.RegisterTick(GoroutineHealthChecker)
+	setTickForTest(s, GoroutineHealthChecker, time.Now().Add(-15*time.Minute))
+
+	now := time.Now()
+	prev := now.Add(-livenessScanInterval) // watchdog ran on schedule
+
+	s.watchdogScan(now, prev)
+
+	select {
+	case err := <-s.FatalChannel():
+		if !strings.Contains(err.Error(), GoroutineHealthChecker) {
+			t.Errorf("fatal missing stale goroutine name: %v", err)
+		}
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("watchdogScan did not FATAL a genuine hang at normal cadence")
+	}
+}
+
 func setTickForTest(s *Supervisor, name string, when time.Time) {
 	v, ok := s.Ticks.Load(name)
 	if !ok {

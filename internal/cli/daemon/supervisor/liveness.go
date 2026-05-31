@@ -10,6 +10,13 @@ import (
 // livenessScanInterval is how often the watchdog scans tick stamps.
 const livenessScanInterval = 10 * time.Second
 
+// suspendGracePeriod is the slack added to livenessScanInterval before the
+// watchdog concludes the whole process was suspended. If the watchdog's OWN
+// loop took this much longer than its interval, the process was frozen (host
+// sleep, SIGSTOP, severe CPU starvation) — not a single goroutine wedged — so
+// every tick is equally and meaninglessly stale.
+const suspendGracePeriod = 20 * time.Second
+
 // minLivenessThreshold is the floor for any per-goroutine staleness threshold.
 const minLivenessThreshold = 60 * time.Second
 
@@ -26,15 +33,38 @@ func (s *Supervisor) livenessWatchdog() {
 	ticker := time.NewTicker(livenessScanInterval)
 	defer ticker.Stop()
 
+	prev := time.Now()
 	for {
 		select {
 		case <-s.Shutdown:
 			return
 		case <-ticker.C:
-			s.RecordTick(GoroutineLivenessWatchdog)
-			s.scanTicks(time.Now())
+			prev = s.watchdogScan(time.Now(), prev)
 		}
 	}
+}
+
+// watchdogScan runs one watchdog iteration and returns the timestamp the next
+// iteration should treat as its predecessor.
+//
+// If far more wall-clock time elapsed since prev than the scan interval, the
+// whole process was suspended (host sleep, SIGSTOP, severe CPU starvation):
+// tick ages are recorded as wall-clock UnixNano, so a suspend makes every tick
+// look equally and meaninglessly stale. In that case it re-baselines all ticks
+// and skips the staleness check instead of FATAL-killing the daemon. A genuine
+// single-goroutine hang does not stretch the watchdog's own loop, so it is
+// still caught on the next normal-cadence scan.
+func (s *Supervisor) watchdogScan(now, prev time.Time) time.Time {
+	if now.Sub(prev) > livenessScanInterval+suspendGracePeriod {
+		slog.Warn("liveness watchdog: process suspend detected; re-baselining ticks",
+			"gap", now.Sub(prev).Truncate(time.Second),
+			"scan_interval", livenessScanInterval)
+		s.RebaselineTicks(now)
+		return now
+	}
+	s.RecordTick(GoroutineLivenessWatchdog)
+	s.scanTicks(now)
+	return now
 }
 
 // scanTicks evaluates every registered tick against its threshold and signals

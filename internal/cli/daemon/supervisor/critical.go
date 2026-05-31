@@ -150,6 +150,20 @@ func (s *Supervisor) LoadTick(name string) (time.Time, bool) {
 	return time.Unix(0, tick.Load()), true
 }
 
+// RebaselineTicks stamps `at` on every registered tick slot. The liveness
+// watchdog calls this after detecting a whole-process suspend (host sleep,
+// SIGSTOP, severe CPU starvation) so the resulting wall-clock staleness — which
+// affects every goroutine equally — is not mistaken for a wedged goroutine.
+func (s *Supervisor) RebaselineTicks(at time.Time) {
+	ns := at.UnixNano()
+	s.Ticks.Range(func(_, v any) bool {
+		if tick, ok := v.(*atomic.Int64); ok {
+			tick.Store(ns)
+		}
+		return true
+	})
+}
+
 // RangeTicks iterates over registered tick slots, invoking fn for each.
 func (s *Supervisor) RangeTicks(fn func(name string, t time.Time)) {
 	s.Ticks.Range(func(k, v any) bool {
