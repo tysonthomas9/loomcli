@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/agenterr"
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/sessionfinalize"
 	"github.com/tysonthomas9/loomcli/internal/sessions"
@@ -20,6 +21,7 @@ import (
 )
 
 const defaultRealCLIPrompt = "Reply with exactly: loom real CLI smoke ok. Do not inspect files, edit files, or run tools."
+const defaultRealCLIInvalidModel = "definitely-not-a-real-model"
 
 func TestRealCLISessionSmoke(t *testing.T) {
 	unsetEnv(t, "GIT_DIR")
@@ -54,6 +56,42 @@ func TestRealCLISessionSmoke(t *testing.T) {
 		ran++
 		t.Run(backendName, func(t *testing.T) {
 			runRealCLIBackendSmoke(t, root, backendName, prompt, timeout, requireCost)
+		})
+	}
+	if ran == 0 {
+		t.Fatal("no real CLI backends were run")
+	}
+}
+
+func TestRealCLIInvalidModelClassification(t *testing.T) {
+	if envBool("LOOM_REAL_CLI_SKIP_INVALID_MODEL") {
+		t.Skip("LOOM_REAL_CLI_SKIP_INVALID_MODEL is set")
+	}
+	unsetEnv(t, "GIT_DIR")
+	unsetEnv(t, "GIT_WORK_TREE")
+	unsetEnv(t, "GIT_INDEX_FILE")
+	if os.Getenv("LOOM_MAX_BUDGET_USD") == "" {
+		t.Setenv("LOOM_MAX_BUDGET_USD", "0.50")
+	}
+
+	root := realCLIRoot(t)
+	timeout := realCLITimeout(t)
+	backendsToRun := selectedRealCLIBackends()
+	skipMissing := envBool("LOOM_REAL_CLI_SKIP_MISSING")
+
+	ran := 0
+	for _, backendName := range backendsToRun {
+		backendName := backendName
+		if _, err := exec.LookPath(backendName); err != nil {
+			if skipMissing {
+				t.Logf("%s: binary not found on PATH; skipping because LOOM_REAL_CLI_SKIP_MISSING is set", backendName)
+				continue
+			}
+			t.Fatalf("%s binary not found on PATH", backendName)
+		}
+		ran++
+		t.Run(backendName, func(t *testing.T) {
+			runRealCLIInvalidModelClassification(t, root, backendName, timeout)
 		})
 	}
 	if ran == 0 {
@@ -166,6 +204,72 @@ func runRealCLIBackendSmoke(t *testing.T, root, backendName, prompt string, time
 			t.Errorf("%s did not report backend/session cost into session metadata", backendName)
 		}
 	}
+}
+
+func runRealCLIInvalidModelClassification(t *testing.T, root, backendName string, timeout time.Duration) {
+	t.Helper()
+
+	workDir, _ := prepareRealCLIWorktree(t, root, backendName+"-invalid-model")
+	setRealCLIInvalidModel(t, backendName)
+
+	collector := usage.NewCollector(backendName, "real-cli-"+backendName+"-invalid-model")
+	shutdown := make(chan struct{})
+	timer := time.AfterFunc(timeout, func() {
+		close(shutdown)
+	})
+	err := realCLIBackend(t, backendName).InvokeNonInteractive(
+		workDir,
+		"Reply with ok.",
+		"real-cli-"+backendName+"-invalid-model",
+		shutdown,
+		collector,
+	)
+	_ = timer.Stop()
+
+	if err == nil {
+		t.Fatalf("%s invocation unexpectedly succeeded with invalid model", backendName)
+	}
+	ae := classifyRealCLIInvokeError(err, backendName)
+	t.Logf("%s invalid-model classified as %s: %s", backendName, ae.Class, ae.Message)
+	if ae.Class != agenterr.ModelNotFound {
+		t.Fatalf("%s invalid-model class = %s, want %s\noutput:\n%s", backendName, ae.Class, agenterr.ModelNotFound, ae.RawOutput)
+	}
+}
+
+func setRealCLIInvalidModel(t *testing.T, backendName string) {
+	t.Helper()
+	model := envOrDefault("LOOM_REAL_CLI_INVALID_MODEL", defaultRealCLIInvalidModel)
+	switch backendName {
+	case "claude":
+		t.Setenv("LOOM_CLAUDE_MODEL", model)
+	case "codex":
+		t.Setenv("LOOM_CODEX_MODEL", model)
+	case "opencode":
+		if model == defaultRealCLIInvalidModel {
+			model = "fake/fake-model"
+		}
+		t.Setenv("LOOM_OPENCODE_MODEL", model)
+	default:
+		t.Fatalf("unsupported real CLI backend %q", backendName)
+	}
+}
+
+func classifyRealCLIInvokeError(err error, backendName string) *agenterr.AgentError {
+	exitCode := 1
+	evidence := err.Error()
+	var invErr *InvocationError
+	if errors.As(err, &invErr) {
+		exitCode = invErr.ExitCode
+		if strings.TrimSpace(invErr.OutputTail) != "" {
+			evidence = invErr.OutputTail
+		}
+	} else {
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) {
+			exitCode = exitErr.ExitCode()
+		}
+	}
+	return agenterr.ClassifyFromOutput(evidence, exitCode, backendName)
 }
 
 func expectsNativeTranscript(backendName string) bool {

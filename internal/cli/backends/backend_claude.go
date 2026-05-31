@@ -210,6 +210,7 @@ var claudeInvoker = defaultClaudeInvoker
 // Extracted for testability — callers can inspect the returned cmd without execution.
 func buildClaudeInteractiveCmd(workDir, prompt, agentName string) *exec.Cmd {
 	args := []string{"--dangerously-skip-permissions"}
+	args = append(args, claudeModelArgs()...)
 	if effort := resolveAgentEffort(); effort != "" {
 		args = append(args, "--effort", effort)
 	}
@@ -269,6 +270,7 @@ func buildClaudeRunTurnArgs(resumeSessionID string) []string {
 	if effort := resolveAgentEffort(); effort != "" {
 		args = append(args, "--effort", effort)
 	}
+	args = append(args, claudeModelArgs()...)
 	return args
 }
 
@@ -277,6 +279,14 @@ func claudeResumeArgs(sessionID string) []string {
 		return caps.Resume.ResumeArgs(sessionID)
 	}
 	return []string{"--resume", sessionID}
+}
+
+func claudeModelArgs() []string {
+	model := strings.TrimSpace(os.Getenv("LOOM_CLAUDE_MODEL"))
+	if model == "" {
+		return nil
+	}
+	return []string{"--model", model}
 }
 
 // defaultClaudeNonInteractiveInvoker is the real non-interactive Claude

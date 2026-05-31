@@ -380,8 +380,8 @@ test-e2e-stackpublish:
 	@echo "Running stacked-PR publisher e2e (skips unless LOOM_STACK_E2E is set)..."
 	@GOCACHE=$${GOCACHE:-/tmp/go-build-cache} go test -count=1 -tags e2e -run TestE2EStackPublisher ./internal/stackpublish -timeout 10m
 
-# Run the opt-in real backend CLI smoke test. This invokes installed
-# claude/codex/opencode binaries and can spend real tokens.
+# Run the opt-in real backend CLI smoke and invalid-model tests. This invokes
+# installed claude/codex/opencode binaries and can spend real tokens.
 test-real-clis:
 	@scripts/test-real-clis.sh
 
@@ -630,7 +630,7 @@ help:
 	@echo "  make test-distributed-smoke - Run fleet-db distributed compose smoke"
 	@echo "  make test-e2e-api      - Run Playwright API e2e tests (self-contained)"
 	@echo "  make test-e2e-api-local - Run Playwright API e2e tests (needs loom serve)"
-	@echo "  make test-real-clis    - Run opt-in real claude/codex/opencode CLI smoke"
+	@echo "  make test-real-clis    - Run opt-in real claude/codex/opencode CLI smoke + invalid-model checks"
 	@echo "  make test-e2e-real-smoke - Run real Playwright smoke tests (browser + API)"
 	@echo "  make test-e2e-real-smoke-local - Run real Playwright smoke tests (needs loom serve/UI)"
 	@echo "  make test-e2e-real-regression - Run real Playwright regression tests"

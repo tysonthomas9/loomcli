@@ -40,6 +40,7 @@ var codexNonInteractiveInvoker func(workDir, prompt, agentName string, shutdown 
 // Extracted for testability — callers can inspect the returned cmd without execution.
 func buildCodexInteractiveCmd(workDir, prompt, agentName string) *exec.Cmd {
 	args := []string{"--no-alt-screen", "--dangerously-bypass-approvals-and-sandbox"}
+	args = append(args, codexModelArgs()...)
 	args = appendCodexEffortArgs(args, resolveAgentEffort())
 	args = append(args, prompt)
 	cmd := exec.Command("codex", args...)
@@ -106,10 +107,19 @@ func defaultCodexNonInteractiveInvoker(workDir, prompt, agentName string, shutdo
 // positional prompt argument instead.
 func buildCodexNonInteractiveArgs(prompt string) []string {
 	args := []string{"exec", "--json", "--dangerously-bypass-approvals-and-sandbox"}
+	args = append(args, codexModelArgs()...)
 	if prompt != "" {
 		args = append(args, prompt)
 	}
 	return args
+}
+
+func codexModelArgs() []string {
+	model := strings.TrimSpace(os.Getenv("LOOM_CODEX_MODEL"))
+	if model == "" {
+		return nil
+	}
+	return []string{"--model", model}
 }
 
 // buildBackendEnv constructs the standard environment for backend subprocess invocations.
