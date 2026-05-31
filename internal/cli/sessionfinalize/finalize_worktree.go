@@ -23,6 +23,7 @@ type WithWorktreeOptions struct {
 	CacheReadTokens  int64
 	CacheWriteTokens int64
 	EstimatedCostUSD float64
+	Model            string
 }
 
 type WithWorktreeResult struct {
@@ -55,7 +56,7 @@ func WithWorktree(sess *sessions.Session, opts WithWorktreeOptions) (WithWorktre
 		_, _ = sess.SyncLatestCodexRollout(opts.WorktreePath, sess.Meta.StartedAt)
 	}
 	if sess.Meta.Backend == backendnames.Claude {
-		_, _ = sess.SyncLatestClaudeTranscript(opts.WorktreePath, opts.ClaudeSessionID, sess.Meta.StartedAt)
+		enrichClaudeUsageFromTranscript(sess, &opts)
 	}
 	return result, sess.Finalize(sessions.FinalizeOptions{
 		TaskID:       opts.TaskID,
@@ -70,5 +71,39 @@ func WithWorktree(sess *sessions.Session, opts WithWorktreeOptions) (WithWorktre
 		CacheReadTokens:  opts.CacheReadTokens,
 		CacheWriteTokens: opts.CacheWriteTokens,
 		EstimatedCostUSD: opts.EstimatedCostUSD,
+		Model:            opts.Model,
 	})
+}
+
+func enrichClaudeUsageFromTranscript(sess *sessions.Session, opts *WithWorktreeOptions) {
+	srcPath, _ := sess.SyncLatestClaudeTranscript(opts.WorktreePath, opts.ClaudeSessionID, sess.Meta.StartedAt)
+	if srcPath == "" {
+		return
+	}
+	tok, err := sessions.SumTranscriptUsage(srcPath)
+	if err != nil {
+		return
+	}
+	applyTranscriptUsage(opts, tok)
+}
+
+func applyTranscriptUsage(opts *WithWorktreeOptions, tok sessions.TokenUsage) {
+	if opts.InputTokens == 0 {
+		opts.InputTokens = tok.InputTokens
+	}
+	if opts.OutputTokens == 0 {
+		opts.OutputTokens = tok.OutputTokens
+	}
+	if opts.CacheReadTokens == 0 {
+		opts.CacheReadTokens = tok.CacheReadTokens
+	}
+	if opts.CacheWriteTokens == 0 {
+		opts.CacheWriteTokens = tok.CacheWriteTokens
+	}
+	if tok.CostUSD > 0 {
+		opts.EstimatedCostUSD = tok.CostUSD
+	}
+	if tok.Model != "" {
+		opts.Model = tok.Model
+	}
 }

@@ -479,15 +479,23 @@ func captureSessionID(ctx *autoLoopCtx) {
 }
 
 func recordAndFinalize(ctx *autoLoopCtx, collector *usage.Collector, sess *sessions.Session, beforeRef, backendName string, startedAt, endedAt time.Time, err error) {
-	recordSessionUsage(ctx.usageStore, collector, ctx.opts.WorktreePath, ctx.opts.AgentName, ctx.opts.ParentID, startedAt, endedAt, err, ctx.opts.LockBridge)
-
-	inTok, outTok, cacheRead, cacheWrite := collector.Totals()
-	tier := usage.ResolvePricing(backendName)
-	costUSD := usage.EstimateCost(tier, usage.SessionUsage{
-		InputTokens: inTok, OutputTokens: outTok,
-		CacheReadTokens: cacheRead, CacheWriteTokens: cacheWrite,
-	})
-	finalizeAutoSession(ctx, sess, beforeRef, err, inTok, outTok, cacheRead, cacheWrite, costUSD)
+	record, ok := buildSessionUsage(collector, ctx.opts.WorktreePath, ctx.opts.AgentName, ctx.opts.ParentID, startedAt, endedAt, err, ctx.opts.LockBridge)
+	if ok {
+		record.Backend = backendName
+	}
+	finalizeAutoSession(ctx, sess, beforeRef, err, record)
+	if sess != nil {
+		record.SessionID = sess.Meta.SessionID
+		record.InputTokens = sess.Meta.InputTokens
+		record.OutputTokens = sess.Meta.OutputTokens
+		record.CacheReadTokens = sess.Meta.CacheReadTokens
+		record.CacheWriteTokens = sess.Meta.CacheWriteTokens
+		record.EstimatedCostUSD = sess.Meta.EstimatedCostUSD
+		record.Model = sess.Meta.Model
+	}
+	if ok {
+		appendSessionUsage(ctx.usageStore, record)
+	}
 }
 
 func classifyInvokeError(err error, backendName string) *agenterr.AgentError {

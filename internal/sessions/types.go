@@ -118,6 +118,7 @@ type FinalizeOptions struct {
 	CacheReadTokens  int64   `json:"cache_read_tokens,omitempty"`
 	CacheWriteTokens int64   `json:"cache_write_tokens,omitempty"`
 	EstimatedCostUSD float64 `json:"estimated_cost_usd,omitempty"`
+	Model            string  `json:"model,omitempty"`
 
 	// Error context
 	ErrorClass string `json:"error_class,omitempty"`

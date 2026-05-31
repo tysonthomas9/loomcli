@@ -20,13 +20,16 @@ func TestSumTranscriptUsage_EmptyFile(t *testing.T) {
 	if usage.InputTokens != 0 || usage.OutputTokens != 0 || usage.CacheReadTokens != 0 || usage.CacheWriteTokens != 0 {
 		t.Errorf("expected zero usage, got %+v", usage)
 	}
+	if usage.CostUSD != 0 || usage.Model != "" {
+		t.Errorf("expected empty cost/model, got %+v", usage)
+	}
 }
 
 func TestSumTranscriptUsage_SingleAssistant(t *testing.T) {
 	dir := t.TempDir()
 	txPath := filepath.Join(dir, "transcript.jsonl")
 
-	line := `{"type":"assistant","message":{"id":"msg_001","role":"assistant","content":[],"usage":{"input_tokens":100,"output_tokens":50,"cache_read_input_tokens":200,"cache_creation_input_tokens":300}}}` + "\n"
+	line := `{"type":"assistant","message":{"id":"msg_001","role":"assistant","model":"claude-opus-4-8","content":[],"usage":{"input_tokens":100,"output_tokens":50,"cache_read_input_tokens":200,"cache_creation_input_tokens":300}}}` + "\n"
 
 	if err := os.WriteFile(txPath, []byte(line), 0o600); err != nil {
 		t.Fatalf("write file: %v", err)
@@ -47,6 +50,29 @@ func TestSumTranscriptUsage_SingleAssistant(t *testing.T) {
 	}
 	if usage.CacheWriteTokens != 300 {
 		t.Errorf("CacheWriteTokens = %d, want 300", usage.CacheWriteTokens)
+	}
+	if usage.Model != "claude-opus-4-8" {
+		t.Errorf("Model = %q, want claude-opus-4-8", usage.Model)
+	}
+}
+
+func TestSumTranscriptUsage_ResultCost(t *testing.T) {
+	dir := t.TempDir()
+	txPath := filepath.Join(dir, "transcript.jsonl")
+
+	lines := `{"type":"assistant","message":{"id":"msg_001","role":"assistant","content":[],"usage":{"input_tokens":100,"output_tokens":50}}}
+{"type":"result","cost_usd":0.0123}
+`
+	if err := os.WriteFile(txPath, []byte(lines), 0o600); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+
+	usage, err := SumTranscriptUsage(txPath)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if usage.CostUSD != 0.0123 {
+		t.Errorf("CostUSD = %f, want 0.0123", usage.CostUSD)
 	}
 }
 

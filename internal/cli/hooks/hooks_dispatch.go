@@ -6,7 +6,6 @@ import (
 	"path/filepath"
 
 	"github.com/tysonthomas9/loomcli/internal/sessions"
-	"github.com/tysonthomas9/loomcli/internal/usage"
 )
 
 // dispatchHookEvent captures the backend's native transcript (and any
@@ -54,7 +53,7 @@ func dispatchHookEvent(event *HookEvent, runtimeDir, sessionID string) error { /
 	// On SessionEnd, capture token usage from Claude's transcript and patch
 	// session metadata.
 	if event.Type == HookSessionEnd && event.SessionRef != "" {
-		captureTokenUsage(store, sessionID, event.SessionRef, event.Backend)
+		captureTokenUsage(store, sessionID, event.SessionRef)
 	}
 
 	return nil
@@ -73,14 +72,15 @@ func deriveSubagentPath(parentTranscriptPath, subagentID string) string {
 
 // captureTokenUsage reads the Claude transcript, sums token usage, and
 // patches session metadata. Errors are logged to stderr and never propagated.
-func captureTokenUsage(store *sessions.Store, sessionID, transcriptPath, backend string) {
+func captureTokenUsage(store *sessions.Store, sessionID, transcriptPath string) {
 	tok, err := sessions.SumTranscriptUsage(transcriptPath)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "loom hook: failed to sum transcript usage: %v\n", err)
 		return
 	}
 	if tok.InputTokens == 0 && tok.OutputTokens == 0 &&
-		tok.CacheReadTokens == 0 && tok.CacheWriteTokens == 0 {
+		tok.CacheReadTokens == 0 && tok.CacheWriteTokens == 0 &&
+		tok.CostUSD == 0 && tok.Model == "" {
 		return
 	}
 
@@ -94,14 +94,12 @@ func captureTokenUsage(store *sessions.Store, sessionID, transcriptPath, backend
 	meta.OutputTokens = tok.OutputTokens
 	meta.CacheReadTokens = tok.CacheReadTokens
 	meta.CacheWriteTokens = tok.CacheWriteTokens
-
-	tier := usage.ResolvePricing(backend)
-	meta.EstimatedCostUSD = usage.EstimateCost(tier, usage.SessionUsage{
-		InputTokens:      tok.InputTokens,
-		OutputTokens:     tok.OutputTokens,
-		CacheReadTokens:  tok.CacheReadTokens,
-		CacheWriteTokens: tok.CacheWriteTokens,
-	})
+	if tok.CostUSD > 0 {
+		meta.EstimatedCostUSD = tok.CostUSD
+	}
+	if tok.Model != "" {
+		meta.Model = tok.Model
+	}
 
 	if err := store.SaveMetadata(sessionID, meta); err != nil {
 		fmt.Fprintf(os.Stderr, "loom hook: failed to save metadata with token usage: %v\n", err)

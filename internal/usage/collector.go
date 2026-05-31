@@ -5,9 +5,16 @@ import (
 	"time"
 )
 
+type countedUsage struct {
+	input      int64
+	output     int64
+	cacheRead  int64
+	cacheWrite int64
+}
+
 // Collector accumulates token usage during a single agent session.
-// It deduplicates Claude's per-content-block usage reporting by tracking
-// seen message IDs. Safe for concurrent use.
+// It deduplicates Claude's per-content-block usage reporting by tracking the
+// latest usage snapshot per message ID. Safe for concurrent use.
 type Collector struct {
 	mu sync.Mutex
 
@@ -18,8 +25,10 @@ type Collector struct {
 	outputTokens     int64
 	cacheReadTokens  int64
 	cacheWriteTokens int64
+	costUSD          float64
+	model            string
 
-	seen map[string]bool // messageID → already counted
+	seen map[string]countedUsage // messageID → latest counted usage
 }
 
 // NewCollector creates a new usage collector for the given backend and agent.
@@ -27,28 +36,54 @@ func NewCollector(backend, agentName string) *Collector {
 	return &Collector{
 		backend:   backend,
 		agentName: agentName,
-		seen:      make(map[string]bool),
+		seen:      make(map[string]countedUsage),
 	}
 }
 
 // Accumulate adds token counts from a single event. If messageID is non-empty
-// and has been seen before, the call is a no-op (deduplication for Claude's
-// multi-content-block messages).
+// and has been seen before, the previous counts are replaced by the latest
+// snapshot (Claude message_delta usage is cumulative and more complete than
+// message_start).
 func (c *Collector) Accumulate(messageID string, input, output, cacheRead, cacheWrite int64) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
+	next := countedUsage{input: input, output: output, cacheRead: cacheRead, cacheWrite: cacheWrite}
 	if messageID != "" {
-		if c.seen[messageID] {
-			return
+		if prev, ok := c.seen[messageID]; ok {
+			c.inputTokens -= prev.input
+			c.outputTokens -= prev.output
+			c.cacheReadTokens -= prev.cacheRead
+			c.cacheWriteTokens -= prev.cacheWrite
 		}
-		c.seen[messageID] = true
+		c.seen[messageID] = next
 	}
 
-	c.inputTokens += input
-	c.outputTokens += output
-	c.cacheReadTokens += cacheRead
-	c.cacheWriteTokens += cacheWrite
+	c.inputTokens += next.input
+	c.outputTokens += next.output
+	c.cacheReadTokens += next.cacheRead
+	c.cacheWriteTokens += next.cacheWrite
+}
+
+// SetCostUSD records a backend-reported cost for the session. Values are not
+// estimated locally; the latest positive value wins.
+func (c *Collector) SetCostUSD(costUSD float64) {
+	if costUSD <= 0 {
+		return
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.costUSD = costUSD
+}
+
+// SetModel records the backend-reported model for the session.
+func (c *Collector) SetModel(model string) {
+	if model == "" {
+		return
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.model = model
 }
 
 // Totals returns the raw accumulated token counts without constructing a full
@@ -73,12 +108,11 @@ func (c *Collector) Finalize(taskID, epicID string, startedAt, endedAt time.Time
 		OutputTokens:     c.outputTokens,
 		CacheReadTokens:  c.cacheReadTokens,
 		CacheWriteTokens: c.cacheWriteTokens,
+		EstimatedCostUSD: c.costUSD,
 		StartedAt:        startedAt,
 		EndedAt:          endedAt,
 		ExitCode:         exitCode,
+		Model:            c.model,
 	}
-
-	tier := ResolvePricing(c.backend)
-	u.EstimatedCostUSD = EstimateCost(tier, u)
 	return u
 }

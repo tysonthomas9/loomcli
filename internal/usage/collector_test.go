@@ -41,22 +41,21 @@ func TestCollector_BasicAccumulation(t *testing.T) {
 	}
 }
 
-func TestCollector_Deduplication(t *testing.T) {
+func TestCollector_ReplacesDuplicateMessageSnapshot(t *testing.T) {
 	c := NewCollector("claude", "test-agent")
 
-	// Same messageID should be counted only once
+	// Same messageID should keep the latest cumulative snapshot.
 	c.Accumulate("msg-1", 100, 50, 10, 5)
-	c.Accumulate("msg-1", 100, 50, 10, 5) // duplicate — ignored
-	c.Accumulate("msg-1", 999, 999, 0, 0) // duplicate — ignored
+	c.Accumulate("msg-1", 200, 80, 20, 10)
 
 	now := time.Now()
 	u := c.Finalize("", "", now, now, 0)
 
-	if u.InputTokens != 100 {
-		t.Errorf("InputTokens = %d, want 100 (dedup should skip duplicates)", u.InputTokens)
+	if u.InputTokens != 200 {
+		t.Errorf("InputTokens = %d, want 200 (latest duplicate snapshot wins)", u.InputTokens)
 	}
-	if u.OutputTokens != 50 {
-		t.Errorf("OutputTokens = %d, want 50", u.OutputTokens)
+	if u.OutputTokens != 80 {
+		t.Errorf("OutputTokens = %d, want 80", u.OutputTokens)
 	}
 }
 
@@ -125,19 +124,35 @@ func TestCollector_ThreadSafety_DuplicateIDs(t *testing.T) {
 	}
 }
 
-func TestCollector_Finalize_CostEstimation(t *testing.T) {
+func TestCollector_Finalize_DoesNotEstimateCost(t *testing.T) {
 	c := NewCollector("claude", "agent")
 	c.Accumulate("msg-1", 1_000_000, 1_000_000, 0, 0)
 
 	now := time.Now()
 	u := c.Finalize("task", "epic", now, now.Add(time.Hour), 1)
 
-	// $3 input + $15 output = $18
-	if u.EstimatedCostUSD < 17.9 || u.EstimatedCostUSD > 18.1 {
-		t.Errorf("EstimatedCostUSD = %f, want ~18.0", u.EstimatedCostUSD)
+	if u.EstimatedCostUSD != 0 {
+		t.Errorf("EstimatedCostUSD = %f, want 0 when backend did not report cost", u.EstimatedCostUSD)
 	}
 	if u.ExitCode != 1 {
 		t.Errorf("ExitCode = %d, want 1", u.ExitCode)
+	}
+}
+
+func TestCollector_Finalize_CapturedCostAndModel(t *testing.T) {
+	c := NewCollector("claude", "agent")
+	c.Accumulate("msg-1", 100, 50, 0, 0)
+	c.SetCostUSD(0.0123)
+	c.SetModel("claude-opus-4-8")
+
+	now := time.Now()
+	u := c.Finalize("task", "epic", now, now.Add(time.Hour), 0)
+
+	if u.EstimatedCostUSD != 0.0123 {
+		t.Errorf("EstimatedCostUSD = %f, want 0.0123", u.EstimatedCostUSD)
+	}
+	if u.Model != "claude-opus-4-8" {
+		t.Errorf("Model = %q, want claude-opus-4-8", u.Model)
 	}
 }
 
