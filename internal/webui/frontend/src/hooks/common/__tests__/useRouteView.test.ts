@@ -26,6 +26,7 @@ function createRouterWrapper(initialPath = "/ws/test-ws/kanban") {
             { path: "table", element: children },
             { path: "graph", element: children },
             { path: "monitor", element: children },
+            { path: "workflows", element: children },
             { path: "observability", element: children },
             { path: "terminal", element: children },
             { path: "workspace", element: children },
@@ -78,6 +79,14 @@ describe("useRouteView", () => {
       });
 
       expect(result.current.view).toBe("monitor");
+    });
+
+    it("returns workflows for /ws/:id/workflows", () => {
+      const { result } = renderHook(() => useRouteView(), {
+        wrapper: createRouterWrapper("/ws/test-ws/workflows"),
+      });
+
+      expect(result.current.view).toBe("workflows");
     });
 
     it("returns observability for /ws/:id/observability", () => {

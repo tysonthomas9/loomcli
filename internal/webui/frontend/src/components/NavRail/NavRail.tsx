@@ -131,6 +131,24 @@ const TOP_ITEMS: NavItem[] = [
       </svg>
     ),
   },
+  {
+    id: "workflows",
+    label: "Workflows",
+    icon: (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path
+          d="M7 7h10M7 12h10M7 17h6"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+        />
+        <circle cx="4" cy="7" r="1.5" fill="currentColor" aria-hidden="true" />
+        <circle cx="4" cy="12" r="1.5" fill="currentColor" aria-hidden="true" />
+        <circle cx="4" cy="17" r="1.5" fill="currentColor" aria-hidden="true" />
+      </svg>
+    ),
+  },
 ];
 
 const BOTTOM_ITEMS: NavItem[] = [

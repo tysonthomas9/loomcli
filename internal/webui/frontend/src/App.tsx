@@ -322,6 +322,7 @@ function App() {
     settings: "kanban",
     workspace: "kanban",
     files: "kanban",
+    workflows: "kanban",
     observability: "kanban",
   };
   const issueMode = issueModeByView[activeView] ?? ("ready" as const);

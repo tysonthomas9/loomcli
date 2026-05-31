@@ -13,6 +13,7 @@ const VIEW_LABELS: Record<ViewMode, string> = {
   table: "List",
   graph: "Graph",
   monitor: "Monitor",
+  workflows: "Workflows",
   observability: "Observability",
   terminal: "Monitor",
   workspace: "Workspace",

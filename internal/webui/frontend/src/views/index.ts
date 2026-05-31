@@ -2,6 +2,7 @@ export { KanbanPage } from "./KanbanPage";
 export { TablePage } from "./TablePage";
 export { GraphPage } from "./GraphPage";
 export { MonitorPage } from "./MonitorPage";
+export { WorkflowsPage } from "./WorkflowsPage";
 export { ObservabilityPage } from "./ObservabilityPage";
 export { SettingsPage } from "./SettingsPage";
 export { WorkspacePage } from "./WorkspacePage";

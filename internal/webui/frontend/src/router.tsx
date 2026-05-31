@@ -8,6 +8,7 @@
  *     /table                               → TablePage (lazy)
  *     /graph                               → GraphPage (lazy)
  *     /monitor                             → MonitorPage (lazy)
+ *     /workflows                           → WorkflowsPage (lazy)
  *     /observability                       → ObservabilityPage (lazy)
  *     /terminal                            → TerminalView (always-mounted in shell, route renders null)
  *     /settings                            → SettingsPage (lazy)
@@ -105,6 +106,13 @@ const viewRoutes = [
     path: "monitor",
     lazy: () =>
       import("@/views/MonitorPage").then((m) => ({ Component: m.MonitorPage })),
+  },
+  {
+    path: "workflows",
+    lazy: () =>
+      import("@/views/WorkflowsPage").then((m) => ({
+        Component: m.WorkflowsPage,
+      })),
   },
   {
     path: "observability",

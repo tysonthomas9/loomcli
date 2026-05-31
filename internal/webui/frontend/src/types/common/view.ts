@@ -13,6 +13,7 @@ export type ViewMode =
   | "table"
   | "graph"
   | "monitor"
+  | "workflows"
   | "observability"
   | "terminal"
   | "workspace"

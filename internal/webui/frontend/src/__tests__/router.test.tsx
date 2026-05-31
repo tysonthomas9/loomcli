@@ -31,6 +31,9 @@ vi.mock("@/views/GraphPage", () => ({ GraphPage }));
 const MonitorPage = () => null;
 vi.mock("@/views/MonitorPage", () => ({ MonitorPage }));
 
+const WorkflowsPage = () => null;
+vi.mock("@/views/WorkflowsPage", () => ({ WorkflowsPage }));
+
 const ObservabilityPage = () => null;
 vi.mock("@/views/ObservabilityPage", () => ({ ObservabilityPage }));
 
@@ -118,6 +121,7 @@ describe("router view routes", () => {
       expect(paths).toContain("table");
       expect(paths).toContain("graph");
       expect(paths).toContain("monitor");
+      expect(paths).toContain("workflows");
       expect(paths).toContain("observability");
       expect(paths).toContain("terminal");
       expect(paths).toContain("settings");
@@ -139,6 +143,7 @@ describe("router view routes", () => {
       ["table", TablePage],
       ["graph", GraphPage],
       ["monitor", MonitorPage],
+      ["workflows", WorkflowsPage],
       ["observability", ObservabilityPage],
       ["settings", SettingsPage],
       ["workspace", WorkspacePage],

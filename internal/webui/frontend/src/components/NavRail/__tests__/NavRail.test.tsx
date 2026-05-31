@@ -33,6 +33,12 @@ describe("NavRail", () => {
       expect(screen.getByLabelText("Monitor")).toBeInTheDocument();
     });
 
+    it("renders a Workflows button", () => {
+      render(<NavRail activeView="kanban" onChange={() => {}} />);
+
+      expect(screen.getByLabelText("Workflows")).toBeInTheDocument();
+    });
+
     it("does not render a List button", () => {
       render(<NavRail activeView="kanban" onChange={() => {}} />);
 
@@ -53,11 +59,11 @@ describe("NavRail", () => {
       expect(screen.queryByLabelText("Workspace")).not.toBeInTheDocument();
     });
 
-    it("renders exactly four navigation buttons", () => {
+    it("renders exactly five navigation buttons", () => {
       render(<NavRail activeView="kanban" onChange={() => {}} />);
 
       const buttons = screen.getAllByRole("button");
-      expect(buttons).toHaveLength(4);
+      expect(buttons).toHaveLength(5);
     });
 
     it("renders tooltips for each button", () => {
@@ -71,6 +77,7 @@ describe("NavRail", () => {
       const tooltipTexts = Array.from(tooltips).map((t) => t.textContent);
       expect(tooltipTexts).toContain("Workspaces");
       expect(tooltipTexts).toContain("Monitor");
+      expect(tooltipTexts).toContain("Workflows");
       expect(tooltipTexts).toContain("Settings");
     });
 
@@ -85,20 +92,25 @@ describe("NavRail", () => {
         "title",
         "Monitor",
       );
+      expect(screen.getByLabelText("Workflows")).toHaveAttribute(
+        "title",
+        "Workflows",
+      );
       expect(screen.getByLabelText("Settings")).toHaveAttribute(
         "title",
         "Settings",
       );
     });
 
-    it("renders buttons in correct order: Workspaces, Agents, Monitor, Settings", () => {
+    it("renders buttons in correct order: Workspaces, Agents, Monitor, Workflows, Settings", () => {
       render(<NavRail activeView="kanban" onChange={() => {}} />);
 
       const buttons = screen.getAllByRole("button");
       expect(buttons[0]).toHaveAccessibleName("Workspaces");
       expect(buttons[1]).toHaveAccessibleName("Agents");
       expect(buttons[2]).toHaveAccessibleName("Monitor");
-      expect(buttons[3]).toHaveAccessibleName("Settings");
+      expect(buttons[3]).toHaveAccessibleName("Workflows");
+      expect(buttons[4]).toHaveAccessibleName("Settings");
     });
 
     it("renders an Agents button", () => {
@@ -151,6 +163,14 @@ describe("NavRail", () => {
       expect(monitorButton).toHaveAttribute("data-active");
     });
 
+    it("marks Workflows as active when activeView is workflows", () => {
+      render(<NavRail activeView="workflows" onChange={() => {}} />);
+
+      const workflowsButton = screen.getByLabelText("Workflows");
+
+      expect(workflowsButton).toHaveAttribute("data-active");
+    });
+
     it("applies custom className", () => {
       render(
         <NavRail
@@ -183,6 +203,16 @@ describe("NavRail", () => {
 
       expect(onChange).toHaveBeenCalledTimes(1);
       expect(onChange).toHaveBeenCalledWith("terminal");
+    });
+
+    it('calls onChange with "workflows" when Workflows button is clicked', () => {
+      const onChange = vi.fn();
+      render(<NavRail activeView="kanban" onChange={onChange} />);
+
+      fireEvent.click(screen.getByLabelText("Workflows"));
+
+      expect(onChange).toHaveBeenCalledTimes(1);
+      expect(onChange).toHaveBeenCalledWith("workflows");
     });
 
     it('calls onChange with "settings" when Settings button is clicked', () => {

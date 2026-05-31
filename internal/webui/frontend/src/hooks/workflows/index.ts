@@ -10,6 +10,8 @@ export type { UseWorkflowDefinitionsResult } from "./useWorkflowDefinitions";
 
 export { useWorkflowRunEvents } from "./useWorkflowRunEvents";
 export type { UseWorkflowRunEventsResult } from "./useWorkflowRunEvents";
+export { useWorkflowRuns } from "./useWorkflowRuns";
+export type { UseWorkflowRunsResult } from "./useWorkflowRuns";
 
 export { isWorkflowRunLive } from "@/api/workflows";
 export type {

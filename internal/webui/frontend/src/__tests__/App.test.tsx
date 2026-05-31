@@ -2350,6 +2350,19 @@ describe("App", () => {
       );
     });
 
+    it('calls fetchIssues with mode: "kanban" when activeView is "workflows"', () => {
+      mockStoreState = createMockUseIssuesReturn({});
+      vi.mocked(useRouteView).mockReturnValue(
+        createViewStateReturn("workflows"),
+      );
+
+      render(<App />);
+
+      expect(mockStoreState.fetchIssues).toHaveBeenCalledWith(
+        expect.objectContaining({ mode: "kanban" }),
+      );
+    });
+
     it("refetches issues when view changes from kanban to graph", () => {
       mockStoreState = createMockUseIssuesReturn({});
       vi.mocked(useRouteView).mockReturnValue(createViewStateReturn("kanban"));
