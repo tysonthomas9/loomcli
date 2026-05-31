@@ -447,6 +447,8 @@ export default defineTool({
     private: Type.Optional(Type.Boolean()),
   }),
   handler: 'workflow',
+  timeout: '30s',
+  cancellable: true,
   repos: ['slack-src'],
   env: ['SLACK_TOKEN'],
   execute: async ({ name }) => `+"`"+`created ${name}`+"`"+`,
@@ -486,8 +488,8 @@ export default defineWorkflow({
 		t.Fatalf("tools = %+v, want one typed tool definition", plan.Tools)
 	}
 	tool := plan.Tools[0]
-	if tool.Name != "create_channel" || tool.Handler != "workflow" {
-		t.Fatalf("tool = %+v, want create_channel with workflow handler", tool)
+	if tool.Name != "create_channel" || tool.Handler != "workflow" || tool.Timeout != "30s" || !tool.Cancellable {
+		t.Fatalf("tool = %+v, want create_channel with workflow handler timeout/cancellation policy", tool)
 	}
 	if len(tool.Parameters) == 0 || len(tool.Env) != 1 || tool.Env[0] != "SLACK_TOKEN" {
 		t.Fatalf("tool metadata = %+v, want parameters and env policy", tool)
@@ -520,8 +522,8 @@ export default defineWorkflow({
 	}
 	toolCapability := jsonMap(t, toolVersion.CapabilityManifest)
 	execution := toolCapability["execution"].(map[string]any)
-	if execution["handler"] != "workflow" {
-		t.Fatalf("tool execution capability = %#v, want workflow handler", execution)
+	if execution["handler"] != "workflow" || execution["timeout"] != "30s" || execution["cancellable"] != true {
+		t.Fatalf("tool execution capability = %#v, want workflow handler timeout/cancellation policy", execution)
 	}
 	role, err := st.Roles().Get(ctx, "TSTOOL", "slack-agent")
 	if err != nil {

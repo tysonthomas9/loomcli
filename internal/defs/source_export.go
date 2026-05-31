@@ -187,6 +187,8 @@ func renderToolSource(tool ToolModule) string {
 	writeRawProp(&b, "parameters", renderJSONValue(tool.Parameters, 1), 1)
 	writeStringProp(&b, "handler", tool.Handler, 1)
 	writeStringProp(&b, "runtime", tool.Runtime, 1)
+	writeStringProp(&b, "timeout", tool.Timeout, 1)
+	writeBoolProp(&b, "cancellable", tool.Cancellable, 1)
 	writeStringArrayProp(&b, "repos", tool.Repos, 1)
 	writeStringArrayProp(&b, "env", tool.Env, 1)
 	writeBoolProp(&b, "readOnly", tool.ReadOnly, 1)

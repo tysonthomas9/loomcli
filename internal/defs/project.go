@@ -188,6 +188,8 @@ const runtimeTypes = `declare module '@loom/runtime' {
     parameters: ToolSchema;
     handler?: string;
     runtime?: string;
+    timeout?: string;
+    cancellable?: boolean;
     repos?: string[];
     env?: string[];
     readOnly?: boolean;

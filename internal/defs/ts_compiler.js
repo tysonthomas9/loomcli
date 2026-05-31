@@ -673,6 +673,8 @@ function toolModule(file) {
     parameters: tool.parameters || {},
     handler,
     runtime: stringValue(tool.runtime),
+    timeout: stringValue(tool.timeout || tool.deadline || tool.timeoutMs || tool.timeout_ms),
+    cancellable: boolValue(tool.cancellable || tool.cancellation),
     repos: stringArray(tool.repos),
     env: stringArray(tool.env),
     read_only: boolValue(tool.readOnly),

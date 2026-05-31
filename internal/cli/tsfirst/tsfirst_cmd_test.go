@@ -1240,7 +1240,11 @@ func TestRunLocalConnectPassesTypedToolsToRuntimeBackend(t *testing.T) {
 	if result.ToolRuntime == nil || result.ToolRuntime.Status != connectToolRuntimeBackend {
 		t.Fatalf("tool runtime = %+v, want backend runtime policy", result.ToolRuntime)
 	}
-	if len(typedBackend.tools) != 1 || typedBackend.tools[0].Name != "create_channel" || typedBackend.tools[0].Handler != "workflow" {
+	if len(typedBackend.tools) != 1 ||
+		typedBackend.tools[0].Name != "create_channel" ||
+		typedBackend.tools[0].Handler != "workflow" ||
+		typedBackend.tools[0].Timeout != "30s" ||
+		!typedBackend.tools[0].Cancellable {
 		t.Fatalf("backend tools = %+v, want create_channel workflow handler", typedBackend.tools)
 	}
 	if len(result.ToolCalls) != 1 || result.ToolCalls[0].Name != "create_channel" ||
@@ -1249,6 +1253,8 @@ func TestRunLocalConnectPassesTypedToolsToRuntimeBackend(t *testing.T) {
 		result.ToolCalls[0].IdempotencyKey != "tool:create_channel:triage" ||
 		result.ToolCalls[0].AuthorizationStatus != "authorized" ||
 		result.ToolCalls[0].Handler != "workflow" ||
+		result.ToolCalls[0].Timeout != "30s" ||
+		!result.ToolCalls[0].Cancellable ||
 		!result.ToolCalls[0].Redacted {
 		t.Fatalf("tool calls = %+v, want backend-reported model tool call evidence", result.ToolCalls)
 	}
@@ -1290,6 +1296,8 @@ func TestRunLocalConnectAuthorizesBackendToolCallsAgainstManifest(t *testing.T) 
 		result.ToolCalls[0].AuthorizationStatus != "authorized" ||
 		result.ToolCalls[0].IdempotencyKey != "local-connect:create_channel:call-create-channel" ||
 		result.ToolCalls[0].Handler != "workflow" ||
+		result.ToolCalls[0].Timeout != "30s" ||
+		!result.ToolCalls[0].Cancellable ||
 		result.ToolCalls[0].ToolVersion == "" ||
 		result.ToolCalls[0].SourceHash == "" {
 		t.Fatalf("tool calls = %+v, want manifest-authorized call with deterministic evidence", result.ToolCalls)
@@ -1708,6 +1716,8 @@ export default defineTool({
     name: Type.String({ description: 'Channel name' }),
   }),
   handler: 'workflow',
+  timeout: '30s',
+  cancellable: true,
   execute: async ({ name }) => ` + "`" + `created ${name}` + "`" + `,
 });
 `

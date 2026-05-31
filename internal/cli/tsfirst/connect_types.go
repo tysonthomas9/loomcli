@@ -103,6 +103,8 @@ type connectTypedTool struct {
 	Parameters  map[string]any `json:"parameters,omitempty"`
 	Handler     string         `json:"handler,omitempty"`
 	Runtime     string         `json:"runtime,omitempty"`
+	Timeout     string         `json:"timeout,omitempty"`
+	Cancellable bool           `json:"cancellable,omitempty"`
 	Repos       []string       `json:"repos,omitempty"`
 	Env         []string       `json:"env,omitempty"`
 	ReadOnly    bool           `json:"read_only,omitempty"`
@@ -116,6 +118,8 @@ type connectToolCall struct {
 	SourceHash          string         `json:"source_hash,omitempty"`
 	Handler             string         `json:"handler,omitempty"`
 	Runtime             string         `json:"runtime,omitempty"`
+	Timeout             string         `json:"timeout,omitempty"`
+	Cancellable         bool           `json:"cancellable,omitempty"`
 	ReadOnly            bool           `json:"read_only,omitempty"`
 	Arguments           map[string]any `json:"arguments,omitempty"`
 	Result              any            `json:"result,omitempty"`

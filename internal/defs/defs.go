@@ -238,8 +238,10 @@ func toolCapabilityManifest(tool ToolModule) json.RawMessage {
 			"read_only":   tool.ReadOnly,
 		},
 		"execution": map[string]any{
-			"handler": tool.Handler,
-			"runtime": tool.Runtime,
+			"handler":     tool.Handler,
+			"runtime":     tool.Runtime,
+			"timeout":     tool.Timeout,
+			"cancellable": tool.Cancellable,
 		},
 		"runtime": map[string]any{
 			"repos": compactStrings(tool.Repos),
@@ -307,6 +309,8 @@ func referencedToolDefinitions(names []string, tools map[string]ToolModule) []ma
 			"source_hash": tool.SourceHash,
 			"handler":     tool.Handler,
 			"runtime":     tool.Runtime,
+			"timeout":     tool.Timeout,
+			"cancellable": tool.Cancellable,
 			"read_only":   tool.ReadOnly,
 			"parameters":  tool.Parameters,
 		})
