@@ -118,6 +118,13 @@ func applyAgentLease(ctx context.Context, st store.Store, ws string, lease Agent
 		TTL:           leaseTTL(lease.ExpiresAt),
 	})
 	if err != nil {
+		if errors.Is(err, domain.ErrAlreadyExists) {
+			existing, getErr := st.AgentLeases().Get(ctx, ws, lease.LeaseID)
+			if getErr != nil {
+				return fmt.Errorf("get existing agent lease %s after create conflict: %w", lease.LeaseID, getErr)
+			}
+			return syncAgentLeaseState(ctx, st, ws, existing, lease)
+		}
 		return fmt.Errorf("create agent lease %s: %w", lease.LeaseID, err)
 	}
 	return syncAgentLeaseState(ctx, st, ws, created, lease)
@@ -175,6 +182,13 @@ func applyAgentOwnershipLease(ctx context.Context, st store.Store, ws string, le
 		TTL:             leaseTTL(lease.ExpiresAt),
 	})
 	if err != nil {
+		if errors.Is(err, domain.ErrAlreadyExists) {
+			existing, getErr := st.AgentOwnershipLeases().Get(ctx, ws, lease.AgentID)
+			if getErr != nil {
+				return fmt.Errorf("get existing agent ownership lease %s after acquire conflict: %w", lease.AgentID, getErr)
+			}
+			return syncAgentOwnershipLeaseState(ctx, st, ws, existing, lease)
+		}
 		return fmt.Errorf("acquire agent ownership lease %s: %w", lease.AgentID, err)
 	}
 	return syncAgentOwnershipLeaseState(ctx, st, ws, created, lease)

@@ -662,6 +662,168 @@ func TestApplyControlPlaneRuntimeRecordsReconcilesExistingIDsThroughFleetDBHTTP(
 	}
 }
 
+func TestApplyLeaseRuntimeRecordsReconcilesHTTPCreateConflicts(t *testing.T) {
+	ctx := context.Background()
+	now := time.Date(2026, 5, 30, 16, 0, 0, 0, time.UTC)
+	heartbeat := now.Add(time.Minute)
+	expiresAt := now.Add(time.Hour)
+
+	var leaseGetCount, leaseCreateCount, leaseReleaseCount int
+	var ownershipGetCount, ownershipAcquireCount, ownershipReleaseCount int
+	lease := domain.AgentLease{}
+	ownership := domain.AgentOwnershipLease{}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/HTTP/agent-leases/lease-conflict":
+			leaseGetCount++
+			if lease.LeaseID == "" {
+				writeHTTPError(w, http.StatusNotFound, "missing agent lease")
+				return
+			}
+			writeHTTPJSON(t, w, lease)
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/HTTP/agent-sessions/session-conflict/leases":
+			leaseCreateCount++
+			var body map[string]any
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Fatalf("decode agent lease create conflict body: %v", err)
+			}
+			if body["lease_id"] != "lease-conflict" || body["agent_id"] != "runner" || body["node_id"] != "node-a" ||
+				body["token"] != nil || body["fencing_token"] != nil || body["created_at"] != nil || body["updated_at"] != nil {
+				t.Fatalf("agent lease create conflict body = %#v", body)
+			}
+			lease = domain.AgentLease{
+				WorkspaceKey:  "HTTP",
+				LeaseID:       "lease-conflict",
+				SessionID:     "session-conflict",
+				AgentID:       "runner",
+				NodeID:        "node-a",
+				Token:         "server-lease-token-conflict",
+				FencingToken:  47,
+				Status:        domain.AgentLeaseActive,
+				ExpiresAt:     expiresAt,
+				LastHeartbeat: heartbeat,
+				CreatedAt:     now,
+				UpdatedAt:     now,
+			}
+			writeHTTPError(w, http.StatusConflict, "agent lease already exists")
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/HTTP/agent-leases/lease-conflict/release":
+			leaseReleaseCount++
+			if got := r.Header.Get("X-Agent-Lease-Token"); got != "server-lease-token-conflict" {
+				t.Fatalf("agent lease release token = %q, want server token after conflict GET", got)
+			}
+			lease.Status = domain.AgentLeaseReleased
+			lease.UpdatedAt = lease.UpdatedAt.Add(time.Second)
+			writeHTTPJSON(t, w, lease)
+
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/HTTP/agent-ownership-leases/runner":
+			ownershipGetCount++
+			if ownership.AgentID == "" {
+				writeHTTPError(w, http.StatusNotFound, "missing ownership lease")
+				return
+			}
+			writeHTTPJSON(t, w, ownership)
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/HTTP/agent-ownership-leases/runner/acquire":
+			ownershipAcquireCount++
+			var body map[string]any
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Fatalf("decode ownership lease acquire conflict body: %v", err)
+			}
+			if body["lease_id"] != "ownership-conflict" || body["owner_id"] != "owner-a" ||
+				body["runtime_provider"] != string(domain.RuntimeProviderLocal) || body["node_id"] != "node-a" ||
+				body["token"] != nil || body["fencing_token"] != nil || body["created_at"] != nil || body["updated_at"] != nil {
+				t.Fatalf("ownership lease acquire conflict body = %#v", body)
+			}
+			ownership = domain.AgentOwnershipLease{
+				WorkspaceKey:    "HTTP",
+				AgentID:         "runner",
+				LeaseID:         "ownership-conflict",
+				OwnerID:         "owner-a",
+				RuntimeProvider: domain.RuntimeProviderLocal,
+				NodeID:          "node-a",
+				Token:           "server-ownership-token-conflict",
+				FencingToken:    53,
+				Status:          domain.AgentLeaseActive,
+				ExpiresAt:       expiresAt,
+				LastHeartbeat:   heartbeat,
+				CreatedAt:       now,
+				UpdatedAt:       now,
+			}
+			writeHTTPError(w, http.StatusConflict, "ownership lease already exists")
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/HTTP/agent-ownership-leases/runner/release":
+			ownershipReleaseCount++
+			if got := r.Header.Get("X-Agent-Ownership-Lease-Token"); got != "server-ownership-token-conflict" {
+				t.Fatalf("ownership release token = %q, want server token after conflict GET", got)
+			}
+			ownership.Status = domain.AgentLeaseReleased
+			ownership.UpdatedAt = ownership.UpdatedAt.Add(time.Second)
+			writeHTTPJSON(t, w, ownership)
+		default:
+			t.Fatalf("unexpected request %s %s", r.Method, r.URL.String())
+		}
+	}))
+	defer server.Close()
+
+	client, err := fleetdb.New(fleetdb.Config{BaseURL: server.URL, Actor: "tester"})
+	if err != nil {
+		t.Fatalf("new fleetdb client: %v", err)
+	}
+	plan := &Plan{
+		AgentLeases: []AgentLeaseModule{{
+			LeaseID:       "lease-conflict",
+			SessionID:     "session-conflict",
+			SourcePath:    "state/agent-leases.json",
+			SourceHash:    "hash-conflict",
+			Version:       "state-conflict",
+			AgentID:       "runner",
+			NodeID:        "node-a",
+			Token:         "imported-lease-token",
+			FencingToken:  99,
+			Status:        domain.AgentLeaseReleased,
+			ExpiresAt:     &expiresAt,
+			LastHeartbeat: &heartbeat,
+			CreatedAt:     &now,
+			UpdatedAt:     &heartbeat,
+		}},
+		AgentOwnershipLeases: []AgentOwnershipLeaseModule{{
+			AgentID:         "runner",
+			LeaseID:         "ownership-conflict",
+			OwnerID:         "owner-a",
+			SourcePath:      "state/agent-ownership-leases.json",
+			SourceHash:      "hash-conflict",
+			Version:         "state-conflict",
+			RuntimeProvider: domain.RuntimeProviderLocal,
+			NodeID:          "node-a",
+			Token:           "imported-ownership-token",
+			FencingToken:    199,
+			Status:          domain.AgentLeaseReleased,
+			ExpiresAt:       &expiresAt,
+			LastHeartbeat:   &heartbeat,
+			CreatedAt:       &now,
+			UpdatedAt:       &heartbeat,
+		}},
+	}
+	if err := Apply(ctx, client, "HTTP", "tester", plan); err != nil {
+		t.Fatalf("Apply() error = %v", err)
+	}
+	if leaseGetCount != 2 || leaseCreateCount != 1 || leaseReleaseCount != 1 {
+		t.Fatalf("agent lease counts get=%d create=%d release=%d, want GET/409/GET/release",
+			leaseGetCount, leaseCreateCount, leaseReleaseCount)
+	}
+	if ownershipGetCount != 2 || ownershipAcquireCount != 1 || ownershipReleaseCount != 1 {
+		t.Fatalf("ownership lease counts get=%d acquire=%d release=%d, want GET/409/GET/release",
+			ownershipGetCount, ownershipAcquireCount, ownershipReleaseCount)
+	}
+	if !lease.CreatedAt.Equal(now) || lease.Token != "server-lease-token-conflict" ||
+		lease.FencingToken != 47 || lease.Status != domain.AgentLeaseReleased {
+		t.Fatalf("lease = %+v, want conflict replay to preserve server token/fencing/timestamps and release", lease)
+	}
+	if !ownership.CreatedAt.Equal(now) || ownership.Token != "server-ownership-token-conflict" ||
+		ownership.FencingToken != 53 || ownership.Status != domain.AgentLeaseReleased {
+		t.Fatalf("ownership = %+v, want conflict replay to preserve server token/fencing/timestamps and release", ownership)
+	}
+}
+
 func runtimeReplayPlan(commandID, terminalID, artifactID string, seenAt time.Time, endedAt *time.Time, phase string) *Plan {
 	second := phase == "second"
 	commandStatus := domain.AgentCommandSucceeded
