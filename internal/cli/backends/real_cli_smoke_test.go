@@ -23,6 +23,34 @@ import (
 const defaultRealCLIPrompt = "Reply with exactly: loom real CLI smoke ok. Do not inspect files, edit files, or run tools."
 const defaultRealCLIInvalidModel = "definitely-not-a-real-model"
 
+func TestRealCLICommandContracts(t *testing.T) {
+	unsetEnv(t, "GIT_DIR")
+	unsetEnv(t, "GIT_WORK_TREE")
+	unsetEnv(t, "GIT_INDEX_FILE")
+
+	backendsToRun := selectedRealCLIBackends()
+	skipMissing := envBool("LOOM_REAL_CLI_SKIP_MISSING")
+
+	ran := 0
+	for _, backendName := range backendsToRun {
+		backendName := backendName
+		if _, err := exec.LookPath(backendName); err != nil {
+			if skipMissing {
+				t.Logf("%s: binary not found on PATH; skipping because LOOM_REAL_CLI_SKIP_MISSING is set", backendName)
+				continue
+			}
+			t.Fatalf("%s binary not found on PATH", backendName)
+		}
+		ran++
+		t.Run(backendName, func(t *testing.T) {
+			assertRealCLICommandContract(t, backendName)
+		})
+	}
+	if ran == 0 {
+		t.Fatal("no real CLI backends were run")
+	}
+}
+
 func TestRealCLISessionSmoke(t *testing.T) {
 	unsetEnv(t, "GIT_DIR")
 	unsetEnv(t, "GIT_WORK_TREE")
@@ -233,6 +261,62 @@ func runRealCLIInvalidModelClassification(t *testing.T, root, backendName string
 	t.Logf("%s invalid-model classified as %s: %s", backendName, ae.Class, ae.Message)
 	if ae.Class != agenterr.ModelNotFound {
 		t.Fatalf("%s invalid-model class = %s, want %s\noutput:\n%s", backendName, ae.Class, agenterr.ModelNotFound, ae.RawOutput)
+	}
+}
+
+func assertRealCLICommandContract(t *testing.T, backendName string) {
+	t.Helper()
+	switch backendName {
+	case "claude":
+		help := runRealCLIHelp(t, "claude", "--help")
+		assertHelpContainsAll(t, "claude --help", help,
+			"-p, --print",
+			"--output-format",
+			"--dangerously-skip-permissions",
+			"--max-budget-usd",
+			"--model",
+		)
+	case "codex":
+		help := runRealCLIHelp(t, "codex", "exec", "--help")
+		assertHelpContainsAll(t, "codex exec --help", help,
+			"--json",
+			"--dangerously-bypass-approvals-and-sandbox",
+			"--model",
+		)
+	case "opencode":
+		runHelp := runRealCLIHelp(t, "opencode", "run", "--help")
+		assertHelpContainsAll(t, "opencode run --help", runHelp,
+			"--format",
+			"--dir",
+			"--dangerously-skip-permissions",
+			"--model",
+		)
+		exportHelp := runRealCLIHelp(t, "opencode", "export", "--help")
+		assertHelpContainsAll(t, "opencode export --help", exportHelp,
+			"opencode export",
+			"sessionID",
+		)
+	default:
+		t.Fatalf("unsupported real CLI backend %q", backendName)
+	}
+}
+
+func runRealCLIHelp(t *testing.T, name string, args ...string) string {
+	t.Helper()
+	result := cli.DefaultDeps().Exec.Run(t.TempDir(), name, args...)
+	output := strings.TrimSpace(result.Stdout + "\n" + result.Stderr)
+	if result.Err != nil {
+		t.Fatalf("%s %s failed: %v\n%s", name, strings.Join(args, " "), result.Err, output)
+	}
+	return output
+}
+
+func assertHelpContainsAll(t *testing.T, label, output string, wants ...string) {
+	t.Helper()
+	for _, want := range wants {
+		if !strings.Contains(output, want) {
+			t.Fatalf("%s missing %q\noutput:\n%s", label, want, output)
+		}
 	}
 }
 

@@ -16,6 +16,7 @@ Usage: scripts/test-real-clis.sh [OPTIONS]
 Options:
   --backend NAME       Run one backend (claude, codex, opencode)
   --backends LIST      Comma/space-separated backend list
+  --contracts-only     Only check installed CLI flag/export contracts; no token spend
   --prompt TEXT        Prompt sent to each real CLI
   --timeout DURATION   Per-backend timeout (default: 3m)
   --keep               Keep the temporary smoke-test root
@@ -29,8 +30,8 @@ Options:
 Environment equivalents:
   LOOM_REAL_CLI_BACKENDS, LOOM_REAL_CLI_PROMPT, LOOM_REAL_CLI_TIMEOUT,
   LOOM_REAL_CLI_KEEP, LOOM_REAL_CLI_ROOT, LOOM_REAL_CLI_SKIP_MISSING,
-  LOOM_REAL_CLI_SKIP_INVALID_MODEL, LOOM_REAL_CLI_INVALID_MODEL,
-  LOOM_REAL_CLI_REQUIRE_COST
+  LOOM_REAL_CLI_CONTRACTS_ONLY, LOOM_REAL_CLI_SKIP_INVALID_MODEL,
+  LOOM_REAL_CLI_INVALID_MODEL, LOOM_REAL_CLI_REQUIRE_COST
 
 Examples:
   make test-real-clis
@@ -50,6 +51,10 @@ while [[ $# -gt 0 ]]; do
             [[ -n "${2:-}" ]] || { echo "Error: --backends requires a value" >&2; exit 2; }
             export LOOM_REAL_CLI_BACKENDS="$2"
             shift 2
+            ;;
+        --contracts-only)
+            export LOOM_REAL_CLI_CONTRACTS_ONLY=1
+            shift
             ;;
         --prompt)
             [[ -n "${2:-}" ]] || { echo "Error: --prompt requires a value" >&2; exit 2; }
@@ -101,5 +106,11 @@ done
 
 cd "$REPO_ROOT"
 
-echo "Running real backend CLI smoke and invalid-model tests. This uses installed CLIs and may spend real tokens."
-go test -tags realcli -count=1 -run 'TestRealCLI' -timeout "${GO_TEST_TIMEOUT:-15m}" -v ./internal/cli/backends
+run_regex='TestRealCLI'
+if [[ "${LOOM_REAL_CLI_CONTRACTS_ONLY:-}" =~ ^(1|true|TRUE|yes|YES|on|ON)$ ]]; then
+    run_regex='TestRealCLICommandContracts'
+    echo "Running real backend CLI contract checks. This uses installed CLIs but does not send prompts."
+else
+    echo "Running real backend CLI smoke and invalid-model tests. This uses installed CLIs and may spend real tokens."
+fi
+go test -tags realcli -count=1 -run "$run_regex" -timeout "${GO_TEST_TIMEOUT:-15m}" -v ./internal/cli/backends
