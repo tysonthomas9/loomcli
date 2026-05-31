@@ -50,6 +50,68 @@ exit 0
 	}
 }
 
+func TestTSFirstLiveProviderScriptsHaveValidSyntax(t *testing.T) {
+	if _, err := exec.LookPath("bash"); err != nil {
+		t.Skip("bash not found on PATH")
+	}
+	root := repoRoot(t)
+	for _, rel := range []string{
+		"e2e/tsfirst_live_provider_connect.sh",
+		"e2e/run_tsfirst_live_provider_connect_podman.sh",
+	} {
+		cmd := exec.Command("bash", "-n", filepath.Join(root, rel)) //nolint:gosec // validates repo-owned shell scripts.
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("bash -n %s failed: %v\n%s", rel, err, out)
+		}
+	}
+}
+
+func TestTSFirstLiveProviderConnectScriptAcceptsTypedToolEvidence(t *testing.T) {
+	if _, err := exec.LookPath("bash"); err != nil {
+		t.Skip("bash not found on PATH")
+	}
+	if _, err := exec.LookPath("jq"); err != nil {
+		t.Skip("jq not found on PATH")
+	}
+	tmp := t.TempDir()
+	binDir := filepath.Join(tmp, "bin")
+	if err := os.MkdirAll(binDir, 0o755); err != nil {
+		t.Fatalf("create bin dir: %v", err)
+	}
+	writeExecutable(t, filepath.Join(binDir, "node"), "#!/bin/sh\nexit 0\n")
+	writeExecutable(t, filepath.Join(binDir, "codex"), "#!/bin/sh\nexit 0\n")
+	writeExecutable(t, filepath.Join(binDir, "loom"), `#!/bin/sh
+if [ "$1" = "backend" ] && [ "$2" = "health" ]; then
+  printf '[{"name":"codex","healthy":true,"installed":true,"api_key_set":true,"message":"ready"}]\n'
+  exit 0
+fi
+if [ "$1" = "check" ]; then
+  test -d "$3/.loom/agents" && test -d "$3/.loom/tools"
+  exit $?
+fi
+if [ "$1" = "connect" ]; then
+  printf '{"agent":"live-tool-agent","response":"LIVE_TYPED_TOOL_DONE: created triage","tool_runtime":{"status":"backend_typed_tool_runtime","handler_execution":"trusted_executor_configured","schema_publication":"prompt_json_contract","result_feed":"same_turn_prompt_followup"},"tool_calls":[{"name":"create_channel","status":"completed","authorization_status":"authorized","result":"created triage"}],"operation":{"tool_calls":[{"name":"create_channel"}]}}\n'
+  exit 0
+fi
+printf 'unexpected loom command: %s\n' "$*" >&2
+exit 2
+`)
+
+	cmd := exec.Command("bash", filepath.Join(repoRoot(t), "e2e", "tsfirst_live_provider_connect.sh")) //nolint:gosec // executes repo-owned script with fake binaries.
+	cmd.Env = append(os.Environ(),
+		"PATH="+binDir+string(os.PathListSeparator)+os.Getenv("PATH"),
+		"RESULT_ROOT="+filepath.Join(tmp, "result"),
+		"BACKEND=codex",
+	)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("tsfirst_live_provider_connect.sh failed: %v\n%s", err, out)
+	}
+	if !strings.Contains(string(out), "PASS tsfirst live-provider local-connect typed-tool E2E") {
+		t.Fatalf("script output missing PASS marker:\n%s", out)
+	}
+}
+
 func repoRoot(t *testing.T) string {
 	t.Helper()
 	_, file, _, ok := runtime.Caller(0)

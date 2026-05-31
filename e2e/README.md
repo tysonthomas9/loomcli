@@ -76,6 +76,21 @@ e2e/run_local.sh --backend codex
 
 Auto-mounts auth configs (`~/.claude/`, `~/.codex/`, `~/.config/opencode/`) read-only and forwards `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, and `STUB_*` env vars.
 
+## Live TypeScript-First Provider Check
+
+This opt-in check requires a real configured provider CLI. It creates a
+temporary `.loom` project with one `defineAgent(...)` and one `defineTool(...)`,
+runs `loom check`, then runs `loom connect --json` and verifies typed-tool call
+evidence, trusted handler execution, and same-turn result follow-up.
+
+```bash
+# Run directly with an already-configured backend CLI on PATH
+BACKEND=codex e2e/tsfirst_live_provider_connect.sh
+
+# Run in Podman with real Codex auth/config mounted from CODEX_HOME
+CODEX_HOME=/private/tmp/codex-e2e-home e2e/run_tsfirst_live_provider_connect_podman.sh
+```
+
 ## Using agent-browser
 
 agent-browser requires a `navigate` before other commands:
