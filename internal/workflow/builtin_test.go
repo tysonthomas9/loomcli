@@ -1733,6 +1733,158 @@ export default defineWorkflow({
 	}
 }
 
+func TestCodeDefinedWorkflowContextRemoteRuntimeWorkspacePersistsAcrossRunsAndReconcilesCleanup(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	providerWorkspaceID := "e2b-persist-" + safeRuntimeWorkspacePart(filepath.Base(filepath.Dir(root)))
+	runtimePath := filepath.Join(root, ".loom", "runtimes", "remote-e2b-persist.ts")
+	if err := os.MkdirAll(filepath.Dir(runtimePath), 0o755); err != nil {
+		t.Fatalf("mkdir runtime dir: %v", err)
+	}
+	if err := os.WriteFile(runtimePath, []byte(`import { runtime } from '@loom/runtime';
+
+export default runtime.remote({
+  name: 'remote-e2b-persist',
+  provider: 'e2b',
+  cwd: '.',
+  workspace: {
+    providerWorkspaceId: '`+providerWorkspaceID+`',
+    owner: 'loom',
+    cleanup: { mode: 'manual', ttl: '7d' },
+    filesystem: { persistence: 'durable', durability: 'provider', retention: '7d' },
+  },
+  filesystem: { read: true, write: true, artifactURI: true, policy: 'provider_adapter' },
+  lifecycle: { materialize: true, cleanup: true, release: true, policy: 'provider_adapter' },
+  env: [],
+});
+`), 0o644); err != nil {
+		t.Fatalf("write runtime: %v", err)
+	}
+	workflowPath := filepath.Join(root, ".loom", "workflows", "remote-runtime-persist.ts")
+	if err := os.MkdirAll(filepath.Dir(workflowPath), 0o755); err != nil {
+		t.Fatalf("mkdir workflow dir: %v", err)
+	}
+	if err := os.WriteFile(workflowPath, []byte(`import { defineWorkflow } from '@loom/runtime';
+
+export default defineWorkflow({
+  name: 'remote-runtime-persist',
+  runtimeProfile: 'remote-e2b-persist',
+  async run(ctx) {
+    if (ctx.input.mode === 'write') {
+      await ctx.runtime.materializeWorkspace({
+        reason: 'prepare durable provider workspace',
+        metadata: { phase: 'write' },
+      });
+      const written = await ctx.runtime.files.writeJSON('state/persisted.json', {
+        token: 'from-first-run',
+        run: 'write',
+      }, {
+        summary: 'Cross-run provider workspace state',
+      });
+      return {
+        mode: 'write',
+        provider: written.provider,
+        providerBacked: written.providerBacked,
+        uri: written.uri,
+      };
+    }
+
+    const persisted = await ctx.runtime.files.readJSON('state/persisted.json');
+    const cleaned = await ctx.runtime.cleanupWorkspace({
+      reason: 'reconcile durable provider workspace',
+      reconcile: true,
+      metadata: { phase: 'reconcile' },
+    });
+    return {
+      mode: 'reconcile',
+      token: persisted.token,
+      cleanupScope: cleaned.cleanupScope,
+      cleanedFiles: cleaned.cleanedFiles,
+      reconcileRequested: cleaned.reconcileRequested,
+      reconciled: cleaned.reconciled,
+    };
+  },
+});
+`), 0o644); err != nil {
+		t.Fatalf("write workflow: %v", err)
+	}
+	plan, err := defspkg.Load(root)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	st := memstore.New()
+	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "TSREMOTEPU", Name: "Remote Runtime Persistence"}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	if err := defspkg.Apply(ctx, st, "TSREMOTEPU", "atlas", plan); err != nil {
+		t.Fatalf("Apply() error = %v", err)
+	}
+	def, err := st.WorkflowDefinitions().Get(ctx, "TSREMOTEPU", "remote-runtime-persist")
+	if err != nil {
+		t.Fatalf("get workflow definition: %v", err)
+	}
+	adapterRoot := tsContextRuntimeWorkspaceRoot(tsContextRuntimeProfileForDefinition(ctx, st, def))
+	if adapterRoot == "" {
+		t.Fatalf("remote runtime adapter root is empty")
+	}
+	_ = os.RemoveAll(adapterRoot)
+	t.Cleanup(func() { _ = os.RemoveAll(adapterRoot) })
+
+	writeRun, err := CreateOrResumeRun(ctx, st, "TSREMOTEPU", "remote-runtime-persist", json.RawMessage(`{"mode":"write"}`), "atlas")
+	if err != nil {
+		t.Fatalf("CreateOrResumeRun(write) error = %v", err)
+	}
+	writeResult, err := RunOnce(ctx, st, clitest.NewMockIssueBackend(), writeRun)
+	if err != nil {
+		t.Fatalf("RunOnce(write) error = %v", err)
+	}
+	if writeResult.Run == nil || writeResult.Run.Status != domain.WorkflowRunCompleted {
+		t.Fatalf("write result = %+v, want completed provider-backed write run", writeResult)
+	}
+	if _, err := os.Stat(filepath.Join(adapterRoot, "state", "persisted.json")); err != nil {
+		t.Fatalf("provider workspace file after write stat error = %v, want persisted file", err)
+	}
+
+	reconcileRun, err := CreateOrResumeRun(ctx, st, "TSREMOTEPU", "remote-runtime-persist", json.RawMessage(`{"mode":"reconcile"}`), "atlas")
+	if err != nil {
+		t.Fatalf("CreateOrResumeRun(reconcile) error = %v", err)
+	}
+	reconcileResult, err := RunOnce(ctx, st, clitest.NewMockIssueBackend(), reconcileRun)
+	if err != nil {
+		t.Fatalf("RunOnce(reconcile) error = %v", err)
+	}
+	if reconcileResult.Run == nil || reconcileResult.Run.Status != domain.WorkflowRunCompleted {
+		t.Fatalf("reconcile result = %+v, want completed provider-backed cleanup run", reconcileResult)
+	}
+	var data map[string]any
+	if err := json.Unmarshal(reconcileResult.Run.Result, &data); err != nil {
+		t.Fatalf("decode reconcile result: %v", err)
+	}
+	if data["token"] != "from-first-run" || data["cleanupScope"] != "runtime_workspace_reconcile" ||
+		data["cleanedFiles"] != float64(1) || data["reconcileRequested"] != true || data["reconciled"] != true {
+		t.Fatalf("reconcile result data = %+v, want cross-run read and provider workspace cleanup reconciliation", data)
+	}
+	if _, err := os.Stat(filepath.Join(adapterRoot, "state", "persisted.json")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("provider workspace file exists after reconcile cleanup or stat failed with %v, want removed", err)
+	}
+	events, err := st.RunEvents().List(ctx, "TSREMOTEPU", store.RunEventFilter{WorkflowRunID: reconcileRun.RunID})
+	if err != nil {
+		t.Fatalf("list reconcile run events: %v", err)
+	}
+	if !hasWorkflowEvent(events, "runtime_workspace_file_read") ||
+		!hasWorkflowEvent(events, "runtime_workspace_cleanup_requested") ||
+		!hasWorkflowEvent(events, "workflow_completed") {
+		t.Fatalf("events = %+v, want cross-run read, cleanup, and completion evidence", events)
+	}
+	cleanupEvent := workflowEventDataByType(t, events, "runtime_workspace_cleanup_requested")
+	if cleanupEvent["cleanupScope"] != "runtime_workspace_reconcile" ||
+		cleanupEvent["cleanedFiles"] != float64(1) ||
+		cleanupEvent["reconcileRequested"] != true ||
+		cleanupEvent["reconciled"] != true {
+		t.Fatalf("cleanup event = %+v, want provider workspace reconciliation evidence", cleanupEvent)
+	}
+}
+
 func TestCodeDefinedWorkflowContextDiscoversRuntimeWorkspaceSkills(t *testing.T) {
 	ctx := context.Background()
 	root := t.TempDir()

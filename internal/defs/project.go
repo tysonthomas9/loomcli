@@ -280,6 +280,12 @@ const runtimeTypes = `declare module '@loom/runtime' {
     cleanup?: RuntimeCleanupPolicy;
     filesystem?: RuntimeFilesystemPolicy;
     reason?: string;
+    reconcile?: boolean;
+    cleanupReconcile?: boolean;
+    cleanup_reconcile?: boolean;
+    scope?: 'current_run' | 'runtime_workspace' | 'provider_workspace' | 'workspace' | 'all' | string;
+    cleanupScope?: string;
+    cleanup_scope?: string;
     idempotencyKey?: string;
     idempotency_key?: string;
     metadata?: Record<string, string>;
@@ -300,6 +306,8 @@ const runtimeTypes = `declare module '@loom/runtime' {
     cleanupEnforced?: boolean;
     cleanupScope?: string;
     cleanedFiles?: number;
+    reconcileRequested?: boolean;
+    reconciled?: boolean;
   };
 
   export type WorkflowWorkspaceRepo = {

@@ -361,17 +361,23 @@ function makeRuntimeWorkspaceFiles(request, operations, workspace) {
     });
     return text;
   };
-  const cleanupWrittenFiles = () => {
+  const cleanupWrittenFiles = (options = {}) => {
     if (!runtimeRoot) {
       return {
         cleanupEnforced: false,
         cleanupScope: "admitted_only",
         cleanedFiles: 0,
         providerBacked: false,
+        reconcileRequested: runtimeWorkspaceCleanupReconcileRequested(options, runtimeWorkspace),
+        reconciled: false,
       };
     }
+    const reconcileRequested = runtimeWorkspaceCleanupReconcileRequested(options, runtimeWorkspace);
+    const remoteProviderBacked = runtimeWorkspaceHasRemoteProviderBackedRoot(runtimeRoot, runtimeWorkspace);
+    const reconcile = reconcileRequested && remoteProviderBacked;
+    const cleanupPaths = reconcile ? listRuntimeWorkspaceFilePaths(runtimeRoot) : Array.from(writtenPaths);
     let cleanedFiles = 0;
-    for (const rel of writtenPaths) {
+    for (const rel of cleanupPaths) {
       const abs = path.join(runtimeRoot, rel);
       if (!path.resolve(abs).startsWith(path.resolve(runtimeRoot) + path.sep)) {
         throw new Error(`runtime workspace cleanup path escapes root: ${rel}`);
@@ -385,9 +391,11 @@ function makeRuntimeWorkspaceFiles(request, operations, workspace) {
     }
     return {
       cleanupEnforced: true,
-      cleanupScope: "current_run_runtime_files",
+      cleanupScope: reconcile ? "runtime_workspace_reconcile" : "current_run_runtime_files",
       cleanedFiles,
       providerBacked: true,
+      reconcileRequested,
+      reconciled: reconcile,
     };
   };
   return {
@@ -401,6 +409,63 @@ function makeRuntimeWorkspaceFiles(request, operations, workspace) {
       }),
     readJSON: async (relativePath) => JSON.parse(await readText(relativePath)),
   };
+}
+
+function runtimeWorkspaceCleanupReconcileRequested(options = {}, runtimeWorkspace = {}) {
+  const cleanup =
+    options.cleanup && typeof options.cleanup === "object"
+      ? options.cleanup
+      : runtimeWorkspace.cleanup && typeof runtimeWorkspace.cleanup === "object"
+        ? runtimeWorkspace.cleanup
+        : {};
+  const scope = String(
+    options.scope ||
+      options.cleanupScope ||
+      options.cleanup_scope ||
+      cleanup.scope ||
+      cleanup.cleanupScope ||
+      cleanup.cleanup_scope ||
+      "",
+  ).toLowerCase();
+  return (
+    options.reconcile === true ||
+    options.cleanupReconcile === true ||
+    options.cleanup_reconcile === true ||
+    cleanup.reconcile === true ||
+    scope === "runtime_workspace" ||
+    scope === "provider_workspace" ||
+    scope === "workspace" ||
+    scope === "all"
+  );
+}
+
+function runtimeWorkspaceHasRemoteProviderBackedRoot(runtimeRoot, runtimeWorkspace = {}) {
+  const provider = String(runtimeWorkspace.provider || "").toLowerCase();
+  return Boolean(runtimeRoot) && provider !== "" && provider !== "local";
+}
+
+function listRuntimeWorkspaceFilePaths(root) {
+  const resolvedRoot = path.resolve(root);
+  if (!fs.existsSync(resolvedRoot)) return [];
+  const out = [];
+  const walk = (dir) => {
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      const abs = path.join(dir, entry.name);
+      const resolved = path.resolve(abs);
+      if (resolved !== resolvedRoot && !resolved.startsWith(resolvedRoot + path.sep)) {
+        throw new Error(`runtime workspace cleanup path escapes root: ${abs}`);
+      }
+      if (entry.isDirectory()) {
+        walk(abs);
+        continue;
+      }
+      if (entry.isFile() || entry.isSymbolicLink()) {
+        out.push(path.relative(resolvedRoot, resolved).split(path.sep).join("/"));
+      }
+    }
+  };
+  walk(resolvedRoot);
+  return out.sort();
 }
 
 function removeEmptyParents(abs, root) {
@@ -606,7 +671,7 @@ function makeContext(request, workflow) {
         ? { reason: reasonOrOptions, metadata: metadata || {} }
         : reasonOrOptions || {};
     const params = runtimeWorkspaceLifecycleParams("cleanup", options);
-    Object.assign(params, runtimeFiles[cleanupRuntimeWorkspaceFiles]());
+    Object.assign(params, runtimeFiles[cleanupRuntimeWorkspaceFiles](options));
     operations.push({ type: "runtime.workspace.cleanup", params });
     return { accepted: true, status: "admitted", ...jsonSafe(params) };
   };
