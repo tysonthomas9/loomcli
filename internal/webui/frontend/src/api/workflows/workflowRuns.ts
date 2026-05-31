@@ -182,14 +182,17 @@ export async function getWorkflowRunEvents(
 export function workflowRunEventStreamUrl(
   workspaceId: string,
   runId: string,
-  options: { untilTerminal?: boolean } = {},
+  options: { untilTerminal?: boolean; since?: string } = {},
 ): string {
   const path = wsUrl(
     workspaceId,
     `/workflow-runs/${encodeURIComponent(runId)}/events/stream`,
   );
-  if (!options.untilTerminal) return path;
-  return `${path}?until=terminal`;
+  const query = new URLSearchParams();
+  if (options.untilTerminal) query.set("until", "terminal");
+  if (options.since) query.set("since", options.since);
+  const encoded = query.toString();
+  return encoded ? `${path}?${encoded}` : path;
 }
 
 export function cancelWorkflowRun(

@@ -111,10 +111,14 @@ describe("WorkflowRunHistory", () => {
         },
       ],
       streamCompletion: null,
+      streamStatus: "connected",
+      reconnectCount: 0,
+      lastEventIndex: 1,
       isStreamComplete: false,
       isLoading: false,
       error: null,
       refetch: vi.fn(),
+      retryStream: vi.fn(),
     });
 
     render(<WorkflowRunHistory taskId="TASK-1" />);
@@ -160,10 +164,14 @@ describe("WorkflowRunHistory", () => {
     mockUseWorkflowRunEvents.mockReturnValue({
       events: [],
       streamCompletion: null,
+      streamStatus: "connected",
+      reconnectCount: 0,
+      lastEventIndex: null,
       isStreamComplete: false,
       isLoading: false,
       error: null,
       refetch: refetchEvents,
+      retryStream: vi.fn(),
     });
 
     render(<WorkflowRunHistory taskId="TASK-1" />);
@@ -197,10 +205,14 @@ describe("WorkflowRunHistory", () => {
     mockUseWorkflowRunEvents.mockReturnValue({
       events: [],
       streamCompletion: null,
+      streamStatus: "idle",
+      reconnectCount: 0,
+      lastEventIndex: null,
       isStreamComplete: false,
       isLoading: false,
       error: null,
       refetch: vi.fn(),
+      retryStream: vi.fn(),
     });
 
     render(<WorkflowRunHistory taskId="EPIC-1" />);
@@ -250,10 +262,14 @@ describe("WorkflowRunHistory", () => {
           },
         ],
       },
+      streamStatus: "complete",
+      reconnectCount: 0,
+      lastEventIndex: null,
       isStreamComplete: true,
       isLoading: false,
       error: null,
       refetch: vi.fn(),
+      retryStream: vi.fn(),
     });
 
     render(<WorkflowRunHistory taskId="TASK-1" />);
@@ -263,5 +279,46 @@ describe("WorkflowRunHistory", () => {
       screen.queryByRole("button", { name: "Cancel" }),
     ).not.toBeInTheDocument();
     expect(refetchRuns).toHaveBeenCalled();
+  });
+
+  it("shows stream reconnect state and retries the selected event stream", () => {
+    const retryStream = vi.fn();
+    mockUseTaskWorkflowRuns.mockReturnValue({
+      runs: [
+        {
+          run: {
+            workspace_key: "WS",
+            run_id: "wrun-1",
+            workflow_name: "epic-runner",
+            workflow_version: "v1",
+            status: "running",
+            created_at: "2026-01-01T00:00:00Z",
+            updated_at: "2026-01-01T00:00:00Z",
+          },
+        },
+      ],
+      isLoading: false,
+      error: null,
+      refetch: vi.fn(),
+    });
+    mockUseWorkflowRunEvents.mockReturnValue({
+      events: [],
+      streamCompletion: null,
+      streamStatus: "reconnecting",
+      reconnectCount: 1,
+      lastEventIndex: 4,
+      isStreamComplete: false,
+      isLoading: false,
+      error: null,
+      refetch: vi.fn(),
+      retryStream,
+    });
+
+    render(<WorkflowRunHistory taskId="TASK-1" />);
+
+    expect(screen.getByText("Reconnecting 1 #4")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Retry stream" }));
+
+    expect(retryStream).toHaveBeenCalledTimes(1);
   });
 });

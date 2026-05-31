@@ -9,7 +9,10 @@ export { useWorkflowDefinitions } from "./useWorkflowDefinitions";
 export type { UseWorkflowDefinitionsResult } from "./useWorkflowDefinitions";
 
 export { useWorkflowRunEvents } from "./useWorkflowRunEvents";
-export type { UseWorkflowRunEventsResult } from "./useWorkflowRunEvents";
+export type {
+  UseWorkflowRunEventsResult,
+  WorkflowRunEventStreamStatus,
+} from "./useWorkflowRunEvents";
 export { useWorkflowRuns } from "./useWorkflowRuns";
 export type { UseWorkflowRunsResult } from "./useWorkflowRuns";
 

@@ -254,6 +254,49 @@
   white-space: nowrap;
 }
 
+.workflowStreamStateGroup {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.workflowStreamState {
+  color: var(--color-text-tertiary);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.workflowStreamState[data-status="connected"],
+.workflowStreamState[data-status="complete"] {
+  color: #16a34a;
+}
+
+.workflowStreamState[data-status="connecting"],
+.workflowStreamState[data-status="polling"],
+.workflowStreamState[data-status="reconnecting"] {
+  color: #ca8a04;
+}
+
+.workflowStreamState[data-status="error"] {
+  color: #dc2626;
+}
+
+.workflowStreamRetryButton {
+  padding: 3px 7px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-panel-bg);
+  color: var(--color-text-primary);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.workflowStreamRetryButton:hover {
+  background: var(--color-bg-hover);
+}
+
 .workflowCancelButton {
   margin-left: auto;
   padding: 4px 9px;

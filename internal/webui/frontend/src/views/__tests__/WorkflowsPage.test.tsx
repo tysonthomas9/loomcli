@@ -96,10 +96,14 @@ describe("WorkflowsPage", () => {
     mockUseWorkflowRunEvents.mockReturnValue({
       events: [routeEvent],
       streamCompletion: null,
+      streamStatus: "connected",
+      reconnectCount: 0,
+      lastEventIndex: 1,
       isStreamComplete: false,
       isLoading: false,
       error: null,
       refetch: vi.fn(),
+      retryStream: vi.fn(),
     });
   });
 
@@ -135,10 +139,14 @@ describe("WorkflowsPage", () => {
     mockUseWorkflowRunEvents.mockReturnValue({
       events: [],
       streamCompletion: null,
+      streamStatus: "idle",
+      reconnectCount: 0,
+      lastEventIndex: null,
       isStreamComplete: false,
       isLoading: false,
       error: null,
       refetch: vi.fn(),
+      retryStream: vi.fn(),
     });
 
     render(<WorkflowsPage />);
@@ -175,10 +183,14 @@ describe("WorkflowsPage", () => {
     mockUseWorkflowRunEvents.mockReturnValue({
       events: [routeEvent],
       streamCompletion: null,
+      streamStatus: "connected",
+      reconnectCount: 0,
+      lastEventIndex: 1,
       isStreamComplete: false,
       isLoading: false,
       error: null,
       refetch: refetchEvents,
+      retryStream: vi.fn(),
     });
 
     render(<WorkflowsPage />);
@@ -187,5 +199,28 @@ describe("WorkflowsPage", () => {
     await waitFor(() => expect(cancelRun).toHaveBeenCalledWith("wrun-1"));
     expect(refetchRuns).toHaveBeenCalled();
     expect(refetchEvents).toHaveBeenCalled();
+  });
+
+  it("shows stream reconnect state and retries the selected event stream", () => {
+    const retryStream = vi.fn();
+    mockUseWorkflowRunEvents.mockReturnValue({
+      events: [routeEvent],
+      streamCompletion: null,
+      streamStatus: "reconnecting",
+      reconnectCount: 2,
+      lastEventIndex: 1,
+      isStreamComplete: false,
+      isLoading: false,
+      error: new Error("stream interrupted"),
+      refetch: vi.fn(),
+      retryStream,
+    });
+
+    render(<WorkflowsPage />);
+
+    expect(screen.getByText("Reconnecting 2 #1")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Retry stream" }));
+
+    expect(retryStream).toHaveBeenCalledTimes(1);
   });
 });

@@ -9,6 +9,7 @@ import {
   useWorkflowRunEvents,
   type WorkflowDefinition,
   type WorkflowRun,
+  type WorkflowRunEventStreamStatus,
   type WorkflowRunEvent,
   type WorkflowRunListItem,
   type WorkflowRunStatus,
@@ -54,7 +55,11 @@ export function WorkflowRunHistory({
     isLoading: eventsLoading,
     error: eventsError,
     refetch: refetchEvents,
+    retryStream,
+    streamStatus,
     streamCompletion,
+    reconnectCount,
+    lastEventIndex,
   } = useWorkflowRunEvents(selectedRunId, selectedIsLive);
   const selectedTerminalRun = useMemo(
     () =>
@@ -251,6 +256,17 @@ export function WorkflowRunHistory({
                     Finished {formatTimestamp(selectedDisplayFinishedAt)}
                   </span>
                 ) : null}
+                <WorkflowStreamState
+                  status={streamStatus}
+                  reconnectCount={reconnectCount}
+                  lastEventIndex={lastEventIndex}
+                  canRetry={
+                    selectedDisplayIsLive &&
+                    (streamStatus === "reconnecting" ||
+                      streamStatus === "error")
+                  }
+                  onRetry={retryStream}
+                />
                 {selectedItem?.task_runs?.length ? (
                   <span>
                     {selectedItem.task_runs.length}{" "}
@@ -274,6 +290,38 @@ export function WorkflowRunHistory({
         </div>
       </div>
     </section>
+  );
+}
+
+function WorkflowStreamState({
+  status,
+  reconnectCount,
+  lastEventIndex,
+  canRetry,
+  onRetry,
+}: {
+  status: WorkflowRunEventStreamStatus;
+  reconnectCount: number;
+  lastEventIndex: number | null;
+  canRetry: boolean;
+  onRetry: () => void;
+}): JSX.Element {
+  return (
+    <span className={styles.workflowStreamStateGroup}>
+      <span className={styles.workflowStreamState} data-status={status}>
+        {streamStatusLabel(status, reconnectCount)}
+        {lastEventIndex != null ? ` #${lastEventIndex}` : ""}
+      </span>
+      {canRetry ? (
+        <button
+          type="button"
+          className={styles.workflowStreamRetryButton}
+          onClick={onRetry}
+        >
+          Retry stream
+        </button>
+      ) : null}
+    </span>
   );
 }
 
@@ -445,6 +493,31 @@ function WorkflowEventList({
 
 function formatStatus(status: WorkflowRunStatus): string {
   return status.charAt(0).toUpperCase() + status.slice(1);
+}
+
+function streamStatusLabel(
+  status: WorkflowRunEventStreamStatus,
+  reconnectCount: number,
+): string {
+  switch (status) {
+    case "connecting":
+      return "Connecting";
+    case "connected":
+      return "Live stream";
+    case "reconnecting":
+      return reconnectCount > 0
+        ? `Reconnecting ${reconnectCount}`
+        : "Reconnecting";
+    case "polling":
+      return "Polling";
+    case "complete":
+      return "Stream complete";
+    case "error":
+      return "Stream error";
+    case "idle":
+    default:
+      return "Event history";
+  }
 }
 
 function shortRunID(runId: string): string {

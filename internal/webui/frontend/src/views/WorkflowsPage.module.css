@@ -211,6 +211,48 @@
   font-size: 12px;
 }
 
+.streamStateGroup {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.streamState {
+  color: var(--color-muted-fg, #57606a);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.streamState[data-status="connected"],
+.streamState[data-status="complete"] {
+  color: #1a7f37;
+}
+
+.streamState[data-status="connecting"],
+.streamState[data-status="polling"],
+.streamState[data-status="reconnecting"] {
+  color: #bf8700;
+}
+
+.streamState[data-status="error"] {
+  color: #cf222e;
+}
+
+.streamRetryButton {
+  min-height: 24px;
+  padding: 0 8px;
+  border: 1px solid var(--color-border, #d0d7de);
+  border-radius: 6px;
+  background: var(--color-canvas-subtle, #f6f8fa);
+  color: var(--color-fg, #24292f);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
 .detailHeader {
   display: flex;
   gap: 10px;
@@ -275,22 +317,13 @@
 
 .eventData {
   margin: 0;
+  max-height: 220px;
+  overflow: auto;
   padding: 8px;
   border-radius: 6px;
   background: var(--color-canvas-subtle, #f6f8fa);
   color: var(--color-fg, #24292f);
-  overflow: auto;
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 12px;
-}
-
-.eventData {
-  margin: 0;
-  overflow: auto;
-  max-height: 220px;
-  padding: 8px;
-  border-radius: 6px;
-  background: var(--color-canvas-subtle, #f6f8fa);
   font-size: 12px;
 }
 

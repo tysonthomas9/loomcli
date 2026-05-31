@@ -9,6 +9,7 @@ import {
   useWorkflowRuns,
   type WorkflowDefinition,
   type WorkflowRun,
+  type WorkflowRunEventStreamStatus,
   type WorkflowRunEvent,
   type WorkflowRunListItem,
   type WorkflowRunStatus,
@@ -67,7 +68,11 @@ function WorkflowsSurface(): JSX.Element {
     isLoading: eventsLoading,
     error: eventsError,
     refetch: refetchEvents,
+    retryStream,
+    streamStatus,
     streamCompletion,
+    reconnectCount,
+    lastEventIndex,
   } = useWorkflowRunEvents(selectedRunId, selectedIsLive);
 
   const selectedTerminalRun = useMemo(
@@ -193,8 +198,12 @@ function WorkflowsSurface(): JSX.Element {
           events={events}
           isLoadingEvents={eventsLoading}
           streamError={eventsError && events.length > 0 ? eventsError : null}
+          streamStatus={streamStatus}
+          reconnectCount={reconnectCount}
+          lastEventIndex={lastEventIndex}
           cancelingRunId={cancelingRunId}
           onCancel={(run) => void handleCancel(run)}
+          onRetryStream={retryStream}
         />
       </div>
     </section>
@@ -367,8 +376,12 @@ function WorkflowRunDetail({
   events,
   isLoadingEvents,
   streamError,
+  streamStatus,
+  reconnectCount,
+  lastEventIndex,
   cancelingRunId,
   onCancel,
+  onRetryStream,
 }: {
   run: WorkflowRun | null;
   status: WorkflowRunStatus | null;
@@ -376,8 +389,12 @@ function WorkflowRunDetail({
   events: WorkflowRunEvent[];
   isLoadingEvents: boolean;
   streamError: Error | null;
+  streamStatus: WorkflowRunEventStreamStatus;
+  reconnectCount: number;
+  lastEventIndex: number | null;
   cancelingRunId: string | null;
   onCancel: (run: WorkflowRun) => void;
+  onRetryStream: () => void;
 }): JSX.Element {
   if (!run) {
     return <div className={styles.empty}>Select a workflow run</div>;
@@ -399,6 +416,16 @@ function WorkflowRunDetail({
             {finishedAt ? (
               <span>Finished {formatTimestamp(finishedAt)}</span>
             ) : null}
+            <WorkflowStreamState
+              status={streamStatus}
+              reconnectCount={reconnectCount}
+              lastEventIndex={lastEventIndex}
+              canRetry={
+                isLive &&
+                (streamStatus === "reconnecting" || streamStatus === "error")
+              }
+              onRetry={onRetryStream}
+            />
           </div>
         </div>
         {isLive ? (
@@ -418,6 +445,38 @@ function WorkflowRunDetail({
         streamError={streamError}
       />
     </div>
+  );
+}
+
+function WorkflowStreamState({
+  status,
+  reconnectCount,
+  lastEventIndex,
+  canRetry,
+  onRetry,
+}: {
+  status: WorkflowRunEventStreamStatus;
+  reconnectCount: number;
+  lastEventIndex: number | null;
+  canRetry: boolean;
+  onRetry: () => void;
+}): JSX.Element {
+  return (
+    <span className={styles.streamStateGroup}>
+      <span className={styles.streamState} data-status={status}>
+        {streamStatusLabel(status, reconnectCount)}
+        {lastEventIndex != null ? ` #${lastEventIndex}` : ""}
+      </span>
+      {canRetry ? (
+        <button
+          type="button"
+          className={styles.streamRetryButton}
+          onClick={onRetry}
+        >
+          Retry stream
+        </button>
+      ) : null}
+    </span>
   );
 }
 
@@ -471,6 +530,31 @@ function WorkflowEventList({
 
 function formatStatus(status: WorkflowRunStatus): string {
   return status.charAt(0).toUpperCase() + status.slice(1);
+}
+
+function streamStatusLabel(
+  status: WorkflowRunEventStreamStatus,
+  reconnectCount: number,
+): string {
+  switch (status) {
+    case "connecting":
+      return "Connecting";
+    case "connected":
+      return "Live stream";
+    case "reconnecting":
+      return reconnectCount > 0
+        ? `Reconnecting ${reconnectCount}`
+        : "Reconnecting";
+    case "polling":
+      return "Polling";
+    case "complete":
+      return "Stream complete";
+    case "error":
+      return "Stream error";
+    case "idle":
+    default:
+      return "Event history";
+  }
 }
 
 function shortRunID(runId: string): string {

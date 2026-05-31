@@ -25,11 +25,16 @@ vi.mock("@/api/workflows", () => ({
     (
       workspaceId: string,
       runId: string,
-      options?: { untilTerminal?: boolean },
-    ) =>
-      options?.untilTerminal
-        ? `/stream/${workspaceId}/${runId}?until=terminal`
-        : `/stream/${workspaceId}/${runId}`,
+      options?: { untilTerminal?: boolean; since?: string },
+    ) => {
+      const query = new URLSearchParams();
+      if (options?.untilTerminal) query.set("until", "terminal");
+      if (options?.since) query.set("since", options.since);
+      const encoded = query.toString();
+      return encoded
+        ? `/stream/${workspaceId}/${runId}?${encoded}`
+        : `/stream/${workspaceId}/${runId}`;
+    },
   ),
 }));
 
@@ -44,6 +49,7 @@ class MockEventSource {
   readonly url: string | URL;
   readonly listeners = new Map<string, EventListener[]>();
   closed = false;
+  onopen: ((event: Event) => void) | null = null;
   onerror: ((event: Event) => void) | null = null;
 
   constructor(url: string | URL) {
@@ -66,6 +72,10 @@ class MockEventSource {
     for (const listener of this.listeners.get(type) ?? []) {
       listener(event);
     }
+  }
+
+  emitOpen(): void {
+    this.onopen?.(new Event("open"));
   }
 
   emitRaw(type: string, data: string): void {
@@ -121,6 +131,12 @@ describe("useWorkflowRunEvents", () => {
       untilTerminal: true,
     });
     expect(String(MockEventSource.last.url)).toContain("until=terminal");
+    expect(result.current.streamStatus).toBe("connecting");
+
+    act(() => {
+      MockEventSource.last.emitOpen();
+    });
+    expect(result.current.streamStatus).toBe("connected");
 
     const nextEvent: WorkflowRunEvent = {
       ...initialEvent,
@@ -157,6 +173,8 @@ describe("useWorkflowRunEvents", () => {
       expect(result.current.streamCompletion).toEqual(completion),
     );
     expect(result.current.isStreamComplete).toBe(true);
+    expect(result.current.streamStatus).toBe("complete");
+    expect(result.current.lastEventIndex).toBe(2);
     expect(MockEventSource.last.closed).toBe(true);
 
     act(() => {
@@ -172,6 +190,7 @@ describe("useWorkflowRunEvents", () => {
     expect(MockEventSource.instances).toHaveLength(0);
     expect(result.current.streamCompletion).toBeNull();
     expect(result.current.isStreamComplete).toBe(false);
+    expect(result.current.streamStatus).toBe("idle");
   });
 
   it("reports structured stream error envelopes and closes the stream", async () => {
@@ -192,6 +211,7 @@ describe("useWorkflowRunEvents", () => {
       expect(result.current.error?.message).toBe("run disappeared"),
     );
     expect(result.current.isStreamComplete).toBe(false);
+    expect(result.current.streamStatus).toBe("error");
     expect(MockEventSource.last.closed).toBe(true);
 
     act(() => {
@@ -211,6 +231,46 @@ describe("useWorkflowRunEvents", () => {
 
     await waitFor(() => expect(result.current.error).toBeInstanceOf(Error));
     expect(result.current.streamCompletion).toBeNull();
+    expect(result.current.streamStatus).toBe("error");
     expect(MockEventSource.last.closed).toBe(false);
+  });
+
+  it("exposes reconnect state and manually retries from the last event index", async () => {
+    const { result } = renderHook(() => useWorkflowRunEvents("wrun-1", true));
+
+    await waitFor(() => expect(result.current.events).toEqual([initialEvent]));
+    act(() => {
+      MockEventSource.last.emitOpen();
+    });
+
+    const nextEvent: WorkflowRunEvent = {
+      ...initialEvent,
+      event_id: "evt-2",
+      event_index: 2,
+      type: "workflow_log",
+    };
+    act(() => {
+      MockEventSource.last.emit("workflow_event", nextEvent);
+    });
+    await waitFor(() => expect(result.current.lastEventIndex).toBe(2));
+
+    const firstSource = MockEventSource.last;
+    act(() => {
+      firstSource.emitError();
+    });
+
+    await waitFor(() =>
+      expect(result.current.streamStatus).toBe("reconnecting"),
+    );
+    expect(result.current.reconnectCount).toBe(1);
+    expect(mockGetWorkflowRunEvents).toHaveBeenCalledTimes(2);
+
+    act(() => {
+      result.current.retryStream();
+    });
+
+    await waitFor(() => expect(MockEventSource.instances).toHaveLength(2));
+    expect(firstSource.closed).toBe(true);
+    expect(String(MockEventSource.last.url)).toContain("since=2");
   });
 });
