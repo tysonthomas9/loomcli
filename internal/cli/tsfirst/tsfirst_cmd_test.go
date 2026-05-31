@@ -543,6 +543,136 @@ func TestTypeScriptFirstEndToEndPatternConvergesOnDurableGraph(t *testing.T) {
 	}
 }
 
+func TestTypeScriptFirstEndToEndPatternIncludesTypedTools(t *testing.T) {
+	ctx := context.Background()
+	cli.TestingResetBackendState(t)
+	typedBackend := &executingTypedToolBackend{
+		request: backendcaps.TypedToolExecutionRequest{
+			CallID:    "call-create-channel",
+			Name:      "create_channel",
+			Arguments: map[string]any{"name": "triage"},
+		},
+	}
+	cli.RegisterBackend(typedBackend)
+	root := t.TempDir()
+	if err := defspkg.InitTypeScriptProject(root); err != nil {
+		t.Fatalf("InitTypeScriptProject() error = %v", err)
+	}
+	writeTypedToolAgent(t, root, "slack-agent", "executing-typed-runtime")
+	if _, err := defspkg.ScaffoldWorkflow(root, "epic-runner"); err != nil {
+		t.Fatalf("ScaffoldWorkflow() error = %v", err)
+	}
+	withTSFirstGlobals(t, func() {
+		checkDir = root
+		checkJSON = false
+		if err := runCheck(nil, nil); err != nil {
+			t.Fatalf("runCheck() error = %v", err)
+		}
+	})
+	plan, err := defspkg.Load(root)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if got := defspkg.Summary(plan); got != "agents=1 workflows=1 runtimes=0 tools=1" {
+		t.Fatalf("Summary() = %q, want source agent, workflow, and typed tool", got)
+	}
+	agent, ok := defspkg.FindAgent(plan, "slack-agent")
+	if !ok {
+		t.Fatalf("FindAgent() did not find slack-agent")
+	}
+	workflow, ok := defspkg.FindWorkflow(plan, "epic-runner")
+	if !ok {
+		t.Fatalf("FindWorkflow() did not find epic-runner")
+	}
+
+	connectResult, err := runLocalConnect(ctx, connectOptions{
+		Dir:      root,
+		Agent:    "slack-agent",
+		Instance: "local",
+		Session:  "typed-e2e",
+		Message:  "create a channel",
+	})
+	if err != nil {
+		t.Fatalf("runLocalConnect() error = %v", err)
+	}
+	if connectResult.ToolRuntime == nil ||
+		connectResult.ToolRuntime.HandlerExecution != connectToolHandlerExecutionConfigured ||
+		connectResult.ToolRuntime.SchemaPublication != connectToolSchemaPublicationPrompt ||
+		connectResult.ToolRuntime.ResultFeed != connectToolResultFeedPromptHistory {
+		t.Fatalf("tool runtime = %+v, want trusted typed tool runtime with prompt schema/result feed", connectResult.ToolRuntime)
+	}
+	if len(connectResult.ToolCalls) != 1 ||
+		connectResult.ToolCalls[0].Name != "create_channel" ||
+		connectResult.ToolCalls[0].Status != "completed" ||
+		connectResult.ToolCalls[0].AuthorizationStatus != "authorized" ||
+		connectResult.ToolCalls[0].Result != "created triage" {
+		t.Fatalf("tool calls = %+v, want trusted typed tool execution evidence", connectResult.ToolCalls)
+	}
+	if len(typedBackend.prompts) != 1 ||
+		!strings.Contains(typedBackend.prompts[0], "Reviewed TypeScript model tools") ||
+		!strings.Contains(typedBackend.prompts[0], `"type":"loom.typed_tool.call"`) {
+		t.Fatalf("prompt = %q, want typed tool prompt contract", strings.Join(typedBackend.prompts, "\n---\n"))
+	}
+	turns, err := readLocalTurns(connectResult.TranscriptPath)
+	if err != nil {
+		t.Fatalf("readLocalTurns() error = %v", err)
+	}
+	if len(turns) != 1 ||
+		turns[0].ToolRuntime == nil ||
+		len(turns[0].ToolCalls) != 1 ||
+		turns[0].Operation == nil ||
+		len(turns[0].Operation.ToolCalls) != 1 {
+		t.Fatalf("turns = %+v, want local transcript and operation typed tool evidence", turns)
+	}
+
+	st := memstore.New()
+	const workspace = "TSTOOLE2E"
+	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: workspace, Name: "TypeScript Typed Tool E2E"}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	if err := defspkg.Apply(ctx, st, workspace, "test", plan); err != nil {
+		t.Fatalf("Apply() error = %v", err)
+	}
+	instance, err := defspkg.ApplyAgentInstance(ctx, st, workspace, agent, "local", true)
+	if err != nil {
+		t.Fatalf("ApplyAgentInstance() error = %v", err)
+	}
+	if instance.RoleName != "slack-agent" || instance.DesiredState != domain.AgentDesiredRunning {
+		t.Fatalf("instance = %+v, want durable started typed-tool agent instance", instance)
+	}
+
+	ready := backend.IssueData{ID: "TASK-TYPED-1", Title: "Build typed tool task", Status: "open"}
+	ib := clitest.NewMockIssueBackend()
+	ib.ReadyResult = []backend.IssueData{ready}
+	ib.ListResult = []backend.IssueData{ready}
+	runResult, err := runTypeScriptWorkflow(ctx, st, ib, workspace, "test", plan, workflow, json.RawMessage(`{"parentId":"EPIC-TYPED-1","role":"task","maxConcurrency":1}`), true, false)
+	if err != nil {
+		t.Fatalf("runTypeScriptWorkflow() error = %v", err)
+	}
+	if runResult.Run == nil || runResult.Run.Status != domain.WorkflowRunWaiting {
+		t.Fatalf("run result = %+v, want waiting workflow run", runResult)
+	}
+
+	exported, err := defspkg.PlanFromWorkspace(ctx, st, workspace)
+	if err != nil {
+		t.Fatalf("PlanFromWorkspace() error = %v", err)
+	}
+	if len(exported.Tools) != 1 ||
+		exported.Tools[0].Name != "create_channel" ||
+		exported.Tools[0].Handler != "workflow" ||
+		exported.Tools[0].Timeout != "30s" ||
+		!exported.Tools[0].Cancellable {
+		t.Fatalf("exported tools = %+v, want reviewed typed tool definition round trip", exported.Tools)
+	}
+	exportedAgent, ok := defspkg.FindAgent(exported, "slack-agent")
+	if !ok || len(exportedAgent.Tools) != 1 || exportedAgent.Tools[0] != "create_channel" {
+		t.Fatalf("exported agents = %+v, want typed-tool agent source intent", exported.Agents)
+	}
+	if len(exported.WorkflowRuns) != 1 || exported.WorkflowRuns[0].RunID != runResult.Run.RunID {
+		t.Fatalf("exported workflow runs = %+v, want workflow run %s", exported.WorkflowRuns, runResult.Run.RunID)
+	}
+}
+
 func TestTypeScriptFirstCommandSurfaceProofLoopConvergesOnDurableGraph(t *testing.T) {
 	ctx := context.Background()
 	root := t.TempDir()
