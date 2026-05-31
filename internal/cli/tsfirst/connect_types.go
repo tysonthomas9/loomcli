@@ -89,9 +89,10 @@ type connectResume struct {
 }
 
 type connectToolRuntime struct {
-	Status     string             `json:"status"`
-	Message    string             `json:"message,omitempty"`
-	TypedTools []connectTypedTool `json:"typed_tools,omitempty"`
+	Status           string             `json:"status"`
+	Message          string             `json:"message,omitempty"`
+	HandlerExecution string             `json:"handler_execution,omitempty"`
+	TypedTools       []connectTypedTool `json:"typed_tools,omitempty"`
 }
 
 type connectTypedTool struct {

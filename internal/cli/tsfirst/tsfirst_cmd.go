@@ -811,7 +811,7 @@ func invokeLocalAgent(ctx context.Context, plan *defspkg.Plan, agent defspkg.Age
 	if err != nil {
 		return localInvocationResult{}, err
 	}
-	appliedToolRuntime, err := enforceBackendTypedTools(backendName, backend, toolRuntime)
+	appliedToolRuntime, err := enforceBackendTypedTools(backendName, backend, toolRuntime, plan.Root)
 	if err != nil {
 		return localInvocationResult{}, err
 	}

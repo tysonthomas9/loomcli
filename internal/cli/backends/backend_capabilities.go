@@ -49,6 +49,18 @@ type TypedToolRuntimeBackend interface {
 	SetTypedTools(tools []TypedToolDefinition) error
 }
 
+// TypedToolExecutorBackend is an optional interface for backends that can
+// delegate model-selected TypeScript tool calls back to Loom's trusted handler
+// executor instead of executing handlers inside the provider adapter.
+type TypedToolExecutorBackend interface {
+	SetTypedToolExecutor(executor TypedToolExecutor) error
+}
+
+// TypedToolExecutor executes one reviewed TypeScript-authored tool call.
+type TypedToolExecutor interface {
+	ExecuteTypedTool(ctx context.Context, request TypedToolExecutionRequest) (TypedToolCallEvent, error)
+}
+
 // TypedToolCallReporter is an optional interface for backends that can report
 // model-visible TypeScript tool calls observed during the last invocation.
 type TypedToolCallReporter interface {
@@ -77,6 +89,15 @@ type TypedToolDefinition struct {
 	Repos       []string       `json:"repos,omitempty"`
 	Env         []string       `json:"env,omitempty"`
 	ReadOnly    bool           `json:"read_only,omitempty"`
+}
+
+// TypedToolExecutionRequest is one model-selected typed tool invocation passed
+// from a backend to Loom's trusted tool executor.
+type TypedToolExecutionRequest struct {
+	CallID         string         `json:"call_id,omitempty"`
+	Name           string         `json:"name"`
+	Arguments      map[string]any `json:"arguments,omitempty"`
+	IdempotencyKey string         `json:"idempotency_key,omitempty"`
 }
 
 // TypedToolCallEvent describes one model-visible typed tool call observed by a

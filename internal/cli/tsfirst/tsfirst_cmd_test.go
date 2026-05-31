@@ -1270,6 +1270,61 @@ func TestRunLocalConnectPassesTypedToolsToRuntimeBackend(t *testing.T) {
 	}
 }
 
+func TestRunLocalConnectExecutesTrustedTypeScriptToolHandler(t *testing.T) {
+	cli.TestingResetBackendState(t)
+	typedBackend := &executingTypedToolBackend{
+		request: backendcaps.TypedToolExecutionRequest{
+			CallID:    "call-create-channel",
+			Name:      "create_channel",
+			Arguments: map[string]any{"name": "triage"},
+		},
+	}
+	cli.RegisterBackend(typedBackend)
+	root := t.TempDir()
+	writeTypedToolAgent(t, root, "slack-agent", "executing-typed-runtime")
+
+	result, err := runLocalConnect(context.Background(), connectOptions{
+		Dir:      root,
+		Agent:    "slack-agent",
+		Instance: "local",
+		Session:  "tools",
+		Message:  "create a channel",
+	})
+	if err != nil {
+		t.Fatalf("runLocalConnect() error = %v", err)
+	}
+	if result.ToolRuntime == nil ||
+		result.ToolRuntime.Status != connectToolRuntimeBackend ||
+		result.ToolRuntime.HandlerExecution != connectToolHandlerExecutionConfigured {
+		t.Fatalf("tool runtime = %+v, want trusted handler executor configured", result.ToolRuntime)
+	}
+	if len(result.ToolCalls) != 1 ||
+		result.ToolCalls[0].Name != "create_channel" ||
+		result.ToolCalls[0].CallID != "call-create-channel" ||
+		result.ToolCalls[0].Status != "completed" ||
+		result.ToolCalls[0].AuthorizationStatus != "authorized" ||
+		result.ToolCalls[0].IdempotencyKey != "local-connect:create_channel:call-create-channel" ||
+		result.ToolCalls[0].Handler != "workflow" ||
+		result.ToolCalls[0].Timeout != "30s" ||
+		result.ToolCalls[0].Result != "created triage" {
+		t.Fatalf("tool calls = %+v, want trusted TypeScript handler execution evidence", result.ToolCalls)
+	}
+	if !strings.Contains(result.Response, "executed typed tool: created triage") {
+		t.Fatalf("response = %q, want backend response from trusted tool result", result.Response)
+	}
+	turns, err := readLocalTurns(result.TranscriptPath)
+	if err != nil {
+		t.Fatalf("readLocalTurns() error = %v", err)
+	}
+	if len(turns) != 1 ||
+		turns[0].ToolRuntime == nil ||
+		turns[0].ToolRuntime.HandlerExecution != connectToolHandlerExecutionConfigured ||
+		len(turns[0].ToolCalls) != 1 ||
+		turns[0].ToolCalls[0].Result != "created triage" {
+		t.Fatalf("turns = %+v, want trusted handler execution persisted", turns)
+	}
+}
+
 func TestRunLocalConnectAuthorizesBackendToolCallsAgainstManifest(t *testing.T) {
 	cli.TestingResetBackendState(t)
 	typedBackend := &typedToolRuntimeBackend{toolCalls: []backendcaps.TypedToolCallEvent{{
@@ -1651,6 +1706,49 @@ func (b *typedToolRuntimeBackend) SetTypedTools(tools []backendcaps.TypedToolDef
 }
 
 func (b *typedToolRuntimeBackend) TypedToolCalls(_ string) []backendcaps.TypedToolCallEvent {
+	return append([]backendcaps.TypedToolCallEvent(nil), b.toolCalls...)
+}
+
+type executingTypedToolBackend struct {
+	tools     []backendcaps.TypedToolDefinition
+	executor  backendcaps.TypedToolExecutor
+	request   backendcaps.TypedToolExecutionRequest
+	toolCalls []backendcaps.TypedToolCallEvent
+}
+
+func (b *executingTypedToolBackend) Name() string { return "executing-typed-runtime" }
+
+func (b *executingTypedToolBackend) InvokeInteractive(_, _, _ string) error { return nil }
+
+func (b *executingTypedToolBackend) InvokeNonInteractive(_ string, _ string, _ string, shutdown <-chan struct{}, _ *usage.Collector) error {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if shutdown != nil {
+		go func() {
+			<-shutdown
+			cancel()
+		}()
+	}
+	event, err := b.executor.ExecuteTypedTool(ctx, b.request)
+	if err != nil {
+		return err
+	}
+	b.toolCalls = []backendcaps.TypedToolCallEvent{event}
+	fmt.Printf("executed typed tool: %v\n", event.Result)
+	return nil
+}
+
+func (b *executingTypedToolBackend) SetTypedTools(tools []backendcaps.TypedToolDefinition) error {
+	b.tools = append([]backendcaps.TypedToolDefinition(nil), tools...)
+	return nil
+}
+
+func (b *executingTypedToolBackend) SetTypedToolExecutor(executor backendcaps.TypedToolExecutor) error {
+	b.executor = executor
+	return nil
+}
+
+func (b *executingTypedToolBackend) TypedToolCalls(_ string) []backendcaps.TypedToolCallEvent {
 	return append([]backendcaps.TypedToolCallEvent(nil), b.toolCalls...)
 }
 

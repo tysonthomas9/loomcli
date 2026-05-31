@@ -1,17 +1,33 @@
 package tsfirst
 
 import (
+	"bytes"
+	"context"
+	"crypto/sha256"
+	_ "embed"
+	"encoding/hex"
+	"encoding/json"
+	"errors"
 	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
+	"time"
 
 	backendcaps "github.com/tysonthomas9/loomcli/internal/cli/backends"
 	defspkg "github.com/tysonthomas9/loomcli/internal/defs"
 )
 
+//go:embed typed_tool_runner.js
+var typedToolRunnerSource string
+
 const (
 	connectToolRuntimeDeclared = "declared"
 	connectToolRuntimeEcho     = "offline_echo_no_model_tool_execution"
 	connectToolRuntimeBackend  = "backend_typed_tool_runtime"
+
+	connectToolHandlerExecutionConfigured = "trusted_executor_configured"
 )
 
 func localConnectToolRuntime(plan *defspkg.Plan, agent defspkg.AgentModule) *connectToolRuntime {
@@ -73,7 +89,7 @@ func echoToolRuntime(policy *connectToolRuntime) *connectToolRuntime {
 	return out
 }
 
-func enforceBackendTypedTools(backendName string, backend any, policy *connectToolRuntime) (*connectToolRuntime, error) {
+func enforceBackendTypedTools(backendName string, backend any, policy *connectToolRuntime, root string) (*connectToolRuntime, error) {
 	if policy == nil || len(policy.TypedTools) == 0 {
 		return nil, nil
 	}
@@ -87,6 +103,13 @@ func enforceBackendTypedTools(backendName string, backend any, policy *connectTo
 	out := cloneToolRuntime(policy)
 	out.Status = connectToolRuntimeBackend
 	out.Message = "typed model tools were handed to the backend typed-tool runtime before prompt execution"
+	if executorBackend, ok := backend.(backendcaps.TypedToolExecutorBackend); ok {
+		if err := executorBackend.SetTypedToolExecutor(newLocalConnectTypedToolExecutor(root, policy)); err != nil {
+			return nil, fmt.Errorf("configure trusted typed tool executor for backend %q: %w", backendName, err)
+		}
+		out.HandlerExecution = connectToolHandlerExecutionConfigured
+		out.Message = "typed model tools and Loom trusted handler executor were handed to the backend before prompt execution"
+	}
 	return out, nil
 }
 
@@ -254,4 +277,147 @@ func typedToolNames(policy *connectToolRuntime) string {
 		}
 	}
 	return strings.Join(names, ", ")
+}
+
+type localConnectTypedToolExecutor struct {
+	root  string
+	tools map[string]connectTypedTool
+}
+
+func newLocalConnectTypedToolExecutor(root string, policy *connectToolRuntime) *localConnectTypedToolExecutor {
+	return &localConnectTypedToolExecutor{
+		root:  strings.TrimSpace(root),
+		tools: indexConnectTypedTools(policy),
+	}
+}
+
+func (e *localConnectTypedToolExecutor) ExecuteTypedTool(ctx context.Context, request backendcaps.TypedToolExecutionRequest) (backendcaps.TypedToolCallEvent, error) {
+	started := time.Now().UTC()
+	name := strings.TrimSpace(request.Name)
+	event := backendcaps.TypedToolCallEvent{
+		CallID:         strings.TrimSpace(request.CallID),
+		Name:           name,
+		Arguments:      cloneMap(request.Arguments),
+		StartedAt:      started.Format(time.RFC3339Nano),
+		IdempotencyKey: strings.TrimSpace(request.IdempotencyKey),
+	}
+	if event.IdempotencyKey == "" {
+		event.IdempotencyKey = typedToolExecutionIdempotencyKey(name, event.CallID)
+	}
+	tool, ok := e.tools[name]
+	if name == "" || !ok {
+		return e.finishToolExecutionEvent(event, started, "failed", "denied", "typed tool call is not declared in the reviewed TypeScript tool manifest", true), nil
+	}
+	if err := e.validateToolSource(tool); err != nil {
+		return e.finishToolExecutionEvent(event, started, "failed", "denied", err.Error(), true), nil
+	}
+	execCtx := ctx
+	cancel := func() {}
+	if timeout := strings.TrimSpace(tool.Timeout); timeout != "" {
+		duration, err := time.ParseDuration(timeout)
+		if err != nil {
+			return e.finishToolExecutionEvent(event, started, "failed", "denied", "invalid typed tool timeout: "+err.Error(), true), nil
+		}
+		execCtx, cancel = context.WithTimeout(ctx, duration)
+	}
+	defer cancel()
+	result, err := executeTypeScriptTypedTool(execCtx, e.root, tool, event.Arguments)
+	if err != nil {
+		status := "failed"
+		if errors.Is(execCtx.Err(), context.DeadlineExceeded) {
+			err = fmt.Errorf("typed tool execution deadline exceeded: %w", execCtx.Err())
+		}
+		return e.finishToolExecutionEvent(event, started, status, "authorized", err.Error(), false), nil
+	}
+	event.Result = result
+	return e.finishToolExecutionEvent(event, started, "completed", "authorized", "", false), nil
+}
+
+func (e *localConnectTypedToolExecutor) finishToolExecutionEvent(event backendcaps.TypedToolCallEvent, started time.Time, status, authorization, message string, redacted bool) backendcaps.TypedToolCallEvent {
+	completed := time.Now().UTC()
+	event.Status = status
+	event.AuthorizationStatus = authorization
+	event.CompletedAt = completed.Format(time.RFC3339Nano)
+	event.DurationMS = completed.Sub(started).Milliseconds()
+	event.Redacted = redacted
+	if message != "" {
+		event.Error = message
+	}
+	return event
+}
+
+func (e *localConnectTypedToolExecutor) validateToolSource(tool connectTypedTool) error {
+	if strings.TrimSpace(e.root) == "" {
+		return fmt.Errorf("typed tool executor root is not configured")
+	}
+	sourcePath := strings.TrimSpace(tool.SourcePath)
+	if sourcePath == "" {
+		return fmt.Errorf("typed tool %q has no source path", tool.Name)
+	}
+	absRoot, err := filepath.Abs(e.root)
+	if err != nil {
+		return err
+	}
+	absSource, err := filepath.Abs(sourcePath)
+	if err != nil {
+		return err
+	}
+	rel, err := filepath.Rel(absRoot, absSource)
+	if err != nil {
+		return err
+	}
+	if rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || filepath.IsAbs(rel) {
+		return fmt.Errorf("typed tool %q source path resolves outside project root", tool.Name)
+	}
+	data, err := os.ReadFile(absSource)
+	if err != nil {
+		return fmt.Errorf("read typed tool %q source: %w", tool.Name, err)
+	}
+	hash := sha256.Sum256(data)
+	if want := strings.TrimSpace(tool.SourceHash); want != "" && !strings.EqualFold(hex.EncodeToString(hash[:]), want) {
+		return fmt.Errorf("typed tool %q source hash does not match reviewed manifest", tool.Name)
+	}
+	return nil
+}
+
+func typedToolExecutionIdempotencyKey(name, callID string) string {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		name = "unknown"
+	}
+	callID = strings.TrimSpace(callID)
+	if callID == "" {
+		callID = "1"
+	}
+	return "local-connect:" + name + ":" + callID
+}
+
+func executeTypeScriptTypedTool(ctx context.Context, root string, tool connectTypedTool, args map[string]any) (any, error) {
+	request := map[string]any{
+		"root":       root,
+		"sourcePath": tool.SourcePath,
+		"arguments":  args,
+	}
+	payload, err := json.Marshal(request)
+	if err != nil {
+		return nil, err
+	}
+	cmd := exec.CommandContext(ctx, "node", "--no-warnings", "-e", typedToolRunnerSource) //nolint:gosec // Runner source is embedded; tool source path is hash-checked against the reviewed manifest.
+	cmd.Stdin = bytes.NewReader(payload)
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+		return nil, fmt.Errorf("execute TypeScript typed tool %q: %w: %s", tool.Name, err, strings.TrimSpace(stderr.String()))
+	}
+	var response struct {
+		Result any `json:"result"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &response); err != nil {
+		return nil, fmt.Errorf("decode TypeScript typed tool %q result: %w", tool.Name, err)
+	}
+	return response.Result, nil
 }
