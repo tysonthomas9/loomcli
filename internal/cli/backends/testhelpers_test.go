@@ -138,6 +138,20 @@ func installOpenCodeNonInteractiveResumedMock(t *testing.T, fn func(workDir, pro
 	t.Cleanup(func() { openCodeNonInteractiveResumedInvoker = orig })
 }
 
+func installGeminiNonInteractiveMock(t *testing.T, fn func(workDir, prompt, agentName string, shutdown <-chan struct{}, collector *usage.Collector) error) {
+	t.Helper()
+	orig := geminiNonInteractiveInvoker
+	geminiNonInteractiveInvoker = fn
+	t.Cleanup(func() { geminiNonInteractiveInvoker = orig })
+}
+
+func installGeminiNonInteractiveResumedMock(t *testing.T, fn func(workDir, prompt, agentName, providerSessionID string, shutdown <-chan struct{}, collector *usage.Collector) error) {
+	t.Helper()
+	orig := geminiNonInteractiveResumedInvoker
+	geminiNonInteractiveResumedInvoker = fn
+	t.Cleanup(func() { geminiNonInteractiveResumedInvoker = orig })
+}
+
 // installWrapperRunMock swaps the package-level wrapperRun seam for fn
 // so tests can drive non-interactive backend invocations without
 // spawning real subprocesses. The original is restored on cleanup.

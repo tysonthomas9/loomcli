@@ -5,6 +5,7 @@ import "testing"
 var (
 	_ MetadataProvider                          = (*GeminiBackend)(nil)
 	_ HealthCheckableBackend                    = (*GeminiBackend)(nil)
+	_ ResumableNonInteractiveBackend            = (*GeminiBackend)(nil)
 	_ ProviderMetadataReporter                  = (*GeminiBackend)(nil)
 	_ interface{ LastSessionID(string) string } = (*GeminiBackend)(nil)
 )
@@ -21,6 +22,9 @@ func TestGeminiBackend_InspectCapabilities(t *testing.T) {
 	}
 	if !caps.HasProviderMetadata {
 		t.Error("expected HasProviderMetadata=true")
+	}
+	if !caps.HasNonInteractiveResume {
+		t.Error("expected HasNonInteractiveResume=true")
 	}
 	if caps.HasStreaming {
 		t.Error("expected HasStreaming=false")

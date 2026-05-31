@@ -28,6 +28,12 @@ func (g *GeminiBackend) InvokeNonInteractive(workDir, prompt, agentName string, 
 	return geminiNonInteractiveInvoker(workDir, prompt, agentName, shutdown, collector)
 }
 
+// InvokeNonInteractiveResumed runs a non-interactive Gemini invocation against
+// an explicit provider session ID using `gemini --resume`.
+func (g *GeminiBackend) InvokeNonInteractiveResumed(workDir, prompt, agentName, providerSessionID string, shutdown <-chan struct{}, collector *usage.Collector) error {
+	return geminiNonInteractiveResumedInvoker(workDir, prompt, agentName, providerSessionID, shutdown, collector)
+}
+
 func (g *GeminiBackend) LastSessionID(_ string) string {
 	return geminiProviderMetadata.LastSessionID()
 }
@@ -41,6 +47,10 @@ var geminiInvoker = defaultGeminiInvoker
 
 // geminiNonInteractiveInvoker is the function used for non-interactive Gemini invocation (mockable for tests)
 var geminiNonInteractiveInvoker func(workDir, prompt, agentName string, shutdown <-chan struct{}, collector *usage.Collector) error = defaultGeminiNonInteractiveInvoker
+
+// geminiNonInteractiveResumedInvoker is the function used for explicit
+// provider-session resumed non-interactive Gemini invocation (mockable for tests).
+var geminiNonInteractiveResumedInvoker func(workDir, prompt, agentName, providerSessionID string, shutdown <-chan struct{}, collector *usage.Collector) error = defaultGeminiNonInteractiveInvokerWithResume
 
 // buildGeminiInteractiveCmd constructs the exec.Cmd for interactive Gemini invocation.
 // Extracted for testability — callers can inspect the returned cmd without execution.
@@ -86,13 +96,21 @@ func defaultGeminiInvoker(workDir, prompt, agentName string) error {
 }
 
 func defaultGeminiNonInteractiveInvoker(workDir, prompt, agentName string, shutdown <-chan struct{}, collector *usage.Collector) error {
+	return defaultGeminiNonInteractiveInvokerWithResume(workDir, prompt, agentName, "", shutdown, collector)
+}
+
+func defaultGeminiNonInteractiveInvokerWithResume(workDir, prompt, agentName, resumeID string, shutdown <-chan struct{}, collector *usage.Collector) error {
 	env := append(cli.FilteredEnv(), "LOOM_WORKTREE_PATH="+workDir)
 	if agentName != "" {
 		env = append(env, "LOOM_AGENT_NAME="+agentName)
 	}
 
-	fmt.Println("Launching Gemini agent (non-interactive)...")
-	fmt.Println("")
+	if resumeID != "" {
+		fmt.Printf("[auto] Resuming Gemini session %s...\n\n", resumeID)
+	} else {
+		fmt.Println("Launching Gemini agent (non-interactive)...")
+		fmt.Println("")
+	}
 	geminiProviderMetadata.Clear("gemini")
 
 	// Gemini takes the prompt as a -p argv flag, not stdin, so the
@@ -100,7 +118,7 @@ func defaultGeminiNonInteractiveInvoker(workDir, prompt, agentName string, shutd
 	// an empty stdin so the harness sees EOF immediately if it reads).
 	return runHarness(context.Background(), shutdown, harnessInvocation{
 		BinaryName:  "gemini",
-		Args:        []string{"--approval-mode=yolo", "-p", prompt, "-o", "stream-json"},
+		Args:        buildGeminiNonInteractiveArgs(resumeID, prompt),
 		WorkDir:     workDir,
 		Env:         env,
 		Prompt:      "",
@@ -114,6 +132,15 @@ func defaultGeminiNonInteractiveInvoker(workDir, prompt, agentName string, shutd
 		},
 		RetryPolicy: harness.DefaultRetryPolicy(),
 	})
+}
+
+func buildGeminiNonInteractiveArgs(resumeID, prompt string) []string {
+	args := []string{"--approval-mode=yolo"}
+	if resumeID != "" {
+		args = append(args, "--resume", resumeID)
+	}
+	args = append(args, "-p", prompt, "-o", "stream-json")
+	return args
 }
 
 // Meta returns descriptive metadata about the Gemini backend.
