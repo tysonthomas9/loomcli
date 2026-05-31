@@ -495,6 +495,39 @@ function WorkflowComparisonBar({
   onCancelSelected: () => void;
   onClear: () => void;
 }): JSX.Element | null {
+  const [eventTypeFilter, setEventTypeFilter] = useState("");
+  const eventTypes = useMemo(() => {
+    const types = new Set<string>();
+    for (const item of comparedItems) {
+      for (const event of eventsByRunId[item.run.run_id] ?? []) {
+        types.add(event.type);
+      }
+    }
+    return [...types].sort((left, right) => left.localeCompare(right));
+  }, [comparedItems, eventsByRunId]);
+  const sharedEventTypes = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const item of comparedItems) {
+      const runTypes = new Set(
+        (eventsByRunId[item.run.run_id] ?? []).map((event) => event.type),
+      );
+      for (const type of runTypes) {
+        counts.set(type, (counts.get(type) ?? 0) + 1);
+      }
+    }
+    return new Set(
+      [...counts.entries()]
+        .filter(([, count]) => count > 1)
+        .map(([type]) => type),
+    );
+  }, [comparedItems, eventsByRunId]);
+
+  useEffect(() => {
+    if (eventTypeFilter && !eventTypes.includes(eventTypeFilter)) {
+      setEventTypeFilter("");
+    }
+  }, [eventTypeFilter, eventTypes]);
+
   if (comparedItems.length === 0) return null;
   return (
     <div className={styles.comparisonBar} data-testid="workflow-comparison-bar">
@@ -506,6 +539,21 @@ function WorkflowComparisonBar({
         <span className={styles.comparisonMeta}>
           {liveCount} live {liveCount === 1 ? "run" : "runs"}
         </span>
+        {eventTypes.length > 0 ? (
+          <select
+            className={styles.timelineFilter}
+            aria-label="Comparison event type filter"
+            value={eventTypeFilter}
+            onChange={(event) => setEventTypeFilter(event.target.value)}
+          >
+            <option value="">All event types</option>
+            {eventTypes.map((type) => (
+              <option key={type} value={type}>
+                {type}
+              </option>
+            ))}
+          </select>
+        ) : null}
         <button
           type="button"
           className={styles.secondaryButton}
@@ -564,6 +612,9 @@ function WorkflowComparisonBar({
         {comparedItems.map((item) => {
           const runId = item.run.run_id;
           const events = eventsByRunId[runId] ?? [];
+          const visibleEvents = eventTypeFilter
+            ? events.filter((event) => event.type === eventTypeFilter)
+            : events;
           return (
             <div
               key={runId}
@@ -573,19 +624,28 @@ function WorkflowComparisonBar({
               <div className={styles.timelineHeader}>
                 <span>{shortRunID(runId)}</span>
                 <span>
-                  {events.length} {events.length === 1 ? "event" : "events"}
+                  {visibleEvents.length}{" "}
+                  {visibleEvents.length === 1 ? "event" : "events"}
+                  {eventTypeFilter && events.length !== visibleEvents.length
+                    ? ` of ${events.length}`
+                    : ""}
                 </span>
               </div>
               {isLoadingEvents && events.length === 0 ? (
                 <div className={styles.timelineEmpty}>Loading events</div>
-              ) : events.length === 0 ? (
-                <div className={styles.timelineEmpty}>No events recorded</div>
+              ) : visibleEvents.length === 0 ? (
+                <div className={styles.timelineEmpty}>
+                  {events.length === 0
+                    ? "No events recorded"
+                    : "No matching events"}
+                </div>
               ) : (
                 <div className={styles.timelineEvents}>
-                  {events.map((event) => (
+                  {visibleEvents.map((event) => (
                     <div
                       key={event.event_id}
                       className={styles.timelineEvent}
+                      data-shared={sharedEventTypes.has(event.type)}
                       data-testid={`workflow-comparison-event-${runId}-${event.event_index}`}
                     >
                       <div className={styles.timelineEventTop}>

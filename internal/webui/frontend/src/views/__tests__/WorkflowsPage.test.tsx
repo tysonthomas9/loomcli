@@ -94,6 +94,15 @@ const waitingEvent: WorkflowRunEvent = {
   created_at: "2026-01-01T00:01:01Z",
 };
 
+const secondRouteEvent: WorkflowRunEvent = {
+  ...routeEvent,
+  event_id: "evt-3",
+  workflow_run_id: "wrun-2",
+  event_index: 3,
+  message: "Route admission accepted for waiting run",
+  created_at: "2026-01-01T00:01:02Z",
+};
+
 describe("WorkflowsPage", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -224,7 +233,7 @@ describe("WorkflowsPage", () => {
     mockUseWorkflowRunEventSnapshots.mockReturnValue({
       eventsByRunId: {
         "wrun-1": [routeEvent],
-        "wrun-2": [waitingEvent],
+        "wrun-2": [waitingEvent, secondRouteEvent],
       },
       isLoading: false,
       error: null,
@@ -291,7 +300,7 @@ describe("WorkflowsPage", () => {
     mockUseWorkflowRunEventSnapshots.mockReturnValue({
       eventsByRunId: {
         "wrun-1": [routeEvent],
-        "wrun-2": [waitingEvent],
+        "wrun-2": [waitingEvent, secondRouteEvent],
       },
       isLoading: false,
       error: null,
@@ -317,6 +326,26 @@ describe("WorkflowsPage", () => {
     expect(
       screen.getByTestId("workflow-comparison-timeline-wrun-2"),
     ).toHaveTextContent("workflow_waiting");
+    expect(
+      screen.getByTestId("workflow-comparison-event-wrun-2-2"),
+    ).toHaveTextContent("Waiting for trigger follow-up");
+    expect(
+      screen.getByTestId("workflow-comparison-event-wrun-1-1"),
+    ).toHaveAttribute("data-shared", "true");
+    expect(
+      screen.getByTestId("workflow-comparison-event-wrun-2-3"),
+    ).toHaveAttribute("data-shared", "true");
+
+    fireEvent.change(screen.getByLabelText("Comparison event type filter"), {
+      target: { value: "workflow_waiting" },
+    });
+
+    expect(
+      screen.getByTestId("workflow-comparison-timeline-wrun-1"),
+    ).toHaveTextContent("No matching events");
+    expect(
+      screen.queryByTestId("workflow-comparison-event-wrun-1-1"),
+    ).not.toBeInTheDocument();
     expect(
       screen.getByTestId("workflow-comparison-event-wrun-2-2"),
     ).toHaveTextContent("Waiting for trigger follow-up");
