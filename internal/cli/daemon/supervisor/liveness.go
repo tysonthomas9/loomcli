@@ -166,8 +166,10 @@ func (s *Supervisor) startAgentWaitHeartbeatEvery(ap *AgentProcess, interval tim
 // workerHeartbeatInterval is how often the supervisor renews a running agent's
 // fleet-db worker-registration lease. It must stay well below the server-side
 // worker TTL (default 90s) so a live agent is never reaped; 30s gives a 3x
-// margin and matches the node-heartbeat cadence.
-const workerHeartbeatInterval = 30 * time.Second
+// margin and matches the node-heartbeat cadence. It is a var (not const) so the
+// waitForAgent wiring test can drive it without a real-time wait; production
+// never reassigns it.
+var workerHeartbeatInterval = 30 * time.Second
 
 // startWorkerHeartbeat renews the agent's fleet-db worker-registration lease
 // for as long as the supervise goroutine is blocked in cmd.Wait(). The worker
