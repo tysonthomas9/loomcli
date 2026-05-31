@@ -56,6 +56,19 @@ type TypedToolExecutorBackend interface {
 	SetTypedToolExecutor(executor TypedToolExecutor) error
 }
 
+// TypedToolInvocationLifecycleBackend is an optional interface for backends
+// that keep per-invocation typed tool call state.
+type TypedToolInvocationLifecycleBackend interface {
+	BeginTypedToolInvocation()
+}
+
+// TypedToolProviderLineBackend is an optional interface for provider adapters
+// that can observe provider-native JSON lines and execute reviewed typed tool
+// calls through Loom's trusted executor.
+type TypedToolProviderLineBackend interface {
+	IngestTypedToolProviderLine(ctx context.Context, line string)
+}
+
 // TypedToolExecutor executes one reviewed TypeScript-authored tool call.
 type TypedToolExecutor interface {
 	ExecuteTypedTool(ctx context.Context, request TypedToolExecutionRequest) (TypedToolCallEvent, error)

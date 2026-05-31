@@ -1325,6 +1325,40 @@ func TestRunLocalConnectExecutesTrustedTypeScriptToolHandler(t *testing.T) {
 	}
 }
 
+func TestRunLocalConnectStreamingProviderToolLineExecutesTrustedHandler(t *testing.T) {
+	cli.TestingResetBackendState(t)
+	typedBackend := &streamingTypedToolBridgeBackend{}
+	cli.RegisterBackend(typedBackend)
+	root := t.TempDir()
+	writeTypedToolAgent(t, root, "slack-agent", "streaming-typed-runtime")
+
+	result, err := runLocalConnect(context.Background(), connectOptions{
+		Dir:      root,
+		Agent:    "slack-agent",
+		Instance: "local",
+		Session:  "tools",
+		Message:  "create a channel",
+	})
+	if err != nil {
+		t.Fatalf("runLocalConnect() error = %v", err)
+	}
+	if result.ToolRuntime == nil ||
+		result.ToolRuntime.Status != connectToolRuntimeBackend ||
+		result.ToolRuntime.HandlerExecution != connectToolHandlerExecutionConfigured {
+		t.Fatalf("tool runtime = %+v, want trusted handler executor configured for streaming provider bridge", result.ToolRuntime)
+	}
+	if len(result.ToolCalls) != 1 ||
+		result.ToolCalls[0].Name != "create_channel" ||
+		result.ToolCalls[0].CallID != "call-create-channel" ||
+		result.ToolCalls[0].Status != "completed" ||
+		result.ToolCalls[0].Result != "created triage" {
+		t.Fatalf("tool calls = %+v, want trusted TypeScript handler execution from provider stream line", result.ToolCalls)
+	}
+	if !strings.Contains(result.Response, "streaming provider answer") {
+		t.Fatalf("response = %q, want streaming provider answer", result.Response)
+	}
+}
+
 func TestRunLocalConnectAuthorizesBackendToolCallsAgainstManifest(t *testing.T) {
 	cli.TestingResetBackendState(t)
 	typedBackend := &typedToolRuntimeBackend{toolCalls: []backendcaps.TypedToolCallEvent{{
@@ -1750,6 +1784,77 @@ func (b *executingTypedToolBackend) SetTypedToolExecutor(executor backendcaps.Ty
 
 func (b *executingTypedToolBackend) TypedToolCalls(_ string) []backendcaps.TypedToolCallEvent {
 	return append([]backendcaps.TypedToolCallEvent(nil), b.toolCalls...)
+}
+
+type streamingTypedToolBridgeBackend struct {
+	tools    []backendcaps.TypedToolDefinition
+	executor backendcaps.TypedToolExecutor
+	calls    []backendcaps.TypedToolCallEvent
+}
+
+func (b *streamingTypedToolBridgeBackend) Name() string { return "streaming-typed-runtime" }
+
+func (b *streamingTypedToolBridgeBackend) InvokeInteractive(_, _, _ string) error { return nil }
+
+func (b *streamingTypedToolBridgeBackend) InvokeNonInteractive(_, _, _ string, _ <-chan struct{}, _ *usage.Collector) error {
+	return fmt.Errorf("InvokeNonInteractive should not be called for streaming typed tool bridge backend")
+}
+
+func (b *streamingTypedToolBridgeBackend) InvokeStreaming(context.Context, string, string, string) (io.ReadCloser, error) {
+	payload := strings.Join([]string{
+		`{"type":"assistant","message":{"content":[{"type":"tool_use","id":"call-create-channel","name":"create_channel","input":{"name":"triage"}}]}}`,
+		`{"type":"assistant","message":{"content":[{"type":"text","text":"streaming provider answer"}]}}`,
+		"",
+	}, "\n")
+	return io.NopCloser(strings.NewReader(payload)), nil
+}
+
+func (b *streamingTypedToolBridgeBackend) SetTypedTools(tools []backendcaps.TypedToolDefinition) error {
+	b.tools = append([]backendcaps.TypedToolDefinition(nil), tools...)
+	return nil
+}
+
+func (b *streamingTypedToolBridgeBackend) SetTypedToolExecutor(executor backendcaps.TypedToolExecutor) error {
+	b.executor = executor
+	return nil
+}
+
+func (b *streamingTypedToolBridgeBackend) BeginTypedToolInvocation() {
+	b.calls = nil
+}
+
+func (b *streamingTypedToolBridgeBackend) IngestTypedToolProviderLine(ctx context.Context, line string) {
+	var event struct {
+		Message *struct {
+			Content []struct {
+				Type  string         `json:"type"`
+				ID    string         `json:"id"`
+				Name  string         `json:"name"`
+				Input map[string]any `json:"input"`
+			} `json:"content"`
+		} `json:"message"`
+	}
+	if err := json.Unmarshal([]byte(line), &event); err != nil || event.Message == nil {
+		return
+	}
+	for _, block := range event.Message.Content {
+		if block.Type != "tool_use" || block.Name == "" || b.executor == nil {
+			continue
+		}
+		call, err := b.executor.ExecuteTypedTool(ctx, backendcaps.TypedToolExecutionRequest{
+			CallID:    block.ID,
+			Name:      block.Name,
+			Arguments: block.Input,
+		})
+		if err != nil {
+			continue
+		}
+		b.calls = append(b.calls, call)
+	}
+}
+
+func (b *streamingTypedToolBridgeBackend) TypedToolCalls(_ string) []backendcaps.TypedToolCallEvent {
+	return append([]backendcaps.TypedToolCallEvent(nil), b.calls...)
 }
 
 func withTSFirstGlobals(t *testing.T, fn func()) {

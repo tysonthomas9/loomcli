@@ -19,6 +19,7 @@ type GeminiBackend struct{}
 func (g *GeminiBackend) Name() string { return "gemini" }
 
 var geminiProviderMetadata backendProviderMetadataCapture
+var geminiTypedTools = newTypedToolRuntimeBridge("gemini")
 
 func (g *GeminiBackend) InvokeInteractive(workDir, prompt, agentName string) error {
 	return geminiInvoker(workDir, prompt, agentName)
@@ -40,6 +41,26 @@ func (g *GeminiBackend) LastSessionID(_ string) string {
 
 func (g *GeminiBackend) LastProviderMetadata(_ string) map[string]any {
 	return geminiProviderMetadata.Metadata()
+}
+
+func (g *GeminiBackend) SetTypedTools(tools []TypedToolDefinition) error {
+	return geminiTypedTools.SetTypedTools(tools)
+}
+
+func (g *GeminiBackend) SetTypedToolExecutor(executor TypedToolExecutor) error {
+	return geminiTypedTools.SetTypedToolExecutor(executor)
+}
+
+func (g *GeminiBackend) BeginTypedToolInvocation() {
+	geminiTypedTools.BeginTypedToolInvocation()
+}
+
+func (g *GeminiBackend) IngestTypedToolProviderLine(ctx context.Context, line string) {
+	geminiTypedTools.IngestTypedToolProviderLine(ctx, line)
+}
+
+func (g *GeminiBackend) TypedToolCalls(workDir string) []TypedToolCallEvent {
+	return geminiTypedTools.TypedToolCalls(workDir)
 }
 
 // geminiInvoker is the function used to invoke Gemini interactively (mockable for tests)
@@ -124,6 +145,7 @@ func defaultGeminiNonInteractiveInvokerWithResume(workDir, prompt, agentName, re
 		Prompt:      "",
 		HarnessName: "gemini",
 		LineHandler: func(line string) {
+			geminiTypedTools.IngestTypedToolProviderLine(context.Background(), line)
 			geminiProviderMetadata.IngestLine(line)
 			fmt.Println(line)
 			if collector != nil {

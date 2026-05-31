@@ -815,6 +815,7 @@ func invokeLocalAgent(ctx context.Context, plan *defspkg.Plan, agent defspkg.Age
 	if err != nil {
 		return localInvocationResult{}, err
 	}
+	beginBackendTypedToolInvocation(backend)
 	workDir := localWorkDir(plan.Root, agent)
 	if streamer, ok := backend.(backendcaps.StreamingBackend); ok {
 		return invokeStreamingLocalAgent(ctx, streamingLocalInvocation{
@@ -862,7 +863,7 @@ func invokeStreamingLocalAgent(ctx context.Context, in streamingLocalInvocation)
 		return localInvocationResult{}, err
 	}
 	defer func() { _ = rc.Close() }()
-	result, err := captureStreamingResponse(rc, in.stream)
+	result, err := captureStreamingResponse(ctx, rc, in.stream, in.backend)
 	return finishLocalInvocationResult(result, in.backend, in.workDir, in.resume, in.appliedToolRuntime), err
 }
 

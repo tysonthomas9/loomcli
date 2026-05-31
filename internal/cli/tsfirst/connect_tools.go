@@ -91,6 +91,9 @@ func echoToolRuntime(policy *connectToolRuntime) *connectToolRuntime {
 
 func enforceBackendTypedTools(backendName string, backend any, policy *connectToolRuntime, root string) (*connectToolRuntime, error) {
 	if policy == nil || len(policy.TypedTools) == 0 {
+		if runtime, ok := backend.(backendcaps.TypedToolRuntimeBackend); ok {
+			_ = runtime.SetTypedTools(nil)
+		}
 		return nil, nil
 	}
 	runtime, ok := backend.(backendcaps.TypedToolRuntimeBackend)
@@ -111,6 +114,18 @@ func enforceBackendTypedTools(backendName string, backend any, policy *connectTo
 		out.Message = "typed model tools and Loom trusted handler executor were handed to the backend before prompt execution"
 	}
 	return out, nil
+}
+
+func beginBackendTypedToolInvocation(backend any) {
+	if lifecycle, ok := backend.(backendcaps.TypedToolInvocationLifecycleBackend); ok {
+		lifecycle.BeginTypedToolInvocation()
+	}
+}
+
+func ingestBackendTypedToolProviderLine(ctx context.Context, backend any, line string) {
+	if bridge, ok := backend.(backendcaps.TypedToolProviderLineBackend); ok {
+		bridge.IngestTypedToolProviderLine(ctx, line)
+	}
 }
 
 func backendTypedToolDefinitions(tools []connectTypedTool) []backendcaps.TypedToolDefinition {

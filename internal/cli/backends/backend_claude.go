@@ -51,6 +51,8 @@ type ClaudeBackend struct{}
 
 func (c *ClaudeBackend) Name() string { return "claude" }
 
+var claudeTypedTools = newTypedToolRuntimeBridge("claude")
+
 func (c *ClaudeBackend) InvokeInteractive(workDir, prompt, agentName string) error {
 	return claudeInvoker(workDir, prompt, agentName)
 }
@@ -63,6 +65,26 @@ func (c *ClaudeBackend) InvokeNonInteractive(workDir, prompt, agentName string, 
 // an explicit provider session ID without relying on package-level resume state.
 func (c *ClaudeBackend) InvokeNonInteractiveResumed(workDir, prompt, agentName, providerSessionID string, shutdown <-chan struct{}, collector *usage.Collector) error {
 	return claudeNonInteractiveResumedInvoker(workDir, prompt, agentName, providerSessionID, shutdown, collector)
+}
+
+func (c *ClaudeBackend) SetTypedTools(tools []TypedToolDefinition) error {
+	return claudeTypedTools.SetTypedTools(tools)
+}
+
+func (c *ClaudeBackend) SetTypedToolExecutor(executor TypedToolExecutor) error {
+	return claudeTypedTools.SetTypedToolExecutor(executor)
+}
+
+func (c *ClaudeBackend) BeginTypedToolInvocation() {
+	claudeTypedTools.BeginTypedToolInvocation()
+}
+
+func (c *ClaudeBackend) IngestTypedToolProviderLine(ctx context.Context, line string) {
+	claudeTypedTools.IngestTypedToolProviderLine(ctx, line)
+}
+
+func (c *ClaudeBackend) TypedToolCalls(workDir string) []TypedToolCallEvent {
+	return claudeTypedTools.TypedToolCalls(workDir)
 }
 
 // Meta returns descriptive metadata about the Claude backend.
@@ -363,6 +385,7 @@ func (b *outputRingBuffer) String() string {
 func newStreamLineHandler(workDir string, collector *usage.Collector) func(string) {
 	var sessionOnce sync.Once
 	return func(line string) {
+		claudeTypedTools.IngestTypedToolProviderLine(context.Background(), line)
 		if sid, ok := extractClaudeSessionID(line); ok {
 			sessionOnce.Do(func() {
 				SetLastCapturedSessionID(sid)

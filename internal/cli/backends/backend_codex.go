@@ -23,6 +23,7 @@ type CodexBackend struct{}
 func (c *CodexBackend) Name() string { return NameCodex }
 
 var codexProviderMetadata backendProviderMetadataCapture
+var codexTypedTools = newTypedToolRuntimeBridge(NameCodex)
 
 func (c *CodexBackend) InvokeInteractive(workDir, prompt, agentName string) error {
 	return codexInvoker(workDir, prompt, agentName)
@@ -44,6 +45,26 @@ func (c *CodexBackend) LastSessionID(_ string) string {
 
 func (c *CodexBackend) LastProviderMetadata(_ string) map[string]any {
 	return codexProviderMetadata.Metadata()
+}
+
+func (c *CodexBackend) SetTypedTools(tools []TypedToolDefinition) error {
+	return codexTypedTools.SetTypedTools(tools)
+}
+
+func (c *CodexBackend) SetTypedToolExecutor(executor TypedToolExecutor) error {
+	return codexTypedTools.SetTypedToolExecutor(executor)
+}
+
+func (c *CodexBackend) BeginTypedToolInvocation() {
+	codexTypedTools.BeginTypedToolInvocation()
+}
+
+func (c *CodexBackend) IngestTypedToolProviderLine(ctx context.Context, line string) {
+	codexTypedTools.IngestTypedToolProviderLine(ctx, line)
+}
+
+func (c *CodexBackend) TypedToolCalls(workDir string) []TypedToolCallEvent {
+	return codexTypedTools.TypedToolCalls(workDir)
 }
 
 // codexInvoker is the function used to invoke Codex interactively (mockable for tests)
@@ -114,6 +135,7 @@ func defaultCodexNonInteractiveInvokerWithResume(workDir, prompt, agentName, res
 		Env:         buildBackendEnv(workDir, agentName),
 		HarnessName: "codex",
 		LineHandler: func(line string) {
+			codexTypedTools.IngestTypedToolProviderLine(context.Background(), line)
 			codexProviderMetadata.IngestLine(line)
 			fmt.Println(line)
 			if collector != nil {

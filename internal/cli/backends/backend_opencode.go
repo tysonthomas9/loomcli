@@ -22,6 +22,7 @@ type OpenCodeBackend struct{}
 func (o *OpenCodeBackend) Name() string { return "opencode" }
 
 var openCodeProviderMetadata backendProviderMetadataCapture
+var openCodeTypedTools = newTypedToolRuntimeBridge("opencode")
 
 func (o *OpenCodeBackend) InvokeInteractive(workDir, prompt, agentName string) error {
 	return openCodeInvoker(workDir, prompt, agentName)
@@ -43,6 +44,26 @@ func (o *OpenCodeBackend) LastSessionID(_ string) string {
 
 func (o *OpenCodeBackend) LastProviderMetadata(_ string) map[string]any {
 	return openCodeProviderMetadata.Metadata()
+}
+
+func (o *OpenCodeBackend) SetTypedTools(tools []TypedToolDefinition) error {
+	return openCodeTypedTools.SetTypedTools(tools)
+}
+
+func (o *OpenCodeBackend) SetTypedToolExecutor(executor TypedToolExecutor) error {
+	return openCodeTypedTools.SetTypedToolExecutor(executor)
+}
+
+func (o *OpenCodeBackend) BeginTypedToolInvocation() {
+	openCodeTypedTools.BeginTypedToolInvocation()
+}
+
+func (o *OpenCodeBackend) IngestTypedToolProviderLine(ctx context.Context, line string) {
+	openCodeTypedTools.IngestTypedToolProviderLine(ctx, line)
+}
+
+func (o *OpenCodeBackend) TypedToolCalls(workDir string) []TypedToolCallEvent {
+	return openCodeTypedTools.TypedToolCalls(workDir)
 }
 
 // openCodeInvoker is the function used to invoke OpenCode interactively (mockable for tests)
@@ -104,6 +125,7 @@ func defaultOpenCodeNonInteractiveInvokerWithResume(workDir, prompt, agentName, 
 		// the generic cost/quota classifier handles it.
 		HarnessName: "",
 		LineHandler: func(line string) {
+			openCodeTypedTools.IngestTypedToolProviderLine(context.Background(), line)
 			openCodeProviderMetadata.IngestLine(line)
 			fmt.Println(line)
 			if streamErrMsg == "" {

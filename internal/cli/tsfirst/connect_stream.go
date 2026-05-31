@@ -3,6 +3,7 @@ package tsfirst
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -52,8 +53,8 @@ func printInteractiveConnectHeader(out io.Writer, result connectResult) error {
 	return err
 }
 
-func captureStreamingResponse(rc io.Reader, stream io.Writer) (localInvocationResult, error) {
-	capture := &streamResponseCapture{stream: stream}
+func captureStreamingResponse(ctx context.Context, rc io.Reader, stream io.Writer, typedToolLineBackend any) (localInvocationResult, error) {
+	capture := &streamResponseCapture{ctx: ctx, stream: stream, typedToolLineBackend: typedToolLineBackend}
 	scanner := bufio.NewScanner(rc)
 	scanner.Buffer(make([]byte, 0, 64*1024), 10*1024*1024)
 	for scanner.Scan() {
@@ -68,14 +69,17 @@ func captureStreamingResponse(rc io.Reader, stream io.Writer) (localInvocationRe
 }
 
 type streamResponseCapture struct {
-	invocation localInvocationResult
-	metadata   providerMetadataCollector
-	response   strings.Builder
-	fallback   bytes.Buffer
-	stream     io.Writer
+	ctx                  context.Context
+	invocation           localInvocationResult
+	metadata             providerMetadataCollector
+	response             strings.Builder
+	fallback             bytes.Buffer
+	stream               io.Writer
+	typedToolLineBackend any
 }
 
 func (c *streamResponseCapture) ingest(line string) error {
+	ingestBackendTypedToolProviderLine(c.ctx, c.typedToolLineBackend, line)
 	c.metadata.ingestLine(line)
 	event, ok := parseLocalStreamEvent(line)
 	if !ok {
