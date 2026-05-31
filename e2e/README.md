@@ -76,6 +76,39 @@ e2e/run_local.sh --backend codex
 
 Auto-mounts auth configs (`~/.claude/`, `~/.codex/`, `~/.config/opencode/`) read-only and forwards `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, and `STUB_*` env vars.
 
+## Real Backend CLI Session Smoke
+
+Use this when you need to verify Loom's backend invocation, session metadata,
+native transcript mirroring where supported, token capture, and backend-reported
+cost with the actual installed CLIs instead of stubs:
+
+```bash
+make test-real-clis
+
+# Narrow to one backend and keep the temp session root for inspection
+scripts/test-real-clis.sh --backend claude --keep
+
+# Run a subset with a longer per-backend timeout
+scripts/test-real-clis.sh --backends "codex opencode" --timeout 5m
+```
+
+This is intentionally opt-in because it invokes real `claude`, `codex`, and
+`opencode` binaries and can spend real tokens. The test logs the temporary root,
+Loom `metadata.json`, `agent_transcript.jsonl` path when captured, token totals,
+cost, and model for each backend.
+
+Useful knobs:
+
+| Variable / flag | Purpose |
+|---|---|
+| `LOOM_REAL_CLI_BACKENDS` / `--backends` | Backends to run, default `claude,codex,opencode` |
+| `LOOM_REAL_CLI_PROMPT` / `--prompt` | Prompt sent to each backend |
+| `LOOM_REAL_CLI_TIMEOUT` / `--timeout` | Per-backend timeout, default `3m` |
+| `LOOM_REAL_CLI_KEEP` / `--keep` | Keep the temporary root for manual inspection |
+| `LOOM_REAL_CLI_ROOT` / `--root` | Write smoke artifacts to a specific directory |
+| `LOOM_REAL_CLI_SKIP_MISSING` / `--skip-missing` | Skip missing selected CLI binaries |
+| `LOOM_REAL_CLI_REQUIRE_COST` / `--require-cost` | Require non-zero cost for every selected backend |
+
 ## Using agent-browser
 
 agent-browser requires a `navigate` before other commands:

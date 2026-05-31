@@ -1,6 +1,6 @@
 # Makefile for loomcli project
 
-.PHONY: all build build-frontend build-all test test-builtin-workflows test-integration test-all test-playground test-fleetdb-embedded test-fleetdb-supervisor test-fleetdb-ui test-fleetdb-empty-cli fleetdb-empty-up fleetdb-empty-down local-mode-frontend-dist local-mode-up local-mode-codex-up local-mode-claude-up local-mode-daytona-up local-mode-down local-mode-logs local-mode-verify local-mode-codex-verify test-local-mode-harness test-distributed-smoke lint lint-frontend test-frontend e2e test-e2e test-e2e-api test-e2e-api-local test-e2e-real-smoke test-e2e-real-smoke-local test-e2e-real-regression test-e2e-real-regression-local test-e2e-integration test-e2e-integration-local test-e2e-integration-full clean install help frontend check check-go check-frontend gate gate-e2e gate-e2e-full hooks ensure-hooks dev dev-check dev-loom dev-vite check-loc check-loc-stale check-control-plane-paths check-no-raw-exec check-no-beads-prod test-coverage test-forkwatch test-frontend-coverage test-race-cover test-integration-race-cover gen-go-api check-go-api-staleness local-mode-webhook-verify test-e2e-github-webhook test-e2e-github-webhook-live
+.PHONY: all build build-frontend build-all test test-builtin-workflows test-integration test-all test-playground test-fleetdb-embedded test-fleetdb-supervisor test-fleetdb-ui test-fleetdb-empty-cli fleetdb-empty-up fleetdb-empty-down local-mode-frontend-dist local-mode-up local-mode-codex-up local-mode-claude-up local-mode-daytona-up local-mode-down local-mode-logs local-mode-verify local-mode-codex-verify test-local-mode-harness test-distributed-smoke lint lint-frontend test-frontend e2e test-e2e test-e2e-api test-e2e-api-local test-real-clis test-e2e-real-smoke test-e2e-real-smoke-local test-e2e-real-regression test-e2e-real-regression-local test-e2e-integration test-e2e-integration-local test-e2e-integration-full clean install help frontend check check-go check-frontend gate gate-e2e gate-e2e-full hooks ensure-hooks dev dev-check dev-loom dev-vite check-loc check-loc-stale check-control-plane-paths check-no-raw-exec check-no-beads-prod test-coverage test-forkwatch test-frontend-coverage test-race-cover test-integration-race-cover gen-go-api check-go-api-staleness local-mode-webhook-verify test-e2e-github-webhook test-e2e-github-webhook-live
 
 # Default target
 all: build
@@ -380,6 +380,11 @@ test-e2e-stackpublish:
 	@echo "Running stacked-PR publisher e2e (skips unless LOOM_STACK_E2E is set)..."
 	@GOCACHE=$${GOCACHE:-/tmp/go-build-cache} go test -count=1 -tags e2e -run TestE2EStackPublisher ./internal/stackpublish -timeout 10m
 
+# Run the opt-in real backend CLI smoke test. This invokes installed
+# claude/codex/opencode binaries and can spend real tokens.
+test-real-clis:
+	@scripts/test-real-clis.sh
+
 # Run the real Playwright smoke suite: browser + API contracts against FleetDB-backed loom serve.
 test-e2e-real-smoke:
 	@echo "Running real Playwright smoke tests (self-contained)..."
@@ -625,6 +630,7 @@ help:
 	@echo "  make test-distributed-smoke - Run fleet-db distributed compose smoke"
 	@echo "  make test-e2e-api      - Run Playwright API e2e tests (self-contained)"
 	@echo "  make test-e2e-api-local - Run Playwright API e2e tests (needs loom serve)"
+	@echo "  make test-real-clis    - Run opt-in real claude/codex/opencode CLI smoke"
 	@echo "  make test-e2e-real-smoke - Run real Playwright smoke tests (browser + API)"
 	@echo "  make test-e2e-real-smoke-local - Run real Playwright smoke tests (needs loom serve/UI)"
 	@echo "  make test-e2e-real-regression - Run real Playwright regression tests"
