@@ -74,7 +74,7 @@ func (b *typedToolRuntimeBridge) IngestTypedToolProviderLine(ctx context.Context
 		return
 	}
 	var value any
-	if err := json.Unmarshal([]byte(line), &value); err != nil {
+	if err := json.Unmarshal([]byte(providerJSONLinePayload(line)), &value); err != nil {
 		return
 	}
 	for _, call := range extractProviderTypedToolCalls(value) {

@@ -5,7 +5,7 @@ import "testing"
 func TestBackendProviderMetadataCapture_DirectFields(t *testing.T) {
 	var capture backendProviderMetadataCapture
 	capture.Clear("codex")
-	capture.IngestLine(`{"type":"thread.started","thread_id":"thread-123","model":"gpt-5"}`)
+	capture.IngestLine("\x04\b\b" + `{"type":"thread.started","thread_id":"thread-123","model":"gpt-5"}`)
 	capture.IngestLine(`{"type":"turn.completed","response_id":"resp-1"}`)
 
 	if got := capture.LastSessionID(); got != "thread-123" {

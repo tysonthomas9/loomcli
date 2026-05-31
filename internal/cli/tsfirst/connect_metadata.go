@@ -18,7 +18,7 @@ type providerMetadataCollector struct {
 
 func (c *providerMetadataCollector) ingestLine(line string) {
 	var event map[string]any
-	if err := json.Unmarshal([]byte(line), &event); err != nil || len(event) == 0 {
+	if err := json.Unmarshal([]byte(localJSONLinePayload(line)), &event); err != nil || len(event) == 0 {
 		return
 	}
 	c.jsonEventCount++
@@ -90,6 +90,20 @@ func (c *providerMetadataCollector) metadata() map[string]any {
 		out["provider_session_id"] = c.sessionID
 	}
 	return out
+}
+
+func localJSONLinePayload(line string) string {
+	line = strings.TrimSpace(line)
+	if line == "" || strings.HasPrefix(line, "{") || strings.HasPrefix(line, "[") {
+		return line
+	}
+	if start, end := strings.Index(line, "{"), strings.LastIndex(line, "}"); start >= 0 && end > start {
+		return line[start : end+1]
+	}
+	if start, end := strings.Index(line, "["), strings.LastIndex(line, "]"); start >= 0 && end > start {
+		return line[start : end+1]
+	}
+	return line
 }
 
 func providerMetadataFromOutput(output string) (metadata map[string]any, sessionID, providerModel string) {

@@ -216,7 +216,7 @@ func parseLocalStreamEvent(line string) (localStreamEvent, bool) {
 		Item      *streamItem    `json:"item"`
 		Usage     *connectUsage  `json:"usage"`
 	}
-	if err := json.Unmarshal([]byte(line), &event); err != nil {
+	if err := json.Unmarshal([]byte(localJSONLinePayload(line)), &event); err != nil {
 		return localStreamEvent{}, false
 	}
 	out := localStreamEvent{

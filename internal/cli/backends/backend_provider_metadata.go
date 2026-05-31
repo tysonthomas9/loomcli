@@ -33,7 +33,7 @@ func (c *backendProviderMetadataCapture) Clear(provider string) {
 
 func (c *backendProviderMetadataCapture) IngestLine(line string) {
 	var event map[string]any
-	if err := json.Unmarshal([]byte(line), &event); err != nil || len(event) == 0 {
+	if err := json.Unmarshal([]byte(providerJSONLinePayload(line)), &event); err != nil || len(event) == 0 {
 		return
 	}
 	c.mu.Lock()
@@ -147,6 +147,20 @@ func (c *backendProviderMetadataCapture) Metadata() map[string]any {
 		out["provider_session_id"] = c.sessionID
 	}
 	return out
+}
+
+func providerJSONLinePayload(line string) string {
+	line = strings.TrimSpace(line)
+	if line == "" || strings.HasPrefix(line, "{") || strings.HasPrefix(line, "[") {
+		return line
+	}
+	if start, end := strings.Index(line, "{"), strings.LastIndex(line, "}"); start >= 0 && end > start {
+		return line[start : end+1]
+	}
+	if start, end := strings.Index(line, "["), strings.LastIndex(line, "]"); start >= 0 && end > start {
+		return line[start : end+1]
+	}
+	return line
 }
 
 func firstProviderStringField(event map[string]any, keys ...string) string {
