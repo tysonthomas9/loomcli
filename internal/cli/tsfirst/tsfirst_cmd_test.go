@@ -2096,6 +2096,7 @@ func (b *streamingTypedToolBridgeBackend) IngestTypedToolProviderLine(ctx contex
 				ID    string         `json:"id"`
 				Name  string         `json:"name"`
 				Input map[string]any `json:"input"`
+				Text  string         `json:"text"`
 			} `json:"content"`
 		} `json:"message"`
 	}
@@ -2104,6 +2105,29 @@ func (b *streamingTypedToolBridgeBackend) IngestTypedToolProviderLine(ctx contex
 	}
 	for _, block := range event.Message.Content {
 		if block.Type != "tool_use" || block.Name == "" || b.executor == nil {
+			if block.Type != "text" || strings.TrimSpace(block.Text) == "" || b.executor == nil {
+				continue
+			}
+			var explicit struct {
+				Type      string         `json:"type"`
+				CallID    string         `json:"call_id"`
+				Name      string         `json:"name"`
+				Arguments map[string]any `json:"arguments"`
+			}
+			if err := json.Unmarshal([]byte(block.Text), &explicit); err != nil ||
+				explicit.Type != "loom.typed_tool.call" ||
+				strings.TrimSpace(explicit.Name) == "" {
+				continue
+			}
+			call, err := b.executor.ExecuteTypedTool(ctx, backendcaps.TypedToolExecutionRequest{
+				CallID:    explicit.CallID,
+				Name:      explicit.Name,
+				Arguments: explicit.Arguments,
+			})
+			if err != nil {
+				continue
+			}
+			b.calls = append(b.calls, call)
 			continue
 		}
 		call, err := b.executor.ExecuteTypedTool(ctx, backendcaps.TypedToolExecutionRequest{
@@ -2141,7 +2165,7 @@ func (b *streamingTypedToolFollowupBackend) InvokeStreaming(_ context.Context, _
 	b.prompts = append(b.prompts, prompt)
 	if len(b.prompts) == 1 {
 		payload := strings.Join([]string{
-			`{"type":"assistant","message":{"content":[{"type":"tool_use","id":"call-create-channel","name":"create_channel","input":{"name":"triage"}}]}}`,
+			`{"type":"assistant","message":{"content":[{"type":"text","text":"{\"type\":\"loom.typed_tool.call\",\"call_id\":\"call-create-channel\",\"name\":\"create_channel\",\"arguments\":{\"name\":\"triage\"}}"}]}}`,
 			"",
 		}, "\n")
 		return io.NopCloser(strings.NewReader(payload)), nil
@@ -2175,6 +2199,7 @@ func (b *streamingTypedToolFollowupBackend) IngestTypedToolProviderLine(ctx cont
 				ID    string         `json:"id"`
 				Name  string         `json:"name"`
 				Input map[string]any `json:"input"`
+				Text  string         `json:"text"`
 			} `json:"content"`
 		} `json:"message"`
 	}
@@ -2183,6 +2208,29 @@ func (b *streamingTypedToolFollowupBackend) IngestTypedToolProviderLine(ctx cont
 	}
 	for _, block := range event.Message.Content {
 		if block.Type != "tool_use" || block.Name == "" || b.executor == nil {
+			if block.Type != "text" || strings.TrimSpace(block.Text) == "" || b.executor == nil {
+				continue
+			}
+			var explicit struct {
+				Type      string         `json:"type"`
+				CallID    string         `json:"call_id"`
+				Name      string         `json:"name"`
+				Arguments map[string]any `json:"arguments"`
+			}
+			if err := json.Unmarshal([]byte(block.Text), &explicit); err != nil ||
+				explicit.Type != "loom.typed_tool.call" ||
+				strings.TrimSpace(explicit.Name) == "" {
+				continue
+			}
+			call, err := b.executor.ExecuteTypedTool(ctx, backendcaps.TypedToolExecutionRequest{
+				CallID:    explicit.CallID,
+				Name:      explicit.Name,
+				Arguments: explicit.Arguments,
+			})
+			if err != nil {
+				continue
+			}
+			b.calls = append(b.calls, call)
 			continue
 		}
 		call, err := b.executor.ExecuteTypedTool(ctx, backendcaps.TypedToolExecutionRequest{

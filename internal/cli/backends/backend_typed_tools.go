@@ -174,7 +174,39 @@ func extractProviderTypedToolCallsInto(value any, inheritedExplicit bool, out *[
 		for _, item := range typed {
 			extractProviderTypedToolCallsInto(item, inheritedExplicit, out)
 		}
+	case string:
+		extractExplicitTypedToolCallsFromText(typed, out)
 	}
+}
+
+func extractExplicitTypedToolCallsFromText(text string, out *[]providerTypedToolCall) {
+	if !strings.Contains(text, "loom.typed_tool") && !strings.Contains(text, "typed_tool.call") {
+		return
+	}
+	for _, line := range strings.Split(strings.ReplaceAll(text, "\r\n", "\n"), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "```") || (!strings.Contains(line, "loom.typed_tool") && !strings.Contains(line, "typed_tool.call")) {
+			continue
+		}
+		for _, candidate := range explicitTypedToolJSONCandidates(line) {
+			var value any
+			if err := json.Unmarshal([]byte(candidate), &value); err != nil {
+				continue
+			}
+			extractProviderTypedToolCallsInto(value, true, out)
+		}
+	}
+}
+
+func explicitTypedToolJSONCandidates(line string) []string {
+	candidates := []string{line}
+	if start, end := strings.Index(line, "{"), strings.LastIndex(line, "}"); start >= 0 && end > start {
+		candidates = append(candidates, line[start:end+1])
+	}
+	if start, end := strings.Index(line, "["), strings.LastIndex(line, "]"); start >= 0 && end > start {
+		candidates = append(candidates, line[start:end+1])
+	}
+	return candidates
 }
 
 func providerTypedToolCallFromMap(m map[string]any, explicit bool) (providerTypedToolCall, bool) {

@@ -87,6 +87,34 @@ func TestProviderTypedToolBridgeExtractsProviderNativeToolCallShapes(t *testing.
 	}
 }
 
+func TestProviderTypedToolBridgeExtractsExplicitCallsFromTextBlocks(t *testing.T) {
+	backend := &ClaudeBackend{}
+	executor := &recordingTypedToolExecutor{}
+	if err := backend.SetTypedTools([]TypedToolDefinition{{Name: "create_channel"}}); err != nil {
+		t.Fatalf("SetTypedTools() error = %v", err)
+	}
+	if err := backend.SetTypedToolExecutor(executor); err != nil {
+		t.Fatalf("SetTypedToolExecutor() error = %v", err)
+	}
+	backend.BeginTypedToolInvocation()
+
+	backend.IngestTypedToolProviderLine(context.Background(), `{"type":"assistant","message":{"content":[{"type":"text","text":"{\"type\":\"loom.typed_tool.call\",\"call_id\":\"call-create\",\"name\":\"create_channel\",\"arguments\":{\"name\":\"triage\"}}"}]}}`)
+
+	if executor.request.Name != "create_channel" ||
+		executor.request.CallID != "call-create" ||
+		executor.request.Arguments["name"] != "triage" {
+		t.Fatalf("executor request = %+v, want explicit typed tool call extracted from provider text block", executor.request)
+	}
+	calls := backend.TypedToolCalls("")
+	if len(calls) != 1 ||
+		calls[0].Name != "create_channel" ||
+		calls[0].CallID != "call-create" ||
+		calls[0].Status != "completed" ||
+		calls[0].Result != "created triage" {
+		t.Fatalf("typed tool calls = %+v, want trusted execution evidence from text block", calls)
+	}
+}
+
 func TestProviderTypedToolBridgeRecordsExplicitUndeclaredCallsAsDenied(t *testing.T) {
 	backend := &CodexBackend{}
 	if err := backend.SetTypedTools([]TypedToolDefinition{{Name: "create_channel"}}); err != nil {

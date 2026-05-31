@@ -105,17 +105,53 @@ func (c *streamResponseCapture) ingestEvent(event localStreamEvent) error {
 		c.invocation.Usage = mergeConnectUsage(c.invocation.Usage, event.Usage)
 	}
 	if event.Text != "" {
+		text := stripExplicitTypedToolCallText(event.Text)
+		if text == "" {
+			return nil
+		}
 		if c.stream != nil {
-			if _, err := io.WriteString(c.stream, event.Text); err != nil {
+			if _, err := io.WriteString(c.stream, text); err != nil {
 				return err
 			}
 		}
-		c.response.WriteString(event.Text)
+		c.response.WriteString(text)
 	}
 	if event.Result != "" && strings.TrimSpace(c.response.String()) == "" {
 		c.response.WriteString(event.Result)
 	}
 	return nil
+}
+
+func stripExplicitTypedToolCallText(text string) string {
+	if !strings.Contains(text, "loom.typed_tool") && !strings.Contains(text, "typed_tool.call") {
+		return text
+	}
+	lines := strings.Split(strings.ReplaceAll(text, "\r\n", "\n"), "\n")
+	kept := make([]string, 0, len(lines))
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" || strings.HasPrefix(trimmed, "```") {
+			continue
+		}
+		if lineIsExplicitTypedToolCall(trimmed) {
+			continue
+		}
+		kept = append(kept, line)
+	}
+	return strings.TrimSpace(strings.Join(kept, "\n"))
+}
+
+func lineIsExplicitTypedToolCall(line string) bool {
+	if !strings.Contains(line, "loom.typed_tool") && !strings.Contains(line, "typed_tool.call") {
+		return false
+	}
+	if strings.HasPrefix(line, "{") || strings.HasPrefix(line, "[") {
+		return true
+	}
+	if start := strings.Index(line, "{"); start >= 0 {
+		return strings.LastIndex(line, "}") > start
+	}
+	return false
 }
 
 func (c *streamResponseCapture) result() localInvocationResult {
