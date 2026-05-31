@@ -58,6 +58,7 @@ run_with_timeout() {
 require loom
 require jq
 require node
+require git
 
 if ! command -v "$BACKEND" >/dev/null 2>&1; then
     echo "backend CLI not found on PATH: $BACKEND" >&2
@@ -115,6 +116,12 @@ $MODEL_LINE
   tools: [createChannel],
 });
 TS
+
+git -C "$ROOT" init -q
+git -C "$ROOT" config user.name "Loom TSFirst Live E2E"
+git -C "$ROOT" config user.email "loom-tsfirst-live-e2e@example.test"
+git -C "$ROOT" add .loom
+git -C "$ROOT" commit -m "Seed TypeScript-first live provider fixture" >/dev/null
 
 if ! loom check --dir "$ROOT" >"$CHECK_LOG" 2>&1; then
     echo "loom check failed for live provider TypeScript-first fixture" >&2

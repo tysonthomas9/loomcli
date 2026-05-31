@@ -68,12 +68,39 @@ func captureStreamingResponse(ctx context.Context, rc io.Reader, stream io.Write
 	return capture.result(), nil
 }
 
+func localBackendResponseFromOutput(output string) string {
+	var response strings.Builder
+	scanner := bufio.NewScanner(strings.NewReader(output))
+	scanner.Buffer(make([]byte, 0, 64*1024), 10*1024*1024)
+	structured := false
+	for scanner.Scan() {
+		event, ok := parseLocalStreamEvent(scanner.Text())
+		if !ok {
+			continue
+		}
+		structured = true
+		if event.Text != "" {
+			if text := stripExplicitTypedToolCallText(event.Text); text != "" {
+				response.WriteString(text)
+			}
+		}
+		if event.Result != "" && strings.TrimSpace(response.String()) == "" {
+			response.WriteString(event.Result)
+		}
+	}
+	if structured {
+		return strings.TrimSpace(response.String())
+	}
+	return strings.TrimSpace(output)
+}
+
 type streamResponseCapture struct {
 	ctx                  context.Context
 	invocation           localInvocationResult
 	metadata             providerMetadataCollector
 	response             strings.Builder
 	fallback             bytes.Buffer
+	structured           bool
 	stream               io.Writer
 	typedToolLineBackend any
 }
@@ -91,6 +118,7 @@ func (c *streamResponseCapture) ingest(line string) error {
 		fmt.Fprintln(&c.fallback, line)
 		return nil
 	}
+	c.structured = true
 	return c.ingestEvent(event)
 }
 
@@ -157,7 +185,7 @@ func lineIsExplicitTypedToolCall(line string) bool {
 func (c *streamResponseCapture) result() localInvocationResult {
 	result := c.invocation
 	result.Response = strings.TrimSpace(c.response.String())
-	if result.Response == "" {
+	if result.Response == "" && !c.structured {
 		result.Response = strings.TrimSpace(c.fallback.String())
 	}
 	result.ProviderMetadata = c.metadata.metadata()
@@ -185,6 +213,7 @@ func parseLocalStreamEvent(line string) (localStreamEvent, bool) {
 		SessionID string         `json:"session_id"`
 		Result    string         `json:"result"`
 		Message   *streamMessage `json:"message"`
+		Item      *streamItem    `json:"item"`
 		Usage     *connectUsage  `json:"usage"`
 	}
 	if err := json.Unmarshal([]byte(line), &event); err != nil {
@@ -206,6 +235,9 @@ func parseLocalStreamEvent(line string) (localStreamEvent, bool) {
 			}
 		}
 	}
+	if event.Item != nil && event.Item.Type == "agent_message" && event.Item.Text != "" {
+		out.Text += event.Item.Text
+	}
 	return out, true
 }
 
@@ -213,6 +245,11 @@ type streamMessage struct {
 	Model   string          `json:"model"`
 	Content []streamContent `json:"content"`
 	Usage   *connectUsage   `json:"usage"`
+}
+
+type streamItem struct {
+	Type string `json:"type"`
+	Text string `json:"text"`
 }
 
 type streamContent struct {

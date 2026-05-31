@@ -28,7 +28,7 @@ func invokeNonStreamingLocalAgentWithRunner(backendName, agentName string, strea
 	if err != nil {
 		return localInvocationResult{}, err
 	}
-	response := strings.TrimSpace(output)
+	response := localBackendResponseFromOutput(output)
 	if response == "" {
 		response = "backend completed; no stdout response was captured"
 	}
