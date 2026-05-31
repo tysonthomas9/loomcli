@@ -95,3 +95,72 @@ func TestAgentStatus_LastActivityAt_OmittedWhenNil(t *testing.T) {
 		t.Errorf("non-nil LastActivityAt not serialized: %s", withActivity)
 	}
 }
+
+func TestCollectAgentStatus_IgnoresIdleLockTaskIDForCurrentTask(t *testing.T) {
+	// not parallel: uses os.Chdir and defaultResolver global
+	deps, _, _, _, _ := NewTestDeps(t)
+	origDir, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	tmpDir := t.TempDir()
+	if err := os.Chdir(tmpDir); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Chdir(origDir) })
+
+	oldResolver := defaultResolver
+	defaultResolver = nil
+	t.Cleanup(func() { defaultResolver = oldResolver })
+	ResetWorkspaceRuntimeDirCache()
+
+	wtDir := filepath.Join(tmpDir, "worktrees", "alpha")
+	if err := os.MkdirAll(filepath.Join(wtDir, ".git"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	setupMonitorWorkspaceConfig(t, tmpDir, "alpha")
+
+	lockInfo := LockInfo{
+		PID:       os.Getpid(),
+		Command:   "task",
+		AgentName: "alpha",
+		TaskID:    "T-stale",
+		State:     "idle",
+		StartedAt: time.Now(),
+	}
+	lockData, err := json.Marshal(lockInfo)
+	if err != nil {
+		t.Fatalf("marshal lock: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(wtDir, ".agent.lock"), lockData, 0644); err != nil {
+		t.Fatalf("write lock: %v", err)
+	}
+
+	deps.Exec = &MockExecRunner{RunFunc: func(dir, name string, args ...string) CommandResult {
+		if name == "git" && len(args) > 0 && args[0] == "branch" {
+			return CommandResult{Stdout: "alpha"}
+		}
+		if name == "git" && len(args) > 0 && args[0] == "status" {
+			return CommandResult{Stdout: ""}
+		}
+		if name == "git" && len(args) > 0 && args[0] == "rev-list" {
+			return CommandResult{Stdout: "0\t0"}
+		}
+		return CommandResult{}
+	}}
+	deps.Git = &execBridgeGitRunner{Exec: deps.Exec}
+
+	agents, taskIDToAgents := collectAgentStatusDeps(deps, nil, "")
+	if len(agents) != 1 {
+		t.Fatalf("expected 1 agent, got %d", len(agents))
+	}
+	if got := agents[0].CurrentTaskID; got != "" {
+		t.Fatalf("CurrentTaskID = %q, want empty for idle lock with stale task ID", got)
+	}
+	if _, ok := taskIDToAgents["T-stale"]; ok {
+		t.Fatalf("idle lock task ID was counted as an active claim: %#v", taskIDToAgents["T-stale"])
+	}
+	if !strings.HasPrefix(agents[0].Status, "idle ") {
+		t.Fatalf("Status = %q, want idle status", agents[0].Status)
+	}
+}

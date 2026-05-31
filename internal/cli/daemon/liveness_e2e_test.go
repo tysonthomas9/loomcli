@@ -378,7 +378,7 @@ func TestE2E_PR82_DepartureClearsLiveness(t *testing.T) {
 		t.Fatal("LastActivity never advanced — heartbeats did not arrive")
 	}
 
-	// Kill the wrapper subprocess by cancelling its context.
+	// Kill the wrapper subprocess by canceling its context.
 	cancelRun()
 
 	outcome := <-done

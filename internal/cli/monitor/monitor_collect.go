@@ -148,12 +148,13 @@ func buildAgentStatus(deps *cli.Deps, wt cli.WorktreeInfo, daemonManaged map[str
 		agent.LastActivityAt = &la
 	}
 
-	if lockInfo, running, _ := cli.CheckLock(wt.Path); running && lockInfo != nil && lockInfo.TaskID != "" {
+	if lockInfo, running, _ := cli.CheckLock(wt.Path); running && lockHasActiveTaskClaim(lockInfo) {
 		taskIDToAgents[lockInfo.TaskID] = append(taskIDToAgents[lockInfo.TaskID], wt.Name)
 		// Daemon state only records CurrentTaskID for daemon-managed agents;
 		// auto/manual agents leave it empty. Fall back to the lock's claimed
-		// task so the kanban can still join the live agent to its in-progress
-		// card (otherwise the card renders a spurious "agent missing").
+		// task when the lock is actively executing. Idle auto-mode locks may
+		// retain a stale TaskID for no-progress detection and should not satisfy
+		// the kanban's live-agent join.
 		if agent.CurrentTaskID == "" {
 			agent.CurrentTaskID = lockInfo.TaskID
 		}
@@ -182,6 +183,10 @@ func buildAgentStatus(deps *cli.Deps, wt cli.WorktreeInfo, daemonManaged map[str
 		agent.Changes = getWorktreeFileChangesDeps(deps, wt.Path)
 	}
 	return agent
+}
+
+func lockHasActiveTaskClaim(lockInfo *cli.LockInfo) bool {
+	return lockInfo != nil && lockInfo.TaskID != "" && lockInfo.State != cli.StateIdle
 }
 
 // resolveAgentStatus determines the status string for a worktree.
