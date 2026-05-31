@@ -390,6 +390,16 @@
   border-left-color: var(--color-accent, #0969da);
 }
 
+.timelineGap {
+  padding: 7px;
+  border: 1px dashed var(--color-border, #d0d7de);
+  border-radius: 6px;
+  background: var(--color-canvas, #ffffff);
+  color: var(--color-muted-fg, #57606a);
+  font-size: 12px;
+  text-align: center;
+}
+
 .timelineEventIndex,
 .timelineEventOffset,
 .timelineEventType {

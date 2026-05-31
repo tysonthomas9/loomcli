@@ -33,6 +33,8 @@ const TIMELINE_WINDOW_OPTIONS = [
 type TimelineWindowValue = (typeof TIMELINE_WINDOW_OPTIONS)[number]["value"];
 
 const DEFAULT_TIMELINE_WINDOW = TIMELINE_WINDOW_OPTIONS[0];
+const TIMELINE_EDGE_EVENT_COUNT = 25;
+const TIMELINE_EVENT_RENDER_LIMIT = TIMELINE_EDGE_EVENT_COUNT * 2;
 
 export function WorkflowsPage(): JSX.Element {
   const { view: activeView } = useRouteView();
@@ -662,6 +664,7 @@ function WorkflowComparisonBar({
               latestEventTime,
             ),
           );
+          const compactedEvents = compactTimelineEvents(visibleEvents);
           const filtersActive =
             Boolean(eventTypeFilter) || timelineWindow.durationMs != null;
           return (
@@ -673,6 +676,9 @@ function WorkflowComparisonBar({
               <div className={styles.timelineHeader}>
                 <span>{shortRunID(runId)}</span>
                 <span>
+                  {compactedEvents.renderedCount !== visibleEvents.length
+                    ? `${compactedEvents.renderedCount} of `
+                    : ""}
                   {visibleEvents.length}{" "}
                   {visibleEvents.length === 1 ? "event" : "events"}
                   {filtersActive && events.length !== visibleEvents.length
@@ -690,7 +696,53 @@ function WorkflowComparisonBar({
                 </div>
               ) : (
                 <div className={styles.timelineEvents}>
-                  {visibleEvents.map((event) => {
+                  {compactedEvents.leading.map((event) => {
+                    const eventOffset = formatRelativeOffset(
+                      parseEventTime(event.created_at),
+                      baselineEventTime,
+                    );
+                    return (
+                      <div
+                        key={event.event_id}
+                        className={styles.timelineEvent}
+                        data-shared={sharedEventTypes.has(event.type)}
+                        data-testid={`workflow-comparison-event-${runId}-${event.event_index}`}
+                      >
+                        <div className={styles.timelineEventTop}>
+                          <span className={styles.timelineEventIndex}>
+                            #{event.event_index}
+                          </span>
+                          {eventOffset ? (
+                            <span className={styles.timelineEventOffset}>
+                              {eventOffset}
+                            </span>
+                          ) : null}
+                          <span className={styles.timelineEventType}>
+                            {event.type}
+                          </span>
+                          <span className={styles.timelineEventTime}>
+                            {formatTimestamp(event.created_at)}
+                          </span>
+                        </div>
+                        {event.message ? (
+                          <div className={styles.timelineEventMessage}>
+                            {event.message}
+                          </div>
+                        ) : null}
+                      </div>
+                    );
+                  })}
+                  {compactedEvents.hiddenCount > 0 ? (
+                    <div
+                      className={styles.timelineGap}
+                      data-testid={`workflow-comparison-gap-${runId}`}
+                    >
+                      {compactedEvents.hiddenCount} retained{" "}
+                      {compactedEvents.hiddenCount === 1 ? "event" : "events"}{" "}
+                      hidden from this view
+                    </div>
+                  ) : null}
+                  {compactedEvents.trailing.map((event) => {
                     const eventOffset = formatRelativeOffset(
                       parseEventTime(event.created_at),
                       baselineEventTime,
@@ -927,6 +979,30 @@ function streamStatusLabel(
 function shortRunID(runId: string): string {
   if (runId.length <= 12) return runId;
   return runId.slice(0, 12);
+}
+
+function compactTimelineEvents(events: WorkflowRunEvent[]): {
+  leading: WorkflowRunEvent[];
+  trailing: WorkflowRunEvent[];
+  hiddenCount: number;
+  renderedCount: number;
+} {
+  if (events.length <= TIMELINE_EVENT_RENDER_LIMIT) {
+    return {
+      leading: events,
+      trailing: [],
+      hiddenCount: 0,
+      renderedCount: events.length,
+    };
+  }
+  const leading = events.slice(0, TIMELINE_EDGE_EVENT_COUNT);
+  const trailing = events.slice(-TIMELINE_EDGE_EVENT_COUNT);
+  return {
+    leading,
+    trailing,
+    hiddenCount: events.length - leading.length - trailing.length,
+    renderedCount: leading.length + trailing.length,
+  };
 }
 
 function isTimelineEventVisible(

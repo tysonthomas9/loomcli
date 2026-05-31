@@ -271,6 +271,47 @@ describe("WorkflowsPage", () => {
     expect(retryStream).toHaveBeenCalledTimes(1);
   });
 
+  it("condenses large compared timelines while preserving edge events", () => {
+    const largeEventSet: WorkflowRunEvent[] = Array.from(
+      { length: 65 },
+      (_, index) => ({
+        ...routeEvent,
+        event_id: `evt-large-${index + 1}`,
+        event_index: index + 1,
+        type: "workflow_log",
+        message: `Retained event ${index + 1}`,
+        created_at: new Date(Date.UTC(2026, 0, 1, 0, 0, index)).toISOString(),
+      }),
+    );
+    mockUseWorkflowRunEventSnapshots.mockReturnValue({
+      eventsByRunId: {
+        "wrun-1": largeEventSet,
+      },
+      isLoading: false,
+      error: null,
+      refetch: vi.fn(),
+    });
+
+    render(<WorkflowsPage />);
+    fireEvent.click(screen.getByLabelText("Compare run wrun-1"));
+
+    expect(
+      screen.getByTestId("workflow-comparison-timeline-wrun-1"),
+    ).toHaveTextContent("50 of 65 events");
+    expect(
+      screen.getByTestId("workflow-comparison-gap-wrun-1"),
+    ).toHaveTextContent("15 retained events hidden from this view");
+    expect(
+      screen.getByTestId("workflow-comparison-event-wrun-1-1"),
+    ).toHaveTextContent("Retained event 1");
+    expect(
+      screen.getByTestId("workflow-comparison-event-wrun-1-65"),
+    ).toHaveTextContent("Retained event 65");
+    expect(
+      screen.queryByTestId("workflow-comparison-event-wrun-1-26"),
+    ).not.toBeInTheDocument();
+  });
+
   it("compares selected workflow runs and batch cancels live selections", async () => {
     const refetchRuns = vi.fn();
     const refetchEvents = vi.fn();
