@@ -1270,6 +1270,36 @@ func TestRunLocalConnectPassesTypedToolsToRuntimeBackend(t *testing.T) {
 	}
 }
 
+func TestRunLocalConnectPublishesTypedToolPromptContract(t *testing.T) {
+	cli.TestingResetBackendState(t)
+	typedBackend := &typedToolRuntimeBackend{}
+	cli.RegisterBackend(typedBackend)
+	root := t.TempDir()
+	writeTypedToolAgent(t, root, "slack-agent", "typed-runtime")
+
+	result, err := runLocalConnect(context.Background(), connectOptions{
+		Dir:      root,
+		Agent:    "slack-agent",
+		Instance: "local",
+		Session:  "tools",
+		Message:  "create a channel",
+	})
+	if err != nil {
+		t.Fatalf("runLocalConnect() error = %v", err)
+	}
+	if result.ToolRuntime == nil ||
+		result.ToolRuntime.SchemaPublication != connectToolSchemaPublicationPrompt ||
+		result.ToolRuntime.ResultFeed != connectToolResultFeedPromptHistory {
+		t.Fatalf("tool runtime = %+v, want prompt schema publication and prompt-history result feed evidence", result.ToolRuntime)
+	}
+	if !strings.Contains(typedBackend.prompt, "Reviewed TypeScript model tools") ||
+		!strings.Contains(typedBackend.prompt, `"name": "create_channel"`) ||
+		!strings.Contains(typedBackend.prompt, `"type":"loom.typed_tool.call"`) ||
+		!strings.Contains(typedBackend.prompt, `"timeout": "30s"`) {
+		t.Fatalf("prompt = %q, want reviewed typed tool schema contract", typedBackend.prompt)
+	}
+}
+
 func TestRunLocalConnectExecutesTrustedTypeScriptToolHandler(t *testing.T) {
 	cli.TestingResetBackendState(t)
 	typedBackend := &executingTypedToolBackend{
@@ -1322,6 +1352,49 @@ func TestRunLocalConnectExecutesTrustedTypeScriptToolHandler(t *testing.T) {
 		len(turns[0].ToolCalls) != 1 ||
 		turns[0].ToolCalls[0].Result != "created triage" {
 		t.Fatalf("turns = %+v, want trusted handler execution persisted", turns)
+	}
+}
+
+func TestRunLocalConnectFeedsPriorTypedToolResultsIntoPrompt(t *testing.T) {
+	cli.TestingResetBackendState(t)
+	typedBackend := &executingTypedToolBackend{
+		request: backendcaps.TypedToolExecutionRequest{
+			CallID:    "call-create-channel",
+			Name:      "create_channel",
+			Arguments: map[string]any{"name": "triage"},
+		},
+	}
+	cli.RegisterBackend(typedBackend)
+	root := t.TempDir()
+	writeTypedToolAgent(t, root, "slack-agent", "executing-typed-runtime")
+
+	if _, err := runLocalConnect(context.Background(), connectOptions{
+		Dir:      root,
+		Agent:    "slack-agent",
+		Instance: "local",
+		Session:  "tools",
+		Message:  "create a channel",
+	}); err != nil {
+		t.Fatalf("first runLocalConnect() error = %v", err)
+	}
+	if _, err := runLocalConnect(context.Background(), connectOptions{
+		Dir:      root,
+		Agent:    "slack-agent",
+		Instance: "local",
+		Session:  "tools",
+		Message:  "what happened?",
+	}); err != nil {
+		t.Fatalf("second runLocalConnect() error = %v", err)
+	}
+	if len(typedBackend.prompts) < 2 {
+		t.Fatalf("captured prompts = %d, want two local connect prompts", len(typedBackend.prompts))
+	}
+	followupPrompt := typedBackend.prompts[1]
+	if !strings.Contains(followupPrompt, "Recent typed tool results") ||
+		!strings.Contains(followupPrompt, "call-create-channel") ||
+		!strings.Contains(followupPrompt, "created triage") ||
+		!strings.Contains(followupPrompt, `"authorization_status": "authorized"`) {
+		t.Fatalf("followup prompt = %q, want prior typed tool result feed", followupPrompt)
 	}
 }
 
@@ -1723,13 +1796,15 @@ func (b *dualResumeStreamingBackend) SetterIDs() []string {
 type typedToolRuntimeBackend struct {
 	tools     []backendcaps.TypedToolDefinition
 	toolCalls []backendcaps.TypedToolCallEvent
+	prompt    string
 }
 
 func (b *typedToolRuntimeBackend) Name() string { return "typed-runtime" }
 
 func (b *typedToolRuntimeBackend) InvokeInteractive(_, _, _ string) error { return nil }
 
-func (b *typedToolRuntimeBackend) InvokeNonInteractive(_, _, _ string, _ <-chan struct{}, _ *usage.Collector) error {
+func (b *typedToolRuntimeBackend) InvokeNonInteractive(_, prompt, _ string, _ <-chan struct{}, _ *usage.Collector) error {
+	b.prompt = prompt
 	fmt.Println("typed runtime answer")
 	return nil
 }
@@ -1748,13 +1823,15 @@ type executingTypedToolBackend struct {
 	executor  backendcaps.TypedToolExecutor
 	request   backendcaps.TypedToolExecutionRequest
 	toolCalls []backendcaps.TypedToolCallEvent
+	prompts   []string
 }
 
 func (b *executingTypedToolBackend) Name() string { return "executing-typed-runtime" }
 
 func (b *executingTypedToolBackend) InvokeInteractive(_, _, _ string) error { return nil }
 
-func (b *executingTypedToolBackend) InvokeNonInteractive(_ string, _ string, _ string, shutdown <-chan struct{}, _ *usage.Collector) error {
+func (b *executingTypedToolBackend) InvokeNonInteractive(_ string, prompt string, _ string, shutdown <-chan struct{}, _ *usage.Collector) error {
+	b.prompts = append(b.prompts, prompt)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	if shutdown != nil {

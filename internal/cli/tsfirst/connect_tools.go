@@ -28,6 +28,8 @@ const (
 	connectToolRuntimeBackend  = "backend_typed_tool_runtime"
 
 	connectToolHandlerExecutionConfigured = "trusted_executor_configured"
+	connectToolSchemaPublicationPrompt    = "prompt_json_contract"
+	connectToolResultFeedPromptHistory    = "prompt_history"
 )
 
 func localConnectToolRuntime(plan *defspkg.Plan, agent defspkg.AgentModule) *connectToolRuntime {
@@ -36,9 +38,11 @@ func localConnectToolRuntime(plan *defspkg.Plan, agent defspkg.AgentModule) *con
 		return nil
 	}
 	return &connectToolRuntime{
-		Status:     connectToolRuntimeDeclared,
-		Message:    "typed model tools are declared and require echo offline mode or a backend typed-tool runtime before prompt execution",
-		TypedTools: tools,
+		Status:            connectToolRuntimeDeclared,
+		Message:           "typed model tools are declared and require echo offline mode or a backend typed-tool runtime before prompt execution",
+		SchemaPublication: connectToolSchemaPublicationPrompt,
+		ResultFeed:        connectToolResultFeedPromptHistory,
+		TypedTools:        tools,
 	}
 }
 

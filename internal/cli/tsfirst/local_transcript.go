@@ -106,6 +106,7 @@ func localConnectPrompt(plan *defspkg.Plan, agent defspkg.AgentModule, instance,
 	if strings.TrimSpace(agent.Instructions) != "" {
 		fmt.Fprintf(&b, "\nAgent instructions:\n%s\n", strings.TrimSpace(agent.Instructions))
 	}
+	appendLocalConnectTypedToolContract(&b, plan, agent)
 	if len(history) > 0 {
 		fmt.Fprintf(&b, "\nRecent local session history:\n")
 		start := 0
@@ -115,9 +116,74 @@ func localConnectPrompt(plan *defspkg.Plan, agent defspkg.AgentModule, instance,
 		for _, turn := range history[start:] {
 			fmt.Fprintf(&b, "User: %s\nAgent: %s\n", turn.Message, turn.Response)
 		}
+		appendLocalConnectTypedToolResultFeed(&b, history[start:])
 	}
 	fmt.Fprintf(&b, "\nUser message:\n%s\n", message)
 	return b.String()
+}
+
+func appendLocalConnectTypedToolContract(b *strings.Builder, plan *defspkg.Plan, agent defspkg.AgentModule) {
+	runtime := localConnectToolRuntime(plan, agent)
+	if runtime == nil || len(runtime.TypedTools) == 0 {
+		return
+	}
+	contract := make([]map[string]any, 0, len(runtime.TypedTools))
+	for _, tool := range runtime.TypedTools {
+		entry := map[string]any{
+			"name":       tool.Name,
+			"parameters": tool.Parameters,
+			"read_only":  tool.ReadOnly,
+		}
+		if tool.Description != "" {
+			entry["description"] = tool.Description
+		}
+		if tool.Timeout != "" {
+			entry["timeout"] = tool.Timeout
+		}
+		if tool.Cancellable {
+			entry["cancellable"] = true
+		}
+		contract = append(contract, entry)
+	}
+	data, err := json.MarshalIndent(contract, "", "  ")
+	if err != nil {
+		return
+	}
+	fmt.Fprintf(b, "\nReviewed TypeScript model tools:\n%s\n", string(data))
+	fmt.Fprintln(b, "To call one reviewed tool, emit exactly one JSON line and no surrounding prose:")
+	fmt.Fprintln(b, `{"type":"loom.typed_tool.call","call_id":"stable-call-id","name":"tool_name","arguments":{}}`)
+	fmt.Fprintln(b, "Loom executes matching reviewed tools through the trusted TypeScript handler boundary and records the result in local-connect evidence.")
+}
+
+func appendLocalConnectTypedToolResultFeed(b *strings.Builder, history []localTurn) {
+	var entries []map[string]any
+	for _, turn := range history {
+		for _, call := range turn.ToolCalls {
+			entry := map[string]any{
+				"operation_id":         turn.OperationID,
+				"call_id":              call.CallID,
+				"name":                 call.Name,
+				"status":               call.Status,
+				"authorization_status": call.AuthorizationStatus,
+				"redacted":             call.Redacted,
+			}
+			if call.Error != "" {
+				entry["error"] = call.Error
+			}
+			if !call.Redacted && call.Result != nil {
+				entry["result"] = call.Result
+			}
+			entries = append(entries, entry)
+		}
+	}
+	if len(entries) == 0 {
+		return
+	}
+	data, err := json.MarshalIndent(entries, "", "  ")
+	if err != nil {
+		return
+	}
+	fmt.Fprintf(b, "\nRecent typed tool results:\n%s\n", string(data))
 }
 
 func lastProviderSessionID(history []localTurn) string {
