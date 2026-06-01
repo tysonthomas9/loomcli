@@ -40,7 +40,7 @@ const (
 
 	// clockTickInterval is how often the Manager advances miniredis' clock so
 	// that relative TTLs (SET ... EX, SETEX, EXPIRE) actually count down. See
-	// run() for why this is load-bearing. 1s keeps PTTL within a second of
+	// runClock() for why this is load-bearing. 1s keeps PTTL within a second of
 	// wall time, which is well inside the tolerance of every TTL we set
 	// (issue locks/worker leases/leader election are tens of seconds or more).
 	clockTickInterval = 1 * time.Second
@@ -80,14 +80,23 @@ type Manager struct {
 	fleetKeys    bool
 	logger       *slog.Logger
 
-	// clockInterval is how often run() fast-forwards miniredis' clock.
-	// Defaults to clockTickInterval; overridable in tests so TTL expiry can
-	// be driven quickly without real sleeps.
+	// clockInterval is how often runClock() fast-forwards miniredis' clock.
+	// Defaults to clockTickInterval; overridable at construction (withClockInterval)
+	// so tests can drive TTL expiry quickly without real sleeps.
 	clockInterval time.Duration
 
+	// stopCh/stoppedCh control the periodic-dump loop (run), which only exists
+	// when Start has been called with a non-empty snapshotPath.
 	stopCh    chan struct{}
 	stoppedCh chan struct{}
 	started   bool
+
+	// clockStopCh/clockDoneCh control the clock goroutine (runClock), which is
+	// started by NewManager and lives for the Manager's whole lifetime —
+	// independent of snapshotting. Stopped in Close.
+	clockStopCh chan struct{}
+	clockDoneCh chan struct{}
+
 	mu        sync.Mutex
 	closeOnce sync.Once
 
@@ -100,12 +109,20 @@ type Manager struct {
 	lastDumpSet  bool
 }
 
-// NewManager starts an in-process miniredis and returns a Manager.
-// If snapshotPath is non-empty, the Manager loads an existing snapshot
-// from disk but does NOT start the periodic dump goroutine — call Start
-// for that. Pass an empty snapshotPath to disable persistence entirely
-// (tests).
-func NewManager(snapshotPath string, fleetKeys bool, logger *slog.Logger) (*Manager, error) {
+// Option configures a Manager at construction. The only options today are
+// test seams (e.g. withClockInterval); production callers pass none.
+type Option func(*Manager)
+
+// NewManager starts an in-process miniredis and returns a Manager. It also
+// starts the clock goroutine (runClock) immediately, so relative TTLs age for
+// the Manager's entire lifetime regardless of whether snapshotting is enabled
+// — TTL expiry is a correctness property of the store, not of the dump feature.
+//
+// If snapshotPath is non-empty, the Manager loads an existing snapshot from
+// disk but does NOT start the periodic dump goroutine — call Start for that.
+// Pass an empty snapshotPath to disable persistence entirely (the clock still
+// runs). Close stops every goroutine NewManager started.
+func NewManager(snapshotPath string, fleetKeys bool, logger *slog.Logger, opts ...Option) (*Manager, error) {
 	if logger == nil {
 		logger = slog.Default()
 	}
@@ -122,6 +139,14 @@ func NewManager(snapshotPath string, fleetKeys bool, logger *slog.Logger) (*Mana
 		clockInterval: clockTickInterval,
 		stopCh:        make(chan struct{}),
 		stoppedCh:     make(chan struct{}),
+		clockStopCh:   make(chan struct{}),
+		clockDoneCh:   make(chan struct{}),
+	}
+	for _, opt := range opts {
+		opt(m)
+	}
+	if m.clockInterval <= 0 {
+		m.clockInterval = clockTickInterval
 	}
 	if snapshotPath != "" {
 		if err := m.load(); err != nil {
@@ -129,6 +154,7 @@ func NewManager(snapshotPath string, fleetKeys bool, logger *slog.Logger) (*Mana
 			logger.Warn("failed to load redis snapshot, starting empty", "path", snapshotPath, "err", err)
 		}
 	}
+	go m.runClock()
 	return m, nil
 }
 
@@ -142,6 +168,10 @@ func (m *Manager) Client() *redis.Client { return m.client }
 // Start launches the periodic snapshot goroutine. Idempotent: safe to
 // call multiple times. The goroutine stops when ctx is cancelled OR
 // when Close is called. If snapshotPath is empty, Start is a no-op.
+//
+// Start does NOT gate the clock: miniredis' clock is driven by runClock from
+// NewManager onward, so TTLs age even on a Manager that is never Started or has
+// no snapshotPath. Start only controls snapshot persistence.
 func (m *Manager) Start(ctx context.Context) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -154,43 +184,53 @@ func (m *Manager) Start(ctx context.Context) {
 
 // run is the periodic-dump loop. It uses context.Background() for the
 // dump call itself so shutdown dumps still go through after the parent
-// ctx is cancelled.
-//
-// It also drives miniredis' clock. miniredis stores relative TTLs (SET ... EX,
-// SETEX, EXPIRE) as remaining *durations*, not absolute deadlines, and only
-// decrements them when the host calls FastForward — PTTL returns the stored
-// duration verbatim. With no host advancing the clock, every TTL'd key is
-// immortal: fleet-db issue locks, worker leases and leader-election keys never
-// expire, so an abandoned lock keeps a holder forever and the fleet-db reaper
-// skips it, leaving tasks stuck in_progress indefinitely. (SetTime does NOT
-// help: it only affects EXPIREAT comparisons and stream IDs, not the stored
-// countdown.) FastForward by the real elapsed wall time keeps expiry honest and
-// self-corrects across missed/coalesced ticks (e.g. laptop sleep), since the
-// delta is measured against wall time rather than counting fixed-size steps.
+// ctx is cancelled. It is gated on snapshotPath via Start; the clock is
+// driven separately by runClock so expiry never depends on this loop.
 func (m *Manager) run(ctx context.Context) {
 	defer close(m.stoppedCh)
 	ticker := time.NewTicker(defaultInterval)
 	defer ticker.Stop()
-	clockInterval := m.clockInterval
-	if clockInterval <= 0 {
-		clockInterval = clockTickInterval
-	}
-	clockTicker := time.NewTicker(clockInterval)
-	defer clockTicker.Stop()
-	lastTick := time.Now()
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-m.stopCh:
 			return
-		case now := <-clockTicker.C:
-			m.mr.FastForward(now.Sub(lastTick))
-			lastTick = now
 		case <-ticker.C:
 			if err := m.Dump(); err != nil {
 				m.logger.Warn("periodic snapshot dump failed", "err", err)
 			}
+		}
+	}
+}
+
+// runClock drives miniredis' clock for the Manager's entire lifetime. It is
+// started by NewManager (NOT Start) and stopped by Close, so TTL expiry can
+// never be silently disabled by a missing snapshotPath or a never-called Start.
+//
+// miniredis stores relative TTLs (SET ... EX, SETEX, EXPIRE) as remaining
+// *durations*, not absolute deadlines, and only decrements them when the host
+// calls FastForward — PTTL returns the stored duration verbatim. With no host
+// advancing the clock, every TTL'd key is immortal: fleet-db issue locks,
+// worker leases and leader-election keys never expire, so an abandoned lock
+// keeps a holder forever and the fleet-db reaper skips it, leaving tasks stuck
+// in_progress indefinitely. (SetTime does NOT help: it only affects EXPIREAT
+// comparisons and stream IDs, not the stored countdown.) FastForward by the
+// real elapsed wall time keeps expiry honest and self-corrects across
+// missed/coalesced ticks (e.g. laptop sleep), since the delta is measured
+// against wall time rather than counting fixed-size steps.
+func (m *Manager) runClock() {
+	defer close(m.clockDoneCh)
+	ticker := time.NewTicker(m.clockInterval)
+	defer ticker.Stop()
+	lastTick := time.Now()
+	for {
+		select {
+		case <-m.clockStopCh:
+			return
+		case now := <-ticker.C:
+			m.mr.FastForward(now.Sub(lastTick))
+			lastTick = now
 		}
 	}
 }
@@ -281,6 +321,7 @@ func (m *Manager) Dump() error {
 func (m *Manager) Close() error {
 	var closeErr error
 	m.closeOnce.Do(func() {
+		// Stop the periodic-dump loop if Start launched it.
 		m.mu.Lock()
 		running := m.started
 		m.mu.Unlock()
@@ -288,6 +329,9 @@ func (m *Manager) Close() error {
 			close(m.stopCh)
 			<-m.stoppedCh
 		}
+		// Stop the always-on clock goroutine (started by NewManager).
+		close(m.clockStopCh)
+		<-m.clockDoneCh
 		if err := m.Dump(); err != nil {
 			m.logger.Warn("final snapshot dump failed", "err", err)
 			closeErr = err

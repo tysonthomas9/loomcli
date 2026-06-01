@@ -7,19 +7,25 @@ import (
 	"time"
 )
 
-// TestClock_StartedManagerExpiresRelativeTTL is the fix: once Start drives the
-// clock, miniredis ages relative TTLs (SET ... PX/EX) in real wall time so
-// PTTL counts down and the key disappears. This is the behavior fleet-db's
-// issue locks / worker leases / leader election all depend on.
+// withClockInterval overrides how often runClock advances miniredis' clock.
+// Test-only seam: production uses clockTickInterval. The clock goroutine starts
+// in NewManager, so the interval must be supplied at construction.
+func withClockInterval(d time.Duration) Option {
+	return func(m *Manager) { m.clockInterval = d }
+}
+
+// TestClock_StartedManagerExpiresRelativeTTL is the fix: the Manager ages
+// relative TTLs (SET ... PX/EX) in real wall time so PTTL counts down and the
+// key disappears. This is the behavior fleet-db's issue locks / worker leases /
+// leader election all depend on.
 func TestClock_StartedManagerExpiresRelativeTTL(t *testing.T) {
 	snapPath := filepath.Join(t.TempDir(), "snapshot.json")
-	m, err := NewManager(snapPath, true, nil)
+	// Fine-grained ticks so the test runs fast; FastForward still advances by
+	// real elapsed wall time, so a short TTL expires on schedule.
+	m, err := NewManager(snapPath, true, nil, withClockInterval(5*time.Millisecond))
 	if err != nil {
 		t.Fatalf("NewManager: %v", err)
 	}
-	// Fine-grained ticks so the test runs fast; FastForward still advances by
-	// real elapsed wall time, so a short TTL expires on schedule.
-	m.clockInterval = 5 * time.Millisecond
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -62,44 +68,41 @@ func TestClock_StartedManagerExpiresRelativeTTL(t *testing.T) {
 	}
 }
 
-// TestClock_FrozenWithoutStart reproduces the bug: a Manager whose clock is
-// never advanced (Start not called) leaves relative TTLs frozen forever — the
-// stored PTTL does not move and the key is immortal. This is the exact failure
-// behind locks showing PTTL=300000ms hours later.
-func TestClock_FrozenWithoutStart(t *testing.T) {
-	m, err := NewManager("", true, nil)
+// TestClock_AgesWithoutStartOrSnapshot is the regression guard for the
+// decoupling: the clock is driven by NewManager (runClock), NOT by Start, so a
+// Manager with an empty snapshotPath that is never Started STILL ages relative
+// TTLs. This is the exact configuration of the ephemeral daemonwire path, where
+// the pre-decoupling fix left TTLs frozen (immortal locks → stuck in_progress).
+// Closing the bug as a *class* means no call sequence leaves the clock frozen.
+func TestClock_AgesWithoutStartOrSnapshot(t *testing.T) {
+	// Empty snapshotPath (persistence off) + Start never called.
+	m, err := NewManager("", true, nil, withClockInterval(5*time.Millisecond))
 	if err != nil {
 		t.Fatalf("NewManager: %v", err)
 	}
 	defer m.Close()
 
 	ctx := context.Background()
-	const key = "fleet-db:locks:issue:frozen"
+	const key = "fleet-db:locks:issue:ephemeral"
 	if err := m.Client().Set(ctx, key, "holder-1", 100*time.Millisecond).Err(); err != nil {
 		t.Fatalf("Set: %v", err)
 	}
 
-	before, err := m.Client().PTTL(ctx, key).Result()
-	if err != nil {
-		t.Fatalf("PTTL: %v", err)
-	}
-
-	// Real time passes well beyond the TTL, but nothing advances the clock.
-	time.Sleep(250 * time.Millisecond)
-
-	n, err := m.Client().Exists(ctx, key).Result()
-	if err != nil {
-		t.Fatalf("Exists: %v", err)
-	}
-	if n != 1 {
-		t.Fatalf("key expired without a running clock (n=%d) — frozen-clock bug not reproduced", n)
-	}
-	after, err := m.Client().PTTL(ctx, key).Result()
-	if err != nil {
-		t.Fatalf("PTTL: %v", err)
-	}
-	if after != before {
-		t.Errorf("PTTL moved without a running clock: before=%v after=%v", before, after)
+	// Despite no Start and no snapshotPath, the clock must drive this to expiry.
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		n, err := m.Client().Exists(ctx, key).Result()
+		if err != nil {
+			t.Fatalf("Exists: %v", err)
+		}
+		if n == 0 {
+			break // expired — clock runs independent of Start/snapshot
+		}
+		if time.Now().After(deadline) {
+			pttl, _ := m.Client().PTTL(ctx, key).Result()
+			t.Fatalf("key %q never expired without Start (PTTL still %v) — clock gated on snapshot/Start again", key, pttl)
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
 }
 
@@ -109,7 +112,10 @@ func TestClock_FrozenWithoutStart(t *testing.T) {
 func TestClock_SnapshotAgesAcrossReload(t *testing.T) {
 	snapPath := filepath.Join(t.TempDir(), "snapshot.json")
 
-	m1, err := NewManager(snapPath, true, nil)
+	// Park the live clock (huge interval → no tick fires during the test) so
+	// this exercises ONLY snapshot/replay aging, not live FastForward — the
+	// dumped TTL must stay stable for the restored-vs-dumped comparison.
+	m1, err := NewManager(snapPath, true, nil, withClockInterval(time.Hour))
 	if err != nil {
 		t.Fatalf("NewManager: %v", err)
 	}
@@ -128,7 +134,7 @@ func TestClock_SnapshotAgesAcrossReload(t *testing.T) {
 	// so the restored TTL must be no larger than what was dumped (it ages even
 	// while the process was down). This is the snapshot-fidelity half noted in
 	// the plan; it works because TTLs are stored as remaining durations.
-	m2, err := NewManager(snapPath, true, nil)
+	m2, err := NewManager(snapPath, true, nil, withClockInterval(time.Hour))
 	if err != nil {
 		t.Fatalf("NewManager reload: %v", err)
 	}
