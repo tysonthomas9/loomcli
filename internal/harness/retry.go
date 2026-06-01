@@ -59,25 +59,14 @@ func DefaultRetryPolicy() RetryPolicy {
 	}
 }
 
-// attemptResult bundles a single supervised run's terminal Result with
-// the most recent RetryAfter hint observed during the run.
-//
-// SawAPIError captures whether the wrapper emitted any
-// StatusAPIError event during the run. The classifier marks
-// StatusAPIError as non-terminal because some harnesses recover on
-// their own; when the harness instead exits with a failure after
-// surfacing the API error (typical of `claude -p`), the terminal
-// status is StatusFailed and the API-error signal must be carried
-// out-of-band so the retry layer can act on it.
-type attemptResult struct {
-	Result      wrapper.Result
-	RetryAfter  time.Duration
-	SawAPIError bool
-}
-
-// runOnceFn is the seam tests use to swap in a fake harness without
-// spawning a real subprocess. Production code uses runOnceDefault.
-type runOnceFn func(ctx context.Context, cfg wrapper.Config, p RetryPolicy) (attemptResult, error)
+// runOnceFn is the seam tests use to swap in a fake harness without spawning a
+// real subprocess. Production code uses runOnceDefault. The hwharness.Result it
+// returns carries the terminal wrapper.Result (embedded) plus the out-of-band
+// retry signals the wrapper now surfaces: RetryAfter and SawAPIError (whether a
+// StatusAPIError fired mid-run — the classifier marks it non-terminal, but a
+// print-mode harness like `claude -p` may then exit Failed, so the signal must
+// reach the retry layer out-of-band).
+type runOnceFn func(ctx context.Context, cfg hwharness.Config, p RetryPolicy) (hwharness.Result, error)
 
 // sleepFn is the seam tests use to skip real sleeps. Production code
 // uses sleepDefault.
@@ -95,7 +84,7 @@ var (
 // The returned Result is the final attempt's outcome. err is non-nil
 // only for wrapper-level failures (PTY allocation, bad config) or
 // ctx.Err() if ctx was cancelled during backoff.
-func RunWithRetry(ctx context.Context, cfg wrapper.Config, p RetryPolicy) (wrapper.Result, error) {
+func RunWithRetry(ctx context.Context, cfg hwharness.Config, p RetryPolicy) (hwharness.Result, error) {
 	if p.Max == 0 && p.BaseBackoff == 0 && p.MaxBackoff == 0 {
 		// Caller passed a zero-value RetryPolicy (modulo OnActivity, which
 		// stays nil-or-set independent of defaults). Apply DefaultRetryPolicy
@@ -106,15 +95,15 @@ func RunWithRetry(ctx context.Context, cfg wrapper.Config, p RetryPolicy) (wrapp
 		p = dp
 	}
 
-	var lastResult wrapper.Result
+	var lastResult hwharness.Result
 	for attempt := 0; ; attempt++ {
 		out, err := runOnce(ctx, cfg, p)
 		if err != nil {
-			return out.Result, err
+			return out, err
 		}
-		lastResult = out.Result
+		lastResult = out
 
-		if !shouldRetry(out.Result.Status, out.SawAPIError) {
+		if !shouldRetry(out.Status, out.SawAPIError) {
 			return lastResult, nil
 		}
 		if attempt >= p.Max {
@@ -169,17 +158,12 @@ func backoffFor(p RetryPolicy, attempt int, hint time.Duration) time.Duration {
 // (TranscriptMode/OnEvent/OnDisplayLine/HookCommand) are left zero here: this is
 // the entrypoint switch only (TranscriptMode defaults to Off → no acquisition,
 // no behavior change). The OnEvent/eventstore wiring lands behind flags next.
-func runOnceDefault(ctx context.Context, cfg wrapper.Config, p RetryPolicy) (attemptResult, error) {
-	res, err := hwharness.Run(ctx, hwharness.Config{
-		Wrapper:          cfg,
-		OnActivity:       p.OnActivity,
-		ActivityInterval: p.ActivityInterval,
-	})
-	return attemptResult{
-		Result:      res.Result,
-		RetryAfter:  res.RetryAfter,
-		SawAPIError: res.SawAPIError,
-	}, err
+func runOnceDefault(ctx context.Context, cfg hwharness.Config, p RetryPolicy) (hwharness.Result, error) {
+	// OnActivity stays a RetryPolicy/supervision concern; merge it into the
+	// harness.Config the orchestrator consumes.
+	cfg.OnActivity = p.OnActivity
+	cfg.ActivityInterval = p.ActivityInterval
+	return hwharness.Run(ctx, cfg)
 }
 
 // sleepDefault is the production implementation of sleepFnT. It
