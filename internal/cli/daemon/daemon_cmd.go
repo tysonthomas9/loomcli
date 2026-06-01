@@ -60,7 +60,6 @@ type DaemonState struct {
 var daemonDryRun bool
 var daemonStopForce bool
 var daemonStopTimeout int // seconds; 0 = default (60)
-var daemonNoAutoRestart bool
 
 // daemonCmd is the parent command for daemon subcommands
 var daemonCmd = &cobra.Command{
@@ -137,8 +136,6 @@ daemon is running.`,
 func init() {
 	daemonCmd.Flags().BoolVar(&daemonDryRun, "dry-run", false,
 		"Validate config and print what would be started without actually starting")
-	daemonCmd.Flags().BoolVar(&daemonNoAutoRestart, "no-auto-restart", false,
-		"Do not re-exec the daemon after a fatal supervisor exit (use when an external supervisor manages restarts)")
 	daemonCmd.AddCommand(daemonStatusCmd)
 	daemonCmd.AddCommand(daemonLogsCmd)
 	daemonStopCmd.Flags().BoolVarP(&daemonStopForce, "force", "f", false,
@@ -195,18 +192,10 @@ func runDaemon(cmd *cobra.Command, args []string) {
 	// the daemon has cleaned up its on-disk footprint.
 	_ = cmd
 	_ = args
-	start := time.Now()
 	exitCode := runDaemonBody()
-	if exitCode == 0 {
-		return
+	if exitCode != 0 {
+		os.Exit(exitCode)
 	}
-	// A fatal supervisor exit (e.g. a host suspend that tripped the liveness
-	// watchdog, or a fleet-db blip) is usually transient. Unless disabled,
-	// re-exec a fresh daemon — runDaemonBody's defers have already released the
-	// lock/PID files — with a bounded, backed-off budget so the fleet self-heals
-	// instead of going dark. Does not return on a successful re-exec.
-	exitCode = maybeRestartDaemon(exitCode, !daemonNoAutoRestart, time.Since(start))
-	os.Exit(exitCode)
 }
 
 // runDaemonBody is the body of `loom daemon`, factored out so its defers can
@@ -278,7 +267,7 @@ func awaitDaemonExit(shutdown <-chan struct{}, fatalCh <-chan error) int {
 	case err := <-fatalCh:
 		log.Printf("[daemon] FATAL: %v — exiting non-zero", err)
 		fmt.Fprintf(os.Stderr, "\n[daemon] FATAL: %v\n", err)
-		return fatalSupervisorExitCode
+		return 2
 	}
 }
 
