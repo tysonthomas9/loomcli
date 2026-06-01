@@ -803,24 +803,11 @@ func HandleMultiRunEventStream(st store.Store) http.HandlerFunc {
 
 func HandleCancel(st store.Store) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		now := time.Now().UTC()
-		finishedAt := &now
-		status := domain.WorkflowRunCancelled
-		run, err := st.WorkflowRuns().Update(r.Context(), r.PathValue("ws"), r.PathValue("runID"), store.WorkflowRunUpdate{
-			Status:     &status,
-			FinishedAt: &finishedAt,
-		})
+		run, err := workflowpkg.CancelRun(r.Context(), st, r.PathValue("ws"), r.PathValue("runID"), map[string]any{"actor": actorName(r)})
 		if err != nil {
-			handler.HandleServiceError(w, storeError("cancel workflow run", err))
+			handler.HandleServiceError(w, storeError(err.Error(), err))
 			return
 		}
-		_, _ = st.RunEvents().Append(r.Context(), store.RunEventAppend{
-			WorkspaceKey:  run.WorkspaceKey,
-			WorkflowRunID: run.RunID,
-			Type:          "workflow_cancelled",
-			Message:       "workflow run cancelled",
-			Data:          mustJSON(map[string]string{"actor": actorName(r)}),
-		})
 		handler.WriteJSON(w, http.StatusOK, run)
 	}
 }

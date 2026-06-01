@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
 	defspkg "github.com/tysonthomas9/loomcli/internal/defs"
@@ -434,6 +435,52 @@ func TestWorkflowRunAPICreatesInspectableRun(t *testing.T) {
 	}
 	if cancelled.Status != domain.WorkflowRunCancelled {
 		t.Fatalf("cancelled status = %s, want cancelled", cancelled.Status)
+	}
+}
+
+func TestWorkflowRunAPICancelRejectsTerminalRun(t *testing.T) {
+	ctx := context.Background()
+	st := memstore.New()
+	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "WS", Name: "Workflow Store"}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	run, err := st.WorkflowRuns().CreateOrResume(ctx, store.WorkflowRunCreate{
+		WorkspaceKey: "WS",
+		WorkflowName: "done-workflow",
+		Status:       domain.WorkflowRunRunning,
+	})
+	if err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+	finishedAt := time.Date(2026, 6, 1, 12, 0, 0, 0, time.UTC)
+	finishedAtPtr := &finishedAt
+	completed := domain.WorkflowRunCompleted
+	if _, err := st.WorkflowRuns().Update(ctx, "WS", run.RunID, store.WorkflowRunUpdate{
+		Status:     &completed,
+		FinishedAt: &finishedAtPtr,
+	}); err != nil {
+		t.Fatalf("complete run: %v", err)
+	}
+
+	mux := workflowMux(st, nil)
+	cancelRec := postJSON(t, mux, "/api/workspaces/WS/workflow-runs/"+run.RunID+"/cancel", map[string]any{})
+	if cancelRec.Code != http.StatusConflict {
+		t.Fatalf("cancel terminal status = %d, want 409; body=%s", cancelRec.Code, cancelRec.Body.String())
+	}
+	var errBody map[string]string
+	if err := json.Unmarshal(cancelRec.Body.Bytes(), &errBody); err != nil {
+		t.Fatalf("decode cancel terminal error body: %v", err)
+	}
+	if !strings.Contains(errBody["error"], `already in terminal state "completed"`) {
+		t.Fatalf("cancel terminal error = %q, want terminal state message", errBody["error"])
+	}
+	unchanged, err := st.WorkflowRuns().Get(ctx, "WS", run.RunID)
+	if err != nil {
+		t.Fatalf("get unchanged run: %v", err)
+	}
+	if unchanged.Status != domain.WorkflowRunCompleted ||
+		unchanged.FinishedAt == nil || !unchanged.FinishedAt.Equal(finishedAt) {
+		t.Fatalf("unchanged run = %+v, want completed status and original finished_at", unchanged)
 	}
 }
 

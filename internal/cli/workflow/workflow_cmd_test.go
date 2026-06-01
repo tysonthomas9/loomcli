@@ -150,6 +150,46 @@ func TestWorkflowCancelJSON(t *testing.T) {
 	})
 }
 
+func TestWorkflowCancelRejectsTerminalRun(t *testing.T) {
+	ctx := context.Background()
+	st := memstore.New()
+	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "WF", Name: "Workflow CLI"}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	if err := workflowpkg.EnsureBuiltins(ctx, st, "WF"); err != nil {
+		t.Fatalf("EnsureBuiltins() error = %v", err)
+	}
+	run, err := workflowpkg.CreateOrResumeRun(ctx, st, "WF", workflowpkg.RunParentWorkItemsName, []byte(`{"parentId":"EPIC-1"}`), "test")
+	if err != nil {
+		t.Fatalf("CreateOrResumeRun() error = %v", err)
+	}
+	finishedAt := time.Date(2026, 6, 1, 12, 0, 0, 0, time.UTC)
+	finishedAtPtr := &finishedAt
+	completed := domain.WorkflowRunCompleted
+	if _, err := st.WorkflowRuns().Update(ctx, "WF", run.RunID, store.WorkflowRunUpdate{
+		Status:     &completed,
+		FinishedAt: &finishedAtPtr,
+	}); err != nil {
+		t.Fatalf("complete run: %v", err)
+	}
+
+	withWorkflowStore(t, st, "WF")
+	withWorkflowGlobals(t, func() {
+		err := runWorkflowCancel(nil, []string{run.RunID})
+		if err == nil || !strings.Contains(err.Error(), `cannot cancel workflow run `+run.RunID+`: already in terminal state "completed"`) {
+			t.Fatalf("runWorkflowCancel() error = %v, want terminal rejection", err)
+		}
+		unchanged, err := st.WorkflowRuns().Get(ctx, "WF", run.RunID)
+		if err != nil {
+			t.Fatalf("get unchanged run: %v", err)
+		}
+		if unchanged.Status != domain.WorkflowRunCompleted ||
+			unchanged.FinishedAt == nil || !unchanged.FinishedAt.Equal(finishedAt) {
+			t.Fatalf("unchanged run = %+v, want completed status and original finished_at", unchanged)
+		}
+	})
+}
+
 func TestWorkflowTasksJSON(t *testing.T) {
 	ctx := context.Background()
 	st := memstore.New()

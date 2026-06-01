@@ -930,22 +930,10 @@ func parseWorkflowTriggerFilter(raw string) (map[string]string, json.RawMessage,
 
 func runWorkflowCancel(_ *cobra.Command, args []string) error {
 	return workflowWithActiveWorkspace(func(ctx context.Context, h *bootstrap.StoreHandle, ws string) error {
-		now := time.Now().UTC()
-		finishedAt := &now
-		status := domain.WorkflowRunCancelled
-		run, err := h.Store.WorkflowRuns().Update(ctx, ws, args[0], store.WorkflowRunUpdate{
-			Status:     &status,
-			FinishedAt: &finishedAt,
-		})
+		run, err := workflowpkg.CancelRun(ctx, h.Store, ws, args[0], nil)
 		if err != nil {
-			return fmt.Errorf("cancel workflow run: %w", err)
+			return err
 		}
-		_, _ = h.Store.RunEvents().Append(ctx, store.RunEventAppend{
-			WorkspaceKey:  ws,
-			WorkflowRunID: run.RunID,
-			Type:          "workflow_cancelled",
-			Message:       "workflow run cancelled",
-		})
 		if workflowCancelJSON {
 			return workflowWriteJSON(run)
 		}

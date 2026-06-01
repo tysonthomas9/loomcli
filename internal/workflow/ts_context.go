@@ -443,27 +443,10 @@ func applyWorkflowWaitUntilOperation(ctx context.Context, st store.Store, run *d
 }
 
 func applyWorkflowCancelOperation(ctx context.Context, st store.Store, run *domain.WorkflowRun, params map[string]any) (*domain.WorkflowRun, error) {
-	now := time.Now().UTC()
-	finishedAt := &now
-	status := domain.WorkflowRunCancelled
-	updated, err := st.WorkflowRuns().Update(ctx, run.WorkspaceKey, run.RunID, store.WorkflowRunUpdate{
-		Status:     &status,
-		FinishedAt: &finishedAt,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("cancel workflow run: %w", err)
-	}
 	data := copyAnyMap(params)
 	data["workflow_run_id"] = run.RunID
 	data["source"] = "workflow_context"
-	_, _ = st.RunEvents().Append(ctx, store.RunEventAppend{
-		WorkspaceKey:  run.WorkspaceKey,
-		WorkflowRunID: run.RunID,
-		Type:          "workflow_cancelled",
-		Message:       "TypeScript WorkflowContext cancelled workflow run",
-		Data:          mustJSON(data),
-	})
-	return updated, nil
+	return CancelRun(ctx, st, run.WorkspaceKey, run.RunID, data)
 }
 
 func appendAgentDispatchAdmittedEvent(ctx context.Context, st store.Store, run *domain.WorkflowRun, params map[string]any) error {
