@@ -79,7 +79,7 @@ func runHarness(parent context.Context, shutdown <-chan struct{}, inv harnessInv
 		inv.RetryPolicy.OnActivity = cli.DaemonActivityObserver()
 	}
 
-	res, runErr := wrapperRun(ctx, hwharness.Config{
+	hwCfg := hwharness.Config{
 		Wrapper: wrapper.Config{
 			BinaryPath: inv.BinaryName,
 			Args:       inv.Args,
@@ -89,9 +89,17 @@ func runHarness(parent context.Context, shutdown <-chan struct{}, inv harnessInv
 			Stdout:     pw,
 			Harness:    inv.HarnessName,
 		},
-		// Transcript-acquisition fields (TranscriptMode/OnEvent/HookCommand) are
-		// added behind flags in the next step; default zero ⇒ Off, no acquisition.
-	}, inv.RetryPolicy)
+		// Transcript acquisition, gated by env flags (default Off ⇒ no behavior
+		// change). When enabled, harness.Run drives StreamParse/Hooks and emits
+		// to OnEvent; output still flows via pw→LineHandler for display.
+		TranscriptMode: transcriptModeFromEnv(),
+		HookCommand:    loomHookCommand(),
+	}
+	if sink, runID := eventStoreSink(inv.WorkDir); sink != nil {
+		hwCfg.OnEvent = sink
+		hwCfg.RunID = runID
+	}
+	res, runErr := wrapperRun(ctx, hwCfg, inv.RetryPolicy)
 	_ = pw.Close()
 	outputTail := <-scanDone
 
