@@ -53,7 +53,9 @@ func loomHookCommand() []string {
 	if err != nil || exe == "" {
 		return nil
 	}
-	return []string{exe, "hooks"}
+	// The wrapper renders `<exe> hooks dispatch <harness> <event>` — loom's
+	// generic forwarder (internal/cli/hooks hooksDispatchCmd → HandleHookEvent).
+	return []string{exe, "hooks", "dispatch"}
 }
 
 // eventStoreSink builds the durable OnEvent sink + the RunID for the active loom
