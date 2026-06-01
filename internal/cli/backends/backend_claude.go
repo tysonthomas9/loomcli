@@ -14,10 +14,25 @@ import (
 	"sync"
 	"syscall"
 
+	hwharness "github.com/olesho/harness-wrapper/pkg/harness"
+	_ "github.com/olesho/harness-wrapper/pkg/harness/claude" // register the "claude" profile
+
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/harness"
 	"github.com/tysonthomas9/loomcli/internal/usage"
 )
+
+// claudeProfileCaps resolves the Claude harness profile's capabilities once.
+// Session-id extraction and the --resume arg prefix now live in harness-wrapper
+// (pkg/harness/claude); loom delegates to them so the per-harness knowledge has
+// one home and other harnesses can gain the same capabilities centrally.
+var claudeProfileCaps = sync.OnceValue(func() hwharness.ResolvedProfile {
+	p, ok := hwharness.For("claude")
+	if !ok {
+		return hwharness.ResolvedProfile{}
+	}
+	return p.Resolve(hwharness.ResolveContext{})
+})
 
 // DefaultMaxBudgetUSD is the default per-session budget ceiling for non-interactive
 // Claude invocations. Analysis of 287 sessions shows median session cost well under $2;
@@ -232,13 +247,15 @@ func buildClaudeEnv(workDir, agentName string) []string {
 // prompt via a real pipe through cmd.StdinPipe.
 func buildClaudeNonInteractiveArgs(resumeSessionID, prompt string) []string {
 	var args []string
+	// Resume prefix comes from the harness profile (pkg/harness/claude), not a
+	// hardcoded literal — so resume is owned in one place across harnesses.
 	if resumeSessionID != "" {
-		args = []string{"--resume", "--session-id", resumeSessionID, "-p", "--verbose",
-			"--output-format", "stream-json", "--dangerously-skip-permissions"}
-	} else {
-		args = []string{"-p", "--verbose", "--output-format", "stream-json",
-			"--dangerously-skip-permissions"}
+		if caps := claudeProfileCaps(); caps.Resume != nil {
+			args = append(args, caps.Resume.ResumeArgs(resumeSessionID)...)
+		}
 	}
+	args = append(args, "-p", "--verbose", "--output-format", "stream-json",
+		"--dangerously-skip-permissions")
 	if budget := resolveMaxBudgetUSD(); budget != "" {
 		args = append(args, "--max-budget-usd", budget)
 	}
@@ -292,10 +309,10 @@ func defaultClaudeNonInteractiveInvoker(workDir, prompt, agentName string, shutd
 		RetryPolicy: harness.DefaultRetryPolicy(),
 	})
 
-	if cerr := cli.ClearLockClaudeSessionID(workDir); cerr != nil {
-		fmt.Fprintf(os.Stderr, "[loom] failed to clear claude session ID: %v\n", cerr)
-	}
-
+	// NOTE: the lock's Claude session ID is intentionally NOT cleared per-invoke.
+	// It must survive a failed/killed run so a daemon restart can carry it forward
+	// and --resume (P4). Clearing happens only on SUCCESS — in the daemon path
+	// (runTaskDaemon/runPlanDaemon) and the auto-loop's task-completion handler.
 	return err
 }
 
@@ -402,24 +419,15 @@ type StreamUsage struct {
 	CacheCreationInputTokens int64 `json:"cache_creation_input_tokens"`
 }
 
-// extractClaudeSessionID parses a stream-json line and returns the session_id
-// if the line is a system init event (type:"system", subtype:"init").
+// extractClaudeSessionID delegates to the Claude harness profile's session-id
+// extractor (pkg/harness/claude). The parsing logic now lives in harness-wrapper;
+// this thin shim preserves the existing call sites + tests with identical behavior.
 func extractClaudeSessionID(line string) (string, bool) {
-	var event struct {
-		Type      string `json:"type"`
-		Subtype   string `json:"subtype"`
-		SessionID string `json:"session_id"`
-	}
-	if err := json.Unmarshal([]byte(line), &event); err != nil {
+	caps := claudeProfileCaps()
+	if caps.SessionID == nil {
 		return "", false
 	}
-	if event.Type != "system" || event.Subtype != "init" {
-		return "", false
-	}
-	if event.SessionID == "" {
-		return "", false
-	}
-	return event.SessionID, true
+	return caps.SessionID.ExtractSessionID(line)
 }
 
 // displayStreamEvent parses JSON event and displays relevant content

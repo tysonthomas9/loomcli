@@ -137,6 +137,10 @@ func runTaskDaemon(deps *cli.Deps, worktreePath, agentName string) {
 
 	emitTaskClaimedFromEnv(agentName, assignedTaskID)
 
+	// P4: if this is a same-task daemon restart, resume the prior Claude session
+	// carried forward in the lock instead of cold-starting. Guarded + conservative.
+	maybeResumeDaemonSession(worktreePath, assignedTaskID)
+
 	beforeRef := automode.CaptureHEADRef(worktreePath)
 	startedAt := time.Now()
 
@@ -148,6 +152,11 @@ func runTaskDaemon(deps *cli.Deps, worktreePath, agentName string) {
 	shutdown := automode.SetupSignalHandler()
 	collector := usage.NewCollector(cli.GetBackendName(), agentName)
 	invokeErr := deps.Agent.InvokeNonInteractive(worktreePath, prompt, agentName, shutdown, collector)
+	if invokeErr == nil {
+		// Success: drop the carried session so the next restart starts the next
+		// task fresh. On failure we KEEP it (carry-forward → resume on respawn).
+		clearDaemonResumeOnSuccess(worktreePath)
+	}
 
 	emitTaskLifecycleResult(agentName, worktreePath, startedAt, invokeErr)
 	finalizeAgentSession(sess, worktreePath, beforeRef, invokeErr)
