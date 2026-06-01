@@ -3,14 +3,12 @@
  * Displays a single issue as a card with title, ID, priority badge, and optional blocked indicator.
  */
 
-import { memo } from "react";
+import { memo, useMemo } from "react";
 
-import { getStatusDotColor, getStatusLabel } from "@/components/AgentCard";
 import { BlockedBadge } from "@/components/BlockedBadge";
 import { HighlightText } from "@/components/HighlightText";
 import { RepoBadge } from "@/components/RepoBadge";
 import { TypeIcon } from "@/components/TypeIcon";
-import { getAvatarColor } from "@/utils/colorUtils";
 import { useHasActiveSession } from "@/contexts/IssueSessionContext";
 import { useSearchTerm } from "@/contexts/SearchTermContext";
 import { useStore } from "zustand";
@@ -18,7 +16,7 @@ import { useStore } from "zustand";
 import { useAgentStoreInstance } from "@/hooks";
 import { useWorkspaceContext } from "@/hooks/workspace";
 import type { BlockerRef, Issue } from "@/types";
-import { isKnownIssueType, parseLoomStatus } from "@/types";
+import { isKnownIssueType } from "@/types";
 import {
   formatIssueId,
   getOpenStatus,
@@ -29,6 +27,7 @@ import {
 } from "@/utils/issue";
 
 import { AgentRow } from "./AgentRow";
+import { resolveCardAgent } from "./cardAgentView";
 import styles from "./IssueCard.module.css";
 
 /**
@@ -132,41 +131,15 @@ export const IssueCard = memo(function IssueCard({
   const reviewType = getReviewType(issue);
   const openStatus = columnId === "ready" ? getOpenStatus(issue) : null;
 
-  // Compute agent row data for in_progress and review cards with an assignee
-  const showAgentRow =
-    (columnId === "in_progress" || columnId === "review") && !!issue.assignee;
-  const isReviewColumn = columnId === "review";
-  // Liveness join: the live agent claiming this task is the one whose
-  // current_task_id points at this issue, not the one whose name matches
-  // the saved assignee. The two can diverge (stale assignee after a
-  // worker crash, mid-handoff between siblings) — and that divergence is
-  // exactly what "agent missing" needs to surface.
-  //
-  // active_task_id is fleet-db's DERIVED claim (session+lease join); it is the
-  // only one populated on the store-backed serve path, where the lock-derived
-  // current_task_id stays empty even for a provably-working agent (same reason
-  // live_status exists). Match either so a working agent resolves to its card
-  // instead of falsely reading "agent missing".
-  const assignedAgent = agents.find(
-    (a) => a.current_task_id === issue.id || a.active_task_id === issue.id,
+  // The card's agent state — a single, semantic view-model resolving the
+  // live-claimant (by task id) and assignee-named (by name) joins plus review
+  // suppression in one pure place. AgentRow renders from it as a total function.
+  // Closes over primitives only so the memo deps don't need the whole issue.
+  const { id: issueId, assignee } = issue;
+  const cardAgent = useMemo(
+    () => resolveCardAgent(agents, { id: issueId, assignee }, columnId),
+    [agents, issueId, assignee, columnId],
   );
-  const agentParsedStatus = assignedAgent
-    ? parseLoomStatus(assignedAgent.status)
-    : null;
-  // On in_progress cards where the issue claims an assignee, but no live
-  // agent is claiming the task (by current_task_id or the derived
-  // active_task_id), the task is orphaned. Review cards intentionally don't
-  // show "missing" — the agent legitimately releases the task at handoff.
-  const isAgentMissing =
-    columnId === "in_progress" && !!issue.assignee && !assignedAgent;
-  // A stalled agent isn't on this task (current_task_id won't match), so look
-  // it up by name to surface WHY it stopped — its last failed run's error_class
-  // — alongside "agent missing" instead of just the bare label.
-  const assigneeName = issue.assignee?.replace(/^\[H\]\s*/, "");
-  const assigneeAgent = assigneeName
-    ? agents.find((a) => a.name === assigneeName)
-    : undefined;
-  const assigneeLastErrorClass = assigneeAgent?.last_error_class;
 
   const rootClassName = className
     ? `${styles.issueCard} ${className}`
@@ -312,34 +285,8 @@ export const IssueCard = memo(function IssueCard({
           <RepoBadge repoName={issue.repo} />
         </div>
       )}
-      {showAgentRow && issue.assignee && (
-        <AgentRow
-          agentName={issue.assignee}
-          status={isReviewColumn ? null : agentParsedStatus}
-          avatarColor={getAvatarColor(issue.assignee.replace(/^\[H\]\s*/, ""))}
-          dotColor={
-            isReviewColumn
-              ? undefined
-              : agentParsedStatus
-                ? getStatusDotColor(agentParsedStatus.type)
-                : undefined
-          }
-          activity={
-            isReviewColumn
-              ? "Submitted for review"
-              : agentParsedStatus && assignedAgent
-                ? getStatusLabel(agentParsedStatus)
-                : undefined
-          }
-          lastActivityAt={
-            isReviewColumn
-              ? undefined
-              : (assignedAgent?.last_activity_at ?? null)
-          }
-          agentMissing={isAgentMissing}
-          lastErrorClass={isReviewColumn ? undefined : assigneeLastErrorClass}
-        />
-      )}
+      {/* AgentRow renders null for kind: "none" — single source of truth. */}
+      <AgentRow view={cardAgent} />
     </article>
   );
 });

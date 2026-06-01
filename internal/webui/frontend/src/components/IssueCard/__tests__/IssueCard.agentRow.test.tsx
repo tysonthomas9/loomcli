@@ -53,8 +53,9 @@ vi.mock("@/hooks", async (importOriginal) => {
   };
 });
 
-// Mock AgentCard status helpers to return predictable values.
-vi.mock("@/components/AgentCard", () => ({
+// Mock the status presentation helpers (now in @/utils/agent, consumed by
+// AgentRow) to return predictable values.
+vi.mock("@/utils/agent", () => ({
   getStatusDotColor: vi.fn(() => "#22c55e"),
   getStatusLabel: vi.fn(() => "Working"),
 }));
@@ -98,12 +99,15 @@ function createMockAgent(
 }
 
 /**
- * Helper to configure the mock agent store state with a specific agent.
+ * Helper to configure the mock agent store state. Accepts a single agent, an
+ * array (for divergence cases: a live claimant plus a separate assignee-named
+ * agent), or undefined for the empty store.
  */
-function setupAgentContext(agent: LoomAgentStatus | undefined) {
-  mockAgentStoreState = {
-    agents: agent ? [agent] : [],
-  };
+function setupAgentContext(
+  agents: LoomAgentStatus | LoomAgentStatus[] | undefined,
+) {
+  const list = agents == null ? [] : Array.isArray(agents) ? agents : [agents];
+  mockAgentStoreState = { agents: list };
 }
 
 describe("IssueCard AgentRow integration", () => {
@@ -147,6 +151,36 @@ describe("IssueCard AgentRow integration", () => {
       // The agent is provably on this task, so no false "agent missing".
       expect(screen.queryByText("agent missing")).not.toBeInTheDocument();
       expect(screen.getByText("oleh")).toBeInTheDocument();
+    });
+
+    it("shows live activity (not a stale red error) when the assignee-named agent failed but a different agent is live on the task", () => {
+      // Regression guard for the original bug: lastErrorClass was sourced from
+      // the assignee-named agent and rendered red even while a different agent
+      // was provably live on the task, hiding the live activity.
+      const liveClaimant = createMockAgent({
+        name: "jack-worker",
+        current_task_id: "",
+        active_task_id: "test-issue-abc123",
+        live_status: "working",
+      });
+      const staleAssignee = createMockAgent({
+        name: "oleh",
+        status: "idle",
+        current_task_id: "",
+        active_task_id: "",
+        live_status: "idle",
+        last_error_class: "RateLimited",
+      });
+      setupAgentContext([liveClaimant, staleAssignee]);
+
+      const issue = createTestIssue({ assignee: "oleh" });
+      render(<IssueCard issue={issue} columnId="in_progress" />);
+
+      // The live claimant wins: the working label shows, the stale error does not.
+      expect(screen.getByText("Working")).toBeInTheDocument();
+      expect(
+        screen.queryByText(/rate limited|run failed|agent missing/),
+      ).not.toBeInTheDocument();
     });
 
     it('renders AgentRow with the saved assignee name and "agent missing" when no live agent has current_task_id === issue.id', () => {
