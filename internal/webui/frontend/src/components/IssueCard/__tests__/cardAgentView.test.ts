@@ -37,7 +37,9 @@ describe("resolveAgentForTask", () => {
   });
 
   it("returns undefined when nothing matches", () => {
-    expect(resolveAgentForTask([agent({ active_task_id: "other" })], TASK)).toBeUndefined();
+    expect(
+      resolveAgentForTask([agent({ active_task_id: "other" })], TASK),
+    ).toBeUndefined();
   });
 
   it("prefers an active_task_id match over a current_task_id match, regardless of array order (immortal-lock guard)", () => {
@@ -45,9 +47,9 @@ describe("resolveAgentForTask", () => {
     // task via active_task_id. The live one must win.
     const staleLockHolder = agent({ name: "stale-B", current_task_id: TASK });
     const liveSessionHolder = agent({ name: "live-A", active_task_id: TASK });
-    expect(resolveAgentForTask([staleLockHolder, liveSessionHolder], TASK)).toBe(
-      liveSessionHolder,
-    );
+    expect(
+      resolveAgentForTask([staleLockHolder, liveSessionHolder], TASK),
+    ).toBe(liveSessionHolder);
   });
 });
 
@@ -75,8 +77,16 @@ describe("resolveCardAgent", () => {
   });
 
   it("returns claimed when an agent matches by current_task_id", () => {
-    const a = agent({ name: "nova", status: "working: T (5m)", current_task_id: TASK });
-    const view = resolveCardAgent([a], { id: TASK, assignee: "nova" }, "in_progress");
+    const a = agent({
+      name: "nova",
+      status: "working: T (5m)",
+      current_task_id: TASK,
+    });
+    const view = resolveCardAgent(
+      [a],
+      { id: TASK, assignee: "nova" },
+      "in_progress",
+    );
     expect(view.kind).toBe("claimed");
     if (view.kind === "claimed") {
       expect(view.status.type).toBe("working");
@@ -92,15 +102,27 @@ describe("resolveCardAgent", () => {
       active_task_id: TASK,
       live_status: "working",
     });
-    const view = resolveCardAgent([a], { id: TASK, assignee: "oleh" }, "in_progress");
+    const view = resolveCardAgent(
+      [a],
+      { id: TASK, assignee: "oleh" },
+      "in_progress",
+    );
     expect(view.kind).toBe("claimed");
     // effectiveAgentStatus upgrades the idle raw status using live_status.
     if (view.kind === "claimed") expect(view.status.type).toBe("working");
   });
 
   it("returns missing with no errorClass when nobody claims the task and no same-named agent exists", () => {
-    const view = resolveCardAgent([], { id: TASK, assignee: "ghost" }, "in_progress");
-    expect(view).toEqual({ kind: "missing", displayName: "ghost", errorClass: undefined });
+    const view = resolveCardAgent(
+      [],
+      { id: TASK, assignee: "ghost" },
+      "in_progress",
+    );
+    expect(view).toEqual({
+      kind: "missing",
+      displayName: "ghost",
+      errorClass: undefined,
+    });
   });
 
   it("returns missing with the assignee-named agent's last_error_class when orphaned", () => {
@@ -110,7 +132,11 @@ describe("resolveCardAgent", () => {
       active_task_id: "",
       last_error_class: "SpawnFailure",
     });
-    const view = resolveCardAgent([idleFailed], { id: TASK, assignee: "ghost" }, "in_progress");
+    const view = resolveCardAgent(
+      [idleFailed],
+      { id: TASK, assignee: "ghost" },
+      "in_progress",
+    );
     expect(view).toEqual({
       kind: "missing",
       displayName: "ghost",

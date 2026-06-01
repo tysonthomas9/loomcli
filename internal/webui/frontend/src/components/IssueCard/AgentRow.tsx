@@ -111,7 +111,11 @@ function computeSlot(
 ): ActivitySlot {
   switch (view.kind) {
     case "review":
-      return { text: "Submitted for review", state: "neutral", title: undefined };
+      return {
+        text: "Submitted for review",
+        state: "neutral",
+        title: undefined,
+      };
     case "missing": {
       const label = errorClassLabel(view.errorClass);
       return {
@@ -122,12 +126,18 @@ function computeSlot(
     }
     case "claimed": {
       const label = getStatusLabel(view.status);
-      const parsedAt = view.lastActivityAt ? Date.parse(view.lastActivityAt) : NaN;
+      const parsedAt = view.lastActivityAt
+        ? Date.parse(view.lastActivityAt)
+        : NaN;
       const ago = Number.isFinite(parsedAt)
         ? formatRelativeAgo(parsedAt, now())
         : undefined;
       if (label && ago) {
-        return { text: `${label} · ${ago}`, state: "neutral", title: undefined };
+        return {
+          text: `${label} · ${ago}`,
+          state: "neutral",
+          title: undefined,
+        };
       }
       if (label) {
         return { text: label, state: "neutral", title: undefined };
@@ -136,7 +146,11 @@ function computeSlot(
         return { text: ago, state: "neutral", title: undefined };
       }
       if (view.lastActivityAt === null) {
-        return { text: "awaiting activity", state: "neutral", title: undefined };
+        return {
+          text: "awaiting activity",
+          state: "neutral",
+          title: undefined,
+        };
       }
       return { text: undefined, state: undefined, title: undefined };
     }

@@ -33,10 +33,18 @@ function claimed(overrides: Partial<ClaimedView> = {}): CardAgentView {
 }
 
 function missing(overrides: Partial<MissingView> = {}): CardAgentView {
-  return { kind: "missing", displayName: "nova", errorClass: undefined, ...overrides };
+  return {
+    kind: "missing",
+    displayName: "nova",
+    errorClass: undefined,
+    ...overrides,
+  };
 }
 
-const review = (displayName = "nova"): CardAgentView => ({ kind: "review", displayName });
+const review = (displayName = "nova"): CardAgentView => ({
+  kind: "review",
+  displayName,
+});
 
 describe("AgentRow", () => {
   describe("rendering", () => {
@@ -56,7 +64,9 @@ describe("AgentRow", () => {
     });
 
     it("derives an avatar background color from the name", () => {
-      const { container } = render(<AgentRow view={missing({ displayName: "nova" })} />);
+      const { container } = render(
+        <AgentRow view={missing({ displayName: "nova" })} />,
+      );
       // The avatar div is the styled element (missing has no status dot).
       const avatar = container.querySelector("[style]") as HTMLElement;
       expect(avatar).toBeInTheDocument();
@@ -98,7 +108,9 @@ describe("AgentRow", () => {
       render(
         <AgentRow view={claimed({ lastActivityAt: at })} now={() => NOW_MS} />,
       );
-      expect(screen.getByText("Working · last seen 30m ago")).toBeInTheDocument();
+      expect(
+        screen.getByText("Working · last seen 30m ago"),
+      ).toBeInTheDocument();
     });
 
     describe("self-refresh ticker (mirrors ConnectionBanner pattern)", () => {
@@ -109,7 +121,9 @@ describe("AgentRow", () => {
         const NOW_MS = Date.UTC(2026, 4, 21, 12, 0, 0);
         let nowMs = NOW_MS;
         const at = new Date(NOW_MS - 1_000).toISOString();
-        render(<AgentRow view={claimed({ lastActivityAt: at })} now={() => nowMs} />);
+        render(
+          <AgentRow view={claimed({ lastActivityAt: at })} now={() => nowMs} />,
+        );
         expect(screen.getByText("Working · active 1s ago")).toBeInTheDocument();
 
         nowMs += 15_000;
@@ -123,7 +137,9 @@ describe("AgentRow", () => {
 
   describe("missing", () => {
     it('renders a red "agent missing" with no reason when errorClass is absent', () => {
-      const { container } = render(<AgentRow view={missing({ displayName: "worker2" })} />);
+      const { container } = render(
+        <AgentRow view={missing({ displayName: "worker2" })} />,
+      );
       expect(screen.getByText("agent missing")).toBeInTheDocument();
       expect(container.querySelector('[class*="activity"]')).toHaveAttribute(
         "data-state",
@@ -135,7 +151,9 @@ describe("AgentRow", () => {
       const { container } = render(
         <AgentRow view={missing({ errorClass: "SpawnFailure" })} />,
       );
-      expect(screen.getByText("agent missing · launch failed")).toBeInTheDocument();
+      expect(
+        screen.getByText("agent missing · launch failed"),
+      ).toBeInTheDocument();
       const activity = container.querySelector('[class*="activity"]');
       expect(activity).toHaveAttribute("data-state", "missing");
       expect(activity).toHaveAttribute("title", "SpawnFailure");
@@ -143,11 +161,15 @@ describe("AgentRow", () => {
 
     it("renders an unknown error_class as a generic 'run failed'", () => {
       render(<AgentRow view={missing({ errorClass: "Wat" })} />);
-      expect(screen.getByText("agent missing · run failed")).toBeInTheDocument();
+      expect(
+        screen.getByText("agent missing · run failed"),
+      ).toBeInTheDocument();
     });
 
     it("renders no status dot", () => {
-      const { container } = render(<AgentRow view={missing({ errorClass: "SpawnFailure" })} />);
+      const { container } = render(
+        <AgentRow view={missing({ errorClass: "SpawnFailure" })} />,
+      );
       expect(container.querySelector('[class*="statusDot"]')).toBeNull();
     });
   });
@@ -185,7 +207,9 @@ describe("AgentRow", () => {
     });
 
     it("handles a name that is only [H]", () => {
-      const { container } = render(<AgentRow view={missing({ displayName: "[H]" })} />);
+      const { container } = render(
+        <AgentRow view={missing({ displayName: "[H]" })} />,
+      );
       const nameSpan = container.querySelector('[class*="name"]');
       expect(nameSpan).toBeInTheDocument();
       expect(nameSpan?.textContent).toBe("");
@@ -195,7 +219,9 @@ describe("AgentRow", () => {
   describe("CSS classes", () => {
     it("renders with agentRow class", () => {
       const { container } = render(<AgentRow view={claimed()} />);
-      expect((container.firstChild as HTMLElement).className).toMatch(/agentRow/);
+      expect((container.firstChild as HTMLElement).className).toMatch(
+        /agentRow/,
+      );
     });
 
     it("renders avatar with avatar class", () => {
