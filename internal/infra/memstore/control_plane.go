@@ -254,6 +254,224 @@ func (s *agentSessionStore) Update(_ context.Context, ws, sessionID string, patc
 	return cloneAgentSession(session), nil
 }
 
+type agentSessionOperationStore struct {
+	mu    sync.RWMutex
+	items map[string]map[string]*domain.AgentSessionOperation
+}
+
+func newAgentSessionOperationStore() *agentSessionOperationStore {
+	return &agentSessionOperationStore{items: make(map[string]map[string]*domain.AgentSessionOperation)}
+}
+
+var _ store.AgentSessionOperationStore = (*agentSessionOperationStore)(nil)
+
+func (s *agentSessionOperationStore) Upsert(_ context.Context, in store.AgentSessionOperationUpsert) (*domain.AgentSessionOperation, error) {
+	if in.WorkspaceKey == "" || in.OperationID == "" || in.SessionID == "" || in.AgentID == "" {
+		return nil, fmt.Errorf("workspace_key + operation_id + session_id + agent_id required: %w", domain.ErrInvalid)
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.items[in.WorkspaceKey] == nil {
+		s.items[in.WorkspaceKey] = make(map[string]*domain.AgentSessionOperation)
+	}
+	now := time.Now().UTC()
+	createdAt := now
+	if existing := s.items[in.WorkspaceKey][in.OperationID]; existing != nil && !existing.CreatedAt.IsZero() {
+		createdAt = existing.CreatedAt
+	}
+	op := &domain.AgentSessionOperation{
+		WorkspaceKey:      in.WorkspaceKey,
+		OperationID:       in.OperationID,
+		SessionID:         in.SessionID,
+		AgentID:           in.AgentID,
+		WorkflowRunID:     in.WorkflowRunID,
+		TaskRunID:         in.TaskRunID,
+		TaskID:            in.TaskID,
+		Kind:              in.Kind,
+		Status:            in.Status,
+		Model:             in.Model,
+		Provider:          in.Provider,
+		ProviderModel:     in.ProviderModel,
+		ProviderSessionID: in.ProviderSessionID,
+		PromptHash:        in.PromptHash,
+		Text:              in.Text,
+		Input:             cloneRaw(in.Input),
+		Result:            cloneRaw(in.Result),
+		Usage:             cloneRaw(in.Usage),
+		ToolCalls:         cloneRaw(in.ToolCalls),
+		ErrorClass:        in.ErrorClass,
+		ErrorMessage:      in.ErrorMessage,
+		StartedAt:         in.StartedAt,
+		CompletedAt:       clonePtr(in.CompletedAt),
+		DurationMS:        in.DurationMS,
+		Metadata:          cloneMap(in.Metadata),
+		CreatedAt:         createdAt,
+		UpdatedAt:         now,
+	}
+	if op.Status == "" {
+		op.Status = domain.AgentSessionOperationAdmitted
+	}
+	s.items[in.WorkspaceKey][in.OperationID] = op
+	return cloneAgentSessionOperation(op), nil
+}
+
+func (s *agentSessionOperationStore) Get(_ context.Context, ws, operationID string) (*domain.AgentSessionOperation, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	op, ok := s.items[ws][operationID]
+	if !ok {
+		return nil, fmt.Errorf("agent session operation %q in workspace %q: %w", operationID, ws, domain.ErrNotFound)
+	}
+	return cloneAgentSessionOperation(op), nil
+}
+
+func (s *agentSessionOperationStore) List(_ context.Context, ws string, filter store.AgentSessionOperationFilter) ([]*domain.AgentSessionOperation, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	ops := s.items[ws]
+	out := make([]*domain.AgentSessionOperation, 0, len(ops))
+	for _, op := range ops {
+		if !agentSessionOperationMatches(op, filter) {
+			continue
+		}
+		out = append(out, cloneAgentSessionOperation(op))
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].CreatedAt.Before(out[j].CreatedAt) })
+	if filter.Limit > 0 && len(out) > filter.Limit {
+		out = out[:filter.Limit]
+	}
+	return out, nil
+}
+
+func (s *agentSessionOperationStore) Cancel(_ context.Context, ws, operationID string, in store.AgentSessionOperationCancel) (*domain.AgentSessionOperation, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	op, ok := s.items[ws][operationID]
+	if !ok {
+		return nil, fmt.Errorf("agent session operation %q in workspace %q: %w", operationID, ws, domain.ErrNotFound)
+	}
+	completedAt := in.CompletedAt
+	if completedAt.IsZero() {
+		completedAt = time.Now().UTC()
+	}
+	op.Status = domain.AgentSessionOperationCancelled
+	op.CompletedAt = &completedAt
+	if !op.StartedAt.IsZero() && op.DurationMS == 0 {
+		op.DurationMS = completedAt.Sub(op.StartedAt).Milliseconds()
+	}
+	if in.ErrorClass != "" {
+		op.ErrorClass = in.ErrorClass
+	} else if op.ErrorClass == "" {
+		op.ErrorClass = "cancelled"
+	}
+	if in.ErrorMessage != "" {
+		op.ErrorMessage = in.ErrorMessage
+	} else if op.ErrorMessage == "" {
+		op.ErrorMessage = "agent session operation cancelled"
+	}
+	for key, value := range in.Metadata {
+		if op.Metadata == nil {
+			op.Metadata = map[string]string{}
+		}
+		op.Metadata[key] = value
+	}
+	op.UpdatedAt = time.Now().UTC()
+	return cloneAgentSessionOperation(op), nil
+}
+
+type agentSessionToolCallStore struct {
+	mu    sync.RWMutex
+	items map[string]map[string]*domain.AgentSessionToolCall
+}
+
+func newAgentSessionToolCallStore() *agentSessionToolCallStore {
+	return &agentSessionToolCallStore{items: make(map[string]map[string]*domain.AgentSessionToolCall)}
+}
+
+var _ store.AgentSessionToolCallStore = (*agentSessionToolCallStore)(nil)
+
+func (s *agentSessionToolCallStore) Upsert(_ context.Context, in store.AgentSessionToolCallUpsert) (*domain.AgentSessionToolCall, error) {
+	if in.WorkspaceKey == "" || in.CallID == "" || in.OperationID == "" || in.SessionID == "" || in.AgentID == "" || in.Name == "" {
+		return nil, fmt.Errorf("workspace_key + call_id + operation_id + session_id + agent_id + name required: %w", domain.ErrInvalid)
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.items[in.WorkspaceKey] == nil {
+		s.items[in.WorkspaceKey] = make(map[string]*domain.AgentSessionToolCall)
+	}
+	now := time.Now().UTC()
+	createdAt := now
+	if existing := s.items[in.WorkspaceKey][in.CallID]; existing != nil && !existing.CreatedAt.IsZero() {
+		createdAt = existing.CreatedAt
+	}
+	call := &domain.AgentSessionToolCall{
+		WorkspaceKey:        in.WorkspaceKey,
+		CallID:              in.CallID,
+		ProviderCallID:      in.ProviderCallID,
+		OperationID:         in.OperationID,
+		SessionID:           in.SessionID,
+		AgentID:             in.AgentID,
+		WorkflowRunID:       in.WorkflowRunID,
+		TaskRunID:           in.TaskRunID,
+		TaskID:              in.TaskID,
+		Name:                in.Name,
+		Status:              in.Status,
+		AuthorizationStatus: in.AuthorizationStatus,
+		IdempotencyKey:      in.IdempotencyKey,
+		ToolVersion:         in.ToolVersion,
+		SourceHash:          in.SourceHash,
+		Handler:             in.Handler,
+		Runtime:             in.Runtime,
+		Timeout:             in.Timeout,
+		Cancellable:         in.Cancellable,
+		ReadOnly:            in.ReadOnly,
+		Redacted:            in.Redacted,
+		Args:                cloneRaw(in.Args),
+		Result:              cloneRaw(in.Result),
+		ErrorClass:          in.ErrorClass,
+		ErrorMessage:        in.ErrorMessage,
+		StartedAt:           in.StartedAt,
+		CompletedAt:         clonePtr(in.CompletedAt),
+		DurationMS:          in.DurationMS,
+		Metadata:            cloneMap(in.Metadata),
+		CreatedAt:           createdAt,
+		UpdatedAt:           now,
+	}
+	if call.Status == "" {
+		call.Status = "completed"
+	}
+	s.items[in.WorkspaceKey][in.CallID] = call
+	return cloneAgentSessionToolCall(call), nil
+}
+
+func (s *agentSessionToolCallStore) Get(_ context.Context, ws, callID string) (*domain.AgentSessionToolCall, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	call, ok := s.items[ws][callID]
+	if !ok {
+		return nil, fmt.Errorf("agent session tool call %q in workspace %q: %w", callID, ws, domain.ErrNotFound)
+	}
+	return cloneAgentSessionToolCall(call), nil
+}
+
+func (s *agentSessionToolCallStore) List(_ context.Context, ws string, filter store.AgentSessionToolCallFilter) ([]*domain.AgentSessionToolCall, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	calls := s.items[ws]
+	out := make([]*domain.AgentSessionToolCall, 0, len(calls))
+	for _, call := range calls {
+		if !agentSessionToolCallMatches(call, filter) {
+			continue
+		}
+		out = append(out, cloneAgentSessionToolCall(call))
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].CreatedAt.Before(out[j].CreatedAt) })
+	if filter.Limit > 0 && len(out) > filter.Limit {
+		out = out[:filter.Limit]
+	}
+	return out, nil
+}
+
 func cloneNode(n *domain.Node) *domain.Node {
 	out := *n
 	out.Labels = append([]string(nil), n.Labels...)
@@ -270,6 +488,26 @@ func cloneAgentSession(s *domain.AgentSession) *domain.AgentSession {
 	return &out
 }
 
+func cloneAgentSessionOperation(op *domain.AgentSessionOperation) *domain.AgentSessionOperation {
+	out := *op
+	out.Input = cloneRaw(op.Input)
+	out.Result = cloneRaw(op.Result)
+	out.Usage = cloneRaw(op.Usage)
+	out.ToolCalls = cloneRaw(op.ToolCalls)
+	out.CompletedAt = clonePtr(op.CompletedAt)
+	out.Metadata = cloneMap(op.Metadata)
+	return &out
+}
+
+func cloneAgentSessionToolCall(call *domain.AgentSessionToolCall) *domain.AgentSessionToolCall {
+	out := *call
+	out.Args = cloneRaw(call.Args)
+	out.Result = cloneRaw(call.Result)
+	out.CompletedAt = clonePtr(call.CompletedAt)
+	out.Metadata = cloneMap(call.Metadata)
+	return &out
+}
+
 func cloneMap(in map[string]string) map[string]string {
 	if in == nil {
 		return nil
@@ -279,6 +517,59 @@ func cloneMap(in map[string]string) map[string]string {
 		out[k] = v
 	}
 	return out
+}
+
+func agentSessionOperationMatches(op *domain.AgentSessionOperation, filter store.AgentSessionOperationFilter) bool {
+	if filter.SessionID != "" && op.SessionID != filter.SessionID {
+		return false
+	}
+	if filter.AgentID != "" && op.AgentID != filter.AgentID {
+		return false
+	}
+	if filter.WorkflowRunID != "" && op.WorkflowRunID != filter.WorkflowRunID {
+		return false
+	}
+	if filter.TaskRunID != "" && op.TaskRunID != filter.TaskRunID {
+		return false
+	}
+	if filter.TaskID != "" && op.TaskID != filter.TaskID {
+		return false
+	}
+	if filter.Kind != "" && op.Kind != filter.Kind {
+		return false
+	}
+	if filter.Status != "" && op.Status != filter.Status {
+		return false
+	}
+	return true
+}
+
+func agentSessionToolCallMatches(call *domain.AgentSessionToolCall, filter store.AgentSessionToolCallFilter) bool {
+	if filter.OperationID != "" && call.OperationID != filter.OperationID {
+		return false
+	}
+	if filter.SessionID != "" && call.SessionID != filter.SessionID {
+		return false
+	}
+	if filter.AgentID != "" && call.AgentID != filter.AgentID {
+		return false
+	}
+	if filter.WorkflowRunID != "" && call.WorkflowRunID != filter.WorkflowRunID {
+		return false
+	}
+	if filter.TaskRunID != "" && call.TaskRunID != filter.TaskRunID {
+		return false
+	}
+	if filter.TaskID != "" && call.TaskID != filter.TaskID {
+		return false
+	}
+	if filter.Name != "" && call.Name != filter.Name {
+		return false
+	}
+	if filter.Status != "" && call.Status != filter.Status {
+		return false
+	}
+	return true
 }
 
 func sessionMatches(s *domain.AgentSession, filter store.AgentSessionFilter) bool {

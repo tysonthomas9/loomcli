@@ -18,7 +18,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	backendcaps "github.com/tysonthomas9/loomcli/internal/cli/backends"
 	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
-	workspacecli "github.com/tysonthomas9/loomcli/internal/cli/workspace"
+	"github.com/tysonthomas9/loomcli/internal/cli/sourceagent"
 	defspkg "github.com/tysonthomas9/loomcli/internal/defs"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/store"
@@ -508,7 +508,7 @@ func runApply(_ *cobra.Command, args []string) error {
 		if err != nil {
 			return err
 		}
-		worktree, err := provisionAppliedAgentWorktree(agent, instance.Name)
+		worktree, err := sourceagent.ProvisionWorktree(instance.Name, agent.Repos)
 		if err != nil {
 			return err
 		}
@@ -539,38 +539,6 @@ func runApply(_ *cobra.Command, args []string) error {
 		}
 		return nil
 	})
-}
-
-type appliedAgentWorktree struct {
-	Repo string
-	Path string
-}
-
-func provisionAppliedAgentWorktree(agent defspkg.AgentModule, instanceName string) (*appliedAgentWorktree, error) {
-	repo, ok := singleAppliedAgentRepo(agent.Repos)
-	if !ok {
-		return nil, nil
-	}
-	target, err := workspacecli.ResolveAgentTarget(instanceName, repo)
-	if err != nil {
-		return nil, fmt.Errorf("prepare worktree for agent %q repo %q: %w", instanceName, repo, err)
-	}
-	return &appliedAgentWorktree{Repo: repo, Path: target.WorkDir}, nil
-}
-
-func singleAppliedAgentRepo(repos []string) (string, bool) {
-	var selected string
-	for _, repo := range repos {
-		repo = strings.TrimSpace(repo)
-		if repo == "" || repo == "." {
-			continue
-		}
-		if selected != "" && selected != repo {
-			return "", false
-		}
-		selected = repo
-	}
-	return selected, selected != ""
 }
 
 func runApplyWorkflow(_ *cobra.Command, args []string) error {
@@ -639,7 +607,11 @@ func runTypeScriptWorkflowCommand(_ *cobra.Command, args []string) error {
 }
 
 func runTypeScriptWorkflow(ctx context.Context, st store.Store, ib backend.IssueBackend, workspace, actor string, plan *defspkg.Plan, workflow defspkg.WorkflowModule, input json.RawMessage, once, wait bool) (*workflowRunResult, error) {
-	if err := defspkg.Apply(ctx, st, workspace, actor, plan); err != nil {
+	proofPlan, err := privateProofPlan(ctx, st, workspace, plan)
+	if err != nil {
+		return nil, err
+	}
+	if err := defspkg.Apply(ctx, st, workspace, actor, proofPlan); err != nil {
 		return nil, err
 	}
 	run, err := workflowpkg.CreateOrResumeRun(ctx, st, workspace, workflow.Name, input, actor)
@@ -676,6 +648,82 @@ func runTypeScriptWorkflow(ctx context.Context, st store.Store, ib backend.Issue
 		Builtin:   builtin,
 		Operation: operation,
 	}, nil
+}
+
+func privateProofPlan(ctx context.Context, st store.Store, workspace string, plan *defspkg.Plan) (*defspkg.Plan, error) {
+	if plan == nil {
+		return nil, nil
+	}
+	proof := *plan
+	proof.Workflows = append([]defspkg.WorkflowModule(nil), plan.Workflows...)
+	for i := range proof.Workflows {
+		if err := keepExistingPrivateProofIngress(ctx, st, workspace, &proof.Workflows[i]); err != nil {
+			return nil, err
+		}
+	}
+	return &proof, nil
+}
+
+func keepExistingPrivateProofIngress(ctx context.Context, st store.Store, workspace string, workflow *defspkg.WorkflowModule) error {
+	workflow.RoutePath = ""
+	workflow.RouteAuth = ""
+	workflow.TriggerEvent = ""
+	workflow.TriggerFilter = nil
+	if st == nil || workflow == nil {
+		return nil
+	}
+	if st.RouteBindings() != nil {
+		routes, err := st.RouteBindings().List(ctx, workspace, store.RouteBindingFilter{
+			DefinitionName: workflow.Name,
+			Status:         domain.DefinitionStatusActive,
+			Limit:          1,
+		})
+		if err != nil {
+			return fmt.Errorf("list existing route bindings for private proof: %w", err)
+		}
+		if len(routes) > 0 {
+			workflow.RoutePath = routes[0].Path
+			workflow.RouteAuth = routes[0].AuthPolicy
+		}
+	}
+	if st.TriggerBindings() != nil {
+		triggers, err := st.TriggerBindings().List(ctx, workspace, store.TriggerBindingFilter{
+			WorkflowName: workflow.Name,
+			Status:       domain.DefinitionStatusActive,
+			Limit:        1,
+		})
+		if err != nil {
+			return fmt.Errorf("list existing trigger bindings for private proof: %w", err)
+		}
+		if len(triggers) > 0 {
+			workflow.TriggerEvent = triggers[0].EventType
+			filter, err := triggerFilterFromRaw(triggers[0].Filter)
+			if err != nil {
+				return err
+			}
+			workflow.TriggerFilter = filter
+		}
+	}
+	return nil
+}
+
+func triggerFilterFromRaw(raw json.RawMessage) (map[string]string, error) {
+	if len(raw) == 0 {
+		return nil, nil
+	}
+	var values map[string]string
+	if err := json.Unmarshal(raw, &values); err == nil {
+		return values, nil
+	}
+	var generic map[string]any
+	if err := json.Unmarshal(raw, &generic); err != nil {
+		return nil, fmt.Errorf("decode existing trigger binding for private proof: %w", err)
+	}
+	out := make(map[string]string, len(generic))
+	for key, value := range generic {
+		out[key] = fmt.Sprint(value)
+	}
+	return out, nil
 }
 
 func workflowRunOperationEnvelope(ctx context.Context, st store.Store, workspace string, run *domain.WorkflowRun, builtin *workflowpkg.BuiltinRunResult) (*workflowRunOperation, error) {

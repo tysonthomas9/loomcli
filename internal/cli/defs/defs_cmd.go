@@ -11,7 +11,9 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
+	"github.com/tysonthomas9/loomcli/internal/cli/sourceagent"
 	defspkg "github.com/tysonthomas9/loomcli/internal/defs"
+	"github.com/tysonthomas9/loomcli/internal/domain"
 )
 
 var (
@@ -20,6 +22,10 @@ var (
 	defsFromWorkspace bool
 	defsExportForce   bool
 	defsExportState   bool
+	defsApplyStart    bool
+
+	defsWithActiveWorkspace = cmdstore.WithActiveWorkspace
+	defsWriteJSON           = cmdstore.WriteJSON
 )
 
 var defsCmd = &cobra.Command{
@@ -60,6 +66,7 @@ func init() {
 	defsCmd.PersistentFlags().StringVar(&defsDir, "dir", ".", "Directory containing optional .loom definitions")
 	defsCmd.PersistentFlags().BoolVar(&defsJSON, "json", false, "JSON output")
 	defsPlanCmd.Flags().BoolVar(&defsFromWorkspace, "from-workspace", false, "Read durable definitions from the active Loom workspace instead of local source")
+	defsApplyCmd.Flags().BoolVar(&defsApplyStart, "start", false, "Create or update one running agent instance per source-defined agent")
 	defsExportSourceCmd.Flags().BoolVar(&defsExportForce, "force", false, "Overwrite existing generated source files")
 	defsExportSourceCmd.Flags().BoolVar(&defsExportState, "include-state", false, "Also write reviewable mutable runtime state snapshots under .loom/state")
 	defsCmd.AddCommand(defsCheckCmd, defsPlanCmd, defsApplyCmd, defsExportSourceCmd)
@@ -72,7 +79,7 @@ func runDefsCheck(_ *cobra.Command, _ []string) error {
 		return err
 	}
 	if defsJSON {
-		return cmdstore.WriteJSON(plan)
+		return defsWriteJSON(plan)
 	}
 	fmt.Printf("Definitions OK: %s\n", defspkg.Summary(plan))
 	return nil
@@ -80,13 +87,13 @@ func runDefsCheck(_ *cobra.Command, _ []string) error {
 
 func runDefsPlan(_ *cobra.Command, _ []string) error {
 	if defsFromWorkspace {
-		return cmdstore.WithActiveWorkspace(func(ctx context.Context, h *bootstrap.StoreHandle, ws string) error {
+		return defsWithActiveWorkspace(func(ctx context.Context, h *bootstrap.StoreHandle, ws string) error {
 			plan, err := defspkg.PlanFromWorkspace(ctx, h.Store, ws)
 			if err != nil {
 				return err
 			}
 			if defsJSON {
-				return cmdstore.WriteJSON(plan)
+				return defsWriteJSON(plan)
 			}
 			printPlan(plan)
 			return nil
@@ -97,7 +104,7 @@ func runDefsPlan(_ *cobra.Command, _ []string) error {
 		return err
 	}
 	if defsJSON {
-		return cmdstore.WriteJSON(plan)
+		return defsWriteJSON(plan)
 	}
 	printPlan(plan)
 	return nil
@@ -108,20 +115,91 @@ func runDefsApply(_ *cobra.Command, _ []string) error {
 	if err != nil {
 		return err
 	}
-	return cmdstore.WithActiveWorkspace(func(ctx context.Context, h *bootstrap.StoreHandle, ws string) error {
+	return defsWithActiveWorkspace(func(ctx context.Context, h *bootstrap.StoreHandle, ws string) error {
 		if err := defspkg.Apply(ctx, h.Store, ws, actorName(), plan); err != nil {
 			return err
 		}
+		var started []*domain.Agent
+		var worktrees []defsApplyWorktree
+		if defsApplyStart {
+			var err error
+			started, err = defspkg.ApplyAgentInstancesForPlan(ctx, h.Store, ws, plan, true)
+			if err != nil {
+				return err
+			}
+			worktrees, err = provisionStartedAgentWorktrees(plan, started)
+			if err != nil {
+				return err
+			}
+		}
 		if defsJSON {
-			return cmdstore.WriteJSON(plan)
+			if defsApplyStart {
+				return defsWriteJSON(map[string]any{
+					"plan":                    plan,
+					"started_agent_instances": started,
+					"prepared_worktrees":      worktrees,
+				})
+			}
+			return defsWriteJSON(plan)
 		}
 		fmt.Printf("Applied definitions to %s: %s\n", ws, defspkg.Summary(plan))
+		if defsApplyStart {
+			fmt.Printf("Started %d agent instance(s)\n", len(started))
+			for _, worktree := range worktrees {
+				fmt.Printf("Prepared worktree for %s repo %s: %s\n", worktree.Instance, worktree.Repo, worktree.Path)
+			}
+		}
 		return nil
 	})
 }
 
+type defsApplyWorktree struct {
+	Agent    string `json:"agent"`
+	Instance string `json:"instance"`
+	Repo     string `json:"repo"`
+	Path     string `json:"path"`
+}
+
+func provisionStartedAgentWorktrees(plan *defspkg.Plan, started []*domain.Agent) ([]defsApplyWorktree, error) {
+	if plan == nil || len(started) == 0 {
+		return nil, nil
+	}
+	startedByRole := make(map[string]*domain.Agent, len(started))
+	for _, instance := range started {
+		if instance == nil {
+			continue
+		}
+		role := strings.TrimSpace(instance.RoleName)
+		if role == "" {
+			role = instance.Name
+		}
+		startedByRole[role] = instance
+	}
+	worktrees := make([]defsApplyWorktree, 0, len(plan.Agents))
+	for _, agent := range plan.Agents {
+		instance := startedByRole[agent.Name]
+		if instance == nil {
+			continue
+		}
+		worktree, err := sourceagent.ProvisionWorktree(instance.Name, agent.Repos)
+		if err != nil {
+			return nil, err
+		}
+		if worktree == nil {
+			continue
+		}
+		worktrees = append(worktrees, defsApplyWorktree{
+			Agent:    agent.Name,
+			Instance: worktree.Instance,
+			Repo:     worktree.Repo,
+			Path:     worktree.Path,
+		})
+	}
+	return worktrees, nil
+}
+
 func runDefsExportSource(_ *cobra.Command, _ []string) error {
-	return cmdstore.WithActiveWorkspace(func(ctx context.Context, h *bootstrap.StoreHandle, ws string) error {
+	return defsWithActiveWorkspace(func(ctx context.Context, h *bootstrap.StoreHandle, ws string) error {
 		plan, err := defspkg.PlanFromWorkspace(ctx, h.Store, ws)
 		if err != nil {
 			return err
@@ -138,7 +216,7 @@ func runDefsExportSource(_ *cobra.Command, _ []string) error {
 			files = append(files, stateFiles...)
 		}
 		if defsJSON {
-			return cmdstore.WriteJSON(files)
+			return defsWriteJSON(files)
 		}
 		fmt.Printf("Exported %d files to %s\n", len(files), defsDir)
 		for _, file := range files {

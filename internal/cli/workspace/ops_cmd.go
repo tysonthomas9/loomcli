@@ -57,10 +57,18 @@ var workspaceOpsEnsureRuntimeCmd = &cobra.Command{
 	RunE:  runWorkspaceOpsEnsureRuntime,
 }
 
+var workspaceOpsRepairCmd = &cobra.Command{
+	Use:   "repair [KEY]",
+	Short: "Repair workspace runtime readiness",
+	Args:  cobra.MaximumNArgs(1),
+	RunE:  runWorkspaceOpsRepair,
+}
+
 func init() {
 	workspaceOpsCmd.PersistentFlags().BoolVar(&workspaceOpsJSON, "json", false, "Output JSON")
 	workspaceOpsEnsureRuntimeCmd.Flags().IntVar(&workspaceOpsTimeoutSec, "timeout", 20, "Seconds to wait for runtime and daemon readiness")
-	workspaceOpsCmd.AddCommand(workspaceOpsStatusCmd, workspaceOpsDiagnoseCmd, workspaceOpsEnsureRuntimeCmd)
+	workspaceOpsRepairCmd.Flags().IntVar(&workspaceOpsTimeoutSec, "timeout", 20, "Seconds to wait for runtime and daemon readiness")
+	workspaceOpsCmd.AddCommand(workspaceOpsStatusCmd, workspaceOpsDiagnoseCmd, workspaceOpsEnsureRuntimeCmd, workspaceOpsRepairCmd)
 	workspaceCmd.AddCommand(workspaceOpsCmd)
 }
 
@@ -205,6 +213,10 @@ func runWorkspaceOpsEnsureRuntime(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("wait for workspace daemon: %w", err)
 	}
 	return renderWorkspaceOpsStatus(cmd, status)
+}
+
+func runWorkspaceOpsRepair(cmd *cobra.Command, args []string) error {
+	return runWorkspaceOpsEnsureRuntime(cmd, args)
 }
 
 func withWorkspaceOpsStatus(args []string, fn func(*WorkspaceOpsStatus) error) error {

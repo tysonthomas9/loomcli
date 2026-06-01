@@ -169,15 +169,19 @@ function defineTool(config) {
   return { __loomType: "tool", name: config && config.name, ...config, handler };
 }
 
+function defineRuntimeProfile(config) {
+  return { __loomType: "runtime", provider: "local", ...(config || {}) };
+}
+
 const runtime = {
   local(config = {}) {
-    return { __loomType: "runtime", provider: "local", ...config };
+    return defineRuntimeProfile({ provider: "local", ...config });
   },
   podman(config = {}) {
-    return { __loomType: "runtime", provider: "other", ...config };
+    return defineRuntimeProfile({ provider: "other", ...config });
   },
   remote(config = {}) {
-    return { __loomType: "runtime", provider: config.provider || "e2b", ...config };
+    return defineRuntimeProfile({ provider: config.provider || "e2b", ...config });
   },
 };
 
@@ -194,9 +198,35 @@ const Type = schema;
 
 const trigger = {
   issueLabelAdded(config = {}) {
-    return { event: "issue.label_added", filter: config };
+    return trigger.event("issue.label_added", config);
+  },
+  event(event, filter = {}) {
+    return { event: String(event), filter: stringRecord(filter) };
+  },
+  cron(schedule, filter = {}) {
+    return trigger.event("schedule.cron", { ...filter, schedule });
+  },
+  webhook(provider, filter = {}) {
+    return trigger.event(`webhook.${provider}`, filter);
+  },
+  github(event, filter = {}) {
+    return trigger.event(`github.${event}`, filter);
+  },
+  datadogAlert(filter = {}) {
+    return trigger.event("datadog.alert", filter);
+  },
+  chat(provider, filter = {}) {
+    return trigger.event(`chat.${provider}`, filter);
   },
 };
+
+function stringRecord(value = {}) {
+  return Object.fromEntries(
+    Object.entries(value || {})
+      .filter(([, v]) => v != null)
+      .map(([k, v]) => [k, String(v)]),
+  );
+}
 
 function evaluateModule(file) {
   file = path.resolve(file);
@@ -221,6 +251,7 @@ function evaluateModule(file) {
     defineSkill,
     defineWorkflow,
     defineTool,
+    defineRuntimeProfile,
     runtime,
     schema,
     Type,

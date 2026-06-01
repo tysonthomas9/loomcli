@@ -12,24 +12,26 @@ import (
 )
 
 type Plan struct {
-	Root                 string                      `json:"root"`
-	ModelPolicy          *ModelPolicy                `json:"model_policy,omitempty"`
-	Agents               []AgentModule               `json:"agents,omitempty"`
-	AgentInstances       []AgentInstanceModule       `json:"agent_instances,omitempty"`
-	Nodes                []NodeModule                `json:"nodes,omitempty"`
-	AgentSessions        []AgentSessionModule        `json:"agent_sessions,omitempty"`
-	AgentLeases          []AgentLeaseModule          `json:"agent_leases,omitempty"`
-	AgentOwnershipLeases []AgentOwnershipLeaseModule `json:"agent_ownership_leases,omitempty"`
-	AgentCommands        []AgentCommandModule        `json:"agent_commands,omitempty"`
-	TerminalSessions     []TerminalSessionModule     `json:"terminal_sessions,omitempty"`
-	Artifacts            []ArtifactModule            `json:"artifacts,omitempty"`
-	Workflows            []WorkflowModule            `json:"workflows,omitempty"`
-	WorkflowRuns         []WorkflowRunModule         `json:"workflow_runs,omitempty"`
-	TaskRuns             []TaskRunModule             `json:"task_runs,omitempty"`
-	RunEvents            []RunEventModule            `json:"run_events,omitempty"`
-	Runtimes             []RuntimeModule             `json:"runtimes,omitempty"`
-	Skills               []SkillModule               `json:"skills,omitempty"`
-	Tools                []ToolModule                `json:"tools,omitempty"`
+	Root                   string                        `json:"root"`
+	ModelPolicy            *ModelPolicy                  `json:"model_policy,omitempty"`
+	Agents                 []AgentModule                 `json:"agents,omitempty"`
+	AgentInstances         []AgentInstanceModule         `json:"agent_instances,omitempty"`
+	Nodes                  []NodeModule                  `json:"nodes,omitempty"`
+	AgentSessions          []AgentSessionModule          `json:"agent_sessions,omitempty"`
+	AgentSessionOperations []AgentSessionOperationModule `json:"agent_session_operations,omitempty"`
+	AgentSessionToolCalls  []AgentSessionToolCallModule  `json:"agent_session_tool_calls,omitempty"`
+	AgentLeases            []AgentLeaseModule            `json:"agent_leases,omitempty"`
+	AgentOwnershipLeases   []AgentOwnershipLeaseModule   `json:"agent_ownership_leases,omitempty"`
+	AgentCommands          []AgentCommandModule          `json:"agent_commands,omitempty"`
+	TerminalSessions       []TerminalSessionModule       `json:"terminal_sessions,omitempty"`
+	Artifacts              []ArtifactModule              `json:"artifacts,omitempty"`
+	Workflows              []WorkflowModule              `json:"workflows,omitempty"`
+	WorkflowRuns           []WorkflowRunModule           `json:"workflow_runs,omitempty"`
+	TaskRuns               []TaskRunModule               `json:"task_runs,omitempty"`
+	RunEvents              []RunEventModule              `json:"run_events,omitempty"`
+	Runtimes               []RuntimeModule               `json:"runtimes,omitempty"`
+	Skills                 []SkillModule                 `json:"skills,omitempty"`
+	Tools                  []ToolModule                  `json:"tools,omitempty"`
 }
 
 type ModelPolicy struct {
@@ -326,7 +328,7 @@ Before finishing, summarize what changed, what evidence was checked, and any fol
 `, name, name, name)
 }
 
-const defaultConfig = `import { defineConfig } from '@loom/runtime';
+const defaultConfig = `import { defineConfig } from '@loom/sdk';
 
 export default defineConfig({
   sourceRoot: '.loom',
@@ -341,7 +343,8 @@ workflow in this repository.
 ## Contract
 
 Before changing files, inspect the current repository and treat the existing
-layout as authoritative. Use the .loom source layout:
+layout as authoritative. Import authored helpers from @loom/sdk and use the
+.loom source layout:
 
 .loom/
   agents/
@@ -416,7 +419,7 @@ Before finishing:
 `
 
 func agentTemplate(name string) string {
-	return fmt.Sprintf(`import { createAgent, runtime } from '@loom/runtime';
+	return fmt.Sprintf(`import { createAgent, runtime } from '@loom/sdk';
 
 export default createAgent({
   name: '%s',
@@ -442,7 +445,7 @@ export default createAgent({
 }
 
 func workflowTemplate(name string) string {
-	return fmt.Sprintf(`import { defineWorkflow, trigger } from '@loom/runtime';
+	return fmt.Sprintf(`import { defineWorkflow, trigger } from '@loom/sdk';
 
 type Input = {
   parentId: string;

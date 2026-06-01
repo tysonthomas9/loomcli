@@ -1,0 +1,13 @@
+{
+  "name": "@loom/sdk",
+  "version": "0.1.0",
+  "description": "TypeScript SDK for authoring, checking, applying, and running Loom definitions",
+  "type": "module",
+  "main": "index.js",
+  "types": "index.d.ts",
+  "license": "MIT",
+  "files": [
+    "index.js",
+    "index.d.ts"
+  ]
+}

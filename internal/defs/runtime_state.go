@@ -22,6 +22,12 @@ func applyRuntimeStateRecords(ctx context.Context, st store.Store, workspaceKey 
 	if err := applyAgentSessions(ctx, st, workspaceKey, plan.AgentSessions); err != nil {
 		return err
 	}
+	if err := applyAgentSessionOperations(ctx, st, workspaceKey, plan.AgentSessionOperations); err != nil {
+		return err
+	}
+	if err := applyAgentSessionToolCalls(ctx, st, workspaceKey, plan.AgentSessionToolCalls); err != nil {
+		return err
+	}
 	if err := applyAgentLeases(ctx, st, workspaceKey, plan.AgentLeases); err != nil {
 		return err
 	}

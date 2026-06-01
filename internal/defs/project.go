@@ -215,7 +215,7 @@ const runtimeTypes = `declare module '@loom/runtime' {
     triggerEvent?: string;
     triggerFilter?: Record<string, string>;
     issueLabelAdded?: Record<string, string>;
-    triggers?: Array<{ event: string; filter?: Record<string, string> }>;
+    triggers?: TriggerDefinition[];
     runtime?: string | RuntimeProfile;
     runtimeProfile?: string;
     runtime_profile?: string;
@@ -223,6 +223,11 @@ const runtimeTypes = `declare module '@loom/runtime' {
     repos?: string[];
     env?: string[];
     run?: (ctx: WorkflowContext) => unknown | Promise<unknown>;
+  };
+
+  export type TriggerDefinition = {
+    event: string;
+    filter: Record<string, string>;
   };
 
   export type WorkflowRequestContext = {
@@ -823,6 +828,7 @@ const runtimeTypes = `declare module '@loom/runtime' {
   export function defineSkill<T extends SkillDefinition>(skill: T): T;
   export function defineTool<T extends ToolDefinition>(tool: T): T;
   export function defineWorkflow<T extends WorkflowDefinition>(workflow: T): T;
+  export function defineRuntimeProfile<T extends RuntimeProfile>(profile: T): T;
 
   export const schema: {
     [kind: string]: (...args: unknown[]) => ToolSchema;
@@ -839,8 +845,251 @@ const runtimeTypes = `declare module '@loom/runtime' {
   };
 
   export const trigger: {
-    issueLabelAdded(config?: Record<string, string>): { event: 'issue.label_added'; filter: Record<string, string> };
+    issueLabelAdded(config?: Record<string, string>): TriggerDefinition;
+    event(event: string, filter?: Record<string, unknown>): TriggerDefinition;
+    cron(schedule: string, filter?: Record<string, unknown>): TriggerDefinition;
+    webhook(provider: string, filter?: Record<string, unknown>): TriggerDefinition;
+    github(event: string, filter?: Record<string, unknown>): TriggerDefinition;
+    datadogAlert(filter?: Record<string, unknown>): TriggerDefinition;
+    chat(provider: string, filter?: Record<string, unknown>): TriggerDefinition;
   };
+}
+
+declare module '@loom/sdk' {
+  export {
+    Type,
+    createAgent,
+    defineAgent,
+    defineAgentProfile,
+    defineConfig,
+    defineRuntimeProfile,
+    defineSkill,
+    defineTool,
+    defineWorkflow,
+    runtime,
+    schema,
+    trigger,
+  } from '@loom/runtime';
+
+  export type LoomTransportResult = {
+    stdout: string;
+    stderr?: string;
+    status?: number | null;
+    signal?: string | null;
+  };
+
+  export type LoomTransportRunOptions = {
+    cwd?: string;
+    env?: Record<string, string | undefined>;
+    signal?: AbortSignal;
+    stdin?: string;
+  };
+
+  export type LoomHTTPRequestOptions = {
+    query?: Record<string, string | number | boolean | undefined>;
+    body?: unknown;
+    signal?: AbortSignal;
+    headers?: Record<string, string>;
+  };
+
+  export interface LoomTransport {
+    workspace?: string;
+    workspaceKey?: string;
+    workspace_key?: string;
+    run?(args: string[], options?: LoomTransportRunOptions): Promise<LoomTransportResult>;
+    request?<T = unknown>(method: string, path: string, options?: LoomHTTPRequestOptions): Promise<T>;
+  }
+
+  export type LoomClientOptions = {
+    transport?: LoomTransport;
+    binary?: string;
+    cwd?: string;
+    env?: Record<string, string | undefined>;
+    baseURL?: string;
+    url?: string;
+    workspace?: string;
+    workspaceKey?: string;
+    workspace_key?: string;
+    apiKey?: string;
+    api_key?: string;
+    authToken?: string;
+    auth_token?: string;
+    fetch?: (input: unknown, init?: unknown) => Promise<{ ok: boolean; status: number; text(): Promise<string> }>;
+  };
+
+  export type LoomSourceOptions = {
+    source?: string;
+    dir?: string;
+    cwd?: string;
+    envVars?: Record<string, string | undefined>;
+    signal?: AbortSignal;
+    stdin?: string;
+    workspace?: string;
+    key?: string;
+    workspaceKey?: string;
+    workspace_key?: string;
+    headers?: Record<string, string>;
+  };
+
+  export type LoomConnectOptions = LoomSourceOptions & {
+    id?: string;
+    instance?: string;
+    session?: string;
+    message?: string;
+    env?: string;
+    envFile?: string;
+  };
+
+  export type LoomRunOptions = LoomSourceOptions & {
+    input?: unknown;
+    payload?: unknown;
+    wait?: boolean;
+    once?: boolean;
+  };
+
+  export type LoomDefsPlanOptions = LoomSourceOptions & {
+    fromWorkspace?: boolean;
+  };
+
+  export type LoomDefsApplyOptions = LoomSourceOptions & {
+    start?: boolean;
+  };
+
+  export type LoomDefsExportSourceOptions = LoomSourceOptions & {
+    force?: boolean;
+    includeState?: boolean;
+  };
+
+  export type LoomWorkflowRouteBindOptions = LoomSourceOptions & {
+    auth?: string;
+  };
+
+  export type LoomWorkflowTriggerBindOptions = LoomSourceOptions & {
+    filter?: Record<string, string> | string;
+  };
+
+  export type LoomRunArtifactsOptions = LoomSourceOptions & {
+    type?: string;
+  };
+
+  export type LoomAgentCreateOptions = LoomSourceOptions & {
+    role: string;
+    roleName?: string;
+    auto?: boolean;
+    backend?: string;
+    repos?: string[] | string;
+    repoGroups?: string[] | string;
+    repo_groups?: string[] | string;
+    crossRepo?: boolean;
+    cross_repo?: boolean;
+    parent?: string;
+    mode?: string;
+    taskFilter?: string;
+    task_filter?: string;
+    maxConcurrency?: number;
+    max_concurrency?: number;
+    budgetPolicy?: string;
+    budget_policy?: string;
+    task?: string;
+    orchestrator?: string;
+  };
+
+  export type LoomAgentStopOptions = LoomSourceOptions & {
+    force?: boolean;
+  };
+
+  export type LoomAdminOptions = LoomSourceOptions & {
+    workspace?: string;
+    key?: string;
+    workspaceKey?: string;
+    workspace_key?: string;
+    timeout?: number;
+  };
+
+  export class CLILoomTransport implements LoomTransport {
+    constructor(options?: LoomClientOptions);
+    run(args: string[], options?: LoomTransportRunOptions): Promise<LoomTransportResult>;
+  }
+
+  export class FetchLoomTransport implements LoomTransport {
+    workspace?: string;
+    constructor(options: LoomClientOptions & { baseURL?: string; url?: string });
+    request<T = unknown>(method: string, path: string, options?: LoomHTTPRequestOptions): Promise<T>;
+  }
+
+  export class LoomClient {
+    constructor(options?: LoomClientOptions);
+    check<T = unknown>(request?: LoomSourceOptions): Promise<T>;
+    connect<T = unknown>(agent: string | { name: string }, request?: LoomConnectOptions): Promise<T>;
+    run<T = unknown>(workflow: string | { name: string }, request?: LoomRunOptions): Promise<T>;
+    agents: {
+      list<T = unknown>(request?: LoomSourceOptions): Promise<T>;
+      get<T = unknown>(agent: string | { name: string }, request?: LoomSourceOptions): Promise<T>;
+      create<T = unknown>(agent: string | { name: string }, request: LoomAgentCreateOptions): Promise<T>;
+      remove<T = unknown>(agent: string | { name: string }, request?: LoomSourceOptions): Promise<T>;
+      start<T = unknown>(agent: string | { name: string }, request?: LoomSourceOptions): Promise<T>;
+      stop<T = unknown>(agent: string | { name: string }, request?: LoomAgentStopOptions): Promise<T>;
+    };
+    defs: {
+      plan<T = unknown>(request?: LoomDefsPlanOptions): Promise<T>;
+      apply<T = unknown>(request?: LoomDefsApplyOptions): Promise<T>;
+      exportSource<T = unknown>(request?: LoomDefsExportSourceOptions): Promise<T>;
+    };
+    workflows: {
+      list<T = unknown>(request?: LoomSourceOptions): Promise<T>;
+      listRoutes<T = unknown>(workflow?: string | { name: string }, request?: LoomSourceOptions): Promise<T>;
+      bindRoute<T = unknown>(
+        workflow: string | { name: string },
+        path: string,
+        request?: LoomWorkflowRouteBindOptions,
+      ): Promise<T>;
+      unbindRoute<T = unknown>(workflow: string | { name: string }, path: string, request?: LoomSourceOptions): Promise<T>;
+      listTriggers<T = unknown>(workflow?: string | { name: string }, request?: LoomSourceOptions): Promise<T>;
+      bindTrigger<T = unknown>(
+        workflow: string | { name: string },
+        event: string,
+        request?: LoomWorkflowTriggerBindOptions,
+      ): Promise<T>;
+      unbindTrigger<T = unknown>(workflow: string | { name: string }, event: string, request?: LoomSourceOptions): Promise<T>;
+    };
+    runs: {
+      get<T = unknown>(runId: string, request?: LoomSourceOptions): Promise<T>;
+      events<T = unknown>(runId: string, request?: LoomSourceOptions): Promise<T>;
+      tasks<T = unknown>(runId: string, request?: LoomSourceOptions): Promise<T>;
+      sessions<T = unknown>(runId: string, request?: LoomSourceOptions): Promise<T>;
+      artifacts<T = unknown>(runId: string, request?: LoomRunArtifactsOptions): Promise<T>;
+      cancel<T = unknown>(runId: string, request?: LoomSourceOptions): Promise<T>;
+    };
+    sessions: {
+      list<T = unknown>(request?: LoomSourceOptions): Promise<T[]>;
+      get<T = unknown>(sessionId: string, request?: LoomSourceOptions): Promise<T | undefined>;
+      forRun<T = unknown>(runId: string, request?: LoomSourceOptions): Promise<T>;
+    };
+    tasks: {
+      list<T = unknown>(request?: LoomSourceOptions): Promise<T[]>;
+      get<T = unknown>(taskRunId: string, request?: LoomSourceOptions): Promise<T | undefined>;
+      forRun<T = unknown>(runId: string, request?: LoomSourceOptions): Promise<T>;
+    };
+    events: {
+      list<T = unknown>(request?: LoomSourceOptions): Promise<T[]>;
+      get<T = unknown>(eventId: string, request?: LoomSourceOptions): Promise<T | undefined>;
+      forRun<T = unknown>(runId: string, request?: LoomSourceOptions): Promise<T>;
+    };
+    tools: {
+      list<T = unknown>(request?: LoomSourceOptions): Promise<T[]>;
+      get<T = unknown>(tool: string | { name: string }, request?: LoomSourceOptions): Promise<T | undefined>;
+    };
+    admin: {
+      status<T = unknown>(request?: LoomAdminOptions): Promise<T>;
+      diagnose<T = unknown>(request?: LoomAdminOptions): Promise<T>;
+      ensureRuntime<T = unknown>(request?: LoomAdminOptions): Promise<T>;
+      repair<T = unknown>(request?: LoomAdminOptions): Promise<T>;
+    };
+  }
+
+  export function createLoomClient(options?: LoomClientOptions): LoomClient;
+  export const loom: LoomClient;
+  export function sourceToProjectDir(source: string): string;
 }
 
 declare module '*.md' {

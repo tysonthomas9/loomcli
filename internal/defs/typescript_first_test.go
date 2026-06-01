@@ -26,6 +26,7 @@ func TestInitTypeScriptProjectWritesStartContract(t *testing.T) {
 	text := string(data)
 	for _, want := range []string{
 		"Create a TypeScript-First Loom Agent",
+		"@loom/sdk",
 		".loom/agents/<name>.ts",
 		"loom connect <name> local",
 		"loom run <name> --payload '{}'",
@@ -51,6 +52,18 @@ func TestInitTypeScriptProjectWritesStartContract(t *testing.T) {
 	}
 	if string(got) != string(custom) {
 		t.Fatalf("start contract overwritten = %q, want custom preserved", got)
+	}
+
+	typesPath := filepath.Join(root, ".loom", "runtime.d.ts")
+	typesData, err := os.ReadFile(typesPath)
+	if err != nil {
+		t.Fatalf("read runtime declarations: %v", err)
+	}
+	if !strings.Contains(string(typesData), "declare module '@loom/sdk'") ||
+		!strings.Contains(string(typesData), "check<T = unknown>") ||
+		!strings.Contains(string(typesData), "connect<T = unknown>") ||
+		!strings.Contains(string(typesData), "export const loom") {
+		t.Fatalf("runtime declarations missing @loom/sdk client surface:\n%s", typesData)
 	}
 }
 
@@ -131,6 +144,88 @@ func TestTypeScriptFirstAgentApplyCreatesUIVisibleInstance(t *testing.T) {
 	}
 }
 
+func TestTypeScriptFirstPlanApplyStartCreatesAgentInstances(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+
+	writeDefFile(t, root, ".loom/agents/lead.ts", `import { createAgent } from '@loom/runtime';
+
+export default createAgent({
+  name: 'lead',
+  backend: 'echo',
+  model: 'local/echo',
+  repos: ['.'],
+  instructions: 'Coordinate work.',
+});`)
+	writeDefFile(t, root, ".loom/agents/worker.ts", `import { createAgent, runtime } from '@loom/runtime';
+
+export default createAgent({
+  name: 'worker',
+  backend: 'echo',
+  model: 'local/echo',
+  runtime: runtime.local({ repos: ['app'], env: ['NODE_ENV'] }),
+  instructions: 'Implement assigned work.',
+  policy: { maxConcurrency: 2 },
+});`)
+
+	plan, err := Load(root)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	st := memstore.New()
+	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "TSSTART", Name: "TypeScript Start"}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	if err := Apply(ctx, st, "TSSTART", "test", plan); err != nil {
+		t.Fatalf("Apply() error = %v", err)
+	}
+
+	instances, err := ApplyAgentInstancesForPlan(ctx, st, "TSSTART", plan, true)
+	if err != nil {
+		t.Fatalf("ApplyAgentInstancesForPlan() error = %v", err)
+	}
+	if len(instances) != 2 {
+		t.Fatalf("instances = %+v, want one started instance per source-defined agent", instances)
+	}
+	lead, err := st.Agents().Get(ctx, "TSSTART", "lead")
+	if err != nil {
+		t.Fatalf("lead instance not created: %v", err)
+	}
+	if lead.RoleName != "lead" || lead.State != domain.AgentStateActive || lead.DesiredState != domain.AgentDesiredRunning {
+		t.Fatalf("lead instance = %+v, want active/running lead role instance", lead)
+	}
+	worker, err := st.Agents().Get(ctx, "TSSTART", "worker")
+	if err != nil {
+		t.Fatalf("worker instance not created: %v", err)
+	}
+	if worker.RoleName != "worker" || worker.State != domain.AgentStateActive || worker.DesiredState != domain.AgentDesiredRunning {
+		t.Fatalf("worker instance = %+v, want active/running worker role instance", worker)
+	}
+	if worker.MaxConcurrency != 2 {
+		t.Fatalf("worker MaxConcurrency = %d, want source policy preserved", worker.MaxConcurrency)
+	}
+	if len(worker.Repos) != 1 || worker.Repos[0] != "app" {
+		t.Fatalf("worker repos = %+v, want source runtime repo preserved", worker.Repos)
+	}
+	cmds, err := st.AgentCommands().List(ctx, "TSSTART", store.AgentCommandFilter{Limit: 10})
+	if err != nil {
+		t.Fatalf("list commands: %v", err)
+	}
+	if len(cmds) != 2 {
+		t.Fatalf("commands = %+v, want one start command per source-defined agent", cmds)
+	}
+	seen := map[string]bool{}
+	for _, cmd := range cmds {
+		if cmd.Type != "start" || cmd.Payload["source"] != "typescript-first" {
+			t.Fatalf("command = %+v, want TypeScript-first start command", cmd)
+		}
+		seen[cmd.TargetAgentID] = true
+	}
+	if !seen["lead"] || !seen["worker"] {
+		t.Fatalf("commands = %+v, want start commands for lead and worker", cmds)
+	}
+}
+
 func TestTypeScriptFirstAgentCanUseReusableProfile(t *testing.T) {
 	ctx := context.Background()
 	root := t.TempDir()
@@ -193,6 +288,43 @@ export default createAgent(reviewProfile, {
 	profileCapability, ok := capability["profile"].(map[string]any)
 	if !ok || profileCapability["name"] != "review-specialist" {
 		t.Fatalf("capability profile = %#v, want reusable profile identity", capability["profile"])
+	}
+}
+
+func TestLoadSupportsSDKModuleImports(t *testing.T) {
+	root := t.TempDir()
+	writeDefFile(t, root, ".loom/agents/sdk-agent.ts", `import { defineAgent, runtime } from '@loom/sdk';
+
+export default defineAgent({
+  name: 'sdk-agent',
+  backend: 'echo',
+  model: 'local/echo',
+  runtime: runtime.local({ repos: ['.'] }),
+  instructions: 'Author through the SDK import path.',
+});`)
+	writeDefFile(t, root, ".loom/workflows/sdk-workflow.ts", `import { defineWorkflow, trigger } from '@loom/sdk';
+
+export default defineWorkflow({
+  name: 'sdk-workflow',
+  triggers: [trigger.github('pull_request.closed', { action: 'closed', merged: true })],
+  builtin: 'run-parent-work-items',
+});`)
+
+	plan, err := Load(root)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if _, ok := FindAgent(plan, "sdk-agent"); !ok {
+		t.Fatalf("agents = %+v, want sdk-agent loaded from @loom/sdk import", plan.Agents)
+	}
+	workflow, ok := FindWorkflow(plan, "sdk-workflow")
+	if !ok {
+		t.Fatalf("workflows = %+v, want sdk-workflow loaded from @loom/sdk import", plan.Workflows)
+	}
+	if workflow.TriggerEvent != "github.pull_request.closed" ||
+		workflow.TriggerFilter["action"] != "closed" ||
+		workflow.TriggerFilter["merged"] != "true" {
+		t.Fatalf("workflow trigger = %q %+v, want normalized github trigger", workflow.TriggerEvent, workflow.TriggerFilter)
 	}
 }
 
@@ -678,6 +810,64 @@ export default defineWorkflow({
 	networkCaps, ok := capabilityManifest["network"].(map[string]any)
 	if !ok || networkCaps["enabled"] != false || networkCaps["policy"] != "disabled" {
 		t.Fatalf("network capabilities = %#v, want durable network capability metadata", capabilityManifest["network"])
+	}
+}
+
+func TestTypeScriptFirstRuntimeProfileHelper(t *testing.T) {
+	root := t.TempDir()
+
+	writeDefFile(t, root, ".loom/runtimes/remote-dev.ts", `import { defineRuntimeProfile } from '@loom/sdk';
+
+export default defineRuntimeProfile({
+  name: 'remote-dev',
+  provider: 'e2b',
+  cwd: '/workspace/app',
+  repos: ['app'],
+  env: ['NODE_ENV'],
+  workspace: {
+    providerWorkspaceId: 'e2b-dev-1',
+    owner: 'loom',
+    cleanup: { mode: 'after_ttl', ttl: '6h' },
+    filesystem: { persistence: 'session', durability: 'provider', retention: '1d' },
+  },
+  capabilities: {
+    filesystem: { read: true, write: true, persistence: 'session' },
+    shell: { enabled: true, commands: ['node', 'npm'] },
+    network: { enabled: true, policy: 'provider_default' },
+    lifecycle: { materialize: true, cleanup: true, cancellation: true, defaultTimeout: '20m' },
+  },
+});`)
+	writeDefFile(t, root, ".loom/workflows/remote-run.ts", `import { defineWorkflow } from '@loom/sdk';
+
+export default defineWorkflow({
+  name: 'remote-run',
+  builtin: 'run-parent-work-items',
+  runtimeProfile: 'remote-dev',
+});`)
+
+	plan, err := Load(root)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if len(plan.Runtimes) != 1 {
+		t.Fatalf("runtimes = %+v, want one defineRuntimeProfile runtime", plan.Runtimes)
+	}
+	rt := plan.Runtimes[0]
+	if rt.Name != "remote-dev" || rt.Provider != domain.RuntimeProviderE2B || rt.CWD != "/workspace/app" {
+		t.Fatalf("runtime = %+v, want explicit remote runtime profile", rt)
+	}
+	if rt.Workspace == nil || rt.Workspace.ProviderWorkspaceID != "e2b-dev-1" ||
+		rt.Workspace.Cleanup == nil || rt.Workspace.Cleanup.TTL != "6h" ||
+		rt.Workspace.Filesystem == nil || rt.Workspace.Filesystem.Persistence != "session" {
+		t.Fatalf("runtime workspace = %+v, want durable remote lifecycle policy", rt.Workspace)
+	}
+	if rt.Capabilities == nil || rt.Capabilities.Shell == nil || len(rt.Capabilities.Shell.Commands) != 2 ||
+		rt.Capabilities.Lifecycle == nil || rt.Capabilities.Lifecycle.DefaultTimeout != "20m" {
+		t.Fatalf("runtime capabilities = %+v, want explicit shell/lifecycle policy", rt.Capabilities)
+	}
+	workflow, ok := FindWorkflow(plan, "remote-run")
+	if !ok || workflow.RuntimeProfileName != "remote-dev" {
+		t.Fatalf("workflow = %+v, want runtime profile binding", workflow)
 	}
 }
 

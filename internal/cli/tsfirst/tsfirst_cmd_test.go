@@ -349,6 +349,9 @@ func TestRunTypeScriptWorkflowAppliesAndRunsWorkflowContext(t *testing.T) {
 	if !ok {
 		t.Fatalf("FindWorkflow() did not find epic-runner in %+v", plan.Workflows)
 	}
+	if workflow.RoutePath == "" || workflow.TriggerEvent == "" {
+		t.Fatalf("scaffolded workflow = %+v, want ingress intent to prove private run does not publish it", workflow)
+	}
 
 	st := memstore.New()
 	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "TSRUN", Name: "TypeScript Run"}); err != nil {
@@ -392,6 +395,20 @@ func TestRunTypeScriptWorkflowAppliesAndRunsWorkflowContext(t *testing.T) {
 	if def.Version != workflow.Version || def.SourceRef != path {
 		t.Fatalf("workflow definition = %+v, want TypeScript source %s@%s", def, path, workflow.Version)
 	}
+	routes, err := st.RouteBindings().List(ctx, "TSRUN", store.RouteBindingFilter{DefinitionName: "epic-runner"})
+	if err != nil {
+		t.Fatalf("list route bindings: %v", err)
+	}
+	if len(routes) != 0 {
+		t.Fatalf("routes = %+v, want private loom run proof to avoid publishing ingress", routes)
+	}
+	triggers, err := st.TriggerBindings().List(ctx, "TSRUN", store.TriggerBindingFilter{WorkflowName: "epic-runner"})
+	if err != nil {
+		t.Fatalf("list trigger bindings: %v", err)
+	}
+	if len(triggers) != 0 {
+		t.Fatalf("triggers = %+v, want private loom run proof to avoid publishing triggers", triggers)
+	}
 	taskRuns, err := st.TaskRuns().List(ctx, "TSRUN", store.TaskRunFilter{WorkflowRunID: result.Run.RunID, WorkItemID: ready.ID})
 	if err != nil {
 		t.Fatalf("list task runs: %v", err)
@@ -412,6 +429,55 @@ func TestRunTypeScriptWorkflowAppliesAndRunsWorkflowContext(t *testing.T) {
 	}
 	if !hasRunEvent(events, "workflow_ts_context_started") || !hasRunEvent(events, "workflow_log") || !hasRunEvent(events, "task_run_ensured") || !hasRunEvent(events, "task_run_dispatched") {
 		t.Fatalf("events = %+v, want TypeScript WorkflowContext, log, ensure, and dispatch evidence", events)
+	}
+}
+
+func TestPrivateProofPlanKeepsExistingIngressWithoutPublishingSourceIntent(t *testing.T) {
+	ctx := context.Background()
+	st := memstore.New()
+	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "PROOF", Name: "Proof"}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	if _, err := st.RouteBindings().Upsert(ctx, store.RouteBindingUpsert{
+		WorkspaceKey:   "PROOF",
+		DefinitionName: "route-issue",
+		DefinitionType: domain.DefinitionTypeWorkflow,
+		Path:           "/existing/route",
+		Method:         "POST",
+		AuthPolicy:     "workspace",
+		Status:         domain.DefinitionStatusActive,
+	}); err != nil {
+		t.Fatalf("upsert route: %v", err)
+	}
+	if _, err := st.TriggerBindings().Upsert(ctx, store.TriggerBindingUpsert{
+		WorkspaceKey: "PROOF",
+		WorkflowName: "route-issue",
+		EventType:    "issue.label_added",
+		Filter:       json.RawMessage(`{"priority":1}`),
+		Status:       domain.DefinitionStatusActive,
+	}); err != nil {
+		t.Fatalf("upsert trigger: %v", err)
+	}
+	plan := &defspkg.Plan{Workflows: []defspkg.WorkflowModule{{
+		Name:          "route-issue",
+		RoutePath:     "/source/route",
+		RouteAuth:     "public",
+		TriggerEvent:  "github.issue.opened",
+		TriggerFilter: map[string]string{"source": "true"},
+	}}}
+
+	proof, err := privateProofPlan(ctx, st, "PROOF", plan)
+	if err != nil {
+		t.Fatalf("privateProofPlan() error = %v", err)
+	}
+	if proof.Workflows[0].RoutePath != "/existing/route" ||
+		proof.Workflows[0].RouteAuth != "workspace" ||
+		proof.Workflows[0].TriggerEvent != "issue.label_added" ||
+		proof.Workflows[0].TriggerFilter["priority"] != "1" {
+		t.Fatalf("proof workflow = %+v, want existing durable ingress preserved", proof.Workflows[0])
+	}
+	if plan.Workflows[0].RoutePath != "/source/route" || plan.Workflows[0].TriggerEvent != "github.issue.opened" {
+		t.Fatalf("source plan mutated = %+v", plan.Workflows[0])
 	}
 }
 

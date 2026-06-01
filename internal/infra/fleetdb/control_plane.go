@@ -87,8 +87,12 @@ func (s *nodeStore) Update(ctx context.Context, ws, nodeID string, patch store.N
 }
 
 type agentSessionStore struct{ client *Client }
+type agentSessionOperationStore struct{ client *Client }
+type agentSessionToolCallStore struct{ client *Client }
 
 var _ store.AgentSessionStore = (*agentSessionStore)(nil)
+var _ store.AgentSessionOperationStore = (*agentSessionOperationStore)(nil)
+var _ store.AgentSessionToolCallStore = (*agentSessionToolCallStore)(nil)
 
 func (s *agentSessionStore) Create(ctx context.Context, in store.AgentSessionCreate) (*domain.AgentSession, error) {
 	body := struct {
@@ -212,6 +216,195 @@ func (s *agentSessionStore) Update(ctx context.Context, ws, sessionID string, pa
 		return nil, err
 	}
 	return &out, nil
+}
+
+func (s *agentSessionOperationStore) Upsert(ctx context.Context, in store.AgentSessionOperationUpsert) (*domain.AgentSessionOperation, error) {
+	body := map[string]any{
+		"operation_id":        in.OperationID,
+		"session_id":          in.SessionID,
+		"agent_id":            in.AgentID,
+		"workflow_run_id":     in.WorkflowRunID,
+		"task_run_id":         in.TaskRunID,
+		"task_id":             in.TaskID,
+		"kind":                in.Kind,
+		"status":              in.Status,
+		"model":               in.Model,
+		"provider":            in.Provider,
+		"provider_model":      in.ProviderModel,
+		"provider_session_id": in.ProviderSessionID,
+		"prompt_hash":         in.PromptHash,
+		"text":                in.Text,
+		"input":               rawOrNil(in.Input),
+		"result":              rawOrNil(in.Result),
+		"usage":               rawOrNil(in.Usage),
+		"tool_calls":          rawOrNil(in.ToolCalls),
+		"error_class":         in.ErrorClass,
+		"error_message":       in.ErrorMessage,
+		"started_at":          in.StartedAt,
+		"completed_at":        in.CompletedAt,
+		"duration_ms":         in.DurationMS,
+		"metadata":            in.Metadata,
+	}
+	var out domain.AgentSessionOperation
+	if err := s.client.do(ctx, "PUT", "/api/v1/"+pathEscape(in.WorkspaceKey)+"/agent-session-operations/"+pathEscape(in.OperationID), body, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+func (s *agentSessionOperationStore) Get(ctx context.Context, ws, operationID string) (*domain.AgentSessionOperation, error) {
+	var out domain.AgentSessionOperation
+	if err := s.client.do(ctx, "GET", "/api/v1/"+pathEscape(ws)+"/agent-session-operations/"+pathEscape(operationID), nil, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+func (s *agentSessionOperationStore) List(ctx context.Context, ws string, filter store.AgentSessionOperationFilter) ([]*domain.AgentSessionOperation, error) {
+	q := url.Values{}
+	if filter.SessionID != "" {
+		q.Set("session_id", filter.SessionID)
+	}
+	if filter.AgentID != "" {
+		q.Set("agent_id", filter.AgentID)
+	}
+	if filter.WorkflowRunID != "" {
+		q.Set("workflow_run_id", filter.WorkflowRunID)
+	}
+	if filter.TaskRunID != "" {
+		q.Set("task_run_id", filter.TaskRunID)
+	}
+	if filter.TaskID != "" {
+		q.Set("task_id", filter.TaskID)
+	}
+	if filter.Kind != "" {
+		q.Set("kind", filter.Kind)
+	}
+	if filter.Status != "" {
+		q.Set("status", string(filter.Status))
+	}
+	if filter.Limit > 0 {
+		q.Set("limit", strconv.Itoa(filter.Limit))
+	}
+	path := "/api/v1/" + pathEscape(ws) + "/agent-session-operations"
+	if encoded := q.Encode(); encoded != "" {
+		path += "?" + encoded
+	}
+	var resp struct {
+		AgentSessionOperations []*domain.AgentSessionOperation `json:"agent_session_operations"`
+	}
+	if err := s.client.do(ctx, "GET", path, nil, &resp); err != nil {
+		return nil, err
+	}
+	if resp.AgentSessionOperations == nil {
+		resp.AgentSessionOperations = []*domain.AgentSessionOperation{}
+	}
+	return resp.AgentSessionOperations, nil
+}
+
+func (s *agentSessionOperationStore) Cancel(ctx context.Context, ws, operationID string, in store.AgentSessionOperationCancel) (*domain.AgentSessionOperation, error) {
+	body := map[string]any{
+		"error_class":   in.ErrorClass,
+		"error_message": in.ErrorMessage,
+		"completed_at":  in.CompletedAt,
+		"metadata":      in.Metadata,
+	}
+	var out domain.AgentSessionOperation
+	if err := s.client.do(ctx, "POST", "/api/v1/"+pathEscape(ws)+"/agent-session-operations/"+pathEscape(operationID)+"/cancel", body, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+func (s *agentSessionToolCallStore) Upsert(ctx context.Context, in store.AgentSessionToolCallUpsert) (*domain.AgentSessionToolCall, error) {
+	body := map[string]any{
+		"call_id":              in.CallID,
+		"provider_call_id":     in.ProviderCallID,
+		"operation_id":         in.OperationID,
+		"session_id":           in.SessionID,
+		"agent_id":             in.AgentID,
+		"workflow_run_id":      in.WorkflowRunID,
+		"task_run_id":          in.TaskRunID,
+		"task_id":              in.TaskID,
+		"name":                 in.Name,
+		"status":               in.Status,
+		"authorization_status": in.AuthorizationStatus,
+		"idempotency_key":      in.IdempotencyKey,
+		"tool_version":         in.ToolVersion,
+		"source_hash":          in.SourceHash,
+		"handler":              in.Handler,
+		"runtime":              in.Runtime,
+		"timeout":              in.Timeout,
+		"cancellable":          in.Cancellable,
+		"read_only":            in.ReadOnly,
+		"redacted":             in.Redacted,
+		"args":                 rawOrNil(in.Args),
+		"result":               rawOrNil(in.Result),
+		"error_class":          in.ErrorClass,
+		"error_message":        in.ErrorMessage,
+		"started_at":           in.StartedAt,
+		"completed_at":         in.CompletedAt,
+		"duration_ms":          in.DurationMS,
+		"metadata":             in.Metadata,
+	}
+	var out domain.AgentSessionToolCall
+	if err := s.client.do(ctx, "PUT", "/api/v1/"+pathEscape(in.WorkspaceKey)+"/agent-session-tool-calls/"+pathEscape(in.CallID), body, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+func (s *agentSessionToolCallStore) Get(ctx context.Context, ws, callID string) (*domain.AgentSessionToolCall, error) {
+	var out domain.AgentSessionToolCall
+	if err := s.client.do(ctx, "GET", "/api/v1/"+pathEscape(ws)+"/agent-session-tool-calls/"+pathEscape(callID), nil, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+func (s *agentSessionToolCallStore) List(ctx context.Context, ws string, filter store.AgentSessionToolCallFilter) ([]*domain.AgentSessionToolCall, error) {
+	q := url.Values{}
+	if filter.OperationID != "" {
+		q.Set("operation_id", filter.OperationID)
+	}
+	if filter.SessionID != "" {
+		q.Set("session_id", filter.SessionID)
+	}
+	if filter.AgentID != "" {
+		q.Set("agent_id", filter.AgentID)
+	}
+	if filter.WorkflowRunID != "" {
+		q.Set("workflow_run_id", filter.WorkflowRunID)
+	}
+	if filter.TaskRunID != "" {
+		q.Set("task_run_id", filter.TaskRunID)
+	}
+	if filter.TaskID != "" {
+		q.Set("task_id", filter.TaskID)
+	}
+	if filter.Name != "" {
+		q.Set("name", filter.Name)
+	}
+	if filter.Status != "" {
+		q.Set("status", filter.Status)
+	}
+	if filter.Limit > 0 {
+		q.Set("limit", strconv.Itoa(filter.Limit))
+	}
+	path := "/api/v1/" + pathEscape(ws) + "/agent-session-tool-calls"
+	if encoded := q.Encode(); encoded != "" {
+		path += "?" + encoded
+	}
+	var resp struct {
+		AgentSessionToolCalls []*domain.AgentSessionToolCall `json:"agent_session_tool_calls"`
+	}
+	if err := s.client.do(ctx, "GET", path, nil, &resp); err != nil {
+		return nil, err
+	}
+	if resp.AgentSessionToolCalls == nil {
+		resp.AgentSessionToolCalls = []*domain.AgentSessionToolCall{}
+	}
+	return resp.AgentSessionToolCalls, nil
 }
 
 func ttlSeconds(ttl time.Duration) int {

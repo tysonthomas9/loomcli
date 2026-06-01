@@ -603,7 +603,9 @@ export default defineWorkflow({
 	}
 	if len(artifacts) != 1 || artifacts[0].URI != "artifact://workflow/context-artifact/report.json" ||
 		artifacts[0].MIMEType != "application/json" || artifacts[0].SizeBytes != 123 ||
-		artifacts[0].Metadata["source"] != "workflow-context" {
+		artifacts[0].Metadata["source"] != "workflow-context" ||
+		artifacts[0].Metadata["workflow_run_id"] != run.RunID ||
+		artifacts[0].Metadata["workflow_name"] != "context-artifact" {
 		t.Fatalf("artifacts = %+v, want recorded controller artifact", artifacts)
 	}
 	events, err := st.RunEvents().List(ctx, "TSART", store.RunEventFilter{WorkflowRunID: run.RunID})
@@ -1057,6 +1059,45 @@ export default defineWorkflow({
 		t.Fatalf("events = %+v, want one session operation and one session tool call event", events)
 	}
 	operationEvent := workflowEventDataByOperation(t, events, "prompt")
+	sessionOperations, err := st.AgentSessionOperations().List(ctx, "TSSESSIONTOOLS", store.AgentSessionOperationFilter{WorkflowRunID: run.RunID})
+	if err != nil {
+		t.Fatalf("list agent session operations: %v", err)
+	}
+	if len(sessionOperations) != 1 ||
+		sessionOperations[0].OperationID != operationEvent["operation_id"] ||
+		sessionOperations[0].SessionID == "" ||
+		sessionOperations[0].AgentID != "tool-worker" ||
+		sessionOperations[0].Kind != "prompt" ||
+		sessionOperations[0].Status != domain.AgentSessionOperationCompleted ||
+		sessionOperations[0].ProviderModel != "test/provider-model" ||
+		string(sessionOperations[0].ToolCalls) == "" ||
+		string(sessionOperations[0].Usage) != `{"inputTokens":7,"outputTokens":3,"totalTokens":10}` {
+		t.Fatalf("session operations = %+v, want durable operation root with usage and tool call evidence", sessionOperations)
+	}
+	durableToolCalls, err := st.AgentSessionToolCalls().List(ctx, "TSSESSIONTOOLS", store.AgentSessionToolCallFilter{WorkflowRunID: run.RunID})
+	if err != nil {
+		t.Fatalf("list agent session tool calls: %v", err)
+	}
+	if len(durableToolCalls) != 1 ||
+		durableToolCalls[0].CallID != "call-lookup-1" ||
+		durableToolCalls[0].ProviderCallID != "provider-call-lookup-1" ||
+		durableToolCalls[0].OperationID != sessionOperations[0].OperationID ||
+		durableToolCalls[0].SessionID != sessionOperations[0].SessionID ||
+		durableToolCalls[0].AgentID != "tool-worker" ||
+		durableToolCalls[0].Name != "lookup_order_status" ||
+		durableToolCalls[0].Status != "completed" ||
+		durableToolCalls[0].AuthorizationStatus != "authorized" ||
+		durableToolCalls[0].IdempotencyKey != "idem-lookup-1" ||
+		durableToolCalls[0].ToolVersion != "v1" ||
+		durableToolCalls[0].SourceHash != "sha256:lookup" ||
+		durableToolCalls[0].Handler != "typescript" ||
+		durableToolCalls[0].Runtime != "local" ||
+		durableToolCalls[0].Timeout != "2s" ||
+		!durableToolCalls[0].Cancellable ||
+		!durableToolCalls[0].ReadOnly ||
+		durableToolCalls[0].Redacted {
+		t.Fatalf("durable tool calls = %+v, want first-class session tool call evidence", durableToolCalls)
+	}
 	toolEvent := workflowEventDataByType(t, events, "agent_session_tool_call")
 	if toolEvent["workflow_run_id"] != run.RunID ||
 		toolEvent["agent_id"] != "tool-worker" ||

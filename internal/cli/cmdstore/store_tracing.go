@@ -38,52 +38,56 @@ func WrapStoreWithTracing(inner store.Store) store.Store {
 		return nil
 	}
 	return &tracedStore{
-		inner:                inner,
-		workspaces:           &tracedWorkspaceStore{inner: inner.Workspaces()},
-		repos:                &tracedRepoStore{inner: inner.Repos()},
-		agents:               &tracedAgentStore{inner: inner.Agents()},
-		nodes:                &tracedNodeStore{inner: inner.Nodes()},
-		agentSessions:        &tracedAgentSessionStore{inner: inner.AgentSessions()},
-		terminalSessions:     &tracedTerminalSessionStore{inner: inner.TerminalSessions()},
-		artifacts:            &tracedArtifactStore{inner: inner.Artifacts()},
-		agentLeases:          &tracedAgentLeaseStore{inner: inner.AgentLeases()},
-		agentOwnershipLeases: &tracedAgentOwnershipLeaseStore{inner: inner.AgentOwnershipLeases()},
-		agentCommands:        &tracedAgentCommandStore{inner: inner.AgentCommands()},
-		roles:                &tracedRoleStore{inner: inner.Roles()},
-		daemon:               &tracedDaemonStore{inner: inner.Daemon()},
-		defVersions:          inner.DefinitionVersions(),
-		workflowDefs:         inner.WorkflowDefinitions(),
-		workflowRuns:         inner.WorkflowRuns(),
-		taskRuns:             inner.TaskRuns(),
-		runEvents:            inner.RunEvents(),
-		runtimes:             inner.RuntimeProfiles(),
-		routes:               inner.RouteBindings(),
-		triggers:             inner.TriggerBindings(),
+		inner:                 inner,
+		workspaces:            &tracedWorkspaceStore{inner: inner.Workspaces()},
+		repos:                 &tracedRepoStore{inner: inner.Repos()},
+		agents:                &tracedAgentStore{inner: inner.Agents()},
+		nodes:                 &tracedNodeStore{inner: inner.Nodes()},
+		agentSessions:         &tracedAgentSessionStore{inner: inner.AgentSessions()},
+		agentSessionOps:       inner.AgentSessionOperations(),
+		agentSessionToolCalls: inner.AgentSessionToolCalls(),
+		terminalSessions:      &tracedTerminalSessionStore{inner: inner.TerminalSessions()},
+		artifacts:             &tracedArtifactStore{inner: inner.Artifacts()},
+		agentLeases:           &tracedAgentLeaseStore{inner: inner.AgentLeases()},
+		agentOwnershipLeases:  &tracedAgentOwnershipLeaseStore{inner: inner.AgentOwnershipLeases()},
+		agentCommands:         &tracedAgentCommandStore{inner: inner.AgentCommands()},
+		roles:                 &tracedRoleStore{inner: inner.Roles()},
+		daemon:                &tracedDaemonStore{inner: inner.Daemon()},
+		defVersions:           inner.DefinitionVersions(),
+		workflowDefs:          inner.WorkflowDefinitions(),
+		workflowRuns:          inner.WorkflowRuns(),
+		taskRuns:              inner.TaskRuns(),
+		runEvents:             inner.RunEvents(),
+		runtimes:              inner.RuntimeProfiles(),
+		routes:                inner.RouteBindings(),
+		triggers:              inner.TriggerBindings(),
 	}
 }
 
 type tracedStore struct {
-	inner                store.Store
-	workspaces           *tracedWorkspaceStore
-	repos                *tracedRepoStore
-	agents               *tracedAgentStore
-	nodes                *tracedNodeStore
-	agentSessions        *tracedAgentSessionStore
-	terminalSessions     *tracedTerminalSessionStore
-	artifacts            *tracedArtifactStore
-	agentLeases          *tracedAgentLeaseStore
-	agentOwnershipLeases *tracedAgentOwnershipLeaseStore
-	agentCommands        *tracedAgentCommandStore
-	roles                *tracedRoleStore
-	daemon               *tracedDaemonStore
-	defVersions          store.DefinitionVersionStore
-	workflowDefs         store.WorkflowDefinitionStore
-	workflowRuns         store.WorkflowRunStore
-	taskRuns             store.TaskRunStore
-	runEvents            store.RunEventStore
-	runtimes             store.RuntimeProfileStore
-	routes               store.RouteBindingStore
-	triggers             store.TriggerBindingStore
+	inner                 store.Store
+	workspaces            *tracedWorkspaceStore
+	repos                 *tracedRepoStore
+	agents                *tracedAgentStore
+	nodes                 *tracedNodeStore
+	agentSessions         *tracedAgentSessionStore
+	agentSessionOps       store.AgentSessionOperationStore
+	agentSessionToolCalls store.AgentSessionToolCallStore
+	terminalSessions      *tracedTerminalSessionStore
+	artifacts             *tracedArtifactStore
+	agentLeases           *tracedAgentLeaseStore
+	agentOwnershipLeases  *tracedAgentOwnershipLeaseStore
+	agentCommands         *tracedAgentCommandStore
+	roles                 *tracedRoleStore
+	daemon                *tracedDaemonStore
+	defVersions           store.DefinitionVersionStore
+	workflowDefs          store.WorkflowDefinitionStore
+	workflowRuns          store.WorkflowRunStore
+	taskRuns              store.TaskRunStore
+	runEvents             store.RunEventStore
+	runtimes              store.RuntimeProfileStore
+	routes                store.RouteBindingStore
+	triggers              store.TriggerBindingStore
 }
 
 func (t *tracedStore) Workspaces() store.WorkspaceStore       { return t.workspaces }
@@ -91,6 +95,12 @@ func (t *tracedStore) Repos() store.RepoStore                 { return t.repos }
 func (t *tracedStore) Agents() store.AgentStore               { return t.agents }
 func (t *tracedStore) Nodes() store.NodeStore                 { return t.nodes }
 func (t *tracedStore) AgentSessions() store.AgentSessionStore { return t.agentSessions }
+func (t *tracedStore) AgentSessionOperations() store.AgentSessionOperationStore {
+	return t.agentSessionOps
+}
+func (t *tracedStore) AgentSessionToolCalls() store.AgentSessionToolCallStore {
+	return t.agentSessionToolCalls
+}
 func (t *tracedStore) TerminalSessions() store.TerminalSessionStore {
 	return t.terminalSessions
 }

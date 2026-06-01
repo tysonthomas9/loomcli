@@ -55,6 +55,12 @@ func appendControlPlaneState(ctx context.Context, st store.Store, workspaceKey s
 	if err := appendControlPlaneAgentSessions(ctx, st, workspaceKey, plan); err != nil {
 		return err
 	}
+	if err := appendControlPlaneAgentSessionOperations(ctx, st, workspaceKey, plan); err != nil {
+		return err
+	}
+	if err := appendControlPlaneAgentSessionToolCalls(ctx, st, workspaceKey, plan); err != nil {
+		return err
+	}
 	if err := appendControlPlaneAgentLeases(ctx, st, workspaceKey, plan); err != nil {
 		return err
 	}
@@ -407,6 +413,118 @@ func agentSessionFromControlPlane(session *domain.AgentSession) AgentSessionModu
 		module.LastHeartbeat = &lastHeartbeat
 	}
 	module.FinishedAt = cloneWorkflowRunTime(session.FinishedAt)
+	module.SourceHash = workspaceHash(module)
+	module.Version = version(module.SourceHash)
+	return module
+}
+
+func appendControlPlaneAgentSessionOperations(ctx context.Context, st store.Store, workspaceKey string, plan *Plan) error {
+	operationStore := st.AgentSessionOperations()
+	if operationStore == nil {
+		return fmt.Errorf("agent session operation store not configured")
+	}
+	operations, err := operationStore.List(ctx, workspaceKey, store.AgentSessionOperationFilter{Limit: 10000})
+	if err != nil {
+		return fmt.Errorf("list agent session operations: %w", err)
+	}
+	for _, operation := range operations {
+		if operation == nil {
+			continue
+		}
+		plan.AgentSessionOperations = append(plan.AgentSessionOperations, agentSessionOperationFromControlPlane(operation))
+	}
+	return nil
+}
+
+func agentSessionOperationFromControlPlane(operation *domain.AgentSessionOperation) AgentSessionOperationModule {
+	module := AgentSessionOperationModule{
+		OperationID:       operation.OperationID,
+		SessionID:         operation.SessionID,
+		AgentID:           operation.AgentID,
+		SourcePath:        "control-plane:agent-session-operation/" + operation.OperationID,
+		WorkflowRunID:     operation.WorkflowRunID,
+		TaskRunID:         operation.TaskRunID,
+		TaskID:            operation.TaskID,
+		Kind:              operation.Kind,
+		Status:            operation.Status,
+		Model:             operation.Model,
+		Provider:          operation.Provider,
+		ProviderModel:     operation.ProviderModel,
+		ProviderSessionID: operation.ProviderSessionID,
+		PromptHash:        operation.PromptHash,
+		Text:              operation.Text,
+		Input:             cloneWorkflowRunRaw(operation.Input),
+		Result:            cloneWorkflowRunRaw(operation.Result),
+		Usage:             cloneWorkflowRunRaw(operation.Usage),
+		ToolCalls:         cloneWorkflowRunRaw(operation.ToolCalls),
+		ErrorClass:        operation.ErrorClass,
+		ErrorMessage:      operation.ErrorMessage,
+		CompletedAt:       cloneWorkflowRunTime(operation.CompletedAt),
+		DurationMS:        operation.DurationMS,
+		Metadata:          cloneStringMap(operation.Metadata),
+	}
+	if !operation.StartedAt.IsZero() {
+		startedAt := operation.StartedAt
+		module.StartedAt = &startedAt
+	}
+	module.SourceHash = workspaceHash(module)
+	module.Version = version(module.SourceHash)
+	return module
+}
+
+func appendControlPlaneAgentSessionToolCalls(ctx context.Context, st store.Store, workspaceKey string, plan *Plan) error {
+	toolCallStore := st.AgentSessionToolCalls()
+	if toolCallStore == nil {
+		return fmt.Errorf("agent session tool call store not configured")
+	}
+	calls, err := toolCallStore.List(ctx, workspaceKey, store.AgentSessionToolCallFilter{Limit: 10000})
+	if err != nil {
+		return fmt.Errorf("list agent session tool calls: %w", err)
+	}
+	for _, call := range calls {
+		if call == nil {
+			continue
+		}
+		plan.AgentSessionToolCalls = append(plan.AgentSessionToolCalls, agentSessionToolCallFromControlPlane(call))
+	}
+	return nil
+}
+
+func agentSessionToolCallFromControlPlane(call *domain.AgentSessionToolCall) AgentSessionToolCallModule {
+	module := AgentSessionToolCallModule{
+		CallID:              call.CallID,
+		ProviderCallID:      call.ProviderCallID,
+		OperationID:         call.OperationID,
+		SessionID:           call.SessionID,
+		AgentID:             call.AgentID,
+		SourcePath:          "control-plane:agent-session-tool-call/" + call.CallID,
+		WorkflowRunID:       call.WorkflowRunID,
+		TaskRunID:           call.TaskRunID,
+		TaskID:              call.TaskID,
+		Name:                call.Name,
+		Status:              call.Status,
+		AuthorizationStatus: call.AuthorizationStatus,
+		IdempotencyKey:      call.IdempotencyKey,
+		ToolVersion:         call.ToolVersion,
+		ToolSourceHash:      call.SourceHash,
+		Handler:             call.Handler,
+		Runtime:             call.Runtime,
+		Timeout:             call.Timeout,
+		Cancellable:         call.Cancellable,
+		ReadOnly:            call.ReadOnly,
+		Redacted:            call.Redacted,
+		Args:                cloneWorkflowRunRaw(call.Args),
+		Result:              cloneWorkflowRunRaw(call.Result),
+		ErrorClass:          call.ErrorClass,
+		ErrorMessage:        call.ErrorMessage,
+		CompletedAt:         cloneWorkflowRunTime(call.CompletedAt),
+		DurationMS:          call.DurationMS,
+		Metadata:            cloneStringMap(call.Metadata),
+	}
+	if !call.StartedAt.IsZero() {
+		startedAt := call.StartedAt
+		module.StartedAt = &startedAt
+	}
 	module.SourceHash = workspaceHash(module)
 	module.Version = version(module.SourceHash)
 	return module
@@ -942,6 +1060,12 @@ func sortPlan(plan *Plan) {
 	sort.Slice(plan.AgentInstances, func(i, j int) bool { return plan.AgentInstances[i].Name < plan.AgentInstances[j].Name })
 	sort.Slice(plan.Nodes, func(i, j int) bool { return plan.Nodes[i].NodeID < plan.Nodes[j].NodeID })
 	sort.Slice(plan.AgentSessions, func(i, j int) bool { return plan.AgentSessions[i].SessionID < plan.AgentSessions[j].SessionID })
+	sort.Slice(plan.AgentSessionOperations, func(i, j int) bool {
+		return plan.AgentSessionOperations[i].OperationID < plan.AgentSessionOperations[j].OperationID
+	})
+	sort.Slice(plan.AgentSessionToolCalls, func(i, j int) bool {
+		return plan.AgentSessionToolCalls[i].CallID < plan.AgentSessionToolCalls[j].CallID
+	})
 	sort.Slice(plan.AgentLeases, func(i, j int) bool { return plan.AgentLeases[i].LeaseID < plan.AgentLeases[j].LeaseID })
 	sort.Slice(plan.AgentOwnershipLeases, func(i, j int) bool {
 		return plan.AgentOwnershipLeases[i].AgentID < plan.AgentOwnershipLeases[j].AgentID

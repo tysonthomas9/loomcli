@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"encoding/json"
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
@@ -98,6 +99,109 @@ type AgentSessionStore interface {
 	List(ctx context.Context, workspaceKey string, filter AgentSessionFilter) ([]*domain.AgentSession, error)
 	Heartbeat(ctx context.Context, workspaceKey, sessionID string) (*domain.AgentSession, error)
 	Update(ctx context.Context, workspaceKey, sessionID string, patch AgentSessionUpdate) (*domain.AgentSession, error)
+}
+
+type AgentSessionOperationUpsert struct {
+	WorkspaceKey      string
+	OperationID       string
+	SessionID         string
+	AgentID           string
+	WorkflowRunID     string
+	TaskRunID         string
+	TaskID            string
+	Kind              string
+	Status            domain.AgentSessionOperationStatus
+	Model             string
+	Provider          string
+	ProviderModel     string
+	ProviderSessionID string
+	PromptHash        string
+	Text              string
+	Input             json.RawMessage
+	Result            json.RawMessage
+	Usage             json.RawMessage
+	ToolCalls         json.RawMessage
+	ErrorClass        string
+	ErrorMessage      string
+	StartedAt         time.Time
+	CompletedAt       *time.Time
+	DurationMS        int64
+	Metadata          map[string]string
+}
+
+type AgentSessionOperationFilter struct {
+	SessionID     string
+	AgentID       string
+	WorkflowRunID string
+	TaskRunID     string
+	TaskID        string
+	Kind          string
+	Status        domain.AgentSessionOperationStatus
+	Limit         int
+}
+
+type AgentSessionOperationCancel struct {
+	ErrorClass   string
+	ErrorMessage string
+	CompletedAt  time.Time
+	Metadata     map[string]string
+}
+
+type AgentSessionOperationStore interface {
+	Upsert(ctx context.Context, in AgentSessionOperationUpsert) (*domain.AgentSessionOperation, error)
+	Get(ctx context.Context, workspaceKey, operationID string) (*domain.AgentSessionOperation, error)
+	List(ctx context.Context, workspaceKey string, filter AgentSessionOperationFilter) ([]*domain.AgentSessionOperation, error)
+	Cancel(ctx context.Context, workspaceKey, operationID string, in AgentSessionOperationCancel) (*domain.AgentSessionOperation, error)
+}
+
+type AgentSessionToolCallUpsert struct {
+	WorkspaceKey        string
+	CallID              string
+	ProviderCallID      string
+	OperationID         string
+	SessionID           string
+	AgentID             string
+	WorkflowRunID       string
+	TaskRunID           string
+	TaskID              string
+	Name                string
+	Status              string
+	AuthorizationStatus string
+	IdempotencyKey      string
+	ToolVersion         string
+	SourceHash          string
+	Handler             string
+	Runtime             string
+	Timeout             string
+	Cancellable         bool
+	ReadOnly            bool
+	Redacted            bool
+	Args                json.RawMessage
+	Result              json.RawMessage
+	ErrorClass          string
+	ErrorMessage        string
+	StartedAt           time.Time
+	CompletedAt         *time.Time
+	DurationMS          int64
+	Metadata            map[string]string
+}
+
+type AgentSessionToolCallFilter struct {
+	OperationID   string
+	SessionID     string
+	AgentID       string
+	WorkflowRunID string
+	TaskRunID     string
+	TaskID        string
+	Name          string
+	Status        string
+	Limit         int
+}
+
+type AgentSessionToolCallStore interface {
+	Upsert(ctx context.Context, in AgentSessionToolCallUpsert) (*domain.AgentSessionToolCall, error)
+	Get(ctx context.Context, workspaceKey, callID string) (*domain.AgentSessionToolCall, error)
+	List(ctx context.Context, workspaceKey string, filter AgentSessionToolCallFilter) ([]*domain.AgentSessionToolCall, error)
 }
 
 type TerminalSessionCreate struct {

@@ -149,6 +149,224 @@ func TestWorkflowRunAPICreatesInspectableRun(t *testing.T) {
 		t.Fatalf("events = %+v, want TypeScript WorkflowContext, log, ensure, and dispatch evidence", events.Data)
 	}
 
+	tasksRec := httptest.NewRecorder()
+	mux.ServeHTTP(tasksRec, httptest.NewRequest(http.MethodGet, "/api/workspaces/WS/workflow-runs/"+created.Run.RunID+"/tasks", nil))
+	if tasksRec.Code != http.StatusOK {
+		t.Fatalf("tasks status = %d, want 200; body=%s", tasksRec.Code, tasksRec.Body.String())
+	}
+	var tasks struct {
+		Data []domain.TaskRun `json:"data"`
+	}
+	if err := json.Unmarshal(tasksRec.Body.Bytes(), &tasks); err != nil {
+		t.Fatalf("decode tasks: %v", err)
+	}
+	if len(tasks.Data) != 1 || tasks.Data[0].WorkflowRunID != created.Run.RunID || tasks.Data[0].WorkItemID != "TASK-2" {
+		t.Fatalf("tasks = %+v, want run-linked task", tasks.Data)
+	}
+
+	if _, err := st.AgentSessions().Create(ctx, store.AgentSessionCreate{
+		WorkspaceKey: "WS",
+		SessionID:    "session-" + created.Run.RunID,
+		AgentID:      "agent-task",
+		NodeID:       "node-local",
+		Kind:         domain.AgentSessionKindTask,
+		TaskID:       "TASK-2",
+		Status:       domain.AgentSessionRunning,
+		Metadata:     map[string]string{"workflow_run_id": created.Run.RunID},
+	}); err != nil {
+		t.Fatalf("create workflow session: %v", err)
+	}
+	if _, err := st.AgentSessions().Create(ctx, store.AgentSessionCreate{
+		WorkspaceKey: "WS",
+		SessionID:    "session-unrelated",
+		AgentID:      "agent-other",
+		Kind:         domain.AgentSessionKindTask,
+		TaskID:       "TASK-OTHER",
+		Status:       domain.AgentSessionRunning,
+	}); err != nil {
+		t.Fatalf("create unrelated session: %v", err)
+	}
+	if _, err := st.Artifacts().Create(ctx, store.ArtifactCreate{
+		WorkspaceKey: "WS",
+		ArtifactID:   "artifact-" + created.Run.RunID,
+		AgentID:      "agent-task",
+		SessionID:    "session-" + created.Run.RunID,
+		TaskID:       "TASK-2",
+		Type:         "report",
+		URI:          "artifact://workflow/report.json",
+		Summary:      "workflow report",
+		Metadata:     map[string]string{"workflow_run_id": created.Run.RunID},
+	}); err != nil {
+		t.Fatalf("create workflow artifact: %v", err)
+	}
+	if _, err := st.Artifacts().Create(ctx, store.ArtifactCreate{
+		WorkspaceKey: "WS",
+		ArtifactID:   "artifact-unrelated",
+		AgentID:      "agent-other",
+		TaskID:       "TASK-OTHER",
+		Type:         "report",
+		URI:          "artifact://other/report.json",
+		Summary:      "unrelated report",
+	}); err != nil {
+		t.Fatalf("create unrelated artifact: %v", err)
+	}
+	if _, err := st.AgentSessionOperations().Upsert(ctx, store.AgentSessionOperationUpsert{
+		WorkspaceKey:  "WS",
+		OperationID:   "operation-" + created.Run.RunID,
+		SessionID:     "session-" + created.Run.RunID,
+		AgentID:       "agent-task",
+		WorkflowRunID: created.Run.RunID,
+		TaskID:        "TASK-2",
+		Kind:          "prompt",
+		Status:        domain.AgentSessionOperationCompleted,
+	}); err != nil {
+		t.Fatalf("upsert workflow operation: %v", err)
+	}
+	if _, err := st.AgentSessionOperations().Upsert(ctx, store.AgentSessionOperationUpsert{
+		WorkspaceKey:  "WS",
+		OperationID:   "operation-unrelated",
+		SessionID:     "session-unrelated",
+		AgentID:       "agent-other",
+		WorkflowRunID: "other-run",
+		TaskID:        "TASK-OTHER",
+		Kind:          "prompt",
+		Status:        domain.AgentSessionOperationCompleted,
+	}); err != nil {
+		t.Fatalf("upsert unrelated operation: %v", err)
+	}
+	if _, err := st.AgentSessionToolCalls().Upsert(ctx, store.AgentSessionToolCallUpsert{
+		WorkspaceKey:  "WS",
+		CallID:        "call-" + created.Run.RunID,
+		OperationID:   "operation-" + created.Run.RunID,
+		SessionID:     "session-" + created.Run.RunID,
+		AgentID:       "agent-task",
+		WorkflowRunID: created.Run.RunID,
+		TaskID:        "TASK-2",
+		Name:          "lookup",
+		Status:        "completed",
+	}); err != nil {
+		t.Fatalf("upsert workflow tool call: %v", err)
+	}
+	if _, err := st.AgentSessionToolCalls().Upsert(ctx, store.AgentSessionToolCallUpsert{
+		WorkspaceKey:  "WS",
+		CallID:        "call-unrelated",
+		OperationID:   "operation-unrelated",
+		SessionID:     "session-unrelated",
+		AgentID:       "agent-other",
+		WorkflowRunID: "other-run",
+		TaskID:        "TASK-OTHER",
+		Name:          "lookup",
+		Status:        "completed",
+	}); err != nil {
+		t.Fatalf("upsert unrelated tool call: %v", err)
+	}
+
+	sessionsRec := httptest.NewRecorder()
+	mux.ServeHTTP(sessionsRec, httptest.NewRequest(http.MethodGet, "/api/workspaces/WS/workflow-runs/"+created.Run.RunID+"/sessions", nil))
+	if sessionsRec.Code != http.StatusOK {
+		t.Fatalf("sessions status = %d, want 200; body=%s", sessionsRec.Code, sessionsRec.Body.String())
+	}
+	var sessions struct {
+		Data []domain.AgentSession `json:"data"`
+	}
+	if err := json.Unmarshal(sessionsRec.Body.Bytes(), &sessions); err != nil {
+		t.Fatalf("decode sessions: %v", err)
+	}
+	if len(sessions.Data) != 1 || sessions.Data[0].SessionID != "session-"+created.Run.RunID {
+		t.Fatalf("sessions = %+v, want workflow-linked agent session", sessions.Data)
+	}
+
+	operationsRec := httptest.NewRecorder()
+	mux.ServeHTTP(operationsRec, httptest.NewRequest(http.MethodGet, "/api/workspaces/WS/workflow-runs/"+created.Run.RunID+"/operations", nil))
+	if operationsRec.Code != http.StatusOK {
+		t.Fatalf("operations status = %d, want 200; body=%s", operationsRec.Code, operationsRec.Body.String())
+	}
+	var operations struct {
+		Data []domain.AgentSessionOperation `json:"data"`
+	}
+	if err := json.Unmarshal(operationsRec.Body.Bytes(), &operations); err != nil {
+		t.Fatalf("decode operations: %v", err)
+	}
+	if len(operations.Data) != 1 || operations.Data[0].OperationID != "operation-"+created.Run.RunID {
+		t.Fatalf("operations = %+v, want workflow-linked agent session operation", operations.Data)
+	}
+
+	toolCallsRec := httptest.NewRecorder()
+	mux.ServeHTTP(toolCallsRec, httptest.NewRequest(http.MethodGet, "/api/workspaces/WS/workflow-runs/"+created.Run.RunID+"/tool-calls", nil))
+	if toolCallsRec.Code != http.StatusOK {
+		t.Fatalf("tool calls status = %d, want 200; body=%s", toolCallsRec.Code, toolCallsRec.Body.String())
+	}
+	var toolCalls struct {
+		Data []domain.AgentSessionToolCall `json:"data"`
+	}
+	if err := json.Unmarshal(toolCallsRec.Body.Bytes(), &toolCalls); err != nil {
+		t.Fatalf("decode tool calls: %v", err)
+	}
+	if len(toolCalls.Data) != 1 || toolCalls.Data[0].CallID != "call-"+created.Run.RunID {
+		t.Fatalf("tool calls = %+v, want workflow-linked agent session tool call", toolCalls.Data)
+	}
+
+	if _, err := st.AgentSessionOperations().Upsert(ctx, store.AgentSessionOperationUpsert{
+		WorkspaceKey:  "WS",
+		OperationID:   "operation-cancel",
+		SessionID:     "session-" + created.Run.RunID,
+		AgentID:       "agent-task",
+		WorkflowRunID: created.Run.RunID,
+		TaskID:        "TASK-2",
+		Kind:          "prompt",
+		Status:        domain.AgentSessionOperationRunning,
+	}); err != nil {
+		t.Fatalf("upsert cancellable operation: %v", err)
+	}
+	if _, err := st.AgentSessionToolCalls().Upsert(ctx, store.AgentSessionToolCallUpsert{
+		WorkspaceKey:  "WS",
+		CallID:        "call-cancel",
+		OperationID:   "operation-cancel",
+		SessionID:     "session-" + created.Run.RunID,
+		AgentID:       "agent-task",
+		WorkflowRunID: created.Run.RunID,
+		TaskID:        "TASK-2",
+		Name:          "lookup",
+		Status:        "running",
+	}); err != nil {
+		t.Fatalf("upsert cancellable tool call: %v", err)
+	}
+	cancelOperationRec := postJSON(t, mux, "/api/workspaces/WS/agent-session-operations/operation-cancel/cancel", map[string]any{"reason": "user stopped"})
+	if cancelOperationRec.Code != http.StatusOK {
+		t.Fatalf("cancel operation status = %d, want 200; body=%s", cancelOperationRec.Code, cancelOperationRec.Body.String())
+	}
+	var cancelledOperation domain.AgentSessionOperation
+	if err := json.Unmarshal(cancelOperationRec.Body.Bytes(), &cancelledOperation); err != nil {
+		t.Fatalf("decode cancelled operation: %v", err)
+	}
+	if cancelledOperation.Status != domain.AgentSessionOperationCancelled ||
+		cancelledOperation.ErrorMessage != "user stopped" ||
+		cancelledOperation.Metadata["cancel_reason"] != "user stopped" {
+		t.Fatalf("cancelled operation = %+v, want cancelled operation with reason", cancelledOperation)
+	}
+	cancelledToolCall, err := st.AgentSessionToolCalls().Get(ctx, "WS", "call-cancel")
+	if err != nil {
+		t.Fatalf("get cancelled tool call: %v", err)
+	}
+	if cancelledToolCall.Status != "cancelled" || cancelledToolCall.ErrorMessage != "user stopped" {
+		t.Fatalf("cancelled tool call = %+v, want propagated cancellation", cancelledToolCall)
+	}
+
+	artifactsRec := httptest.NewRecorder()
+	mux.ServeHTTP(artifactsRec, httptest.NewRequest(http.MethodGet, "/api/workspaces/WS/workflow-runs/"+created.Run.RunID+"/artifacts?type=report", nil))
+	if artifactsRec.Code != http.StatusOK {
+		t.Fatalf("artifacts status = %d, want 200; body=%s", artifactsRec.Code, artifactsRec.Body.String())
+	}
+	var artifacts struct {
+		Data []domain.Artifact `json:"data"`
+	}
+	if err := json.Unmarshal(artifactsRec.Body.Bytes(), &artifacts); err != nil {
+		t.Fatalf("decode artifacts: %v", err)
+	}
+	if len(artifacts.Data) != 1 || artifacts.Data[0].ArtifactID != "artifact-"+created.Run.RunID {
+		t.Fatalf("artifacts = %+v, want workflow-linked artifact", artifacts.Data)
+	}
+
 	streamRec := httptest.NewRecorder()
 	mux.ServeHTTP(streamRec, httptest.NewRequest(http.MethodGet, "/api/workspaces/WS/workflow-runs/"+created.Run.RunID+"/events/stream?once=1", nil))
 	if streamRec.Code != http.StatusOK {
@@ -349,6 +567,124 @@ func TestWorkflowRouteBindingAPIValidation(t *testing.T) {
 	unsupported := postJSON(t, mux, "/api/workspaces/WS/workflow-routes/public", map[string]any{"once": false})
 	if unsupported.Code != http.StatusForbidden {
 		t.Fatalf("unsupported auth route status = %d, want 403; body=%s", unsupported.Code, unsupported.Body.String())
+	}
+}
+
+func TestWorkflowBindingManagementAPI(t *testing.T) {
+	ctx := context.Background()
+	_, mux := setupWorkflowTestMux(t, ctx, nil)
+
+	routeCreate := postJSON(t, mux, "/api/workspaces/WS/workflows/epic-runner/routes", map[string]any{
+		"path": "/api/epic-runner",
+		"auth": "workspace",
+	})
+	if routeCreate.Code != http.StatusCreated {
+		t.Fatalf("route create status = %d, want 201; body=%s", routeCreate.Code, routeCreate.Body.String())
+	}
+	var route domain.RouteBinding
+	if err := json.Unmarshal(routeCreate.Body.Bytes(), &route); err != nil {
+		t.Fatalf("decode route: %v", err)
+	}
+	if route.DefinitionName != "epic-runner" || route.Path != "/api/epic-runner" ||
+		route.AuthPolicy != "workspace" || route.Status != domain.DefinitionStatusActive {
+		t.Fatalf("route = %+v, want active api route binding", route)
+	}
+
+	routeList := httptest.NewRecorder()
+	mux.ServeHTTP(routeList, httptest.NewRequest(http.MethodGet, "/api/workspaces/WS/workflow-route-bindings?workflow=epic-runner", nil))
+	if routeList.Code != http.StatusOK {
+		t.Fatalf("route list status = %d, want 200; body=%s", routeList.Code, routeList.Body.String())
+	}
+	var routes struct {
+		Data []domain.RouteBinding `json:"data"`
+	}
+	if err := json.Unmarshal(routeList.Body.Bytes(), &routes); err != nil {
+		t.Fatalf("decode route list: %v", err)
+	}
+	if !hasRouteBinding(routes.Data, route.BindingID) {
+		t.Fatalf("routes = %+v, want created route binding", routes.Data)
+	}
+
+	routeDelete := httptest.NewRecorder()
+	mux.ServeHTTP(routeDelete, httptest.NewRequest(http.MethodDelete, "/api/workspaces/WS/workflows/epic-runner/routes/api/epic-runner", nil))
+	if routeDelete.Code != http.StatusOK {
+		t.Fatalf("route delete status = %d, want 200; body=%s", routeDelete.Code, routeDelete.Body.String())
+	}
+	var disabledRoute domain.RouteBinding
+	if err := json.Unmarshal(routeDelete.Body.Bytes(), &disabledRoute); err != nil {
+		t.Fatalf("decode disabled route: %v", err)
+	}
+	if disabledRoute.BindingID != route.BindingID || disabledRoute.Status != domain.DefinitionStatusDisabled {
+		t.Fatalf("disabled route = %+v, want disabled created binding", disabledRoute)
+	}
+
+	routeListAfter := httptest.NewRecorder()
+	mux.ServeHTTP(routeListAfter, httptest.NewRequest(http.MethodGet, "/api/workspaces/WS/workflow-route-bindings?workflow=epic-runner", nil))
+	var activeRoutes struct {
+		Data []domain.RouteBinding `json:"data"`
+	}
+	if err := json.Unmarshal(routeListAfter.Body.Bytes(), &activeRoutes); err != nil {
+		t.Fatalf("decode route list after disable: %v", err)
+	}
+	if hasRouteBinding(activeRoutes.Data, route.BindingID) {
+		t.Fatalf("active routes after disable = %+v, disabled route still listed", activeRoutes.Data)
+	}
+
+	triggerCreate := postJSON(t, mux, "/api/workspaces/WS/workflows/epic-runner/triggers", map[string]any{
+		"event":  "github.issue.opened",
+		"filter": map[string]any{"repo": "loom"},
+	})
+	if triggerCreate.Code != http.StatusCreated {
+		t.Fatalf("trigger create status = %d, want 201; body=%s", triggerCreate.Code, triggerCreate.Body.String())
+	}
+	var trigger domain.TriggerBinding
+	if err := json.Unmarshal(triggerCreate.Body.Bytes(), &trigger); err != nil {
+		t.Fatalf("decode trigger: %v", err)
+	}
+	if trigger.WorkflowName != "epic-runner" || trigger.EventType != "github.issue.opened" ||
+		!strings.Contains(string(trigger.Filter), `"repo":"loom"`) ||
+		trigger.Status != domain.DefinitionStatusActive {
+		t.Fatalf("trigger = %+v, want active api trigger binding", trigger)
+	}
+
+	triggerList := httptest.NewRecorder()
+	mux.ServeHTTP(triggerList, httptest.NewRequest(http.MethodGet, "/api/workspaces/WS/workflow-trigger-bindings?workflow=epic-runner", nil))
+	if triggerList.Code != http.StatusOK {
+		t.Fatalf("trigger list status = %d, want 200; body=%s", triggerList.Code, triggerList.Body.String())
+	}
+	var triggers struct {
+		Data []domain.TriggerBinding `json:"data"`
+	}
+	if err := json.Unmarshal(triggerList.Body.Bytes(), &triggers); err != nil {
+		t.Fatalf("decode trigger list: %v", err)
+	}
+	if !hasTriggerBinding(triggers.Data, trigger.BindingID) {
+		t.Fatalf("triggers = %+v, want created trigger binding", triggers.Data)
+	}
+
+	triggerDelete := httptest.NewRecorder()
+	mux.ServeHTTP(triggerDelete, httptest.NewRequest(http.MethodDelete, "/api/workspaces/WS/workflows/epic-runner/triggers/github.issue.opened", nil))
+	if triggerDelete.Code != http.StatusOK {
+		t.Fatalf("trigger delete status = %d, want 200; body=%s", triggerDelete.Code, triggerDelete.Body.String())
+	}
+	var disabledTrigger domain.TriggerBinding
+	if err := json.Unmarshal(triggerDelete.Body.Bytes(), &disabledTrigger); err != nil {
+		t.Fatalf("decode disabled trigger: %v", err)
+	}
+	if disabledTrigger.BindingID != trigger.BindingID || disabledTrigger.Status != domain.DefinitionStatusDisabled {
+		t.Fatalf("disabled trigger = %+v, want disabled created binding", disabledTrigger)
+	}
+
+	triggerListAfter := httptest.NewRecorder()
+	mux.ServeHTTP(triggerListAfter, httptest.NewRequest(http.MethodGet, "/api/workspaces/WS/workflow-trigger-bindings?workflow=epic-runner", nil))
+	var activeTriggers struct {
+		Data []domain.TriggerBinding `json:"data"`
+	}
+	if err := json.Unmarshal(triggerListAfter.Body.Bytes(), &activeTriggers); err != nil {
+		t.Fatalf("decode trigger list after disable: %v", err)
+	}
+	if hasTriggerBinding(activeTriggers.Data, trigger.BindingID) {
+		t.Fatalf("active triggers after disable = %+v, disabled trigger still listed", activeTriggers.Data)
 	}
 }
 
@@ -694,6 +1030,24 @@ func hasRunEventPtr(events []*domain.RunEvent, typ string) bool {
 	return false
 }
 
+func hasRouteBinding(routes []domain.RouteBinding, bindingID string) bool {
+	for _, route := range routes {
+		if route.BindingID == bindingID {
+			return true
+		}
+	}
+	return false
+}
+
+func hasTriggerBinding(triggers []domain.TriggerBinding, bindingID string) bool {
+	for _, trigger := range triggers {
+		if trigger.BindingID == bindingID {
+			return true
+		}
+	}
+	return false
+}
+
 type testIssueBackend struct {
 	backend.IssueBackend
 	ready   []backend.IssueData
@@ -711,6 +1065,16 @@ func (b testIssueBackend) Blocked(context.Context, backend.BlockedOpts) ([]backe
 
 func (b testIssueBackend) List(context.Context, backend.ListOpts) ([]backend.IssueData, error) {
 	return b.list, nil
+}
+
+func (b testIssueBackend) Get(_ context.Context, id string) (*backend.IssueDetailData, error) {
+	for _, issue := range append(append([]backend.IssueData{}, b.ready...), append(b.blocked, b.list...)...) {
+		if issue.ID == id {
+			got := backend.IssueDetailData{IssueData: issue}
+			return &got, nil
+		}
+	}
+	return nil, errors.New("issue not found")
 }
 
 func (b testIssueBackend) BackendName() string {

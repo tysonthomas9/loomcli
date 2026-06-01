@@ -493,6 +493,21 @@ func ApplyAgentInstance(ctx context.Context, st store.Store, workspaceKey string
 	return updated, nil
 }
 
+func ApplyAgentInstancesForPlan(ctx context.Context, st store.Store, workspaceKey string, plan *Plan, start bool) ([]*domain.Agent, error) {
+	if plan == nil {
+		return nil, fmt.Errorf("definition plan required")
+	}
+	instances := make([]*domain.Agent, 0, len(plan.Agents))
+	for _, agent := range plan.Agents {
+		instance, err := ApplyAgentInstance(ctx, st, workspaceKey, agent, "", start)
+		if err != nil {
+			return nil, err
+		}
+		instances = append(instances, instance)
+	}
+	return instances, nil
+}
+
 func loadDir(dir string, fn func(string, []byte) error) error {
 	entries, err := os.ReadDir(dir)
 	if errors.Is(err, os.ErrNotExist) {
@@ -642,6 +657,12 @@ func validatePlan(plan *Plan) error {
 			return fmt.Errorf("duplicate agent session %q in %s and %s", session.SessionID, prior, sourcePath)
 		}
 		seen["agent-session:"+session.SessionID] = sourcePath
+	}
+	if err := validateAgentSessionOperationModules(plan, seen); err != nil {
+		return err
+	}
+	if err := validateAgentSessionToolCallModules(plan, seen); err != nil {
+		return err
 	}
 	for _, command := range plan.AgentCommands {
 		sourcePath := firstNonEmpty(command.SourcePath, "agent_command:"+command.CommandID)
@@ -933,6 +954,10 @@ func routeBindingID(name, method, routePath string) string {
 	}
 	safePath = strings.NewReplacer("/", ".", " ", "-").Replace(safePath)
 	return "workflow:" + name + ":" + method + ":" + safePath
+}
+
+func RouteBindingID(name, method, routePath string) string {
+	return routeBindingID(name, method, routePath)
 }
 
 func compactMap(in map[string]any) map[string]any {

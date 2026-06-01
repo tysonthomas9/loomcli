@@ -626,6 +626,12 @@ func createWorkflowArtifact(ctx context.Context, st store.Store, run *domain.Wor
 		artifactID = generatedArtifactID(run.RunID, artifactType, uri)
 	}
 	taskID := firstString(params, "taskId", "task_id", "workItemId", "work_item_id")
+	metadata := stringMap(params["metadata"])
+	metadata["workflow_run_id"] = run.RunID
+	metadata["workflow_name"] = run.WorkflowName
+	if run.WorkflowVersion != "" {
+		metadata["workflow_version"] = run.WorkflowVersion
+	}
 	artifact, err := st.Artifacts().Create(ctx, store.ArtifactCreate{
 		WorkspaceKey: run.WorkspaceKey,
 		ArtifactID:   artifactID,
@@ -636,7 +642,7 @@ func createWorkflowArtifact(ctx context.Context, st store.Store, run *domain.Wor
 		MIMEType:     firstString(params, "mimeType", "mime_type"),
 		SizeBytes:    firstInt64(params, "sizeBytes", "size_bytes"),
 		Checksum:     firstString(params, "checksum"),
-		Metadata:     stringMap(params["metadata"]),
+		Metadata:     metadata,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("record workflow artifact %s: %w", artifactID, err)
@@ -780,9 +786,11 @@ func appendAgentSessionOperationEvent(ctx context.Context, st store.Store, run *
 	data["session_id"] = sessionID
 	data["operation"] = operation
 	data["visibility"] = agentSessionOperationVisibility(operation)
-	if operationID := firstString(data, "operationId", "operation_id"); operationID != "" {
-		data["operation_id"] = operationID
+	operationID := firstString(data, "operationId", "operation_id")
+	if operationID == "" {
+		operationID = generatedAgentSessionOperationID(run.RunID, sessionID, operation, data)
 	}
+	data["operation_id"] = operationID
 	if _, ok := data["status"]; !ok {
 		data["status"] = "admitted"
 	}
@@ -793,6 +801,7 @@ func appendAgentSessionOperationEvent(ctx context.Context, st store.Store, run *
 	if firstString(data, "status") == "completed" {
 		message = "workflow agent session operation completed"
 	}
+	upsertAgentSessionOperation(ctx, st, run, data)
 	_, _ = st.RunEvents().Append(ctx, store.RunEventAppend{
 		WorkspaceKey:  run.WorkspaceKey,
 		WorkflowRunID: run.RunID,
@@ -801,6 +810,45 @@ func appendAgentSessionOperationEvent(ctx context.Context, st store.Store, run *
 		Data:          mustJSON(data),
 	})
 	return appendAgentSessionToolCallEvents(ctx, st, run, data)
+}
+
+func upsertAgentSessionOperation(ctx context.Context, st store.Store, run *domain.WorkflowRun, data map[string]any) {
+	if st == nil || st.AgentSessionOperations() == nil || run == nil {
+		return
+	}
+	result, _ := rawMessageFromFirst(data, "result", "data")
+	input, _ := rawMessageFromFirst(data, "input")
+	usage, _ := rawMessageFromFirst(data, "usage")
+	toolCalls, _ := rawMessageFromFirst(data, "toolCalls", "tool_calls")
+	startedAt := firstTime(data, "startedAt", "started_at")
+	completedAt := firstTimePtr(data, "completedAt", "completed_at")
+	_, _ = st.AgentSessionOperations().Upsert(ctx, store.AgentSessionOperationUpsert{
+		WorkspaceKey:      run.WorkspaceKey,
+		OperationID:       firstString(data, "operation_id", "operationId"),
+		SessionID:         firstString(data, "session_id", "sessionId"),
+		AgentID:           firstString(data, "agent_id", "agentId"),
+		WorkflowRunID:     run.RunID,
+		TaskRunID:         firstString(data, "taskRunId", "task_run_id"),
+		TaskID:            firstString(data, "task_id", "taskId", "workItemId", "work_item_id"),
+		Kind:              firstString(data, "operation"),
+		Status:            domain.AgentSessionOperationStatus(firstNonEmptyString(firstString(data, "status"), string(domain.AgentSessionOperationAdmitted))),
+		Model:             firstString(data, "model"),
+		Provider:          firstString(data, "provider"),
+		ProviderModel:     firstString(data, "providerModel", "provider_model"),
+		ProviderSessionID: firstString(data, "providerSessionId", "provider_session_id"),
+		PromptHash:        firstString(data, "promptHash", "prompt_hash"),
+		Text:              firstNonEmptyString(firstString(data, "text", "response", "message"), resultText(result)),
+		Input:             input,
+		Result:            result,
+		Usage:             usage,
+		ToolCalls:         toolCalls,
+		ErrorClass:        firstString(data, "errorClass", "error_class"),
+		ErrorMessage:      firstString(data, "errorMessage", "error_message"),
+		StartedAt:         startedAt,
+		CompletedAt:       completedAt,
+		DurationMS:        firstInt64(data, "durationMs", "duration_ms"),
+		Metadata:          stringMapFromFirst(data, "metadata"),
+	})
 }
 
 func appendAgentSessionToolCallEvents(ctx context.Context, st store.Store, run *domain.WorkflowRun, operationData map[string]any) error {
@@ -818,6 +866,12 @@ func appendAgentSessionToolCallEvents(ctx context.Context, st store.Store, run *
 		data["agent_id"] = firstString(operationData, "agent_id", "agentId")
 		data["session_id"] = firstString(operationData, "session_id", "sessionId")
 		data["operation"] = firstString(operationData, "operation")
+		if taskRunID := firstString(operationData, "taskRunId", "task_run_id"); taskRunID != "" {
+			data["task_run_id"] = taskRunID
+		}
+		if taskID := firstString(operationData, "taskId", "task_id", "workItemId", "work_item_id"); taskID != "" {
+			data["task_id"] = taskID
+		}
 		if operationID != "" {
 			data["operation_id"] = operationID
 		}
@@ -856,6 +910,7 @@ func appendAgentSessionToolCallEvents(ctx context.Context, st store.Store, run *
 		copyFirstValue(data, "runtime", "runtime")
 		copyFirstValue(data, "timeout", "timeout")
 		copyFirstValue(data, "cancellable", "cancellable")
+		upsertAgentSessionToolCall(ctx, st, run, data)
 		_, _ = st.RunEvents().Append(ctx, store.RunEventAppend{
 			WorkspaceKey:  run.WorkspaceKey,
 			WorkflowRunID: run.RunID,
@@ -865,6 +920,45 @@ func appendAgentSessionToolCallEvents(ctx context.Context, st store.Store, run *
 		})
 	}
 	return nil
+}
+
+func upsertAgentSessionToolCall(ctx context.Context, st store.Store, run *domain.WorkflowRun, data map[string]any) {
+	if st == nil || st.AgentSessionToolCalls() == nil || run == nil {
+		return
+	}
+	args, _ := rawMessageFromFirst(data, "args", "arguments", "input")
+	result, _ := rawMessageFromFirst(data, "result", "output")
+	_, _ = st.AgentSessionToolCalls().Upsert(ctx, store.AgentSessionToolCallUpsert{
+		WorkspaceKey:        run.WorkspaceKey,
+		CallID:              firstString(data, "call_id", "callId", "id"),
+		ProviderCallID:      firstString(data, "provider_call_id", "providerCallId"),
+		OperationID:         firstString(data, "operation_id", "operationId"),
+		SessionID:           firstString(data, "session_id", "sessionId"),
+		AgentID:             firstString(data, "agent_id", "agentId"),
+		WorkflowRunID:       run.RunID,
+		TaskRunID:           firstString(data, "taskRunId", "task_run_id"),
+		TaskID:              firstString(data, "task_id", "taskId", "workItemId", "work_item_id"),
+		Name:                firstString(data, "name", "toolName", "tool_name", "tool"),
+		Status:              firstNonEmptyString(firstString(data, "status"), "completed"),
+		AuthorizationStatus: firstString(data, "authorization_status", "authorizationStatus"),
+		IdempotencyKey:      firstString(data, "idempotency_key", "idempotencyKey"),
+		ToolVersion:         firstString(data, "tool_version", "toolVersion", "version"),
+		SourceHash:          firstString(data, "source_hash", "sourceHash"),
+		Handler:             firstString(data, "handler"),
+		Runtime:             firstString(data, "runtime"),
+		Timeout:             firstString(data, "timeout"),
+		Cancellable:         firstBool(data, "cancellable"),
+		ReadOnly:            firstBool(data, "read_only", "readOnly"),
+		Redacted:            firstBool(data, "redacted"),
+		Args:                args,
+		Result:              result,
+		ErrorClass:          firstString(data, "error_class", "errorClass"),
+		ErrorMessage:        firstString(data, "error_message", "errorMessage", "error"),
+		StartedAt:           firstTime(data, "startedAt", "started_at"),
+		CompletedAt:         firstTimePtr(data, "completedAt", "completed_at"),
+		DurationMS:          firstInt64(data, "durationMs", "duration_ms"),
+		Metadata:            stringMapFromFirst(data, "metadata"),
+	})
 }
 
 func validAgentSessionOperation(operation string) bool {
@@ -937,6 +1031,12 @@ func generatedArtifactID(runID, artifactType, uri string) string {
 func generatedSessionID(runID, agentID, harnessName, sessionName, taskID string) string {
 	sum := sha256.Sum256([]byte(runID + "\x00" + agentID + "\x00" + harnessName + "\x00" + sessionName + "\x00" + taskID))
 	return "session:" + runID + ":" + hex.EncodeToString(sum[:])[:12]
+}
+
+func generatedAgentSessionOperationID(runID, sessionID, operation string, data map[string]any) string {
+	seed := runID + "\x00" + sessionID + "\x00" + operation + "\x00" + string(mustJSON(data))
+	sum := sha256.Sum256([]byte(seed))
+	return "op:" + runID + ":" + hex.EncodeToString(sum[:])[:12]
 }
 
 func agentSessionKind(raw string) (domain.AgentSessionKind, error) {
@@ -1072,6 +1172,26 @@ func firstInt64(values map[string]any, keys ...string) int64 {
 	return 0
 }
 
+func firstTime(values map[string]any, keys ...string) time.Time {
+	if raw := firstString(values, keys...); raw != "" {
+		if parsed, err := time.Parse(time.RFC3339Nano, raw); err == nil {
+			return parsed
+		}
+		if parsed, err := time.Parse(time.RFC3339, raw); err == nil {
+			return parsed
+		}
+	}
+	return time.Time{}
+}
+
+func firstTimePtr(values map[string]any, keys ...string) *time.Time {
+	parsed := firstTime(values, keys...)
+	if parsed.IsZero() {
+		return nil
+	}
+	return &parsed
+}
+
 func firstBool(values map[string]any, keys ...string) bool {
 	for _, key := range keys {
 		if values == nil {
@@ -1099,6 +1219,37 @@ func stringMap(value any) map[string]string {
 		}
 	}
 	return out
+}
+
+func stringMapFromFirst(values map[string]any, keys ...string) map[string]string {
+	value, ok := firstValue(values, keys...)
+	if !ok {
+		return nil
+	}
+	out := stringMap(value)
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+func rawMessageFromFirst(values map[string]any, keys ...string) (json.RawMessage, bool) {
+	value, ok := firstValue(values, keys...)
+	if !ok {
+		return nil, false
+	}
+	return mustJSON(value), true
+}
+
+func resultText(raw json.RawMessage) string {
+	if len(raw) == 0 {
+		return ""
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		return ""
+	}
+	return firstString(payload, "text", "response", "message")
 }
 
 func copyAnyMap(value map[string]any) map[string]any {

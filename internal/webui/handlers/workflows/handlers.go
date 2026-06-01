@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"path"
@@ -14,6 +15,7 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
+	defspkg "github.com/tysonthomas9/loomcli/internal/defs"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/dto"
@@ -29,6 +31,10 @@ type runRequest struct {
 	Wait  bool            `json:"wait,omitempty"`
 }
 
+type cancelOperationRequest struct {
+	Reason string `json:"reason,omitempty"`
+}
+
 type runResponse struct {
 	Run     *domain.WorkflowRun           `json:"run"`
 	Builtin *workflowpkg.BuiltinRunResult `json:"builtin,omitempty"`
@@ -42,6 +48,16 @@ type triggerResponse struct {
 type runListItem struct {
 	Run      *domain.WorkflowRun `json:"run"`
 	TaskRuns []*domain.TaskRun   `json:"task_runs,omitempty"`
+}
+
+type routeBindingRequest struct {
+	Path string `json:"path"`
+	Auth string `json:"auth,omitempty"`
+}
+
+type triggerBindingRequest struct {
+	Event  string          `json:"event"`
+	Filter json.RawMessage `json:"filter,omitempty"`
 }
 
 func HandleList(st store.Store) http.HandlerFunc {
@@ -178,6 +194,180 @@ func HandleTriggerBinding(st store.Store, issueBackendFn func(context.Context) b
 	}
 }
 
+func HandleListRouteBindings(st store.Store) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if st == nil || st.RouteBindings() == nil {
+			handler.HandleServiceError(w, service.ErrUnavailable("route binding store not configured"))
+			return
+		}
+		routes, err := st.RouteBindings().List(r.Context(), r.PathValue("ws"), store.RouteBindingFilter{
+			DefinitionName: strings.TrimSpace(r.URL.Query().Get("workflow")),
+			Status:         domain.DefinitionStatusActive,
+			Limit:          10000,
+		})
+		if err != nil {
+			handler.HandleServiceError(w, storeError("list workflow route bindings", err))
+			return
+		}
+		handler.WriteJSON(w, http.StatusOK, dto.NewListResponse(routes, len(routes)))
+	}
+}
+
+func HandleCreateRouteBinding(st store.Store) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		req, ok := readRouteBindingRequest(w, r)
+		if !ok {
+			return
+		}
+		ws := r.PathValue("ws")
+		workflowName := strings.TrimSpace(r.PathValue("name"))
+		if _, err := st.WorkflowDefinitions().Get(r.Context(), ws, workflowName); err != nil {
+			handler.HandleServiceError(w, storeError("get workflow definition", err))
+			return
+		}
+		routePath := normalizeRoutePath(req.Path)
+		auth := strings.TrimSpace(req.Auth)
+		if auth == "" {
+			auth = "workspace"
+		}
+		if err := defspkg.ValidateWorkflowRouteBindingCollision(r.Context(), st, ws, defspkg.WorkflowModule{
+			Name:      workflowName,
+			RoutePath: routePath,
+		}); err != nil {
+			handler.HandleServiceError(w, err)
+			return
+		}
+		route, err := st.RouteBindings().Upsert(r.Context(), store.RouteBindingUpsert{
+			WorkspaceKey:   ws,
+			BindingID:      defspkg.RouteBindingID(workflowName, http.MethodPost, routePath),
+			DefinitionName: workflowName,
+			DefinitionType: domain.DefinitionTypeWorkflow,
+			Path:           routePath,
+			Method:         http.MethodPost,
+			AuthPolicy:     auth,
+			Status:         domain.DefinitionStatusActive,
+		})
+		if err != nil {
+			handler.HandleServiceError(w, storeError("upsert workflow route binding", err))
+			return
+		}
+		handler.WriteJSON(w, http.StatusCreated, route)
+	}
+}
+
+func HandleDisableRouteBinding(st store.Store) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		ws := r.PathValue("ws")
+		workflowName := strings.TrimSpace(r.PathValue("name"))
+		routePath := normalizeRoutePath(r.PathValue("route"))
+		bindingID := defspkg.RouteBindingID(workflowName, http.MethodPost, routePath)
+		existing, err := st.RouteBindings().Get(r.Context(), ws, bindingID)
+		if err != nil {
+			handler.HandleServiceError(w, storeError("get workflow route binding", err))
+			return
+		}
+		route, err := st.RouteBindings().Upsert(r.Context(), store.RouteBindingUpsert{
+			WorkspaceKey:   ws,
+			BindingID:      existing.BindingID,
+			DefinitionName: existing.DefinitionName,
+			DefinitionType: existing.DefinitionType,
+			Path:           existing.Path,
+			Method:         existing.Method,
+			AuthPolicy:     existing.AuthPolicy,
+			Status:         domain.DefinitionStatusDisabled,
+		})
+		if err != nil {
+			handler.HandleServiceError(w, storeError("disable workflow route binding", err))
+			return
+		}
+		handler.WriteJSON(w, http.StatusOK, route)
+	}
+}
+
+func HandleListTriggerBindings(st store.Store) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if st == nil || st.TriggerBindings() == nil {
+			handler.HandleServiceError(w, service.ErrUnavailable("trigger binding store not configured"))
+			return
+		}
+		triggers, err := st.TriggerBindings().List(r.Context(), r.PathValue("ws"), store.TriggerBindingFilter{
+			WorkflowName: strings.TrimSpace(r.URL.Query().Get("workflow")),
+			Status:       domain.DefinitionStatusActive,
+			Limit:        10000,
+		})
+		if err != nil {
+			handler.HandleServiceError(w, storeError("list workflow trigger bindings", err))
+			return
+		}
+		handler.WriteJSON(w, http.StatusOK, dto.NewListResponse(triggers, len(triggers)))
+	}
+}
+
+func HandleCreateTriggerBinding(st store.Store) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		req, ok := readTriggerBindingRequest(w, r)
+		if !ok {
+			return
+		}
+		ws := r.PathValue("ws")
+		workflowName := strings.TrimSpace(r.PathValue("name"))
+		eventType := strings.TrimSpace(req.Event)
+		if _, err := st.WorkflowDefinitions().Get(r.Context(), ws, workflowName); err != nil {
+			handler.HandleServiceError(w, storeError("get workflow definition", err))
+			return
+		}
+		filter := stringMapFromRaw(req.Filter)
+		if err := defspkg.ValidateWorkflowTriggerBindingCollision(r.Context(), st, ws, defspkg.WorkflowModule{
+			Name:          workflowName,
+			TriggerEvent:  eventType,
+			TriggerFilter: filter,
+		}); err != nil {
+			handler.HandleServiceError(w, err)
+			return
+		}
+		trigger, err := st.TriggerBindings().Upsert(r.Context(), store.TriggerBindingUpsert{
+			WorkspaceKey: ws,
+			BindingID:    "workflow:" + workflowName + ":" + eventType,
+			WorkflowName: workflowName,
+			EventType:    eventType,
+			Filter:       req.Filter,
+			Status:       domain.DefinitionStatusActive,
+		})
+		if err != nil {
+			handler.HandleServiceError(w, storeError("upsert workflow trigger binding", err))
+			return
+		}
+		handler.WriteJSON(w, http.StatusCreated, trigger)
+	}
+}
+
+func HandleDisableTriggerBinding(st store.Store) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		ws := r.PathValue("ws")
+		workflowName := strings.TrimSpace(r.PathValue("name"))
+		eventType := strings.TrimSpace(r.PathValue("event"))
+		bindingID := "workflow:" + workflowName + ":" + eventType
+		existing, err := st.TriggerBindings().Get(r.Context(), ws, bindingID)
+		if err != nil {
+			handler.HandleServiceError(w, storeError("get workflow trigger binding", err))
+			return
+		}
+		trigger, err := st.TriggerBindings().Upsert(r.Context(), store.TriggerBindingUpsert{
+			WorkspaceKey: ws,
+			BindingID:    existing.BindingID,
+			WorkflowName: existing.WorkflowName,
+			EventType:    existing.EventType,
+			Filter:       existing.Filter,
+			Status:       domain.DefinitionStatusDisabled,
+		})
+		if err != nil {
+			handler.HandleServiceError(w, storeError("disable workflow trigger binding", err))
+			return
+		}
+		handler.WriteJSON(w, http.StatusOK, trigger)
+	}
+}
+
 func HandleShow(st store.Store) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		run, err := st.WorkflowRuns().Get(r.Context(), r.PathValue("ws"), r.PathValue("runID"))
@@ -198,6 +388,334 @@ func HandleEvents(st store.Store) http.HandlerFunc {
 		}
 		handler.WriteJSON(w, http.StatusOK, dto.NewListResponse(events, len(events)))
 	}
+}
+
+func HandleTasks(st store.Store) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		ws := r.PathValue("ws")
+		runID := r.PathValue("runID")
+		if _, err := st.WorkflowRuns().Get(r.Context(), ws, runID); err != nil {
+			handler.HandleServiceError(w, storeError("get workflow run", err))
+			return
+		}
+		taskRuns, err := st.TaskRuns().List(r.Context(), ws, store.TaskRunFilter{WorkflowRunID: runID, Limit: 10000})
+		if err != nil {
+			handler.HandleServiceError(w, storeError("list workflow task runs", err))
+			return
+		}
+		handler.WriteJSON(w, http.StatusOK, dto.NewListResponse(taskRuns, len(taskRuns)))
+	}
+}
+
+func HandleSessions(st store.Store) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		ws := r.PathValue("ws")
+		runID := r.PathValue("runID")
+		if _, err := st.WorkflowRuns().Get(r.Context(), ws, runID); err != nil {
+			handler.HandleServiceError(w, storeError("get workflow run", err))
+			return
+		}
+		sessions, err := workflowRunSessions(r.Context(), st, ws, runID)
+		if err != nil {
+			handler.HandleServiceError(w, storeError("list workflow agent sessions", err))
+			return
+		}
+		handler.WriteJSON(w, http.StatusOK, dto.NewListResponse(sessions, len(sessions)))
+	}
+}
+
+func HandleOperations(st store.Store) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		ws := r.PathValue("ws")
+		runID := r.PathValue("runID")
+		if _, err := st.WorkflowRuns().Get(r.Context(), ws, runID); err != nil {
+			handler.HandleServiceError(w, storeError("get workflow run", err))
+			return
+		}
+		operations, err := workflowRunOperations(r.Context(), st, ws, runID)
+		if err != nil {
+			handler.HandleServiceError(w, storeError("list workflow agent session operations", err))
+			return
+		}
+		handler.WriteJSON(w, http.StatusOK, dto.NewListResponse(operations, len(operations)))
+	}
+}
+
+func HandleToolCalls(st store.Store) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		ws := r.PathValue("ws")
+		runID := r.PathValue("runID")
+		if _, err := st.WorkflowRuns().Get(r.Context(), ws, runID); err != nil {
+			handler.HandleServiceError(w, storeError("get workflow run", err))
+			return
+		}
+		calls, err := workflowRunToolCalls(r.Context(), st, ws, runID)
+		if err != nil {
+			handler.HandleServiceError(w, storeError("list workflow agent session tool calls", err))
+			return
+		}
+		handler.WriteJSON(w, http.StatusOK, dto.NewListResponse(calls, len(calls)))
+	}
+}
+
+func HandleArtifacts(st store.Store) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		ws := r.PathValue("ws")
+		runID := r.PathValue("runID")
+		if _, err := st.WorkflowRuns().Get(r.Context(), ws, runID); err != nil {
+			handler.HandleServiceError(w, storeError("get workflow run", err))
+			return
+		}
+		artifacts, err := workflowRunArtifacts(r.Context(), st, ws, runID, r.URL.Query().Get("type"))
+		if err != nil {
+			handler.HandleServiceError(w, storeError("list workflow artifacts", err))
+			return
+		}
+		handler.WriteJSON(w, http.StatusOK, dto.NewListResponse(artifacts, len(artifacts)))
+	}
+}
+
+func workflowRunTaskLinks(ctx context.Context, st store.Store, ws, runID string) (map[string]struct{}, map[string]struct{}, error) {
+	taskRuns, err := st.TaskRuns().List(ctx, ws, store.TaskRunFilter{WorkflowRunID: runID, Limit: 10000})
+	if err != nil {
+		return nil, nil, err
+	}
+	taskIDs := make(map[string]struct{}, len(taskRuns))
+	sessionIDs := make(map[string]struct{}, len(taskRuns))
+	for _, task := range taskRuns {
+		if task == nil {
+			continue
+		}
+		if strings.TrimSpace(task.WorkItemID) != "" {
+			taskIDs[task.WorkItemID] = struct{}{}
+		}
+		if strings.TrimSpace(task.SessionID) != "" {
+			sessionIDs[task.SessionID] = struct{}{}
+		}
+	}
+	return taskIDs, sessionIDs, nil
+}
+
+func workflowRunArtifacts(ctx context.Context, st store.Store, ws, runID, typ string) ([]*domain.Artifact, error) {
+	taskIDs, sessionIDs, err := workflowRunTaskLinks(ctx, st, ws, runID)
+	if err != nil {
+		return nil, err
+	}
+	artifacts, err := st.Artifacts().List(ctx, ws, store.ArtifactFilter{Type: strings.TrimSpace(typ), Limit: 10000})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]*domain.Artifact, 0, len(artifacts))
+	seen := map[string]struct{}{}
+	generatedPrefix := "artifact:" + runID + ":"
+	for _, artifact := range artifacts {
+		if artifact == nil {
+			continue
+		}
+		if artifact.Metadata["workflow_run_id"] == runID || strings.HasPrefix(artifact.ArtifactID, generatedPrefix) {
+			appendUniqueArtifact(&out, seen, artifact)
+			continue
+		}
+		if _, ok := taskIDs[artifact.TaskID]; ok && artifact.TaskID != "" {
+			appendUniqueArtifact(&out, seen, artifact)
+			continue
+		}
+		if _, ok := sessionIDs[artifact.SessionID]; ok && artifact.SessionID != "" {
+			appendUniqueArtifact(&out, seen, artifact)
+		}
+	}
+	return out, nil
+}
+
+func appendUniqueArtifact(out *[]*domain.Artifact, seen map[string]struct{}, artifact *domain.Artifact) {
+	if _, ok := seen[artifact.ArtifactID]; ok {
+		return
+	}
+	seen[artifact.ArtifactID] = struct{}{}
+	*out = append(*out, artifact)
+}
+
+func workflowRunSessions(ctx context.Context, st store.Store, ws, runID string) ([]*domain.AgentSession, error) {
+	taskIDs, sessionIDs, err := workflowRunTaskLinks(ctx, st, ws, runID)
+	if err != nil {
+		return nil, err
+	}
+	sessions, err := st.AgentSessions().List(ctx, ws, store.AgentSessionFilter{Limit: 10000})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]*domain.AgentSession, 0, len(sessions))
+	seen := map[string]struct{}{}
+	generatedPrefix := "session:" + runID + ":"
+	for _, session := range sessions {
+		if session == nil {
+			continue
+		}
+		if session.Metadata["workflow_run_id"] == runID || strings.HasPrefix(session.SessionID, generatedPrefix) {
+			appendUniqueSession(&out, seen, session)
+			continue
+		}
+		if _, ok := taskIDs[session.TaskID]; ok && session.TaskID != "" {
+			appendUniqueSession(&out, seen, session)
+			continue
+		}
+		if _, ok := sessionIDs[session.SessionID]; ok && session.SessionID != "" {
+			appendUniqueSession(&out, seen, session)
+		}
+	}
+	return out, nil
+}
+
+func workflowRunOperations(ctx context.Context, st store.Store, ws, runID string) ([]*domain.AgentSessionOperation, error) {
+	taskIDs, sessionIDs, err := workflowRunTaskLinks(ctx, st, ws, runID)
+	if err != nil {
+		return nil, err
+	}
+	operations, err := st.AgentSessionOperations().List(ctx, ws, store.AgentSessionOperationFilter{Limit: 10000})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]*domain.AgentSessionOperation, 0, len(operations))
+	seen := map[string]struct{}{}
+	generatedPrefix := "op:" + runID + ":"
+	for _, operation := range operations {
+		if operation == nil {
+			continue
+		}
+		if operation.WorkflowRunID == runID || strings.HasPrefix(operation.OperationID, generatedPrefix) {
+			appendUniqueOperation(&out, seen, operation)
+			continue
+		}
+		if _, ok := taskIDs[operation.TaskID]; ok && operation.TaskID != "" {
+			appendUniqueOperation(&out, seen, operation)
+			continue
+		}
+		if _, ok := sessionIDs[operation.SessionID]; ok && operation.SessionID != "" {
+			appendUniqueOperation(&out, seen, operation)
+		}
+	}
+	return out, nil
+}
+
+func workflowRunToolCalls(ctx context.Context, st store.Store, ws, runID string) ([]*domain.AgentSessionToolCall, error) {
+	taskIDs, sessionIDs, err := workflowRunTaskLinks(ctx, st, ws, runID)
+	if err != nil {
+		return nil, err
+	}
+	calls, err := st.AgentSessionToolCalls().List(ctx, ws, store.AgentSessionToolCallFilter{Limit: 10000})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]*domain.AgentSessionToolCall, 0, len(calls))
+	seen := map[string]struct{}{}
+	for _, call := range calls {
+		if call == nil {
+			continue
+		}
+		if call.WorkflowRunID == runID {
+			appendUniqueToolCall(&out, seen, call)
+			continue
+		}
+		if _, ok := taskIDs[call.TaskID]; ok && call.TaskID != "" {
+			appendUniqueToolCall(&out, seen, call)
+			continue
+		}
+		if _, ok := sessionIDs[call.SessionID]; ok && call.SessionID != "" {
+			appendUniqueToolCall(&out, seen, call)
+		}
+	}
+	return out, nil
+}
+
+func cancelOperationToolCalls(ctx context.Context, st store.Store, ws, operationID, reason string, completedAt time.Time) error {
+	if st.AgentSessionToolCalls() == nil {
+		return nil
+	}
+	calls, err := st.AgentSessionToolCalls().List(ctx, ws, store.AgentSessionToolCallFilter{OperationID: operationID, Limit: 10000})
+	if err != nil {
+		return err
+	}
+	for _, call := range calls {
+		if call == nil || terminalToolCallStatus(call.Status) {
+			continue
+		}
+		if _, err := st.AgentSessionToolCalls().Upsert(ctx, store.AgentSessionToolCallUpsert{
+			WorkspaceKey:        ws,
+			CallID:              call.CallID,
+			ProviderCallID:      call.ProviderCallID,
+			OperationID:         call.OperationID,
+			SessionID:           call.SessionID,
+			AgentID:             call.AgentID,
+			WorkflowRunID:       call.WorkflowRunID,
+			TaskRunID:           call.TaskRunID,
+			TaskID:              call.TaskID,
+			Name:                call.Name,
+			Status:              "cancelled",
+			AuthorizationStatus: call.AuthorizationStatus,
+			IdempotencyKey:      call.IdempotencyKey,
+			ToolVersion:         call.ToolVersion,
+			SourceHash:          call.SourceHash,
+			Handler:             call.Handler,
+			Runtime:             call.Runtime,
+			Timeout:             call.Timeout,
+			Cancellable:         call.Cancellable,
+			ReadOnly:            call.ReadOnly,
+			Redacted:            call.Redacted,
+			Args:                call.Args,
+			Result:              call.Result,
+			ErrorClass:          firstNonEmptyString(call.ErrorClass, "cancelled"),
+			ErrorMessage:        firstNonEmptyString(reason, call.ErrorMessage, "agent session operation cancelled"),
+			StartedAt:           call.StartedAt,
+			CompletedAt:         &completedAt,
+			DurationMS:          call.DurationMS,
+			Metadata:            call.Metadata,
+		}); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func terminalToolCallStatus(status string) bool {
+	switch strings.TrimSpace(status) {
+	case "completed", "failed", "cancelled":
+		return true
+	default:
+		return false
+	}
+}
+
+func firstNonEmptyString(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+func appendUniqueSession(out *[]*domain.AgentSession, seen map[string]struct{}, session *domain.AgentSession) {
+	if _, ok := seen[session.SessionID]; ok {
+		return
+	}
+	seen[session.SessionID] = struct{}{}
+	*out = append(*out, session)
+}
+
+func appendUniqueOperation(out *[]*domain.AgentSessionOperation, seen map[string]struct{}, operation *domain.AgentSessionOperation) {
+	if _, ok := seen[operation.OperationID]; ok {
+		return
+	}
+	seen[operation.OperationID] = struct{}{}
+	*out = append(*out, operation)
+}
+
+func appendUniqueToolCall(out *[]*domain.AgentSessionToolCall, seen map[string]struct{}, call *domain.AgentSessionToolCall) {
+	if _, ok := seen[call.CallID]; ok {
+		return
+	}
+	seen[call.CallID] = struct{}{}
+	*out = append(*out, call)
 }
 
 func HandleEventStream(st store.Store) http.HandlerFunc {
@@ -304,6 +822,55 @@ func HandleCancel(st store.Store) http.HandlerFunc {
 			Data:          mustJSON(map[string]string{"actor": actorName(r)}),
 		})
 		handler.WriteJSON(w, http.StatusOK, run)
+	}
+}
+
+func HandleCancelOperation(st store.Store) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		ws := r.PathValue("ws")
+		operationID := r.PathValue("operationID")
+		var req cancelOperationRequest
+		if r.Body != nil {
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil && !errors.Is(err, io.EOF) {
+				handler.HandleServiceError(w, service.ErrValidation("invalid request body"))
+				return
+			}
+		}
+		reason := strings.TrimSpace(req.Reason)
+		now := time.Now().UTC()
+		cancel := store.AgentSessionOperationCancel{
+			ErrorClass:   "cancelled",
+			ErrorMessage: firstNonEmptyString(reason, "agent session operation cancelled"),
+			CompletedAt:  now,
+			Metadata:     map[string]string{"cancelled_by": actorName(r)},
+		}
+		if reason != "" {
+			cancel.Metadata["cancel_reason"] = reason
+		}
+		operation, err := st.AgentSessionOperations().Cancel(r.Context(), ws, operationID, cancel)
+		if err != nil {
+			handler.HandleServiceError(w, storeError("cancel agent session operation", err))
+			return
+		}
+		if err := cancelOperationToolCalls(r.Context(), st, ws, operationID, reason, now); err != nil {
+			handler.HandleServiceError(w, storeError("cancel agent session tool calls", err))
+			return
+		}
+		if operation.WorkflowRunID != "" {
+			data := map[string]string{"actor": actorName(r), "operation_id": operation.OperationID}
+			if reason != "" {
+				data["reason"] = reason
+			}
+			_, _ = st.RunEvents().Append(r.Context(), store.RunEventAppend{
+				WorkspaceKey:  ws,
+				WorkflowRunID: operation.WorkflowRunID,
+				TaskRunID:     operation.TaskRunID,
+				Type:          "agent_session_operation_cancelled",
+				Message:       "agent session operation cancelled",
+				Data:          mustJSON(data),
+			})
+		}
+		handler.WriteJSON(w, http.StatusOK, operation)
 	}
 }
 
@@ -658,6 +1225,40 @@ func readRunRequest(w http.ResponseWriter, r *http.Request) (runRequest, bool) {
 	var tmp any
 	if err := json.Unmarshal(req.Input, &tmp); err != nil {
 		handler.HandleServiceError(w, service.ErrValidation("input must be valid JSON"))
+		return req, false
+	}
+	return req, true
+}
+
+func readRouteBindingRequest(w http.ResponseWriter, r *http.Request) (routeBindingRequest, bool) {
+	var req routeBindingRequest
+	if err := handler.ReadJSON(w, r, &req); err != nil {
+		handler.HandleServiceError(w, err)
+		return req, false
+	}
+	if strings.TrimSpace(req.Path) == "" {
+		handler.HandleServiceError(w, service.ErrValidation("route path is required"))
+		return req, false
+	}
+	return req, true
+}
+
+func readTriggerBindingRequest(w http.ResponseWriter, r *http.Request) (triggerBindingRequest, bool) {
+	req := triggerBindingRequest{Filter: json.RawMessage(`{}`)}
+	if err := handler.ReadJSON(w, r, &req); err != nil {
+		handler.HandleServiceError(w, err)
+		return req, false
+	}
+	if strings.TrimSpace(req.Event) == "" {
+		handler.HandleServiceError(w, service.ErrValidation("trigger event is required"))
+		return req, false
+	}
+	if len(req.Filter) == 0 {
+		req.Filter = json.RawMessage(`{}`)
+	}
+	var filter map[string]any
+	if err := json.Unmarshal(req.Filter, &filter); err != nil {
+		handler.HandleServiceError(w, service.ErrValidation("trigger filter must be a JSON object"))
 		return req, false
 	}
 	return req, true

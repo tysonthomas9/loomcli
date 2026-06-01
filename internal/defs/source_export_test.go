@@ -215,6 +215,46 @@ func TestWriteSourceExportCodifiesWorkspaceDefinitions(t *testing.T) {
 		t.Fatalf("exported skills = %+v, want skill source codification", exportedPlan.Skills)
 	}
 
+	imported := memstore.New()
+	if _, err := imported.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "REPLAY", Name: "Replay"}); err != nil {
+		t.Fatalf("create replay workspace: %v", err)
+	}
+	if err := Apply(ctx, imported, "REPLAY", "test", exportedPlan); err != nil {
+		t.Fatalf("Apply(exportedPlan) error = %v", err)
+	}
+	importedRoutes, err := imported.RouteBindings().List(ctx, "REPLAY", store.RouteBindingFilter{
+		DefinitionName: "slack-runner",
+		Status:         domain.DefinitionStatusActive,
+	})
+	if err != nil {
+		t.Fatalf("list imported route bindings: %v", err)
+	}
+	if len(importedRoutes) != 1 || importedRoutes[0].Path != "/workflows/slack-runner/run" ||
+		importedRoutes[0].Method != "POST" || importedRoutes[0].AuthPolicy != "workspace" {
+		t.Fatalf("imported routes = %+v, want source replay to recreate durable route binding", importedRoutes)
+	}
+	importedTriggers, err := imported.TriggerBindings().List(ctx, "REPLAY", store.TriggerBindingFilter{
+		WorkflowName: "slack-runner",
+		Status:       domain.DefinitionStatusActive,
+	})
+	if err != nil {
+		t.Fatalf("list imported trigger bindings: %v", err)
+	}
+	if len(importedTriggers) != 1 || importedTriggers[0].EventType != "issue.label_added" ||
+		!strings.Contains(string(importedTriggers[0].Filter), `"label":"slack"`) {
+		t.Fatalf("imported triggers = %+v, want source replay to recreate durable trigger binding", importedTriggers)
+	}
+	replayedPlan, err := PlanFromWorkspace(ctx, imported, "REPLAY")
+	if err != nil {
+		t.Fatalf("PlanFromWorkspace(replay) error = %v", err)
+	}
+	if len(replayedPlan.Workflows) != 1 ||
+		replayedPlan.Workflows[0].RoutePath != "/workflows/slack-runner/run" ||
+		replayedPlan.Workflows[0].TriggerEvent != "issue.label_added" ||
+		replayedPlan.Workflows[0].TriggerFilter["type"] != "epic" {
+		t.Fatalf("replayed workflow plan = %+v, want imported source to plan back with route/trigger semantics", replayedPlan.Workflows)
+	}
+
 	agentPath := filepath.Join(exportRoot, ".loom", "agents", "triage.ts")
 	if err := os.WriteFile(agentPath, []byte("// user edit\n"), 0o644); err != nil {
 		t.Fatalf("mutate exported agent: %v", err)
@@ -232,6 +272,17 @@ func TestWriteSourceExportCodifiesWorkspaceDefinitions(t *testing.T) {
 	}
 	if !strings.Contains(string(data), "createAgent") || strings.Contains(string(data), "user edit") {
 		t.Fatalf("force-overwritten agent source = %s, want generated source", data)
+	}
+	if !strings.Contains(string(data), "from '@loom/sdk'") {
+		t.Fatalf("force-overwritten agent source = %s, want SDK import path", data)
+	}
+	runtimeData, err := os.ReadFile(filepath.Join(exportRoot, ".loom", "runtimes", "remote-e2b.ts"))
+	if err != nil {
+		t.Fatalf("read generated runtime: %v", err)
+	}
+	if !strings.Contains(string(runtimeData), "defineRuntimeProfile") ||
+		!strings.Contains(string(runtimeData), "from '@loom/sdk'") {
+		t.Fatalf("generated runtime source = %s, want SDK defineRuntimeProfile export", runtimeData)
 	}
 }
 
@@ -285,6 +336,45 @@ func TestWriteRuntimeStateExportCodifiesMutableRuntimeRecords(t *testing.T) {
 			FinishedAt:    &finished,
 			ExitCode:      &exitCode,
 			Metadata:      map[string]string{"workflow_run_id": "wrun-1"},
+		}},
+		AgentSessionOperations: []AgentSessionOperationModule{{
+			OperationID:   "op-1",
+			SessionID:     "session-1",
+			AgentID:       "worker",
+			SourcePath:    "control-plane:agent-session-operation/op-1",
+			SourceHash:    "operation-hash",
+			Version:       "operation-v1",
+			WorkflowRunID: "wrun-1",
+			TaskRunID:     "trun-1",
+			TaskID:        "TASK-1",
+			Kind:          "prompt",
+			Status:        domain.AgentSessionOperationCompleted,
+			Result:        json.RawMessage(`{"summary":"done"}`),
+			Usage:         json.RawMessage(`{"totalTokens":12}`),
+			StartedAt:     &now,
+			CompletedAt:   &finished,
+			DurationMS:    180000,
+			Metadata:      map[string]string{"visibility": "audit"},
+		}},
+		AgentSessionToolCalls: []AgentSessionToolCallModule{{
+			CallID:              "call-1",
+			OperationID:         "op-1",
+			SessionID:           "session-1",
+			AgentID:             "worker",
+			SourcePath:          "control-plane:agent-session-tool-call/call-1",
+			SourceHash:          "tool-call-hash",
+			Version:             "tool-call-v1",
+			WorkflowRunID:       "wrun-1",
+			TaskRunID:           "trun-1",
+			TaskID:              "TASK-1",
+			Name:                "lookup_issue",
+			Status:              "completed",
+			AuthorizationStatus: "authorized",
+			Args:                json.RawMessage(`{"issue":"TASK-1"}`),
+			Result:              json.RawMessage(`{"title":"Task"}`),
+			StartedAt:           &now,
+			CompletedAt:         &finished,
+			DurationMS:          180000,
 		}},
 		AgentLeases: []AgentLeaseModule{{
 			LeaseID:       "lease-1",
@@ -407,6 +497,8 @@ func TestWriteRuntimeStateExportCodifiesMutableRuntimeRecords(t *testing.T) {
 	}
 	if !strings.Contains(string(data), runtimeStateExportSchema) ||
 		!strings.Contains(string(data), `"agent_instances"`) ||
+		!strings.Contains(string(data), `"agent_session_operations"`) ||
+		!strings.Contains(string(data), `"agent_session_tool_calls"`) ||
 		!strings.Contains(string(data), `"workflow_runs"`) {
 		t.Fatalf("runtime state snapshot = %s, want reviewable mutable runtime records", data)
 	}
@@ -415,7 +507,7 @@ func TestWriteRuntimeStateExportCodifiesMutableRuntimeRecords(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load(exportRoot) error = %v", err)
 	}
-	if got := Summary(loaded); got != "agents=0 workflows=0 runtimes=0 agent_instances=1 nodes=1 agent_sessions=1 agent_leases=1 agent_ownership_leases=1 agent_commands=1 terminal_sessions=1 workflow_runs=1 task_runs=1 run_events=1 artifacts=1" {
+	if got := Summary(loaded); got != "agents=0 workflows=0 runtimes=0 agent_instances=1 nodes=1 agent_sessions=1 agent_session_operations=1 agent_session_tool_calls=1 agent_leases=1 agent_ownership_leases=1 agent_commands=1 terminal_sessions=1 workflow_runs=1 task_runs=1 run_events=1 artifacts=1" {
 		t.Fatalf("Summary(loaded) = %q, want mutable runtime state imported from reviewable artifact", got)
 	}
 	if loaded.AgentInstances[0].Name != "worker" ||
@@ -423,9 +515,48 @@ func TestWriteRuntimeStateExportCodifiesMutableRuntimeRecords(t *testing.T) {
 		!strings.Contains(string(loaded.WorkflowRuns[0].Input), `"parentId"`) ||
 		loaded.TaskRuns[0].TaskRunID != "trun-1" ||
 		loaded.RunEvents[0].EventID != "evt-1" ||
+		loaded.AgentSessionOperations[0].OperationID != "op-1" ||
+		loaded.AgentSessionToolCalls[0].CallID != "call-1" ||
 		loaded.AgentSessions[0].ExitCode == nil ||
 		*loaded.AgentSessions[0].ExitCode != 0 {
 		t.Fatalf("loaded runtime state = %+v, want source-loadable mutable records", loaded)
+	}
+
+	imported := memstore.New()
+	if _, err := imported.Workspaces().Create(context.Background(), store.WorkspaceCreate{Key: "STATE-IMPORT", Name: "State Import"}); err != nil {
+		t.Fatalf("create state import workspace: %v", err)
+	}
+	if err := Apply(context.Background(), imported, "STATE-IMPORT", "test", loaded); err != nil {
+		t.Fatalf("Apply(loaded runtime state) error = %v", err)
+	}
+	importedRun, err := imported.WorkflowRuns().Get(context.Background(), "STATE-IMPORT", "wrun-1")
+	if err != nil {
+		t.Fatalf("get imported workflow run: %v", err)
+	}
+	importedSession, err := imported.AgentSessions().Get(context.Background(), "STATE-IMPORT", "session-1")
+	if err != nil {
+		t.Fatalf("get imported agent session: %v", err)
+	}
+	importedOperation, err := imported.AgentSessionOperations().Get(context.Background(), "STATE-IMPORT", "op-1")
+	if err != nil {
+		t.Fatalf("get imported agent session operation: %v", err)
+	}
+	importedToolCall, err := imported.AgentSessionToolCalls().Get(context.Background(), "STATE-IMPORT", "call-1")
+	if err != nil {
+		t.Fatalf("get imported agent session tool call: %v", err)
+	}
+	importedArtifact, err := imported.Artifacts().Get(context.Background(), "STATE-IMPORT", "artifact-1")
+	if err != nil {
+		t.Fatalf("get imported artifact: %v", err)
+	}
+	if importedRun.Status != domain.WorkflowRunRunning ||
+		importedSession.Status != domain.AgentSessionRunning ||
+		importedOperation.Status != domain.AgentSessionOperationCompleted ||
+		!strings.Contains(string(importedOperation.Result), `"summary": "done"`) ||
+		importedToolCall.Status != "completed" ||
+		!strings.Contains(string(importedToolCall.Result), `"title": "Task"`) ||
+		importedArtifact.Summary != "runtime report" {
+		t.Fatalf("imported runtime state run=%+v session=%+v operation=%+v tool_call=%+v artifact=%+v, want durable state replay", importedRun, importedSession, importedOperation, importedToolCall, importedArtifact)
 	}
 }
 

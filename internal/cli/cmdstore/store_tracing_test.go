@@ -35,6 +35,7 @@ func TestWrapStoreWithTracing_Smoke(t *testing.T) {
 	_ = wrapped.Agents()
 	_ = wrapped.Nodes()
 	_ = wrapped.AgentSessions()
+	_ = wrapped.AgentSessionOperations()
 	_ = wrapped.TerminalSessions()
 	_ = wrapped.Artifacts()
 	_ = wrapped.AgentLeases()
@@ -87,6 +88,31 @@ func TestWrapStoreWithTracing_Smoke(t *testing.T) {
 	_, _ = sessions.List(ctx, "TEST", store.AgentSessionFilter{})
 	_, _ = sessions.Heartbeat(ctx, "TEST", "sess-1")
 	_, _ = sessions.Update(ctx, "TEST", "sess-1", store.AgentSessionUpdate{})
+
+	sessionOps := wrapped.AgentSessionOperations()
+	_, _ = sessionOps.Upsert(ctx, store.AgentSessionOperationUpsert{
+		WorkspaceKey: "TEST",
+		OperationID:  "op-1",
+		SessionID:    "sess-1",
+		AgentID:      "agent",
+		Kind:         "prompt",
+		Status:       domain.AgentSessionOperationCompleted,
+	})
+	_, _ = sessionOps.Get(ctx, "TEST", "op-1")
+	_, _ = sessionOps.List(ctx, "TEST", store.AgentSessionOperationFilter{SessionID: "sess-1"})
+
+	toolCalls := wrapped.AgentSessionToolCalls()
+	_, _ = toolCalls.Upsert(ctx, store.AgentSessionToolCallUpsert{
+		WorkspaceKey: "TEST",
+		CallID:       "call-1",
+		OperationID:  "op-1",
+		SessionID:    "sess-1",
+		AgentID:      "agent",
+		Name:         "lookup",
+		Status:       "completed",
+	})
+	_, _ = toolCalls.Get(ctx, "TEST", "call-1")
+	_, _ = toolCalls.List(ctx, "TEST", store.AgentSessionToolCallFilter{OperationID: "op-1"})
 
 	terms := wrapped.TerminalSessions()
 	_, _ = terms.Create(ctx, store.TerminalSessionCreate{WorkspaceKey: "TEST", TerminalID: "term-1", AgentID: "agent"})

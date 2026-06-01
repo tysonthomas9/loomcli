@@ -100,7 +100,7 @@ func writeExportFiles(root string, files []SourceExportFile, force bool) ([]Sour
 
 func renderAgentSource(agent AgentModule) string {
 	var b bytes.Buffer
-	b.WriteString("import { createAgent } from '@loom/runtime';\n\n")
+	b.WriteString("import { createAgent } from '@loom/sdk';\n\n")
 	b.WriteString("export default createAgent({\n")
 	writeStringProp(&b, "name", agent.Name, 1)
 	writeStringProp(&b, "description", agent.Description, 1)
@@ -125,7 +125,7 @@ func renderAgentSource(agent AgentModule) string {
 
 func renderWorkflowSource(workflow WorkflowModule) string {
 	var b bytes.Buffer
-	b.WriteString("import { defineWorkflow } from '@loom/runtime';\n\n")
+	b.WriteString("import { defineWorkflow } from '@loom/sdk';\n\n")
 	b.WriteString("export default defineWorkflow({\n")
 	writeStringProp(&b, "name", workflow.Name, 1)
 	writeStringProp(&b, "description", workflow.Description, 1)
@@ -150,21 +150,10 @@ func renderWorkflowSource(workflow WorkflowModule) string {
 
 func renderRuntimeSource(runtime RuntimeModule) string {
 	var b bytes.Buffer
-	b.WriteString("import { runtime } from '@loom/runtime';\n\n")
-	b.WriteString("export default ")
-	switch runtime.Provider {
-	case domain.RuntimeProviderLocal, "":
-		b.WriteString("runtime.local")
-	case domain.RuntimeProviderOther:
-		b.WriteString("runtime.podman")
-	default:
-		b.WriteString("runtime.remote")
-	}
-	b.WriteString("({\n")
+	b.WriteString("import { defineRuntimeProfile } from '@loom/sdk';\n\n")
+	b.WriteString("export default defineRuntimeProfile({\n")
 	writeStringProp(&b, "name", runtime.Name, 1)
-	if runtime.Provider != "" && runtime.Provider != domain.RuntimeProviderLocal && runtime.Provider != domain.RuntimeProviderOther {
-		writeStringProp(&b, "provider", string(runtime.Provider), 1)
-	}
+	writeStringProp(&b, "provider", exportedRuntimeProvider(runtime.Provider), 1)
 	writeStringProp(&b, "image", runtime.Image, 1)
 	writeStringProp(&b, "cwd", runtime.CWD, 1)
 	writeStringProp(&b, "cpu", runtime.CPU, 1)
@@ -180,7 +169,7 @@ func renderRuntimeSource(runtime RuntimeModule) string {
 
 func renderToolSource(tool ToolModule) string {
 	var b bytes.Buffer
-	b.WriteString("import { defineTool } from '@loom/runtime';\n\n")
+	b.WriteString("import { defineTool } from '@loom/sdk';\n\n")
 	b.WriteString("export default defineTool({\n")
 	writeStringProp(&b, "name", tool.Name, 1)
 	writeStringProp(&b, "description", tool.Description, 1)
@@ -194,6 +183,13 @@ func renderToolSource(tool ToolModule) string {
 	writeBoolProp(&b, "readOnly", tool.ReadOnly, 1)
 	b.WriteString("});\n")
 	return b.String()
+}
+
+func exportedRuntimeProvider(provider domain.RuntimeProvider) string {
+	if provider == "" {
+		return string(domain.RuntimeProviderLocal)
+	}
+	return string(provider)
 }
 
 func renderSkillSource(skill SkillModule) string {

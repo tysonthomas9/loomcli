@@ -268,6 +268,65 @@ func TestPlanFromWorkspaceProjectsControlPlaneRecords(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("update agent session: %v", err)
 	}
+	operationStartedAt := sessionHeartbeat.Add(10 * time.Second)
+	operationCompletedAt := operationStartedAt.Add(5 * time.Second)
+	if _, err := st.AgentSessionOperations().Upsert(ctx, store.AgentSessionOperationUpsert{
+		WorkspaceKey:      "CP",
+		OperationID:       "op-session-1",
+		SessionID:         "session-1",
+		AgentID:           "triage-bot",
+		WorkflowRunID:     workflowRun.RunID,
+		TaskRunID:         taskRun.TaskRunID,
+		TaskID:            "TASK-1",
+		Kind:              "prompt",
+		Status:            domain.AgentSessionOperationCompleted,
+		Model:             "gpt-5",
+		Provider:          "codex",
+		ProviderModel:     "gpt-5.1",
+		ProviderSessionID: "provider-session-1",
+		PromptHash:        "sha256:prompt",
+		Text:              "Summarize the sidebar task.",
+		Input:             json.RawMessage(`{"instruction":"Summarize the sidebar task."}`),
+		Result:            json.RawMessage(`{"summary":"sidebar implemented"}`),
+		Usage:             json.RawMessage(`{"totalTokens":42}`),
+		ToolCalls:         json.RawMessage(`[{"callId":"lookup-1","name":"github_issue_read"}]`),
+		StartedAt:         operationStartedAt,
+		CompletedAt:       &operationCompletedAt,
+		DurationMS:        5000,
+		Metadata:          map[string]string{"visibility": "audit", "source": "test"},
+	}); err != nil {
+		t.Fatalf("upsert agent session operation: %v", err)
+	}
+	if _, err := st.AgentSessionToolCalls().Upsert(ctx, store.AgentSessionToolCallUpsert{
+		WorkspaceKey:        "CP",
+		CallID:              "lookup-1",
+		ProviderCallID:      "provider-lookup-1",
+		OperationID:         "op-session-1",
+		SessionID:           "session-1",
+		AgentID:             "triage-bot",
+		WorkflowRunID:       workflowRun.RunID,
+		TaskRunID:           taskRun.TaskRunID,
+		TaskID:              "TASK-1",
+		Name:                "github_issue_read",
+		Status:              "completed",
+		AuthorizationStatus: "authorized",
+		IdempotencyKey:      "tool:lookup-1",
+		ToolVersion:         "v1",
+		SourceHash:          "sha256:tool",
+		Handler:             "workflow",
+		Runtime:             "local",
+		Timeout:             "30s",
+		Cancellable:         true,
+		ReadOnly:            true,
+		Args:                json.RawMessage(`{"issue":"TASK-1"}`),
+		Result:              json.RawMessage(`{"title":"Sidebar"}`),
+		StartedAt:           operationStartedAt,
+		CompletedAt:         &operationCompletedAt,
+		DurationMS:          5000,
+		Metadata:            map[string]string{"visibility": "audit"},
+	}); err != nil {
+		t.Fatalf("upsert agent session tool call: %v", err)
+	}
 	leaseCreatedAt := sessionHeartbeat.Add(-30 * time.Second)
 	leaseUpdatedAt := sessionHeartbeat.Add(30 * time.Second)
 	leaseExpiresAt := sessionHeartbeat.Add(10 * time.Minute)
@@ -344,7 +403,7 @@ func TestPlanFromWorkspaceProjectsControlPlaneRecords(t *testing.T) {
 	if err != nil {
 		t.Fatalf("PlanFromWorkspace() error = %v", err)
 	}
-	if got := Summary(plan); got != "agents=1 workflows=1 runtimes=1 agent_instances=1 nodes=1 agent_sessions=1 agent_leases=1 agent_ownership_leases=1 agent_commands=1 terminal_sessions=1 workflow_runs=1 task_runs=1 run_events=1 artifacts=1 tools=1" {
+	if got := Summary(plan); got != "agents=1 workflows=1 runtimes=1 agent_instances=1 nodes=1 agent_sessions=1 agent_session_operations=1 agent_session_tool_calls=1 agent_leases=1 agent_ownership_leases=1 agent_commands=1 terminal_sessions=1 workflow_runs=1 task_runs=1 run_events=1 artifacts=1 tools=1" {
 		t.Fatalf("Summary() = %q, want direct record parity", got)
 	}
 	if plan.Root != "workspace:CP" {
@@ -392,6 +451,39 @@ func TestPlanFromWorkspaceProjectsControlPlaneRecords(t *testing.T) {
 		session.Summary != "working on sidebar" || session.Metadata["harness"] != "planning" ||
 		session.LastHeartbeat == nil || !session.LastHeartbeat.Equal(sessionHeartbeat) {
 		t.Fatalf("agent session = %+v, want durable session runtime state", session)
+	}
+	operation := plan.AgentSessionOperations[0]
+	if operation.OperationID != "op-session-1" || operation.SessionID != "session-1" ||
+		operation.AgentID != "triage-bot" || operation.WorkflowRunID != workflowRun.RunID ||
+		operation.TaskRunID != taskRun.TaskRunID || operation.TaskID != "TASK-1" ||
+		operation.Kind != "prompt" || operation.Status != domain.AgentSessionOperationCompleted ||
+		operation.Model != "gpt-5" || operation.Provider != "codex" ||
+		operation.ProviderModel != "gpt-5.1" || operation.ProviderSessionID != "provider-session-1" ||
+		operation.PromptHash != "sha256:prompt" || operation.Text != "Summarize the sidebar task." ||
+		string(operation.Input) != `{"instruction":"Summarize the sidebar task."}` ||
+		string(operation.Result) != `{"summary":"sidebar implemented"}` ||
+		string(operation.Usage) != `{"totalTokens":42}` ||
+		string(operation.ToolCalls) != `[{"callId":"lookup-1","name":"github_issue_read"}]` ||
+		operation.DurationMS != 5000 || operation.Metadata["visibility"] != "audit" ||
+		operation.StartedAt == nil || !operation.StartedAt.Equal(operationStartedAt) ||
+		operation.CompletedAt == nil || !operation.CompletedAt.Equal(operationCompletedAt) {
+		t.Fatalf("agent session operation = %+v, want durable operation audit state", operation)
+	}
+	toolCall := plan.AgentSessionToolCalls[0]
+	if toolCall.CallID != "lookup-1" || toolCall.ProviderCallID != "provider-lookup-1" ||
+		toolCall.OperationID != "op-session-1" || toolCall.SessionID != "session-1" ||
+		toolCall.AgentID != "triage-bot" || toolCall.WorkflowRunID != workflowRun.RunID ||
+		toolCall.TaskRunID != taskRun.TaskRunID || toolCall.TaskID != "TASK-1" ||
+		toolCall.Name != "github_issue_read" || toolCall.Status != "completed" ||
+		toolCall.AuthorizationStatus != "authorized" || toolCall.IdempotencyKey != "tool:lookup-1" ||
+		toolCall.ToolVersion != "v1" || toolCall.ToolSourceHash != "sha256:tool" ||
+		toolCall.Handler != "workflow" || toolCall.Runtime != "local" ||
+		toolCall.Timeout != "30s" || !toolCall.Cancellable || !toolCall.ReadOnly ||
+		string(toolCall.Args) != `{"issue":"TASK-1"}` ||
+		string(toolCall.Result) != `{"title":"Sidebar"}` ||
+		toolCall.StartedAt == nil || !toolCall.StartedAt.Equal(operationStartedAt) ||
+		toolCall.CompletedAt == nil || !toolCall.CompletedAt.Equal(operationCompletedAt) {
+		t.Fatalf("agent session tool call = %+v, want durable tool-call audit state", toolCall)
 	}
 	lease := plan.AgentLeases[0]
 	if lease.LeaseID != "lease-task-1" || lease.SessionID != "session-1" ||
@@ -601,6 +693,35 @@ func TestPlanFromWorkspaceProjectsControlPlaneRecords(t *testing.T) {
 		importedSession.Metadata["workflow_run_id"] != "wrun-slack-1" ||
 		!importedSession.LastHeartbeat.Equal(sessionHeartbeat) {
 		t.Fatalf("imported agent session = %+v, want round-tripped durable session state", importedSession)
+	}
+	importedOperation, err := imported.AgentSessionOperations().Get(ctx, "IMPORT", "op-session-1")
+	if err != nil {
+		t.Fatalf("get imported agent session operation: %v", err)
+	}
+	if importedOperation.SessionID != "session-1" || importedOperation.AgentID != "triage-bot" ||
+		importedOperation.WorkflowRunID != "wrun-slack-1" || importedOperation.TaskRunID != "trun-slack-1" ||
+		importedOperation.Kind != "prompt" || importedOperation.Status != domain.AgentSessionOperationCompleted ||
+		importedOperation.Model != "gpt-5" || importedOperation.ProviderModel != "gpt-5.1" ||
+		string(importedOperation.Result) != `{"summary":"sidebar implemented"}` ||
+		string(importedOperation.ToolCalls) != `[{"callId":"lookup-1","name":"github_issue_read"}]` ||
+		importedOperation.DurationMS != 5000 || importedOperation.Metadata["source"] != "test" ||
+		!importedOperation.StartedAt.Equal(operationStartedAt) ||
+		importedOperation.CompletedAt == nil || !importedOperation.CompletedAt.Equal(operationCompletedAt) {
+		t.Fatalf("imported agent session operation = %+v, want round-tripped durable operation state", importedOperation)
+	}
+	importedToolCall, err := imported.AgentSessionToolCalls().Get(ctx, "IMPORT", "lookup-1")
+	if err != nil {
+		t.Fatalf("get imported agent session tool call: %v", err)
+	}
+	if importedToolCall.OperationID != "op-session-1" || importedToolCall.SessionID != "session-1" ||
+		importedToolCall.AgentID != "triage-bot" || importedToolCall.WorkflowRunID != "wrun-slack-1" ||
+		importedToolCall.TaskRunID != "trun-slack-1" || importedToolCall.Name != "github_issue_read" ||
+		importedToolCall.Status != "completed" || importedToolCall.AuthorizationStatus != "authorized" ||
+		importedToolCall.SourceHash != "sha256:tool" || string(importedToolCall.Args) != `{"issue":"TASK-1"}` ||
+		string(importedToolCall.Result) != `{"title":"Sidebar"}` ||
+		!importedToolCall.StartedAt.Equal(operationStartedAt) ||
+		importedToolCall.CompletedAt == nil || !importedToolCall.CompletedAt.Equal(operationCompletedAt) {
+		t.Fatalf("imported agent session tool call = %+v, want round-tripped durable tool-call state", importedToolCall)
 	}
 	importedCommand, err := imported.AgentCommands().Get(ctx, "IMPORT", "cmd-1")
 	if err != nil {

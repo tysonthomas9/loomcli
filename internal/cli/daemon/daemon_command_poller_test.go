@@ -104,6 +104,12 @@ func (s commandPollerTestStore) Nodes() store.NodeStore           { return nil }
 func (s commandPollerTestStore) AgentSessions() store.AgentSessionStore {
 	return nil
 }
+func (s commandPollerTestStore) AgentSessionOperations() store.AgentSessionOperationStore {
+	return nil
+}
+func (s commandPollerTestStore) AgentSessionToolCalls() store.AgentSessionToolCallStore {
+	return nil
+}
 func (s commandPollerTestStore) TerminalSessions() store.TerminalSessionStore {
 	return nil
 }

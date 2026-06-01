@@ -22,6 +22,14 @@ func validateWorkflowBindingCollisions(ctx context.Context, st store.Store, work
 	return validateWorkflowTriggerCollisions(ctx, st, workspaceKey, workflows)
 }
 
+func ValidateWorkflowRouteBindingCollision(ctx context.Context, st store.Store, workspaceKey string, workflow WorkflowModule) error {
+	return validateWorkflowRouteCollisions(ctx, st, workspaceKey, []WorkflowModule{workflow})
+}
+
+func ValidateWorkflowTriggerBindingCollision(ctx context.Context, st store.Store, workspaceKey string, workflow WorkflowModule) error {
+	return validateWorkflowTriggerCollisions(ctx, st, workspaceKey, []WorkflowModule{workflow})
+}
+
 func validateWorkflowRouteCollisions(ctx context.Context, st store.Store, workspaceKey string, workflows []WorkflowModule) error {
 	if st.RouteBindings() == nil {
 		return nil

@@ -37,9 +37,16 @@ var (
 	agentAddTask         string
 	agentAddOrchestrator string
 
-	agentListJSON  bool
-	agentShowJSON  bool
-	agentStopForce bool
+	agentAddJSON    bool
+	agentListJSON   bool
+	agentShowJSON   bool
+	agentRemoveJSON bool
+	agentStartJSON  bool
+	agentStopJSON   bool
+	agentStopForce  bool
+
+	agentdefWithActiveWorkspace = cmdstore.WithActiveWorkspace
+	agentdefWriteJSON           = cmdstore.WriteJSON
 )
 
 // envOrchestratorSessionID is the env var lead injects so descendants are
@@ -113,9 +120,13 @@ func init() {
 	agentAddCmd.Flags().StringVar(&agentAddBudget, "budget-policy", "", "Budget/retry policy name")
 	agentAddCmd.Flags().StringVar(&agentAddTask, "task", "", "Pin this agent's first cycle to a specific task ID (claims that task instead of polling Ready)")
 	agentAddCmd.Flags().StringVar(&agentAddOrchestrator, "orchestrator", "", "Parent lead/orchestrator session ID for the queued --task start command (overrides $LOOM_ORCHESTRATOR_SESSION_ID)")
+	agentAddCmd.Flags().BoolVar(&agentAddJSON, "json", false, "JSON output")
 
 	agentListCmd.Flags().BoolVar(&agentListJSON, "json", false, "JSON output")
 	agentShowCmd.Flags().BoolVar(&agentShowJSON, "json", false, "JSON output")
+	agentRemoveCmd.Flags().BoolVar(&agentRemoveJSON, "json", false, "JSON output")
+	agentStartCmd.Flags().BoolVar(&agentStartJSON, "json", false, "JSON output")
+	agentStopCmd.Flags().BoolVar(&agentStopJSON, "json", false, "JSON output")
 	agentStopCmd.Flags().BoolVar(&agentStopForce, "force", false, "Stop without graceful yield when handled by a local daemon")
 
 	agentdefCmd.AddCommand(agentAddCmd, agentListCmd, agentShowCmd, agentRemoveCmd, agentStartCmd, agentStopCmd)
@@ -123,7 +134,7 @@ func init() {
 }
 
 func runAgentAdd(cmd *cobra.Command, args []string) error {
-	return cmdstore.WithActiveWorkspace(func(ctx context.Context, h *bootstrap.StoreHandle, ws string) error {
+	return agentdefWithActiveWorkspace(func(ctx context.Context, h *bootstrap.StoreHandle, ws string) error {
 		mode := domain.AgentMode(agentAddMode)
 		// Attribution: explicit --orchestrator flag wins; otherwise inherit from
 		// the env var that `loom lead` injects. Empty = unattached.
@@ -139,12 +150,14 @@ func runAgentAdd(cmd *cobra.Command, args []string) error {
 			_ = h.Store.Agents().Delete(ctx, a.WorkspaceKey, a.Name)
 			return err
 		}
-		fmt.Printf("Created agent %s/%s (role=%s)\n", a.WorkspaceKey, a.Name, a.RoleName)
-
-		if err := enqueueAgentAddTaskStart(ctx, h.Store, ws, a.Name, orchestratorID); err != nil {
+		if err := enqueueAgentAddTaskStart(ctx, h.Store, ws, a.Name, orchestratorID, !agentAddJSON); err != nil {
 			return err
 		}
 		warnIfBackendMissing(cmd, a.Name, agentAddBackend)
+		if agentAddJSON {
+			return agentdefWriteJSON(a)
+		}
+		fmt.Printf("Created agent %s/%s (role=%s)\n", a.WorkspaceKey, a.Name, a.RoleName)
 		return nil
 	})
 }
@@ -172,7 +185,7 @@ func agentCreateFromFlags(workspace, name string, mode domain.AgentMode) store.A
 	}
 }
 
-func enqueueAgentAddTaskStart(ctx context.Context, st store.Store, workspace, agentName, orchestratorID string) error {
+func enqueueAgentAddTaskStart(ctx context.Context, st store.Store, workspace, agentName, orchestratorID string, print bool) error {
 	if agentAddTask == "" || st.AgentCommands() == nil {
 		return nil
 	}
@@ -188,7 +201,9 @@ func enqueueAgentAddTaskStart(ctx context.Context, st store.Store, workspace, ag
 	}); err != nil {
 		return fmt.Errorf("enqueue start command for task %q: %w", agentAddTask, err)
 	}
-	fmt.Printf("  pinned to task: %s\n", agentAddTask)
+	if print {
+		fmt.Printf("  pinned to task: %s\n", agentAddTask)
+	}
 	return nil
 }
 
@@ -256,13 +271,13 @@ func ensureAgentDefinitionLocalWorktrees(ctx context.Context, st store.Store, ag
 }
 
 func runAgentList(_ *cobra.Command, _ []string) error {
-	return cmdstore.WithActiveWorkspace(func(ctx context.Context, h *bootstrap.StoreHandle, ws string) error {
+	return agentdefWithActiveWorkspace(func(ctx context.Context, h *bootstrap.StoreHandle, ws string) error {
 		agents, err := h.Store.Agents().List(ctx, ws)
 		if err != nil {
 			return fmt.Errorf("list agents: %w", err)
 		}
 		if agentListJSON {
-			return cmdstore.WriteJSON(agents)
+			return agentdefWriteJSON(agents)
 		}
 		if len(agents) == 0 {
 			fmt.Printf("No agents in workspace %s\n", ws)
@@ -284,13 +299,13 @@ func runAgentList(_ *cobra.Command, _ []string) error {
 }
 
 func runAgentShow(_ *cobra.Command, args []string) error {
-	return cmdstore.WithActiveWorkspace(func(ctx context.Context, h *bootstrap.StoreHandle, ws string) error {
+	return agentdefWithActiveWorkspace(func(ctx context.Context, h *bootstrap.StoreHandle, ws string) error {
 		a, err := h.Store.Agents().Get(ctx, ws, args[0])
 		if err != nil {
 			return fmt.Errorf("get agent: %w", err)
 		}
 		if agentShowJSON {
-			return cmdstore.WriteJSON(a)
+			return agentdefWriteJSON(a)
 		}
 		fmt.Printf("Workspace:    %s\n", a.WorkspaceKey)
 		fmt.Printf("Name:         %s\n", a.Name)
@@ -335,9 +350,16 @@ func runAgentShow(_ *cobra.Command, args []string) error {
 }
 
 func runAgentRemove(_ *cobra.Command, args []string) error {
-	return cmdstore.WithActiveWorkspace(func(ctx context.Context, h *bootstrap.StoreHandle, ws string) error {
+	return agentdefWithActiveWorkspace(func(ctx context.Context, h *bootstrap.StoreHandle, ws string) error {
 		if err := h.Store.Agents().Delete(ctx, ws, args[0]); err != nil {
 			return fmt.Errorf("remove agent: %w", err)
+		}
+		if agentRemoveJSON {
+			return agentdefWriteJSON(map[string]string{
+				"workspace_key": ws,
+				"name":          args[0],
+				"status":        "removed",
+			})
 		}
 		fmt.Printf("Removed agent %s/%s\n", ws, args[0])
 		return nil
@@ -345,7 +367,7 @@ func runAgentRemove(_ *cobra.Command, args []string) error {
 }
 
 func runAgentStart(_ *cobra.Command, args []string) error {
-	return updateAgentDesiredState(args[0], domain.AgentDesiredRunning, domain.AgentStateActive, "start", nil)
+	return updateAgentDesiredState(args[0], domain.AgentDesiredRunning, domain.AgentStateActive, "start", nil, agentStartJSON)
 }
 
 func runAgentStop(_ *cobra.Command, args []string) error {
@@ -353,26 +375,37 @@ func runAgentStop(_ *cobra.Command, args []string) error {
 	if agentStopForce {
 		payload["force"] = "true"
 	}
-	return updateAgentDesiredState(args[0], domain.AgentDesiredStopped, domain.AgentStateStopped, "stop", payload)
+	return updateAgentDesiredState(args[0], domain.AgentDesiredStopped, domain.AgentStateStopped, "stop", payload, agentStopJSON)
 }
 
-func updateAgentDesiredState(name string, desired domain.AgentDesiredState, state domain.AgentState, commandType string, payload map[string]string) error {
-	return cmdstore.WithActiveWorkspace(func(ctx context.Context, h *bootstrap.StoreHandle, ws string) error {
-		if _, err := h.Store.Agents().Update(ctx, ws, name, store.AgentUpdate{
+type agentStateUpdateResult struct {
+	Agent   *domain.Agent        `json:"agent"`
+	Command *domain.AgentCommand `json:"command,omitempty"`
+}
+
+func updateAgentDesiredState(name string, desired domain.AgentDesiredState, state domain.AgentState, commandType string, payload map[string]string, jsonOutput bool) error {
+	return agentdefWithActiveWorkspace(func(ctx context.Context, h *bootstrap.StoreHandle, ws string) error {
+		agent, err := h.Store.Agents().Update(ctx, ws, name, store.AgentUpdate{
 			DesiredState: &desired,
 			State:        &state,
-		}); err != nil {
+		})
+		if err != nil {
 			return fmt.Errorf("update agent desired state: %w", err)
 		}
+		var command *domain.AgentCommand
 		if h.Store.AgentCommands() != nil {
-			if _, err := h.Store.AgentCommands().Create(ctx, store.AgentCommandCreate{
+			command, err = h.Store.AgentCommands().Create(ctx, store.AgentCommandCreate{
 				WorkspaceKey:  ws,
 				TargetAgentID: name,
 				Type:          commandType,
 				Payload:       payload,
-			}); err != nil {
+			})
+			if err != nil {
 				return fmt.Errorf("create agent command: %w", err)
 			}
+		}
+		if jsonOutput {
+			return agentdefWriteJSON(agentStateUpdateResult{Agent: agent, Command: command})
 		}
 		fmt.Printf("Requested agent %s/%s %s\n", ws, name, commandType)
 		return nil

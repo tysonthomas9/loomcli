@@ -76,6 +76,8 @@ type Client struct {
 	agents       *agentStore
 	nodes        *nodeStore
 	sessions     *agentSessionStore
+	sessionOps   *agentSessionOperationStore
+	toolCalls    *agentSessionToolCallStore
 	terminals    *terminalSessionStore
 	artifacts    *artifactStore
 	leases       *agentLeaseStore
@@ -116,6 +118,8 @@ func New(cfg Config) (*Client, error) {
 	c.agents = &agentStore{client: c}
 	c.nodes = &nodeStore{client: c}
 	c.sessions = &agentSessionStore{client: c}
+	c.sessionOps = &agentSessionOperationStore{client: c}
+	c.toolCalls = &agentSessionToolCallStore{client: c}
 	c.terminals = &terminalSessionStore{client: c}
 	c.artifacts = &artifactStore{client: c}
 	c.leases = &agentLeaseStore{client: c}
@@ -151,6 +155,10 @@ func (c *Client) Nodes() store.NodeStore { return c.nodes }
 
 // AgentSessions returns the AgentSessionStore.
 func (c *Client) AgentSessions() store.AgentSessionStore { return c.sessions }
+
+func (c *Client) AgentSessionOperations() store.AgentSessionOperationStore { return c.sessionOps }
+
+func (c *Client) AgentSessionToolCalls() store.AgentSessionToolCallStore { return c.toolCalls }
 
 // TerminalSessions returns the TerminalSessionStore.
 func (c *Client) TerminalSessions() store.TerminalSessionStore { return c.terminals }

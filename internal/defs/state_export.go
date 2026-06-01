@@ -15,19 +15,21 @@ const (
 )
 
 type RuntimeStateExport struct {
-	Schema               string                      `json:"schema"`
-	Root                 string                      `json:"root,omitempty"`
-	AgentInstances       []AgentInstanceModule       `json:"agent_instances,omitempty"`
-	Nodes                []NodeModule                `json:"nodes,omitempty"`
-	AgentSessions        []AgentSessionModule        `json:"agent_sessions,omitempty"`
-	AgentLeases          []AgentLeaseModule          `json:"agent_leases,omitempty"`
-	AgentOwnershipLeases []AgentOwnershipLeaseModule `json:"agent_ownership_leases,omitempty"`
-	AgentCommands        []AgentCommandModule        `json:"agent_commands,omitempty"`
-	TerminalSessions     []TerminalSessionModule     `json:"terminal_sessions,omitempty"`
-	Artifacts            []ArtifactModule            `json:"artifacts,omitempty"`
-	WorkflowRuns         []WorkflowRunModule         `json:"workflow_runs,omitempty"`
-	TaskRuns             []TaskRunModule             `json:"task_runs,omitempty"`
-	RunEvents            []RunEventModule            `json:"run_events,omitempty"`
+	Schema                 string                        `json:"schema"`
+	Root                   string                        `json:"root,omitempty"`
+	AgentInstances         []AgentInstanceModule         `json:"agent_instances,omitempty"`
+	Nodes                  []NodeModule                  `json:"nodes,omitempty"`
+	AgentSessions          []AgentSessionModule          `json:"agent_sessions,omitempty"`
+	AgentSessionOperations []AgentSessionOperationModule `json:"agent_session_operations,omitempty"`
+	AgentSessionToolCalls  []AgentSessionToolCallModule  `json:"agent_session_tool_calls,omitempty"`
+	AgentLeases            []AgentLeaseModule            `json:"agent_leases,omitempty"`
+	AgentOwnershipLeases   []AgentOwnershipLeaseModule   `json:"agent_ownership_leases,omitempty"`
+	AgentCommands          []AgentCommandModule          `json:"agent_commands,omitempty"`
+	TerminalSessions       []TerminalSessionModule       `json:"terminal_sessions,omitempty"`
+	Artifacts              []ArtifactModule              `json:"artifacts,omitempty"`
+	WorkflowRuns           []WorkflowRunModule           `json:"workflow_runs,omitempty"`
+	TaskRuns               []TaskRunModule               `json:"task_runs,omitempty"`
+	RunEvents              []RunEventModule              `json:"run_events,omitempty"`
 }
 
 func ExportRuntimeStateFiles(plan *Plan) ([]SourceExportFile, error) {
@@ -81,19 +83,21 @@ func mergeRuntimeStateExport(root string, plan *Plan) error {
 
 func runtimeStateFromPlan(plan *Plan) RuntimeStateExport {
 	return RuntimeStateExport{
-		Schema:               runtimeStateExportSchema,
-		Root:                 plan.Root,
-		AgentInstances:       append([]AgentInstanceModule(nil), plan.AgentInstances...),
-		Nodes:                append([]NodeModule(nil), plan.Nodes...),
-		AgentSessions:        append([]AgentSessionModule(nil), plan.AgentSessions...),
-		AgentLeases:          append([]AgentLeaseModule(nil), plan.AgentLeases...),
-		AgentOwnershipLeases: append([]AgentOwnershipLeaseModule(nil), plan.AgentOwnershipLeases...),
-		AgentCommands:        append([]AgentCommandModule(nil), plan.AgentCommands...),
-		TerminalSessions:     append([]TerminalSessionModule(nil), plan.TerminalSessions...),
-		Artifacts:            append([]ArtifactModule(nil), plan.Artifacts...),
-		WorkflowRuns:         append([]WorkflowRunModule(nil), plan.WorkflowRuns...),
-		TaskRuns:             append([]TaskRunModule(nil), plan.TaskRuns...),
-		RunEvents:            append([]RunEventModule(nil), plan.RunEvents...),
+		Schema:                 runtimeStateExportSchema,
+		Root:                   plan.Root,
+		AgentInstances:         append([]AgentInstanceModule(nil), plan.AgentInstances...),
+		Nodes:                  append([]NodeModule(nil), plan.Nodes...),
+		AgentSessions:          append([]AgentSessionModule(nil), plan.AgentSessions...),
+		AgentSessionOperations: append([]AgentSessionOperationModule(nil), plan.AgentSessionOperations...),
+		AgentSessionToolCalls:  append([]AgentSessionToolCallModule(nil), plan.AgentSessionToolCalls...),
+		AgentLeases:            append([]AgentLeaseModule(nil), plan.AgentLeases...),
+		AgentOwnershipLeases:   append([]AgentOwnershipLeaseModule(nil), plan.AgentOwnershipLeases...),
+		AgentCommands:          append([]AgentCommandModule(nil), plan.AgentCommands...),
+		TerminalSessions:       append([]TerminalSessionModule(nil), plan.TerminalSessions...),
+		Artifacts:              append([]ArtifactModule(nil), plan.Artifacts...),
+		WorkflowRuns:           append([]WorkflowRunModule(nil), plan.WorkflowRuns...),
+		TaskRuns:               append([]TaskRunModule(nil), plan.TaskRuns...),
+		RunEvents:              append([]RunEventModule(nil), plan.RunEvents...),
 	}
 }
 
@@ -101,6 +105,8 @@ func runtimeStateEmpty(state RuntimeStateExport) bool {
 	return len(state.AgentInstances) == 0 &&
 		len(state.Nodes) == 0 &&
 		len(state.AgentSessions) == 0 &&
+		len(state.AgentSessionOperations) == 0 &&
+		len(state.AgentSessionToolCalls) == 0 &&
 		len(state.AgentLeases) == 0 &&
 		len(state.AgentOwnershipLeases) == 0 &&
 		len(state.AgentCommands) == 0 &&
@@ -115,6 +121,8 @@ func mergeRuntimeState(plan *Plan, state RuntimeStateExport) {
 	plan.AgentInstances = append(plan.AgentInstances, state.AgentInstances...)
 	plan.Nodes = append(plan.Nodes, state.Nodes...)
 	plan.AgentSessions = append(plan.AgentSessions, state.AgentSessions...)
+	plan.AgentSessionOperations = append(plan.AgentSessionOperations, state.AgentSessionOperations...)
+	plan.AgentSessionToolCalls = append(plan.AgentSessionToolCalls, state.AgentSessionToolCalls...)
 	plan.AgentLeases = append(plan.AgentLeases, state.AgentLeases...)
 	plan.AgentOwnershipLeases = append(plan.AgentOwnershipLeases, state.AgentOwnershipLeases...)
 	plan.AgentCommands = append(plan.AgentCommands, state.AgentCommands...)

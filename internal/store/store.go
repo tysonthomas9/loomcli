@@ -24,6 +24,8 @@ type Store interface {
 	Agents() AgentStore
 	Nodes() NodeStore
 	AgentSessions() AgentSessionStore
+	AgentSessionOperations() AgentSessionOperationStore
+	AgentSessionToolCalls() AgentSessionToolCallStore
 	TerminalSessions() TerminalSessionStore
 	Artifacts() ArtifactStore
 	AgentLeases() AgentLeaseStore

@@ -1,6 +1,9 @@
 package domain
 
-import "time"
+import (
+	"encoding/json"
+	"time"
+)
 
 type AgentMode string
 
@@ -99,6 +102,80 @@ type AgentSession struct {
 	Metadata        map[string]string  `json:"metadata,omitempty"`
 	CreatedAt       time.Time          `json:"created_at"`
 	UpdatedAt       time.Time          `json:"updated_at"`
+}
+
+type AgentSessionOperationStatus string
+
+const (
+	AgentSessionOperationAdmitted  AgentSessionOperationStatus = "admitted"
+	AgentSessionOperationRunning   AgentSessionOperationStatus = "running"
+	AgentSessionOperationCompleted AgentSessionOperationStatus = "completed"
+	AgentSessionOperationFailed    AgentSessionOperationStatus = "failed"
+	AgentSessionOperationCancelled AgentSessionOperationStatus = "cancelled"
+)
+
+type AgentSessionOperation struct {
+	WorkspaceKey      string                      `json:"workspace_key"`
+	OperationID       string                      `json:"operation_id"`
+	SessionID         string                      `json:"session_id"`
+	AgentID           string                      `json:"agent_id"`
+	WorkflowRunID     string                      `json:"workflow_run_id,omitempty"`
+	TaskRunID         string                      `json:"task_run_id,omitempty"`
+	TaskID            string                      `json:"task_id,omitempty"`
+	Kind              string                      `json:"kind"`
+	Status            AgentSessionOperationStatus `json:"status"`
+	Model             string                      `json:"model,omitempty"`
+	Provider          string                      `json:"provider,omitempty"`
+	ProviderModel     string                      `json:"provider_model,omitempty"`
+	ProviderSessionID string                      `json:"provider_session_id,omitempty"`
+	PromptHash        string                      `json:"prompt_hash,omitempty"`
+	Text              string                      `json:"text,omitempty"`
+	Input             json.RawMessage             `json:"input,omitempty"`
+	Result            json.RawMessage             `json:"result,omitempty"`
+	Usage             json.RawMessage             `json:"usage,omitempty"`
+	ToolCalls         json.RawMessage             `json:"tool_calls,omitempty"`
+	ErrorClass        string                      `json:"error_class,omitempty"`
+	ErrorMessage      string                      `json:"error_message,omitempty"`
+	StartedAt         time.Time                   `json:"started_at,omitempty"`
+	CompletedAt       *time.Time                  `json:"completed_at,omitempty"`
+	DurationMS        int64                       `json:"duration_ms,omitempty"`
+	Metadata          map[string]string           `json:"metadata,omitempty"`
+	CreatedAt         time.Time                   `json:"created_at"`
+	UpdatedAt         time.Time                   `json:"updated_at"`
+}
+
+type AgentSessionToolCall struct {
+	WorkspaceKey        string            `json:"workspace_key"`
+	CallID              string            `json:"call_id"`
+	ProviderCallID      string            `json:"provider_call_id,omitempty"`
+	OperationID         string            `json:"operation_id"`
+	SessionID           string            `json:"session_id"`
+	AgentID             string            `json:"agent_id"`
+	WorkflowRunID       string            `json:"workflow_run_id,omitempty"`
+	TaskRunID           string            `json:"task_run_id,omitempty"`
+	TaskID              string            `json:"task_id,omitempty"`
+	Name                string            `json:"name"`
+	Status              string            `json:"status"`
+	AuthorizationStatus string            `json:"authorization_status,omitempty"`
+	IdempotencyKey      string            `json:"idempotency_key,omitempty"`
+	ToolVersion         string            `json:"tool_version,omitempty"`
+	SourceHash          string            `json:"source_hash,omitempty"`
+	Handler             string            `json:"handler,omitempty"`
+	Runtime             string            `json:"runtime,omitempty"`
+	Timeout             string            `json:"timeout,omitempty"`
+	Cancellable         bool              `json:"cancellable,omitempty"`
+	ReadOnly            bool              `json:"read_only,omitempty"`
+	Redacted            bool              `json:"redacted,omitempty"`
+	Args                json.RawMessage   `json:"args,omitempty"`
+	Result              json.RawMessage   `json:"result,omitempty"`
+	ErrorClass          string            `json:"error_class,omitempty"`
+	ErrorMessage        string            `json:"error_message,omitempty"`
+	StartedAt           time.Time         `json:"started_at,omitempty"`
+	CompletedAt         *time.Time        `json:"completed_at,omitempty"`
+	DurationMS          int64             `json:"duration_ms,omitempty"`
+	Metadata            map[string]string `json:"metadata,omitempty"`
+	CreatedAt           time.Time         `json:"created_at"`
+	UpdatedAt           time.Time         `json:"updated_at"`
 }
 
 type TerminalSessionStatus string
