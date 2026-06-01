@@ -141,6 +141,9 @@ func (s *sessionServiceImpl) ListTaskSessions(ctx context.Context, wsID, taskID 
 			if info, err := os.Stat(sessStore.NativeTranscriptPath(rec.SessionID)); err == nil && info.Size() > 0 {
 				item.HasTranscript = true
 			}
+			if !item.HasTranscript && eventStoreHasTranscript(sessStore, rec.SessionID) {
+				item.HasTranscript = true // F3: event store as a has_transcript source (native fallback above)
+			}
 			if diff, err := sessStore.ReadDiff(rec.SessionID); err == nil && diff != "" {
 				item.HasDiff = true
 			}
@@ -192,6 +195,9 @@ func fillControlPlaneArtifactFlags(item *service.SessionListItem, stores []*sess
 	if st := storeOwningSession(stores, rec.SessionID); st != nil {
 		if info, err := os.Stat(st.NativeTranscriptPath(rec.SessionID)); err == nil && info.Size() > 0 {
 			item.HasTranscript = true
+		}
+		if !item.HasTranscript && eventStoreHasTranscript(st, rec.SessionID) {
+			item.HasTranscript = true // F3: event store as a has_transcript source (native fallback above)
 		}
 		if diff, err := st.ReadDiff(rec.SessionID); err == nil && diff != "" {
 			item.HasDiff = true
@@ -305,6 +311,11 @@ func (s *sessionServiceImpl) GetSessionTranscript(ctx context.Context, wsID, tas
 	if err != nil {
 		return nil, err
 	}
+	// F3: serve from the event store when enabled + populated, else fall back to
+	// the native reader (transitional — transcripts never disappear mid-rollout).
+	if evs, ok := eventStoreParentEvents(store, sessionID); ok {
+		return evs, nil
+	}
 	events, loadErr := store.LoadNativeEvents(sessionID)
 	if loadErr != nil {
 		logger.Error("failed to load native transcript", "session_id", sessionID, "err", loadErr)
@@ -347,6 +358,11 @@ func (s *sessionServiceImpl) GetSessionSubagentTranscript(ctx context.Context, w
 	}
 	if !sessions.SubagentIDPattern.MatchString(subagentID) {
 		return nil, service.ErrValidation("invalid subagent ID")
+	}
+	// F3: serve the subagent from the event store when enabled + populated, else
+	// fall back to the native subagent transcript.
+	if evs, ok := eventStoreSubagentEvents(store, sessionID, subagentID); ok {
+		return evs, nil
 	}
 	path := store.SubagentTranscriptPath(sessionID, subagentID)
 	if _, statErr := os.Stat(path); statErr != nil {
