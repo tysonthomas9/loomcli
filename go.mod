@@ -13,7 +13,7 @@ require (
 	github.com/golang-jwt/jwt/v5 v5.3.1
 	github.com/google/uuid v1.6.0
 	github.com/mattn/go-runewidth v0.0.23
-	github.com/olesho/harness-wrapper v0.1.0
+	github.com/olesho/harness-wrapper v0.1.1-0.20260601104222-ea88094b42dc
 	github.com/prometheus/client_golang v1.23.2
 	github.com/redis/go-redis/v9 v9.17.3
 	github.com/spf13/cobra v1.10.2
