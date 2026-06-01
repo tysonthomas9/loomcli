@@ -2,13 +2,13 @@ package backends
 
 import (
 	"os"
-	"path/filepath"
 	"strings"
 
 	hwharness "github.com/olesho/harness-wrapper/pkg/harness"
 	"github.com/olesho/harness-wrapper/pkg/transcript"
 
 	"github.com/tysonthomas9/loomcli/internal/cli"
+	"github.com/tysonthomas9/loomcli/internal/sessions"
 	"github.com/tysonthomas9/loomcli/internal/sessions/eventstore"
 )
 
@@ -70,7 +70,13 @@ func eventStoreSink(workDir string) (func(transcript.EventEnvelope) error, strin
 	if runtimeDir == "" || sid == "" {
 		return nil, "" // standalone / no session ⇒ nothing to key the store by
 	}
-	sessionDir := filepath.Join(runtimeDir, "sessions", sid)
+	// Resolve the session dir through the SAME source of truth the serving side
+	// reads from (sessions.Store.SessionDir), so writer + reader can't diverge.
+	store, err := sessions.NewStore(runtimeDir)
+	if err != nil {
+		return nil, ""
+	}
+	sessionDir := store.SessionDir(sid)
 	if err := os.MkdirAll(sessionDir, 0o755); err != nil {
 		return nil, "" // can't place the store; skip rather than fail the run
 	}
