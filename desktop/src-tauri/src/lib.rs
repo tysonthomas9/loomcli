@@ -1,9 +1,13 @@
+use std::path::PathBuf;
+
 use tauri::{
     menu::{Menu, MenuItem, MenuItemKind, PredefinedMenuItem, Submenu, WINDOW_SUBMENU_ID},
     AppHandle, Emitter, Manager, RunEvent, Runtime, Url, WebviewUrl, WebviewWindow,
     WebviewWindowBuilder,
 };
 
+const ENV_ALLOW_DATA_DIR: &str = "LOOM_DESKTOP_ALLOW_ENV_DATA_DIR";
+const ENV_DESKTOP_DATA_DIR: &str = "LOOM_DESKTOP_DATA_DIR";
 const MENU_NEW_WORKSPACE_WINDOW: &str = "new-workspace-window";
 const MENU_NEW_WORKSPACE_WINDOW_ALT: &str = "new-workspace-window-window-menu";
 const EVENT_NEW_WORKSPACE_WINDOW: &str = "loom:new-workspace-window";
@@ -13,6 +17,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .invoke_handler(tauri::generate_handler![
+            desktop_runtime_data_dir,
             open_workspace_window,
             pick_folder
         ])
@@ -40,6 +45,47 @@ pub fn run() {
             RunEvent::Opened { .. } => show_primary_window(app),
             _ => {}
         });
+}
+
+#[tauri::command]
+fn desktop_runtime_data_dir<R: Runtime>(app: AppHandle<R>) -> Result<String, String> {
+    desktop_runtime_data_dir_path(&app).map(|path| path.to_string_lossy().into_owned())
+}
+
+fn desktop_runtime_data_dir_path<R: Runtime>(app: &AppHandle<R>) -> Result<PathBuf, String> {
+    if env_data_dir_allowed() {
+        if let Some(value) = std::env::var_os(ENV_DESKTOP_DATA_DIR) {
+            if !value.as_os_str().is_empty() {
+                return Ok(PathBuf::from(value));
+            }
+        }
+    }
+
+    let home = app.path().home_dir().map_err(|err| err.to_string())?;
+
+    #[cfg(target_os = "macos")]
+    {
+        Ok(home
+            .join("Library")
+            .join("Application Support")
+            .join("Loom")
+            .join("data"))
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    {
+        Ok(home.join(".loom").join("desktop"))
+    }
+}
+
+fn env_data_dir_allowed() -> bool {
+    if cfg!(debug_assertions) {
+        return true;
+    }
+    match std::env::var(ENV_ALLOW_DATA_DIR) {
+        Ok(value) => matches!(value.as_str(), "1" | "true" | "TRUE" | "yes" | "YES"),
+        Err(_) => false,
+    }
 }
 
 #[tauri::command]
@@ -170,6 +216,7 @@ fn show_launcher_window<R: Runtime>(app: &AppHandle<R>) {
         .title("Loom")
         .inner_size(520.0, 300.0)
         .min_inner_size(420.0, 260.0)
+        .zoom_hotkeys_enabled(true)
         .content_protected(false)
         .focused(true)
         .build()
@@ -287,6 +334,7 @@ fn open_workspace_window_native<R: Runtime>(
         .title("Loom")
         .inner_size(1280.0, 800.0)
         .min_inner_size(720.0, 520.0)
+        .zoom_hotkeys_enabled(true)
         .content_protected(false)
         .focused(true)
         .build()?;
@@ -309,6 +357,7 @@ fn open_additional_workspace_window<R: Runtime>(app: &AppHandle<R>) -> tauri::Re
         .title("Loom")
         .inner_size(1280.0, 800.0)
         .min_inner_size(720.0, 520.0)
+        .zoom_hotkeys_enabled(true)
         .content_protected(false)
         .focused(true)
         .build()?;

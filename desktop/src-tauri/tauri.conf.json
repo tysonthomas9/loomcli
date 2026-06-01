@@ -19,6 +19,7 @@
         "height": 300,
         "minWidth": 420,
         "minHeight": 260,
+        "zoomHotkeysEnabled": true,
         "contentProtected": false
       }
     ],

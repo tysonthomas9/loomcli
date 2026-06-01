@@ -76,7 +76,8 @@ func (s *Supervisor) buildCommand(ap *AgentProcess) (*exec.Cmd, error) {
 // buildAgentExecCmd creates the exec.Cmd with the correct arguments for the agent role.
 func buildAgentExecCmd(ap *AgentProcess, backend, epicID string) *exec.Cmd {
 	if BuiltInRoles[ap.Entry.Role] {
-		args := []string{ap.Entry.Role, ap.WorktreePath, "--auto", "--daemon-mode"}
+		args := builtInRoleExecArgs(ap.Entry.Role, ap.WorktreePath)
+		args = append(args, "--auto", "--daemon-mode")
 		if backend != "" {
 			args = append(args, "--backend", backend)
 		}
@@ -97,6 +98,13 @@ func buildAgentExecCmd(ap *AgentProcess, backend, epicID string) *exec.Cmd {
 		args = append(args, "--parent", epicID)
 	}
 	return exec.Command("loom", args...) //nolint:gosec // G204: intentional loom subprocess launch
+}
+
+func builtInRoleExecArgs(role, worktreePath string) []string {
+	if role == "task" {
+		return []string{"task", "run", worktreePath}
+	}
+	return []string{role, worktreePath}
 }
 
 // appendRoleEnv adds role constraint env vars (allowed/denied tools, read-only, repo).

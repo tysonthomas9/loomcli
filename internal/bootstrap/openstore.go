@@ -53,6 +53,16 @@ func (h *StoreHandle) URL() string {
 	return os.Getenv(EnvFleetDBURL)
 }
 
+// EmbeddedExit reports the owned embedded fleet-db subprocess exit, if this
+// handle started one. Nil means the handle is cloud-backed or reused an
+// already-running embedded fleet-db owned by another process.
+func (h *StoreHandle) EmbeddedExit() <-chan error {
+	if h == nil || h.embedded == nil {
+		return nil
+	}
+	return h.embedded.Exit()
+}
+
 // Close shuts down the store and any subprocess it owns. Idempotent.
 func (h *StoreHandle) Close() error {
 	var firstErr error

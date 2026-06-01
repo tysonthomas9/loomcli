@@ -7,9 +7,9 @@ Follow this workflow EXACTLY for ONE task.
 {{ .WorkspaceBlock }}{{ .SafetyBlock }}
 ### Step 1: Load Your Pre-Assigned Task
 - Your task has been pre-assigned by the Fleet API: {{ .TaskID }}
-- Run 'loom data show {{ .TaskID }}' to load the full task details
+- Run 'loom task show {{ .TaskID }}' to load the full task details
 - The supervisor or Fleet API has already claimed this task
-- Run 'loom claim {{ .TaskID }}' to register with the agent monitor
+- Run 'loom task claim {{ .TaskID }}' to bind the task into the local agent runtime
 - IMPORTANT: Do NOT run 'loom data ready' — your task is already assigned
 - If the task does not exist or its status is neither 'open' nor the expected pre-claimed 'in_progress':
   1. Print the error
@@ -18,11 +18,11 @@ Follow this workflow EXACTLY for ONE task.
 
 ### Step 1.5: Check if This is a Revision
 Check the task's labels for 'needs-revision':
-- Run 'loom data show {{ .TaskID }} --output json' and check the labels field
+- Run 'loom task show {{ .TaskID }} --output json' and check the labels field
 
 **If the task has a 'needs-revision' label:**
 - This is a REVISION - a previous design was rejected
-- Run 'loom data show {{ .TaskID }}' and inspect comments/notes for feedback
+- Run 'loom task show {{ .TaskID }}' and inspect comments/notes for feedback
 - Read the existing design field for context
 - Your new design must address the specific feedback
 
@@ -72,27 +72,26 @@ Write a comprehensive plan that includes:
 - Key scenarios to cover
 - How to manually verify the implementation works
 
-### Step 4: Save the Plan
-Save your plan to the task's design field:
+### Step 4: Submit the Plan for Review
+Save your plan to the task's design field, set status to 'review', and clear
+the assignee:
 ```
-loom data update <id> --design="<your complete plan here>"
+loom task submit <id> --design="<your complete plan here>"
 ```
 
 IMPORTANT: Make sure the plan is complete and detailed enough that another agent
 (or human) could implement it without needing to ask questions.
 
-### Step 5: Mark for Review
-Set the task status to 'review' and clear the assignee:
+### Step 5: Confirm Review State
+The submit command already moved the task to review. If labels need to change,
+document it in the task notes for the lead:
 ```
-# If labels need to change, document it in the task notes for the lead.
-
-# Then mark for review:
-loom data update <id> --status review --assignee=""
+loom data update <id> --notes "<label change request for lead>"
 ```
 
 This puts the task in review status where:
 - It won't appear in 'loom data ready' (filtered out)
-- The lead can find it with 'loom data list --status review'
+- The lead can find it with 'loom task list --status review'
 - Other agents won't accidentally pick it up
 
 ### Step 6: Signal Completion and Exit
@@ -110,7 +109,7 @@ After completing Step 6, you are DONE.
 - Simply EXIT
 
 You have completed ONE planning task. The human will:
-1. Review your plan with 'loom data list --status review' then 'loom data show <id>'
+1. Review your plan with 'loom task list --status review' then 'loom task show <id>'
 2. Either approve it (set status back to open) or request changes
 3. Run an implementation agent separately
 

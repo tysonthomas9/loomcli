@@ -21,17 +21,16 @@ You are running in a parallel multi-agent environment. Follow these rules strict
 - Run this command to find tasks ready to implement (has design, not needs-revision):
   {{ .ReadyJSON }} | jq -r '.[] | select(.status == "open") | select((.issue_type == "epic") | not) | select(.design) | select((.design == "") | not) | select(((.labels // []) | index("needs-revision")) | not) | "\(.id) [\(.priority)] \(.title)"'
 - If jq fails, fallback: Run '{{ .ReadyFallback }}' and manually SKIP epics, tasks without a --design field, or tasks with 'needs-revision' label
-- Run 'loom data list --status in_progress --output json' to check for stale tasks (updated_at >10 hours ago = abandoned, reclaim with 'loom data update <id> --status in_progress --assignee {{ .AgentName }}')
+- Run 'loom task list --status in_progress --output json' to check for stale tasks (updated_at >10 hours ago = abandoned, reclaim with 'loom data update <id> --status in_progress --assignee {{ .AgentName }}')
 - IGNORE existing assignees - if status is 'open', the task is available to claim
 - Pick the HIGHEST PRIORITY task (P0 > P1 > P2 > P3 > P4) that is not already in_progress
-- Run 'loom data show <id>' to understand the task requirements
+- Run 'loom task show <id>' to understand the task requirements
 - If NO tasks have a --design field (or all have 'needs-revision' label):
   1. Print: "No planned tasks available. Run 'loom plan' first."
   2. Run: loom complete
   3. EXIT immediately
-- Run 'loom data claim <id>' to claim it (atomic - prevents race conditions)
+- Run 'loom task claim <id>' to claim it (atomic - prevents race conditions)
 - If claim fails with 'already claimed by X', pick the next highest priority task
-- Run 'loom claim <id>' to register the task with the agent monitor
 - REMEMBER this task ID - you will work ONLY on this task
 
 ### Step 2: Ground Yourself Before Implementing
@@ -39,18 +38,18 @@ You are running in a parallel multi-agent environment. Follow these rules strict
 Before writing any code, build context from three sources: the epic, related tasks, and the current code.
 
 #### 2a. Read the Epic
-- Determine the parent epic: check the task ID for a dotted prefix (e.g., `loomcli-abc.5` -> parent is `loomcli-abc`), or run `loom data show <id> --output json` and check the `parent` field
-- Run `loom data show <epic-id>` to read the epic's title, description, and notes
+- Determine the parent epic: check the task ID for a dotted prefix (e.g., `loomcli-abc.5` -> parent is `loomcli-abc`), or run `loom task show <id> --output json` and check the `parent` field
+- Run `loom task show <epic-id>` to read the epic's title, description, and notes
 - The epic notes contain architectural decisions and conventions — these are **authoritative**
 
 #### 2b. Read Dependency and Sibling Designs
-- Run `loom data show <id> --output json` and check the `depends_on` field for blockers
-- For each dependency: run `loom data show <dep-id>` and read its design and status
+- Run `loom task show <id> --output json` and check the `depends_on` field for blockers
+- For each dependency: run `loom task show <dep-id>` and read its design and status
   - If a dependency is closed: note what it implemented — you will build on its code
   - If a dependency is still open: go to Step 8a (External Blocker)
 - Read 2-3 other closed sibling tasks in the same epic to understand the conventions they established:
-  `loom data list --parent <epic-id> --status closed --limit 5 --output json | jq -r '.[] | "\(.id) \(.title)"'`
-  For each, run `loom data show <sibling-id>` and skim the design for naming conventions, sentinel values, key formats, and patterns
+  `loom task list --parent <epic-id> --status closed --limit 5 --output json | jq -r '.[] | "\(.id) \(.title)"'`
+  For each, run `loom task show <sibling-id>` and skim the design for naming conventions, sentinel values, key formats, and patterns
 
 #### 2c. Read the Design and Reconcile Against Current Code
 - Read the --design field thoroughly
@@ -140,16 +139,14 @@ Use this ONLY when nothing in this codebase can move the task forward:
 - A bug in code outside the design's scope blocks this work
 
 Procedure:
-1. Document the blocker:
-   loom data update <id> --notes "BLOCKED: <detailed external reason>"
-2. If blocked by another task, mention its ID in the notes.
-3. Change status to blocked:
-   loom data update <id> --status blocked
-4. Commit any partial work (if meaningful):
+1. Mark the task blocked and document the blocker:
+   loom task block <id> --reason "<detailed external reason>"
+2. If blocked by another task, mention its ID in the reason.
+3. Commit any partial work (if meaningful):
    git add <files> && git commit -m "WIP: <task-id> - blocked on <reason>"
    git push origin HEAD
-5. Signal completion: loom complete
-6. EXIT immediately
+4. Signal completion: loom complete
+5. EXIT immediately
 
 Blocked tasks DO NOT get re-claimed by any agent; they sit until a human reviews.
 
@@ -190,7 +187,7 @@ the planner is cheaper to re-engage than a human, and 8b is non-terminal
   make gate
 - If it fails, fix ALL failures and re-run until it passes
 - Do NOT commit or push with failing tests
-- Run 'loom data close <id> --reason "Completed with tests and code review"'
+- Run 'loom task close <id> --reason "Completed with tests and code review"'
 - Stage and commit: git add <files> && git commit -m "<brief description> (<task-id>)"
 - Push: git push origin HEAD
 - Signal completion: loom complete

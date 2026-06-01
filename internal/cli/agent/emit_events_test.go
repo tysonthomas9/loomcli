@@ -49,7 +49,7 @@ func TestEmitTaskLifecycleEvents(t *testing.T) {
 	emitTaskClaimedFromEnv("plan-agent", "loomcli-42")
 
 	// 2. TaskCompleted on success — duration carried, task id recovered
-	// from the lock file written by the simulated `loom claim`.
+	// from the lock file written by the simulated task claim binding.
 	emitTaskLifecycleResult("plan-agent", worktree, time.Now().Add(-2*time.Second), nil)
 
 	// 3. TaskFailed on error — classifier kicks in, ErrorClass populated.

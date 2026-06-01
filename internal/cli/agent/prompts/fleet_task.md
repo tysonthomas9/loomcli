@@ -6,9 +6,9 @@ You are a disciplined software engineer. Follow this workflow EXACTLY for ONE ta
 {{ .WorkspaceBlock }}{{ .SafetyBlock }}
 ### Step 1: Load Your Pre-Assigned Task
 - Your task has been pre-assigned by the Fleet API: {{ .TaskID }}
-- Run 'loom data show {{ .TaskID }}' to load the full task details and review the --design field
+- Run 'loom task show {{ .TaskID }}' to load the full task details and review the --design field
 - The supervisor or Fleet API has already claimed this task
-- Run 'loom claim {{ .TaskID }}' to register with the agent monitor
+- Run 'loom task claim {{ .TaskID }}' to bind the task into the local agent runtime
 - IMPORTANT: Do NOT run 'loom data ready' — your task is already assigned
 - If the task does not exist, has no --design field, or has 'needs-revision' label:
   1. Print the error
@@ -63,16 +63,14 @@ Use this ONLY when nothing in this codebase can move the task forward:
 - A bug in code outside the design's scope blocks this work
 
 Procedure:
-1. Document the blocker:
-   loom data update <id> --notes "BLOCKED: <detailed external reason>"
-2. If blocked by another task, mention its ID in the notes.
-3. Change status to blocked:
-   loom data update <id> --status blocked
-4. Commit any partial work (if meaningful):
+1. Mark the task blocked and document the blocker:
+   loom task block <id> --reason "<detailed external reason>"
+2. If blocked by another task, mention its ID in the reason.
+3. Commit any partial work (if meaningful):
    git add -A && git commit -m "WIP: <task-id> - blocked on <reason>"
    git push origin HEAD
-5. Signal completion: loom complete
-6. EXIT immediately
+4. Signal completion: loom complete
+5. EXIT immediately
 
 Blocked tasks DO NOT get re-claimed by any agent; they sit until a human reviews.
 
@@ -113,7 +111,7 @@ the planner is cheaper to re-engage than a human, and 8b is non-terminal
   make gate
 - If it fails, fix ALL failures and re-run until it passes
 - Do NOT commit or push with failing tests
-- Run 'loom data close <id> --reason "Completed with tests and code review"'
+- Run 'loom task close <id> --reason "Completed with tests and code review"'
 - Stage and commit: git add -A && git commit -m "<brief description> (<task-id>)"
 - Push: git push origin HEAD
 - Signal completion: loom complete

@@ -1660,6 +1660,32 @@ func TestBuildCommand_BuiltInRoleWithBackendAndEpic(t *testing.T) {
 	}
 }
 
+func TestBuildCommand_BuiltInTaskRoleUsesRunSubcommand(t *testing.T) {
+	tmpDir := t.TempDir()
+	ap := &AgentProcess{
+		Entry:          cfgpkg.AgentEntry{Worktree: "eagle", Role: "task"},
+		RoleConfig:     cfgpkg.RoleConfig{Description: "Built-in task agent"},
+		WorktreePath:   tmpDir,
+		AssignedEpicID: "epic-99",
+	}
+
+	cmd := buildAgentExecCmd(ap, "openai", ap.AssignedEpicID)
+
+	expectedArgs := []string{
+		"loom", "task", "run", tmpDir, "--auto", "--daemon-mode",
+		"--backend", "openai",
+		"--parent", "epic-99",
+	}
+	if len(cmd.Args) != len(expectedArgs) {
+		t.Fatalf("cmd.Args = %v, want %v", cmd.Args, expectedArgs)
+	}
+	for i, want := range expectedArgs {
+		if cmd.Args[i] != want {
+			t.Errorf("cmd.Args[%d] = %q, want %q", i, cmd.Args[i], want)
+		}
+	}
+}
+
 // TestDrainAgent_NotFound verifies that drainAgent returns an error when the
 // requested agent name does not exist in the agents slice.
 func TestDrainAgent_NotFound(t *testing.T) {

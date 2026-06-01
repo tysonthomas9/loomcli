@@ -18,10 +18,10 @@ func TestGeneratePlanningPrompt(t *testing.T) {
 			agentName: "falcon",
 			wantParts: []string{
 				"Your agent name is: falcon",
-				"loom data claim",
+				"loom task claim",
 				"Planning Task",
 				"Do NOT write any implementation code",
-				"--status review",
+				"loom task submit",
 				"needs-revision",
 			},
 		},
@@ -30,7 +30,7 @@ func TestGeneratePlanningPrompt(t *testing.T) {
 			agentName: "nova",
 			wantParts: []string{
 				"Your agent name is: nova",
-				"loom data claim",
+				"loom task claim",
 			},
 		},
 	}
@@ -59,7 +59,7 @@ func TestGenerateTaskPrompt(t *testing.T) {
 			agentName: "ember",
 			wantParts: []string{
 				"Your agent name is: ember",
-				"loom data claim",  // Main task claiming uses the backend claim API.
+				"loom task claim",  // Main task claiming uses the backend claim API.
 				"--assignee ember", // Reclaiming stale tasks still sets assignee.
 				"Implementation Task",
 				"--design",
@@ -72,7 +72,7 @@ func TestGenerateTaskPrompt(t *testing.T) {
 			agentName: "zephyr",
 			wantParts: []string{
 				"Your agent name is: zephyr",
-				"loom data claim",
+				"loom task claim",
 				"--assignee zephyr",
 			},
 		},
@@ -328,7 +328,7 @@ func TestGeneratePlanningPrompt_Workspace(t *testing.T) {
 		"develop",
 		"backend",
 		"./services/backend",
-		"Run `loom data` commands from the workspace root",
+		"Run `loom task` and `loom data` commands from the workspace root",
 		"Run git commands (git status, git add, git commit, git push) from the specific repo subdirectory",
 		// Standard planning steps must still be present
 		"Step 1:",
@@ -364,7 +364,7 @@ func TestGenerateTaskPrompt_Workspace(t *testing.T) {
 		"./api",
 		"web",
 		"./web",
-		"Run `loom data` commands from the workspace root",
+		"Run `loom task` and `loom data` commands from the workspace root",
 		"Run git commands (git status, git add, git commit, git push) from the specific repo subdirectory",
 		"Run build/test commands from the specific repo subdirectory",
 		"Changes may span multiple repos",
@@ -636,10 +636,10 @@ func TestGenerateFleetPlanningPrompt(t *testing.T) {
 				"Do NOT write any implementation code",
 				"pre-assigned",
 				"Fleet API",
-				"loom claim loomcli-kv6.4",
-				"loom data show loomcli-kv6.4",
+				"loom task claim loomcli-kv6.4",
+				"loom task show loomcli-kv6.4",
 				"already claimed",
-				"--status review",
+				"loom task submit",
 				"needs-revision",
 			},
 		},
@@ -650,8 +650,8 @@ func TestGenerateFleetPlanningPrompt(t *testing.T) {
 			wantParts: []string{
 				"Your agent name is: nova",
 				"proj-abc.1",
-				"loom claim proj-abc.1",
-				"loom data show proj-abc.1",
+				"loom task claim proj-abc.1",
+				"loom task show proj-abc.1",
 			},
 		},
 	}
@@ -686,8 +686,8 @@ func TestGenerateFleetTaskPrompt(t *testing.T) {
 				"Implementation Task",
 				"pre-assigned",
 				"Fleet API",
-				"loom claim loomcli-kv6.4",
-				"loom data show loomcli-kv6.4",
+				"loom task claim loomcli-kv6.4",
+				"loom task show loomcli-kv6.4",
 				"already claimed",
 				"--design",
 				"git push origin HEAD",
@@ -700,8 +700,8 @@ func TestGenerateFleetTaskPrompt(t *testing.T) {
 			wantParts: []string{
 				"Your agent name is: ember",
 				"proj-xyz.2",
-				"loom claim proj-xyz.2",
-				"loom data show proj-xyz.2",
+				"loom task claim proj-xyz.2",
+				"loom task show proj-xyz.2",
 			},
 		},
 	}
@@ -737,7 +737,7 @@ func TestGenerateFleetPlanningPrompt_Workspace(t *testing.T) {
 		"develop",
 		"backend",
 		"./services/backend",
-		"Run `loom data` commands from the workspace root",
+		"Run `loom task` and `loom data` commands from the workspace root",
 		// Standard planning steps must still be present
 		"Step 1:",
 		"Step 2:",
@@ -774,7 +774,7 @@ func TestGenerateFleetTaskPrompt_Workspace(t *testing.T) {
 		"./api",
 		"web",
 		"./web",
-		"Run `loom data` commands from the workspace root",
+		"Run `loom task` and `loom data` commands from the workspace root",
 		"Run build/test commands from the specific repo subdirectory",
 		"Changes may span multiple repos",
 		// Standard task steps must still be present
@@ -900,6 +900,7 @@ func TestFleetPromptsNoClaimCommand(t *testing.T) {
 
 	notWantParts := []string{
 		"loom data claim <id>",
+		"loom claim <id>",
 		"loom data ready --json",
 	}
 

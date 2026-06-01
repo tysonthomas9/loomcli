@@ -130,7 +130,7 @@ func ensureRepoLocalCheckout(ctx context.Context, ws, name, remoteURL string) (p
 	}
 	local := sc.Workspaces[ws]
 	if strings.TrimSpace(local.Path) == "" {
-		return "", false, nil
+		return "", false, fmt.Errorf("workspace %q has no local path; create it with `loom workspace add %s --path <dir>` or `loom workspace create <name> --repos <path>`", ws, ws)
 	}
 	if local.Repos != nil && local.Repos[name] != "" {
 		cachedPath := local.Repos[name]

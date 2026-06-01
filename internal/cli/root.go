@@ -43,12 +43,12 @@ GETTING STARTED
   1. Select a FleetDB-backed workspace with registered repos.
 
   2. Create tasks for agents to work on:
-     loom task create --title="Add login feature" --type=feature --priority=2
+     loom data create --title="Add login feature" --type=feature --priority=2
 
   3. Run agents:
      loom plan falcon    # Creates design, sets status=review
      loom lead           # Review and approve plans
-     loom task falcon    # Implements approved design
+     loom task run falcon # Implements approved design
 
 KEY CONCEPTS
   Workspaces   FleetDB-backed repo groups where agents work independently.
@@ -65,7 +65,7 @@ KEY CONCEPTS
 
 COMMANDS
   plan         Run a planning agent (creates designs, marks for review)
-  task         Run an implementation agent (implements approved tasks)
+  task         Manage task workflow and run implementation agents
   lead         Interactive mode for reviewing plans and managing backlog
   monitor      Dashboard showing agent status and task progress
   recover      Recover agent from error state (clear stale locks, reset tasks)
@@ -84,7 +84,7 @@ ENVIRONMENT VARIABLES
 
 EXAMPLES
   loom plan falcon              # Run planning agent in falcon worktree
-  loom task falcon --auto       # Continuous implementation mode
+  loom task run falcon --auto   # Continuous implementation mode
   loom lead                     # Interactive backlog management
   loom monitor                  # Watch agent progress
   loom push --all               # Push all worktrees to main

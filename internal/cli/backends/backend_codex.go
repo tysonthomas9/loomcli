@@ -80,10 +80,10 @@ func defaultCodexNonInteractiveInvoker(workDir, prompt, agentName string, shutdo
 
 	return runHarness(context.Background(), shutdown, harnessInvocation{
 		BinaryName:  "codex",
-		Args:        []string{"exec", "--json", "--dangerously-bypass-approvals-and-sandbox"},
+		Args:        buildCodexNonInteractiveArgs(prompt),
 		WorkDir:     workDir,
 		Env:         buildBackendEnv(workDir, agentName),
-		Prompt:      prompt,
+		Prompt:      "",
 		HarnessName: "codex",
 		LineHandler: func(line string) {
 			fmt.Println(line)
@@ -93,6 +93,18 @@ func defaultCodexNonInteractiveInvoker(workDir, prompt, agentName string, shutdo
 		},
 		RetryPolicy: harness.DefaultRetryPolicy(),
 	})
+}
+
+// buildCodexNonInteractiveArgs returns the argument list for a Codex exec run.
+// The prompt is appended as the final positional argument because runHarness
+// executes Codex under a PTY. In that mode Codex sees stdin as a terminal, so it
+// will not treat wrapper-fed stdin as a piped prompt during argument parsing.
+func buildCodexNonInteractiveArgs(prompt string) []string {
+	args := []string{"exec", "--json", "--dangerously-bypass-approvals-and-sandbox"}
+	if prompt != "" {
+		args = append(args, prompt)
+	}
+	return args
 }
 
 // buildBackendEnv constructs the standard environment for backend subprocess invocations.

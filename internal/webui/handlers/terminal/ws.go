@@ -19,6 +19,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
+	"github.com/tysonthomas9/loomcli/internal/webui/storeadapter"
 	"github.com/tysonthomas9/loomcli/internal/webui/tabmeta"
 	webuterminal "github.com/tysonthomas9/loomcli/internal/webui/terminal"
 )
@@ -72,6 +73,10 @@ type terminalWSParams struct {
 	// triggers a 4410 close; the latter proceeds to AttachSession as
 	// normal.
 	serverStartedAt time.Time
+}
+
+type workspaceRegisterer interface {
+	Register(wsID, path string) error
 }
 
 // HandleTerminalWS returns a WebSocket handler for terminal relay. It upgrades
@@ -275,6 +280,9 @@ func runTerminalRelay(reqCtx context.Context, conn *websocket.Conn, p *terminalW
 	key := webuterminal.SessionKey{Workspace: workspace, Name: session}
 
 	att, reattach, err := p.manager.AttachSession(key, initialCols, initialRows, webuterminal.ArgvForSession(session))
+	if err != nil && errors.Is(err, webuterminal.ErrWorkspaceNotRegistered) && registerWorkspaceForTerminal(reqCtx, p, workspace) {
+		att, reattach, err = p.manager.AttachSession(key, initialCols, initialRows, webuterminal.ArgvForSession(session))
+	}
 	if err != nil {
 		return classifyAttachErr(err, session, workspace)
 	}
@@ -321,6 +329,27 @@ func runTerminalRelay(reqCtx context.Context, conn *websocket.Conn, p *terminalW
 	p.manager.Detach(key, connID)
 
 	return (<-crashCh).WSClose()
+}
+
+func registerWorkspaceForTerminal(ctx context.Context, p *terminalWSParams, workspace string) bool {
+	registrar, ok := p.manager.(workspaceRegisterer)
+	if !ok || p.store == nil || workspace == "" {
+		return false
+	}
+	if _, err := p.store.Workspaces().Get(ctx, workspace); err != nil {
+		return false
+	}
+	path, err := storeadapter.EnsureWorkspacePath(workspace)
+	if err != nil {
+		slog.Warn("failed to self-heal local workspace path for terminal", "workspace", workspace, "err", err)
+		return false
+	}
+	if err := registrar.Register(workspace, path); err != nil {
+		slog.Warn("failed to register self-healed workspace terminal manager", "workspace", workspace, "path", path, "err", err)
+		return false
+	}
+	slog.Info("self-healed workspace terminal registration", "workspace", workspace, "path", path)
+	return true
 }
 
 func initialTerminalSizeFromRequest(r *http.Request) (uint16, uint16) {

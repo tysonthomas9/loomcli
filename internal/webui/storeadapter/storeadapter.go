@@ -6,14 +6,21 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
+	"os"
 	"path/filepath"
 	"sort"
+	"strings"
+	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/localworkspace"
 	"github.com/tysonthomas9/loomcli/internal/ops"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
+
+const repoCheckoutHealTimeout = 2 * time.Minute
 
 // BuildActiveWorkspaceData materializes the active workspace topology as
 // an *ops.WorkspaceData using the supplied Store. The "active" workspace
@@ -54,6 +61,10 @@ func BuildWorkspaceDataForKey(ctx context.Context, s store.Store, key string) (*
 	if err != nil {
 		return nil, err
 	}
+	wsPath, pathErr := EnsureWorkspacePath(ws.Key)
+	if pathErr != nil {
+		wsPath = resolveWorkspacePath(ws.Key)
+	}
 	repos, groups, err := loadRepos(ctx, s, ws.Key)
 	if err != nil {
 		return nil, err
@@ -66,8 +77,6 @@ func BuildWorkspaceDataForKey(ctx context.Context, s store.Store, key string) (*
 	if err != nil {
 		return nil, err
 	}
-
-	wsPath := resolveWorkspacePath(ws.Key)
 
 	return &ops.WorkspaceData{
 		ID:               ws.Key,
@@ -86,8 +95,9 @@ func BuildWorkspaceDataForKey(ctx context.Context, s store.Store, key string) (*
 // every workspace registered in the store. Used by the webui's workspace
 // reconciliation + health doctor goroutines to enumerate live targets.
 //
-// Paths come from the per-machine state cache; workspaces missing from
-// the cache map to "" so callers can fall back to defaults.
+// Paths come from the per-machine state cache. Workspaces missing a valid
+// local path are bound to the default local workspace directory so runtime
+// features such as terminals can recover after metadata-only CLI creation.
 func ListWorkspacePaths(ctx context.Context, s store.Store) (map[string]string, error) {
 	if s == nil {
 		return nil, nil
@@ -101,7 +111,12 @@ func ListWorkspacePaths(ctx context.Context, s store.Store) (map[string]string, 
 	}
 	out := make(map[string]string, len(all))
 	for _, ws := range all {
-		out[ws.Key] = resolveWorkspacePath(ws.Key)
+		path, err := EnsureWorkspacePath(ws.Key)
+		if err != nil {
+			out[ws.Key] = ""
+			continue
+		}
+		out[ws.Key] = path
 	}
 	return out, nil
 }
@@ -140,11 +155,7 @@ func loadRepos(ctx context.Context, s store.Store, wsKey string) ([]ops.Workspac
 		if remote == "" {
 			remote = "origin"
 		}
-		// Best-effort path resolution: state cache should have an entry.
-		repoPath := resolveRepoPath(wsKey, r.Name)
-		if repoPath == "" && wsRoot != "" {
-			repoPath = filepath.Join(wsRoot, r.Name)
-		}
+		repoPath := ensureRepoCheckout(ctx, wsKey, wsRoot, r)
 		out = append(out, ops.WorkspaceRepo{
 			Name:          r.Name,
 			Path:          repoPath,
@@ -163,6 +174,55 @@ func loadRepos(ctx context.Context, s store.Store, wsKey string) ([]ops.Workspac
 	}
 	sort.Strings(groups)
 	return out, groups, nil
+}
+
+func ensureRepoCheckout(ctx context.Context, wsKey, wsRoot string, r *domain.Repo) string {
+	if r == nil {
+		return ""
+	}
+	if cached := resolveRepoPath(wsKey, r.Name); validRepoCheckout(cached) {
+		return cached
+	}
+	if wsRoot == "" {
+		return ""
+	}
+	target, err := localworkspace.RepoCheckoutPath(wsRoot, r.Name)
+	if err != nil {
+		slog.Warn("failed to resolve local repo checkout path", "workspace", wsKey, "repo", r.Name, "err", err)
+		return ""
+	}
+	if validRepoCheckout(target) {
+		if err := localworkspace.RememberRepoPath(wsKey, r.Name, target); err != nil {
+			slog.Warn("failed to cache discovered local repo checkout", "workspace", wsKey, "repo", r.Name, "path", target, "err", err)
+		}
+		return target
+	}
+	if strings.TrimSpace(r.RemoteURL) == "" {
+		return ""
+	}
+	if info, err := os.Stat(target); err == nil {
+		if !info.IsDir() {
+			slog.Warn("cannot self-heal repo checkout because target exists and is not a directory", "workspace", wsKey, "repo", r.Name, "path", target)
+			return ""
+		}
+		slog.Warn("cannot self-heal repo checkout because target directory is not a git checkout", "workspace", wsKey, "repo", r.Name, "path", target)
+		return ""
+	} else if err != nil && !os.IsNotExist(err) {
+		slog.Warn("failed to inspect local repo checkout target", "workspace", wsKey, "repo", r.Name, "path", target, "err", err)
+		return ""
+	}
+
+	cloneCtx, cancel := context.WithTimeout(ctx, repoCheckoutHealTimeout)
+	defer cancel()
+	if err := localworkspace.CloneRepoTo(cloneCtx, strings.TrimSpace(r.RemoteURL), target); err != nil {
+		slog.Warn("failed to self-heal local repo checkout", "workspace", wsKey, "repo", r.Name, "remote_url", r.RemoteURL, "path", target, "err", err)
+		_ = os.RemoveAll(target)
+		return ""
+	}
+	if err := localworkspace.RememberRepoPath(wsKey, r.Name, target); err != nil {
+		slog.Warn("failed to cache self-healed repo checkout", "workspace", wsKey, "repo", r.Name, "path", target, "err", err)
+	}
+	return target
 }
 
 func loadAgents(ctx context.Context, s store.Store, wsKey string) ([]ops.WorkspaceAgentInfo, error) {
@@ -241,6 +301,62 @@ func resolveWorkspacePath(key string) string {
 // need workspace summaries without materializing full WorkspaceData.
 func ResolveWorkspacePath(key string) string {
 	return resolveWorkspacePath(key)
+}
+
+// EnsureWorkspacePath returns a usable local workspace directory for key,
+// creating and caching the default path when the per-machine cache is missing
+// or points at a stale/non-directory path.
+func EnsureWorkspacePath(key string) (string, error) {
+	if path := resolveWorkspacePath(key); validWorkspaceDir(path) {
+		return path, nil
+	}
+	path, err := defaultWorkspacePath(key)
+	if err != nil {
+		return "", err
+	}
+	if err := os.MkdirAll(path, 0755); err != nil {
+		return "", fmt.Errorf("storeadapter: create local workspace path %s: %w", path, err)
+	}
+	if err := bootstrap.MutateWorkspaceLocalState(key, func(local *bootstrap.WorkspaceLocalState) error {
+		local.Path = path
+		if local.Repos == nil {
+			local.Repos = make(map[string]string)
+		}
+		if local.Agents == nil {
+			local.Agents = make(map[string]bootstrap.AgentLocalState)
+		}
+		return nil
+	}); err != nil {
+		return "", fmt.Errorf("storeadapter: cache local workspace path: %w", err)
+	}
+	return path, nil
+}
+
+func validWorkspaceDir(path string) bool {
+	if strings.TrimSpace(path) == "" {
+		return false
+	}
+	info, err := os.Stat(path)
+	return err == nil && info.IsDir()
+}
+
+func validRepoCheckout(path string) bool {
+	if strings.TrimSpace(path) == "" {
+		return false
+	}
+	_, err := os.Stat(filepath.Join(path, ".git"))
+	return err == nil
+}
+
+func defaultWorkspacePath(key string) (string, error) {
+	if strings.TrimSpace(key) == "" || filepath.IsAbs(key) || strings.ContainsAny(key, `/\`) {
+		return "", fmt.Errorf("storeadapter: invalid workspace key for local path: %q", key)
+	}
+	dir := bootstrap.LoomDir()
+	if dir == "" {
+		return "", errors.New("storeadapter: cannot resolve loom directory")
+	}
+	return filepath.Join(dir, "workspaces", key), nil
 }
 
 // resolveRepoPath looks up the per-machine on-disk path for a repo within

@@ -29,6 +29,17 @@ const SIDECAR = "binaries/loom";
 const RUNTIME_TIMEOUT_MS = 45_000;
 const RUNTIME_POLL_MS = 500;
 const NEW_WORKSPACE_WINDOW_EVENT = "loom:new-workspace-window";
+const LOOM_RUNTIME_ENV_KEYS = {
+  configDir: "LOOM_CONFIG_DIR",
+  desktopDataDir: "LOOM_DESKTOP_DATA_DIR",
+  runtimeDir: "LOOM_WORKSPACE_RUNTIME_DIR",
+  workspace: "LOOM_WORKSPACE",
+  serverUrl: "LOOM_SERVER_URL",
+  webuiUrl: "LOOM_WEBUI_URL",
+  fleetDbUrl: "LOOM_FLEET_DB_URL",
+  fleetUrl: "LOOM_FLEET_URL",
+  daemonSocket: "LOOM_DAEMON_SOCKET",
+} as const;
 
 const app = document.querySelector<HTMLDivElement>("#app");
 if (!app) {
@@ -91,6 +102,7 @@ const retryBtn = document.querySelector<HTMLButtonElement>("#retryBtn")!;
 let bootInFlight = false;
 let lastRuntimeStatus: RuntimeStatus | null = null;
 let lastRuntimeUrl = "";
+let runtimeDataDirPromise: Promise<string> | null = null;
 
 function setStage(mode: StageMode, title: string, detail: string) {
   document.body.dataset.mode = mode;
@@ -128,12 +140,44 @@ function delay(ms: number) {
   return new Promise((resolve) => window.setTimeout(resolve, ms));
 }
 
-async function runLoom(args: string[]) {
-  return Command.sidecar(SIDECAR, args).execute();
+function desktopRuntimeDataDir() {
+  if (!runtimeDataDirPromise) {
+    runtimeDataDirPromise = invoke<string>("desktop_runtime_data_dir").catch((err) => {
+      runtimeDataDirPromise = null;
+      throw err;
+    });
+  }
+  return runtimeDataDirPromise;
+}
+
+function sidecarEnv(dataDir: string): Record<string, string> {
+  return {
+    [LOOM_RUNTIME_ENV_KEYS.configDir]: dataDir,
+    [LOOM_RUNTIME_ENV_KEYS.desktopDataDir]: dataDir,
+    [LOOM_RUNTIME_ENV_KEYS.runtimeDir]: dataDir,
+    [LOOM_RUNTIME_ENV_KEYS.workspace]: "",
+    [LOOM_RUNTIME_ENV_KEYS.serverUrl]: "",
+    [LOOM_RUNTIME_ENV_KEYS.webuiUrl]: "",
+    [LOOM_RUNTIME_ENV_KEYS.fleetDbUrl]: "",
+    [LOOM_RUNTIME_ENV_KEYS.fleetUrl]: "",
+    [LOOM_RUNTIME_ENV_KEYS.daemonSocket]: "",
+  };
+}
+
+async function runLoom(args: string[], dataDir?: string) {
+  const resolvedDataDir = dataDir ?? (await desktopRuntimeDataDir());
+  return Command.sidecar(SIDECAR, args, {
+    env: sidecarEnv(resolvedDataDir),
+  }).execute();
+}
+
+async function runLocal(args: string[]) {
+  const dataDir = await desktopRuntimeDataDir();
+  return runLoom(["local", "--data-dir", dataDir, ...args], dataDir);
 }
 
 async function readRuntimeStatus() {
-  const result = await runLoom(["local", "status", "--json"]);
+  const result = await runLocal(["status", "--json"]);
   if (result.code !== 0) {
     throw new Error(result.stderr || result.stdout || `loom exited ${result.code}`);
   }
@@ -154,7 +198,7 @@ async function ensureRuntime() {
   renderRuntime(initial);
 
   setStage("starting", "Starting Loom", "Ensuring the local runtime matches this app.");
-  const start = await runLoom(["local", "start"]);
+  const start = await runLocal(["start"]);
   renderRuntime(initial, `${start.stdout}\n${start.stderr}`);
   if (start.code !== 0) {
     throw new Error(start.stderr || start.stdout || `loom exited ${start.code}`);
@@ -211,11 +255,15 @@ async function openAdditionalWorkspaceWindow() {
 }
 
 async function focusExistingWorkspaceWindow() {
-  if (lastRuntimeUrl) {
-    await openWorkspaceWindow(lastRuntimeUrl);
+  if (bootInFlight) {
     return;
   }
-  await boot();
+  const status = await ensureRuntime();
+  const runtimeUrl = status.runtime?.url || lastRuntimeUrl;
+  if (!runtimeUrl) {
+    throw new Error("local runtime URL is missing");
+  }
+  await openWorkspaceWindow(runtimeUrl);
 }
 
 function showFailure(err: unknown) {

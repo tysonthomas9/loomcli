@@ -3,34 +3,41 @@ package workspace
 import (
 	"context"
 	"fmt"
-	"os"
+	"regexp"
 
 	"github.com/spf13/cobra"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
+	"github.com/tysonthomas9/loomcli/internal/cli/serve/workspacemgr"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/store"
+	"github.com/tysonthomas9/loomcli/internal/webui/service"
 )
 
 var (
 	wsAddDescription string
 	wsAddBranch      string
+	wsAddPath        string
 
 	wsShowJSON   bool
 	wsStatusJSON bool
 )
 
+var workspaceKeyPattern = regexp.MustCompile(`^[A-Z]([A-Z0-9-]{0,30}[A-Z0-9])?$`)
+
 var workspaceAddCmd = &cobra.Command{
 	Use:   "add <KEY>",
-	Short: "Create a new workspace in fleet-db",
-	Long: `Create a new workspace. KEY must match fleet-db's key regex
+	Short: "Create a new local FleetDB-backed workspace",
+	Long: `Create a new workspace in FleetDB and bind it to a local workspace
+directory on this machine. KEY must match fleet-db's key regex
 (uppercase letters, digits, hyphens; 1-32 chars; starts with a letter).
 
 Examples:
   loom workspace add MYPROJ --description "My project"
-  loom workspace add ACME --branch main`,
+  loom workspace add ACME --branch main
+  loom workspace add ACME --path ~/code/acme`,
 	Args: cobra.ExactArgs(1),
 	RunE: runWorkspaceAdd,
 }
@@ -62,6 +69,7 @@ var workspaceStatusCmd = &cobra.Command{
 func init() {
 	workspaceAddCmd.Flags().StringVar(&wsAddDescription, "description", "", "Optional description")
 	workspaceAddCmd.Flags().StringVar(&wsAddBranch, "branch", "", "Default branch (default: main)")
+	workspaceAddCmd.Flags().StringVar(&wsAddPath, "path", "", "Workspace directory path (default: ~/.loom/workspaces/<KEY>)")
 	workspaceShowCmd.Flags().BoolVar(&wsShowJSON, "json", false, "JSON output")
 	workspaceStatusCmd.Flags().BoolVar(&wsStatusJSON, "json", false, "JSON output")
 
@@ -74,19 +82,28 @@ func init() {
 func runWorkspaceAdd(_ *cobra.Command, args []string) error {
 	return cmdstore.WithStore(func(ctx context.Context, h *bootstrap.StoreHandle) error {
 		key := args[0]
-		ws, err := h.Store.Workspaces().Create(ctx, store.WorkspaceCreate{
-			Key:           key,
-			Name:          key,
-			Description:   wsAddDescription,
-			DefaultBranch: wsAddBranch,
+		if !workspaceKeyPattern.MatchString(key) {
+			return fmt.Errorf("workspace key %q must match ^[A-Z]([A-Z0-9-]{0,30}[A-Z0-9])?$", key)
+		}
+		branch := wsAddBranch
+		if branch == "" {
+			branch = "main"
+		}
+		create := workspacemgr.BuildStoreBackedCreateWorkspace(h.Store)
+		result, err := create(ctx, service.WorkspaceCreateRequest{
+			Name:        key,
+			Description: wsAddDescription,
+			Type:        "empty",
+			Path:        wsAddPath,
+			Branch:      branch,
 		})
 		if err != nil {
 			return fmt.Errorf("create workspace: %w", err)
 		}
-		if err := bootstrap.SetActiveWorkspaceKey(key); err != nil {
-			fmt.Fprintf(os.Stderr, "Warning: workspace created but selected-workspace hint update failed (run 'loom workspace use %s' to retry): %v\n", key, err)
+		if result.WorkspaceID != key {
+			return fmt.Errorf("created workspace key %q, want %q", result.WorkspaceID, key)
 		}
-		fmt.Printf("Created workspace %s (mode=%s)\n", ws.Key, h.Mode())
+		fmt.Printf("Created workspace %s at %s (mode=%s)\n", result.WorkspaceID, result.WorkspacePath, h.Mode())
 		return nil
 	})
 }

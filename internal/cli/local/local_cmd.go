@@ -3,12 +3,14 @@ package local
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
 	"os"
 	"os/exec"
 	"os/signal"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"syscall"
@@ -26,8 +28,10 @@ var (
 	bindFlag    string
 	jsonFlag    bool
 
-	readRuntimeStatusFn = ReadRuntimeStatus
-	restartRuntimeFn    = RestartRuntime
+	readRuntimeStatusFn  = ReadRuntimeStatus
+	restartRuntimeFn     = RestartRuntime
+	inspectProcessFn     = inspectProcess
+	stopRuntimeProcessFn = stopRuntimeProcess
 )
 
 var localCmd = &cobra.Command{
@@ -443,11 +447,14 @@ func startRuntime(dataDir string, port int, force bool) (*RuntimeStartResult, er
 	if result, err := reuseRunningRuntime(dataDir, force); err != nil || result != nil {
 		return result, err
 	}
-	if _, err := currentFleetDBRedisHash(dataDir); err != nil {
-		return nil, fmt.Errorf("load FleetDB Redis settings: %w", err)
-	}
 	if err := ensureRuntimeDirs(dataDir); err != nil {
 		return nil, err
+	}
+	if err := cleanupOrphanedEmbeddedLock(dataDir, 15*time.Second); err != nil {
+		return nil, err
+	}
+	if _, err := currentFleetDBRedisHash(dataDir); err != nil {
+		return nil, fmt.Errorf("load FleetDB Redis settings: %w", err)
 	}
 	exe, err := os.Executable()
 	if err != nil {
@@ -462,7 +469,10 @@ func startRuntime(dataDir string, port int, force bool) (*RuntimeStartResult, er
 // (nil, nil) so the caller can spawn a fresh one. Errors propagate.
 func reuseRunningRuntime(dataDir string, force bool) (*RuntimeStartResult, error) {
 	info, err := readRuntime(dataDir)
-	if err != nil || !processRunning(info.PID) {
+	if err != nil {
+		return nil, nil
+	}
+	if !runtimeProcessesRunning(info) {
 		return nil, nil
 	}
 	if !force {
@@ -472,10 +482,15 @@ func reuseRunningRuntime(dataDir string, force bool) (*RuntimeStartResult, error
 			return nil, fmt.Errorf("load FleetDB Redis settings: %w", err)
 		}
 		if runtimeMatchesExecutable(info, identity) && runtimeMatchesFleetDBRedisSettings(info, redisHash) {
-			return &RuntimeStartResult{PID: info.PID, URL: info.URL, AlreadyRunning: true}, nil
+			healthCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			healthErr := checkRuntimeHealth(healthCtx, info.URL)
+			cancel()
+			if healthErr == nil {
+				return &RuntimeStartResult{PID: info.PID, URL: info.URL, AlreadyRunning: true}, nil
+			}
 		}
 	}
-	if err := stopRuntimeProcess(info.PID, 15*time.Second); err != nil {
+	if err := stopRuntimeProcesses(info, 15*time.Second); err != nil {
 		return nil, fmt.Errorf("stop stale local runtime: %w", err)
 	}
 	return nil, nil
@@ -559,16 +574,44 @@ func runStop(cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		return fmt.Errorf("read runtime: %w", err)
 	}
-	if !processRunning(info.PID) {
+	if !runtimeProcessesRunning(info) {
 		info.Status = "stopped"
 		_ = writeRuntime(dataDir, info)
 		_, _ = fmt.Fprintln(cmd.OutOrStdout(), "Loom local runtime is not running.")
 		return nil
 	}
-	if err := stopRuntimeProcess(info.PID, 15*time.Second); err != nil {
+	if err := stopRuntimeProcesses(info, 15*time.Second); err != nil {
 		return err
 	}
 	_, _ = fmt.Fprintln(cmd.OutOrStdout(), "Loom local runtime stopped.")
+	return nil
+}
+
+func runtimeProcessesRunning(info *runtimeInfo) bool {
+	if info == nil {
+		return false
+	}
+	return processRunning(info.PID) || processRunning(info.ServePID)
+}
+
+func stopRuntimeProcesses(info *runtimeInfo, timeout time.Duration) error {
+	if info == nil {
+		return nil
+	}
+	var errs []string
+	if processRunning(info.PID) {
+		if err := stopRuntimeProcessFn(info.PID, timeout); err != nil {
+			errs = append(errs, err.Error())
+		}
+	}
+	if info.ServePID > 0 && info.ServePID != info.PID && processRunning(info.ServePID) {
+		if err := stopRuntimeProcessFn(info.ServePID, timeout); err != nil {
+			errs = append(errs, err.Error())
+		}
+	}
+	if len(errs) > 0 {
+		return errors.New(strings.Join(errs, "; "))
+	}
 	return nil
 }
 
@@ -588,6 +631,84 @@ func stopRuntimeProcess(pid int, timeout time.Duration) error {
 		time.Sleep(250 * time.Millisecond)
 	}
 	return fmt.Errorf("local runtime did not stop within %s", timeout)
+}
+
+type processDetails struct {
+	PPID    int
+	Command string
+}
+
+func cleanupOrphanedEmbeddedLock(dataDir string, timeout time.Duration) error {
+	if info, err := readRuntime(dataDir); err == nil && runtimeProcessesRunning(info) {
+		return nil
+	}
+
+	lockPath := filepath.Join(dataDir, "fleet-db", "embedded.lock")
+	pid, err := readEmbeddedLockOwner(lockPath)
+	if err != nil {
+		return nil
+	}
+	if !processRunning(pid) {
+		return nil
+	}
+	details, err := inspectProcessFn(pid)
+	if err != nil || !isOrphanedFleetModeServeProcess(details) {
+		return nil
+	}
+	if err := stopRuntimeProcessFn(pid, timeout); err != nil {
+		return fmt.Errorf("stop orphaned embedded fleet-db lock owner %d: %w", pid, err)
+	}
+	return nil
+}
+
+func readEmbeddedLockOwner(path string) (int, error) {
+	data, err := os.ReadFile(path) //nolint:gosec // app-private runtime lock
+	if err != nil {
+		return 0, err
+	}
+	pid, err := strconv.Atoi(strings.TrimSpace(string(data)))
+	if err != nil {
+		return 0, fmt.Errorf("parse embedded lock owner %s: %w", path, err)
+	}
+	if pid <= 0 {
+		return 0, fmt.Errorf("parse embedded lock owner %s: non-positive pid %d", path, pid)
+	}
+	return pid, nil
+}
+
+func inspectProcess(pid int) (processDetails, error) {
+	// #nosec G204 -- pid is parsed as an integer before this helper is called.
+	out, err := exec.Command("ps", "-p", strconv.Itoa(pid), "-o", "ppid=", "-o", "command=").Output()
+	if err != nil {
+		return processDetails{}, err
+	}
+	line := strings.TrimSpace(string(out))
+	fields := strings.Fields(line)
+	if len(fields) < 2 {
+		return processDetails{}, fmt.Errorf("parse process %d details: %q", pid, line)
+	}
+	ppid, err := strconv.Atoi(fields[0])
+	if err != nil {
+		return processDetails{}, fmt.Errorf("parse process %d ppid: %w", pid, err)
+	}
+	command := strings.TrimSpace(strings.TrimPrefix(line, fields[0]))
+	return processDetails{PPID: ppid, Command: command}, nil
+}
+
+func isOrphanedFleetModeServeProcess(details processDetails) bool {
+	if details.PPID != 1 {
+		return false
+	}
+	if !strings.Contains(details.Command, "loom serve") {
+		return false
+	}
+	hasFleetMode := false
+	for _, field := range strings.Fields(details.Command) {
+		if field == "--fleet-mode" {
+			hasFleetMode = true
+		}
+	}
+	return hasFleetMode
 }
 
 func runInstallService(cmd *cobra.Command, _ []string) error {

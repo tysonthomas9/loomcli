@@ -1,14 +1,14 @@
 # Agent Instructions
 
-This project uses fleet-db-backed `loom data` commands for issue tracking.
+This project uses fleet-db-backed `loom task` commands for normal issue workflow.
 
 ## Quick Reference
 
 ```bash
 loom data ready --limit 10     # Find available work
-loom data show <id>            # View issue details
-loom data claim <id>           # Claim work
-loom data close <id> --reason "done"  # Complete work
+loom task show <id>            # View issue details
+loom task claim <id>           # Claim work
+loom task close <id> --reason "done"  # Complete work
 ```
 
 ## Landing the Plane (Session Completion)

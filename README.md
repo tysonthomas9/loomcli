@@ -36,7 +36,7 @@ loom serve
 # 3. Run agents
 loom plan falcon              # Planning agent creates designs
 loom lead                     # Review and approve plans
-loom task falcon              # Implementation agent builds it
+loom task run falcon          # Implementation agent builds it
 ```
 
 In cloud mode (shared fleet-db), set `LOOM_FLEET_DB_URL=https://fleet.example.com`
@@ -97,7 +97,7 @@ The `LOOM_FLEET_MODE=true` env var is equivalent to `--fleet-mode`.
 ### Agent Commands
 ```
 plan       Run a planning agent (creates designs, marks for review)
-task       Run an implementation agent (implements approved designs)
+task       Manage task workflow and run implementation agents
 lead       Interactive AI project management (review plans, triage backlog)
 agent      Run a custom agent with a user-defined prompt template
 monitor    Live dashboard showing agent status and task progress
@@ -135,7 +135,7 @@ serve      Start web UI + API server for managing agents via browser
 ```bash
 # Agent workflows
 loom plan falcon              # Single planning task in falcon worktree
-loom task falcon --auto       # Continuous implementation mode
+loom task run falcon --auto   # Continuous implementation mode
 loom plan falcon -a -m 5      # Process up to 5 tasks, then stop
 loom plan falcon -a -t 30     # Exit after 30 min idle
 loom lead                     # Interactive backlog management
@@ -162,7 +162,7 @@ Both `plan` and `task` commands support continuous auto mode with the `--auto` f
 
 ```bash
 loom plan falcon --auto              # Continuous planning mode
-loom task falcon --auto              # Continuous implementation mode
+loom task run falcon --auto          # Continuous implementation mode
 loom plan falcon -a -m 5             # Process up to 5 tasks
 loom plan falcon -a -t 30            # Exit after 30 min idle
 ```
@@ -170,7 +170,7 @@ loom plan falcon -a -t 30            # Exit after 30 min idle
 ### Implementation Flow
 
 ```
-loom plan <worktree> --auto   OR   loom task <worktree> --auto
+loom plan <worktree> --auto   OR   loom task run <worktree> --auto
         │
         ▼
    Acquire Lock (prevent concurrent agents)

@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/cli"
@@ -19,14 +20,15 @@ func startTmuxSession(sessionName string, opts AutoModeOptions, logFile string) 
 	// TERM=dumb disables alternate screen buffer for Claude, enabling output streaming via capture-pane.
 	// Other backends (codex, opencode) need a real TERM value to detect TTY properly.
 	termPrefix := "TERM=dumb "
-	if resolved := cli.GetBackendName(); resolved != "claude" {
+	backendName := cli.GetBackendName()
+	if backendName != "claude" {
 		termPrefix = ""
 	}
-	loomCmd := fmt.Sprintf("%sloom %s %s --daemon-mode", termPrefix, shellQuote(opts.AgentType), shellQuote(opts.WorktreePath))
+	loomCmd := buildAutoModeLoomCommand(opts, termPrefix)
 
 	// Always propagate backend to subprocess so the tmux-spawned process
 	// (which runs the installed binary) uses the same backend as the parent.
-	loomCmd += fmt.Sprintf(" --backend %s", shellQuote(cli.GetBackendName()))
+	loomCmd += fmt.Sprintf(" --backend %s", shellQuote(backendName))
 
 	// Propagate parent ID filter to subprocess
 	if opts.ParentID != "" {
@@ -65,6 +67,22 @@ func startTmuxSession(sessionName string, opts AutoModeOptions, logFile string) 
 	}
 
 	return nil
+}
+
+func buildAutoModeLoomCommand(opts AutoModeOptions, termPrefix string) string {
+	parts := autoModeAgentCommandParts(opts.AgentType)
+	quotedParts := make([]string, 0, len(parts))
+	for _, part := range parts {
+		quotedParts = append(quotedParts, shellQuote(part))
+	}
+	return fmt.Sprintf("%sloom %s %s --daemon-mode", termPrefix, strings.Join(quotedParts, " "), shellQuote(opts.WorktreePath))
+}
+
+func autoModeAgentCommandParts(agentType string) []string {
+	if agentType == "task" {
+		return []string{"task", "run"}
+	}
+	return []string{agentType}
 }
 
 // streamUntilExit streams tmux output until the session exits naturally

@@ -2,6 +2,7 @@ package serve
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"log/slog"
@@ -204,6 +205,7 @@ func runServe(cmd *cobra.Command, args []string) {
 	monitorHandlers := buildMonitorHandlers(collectDataFn, staleDetectorHandler, storeHandle.Store, issueBackendFn, monitorDefaultWorkspace)
 
 	webuiErr := make(chan error, 1)
+	monitorEmbeddedStore(ctx, storeHandle, webuiErr)
 	go func() {
 		cfg := buildServerConfig(monitorHandlers, fleetState, storeHandle)
 		webuiErr <- webuiapp.StartServer(ctx, cfg)
@@ -211,6 +213,30 @@ func runServe(cmd *cobra.Command, args []string) {
 
 	logServerStartup()
 	awaitShutdown(cmd, stop, webuiErr, cancel)
+}
+
+func monitorEmbeddedStore(ctx context.Context, storeHandle *bootstrap.StoreHandle, webuiErr chan<- error) {
+	exit := storeHandle.EmbeddedExit()
+	if exit == nil {
+		return
+	}
+	go func() {
+		select {
+		case <-ctx.Done():
+			return
+		case err, ok := <-exit:
+			if !ok || ctx.Err() != nil {
+				return
+			}
+			if err == nil {
+				err = errors.New("embedded fleet-db exited")
+			}
+			select {
+			case webuiErr <- fmt.Errorf("embedded fleet-db exited unexpectedly: %w", err):
+			case <-ctx.Done():
+			}
+		}
+	}()
 }
 
 func buildMonitorCollectDataFn(workspaceHint string, issueBackendFn metricscmd.IssueBackendFn) metricscmd.CollectDataFn {

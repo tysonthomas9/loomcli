@@ -96,6 +96,7 @@ func createStoreBackedEmptyWorkspace(ctx context.Context, s storepkg.Store, req 
 	if _, err := s.Workspaces().Create(ctx, storepkg.WorkspaceCreate{
 		Key:           key,
 		Name:          req.Name,
+		Description:   req.Description,
 		DefaultBranch: branch,
 	}); err != nil {
 		cleanupWorktrees(wsPlan, created)
@@ -398,6 +399,7 @@ func createStoreBackedCloneWorkspace(ctx context.Context, s storepkg.Store, req 
 	if _, err := s.Workspaces().Create(ctx, storepkg.WorkspaceCreate{
 		Key:           key,
 		Name:          req.Name,
+		Description:   req.Description,
 		DefaultBranch: branch,
 	}); err != nil {
 		if errors.Is(err, domain.ErrAlreadyExists) {
