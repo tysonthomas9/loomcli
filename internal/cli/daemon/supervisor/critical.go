@@ -111,12 +111,23 @@ func (s *Supervisor) supervisedAgentBody(name string, ap *AgentProcess) {
 	s.superviseAgent(ap)
 }
 
+// monoBase anchors tick storage. Captured at process start, it carries a
+// monotonic clock reading; ticks are stored as nanosecond durations from it and
+// reconstructed via monoBase.Add, which preserves the monotonic reading. That
+// keeps staleness math (now.Sub(t) in scanTicks) on the monotonic clock, so a
+// host suspend — which freezes the monotonic clock but not the wall clock — does
+// not make ticks look stale and trip the watchdog. NOTE: this relies on Go's
+// monotonic clock pausing during host suspend (true on Linux CLOCK_MONOTONIC and
+// macOS mach_absolute_time); it is an OS/runtime property, not a Go guarantee.
+// Ticks are never persisted, so a per-process base never crosses a process.
+var monoBase = time.Now()
+
 // RegisterTick allocates a tick slot for a goroutine name and primes it with
 // the current time. Call this before starting the goroutine so the watchdog
 // does not see a zero-valued tick on its first scan.
 func (s *Supervisor) RegisterTick(name string) {
 	tick := new(atomic.Int64)
-	tick.Store(time.Now().UnixNano())
+	tick.Store(int64(time.Since(monoBase)))
 	s.Ticks.Store(name, tick)
 }
 
@@ -133,7 +144,7 @@ func (s *Supervisor) RecordTick(name string) {
 	if !ok {
 		return
 	}
-	tick.Store(time.Now().UnixNano())
+	tick.Store(int64(time.Since(monoBase)))
 }
 
 // LoadTick returns the last recorded tick time for a goroutine name, and false
@@ -147,21 +158,7 @@ func (s *Supervisor) LoadTick(name string) (time.Time, bool) {
 	if !ok {
 		return time.Time{}, false
 	}
-	return time.Unix(0, tick.Load()), true
-}
-
-// RebaselineTicks stamps `at` on every registered tick slot. The liveness
-// watchdog calls this after detecting a whole-process suspend (host sleep,
-// SIGSTOP, severe CPU starvation) so the resulting wall-clock staleness — which
-// affects every goroutine equally — is not mistaken for a wedged goroutine.
-func (s *Supervisor) RebaselineTicks(at time.Time) {
-	ns := at.UnixNano()
-	s.Ticks.Range(func(_, v any) bool {
-		if tick, ok := v.(*atomic.Int64); ok {
-			tick.Store(ns)
-		}
-		return true
-	})
+	return monoBase.Add(time.Duration(tick.Load())), true
 }
 
 // RangeTicks iterates over registered tick slots, invoking fn for each.
@@ -175,7 +172,7 @@ func (s *Supervisor) RangeTicks(fn func(name string, t time.Time)) {
 		if !ok {
 			return true
 		}
-		fn(name, time.Unix(0, tick.Load()))
+		fn(name, monoBase.Add(time.Duration(tick.Load())))
 		return true
 	})
 }

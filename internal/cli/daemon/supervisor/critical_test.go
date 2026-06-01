@@ -228,3 +228,25 @@ func TestRecoverAndSignalIsNoOpWithoutPanic(t *testing.T) {
 	case <-time.After(100 * time.Millisecond):
 	}
 }
+
+// TestTicksUseMonotonicClock is the regression guard for the host-sleep daemon
+// crash. Staleness is suspend-immune only if reconstructed ticks carry a
+// monotonic reading, so scanTicks' now.Sub(t) runs on the monotonic clock. The
+// old time.Unix(0, ns) path produced wall-clock-only times (the bug); this
+// asserts the representation keeps the monotonic reading. A time.Time carrying a
+// monotonic reading prints a trailing " m=..." in its String form; a wall-only
+// one does not — the cheapest in-process proxy, since wall-clock can't be moved
+// independently of monotonic to simulate a real suspend in a unit test.
+func TestTicksUseMonotonicClock(t *testing.T) {
+	s := newHarnessSupervisor()
+	s.RegisterTick("probe")
+	s.RecordTick("probe")
+
+	loaded, ok := s.LoadTick("probe")
+	if !ok {
+		t.Fatal("LoadTick reported the probe tick as unregistered")
+	}
+	if !strings.Contains(loaded.String(), " m=") {
+		t.Fatalf("LoadTick returned a wall-clock-only time (no monotonic reading): %q", loaded.String())
+	}
+}
