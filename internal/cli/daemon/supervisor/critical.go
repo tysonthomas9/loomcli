@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"log/slog"
 	"runtime"
-	"sync/atomic"
 	"time"
 )
 
@@ -108,32 +107,42 @@ func (s *Supervisor) supervisedAgentBody(name string, ap *AgentProcess) {
 	defer s.Wg.Done()
 	defer close(ap.Done)
 	defer s.RecoverAndSignal(name)
+	// Deregister this agent's liveness tick on every exit path (max restarts,
+	// config removed, shutdown, or panic). Identity-based: CompareAndDelete
+	// only removes the slot if the registry still holds *this* goroutine's
+	// slot, so a same-worktree successor that re-registered first is never
+	// clobbered. Without deregistration the slot freezes and the watchdog would
+	// eventually quarantine a departed agent (harmless but noisy); with the bare
+	// name-keyed delete it replaced, it could nuke a successor's live slot.
+	defer s.deregister(ap.tick)
 	s.superviseAgent(ap)
 }
 
-// RegisterTick allocates a tick slot for a goroutine name and primes it with
-// the current time. Call this before starting the goroutine so the watchdog
-// does not see a zero-valued tick on its first scan.
+// RegisterTick allocates a ClassCore tick slot for a goroutine name and primes
+// it with the current time. Call this before starting a daemon-lifetime
+// singleton goroutine so the watchdog does not see a zero-valued tick on its
+// first scan. Per-agent goroutines use registerAgentTick instead, which marks
+// the slot ClassAgent so a stale tick is quarantined rather than fatal.
 func (s *Supervisor) RegisterTick(name string) {
-	tick := new(atomic.Int64)
-	tick.Store(time.Now().UnixNano())
-	s.Ticks.Store(name, tick)
+	s.registerTick(name, ClassCore, nil)
 }
 
 // RecordTick stamps the current time on the named goroutine's tick slot. Call
 // this at the top of every iteration of a watched loop. Missing the named slot
 // is a programmer error (the goroutine was not registered) and is silently
 // ignored — the watchdog will not flag what it does not know to watch.
+//
+// Core singletons record by name (their names are never reused). Per-agent
+// goroutines record by slot identity via ap.recordTick to stay immune to
+// same-name reuse.
 func (s *Supervisor) RecordTick(name string) {
 	v, ok := s.Ticks.Load(name)
 	if !ok {
 		return
 	}
-	tick, ok := v.(*atomic.Int64)
-	if !ok {
-		return
+	if sl, ok := v.(*tickSlot); ok {
+		sl.record()
 	}
-	tick.Store(time.Now().UnixNano())
 }
 
 // LoadTick returns the last recorded tick time for a goroutine name, and false
@@ -143,25 +152,16 @@ func (s *Supervisor) LoadTick(name string) (time.Time, bool) {
 	if !ok {
 		return time.Time{}, false
 	}
-	tick, ok := v.(*atomic.Int64)
+	sl, ok := v.(*tickSlot)
 	if !ok {
 		return time.Time{}, false
 	}
-	return time.Unix(0, tick.Load()), true
+	return sl.last(), true
 }
 
 // RangeTicks iterates over registered tick slots, invoking fn for each.
 func (s *Supervisor) RangeTicks(fn func(name string, t time.Time)) {
-	s.Ticks.Range(func(k, v any) bool {
-		name, ok := k.(string)
-		if !ok {
-			return true
-		}
-		tick, ok := v.(*atomic.Int64)
-		if !ok {
-			return true
-		}
-		fn(name, time.Unix(0, tick.Load()))
-		return true
+	s.rangeSlots(func(sl *tickSlot) {
+		fn(sl.name, sl.last())
 	})
 }

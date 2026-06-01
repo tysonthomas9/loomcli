@@ -58,6 +58,8 @@ type AgentProcess struct {
 	Done     chan struct{} // closed when superviseAgent goroutine exits
 	StopOnce sync.Once     // prevents double-close of StopCh
 
+	tick *tickSlot // this agent's liveness slot (set by registerAgentTick); identity for record/deregister
+
 	StopReason StopReason // why the agent was stopped (set at decision site, empty while running)
 
 	Mu sync.Mutex // protects Cmd, Pid, LogFile, restart tracking, AssignedEpicID, AssignedTaskID, LastError, CurrentBackendIdx, Session, AgentSessionID, AgentLeaseID, AgentLeaseToken, ownership fields, TranscriptPath, BeforeRef, StopReason, LastActivity
@@ -78,6 +80,21 @@ const (
 	StopReasonWatchdog           StopReason = "watchdog"
 	StopReasonBackendUnavailable StopReason = "backend_unavailable"
 )
+
+// recordTick refreshes this agent's liveness slot by identity. A no-op before
+// registerAgentTick has run (ap.tick nil), so callers need no guard.
+func (ap *AgentProcess) recordTick() {
+	if ap.tick != nil {
+		ap.tick.record()
+	}
+}
+
+// signalStop asks this agent's supervise loop to stop at its next checkpoint by
+// closing StopCh exactly once. Non-blocking and safe to call concurrently — the
+// liveness watchdog uses it to quarantine a wedged agent without taking locks.
+func (ap *AgentProcess) signalStop() {
+	ap.StopOnce.Do(func() { close(ap.StopCh) })
+}
 
 // resolveRemote returns the git remote name for this agent.
 // Uses RepoConfig.Remote if available, otherwise defaults to "origin".

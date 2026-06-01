@@ -188,7 +188,7 @@ func (s *Supervisor) Start() error {
 // see drain.go for that variant.
 func (s *Supervisor) startAgentSupervisor(ap *AgentProcess) {
 	name := GoroutineAgentPrefix + ap.Entry.Worktree
-	s.RegisterTick(name)
+	s.registerAgentTick(ap)
 	s.Wg.Add(1)
 	go s.supervisedAgentBody(name, ap)
 }
@@ -228,12 +228,13 @@ func (s *Supervisor) Stop() {
 //nolint:funlen // The restart loop keeps lifecycle ordering visible.
 func (s *Supervisor) superviseAgent(ap *AgentProcess) {
 	slog.Info("starting agent supervisor", "worktree", ap.Entry.Worktree, "role", ap.Entry.Role)
-	tickName := agentTickName(ap)
 
 	for {
 		// Refreshed at the top of every iteration; while we block in
 		// waitForAgent → cmd.Wait(), startAgentWaitHeartbeat keeps it fresh.
-		s.RecordTick(tickName)
+		// Recorded by slot identity so a same-worktree successor's slot is
+		// never refreshed by this (possibly outgoing) goroutine.
+		ap.recordTick()
 		if s.checkAgentStopSignals(ap) {
 			return
 		}

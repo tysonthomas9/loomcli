@@ -37,26 +37,43 @@ func (s *Supervisor) livenessWatchdog() {
 	}
 }
 
-// scanTicks evaluates every registered tick against its threshold and signals
-// fatal on the first staleness it finds.
+// scanTicks evaluates every registered tick against its threshold and routes
+// the response by goroutine class. A stale ClassCore tick (a daemon-lifetime
+// singleton) is fatal: the daemon cannot function without it. A stale
+// ClassAgent tick is quarantined — that single agent is contained while the
+// rest of the fleet keeps running, so one wedged agent can never crash the
+// daemon.
 func (s *Supervisor) scanTicks(now time.Time) {
-	var stale []string
+	var fatal []string
+	var quarantine []*tickSlot
 
-	s.RangeTicks(func(name string, t time.Time) {
-		threshold := s.thresholdFor(name)
-		age := now.Sub(t)
-		if age > threshold {
-			stale = append(stale, fmt.Sprintf("%s (age=%s, threshold=%s)",
-				name, age.Truncate(time.Second), threshold))
+	s.rangeSlots(func(sl *tickSlot) {
+		threshold := s.thresholdFor(sl.name)
+		age := now.Sub(sl.last())
+		if age <= threshold {
+			return
 		}
+		if sl.class == ClassAgent {
+			quarantine = append(quarantine, sl)
+			return
+		}
+		fatal = append(fatal, fmt.Sprintf("%s (age=%s, threshold=%s)",
+			sl.name, age.Truncate(time.Second), threshold))
 	})
 
-	if len(stale) == 0 {
+	// Contain agent-level faults first; these never crash the daemon.
+	for _, sl := range quarantine {
+		if sl.onStale != nil {
+			sl.onStale()
+		}
+	}
+
+	if len(fatal) == 0 {
 		return
 	}
 
-	reason := "liveness watchdog: " + strings.Join(stale, ", ")
-	slog.Error("supervisor liveness check failed", "stale", stale)
+	reason := "liveness watchdog: " + strings.Join(fatal, ", ")
+	slog.Error("supervisor liveness check failed", "stale", fatal)
 	DumpGoroutinesToLog(reason)
 	s.SignalFatal(GoroutineLivenessWatchdog, fmt.Errorf("%s", reason))
 }
@@ -138,7 +155,6 @@ func (s *Supervisor) startAgentWaitHeartbeat(ap *AgentProcess) func() {
 // startAgentWaitHeartbeatEvery is startAgentWaitHeartbeat with an explicit
 // interval, allowing tests to drive the heartbeat without real-time waits.
 func (s *Supervisor) startAgentWaitHeartbeatEvery(ap *AgentProcess, interval time.Duration) func() {
-	tickName := agentTickName(ap)
 	stop := make(chan struct{})
 	done := make(chan struct{})
 	go func() {
@@ -152,7 +168,10 @@ func (s *Supervisor) startAgentWaitHeartbeatEvery(ap *AgentProcess, interval tim
 			case <-s.Shutdown:
 				return
 			case <-ticker.C:
-				s.RecordTick(tickName)
+				// Record by slot identity, not by name: if this agent's worktree
+				// was re-added, RecordTick(name) would refresh the successor's
+				// slot. ap.recordTick only ever refreshes this goroutine's slot.
+				ap.recordTick()
 			}
 		}
 	}()
