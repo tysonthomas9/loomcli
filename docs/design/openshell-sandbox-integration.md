@@ -3,8 +3,13 @@
 Run loom AI agents (Claude, Codex, OpenCode) inside isolated OpenShell containers
 instead of directly on the host.
 
-**Status:** Implemented on `falcon` branch
+**Status:** Original v2-era design (PR #20). Recovered + partially ported to v5.
 **Backend:** [NVIDIA OpenShell](https://github.com/NVIDIA/OpenShell) (K3s-in-Docker, OPA/Rego policy, credential proxy)
+
+> ⚠️ **v5 note:** this doc predates the beads → FleetDB migration. The `bd sync` steps and
+> "Beads state travels through git" below are **obsolete** — v5 task state is in FleetDB, so the
+> in-container agent must reach the FleetDB/`loom serve` API over the network instead. See
+> `sandbox-daemon-port.md` §D.
 
 ## Architecture Overview
 

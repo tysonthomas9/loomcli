@@ -204,7 +204,7 @@ func resolveSandboxProjectDir(worktreePath string) (string, error) {
 
 // isSandboxProjectRoot reports whether dir looks like a loom project root.
 func isSandboxProjectRoot(dir string) bool {
-	for _, marker := range []string{".loom", ".beads", "loom.yaml"} {
+	for _, marker := range []string{".loom", "loom.yaml"} {
 		if _, err := os.Stat(filepath.Join(dir, marker)); err == nil {
 			return true
 		}
@@ -250,7 +250,7 @@ func buildOneshotCreateArgs(cfg SandboxConfig, sandboxName, branch string, onesh
 }
 
 // buildOneshotCommand builds the shell bootstrap script run inside the sandbox:
-// clone the branch, run loom, sync beads state, and push the results back.
+// clone the branch, run loom, then commit and push the code changes back.
 func buildOneshotCommand(branch string, oneshot SandboxOneshotConfig, repoURL, backendOverride string) string {
 	var sb strings.Builder
 	sb.WriteString("set -e\n")
@@ -274,7 +274,8 @@ func buildOneshotCommand(branch string, oneshot SandboxOneshotConfig, repoURL, b
 	}
 	sb.WriteString(loomCmd + "\n")
 
-	sb.WriteString("bd sync\n")
+	// Task state lives in FleetDB (v5), not in the repo, so there is no
+	// issue-tracker sync step here; only code changes travel back via git.
 	sb.WriteString("git add -A\n")
 	sb.WriteString(fmt.Sprintf("git diff --cached --quiet || git commit -m %s\n",
 		shellQuote(fmt.Sprintf("sandbox agent work [%s]", branch))))

@@ -45,7 +45,6 @@ func TestBuildOneshotCommand_FullScript(t *testing.T) {
 		"git clone --branch 'feature/x' --single-branch 'https://github.com/o/r.git' /sandbox/repo\n",
 		"cd /sandbox/repo\n",
 		"/sandbox/bin/loom 'task' 'worktrees/falcon' --backend 'claude' --parent 'epic-1'\n",
-		"bd sync\n",
 		"git diff --cached --quiet || git commit -m 'sandbox agent work [feature/x]'\n",
 		"git push origin 'feature/x'\n",
 	}
@@ -53,6 +52,10 @@ func TestBuildOneshotCommand_FullScript(t *testing.T) {
 		if !strings.Contains(script, w) {
 			t.Errorf("script missing %q\n--- script ---\n%s", w, script)
 		}
+	}
+	// v5 task state is FleetDB-backed; the beads `bd sync` step must not return.
+	if strings.Contains(script, "bd ") || strings.Contains(script, "beads") {
+		t.Errorf("bootstrap script still references beads:\n%s", script)
 	}
 }
 
