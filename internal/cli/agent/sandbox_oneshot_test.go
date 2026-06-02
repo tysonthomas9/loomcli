@@ -35,6 +35,26 @@ func TestDefaultSandboxConfig(t *testing.T) {
 	}
 }
 
+func TestDefaultSandboxConfig_EnvOverrides(t *testing.T) {
+	t.Run("policy + providers", func(t *testing.T) {
+		t.Setenv("LOOM_SANDBOX_POLICY", "/tmp/p.yaml")
+		t.Setenv("LOOM_SANDBOX_PROVIDERS", "claude")
+		c := defaultSandboxConfig()
+		if c.Network != "/tmp/p.yaml" {
+			t.Errorf("Network = %q, want /tmp/p.yaml", c.Network)
+		}
+		if !slices.Equal(c.Providers, []string{"claude"}) {
+			t.Errorf("Providers = %v, want [claude]", c.Providers)
+		}
+	})
+	t.Run("empty providers disables attachment", func(t *testing.T) {
+		t.Setenv("LOOM_SANDBOX_PROVIDERS", "")
+		if c := defaultSandboxConfig(); len(c.Providers) != 0 {
+			t.Errorf("Providers = %v, want none", c.Providers)
+		}
+	})
+}
+
 func TestBuildOneshotCommand_FullScript(t *testing.T) {
 	cfg := SandboxOneshotConfig{
 		AgentType: "task", AgentName: "falcon", ParentID: "epic-1",
