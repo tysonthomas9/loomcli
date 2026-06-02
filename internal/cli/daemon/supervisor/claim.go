@@ -41,6 +41,24 @@ func (s *Supervisor) claimTask(ap *AgentProcess, epicID string) bool {
 	if s.IssueBackend == nil || !shouldClaimTaskForRole(ap) {
 		return true
 	}
+
+	// Resume-first: re-claim the agent's OWN interrupted task (set by
+	// prepareResume) directly, bypassing the ready-queue gate — an in_progress
+	// task is never "ready", so the normal claim path can't recover it. On
+	// failure, drop the resume target and fall through to a normal claim
+	// (cold-start), so resume never strands an agent.
+	ap.Mu.Lock()
+	resumeTaskID := ap.ResumeTaskID
+	ap.Mu.Unlock()
+	if resumeTaskID != "" {
+		if s.claimResumeTask(ap, resumeTaskID) {
+			return true
+		}
+		ap.Mu.Lock()
+		ap.ResumeTaskID = ""
+		ap.Mu.Unlock()
+	}
+
 	opts, constraints := s.buildClaimOpts(ap, epicID)
 
 	ap.Mu.Lock()
@@ -141,6 +159,30 @@ func (s *Supervisor) claimRequestedTask(ap *AgentProcess, opts backend.ReadyOpts
 		return true
 	}
 	s.setPreflightError(ap, agenterr.NoWork, fmt.Sprintf("requested task %s is not ready", taskID))
+	return false
+}
+
+// claimResumeTask re-acquires the claim on the agent's OWN interrupted task for
+// a resume cycle. Unlike claimRequestedTask it does NOT consult the ready queue
+// (an in_progress task is never "ready") — recovering your own task is safe, and
+// the worktree actor already held the claim. Returns true when the task is ours
+// to resume: a successful (re-)claim, or a conflict whose holder is THIS
+// worktree (our own claim still within its TTL). Any other failure returns
+// false so the caller cold-starts rather than stranding the agent.
+func (s *Supervisor) claimResumeTask(ap *AgentProcess, taskID string) bool {
+	err := s.claimIssueForAgent(ap, taskID, "resume interrupted task")
+	if err == nil {
+		return true
+	}
+	if backend.IsKind(err, backend.KindConflict) && conflictHolder(err) == ap.Entry.Worktree {
+		ap.Mu.Lock()
+		ap.AssignedTaskID = taskID
+		ap.RequestedTaskID = ""
+		ap.Mu.Unlock()
+		slog.Info("resuming task already claimed by this worktree", "worktree", ap.Entry.Worktree, "task_id", taskID)
+		return true
+	}
+	slog.Warn("resume re-claim failed; cold-starting", "worktree", ap.Entry.Worktree, "task_id", taskID, "err", err)
 	return false
 }
 

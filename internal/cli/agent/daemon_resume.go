@@ -13,9 +13,11 @@ import (
 // a daemon restart treats it as stale and cold-starts instead of resuming.
 const defaultResumeTTL = 30 * time.Minute
 
-// resumeTTL returns the resume staleness bound, overridable via LOOM_RESUME_TTL
-// (a Go duration string, e.g. "45m"). Falls back to defaultResumeTTL.
-func resumeTTL() time.Duration {
+// ResumeTTL returns the resume staleness bound, overridable via LOOM_RESUME_TTL
+// (a Go duration string, e.g. "45m"). Falls back to defaultResumeTTL. Exported
+// so the daemon supervisor's resume-detection shares the exact same bound as the
+// agent-side resume decision (maybeResumeDaemonSession).
+func ResumeTTL() time.Duration {
 	if v := os.Getenv("LOOM_RESUME_TTL"); v != "" {
 		if d, err := time.ParseDuration(v); err == nil && d >= 0 {
 			return d
@@ -45,7 +47,7 @@ func maybeResumeDaemonSession(worktreePath, assignedTaskID string) {
 	if info.TaskID != assignedTaskID {
 		return // carried session belongs to a different task → cold start
 	}
-	if ttl := resumeTTL(); ttl > 0 && !info.TaskStartedAt.IsZero() && time.Since(info.TaskStartedAt) > ttl {
+	if ttl := ResumeTTL(); ttl > 0 && !info.TaskStartedAt.IsZero() && time.Since(info.TaskStartedAt) > ttl {
 		fmt.Printf("[daemon] prior Claude session for %s is stale (%s old); cold-starting\n",
 			assignedTaskID, time.Since(info.TaskStartedAt).Round(time.Second))
 		return

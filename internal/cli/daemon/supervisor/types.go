@@ -39,6 +39,8 @@ type AgentProcess struct {
 	BeforeRef              string            // git HEAD ref before spawn (for diff stats at finalization)
 	AssignedTaskID         string            // task claimed by supervisor preflight for this run
 	RequestedTaskID        string            // task requested by a lifecycle command before normal queue selection
+	ResumeTaskID           string            // interrupted task to resume this cycle (detected from a surviving crash-remnant lock); drives claimResumeTask + signals the resume path. Per-cycle: cleared in clearAgentSessionState, re-detected in preFlightSetup
+	ResumeFailures         int               // consecutive failed resume attempts (PERSISTS across cycles); at maxResumeFailures the supervisor cold-starts instead of resuming
 	LastActivity           time.Time         // most recent PTY output observed by the agent's wrapper (driven by agent IPC heartbeats); zero between spawn and first observation
 
 	RestartCount   int       // consecutive restart attempts
@@ -61,7 +63,7 @@ type AgentProcess struct {
 
 	StopReason StopReason // why the agent was stopped (set at decision site, empty while running)
 
-	Mu sync.Mutex // protects Cmd, Pid, LogFile, restart tracking, AssignedEpicID, AssignedTaskID, LastError, CurrentBackendIdx, Session, AgentSessionID, AgentLeaseID, AgentLeaseToken, ownership fields, TranscriptPath, BeforeRef, StopReason, LastActivity
+	Mu sync.Mutex // protects Cmd, Pid, LogFile, restart tracking, AssignedEpicID, AssignedTaskID, RequestedTaskID, ResumeTaskID, ResumeFailures, LastError, CurrentBackendIdx, Session, AgentSessionID, AgentLeaseID, AgentLeaseToken, ownership fields, TranscriptPath, BeforeRef, StopReason, LastActivity
 }
 
 // StopReason identifies why an agent was stopped.

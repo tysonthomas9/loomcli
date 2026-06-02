@@ -79,11 +79,11 @@ func TestMaybeResumeDaemonSession_Guards(t *testing.T) {
 
 func TestResumeTTL_EnvOverride(t *testing.T) {
 	t.Setenv("LOOM_RESUME_TTL", "45m")
-	if got := resumeTTL(); got != 45*time.Minute {
-		t.Fatalf("resumeTTL = %v, want 45m", got)
+	if got := ResumeTTL(); got != 45*time.Minute {
+		t.Fatalf("ResumeTTL = %v, want 45m", got)
 	}
 	t.Setenv("LOOM_RESUME_TTL", "garbage")
-	if got := resumeTTL(); got != defaultResumeTTL {
-		t.Fatalf("resumeTTL with bad value = %v, want default %v", got, defaultResumeTTL)
+	if got := ResumeTTL(); got != defaultResumeTTL {
+		t.Fatalf("ResumeTTL with bad value = %v, want default %v", got, defaultResumeTTL)
 	}
 }
