@@ -143,9 +143,34 @@ FleetDB. The working recipe (what loom must generate for daemon-mode):
 Verified: `data list` returned the seeded tasks; `data claim PLAYGROUND-1` → host `in_progress`;
 `data close PLAYGROUND-1` → host `closed`.
 
-Not yet assembled into the single `loom task <wt> --sandbox` command (which additionally needs
-the workspace repo reachable from the sandbox over git + the agent's backend in the image) —
-but the novel risk (in-sandbox agent ⇄ host FleetDB over the OPA boundary) is fully retired.
+Not yet assembled into the single `loom task <wt> --sandbox` command — see §F.
+
+## F. Literal `loom task --sandbox` end-to-end — remaining gaps (found by driving it)
+
+Running the verbatim command (`loom task playground-coder --sandbox` with `LOOM_SANDBOX_LOOM_BIN`,
+`LOOM_SANDBOX_SERVER_URL`, `LOOM_SANDBOX_POLICY`, `LOOM_SANDBOX_PROVIDERS=`, `LOOM_WORKSPACE`)
+resolved the agent worktree and entered `runSandboxOneshot`, then stopped at:
+
+    Error: could not determine git remote URL for …/worktrees/repo/playground-coder
+
+The §D/§E core (in-sandbox agent ⇄ host FleetDB) is proven; the *full* one-command run
+additionally needs the following — **two are one-shot code/design changes**, the rest infra:
+
+1. **[code] repoURL must be sandbox-reachable.** The one-shot pushes to `origin` and hands that
+   same URL to the sandbox to clone — but host and sandbox reach the host at different addresses
+   (`127.0.0.1` vs `host.containers.internal`). Needs the same host-gateway rewrite as
+   `LOOM_SANDBOX_SERVER_URL` (or a `LOOM_SANDBOX_REPO_URL` override) — the §D fix, applied to the clone URL.
+2. **[code] bootstrap worktree layout.** The bootstrap runs `loom task worktrees/<name>` inside the
+   fresh clone, but a clone has no `worktrees/<name>` (worktrees are local, not committed). A v2-era
+   assumption that doesn't fit clone-fresh on v5 — rework to run in the repo root / `worktree add`.
+3. **[infra] writable git endpoint** reachable from both host and sandbox (`git daemon
+   --enable=receive-pack` on a both-reachable address, e.g. the host LAN IP).
+4. **[infra] agent backend in the `--from` image** (e.g. the playground backend) + a selector
+   (`LOOM_SANDBOX_BACKEND` → `cfg.Backend`).
+5. **[infra] OPA policy** must also open the git port (alongside the serve port).
+
+So the literal command is a feature-completion effort (esp. #1–#2 in code), not just assembly;
+the novel risk (in-sandbox agent ⇄ host FleetDB over the OPA boundary) is already retired (§E).
 
 ## B. Config plumbing
 

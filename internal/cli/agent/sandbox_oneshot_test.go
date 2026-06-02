@@ -36,9 +36,10 @@ func TestDefaultSandboxConfig(t *testing.T) {
 }
 
 func TestDefaultSandboxConfig_EnvOverrides(t *testing.T) {
-	t.Run("policy + providers", func(t *testing.T) {
+	t.Run("policy + providers + backend", func(t *testing.T) {
 		t.Setenv("LOOM_SANDBOX_POLICY", "/tmp/p.yaml")
 		t.Setenv("LOOM_SANDBOX_PROVIDERS", "claude")
+		t.Setenv("LOOM_SANDBOX_BACKEND", "playground")
 		c := defaultSandboxConfig()
 		if c.Network != "/tmp/p.yaml" {
 			t.Errorf("Network = %q, want /tmp/p.yaml", c.Network)
@@ -46,11 +47,29 @@ func TestDefaultSandboxConfig_EnvOverrides(t *testing.T) {
 		if !slices.Equal(c.Providers, []string{"claude"}) {
 			t.Errorf("Providers = %v, want [claude]", c.Providers)
 		}
+		if c.Backend != "playground" {
+			t.Errorf("Backend = %q, want playground", c.Backend)
+		}
 	})
 	t.Run("empty providers disables attachment", func(t *testing.T) {
 		t.Setenv("LOOM_SANDBOX_PROVIDERS", "")
 		if c := defaultSandboxConfig(); len(c.Providers) != 0 {
 			t.Errorf("Providers = %v, want none", c.Providers)
+		}
+	})
+}
+
+func TestSandboxCloneURL(t *testing.T) {
+	t.Run("explicit override wins", func(t *testing.T) {
+		t.Setenv("LOOM_SANDBOX_REPO_URL", "git://host.containers.internal:9418/repo")
+		if got := sandboxCloneURL("git://127.0.0.1:9418/repo"); got != "git://host.containers.internal:9418/repo" {
+			t.Errorf("got %q, want the override", got)
+		}
+	})
+	t.Run("localhost rewritten to host gateway", func(t *testing.T) {
+		t.Setenv("LOOM_SANDBOX_REPO_URL", "")
+		if got := sandboxCloneURL("http://127.0.0.1:9419/r.git"); got != "http://host.docker.internal:9419/r.git" {
+			t.Errorf("got %q, want host-gateway rewrite", got)
 		}
 	})
 }
