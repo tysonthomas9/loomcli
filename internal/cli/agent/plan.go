@@ -139,6 +139,11 @@ func runPlanDaemon(deps *cli.Deps, worktreePath, agentName string) {
 	// P4: arm same-task resume (guarded) BEFORE building the prompt, so prompt
 	// generation skips the redundant checkpoint context when resuming.
 	maybeResumeDaemonSession(worktreePath, assignedTaskID)
+	// Record the assigned task on the worktree lock (AFTER the resume decision)
+	// so a crash leaves a resumable remnant for the next restart's
+	// detectRecovery — the agent's own `loom claim` is CWD-dependent (planners
+	// run it from the workspace root) and can't be relied on to set this.
+	persistAssignedTaskToLock(worktreePath, assignedTaskID)
 
 	ws, _ := config.ResolveActiveWorkspace()
 	prompt := GeneratePlanningPrompt(agentName, ws, planParentID)

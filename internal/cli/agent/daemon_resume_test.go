@@ -87,3 +87,34 @@ func TestResumeTTL_EnvOverride(t *testing.T) {
 		t.Fatalf("ResumeTTL with bad value = %v, want default %v", got, defaultResumeTTL)
 	}
 }
+
+// TestPersistAssignedTaskToLock: the daemon records the assigned task on the
+// WORKTREE lock (so detectRecovery can trigger resume after a crash), skipping
+// the write — and thus preserving the TaskStartedAt resume-TTL clock — when the
+// lock already carries that task (a resume/checkpoint cycle).
+func TestPersistAssignedTaskToLock(t *testing.T) {
+	dir := t.TempDir()
+	writeLockInfo(t, dir, cli.LockInfo{PID: os.Getpid(), Command: "plan", AgentName: "tester"})
+
+	// empty id → no-op
+	persistAssignedTaskToLock(dir, "")
+	if info, _ := cli.ReadLockFile(dir); info == nil || info.TaskID != "" {
+		t.Fatalf("empty id should not set TaskID, got %+v", info)
+	}
+
+	// new task → recorded on the worktree lock (the trigger detectRecovery reads)
+	persistAssignedTaskToLock(dir, "loomcli-7")
+	info, err := cli.ReadLockFile(dir)
+	if err != nil || info == nil || info.TaskID != "loomcli-7" {
+		t.Fatalf("after persist: TaskID=%v err=%v", info, err)
+	}
+	started := info.TaskStartedAt
+
+	// same task again → skipped, so TaskStartedAt (resume-TTL clock) is preserved
+	time.Sleep(10 * time.Millisecond)
+	persistAssignedTaskToLock(dir, "loomcli-7")
+	info2, _ := cli.ReadLockFile(dir)
+	if info2 == nil || !info2.TaskStartedAt.Equal(started) {
+		t.Errorf("same-task re-persist reset TaskStartedAt: %v → %v", started, info2.TaskStartedAt)
+	}
+}

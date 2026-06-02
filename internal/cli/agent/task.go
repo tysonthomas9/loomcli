@@ -132,6 +132,11 @@ func runTaskDaemon(deps *cli.Deps, worktreePath, agentName string) {
 	// carried forward in the lock instead of cold-starting (guarded). Done BEFORE
 	// building the prompt so it can skip the redundant checkpoint context.
 	maybeResumeDaemonSession(worktreePath, assignedTaskID)
+	// Record the assigned task on the worktree lock (AFTER the resume decision)
+	// so a crash leaves a resumable remnant for the next restart's
+	// detectRecovery — the agent's own `loom claim` is CWD-dependent and can't be
+	// relied on to set this.
+	persistAssignedTaskToLock(worktreePath, assignedTaskID)
 
 	ws, _ := config.ResolveActiveWorkspace()
 	prompt := GenerateTaskPrompt(agentName, ws, taskParentID, cli.GetBackendName())

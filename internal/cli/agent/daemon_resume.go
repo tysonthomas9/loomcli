@@ -56,6 +56,28 @@ func maybeResumeDaemonSession(worktreePath, assignedTaskID string) {
 	fmt.Printf("[daemon] resuming Claude session for task %s (run %s)\n", assignedTaskID, info.RunID)
 }
 
+// persistAssignedTaskToLock records the daemon-assigned task on the WORKTREE
+// lock so a crash mid-run leaves a resumable remnant that the next restart's
+// detectRecovery can find. The agent's own `loom claim` sets the task on its
+// CWD's lock, and planners run it from the workspace root (per the prompt), so
+// it cannot be relied on to populate the per-worktree lock the daemon reads.
+//
+// MUST be called AFTER maybeResumeDaemonSession so the resume decision reads the
+// carried-forward task id, not this run's. Skips when the lock already carries
+// this task (a resume/checkpoint cycle) so TaskStartedAt — the resume-TTL clock
+// — is not reset.
+func persistAssignedTaskToLock(worktreePath, assignedTaskID string) {
+	if assignedTaskID == "" {
+		return
+	}
+	if info, err := cli.ReadLockFile(worktreePath); err == nil && info != nil && info.TaskID == assignedTaskID {
+		return // already recorded (carried forward) — keep the TTL clock
+	}
+	if err := cli.UpdateLockTask(worktreePath, assignedTaskID, ""); err != nil {
+		fmt.Fprintf(os.Stderr, "[daemon] failed to persist assigned task %s on lock: %v\n", assignedTaskID, err)
+	}
+}
+
 // clearDaemonResumeOnSuccess clears the carried session id after a successful
 // daemon run so the next restart starts the next task fresh (resume-first /
 // checkpoint-fallback: a failed run instead KEEPS the session for carry-forward).
