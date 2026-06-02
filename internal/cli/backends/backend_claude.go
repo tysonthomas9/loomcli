@@ -422,12 +422,30 @@ type StreamUsage struct {
 // extractClaudeSessionID delegates to the Claude harness profile's session-id
 // extractor (pkg/harness/claude). The parsing logic now lives in harness-wrapper;
 // this thin shim preserves the existing call sites + tests with identical behavior.
+//
+// It first strips any leading non-JSON prefix (see trimToJSONObject): in headless
+// daemon mode the harness runs under a PTY that is not in raw mode, so terminal
+// ECHO can prepend the wrapper's stdin-EOF bytes (\x04\x04, rendered "^D\b\b^D\b\b")
+// to the FIRST stream-json line — the system:init event that carries session_id.
+// Those leading control bytes break json.Unmarshal, so without this the session id
+// is silently never captured and daemon --resume can never arm.
 func extractClaudeSessionID(line string) (string, bool) {
 	caps := claudeProfileCaps()
 	if caps.SessionID == nil {
 		return "", false
 	}
-	return caps.SessionID.ExtractSessionID(line)
+	return caps.SessionID.ExtractSessionID(trimToJSONObject(line))
+}
+
+// trimToJSONObject returns line starting at its first '{' so a leading non-JSON
+// prefix (PTY-echoed control bytes on the system:init line; see
+// extractClaudeSessionID) does not defeat json.Unmarshal. A line with no '{' (a
+// non-JSON line) is returned unchanged — the extractor rejects it anyway.
+func trimToJSONObject(line string) string {
+	if i := strings.IndexByte(line, '{'); i > 0 {
+		return line[i:]
+	}
+	return line
 }
 
 // displayStreamEvent parses JSON event and displays relevant content
