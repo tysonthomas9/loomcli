@@ -67,6 +67,26 @@ Consequence:
 unit — rely on log-mtime only and **skip IPC/lease/ownership watchdogs** for them. Design this
 *before* enabling daemon-mode, or sandboxed agents get reaped.
 
+## D. Task-state transport: the git-native premise no longer holds ⚠️
+
+The original PR #20 design said *"Beads state travels through git — no separate sync needed"*:
+task state lived in `.beads/issues.jsonl` **in the repo**, so cloning the branch carried the
+tasks into the container and the agent's `bd sync` + push carried updates back.
+
+v5 moved task state into **FleetDB** (`issue_backend: fleetdb`); there is **no task state in
+git** anymore. So git only carries *code* changes back — the `bd sync` step is gone (removed
+from the one-shot bootstrap). The in-container `loom task` must instead reach the **FleetDB /
+`loom serve` API over the network** to claim/update/close tasks. That is the same
+container-boundary problem as §C, and the current bootstrap does **not** set it up:
+
+- Inject `LOOM_SERVER_URL` (+ auth token) for a host address the container can reach
+  (loopback won't resolve from inside; needs the host gateway IP or `--network host`-equivalent).
+- Allow that host\:port through the OpenShell OPA policy (today only 443/80/22 are open).
+- Decide auth: a scoped token minted per sandbox run.
+
+Until this is wired, a sandbox agent boots but **can't fetch work**. This affects the shipped
+one-shot too — it's a known limitation, not yet a working end-to-end path against a real gateway.
+
 ## B. Config plumbing
 
 **loomcli (~11 sites, mechanical):** `domain.Agent`; `store.AgentCreate`/`AgentUpdate`;
@@ -99,3 +119,5 @@ evolve without fleet-db PRs.
 2. Liveness for sandboxed agents — log-mtime-only + disable IPC/lease watchdogs (pragmatic), or
    forward a control channel into the container (robust, much larger)?
 3. Is daemon-mode worth it now, or is the shipped one-shot enough near-term?
+4. FleetDB connectivity for the in-container agent (§D): host-gateway URL + scoped token + OPA
+   port allowance — **required before either mode can actually fetch work.**
