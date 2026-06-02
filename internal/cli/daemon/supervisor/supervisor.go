@@ -343,7 +343,8 @@ func (s *Supervisor) clearAgentSessionState(ap *AgentProcess) {
 	ap.TranscriptPath = ""
 	ap.BeforeRef = ""
 	ap.AssignedTaskID = ""
-	ap.ResumeTaskID = "" // per-cycle; re-detected in preFlightSetup (ResumeFailures persists)
+	ap.ResumeTaskID = ""          // per-cycle; re-detected in preFlightSetup (ResumeFailures persists)
+	ap.RecoveryMode = recoverCold // per-cycle; re-classified in preFlightSetup
 	ap.LastActivity = time.Time{}
 	ap.Mu.Unlock()
 }
@@ -377,23 +378,33 @@ func (s *Supervisor) RecordAgentActivity(agentName string, at time.Time) {
 
 // preFlightSetup runs recovery, assigns epic, creates session, and clears yield file.
 //
-// Resume-first: when the worktree carries a genuine crash remnant (a dead agent
-// PID with a carried Claude session + task within TTL), RESUME the interrupted
-// task — preserve the lock, the in-progress worktree files, and the fleet claim
-// so the agent can `--resume` — instead of the destructive recoverAgent path,
-// which deletes the lock (discarding the session id) and leaves the task an
-// orphaned in_progress. Otherwise cold-start as before.
+// Resume-first / checkpoint-fallback: when the worktree carries a genuine crash
+// remnant (a dead agent PID with a carried Claude session + task within TTL),
+// RESUME the interrupted task — preserve the lock, the in-progress worktree
+// files, and the fleet claim so the agent can `--resume` — instead of the
+// destructive recoverAgent path, which deletes the lock (discarding the session
+// id) and orphans the task. After repeated resume failures it escalates to a
+// CHECKPOINT retry of the same task (re-claim, but cold-start with the prior
+// attempt's diff injected) before finally cold-starting a fresh task. See
+// detectRecovery.
 func (s *Supervisor) preFlightSetup(ap *AgentProcess) bool {
-	if resumeTaskID := s.detectResumableTask(ap); resumeTaskID != "" {
-		s.prepareResume(ap, resumeTaskID)
-	} else {
+	taskID, mode := s.detectRecovery(ap)
+	switch mode {
+	case recoverResume:
+		s.prepareResume(ap, taskID)
+	case recoverCheckpoint:
+		s.prepareCheckpointRetry(ap, taskID)
+	default: // recoverCold
 		ap.Mu.Lock()
-		ap.ResumeFailures = 0 // cold-starting ⇒ let a future interruption resume again
+		ap.ResumeFailures = 0 // cold-starting ⇒ let a future interruption recover again
 		ap.Mu.Unlock()
 		if err := s.recoverAgent(ap, 0); err != nil {
 			slog.Warn("pre-flight recovery failed", "worktree", ap.Entry.Worktree, "err", err)
 		}
 	}
+	ap.Mu.Lock()
+	ap.RecoveryMode = mode // consumed by recordResumeOutcome after the run
+	ap.Mu.Unlock()
 
 	if err := ClearYieldFile(ap.WorktreePath); err != nil {
 		slog.Warn("failed to clear stale yield file", "worktree", ap.Entry.Worktree, "err", err)
