@@ -17,7 +17,8 @@ agent invocation inside an OpenShell container instead of on the host:
 
 1. Push the worktree branch to origin (`--force-with-lease`)
 2. `openshell sandbox create` — uploads the `loom` binary, clones the branch, runs
-   `loom <task|plan> worktrees/<name>` inside the container, `bd sync`, commits, pushes
+   `loom <task|plan> worktrees/<name>` inside the container, then commits and pushes code back
+   (no `bd sync` — v5 task state is FleetDB-backed, not in the repo)
 3. Host fetches + `git merge --ff-only` the pushed results back
 4. Deletes the sandbox (deferred cleanup on all exit paths)
 
