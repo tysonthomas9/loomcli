@@ -273,6 +273,7 @@ func (s *Supervisor) superviseAgent(ap *AgentProcess) {
 		}
 
 		s.spawnAndWait(ap)
+		s.recordResumeOutcome(ap) // resume-failure accounting (resume-first / cold-start fallback)
 
 		releaseOwnership()
 		s.postExitCleanup(ap)
@@ -342,6 +343,7 @@ func (s *Supervisor) clearAgentSessionState(ap *AgentProcess) {
 	ap.TranscriptPath = ""
 	ap.BeforeRef = ""
 	ap.AssignedTaskID = ""
+	ap.ResumeTaskID = "" // per-cycle; re-detected in preFlightSetup (ResumeFailures persists)
 	ap.LastActivity = time.Time{}
 	ap.Mu.Unlock()
 }
@@ -374,9 +376,23 @@ func (s *Supervisor) RecordAgentActivity(agentName string, at time.Time) {
 }
 
 // preFlightSetup runs recovery, assigns epic, creates session, and clears yield file.
+//
+// Resume-first: when the worktree carries a genuine crash remnant (a dead agent
+// PID with a carried Claude session + task within TTL), RESUME the interrupted
+// task — preserve the lock, the in-progress worktree files, and the fleet claim
+// so the agent can `--resume` — instead of the destructive recoverAgent path,
+// which deletes the lock (discarding the session id) and leaves the task an
+// orphaned in_progress. Otherwise cold-start as before.
 func (s *Supervisor) preFlightSetup(ap *AgentProcess) bool {
-	if err := s.recoverAgent(ap, 0); err != nil {
-		slog.Warn("pre-flight recovery failed", "worktree", ap.Entry.Worktree, "err", err)
+	if resumeTaskID := s.detectResumableTask(ap); resumeTaskID != "" {
+		s.prepareResume(ap, resumeTaskID)
+	} else {
+		ap.Mu.Lock()
+		ap.ResumeFailures = 0 // cold-starting ⇒ let a future interruption resume again
+		ap.Mu.Unlock()
+		if err := s.recoverAgent(ap, 0); err != nil {
+			slog.Warn("pre-flight recovery failed", "worktree", ap.Entry.Worktree, "err", err)
+		}
 	}
 
 	if err := ClearYieldFile(ap.WorktreePath); err != nil {
