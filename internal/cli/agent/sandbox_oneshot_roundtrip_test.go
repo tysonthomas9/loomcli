@@ -77,6 +77,12 @@ func TestSandboxOneshot_RoundTrip(t *testing.T) {
 	t.Setenv("FAKE_REMOTE", remote)
 	t.Setenv("FAKE_BRANCH", branch)
 
+	// FleetDB connectivity preconditions: isolate config so no real workspace is
+	// resolved, then supply a container-reachable server URL + workspace via env.
+	t.Setenv("LOOM_CONFIG_DIR", filepath.Join(root, "loomcfg"))
+	t.Setenv("LOOM_SANDBOX_SERVER_URL", "http://host.docker.internal:8080")
+	t.Setenv("LOOM_WORKSPACE", "ws-test")
+
 	// Run the real one-shot flow.
 	if err := runSandboxOneshot(SandboxOneshotConfig{
 		AgentType:    "task",
@@ -110,6 +116,8 @@ func TestSandboxOneshot_RoundTrip(t *testing.T) {
 		"git clone --branch 'sbx'", // bootstrap script
 		"--parent 'epic-9'",        // parent threaded through
 		"git push origin 'sbx'",    // results pushed back from inside
+		"export LOOM_SERVER_URL='http://host.docker.internal:8080'", // FleetDB connectivity
+		"export LOOM_WORKSPACE='ws-test'",
 	} {
 		if !strings.Contains(log, want) {
 			t.Errorf("openshell invocation missing %q\n--- log ---\n%s", want, log)

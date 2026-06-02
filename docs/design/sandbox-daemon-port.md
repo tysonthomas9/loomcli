@@ -76,16 +76,23 @@ tasks into the container and the agent's `bd sync` + push carried updates back.
 v5 moved task state into **FleetDB** (`issue_backend: fleetdb`); there is **no task state in
 git** anymore. So git only carries *code* changes back — the `bd sync` step is gone (removed
 from the one-shot bootstrap). The in-container `loom task` must instead reach the **FleetDB /
-`loom serve` API over the network** to claim/update/close tasks. That is the same
-container-boundary problem as §C, and the current bootstrap does **not** set it up:
+`loom serve` API over the network** (setting `LOOM_SERVER_URL` auto-selects the `api` issue
+backend — see `internal/cli/issue_backend_resolve.go` + `deps.go`).
 
-- Inject `LOOM_SERVER_URL` (+ auth token) for a host address the container can reach
-  (loopback won't resolve from inside; needs the host gateway IP or `--network host`-equivalent).
-- Allow that host\:port through the OpenShell OPA policy (today only 443/80/22 are open).
-- Decide auth: a scoped token minted per sandbox run.
+**Wired (one-shot):** the bootstrap now `export`s `LOOM_SERVER_URL` + `LOOM_WORKSPACE` into the
+container, resolved on the host from `LOOM_SANDBOX_SERVER_URL` (explicit, container-reachable) or
+a localhost→`host.docker.internal` rewrite of `LOOM_SERVER_URL`, with the active workspace ID.
+`runSandboxOneshot` **fails fast** if neither a server nor a workspace can be resolved, instead
+of booting a sandbox whose agent could never claim work.
 
-Until this is wired, a sandbox agent boots but **can't fetch work**. This affects the shipped
-one-shot too — it's a known limitation, not yet a working end-to-end path against a real gateway.
+**Still operator/environment-dependent (not verified against a live gateway):**
+- **Reachability:** the host-gateway address (`host.docker.internal`) is a Docker default; the
+  real OpenShell host address may differ — hence the `LOOM_SANDBOX_SERVER_URL` override.
+- **OPA policy port:** the default "open" policy opens only 443/80/22, so a serve on `:8080`
+  needs the port added to the sandbox network policy.
+- **Auth:** the http client does OIDC device flow when serve requires auth — that can't run
+  headless in a non-TTY container, so an auth'd serve needs a pre-minted/scoped token (TODO).
+- **Daemon-mode** must do the same injection at the supervisor seam (§A).
 
 ## B. Config plumbing
 
