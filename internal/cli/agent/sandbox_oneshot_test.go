@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -94,19 +95,20 @@ func TestBuildSandboxCreateArgs(t *testing.T) {
 				t.Errorf("missing %q in %v", want, args)
 			}
 		}
-		// v0.0.53: create is keep-alive — no --upload, no trailing command; the
-		// one-shot stays interactive (no --no-tty); "open" passes no --policy.
+		// v0.0.53: no --upload create flag; one-shot stays interactive (no
+		// --no-tty); "open" passes no --policy. Create ends with a trivial
+		// `-- true` so it returns instead of attaching an interactive shell (F2).
 		if slices.Contains(args, "--upload") {
 			t.Error("v0.0.53 has no --upload create flag")
-		}
-		if slices.Contains(args, "--") {
-			t.Error("create must be keep-alive (no trailing command)")
 		}
 		if slices.Contains(args, "--no-tty") {
 			t.Error("one-shot create is interactive")
 		}
 		if slices.Contains(args, "--policy") {
 			t.Error("open network must not pass --policy")
+		}
+		if n := len(args); n < 2 || args[n-2] != "--" || args[n-1] != "true" {
+			t.Errorf("create must end with `-- true` (keep-alive without a shell), got %v", args)
 		}
 	})
 
@@ -153,6 +155,26 @@ func TestResolveSandboxServerURL(t *testing.T) {
 		t.Setenv("LOOM_SERVER_URL", "")
 		if got := resolveSandboxServerURL(); got != "" {
 			t.Errorf("got %q, want empty", got)
+		}
+	})
+}
+
+func TestResolveSandboxLoomBinary(t *testing.T) {
+	t.Run("explicit override wins", func(t *testing.T) {
+		t.Setenv("LOOM_SANDBOX_LOOM_BIN", "/tmp/loom-linux")
+		got, err := resolveSandboxLoomBinary()
+		if err != nil || got != "/tmp/loom-linux" {
+			t.Fatalf("got (%q, %v), want (/tmp/loom-linux, nil)", got, err)
+		}
+	})
+	t.Run("non-linux host without override errors", func(t *testing.T) {
+		if runtime.GOOS == "linux" {
+			t.Skip("on a linux host the running binary is uploadable")
+		}
+		t.Setenv("LOOM_SANDBOX_LOOM_BIN", "")
+		_, err := resolveSandboxLoomBinary()
+		if err == nil || !strings.Contains(err.Error(), "linux") {
+			t.Fatalf("expected a 'needs a linux build' error, got %v", err)
 		}
 	})
 }

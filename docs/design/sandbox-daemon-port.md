@@ -94,6 +94,34 @@ of booting a sandbox whose agent could never claim work.
   headless in a non-TTY container, so an auth'd serve needs a pre-minted/scoped token (TODO).
 - **Daemon-mode** must do the same injection at the supervisor seam (§A).
 
+## E. Live validation against OpenShell v0.0.53 (empirical) — Podman on macOS
+
+Installed OpenShell 0.0.53 (Homebrew) + Podman driver + gateway on macOS/arm64 and drove
+real sandboxes. Confirmed and fixed (one-shot, PR #118):
+
+- **Arch vs OS.** A sandbox is **Linux**; the M-series host is **darwin/arm64**. Proven in a
+  live sandbox: a `GOOS=linux` ELF prints `hello from linux/arm64` (rc 0); the darwin Mach-O
+  gets `Exec format error` (rc 126). Same arch — only the OS/format differs.
+- **F1 — upload a linux loom build.** `os.Executable()` on a Mac host is a darwin binary that
+  can't run in the sandbox. Fixed: `resolveSandboxLoomBinary()` uses `LOOM_SANDBOX_LOOM_BIN`
+  (a `GOOS=linux` build) or the running binary only on a Linux host. Better long-term: **bake
+  loom into the `--from` image** (also dodges the upload issue below).
+- **F2 — `create` must carry a command.** `openshell sandbox create` with **no** trailing
+  command attaches an interactive SSH shell (`ssh -tt`) and blocks forever in a non-TTY
+  context. Fixed: create ends with `-- true` (sandbox persists without `--no-keep`).
+- **F3 — `exec` rejects newline args.** `openshell sandbox exec -- sh -c '<multi-line>'` →
+  `InvalidArgument: command argument contains newline`. Fixed: upload the bootstrap as a file
+  and run `exec -- sh /sandbox/bootstrap.sh` (validated live: a multi-line bootstrap runs by
+  path where inline was rejected).
+- **Large-file upload is flaky.** A 50 MB loom upload hit `ssh … broken pipe`; small files
+  (≤2.4 MB) upload fine. Reinforces **baking loom into `--from`** over uploading a big binary.
+- **Host address (driver-aware).** Podman exposes the host to sandboxes as
+  **`host.containers.internal`** (gateway log: `grpc_endpoint=https://host.containers.internal:17670`)
+  — not `host.docker.internal`/`192.168.127.254`. §D's `LOOM_SANDBOX_SERVER_URL` should be set per driver.
+
+Still open for a full task E2E: reliable loom delivery (prefer `--from` image), an isolated
+`loom serve` (playground backend) reachable at the driver's host address, and a seeded task.
+
 ## B. Config plumbing
 
 **loomcli (~11 sites, mechanical):** `domain.Agent`; `store.AgentCreate`/`AgentUpdate`;
