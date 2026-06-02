@@ -1,4 +1,4 @@
-## WORKFLOW: Resolve Merge Conflicts
+## Resolve Merge Conflicts
 
 You are resolving merge conflicts for: {{ .SourceBranch }} -> {{ .TargetBranch }}
 {{ .SafetyBlock }}

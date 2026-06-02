@@ -55,8 +55,8 @@ func TestPlanSmoke_HappyPath(t *testing.T) {
 	}
 
 	prompt := recorder.InteractiveCalls[0].Prompt
-	if !strings.Contains(prompt, "WORKFLOW: Planning Task") {
-		t.Errorf("prompt should contain 'WORKFLOW: Planning Task', got prompt length %d", len(prompt))
+	if !strings.Contains(prompt, "Planning Task") {
+		t.Errorf("prompt should contain 'Planning Task', got prompt length %d", len(prompt))
 	}
 
 	_, err := os.Stat(filepath.Join(tmpDir, LockFileName))
