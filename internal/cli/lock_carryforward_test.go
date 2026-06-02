@@ -3,23 +3,17 @@ package cli
 import (
 	"encoding/json"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"sync"
 	"testing"
 	"time"
 )
 
-// deadPID returns a PID that is guaranteed not to be running: we start /bin/true,
-// wait for it (reaping it), and return its now-dead PID.
-func deadPID(t *testing.T) int {
-	t.Helper()
-	cmd := exec.Command("true")
-	if err := cmd.Run(); err != nil {
-		t.Fatalf("spawning true: %v", err)
-	}
-	return cmd.Process.Pid
-}
+// deadPID is a PID guaranteed never to belong to a live process: it exceeds the
+// kernel's maximum PID (Linux PID_MAX_LIMIT is 2^22; macOS is far lower), so
+// IsProcessRunning's syscall.Kill(pid, 0) returns ESRCH ("no such process").
+// A constant avoids spawning+reaping a real process just to obtain a dead PID.
+const deadPID = 1 << 30
 
 // writeStaleLock writes a lock file with the given (dead) PID + resume fields.
 func writeStaleLock(t *testing.T, dir string, info LockInfo) {
@@ -50,7 +44,7 @@ func TestAcquireLock_AssignsRunID(t *testing.T) {
 func TestAcquireLock_CarriesResumeForwardAcrossStaleReplacement(t *testing.T) {
 	dir := t.TempDir()
 	writeStaleLock(t, dir, LockInfo{
-		PID:             deadPID(t),
+		PID:             deadPID,
 		Command:         "task",
 		ClaudeSessionID: "sess-XYZ",
 		RunID:           "run-ABC",
@@ -125,7 +119,7 @@ func TestUpdateLockClaudeSessionID_RoundTripAndOwnership(t *testing.T) {
 
 	// A lock owned by a different process must not be mutated by the owner-checked path.
 	foreign := t.TempDir()
-	writeStaleLock(t, foreign, LockInfo{PID: deadPID(t), Command: "task"})
+	writeStaleLock(t, foreign, LockInfo{PID: deadPID, Command: "task"})
 	if err := UpdateLockState(foreign, StateActive); err == nil {
 		t.Fatal("UpdateLockState on a foreign-owned lock should error")
 	}
