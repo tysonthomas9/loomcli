@@ -19,6 +19,10 @@ import (
 // (e.g. `loom serve`) on the host when only a localhost server URL is known.
 const sandboxHostGateway = "host.docker.internal"
 
+// sandboxLoomPath is where the loom binary is uploaded inside the sandbox. The
+// sandbox root is read-write, so no directory needs pre-creating.
+const sandboxLoomPath = "/sandbox/loom"
+
 // SandboxConfig configures OpenShell sandbox execution for a one-shot agent run.
 //
 // NOTE: daemon-mode sandbox config (per-agent `execution: sandbox`) is a separate,
@@ -106,8 +110,7 @@ func runSandboxOneshot(cfg SandboxOneshotConfig) error {
 	deleteSandbox(sandboxName) // best-effort cleanup of a stale sandbox from a prior crash
 
 	fmt.Printf("[sandbox] Creating sandbox %s...\n", sandboxName)
-	args := buildOneshotCreateArgs(defaultSandboxConfig(), sandboxName, branch, cfg, repoURL)
-	exitCode, err := runOpenshellSandbox(args)
+	exitCode, err := runSandboxAgent(sandboxName, defaultSandboxConfig(), branch, cfg, repoURL)
 	if err != nil {
 		return err
 	}
@@ -135,22 +138,52 @@ func pushSandboxBranch(worktreePath, branch string) error {
 	return nil
 }
 
-// runOpenshellSandbox starts the openshell process with inherited stdio (so the
-// run is interactive) and waits for it, returning the sandbox exit code.
-func runOpenshellSandbox(args []string) (int, error) {
-	cmd := exec.Command("openshell", args...) //nolint:gosec // args built by buildOneshotCreateArgs
-	cmd.Stdin = os.Stdin
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	if err := cmd.Start(); err != nil {
+// runSandboxAgent runs the agent inside a fresh sandbox using the OpenShell
+// v0.0.53 flow: create (keep-alive) → upload the loom binary → exec the
+// bootstrap. (Earlier OpenShell took a single `create --upload … -- cmd` call;
+// v0.0.53 split upload and exec into their own subcommands.) Returns the agent's
+// exit code.
+func runSandboxAgent(name string, cfg SandboxConfig, branch string, oneshot SandboxOneshotConfig, repoURL string) (int, error) {
+	if err := runOpenshell(buildSandboxCreateArgs(name, cfg)); err != nil {
 		return 0, fmt.Errorf("openshell sandbox create: %w", err)
 	}
-	if err := cmd.Wait(); err != nil {
+	if err := uploadLoomBinary(name); err != nil {
+		return 0, err
+	}
+	return runOpenshellExit([]string{"sandbox", "exec", "-n", name, "--", "sh", "-c",
+		buildOneshotCommand(branch, oneshot, repoURL, cfg.Backend)})
+}
+
+// uploadLoomBinary uploads the running loom binary to sandboxLoomPath in the sandbox.
+func uploadLoomBinary(name string) error {
+	loomBin, err := os.Executable()
+	if err != nil {
+		return fmt.Errorf("locate loom binary: %w", err)
+	}
+	if err := runOpenshell([]string{"sandbox", "upload", name, loomBin, sandboxLoomPath}); err != nil {
+		return fmt.Errorf("openshell sandbox upload: %w", err)
+	}
+	return nil
+}
+
+// runOpenshell runs an openshell subcommand with inherited stdio and waits.
+func runOpenshell(args []string) error {
+	cmd := exec.Command("openshell", args...) //nolint:gosec // args built internally
+	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
+	return cmd.Run()
+}
+
+// runOpenshellExit runs an openshell subcommand and returns its exit code (0/nil
+// on success; the remote exit code with a nil error on a clean non-zero exit).
+func runOpenshellExit(args []string) (int, error) {
+	cmd := exec.Command("openshell", args...) //nolint:gosec // args built internally
+	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
+	if err := cmd.Run(); err != nil {
 		var exitErr *exec.ExitError
 		if errors.As(err, &exitErr) {
 			return exitErr.ExitCode(), nil
 		}
-		return 0, fmt.Errorf("waiting for sandbox: %w", err)
+		return 0, fmt.Errorf("openshell exec: %w", err)
 	}
 	return 0, nil
 }
@@ -277,40 +310,28 @@ func isSandboxProjectRoot(dir string) bool {
 	return false
 }
 
-// buildOneshotCreateArgs constructs the `openshell sandbox create ...` arguments
-// for an interactive one-shot run (PTY enabled — no --no-tty).
-func buildOneshotCreateArgs(cfg SandboxConfig, sandboxName, branch string, oneshot SandboxOneshotConfig, repoURL string) []string {
-	args := []string{"sandbox", "create", "--name", sandboxName}
-
-	// Upload the loom binary. --upload accepts a single value; the destination is
-	// a directory and the file keeps its name, so it must be named "loom".
-	if loomBin, err := os.Executable(); err == nil {
-		uploadPath := loomBin
-		if filepath.Base(loomBin) != "loom" {
-			tmpLoom := filepath.Join(os.TempDir(), "loom")
-			if data, err := os.ReadFile(loomBin); err == nil { //nolint:gosec // loomBin from os.Executable()
-				if err := os.WriteFile(tmpLoom, data, 0o755); err == nil { //nolint:gosec // uploaded binary must be executable
-					uploadPath = tmpLoom
-				}
-			}
-		}
-		args = append(args, "--upload", uploadPath+":/sandbox/bin")
-	}
-
+// buildSandboxCreateArgs builds the `openshell sandbox create` arguments. The
+// sandbox is created keep-alive (no trailing command and no --upload — those are
+// separate subcommands in OpenShell v0.0.53) so the loom binary can be uploaded
+// and the bootstrap exec'd afterwards.
+func buildSandboxCreateArgs(name string, cfg SandboxConfig) []string {
+	args := []string{"sandbox", "create", "--name", name}
 	if cfg.From != "" {
 		args = append(args, "--from", cfg.From)
 	}
 	for _, p := range cfg.Providers {
 		args = append(args, "--provider", p)
 	}
+	if len(cfg.Providers) > 0 {
+		// Non-interactive: auto-create missing providers from local credentials
+		// rather than prompting (which errors without a TTY).
+		args = append(args, "--auto-providers")
+	}
 	// Only pass --policy for custom networks; the default "open" relies on the
-	// sandbox's built-in policy (passing --policy can hang provisioning on some
-	// OpenShell versions).
+	// sandbox's built-in policy.
 	if cfg.Network != "" && cfg.Network != "open" {
 		args = append(args, "--policy", cfg.Network)
 	}
-
-	args = append(args, "--", "sh", "-c", buildOneshotCommand(branch, oneshot, repoURL, cfg.Backend))
 	return args
 }
 
@@ -319,7 +340,7 @@ func buildOneshotCreateArgs(cfg SandboxConfig, sandboxName, branch string, onesh
 func buildOneshotCommand(branch string, oneshot SandboxOneshotConfig, repoURL, backendOverride string) string {
 	var sb strings.Builder
 	sb.WriteString("set -e\n")
-	sb.WriteString("chmod +x /sandbox/bin/loom\n")
+	sb.WriteString("chmod +x " + sandboxLoomPath + "\n")
 	// The OpenShell proxy intercepts HTTPS but its CA cert isn't in the container
 	// trust store, so disable git SSL verification for sandbox network operations.
 	sb.WriteString("export GIT_SSL_NO_VERIFY=1\n")
@@ -339,7 +360,7 @@ func buildOneshotCommand(branch string, oneshot SandboxOneshotConfig, repoURL, b
 		sb.WriteString("export LOOM_WORKSPACE=" + shellQuote(oneshot.WorkspaceID) + "\n")
 	}
 
-	loomCmd := fmt.Sprintf("/sandbox/bin/loom %s %s",
+	loomCmd := fmt.Sprintf("%s %s %s", sandboxLoomPath,
 		shellQuote(oneshot.AgentType), shellQuote("worktrees/"+oneshot.AgentName))
 	if backendOverride != "" {
 		loomCmd += " --backend " + shellQuote(backendOverride)
