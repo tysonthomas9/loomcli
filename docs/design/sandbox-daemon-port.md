@@ -119,8 +119,33 @@ real sandboxes. Confirmed and fixed (one-shot, PR #118):
   **`host.containers.internal`** (gateway log: `grpc_endpoint=https://host.containers.internal:17670`)
   — not `host.docker.internal`/`192.168.127.254`. §D's `LOOM_SANDBOX_SERVER_URL` should be set per driver.
 
-Still open for a full task E2E: reliable loom delivery (prefer `--from` image), an isolated
-`loom serve` (playground backend) reachable at the driver's host address, and a seeded task.
+### Full task E2E — PROVEN (Podman/macOS)
+
+A real loom binary inside an OpenShell sandbox claimed + closed a live task in the host's
+FleetDB. The working recipe (what loom must generate for daemon-mode):
+
+1. **Host serve** exposed to sandboxes: `loom serve --bind 0.0.0.0 -p 18099` (isolated
+   `LOOM_CONFIG_DIR`); seed a workspace + tasks (`test/playground/setup.sh`).
+2. **Loom-baked sandbox image** (F1): `FROM <openshell base>` + `COPY --chmod=0755 loom …`
+   (a `GOOS=linux GOARCH=arm64` build; `--chmod` because the base runs as non-root `sandbox`).
+3. **Policy opening the serve port** — concrete hosts only (a wildcard `host: "**"` crashes
+   provisioning); bare `{host, port}` = L4 allow (all methods):
+   ```yaml
+   network_policies:
+     loom_serve:
+       name: loom-serve
+       endpoints: [ { host: host.containers.internal, port: 18099 }, { host: "192.168.127.254", port: 18099 } ]
+       binaries:  [ { path: /usr/local/bin/loom }, { path: /usr/bin/curl } ]
+   ```
+4. `openshell sandbox create --from <image> --policy <policy> -- true`, then
+   `exec -n <s> -- env LOOM_SERVER_URL=http://host.containers.internal:18099 LOOM_WORKSPACE=<ws> /usr/local/bin/loom data claim|close …`.
+
+Verified: `data list` returned the seeded tasks; `data claim PLAYGROUND-1` → host `in_progress`;
+`data close PLAYGROUND-1` → host `closed`.
+
+Not yet assembled into the single `loom task <wt> --sandbox` command (which additionally needs
+the workspace repo reachable from the sandbox over git + the agent's backend in the image) —
+but the novel risk (in-sandbox agent ⇄ host FleetDB over the OPA boundary) is fully retired.
 
 ## B. Config plumbing
 
