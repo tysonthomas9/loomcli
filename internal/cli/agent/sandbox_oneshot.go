@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
@@ -22,6 +23,11 @@ const sandboxHostGateway = "host.docker.internal"
 // sandboxLoomPath is where the loom binary is uploaded inside the sandbox. The
 // sandbox root is read-write, so no directory needs pre-creating.
 const sandboxLoomPath = "/sandbox/loom"
+
+// sandboxBootstrapPath is where the bootstrap script is uploaded. `openshell
+// sandbox exec` rejects newline-bearing arguments, so the multi-line bootstrap
+// is uploaded as a file and run as `sh <path>` rather than passed inline.
+const sandboxBootstrapPath = "/sandbox/bootstrap.sh"
 
 // SandboxConfig configures OpenShell sandbox execution for a one-shot agent run.
 //
@@ -139,31 +145,70 @@ func pushSandboxBranch(worktreePath, branch string) error {
 }
 
 // runSandboxAgent runs the agent inside a fresh sandbox using the OpenShell
-// v0.0.53 flow: create (keep-alive) → upload the loom binary → exec the
-// bootstrap. (Earlier OpenShell took a single `create --upload … -- cmd` call;
-// v0.0.53 split upload and exec into their own subcommands.) Returns the agent's
-// exit code.
+// v0.0.53 flow: create (keep-alive, with a trivial command so create returns
+// instead of attaching an interactive shell) → upload the loom binary → upload
+// the bootstrap script → exec it. The bootstrap is uploaded as a file and run as
+// `sh <path>` because `sandbox exec` rejects multi-line arguments. Returns the
+// agent's exit code.
 func runSandboxAgent(name string, cfg SandboxConfig, branch string, oneshot SandboxOneshotConfig, repoURL string) (int, error) {
+	loomBin, err := resolveSandboxLoomBinary()
+	if err != nil {
+		return 0, err
+	}
 	if err := runOpenshell(buildSandboxCreateArgs(name, cfg)); err != nil {
 		return 0, fmt.Errorf("openshell sandbox create: %w", err)
 	}
-	if err := uploadLoomBinary(name); err != nil {
+	if err := runOpenshell([]string{"sandbox", "upload", name, loomBin, sandboxLoomPath}); err != nil {
+		return 0, fmt.Errorf("openshell sandbox upload loom: %w", err)
+	}
+	scriptPath, cleanup, err := writeBootstrapScript(buildOneshotCommand(branch, oneshot, repoURL, cfg.Backend))
+	if err != nil {
 		return 0, err
 	}
-	return runOpenshellExit([]string{"sandbox", "exec", "-n", name, "--", "sh", "-c",
-		buildOneshotCommand(branch, oneshot, repoURL, cfg.Backend)})
+	defer cleanup()
+	if err := runOpenshell([]string{"sandbox", "upload", name, scriptPath, sandboxBootstrapPath}); err != nil {
+		return 0, fmt.Errorf("openshell sandbox upload bootstrap: %w", err)
+	}
+	return runOpenshellExit([]string{"sandbox", "exec", "-n", name, "--", "sh", sandboxBootstrapPath})
 }
 
-// uploadLoomBinary uploads the running loom binary to sandboxLoomPath in the sandbox.
-func uploadLoomBinary(name string) error {
-	loomBin, err := os.Executable()
+// resolveSandboxLoomBinary returns a loom binary that can run inside the (Linux)
+// sandbox. The container is Linux, so a darwin/host binary won't execute (exec
+// format error — the arch matches, the OS/format does not). Prefer an explicit
+// LOOM_SANDBOX_LOOM_BIN; otherwise the running binary only when this host is
+// itself Linux.
+func resolveSandboxLoomBinary() (string, error) {
+	if v := strings.TrimSpace(os.Getenv("LOOM_SANDBOX_LOOM_BIN")); v != "" {
+		return v, nil
+	}
+	if runtime.GOOS == "linux" {
+		return os.Executable()
+	}
+	return "", fmt.Errorf("--sandbox runs a Linux container but this host is %s/%s: set "+
+		"LOOM_SANDBOX_LOOM_BIN to a `GOOS=linux GOARCH=%s` loom build (or use a --from image with loom baked in)",
+		runtime.GOOS, runtime.GOARCH, runtime.GOARCH)
+}
+
+// writeBootstrapScript writes the bootstrap to a temp file and returns its path
+// and a cleanup func. Used because `openshell sandbox exec` rejects arguments
+// that contain newlines, so the multi-line bootstrap is uploaded and run by path.
+func writeBootstrapScript(script string) (string, func(), error) {
+	f, err := os.CreateTemp("", "loom-sandbox-bootstrap-*.sh")
 	if err != nil {
-		return fmt.Errorf("locate loom binary: %w", err)
+		return "", func() {}, fmt.Errorf("write bootstrap script: %w", err)
 	}
-	if err := runOpenshell([]string{"sandbox", "upload", name, loomBin, sandboxLoomPath}); err != nil {
-		return fmt.Errorf("openshell sandbox upload: %w", err)
+	name := f.Name()
+	cleanup := func() { _ = os.Remove(name) }
+	if _, err := f.WriteString(script); err != nil {
+		_ = f.Close()
+		cleanup()
+		return "", func() {}, fmt.Errorf("write bootstrap script: %w", err)
 	}
-	return nil
+	if err := f.Close(); err != nil {
+		cleanup()
+		return "", func() {}, fmt.Errorf("write bootstrap script: %w", err)
+	}
+	return name, cleanup, nil
 }
 
 // runOpenshell runs an openshell subcommand with inherited stdio and waits.
@@ -311,9 +356,8 @@ func isSandboxProjectRoot(dir string) bool {
 }
 
 // buildSandboxCreateArgs builds the `openshell sandbox create` arguments. The
-// sandbox is created keep-alive (no trailing command and no --upload — those are
-// separate subcommands in OpenShell v0.0.53) so the loom binary can be uploaded
-// and the bootstrap exec'd afterwards.
+// loom binary and bootstrap are uploaded/exec'd separately afterwards (v0.0.53
+// has no --upload create flag), so create only provisions the sandbox.
 func buildSandboxCreateArgs(name string, cfg SandboxConfig) []string {
 	args := []string{"sandbox", "create", "--name", name}
 	if cfg.From != "" {
@@ -332,6 +376,10 @@ func buildSandboxCreateArgs(name string, cfg SandboxConfig) []string {
 	if cfg.Network != "" && cfg.Network != "open" {
 		args = append(args, "--policy", cfg.Network)
 	}
+	// Trailing trivial command: create RUNS it and returns. A command-less create
+	// attaches an interactive SSH shell and blocks forever in a non-TTY context.
+	// Without --no-keep the sandbox persists for the upload + exec steps.
+	args = append(args, "--", "true")
 	return args
 }
 

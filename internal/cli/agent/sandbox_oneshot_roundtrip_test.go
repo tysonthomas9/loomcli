@@ -81,8 +81,14 @@ func TestSandboxOneshot_RoundTrip(t *testing.T) {
 	// FleetDB connectivity preconditions: isolate config so no real workspace is
 	// resolved, then supply a container-reachable server URL + workspace via env.
 	t.Setenv("LOOM_CONFIG_DIR", filepath.Join(root, "loomcfg"))
-	t.Setenv("LOOM_SANDBOX_SERVER_URL", "http://host.docker.internal:8080")
+	t.Setenv("LOOM_SANDBOX_SERVER_URL", "http://host.containers.internal:8080")
 	t.Setenv("LOOM_WORKSPACE", "ws-test")
+
+	// F1: the sandbox is Linux, so on a non-linux host the upload must be a linux
+	// loom build. Point at a dummy file (the fake openshell only logs the upload).
+	loomLinux := filepath.Join(root, "loom-linux")
+	mustWrite(t, loomLinux, "#!fake-linux-loom\n")
+	t.Setenv("LOOM_SANDBOX_LOOM_BIN", loomLinux)
 
 	// Run the real one-shot flow.
 	if err := runSandboxOneshot(SandboxOneshotConfig{
@@ -108,28 +114,30 @@ func TestSandboxOneshot_RoundTrip(t *testing.T) {
 	if strings.Contains(log, "CLONE_FAILED") {
 		t.Fatalf("fake openshell could not clone the pushed branch:\n%s", log)
 	}
+	// The openshell *argv* log shows the orchestration. The bootstrap's contents
+	// (git clone, --parent, LOOM_SERVER_URL exports, …) live in the uploaded
+	// bootstrap file — not in any argument — and are covered by the
+	// buildOneshotCommand unit tests.
 	for _, want := range []string{
-		"sandbox create --name loom-falcon-", // create (keep-alive)
+		"sandbox create --name loom-falcon-", // create
 		"--provider claude",                  // default providers
 		"--provider github",
 		"--auto-providers",
-		"sandbox upload loom-falcon-", // loom binary uploaded as its own step
-		"/sandbox/loom",
-		"sandbox exec -n loom-falcon-", // bootstrap exec'd as its own step
-		"-- sh -c",
-		"git clone --branch 'sbx'", // bootstrap script
-		"--parent 'epic-9'",        // parent threaded through
-		"git push origin 'sbx'",    // results pushed back from inside
-		"export LOOM_SERVER_URL='http://host.docker.internal:8080'", // FleetDB connectivity
-		"export LOOM_WORKSPACE='ws-test'",
+		"-- true",                     // F2: create runs a trivial command and returns (no shell attach)
+		"sandbox upload loom-falcon-", // uploads (loom binary + bootstrap)
+		"/sandbox/loom",               // loom binary destination
+		"/sandbox/bootstrap.sh",       // F3: bootstrap uploaded as a file
+		"sandbox exec -n loom-falcon-",
+		"sh /sandbox/bootstrap.sh", // F3: run by path, not inline `-- sh -c <script>`
 	} {
 		if !strings.Contains(log, want) {
 			t.Errorf("openshell invocation missing %q\n--- log ---\n%s", want, log)
 		}
 	}
-	// v0.0.53: --upload is gone (separate `sandbox upload`); "open" → no --policy;
-	// one-shot is interactive → no --no-tty.
-	for _, absent := range []string{"--upload", ":/sandbox/bin", "--policy", "--no-tty"} {
+	// v0.0.53 constraints: no --upload create flag; "open" → no --policy; one-shot
+	// interactive → no --no-tty; and F3 — the bootstrap is never passed inline, so
+	// `sandbox exec` never receives a multi-line `sh -c` argument.
+	for _, absent := range []string{"--upload", ":/sandbox/bin", "--policy", "--no-tty", "sh -c"} {
 		if strings.Contains(log, absent) {
 			t.Errorf("unexpected %q in openshell invocations\n%s", absent, log)
 		}
