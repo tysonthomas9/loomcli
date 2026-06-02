@@ -43,14 +43,14 @@ func TestBuildOneshotCommand_FullScript(t *testing.T) {
 
 	wants := []string{
 		"set -e\n",
-		"chmod +x /sandbox/bin/loom\n",
+		"chmod +x /sandbox/loom\n",
 		"export GIT_SSL_NO_VERIFY=1\n",
 		"git clone --branch 'feature/x' --single-branch 'https://github.com/o/r.git' /sandbox/repo\n",
 		"cd /sandbox/repo\n",
 		// FleetDB connectivity: the agent inside reaches loom-serve for task state.
 		"export LOOM_SERVER_URL='http://host.docker.internal:8080'\n",
 		"export LOOM_WORKSPACE='ws-123'\n",
-		"/sandbox/bin/loom 'task' 'worktrees/falcon' --backend 'claude' --parent 'epic-1'\n",
+		"/sandbox/loom 'task' 'worktrees/falcon' --backend 'claude' --parent 'epic-1'\n",
 		"git diff --cached --quiet || git commit -m 'sandbox agent work [feature/x]'\n",
 		"git push origin 'feature/x'\n",
 	}
@@ -69,7 +69,7 @@ func TestBuildOneshotCommand_NoBackendNoParent(t *testing.T) {
 	cfg := SandboxOneshotConfig{AgentType: "plan", AgentName: "nova"}
 	script := buildOneshotCommand("main", cfg, "git@x:o/r.git", "")
 
-	if !strings.Contains(script, "/sandbox/bin/loom 'plan' 'worktrees/nova'\n") {
+	if !strings.Contains(script, "/sandbox/loom 'plan' 'worktrees/nova'\n") {
 		t.Errorf("expected bare loom invocation without flags\n%s", script)
 	}
 	if strings.Contains(script, "--backend") {
@@ -80,40 +80,50 @@ func TestBuildOneshotCommand_NoBackendNoParent(t *testing.T) {
 	}
 }
 
-func TestBuildOneshotCreateArgs_OpenNetwork(t *testing.T) {
-	cfg := SandboxConfig{Network: "open", Providers: []string{"claude", "github"}}
-	args := buildOneshotCreateArgs(cfg, "loom-falcon-abc", "br",
-		SandboxOneshotConfig{AgentType: "task", AgentName: "falcon"}, "https://x")
+func TestBuildSandboxCreateArgs(t *testing.T) {
+	t.Run("open network with providers", func(t *testing.T) {
+		args := buildSandboxCreateArgs("loom-falcon-abc",
+			SandboxConfig{Network: "open", Providers: []string{"claude", "github"}})
 
-	if !slices.Equal(args[:4], []string{"sandbox", "create", "--name", "loom-falcon-abc"}) {
-		t.Errorf("unexpected leading args: %v", args[:4])
-	}
-	// "open" must NOT pass --policy, and one-shot must stay interactive (no --no-tty).
-	if slices.Contains(args, "--policy") {
-		t.Error("open network must not pass --policy")
-	}
-	if slices.Contains(args, "--no-tty") {
-		t.Error("one-shot mode must be interactive (no --no-tty)")
-	}
-	if n := countFlag(args, "--provider"); n != 2 {
-		t.Errorf("--provider count = %d, want 2", n)
-	}
-	assertTrailingShellCommand(t, args)
-}
+		if !slices.Equal(args[:4], []string{"sandbox", "create", "--name", "loom-falcon-abc"}) {
+			t.Errorf("unexpected leading args: %v", args[:4])
+		}
+		joined := strings.Join(args, " ")
+		for _, want := range []string{"--provider claude", "--provider github", "--auto-providers"} {
+			if !strings.Contains(joined, want) {
+				t.Errorf("missing %q in %v", want, args)
+			}
+		}
+		// v0.0.53: create is keep-alive — no --upload, no trailing command; the
+		// one-shot stays interactive (no --no-tty); "open" passes no --policy.
+		if slices.Contains(args, "--upload") {
+			t.Error("v0.0.53 has no --upload create flag")
+		}
+		if slices.Contains(args, "--") {
+			t.Error("create must be keep-alive (no trailing command)")
+		}
+		if slices.Contains(args, "--no-tty") {
+			t.Error("one-shot create is interactive")
+		}
+		if slices.Contains(args, "--policy") {
+			t.Error("open network must not pass --policy")
+		}
+	})
 
-func TestBuildOneshotCreateArgs_CustomNetworkAndImage(t *testing.T) {
-	cfg := SandboxConfig{Network: "/etc/policy.yaml", From: "ubuntu:22.04"}
-	args := buildOneshotCreateArgs(cfg, "loom-x-1", "br",
-		SandboxOneshotConfig{AgentType: "task", AgentName: "x"}, "https://x")
-
-	joined := strings.Join(args, " ")
-	if !strings.Contains(joined, "--policy /etc/policy.yaml") {
-		t.Errorf("custom network must pass --policy: %v", args)
-	}
-	if !strings.Contains(joined, "--from ubuntu:22.04") {
-		t.Errorf("From must pass --from: %v", args)
-	}
-	assertTrailingShellCommand(t, args)
+	t.Run("custom network and image", func(t *testing.T) {
+		args := buildSandboxCreateArgs("loom-x-1",
+			SandboxConfig{Network: "/etc/policy.yaml", From: "ubuntu:22.04"})
+		joined := strings.Join(args, " ")
+		if !strings.Contains(joined, "--policy /etc/policy.yaml") {
+			t.Errorf("custom network must pass --policy: %v", args)
+		}
+		if !strings.Contains(joined, "--from ubuntu:22.04") {
+			t.Errorf("From must pass --from: %v", args)
+		}
+		if slices.Contains(args, "--auto-providers") {
+			t.Error("no providers => no --auto-providers")
+		}
+	})
 }
 
 func TestResolveSandboxServerURL(t *testing.T) {
@@ -145,30 +155,4 @@ func TestResolveSandboxServerURL(t *testing.T) {
 			t.Errorf("got %q, want empty", got)
 		}
 	})
-}
-
-// countFlag counts occurrences of flag in args.
-func countFlag(args []string, flag string) int {
-	n := 0
-	for _, a := range args {
-		if a == flag {
-			n++
-		}
-	}
-	return n
-}
-
-// assertTrailingShellCommand checks the args end with `-- sh -c <script>`.
-func assertTrailingShellCommand(t *testing.T, args []string) {
-	t.Helper()
-	if len(args) < 4 {
-		t.Fatalf("args too short for trailing command: %v", args)
-	}
-	tail := args[len(args)-4:]
-	if tail[0] != "--" || tail[1] != "sh" || tail[2] != "-c" {
-		t.Errorf("expected trailing `-- sh -c <script>`, got %v", tail)
-	}
-	if !strings.Contains(tail[3], "git clone") {
-		t.Errorf("trailing script should be the bootstrap command, got %q", tail[3])
-	}
 }

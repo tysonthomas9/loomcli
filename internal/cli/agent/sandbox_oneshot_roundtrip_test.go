@@ -9,14 +9,15 @@ import (
 	"testing"
 )
 
-// fakeOpenshell records each invocation's args to $OPENSHELL_LOG. On "sandbox
-// create" it simulates the container doing work and pushing the branch back:
-// it clones $FAKE_REMOTE at $FAKE_BRANCH, adds a marker file, commits, and pushes.
-// This lets the host-side round-trip (push → create → fetch + ff-merge) be
-// verified end-to-end without a real OpenShell gateway.
+// fakeOpenshell records each invocation's args to $OPENSHELL_LOG. It models the
+// OpenShell v0.0.53 flow (create → upload → exec → delete); on "sandbox exec" —
+// when the bootstrap actually runs — it simulates the agent doing work and
+// pushing the branch back: it clones $FAKE_REMOTE at $FAKE_BRANCH, adds a marker
+// file, commits, and pushes. This verifies the host-side round-trip
+// (push → create → upload → exec → fetch + ff-merge) without a real gateway.
 const fakeOpenshell = `#!/bin/sh
 printf '%s\n' "$*" >> "$OPENSHELL_LOG"
-if [ "$2" = "create" ]; then
+if [ "$2" = "exec" ]; then
   work=$(mktemp -d)
   if ! git clone --branch "$FAKE_BRANCH" "$FAKE_REMOTE" "$work/clone" >/dev/null 2>&1; then
     echo "CLONE_FAILED" >> "$OPENSHELL_LOG"; exit 0
@@ -108,10 +109,13 @@ func TestSandboxOneshot_RoundTrip(t *testing.T) {
 		t.Fatalf("fake openshell could not clone the pushed branch:\n%s", log)
 	}
 	for _, want := range []string{
-		"sandbox create --name loom-falcon-",
-		":/sandbox/bin",     // loom binary upload
-		"--provider claude", // default providers
+		"sandbox create --name loom-falcon-", // create (keep-alive)
+		"--provider claude",                  // default providers
 		"--provider github",
+		"--auto-providers",
+		"sandbox upload loom-falcon-", // loom binary uploaded as its own step
+		"/sandbox/loom",
+		"sandbox exec -n loom-falcon-", // bootstrap exec'd as its own step
 		"-- sh -c",
 		"git clone --branch 'sbx'", // bootstrap script
 		"--parent 'epic-9'",        // parent threaded through
@@ -123,12 +127,12 @@ func TestSandboxOneshot_RoundTrip(t *testing.T) {
 			t.Errorf("openshell invocation missing %q\n--- log ---\n%s", want, log)
 		}
 	}
-	// "open" network → no --policy; one-shot is interactive → no --no-tty.
-	if strings.Contains(log, "--policy") {
-		t.Errorf("default open network must not pass --policy\n%s", log)
-	}
-	if strings.Contains(log, "--no-tty") {
-		t.Errorf("one-shot must be interactive (no --no-tty)\n%s", log)
+	// v0.0.53: --upload is gone (separate `sandbox upload`); "open" → no --policy;
+	// one-shot is interactive → no --no-tty.
+	for _, absent := range []string{"--upload", ":/sandbox/bin", "--policy", "--no-tty"} {
+		if strings.Contains(log, absent) {
+			t.Errorf("unexpected %q in openshell invocations\n%s", absent, log)
+		}
 	}
 
 	// 3. delete was called for cleanup (stale + deferred).
