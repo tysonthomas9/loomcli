@@ -116,7 +116,7 @@ func runSandboxOneshot(cfg SandboxOneshotConfig) error {
 	deleteSandbox(sandboxName) // best-effort cleanup of a stale sandbox from a prior crash
 
 	fmt.Printf("[sandbox] Creating sandbox %s...\n", sandboxName)
-	exitCode, err := runSandboxAgent(sandboxName, defaultSandboxConfig(), branch, cfg, repoURL)
+	exitCode, err := runSandboxAgent(sandboxName, defaultSandboxConfig(), branch, cfg, sandboxCloneURL(repoURL))
 	if err != nil {
 		return err
 	}
@@ -277,6 +277,9 @@ func defaultSandboxConfig() SandboxConfig {
 			}
 		}
 	}
+	if b := strings.TrimSpace(os.Getenv("LOOM_SANDBOX_BACKEND")); b != "" {
+		cfg.Backend = b
+	}
 	return cfg
 }
 
@@ -287,6 +290,21 @@ func resolveSandboxRepoURL(projectDir string) string {
 		return ""
 	}
 	return strings.TrimSpace(out)
+}
+
+// sandboxCloneURL returns the git URL the sandbox uses to clone the repo. The host
+// and the sandbox reach the host at different addresses, so a localhost origin is
+// rewritten to the container host gateway — or overridden via LOOM_SANDBOX_REPO_URL
+// with an address both sides can reach (e.g. the host LAN IP or a git endpoint).
+func sandboxCloneURL(origin string) string {
+	if v := strings.TrimSpace(os.Getenv("LOOM_SANDBOX_REPO_URL")); v != "" {
+		return v
+	}
+	out := origin
+	for _, lh := range []string{"localhost", "127.0.0.1", "0.0.0.0"} {
+		out = strings.ReplaceAll(out, lh, sandboxHostGateway)
+	}
+	return out
 }
 
 // applySandboxFleetConfig resolves the FleetDB/loom-serve endpoint + workspace the
