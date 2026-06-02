@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -295,7 +295,7 @@ func deleteSandbox(name string) {
 	defer cancel()
 	cmd := exec.CommandContext(ctx, openshellBinary(), "sandbox", "delete", name) //nolint:gosec // name is internally generated
 	if out, err := cmd.CombinedOutput(); err != nil {
-		log.Printf("[sandbox] delete %s: %s: %v", name, string(out), err)
+		slog.Warn("sandbox delete failed", "name", name, "output", string(out), "err", err)
 	}
 }
 
