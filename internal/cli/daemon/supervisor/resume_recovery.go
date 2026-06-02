@@ -8,73 +8,120 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/cli/agent"
 )
 
-// maxResumeFailures bounds consecutive failed resume attempts for a worktree
-// before the supervisor abandons resume and cold-starts instead (resume-first
-// with a cold-start fallback). Mirrors the automode resumeFailures>=2 ceiling.
+// recoveryMode classifies how a supervise cycle recovers a worktree after a
+// crash. The zero value is recoverCold (no recovery — claim a fresh task).
+type recoveryMode int
+
+const (
+	recoverCold       recoveryMode = iota // destructive recover + claim a fresh task
+	recoverResume                         // preserve lock + re-claim the same task + `--resume`
+	recoverCheckpoint                     // re-claim the same task, cold-start with checkpoint injection (no `--resume`)
+)
+
+// maxResumeFailures is the number of consecutive `--resume` attempts before the
+// supervisor stops resuming. The (maxResumeFailures)th failure escalates to a
+// single checkpoint retry of the SAME task; a failure beyond that cold-starts a
+// fresh task. So the escalation is: resume × maxResumeFailures → checkpoint × 1
+// → cold-start. Mirrors the automode resumeFailures>=2 ceiling.
 const maxResumeFailures = 2
 
-// detectResumableTask inspects the worktree's surviving lock to decide whether
-// this supervise cycle should RESUME an interrupted task rather than claim a
-// fresh one. It returns the task id to resume, or "" to cold-start.
+// detectRecovery inspects the worktree's surviving lock and the persisted
+// failure count to decide how this supervise cycle should recover: RESUME the
+// interrupted task's Claude session, retry the same task with CHECKPOINT
+// injection (resume-first / checkpoint-fallback), or COLD-start a fresh task. It
+// returns the task id to re-claim ("" for cold) and the mode.
 //
-// A resume is offered only when the lock is a genuine crash remnant: a DEAD
-// agent PID with a carried Claude session id + task id, within the resume TTL,
-// and under the consecutive-failure ceiling. The lock is deliberately NOT
-// touched here — preserving it lets the agent's AcquireLock carry the session
-// id + task id forward (lock.go), so agent-side maybeResumeDaemonSession can
-// arm `--resume`. (The destructive recoverAgent path would delete the lock and
-// discard the session id, which is exactly what prevented resume before.)
-func (s *Supervisor) detectResumableTask(ap *AgentProcess) string {
+// The lock is deliberately NOT mutated here; the resume/checkpoint paths decide
+// what to preserve vs clear. A resume needs a carried Claude session id; a
+// checkpoint does not (the agent re-derives the prior attempt's WIP from the
+// saved checkpoint + worktree diff).
+func (s *Supervisor) detectRecovery(ap *AgentProcess) (string, recoveryMode) {
 	info, running, err := cli.CheckLock(ap.WorktreePath)
-	if err != nil || info == nil {
-		return ""
-	}
-	if running {
-		return "" // the prior agent is still alive — not a crash to recover
-	}
-	if info.TaskID == "" || info.ClaudeSessionID == "" {
-		return "" // no carried task/session ⇒ nothing to resume
+	if err != nil || info == nil || running || info.TaskID == "" {
+		return "", recoverCold // no crash remnant / agent still alive / no task to recover
 	}
 	if ttl := agent.ResumeTTL(); ttl > 0 && !info.TaskStartedAt.IsZero() && time.Since(info.TaskStartedAt) > ttl {
-		slog.Info("interrupted task too old to resume; cold-starting",
+		slog.Info("interrupted task too old to recover; cold-starting",
 			"worktree", ap.Entry.Worktree, "task_id", info.TaskID,
 			"age", time.Since(info.TaskStartedAt).Round(time.Second))
-		return ""
+		return "", recoverCold
 	}
 	ap.Mu.Lock()
 	fails := ap.ResumeFailures
 	ap.Mu.Unlock()
-	if fails >= maxResumeFailures {
-		slog.Warn("resume failure ceiling reached; cold-starting",
+	switch {
+	case fails > maxResumeFailures:
+		// resume (×maxResumeFailures) + checkpoint (×1) both exhausted → stop
+		// retrying this task and claim a fresh one.
+		slog.Warn("recovery exhausted; cold-starting a fresh task",
 			"worktree", ap.Entry.Worktree, "task_id", info.TaskID, "failures", fails)
-		return ""
+		return "", recoverCold
+	case fails == maxResumeFailures:
+		// `--resume` kept failing → one checkpoint retry of the SAME task.
+		return info.TaskID, recoverCheckpoint
+	case info.ClaudeSessionID != "":
+		return info.TaskID, recoverResume
+	default:
+		// A task remnant with no captured session can't be `--resume`d; that is
+		// out of scope for resume-recovery — cold-start.
+		return "", recoverCold
 	}
-	return info.TaskID
 }
 
-// prepareResume sets up a resume cycle. It kills any orphaned backend the
-// crashed run left under this worktree (so we never run two CLIs on one
-// session) but PRESERVES the lock, the worktree's in-progress files, and the
-// fleet claim — the opposite of the destructive recoverAgent path — then
-// records the interrupted task so claimTask self-recovers it (claimResumeTask).
+// prepareResume sets up a `--resume` cycle: kill any orphaned backend the crashed
+// run left under this worktree (so two CLIs never share one session) but PRESERVE
+// the lock, the in-progress worktree, and the fleet claim — the opposite of the
+// destructive recoverAgent path — then target the interrupted task so claimTask
+// self-recovers it. The preserved lock carries the Claude session id forward
+// (cli.AcquireLock) so agent-side maybeResumeDaemonSession arms `--resume`.
 func (s *Supervisor) prepareResume(ap *AgentProcess, taskID string) {
-	if killed := s.killOrphanedWorktreeProcesses([]string{ap.WorktreePath}); killed > 0 {
-		slog.Info("killed orphaned backend before resume", "worktree", ap.Entry.Worktree, "count", killed)
-	}
+	s.sweepWorktreeBackends(ap)
 	ap.Mu.Lock()
 	ap.ResumeTaskID = taskID
 	ap.Mu.Unlock()
 	slog.Info("resuming interrupted task", "worktree", ap.Entry.Worktree, "task_id", taskID)
 }
 
-// recordResumeOutcome updates the consecutive-resume-failure counter after a
-// supervised run. A non-resume cycle is ignored; a clean resume clears the
-// counter; a failed resume advances it toward the cold-start ceiling.
+// prepareCheckpointRetry sets up a CHECKPOINT cycle after `--resume` is
+// exhausted: re-claim the SAME task but CLEAR the carried Claude session id so
+// the agent cold-starts (no `--resume`) and injectCheckpointIfNotResuming
+// re-derives the prior attempt's WIP from the saved checkpoint. The worktree
+// (and its diff) is preserved — recoverAgent is skipped — so the checkpoint has
+// content.
+func (s *Supervisor) prepareCheckpointRetry(ap *AgentProcess, taskID string) {
+	s.sweepWorktreeBackends(ap)
+	// Drop the carried session so maybeResumeDaemonSession won't arm `--resume`;
+	// the agent then falls back to checkpoint injection for this task.
+	if err := cli.ClearLockClaudeSessionID(ap.WorktreePath); err != nil {
+		slog.Warn("checkpoint retry: failed to clear carried session id",
+			"worktree", ap.Entry.Worktree, "task_id", taskID, "err", err)
+	}
+	ap.Mu.Lock()
+	ap.ResumeTaskID = taskID
+	ap.Mu.Unlock()
+	slog.Info("resume exhausted; retrying task with checkpoint",
+		"worktree", ap.Entry.Worktree, "task_id", taskID)
+}
+
+// sweepWorktreeBackends kills any orphaned backend process still running under
+// this worktree from a crashed run, scoped so the daemon never signals
+// processes that are not its own.
+func (s *Supervisor) sweepWorktreeBackends(ap *AgentProcess) {
+	if killed := s.killOrphanedWorktreeProcesses([]string{ap.WorktreePath}); killed > 0 {
+		slog.Info("killed orphaned backend before recovery",
+			"worktree", ap.Entry.Worktree, "count", killed)
+	}
+}
+
+// recordResumeOutcome updates the persisted recovery-failure counter after a
+// supervised run. Only recovery cycles (resume or checkpoint) count: a clean
+// exit clears the counter (the task progressed), a failure advances it toward
+// the cold-start ceiling. A non-recovery (cold) cycle is ignored.
 func (s *Supervisor) recordResumeOutcome(ap *AgentProcess) {
 	ap.Mu.Lock()
 	defer ap.Mu.Unlock()
-	if ap.ResumeTaskID == "" {
-		return // this cycle was not a resume
+	if ap.RecoveryMode == recoverCold {
+		return // this cycle was not a recovery
 	}
 	if ap.LastExitCode == 0 {
 		ap.ResumeFailures = 0
