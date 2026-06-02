@@ -255,13 +255,29 @@ func mergeSandboxResults(projectDir, worktreePath, branch string) {
 	}
 }
 
-// defaultSandboxConfig returns the built-in sandbox defaults for one-shot runs.
-// v5 dropped loom.yaml; daemon-level FleetDB-backed config is a deferred change.
+// defaultSandboxConfig returns the sandbox defaults for one-shot runs, with env
+// overrides. v5 dropped loom.yaml; daemon-level FleetDB-backed config is a
+// deferred change, so these env knobs are how an operator configures a one-shot:
+//
+//   - LOOM_SANDBOX_POLICY    — path to a custom OPA/Rego policy YAML. Required to
+//     reach a `loom serve` on a non-443/80/22 port (the default "open" policy
+//     only opens common ports); passed to `openshell sandbox create --policy`.
+//   - LOOM_SANDBOX_PROVIDERS — comma-separated credential providers (empty string
+//     disables provider attachment — e.g. for the token-free playground backend).
 func defaultSandboxConfig() SandboxConfig {
-	return SandboxConfig{
-		Network:   "open",
-		Providers: []string{"claude", "github"},
+	cfg := SandboxConfig{Network: "open", Providers: []string{"claude", "github"}}
+	if p := strings.TrimSpace(os.Getenv("LOOM_SANDBOX_POLICY")); p != "" {
+		cfg.Network = p
 	}
+	if v, ok := os.LookupEnv("LOOM_SANDBOX_PROVIDERS"); ok {
+		cfg.Providers = nil
+		for _, p := range strings.Split(v, ",") {
+			if p = strings.TrimSpace(p); p != "" {
+				cfg.Providers = append(cfg.Providers, p)
+			}
+		}
+	}
+	return cfg
 }
 
 // resolveSandboxRepoURL returns the origin remote URL for projectDir, or "" on error.
