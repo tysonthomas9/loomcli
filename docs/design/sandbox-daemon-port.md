@@ -160,9 +160,22 @@ additionally needs the following — **two are one-shot code/design changes**, t
    same URL to the sandbox to clone — but host and sandbox reach the host at different addresses
    (`127.0.0.1` vs `host.containers.internal`). Needs the same host-gateway rewrite as
    `LOOM_SANDBOX_SERVER_URL` (or a `LOOM_SANDBOX_REPO_URL` override) — the §D fix, applied to the clone URL.
-2. **[code] bootstrap worktree layout.** The bootstrap runs `loom task worktrees/<name>` inside the
-   fresh clone, but a clone has no `worktrees/<name>` (worktrees are local, not committed). A v2-era
-   assumption that doesn't fit clone-fresh on v5 — rework to run in the repo root / `worktree add`.
+2. **[code] ROOT BLOCKER — agent can't resolve its workspace/config remotely.** Two layers:
+   - The bootstrap's `loom task worktrees/<name>` assumes the worktree lives *inside* the cloned
+     repo, but v5 keeps worktrees in the loom config dir as git worktrees at
+     `<cfg>/workspaces/<ws>/worktrees/<repo>/<agent>` — never in the repo.
+   - Deeper: even the v5 headless form (`loom task <agent> --daemon-mode`, API backend wired)
+     dies at `load workspace config: open fleet-db store: fleet-db binary not found`.
+     `ResolveActiveWorkspace`/`LoadDaemonConfig` resolve workspace+daemon config from a **local
+     fleet-db store** (`bootstrap.OpenStore`), which a bare sandbox has no data for. The API
+     backend serves *tasks*, not *workspace config*.
+
+   **Same root cause as `bd sync`:** v5 moved config out of the repo (`loom.yaml` → FleetDB), so
+   the v2 model ("clone repo → agent reads local `loom.yaml`") no longer works — the clone carries
+   no config, and the agent has no way to load its workspace from the remote serve. **Real fix:
+   teach loom's workspace/daemon-config resolution to use the API backend** (so an agent can run
+   against a remote serve with no local store) — a v5 config-layer change, the true prerequisite
+   for *any* sandboxed/remote agent, well beyond the one-shot bootstrap.
 3. **[infra] writable git endpoint** reachable from both host and sandbox (`git daemon
    --enable=receive-pack` on a both-reachable address, e.g. the host LAN IP).
 4. **[infra] agent backend in the `--from` image** (e.g. the playground backend) + a selector
