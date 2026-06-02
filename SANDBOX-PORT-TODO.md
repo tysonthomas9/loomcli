@@ -25,6 +25,14 @@ agent invocation inside an OpenShell container instead of on the host:
 `--sandbox` is mutually exclusive with `--auto`. Network defaults to the sandbox's
 built-in "open" policy (common ports); providers default to `claude,github`.
 
+**FleetDB connectivity:** because v5 task state is in FleetDB (not git), the bootstrap exports
+`LOOM_SERVER_URL` + `LOOM_WORKSPACE` so the in-container agent uses the loom-serve HTTP API to
+claim/update work. The host resolves the URL from `LOOM_SANDBOX_SERVER_URL` (explicit) or a
+localhost→`host.docker.internal` rewrite of `LOOM_SERVER_URL`; it **fails fast** if no reachable
+server/workspace is found. Remaining environment caveats (host-gateway address, OPA port for a
+non-443/80/22 serve, headless auth) are tracked in `docs/design/sandbox-daemon-port.md` §D — not
+yet verified against a live gateway.
+
 Files:
 ```
 internal/cli/agent/sandbox_oneshot.go        # all one-shot logic (self-contained)

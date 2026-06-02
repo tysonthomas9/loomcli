@@ -12,7 +12,12 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/cli"
+	"github.com/tysonthomas9/loomcli/internal/cli/config"
 )
+
+// sandboxHostGateway is the address a sandbox container uses to reach a service
+// (e.g. `loom serve`) on the host when only a localhost server URL is known.
+const sandboxHostGateway = "host.docker.internal"
 
 // SandboxConfig configures OpenShell sandbox execution for a one-shot agent run.
 //
@@ -34,6 +39,12 @@ type SandboxOneshotConfig struct {
 	AgentName    string // worktree/workspace name
 	WorktreePath string // resolved local worktree path
 	ParentID     string // --parent epic filter (may be empty)
+
+	// Resolved at runtime (not set by the flag): the FleetDB/loom-serve endpoint
+	// the in-container agent uses to claim/update tasks (v5 task state is in
+	// FleetDB, not the repo), plus the workspace it belongs to.
+	ServerURL   string // LOOM_SERVER_URL exported into the sandbox
+	WorkspaceID string // LOOM_WORKSPACE exported into the sandbox
 }
 
 // handleSandboxMode validates flags and runs a one-shot sandbox agent, exiting the
@@ -75,6 +86,12 @@ func runSandboxOneshot(cfg SandboxOneshotConfig) error {
 	repoURL := resolveSandboxRepoURL(projectDir)
 	if repoURL == "" {
 		return fmt.Errorf("could not determine git remote URL for %s", projectDir)
+	}
+
+	// v5 keeps task state in FleetDB, not in the repo, so the agent inside the
+	// sandbox must reach the loom-serve/FleetDB HTTP API. Fail fast if we can't.
+	if err := applySandboxFleetConfig(&cfg); err != nil {
+		return err
 	}
 
 	if err := pushSandboxBranch(cfg.WorktreePath, branch); err != nil {
@@ -178,6 +195,54 @@ func resolveSandboxRepoURL(projectDir string) string {
 	return strings.TrimSpace(out)
 }
 
+// applySandboxFleetConfig resolves the FleetDB/loom-serve endpoint + workspace the
+// in-container agent needs (v5 task state is in FleetDB) and records them on cfg.
+// Returns an error if no reachable server or workspace can be determined, so the
+// caller fails before booting a sandbox whose agent could never claim work.
+func applySandboxFleetConfig(cfg *SandboxOneshotConfig) error {
+	cfg.ServerURL = resolveSandboxServerURL()
+	if cfg.ServerURL == "" {
+		return fmt.Errorf("--sandbox needs a FleetDB server the container can reach: " +
+			"run `loom serve` and set LOOM_SERVER_URL, or set LOOM_SANDBOX_SERVER_URL to a container-reachable URL")
+	}
+	cfg.WorkspaceID = resolveSandboxWorkspace()
+	if cfg.WorkspaceID == "" {
+		return fmt.Errorf("--sandbox needs a workspace: no active workspace and LOOM_WORKSPACE is unset")
+	}
+	return nil
+}
+
+// resolveSandboxServerURL returns a FleetDB / loom-serve URL the sandbox
+// container can reach, or "" if none is configured. It prefers an explicit
+// LOOM_SANDBOX_SERVER_URL (the operator-supplied, container-reachable address);
+// otherwise it rewrites a localhost LOOM_SERVER_URL to the container's host
+// gateway so the in-container agent can reach the host's serve.
+func resolveSandboxServerURL() string {
+	if v := strings.TrimSpace(os.Getenv("LOOM_SANDBOX_SERVER_URL")); v != "" {
+		return v
+	}
+	host := strings.TrimSpace(os.Getenv("LOOM_SERVER_URL"))
+	if host == "" {
+		return ""
+	}
+	for _, lh := range []string{"localhost", "127.0.0.1", "0.0.0.0"} {
+		host = strings.ReplaceAll(host, lh, sandboxHostGateway)
+	}
+	return host
+}
+
+// resolveSandboxWorkspace returns the workspace ID to pass to the in-sandbox
+// agent's API backend (LOOM_WORKSPACE), preferring the active workspace, then env.
+func resolveSandboxWorkspace() string {
+	if ws, err := config.ResolveActiveWorkspace(); err == nil && ws != nil && ws.ID != "" {
+		return ws.ID
+	}
+	if v := strings.TrimSpace(os.Getenv("LOOM_WORKSPACE")); v != "" {
+		return v
+	}
+	return strings.TrimSpace(os.Getenv("LOOM_WORKSPACE_ID"))
+}
+
 // resolveSandboxProjectDir finds the main repository root from a worktree path by
 // walking up from the git toplevel to the nearest project-root marker.
 func resolveSandboxProjectDir(worktreePath string) (string, error) {
@@ -263,6 +328,16 @@ func buildOneshotCommand(branch string, oneshot SandboxOneshotConfig, repoURL, b
 	sb.WriteString("cd /sandbox/repo\n")
 	sb.WriteString("git config user.name \"loom-sandbox\"\n")
 	sb.WriteString("git config user.email \"loom-sandbox@local\"\n")
+
+	// v5 keeps task state in FleetDB, not the repo. Point the in-container agent
+	// at the loom-serve HTTP API (LOOM_SERVER_URL auto-selects the api backend)
+	// so it can claim/update/close work; LOOM_WORKSPACE scopes it.
+	if oneshot.ServerURL != "" {
+		sb.WriteString("export LOOM_SERVER_URL=" + shellQuote(oneshot.ServerURL) + "\n")
+	}
+	if oneshot.WorkspaceID != "" {
+		sb.WriteString("export LOOM_WORKSPACE=" + shellQuote(oneshot.WorkspaceID) + "\n")
+	}
 
 	loomCmd := fmt.Sprintf("/sandbox/bin/loom %s %s",
 		shellQuote(oneshot.AgentType), shellQuote("worktrees/"+oneshot.AgentName))
