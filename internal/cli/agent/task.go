@@ -17,6 +17,7 @@ import (
 var (
 	taskAutoMode    bool
 	taskDaemonMode  bool // Hidden: for internal tmux session use
+	taskSandboxMode bool
 	taskInterval    int
 	taskMaxTasks    int
 	taskIdleTimeout int
@@ -62,6 +63,7 @@ func init() {
 	taskCmd.Flags().BoolVarP(&taskAutoMode, "auto", "a", false, "Enable continuous mode (process multiple tasks)")
 	taskCmd.Flags().BoolVar(&taskDaemonMode, "daemon-mode", false, "Internal: single task mode for daemon")
 	_ = taskCmd.Flags().MarkHidden("daemon-mode")
+	taskCmd.Flags().BoolVar(&taskSandboxMode, "sandbox", false, "Run the agent inside an isolated OpenShell sandbox container")
 	taskCmd.Flags().IntVarP(&taskInterval, "interval", "i", 30, "Polling interval in seconds when no tasks available")
 	taskCmd.Flags().IntVarP(&taskMaxTasks, "max-tasks", "m", 0, "Maximum tasks to process (0 = unlimited)")
 	taskCmd.Flags().IntVarP(&taskIdleTimeout, "idle-timeout", "t", 0, "Exit after N minutes with no tasks (0 = none)")
@@ -85,6 +87,11 @@ func runTask(cmd *cobra.Command, args []string) {
 
 	worktreePath := target.WorkDir
 	agentName := target.AgentName
+
+	if taskSandboxMode {
+		handleSandboxMode("task", agentName, worktreePath, taskParentID, taskAutoMode)
+		return
+	}
 
 	if taskDaemonMode {
 		runTaskDaemon(deps, worktreePath, agentName)
