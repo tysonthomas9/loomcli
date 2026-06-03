@@ -136,6 +136,18 @@ func pushSandboxBranch(worktreePath, branch string) error {
 // v0.0.53 flow (see package sandbox): create (keep-alive, trivial command) →
 // upload loom → upload bootstrap → exec it. Returns the agent's exit code.
 func runSandboxAgent(name string, cfg sandbox.Config, branch string, oneshot SandboxOneshotConfig, repoURL string) (int, error) {
+	// Auto-generate an OPA policy opening the fleet-db + repo endpoints unless an
+	// explicit LOOM_SANDBOX_POLICY was given (the default "open" doesn't open them).
+	if cfg.Network == "open" {
+		if eps := sandbox.PolicyEndpoints(oneshot.FleetDBURL, repoURL); len(eps) > 0 {
+			policyPath, cleanupPolicy, err := sandbox.WritePolicy(eps, []string{cfg.LoomCmd(), "/usr/bin/git", "/usr/bin/curl"})
+			if err != nil {
+				return 0, err
+			}
+			defer cleanupPolicy()
+			cfg.Network = policyPath
+		}
+	}
 	if err := sandbox.RunOpenshell(sandbox.BuildCreateArgs(name, cfg)); err != nil {
 		return 0, fmt.Errorf("openshell sandbox create: %w", err)
 	}

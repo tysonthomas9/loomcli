@@ -13,6 +13,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/url"
 	"os"
 	"os/exec"
 	"runtime"
@@ -204,4 +205,99 @@ func DeleteSandbox(name string) {
 // escaping any embedded single quotes.
 func ShellQuote(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
+}
+
+// Endpoint is a host:port a sandbox is allowed to reach (L4 — all methods).
+type Endpoint struct {
+	Host string
+	Port string
+}
+
+// HostPort extracts host + port from an http(s)/git URL for a policy endpoint.
+// Returns ok=false for URLs without a usable host:port (e.g. ssh remotes, which
+// the operator must allow via an explicit LOOM_SANDBOX_POLICY).
+func HostPort(rawURL string) (host, port string, ok bool) {
+	u, err := url.Parse(strings.TrimSpace(rawURL))
+	if err != nil || u.Host == "" {
+		return "", "", false
+	}
+	host, port = u.Hostname(), u.Port()
+	if port == "" {
+		switch u.Scheme {
+		case "https":
+			port = "443"
+		case "http":
+			port = "80"
+		case "git":
+			port = "9418"
+		default:
+			return "", "", false
+		}
+	}
+	if host == "" {
+		return "", "", false
+	}
+	return host, port, true
+}
+
+// PolicyEndpoints derives allow-list endpoints from the given URLs (fleet-db +
+// repo), adding Podman's 192.168.127.254 alias whenever the host is the
+// container gateway. De-duplicated; URLs without a usable host:port are skipped.
+func PolicyEndpoints(urls ...string) []Endpoint {
+	var eps []Endpoint
+	seen := map[string]bool{}
+	add := func(host, port string) {
+		k := host + ":" + port
+		if host == "" || port == "" || seen[k] {
+			return
+		}
+		seen[k] = true
+		eps = append(eps, Endpoint{Host: host, Port: port})
+	}
+	for _, u := range urls {
+		if host, port, ok := HostPort(u); ok {
+			add(host, port)
+			if host == "host.containers.internal" {
+				add("192.168.127.254", port) // Podman's IP gateway alias
+			}
+		}
+	}
+	return eps
+}
+
+// WritePolicy writes an OpenShell network policy opening endpoints to binaries
+// and returns its path + a cleanup func. Format is the §E-proven shape: concrete
+// hosts only (a wildcard host crashes provisioning); a bare {host,port} is an L4
+// allow (all methods). Re-validate against the live gateway if the OpenShell
+// policy schema changes.
+func WritePolicy(endpoints []Endpoint, binaries []string) (string, func(), error) {
+	var sb strings.Builder
+	sb.WriteString("network_policies:\n")
+	sb.WriteString("  loom:\n")
+	sb.WriteString("    name: loom\n")
+	sb.WriteString("    endpoints:\n")
+	for _, e := range endpoints {
+		sb.WriteString(fmt.Sprintf("      - { host: %q, port: %s }\n", e.Host, e.Port))
+	}
+	sb.WriteString("    binaries:\n")
+	for _, b := range binaries {
+		sb.WriteString(fmt.Sprintf("      - { path: %q }\n", b))
+	}
+
+	f, err := os.CreateTemp("", "loom-sandbox-policy-*.yaml")
+	if err != nil {
+		return "", func() {}, fmt.Errorf("write sandbox policy: %w", err)
+	}
+	name := f.Name()
+	cleanup := func() { _ = os.Remove(name) }
+	if _, err := f.WriteString(sb.String()); err != nil {
+		_ = f.Close()
+		cleanup()
+		return "", func() {}, fmt.Errorf("write sandbox policy: %w", err)
+	}
+	if err := f.Close(); err != nil {
+		cleanup()
+		return "", func() {}, fmt.Errorf("write sandbox policy: %w", err)
+	}
+	return name, cleanup, nil
 }

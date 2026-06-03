@@ -69,6 +69,18 @@ func (s *Supervisor) buildSandboxCommand(ap *AgentProcess) (*exec.Cmd, error) {
 	ap.sandboxRevoke = revoke
 	ap.Mu.Unlock()
 
+	// Auto-generate an OPA policy opening the fleet-db + repo endpoints unless an
+	// explicit LOOM_SANDBOX_POLICY was given (the default "open" doesn't open them).
+	if cfg.Network == "open" {
+		if eps := sandbox.PolicyEndpoints(fleetEnv.URL, repoURL); len(eps) > 0 {
+			policyPath, cleanupPolicy, perr := sandbox.WritePolicy(eps, []string{cfg.LoomCmd(), "/usr/bin/git", "/usr/bin/curl"})
+			if perr != nil {
+				return nil, perr
+			}
+			defer cleanupPolicy()
+			cfg.Network = policyPath
+		}
+	}
 	sandbox.DeleteSandbox(name) // best-effort stale cleanup
 	if err := sandbox.RunOpenshell(sandbox.BuildCreateArgs(name, cfg)); err != nil {
 		return nil, fmt.Errorf("sandbox create: %w", err)

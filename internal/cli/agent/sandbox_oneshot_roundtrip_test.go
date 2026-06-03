@@ -123,6 +123,7 @@ func TestSandboxOneshot_RoundTrip(t *testing.T) {
 		"--provider claude",                  // default providers
 		"--provider github",
 		"--auto-providers",
+		"--policy",                    // RW4: auto-generated OPA policy (fleet-db + repo endpoints)
 		"-- true",                     // F2: create runs a trivial command and returns (no shell attach)
 		"sandbox upload loom-falcon-", // uploads (loom binary + bootstrap)
 		"/sandbox/loom",               // loom binary destination
@@ -134,10 +135,11 @@ func TestSandboxOneshot_RoundTrip(t *testing.T) {
 			t.Errorf("openshell invocation missing %q\n--- log ---\n%s", want, log)
 		}
 	}
-	// v0.0.53 constraints: no --upload create flag; "open" → no --policy; one-shot
-	// interactive → no --no-tty; and F3 — the bootstrap is never passed inline, so
-	// `sandbox exec` never receives a multi-line `sh -c` argument.
-	for _, absent := range []string{"--upload", ":/sandbox/bin", "--policy", "--no-tty", "sh -c"} {
+	// v0.0.53 constraints: no --upload create flag; one-shot is interactive → no
+	// --no-tty; and F3 — the bootstrap is never passed inline, so `sandbox exec`
+	// never receives a multi-line `sh -c` argument. (--policy IS expected now:
+	// RW4 auto-generates an OPA policy when none is supplied.)
+	for _, absent := range []string{"--upload", ":/sandbox/bin", "--no-tty", "sh -c"} {
 		if strings.Contains(log, absent) {
 			t.Errorf("unexpected %q in openshell invocations\n%s", absent, log)
 		}

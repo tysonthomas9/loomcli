@@ -1,6 +1,7 @@
 package sandbox
 
 import (
+	"os"
 	"runtime"
 	"slices"
 	"strings"
@@ -171,4 +172,68 @@ func TestConfigBakedLoom(t *testing.T) {
 			t.Errorf("baked path not honored: %+v", c)
 		}
 	})
+}
+
+func TestHostPort(t *testing.T) {
+	cases := []struct {
+		url, host, port string
+		ok              bool
+	}{
+		{"http://host.containers.internal:18099", "host.containers.internal", "18099", true},
+		{"https://fleet.example.com", "fleet.example.com", "443", true},
+		{"git://127.0.0.1/r.git", "127.0.0.1", "9418", true},
+		{"git@github.com:o/r.git", "", "", false}, // ssh: no usable host:port
+		{"", "", "", false},
+	}
+	for _, c := range cases {
+		host, port, ok := HostPort(c.url)
+		if ok != c.ok || host != c.host || port != c.port {
+			t.Errorf("HostPort(%q) = (%q,%q,%v), want (%q,%q,%v)", c.url, host, port, ok, c.host, c.port, c.ok)
+		}
+	}
+}
+
+func TestPolicyEndpoints_PodmanAlias(t *testing.T) {
+	eps := PolicyEndpoints("http://host.containers.internal:18099", "http://host.containers.internal:9418")
+	want := map[string]bool{
+		"host.containers.internal:18099": false, "192.168.127.254:18099": false,
+		"host.containers.internal:9418": false, "192.168.127.254:9418": false,
+	}
+	for _, e := range eps {
+		want[e.Host+":"+e.Port] = true
+	}
+	for k, seen := range want {
+		if !seen {
+			t.Errorf("missing endpoint %s in %v", k, eps)
+		}
+	}
+}
+
+func TestWritePolicy_Format(t *testing.T) {
+	path, cleanup, err := WritePolicy(
+		[]Endpoint{{Host: "host.containers.internal", Port: "18099"}},
+		[]string{"/sandbox/loom", "/usr/bin/curl"},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cleanup()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(data)
+	for _, want := range []string{
+		"network_policies:", "name: loom",
+		`- { host: "host.containers.internal", port: 18099 }`,
+		`- { path: "/sandbox/loom" }`,
+		`- { path: "/usr/bin/curl" }`,
+	} {
+		if !strings.Contains(s, want) {
+			t.Errorf("policy missing %q\n%s", want, s)
+		}
+	}
+	if strings.Contains(s, `"**"`) || strings.Contains(s, "host: **") {
+		t.Error("policy must not contain a wildcard host (crashes provisioning, §E)")
+	}
 }
