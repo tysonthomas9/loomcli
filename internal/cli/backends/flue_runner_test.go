@@ -179,8 +179,12 @@ func TestPushWorktreeBack(t *testing.T) {
 	gitT(t, repo, "remote", "add", "origin", filepath.Join(t.TempDir(), "missing-bare"))
 	baseHead := gitT(t, repo, "rev-parse", "HEAD")
 
-	// A pending change in the worktree (as if a patch were just applied).
+	// A staged change in the index, as applyPatch --index leaves it. Also drop
+	// an unstaged/untracked file to prove pushWorktreeBack commits only the
+	// staged work (not loom's runtime files) — no `git add -A`.
 	writeFileT(t, filepath.Join(repo, "x.txt"), "hi\n")
+	gitT(t, repo, "add", "x.txt")
+	writeFileT(t, filepath.Join(repo, "loom-runtime.tmp"), "should not be committed\n")
 
 	// Push fails (bad remote) but the commit must still succeed → returns nil.
 	if err := pushWorktreeBack(repo, "nova", "sb-1"); err != nil {
@@ -189,6 +193,10 @@ func TestPushWorktreeBack(t *testing.T) {
 	committed := gitT(t, repo, "rev-parse", "HEAD")
 	if committed == baseHead {
 		t.Fatal("work was not committed despite push failure")
+	}
+	// Only the staged file is in the commit; the untracked runtime file is not.
+	if files := gitT(t, repo, "show", "--name-only", "--format=", "HEAD"); !strings.Contains(files, "x.txt") || strings.Contains(files, "loom-runtime.tmp") {
+		t.Errorf("commit contents = %q, want only x.txt", files)
 	}
 
 	// Second call with a clean tree is a no-op (no empty commit).

@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"strings"
 
+	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/flue"
 	"github.com/tysonthomas9/loomcli/internal/harness"
 	"github.com/tysonthomas9/loomcli/internal/sessions"
@@ -155,16 +156,17 @@ func runFlueDaytonaTask(workDir, prompt, agentName string, shutdown <-chan struc
 // work must be durable in loom's git); push is best-effort — a missing remote
 // credential must not fail the task, since the work is already committed locally.
 func pushWorktreeBack(workDir, agentName, sandboxID string) error {
-	if out, err := gitCombined(workDir, "add", "-A"); err != nil {
-		return fmt.Errorf("git add: %v\n%s", err, out)
-	}
-	// `git diff --cached --quiet` exits 0 when nothing is staged → the patch was
-	// a no-op (e.g. a planning run that wrote no files); nothing to commit.
+	// applyPatch staged exactly the sandbox's changes (git apply --index), so the
+	// index holds the agent's work and nothing else — deliberately NOT `git add
+	// -A`, which would also sweep in loom's own runtime files (.agent.lock,
+	// sessions/, usage.jsonl). Empty index → the run produced no changes.
 	if _, err := gitOutput(workDir, "diff", "--cached", "--quiet"); err == nil {
 		return nil
 	}
+	// Commit with an explicit loom identity: agent worktrees may not have
+	// user.name/email configured, which would fail `git commit` with exit 128.
 	msg := fmt.Sprintf("loom: apply flue daytona-task work (agent %s, sandbox %s)", agentName, sandboxID)
-	if out, err := gitCombined(workDir, "commit", "-m", msg); err != nil {
+	if out, err := gitCombined(workDir, "-c", "user.name=loom", "-c", "user.email=loom@localhost", "commit", "-m", msg); err != nil {
 		return fmt.Errorf("git commit: %v\n%s", err, out)
 	}
 	fmt.Printf("[loom] committed Daytona work in %s\n", workDir)
@@ -187,7 +189,7 @@ func deriveDaytonaInput(workDir, prompt, agentName string) (runnerInput, error) 
 	branch, _ := gitOutput(workDir, "rev-parse", "--abbrev-ref", "HEAD")
 	return runnerInput{
 		Sandbox:       "daytona-task",
-		Prompt:        prompt,
+		Prompt:        buildSandboxPrompt(workDir, prompt),
 		Model:         resolveFlueModel(),
 		RepoRemoteURL: remote,
 		RepoBranch:    branch,
@@ -195,6 +197,63 @@ func deriveDaytonaInput(workDir, prompt, agentName string) (runnerInput, error) 
 		TaskID:        agentName,
 		SyncStrategy:  syncStrategyPatchBack,
 	}, nil
+}
+
+// daytonaSandboxPreamble reframes loom's task prompt for execution inside a
+// fresh remote sandbox. loom's task prompts assume the `loom` CLI and the
+// host's local worktree paths are present (for `loom data close`, `loom
+// complete`, committing, etc.) — none of which exist in the sandbox. Without
+// this the agent refuses ("loom is not installed... repo path does not
+// exist"). The agent's only job in the sandbox is the code change; loom
+// captures the resulting diff on the host and handles all task bookkeeping.
+const daytonaSandboxPreamble = "You are running inside an isolated sandbox that contains a fresh clone of " +
+	"the repository, checked out at the current working directory. The following rules OVERRIDE any " +
+	"conflicting instructions below:\n" +
+	"- The `loom` and `bd` CLIs are NOT installed here, and the host's local workspace paths do NOT exist. " +
+	"Do not run `loom`/`bd` commands, do not attempt to select/claim/close/complete/signal tasks, and do " +
+	"not run `git commit`, `git push`, or open a PR.\n" +
+	"- Simply implement the requested change by creating/editing files in the current working directory. " +
+	"loom captures your file changes as a diff on the host and handles all task bookkeeping, commits, and " +
+	"pushes for you.\n" +
+	"- Stay within the current repository directory.\n\n" +
+	"--- TASK ---\n\n"
+
+// buildSandboxPrompt produces the prompt for the sandbox agent. loom's task
+// prompts assume the `loom` CLI is present to *discover* the claimed task's
+// design — but the sandbox has no `loom` CLI, so the agent can't fetch it and
+// makes no changes. We inline the claimed task's title/description/design
+// (fetched on the host via the lock file + issue backend) so the sandbox agent
+// is self-sufficient. Falls back to the original prompt if no task is resolvable.
+func buildSandboxPrompt(workDir, fallback string) string {
+	// The daemon injects the claimed task as LOOM_ASSIGNED_TASK_ID; single-task
+	// runs record it in the worktree lock. Prefer the env, fall back to the lock.
+	taskID := strings.TrimSpace(os.Getenv("LOOM_ASSIGNED_TASK_ID"))
+	if taskID == "" {
+		if info, err := cli.ReadLockFile(workDir); err == nil {
+			taskID = info.TaskID
+		}
+	}
+	if taskID == "" {
+		return daytonaSandboxPreamble + fallback
+	}
+	detail, err := cli.DefaultIssueBackend().Get(context.Background(), taskID)
+	if err != nil || detail == nil {
+		return daytonaSandboxPreamble + fallback
+	}
+	var b strings.Builder
+	b.WriteString(daytonaSandboxPreamble)
+	fmt.Fprintf(&b, "Implement task %s: %s\n\n", taskID, detail.Title)
+	if detail.Description != "" {
+		fmt.Fprintf(&b, "Description:\n%s\n\n", detail.Description)
+	}
+	if detail.Design != "" {
+		fmt.Fprintf(&b, "Approved design / implementation plan (follow it exactly):\n%s\n\n", detail.Design)
+	}
+	if detail.AcceptanceCriteria != "" {
+		fmt.Fprintf(&b, "Acceptance criteria:\n%s\n\n", detail.AcceptanceCriteria)
+	}
+	b.WriteString("Make exactly the code changes this task requires in the current working directory, then stop.")
+	return b.String()
 }
 
 // recordSandboxMetadata stashes the sandbox/runtime metadata for the session
@@ -278,7 +337,9 @@ func gitCombined(dir string, args ...string) (string, error) {
 }
 
 func applyPatch(workDir, patchPath string) error {
-	cmd := exec.Command("git", "-C", workDir, "apply", "--3way", "--whitespace=nowarn", patchPath) //nolint:gosec // fixed args, patchPath is a loom temp file
+	// --index stages exactly the patch's files (and only those) so the caller
+	// can commit them without `git add -A` sweeping in loom's runtime files.
+	cmd := exec.Command("git", "-C", workDir, "apply", "--3way", "--index", "--whitespace=nowarn", patchPath) //nolint:gosec // fixed args, patchPath is a loom temp file
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	return cmd.Run()
