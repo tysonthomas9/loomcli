@@ -479,6 +479,9 @@ func OverlayDaemonSettings(dst *DaemonSettings, src *DaemonSettings) {
 	if src.StartupTimeout != nil {
 		dst.StartupTimeout = src.StartupTimeout
 	}
+	if src.FlueSandbox != "" {
+		dst.FlueSandbox = src.FlueSandbox
+	}
 }
 
 func overlayRestartPolicy(dst, src *RestartPolicy) {

@@ -49,6 +49,11 @@ args=(-d --init --name "$NAME" -p "$HOST_PORT:3000"
 
 [[ -n "${ANTHROPIC_API_KEY:-}" ]] && args+=(-e ANTHROPIC_API_KEY)
 [[ -n "${OPENAI_API_KEY:-}"    ]] && args+=(-e OPENAI_API_KEY)
+# DAYTONA_API_KEY enables the flue Daytona-per-task sandbox path. LOOM_FLUE_SANDBOX
+# (=daytona) is the operator switch that routes flue agents into a sandbox per
+# task; it rides the LOOM_ allowlist down to spawned agents. Both forwarded if set.
+[[ -n "${DAYTONA_API_KEY:-}"   ]] && args+=(-e DAYTONA_API_KEY)
+[[ -n "${LOOM_FLUE_SANDBOX:-}" ]] && args+=(-e LOOM_FLUE_SANDBOX)
 
 [[ -d "$HOME/.claude"          ]] && args+=(-v "$HOME/.claude:/root/.claude:ro")
 [[ -d "$HOME/.codex"           ]] && args+=(-v "$HOME/.codex:/root/.codex:ro")
@@ -74,6 +79,13 @@ if [[ -n "${FLEET_DB_BIN:-}" && -x "$FLEET_DB_BIN" ]]; then
 else
     echo "Warning: no fleet-db binary found; loom serve will fail to start." >&2
     echo "         Set FLEET_DB_BIN=/path/to/fleet-db before re-running." >&2
+fi
+
+# LOOM_BIN lets you test a locally-built loom (cross-compiled for the container
+# arch) without a full image rebuild: mounts it over the baked binary.
+if [[ -n "${LOOM_BIN:-}" && -x "$LOOM_BIN" ]]; then
+    echo "==> mounting loom from $LOOM_BIN"
+    args+=(-v "$LOOM_BIN:/usr/local/bin/loom:ro")
 fi
 
 echo "==> starting $NAME on http://localhost:$HOST_PORT"

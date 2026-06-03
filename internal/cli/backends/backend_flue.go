@@ -210,6 +210,22 @@ func defaultFlueNonInteractiveInvoker(workDir, prompt, agentName string, shutdow
 	})
 }
 
+// ManagedRuntimeReady implements cli.ManagedRuntimeBackend. flue has no CLI on
+// PATH (it's a managed Node project that builds on first use), so the daemon's
+// pre-spawn gate must check Node availability here rather than a PATH lookup,
+// which would always report flue missing and park the agent. The project's
+// lazy first-use build is not required for readiness — only Node.
+func (f *FlueBackend) ManagedRuntimeReady() (bool, string) {
+	s := flue.DefaultManager().Probe()
+	if s.NodeInstalled {
+		return true, ""
+	}
+	if s.NodeError != "" {
+		return false, s.NodeError
+	}
+	return false, "Node.js >= 22.18 not found (required by the flue runtime)"
+}
+
 // Meta returns descriptive metadata about the flue backend. BinaryName is
 // intentionally empty: flue is not a global CLI on PATH but a managed Node
 // project, so health/setup are handled differently from the binary backends.

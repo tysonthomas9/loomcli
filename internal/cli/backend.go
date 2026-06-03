@@ -23,6 +23,16 @@ type Backend interface {
 	InvokeNonInteractive(workDir, prompt, agentName string, shutdown <-chan struct{}, collector *usage.Collector) error
 }
 
+// ManagedRuntimeBackend is an optional interface for backends that run as a
+// managed runtime rather than a CLI on PATH (e.g. flue, a managed Node
+// project). The daemon's pre-spawn availability gate consults
+// ManagedRuntimeReady for these instead of a PATH lookup — a PATH lookup would
+// always report them missing and wrongly park the agent. ready=false parks the
+// agent as backend-unavailable with the given human-readable reason.
+type ManagedRuntimeBackend interface {
+	ManagedRuntimeReady() (ready bool, reason string)
+}
+
 var (
 	backends      = make(map[string]Backend)
 	activeBackend = backendnames.Codex

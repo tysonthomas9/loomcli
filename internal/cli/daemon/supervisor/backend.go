@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/agenterr"
+	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/backendcheck"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 )
@@ -35,6 +36,19 @@ func (s *Supervisor) gateBackendAvailable(ap *AgentProcess) error {
 		// gate's job is specifically "named backend missing on PATH".
 		return nil
 	}
+	// Managed-runtime backends (e.g. flue) have no CLI on PATH; a PATH lookup
+	// would always report them missing. Gate them on their own readiness.
+	if b, ok := cli.GetBackendByName(backend); ok {
+		if mrb, ok := b.(cli.ManagedRuntimeBackend); ok {
+			return s.gateManagedRuntimeAvailable(ap, backend, mrb)
+		}
+	}
+	return s.gatePathBackendAvailable(ap, backend)
+}
+
+// gatePathBackendAvailable is the PATH-lookup availability gate for ordinary
+// CLI backends (the original gateBackendAvailable behavior).
+func (s *Supervisor) gatePathBackendAvailable(ap *AgentProcess, backend string) error {
 	info, lookupErr := backendcheck.CheckBackend(backend)
 	if lookupErr != nil {
 		slog.Warn("backend availability check failed; proceeding with spawn",
@@ -78,6 +92,46 @@ func (s *Supervisor) gateBackendAvailable(ap *AgentProcess) error {
 	if !wasUnavailable {
 		log.Printf("[daemon] Agent %s: backend %q not on PATH — skipping spawn (%s)",
 			worktree, backend, info.InstallHint)
+	}
+	return ErrBackendUnavailable
+}
+
+// gateManagedRuntimeAvailable is the pre-spawn gate for managed-runtime
+// backends (no CLI on PATH). It mirrors gateBackendAvailable's recovery/park
+// branches but uses the backend's own readiness signal instead of a PATH lookup.
+func (s *Supervisor) gateManagedRuntimeAvailable(ap *AgentProcess, backend string, mrb cli.ManagedRuntimeBackend) error {
+	ready, reason := mrb.ManagedRuntimeReady()
+	if ready {
+		ap.Mu.Lock()
+		wasUnavailable := ap.StopReason == StopReasonBackendUnavailable
+		if wasUnavailable {
+			ap.StopReason = ""
+			ap.LastError = nil
+		}
+		worktree := ap.Entry.Worktree
+		ap.Mu.Unlock()
+		if wasUnavailable {
+			s.markControlPlaneAgentState(ap, domain.AgentStateActive)
+			log.Printf("[daemon] Agent %s: backend %q runtime ready — resuming spawn", worktree, backend)
+		}
+		return nil
+	}
+
+	ap.Mu.Lock()
+	wasUnavailable := ap.StopReason == StopReasonBackendUnavailable
+	ap.StopReason = StopReasonBackendUnavailable
+	ap.LastError = &agenterr.AgentError{
+		Class:     agenterr.BackendUnavailable,
+		Message:   reason,
+		Backend:   backend,
+		Timestamp: time.Now(),
+	}
+	worktree := ap.Entry.Worktree
+	ap.Mu.Unlock()
+
+	s.markControlPlaneAgentState(ap, domain.AgentStateBackendUnavailable)
+	if !wasUnavailable {
+		log.Printf("[daemon] Agent %s: backend %q runtime not ready — skipping spawn (%s)", worktree, backend, reason)
 	}
 	return ErrBackendUnavailable
 }
