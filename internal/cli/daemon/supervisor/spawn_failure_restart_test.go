@@ -52,7 +52,9 @@ func TestMarkSpawnFailure_SetsSyntheticExitState(t *testing.T) {
 
 // TestSpawnFailure_CountsOnceAndRespectsMaxRetries simulates the supervise loop
 // for repeated spawn failures, starting from a clean prior run. Each failure
-// must count exactly once and the supervisor must give up after maxRetries.
+// must count exactly once and, after maxRetries, the agent parks-and-retries
+// (SpawnFailure routes through the single exhaustion branch, so it parks like
+// any other non-fatal class rather than being silently lost).
 //
 // Regression: previously the spawn-failure path left LastExitCode==0 &&
 // LastError==nil, so shouldRestart's clean-success branch reset RestartCount
@@ -84,18 +86,20 @@ func TestSpawnFailure_CountsOnceAndRespectsMaxRetries(t *testing.T) {
 		}
 	}
 
-	// One more failure exceeds maxRetries → supervisor must stop.
+	// One more failure exceeds maxRetries → instead of giving up, the agent
+	// parks-and-retries: shouldRestart stays true, the budget resets, and the
+	// stop reason flips to parked.
 	s.markSpawnFailure(ap, errors.New("spawn failed"))
-	if s.shouldRestart(ap) {
-		t.Fatal("shouldRestart = true after maxRetries exceeded, want false")
+	if !s.shouldRestart(ap) {
+		t.Fatal("shouldRestart = false after budget exhausted, want true (parks)")
 	}
 	ap.Mu.Lock()
 	defer ap.Mu.Unlock()
-	if ap.RestartCount != maxRetries+1 {
-		t.Errorf("RestartCount = %d, want %d", ap.RestartCount, maxRetries+1)
+	if ap.RestartCount != 0 {
+		t.Errorf("RestartCount = %d, want 0 (reset on park)", ap.RestartCount)
 	}
-	if ap.StopReason != StopReasonMaxRetries {
-		t.Errorf("StopReason = %q, want %q", ap.StopReason, StopReasonMaxRetries)
+	if ap.StopReason != StopReasonMaxRetriesParked {
+		t.Errorf("StopReason = %q, want %q", ap.StopReason, StopReasonMaxRetriesParked)
 	}
 }
 

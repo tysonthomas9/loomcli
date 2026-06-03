@@ -1000,6 +1000,38 @@ func TestComputeAgentStatus_MaxRetries_StopReason(t *testing.T) {
 	}
 }
 
+func TestComputeAgentStatus_Parked(t *testing.T) {
+	// A parked agent (exhausted budget, retrying) is not running and not failed:
+	// RestartCount is reset to 0 and the parked stop reason yields "parked".
+	ap := SupervisedAgentStatus{
+		PID:          0,
+		RestartCount: 0,
+		StopReason:   StopReasonMaxRetriesParked,
+	}
+
+	status := computeAgentStatus(ap, 3)
+
+	if status != "parked" {
+		t.Errorf("computeAgentStatus() = %q, want %q for StopReasonMaxRetriesParked", status, "parked")
+	}
+}
+
+func TestComputeAgentStatus_Parked_RunningTakesPrecedence(t *testing.T) {
+	// A re-spawned parked agent (PID alive) reads as "running" — the running
+	// guard is checked before the parked stop reason.
+	ap := SupervisedAgentStatus{
+		PID:          os.Getpid(), // a live process
+		RestartCount: 0,
+		StopReason:   StopReasonMaxRetriesParked,
+	}
+
+	status := computeAgentStatus(ap, 3)
+
+	if status != "running" {
+		t.Errorf("computeAgentStatus() = %q, want %q (running must override a stale parked reason)", status, "running")
+	}
+}
+
 func TestComputeAgentStatus_Shutdown(t *testing.T) {
 	ap := SupervisedAgentStatus{
 		PID:          0,

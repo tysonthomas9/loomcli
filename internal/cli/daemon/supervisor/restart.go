@@ -17,6 +17,13 @@ const primaryBackendRetryCooldown = time.Minute
 // than an exponential backoff, and never count these retries toward max_retries.
 const backendUnavailableRecheckInterval = 30 * time.Second
 
+// defaultMaxRetriesParkInterval is the fixed delay between re-attempts after an
+// agent has exhausted its restart budget. Rather than abandoning the agent
+// (silent loss until a daemon restart), the supervise goroutine parks and
+// retries on this interval so a transient root cause (a prerequisite landing, a
+// rate-limit window passing, a flaky dependency recovering) lets it self-resume.
+const defaultMaxRetriesParkInterval = 60 * time.Second
+
 // shouldRestart determines if agent should restart based on backoff policy
 // and the classified error from the most recent exit.
 func (s *Supervisor) shouldRestart(ap *AgentProcess) bool {
@@ -69,7 +76,18 @@ func (s *Supervisor) shouldRestart(ap *AgentProcess) bool {
 		return true
 	}
 
-	// All other errors: count toward max_retries
+	// All other errors: count toward max_retries, then park on exhaustion.
+	return s.applyGenericErrorRestart(ap, maxRetries)
+}
+
+// applyGenericErrorRestart handles a non-special error (not fatal, NoWork,
+// BackendUnavailable, or rate-limited): it counts toward max_retries and, once
+// the budget is exhausted, parks-and-retries (returning true) instead of
+// abandoning the agent to silent loss until a daemon restart. The exception is
+// max_retries == 0, an explicit fail-fast opt-out. Fatal errors already returned
+// false in shouldRestart before reaching here, so park never swallows a fatal.
+// Caller holds ap.Mu.
+func (s *Supervisor) applyGenericErrorRestart(ap *AgentProcess, maxRetries int) bool {
 	ap.RestartCount++
 	ap.RateRetryCount = 0 // reset rate counter on non-rate error
 	ap.NoWorkCount = 0
@@ -77,8 +95,14 @@ func (s *Supervisor) shouldRestart(ap *AgentProcess) bool {
 		ap.StopReason = ""
 		return true
 	}
-	ap.StopReason = StopReasonMaxRetries
-	return false
+	// The guard sits after the increment so the max_retries==0 counter side
+	// effect (RestartCount lands at 1) is unchanged from before park existed.
+	if maxRetries == 0 {
+		ap.StopReason = StopReasonMaxRetries
+		return false
+	}
+	s.applyMaxRetriesPark(ap)
+	return true
 }
 
 // applyNoWorkRestart resets retry counters for a NoWork exit and, if the
@@ -118,6 +142,51 @@ func (s *Supervisor) backendRecheckBackoff() time.Duration {
 	return backendUnavailableRecheckInterval
 }
 
+// applyMaxRetriesPark parks an agent that has exhausted its restart budget so it
+// keeps retrying on a fixed interval instead of being abandoned. It mirrors
+// applyBackendUnavailableRestart: reset the retry counters, set a visible parked
+// stop reason, and let computeBackoff return the fixed park interval. RestartCount
+// is reset to 0 so each park cycle gets a fresh max_retries burst and status
+// readers never mistake a live parked agent for a failed one (computeAgentStatus
+// treats RestartCount > maxRetries as "failed"). LastError is deliberately left
+// intact so last_error_class still surfaces why the agent parked. Caller holds ap.Mu.
+func (s *Supervisor) applyMaxRetriesPark(ap *AgentProcess) {
+	ap.RestartCount = 0
+	ap.RateRetryCount = 0
+	ap.NoWorkCount = 0
+	ap.StopReason = StopReasonMaxRetriesParked
+	log.Printf("[daemon] Agent %s: restart budget exhausted, parking — will recheck in %s",
+		ap.Entry.Worktree, s.maxRetriesParkBackoff())
+}
+
+// maxRetriesParkBackoff is the fixed delay between re-attempts for a parked agent
+// (configurable via maxRetriesParkInterval; package default otherwise).
+func (s *Supervisor) maxRetriesParkBackoff() time.Duration {
+	if s.maxRetriesParkInterval > 0 {
+		return s.maxRetriesParkInterval
+	}
+	return defaultMaxRetriesParkInterval
+}
+
+// fixedRestartBackoff returns the fixed (non-exponential) wait for the cases
+// that poll on a steady interval rather than backing off a flaky run: NoWork,
+// BackendUnavailable, and a parked (budget-exhausted) agent. The bool is false
+// when no fixed interval applies and the caller falls back to exponential
+// backoff. Parked is keyed on StopReason, not error class, because any non-fatal
+// class can exhaust the budget.
+func (s *Supervisor) fixedRestartBackoff(lastErr *agenterr.AgentError, parked bool) (time.Duration, bool) {
+	switch {
+	case lastErr != nil && lastErr.Class == agenterr.NoWork:
+		return time.Duration(s.getNoWorkBackoff()) * time.Second, true
+	case lastErr != nil && lastErr.Class == agenterr.BackendUnavailable:
+		return s.backendRecheckBackoff(), true
+	case parked:
+		return s.maxRetriesParkBackoff(), true
+	default:
+		return 0, false
+	}
+}
+
 // computeBackoff returns the sleep duration before next restart.
 // Uses error-class-specific initial values and caps.
 func (s *Supervisor) computeBackoff(ap *AgentProcess) time.Duration {
@@ -127,17 +196,13 @@ func (s *Supervisor) computeBackoff(ap *AgentProcess) time.Duration {
 	lastErr := ap.LastError
 	count := ap.RestartCount
 	rateCount := ap.RateRetryCount
+	parked := ap.StopReason == StopReasonMaxRetriesParked
 	ap.Mu.Unlock()
 
-	// NoWork: fixed interval, no exponential growth
-	if lastErr != nil && lastErr.Class == agenterr.NoWork {
-		return time.Duration(s.getNoWorkBackoff()) * time.Second
-	}
-
-	// Backend unavailable: fixed recheck interval (no exponential growth) — we
-	// are waiting for the backend CLI to reappear, not backing off a flaky run.
-	if lastErr != nil && lastErr.Class == agenterr.BackendUnavailable {
-		return s.backendRecheckBackoff()
+	// Fixed-interval cases (steady polling, not backing off a flaky run):
+	// NoWork, BackendUnavailable, and a parked (budget-exhausted) agent.
+	if d, ok := s.fixedRestartBackoff(lastErr, parked); ok {
+		return d
 	}
 
 	// Select initial backoff and retry count based on error class
