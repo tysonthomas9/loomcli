@@ -1,6 +1,7 @@
 package fleet
 
 import (
+	"context"
 	"fmt"
 	"slices"
 	"time"
@@ -112,6 +113,40 @@ func (c *TaskRunClaims) AuthorizesSession(workspace, sessionID string) bool {
 func (c *TaskRunClaims) AuthorizesTask(workspace, taskID string) bool {
 	return c.Workspace != "" && c.Workspace == workspace &&
 		c.TaskID != "" && c.TaskID == taskID
+}
+
+// MintTaskRunToken loads the current shared signing key from Redis and mints a
+// scoped TaskRun capability token. Because the key is shared (SET-NX in Redis,
+// see GetOrCreateSigningKey), a token minted by one process — e.g. the
+// daemon/supervisor at lease time — validates in another (loom serve), with no
+// separate key-distribution mechanism. The caller (serve) must have created the
+// key at startup via GetOrCreateSigningKey.
+func (m *SigningKeyManager) MintTaskRunToken(ctx context.Context, claims TaskRunClaims, expiry time.Duration) (string, error) {
+	key, err := m.GetCurrentSigningKey(ctx)
+	if err != nil {
+		return "", fmt.Errorf("taskrun token: load signing key: %w", err)
+	}
+	return GenerateTaskRunToken(claims, key, expiry)
+}
+
+// ValidateTaskRunTokenFromStore validates a TaskRun token against the current
+// shared signing key, falling back to the previous version during a rotation
+// grace period (mirrors how worker tokens tolerate rotation).
+func (m *SigningKeyManager) ValidateTaskRunTokenFromStore(ctx context.Context, tokenString string) (*TaskRunClaims, error) {
+	current, previous, err := m.GetCurrentAndPreviousKeys(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("taskrun token: load signing keys: %w", err)
+	}
+	claims, err := ValidateTaskRunToken(tokenString, current)
+	if err == nil {
+		return claims, nil
+	}
+	if len(previous) > 0 {
+		if prevClaims, prevErr := ValidateTaskRunToken(tokenString, previous); prevErr == nil {
+			return prevClaims, nil
+		}
+	}
+	return nil, err
 }
 
 // FencedOut reports whether this token's fencing token is stale relative to the
