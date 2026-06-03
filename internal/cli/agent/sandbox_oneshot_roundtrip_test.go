@@ -79,9 +79,9 @@ func TestSandboxOneshot_RoundTrip(t *testing.T) {
 	t.Setenv("FAKE_BRANCH", branch)
 
 	// FleetDB connectivity preconditions: isolate config so no real workspace is
-	// resolved, then supply a container-reachable server URL + workspace via env.
+	// resolved, then supply a container-reachable fleet-db URL + workspace via env.
 	t.Setenv("LOOM_CONFIG_DIR", filepath.Join(root, "loomcfg"))
-	t.Setenv("LOOM_SANDBOX_SERVER_URL", "http://host.containers.internal:8080")
+	t.Setenv("LOOM_SANDBOX_FLEETDB_URL", "http://host.containers.internal:8080")
 	t.Setenv("LOOM_WORKSPACE", "ws-test")
 
 	// F1: the sandbox is Linux, so on a non-linux host the upload must be a linux
@@ -115,7 +115,7 @@ func TestSandboxOneshot_RoundTrip(t *testing.T) {
 		t.Fatalf("fake openshell could not clone the pushed branch:\n%s", log)
 	}
 	// The openshell *argv* log shows the orchestration. The bootstrap's contents
-	// (git clone, --parent, LOOM_SERVER_URL exports, …) live in the uploaded
+	// (git clone, --parent, LOOM_FLEET_DB_URL exports, …) live in the uploaded
 	// bootstrap file — not in any argument — and are covered by the
 	// buildOneshotCommand unit tests.
 	for _, want := range []string{

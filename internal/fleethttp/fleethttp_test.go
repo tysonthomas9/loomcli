@@ -18,6 +18,9 @@ func TestAuth_Apply(t *testing.T) {
 		if got := req.Header.Get("X-Fleet-API-Key"); got != "ak" {
 			t.Errorf("X-Fleet-API-Key = %q, want ak", got)
 		}
+		if got := req.Header.Get("X-API-Key"); got != "ak" {
+			t.Errorf("X-API-Key = %q, want ak (dual-send for fleet-db RBAC)", got)
+		}
 		if got := req.Header.Get("X-Actor"); got != "alice" {
 			t.Errorf("X-Actor = %q, want alice", got)
 		}
@@ -30,6 +33,9 @@ func TestAuth_Apply(t *testing.T) {
 		}
 		if req.Header.Get("X-Fleet-API-Key") != "" {
 			t.Errorf("expected no X-Fleet-API-Key header")
+		}
+		if req.Header.Get("X-API-Key") != "" {
+			t.Errorf("expected no X-API-Key header")
 		}
 		if req.Header.Get("X-Actor") != "bob" {
 			t.Errorf("X-Actor = %q, want bob", req.Header.Get("X-Actor"))

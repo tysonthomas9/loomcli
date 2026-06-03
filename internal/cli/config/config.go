@@ -52,6 +52,7 @@ type RepoConfig struct {
 	Path          string   `yaml:"path" json:"path"`                                         // Path to the repo (absolute or relative to workspace)
 	DefaultBranch string   `yaml:"default_branch,omitempty" json:"default_branch,omitempty"` // Override default branch (defaults to "main")
 	Remote        string   `yaml:"remote,omitempty" json:"remote,omitempty"`                 // Git remote name (defaults to "origin")
+	RemoteURL     string   `yaml:"remote_url,omitempty" json:"remote_url,omitempty"`         // Git clone URL (from FleetDB); needed to materialize the repo on a host with no local checkout (sandbox/remote)
 	Groups        []string `yaml:"groups,omitempty" json:"groups,omitempty"`                 // Logical groups (e.g., backend, infra)
 	SourceRepoID  string   `yaml:"source_repo_id,omitempty" json:"source_repo_id,omitempty"` // Stable identifier for server-side filtering (defaults to Name)
 }
@@ -152,6 +153,23 @@ func ResolveActiveWorkspace() (*WorkspaceConfig, error) {
 	// Apply store-level tracing (this path bypasses cmdstore.OpenStore).
 	handle.Store = cmdstore.WrapStoreWithTracing(handle.Store)
 	defer func() { _ = handle.Close() }()
+
+	// Cloud / least-privilege path: resolve ONLY the active workspace via the
+	// workspace-scoped route, so a workspace-scoped credential (no global role)
+	// works. The global List-based path below needs global workspace.list.
+	if bootstrap.DetectMode() == bootstrap.ModeCloud {
+		if sg, ok := handle.Store.Workspaces().(store.ScopedWorkspaceGetter); ok {
+			wsRec, err := sg.GetWorkspaceScoped(ctx, key)
+			if err != nil {
+				return nil, fmt.Errorf("resolve active workspace %q (scoped): %w", key, err)
+			}
+			wsc, err := workspaceConfigFromStore(ctx, handle.Store, wsRec, bootstrap.WorkspaceLocalState{})
+			if err != nil {
+				return nil, err
+			}
+			return &wsc, nil
+		}
+	}
 
 	cfg, err := loadConfigFromStore(ctx, handle.Store)
 	if err != nil {
@@ -255,6 +273,7 @@ func repoConfigFromStore(r *domain.Repo, local bootstrap.WorkspaceLocalState) Re
 		Path:          path,
 		DefaultBranch: r.DefaultBranch,
 		Remote:        r.Remote,
+		RemoteURL:     r.RemoteURL,
 		Groups:        append([]string(nil), r.Groups...),
 		SourceRepoID:  sourceRepoID,
 	}

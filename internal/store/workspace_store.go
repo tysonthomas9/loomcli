@@ -51,3 +51,13 @@ type WorkspaceStore interface {
 	// Returns ErrNotFound if absent.
 	Delete(ctx context.Context, key string) error
 }
+
+// ScopedWorkspaceGetter is optionally implemented by a WorkspaceStore that can
+// fetch a single workspace via the workspace-scoped API route
+// (GET /api/v1/{workspace}/workspace), authorized by a workspace-scoped role.
+// It lets a least-privilege actor (e.g. a sandboxed agent holding a developer
+// key) resolve its active workspace WITHOUT the global admin List/Get. The HTTP
+// (fleetdb) store implements it; callers type-assert and fall back to Get/List.
+type ScopedWorkspaceGetter interface {
+	GetWorkspaceScoped(ctx context.Context, key string) (*domain.Workspace, error)
+}

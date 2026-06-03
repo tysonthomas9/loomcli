@@ -142,14 +142,19 @@ func (s *Supervisor) checkWatchdog(ap *AgentProcess, outputTimeout int, logPath 
 	var lastActivity time.Time
 	activitySource := "none"
 
-	// Tier 1: Check session transcript (updated by hooks on every turn)
-	ap.Mu.Lock()
-	txPath := ap.TranscriptPath
-	ap.Mu.Unlock()
-	if txPath != "" {
-		if info, err := os.Stat(txPath); err == nil {
-			lastActivity = info.ModTime()
-			activitySource = "transcript"
+	// Tier 1: session transcript (updated by hooks on every turn). Skipped for
+	// sandbox agents: the transcript is written INSIDE the container, so the host
+	// path is always stale and would falsely trip the watchdog — sandbox agents
+	// rely on log mtime (Tier 2), fed by openshell-forwarded container stdout.
+	if !ap.IsSandbox() {
+		ap.Mu.Lock()
+		txPath := ap.TranscriptPath
+		ap.Mu.Unlock()
+		if txPath != "" {
+			if info, err := os.Stat(txPath); err == nil {
+				lastActivity = info.ModTime()
+				activitySource = "transcript"
+			}
 		}
 	}
 

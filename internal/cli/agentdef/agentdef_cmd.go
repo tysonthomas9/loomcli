@@ -33,6 +33,7 @@ var (
 	agentAddTaskFilter string
 	agentAddMaxConc    int
 	agentAddBudget     string
+	agentAddExecution  string
 
 	agentListJSON  bool
 	agentShowJSON  bool
@@ -104,6 +105,7 @@ func init() {
 	agentAddCmd.Flags().StringVar(&agentAddTaskFilter, "task-filter", "", "Task filter for task-driven agents")
 	agentAddCmd.Flags().IntVar(&agentAddMaxConc, "max-concurrency", 0, "Maximum concurrent runs for orchestrator/service agents")
 	agentAddCmd.Flags().StringVar(&agentAddBudget, "budget-policy", "", "Budget/retry policy name")
+	agentAddCmd.Flags().StringVar(&agentAddExecution, "execution", "", `Execution strategy: "" (host, default) or "sandbox" (run under OpenShell)`)
 
 	agentListCmd.Flags().BoolVar(&agentListJSON, "json", false, "JSON output")
 	agentShowCmd.Flags().BoolVar(&agentShowJSON, "json", false, "JSON output")
@@ -130,6 +132,7 @@ func runAgentAdd(cmd *cobra.Command, args []string) error {
 			TaskFilter:     agentAddTaskFilter,
 			MaxConcurrency: agentAddMaxConc,
 			BudgetPolicy:   agentAddBudget,
+			Execution:      agentAddExecution,
 		})
 		if err != nil {
 			return fmt.Errorf("create agent: %w", err)

@@ -254,7 +254,15 @@ func (b *fleetDBIssueBackend) withBackend(ctx context.Context, op string, fn fun
 	handle.Store = cmdstore.WrapStoreWithTracing(handle.Store)
 	defer func() { _ = handle.Close() }()
 
-	ws, err := bootstrap.ResolveActiveWorkspaceKey(ctx, handle.Store.Workspaces())
+	// A workspace-scoped credential (cloud mode) cannot call the global admin
+	// Get used to validate the key, so skip the existence-check there; the
+	// scoped issue operations surface a bad workspace clearly enough.
+	var ws string
+	if bootstrap.DetectMode() == bootstrap.ModeCloud {
+		ws, err = bootstrap.ResolveActiveWorkspaceKey(ctx, nil)
+	} else {
+		ws, err = bootstrap.ResolveActiveWorkspaceKey(ctx, handle.Store.Workspaces())
+	}
 	if err != nil {
 		return backend.ErrUnavailable(op, "resolve active fleet-db workspace", err)
 	}

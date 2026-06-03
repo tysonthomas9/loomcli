@@ -23,6 +23,12 @@ import (
 
 // buildCommand constructs the exec.Cmd for spawning an agent subprocess (does not start it).
 func (s *Supervisor) buildCommand(ap *AgentProcess) (*exec.Cmd, error) {
+	// execution: sandbox — provision an OpenShell sandbox and return its `exec`
+	// command instead of the default host loom process. Gated; default off.
+	if ap.IsSandbox() {
+		return s.buildSandboxCommand(ap)
+	}
+
 	cfg := s.ConfigSnapshot()
 
 	ap.Mu.Lock()

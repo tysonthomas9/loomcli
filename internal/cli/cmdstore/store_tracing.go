@@ -157,6 +157,22 @@ func (t *tracedWorkspaceStore) Get(ctx context.Context, key string) (*domain.Wor
 	return out, err
 }
 
+// GetWorkspaceScoped delegates to the inner store's workspace-scoped fetch when
+// supported (the HTTP/fleetdb store). Implements store.ScopedWorkspaceGetter so
+// the assertion still succeeds through the tracing wrapper.
+func (t *tracedWorkspaceStore) GetWorkspaceScoped(ctx context.Context, key string) (*domain.Workspace, error) {
+	sg, ok := t.inner.(store.ScopedWorkspaceGetter)
+	if !ok {
+		return nil, errors.New("workspace store does not support scoped get")
+	}
+	ctx, span := startStoreSpan(ctx, "Workspaces", "GetWorkspaceScoped",
+		attribute.String("loom.workspace", key),
+	)
+	out, err := sg.GetWorkspaceScoped(ctx, key)
+	finish(span, err)
+	return out, err
+}
+
 func (t *tracedWorkspaceStore) GetByName(ctx context.Context, name string) (*domain.Workspace, error) {
 	ctx, span := startStoreSpan(ctx, "Workspaces", "GetByName")
 	out, err := t.inner.GetByName(ctx, name)

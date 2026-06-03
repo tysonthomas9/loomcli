@@ -75,6 +75,19 @@ func (s *workspaceStore) Get(ctx context.Context, key string) (*domain.Workspace
 	return resp.toDomain(), nil
 }
 
+// GetWorkspaceScoped fetches a single workspace via the workspace-scoped route
+// (GET /api/v1/{workspace}/workspace), authorized by a workspace-scoped role —
+// unlike Get, which uses the global admin route. Implements
+// store.ScopedWorkspaceGetter so a least-privilege agent can resolve its own
+// workspace without a global role.
+func (s *workspaceStore) GetWorkspaceScoped(ctx context.Context, key string) (*domain.Workspace, error) {
+	var resp workspaceWire
+	if err := s.client.do(ctx, "GET", "/api/v1/"+pathEscape(key)+"/workspace", nil, &resp); err != nil {
+		return nil, err
+	}
+	return resp.toDomain(), nil
+}
+
 func (s *workspaceStore) GetByName(ctx context.Context, name string) (*domain.Workspace, error) {
 	// Fleet-db does not currently expose a name-lookup endpoint, so we
 	// fall back to List + scan. List is cheap (workspace count is tiny);

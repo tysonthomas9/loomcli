@@ -27,7 +27,7 @@ import (
 // to empty (omitted from the request when zero).
 type Auth struct {
 	BearerToken string // → Authorization: Bearer <token>
-	APIKey      string // → X-Fleet-API-Key
+	APIKey      string // → X-API-Key + X-Fleet-API-Key (dual-send)
 	Actor       string // → X-Actor (used by --auth-dev-mode)
 }
 
@@ -37,6 +37,10 @@ func (a Auth) Apply(req *http.Request) {
 		req.Header.Set("Authorization", "Bearer "+a.BearerToken)
 	}
 	if a.APIKey != "" {
+		// Dual-send: fleet-db's production API-key auth (auth.APIKeySource) reads
+		// X-API-Key, while older / loom-serve paths read X-Fleet-API-Key. Send
+		// both so one minted key authenticates everywhere (back-compat + RBAC).
+		req.Header.Set("X-API-Key", a.APIKey)
 		req.Header.Set("X-Fleet-API-Key", a.APIKey)
 	}
 	if a.Actor != "" {
