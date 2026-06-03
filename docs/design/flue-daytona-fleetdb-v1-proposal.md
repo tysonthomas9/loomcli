@@ -7,6 +7,11 @@
 - `docs/design/distributed-control-plane.md`
 - `docs/product/session-artifact-contract.md`
 - `docs/product/local-mode-product-spec.md`
+- `docs/product/agent-execution-prd.md`
+- `docs/product/agent-lifecycle-state-machine.md`
+- `docs/product/container-runner-mvp-spec.md`
+- `docs/product/daemon-agent-runtime-architecture.md`
+- `docs/product/failure-modes-recovery-ux.md`
 - `docs/product/orchestrator-worker-model.md`
 - `docs/api.md`
 
@@ -28,6 +33,254 @@ runtime proposal:
 - how local embedded FleetDB differs from cloud/server FleetDB;
 - how pull-based task ownership and push-assisted wakeups fit together;
 - which edge cases V1 must handle before scale-out is trustworthy.
+
+## Start Here
+
+The simple version:
+
+1. FleetDB is the boss. It knows the epic, the tasks, and which tasks are
+   blocked by other tasks.
+2. Loom asks FleetDB for the next tasks that are actually ready.
+3. Loom creates one run for one task and locks that run so only one runner can
+   finish it.
+4. Flue is the agent backend that does the work.
+5. Daytona is the remote Linux sandbox where the work runs.
+6. The runner sends logs, patches, test output, and other artifacts back to the
+   Loom/FleetDB control plane.
+7. The server only closes the task if the runner still owns the lock and the
+   artifacts are safely stored.
+8. Closing the task in FleetDB is what unlocks dependent tasks.
+
+The main design decision is this: FleetDB should drive dependency order, and
+Flue-Daytona should only execute the exact task FleetDB assigned.
+
+## Simple Flow
+
+```text
+FleetDB epic DAG
+  -> ready task
+  -> Loom creates TaskRun + lease
+  -> runner process registers + preflights
+  -> runner creates/attaches Daytona sandbox
+  -> Flue executes exact task in sandbox
+  -> runner uploads artifacts
+  -> CompleteRun validates lease + artifacts
+  -> FleetDB closes task
+  -> downstream tasks become ready
+```
+
+## Local vs Cloud In One Paragraph
+
+In local mode, your laptop still owns FleetDB writes. Daytona should not talk
+to your embedded/local FleetDB. The local runner sends task context into
+Daytona, gets a patch back, applies it locally, and then closes the task
+locally.
+
+In cloud mode, there is no laptop worktree in the critical path. The remote
+runner talks to the Loom server, stores artifacts where the server can read
+them, and calls `CompleteRun` so FleetDB can update task state and unlock the
+next tasks.
+
+## Key Terms
+
+| Term | Meaning |
+|---|---|
+| FleetDB | Source of truth for epics, tasks, dependencies, and task status |
+| Ready frontier | Tasks whose dependencies are closed and can be scheduled now |
+| TaskRun | One attempt to run one exact task |
+| Runner process | Loom-facing process that owns heartbeat, lease mutation, artifact upload, and sandbox control |
+| Runtime placement | Where the runner process runs: local host, daemon child, container, pod, or Daytona bootstrap |
+| Daytona sandbox | Remote Linux filesystem/shell environment used by Flue for task execution |
+| Lease | The lock that says which runner currently owns a TaskRun |
+| Fencing token | A version on the lease that rejects stale runners |
+| Artifact | Output from the run: patch, logs, tests, usage, transcript, commit, PR |
+| CompleteRun | Final server call that validates the lease, records artifacts, and updates the task |
+| Local patch-back | Developer path where Daytona returns a patch that is applied to the local worktree |
+| Server-visible artifacts | Cloud path where outputs are stored somewhere the Loom server can read after Daytona cleanup |
+
+## Product-Doc Alignment
+
+This proposal inherits the execution model from the existing product docs:
+
+- `distributed-control-plane.md`: FleetDB owns shared intent and coordination;
+  nodes own local side effects; observed state must have TTL/staleness
+  semantics.
+- `agent-execution-prd.md`: every run must be visible before backend/model
+  invocation, and sessions/artifacts must survive process exit.
+- `agent-lifecycle-state-machine.md`: run state, task state, and agent
+  definition state are separate state machines.
+- `container-runner-mvp-spec.md`: a runner registers, creates a run/session,
+  preflights, claims/accepts work, heartbeats, streams logs/artifacts, finalizes,
+  and then exits or returns to idle.
+- `failure-modes-recovery-ux.md`: preflight failures, stale runners, runner
+  loss, artifact upload failure, and partial success must become explicit
+  product states with recovery actions.
+- `orchestrator-worker-model.md`: epic runners are reconcile loops over
+  FleetDB issue state; worktree paths are node-local, while branches, PRs,
+  patches, logs, and external runtime IDs are portable artifacts.
+
+The key alignment decision for Flue-Daytona FleetDB V1 is to use the
+task-driven model for epic task runners. Long-lived lead/service agents remain
+valid, but they are not the unit of ownership for dependency-driven task fanout.
+
+## Where The Runner Runs
+
+There are two different "where" questions:
+
+1. Where does the **Loom-facing runner process** run?
+2. Where does the **repo/filesystem/tool execution** happen?
+
+V1 must record both. The Loom-facing runner holds the lease, heartbeats, streams
+events, uploads artifacts, and calls `CompleteRun`. The Daytona sandbox provides
+the remote Linux filesystem and shell that Flue uses for the task.
+
+### Phase 2 Local Patch-Back Placement
+
+```text
+laptop / local daemon / loom task
+  -> starts Loom-owned Flue runner from this repo
+    -> runner creates Daytona sandbox
+      -> Flue agent uses sandbox=daytona and cwd=/workspace/project
+    -> runner captures remote patch
+  -> local host applies patch-back
+  -> local Loom finalizer writes session/artifacts and updates FleetDB
+```
+
+In this mode, the control-plane-facing runner is local. Daytona does not talk to
+embedded FleetDB and does not own final task mutation. The sandbox is remote
+execution only.
+
+### Cloud Scale-Out Placement
+
+```text
+Loom server scheduler
+  -> ScheduleRun creates TaskRun + lease + capacity reservation
+  -> runtime placement starts one runner attempt
+       option A: runner process/pod controls a Daytona sandbox
+       option B: bootstrap runner runs inside the Daytona sandbox
+  -> runner registers/heartbeats to Loom server
+  -> Flue runs the exact task against the Daytona workspace
+  -> runner uploads server-visible artifacts
+  -> CompleteRun updates TaskRun/session/task state
+```
+
+Both placement options use the same TaskRun contract. The implementation can
+choose either per provider, but it must record the placement explicitly:
+
+```text
+runner_runtime_provider = local | daemon | podman | kubernetes | daytona-bootstrap | other
+runner_node_id
+runner_worker_id
+runner_process_ref = pid | container_id | pod_name | job_id | sandbox_process_id
+sandbox_provider = daytona
+sandbox_id
+sandbox_region
+sandbox_image_or_snapshot
+sandbox_cwd
+placement_started_at
+placement_ended_at
+```
+
+Default recommendation:
+
+- Phase 2: Loom-facing runner runs on the local host and controls Daytona by
+  API.
+- Phase 4: use a remote Loom worker/pod or a Daytona bootstrap runner, but keep
+  the control-plane protocol identical.
+- Persistent lead sandboxes are separate long-running environments. They should
+  not run child task agents inside the lead sandbox; task fanout gets separate
+  TaskRuns and task sandboxes.
+
+## Runner Lifecycle Contract
+
+The product lifecycle has four nested lifecycles. They must be visible and
+independently recoverable.
+
+```text
+Epic/Campaign Run
+  owns dependency-driven reconcile loop and max concurrency
+
+TaskRun
+  owns one exact task attempt, lease, status, retry, and final policy
+
+Runner Process
+  owns heartbeat, control-plane mutation, event streaming, and sandbox control
+
+Daytona Sandbox
+  owns remote repo files, shell commands, Flue tool execution, and temporary
+  process state
+```
+
+TaskRun state:
+
+```text
+queued
+  -> leased
+  -> starting
+  -> preflight
+  -> sandbox_starting
+  -> repo_hydrating
+  -> running
+  -> finalizing
+  -> completed | failed | blocked | cancelled | expired | stale | lost
+```
+
+Runner process state:
+
+```text
+registered
+  -> starting
+  -> preflight
+  -> active
+  -> draining
+  -> exited | stale | lost
+```
+
+Sandbox state:
+
+```text
+requested
+  -> created
+  -> hydrated
+  -> active
+  -> retained | cleanup_pending | deleted | lost
+```
+
+Lifecycle rules:
+
+- create the run/session record before model invocation;
+- preflight backend, credentials, repo metadata, artifact upload access, and
+  sandbox provider access before starting the model;
+- persist placement metadata as soon as a runner or sandbox exists;
+- heartbeat both run lease and runner/node liveness while active;
+- finalization starts after backend exit, cancellation, sandbox failure, or
+  lease loss;
+- terminal TaskRun state must include `ended_at`, `error_class` when not
+  completed, and a user-readable reason;
+- task status changes happen only through fenced completion/finalization;
+- cleanup is after artifact durability, not before.
+
+## Mid-Run Failure Contract
+
+Mid-run failure must converge through FleetDB state, not through local files or
+best-effort logs. The task remains protected by the run lease and task status
+policy until the server accepts a fenced finalization.
+
+| Failure | Detection | Required state/result | Task effect | Retry/recovery |
+|---|---|---|---|---|
+| Runner process dies | runner/node heartbeat expires | TaskRun `stale`, then `failed`/`lost` after timeout | task not closed; active reservation released after lease expiry | new attempt starts from configured branch or durable artifact refs |
+| Runner loses lease while still alive | heartbeat returns `lease_lost`/newer fence | runner fail-stops provider command; old run `expired`/`stale` | no task mutation allowed | replacement run uses new lease; stale events/artifacts rejected |
+| Daytona sandbox dies | runner sees provider error or sandbox heartbeat/status loss | TaskRun `failed` with `sandbox_lost`; sandbox metadata retained | task not closed | retry if policy allows; retain diagnostics if available |
+| Network partition runner to server | heartbeat/upload failures | runner stops after heartbeat grace or enters offline-finalize policy | no close while disconnected | if lease expires, later completion is rejected; partial diagnostics may be attached through recovery policy |
+| Backend/model command fails | runner captures exit/error | TaskRun `failed` or `blocked` with error class | task remains open/blocked/review per policy | preserve logs/transcript/test artifacts; retry or human action |
+| Artifact upload/finalize fails | artifact state not committed | TaskRun remains `finalizing` or fails `artifact_upload_failed` | task not closed if required artifacts missing | retry upload while lease valid; retain sandbox until TTL/cleanup policy |
+| CompleteRun response lost | client retry with same `completion_id` | server replays stored completion result | task mutation happens once | idempotent retry returns prior result |
+| Scheduler/controller dies | scheduler heartbeat/lease expires | in-flight runner may continue if its run lease is valid | server can accept valid runner completion | another scheduler reconciles durable run state |
+| Cleanup fails after success | sandbox delete error | TaskRun can stay `completed`; sandbox `cleanup_pending`/`retained` | do not roll back close if artifacts are durable | cleanup worker retries; UI shows retained sandbox |
+
+Stale/lost runners are allowed to preserve evidence, but not to decide task
+truth. Recovery uploads from a stale runner must be fenced as diagnostics and
+must not trigger dependency unlock.
 
 ## Five-Agent Review Synthesis
 
@@ -67,6 +320,11 @@ findings folded into this document are:
     the control plane.
 12. A runner that loses its run lease must fail-stop and must not mutate task
     status.
+13. A server-visible run/session record must exist before the model/backend
+    starts work.
+14. Runtime placement and sandbox placement are recorded separately.
+15. Mid-run runner failure creates stale/failed run state and evidence; it does
+    not silently leave a task claimed or close the task.
 
 ## V1 System Fit
 
@@ -143,6 +401,8 @@ while epic run is active:
   scheduler atomically creates TaskRun, reserves task, and creates lease
   scheduler starts or wakes Flue-Daytona runner
   runner accepts exact task attempt with lease token
+  runner registers placement and creates session before model invocation
+  runner preflights control-plane, credentials, artifact storage, and Daytona
   runner executes in Daytona
   runner uploads logs, transcript, usage, patch/commit/test artifacts
   runner calls CompleteRun
@@ -228,7 +488,18 @@ TaskRun {
   close_policy
   dependency_projection_version
   task_version_at_start
-  status = queued | leased | starting
+  runner_runtime_provider
+  runner_node_id
+  runner_worker_id
+  runner_process_ref
+  sandbox_provider = daytona
+  sandbox_id
+  sandbox_cwd
+  status = queued | leased | starting | preflight | sandbox_starting |
+           repo_hydrating | running | finalizing | completed | failed |
+           blocked | cancelled | expired | stale | lost
+  error_class
+  error_message
 }
 ```
 
@@ -303,10 +574,14 @@ The runner receives exact task context:
   "role": "task",
   "backend": "flue",
   "runtime_provider": "daytona",
+  "runner_runtime_provider": "local",
+  "runner_process_ref": "pid:12345",
   "repo_remote_url": "git@github.com:org/repo.git",
   "repo_branch": "feature/acme-42",
   "base_ref": "abc123",
   "sandbox_cwd": "/workspace/project",
+  "sandbox_provider": "daytona",
+  "sandbox_image_or_snapshot": "loom-task-runner:2026-06-03",
   "sync_strategy": "server-artifacts",
   "loom_server_url": "https://loom.example.com",
   "fleetdb_url": "https://fleetdb.example.com",
@@ -350,7 +625,11 @@ Credential rule:
 
 Runner duties:
 
+- register runner placement and create/update server-visible run/session;
+- preflight backend, scoped credentials, artifact upload, repo access, and
+  Daytona provider access;
 - create or attach Daytona sandbox;
+- persist sandbox metadata immediately after creation;
 - hydrate repo under `/workspace/project`;
 - verify `base_ref` or expected branch state;
 - start Flue harness with `sandbox=daytona`;
@@ -363,6 +642,9 @@ Runner output should be NDJSON:
 
 ```text
 runner_started
+runner_registered
+preflight_started
+preflight_passed
 sandbox_created
 repo_hydrated
 log
@@ -371,6 +653,7 @@ usage
 test_result
 patch_ready
 artifact_uploaded
+finalizing
 final
 ```
 
@@ -381,6 +664,8 @@ lease_state = active | lease_lost | expired | revoked
 desired_state = running | cancel_requested
 current_fencing_token
 heartbeat_deadline
+runner_state = preflight | active | finalizing | draining
+sandbox_state = none | requested | created | hydrated | active | cleanup_pending
 ```
 
 Cancellation is not push-only. Push may deliver a fast cancellation hint, but
@@ -555,16 +840,17 @@ Idempotency:
 Run status is separate from task status:
 
 ```text
-Run: queued -> leased -> starting -> running
-Run terminal: completed | failed | blocked | cancelled | expired | stale
+Run: queued -> leased -> starting -> preflight -> sandbox_starting ->
+     repo_hydrating -> running -> finalizing
+Run terminal: completed | failed | blocked | cancelled | expired | stale | lost
 
 Task: open | in_progress/reserved | review | blocked | closed | needs-revision
 ```
 
 Only a terminal run with a successful `task_status_policy=close` can close the
 task and unlock downstream dependencies. `failed`, `cancelled`, `expired`, and
-`stale` runs do not close tasks by default. A `blocked` run may move the task to
-blocked, but it must not unlock dependents.
+`stale`/`lost` runs do not close tasks by default. A `blocked` run may move the
+task to blocked, but it must not unlock dependents.
 
 `/api/workspaces/{ws}/fleet/done/{worker}` is not enough for this V1
 contract. It records a short-lived worker result and releases a Redis
@@ -588,6 +874,7 @@ lease/fencing contract.
 ```text
 local Loom selects/claims task
 local Loom creates session/lease
+host Flue runner registers placement and preflights
 host Flue runner creates Daytona sandbox
 host runner passes task content and repo context into sandbox
 Daytona executes task
@@ -617,6 +904,8 @@ Local mode rules:
 Loom server owns scheduler
 FleetDB provides ready frontier
 server creates TaskRun/lease
+server or runtime provider starts one runner attempt
+runner registers placement, preflights, and creates/attaches Daytona sandbox
 runner executes exact task in Daytona
 runner uploads server-visible artifacts
 CompleteRun writes FleetDB state
@@ -756,6 +1045,8 @@ The exact endpoint names can change, but V1 needs this shape:
 ```text
 GET  /api/workspaces/{ws}/epics/{epic}/scheduler-ready-frontier
 POST /api/workspaces/{ws}/runs/schedule
+POST /api/workspaces/{ws}/runs/{run}/placement
+POST /api/workspaces/{ws}/runs/{run}/preflight
 POST /api/workspaces/{ws}/runs/{run}/heartbeat
 POST /api/workspaces/{ws}/runs/{run}/events
 GET  /api/workspaces/{ws}/runs/{run}/events
@@ -800,6 +1091,10 @@ Compatibility path:
 - stale runner appends events or artifacts after replacement run starts;
 - scheduler crash after lease but before runner start;
 - runner crash after task reservation but before artifacts;
+- runner crash after sandbox creation but before model starts;
+- runner crash while Flue/model command is active in Daytona;
+- runner crash during finalizing after artifacts upload but before CompleteRun;
+- bootstrap runner inside Daytona exits while sandbox process keeps running;
 - run lease renews after expiry because the store validates token but not
   active/unexpired state;
 - capacity reservation leaks after scheduler or runner crash.
@@ -846,6 +1141,7 @@ Compatibility path:
 ### Runtime/Sandbox
 
 - Daytona provision fails;
+- Daytona sandbox process exits mid-run;
 - repo clone fails;
 - base ref does not exist in remote;
 - runner uses wrong cwd;
@@ -854,6 +1150,7 @@ Compatibility path:
 - cancellation arrives by push but is missed until heartbeat;
 - sandbox is retained on failure and leaks credentials in files;
 - cleanup runs before artifact finalize response is persisted;
+- cleanup fails after CompleteRun succeeds;
 - replacement attempt reuses stale sandbox state accidentally.
 
 ### Push/Pull
@@ -899,6 +1196,23 @@ Assert:
   result;
 - conflicting terminal completion returns conflict;
 - dependency unlock and timeline event occur once.
+
+### Mid-Run Failure E2E
+
+```text
+TestE2E_FlueDaytonaTaskRun_MidRunFailureDoesNotCloseTask
+```
+
+Assert:
+
+- run/session/placement are visible before the backend starts;
+- runner death while Flue is active marks the run stale after heartbeat TTL;
+- lease expiry releases capacity and allows a replacement attempt;
+- stale runner completion, events, and artifacts are rejected by fencing;
+- partial diagnostics are preserved as non-unlocking artifacts;
+- task remains open/blocked/review according to policy and downstream tasks
+  remain blocked;
+- sandbox cleanup/retention state is visible after failure.
 
 ### Artifact Durability E2E
 
@@ -1013,3 +1327,6 @@ Assert:
     embedded FleetDB state and local artifacts into cloud?
 11. Does V1 assume one scheduler leader per workspace, or do we require
     database-backed capacity reservations from day one?
+12. In cloud Phase 4, should the default placement be a Loom worker/pod that
+    controls Daytona by API, or a bootstrap runner that runs inside the Daytona
+    sandbox and calls Loom server directly?
