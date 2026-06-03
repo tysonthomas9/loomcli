@@ -1,89 +1,149 @@
-# OpenShell sandbox — remaining work (runnable plan)
+# OpenShell sandbox — least-privilege implementation record (RW1–RW6 + 2C)
 
-Actionable, dependency-ordered plan to finish the OpenShell sandbox feature on v5.
-Evidence + detail for every claim here is in `sandbox-daemon-port.md` (§A–§F);
-the one-shot code is `internal/cli/agent/sandbox_oneshot.go`.
+Status record for the OpenShell sandbox least-privilege feature. The original
+forward-looking plan lived here; this now records **what actually shipped** (the
+architecture diverged from the first RW1/RW2 sketch — see "Architecture" below).
+Mechanics detail + the v0.0.53 field notes remain in `sandbox-daemon-port.md`
+(§A–§F); the one-shot code is `internal/cli/agent/sandbox_oneshot.go`.
 
-Branch: `feat/sandbox-openshell-v5` (loomcli PR #118). Server field: fleet-db PR #75.
-Original v2 code preserved at tag `rescue-sandbox-openshell-pr20`.
+**Shipped across two PRs (both gated, tested, CI-green):**
+- **fleet-db #76** (`feat/sandbox-rbac-enablement`, base `origin/main`) — activates
+  fleet-db's RBAC: admin-seed bootstrap (`auth.SeedAdmin` + `Auth.BootstrapAdminActor/Key`),
+  the workspace-scoped meta route `GET /api/v1/{workspace}/workspace`, and the atomic
+  `ProvisionScopedKey`/`RevokeKey` admin apikey endpoint (key + ACL role in one MULTI, co-TTL).
+- **loom #126** (`feat/sandbox-loom-rbac-config`, stacked on **#118** the one-shot, base v5) —
+  the loom side (RW1–RW6 + 2C) below.
 
-## Already done (don't redo)
-- One-shot `loom task|plan <wt> --sandbox` ported to v5 + reconciled with the live
-  OpenShell **v0.0.53** CLI: `create -- true` → `sandbox upload` loom → `sandbox upload`
-  bootstrap → `exec -- sh /sandbox/bootstrap.sh` (F1/F2/F3, §E). Build/vet/golangci/guards green.
-- Env knobs: `LOOM_SANDBOX_LOOM_BIN`, `LOOM_SANDBOX_SERVER_URL`, `LOOM_SANDBOX_REPO_URL`,
-  `LOOM_SANDBOX_POLICY`, `LOOM_SANDBOX_PROVIDERS`, `LOOM_SANDBOX_BACKEND`.
-- fleet-db #75: `execution` + opaque `execution_config` fields on the Agent model.
-- **Proven E2E**: a real loom binary in an OpenShell/Podman sandbox claimed → closed a task
-  in the host FleetDB (the §E recipe). The novel risk (in-sandbox agent ⇄ host FleetDB over the
-  OPA boundary) is retired.
+Original v2 code preserved at tag `rescue-sandbox-openshell-pr20`. fleet-db #75 added
+`execution`/`execution_config` to the Agent model (consumed by RW6).
 
-## Remaining work (in dependency order)
+## Architecture (as shipped — one endpoint, one scoped credential)
 
-### RW1 — ROOT BLOCKER: API-backed workspace/daemon-config resolution  [v5 config-layer]
-Today `config.ResolveActiveWorkspace` / `config.LoadDaemonConfig`
-(`internal/cli/config/project.go`) load workspace + daemon config from a **local fleet-db
-store** (`bootstrap.OpenStore`). A sandbox (or any remote-only host) has no local store, so the
-agent dies at `load workspace config: open fleet-db store: fleet-db binary not found`. The API
-backend serves *tasks*, not *workspace config*. (Root cause: v5 moved config out of the repo,
-`loom.yaml` → FleetDB, so there is no longer any local-or-cloned source of workspace config.)
-- **Do:** when `LOOM_SERVER_URL` is set, resolve workspace + roles + agents + repos + daemon
-  settings via the **API backend** (HTTP to serve) instead of the local fleet-db store.
-- **Done when:** on a host with NO local fleet-db data, `LOOM_SERVER_URL=… LOOM_WORKSPACE=… loom task <agent>` resolves the workspace and reaches task selection.
-- **Note:** this is the true prerequisite for *any* remote/sandboxed agent — bigger than sandbox.
+**`loom lead` + the host daemon stay admin on the trusted host; a sandboxed
+planner/worker gets a workspace-scoped `developer` API key, enforced by fleet-db
+RBAC.** The container opens exactly one socket and carries one credential whose
+scope fleet-db enforces uniformly.
 
-### RW2 — Rework the one-shot bootstrap to v5's worktree/repo model  [depends on RW1]
-The bootstrap (`buildOneshotCommand`) does `git clone <repoURL> → loom task worktrees/<name>`.
-v5 keeps worktrees in the loom config dir (`<cfg>/workspaces/<ws>/worktrees/<repo>/<agent>`),
-not inside the repo, and config isn't in the repo — so the manual clone + `worktrees/<name>`
-path is v2-era and wrong.
-- **Do:** let loom set up the worktree/repo from the workspace's repo config (after RW1).
-  Bootstrap becomes ~`/sandbox/loom <role> <agent> --daemon-mode --backend <b>` with
-  `LOOM_SERVER_URL`/`LOOM_WORKSPACE` exported; drop the manual `git clone`/`worktrees/<name>`/push.
-- **Done when:** the in-sandbox agent self-resolves its worktree and works a task with no manual clone.
+- **Transport = Opt 1 (direct to fleet-db via `ModeCloud`).** The bootstrap exports
+  `LOOM_FLEET_DB_URL/_API_KEY/_ACTOR` + `LOOM_WORKSPACE` and **drops `LOOM_SERVER_URL`**,
+  so both config resolution (`OpenStore` → `ModeCloud`) and the `fleetdb` issue backend
+  hit the same fleet-db with the same scoped key. (This supersedes the original RW1/RW2
+  sketch, which routed through `LOOM_SERVER_URL`/the API backend and self-resolved
+  worktrees — neither shipped.)
+- **2C (network isolation layer, shipped):** point `LOOM_SANDBOX_FLEETDB_URL` at a
+  `loom serve` running the config proxy and the sandbox reaches **only serve**; serve
+  forwards the caller's scoped key to fleet-db (RBAC still enforces). See RW-2C.
 
-### RW3 — Repo + serve reachable from the sandbox (driver-aware)
-- Serve: `loom serve --bind 0.0.0.0`. Sandbox reaches the host at the **driver's** address:
-  Podman → `host.containers.internal` (`192.168.127.254`); Docker → `host.docker.internal`.
-  `LOOM_SANDBOX_SERVER_URL` overrides; make `sandboxHostGateway` driver-aware (it's hardcoded
-  `host.docker.internal`).
-- Repo: the workspace repo's `Remote` must be reachable from the sandbox (a git endpoint on the
-  host gateway, or a real remote), and **writable** for push-back. `LOOM_SANDBOX_REPO_URL` overrides.
+## What shipped (per workstream)
 
-### RW4 — Auto-generate the OPA policy
-The default "open" policy opens only 443/80/22; the sandbox needs the **serve port** (+ git port).
-- **Do:** loom generates a policy opening the serve + repo endpoints and passes `--policy`.
-  Format rules (proven, §E): **concrete hosts only** (a wildcard `host: "**"` crashes
-  provisioning); a bare `{host, port}` endpoint = L4 (all methods); `binaries` lists the loom +
-  git binary paths. `LOOM_SANDBOX_POLICY` overrides today; auto-gen is the goal.
+### RW1 + RW-SEC — least-privilege transport & credential  `[loom #126]`
+- `fleethttp.Auth.Apply` dual-sends `X-API-Key` (+ legacy `X-Fleet-API-Key`); fleet-db
+  reads `X-API-Key`.
+- **Scoped config resolution:** `store.ScopedWorkspaceGetter` (`GetWorkspaceScoped` →
+  `GET /api/v1/{ws}/workspace`) + a `ModeCloud` branch in `config.ResolveActiveWorkspace`
+  (`internal/cli/config/config.go`) that resolves *only* the active workspace via the
+  scoped route and returns early — never the global `Workspaces().List()`. The `fleetdb`
+  issue backend skips its global existence-check on the cloud path (`deps.go`). Net: a
+  `developer` key with **no global role** resolves workspace + daemon config + claims/closes.
+- **Credential provisioning** (`sandbox.ProvisionCredential`, `internal/sandbox/credential.go`):
+  when the host holds an admin key, mints a short-TTL (`CredentialTTLSeconds` = 6 h),
+  workspace-scoped `developer` key for a unique actor (`sandbox:<ws>:<agent>:<ts>`) and
+  returns a revoke func; no-op ambient passthrough in dev/auth-off. Shared by the one-shot
+  and the daemon strategy.
 
-### RW5 — Deliver loom + backend via a `--from` image (not upload)
-Large-file `sandbox upload` is flaky (50 MB broke); bake instead.
-- **Do:** build/select a `--from` image with a `GOOS=linux` loom + the agent backend baked
-  (`COPY --chmod=0755 …`; the base runs as non-root `sandbox`). Add "loom already in image →
-  skip the upload step". `LOOM_SANDBOX_BACKEND` selects the backend.
+### RW2 — repo materialization  `[loom #126]`
+`RepoConfig.RemoteURL` is projected from the fleet-db Repo row (`repoConfigFromStore`), so
+a sandbox clones from a container-reachable remote (host-gateway rewrite) and pushes work
+back. (No worktree self-resolution — the bootstrap clones explicitly.)
 
-### RW6 — Daemon-mode (supervised sandbox agents)  [depends on RW1–RW5 + fleet-db #75]
-- Consume `execution`/`execution_config` (fleet-db #75) → plumb through `domain.Agent` →
-  `agentWire` → `config.AgentEntry` (see `sandbox-daemon-port.md §B`).
-- Supervisor `ExecutionStrategy` seam (§A): `BuildSpawnCommand`/`Cleanup`/`OnStop` hooked into
-  `supervisor/spawn.go`, `health.go`, agent construction in `supervisor.go`.
-- **§C liveness adaptation (critical):** IPC heartbeats, ownership leases, and host-side
-  transcript liveness can't reach into a container — for `execution: sandbox` agents, rely on
-  log-mtime only and skip the IPC/lease/transcript watchdogs, or they get reaped.
+### RW3 — driver-aware reachability  `[loom #126]`
+`sandbox.HostGateway()` resolves Podman → `host.containers.internal`/`192.168.127.254`,
+Docker → `host.docker.internal` (via `OPENSHELL_DRIVERS`; `LOOM_SANDBOX_HOST_GATEWAY`
+override). Applied to both the fleet-db URL and the repo clone URL. fleet-db must bind
+`0.0.0.0` (the gvproxy gateway can't reach a `127.0.0.1`-bound server).
 
-## Verification harness (the proven recipe — reuse as the integration test)
-1. `LOOM_CONFIG_DIR=<tmp> loom serve --bind 0.0.0.0 -p 18099` (isolated).
-2. `LOOM_CONFIG_DIR=<same> bash test/playground/setup.sh` → seeds the PLAYGROUND workspace + tasks.
-3. Build a loom-baked image: `FROM <openshell base>` + `COPY --chmod=0755 loom /usr/local/bin/loom`.
-4. Policy opening `:18099` (concrete hosts) + binaries `/usr/local/bin/loom`,`/usr/bin/curl`.
-5. `openshell sandbox create --from <img> --policy <p> -- true`; then
-   `exec -n <s> -- env LOOM_SERVER_URL=http://host.containers.internal:18099 LOOM_WORKSPACE=PLAYGROUND /usr/local/bin/loom data claim|close <id>` → verify the transition host-side.
+### RW4 — auto-generated OPA policy  `[loom #126]`
+`sandbox.PolicyEndpoints` + `sandbox.WritePolicy` generate a policy opening the fleet-db
+(+ git) endpoints and pass `--policy` from both spawn paths when no explicit
+`LOOM_SANDBOX_POLICY` is set. **Format (v0.0.53, validated live):** top-level
+`version: 1`; a `filesystem_policy` granting the default read/write surface; concrete
+hosts only (a wildcard `host: "**"` crashes provisioning); each Podman host also gets its
+`192.168.127.254` alias; `binaries` lists the loom + git + curl paths.
+
+### RW5 — deliver loom via a `--from` image  `[loom #126]`
+`Config.LoomBinPath` (from `LOOM_SANDBOX_LOOM_PATH`) → "loom baked in image, skip upload".
+Large-file `sandbox upload` is flaky, so baking is preferred; `LOOM_SANDBOX_BACKEND`
+selects the agent backend.
+
+### RW6 — daemon-mode (supervised `execution: sandbox` agents)  `[loom #126]`
+- **§B plumbing:** `execution`/`execution_config` threaded through `domain.Agent`, the
+  fleetdb agent wire, store `Agent{Create,Update}`, `config.AgentEntry` (+ `Equal`/
+  `agentEntryFromDomain`), and `loom agentdef add --execution`.
+- **§A strategy:** the supervisor's `buildCommand` dispatches `IsSandbox()` agents to
+  `buildSandboxCommand`, which marshals the `AgentProcess` into an
+  `agent.SandboxExecSpec` and calls `agent.BuildSandboxExecCommand` (push branch →
+  `create -- true` → upload loom + bootstrap → return the `exec` cmd; clone-from-`RemoteURL`
+  bootstrap runs loom **without** `--daemon-mode`). `postExitCleanup` → `cleanupSandbox`
+  does **non-destructive** recovery (fetch + ff-merge + revoke + delete; a non-ff is logged,
+  not deleted). The heavy sandbox/fleet-db logic lives in `internal/cli/agent` (reached via
+  the existing supervisor→agent import) to keep package import fan-out under the gate.
+- **§C liveness:** sandbox agents skip the host transcript-mtime watchdog (the transcript
+  is in the container) and fall back to log-mtime — the fix for the watchdog-FATAL class.
+- **All daemon-sandbox behavior is gated on `Entry.Execution == "sandbox"` (default off).**
+
+### RW-2C — loom-serve config proxy (network isolation)  `[loom #126]`
+`loom serve --fleet-db-proxy-url <fleet-db>` (env `LOOM_FLEET_DB_PROXY_URL`) exposes a
+reverse proxy at `/api/v1/` (`internal/webui/fleet_proxy.go`) that forwards to fleet-db,
+passing the caller's `X-API-Key`/`X-Actor` through unchanged — serve injects **no** identity,
+so fleet-db's RBAC authorizes the caller's scoped key. The route is exempt from serve's JWT
+auth (`isPublicRoute`, same pattern as `/api/fleet/`). Point `LOOM_SANDBOX_FLEETDB_URL` at
+serve and the sandbox reaches only serve; the auto-generated OPA policy then opens serve's
+port instead of fleet-db's. No agent-side code change — the `ModeCloud` client works
+unchanged against serve.
+
+## Bugs found by the live E2E (fixed in #126, would have shipped broken)
+
+Unit tests were green; only driving the full path in a real sandbox surfaced these:
+1. **`sharedTransport` ignored the egress proxy (showstopper).** `internal/backend/fleet/transport.go`
+   built a bare `&http.Transport{}`, defaulting `Proxy` to nil — so a sandboxed loom bypassed
+   OpenShell's mandatory egress proxy (`http_proxy=http://10.200.0.1:3128`) and every fleet-db
+   dial was refused. Fix: `Proxy: http.ProxyFromEnvironment` (no-op outside a sandbox). Without
+   this, **no** sandboxed loom could reach fleet-db.
+2. **RW4 policy missing `version: 1`** → v0.0.53 rejects the policy ("missing field `version`")
+   → sandbox create fails.
+3. **RW4 policy dropped `filesystem_policy`** → nothing writable in-container (`/sandbox`, `/tmp`,
+   `/home` all read-only) → clone/upload fail.
+
+## Verification (the proven recipe — reuse as the integration test)
+
+Run against fleet-db with **authz ON** (production `X-API-Key` path, not `--auth-dev-mode`):
+1. fleet-db bound `0.0.0.0:<port>` with `-redis-durability-profile managed` (skips `CONFIG SET`,
+   so miniredis works) and `FLEET_AUTH_BOOTSTRAP_ADMIN_ACTOR/_KEY` set (admin-seed).
+2. Create a workspace; mint a scoped `developer` key via `POST /api/v1/admin/apikeys`
+   (`{workspace, role: developer}`).
+3. Build a `GOOS=linux` loom (or bake it via `--from`); generate the OPA policy (RW4).
+4. **One-shot / data-path E2E:** in an OpenShell sandbox, `loom data create|claim|close` over
+   `ModeCloud` with the developer key → host-side confirms the transition. **Least-privilege
+   battery:** scoped read 200, `/api/v1/admin/*` 403, no-key 401, external host blocked (the
+   egress proxy returns 403 for a disallowed endpoint).
+5. **2C E2E:** repeat with `LOOM_SANDBOX_FLEETDB_URL` pointed at `loom serve --fleet-db-proxy-url`,
+   OPA policy opening only serve → same lifecycle, fleet-db egress blocked.
+
+(Proven 2026-06 on Podman/macOS, both the direct-fleet-db and 2C-via-serve paths.)
+
+## Remaining (env-gated, not code-blocked)
+
+**Daemon-mode live drain with a real AI agent.** The RW6 §A/§C supervisor strategy is
+unit-tested and the data path is live-proven, but a fully end-to-end daemon-supervised
+sandbox agent additionally needs an AI backend *inside* the container — which requires the
+generated OPA policy to also open the AI-provider endpoints (today it opens only fleet-db +
+git), or the token-free `playground` backend (which has its own drain blockers). Left as a
+follow-up.
 
 ## Bring up the OpenShell test stack (macOS/arm64, no Docker)
 - `brew install podman && podman machine init && podman machine start`
-- `curl -LsSf https://raw.githubusercontent.com/NVIDIA/OpenShell/main/install.sh | sh` (CLI + gateway via brew services)
+- Install the OpenShell CLI + gateway (brew services).
 - `~/.config/openshell/gateway.env`:
   `OPENSHELL_DRIVERS=podman` · `PATH=/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin` ·
-  `OPENSHELL_PODMAN_SOCKET=<podman machine inspect → PodmanSocket.Path>`
-- `brew services restart openshell` → `openshell status` should show **Connected**.
+  `OPENSHELL_PODMAN_SOCKET=<podman machine inspect → ConnectionInfo.PodmanSocket.Path>`
+- `brew services restart openshell` → `openshell status` should show **Connected** (v0.0.53).
