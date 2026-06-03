@@ -320,7 +320,7 @@ func TestShouldRestart(t *testing.T) {
 		}
 	})
 
-	t.Run("counter exceeds maxRetries returns false", func(t *testing.T) {
+	t.Run("counter exceeds maxRetries parks and retries", func(t *testing.T) {
 		config := makeSupervisorConfig(
 			[]cfgpkg.AgentEntry{{Worktree: "test", Role: "plan"}},
 			nil,
@@ -336,12 +336,17 @@ func TestShouldRestart(t *testing.T) {
 		}
 
 		result := s.shouldRestart(ap)
-		// After increment, count becomes 4 which exceeds maxRetries of 3
-		if result {
-			t.Error("shouldRestart() = true, want false (counter exceeds max)")
+		// After increment count becomes 4 (> maxRetries 3): instead of giving
+		// up, the agent parks-and-retries — shouldRestart stays true and the
+		// budget resets so the parked agent isn't shown as "failed".
+		if !result {
+			t.Error("shouldRestart() = false, want true (parks after exhaustion)")
 		}
-		if ap.RestartCount != 4 {
-			t.Errorf("restartCount = %d, want 4", ap.RestartCount)
+		if ap.RestartCount != 0 {
+			t.Errorf("restartCount = %d, want 0 (reset on park)", ap.RestartCount)
+		}
+		if ap.StopReason != StopReasonMaxRetriesParked {
+			t.Errorf("StopReason = %q, want %q", ap.StopReason, StopReasonMaxRetriesParked)
 		}
 	})
 

@@ -79,6 +79,11 @@ const (
 	StopReasonYielded            StopReason = "yielded"
 	StopReasonWatchdog           StopReason = "watchdog"
 	StopReasonBackendUnavailable StopReason = "backend_unavailable"
+	// StopReasonMaxRetriesParked marks an agent that exhausted its restart
+	// budget and is now park-and-retrying on a fixed interval instead of being
+	// abandoned (silent loss until daemon restart). The supervise goroutine
+	// stays alive and the agent self-resumes once a transient root cause clears.
+	StopReasonMaxRetriesParked StopReason = "max_retries_parked"
 )
 
 // recordTick refreshes this agent's liveness slot by identity. A no-op before
