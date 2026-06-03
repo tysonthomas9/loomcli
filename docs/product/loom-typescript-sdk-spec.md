@@ -1,6 +1,6 @@
 # Loom TypeScript SDK & Flue-as-Control-Plane-Client — PRD
 
-**Status:** In progress — Phases A + B implemented; Phase C started (TaskRun token + fencing primitives); D pending
+**Status:** In progress — Phases A + B done; Phase C implemented and the SDK read+write data plane **validated live E2E** through a real Daytona sandbox (auth-hardening: token minting + fencing mount pending; Phase D pending)
 **Date:** 2026-06-03
 **Owner:** Tyson
 
@@ -422,15 +422,39 @@ when all four phases pass and the Definition of Done holds.
 - `loom serve` mints scoped per-TaskRun tokens and enforces fencing.
 
 **Validation steps**
+
+*Live E2E run 2026-06-03 (dev container: real `loom serve` + fleetdb + a real
+Daytona sandbox; workspace `HELLO`, task `HELLO-1`):*
+- ✅ **Read + write data plane via the SDK, end to end.** The daemon spawned the
+  flue agent; the runner fetched `HELLO-1`'s design via `getTask()` from the live
+  serve (`task_fetched` event), the agent created `SDK_E2E.md` in the Daytona
+  sandbox, and the runner's `postArtifact()` **auto-registered the result
+  artifact on the supervisor-created `AgentSession`** (`art_4fa4f6b…` →
+  `20260603-210125-sdkbot…`, type `patch`) — the artifact arrived **via the SDK,
+  not `LOOMRUNNER`**. `recordUsage`/`heartbeat`/`postArtifact` also verified
+  directly against real fleetdb (201/200 + persistence). Sandbox created →
+  deleted; no regression in the Daytona lifecycle.
+- *Minor follow-up:* loom's session finalizer overwrites the whole session
+  metadata map, clobbering the `usage_*` keys `recordUsage` writes (usage still
+  flows via `LOOMRUNNER`→the usage collector). Fix = merge metadata, or give
+  usage its own field/store.
+
+*Still pending (need token minting wired and/or a writable repo — gated runbook):*
 1. A completed Daytona run closes its task via the SDK → the daemon does **not**
-   re-claim it (no orphan loop), verified over ≥ 2 supervise cycles.
+   re-claim it (no orphan loop), verified over ≥ 2 supervise cycles. *(The runner
+   does not yet call `complete()`; loom's finalizer closes the task in the
+   host-orchestrated model.)*
 2. Duplicate-runner test: two runners on one TaskRun → the stale-fencing-token
-   writer is rejected (HTTP 409) and stops; the current holder completes.
+   writer is rejected (HTTP 409) and stops; the current holder completes. *(Needs
+   supervisor token minting + the fencing middleware mounted.)*
 3. Scope test: the TaskRun token cannot read a different task (403) or claim new
-   work (403).
+   work (403). *(Primitive proven by unit tests; needs minting wired to exercise live.)*
 4. The sandbox holds no fleetdb credentials and can reach only `loom serve`
-   (network policy; no `X-Actor` fleetdb key present).
+   (network policy; no `X-Actor` fleetdb key present). *(In the host-orchestrated
+   run the runner is on the host; this becomes testable when the runner moves
+   into the sandbox.)*
 5. Lease-loss test: after the lease expires, SDK calls fail closed (no refresh).
+   *(Needs minting + lease-TTL wiring.)*
 
 ### Phase D — Artifacts as source of truth
 **Exit criteria**
