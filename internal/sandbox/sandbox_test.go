@@ -224,6 +224,9 @@ func TestWritePolicy_Format(t *testing.T) {
 	}
 	s := string(data)
 	for _, want := range []string{
+		"version: 1", // OpenShell v0.0.53 rejects a policy without a top-level version
+		// filesystem grants must survive, or the in-container agent has nothing writable.
+		"filesystem_policy:", "read_write: [/sandbox, /tmp, /dev/null, /home]",
 		"network_policies:", "name: loom",
 		`- { host: "host.containers.internal", port: 18099 }`,
 		`- { path: "/sandbox/loom" }`,

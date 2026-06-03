@@ -272,6 +272,17 @@ func PolicyEndpoints(urls ...string) []Endpoint {
 // policy schema changes.
 func WritePolicy(endpoints []Endpoint, binaries []string) (string, func(), error) {
 	var sb strings.Builder
+	// OpenShell v0.0.53 requires a top-level schema version; the parser rejects a
+	// policy without it ("missing field `version`").
+	sb.WriteString("version: 1\n")
+	// Preserve the default sandbox filesystem grants. A network-only policy with no
+	// filesystem_policy leaves nothing writable (verified live: /sandbox, /tmp, /home
+	// all read-only), so the in-container clone/worktree/loom-upload all fail. We
+	// keep the default's read/write surface and only tighten the network below.
+	sb.WriteString("filesystem_policy:\n")
+	sb.WriteString("  include_workdir: true\n")
+	sb.WriteString("  read_only: [/usr, /lib, /etc, /proc, /dev/urandom, /opt, /var/log]\n")
+	sb.WriteString("  read_write: [/sandbox, /tmp, /dev/null, /home]\n")
 	sb.WriteString("network_policies:\n")
 	sb.WriteString("  loom:\n")
 	sb.WriteString("    name: loom\n")
