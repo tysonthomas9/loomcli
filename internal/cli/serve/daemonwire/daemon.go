@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
@@ -169,6 +170,7 @@ func BuildDaemonConfigFn() func() (json.RawMessage, error) {
 		if err != nil {
 			return nil, err
 		}
+		redactDaemonConfigSecrets(cfg)
 		data, err := json.Marshal(cfg)
 		if err != nil {
 			return nil, fmt.Errorf("marshal daemon config: %w", err)
@@ -194,6 +196,7 @@ func BuildStoreBackedDaemonConfigFn(s store.Store) func() (json.RawMessage, erro
 		if err != nil {
 			return nil, err
 		}
+		redactDaemonConfigSecrets(cfg)
 		data, err := json.Marshal(cfg)
 		if err != nil {
 			return nil, fmt.Errorf("marshal daemon config: %w", err)
@@ -256,19 +259,23 @@ func roleConfigFromDomain(r *domain.Role) config.RoleConfig {
 		return config.RoleConfig{}
 	}
 	return config.RoleConfig{
-		Description:    r.Description,
-		PromptFile:     r.PromptFile,
-		Model:          r.Model,
-		TaskFilter:     r.TaskFilter,
-		Backend:        r.Backend,
-		PathPatterns:   append([]string(nil), r.PathPatterns...),
-		Skills:         append([]string(nil), r.Skills...),
-		MaxPriority:    cloneIntPtr(r.MaxPriority),
-		MaxConcurrency: cloneIntPtr(r.MaxConcurrency),
-		ReadOnly:       r.ReadOnly,
-		AllowedTools:   append([]string(nil), r.AllowedTools...),
-		DeniedTools:    append([]string(nil), r.DeniedTools...),
-		MaxBudgetUSD:   cloneFloatPtr(r.MaxBudgetUSD),
+		Description:        r.Description,
+		PromptFile:         r.PromptFile,
+		Model:              r.Model,
+		TaskFilter:         r.TaskFilter,
+		Backend:            r.Backend,
+		PathPatterns:       append([]string(nil), r.PathPatterns...),
+		Skills:             append([]string(nil), r.Skills...),
+		MaxPriority:        cloneIntPtr(r.MaxPriority),
+		MaxConcurrency:     cloneIntPtr(r.MaxConcurrency),
+		ReadOnly:           r.ReadOnly,
+		AllowedTools:       append([]string(nil), r.AllowedTools...),
+		DeniedTools:        append([]string(nil), r.DeniedTools...),
+		MaxBudgetUSD:       cloneFloatPtr(r.MaxBudgetUSD),
+		RuntimeProvider:    r.RuntimeProvider,
+		RuntimeProfileName: r.RuntimeProfileName,
+		RuntimeCWD:         r.RuntimeCWD,
+		RuntimeDaytona:     cloneAnyMap(r.RuntimeDaytona),
 	}
 }
 
@@ -345,6 +352,99 @@ func cloneFloatPtr(v *float64) *float64 {
 	}
 	out := *v
 	return &out
+}
+
+func cloneAnyMap(in map[string]any) map[string]any {
+	if in == nil {
+		return nil
+	}
+	out := make(map[string]any, len(in))
+	for k, v := range in {
+		out[k] = v
+	}
+	return out
+}
+
+func cloneRedactedAnyMap(in map[string]any) map[string]any {
+	return cloneRedactedAnyMapForParent("", in)
+}
+
+func redactDaemonConfigSecrets(cfg *config.DaemonConfig) {
+	if cfg == nil {
+		return
+	}
+	for name, role := range cfg.Roles {
+		role.RuntimeDaytona = cloneRedactedAnyMap(role.RuntimeDaytona)
+		cfg.Roles[name] = role
+	}
+}
+
+func cloneRedactedAnyMapForParent(parentKey string, in map[string]any) map[string]any {
+	if in == nil {
+		return nil
+	}
+	out := make(map[string]any, len(in))
+	for k, v := range in {
+		out[k] = cloneRedactedAnyValue(parentKey, k, v)
+	}
+	return out
+}
+
+func cloneRedactedAnyValue(parentKey, key string, value any) any {
+	if shouldRedactConfigValue(parentKey, key) {
+		return "[redacted]"
+	}
+	switch typed := value.(type) {
+	case map[string]any:
+		return cloneRedactedAnyMapForParent(key, typed)
+	case map[string]string:
+		out := make(map[string]any, len(typed))
+		for k, v := range typed {
+			out[k] = cloneRedactedAnyValue(key, k, v)
+		}
+		return out
+	case []any:
+		out := make([]any, len(typed))
+		for i, item := range typed {
+			out[i] = cloneRedactedAnyValue(key, "", item)
+		}
+		return out
+	default:
+		return value
+	}
+}
+
+func shouldRedactConfigValue(parentKey, key string) bool {
+	if key == "" {
+		return false
+	}
+	if strings.EqualFold(parentKey, "env_vars") || strings.EqualFold(parentKey, "envVars") {
+		return isSecretConfigKey(key)
+	}
+	if isEnvSelectorConfigKey(key) {
+		return false
+	}
+	return isSecretConfigKey(key)
+}
+
+func isEnvSelectorConfigKey(key string) bool {
+	clean := strings.TrimSpace(key)
+	lower := strings.ToLower(clean)
+	if lower == "env" || lower == "env_grants" || lower == "envgrants" || lower == "secrets" ||
+		lower == "secret_env" || lower == "secretenv" {
+		return true
+	}
+	return strings.HasSuffix(clean, "_env") || strings.HasSuffix(clean, "Env")
+}
+
+func isSecretConfigKey(key string) bool {
+	upper := strings.ToUpper(strings.TrimSpace(key))
+	for _, marker := range []string{"TOKEN", "API_KEY", "SECRET", "PASSWORD", "CREDENTIAL", "AUTH"} {
+		if strings.Contains(upper, marker) {
+			return true
+		}
+	}
+	return false
 }
 
 // BuildAgentQueueFn returns a callback that fetches and scores ready issues

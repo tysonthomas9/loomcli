@@ -23,7 +23,7 @@ func loadWithTypeScriptCompiler(root string) (*Plan, error) {
 	cmd.Dir = root
 	out, err := cmd.CombinedOutput()
 	if err != nil {
-		return nil, fmt.Errorf("compile .loom TypeScript definitions: %w\n%s", err, string(out))
+		return nil, fmt.Errorf("compile Loom TypeScript definitions: %w\n%s", err, string(out))
 	}
 	var plan Plan
 	if err := json.Unmarshal(out, &plan); err != nil {

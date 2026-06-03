@@ -260,6 +260,155 @@ loom daemon profile set --backend codex
 
 **Resolution order:** `--backend` flag > `LOOM_BACKEND` env > workspace daemon profile > default `claude`
 
+## Runtime Profiles
+
+TypeScript-first workspaces can declare runtime profiles under `.loom/runtimes`.
+Loom supports `runtime.local`, `runtime.podman`, `runtime.remote`, and
+`runtime.daytona` declarations. Daytona profiles persist provider metadata,
+sandbox create options, repo/env grants, lifecycle policy, and declarative image
+builder intent in FleetDB.
+
+```ts
+// .loom/runtimes/daytona-dev.ts
+import { Image } from "@daytona/sdk";
+import { runtime } from "@loom/sdk";
+
+export default runtime.daytona({
+  name: "daytona-dev",
+  image: Image.debianSlim("3.12")
+    .runCommands("apt-get update && apt-get install -y --no-install-recommends git nodejs npm")
+    .workdir("/workspace/project"),
+  language: "typescript",
+  cwd: "/workspace/project",
+  repos: ["frontend"],
+  repoUrl: "https://github.com/acme/frontend.git",
+  env: ["GITHUB_TOKEN", "NODE_ENV"],
+  resources: { cpu: 2, memory: 4, disk: 8 },
+  target: "us",
+  apiKeyEnv: "DAYTONA_API_KEY",
+  gitTokenEnv: "GITHUB_TOKEN",
+  openaiApiKeyEnv: "OPENAI_API_KEY",
+  setupCommands: ["npm install"],
+  autoStopInterval: 60,
+  workspace: {
+    owner: "loom",
+    cleanup: { mode: "after_ttl", ttl: "6h" },
+    filesystem: { persistence: "session", durability: "provider" },
+  },
+  capabilities: {
+    filesystem: { read: true, write: true },
+    shell: { enabled: true, commands: ["git", "npm", "node"] },
+    network: { enabled: true },
+    lifecycle: { materialize: true, cleanup: true, release: true },
+  },
+});
+```
+
+`apiKeyEnv` records the controller-side Daytona API key environment variable
+name, not the secret value. Agent and Git credentials are opt-in: declare grant
+names through `env`, use `gitTokenEnv`/`gitDeployKeyEnv` for private repo
+materialization, and use `openaiApiKeyEnv` or a Daytona-provisioned
+`codexAuthFileEnv` for Codex/OpenAI auth.
+
+Daemon-managed Daytona agents use the same explicit setup model as workflows.
+Each spawned agent gets its own sandbox, validates that `LOOM_FLEET_DB_URL`,
+`LOOM_WORKSPACE`, and either `LOOM_FLEET_DB_API_KEY` or `LOOM_FLEET_DB_ACTOR`
+are available, runs a remote `/health` check, clones the configured repo into
+the runtime `cwd` (default `/workspace/project`), then runs any declared
+`setup_commands` before starting the agent command. Host-local IPC and auth
+paths such as `LOOM_DAEMON_SOCKET`, `CODEX_HOME`, `HOME`, and `SSH_AUTH_SOCK`
+are not forwarded. Private Git clones use temporary in-sandbox Git auth helpers
+backed only by declared token/deploy-key env vars, and secret values are
+redacted from captured remote output.
+
+WorkflowContext also supports Daytona-shaped setup code. Workflows can import
+`Daytona` from `@daytona/sdk`, create a sandbox, attach it to an agent with
+`daytona(sandbox)`, and Loom will record sandbox/session metadata and redact
+secret-like fields. When `@daytona/sdk` is installed next to the workflow source,
+`ctx.runtime.materializeWorkspace()` creates a Daytona sandbox from the active
+`runtime.daytona` profile. Daytona-backed `session.shell(...)` and
+`session.prompt(...)` calls execute through `sandbox.process.executeCommand(...)`
+when the SDK and selected backend CLI are available; otherwise Loom falls back to
+an admission shim so definitions and tests can still run without the SDK
+installed.
+
+The native import is `@loom/runtime`; Loom also declares `@flue/runtime` as a
+compatibility alias for example-shaped workflows that export named `route` and
+`run` handlers with `FlueContext` / `WorkflowRouteHandler` types. New
+TypeScript projects include a small `.loom/connectors/daytona.ts` adapter so
+workflows can use the sample-style `../connectors/daytona` import.
+Loom's native source root remains `.loom`, but copied Flue examples can live
+under `.flue/workflows`, `.flue/runtimes`, `.flue/tools`, `.flue/agents`, and
+`.flue/connectors` when there are no `.loom` authored entrypoints in the same
+project.
+
+```ts
+// .loom/connectors/daytona.ts
+import { daytona as loomDaytona } from "@loom/runtime";
+
+export function daytona(sandbox, options = {}) {
+  return loomDaytona(sandbox, options);
+}
+```
+
+```ts
+// .loom/workflows/code.ts
+import { Daytona } from "@daytona/sdk";
+import {
+  createAgent,
+  type FlueContext,
+  type WorkflowRouteHandler,
+} from "@flue/runtime";
+import { daytona } from "../connectors/daytona";
+
+export const route: WorkflowRouteHandler = async (_c, next) => next();
+
+export async function run({ init, payload, env }: FlueContext) {
+  const client = new Daytona({ apiKey: env.DAYTONA_API_KEY });
+  const sandbox = await client.create({ snapshot: "loom-node-dev", cwd: "/workspace/project" });
+
+  const setup = await (await init(createAgent(() => ({
+    name: "setup",
+    sandbox: daytona(sandbox, { name: "daytona-setup" }),
+  })), { name: "setup" })).session();
+
+  await setup.shell(`git clone ${payload.repo} /workspace/project`);
+
+  const project = await (await init(createAgent(() => ({
+    name: "project",
+    model: "openai/gpt-5.5",
+    sandbox: daytona(sandbox, { name: "daytona-project", cwd: "/workspace/project" }),
+  })), { name: "project" })).session();
+
+  return await project.prompt(payload.prompt);
+}
+```
+
+This makes Daytona profiles, setup shell commands, workflow-runner prompt
+execution, and daemon-managed coding-agent sessions first-class in Loom. The
+workflow example above deliberately reuses one application-created sandbox for
+setup and prompting; daemon-managed `runtime.daytona` agents do not share that
+state, and each spawned agent receives its own Daytona sandbox.
+
+To exercise the Slack-clone epic runner with Daytona-backed task agents, keep
+the harness local and set the remote runtime inputs explicitly:
+
+```bash
+AGENT_RUNTIME=daytona \
+DAYTONA_API_KEY=<daytona-key> \
+OPENAI_API_KEY=<openai-key> \
+LOOM_FLEET_DB_URL=https://fleet.example.com \
+LOOM_FLEET_DB_API_KEY=<fleet-key> \
+DAYTONA_REMOTE_REPO_URL=https://github.com/acme/slack-clone-e2e.git \
+GITHUB_TOKEN=<repo-token> \
+bash e2e/run_epic_runner_real_codex_tsfirst_slack_podman.sh
+```
+
+For Codex auth, use either `OPENAI_API_KEY` or a Daytona-provisioned remote
+`CODEX_AUTH_FILE` that points to an in-sandbox `auth.json`. The e2e scripts
+reject host-local FleetDB URLs, local repo paths, malformed remote URLs, and
+host-local auth paths before starting Daytona work.
+
 ## Configuration
 
 All loom state lives in fleet-db (workspaces, repos, roles, agent definitions,

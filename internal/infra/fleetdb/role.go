@@ -14,78 +14,94 @@ var _ store.RoleStore = (*roleStore)(nil)
 
 // roleWire mirrors fleet-db's models.Role JSON shape.
 type roleWire struct {
-	WorkspaceKey   string    `json:"workspace_key"`
-	Name           string    `json:"name"`
-	Description    string    `json:"description,omitempty"`
-	PromptFile     string    `json:"prompt_file,omitempty"`
-	Model          string    `json:"model,omitempty"`
-	TaskFilter     string    `json:"task_filter,omitempty"`
-	Backend        string    `json:"backend,omitempty"`
-	PathPatterns   []string  `json:"path_patterns,omitempty"`
-	Skills         []string  `json:"skills,omitempty"`
-	MaxPriority    *int      `json:"max_priority,omitempty"`
-	MaxConcurrency *int      `json:"max_concurrency,omitempty"`
-	ReadOnly       bool      `json:"read_only,omitempty"`
-	AllowedTools   []string  `json:"allowed_tools,omitempty"`
-	DeniedTools    []string  `json:"denied_tools,omitempty"`
-	MaxBudgetUSD   *float64  `json:"max_budget_usd,omitempty"`
-	CreatedAt      time.Time `json:"created_at"`
-	UpdatedAt      time.Time `json:"updated_at"`
+	WorkspaceKey       string                 `json:"workspace_key"`
+	Name               string                 `json:"name"`
+	Description        string                 `json:"description,omitempty"`
+	PromptFile         string                 `json:"prompt_file,omitempty"`
+	Model              string                 `json:"model,omitempty"`
+	TaskFilter         string                 `json:"task_filter,omitempty"`
+	Backend            string                 `json:"backend,omitempty"`
+	PathPatterns       []string               `json:"path_patterns,omitempty"`
+	Skills             []string               `json:"skills,omitempty"`
+	MaxPriority        *int                   `json:"max_priority,omitempty"`
+	MaxConcurrency     *int                   `json:"max_concurrency,omitempty"`
+	ReadOnly           bool                   `json:"read_only,omitempty"`
+	AllowedTools       []string               `json:"allowed_tools,omitempty"`
+	DeniedTools        []string               `json:"denied_tools,omitempty"`
+	MaxBudgetUSD       *float64               `json:"max_budget_usd,omitempty"`
+	RuntimeProvider    domain.RuntimeProvider `json:"runtime_provider,omitempty"`
+	RuntimeProfileName string                 `json:"runtime_profile_name,omitempty"`
+	RuntimeCWD         string                 `json:"runtime_cwd,omitempty"`
+	RuntimeDaytona     map[string]any         `json:"runtime_daytona,omitempty"`
+	CreatedAt          time.Time              `json:"created_at"`
+	UpdatedAt          time.Time              `json:"updated_at"`
 }
 
 func (r roleWire) toDomain() *domain.Role {
 	return &domain.Role{
-		WorkspaceKey:   r.WorkspaceKey,
-		Name:           r.Name,
-		Description:    r.Description,
-		PromptFile:     r.PromptFile,
-		Model:          r.Model,
-		TaskFilter:     r.TaskFilter,
-		Backend:        r.Backend,
-		PathPatterns:   r.PathPatterns,
-		Skills:         r.Skills,
-		MaxPriority:    r.MaxPriority,
-		MaxConcurrency: r.MaxConcurrency,
-		ReadOnly:       r.ReadOnly,
-		AllowedTools:   r.AllowedTools,
-		DeniedTools:    r.DeniedTools,
-		MaxBudgetUSD:   r.MaxBudgetUSD,
-		CreatedAt:      r.CreatedAt,
-		UpdatedAt:      r.UpdatedAt,
+		WorkspaceKey:       r.WorkspaceKey,
+		Name:               r.Name,
+		Description:        r.Description,
+		PromptFile:         r.PromptFile,
+		Model:              r.Model,
+		TaskFilter:         r.TaskFilter,
+		Backend:            r.Backend,
+		PathPatterns:       r.PathPatterns,
+		Skills:             r.Skills,
+		MaxPriority:        r.MaxPriority,
+		MaxConcurrency:     r.MaxConcurrency,
+		ReadOnly:           r.ReadOnly,
+		AllowedTools:       r.AllowedTools,
+		DeniedTools:        r.DeniedTools,
+		MaxBudgetUSD:       r.MaxBudgetUSD,
+		RuntimeProvider:    r.RuntimeProvider,
+		RuntimeProfileName: r.RuntimeProfileName,
+		RuntimeCWD:         r.RuntimeCWD,
+		RuntimeDaytona:     cloneRoleAnyMap(r.RuntimeDaytona),
+		CreatedAt:          r.CreatedAt,
+		UpdatedAt:          r.UpdatedAt,
 	}
 }
 
 func (s *roleStore) Create(ctx context.Context, in store.RoleCreate) (*domain.Role, error) {
 	body := struct {
-		Name           string   `json:"name"`
-		Description    string   `json:"description,omitempty"`
-		PromptFile     string   `json:"prompt_file,omitempty"`
-		Model          string   `json:"model,omitempty"`
-		TaskFilter     string   `json:"task_filter,omitempty"`
-		Backend        string   `json:"backend,omitempty"`
-		PathPatterns   []string `json:"path_patterns,omitempty"`
-		Skills         []string `json:"skills,omitempty"`
-		MaxPriority    *int     `json:"max_priority,omitempty"`
-		MaxConcurrency *int     `json:"max_concurrency,omitempty"`
-		ReadOnly       bool     `json:"read_only,omitempty"`
-		AllowedTools   []string `json:"allowed_tools,omitempty"`
-		DeniedTools    []string `json:"denied_tools,omitempty"`
-		MaxBudgetUSD   *float64 `json:"max_budget_usd,omitempty"`
+		Name               string                 `json:"name"`
+		Description        string                 `json:"description,omitempty"`
+		PromptFile         string                 `json:"prompt_file,omitempty"`
+		Model              string                 `json:"model,omitempty"`
+		TaskFilter         string                 `json:"task_filter,omitempty"`
+		Backend            string                 `json:"backend,omitempty"`
+		PathPatterns       []string               `json:"path_patterns,omitempty"`
+		Skills             []string               `json:"skills,omitempty"`
+		MaxPriority        *int                   `json:"max_priority,omitempty"`
+		MaxConcurrency     *int                   `json:"max_concurrency,omitempty"`
+		ReadOnly           bool                   `json:"read_only,omitempty"`
+		AllowedTools       []string               `json:"allowed_tools,omitempty"`
+		DeniedTools        []string               `json:"denied_tools,omitempty"`
+		MaxBudgetUSD       *float64               `json:"max_budget_usd,omitempty"`
+		RuntimeProvider    domain.RuntimeProvider `json:"runtime_provider,omitempty"`
+		RuntimeProfileName string                 `json:"runtime_profile_name,omitempty"`
+		RuntimeCWD         string                 `json:"runtime_cwd,omitempty"`
+		RuntimeDaytona     map[string]any         `json:"runtime_daytona,omitempty"`
 	}{
-		Name:           in.Name,
-		Description:    in.Description,
-		PromptFile:     in.PromptFile,
-		Model:          in.Model,
-		TaskFilter:     in.TaskFilter,
-		Backend:        in.Backend,
-		PathPatterns:   in.PathPatterns,
-		Skills:         in.Skills,
-		MaxPriority:    in.MaxPriority,
-		MaxConcurrency: in.MaxConcurrency,
-		ReadOnly:       in.ReadOnly,
-		AllowedTools:   in.AllowedTools,
-		DeniedTools:    in.DeniedTools,
-		MaxBudgetUSD:   in.MaxBudgetUSD,
+		Name:               in.Name,
+		Description:        in.Description,
+		PromptFile:         in.PromptFile,
+		Model:              in.Model,
+		TaskFilter:         in.TaskFilter,
+		Backend:            in.Backend,
+		PathPatterns:       in.PathPatterns,
+		Skills:             in.Skills,
+		MaxPriority:        in.MaxPriority,
+		MaxConcurrency:     in.MaxConcurrency,
+		ReadOnly:           in.ReadOnly,
+		AllowedTools:       in.AllowedTools,
+		DeniedTools:        in.DeniedTools,
+		MaxBudgetUSD:       in.MaxBudgetUSD,
+		RuntimeProvider:    in.RuntimeProvider,
+		RuntimeProfileName: in.RuntimeProfileName,
+		RuntimeCWD:         in.RuntimeCWD,
+		RuntimeDaytona:     in.RuntimeDaytona,
 	}
 	var resp roleWire
 	if err := s.client.do(ctx, "POST", "/api/v1/"+pathEscape(in.WorkspaceKey)+"/roles", body, &resp); err != nil {
@@ -124,33 +140,41 @@ func (s *roleStore) Update(ctx context.Context, ws, name string, patch store.Rol
 	// "clear", **int = &&value signals "set", and nil signals "leave
 	// alone") into that wire shape.
 	body := struct {
-		Description       *string   `json:"description,omitempty"`
-		PromptFile        *string   `json:"prompt_file,omitempty"`
-		Model             *string   `json:"model,omitempty"`
-		TaskFilter        *string   `json:"task_filter,omitempty"`
-		Backend           *string   `json:"backend,omitempty"`
-		PathPatterns      *[]string `json:"path_patterns,omitempty"`
-		Skills            *[]string `json:"skills,omitempty"`
-		MaxPriority       *int      `json:"max_priority,omitempty"`
-		ClearMaxPriority  bool      `json:"clear_max_priority,omitempty"`
-		MaxConcurrency    *int      `json:"max_concurrency,omitempty"`
-		ClearConcurrency  bool      `json:"clear_concurrency,omitempty"`
-		ReadOnly          *bool     `json:"read_only,omitempty"`
-		AllowedTools      *[]string `json:"allowed_tools,omitempty"`
-		DeniedTools       *[]string `json:"denied_tools,omitempty"`
-		MaxBudgetUSD      *float64  `json:"max_budget_usd,omitempty"`
-		ClearMaxBudgetUSD bool      `json:"clear_max_budget_usd,omitempty"`
+		Description        *string                 `json:"description,omitempty"`
+		PromptFile         *string                 `json:"prompt_file,omitempty"`
+		Model              *string                 `json:"model,omitempty"`
+		TaskFilter         *string                 `json:"task_filter,omitempty"`
+		Backend            *string                 `json:"backend,omitempty"`
+		PathPatterns       *[]string               `json:"path_patterns,omitempty"`
+		Skills             *[]string               `json:"skills,omitempty"`
+		MaxPriority        *int                    `json:"max_priority,omitempty"`
+		ClearMaxPriority   bool                    `json:"clear_max_priority,omitempty"`
+		MaxConcurrency     *int                    `json:"max_concurrency,omitempty"`
+		ClearConcurrency   bool                    `json:"clear_concurrency,omitempty"`
+		ReadOnly           *bool                   `json:"read_only,omitempty"`
+		AllowedTools       *[]string               `json:"allowed_tools,omitempty"`
+		DeniedTools        *[]string               `json:"denied_tools,omitempty"`
+		MaxBudgetUSD       *float64                `json:"max_budget_usd,omitempty"`
+		ClearMaxBudgetUSD  bool                    `json:"clear_max_budget_usd,omitempty"`
+		RuntimeProvider    *domain.RuntimeProvider `json:"runtime_provider,omitempty"`
+		RuntimeProfileName *string                 `json:"runtime_profile_name,omitempty"`
+		RuntimeCWD         *string                 `json:"runtime_cwd,omitempty"`
+		RuntimeDaytona     *map[string]any         `json:"runtime_daytona,omitempty"`
 	}{
-		Description:  patch.Description,
-		PromptFile:   patch.PromptFile,
-		Model:        patch.Model,
-		TaskFilter:   patch.TaskFilter,
-		Backend:      patch.Backend,
-		PathPatterns: patch.PathPatterns,
-		Skills:       patch.Skills,
-		ReadOnly:     patch.ReadOnly,
-		AllowedTools: patch.AllowedTools,
-		DeniedTools:  patch.DeniedTools,
+		Description:        patch.Description,
+		PromptFile:         patch.PromptFile,
+		Model:              patch.Model,
+		TaskFilter:         patch.TaskFilter,
+		Backend:            patch.Backend,
+		PathPatterns:       patch.PathPatterns,
+		Skills:             patch.Skills,
+		ReadOnly:           patch.ReadOnly,
+		AllowedTools:       patch.AllowedTools,
+		DeniedTools:        patch.DeniedTools,
+		RuntimeProvider:    patch.RuntimeProvider,
+		RuntimeProfileName: patch.RuntimeProfileName,
+		RuntimeCWD:         patch.RuntimeCWD,
+		RuntimeDaytona:     patch.RuntimeDaytona,
 	}
 	if patch.MaxPriority != nil {
 		if *patch.MaxPriority == nil {
@@ -178,6 +202,17 @@ func (s *roleStore) Update(ctx context.Context, ws, name string, patch store.Rol
 		return nil, err
 	}
 	return resp.toDomain(), nil
+}
+
+func cloneRoleAnyMap(in map[string]any) map[string]any {
+	if in == nil {
+		return nil
+	}
+	out := make(map[string]any, len(in))
+	for k, v := range in {
+		out[k] = v
+	}
+	return out
 }
 
 func (s *roleStore) Delete(ctx context.Context, ws, name string) error {

@@ -7,21 +7,25 @@ import "time"
 // Workspace-scoped: every Workspace gets its own Role definitions
 // (built-in "plan" and "task" are auto-seeded on workspace creation).
 type Role struct {
-	WorkspaceKey   string   `json:"workspace_key"`
-	Name           string   `json:"name"`
-	Description    string   `json:"description,omitempty"`
-	PromptFile     string   `json:"prompt_file,omitempty"`
-	Model          string   `json:"model,omitempty"`
-	TaskFilter     string   `json:"task_filter,omitempty"`
-	Backend        string   `json:"backend,omitempty"`
-	PathPatterns   []string `json:"path_patterns,omitempty"`
-	Skills         []string `json:"skills,omitempty"`
-	MaxPriority    *int     `json:"max_priority,omitempty"`
-	MaxConcurrency *int     `json:"max_concurrency,omitempty"`
-	ReadOnly       bool     `json:"read_only,omitempty"`
-	AllowedTools   []string `json:"allowed_tools,omitempty"`
-	DeniedTools    []string `json:"denied_tools,omitempty"`
-	MaxBudgetUSD   *float64 `json:"max_budget_usd,omitempty"`
+	WorkspaceKey       string          `json:"workspace_key"`
+	Name               string          `json:"name"`
+	Description        string          `json:"description,omitempty"`
+	PromptFile         string          `json:"prompt_file,omitempty"`
+	Model              string          `json:"model,omitempty"`
+	TaskFilter         string          `json:"task_filter,omitempty"`
+	Backend            string          `json:"backend,omitempty"`
+	PathPatterns       []string        `json:"path_patterns,omitempty"`
+	Skills             []string        `json:"skills,omitempty"`
+	MaxPriority        *int            `json:"max_priority,omitempty"`
+	MaxConcurrency     *int            `json:"max_concurrency,omitempty"`
+	ReadOnly           bool            `json:"read_only,omitempty"`
+	AllowedTools       []string        `json:"allowed_tools,omitempty"`
+	DeniedTools        []string        `json:"denied_tools,omitempty"`
+	MaxBudgetUSD       *float64        `json:"max_budget_usd,omitempty"`
+	RuntimeProvider    RuntimeProvider `json:"runtime_provider,omitempty"`
+	RuntimeProfileName string          `json:"runtime_profile_name,omitempty"`
+	RuntimeCWD         string          `json:"runtime_cwd,omitempty"`
+	RuntimeDaytona     map[string]any  `json:"runtime_daytona,omitempty"`
 
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`

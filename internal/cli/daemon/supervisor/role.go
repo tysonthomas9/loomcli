@@ -92,6 +92,21 @@ func MergeRoleConfig(base, overlay cfgpkg.RoleConfig) cfgpkg.RoleConfig {
 	if len(overlay.DeniedTools) > 0 {
 		base.DeniedTools = overlay.DeniedTools
 	}
+	if overlay.MaxBudgetUSD != nil {
+		base.MaxBudgetUSD = overlay.MaxBudgetUSD
+	}
+	if overlay.RuntimeProvider != "" {
+		base.RuntimeProvider = overlay.RuntimeProvider
+	}
+	if overlay.RuntimeProfileName != "" {
+		base.RuntimeProfileName = overlay.RuntimeProfileName
+	}
+	if overlay.RuntimeCWD != "" {
+		base.RuntimeCWD = overlay.RuntimeCWD
+	}
+	if len(overlay.RuntimeDaytona) > 0 {
+		base.RuntimeDaytona = overlay.RuntimeDaytona
+	}
 	// PromptFile intentionally NOT merged for built-in roles
 	return base
 }

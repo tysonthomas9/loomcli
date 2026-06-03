@@ -92,6 +92,11 @@ type Supervisor struct {
 	// means use the package default (backendUnavailableRecheckInterval). Tests set a
 	// small value to avoid the 30s wait.
 	backendRecheckInterval time.Duration
+
+	// RuntimeRunner executes non-local agent runtimes such as Daytona. Nil
+	// keeps the current local subprocess behavior unless a role explicitly
+	// declares a remote runtime, in which case the default provider runner is used.
+	RuntimeRunner AgentRuntimeRunner
 }
 
 // NewAgent creates an AgentProcess from an agent entry, resolving the worktree path
@@ -355,6 +360,9 @@ func (s *Supervisor) clearAgentSessionState(ap *AgentProcess) {
 	ap.BeforeRef = ""
 	ap.AssignedTaskID = ""
 	ap.LastActivity = time.Time{}
+	ap.DaytonaSandboxID = ""
+	ap.DaytonaRuntimePhase = ""
+	ap.DaytonaCleanupState = ""
 	ap.Mu.Unlock()
 }
 
@@ -387,12 +395,14 @@ func (s *Supervisor) RecordAgentActivity(agentName string, at time.Time) {
 
 // preFlightSetup runs recovery, assigns epic, creates session, and clears yield file.
 func (s *Supervisor) preFlightSetup(ap *AgentProcess) bool {
-	if err := s.recoverAgent(ap, 0); err != nil {
-		slog.Warn("pre-flight recovery failed", "worktree", ap.Entry.Worktree, "err", err)
-	}
+	if !usesRemoteAgentRuntime(ap) {
+		if err := s.recoverAgent(ap, 0); err != nil {
+			slog.Warn("pre-flight recovery failed", "worktree", ap.Entry.Worktree, "err", err)
+		}
 
-	if err := ClearYieldFile(ap.WorktreePath); err != nil {
-		slog.Warn("failed to clear stale yield file", "worktree", ap.Entry.Worktree, "err", err)
+		if err := ClearYieldFile(ap.WorktreePath); err != nil {
+			slog.Warn("failed to clear stale yield file", "worktree", ap.Entry.Worktree, "err", err)
+		}
 	}
 
 	epicID := s.assignEpic(ap)
@@ -448,7 +458,10 @@ func (s *Supervisor) createAgentSession(ap *AgentProcess, epicID string) {
 		return
 	}
 	txPath := sessStore.NativeTranscriptPath(sess.SessionID())
-	bRef := automode.CaptureHEADRef(ap.WorktreePath)
+	bRef := ""
+	if !usesRemoteAgentRuntime(ap) {
+		bRef = automode.CaptureHEADRef(ap.WorktreePath)
+	}
 	ap.Mu.Lock()
 	ap.Session = sess
 	ap.AgentSessionID = sess.SessionID()
@@ -587,6 +600,25 @@ func (s *Supervisor) agentSessionMetadataLocked(ap *AgentProcess, backend string
 	if ap.LogFilePath != "" {
 		metadata["log_path"] = ap.LogFilePath
 	}
+	if provider := ap.RoleConfig.RuntimeProvider; provider != "" {
+		metadata["runtime_provider"] = string(provider)
+	}
+	if ap.RoleConfig.RuntimeProfileName != "" {
+		metadata["runtime_profile_name"] = ap.RoleConfig.RuntimeProfileName
+	}
+	if ap.RoleConfig.RuntimeCWD != "" {
+		metadata["runtime_cwd"] = ap.RoleConfig.RuntimeCWD
+	}
+	if ap.DaytonaSandboxID != "" {
+		metadata["daytona_sandbox_id"] = ap.DaytonaSandboxID
+		metadata["runtime_provider_workspace_id"] = ap.DaytonaSandboxID
+	}
+	if ap.DaytonaRuntimePhase != "" {
+		metadata["runtime_phase"] = ap.DaytonaRuntimePhase
+	}
+	if ap.DaytonaCleanupState != "" {
+		metadata["runtime_cleanup_state"] = ap.DaytonaCleanupState
+	}
 	return metadata
 }
 
@@ -650,6 +682,19 @@ func (s *Supervisor) completeControlPlaneAgentSession(ap *AgentProcess, input ag
 // restart decision — shouldRestart + sleepBeforeRestart — owns counting and
 // backoff for both real exits and spawn failures.
 func (s *Supervisor) spawnAndWait(ap *AgentProcess) {
+	if usesDaytonaAgentRuntime(ap) {
+		exitCode, err := s.runDaytonaAgent(ap)
+		if err != nil {
+			s.handleSpawnFailure(ap, err)
+			return
+		}
+		s.classifyAgentExit(ap, exitCode)
+		s.finalizeAgentSession(ap, exitCode)
+		s.Concurrency.Release(ap.Entry.Role)
+		s.handleEpicTransition(ap)
+		return
+	}
+
 	if err := s.spawnAgent(ap); err != nil {
 		if errors.Is(err, ErrBackendUnavailable) {
 			// Gate fired before buildCommand: gateBackendAvailable already set
@@ -663,30 +708,7 @@ func (s *Supervisor) spawnAndWait(ap *AgentProcess) {
 			s.Concurrency.Release(ap.Entry.Role)
 			return
 		}
-		slog.Warn("spawn failed", "worktree", ap.Entry.Worktree, "err", err)
-		ap.Mu.Lock()
-		orphanSess := ap.Session
-		ap.Session = nil
-		orphanSessionID := ap.AgentSessionID
-		ap.AgentSessionID = ""
-		orphanLeaseID := ap.AgentLeaseID
-		orphanLeaseToken := ap.AgentLeaseToken
-		ap.AgentLeaseID = ""
-		ap.AgentLeaseToken = ""
-		ap.Mu.Unlock()
-		if orphanSess != nil {
-			_ = orphanSess.Finalize(sessions.FinalizeOptions{ExitCode: -1, ErrorClass: "spawn_failure"})
-		}
-		s.completeControlPlaneAgentSession(ap, agentSessionCompletionInput{
-			sessionID:  orphanSessionID,
-			leaseID:    orphanLeaseID,
-			leaseToken: orphanLeaseToken,
-			exitCode:   -1,
-			errClass:   "spawn_failure",
-			taskID:     s.taskIDForLifecycle(ap, nil),
-		})
-		s.Concurrency.Release(ap.Entry.Role)
-		s.markSpawnFailure(ap, err)
+		s.handleSpawnFailure(ap, err)
 		return
 	}
 
@@ -697,6 +719,33 @@ func (s *Supervisor) spawnAndWait(ap *AgentProcess) {
 	s.postMortemRecovery(ap, exitCode)
 	s.Concurrency.Release(ap.Entry.Role)
 	s.handleEpicTransition(ap)
+}
+
+func (s *Supervisor) handleSpawnFailure(ap *AgentProcess, err error) {
+	slog.Warn("spawn failed", "worktree", ap.Entry.Worktree, "err", err)
+	ap.Mu.Lock()
+	orphanSess := ap.Session
+	ap.Session = nil
+	orphanSessionID := ap.AgentSessionID
+	ap.AgentSessionID = ""
+	orphanLeaseID := ap.AgentLeaseID
+	orphanLeaseToken := ap.AgentLeaseToken
+	ap.AgentLeaseID = ""
+	ap.AgentLeaseToken = ""
+	ap.Mu.Unlock()
+	if orphanSess != nil {
+		_ = orphanSess.Finalize(sessions.FinalizeOptions{ExitCode: -1, ErrorClass: "spawn_failure"})
+	}
+	s.completeControlPlaneAgentSession(ap, agentSessionCompletionInput{
+		sessionID:  orphanSessionID,
+		leaseID:    orphanLeaseID,
+		leaseToken: orphanLeaseToken,
+		exitCode:   -1,
+		errClass:   "spawn_failure",
+		taskID:     s.taskIDForLifecycle(ap, nil),
+	})
+	s.Concurrency.Release(ap.Entry.Role)
+	s.markSpawnFailure(ap, err)
 }
 
 type agentSessionFinalizeState struct {
@@ -745,6 +794,9 @@ func takeAgentSessionForFinalize(ap *AgentProcess) agentSessionFinalizeState {
 }
 
 func (s *Supervisor) taskIDForFinalize(ap *AgentProcess) string {
+	if usesRemoteAgentRuntime(ap) {
+		return s.taskIDForLifecycle(ap, nil)
+	}
 	taskID := ""
 	if info, lockErr := cli.ReadLockFile(ap.WorktreePath); lockErr == nil {
 		taskID = info.TaskID
@@ -773,6 +825,14 @@ func finalizeLocalSession(
 	exitCode int,
 	errClass string,
 ) sessionfinalize.WithWorktreeResult {
+	if usesRemoteAgentRuntime(ap) {
+		if sess != nil {
+			if err := sess.Finalize(sessions.FinalizeOptions{TaskID: taskID, ExitCode: exitCode, ErrorClass: errClass}); err != nil {
+				slog.Warn("remote session finalization failed", "worktree", ap.Entry.Worktree, "err", err)
+			}
+		}
+		return sessionfinalize.WithWorktreeResult{}
+	}
 	result, err := sessionfinalize.WithWorktree(sess, sessionfinalize.WithWorktreeOptions{
 		WorktreePath: ap.WorktreePath,
 		BeforeRef:    beforeRef,
@@ -788,6 +848,9 @@ func finalizeLocalSession(
 
 // postMortemRecovery runs recovery after agent exit, skipping for yield exits.
 func (s *Supervisor) postMortemRecovery(ap *AgentProcess, exitCode int) {
+	if usesRemoteAgentRuntime(ap) {
+		return
+	}
 	if IsYieldRequested(ap.WorktreePath) {
 		slog.Info("skipping post-mortem recovery for yield exit", "worktree", ap.Entry.Worktree)
 		return
@@ -897,6 +960,10 @@ func (s *Supervisor) GetAgents() []SupervisedAgentStatus {
 			OwnershipLastHeartbeat: ap.OwnershipLastHeartbeat,
 			AssignedTaskID:         ap.AssignedTaskID,
 			LastActivity:           ap.LastActivity,
+			RuntimeProvider:        string(ap.RoleConfig.RuntimeProvider),
+			RuntimePhase:           ap.DaytonaRuntimePhase,
+			RuntimeCleanupState:    ap.DaytonaCleanupState,
+			DaytonaSandboxID:       ap.DaytonaSandboxID,
 		}
 		if ap.LastError != nil {
 			result[i].LastErrorClass = ap.LastError.Class.String()

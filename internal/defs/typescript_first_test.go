@@ -28,6 +28,8 @@ func TestInitTypeScriptProjectWritesStartContract(t *testing.T) {
 		"Create a TypeScript-First Loom Agent",
 		"@loom/sdk",
 		".loom/agents/<name>.ts",
+		"connectors/",
+		"Provider adapters, including the Daytona sandbox adapter",
 		"loom connect <name> local",
 		"loom run <name> --payload '{}'",
 		"loom defs apply --start",
@@ -53,6 +55,30 @@ func TestInitTypeScriptProjectWritesStartContract(t *testing.T) {
 	if string(got) != string(custom) {
 		t.Fatalf("start contract overwritten = %q, want custom preserved", got)
 	}
+	connectorPath := filepath.Join(root, ".loom", "connectors", "daytona.ts")
+	connectorData, err := os.ReadFile(connectorPath)
+	if err != nil {
+		t.Fatalf("read Daytona connector: %v", err)
+	}
+	if !strings.Contains(string(connectorData), "daytona as loomDaytona") ||
+		!strings.Contains(string(connectorData), "export function daytona") {
+		t.Fatalf("daytona connector = %s, want adapter export", connectorData)
+	}
+
+	customConnector := []byte("export const daytona = () => ({ provider: 'custom' });\n")
+	if err := os.WriteFile(connectorPath, customConnector, 0o644); err != nil {
+		t.Fatalf("write custom Daytona connector: %v", err)
+	}
+	if err := InitTypeScriptProject(root); err != nil {
+		t.Fatalf("third InitTypeScriptProject() error = %v", err)
+	}
+	gotConnector, err := os.ReadFile(connectorPath)
+	if err != nil {
+		t.Fatalf("read custom Daytona connector: %v", err)
+	}
+	if string(gotConnector) != string(customConnector) {
+		t.Fatalf("daytona connector overwritten = %q, want custom preserved", gotConnector)
+	}
 
 	typesPath := filepath.Join(root, ".loom", "runtime.d.ts")
 	typesData, err := os.ReadFile(typesPath)
@@ -60,6 +86,9 @@ func TestInitTypeScriptProjectWritesStartContract(t *testing.T) {
 		t.Fatalf("read runtime declarations: %v", err)
 	}
 	if !strings.Contains(string(typesData), "declare module '@loom/sdk'") ||
+		!strings.Contains(string(typesData), "declare module '@flue/runtime'") ||
+		!strings.Contains(string(typesData), "export type FlueContext = WorkflowContext") ||
+		!strings.Contains(string(typesData), "WorkflowRouteHandler") ||
 		!strings.Contains(string(typesData), "check<T = unknown>") ||
 		!strings.Contains(string(typesData), "connect<T = unknown>") ||
 		!strings.Contains(string(typesData), "export const loom") {
@@ -868,6 +897,429 @@ export default defineWorkflow({
 	workflow, ok := FindWorkflow(plan, "remote-run")
 	if !ok || workflow.RuntimeProfileName != "remote-dev" {
 		t.Fatalf("workflow = %+v, want runtime profile binding", workflow)
+	}
+}
+
+func TestLoadDaytonaRuntimeProfileWithDeclarativeImage(t *testing.T) {
+	root := t.TempDir()
+	writeDefFile(t, root, ".loom/runtimes/daytona-dev.ts", `import { Image } from '@daytona/sdk';
+import { runtime } from '@loom/sdk';
+
+export default runtime.daytona({
+  name: 'daytona-dev',
+  image: Image.debianSlim('3.12')
+    .runCommands('apt-get update && apt-get install -y --no-install-recommends git nodejs npm && rm -rf /var/lib/apt/lists/*')
+    .workdir('/workspace/project'),
+  language: 'typescript',
+  cwd: '/workspace/project',
+  repos: ['app'],
+  env: ['GITHUB_TOKEN', 'NODE_ENV'],
+  resources: { cpu: 2, memory: 4, disk: 8 },
+  autoStopInterval: 60,
+  autoArchiveInterval: 240,
+  autoDeleteInterval: 1440,
+  target: 'us',
+  apiKeyEnv: 'DAYTONA_API_KEY',
+  buildLogs: 'inherit',
+  repoUrl: 'https://github.com/acme/app.git',
+  branch: 'main',
+  ref: 'refs/heads/main',
+  gitTokenEnv: 'GITHUB_TOKEN',
+  gitUsername: 'x-access-token',
+  gitDeployKeyEnv: 'GIT_DEPLOY_KEY',
+  openaiApiKeyEnv: 'OPENAI_API_KEY',
+  codexAuthFileEnv: 'CODEX_AUTH_FILE',
+  setupCommands: ['npm ci', 'npm test -- --runInBand'],
+  setupTimeout: 120,
+  healthTimeout: 15,
+  runTimeout: 600,
+  workspace: {
+    providerWorkspaceId: 'daytona-sandbox-1',
+    owner: 'loom',
+    cleanup: { mode: 'after_ttl', ttl: '6h' },
+    filesystem: { persistence: 'session', durability: 'provider', retention: '1d' },
+  },
+  capabilities: {
+    filesystem: { read: true, write: true, policy: 'provider_default' },
+    shell: { enabled: true, commands: ['git', 'npm', 'node'] },
+    network: { enabled: true, policy: 'provider_default' },
+    lifecycle: { materialize: true, cleanup: true, release: true, cancellation: true },
+  },
+});`)
+	writeDefFile(t, root, ".loom/workflows/daytona-run.ts", `import { defineWorkflow } from '@loom/sdk';
+
+export default defineWorkflow({
+  name: 'daytona-run',
+  builtin: 'run-parent-work-items',
+  runtimeProfile: 'daytona-dev',
+});`)
+
+	plan, err := Load(root)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if len(plan.Runtimes) != 1 {
+		t.Fatalf("runtimes = %+v, want one Daytona runtime", plan.Runtimes)
+	}
+	rt := plan.Runtimes[0]
+	if rt.Name != "daytona-dev" || rt.Provider != domain.RuntimeProviderDaytona || rt.CWD != "/workspace/project" {
+		t.Fatalf("runtime = %+v, want Daytona runtime profile", rt)
+	}
+	if rt.Image != "" {
+		t.Fatalf("runtime image = %q, want declarative image only in Daytona metadata", rt.Image)
+	}
+	if rt.Daytona["language"] != "typescript" || rt.Daytona["target"] != "us" ||
+		rt.Daytona["api_key_env"] != "DAYTONA_API_KEY" || rt.Daytona["build_logs"] != "inherit" {
+		t.Fatalf("daytona metadata = %+v, want SDK create options", rt.Daytona)
+	}
+	if rt.Daytona["repo_url"] != "https://github.com/acme/app.git" ||
+		rt.Daytona["branch"] != "main" ||
+		rt.Daytona["ref"] != "refs/heads/main" {
+		t.Fatalf("daytona materialization metadata = %+v, want repo/branch/ref", rt.Daytona)
+	}
+	if rt.Daytona["git_token_env"] != "GITHUB_TOKEN" ||
+		rt.Daytona["git_username"] != "x-access-token" ||
+		rt.Daytona["git_deploy_key_env"] != "GIT_DEPLOY_KEY" ||
+		rt.Daytona["openai_api_key_env"] != "OPENAI_API_KEY" ||
+		rt.Daytona["codex_auth_file_env"] != "CODEX_AUTH_FILE" {
+		t.Fatalf("daytona auth metadata = %+v, want configured auth env names", rt.Daytona)
+	}
+	setupCommands, ok := rt.Daytona["setup_commands"].([]any)
+	if !ok || len(setupCommands) != 2 || setupCommands[0] != "npm ci" || setupCommands[1] != "npm test -- --runInBand" {
+		t.Fatalf("daytona setup commands = %+v, want configured setup commands", rt.Daytona["setup_commands"])
+	}
+	if rt.Daytona["setup_timeout"] != float64(120) ||
+		rt.Daytona["health_timeout"] != float64(15) ||
+		rt.Daytona["run_timeout"] != float64(600) {
+		t.Fatalf("daytona command timeouts = %+v, want setup/health/run timeouts", rt.Daytona)
+	}
+	if rt.Daytona["auto_stop_interval"] != float64(60) ||
+		rt.Daytona["auto_archive_interval"] != float64(240) ||
+		rt.Daytona["auto_delete_interval"] != float64(1440) {
+		t.Fatalf("daytona intervals = %+v, want auto lifecycle intervals", rt.Daytona)
+	}
+	resources, ok := rt.Daytona["resources"].(map[string]any)
+	if !ok || resources["cpu"] != float64(2) || resources["memory"] != float64(4) || resources["disk"] != float64(8) {
+		t.Fatalf("daytona resources = %+v, want cpu/memory/disk", rt.Daytona["resources"])
+	}
+	image, ok := rt.Daytona["image"].(map[string]any)
+	if !ok || image["base"] != "debian-slim:3.12" {
+		t.Fatalf("daytona image = %+v, want declarative image metadata", rt.Daytona["image"])
+	}
+	steps, ok := image["steps"].([]any)
+	if !ok || len(steps) != 2 {
+		t.Fatalf("daytona image steps = %+v, want runCommands and workdir steps", image["steps"])
+	}
+	workflow, ok := FindWorkflow(plan, "daytona-run")
+	if !ok || workflow.RuntimeProfileName != "daytona-dev" {
+		t.Fatalf("workflow = %+v, want Daytona runtime profile binding", workflow)
+	}
+}
+
+func TestTypeScriptFirstAgentDaytonaRuntimeAppliesToRole(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	if err := InitTypeScriptProject(root); err != nil {
+		t.Fatalf("InitTypeScriptProject() error = %v", err)
+	}
+	writeDefFile(t, root, ".loom/agents/daytona-worker.ts", `import { defineAgent, runtime } from '@loom/sdk';
+
+export default defineAgent({
+  name: 'daytona-worker',
+  backend: 'codex',
+  model: 'openai/gpt-5.5',
+  runtime: runtime.daytona({
+    name: 'daytona-agent',
+    cwd: '/workspace/project',
+    language: 'typescript',
+    target: 'us',
+    apiKeyEnv: 'DAYTONA_API_KEY',
+    autoStopInterval: 15,
+  }),
+});`)
+
+	plan, err := Load(root)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	agent, ok := FindAgent(plan, "daytona-worker")
+	if !ok {
+		t.Fatalf("FindAgent() did not find daytona-worker in %+v", plan.Agents)
+	}
+	if agent.RuntimeProvider != domain.RuntimeProviderDaytona || agent.RuntimeProfileName != "daytona-agent" || agent.RuntimeCWD != "/workspace/project" {
+		t.Fatalf("agent runtime = provider:%q profile:%q cwd:%q", agent.RuntimeProvider, agent.RuntimeProfileName, agent.RuntimeCWD)
+	}
+	if agent.RuntimeDaytona["language"] != "typescript" || agent.RuntimeDaytona["target"] != "us" ||
+		agent.RuntimeDaytona["api_key_env"] != "DAYTONA_API_KEY" || agent.RuntimeDaytona["auto_stop_interval"] != float64(15) {
+		t.Fatalf("agent Daytona metadata = %+v", agent.RuntimeDaytona)
+	}
+
+	st := memstore.New()
+	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "TSDAYTONAAGENT", Name: "TypeScript Daytona Agent"}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	if err := Apply(ctx, st, "TSDAYTONAAGENT", "test", plan); err != nil {
+		t.Fatalf("Apply() error = %v", err)
+	}
+	role, err := st.Roles().Get(ctx, "TSDAYTONAAGENT", "daytona-worker")
+	if err != nil {
+		t.Fatalf("get role: %v", err)
+	}
+	if role.RuntimeProvider != domain.RuntimeProviderDaytona || role.RuntimeProfileName != "daytona-agent" || role.RuntimeCWD != "/workspace/project" {
+		t.Fatalf("role runtime = provider:%q profile:%q cwd:%q", role.RuntimeProvider, role.RuntimeProfileName, role.RuntimeCWD)
+	}
+	if role.RuntimeDaytona["language"] != "typescript" || role.RuntimeDaytona["target"] != "us" {
+		t.Fatalf("role Daytona metadata = %+v", role.RuntimeDaytona)
+	}
+}
+
+func TestTypeScriptFirstAgentDaytonaAdapterOptionsApplyToRole(t *testing.T) {
+	root := t.TempDir()
+	if err := InitTypeScriptProject(root); err != nil {
+		t.Fatalf("InitTypeScriptProject() error = %v", err)
+	}
+	writeDefFile(t, root, ".loom/agents/daytona-adapter-worker.ts", `import { daytona, defineAgent } from '@loom/sdk';
+
+const sandbox = {
+  id: 'external-flue-style-sandbox',
+  cwd: '/workspace/project',
+  daytona: { target: 'us' },
+};
+
+export default defineAgent({
+  name: 'daytona-adapter-worker',
+  backend: 'codex',
+  runtime: daytona(sandbox, {
+    name: 'project',
+    repos: ['app'],
+    env: ['OPENAI_API_KEY', 'GH_TOKEN'],
+    language: 'typescript',
+    resources: { cpu: 2, memory: 4 },
+    envVars: { NODE_ENV: 'test' },
+    autoStopInterval: 0,
+    autoDeleteInterval: 0,
+    ephemeral: false,
+    repoUrl: 'https://github.com/acme/app.git',
+    branch: 'main',
+    gitTokenEnv: 'GH_TOKEN',
+    openaiApiKeyEnv: 'OPENAI_API_KEY',
+    setupCommands: ['npm ci'],
+    createTimeout: 90,
+    buildLogs: 'inherit',
+  }),
+});`)
+
+	plan, err := Load(root)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	agent, ok := FindAgent(plan, "daytona-adapter-worker")
+	if !ok {
+		t.Fatalf("FindAgent() did not find daytona-adapter-worker in %+v", plan.Agents)
+	}
+	if agent.RuntimeProvider != domain.RuntimeProviderDaytona ||
+		agent.RuntimeProfileName != "project" ||
+		agent.RuntimeCWD != "/workspace/project" {
+		t.Fatalf("agent runtime = provider:%q profile:%q cwd:%q", agent.RuntimeProvider, agent.RuntimeProfileName, agent.RuntimeCWD)
+	}
+	if len(agent.Repos) != 1 || agent.Repos[0] != "app" ||
+		len(agent.Env) != 2 || agent.Env[0] != "OPENAI_API_KEY" || agent.Env[1] != "GH_TOKEN" {
+		t.Fatalf("agent repos/env = %+v/%+v, want adapter options propagated", agent.Repos, agent.Env)
+	}
+	if agent.RuntimeDaytona["sandbox_id"] != nil || agent.RuntimeDaytona["sandboxId"] != nil {
+		t.Fatalf("agent Daytona metadata = %+v, external sandbox id should not become daemon create config", agent.RuntimeDaytona)
+	}
+	if agent.RuntimeDaytona["language"] != "typescript" ||
+		agent.RuntimeDaytona["target"] != "us" ||
+		agent.RuntimeDaytona["repo_url"] != "https://github.com/acme/app.git" ||
+		agent.RuntimeDaytona["branch"] != "main" ||
+		agent.RuntimeDaytona["git_token_env"] != "GH_TOKEN" ||
+		agent.RuntimeDaytona["openai_api_key_env"] != "OPENAI_API_KEY" ||
+		agent.RuntimeDaytona["create_timeout"] != float64(90) ||
+		agent.RuntimeDaytona["build_logs"] != "inherit" {
+		t.Fatalf("agent Daytona metadata = %+v, want adapter runtime options", agent.RuntimeDaytona)
+	}
+	if agent.RuntimeDaytona["auto_stop_interval"] != float64(0) ||
+		agent.RuntimeDaytona["auto_delete_interval"] != float64(0) ||
+		agent.RuntimeDaytona["ephemeral"] != false {
+		t.Fatalf("agent Daytona lifecycle metadata = %+v, want zero/false options preserved", agent.RuntimeDaytona)
+	}
+	envVars, ok := agent.RuntimeDaytona["env_vars"].(map[string]any)
+	if !ok || envVars["NODE_ENV"] != "test" {
+		t.Fatalf("agent Daytona env_vars = %+v, want adapter env vars", agent.RuntimeDaytona["env_vars"])
+	}
+	setupCommands, ok := agent.RuntimeDaytona["setup_commands"].([]any)
+	if !ok || len(setupCommands) != 1 || setupCommands[0] != "npm ci" {
+		t.Fatalf("agent Daytona setup_commands = %+v, want adapter setup commands", agent.RuntimeDaytona["setup_commands"])
+	}
+}
+
+func TestTypeScriptFirstBuiltInTaskCanOverrideDaytonaRuntime(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	if err := InitTypeScriptProject(root); err != nil {
+		t.Fatalf("InitTypeScriptProject() error = %v", err)
+	}
+	writeDefFile(t, root, ".loom/agents/task.ts", `import { defineAgent, runtime } from '@loom/sdk';
+
+export default defineAgent({
+  name: 'task',
+  backend: 'codex',
+  repos: ['frontend'],
+  runtime: runtime.daytona({
+    name: 'daytona-task',
+    cwd: '/workspace/project',
+    repoUrl: 'https://github.com/acme/frontend.git',
+    branch: 'main',
+    setupCommands: ['npm install'],
+    apiKeyEnv: 'DAYTONA_API_KEY',
+    openaiApiKeyEnv: 'OPENAI_API_KEY',
+  }),
+});`)
+
+	plan, err := Load(root)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	st := memstore.New()
+	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "TSDAYTONATASK", Name: "TypeScript Daytona Task"}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	if err := Apply(ctx, st, "TSDAYTONATASK", "test", plan); err != nil {
+		t.Fatalf("Apply() error = %v", err)
+	}
+	role, err := st.Roles().Get(ctx, "TSDAYTONATASK", "task")
+	if err != nil {
+		t.Fatalf("get role: %v", err)
+	}
+	if role.PromptFile != "" {
+		t.Fatalf("built-in task prompt_file = %q, want empty so built-in command remains usable", role.PromptFile)
+	}
+	if role.RuntimeProvider != domain.RuntimeProviderDaytona || role.RuntimeProfileName != "daytona-task" || role.RuntimeCWD != "/workspace/project" {
+		t.Fatalf("role runtime = provider:%q profile:%q cwd:%q", role.RuntimeProvider, role.RuntimeProfileName, role.RuntimeCWD)
+	}
+	if role.RuntimeDaytona["repo_url"] != "https://github.com/acme/frontend.git" ||
+		role.RuntimeDaytona["branch"] != "main" {
+		t.Fatalf("role Daytona metadata = %+v, want task worker repo materialization config", role.RuntimeDaytona)
+	}
+}
+
+func TestLoadDaytonaWorkflowRouteStyleNamedRun(t *testing.T) {
+	root := t.TempDir()
+	if err := InitTypeScriptProject(root); err != nil {
+		t.Fatalf("InitTypeScriptProject() error = %v", err)
+	}
+	writeDefFile(t, root, ".loom/workflows/daytona-code.ts", `import {
+  Type,
+  createAgent,
+  defineTool,
+  type FlueContext,
+  type WorkflowRouteHandler,
+} from '@flue/runtime';
+import { Daytona } from '@daytona/sdk';
+import { daytona } from '../connectors/daytona';
+
+export const route: WorkflowRouteHandler = async (_c, next) => next();
+
+export const cloneRepo = defineTool({
+  name: 'clone_repo',
+  description: 'Clone a repository into the Daytona sandbox',
+  parameters: {
+    repo: Type.string(),
+  },
+});
+
+export async function run({ init, payload, env }: FlueContext) {
+  const client = new Daytona({ apiKey: env.DAYTONA_API_KEY });
+  const sandbox = await client.create({
+    id: 'daytona-example',
+    snapshot: 'loom-node-dev',
+    cwd: '/workspace/project',
+  });
+  const setupAgent = createAgent(() => ({
+    sandbox: daytona(sandbox),
+    model: 'openai/gpt-5.5',
+  }));
+  const setup = await (await init(setupAgent, { name: 'setup' })).session();
+  await setup.shell(`+"`git clone ${payload.repo} /workspace/project`"+`);
+  const projectAgent = createAgent(() => ({
+    sandbox: daytona(sandbox, { cwd: '/workspace/project', name: 'project' }),
+    model: 'openai/gpt-5.5',
+  }));
+  const session = await (await init(projectAgent, { name: 'project' })).session();
+  return await session.prompt(payload.prompt);
+}
+`)
+
+	plan, err := Load(root)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if got := Summary(plan); got != "agents=0 workflows=1 runtimes=0" {
+		t.Fatalf("Summary() = %q, want implicit named-run workflow", got)
+	}
+	workflow, ok := FindWorkflow(plan, "daytona-code")
+	if !ok {
+		t.Fatalf("FindWorkflow() did not find implicit Daytona workflow")
+	}
+	if workflow.Runner != "workflow-context-v1" || workflow.Builtin != "" {
+		t.Fatalf("workflow = %+v, want code-defined workflow context runner", workflow)
+	}
+}
+
+func TestLoadFlueCompatibilitySourceRootDaytonaWorkflow(t *testing.T) {
+	root := t.TempDir()
+	writeDefFile(t, root, ".flue/connectors/daytona.ts", `import { daytona as loomDaytona } from '@loom/runtime';
+
+export function daytona(sandbox, options = {}) {
+  return loomDaytona(sandbox, options);
+}
+`)
+	writeDefFile(t, root, ".flue/workflows/code.ts", `import {
+  createAgent,
+  type FlueContext,
+  type WorkflowRouteHandler,
+} from '@flue/runtime';
+import { Daytona } from '@daytona/sdk';
+import { daytona } from '../connectors/daytona';
+
+export const route: WorkflowRouteHandler = async (_c, next) => next();
+
+export async function run({ init, payload, env }: FlueContext) {
+  const client = new Daytona({ apiKey: env.DAYTONA_API_KEY });
+  const sandbox = await client.create();
+  const setupAgent = createAgent(() => ({
+    sandbox: daytona(sandbox),
+    model: 'openai/gpt-5.5',
+  }));
+  const setup = await (await init(setupAgent, { name: 'setup' })).session();
+  await setup.shell(`+"`git clone ${payload.repo} /workspace/project`"+`);
+  const projectAgent = createAgent(() => ({
+    sandbox: daytona(sandbox, { cwd: '/workspace/project' }),
+    model: 'openai/gpt-5.5',
+  }));
+  const session = await (await init(projectAgent, { name: 'project' })).session();
+  return await session.prompt(payload.prompt);
+}
+`)
+
+	plan, err := Load(root)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if got := Summary(plan); got != "agents=0 workflows=1 runtimes=0" {
+		t.Fatalf("Summary() = %q, want .flue implicit named-run workflow", got)
+	}
+	workflow, ok := FindWorkflow(plan, "code")
+	if !ok {
+		t.Fatalf("FindWorkflow() did not find .flue compatibility workflow")
+	}
+	if workflow.Runner != "workflow-context-v1" ||
+		!strings.Contains(filepath.ToSlash(workflow.SourcePath), "/.flue/workflows/code.ts") {
+		t.Fatalf("workflow = %+v, want .flue code-defined workflow context runner", workflow)
+	}
+	if !containsString(workflow.Env, "DAYTONA_API_KEY") {
+		t.Fatalf("workflow env = %+v, want implicit Daytona API key grant for copied @daytona/sdk workflow", workflow.Env)
 	}
 }
 

@@ -145,6 +145,10 @@ func toDaemonAgentStatus(ap supervisor.SupervisedAgentStatus, maxRetries int) Da
 		OwnershipFencingToken:  ap.OwnershipFencingToken,
 		OwnershipLastHeartbeat: ap.OwnershipLastHeartbeat,
 		LastActivity:           ap.LastActivity,
+		RuntimeProvider:        ap.RuntimeProvider,
+		RuntimePhase:           ap.RuntimePhase,
+		RuntimeCleanupState:    ap.RuntimeCleanupState,
+		DaytonaSandboxID:       ap.DaytonaSandboxID,
 	}
 	if ap.StopReason != "" && ap.PID == 0 {
 		if !ap.LastExit.IsZero() {
@@ -158,6 +162,22 @@ func toDaemonAgentStatus(ap supervisor.SupervisedAgentStatus, maxRetries int) Da
 
 // computeAgentStatus determines the status string based on agent state.
 func computeAgentStatus(ap supervisor.SupervisedAgentStatus, maxRetries int) string {
+	if ap.RuntimeProvider == "daytona" {
+		if !ap.LastExit.IsZero() {
+			if ap.LastExitCode != 0 {
+				return "failed"
+			}
+			return "stopped"
+		}
+		switch ap.RuntimePhase {
+		case "provisioning", "setup":
+			return "starting"
+		case "running", "stopping":
+			return "running"
+		case "failed":
+			return "failed"
+		}
+	}
 	if ap.PID > 0 && lockfile.IsProcessRunning(ap.PID) {
 		return "running"
 	}

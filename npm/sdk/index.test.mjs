@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   FetchLoomTransport,
   createLoomClient,
+  daytona,
   defineAgent,
   defineRuntimeProfile,
   defineWorkflow,
@@ -57,6 +58,100 @@ test("defineRuntimeProfile is a first-class runtime authoring helper", () => {
   assert.deepEqual(runtime.remote({ name: "sandbox" }), {
     name: "sandbox",
     provider: "e2b",
+  });
+  assert.deepEqual(runtime.daytona({ name: "daytona-dev", target: "us", apiKeyEnv: "DAYTONA_API_KEY" }), {
+    name: "daytona-dev",
+    target: "us",
+    apiKeyEnv: "DAYTONA_API_KEY",
+    provider: "daytona",
+  });
+  assert.deepEqual(daytona({ id: "sandbox-1", cwd: "/workspace/project", snapshot: "snap", target: "us" }), {
+    provider: "daytona",
+    cwd: "/workspace/project",
+    workspace: {
+      providerWorkspaceId: "sandbox-1",
+      provider_workspace_id: "sandbox-1",
+      provider: "daytona",
+    },
+    daytona: {
+      sandbox_id: "sandbox-1",
+      sandboxId: "sandbox-1",
+      snapshot: "snap",
+      target: "us",
+    },
+  });
+  assert.deepEqual(daytona({ id: "sandbox-3" }, {
+    cwd: "/workspace/project",
+    env: ["OPENAI_API_KEY", "GITHUB_TOKEN"],
+    repos: ["app"],
+    language: "typescript",
+    image: { base: "debian-slim:3.12" },
+    resources: { cpu: 2, memory: 4 },
+    envVars: { NODE_ENV: "test" },
+    autoStopInterval: 15,
+    autoArchiveInterval: 60,
+    autoDeleteInterval: 120,
+    ephemeral: false,
+    repoUrl: "https://github.com/acme/app.git",
+    branch: "main",
+    gitTokenEnv: "GITHUB_TOKEN",
+    openaiApiKeyEnv: "OPENAI_API_KEY",
+    setupCommands: ["npm ci"],
+    createTimeout: 90,
+    runTimeout: 600,
+    buildLogs: "inherit",
+  }), {
+    provider: "daytona",
+    cwd: "/workspace/project",
+    env: ["OPENAI_API_KEY", "GITHUB_TOKEN"],
+    repos: ["app"],
+    workspace: {
+      providerWorkspaceId: "sandbox-3",
+      provider_workspace_id: "sandbox-3",
+      provider: "daytona",
+    },
+    daytona: {
+      sandbox_id: "sandbox-3",
+      sandboxId: "sandbox-3",
+      language: "typescript",
+      image: { base: "debian-slim:3.12" },
+      resources: { cpu: 2, memory: 4 },
+      env_vars: { NODE_ENV: "test" },
+      auto_stop_interval: 15,
+      auto_archive_interval: 60,
+      auto_delete_interval: 120,
+      ephemeral: false,
+      repo_url: "https://github.com/acme/app.git",
+      branch: "main",
+      git_token_env: "GITHUB_TOKEN",
+      openai_api_key_env: "OPENAI_API_KEY",
+      setup_commands: ["npm ci"],
+      create_timeout: 90,
+      run_timeout: 600,
+      build_logs: "inherit",
+    },
+  });
+  const instrumentedSandbox = {};
+  Object.defineProperty(instrumentedSandbox, "__loomDaytona", {
+    value: { sandbox_id: "sandbox-2", cwd: "/workspace/app", snapshot: "hidden-snap" },
+  });
+  assert.deepEqual(daytona(instrumentedSandbox, { name: "instrumented" }), {
+    provider: "daytona",
+    profileName: "instrumented",
+    profile_name: "instrumented",
+    name: "instrumented",
+    cwd: "/workspace/app",
+    workspace: {
+      providerWorkspaceId: "sandbox-2",
+      provider_workspace_id: "sandbox-2",
+      provider: "daytona",
+    },
+    daytona: {
+      sandbox_id: "sandbox-2",
+      cwd: "/workspace/app",
+      snapshot: "hidden-snap",
+      sandboxId: "sandbox-2",
+    },
   });
 });
 

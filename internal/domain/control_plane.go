@@ -25,6 +25,7 @@ type RuntimeProvider string
 
 const (
 	RuntimeProviderLocal      RuntimeProvider = "local"
+	RuntimeProviderDaytona    RuntimeProvider = "daytona"
 	RuntimeProviderE2B        RuntimeProvider = "e2b"
 	RuntimeProviderKubernetes RuntimeProvider = "kubernetes"
 	RuntimeProviderCI         RuntimeProvider = "ci"

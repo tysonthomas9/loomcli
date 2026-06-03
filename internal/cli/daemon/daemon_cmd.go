@@ -47,6 +47,10 @@ type DaemonAgentStatus struct {
 	OwnershipFencingToken  int64     `json:"ownership_fencing_token,omitempty"`
 	OwnershipLastHeartbeat time.Time `json:"ownership_last_heartbeat,omitempty"`
 	LastActivity           time.Time `json:"last_activity,omitempty"`
+	RuntimeProvider        string    `json:"runtime_provider,omitempty"`
+	RuntimePhase           string    `json:"runtime_phase,omitempty"`
+	RuntimeCleanupState    string    `json:"runtime_cleanup_state,omitempty"`
+	DaytonaSandboxID       string    `json:"daytona_sandbox_id,omitempty"`
 }
 
 // DaemonState represents the complete daemon state in daemon-agents.json

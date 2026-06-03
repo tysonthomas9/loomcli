@@ -92,12 +92,124 @@ const runtimeTypes = `declare module '@loom/runtime' {
     filesystem?: RuntimeFilesystemPolicy;
   };
 
+  export type DaytonaRuntimeOptions = {
+    language?: 'typescript' | 'javascript' | 'python' | string;
+    image?: unknown;
+    snapshot?: string;
+    resources?: {
+      cpu?: number;
+      memory?: number;
+      disk?: number;
+    };
+    envVars?: Record<string, string>;
+    env_vars?: Record<string, string>;
+    autoStopInterval?: number;
+    auto_stop_interval?: number;
+    autoArchiveInterval?: number;
+    auto_archive_interval?: number;
+    autoDeleteInterval?: number;
+    auto_delete_interval?: number;
+    ephemeral?: boolean;
+    target?: string;
+    apiUrl?: string;
+    api_url?: string;
+    apiKeyEnv?: string;
+    api_key_env?: string;
+    repoUrl?: string;
+    repo_url?: string;
+    remoteUrl?: string;
+    remote_url?: string;
+    branch?: string;
+    checkoutBranch?: string;
+    checkout_branch?: string;
+    ref?: string;
+    checkoutRef?: string;
+    checkout_ref?: string;
+    gitTokenEnv?: string;
+    git_token_env?: string;
+    githubTokenEnv?: string;
+    github_token_env?: string;
+    gitAuthTokenEnv?: string;
+    git_auth_token_env?: string;
+    gitUsername?: string;
+    git_username?: string;
+    githubUsername?: string;
+    github_username?: string;
+    gitDeployKeyEnv?: string;
+    git_deploy_key_env?: string;
+    deployKeyEnv?: string;
+    deploy_key_env?: string;
+    sshKeyEnv?: string;
+    ssh_key_env?: string;
+    openaiApiKeyEnv?: string;
+    openai_api_key_env?: string;
+    codexAuthFileEnv?: string;
+    codex_auth_file_env?: string;
+    setupCommands?: string[];
+    setup_commands?: string[];
+    installCommands?: string[];
+    install_commands?: string[];
+    createTimeout?: number;
+    create_timeout?: number;
+    setupTimeout?: number;
+    setup_timeout?: number;
+    healthTimeout?: number;
+    health_timeout?: number;
+    runTimeout?: number;
+    run_timeout?: number;
+    commandTimeout?: number;
+    command_timeout?: number;
+    timeout?: number;
+    buildLogs?: 'inherit' | 'discard' | string;
+    build_logs?: 'inherit' | 'discard' | string;
+  };
+
+  export type DaytonaSandbox = {
+    id?: string;
+    sandboxId?: string;
+    sandbox_id?: string;
+    workspaceId?: string;
+    workspace_id?: string;
+    cwd?: string;
+    root?: string;
+    snapshot?: string;
+    target?: string;
+    daytona?: DaytonaRuntimeOptions & {
+      sandbox_id?: string;
+      sandboxId?: string;
+    };
+  };
+
   export type RuntimeProfile = {
     provider: string;
     name?: string;
-    image?: string;
+    image?: string | unknown;
+    daytona?: DaytonaRuntimeOptions;
+    language?: DaytonaRuntimeOptions['language'];
+    snapshot?: string;
+    resources?: DaytonaRuntimeOptions['resources'];
+    envVars?: DaytonaRuntimeOptions['envVars'];
+    env_vars?: DaytonaRuntimeOptions['env_vars'];
+    autoStopInterval?: number;
+    auto_stop_interval?: number;
+    autoArchiveInterval?: number;
+    auto_archive_interval?: number;
+    autoDeleteInterval?: number;
+    auto_delete_interval?: number;
+    ephemeral?: boolean;
+    target?: string;
+    apiUrl?: string;
+    api_url?: string;
+    apiKeyEnv?: string;
+    api_key_env?: string;
+    createTimeout?: number;
+    create_timeout?: number;
+    timeout?: number;
+    buildLogs?: DaytonaRuntimeOptions['buildLogs'];
+    build_logs?: DaytonaRuntimeOptions['build_logs'];
     repos?: string[];
     env?: string[];
+    cwd?: string;
     cpu?: string;
     memory?: string;
     cwd?: string;
@@ -130,6 +242,7 @@ const runtimeTypes = `declare module '@loom/runtime' {
     profileName?: string;
     profile_name?: string;
     runtime?: RuntimeProfile;
+    sandbox?: RuntimeProfile | DaytonaSandbox | Record<string, unknown>;
     instructions?: string;
     skills?: Array<string | SkillDefinition>;
     tools?: Array<string | unknown>;
@@ -253,6 +366,7 @@ const runtimeTypes = `declare module '@loom/runtime' {
     cpu?: string;
     memory?: string;
     status?: string;
+    daytona?: DaytonaRuntimeOptions & Record<string, unknown>;
     capabilities?: RuntimeCapabilities;
     workspace?: {
       providerWorkspaceId?: string;
@@ -303,7 +417,13 @@ const runtimeTypes = `declare module '@loom/runtime' {
     runtimeProfileName?: string;
     provider?: string;
     providerWorkspaceId?: string;
+    provider_workspace_id?: string;
     owner?: string;
+    providerBacked?: boolean;
+    materialized?: boolean;
+    realSDK?: boolean;
+    daytona?: DaytonaRuntimeOptions & Record<string, unknown>;
+    createParams?: Record<string, unknown>;
     cleanup?: RuntimeCleanupPolicy;
     filesystem?: RuntimeFilesystemPolicy;
     reason?: string;
@@ -336,9 +456,12 @@ const runtimeTypes = `declare module '@loom/runtime' {
       profileName?: string;
       provider?: string;
       version?: string;
+      daytona?: DaytonaRuntimeOptions & Record<string, unknown>;
       repos?: string[];
       env?: string[];
+      cwd?: string;
       providerWorkspaceId?: string;
+      provider_workspace_id?: string;
       owner?: string;
       cleanup?: RuntimeCleanupPolicy;
       filesystem?: RuntimeFilesystemPolicy;
@@ -423,6 +546,11 @@ const runtimeTypes = `declare module '@loom/runtime' {
     attempt?: number;
     model?: string;
     backend?: string;
+    runtime?: RuntimeProfile | Record<string, unknown>;
+    runtimeProfileName?: string;
+    runtime_profile_name?: string;
+    runtimeProvider?: string;
+    runtime_provider?: string;
     metadata?: Record<string, string>;
   };
 
@@ -436,10 +564,16 @@ const runtimeTypes = `declare module '@loom/runtime' {
     session_name?: string;
     profileName?: string;
     profile_name?: string;
+    runtime?: RuntimeProfile | Record<string, unknown>;
+    runtimeProfileName?: string;
+    runtime_profile_name?: string;
+    runtimeProvider?: string;
+    runtime_provider?: string;
     harness?: string;
     prompt<T = unknown>(input: WorkflowAgentSessionOperationInput<T>): Promise<WorkflowAgentSessionOperationResult<T>>;
     skill<T = unknown>(input: WorkflowAgentSessionOperationInput<T>): Promise<WorkflowAgentSessionOperationResult<T>>;
     task<T = unknown>(input: WorkflowAgentSessionOperationInput<T>): Promise<WorkflowAgentSessionOperationResult<T>>;
+    shell<T = unknown>(command: string, options?: WorkflowAgentSessionOperationInput<T>): Promise<WorkflowAgentSessionOperationResult<T>>;
     shell<T = unknown>(input: WorkflowAgentSessionOperationInput<T>): Promise<WorkflowAgentSessionOperationResult<T>>;
     compact<T = unknown>(input?: WorkflowAgentSessionOperationInput<T>): Promise<WorkflowAgentSessionOperationResult<T>>;
   };
@@ -505,6 +639,11 @@ const runtimeTypes = `declare module '@loom/runtime' {
     prompt?: string;
     name?: string;
     command?: string;
+    cwd?: string;
+    env?: Record<string, string | undefined>;
+    timeout?: number;
+    timeoutMs?: number;
+    timeout_ms?: number;
     args?: Record<string, unknown>;
     model?: string;
     provider?: string;
@@ -543,6 +682,16 @@ const runtimeTypes = `declare module '@loom/runtime' {
     model?: string;
     provider?: string;
     providerModel?: string;
+    runtime?: RuntimeProfile | Record<string, unknown>;
+    runtimeProfileName?: string;
+    runtimeProvider?: string;
+    providerExecution?: {
+      provider?: string;
+      sandboxId?: string;
+      command?: string;
+      exitCode?: number;
+      realExecution?: boolean;
+    };
     usage?: WorkflowModelUsage;
     startedAt?: string;
     completedAt?: string;
@@ -820,6 +969,10 @@ const runtimeTypes = `declare module '@loom/runtime' {
     tool(name: string, args?: Record<string, unknown>): Promise<unknown>;
   };
 
+  export type FlueContext = WorkflowContext;
+  export type WorkflowRouteNext = () => unknown | Promise<unknown>;
+  export type WorkflowRouteHandler = (ctx: WorkflowContext, next: WorkflowRouteNext) => unknown | Promise<unknown>;
+
   export function defineConfig<T extends LoomConfig>(config: T): T;
   export function defineAgent<T extends AgentDefinition>(agent: T): T;
   export function createAgent<T extends AgentDefinition | AgentFactory>(agent: T): CreatedAgent;
@@ -829,6 +982,7 @@ const runtimeTypes = `declare module '@loom/runtime' {
   export function defineTool<T extends ToolDefinition>(tool: T): T;
   export function defineWorkflow<T extends WorkflowDefinition>(workflow: T): T;
   export function defineRuntimeProfile<T extends RuntimeProfile>(profile: T): T;
+  export function daytona(sandbox: DaytonaSandbox | Record<string, unknown>, options?: Omit<RuntimeProfile, 'provider'> & DaytonaRuntimeOptions): RuntimeProfile;
 
   export const schema: {
     [kind: string]: (...args: unknown[]) => ToolSchema;
@@ -841,6 +995,7 @@ const runtimeTypes = `declare module '@loom/runtime' {
   export const runtime: {
     local(config: Omit<RuntimeProfile, 'provider'>): RuntimeProfile;
     podman(config: Omit<RuntimeProfile, 'provider'>): RuntimeProfile;
+    daytona(config: Omit<RuntimeProfile, 'provider'> & DaytonaRuntimeOptions): RuntimeProfile;
     remote(config: Omit<RuntimeProfile, 'provider'> & { provider?: string }): RuntimeProfile;
   };
 
@@ -855,10 +1010,102 @@ const runtimeTypes = `declare module '@loom/runtime' {
   };
 }
 
+declare module '@daytona/sdk' {
+  export type DaytonaClientOptions = {
+    apiKey?: string;
+    api_key?: string;
+    apiUrl?: string;
+    api_url?: string;
+    apiKeyEnv?: string;
+    api_key_env?: string;
+    target?: string;
+  };
+
+  export type DaytonaSandboxCreateOptions = {
+    id?: string;
+    name?: string;
+    sandboxId?: string;
+    sandbox_id?: string;
+    language?: 'typescript' | 'javascript' | 'python' | string;
+    image?: string | DaytonaImage | unknown;
+    snapshot?: string;
+    snapshotName?: string;
+    snapshot_name?: string;
+    resources?: {
+      cpu?: number;
+      memory?: number;
+      disk?: number;
+    };
+    envVars?: Record<string, string>;
+    env_vars?: Record<string, string>;
+    autoStopInterval?: number;
+    auto_stop_interval?: number;
+    autoArchiveInterval?: number;
+    auto_archive_interval?: number;
+    autoDeleteInterval?: number;
+    auto_delete_interval?: number;
+    ephemeral?: boolean;
+    target?: string;
+    cwd?: string;
+    workdir?: string;
+    workspaceRoot?: string;
+    workspace_root?: string;
+  };
+
+  export type DaytonaSandboxCreateSDKOptions = {
+    timeout?: number;
+    onSnapshotCreateLogs?: (chunk: string) => void;
+  };
+
+  export type DaytonaImage = {
+    runCommands(...commands: (string | string[])[]): DaytonaImage;
+    run_commands(...commands: (string | string[])[]): DaytonaImage;
+    dockerfileCommands(commands: string[], contextDir?: string): DaytonaImage;
+    dockerfile_commands(commands: string[], contextDir?: string): DaytonaImage;
+    pipInstall(packages: string | string[], options?: Record<string, unknown>): DaytonaImage;
+    pip_install(packages: string | string[], options?: Record<string, unknown>): DaytonaImage;
+    pipInstallFromRequirements(requirementsTxt: string, options?: Record<string, unknown>): DaytonaImage;
+    pip_install_from_requirements(requirementsTxt: string, options?: Record<string, unknown>): DaytonaImage;
+    pipInstallFromPyproject(pyprojectToml: string, options?: Record<string, unknown>): DaytonaImage;
+    pip_install_from_pyproject(pyprojectToml: string, options?: Record<string, unknown>): DaytonaImage;
+    addLocalFile(localPath: string, remotePath: string): DaytonaImage;
+    add_local_file(localPath: string, remotePath: string): DaytonaImage;
+    addLocalDir(localPath: string, remotePath: string): DaytonaImage;
+    add_local_dir(localPath: string, remotePath: string): DaytonaImage;
+    env(envVars: Record<string, string>): DaytonaImage;
+    workdir(dirPath: string): DaytonaImage;
+    entrypoint(entrypointCommands: string[]): DaytonaImage;
+    cmd(cmd: string[]): DaytonaImage;
+    user(user: string): DaytonaImage;
+  };
+
+  export type DaytonaSandbox = import('@loom/runtime').DaytonaSandbox & {
+    shell(command: string, options?: Record<string, unknown>): Promise<Record<string, unknown>>;
+    shell(options: { command: string; cwd?: string; env?: Record<string, string | undefined>; timeoutMs?: number; timeout_ms?: number }): Promise<Record<string, unknown>>;
+    destroy(options?: Record<string, unknown>): Promise<Record<string, unknown>>;
+    delete(options?: Record<string, unknown>): Promise<Record<string, unknown>>;
+  };
+
+  export class Daytona {
+    constructor(options?: DaytonaClientOptions);
+    create(params?: DaytonaSandboxCreateOptions, options?: DaytonaSandboxCreateSDKOptions): Promise<DaytonaSandbox>;
+    get(id: string): Promise<DaytonaSandbox>;
+  }
+
+  export const Image: {
+    base(image: string): DaytonaImage;
+    debianSlim(version?: '3.9' | '3.10' | '3.11' | '3.12' | '3.13' | string): DaytonaImage;
+    debian_slim(version?: '3.9' | '3.10' | '3.11' | '3.12' | '3.13' | string): DaytonaImage;
+    fromDockerfile(dockerfile: string): DaytonaImage;
+    from_dockerfile(dockerfile: string): DaytonaImage;
+  };
+}
+
 declare module '@loom/sdk' {
   export {
     Type,
     createAgent,
+    daytona,
     defineAgent,
     defineAgentProfile,
     defineConfig,
@@ -869,6 +1116,12 @@ declare module '@loom/sdk' {
     runtime,
     schema,
     trigger,
+  } from '@loom/runtime';
+  export type {
+    FlueContext,
+    WorkflowContext,
+    WorkflowRouteHandler,
+    WorkflowRouteNext,
   } from '@loom/runtime';
 
   export type LoomTransportResult = {
@@ -1090,6 +1343,10 @@ declare module '@loom/sdk' {
   export function createLoomClient(options?: LoomClientOptions): LoomClient;
   export const loom: LoomClient;
   export function sourceToProjectDir(source: string): string;
+}
+
+declare module '@flue/runtime' {
+  export * from '@loom/runtime';
 }
 
 declare module '*.md' {

@@ -3,10 +3,13 @@ const crypto = require("crypto");
 const os = require("os");
 const path = require("path");
 const vm = require("vm");
+const { createRequire } = require("module");
 const { stripTypeScriptTypes } = require("node:module");
 
 const moduleCache = new Map();
 const cleanupRuntimeWorkspaceFiles = Symbol("cleanupRuntimeWorkspaceFiles");
+const daytonaSandboxRegistry = new Map();
+let activeWorkflowExecution = null;
 
 function defineWorkflow(config) {
   return { __loomType: "workflow", ...config };
@@ -62,6 +65,17 @@ function defineTool(config) {
   return { __loomType: "tool", ...config };
 }
 
+const schema = new Proxy(
+  {},
+  {
+    get(_target, prop) {
+      return (...args) => ({ kind: String(prop), args });
+    },
+  },
+);
+
+const Type = schema;
+
 const trigger = {
   issueLabelAdded(config = {}) {
     return { event: "issue.label_added", filter: config };
@@ -75,10 +89,637 @@ const runtime = {
   podman(config = {}) {
     return { __loomType: "runtime", provider: "other", ...config };
   },
+  daytona(config = {}) {
+    return { __loomType: "runtime", provider: "daytona", ...config };
+  },
   remote(config = {}) {
     return { __loomType: "runtime", provider: config.provider || "e2b", ...config };
   },
 };
+
+function daytona(sandbox, options = {}) {
+  const sandboxData = sandbox && typeof sandbox === "object" ? sandbox : {};
+  const loomData = sandboxData.__loomDaytona && typeof sandboxData.__loomDaytona === "object" ? sandboxData.__loomDaytona : {};
+  const sandboxId = String(
+    firstPresent(
+      options.sandboxId,
+      options.sandbox_id,
+      loomData.sandboxId,
+      loomData.sandbox_id,
+      sandboxData.sandboxId,
+      sandboxData.sandbox_id,
+      sandboxData.id,
+      sandboxData.workspaceId,
+      sandboxData.workspace_id,
+    ) || "",
+  );
+  const daytonaData = sandboxData.daytona && typeof sandboxData.daytona === "object" ? sandboxData.daytona : {};
+  const optionDaytonaData = options.daytona && typeof options.daytona === "object" ? options.daytona : {};
+  const profileName = String(firstPresent(options.profileName, options.profile_name, options.name, loomData.profileName, loomData.profile_name, sandboxData.profileName, sandboxData.profile_name) || "");
+  const cwd = String(firstPresent(options.cwd, loomData.cwd, sandboxData.cwd, sandboxData.root) || "");
+  const setupCommands = [
+    ...stringArray(firstPresent(options.setupCommands, options.setup_commands)),
+    ...stringArray(firstPresent(options.installCommands, options.install_commands)),
+  ];
+  const env = stringArray(options.env);
+  const repos = stringArray(options.repos);
+  const envVars = firstPresent(
+    options.envVars,
+    options.env_vars,
+    optionDaytonaData.envVars,
+    optionDaytonaData.env_vars,
+    daytonaData.envVars,
+    daytonaData.env_vars,
+  );
+  return {
+    __loomType: "runtime",
+    provider: "daytona",
+    ...(profileName ? { profileName, profile_name: profileName, name: profileName } : {}),
+    ...(cwd ? { cwd } : {}),
+    ...(options.model ? { model: String(options.model) } : {}),
+    ...(env.length > 0 ? { env } : {}),
+    ...(repos.length > 0 ? { repos } : {}),
+    workspace: {
+      ...(options.workspace && typeof options.workspace === "object" ? jsonSafe(options.workspace) : {}),
+      ...(sandboxId ? { providerWorkspaceId: sandboxId, provider_workspace_id: sandboxId } : {}),
+      provider: "daytona",
+    },
+    daytona: compactObject({
+      ...jsonSafe(daytonaData),
+      ...jsonSafe(loomData),
+      ...jsonSafe(optionDaytonaData),
+      sandbox_id: sandboxId,
+      sandboxId,
+      language: firstPresent(options.language, optionDaytonaData.language, daytonaData.language),
+      image: firstPresent(options.image, optionDaytonaData.image, daytonaData.image),
+      snapshot: firstPresent(options.snapshot, loomData.snapshot, sandboxData.snapshot, daytonaData.snapshot),
+      resources: firstPresent(options.resources, optionDaytonaData.resources, daytonaData.resources),
+      env_vars: envVars && typeof envVars === "object" ? stringRecord(envVars) : undefined,
+      auto_stop_interval: firstPresent(options.autoStopInterval, options.auto_stop_interval, optionDaytonaData.autoStopInterval, optionDaytonaData.auto_stop_interval, daytonaData.autoStopInterval, daytonaData.auto_stop_interval),
+      auto_archive_interval: firstPresent(options.autoArchiveInterval, options.auto_archive_interval, optionDaytonaData.autoArchiveInterval, optionDaytonaData.auto_archive_interval, daytonaData.autoArchiveInterval, daytonaData.auto_archive_interval),
+      auto_delete_interval: firstPresent(options.autoDeleteInterval, options.auto_delete_interval, optionDaytonaData.autoDeleteInterval, optionDaytonaData.auto_delete_interval, daytonaData.autoDeleteInterval, daytonaData.auto_delete_interval),
+      ephemeral: firstPresent(options.ephemeral, optionDaytonaData.ephemeral, daytonaData.ephemeral),
+      target: firstPresent(options.target, loomData.target, sandboxData.target, daytonaData.target),
+      api_key_env: firstPresent(options.apiKeyEnv, options.api_key_env, loomData.api_key_env, sandboxData.apiKeyEnv, sandboxData.api_key_env, daytonaData.api_key_env),
+      apiKeyEnv: firstPresent(options.apiKeyEnv, options.api_key_env, loomData.apiKeyEnv, sandboxData.apiKeyEnv, sandboxData.api_key_env, daytonaData.apiKeyEnv),
+      repo_url: firstPresent(options.repoUrl, options.repo_url, options.remoteUrl, options.remote_url),
+      branch: firstPresent(options.branch, options.checkoutBranch, options.checkout_branch, options.gitBranch, options.git_branch),
+      ref: firstPresent(options.ref, options.checkoutRef, options.checkout_ref, options.gitRef, options.git_ref),
+      git_token_env: firstPresent(options.gitTokenEnv, options.git_token_env, options.githubTokenEnv, options.github_token_env, options.gitAuthTokenEnv, options.git_auth_token_env),
+      git_username: firstPresent(options.gitUsername, options.git_username, options.githubUsername, options.github_username),
+      git_deploy_key_env: firstPresent(options.gitDeployKeyEnv, options.git_deploy_key_env, options.deployKeyEnv, options.deploy_key_env, options.sshKeyEnv, options.ssh_key_env),
+      openai_api_key_env: firstPresent(options.openaiApiKeyEnv, options.openai_api_key_env),
+      codex_auth_file_env: firstPresent(options.codexAuthFileEnv, options.codex_auth_file_env),
+      setup_commands: setupCommands.length > 0 ? setupCommands : undefined,
+      create_timeout: firstPresent(options.createTimeout, options.create_timeout, options.timeout, optionDaytonaData.createTimeout, optionDaytonaData.create_timeout, optionDaytonaData.timeout, daytonaData.createTimeout, daytonaData.create_timeout, daytonaData.timeout),
+      setup_timeout: firstPresent(options.setupTimeout, options.setup_timeout),
+      health_timeout: firstPresent(options.healthTimeout, options.health_timeout),
+      run_timeout: firstPresent(options.runTimeout, options.run_timeout, options.commandTimeout, options.command_timeout),
+      build_logs: firstPresent(options.buildLogs, options.build_logs, optionDaytonaData.buildLogs, optionDaytonaData.build_logs, daytonaData.buildLogs, daytonaData.build_logs),
+    }),
+  };
+}
+
+function createDaytonaImage(spec) {
+  const current = {
+    __loomType: "daytona_image",
+    ...spec,
+    steps: Array.isArray(spec.steps) ? spec.steps : [],
+  };
+  const withStep = (step) => createDaytonaImage({ ...current, steps: current.steps.concat([compactObject(step)]) });
+  return {
+    ...current,
+    runCommands: (...commands) => withStep({ op: "runCommands", commands: flattenStringArgs(commands) }),
+    run_commands: (...commands) => withStep({ op: "runCommands", commands: flattenStringArgs(commands) }),
+    pipInstall: (...packages) => withStep({ op: "pipInstall", packages: flattenStringArgs(packages) }),
+    pip_install: (...packages) => withStep({ op: "pipInstall", packages: flattenStringArgs(packages) }),
+    pipInstallFromRequirements: (file) => withStep({ op: "pipInstallFromRequirements", file: stringValue(file) }),
+    pip_install_from_requirements: (file) => withStep({ op: "pipInstallFromRequirements", file: stringValue(file) }),
+    pipInstallFromPyproject: (file, options = {}) =>
+      withStep({ op: "pipInstallFromPyproject", file: stringValue(file), options: compactObject(options || {}) }),
+    pip_install_from_pyproject: (file, options = {}) =>
+      withStep({ op: "pipInstallFromPyproject", file: stringValue(file), options: compactObject(options || {}) }),
+    addLocalFile: (source, target) => withStep({ op: "addLocalFile", source: stringValue(source), target: stringValue(target) }),
+    add_local_file: (source, target) => withStep({ op: "addLocalFile", source: stringValue(source), target: stringValue(target) }),
+    addLocalDir: (source, target) => withStep({ op: "addLocalDir", source: stringValue(source), target: stringValue(target) }),
+    add_local_dir: (source, target) => withStep({ op: "addLocalDir", source: stringValue(source), target: stringValue(target) }),
+    env: (vars = {}) => withStep({ op: "env", vars: stringRecord(vars) }),
+    workdir: (dir) => withStep({ op: "workdir", dir: stringValue(dir) }),
+    entrypoint: (value) => withStep({ op: "entrypoint", value: Array.isArray(value) ? stringArray(value) : stringValue(value) }),
+    cmd: (value) => withStep({ op: "cmd", value: Array.isArray(value) ? stringArray(value) : stringValue(value) }),
+    dockerfileCommands: (commands, contextDir) =>
+      withStep({ op: "dockerfileCommands", commands: stringArray(Array.isArray(commands) ? commands : [commands]), contextDir: stringValue(contextDir) }),
+    dockerfile_commands: (commands, contextDir) =>
+      withStep({ op: "dockerfileCommands", commands: stringArray(Array.isArray(commands) ? commands : [commands]), contextDir: stringValue(contextDir) }),
+    user: (value) => withStep({ op: "user", value: stringValue(value) }),
+    toJSON() {
+      const { __loomType, toJSON, ...json } = current;
+      return compactObject(json);
+    },
+  };
+}
+
+function makeDaytonaSandbox(clientOptions = {}, createOptions = {}) {
+  const execution = activeWorkflowExecution || {};
+  const request = execution.request || {};
+  const operations = execution.operations || [];
+  const index = operations.length + 1;
+  const sandboxId = String(
+    firstPresent(
+      createOptions.id,
+      createOptions.sandboxId,
+      createOptions.sandbox_id,
+      createOptions.name,
+      `daytona:${String(request.id || "workflow")}:${index}`,
+    ),
+  ).replace(/[^A-Za-z0-9_.:-]/g, "_");
+  const snapshot = String(firstPresent(createOptions.snapshot, createOptions.snapshotName, createOptions.snapshot_name) || "");
+  const target = String(firstPresent(createOptions.target, clientOptions.target) || "");
+  const cwd = String(firstPresent(createOptions.cwd, createOptions.workdir, createOptions.workspaceRoot, "/workspace") || "/workspace");
+  const sandbox = {
+    __loomType: "daytona_sandbox",
+    provider: "daytona",
+    id: sandboxId,
+    sandboxId,
+    sandbox_id: sandboxId,
+    workspaceId: sandboxId,
+    workspace_id: sandboxId,
+    cwd,
+    root: cwd,
+    snapshot,
+    target,
+    daytona: compactObject({
+      sandbox_id: sandboxId,
+      sandboxId,
+      snapshot,
+      target,
+      api_key_configured: Boolean(clientOptions.apiKey || clientOptions.api_key),
+      api_key_env: firstPresent(clientOptions.apiKeyEnv, clientOptions.api_key_env, createOptions.apiKeyEnv, createOptions.api_key_env),
+    }),
+    process: {
+      executeCommand: async (command, cwd, env, timeout) => daytonaSandboxShell(sandbox, command, { cwd, env, timeout, __record: false }),
+      exec: async (command, cwd, env, timeout) => daytonaSandboxShell(sandbox, command, { cwd, env, timeout, __record: false }),
+    },
+    async shell(commandOrOptions, maybeOptions = {}) {
+      return daytonaSandboxShell(sandbox, commandOrOptions, maybeOptions);
+    },
+    async destroy(options = {}) {
+      return daytonaSandboxLifecycle("destroy", sandbox, options);
+    },
+    async delete(options = {}) {
+      return daytonaSandboxLifecycle("delete", sandbox, options);
+    },
+    toJSON() {
+      return {
+        provider: "daytona",
+        id: sandboxId,
+        sandboxId,
+        sandbox_id: sandboxId,
+        workspaceId: sandboxId,
+        workspace_id: sandboxId,
+        cwd,
+        root: cwd,
+        snapshot,
+        target,
+        daytona: this.daytona,
+      };
+    },
+  };
+  daytonaSandboxRegistry.set(sandboxId, sandbox);
+  if (activeWorkflowExecution) {
+    operations.push({
+      type: "runtime.daytona.sandbox.create",
+      params: {
+        accepted: true,
+        status: "admitted",
+        provider: "daytona",
+        sandboxId,
+        sandbox_id: sandboxId,
+        snapshot,
+        target,
+        cwd,
+        apiKeyConfigured: Boolean(clientOptions.apiKey || clientOptions.api_key),
+        api_key_configured: Boolean(clientOptions.apiKey || clientOptions.api_key),
+        client: daytonaClientMetadata(clientOptions),
+        options: redactSensitiveObject(createOptions),
+        createdAt: new Date().toISOString(),
+      },
+    });
+  }
+  return sandbox;
+}
+
+function daytonaSandboxShell(sandbox, commandOrOptions, maybeOptions = {}) {
+  const options =
+    typeof commandOrOptions === "string"
+      ? { ...(maybeOptions || {}), command: commandOrOptions }
+      : commandOrOptions || {};
+  const command = String(options.command || "").trim();
+  if (!command) throw new Error("Daytona sandbox shell requires command");
+  const params = {
+    accepted: true,
+    status: String(options.status || "completed"),
+    provider: "daytona",
+    sandboxId: sandbox.sandboxId,
+    sandbox_id: sandbox.sandboxId,
+    command,
+    cwd: String(options.cwd || sandbox.cwd || ""),
+    env: redactSensitiveObject(options.env || {}),
+    exitCode: Number(options.exitCode || options.exit_code || 0),
+    result: Object.prototype.hasOwnProperty.call(options, "mockResult") ? jsonSafe(options.mockResult) : undefined,
+    completedAt: new Date().toISOString(),
+  };
+  if (activeWorkflowExecution && options.__record !== false) {
+    activeWorkflowExecution.operations.push({ type: "runtime.daytona.sandbox.shell", params });
+  }
+  return jsonSafe(params);
+}
+
+function daytonaSandboxLifecycle(action, sandbox, options = {}) {
+  const params = {
+    accepted: true,
+    status: "admitted",
+    action,
+    provider: "daytona",
+    sandboxId: sandbox.sandboxId,
+    sandbox_id: sandbox.sandboxId,
+    reason: String(options.reason || ""),
+    metadata: redactSensitiveObject(options.metadata || {}),
+    requestedAt: new Date().toISOString(),
+  };
+  if (activeWorkflowExecution) {
+    activeWorkflowExecution.operations.push({ type: "runtime.daytona.sandbox.lifecycle", params });
+  }
+  return jsonSafe(params);
+}
+
+const daytonaSDKShim = {
+  Daytona: class Daytona {
+    constructor(options = {}) {
+      this.options = options || {};
+    }
+
+    async create(options = {}) {
+      return makeDaytonaSandbox(this.options, options || {});
+    }
+
+    async get(id) {
+      return makeDaytonaSandbox(this.options, { id });
+    }
+  },
+  Image: {
+    base: (image) => createDaytonaImage({ base: stringValue(image) }),
+    debianSlim: (version) => createDaytonaImage({ base: `debian-slim:${stringValue(version)}` }),
+    debian_slim: (version) => createDaytonaImage({ base: `debian-slim:${stringValue(version)}` }),
+    fromDockerfile: (dockerfile) => createDaytonaImage({ dockerfile: stringValue(dockerfile) }),
+    from_dockerfile: (dockerfile) => createDaytonaImage({ dockerfile: stringValue(dockerfile) }),
+  },
+};
+
+function daytonaSDKModuleFor(file) {
+  const real = loadRealDaytonaSDK(file);
+  if (!real || typeof real.Daytona !== "function") return { ...daytonaSDKShim, __loomRealSDK: false };
+  return { ...instrumentedDaytonaSDK(real), __loomRealSDK: true };
+}
+
+function loadRealDaytonaSDK(file) {
+  if (String(process.env.LOOM_DAYTONA_SDK || "").toLowerCase() === "shim") return null;
+  try {
+    return createRequire(file)("@daytona/sdk");
+  } catch {
+    return null;
+  }
+}
+
+function instrumentedDaytonaSDK(real) {
+  return {
+    ...real,
+    Daytona: class LoomDaytona {
+      constructor(options = {}) {
+        this.__loomOptions = options || {};
+        this.__realDaytona = new real.Daytona(options);
+      }
+
+      async create(params = {}, options = {}) {
+        const sandbox = await this.__realDaytona.create(params || {}, options || {});
+        return registerDaytonaSandbox(sandbox, this.__loomOptions, params || {}, options || {});
+      }
+
+      async get(id, ...args) {
+        const sandbox = await this.__realDaytona.get(id, ...args);
+        return registerDaytonaSandbox(sandbox, this.__loomOptions, { id }, {});
+      }
+
+      async delete(sandbox, timeout) {
+        const result = await this.__realDaytona.delete(sandbox, timeout);
+        recordDaytonaLifecycle("delete", sandbox, { timeout });
+        return result;
+      }
+
+      async [Symbol.asyncDispose]() {
+        if (typeof this.__realDaytona[Symbol.asyncDispose] === "function") {
+          return this.__realDaytona[Symbol.asyncDispose]();
+        }
+      }
+    },
+    Image: real.Image || daytonaSDKShim.Image,
+  };
+}
+
+function registerDaytonaSandbox(sandbox, clientOptions = {}, createOptions = {}, sdkOptions = {}) {
+  if (!sandbox || typeof sandbox !== "object") return sandbox;
+  const sandboxId = daytonaSandboxId(sandbox, createOptions.id || createOptions.name || "");
+  const recordedCreateOptions = daytonaRecordableCreateParams(createOptions);
+  const loomData = compactObject({
+    sandbox_id: sandboxId,
+    sandboxId,
+    snapshot: firstPresent(createOptions.snapshot, createOptions.snapshotName, createOptions.snapshot_name, sandbox.snapshot),
+    target: firstPresent(createOptions.target, clientOptions.target, sandbox.target),
+    cwd: firstPresent(createOptions.cwd, createOptions.workdir, createOptions.workspaceRoot, sandbox.cwd, sandbox.root),
+    api_key_configured: Boolean(clientOptions.apiKey || clientOptions.api_key),
+    api_key_env: firstPresent(clientOptions.apiKeyEnv, clientOptions.api_key_env, createOptions.apiKeyEnv, createOptions.api_key_env),
+  });
+  if (sandboxId) daytonaSandboxRegistry.set(sandboxId, sandbox);
+  try {
+    Object.defineProperty(sandbox, "__loomDaytona", {
+      value: loomData,
+      enumerable: false,
+      configurable: true,
+    });
+  } catch {
+    // Some SDK objects may be non-extensible; the registry still carries them.
+  }
+  if (activeWorkflowExecution) {
+    activeWorkflowExecution.operations.push({
+      type: "runtime.daytona.sandbox.create",
+      params: {
+        accepted: true,
+        status: "completed",
+        provider: "daytona",
+        sandboxId,
+        sandbox_id: sandboxId,
+        snapshot: String(loomData.snapshot || ""),
+        target: String(loomData.target || ""),
+        cwd: String(loomData.cwd || ""),
+        apiKeyConfigured: Boolean(clientOptions.apiKey || clientOptions.api_key),
+        api_key_configured: Boolean(clientOptions.apiKey || clientOptions.api_key),
+        client: daytonaClientMetadata(clientOptions),
+        options: redactSensitiveObject(recordedCreateOptions),
+        sdkOptions: redactSensitiveObject(sdkOptions),
+        createdAt: new Date().toISOString(),
+        realSDK: true,
+      },
+    });
+  }
+  return sandbox;
+}
+
+function daytonaSandboxId(sandbox, fallback = "") {
+  if (!sandbox || typeof sandbox !== "object") return String(fallback || "");
+  const loomData = sandbox.__loomDaytona && typeof sandbox.__loomDaytona === "object" ? sandbox.__loomDaytona : {};
+  return String(
+    firstPresent(
+      loomData.sandboxId,
+      loomData.sandbox_id,
+      sandbox.id,
+      sandbox.sandboxId,
+      sandbox.sandbox_id,
+      sandbox.workspaceId,
+      sandbox.workspace_id,
+      fallback,
+    ) || "",
+  );
+}
+
+function recordDaytonaLifecycle(action, sandbox, options = {}) {
+  if (!activeWorkflowExecution) return;
+  daytonaSandboxLifecycle(action, {
+    sandboxId: daytonaSandboxId(sandbox),
+  }, options || {});
+}
+
+async function materializeDaytonaWorkspace(request, workspace, runtimeWorkspace, lifecycleParams, options = {}, operations) {
+  const provider = String(runtimeWorkspace && runtimeWorkspace.provider || "").toLowerCase();
+  if (provider !== "daytona") return null;
+  const sdk = daytonaSDKModuleFor(String(request.sourcePath || ""));
+  const daytonaConfig = runtimeWorkspace.daytona && typeof runtimeWorkspace.daytona === "object" ? runtimeWorkspace.daytona : {};
+  const apiKeyEnv = String(firstPresent(options.apiKeyEnv, options.api_key_env, daytonaConfig.api_key_env, daytonaConfig.apiKeyEnv, "DAYTONA_API_KEY") || "");
+  const clientOptions = compactObject({
+    apiKey: apiKeyEnv && request.env ? request.env[apiKeyEnv] : undefined,
+    apiUrl: firstPresent(options.apiUrl, options.api_url, daytonaConfig.api_url, daytonaConfig.apiUrl),
+    target: firstPresent(options.target, daytonaConfig.target),
+    apiKeyEnv,
+  });
+  const createParams = daytonaCreateParams(runtimeWorkspace, daytonaConfig, request.env || {}, options || {});
+  const createOptions = compactObject({
+    timeout: firstPresent(options.timeout, options.createTimeout, options.create_timeout, daytonaConfig.create_timeout, daytonaConfig.timeout),
+    onSnapshotCreateLogs: daytonaSnapshotLogHandler(firstPresent(options.onSnapshotCreateLogs, options.on_snapshot_create_logs, options.buildLogs, options.build_logs, daytonaConfig.buildLogs, daytonaConfig.build_logs)),
+  });
+  const sdkCreateParams = daytonaCreateParamsForSDK(createParams, sdk);
+  let sandbox;
+  try {
+    const client = new sdk.Daytona(clientOptions);
+    sandbox = await client.create(sdkCreateParams, createOptions);
+  } catch (err) {
+    const params = {
+      ...lifecycleParams,
+      providerBacked: false,
+      materialized: false,
+      realSDK: Boolean(sdk.__loomRealSDK),
+      status: "failed",
+      errorMessage: err && err.message ? String(err.message) : String(err),
+      daytona: redactSensitiveObject(daytonaConfig),
+    };
+    operations.push({ type: "runtime.workspace.materialize", params });
+    return { accepted: false, status: "failed", ...jsonSafe(params) };
+  }
+  const sandboxId = daytonaSandboxId(sandbox);
+  const realSDK = Boolean(sdk.__loomRealSDK);
+  runtimeWorkspace.providerWorkspaceId = sandboxId;
+  runtimeWorkspace.provider_workspace_id = sandboxId;
+  runtimeWorkspace.daytona = compactObject({
+    ...daytonaConfig,
+    sandbox_id: sandboxId,
+    sandboxId,
+    snapshot: firstPresent(daytonaConfig.snapshot, createParams.snapshot),
+    target: firstPresent(daytonaConfig.target, createParams.target),
+    api_key_env: apiKeyEnv,
+  });
+  workspace.runtime = runtimeWorkspace;
+  const params = {
+    ...lifecycleParams,
+    providerBacked: realSDK,
+    materialized: realSDK,
+    realSDK,
+    providerWorkspaceId: sandboxId,
+    provider_workspace_id: sandboxId,
+    daytona: redactSensitiveObject(runtimeWorkspace.daytona),
+    createParams: redactSensitiveObject(createParams),
+  };
+  operations.push({ type: "runtime.workspace.materialize", params });
+  return { accepted: true, status: "admitted", ...jsonSafe(params) };
+}
+
+function daytonaCreateParams(runtimeWorkspace, daytonaConfig, env, options = {}) {
+  const envVars = {
+    ...(daytonaConfig.env_vars && typeof daytonaConfig.env_vars === "object" ? stringRecord(daytonaConfig.env_vars) : {}),
+    ...runtimeEnvBindings(runtimeWorkspace.env || [], env || {}),
+    ...(options.envVars && typeof options.envVars === "object" ? stringRecord(options.envVars) : {}),
+    ...(options.env_vars && typeof options.env_vars === "object" ? stringRecord(options.env_vars) : {}),
+  };
+  return compactObject({
+    language: firstPresent(options.language, daytonaConfig.language),
+    image: firstPresent(options.image, daytonaConfig.image),
+    snapshot: firstPresent(options.snapshot, daytonaConfig.snapshot),
+    resources: firstPresent(options.resources, daytonaConfig.resources),
+    envVars,
+    autoStopInterval: firstPresent(options.autoStopInterval, options.auto_stop_interval, daytonaConfig.auto_stop_interval),
+    autoArchiveInterval: firstPresent(options.autoArchiveInterval, options.auto_archive_interval, daytonaConfig.auto_archive_interval),
+    autoDeleteInterval: firstPresent(options.autoDeleteInterval, options.auto_delete_interval, daytonaConfig.auto_delete_interval),
+    ephemeral: firstPresent(options.ephemeral, daytonaConfig.ephemeral),
+    target: firstPresent(options.target, daytonaConfig.target),
+    cwd: firstPresent(options.cwd, runtimeWorkspace.cwd),
+  });
+}
+
+function daytonaCreateParamsForSDK(params, sdk) {
+  const out = { ...(params || {}) };
+  if (out.image !== undefined) {
+    out.image = daytonaImageForSDK(out.image, sdk);
+  }
+  return out;
+}
+
+function daytonaImageForSDK(image, sdk) {
+  if (image == null || typeof image === "string") return image;
+  if (typeof image !== "object") return image;
+  if (typeof image.runCommands === "function" || typeof image.pipInstall === "function" || typeof image.workdir === "function") {
+    return image;
+  }
+  if (!sdk || !sdk.Image) return image;
+
+  let built;
+  const metadata = daytonaImageMetadata(image);
+  const base = String(metadata.base || "");
+  const dockerfile = String(metadata.dockerfile || "");
+  if (base && /^debian-slim:/i.test(base) && typeof sdk.Image.debianSlim === "function") {
+    built = sdk.Image.debianSlim(base.replace(/^debian-slim:/i, ""));
+  } else if (base && typeof sdk.Image.base === "function") {
+    built = sdk.Image.base(base);
+  } else if (dockerfile && typeof sdk.Image.fromDockerfile === "function") {
+    built = sdk.Image.fromDockerfile(dockerfile);
+  }
+  if (!built) return image;
+
+  for (const step of Array.isArray(metadata.steps) ? metadata.steps : []) {
+    built = applyDaytonaImageStep(built, step);
+  }
+  attachDaytonaImageMetadata(built, metadata);
+  return built;
+}
+
+function applyDaytonaImageStep(image, step = {}) {
+  const op = String(step.op || "").trim();
+  if (!op) return image;
+  switch (op) {
+    case "runCommands":
+      return callDaytonaImageMethod(image, "runCommands", flattenStringArgs(step.commands || []));
+    case "dockerfileCommands":
+      return callDaytonaImageMethod(image, "dockerfileCommands", [stringArray(step.commands || []), stringValue(step.contextDir)]);
+    case "pipInstall": {
+      const packages = stringArray(step.packages || []);
+      const packageArg = packages.length === 1 ? packages[0] : packages;
+      return callDaytonaImageMethod(image, "pipInstall", [packageArg, compactObject(step.options || {})]);
+    }
+    case "pipInstallFromRequirements":
+      return callDaytonaImageMethod(image, "pipInstallFromRequirements", [stringValue(step.file), compactObject(step.options || {})]);
+    case "pipInstallFromPyproject":
+      return callDaytonaImageMethod(image, "pipInstallFromPyproject", [stringValue(step.file), compactObject(step.options || {})]);
+    case "addLocalFile":
+      return callDaytonaImageMethod(image, "addLocalFile", [stringValue(step.source), stringValue(step.target)]);
+    case "addLocalDir":
+      return callDaytonaImageMethod(image, "addLocalDir", [stringValue(step.source), stringValue(step.target)]);
+    case "env":
+      return callDaytonaImageMethod(image, "env", [stringRecord(step.vars || {})]);
+    case "workdir":
+      return callDaytonaImageMethod(image, "workdir", [stringValue(step.dir)]);
+    case "entrypoint":
+      return callDaytonaImageMethod(image, "entrypoint", [Array.isArray(step.value) ? stringArray(step.value) : [stringValue(step.value)]]);
+    case "cmd":
+      return callDaytonaImageMethod(image, "cmd", [Array.isArray(step.value) ? stringArray(step.value) : [stringValue(step.value)]]);
+    case "user":
+      return callDaytonaImageMethod(image, "user", [stringValue(step.value)]);
+    default:
+      return image;
+  }
+}
+
+function callDaytonaImageMethod(image, method, args = []) {
+  if (!image || typeof image[method] !== "function") return image;
+  const result = image[method](...args.filter((arg) => arg !== undefined && arg !== ""));
+  return result || image;
+}
+
+function attachDaytonaImageMetadata(image, metadata) {
+  if (!image || typeof image !== "object") return;
+  try {
+    Object.defineProperty(image, "__loomDaytonaImage", {
+      value: jsonSafe(metadata),
+      enumerable: false,
+      configurable: true,
+    });
+  } catch {
+    // SDK images may be non-extensible; command execution still receives the SDK image object.
+  }
+}
+
+function daytonaRecordableCreateParams(params = {}) {
+  const out = { ...(params || {}) };
+  if (out.image !== undefined) {
+    out.image = daytonaImageMetadata(out.image);
+  }
+  return out;
+}
+
+function daytonaImageMetadata(image) {
+  if (image == null || typeof image === "string") return image;
+  if (image && typeof image === "object" && image.__loomDaytonaImage) return image.__loomDaytonaImage;
+  if (!image || typeof image !== "object") return image;
+  if (image.__loomType === "daytona_image" || image.base || image.dockerfile || Array.isArray(image.steps)) {
+    return jsonSafe({
+      ...(image.base ? { base: image.base } : {}),
+      ...(image.dockerfile ? { dockerfile: image.dockerfile } : {}),
+      ...(Array.isArray(image.steps) ? { steps: image.steps } : {}),
+    });
+  }
+  try {
+    if (typeof image.dockerfile === "string" && image.dockerfile) {
+      return { dockerfile: image.dockerfile };
+    }
+  } catch {
+    // Some SDK image getters can throw before the image is fully initialized.
+  }
+  return { type: "sdk-image" };
+}
+
+function daytonaSnapshotLogHandler(value) {
+  if (typeof value === "function") return value;
+  const mode = String(value || "").trim().toLowerCase();
+  if (mode === "inherit" || mode === "stdout" || mode === "console") {
+    return (chunk) => process.stdout.write(String(chunk));
+  }
+  return undefined;
+}
+
+function runtimeEnvBindings(names, env) {
+  const out = {};
+  for (const name of Array.isArray(names) ? names : []) {
+    const key = String(name || "").trim();
+    if (!key || env[key] == null) continue;
+    out[key] = String(env[key]);
+  }
+  return out;
+}
 
 function transformSource(src, file) {
   return stripTypeScriptSyntax(src, file)
@@ -88,7 +729,8 @@ function transformSource(src, file) {
     .replace(/export\s+interface\s+[A-Za-z0-9_]+\s*\{[^}]*\}/gs, "")
     .replace(/export\s+default\s+/, "module.exports.default = ")
     .replace(/export\s+const\s+([A-Za-z0-9_]+)\s*=/g, "const $1 = module.exports.$1 =")
-    .replace(/export\s+function\s+([A-Za-z0-9_]+)\s*\(/g, "function $1(");
+    .replace(/export\s+async\s+function\s+([A-Za-z0-9_]+)\s*\(/g, "module.exports.$1 = async function $1(")
+    .replace(/export\s+function\s+([A-Za-z0-9_]+)\s*\(/g, "module.exports.$1 = function $1(");
 }
 
 function stripTypeScriptSyntax(src, file) {
@@ -104,6 +746,7 @@ function stripTypeScriptFallback(src) {
     .replace(/\s+as\s+const\b/g, "")
     .replace(/\s+as\s+[A-Za-z_$][\w$]*(?:\[\])?/g, "")
     .replace(/\)\s*:\s*[^=]+=>/g, ") =>")
+    .replace(/\((\s*\{[^)]*\})\s*:\s*[^)]+?\)/g, "($1)")
     .replace(/\((\s*[A-Za-z_$][\w$]*)\??\s*:\s*[^)=,]+(\s*)\)/g, "($1$2)")
     .replace(/(\b(?:const|let|var)\s+[A-Za-z_$][\w$]*)\s*:\s*[^=;]+=/g, "$1 =");
 }
@@ -160,13 +803,35 @@ function evaluateModule(file) {
     defineTool,
     trigger,
     runtime,
+    daytona,
+    schema,
+    Type,
   };
   const record = { source: src, value: undefined, exports: module.exports };
   moduleCache.set(file, record);
   vm.runInNewContext(transformSource(src, file), sandbox, { filename: file });
-  record.value = module.exports.default;
+  record.value = module.exports.default || implicitWorkflowFromExports(file, src, module.exports);
   record.exports = module.exports;
   return record;
+}
+
+function implicitWorkflowFromExports(file, source, exports) {
+  if (!exports || typeof exports.run !== "function") return undefined;
+  return defineWorkflow({
+    name: String(exports.name || path.basename(file, path.extname(file)) || "workflow"),
+    ...(exports.route ? { route: exports.route } : {}),
+    ...(exports.runtimeProfile ? { runtimeProfile: exports.runtimeProfile } : {}),
+    ...(exports.runtime_profile ? { runtime_profile: exports.runtime_profile } : {}),
+    env: implicitWorkflowEnv(source, exports),
+    run: exports.run,
+  });
+}
+
+function implicitWorkflowEnv(source, exports) {
+  const explicit = stringArray(exports.env);
+  if (Object.prototype.hasOwnProperty.call(exports, "env")) return explicit;
+  if (/@daytona\/sdk/.test(String(source || ""))) return ["DAYTONA_API_KEY"];
+  return [];
 }
 
 function importedBindings(file, src) {
@@ -175,11 +840,36 @@ function importedBindings(file, src) {
   for (const match of src.matchAll(re)) {
     const clause = match[1].trim();
     const spec = match[2].trim();
-    if (!spec.startsWith(".")) continue;
+    if (!spec.startsWith(".")) {
+      if (spec === "@loom/runtime" || spec === "@loom/sdk" || spec === "@flue/runtime") {
+        const loomRuntime = loomRuntimeModule();
+        bindImportClause(out, clause, { value: loomRuntime, exports: loomRuntime });
+      }
+      if (spec === "@daytona/sdk") {
+        const sdk = daytonaSDKModuleFor(file);
+        bindImportClause(out, clause, { value: sdk, exports: sdk });
+      }
+      continue;
+    }
     const dep = evaluateModule(resolveRelativeImport(file, spec));
     bindImportClause(out, clause, dep);
   }
   return out;
+}
+
+function loomRuntimeModule() {
+  return {
+    Type,
+    createAgent,
+    daytona,
+    defineAgent,
+    defineAgentProfile,
+    defineTool,
+    defineWorkflow,
+    runtime,
+    schema,
+    trigger,
+  };
 }
 
 function bindImportClause(out, clause, dep) {
@@ -205,6 +895,7 @@ function bindNamedImports(out, clause, dep) {
   for (const part of inner.split(",")) {
     const item = part.trim();
     if (!item) continue;
+    if (item === "type" || item.startsWith("type ")) continue;
     const [imported, local] = item.split(/\s+as\s+/);
     const importedName = imported.trim();
     const localName = (local || imported).trim();
@@ -656,6 +1347,8 @@ function makeContext(request, workflow) {
   };
   const materializeWorkspace = async (options = {}) => {
     const params = runtimeWorkspaceLifecycleParams("materialize", options || {});
+    const daytonaReceipt = await materializeDaytonaWorkspace(request, workspace, runtimeWorkspacePolicy().runtimeWorkspace, params, options, operations);
+    if (daytonaReceipt) return daytonaReceipt;
     const providerBacked = Boolean(request.runtimeWorkspaceRoot);
     if (providerBacked) {
       fs.mkdirSync(String(request.runtimeWorkspaceRoot), { recursive: true });
@@ -716,6 +1409,40 @@ function makeContext(request, workflow) {
   const profileNameFor = (agent) => {
     if (!agent || typeof agent !== "object") return "";
     return String(agent.profileName || agent.profile_name || (isAgentProfile(agent) ? agent.name : "") || "");
+  };
+  const runtimeReferenceFor = (agent, options = {}) => {
+    const value = firstPresent(options.runtime, options.runtimeProfile, options.runtime_profile, agent && agent.runtime, agent && agent.sandbox, runtimeProfile);
+    if (!value) return null;
+    if (typeof value === "string") return { profileName: String(value) };
+    if (typeof value !== "object") return null;
+    const workspaceRuntime =
+      workspace && workspace.runtime && typeof workspace.runtime === "object"
+        ? workspace.runtime
+        : {};
+    return jsonSafe({
+      profileName: firstPresent(value.profileName, value.profile_name, value.name, workspaceRuntime.profileName),
+      provider: firstPresent(value.provider, workspaceRuntime.provider),
+      version: firstPresent(value.version, workspaceRuntime.version),
+      image: firstPresent(value.image),
+      repos: firstPresent(value.repos, workspaceRuntime.repos),
+      env: firstPresent(value.env, workspaceRuntime.env),
+      cwd: firstPresent(value.cwd, value.cwdPath, agent && agent.cwd),
+      workspace: firstPresent(value.workspace, workspaceRuntime),
+      daytona: firstPresent(value.daytona, workspaceRuntime.daytona),
+    });
+  };
+  const runtimeMetadataFor = (runtimeRef) => {
+    if (!runtimeRef || typeof runtimeRef !== "object") return {};
+    const daytona = runtimeRef.daytona && typeof runtimeRef.daytona === "object" ? runtimeRef.daytona : {};
+    return {
+      ...(runtimeRef.profileName ? { runtime_profile_name: String(runtimeRef.profileName) } : {}),
+      ...(runtimeRef.provider ? { runtime_provider: String(runtimeRef.provider) } : {}),
+      ...(runtimeRef.version ? { runtime_profile_version: String(runtimeRef.version) } : {}),
+      ...(daytona.snapshot ? { daytona_snapshot: String(daytona.snapshot) } : {}),
+      ...(daytona.target ? { daytona_target: String(daytona.target) } : {}),
+      ...(daytona.api_key_env ? { daytona_api_key_env: String(daytona.api_key_env) } : {}),
+      ...(daytona.sandbox_id ? { daytona_sandbox_id: String(daytona.sandbox_id) } : {}),
+    };
   };
   const sessionFor = (base) => async (nameOrOptions, maybeOptions) => {
     const hasName = typeof nameOrOptions === "string";
@@ -796,7 +1523,9 @@ function makeContext(request, workflow) {
           runtimeProfileName: String(runtimeWorkspace.profileName || ""),
           provider: String(runtimeWorkspace.provider || ""),
           providerWorkspaceId: String(runtimeWorkspace.providerWorkspaceId || ""),
+          cwd: String(runtimeWorkspace.cwd || ""),
           owner: String(runtimeWorkspace.owner || ""),
+          daytona: jsonSafe(runtimeWorkspace.daytona || {}),
           cleanup: jsonSafe(runtimeWorkspace.cleanup || {}),
           filesystem: jsonSafe(runtimeWorkspace.filesystem || {}),
           capabilities: jsonSafe(runtimeWorkspace.capabilities || {}),
@@ -819,6 +1548,7 @@ function makeContext(request, workflow) {
             version: runtimeProfile ? String(runtimeProfile.version || "") : "",
             repos: runtimeProfile ? jsonSafe(runtimeProfile.repos || []) : [],
             env: runtimeProfile ? jsonSafe(runtimeProfile.env || []) : [],
+            daytona: runtimeProfile ? jsonSafe(runtimeProfile.daytona || {}) : {},
             workspace: runtimeProfile ? jsonSafe(runtimeProfile.workspace || {}) : {},
             capabilities: runtimeProfile ? jsonSafe(runtimeProfile.capabilities || {}) : {},
           },
@@ -843,7 +1573,13 @@ function makeContext(request, workflow) {
     },
     init: async (agent, options = {}) => {
       const materialized = materializeAgent(agent);
-      const profileName = String(options.profileName || options.profile_name || profileNameFor(materialized));
+      const runtimeRef = runtimeReferenceFor(materialized, options);
+      const profileName = String(
+        options.profileName ||
+          options.profile_name ||
+          (runtimeRef && runtimeRef.profileName) ||
+          profileNameFor(materialized),
+      );
       const harness = String(options.name || options.harness || "default");
       const agentId = String(
         options.agentId ||
@@ -859,8 +1595,12 @@ function makeContext(request, workflow) {
         profileName,
         model: materialized.model,
         backend: materialized.backend,
+        runtime: runtimeRef || undefined,
+        runtimeProfileName: runtimeRef && runtimeRef.profileName,
+        runtimeProvider: runtimeRef && runtimeRef.provider,
         metadata: {
           ...(options.metadata || {}),
+          ...runtimeMetadataFor(runtimeRef),
           ...(materialized.name ? { source_agent_name: String(materialized.name) } : {}),
           ...(profileName ? { source_agent_profile: profileName, profile_name: profileName } : {}),
         },
@@ -1144,9 +1884,13 @@ function sessionHandle(operations, session) {
       sessionName: session.sessionName || session.session_name,
       profileName: session.profileName || session.profile_name,
       taskId: session.taskId || session.task_id || session.workItemId || session.work_item_id,
+      taskRunId: session.taskRunId || session.task_run_id,
       model: firstPresent(operationInput.model, session.model),
-      provider: firstPresent(operationInput.provider, session.provider, session.backend),
+      provider: firstPresent(operationInput.provider, session.provider, session.backend, session.runtimeProvider, session.runtime_provider),
       providerModel: firstPresent(operationInput.providerModel, operationInput.provider_model, session.providerModel, session.provider_model),
+      runtime: session.runtime,
+      runtimeProfileName: session.runtimeProfileName || session.runtime_profile_name,
+      runtimeProvider: session.runtimeProvider || session.runtime_provider,
       usage: Object.prototype.hasOwnProperty.call(operationInput, "usage") ? jsonSafe(operationInput.usage) : undefined,
       metadata: Object.prototype.hasOwnProperty.call(operationInput, "metadata") ? jsonSafe(operationInput.metadata) : undefined,
       toolCalls: Object.prototype.hasOwnProperty.call(operationInput, "toolCalls")
@@ -1158,11 +1902,12 @@ function sessionHandle(operations, session) {
       input: jsonSafe(operationInput),
       startedAt,
     };
-    const result = sessionOperationResult(operation, operationInput, params);
+    const result = (await providerSessionOperationResult(session, operation, operationInput, params, operations)) || sessionOperationResult(operation, operationInput, params);
     const completedAt = new Date().toISOString();
     params.completedAt = completedAt;
     params.durationMs = Date.parse(completedAt) - Date.parse(startedAt);
     params.status = String(result.status || "completed");
+    if (result.providerExecution) params.providerExecution = jsonSafe(result.providerExecution);
     result.completedAt = completedAt;
     result.durationMs = params.durationMs;
     params.result = jsonSafe(result);
@@ -1171,11 +1916,217 @@ function sessionHandle(operations, session) {
   };
   return {
     ...session,
-    prompt: (input) => call("prompt", input),
+    prompt: (input, options) => call("prompt", typeof input === "string" ? { ...(options || {}), prompt: input } : input),
     skill: (input) => call("skill", input),
     task: (input) => call("task", input),
-    shell: (input) => call("shell", input),
+    shell: (input, options) => call("shell", typeof input === "string" ? { ...(options || {}), command: input } : input),
     compact: (input) => call("compact", input),
+  };
+}
+
+async function providerSessionOperationResult(session, operation, input, params, operations) {
+  if (!["shell", "prompt"].includes(operation)) return null;
+  const runtimeProvider = String(session.runtimeProvider || session.runtime_provider || (session.runtime && session.runtime.provider) || "");
+  if (runtimeProvider !== "daytona") return null;
+  const runtime = session.runtime && typeof session.runtime === "object" ? session.runtime : {};
+  const daytonaData = runtime.daytona && typeof runtime.daytona === "object" ? runtime.daytona : {};
+  const sandboxId = String(firstPresent(daytonaData.sandbox_id, daytonaData.sandboxId, runtime.workspace && runtime.workspace.providerWorkspaceId) || "");
+  const sandbox = sandboxId ? daytonaSandboxRegistry.get(sandboxId) : null;
+  if (!sandbox) {
+    return sessionOperationResult(operation, {
+      ...input,
+      status: "result_unavailable",
+      result_unavailable: {
+        reason: "daytona sandbox is not available in this runner process",
+        sandboxId,
+      },
+    }, params);
+  }
+  const promptSpec = operation === "prompt" ? daytonaPromptCommand(session, input || {}) : null;
+  const command = operation === "prompt" ? promptSpec.command : String(firstPresent(input.command, input.cmd, input.prompt) || "").trim();
+  if (!command) throw new Error(`Daytona-backed session.${operation} requires ${operation === "prompt" ? "prompt" : "command"}`);
+  const commandEnv = { ...(promptSpec && promptSpec.env ? promptSpec.env : {}), ...(input.env || {}) };
+  const redactions = sensitiveRedactionValues(
+    activeWorkflowExecution && activeWorkflowExecution.request ? activeWorkflowExecution.request.env || {} : {},
+    commandEnv,
+  );
+  const startedAt = new Date().toISOString();
+  const response = await executeDaytonaCommand(sandbox, command, {
+    ...(input || {}),
+    cwd: firstPresent(input.cwd, input.workdir, promptSpec && promptSpec.cwd),
+    env: commandEnv,
+  });
+  const completedAt = new Date().toISOString();
+  const normalized = redactDaytonaCommandResult(normalizeDaytonaCommandResult(response), redactions);
+  const redactedCommand = redactSensitiveText(command, redactions);
+  params.input = redactSensitiveObject(params.input, redactions);
+  if (params.metadata) params.metadata = redactSensitiveObject(params.metadata, redactions);
+  if (params.toolCalls) params.toolCalls = redactSensitiveObject(params.toolCalls, redactions);
+  const providerParams = {
+    accepted: true,
+    status: normalized.exitCode === 0 ? "completed" : "failed",
+    provider: "daytona",
+    sandboxId,
+    sandbox_id: sandboxId,
+    command: redactedCommand,
+    backend: promptSpec && promptSpec.backend,
+    promptHash: promptSpec && promptSpec.promptHash,
+    cwd: String(firstPresent(input.cwd, input.workdir, promptSpec && promptSpec.cwd, runtime.cwd) || ""),
+    env: redactSensitiveObject(input.env || {}, redactions),
+    exitCode: normalized.exitCode,
+    result: normalized.result,
+    stdout: normalized.stdout,
+    stderr: normalized.stderr,
+    startedAt,
+    completedAt,
+    durationMs: Date.parse(completedAt) - Date.parse(startedAt),
+    realExecution: Boolean(!sandbox.__loomType),
+  };
+  operations.push({ type: operation === "prompt" ? "runtime.daytona.agent.prompt" : "runtime.daytona.sandbox.shell", params: providerParams });
+  return jsonSafe({
+    accepted: providerParams.status === "completed",
+    status: providerParams.status,
+    operation,
+    operationId: params.operationId,
+    agentId: params.agentId,
+    sessionId: params.sessionId,
+    sessionName: params.sessionName,
+    profileName: params.profileName,
+    model: params.model,
+    provider: params.provider,
+    runtime: params.runtime,
+    runtimeProfileName: params.runtimeProfileName,
+    runtimeProvider: params.runtimeProvider,
+    startedAt: params.startedAt,
+    text: normalized.text,
+    data: normalized.result,
+    result: normalized.result,
+    eventType: "agent_session_operation",
+    providerExecution: {
+      provider: "daytona",
+      sandboxId,
+      command: redactedCommand,
+      backend: promptSpec && promptSpec.backend,
+      exitCode: normalized.exitCode,
+      realExecution: providerParams.realExecution,
+    },
+  });
+}
+
+async function executeDaytonaCommand(sandbox, command, options = {}) {
+  const cwd = firstPresent(options.cwd, options.workdir);
+  const env = options.env && typeof options.env === "object" ? stringRecord(options.env) : undefined;
+  const timeout = firstPresent(options.timeout, options.timeoutSeconds, options.timeout_seconds, options.timeoutMs, options.timeout_ms);
+  if (sandbox.process && typeof sandbox.process.executeCommand === "function") {
+    try {
+      return await sandbox.process.executeCommand(command, cwd, env, timeout);
+    } catch (err) {
+      if (!daytonaCommandObjectFallbackAllowed(err)) throw err;
+      return sandbox.process.executeCommand(command, compactObject({ cwd, env, timeout }));
+    }
+  }
+  if (sandbox.process && typeof sandbox.process.exec === "function") {
+    return sandbox.process.exec(command, cwd, env, timeout);
+  }
+  if (typeof sandbox.shell === "function") {
+    return sandbox.shell(command, compactObject({ cwd, env, timeout }));
+  }
+  throw new Error("Daytona sandbox does not expose process.executeCommand, process.exec, or shell");
+}
+
+function daytonaCommandObjectFallbackAllowed(err) {
+  const message = err && err.message ? String(err.message) : String(err || "");
+  return /argument|parameter|cwd|env|timeout|object/i.test(message);
+}
+
+function daytonaPromptCommand(session, input = {}) {
+  const prompt = String(firstPresent(input.prompt, input.instruction, input.message, input.text) || "").trim();
+  if (!prompt) return { command: "", backend: "", cwd: "", env: {} };
+  const backend = normalizeBackendName(firstPresent(input.backend, input.provider, session.backend, session.provider, backendFromModel(firstPresent(input.model, session.model)), "codex"));
+  const runtime = session.runtime && typeof session.runtime === "object" ? session.runtime : {};
+  const cwd = String(firstPresent(input.cwd, input.workdir, runtime.cwd, "/workspace/project") || "/workspace/project");
+  const env = compactObject({
+    LOOM_AGENT_NAME: firstPresent(session.agentId, session.agent_id),
+    LOOM_WORKTREE_PATH: cwd,
+  });
+  const explicit = firstPresent(input.command, input.promptCommand, input.prompt_command);
+  const command = explicit ? renderPromptCommandTemplate(String(explicit), prompt, cwd, backend) : backendPromptCommand(backend, prompt, cwd);
+  return {
+    backend,
+    command,
+    cwd,
+    env,
+    promptHash: `sha256:${crypto.createHash("sha256").update(prompt).digest("hex")}`,
+  };
+}
+
+function normalizeBackendName(value) {
+  const raw = String(value || "").toLowerCase().trim();
+  if (raw === "openai" || raw === "gpt" || raw === "gpt-5" || raw === "gpt-5.5") return "codex";
+  if (raw === "anthropic" || raw === "claude-code") return "claude";
+  if (raw === "open-code" || raw === "opencode-ai") return "opencode";
+  return raw || "codex";
+}
+
+function backendFromModel(model) {
+  const raw = String(model || "").toLowerCase();
+  if (raw.startsWith("openai/") || raw.includes("gpt-")) return "codex";
+  if (raw.startsWith("anthropic/") || raw.includes("claude")) return "claude";
+  if (raw.includes("gemini")) return "gemini";
+  return "";
+}
+
+function backendPromptCommand(backend, prompt, cwd) {
+  const quotedPrompt = shellQuote(prompt);
+  switch (backend) {
+    case "claude":
+      return `claude -p --verbose --output-format stream-json --dangerously-skip-permissions ${quotedPrompt}`;
+    case "opencode":
+      return `opencode run --format json --dir ${shellQuote(cwd)} --dangerously-skip-permissions ${quotedPrompt}`;
+    case "gemini":
+      return `gemini --approval-mode=yolo -p ${quotedPrompt} -o stream-json`;
+    case "cursor":
+      return `cursor -p --output-format stream-json --force ${quotedPrompt}`;
+    case "codex":
+    default:
+      return `codex exec --json --dangerously-bypass-approvals-and-sandbox ${quotedPrompt}`;
+  }
+}
+
+function renderPromptCommandTemplate(template, prompt, cwd, backend) {
+  return template
+    .replaceAll("{prompt}", shellQuote(prompt))
+    .replaceAll("{rawPrompt}", prompt)
+    .replaceAll("{cwd}", shellQuote(cwd))
+    .replaceAll("{backend}", shellQuote(backend));
+}
+
+function shellQuote(value) {
+  return `'${String(value).replace(/'/g, `'\\''`)}'`;
+}
+
+function normalizeDaytonaCommandResult(response) {
+  const raw = response && typeof response === "object" ? response : { result: response };
+  const result = firstPresent(raw.result, raw.output, raw.stdout, raw.text, response);
+  const stdout = String(firstPresent(raw.stdout, raw.output, typeof result === "string" ? result : "") || "");
+  const stderr = String(firstPresent(raw.stderr, raw.error, "") || "");
+  const exitCode = Number(firstPresent(raw.exitCode, raw.exit_code, raw.code, 0) || 0);
+  return {
+    exitCode: Number.isFinite(exitCode) ? exitCode : 0,
+    stdout,
+    stderr,
+    text: typeof result === "string" ? result : stdout || undefined,
+    result: jsonSafe(raw),
+  };
+}
+
+function redactDaytonaCommandResult(normalized, redactions = []) {
+  return {
+    ...normalized,
+    stdout: redactSensitiveText(normalized.stdout || "", redactions),
+    stderr: redactSensitiveText(normalized.stderr || "", redactions),
+    text: normalized.text === undefined ? undefined : redactSensitiveText(String(normalized.text), redactions),
+    result: redactSensitiveObject(normalized.result, redactions),
   };
 }
 
@@ -1227,6 +2178,9 @@ function sessionOperationResult(operation, input, params) {
     model: params.model,
     provider: params.provider,
     providerModel: params.providerModel,
+    runtime: params.runtime,
+    runtimeProfileName: params.runtimeProfileName,
+    runtimeProvider: params.runtimeProvider,
     usage: params.usage,
     startedAt: params.startedAt,
     text: sessionOperationText(raw),
@@ -1348,6 +2302,101 @@ function firstPresent(...values) {
   return undefined;
 }
 
+function stringValue(value) {
+  return String(value ?? "").trim();
+}
+
+function stringArray(value) {
+  if (!Array.isArray(value)) return [];
+  return value.map((item) => stringValue(item)).filter(Boolean);
+}
+
+function flattenStringArgs(args) {
+  return args.flatMap((arg) => (Array.isArray(arg) ? flattenStringArgs(arg) : [stringValue(arg)])).filter(Boolean);
+}
+
+function stringRecord(value = {}) {
+  return Object.fromEntries(
+    Object.entries(value || {})
+      .filter(([, v]) => v != null)
+      .map(([k, v]) => [k, String(v)]),
+  );
+}
+
+function compactObject(value = {}) {
+  return Object.fromEntries(Object.entries(value || {}).filter(([, v]) => v !== undefined && v !== null && v !== ""));
+}
+
+function daytonaClientMetadata(options = {}) {
+  return compactObject({
+    apiUrl: firstPresent(options.apiUrl, options.api_url),
+    api_url: firstPresent(options.apiUrl, options.api_url),
+    apiKeyConfigured: Boolean(options.apiKey || options.api_key),
+    api_key_configured: Boolean(options.apiKey || options.api_key),
+    apiKeyEnv: firstPresent(options.apiKeyEnv, options.api_key_env),
+    api_key_env: firstPresent(options.apiKeyEnv, options.api_key_env),
+    target: firstPresent(options.target),
+  });
+}
+
+function sensitiveObjectKey(key) {
+  return /api[_-]?key|token|secret|password|authorization|credential|auth/i.test(String(key));
+}
+
+function addSensitiveValue(out, value) {
+  const text = String(value == null ? "" : value).trim();
+  if (text.length >= 4 && !out.includes(text)) out.push(text);
+}
+
+function collectSensitiveValues(value, out, force = false) {
+  if (Array.isArray(value)) {
+    for (const item of value) collectSensitiveValues(item, out, force);
+    return out;
+  }
+  if (value && typeof value === "object") {
+    for (const [key, item] of Object.entries(value)) {
+      const sensitive = force || sensitiveObjectKey(key);
+      if (item && typeof item === "object") {
+        collectSensitiveValues(item, out, sensitive);
+      } else if (sensitive) {
+        addSensitiveValue(out, item);
+      }
+    }
+    return out;
+  }
+  if (force) addSensitiveValue(out, value);
+  return out;
+}
+
+function sensitiveRedactionValues(...values) {
+  const out = [];
+  for (const value of values) collectSensitiveValues(value, out, false);
+  return out.sort((a, b) => b.length - a.length);
+}
+
+function redactSensitiveText(value, redactions = []) {
+  let text = String(value == null ? "" : value);
+  for (const secret of redactions || []) {
+    if (secret) text = text.split(secret).join("[redacted]");
+  }
+  return text;
+}
+
+function redactSensitiveObject(value, redactions = []) {
+  if (typeof value === "string") return redactSensitiveText(value, redactions);
+  if (Array.isArray(value)) return value.map((item) => redactSensitiveObject(item, redactions));
+  if (!value || typeof value !== "object") return value;
+  const out = {};
+  for (const [key, item] of Object.entries(value)) {
+    if (sensitiveObjectKey(key)) {
+      out[key] = item == null || item === "" ? item : "[redacted]";
+      continue;
+    }
+    out[key] = redactSensitiveObject(item, redactions);
+  }
+  return out;
+}
+
 function stringPresent(...values) {
   const value = firstPresent(...values);
   return value === undefined ? "" : String(value);
@@ -1404,7 +2453,14 @@ async function main() {
     throw new Error(`${sourcePath}: workflow has no run(ctx) function`);
   }
   const { ctx, logs, operations } = makeContext(request, value);
-  const result = await value.run(ctx);
+  const previousExecution = activeWorkflowExecution;
+  activeWorkflowExecution = { request, operations };
+  let result;
+  try {
+    result = await value.run(ctx);
+  } finally {
+    activeWorkflowExecution = previousExecution;
+  }
   process.stdout.write(JSON.stringify({ result: result === undefined ? null : result, logs, operations }));
 }
 

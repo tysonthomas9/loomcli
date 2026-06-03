@@ -169,7 +169,7 @@ func buildTSContextRequest(ctx context.Context, st store.Store, ib backend.Issue
 		ID:             run.RunID,
 		SourcePath:     sourcePath,
 		Input:          inputMap,
-		Env:            workflowEnvBindings(def),
+		Env:            workflowEnvBindings(def, runtimeProfile),
 		Workspace:      tsContextWorkspaceForRun(ctx, st, run, def, runtimeProfile),
 		Workflow:       workflowState,
 		RuntimeProfile: runtimeProfile,
@@ -240,18 +240,21 @@ func taskClaimProjections(taskRuns []*domain.TaskRun) []tsContextTaskClaim {
 	return out
 }
 
-func workflowEnvBindings(def *domain.WorkflowDefinition) map[string]string {
+func workflowEnvBindings(def *domain.WorkflowDefinition, runtimeProfile *tsContextRuntimeProfile) map[string]string {
 	out := map[string]string{}
-	if def == nil || len(def.Manifest) == 0 {
-		return out
+	names := []string{}
+	if def != nil && len(def.Manifest) > 0 {
+		var manifest struct {
+			Env []string `json:"env"`
+		}
+		if err := json.Unmarshal(def.Manifest, &manifest); err == nil {
+			names = append(names, manifest.Env...)
+		}
 	}
-	var manifest struct {
-		Env []string `json:"env"`
+	if runtimeProfile != nil {
+		names = append(names, runtimeProfile.Env...)
 	}
-	if err := json.Unmarshal(def.Manifest, &manifest); err != nil {
-		return out
-	}
-	for _, name := range manifest.Env {
+	for _, name := range names {
 		name = strings.TrimSpace(name)
 		if name == "" {
 			continue
@@ -320,6 +323,14 @@ func applyTSOperation(ctx context.Context, st store.Store, ib backend.IssueBacke
 		return applyRuntimeWorkspaceFileOperation(ctx, st, run, op.Params, "runtime_workspace_file_written", "workflow runtime workspace file written")
 	case "runtime.workspace.files.read":
 		return applyRuntimeWorkspaceFileOperation(ctx, st, run, op.Params, "runtime_workspace_file_read", "workflow runtime workspace file read")
+	case "runtime.daytona.sandbox.create":
+		appendRuntimeProviderEvent(ctx, st, run, op.Params, "runtime_daytona_sandbox_created", "workflow Daytona sandbox creation admitted")
+	case "runtime.daytona.sandbox.shell":
+		appendRuntimeProviderEvent(ctx, st, run, op.Params, "runtime_daytona_sandbox_shell_completed", "workflow Daytona sandbox shell command recorded")
+	case "runtime.daytona.agent.prompt":
+		appendRuntimeProviderEvent(ctx, st, run, op.Params, "runtime_daytona_agent_prompt_completed", "workflow Daytona agent prompt completed")
+	case "runtime.daytona.sandbox.lifecycle":
+		appendRuntimeProviderEvent(ctx, st, run, op.Params, "runtime_daytona_sandbox_lifecycle_requested", "workflow Daytona sandbox lifecycle request admitted")
 	case "workItems.get":
 		appendWorkItemReadEvent(ctx, st, run, op.Params)
 	case "workItems.comment":
@@ -367,6 +378,19 @@ func applyTSOperation(ctx context.Context, st store.Store, ib backend.IssueBacke
 		return fmt.Errorf("unsupported WorkflowContext operation %q", op.Type)
 	}
 	return nil
+}
+
+func appendRuntimeProviderEvent(ctx context.Context, st store.Store, run *domain.WorkflowRun, params map[string]any, eventType, message string) {
+	data := copyAnyMap(params)
+	data["workflow_run_id"] = run.RunID
+	data["visibility"] = "runtime_provider"
+	_, _ = st.RunEvents().Append(ctx, store.RunEventAppend{
+		WorkspaceKey:  run.WorkspaceKey,
+		WorkflowRunID: run.RunID,
+		Type:          eventType,
+		Message:       message,
+		Data:          mustJSON(data),
+	})
 }
 
 func setAppliedWaitCondition(applied *tsAppliedOperations, waitCondition string) {
@@ -652,7 +676,7 @@ func applyInitializeAgentSessionOperation(ctx context.Context, st store.Store, r
 		}
 	}
 	appendAgentSessionInitializedEvent(ctx, st, run, session)
-	return nil
+	return markWorkflowTaskRunPickedUpBySession(ctx, st, run, params, session)
 }
 
 func agentSessionCreateForWorkflow(run *domain.WorkflowRun, params map[string]any) (store.AgentSessionCreate, error) {
@@ -718,6 +742,37 @@ func agentSessionMetadataForWorkflow(run *domain.WorkflowRun, params map[string]
 		metadata["profile_name"] = profileName
 		if _, ok := metadata["source_agent_profile"]; !ok {
 			metadata["source_agent_profile"] = profileName
+		}
+	}
+	if runtimeProfileName := firstString(params, "runtimeProfileName", "runtime_profile_name"); runtimeProfileName != "" {
+		metadata["runtime_profile_name"] = runtimeProfileName
+		if metadata["profile_name"] == "" {
+			metadata["profile_name"] = runtimeProfileName
+		}
+	}
+	if runtimeProvider := firstString(params, "runtimeProvider", "runtime_provider"); runtimeProvider != "" {
+		metadata["runtime_provider"] = runtimeProvider
+	}
+	if runtime, ok := params["runtime"].(map[string]any); ok {
+		if runtimeProvider := firstString(runtime, "provider"); runtimeProvider != "" && metadata["runtime_provider"] == "" {
+			metadata["runtime_provider"] = runtimeProvider
+		}
+		if runtimeProfileName := firstString(runtime, "profileName", "profile_name", "name"); runtimeProfileName != "" && metadata["runtime_profile_name"] == "" {
+			metadata["runtime_profile_name"] = runtimeProfileName
+		}
+		if daytona, ok := runtime["daytona"].(map[string]any); ok {
+			if snapshot := firstString(daytona, "snapshot"); snapshot != "" {
+				metadata["daytona_snapshot"] = snapshot
+			}
+			if target := firstString(daytona, "target"); target != "" {
+				metadata["daytona_target"] = target
+			}
+			if apiKeyEnv := firstString(daytona, "api_key_env", "apiKeyEnv"); apiKeyEnv != "" {
+				metadata["daytona_api_key_env"] = apiKeyEnv
+			}
+			if sandboxID := firstString(daytona, "sandbox_id", "sandboxId"); sandboxID != "" {
+				metadata["daytona_sandbox_id"] = sandboxID
+			}
 		}
 	}
 	return metadata
@@ -792,7 +847,218 @@ func appendAgentSessionOperationEvent(ctx context.Context, st store.Store, run *
 		Message:       message,
 		Data:          mustJSON(data),
 	})
+	if err := markWorkflowTaskRunFromSessionOperation(ctx, st, run, data); err != nil {
+		return err
+	}
 	return appendAgentSessionToolCallEvents(ctx, st, run, data)
+}
+
+func markWorkflowTaskRunPickedUpBySession(ctx context.Context, st store.Store, run *domain.WorkflowRun, params map[string]any, session *domain.AgentSession) error {
+	if st == nil || st.TaskRuns() == nil || st.RunEvents() == nil || run == nil || session == nil {
+		return nil
+	}
+	taskRun, explicit, err := workflowTaskRunForSession(ctx, st, run, params)
+	if err != nil {
+		return err
+	}
+	if taskRun == nil {
+		return nil
+	}
+	if !domain.TaskRunStatusLive(taskRun.Status) {
+		if explicit {
+			return fmt.Errorf("task run %s is terminal with status %q", taskRun.TaskRunID, taskRun.Status)
+		}
+		return nil
+	}
+	now := time.Now().UTC()
+	status := domain.TaskRunRunning
+	agentID := session.AgentID
+	sessionID := session.SessionID
+	claimActor := agentID
+	claimEventID := taskRun.ClaimEventID
+	if claimEventID == "" {
+		claimEventID = "agent-session:" + sessionID
+	}
+	metadata := mergeTaskRunSessionMetadata(taskRun.Metadata, params, session)
+	if _, err := st.TaskRuns().Update(ctx, run.WorkspaceKey, taskRun.TaskRunID, store.TaskRunUpdate{
+		Status:       &status,
+		AgentID:      &agentID,
+		SessionID:    &sessionID,
+		ClaimActor:   &claimActor,
+		ClaimEventID: &claimEventID,
+		StartedAt:    &now,
+		Metadata:     &metadata,
+	}); err != nil {
+		return fmt.Errorf("mark task run %s picked up by workflow agent session %s: %w", taskRun.TaskRunID, sessionID, err)
+	}
+	_, _ = st.RunEvents().Append(ctx, store.RunEventAppend{
+		WorkspaceKey:  run.WorkspaceKey,
+		WorkflowRunID: run.RunID,
+		TaskRunID:     taskRun.TaskRunID,
+		Type:          "task_run_picked_up",
+		Message:       "workflow agent session picked up task run",
+		Data: mustJSON(compactStringMap(map[string]string{
+			"task_run_id":        taskRun.TaskRunID,
+			"work_item_id":       taskRun.WorkItemID,
+			"agent_id":           agentID,
+			"session_id":         sessionID,
+			"runtime_provider":   taskRunRuntimeProvider(params, session),
+			"daytona_sandbox_id": metadata["daytona_sandbox_id"],
+		})),
+	})
+	return nil
+}
+
+func markWorkflowTaskRunFromSessionOperation(ctx context.Context, st store.Store, run *domain.WorkflowRun, data map[string]any) error {
+	if st == nil || st.TaskRuns() == nil || st.RunEvents() == nil || run == nil {
+		return nil
+	}
+	taskRunID := firstString(data, "taskRunId", "task_run_id")
+	if taskRunID == "" {
+		return nil
+	}
+	taskRun, err := st.TaskRuns().Get(ctx, run.WorkspaceKey, taskRunID)
+	if err != nil {
+		return fmt.Errorf("load task run %s for workflow agent session operation: %w", taskRunID, err)
+	}
+	if !domain.TaskRunStatusLive(taskRun.Status) {
+		return nil
+	}
+	operation := firstString(data, "operation")
+	switch operation {
+	case "prompt", "task":
+	default:
+		return nil
+	}
+	opStatus := firstString(data, "status")
+	if opStatus == "" || opStatus == string(domain.AgentSessionOperationAdmitted) || opStatus == string(domain.AgentSessionOperationRunning) {
+		return nil
+	}
+	finishedAt := time.Now().UTC()
+	finishedAtPtr := &finishedAt
+	status := domain.TaskRunFailed
+	if opStatus == string(domain.AgentSessionOperationCompleted) {
+		status = domain.TaskRunPassed
+	}
+	errorClass := firstString(data, "errorClass", "error_class")
+	errorMessage := firstString(data, "errorMessage", "error_message")
+	metadata := mergeStringMaps(taskRun.Metadata, stringMapFromFirst(data, "metadata"))
+	if providerExecution, ok := data["providerExecution"].(map[string]any); ok {
+		if provider := firstString(providerExecution, "provider"); provider != "" {
+			metadata["provider_execution"] = provider
+		}
+		if sandboxID := firstString(providerExecution, "sandboxId", "sandbox_id"); sandboxID != "" {
+			metadata["daytona_sandbox_id"] = sandboxID
+		}
+	}
+	if _, err := st.TaskRuns().Update(ctx, run.WorkspaceKey, taskRunID, store.TaskRunUpdate{
+		Status:       &status,
+		FinishedAt:   &finishedAtPtr,
+		ErrorClass:   &errorClass,
+		ErrorMessage: &errorMessage,
+		Metadata:     &metadata,
+	}); err != nil {
+		return fmt.Errorf("mark task run %s from workflow agent session operation: %w", taskRunID, err)
+	}
+	_, _ = st.RunEvents().Append(ctx, store.RunEventAppend{
+		WorkspaceKey:  run.WorkspaceKey,
+		WorkflowRunID: run.RunID,
+		TaskRunID:     taskRunID,
+		Type:          "task_run_completed_by_session",
+		Message:       "workflow agent session completed task run",
+		Data: mustJSON(compactStringMap(map[string]string{
+			"task_run_id":        taskRunID,
+			"work_item_id":       taskRun.WorkItemID,
+			"agent_id":           firstString(data, "agent_id", "agentId"),
+			"session_id":         firstString(data, "session_id", "sessionId"),
+			"status":             string(status),
+			"operation":          operation,
+			"runtime_provider":   metadata["runtime_provider"],
+			"daytona_sandbox_id": metadata["daytona_sandbox_id"],
+		})),
+	})
+	return nil
+}
+
+func workflowTaskRunForSession(ctx context.Context, st store.Store, run *domain.WorkflowRun, params map[string]any) (*domain.TaskRun, bool, error) {
+	taskRunID := firstString(params, "taskRunId", "task_run_id")
+	if taskRunID != "" {
+		taskRun, err := st.TaskRuns().Get(ctx, run.WorkspaceKey, taskRunID)
+		if err != nil {
+			return nil, true, fmt.Errorf("load task run %s for workflow agent session: %w", taskRunID, err)
+		}
+		return taskRun, true, nil
+	}
+	taskID := firstString(params, "taskId", "task_id", "workItemId", "work_item_id")
+	if taskID == "" {
+		return nil, false, nil
+	}
+	taskRuns, err := st.TaskRuns().List(ctx, run.WorkspaceKey, store.TaskRunFilter{WorkflowRunID: run.RunID, WorkItemID: taskID, Live: true, Limit: 2})
+	if err != nil {
+		return nil, false, fmt.Errorf("list task runs for workflow agent session task %s: %w", taskID, err)
+	}
+	if len(taskRuns) != 1 {
+		return nil, false, nil
+	}
+	return taskRuns[0], false, nil
+}
+
+func mergeTaskRunSessionMetadata(existing map[string]string, params map[string]any, session *domain.AgentSession) map[string]string {
+	metadata := mergeStringMaps(existing, stringMap(params["metadata"]))
+	if session != nil {
+		metadata["agent_id"] = session.AgentID
+		metadata["session_id"] = session.SessionID
+		if session.NodeID != "" {
+			metadata["node_id"] = session.NodeID
+		}
+	}
+	if runtimeProvider := taskRunRuntimeProvider(params, session); runtimeProvider != "" {
+		metadata["runtime_provider"] = runtimeProvider
+	}
+	if runtime, ok := params["runtime"].(map[string]any); ok {
+		if daytona, ok := runtime["daytona"].(map[string]any); ok {
+			if sandboxID := firstString(daytona, "sandbox_id", "sandboxId"); sandboxID != "" {
+				metadata["daytona_sandbox_id"] = sandboxID
+			}
+		}
+	}
+	return metadata
+}
+
+func mergeStringMaps(base map[string]string, overlay map[string]string) map[string]string {
+	out := map[string]string{}
+	for k, v := range base {
+		out[k] = v
+	}
+	for k, v := range overlay {
+		out[k] = v
+	}
+	return out
+}
+
+func compactStringMap(in map[string]string) map[string]string {
+	out := map[string]string{}
+	for k, v := range in {
+		if v != "" {
+			out[k] = v
+		}
+	}
+	return out
+}
+
+func taskRunRuntimeProvider(params map[string]any, session *domain.AgentSession) string {
+	if runtimeProvider := firstString(params, "runtimeProvider", "runtime_provider"); runtimeProvider != "" {
+		return runtimeProvider
+	}
+	if runtime, ok := params["runtime"].(map[string]any); ok {
+		if runtimeProvider := firstString(runtime, "provider"); runtimeProvider != "" {
+			return runtimeProvider
+		}
+	}
+	if session != nil && session.Metadata != nil {
+		return session.Metadata["runtime_provider"]
+	}
+	return ""
 }
 
 func upsertAgentSessionOperation(ctx context.Context, st store.Store, run *domain.WorkflowRun, data map[string]any) {

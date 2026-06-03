@@ -65,10 +65,121 @@ export type RuntimeWorkspacePolicy = {
   filesystem?: RuntimeFilesystemPolicy;
 };
 
+export type DaytonaRuntimeOptions = {
+  language?: "typescript" | "javascript" | "python" | string;
+  image?: unknown;
+  snapshot?: string;
+  resources?: {
+    cpu?: number;
+    memory?: number;
+    disk?: number;
+  };
+  envVars?: Record<string, string>;
+  env_vars?: Record<string, string>;
+  autoStopInterval?: number;
+  auto_stop_interval?: number;
+  autoArchiveInterval?: number;
+  auto_archive_interval?: number;
+  autoDeleteInterval?: number;
+  auto_delete_interval?: number;
+  ephemeral?: boolean;
+  target?: string;
+  apiUrl?: string;
+  api_url?: string;
+  apiKeyEnv?: string;
+  api_key_env?: string;
+  repoUrl?: string;
+  repo_url?: string;
+  remoteUrl?: string;
+  remote_url?: string;
+  branch?: string;
+  checkoutBranch?: string;
+  checkout_branch?: string;
+  ref?: string;
+  checkoutRef?: string;
+  checkout_ref?: string;
+  gitTokenEnv?: string;
+  git_token_env?: string;
+  githubTokenEnv?: string;
+  github_token_env?: string;
+  gitAuthTokenEnv?: string;
+  git_auth_token_env?: string;
+  gitUsername?: string;
+  git_username?: string;
+  githubUsername?: string;
+  github_username?: string;
+  gitDeployKeyEnv?: string;
+  git_deploy_key_env?: string;
+  deployKeyEnv?: string;
+  deploy_key_env?: string;
+  sshKeyEnv?: string;
+  ssh_key_env?: string;
+  openaiApiKeyEnv?: string;
+  openai_api_key_env?: string;
+  codexAuthFileEnv?: string;
+  codex_auth_file_env?: string;
+  setupCommands?: string[];
+  setup_commands?: string[];
+  installCommands?: string[];
+  install_commands?: string[];
+  createTimeout?: number;
+  create_timeout?: number;
+  setupTimeout?: number;
+  setup_timeout?: number;
+  healthTimeout?: number;
+  health_timeout?: number;
+  runTimeout?: number;
+  run_timeout?: number;
+  commandTimeout?: number;
+  command_timeout?: number;
+  timeout?: number;
+  buildLogs?: "inherit" | "discard" | string;
+  build_logs?: "inherit" | "discard" | string;
+};
+
+export type DaytonaSandbox = {
+  id?: string;
+  sandboxId?: string;
+  sandbox_id?: string;
+  workspaceId?: string;
+  workspace_id?: string;
+  cwd?: string;
+  root?: string;
+  snapshot?: string;
+  target?: string;
+  daytona?: DaytonaRuntimeOptions & {
+    sandbox_id?: string;
+    sandboxId?: string;
+  };
+};
+
 export type RuntimeProfile = {
   provider: string;
   name?: string;
-  image?: string;
+  image?: string | unknown;
+  daytona?: DaytonaRuntimeOptions;
+  language?: DaytonaRuntimeOptions["language"];
+  snapshot?: string;
+  resources?: DaytonaRuntimeOptions["resources"];
+  envVars?: DaytonaRuntimeOptions["envVars"];
+  env_vars?: DaytonaRuntimeOptions["env_vars"];
+  autoStopInterval?: number;
+  auto_stop_interval?: number;
+  autoArchiveInterval?: number;
+  auto_archive_interval?: number;
+  autoDeleteInterval?: number;
+  auto_delete_interval?: number;
+  ephemeral?: boolean;
+  target?: string;
+  apiUrl?: string;
+  api_url?: string;
+  apiKeyEnv?: string;
+  api_key_env?: string;
+  createTimeout?: number;
+  create_timeout?: number;
+  timeout?: number;
+  buildLogs?: DaytonaRuntimeOptions["buildLogs"];
+  build_logs?: DaytonaRuntimeOptions["build_logs"];
   repos?: string[];
   env?: string[];
   cpu?: string;
@@ -109,6 +220,7 @@ export type AgentDefinition = {
   backend?: string;
   model?: string;
   runtime?: RuntimeProfile;
+  sandbox?: RuntimeProfile | DaytonaSandbox | Record<string, unknown>;
   instructions?: string;
   skills?: Array<string | SkillDefinition>;
   tools?: Array<string | unknown>;
@@ -136,22 +248,57 @@ export type WorkflowDefinition = {
   name: string;
   description?: string;
   builtin?: string;
+  runner?: string;
   singleton?: string | ((input: unknown) => string);
+  path?: string;
+  auth?: string;
   routePath?: string;
   routeAuth?: string;
+  expose?: {
+    http?: {
+      path?: string;
+      auth?: string;
+    };
+  };
   triggerEvent?: string;
   triggerFilter?: Record<string, string>;
   issueLabelAdded?: Record<string, string>;
   triggers?: TriggerDefinition[];
+  runtime?: string | RuntimeProfile;
+  runtimeProfile?: string;
+  runtime_profile?: string;
   tools?: Array<string | unknown>;
   repos?: string[];
   env?: string[];
+  run?: (ctx: WorkflowContext) => unknown | Promise<unknown>;
 };
 
 export type TriggerDefinition = {
   event: string;
   filter: Record<string, string>;
 };
+
+export type WorkflowAgentSession = {
+  prompt(input: string | Record<string, unknown>, options?: Record<string, unknown>): Promise<Record<string, unknown>>;
+  shell(command: string, options?: Record<string, unknown>): Promise<Record<string, unknown>>;
+  shell(input: Record<string, unknown>): Promise<Record<string, unknown>>;
+};
+
+export type WorkflowAgentHarness = {
+  session(name?: string, options?: Record<string, unknown>): Promise<WorkflowAgentSession>;
+  session(options?: Record<string, unknown>): Promise<WorkflowAgentSession>;
+};
+
+export type WorkflowContext = {
+  input: Record<string, unknown>;
+  payload: Record<string, unknown>;
+  env: Record<string, string | undefined>;
+  init(agent: AgentDefinition | (() => AgentDefinition | Record<string, unknown>) | Record<string, unknown>, options?: Record<string, unknown>): Promise<WorkflowAgentHarness>;
+};
+
+export type FlueContext = WorkflowContext;
+export type WorkflowRouteNext = () => unknown | Promise<unknown>;
+export type WorkflowRouteHandler = (ctx: WorkflowContext, next: WorkflowRouteNext) => unknown | Promise<unknown>;
 
 export type Config = {
   sourceRoot?: string;
@@ -165,10 +312,12 @@ export declare function defineSkill<T extends SkillDefinition>(skill: T): T;
 export declare function defineWorkflow<T extends WorkflowDefinition>(workflow: T): T;
 export declare function defineTool<T extends object>(tool: T): T;
 export declare function defineRuntimeProfile<T extends RuntimeProfile>(profile: T): T;
+export declare function daytona(sandbox: DaytonaSandbox | Record<string, unknown>, options?: Omit<RuntimeProfile, "provider"> & DaytonaRuntimeOptions): RuntimeProfile;
 
 export declare const runtime: {
   local(config: Omit<RuntimeProfile, "provider">): RuntimeProfile;
   podman(config: Omit<RuntimeProfile, "provider">): RuntimeProfile;
+  daytona(config: Omit<RuntimeProfile, "provider"> & DaytonaRuntimeOptions): RuntimeProfile;
   remote(config: Omit<RuntimeProfile, "provider"> & { provider?: string }): RuntimeProfile;
 };
 
@@ -188,4 +337,8 @@ export declare const Type: typeof schema;
 declare module "*.md" {
   const skill: import("@loom/runtime").SkillDefinition;
   export default skill;
+}
+
+declare module "@flue/runtime" {
+  export * from "@loom/runtime";
 }

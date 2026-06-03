@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -1497,6 +1498,939 @@ export default defineWorkflow({
 	}
 }
 
+func TestCodeDefinedWorkflowContextReadsDaytonaRuntimeMetadata(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	runtimePath := filepath.Join(root, ".loom", "runtimes", "daytona-node.ts")
+	if err := os.MkdirAll(filepath.Dir(runtimePath), 0o755); err != nil {
+		t.Fatalf("mkdir runtime dir: %v", err)
+	}
+	if err := os.WriteFile(runtimePath, []byte(`import { runtime } from '@loom/runtime';
+
+export default runtime.daytona({
+  name: 'daytona-node',
+  image: 'debian:12.9',
+  language: 'typescript',
+  snapshot: 'loom-node-dev',
+  target: 'us',
+  apiKeyEnv: 'DAYTONA_API_KEY',
+  cwd: '/workspace/project',
+  repos: ['slack-src'],
+  env: ['GITHUB_TOKEN'],
+  workspace: {
+    providerWorkspaceId: 'daytona-sandbox-ctx',
+    owner: 'loom',
+    cleanup: { mode: 'after_ttl', ttl: '6h' },
+    filesystem: { persistence: 'session', durability: 'provider', retention: '1d' },
+  },
+  capabilities: {
+    filesystem: { read: true, write: true },
+    lifecycle: { materialize: true, cleanup: true },
+  },
+});
+`), 0o644); err != nil {
+		t.Fatalf("write runtime: %v", err)
+	}
+	workflowPath := filepath.Join(root, ".loom", "workflows", "daytona-runtime.ts")
+	if err := os.MkdirAll(filepath.Dir(workflowPath), 0o755); err != nil {
+		t.Fatalf("mkdir workflow dir: %v", err)
+	}
+	if err := os.WriteFile(workflowPath, []byte(`import { defineWorkflow } from '@loom/runtime';
+
+export default defineWorkflow({
+  name: 'daytona-runtime',
+  runtimeProfile: 'daytona-node',
+  async run(ctx) {
+    const profile = await ctx.runtime.profile();
+    const workspace = await ctx.runtime.workspace();
+    return {
+      profileName: profile?.name,
+      provider: profile?.provider,
+      snapshot: profile?.daytona?.snapshot,
+      target: profile?.daytona?.target,
+      apiKeyEnv: profile?.daytona?.api_key_env,
+      workspaceProvider: workspace.runtime?.provider,
+      workspaceSnapshot: workspace.runtime?.daytona?.snapshot,
+      providerWorkspaceId: workspace.runtime?.providerWorkspaceId,
+    };
+  },
+});
+`), 0o644); err != nil {
+		t.Fatalf("write workflow: %v", err)
+	}
+	plan, err := defspkg.Load(root)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	st := memstore.New()
+	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "TSDAYTONACTX", Name: "Daytona Runtime Context"}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	if err := defspkg.Apply(ctx, st, "TSDAYTONACTX", "atlas", plan); err != nil {
+		t.Fatalf("Apply() error = %v", err)
+	}
+	run, err := CreateOrResumeRun(ctx, st, "TSDAYTONACTX", "daytona-runtime", json.RawMessage(`{}`), "atlas")
+	if err != nil {
+		t.Fatalf("CreateOrResumeRun() error = %v", err)
+	}
+	result, err := RunOnce(ctx, st, clitest.NewMockIssueBackend(), run)
+	if err != nil {
+		t.Fatalf("RunOnce() error = %v", err)
+	}
+	if result.Run == nil || result.Run.Status != domain.WorkflowRunCompleted {
+		t.Fatalf("result = %+v, want completed Daytona runtime workflow", result)
+	}
+	var data map[string]any
+	if err := json.Unmarshal(result.Run.Result, &data); err != nil {
+		t.Fatalf("decode workflow result: %v", err)
+	}
+	if data["profileName"] != "daytona-node" || data["provider"] != "daytona" ||
+		data["snapshot"] != "loom-node-dev" || data["target"] != "us" ||
+		data["apiKeyEnv"] != "DAYTONA_API_KEY" {
+		t.Fatalf("result data = %+v, want Daytona profile metadata", data)
+	}
+	if data["workspaceProvider"] != "daytona" || data["workspaceSnapshot"] != "loom-node-dev" ||
+		data["providerWorkspaceId"] != "daytona-sandbox-ctx" {
+		t.Fatalf("result data = %+v, want Daytona workspace metadata", data)
+	}
+	events, err := st.RunEvents().List(ctx, "TSDAYTONACTX", store.RunEventFilter{WorkflowRunID: run.RunID})
+	if err != nil {
+		t.Fatalf("list events: %v", err)
+	}
+	profileEvent := workflowEventDataByType(t, events, "runtime_profile_read")
+	if daytona, ok := profileEvent["daytona"].(map[string]any); !ok || daytona["snapshot"] != "loom-node-dev" {
+		t.Fatalf("profile event = %+v, want Daytona metadata evidence", profileEvent)
+	}
+	workspaceEvent := workflowEventDataByType(t, events, "runtime_workspace_read")
+	if daytona, ok := workspaceEvent["daytona"].(map[string]any); !ok || daytona["snapshot"] != "loom-node-dev" {
+		t.Fatalf("workspace event = %+v, want Daytona metadata evidence", workspaceEvent)
+	}
+}
+
+func TestCodeDefinedWorkflowAdmitsDaytonaSDKSandboxSession(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	workflowPath := filepath.Join(root, ".loom", "workflows", "daytona-sdk.ts")
+	if err := os.MkdirAll(filepath.Dir(workflowPath), 0o755); err != nil {
+		t.Fatalf("mkdir workflow dir: %v", err)
+	}
+	if err := os.WriteFile(workflowPath, []byte(`import { Daytona } from '@daytona/sdk';
+import { createAgent, daytona } from '@loom/runtime';
+
+export const route = async (_c, next) => next();
+
+export async function run({ init, payload, env }) {
+  const client = new Daytona({
+    apiKey: env.DAYTONA_API_KEY || 'test-secret',
+    apiUrl: 'https://daytona.example',
+  });
+  const sandbox = await client.create({
+    id: 'daytona-sandbox-run',
+    snapshot: 'loom-node-dev',
+    target: 'us',
+    cwd: '/workspace/project',
+    env: { DAYTONA_API_KEY: env.DAYTONA_API_KEY || 'test-secret' },
+  });
+  const setupAgent = createAgent(() => ({
+    name: 'setup-agent',
+    model: 'openai/gpt-5.5',
+    sandbox: daytona(sandbox, { name: 'daytona-setup' }),
+  }));
+  const setupHarness = await init(setupAgent, { name: 'setup' });
+  const setup = await setupHarness.session();
+  await setup.shell('git clone ' + payload.repo + ' /workspace/project');
+  await setup.shell('npm install', { cwd: '/workspace/project' });
+  await sandbox.shell('git status --short', {
+    cwd: '/workspace/project',
+    env: { GITHUB_TOKEN: 'test-secret' },
+    mockResult: { stdout: '' },
+  });
+  const worker = createAgent(() => ({
+    name: 'project-agent',
+    model: 'openai/gpt-5.5',
+    cwd: '/workspace/project',
+    sandbox: daytona(sandbox, {
+      name: 'daytona-project',
+      apiKeyEnv: 'DAYTONA_API_KEY',
+    }),
+  }));
+  const harness = await init(worker, { name: 'project' });
+  const session = await harness.session();
+  const report = await session.prompt(payload.prompt);
+  return {
+    sandboxId: sandbox.id,
+    accepted: report.accepted,
+    runtimeProvider: report.runtimeProvider,
+    runtimeProfileName: report.runtimeProfileName,
+    runtimeSandboxId: report.runtime?.daytona?.sandbox_id,
+  };
+}
+`), 0o644); err != nil {
+		t.Fatalf("write workflow: %v", err)
+	}
+	plan, err := defspkg.Load(root)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	st := memstore.New()
+	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "TSDAYTONASDK", Name: "Daytona SDK Workflow"}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	if err := defspkg.Apply(ctx, st, "TSDAYTONASDK", "atlas", plan); err != nil {
+		t.Fatalf("Apply() error = %v", err)
+	}
+	run, err := CreateOrResumeRun(ctx, st, "TSDAYTONASDK", "daytona-sdk", json.RawMessage(`{"repo":"https://example.com/repo.git","prompt":"inspect the repo"}`), "atlas")
+	if err != nil {
+		t.Fatalf("CreateOrResumeRun() error = %v", err)
+	}
+	result, err := RunOnce(ctx, st, clitest.NewMockIssueBackend(), run)
+	if err != nil {
+		t.Fatalf("RunOnce() error = %v", err)
+	}
+	if result.Run == nil || result.Run.Status != domain.WorkflowRunCompleted {
+		t.Fatalf("result = %+v, want completed Daytona SDK workflow", result)
+	}
+	var data map[string]any
+	if err := json.Unmarshal(result.Run.Result, &data); err != nil {
+		t.Fatalf("decode workflow result: %v", err)
+	}
+	if data["sandboxId"] != "daytona-sandbox-run" || data["accepted"] != true ||
+		data["runtimeProvider"] != "daytona" || data["runtimeProfileName"] != "daytona-project" ||
+		data["runtimeSandboxId"] != "daytona-sandbox-run" {
+		t.Fatalf("result data = %+v, want Daytona SDK session runtime metadata", data)
+	}
+	sessions, err := st.AgentSessions().List(ctx, "TSDAYTONASDK", store.AgentSessionFilter{AgentID: "project-agent"})
+	if err != nil {
+		t.Fatalf("list agent sessions: %v", err)
+	}
+	if len(sessions) != 1 || sessions[0].Metadata["runtime_provider"] != "daytona" ||
+		sessions[0].Metadata["runtime_profile_name"] != "daytona-project" ||
+		sessions[0].Metadata["daytona_sandbox_id"] != "daytona-sandbox-run" ||
+		sessions[0].Metadata["daytona_api_key_env"] != "DAYTONA_API_KEY" {
+		t.Fatalf("sessions = %+v, want Daytona runtime metadata", sessions)
+	}
+	events, err := st.RunEvents().List(ctx, "TSDAYTONASDK", store.RunEventFilter{WorkflowRunID: run.RunID})
+	if err != nil {
+		t.Fatalf("list events: %v", err)
+	}
+	createEvent := workflowEventDataByType(t, events, "runtime_daytona_sandbox_created")
+	if createEvent["sandboxId"] != "daytona-sandbox-run" || createEvent["apiKeyConfigured"] != true {
+		t.Fatalf("create event = %+v, want Daytona sandbox admission metadata", createEvent)
+	}
+	clientEvent, ok := createEvent["client"].(map[string]any)
+	if !ok || clientEvent["apiKeyConfigured"] != true || clientEvent["apiKey"] != nil {
+		t.Fatalf("create event client = %+v, want redacted client metadata", createEvent["client"])
+	}
+	optionsEvent, ok := createEvent["options"].(map[string]any)
+	if !ok {
+		t.Fatalf("create event options = %+v, want options metadata", createEvent["options"])
+	}
+	envEvent, ok := optionsEvent["env"].(map[string]any)
+	if !ok || envEvent["DAYTONA_API_KEY"] != "[redacted]" {
+		t.Fatalf("create event options env = %+v, want redacted env", optionsEvent["env"])
+	}
+	shellCommands := workflowEventStringFieldsByType(t, events, "runtime_daytona_sandbox_shell_completed", "command")
+	if len(shellCommands) != 3 || shellCommands[0] != "git clone https://example.com/repo.git /workspace/project" ||
+		shellCommands[1] != "npm install" || shellCommands[2] != "git status --short" {
+		t.Fatalf("shell commands = %+v, want setup and sandbox shell commands recorded", shellCommands)
+	}
+	promptEvent := workflowEventDataByOperation(t, events, "prompt")
+	if promptEvent["runtimeProvider"] != "daytona" || promptEvent["runtimeProfileName"] != "daytona-project" {
+		t.Fatalf("prompt event = %+v, want Daytona runtime operation metadata", promptEvent)
+	}
+	setupShellEvent := workflowEventDataByOperation(t, events, "shell")
+	if setupShellEvent["runtimeProvider"] != "daytona" || setupShellEvent["status"] != "completed" {
+		t.Fatalf("setup shell event = %+v, want Daytona-backed shell operation", setupShellEvent)
+	}
+}
+
+func TestCodeDefinedWorkflowUsesInstalledDaytonaSDKForShell(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	writeFakeDaytonaSDK(t, root)
+	workflowPath := filepath.Join(root, ".loom", "workflows", "daytona-real-sdk.ts")
+	if err := os.MkdirAll(filepath.Dir(workflowPath), 0o755); err != nil {
+		t.Fatalf("mkdir workflow dir: %v", err)
+	}
+	if err := os.WriteFile(workflowPath, []byte(`import { Daytona } from '@daytona/sdk';
+import { createAgent, daytona } from '@loom/runtime';
+
+export async function run({ init, env }) {
+  const client = new Daytona({ apiKey: env.DAYTONA_API_KEY || 'test-secret' });
+  const sandbox = await client.create({
+    id: 'real-sdk-sandbox',
+    cwd: '/workspace/project',
+    snapshot: 'loom-real-sdk',
+    target: 'us',
+  });
+  const worker = createAgent(() => ({
+    name: 'real-sdk-agent',
+    sandbox: daytona(sandbox, { name: 'real-sdk-runtime' }),
+  }));
+  const harness = await init(worker, { name: 'real-sdk' });
+  const session = await harness.session();
+  const result = await session.shell('echo hello', { cwd: '/workspace/project' });
+  return {
+    status: result.status,
+    text: result.text,
+    runtimeProvider: result.runtimeProvider,
+    realExecution: result.providerExecution?.realExecution,
+  };
+}
+`), 0o644); err != nil {
+		t.Fatalf("write workflow: %v", err)
+	}
+	plan, err := defspkg.Load(root)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	st := memstore.New()
+	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "TSDAYTONAREALSDK", Name: "Daytona Real SDK Workflow"}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	if err := defspkg.Apply(ctx, st, "TSDAYTONAREALSDK", "atlas", plan); err != nil {
+		t.Fatalf("Apply() error = %v", err)
+	}
+	run, err := CreateOrResumeRun(ctx, st, "TSDAYTONAREALSDK", "daytona-real-sdk", json.RawMessage(`{}`), "atlas")
+	if err != nil {
+		t.Fatalf("CreateOrResumeRun() error = %v", err)
+	}
+	result, err := RunOnce(ctx, st, clitest.NewMockIssueBackend(), run)
+	if err != nil {
+		t.Fatalf("RunOnce() error = %v", err)
+	}
+	if result.Run == nil || result.Run.Status != domain.WorkflowRunCompleted {
+		t.Fatalf("result = %+v, want completed real Daytona SDK workflow", result)
+	}
+	var data map[string]any
+	if err := json.Unmarshal(result.Run.Result, &data); err != nil {
+		t.Fatalf("decode workflow result: %v", err)
+	}
+	if data["status"] != "completed" || data["runtimeProvider"] != "daytona" ||
+		data["realExecution"] != true || data["text"] != "real result: echo hello @ /workspace/project" {
+		t.Fatalf("result data = %+v, want real SDK Daytona shell execution", data)
+	}
+	events, err := st.RunEvents().List(ctx, "TSDAYTONAREALSDK", store.RunEventFilter{WorkflowRunID: run.RunID})
+	if err != nil {
+		t.Fatalf("list events: %v", err)
+	}
+	createEvent := workflowEventDataByType(t, events, "runtime_daytona_sandbox_created")
+	if createEvent["realSDK"] != true || createEvent["sandboxId"] != "real-sdk-sandbox" {
+		t.Fatalf("create event = %+v, want installed SDK sandbox evidence", createEvent)
+	}
+	shellEvent := workflowEventDataByType(t, events, "runtime_daytona_sandbox_shell_completed")
+	if shellEvent["realExecution"] != true || shellEvent["command"] != "echo hello" || shellEvent["stdout"] != "real stdout: echo hello" {
+		t.Fatalf("shell event = %+v, want installed SDK shell evidence", shellEvent)
+	}
+	operationEvent := workflowEventDataByOperation(t, events, "shell")
+	providerExecution, ok := operationEvent["providerExecution"].(map[string]any)
+	if !ok || providerExecution["realExecution"] != true || providerExecution["sandboxId"] != "real-sdk-sandbox" {
+		t.Fatalf("operation event = %+v, want real SDK provider execution evidence", operationEvent)
+	}
+}
+
+func TestCodeDefinedWorkflowRunsDaytonaPromptWithInstalledSDK(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	writeFakeDaytonaSDK(t, root)
+	workflowPath := filepath.Join(root, ".loom", "workflows", "daytona-prompt.ts")
+	if err := os.MkdirAll(filepath.Dir(workflowPath), 0o755); err != nil {
+		t.Fatalf("mkdir workflow dir: %v", err)
+	}
+	connectorPath := filepath.Join(root, ".loom", "connectors", "daytona.ts")
+	if err := os.MkdirAll(filepath.Dir(connectorPath), 0o755); err != nil {
+		t.Fatalf("mkdir connector dir: %v", err)
+	}
+	if err := os.WriteFile(connectorPath, []byte(`import { daytona as loomDaytona } from '@flue/runtime';
+
+export function daytona(sandbox, options = {}) {
+  return loomDaytona(sandbox, options);
+}
+`), 0o644); err != nil {
+		t.Fatalf("write connector: %v", err)
+	}
+	if err := os.WriteFile(workflowPath, []byte(`import {
+  Type,
+  createAgent,
+  defineTool,
+  type FlueContext,
+  type WorkflowRouteHandler,
+} from '@flue/runtime';
+import { Daytona } from '@daytona/sdk';
+import { daytona } from '../connectors/daytona';
+
+export const route: WorkflowRouteHandler = async (_c, next) => next();
+
+export const inspectRepo = defineTool({
+  name: 'inspect_repo',
+  description: 'Inspect a repository inside the Daytona sandbox',
+  parameters: {
+    prompt: Type.string(),
+  },
+});
+
+export async function run({ init, payload }: FlueContext) {
+  const client = new Daytona();
+  const sandbox = await client.create({
+    id: 'prompt-sdk-sandbox',
+    cwd: '/workspace/project',
+    snapshot: 'loom-prompt-sdk',
+    target: 'us',
+  });
+  const worker = createAgent(() => ({
+    name: 'prompt-agent',
+    model: 'openai/gpt-5.5',
+    sandbox: daytona(sandbox, { name: 'prompt-runtime' }),
+  }));
+  const harness = await init(worker, { name: 'prompt' });
+  const session = await harness.session();
+  const result = await session.prompt(payload.prompt);
+  return {
+    status: result.status,
+    text: result.text,
+    runtimeProvider: result.runtimeProvider,
+    backend: result.providerExecution?.backend,
+    realExecution: result.providerExecution?.realExecution,
+  };
+}
+`), 0o644); err != nil {
+		t.Fatalf("write workflow: %v", err)
+	}
+	plan, err := defspkg.Load(root)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	st := memstore.New()
+	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "TSDAYTONAPROMPT", Name: "Daytona Prompt Workflow"}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	if err := defspkg.Apply(ctx, st, "TSDAYTONAPROMPT", "atlas", plan); err != nil {
+		t.Fatalf("Apply() error = %v", err)
+	}
+	run, err := CreateOrResumeRun(ctx, st, "TSDAYTONAPROMPT", "daytona-prompt", json.RawMessage(`{"prompt":"inspect the repo"}`), "atlas")
+	if err != nil {
+		t.Fatalf("CreateOrResumeRun() error = %v", err)
+	}
+	result, err := RunOnce(ctx, st, clitest.NewMockIssueBackend(), run)
+	if err != nil {
+		t.Fatalf("RunOnce() error = %v", err)
+	}
+	if result.Run == nil || result.Run.Status != domain.WorkflowRunCompleted {
+		t.Fatalf("result = %+v, want completed Daytona prompt workflow", result)
+	}
+	var data map[string]any
+	if err := json.Unmarshal(result.Run.Result, &data); err != nil {
+		t.Fatalf("decode workflow result: %v", err)
+	}
+	if data["status"] != "completed" || data["runtimeProvider"] != "daytona" ||
+		data["backend"] != "codex" || data["realExecution"] != true {
+		t.Fatalf("result data = %+v, want real Daytona prompt execution", data)
+	}
+	if text, ok := data["text"].(string); !ok || !strings.Contains(text, "codex exec --json") || !strings.Contains(text, "inspect the repo") {
+		t.Fatalf("result text = %q, want remote Codex command output", data["text"])
+	}
+	events, err := st.RunEvents().List(ctx, "TSDAYTONAPROMPT", store.RunEventFilter{WorkflowRunID: run.RunID})
+	if err != nil {
+		t.Fatalf("list events: %v", err)
+	}
+	promptExecEvent := workflowEventDataByType(t, events, "runtime_daytona_agent_prompt_completed")
+	if promptExecEvent["backend"] != "codex" || promptExecEvent["sandboxId"] != "prompt-sdk-sandbox" ||
+		promptExecEvent["realExecution"] != true || promptExecEvent["promptHash"] == "" {
+		t.Fatalf("prompt exec event = %+v, want Daytona prompt execution evidence", promptExecEvent)
+	}
+	command, _ := promptExecEvent["command"].(string)
+	if !strings.Contains(command, "codex exec --json") || !strings.Contains(command, "inspect the repo") {
+		t.Fatalf("prompt command = %q, want Codex remote command", command)
+	}
+	operationEvent := workflowEventDataByOperation(t, events, "prompt")
+	providerExecution, ok := operationEvent["providerExecution"].(map[string]any)
+	if !ok || providerExecution["backend"] != "codex" || providerExecution["realExecution"] != true ||
+		providerExecution["sandboxId"] != "prompt-sdk-sandbox" {
+		t.Fatalf("operation event = %+v, want Daytona provider prompt execution evidence", operationEvent)
+	}
+}
+
+func TestCodeDefinedWorkflowDaytonaSessionOutputRedactsSecrets(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	writeFakeDaytonaSDK(t, root)
+	t.Setenv("DAYTONA_API_KEY", "daytona-redact-secret")
+	t.Setenv("OPENAI_API_KEY", "sk-daytona-output-secret")
+
+	workflowPath := filepath.Join(root, ".loom", "workflows", "daytona-output-redaction.ts")
+	if err := os.MkdirAll(filepath.Dir(workflowPath), 0o755); err != nil {
+		t.Fatalf("mkdir workflow dir: %v", err)
+	}
+	if err := os.WriteFile(workflowPath, []byte(`import { createAgent, defineWorkflow, daytona } from '@loom/runtime';
+import { Daytona } from '@daytona/sdk';
+
+export default defineWorkflow({
+  name: 'daytona-output-redaction',
+  env: ['DAYTONA_API_KEY', 'OPENAI_API_KEY'],
+  async run(ctx) {
+    const client = new Daytona({ apiKey: ctx.env.DAYTONA_API_KEY });
+    const sandbox = await client.create({ id: 'redact-output-sandbox' });
+    const worker = createAgent(() => ({
+      name: 'redact-worker',
+      model: 'openai/gpt-5.5',
+      sandbox: daytona(sandbox, { name: 'redact-runtime', cwd: '/workspace/project' }),
+    }));
+    const harness = await ctx.init(worker, { name: 'redact' });
+    const session = await harness.session();
+    const result = await session.shell({
+      command: 'leak-secret ' + ctx.env.OPENAI_API_KEY,
+      env: { OPENAI_API_KEY: ctx.env.OPENAI_API_KEY },
+      metadata: { secret_note: ctx.env.OPENAI_API_KEY },
+    });
+    return {
+      status: result.status,
+      text: result.text,
+      result: result.result,
+      providerExecution: result.providerExecution,
+    };
+  },
+});
+`), 0o644); err != nil {
+		t.Fatalf("write workflow: %v", err)
+	}
+	plan, err := defspkg.Load(root)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	st := memstore.New()
+	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "TSDAYTONAREDACT", Name: "Daytona Output Redaction"}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	if err := defspkg.Apply(ctx, st, "TSDAYTONAREDACT", "atlas", plan); err != nil {
+		t.Fatalf("Apply() error = %v", err)
+	}
+	run, err := CreateOrResumeRun(ctx, st, "TSDAYTONAREDACT", "daytona-output-redaction", json.RawMessage(`{}`), "atlas")
+	if err != nil {
+		t.Fatalf("CreateOrResumeRun() error = %v", err)
+	}
+	result, err := RunOnce(ctx, st, clitest.NewMockIssueBackend(), run)
+	if err != nil {
+		t.Fatalf("RunOnce() error = %v", err)
+	}
+	if result.Run == nil || result.Run.Status != domain.WorkflowRunCompleted {
+		t.Fatalf("result = %+v, want completed Daytona redaction workflow", result)
+	}
+	secret := "sk-daytona-output-secret"
+	if strings.Contains(string(result.Run.Result), secret) {
+		t.Fatalf("workflow result leaked secret: %s", result.Run.Result)
+	}
+	if !strings.Contains(string(result.Run.Result), "[redacted]") {
+		t.Fatalf("workflow result = %s, want redacted marker", result.Run.Result)
+	}
+	events, err := st.RunEvents().List(ctx, "TSDAYTONAREDACT", store.RunEventFilter{WorkflowRunID: run.RunID})
+	if err != nil {
+		t.Fatalf("list events: %v", err)
+	}
+	for _, event := range events {
+		if event != nil && strings.Contains(string(event.Data), secret) {
+			t.Fatalf("event %s leaked secret: %s", event.Type, event.Data)
+		}
+	}
+	shellExecEvent := workflowEventDataByType(t, events, "runtime_daytona_sandbox_shell_completed")
+	if fmt.Sprint(shellExecEvent["stdout"]) == "" || !strings.Contains(fmt.Sprint(shellExecEvent["stdout"]), "[redacted]") {
+		t.Fatalf("shell exec event = %+v, want redacted stdout", shellExecEvent)
+	}
+	operationEvent := workflowEventDataByOperation(t, events, "shell")
+	if strings.Contains(fmt.Sprint(operationEvent["input"]), secret) ||
+		strings.Contains(fmt.Sprint(operationEvent["result"]), secret) ||
+		strings.Contains(fmt.Sprint(operationEvent["metadata"]), secret) {
+		t.Fatalf("operation event leaked secret: %+v", operationEvent)
+	}
+	sessionOps, err := st.AgentSessionOperations().List(ctx, "TSDAYTONAREDACT", store.AgentSessionOperationFilter{WorkflowRunID: run.RunID})
+	if err != nil {
+		t.Fatalf("list session ops: %v", err)
+	}
+	if len(sessionOps) != 1 {
+		t.Fatalf("session ops = %d, want 1", len(sessionOps))
+	}
+	if strings.Contains(string(sessionOps[0].Input), secret) ||
+		strings.Contains(string(sessionOps[0].Result), secret) ||
+		strings.Contains(fmt.Sprint(sessionOps[0].Metadata), secret) {
+		t.Fatalf("session op leaked secret: %+v", sessionOps[0])
+	}
+}
+
+func TestCodeDefinedWorkflowDaytonaAgentPicksUpTaskRun(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	writeFakeDaytonaSDK(t, root)
+	t.Setenv("DAYTONA_API_KEY", "task-pickup-secret")
+
+	workflowPath := filepath.Join(root, ".loom", "workflows", "daytona-task-pickup.ts")
+	if err := os.MkdirAll(filepath.Dir(workflowPath), 0o755); err != nil {
+		t.Fatalf("mkdir workflow dir: %v", err)
+	}
+	if err := os.WriteFile(workflowPath, []byte(`import { createAgent, defineWorkflow, daytona } from '@loom/runtime';
+import { Daytona } from '@daytona/sdk';
+
+export default defineWorkflow({
+  name: 'daytona-task-pickup',
+  async run(ctx) {
+    const taskId = String(ctx.input.taskId || '');
+    const [taskRun] = await ctx.taskRuns.list({ workItemId: taskId });
+    if (!taskRun) throw new Error('expected seeded task run');
+
+    const client = new Daytona({ apiKey: ctx.env.DAYTONA_API_KEY });
+    const sandbox = await client.create({
+      id: 'task-pickup-sandbox',
+      cwd: '/workspace/project',
+      snapshot: 'loom-task-pickup',
+      target: 'us',
+    });
+    const worker = createAgent(() => ({
+      name: 'daytona-worker',
+      model: 'openai/gpt-5.5',
+      sandbox: daytona(sandbox, { name: 'daytona-task-runtime', cwd: '/workspace/project' }),
+    }));
+    const harness = await ctx.init(worker, { name: 'daytona-task' });
+    const session = await harness.session('pickup', {
+      taskId,
+      taskRunId: taskRun.task_run_id,
+      metadata: { purpose: 'task-pickup-proof' },
+    });
+    const result = await session.prompt('Pick up ' + taskId);
+    return {
+      status: result.status,
+      taskRunId: taskRun.task_run_id,
+      runtimeProvider: result.runtimeProvider,
+      sandboxId: result.providerExecution?.sandboxId,
+      command: result.providerExecution?.command,
+    };
+  },
+});
+`), 0o644); err != nil {
+		t.Fatalf("write workflow: %v", err)
+	}
+	plan, err := defspkg.Load(root)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	st := memstore.New()
+	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "TSDAYTONATASK", Name: "Daytona Task Pickup Workflow"}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	if err := defspkg.Apply(ctx, st, "TSDAYTONATASK", "atlas", plan); err != nil {
+		t.Fatalf("Apply() error = %v", err)
+	}
+	run, err := CreateOrResumeRun(ctx, st, "TSDAYTONATASK", "daytona-task-pickup", json.RawMessage(`{"taskId":"TASK-DAYTONA-1"}`), "atlas")
+	if err != nil {
+		t.Fatalf("CreateOrResumeRun() error = %v", err)
+	}
+	taskRun, err := st.TaskRuns().Ensure(ctx, store.TaskRunEnsure{
+		WorkspaceKey:   "TSDAYTONATASK",
+		WorkflowRunID:  run.RunID,
+		WorkItemID:     "TASK-DAYTONA-1",
+		RoleName:       "task",
+		IdempotencyKey: "seed:TASK-DAYTONA-1",
+		Status:         domain.TaskRunQueued,
+	})
+	if err != nil {
+		t.Fatalf("seed task run: %v", err)
+	}
+	result, err := RunOnce(ctx, st, clitest.NewMockIssueBackend(), run)
+	if err != nil {
+		t.Fatalf("RunOnce() error = %v", err)
+	}
+	if result.Run == nil || result.Run.Status != domain.WorkflowRunCompleted {
+		t.Fatalf("result = %+v, want completed Daytona task-pickup workflow", result)
+	}
+	var output map[string]any
+	if err := json.Unmarshal(result.Run.Result, &output); err != nil {
+		t.Fatalf("decode result: %v", err)
+	}
+	if output["status"] != "completed" || output["runtimeProvider"] != "daytona" ||
+		output["taskRunId"] != taskRun.TaskRunID || output["sandboxId"] != "task-pickup-sandbox" {
+		t.Fatalf("output = %+v, want Daytona task pickup result", output)
+	}
+	updated, err := st.TaskRuns().Get(ctx, "TSDAYTONATASK", taskRun.TaskRunID)
+	if err != nil {
+		t.Fatalf("get updated task run: %v", err)
+	}
+	if updated.Status != domain.TaskRunPassed || updated.AgentID != "daytona-worker" ||
+		updated.ClaimActor != "daytona-worker" || updated.SessionID == "" ||
+		updated.Metadata["runtime_provider"] != "daytona" ||
+		updated.Metadata["daytona_sandbox_id"] != "task-pickup-sandbox" {
+		t.Fatalf("task run = %+v, want passed task claimed by Daytona session", updated)
+	}
+	sessionOps, err := st.AgentSessionOperations().List(ctx, "TSDAYTONATASK", store.AgentSessionOperationFilter{TaskRunID: taskRun.TaskRunID})
+	if err != nil {
+		t.Fatalf("list session ops: %v", err)
+	}
+	if len(sessionOps) != 1 || sessionOps[0].Status != domain.AgentSessionOperationCompleted ||
+		sessionOps[0].Provider != "daytona" || sessionOps[0].TaskID != "TASK-DAYTONA-1" {
+		t.Fatalf("session ops = %+v, want completed Daytona operation for task run", sessionOps)
+	}
+	events, err := st.RunEvents().List(ctx, "TSDAYTONATASK", store.RunEventFilter{WorkflowRunID: run.RunID})
+	if err != nil {
+		t.Fatalf("list events: %v", err)
+	}
+	if !hasWorkflowEvent(events, "runtime_daytona_agent_prompt_completed") ||
+		!hasWorkflowEvent(events, "task_run_picked_up") ||
+		!hasWorkflowEvent(events, "task_run_completed_by_session") {
+		t.Fatalf("events = %+v, want Daytona prompt plus task pickup/completion evidence", events)
+	}
+	pickupEvent := workflowEventDataByType(t, events, "task_run_picked_up")
+	if pickupEvent["task_run_id"] != taskRun.TaskRunID || pickupEvent["agent_id"] != "daytona-worker" ||
+		pickupEvent["runtime_provider"] != "daytona" ||
+		pickupEvent["daytona_sandbox_id"] != "task-pickup-sandbox" {
+		t.Fatalf("pickup event = %+v, want Daytona task-run pickup evidence", pickupEvent)
+	}
+	completedEvent := workflowEventDataByType(t, events, "task_run_completed_by_session")
+	if completedEvent["task_run_id"] != taskRun.TaskRunID || completedEvent["runtime_provider"] != "daytona" ||
+		completedEvent["daytona_sandbox_id"] != "task-pickup-sandbox" {
+		t.Fatalf("completed event = %+v, want Daytona task-run completion evidence", completedEvent)
+	}
+}
+
+func TestCodeDefinedWorkflowRunsFlueDaytonaExampleWithInstalledSDK(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	writeFakeDaytonaSDK(t, root)
+	t.Setenv("DAYTONA_API_KEY", "flue-secret")
+
+	connectorPath := filepath.Join(root, ".flue", "connectors", "daytona.ts")
+	if err := os.MkdirAll(filepath.Dir(connectorPath), 0o755); err != nil {
+		t.Fatalf("mkdir connector dir: %v", err)
+	}
+	if err := os.WriteFile(connectorPath, []byte(`import { daytona as loomDaytona } from '@flue/runtime';
+
+export function daytona(sandbox, options = {}) {
+  return loomDaytona(sandbox, options);
+}
+`), 0o644); err != nil {
+		t.Fatalf("write connector: %v", err)
+	}
+
+	workflowPath := filepath.Join(root, ".flue", "workflows", "code.ts")
+	if err := os.MkdirAll(filepath.Dir(workflowPath), 0o755); err != nil {
+		t.Fatalf("mkdir workflow dir: %v", err)
+	}
+	if err := os.WriteFile(workflowPath, []byte(`import {
+  createAgent,
+  type FlueContext,
+  type WorkflowRouteHandler,
+} from '@flue/runtime';
+import { Daytona } from '@daytona/sdk';
+import { daytona } from '../connectors/daytona';
+
+export const route: WorkflowRouteHandler = async (_c, next) => next();
+
+export async function run({ init, payload, env }: FlueContext) {
+  const client = new Daytona({ apiKey: env.DAYTONA_API_KEY });
+  const sandbox = await client.create({
+    id: 'flue-example-sandbox',
+    cwd: '/workspace',
+    snapshot: 'loom-flue-example',
+    target: 'us',
+  });
+  const setupAgent = createAgent(() => ({
+    sandbox: daytona(sandbox),
+    model: 'openai/gpt-5.5',
+  }));
+  const setupHarness = await init(setupAgent, { name: 'setup' });
+  const setup = await setupHarness.session();
+  await setup.shell(`+"`git clone ${payload.repo} /workspace/project`"+`);
+
+  const projectAgent = createAgent(() => ({
+    sandbox: daytona(sandbox, { cwd: '/workspace/project' }),
+    model: 'openai/gpt-5.5',
+  }));
+  const projectHarness = await init(projectAgent, { name: 'project' });
+  const session = await projectHarness.session();
+  return await session.prompt(payload.prompt);
+}
+`), 0o644); err != nil {
+		t.Fatalf("write workflow: %v", err)
+	}
+
+	plan, err := defspkg.Load(root)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	workflow, ok := defspkg.FindWorkflow(plan, "code")
+	if !ok {
+		t.Fatalf("FindWorkflow() did not find .flue example workflow")
+	}
+	if !strings.Contains(filepath.ToSlash(workflow.SourcePath), "/.flue/workflows/code.ts") ||
+		!containsWorkflowString(workflow.Env, "DAYTONA_API_KEY") {
+		t.Fatalf("workflow = %+v, want .flue source and implicit Daytona API key env grant", workflow)
+	}
+
+	st := memstore.New()
+	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "TSFLUEDAYTONA", Name: "Flue Daytona Example Workflow"}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	if err := defspkg.Apply(ctx, st, "TSFLUEDAYTONA", "atlas", plan); err != nil {
+		t.Fatalf("Apply() error = %v", err)
+	}
+	run, err := CreateOrResumeRun(ctx, st, "TSFLUEDAYTONA", "code", json.RawMessage(`{"repo":"https://example.com/repo.git","prompt":"inspect the repo"}`), "atlas")
+	if err != nil {
+		t.Fatalf("CreateOrResumeRun() error = %v", err)
+	}
+	result, err := RunOnce(ctx, st, clitest.NewMockIssueBackend(), run)
+	if err != nil {
+		t.Fatalf("RunOnce() error = %v", err)
+	}
+	if result.Run == nil || result.Run.Status != domain.WorkflowRunCompleted {
+		t.Fatalf("result = %+v, want completed .flue Daytona example workflow", result)
+	}
+	var data map[string]any
+	if err := json.Unmarshal(result.Run.Result, &data); err != nil {
+		t.Fatalf("decode workflow result: %v", err)
+	}
+	if data["status"] != "completed" || data["runtimeProvider"] != "daytona" {
+		t.Fatalf("result data = %+v, want Daytona prompt result from copied .flue example", data)
+	}
+	if text, ok := data["text"].(string); !ok || !strings.Contains(text, "codex exec --json") || !strings.Contains(text, "inspect the repo") {
+		t.Fatalf("result text = %q, want remote Codex command output", data["text"])
+	}
+
+	events, err := st.RunEvents().List(ctx, "TSFLUEDAYTONA", store.RunEventFilter{WorkflowRunID: run.RunID})
+	if err != nil {
+		t.Fatalf("list events: %v", err)
+	}
+	createEvent := workflowEventDataByType(t, events, "runtime_daytona_sandbox_created")
+	if createEvent["sandboxId"] != "flue-example-sandbox" || createEvent["apiKeyConfigured"] != true {
+		t.Fatalf("create event = %+v, want .flue Daytona sandbox creation with configured API key", createEvent)
+	}
+	shellCommands := workflowEventStringFieldsByType(t, events, "runtime_daytona_sandbox_shell_completed", "command")
+	if len(shellCommands) != 1 || !strings.Contains(shellCommands[0], "git clone https://example.com/repo.git /workspace/project") {
+		t.Fatalf("shell commands = %+v, want setup clone command in Daytona sandbox", shellCommands)
+	}
+	promptExecEvent := workflowEventDataByType(t, events, "runtime_daytona_agent_prompt_completed")
+	if promptExecEvent["sandboxId"] != "flue-example-sandbox" || promptExecEvent["backend"] != "codex" ||
+		promptExecEvent["realExecution"] != true {
+		t.Fatalf("prompt exec event = %+v, want project prompt execution in Daytona sandbox", promptExecEvent)
+	}
+}
+
+func TestCodeDefinedWorkflowMaterializesDaytonaRuntimeProfileWithInstalledSDK(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	writeFakeDaytonaSDK(t, root)
+	t.Setenv("DAYTONA_API_KEY", "profile-secret")
+	runtimePath := filepath.Join(root, ".loom", "runtimes", "daytona-profile.ts")
+	if err := os.MkdirAll(filepath.Dir(runtimePath), 0o755); err != nil {
+		t.Fatalf("mkdir runtime dir: %v", err)
+	}
+	if err := os.WriteFile(runtimePath, []byte(`import { Image } from '@daytona/sdk';
+import { runtime } from '@loom/runtime';
+
+export default runtime.daytona({
+  name: 'daytona-profile',
+  language: 'typescript',
+  image: Image.debianSlim('3.12')
+    .runCommands('apt-get update', 'npm install -g corepack')
+    .workdir('/workspace/project'),
+  snapshot: 'loom-profile-snapshot',
+  target: 'us',
+  apiKeyEnv: 'DAYTONA_API_KEY',
+  cwd: '/workspace/project',
+  env: ['DAYTONA_API_KEY', 'GITHUB_TOKEN'],
+  resources: { cpu: 2, memory: 4, disk: 8 },
+  autoStopInterval: 30,
+});
+`), 0o644); err != nil {
+		t.Fatalf("write runtime: %v", err)
+	}
+	workflowPath := filepath.Join(root, ".loom", "workflows", "daytona-materialize.ts")
+	if err := os.MkdirAll(filepath.Dir(workflowPath), 0o755); err != nil {
+		t.Fatalf("mkdir workflow dir: %v", err)
+	}
+	if err := os.WriteFile(workflowPath, []byte(`import { defineWorkflow } from '@loom/runtime';
+
+export default defineWorkflow({
+  name: 'daytona-materialize',
+  runtimeProfile: 'daytona-profile',
+  async run(ctx) {
+    const receipt = await ctx.runtime.materializeWorkspace();
+    const workspace = await ctx.runtime.workspace();
+    return {
+      accepted: receipt.accepted,
+      materialized: receipt.materialized,
+      providerBacked: receipt.providerBacked,
+      realSDK: receipt.realSDK,
+      providerWorkspaceId: receipt.providerWorkspaceId,
+      workspaceProviderWorkspaceId: workspace.runtime?.providerWorkspaceId,
+      workspaceSandboxId: workspace.runtime?.daytona?.sandbox_id,
+    };
+  },
+});
+`), 0o644); err != nil {
+		t.Fatalf("write workflow: %v", err)
+	}
+	plan, err := defspkg.Load(root)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	st := memstore.New()
+	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "TSDAYTONAMATERIALIZE", Name: "Daytona Materialize Workflow"}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	if err := defspkg.Apply(ctx, st, "TSDAYTONAMATERIALIZE", "atlas", plan); err != nil {
+		t.Fatalf("Apply() error = %v", err)
+	}
+	run, err := CreateOrResumeRun(ctx, st, "TSDAYTONAMATERIALIZE", "daytona-materialize", json.RawMessage(`{}`), "atlas")
+	if err != nil {
+		t.Fatalf("CreateOrResumeRun() error = %v", err)
+	}
+	result, err := RunOnce(ctx, st, clitest.NewMockIssueBackend(), run)
+	if err != nil {
+		t.Fatalf("RunOnce() error = %v", err)
+	}
+	if result.Run == nil || result.Run.Status != domain.WorkflowRunCompleted {
+		t.Fatalf("result = %+v, want completed Daytona materialize workflow", result)
+	}
+	var data map[string]any
+	if err := json.Unmarshal(result.Run.Result, &data); err != nil {
+		t.Fatalf("decode workflow result: %v", err)
+	}
+	if data["accepted"] != true || data["materialized"] != true || data["providerBacked"] != true ||
+		data["realSDK"] != true || data["providerWorkspaceId"] != "real-sdk-image-sandbox" ||
+		data["workspaceProviderWorkspaceId"] != "real-sdk-image-sandbox" || data["workspaceSandboxId"] != "real-sdk-image-sandbox" {
+		t.Fatalf("result data = %+v, want Daytona runtime profile materialized with installed SDK", data)
+	}
+	events, err := st.RunEvents().List(ctx, "TSDAYTONAMATERIALIZE", store.RunEventFilter{WorkflowRunID: run.RunID})
+	if err != nil {
+		t.Fatalf("list events: %v", err)
+	}
+	createEvent := workflowEventDataByType(t, events, "runtime_daytona_sandbox_created")
+	if createEvent["realSDK"] != true || createEvent["sandboxId"] != "real-sdk-image-sandbox" ||
+		createEvent["snapshot"] != "loom-profile-snapshot" || createEvent["cwd"] != "/workspace/project" {
+		t.Fatalf("create event = %+v, want runtime-profile Daytona sandbox creation evidence", createEvent)
+	}
+	clientEvent, ok := createEvent["client"].(map[string]any)
+	if !ok || clientEvent["apiKeyConfigured"] != true || clientEvent["apiKey"] != nil {
+		t.Fatalf("create event client = %+v, want configured but redacted API key evidence", createEvent["client"])
+	}
+	optionsEvent, ok := createEvent["options"].(map[string]any)
+	if !ok {
+		t.Fatalf("create event options = %+v, want create params", createEvent["options"])
+	}
+	envVars, ok := optionsEvent["envVars"].(map[string]any)
+	if !ok || envVars["DAYTONA_API_KEY"] != "[redacted]" {
+		t.Fatalf("create event envVars = %+v, want redacted runtime env grant", optionsEvent["envVars"])
+	}
+	imageEvent, ok := optionsEvent["image"].(map[string]any)
+	if !ok || imageEvent["base"] != "debian-slim:3.12" {
+		t.Fatalf("create event image = %+v, want recordable Daytona image metadata", optionsEvent["image"])
+	}
+	imageSteps, ok := imageEvent["steps"].([]any)
+	if !ok || len(imageSteps) != 2 {
+		t.Fatalf("create event image steps = %+v, want reconstructed image builder steps", imageEvent["steps"])
+	}
+	materializeEvent := workflowEventDataByType(t, events, "runtime_workspace_materialize_requested")
+	if materializeEvent["providerWorkspaceId"] != "real-sdk-image-sandbox" || materializeEvent["realSDK"] != true ||
+		materializeEvent["materialized"] != true {
+		t.Fatalf("materialize event = %+v, want Daytona provider-backed materialization evidence", materializeEvent)
+	}
+}
+
 func TestCodeDefinedWorkflowContextAdmitsRuntimeWorkspaceLifecycle(t *testing.T) {
 	ctx := context.Background()
 	root := t.TempDir()
@@ -2569,4 +3503,136 @@ func workflowEventDataByType(t *testing.T, events []*domain.RunEvent, typ string
 	}
 	t.Fatalf("missing workflow event %s in %+v", typ, events)
 	return nil
+}
+
+func containsWorkflowString(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
+}
+
+func workflowEventStringFieldsByType(t *testing.T, events []*domain.RunEvent, typ, field string) []string {
+	t.Helper()
+	out := []string{}
+	for _, event := range events {
+		if event == nil || event.Type != typ {
+			continue
+		}
+		var data map[string]any
+		if err := json.Unmarshal(event.Data, &data); err != nil {
+			t.Fatalf("decode event data %s: %v", event.EventID, err)
+		}
+		out = append(out, fmt.Sprint(data[field]))
+	}
+	if len(out) == 0 {
+		t.Fatalf("missing workflow event %s field %s in %+v", typ, field, events)
+	}
+	return out
+}
+
+func writeFakeDaytonaSDK(t *testing.T, root string) {
+	t.Helper()
+	sdkPath := filepath.Join(root, "node_modules", "@daytona", "sdk", "index.js")
+	if err := os.MkdirAll(filepath.Dir(sdkPath), 0o755); err != nil {
+		t.Fatalf("mkdir fake sdk dir: %v", err)
+	}
+	if err := os.WriteFile(sdkPath, []byte(`class Daytona {
+  constructor(options = {}) {
+    this.options = options;
+  }
+
+  async create(params = {}) {
+    const imageReady = params.image && params.image.__sdkImage &&
+      params.image.calls.some((call) => call.op === 'runCommands') &&
+      params.image.calls.some((call) => call.op === 'workdir' && call.dir === '/workspace/project');
+    return {
+      id: params.id || params.name || (imageReady ? 'real-sdk-image-sandbox' : 'real-sdk-sandbox'),
+      cwd: params.cwd || '/workspace',
+      snapshot: params.snapshot || '',
+      target: params.target || '',
+      receivedParams: params,
+      process: {
+        async executeCommand(command, cwd, env, timeout) {
+          if (env && env.OPENAI_API_KEY && String(command).includes('leak-secret')) {
+            return {
+              exitCode: 0,
+              stdout: 'secret stdout ' + env.OPENAI_API_KEY,
+              stderr: 'secret stderr ' + env.OPENAI_API_KEY,
+              result: {
+                text: 'secret result ' + env.OPENAI_API_KEY,
+                nested: ['secret nested ' + env.OPENAI_API_KEY],
+                env,
+              },
+              env,
+              timeout,
+            };
+          }
+          return {
+            exitCode: 0,
+            stdout: 'real stdout: ' + command,
+            result: 'real result: ' + command + ' @ ' + (cwd || ''),
+            env,
+            timeout,
+          };
+        },
+      },
+    };
+  }
+}
+
+function sdkImage(base, calls = []) {
+  return {
+    __sdkImage: true,
+    base,
+    calls,
+    runCommands(...commands) {
+      return sdkImage(base, calls.concat([{ op: 'runCommands', commands }]));
+    },
+    workdir(dir) {
+      return sdkImage(base, calls.concat([{ op: 'workdir', dir }]));
+    },
+    env(vars) {
+      return sdkImage(base, calls.concat([{ op: 'env', vars }]));
+    },
+    pipInstall(packages, options) {
+      return sdkImage(base, calls.concat([{ op: 'pipInstall', packages, options }]));
+    },
+    addLocalFile(source, target) {
+      return sdkImage(base, calls.concat([{ op: 'addLocalFile', source, target }]));
+    },
+    addLocalDir(source, target) {
+      return sdkImage(base, calls.concat([{ op: 'addLocalDir', source, target }]));
+    },
+    entrypoint(value) {
+      return sdkImage(base, calls.concat([{ op: 'entrypoint', value }]));
+    },
+    cmd(value) {
+      return sdkImage(base, calls.concat([{ op: 'cmd', value }]));
+    },
+    dockerfileCommands(commands, contextDir) {
+      return sdkImage(base, calls.concat([{ op: 'dockerfileCommands', commands, contextDir }]));
+    },
+  };
+}
+
+module.exports = {
+  Daytona,
+  Image: {
+    base(image) {
+      return sdkImage(image);
+    },
+    debianSlim(version) {
+      return sdkImage('debian-slim:' + version);
+    },
+    fromDockerfile(path) {
+      return sdkImage('dockerfile:' + path);
+    },
+  },
+};
+`), 0o644); err != nil {
+		t.Fatalf("write fake sdk: %v", err)
+	}
 }

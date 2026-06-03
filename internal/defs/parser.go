@@ -14,24 +14,28 @@ func parseAgent(path string, data []byte) (AgentModule, error) {
 	src := string(data)
 	hash := hashSource(data)
 	mod := AgentModule{
-		Name:            stringField(src, "name"),
-		Description:     stringField(src, "description"),
-		Backend:         stringField(src, "backend"),
-		Model:           stringField(src, "model"),
-		ProfileName:     firstNonEmpty(stringField(src, "profileName"), stringField(src, "profile_name")),
-		SourcePath:      path,
-		SourceHash:      hash,
-		Version:         version(hash),
-		Instructions:    templateField(src, "instructions"),
-		Skills:          arrayField(src, "skills"),
-		Tools:           dottedArrayField(src, "tools"),
-		AllowedCommands: arrayField(src, "allowedCommands"),
-		DeniedCommands:  arrayField(src, "deniedCommands"),
-		Repos:           arrayField(src, "repos"),
-		Env:             arrayField(src, "env"),
-		MaxConcurrency:  intField(src, "maxConcurrency"),
-		ReadOnly:        boolField(src, "readOnly"),
+		Name:               stringField(src, "name"),
+		Description:        stringField(src, "description"),
+		Backend:            stringField(src, "backend"),
+		Model:              stringField(src, "model"),
+		ProfileName:        firstNonEmpty(stringField(src, "profileName"), stringField(src, "profile_name")),
+		SourcePath:         path,
+		SourceHash:         hash,
+		Version:            version(hash),
+		Instructions:       templateField(src, "instructions"),
+		Skills:             arrayField(src, "skills"),
+		Tools:              dottedArrayField(src, "tools"),
+		AllowedCommands:    arrayField(src, "allowedCommands"),
+		DeniedCommands:     arrayField(src, "deniedCommands"),
+		Repos:              arrayField(src, "repos"),
+		Env:                arrayField(src, "env"),
+		MaxConcurrency:     intField(src, "maxConcurrency"),
+		ReadOnly:           boolField(src, "readOnly"),
+		RuntimeProvider:    agentRuntimeProviderFromSource(src),
+		RuntimeProfileName: firstNonEmpty(stringField(src, "runtimeProfile"), stringField(src, "runtime_profile"), stringField(src, "runtime")),
+		RuntimeCWD:         stringField(src, "cwd"),
 	}
+	mod.RuntimeDaytona = daytonaRuntimeConfigFromSource(src, mod.RuntimeProvider)
 	if v, ok := floatField(src, "maxBudgetUSD"); ok {
 		mod.MaxBudgetUSD = &v
 	}
@@ -39,6 +43,24 @@ func parseAgent(path string, data []byte) (AgentModule, error) {
 		return mod, fmt.Errorf("%s: defineAgent name is required", path)
 	}
 	return mod, nil
+}
+
+func agentRuntimeProviderFromSource(src string) domain.RuntimeProvider {
+	if explicit := stringField(src, "provider"); explicit != "" {
+		return domain.RuntimeProvider(explicit)
+	}
+	switch {
+	case strings.Contains(src, "runtime.daytona"):
+		return domain.RuntimeProviderDaytona
+	case strings.Contains(src, "runtime.podman"):
+		return domain.RuntimeProviderOther
+	case strings.Contains(src, "runtime.remote"):
+		return domain.RuntimeProviderE2B
+	case strings.Contains(src, "runtime.local"):
+		return domain.RuntimeProviderLocal
+	default:
+		return ""
+	}
 }
 
 func parseWorkflow(path string, data []byte) (WorkflowModule, error) {
@@ -79,7 +101,12 @@ func parseRuntime(path string, data []byte) RuntimeModule {
 	src := string(data)
 	hash := hashSource(data)
 	provider := domain.RuntimeProviderLocal
+	if explicit := stringField(src, "provider"); explicit != "" {
+		provider = domain.RuntimeProvider(explicit)
+	}
 	switch {
+	case strings.Contains(src, "runtime.daytona"):
+		provider = domain.RuntimeProviderDaytona
 	case strings.Contains(src, "runtime.podman"):
 		provider = domain.RuntimeProviderOther
 	case strings.Contains(src, "runtime.remote"):
@@ -96,6 +123,7 @@ func parseRuntime(path string, data []byte) RuntimeModule {
 		SourceHash:         hash,
 		Provider:           provider,
 		Image:              stringField(src, "image"),
+		Daytona:            daytonaRuntimeConfigFromSource(src, provider),
 		Repos:              arrayField(src, "repos"),
 		Env:                arrayField(src, "env"),
 		CPU:                stringField(src, "cpu"),
@@ -106,6 +134,69 @@ func parseRuntime(path string, data []byte) RuntimeModule {
 	}
 	runtime.Capabilities = runtimeCapabilities(src, runtime)
 	return runtime
+}
+
+func daytonaRuntimeConfigFromSource(src string, provider domain.RuntimeProvider) map[string]any {
+	out := map[string]any{
+		"language":           firstNonEmpty(stringField(src, "language")),
+		"snapshot":           firstNonEmpty(stringField(src, "snapshot")),
+		"target":             firstNonEmpty(stringField(src, "target")),
+		"api_url":            firstNonEmpty(stringField(src, "apiUrl"), stringField(src, "api_url")),
+		"api_key_env":        firstNonEmpty(stringField(src, "apiKeyEnv"), stringField(src, "api_key_env")),
+		"build_logs":         firstNonEmpty(stringField(src, "buildLogs"), stringField(src, "build_logs")),
+		"repo_url":           firstNonEmpty(stringField(src, "repoUrl"), stringField(src, "repo_url"), stringField(src, "remoteUrl"), stringField(src, "remote_url")),
+		"branch":             firstNonEmpty(stringField(src, "branch"), stringField(src, "checkoutBranch"), stringField(src, "checkout_branch"), stringField(src, "gitBranch"), stringField(src, "git_branch")),
+		"ref":                firstNonEmpty(stringField(src, "ref"), stringField(src, "checkoutRef"), stringField(src, "checkout_ref"), stringField(src, "gitRef"), stringField(src, "git_ref")),
+		"git_token_env":      firstNonEmpty(stringField(src, "gitTokenEnv"), stringField(src, "git_token_env"), stringField(src, "githubTokenEnv"), stringField(src, "github_token_env"), stringField(src, "gitAuthTokenEnv"), stringField(src, "git_auth_token_env")),
+		"git_username":       firstNonEmpty(stringField(src, "gitUsername"), stringField(src, "git_username"), stringField(src, "githubUsername"), stringField(src, "github_username")),
+		"git_deploy_key_env": firstNonEmpty(stringField(src, "gitDeployKeyEnv"), stringField(src, "git_deploy_key_env"), stringField(src, "deployKeyEnv"), stringField(src, "deploy_key_env"), stringField(src, "sshKeyEnv"), stringField(src, "ssh_key_env")),
+		"openai_api_key_env": firstNonEmpty(stringField(src, "openaiApiKeyEnv"), stringField(src, "openai_api_key_env")),
+		"codex_auth_file_env": firstNonEmpty(
+			stringField(src, "codexAuthFileEnv"),
+			stringField(src, "codex_auth_file_env"),
+		),
+		"setup_commands": compactStrings(append(
+			append(arrayField(src, "setupCommands"), arrayField(src, "setup_commands")...),
+			append(arrayField(src, "installCommands"), arrayField(src, "install_commands")...)...,
+		)),
+		"auto_stop_interval":    firstNonZeroInt(intField(src, "autoStopInterval"), intField(src, "auto_stop_interval")),
+		"auto_archive_interval": firstNonZeroInt(intField(src, "autoArchiveInterval"), intField(src, "auto_archive_interval")),
+		"auto_delete_interval":  firstNonZeroInt(intField(src, "autoDeleteInterval"), intField(src, "auto_delete_interval")),
+		"create_timeout":        firstNonZeroInt(intField(src, "createTimeout"), intField(src, "create_timeout"), intField(src, "timeout")),
+		"setup_timeout":         firstNonZeroInt(intField(src, "setupTimeout"), intField(src, "setup_timeout")),
+		"health_timeout":        firstNonZeroInt(intField(src, "healthTimeout"), intField(src, "health_timeout")),
+		"run_timeout":           firstNonZeroInt(intField(src, "runTimeout"), intField(src, "run_timeout"), intField(src, "commandTimeout"), intField(src, "command_timeout")),
+	}
+	clean := make(map[string]any, len(out))
+	for key, value := range out {
+		switch typed := value.(type) {
+		case string:
+			if strings.TrimSpace(typed) != "" {
+				clean[key] = typed
+			}
+		case []string:
+			if len(typed) > 0 {
+				clean[key] = typed
+			}
+		case int:
+			if typed != 0 {
+				clean[key] = typed
+			}
+		}
+	}
+	if provider != domain.RuntimeProviderDaytona && len(clean) == 0 {
+		return nil
+	}
+	return clean
+}
+
+func firstNonZeroInt(values ...int) int {
+	for _, value := range values {
+		if value != 0 {
+			return value
+		}
+	}
+	return 0
 }
 
 func runtimeWorkspaceSkillDirs(src string) []string {

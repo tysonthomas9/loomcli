@@ -35,8 +35,10 @@ type tsContextWorkspaceRuntime struct {
 	ProfileName         string                            `json:"profileName,omitempty"`
 	Provider            string                            `json:"provider,omitempty"`
 	Version             string                            `json:"version,omitempty"`
+	Daytona             map[string]any                    `json:"daytona,omitempty"`
 	Repos               []string                          `json:"repos,omitempty"`
 	Env                 []string                          `json:"env,omitempty"`
+	CWD                 string                            `json:"cwd,omitempty"`
 	ProviderWorkspaceID string                            `json:"providerWorkspaceId,omitempty"`
 	Owner               string                            `json:"owner,omitempty"`
 	Cleanup             *tsContextRuntimeCleanupPolicy    `json:"cleanup,omitempty"`
@@ -86,8 +88,10 @@ func tsContextWorkspaceForRun(ctx context.Context, st store.Store, run *domain.W
 		workspace.Runtime.ProfileName = firstNonEmptyString(workspace.Runtime.ProfileName, profile.Name)
 		workspace.Runtime.Provider = profile.Provider
 		workspace.Runtime.Version = profile.Version
+		workspace.Runtime.Daytona = copyAnyMap(profile.Daytona)
 		workspace.Runtime.Repos = cloneStrings(profile.Repos)
 		workspace.Runtime.Env = cloneStrings(profile.Env)
+		workspace.Runtime.CWD = profile.CWD
 		if profile.Workspace != nil {
 			workspace.Runtime.ProviderWorkspaceID = profile.Workspace.ProviderWorkspaceID
 			workspace.Runtime.Owner = profile.Workspace.Owner
@@ -389,7 +393,7 @@ func runtimeProfileProjectRoot(sourcePath string) string {
 	}
 	dir := filepath.Dir(filepath.Clean(sourcePath))
 	for {
-		if filepath.Base(dir) == ".loom" {
+		if base := filepath.Base(dir); base == ".loom" || base == ".flue" {
 			return filepath.Dir(dir)
 		}
 		parent := filepath.Dir(dir)

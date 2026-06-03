@@ -13,6 +13,7 @@ type tsContextRuntimeProfile struct {
 	Version            string                           `json:"version,omitempty"`
 	Provider           string                           `json:"provider"`
 	Image              string                           `json:"image,omitempty"`
+	Daytona            map[string]any                   `json:"daytona,omitempty"`
 	Repos              []string                         `json:"repos,omitempty"`
 	Env                []string                         `json:"env,omitempty"`
 	CPU                string                           `json:"cpu,omitempty"`
@@ -110,6 +111,7 @@ func tsContextRuntimeProfileForDefinition(ctx context.Context, st store.Store, d
 		Version:            profile.Version,
 		Provider:           string(profile.Provider),
 		Image:              profile.Image,
+		Daytona:            copyAnyMap(manifest.Daytona),
 		Repos:              cloneStrings(profile.Repos),
 		Env:                cloneStrings(profile.Env),
 		CPU:                profile.CPU,
@@ -127,6 +129,7 @@ func tsContextRuntimeProfileManifest(data json.RawMessage) struct {
 	CWD                string                        `json:"cwd"`
 	SourcePath         string                        `json:"source_path"`
 	WorkspaceSkillDirs []string                      `json:"workspace_skill_dirs"`
+	Daytona            map[string]any                `json:"daytona"`
 	Capabilities       *tsContextRuntimeCapabilities `json:"capabilities"`
 	Workspace          *struct {
 		ProviderWorkspaceID string                            `json:"provider_workspace_id"`
@@ -139,6 +142,7 @@ func tsContextRuntimeProfileManifest(data json.RawMessage) struct {
 		CWD                string                        `json:"cwd"`
 		SourcePath         string                        `json:"source_path"`
 		WorkspaceSkillDirs []string                      `json:"workspace_skill_dirs"`
+		Daytona            map[string]any                `json:"daytona"`
 		Capabilities       *tsContextRuntimeCapabilities `json:"capabilities"`
 		Workspace          *struct {
 			ProviderWorkspaceID string                            `json:"provider_workspace_id"`

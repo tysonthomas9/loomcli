@@ -24,8 +24,13 @@ func Load(root string) (*Plan, error) {
 		return nil, err
 	}
 	loomDir := filepath.Join(abs, ".loom")
+	flueDir := filepath.Join(abs, ".flue")
 	plan := &Plan{Root: abs}
 	loomExists, err := pathExists(loomDir)
+	if err != nil {
+		return nil, err
+	}
+	flueExists, err := pathExists(flueDir)
 	if err != nil {
 		return nil, err
 	}
@@ -37,7 +42,7 @@ func Load(root string) (*Plan, error) {
 	if err != nil {
 		return nil, err
 	}
-	if !loomExists && !configExists && !rootEntrypoints {
+	if !loomExists && !flueExists && !configExists && !rootEntrypoints {
 		return plan, nil
 	}
 	plan, err = loadWithTypeScriptCompiler(abs)
@@ -212,8 +217,12 @@ func agentCapabilityManifest(agent AgentModule, skills map[string]SkillModule, t
 			"denied_commands":  compactStrings(agent.DeniedCommands),
 		},
 		"runtime": map[string]any{
-			"repos": compactStrings(agent.Repos),
-			"env":   compactStrings(agent.Env),
+			"provider":     agent.RuntimeProvider,
+			"profile_name": agent.RuntimeProfileName,
+			"cwd":          agent.RuntimeCWD,
+			"daytona":      agent.RuntimeDaytona,
+			"repos":        compactStrings(agent.Repos),
+			"env":          compactStrings(agent.Env),
 		},
 		"limits": map[string]any{
 			"max_concurrency": agent.MaxConcurrency,
@@ -867,19 +876,27 @@ func validateNoExactCollision(sourcePath, leftLabel string, left []string, right
 
 func upsertRole(ctx context.Context, st store.Store, ws string, agent AgentModule) error {
 	allowed := append([]string(nil), agent.AllowedCommands...)
+	promptFile := agent.SourcePath
+	if isBuiltInDaemonRole(agent.Name) {
+		promptFile = ""
+	}
 	in := store.RoleCreate{
-		WorkspaceKey:   ws,
-		Name:           agent.Name,
-		Description:    agent.Description,
-		PromptFile:     agent.SourcePath,
-		Model:          agent.Model,
-		Backend:        agent.Backend,
-		Skills:         agent.Skills,
-		MaxConcurrency: nil,
-		ReadOnly:       agent.ReadOnly,
-		AllowedTools:   compactStrings(allowed),
-		DeniedTools:    compactStrings(agent.DeniedCommands),
-		MaxBudgetUSD:   agent.MaxBudgetUSD,
+		WorkspaceKey:       ws,
+		Name:               agent.Name,
+		Description:        agent.Description,
+		PromptFile:         promptFile,
+		Model:              agent.Model,
+		Backend:            agent.Backend,
+		Skills:             agent.Skills,
+		MaxConcurrency:     nil,
+		ReadOnly:           agent.ReadOnly,
+		AllowedTools:       compactStrings(allowed),
+		DeniedTools:        compactStrings(agent.DeniedCommands),
+		MaxBudgetUSD:       agent.MaxBudgetUSD,
+		RuntimeProvider:    agent.RuntimeProvider,
+		RuntimeProfileName: agent.RuntimeProfileName,
+		RuntimeCWD:         agent.RuntimeCWD,
+		RuntimeDaytona:     cloneDefinitionAnyMap(agent.RuntimeDaytona),
 	}
 	if agent.MaxConcurrency > 0 {
 		v := agent.MaxConcurrency
@@ -891,16 +908,24 @@ func upsertRole(ctx context.Context, st store.Store, ws string, agent AgentModul
 		return fmt.Errorf("create role %s: %w", agent.Name, err)
 	}
 	patch := store.RoleUpdate{
-		Description:  &agent.Description,
-		PromptFile:   &agent.SourcePath,
-		Model:        &agent.Model,
-		Backend:      &agent.Backend,
-		Skills:       &agent.Skills,
-		ReadOnly:     &agent.ReadOnly,
-		AllowedTools: &in.AllowedTools,
-		DeniedTools:  &in.DeniedTools,
-		MaxBudgetUSD: &agent.MaxBudgetUSD,
+		Description:        &agent.Description,
+		PromptFile:         &promptFile,
+		Model:              &agent.Model,
+		Backend:            &agent.Backend,
+		Skills:             &agent.Skills,
+		ReadOnly:           &agent.ReadOnly,
+		AllowedTools:       &in.AllowedTools,
+		DeniedTools:        &in.DeniedTools,
+		MaxBudgetUSD:       &agent.MaxBudgetUSD,
+		RuntimeProvider:    &agent.RuntimeProvider,
+		RuntimeProfileName: &agent.RuntimeProfileName,
+		RuntimeCWD:         &agent.RuntimeCWD,
 	}
+	runtimeDaytona := cloneDefinitionAnyMap(agent.RuntimeDaytona)
+	if runtimeDaytona == nil {
+		runtimeDaytona = map[string]any{}
+	}
+	patch.RuntimeDaytona = &runtimeDaytona
 	if in.MaxConcurrency != nil {
 		patch.MaxConcurrency = &in.MaxConcurrency
 	}
@@ -908,6 +933,15 @@ func upsertRole(ctx context.Context, st store.Store, ws string, agent AgentModul
 		return fmt.Errorf("update role %s: %w", agent.Name, err)
 	}
 	return nil
+}
+
+func isBuiltInDaemonRole(name string) bool {
+	switch strings.TrimSpace(name) {
+	case "plan", "task":
+		return true
+	default:
+		return false
+	}
 }
 
 func hashSource(data []byte) string {
@@ -939,6 +973,17 @@ func compactStrings(values []string) []string {
 		}
 		seen[v] = struct{}{}
 		out = append(out, v)
+	}
+	return out
+}
+
+func cloneDefinitionAnyMap(in map[string]any) map[string]any {
+	if in == nil {
+		return nil
+	}
+	out := make(map[string]any, len(in))
+	for k, v := range in {
+		out[k] = v
 	}
 	return out
 }

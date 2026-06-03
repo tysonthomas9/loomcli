@@ -155,6 +155,7 @@ func renderRuntimeSource(runtime RuntimeModule) string {
 	writeStringProp(&b, "name", runtime.Name, 1)
 	writeStringProp(&b, "provider", exportedRuntimeProvider(runtime.Provider), 1)
 	writeStringProp(&b, "image", runtime.Image, 1)
+	writeRawProp(&b, "daytona", renderJSONValue(runtime.Daytona, 1), 1)
 	writeStringProp(&b, "cwd", runtime.CWD, 1)
 	writeStringProp(&b, "cpu", runtime.CPU, 1)
 	writeStringProp(&b, "memory", runtime.Memory, 1)

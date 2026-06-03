@@ -36,23 +36,27 @@ func (s *roleStore) Create(_ context.Context, in store.RoleCreate) (*domain.Role
 	}
 	now := time.Now().UTC()
 	r := &domain.Role{
-		WorkspaceKey:   in.WorkspaceKey,
-		Name:           in.Name,
-		Description:    in.Description,
-		PromptFile:     in.PromptFile,
-		Model:          in.Model,
-		TaskFilter:     in.TaskFilter,
-		Backend:        in.Backend,
-		PathPatterns:   append([]string(nil), in.PathPatterns...),
-		Skills:         append([]string(nil), in.Skills...),
-		MaxPriority:    clonePtr(in.MaxPriority),
-		MaxConcurrency: clonePtr(in.MaxConcurrency),
-		ReadOnly:       in.ReadOnly,
-		AllowedTools:   append([]string(nil), in.AllowedTools...),
-		DeniedTools:    append([]string(nil), in.DeniedTools...),
-		MaxBudgetUSD:   clonePtr(in.MaxBudgetUSD),
-		CreatedAt:      now,
-		UpdatedAt:      now,
+		WorkspaceKey:       in.WorkspaceKey,
+		Name:               in.Name,
+		Description:        in.Description,
+		PromptFile:         in.PromptFile,
+		Model:              in.Model,
+		TaskFilter:         in.TaskFilter,
+		Backend:            in.Backend,
+		PathPatterns:       append([]string(nil), in.PathPatterns...),
+		Skills:             append([]string(nil), in.Skills...),
+		MaxPriority:        clonePtr(in.MaxPriority),
+		MaxConcurrency:     clonePtr(in.MaxConcurrency),
+		ReadOnly:           in.ReadOnly,
+		AllowedTools:       append([]string(nil), in.AllowedTools...),
+		DeniedTools:        append([]string(nil), in.DeniedTools...),
+		MaxBudgetUSD:       clonePtr(in.MaxBudgetUSD),
+		RuntimeProvider:    in.RuntimeProvider,
+		RuntimeProfileName: in.RuntimeProfileName,
+		RuntimeCWD:         in.RuntimeCWD,
+		RuntimeDaytona:     cloneAnyMap(in.RuntimeDaytona),
+		CreatedAt:          now,
+		UpdatedAt:          now,
 	}
 	s.items[in.WorkspaceKey][in.Name] = r
 	return cloneRole(r), nil
@@ -126,6 +130,18 @@ func (s *roleStore) Update(_ context.Context, ws, name string, patch store.RoleU
 	if patch.MaxBudgetUSD != nil {
 		r.MaxBudgetUSD = clonePtr(*patch.MaxBudgetUSD)
 	}
+	if patch.RuntimeProvider != nil {
+		r.RuntimeProvider = *patch.RuntimeProvider
+	}
+	if patch.RuntimeProfileName != nil {
+		r.RuntimeProfileName = *patch.RuntimeProfileName
+	}
+	if patch.RuntimeCWD != nil {
+		r.RuntimeCWD = *patch.RuntimeCWD
+	}
+	if patch.RuntimeDaytona != nil {
+		r.RuntimeDaytona = cloneAnyMap(*patch.RuntimeDaytona)
+	}
 	r.UpdatedAt = time.Now().UTC()
 	return cloneRole(r), nil
 }
@@ -149,5 +165,17 @@ func cloneRole(r *domain.Role) *domain.Role {
 	out.MaxPriority = clonePtr(r.MaxPriority)
 	out.MaxConcurrency = clonePtr(r.MaxConcurrency)
 	out.MaxBudgetUSD = clonePtr(r.MaxBudgetUSD)
+	out.RuntimeDaytona = cloneAnyMap(r.RuntimeDaytona)
 	return &out
+}
+
+func cloneAnyMap(in map[string]any) map[string]any {
+	if in == nil {
+		return nil
+	}
+	out := make(map[string]any, len(in))
+	for k, v := range in {
+		out[k] = v
+	}
+	return out
 }

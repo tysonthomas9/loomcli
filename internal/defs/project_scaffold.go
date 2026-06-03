@@ -41,24 +41,28 @@ type ModelPolicy struct {
 }
 
 type AgentModule struct {
-	Name            string   `json:"name"`
-	Description     string   `json:"description,omitempty"`
-	Backend         string   `json:"backend,omitempty"`
-	Model           string   `json:"model,omitempty"`
-	ProfileName     string   `json:"profile_name,omitempty"`
-	SourcePath      string   `json:"source_path"`
-	SourceHash      string   `json:"source_hash"`
-	Version         string   `json:"version"`
-	Instructions    string   `json:"instructions,omitempty"`
-	Skills          []string `json:"skills,omitempty"`
-	Tools           []string `json:"tools,omitempty"`
-	AllowedCommands []string `json:"allowed_commands,omitempty"`
-	DeniedCommands  []string `json:"denied_commands,omitempty"`
-	Repos           []string `json:"repos,omitempty"`
-	Env             []string `json:"env,omitempty"`
-	MaxConcurrency  int      `json:"max_concurrency,omitempty"`
-	MaxBudgetUSD    *float64 `json:"max_budget_usd,omitempty"`
-	ReadOnly        bool     `json:"read_only,omitempty"`
+	Name               string                 `json:"name"`
+	Description        string                 `json:"description,omitempty"`
+	Backend            string                 `json:"backend,omitempty"`
+	Model              string                 `json:"model,omitempty"`
+	ProfileName        string                 `json:"profile_name,omitempty"`
+	SourcePath         string                 `json:"source_path"`
+	SourceHash         string                 `json:"source_hash"`
+	Version            string                 `json:"version"`
+	Instructions       string                 `json:"instructions,omitempty"`
+	Skills             []string               `json:"skills,omitempty"`
+	Tools              []string               `json:"tools,omitempty"`
+	AllowedCommands    []string               `json:"allowed_commands,omitempty"`
+	DeniedCommands     []string               `json:"denied_commands,omitempty"`
+	Repos              []string               `json:"repos,omitempty"`
+	Env                []string               `json:"env,omitempty"`
+	MaxConcurrency     int                    `json:"max_concurrency,omitempty"`
+	MaxBudgetUSD       *float64               `json:"max_budget_usd,omitempty"`
+	ReadOnly           bool                   `json:"read_only,omitempty"`
+	RuntimeProvider    domain.RuntimeProvider `json:"runtime_provider,omitempty"`
+	RuntimeProfileName string                 `json:"runtime_profile_name,omitempty"`
+	RuntimeCWD         string                 `json:"runtime_cwd,omitempty"`
+	RuntimeDaytona     map[string]any         `json:"runtime_daytona,omitempty"`
 }
 
 type WorkflowModule struct {
@@ -87,6 +91,7 @@ type RuntimeModule struct {
 	SourceHash         string                 `json:"source_hash"`
 	Provider           domain.RuntimeProvider `json:"provider"`
 	Image              string                 `json:"image,omitempty"`
+	Daytona            map[string]any         `json:"daytona,omitempty"`
 	Repos              []string               `json:"repos,omitempty"`
 	Env                []string               `json:"env,omitempty"`
 	CPU                string                 `json:"cpu,omitempty"`
@@ -228,6 +233,7 @@ func InitTypeScriptProject(root string) error {
 	}
 	dirs := []string{
 		filepath.Join(root, ".loom", "agents"),
+		filepath.Join(root, ".loom", "connectors"),
 		filepath.Join(root, ".loom", "workflows"),
 		filepath.Join(root, ".loom", "runtimes"),
 		filepath.Join(root, ".loom", "tools"),
@@ -245,6 +251,9 @@ func InitTypeScriptProject(root string) error {
 		return err
 	}
 	if err := writeIfMissing(filepath.Join(root, ".loom", "runtime.d.ts"), []byte(runtimeTypes)); err != nil {
+		return err
+	}
+	if err := writeIfMissing(filepath.Join(root, ".loom", "connectors", "daytona.ts"), []byte(daytonaConnector)); err != nil {
 		return err
 	}
 	return nil
@@ -335,6 +344,15 @@ export default defineConfig({
 });
 `
 
+const daytonaConnector = `import { daytona as loomDaytona } from '@loom/runtime';
+
+export function daytona(sandbox, options = {}) {
+  return loomDaytona(sandbox, options);
+}
+
+export default daytona;
+`
+
 const startContract = `# Create a TypeScript-First Loom Agent
 
 You are helping the user create or update a TypeScript-first Loom agent or
@@ -348,6 +366,7 @@ layout as authoritative. Import authored helpers from @loom/sdk and use the
 
 .loom/
   agents/
+  connectors/
   workflows/
   runtimes/
   tools/
@@ -395,6 +414,7 @@ for a bounded job.
 Keep runtime authority explicit:
 
 - Runtime profiles live in .loom/runtimes/*.ts.
+- Provider adapters, including the Daytona sandbox adapter, live in .loom/connectors/*.ts.
 - Typed tools live in .loom/tools/*.ts and need trusted handlers.
 - Skills live in .loom/skills/<name>/SKILL.md when source-owned.
 - Environment bindings list names only; never invent or write secret values.

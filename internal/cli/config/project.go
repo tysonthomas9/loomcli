@@ -67,19 +67,23 @@ type RestartPolicy struct {
 
 // RoleConfig defines an agent role (built-in like "plan"/"task", or custom).
 type RoleConfig struct {
-	Description    string   `yaml:"description,omitempty"`
-	PromptFile     string   `yaml:"prompt_file,omitempty"`
-	Model          string   `yaml:"model,omitempty"`
-	TaskFilter     string   `yaml:"task_filter,omitempty"`
-	Backend        string   `yaml:"backend,omitempty"`
-	PathPatterns   []string `yaml:"path_patterns,omitempty"`
-	Skills         []string `yaml:"skills,omitempty"`
-	MaxPriority    *int     `yaml:"max_priority,omitempty"`
-	MaxConcurrency *int     `yaml:"max_concurrency,omitempty"`
-	ReadOnly       bool     `yaml:"read_only,omitempty"`
-	AllowedTools   []string `yaml:"allowed_tools,omitempty"`
-	DeniedTools    []string `yaml:"denied_tools,omitempty"`
-	MaxBudgetUSD   *float64 `yaml:"max_budget_usd,omitempty"`
+	Description        string                 `yaml:"description,omitempty"`
+	PromptFile         string                 `yaml:"prompt_file,omitempty"`
+	Model              string                 `yaml:"model,omitempty"`
+	TaskFilter         string                 `yaml:"task_filter,omitempty"`
+	Backend            string                 `yaml:"backend,omitempty"`
+	PathPatterns       []string               `yaml:"path_patterns,omitempty"`
+	Skills             []string               `yaml:"skills,omitempty"`
+	MaxPriority        *int                   `yaml:"max_priority,omitempty"`
+	MaxConcurrency     *int                   `yaml:"max_concurrency,omitempty"`
+	ReadOnly           bool                   `yaml:"read_only,omitempty"`
+	AllowedTools       []string               `yaml:"allowed_tools,omitempty"`
+	DeniedTools        []string               `yaml:"denied_tools,omitempty"`
+	MaxBudgetUSD       *float64               `yaml:"max_budget_usd,omitempty"`
+	RuntimeProvider    domain.RuntimeProvider `yaml:"runtime_provider,omitempty"`
+	RuntimeProfileName string                 `yaml:"runtime_profile_name,omitempty"`
+	RuntimeCWD         string                 `yaml:"runtime_cwd,omitempty"`
+	RuntimeDaytona     map[string]any         `yaml:"runtime_daytona,omitempty"`
 }
 
 // AgentEntry defines a single agent assignment.
@@ -277,19 +281,23 @@ func roleConfigFromDomain(r *domain.Role) RoleConfig {
 		return RoleConfig{}
 	}
 	return RoleConfig{
-		Description:    r.Description,
-		PromptFile:     r.PromptFile,
-		Model:          r.Model,
-		TaskFilter:     r.TaskFilter,
-		Backend:        r.Backend,
-		PathPatterns:   append([]string(nil), r.PathPatterns...),
-		Skills:         append([]string(nil), r.Skills...),
-		MaxPriority:    cloneIntPtr(r.MaxPriority),
-		MaxConcurrency: cloneIntPtr(r.MaxConcurrency),
-		ReadOnly:       r.ReadOnly,
-		AllowedTools:   append([]string(nil), r.AllowedTools...),
-		DeniedTools:    append([]string(nil), r.DeniedTools...),
-		MaxBudgetUSD:   cloneFloatPtr(r.MaxBudgetUSD),
+		Description:        r.Description,
+		PromptFile:         r.PromptFile,
+		Model:              r.Model,
+		TaskFilter:         r.TaskFilter,
+		Backend:            r.Backend,
+		PathPatterns:       append([]string(nil), r.PathPatterns...),
+		Skills:             append([]string(nil), r.Skills...),
+		MaxPriority:        cloneIntPtr(r.MaxPriority),
+		MaxConcurrency:     cloneIntPtr(r.MaxConcurrency),
+		ReadOnly:           r.ReadOnly,
+		AllowedTools:       append([]string(nil), r.AllowedTools...),
+		DeniedTools:        append([]string(nil), r.DeniedTools...),
+		MaxBudgetUSD:       cloneFloatPtr(r.MaxBudgetUSD),
+		RuntimeProvider:    r.RuntimeProvider,
+		RuntimeProfileName: r.RuntimeProfileName,
+		RuntimeCWD:         r.RuntimeCWD,
+		RuntimeDaytona:     cloneAnyMap(r.RuntimeDaytona),
 	}
 }
 
@@ -350,6 +358,17 @@ func cloneFloatPtr(v *float64) *float64 {
 	}
 	out := *v
 	return &out
+}
+
+func cloneAnyMap(in map[string]any) map[string]any {
+	if in == nil {
+		return nil
+	}
+	out := make(map[string]any, len(in))
+	for k, v := range in {
+		out[k] = v
+	}
+	return out
 }
 
 // validateAgents checks that agent entries and max_agents limits are valid.

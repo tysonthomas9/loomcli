@@ -14,12 +14,180 @@ ROOT="${RESULT_ROOT:-$(mktemp -d /tmp/loom-tsfirst-slack.XXXXXX)}"
 ARTIFACTS_OUT="${ARTIFACTS_OUT:-}"
 DAEMON_PID=""
 SERVE_PID=""
+WORKSPACE_CREATED=""
 EPIC_RUNNER_TIMEOUT="${EPIC_RUNNER_TIMEOUT:-900s}"
 TIMEOUT_SECS="${EPIC_RUNNER_TIMEOUT%s}"
 RECONCILE_INTERVAL="${RECONCILE_INTERVAL:-3}"
 CODEX_VERSION="${CODEX_VERSION:-0.129.0}"
 SLACK_SRC_DIR="${SLACK_SRC_DIR:-/opt/slack-src}"
+AGENT_RUNTIME="${AGENT_RUNTIME:-local}"
+DAYTONA_REMOTE_REPO_URL="${DAYTONA_REMOTE_REPO_URL:-}"
+DAYTONA_FORCE_PUSH_REMOTE="${DAYTONA_FORCE_PUSH_REMOTE:-}"
+DAYTONA_SNAPSHOT="${DAYTONA_SNAPSHOT:-}"
+DAYTONA_TARGET="${DAYTONA_TARGET:-}"
+DAYTONA_GIT_USERNAME="${DAYTONA_GIT_USERNAME:-x-access-token}"
+DAYTONA_GIT_TOKEN_ENV="${DAYTONA_GIT_TOKEN_ENV:-}"
 WORKSPACE_PATH="$ROOT/workspace"
+
+DAYTONA_PUSH_ASKPASS="$ROOT/daytona-git-askpass.sh"
+
+is_shell_identifier() {
+    [[ "$1" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]]
+}
+
+daytona_env_value() {
+    local name="$1"
+    if [[ -n "$name" ]] && is_shell_identifier "$name"; then
+        printf '%s' "${!name:-}"
+    fi
+}
+
+daytona_push_token_available() {
+    [[ -n "$(daytona_env_value "$DAYTONA_GIT_TOKEN_ENV")" || -n "${GITHUB_TOKEN:-}" || -n "${GH_TOKEN:-}" ]]
+}
+
+validate_daytona_codex_auth_file() {
+    local auth_file="${CODEX_AUTH_FILE:-}"
+    [[ -n "$auth_file" ]] || return 0
+    if [[ "$auth_file" != /* ]]; then
+        echo "AGENT_RUNTIME=daytona CODEX_AUTH_FILE must be an absolute Daytona remote path, got: $auth_file" >&2
+        exit 1
+    fi
+    case "$auth_file" in
+        /Users/*|/private/*|/Volumes/*|/var/folders/*)
+            echo "AGENT_RUNTIME=daytona CODEX_AUTH_FILE must point at a Daytona-provisioned remote auth.json, not host-local path: $auth_file" >&2
+            exit 1
+            ;;
+    esac
+    if [[ "${auth_file##*/}" != "auth.json" ]]; then
+        echo "AGENT_RUNTIME=daytona CODEX_AUTH_FILE must point to auth.json, got: $auth_file" >&2
+        exit 1
+    fi
+}
+
+validate_daytona_fleetdb_url() {
+    local fleet_url="${LOOM_FLEET_DB_URL:-}"
+    if [[ -z "$fleet_url" ]]; then
+        echo "AGENT_RUNTIME=daytona requires LOOM_FLEET_DB_URL pointing at a URL reachable from Daytona" >&2
+        exit 1
+    fi
+    if [[ "$fleet_url" == /* ]]; then
+        echo "AGENT_RUNTIME=daytona cannot use a host-local LOOM_FLEET_DB_URL: $fleet_url" >&2
+        exit 1
+    fi
+    if [[ "$fleet_url" != *"://"* ]]; then
+        echo "AGENT_RUNTIME=daytona LOOM_FLEET_DB_URL must use http or https: $fleet_url" >&2
+        exit 1
+    fi
+    local scheme="${fleet_url%%://*}"
+    case "$scheme" in
+        http|https) ;;
+        *)
+            echo "AGENT_RUNTIME=daytona LOOM_FLEET_DB_URL must use http or https, got scheme '$scheme': $fleet_url" >&2
+            exit 1
+            ;;
+    esac
+
+    local rest="${fleet_url#*://}"
+    local hostport="${rest%%/*}"
+    local host="${hostport##*@}"
+    if [[ "$host" == \[* ]]; then
+        host="${host#\[}"
+        host="${host%%\]*}"
+    else
+        host="${host%%:*}"
+    fi
+    local lower_host
+    lower_host="$(printf '%s' "$host" | tr '[:upper:]' '[:lower:]')"
+    if [[ -z "$lower_host" ]]; then
+        echo "AGENT_RUNTIME=daytona LOOM_FLEET_DB_URL host is required: $fleet_url" >&2
+        exit 1
+    fi
+    case "$lower_host" in
+        localhost|*.localhost|host.docker.internal|127.*|0.0.0.0|10.*|192.168.*|169.254.*|172.1[6-9].*|172.2[0-9].*|172.3[0-1].*|::1|0:0:0:0:0:0:0:1|fe80:*)
+            echo "AGENT_RUNTIME=daytona cannot use a host-local LOOM_FLEET_DB_URL: $fleet_url" >&2
+            exit 1
+            ;;
+    esac
+}
+
+validate_daytona_remote_repo_url() {
+    local repo_url="$DAYTONA_REMOTE_REPO_URL"
+    if [[ -z "$repo_url" ]]; then
+        echo "AGENT_RUNTIME=daytona requires DAYTONA_REMOTE_REPO_URL for a Git remote reachable from Daytona" >&2
+        exit 1
+    fi
+    if [[ "$repo_url" == *"://"* ]]; then
+        local scheme="${repo_url%%://*}"
+        case "$scheme" in
+            http|https|ssh|git|file) ;;
+            *)
+                echo "AGENT_RUNTIME=daytona DAYTONA_REMOTE_REPO_URL uses unsupported scheme '$scheme': $repo_url" >&2
+                exit 1
+                ;;
+        esac
+    fi
+    case "$repo_url" in
+        http:*|https:*|ssh:*|git:*|file:*|ftp:*)
+            if [[ "$repo_url" != *"://"* ]]; then
+                local scheme="${repo_url%%:*}"
+                echo "AGENT_RUNTIME=daytona DAYTONA_REMOTE_REPO_URL uses malformed scheme '$scheme'; use $scheme://... or scp-like Git syntax: $repo_url" >&2
+                exit 1
+            fi
+            ;;
+    esac
+    case "$repo_url" in
+        /*|./*|../*|~/*|file://*)
+            echo "AGENT_RUNTIME=daytona cannot use a host-local DAYTONA_REMOTE_REPO_URL: $repo_url" >&2
+            exit 1
+            ;;
+        http://localhost*|https://localhost*|ssh://*localhost*|git://localhost*|*localhost:*|*host.docker.internal*)
+            echo "AGENT_RUNTIME=daytona cannot use a localhost DAYTONA_REMOTE_REPO_URL: $repo_url" >&2
+            exit 1
+            ;;
+        http://127.*|https://127.*|ssh://*127.*|git://127.*|*@127.*:*|127.*:*|http://0.0.0.0*|https://0.0.0.0*|ssh://*0.0.0.0*|*@0.0.0.0:*)
+            echo "AGENT_RUNTIME=daytona cannot use a loopback DAYTONA_REMOTE_REPO_URL: $repo_url" >&2
+            exit 1
+            ;;
+    esac
+}
+
+write_daytona_push_askpass() {
+cat > "$DAYTONA_PUSH_ASKPASS" <<'EOF'
+#!/bin/sh
+token=""
+if [ -n "${DAYTONA_GIT_TOKEN_ENV:-}" ]; then
+    case "$DAYTONA_GIT_TOKEN_ENV" in
+        [0-9]*|*[!A-Za-z0-9_]*)
+            ;;
+        *)
+            eval "token=\${$DAYTONA_GIT_TOKEN_ENV:-}"
+            ;;
+    esac
+fi
+if [ -z "$token" ]; then
+    token="${GITHUB_TOKEN:-}"
+fi
+if [ -z "$token" ]; then
+    token="${GH_TOKEN:-}"
+fi
+case "$1" in
+    *Username*) printf '%s' "${DAYTONA_GIT_USERNAME:-x-access-token}" ;;
+    *Password*) printf '%s' "$token" ;;
+    *) printf '%s' "" ;;
+esac
+EOF
+    chmod 700 "$DAYTONA_PUSH_ASKPASS"
+}
+
+push_seed_remote() {
+    if [[ "$AGENT_RUNTIME" == "daytona" ]] && daytona_push_token_available; then
+        write_daytona_push_askpass
+        GIT_TERMINAL_PROMPT=0 GIT_ASKPASS="$DAYTONA_PUSH_ASKPASS" DAYTONA_GIT_USERNAME="$DAYTONA_GIT_USERNAME" git -C "$SEED" push "$@"
+        return
+    fi
+    git -C "$SEED" push "$@"
+}
 
 cleanup() {
     status=$?
@@ -48,8 +216,8 @@ cleanup() {
                 tail -n 240 "$log" >&2
             done < <(find "$WORKSPACE_PATH/.loom/logs" -type f | sort)
         fi
-        if command -v loom >/dev/null 2>&1; then
-            loom workspace show --json "$LOOM_WORKSPACE" >&2 || true
+        if [[ -n "$WORKSPACE_CREATED" ]] && command -v loom >/dev/null 2>&1; then
+            loom workspace list --json >&2 || true
         fi
     fi
     if [[ -n "$DAEMON_PID" ]] && kill -0 "$DAEMON_PID" 2>/dev/null; then
@@ -74,14 +242,61 @@ export GIT_AUTHOR_EMAIL="loom-tsfirst-slack-e2e@example.test"
 export GIT_COMMITTER_NAME="$GIT_AUTHOR_NAME"
 export GIT_COMMITTER_EMAIL="$GIT_AUTHOR_EMAIL"
 
+if [[ "$AGENT_RUNTIME" != "local" && "$AGENT_RUNTIME" != "daytona" ]]; then
+    echo "AGENT_RUNTIME must be local or daytona, got: $AGENT_RUNTIME" >&2
+    exit 1
+fi
+if [[ "$AGENT_RUNTIME" == "daytona" ]]; then
+    if [[ -z "$DAYTONA_GIT_TOKEN_ENV" ]]; then
+        if [[ -n "${GITHUB_TOKEN:-}" ]]; then
+            DAYTONA_GIT_TOKEN_ENV="GITHUB_TOKEN"
+        elif [[ -n "${GH_TOKEN:-}" ]]; then
+            DAYTONA_GIT_TOKEN_ENV="GH_TOKEN"
+	    else
+	        DAYTONA_GIT_TOKEN_ENV="GITHUB_TOKEN"
+	    fi
+	fi
+	if ! is_shell_identifier "$DAYTONA_GIT_TOKEN_ENV"; then
+	    echo "AGENT_RUNTIME=daytona requires DAYTONA_GIT_TOKEN_ENV to be a valid environment variable name, got: $DAYTONA_GIT_TOKEN_ENV" >&2
+	    exit 1
+	fi
+	if [[ -z "${DAYTONA_API_KEY:-}" ]]; then
+	    echo "AGENT_RUNTIME=daytona requires DAYTONA_API_KEY" >&2
+	    exit 1
+    fi
+    if [[ -z "${OPENAI_API_KEY:-}" && -z "${CODEX_AUTH_FILE:-}" ]]; then
+        echo "AGENT_RUNTIME=daytona requires OPENAI_API_KEY or a Daytona-provisioned CODEX_AUTH_FILE" >&2
+        exit 1
+    fi
+    validate_daytona_codex_auth_file
+    validate_daytona_fleetdb_url
+	validate_daytona_remote_repo_url
+	case "$DAYTONA_REMOTE_REPO_URL" in
+	    http://*|https://*)
+	        if ! daytona_push_token_available; then
+	            if [[ "$DAYTONA_GIT_TOKEN_ENV" == "GITHUB_TOKEN" ]]; then
+	                echo "AGENT_RUNTIME=daytona requires GITHUB_TOKEN or GH_TOKEN to seed HTTPS remote $DAYTONA_REMOTE_REPO_URL" >&2
+	            else
+	                echo "AGENT_RUNTIME=daytona requires $DAYTONA_GIT_TOKEN_ENV, GITHUB_TOKEN, or GH_TOKEN to seed HTTPS remote $DAYTONA_REMOTE_REPO_URL" >&2
+	            fi
+	            exit 1
+	        fi
+	        ;;
+	esac
+fi
+
 mkdir -p "$LOOM_CONFIG_DIR"
 git config --global user.name "$GIT_AUTHOR_NAME"
 git config --global user.email "$GIT_AUTHOR_EMAIL"
 git config --global --add safe.directory '*'
 
-rm -f /usr/local/bin/codex
-npm install -g "@openai/codex@${CODEX_VERSION}" >/tmp/codex-install.log
-codex --version
+if [[ "$AGENT_RUNTIME" == "local" ]]; then
+    rm -f /usr/local/bin/codex
+    npm install -g "@openai/codex@${CODEX_VERSION}" >/tmp/codex-install.log
+    codex --version
+else
+    echo "AGENT_RUNTIME=daytona: skipping local Codex install; remote runtime prerequisites will check loom and codex"
+fi
 
 if [[ ! -d "$SLACK_SRC_DIR" ]]; then
     echo "slack-src fixture not found at $SLACK_SRC_DIR" >&2
@@ -92,6 +307,9 @@ fi
 SEED="$ROOT/slack-src"
 REMOTE="$ROOT/slack-src.git"
 DEFAULT_BRANCH="loom-slack-tsfirst-target"
+if [[ "$AGENT_RUNTIME" == "daytona" ]]; then
+    REMOTE="$DAYTONA_REMOTE_REPO_URL"
+fi
 
 # Seed the workspace repo from the Slack-clone fixture.
 mkdir -p "$SEED"
@@ -113,40 +331,61 @@ git -C "$SEED" init -b main >/dev/null
 git -C "$SEED" add .
 git -C "$SEED" commit -m "Seed Slack-clone app shell for TSFirst E2E" >/dev/null
 
-git init --bare "$REMOTE" >/dev/null
 git -C "$SEED" remote add origin "$REMOTE"
-git -C "$SEED" push -u origin "HEAD:$DEFAULT_BRANCH" >/dev/null
+if [[ "$AGENT_RUNTIME" == "daytona" ]]; then
+    if [[ "$DAYTONA_FORCE_PUSH_REMOTE" == "1" ]]; then
+        push_seed_remote --force -u origin "HEAD:$DEFAULT_BRANCH" >/dev/null
+    else
+        push_seed_remote -u origin "HEAD:$DEFAULT_BRANCH" >/dev/null
+    fi
+else
+    git init --bare "$REMOTE" >/dev/null
+    push_seed_remote -u origin "HEAD:$DEFAULT_BRANCH" >/dev/null
+fi
 
 loom workspace create "$LOOM_WORKSPACE" --repos "$SEED" --path "$WORKSPACE_PATH" --branch "$DEFAULT_BRANCH"
+WORKSPACE_CREATED=1
 cd "$WORKSPACE_PATH"
 
-# Start ONE long-lived process that OWNS the embedded fleet-db. Every other loom
-# command in this LOOM_CONFIG_DIR (apply, daemon, run) then reuses this same live
-# fleet-db via runtime.json instead of spinning up its own ephemeral instance, so
-# the daemon and each `loom run` pass share one datastore. Without a stable owner,
-# each `loom run` started + tore down its own fleet-db and the daemon never saw
-# the task runs it dispatched.
-loom serve --no-daemon > "$ROOT/serve.log" 2>&1 &
-SERVE_PID="$!"
-for _ in {1..60}; do
-    if ! kill -0 "$SERVE_PID" 2>/dev/null; then
-        echo "loom serve exited during startup" >&2
+if [[ "$AGENT_RUNTIME" == "daytona" ]]; then
+    echo "AGENT_RUNTIME=daytona: using external FleetDB at $LOOM_FLEET_DB_URL"
+else
+    # Start ONE long-lived process that OWNS the embedded fleet-db. Every other loom
+    # command in this LOOM_CONFIG_DIR (apply, daemon, run) then reuses this same live
+    # fleet-db via runtime.json instead of spinning up its own ephemeral instance, so
+    # the daemon and each `loom run` pass share one datastore. Without a stable owner,
+    # each `loom run` started + tore down its own fleet-db and the daemon never saw
+    # the task runs it dispatched.
+    loom serve --no-daemon > "$ROOT/serve.log" 2>&1 &
+    SERVE_PID="$!"
+    for _ in {1..60}; do
+        if ! kill -0 "$SERVE_PID" 2>/dev/null; then
+            echo "loom serve exited during startup" >&2
+            cat "$ROOT/serve.log" >&2 || true
+            exit 1
+        fi
+        [[ -f "$LOOM_CONFIG_DIR/fleet-db/runtime.json" ]] && break
+        sleep 0.5
+    done
+    if [[ ! -f "$LOOM_CONFIG_DIR/fleet-db/runtime.json" ]]; then
+        echo "loom serve did not become the embedded fleet-db owner" >&2
         cat "$ROOT/serve.log" >&2 || true
         exit 1
     fi
-    [[ -f "$LOOM_CONFIG_DIR/fleet-db/runtime.json" ]] && break
-    sleep 0.5
-done
-if [[ ! -f "$LOOM_CONFIG_DIR/fleet-db/runtime.json" ]]; then
-    echo "loom serve did not become the embedded fleet-db owner" >&2
-    cat "$ROOT/serve.log" >&2 || true
-    exit 1
 fi
 
-# NOTE: the daemon is intentionally started later, AFTER `loom apply nova`.
+# NOTE: the daemon is intentionally started later, AFTER `loom apply`.
 # `loom daemon` exits immediately if the workspace has no agents configured.
 
-REPO_NAME="$(loom workspace show --json "$LOOM_WORKSPACE" | jq -r '.repos[0].name')"
+REPO_NAME="$(basename "$SEED")"
+if [[ ! -e "$WORKSPACE_PATH/$REPO_NAME/.git" ]]; then
+    repo_path="$(find "$WORKSPACE_PATH" -mindepth 1 -maxdepth 1 -type d -exec test -e '{}/.git' ';' -print -quit)"
+    if [[ -z "$repo_path" ]]; then
+        echo "unable to resolve workspace repo name under $WORKSPACE_PATH" >&2
+        exit 1
+    fi
+    REPO_NAME="$(basename "$repo_path")"
+fi
 
 create_issue() {
     loom data --output json create "$@" | jq -r '.id'
@@ -181,9 +420,46 @@ TASK_B="$(create_issue \
 # under the e2e image's Node 20 (regex-fallback compile path).
 mkdir -p "$WORKSPACE_PATH/.loom/agents" "$WORKSPACE_PATH/.loom/workflows"
 
-# Delimiter is UNquoted so $REPO_NAME expands: the agent MUST declare a repo or
-# the daemon rejects it at startup (agent[N] worktree "nova": not a worktree/repo)
-# and exits, leaving no supervisor to execute dispatched task workers.
+# Delimiters are UNquoted so repo/runtime values expand: the applied agent MUST
+# declare a repo or the daemon rejects it at startup and exits, leaving no
+# supervisor to execute dispatched workers.
+if [[ "$AGENT_RUNTIME" == "daytona" ]]; then
+APPLY_AGENT="task"
+DAYTONA_AUTH_ENV_ENTRIES="'OPENAI_API_KEY'"
+DAYTONA_CODEX_AUTH_CONFIG=""
+if [[ -n "${CODEX_AUTH_FILE:-}" ]]; then
+    DAYTONA_AUTH_ENV_ENTRIES="$DAYTONA_AUTH_ENV_ENTRIES, 'CODEX_AUTH_FILE'"
+    DAYTONA_CODEX_AUTH_CONFIG="    codexAuthFileEnv: 'CODEX_AUTH_FILE',"
+fi
+cat > "$WORKSPACE_PATH/.loom/agents/task.ts" <<TS
+import { defineAgent, runtime } from '@loom/runtime';
+
+export default defineAgent({
+  name: 'task',
+  description: 'Daytona-backed Codex task worker for the TypeScript-first Slack epic runner E2E',
+  backend: 'codex',
+  repos: ['$REPO_NAME'],
+  runtime: runtime.daytona({
+    name: 'daytona-slack',
+    cwd: '/workspace/project',
+    repos: ['$REPO_NAME'],
+    env: [$DAYTONA_AUTH_ENV_ENTRIES, '$DAYTONA_GIT_TOKEN_ENV', 'GIT_AUTHOR_NAME', 'GIT_AUTHOR_EMAIL', 'GIT_COMMITTER_NAME', 'GIT_COMMITTER_EMAIL'],
+    repoUrl: '$REMOTE',
+    branch: '$DEFAULT_BRANCH',
+    setupCommands: ['npm install'],
+    snapshot: '$DAYTONA_SNAPSHOT',
+    target: '$DAYTONA_TARGET',
+    apiKeyEnv: 'DAYTONA_API_KEY',
+    openaiApiKeyEnv: 'OPENAI_API_KEY',
+$DAYTONA_CODEX_AUTH_CONFIG
+    gitTokenEnv: '$DAYTONA_GIT_TOKEN_ENV',
+    gitUsername: '$DAYTONA_GIT_USERNAME',
+    autoStopInterval: 15,
+  }),
+});
+TS
+else
+APPLY_AGENT="nova"
 cat > "$WORKSPACE_PATH/.loom/agents/nova.ts" <<TS
 import { defineAgent, runtime } from '@loom/runtime';
 
@@ -195,6 +471,7 @@ export default defineAgent({
   runtime: runtime.local({ repos: ['$REPO_NAME'] }),
 });
 TS
+fi
 
 cat > "$WORKSPACE_PATH/.loom/workflows/epic-runner.ts" <<'TS'
 import { defineWorkflow } from '@loom/runtime';
@@ -244,10 +521,10 @@ if ! loom check --dir "$WORKSPACE_PATH" >> "$ROOT/runner.log" 2>&1; then
     echo "loom check failed to compile the .loom/ project" >&2
     exit 1
 fi
-# Register the TS-defined agent. This MUST succeed before the daemon starts:
+# Register the TS-defined agent/role. This MUST succeed before the daemon starts:
 # `loom daemon` exits immediately if the workspace has no agents configured.
-if ! loom apply nova --dir "$WORKSPACE_PATH" >> "$ROOT/runner.log" 2>&1; then
-    echo "loom apply nova failed" >&2
+if ! loom apply "$APPLY_AGENT" --dir "$WORKSPACE_PATH" >> "$ROOT/runner.log" 2>&1; then
+    echo "loom apply $APPLY_AGENT failed" >&2
     tail -n 40 "$ROOT/runner.log" >&2 || true
     exit 1
 fi
@@ -325,7 +602,7 @@ if [[ "$(printf '%s\n' "$ORDER" | sed -n '2p')" != "$TASK_B" ]]; then
     exit 1
 fi
 
-loom workspace show --json "$LOOM_WORKSPACE" > "$ROOT/workspace-final.json"
+loom workspace list --json > "$ROOT/workspace-final.json"
 loom data --output json list --parent "$EPIC_ID" > "$ROOT/issues-final.json"
 
 echo "PASS tsfirst Codex epic runner Slack-clone E2E"

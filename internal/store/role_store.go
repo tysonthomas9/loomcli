@@ -9,38 +9,46 @@ import (
 // RoleCreate is the input for RoleStore.Create. WorkspaceKey + Name
 // required.
 type RoleCreate struct {
-	WorkspaceKey   string
-	Name           string
-	Description    string
-	PromptFile     string
-	Model          string
-	TaskFilter     string
-	Backend        string
-	PathPatterns   []string
-	Skills         []string
-	MaxPriority    *int
-	MaxConcurrency *int
-	ReadOnly       bool
-	AllowedTools   []string
-	DeniedTools    []string
-	MaxBudgetUSD   *float64
+	WorkspaceKey       string
+	Name               string
+	Description        string
+	PromptFile         string
+	Model              string
+	TaskFilter         string
+	Backend            string
+	PathPatterns       []string
+	Skills             []string
+	MaxPriority        *int
+	MaxConcurrency     *int
+	ReadOnly           bool
+	AllowedTools       []string
+	DeniedTools        []string
+	MaxBudgetUSD       *float64
+	RuntimeProvider    domain.RuntimeProvider
+	RuntimeProfileName string
+	RuntimeCWD         string
+	RuntimeDaytona     map[string]any
 }
 
 // RoleUpdate is the partial-update payload for roles.
 type RoleUpdate struct {
-	Description    *string
-	PromptFile     *string
-	Model          *string
-	TaskFilter     *string
-	Backend        *string
-	PathPatterns   *[]string
-	Skills         *[]string
-	MaxPriority    **int
-	MaxConcurrency **int
-	ReadOnly       *bool
-	AllowedTools   *[]string
-	DeniedTools    *[]string
-	MaxBudgetUSD   **float64
+	Description        *string
+	PromptFile         *string
+	Model              *string
+	TaskFilter         *string
+	Backend            *string
+	PathPatterns       *[]string
+	Skills             *[]string
+	MaxPriority        **int
+	MaxConcurrency     **int
+	ReadOnly           *bool
+	AllowedTools       *[]string
+	DeniedTools        *[]string
+	MaxBudgetUSD       **float64
+	RuntimeProvider    *domain.RuntimeProvider
+	RuntimeProfileName *string
+	RuntimeCWD         *string
+	RuntimeDaytona     *map[string]any
 }
 
 // RoleStore is the persistence interface for Role entities. Roles are

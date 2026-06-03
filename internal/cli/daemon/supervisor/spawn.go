@@ -24,6 +24,10 @@ var resolveLoomExecutable = os.Executable
 
 // buildCommand constructs the exec.Cmd for spawning an agent subprocess (does not start it).
 func (s *Supervisor) buildCommand(ap *AgentProcess) (*exec.Cmd, error) {
+	return s.buildCommandForWorktree(ap, ap.WorktreePath, ap.WorktreePath, "")
+}
+
+func (s *Supervisor) buildCommandForWorktree(ap *AgentProcess, commandWorktreePath, cmdDir, loomPath string) (*exec.Cmd, error) {
 	cfg := s.ConfigSnapshot()
 
 	ap.Mu.Lock()
@@ -31,17 +35,17 @@ func (s *Supervisor) buildCommand(ap *AgentProcess) (*exec.Cmd, error) {
 	ap.Mu.Unlock()
 
 	agentBackend := s.GetEffectiveBackend(ap)
-	cmd, err := buildAgentExecCmd(ap, agentBackend, epicID)
+	cmd, err := buildAgentExecCmd(ap, agentBackend, epicID, commandWorktreePath, loomPath)
 	if err != nil {
 		return nil, err
 	}
 
-	cmd.Dir = ap.WorktreePath
+	cmd.Dir = cmdDir
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 
 	cmd.Env = append(cli.FilteredEnv(),
 		fmt.Sprintf("LOOM_AGENT_NAME=%s", ap.Entry.Worktree),
-		fmt.Sprintf("LOOM_WORKTREE_PATH=%s", ap.WorktreePath),
+		fmt.Sprintf("LOOM_WORKTREE_PATH=%s", commandWorktreePath),
 		fmt.Sprintf("LOOM_EVENTS_DIR=%s", ResolveDaemonPath(s.ProjectDir, cfg.Daemon.EventsDir)),
 	)
 
@@ -64,7 +68,7 @@ func (s *Supervisor) buildCommand(ap *AgentProcess) (*exec.Cmd, error) {
 	}
 
 	cmd.Env = s.appendDaemonEnv(cmd.Env)
-	cmd.Env = append(cmd.Env, fmt.Sprintf("LOOM_YIELD_FILE=%s", filepath.Join(ap.WorktreePath, YieldFileName)))
+	cmd.Env = append(cmd.Env, fmt.Sprintf("LOOM_YIELD_FILE=%s", filepath.Join(commandWorktreePath, YieldFileName)))
 	cmd.Env = appendSessionEnv(cmd.Env, ap)
 
 	// Propagate the active trace context so the agent subprocess's bootstrap
@@ -78,13 +82,16 @@ func (s *Supervisor) buildCommand(ap *AgentProcess) (*exec.Cmd, error) {
 }
 
 // buildAgentExecCmd creates the exec.Cmd with the correct arguments for the agent role.
-func buildAgentExecCmd(ap *AgentProcess, backend, epicID string) (*exec.Cmd, error) {
-	loomPath, err := resolveLoomExecutable()
-	if err != nil {
-		return nil, fmt.Errorf("resolve loom executable: %w", err)
+func buildAgentExecCmd(ap *AgentProcess, backend, epicID, worktreePath, loomPath string) (*exec.Cmd, error) {
+	if loomPath == "" {
+		resolved, err := resolveLoomExecutable()
+		if err != nil {
+			return nil, fmt.Errorf("resolve loom executable: %w", err)
+		}
+		loomPath = resolved
 	}
 	if BuiltInRoles[ap.Entry.Role] {
-		args := []string{ap.Entry.Role, ap.WorktreePath, "--auto", "--daemon-mode"}
+		args := []string{ap.Entry.Role, worktreePath, "--auto", "--daemon-mode"}
 		if backend != "" {
 			args = append(args, "--backend", backend)
 		}
@@ -98,7 +105,7 @@ func buildAgentExecCmd(ap *AgentProcess, backend, epicID string) (*exec.Cmd, err
 	if promptFile == "" {
 		return nil, fmt.Errorf("custom role %q missing prompt_file", ap.Entry.Role)
 	}
-	args := []string{"agent", ap.WorktreePath, "--prompt", promptFile, "--auto", "--daemon-mode"}
+	args := []string{"agent", worktreePath, "--prompt", promptFile, "--auto", "--daemon-mode"}
 	if ap.RoleConfig.TaskFilter != "" {
 		args = append(args, "--task-filter", ap.RoleConfig.TaskFilter)
 	}

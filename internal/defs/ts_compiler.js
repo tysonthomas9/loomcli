@@ -60,7 +60,8 @@ function transformSource(src, file) {
     .replace(/export\s+interface\s+[A-Za-z0-9_]+\s*\{[^}]*\}/gs, "")
     .replace(/export\s+default\s+/, "module.exports.default = ")
     .replace(/export\s+const\s+([A-Za-z0-9_]+)\s*=/g, "const $1 = module.exports.$1 =")
-    .replace(/export\s+function\s+([A-Za-z0-9_]+)\s*\(/g, "function $1(");
+    .replace(/export\s+async\s+function\s+([A-Za-z0-9_]+)\s*\(/g, "module.exports.$1 = async function $1(")
+    .replace(/export\s+function\s+([A-Za-z0-9_]+)\s*\(/g, "module.exports.$1 = function $1(");
 }
 
 function stripTypeScriptSyntax(src, file) {
@@ -76,6 +77,7 @@ function stripTypeScriptFallback(src) {
     .replace(/\s+as\s+const\b/g, "")
     .replace(/\s+as\s+[A-Za-z_$][\w$]*(?:\[\])?/g, "")
     .replace(/\)\s*:\s*[^=]+=>/g, ") =>")
+    .replace(/\((\s*\{[^)]*\})\s*:\s*[^)]+?\)/g, "($1)")
     .replace(/\((\s*[A-Za-z_$][\w$]*)\??\s*:\s*[^)=,]+(\s*)\)/g, "($1$2)")
     .replace(/(\b(?:const|let|var)\s+[A-Za-z_$][\w$]*)\s*:\s*[^=;]+=/g, "$1 =");
 }
@@ -180,8 +182,146 @@ const runtime = {
   podman(config = {}) {
     return defineRuntimeProfile({ provider: "other", ...config });
   },
+  daytona(config = {}) {
+    return defineRuntimeProfile({ provider: "daytona", ...config });
+  },
   remote(config = {}) {
     return defineRuntimeProfile({ provider: config.provider || "e2b", ...config });
+  },
+};
+
+function daytona(sandbox, options = {}) {
+  const sandboxData = sandbox && typeof sandbox === "object" ? sandbox : {};
+  const loomData = sandboxData.__loomDaytona && typeof sandboxData.__loomDaytona === "object" ? sandboxData.__loomDaytona : {};
+  const daytonaData = sandboxData.daytona && typeof sandboxData.daytona === "object" ? sandboxData.daytona : {};
+  const optionDaytonaData = options.daytona && typeof options.daytona === "object" ? options.daytona : {};
+  const sandboxId = String(
+    options.sandboxId ||
+      options.sandbox_id ||
+      loomData.sandboxId ||
+      loomData.sandbox_id ||
+      sandboxData.sandboxId ||
+      sandboxData.sandbox_id ||
+      sandboxData.id ||
+      sandboxData.workspaceId ||
+      sandboxData.workspace_id ||
+      "",
+  );
+  const profileName = String(options.profileName || options.profile_name || options.name || loomData.profileName || loomData.profile_name || sandboxData.profileName || sandboxData.profile_name || "");
+  const cwd = String(options.cwd || loomData.cwd || sandboxData.cwd || sandboxData.root || "");
+  const setupCommands = [
+    ...stringArray(firstPresent(options.setupCommands, options.setup_commands)),
+    ...stringArray(firstPresent(options.installCommands, options.install_commands)),
+  ];
+  const env = stringArray(options.env);
+  const repos = stringArray(options.repos);
+  const envVars = firstPresent(
+    options.envVars,
+    options.env_vars,
+    optionDaytonaData.envVars,
+    optionDaytonaData.env_vars,
+    daytonaData.envVars,
+    daytonaData.env_vars,
+  );
+  return {
+    __loomType: "runtime",
+    provider: "daytona",
+    ...(profileName ? { profileName, profile_name: profileName, name: profileName } : {}),
+    ...(cwd ? { cwd } : {}),
+    ...(env.length > 0 ? { env } : {}),
+    ...(repos.length > 0 ? { repos } : {}),
+    workspace: {
+      ...(options.workspace && typeof options.workspace === "object" ? jsonSerializable(options.workspace) : {}),
+      ...(sandboxId ? { providerWorkspaceId: sandboxId, provider_workspace_id: sandboxId } : {}),
+      provider: "daytona",
+    },
+    daytona: compactObjectKeepFalse({
+      ...(jsonSerializable(daytonaData) || {}),
+      ...(jsonSerializable(loomData) || {}),
+      ...(jsonSerializable(optionDaytonaData) || {}),
+      sandbox_id: sandboxId,
+      sandboxId,
+      language: firstPresent(options.language, optionDaytonaData.language, daytonaData.language),
+      image: daytonaImageSpec(firstPresent(options.image, optionDaytonaData.image, daytonaData.image)),
+      snapshot: firstPresent(options.snapshot, loomData.snapshot, sandboxData.snapshot, daytonaData.snapshot),
+      resources: firstPresent(options.resources, optionDaytonaData.resources, daytonaData.resources),
+      env_vars: envVars && typeof envVars === "object" ? stringRecord(envVars) : undefined,
+      auto_stop_interval: optionalNumber(firstPresent(options.autoStopInterval, options.auto_stop_interval, optionDaytonaData.autoStopInterval, optionDaytonaData.auto_stop_interval, daytonaData.autoStopInterval, daytonaData.auto_stop_interval)),
+      auto_archive_interval: optionalNumber(firstPresent(options.autoArchiveInterval, options.auto_archive_interval, optionDaytonaData.autoArchiveInterval, optionDaytonaData.auto_archive_interval, daytonaData.autoArchiveInterval, daytonaData.auto_archive_interval)),
+      auto_delete_interval: optionalNumber(firstPresent(options.autoDeleteInterval, options.auto_delete_interval, optionDaytonaData.autoDeleteInterval, optionDaytonaData.auto_delete_interval, daytonaData.autoDeleteInterval, daytonaData.auto_delete_interval)),
+      ephemeral: firstPresent(options.ephemeral, optionDaytonaData.ephemeral, daytonaData.ephemeral),
+      target: firstPresent(options.target, loomData.target, sandboxData.target, daytonaData.target),
+      api_key_env: firstPresent(options.apiKeyEnv, options.api_key_env, loomData.api_key_env, sandboxData.apiKeyEnv, sandboxData.api_key_env, daytonaData.api_key_env),
+      apiKeyEnv: firstPresent(options.apiKeyEnv, options.api_key_env, loomData.apiKeyEnv, sandboxData.apiKeyEnv, sandboxData.api_key_env, daytonaData.apiKeyEnv),
+      repo_url: firstPresent(options.repoUrl, options.repo_url, options.remoteUrl, options.remote_url),
+      branch: firstPresent(options.branch, options.checkoutBranch, options.checkout_branch, options.gitBranch, options.git_branch),
+      ref: firstPresent(options.ref, options.checkoutRef, options.checkout_ref, options.gitRef, options.git_ref),
+      git_token_env: firstPresent(options.gitTokenEnv, options.git_token_env, options.githubTokenEnv, options.github_token_env, options.gitAuthTokenEnv, options.git_auth_token_env),
+      git_username: firstPresent(options.gitUsername, options.git_username, options.githubUsername, options.github_username),
+      git_deploy_key_env: firstPresent(options.gitDeployKeyEnv, options.git_deploy_key_env, options.deployKeyEnv, options.deploy_key_env, options.sshKeyEnv, options.ssh_key_env),
+      openai_api_key_env: firstPresent(options.openaiApiKeyEnv, options.openai_api_key_env),
+      codex_auth_file_env: firstPresent(options.codexAuthFileEnv, options.codex_auth_file_env),
+      setup_commands: setupCommands.length > 0 ? setupCommands : undefined,
+      create_timeout: optionalNumber(firstPresent(options.createTimeout, options.create_timeout, options.timeout, optionDaytonaData.createTimeout, optionDaytonaData.create_timeout, optionDaytonaData.timeout, daytonaData.createTimeout, daytonaData.create_timeout, daytonaData.timeout)),
+      setup_timeout: optionalNumber(firstPresent(options.setupTimeout, options.setup_timeout)),
+      health_timeout: optionalNumber(firstPresent(options.healthTimeout, options.health_timeout)),
+      run_timeout: optionalNumber(firstPresent(options.runTimeout, options.run_timeout, options.commandTimeout, options.command_timeout)),
+      build_logs: firstPresent(options.buildLogs, options.build_logs, optionDaytonaData.buildLogs, optionDaytonaData.build_logs, daytonaData.buildLogs, daytonaData.build_logs),
+    }),
+  };
+}
+
+function createDaytonaImage(spec) {
+  const current = {
+    __loomType: "daytona_image",
+    ...spec,
+    steps: Array.isArray(spec.steps) ? spec.steps : [],
+  };
+  const withStep = (step) => createDaytonaImage({ ...current, steps: current.steps.concat([compactObject(step)]) });
+  return {
+    ...current,
+    runCommands: (...commands) => withStep({ op: "runCommands", commands: flattenStringArgs(commands) }),
+    run_commands: (...commands) => withStep({ op: "runCommands", commands: flattenStringArgs(commands) }),
+    pipInstall: (...packages) => withStep({ op: "pipInstall", packages: flattenStringArgs(packages) }),
+    pip_install: (...packages) => withStep({ op: "pipInstall", packages: flattenStringArgs(packages) }),
+    pipInstallFromRequirements: (file) => withStep({ op: "pipInstallFromRequirements", file: stringValue(file) }),
+    pip_install_from_requirements: (file) => withStep({ op: "pipInstallFromRequirements", file: stringValue(file) }),
+    pipInstallFromPyproject: (file, options = {}) =>
+      withStep({ op: "pipInstallFromPyproject", file: stringValue(file), options: compactObject(options || {}) }),
+    pip_install_from_pyproject: (file, options = {}) =>
+      withStep({ op: "pipInstallFromPyproject", file: stringValue(file), options: compactObject(options || {}) }),
+    addLocalFile: (source, target) => withStep({ op: "addLocalFile", source: stringValue(source), target: stringValue(target) }),
+    add_local_file: (source, target) => withStep({ op: "addLocalFile", source: stringValue(source), target: stringValue(target) }),
+    addLocalDir: (source, target) => withStep({ op: "addLocalDir", source: stringValue(source), target: stringValue(target) }),
+    add_local_dir: (source, target) => withStep({ op: "addLocalDir", source: stringValue(source), target: stringValue(target) }),
+    env: (vars = {}) => withStep({ op: "env", vars: stringRecord(vars) }),
+    workdir: (dir) => withStep({ op: "workdir", dir: stringValue(dir) }),
+    entrypoint: (value) => withStep({ op: "entrypoint", value: Array.isArray(value) ? stringArray(value) : stringValue(value) }),
+    cmd: (value) => withStep({ op: "cmd", value: Array.isArray(value) ? stringArray(value) : stringValue(value) }),
+    dockerfileCommands: (commands, contextDir) =>
+      withStep({ op: "dockerfileCommands", commands: stringArray(Array.isArray(commands) ? commands : [commands]), contextDir: stringValue(contextDir) }),
+    dockerfile_commands: (commands, contextDir) =>
+      withStep({ op: "dockerfileCommands", commands: stringArray(Array.isArray(commands) ? commands : [commands]), contextDir: stringValue(contextDir) }),
+    user: (value) => withStep({ op: "user", value: stringValue(value) }),
+    toJSON() {
+      const { __loomType, toJSON, ...json } = current;
+      return compactObject(json);
+    },
+  };
+}
+
+const daytonaSDKShim = {
+  Daytona: class Daytona {
+    constructor() {
+      throw new Error("Daytona SDK runtime calls are only available from a provider executor, not during Loom definition compilation");
+    }
+  },
+  Image: {
+    base: (image) => createDaytonaImage({ base: stringValue(image) }),
+    debianSlim: (version) => createDaytonaImage({ base: `debian-slim:${stringValue(version)}` }),
+    debian_slim: (version) => createDaytonaImage({ base: `debian-slim:${stringValue(version)}` }),
+    fromDockerfile: (dockerfile) => createDaytonaImage({ dockerfile: stringValue(dockerfile) }),
+    from_dockerfile: (dockerfile) => createDaytonaImage({ dockerfile: stringValue(dockerfile) }),
   },
 };
 
@@ -252,6 +392,7 @@ function evaluateModule(file) {
     defineWorkflow,
     defineTool,
     defineRuntimeProfile,
+    daytona,
     runtime,
     schema,
     Type,
@@ -262,10 +403,29 @@ function evaluateModule(file) {
   const record = { source: src, value: undefined, exports: module.exports };
   moduleCache.set(file, record);
   vm.runInNewContext(transformSource(src, file), sandbox, { filename: file });
-  record.value = module.exports.default;
+  record.value = module.exports.default || implicitWorkflowFromExports(file, src, module.exports);
   record.exports = module.exports;
   registerExportedSkills(file, src, module.exports);
   return record;
+}
+
+function implicitWorkflowFromExports(file, source, exports) {
+  if (!exports || typeof exports.run !== "function") return undefined;
+  return defineWorkflow({
+    name: stringValue(exports.name || path.basename(file, path.extname(file)) || "workflow"),
+    ...(exports.route ? { route: exports.route } : {}),
+    ...(exports.runtimeProfile ? { runtimeProfile: exports.runtimeProfile } : {}),
+    ...(exports.runtime_profile ? { runtime_profile: exports.runtime_profile } : {}),
+    env: implicitWorkflowEnv(source, exports),
+    run: exports.run,
+  });
+}
+
+function implicitWorkflowEnv(source, exports) {
+  const explicit = stringArray(exports.env);
+  if (Object.prototype.hasOwnProperty.call(exports, "env")) return explicit;
+  if (/@daytona\/sdk/.test(String(source || ""))) return ["DAYTONA_API_KEY"];
+  return [];
 }
 
 function importedBindings(file, src) {
@@ -275,13 +435,36 @@ function importedBindings(file, src) {
     const clause = match[1].trim();
     const spec = match[2].trim();
     if (!spec.startsWith(".")) {
+      if (spec === "@loom/runtime" || spec === "@loom/sdk" || spec === "@flue/runtime") {
+        const loomRuntime = loomRuntimeModule();
+        bindImportClause(out, clause, { value: loomRuntime, exports: loomRuntime });
+      }
       if (spec === "valibot") bindNonRelativeModule(out, clause, schema);
+      if (spec === "@daytona/sdk") bindImportClause(out, clause, { value: daytonaSDKShim, exports: daytonaSDKShim });
       continue;
     }
     const dep = evaluateModule(resolveRelativeImport(file, spec));
     bindImportClause(out, clause, dep);
   }
   return out;
+}
+
+function loomRuntimeModule() {
+  return {
+    Type,
+    createAgent,
+    daytona,
+    defineAgent,
+    defineAgentProfile,
+    defineConfig,
+    defineRuntimeProfile,
+    defineSkill,
+    defineTool,
+    defineWorkflow,
+    runtime,
+    schema,
+    trigger,
+  };
 }
 
 function bindNonRelativeModule(out, clause, value) {
@@ -318,6 +501,7 @@ function bindNamedImports(out, clause, dep) {
   for (const part of inner.split(",")) {
     const item = part.trim();
     if (!item) continue;
+    if (item === "type" || item.startsWith("type ")) continue;
     const [imported, local] = item.split(/\s+as\s+/);
     const importedName = imported.trim();
     const localName = (local || imported).trim();
@@ -462,16 +646,26 @@ function projectConfig() {
 }
 
 function sourceRootDir(config = projectConfig()) {
-  const sourceRoot = stringValue(config.sourceRoot || ".loom");
+  const configured = Object.prototype.hasOwnProperty.call(config, "sourceRoot");
+  const sourceRoot = configured ? stringValue(config.sourceRoot) : defaultSourceRoot();
   if (sourceRoot === "" || path.isAbsolute(sourceRoot)) {
     throw new Error("loom.config.ts sourceRoot must be a relative path");
   }
   return path.join(root, sourceRoot);
 }
 
+function defaultSourceRoot() {
+  const loomRoot = path.join(root, ".loom");
+  const flueRoot = path.join(root, ".flue");
+  if (authoredEntrypoints(loomRoot).length === 0 && authoredEntrypoints(flueRoot).length > 0) {
+    return ".flue";
+  }
+  return ".loom";
+}
+
 function rejectMixedSourceRoots(selectedRoot) {
   const selected = path.resolve(selectedRoot);
-  const candidates = [path.join(root, ".loom"), root];
+  const candidates = [path.join(root, ".loom"), path.join(root, ".flue"), root];
   for (const candidate of candidates) {
     const resolved = path.resolve(candidate);
     if (resolved === selected) continue;
@@ -549,9 +743,29 @@ function stringValue(v) {
   return String(v).trim();
 }
 
+function firstPresent(...values) {
+  for (const value of values) {
+    if (value !== undefined && value !== null && value !== "") return value;
+  }
+  return undefined;
+}
+
 function stringArray(v) {
   if (!Array.isArray(v)) return [];
   return v.map((item) => stringValue(item)).filter(Boolean);
+}
+
+function flattenStringArgs(values) {
+  return values.flatMap((item) => (Array.isArray(item) ? item : [item])).map((item) => stringValue(item)).filter(Boolean);
+}
+
+function jsonSerializable(value) {
+  if (value === undefined) return undefined;
+  return JSON.parse(JSON.stringify(value));
+}
+
+function optionalNumber(value) {
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
 }
 
 function uniqueStrings(values) {
@@ -640,7 +854,7 @@ function agentModule(file) {
   if (!value || value.__loomType !== "agent") {
     throw new Error(`${file}: default export must be defineAgent(...) or createAgent(...)`);
   }
-  const rt = value.runtime || {};
+  const rt = value.runtime && typeof value.runtime === "object" ? value.runtime : {};
   return {
     name: stringValue(value.name),
     description: stringValue(value.description),
@@ -657,6 +871,10 @@ function agentModule(file) {
     denied_commands: stringArray(value.deniedCommands || (value.policy && value.policy.deniedCommands)),
     repos: stringArray(value.repos).concat(stringArray(rt.repos)),
     env: stringArray(value.env).concat(stringArray(rt.env)),
+    runtime_provider: stringValue(rt.provider),
+    runtime_profile_name: runtimeProfileName(value),
+    runtime_cwd: stringValue(rt.cwd),
+    runtime_daytona: daytonaRuntimeConfig(rt),
     max_concurrency: numberValue(value.maxConcurrency || (value.policy && value.policy.maxConcurrency)),
     max_budget_usd:
       typeof value.maxBudgetUSD === "number"
@@ -725,7 +943,8 @@ function runtimeModule(file) {
     source_path: file,
     source_hash: hash,
     provider: stringValue(value.provider || "local"),
-    image: stringValue(value.image),
+    image: typeof value.image === "string" ? stringValue(value.image) : "",
+    daytona: daytonaRuntimeConfig(value),
     repos: stringArray(value.repos),
     env: stringArray(value.env),
     cpu: stringValue(value.cpu),
@@ -736,6 +955,76 @@ function runtimeModule(file) {
   };
   module.capabilities = runtimeCapabilities(value, module);
   return module;
+}
+
+function daytonaRuntimeConfig(value) {
+  const provider = stringValue(value.provider || "local");
+  const source = value.daytona && typeof value.daytona === "object" ? value.daytona : {};
+  const imageSpec = daytonaImageSpec(value.image !== undefined ? value.image : source.image);
+  const resources = compactObject({
+    cpu: optionalNumber((value.resources && value.resources.cpu) || source.cpu || (source.resources && source.resources.cpu)),
+    memory: optionalNumber((value.resources && value.resources.memory) || source.memory || (source.resources && source.resources.memory)),
+    disk: optionalNumber((value.resources && value.resources.disk) || source.disk || (source.resources && source.resources.disk)),
+  });
+  const envVars =
+    value.envVars && typeof value.envVars === "object"
+      ? stringRecord(value.envVars)
+      : source.envVars && typeof source.envVars === "object"
+        ? stringRecord(source.envVars)
+        : source.env_vars && typeof source.env_vars === "object"
+          ? stringRecord(source.env_vars)
+          : {};
+  const config = compactObjectKeepFalse({
+    language: stringValue(value.language || source.language),
+    image: imageSpec,
+    snapshot: stringValue(value.snapshot || source.snapshot),
+    resources,
+    env_vars: envVars,
+    auto_stop_interval: optionalNumber(value.autoStopInterval ?? value.auto_stop_interval ?? source.autoStopInterval ?? source.auto_stop_interval),
+    auto_archive_interval: optionalNumber(
+      value.autoArchiveInterval ?? value.auto_archive_interval ?? source.autoArchiveInterval ?? source.auto_archive_interval,
+    ),
+    auto_delete_interval: optionalNumber(value.autoDeleteInterval ?? value.auto_delete_interval ?? source.autoDeleteInterval ?? source.auto_delete_interval),
+    ephemeral: typeof value.ephemeral === "boolean" ? value.ephemeral : typeof source.ephemeral === "boolean" ? source.ephemeral : undefined,
+    target: stringValue(value.target || source.target),
+    api_url: stringValue(value.apiUrl || value.api_url || source.apiUrl || source.api_url),
+    api_key_env: stringValue(value.apiKeyEnv || value.api_key_env || source.apiKeyEnv || source.api_key_env),
+    repo_url: stringValue(value.repoUrl || value.repo_url || value.remoteUrl || value.remote_url || source.repoUrl || source.repo_url || source.remoteUrl || source.remote_url),
+    branch: stringValue(
+      value.branch || value.checkoutBranch || value.checkout_branch || value.gitBranch || value.git_branch ||
+        source.branch || source.checkoutBranch || source.checkout_branch || source.gitBranch || source.git_branch,
+    ),
+    ref: stringValue(value.ref || value.checkoutRef || value.checkout_ref || value.gitRef || value.git_ref || source.ref || source.checkoutRef || source.checkout_ref || source.gitRef || source.git_ref),
+    git_token_env: stringValue(
+      value.gitTokenEnv || value.git_token_env || value.githubTokenEnv || value.github_token_env || value.gitAuthTokenEnv || value.git_auth_token_env ||
+        source.gitTokenEnv || source.git_token_env || source.githubTokenEnv || source.github_token_env || source.gitAuthTokenEnv || source.git_auth_token_env,
+    ),
+    git_username: stringValue(value.gitUsername || value.git_username || value.githubUsername || value.github_username || source.gitUsername || source.git_username || source.githubUsername || source.github_username),
+    git_deploy_key_env: stringValue(
+      value.gitDeployKeyEnv || value.git_deploy_key_env || value.deployKeyEnv || value.deploy_key_env || value.sshKeyEnv || value.ssh_key_env ||
+        source.gitDeployKeyEnv || source.git_deploy_key_env || source.deployKeyEnv || source.deploy_key_env || source.sshKeyEnv || source.ssh_key_env,
+    ),
+    openai_api_key_env: stringValue(value.openaiApiKeyEnv || value.openai_api_key_env || source.openaiApiKeyEnv || source.openai_api_key_env),
+    codex_auth_file_env: stringValue(value.codexAuthFileEnv || value.codex_auth_file_env || source.codexAuthFileEnv || source.codex_auth_file_env),
+    setup_commands: [
+      ...stringArray(value.setupCommands || value.setup_commands || source.setupCommands || source.setup_commands),
+      ...stringArray(value.installCommands || value.install_commands || source.installCommands || source.install_commands),
+    ],
+    create_timeout: optionalNumber(value.createTimeout ?? value.create_timeout ?? value.timeout ?? source.createTimeout ?? source.create_timeout ?? source.timeout),
+    setup_timeout: optionalNumber(value.setupTimeout ?? value.setup_timeout ?? source.setupTimeout ?? source.setup_timeout),
+    health_timeout: optionalNumber(value.healthTimeout ?? value.health_timeout ?? source.healthTimeout ?? source.health_timeout),
+    run_timeout: optionalNumber(value.runTimeout ?? value.run_timeout ?? value.commandTimeout ?? value.command_timeout ?? source.runTimeout ?? source.run_timeout ?? source.commandTimeout ?? source.command_timeout),
+    build_logs: stringValue(value.buildLogs || value.build_logs || source.buildLogs || source.build_logs),
+  });
+  if (provider !== "daytona" && Object.keys(config).length === 0) return undefined;
+  return config;
+}
+
+function daytonaImageSpec(value) {
+  if (value == null || value === "") return undefined;
+  if (typeof value === "string") return value;
+  if (typeof value !== "object") return stringValue(value);
+  return jsonSerializable(value);
 }
 
 function runtimeWorkspacePolicy(value) {
@@ -893,7 +1182,7 @@ function compactObjectKeepFalse(item) {
     if (v === undefined || v === null) continue;
     if (Array.isArray(v) && v.length === 0) continue;
     if (v && typeof v === "object" && !Array.isArray(v) && Object.keys(v).length === 0) continue;
-    if (v === "" || v === 0) continue;
+    if (v === "") continue;
     out[k] = v;
   }
   return out;

@@ -26,6 +26,9 @@ type AgentProcess struct {
 	LogFile                *os.File          // log file handle for subprocess output (nil if not logging)
 	LogFilePath            string            // path to agent log file for watchdog stat checks
 	TranscriptPath         string            // path to session transcript.jsonl for watchdog liveness (set by superviseAgent)
+	DaytonaSandboxID       string            // provider sandbox id for Daytona-backed agent runs
+	DaytonaRuntimePhase    string            // provider runtime phase for Daytona-backed agent runs
+	DaytonaCleanupState    string            // provider cleanup state for Daytona-backed agent runs
 	Session                *sessions.Session // daemon-created session handle (nil when no session active)
 	AgentSessionID         string            // fleet-db control-plane session id (empty when no session active)
 	ParentSessionID        string            // lead/orchestration session that requested this run (empty when unattached)
@@ -60,7 +63,7 @@ type AgentProcess struct {
 
 	StopReason StopReason // why the agent was stopped (set at decision site, empty while running)
 
-	Mu sync.Mutex // protects Cmd, Pid, LogFile, restart tracking, AssignedEpicID, AssignedTaskID, RequestedTaskID, LastError, CurrentBackendIdx, Session, AgentSessionID, ParentSessionID, AgentLeaseID, AgentLeaseToken, ownership fields, TranscriptPath, BeforeRef, StopReason, LastActivity
+	Mu sync.Mutex // protects Cmd, Pid, LogFile, restart tracking, AssignedEpicID, AssignedTaskID, RequestedTaskID, LastError, CurrentBackendIdx, Session, AgentSessionID, ParentSessionID, AgentLeaseID, AgentLeaseToken, ownership fields, TranscriptPath, DaytonaSandboxID, DaytonaRuntimePhase, DaytonaCleanupState, BeforeRef, StopReason, LastActivity
 }
 
 // StopReason identifies why an agent was stopped.
@@ -131,6 +134,10 @@ type SupervisedAgentStatus struct {
 	OwnershipLastHeartbeat time.Time
 	AssignedTaskID         string    // task currently claimed by this agent (empty when between tasks)
 	LastActivity           time.Time // most recent PTY output observed by the wrapper; zero if no observation yet
+	RuntimeProvider        string
+	RuntimePhase           string
+	RuntimeCleanupState    string
+	DaytonaSandboxID       string
 }
 
 // BuiltInRoles defines the built-in role names that use loom <role> command.
