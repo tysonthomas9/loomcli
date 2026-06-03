@@ -175,6 +175,12 @@ func defaultFlueInteractiveInvoker(workDir, prompt, agentName string) error {
 }
 
 func defaultFlueNonInteractiveInvoker(workDir, prompt, agentName string, shutdown <-chan struct{}, collector *usage.Collector) error {
+	// LOOM_FLUE_SANDBOX=daytona runs the task in a fresh remote Daytona sandbox
+	// and patch-syncs the result back into the local worktree (proposal Phase 2).
+	if resolveFlueSandbox() == "daytona" {
+		return runFlueDaytonaTask(workDir, prompt, agentName, shutdown, collector)
+	}
+
 	flueBin, projectDir, err := flue.DefaultManager().EnsureProject(context.Background())
 	if err != nil {
 		return err

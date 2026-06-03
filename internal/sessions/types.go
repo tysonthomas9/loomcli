@@ -58,6 +58,22 @@ type SessionRecord struct {
 	// Retry context
 	AttemptNum int    `json:"attempt_num"`
 	ErrorClass string `json:"error_class,omitempty"`
+
+	// Runtime captures non-local execution metadata. nil for ordinary local
+	// worktree runs; set when the agent ran in a remote sandbox (e.g. a Flue
+	// Daytona-per-task run whose changes were patch-synced back).
+	Runtime *RuntimeMetadata `json:"runtime,omitempty"`
+}
+
+// RuntimeMetadata records where and how an agent run executed when it differs
+// from loom's default local-worktree model. See
+// docs/design/flue-daytona-runtime-proposal.md (Phase 2, "Session metadata").
+type RuntimeMetadata struct {
+	Provider     string `json:"provider,omitempty"`      // sandbox provider, e.g. "daytona"
+	SandboxID    string `json:"sandbox_id,omitempty"`    // remote sandbox identifier
+	RemoteCwd    string `json:"remote_cwd,omitempty"`    // working dir inside the sandbox
+	BaseRef      string `json:"base_ref,omitempty"`      // commit the sandbox was hydrated to
+	SyncStrategy string `json:"sync_strategy,omitempty"` // "patch-back" | "branch-push" | "none"
 }
 
 // SessionMetadata is the mutable state in sessions/<id>/metadata.json.
@@ -107,6 +123,9 @@ type FinalizeOptions struct {
 
 	// Error context
 	ErrorClass string `json:"error_class,omitempty"`
+
+	// Runtime is optional non-local execution metadata (e.g. Daytona sandbox).
+	Runtime *RuntimeMetadata `json:"runtime,omitempty"`
 }
 
 // DiffStats summarizes the git diff for a session.

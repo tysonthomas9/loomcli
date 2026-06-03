@@ -64,6 +64,11 @@ func (s *Session) Finalize(opts FinalizeOptions) error {
 	// Set error context.
 	s.Meta.ErrorClass = opts.ErrorClass
 
+	// Record non-local runtime metadata (e.g. Daytona sandbox) when present.
+	if opts.Runtime != nil {
+		s.Meta.Runtime = opts.Runtime
+	}
+
 	// Ensure schema version is current before writing to disk.
 	normalizeRecord(&s.Meta.SessionRecord)
 

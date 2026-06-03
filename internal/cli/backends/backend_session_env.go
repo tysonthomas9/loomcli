@@ -7,6 +7,7 @@ import (
 	"sync"
 
 	"github.com/tysonthomas9/loomcli/internal/cli"
+	"github.com/tysonthomas9/loomcli/internal/sessions"
 )
 
 // Thread-safe package-level state for active session env vars.
@@ -78,6 +79,38 @@ func ClearLastCapturedSessionID() {
 	resumeMu.Lock()
 	defer resumeMu.Unlock()
 	lastCapturedSessionID = ""
+}
+
+// Thread-safe package-level state for non-local runtime metadata (e.g. a Flue
+// Daytona-per-task sandbox). Set by the backend invoker during the run and read
+// by the session finalizer, mirroring lastCapturedSessionID above.
+var (
+	runtimeMetaMu       sync.RWMutex
+	lastRuntimeMetadata *sessions.RuntimeMetadata
+)
+
+// SetLastRuntimeMetadata records the sandbox/runtime metadata for the most
+// recent non-interactive invocation so the finalizer can attach it to the
+// session record. Thread-safe.
+func SetLastRuntimeMetadata(m *sessions.RuntimeMetadata) {
+	runtimeMetaMu.Lock()
+	defer runtimeMetaMu.Unlock()
+	lastRuntimeMetadata = m
+}
+
+// GetLastRuntimeMetadata returns the runtime metadata captured from the most
+// recent non-interactive invocation, or nil for ordinary local runs. Thread-safe.
+func GetLastRuntimeMetadata() *sessions.RuntimeMetadata {
+	runtimeMetaMu.RLock()
+	defer runtimeMetaMu.RUnlock()
+	return lastRuntimeMetadata
+}
+
+// ClearLastRuntimeMetadata clears the captured runtime metadata. Thread-safe.
+func ClearLastRuntimeMetadata() {
+	runtimeMetaMu.Lock()
+	defer runtimeMetaMu.Unlock()
+	lastRuntimeMetadata = nil
 }
 
 // SetActiveSessionRuntimeEnv sets the workspace runtime directory and session ID that will be

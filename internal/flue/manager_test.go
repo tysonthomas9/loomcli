@@ -76,6 +76,7 @@ func TestScaffoldTemplateWritesProjectFiles(t *testing.T) {
 		"flue.config.ts",
 		filepath.Join(".flue", "app.ts"),
 		filepath.Join(".flue", "workflows", "agent.ts"),
+		filepath.Join(".flue", "workflows", "runner.ts"),
 		filepath.Join(".flue", "agents", "lead.ts"),
 		filepath.Join(".flue", "connectors", "daytona.ts"),
 	}
