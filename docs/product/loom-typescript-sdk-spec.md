@@ -259,6 +259,87 @@ already has.
 
 Each phase is independently shippable; A+B deliver value with no auth work.
 
+## Validation & exit criteria
+
+A phase is "done" only when every validation step below passes. The PRD is done
+when all four phases pass and the Definition of Done holds.
+
+### Phase A — SDK generation
+**Exit criteria**
+- `@loom/sdk` builds and type-checks; request/response types are generated from
+  `api/openapi.yaml` (no hand-written shapes).
+- The drift gate fails CI when the spec changes without regenerating the SDK.
+
+**Validation steps**
+1. On a clean checkout, run the generator → `git diff` is empty (SDK in sync).
+2. Edit a field in `api/openapi.yaml` without regenerating →
+   `check-openapi-staleness` (extended to the SDK) fails CI.
+3. The Flue template build imports `@loom/sdk` and compiles.
+
+### Phase B — Read path
+**Exit criteria**
+- A runner fetches title/description/design/AC via `getTask()` using only the
+  bootstrap capability.
+- The Go-side design-inlining workaround is removed.
+
+**Validation steps**
+1. Run a daytona-task whose injected payload carries **no task contents** (only
+   the bootstrap) → the agent receives the design via the SDK and makes the
+   change (`files_changed ≥ 1`).
+2. `grep` confirms `buildSandboxPrompt` design-inlining and the task-content
+   fields of `runnerInput` are deleted.
+3. A run with the server unreachable fails fast with a clear error (no silent
+   empty run).
+
+### Phase C — Write path + auth
+**Exit criteria**
+- Runner reports status/logs/usage/artifacts and completes/fails/blocks via the
+  SDK; `LOOMRUNNER` data-plane events are removed.
+- `loom serve` mints scoped per-TaskRun tokens and enforces fencing.
+
+**Validation steps**
+1. A completed Daytona run closes its task via the SDK → the daemon does **not**
+   re-claim it (no orphan loop), verified over ≥ 2 supervise cycles.
+2. Duplicate-runner test: two runners on one TaskRun → the stale-fencing-token
+   writer is rejected (HTTP 409) and stops; the current holder completes.
+3. Scope test: the TaskRun token cannot read a different task (403) or claim new
+   work (403).
+4. The sandbox holds no fleetdb credentials and can reach only `loom serve`
+   (network policy; no `X-Actor` fleetdb key present).
+5. Lease-loss test: after the lease expires, SDK calls fail closed (no refresh).
+
+### Phase D — Artifacts as source of truth
+**Exit criteria**
+- The runner branch-pushes or uploads the result and registers an `Artifact`
+  ref on the TaskRun; host patch-back is opt-in only.
+
+**Validation steps**
+1. After a run, the `AgentSession`/TaskRun carries an `Artifact` with a
+   resolvable URI (commit SHA / branch ref / patch object).
+2. A fresh client with **no local worktree** retrieves the result from the
+   server alone (server-visible source of truth).
+3. Phase-4 smoke: a server-scheduled TaskRun (no developer worktree) produces
+   server-visible artifacts end to end.
+
+## Definition of Done
+
+The PRD is complete — not merely "the SDK was written" — when all hold:
+
+- A Flue runner in a remote Daytona sandbox completes a real task end to end
+  using **only** the bootstrap capability: no task contents in the payload, no
+  `loom`/`bd` CLI in the sandbox, no design-inlining, and host patch-back is not
+  the contract.
+- The task is **auto-closed** by the run; no orphan/re-claim loop.
+- The result is a **server-visible `Artifact`** on the TaskRun, retrievable
+  without a local worktree.
+- **Fencing is enforced:** a stale-token writer is rejected; the lease holder
+  wins (duplicate-runner test green).
+- **One generated contract** remains — no `runnerInput`/`RunnerInput`/
+  `LOOMRUNNER` triple-mirror — and the drift gate is green in CI.
+- fleetdb is **never directly reachable** from a sandbox.
+- The gated integration test above runs green in CI, or a documented manual
+  runbook exists where CI cannot reach Daytona.
+
 ## Risks & open questions
 
 1. **Auth is the critical path.** Scoped per-TaskRun tokens + server-side
@@ -282,20 +363,6 @@ Each phase is independently shippable; A+B deliver value with no auth work.
    but loom is still Go and the runner still TS/Node; this is not in-process.
 7. Does `loom serve`'s current OpenAPI cover the full TaskRun write surface
    (artifacts, comment, complete/fail/block), or must endpoints be added first?
-
-## Success metrics / acceptance criteria
-
-- A Flue runner completes a task using **only** the bootstrap capability — no
-  task contents passed in, no `loom` CLI in the sandbox, no design-inlining.
-- The `runnerInput` blob and the `LOOMRUNNER` data-plane events are removed; one
-  generated contract remains, guarded by the staleness check.
-- A completed Daytona run **closes its task** via the SDK (no orphan/re-claim
-  loop) and posts a server-visible `Artifact` for the result.
-- A runner with a **stale fencing token is rejected** (409) and stops; a runner
-  with a valid token completes — verified with a duplicate-runner test.
-- The SDK targets `loom serve`; fleetdb is never directly reachable from a
-  sandbox (verified by network policy / the sandbox holding no fleetdb creds).
-- Drift gate: changing `api/openapi.yaml` without regenerating the SDK fails CI.
 
 ## Recommended next step
 
