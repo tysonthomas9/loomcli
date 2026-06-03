@@ -48,18 +48,19 @@ func (s *Supervisor) buildSandboxCommand(ap *AgentProcess) (*exec.Cmd, error) {
 		return nil, fmt.Errorf("sandbox push branch %q: %w", branch, err)
 	}
 
-	loomBin, err := sandbox.ResolveLoomBinary()
-	if err != nil {
-		return nil, err
+	cfg := sandbox.DefaultConfig()
+	if cfg.Backend == "" {
+		cfg.Backend = s.GetEffectiveBackend(ap)
+	}
+	var loomBin string
+	if cfg.UploadsLoom() {
+		if loomBin, err = sandbox.ResolveLoomBinary(); err != nil {
+			return nil, err
+		}
 	}
 	fleetEnv, revoke, err := s.provisionSandboxCredential(ap)
 	if err != nil {
 		return nil, err
-	}
-
-	cfg := sandbox.DefaultConfig()
-	if cfg.Backend == "" {
-		cfg.Backend = s.GetEffectiveBackend(ap)
 	}
 
 	name := fmt.Sprintf("loom-%s-%x", ap.Entry.Worktree, time.Now().UnixMilli())
@@ -72,10 +73,12 @@ func (s *Supervisor) buildSandboxCommand(ap *AgentProcess) (*exec.Cmd, error) {
 	if err := sandbox.RunOpenshell(sandbox.BuildCreateArgs(name, cfg)); err != nil {
 		return nil, fmt.Errorf("sandbox create: %w", err)
 	}
-	if err := sandbox.RunOpenshell([]string{"sandbox", "upload", name, loomBin, sandbox.LoomPath}); err != nil {
-		return nil, fmt.Errorf("sandbox upload loom: %w", err)
+	if cfg.UploadsLoom() {
+		if err := sandbox.RunOpenshell([]string{"sandbox", "upload", name, loomBin, sandbox.LoomPath}); err != nil {
+			return nil, fmt.Errorf("sandbox upload loom: %w", err)
+		}
 	}
-	scriptPath, cleanup, err := sandbox.WriteBootstrapScript(s.buildSandboxBootstrap(ap, branch, repoURL, fleetEnv, cfg.Backend))
+	scriptPath, cleanup, err := sandbox.WriteBootstrapScript(s.buildSandboxBootstrap(ap, branch, repoURL, fleetEnv, cfg))
 	if err != nil {
 		return nil, err
 	}
@@ -172,10 +175,12 @@ func (s *Supervisor) provisionSandboxCredential(ap *AgentProcess) (sandboxFleetE
 
 // buildSandboxBootstrap builds the in-container script: clone the branch, point
 // at fleet-db with the scoped credential, run the agent, push the work back.
-func (s *Supervisor) buildSandboxBootstrap(ap *AgentProcess, branch, repoURL string, env sandboxFleetEnv, backend string) string {
+func (s *Supervisor) buildSandboxBootstrap(ap *AgentProcess, branch, repoURL string, env sandboxFleetEnv, cfg sandbox.Config) string {
 	var sb strings.Builder
 	sb.WriteString("set -e\n")
-	sb.WriteString("chmod +x " + sandbox.LoomPath + "\n")
+	if cfg.UploadsLoom() {
+		sb.WriteString("chmod +x " + sandbox.LoomPath + "\n")
+	}
 	sb.WriteString("export GIT_SSL_NO_VERIFY=1\n")
 	sb.WriteString(fmt.Sprintf("git clone --branch %s --single-branch %s /sandbox/repo\n",
 		sandbox.ShellQuote(branch), sandbox.ShellQuote(repoURL)))
@@ -192,7 +197,7 @@ func (s *Supervisor) buildSandboxBootstrap(ap *AgentProcess, branch, repoURL str
 			sb.WriteString("export " + kv.k + "=" + sandbox.ShellQuote(kv.v) + "\n")
 		}
 	}
-	sb.WriteString(sandboxLoomInvocation(ap, backend) + "\n")
+	sb.WriteString(sandboxLoomInvocation(ap, cfg) + "\n")
 	sb.WriteString("git add -A\n")
 	sb.WriteString(fmt.Sprintf("git diff --cached --quiet || git commit -m %s\n",
 		sandbox.ShellQuote(fmt.Sprintf("sandbox agent work [%s]", branch))))
@@ -204,10 +209,10 @@ func (s *Supervisor) buildSandboxBootstrap(ap *AgentProcess, branch, repoURL str
 // omits --daemon-mode: the container has no daemon, IPC socket, or host
 // transcript — the host supervisor manages lifecycle via the openshell exec
 // process. Mirrors buildAgentExecCmd's role logic otherwise.
-func sandboxLoomInvocation(ap *AgentProcess, backend string) string {
+func sandboxLoomInvocation(ap *AgentProcess, cfg sandbox.Config) string {
 	q := sandbox.ShellQuote
 	const repo = "/sandbox/repo"
-	parts := []string{sandbox.LoomPath}
+	parts := []string{cfg.LoomCmd()}
 	if BuiltInRoles[ap.Entry.Role] {
 		parts = append(parts, q(ap.Entry.Role), q(repo), "--auto")
 	} else {
@@ -216,8 +221,8 @@ func sandboxLoomInvocation(ap *AgentProcess, backend string) string {
 			parts = append(parts, "--task-filter", q(ap.RoleConfig.TaskFilter))
 		}
 	}
-	if backend != "" {
-		parts = append(parts, "--backend", q(backend))
+	if cfg.Backend != "" {
+		parts = append(parts, "--backend", q(cfg.Backend))
 	}
 	ap.Mu.Lock()
 	epicID := ap.AssignedEpicID

@@ -5,11 +5,12 @@ import (
 	"testing"
 
 	cfgpkg "github.com/tysonthomas9/loomcli/internal/cli/config"
+	"github.com/tysonthomas9/loomcli/internal/sandbox"
 )
 
 func TestSandboxLoomInvocation_BuiltInRole(t *testing.T) {
 	ap := &AgentProcess{Entry: cfgpkg.AgentEntry{Worktree: "coder", Role: "task", Execution: "sandbox"}}
-	got := sandboxLoomInvocation(ap, "playground")
+	got := sandboxLoomInvocation(ap, sandbox.Config{Backend: "playground"})
 	want := "/sandbox/loom 'task' '/sandbox/repo' --auto --backend 'playground'"
 	if got != want {
 		t.Errorf("got %q\nwant %q", got, want)
@@ -26,7 +27,7 @@ func TestSandboxLoomInvocation_CustomRole(t *testing.T) {
 		Entry:      cfgpkg.AgentEntry{Worktree: "researcher", Role: "deep", Execution: "sandbox"},
 		RoleConfig: cfgpkg.RoleConfig{PromptFile: "p.md", TaskFilter: "label:research"},
 	}
-	got := sandboxLoomInvocation(ap, "")
+	got := sandboxLoomInvocation(ap, sandbox.Config{})
 	for _, want := range []string{"agent '/sandbox/repo'", "--prompt 'p.md'", "--task-filter 'label:research'", "--auto"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("invocation %q missing %q", got, want)
@@ -43,7 +44,7 @@ func TestBuildSandboxBootstrap_ScopedFleetEnv(t *testing.T) {
 		URL: "http://host.docker.internal:18099", Key: "sk-dev",
 		Actor: "sandbox:WS1:coder:1", Workspace: "WS1",
 	}
-	script := (&Supervisor{}).buildSandboxBootstrap(ap, "feature/x", "http://host.docker.internal:9418/r.git", env, "playground")
+	script := (&Supervisor{}).buildSandboxBootstrap(ap, "feature/x", "http://host.docker.internal:9418/r.git", env, sandbox.Config{Backend: "playground"})
 
 	for _, want := range []string{
 		"git clone --branch 'feature/x' --single-branch 'http://host.docker.internal:9418/r.git' /sandbox/repo\n",

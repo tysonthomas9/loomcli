@@ -3,6 +3,8 @@ package agent
 import (
 	"strings"
 	"testing"
+
+	"github.com/tysonthomas9/loomcli/internal/sandbox"
 )
 
 func TestSandboxCloneURL(t *testing.T) {
@@ -26,7 +28,7 @@ func TestBuildOneshotCommand_FullScript(t *testing.T) {
 		FleetDBURL: "http://host.docker.internal:8080", FleetDBKey: "sk-dev",
 		FleetDBActor: "sandbox:ws-123:falcon:1", WorkspaceID: "ws-123",
 	}
-	script := buildOneshotCommand("feature/x", cfg, "https://github.com/o/r.git", "claude")
+	script := buildOneshotCommand("feature/x", cfg, "https://github.com/o/r.git", sandbox.Config{Backend: "claude"})
 
 	wants := []string{
 		"set -e\n",
@@ -61,7 +63,7 @@ func TestBuildOneshotCommand_FullScript(t *testing.T) {
 
 func TestBuildOneshotCommand_NoBackendNoParent(t *testing.T) {
 	cfg := SandboxOneshotConfig{AgentType: "plan", AgentName: "nova"}
-	script := buildOneshotCommand("main", cfg, "git@x:o/r.git", "")
+	script := buildOneshotCommand("main", cfg, "git@x:o/r.git", sandbox.Config{})
 
 	if !strings.Contains(script, "/sandbox/loom 'plan' 'worktrees/nova'\n") {
 		t.Errorf("expected bare loom invocation without flags\n%s", script)

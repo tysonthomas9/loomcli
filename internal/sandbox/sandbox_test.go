@@ -145,3 +145,30 @@ func TestHostGateway(t *testing.T) {
 		}
 	})
 }
+
+func TestConfigBakedLoom(t *testing.T) {
+	t.Run("upload by default", func(t *testing.T) {
+		c := Config{}
+		if !c.UploadsLoom() {
+			t.Error("empty LoomBinPath => must upload loom")
+		}
+		if c.LoomCmd() != LoomPath {
+			t.Errorf("LoomCmd = %q, want %q", c.LoomCmd(), LoomPath)
+		}
+	})
+	t.Run("baked image skips upload", func(t *testing.T) {
+		c := Config{LoomBinPath: "/usr/local/bin/loom"}
+		if c.UploadsLoom() {
+			t.Error("LoomBinPath set => loom baked, no upload")
+		}
+		if c.LoomCmd() != "/usr/local/bin/loom" {
+			t.Errorf("LoomCmd = %q, want the baked path", c.LoomCmd())
+		}
+	})
+	t.Run("DefaultConfig reads LOOM_SANDBOX_LOOM_PATH", func(t *testing.T) {
+		t.Setenv("LOOM_SANDBOX_LOOM_PATH", "/opt/loom")
+		if c := DefaultConfig(); c.LoomBinPath != "/opt/loom" || c.UploadsLoom() {
+			t.Errorf("baked path not honored: %+v", c)
+		}
+	})
+}

@@ -136,17 +136,19 @@ func pushSandboxBranch(worktreePath, branch string) error {
 // v0.0.53 flow (see package sandbox): create (keep-alive, trivial command) →
 // upload loom → upload bootstrap → exec it. Returns the agent's exit code.
 func runSandboxAgent(name string, cfg sandbox.Config, branch string, oneshot SandboxOneshotConfig, repoURL string) (int, error) {
-	loomBin, err := sandbox.ResolveLoomBinary()
-	if err != nil {
-		return 0, err
-	}
 	if err := sandbox.RunOpenshell(sandbox.BuildCreateArgs(name, cfg)); err != nil {
 		return 0, fmt.Errorf("openshell sandbox create: %w", err)
 	}
-	if err := sandbox.RunOpenshell([]string{"sandbox", "upload", name, loomBin, sandbox.LoomPath}); err != nil {
-		return 0, fmt.Errorf("openshell sandbox upload loom: %w", err)
+	if cfg.UploadsLoom() {
+		loomBin, err := sandbox.ResolveLoomBinary()
+		if err != nil {
+			return 0, err
+		}
+		if err := sandbox.RunOpenshell([]string{"sandbox", "upload", name, loomBin, sandbox.LoomPath}); err != nil {
+			return 0, fmt.Errorf("openshell sandbox upload loom: %w", err)
+		}
 	}
-	scriptPath, cleanup, err := sandbox.WriteBootstrapScript(buildOneshotCommand(branch, oneshot, repoURL, cfg.Backend))
+	scriptPath, cleanup, err := sandbox.WriteBootstrapScript(buildOneshotCommand(branch, oneshot, repoURL, cfg))
 	if err != nil {
 		return 0, err
 	}
@@ -332,10 +334,12 @@ func isSandboxProjectRoot(dir string) bool {
 
 // buildOneshotCommand builds the shell bootstrap script run inside the sandbox:
 // clone the branch, run loom, then commit and push the code changes back.
-func buildOneshotCommand(branch string, oneshot SandboxOneshotConfig, repoURL, backendOverride string) string {
+func buildOneshotCommand(branch string, oneshot SandboxOneshotConfig, repoURL string, cfg sandbox.Config) string {
 	var sb strings.Builder
 	sb.WriteString("set -e\n")
-	sb.WriteString("chmod +x " + sandbox.LoomPath + "\n")
+	if cfg.UploadsLoom() {
+		sb.WriteString("chmod +x " + sandbox.LoomPath + "\n")
+	}
 	// The OpenShell proxy intercepts HTTPS but its CA cert isn't in the container
 	// trust store, so disable git SSL verification for sandbox network operations.
 	sb.WriteString("export GIT_SSL_NO_VERIFY=1\n")
@@ -362,10 +366,10 @@ func buildOneshotCommand(branch string, oneshot SandboxOneshotConfig, repoURL, b
 		sb.WriteString("export LOOM_WORKSPACE=" + sandbox.ShellQuote(oneshot.WorkspaceID) + "\n")
 	}
 
-	loomCmd := fmt.Sprintf("%s %s %s", sandbox.LoomPath,
+	loomCmd := fmt.Sprintf("%s %s %s", cfg.LoomCmd(),
 		sandbox.ShellQuote(oneshot.AgentType), sandbox.ShellQuote("worktrees/"+oneshot.AgentName))
-	if backendOverride != "" {
-		loomCmd += " --backend " + sandbox.ShellQuote(backendOverride)
+	if cfg.Backend != "" {
+		loomCmd += " --backend " + sandbox.ShellQuote(cfg.Backend)
 	}
 	if oneshot.ParentID != "" {
 		loomCmd += " --parent " + sandbox.ShellQuote(oneshot.ParentID)

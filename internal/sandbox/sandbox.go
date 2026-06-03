@@ -49,7 +49,25 @@ type Config struct {
 	Network   string   // "open" (default) or a path to a custom OPA/Rego policy YAML
 	From      string   // container base image (--from); empty uses the openshell default
 	Backend   string   // backend override inside the sandbox; empty inherits the host default
+	// LoomBinPath is where loom lives INSIDE the container. Empty means loom is
+	// uploaded to LoomPath; non-empty means loom is baked into the --from image
+	// at this path (no upload — which is flaky for large binaries — and no chmod,
+	// since a baked binary is already executable). Set via LOOM_SANDBOX_LOOM_PATH.
+	LoomBinPath string
 }
+
+// LoomCmd returns the in-container path to the loom binary: the baked path when
+// set, else the uploaded LoomPath.
+func (c Config) LoomCmd() string {
+	if c.LoomBinPath != "" {
+		return c.LoomBinPath
+	}
+	return LoomPath
+}
+
+// UploadsLoom reports whether loom must be uploaded into the sandbox (vs. baked
+// into the --from image at LoomBinPath).
+func (c Config) UploadsLoom() bool { return c.LoomBinPath == "" }
 
 // DefaultConfig returns the sandbox defaults with env overrides:
 //   - LOOM_SANDBOX_POLICY    — path to a custom OPA/Rego policy YAML (else "open").
@@ -71,6 +89,9 @@ func DefaultConfig() Config {
 	if b := strings.TrimSpace(os.Getenv("LOOM_SANDBOX_BACKEND")); b != "" {
 		cfg.Backend = b
 	}
+	// LOOM_SANDBOX_LOOM_PATH set => loom is baked into the --from image at this
+	// path; skip the upload. Empty => upload to LoomPath.
+	cfg.LoomBinPath = strings.TrimSpace(os.Getenv("LOOM_SANDBOX_LOOM_PATH"))
 	return cfg
 }
 
