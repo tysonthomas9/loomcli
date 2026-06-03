@@ -312,11 +312,27 @@ async function pushResultBranch(
 	}
 }
 
-/** Inject a GITHUB_TOKEN into an https GitHub remote so a credential-less sandbox can push. */
+/**
+ * Inject a GITHUB_TOKEN into an https GitHub remote so a credential-less sandbox
+ * can clone/push. Parsed with the URL API and gated to an exact `github.com`
+ * host with no pre-existing userinfo, so a crafted remote
+ * (e.g. `https://github.com.evil/…` or `https://attacker@github.com/…`) can't
+ * exfiltrate the token to another host. Returns the remote unchanged if it isn't
+ * a bare https github.com URL.
+ */
 function authPushUrl(remote: string, token: string | undefined): string {
 	if (!token) return remote;
-	const m = remote.match(/^https:\/\/(github\.com\/.+)$/);
-	return m ? `https://x-access-token:${token}@${m[1]}` : remote;
+	try {
+		const u = new URL(remote);
+		if (u.protocol !== 'https:' || u.hostname.toLowerCase() !== 'github.com' || u.username || u.password) {
+			return remote;
+		}
+		u.username = 'x-access-token';
+		u.password = token;
+		return u.toString();
+	} catch {
+		return remote;
+	}
 }
 
 function renderTaskBody(task: Task): string {
