@@ -661,8 +661,8 @@ func TestResolveMaxBudgetUSD_Default(t *testing.T) {
 	os.Unsetenv("LOOM_MAX_BUDGET_USD")
 
 	got := resolveMaxBudgetUSD()
-	if got != "5.00" {
-		t.Errorf("resolveMaxBudgetUSD() = %q, want %q", got, "5.00")
+	if got != "50.00" {
+		t.Errorf("resolveMaxBudgetUSD() = %q, want %q", got, "50.00")
 	}
 }
 
@@ -691,8 +691,8 @@ func TestResolveMaxBudgetUSD_Invalid(t *testing.T) {
 	t.Setenv("LOOM_MAX_BUDGET_USD", "abc")
 
 	got := resolveMaxBudgetUSD()
-	if got != "5.00" {
-		t.Errorf("resolveMaxBudgetUSD() = %q, want %q (default fallback)", got, "5.00")
+	if got != "50.00" {
+		t.Errorf("resolveMaxBudgetUSD() = %q, want %q (default fallback)", got, "50.00")
 	}
 }
 
@@ -701,8 +701,8 @@ func TestResolveMaxBudgetUSD_Negative(t *testing.T) {
 	t.Setenv("LOOM_MAX_BUDGET_USD", "-1")
 
 	got := resolveMaxBudgetUSD()
-	if got != "5.00" {
-		t.Errorf("resolveMaxBudgetUSD() = %q, want %q (default fallback)", got, "5.00")
+	if got != "50.00" {
+		t.Errorf("resolveMaxBudgetUSD() = %q, want %q (default fallback)", got, "50.00")
 	}
 }
 
