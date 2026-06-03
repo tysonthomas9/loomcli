@@ -449,8 +449,8 @@ check-frontend:
 # types are in sync with api/openapi.yaml, and typecheck. check:generated
 # self-skips when the toolchain is absent.
 check-sdk:
-	@echo "=== SDK: install + generated staleness + typecheck ==="
-	@cd sdk/typescript && (npm ci --silent || npm install --silent) && npm run check:generated && npm run typecheck
+	@echo "=== SDK: install + generated staleness + typecheck + tests ==="
+	@cd sdk/typescript && (npm ci --silent || npm install --silent) && npm run check:generated && npm run typecheck && npm test
 	@echo "=== SDK quality gates PASSED ==="
 
 # Unified quality gate — runs Go + frontend + SDK checks in parallel
