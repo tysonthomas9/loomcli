@@ -3,6 +3,7 @@
 **Status:** V2 proposal for review
 **Date:** 2026-06-03
 **Related:**
+- `docs/design/fleetdb-agent-platform-v2-phased-delivery.md`
 - `docs/design/flue-daytona-fleetdb-v1-proposal.md`
 - `docs/design/flue-daytona-runtime-proposal.md`
 - `docs/design/distributed-control-plane.md`
