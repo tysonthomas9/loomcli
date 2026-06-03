@@ -242,6 +242,51 @@ This lands directly on `internal/domain/control_plane.go`:
 No new abstraction is introduced; the SDK is the typed client for entities loom
 already has.
 
+## Deployment & reachability
+
+The SDK model requires the runner to reach **`loom serve`** (never fleetdb
+directly). The embedded dev fleetdb (miniredis on `127.0.0.1`) is fundamentally
+**not network-reachable**, so any remote runtime needs a *served, addressable,
+authenticated* loom endpoint. Three topologies provide that:
+
+| Option | What it is | Best for | Trade-offs |
+|---|---|---|---|
+| **1. Tunnel local `loom serve`** | Cloudflare Tunnel / ngrok / Tailscale Funnel exposes the laptop's `loom serve` at a public HTTPS URL | Dev / single-user trying the SDK model | No VM; loom stays local. Laptop must stay online; tunnel adds its own auth + latency; if `loom serve` dies mid-run the control plane drops |
+| **2. Daytona ↔ private network** | The sandbox joins your network (Tailscale daemon in the sandbox image, or Daytona VPC peering) and reaches a private `loom serve` | Teams wanting no public exposure | Strongest isolation. Requires network-join provisioning in the sandbox image/runtime; depends on Daytona's networking support |
+| **3. Hosted `loom serve` (cloud VM / managed)** | `loom serve` (+ fleetdb/redis) runs on an always-on reachable host | Team / Phase-4 scale-out | Durable, always-on, server-visible artifacts as source of truth. Real ops: provisioning, TLS, scaling, secrets |
+
+In all three the runner reaches **only `loom serve`**; fleetdb stays behind it.
+A small hosted deployment can keep `loom serve`'s embedded fleetdb + miniredis;
+only at scale do you split out a standalone fleetdb + real Redis.
+
+### Does the implementation differ across the three?
+
+**No — the runner, `@loom/sdk`, and control-plane API code are identical across
+all three. That is a design goal: deployment topology is a config axis, not a
+code fork.** The runner only knows `LOOM_SERVER_URL` + a scoped token; whether
+that URL resolves to a tunnel, a tailnet host, or a public VM is irrelevant to
+it. If per-deployment runner code starts appearing, that's a design smell.
+
+What varies is config / infra / provisioning — not logic:
+
+| Concern | 1. Tunnel | 2. Private net | 3. Hosted VM |
+|---|---|---|---|
+| Runner / SDK / control-plane API code | same | same | same |
+| `LOOM_SERVER_URL` value | tunnel URL | private host | public/VPC host |
+| TLS / cert trust | tunnel-provided HTTPS | may need a custom CA in the sandbox (`NODE_EXTRA_CA_CERTS`) | standard public TLS |
+| Sandbox network setup | none (public egress) | **network-join in the image** (Tailscale, etc.) | none (public egress) |
+| fleetdb / redis | embedded in `loom serve` | embedded or external | embedded (small) → external + real Redis (scale) |
+| Auth posture | scoped token (mandatory) | scoped token + reduced exposure | scoped token (mandatory; internet-exposed) |
+| Availability assumption | laptop-bound; exercises lease-loss/reconnect | host-bound | always-on |
+
+The only genuine deltas beyond config are: **(a)** Option 2 needs network-join
+provisioning in the *sandbox image* (the runtime-provider layer, not the SDK);
+and **(b)** at scale you flip `loom serve` from embedded fleetdb to external via
+`LOOM_FLEET_DB_URL` (the existing ModeCloud path — config, not new code).
+Notably, the laptop-bound tunnel option simply *exercises* the
+reconnect / lease-loss / fencing paths more often — the same code that must
+exist anyway — so building those robustly is the right move under any topology.
+
 ## Phasing
 
 - **Phase A — SDK generation.** Generate `@loom/sdk` from `api/openapi.yaml`;
@@ -346,9 +391,12 @@ The PRD is complete — not merely "the SDK was written" — when all hold:
    fencing is the hard, security-sensitive work. Decision: JWT vs macaroon;
    where minting lives; revocation on lease loss.
 2. **Server reachability for remote runtimes.** Embedded fleetdb is unreachable
-   from a sandbox; this forces a deployed/tunneled `loom serve` for remote
-   providers. Local + podman can use loopback. Tunnel story for local-dev remote
-   sandboxes is an open question.
+   from a sandbox; remote runtimes need a served `loom serve` endpoint (local +
+   podman can use loopback). See **Deployment & reachability** for the three
+   topologies and why the implementation is identical across them. Remaining
+   open question: the default dev path (tunnel vs lightweight hosted), and
+   whether to bundle a Tailscale-based network-join in the sandbox image for
+   Option 2.
 3. **SDK versioning.** Flue templates pin an SDK version embedded in loom and
    built in sandboxes; API changes must be semver'd and staleness-gated. Risk of
    template/SDK skew (we already hit cross-compiled-fleetdb skew).
