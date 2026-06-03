@@ -62,15 +62,22 @@ type ServerConfig struct {
 	// talk to — the IssueBackend is fleet-db over HTTP. Drives the
 	// /api/health handler choice so a missing daemon is reported as the
 	// expected steady state, not a degraded one.
-	FleetClient             bool
-	FleetRedis              *fleet.RedisConfig
-	FleetJWTKey             []byte                      // Pre-provisioned JWT signing key for fleet auth (optional; if nil, server generates one)
-	FleetAPIKey             string                      // Pre-shared API key for fleet worker registration (required for fleet register endpoint)
-	HSTSEnabled             bool                        // Whether to send Strict-Transport-Security header (use when behind TLS-terminating proxy)
-	ExtAuthURL              string                      // Auth service base URL (e.g., "https://auth.loomcli.com"); empty = open mode
-	ExtAuthIssuer           string                      // Expected JWT issuer (validated against "iss" claim; defaults to ExtAuthURL)
-	ExtAuthAudience         string                      // Expected JWT audience (validated against "aud" claim; defaults to "loom")
-	ExtAuthAllowInsecure    bool                        // Allow HTTP for non-loopback --auth-url (escape hatch for Docker networks)
+	FleetClient          bool
+	FleetRedis           *fleet.RedisConfig
+	FleetJWTKey          []byte // Pre-provisioned JWT signing key for fleet auth (optional; if nil, server generates one)
+	FleetAPIKey          string // Pre-shared API key for fleet worker registration (required for fleet register endpoint)
+	HSTSEnabled          bool   // Whether to send Strict-Transport-Security header (use when behind TLS-terminating proxy)
+	ExtAuthURL           string // Auth service base URL (e.g., "https://auth.loomcli.com"); empty = open mode
+	ExtAuthIssuer        string // Expected JWT issuer (validated against "iss" claim; defaults to ExtAuthURL)
+	ExtAuthAudience      string // Expected JWT audience (validated against "aud" claim; defaults to "loom")
+	ExtAuthAllowInsecure bool   // Allow HTTP for non-loopback --auth-url (escape hatch for Docker networks)
+	// FleetDBProxyURL, when set, exposes a credential-forwarding reverse proxy
+	// at /api/v1/ that forwards to this fleet-db base URL, passing the caller's
+	// own X-API-Key/X-Actor through unchanged (fleet-db's RBAC authorizes the
+	// caller's scoped key; serve adds no identity). This lets a sandboxed agent
+	// reach fleet-db through serve as a single network egress point. Empty =
+	// disabled (opt-in; bypasses serve's JWT auth for /api/v1/).
+	FleetDBProxyURL         string
 	MonitorHandlers         MonitorHandlers             // Pre-built handlers for monitor/metrics endpoints (injected by cli)
 	GitOps                  ops.GitOps                  // Git operations interface (optional; nil disables git endpoints)
 	FileOps                 ops.FileOps                 // File operations interface (optional; nil disables file endpoints)

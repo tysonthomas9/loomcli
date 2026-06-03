@@ -18,6 +18,7 @@ func (app *Server) registerRoutes() {
 	app.registerMonitorHandlers()
 	app.registerEditorAndNotifyRoutes(h)
 	app.registerAuthProxy()
+	app.registerFleetDBProxy()
 
 	// Workspace management and workspace-scoped API routes
 	if app.multiPool != nil {
@@ -75,6 +76,17 @@ func (app *Server) registerAuthProxy() {
 		// opaque tokens or IDs (verify-email, callbacks), which would explode
 		// metric label cardinality.
 		app.mux.Handle("/api/auth/", proxy)
+	}
+}
+
+// registerFleetDBProxy forwards /api/v1/* to fleet-db (config proxy / 2C),
+// passing the caller's X-API-Key through so fleet-db's RBAC enforces. Lets a
+// sandboxed agent reach fleet-db via serve as a single egress point. Disabled
+// unless FleetDBProxyURL is set. /api/v1/ is exempt from serve's JWT auth (see
+// middleware.isPublicRoute) — the caller authenticates to fleet-db, not serve.
+func (app *Server) registerFleetDBProxy() {
+	if proxy := webui.NewFleetDBProxy(app.config.FleetDBProxyURL, logger); proxy != nil {
+		app.mux.Handle("/api/v1/", proxy)
 	}
 }
 

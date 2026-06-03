@@ -58,6 +58,7 @@ var (
 	serveAuthAudience      string
 	serveAuthAllowInsecure bool
 	serveSentryDSN         string
+	serveFleetDBProxyURL   string
 
 	// usageHandler holds the initialized usage HTTP handler.
 	usageHandler http.HandlerFunc
@@ -140,6 +141,7 @@ func registerServeFlags() {
 	serveCmd.Flags().StringVar(&serveRedisPassword, "redis-password", os.Getenv("LOOM_REDIS_PASSWORD"), "Redis password (prefer LOOM_REDIS_PASSWORD env var to avoid leaking in process list)")
 	serveCmd.Flags().BoolVar(&serveFleetMode, "fleet-mode", os.Getenv(envLoomFleetMode) == "true", "Enable fleet coordination features (stale detector, task claims, fleet routes). Default off for local dev. Env: "+envLoomFleetMode)
 	serveCmd.Flags().StringVar(&serveFleetAPIKey, "fleet-api-key", os.Getenv("LOOM_FLEET_API_KEY"), "API key for fleet worker registration (required for fleet register endpoint)")
+	serveCmd.Flags().StringVar(&serveFleetDBProxyURL, "fleet-db-proxy-url", os.Getenv("LOOM_FLEET_DB_PROXY_URL"), "Expose a credential-forwarding reverse proxy at /api/v1/ to this fleet-db URL, for sandboxed agents (forwards the caller's X-API-Key; fleet-db RBAC enforces). Env: LOOM_FLEET_DB_PROXY_URL")
 	serveCmd.Flags().BoolVar(&serveHSTS, "hsts", false, "Enable HSTS header (use when behind TLS-terminating proxy)")
 	serveCmd.Flags().StringVar(&serveSentryDSN, "sentry-dsn", os.Getenv("LOOM_SENTRY_DSN"), "Sentry/GlitchTip DSN for error tracking (or LOOM_SENTRY_DSN)")
 }
@@ -400,6 +402,7 @@ func buildCoreServerConfig(monitorHandlers webui.MonitorHandlers, gitOps *opsimp
 		ExtAuthIssuer:        serveAuthIssuer,
 		ExtAuthAudience:      serveAuthAudience,
 		ExtAuthAllowInsecure: serveAuthAllowInsecure,
+		FleetDBProxyURL:      serveFleetDBProxyURL,
 		GitOps:               gitOps,
 		FileOps:              gitOps,
 		BackendOps:           opsimpl.NewBackendOps(),

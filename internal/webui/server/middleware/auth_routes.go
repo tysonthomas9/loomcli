@@ -25,6 +25,14 @@ func isPublicRoute(method, path string) bool {
 		return true
 	}
 
+	// The fleet-db config proxy (/api/v1/...) forwards the caller's own
+	// X-API-Key to fleet-db, which authorizes it via RBAC. Serve must not gate
+	// it behind serve's JWT — a sandboxed agent authenticates to fleet-db, not
+	// to serve. Covers all methods (GET reads + POST/PATCH issue lifecycle).
+	if strings.HasPrefix(normalizedPath, "/api/v1/") {
+		return true
+	}
+
 	// All auth routes are public — the BetterAuth service handles its own auth.
 	// Must be above the GET-only gate because sign-in/sign-up use POST.
 	if strings.HasPrefix(normalizedPath, "/api/auth/") {
