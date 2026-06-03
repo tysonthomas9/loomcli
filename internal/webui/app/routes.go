@@ -6,6 +6,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/webui"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlermux"
 	locsettings "github.com/tysonthomas9/loomcli/internal/webui/handlers/localsettings"
+	"github.com/tysonthomas9/loomcli/internal/webui/handlers/sessionwrite"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 )
 
@@ -153,6 +154,18 @@ func (app *Server) registerWorkspaceRoutes() {
 	app.mux.Handle("PATCH /api/workspaces/{ws}/name", workspaceMW(handlermux.HandleWorkspaceRename(app.workspaceSvc)))
 	app.mux.Handle("GET /api/workspaces/{ws}/config/backend", workspaceMW(handlermux.HandleWorkspaceBackendGet(app.workspaceSvc)))
 	app.mux.Handle("PATCH /api/workspaces/{ws}/config/backend", workspaceMW(handlermux.HandleWorkspaceBackendPatch(app.workspaceSvc)))
+
+	// TaskRun session write path (PRD Phase C: a flue runner reports artifacts/
+	// usage/logs and heartbeats its session via @loom/sdk). Store-backed only;
+	// skipped when serve has no control-plane store. Registered on the outer mux
+	// (more specific than the /api/workspaces/{ws}/ subtree, which therefore
+	// won't shadow them), guarded by the workspace middleware.
+	if st := app.config.Store; st != nil {
+		app.mux.Handle("POST /api/workspaces/{ws}/sessions/{sessionId}/artifacts", workspaceMW(sessionwrite.HandlePostSessionArtifact(st.AgentSessions(), st.Artifacts())))
+		app.mux.Handle("POST /api/workspaces/{ws}/sessions/{sessionId}/usage", workspaceMW(sessionwrite.HandleRecordSessionUsage(st.AgentSessions())))
+		app.mux.Handle("POST /api/workspaces/{ws}/sessions/{sessionId}/logs", workspaceMW(sessionwrite.HandleAppendSessionLog(st.AgentSessions())))
+		app.mux.Handle("POST /api/workspaces/{ws}/sessions/{sessionId}/heartbeat", workspaceMW(sessionwrite.HandleHeartbeatSession(st.AgentSessions())))
+	}
 	if statusHandler := app.config.MonitorHandlers.Status; statusHandler != nil {
 		app.mux.Handle("GET /api/workspaces/{ws}/monitor/status", workspaceMW(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			q := r.URL.Query()
