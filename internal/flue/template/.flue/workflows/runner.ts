@@ -92,7 +92,7 @@ export async function run({ init, payload, env }: FlueContext) {
 				// reachable from the credential-less sandbox; the repo_hydrated event
 				// below keeps the clean (token-free) URL.
 				const cloneToken = env.GITHUB_TOKEN ?? process.env.GITHUB_TOKEN;
-				await sh(sandbox, `git clone --no-single-branch ${shq(authPushUrl(p.repo_remote_url, cloneToken))} ${shq(cwd)}`);
+				await sh(sandbox, `git ${gitAuthArgs(p.repo_remote_url, cloneToken)}clone --no-single-branch ${shq(p.repo_remote_url)} ${shq(cwd)}`);
 				let effectiveRef = ref;
 				if (ref) {
 					// base_ref is the local worktree HEAD; it may carry local-only
@@ -153,7 +153,7 @@ export async function run({ init, payload, env }: FlueContext) {
 			//     patch + LOOMRUNNER events, so a reporting failure must not fail the
 			//     task.
 			if (loom) {
-				await reportToLoom(loom, resp.usage, p.patch_out, filesChanged);
+				await reportToLoom(loom, resp.usage);
 			}
 
 			// 4. Delete the sandbox on success (proposal: successful sandboxes are
@@ -253,22 +253,17 @@ async function resolvePrompt(p: RunnerInput, loom: TaskRunClient | null): Promis
 async function reportToLoom(
 	loom: TaskRunClient,
 	usage: { input: number; output: number } | undefined,
-	patchOut: string | undefined,
-	filesChanged: number,
 ): Promise<void> {
+	// We deliberately do NOT register a "patch" artifact here: the patch lives at
+	// a host-local temp path that isn't resolvable from the server, so it's not a
+	// server-visible source of truth. The branch-push path (pushResultBranch)
+	// registers a proper "commit" artifact with a resolvable ref; patch-back is a
+	// host-local convenience with no server artifact.
 	if (usage) {
 		try {
 			await loom.recordUsage({ inputTokens: usage.input, outputTokens: usage.output });
 		} catch (err) {
 			emit({ type: 'report_warning', op: 'recordUsage', error: errMessage(err) });
-		}
-	}
-	if (patchOut && filesChanged > 0) {
-		try {
-			await loom.postArtifact({ type: 'patch', uri: patchOut, filesChanged });
-			emit({ type: 'artifact_reported', artifact_type: 'patch', files_changed: filesChanged });
-		} catch (err) {
-			emit({ type: 'report_warning', op: 'postArtifact', error: errMessage(err) });
 		}
 	}
 }
@@ -295,11 +290,14 @@ async function pushResultBranch(
 	const remote = p.repo_remote_url ?? '';
 	const safeTask = (p.task_id || 'run').replace(/[^A-Za-z0-9._-]/g, '-');
 	const branch = `loom/${safeTask}-${sandbox.id.slice(0, 8)}`;
-	// step 3 already staged everything (`git add -A`); commit it with a loom identity.
-	await sh(sandbox, `cd ${shq(cwd)} && git -c user.name=loom -c user.email=loom@localhost commit -q -m ${shq('loom: ' + safeTask)} || true`);
+	// step 3 already staged everything (`git add -A`); commit it with a loom
+	// identity. Do NOT swallow a commit failure: if it fails we must not push a
+	// stale HEAD and register a "commit" artifact with none of the agent's work —
+	// let it throw so the run is reported failed.
+	await sh(sandbox, `cd ${shq(cwd)} && git -c user.name=loom -c user.email=loom@localhost commit -q -m ${shq('loom: ' + safeTask)}`);
 	const sha = (await sh(sandbox, `cd ${shq(cwd)} && git rev-parse HEAD`)).trim();
 	const token = env.GITHUB_TOKEN ?? process.env.GITHUB_TOKEN;
-	await sh(sandbox, `cd ${shq(cwd)} && git push ${shq(authPushUrl(remote, token))} HEAD:refs/heads/${branch}`);
+	await sh(sandbox, `cd ${shq(cwd)} && git ${gitAuthArgs(remote, token)}push ${shq(remote)} HEAD:refs/heads/${branch}`);
 	const ref = `${remote}#${branch}@${sha}`;
 	emit({ type: 'branch_pushed', branch, commit: sha, remote });
 	if (loom) {
@@ -313,26 +311,34 @@ async function pushResultBranch(
 }
 
 /**
- * Inject a GITHUB_TOKEN into an https GitHub remote so a credential-less sandbox
- * can clone/push. Parsed with the URL API and gated to an exact `github.com`
- * host with no pre-existing userinfo, so a crafted remote
- * (e.g. `https://github.com.evil/…` or `https://attacker@github.com/…`) can't
- * exfiltrate the token to another host. Returns the remote unchanged if it isn't
- * a bare https github.com URL.
+ * Build a `-c http.extraHeader=…` git argument that authenticates to GitHub with
+ * a GITHUB_TOKEN, so a credential-less sandbox can clone/push a private remote
+ * WITHOUT the token ever landing in the remote URL or `.git/config`. Host-pinned
+ * to an exact `github.com` https URL (a crafted/lookalike remote, or one with
+ * pre-existing userinfo, gets no header — the token can't be exfiltrated to
+ * another host). Returns '' (no auth) when there's no token or the remote isn't a
+ * bare https github.com URL. Always followed by a trailing space so it slots in
+ * after `git `.
  */
-function authPushUrl(remote: string, token: string | undefined): string {
-	if (!token) return remote;
+function gitAuthArgs(remote: string, token: string | undefined): string {
+	if (!token) return '';
 	try {
 		const u = new URL(remote);
 		if (u.protocol !== 'https:' || u.hostname.toLowerCase() !== 'github.com' || u.username || u.password) {
-			return remote;
+			return '';
 		}
-		u.username = 'x-access-token';
-		u.password = token;
-		return u.toString();
 	} catch {
-		return remote;
+		return '';
 	}
+	const basic = Buffer.from(`x-access-token:${token}`).toString('base64');
+	return `-c ${shq('http.extraHeader=AUTHORIZATION: basic ' + basic)} `;
+}
+
+/** Strip git credentials (extraHeader basic auth, token-in-URL) from a string. */
+function redactSecrets(s: string): string {
+	return s
+		.replace(/AUTHORIZATION: basic [A-Za-z0-9+/=]+/gi, 'AUTHORIZATION: basic <redacted>')
+		.replace(/x-access-token:[^@\s'"]+/g, 'x-access-token:<redacted>');
 }
 
 function renderTaskBody(task: Task): string {
@@ -357,7 +363,8 @@ async function sh(
 ): Promise<string> {
 	const res = await sandbox.process.executeCommand(`sh -lc ${shq(command)}`);
 	if ((res.exitCode ?? 0) !== 0) {
-		throw new Error(`runner: command failed (exit ${res.exitCode}): ${command}\n${res.result ?? ''}`);
+		// redact: the command may carry an http.extraHeader basic-auth credential.
+		throw new Error(redactSecrets(`runner: command failed (exit ${res.exitCode}): ${command}\n${res.result ?? ''}`));
 	}
 	return res.result ?? '';
 }
@@ -368,5 +375,5 @@ async function shTry(
 	command: string,
 ): Promise<{ ok: boolean; output: string }> {
 	const res = await sandbox.process.executeCommand(`sh -lc ${shq(command)}`);
-	return { ok: (res.exitCode ?? 0) === 0, output: res.result ?? '' };
+	return { ok: (res.exitCode ?? 0) === 0, output: redactSecrets(res.result ?? '') };
 }

@@ -346,6 +346,7 @@ func (s *Supervisor) clearAgentSessionState(ap *AgentProcess) {
 	ap.AgentSessionID = ""
 	ap.AgentLeaseID = ""
 	ap.AgentLeaseToken = ""
+	ap.AgentLeaseFencingToken = 0
 	ap.TranscriptPath = ""
 	ap.BeforeRef = ""
 	ap.AssignedTaskID = ""
