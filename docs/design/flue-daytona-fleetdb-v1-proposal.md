@@ -282,6 +282,231 @@ Stale/lost runners are allowed to preserve evidence, but not to decide task
 truth. Recovery uploads from a stale runner must be fenced as diagnostics and
 must not trigger dependency unlock.
 
+## Edge-Case Pressure Tests To Discuss
+
+These are the scenarios most likely to make the system appear successful while
+FleetDB, artifacts, or the dependency graph are actually wrong. V1 should treat
+them as design-review prompts, not only implementation details.
+
+### 1. Runner Dies But Daytona Keeps Running
+
+Risk:
+
+- the runner process stops heartbeating while the Daytona sandbox keeps running
+  commands, spending tokens, or changing files;
+- the server marks the run stale and starts a replacement attempt;
+- the old sandbox later produces artifacts that look useful.
+
+Required rule:
+
+- run lease expiry removes authority from the old runner;
+- any late events, artifacts, or completion from the old fence are rejected or
+  stored only as non-unlocking diagnostics;
+- cleanup/retention state records whether the old sandbox was killed, retained,
+  or lost.
+
+Decision to make:
+
+- should heartbeat loss always trigger provider-side sandbox kill, or should V1
+  retain failed sandboxes by default for diagnostics and cleanup them by TTL?
+
+### 2. Lease Loss During Finalization
+
+Risk:
+
+- the runner uploads artifacts, enters finalization, then loses the lease;
+- `CompleteRun` succeeds but the response is lost;
+- the runner retries after a replacement run has started.
+
+Required rule:
+
+- `completion_id` makes identical completion retries replayable;
+- `lease_id` and `fencing_token` reject stale or conflicting completion;
+- dependency unlock and timeline emission happen once.
+
+Decision to make:
+
+- how long should a runner stay in `finalizing` before the server treats it as
+  stale and permits a replacement attempt?
+
+### 3. Dependency Unlocks Too Early
+
+Risk:
+
+- a task produces a patch or PR but the code is not merged;
+- the task moves to `review` and dependents start even though they need the code
+  on the configured branch;
+- a user manually closes or reopens the upstream task while completion is in
+  flight.
+
+Required rule:
+
+- sandbox success, patch creation, PR creation, and review state are not unlock
+  events by themselves;
+- FleetDB task close is the default dependency unlock;
+- close requires a workflow-specific policy proving that dependents may safely
+  start.
+
+Decision to make:
+
+- for PR workflows, should close happen on PR creation, review approval, or
+  merge to the configured branch?
+
+### 4. Local Patch-Back Corrupts User Work
+
+Risk:
+
+- the local worktree changes while Daytona is running;
+- the patch applies partially or against the wrong base;
+- binary files, deletes, renames, submodules, or LFS files are missing from the
+  patch-back path.
+
+Required rule:
+
+- local mode preflights a clean worktree or isolated attempt worktree;
+- patch-back verifies `base_ref`;
+- conflict preserves the remote patch artifact, does not overwrite user files,
+  and does not close the FleetDB task.
+
+Decision to make:
+
+- should Phase 2 always use an isolated local attempt worktree for patch-back,
+  or allow direct apply into the user's current worktree after a clean preflight?
+
+### 5. Artifact Durability Split-Brain
+
+Risk:
+
+- patch upload succeeds but logs/transcript/test output fail;
+- `CompleteRun` succeeds but the UI cannot read artifacts;
+- an artifact URI points to a Daytona-local path that disappears at cleanup.
+
+Required rule:
+
+- required artifacts must be declared, uploaded, checksum-verified, committed,
+  and server-readable before task close;
+- `CompleteRun` references committed artifact IDs, not local paths;
+- missing required artifacts downgrade or reject close.
+
+Decision to make:
+
+- what artifact set is mandatory for each close policy: no-change, patch-back,
+  PR, direct push, review-only, and blocked?
+
+### 6. Sandbox Cleanup And Retention Leaks State
+
+Risk:
+
+- cleanup fails after a successful run;
+- failed sandboxes retain secrets, repo credentials, task notes, or generated
+  files;
+- warm sandbox reuse leaks state from a previous task.
+
+Required rule:
+
+- cleanup state is tracked separately from TaskRun success;
+- retained sandboxes require TTL, ACLs, credential scrub status, and audit
+  metadata;
+- warm pool reuse requires a scrub proof before reassignment.
+
+Decision to make:
+
+- should V1 support warm pools, or require fresh sandbox per task until cleanup
+  proofs exist?
+
+### 7. Scheduler Races And Capacity Leaks
+
+Risk:
+
+- two schedulers see the same ready task;
+- capacity is reserved twice;
+- ready-frontier cache is stale when scheduling or completion occurs;
+- scheduler dies after reserving capacity but before runner start.
+
+Required rule:
+
+- `ScheduleRun` atomically checks readiness, reserves the task, creates the
+  TaskRun, acquires the lease, and reserves capacity;
+- lease/capacity expiry releases stale reservations;
+- completion validates task and dependency projection versions.
+
+Decision to make:
+
+- does V1 require one elected scheduler per workspace, or DB-backed atomic
+  capacity reservations from day one?
+
+### 8. Local And Cloud Control Planes Diverge
+
+Risk:
+
+- Daytona tries to reach a laptop-local embedded FleetDB;
+- the runner writes sessions to Loom server but task status directly to
+  FleetDB;
+- `LOOM_SERVER_URL` and `LOOM_FLEET_DB_URL` are both present and ownership is
+  ambiguous.
+
+Required rule:
+
+- one authoritative control-plane endpoint owns all run mutations for a given
+  run;
+- local mode uses the host runner bridge for FleetDB writes;
+- cloud mode uses server-visible TaskRun APIs and server-visible artifacts.
+
+Decision to make:
+
+- should cloud V1 expose only Loom TaskRun APIs, or allow direct FleetDB TaskRun
+  APIs as a separate deployment mode?
+
+### 9. Credentials Expire Or Leak Mid-Run
+
+Risk:
+
+- control-plane, git, package registry, artifact, or Daytona credentials expire
+  while the model is active or while finalization is uploading artifacts;
+- transcripts, logs, test output, or retained sandboxes contain secrets;
+- a broad provider token is exposed to task code.
+
+Required rule:
+
+- credentials are run-scoped, separated by purpose, and short-lived;
+- refresh policy is explicit before model invocation;
+- redaction runs before persistence;
+- retained sandboxes scrub or revoke credentials before human inspection.
+
+Decision to make:
+
+- should model/tool code receive direct credentials, or only use brokered tools
+  and credential references where possible?
+
+### 10. Partial Success Is Misclassified
+
+Risk:
+
+- code changed and tests passed, but push failed;
+- PR opened, but status update failed;
+- model completed, but finalizer crashed;
+- useful diagnostics appear after lease loss.
+
+Required rule:
+
+- partial artifacts are preserved and visible;
+- partial success does not imply task close;
+- final task mutation requires valid fenced completion and the configured close
+  policy.
+
+Decision to make:
+
+- which partial-success cases should move the task to `review`, `blocked`,
+  `needs-revision`, or leave it open with a failed run?
+
+### Highest-Risk V1 Areas
+
+The first implementation should prove these before broad scale-out:
+
+1. runner dies but Daytona keeps running;
+2. artifact durability before task close;
+3. PR/merge close policy versus dependency unlock.
+
 ## Five-Agent Review Synthesis
 
 This V1 draft was reviewed against five areas: FleetDB/control-plane
