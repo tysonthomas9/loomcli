@@ -26,6 +26,7 @@ type DaemonSettings struct {
 	OTel           *OTelDaemonConfig `yaml:"otel,omitempty"`
 	IssueBackend   string            `yaml:"issue_backend,omitempty"`   // "fleetdb", "fleet", or "api"
 	StartupTimeout *int              `yaml:"startup_timeout,omitempty"` // seconds; how long to wait for daemon readiness (default 30)
+	FlueSandbox    string            `yaml:"flue_sandbox,omitempty"`    // "" / "local" or "daytona": where flue agents run
 }
 
 // GetStartupTimeout returns the configured startup timeout or the given fallback.
@@ -245,6 +246,7 @@ func daemonSettingsFromDomain(p *domain.DaemonProfile) *DaemonSettings {
 		IssueBackend:   p.IssueBackend,
 		StartupTimeout: cloneIntPtr(p.StartupTimeout),
 		OTel:           otelFromDomain(p.OTel),
+		FlueSandbox:    p.FlueSandbox,
 	}
 }
 

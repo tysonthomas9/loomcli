@@ -75,23 +75,12 @@ func TestRunFlueDaytonaTask_SyncsPatchBack(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git not available")
 	}
-	repo := t.TempDir()
-	gitT(t, repo, "init", "-q")
-	gitT(t, repo, "config", "user.email", "t@example.com")
-	gitT(t, repo, "config", "user.name", "Test")
-	writeFileT(t, filepath.Join(repo, "base.txt"), "base\n")
-	gitT(t, repo, "add", ".")
-	gitT(t, repo, "commit", "-qm", "base")
-	gitT(t, repo, "remote", "add", "origin", "https://example.com/repo.git")
+	repo, bare := newGitRepoWithRemoteT(t)
 	baseRef := gitT(t, repo, "rev-parse", "HEAD")
 	branch := gitT(t, repo, "rev-parse", "--abbrev-ref", "HEAD")
 
-	// Produce a real patch that adds created.txt, then reset the worktree to base.
-	writeFileT(t, filepath.Join(repo, "created.txt"), "daytona task ok\n")
-	gitT(t, repo, "add", "-N", "created.txt")
-	patch := gitRawT(t, repo, "diff", "--binary", "--full-index")
-	gitT(t, repo, "reset", "-q")
-	_ = os.Remove(filepath.Join(repo, "created.txt"))
+	// A real patch that adds created.txt (worktree reset back to base afterward).
+	patch := makeAddFilePatchT(t, repo, "created.txt", "daytona task ok\n")
 
 	// Swap the runner exec with a fake that writes the patch and reports success.
 	var gotInput runnerInput
@@ -103,7 +92,7 @@ func TestRunFlueDaytonaTask_SyncsPatchBack(t *testing.T) {
 		if err := os.WriteFile(in.PatchOut, patch, 0o600); err != nil {
 			return nil, err
 		}
-		return &runnerResult{status: "completed", sandboxID: "sb-test", remoteCwd: "/home/daytona/project", patchPath: in.PatchOut}, nil
+		return &runnerResult{status: "completed", sandboxID: "sb-test", remoteCwd: "/home/daytona/project", patchPath: in.PatchOut, cleanup: "deleted"}, nil
 	}
 
 	if err := runFlueDaytonaTask(repo, "make a change", "nova", nil, nil); err != nil {
@@ -111,7 +100,8 @@ func TestRunFlueDaytonaTask_SyncsPatchBack(t *testing.T) {
 	}
 
 	// Sandbox runtime metadata was captured for the session finalizer
-	// (proposal: session metadata records provider daytona, sandbox ID, base ref).
+	// (proposal: session metadata records provider daytona, sandbox ID, base ref,
+	// and cleanup outcome).
 	rt := GetLastRuntimeMetadata()
 	if rt == nil {
 		t.Fatal("runtime metadata was not captured")
@@ -124,6 +114,9 @@ func TestRunFlueDaytonaTask_SyncsPatchBack(t *testing.T) {
 	}
 	if rt.SyncStrategy != "patch-back" {
 		t.Errorf("runtime sync_strategy = %q, want patch-back", rt.SyncStrategy)
+	}
+	if rt.Cleanup != "deleted" {
+		t.Errorf("runtime cleanup = %q, want deleted", rt.Cleanup)
 	}
 	if gotInput.SyncStrategy != "patch-back" {
 		t.Errorf("runner input sync_strategy = %q, want patch-back", gotInput.SyncStrategy)
@@ -138,12 +131,25 @@ func TestRunFlueDaytonaTask_SyncsPatchBack(t *testing.T) {
 		t.Fatalf("created.txt = %q", data)
 	}
 
+	// "Back to loom": the work was committed locally (HEAD advanced past base)...
+	newHead := gitT(t, repo, "rev-parse", "HEAD")
+	if newHead == baseRef {
+		t.Error("daytona work was not committed (HEAD did not advance)")
+	}
+	if tracked := gitT(t, repo, "ls-files", "created.txt"); tracked == "" {
+		t.Error("created.txt is not tracked after commit")
+	}
+	// ...and pushed to the origin remote.
+	if pushed := gitT(t, bare, "rev-parse", branch); pushed != newHead {
+		t.Errorf("push did not land in origin: bare %s != local %s", pushed, newHead)
+	}
+
 	// Runner received correctly-derived input.
 	if gotInput.Sandbox != "daytona-task" {
 		t.Errorf("sandbox = %q", gotInput.Sandbox)
 	}
-	if gotInput.RepoRemoteURL != "https://example.com/repo.git" {
-		t.Errorf("remote = %q", gotInput.RepoRemoteURL)
+	if gotInput.RepoRemoteURL != bare {
+		t.Errorf("remote = %q, want %q", gotInput.RepoRemoteURL, bare)
 	}
 	if gotInput.BaseRef != baseRef {
 		t.Errorf("base_ref = %q, want %q", gotInput.BaseRef, baseRef)
@@ -153,6 +159,44 @@ func TestRunFlueDaytonaTask_SyncsPatchBack(t *testing.T) {
 	}
 	if gotInput.PatchOut == "" {
 		t.Error("patch_out was empty")
+	}
+}
+
+// TestPushWorktreeBack covers the loom-side git proxy: it commits the synced
+// work, tolerates a failed push (best-effort), and is a no-op when clean.
+func TestPushWorktreeBack(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+	repo := t.TempDir()
+	gitT(t, repo, "init", "-q")
+	gitT(t, repo, "config", "user.email", "t@example.com")
+	gitT(t, repo, "config", "user.name", "Test")
+	writeFileT(t, filepath.Join(repo, "base.txt"), "base\n")
+	gitT(t, repo, "add", ".")
+	gitT(t, repo, "commit", "-qm", "base")
+	// Origin points at a path with no repo, so push fails fast offline.
+	gitT(t, repo, "remote", "add", "origin", filepath.Join(t.TempDir(), "missing-bare"))
+	baseHead := gitT(t, repo, "rev-parse", "HEAD")
+
+	// A pending change in the worktree (as if a patch were just applied).
+	writeFileT(t, filepath.Join(repo, "x.txt"), "hi\n")
+
+	// Push fails (bad remote) but the commit must still succeed → returns nil.
+	if err := pushWorktreeBack(repo, "nova", "sb-1"); err != nil {
+		t.Fatalf("pushWorktreeBack should be best-effort on push failure, got: %v", err)
+	}
+	committed := gitT(t, repo, "rev-parse", "HEAD")
+	if committed == baseHead {
+		t.Fatal("work was not committed despite push failure")
+	}
+
+	// Second call with a clean tree is a no-op (no empty commit).
+	if err := pushWorktreeBack(repo, "nova", "sb-1"); err != nil {
+		t.Fatalf("pushWorktreeBack (clean): %v", err)
+	}
+	if h := gitT(t, repo, "rev-parse", "HEAD"); h != committed {
+		t.Error("pushWorktreeBack created an empty commit on a clean tree")
 	}
 }
 
@@ -260,18 +304,29 @@ func TestRunFlueDaytonaTask_ConcurrentTasksAreIsolated(t *testing.T) {
 
 // ── test git helpers (real git is required to build a repo + a valid patch) ──
 
-// newGitRepoT initializes a committed git repo with an origin remote.
+// newGitRepoT initializes a committed git repo with a local (bare) origin so
+// the commit+push-back path works hermetically (no network).
 func newGitRepoT(t *testing.T) string {
 	t.Helper()
-	repo := t.TempDir()
+	repo, _ := newGitRepoWithRemoteT(t)
+	return repo
+}
+
+// newGitRepoWithRemoteT returns a committed git repo plus the path to its bare
+// origin remote, so tests can assert the push landed.
+func newGitRepoWithRemoteT(t *testing.T) (repo, bare string) {
+	t.Helper()
+	repo = t.TempDir()
 	gitT(t, repo, "init", "-q")
 	gitT(t, repo, "config", "user.email", "t@example.com")
 	gitT(t, repo, "config", "user.name", "Test")
 	writeFileT(t, filepath.Join(repo, "base.txt"), "base\n")
 	gitT(t, repo, "add", ".")
 	gitT(t, repo, "commit", "-qm", "base")
-	gitT(t, repo, "remote", "add", "origin", "https://example.com/repo.git")
-	return repo
+	bare = t.TempDir()
+	gitT(t, bare, "init", "--bare", "-q")
+	gitT(t, repo, "remote", "add", "origin", bare)
+	return repo, bare
 }
 
 // makeAddFilePatchT returns a git-generated patch that adds one new file, then

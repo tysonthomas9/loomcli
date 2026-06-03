@@ -38,6 +38,7 @@ func TestRealDaytonaRunner_EndToEnd(t *testing.T) {
 	repo := t.TempDir()
 	gitT(t, repo, "clone", "--depth", "1", "https://github.com/octocat/Hello-World.git", ".")
 
+	baseHead := gitT(t, repo, "rev-parse", "HEAD")
 	col := usage.NewCollector("flue", "novareal")
 	prompt := "Create a new file named LOOM_OK.txt whose entire contents are the text: daytona ok"
 	if err := runFlueDaytonaTask(repo, prompt, "novareal", nil, col); err != nil {
@@ -51,11 +52,20 @@ func TestRealDaytonaRunner_EndToEnd(t *testing.T) {
 	}
 	t.Logf("synced LOOM_OK.txt: %q", string(data))
 
-	// Sandbox metadata was recorded for the session.
+	// "Back to loom": the work was committed locally (push to octocat/Hello-World
+	// is expected to fail for lack of write access — that's best-effort).
+	if head := gitT(t, repo, "rev-parse", "HEAD"); head == baseHead {
+		t.Error("daytona work was not committed back into the local worktree")
+	}
+
+	// Sandbox metadata was recorded, and the sandbox was deleted on success.
 	rt := GetLastRuntimeMetadata()
 	if rt == nil || rt.SandboxID == "" || rt.Provider != "daytona" {
 		t.Fatalf("runtime metadata not recorded: %+v", rt)
 	}
-	t.Logf("sandbox metadata: provider=%s id=%s cwd=%s base=%s sync=%s",
-		rt.Provider, rt.SandboxID, rt.RemoteCwd, rt.BaseRef, rt.SyncStrategy)
+	if rt.Cleanup != "deleted" {
+		t.Errorf("sandbox cleanup = %q, want deleted (sandbox should be removed on success)", rt.Cleanup)
+	}
+	t.Logf("sandbox metadata: provider=%s id=%s cwd=%s base=%s sync=%s cleanup=%s",
+		rt.Provider, rt.SandboxID, rt.RemoteCwd, rt.BaseRef, rt.SyncStrategy, rt.Cleanup)
 }

@@ -22,6 +22,11 @@ type DaemonProfile struct {
 	StartupTimeout *int          `json:"startup_timeout,omitempty"`
 	OTel           *OTelSettings `json:"otel,omitempty"`
 
+	// FlueSandbox selects where flue-backed agents execute: "" / "local"
+	// (host worktree) or "daytona" (a fresh remote Daytona sandbox per task,
+	// patch-synced back). Injected as LOOM_FLUE_SANDBOX into spawned agents.
+	FlueSandbox string `json:"flue_sandbox,omitempty"`
+
 	UpdatedAt time.Time `json:"updated_at"`
 }
 

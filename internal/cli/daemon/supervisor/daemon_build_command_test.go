@@ -45,6 +45,69 @@ func TestBuildCommand_SourceReposInjected(t *testing.T) {
 	}
 }
 
+// TestBuildCommand_FlueSandboxInjected verifies that the daemon profile's
+// flue_sandbox setting is propagated to spawned agents as LOOM_FLUE_SANDBOX, so
+// UI-created planner/task agents run in a Daytona sandbox per task.
+func TestBuildCommand_FlueSandboxInjected(t *testing.T) {
+	tmpDir := t.TempDir()
+	s := &Supervisor{
+		ConfigSnapshot: func() *cfgpkg.DaemonConfig {
+			return &cfgpkg.DaemonConfig{Daemon: cfgpkg.DaemonSettings{FlueSandbox: "daytona"}}
+		},
+		ProjectDir:    tmpDir,
+		Shutdown:      make(chan struct{}),
+		StoppedAgents: make(map[string]struct{}),
+		EmitEvent:     func(events.Event) {},
+	}
+	ap := &AgentProcess{
+		Entry:        cfgpkg.AgentEntry{Worktree: "nova", Role: "task"},
+		RoleConfig:   cfgpkg.RoleConfig{Description: "Task agent"},
+		WorktreePath: tmpDir,
+	}
+
+	cmd, err := s.buildCommand(ap)
+	if err != nil {
+		t.Fatalf("buildCommand error: %v", err)
+	}
+	got := ""
+	for _, env := range cmd.Env {
+		if strings.HasPrefix(env, "LOOM_FLUE_SANDBOX=") {
+			got = strings.TrimPrefix(env, "LOOM_FLUE_SANDBOX=")
+		}
+	}
+	if got != "daytona" {
+		t.Errorf("LOOM_FLUE_SANDBOX = %q, want daytona", got)
+	}
+}
+
+// TestBuildCommand_FlueSandboxAbsentWhenUnset verifies LOOM_FLUE_SANDBOX is not
+// injected when the daemon profile leaves it empty (default = local).
+func TestBuildCommand_FlueSandboxAbsentWhenUnset(t *testing.T) {
+	tmpDir := t.TempDir()
+	s := &Supervisor{
+		ConfigSnapshot: func() *cfgpkg.DaemonConfig { return &cfgpkg.DaemonConfig{Daemon: cfgpkg.DaemonSettings{}} },
+		ProjectDir:     tmpDir,
+		Shutdown:       make(chan struct{}),
+		StoppedAgents:  make(map[string]struct{}),
+		EmitEvent:      func(events.Event) {},
+	}
+	ap := &AgentProcess{
+		Entry:        cfgpkg.AgentEntry{Worktree: "nova", Role: "task"},
+		RoleConfig:   cfgpkg.RoleConfig{Description: "Task agent"},
+		WorktreePath: tmpDir,
+	}
+
+	cmd, err := s.buildCommand(ap)
+	if err != nil {
+		t.Fatalf("buildCommand error: %v", err)
+	}
+	for _, env := range cmd.Env {
+		if strings.HasPrefix(env, "LOOM_FLUE_SANDBOX=") {
+			t.Errorf("LOOM_FLUE_SANDBOX should not be set when unset; got %q", env)
+		}
+	}
+}
+
 // TestBuildCommand_SourceReposAbsentWhenEmpty verifies LOOM_SOURCE_REPOS is not
 // set when the agent has no repo affinity.
 func TestBuildCommand_SourceReposAbsentWhenEmpty(t *testing.T) {

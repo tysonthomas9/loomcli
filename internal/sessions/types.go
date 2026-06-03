@@ -74,6 +74,7 @@ type RuntimeMetadata struct {
 	RemoteCwd    string `json:"remote_cwd,omitempty"`    // working dir inside the sandbox
 	BaseRef      string `json:"base_ref,omitempty"`      // commit the sandbox was hydrated to
 	SyncStrategy string `json:"sync_strategy,omitempty"` // "patch-back" | "branch-push" | "none"
+	Cleanup      string `json:"cleanup,omitempty"`       // "deleted" (success) | "retained" (failure/leak)
 }
 
 // SessionMetadata is the mutable state in sessions/<id>/metadata.json.

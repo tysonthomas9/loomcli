@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strconv"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -41,6 +42,7 @@ var daemonProfileSetCmd = &cobra.Command{
   events_dir      string
   issue_backend   string (default: fleetdb)
   agent_backend   string (workspace default AI backend, e.g. claude|codex|flue)
+  flue_sandbox    string (local|daytona) — run flue agents in a Daytona sandbox per task
   max_agents      integer
   startup_timeout integer (seconds)`,
 	Args: cobra.ExactArgs(2),
@@ -172,6 +174,12 @@ func applyProfileField(p *domain.DaemonProfile, key, value string, unset bool) e
 		p.IssueBackend = value
 	case "agent_backend":
 		p.AgentBackend = value
+	case "flue_sandbox":
+		v := strings.ToLower(strings.TrimSpace(value))
+		if !unset && v != "" && v != "local" && v != "daytona" {
+			return fmt.Errorf("flue_sandbox must be 'local' or 'daytona'")
+		}
+		p.FlueSandbox = v
 	case "max_agents":
 		if unset {
 			p.MaxAgents = nil

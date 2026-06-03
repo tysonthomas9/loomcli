@@ -408,5 +408,12 @@ func (s *Supervisor) appendDaemonEnv(env []string) []string {
 	if s.IpcSocketPath != "" {
 		env = append(env, fmt.Sprintf("LOOM_DAEMON_SOCKET=%s", s.IpcSocketPath))
 	}
+	// Route flue-backed agents into a Daytona sandbox per task when the daemon
+	// profile opts in (`loom daemon profile set flue_sandbox daytona`). Appended
+	// last so the explicit profile value wins over any inherited env. Non-flue
+	// backends ignore LOOM_FLUE_SANDBOX, so this is safe to set unconditionally.
+	if cfg := s.ConfigSnapshot(); cfg != nil && cfg.Daemon.FlueSandbox != "" {
+		env = append(env, fmt.Sprintf("LOOM_FLUE_SANDBOX=%s", cfg.Daemon.FlueSandbox))
+	}
 	return env
 }

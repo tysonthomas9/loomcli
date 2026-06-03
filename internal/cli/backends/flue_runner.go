@@ -59,6 +59,7 @@ type runnerEvent struct {
 	OutputTokens int64  `json:"output_tokens,omitempty"`
 	Status       string `json:"status,omitempty"`
 	Error        string `json:"error,omitempty"`
+	Cleanup      string `json:"cleanup,omitempty"` // "deleted" | "retained"
 }
 
 const runnerEventPrefix = "LOOMRUNNER "
@@ -71,6 +72,7 @@ type runnerResult struct {
 	patchPath string
 	status    string
 	errMsg    string
+	cleanup   string // "deleted" | "retained"
 }
 
 // handleLine parses one output line; LOOMRUNNER events update the result and
@@ -93,7 +95,7 @@ func (r *runnerResult) handleLine(line string, collector *usage.Collector) {
 			collector.Accumulate("", ev.InputTokens, ev.OutputTokens, 0, 0)
 		}
 	case "final":
-		r.status, r.errMsg = ev.Status, ev.Error
+		r.status, r.errMsg, r.cleanup = ev.Status, ev.Error, ev.Cleanup
 		if ev.SandboxID != "" {
 			r.sandboxID = ev.SandboxID
 		}
@@ -131,14 +133,46 @@ func runFlueDaytonaTask(workDir, prompt, agentName string, shutdown <-chan struc
 		return fmt.Errorf("flue daytona-task did not report completion")
 	}
 
-	// Patch-sync: apply the remote changes back into the local worktree.
+	// Patch-sync: apply the remote changes back into the local worktree, then
+	// commit + push so the work lands "back in loom" the way a local agent's own
+	// git commit/push would (the remote agent can't touch the local repo).
 	if hasPatch(res.patchPath) {
 		if err := applyPatch(workDir, res.patchPath); err != nil {
 			return fmt.Errorf("flue daytona-task patch_apply_failed (sandbox %s retained): %w", res.sandboxID, err)
 		}
 		fmt.Printf("[loom] applied Daytona patch from sandbox %s into %s\n", res.sandboxID, workDir)
+		if err := pushWorktreeBack(workDir, agentName, res.sandboxID); err != nil {
+			fmt.Printf("[loom] warning: could not commit Daytona work back to loom: %v\n", err)
+		}
 	}
-	fmt.Printf("[loom] flue daytona-task complete (sandbox=%s remote_cwd=%s)\n", res.sandboxID, res.remoteCwd)
+	fmt.Printf("[loom] flue daytona-task complete (sandbox=%s remote_cwd=%s cleanup=%s)\n", res.sandboxID, res.remoteCwd, res.cleanup)
+	return nil
+}
+
+// pushWorktreeBack commits the patch-synced changes in the local worktree and
+// pushes them, so a remote-sandbox run lands back in loom the same way a local
+// agent's git commit + push (task prompt Step 9) does. Commit is required (the
+// work must be durable in loom's git); push is best-effort — a missing remote
+// credential must not fail the task, since the work is already committed locally.
+func pushWorktreeBack(workDir, agentName, sandboxID string) error {
+	if out, err := gitCombined(workDir, "add", "-A"); err != nil {
+		return fmt.Errorf("git add: %v\n%s", err, out)
+	}
+	// `git diff --cached --quiet` exits 0 when nothing is staged → the patch was
+	// a no-op (e.g. a planning run that wrote no files); nothing to commit.
+	if _, err := gitOutput(workDir, "diff", "--cached", "--quiet"); err == nil {
+		return nil
+	}
+	msg := fmt.Sprintf("loom: apply flue daytona-task work (agent %s, sandbox %s)", agentName, sandboxID)
+	if out, err := gitCombined(workDir, "commit", "-m", msg); err != nil {
+		return fmt.Errorf("git commit: %v\n%s", err, out)
+	}
+	fmt.Printf("[loom] committed Daytona work in %s\n", workDir)
+	if out, err := gitCombined(workDir, "push", "origin", "HEAD"); err != nil {
+		fmt.Printf("[loom] push origin HEAD failed (work is committed locally): %v\n%s", err, out)
+		return nil
+	}
+	fmt.Println("[loom] pushed Daytona work to origin HEAD")
 	return nil
 }
 
@@ -177,6 +211,7 @@ func recordSandboxMetadata(res *runnerResult, baseRef string) {
 		RemoteCwd:    res.remoteCwd,
 		BaseRef:      baseRef,
 		SyncStrategy: syncStrategyPatchBack,
+		Cleanup:      res.cleanup,
 	})
 }
 
@@ -231,6 +266,15 @@ func orDefault(v, fallback string) string {
 func gitOutput(dir string, args ...string) (string, error) {
 	out, err := exec.Command("git", append([]string{"-C", dir}, args...)...).Output() //nolint:gosec // fixed git args
 	return strings.TrimSpace(string(out)), err
+}
+
+func gitCombined(dir string, args ...string) (string, error) {
+	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...) //nolint:gosec // fixed git args
+	// Never block on an interactive credential prompt — a push to an
+	// auth-required remote must fail fast (the daemon has no TTY), not hang.
+	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
+	out, err := cmd.CombinedOutput()
+	return string(out), err
 }
 
 func applyPatch(workDir, patchPath string) error {

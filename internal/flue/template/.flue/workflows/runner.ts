@@ -94,21 +94,39 @@ export async function run({ init, payload, env }: FlueContext) {
 				emit({ type: 'usage', input_tokens: resp.usage.input, output_tokens: resp.usage.output });
 			}
 
-			// 3. Capture the remote changes as a patch (tracked + untracked + deletes).
-			await sh(sandbox, `cd ${shq(cwd)} && git add -N . 2>/dev/null || true`);
-			const patch = await sh(sandbox, `cd ${shq(cwd)} && git diff --binary --full-index --no-ext-diff || true`);
+			// 3. Capture ALL changes since base_ref — committed (the task prompt
+			//    tells the agent to `git commit`), staged, unstaged, untracked, and
+			//    deletes — so nothing the agent did in the sandbox is lost. Diffing
+			//    against working-tree-vs-index would miss anything it committed.
+			await sh(sandbox, `cd ${shq(cwd)} && git add -A`);
+			const diffCmd = p.base_ref
+				? `git diff --binary --full-index --no-ext-diff ${shq(p.base_ref)}`
+				: `git diff --binary --full-index --no-ext-diff --cached`;
+			const patch = await sh(sandbox, `cd ${shq(cwd)} && ${diffCmd} || true`);
 			const filesChanged = countDiffFiles(patch);
 			if (p.patch_out) {
 				await writeFile(p.patch_out, patch);
 				emit({ type: 'patch_ready', path: p.patch_out, files_changed: filesChanged });
 			}
 
-			emit({ type: 'final', status: 'completed', sandbox_id: sandbox.id, files_changed: filesChanged, exit_code: 0 });
-			return { status: 'completed', sandbox_id: sandbox.id, files_changed: filesChanged };
+			// 4. Delete the sandbox on success (proposal: successful sandboxes are
+			//    deleted by default). Best-effort — the work is already captured, so
+			//    a delete failure must not fail the task; report it as retained.
+			let cleanup = 'retained';
+			try {
+				await sandbox.delete();
+				cleanup = 'deleted';
+				emit({ type: 'sandbox_deleted', sandbox_id: sandbox.id });
+			} catch (delErr) {
+				emit({ type: 'sandbox_delete_failed', sandbox_id: sandbox.id, error: delErr instanceof Error ? delErr.message : String(delErr) });
+			}
+
+			emit({ type: 'final', status: 'completed', sandbox_id: sandbox.id, files_changed: filesChanged, cleanup, exit_code: 0 });
+			return { status: 'completed', sandbox_id: sandbox.id, files_changed: filesChanged, cleanup };
 		} catch (err) {
 			const message = err instanceof Error ? err.message : String(err);
 			// Retain the sandbox on failure (proposal: failed sandboxes are kept for debugging).
-			emit({ type: 'final', status: 'failed', sandbox_id: sandbox.id, error: message, exit_code: 1 });
+			emit({ type: 'final', status: 'failed', sandbox_id: sandbox.id, error: message, cleanup: 'retained', exit_code: 1 });
 			throw err;
 		}
 	}
