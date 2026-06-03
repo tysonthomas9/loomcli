@@ -244,13 +244,22 @@ already has.
 
 ## Deployment & reachability
 
-The SDK model requires the runner to reach **`loom serve`** (never fleetdb
+**This requirement only exists once the runner calls loom directly (the SDK /
+control-plane-client model).** In the **host-orchestrated model loom runs today**
+(Phase 2), the flue runner process stays on the host and only the agent's *tools*
+execute in the sandbox via the connector — loom is never called from the sandbox,
+so **nothing needs to be hosted** (the sandbox needs only outbound to its git
+remote). Adopt one of the served topologies below only when you move the runner
+itself into the sandbox.
+
+Once the runner does call loom, it reaches **`loom serve`** (never fleetdb
 directly). The embedded dev fleetdb (miniredis on `127.0.0.1`) is fundamentally
-**not network-reachable**, so any remote runtime needs a *served, addressable,
-authenticated* loom endpoint. Three topologies provide that:
+**not network-reachable**, so any remote runner needs a *served, addressable,
+authenticated* loom endpoint:
 
 | Option | What it is | Best for | Trade-offs |
 |---|---|---|---|
+| **0. Host-orchestrated (today)** | Flue runner runs on the host; the sandbox is just a remote shell/FS reached via the Daytona API; loom is never called from the sandbox | Dev / single-user; Phase 1–2 | **Nothing to host.** But the runner can't self-serve task data/artifacts — you keep the blob bridge and its limits (no in-sandbox task read/close, patch-back fragility) |
 | **1. Tunnel local `loom serve`** | Cloudflare Tunnel / ngrok / Tailscale Funnel exposes the laptop's `loom serve` at a public HTTPS URL | Dev / single-user trying the SDK model | No VM; loom stays local. Laptop must stay online; tunnel adds its own auth + latency; if `loom serve` dies mid-run the control plane drops |
 | **2. Daytona ↔ private network** | The sandbox joins your network (Tailscale daemon in the sandbox image, or Daytona VPC peering) and reaches a private `loom serve` | Teams wanting no public exposure | Strongest isolation. Requires network-join provisioning in the sandbox image/runtime; depends on Daytona's networking support |
 | **3. Hosted `loom serve` (cloud VM / managed)** | `loom serve` (+ fleetdb/redis) runs on an always-on reachable host | Team / Phase-4 scale-out | Durable, always-on, server-visible artifacts as source of truth. Real ops: provisioning, TLS, scaling, secrets |
