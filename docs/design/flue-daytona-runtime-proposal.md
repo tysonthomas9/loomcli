@@ -58,6 +58,32 @@ The key correction from the earlier backend-only framing is this:
 > provide task/data access, stream logs, collect artifacts, and return
 > changes before finalization.
 
+## Reviewer Guide
+
+This document is intended to be reviewed in layers:
+
+1. Read the architecture diagrams first to understand the control-plane,
+   backend, and sandbox boundaries.
+2. Review Phase 2 carefully if the question is "can we run task agents
+   remotely without breaking Loom's current local finalizer?"
+3. Review Phase 3 carefully if the question is "what persists for a
+   long-running lead agent?"
+4. Review Phase 4 carefully if the question is "what changes when Loom
+   server provisions hundreds of remote task sandboxes?"
+5. Treat the open design decisions as the expected review output: each
+   decision should become either an accepted constraint or an implementation
+   issue before coding begins.
+
+The most important review distinction is:
+
+| Topic | Phase 2 | Phase 3 | Phase 4 |
+|---|---|---|---|
+| Sandbox identity | One sandbox per task run | One durable sandbox per lead agent | Many task sandboxes managed by Loom server |
+| Primary output | Patch synced back locally | Persistent lead state and branch assignment | Server-visible artifacts, patches, commits, logs |
+| Task workers inside sandbox? | Yes, one task agent per sandbox | No | Yes, scheduled by Loom server |
+| Local worktree required? | Yes, for patch-back finalization | No, lead workspace is remote | No, artifacts are server-visible |
+| Persistence | Usually deleted after success | Retained for the lead agent | Policy-driven pool/fresh/retained |
+
 ## Terms
 
 | Term | Meaning |
@@ -140,6 +166,127 @@ Daytona integration is application-owned:
   provider SDK supports.
 
 ## Proposed Architecture
+
+### Architecture Diagrams
+
+#### System Boundary
+
+```mermaid
+flowchart LR
+    User[User or UI] --> Loom[Loom CLI or daemon]
+    Loom --> FleetDB[FleetDB or Loom server]
+    Loom --> SessionStore[Session store and logs]
+    Loom --> Backend[Flue backend adapter]
+
+    Backend --> Runner[loom-flue-runner]
+    Runner --> Flue[Flue harness and session]
+    Flue --> LocalSandbox[Flue local sandbox]
+    Flue --> DaytonaSandbox[Flue Daytona sandbox]
+
+    LocalSandbox --> LocalWorktree[Local Loom worktree]
+    DaytonaSandbox --> RemoteWorkspace[Remote /workspace/project]
+
+    Runner --> EventStream[NDJSON events]
+    EventStream --> SessionStore
+    Runner --> Usage[Usage and transcript metadata]
+    Usage --> SessionStore
+    Runner --> Artifacts[Patch, diff, logs, test artifacts]
+    Artifacts --> SessionStore
+```
+
+The adapter boundary is intentionally narrow. Loom owns orchestration and
+visibility. Flue owns prompt execution. The selected Flue sandbox decides
+where file and shell tools actually run.
+
+#### Phase 2: Per-Task Daytona With Patch-Back
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant Loom as Loom task process
+    participant Runner as loom-flue-runner
+    participant Daytona as Daytona sandbox
+    participant Flue as Flue harness
+    participant LocalGit as Local Loom worktree
+    participant Store as Loom session store
+
+    Loom->>LocalGit: capture base_ref
+    Loom->>Runner: invoke backend with prompt, task_id, base_ref
+    Runner->>Daytona: create fresh sandbox
+    Runner->>Daytona: clone or hydrate repo at /workspace/project
+    Runner->>Flue: create agent with sandbox=daytona and cwd=/workspace/project
+    Flue->>Daytona: read, write, bash, grep, glob
+    Runner-->>Store: stream logs, Flue events, usage
+    Runner->>Daytona: generate binary patch from remote changes
+    Runner->>LocalGit: apply patch to local worktree
+    Loom->>Store: finalize session from local diff
+    Runner->>Daytona: delete or retain by policy
+```
+
+The patch-back step is what lets Phase 2 use remote execution while
+preserving Loom's current local worktree finalization behavior.
+
+#### Phase 3: Persistent Daytona Lead Agent
+
+```mermaid
+flowchart TB
+    Lead[Lead agent: nova] --> Binding[Loom lead runtime binding]
+    Binding --> Sandbox[Stable Daytona sandbox ID]
+
+    subgraph SandboxFS[Persistent Daytona filesystem]
+        State[State path: /home/daytona/.loom-agent]
+        Project[Repo path: /workspace/project]
+        Cache[Cache path: /workspace/cache]
+        Scratch[Scratch path: /workspace/scratch]
+        Artifacts[Artifact path: /workspace/artifacts]
+    end
+
+    Sandbox --> SandboxFS
+    BranchAssignment[Branch assignment] --> Project
+    Lead --> ControlPlane[Loom control plane]
+    ControlPlane --> Tasks[FleetDB tasks and reviews]
+
+    State --> Memory[Notes, memory, config, session state]
+    Project --> Branch[Current assigned branch]
+```
+
+The sandbox belongs to the lead agent. Branch assignment changes the repo
+state inside `/workspace/project`; it does not replace the sandbox or
+delete non-repo state.
+
+#### Phase 4: Loom Server Scale-Out
+
+```mermaid
+flowchart LR
+    Server[Loom server] --> Queue[Task queue and leases]
+    Queue --> Scheduler[Runtime scheduler]
+    Scheduler --> Limits[Capacity, budget, concurrency]
+    Scheduler --> Provisioner[Daytona provisioner or pool]
+
+    Provisioner --> SandboxA[Task sandbox A]
+    Provisioner --> SandboxB[Task sandbox B]
+    Provisioner --> SandboxN[Task sandbox N]
+
+    SandboxA --> RunnerA[Flue runner]
+    SandboxB --> RunnerB[Flue runner]
+    SandboxN --> RunnerN[Flue runner]
+
+    RunnerA --> Artifacts[Server-visible artifacts]
+    RunnerB --> Artifacts
+    RunnerN --> Artifacts
+
+    RunnerA --> Events[Logs, transcripts, usage]
+    RunnerB --> Events
+    RunnerN --> Events
+
+    Events --> Server
+    Artifacts --> Server
+    Server --> UI[Loom UI]
+```
+
+Phase 4 removes the local developer worktree as the primary artifact
+sink. The server must own leases, scheduling, logs, transcripts, patches,
+commits, cleanup, and retry state.
 
 ### Backend Adapter Boundary
 
