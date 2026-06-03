@@ -1,6 +1,6 @@
 # Loom TypeScript SDK & Flue-as-Control-Plane-Client — PRD
 
-**Status:** In progress — Phases A + B implemented; Phases C–D pending
+**Status:** In progress — Phases A + B implemented; Phase C started (TaskRun token + fencing primitives); D pending
 **Date:** 2026-06-03
 **Owner:** Tyson
 
@@ -329,11 +329,20 @@ ModeCloud path — config, not new code). The deferred private-endpoint path add
   the Goals require. Unconditional removal of the inlining lands once a served
   endpoint is the default (Phase C). *Token/fencing auth is still Phase C; the
   read path uses dev-mode `X-Actor`.*
-- **Phase C — Write path + auth.** *Pending.* Implement scoped-token minting +
-  fencing on `loom serve` and the write endpoints (artifact/usage/log/heartbeat);
-  un-stub the corresponding SDK methods; runner reports status/logs/usage/
-  artifacts and completes/fails/blocks via the SDK. Retire `LOOMRUNNER` for the
-  data plane.
+- **Phase C — Write path + auth.** *In progress.* The scoped per-TaskRun
+  **capability token + fencing primitives have landed**
+  (`internal/webui/fleet/taskrun_token.go`): `TaskRunClaims` bound to
+  `{workspace, task_id, session_id, fencing_token, scopes}`,
+  `GenerateTaskRunToken`/`ValidateTaskRunToken` reusing the existing fleet
+  HMAC-JWT pattern (so no new key management — resolves the "JWT vs macaroon"
+  open question by precedent), least-privilege default scopes, binding checks
+  (`AuthorizesSession`/`AuthorizesTask` → 403 on mismatch) and `FencedOut`
+  (stale fencing → 409), fully unit-tested. **Remaining:** the fencing/auth
+  middleware + write endpoints (artifact/usage/heartbeat/status) on `loom
+  serve`; mint the token in the supervisor at lease time (inject
+  `LOOM_TASKRUN_TOKEN` + `LOOM_FENCING_TOKEN`); un-stub the SDK methods; runner
+  reports status/logs/usage/artifacts and completes/fails/blocks via the SDK;
+  retire `LOOMRUNNER` for the data plane.
 - **Phase D — Artifacts as source of truth.** *Pending.* Branch-push / upload +
   register refs; server-visible artifacts replace host patch-back as the
   contract (patch-back remains an opt-in local convenience). Unblocks Phase-4
