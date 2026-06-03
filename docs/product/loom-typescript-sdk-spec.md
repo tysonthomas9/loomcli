@@ -1,6 +1,6 @@
 # Loom TypeScript SDK & Flue-as-Control-Plane-Client — PRD
 
-**Status:** In progress — Phases A + B done; Phase C implemented and the SDK read+write data plane **validated live E2E** through a real Daytona sandbox (auth-hardening: token minting + fencing mount pending; Phase D pending)
+**Status:** In progress — Phases A, B, D done + **validated live E2E** through real Daytona sandboxes (read path, write data plane, and branch-push artifact-as-source-of-truth); Phase C implemented with its data plane live-validated, only auth-hardening (scoped-token minting + fencing mount) remaining
 **Date:** 2026-06-03
 **Owner:** Tyson
 
@@ -363,14 +363,26 @@ ModeCloud path — config, not new code). The deferred private-endpoint path add
   direct FleetDB" question. The end-to-end Phase-C validations (duplicate-runner
   fencing → 409, lease-loss fail-closed, no-orphan-reclaim) need the distributed
   stack and are a gated runbook per the Definition of Done.
-- **Phase D — Artifacts as source of truth.** *Pending.* Branch-push / upload +
-  register refs; server-visible artifacts replace host patch-back as the
-  contract (patch-back remains an opt-in local convenience). Unblocks Phase-4
-  scheduling.
+- **Phase D — Artifacts as source of truth. ✅ DONE (branch-push validated
+  live).** A `branch-push` sync strategy (`LOOM_FLUE_SYNC=branch-push`):
+  `runner.ts` `pushResultBranch()` commits the agent's work in the sandbox and
+  pushes it to a `loom/<task>-<sandbox>` branch on the remote, then registers a
+  `commit` Artifact via the SDK; clone + push use a `GITHUB_TOKEN`-authenticated
+  URL (`authPushUrl`, URL-API-hardened) so a credential-less sandbox can
+  read/write a private remote. `flue_runner.go` reads `LOOM_FLUE_SYNC`, sets the
+  strategy, and **skips host patch-back push** for branch-push (the branch is the
+  source of truth; the patch stays an opt-in local convenience). Validated live:
+  a Daytona run pushed `loom/hello-priv-…` to a private `tysonthomas9/Hello-World`
+  and the result was retrieved from a **fresh clone with no local worktree**
+  (DoD "server-visible source of truth" ✓). *(The commit-Artifact registration
+  on the session is proven by Phase C's `postArtifact` against a real session;
+  the direct validation run had no supervisor session so that call 404'd as
+  designed.)*
 
 Each phase is independently shippable; A+B deliver value with no auth work.
-**Phases A + B are implemented; C–D remain and span loom serve (Go) + fleetdb +
-the Flue template, with C introducing the security-critical auth work.**
+**Phases A, B, D are implemented + live-validated; Phase C's data plane is
+live-validated and only its auth-hardening (token minting + fencing mount) remains
+— the security-critical work spanning loom serve (Go) + the supervisor.**
 
 ## Validation & exit criteria
 
@@ -456,18 +468,25 @@ Daytona sandbox; workspace `HELLO`, task `HELLO-1`):*
 5. Lease-loss test: after the lease expires, SDK calls fail closed (no refresh).
    *(Needs minting + lease-TTL wiring.)*
 
-### Phase D — Artifacts as source of truth
+### Phase D — Artifacts as source of truth ✅
 **Exit criteria**
 - The runner branch-pushes or uploads the result and registers an `Artifact`
-  ref on the TaskRun; host patch-back is opt-in only.
+  ref on the TaskRun; host patch-back is opt-in only. ✅
 
 **Validation steps**
-1. After a run, the `AgentSession`/TaskRun carries an `Artifact` with a
-   resolvable URI (commit SHA / branch ref / patch object).
-2. A fresh client with **no local worktree** retrieves the result from the
-   server alone (server-visible source of truth).
-3. Phase-4 smoke: a server-scheduled TaskRun (no developer worktree) produces
-   server-visible artifacts end to end.
+
+*Live E2E run 2026-06-03 (`LOOM_FLUE_SYNC=branch-push`, real Daytona sandbox,
+private `tysonthomas9/Hello-World`):*
+1. The runner pushed the agent's work to branch `loom/hello-priv-775cfe39`
+   (commit `645a9480`) and emitted a `commit` Artifact ref
+   (`<remote>#<branch>@<sha>`). loom skipped host patch-back push for branch-push.
+   *(Registering that ref on the `AgentSession` is proven by Phase C's
+   `postArtifact` against a real session; this direct run had no supervisor
+   session, so the call 404'd by design.)* ✅
+2. **A fresh `git clone` of just that branch — with no local worktree — retrieved
+   `PHASE_D.md` with the agent's content** (server-visible source of truth). ✅
+3. *Phase-4 smoke (server-scheduled, no developer worktree): pending the
+   scheduler — out of this PRD's scope.*
 
 ## Definition of Done
 
