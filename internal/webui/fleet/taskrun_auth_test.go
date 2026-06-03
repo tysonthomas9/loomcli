@@ -55,7 +55,7 @@ func freshToken(t *testing.T, c TaskRunClaims) string {
 
 func TestTaskRunAuth_AllowsValidMatchingRequest(t *testing.T) {
 	tok := freshToken(t, TaskRunClaims{Workspace: "DEMO", TaskID: "DEMO-1", SessionID: "sess-1", FencingToken: 7})
-	mw := NewTaskRunAuthMiddleware(testSigningKey, fencingAt(7)) // equal fencing → current holder
+	mw := NewTaskRunAuthMiddleware(testSigningKey, fencingAt(7), false) // equal fencing → current holder
 	code, called := run(t, mw, requestFor(http.MethodPost, "DEMO", "sess-1", tok))
 	if code != http.StatusOK || !called {
 		t.Fatalf("expected 200 + next called, got code=%d called=%v", code, called)
@@ -63,7 +63,7 @@ func TestTaskRunAuth_AllowsValidMatchingRequest(t *testing.T) {
 }
 
 func TestTaskRunAuth_RejectsMissingAndMalformedToken(t *testing.T) {
-	mw := NewTaskRunAuthMiddleware(testSigningKey, fencingAt(1))
+	mw := NewTaskRunAuthMiddleware(testSigningKey, fencingAt(1), false)
 
 	if code, called := run(t, mw, requestFor(http.MethodPost, "DEMO", "sess-1", "")); code != http.StatusUnauthorized || called {
 		t.Errorf("missing token: code=%d called=%v, want 401", code, called)
@@ -77,7 +77,7 @@ func TestTaskRunAuth_RejectsMissingAndMalformedToken(t *testing.T) {
 }
 
 func TestTaskRunAuth_RejectsInvalidToken(t *testing.T) {
-	mw := NewTaskRunAuthMiddleware(testSigningKey, fencingAt(1))
+	mw := NewTaskRunAuthMiddleware(testSigningKey, fencingAt(1), false)
 	// A token signed with a different key must not validate.
 	other, err := GenerateTaskRunToken(TaskRunClaims{Workspace: "DEMO", SessionID: "sess-1"}, []byte("another-key-32-bytes-long-xxxxxx"), time.Hour)
 	if err != nil {
@@ -91,7 +91,7 @@ func TestTaskRunAuth_RejectsInvalidToken(t *testing.T) {
 func TestTaskRunAuth_RejectsWrongSessionBinding(t *testing.T) {
 	// Token bound to sess-1 but the path targets sess-2 → 403.
 	tok := freshToken(t, TaskRunClaims{Workspace: "DEMO", TaskID: "DEMO-1", SessionID: "sess-1", FencingToken: 7})
-	mw := NewTaskRunAuthMiddleware(testSigningKey, fencingAt(7))
+	mw := NewTaskRunAuthMiddleware(testSigningKey, fencingAt(7), false)
 	if code, called := run(t, mw, requestFor(http.MethodPost, "DEMO", "sess-2", tok)); code != http.StatusForbidden || called {
 		t.Errorf("cross-session: code=%d called=%v, want 403", code, called)
 	}
@@ -104,7 +104,7 @@ func TestTaskRunAuth_RejectsWrongSessionBinding(t *testing.T) {
 func TestTaskRunAuth_RejectsStaleFencing(t *testing.T) {
 	// Token fencing 7, current lease at 8 → stale writer → 409.
 	tok := freshToken(t, TaskRunClaims{Workspace: "DEMO", TaskID: "DEMO-1", SessionID: "sess-1", FencingToken: 7})
-	mw := NewTaskRunAuthMiddleware(testSigningKey, fencingAt(8))
+	mw := NewTaskRunAuthMiddleware(testSigningKey, fencingAt(8), false)
 	if code, called := run(t, mw, requestFor(http.MethodPost, "DEMO", "sess-1", tok)); code != http.StatusConflict || called {
 		t.Errorf("stale fencing: code=%d called=%v, want 409", code, called)
 	}
@@ -113,7 +113,7 @@ func TestTaskRunAuth_RejectsStaleFencing(t *testing.T) {
 func TestTaskRunAuth_RejectsWhenNoActiveLease(t *testing.T) {
 	tok := freshToken(t, TaskRunClaims{Workspace: "DEMO", TaskID: "DEMO-1", SessionID: "sess-1", FencingToken: 7})
 	noLease := FencingLookup(func(context.Context, string, string) (int64, bool, error) { return 0, false, nil })
-	mw := NewTaskRunAuthMiddleware(testSigningKey, noLease)
+	mw := NewTaskRunAuthMiddleware(testSigningKey, noLease, false)
 	if code, called := run(t, mw, requestFor(http.MethodPost, "DEMO", "sess-1", tok)); code != http.StatusConflict || called {
 		t.Errorf("no active lease: code=%d called=%v, want 409", code, called)
 	}
@@ -124,7 +124,7 @@ func TestTaskRunAuth_FencingLookupErrorIs503(t *testing.T) {
 	boom := FencingLookup(func(context.Context, string, string) (int64, bool, error) {
 		return 0, false, context.DeadlineExceeded
 	})
-	mw := NewTaskRunAuthMiddleware(testSigningKey, boom)
+	mw := NewTaskRunAuthMiddleware(testSigningKey, boom, false)
 	if code, called := run(t, mw, requestFor(http.MethodPost, "DEMO", "sess-1", tok)); code != http.StatusServiceUnavailable || called {
 		t.Errorf("fencing lookup error: code=%d called=%v, want 503", code, called)
 	}
@@ -133,7 +133,7 @@ func TestTaskRunAuth_FencingLookupErrorIs503(t *testing.T) {
 func TestTaskRunAuth_ReadsSkipFencing(t *testing.T) {
 	// A GET to a session endpoint is not fencing-gated: a stale token still reads.
 	tok := freshToken(t, TaskRunClaims{Workspace: "DEMO", TaskID: "DEMO-1", SessionID: "sess-1", FencingToken: 1})
-	mw := NewTaskRunAuthMiddleware(testSigningKey, fencingAt(99)) // would be stale if enforced
+	mw := NewTaskRunAuthMiddleware(testSigningKey, fencingAt(99), false) // would be stale if enforced
 	if code, called := run(t, mw, requestFor(http.MethodGet, "DEMO", "sess-1", tok)); code != http.StatusOK || !called {
 		t.Errorf("GET should skip fencing: code=%d called=%v, want 200", code, called)
 	}
@@ -141,8 +141,30 @@ func TestTaskRunAuth_ReadsSkipFencing(t *testing.T) {
 
 func TestTaskRunAuth_UnconfiguredRejects(t *testing.T) {
 	tok := freshToken(t, TaskRunClaims{Workspace: "DEMO", SessionID: "sess-1"})
-	mw := NewTaskRunAuthMiddleware(nil, fencingAt(1)) // no signing key
+	mw := NewTaskRunAuthMiddleware(nil, fencingAt(1), false) // no signing key
 	if code, called := run(t, mw, requestFor(http.MethodPost, "DEMO", "sess-1", tok)); code != http.StatusUnauthorized || called {
 		t.Errorf("unconfigured: code=%d called=%v, want 401", code, called)
+	}
+}
+
+func TestTaskRunAuth_TokenOptional(t *testing.T) {
+	mw := NewTaskRunAuthMiddleware(testSigningKey, fencingAt(8), true) // token-optional
+
+	// No token → passthrough to next (dev-mode), claims not required.
+	called := false
+	next := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		called = true
+		w.WriteHeader(http.StatusOK)
+	})
+	rec := httptest.NewRecorder()
+	mw(next).ServeHTTP(rec, requestFor(http.MethodPost, "DEMO", "sess-1", ""))
+	if rec.Code != http.StatusOK || !called {
+		t.Errorf("no-token passthrough: code=%d called=%v, want 200", rec.Code, called)
+	}
+
+	// Token present → still enforced: a stale token is rejected even when optional.
+	tok := freshToken(t, TaskRunClaims{Workspace: "DEMO", TaskID: "DEMO-1", SessionID: "sess-1", FencingToken: 7})
+	if code, ran := run(t, mw, requestFor(http.MethodPost, "DEMO", "sess-1", tok)); code != http.StatusConflict || ran {
+		t.Errorf("token-present enforced: code=%d ran=%v, want 409", code, ran)
 	}
 }

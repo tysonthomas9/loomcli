@@ -41,12 +41,23 @@ type taskRunAuthError struct {
 //
 // fencing may be nil to skip lease-fencing (e.g. a read-only mount); when set,
 // a mutating request with no resolvable active lease is rejected with 409.
-func NewTaskRunAuthMiddleware(signingKey []byte, fencing FencingLookup) func(http.Handler) http.Handler {
-	if len(signingKey) == 0 {
+//
+// tokenOptional=true runs in "enforce-if-present" mode: a request with no bearer
+// token is passed straight through (e.g. to the existing dev-mode X-Actor auth),
+// while a request that DOES carry a token is fully validated + fenced. This lets
+// the middleware be mounted before runner token-minting is the default without
+// locking out the current callers; set it false to require a token.
+func NewTaskRunAuthMiddleware(signingKey []byte, fencing FencingLookup, tokenOptional bool) func(http.Handler) http.Handler {
+	if len(signingKey) == 0 && !tokenOptional {
 		slog.Warn("taskrun JWT signing key is empty; all TaskRun write requests will be rejected")
 	}
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// Enforce-if-present: no token → defer to the underlying auth.
+			if tokenOptional && !hasBearerToken(r) {
+				next.ServeHTTP(w, r)
+				return
+			}
 			claims, status, msg := authenticateTaskRun(r, signingKey)
 			if status != 0 {
 				writeTaskRunAuthError(w, status, msg)
@@ -81,6 +92,13 @@ func NewTaskRunAuthMiddleware(signingKey []byte, fencing FencingLookup) func(htt
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}
+}
+
+// hasBearerToken reports whether the request carries a non-empty bearer token.
+func hasBearerToken(r *http.Request) bool {
+	auth := r.Header.Get("Authorization")
+	const prefix = "Bearer "
+	return strings.HasPrefix(auth, prefix) && strings.TrimSpace(auth[len(prefix):]) != ""
 }
 
 // authenticateTaskRun extracts and validates the bearer token. Returns

@@ -5,12 +5,14 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui"
 	"github.com/tysonthomas9/loomcli/internal/webui/daemon"
+	"github.com/tysonthomas9/loomcli/internal/webui/fleet"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 	"github.com/tysonthomas9/loomcli/internal/webui/svcimpl"
 )
@@ -77,5 +79,73 @@ func TestSessionWriteRoutes_MountedAndStoreBacked(t *testing.T) {
 	app.mux.ServeHTTP(rr, req)
 	if rr.Code != http.StatusNotFound {
 		t.Fatalf("unknown session status = %d, want 404; body = %s", rr.Code, rr.Body.String())
+	}
+}
+
+// TestSessionWriteRoutes_FencingEnforced drives the mounted token-optional
+// TaskRun auth+fencing middleware through the real route table: a write bearing
+// a token with the current lease's fencing token is accepted (201), while a
+// stale fencing token is rejected (409) — using a real minted token + a
+// lease-backed lookup, against the in-memory store (no distributed stack).
+func TestSessionWriteRoutes_FencingEnforced(t *testing.T) {
+	ctx := t.Context()
+	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
+	key := []byte("test-taskrun-signing-key-32bytes!")
+
+	st := memstore.New()
+	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "PARITY", Name: "Parity"}); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+	if _, err := st.AgentSessions().Create(ctx, store.AgentSessionCreate{
+		WorkspaceKey: "PARITY", SessionID: "sess-f1", AgentID: "nova", TaskID: "PARITY-1",
+	}); err != nil {
+		t.Fatalf("seed session: %v", err)
+	}
+	lease, err := st.AgentLeases().Create(ctx, store.AgentLeaseCreate{
+		WorkspaceKey: "PARITY", SessionID: "sess-f1", LeaseID: "sess-f1-lease", AgentID: "nova", TTL: time.Hour,
+	})
+	if err != nil {
+		t.Fatalf("seed lease: %v", err)
+	}
+	if err := bootstrap.SaveStateCache(&bootstrap.StateCache{
+		Workspaces: map[string]bootstrap.WorkspaceLocalState{"PARITY": {Path: t.TempDir()}},
+	}); err != nil {
+		t.Fatalf("seed state cache: %v", err)
+	}
+
+	gitOps := &mockGitOps{}
+	app := &Server{
+		multiPool:  daemon.NewMultiPool(middleware.WorkspaceFromContext, 1),
+		config:     webui.ServerConfig{Store: st, GitOps: gitOps, FleetJWTKey: key},
+		agentSvc:   svcimpl.NewAgentService(gitOps, nil, nil, st),
+		wsExistsFn: func(id string) bool { return id == "PARITY" },
+	}
+	setupTestRoutes(t, app)
+
+	mint := func(fencing int64) string {
+		tok, err := fleet.GenerateTaskRunToken(fleet.TaskRunClaims{
+			Workspace: "PARITY", TaskID: "PARITY-1", SessionID: "sess-f1", FencingToken: fencing,
+		}, key, time.Hour)
+		if err != nil {
+			t.Fatalf("mint token: %v", err)
+		}
+		return tok
+	}
+	post := func(token string) int {
+		body := bytes.NewBufferString(`{"type":"patch","uri":"/tmp/x.patch","files_changed":1}`)
+		req := httptest.NewRequest(http.MethodPost, "/api/workspaces/PARITY/sessions/sess-f1/artifacts", body)
+		req.Header.Set("Authorization", "Bearer "+token)
+		rr := httptest.NewRecorder()
+		app.mux.ServeHTTP(rr, req)
+		return rr.Code
+	}
+
+	// Current lease holder (matching fencing token) → accepted.
+	if code := post(mint(lease.FencingToken)); code != http.StatusCreated {
+		t.Errorf("current fencing token: status = %d, want 201", code)
+	}
+	// Stale writer (older fencing token) → rejected 409 by the fencing middleware.
+	if code := post(mint(lease.FencingToken - 1)); code != http.StatusConflict {
+		t.Errorf("stale fencing token: status = %d, want 409", code)
 	}
 }

@@ -161,10 +161,15 @@ func (app *Server) registerWorkspaceRoutes() {
 	// (more specific than the /api/workspaces/{ws}/ subtree, which therefore
 	// won't shadow them), guarded by the workspace middleware.
 	if st := app.config.Store; st != nil {
-		app.mux.Handle("POST /api/workspaces/{ws}/sessions/{sessionId}/artifacts", workspaceMW(sessionwrite.HandlePostSessionArtifact(st.AgentSessions(), st.Artifacts())))
-		app.mux.Handle("POST /api/workspaces/{ws}/sessions/{sessionId}/usage", workspaceMW(sessionwrite.HandleRecordSessionUsage(st.AgentSessions(), st.Artifacts())))
-		app.mux.Handle("POST /api/workspaces/{ws}/sessions/{sessionId}/logs", workspaceMW(sessionwrite.HandleAppendSessionLog(st.AgentSessions())))
-		app.mux.Handle("POST /api/workspaces/{ws}/sessions/{sessionId}/heartbeat", workspaceMW(sessionwrite.HandleHeartbeatSession(st.AgentSessions())))
+		// Token-optional TaskRun auth + fencing in front of the write handlers:
+		// no token → dev-mode passthrough; a token-bearing write is fenced (stale
+		// fencing token → 409). workspaceMW runs first so the workspace is in ctx.
+		taskMW := taskRunWriteAuth(st, app.config.FleetJWTKey)
+		wrap := func(h http.Handler) http.Handler { return workspaceMW(taskMW(h)) }
+		app.mux.Handle("POST /api/workspaces/{ws}/sessions/{sessionId}/artifacts", wrap(sessionwrite.HandlePostSessionArtifact(st.AgentSessions(), st.Artifacts())))
+		app.mux.Handle("POST /api/workspaces/{ws}/sessions/{sessionId}/usage", wrap(sessionwrite.HandleRecordSessionUsage(st.AgentSessions(), st.Artifacts())))
+		app.mux.Handle("POST /api/workspaces/{ws}/sessions/{sessionId}/logs", wrap(sessionwrite.HandleAppendSessionLog(st.AgentSessions())))
+		app.mux.Handle("POST /api/workspaces/{ws}/sessions/{sessionId}/heartbeat", wrap(sessionwrite.HandleHeartbeatSession(st.AgentSessions())))
 	}
 	if statusHandler := app.config.MonitorHandlers.Status; statusHandler != nil {
 		app.mux.Handle("GET /api/workspaces/{ws}/monitor/status", workspaceMW(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
