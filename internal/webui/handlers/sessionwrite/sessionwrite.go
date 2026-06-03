@@ -135,9 +135,13 @@ func HandlePostSessionArtifact(sessions store.AgentSessionStore, artifacts store
 	}
 }
 
-// HandleRecordSessionUsage records token usage on the session (stored in session
-// metadata). POST /api/workspaces/{ws}/sessions/{sessionId}/usage
-func HandleRecordSessionUsage(sessions store.AgentSessionStore) http.HandlerFunc {
+// HandleRecordSessionUsage records token usage as a typed "usage" Artifact on
+// the session. We deliberately do NOT store usage in the session's metadata map:
+// loom's session finalizer rewrites that map wholesale (AgentSessionUpdate
+// replaces, not merges), which would clobber the usage keys. An Artifact is
+// durable, queryable by session, and matches the domain's documented "usage"
+// artifact type. POST /api/workspaces/{ws}/sessions/{sessionId}/usage
+func HandleRecordSessionUsage(sessions store.AgentSessionStore, artifacts store.ArtifactStore) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		ws, sessionID := scope(r)
 		var req struct {
@@ -155,20 +159,27 @@ func HandleRecordSessionUsage(sessions store.AgentSessionStore) http.HandlerFunc
 			writeErr(w, statusForErr(err), "session not found")
 			return
 		}
-		meta := map[string]string{}
-		for k, v := range sess.Metadata {
-			meta[k] = v
+		meta := map[string]string{
+			"input_tokens":  strconv.FormatInt(req.InputTokens, 10),
+			"output_tokens": strconv.FormatInt(req.OutputTokens, 10),
 		}
-		meta["usage_input_tokens"] = strconv.FormatInt(req.InputTokens, 10)
-		meta["usage_output_tokens"] = strconv.FormatInt(req.OutputTokens, 10)
 		if req.CacheReadTokens > 0 {
-			meta["usage_cache_read_tokens"] = strconv.FormatInt(req.CacheReadTokens, 10)
+			meta["cache_read_tokens"] = strconv.FormatInt(req.CacheReadTokens, 10)
 		}
 		if req.CacheWriteTokens > 0 {
-			meta["usage_cache_write_tokens"] = strconv.FormatInt(req.CacheWriteTokens, 10)
+			meta["cache_write_tokens"] = strconv.FormatInt(req.CacheWriteTokens, 10)
 		}
-		if _, err := sessions.Update(r.Context(), ws, sessionID, store.AgentSessionUpdate{Metadata: &meta}); err != nil {
-			writeErr(w, statusForErr(err), "could not record usage")
+		if _, err := artifacts.Create(r.Context(), store.ArtifactCreate{
+			WorkspaceKey: ws,
+			ArtifactID:   newArtifactID(),
+			AgentID:      sess.AgentID,
+			SessionID:    sessionID,
+			TaskID:       sess.TaskID,
+			Type:         "usage",
+			URI:          "usage://" + sessionID,
+			Metadata:     meta,
+		}); err != nil {
+			writeErr(w, http.StatusInternalServerError, "could not record usage")
 			return
 		}
 		writeOK(w, http.StatusOK, nil)

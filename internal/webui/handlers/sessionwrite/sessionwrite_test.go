@@ -94,9 +94,9 @@ func TestPostSessionArtifact_Validation(t *testing.T) {
 	}
 }
 
-func TestRecordSessionUsage_StoresOnSessionMetadata(t *testing.T) {
+func TestRecordSessionUsage_PersistsUsageArtifact(t *testing.T) {
 	st := seedStore(t)
-	h := HandleRecordSessionUsage(st.AgentSessions())
+	h := HandleRecordSessionUsage(st.AgentSessions(), st.Artifacts())
 
 	rec := httptest.NewRecorder()
 	h(rec, newReq(http.MethodPost, testSession, `{"input_tokens":100,"output_tokens":20,"cache_read_tokens":5}`))
@@ -104,15 +104,18 @@ func TestRecordSessionUsage_StoresOnSessionMetadata(t *testing.T) {
 		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
 	}
 
-	sess, err := st.AgentSessions().Get(context.Background(), testWS, testSession)
-	if err != nil {
-		t.Fatalf("get session: %v", err)
+	// Usage is stored as a typed "usage" artifact (not session metadata, which
+	// loom's finalizer would clobber), with the counts in artifact metadata.
+	arts, err := st.Artifacts().List(context.Background(), testWS, store.ArtifactFilter{SessionID: testSession, Type: "usage"})
+	if err != nil || len(arts) != 1 {
+		t.Fatalf("expected 1 usage artifact, got %d (err=%v)", len(arts), err)
 	}
-	if sess.Metadata["usage_input_tokens"] != "100" || sess.Metadata["usage_output_tokens"] != "20" {
-		t.Errorf("usage metadata = %+v", sess.Metadata)
+	a := arts[0]
+	if a.Type != "usage" || a.TaskID != "DEMO-1" {
+		t.Errorf("usage artifact = %+v", a)
 	}
-	if sess.Metadata["usage_cache_read_tokens"] != "5" {
-		t.Errorf("cache_read metadata = %q, want 5", sess.Metadata["usage_cache_read_tokens"])
+	if a.Metadata["input_tokens"] != "100" || a.Metadata["output_tokens"] != "20" || a.Metadata["cache_read_tokens"] != "5" {
+		t.Errorf("usage artifact metadata = %+v", a.Metadata)
 	}
 
 	// Unknown session → 404.

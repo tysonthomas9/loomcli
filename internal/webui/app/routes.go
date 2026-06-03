@@ -162,7 +162,7 @@ func (app *Server) registerWorkspaceRoutes() {
 	// won't shadow them), guarded by the workspace middleware.
 	if st := app.config.Store; st != nil {
 		app.mux.Handle("POST /api/workspaces/{ws}/sessions/{sessionId}/artifacts", workspaceMW(sessionwrite.HandlePostSessionArtifact(st.AgentSessions(), st.Artifacts())))
-		app.mux.Handle("POST /api/workspaces/{ws}/sessions/{sessionId}/usage", workspaceMW(sessionwrite.HandleRecordSessionUsage(st.AgentSessions())))
+		app.mux.Handle("POST /api/workspaces/{ws}/sessions/{sessionId}/usage", workspaceMW(sessionwrite.HandleRecordSessionUsage(st.AgentSessions(), st.Artifacts())))
 		app.mux.Handle("POST /api/workspaces/{ws}/sessions/{sessionId}/logs", workspaceMW(sessionwrite.HandleAppendSessionLog(st.AgentSessions())))
 		app.mux.Handle("POST /api/workspaces/{ws}/sessions/{sessionId}/heartbeat", workspaceMW(sessionwrite.HandleHeartbeatSession(st.AgentSessions())))
 	}
