@@ -3,17 +3,14 @@ package agent
 import (
 	"context"
 	"fmt"
-	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
-	"github.com/tysonthomas9/loomcli/internal/infra/fleetdb"
 	"github.com/tysonthomas9/loomcli/internal/sandbox"
 )
 
@@ -234,11 +231,6 @@ func applySandboxFleetConfig(cfg *SandboxOneshotConfig) error {
 	return nil
 }
 
-// sandboxKeyTTLSeconds bounds a provisioned sandbox credential's lifetime: long
-// enough for a full agent run, short enough that a leaked key from a finished
-// run is quickly useless. fleet-db co-expires the ACL role with the key.
-const sandboxKeyTTLSeconds = 6 * 60 * 60 // 6 hours
-
 // provisionSandboxCredential mints a short-TTL, workspace-scoped `developer` API
 // key for a unique sandbox actor and records it on cfg, returning a revoke func.
 // It runs only when the host holds an admin fleet-db credential
@@ -247,33 +239,14 @@ const sandboxKeyTTLSeconds = 6 * 60 * 60 // 6 hours
 // fleet-db). Provisioning errors are fatal: a configured admin path that fails
 // must not silently fall back to an over-privileged key.
 func provisionSandboxCredential(ctx context.Context, cfg *SandboxOneshotConfig) (func(), error) {
-	adminKey := strings.TrimSpace(os.Getenv(bootstrap.EnvFleetDBAPIKey))
-	hostURL := strings.TrimSpace(os.Getenv(bootstrap.EnvFleetDBURL))
-	if adminKey == "" || hostURL == "" {
-		return func() {}, nil
-	}
-	client, err := fleetdb.New(fleetdb.Config{
-		BaseURL: hostURL,
-		APIKey:  adminKey,
-		Actor:   strings.TrimSpace(os.Getenv(bootstrap.EnvFleetDBActor)),
-	})
+	key, actor, revoke, err := sandbox.ProvisionCredential(ctx, cfg.WorkspaceID, cfg.AgentName)
 	if err != nil {
-		return nil, fmt.Errorf("sandbox credential client: %w", err)
+		return nil, err
 	}
-	actor := fmt.Sprintf("sandbox:%s:%s:%x", cfg.WorkspaceID, cfg.AgentName, time.Now().UnixMilli())
-	key, err := client.ProvisionScopedKey(ctx, actor, cfg.WorkspaceID, "developer", sandboxKeyTTLSeconds)
-	if err != nil {
-		return nil, fmt.Errorf("provision sandbox developer key for %q: %w", actor, err)
-	}
-	cfg.FleetDBKey = key
-	cfg.FleetDBActor = actor
-	fmt.Printf("[sandbox] Provisioned scoped developer credential for %s\n", actor)
-	revoke := func() {
-		rctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-		defer cancel()
-		if err := client.RevokeKey(rctx, actor); err != nil {
-			slog.Warn("sandbox credential revoke failed", "actor", actor, "err", err)
-		}
+	if actor != "" { // a scoped key was minted (admin path); else ambient credential
+		cfg.FleetDBKey = key
+		cfg.FleetDBActor = actor
+		fmt.Printf("[sandbox] Provisioned scoped developer credential for %s\n", actor)
 	}
 	return revoke, nil
 }
@@ -284,18 +257,7 @@ func provisionSandboxCredential(ctx context.Context, cfg *SandboxOneshotConfig) 
 // otherwise it rewrites a localhost LOOM_FLEET_DB_URL to the container's host
 // gateway so the in-container agent can reach the host's fleet-db.
 func resolveSandboxFleetDBURL() string {
-	if v := strings.TrimSpace(os.Getenv("LOOM_SANDBOX_FLEETDB_URL")); v != "" {
-		return v
-	}
-	host := strings.TrimSpace(os.Getenv(bootstrap.EnvFleetDBURL))
-	if host == "" {
-		return ""
-	}
-	gw := sandbox.HostGateway()
-	for _, lh := range []string{"localhost", "127.0.0.1", "0.0.0.0"} {
-		host = strings.ReplaceAll(host, lh, gw)
-	}
-	return host
+	return sandbox.FleetDBURL()
 }
 
 // resolveSandboxWorkspace returns the workspace ID to pass to the in-sandbox

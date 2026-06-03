@@ -1,16 +1,15 @@
-package supervisor
+package agent
 
 import (
 	"strings"
 	"testing"
 
-	cfgpkg "github.com/tysonthomas9/loomcli/internal/cli/config"
 	"github.com/tysonthomas9/loomcli/internal/sandbox"
 )
 
-func TestSandboxLoomInvocation_BuiltInRole(t *testing.T) {
-	ap := &AgentProcess{Entry: cfgpkg.AgentEntry{Worktree: "coder", Role: "task", Execution: "sandbox"}}
-	got := sandboxLoomInvocation(ap, sandbox.Config{Backend: "playground"})
+func TestSandboxSupervisedLoomInvocation_BuiltInRole(t *testing.T) {
+	spec := SandboxExecSpec{Worktree: "coder", Role: "task", IsBuiltinRole: true}
+	got := sandboxSupervisedLoomInvocation(spec, sandbox.Config{Backend: "playground"})
 	want := "/sandbox/loom 'task' '/sandbox/repo' --auto --backend 'playground'"
 	if got != want {
 		t.Errorf("got %q\nwant %q", got, want)
@@ -22,12 +21,9 @@ func TestSandboxLoomInvocation_BuiltInRole(t *testing.T) {
 	}
 }
 
-func TestSandboxLoomInvocation_CustomRole(t *testing.T) {
-	ap := &AgentProcess{
-		Entry:      cfgpkg.AgentEntry{Worktree: "researcher", Role: "deep", Execution: "sandbox"},
-		RoleConfig: cfgpkg.RoleConfig{PromptFile: "p.md", TaskFilter: "label:research"},
-	}
-	got := sandboxLoomInvocation(ap, sandbox.Config{})
+func TestSandboxSupervisedLoomInvocation_CustomRole(t *testing.T) {
+	spec := SandboxExecSpec{Worktree: "researcher", Role: "deep", PromptFile: "p.md", TaskFilter: "label:research"}
+	got := sandboxSupervisedLoomInvocation(spec, sandbox.Config{})
 	for _, want := range []string{"agent '/sandbox/repo'", "--prompt 'p.md'", "--task-filter 'label:research'", "--auto"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("invocation %q missing %q", got, want)
@@ -38,13 +34,13 @@ func TestSandboxLoomInvocation_CustomRole(t *testing.T) {
 	}
 }
 
-func TestBuildSandboxBootstrap_ScopedFleetEnv(t *testing.T) {
-	ap := &AgentProcess{Entry: cfgpkg.AgentEntry{Worktree: "coder", Role: "task", Execution: "sandbox"}}
-	env := sandboxFleetEnv{
+func TestSandboxSupervisedBootstrap_ScopedFleetEnv(t *testing.T) {
+	spec := SandboxExecSpec{Worktree: "coder", Role: "task", IsBuiltinRole: true}
+	cred := sandboxExecCred{
 		URL: "http://host.docker.internal:18099", Key: "sk-dev",
 		Actor: "sandbox:WS1:coder:1", Workspace: "WS1",
 	}
-	script := (&Supervisor{}).buildSandboxBootstrap(ap, "feature/x", "http://host.docker.internal:9418/r.git", env, sandbox.Config{Backend: "playground"})
+	script := sandboxSupervisedBootstrap(spec, "feature/x", "http://host.docker.internal:9418/r.git", cred, sandbox.Config{Backend: "playground"})
 
 	for _, want := range []string{
 		"git clone --branch 'feature/x' --single-branch 'http://host.docker.internal:9418/r.git' /sandbox/repo\n",
@@ -61,17 +57,5 @@ func TestBuildSandboxBootstrap_ScopedFleetEnv(t *testing.T) {
 	// Agent reaches fleet-db directly; loom-serve must not be in the picture.
 	if strings.Contains(script, "LOOM_SERVER_URL") {
 		t.Error("bootstrap must not export LOOM_SERVER_URL (agent uses fleet-db directly)")
-	}
-}
-
-func TestSandboxFleetDBURL_GatewayRewrite(t *testing.T) {
-	t.Setenv("LOOM_SANDBOX_FLEETDB_URL", "")
-	t.Setenv("LOOM_FLEET_DB_URL", "http://127.0.0.1:18099")
-	if got := sandboxFleetDBURL(); got != "http://host.docker.internal:18099" {
-		t.Errorf("got %q, want host-gateway rewrite", got)
-	}
-	t.Setenv("LOOM_SANDBOX_FLEETDB_URL", "http://fleet.internal:9000")
-	if got := sandboxFleetDBURL(); got != "http://fleet.internal:9000" {
-		t.Errorf("explicit override should win, got %q", got)
 	}
 }
