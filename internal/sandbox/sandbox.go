@@ -20,10 +20,19 @@ import (
 	"time"
 )
 
-// HostGateway is the address a sandbox container uses to reach a service on the
-// host when only a localhost URL is known. NOTE: this is the Docker default;
-// RW3 makes it driver-aware (Podman uses host.containers.internal).
-const HostGateway = "host.docker.internal"
+// HostGateway returns the address a sandbox container uses to reach a service on
+// the host, driver-aware. Override with LOOM_SANDBOX_HOST_GATEWAY; otherwise
+// Podman exposes the host as host.containers.internal and Docker as
+// host.docker.internal (driver detected via OPENSHELL_DRIVERS).
+func HostGateway() string {
+	if v := strings.TrimSpace(os.Getenv("LOOM_SANDBOX_HOST_GATEWAY")); v != "" {
+		return v
+	}
+	if strings.Contains(strings.ToLower(os.Getenv("OPENSHELL_DRIVERS")), "podman") {
+		return "host.containers.internal"
+	}
+	return "host.docker.internal"
+}
 
 // LoomPath is where the loom binary is uploaded inside the sandbox. The sandbox
 // root is read-write, so no directory needs pre-creating.

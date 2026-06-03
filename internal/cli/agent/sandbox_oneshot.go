@@ -196,9 +196,9 @@ func sandboxCloneURL(origin string) string {
 	if v := strings.TrimSpace(os.Getenv("LOOM_SANDBOX_REPO_URL")); v != "" {
 		return v
 	}
-	out := origin
+	out, gw := origin, sandbox.HostGateway()
 	for _, lh := range []string{"localhost", "127.0.0.1", "0.0.0.0"} {
-		out = strings.ReplaceAll(out, lh, sandbox.HostGateway)
+		out = strings.ReplaceAll(out, lh, gw)
 	}
 	return out
 }
@@ -277,8 +277,9 @@ func resolveSandboxFleetDBURL() string {
 	if host == "" {
 		return ""
 	}
+	gw := sandbox.HostGateway()
 	for _, lh := range []string{"localhost", "127.0.0.1", "0.0.0.0"} {
-		host = strings.ReplaceAll(host, lh, sandbox.HostGateway)
+		host = strings.ReplaceAll(host, lh, gw)
 	}
 	return host
 }

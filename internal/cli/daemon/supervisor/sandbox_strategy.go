@@ -128,8 +128,9 @@ func (s *Supervisor) sandboxRepoURL(ap *AgentProcess) string {
 	if origin == "" {
 		return ""
 	}
+	gw := sandbox.HostGateway()
 	for _, lh := range []string{"localhost", "127.0.0.1", "0.0.0.0"} {
-		origin = strings.ReplaceAll(origin, lh, sandbox.HostGateway)
+		origin = strings.ReplaceAll(origin, lh, gw)
 	}
 	return origin
 }
@@ -237,8 +238,9 @@ func sandboxFleetDBURL() string {
 	if host == "" {
 		return ""
 	}
+	gw := sandbox.HostGateway()
 	for _, lh := range []string{"localhost", "127.0.0.1", "0.0.0.0"} {
-		host = strings.ReplaceAll(host, lh, sandbox.HostGateway)
+		host = strings.ReplaceAll(host, lh, gw)
 	}
 	return host
 }

@@ -121,3 +121,27 @@ func TestResolveLoomBinary(t *testing.T) {
 		}
 	})
 }
+
+func TestHostGateway(t *testing.T) {
+	t.Run("default is docker", func(t *testing.T) {
+		t.Setenv("LOOM_SANDBOX_HOST_GATEWAY", "")
+		t.Setenv("OPENSHELL_DRIVERS", "")
+		if got := HostGateway(); got != "host.docker.internal" {
+			t.Errorf("got %q, want host.docker.internal", got)
+		}
+	})
+	t.Run("podman driver", func(t *testing.T) {
+		t.Setenv("LOOM_SANDBOX_HOST_GATEWAY", "")
+		t.Setenv("OPENSHELL_DRIVERS", "podman")
+		if got := HostGateway(); got != "host.containers.internal" {
+			t.Errorf("got %q, want host.containers.internal (Podman gateway)", got)
+		}
+	})
+	t.Run("explicit override wins", func(t *testing.T) {
+		t.Setenv("LOOM_SANDBOX_HOST_GATEWAY", "192.168.127.254")
+		t.Setenv("OPENSHELL_DRIVERS", "podman")
+		if got := HostGateway(); got != "192.168.127.254" {
+			t.Errorf("got %q, want the override", got)
+		}
+	})
+}
