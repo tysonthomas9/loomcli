@@ -17,9 +17,15 @@ import (
 	cfgpkg "github.com/tysonthomas9/loomcli/internal/cli/config"
 	"github.com/tysonthomas9/loomcli/internal/events"
 	"github.com/tysonthomas9/loomcli/internal/observability/tracing"
+	"github.com/tysonthomas9/loomcli/internal/webui/fleet"
 
 	"go.opentelemetry.io/otel/attribute"
 )
+
+// taskRunTokenTTL bounds the scoped TaskRun capability token's lifetime. It
+// should comfortably exceed a single run; the runner refreshes via heartbeat
+// once that path lands.
+const taskRunTokenTTL = 2 * time.Hour
 
 // buildCommand constructs the exec.Cmd for spawning an agent subprocess (does not start it).
 func (s *Supervisor) buildCommand(ap *AgentProcess) (*exec.Cmd, error) {
@@ -61,7 +67,7 @@ func (s *Supervisor) buildCommand(ap *AgentProcess) (*exec.Cmd, error) {
 
 	cmd.Env = s.appendDaemonEnv(cmd.Env)
 	cmd.Env = append(cmd.Env, fmt.Sprintf("LOOM_YIELD_FILE=%s", filepath.Join(ap.WorktreePath, YieldFileName)))
-	cmd.Env = appendSessionEnv(cmd.Env, ap)
+	cmd.Env = s.appendSessionEnv(cmd.Env, ap)
 
 	// Propagate the active trace context so the agent subprocess's bootstrap
 	// span and per-request spans inherit the daemon's trace tree.
@@ -141,7 +147,7 @@ func appendRoutingEnv(env []string, ap *AgentProcess) []string {
 }
 
 // appendSessionEnv adds session-related env vars for transcript-based liveness tracking.
-func appendSessionEnv(env []string, ap *AgentProcess) []string {
+func (s *Supervisor) appendSessionEnv(env []string, ap *AgentProcess) []string {
 	ap.Mu.Lock()
 	sessionID := ""
 	if ap.Session != nil {
@@ -149,6 +155,7 @@ func appendSessionEnv(env []string, ap *AgentProcess) []string {
 	}
 	leaseID := ap.AgentLeaseID
 	leaseToken := ap.AgentLeaseToken
+	leaseFencingToken := ap.AgentLeaseFencingToken
 	ownershipLeaseID := ap.OwnershipLeaseID
 	ownershipFencingToken := ap.OwnershipFencingToken
 	ap.Mu.Unlock()
@@ -169,6 +176,27 @@ func appendSessionEnv(env []string, ap *AgentProcess) []string {
 			fmt.Sprintf("LOOM_AGENT_OWNERSHIP_LEASE_ID=%s", ownershipLeaseID),
 			fmt.Sprintf("LOOM_AGENT_OWNERSHIP_FENCING_TOKEN=%d", ownershipFencingToken),
 		)
+	}
+	// PRD Phase C: mint a scoped per-TaskRun capability token bound to this
+	// {workspace, task, session} and the lease's fencing token, so the flue
+	// runner can write to loom serve fenced (a stale/duplicate runner's older
+	// token is rejected). Requires the shared signing key; otherwise writes fall
+	// through to dev-mode auth.
+	if len(s.TaskRunSigningKey) > 0 && sessionID != "" && s.WorkspaceID != "" {
+		claims := fleet.TaskRunClaims{
+			Workspace:    s.WorkspaceID,
+			TaskID:       s.taskIDForLifecycle(ap, nil),
+			SessionID:    sessionID,
+			FencingToken: leaseFencingToken,
+		}
+		if tok, err := fleet.GenerateTaskRunToken(claims, s.TaskRunSigningKey, taskRunTokenTTL); err == nil {
+			env = append(env,
+				fmt.Sprintf("LOOM_TASKRUN_TOKEN=%s", tok),
+				fmt.Sprintf("LOOM_FENCING_TOKEN=%d", leaseFencingToken),
+			)
+		} else {
+			log.Printf("[daemon] taskrun token mint failed for session %s: %v", sessionID, err)
+		}
 	}
 	return env
 }
