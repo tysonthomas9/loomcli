@@ -77,6 +77,7 @@ func TestScaffoldTemplateWritesProjectFiles(t *testing.T) {
 		filepath.Join(".flue", "app.ts"),
 		filepath.Join(".flue", "workflows", "agent.ts"),
 		filepath.Join(".flue", "agents", "lead.ts"),
+		filepath.Join(".flue", "connectors", "daytona.ts"),
 	}
 	for _, rel := range want {
 		if !fileExists(filepath.Join(dst, rel)) {
