@@ -434,10 +434,10 @@ Daytona sandbox; workspace `HELLO`, task `HELLO-1`):*
   not `LOOMRUNNER`**. `recordUsage`/`heartbeat`/`postArtifact` also verified
   directly against real fleetdb (201/200 + persistence). Sandbox created →
   deleted; no regression in the Daytona lifecycle.
-- *Minor follow-up:* loom's session finalizer overwrites the whole session
-  metadata map, clobbering the `usage_*` keys `recordUsage` writes (usage still
-  flows via `LOOMRUNNER`→the usage collector). Fix = merge metadata, or give
-  usage its own field/store.
+- *Fixed (was a follow-up):* `recordUsage` originally wrote usage into the
+  session metadata map, which loom's finalizer overwrote wholesale. Usage is now
+  stored as a typed `usage` `Artifact` — durable and immune to the finalizer's
+  metadata rewrite.
 
 *Still pending (need token minting wired and/or a writable repo — gated runbook):*
 1. A completed Daytona run closes its task via the SDK → the daemon does **not**
