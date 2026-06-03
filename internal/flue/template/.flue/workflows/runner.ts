@@ -77,9 +77,20 @@ export async function run({ init, payload, env }: FlueContext) {
 			if (p.repo_remote_url) {
 				const ref = p.base_ref || p.repo_branch || '';
 				await sh(sandbox, `git clone --no-single-branch ${shq(p.repo_remote_url)} ${shq(cwd)}`);
-				if (ref) await sh(sandbox, `cd ${shq(cwd)} && git checkout ${shq(ref)}`);
+				let effectiveRef = ref;
+				if (ref) {
+					// base_ref is the local worktree HEAD; it may carry local-only
+					// commits not pushed to the remote (e.g. a prior task whose push
+					// failed). Those aren't in this clone, so checkout would fail —
+					// fall back to the cloned default-branch HEAD instead of aborting.
+					const co = await shTry(sandbox, `cd ${shq(cwd)} && git checkout ${shq(ref)}`);
+					if (!co.ok) {
+						effectiveRef = '';
+						emit({ type: 'hydrate_warning', base_ref: ref, message: 'base_ref not present on remote; working from default-branch HEAD', detail: co.output.slice(0, 200) });
+					}
+				}
 				const commit = (await sh(sandbox, `cd ${shq(cwd)} && git rev-parse HEAD`)).trim();
-				emit({ type: 'repo_hydrated', remote: p.repo_remote_url, ref, commit });
+				emit({ type: 'repo_hydrated', remote: p.repo_remote_url, ref: effectiveRef, commit });
 			} else {
 				await sh(sandbox, `mkdir -p ${shq(cwd)} && cd ${shq(cwd)} && git init -q`);
 				emit({ type: 'repo_hydrated', remote: '', ref: '', commit: '' });
@@ -160,4 +171,13 @@ async function sh(
 		throw new Error(`runner: command failed (exit ${res.exitCode}): ${command}\n${res.result ?? ''}`);
 	}
 	return res.result ?? '';
+}
+
+/** Like sh() but never throws: returns ok=false + output for best-effort commands. */
+async function shTry(
+	sandbox: { process: { executeCommand: (c: string) => Promise<{ result?: string; exitCode?: number }> } },
+	command: string,
+): Promise<{ ok: boolean; output: string }> {
+	const res = await sandbox.process.executeCommand(`sh -lc ${shq(command)}`);
+	return { ok: (res.exitCode ?? 0) === 0, output: res.result ?? '' };
 }
