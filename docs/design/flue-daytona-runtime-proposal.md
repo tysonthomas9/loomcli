@@ -72,6 +72,8 @@ The key correction from the earlier backend-only framing is this:
 | Patch sync | Applying remote Daytona changes back into Loom's local worktree before session finalization. |
 | Branch assignment | The branch a persistent lead agent should currently work on inside its durable sandbox. |
 | Runtime provider | The execution substrate: local, daemon, Podman, Daytona, Kubernetes, etc. |
+| Dependency graph | FleetDB issue dependencies inside an epic. A task is runnable only when its blockers are complete. |
+| Ready frontier | The current set of open, unblocked tasks in an epic that can receive leases. |
 
 ## Current Loom Runtime Shape
 
@@ -224,6 +226,82 @@ Loom should convert these into:
 - transcript/canonical events;
 - runtime metadata, including sandbox ID and remote cwd;
 - final error class and exit code.
+
+### Dependency-Driven Epic Execution
+
+The core FleetDB value is not just task storage or task fanout. FleetDB
+owns the dependency graph inside an epic, so it can drive a whole epic
+forward by repeatedly exposing the next ready frontier.
+
+```mermaid
+flowchart LR
+    Epic[Epic] --> A[Task A]
+    Epic --> B[Task B]
+    Epic --> C[Task C]
+    Epic --> D[Task D]
+
+    A -->|unblocks| B
+    A -->|unblocks| C
+    B -->|unblocks| D
+    C -->|unblocks| D
+
+    FleetDB[FleetDB ready frontier] --> A
+    A --> RunnerA[Flue-Daytona task runner]
+    RunnerA --> CloseA[Close Task A]
+    CloseA --> FleetDB
+    FleetDB --> B
+    FleetDB --> C
+    B --> RunnerB[Runner]
+    C --> RunnerC[Runner]
+    RunnerB --> CloseB[Close Task B]
+    RunnerC --> CloseC[Close Task C]
+    CloseB --> FleetDB
+    CloseC --> FleetDB
+    FleetDB --> D
+```
+
+The scheduler should not launch "100 tasks in an epic." It should launch
+"up to N tasks from the ready frontier." When a task closes, FleetDB's
+normal dependency rules determine which downstream tasks become ready.
+That lets Loom push an epic through its dependency chain without a
+separate DAG engine in Flue, Daytona, or the lead agent.
+
+Recommended control loop:
+
+```text
+while run is active:
+  ready = FleetDB.Ready(parent_epic, role_filter, repo_filter)
+  start ready tasks up to concurrency/capacity limits
+  heartbeat in-flight task runs
+  ingest completions, failures, artifacts, and task status changes
+  let FleetDB dependency state compute the next ready frontier
+  stop when no ready, blocked, in-flight, or review work remains
+```
+
+Ownership boundaries:
+
+| Layer | Dependency responsibility |
+|---|---|
+| FleetDB | Stores `depends_on`, blocked/ready projections, task status, and atomic claims. |
+| Loom scheduler | Polls or subscribes to the ready frontier and leases only eligible tasks. |
+| Lead agent | Creates/refines the epic graph, reviews plans, and chooses policy/concurrency. |
+| Flue runner | Executes one exact task after Loom/FleetDB has granted a lease. |
+| Daytona sandbox | Provides isolated filesystem and shell for that one leased task. |
+
+This distinction matters for scale. Daytona sandboxes are disposable
+compute slots; they should not decide which dependencies are satisfied.
+Flue should not own DAG state. The lead agent should not keep private
+task dependency state in its persistent sandbox. FleetDB is the shared
+truth that lets many task runners operate safely in parallel.
+
+Completion policy also controls dependency unlock timing. The default
+unblock signal should remain task closure:
+
+- if downstream tasks need merged code, close after merge;
+- if downstream tasks can start after a PR exists, close after PR
+  creation or after a review gate approves that state;
+- if a task fails or blocks, leave downstream tasks blocked and record
+  the blocker in FleetDB.
 
 ## Phase 1: Flue Local Backend
 
@@ -672,18 +750,21 @@ Add dirty-repo variant:
 ## Phase 4: Loom Server Scale-Out
 
 Phase 4 moves from "local Loom process provisions one Daytona task
-sandbox" to "Loom server provisions hundreds of remote task sandboxes."
+sandbox" to "Loom server drives an epic through its dependency graph by
+provisioning remote task sandboxes for the current ready frontier."
 
 This is the architecture needed to scale task execution:
 
 ```text
 Loom server/control plane
-  -> task queue and leases
-  -> runtime scheduler
+  -> FleetDB epic dependency graph
+  -> ready frontier query
+  -> runtime scheduler with leases
   -> Daytona provisioning/pool manager
   -> Flue task runners
   -> logs/transcripts/artifacts streamed to server
   -> patch/commit results attached to task runs
+  -> task closure unlocks downstream work
 ```
 
 In Phase 4, the local developer's worktree should no longer be the
@@ -692,7 +773,10 @@ patches, commits, logs, transcripts, test results, and sandbox metadata.
 
 ### Phase 4 Goals
 
-- Provision hundreds of Flue-Daytona task environments.
+- Drive an epic forward by scheduling only open, unblocked tasks from
+  FleetDB's ready frontier.
+- Provision hundreds of Flue-Daytona task environments over time, bounded
+  by dependency readiness, capacity, and policy.
 - Allocate tasks through server-side leases and fencing tokens.
 - Enforce concurrency, budget, and provider capacity limits.
 - Stream logs and session events to the Loom UI.
@@ -710,7 +794,8 @@ patches, commits, logs, transcripts, test results, and sandbox metadata.
 
 The server needs a runtime scheduler with:
 
-- task queue selection and prioritization;
+- parent-epic scoped ready-frontier queries;
+- dependency-aware task selection and prioritization;
 - per-workspace and per-repo concurrency limits;
 - per-provider capacity controls;
 - per-model and per-agent budget controls;
@@ -723,6 +808,26 @@ The server needs a runtime scheduler with:
 - retry policy;
 - cleanup policy;
 - artifact registration.
+
+Scheduling invariants:
+
+- never start a task whose dependencies are not complete;
+- never let a remote runner choose an arbitrary sibling task after it is
+  assigned an exact task;
+- do not treat `blocked`, `review`, or `in_progress` tasks as ready;
+- let task closure, not sandbox completion alone, unlock downstream work;
+- continue reconciling until the epic has no ready, in-flight, blocked,
+  or review work, or until the run is cancelled/timeboxed.
+
+Useful policies can all share the same FleetDB dependency graph:
+
+| Policy | Behavior |
+|---|---|
+| `epic-dag` | Drain ready children under one epic, respecting dependencies. |
+| `critical-path` | Prefer tasks that unblock the largest downstream path. |
+| `repo-sharded` | Keep concurrency fair across repos in a multi-repo epic. |
+| `risk-aware` | Route risky labels to stronger roles or lower parallelism. |
+| `gated-dag` | Require approval before protected branches or risky downstream unlocks. |
 
 ### Daytona Pooling
 
@@ -776,16 +881,19 @@ model-visible shell access.
 
 ### Phase 4 E2E Test
 
-`TestE2E_LoomServerProvisioner_FansOutFlueDaytonaTasks`
+`TestE2E_LoomServerProvisioner_DrivesEpicDependencyDAG`
 
 Test shape:
 
 1. Start a test Loom server/control plane.
-2. Create 100 ready tasks and a fake Daytona provider with finite
-   capacity.
+2. Create an epic with a dependency graph, for example `A -> {B, C} -> D`,
+   plus enough independent ready tasks to exercise concurrency.
 3. Start the runtime scheduler.
 4. Fake runners complete tasks with patches/artifacts.
 5. Assert:
+   - only `A` and independent unblocked tasks are leased first;
+   - `B` and `C` are not leased until `A` closes;
+   - `D` is not leased until both `B` and `C` close;
    - no task is leased twice;
    - concurrency limit is respected;
    - logs and heartbeats stream to the server;
@@ -852,6 +960,9 @@ For Phase 3:
 For Phase 4:
 
 - add runtime scheduler;
+- add dependency-aware ready-frontier queries for parent epics;
+- add run policies such as `epic-dag`, `critical-path`, and
+  `gated-dag`;
 - add provider capacity and provisioning APIs;
 - add server-visible artifact storage;
 - add retry/cancel/stale cleanup.
@@ -886,6 +997,14 @@ For Phase 4:
    Recommendation: retain by default for Phase 2 failures, store sandbox
    ID in session metadata, and add explicit cleanup commands/policy.
 
+6. What event should unlock downstream tasks in an epic dependency graph?
+
+   Recommendation: keep task closure as the default unblock signal. If a
+   workflow needs merged code before downstream work starts, close after
+   merge. If a workflow allows downstream work after PR creation or review,
+   close after that delivery gate. Avoid adding a second hidden dependency
+   unlock mechanism.
+
 ## Acceptance Criteria by Phase
 
 ### Phase 1
@@ -916,7 +1035,11 @@ For Phase 4:
 
 ### Phase 4
 
-- Loom server can schedule many Daytona task sandboxes concurrently.
+- Loom server schedules many Daytona task sandboxes from the FleetDB
+  ready frontier, not from the full epic task list.
+- Tasks whose dependencies are not closed are not leased.
+- Closing an upstream task unlocks downstream tasks through normal
+  FleetDB dependency semantics.
 - Leases prevent duplicate work.
 - Provider capacity and cost limits are enforced.
 - Logs, transcripts, usage, and artifacts are server-visible.
