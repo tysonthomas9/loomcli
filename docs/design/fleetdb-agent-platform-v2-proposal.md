@@ -37,6 +37,7 @@ V2 defines the broader platform model needed to support:
 
 - dependency-driven FleetDB epic task runners;
 - persistent lead/support/service agents;
+- dynamic user-authored or lead-authored TypeScript workflow drivers;
 - schedules, GitHub, CI, webhooks, and custom TypeScript triggers;
 - local and cloud deployments using the same FleetDB-backed state model;
 - push-assisted and pull-authoritative execution;
@@ -57,6 +58,7 @@ Loom API / Orchestrator / SDK
         v
 FleetDB data layer
   - epics, tasks, dependencies
+  - workflow driver source, versions, manifests
   - trigger definitions and events
   - automation and workflow runs
   - agent services and worker profiles
@@ -89,10 +91,10 @@ many sources while FleetDB remains the durable data layer?
 | Area | V1 | V2 |
 |---|---|---|
 | Primary scope | Flue + Daytona task execution | FleetDB-backed agent platform |
-| Durable center | TaskRun | TriggerEvent, AutomationRun, AgentService, TaskRun |
+| Durable center | TaskRun | DriverVersion, TriggerEvent, AutomationRun, AgentService, TaskRun |
 | Invocation sources | FleetDB ready frontier | Human, lead, schedule, GitHub, CI, webhook, custom TS, ready frontier |
 | Long-running agents | Mentioned as separate | First-class AgentService |
-| TypeScript | Runner SDK | App/automation SDK plus runner SDK |
+| TypeScript | Runner SDK | Versioned dynamic workflow drivers plus runner SDK |
 | Data layer | FleetDB for tasks/runs | FleetDB for platform state |
 | Runtime providers | Flue + Daytona | Local, CI, Flue, Daytona, containers, Kubernetes |
 | Scale-out | Phase 4 task sandboxes | Platform-level scheduler over FleetDB |
@@ -137,6 +139,16 @@ many sources while FleetDB remains the durable data layer?
    FleetDB can store artifact metadata and content hashes. Large blobs may live
    in object storage, but FleetDB remains the index and source of truth.
 
+9. **Dynamic workflow code is a versioned platform artifact.**
+   A user or lead agent must be able to create a `.ts` file that becomes the
+   driver for an agent run. FleetDB should store the driver source reference,
+   built bundle reference, manifest, permissions, version, and activation state.
+
+10. **FleetDB stores stable envelopes, not every workflow variation.**
+    Do not add a new FleetDB enum or table for every possible trigger, step, or
+    workflow shape. FleetDB needs durable generic envelopes plus indexed fields
+    for common queries; the TypeScript driver owns domain-specific branching.
+
 ## Platform Block Diagram
 
 ```text
@@ -148,7 +160,8 @@ many sources while FleetDB remains the durable data layer?
                          | Schedule                    |
                          | GitHub webhook              |
                          | CI workflow                 |
-                         | Custom TypeScript           |
+                         | Custom TypeScript driver    |
+                         | Lead-created .ts driver     |
                          | FleetDB ready frontier      |
                          +--------------+--------------+
                                         |
@@ -169,6 +182,7 @@ many sources while FleetDB remains the durable data layer?
 |-----------------------------------------------------------------------|
 | Workspace / repo / team state                                         |
 | Epic tasks and dependency graph                                       |
+| WorkflowDriver / DriverVersion / driver manifest                      |
 | TriggerDefinition / TriggerEvent / TriggerDelivery                    |
 | AutomationRun / WorkflowRun / WorkflowStep                            |
 | AgentService / WorkerProfile                                          |
@@ -209,7 +223,9 @@ many sources while FleetDB remains the durable data layer?
 | Workspace, repo, team, settings | FleetDB | Durable product state |
 | Epic/task/dependency graph | FleetDB | Source of scheduling truth |
 | Ready frontier | FleetDB query/projection | The scheduler consumes this, agents do not invent it |
-| Trigger definitions | FleetDB | Schedules, GitHub, CI, webhooks, manual/custom TS |
+| Workflow driver definitions | FleetDB | Name, owner, permissions, active version, source policy |
+| Workflow driver versions | FleetDB | Source refs, bundle refs, manifests, validation state |
+| Trigger definitions | FleetDB | Generic event-to-driver bindings, not a provider enum trap |
 | Trigger events | FleetDB | Normalized, deduped, replayable event records |
 | Automation/workflow runs | FleetDB | Durable response to one event or manual request |
 | Agent services | FleetDB | Long-running desired agents and service leases |
@@ -226,6 +242,69 @@ many sources while FleetDB remains the durable data layer?
 
 ## Core FleetDB Entities
 
+### WorkflowDriver
+
+User-authored or lead-authored TypeScript program that can drive an agent,
+workflow, or automation. The driver is the product-level object; its versions
+are immutable build artifacts.
+
+```text
+WorkflowDriver
+  id
+  workspace_key
+  name
+  owner_type: user | team | lead_agent | system
+  owner_ref
+  description optional
+  active_version_id optional
+  visibility: private | workspace | organization
+  default_permissions
+  default_runtime_policy
+  status: draft | active | disabled | archived
+  created_at
+  updated_at
+```
+
+The driver can be created from:
+
+- a committed repo file such as `.loom/workflows/triage.ts`;
+- a lead-agent-authored file staged in a persistent service sandbox;
+- an uploaded source bundle;
+- a generated Flue project containing `.flue/workflows/*.ts`,
+  `.flue/agents/*.ts`, connectors, skills, and `app.ts`.
+
+### DriverVersion
+
+Immutable version of a workflow driver.
+
+```text
+DriverVersion
+  id
+  workflow_driver_id
+  workspace_key
+  version
+  source_ref
+  source_digest
+  bundle_ref
+  bundle_digest
+  build_target: node | cloudflare | runner
+  runtime: flue | loom_ts | other
+  manifest
+  declared_inputs_schema_ref optional
+  declared_outputs_schema_ref optional
+  declared_capabilities
+  dependency_lock_ref optional
+  created_by
+  created_at
+  validation_status: pending | passed | failed
+  validation_errors_ref optional
+```
+
+FleetDB does not need to understand every branch in the TypeScript. It stores
+the source/bundle identity, manifest, declared capabilities, validation result,
+and durable run state. The driver code owns domain-specific decisions inside a
+capability envelope.
+
 ### TriggerDefinition
 
 Defines how external or internal events enter Loom.
@@ -235,12 +314,15 @@ TriggerDefinition
   id
   workspace_key
   name
-  source_type: manual | schedule | github | ci | webhook | custom_ts | fleetdb_ready
-  source_ref
-  event_types
-  filters
-  target_type: automation | workflow | agent_service | task_run
-  target_ref
+  source_kind
+  source_ref optional
+  source_config_ref optional
+  event_type_patterns
+  filter_ref optional
+  target_driver_id optional
+  target_driver_version_id optional
+  target_entrypoint
+  target_agent_service_id optional
   concurrency_policy: allow | forbid | replace | queue
   idempotency_template
   permissions
@@ -255,7 +337,13 @@ Examples:
 - GitHub issue opened triage;
 - CI failure remediation;
 - support escalation webhook;
-- custom TypeScript workflow entrypoint.
+- custom TypeScript workflow entrypoint;
+- lead-created workflow driver invoked by a human or another agent.
+
+`source_kind` is a string with reserved built-ins such as `manual`, `schedule`,
+`github`, `ci`, `webhook`, and `fleetdb_ready`, but FleetDB should not require a
+schema migration for every new provider. Provider-specific config lives behind
+`source_config_ref` and is indexed only where the product needs queries.
 
 ### TriggerEvent
 
@@ -266,7 +354,7 @@ TriggerEvent
   id
   workspace_key
   trigger_definition_id optional
-  source_type
+  source_kind
   source_event_id
   event_type
   subject_ref
@@ -313,13 +401,17 @@ AutomationRun
   workspace_key
   trigger_event_id optional
   requested_by
-  source_type
+  source_kind
   source_ref
-  workflow_name
+  workflow_driver_id optional
+  driver_version_id optional
+  entrypoint
   status: queued | running | waiting | completed | failed | cancelled
   concurrency_key
   idempotency_key
   lease_id optional
+  input_ref
+  output_ref optional
   started_at
   ended_at
   summary
@@ -337,15 +429,20 @@ Auditable step under an automation run.
 WorkflowStep
   id
   automation_run_id
-  kind: evaluate | plan | run_agent | create_task | comment | create_pr | wait | gate
+  step_kind
   status: queued | running | waiting | completed | failed | skipped
   task_run_id optional
   action_ledger_id optional
+  external_ref optional
   input_ref
   output_ref
   started_at
   ended_at
 ```
+
+`step_kind` is an open string, not a closed enum. FleetDB may reserve common
+values like `run_agent`, `create_task`, `comment`, or `gate` for UI affordances,
+but unknown kinds must still be storable, inspectable, retryable, and auditable.
 
 ### AgentService
 
@@ -496,6 +593,124 @@ ActionLedger
 This prevents duplicate comments, duplicate PRs, duplicate task closes, and
 duplicate runner starts when events are retried or replayed.
 
+## Dynamic Workflow Driver Lifecycle
+
+V2 must support this product flow:
+
+```text
+user or lead agent writes TypeScript
+  -> Loom saves source as WorkflowDriver draft
+  -> Loom builds and validates a DriverVersion
+  -> FleetDB stores source ref, bundle ref, manifest, permissions, digest
+  -> TriggerDefinition or manual invocation targets that driver version
+  -> AutomationRun executes the driver
+  -> driver emits actions, messages, TaskRuns, artifacts, and result data
+  -> FleetDB stores the durable envelopes and action ledger
+```
+
+The driver source can look Flue-native:
+
+```ts
+// .loom/workflows/triage.ts
+import { createAgent, type FlueContext } from "@flue/runtime";
+import { loom } from "@loom/sdk/flue";
+import * as v from "valibot";
+
+export async function run(ctx: FlueContext) {
+  const event = loom.event(ctx);
+  const triage = createAgent(() => ({
+    model: "anthropic/claude-sonnet-4-6",
+  }));
+
+  const harness = await ctx.init(triage);
+  const session = await harness.session(`issue:${event.subject.ref}`);
+  const { data } = await session.prompt("Triage this issue and recommend next action.", {
+    result: v.object({
+      severity: v.picklist(["low", "medium", "high", "critical"]),
+      needsFix: v.boolean(),
+      summary: v.string(),
+    }),
+  });
+
+  if (data.needsFix) {
+    await loom.actions.startTaskRun({
+      taskSelector: { issueRef: event.subject.ref },
+      profile: "coder",
+      idempotencyKey: event.key("fix"),
+    });
+  }
+
+  return data;
+}
+```
+
+The important product rule is that this TypeScript is the flexible driver, not
+FleetDB. FleetDB records:
+
+- who authored the driver;
+- which source and dependency lock were built;
+- which bundle digest was executed;
+- what capabilities the driver requested and was granted;
+- which event invoked it;
+- which actions it emitted;
+- which TaskRuns, sessions, and artifacts resulted.
+
+FleetDB should not attempt to model every branch in the driver as relational
+schema. It only needs stable control-plane envelopes, auditability, leases,
+idempotency, and queryable summaries.
+
+### Lead-Created Drivers
+
+A persistent lead agent may create or edit a `.ts` driver as part of its work.
+That should be a first-class platform workflow:
+
+```text
+lead agent writes /workspace/.loom/workflows/fix-ci.ts
+  -> lead requests "publish driver"
+  -> Loom snapshots source and dependency metadata
+  -> build runs in an isolated build sandbox
+  -> validation checks permissions, imports, manifest, and static policy
+  -> human or policy gate activates DriverVersion
+  -> trigger/manual invocation can run it
+```
+
+Lead-authored drivers should default to `draft`. Activation can require human
+approval, code review, tests, or a workspace policy because publishing a driver
+is equivalent to granting executable code authority.
+
+### Driver Build And Execution Boundaries
+
+Building and running a driver are separate operations.
+
+```text
+BuildDriver
+  input: source ref, dependency lock, target runtime
+  output: bundle ref, manifest, diagnostics, declared capabilities
+
+RunDriver
+  input: driver version, event payload, scoped capabilities
+  output: AutomationRun events, actions, TaskRuns, artifacts, result
+```
+
+The build step can use Flue's existing project model:
+
+- source files under `.flue/workflows/` and `.flue/agents/`;
+- optional `.flue/app.ts` for custom ingress/routing;
+- `createAgent(...)` for runtime agent definitions;
+- `init(...)` and `harness.session()` for per-run sessions;
+- Valibot schemas for typed results;
+- sandbox connectors for local, virtual, Daytona, Cloudflare, or other
+  providers.
+
+Loom should wrap that with:
+
+- isolated builds for untrusted code;
+- dependency allowlists or locked dependency snapshots;
+- capability declarations and policy checks;
+- FleetDB-backed run stores and session stores;
+- action-ledger mediated side effects;
+- signed bundle digests so a run can prove which driver version executed.
+
 ## Invocation Paths
 
 ### Human Lead Agent
@@ -518,7 +733,7 @@ mode.
 ```text
 Customer message
   -> TriggerEvent(source=webhook|chat|manual)
-  -> AutomationRun(workflow=support-triage)
+  -> AutomationRun(driver=support-triage@version)
   -> AgentService(kind=support) or lightweight Flue virtual sandbox
   -> response artifact/session event
   -> optional issue/task/task-run creation
@@ -535,8 +750,8 @@ GitHub webhook
   -> Loom verifies signature
   -> FleetDB TriggerEvent(source=github)
   -> TriggerDelivery dedupes by delivery ID/event/object
-  -> AutomationRun(workflow=issue-triage)
-  -> custom TS evaluates event and emits workflow actions
+  -> AutomationRun(driver=issue-triage@version)
+  -> driver TypeScript evaluates event and emits workflow actions
   -> optional TaskRun for code investigation or fix
   -> ActionLedger records comments/labels/PR/task creation
 ```
@@ -546,7 +761,7 @@ GitHub webhook
 ```text
 CI job or webhook
   -> TriggerEvent(source=ci)
-  -> AutomationRun(workflow=ci-remediation)
+  -> AutomationRun(driver=ci-remediation@version)
   -> runner placement may be the CI host using Flue local()
   -> TaskRun reports logs, artifacts, status through scoped capability
   -> completion policy may create PR/comment instead of closing a task
@@ -585,42 +800,70 @@ This remains the center of coding-task scale-out.
 
 ## TypeScript Developer Model
 
-V2 needs two TypeScript surfaces.
+V2 needs three TypeScript surfaces.
 
-### App/Automation SDK
+### Driver Authoring Surface
 
-For teams writing schedules, GitHub handlers, CI integrations, and custom
-automation.
+For users, teams, and lead agents writing dynamic workflow drivers.
 
 ```ts
-import { Loom, defineTrigger, defineWorkflow } from "@loom/sdk";
+import { createAgent, type FlueContext } from "@flue/runtime";
+import { loom } from "@loom/sdk/flue";
 
-export default defineTrigger({
+export async function run(ctx: FlueContext) {
+  const event = loom.event(ctx);
+  const agent = createAgent(() => ({
+    model: "openai/gpt-5.5",
+    sandbox: loom.sandbox.forEvent(event),
+  }));
+
+  const harness = await ctx.init(agent);
+  const session = await harness.session();
+  const result = await session.prompt(event.payload.prompt);
+
+  await loom.actions.recordResult({
+    result,
+    idempotencyKey: event.key("result"),
+  });
+
+  return result;
+}
+```
+
+This is the core dynamic workflow model. A `.ts` file becomes a versioned
+`DriverVersion` after build and validation. The driver can create agents,
+choose sandboxes, call skills, branch on typed model output, and emit actions.
+FleetDB stores the run envelope and action results, not the driver's internal
+control flow.
+
+### App/Automation Control SDK
+
+For application code that registers drivers, manages triggers, or invokes
+automations.
+
+```ts
+import { Loom } from "@loom/sdk";
+
+const loom = new Loom({ workspace: "acme" });
+
+const driver = await loom.drivers.publish({
   name: "github-issue-triage",
-  source: "github",
-  on: ["issues.opened", "issues.reopened"],
-  workflow: defineWorkflow(async (ctx) => {
-    const issue = await ctx.github.issue();
+  source: { repo: "org/app", path: ".loom/workflows/triage.ts", ref: "main" },
+  activate: false,
+});
 
-    if (issue.labels.includes("security")) {
-      await ctx.action.comment({
-        body: "Security triage has started.",
-        idempotencyKey: ctx.event.key("security-comment"),
-      });
-    }
-
-    return ctx.runAgent({
-      agent: "triage",
-      input: { issueNumber: issue.number },
-      idempotencyKey: ctx.event.key("triage-agent"),
-    });
-  }),
+await loom.triggers.create({
+  name: "github-issue-triage",
+  sourceKind: "github",
+  eventTypePatterns: ["issues.opened", "issues.reopened"],
+  target: { driverVersionId: driver.versionId, entrypoint: "run" },
+  concurrencyPolicy: "queue",
 });
 ```
 
-The automation SDK should let custom TypeScript inspect normalized event context
-and emit workflow actions. Loom should execute side effects through FleetDB
-leases and the action ledger.
+The control SDK should not require every provider or workflow variant to be a
+new FleetDB type. Provider-specific config and driver-specific input schemas can
+live in versioned JSON refs while common fields stay queryable.
 
 ### Runner SDK
 
@@ -795,6 +1038,61 @@ FleetDB and Loom still own:
 Flue is the model/tool harness. Daytona is one possible remote Linux sandbox.
 Neither should become the platform data layer.
 
+### Flue Source Code Findings
+
+Reading `../flue` changes the recommendation. Flue already has the right shape
+for dynamic TypeScript drivers:
+
+- workflow modules are source files under `.flue/workflows/*.ts` that export
+  `run(ctx)`;
+- agent modules are source files under `.flue/agents/*.ts` that export
+  `createAgent(...)`;
+- `flue build` discovers those files and generates a manifest-backed server;
+- `flue run` builds a project, starts a temporary local server, invokes one
+  workflow, streams events, returns JSON, and exits;
+- workflows produce inspectable run IDs, durable run events when a run store is
+  configured, SSE streams, and typed result envelopes;
+- direct/message-driven agents are addressable by agent name and instance ID,
+  can receive many messages over time, and are intentionally separate from
+  workflow runs;
+- custom `app.ts` ingress code can verify provider webhooks and call
+  `dispatch(...)` into agent instances;
+- sandbox choice is runtime code: default virtual sandbox, `local()`, Daytona,
+  Cloudflare sandbox, or custom connector;
+- custom tools, skills, subagents, result schemas, and sandbox connectors are
+  code-level extensions.
+
+That means Loom should use Flue as the driver execution/build substrate instead
+of inventing a static workflow DSL.
+
+Flue also has limits Loom must cover:
+
+- discovery is build-manifest based, so new `.ts` drivers need a build/publish
+  step before production use;
+- Node run/session stores default to in-memory process lifetime;
+- Cloudflare run/session state uses Durable Object storage by default, not
+  FleetDB;
+- direct agent interactions do not create Flue workflow runs, so Loom must map
+  them to `AgentService` activity/session records when product visibility
+  requires it;
+- `dispatch(...)` returns admission, not completion, and provider retry
+  idempotency remains application responsibility;
+- Flue run status is coarse compared with Loom's needed task lease,
+  dependency, artifact, and completion state;
+- arbitrary TypeScript drivers are arbitrary code execution and require build
+  isolation, capability scoping, dependency policy, review, and audit;
+- Flue does not own FleetDB dependency closure, task leases, action-ledger side
+  effects, or durable artifact validation.
+
+The V2 integration posture should be:
+
+```text
+FleetDB stores driver versions, invocations, actions, leases, artifacts
+Loom validates, builds, dispatches, and governs drivers
+Flue executes the TypeScript driver and emits events/results
+FleetDB remains the durable data layer
+```
+
 Use Flue in three ways:
 
 1. **Flue local()**
@@ -818,6 +1116,7 @@ warm-pool policy is introduced.
 
 ### FleetDB Data Model Gaps
 
+- Add `WorkflowDriver` and `DriverVersion` for dynamic `.ts` drivers.
 - Add `TriggerDefinition`, `TriggerEvent`, and `TriggerDelivery`.
 - Add `AutomationRun` and `WorkflowStep`.
 - Promote `TaskRun` to a first-class resource instead of overloading
@@ -830,6 +1129,8 @@ warm-pool policy is introduced.
 
 ### API Gaps
 
+- Public APIs for driver draft creation, source upload/snapshot, build,
+  validation, activation, rollback, and invocation.
 - Public APIs for triggers, events, automation runs, task runs, leases,
   artifacts, and action ledger.
 - Runner-scoped APIs for heartbeat, logs, usage, artifact upload, and
@@ -840,6 +1141,9 @@ warm-pool policy is introduced.
 
 ### Runtime Gaps
 
+- Isolated build workers for user-authored and lead-authored TypeScript.
+- Driver execution workers that can run a pinned bundle digest with scoped
+  capabilities.
 - One canonical run command contract:
   `run_task`, `run_prompt`, `run_workflow`, `resume_session`, `cancel_run`.
 - Runner bootstrap that carries server URL, run ID, lease ID, fencing token, and
@@ -850,7 +1154,8 @@ warm-pool policy is introduced.
 
 ### SDK Gaps
 
-- App/automation SDK for triggers, workflows, events, and action emission.
+- Driver authoring SDK for Flue-backed workflow code.
+- App/control SDK for driver publishing, trigger management, and invocation.
 - Runner SDK for one scoped TaskRun.
 - Typed result schemas for workflow steps.
 - Local and cloud auth modes with the same resource model.
@@ -858,6 +1163,9 @@ warm-pool policy is introduced.
 ### Security Gaps
 
 - Tenant/workspace scoping on every durable row and token claim.
+- Source/bundle signing, digest verification, and dependency-lock validation for
+  dynamic drivers.
+- Build sandboxing and policy gates for lead-authored code.
 - Short-lived scoped runner tokens.
 - No raw FleetDB credentials in remote sandboxes.
 - HMAC verification and replay windows for webhooks.
@@ -866,6 +1174,8 @@ warm-pool policy is introduced.
 
 ### UI/Ops Gaps
 
+- Driver registry, version history, build logs, validation errors, activation,
+  rollback, and approval UI.
 - Trigger delivery timeline.
 - Automation run timeline.
 - TaskRun detail page with lease, runner, sandbox, artifacts, and retries.
@@ -878,6 +1188,8 @@ warm-pool policy is introduced.
 ### Phase 0: Taxonomy And Contract
 
 - Adopt FleetDB-as-data-layer wording across the docs.
+- Declare `WorkflowDriver`/`DriverVersion` as the dynamic TypeScript driver
+  contract.
 - Declare `TaskRun` as the finite execution unit.
 - Declare `AgentService` as the long-running agent unit.
 - Declare `AutomationRun` as the durable triggered workflow unit.
@@ -886,23 +1198,35 @@ warm-pool policy is introduced.
 
 ### Phase 1: FleetDB Platform Schema
 
-- Add trigger, automation, task-run, lease, artifact, and action-ledger
+- Add driver, trigger, automation, task-run, lease, artifact, and action-ledger
   resources to FleetDB.
 - Add migrations and store interfaces.
 - Keep existing `AgentSession` as compatibility telemetry.
 - Add idempotency keys to creation and completion paths.
 
-### Phase 2: Minimal Trigger And Automation MVP
+### Phase 2: Dynamic Driver MVP
+
+- Let a user or lead agent create a `.ts` driver draft.
+- Snapshot source and dependency metadata.
+- Build it through Flue in an isolated local build worker.
+- Store `DriverVersion` manifest, bundle ref, diagnostics, and digest in
+  FleetDB.
+- Invoke the driver manually as an `AutomationRun`.
+- Persist driver logs/events/results through FleetDB-backed run records.
+
+### Phase 3: Minimal Trigger And Automation MVP
 
 - Implement manual trigger, schedule trigger, GitHub issue webhook, CI webhook,
   and generic webhook.
 - Persist `TriggerEvent` before dispatch.
 - Add `AutomationRun` creation and delivery status.
-- Bridge workflow actions into existing `AgentCommand start` where possible.
+- Target activated `DriverVersion`s from `TriggerDefinition`.
+- Bridge driver-emitted run actions into existing `AgentCommand start` where
+  possible.
 - Record the parent/child link from `AutomationRun` to `AgentSession` or
   `TaskRun`.
 
-### Phase 3: TaskRun Completion Contract
+### Phase 4: TaskRun Completion Contract
 
 - Add runner-scoped bootstrap tokens.
 - Add heartbeat, logs, usage, artifact declare/upload/finalize APIs.
@@ -911,7 +1235,7 @@ warm-pool policy is introduced.
 - Add stale runner, lost sandbox, duplicate completion, and artifact failure
   recovery states.
 
-### Phase 4: Runtime Scale-Out
+### Phase 5: Runtime Scale-Out
 
 - Add runtime provider adapters for local, CI, Kubernetes/container, and
   Daytona.
@@ -919,10 +1243,10 @@ warm-pool policy is introduced.
 - Add capacity reservations, retry policies, quotas, and cancellation.
 - Keep persistent lead/support sandboxes as `AgentService` runtime state.
 
-### Phase 5: Productize Visibility And Operations
+### Phase 6: Productize Visibility And Operations
 
-- Add UI for triggers, automation runs, task runs, agent services, artifacts,
-  dependency frontier, and recovery actions.
+- Add UI for drivers, versions, triggers, automation runs, task runs, agent
+  services, artifacts, dependency frontier, and recovery actions.
 - Add audit logs and billing/usage rollups.
 - Add replay tools for failed trigger deliveries.
 - Add runbooks for local, cloud, and hybrid worker deployment.
@@ -931,16 +1255,21 @@ warm-pool policy is introduced.
 
 The smallest useful V2 slice is:
 
-1. FleetDB stores `TriggerEvent`, `AutomationRun`, `TaskRun`, `Lease`,
-   `Artifact`, and `ActionLedger` records.
-2. Loom exposes a manual trigger API and one schedule trigger.
-3. The trigger creates an `AutomationRun`.
-4. The automation creates one `TaskRun` for an existing FleetDB task.
-5. A local runner or Flue local runner executes the task.
-6. The runner appends logs and finalizes a patch artifact.
-7. `CompleteRun` validates the lease and artifact.
-8. FleetDB closes the task and updates dependency readiness.
-9. The UI shows the trigger, automation, task run, artifact, and dependency
+1. FleetDB stores `WorkflowDriver`, `DriverVersion`, `TriggerEvent`,
+   `AutomationRun`, `TaskRun`, `Lease`, `Artifact`, and `ActionLedger` records.
+2. A user or lead agent creates `.loom/workflows/triage.ts`.
+3. Loom builds the driver with Flue, stores the bundle digest and manifest, and
+   activates the `DriverVersion`.
+4. Loom exposes a manual trigger API and one schedule trigger.
+5. The trigger creates an `AutomationRun` targeting the activated driver
+   version.
+6. The driver creates one `TaskRun` for an existing FleetDB task.
+7. A local runner or Flue local runner executes the task.
+8. The runner appends logs and finalizes a patch artifact.
+9. `CompleteRun` validates the lease and artifact.
+10. FleetDB closes the task and updates dependency readiness.
+11. The UI shows the driver version, trigger, automation, task run, artifact,
+   and dependency
    unlock as one timeline.
 
 This proves the platform shape before scaling to GitHub, CI, custom TypeScript,
@@ -950,9 +1279,15 @@ Daytona, or Kubernetes.
 
 | Edge case | Required behavior |
 |---|---|
+| Lead writes invalid TypeScript | Build fails; DriverVersion remains inactive with diagnostics |
+| Driver requests disallowed import/capability | Validation fails or activation requires approval |
+| Driver source changes after build | Existing DriverVersion still points to immutable source/bundle digest |
+| Activated driver has a bug | AutomationRun fails; previous DriverVersion can be rolled back |
+| Driver emits unknown step kind | FleetDB stores it as generic step data; UI shows fallback rendering |
+| Driver emits duplicate action | ActionLedger returns existing result by idempotency key |
 | Duplicate webhook delivery | Same `TriggerEvent`/`TriggerDelivery` or duplicate status; no duplicate side effect |
 | Missed schedule tick | Visible missed/late delivery; deterministic replay possible |
-| Custom TS throws before dispatch | AutomationRun fails; no TaskRun created unless action committed |
+| Driver TypeScript throws before dispatch | AutomationRun fails; no TaskRun created unless action committed |
 | Workflow retries comment action | ActionLedger returns existing comment result |
 | Runner dies mid-run | Lease expires; TaskRun becomes stale/lost; task not closed |
 | Runner loses lease during finalization | Stale `CompleteRun` rejected unless same committed completion ID |
@@ -971,30 +1306,35 @@ Daytona, or Kubernetes.
 
 1. Should FleetDB expose the V2 control-plane API directly, or should Loom
    server expose it while writing through FleetDB internals?
-2. Should `AutomationRun` and `WorkflowRun` be one table or separate concepts?
-3. Should `AgentSession{Kind=task}` be a compatibility view over `TaskRun`, or
+2. Should dynamic drivers use Flue project layout directly (`.flue/`) or a
+   Loom-owned layout (`.loom/workflows`) that compiles to Flue?
+3. What approval policy is required before a lead-authored driver becomes
+   active?
+4. Should `AutomationRun` and `WorkflowRun` be one table or separate concepts?
+5. Should `AgentSession{Kind=task}` be a compatibility view over `TaskRun`, or
    should both records exist during migration?
-4. What is the minimum object-storage abstraction for local and cloud artifact
+6. What is the minimum object-storage abstraction for local and cloud artifact
    durability?
-5. How much custom TypeScript should run inside Loom server versus an isolated
+7. How much custom TypeScript should run inside Loom server versus an isolated
    workflow runner?
-6. Which external side effects are allowed in V2 without human approval:
+8. Which external side effects are allowed in V2 without human approval:
    comments, labels, PR creation, task close, merge?
-7. What is the first cloud runtime target after local/CI: Daytona bootstrap,
+9. What is the first cloud runtime target after local/CI: Daytona bootstrap,
    Kubernetes pod, or container worker?
-8. How should local embedded FleetDB state migrate into cloud FleetDB, if at
+10. How should local embedded FleetDB state migrate into cloud FleetDB, if at
    all?
 
 ## Recommendation
 
 Build V2 FleetDB-first:
 
-1. Put trigger, automation, task-run, lease, artifact, and action-ledger records
-   in FleetDB.
+1. Put driver, trigger, automation, task-run, lease, artifact, and
+   action-ledger records in FleetDB.
 2. Treat Loom server and SDKs as the control plane over those FleetDB resources.
-3. Make all invocation paths create durable FleetDB-backed intent first.
-4. Make all finite coding work complete through fenced TaskRun completion.
-5. Keep Flue, Daytona, local, CI, and Kubernetes behind runtime adapters.
+3. Use Flue as the dynamic TypeScript driver runtime/build substrate.
+4. Make all invocation paths create durable FleetDB-backed intent first.
+5. Make all finite coding work complete through fenced TaskRun completion.
+6. Keep Daytona, local, CI, and Kubernetes behind runtime adapters.
 
 This gives Loom a scalable platform shape: teams can invoke agents however they
 want, FleetDB keeps the durable state and dependency semantics coherent, and
