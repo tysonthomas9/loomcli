@@ -23,6 +23,7 @@ import { createAgent, type FlueContext } from '@flue/runtime';
 import { local } from '@flue/runtime/node';
 import { Daytona } from '@daytona/sdk';
 import { daytona } from '../connectors/daytona';
+import { TaskRunClient, type Task } from '../vendor/loom-sdk/index.js';
 
 interface RunnerInput {
 	/** "local" runs in the host worktree; "daytona-task" in a fresh remote sandbox. */
@@ -42,6 +43,15 @@ interface RunnerInput {
 	task_id?: string;
 	/** How loom syncs the result back: "patch-back" (default) | "branch-push" | "none". */
 	sync_strategy?: string;
+	/**
+	 * PRD Phase B (docs/product/loom-typescript-sdk-spec.md). When true, the
+	 * runner fetches the task's title/description/design/AC from loom serve via
+	 * `@loom/sdk` (getTask) instead of relying on loom inlining them into
+	 * `prompt`. The scoped bootstrap (server URL, workspace, task id, …) arrives
+	 * via LOOM_* env vars. loom sets this only when it has a reachable server;
+	 * otherwise `prompt` carries the full (inlined) task and this stays false.
+	 */
+	fetch_task?: boolean;
 }
 
 function emit(event: Record<string, unknown>): void {
@@ -56,7 +66,9 @@ function countDiffFiles(patch: string): number {
 
 export async function run({ init, payload, env }: FlueContext) {
 	const p = (payload ?? {}) as RunnerInput;
-	if (!p.prompt) throw new Error('runner: payload.prompt is required');
+	// With fetch_task the task body comes from the SDK, so `prompt` may be just
+	// the sandbox preamble (or empty); only require a prompt otherwise.
+	if (!p.prompt && !p.fetch_task) throw new Error('runner: payload.prompt is required');
 	const model = p.model ?? 'anthropic/claude-sonnet-4-6';
 	emit({ type: 'runner_started', sandbox: p.sandbox, task_id: p.task_id });
 
@@ -96,11 +108,13 @@ export async function run({ init, payload, env }: FlueContext) {
 				emit({ type: 'repo_hydrated', remote: '', ref: '', commit: '' });
 			}
 
-			// 2. Run the agent in the sandbox.
+			// 2. Resolve the prompt (SDK read path or inlined fallback), then run
+			//    the agent in the sandbox.
+			const prompt = await resolvePrompt(p);
 			const agent = createAgent(() => ({ sandbox: daytona(sandbox), cwd, model }));
 			const harness = await init(agent);
 			const session = await harness.session();
-			const resp = await session.prompt(p.prompt);
+			const resp = await session.prompt(prompt);
 			if (resp.usage) {
 				emit({ type: 'usage', input_tokens: resp.usage.input, output_tokens: resp.usage.output });
 			}
@@ -156,6 +170,67 @@ export async function run({ init, payload, env }: FlueContext) {
 }
 
 // ── helpers ──────────────────────────────────────────────────────────────────
+
+function errMessage(err: unknown): string {
+	return err instanceof Error ? err.message : String(err);
+}
+
+/**
+ * Resolve the agent prompt. With `fetch_task`, the runner pulls the task's
+ * title/description/design/AC from loom serve via `@loom/sdk` (PRD Phase B) and
+ * appends it to the sandbox preamble loom sent in `prompt` — replacing loom's
+ * Go-side design-inlining. The runner process runs on the host, so it reaches
+ * loom serve directly (no extra hosting). When the bootstrap is incomplete or
+ * the server is unreachable we throw rather than silently run an empty task.
+ * Without `fetch_task`, `prompt` already carries the (inlined) task.
+ */
+async function resolvePrompt(p: RunnerInput): Promise<string> {
+	if (!p.fetch_task) return p.prompt;
+
+	let client: TaskRunClient;
+	try {
+		client = TaskRunClient.fromEnv();
+	} catch (err) {
+		throw new Error(`runner: fetch_task set but the loom bootstrap env is incomplete: ${errMessage(err)}`);
+	}
+
+	let task: Task;
+	try {
+		task = await client.getTask();
+	} catch (err) {
+		throw new Error(
+			`runner: could not fetch task ${client.bootstrap.taskId} from ${client.bootstrap.serverUrl} via @loom/sdk: ${errMessage(err)}`,
+		);
+	}
+
+	emit({
+		type: 'task_fetched',
+		task_id: task.id,
+		title: task.title,
+		has_design: Boolean(task.design),
+		source: client.bootstrap.serverUrl,
+	});
+
+	const body = renderTaskBody(task);
+	const preamble = p.prompt?.trim();
+	return preamble ? `${preamble}\n\n${body}` : body;
+}
+
+/**
+ * Format a server-fetched task into the sandbox agent's prompt body. Mirrors
+ * loom's Go-side buildSandboxPrompt body so the SDK read path and the inlined
+ * fallback produce equivalent instructions.
+ */
+function renderTaskBody(task: Task): string {
+	const parts: string[] = [`Implement task ${task.id}: ${task.title}`];
+	if (task.description) parts.push(`Description:\n${task.description}`);
+	if (task.design) {
+		parts.push(`Approved design / implementation plan (follow it exactly):\n${task.design}`);
+	}
+	if (task.acceptance_criteria) parts.push(`Acceptance criteria:\n${task.acceptance_criteria}`);
+	parts.push('Make exactly the code changes this task requires in the current working directory, then stop.');
+	return parts.join('\n\n');
+}
 
 function shq(value: string): string {
 	return `'${value.replace(/'/g, "'\\''")}'`;

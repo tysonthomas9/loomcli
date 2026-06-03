@@ -446,11 +446,12 @@ check-frontend:
 	@echo "=== Frontend quality gates PASSED ==="
 
 # TypeScript SDK (@loom/sdk) quality gate: install deps, verify the generated
-# types are in sync with api/openapi.yaml, and typecheck. check:generated
-# self-skips when the toolchain is absent.
+# types are in sync with api/openapi.yaml, verify the bundle vendored into the
+# flue template is in sync with the SDK source, typecheck, and test.
+# check:generated / check:vendored self-skip when the toolchain is absent.
 check-sdk:
-	@echo "=== SDK: install + generated staleness + typecheck + tests ==="
-	@cd sdk/typescript && (npm ci --silent || npm install --silent) && npm run check:generated && npm run typecheck && npm test
+	@echo "=== SDK: install + generated/vendored staleness + typecheck + tests ==="
+	@cd sdk/typescript && (npm ci --silent || npm install --silent) && npm run check:generated && npm run check:vendored && npm run typecheck && npm test
 	@echo "=== SDK quality gates PASSED ==="
 
 # Unified quality gate — runs Go + frontend + SDK checks in parallel

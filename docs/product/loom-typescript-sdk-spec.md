@@ -1,6 +1,6 @@
 # Loom TypeScript SDK & Flue-as-Control-Plane-Client — PRD
 
-**Status:** In progress — Phase A implemented (`sdk/typescript`); Phases B–D pending
+**Status:** In progress — Phases A + B implemented; Phases C–D pending
 **Date:** 2026-06-03
 **Owner:** Tyson
 
@@ -311,11 +311,24 @@ ModeCloud path — config, not new code). The deferred private-endpoint path add
   `complete`, `block`, `fail`) are wired against existing loom-serve endpoints;
   `postArtifact`/`recordUsage`/`appendLog`/`heartbeat` are stubbed
   (`NotImplementedError`) pending Phase C. *No behavior change to loom yet.*
-- **Phase B — Read path.** *Pending.* Vendor/depend `@loom/sdk` in the Flue
-  template, inject the scoped bootstrap (`LOOM_SERVER_URL` + token + task/session
-  ids) into the runner env, have the runner call `getTask()` instead of the
-  Go-side design-inlining (`buildSandboxPrompt`), and delete that workaround.
-  Requires `loom serve` reachable from the runner. Keep NDJSON results.
+- **Phase B — Read path. ✅ DONE.** `@loom/sdk` is vendored into the Flue
+  template as a self-contained ESM bundle
+  (`internal/flue/template/.flue/vendor/loom-sdk/`, openapi-fetch inlined so it
+  builds offline in a sandbox), kept in sync with the SDK source by a
+  `check-vendored-sdk` gate in `make check-sdk`. When loom has a reachable serve
+  + bootstrap (`LOOM_SERVER_URL` + workspace + task id, all carried via the
+  existing `LOOM_` env allowlist), `deriveDaytonaInput` sets `fetch_task` and
+  sends **only the sandbox preamble** (no task contents); the runner — which
+  runs on the host, so it reaches `loom serve` with nothing extra to host —
+  calls `getTask()` and composes the prompt from server-fetched task content.
+  It **fails fast** if the bootstrap is set but the server is unreachable (no
+  silent empty run). NDJSON results are kept. **Backward compatibility:** when no
+  bootstrap is present (the host-orchestrated dev default, Option 0), the Go-side
+  design-inlining (`buildSandboxPrompt`) is **retained as the fallback** rather
+  than deleted — deleting it unconditionally would break the zero-hosting path
+  the Goals require. Unconditional removal of the inlining lands once a served
+  endpoint is the default (Phase C). *Token/fencing auth is still Phase C; the
+  read path uses dev-mode `X-Actor`.*
 - **Phase C — Write path + auth.** *Pending.* Implement scoped-token minting +
   fencing on `loom serve` and the write endpoints (artifact/usage/log/heartbeat);
   un-stub the corresponding SDK methods; runner reports status/logs/usage/
@@ -327,8 +340,8 @@ ModeCloud path — config, not new code). The deferred private-endpoint path add
   scheduling.
 
 Each phase is independently shippable; A+B deliver value with no auth work.
-**Phase A is implemented; B–D remain and span loom serve (Go) + fleetdb + the
-Flue template, with C introducing the security-critical auth work.**
+**Phases A + B are implemented; C–D remain and span loom serve (Go) + fleetdb +
+the Flue template, with C introducing the security-critical auth work.**
 
 ## Validation & exit criteria
 
@@ -347,20 +360,31 @@ when all four phases pass and the Definition of Done holds.
    `check-openapi-staleness` (extended to the SDK) fails CI.
 3. The Flue template build imports `@loom/sdk` and compiles.
 
-### Phase B — Read path
+### Phase B — Read path ✅
 **Exit criteria**
 - A runner fetches title/description/design/AC via `getTask()` using only the
-  bootstrap capability.
-- The Go-side design-inlining workaround is removed.
+  bootstrap capability. ✅
+- The Go-side design-inlining is **gated off whenever the bootstrap is present**
+  and retained only as the no-server fallback. *(Reconciled from the original
+  "removed" wording: the Goals mandate the blob/inlining path keep working until
+  the SDK path is proven and a server is always reachable. Unconditional removal
+  is deferred to Phase C, when a served endpoint becomes the default.)* ✅
 
 **Validation steps**
-1. Run a daytona-task whose injected payload carries **no task contents** (only
-   the bootstrap) → the agent receives the design via the SDK and makes the
-   change (`files_changed ≥ 1`).
-2. `grep` confirms `buildSandboxPrompt` design-inlining and the task-content
-   fields of `runnerInput` are deleted.
-3. A run with the server unreachable fails fast with a clear error (no silent
-   empty run).
+1. *(Gated manual runbook — CI cannot reach Daytona.)* Run a daytona-task with
+   `LOOM_SERVER_URL`/`LOOM_WORKSPACE`/`LOOM_ASSIGNED_TASK_ID` set and `loom serve`
+   reachable → loom sends `fetch_task` + preamble only (no task contents), the
+   runner fetches the design via the SDK, and the agent makes the change
+   (`files_changed ≥ 1`). Mechanically verified by
+   `TestDeriveDaytonaInput_ReadPath`: with the bootstrap present the payload
+   carries the preamble only (no inlined task body) and `fetch_task=true`. ✅
+2. The runner imports the vendored `@loom/sdk`, and the **real `flue build`
+   bundles it** — verified that `dist/server.mjs` contains `TaskRunClient` + the
+   read-path code; `make check-sdk`'s `check-vendored` gate keeps the bundle in
+   sync with the SDK source. ✅
+3. A run with `fetch_task` set but the server unreachable **fails fast** with a
+   clear error (`runner: could not fetch task … via @loom/sdk: …`) — no silent
+   empty run. ✅
 
 ### Phase C — Write path + auth
 **Exit criteria**
@@ -442,8 +466,12 @@ The PRD is complete — not merely "the SDK was written" — when all hold:
 
 ## Recommended next step
 
-Spec the `@loom/sdk` `TaskRunClient` interface and the `loom serve`
-scoped-token + fencing endpoints against the current `api/openapi.yaml` (confirm
-the write surface exists), then implement Phase A + B (generation + read path),
-which deliver value with zero auth work and immediately delete the design-
-inlining workaround.
+Phases A + B are implemented. Next is **Phase C (write path + auth)** — the
+security-critical work: mint scoped, short-lived per-TaskRun tokens on
+`loom serve` bound to `{workspace, task_id, session_id, fencing_token, scope}`,
+enforce fencing server-side (stale-token writes → HTTP 409), add the write
+endpoints (artifact/usage/log/heartbeat), and un-stub the corresponding SDK
+methods. Confirm the current `api/openapi.yaml` covers the write surface (open
+question #7) before wiring; add endpoints first if not. Completing C unlocks
+retiring the `LOOMRUNNER` data plane and, once a served endpoint is the default,
+the unconditional removal of the Go-side design-inlining deferred from Phase B.

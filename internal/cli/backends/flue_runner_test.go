@@ -310,6 +310,89 @@ func TestRunFlueDaytonaTask_ConcurrentTasksAreIsolated(t *testing.T) {
 	}
 }
 
+// TestDeriveDaytonaInput_ReadPath covers PRD Phase B: with a reachable loom
+// serve bootstrap, loom flags FetchTask and sends only the sandbox preamble
+// (the runner fetches the task via @loom/sdk); without it, loom inlines the
+// task into the prompt as before.
+func TestDeriveDaytonaInput_ReadPath(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+	repo, _ := newGitRepoWithRemoteT(t)
+
+	// No bootstrap → fallback inlining; FetchTask stays false.
+	t.Setenv("LOOM_SERVER_URL", "")
+	t.Setenv("LOOM_WORKSPACE", "")
+	t.Setenv("LOOM_WORKSPACE_ID", "")
+	t.Setenv("LOOM_ASSIGNED_TASK_ID", "")
+	in, err := deriveDaytonaInput(repo, "do the work", "nova")
+	if err != nil {
+		t.Fatalf("deriveDaytonaInput (no bootstrap): %v", err)
+	}
+	if in.FetchTask {
+		t.Error("FetchTask should be false without a bootstrap")
+	}
+	if !strings.Contains(in.Prompt, "do the work") {
+		t.Errorf("fallback prompt should inline the task content, got %q", in.Prompt)
+	}
+
+	// Bootstrap present → preamble-only prompt + FetchTask set.
+	t.Setenv("LOOM_SERVER_URL", "http://127.0.0.1:8091")
+	t.Setenv("LOOM_WORKSPACE", "DEMO")
+	t.Setenv("LOOM_ASSIGNED_TASK_ID", "DEMO-1")
+	in, err = deriveDaytonaInput(repo, "do the work", "nova")
+	if err != nil {
+		t.Fatalf("deriveDaytonaInput (bootstrap): %v", err)
+	}
+	if !in.FetchTask {
+		t.Fatal("FetchTask should be true when the bootstrap is available")
+	}
+	if in.Prompt != daytonaSandboxPreamble {
+		t.Errorf("with FetchTask the prompt must be the preamble only, got %q", in.Prompt)
+	}
+	if strings.Contains(in.Prompt, "do the work") {
+		t.Error("preamble-only prompt must not inline the task content")
+	}
+}
+
+// TestSandboxReadPathAvailable checks the bootstrap-availability gate, including
+// resolving the workspace via either LOOM_WORKSPACE or LOOM_WORKSPACE_ID.
+func TestSandboxReadPathAvailable(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+	repo := t.TempDir() // no lock file, so task id comes only from env
+
+	t.Setenv("LOOM_SERVER_URL", "")
+	t.Setenv("LOOM_WORKSPACE", "")
+	t.Setenv("LOOM_WORKSPACE_ID", "")
+	t.Setenv("LOOM_ASSIGNED_TASK_ID", "")
+	if sandboxReadPathAvailable(repo) {
+		t.Error("empty env must not be available")
+	}
+
+	// Server + workspace but no task id → not available.
+	t.Setenv("LOOM_SERVER_URL", "http://x")
+	t.Setenv("LOOM_WORKSPACE", "W")
+	if sandboxReadPathAvailable(repo) {
+		t.Error("missing task id must not be available")
+	}
+
+	// All present, workspace supplied via LOOM_WORKSPACE_ID → available.
+	t.Setenv("LOOM_WORKSPACE", "")
+	t.Setenv("LOOM_WORKSPACE_ID", "W-id")
+	t.Setenv("LOOM_ASSIGNED_TASK_ID", "T-1")
+	if !sandboxReadPathAvailable(repo) {
+		t.Error("full bootstrap (workspace via _ID) must be available")
+	}
+
+	// Missing server url → not available.
+	t.Setenv("LOOM_SERVER_URL", "")
+	if sandboxReadPathAvailable(repo) {
+		t.Error("missing server url must not be available")
+	}
+}
+
 // ── test git helpers (real git is required to build a repo + a valid patch) ──
 
 // newGitRepoT initializes a committed git repo with a local (bare) origin so

@@ -40,6 +40,12 @@ type runnerInput struct {
 	PatchOut      string `json:"patch_out,omitempty"`
 	TaskID        string `json:"task_id,omitempty"`
 	SyncStrategy  string `json:"sync_strategy,omitempty"` // "patch-back" (default) | "branch-push" | "none"
+	// FetchTask tells the runner to pull the task's title/description/design/AC
+	// from loom serve itself via @loom/sdk (getTask), instead of loom inlining
+	// them into Prompt. Set only when a reachable loom serve + bootstrap is
+	// available; otherwise Prompt carries the inlined task (fallback). See
+	// docs/product/loom-typescript-sdk-spec.md (Phase B).
+	FetchTask bool `json:"fetch_task,omitempty"`
 }
 
 // syncStrategyPatchBack is the only strategy implemented today: the runner
@@ -187,16 +193,57 @@ func deriveDaytonaInput(workDir, prompt, agentName string) (runnerInput, error) 
 	}
 	baseRef, _ := gitOutput(workDir, "rev-parse", "HEAD")
 	branch, _ := gitOutput(workDir, "rev-parse", "--abbrev-ref", "HEAD")
-	return runnerInput{
+	in := runnerInput{
 		Sandbox:       "daytona-task",
-		Prompt:        buildSandboxPrompt(workDir, prompt),
 		Model:         resolveFlueModel(),
 		RepoRemoteURL: remote,
 		RepoBranch:    branch,
 		BaseRef:       baseRef,
 		TaskID:        agentName,
 		SyncStrategy:  syncStrategyPatchBack,
-	}, nil
+	}
+	// PRD Phase B: when loom serve is reachable (bootstrap present), the runner
+	// — which runs on the host — fetches the task content itself via @loom/sdk,
+	// so we send only the sandbox preamble (env guidance). Otherwise we inline
+	// the task's design into the prompt as before (the no-server fallback).
+	if sandboxReadPathAvailable(workDir) {
+		in.FetchTask = true
+		in.Prompt = daytonaSandboxPreamble
+	} else {
+		in.Prompt = buildSandboxPrompt(workDir, prompt)
+	}
+	return in, nil
+}
+
+// sandboxReadPathAvailable reports whether loom can hand the runner a usable
+// bootstrap for the SDK read path: a reachable loom serve URL, the workspace,
+// and a resolvable task id. All arrive via LOOM_* env (allowlisted by the
+// LOOM_ prefix) which the runner reads through @loom/sdk's bootstrapFromEnv.
+func sandboxReadPathAvailable(workDir string) bool {
+	if strings.TrimSpace(os.Getenv("LOOM_SERVER_URL")) == "" {
+		return false
+	}
+	workspace := strings.TrimSpace(os.Getenv("LOOM_WORKSPACE"))
+	if workspace == "" {
+		workspace = strings.TrimSpace(os.Getenv("LOOM_WORKSPACE_ID"))
+	}
+	if workspace == "" {
+		return false
+	}
+	return resolveAssignedTaskID(workDir) != ""
+}
+
+// resolveAssignedTaskID resolves the claimed task id for this run: the daemon
+// injects it as LOOM_ASSIGNED_TASK_ID; single-task runs record it in the
+// worktree lock. Returns "" when neither is present.
+func resolveAssignedTaskID(workDir string) string {
+	if taskID := strings.TrimSpace(os.Getenv("LOOM_ASSIGNED_TASK_ID")); taskID != "" {
+		return taskID
+	}
+	if info, err := cli.ReadLockFile(workDir); err == nil {
+		return info.TaskID
+	}
+	return ""
 }
 
 // daytonaSandboxPreamble reframes loom's task prompt for execution inside a
@@ -225,14 +272,7 @@ const daytonaSandboxPreamble = "You are running inside an isolated sandbox that 
 // (fetched on the host via the lock file + issue backend) so the sandbox agent
 // is self-sufficient. Falls back to the original prompt if no task is resolvable.
 func buildSandboxPrompt(workDir, fallback string) string {
-	// The daemon injects the claimed task as LOOM_ASSIGNED_TASK_ID; single-task
-	// runs record it in the worktree lock. Prefer the env, fall back to the lock.
-	taskID := strings.TrimSpace(os.Getenv("LOOM_ASSIGNED_TASK_ID"))
-	if taskID == "" {
-		if info, err := cli.ReadLockFile(workDir); err == nil {
-			taskID = info.TaskID
-		}
-	}
+	taskID := resolveAssignedTaskID(workDir)
 	if taskID == "" {
 		return daytonaSandboxPreamble + fallback
 	}
@@ -307,6 +347,11 @@ func defaultFlueRunnerExec(ctx context.Context, workDir, agentName string, input
 // flueDaytonaEnv is the runner subprocess env: the standard backend env plus an
 // explicit DAYTONA_API_KEY passthrough (FilteredEnv is an allowlist and does
 // not carry it). Codex auth is read from ~/.codex by the project's app.ts.
+//
+// The Phase-B SDK bootstrap (LOOM_SERVER_URL, LOOM_WORKSPACE, LOOM_ASSIGNED_TASK_ID,
+// LOOM_SESSION_ID, LOOM_FLEET_DB_ACTOR, …) needs no special handling here: those
+// are LOOM_-prefixed and so pass through buildBackendEnv's allowlist to the
+// runner, where @loom/sdk's bootstrapFromEnv reads them.
 func flueDaytonaEnv(workDir, agentName string) []string {
 	env := buildBackendEnv(workDir, agentName)
 	if key := os.Getenv("DAYTONA_API_KEY"); key != "" {

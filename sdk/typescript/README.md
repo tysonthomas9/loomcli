@@ -49,3 +49,25 @@ npm run check:generated   # fail if committed types are stale (CI gate)
 
 The committed `src/generated/openapi.ts` must stay in sync with the spec;
 `check:generated` enforces it (wired into `make` alongside the frontend check).
+
+## Vendored bundle (used by the Flue runner template)
+
+The Flue runner can be installed inside a sandbox with no access to a private
+`@loom/sdk` registry entry, so the SDK is vendored into the template as a
+**single self-contained ESM bundle** (openapi-fetch inlined) that `runner.ts`
+imports by relative path:
+
+```
+internal/flue/template/.flue/vendor/loom-sdk/index.js    # esbuild bundle
+internal/flue/template/.flue/vendor/loom-sdk/index.d.ts  # type façade
+```
+
+```bash
+npm run vendor          # regenerate the vendored bundle from src (run after SDK changes)
+npm run check:vendored  # fail if the vendored bundle is stale (CI gate, in make check-sdk)
+```
+
+`check:vendored` re-bundles the SDK and byte-diffs it against the committed
+copy (esbuild output is deterministic for the pinned version), so the runner can
+never ship a stale SDK. Commit the regenerated `vendor/loom-sdk/` after running
+`npm run vendor`.
