@@ -54,6 +54,12 @@ args=(-d --init --name "$NAME" -p "$HOST_PORT:3000"
 # task; it rides the LOOM_ allowlist down to spawned agents. Both forwarded if set.
 [[ -n "${DAYTONA_API_KEY:-}"   ]] && args+=(-e DAYTONA_API_KEY)
 [[ -n "${LOOM_FLUE_SANDBOX:-}" ]] && args+=(-e LOOM_FLUE_SANDBOX)
+# LOOM_FLUE_SYNC (=branch-push) selects the result-sync strategy (PRD Phase D).
+# LOOM_FLEET_JWT_KEY is the shared fleet JWT signing key: when set, loom serve
+# AND the daemon use it, so a supervisor-minted scoped TaskRun token validates
+# at serve (PRD Phase C fencing). Both forwarded if set.
+[[ -n "${LOOM_FLUE_SYNC:-}"     ]] && args+=(-e LOOM_FLUE_SYNC)
+[[ -n "${LOOM_FLEET_JWT_KEY:-}" ]] && args+=(-e LOOM_FLEET_JWT_KEY)
 
 [[ -d "$HOME/.claude"          ]] && args+=(-v "$HOME/.claude:/root/.claude:ro")
 [[ -d "$HOME/.codex"           ]] && args+=(-v "$HOME/.codex:/root/.codex:ro")
