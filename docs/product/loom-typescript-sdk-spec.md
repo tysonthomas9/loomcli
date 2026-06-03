@@ -1,6 +1,6 @@
 # Loom TypeScript SDK & Flue-as-Control-Plane-Client — PRD
 
-**Status:** Draft
+**Status:** In progress — Phase A implemented (`sdk/typescript`); Phases B–D pending
 **Date:** 2026-06-03
 **Owner:** Tyson
 
@@ -302,20 +302,33 @@ ModeCloud path — config, not new code). The deferred private-endpoint path add
 
 ## Phasing
 
-- **Phase A — SDK generation.** Generate `@loom/sdk` from `api/openapi.yaml`;
-  hand-author the `TaskRunClient` facade; extend `check-openapi-staleness` to
-  the SDK; publish internally (npm workspace or vendored into the Flue template).
-  *No behavior change.*
-- **Phase B — Read path.** Runner calls `getTask()` instead of consuming the
-  inlined design; delete the design-inlining workaround. Keep NDJSON results.
-- **Phase C — Write path + auth.** Implement scoped-token minting + fencing on
-  `loom serve`; runner reports status/logs/usage/artifacts and
-  completes/fails/blocks via the SDK. Retire `LOOMRUNNER` for the data plane.
-- **Phase D — Artifacts as source of truth.** Branch-push / upload + register
-  refs; server-visible artifacts replace host patch-back as the contract
-  (patch-back remains an opt-in local convenience). Unblocks Phase-4 scheduling.
+- **Phase A — SDK generation. ✅ DONE** (`sdk/typescript`, commits `06926d15` +
+  `688cfeda`). `@loom/sdk` generated from `api/openapi.yaml` via
+  `openapi-typescript` + an `openapi-fetch` client; the `TaskRunClient` facade
+  is hand-authored; a `check:generated` drift gate is wired into `make` as
+  `check-sdk` (third parallel lane in `make check`); unit tests cover bootstrap
+  + client. The read/control methods (`getTask`, `comment`, `updateStatus`,
+  `complete`, `block`, `fail`) are wired against existing loom-serve endpoints;
+  `postArtifact`/`recordUsage`/`appendLog`/`heartbeat` are stubbed
+  (`NotImplementedError`) pending Phase C. *No behavior change to loom yet.*
+- **Phase B — Read path.** *Pending.* Vendor/depend `@loom/sdk` in the Flue
+  template, inject the scoped bootstrap (`LOOM_SERVER_URL` + token + task/session
+  ids) into the runner env, have the runner call `getTask()` instead of the
+  Go-side design-inlining (`buildSandboxPrompt`), and delete that workaround.
+  Requires `loom serve` reachable from the runner. Keep NDJSON results.
+- **Phase C — Write path + auth.** *Pending.* Implement scoped-token minting +
+  fencing on `loom serve` and the write endpoints (artifact/usage/log/heartbeat);
+  un-stub the corresponding SDK methods; runner reports status/logs/usage/
+  artifacts and completes/fails/blocks via the SDK. Retire `LOOMRUNNER` for the
+  data plane.
+- **Phase D — Artifacts as source of truth.** *Pending.* Branch-push / upload +
+  register refs; server-visible artifacts replace host patch-back as the
+  contract (patch-back remains an opt-in local convenience). Unblocks Phase-4
+  scheduling.
 
 Each phase is independently shippable; A+B deliver value with no auth work.
+**Phase A is implemented; B–D remain and span loom serve (Go) + fleetdb + the
+Flue template, with C introducing the security-critical auth work.**
 
 ## Validation & exit criteria
 
