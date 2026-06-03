@@ -1,0 +1,35 @@
+{
+  "name": "@loom/sdk",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "description": "TypeScript SDK for the loom control plane (loom serve). Lets a flue runner read its task and report results via typed calls instead of a JSON blob. See docs/product/loom-typescript-sdk-spec.md.",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "src"
+  ],
+  "engines": {
+    "node": ">=22.18.0"
+  },
+  "scripts": {
+    "generate": "openapi-typescript ../../api/openapi.yaml -o src/generated/openapi.ts",
+    "typecheck": "tsc --noEmit",
+    "build": "tsc",
+    "check:generated": "node scripts/check-generated.mjs"
+  },
+  "dependencies": {
+    "openapi-fetch": "^0.13.8"
+  },
+  "devDependencies": {
+    "openapi-typescript": "^7.13.0",
+    "typescript": "^5.6.0"
+  }
+}

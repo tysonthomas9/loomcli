@@ -1,6 +1,6 @@
 # Makefile for loomcli project
 
-.PHONY: all build build-frontend build-all test test-integration test-all test-playground test-fleetdb-embedded test-fleetdb-supervisor test-fleetdb-ui test-fleetdb-empty-cli fleetdb-empty-up fleetdb-empty-down local-mode-up local-mode-codex-up local-mode-down local-mode-logs local-mode-verify test-local-mode-harness test-distributed-smoke lint lint-frontend test-frontend e2e test-e2e test-e2e-api test-e2e-api-local test-e2e-real-smoke test-e2e-real-smoke-local test-e2e-real-regression test-e2e-real-regression-local test-e2e-integration test-e2e-integration-local test-e2e-integration-full clean install help frontend check check-go check-frontend gate gate-e2e gate-e2e-full hooks ensure-hooks dev dev-check dev-loom dev-vite check-loc check-loc-stale check-no-raw-exec check-no-beads-prod test-coverage test-frontend-coverage test-race-cover test-integration-race-cover gen-go-api check-go-api-staleness
+.PHONY: all build build-frontend build-all test test-integration test-all test-playground test-fleetdb-embedded test-fleetdb-supervisor test-fleetdb-ui test-fleetdb-empty-cli fleetdb-empty-up fleetdb-empty-down local-mode-up local-mode-codex-up local-mode-down local-mode-logs local-mode-verify test-local-mode-harness test-distributed-smoke lint lint-frontend test-frontend e2e test-e2e test-e2e-api test-e2e-api-local test-e2e-real-smoke test-e2e-real-smoke-local test-e2e-real-regression test-e2e-real-regression-local test-e2e-integration test-e2e-integration-local test-e2e-integration-full clean install help frontend check check-go check-frontend check-sdk gate gate-e2e gate-e2e-full hooks ensure-hooks dev dev-check dev-loom dev-vite check-loc check-loc-stale check-no-raw-exec check-no-beads-prod test-coverage test-frontend-coverage test-race-cover test-integration-race-cover gen-go-api check-go-api-staleness
 
 # Default target
 all: build
@@ -445,28 +445,42 @@ check-frontend:
 	@cd $(FRONTEND_DIR) && npm run test:coverage
 	@echo "=== Frontend quality gates PASSED ==="
 
-# Unified quality gate — runs Go + frontend checks in parallel
+# TypeScript SDK (@loom/sdk) quality gate: install deps, verify the generated
+# types are in sync with api/openapi.yaml, and typecheck. check:generated
+# self-skips when the toolchain is absent.
+check-sdk:
+	@echo "=== SDK: install + generated staleness + typecheck ==="
+	@cd sdk/typescript && (npm ci --silent || npm install --silent) && npm run check:generated && npm run typecheck
+	@echo "=== SDK quality gates PASSED ==="
+
+# Unified quality gate — runs Go + frontend + SDK checks in parallel
 check:
-	@echo "=== Running Go and Frontend checks in parallel ==="
-	@go_log=$$(mktemp); fe_log=$$(mktemp); \
+	@echo "=== Running Go, Frontend, and SDK checks in parallel ==="
+	@go_log=$$(mktemp); fe_log=$$(mktemp); sdk_log=$$(mktemp); \
 	$(MAKE) check-go >"$$go_log" 2>&1 & go_pid=$$!; \
 	$(MAKE) check-frontend >"$$fe_log" 2>&1 & fe_pid=$$!; \
-	go_rc=0; fe_rc=0; \
+	$(MAKE) check-sdk >"$$sdk_log" 2>&1 & sdk_pid=$$!; \
+	go_rc=0; fe_rc=0; sdk_rc=0; \
 	wait $$go_pid || go_rc=$$?; \
 	wait $$fe_pid || fe_rc=$$?; \
-	if [ $$go_rc -ne 0 ] || [ $$fe_rc -ne 0 ]; then \
+	wait $$sdk_pid || sdk_rc=$$?; \
+	if [ $$go_rc -ne 0 ] || [ $$fe_rc -ne 0 ] || [ $$sdk_rc -ne 0 ]; then \
 		if [ $$go_rc -ne 0 ]; then \
 			echo ""; echo "━━━ Go output (FAILED) ━━━"; cat "$$go_log"; \
 		fi; \
 		if [ $$fe_rc -ne 0 ]; then \
 			echo ""; echo "━━━ Frontend output (FAILED) ━━━"; cat "$$fe_log"; \
 		fi; \
-		rm -f "$$go_log" "$$fe_log"; \
+		if [ $$sdk_rc -ne 0 ]; then \
+			echo ""; echo "━━━ SDK output (FAILED) ━━━"; cat "$$sdk_log"; \
+		fi; \
+		rm -f "$$go_log" "$$fe_log" "$$sdk_log"; \
 		exit 1; \
 	fi; \
 	echo "=== Go quality gates PASSED ==="; \
 	echo "=== Frontend quality gates PASSED ==="; \
-	rm -f "$$go_log" "$$fe_log"
+	echo "=== SDK quality gates PASSED ==="; \
+	rm -f "$$go_log" "$$fe_log" "$$sdk_log"
 	@echo "=== All quality gates PASSED ==="
 
 # Backward-compatible alias for 'make check'
