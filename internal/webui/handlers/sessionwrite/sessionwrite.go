@@ -8,6 +8,7 @@ package sessionwrite
 
 import (
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -65,6 +66,21 @@ func newArtifactID() string {
 	return "art_" + hex.EncodeToString(b[:])
 }
 
+// idempotencyHeader carries a client-supplied key that makes an artifact write
+// idempotent: a retried POST with the same key maps to the same artifact id, so
+// no duplicate row is created (a transient 5xx + retry can't double-register).
+const idempotencyHeader = "Idempotency-Key"
+
+// artifactID returns the id for an artifact write — deterministic from the
+// idempotency key (same key → same id) when provided, else random.
+func artifactID(ws, sessionID, typ, idemKey string) string {
+	if idemKey == "" {
+		return newArtifactID()
+	}
+	sum := sha256.Sum256([]byte(ws + "|" + sessionID + "|" + typ + "|" + idemKey))
+	return "art_" + hex.EncodeToString(sum[:10])
+}
+
 // artifactRecord is the ArtifactRecord response shape (mirrors openapi.yaml).
 type artifactRecord struct {
 	ArtifactID string `json:"artifact_id"`
@@ -116,9 +132,10 @@ func HandlePostSessionArtifact(sessions store.AgentSessionStore, artifacts store
 		if req.FilesChanged > 0 {
 			meta["files_changed"] = strconv.Itoa(req.FilesChanged)
 		}
+		id := artifactID(ws, sessionID, req.Type, r.Header.Get(idempotencyHeader))
 		art, err := artifacts.Create(r.Context(), store.ArtifactCreate{
 			WorkspaceKey: ws,
-			ArtifactID:   newArtifactID(),
+			ArtifactID:   id,
 			AgentID:      sess.AgentID,
 			SessionID:    sessionID,
 			TaskID:       sess.TaskID,
@@ -127,6 +144,13 @@ func HandlePostSessionArtifact(sessions store.AgentSessionStore, artifacts store
 			Summary:      req.Summary,
 			Metadata:     meta,
 		})
+		if errors.Is(err, domain.ErrAlreadyExists) {
+			// Idempotent retry: the deterministic id already exists — return it.
+			if existing, getErr := artifacts.Get(r.Context(), ws, id); getErr == nil {
+				writeOK(w, http.StatusCreated, toArtifactRecord(existing))
+				return
+			}
+		}
 		if err != nil {
 			writeErr(w, http.StatusInternalServerError, "could not register artifact")
 			return

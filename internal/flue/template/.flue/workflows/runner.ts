@@ -302,7 +302,7 @@ async function pushResultBranch(
 	emit({ type: 'branch_pushed', branch, commit: sha, remote });
 	if (loom) {
 		try {
-			await loom.postArtifact({ type: 'commit', uri: ref, summary: `branch ${branch}`, filesChanged });
+			await loom.postArtifact({ type: 'commit', uri: ref, summary: `branch ${branch}`, filesChanged, idempotencyKey: sha });
 			emit({ type: 'artifact_reported', artifact_type: 'commit', files_changed: filesChanged });
 		} catch (err) {
 			emit({ type: 'report_warning', op: 'postArtifact(commit)', error: errMessage(err) });

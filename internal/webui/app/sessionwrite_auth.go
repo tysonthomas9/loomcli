@@ -36,6 +36,15 @@ func taskRunWriteAuth(st store.Store, signingKey []byte) func(http.Handler) http
 		}
 		return current, found, nil
 	}
+	// validate against the configured signing key (nil when none → keyless
+	// dev-mode). Swap for a SigningKeyManager.ValidateTaskRunTokenFromStore here
+	// to tolerate key rotation once the app holds the key manager.
+	var validate fleet.ValidateFunc
+	if len(signingKey) > 0 {
+		validate = func(token string) (*fleet.TaskRunClaims, error) {
+			return fleet.ValidateTaskRunToken(token, signingKey)
+		}
+	}
 	// token-optional only in keyless dev-mode; fail-closed when a key is configured.
-	return fleet.NewTaskRunAuthMiddleware(signingKey, fencing, len(signingKey) == 0)
+	return fleet.NewTaskRunAuthMiddleware(validate, fencing, len(signingKey) == 0)
 }

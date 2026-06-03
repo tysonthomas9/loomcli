@@ -178,3 +178,30 @@ func TestAppendSessionLog(t *testing.T) {
 		t.Errorf("unknown session: status = %d, want 404", rec.Code)
 	}
 }
+
+func TestPostSessionArtifact_IdempotencyKeyDedupes(t *testing.T) {
+	st := seedStore(t)
+	h := HandlePostSessionArtifact(st.AgentSessions(), st.Artifacts())
+	post := func() int {
+		r := newReq(http.MethodPost, testSession, `{"type":"commit","uri":"x#b@sha1","files_changed":1}`)
+		r.Header.Set("Idempotency-Key", "sha1")
+		rec := httptest.NewRecorder()
+		h(rec, r)
+		return rec.Code
+	}
+	if c1, c2 := post(), post(); c1 != http.StatusCreated || c2 != http.StatusCreated {
+		t.Fatalf("statuses = %d,%d, want 201,201", c1, c2)
+	}
+	arts, err := st.Artifacts().List(context.Background(), testWS, store.ArtifactFilter{SessionID: testSession})
+	if err != nil || len(arts) != 1 {
+		t.Fatalf("expected exactly 1 artifact after a retried idempotent POST, got %d (err=%v)", len(arts), err)
+	}
+	// Without a key, a second POST creates a distinct artifact.
+	noKey := newReq(http.MethodPost, testSession, `{"type":"commit","uri":"y"}`)
+	rec := httptest.NewRecorder()
+	h(rec, noKey)
+	arts, _ = st.Artifacts().List(context.Background(), testWS, store.ArtifactFilter{SessionID: testSession})
+	if len(arts) != 2 {
+		t.Errorf("keyless POST should add a distinct artifact; total = %d, want 2", len(arts))
+	}
+}

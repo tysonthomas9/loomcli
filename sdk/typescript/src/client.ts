@@ -120,12 +120,17 @@ export class TaskRunClient {
 
   // ── Phase C: session write path (loom-serve endpoints; fencing-gated) ────────
 
-  /** Register a result artifact (patch/commit/log/…) on the TaskRun session. */
+  /** Register a result artifact (patch/commit/log/…) on the TaskRun session.
+   *  Pass `idempotencyKey` (e.g. the commit SHA) so a retry registers no
+   *  duplicate. */
   async postArtifact(artifact: ArtifactInput): Promise<void> {
     const { error, response } = await this.http.POST(
       "/api/workspaces/{ws}/sessions/{sessionId}/artifacts",
       {
         params: { path: this.sessionPath() },
+        headers: artifact.idempotencyKey
+          ? { "Idempotency-Key": artifact.idempotencyKey }
+          : undefined,
         body: {
           type: artifact.type,
           uri: artifact.uri,
@@ -188,6 +193,9 @@ export interface ArtifactInput {
   uri: string;
   summary?: string;
   filesChanged?: number;
+  /** Makes the write idempotent — a retry with the same key registers no
+   *  duplicate (e.g. set to the commit SHA). */
+  idempotencyKey?: string;
 }
 
 export interface UsageInput {

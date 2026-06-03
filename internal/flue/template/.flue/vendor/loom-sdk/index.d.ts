@@ -44,6 +44,7 @@ export interface ArtifactInput {
   uri: string;
   summary?: string;
   filesChanged?: number;
+  idempotencyKey?: string;
 }
 export interface UsageInput {
   inputTokens: number;

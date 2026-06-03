@@ -593,12 +593,15 @@ var TaskRunClient = class _TaskRunClient {
     if (error) throw this.toError("complete", response, error);
   }
   // ── Phase C: session write path (loom-serve endpoints; fencing-gated) ────────
-  /** Register a result artifact (patch/commit/log/…) on the TaskRun session. */
+  /** Register a result artifact (patch/commit/log/…) on the TaskRun session.
+   *  Pass `idempotencyKey` (e.g. the commit SHA) so a retry registers no
+   *  duplicate. */
   async postArtifact(artifact) {
     const { error, response } = await this.http.POST(
       "/api/workspaces/{ws}/sessions/{sessionId}/artifacts",
       {
         params: { path: this.sessionPath() },
+        headers: artifact.idempotencyKey ? { "Idempotency-Key": artifact.idempotencyKey } : void 0,
         body: {
           type: artifact.type,
           uri: artifact.uri,

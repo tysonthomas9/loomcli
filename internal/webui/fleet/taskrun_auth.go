@@ -23,6 +23,12 @@ type taskRunClaimsContextKey struct{}
 // active lease — a mutating request is then rejected (we cannot prove ownership).
 type FencingLookup func(ctx context.Context, workspace, sessionID string) (current int64, found bool, err error)
 
+// ValidateFunc validates a raw bearer token and returns its claims. The mount
+// supplies it (typically a closure over ValidateTaskRunToken with the signing
+// key, or a rotation-aware ValidateTaskRunTokenFromStore). nil means auth is
+// not configured — token-bearing requests are then rejected.
+type ValidateFunc func(token string) (*TaskRunClaims, error)
+
 // taskRunAuthError is the JSON envelope for auth/fencing rejections.
 type taskRunAuthError struct {
 	Success bool   `json:"success"`
@@ -47,9 +53,9 @@ type taskRunAuthError struct {
 // while a request that DOES carry a token is fully validated + fenced. This lets
 // the middleware be mounted before runner token-minting is the default without
 // locking out the current callers; set it false to require a token.
-func NewTaskRunAuthMiddleware(signingKey []byte, fencing FencingLookup, tokenOptional bool) func(http.Handler) http.Handler {
-	if len(signingKey) == 0 && !tokenOptional {
-		slog.Warn("taskrun JWT signing key is empty; all TaskRun write requests will be rejected")
+func NewTaskRunAuthMiddleware(validate ValidateFunc, fencing FencingLookup, tokenOptional bool) func(http.Handler) http.Handler {
+	if validate == nil && !tokenOptional {
+		slog.Warn("taskrun token validation not configured; all TaskRun write requests will be rejected")
 	}
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -58,7 +64,7 @@ func NewTaskRunAuthMiddleware(signingKey []byte, fencing FencingLookup, tokenOpt
 				next.ServeHTTP(w, r)
 				return
 			}
-			claims, status, msg := authenticateTaskRun(r, signingKey)
+			claims, status, msg := authenticateTaskRun(r, validate)
 			if status != 0 {
 				writeTaskRunAuthError(w, status, msg)
 				return
@@ -103,8 +109,8 @@ func hasBearerToken(r *http.Request) bool {
 
 // authenticateTaskRun extracts and validates the bearer token. Returns
 // (claims, 0, "") on success, or (nil, status, msg) describing the rejection.
-func authenticateTaskRun(r *http.Request, signingKey []byte) (*TaskRunClaims, int, string) {
-	if len(signingKey) == 0 {
+func authenticateTaskRun(r *http.Request, validate ValidateFunc) (*TaskRunClaims, int, string) {
+	if validate == nil {
 		return nil, http.StatusUnauthorized, "taskrun authentication not configured"
 	}
 	auth := r.Header.Get("Authorization")
@@ -116,7 +122,7 @@ func authenticateTaskRun(r *http.Request, signingKey []byte) (*TaskRunClaims, in
 	if tokenStr == "" {
 		return nil, http.StatusUnauthorized, "missing bearer token"
 	}
-	claims, err := ValidateTaskRunToken(tokenStr, signingKey)
+	claims, err := validate(tokenStr)
 	if err != nil {
 		return nil, http.StatusUnauthorized, "invalid or expired token"
 	}
