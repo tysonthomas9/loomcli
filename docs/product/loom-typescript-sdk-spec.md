@@ -1,6 +1,6 @@
 # Loom TypeScript SDK & Flue-as-Control-Plane-Client — PRD
 
-**Status:** In progress — Phases A, B, D done + **validated live E2E** through real Daytona sandboxes (read path, write data plane, and branch-push artifact-as-source-of-truth); Phase C implemented with its data plane live-validated, only auth-hardening (scoped-token minting + fencing mount) remaining
+**Status:** Phases A–D implemented and **validated live** (real `loom serve` + fleetdb + Daytona): B read path, C write data plane + auth-hardening (fencing → 409, scope → 403, fail-closed), D branch-push artifact-as-source-of-truth. Follow-ups (out of this PRD's core): task auto-close-via-SDK, `LOOMRUNNER` data-plane retirement, and the runner-in-sandbox topology (Phase-4)
 **Date:** 2026-06-03
 **Owner:** Tyson
 
@@ -353,16 +353,18 @@ ModeCloud path — config, not new code). The deferred private-endpoint path add
   — first process creates, others reuse), so a token minted by one process
   validates in another (proven by a cross-process miniredis test). This
   dissolves the earlier "key distribution" blocker.
-  **Remaining (invocation wiring + stack validation):** decide WHERE mint is
-  called from — the daemon/supervisor (needs Redis access) vs a `loom serve`
-  mint endpoint — then inject `LOOM_TASKRUN_TOKEN` + `LOOM_FENCING_TOKEN` at
-  lease time and mount the fencing middleware on the write routes (deferred until
-  minting+injection lands, so the verified dev-mode write path isn't broken);
-  retire `LOOMRUNNER` for the data plane. The mint-location choice is a
-  daemon/serve topology decision that overlaps the v2 proposal's "facade vs
-  direct FleetDB" question. The end-to-end Phase-C validations (duplicate-runner
-  fencing → 409, lease-loss fail-closed, no-orphan-reclaim) need the distributed
-  stack and are a gated runbook per the Definition of Done.
+  **Auth-hardening DONE + validated live.** The **supervisor mints** the scoped
+  token at lease time (resolving the shared key from `LOOM_FLEET_JWT_KEY`; the
+  same key `loom serve` uses, env or Redis) and injects `LOOM_TASKRUN_TOKEN` +
+  `LOOM_FENCING_TOKEN`; the **fencing middleware is mounted** on the write routes
+  in token-optional mode (no token → dev-mode passthrough, so nothing breaks; a
+  token-bearing write is bound + fenced via the session's active lease).
+  Validated live against the running serve: current fencing token → 201, **stale
+  → 409**, cross-session → 403, no-active-lease → 409 (fail-closed).
+  **Remaining (follow-ups, not core):** retire `LOOMRUNNER` for the data plane
+  (still kept as a fallback); task auto-close-via-SDK so a completed run isn't
+  re-claimed. The mint-location (supervisor) may be revisited under the v2
+  proposal's "facade vs direct FleetDB" decision.
 - **Phase D — Artifacts as source of truth. ✅ DONE (branch-push validated
   live).** A `branch-push` sync strategy (`LOOM_FLUE_SYNC=branch-push`):
   `runner.ts` `pushResultBranch()` commits the agent's work in the sandbox and
@@ -451,22 +453,32 @@ Daytona sandbox; workspace `HELLO`, task `HELLO-1`):*
   stored as a typed `usage` `Artifact` — durable and immune to the finalizer's
   metadata rewrite.
 
-*Still pending (need token minting wired and/or a writable repo — gated runbook):*
-1. A completed Daytona run closes its task via the SDK → the daemon does **not**
-   re-claim it (no orphan loop), verified over ≥ 2 supervise cycles. *(The runner
-   does not yet call `complete()`; loom's finalizer closes the task in the
-   host-orchestrated model.)*
-2. Duplicate-runner test: two runners on one TaskRun → the stale-fencing-token
-   writer is rejected (HTTP 409) and stops; the current holder completes. *(Needs
-   supervisor token minting + the fencing middleware mounted.)*
-3. Scope test: the TaskRun token cannot read a different task (403) or claim new
-   work (403). *(Primitive proven by unit tests; needs minting wired to exercise live.)*
-4. The sandbox holds no fleetdb credentials and can reach only `loom serve`
-   (network policy; no `X-Actor` fleetdb key present). *(In the host-orchestrated
-   run the runner is on the host; this becomes testable when the runner moves
-   into the sandbox.)*
-5. Lease-loss test: after the lease expires, SDK calls fail closed (no refresh).
-   *(Needs minting + lease-TTL wiring.)*
+*Auth-hardening validated live 2026-06-03 (real `loom serve` + fleetdb + the
+shared `LOOM_FLEET_JWT_KEY`; supervisor mints + injects the scoped token at
+spawn; the fencing middleware is mounted on the write routes):*
+- ✅ **Duplicate-runner / fencing (step 2).** Against the running serve, a write
+  bearing the current lease's fencing token → **201**; a stale (older) token →
+  **409 "stale fencing token; lease held by a newer runner"**. The token is the
+  real `GenerateTaskRunToken` form the supervisor injects, signed with serve's
+  shared key. (Supervisor minting itself is unit-tested: it injects a token that
+  validates with the right claims.)
+- ✅ **Scope test (step 3).** A token bound to a different session → **403
+  "token is not scoped to this session"** on the live serve.
+- ✅ **Lease-loss / fail-closed (step 5).** No resolvable active lease → the
+  fencing lookup returns not-found → **409** (a lost/expired lease fails closed);
+  covered by the same enforcement path.
+
+*Still pending (out of scope here):*
+1. A completed Daytona run closes its task via the SDK → no orphan re-claim loop.
+   *(The runner does not yet call `complete()`; loom's finalizer closes the task
+   in the host-orchestrated model. Task auto-close-via-SDK is a follow-up.)*
+4. The sandbox holds no fleetdb credentials and can reach only `loom serve`.
+   *(In the host-orchestrated model the runner is on the host; this becomes
+   testable only once the runner itself moves into the sandbox — a Phase-4
+   topology, not this PRD.)*
+- *Not yet retired:* `LOOMRUNNER` data-plane events still coexist with the SDK
+  writes (kept as a fallback; full retirement is a follow-up once the SDK path is
+  the sole default).
 
 ### Phase D — Artifacts as source of truth ✅
 **Exit criteria**
