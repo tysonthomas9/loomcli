@@ -260,41 +260,53 @@ authenticated* loom endpoint:
 | Option | What it is | Best for | Trade-offs |
 |---|---|---|---|
 | **0. Host-orchestrated (today)** | Flue runner runs on the host; the sandbox is just a remote shell/FS reached via the Daytona API; loom is never called from the sandbox | Dev / single-user; Phase 1–2 | **Nothing to host.** But the runner can't self-serve task data/artifacts — you keep the blob bridge and its limits (no in-sandbox task read/close, patch-back fragility) |
-| **1. Tunnel local `loom serve`** | Cloudflare Tunnel / ngrok / Tailscale Funnel exposes the laptop's `loom serve` at a public HTTPS URL | Dev / single-user trying the SDK model | No VM; loom stays local. Laptop must stay online; tunnel adds its own auth + latency; if `loom serve` dies mid-run the control plane drops |
-| **2. Daytona ↔ private network** | The sandbox joins your network (Tailscale daemon in the sandbox image, or Daytona VPC peering) and reaches a private `loom serve` | Teams wanting no public exposure | Strongest isolation. Requires network-join provisioning in the sandbox image/runtime; depends on Daytona's networking support |
-| **3. Hosted `loom serve` (cloud VM / managed)** | `loom serve` (+ fleetdb/redis) runs on an always-on reachable host | Team / Phase-4 scale-out | Durable, always-on, server-visible artifacts as source of truth. Real ops: provisioning, TLS, scaling, secrets |
+| **1. Hosted `loom serve`** (cloud VM / managed) — *primary* | `loom serve` (+ fleetdb/redis) runs on an always-on, reachable host; the sandbox calls it over public HTTPS, egress-allowlisted to the endpoint | Team / Phase-4 scale-out | Durable, always-on, server-visible artifacts as source of truth. Real ops: provisioning, TLS, scaling, secrets. Internet-exposed → scoped-token auth is non-negotiable |
+| **2. Private overlay** (Tailscale `tsnet`) — *optional/advanced* | The runner joins a mesh VPN from **inside** the sandbox (userspace `tsnet`, no TUN/root) and reaches a `loom serve` that is **not** publicly exposed | Security-conscious teams refusing a public endpoint | No provider-native VPC needed (see note), but adds a Tailscale dependency + ephemeral auth-key management, and still needs egress to Tailscale's control/DERP relays |
 
-In all three the runner reaches **only `loom serve`**; fleetdb stays behind it.
-A small hosted deployment can keep `loom serve`'s embedded fleetdb + miniredis;
-only at scale do you split out a standalone fleetdb + real Redis.
+> **Provider networking reality (researched 2026-06).** There is **no
+> provider-native private-network / VPC-join for sandboxes** on the major
+> providers — they expose *egress firewalling*, not inbound private networking:
+> **Daytona** = `networkAllowList` (IPv4 **CIDR only**; no hostnames, domains, or
+> IPv6) + `networkBlockAll`; **e2b** = `allowInternetAccess` + `network.allowOut/
+> denyOut` (IP/CIDR/**domain**). Both default to outbound-on. Implications:
+> - The original "Daytona ↔ private network / VPC peering" idea is **not viable
+>   and is dropped.** The only way to keep loom off the public internet is the
+>   **`tsnet` overlay** (Option 2) — an app-level mesh that works on any provider
+>   allowing outbound + a running process, *not* provider VPC support.
+> - On **Daytona** the egress allowlist is **CIDR-only**, so a hosted `loom serve`
+>   must sit at a **stable IP/CIDR** — a hostname-only / rotating-IP CDN endpoint
+>   cannot be allowlisted there. e2b can allowlist by domain.
+> - The overlay still needs egress to Tailscale's coordination + DERP relays
+>   (allowlist those CIDRs when egress is locked down).
 
-### Does the implementation differ across the three?
+In every option the runner reaches **only `loom serve`**; fleetdb stays behind
+it. A small hosted deployment can keep `loom serve`'s embedded fleetdb +
+miniredis; only at scale do you split out a standalone fleetdb + real Redis.
 
-**No — the runner, `@loom/sdk`, and control-plane API code are identical across
-all three. That is a design goal: deployment topology is a config axis, not a
-code fork.** The runner only knows `LOOM_SERVER_URL` + a scoped token; whether
-that URL resolves to a tunnel, a tailnet host, or a public VM is irrelevant to
-it. If per-deployment runner code starts appearing, that's a design smell.
+### Does the implementation differ between the served options (1 and 2)?
+
+**No — the runner, `@loom/sdk`, and control-plane API code are identical. That is
+a design goal: deployment topology is a config axis, not a code fork.** The runner
+only knows `LOOM_SERVER_URL` + a scoped token; whether that resolves to a public
+host or a tailnet host is irrelevant to it. If per-deployment runner code starts
+appearing, that's a design smell.
 
 What varies is config / infra / provisioning — not logic:
 
-| Concern | 1. Tunnel | 2. Private net | 3. Hosted VM |
-|---|---|---|---|
-| Runner / SDK / control-plane API code | same | same | same |
-| `LOOM_SERVER_URL` value | tunnel URL | private host | public/VPC host |
-| TLS / cert trust | tunnel-provided HTTPS | may need a custom CA in the sandbox (`NODE_EXTRA_CA_CERTS`) | standard public TLS |
-| Sandbox network setup | none (public egress) | **network-join in the image** (Tailscale, etc.) | none (public egress) |
-| fleetdb / redis | embedded in `loom serve` | embedded or external | embedded (small) → external + real Redis (scale) |
-| Auth posture | scoped token (mandatory) | scoped token + reduced exposure | scoped token (mandatory; internet-exposed) |
-| Availability assumption | laptop-bound; exercises lease-loss/reconnect | host-bound | always-on |
+| Concern | 1. Hosted `loom serve` | 2. Private overlay (`tsnet`) |
+|---|---|---|
+| Runner / SDK / control-plane API code | same | same |
+| `LOOM_SERVER_URL` value | public/VPC host (stable IP for Daytona egress) | tailnet host |
+| TLS / cert trust | standard public TLS | tailnet TLS, or a custom CA in the sandbox (`NODE_EXTRA_CA_CERTS`) |
+| Sandbox network setup | none (egress to the endpoint) | **`tsnet`/Tailscale join** (embed in the runner or bake into the image) + ephemeral auth key + egress to TS control/DERP |
+| fleetdb / redis | embedded (small) → external + real Redis (scale) | same |
+| Auth posture | scoped token (mandatory; internet-exposed) | scoped token + no public exposure |
 
-The only genuine deltas beyond config are: **(a)** Option 2 needs network-join
-provisioning in the *sandbox image* (the runtime-provider layer, not the SDK);
-and **(b)** at scale you flip `loom serve` from embedded fleetdb to external via
-`LOOM_FLEET_DB_URL` (the existing ModeCloud path — config, not new code).
-Notably, the laptop-bound tunnel option simply *exercises* the
-reconnect / lease-loss / fencing paths more often — the same code that must
-exist anyway — so building those robustly is the right move under any topology.
+The only genuine non-config delta is **Option 2's network-join**: embed `tsnet`
+in `loom serve worker` (it's Go — no daemon/TUN/root needed) or bake Tailscale
+into the sandbox image. That lives in the runtime/provisioning layer, not the
+SDK. At scale, both options flip `loom serve` from embedded fleetdb to external
+via `LOOM_FLEET_DB_URL` (the existing ModeCloud path — config, not new code).
 
 ## Phasing
 
@@ -400,12 +412,14 @@ The PRD is complete — not merely "the SDK was written" — when all hold:
    fencing is the hard, security-sensitive work. Decision: JWT vs macaroon;
    where minting lives; revocation on lease loss.
 2. **Server reachability for remote runtimes.** Embedded fleetdb is unreachable
-   from a sandbox; remote runtimes need a served `loom serve` endpoint (local +
-   podman can use loopback). See **Deployment & reachability** for the three
-   topologies and why the implementation is identical across them. Remaining
-   open question: the default dev path (tunnel vs lightweight hosted), and
-   whether to bundle a Tailscale-based network-join in the sandbox image for
-   Option 2.
+   from a sandbox; a runner that calls loom needs a served `loom serve` endpoint
+   (host-orchestrated runs need nothing — see **Deployment & reachability**).
+   Research finding: **no major sandbox provider offers native private
+   networking** (Daytona/e2b only do egress firewalling), so the served options
+   reduce to a **hosted `loom serve`** (primary) or a **`tsnet` overlay**
+   (optional). Open questions: does v1 ship overlay support or start
+   hosted-only; and the Daytona **CIDR-only egress** constraint forces the
+   endpoint to a stable IP/CIDR.
 3. **SDK versioning.** Flue templates pin an SDK version embedded in loom and
    built in sandboxes; API changes must be semver'd and staleness-gated. Risk of
    template/SDK skew (we already hit cross-compiled-fleetdb skew).
