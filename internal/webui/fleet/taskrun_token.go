@@ -3,120 +3,35 @@ package fleet
 import (
 	"context"
 	"fmt"
-	"slices"
 	"time"
 
-	"github.com/golang-jwt/jwt/v5"
+	"github.com/tysonthomas9/loomcli/internal/taskruntoken"
 )
 
-// TaskRun-scoped capability tokens — PRD Phase C
-// (docs/product/loom-typescript-sdk-spec.md, "Auth & trust model").
-//
-// When loom leases a TaskRun to a runner it mints a short-lived, least-privilege
-// token bound to exactly one {workspace, task, session} and the lease's current
-// fencing token. The runner presents it (via @loom/sdk) to `loom serve` to read
-// its task and report results — it never holds fleetdb credentials.
-//
-// The {workspace, task, session} binding is the primary least-privilege control:
-// a token minted for one TaskRun cannot read another task, report against
-// another session, or claim new work. The scope list is a secondary capability
-// filter. Reuses the same HMAC-SHA256 signing the fleet worker tokens use
-// (jwt.go); the signing key is provisioned once at `loom serve` startup, so this
-// adds no new key-management surface (resolving the PRD's "JWT vs macaroon" open
-// question by following the codebase's existing precedent).
+// The scoped TaskRun capability token contract lives in internal/taskruntoken
+// (dependency-light, no webui deps) so the daemon supervisor — which mints at
+// lease time — can depend on it without importing webui/fleet. fleet re-exports
+// the type + mint/validate here so its middleware (taskrun_auth.go) and the
+// SigningKeyManager methods below keep a stable local surface.
 
-// TaskRun token scopes. Coarse capability filter layered on top of the
-// workspace/task/session binding.
+// TaskRunClaims aliases the neutral token claims (internal/taskruntoken.Claims).
+type TaskRunClaims = taskruntoken.Claims
+
+// Token scope re-exports.
 const (
-	ScopeTaskRead     = "task:read"     // read this task (getTask)
-	ScopeTaskComment  = "task:comment"  // comment on this task
-	ScopeSessionWrite = "session:write" // status / artifact / usage / log / heartbeat / complete for this session
+	ScopeTaskRead     = taskruntoken.ScopeTaskRead
+	ScopeTaskComment  = taskruntoken.ScopeTaskComment
+	ScopeSessionWrite = taskruntoken.ScopeSessionWrite
 )
 
-// DefaultTaskRunScopes is the least-privilege set a runner needs: read its task
-// and report against its own session. It deliberately excludes any claim/admin
-// scope, so a leaked TaskRun token cannot acquire new work.
-var DefaultTaskRunScopes = []string{ScopeTaskRead, ScopeTaskComment, ScopeSessionWrite}
+// DefaultTaskRunScopes re-exports the least-privilege default scope set.
+var DefaultTaskRunScopes = taskruntoken.DefaultScopes
 
-// TaskRunClaims binds a capability token to exactly one TaskRun.
-type TaskRunClaims struct {
-	Workspace    string   `json:"workspace"`
-	TaskID       string   `json:"task_id"`
-	SessionID    string   `json:"session_id"`
-	FencingToken int64    `json:"fencing_token"`
-	Scopes       []string `json:"scopes,omitempty"`
-	jwt.RegisteredClaims
-}
-
-// GenerateTaskRunToken mints a signed, scoped TaskRun capability token. The token
-// is static for its TTL — there is NO refresh today (heartbeat bumps the lease's
-// last-heartbeat but does not re-issue a token). Within the TTL, fencing is the
-// backstop: a stale writer is rejected because a newer lease holder has a higher
-// fencing token. A future refresh-on-heartbeat (re-mint with the current fencing
-// token, shorter TTL) would make lease-loss fail closed; see the PRD.
-func GenerateTaskRunToken(c TaskRunClaims, signingKey []byte, expiry time.Duration) (string, error) {
-	if len(signingKey) == 0 {
-		return "", fmt.Errorf("taskrun token: empty signing key")
-	}
-	if c.Workspace == "" || c.SessionID == "" {
-		return "", fmt.Errorf("taskrun token: workspace and session_id are required")
-	}
-	now := time.Now()
-	if len(c.Scopes) == 0 {
-		c.Scopes = slices.Clone(DefaultTaskRunScopes)
-	}
-	c.RegisteredClaims = jwt.RegisteredClaims{
-		Subject:   c.SessionID,
-		IssuedAt:  jwt.NewNumericDate(now),
-		ExpiresAt: jwt.NewNumericDate(now.Add(expiry)),
-	}
-	token := jwt.NewWithClaims(jwt.SigningMethodHS256, c)
-	signed, err := token.SignedString(signingKey)
-	if err != nil {
-		return "", fmt.Errorf("taskrun token: sign: %w", err)
-	}
-	return signed, nil
-}
-
-// ValidateTaskRunToken parses and verifies a TaskRun token (HMAC signature +
-// expiry). It does NOT check scope, binding, or fencing — callers do that via
-// the claim helpers against the request path and the current lease.
-func ValidateTaskRunToken(tokenString string, signingKey []byte) (*TaskRunClaims, error) {
-	token, err := jwt.ParseWithClaims(tokenString, &TaskRunClaims{}, func(t *jwt.Token) (interface{}, error) {
-		if _, ok := t.Method.(*jwt.SigningMethodHMAC); !ok {
-			return nil, fmt.Errorf("unexpected signing method: %v", t.Header["alg"])
-		}
-		return signingKey, nil
-	})
-	if err != nil {
-		return nil, fmt.Errorf("taskrun token: parse: %w", err)
-	}
-	claims, ok := token.Claims.(*TaskRunClaims)
-	if !ok || !token.Valid {
-		return nil, fmt.Errorf("taskrun token: invalid claims")
-	}
-	return claims, nil
-}
-
-// HasScope reports whether the token carries the given capability.
-func (c *TaskRunClaims) HasScope(scope string) bool {
-	return slices.Contains(c.Scopes, scope)
-}
-
-// AuthorizesSession reports whether the token may act on the given
-// workspace+session. A token minted for one TaskRun cannot touch another
-// session (the caller maps a mismatch to HTTP 403).
-func (c *TaskRunClaims) AuthorizesSession(workspace, sessionID string) bool {
-	return c.Workspace != "" && c.Workspace == workspace &&
-		c.SessionID != "" && c.SessionID == sessionID
-}
-
-// AuthorizesTask reports whether the token may read/comment on the given
-// workspace+task (a mismatch is the scope-test 403 in PRD Phase C validation).
-func (c *TaskRunClaims) AuthorizesTask(workspace, taskID string) bool {
-	return c.Workspace != "" && c.Workspace == workspace &&
-		c.TaskID != "" && c.TaskID == taskID
-}
+// GenerateTaskRunToken / ValidateTaskRunToken re-export the neutral mint/verify.
+var (
+	GenerateTaskRunToken = taskruntoken.Generate
+	ValidateTaskRunToken = taskruntoken.Validate
+)
 
 // MintTaskRunToken loads the current shared signing key from Redis and mints a
 // scoped TaskRun capability token. Because the key is shared (SET-NX in Redis,
@@ -129,7 +44,7 @@ func (m *SigningKeyManager) MintTaskRunToken(ctx context.Context, claims TaskRun
 	if err != nil {
 		return "", fmt.Errorf("taskrun token: load signing key: %w", err)
 	}
-	return GenerateTaskRunToken(claims, key, expiry)
+	return taskruntoken.Generate(claims, key, expiry)
 }
 
 // ValidateTaskRunTokenFromStore validates a TaskRun token against the current
@@ -140,23 +55,14 @@ func (m *SigningKeyManager) ValidateTaskRunTokenFromStore(ctx context.Context, t
 	if err != nil {
 		return nil, fmt.Errorf("taskrun token: load signing keys: %w", err)
 	}
-	claims, err := ValidateTaskRunToken(tokenString, current)
+	claims, err := taskruntoken.Validate(tokenString, current)
 	if err == nil {
 		return claims, nil
 	}
 	if len(previous) > 0 {
-		if prevClaims, prevErr := ValidateTaskRunToken(tokenString, previous); prevErr == nil {
+		if prevClaims, prevErr := taskruntoken.Validate(tokenString, previous); prevErr == nil {
 			return prevClaims, nil
 		}
 	}
 	return nil, err
-}
-
-// FencedOut reports whether this token's fencing token is stale relative to the
-// current lease holder's. A stale writer (lower fencing token) must be rejected
-// with HTTP 409 so a zombie/duplicate runner cannot corrupt state; the current
-// holder (equal token) is allowed. A higher token should never occur (the lease
-// store issues monotonically) but is treated as not-stale defensively.
-func (c *TaskRunClaims) FencedOut(currentFencingToken int64) bool {
-	return c.FencingToken < currentFencingToken
 }

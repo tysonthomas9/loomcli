@@ -17,7 +17,7 @@ import (
 	cfgpkg "github.com/tysonthomas9/loomcli/internal/cli/config"
 	"github.com/tysonthomas9/loomcli/internal/events"
 	"github.com/tysonthomas9/loomcli/internal/observability/tracing"
-	"github.com/tysonthomas9/loomcli/internal/webui/fleet"
+	"github.com/tysonthomas9/loomcli/internal/taskruntoken"
 
 	"go.opentelemetry.io/otel/attribute"
 )
@@ -183,13 +183,13 @@ func (s *Supervisor) appendSessionEnv(env []string, ap *AgentProcess) []string {
 	// token is rejected). Requires the shared signing key; otherwise writes fall
 	// through to dev-mode auth.
 	if len(s.TaskRunSigningKey) > 0 && sessionID != "" && s.WorkspaceID != "" {
-		claims := fleet.TaskRunClaims{
+		claims := taskruntoken.Claims{
 			Workspace:    s.WorkspaceID,
 			TaskID:       s.taskIDForLifecycle(ap, nil),
 			SessionID:    sessionID,
 			FencingToken: leaseFencingToken,
 		}
-		if tok, err := fleet.GenerateTaskRunToken(claims, s.TaskRunSigningKey, taskRunTokenTTL); err == nil {
+		if tok, err := taskruntoken.Generate(claims, s.TaskRunSigningKey, taskRunTokenTTL); err == nil {
 			env = append(env,
 				fmt.Sprintf("LOOM_TASKRUN_TOKEN=%s", tok),
 				fmt.Sprintf("LOOM_FENCING_TOKEN=%d", leaseFencingToken),

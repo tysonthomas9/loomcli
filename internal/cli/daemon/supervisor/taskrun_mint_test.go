@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	"github.com/tysonthomas9/loomcli/internal/sessions"
-	"github.com/tysonthomas9/loomcli/internal/webui/fleet"
+	"github.com/tysonthomas9/loomcli/internal/taskruntoken"
 )
 
 // TestAppendSessionEnv_MintsTaskRunToken verifies that when a signing key is
@@ -31,7 +31,7 @@ func TestAppendSessionEnv_MintsTaskRunToken(t *testing.T) {
 	if token == "" {
 		t.Fatalf("LOOM_TASKRUN_TOKEN not injected; env=%v", env)
 	}
-	claims, err := fleet.ValidateTaskRunToken(token, key)
+	claims, err := taskruntoken.Validate(token, key)
 	if err != nil {
 		t.Fatalf("minted token failed to validate: %v", err)
 	}
