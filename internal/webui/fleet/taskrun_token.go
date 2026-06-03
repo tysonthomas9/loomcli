@@ -48,9 +48,12 @@ type TaskRunClaims struct {
 	jwt.RegisteredClaims
 }
 
-// GenerateTaskRunToken mints a signed, scoped TaskRun capability token. The TTL
-// should track the lease TTL; the runner refreshes via heartbeat while the lease
-// holds, so a lost lease means the token is not refreshed and calls fail closed.
+// GenerateTaskRunToken mints a signed, scoped TaskRun capability token. The token
+// is static for its TTL — there is NO refresh today (heartbeat bumps the lease's
+// last-heartbeat but does not re-issue a token). Within the TTL, fencing is the
+// backstop: a stale writer is rejected because a newer lease holder has a higher
+// fencing token. A future refresh-on-heartbeat (re-mint with the current fencing
+// token, shorter TTL) would make lease-loss fail closed; see the PRD.
 func GenerateTaskRunToken(c TaskRunClaims, signingKey []byte, expiry time.Duration) (string, error) {
 	if len(signingKey) == 0 {
 		return "", fmt.Errorf("taskrun token: empty signing key")

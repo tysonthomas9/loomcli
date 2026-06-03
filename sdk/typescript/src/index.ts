@@ -2,7 +2,6 @@ export {
   TaskRunClient,
   TaskRunError,
   FencedError,
-  NotImplementedError,
   type Task,
   type ArtifactInput,
   type UsageInput,

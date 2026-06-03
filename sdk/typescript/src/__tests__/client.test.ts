@@ -29,12 +29,13 @@ const json = (body: unknown, status = 200) =>
 afterEach(() => vi.unstubAllGlobals());
 
 describe("TaskRunClient", () => {
-  it("getTask GETs the issue, sends auth + fencing headers, unwraps data", async () => {
+  it("getTask GETs the issue, sends auth headers, unwraps data", async () => {
     const fetchFn = stubFetch((req) => {
       expect(req.method).toBe("GET");
       expect(new URL(req.url).pathname).toBe("/api/workspaces/DEMO/issues/DEMO-1");
       expect(req.headers.get("authorization")).toBe("Bearer tok");
-      expect(req.headers.get("x-loom-fencing-token")).toBe("7");
+      // fencing rides the signed token claim, not a header.
+      expect(req.headers.get("x-loom-fencing-token")).toBeNull();
       expect(req.headers.get("x-actor")).toBe("loom-dev");
       return json({
         success: true,

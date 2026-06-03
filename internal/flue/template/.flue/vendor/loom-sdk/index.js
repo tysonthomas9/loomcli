@@ -524,12 +524,6 @@ var FencedError = class extends TaskRunError {
     this.name = "FencedError";
   }
 };
-var NotImplementedError = class extends Error {
-  constructor(method, detail) {
-    super(`loom ${method}: not available yet \u2014 ${detail}`);
-    this.name = "NotImplementedError";
-  }
-};
 var TaskRunClient = class _TaskRunClient {
   constructor(bootstrap, http) {
     this.bootstrap = bootstrap;
@@ -539,7 +533,6 @@ var TaskRunClient = class _TaskRunClient {
   static fromBootstrap(bootstrap) {
     const headers = {};
     if (bootstrap.token) headers["Authorization"] = `Bearer ${bootstrap.token}`;
-    if (bootstrap.fencingToken) headers["X-Loom-Fencing-Token"] = bootstrap.fencingToken;
     if (bootstrap.actor) headers["X-Actor"] = bootstrap.actor;
     const http = createClient({ baseUrl: bootstrap.serverUrl, headers });
     return new _TaskRunClient(bootstrap, http);
@@ -588,11 +581,6 @@ var TaskRunClient = class _TaskRunClient {
     );
     if (error) throw this.toError("updateStatus", response, error);
   }
-  /** Mark the task blocked, recording why (used when the run cannot proceed). */
-  async block(reason) {
-    await this.comment(`blocked: ${reason}`);
-    await this.updateStatus("blocked");
-  }
   /** Complete (close) the task. Mirrors what a local agent does at end of run. */
   async complete(opts = {}) {
     const { error, response } = await this.http.POST(
@@ -603,11 +591,6 @@ var TaskRunClient = class _TaskRunClient {
       }
     );
     if (error) throw this.toError("complete", response, error);
-  }
-  /** Record a non-fatal failure on the task (no dedicated endpoint yet). */
-  async fail(opts = {}) {
-    const tag = opts.errorClass ? ` [${opts.errorClass}]` : "";
-    await this.comment(`run failed${tag}: ${opts.reason ?? "see logs"}`);
   }
   // ── Phase C: session write path (loom-serve endpoints; fencing-gated) ────────
   /** Register a result artifact (patch/commit/log/…) on the TaskRun session. */
@@ -650,7 +633,8 @@ var TaskRunClient = class _TaskRunClient {
     );
     if (error) throw this.toError("appendLog", response, error);
   }
-  /** Heartbeat the session to keep its lease alive (also refreshes the token TTL). */
+  /** Heartbeat the session (bumps the lease's last-heartbeat). Note: does NOT
+   *  re-issue or refresh the capability token, which has a fixed TTL. */
   async heartbeat() {
     const { error, response } = await this.http.POST(
       "/api/workspaces/{ws}/sessions/{sessionId}/heartbeat",
@@ -666,7 +650,6 @@ var TaskRunClient = class _TaskRunClient {
 export {
   BOOTSTRAP_ENV,
   FencedError,
-  NotImplementedError,
   TaskRunClient,
   TaskRunError,
   bootstrapFromEnv

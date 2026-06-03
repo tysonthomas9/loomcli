@@ -25,25 +25,16 @@ export class FencedError extends TaskRunError {
   }
 }
 
-/** Thrown by methods whose server endpoint is not built yet (Phase C/D). */
-export class NotImplementedError extends Error {
-  constructor(method: string, detail: string) {
-    super(`loom ${method}: not available yet — ${detail}`);
-    this.name = "NotImplementedError";
-  }
-}
-
 /**
  * TaskRunClient is the typed facade a flue runner uses to talk to the loom
  * control plane (`loom serve`). It is constructed from the scoped bootstrap loom
  * injects; the runner pulls its task and reports results without the `loom` CLI.
  * See docs/product/loom-typescript-sdk-spec.md.
  *
- * Phase B (read path) — getTask().
- * Phase B/C control — comment(), updateStatus(), complete(), block().
- * Phase C (session write path) — postArtifact(), recordUsage(), appendLog(),
- *   heartbeat() call the loom-serve session endpoints (fencing-gated server
- *   side). They require bootstrap.sessionId.
+ * Read path — getTask(); task control — comment(), updateStatus(), complete().
+ * Session write path — postArtifact(), recordUsage(), appendLog(), heartbeat()
+ *   call the loom-serve session endpoints (fencing-gated server side); they
+ *   require bootstrap.sessionId.
  */
 export class TaskRunClient {
   private constructor(
@@ -55,8 +46,8 @@ export class TaskRunClient {
   static fromBootstrap(bootstrap: TaskRunBootstrap): TaskRunClient {
     const headers: Record<string, string> = {};
     if (bootstrap.token) headers["Authorization"] = `Bearer ${bootstrap.token}`;
-    // Fencing token rides every request so the server can reject stale writers.
-    if (bootstrap.fencingToken) headers["X-Loom-Fencing-Token"] = bootstrap.fencingToken;
+    // Fencing is enforced server-side via the signed token claim, not a header,
+    // so bootstrap.fencingToken is informational only and not sent.
     // fleetdb dev-mode auth compatibility (local only).
     if (bootstrap.actor) headers["X-Actor"] = bootstrap.actor;
     const http = createClient<paths>({ baseUrl: bootstrap.serverUrl, headers });
@@ -115,12 +106,6 @@ export class TaskRunClient {
     if (error) throw this.toError("updateStatus", response, error);
   }
 
-  /** Mark the task blocked, recording why (used when the run cannot proceed). */
-  async block(reason: string): Promise<void> {
-    await this.comment(`blocked: ${reason}`);
-    await this.updateStatus("blocked");
-  }
-
   /** Complete (close) the task. Mirrors what a local agent does at end of run. */
   async complete(opts: { reason?: string } = {}): Promise<void> {
     const { error, response } = await this.http.POST(
@@ -131,12 +116,6 @@ export class TaskRunClient {
       },
     );
     if (error) throw this.toError("complete", response, error);
-  }
-
-  /** Record a non-fatal failure on the task (no dedicated endpoint yet). */
-  async fail(opts: { errorClass?: string; reason?: string } = {}): Promise<void> {
-    const tag = opts.errorClass ? ` [${opts.errorClass}]` : "";
-    await this.comment(`run failed${tag}: ${opts.reason ?? "see logs"}`);
   }
 
   // ── Phase C: session write path (loom-serve endpoints; fencing-gated) ────────
@@ -184,7 +163,8 @@ export class TaskRunClient {
     if (error) throw this.toError("appendLog", response, error);
   }
 
-  /** Heartbeat the session to keep its lease alive (also refreshes the token TTL). */
+  /** Heartbeat the session (bumps the lease's last-heartbeat). Note: does NOT
+   *  re-issue or refresh the capability token, which has a fixed TTL. */
   async heartbeat(): Promise<void> {
     const { error, response } = await this.http.POST(
       "/api/workspaces/{ws}/sessions/{sessionId}/heartbeat",

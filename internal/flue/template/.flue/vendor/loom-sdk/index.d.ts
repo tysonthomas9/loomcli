@@ -62,7 +62,6 @@ export class TaskRunError extends Error {
   readonly body: unknown;
 }
 export class FencedError extends TaskRunError {}
-export class NotImplementedError extends Error {}
 
 export class TaskRunClient {
   readonly bootstrap: TaskRunBootstrap;
@@ -71,9 +70,7 @@ export class TaskRunClient {
   getTask(): Promise<Task>;
   comment(text: string): Promise<void>;
   updateStatus(status: string): Promise<void>;
-  block(reason: string): Promise<void>;
   complete(opts?: { reason?: string }): Promise<void>;
-  fail(opts?: { errorClass?: string; reason?: string }): Promise<void>;
   postArtifact(artifact: ArtifactInput): Promise<void>;
   recordUsage(usage: UsageInput): Promise<void>;
   appendLog(log: LogInput): Promise<void>;
