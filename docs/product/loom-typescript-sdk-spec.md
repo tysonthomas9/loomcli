@@ -337,12 +337,21 @@ ModeCloud path — config, not new code). The deferred private-endpoint path add
   HMAC-JWT pattern (so no new key management — resolves the "JWT vs macaroon"
   open question by precedent), least-privilege default scopes, binding checks
   (`AuthorizesSession`/`AuthorizesTask` → 403 on mismatch) and `FencedOut`
-  (stale fencing → 409), fully unit-tested. **Remaining:** the fencing/auth
-  middleware + write endpoints (artifact/usage/heartbeat/status) on `loom
-  serve`; mint the token in the supervisor at lease time (inject
-  `LOOM_TASKRUN_TOKEN` + `LOOM_FENCING_TOKEN`); un-stub the SDK methods; runner
-  reports status/logs/usage/artifacts and completes/fails/blocks via the SDK;
-  retire `LOOMRUNNER` for the data plane.
+  (stale fencing → 409), fully unit-tested. The **auth/fencing middleware**
+  (`taskrun_auth.go`, 401/403/409, reads skip fencing) is also landed + tested.
+  The **session write endpoints are implemented**: `api/openapi.yaml` gained POST
+  `/sessions/{sessionId}/{artifacts,usage,logs,heartbeat}` (all three type sets
+  regenerated, gates green); `internal/webui/handlers/sessionwrite/` persists via
+  the existing `ArtifactStore`/`AgentSessionStore` and is mounted on the
+  workspace router (store-backed; unit- + route-mount-tested against the
+  in-memory store); the **SDK write methods are un-stubbed** to typed calls. Auth
+  is currently dev-mode `X-Actor` (per the chosen "finish the old PRD" path).
+  **Remaining:** mint the scoped token in the supervisor at lease time (inject
+  `LOOM_TASKRUN_TOKEN` + `LOOM_FENCING_TOKEN`) and mount the fencing middleware on
+  the write routes; have the runner report usage/artifacts via the SDK; retire
+  `LOOMRUNNER` for the data plane. (The end-to-end Phase-C validations —
+  duplicate-runner fencing, lease-loss, no-orphan-reclaim — need the distributed
+  stack and are a gated runbook per the Definition of Done.)
 - **Phase D — Artifacts as source of truth.** *Pending.* Branch-push / upload +
   register refs; server-visible artifacts replace host patch-back as the
   contract (patch-back remains an opt-in local convenience). Unblocks Phase-4

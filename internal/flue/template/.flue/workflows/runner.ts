@@ -109,8 +109,10 @@ export async function run({ init, payload, env }: FlueContext) {
 			}
 
 			// 2. Resolve the prompt (SDK read path or inlined fallback), then run
-			//    the agent in the sandbox.
-			const prompt = await resolvePrompt(p);
+			//    the agent in the sandbox. `loom` is the control-plane client when
+			//    the bootstrap is present (null otherwise → LOOMRUNNER-only path).
+			const loom = taskRunClient(p);
+			const prompt = await resolvePrompt(p, loom);
 			const agent = createAgent(() => ({ sandbox: daytona(sandbox), cwd, model }));
 			const harness = await init(agent);
 			const session = await harness.session();
@@ -132,6 +134,14 @@ export async function run({ init, payload, env }: FlueContext) {
 			if (p.patch_out) {
 				await writeFile(p.patch_out, patch);
 				emit({ type: 'patch_ready', path: p.patch_out, files_changed: filesChanged });
+			}
+
+			// 3b. Report results to loom serve via @loom/sdk (PRD Phase C) when the
+			//     bootstrap is present. Best-effort: the work is already captured as a
+			//     patch + LOOMRUNNER events, so a reporting failure must not fail the
+			//     task.
+			if (loom) {
+				await reportToLoom(loom, resp.usage, p.patch_out, filesChanged);
 			}
 
 			// 4. Delete the sandbox on success (proposal: successful sandboxes are
@@ -176,30 +186,37 @@ function errMessage(err: unknown): string {
 }
 
 /**
- * Resolve the agent prompt. With `fetch_task`, the runner pulls the task's
- * title/description/design/AC from loom serve via `@loom/sdk` (PRD Phase B) and
- * appends it to the sandbox preamble loom sent in `prompt` — replacing loom's
- * Go-side design-inlining. The runner process runs on the host, so it reaches
- * loom serve directly (no extra hosting). When the bootstrap is incomplete or
- * the server is unreachable we throw rather than silently run an empty task.
- * Without `fetch_task`, `prompt` already carries the (inlined) task.
+ * Build the loom control-plane client when the bootstrap is present (fetch_task).
+ * Throws fast if fetch_task is set but the bootstrap env is incomplete, rather
+ * than silently degrading to an empty task.
  */
-async function resolvePrompt(p: RunnerInput): Promise<string> {
-	if (!p.fetch_task) return p.prompt;
-
-	let client: TaskRunClient;
+function taskRunClient(p: RunnerInput): TaskRunClient | null {
+	if (!p.fetch_task) return null;
 	try {
-		client = TaskRunClient.fromEnv();
+		return TaskRunClient.fromEnv();
 	} catch (err) {
 		throw new Error(`runner: fetch_task set but the loom bootstrap env is incomplete: ${errMessage(err)}`);
 	}
+}
+
+/**
+ * Resolve the agent prompt. With a loom client, the runner pulls the task's
+ * title/description/design/AC from loom serve via `@loom/sdk` (PRD Phase B) and
+ * appends it to the sandbox preamble loom sent in `prompt` — replacing loom's
+ * Go-side design-inlining. The runner process runs on the host, so it reaches
+ * loom serve directly (no extra hosting). When the fetch fails we throw rather
+ * than silently run an empty task. Without a client, `prompt` already carries
+ * the (inlined) task.
+ */
+async function resolvePrompt(p: RunnerInput, loom: TaskRunClient | null): Promise<string> {
+	if (!loom) return p.prompt;
 
 	let task: Task;
 	try {
-		task = await client.getTask();
+		task = await loom.getTask();
 	} catch (err) {
 		throw new Error(
-			`runner: could not fetch task ${client.bootstrap.taskId} from ${client.bootstrap.serverUrl} via @loom/sdk: ${errMessage(err)}`,
+			`runner: could not fetch task ${loom.bootstrap.taskId} from ${loom.bootstrap.serverUrl} via @loom/sdk: ${errMessage(err)}`,
 		);
 	}
 
@@ -208,12 +225,40 @@ async function resolvePrompt(p: RunnerInput): Promise<string> {
 		task_id: task.id,
 		title: task.title,
 		has_design: Boolean(task.design),
-		source: client.bootstrap.serverUrl,
+		source: loom.bootstrap.serverUrl,
 	});
 
 	const body = renderTaskBody(task);
 	const preamble = p.prompt?.trim();
 	return preamble ? `${preamble}\n\n${body}` : body;
+}
+
+/**
+ * Report run results to loom serve via @loom/sdk (PRD Phase C). Best-effort:
+ * each call is independently guarded so a server-side write failure surfaces a
+ * warning event but never fails the task (the work is captured as a patch).
+ */
+async function reportToLoom(
+	loom: TaskRunClient,
+	usage: { input: number; output: number } | undefined,
+	patchOut: string | undefined,
+	filesChanged: number,
+): Promise<void> {
+	if (usage) {
+		try {
+			await loom.recordUsage({ inputTokens: usage.input, outputTokens: usage.output });
+		} catch (err) {
+			emit({ type: 'report_warning', op: 'recordUsage', error: errMessage(err) });
+		}
+	}
+	if (patchOut && filesChanged > 0) {
+		try {
+			await loom.postArtifact({ type: 'patch', uri: patchOut, filesChanged });
+			emit({ type: 'artifact_reported', artifact_type: 'patch', files_changed: filesChanged });
+		} catch (err) {
+			emit({ type: 'report_warning', op: 'postArtifact', error: errMessage(err) });
+		}
+	}
 }
 
 /**
