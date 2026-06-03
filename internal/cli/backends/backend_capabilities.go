@@ -50,6 +50,16 @@ type MetadataProvider interface {
 	Meta() BackendMeta
 }
 
+// LeadServerBackend is an optional interface for backends that run the
+// interactive lead agent against a long-lived server (multi-turn, resumable
+// conversation) rather than a one-shot interactive subprocess. The `loom lead`
+// command prefers InvokeLead over InvokeInteractive when a backend implements
+// it. prompt is the rendered lead system prompt; the backend seeds it and then
+// drives an interactive REPL bridged to stdin/stdout.
+type LeadServerBackend interface {
+	InvokeLead(workDir, prompt string) error
+}
+
 // HealthStatus describes the health and readiness of a backend.
 type HealthStatus struct {
 	Healthy   bool   `json:"healthy"`
@@ -87,6 +97,7 @@ type BackendCapabilities struct {
 	HasHealthCheck bool
 	HasConfig      bool
 	HasMeta        bool
+	HasLead        bool
 
 	Streaming StreamingBackend
 	Sessions  SessionAwareBackend
@@ -94,6 +105,7 @@ type BackendCapabilities struct {
 	Health    HealthCheckableBackend
 	Config    ConfigurableBackend
 	Meta      MetadataProvider
+	Lead      LeadServerBackend
 }
 
 // detectBinaryVersion runs "<binary> --version" and returns the first line of
@@ -143,6 +155,10 @@ func InspectCapabilities(b cli.Backend) BackendCapabilities {
 	if m, ok := b.(MetadataProvider); ok {
 		caps.HasMeta = true
 		caps.Meta = m
+	}
+	if l, ok := b.(LeadServerBackend); ok {
+		caps.HasLead = true
+		caps.Lead = l
 	}
 
 	return caps

@@ -61,6 +61,11 @@ export const KNOWN_BACKEND_DEFAULTS: Record<string, BackendDefaults> = {
     provider: "Anysphere",
     brandColor: "#00e5ff",
   },
+  flue: {
+    displayName: "Flue",
+    provider: "Flue",
+    brandColor: "#7c3aed",
+  },
   browser: {
     displayName: "Browser",
     provider: "System",

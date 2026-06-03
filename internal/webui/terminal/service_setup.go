@@ -90,6 +90,37 @@ var setupCommandSpecs = map[string]setupCommandSpec{
 			"configure": true,
 		},
 	},
+	// Flue is a managed Node runtime, not a global CLI: there's nothing to
+	// `npm -g install` or `login` to. loom bootstraps ~/.loom/flue
+	// automatically and uses your model-provider keys (or local `codex login`).
+	// The only meaningful check is that Node is present, so each action just
+	// verifies Node and explains flue's managed nature instead of running a
+	// (nonexistent) install/login command.
+	"flue": {
+		displayName: "Flue",
+		commands: map[string]string{
+			"install":   "node --version",
+			"login":     "node --version",
+			"configure": "node --version",
+			"test":      "node --version",
+		},
+		messages: map[string]string{
+			"install":   "Flue is a managed Node runtime — there's no global CLI to install. loom bootstraps ~/.loom/flue (npm install + build) automatically on first use; it just needs Node >= 22.18 on PATH (verified here).",
+			"login":     "Flue has no separate login. It uses your model-provider credentials (ANTHROPIC_API_KEY / OPENAI_API_KEY / OPENROUTER_API_KEY) or your local `codex login` auth automatically.",
+			"configure": "No Flue-specific configuration. Ensure a model-provider key is set, or that you're signed in via `codex login`.",
+			"test":      "Verifies Node is present; loom builds the flue project on the first agent run.",
+		},
+		titles: map[string]string{
+			"install":   "Flue runtime (Node)",
+			"login":     "Flue credentials",
+			"configure": "Flue credentials",
+		},
+		manual: map[string]bool{
+			"install":   true,
+			"login":     true,
+			"configure": true,
+		},
+	},
 }
 
 func setupCommandFor(backend, action string) (setupCommandSpec, string, error) {
