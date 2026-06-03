@@ -346,12 +346,23 @@ ModeCloud path — config, not new code). The deferred private-endpoint path add
   workspace router (store-backed; unit- + route-mount-tested against the
   in-memory store); the **SDK write methods are un-stubbed** to typed calls. Auth
   is currently dev-mode `X-Actor` (per the chosen "finish the old PRD" path).
-  **Remaining:** mint the scoped token in the supervisor at lease time (inject
-  `LOOM_TASKRUN_TOKEN` + `LOOM_FENCING_TOKEN`) and mount the fencing middleware on
-  the write routes; have the runner report usage/artifacts via the SDK; retire
-  `LOOMRUNNER` for the data plane. (The end-to-end Phase-C validations —
-  duplicate-runner fencing, lease-loss, no-orphan-reclaim — need the distributed
-  stack and are a gated runbook per the Definition of Done.)
+  The runner also **reports usage + the patch artifact via the SDK**
+  (best-effort, keeps `LOOMRUNNER`). The **token-minting primitive is wired to
+  the shared signing key** (`SigningKeyManager.MintTaskRunToken` /
+  `ValidateTaskRunTokenFromStore`): the fleet signing key lives in Redis (SET-NX
+  — first process creates, others reuse), so a token minted by one process
+  validates in another (proven by a cross-process miniredis test). This
+  dissolves the earlier "key distribution" blocker.
+  **Remaining (invocation wiring + stack validation):** decide WHERE mint is
+  called from — the daemon/supervisor (needs Redis access) vs a `loom serve`
+  mint endpoint — then inject `LOOM_TASKRUN_TOKEN` + `LOOM_FENCING_TOKEN` at
+  lease time and mount the fencing middleware on the write routes (deferred until
+  minting+injection lands, so the verified dev-mode write path isn't broken);
+  retire `LOOMRUNNER` for the data plane. The mint-location choice is a
+  daemon/serve topology decision that overlaps the v2 proposal's "facade vs
+  direct FleetDB" question. The end-to-end Phase-C validations (duplicate-runner
+  fencing → 409, lease-loss fail-closed, no-orphan-reclaim) need the distributed
+  stack and are a gated runbook per the Definition of Done.
 - **Phase D — Artifacts as source of truth.** *Pending.* Branch-push / upload +
   register refs; server-visible artifacts replace host patch-back as the
   contract (patch-back remains an opt-in local convenience). Unblocks Phase-4
