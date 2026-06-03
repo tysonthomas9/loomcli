@@ -48,10 +48,25 @@ type runnerInput struct {
 	FetchTask bool `json:"fetch_task,omitempty"`
 }
 
-// syncStrategyPatchBack is the only strategy implemented today: the runner
-// captures a binary-safe diff in the sandbox and loom applies it to the local
-// worktree. (Proposal also describes "branch-push" for server-scale operation.)
-const syncStrategyPatchBack = "patch-back"
+// Sync strategies for how a daytona-task result returns to loom:
+//   - patch-back (default): the runner captures a binary-safe diff; loom applies
+//     it to the local worktree and commits/pushes (host-side convenience).
+//   - branch-push (PRD Phase D): the runner commits + pushes the work as a
+//     branch to the remote and registers a server-visible "commit" Artifact via
+//     @loom/sdk; loom does not host-push (the branch is the source of truth).
+const (
+	syncStrategyPatchBack  = "patch-back"
+	syncStrategyBranchPush = "branch-push"
+)
+
+// resolveFlueSyncStrategy selects the result-sync strategy ("patch-back" default
+// | "branch-push") from LOOM_FLUE_SYNC.
+func resolveFlueSyncStrategy() string {
+	if strings.EqualFold(strings.TrimSpace(os.Getenv("LOOM_FLUE_SYNC")), syncStrategyBranchPush) {
+		return syncStrategyBranchPush
+	}
+	return syncStrategyPatchBack
+}
 
 // runnerEvent is one LOOMRUNNER NDJSON event line emitted by the runner.
 type runnerEvent struct {
@@ -129,7 +144,7 @@ func runFlueDaytonaTask(workDir, prompt, agentName string, shutdown <-chan struc
 	fmt.Println("")
 
 	res, runErr := flueRunnerExec(context.Background(), workDir, agentName, input, shutdown, collector)
-	recordSandboxMetadata(res, input.BaseRef)
+	recordSandboxMetadata(res, input.BaseRef, input.SyncStrategy)
 	if runErr != nil {
 		return runErr
 	}
@@ -143,13 +158,18 @@ func runFlueDaytonaTask(workDir, prompt, agentName string, shutdown <-chan struc
 	// Patch-sync: apply the remote changes back into the local worktree, then
 	// commit + push so the work lands "back in loom" the way a local agent's own
 	// git commit/push would (the remote agent can't touch the local repo).
+	// For branch-push the runner already pushed a server-visible branch and
+	// registered the artifact, so loom applies the patch as a local convenience
+	// but does NOT also push the worktree to origin (the branch is the contract).
 	if hasPatch(res.patchPath) {
 		if err := applyPatch(workDir, res.patchPath); err != nil {
 			return fmt.Errorf("flue daytona-task patch_apply_failed (sandbox %s retained): %w", res.sandboxID, err)
 		}
 		fmt.Printf("[loom] applied Daytona patch from sandbox %s into %s\n", res.sandboxID, workDir)
-		if err := pushWorktreeBack(workDir, agentName, res.sandboxID); err != nil {
-			fmt.Printf("[loom] warning: could not commit Daytona work back to loom: %v\n", err)
+		if input.SyncStrategy != syncStrategyBranchPush {
+			if err := pushWorktreeBack(workDir, agentName, res.sandboxID); err != nil {
+				fmt.Printf("[loom] warning: could not commit Daytona work back to loom: %v\n", err)
+			}
 		}
 	}
 	fmt.Printf("[loom] flue daytona-task complete (sandbox=%s remote_cwd=%s cleanup=%s)\n", res.sandboxID, res.remoteCwd, res.cleanup)
@@ -200,7 +220,7 @@ func deriveDaytonaInput(workDir, prompt, agentName string) (runnerInput, error) 
 		RepoBranch:    branch,
 		BaseRef:       baseRef,
 		TaskID:        agentName,
-		SyncStrategy:  syncStrategyPatchBack,
+		SyncStrategy:  resolveFlueSyncStrategy(),
 	}
 	// PRD Phase B: when loom serve is reachable (bootstrap present), the runner
 	// — which runs on the host — fetches the task content itself via @loom/sdk,
@@ -300,7 +320,7 @@ func buildSandboxPrompt(workDir, fallback string) string {
 // finalizer as soon as the sandbox ID is known — even on failure, so a retained
 // failed sandbox stays auditable (proposal: failed sandboxes are kept with
 // their ID in session metadata).
-func recordSandboxMetadata(res *runnerResult, baseRef string) {
+func recordSandboxMetadata(res *runnerResult, baseRef, syncStrategy string) {
 	if res == nil || res.sandboxID == "" {
 		return
 	}
@@ -309,7 +329,7 @@ func recordSandboxMetadata(res *runnerResult, baseRef string) {
 		SandboxID:    res.sandboxID,
 		RemoteCwd:    res.remoteCwd,
 		BaseRef:      baseRef,
-		SyncStrategy: syncStrategyPatchBack,
+		SyncStrategy: orDefault(syncStrategy, syncStrategyPatchBack),
 		Cleanup:      res.cleanup,
 	})
 }

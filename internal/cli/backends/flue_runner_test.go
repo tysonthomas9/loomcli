@@ -355,6 +355,39 @@ func TestDeriveDaytonaInput_ReadPath(t *testing.T) {
 	}
 }
 
+// TestResolveFlueSyncStrategy covers the LOOM_FLUE_SYNC toggle (PRD Phase D).
+func TestResolveFlueSyncStrategy(t *testing.T) {
+	t.Setenv("LOOM_FLUE_SYNC", "")
+	if got := resolveFlueSyncStrategy(); got != syncStrategyPatchBack {
+		t.Errorf("default = %q, want patch-back", got)
+	}
+	t.Setenv("LOOM_FLUE_SYNC", "branch-push")
+	if got := resolveFlueSyncStrategy(); got != syncStrategyBranchPush {
+		t.Errorf("= %q, want branch-push", got)
+	}
+	t.Setenv("LOOM_FLUE_SYNC", "Branch-Push")
+	if got := resolveFlueSyncStrategy(); got != syncStrategyBranchPush {
+		t.Errorf("case-insensitive: = %q, want branch-push", got)
+	}
+}
+
+// TestDeriveDaytonaInput_BranchPushStrategy verifies the runner input carries
+// the branch-push strategy when LOOM_FLUE_SYNC selects it.
+func TestDeriveDaytonaInput_BranchPushStrategy(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+	repo, _ := newGitRepoWithRemoteT(t)
+	t.Setenv("LOOM_FLUE_SYNC", "branch-push")
+	in, err := deriveDaytonaInput(repo, "do work", "nova")
+	if err != nil {
+		t.Fatalf("deriveDaytonaInput: %v", err)
+	}
+	if in.SyncStrategy != syncStrategyBranchPush {
+		t.Errorf("SyncStrategy = %q, want branch-push", in.SyncStrategy)
+	}
+}
+
 // TestSandboxReadPathAvailable checks the bootstrap-availability gate, including
 // resolving the workspace via either LOOM_WORKSPACE or LOOM_WORKSPACE_ID.
 func TestSandboxReadPathAvailable(t *testing.T) {

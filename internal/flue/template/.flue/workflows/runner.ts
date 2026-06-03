@@ -88,7 +88,11 @@ export async function run({ init, payload, env }: FlueContext) {
 			// 1. Hydrate the repo into the sandbox at `cwd`, checked out to base_ref.
 			if (p.repo_remote_url) {
 				const ref = p.base_ref || p.repo_branch || '';
-				await sh(sandbox, `git clone --no-single-branch ${shq(p.repo_remote_url)} ${shq(cwd)}`);
+				// Clone via a GITHUB_TOKEN-authenticated URL so a private remote is
+				// reachable from the credential-less sandbox; the repo_hydrated event
+				// below keeps the clean (token-free) URL.
+				const cloneToken = env.GITHUB_TOKEN ?? process.env.GITHUB_TOKEN;
+				await sh(sandbox, `git clone --no-single-branch ${shq(authPushUrl(p.repo_remote_url, cloneToken))} ${shq(cwd)}`);
 				let effectiveRef = ref;
 				if (ref) {
 					// base_ref is the local worktree HEAD; it may carry local-only
@@ -134,6 +138,14 @@ export async function run({ init, payload, env }: FlueContext) {
 			if (p.patch_out) {
 				await writeFile(p.patch_out, patch);
 				emit({ type: 'patch_ready', path: p.patch_out, files_changed: filesChanged });
+			}
+
+			// 3a. Branch-push (PRD Phase D): commit the agent's work and push it as a
+			//     branch to the remote, then register a "commit" Artifact — so the
+			//     result is server-visible without host patch-back. Gated on
+			//     sync_strategy; the patch above stays an opt-in local convenience.
+			if (p.sync_strategy === 'branch-push' && p.repo_remote_url && filesChanged > 0) {
+				await pushResultBranch(sandbox, cwd, p, env, filesChanged, loom);
 			}
 
 			// 3b. Report results to loom serve via @loom/sdk (PRD Phase C) when the
@@ -266,6 +278,47 @@ async function reportToLoom(
  * loom's Go-side buildSandboxPrompt body so the SDK read path and the inlined
  * fallback produce equivalent instructions.
  */
+/**
+ * Push the agent's work as a branch to the remote and register a "commit"
+ * Artifact via the SDK (PRD Phase D). Commits with a loom identity; pushes via a
+ * GITHUB_TOKEN-authenticated URL when available so a fresh sandbox (no host
+ * creds) can write to a private remote.
+ */
+async function pushResultBranch(
+	sandbox: { id: string; process: { executeCommand: (c: string) => Promise<{ result?: string; exitCode?: number }> } },
+	cwd: string,
+	p: RunnerInput,
+	env: Record<string, string | undefined>,
+	filesChanged: number,
+	loom: TaskRunClient | null,
+): Promise<void> {
+	const remote = p.repo_remote_url ?? '';
+	const safeTask = (p.task_id || 'run').replace(/[^A-Za-z0-9._-]/g, '-');
+	const branch = `loom/${safeTask}-${sandbox.id.slice(0, 8)}`;
+	// step 3 already staged everything (`git add -A`); commit it with a loom identity.
+	await sh(sandbox, `cd ${shq(cwd)} && git -c user.name=loom -c user.email=loom@localhost commit -q -m ${shq('loom: ' + safeTask)} || true`);
+	const sha = (await sh(sandbox, `cd ${shq(cwd)} && git rev-parse HEAD`)).trim();
+	const token = env.GITHUB_TOKEN ?? process.env.GITHUB_TOKEN;
+	await sh(sandbox, `cd ${shq(cwd)} && git push ${shq(authPushUrl(remote, token))} HEAD:refs/heads/${branch}`);
+	const ref = `${remote}#${branch}@${sha}`;
+	emit({ type: 'branch_pushed', branch, commit: sha, remote });
+	if (loom) {
+		try {
+			await loom.postArtifact({ type: 'commit', uri: ref, summary: `branch ${branch}`, filesChanged });
+			emit({ type: 'artifact_reported', artifact_type: 'commit', files_changed: filesChanged });
+		} catch (err) {
+			emit({ type: 'report_warning', op: 'postArtifact(commit)', error: errMessage(err) });
+		}
+	}
+}
+
+/** Inject a GITHUB_TOKEN into an https GitHub remote so a credential-less sandbox can push. */
+function authPushUrl(remote: string, token: string | undefined): string {
+	if (!token) return remote;
+	const m = remote.match(/^https:\/\/(github\.com\/.+)$/);
+	return m ? `https://x-access-token:${token}@${m[1]}` : remote;
+}
+
 function renderTaskBody(task: Task): string {
 	const parts: string[] = [`Implement task ${task.id}: ${task.title}`];
 	if (task.description) parts.push(`Description:\n${task.description}`);
