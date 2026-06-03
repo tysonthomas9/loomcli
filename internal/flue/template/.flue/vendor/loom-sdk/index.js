@@ -551,6 +551,18 @@ var TaskRunClient = class _TaskRunClient {
   get path() {
     return { ws: this.bootstrap.workspace, id: this.bootstrap.taskId };
   }
+  /** Path params for session-scoped writes; requires bootstrap.sessionId. */
+  sessionPath() {
+    const sessionId = this.bootstrap.sessionId;
+    if (!sessionId) {
+      throw new TaskRunError(
+        "session",
+        void 0,
+        "bootstrap.sessionId (LOOM_SESSION_ID) is required for session writes"
+      );
+    }
+    return { ws: this.bootstrap.workspace, sessionId };
+  }
   /** Phase B: fetch the task's title/description/design/acceptance criteria. */
   async getTask() {
     const { data, error, response } = await this.http.GET(
@@ -597,34 +609,54 @@ var TaskRunClient = class _TaskRunClient {
     const tag = opts.errorClass ? ` [${opts.errorClass}]` : "";
     await this.comment(`run failed${tag}: ${opts.reason ?? "see logs"}`);
   }
-  // ── Phase C/D: pending loom-serve write surface + scoped-token/fencing auth ──
-  /** Register a result artifact (commit/patch/log) on the TaskRun. */
-  async postArtifact(_artifact) {
-    throw new NotImplementedError(
-      "postArtifact",
-      "needs a loom-serve artifact endpoint on the AgentSession/TaskRun (PRD Phase D)"
+  // ── Phase C: session write path (loom-serve endpoints; fencing-gated) ────────
+  /** Register a result artifact (patch/commit/log/…) on the TaskRun session. */
+  async postArtifact(artifact) {
+    const { error, response } = await this.http.POST(
+      "/api/workspaces/{ws}/sessions/{sessionId}/artifacts",
+      {
+        params: { path: this.sessionPath() },
+        body: {
+          type: artifact.type,
+          uri: artifact.uri,
+          summary: artifact.summary,
+          files_changed: artifact.filesChanged
+        }
+      }
     );
+    if (error) throw this.toError("postArtifact", response, error);
   }
-  /** Stream token usage to the control plane. */
-  async recordUsage(_usage) {
-    throw new NotImplementedError(
-      "recordUsage",
-      "needs a loom-serve usage endpoint (PRD Phase C)"
+  /** Record token usage for the TaskRun session. */
+  async recordUsage(usage) {
+    const { error, response } = await this.http.POST(
+      "/api/workspaces/{ws}/sessions/{sessionId}/usage",
+      {
+        params: { path: this.sessionPath() },
+        body: {
+          input_tokens: usage.inputTokens,
+          output_tokens: usage.outputTokens,
+          cache_read_tokens: usage.cacheReadTokens,
+          cache_write_tokens: usage.cacheWriteTokens
+        }
+      }
     );
+    if (error) throw this.toError("recordUsage", response, error);
   }
-  /** Append a log line to the TaskRun's server-visible log. */
-  async appendLog(_log) {
-    throw new NotImplementedError(
-      "appendLog",
-      "needs a loom-serve log-append endpoint (PRD Phase C)"
+  /** Append a log line to the TaskRun session's server-visible log. */
+  async appendLog(log) {
+    const { error, response } = await this.http.POST(
+      "/api/workspaces/{ws}/sessions/{sessionId}/logs",
+      { params: { path: this.sessionPath() }, body: { stream: log.stream, text: log.text } }
     );
+    if (error) throw this.toError("appendLog", response, error);
   }
-  /** Keep the lease alive (refreshes the scoped token TTL). */
+  /** Heartbeat the session to keep its lease alive (also refreshes the token TTL). */
   async heartbeat() {
-    throw new NotImplementedError(
-      "heartbeat",
-      "needs a loom-serve session-heartbeat endpoint + lease/fencing (PRD Phase C)"
+    const { error, response } = await this.http.POST(
+      "/api/workspaces/{ws}/sessions/{sessionId}/heartbeat",
+      { params: { path: this.sessionPath() } }
     );
+    if (error) throw this.toError("heartbeat", response, error);
   }
   toError(op, response, body) {
     if (response?.status === 409) return new FencedError(op, body);

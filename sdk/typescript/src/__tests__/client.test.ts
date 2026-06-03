@@ -1,10 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { FencedError, NotImplementedError, TaskRunClient } from "../client.js";
+import { FencedError, TaskRunClient, TaskRunError } from "../client.js";
 
 const bootstrap = {
   serverUrl: "https://loom.example.com",
   workspace: "DEMO",
   taskId: "DEMO-1",
+  sessionId: "sess-1",
   token: "tok",
   fencingToken: "7",
   actor: "loom-dev",
@@ -70,14 +71,72 @@ describe("TaskRunClient", () => {
     );
   });
 
-  it("Phase C/D methods throw NotImplementedError", async () => {
+  it("postArtifact POSTs the artifact to the session endpoint", async () => {
+    stubFetch(async (req) => {
+      expect(req.method).toBe("POST");
+      expect(new URL(req.url).pathname).toBe("/api/workspaces/DEMO/sessions/sess-1/artifacts");
+      await expect(req.json()).resolves.toEqual({
+        type: "patch",
+        uri: "/tmp/x.patch",
+        summary: "did X",
+        files_changed: 3,
+      });
+      return json({ success: true, data: { artifact_id: "a1", type: "patch", uri: "/tmp/x.patch" } }, 201);
+    });
+    await TaskRunClient.fromBootstrap(bootstrap).postArtifact({
+      type: "patch",
+      uri: "/tmp/x.patch",
+      summary: "did X",
+      filesChanged: 3,
+    });
+  });
+
+  it("recordUsage POSTs snake_case usage to the session endpoint", async () => {
+    stubFetch(async (req) => {
+      expect(new URL(req.url).pathname).toBe("/api/workspaces/DEMO/sessions/sess-1/usage");
+      await expect(req.json()).resolves.toEqual({
+        input_tokens: 100,
+        output_tokens: 20,
+        cache_read_tokens: 5,
+        cache_write_tokens: 2,
+      });
+      return json({ success: true });
+    });
+    await TaskRunClient.fromBootstrap(bootstrap).recordUsage({
+      inputTokens: 100,
+      outputTokens: 20,
+      cacheReadTokens: 5,
+      cacheWriteTokens: 2,
+    });
+  });
+
+  it("appendLog POSTs the log line; heartbeat POSTs to the heartbeat endpoint", async () => {
+    const seen: string[] = [];
+    stubFetch((req) => {
+      seen.push(new URL(req.url).pathname);
+      return json({ success: true }, 202);
+    });
     const run = TaskRunClient.fromBootstrap(bootstrap);
-    await expect(run.heartbeat()).rejects.toBeInstanceOf(NotImplementedError);
-    await expect(run.recordUsage({ inputTokens: 1, outputTokens: 2 })).rejects.toBeInstanceOf(
-      NotImplementedError,
+    await run.appendLog({ stream: "stdout", text: "hi" });
+    await run.heartbeat();
+    expect(seen).toEqual([
+      "/api/workspaces/DEMO/sessions/sess-1/logs",
+      "/api/workspaces/DEMO/sessions/sess-1/heartbeat",
+    ]);
+  });
+
+  it("session writes require a sessionId in the bootstrap", async () => {
+    const { sessionId, ...noSession } = bootstrap;
+    void sessionId;
+    await expect(TaskRunClient.fromBootstrap(noSession).heartbeat()).rejects.toBeInstanceOf(
+      TaskRunError,
     );
-    await expect(run.postArtifact({ type: "patch", uri: "/tmp/x.patch" })).rejects.toBeInstanceOf(
-      NotImplementedError,
-    );
+  });
+
+  it("maps a 409 on a write to FencedError", async () => {
+    stubFetch(() => json({ error: "stale fencing token" }, 409));
+    await expect(
+      TaskRunClient.fromBootstrap(bootstrap).postArtifact({ type: "patch", uri: "/tmp/x" }),
+    ).rejects.toBeInstanceOf(FencedError);
   });
 });

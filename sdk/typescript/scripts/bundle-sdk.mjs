@@ -153,9 +153,9 @@ export class TaskRunClient {
   block(reason: string): Promise<void>;
   complete(opts?: { reason?: string }): Promise<void>;
   fail(opts?: { errorClass?: string; reason?: string }): Promise<void>;
-  postArtifact(artifact: ArtifactInput): Promise<never>;
-  recordUsage(usage: UsageInput): Promise<never>;
-  appendLog(log: LogInput): Promise<never>;
-  heartbeat(): Promise<never>;
+  postArtifact(artifact: ArtifactInput): Promise<void>;
+  recordUsage(usage: UsageInput): Promise<void>;
+  appendLog(log: LogInput): Promise<void>;
+  heartbeat(): Promise<void>;
 }
 `;

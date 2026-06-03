@@ -443,6 +443,74 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/workspaces/{ws}/sessions/{sessionId}/artifacts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Register a result artifact (patch/commit/log/…) on a TaskRun session */
+        post: operations["postSessionArtifact"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/workspaces/{ws}/sessions/{sessionId}/usage": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Record token usage for a TaskRun session */
+        post: operations["recordSessionUsage"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/workspaces/{ws}/sessions/{sessionId}/logs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Append a log line to a TaskRun session */
+        post: operations["appendSessionLog"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/workspaces/{ws}/sessions/{sessionId}/heartbeat": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Heartbeat a TaskRun session to keep its lease alive */
+        post: operations["heartbeatSession"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/workspaces/{ws}/issues/{id}/dependencies": {
         parameters: {
             query?: never;
@@ -2180,6 +2248,44 @@ export interface components {
         CommentRequest: {
             text: string;
         };
+        ArtifactRequest: {
+            /** @description patch | commit | log | test | transcript | usage | … */
+            type: string;
+            uri: string;
+            summary?: string;
+            files_changed?: number;
+        };
+        ArtifactRecord: {
+            artifact_id: string;
+            session_id?: string;
+            task_id?: string;
+            type: string;
+            uri: string;
+            summary?: string;
+            /** Format: date-time */
+            created_at?: string;
+        };
+        UsageRequest: {
+            /** Format: int64 */
+            input_tokens: number;
+            /** Format: int64 */
+            output_tokens: number;
+            /** Format: int64 */
+            cache_read_tokens?: number;
+            /** Format: int64 */
+            cache_write_tokens?: number;
+        };
+        LogRequest: {
+            /** @enum {string} */
+            stream: "stdout" | "stderr";
+            text: string;
+        };
+        SessionHeartbeat: {
+            session_id?: string;
+            /** Format: date-time */
+            last_heartbeat?: string;
+            status?: string;
+        };
         AddDependencyRequest: {
             depends_on_id: string;
             dep_type?: string;
@@ -2763,6 +2869,8 @@ export interface components {
         WorkspaceId: string;
         /** @description Issue identifier */
         IssueId: string;
+        /** @description AgentSession (TaskRun) identifier */
+        SessionId: string;
         /** @description Agent worktree name */
         AgentName: string;
     };
@@ -3810,6 +3918,233 @@ export interface operations {
             };
             /** @description Issue not found */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    postSessionArtifact: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Workspace identifier */
+                ws: components["parameters"]["WorkspaceId"];
+                /** @description AgentSession (TaskRun) identifier */
+                sessionId: components["parameters"]["SessionId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ArtifactRequest"];
+            };
+        };
+        responses: {
+            /** @description Artifact registered */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        success: boolean;
+                        data?: components["schemas"]["ArtifactRecord"];
+                    };
+                };
+            };
+            /** @description Invalid artifact */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Token not scoped to this session */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Session not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Stale fencing token */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    recordSessionUsage: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Workspace identifier */
+                ws: components["parameters"]["WorkspaceId"];
+                /** @description AgentSession (TaskRun) identifier */
+                sessionId: components["parameters"]["SessionId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UsageRequest"];
+            };
+        };
+        responses: {
+            /** @description Usage recorded */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        success: boolean;
+                    };
+                };
+            };
+            /** @description Invalid usage */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Token not scoped to this session */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Session not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Stale fencing token */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    appendSessionLog: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Workspace identifier */
+                ws: components["parameters"]["WorkspaceId"];
+                /** @description AgentSession (TaskRun) identifier */
+                sessionId: components["parameters"]["SessionId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LogRequest"];
+            };
+        };
+        responses: {
+            /** @description Log accepted */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        success: boolean;
+                    };
+                };
+            };
+            /** @description Invalid log entry */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Token not scoped to this session */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Session not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Stale fencing token */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    heartbeatSession: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Workspace identifier */
+                ws: components["parameters"]["WorkspaceId"];
+                /** @description AgentSession (TaskRun) identifier */
+                sessionId: components["parameters"]["SessionId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Heartbeat recorded */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        success: boolean;
+                        data?: components["schemas"]["SessionHeartbeat"];
+                    };
+                };
+            };
+            /** @description Token not scoped to this session */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Session not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Stale fencing token */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };
