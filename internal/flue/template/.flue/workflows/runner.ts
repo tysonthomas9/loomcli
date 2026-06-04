@@ -80,6 +80,10 @@ export async function run({ init, payload, env }: FlueContext) {
 	emit({ type: 'runner_started', sandbox: p.sandbox, task_id: p.task_id });
 
 	if (p.sandbox === 'daytona-task') {
+		// Pick the result-sync strategy up front (TS-owned — see SYNC_STRATEGIES)
+		// and pre-flight it before spending a sandbox on a misconfigured run.
+		const strategy = selectSyncStrategy(p);
+		strategy.validate?.(p);
 		const key = env.DAYTONA_API_KEY?.trim();
 		if (!key) throw new Error('runner: DAYTONA_API_KEY is required for sandbox=daytona-task');
 
@@ -92,9 +96,12 @@ export async function run({ init, payload, env }: FlueContext) {
 		emit({ type: 'sandbox_created', provider: 'daytona', sandbox_id: sandbox.id, cwd });
 
 		try {
-			// 1. Hydrate the repo into the sandbox at `cwd`, checked out to base_ref.
+			// 1. Hydrate the repo into the sandbox at `cwd`, checked out to the
+			//    strategy's ref (default base_ref). `diffBase` is whatever we
+			//    actually checked out, so step 3 diffs against a ref present here.
+			let diffBase = '';
 			if (p.repo_remote_url) {
-				const ref = p.base_ref || p.repo_branch || '';
+				const ref = strategy.hydrateRef?.(p) || p.base_ref || p.repo_branch || '';
 				// Clone via a GITHUB_TOKEN-authenticated URL so a private remote is
 				// reachable from the credential-less sandbox; the repo_hydrated event
 				// below keeps the clean (token-free) URL.
@@ -112,6 +119,7 @@ export async function run({ init, payload, env }: FlueContext) {
 						emit({ type: 'hydrate_warning', base_ref: ref, message: 'base_ref not present on remote; working from default-branch HEAD', detail: co.output.slice(0, 200) });
 					}
 				}
+				diffBase = effectiveRef;
 				const commit = (await sh(sandbox, `cd ${shq(cwd)} && git rev-parse HEAD`)).trim();
 				emit({ type: 'repo_hydrated', remote: p.repo_remote_url, ref: effectiveRef, commit });
 			} else {
@@ -141,30 +149,16 @@ export async function run({ init, payload, env }: FlueContext) {
 			//    deletes — so nothing the agent did in the sandbox is lost. Diffing
 			//    against working-tree-vs-index would miss anything it committed.
 			await sh(sandbox, `cd ${shq(cwd)} && git add -A`);
-			const diffCmd = p.base_ref
-				? `git diff --binary --full-index --no-ext-diff ${shq(p.base_ref)}`
+			const diffCmd = diffBase
+				? `git diff --binary --full-index --no-ext-diff ${shq(diffBase)}`
 				: `git diff --binary --full-index --no-ext-diff --cached`;
 			const patch = await sh(sandbox, `cd ${shq(cwd)} && ${diffCmd} || true`);
 			const filesChanged = countDiffFiles(patch);
-			if (p.patch_out) {
-				await writeFile(p.patch_out, patch);
-				emit({ type: 'patch_ready', path: p.patch_out, files_changed: filesChanged });
-			}
 
-			// 3a. Branch-push (PRD Phase D): commit the agent's work and push it as a
-			//     branch to the remote, then register a "commit" Artifact — so the
-			//     result is server-visible without host patch-back. Gated on
-			//     sync_strategy; the patch above stays an opt-in local convenience.
-			if (p.sync_strategy === 'branch-push' && p.repo_remote_url && filesChanged > 0) {
-				await pushResultBranch(sandbox, cwd, p, env, filesChanged, loom);
-			}
-
-			// 3a-epic: commit the work onto a SHARED epic branch (each epic task
-			//     builds on the previous one), pushing back to it. Sibling of
-			//     branch-push — both coexist; LOOM_FLUE_SYNC picks one.
-			if (p.sync_strategy === 'epic-branch' && p.repo_remote_url && p.epic_branch && filesChanged > 0) {
-				await commitToEpicBranch(sandbox, cwd, p, env, filesChanged, loom);
-			}
+			// 3a. Hand the result to the selected sync strategy (TS-owned):
+			//     patch-back writes the patch for loom to apply host-side;
+			//     branch-push / epic-branch commit + push to the remote.
+			await strategy.sync({ sandbox, cwd, p, env, filesChanged, patch, loom });
 
 			// 3b. Report results to loom serve via @loom/sdk (PRD Phase C) when the
 			//     bootstrap is present. Best-effort: the work is already captured as a
@@ -331,11 +325,82 @@ function startHeartbeat(loom: TaskRunClient | null): () => void {
 	return () => clearInterval(timer);
 }
 
+/** Structural handle for a Daytona sandbox — just what the git helpers need. */
+type SandboxLike = { id: string; process: { executeCommand: (c: string) => Promise<{ result?: string; exitCode?: number }> } };
+
 /**
- * Format a server-fetched task into the sandbox agent's prompt body. Mirrors
- * loom's Go-side buildSandboxPrompt body so the SDK read path and the inlined
- * fallback produce equivalent instructions.
+ * A daytona-task SYNC STRATEGY owns how the agent's result leaves the sandbox
+ * (and, optionally, which ref the sandbox is hydrated from). The whole set lives
+ * here in TypeScript — add or customize one by editing SYNC_STRATEGIES below.
+ * loom (Go) forwards the chosen name + options verbatim and never interprets
+ * them, so a new strategy needs zero Go changes.
  */
+interface SyncContext {
+	sandbox: SandboxLike;
+	cwd: string;
+	p: RunnerInput;
+	env: Record<string, string | undefined>;
+	filesChanged: number;
+	patch: string;
+	loom: TaskRunClient | null;
+}
+
+interface SyncStrategy {
+	/** Fail-fast pre-flight, before a sandbox is even created. */
+	validate?(p: RunnerInput): void;
+	/** Which ref to clone/checkout into the sandbox; undefined → base_ref. */
+	hydrateRef?(p: RunnerInput): string | undefined;
+	/** Sync the staged result out of the sandbox (called after `git add -A`). */
+	sync(ctx: SyncContext): Promise<void>;
+}
+
+const SYNC_STRATEGIES: Record<string, SyncStrategy> = {
+	// patch-back (default): hand the captured diff to loom, which applies it to
+	// the host worktree. That host apply is the ONE step that must stay loom-side
+	// (only the host process owns that worktree); everything else is here.
+	'patch-back': {
+		async sync({ p, patch, filesChanged }) {
+			if (!p.patch_out) return;
+			await writeFile(p.patch_out, patch);
+			emit({ type: 'patch_ready', path: p.patch_out, files_changed: filesChanged });
+		},
+	},
+	// branch-push (PRD Phase D): commit + push the work as a per-task branch and
+	// register a server-visible "commit" artifact. The branch is the contract —
+	// loom writes no host patch.
+	'branch-push': {
+		async sync(ctx) {
+			if (ctx.p.repo_remote_url && ctx.filesChanged > 0) {
+				await pushResultBranch(ctx.sandbox, ctx.cwd, ctx.p, ctx.env, ctx.filesChanged, ctx.loom);
+			}
+		},
+	},
+	// epic-branch: commit the work onto a SHARED epic branch so an epic's tasks
+	// accumulate on one integration branch; the sandbox is hydrated from the epic
+	// tip (hydrateRef) so each task builds on the previous one's commit.
+	'epic-branch': {
+		validate(p) {
+			if (!p.epic_branch?.trim()) throw new Error('epic-branch: epic_branch (LOOM_FLUE_EPIC_BRANCH) is required');
+		},
+		hydrateRef: (p) => p.epic_branch?.trim() || undefined,
+		async sync(ctx) {
+			if (ctx.p.repo_remote_url && ctx.filesChanged > 0) {
+				await commitToEpicBranch(ctx.sandbox, ctx.cwd, ctx.p, ctx.env, ctx.filesChanged, ctx.loom, ctx.p.epic_branch!.trim());
+			}
+		},
+	},
+};
+
+/** Select the sync strategy by name (default patch-back); unknown → clear error. */
+function selectSyncStrategy(p: RunnerInput): SyncStrategy {
+	const name = (p.sync_strategy || 'patch-back').trim().toLowerCase() || 'patch-back';
+	const strategy = SYNC_STRATEGIES[name];
+	if (!strategy) {
+		throw new Error(`runner: unknown sync_strategy '${name}' (known: ${Object.keys(SYNC_STRATEGIES).join(', ')})`);
+	}
+	return strategy;
+}
+
 /**
  * Push the agent's work as a branch to the remote and register a "commit"
  * Artifact via the SDK (PRD Phase D). Commits with a loom identity; pushes via a
@@ -343,7 +408,7 @@ function startHeartbeat(loom: TaskRunClient | null): () => void {
  * creds) can write to a private remote.
  */
 async function pushResultBranch(
-	sandbox: { id: string; process: { executeCommand: (c: string) => Promise<{ result?: string; exitCode?: number }> } },
+	sandbox: SandboxLike,
 	cwd: string,
 	p: RunnerInput,
 	env: Record<string, string | undefined>,
@@ -381,15 +446,15 @@ async function pushResultBranch(
  * (per-task branch) — both strategies coexist; LOOM_FLUE_SYNC picks one.
  */
 async function commitToEpicBranch(
-	sandbox: { id: string; process: { executeCommand: (c: string) => Promise<{ result?: string; exitCode?: number }> } },
+	sandbox: SandboxLike,
 	cwd: string,
 	p: RunnerInput,
 	env: Record<string, string | undefined>,
 	filesChanged: number,
 	loom: TaskRunClient | null,
+	branch: string,
 ): Promise<void> {
 	const remote = p.repo_remote_url ?? '';
-	const branch = p.epic_branch ?? '';
 	const safeTask = (p.task_id || 'run').replace(/[^A-Za-z0-9._-]/g, '-');
 	const token = env.GITHUB_TOKEN ?? process.env.GITHUB_TOKEN;
 	const auth = gitAuthArgs(remote, token);

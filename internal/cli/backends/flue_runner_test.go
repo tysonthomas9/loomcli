@@ -162,33 +162,36 @@ func TestRunFlueDaytonaTask_SyncsPatchBack(t *testing.T) {
 	}
 }
 
-// TestDeriveDaytonaInput_EpicBranch verifies the epic-branch strategy: the
-// runner is told to work from + push to the shared epic branch (not the local
-// HEAD), and a missing LOOM_FLUE_EPIC_BRANCH fails fast.
+// TestDeriveDaytonaInput_EpicBranch verifies loom FORWARDS the epic-branch
+// strategy + branch verbatim and stays agnostic: it does NOT override base_ref
+// to the epic branch and does NOT validate the branch name — that logic lives in
+// the runner (runner.ts SYNC_STRATEGIES), which hydrates from the epic tip.
 func TestDeriveDaytonaInput_EpicBranch(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git not available")
 	}
 	repo, _ := newGitRepoWithRemoteT(t)
+	localHead := gitT(t, repo, "rev-parse", "HEAD")
 	t.Setenv("LOOM_FLUE_SYNC", "epic-branch")
-
-	// epic-branch without a branch name → error.
-	t.Setenv("LOOM_FLUE_EPIC_BRANCH", "")
-	if _, err := deriveDaytonaInput(repo, "do work", "nova"); err == nil || !strings.Contains(err.Error(), "LOOM_FLUE_EPIC_BRANCH") {
-		t.Fatalf("expected a LOOM_FLUE_EPIC_BRANCH error, got %v", err)
-	}
-
-	// With a branch → epic fields set; the sandbox clones/works from the epic tip.
 	t.Setenv("LOOM_FLUE_EPIC_BRANCH", "loom/epic-x")
+
 	in, err := deriveDaytonaInput(repo, "do work", "nova")
 	if err != nil {
 		t.Fatalf("deriveDaytonaInput: %v", err)
 	}
-	if in.SyncStrategy != syncStrategyEpicBranch {
-		t.Errorf("sync_strategy = %q, want epic-branch", in.SyncStrategy)
+	if in.SyncStrategy != syncStrategyEpicBranch || in.EpicBranch != "loom/epic-x" {
+		t.Errorf("forward = %q/%q, want epic-branch / loom/epic-x", in.SyncStrategy, in.EpicBranch)
 	}
-	if in.EpicBranch != "loom/epic-x" || in.BaseRef != "loom/epic-x" || in.RepoBranch != "loom/epic-x" {
-		t.Errorf("epic/base/branch = %q/%q/%q, want all loom/epic-x", in.EpicBranch, in.BaseRef, in.RepoBranch)
+	// base_ref/repo_branch stay the LOCAL git state — loom must not reinterpret
+	// them for the epic strategy (the runner decides to hydrate from the epic tip).
+	if in.BaseRef != localHead {
+		t.Errorf("base_ref = %q, want the local HEAD %q (not overridden to the epic branch)", in.BaseRef, localHead)
+	}
+
+	// Missing branch name is NOT a loom error anymore — the runner validates it.
+	t.Setenv("LOOM_FLUE_EPIC_BRANCH", "")
+	if _, err := deriveDaytonaInput(repo, "do work", "nova"); err != nil {
+		t.Errorf("loom should not validate the epic branch; got error %v", err)
 	}
 }
 
@@ -403,6 +406,12 @@ func TestResolveFlueSyncStrategy(t *testing.T) {
 	if got := resolveFlueSyncStrategy(); got != syncStrategyEpicBranch {
 		t.Errorf("= %q, want epic-branch", got)
 	}
+	// loom is strategy-agnostic: an unknown name passes through verbatim (lower-
+	// cased) so a runner-only strategy needs no Go change. The runner validates it.
+	t.Setenv("LOOM_FLUE_SYNC", "Some-Future-Strategy")
+	if got := resolveFlueSyncStrategy(); got != "some-future-strategy" {
+		t.Errorf("verbatim passthrough = %q, want some-future-strategy", got)
+	}
 }
 
 // TestDeriveDaytonaInput_BranchPushStrategy verifies the runner input carries
@@ -424,10 +433,14 @@ func TestDeriveDaytonaInput_BranchPushStrategy(t *testing.T) {
 
 func TestFlueCloseTaskEnabled(t *testing.T) {
 	t.Setenv("LOOM_FLUE_CLOSE_TASK", "")
-	if !flueCloseTaskEnabled() { t.Error("default should be enabled") }
+	if !flueCloseTaskEnabled() {
+		t.Error("default should be enabled")
+	}
 	for _, v := range []string{"0", "false", "no", "off", "OFF"} {
 		t.Setenv("LOOM_FLUE_CLOSE_TASK", v)
-		if flueCloseTaskEnabled() { t.Errorf("%q should disable close", v) }
+		if flueCloseTaskEnabled() {
+			t.Errorf("%q should disable close", v)
+		}
 	}
 }
 
