@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/olesho/harness-wrapper/pkg/wrapper"
 	"github.com/tysonthomas9/loomcli/internal/agenterr"
 	cfgpkg "github.com/tysonthomas9/loomcli/internal/cli/config"
 	"github.com/tysonthomas9/loomcli/internal/events"
@@ -129,7 +130,7 @@ func TestComputeBackoff(t *testing.T) {
 	t.Run("rate limited uses rate_limit_backoff as initial", func(t *testing.T) {
 		ap := &AgentProcess{
 			RateRetryCount: 0,
-			LastError:      &agenterr.AgentError{Class: agenterr.RateLimited},
+			LastError:      &agenterr.AgentError{Class: agenterr.OutcomeFromHarness(wrapper.ErrRateLimited)},
 		}
 		backoff := s.computeBackoff(ap)
 
@@ -144,7 +145,7 @@ func TestComputeBackoff(t *testing.T) {
 		ap := &AgentProcess{
 			RateRetryCount: 0,
 			LastError: &agenterr.AgentError{
-				Class:      agenterr.RateLimited,
+				Class:      agenterr.OutcomeFromHarness(wrapper.ErrRateLimited),
 				RetryAfter: 60 * time.Second,
 			},
 		}
@@ -161,7 +162,7 @@ func TestComputeBackoff(t *testing.T) {
 		ap := &AgentProcess{
 			RateRetryCount: 0,
 			LastError: &agenterr.AgentError{
-				Class:      agenterr.RateLimited,
+				Class:      agenterr.OutcomeFromHarness(wrapper.ErrRateLimited),
 				RetryAfter: 600 * time.Second, // 10 minutes
 			},
 		}
@@ -177,7 +178,7 @@ func TestComputeBackoff(t *testing.T) {
 	t.Run("rate limited exponential growth", func(t *testing.T) {
 		ap := &AgentProcess{
 			RateRetryCount: 2,
-			LastError:      &agenterr.AgentError{Class: agenterr.RateLimited},
+			LastError:      &agenterr.AgentError{Class: agenterr.OutcomeFromHarness(wrapper.ErrRateLimited)},
 		}
 		backoff := s.computeBackoff(ap)
 
@@ -191,7 +192,7 @@ func TestComputeBackoff(t *testing.T) {
 	t.Run("timeout uses timeout_backoff as initial", func(t *testing.T) {
 		ap := &AgentProcess{
 			RestartCount: 0,
-			LastError:    &agenterr.AgentError{Class: agenterr.Timeout},
+			LastError:    &agenterr.AgentError{Class: agenterr.OutcomeFromHarness(wrapper.ErrTimeout)},
 		}
 		backoff := s.computeBackoff(ap)
 
@@ -205,7 +206,7 @@ func TestComputeBackoff(t *testing.T) {
 	t.Run("transient uses standard backoff_initial", func(t *testing.T) {
 		ap := &AgentProcess{
 			RestartCount: 0,
-			LastError:    &agenterr.AgentError{Class: agenterr.Transient},
+			LastError:    &agenterr.AgentError{Class: agenterr.OutcomeFromHarness(wrapper.ErrTransient)},
 		}
 		backoff := s.computeBackoff(ap)
 
@@ -233,7 +234,7 @@ func TestComputeBackoff(t *testing.T) {
 	t.Run("NoWork uses fixed no_work_backoff", func(t *testing.T) {
 		ap := &AgentProcess{
 			RestartCount: 5, // should be irrelevant
-			LastError:    &agenterr.AgentError{Class: agenterr.NoWork},
+			LastError:    &agenterr.AgentError{Class: agenterr.OutcomeFromDomain(agenterr.NoWorkOutcome)},
 		}
 		backoff := s.computeBackoff(ap)
 
@@ -406,7 +407,7 @@ func TestShouldRestart(t *testing.T) {
 			RestartCount: 0,
 			LastExitCode: 1,
 			LastStart:    time.Now().Add(-2 * time.Minute),
-			LastError:    &agenterr.AgentError{Class: agenterr.AuthFailure, Message: "invalid API key"},
+			LastError:    &agenterr.AgentError{Class: agenterr.OutcomeFromHarness(wrapper.ErrAuth), Message: "invalid API key"},
 		}
 
 		result := s.shouldRestart(ap)
@@ -432,7 +433,7 @@ func TestShouldRestart(t *testing.T) {
 			RestartCount: 0,
 			LastExitCode: 1,
 			LastStart:    time.Now().Add(-2 * time.Minute),
-			LastError:    &agenterr.AgentError{Class: agenterr.BillingError, Message: "payment required"},
+			LastError:    &agenterr.AgentError{Class: agenterr.OutcomeFromHarness(wrapper.ErrBilling), Message: "payment required"},
 		}
 
 		result := s.shouldRestart(ap)
@@ -456,7 +457,7 @@ func TestShouldRestart(t *testing.T) {
 			RestartCount: 2,
 			LastExitCode: 1,
 			LastStart:    time.Now().Add(-2 * time.Minute),
-			LastError:    &agenterr.AgentError{Class: agenterr.RateLimited, Message: "rate limited"},
+			LastError:    &agenterr.AgentError{Class: agenterr.OutcomeFromHarness(wrapper.ErrRateLimited), Message: "rate limited"},
 		}
 
 		result := s.shouldRestart(ap)
@@ -486,7 +487,7 @@ func TestShouldRestart(t *testing.T) {
 			RestartCount: 2,
 			LastExitCode: 1,
 			LastStart:    time.Now().Add(-2 * time.Minute),
-			LastError:    &agenterr.AgentError{Class: agenterr.RateLimited, Message: "rate limited"},
+			LastError:    &agenterr.AgentError{Class: agenterr.OutcomeFromHarness(wrapper.ErrRateLimited), Message: "rate limited"},
 		}
 
 		result := s.shouldRestart(ap)
@@ -540,7 +541,7 @@ func TestShouldRestart(t *testing.T) {
 			RestartCount: 1,
 			LastExitCode: 137,
 			LastStart:    time.Now().Add(-2 * time.Minute),
-			LastError:    &agenterr.AgentError{Class: agenterr.Timeout, Message: "connection timed out"},
+			LastError:    &agenterr.AgentError{Class: agenterr.OutcomeFromHarness(wrapper.ErrTimeout), Message: "connection timed out"},
 		}
 
 		result := s.shouldRestart(ap)
@@ -566,7 +567,7 @@ func TestShouldRestart(t *testing.T) {
 			RateRetryCount: 2,
 			LastExitCode:   0,
 			LastStart:      time.Now().Add(-10 * time.Second), // short run
-			LastError:      &agenterr.AgentError{Class: agenterr.NoWork, Message: "no claimable tasks"},
+			LastError:      &agenterr.AgentError{Class: agenterr.OutcomeFromDomain(agenterr.NoWorkOutcome), Message: "no claimable tasks"},
 		}
 
 		result := s.shouldRestart(ap)
@@ -594,7 +595,7 @@ func TestShouldRestart(t *testing.T) {
 			RestartCount:      1,
 			LastExitCode:      0,
 			LastStart:         time.Now().Add(-10 * time.Second),
-			LastError:         &agenterr.AgentError{Class: agenterr.NoWork, Message: "no claimable tasks"},
+			LastError:         &agenterr.AgentError{Class: agenterr.OutcomeFromDomain(agenterr.NoWorkOutcome), Message: "no claimable tasks"},
 		}
 
 		result := s.shouldRestart(ap)
@@ -618,7 +619,7 @@ func TestShouldRestart(t *testing.T) {
 			CurrentBackendIdx: 1,
 			NoWorkCount:       2,
 			LastExitCode:      0,
-			LastError:         &agenterr.AgentError{Class: agenterr.NoWork, Message: "no claimable tasks"},
+			LastError:         &agenterr.AgentError{Class: agenterr.OutcomeFromDomain(agenterr.NoWorkOutcome), Message: "no claimable tasks"},
 		}
 
 		if !s.shouldRestart(ap) {
@@ -669,7 +670,7 @@ func TestShouldRestart(t *testing.T) {
 			RateRetryCount: 5,
 			LastExitCode:   1,
 			LastStart:      time.Now().Add(-2 * time.Minute),
-			LastError:      &agenterr.AgentError{Class: agenterr.Transient, Message: "server error"},
+			LastError:      &agenterr.AgentError{Class: agenterr.OutcomeFromHarness(wrapper.ErrTransient), Message: "server error"},
 		}
 
 		result := s.shouldRestart(ap)
@@ -920,7 +921,7 @@ func TestClassifyAgentExit_WatchdogIdleNoTaskIsNoWork(t *testing.T) {
 
 	s.classifyAgentExit(ap, 137)
 
-	if ap.LastError == nil || ap.LastError.Class != agenterr.NoWork {
+	if ap.LastError == nil || ap.LastError.Class != agenterr.OutcomeFromDomain(agenterr.NoWorkOutcome) {
 		t.Fatalf("LastError = %#v, want NoWork for watchdog-stopped idle agent", ap.LastError)
 	}
 	if !ap.LastNoWork {
@@ -1759,7 +1760,7 @@ func TestTryFallbackBackend(t *testing.T) {
 			CurrentBackendIdx: 0,
 			RestartCount:      2,
 			RateRetryCount:    1,
-			LastError:         &agenterr.AgentError{Class: agenterr.ModelNotFound, Message: "model not found"},
+			LastError:         &agenterr.AgentError{Class: agenterr.OutcomeFromHarness(wrapper.ErrModelNotFound), Message: "model not found"},
 		}
 
 		result := s.tryFallbackBackend(ap)
@@ -1786,7 +1787,7 @@ func TestTryFallbackBackend(t *testing.T) {
 			Entry:             cfgpkg.AgentEntry{Worktree: "test", FallbackBackends: []string{"codex"}},
 			CurrentBackendIdx: 0,
 			RateRetryCount:    2,
-			LastError:         &agenterr.AgentError{Class: agenterr.RateLimited, Message: "rate limited"},
+			LastError:         &agenterr.AgentError{Class: agenterr.OutcomeFromHarness(wrapper.ErrRateLimited), Message: "rate limited"},
 		}
 
 		result := s.tryFallbackBackend(ap)
@@ -1807,7 +1808,7 @@ func TestTryFallbackBackend(t *testing.T) {
 			Entry:             cfgpkg.AgentEntry{Worktree: "test", FallbackBackends: []string{"codex"}},
 			CurrentBackendIdx: 0,
 			RateRetryCount:    4,
-			LastError:         &agenterr.AgentError{Class: agenterr.RateLimited, Message: "rate limited"},
+			LastError:         &agenterr.AgentError{Class: agenterr.OutcomeFromHarness(wrapper.ErrRateLimited), Message: "rate limited"},
 		}
 
 		result := s.tryFallbackBackend(ap)
@@ -1826,7 +1827,7 @@ func TestTryFallbackBackend(t *testing.T) {
 
 		ap := &AgentProcess{
 			Entry:     cfgpkg.AgentEntry{Worktree: "test"},
-			LastError: &agenterr.AgentError{Class: agenterr.ModelNotFound, Message: "model not found"},
+			LastError: &agenterr.AgentError{Class: agenterr.OutcomeFromHarness(wrapper.ErrModelNotFound), Message: "model not found"},
 		}
 
 		result := s.tryFallbackBackend(ap)
@@ -1843,7 +1844,7 @@ func TestTryFallbackBackend(t *testing.T) {
 		ap := &AgentProcess{
 			Entry:             cfgpkg.AgentEntry{Worktree: "test", FallbackBackends: []string{"codex", "opencode"}},
 			CurrentBackendIdx: 2, // already on last fallback (total 3 backends)
-			LastError:         &agenterr.AgentError{Class: agenterr.ModelNotFound, Message: "model not found"},
+			LastError:         &agenterr.AgentError{Class: agenterr.OutcomeFromHarness(wrapper.ErrModelNotFound), Message: "model not found"},
 		}
 
 		result := s.tryFallbackBackend(ap)
@@ -1859,7 +1860,7 @@ func TestTryFallbackBackend(t *testing.T) {
 
 		ap := &AgentProcess{
 			Entry:     cfgpkg.AgentEntry{Worktree: "test", FallbackBackends: []string{"codex"}},
-			LastError: &agenterr.AgentError{Class: agenterr.AuthFailure, Message: "invalid API key"},
+			LastError: &agenterr.AgentError{Class: agenterr.OutcomeFromHarness(wrapper.ErrAuth), Message: "invalid API key"},
 		}
 
 		result := s.tryFallbackBackend(ap)
@@ -1875,7 +1876,7 @@ func TestTryFallbackBackend(t *testing.T) {
 
 		ap := &AgentProcess{
 			Entry:     cfgpkg.AgentEntry{Worktree: "test", FallbackBackends: []string{"codex"}},
-			LastError: &agenterr.AgentError{Class: agenterr.Transient, Message: "server error"},
+			LastError: &agenterr.AgentError{Class: agenterr.OutcomeFromHarness(wrapper.ErrTransient), Message: "server error"},
 		}
 
 		result := s.tryFallbackBackend(ap)
@@ -1910,7 +1911,7 @@ func TestTryFallbackBackend(t *testing.T) {
 			CurrentBackendIdx: 0,
 			RestartCount:      5,
 			RateRetryCount:    3,
-			LastError:         &agenterr.AgentError{Class: agenterr.ModelNotFound, Message: "not found"},
+			LastError:         &agenterr.AgentError{Class: agenterr.OutcomeFromHarness(wrapper.ErrModelNotFound), Message: "not found"},
 		}
 
 		s.tryFallbackBackend(ap)

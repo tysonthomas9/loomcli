@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/olesho/harness-wrapper/pkg/wrapper"
 	"github.com/tysonthomas9/loomcli/internal/agenterr"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/store"
@@ -319,7 +320,7 @@ func (s *Supervisor) killAgentForOwnership(ap *AgentProcess, reason string, hbEr
 	backend := s.GetEffectiveBackend(ap)
 	ap.Mu.Lock()
 	ap.LastError = &agenterr.AgentError{
-		Class:     agenterr.Unknown,
+		Class:     agenterr.OutcomeFromHarness(wrapper.ErrUnknown),
 		ExitCode:  -1,
 		Message:   fmt.Sprintf("ownership heartbeat failed (%s): %v", reason, hbErr),
 		Backend:   backend,

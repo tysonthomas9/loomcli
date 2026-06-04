@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/olesho/harness-wrapper/pkg/wrapper"
 	"github.com/tysonthomas9/loomcli/internal/agenterr"
 	cfgpkg "github.com/tysonthomas9/loomcli/internal/cli/config"
 	"github.com/tysonthomas9/loomcli/internal/events"
@@ -86,7 +87,7 @@ func TestHandleEpicTransition_ConfigDriven_Exhausted(t *testing.T) {
 	if lastErr == nil {
 		t.Fatal("expected LastError to be set on epic exhaustion")
 	}
-	if lastErr.Class != agenterr.NoWork {
+	if lastErr.Class != agenterr.OutcomeFromDomain(agenterr.NoWorkOutcome) {
 		t.Errorf("expected LastError.Class=NoWork, got %v", lastErr.Class)
 	}
 }
@@ -97,7 +98,7 @@ func TestHandleEpicTransition_ConfigDriven_Exhausted_DoesNotMaskCrashError(t *te
 	})
 
 	crashErr := &agenterr.AgentError{
-		Class:   agenterr.Unknown,
+		Class:   agenterr.OutcomeFromHarness(wrapper.ErrUnknown),
 		Message: "segfault",
 		Backend: "claude",
 	}
@@ -214,7 +215,7 @@ func TestHandleEpicTransition_WithIssueBackend_Exhausted(t *testing.T) {
 	if lastErr == nil {
 		t.Fatal("expected LastError to be set on epic exhaustion")
 	}
-	if lastErr.Class != agenterr.NoWork {
+	if lastErr.Class != agenterr.OutcomeFromDomain(agenterr.NoWorkOutcome) {
 		t.Errorf("expected LastError.Class=NoWork, got %v", lastErr.Class)
 	}
 }

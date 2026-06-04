@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"time"
 
+	"github.com/olesho/harness-wrapper/pkg/wrapper"
 	"github.com/tysonthomas9/loomcli/internal/agenterr"
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/backends"
@@ -81,10 +82,10 @@ func handleAutoTaskError(ctx *autoLoopCtx, ae *agenterr.AgentError, rawErr error
 
 	// Fatal errors (auth, billing) and non-retryable specifics: exit immediately.
 	// These never retry, so per-task tracking would only accumulate stale state.
-	if ae.IsFatal() || ae.Class == agenterr.ModelNotFound {
+	if ae.IsFatal() || ae.Class.IsClass(wrapper.ErrModelNotFound) {
 		return exitWithReason(ctx, fmt.Sprintf("fatal error: %s", ae.Message))
 	}
-	if ae.Class == agenterr.NoWork {
+	if ae.Class.Is(agenterr.NoWorkOutcome) {
 		return exitWithReason(ctx, "no work available")
 	}
 
@@ -102,7 +103,7 @@ func handleAutoTaskError(ctx *autoLoopCtx, ae *agenterr.AgentError, rawErr error
 	// them before per-task tracking so a sustained rate limit against a
 	// single task doesn't drain its stuck-task budget — and so the rate-
 	// limit breaker and ConsecutiveRateLimits counter record every hit.
-	if ae.Class == agenterr.RateLimited {
+	if ae.Class.IsClass(wrapper.ErrRateLimited) {
 		return handleRateLimitError(ctx, ae, shutdown)
 	}
 

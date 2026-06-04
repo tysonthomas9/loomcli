@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/olesho/harness-wrapper/pkg/wrapper"
 )
 
 func TestClassifyClaude(t *testing.T) {
@@ -543,7 +545,7 @@ func TestClassifyByExitCode(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			got := classifyByExitCode(tt.exitCode)
+			got := OutcomeFromHarness(classifyByExitCode(tt.exitCode))
 			if got != tt.wantClass {
 				t.Errorf("classifyByExitCode(%d) = %s, want %s", tt.exitCode, got, tt.wantClass)
 			}
@@ -1076,14 +1078,14 @@ func TestErrorClassString(t *testing.T) {
 		{Transient, "Transient"},
 		{NoWork, "NoWork"},
 		{Unknown, "Unknown"},
-		{ErrorClass(99), "Unknown"},
+		{Outcome{Harness: wrapper.ErrorClass(99)}, "Unknown"},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.want, func(t *testing.T) {
 			t.Parallel()
 			if got := tt.class.String(); got != tt.want {
-				t.Errorf("ErrorClass(%d).String() = %q, want %q", tt.class, got, tt.want)
+				t.Errorf("Outcome(%v).String() = %q, want %q", tt.class, got, tt.want)
 			}
 		})
 	}

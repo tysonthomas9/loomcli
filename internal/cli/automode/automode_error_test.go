@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/olesho/harness-wrapper/pkg/wrapper"
 	"github.com/tysonthomas9/loomcli/internal/agenterr"
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/backends"
@@ -34,7 +35,7 @@ func TestHandleAutoTaskError_FatalError(t *testing.T) {
 	shutdown := make(chan struct{})
 
 	ae := &agenterr.AgentError{
-		Class:   agenterr.AuthFailure,
+		Class:   agenterr.OutcomeFromHarness(wrapper.ErrAuth),
 		Message: "invalid api key",
 		Backend: "claude",
 	}
@@ -56,7 +57,7 @@ func TestHandleAutoTaskError_ModelNotFound(t *testing.T) {
 	shutdown := make(chan struct{})
 
 	ae := &agenterr.AgentError{
-		Class:   agenterr.ModelNotFound,
+		Class:   agenterr.OutcomeFromHarness(wrapper.ErrModelNotFound),
 		Message: "model claude-99 not found",
 		Backend: "claude",
 	}
@@ -78,7 +79,7 @@ func TestHandleAutoTaskError_RateLimit(t *testing.T) {
 	shutdown := make(chan struct{})
 
 	ae := &agenterr.AgentError{
-		Class:      agenterr.RateLimited,
+		Class:      agenterr.OutcomeFromHarness(wrapper.ErrRateLimited),
 		Message:    "rate limit exceeded",
 		Backend:    "claude",
 		RetryAfter: 1 * time.Millisecond,
@@ -102,7 +103,7 @@ func TestHandleAutoTaskError_RateLimit_ExitsAfterFive(t *testing.T) {
 	shutdown := make(chan struct{})
 
 	ae := &agenterr.AgentError{
-		Class:      agenterr.RateLimited,
+		Class:      agenterr.OutcomeFromHarness(wrapper.ErrRateLimited),
 		Message:    "rate limit exceeded",
 		Backend:    "claude",
 		RetryAfter: 1 * time.Millisecond,
@@ -138,7 +139,7 @@ func TestHandleAutoTaskError_TransientBackoff(t *testing.T) {
 	shutdown := make(chan struct{})
 
 	ae := &agenterr.AgentError{
-		Class:   agenterr.Transient,
+		Class:   agenterr.OutcomeFromHarness(wrapper.ErrTransient),
 		Message: "server error",
 		Backend: "claude",
 	}
@@ -178,7 +179,7 @@ func TestHandleAutoTaskError_MixedErrors(t *testing.T) {
 
 	// First: rate-limit error.
 	aeRL := &agenterr.AgentError{
-		Class:      agenterr.RateLimited,
+		Class:      agenterr.OutcomeFromHarness(wrapper.ErrRateLimited),
 		Message:    "rate limit exceeded",
 		Backend:    "claude",
 		RetryAfter: 1 * time.Millisecond,
@@ -193,7 +194,7 @@ func TestHandleAutoTaskError_MixedErrors(t *testing.T) {
 
 	// Second: transient error.
 	aeTrans := &agenterr.AgentError{
-		Class:   agenterr.Transient,
+		Class:   agenterr.OutcomeFromHarness(wrapper.ErrTransient),
 		Message: "server error",
 		Backend: "claude",
 	}
@@ -221,7 +222,7 @@ func TestHandleAutoTaskError_NoWork(t *testing.T) {
 	shutdown := make(chan struct{})
 
 	ae := &agenterr.AgentError{
-		Class:   agenterr.NoWork,
+		Class:   agenterr.OutcomeFromDomain(agenterr.NoWorkOutcome),
 		Message: "no work available",
 		Backend: "claude",
 	}
@@ -245,8 +246,8 @@ func TestClassifyInvokeError_UsesInvocationLocalOutput(t *testing.T) {
 	}
 
 	got := classifyInvokeError(err, "claude")
-	if got.Class != agenterr.RateLimited {
-		t.Fatalf("Class = %s, want %s", got.Class, agenterr.RateLimited)
+	if got.Class != agenterr.OutcomeFromHarness(wrapper.ErrRateLimited) {
+		t.Fatalf("Class = %s, want %s", got.Class, agenterr.OutcomeFromHarness(wrapper.ErrRateLimited))
 	}
 	if got.RetryAfter.Seconds() != 60 {
 		t.Fatalf("RetryAfter = %s, want 60s", got.RetryAfter)
@@ -258,8 +259,8 @@ func TestClassifyInvokeError_UsesInvocationLocalOutput(t *testing.T) {
 
 func TestClassifyInvokeError_FallsBackToRawErrorText(t *testing.T) {
 	got := classifyInvokeError(errors.New("OPENAI_API_KEY not set"), "codex")
-	if got.Class != agenterr.AuthFailure {
-		t.Fatalf("Class = %s, want %s", got.Class, agenterr.AuthFailure)
+	if got.Class != agenterr.OutcomeFromHarness(wrapper.ErrAuth) {
+		t.Fatalf("Class = %s, want %s", got.Class, agenterr.OutcomeFromHarness(wrapper.ErrAuth))
 	}
 }
 
@@ -294,7 +295,7 @@ func TestHandleRateLimitError_ResetsErrorCounter(t *testing.T) {
 		},
 	}
 
-	ae := &agenterr.AgentError{Class: agenterr.RateLimited, RetryAfter: time.Millisecond}
+	ae := &agenterr.AgentError{Class: agenterr.OutcomeFromHarness(wrapper.ErrRateLimited), RetryAfter: time.Millisecond}
 	if !handleRateLimitError(ctx, ae, make(chan struct{})) {
 		t.Fatalf("handleRateLimitError() returned false, want retry")
 	}

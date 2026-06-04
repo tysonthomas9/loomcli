@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/olesho/harness-wrapper/pkg/wrapper"
 	"github.com/tysonthomas9/loomcli/internal/agenterr"
 )
 
@@ -38,14 +39,14 @@ func (s *Supervisor) shouldRestart(ap *AgentProcess) bool {
 		return true
 	}
 
-	if ap.LastError != nil && ap.LastError.Class == agenterr.NoWork {
+	if ap.LastError != nil && ap.LastError.Class.Is(agenterr.NoWorkOutcome) {
 		s.applyNoWorkRestart(ap)
 		return true
 	}
 
 	// Backend unavailable (CLI binary not on PATH): park without eroding the
 	// restart budget — recoverable once the binary returns (applyBackendUnavailableRestart).
-	if ap.LastError != nil && ap.LastError.Class == agenterr.BackendUnavailable {
+	if ap.LastError != nil && ap.LastError.Class.Is(agenterr.BackendUnavailableOutcome) {
 		s.applyBackendUnavailableRestart(ap)
 		return true
 	}
@@ -60,7 +61,7 @@ func (s *Supervisor) shouldRestart(ap *AgentProcess) bool {
 	}
 
 	// Rate-limited: unlimited retries (don't count toward max_retries)
-	if ap.LastError != nil && ap.LastError.Class == agenterr.RateLimited && s.getRateLimitNoCount() {
+	if ap.LastError != nil && ap.LastError.Class.IsClass(wrapper.ErrRateLimited) && s.getRateLimitNoCount() {
 		ap.RateRetryCount++
 		ap.NoWorkCount = 0
 		ap.StopReason = ""
@@ -130,24 +131,24 @@ func (s *Supervisor) computeBackoff(ap *AgentProcess) time.Duration {
 	ap.Mu.Unlock()
 
 	// NoWork: fixed interval, no exponential growth
-	if lastErr != nil && lastErr.Class == agenterr.NoWork {
+	if lastErr != nil && lastErr.Class.Is(agenterr.NoWorkOutcome) {
 		return time.Duration(s.getNoWorkBackoff()) * time.Second
 	}
 
 	// Backend unavailable: fixed recheck interval (no exponential growth) — we
 	// are waiting for the backend CLI to reappear, not backing off a flaky run.
-	if lastErr != nil && lastErr.Class == agenterr.BackendUnavailable {
+	if lastErr != nil && lastErr.Class.Is(agenterr.BackendUnavailableOutcome) {
 		return s.backendRecheckBackoff()
 	}
 
 	// Select initial backoff and retry count based on error class
 	var initial int
 	var retryN int
-	if lastErr != nil && lastErr.Class == agenterr.RateLimited {
+	if lastErr != nil && lastErr.Class.IsClass(wrapper.ErrRateLimited) {
 		initial = s.getRateLimitBackoff()
 		retryN = rateCount
 		maxBackoff = s.getRateLimitMaxWait()
-	} else if lastErr != nil && lastErr.Class == agenterr.Timeout {
+	} else if lastErr != nil && lastErr.Class.IsClass(wrapper.ErrTimeout) {
 		initial = s.getTimeoutBackoff()
 		retryN = count
 	} else {
@@ -169,7 +170,7 @@ func (s *Supervisor) computeBackoff(ap *AgentProcess) time.Duration {
 	backoff := time.Duration(backoffSec) * time.Second
 
 	// For rate limits, respect server Retry-After hint if larger
-	if lastErr != nil && lastErr.Class == agenterr.RateLimited && lastErr.RetryAfter > backoff {
+	if lastErr != nil && lastErr.Class.IsClass(wrapper.ErrRateLimited) && lastErr.RetryAfter > backoff {
 		backoff = lastErr.RetryAfter
 		if backoff > time.Duration(maxBackoff)*time.Second {
 			backoff = time.Duration(maxBackoff) * time.Second

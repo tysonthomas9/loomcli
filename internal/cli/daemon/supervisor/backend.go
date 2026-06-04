@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/olesho/harness-wrapper/pkg/wrapper"
 	"github.com/tysonthomas9/loomcli/internal/agenterr"
 	"github.com/tysonthomas9/loomcli/internal/cli/backendcheck"
 	"github.com/tysonthomas9/loomcli/internal/domain"
@@ -66,7 +67,7 @@ func (s *Supervisor) gateBackendAvailable(ap *AgentProcess) error {
 	wasUnavailable := ap.StopReason == StopReasonBackendUnavailable
 	ap.StopReason = StopReasonBackendUnavailable
 	ap.LastError = &agenterr.AgentError{
-		Class:     agenterr.BackendUnavailable,
+		Class:     agenterr.OutcomeFromDomain(agenterr.BackendUnavailableOutcome),
 		Message:   info.InstallHint,
 		Backend:   backend,
 		Timestamp: time.Now(),
@@ -133,9 +134,9 @@ func (s *Supervisor) tryFallbackBackend(ap *AgentProcess) bool {
 	// Determine if failover should trigger
 	shouldFailover := false
 	switch {
-	case lastErr.Class == agenterr.ModelNotFound:
+	case lastErr.Class.IsClass(wrapper.ErrModelNotFound):
 		shouldFailover = true
-	case lastErr.Class == agenterr.RateLimited && rateCount > 3:
+	case lastErr.Class.IsClass(wrapper.ErrRateLimited) && rateCount > 3:
 		shouldFailover = true
 	}
 

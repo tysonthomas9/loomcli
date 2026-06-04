@@ -4,6 +4,7 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/olesho/harness-wrapper/pkg/wrapper"
 	"github.com/tysonthomas9/loomcli/internal/agenterr"
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
 )
@@ -39,7 +40,7 @@ func TestMarkSpawnFailure_SetsSyntheticExitState(t *testing.T) {
 	if ap.LastError == nil {
 		t.Fatal("LastError = nil, want non-nil SpawnFailure error")
 	}
-	if ap.LastError.Class != agenterr.SpawnFailure {
+	if ap.LastError.Class != agenterr.OutcomeFromDomain(agenterr.SpawnFailureOutcome) {
 		t.Errorf("LastError.Class = %v, want SpawnFailure", ap.LastError.Class)
 	}
 	if ap.LastNoWork {
@@ -112,14 +113,14 @@ func TestSpawnFailure_AfterNonZeroExitNotDoubleCounted(t *testing.T) {
 		Entry: config.AgentEntry{Worktree: "wt"},
 		// Stale state from a prior non-zero exit that was already counted once.
 		LastExitCode: 1,
-		LastError:    &agenterr.AgentError{Class: agenterr.Transient, Message: "stale"},
+		LastError:    &agenterr.AgentError{Class: agenterr.OutcomeFromHarness(wrapper.ErrTransient), Message: "stale"},
 		RestartCount: 1,
 	}
 
 	s.markSpawnFailure(ap, errors.New("spawn failed"))
 
 	ap.Mu.Lock()
-	if ap.LastError == nil || ap.LastError.Class != agenterr.SpawnFailure {
+	if ap.LastError == nil || ap.LastError.Class != agenterr.OutcomeFromDomain(agenterr.SpawnFailureOutcome) {
 		ap.Mu.Unlock()
 		t.Fatalf("LastError = %v, want SpawnFailure (stale class must be overwritten)", ap.LastError)
 	}

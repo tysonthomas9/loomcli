@@ -74,3 +74,23 @@ func (o Outcome) String() string {
 	}
 	return o.Harness.String()
 }
+
+// IsRetryable reports whether this outcome is worth retrying.
+//
+// Transitional: subsumed by agentpolicy.Decide (same truth table as the old
+// ErrorClass.IsRetryable); kept until the decision layers are rewired onto
+// the policy table.
+func (o Outcome) IsRetryable() bool {
+	return o.IsClass(wrapper.ErrRateLimited) ||
+		o.IsClass(wrapper.ErrTimeout) ||
+		o.IsClass(wrapper.ErrTransient) ||
+		o.Is(SpawnFailureOutcome)
+}
+
+// IsFatal reports whether this outcome indicates a permanent failure.
+//
+// Transitional: subsumed by agentpolicy.Decide (same truth table as the old
+// ErrorClass.IsFatal); kept until the decision layers are rewired.
+func (o Outcome) IsFatal() bool {
+	return o.IsClass(wrapper.ErrAuth) || o.IsClass(wrapper.ErrBilling)
+}
