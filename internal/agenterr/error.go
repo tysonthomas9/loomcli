@@ -23,15 +23,3 @@ func (e *AgentError) Error() string {
 	}
 	return msg
 }
-
-// IsRetryable returns true if this error is worth retrying.
-// Transitional: see Outcome.IsRetryable.
-func (e *AgentError) IsRetryable() bool {
-	return e.Class.IsRetryable()
-}
-
-// IsFatal returns true if this error indicates a permanent failure.
-// Transitional: see Outcome.IsFatal.
-func (e *AgentError) IsFatal() bool {
-	return e.Class.IsFatal()
-}

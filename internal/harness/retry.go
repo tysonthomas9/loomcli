@@ -15,6 +15,8 @@ import (
 
 	hwharness "github.com/olesho/harness-wrapper/pkg/harness"
 	"github.com/olesho/harness-wrapper/pkg/wrapper"
+	"github.com/tysonthomas9/loomcli/internal/agenterr"
+	"github.com/tysonthomas9/loomcli/internal/agentpolicy"
 )
 
 // RetryPolicy controls how RunWithRetry handles transient failures and how
@@ -61,11 +63,10 @@ func DefaultRetryPolicy() RetryPolicy {
 
 // runOnceFn is the seam tests use to swap in a fake harness without spawning a
 // real subprocess. Production code uses runOnceDefault. The hwharness.Result it
-// returns carries the terminal wrapper.Result (embedded) plus the out-of-band
-// retry signals the wrapper now surfaces: RetryAfter and SawAPIError (whether a
-// StatusAPIError fired mid-run — the classifier marks it non-terminal, but a
-// print-mode harness like `claude -p` may then exit Failed, so the signal must
-// reach the retry layer out-of-band).
+// returns carries the terminal wrapper.Result (embedded) — including the
+// canonical error Class, onto which the wrapper inherits a mid-run non-terminal
+// classification (e.g. an API error before a Failed exit) — plus the RetryAfter
+// hint.
 type runOnceFn func(ctx context.Context, cfg hwharness.Config, p RetryPolicy) (hwharness.Result, error)
 
 // sleepFn is the seam tests use to skip real sleeps. Production code
@@ -103,7 +104,7 @@ func RunWithRetry(ctx context.Context, cfg hwharness.Config, p RetryPolicy) (hwh
 		}
 		lastResult = out
 
-		if !shouldRetry(out.Status, out.SawAPIError) {
+		if !shouldRetry(out) {
 			return lastResult, nil
 		}
 		if attempt >= p.Max {
@@ -117,18 +118,28 @@ func RunWithRetry(ctx context.Context, cfg hwharness.Config, p RetryPolicy) (hwh
 	}
 }
 
-// shouldRetry reports whether the run should be retried. A retry
-// fires when the terminal status is a known transient condition
-// (StatusRetryLater, StatusAPIError) OR when the wrapper observed an
-// API-error event mid-run and the harness then exited with a
-// failure status (common for `claude -p` and similar print-mode
-// harnesses that don't recover internally).
-func shouldRetry(s wrapper.Status, sawAPIError bool) bool {
-	switch s {
+// shouldRetry reports whether the run should be retried. A retry fires when
+// the terminal status is a known transient condition (StatusRetryLater,
+// StatusAPIError) OR when the harness exited with a failure status but the
+// carried error class is one the policy retries — e.g. a non-terminal API
+// error inherited onto a Failed exit by the wrapper (common for `claude -p`
+// and similar print-mode harnesses that don't recover internally).
+//
+// The class check replaces the out-of-band SawAPIError signal and is finer:
+// a Failed exit carrying a fatal class (auth, billing) or a deterministic one
+// (context overflow) is no longer pointlessly retried. Non-retryable terminal
+// statuses (e.g. blocked_by_cost) stay definitive regardless of class — the
+// caller, not the invocation layer, owns what happens to those.
+func shouldRetry(res hwharness.Result) bool {
+	switch res.Status {
 	case wrapper.StatusRetryLater, wrapper.StatusAPIError:
 		return true
 	case wrapper.StatusFailed, wrapper.StatusUnknown:
-		return sawAPIError
+		if res.Class == wrapper.ErrNone {
+			return false
+		}
+		d := agentpolicy.Decide(agenterr.OutcomeFromHarness(res.Class))
+		return d.Decision == agentpolicy.Retry || d.Decision == agentpolicy.RetryUncounted
 	}
 	return false
 }

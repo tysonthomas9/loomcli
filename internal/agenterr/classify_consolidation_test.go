@@ -21,9 +21,8 @@ func TestClassifyFromOutput_ConnectionRefusedIsRetryable(t *testing.T) {
 		t.Run(c.backend, func(t *testing.T) {
 			t.Parallel()
 			aerr := ClassifyFromOutput(c.output, 1, c.backend)
-			if !aerr.IsRetryable() {
-				t.Fatalf("[%s] class = %s, want a retryable class for a transport error", c.backend, aerr.Class)
-			}
+			// Retryability of Transient is policy, asserted by the
+			// agentpolicy golden table.
 			if aerr.Class != Transient {
 				t.Errorf("[%s] class = %s, want Transient", c.backend, aerr.Class)
 			}
@@ -92,7 +91,6 @@ func TestClassifyFromOutput_BillingStaysFatal(t *testing.T) {
 	if aerr.Class != BillingError {
 		t.Fatalf("class = %s, want BillingError", aerr.Class)
 	}
-	if !aerr.IsFatal() {
-		t.Errorf("expected IsFatal() == true for a billing exhaustion")
-	}
+	// Fatality of BillingError is policy, asserted by the agentpolicy golden
+	// table (Decide -> StopFatal).
 }
