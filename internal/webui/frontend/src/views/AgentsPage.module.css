@@ -159,6 +159,23 @@
   background: var(--color-text-secondary);
 }
 
+/* Container for embedded real loom tab components (logs/git/diff/files) —
+   they manage their own header/scroll/layout. */
+.realTabBody {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.tabFallback {
+  padding: var(--space-6);
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+}
+
 .terminalOutput {
   flex: 1;
   min-height: 0;

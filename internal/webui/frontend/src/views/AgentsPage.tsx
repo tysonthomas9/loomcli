@@ -10,13 +10,24 @@
  * is wired to the web UI yet).
  */
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, lazy, Suspense } from "react";
 
 import { useWorkspaceViewData } from "@/contexts/WorkspaceViewContext";
+import { GitTab, AgentLogsTab } from "@/components/AgentDetailPanel";
 import { getAvatarColor, shouldUseWhiteText } from "@/utils/colorUtils";
 import { parseLoomStatus } from "@/types";
 
 import styles from "./AgentsPage.module.css";
+
+// Heavy tabs (CodeMirror/diff) are code-split, mirroring AgentDetailPanel.
+const DiffTab = lazy(() =>
+  import("@/components/AgentDetailPanel").then((m) => ({ default: m.DiffTab })),
+);
+const FileEditorPanel = lazy(() =>
+  import("@/components/FileEditorPanel").then((m) => ({
+    default: m.FileEditorPanel,
+  })),
+);
 
 type AgentTab = "terminal" | "info" | "git" | "diff" | "files";
 
@@ -28,27 +39,6 @@ const TABS: { id: AgentTab; label: string }[] = [
   { id: "files", label: "Files" },
 ];
 
-const TERMINAL_BLOCKS = [
-  {
-    id: "repo-list",
-    command: "repo list --json",
-    lines:
-      '└ time=2026-05-19T05:13:14.923Z level=INFO msg="opened existing embedded fleet-db client"\n  url=http://127.0.0.1:36039\n  [\n    … +9 lines (ctrl + t to view transcript)\n  }\n]',
-  },
-  {
-    id: "diagnose",
-    command: "workspace ops diagnose --json",
-    lines:
-      '└ time=2026-05-19T05:13:14.975Z level=INFO msg="opened existing embedded fleet-db client"\n  url=http://127.0.0.1:36039\n  {\n    … +124 lines (ctrl + t)\n  ]\n}',
-  },
-  {
-    id: "role-list",
-    command: "role list",
-    lines:
-      "└ lead                 Lead orchestrator terminal\n  plan                 Planning agent\n  task                 Task implementation agent",
-  },
-];
-
 const CAPABILITIES = ["TypeScript", "Node.js", "Git", "README", "Testing", "Diagnostics"];
 const RECENT_ACTIVITY = [
   { id: "ra1", tone: "var(--color-status-done)", time: "12m ago" },
@@ -56,31 +46,11 @@ const RECENT_ACTIVITY = [
   { id: "ra3", tone: "var(--color-status-working)", time: "1h ago" },
   { id: "ra4", tone: "var(--color-status-review)", time: "3h ago" },
 ];
-const GIT_COMMITS = [
-  { id: "9a4c2f1", message: "feat: add README runner note", author: "hello-world-agent", date: "May 19, 2026 07:13", tone: "var(--color-warning)" },
-  { id: "61bd930", message: "fix: update workspace diagnostics", author: "demo", date: "May 19, 2026 06:45", tone: "var(--color-info)" },
-  { id: "a18f04b", message: "chore: remove planner agent definition", author: "test2", date: "May 19, 2026 05:23", tone: "var(--color-success)" },
-];
-const DIFF_FILES = [
-  { id: "readme", badge: "M", name: "README.md" },
-  { id: "config", badge: "A", name: ".loom/config.json" },
-  { id: "package", badge: "M", name: "package.json" },
-];
-const DIFF_LINES = [
-  { id: "d1", kind: "context", o: "1", n: "1", text: "# Hello World" },
-  { id: "d3", kind: "context", o: "3", n: "3", text: "A sample hello-world repository." },
-  { id: "d4", kind: "removed", o: "5", n: "", text: "Run tests with npm test" },
-  { id: "d5", kind: "added", o: "", n: "5", text: "## Runner Execution" },
-  { id: "d7", kind: "added", o: "", n: "7", text: "`loom run --watch hello-world`" },
-  { id: "d8", kind: "context", o: "7", n: "10", text: "## Getting Started" },
-];
-const BROWSER_FILES = ["index.ts", "app.ts", "helpers.ts", "logger.ts", "index.test.ts", "README.md", "package.json", "tsconfig.json"];
 
 export function AgentsPage(): JSX.Element {
   const { agents, issues } = useWorkspaceViewData();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<AgentTab>("terminal");
-  const [diffMode, setDiffMode] = useState<"unified" | "split">("unified");
 
   // Default to a lead agent, else the first agent.
   const selected = useMemo(() => {
@@ -203,27 +173,12 @@ export function AgentsPage(): JSX.Element {
                 </p>
               </div>
             </header>
-            <div className={styles.terminalOutput}>
-              {TERMINAL_BLOCKS.map((block) => (
-                <section key={block.id} className={styles.termBlock}>
-                  <p className={styles.termRan}>
-                    <span className={styles.termDot} aria-hidden="true" />
-                    <span>Ran</span>
-                    <code className={styles.termCmd}>loom {block.command}</code>
-                  </p>
-                  <pre className={styles.termPre}>{block.lines}</pre>
-                </section>
-              ))}
+            <div className={styles.realTabBody}>
+              <AgentLogsTab
+                agentName={selected.name}
+                isActive={activeTab === "terminal"}
+              />
             </div>
-            <section className={styles.terminalInput} aria-label="Agent terminal input">
-              <label className={styles.inputRow}>
-                <span className={styles.prompt}>&gt;</span>
-                <input className={styles.cmdInput} placeholder="Explain this codebase" type="text" />
-              </label>
-              <label className={styles.notesRow}>
-                <input className={styles.notesInput} placeholder="Add notes..." type="text" />
-              </label>
-            </section>
           </div>
         )}
 
@@ -282,72 +237,31 @@ export function AgentsPage(): JSX.Element {
         )}
 
         {activeTab === "git" && (
-          <div className={styles.scrollPanel}>
-            <section className={styles.card} style={{ padding: 0 }}>
-              <header className={styles.gitHead}>Git history</header>
-              <ul className={styles.gitList}>
-                {GIT_COMMITS.map((c) => (
-                  <li key={c.id} className={styles.gitItem}>
-                    <span className={styles.gitDot} style={{ backgroundColor: c.tone }} aria-hidden="true" />
-                    <span className={styles.gitBody}>
-                      <strong className={styles.gitMsg}>{c.message}</strong>
-                      <span className={styles.gitMeta}>{c.author} · {c.date}</span>
-                    </span>
-                    <code className={styles.gitHash}>{c.id}</code>
-                  </li>
-                ))}
-              </ul>
-            </section>
+          <div className={styles.realTabBody}>
+            <GitTab agent={selected} isActive={activeTab === "git"} />
           </div>
         )}
 
         {activeTab === "diff" && (
-          <div className={styles.splitPanel}>
-            <aside className={styles.diffSidebar} aria-label="Changed files">
-              <div className={styles.diffModes}>
-                <button type="button" className={styles.diffModeBtn} data-active={diffMode === "unified" || undefined} onClick={() => setDiffMode("unified")}>Unified</button>
-                <button type="button" className={styles.diffModeBtn} data-active={diffMode === "split" || undefined} onClick={() => setDiffMode("split")}>Split</button>
-              </div>
-              {DIFF_FILES.map((f, i) => (
-                <button key={f.id} type="button" className={styles.diffFile} data-active={i === 0 || undefined}>
-                  <span className={styles.diffBadge}>{f.badge}</span>
-                  <span>{f.name}</span>
-                </button>
-              ))}
-            </aside>
-            <section className={styles.diffViewer} aria-label="Unified diff viewer">
-              <h1 className={styles.diffTitle}>README.md</h1>
-              <div className={styles.diffTable}>
-                {DIFF_LINES.map((l) => (
-                  <div key={l.id} className={styles.diffLine} data-kind={l.kind}>
-                    <span className={styles.diffNum}>{l.o}</span>
-                    <span className={styles.diffNum}>{l.n}</span>
-                    <code className={styles.diffText}>{l.text || " "}</code>
-                  </div>
-                ))}
-              </div>
-            </section>
+          <div className={styles.realTabBody}>
+            <Suspense
+              fallback={<div className={styles.tabFallback}>Loading diff…</div>}
+            >
+              <DiffTab agent={selected} isActive={activeTab === "diff"} />
+            </Suspense>
           </div>
         )}
 
         {activeTab === "files" && (
-          <div className={styles.splitPanel}>
-            <aside className={styles.filesSidebar} aria-label="File browser">
-              <label className={styles.fileFilter}>
-                <input placeholder="Filter files..." type="text" />
-              </label>
-              <div className={styles.fileList}>
-                {BROWSER_FILES.map((f, i) => (
-                  <button key={f} type="button" className={styles.fileItem} data-active={f === "README.md" || undefined} style={{ paddingLeft: `${8 + (i < 5 ? 16 : 8)}px` }}>
-                    {f}
-                  </button>
-                ))}
-              </div>
-            </aside>
-            <section className={styles.fileContent} aria-label="File content">
-              <header className={styles.fileContentHead}>README.md</header>
-              <pre className={styles.fileBody}>{` 1  # Hello World\n 2\n 3  A sample hello-world repository.\n 4\n 5  ## Runner Execution\n 6\n 7  This repository includes a runner test that can be observed via:\n 9  ## Getting Started\n10  Clone the repo and run npm install`}</pre>
-            </section>
+          <div className={styles.realTabBody}>
+            <Suspense
+              fallback={<div className={styles.tabFallback}>Loading files…</div>}
+            >
+              <FileEditorPanel
+                agentName={selected.name}
+                isActive={activeTab === "files"}
+              />
+            </Suspense>
           </div>
         )}
       </section>
