@@ -39,16 +39,8 @@ func (s *Supervisor) shouldRestart(ap *AgentProcess) bool {
 
 	// Clean success (exit 0, no error): always restart, reset counters —
 	// including the park-escalation budget ("progress" ends a park spiral).
-	// Long runs (>1 minute) also reset primary backend.
 	if ap.LastExitCode == 0 && ap.LastError == nil {
-		ap.RestartCount = 0
-		ap.RateRetryCount = 0
-		ap.NoWorkCount = 0
-		ap.ParkCount = 0
-		ap.StopReason = ""
-		if time.Since(ap.LastStart) > time.Minute {
-			ap.CurrentBackendIdx = 0 // reset to primary backend
-		}
+		s.applyCleanSuccessRestart(ap)
 		return true
 	}
 
@@ -96,6 +88,20 @@ func (s *Supervisor) shouldRestart(ap *AgentProcess) bool {
 
 	default: // Retry, Failover (failover execution lives in tryFallbackBackend)
 		return s.applyCountedRestart(ap, d, maxRetries)
+	}
+}
+
+// applyCleanSuccessRestart resets every retry counter after a clean exit —
+// including the park-escalation budget ("progress" ends a park spiral). Long
+// runs (>1 minute) also reset to the primary backend. Caller holds ap.Mu.
+func (s *Supervisor) applyCleanSuccessRestart(ap *AgentProcess) {
+	ap.RestartCount = 0
+	ap.RateRetryCount = 0
+	ap.NoWorkCount = 0
+	ap.ParkCount = 0
+	ap.StopReason = ""
+	if time.Since(ap.LastStart) > time.Minute {
+		ap.CurrentBackendIdx = 0 // reset to primary backend
 	}
 }
 
@@ -263,28 +269,32 @@ func (s *Supervisor) computeBackoff(ap *AgentProcess) time.Duration {
 		retryN = count
 	}
 
+	var hint time.Duration
+	if d.HonorHint && lastErr != nil {
+		hint = lastErr.RetryAfter
+	}
+	return exponentialBackoff(initial, retryN, maxBackoff, hint)
+}
+
+// exponentialBackoff computes initial * 2^retryN seconds capped at maxBackoff
+// (both in seconds), preferring a larger harness Retry-After hint when one
+// was carried through (hint is zero when the policy says not to honor it).
+func exponentialBackoff(initial, retryN, maxBackoff int, hint time.Duration) time.Duration {
 	// Cap count to prevent integer overflow in bit shift
 	if retryN > 30 {
 		retryN = 30
 	}
-
-	// Exponential: initial * 2^retryN
 	backoffSec := initial * (1 << retryN)
 	if backoffSec > maxBackoff || backoffSec < 0 {
 		backoffSec = maxBackoff
 	}
-
 	backoff := time.Duration(backoffSec) * time.Second
-
-	// Honor the harness's Retry-After hint when the policy says so and the
-	// hint exceeds the schedule.
-	if d.HonorHint && lastErr != nil && lastErr.RetryAfter > backoff {
-		backoff = lastErr.RetryAfter
+	if hint > backoff {
+		backoff = hint
 		if backoff > time.Duration(maxBackoff)*time.Second {
 			backoff = time.Duration(maxBackoff) * time.Second
 		}
 	}
-
 	return backoff
 }
 
