@@ -299,7 +299,7 @@
 .card {
   border: 1px solid var(--color-border);
   border-radius: var(--radius-lg);
-  background: var(--color-panel-bg);
+  background: var(--color-bg-card); /* #222 — cards must read above the #1a1a1a panel */
   padding: var(--space-5);
 }
 
@@ -336,7 +336,7 @@
 .statCard {
   border: 1px solid var(--color-border);
   border-radius: var(--radius-lg);
-  background: var(--color-surface-subtle);
+  background: var(--color-bg-card);
   padding: var(--space-4);
 }
 
@@ -814,7 +814,7 @@
   margin-top: var(--space-3);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-lg);
-  background: #202020;
+  background: var(--color-bg-card);
   padding: var(--space-2);
 }
 
@@ -835,6 +835,10 @@
 .queueCardKey {
   flex: 1;
   min-width: 0;
+  /* Reset the global code{} background/padding so the key reads as a bare
+     mono label, not a recessed input box. */
+  background: transparent;
+  padding: 0;
   font-family: var(--font-family-mono);
   font-size: 11px;
   text-transform: uppercase;
@@ -881,16 +885,11 @@
   font-size: 10px;
 }
 
-.workerTag {
-  border: 1px solid var(--color-border-hover);
-  background: #252525;
-  color: var(--color-text-secondary);
-}
-
+.workerTag,
 .workerTag2 {
   border: 1px solid var(--color-border);
-  background: var(--color-surface-subtle);
-  color: var(--color-text-tertiary);
+  background: var(--color-bg-active);
+  color: var(--color-text-secondary);
 }
 
 .workerMeta {

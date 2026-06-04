@@ -176,13 +176,17 @@
 
 /* Each body column reuses StatusColumn (header hidden) as the droppable.
    Override its intrinsic min-width/flex so the grid (not the column) controls
-   width — keeping body columns aligned with the header cells. */
-.columnBodyRow > section {
+   width — keeping body columns aligned with the header cells. Pin --column-bg
+   to #111 so every body cell — including the backlog column (normally muted
+   #131313) and the inner .content scroll-shadow gradient — shares one surface. */
+.columnBodyRow > section,
+.columnBodyRow > section[data-column-type="backlog"] {
   overflow: visible;
   min-width: 0;
   min-height: 188px;
   flex: initial;
   border-right: 1px solid var(--color-border);
+  --column-bg: var(--color-bg-secondary);
   background-color: var(--color-bg-secondary);
 }
 

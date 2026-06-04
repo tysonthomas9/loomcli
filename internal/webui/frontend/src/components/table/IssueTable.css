@@ -197,7 +197,7 @@
 
 .issue-table__priority.priority-2 {
   background-color: var(--color-priority-2);
-  color: var(--color-text); /* Dark text for WCAG AA contrast */
+  color: #171717; /* dark text on amber for WCAG AA (--color-text resolves light in dark theme) */
 }
 
 .issue-table__priority.priority-3 {
@@ -407,20 +407,21 @@
   z-index: var(--z-sticky);
 }
 
-/* Header sticky cells need explicit background and elevated z-index for dual-axis sticking */
+/* Header sticky cells need explicit background and elevated z-index for dual-axis sticking.
+   Match the non-sticky header surface so the left columns don't form a darker stripe. */
 .issue-table__header-cell[data-column="id"] {
-  background-color: var(--color-bg-secondary);
+  background-color: var(--color-bg-tertiary);
   z-index: calc(var(--z-sticky, 10) + 1);
 }
 
-/* Body sticky cells need opaque background */
+/* Body sticky cells need opaque background — match the row/table surface. */
 .issue-table__cell[data-column="id"] {
-  background-color: var(--color-bg);
+  background-color: var(--color-bg-card);
 }
 
 /* Match hover state background for sticky cells */
 .issue-table__row:hover .issue-table__cell[data-column="id"] {
-  background-color: var(--color-bg-secondary);
+  background-color: var(--color-bg-hover);
 }
 
 /* Match selected state background for sticky cells */
@@ -451,17 +452,17 @@
 }
 
 .issue-table__header-cell--checkbox {
-  background-color: var(--color-bg-secondary);
+  background-color: var(--color-bg-tertiary);
   z-index: calc(var(--z-sticky, 10) + 2);
 }
 
 .issue-table__cell--checkbox {
-  background-color: var(--color-bg);
+  background-color: var(--color-bg-card);
 }
 
 /* Match hover state for checkbox cells */
 .issue-table__row:hover .issue-table__cell--checkbox {
-  background-color: var(--color-bg-secondary);
+  background-color: var(--color-bg-hover);
 }
 
 /* Match selected state for checkbox cells */
