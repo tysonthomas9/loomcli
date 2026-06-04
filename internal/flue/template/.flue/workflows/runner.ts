@@ -137,9 +137,10 @@ export async function run({ init, payload, env }: FlueContext) {
 			const session = await harness.session();
 			// Keep the scoped token alive across the (potentially long) agent run by
 			// heartbeating; stop once it returns. The brief reporting calls that
-			// follow run well inside the freshly-refreshed TTL.
+			// follow run well inside the freshly-refreshed TTL. session.prompt()
+			// returns a thenable without .finally, so wrap it in a native Promise.
 			const stopHeartbeat = startHeartbeat(loom);
-			const resp = await session.prompt(prompt).finally(stopHeartbeat);
+			const resp = await Promise.resolve(session.prompt(prompt)).finally(stopHeartbeat);
 			if (resp.usage) {
 				emit({ type: 'usage', input_tokens: resp.usage.input, output_tokens: resp.usage.output });
 			}
