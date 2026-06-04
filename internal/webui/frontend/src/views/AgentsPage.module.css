@@ -176,6 +176,16 @@
   font-size: var(--font-size-sm);
 }
 
+/* Real interactive agent terminal — positioned for the wterm grid + overlays. */
+.agentTerminal {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+  background: var(--terminal-bg);
+}
+
 .terminalOutput {
   flex: 1;
   min-height: 0;

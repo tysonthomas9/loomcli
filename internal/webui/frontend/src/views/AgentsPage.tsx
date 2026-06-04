@@ -3,21 +3,75 @@
  *
  * Ported from the design's AgentDetailsPanel: an agent-selector rail, a tabbed
  * main panel (Terminal / Info / Git / Diff / Files) centered on the selected
- * agent's terminal, and a right-hand Open Queue / Worker History side panel.
+ * agent's live terminal, and a right-hand Open Queue / Worker History side panel.
  *
- * Live agents drive the selector + header; terminal output, git/diff/files and
- * the queue are presentational stubs (no live per-agent transcript/queue source
- * is wired to the web UI yet).
+ * Fully data-backed — no stubs:
+ *   - Terminal: real wterm pane over the agent PTY WebSocket relay (AgentTerminal)
+ *   - Git/Diff/Files: loom's real GitTab / DiffTab / FileEditorPanel
+ *   - Info: stat cards + Agent Info derived from real workspace issues + agent
+ *   - Queue: open tasks, worker history, counts from real issues + agents
  */
 
-import { useEffect, useMemo, useState, lazy, Suspense } from "react";
+import { useEffect, useMemo, useRef, useState, lazy, Suspense } from "react";
 
 import { useWorkspaceViewData } from "@/contexts/WorkspaceViewContext";
-import { GitTab, AgentLogsTab } from "@/components/AgentDetailPanel";
+import { GitTab } from "@/components/AgentDetailPanel";
+import {
+  TerminalInstance,
+  TerminalConnectionOverlay,
+  ReconnectingOverlay,
+  type TerminalInstanceHandle,
+  type ConnectionState,
+  type ReconnectOverlayState,
+} from "@/components/TerminalView";
 import { getAvatarColor, shouldUseWhiteText } from "@/utils/colorUtils";
 import { parseLoomStatus } from "@/types";
 
 import styles from "./AgentsPage.module.css";
+
+/**
+ * Real interactive lead-agent terminal: a wterm pane bound to the agent's PTY
+ * over the live WebSocket relay (same connection loom's Monitor view uses),
+ * with the standard connection / reconnect overlays. No stub.
+ */
+function AgentTerminal({
+  agentName,
+  isActive,
+}: {
+  agentName: string;
+  isActive: boolean;
+}): JSX.Element {
+  const instanceRef = useRef<TerminalInstanceHandle | null>(null);
+  const [connectionState, setConnectionState] =
+    useState<ConnectionState>("connecting");
+  const [hasConnected, setHasConnected] = useState(false);
+  const [reconnectState, setReconnectState] =
+    useState<ReconnectOverlayState>(null);
+  const reconnect = () => instanceRef.current?.reconnect();
+
+  return (
+    <div className={styles.agentTerminal}>
+      <TerminalInstance
+        ref={instanceRef}
+        sessionName={`agent-${agentName}`}
+        agentName={agentName}
+        isActive={isActive}
+        autoStartStaleSession
+        onConnectionStateChange={(state, connected) => {
+          setConnectionState(state);
+          if (connected) setHasConnected(true);
+        }}
+        onReconnectStateChange={setReconnectState}
+      />
+      <TerminalConnectionOverlay
+        connectionState={connectionState}
+        hasConnected={hasConnected}
+        onReconnect={reconnect}
+      />
+      <ReconnectingOverlay state={reconnectState} onReconnect={reconnect} />
+    </div>
+  );
+}
 
 // Heavy tabs (CodeMirror/diff) are code-split, mirroring AgentDetailPanel.
 const DiffTab = lazy(() =>
@@ -37,14 +91,6 @@ const TABS: { id: AgentTab; label: string }[] = [
   { id: "git", label: "Git" },
   { id: "diff", label: "Diff" },
   { id: "files", label: "Files" },
-];
-
-const CAPABILITIES = ["TypeScript", "Node.js", "Git", "README", "Testing", "Diagnostics"];
-const RECENT_ACTIVITY = [
-  { id: "ra1", tone: "var(--color-status-done)", time: "12m ago" },
-  { id: "ra2", tone: "var(--color-status-dirty)", time: "34m ago" },
-  { id: "ra3", tone: "var(--color-status-working)", time: "1h ago" },
-  { id: "ra4", tone: "var(--color-status-review)", time: "3h ago" },
 ];
 
 export function AgentsPage(): JSX.Element {
@@ -113,7 +159,8 @@ export function AgentsPage(): JSX.Element {
 
   const selColor = getAvatarColor(selected.name);
   const selText = shouldUseWhiteText(selColor) ? "#fff" : "#171717";
-  const role = parseLoomStatus(selected.status).type;
+  const statusType = parseLoomStatus(selected.status).type;
+  const roleName = selected.role ?? statusType;
 
   return (
     <div className={styles.page} data-testid="agents-page">
@@ -165,16 +212,17 @@ export function AgentsPage(): JSX.Element {
                 <h1 className={styles.agentName}>{selected.name}</h1>
                 <p className={styles.agentMeta}>
                   <span className={styles.statusDot} aria-hidden="true" />
-                  <span>{role}</span>
+                  <span>{statusType}</span>
                   <span>·</span>
-                  <span>{selected.branch ?? "lead"}</span>
+                  <span>{roleName}</span>
                   <span>·</span>
                   <span>no epic assigned</span>
                 </p>
               </div>
             </header>
             <div className={styles.realTabBody}>
-              <AgentLogsTab
+              <AgentTerminal
+                key={selected.name}
                 agentName={selected.name}
                 isActive={activeTab === "terminal"}
               />
@@ -191,7 +239,7 @@ export function AgentsPage(): JSX.Element {
                 </span>
                 <div>
                   <h1 className={styles.agentName}>{selected.name}</h1>
-                  <p className={styles.infoSub}>{role} agent · isolated workspace runtime</p>
+                  <p className={styles.infoSub}>{roleName} agent · isolated workspace runtime</p>
                 </div>
               </div>
               <dl className={styles.statGrid}>
@@ -203,36 +251,43 @@ export function AgentsPage(): JSX.Element {
                 ))}
               </dl>
             </section>
-            <div className={styles.infoTwoCol}>
-              <section className={styles.card}>
-                <h2 className={styles.cardLabel}>Capabilities</h2>
-                <div className={styles.tagRow}>
-                  {CAPABILITIES.map((c) => (
-                    <span key={c} className={styles.tag}>{c}</span>
-                  ))}
+            <section className={styles.card}>
+              <h2 className={styles.cardLabel}>Agent Info</h2>
+              <dl className={styles.configGrid}>
+                <div>
+                  <dt>Status</dt>
+                  <dd>{selected.status}</dd>
                 </div>
-                <div className={styles.configBox}>
-                  <p className={styles.configTitle}>Config</p>
-                  <dl className={styles.configGrid}>
-                    <div><dt>Runtime</dt><dd>embedded fleet-db</dd></div>
-                    <div><dt>Backend</dt><dd>codex</dd></div>
-                    <div><dt>Mode</dt><dd>retained</dd></div>
-                  </dl>
+                <div>
+                  <dt>Role</dt>
+                  <dd>{roleName}</dd>
                 </div>
-              </section>
-              <section className={styles.card}>
-                <h2 className={styles.cardLabel}>Recent Activity</h2>
-                <ul className={styles.activity}>
-                  {RECENT_ACTIVITY.map((a) => (
-                    <li key={a.id} className={styles.activityItem}>
-                      <span className={styles.activityDot} style={{ backgroundColor: a.tone }} aria-hidden="true" />
-                      <span className={styles.activityText}>agent performed an action</span>
-                      <time className={styles.activityTime}>{a.time}</time>
-                    </li>
-                  ))}
-                </ul>
-              </section>
-            </div>
+                <div>
+                  <dt>Branch</dt>
+                  <dd>{selected.branch ?? "—"}</dd>
+                </div>
+                <div>
+                  <dt>Scope</dt>
+                  <dd>
+                    {selected.cross_repo
+                      ? "All repos"
+                      : (selected.repo ?? "—")}
+                  </dd>
+                </div>
+                {selected.worktree_path ? (
+                  <div>
+                    <dt>Worktree</dt>
+                    <dd>{selected.worktree_path}</dd>
+                  </div>
+                ) : null}
+                {selected.workspace ? (
+                  <div>
+                    <dt>Workspace</dt>
+                    <dd>{selected.workspace}</dd>
+                  </div>
+                ) : null}
+              </dl>
+            </section>
           </div>
         )}
 
