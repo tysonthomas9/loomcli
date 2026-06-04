@@ -166,10 +166,13 @@ func (app *Server) registerWorkspaceRoutes() {
 		// fencing token → 409). workspaceMW runs first so the workspace is in ctx.
 		taskMW := taskRunWriteAuth(st, app.config.FleetJWTKey)
 		wrap := func(h http.Handler) http.Handler { return workspaceMW(taskMW(h)) }
+		// refresh re-mints the caller's token on heartbeat so a long run stays
+		// authenticated; nil in keyless dev-mode (no token in the response).
+		refresh := taskRunTokenRefresher(app.config.FleetJWTKey)
 		app.mux.Handle("POST /api/workspaces/{ws}/sessions/{sessionId}/artifacts", wrap(sessionwrite.HandlePostSessionArtifact(st.AgentSessions(), st.Artifacts())))
 		app.mux.Handle("POST /api/workspaces/{ws}/sessions/{sessionId}/usage", wrap(sessionwrite.HandleRecordSessionUsage(st.AgentSessions(), st.Artifacts())))
 		app.mux.Handle("POST /api/workspaces/{ws}/sessions/{sessionId}/logs", wrap(sessionwrite.HandleAppendSessionLog(st.AgentSessions())))
-		app.mux.Handle("POST /api/workspaces/{ws}/sessions/{sessionId}/heartbeat", wrap(sessionwrite.HandleHeartbeatSession(st.AgentSessions())))
+		app.mux.Handle("POST /api/workspaces/{ws}/sessions/{sessionId}/heartbeat", wrap(sessionwrite.HandleHeartbeatSession(st.AgentSessions(), refresh)))
 	}
 	if statusHandler := app.config.MonitorHandlers.Status; statusHandler != nil {
 		app.mux.Handle("GET /api/workspaces/{ws}/monitor/status", workspaceMW(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

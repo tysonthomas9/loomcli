@@ -126,6 +126,22 @@ describe("TaskRunClient", () => {
     ]);
   });
 
+  it("heartbeat rotates the bearer onto the refreshed token", async () => {
+    const auths: (string | null)[] = [];
+    stubFetch((req) => {
+      auths.push(req.headers.get("authorization"));
+      if (new URL(req.url).pathname.endsWith("/heartbeat")) {
+        return json({ success: true, data: { session_id: "sess-1", token: "tok2" } });
+      }
+      return json({ success: true }, 202);
+    });
+    const run = TaskRunClient.fromBootstrap(bootstrap);
+    await run.appendLog({ stream: "stdout", text: "a" }); // uses initial token
+    await run.heartbeat(); // server returns tok2 → client rotates
+    await run.appendLog({ stream: "stdout", text: "b" }); // uses tok2
+    expect(auths).toEqual(["Bearer tok", "Bearer tok", "Bearer tok2"]);
+  });
+
   it("session writes require a sessionId in the bootstrap", async () => {
     const { sessionId, ...noSession } = bootstrap;
     void sessionId;

@@ -125,7 +125,11 @@ export async function run({ init, payload, env }: FlueContext) {
 			const agent = createAgent(() => ({ sandbox: daytona(sandbox), cwd, model }));
 			const harness = await init(agent);
 			const session = await harness.session();
-			const resp = await session.prompt(prompt);
+			// Keep the scoped token alive across the (potentially long) agent run by
+			// heartbeating; stop once it returns. The brief reporting calls that
+			// follow run well inside the freshly-refreshed TTL.
+			const stopHeartbeat = startHeartbeat(loom);
+			const resp = await session.prompt(prompt).finally(stopHeartbeat);
 			if (resp.usage) {
 				emit({ type: 'usage', input_tokens: resp.usage.input, output_tokens: resp.usage.output });
 			}
@@ -293,6 +297,29 @@ async function completeRun(loom: TaskRunClient, filesChanged: number): Promise<v
 	} catch (err) {
 		emit({ type: 'report_warning', op: 'complete', error: errMessage(err) });
 	}
+}
+
+/**
+ * How often to heartbeat during a run. The scoped capability token loom mints is
+ * short-lived (taskruntoken.DefaultTTL, ~30m); heartbeating well inside that
+ * window keeps it alive — loom serve re-mints on each beat and the SDK rotates
+ * onto the fresh token — so a long agent run never expires mid-flight.
+ */
+const HEARTBEAT_INTERVAL_MS = 5 * 60 * 1000;
+
+/**
+ * Start a periodic heartbeat that refreshes the scoped token for the duration
+ * of the agent run. Returns a stop function; a no-op when there's no loom client
+ * or session. Best-effort: a failed beat warns but never throws (it must not
+ * fail the run), and the timer is unref'd so it can't hold the process open.
+ */
+function startHeartbeat(loom: TaskRunClient | null): () => void {
+	if (!loom || !loom.bootstrap.sessionId) return () => {};
+	const timer = setInterval(() => {
+		loom.heartbeat().catch((err) => emit({ type: 'report_warning', op: 'heartbeat', error: errMessage(err) }));
+	}, HEARTBEAT_INTERVAL_MS);
+	(timer as { unref?: () => void }).unref?.();
+	return () => clearInterval(timer);
 }
 
 /**

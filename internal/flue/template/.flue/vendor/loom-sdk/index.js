@@ -525,17 +525,26 @@ var FencedError = class extends TaskRunError {
   }
 };
 var TaskRunClient = class _TaskRunClient {
-  constructor(bootstrap, http) {
+  constructor(bootstrap, http, token) {
     this.bootstrap = bootstrap;
     this.http = http;
+    this.token = token;
   }
   /** Construct from the scoped capability loom injects. */
   static fromBootstrap(bootstrap) {
     const headers = {};
-    if (bootstrap.token) headers["Authorization"] = `Bearer ${bootstrap.token}`;
     if (bootstrap.actor) headers["X-Actor"] = bootstrap.actor;
     const http = createClient({ baseUrl: bootstrap.serverUrl, headers });
-    return new _TaskRunClient(bootstrap, http);
+    const client = new _TaskRunClient(bootstrap, http, bootstrap.token);
+    http.use({
+      onRequest({ request }) {
+        if (client.token) {
+          request.headers.set("Authorization", `Bearer ${client.token}`);
+        }
+        return request;
+      }
+    });
+    return client;
   }
   /** Construct from environment variables (the common runner entry point). */
   static fromEnv(env) {
@@ -636,14 +645,21 @@ var TaskRunClient = class _TaskRunClient {
     );
     if (error) throw this.toError("appendLog", response, error);
   }
-  /** Heartbeat the session (bumps the lease's last-heartbeat). Note: does NOT
-   *  re-issue or refresh the capability token, which has a fixed TTL. */
+  /** Heartbeat the session (bumps the lease's last-heartbeat). When the server
+   *  is configured to refresh tokens, the response carries a freshly-minted
+   *  capability token bound to the same TaskRun with a renewed TTL; this rotates
+   *  the client onto it so a long run never expires mid-flight. Call it
+   *  periodically (well inside the token TTL) for the duration of the run. */
   async heartbeat() {
-    const { error, response } = await this.http.POST(
+    const { data, error, response } = await this.http.POST(
       "/api/workspaces/{ws}/sessions/{sessionId}/heartbeat",
       { params: { path: this.sessionPath() } }
     );
     if (error) throw this.toError("heartbeat", response, error);
+    const refreshed = data?.data?.token;
+    if (typeof refreshed === "string" && refreshed.length > 0) {
+      this.token = refreshed;
+    }
   }
   toError(op, response, body) {
     if (response?.status === 409) return new FencedError(op, body);

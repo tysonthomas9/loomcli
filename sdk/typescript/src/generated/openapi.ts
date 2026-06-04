@@ -2285,6 +2285,8 @@ export interface components {
             /** Format: date-time */
             last_heartbeat?: string;
             status?: string;
+            /** @description A freshly-minted TaskRun capability token bound to the same {workspace, task, session, fencing} as the request, with a renewed TTL. Present only when a signing key is configured. The SDK rotates onto it so a long run never expires mid-flight; a leaked token still dies once the runner stops heartbeating. */
+            token?: string;
         };
         AddDependencyRequest: {
             depends_on_id: string;

@@ -128,7 +128,9 @@ func TestRecordSessionUsage_PersistsUsageArtifact(t *testing.T) {
 
 func TestHeartbeatSession(t *testing.T) {
 	st := seedStore(t)
-	h := HandleHeartbeatSession(st.AgentSessions())
+	// A refresher re-mints the caller's token; its value must surface in the
+	// response so the SDK can rotate onto it. nil refresh → no token.
+	h := HandleHeartbeatSession(st.AgentSessions(), func(*http.Request) string { return "fresh-token" })
 
 	rec := httptest.NewRecorder()
 	h(rec, newReq(http.MethodPost, testSession, ""))
@@ -137,6 +139,16 @@ func TestHeartbeatSession(t *testing.T) {
 	}
 	if !strings.Contains(rec.Body.String(), `"session_id":"sess-1"`) {
 		t.Errorf("body missing session_id: %s", rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), `"token":"fresh-token"`) {
+		t.Errorf("body missing refreshed token: %s", rec.Body.String())
+	}
+
+	// nil refresher (keyless dev-mode) → no token field in the response.
+	rec = httptest.NewRecorder()
+	HandleHeartbeatSession(st.AgentSessions(), nil)(rec, newReq(http.MethodPost, testSession, ""))
+	if strings.Contains(rec.Body.String(), `"token"`) {
+		t.Errorf("nil refresh should omit token: %s", rec.Body.String())
 	}
 
 	// Heartbeat actually bumped LastHeartbeat.

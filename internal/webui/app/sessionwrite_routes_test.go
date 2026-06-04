@@ -2,6 +2,7 @@ package app
 
 import (
 	"bytes"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -147,5 +148,39 @@ func TestSessionWriteRoutes_FencingEnforced(t *testing.T) {
 	// Stale writer (older fencing token) → rejected 409 by the fencing middleware.
 	if code := post(mint(lease.FencingToken - 1)); code != http.StatusConflict {
 		t.Errorf("stale fencing token: status = %d, want 409", code)
+	}
+
+	// Refresh-on-heartbeat: an authenticated heartbeat returns a freshly-minted
+	// token bound to the SAME {workspace, task, session, fencing}, and it
+	// validates with the same signing key — so the runner can rotate onto it and
+	// keep writing past the original TTL without ever widening scope.
+	hbReq := httptest.NewRequest(http.MethodPost, "/api/workspaces/PARITY/sessions/sess-f1/heartbeat", nil)
+	hbReq.Header.Set("Authorization", "Bearer "+mint(lease.FencingToken))
+	hbRec := httptest.NewRecorder()
+	app.mux.ServeHTTP(hbRec, hbReq)
+	if hbRec.Code != http.StatusOK {
+		t.Fatalf("heartbeat: status = %d, want 200; body = %s", hbRec.Code, hbRec.Body.String())
+	}
+	var hb struct {
+		Data struct {
+			Token string `json:"token"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(hbRec.Body.Bytes(), &hb); err != nil {
+		t.Fatalf("decode heartbeat body: %v", err)
+	}
+	if hb.Data.Token == "" {
+		t.Fatal("heartbeat did not return a refreshed token")
+	}
+	refreshed, err := fleet.ValidateTaskRunToken(hb.Data.Token, key)
+	if err != nil {
+		t.Fatalf("refreshed token failed to validate: %v", err)
+	}
+	if !refreshed.AuthorizesSession("PARITY", "sess-f1") || refreshed.TaskID != "PARITY-1" || refreshed.FencingToken != lease.FencingToken {
+		t.Errorf("refreshed claims mismatch: %+v", refreshed)
+	}
+	// And the refreshed token actually works on a subsequent write.
+	if code := post(hb.Data.Token); code != http.StatusCreated {
+		t.Errorf("write with refreshed token: status = %d, want 201", code)
 	}
 }

@@ -215,11 +215,22 @@ type sessionHeartbeat struct {
 	SessionID     string `json:"session_id"`
 	LastHeartbeat string `json:"last_heartbeat,omitempty"`
 	Status        string `json:"status,omitempty"`
+	Token         string `json:"token,omitempty"`
 }
 
+// TokenRefresher re-mints a fresh-TTL capability token for an authenticated
+// heartbeat request (from the validated claims in context), or returns "" when
+// refresh is not configured / not applicable. Supplied by the app layer, where
+// the signing key + validated claims are available; keeping it a seam lets the
+// dependency-light sessionwrite package stay free of the token/fleet stack.
+type TokenRefresher func(r *http.Request) string
+
 // HandleHeartbeatSession bumps the session's last-heartbeat to keep its lease
-// alive. POST /api/workspaces/{ws}/sessions/{sessionId}/heartbeat
-func HandleHeartbeatSession(sessions store.AgentSessionStore) http.HandlerFunc {
+// alive and, when refresh is configured, returns a freshly-minted token so a
+// long run never expires mid-flight (the SDK rotates onto it). refresh may be
+// nil (keyless dev-mode → no token in the response).
+// POST /api/workspaces/{ws}/sessions/{sessionId}/heartbeat
+func HandleHeartbeatSession(sessions store.AgentSessionStore, refresh TokenRefresher) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		ws, sessionID := scope(r)
 		sess, err := sessions.Heartbeat(r.Context(), ws, sessionID)
@@ -227,10 +238,15 @@ func HandleHeartbeatSession(sessions store.AgentSessionStore) http.HandlerFunc {
 			writeErr(w, statusForErr(err), "session not found")
 			return
 		}
+		token := ""
+		if refresh != nil {
+			token = refresh(r)
+		}
 		writeOK(w, http.StatusOK, sessionHeartbeat{
 			SessionID:     sess.SessionID,
 			LastHeartbeat: sess.LastHeartbeat.UTC().Format(time.RFC3339Nano),
 			Status:        string(sess.Status),
+			Token:         token,
 		})
 	}
 }

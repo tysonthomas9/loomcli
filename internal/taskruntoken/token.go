@@ -38,6 +38,14 @@ const (
 // scope, so a leaked TaskRun token cannot acquire new work.
 var DefaultScopes = []string{ScopeTaskRead, ScopeTaskComment, ScopeSessionWrite}
 
+// DefaultTTL is the lifetime of a minted TaskRun token. It is kept short so a
+// leaked token dies quickly after the runner stops; long runs are covered by
+// refresh-on-heartbeat (the heartbeat endpoint re-issues a fresh-TTL token
+// bound to the same TaskRun, and the SDK rotates onto it). Both the supervisor
+// (initial mint) and loom serve (refresh mint) source the value from here so
+// it stays in one place. The runner heartbeats well inside this window.
+const DefaultTTL = 30 * time.Minute
+
 // Claims binds a capability token to exactly one TaskRun.
 type Claims struct {
 	Workspace    string   `json:"workspace"`
@@ -48,12 +56,13 @@ type Claims struct {
 	jwt.RegisteredClaims
 }
 
-// Generate mints a signed, scoped TaskRun capability token. The token is static
-// for its TTL — there is NO refresh today (heartbeat bumps the lease's
-// last-heartbeat but does not re-issue a token). Within the TTL, fencing is the
-// backstop: a stale writer is rejected because a newer lease holder has a higher
-// fencing token. A future refresh-on-heartbeat (re-mint with the current fencing
-// token, shorter TTL) would make lease-loss fail closed; see the PRD.
+// Generate mints a signed, scoped TaskRun capability token valid for expiry
+// (see DefaultTTL). The token's TTL is deliberately short: a long run keeps it
+// alive by refreshing on heartbeat (the heartbeat endpoint re-mints with the
+// same {workspace, task, session, fencing} binding and a fresh TTL), so a
+// leaked token dies soon after the runner stops heartbeating. Within the TTL,
+// fencing is the backstop: a stale writer is rejected because a newer lease
+// holder has a higher fencing token.
 func Generate(c Claims, signingKey []byte, expiry time.Duration) (string, error) {
 	if len(signingKey) == 0 {
 		return "", fmt.Errorf("taskrun token: empty signing key")

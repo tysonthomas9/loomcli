@@ -6,7 +6,9 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/store"
+	"github.com/tysonthomas9/loomcli/internal/taskruntoken"
 	"github.com/tysonthomas9/loomcli/internal/webui/fleet"
+	"github.com/tysonthomas9/loomcli/internal/webui/handlers/sessionwrite"
 )
 
 // taskRunWriteAuth builds the TaskRun auth + fencing middleware for the session
@@ -47,4 +49,29 @@ func taskRunWriteAuth(st store.Store, signingKey []byte) func(http.Handler) http
 	}
 	// token-optional only in keyless dev-mode; fail-closed when a key is configured.
 	return fleet.NewTaskRunAuthMiddleware(validate, fencing, len(signingKey) == 0)
+}
+
+// taskRunTokenRefresher builds the heartbeat token-refresh policy (PRD Phase C,
+// "Auth & trust model"). On an authenticated heartbeat it re-mints the caller's
+// own capability token — same {workspace, task, session, fencing, scopes}
+// binding, a fresh TTL — so a long run keeps a valid token without ever
+// widening its scope. The auth middleware already validated + fenced the
+// request before the handler runs, so the claims in context are trustworthy and
+// the fencing token is current. Returns nil in keyless dev-mode (no key → no
+// token in the heartbeat response).
+func taskRunTokenRefresher(signingKey []byte) sessionwrite.TokenRefresher {
+	if len(signingKey) == 0 {
+		return nil
+	}
+	return func(r *http.Request) string {
+		claims, ok := fleet.TaskRunClaimsFromContext(r.Context())
+		if !ok || claims == nil {
+			return ""
+		}
+		tok, err := fleet.GenerateTaskRunToken(*claims, signingKey, taskruntoken.DefaultTTL)
+		if err != nil {
+			return ""
+		}
+		return tok
+	}
 }

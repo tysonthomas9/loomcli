@@ -40,18 +40,32 @@ export class TaskRunClient {
   private constructor(
     readonly bootstrap: TaskRunBootstrap,
     private readonly http: Client<paths>,
+    /** The current bearer token. Mutable: heartbeat() rotates it onto the
+     *  fresh token loom serve mints, so a long run never expires mid-flight. */
+    private token: string | undefined,
   ) {}
 
   /** Construct from the scoped capability loom injects. */
   static fromBootstrap(bootstrap: TaskRunBootstrap): TaskRunClient {
     const headers: Record<string, string> = {};
-    if (bootstrap.token) headers["Authorization"] = `Bearer ${bootstrap.token}`;
-    // Fencing is enforced server-side via the signed token claim, not a header,
-    // so bootstrap.fencingToken is informational only and not sent.
     // fleetdb dev-mode auth compatibility (local only).
     if (bootstrap.actor) headers["X-Actor"] = bootstrap.actor;
     const http = createClient<paths>({ baseUrl: bootstrap.serverUrl, headers });
-    return new TaskRunClient(bootstrap, http);
+    const client = new TaskRunClient(bootstrap, http, bootstrap.token);
+    // Attach the bearer via middleware that reads the *current* token on every
+    // request, rather than baking it into a static header — so a token
+    // refreshed on heartbeat takes effect for all subsequent calls. Fencing is
+    // enforced server-side from the signed token claim (not a header), so
+    // bootstrap.fencingToken is informational only and not sent.
+    http.use({
+      onRequest({ request }) {
+        if (client.token) {
+          request.headers.set("Authorization", `Bearer ${client.token}`);
+        }
+        return request;
+      },
+    });
+    return client;
   }
 
   /** Construct from environment variables (the common runner entry point). */
@@ -168,14 +182,21 @@ export class TaskRunClient {
     if (error) throw this.toError("appendLog", response, error);
   }
 
-  /** Heartbeat the session (bumps the lease's last-heartbeat). Note: does NOT
-   *  re-issue or refresh the capability token, which has a fixed TTL. */
+  /** Heartbeat the session (bumps the lease's last-heartbeat). When the server
+   *  is configured to refresh tokens, the response carries a freshly-minted
+   *  capability token bound to the same TaskRun with a renewed TTL; this rotates
+   *  the client onto it so a long run never expires mid-flight. Call it
+   *  periodically (well inside the token TTL) for the duration of the run. */
   async heartbeat(): Promise<void> {
-    const { error, response } = await this.http.POST(
+    const { data, error, response } = await this.http.POST(
       "/api/workspaces/{ws}/sessions/{sessionId}/heartbeat",
       { params: { path: this.sessionPath() } },
     );
     if (error) throw this.toError("heartbeat", response, error);
+    const refreshed = data?.data?.token;
+    if (typeof refreshed === "string" && refreshed.length > 0) {
+      this.token = refreshed;
+    }
   }
 
   private toError(

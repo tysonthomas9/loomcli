@@ -22,10 +22,12 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 )
 
-// taskRunTokenTTL bounds the scoped TaskRun capability token's lifetime. It
-// should comfortably exceed a single run; the runner refreshes via heartbeat
-// once that path lands.
-const taskRunTokenTTL = 2 * time.Hour
+// taskRunTokenTTL bounds the scoped TaskRun capability token's lifetime. It is
+// short by design: the runner keeps it alive by refreshing on heartbeat (loom
+// serve re-issues a fresh-TTL token), so a leaked token dies soon after the
+// runner stops. Sourced from taskruntoken so the initial mint here and the
+// refresh mint in loom serve share one value.
+const taskRunTokenTTL = taskruntoken.DefaultTTL
 
 // buildCommand constructs the exec.Cmd for spawning an agent subprocess (does not start it).
 func (s *Supervisor) buildCommand(ap *AgentProcess) (*exec.Cmd, error) {

@@ -1697,6 +1697,9 @@ type SessionHeartbeat struct {
 	LastHeartbeat *time.Time `json:"last_heartbeat,omitempty"`
 	SessionId     *string    `json:"session_id,omitempty"`
 	Status        *string    `json:"status,omitempty"`
+
+	// Token A freshly-minted TaskRun capability token bound to the same {workspace, task, session, fencing} as the request, with a renewed TTL. Present only when a signing key is configured. The SDK rotates onto it so a long run never expires mid-flight; a leaked token still dies once the runner stops heartbeating.
+	Token *string `json:"token,omitempty"`
 }
 
 // SessionHistoryRecord Session history record (Redis-backed, per-issue)
