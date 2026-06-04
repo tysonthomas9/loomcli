@@ -23,7 +23,7 @@
   padding: 14px 16px;
   border-bottom: 1px solid var(--color-border);
   flex-shrink: 0;
-  background-color: var(--color-bg-tertiary);
+  background-color: var(--color-chrome); /* Aether column-header strip (#1a1a1a) */
 }
 
 .headerLabel {
