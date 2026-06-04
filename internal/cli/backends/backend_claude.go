@@ -122,6 +122,9 @@ func (c *ClaudeBackend) InvokeStreaming(ctx context.Context, workDir, prompt, ag
 	if budget := resolveMaxBudgetUSD(); budget != "" {
 		args = append(args, "--max-budget-usd", budget)
 	}
+	if effort := resolveAgentEffort(); effort != "" {
+		args = append(args, "--effort", effort)
+	}
 	cmd := exec.Command("claude", args...) //nolint:gosec // G204: intentional subprocess launch for claude CLI
 	cmd.Dir = workDir
 	cmd.Env = buildClaudeEnv(workDir, agentName)
@@ -178,8 +181,11 @@ func (s *streamReadCloser) Close() error {
 
 // ContinueSession resumes an interactive Claude session by session ID.
 func (c *ClaudeBackend) ContinueSession(workDir, sessionID, agentName string) error {
-	cmd := exec.Command("claude", "--resume", "--session-id", sessionID, //nolint:gosec // G204: intentional subprocess launch for claude CLI
-		"--dangerously-skip-permissions")
+	args := []string{"--resume", "--session-id", sessionID, "--dangerously-skip-permissions"}
+	if effort := resolveAgentEffort(); effort != "" {
+		args = append(args, "--effort", effort)
+	}
+	cmd := exec.Command("claude", args...) //nolint:gosec // G204: intentional subprocess launch for claude CLI
 	cmd.Dir = workDir
 	cmd.Env = buildClaudeEnv(workDir, agentName)
 	cmd.Stdin = os.Stdin
@@ -207,7 +213,12 @@ var claudeInvoker = defaultClaudeInvoker
 // buildClaudeInteractiveCmd constructs the exec.Cmd for interactive Claude invocation.
 // Extracted for testability — callers can inspect the returned cmd without execution.
 func buildClaudeInteractiveCmd(workDir, prompt, agentName string) *exec.Cmd {
-	cmd := exec.Command("claude", "--dangerously-skip-permissions", prompt) //nolint:gosec // G204: intentional subprocess launch for claude CLI
+	args := []string{"--dangerously-skip-permissions"}
+	if effort := resolveAgentEffort(); effort != "" {
+		args = append(args, "--effort", effort)
+	}
+	args = append(args, prompt)
+	cmd := exec.Command("claude", args...) //nolint:gosec // G204: intentional subprocess launch for claude CLI
 	cmd.Dir = workDir
 	cmd.Env = buildClaudeEnv(workDir, agentName)
 	cmd.Stdin = os.Stdin
@@ -259,6 +270,9 @@ func buildClaudeNonInteractiveArgs(resumeSessionID, prompt string) []string {
 	if budget := resolveMaxBudgetUSD(); budget != "" {
 		args = append(args, "--max-budget-usd", budget)
 	}
+	if effort := resolveAgentEffort(); effort != "" {
+		args = append(args, "--effort", effort)
+	}
 	if prompt != "" {
 		args = append(args, prompt)
 	}
@@ -305,6 +319,7 @@ func defaultClaudeNonInteractiveInvoker(workDir, prompt, agentName string, shutd
 		Env:         buildClaudeEnv(workDir, agentName),
 		Prompt:      "",
 		HarnessName: "claude",
+		Effort:      resolveAgentEffort(),
 		LineHandler: newStreamLineHandler(workDir, collector),
 		RetryPolicy: harness.DefaultRetryPolicy(),
 	})

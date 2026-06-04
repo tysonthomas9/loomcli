@@ -80,6 +80,9 @@ func MergeRoleConfig(base, overlay cfgpkg.RoleConfig) cfgpkg.RoleConfig {
 	if overlay.Backend != "" {
 		base.Backend = overlay.Backend
 	}
+	if overlay.Effort != "" {
+		base.Effort = overlay.Effort
+	}
 	if overlay.Model != "" {
 		base.Model = overlay.Model
 	}
