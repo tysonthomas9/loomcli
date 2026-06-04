@@ -21,6 +21,7 @@ const VALID_VIEW_SEGMENTS: ReadonlySet<string> = new Set<ViewMode>([
   "monitor",
   "observability",
   "terminal",
+  "agents",
   "workspace",
   "settings",
   "files",

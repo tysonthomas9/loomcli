@@ -5,6 +5,10 @@
 
 /* Root element */
 html {
+  /* Keep the 16px rem root: the Aether design sizes everything in absolute px
+     (text-sm=14, text-xs=12, text-[10px]), so loom's rem chrome must resolve to
+     those same px (0.875rem=14, 0.75rem=12). Body density comes from
+     --font-size-base (13px), not from scaling the root. */
   font-size: 100%;
   scroll-behavior: smooth;
 }

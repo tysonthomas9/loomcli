@@ -1551,7 +1551,7 @@ describe("App", () => {
   });
 
   describe("filter integration", () => {
-    it("renders SearchInput in the navigation slot", () => {
+    it("renders SearchInput in the board toolbar", () => {
       const mockReturn = createMockUseIssuesReturn({
         issues: [createMockIssue()],
       });
@@ -1566,7 +1566,7 @@ describe("App", () => {
       ).toBeInTheDocument();
     });
 
-    it("renders FilterBar in the navigation slot", () => {
+    it("renders FilterBar in the board toolbar", () => {
       const mockReturn = createMockUseIssuesReturn({
         issues: [createMockIssue()],
       });

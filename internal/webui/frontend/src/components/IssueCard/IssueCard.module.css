@@ -7,22 +7,23 @@
   display: flex;
   flex-direction: column;
   gap: var(--space-2);
-  padding: var(--space-3) var(--space-4);
+  padding: var(--space-3);
   background-color: var(--color-bg-card);
   border: 1px solid var(--color-border);
-  border-radius: 12px;
+  border-radius: 10px;
   box-shadow: 0 1px 2px rgb(17 24 39 / 7%);
   cursor: default;
   transition:
     box-shadow 0.15s ease,
     border-color var(--transition-fast),
+    transform var(--transition-fast),
     background-color var(--transition-fast);
 }
 
-/* Hover state for all cards */
+/* Hover state for all cards — Aether: lift + amber border */
 .issueCard:hover {
-  box-shadow: 0 4px 10px rgb(17 24 39 / 12%);
-  border-color: var(--color-border-hover);
+  border-color: var(--color-warning);
+  transform: translateY(-2px);
 }
 
 /* Interactive state when onClick is provided */
@@ -64,8 +65,14 @@
 
 .id {
   font-family: var(--font-family-mono);
-  font-size: 0.7rem;
-  color: #9aa3af;
+  font-size: 0.6875rem; /* 11px — Aether ticket key */
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--color-text-tertiary);
+  /* Keep the issue key readable: don't shrink below its content (short keys
+     like HELLO-1 show in full); only very long keys cap and ellipsize. */
+  flex-shrink: 0;
+  max-width: 65%;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -82,14 +89,17 @@
   flex-shrink: 0;
   padding: 2px 6px;
   font-size: 0.7rem;
-  font-weight: var(--font-weight-semibold);
+  font-weight: var(--font-weight-bold);
   line-height: 1;
-  border-radius: 7px;
+  border-radius: 5px;
   color: var(--color-text-primary);
   border: 1px solid color-mix(in srgb, var(--color-border) 70%, transparent);
 }
 
-/* Priority-specific badge colors (class-based for CSS Modules compatibility) */
+/* Priority-specific badge colors (class-based for CSS Modules compatibility).
+ * Light-background priorities (P1 amber, P2 yellow, P3 blue) use fixed dark
+ * text for legibility in BOTH themes (var(--color-text) is light in dark mode,
+ * which fails WCAG on these warm backgrounds). Dark-bg priorities keep white. */
 .priority0 {
   background-color: var(--color-priority-0);
   color: #ffffff;
@@ -98,18 +108,20 @@
 
 .priority1 {
   background-color: var(--color-priority-1);
-  color: #ffffff;
+  color: #171717;
   border-color: transparent;
 }
 
 .priority2 {
   background-color: var(--color-priority-2);
-  color: var(--color-text); /* Dark text for WCAG AA contrast */
+  color: #171717;
+  border-color: transparent;
 }
 
 .priority3 {
   background-color: var(--color-priority-3);
-  color: var(--color-text-primary);
+  color: #171717;
+  border-color: transparent;
 }
 
 .priority4 {
@@ -158,8 +170,8 @@
 
 .title {
   margin: 0;
-  font-size: 1rem;
-  font-weight: 400;
+  font-size: var(--font-size-sm); /* 14px — Aether ticket title (text-sm) */
+  font-weight: 500; /* font-medium */
   color: var(--color-text, #111827);
   line-height: var(--line-height-normal);
   /* Truncate to 2 lines */
@@ -356,11 +368,14 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 22px;
-  height: 22px;
-  font-size: 10px;
-  font-weight: 600;
-  color: var(--color-text-muted);
+  width: 28px;
+  height: 28px;
+  font-size: var(--font-size-xs); /* 12px */
+  font-weight: 900;
+  /* Aether ticket assignee avatar is a plain backdrop-colored circle with
+     bright text (NOT a vivid identity chip — only agent/workspace avatars are
+     colored). */
+  color: var(--color-text-primary);
   background-color: var(--color-bg-secondary);
   border-radius: 50%;
   flex-shrink: 0;

@@ -280,6 +280,56 @@
   margin: 0 0 10px;
 }
 
+/* ============= Overview stat cards ============= */
+
+.statGrid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.statCard {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px;
+  background: var(--color-bg-card);
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+}
+
+.statValue {
+  font-size: 22px;
+  font-weight: 800;
+  line-height: 1;
+  color: var(--color-text-primary);
+}
+
+.statValue[data-tone="success"] {
+  color: var(--color-success);
+}
+
+.statValue[data-tone="warning"] {
+  color: var(--color-warning);
+}
+
+.statValue[data-tone="danger"] {
+  color: var(--color-danger);
+}
+
+.statValue[data-tone="info"] {
+  color: var(--color-primary);
+}
+
+.statLabel {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--color-text-tertiary);
+  line-height: 1.2;
+}
+
 /* ============= Current Task ============= */
 
 .taskLink {

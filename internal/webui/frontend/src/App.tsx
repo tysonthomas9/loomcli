@@ -1331,56 +1331,78 @@ function App() {
     activeView === "graph" ||
     activeView === "issue-detail";
 
-  const headerNavigation = (
-    <div className={styles.headerControls}>
-      <div className={styles.searchWrapper}>
-        {searchScopeName && (
-          <SearchScopeIndicator
-            scopeName={searchScopeName}
-            onClear={handleScopeClear}
-          />
-        )}
-        <SearchInput
-          ref={searchInputRef as RefObject<HTMLInputElement>}
-          value={searchValue}
-          onChange={setSearchValue}
-          onClear={handleSearchClear}
-          placeholder={
-            searchScopeName
-              ? `Search in ${searchScopeName}...`
-              : "Search tasks..."
-          }
-          size="md"
+  // Issue controls (search · filters · New Issue) now live in the board toolbar
+  // (next to the Kanban/List tabs), not the top bar — matching the Aether design's
+  // minimal header. Composed below into `boardToolbar`.
+  const searchControl = (
+    <div className={styles.searchWrapper}>
+      {searchScopeName && (
+        <SearchScopeIndicator
+          scopeName={searchScopeName}
+          onClear={handleScopeClear}
         />
+      )}
+      <SearchInput
+        ref={searchInputRef as RefObject<HTMLInputElement>}
+        value={searchValue}
+        onChange={setSearchValue}
+        onClear={handleSearchClear}
+        placeholder={
+          searchScopeName
+            ? `Search in ${searchScopeName}...`
+            : "Search tasks..."
+        }
+        size="md"
+      />
+    </div>
+  );
+  const filterControls = (
+    <div className={styles.filtersWrapper}>
+      <FilterBar
+        filters={filters}
+        actions={syncedFilterActions}
+        showPriority={true}
+        showType={true}
+        showLabels={false}
+        showGroupBy={false}
+        showRepos={availableRepoNames.length > 1}
+        availableRepos={availableRepoNames}
+        selectedRepos={selectedRepoNamesArray}
+        onRepoChange={selectRepos}
+        variant="header"
+        showClear={true}
+      />
+      <MoreFiltersMenu
+        groupBy={filters.groupBy ?? DEFAULT_GROUP_BY}
+        onGroupByChange={syncedFilterActions.setGroupBy}
+      />
+    </div>
+  );
+  const newIssueButton = (
+    <button
+      className={styles.newIssueButton}
+      onClick={() => setShowCreateIssue(true)}
+      aria-label="New Issue"
+      data-testid="new-issue-button"
+    >
+      + New Issue
+    </button>
+  );
+
+  // Board toolbar: view tabs on the left; filters · search · New Issue on the
+  // right (New Issue sits next to Search). Shown only for issue-based views.
+  const showBoardToolbar =
+    activeView === "kanban" ||
+    activeView === "table" ||
+    activeView === "graph";
+  const boardToolbar = (
+    <div className={styles.boardToolbar} data-testid="board-toolbar">
+      <ViewSubSwitcher activeView={activeView} onChange={navigateToView} />
+      <div className={styles.boardToolbarControls}>
+        {filterControls}
+        {searchControl}
+        {newIssueButton}
       </div>
-      <div className={styles.filtersWrapper}>
-        <FilterBar
-          filters={filters}
-          actions={syncedFilterActions}
-          showPriority={true}
-          showType={true}
-          showLabels={false}
-          showGroupBy={false}
-          showRepos={availableRepoNames.length > 1}
-          availableRepos={availableRepoNames}
-          selectedRepos={selectedRepoNamesArray}
-          onRepoChange={selectRepos}
-          variant="header"
-          showClear={true}
-        />
-        <MoreFiltersMenu
-          groupBy={filters.groupBy ?? DEFAULT_GROUP_BY}
-          onGroupByChange={syncedFilterActions.setGroupBy}
-        />
-      </div>
-      <button
-        className={styles.newIssueButton}
-        onClick={() => setShowCreateIssue(true)}
-        aria-label="New Issue"
-        data-testid="new-issue-button"
-      >
-        + New Issue
-      </button>
     </div>
   );
 
@@ -1452,7 +1474,6 @@ function App() {
       <SearchTermProvider value={activeSearchTerm}>
         <AppLayout
           title={headerTitle}
-          navigation={headerNavigation}
           actions={headerActions}
           navRail={
             <NavRail
@@ -1460,6 +1481,13 @@ function App() {
               onChange={handleNavChange}
               sessionCount={activeSessionCount}
               badges={{ terminal: hasTerminalUnread }}
+              workspaces={(workspace?.workspaces ?? []).map((ws) => ({
+                id: ws.id,
+                name: ws.name,
+              }))}
+              activeWorkspaceId={workspaceId}
+              onWorkspaceSwitch={handleWorkspaceSwitcherSelect}
+              onAddWorkspace={() => setShowCreateWorkspace(true)}
             />
           }
           sidebar={sidebarContent}
@@ -1472,10 +1500,7 @@ function App() {
             }
           >
             <div className={styles.workspaceMainContent}>
-              <ViewSubSwitcher
-                activeView={activeView}
-                onChange={navigateToView}
-              />
+              {showBoardToolbar && boardToolbar}
               {(showStaleBanner || isConnectionLost) &&
                 staleBannerDisconnectedSince !== null &&
                 !(

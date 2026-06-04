@@ -118,6 +118,11 @@ const viewRoutes = [
     Component: () => null,
   },
   {
+    path: "agents",
+    lazy: () =>
+      import("@/views/AgentsPage").then((m) => ({ Component: m.AgentsPage })),
+  },
+  {
     path: "settings",
     lazy: () =>
       import("@/views/SettingsPage").then((m) => ({

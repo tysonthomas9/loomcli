@@ -15,6 +15,7 @@ export type ViewMode =
   | "monitor"
   | "observability"
   | "terminal"
+  | "agents"
   | "workspace"
   | "settings"
   | "files"

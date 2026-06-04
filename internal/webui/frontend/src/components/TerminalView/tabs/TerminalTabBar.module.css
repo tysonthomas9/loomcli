@@ -58,6 +58,8 @@
 .tab.active {
   background-color: var(--terminal-tab-active);
   color: var(--terminal-text-bright);
+  /* Aether: active terminal tab marked with an amber underline */
+  box-shadow: inset 0 -2px 0 0 var(--color-warning);
 }
 
 /* ============= Status Dot ============= */

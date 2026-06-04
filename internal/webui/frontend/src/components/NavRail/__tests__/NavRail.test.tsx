@@ -27,10 +27,16 @@ describe("NavRail", () => {
       expect(screen.getByLabelText("Settings")).toBeInTheDocument();
     });
 
-    it("renders a Monitor button", () => {
+    it("renders a Terminal button", () => {
       render(<NavRail activeView="kanban" onChange={() => {}} />);
 
-      expect(screen.getByLabelText("Monitor")).toBeInTheDocument();
+      expect(screen.getByLabelText("Terminal")).toBeInTheDocument();
+    });
+
+    it("renders an Agents button", () => {
+      render(<NavRail activeView="kanban" onChange={() => {}} />);
+
+      expect(screen.getByLabelText("Agents")).toBeInTheDocument();
     });
 
     it("does not render a List button", () => {
@@ -39,10 +45,10 @@ describe("NavRail", () => {
       expect(screen.queryByLabelText("List")).not.toBeInTheDocument();
     });
 
-    it("does not render a Terminal button", () => {
+    it("does not render a Monitor button (relabeled to Terminal)", () => {
       render(<NavRail activeView="kanban" onChange={() => {}} />);
 
-      expect(screen.queryByLabelText("Terminal")).not.toBeInTheDocument();
+      expect(screen.queryByLabelText("Monitor")).not.toBeInTheDocument();
     });
 
     it("does not render Observability, Files, or Workspace buttons", () => {
@@ -53,11 +59,11 @@ describe("NavRail", () => {
       expect(screen.queryByLabelText("Workspace")).not.toBeInTheDocument();
     });
 
-    it("renders exactly three navigation buttons", () => {
+    it("renders exactly four navigation buttons", () => {
       render(<NavRail activeView="kanban" onChange={() => {}} />);
 
       const buttons = screen.getAllByRole("button");
-      expect(buttons).toHaveLength(3);
+      expect(buttons).toHaveLength(4);
     });
 
     it("renders tooltips for each button", () => {
@@ -70,7 +76,8 @@ describe("NavRail", () => {
       );
       const tooltipTexts = Array.from(tooltips).map((t) => t.textContent);
       expect(tooltipTexts).toContain("Workspaces");
-      expect(tooltipTexts).toContain("Monitor");
+      expect(tooltipTexts).toContain("Agents");
+      expect(tooltipTexts).toContain("Terminal");
       expect(tooltipTexts).toContain("Settings");
     });
 
@@ -81,9 +88,9 @@ describe("NavRail", () => {
         "title",
         "Workspaces",
       );
-      expect(screen.getByLabelText("Monitor")).toHaveAttribute(
+      expect(screen.getByLabelText("Terminal")).toHaveAttribute(
         "title",
-        "Monitor",
+        "Terminal",
       );
       expect(screen.getByLabelText("Settings")).toHaveAttribute(
         "title",
@@ -91,13 +98,14 @@ describe("NavRail", () => {
       );
     });
 
-    it("renders buttons in correct order: Workspaces, Monitor, Settings", () => {
+    it("renders buttons in correct order: Workspaces, Agents, Terminal, Settings", () => {
       render(<NavRail activeView="kanban" onChange={() => {}} />);
 
       const buttons = screen.getAllByRole("button");
       expect(buttons[0]).toHaveAccessibleName("Workspaces");
-      expect(buttons[1]).toHaveAccessibleName("Monitor");
-      expect(buttons[2]).toHaveAccessibleName("Settings");
+      expect(buttons[1]).toHaveAccessibleName("Agents");
+      expect(buttons[2]).toHaveAccessibleName("Terminal");
+      expect(buttons[3]).toHaveAccessibleName("Settings");
     });
 
     it("has navigation landmark with aria-label", () => {
@@ -136,12 +144,18 @@ describe("NavRail", () => {
       expect(workspacesButton).toHaveAttribute("data-active");
     });
 
-    it("marks Monitor as active when activeView is terminal", () => {
+    it("marks Terminal as active when activeView is terminal", () => {
       render(<NavRail activeView="terminal" onChange={() => {}} />);
 
-      const monitorButton = screen.getByLabelText("Monitor");
+      const terminalButton = screen.getByLabelText("Terminal");
 
-      expect(monitorButton).toHaveAttribute("data-active");
+      expect(terminalButton).toHaveAttribute("data-active");
+    });
+
+    it("marks Agents as active when activeView is agents", () => {
+      render(<NavRail activeView="agents" onChange={() => {}} />);
+
+      expect(screen.getByLabelText("Agents")).toHaveAttribute("data-active");
     });
 
     it("applies custom className", () => {
@@ -168,14 +182,24 @@ describe("NavRail", () => {
       expect(onChange).toHaveBeenCalledWith("kanban");
     });
 
-    it('calls onChange with "terminal" when Monitor button is clicked', () => {
+    it('calls onChange with "terminal" when Terminal button is clicked', () => {
       const onChange = vi.fn();
       render(<NavRail activeView="kanban" onChange={onChange} />);
 
-      fireEvent.click(screen.getByLabelText("Monitor"));
+      fireEvent.click(screen.getByLabelText("Terminal"));
 
       expect(onChange).toHaveBeenCalledTimes(1);
       expect(onChange).toHaveBeenCalledWith("terminal");
+    });
+
+    it('calls onChange with "agents" when Agents button is clicked', () => {
+      const onChange = vi.fn();
+      render(<NavRail activeView="kanban" onChange={onChange} />);
+
+      fireEvent.click(screen.getByLabelText("Agents"));
+
+      expect(onChange).toHaveBeenCalledTimes(1);
+      expect(onChange).toHaveBeenCalledWith("agents");
     });
 
     it('calls onChange with "settings" when Settings button is clicked', () => {
@@ -225,15 +249,15 @@ describe("NavRail", () => {
       expect(screen.getByLabelText("3 active sessions")).toBeInTheDocument();
     });
 
-    it("badge only appears on Monitor button, not other buttons", () => {
+    it("badge only appears on Terminal button, not other buttons", () => {
       render(
         <NavRail activeView="kanban" onChange={() => {}} sessionCount={2} />,
       );
 
-      // Badge is inside the Monitor button
+      // Badge is inside the Terminal button
       const badge = screen.getByLabelText("2 active sessions");
-      const monitorButton = screen.getByLabelText("Monitor");
-      expect(monitorButton).toContainElement(badge);
+      const terminalButton = screen.getByLabelText("Terminal");
+      expect(terminalButton).toContainElement(badge);
 
       // Other buttons do not contain the badge
       const workspacesButton = screen.getByLabelText("Workspaces");
@@ -284,9 +308,9 @@ describe("NavRail", () => {
       const indicator = screen.getByLabelText("has unread output");
       expect(indicator).toBeInTheDocument();
 
-      // Indicator should be inside the Monitor button
-      const monitorButton = screen.getByLabelText("Monitor");
-      expect(monitorButton).toContainElement(indicator);
+      // Indicator should be inside the Terminal button
+      const terminalButton = screen.getByLabelText("Terminal");
+      expect(terminalButton).toContainElement(indicator);
     });
 
     it("does NOT render unread indicator when terminal IS the active view", () => {

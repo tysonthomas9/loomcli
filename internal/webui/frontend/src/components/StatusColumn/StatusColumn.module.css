@@ -89,8 +89,8 @@
 
 .title {
   margin: 0;
-  font-size: 1rem;
-  font-weight: 700;
+  font-size: var(--font-size-sm); /* 14px — Aether column header (text-sm font-black) */
+  font-weight: 900;
   letter-spacing: -0.01em;
   color: var(--color-text);
   line-height: var(--line-height-tight);

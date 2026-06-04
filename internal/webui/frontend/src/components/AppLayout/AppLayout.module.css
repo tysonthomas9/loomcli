@@ -17,10 +17,9 @@
   left: 0;
   right: 0;
   z-index: var(--z-sticky);
-  background-color: var(--color-bg);
+  background-color: var(--color-bg-secondary);
   border-bottom: 1px solid var(--color-border);
   height: var(--unified-header-height);
-  box-shadow: 0 1px 2px rgb(17 24 39 / 6%);
 }
 
 .headerContent {
@@ -44,9 +43,9 @@
 
 .title {
   margin: 0;
-  font-size: 2rem;
-  font-weight: 700;
-  letter-spacing: -0.03em;
+  font-size: 1rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
   color: var(--color-text-primary);
 }
 
@@ -97,7 +96,7 @@
   }
 
   .title {
-    font-size: 1.75rem;
+    font-size: 1rem;
   }
 }
 
@@ -135,7 +134,7 @@
   }
 
   .title {
-    font-size: 1.3rem;
+    font-size: 0.95rem;
   }
 }
 
