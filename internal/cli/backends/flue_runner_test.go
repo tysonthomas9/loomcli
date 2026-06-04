@@ -162,6 +162,36 @@ func TestRunFlueDaytonaTask_SyncsPatchBack(t *testing.T) {
 	}
 }
 
+// TestDeriveDaytonaInput_EpicBranch verifies the epic-branch strategy: the
+// runner is told to work from + push to the shared epic branch (not the local
+// HEAD), and a missing LOOM_FLUE_EPIC_BRANCH fails fast.
+func TestDeriveDaytonaInput_EpicBranch(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+	repo, _ := newGitRepoWithRemoteT(t)
+	t.Setenv("LOOM_FLUE_SYNC", "epic-branch")
+
+	// epic-branch without a branch name → error.
+	t.Setenv("LOOM_FLUE_EPIC_BRANCH", "")
+	if _, err := deriveDaytonaInput(repo, "do work", "nova"); err == nil || !strings.Contains(err.Error(), "LOOM_FLUE_EPIC_BRANCH") {
+		t.Fatalf("expected a LOOM_FLUE_EPIC_BRANCH error, got %v", err)
+	}
+
+	// With a branch → epic fields set; the sandbox clones/works from the epic tip.
+	t.Setenv("LOOM_FLUE_EPIC_BRANCH", "loom/epic-x")
+	in, err := deriveDaytonaInput(repo, "do work", "nova")
+	if err != nil {
+		t.Fatalf("deriveDaytonaInput: %v", err)
+	}
+	if in.SyncStrategy != syncStrategyEpicBranch {
+		t.Errorf("sync_strategy = %q, want epic-branch", in.SyncStrategy)
+	}
+	if in.EpicBranch != "loom/epic-x" || in.BaseRef != "loom/epic-x" || in.RepoBranch != "loom/epic-x" {
+		t.Errorf("epic/base/branch = %q/%q/%q, want all loom/epic-x", in.EpicBranch, in.BaseRef, in.RepoBranch)
+	}
+}
+
 // TestPushWorktreeBack covers the loom-side git proxy: it commits the synced
 // work, tolerates a failed push (best-effort), and is a no-op when clean.
 func TestPushWorktreeBack(t *testing.T) {
@@ -368,6 +398,10 @@ func TestResolveFlueSyncStrategy(t *testing.T) {
 	t.Setenv("LOOM_FLUE_SYNC", "Branch-Push")
 	if got := resolveFlueSyncStrategy(); got != syncStrategyBranchPush {
 		t.Errorf("case-insensitive: = %q, want branch-push", got)
+	}
+	t.Setenv("LOOM_FLUE_SYNC", "Epic-Branch")
+	if got := resolveFlueSyncStrategy(); got != syncStrategyEpicBranch {
+		t.Errorf("= %q, want epic-branch", got)
 	}
 }
 

@@ -41,8 +41,10 @@ interface RunnerInput {
 	/** daytona-task: host path the captured patch is written to. */
 	patch_out?: string;
 	task_id?: string;
-	/** How loom syncs the result back: "patch-back" (default) | "branch-push" | "none". */
+	/** How loom syncs the result back: "patch-back" (default) | "branch-push" | "epic-branch". */
 	sync_strategy?: string;
+	/** epic-branch: the shared branch this task commits onto (built off, pushed to). */
+	epic_branch?: string;
 	/**
 	 * PRD Phase B (docs/product/loom-typescript-sdk-spec.md). When true, the
 	 * runner fetches the task's title/description/design/AC from loom serve via
@@ -155,6 +157,13 @@ export async function run({ init, payload, env }: FlueContext) {
 			//     sync_strategy; the patch above stays an opt-in local convenience.
 			if (p.sync_strategy === 'branch-push' && p.repo_remote_url && filesChanged > 0) {
 				await pushResultBranch(sandbox, cwd, p, env, filesChanged, loom);
+			}
+
+			// 3a-epic: commit the work onto a SHARED epic branch (each epic task
+			//     builds on the previous one), pushing back to it. Sibling of
+			//     branch-push — both coexist; LOOM_FLUE_SYNC picks one.
+			if (p.sync_strategy === 'epic-branch' && p.repo_remote_url && p.epic_branch && filesChanged > 0) {
+				await commitToEpicBranch(sandbox, cwd, p, env, filesChanged, loom);
 			}
 
 			// 3b. Report results to loom serve via @loom/sdk (PRD Phase C) when the
@@ -357,6 +366,60 @@ async function pushResultBranch(
 	if (loom) {
 		try {
 			await loom.postArtifact({ type: 'commit', uri: ref, summary: `branch ${branch}`, filesChanged, idempotencyKey: sha });
+			emit({ type: 'artifact_reported', artifact_type: 'commit', files_changed: filesChanged });
+		} catch (err) {
+			emit({ type: 'report_warning', op: 'postArtifact(commit)', error: errMessage(err) });
+		}
+	}
+}
+
+/**
+ * epic-branch sync: commit the agent's work onto a SHARED epic branch and push
+ * it there, so an epic's tasks accumulate on one integration branch. Sequential
+ * runs fast-forward; a race is made safe by a fetch → rebase → retry loop. A
+ * "commit" artifact is registered for the epic ref. Sibling of pushResultBranch
+ * (per-task branch) — both strategies coexist; LOOM_FLUE_SYNC picks one.
+ */
+async function commitToEpicBranch(
+	sandbox: { id: string; process: { executeCommand: (c: string) => Promise<{ result?: string; exitCode?: number }> } },
+	cwd: string,
+	p: RunnerInput,
+	env: Record<string, string | undefined>,
+	filesChanged: number,
+	loom: TaskRunClient | null,
+): Promise<void> {
+	const remote = p.repo_remote_url ?? '';
+	const branch = p.epic_branch ?? '';
+	const safeTask = (p.task_id || 'run').replace(/[^A-Za-z0-9._-]/g, '-');
+	const token = env.GITHUB_TOKEN ?? process.env.GITHUB_TOKEN;
+	const auth = gitAuthArgs(remote, token);
+	// step 3 already staged everything (`git add -A`); commit it with a loom
+	// identity. Do NOT swallow a commit failure — a stale HEAD must not be pushed.
+	await sh(sandbox, `cd ${shq(cwd)} && git -c user.name=loom -c user.email=loom@localhost commit -q -m ${shq('loom: ' + safeTask)}`);
+	// Push onto the shared epic branch. If another task advanced it first, the
+	// push is rejected (non-fast-forward) → fetch its new tip, rebase our commit
+	// on top, retry. Bounded so a genuine conflict surfaces instead of looping.
+	let pushed = false;
+	for (let attempt = 1; attempt <= 4 && !pushed; attempt++) {
+		const push = await shTry(sandbox, `cd ${shq(cwd)} && git ${auth}push ${shq(remote)} HEAD:refs/heads/${branch}`);
+		if (push.ok) {
+			pushed = true;
+			break;
+		}
+		const reb = await shTry(sandbox, `cd ${shq(cwd)} && git ${auth}fetch ${shq(remote)} ${shq(branch)} && git rebase FETCH_HEAD`);
+		if (!reb.ok) {
+			await shTry(sandbox, `cd ${shq(cwd)} && git rebase --abort`);
+			throw new Error(`epic-branch: rebase onto ${branch} failed (conflict): ${redactSecrets(reb.output).slice(0, 200)}`);
+		}
+		emit({ type: 'epic_rebased', branch, attempt });
+	}
+	if (!pushed) throw new Error(`epic-branch: push to ${branch} failed after retries`);
+	const sha = (await sh(sandbox, `cd ${shq(cwd)} && git rev-parse HEAD`)).trim();
+	const ref = `${remote}#${branch}@${sha}`;
+	emit({ type: 'epic_committed', branch, commit: sha, remote });
+	if (loom) {
+		try {
+			await loom.postArtifact({ type: 'commit', uri: ref, summary: `epic ${branch}`, filesChanged, idempotencyKey: sha });
 			emit({ type: 'artifact_reported', artifact_type: 'commit', files_changed: filesChanged });
 		} catch (err) {
 			emit({ type: 'report_warning', op: 'postArtifact(commit)', error: errMessage(err) });

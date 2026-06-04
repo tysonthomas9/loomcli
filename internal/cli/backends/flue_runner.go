@@ -39,7 +39,10 @@ type runnerInput struct {
 	BaseRef       string `json:"base_ref,omitempty"`
 	PatchOut      string `json:"patch_out,omitempty"`
 	TaskID        string `json:"task_id,omitempty"`
-	SyncStrategy  string `json:"sync_strategy,omitempty"` // "patch-back" (default) | "branch-push" | "none"
+	SyncStrategy  string `json:"sync_strategy,omitempty"` // "patch-back" (default) | "branch-push" | "epic-branch"
+	// EpicBranch is the shared branch the runner commits onto for the
+	// epic-branch strategy (every epic task builds on the prior task's commit).
+	EpicBranch string `json:"epic_branch,omitempty"`
 	// FetchTask tells the runner to pull the task's title/description/design/AC
 	// from loom serve itself via @loom/sdk (getTask), instead of loom inlining
 	// them into Prompt. Set only when a reachable loom serve + bootstrap is
@@ -55,20 +58,38 @@ type runnerInput struct {
 //   - patch-back (default): the runner captures a binary-safe diff; loom applies
 //     it to the local worktree and commits/pushes (host-side convenience).
 //   - branch-push (PRD Phase D): the runner commits + pushes the work as a
-//     branch to the remote and registers a server-visible "commit" Artifact via
-//     @loom/sdk; loom does not host-push (the branch is the source of truth).
+//     per-task branch to the remote and registers a server-visible "commit"
+//     Artifact via @loom/sdk; loom does not host-push (the branch is the source
+//     of truth).
+//   - epic-branch: the runner commits the work onto a SHARED epic branch
+//     (LOOM_FLUE_EPIC_BRANCH) and pushes it there, so an epic's tasks accumulate
+//     on one integration branch (run sequentially → fast-forward; a race is made
+//     safe by a fetch+rebase retry in the runner). A "commit" Artifact is
+//     registered; loom does not host-push. The three strategies coexist;
+//     LOOM_FLUE_SYNC selects one per run.
 const (
 	syncStrategyPatchBack  = "patch-back"
 	syncStrategyBranchPush = "branch-push"
+	syncStrategyEpicBranch = "epic-branch"
 )
 
-// resolveFlueSyncStrategy selects the result-sync strategy ("patch-back" default
-// | "branch-push") from LOOM_FLUE_SYNC.
+// resolveFlueSyncStrategy selects the result-sync strategy from LOOM_FLUE_SYNC
+// ("patch-back" default | "branch-push" | "epic-branch").
 func resolveFlueSyncStrategy() string {
-	if strings.EqualFold(strings.TrimSpace(os.Getenv("LOOM_FLUE_SYNC")), syncStrategyBranchPush) {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("LOOM_FLUE_SYNC"))) {
+	case syncStrategyBranchPush:
 		return syncStrategyBranchPush
+	case syncStrategyEpicBranch:
+		return syncStrategyEpicBranch
+	default:
+		return syncStrategyPatchBack
 	}
-	return syncStrategyPatchBack
+}
+
+// resolveFlueEpicBranch returns the shared epic branch the runner commits onto
+// for the epic-branch strategy (LOOM_FLUE_EPIC_BRANCH); empty otherwise.
+func resolveFlueEpicBranch() string {
+	return strings.TrimSpace(os.Getenv("LOOM_FLUE_EPIC_BRANCH"))
 }
 
 // runnerEvent is one LOOMRUNNER NDJSON event line emitted by the runner.
@@ -136,12 +157,18 @@ func runFlueDaytonaTask(workDir, prompt, agentName string, shutdown <-chan struc
 		return err
 	}
 
-	patchOut, cleanup, err := tempPatchFile()
-	if err != nil {
-		return err
+	// epic-branch syncs entirely through the shared remote branch (the runner
+	// commits + pushes onto it), so there's no host patch to apply — skip the
+	// patch file. patch-back and branch-push still produce one (branch-push
+	// applies it locally as a convenience; patch-back is the host sink).
+	if input.SyncStrategy != syncStrategyEpicBranch {
+		patchOut, cleanup, err := tempPatchFile()
+		if err != nil {
+			return err
+		}
+		defer cleanup()
+		input.PatchOut = patchOut
 	}
-	defer cleanup()
-	input.PatchOut = patchOut
 
 	fmt.Println("Launching flue agent in a Daytona sandbox (daytona-task)...")
 	fmt.Println("")
@@ -235,6 +262,17 @@ func deriveDaytonaInput(workDir, prompt, agentName string) (runnerInput, error) 
 		in.CloseTask = flueCloseTaskEnabled()
 	} else {
 		in.Prompt = buildSandboxPrompt(workDir, prompt)
+	}
+	// epic-branch: every task builds on the prior task's commit, so the sandbox
+	// clones + works from the shared epic branch tip (not the local worktree
+	// HEAD) and pushes back onto it. Require the branch name up front.
+	if in.SyncStrategy == syncStrategyEpicBranch {
+		in.EpicBranch = resolveFlueEpicBranch()
+		if in.EpicBranch == "" {
+			return runnerInput{}, fmt.Errorf("flue backend: sync=epic-branch requires LOOM_FLUE_EPIC_BRANCH")
+		}
+		in.BaseRef = in.EpicBranch
+		in.RepoBranch = in.EpicBranch
 	}
 	return in, nil
 }
