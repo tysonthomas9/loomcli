@@ -46,6 +46,9 @@ type runnerInput struct {
 	// available; otherwise Prompt carries the inlined task (fallback). See
 	// docs/product/loom-typescript-sdk-spec.md (Phase B).
 	FetchTask bool `json:"fetch_task,omitempty"`
+	// CloseTask tells the runner to close/advance the task via the SDK on success.
+	// The close policy itself lives in the runner.ts completeRun() (customizable).
+	CloseTask bool `json:"close_task,omitempty"`
 }
 
 // Sync strategies for how a daytona-task result returns to loom:
@@ -229,10 +232,23 @@ func deriveDaytonaInput(workDir, prompt, agentName string) (runnerInput, error) 
 	if sandboxReadPathAvailable(workDir) {
 		in.FetchTask = true
 		in.Prompt = daytonaSandboxPreamble
+		in.CloseTask = flueCloseTaskEnabled()
 	} else {
 		in.Prompt = buildSandboxPrompt(workDir, prompt)
 	}
 	return in, nil
+}
+
+// flueCloseTaskEnabled reports whether a successful SDK-path run should close its
+// task (LOOM_FLUE_CLOSE_TASK; default on, disable with 0/false/no/off). The close
+// policy itself lives in the runner.ts completeRun() so it stays customizable.
+func flueCloseTaskEnabled() bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("LOOM_FLUE_CLOSE_TASK"))) {
+	case "0", "false", "no", "off":
+		return false
+	default:
+		return true
+	}
 }
 
 // sandboxReadPathAvailable reports whether loom can hand the runner a usable

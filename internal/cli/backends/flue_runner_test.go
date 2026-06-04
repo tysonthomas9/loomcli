@@ -388,6 +388,15 @@ func TestDeriveDaytonaInput_BranchPushStrategy(t *testing.T) {
 	}
 }
 
+func TestFlueCloseTaskEnabled(t *testing.T) {
+	t.Setenv("LOOM_FLUE_CLOSE_TASK", "")
+	if !flueCloseTaskEnabled() { t.Error("default should be enabled") }
+	for _, v := range []string{"0", "false", "no", "off", "OFF"} {
+		t.Setenv("LOOM_FLUE_CLOSE_TASK", v)
+		if flueCloseTaskEnabled() { t.Errorf("%q should disable close", v) }
+	}
+}
+
 // TestSandboxReadPathAvailable checks the bootstrap-availability gate, including
 // resolving the workspace via either LOOM_WORKSPACE or LOOM_WORKSPACE_ID.
 func TestSandboxReadPathAvailable(t *testing.T) {

@@ -52,6 +52,11 @@ interface RunnerInput {
 	 * otherwise `prompt` carries the full (inlined) task and this stays false.
 	 */
 	fetch_task?: boolean;
+	/**
+	 * When true, the runner closes/advances the task via @loom/sdk on success
+	 * (the policy lives in completeRun() in this file — customize it there).
+	 */
+	close_task?: boolean;
 }
 
 function emit(event: Record<string, unknown>): void {
@@ -154,6 +159,12 @@ export async function run({ init, payload, env }: FlueContext) {
 			//     task.
 			if (loom) {
 				await reportToLoom(loom, resp.usage);
+			}
+
+			// 3c. Close/advance the task on success (PRD Phase C). The policy lives in
+			//     completeRun() below — edit it to change when/how the task closes.
+			if (loom && p.close_task) {
+				await completeRun(loom, filesChanged);
 			}
 
 			// 4. Delete the sandbox on success (proposal: successful sandboxes are
@@ -265,6 +276,22 @@ async function reportToLoom(
 		} catch (err) {
 			emit({ type: 'report_warning', op: 'recordUsage', error: errMessage(err) });
 		}
+	}
+}
+
+/**
+ * Close/advance the task after a successful run (PRD Phase C). CUSTOMIZE THIS:
+ * the default closes the task via the SDK with a short summary. Edit it to set a
+ * different status (loom.updateStatus('review')), gate on acceptance criteria,
+ * post a summary comment, or skip closing. Best-effort — a failure warns but
+ * never fails the run.
+ */
+async function completeRun(loom: TaskRunClient, filesChanged: number): Promise<void> {
+	try {
+		await loom.complete({ reason: `flue runner: applied ${filesChanged} file change(s)` });
+		emit({ type: 'task_completed', task_id: loom.bootstrap.taskId });
+	} catch (err) {
+		emit({ type: 'report_warning', op: 'complete', error: errMessage(err) });
 	}
 }
 
