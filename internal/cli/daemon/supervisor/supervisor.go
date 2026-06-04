@@ -92,6 +92,12 @@ type Supervisor struct {
 	// means use the package default (backendUnavailableRecheckInterval). Tests set a
 	// small value to avoid the 30s wait.
 	backendRecheckInterval time.Duration
+
+	// maxRetriesParkInterval is the fixed delay computeBackoff returns once an
+	// agent has exhausted its restart budget and parked (StopReasonMaxRetriesParked).
+	// Zero means use the package default (defaultMaxRetriesParkInterval). Tests set
+	// a small value to avoid the 60s wait.
+	maxRetriesParkInterval time.Duration
 }
 
 // NewAgent creates an AgentProcess from an agent entry, resolving the worktree path
@@ -288,7 +294,11 @@ func (s *Supervisor) superviseAgent(ap *AgentProcess) {
 		}
 
 		if !s.shouldRestart(ap) {
-			slog.Warn("max restarts exceeded, stopping supervisor", "worktree", ap.Entry.Worktree)
+			// Terminal stops only: fatal (auth/billing), fast-fail
+			// (deterministic / park-budget escalation), or the
+			// max_retries=0 fail-fast opt-out. Budget exhaustion on
+			// retryable classes parks-and-retries instead (returns true).
+			slog.Warn("supervisor stopping (terminal)", "worktree", ap.Entry.Worktree)
 			return
 		}
 
@@ -819,6 +829,17 @@ func (s *Supervisor) postExitCleanup(ap *AgentProcess) {
 // covers the backoff window plus the AgentRestarted event emit; the actual
 // re-spawn that follows is its own daemon.supervisor.spawn child span (via
 // the next iteration of the supervise loop).
+// startBackoffHeartbeat keeps the agent's supervise tick fresh during a long
+// restart wait (a park, or a long exponential backoff). It returns a no-op
+// stopper for short waits that cannot approach the staleness threshold, so
+// callers can always defer the returned function.
+func (s *Supervisor) startBackoffHeartbeat(ap *AgentProcess, backoff time.Duration) func() {
+	if backoff < agentWaitHeartbeatInterval {
+		return func() {}
+	}
+	return s.startAgentWaitHeartbeat(ap)
+}
+
 func (s *Supervisor) sleepBeforeRestart(ap *AgentProcess) bool {
 	backoff := s.computeBackoff(ap)
 	ap.Mu.Lock()
@@ -841,6 +862,13 @@ func (s *Supervisor) sleepBeforeRestart(ap *AgentProcess) bool {
 	if evt, err := events.NewEvent(events.AgentRestarted, ap.Entry.Worktree, ap.Entry.Role, "", events.AgentRestartedData{PID: 0, RestartCount: count}); err == nil {
 		s.EmitEvent(evt)
 	}
+
+	// Keep the agent's liveness tick fresh during a long wait (a park, or a
+	// long exponential backoff) so the watchdog cannot mistake a healthy,
+	// waiting supervise goroutine for a wedged one. The select below is
+	// bounded by backoff, so this masks no real deadlock.
+	stopHeartbeat := s.startBackoffHeartbeat(ap, backoff)
+	defer stopHeartbeat()
 
 	var backoffAction string
 	select {
@@ -901,6 +929,7 @@ func (s *Supervisor) GetAgents() []SupervisedAgentStatus {
 			AssignedEpicID:         ap.AssignedEpicID,
 			StopReason:             ap.StopReason,
 			NoWorkCount:            ap.NoWorkCount,
+			ParkCount:              ap.ParkCount,
 			BackoffUntil:           ap.BackoffUntil,
 			OwnershipLeaseID:       ap.OwnershipLeaseID,
 			OwnershipFencingToken:  ap.OwnershipFencingToken,

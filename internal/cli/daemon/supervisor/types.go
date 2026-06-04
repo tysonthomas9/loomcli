@@ -54,6 +54,7 @@ type AgentProcess struct {
 	RateRetryCount int                  // consecutive rate-limit retries (separate from RestartCount)
 	LastNoWork     bool                 // true if last exit was due to no claimable tasks
 	NoWorkCount    int                  // consecutive NoWork exits (reset on non-NoWork exit)
+	ParkCount      int                  // park cycles since the last successful run (drives ParkBudget escalation; display-only in the state file, never hydrated across daemon restarts)
 
 	CurrentBackendIdx int       // 0=primary, 1+=fallback index into Entry.FallbackBackends
 	BackoffUntil      time.Time // when current backoff sleep ends (zero if not in backoff)
@@ -81,6 +82,17 @@ const (
 	StopReasonYielded            StopReason = "yielded"
 	StopReasonWatchdog           StopReason = "watchdog"
 	StopReasonBackendUnavailable StopReason = "backend_unavailable"
+	// StopReasonMaxRetriesParked marks an agent that exhausted its restart
+	// budget and is now park-and-retrying on a fixed interval (policy
+	// Decision Retry with OnExhaustion Park) instead of being abandoned.
+	// The supervise goroutine stays alive and the agent self-resumes once a
+	// transient root cause clears.
+	StopReasonMaxRetriesParked StopReason = "max_retries_parked"
+	// StopReasonFastFail marks a deterministic failure the policy refuses to
+	// retry or park (Decision FastFail — e.g. ContextOverflow, ModelNotFound
+	// with backends exhausted, or a capped park that never made progress).
+	// Surfaced as "failed" in daemon-status.
+	StopReasonFastFail StopReason = "fast_fail"
 )
 
 // resolveRemote returns the git remote name for this agent.
@@ -127,6 +139,7 @@ type SupervisedAgentStatus struct {
 	StopReason             StopReason // why the agent stopped (empty while running)
 	LastErrorClass         string     // string representation of last error class (e.g. "RateLimited")
 	NoWorkCount            int        // consecutive NoWork exits
+	ParkCount              int        // park cycles since the last successful run
 	BackoffUntil           time.Time  // when backoff sleep ends (zero if not in backoff)
 	RemoteBranch           string     // remote tracking ref (e.g. "origin/main")
 	OwnershipLeaseID       string
