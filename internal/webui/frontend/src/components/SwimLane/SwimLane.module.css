@@ -116,33 +116,83 @@
   text-align: center;
 }
 
+/* Aether kanban: header-row strip stacked above the body grid; the whole
+   block scrolls horizontally when columns hit their min width. */
 .laneContent {
-  display: flex;
-  flex-direction: row;
-  gap: 0;
-  padding: var(--space-3);
+  display: block;
   overflow-x: auto;
   overflow-y: visible;
-  flex: 0 0 auto; /* Size to content instead of filling space */
   opacity: 1;
-  transition:
-    opacity 0.15s ease-out,
-    padding 0.2s ease-out;
+  transition: opacity 0.15s ease-out;
 }
 
-/* Inside swim lanes, columns should size to content (not clip) */
-.laneContent > section {
+.columnHeaderRow {
+  display: grid;
+  background-color: var(--color-chrome);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.columnHeaderCell {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  min-height: 56px;
+  padding: 14px 16px;
+  border-right: 1px solid var(--color-border);
+}
+
+.columnHeaderCell:last-child {
+  border-right: none;
+}
+
+.columnTitle {
+  margin: 0;
+  font-size: var(--font-size-sm); /* 14px */
+  font-weight: 900;
+  letter-spacing: -0.01em;
+  color: var(--color-text);
+}
+
+.columnTitle[data-empty] {
+  color: var(--color-text-secondary);
+}
+
+.columnCount {
+  flex-shrink: 0;
+  min-width: 22px;
+  padding: 2px 8px;
+  font-size: 0.6875rem; /* 11px */
+  font-weight: 700;
+  color: var(--color-text-secondary);
+  background-color: var(--color-bg-card);
+  border-radius: var(--radius-full);
+  text-align: center;
+}
+
+.columnBodyRow {
+  display: grid;
+}
+
+/* Each body column reuses StatusColumn (header hidden) as the droppable.
+   Override its intrinsic min-width/flex so the grid (not the column) controls
+   width — keeping body columns aligned with the header cells. */
+.columnBodyRow > section {
   overflow: visible;
+  min-width: 0;
+  min-height: 188px;
+  flex: initial;
+  border-right: 1px solid var(--color-border);
+  background-color: var(--color-bg-secondary);
 }
 
-/* Column content in swim lanes should not scroll — show all cards */
-.laneContent > section > div[role="list"] {
+.columnBodyRow > section:last-child {
+  border-right: none;
+}
+
+.columnBodyRow > section > div[role="list"] {
   overflow: visible;
   flex: 0 0 auto;
-}
-
-.laneContent > :last-child {
-  border-right: none;
 }
 
 .laneContent[data-collapsed="true"] {
