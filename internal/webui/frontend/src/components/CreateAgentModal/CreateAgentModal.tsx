@@ -2,9 +2,20 @@ import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 
 import type { RepoInfo, WorkspaceAgentInfo } from "@/api/workspace";
 import { useCreateWorkspaceAgent } from "@/hooks/agents";
+import { useBackends } from "@/hooks/workspace";
 import { ApiError } from "@/types/common";
 
 import styles from "./CreateAgentModal.module.css";
+
+/**
+ * Role options as a segmented control (Aether Wireframe V3 Add-Agent dialog).
+ * Loom's backend validates roles — only task/plan are defined, so "lead" is
+ * intentionally absent (creating a lead agent 404s "role not found").
+ */
+const ROLE_OPTIONS: { value: string; label: string }[] = [
+  { value: "task", label: "Task" },
+  { value: "plan", label: "Plan" },
+];
 
 export interface CreateAgentModalProps {
   isOpen: boolean;
@@ -39,9 +50,20 @@ export function CreateAgentModal({
   const [error, setError] = useState<string | null>(null);
   const wasOpenRef = useRef(false);
   const createAgent = useCreateWorkspaceAgent(workspaceId);
+  const { backends } = useBackends();
 
   const repoOptions = useMemo(() => repos.map((repo) => repo.name), [repos]);
   const selectedRepo = repoName || repoOptions[0] || "";
+
+  // Real backend list (Aether V3 made this a dropdown, not free text). Keep the
+  // resolved/current value selectable even if it isn't in the live list.
+  const backendOptions = useMemo(() => {
+    const opts = backends.map((b) => ({ value: b.name, label: b.displayName }));
+    if (backend && !opts.some((o) => o.value === backend)) {
+      opts.unshift({ value: backend, label: backend });
+    }
+    return opts.length > 0 ? opts : [{ value: backend, label: backend }];
+  }, [backends, backend]);
 
   useEffect(() => {
     if (!isOpen) {
@@ -160,32 +182,46 @@ export function CreateAgentModal({
 
           <div className={styles.row}>
             <div className={styles.fieldGroup}>
-              <label className={styles.label} htmlFor="agent-role">
+              <span className={styles.label} id="agent-role-label">
                 Role
-              </label>
-              <select
-                id="agent-role"
-                className={styles.select}
-                value={roleName}
-                onChange={(event) => setRoleName(event.target.value)}
-                disabled={isSubmitting}
+              </span>
+              <div
+                className={styles.segControl}
+                role="group"
+                aria-labelledby="agent-role-label"
               >
-                <option value="task">task</option>
-                <option value="plan">plan</option>
-              </select>
+                {ROLE_OPTIONS.map((option) => (
+                  <button
+                    key={option.value}
+                    type="button"
+                    className={styles.segOption}
+                    data-active={roleName === option.value || undefined}
+                    aria-pressed={roleName === option.value}
+                    onClick={() => setRoleName(option.value)}
+                    disabled={isSubmitting}
+                  >
+                    {option.label}
+                  </button>
+                ))}
+              </div>
             </div>
             <div className={styles.fieldGroup}>
               <label className={styles.label} htmlFor="agent-backend">
-                Backend
+                AI Backend
               </label>
-              <input
+              <select
                 id="agent-backend"
-                className={styles.input}
+                className={styles.select}
                 value={backend}
                 onChange={(event) => setBackend(event.target.value)}
-                placeholder="claude"
                 disabled={isSubmitting}
-              />
+              >
+                {backendOptions.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
             </div>
           </div>
 

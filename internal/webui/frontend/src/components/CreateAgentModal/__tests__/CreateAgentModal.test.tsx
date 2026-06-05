@@ -101,24 +101,30 @@ describe("CreateAgentModal: default prop seeding", () => {
     expect(screen.getByLabelText(/^name$/i)).toHaveValue("pad");
   });
 
-  it("seeds role select from defaultRoleName", () => {
+  it("seeds the role segmented control from defaultRoleName", () => {
     renderModal({ defaultRoleName: "plan" });
-    expect(screen.getByLabelText(/^role$/i)).toHaveValue("plan");
+    expect(screen.getByRole("button", { name: "Plan" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
   });
 
   it("defaults role to 'task' when defaultRoleName is omitted", () => {
     renderModal();
-    expect(screen.getByLabelText(/^role$/i)).toHaveValue("task");
+    expect(screen.getByRole("button", { name: "Task" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
   });
 
   it("seeds backend from defaultBackend (falling back to 'codex')", () => {
     renderModal({ defaultBackend: "claude" });
-    expect(screen.getByLabelText(/^backend$/i)).toHaveValue("claude");
+    expect(screen.getByLabelText(/ai backend/i)).toHaveValue("claude");
   });
 
   it("falls back to 'codex' backend when defaultBackend is empty", () => {
     renderModal({ defaultBackend: "   " });
-    expect(screen.getByLabelText(/^backend$/i)).toHaveValue("codex");
+    expect(screen.getByLabelText(/ai backend/i)).toHaveValue("codex");
   });
 });
 
@@ -258,17 +264,8 @@ describe("CreateAgentModal: submission", () => {
     await waitFor(() => expect(onSuccess).toHaveBeenCalledWith(sampleAgent));
   });
 
-  it("omits backend field when empty", async () => {
-    mockCreateAgent.mockResolvedValueOnce(sampleAgent);
-    renderModal({ defaultName: "agent" });
-    fireEvent.change(screen.getByLabelText(/^backend$/i), {
-      target: { value: "" },
-    });
-    fireEvent.click(screen.getByRole("button", { name: /create agent/i }));
-    await waitFor(() => expect(mockCreateAgent).toHaveBeenCalled());
-    const req = mockCreateAgent.mock.calls[0][0];
-    expect(req).not.toHaveProperty("backend");
-  });
+  // (The "omit backend when empty" case is unreachable now that AI Backend is a
+  // required dropdown — it always carries a value — so that test was removed.)
 
   it("sends cross_repo with empty repos array when workspace scope is on", async () => {
     mockCreateAgent.mockResolvedValueOnce(sampleAgent);
@@ -298,7 +295,10 @@ describe("CreateAgentModal: submission", () => {
     await waitFor(() => {
       expect(screen.getByLabelText(/^name$/i)).toHaveValue("seed-name");
     });
-    expect(screen.getByLabelText(/^role$/i)).toHaveValue("plan");
+    expect(screen.getByRole("button", { name: "Plan" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
   });
 });
 
