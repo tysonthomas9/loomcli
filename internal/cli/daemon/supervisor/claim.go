@@ -169,10 +169,35 @@ func (s *Supervisor) claimRequestedTask(ap *AgentProcess, opts backend.ReadyOpts
 // (an in_progress task is never "ready") — recovering your own task is safe, and
 // the worktree actor already held the claim. Returns true when the task is ours
 // to resume: a successful (re-)claim, or a conflict whose holder is THIS
-// worktree (our own claim still within its TTL). Any other failure returns
-// false so the caller cold-starts rather than stranding the agent.
+// worktree (our own claim still within its TTL — see reclaimOwnLockedTask). Any
+// other failure returns false so the caller cold-starts rather than stranding
+// the agent.
 func (s *Supervisor) claimResumeTask(ap *AgentProcess, taskID string) bool {
 	err := s.claimIssueForAgent(ap, taskID, "resume interrupted task")
+	if err == nil {
+		return true // server set status=in_progress + assignee on the claim
+	}
+	if backend.IsKind(err, backend.KindConflict) && conflictHolder(err) == ap.Entry.Worktree {
+		return s.reclaimOwnLockedTask(ap, taskID)
+	}
+	slog.Warn("resume re-claim failed; cold-starting", "worktree", ap.Entry.Worktree, "task_id", taskID, "err", err)
+	return false
+}
+
+// reclaimOwnLockedTask re-takes a claim this worktree already holds so the
+// server re-asserts status=in_progress + assignee — the symmetric inverse of
+// [recover]'s resetTask(status=open, assignee=""). A bare lock conflict performs
+// no issue-field writes, so resuming through it leaves a [recover]-reset task
+// permanently open/unassigned on the Kanban board (WEB-EXTRACTOR-NEW-49).
+// Releasing our own lock (lock-only, best-effort) and claiming fresh re-runs
+// the claim-side field writes on any server whose release-lock we can use. If
+// the fresh claim still conflicts with ourselves (release unsupported/failed),
+// fall back to the old resume-in-place behavior — board staleness is then
+// logged but resume continuity is preserved. A foreign holder after the
+// release means the task was legitimately stolen: cold-start.
+func (s *Supervisor) reclaimOwnLockedTask(ap *AgentProcess, taskID string) bool {
+	s.releaseAssignedTaskClaim(ap, taskID) // best-effort /release-lock as this worktree
+	err := s.claimIssueForAgent(ap, taskID, "resume re-claim after self-release")
 	if err == nil {
 		return true
 	}
@@ -181,10 +206,12 @@ func (s *Supervisor) claimResumeTask(ap *AgentProcess, taskID string) bool {
 		ap.AssignedTaskID = taskID
 		ap.RequestedTaskID = ""
 		ap.Mu.Unlock()
-		slog.Info("resuming task already claimed by this worktree", "worktree", ap.Entry.Worktree, "task_id", taskID)
+		slog.Warn("resuming own-locked task without field re-assert; board status may lag",
+			"worktree", ap.Entry.Worktree, "task_id", taskID, "err", err)
 		return true
 	}
-	slog.Warn("resume re-claim failed; cold-starting", "worktree", ap.Entry.Worktree, "task_id", taskID, "err", err)
+	slog.Warn("own-locked task re-claim lost or failed; cold-starting",
+		"worktree", ap.Entry.Worktree, "task_id", taskID, "err", err)
 	return false
 }
 

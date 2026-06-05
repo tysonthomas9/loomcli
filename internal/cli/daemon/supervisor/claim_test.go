@@ -285,3 +285,184 @@ func TestTaskIDForLifecycle_UsesAssignedFallback(t *testing.T) {
 		t.Fatalf("taskIDForLifecycle(lock) = %q, want task-lock", got)
 	}
 }
+
+// --- claimResumeTask / reclaimOwnLockedTask ---
+
+// ownConflictErr builds the KindConflict error a fleet backend returns when an
+// issue's claim lock is held, carrying the holder identity in Meta the way
+// fleet-db's 409 envelope populates existing_owner.
+func ownConflictErr(holder string) error {
+	return &backend.BackendError{
+		Kind:    backend.KindConflict,
+		Op:      "ClaimIssue",
+		Message: "already claimed",
+		Meta:    map[string]string{"existing_owner": holder},
+	}
+}
+
+// actorReleaseMock wraps MockIssueBackend with the actorReleaseBackend
+// interface (ReleaseIssueAsActor) so tests can observe the supervisor's
+// lock-only self-release. The mock's ReleaseIssueLock method has a different
+// signature role and does NOT satisfy actorReleaseBackend.
+type actorReleaseMock struct {
+	*clitest.MockIssueBackend
+	releases []string // recorded as "taskID/actor"
+}
+
+func (m *actorReleaseMock) ReleaseIssueAsActor(_ context.Context, id string, actor string) error {
+	m.releases = append(m.releases, id+"/"+actor)
+	return nil
+}
+
+func resumeAgentProcess(taskID string) *AgentProcess {
+	return &AgentProcess{
+		Entry:        cfgpkg.AgentEntry{Worktree: "falcon", Role: "task"},
+		RoleConfig:   cfgpkg.RoleConfig{TaskFilter: "has_design"},
+		ResumeTaskID: taskID,
+	}
+}
+
+// The regression fence for WEB-EXTRACTOR-NEW-49: an own-lock conflict on the
+// resume re-claim must release the stale lock and claim fresh, so the server
+// re-asserts status=in_progress + assignee instead of resuming a task the
+// board shows as open/unassigned.
+func TestClaimTask_ResumeOwnConflict_ReleasesAndReclaims(t *testing.T) {
+	mock := clitest.NewMockIssueBackend()
+	claims := 0
+	mock.ClaimIssueFn = func(_ context.Context, _ string, _ time.Duration) error {
+		claims++
+		if claims == 1 {
+			return ownConflictErr("falcon")
+		}
+		return nil
+	}
+	rm := &actorReleaseMock{MockIssueBackend: mock}
+	s := &Supervisor{IssueBackend: rm}
+	ap := resumeAgentProcess("T-1")
+
+	if !s.claimTask(ap, "") {
+		t.Fatal("claimTask returned false")
+	}
+	if ap.AssignedTaskID != "T-1" {
+		t.Fatalf("AssignedTaskID = %q, want T-1", ap.AssignedTaskID)
+	}
+	if claims != 2 {
+		t.Fatalf("claim attempts = %d, want 2 (conflict, then fresh re-claim)", claims)
+	}
+	if len(rm.releases) != 1 || rm.releases[0] != "T-1/falcon" {
+		t.Fatalf("releases = %#v, want exactly [T-1/falcon]", rm.releases)
+	}
+}
+
+func TestClaimTask_ResumeOwnConflict_NoReleaseSupport_FallsBackToResume(t *testing.T) {
+	mock := clitest.NewMockIssueBackend()
+	claims := 0
+	mock.ClaimIssueFn = func(_ context.Context, _ string, _ time.Duration) error {
+		claims++
+		return ownConflictErr("falcon")
+	}
+	s := &Supervisor{IssueBackend: mock} // bare mock: no actorReleaseBackend
+	ap := resumeAgentProcess("T-1")
+
+	if !s.claimTask(ap, "") {
+		t.Fatal("claimTask returned false, want resume-in-place fallback")
+	}
+	if ap.AssignedTaskID != "T-1" {
+		t.Fatalf("AssignedTaskID = %q, want T-1", ap.AssignedTaskID)
+	}
+	if claims != 2 {
+		t.Fatalf("claim attempts = %d, want exactly 2 (no retry loop)", claims)
+	}
+}
+
+func TestClaimTask_ResumeOwnConflict_ReclaimStolen_ColdStarts(t *testing.T) {
+	mock := clitest.NewMockIssueBackend()
+	claims := 0
+	mock.ClaimIssueFn = func(_ context.Context, _ string, _ time.Duration) error {
+		claims++
+		if claims == 1 {
+			return ownConflictErr("falcon")
+		}
+		return ownConflictErr("hawk") // another worktree won the released lock
+	}
+	rm := &actorReleaseMock{MockIssueBackend: mock}
+	s := &Supervisor{IssueBackend: rm}
+	ap := resumeAgentProcess("T-1")
+
+	if s.claimTask(ap, "") {
+		t.Fatal("claimTask returned true, want cold-start fallthrough with empty ready queue")
+	}
+	if ap.AssignedTaskID != "" {
+		t.Fatalf("AssignedTaskID = %q, want empty", ap.AssignedTaskID)
+	}
+	if ap.ResumeTaskID != "" {
+		t.Fatalf("ResumeTaskID = %q, want cleared after failed resume", ap.ResumeTaskID)
+	}
+	if claims != 2 {
+		t.Fatalf("claim attempts = %d, want 2", claims)
+	}
+}
+
+func TestClaimTask_ResumeForeignConflict_NoRelease_ColdStarts(t *testing.T) {
+	mock := clitest.NewMockIssueBackend()
+	claims := 0
+	mock.ClaimIssueFn = func(_ context.Context, _ string, _ time.Duration) error {
+		claims++
+		return ownConflictErr("hawk")
+	}
+	rm := &actorReleaseMock{MockIssueBackend: mock}
+	s := &Supervisor{IssueBackend: rm}
+	ap := resumeAgentProcess("T-1")
+
+	if s.claimTask(ap, "") {
+		t.Fatal("claimTask returned true, want false")
+	}
+	if claims != 1 {
+		t.Fatalf("claim attempts = %d, want 1 (foreign holder, no self-release re-claim)", claims)
+	}
+	if len(rm.releases) != 0 {
+		t.Fatalf("releases = %#v, want none for a foreign holder", rm.releases)
+	}
+}
+
+func TestClaimTask_ResumeFreshClaimSuccess(t *testing.T) {
+	mock := clitest.NewMockIssueBackend()
+	rm := &actorReleaseMock{MockIssueBackend: mock}
+	s := &Supervisor{IssueBackend: rm}
+	ap := resumeAgentProcess("T-1")
+
+	if !s.claimTask(ap, "") {
+		t.Fatal("claimTask returned false")
+	}
+	if ap.AssignedTaskID != "T-1" {
+		t.Fatalf("AssignedTaskID = %q, want T-1", ap.AssignedTaskID)
+	}
+	if len(rm.releases) != 0 {
+		t.Fatalf("releases = %#v, want none on a clean re-claim", rm.releases)
+	}
+	if len(mock.Calls) != 1 || mock.Calls[0].Method != "ClaimIssue" {
+		t.Fatalf("calls = %#v, want a single ClaimIssue", mock.Calls)
+	}
+}
+
+func TestClaimTask_ResumeOwnConflict_EmptyMeta_ColdStarts(t *testing.T) {
+	mock := clitest.NewMockIssueBackend()
+	claims := 0
+	mock.ClaimIssueFn = func(_ context.Context, _ string, _ time.Duration) error {
+		claims++
+		return backend.ErrConflict("ClaimIssue", "already claimed") // no Meta: holder unknown
+	}
+	rm := &actorReleaseMock{MockIssueBackend: mock}
+	s := &Supervisor{IssueBackend: rm}
+	ap := resumeAgentProcess("T-1")
+
+	if s.claimTask(ap, "") {
+		t.Fatal("claimTask returned true, want false when the holder is unknown")
+	}
+	if claims != 1 {
+		t.Fatalf("claim attempts = %d, want 1", claims)
+	}
+	if len(rm.releases) != 0 {
+		t.Fatalf("releases = %#v, want none when the holder is unknown", rm.releases)
+	}
+}
