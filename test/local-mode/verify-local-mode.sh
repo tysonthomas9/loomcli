@@ -83,7 +83,20 @@ sessions_json() {
 first_session_id() {
   task_id="$1"
   sessions_json "$task_id" | jq -r \
-    '(.data.sessions // .sessions // [])[0].session_id // empty'
+    '(.data.sessions // .sessions // []) |
+    map(select(.status == "completed" and .is_active == false)) |
+    sort_by(.ended_at // .started_at // "") |
+    reverse |
+    .[0].session_id // empty'
+}
+
+code_diff_session_id() {
+  sessions_json "$CODE_TASK_ID" | jq -r \
+    '(.data.sessions // .sessions // []) |
+    map(select(.status == "completed" and (.has_diff == true or ((.files_changed // 0) > 0)))) |
+    sort_by(.ended_at // .started_at // "") |
+    reverse |
+    .[0].session_id // empty'
 }
 
 task_has_completed_session() {
@@ -119,7 +132,7 @@ transcript_has_entries() {
 }
 
 code_diff_mentions_output_file() {
-  session_id="$(first_session_id "$CODE_TASK_ID")"
+  session_id="$(code_diff_session_id)"
   [ "$session_id" != "" ]
   curl -fsS --max-time 10 \
     "${API_URL}/api/workspaces/${WORKSPACE}/tasks/${CODE_TASK_ID}/sessions/${session_id}/diff" |

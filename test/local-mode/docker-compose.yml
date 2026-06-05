@@ -7,7 +7,7 @@
 #   UI:  http://localhost:8283/ws/LOCALMODE/kanban
 #   API: http://localhost:8282
 
-name: loomcli-local-mode
+name: ${LOCAL_MODE_COMPOSE_PROJECT:-loomcli-local-mode}
 
 networks:
   local-mode:
@@ -35,7 +35,7 @@ services:
       retries: 20
 
   fleet-db:
-    image: loomcli-local-mode-fleet-db:latest
+    image: ${LOCAL_MODE_FLEETDB_IMAGE:-loomcli-local-mode-fleet-db:latest}
     build:
       context: ../../../fleet-db
       dockerfile: deploy/docker/Dockerfile
@@ -54,7 +54,7 @@ services:
       - "${LOCAL_MODE_FLEETDB_PORT:-8280}:8080"
 
   loom-local:
-    image: loomcli-local-mode-loom:latest
+    image: ${LOCAL_MODE_LOOM_IMAGE:-loomcli-local-mode-loom:latest}
     build:
       context: ../..
       dockerfile: test/local-mode/Dockerfile

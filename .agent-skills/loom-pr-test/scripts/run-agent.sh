@@ -34,7 +34,7 @@ set -e
 echo "EXIT_CODE=$ec  DURATION=$((SECONDS-start))s   log: $log"
 
 echo "--- agent final message (non-fleetdb tail) ---"
-grep -iv '"service":"fleet-db"' "$log" | tail -15
+grep -iv '"service":"fleet-db"' "$log" | tail -15 || true
 
 echo "--- task states ---"
 "$LOOM" data list -o json 2>/dev/null | grep -iv '"service"' \

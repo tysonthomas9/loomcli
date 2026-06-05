@@ -2,30 +2,37 @@
 # new-sandbox.sh — build a loom PR binary + stand up an ISOLATED FleetDB-backed sandbox.
 #
 #   new-sandbox.sh <name> <pr-worktree-dir> [--no-task]
-#   new-sandbox.sh --clean <name>
+#   new-sandbox.sh --clean <name> [--yes]
 #
 # Creates /tmp/loom-e2e/<name>/{loom, hello/, config/, env.sh} and an UPPERCASE workspace
-# with one open task. NEVER touches the user's real ~/.loom (LOOM_CONFIG_DIR is always set).
+# with planning and implementation-ready tasks. NEVER touches the user's real ~/.loom
+# (LOOM_CONFIG_DIR is always set).
 #
 # Env overrides:
-#   FLEET_DB_REPO   path to the fleet-db source repo (default: ~/codebase/code-agents/fleet-db)
+#   FLEET_DB_REPO   path to the fleet-db source repo (default: ../fleet-db)
 #   FLEET_DB_BIN    prebuilt fleet-db binary (skips building it)
 #   ROOT            sandbox root (default: /tmp/loom-e2e)
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+LOOMCLI_REPO="$(cd "$SCRIPT_DIR/../../.." && pwd)"
 ROOT="${ROOT:-/tmp/loom-e2e}"
-FLEET_DB_REPO="${FLEET_DB_REPO:-$HOME/codebase/code-agents/fleet-db}"
+FLEET_DB_REPO="${FLEET_DB_REPO:-$LOOMCLI_REPO/../fleet-db}"
 
 die() { echo "error: $*" >&2; exit 1; }
 
 # ---- clean ----
 if [[ "${1:-}" == "--clean" ]]; then
-  name="${2:?usage: new-sandbox.sh --clean <name>}"
+  name="${2:?usage: new-sandbox.sh --clean <name> [--yes]}"
+  yes=0
+  [[ "${3:-}" == "--yes" || "${3:-}" == "-y" || "${YES:-}" == "1" ]] && yes=1
   dir="$ROOT/$name"
   [[ -d "$dir" ]] || die "no sandbox at $dir"
-  echo "About to delete: $dir"
-  read -r -p "Proceed? [y/N] " ans
-  [[ "$ans" == "y" || "$ans" == "Y" ]] || { echo "aborted"; exit 0; }
+  if [[ "$yes" != "1" ]]; then
+    echo "About to delete: $dir"
+    read -r -p "Proceed? [y/N] " ans
+    [[ "$ans" == "y" || "$ans" == "Y" ]] || { echo "aborted"; exit 0; }
+  fi
   rm -rf "$dir"
   echo "removed $dir"
   exit 0
@@ -41,13 +48,12 @@ WS_LOWER="hellows"; WS="HELLOWS"     # loom uppercases workspace names; referenc
 mkdir -p "$dir/config"
 
 # ---- 1. fleet-db (the embedded server) ----
-if [[ -z "${FLEET_DB_BIN:-}" ]]; then
-  FLEET_DB_BIN="$ROOT/fleet-db"
-  if [[ ! -x "$FLEET_DB_BIN" ]]; then
-    [[ -f "$FLEET_DB_REPO/cmd/fleet-db/main.go" ]] || die "fleet-db repo not found at $FLEET_DB_REPO (set FLEET_DB_REPO)"
-    echo "==> building fleet-db from $FLEET_DB_REPO"
-    ( cd "$FLEET_DB_REPO" && go build -o "$FLEET_DB_BIN" ./cmd/fleet-db )
-  fi
+FLEET_DB_BIN="${FLEET_DB_BIN:-$ROOT/fleet-db}"
+if [[ ! -x "$FLEET_DB_BIN" ]]; then
+  [[ -f "$FLEET_DB_REPO/cmd/fleet-db/main.go" ]] || die "fleet-db repo not found at $FLEET_DB_REPO (set FLEET_DB_REPO)"
+  mkdir -p "$(dirname "$FLEET_DB_BIN")"
+  echo "==> building fleet-db from $FLEET_DB_REPO"
+  ( cd "$FLEET_DB_REPO" && go build -o "$FLEET_DB_BIN" ./cmd/fleet-db )
 fi
 export FLEET_DB_BIN
 echo "==> fleet-db: $FLEET_DB_BIN"
@@ -82,10 +88,15 @@ export LOOM_WORKSPACE="$WS"
 
 # ---- 5. a starter task ----
 if [[ "$make_task" == "1" ]]; then
-  echo "==> creating starter task"
+  echo "==> creating starter tasks"
   "$LOOM" data create --workspace "$WS" --type task --priority 1 \
-    --title "Add a Greeting(name) helper to main.go" \
-    --description "Add func Greeting(name string) string returning 'Hello, <name>!' and call it from main." \
+    --title "Plan a Greeting(name) helper" \
+    --description "Plan a minimal func Greeting(name string) string returning 'Hello, <name>!' and how main should call it." \
+    2>/dev/null | grep -i created || true
+  "$LOOM" data create --workspace "$WS" --type task --priority 1 \
+    --title "Implement a Greeting(name) helper" \
+    --description "Implement func Greeting(name string) string returning 'Hello, <name>!' and call it from main." \
+    --design "Add func Greeting(name string) string to main.go, have main call Greeting(\"world\"), then run gofmt and go test ./..." \
     2>/dev/null | grep -i created || true
 fi
 

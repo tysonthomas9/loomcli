@@ -23,10 +23,11 @@ ROOT="${ROOT:-/tmp/loom-e2e}"
 mode="${1:?usage: parallel-review.sh <plan|task> <backend> <name=worktree>...}"
 backend="${2:?usage: parallel-review.sh <plan|task> <backend> <name=worktree>...}"
 shift 2
+[[ "$mode" == "plan" || "$mode" == "task" ]] || { echo "mode must be plan|task" >&2; exit 1; }
 [[ $# -ge 1 ]] || { echo "need at least one <name=worktree>" >&2; exit 1; }
 specs=("$@")
 
-# Build fleet-db once up front so all sandboxes share the read-only binary.
+# Build fleet-db on first sandbox setup so all sandboxes share the read-only binary.
 export FLEET_DB_BIN="${FLEET_DB_BIN:-$ROOT/fleet-db}"
 
 echo "==> Phase 1: setup ${#specs[@]} sandboxes (sequential builds)"
@@ -48,8 +49,14 @@ for spec in "${specs[@]}"; do
 done
 
 echo "==> Phase 3: waiting for ${#pids[@]} concurrent runs to finish..."
+failures=0
 for i in "${!pids[@]}"; do
-  wait "${pids[$i]}" && echo "  ${names[$i]}: done" || echo "  ${names[$i]}: wrapper exited nonzero"
+  if wait "${pids[$i]}"; then
+    echo "  ${names[$i]}: done"
+  else
+    echo "  ${names[$i]}: wrapper exited nonzero"
+    failures=$((failures + 1))
+  fi
 done
 
 echo
@@ -60,3 +67,9 @@ for spec in "${specs[@]}"; do
   echo "--- $name ---"
   grep -E 'EXIT_CODE|^   HELLOWS-' "$out" 2>/dev/null | tail -6 || echo "  (no output captured: $out)"
 done
+
+if [[ "$failures" -gt 0 ]]; then
+  echo
+  echo "parallel review failed: $failures run(s) exited nonzero" >&2
+  exit 1
+fi

@@ -75,10 +75,16 @@ Use this when the claim depends on a real Codex CLI process:
 make local-mode-codex-up
 ```
 
+Verify the Codex task IDs:
+
+```bash
+make local-mode-codex-verify
+```
+
 Common knobs:
 
 ```bash
-LOCAL_MODE_CODEX_HOME=/path/to/.codex make local-mode-codex-up
+LOCAL_MODE_CODEX_HOME=<codex-home> make local-mode-codex-up
 LOCAL_MODE_CODEX_CLI_VERSION=0.128.0 make local-mode-codex-up
 ```
 
@@ -93,32 +99,37 @@ LOCAL_MODE_COMPOSE_PROJECT=loomcli-local-mode-b \
 LOCAL_MODE_FLEETDB_PORT=8380 \
 LOCAL_MODE_API_PORT=8382 \
 LOCAL_MODE_UI_PORT=8383 \
+LOCAL_MODE_COMPOSE="docker compose" \
 LOCAL_MODE_COMPOSE_UP_FLAGS="--build -d" \
 make local-mode-up
 ```
 
-Verify the alternate stack:
+Verify the alternate stack with the verifier that matches the stack you started:
 
 ```bash
 LOCAL_MODE_API_URL=http://127.0.0.1:8382 make local-mode-verify
+LOCAL_MODE_API_URL=http://127.0.0.1:8382 make local-mode-codex-verify
 ```
 
 Stop only that stack:
 
 ```bash
-LOCAL_MODE_COMPOSE_PROJECT=loomcli-local-mode-b make local-mode-down
+LOCAL_MODE_COMPOSE_PROJECT=loomcli-local-mode-b \
+LOCAL_MODE_COMPOSE="docker compose" \
+make local-mode-down
 ```
 
 Use `127.0.0.1` in verifier/API commands if sandboxed `localhost` access is inconsistent with Podman-published ports.
 
 ## Compose Overrides
 
-Use `LOCAL_MODE_COMPOSE_FILES` for real compatibility overrides, not for fabricated state.
+Use `LOCAL_MODE_COMPOSE` to force the compose runner when auto-detection picks the wrong one. Use `LOCAL_MODE_COMPOSE_FILES` for real compatibility overrides, not for fabricated state.
 
 Example:
 
 ```bash
 LOCAL_MODE_COMPOSE_PROJECT=loomcli-local-mode-review \
+LOCAL_MODE_COMPOSE="docker compose" \
 LOCAL_MODE_COMPOSE_FILES=/tmp/fleetdb-review.yml \
 LOCAL_MODE_FLEETDB_PORT=8380 \
 LOCAL_MODE_API_PORT=8382 \
@@ -132,6 +143,7 @@ Good override uses:
 - Point `fleet-db` at the compatible FleetDB checkout.
 - Add real server flags required by the current branch.
 - Change ports or resource settings.
+- Override `LOCAL_MODE_FLEETDB_IMAGE`, `LOCAL_MODE_LOOM_IMAGE`, or `LOCAL_MODE_LOOM_CODEX_IMAGE` when a parallel run must use explicit image tags. By default, `make` derives image tags from `LOCAL_MODE_COMPOSE_PROJECT`.
 
 Bad override uses:
 
@@ -163,29 +175,35 @@ curl -sS 'http://127.0.0.1:8282/api/monitor/agents?workspace=LOCALMODE'
 
 ## Browser Validation
 
-Use `agent-browser` after the stack is up. Always pass a dedicated profile path so cookies, storage, tabs, and browser state do not bleed between reviews or stacks. Use one profile per stack.
+Use `agent-browser` after the stack is up. Always pass a dedicated profile path so cookies, storage, tabs, and browser state do not bleed between reviews or stacks. Use one profile per stack and include a unique run name.
 
 ```bash
-mkdir -p /tmp/loom-agent-browser/default
-agent-browser --profile /tmp/loom-agent-browser/default open http://localhost:8283/ws/LOCALMODE/kanban
-agent-browser --profile /tmp/loom-agent-browser/default wait
-agent-browser --profile /tmp/loom-agent-browser/default get text body
-agent-browser --profile /tmp/loom-agent-browser/default screenshot
+RUN_NAME=<review-or-branch-name>
+PROFILE=/tmp/loom-agent-browser/$RUN_NAME/default
+mkdir -p "$PROFILE"
+
+agent-browser --profile "$PROFILE" open http://localhost:8283/ws/LOCALMODE/kanban
+agent-browser --profile "$PROFILE" wait
+agent-browser --profile "$PROFILE" get text body
+agent-browser --profile "$PROFILE" screenshot
 ```
 
 For parallel stacks, use distinct profiles and session names:
 
 ```bash
-mkdir -p /tmp/loom-agent-browser/stack-a /tmp/loom-agent-browser/stack-b
+RUN_NAME=<review-or-branch-name>
+PROFILE_A=/tmp/loom-agent-browser/$RUN_NAME/stack-a
+PROFILE_B=/tmp/loom-agent-browser/$RUN_NAME/stack-b
+mkdir -p "$PROFILE_A" "$PROFILE_B"
 
-agent-browser --profile /tmp/loom-agent-browser/stack-a \
+agent-browser --profile "$PROFILE_A" \
   --session localmode-a open http://localhost:8283/ws/LOCALMODE/kanban
-agent-browser --profile /tmp/loom-agent-browser/stack-a \
+agent-browser --profile "$PROFILE_A" \
   --session localmode-a get text body
 
-agent-browser --profile /tmp/loom-agent-browser/stack-b \
+agent-browser --profile "$PROFILE_B" \
   --session localmode-b open http://localhost:8383/ws/LOCALMODE/kanban
-agent-browser --profile /tmp/loom-agent-browser/stack-b \
+agent-browser --profile "$PROFILE_B" \
   --session localmode-b get text body
 ```
 
@@ -213,19 +231,22 @@ If a task is open with a design, it is normally coder-eligible. If a task needs 
 ## Real Backend Sandbox
 
 Use the bundled scripts for one-shot real backend CLI checks. They create an isolated `/tmp/loom-e2e/<name>` sandbox with its own `LOOM_CONFIG_DIR`, target repo, workspace, and PR-built `loom` binary.
+By default, sandbox setup seeds one planning task and one implementation-ready task with an approved design.
 
 ```bash
 SKILL=.agent-skills/loom-pr-test
 
 $SKILL/scripts/new-sandbox.sh <name> <PR_WORKTREE>
-$SKILL/scripts/run-agent.sh <name> plan claude
-$SKILL/scripts/run-agent.sh <name> task codex
+$SKILL/scripts/run-agent.sh <name> plan <backend>
+$SKILL/scripts/run-agent.sh <name> task <backend>
 ```
+
+`<backend>` is any installed and authenticated Loom backend CLI, such as `claude`, `codex`, `cursor`, or `opencode`.
 
 Clean one sandbox:
 
 ```bash
-$SKILL/scripts/new-sandbox.sh --clean <name>
+$SKILL/scripts/new-sandbox.sh --clean <name> --yes
 ```
 
 Rules:
@@ -238,9 +259,9 @@ Rules:
 Parallel one-shot runs across separate sandboxes:
 
 ```bash
-$SKILL/scripts/parallel-review.sh plan claude \
-  pr-a=/path/to/worktree-a \
-  pr-b=/path/to/worktree-b
+$SKILL/scripts/parallel-review.sh plan <backend> \
+  pr-a=<worktree-a> \
+  pr-b=<worktree-b>
 ```
 
 ## Reporting
@@ -277,6 +298,7 @@ If the stack used compose override files, pass the same override list during tea
 
 ```bash
 LOCAL_MODE_COMPOSE_PROJECT=<project-name> \
+LOCAL_MODE_COMPOSE=<compose-runner> \
 LOCAL_MODE_COMPOSE_FILES=/tmp/fleetdb-review.yml \
 make local-mode-down
 ```
@@ -285,13 +307,19 @@ Real backend sandbox:
 
 ```bash
 SKILL=.agent-skills/loom-pr-test
-$SKILL/scripts/new-sandbox.sh --clean <name>
+$SKILL/scripts/new-sandbox.sh --clean <name> --yes
 ```
 
 Browser profiles:
 
 ```bash
-agent-browser --profile /tmp/loom-agent-browser/<name> close
+agent-browser --profile /tmp/loom-agent-browser/<run-name>/<stack-name> close
 ```
 
-Do not run broad destructive cleanup commands such as `podman system prune`, `git clean`, or `rm -rf /tmp/...` unless the user explicitly asks and understands the scope. If a stack is intentionally left running, report its UI/API URLs and the exact command to stop it later.
+Remove only the review-specific browser profile directory after closing it, if you created one:
+
+```bash
+rm -rf /tmp/loom-agent-browser/<run-name>
+```
+
+Do not run broad destructive cleanup commands such as `podman system prune`, `git clean`, or unscoped `rm -rf /tmp/...` unless the user explicitly asks and understands the scope. If a stack is intentionally left running, report its UI/API URLs and the exact command to stop it later.
