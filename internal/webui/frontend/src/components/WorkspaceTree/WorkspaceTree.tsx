@@ -8,17 +8,15 @@ import {
   useState,
   useCallback,
   useEffect,
-  useRef,
-  type FormEvent,
 } from "react";
 
 import { useStore } from "zustand";
 import { useWorkspaceContext, useAgentStoreInstance } from "@/hooks";
-import { useFolderPicker, type ConnectionState } from "@/hooks/common";
+import { type ConnectionState } from "@/hooks/common";
 import { wsGet, wsSet } from "@/utils/scopedStorage";
 import { ONBOARDING_REPO_URL } from "@/utils/onboardingDefaults";
 import { ErrorDisplay } from "@/components/ErrorDisplay";
-import { addWorkspaceRepos } from "@/hooks/api";
+import { AddRepoModal } from "@/components/AddRepoModal";
 
 import { WorkspaceSelectorBar } from "./WorkspaceSelectorBar";
 import { AgentSection } from "./AgentSection";
@@ -62,7 +60,6 @@ export interface WorkspaceTreeProps {
 
 // Scoped key suffix for workspace-specific collapse state
 const SK_COLLAPSED = "tree-collapsed";
-const CLONE_URL_RE = /^(https:\/\/|git@)/;
 
 export function WorkspaceTree({
   className,
@@ -89,10 +86,7 @@ export function WorkspaceTree({
     error,
     refetch,
   } = workspaceContext;
-  const [repoPathInput, setRepoPathInput] = useState("");
-  const [isAddingRepo, setIsAddingRepo] = useState(false);
-  const [addRepoError, setAddRepoError] = useState<string | null>(null);
-  const prefilledAddRepoWorkspaceRef = useRef<string | null>(null);
+  const [addRepoOpen, setAddRepoOpen] = useState(false);
 
   // Load initial collapsed state from scoped localStorage
   const [isCollapsed, setIsCollapsed] = useState(() => {
@@ -126,28 +120,12 @@ export function WorkspaceTree({
   const agents = useStore(agentStore, (s) => s.agents);
   const workspaceRepos = repos ?? [];
 
-  useEffect(() => {
-    if (workspaceRepos.length > 0) {
-      setRepoPathInput((current) =>
-        current === ONBOARDING_REPO_URL ? "" : current,
-      );
-      return;
-    }
-
-    if (
-      !workspaceId ||
-      isLoading ||
-      error ||
-      prefilledAddRepoWorkspaceRef.current === workspaceId
-    ) {
-      return;
-    }
-
-    prefilledAddRepoWorkspaceRef.current = workspaceId;
-    setRepoPathInput((current) =>
-      current.trim() ? current : ONBOARDING_REPO_URL,
-    );
-  }, [workspaceId, workspaceRepos.length, isLoading, error]);
+  // One-click empty-workspace setup: seed the Add-Repo dialog with the sample
+  // repo when the workspace has no repos yet.
+  const onboardingRepoUrl =
+    workspaceRepos.length === 0 && workspaceId && !isLoading && !error
+      ? ONBOARDING_REPO_URL
+      : "";
 
   const agentHealth =
     agents.some((agent) => agent.status.startsWith("working")) ||
@@ -174,41 +152,6 @@ export function WorkspaceTree({
   const handleToggle = useCallback(() => {
     setIsCollapsed((prev) => !prev);
   }, []);
-
-  const handleAddRepo = useCallback(
-    async (e: FormEvent<HTMLFormElement>) => {
-      e.preventDefault();
-      const repoPath = repoPathInput.trim();
-      if (!workspaceId || !repoPath || isAddingRepo) return;
-
-      setIsAddingRepo(true);
-      setAddRepoError(null);
-      try {
-        await addWorkspaceRepos(
-          workspaceId,
-          CLONE_URL_RE.test(repoPath)
-            ? { clone_urls: [repoPath] }
-            : { repos: [repoPath] },
-        );
-        setRepoPathInput("");
-        await refetch();
-      } catch (err) {
-        setAddRepoError(
-          err instanceof Error ? err.message : "Failed to add repository",
-        );
-      } finally {
-        setIsAddingRepo(false);
-      }
-    },
-    [workspaceId, repoPathInput, isAddingRepo, refetch],
-  );
-
-  const repoFolderPicker = useFolderPicker({
-    disabled: isAddingRepo,
-    onStart: () => setAddRepoError(null),
-    onPick: setRepoPathInput,
-    onError: setAddRepoError,
-  });
 
   const workspaces = workspace?.workspaces ?? [];
 
@@ -299,48 +242,26 @@ export function WorkspaceTree({
           )}
 
           {!isLoading && !error && workspaceId && (
-            <form className={styles.addRepoForm} onSubmit={handleAddRepo}>
-              <input
-                className={styles.addRepoInput}
-                type="text"
-                value={repoPathInput}
-                onChange={(e) => setRepoPathInput(e.target.value)}
-                placeholder="https://github.com/... or /path/to/repo"
-                aria-label="Repository path or URL"
-                disabled={isAddingRepo}
-              />
+            <div className={styles.addRepoForm}>
               <button
                 type="button"
-                className={styles.browseRepoButton}
-                onClick={repoFolderPicker.browseFolder}
-                disabled={
-                  !repoFolderPicker.canBrowseFolders ||
-                  isAddingRepo ||
-                  repoFolderPicker.isBrowsing
-                }
-                title={
-                  repoFolderPicker.canBrowseFolders
-                    ? "Browse for repository folder"
-                    : "Filesystem browsing is only available in the desktop app"
-                }
-                aria-label="Browse for repository folder"
-              >
-                Browse
-              </button>
-              <button
-                type="submit"
                 className={styles.addRepoButton}
-                disabled={isAddingRepo || repoPathInput.trim() === ""}
+                onClick={() => setAddRepoOpen(true)}
               >
-                {isAddingRepo ? "Adding..." : "Add Repo"}
+                + Add Repo
               </button>
-              {addRepoError && (
-                <div className={styles.addRepoError} role="alert">
-                  {addRepoError}
-                </div>
-              )}
-            </form>
+            </div>
           )}
+
+          <AddRepoModal
+            isOpen={addRepoOpen}
+            workspaceId={workspaceId ?? ""}
+            initialUrl={onboardingRepoUrl}
+            onClose={() => setAddRepoOpen(false)}
+            onSuccess={() => {
+              void refetch();
+            }}
+          />
 
           {/* Flat agent list with repo·branch metadata */}
           <AgentSection
