@@ -5,6 +5,7 @@ import (
 	"io"
 	"strings"
 
+	hwharness "github.com/olesho/harness-wrapper/pkg/harness"
 	"github.com/olesho/harness-wrapper/pkg/wrapper"
 
 	"github.com/tysonthomas9/loomcli/internal/cli"
@@ -15,7 +16,7 @@ import (
 // a fake. Production code initializes wrapperRun to harness.RunWithRetry;
 // integration tests can replace it to inject scripted results without
 // spawning real subprocesses.
-type wrapperRunFn func(ctx context.Context, cfg wrapper.Config, p harness.RetryPolicy) (wrapper.Result, error)
+type wrapperRunFn func(ctx context.Context, cfg hwharness.Config, p harness.RetryPolicy) (hwharness.Result, error)
 
 var wrapperRun wrapperRunFn = harness.RunWithRetry
 
@@ -78,25 +79,31 @@ func runHarness(parent context.Context, shutdown <-chan struct{}, inv harnessInv
 		inv.RetryPolicy.OnActivity = cli.DaemonActivityObserver()
 	}
 
-	res, runErr := wrapperRun(ctx, wrapper.Config{
-		BinaryPath: inv.BinaryName,
-		Args:       inv.Args,
-		WorkingDir: inv.WorkDir,
-		Env:        inv.Env,
-		Stdin:      io.NopCloser(strings.NewReader(inv.Prompt)),
-		Stdout:     pw,
-		Harness:    inv.HarnessName,
+	res, runErr := wrapperRun(ctx, hwharness.Config{
+		Wrapper: wrapper.Config{
+			BinaryPath: inv.BinaryName,
+			Args:       inv.Args,
+			WorkingDir: inv.WorkDir,
+			Env:        inv.Env,
+			Stdin:      io.NopCloser(strings.NewReader(inv.Prompt)),
+			Stdout:     pw,
+			Harness:    inv.HarnessName,
+		},
+		// Transcript-acquisition fields (TranscriptMode/OnEvent/HookCommand) are
+		// added behind flags in the next step; default zero ⇒ Off, no acquisition.
 	}, inv.RetryPolicy)
 	_ = pw.Close()
 	outputTail := <-scanDone
 
+	// res.Result is the embedded wrapper.Result; the result-mapping helpers below
+	// keep their wrapper.Result contract.
 	if inv.Finalize != nil {
-		return inv.Finalize(res, runErr, outputTail)
+		return inv.Finalize(res.Result, runErr, outputTail)
 	}
 	if runErr != nil {
 		return wrapInvocationError(runErr, outputTail)
 	}
-	return wrapWrapperResult(res, outputTail)
+	return wrapWrapperResult(res.Result, outputTail)
 }
 
 // contextFromShutdown derives a cancellable child context that fires
