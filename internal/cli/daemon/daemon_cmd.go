@@ -55,6 +55,10 @@ type DaemonState struct {
 	PID       int                 `json:"pid"`
 	StartedAt time.Time           `json:"started_at"`
 	Agents    []DaemonAgentStatus `json:"agents"`
+	// QuarantinedTasks lists tasks the daemon set to blocked after repeated
+	// no-progress kills (plus pending retries when the write is failing).
+	// Display-only: never hydrated back into supervision across restarts.
+	QuarantinedTasks []supervisor.QuarantinedTaskInfo `json:"quarantined_tasks,omitempty"`
 }
 
 // Cobra command variables
@@ -345,7 +349,7 @@ func runDaemonMainLoop(config *cfgpkg.DaemonConfig, projectDir string, paths dae
 	}
 
 	startedAt := time.Now()
-	if err := writeStateFile(paths.stateFile, startedAt, daemon.Agents(), maxRetries); err != nil {
+	if err := writeStateFile(paths.stateFile, startedAt, daemon.Agents(), daemon.QuarantinedTasks(), maxRetries); err != nil {
 		fmt.Printf("Warning: failed to write initial state file: %v\n", err)
 	}
 
@@ -502,6 +506,8 @@ func runDaemonStatus(cmd *cobra.Command, args []string) {
 	for _, agent := range state.Agents {
 		printAgentStatus(agent)
 	}
+
+	printQuarantinedTasks(state.QuarantinedTasks)
 }
 
 func runDaemonStop(cmd *cobra.Command, args []string) {

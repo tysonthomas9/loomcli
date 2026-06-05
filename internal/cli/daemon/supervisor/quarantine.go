@@ -7,6 +7,7 @@ import (
 	"log"
 	"log/slog"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -93,7 +94,8 @@ type taskFailureRecord struct {
 	BaselineDesignHash uint64
 	BaselineNotesHash  uint64
 
-	LastKillReason string
+	LastKillReason  string
+	QuarantineKills int // Count captured at latch time (display-only; Count itself zeroes as the re-arm baseline)
 }
 
 // taskQuarantine is the daemon-wide ledger. One shared map per supervisor:
@@ -543,6 +545,7 @@ func (q *taskQuarantine) latch(taskID string, daemonWrote bool) {
 	q.mu.Lock()
 	if rec := q.rec[taskID]; rec != nil {
 		rec.inFlight = false
+		rec.QuarantineKills = rec.Count
 		rec.Count = 0
 		rec.QuarantinedAt = time.Now()
 		rec.DaemonWrote = daemonWrote
@@ -572,4 +575,55 @@ func (q *taskQuarantine) evictOldestLocked() {
 	if oldestID != "" {
 		delete(q.rec, oldestID)
 	}
+}
+
+// ---------------------------------------------------------------------------
+// Daemon-status surfacing
+// ---------------------------------------------------------------------------
+
+// QuarantinedTaskInfo is the JSON-serializable snapshot of one quarantined
+// (or quarantine-pending) task, surfaced in daemon-agents.json and
+// `loom daemon status` — mirroring how agent parks surface daemon-status-only.
+type QuarantinedTaskInfo struct {
+	TaskID string `json:"task_id"`
+	// Count is the number of no-progress kills behind the quarantine: the
+	// count captured when the write landed, or the live count for a
+	// pending (write-failed, retrying) record.
+	Count          int       `json:"count"`
+	QuarantinedAt  time.Time `json:"quarantined_at,omitzero"`
+	LastKillReason string    `json:"last_kill_reason,omitempty"`
+	WriteFailed    bool      `json:"write_failed,omitempty"`
+}
+
+// QuarantinedTasks returns the daemon-status snapshot: tasks the daemon
+// actually quarantined (DaemonWrote) plus due tasks whose blocked-write is
+// failing and retrying (WriteFailed). Guard-latched records — tasks the
+// read-back found already human-blocked/deferred/closed — are tracked
+// internally but never surfaced as quarantined; the loom:quarantined label
+// is the on-issue discriminator.
+func (s *Supervisor) QuarantinedTasks() []QuarantinedTaskInfo {
+	q := s.qrec()
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	out := []QuarantinedTaskInfo{}
+	for id, rec := range q.rec {
+		switch {
+		case rec.DaemonWrote:
+			out = append(out, QuarantinedTaskInfo{
+				TaskID:         id,
+				Count:          rec.QuarantineKills,
+				QuarantinedAt:  rec.QuarantinedAt,
+				LastKillReason: rec.LastKillReason,
+			})
+		case rec.WriteFailed && rec.QuarantinedAt.IsZero():
+			out = append(out, QuarantinedTaskInfo{
+				TaskID:         id,
+				Count:          rec.Count,
+				LastKillReason: rec.LastKillReason,
+				WriteFailed:    true,
+			})
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].TaskID < out[j].TaskID })
+	return out
 }

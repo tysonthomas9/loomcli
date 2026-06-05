@@ -862,3 +862,49 @@ func TestFormatKillTimeline_RendersASCIIMarkdownTable(t *testing.T) {
 		}
 	}
 }
+
+// ---------------------------------------------------------------------------
+// daemon-status snapshot
+// ---------------------------------------------------------------------------
+
+func TestSweep_GuardLatchExcludedFromDaemonStatus(t *testing.T) {
+	status, design := "open", "d1"
+	mock := openIssueMock(&status, &design)
+	s := newQuarantineSupervisor(mock)
+
+	// T-40 gets daemon-quarantined; T-41 is guard-latched (human blocked it
+	// first); T-42 is pending with a failing write.
+	apA := newKilledAgent(t, "falcon", "T-40", timeoutOutcome())
+	killNTimes(s, apA, 3)
+	s.sweepQuarantineDue(apA)
+
+	apB := newKilledAgent(t, "hawk", "T-41", timeoutOutcome())
+	killNTimes(s, apB, 3)
+	status = "blocked" // human got there first; read-back guard latches
+	s.sweepQuarantineDue(apB)
+	status = "open"
+
+	apC := newKilledAgent(t, "ibis", "T-42", timeoutOutcome())
+	killNTimes(s, apC, 3)
+	mock.UpdateErr = errors.New("fleet down")
+	s.sweepQuarantineDue(apC)
+
+	infos := s.QuarantinedTasks()
+	if len(infos) != 2 {
+		t.Fatalf("QuarantinedTasks() = %+v, want exactly T-40 (daemon-written) and T-42 (pending)", infos)
+	}
+	if infos[0].TaskID != "T-40" || infos[0].WriteFailed || infos[0].QuarantinedAt.IsZero() {
+		t.Errorf("infos[0] = %+v, want daemon-written T-40", infos[0])
+	}
+	if infos[0].Count != 3 || infos[0].LastKillReason != "crash/Timeout" {
+		t.Errorf("infos[0] = %+v, want Count 3 / crash-Timeout", infos[0])
+	}
+	if infos[1].TaskID != "T-42" || !infos[1].WriteFailed || !infos[1].QuarantinedAt.IsZero() {
+		t.Errorf("infos[1] = %+v, want pending write-failed T-42", infos[1])
+	}
+	for _, info := range infos {
+		if info.TaskID == "T-41" {
+			t.Error("guard-latched human-blocked task must never surface as daemon-quarantined")
+		}
+	}
+}
