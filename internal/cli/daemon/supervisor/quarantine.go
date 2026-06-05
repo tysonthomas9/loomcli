@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"hash/fnv"
-	"log"
 	"log/slog"
 	"os"
 	"sort"
@@ -448,8 +447,11 @@ func (s *Supervisor) writeQuarantine(ctx context.Context, ap *AgentProcess, due 
 		q.markWriteFailed(due.taskID)
 		return
 	}
-	log.Printf("[daemon] task %s quarantined after repeated no-progress kills (%d kills, threshold %d): status=blocked, unassigned, labeled %s",
-		due.taskID, due.count, s.quarantineThreshold(), quarantineLabel)
+	// Message text is load-bearing: TestScenarioTaskQuarantine greps the
+	// daemon log for "quarantined after repeated no-progress kills".
+	slog.Info("task quarantined after repeated no-progress kills",
+		"task", due.taskID, "kills", due.count, "threshold", s.quarantineThreshold(),
+		"status", "blocked", "label", quarantineLabel)
 	s.postQuarantineComment(ctx, ap, due)
 	q.latch(due.taskID, true)
 }
