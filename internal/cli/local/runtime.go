@@ -1,6 +1,7 @@
 package local
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -9,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -142,6 +144,63 @@ func runtimePath(dataDir string) string {
 
 func serveLogPath(dataDir string) string {
 	return filepath.Join(dataDir, logsDirName, "loom-serve.log")
+}
+
+// serveStartupLogTail returns up to maxBytes from the end of loom-serve.log,
+// dropping any partial first line so the result begins at a clean line
+// boundary. Returns "" when the log is missing, empty, or unreadable.
+func serveStartupLogTail(dataDir string, maxBytes int) string {
+	if maxBytes <= 0 {
+		return ""
+	}
+	file, err := os.Open(serveLogPath(dataDir)) //nolint:gosec // log path derived from app data dir
+	if err != nil {
+		return ""
+	}
+	defer func() { _ = file.Close() }()
+	stat, err := file.Stat()
+	if err != nil {
+		return ""
+	}
+	size := stat.Size()
+	if size == 0 {
+		return ""
+	}
+	var data []byte
+	if size <= int64(maxBytes) {
+		data, err = io.ReadAll(file)
+		if err != nil {
+			return ""
+		}
+	} else {
+		start := size - int64(maxBytes)
+		// Peek the byte preceding our window so we can tell whether `start`
+		// already sits on a line boundary. If it does, we keep the whole
+		// window; otherwise the first line is a fragment and we drop it.
+		atBoundary := false
+		if start > 0 {
+			var prev [1]byte
+			if _, err := file.ReadAt(prev[:], start-1); err != nil {
+				return ""
+			}
+			atBoundary = prev[0] == '\n'
+		}
+		if _, err := file.Seek(start, io.SeekStart); err != nil {
+			return ""
+		}
+		data, err = io.ReadAll(file)
+		if err != nil {
+			return ""
+		}
+		if !atBoundary {
+			if idx := bytes.IndexByte(data, '\n'); idx >= 0 {
+				data = data[idx+1:]
+			} else {
+				return ""
+			}
+		}
+	}
+	return strings.TrimRight(string(data), " \t\r\n")
 }
 
 func serviceLogPath(dataDir string) string {
@@ -296,6 +355,76 @@ func waitForRuntime(ctx context.Context, url string) error {
 		case <-ticker.C:
 		}
 	}
+}
+
+// runtimeReadyResponse mirrors webui/handlers/health.RuntimeReadyResponse on
+// the wire. Kept local to avoid a CLI → webui import cycle.
+type runtimeReadyResponse struct {
+	Ready     bool   `json:"ready"`
+	Mode      string `json:"mode"`
+	Workspace string `json:"workspace"`
+	Reason    string `json:"reason,omitempty"`
+}
+
+// WaitForWorkspaceReady polls /api/workspaces/{workspaceKey}/readyz
+// until it returns 200 or the context is canceled. On timeout, the returned
+// error includes the last decoded reason so operators see the actual cause
+// (e.g. "workspace not registered: LOOM") rather than a bare
+// "context deadline exceeded".
+func WaitForWorkspaceReady(ctx context.Context, baseURL, workspaceKey string) error {
+	if baseURL == "" {
+		return errors.New("runtime URL is empty")
+	}
+	if workspaceKey == "" {
+		return errors.New("workspace key is empty")
+	}
+	endpoint := baseURL + "/api/workspaces/" + url.PathEscape(workspaceKey) + "/readyz"
+	ticker := time.NewTicker(200 * time.Millisecond)
+	defer ticker.Stop()
+	var lastReason string
+	for {
+		reason, ok, err := probeWorkspaceReady(ctx, endpoint)
+		if ok {
+			return nil
+		}
+		if reason != "" {
+			lastReason = reason
+		} else if err != nil {
+			lastReason = err.Error()
+		}
+		select {
+		case <-ctx.Done():
+			if lastReason != "" {
+				return fmt.Errorf("workspace %q runtime not ready: %s", workspaceKey, lastReason)
+			}
+			return ctx.Err()
+		case <-ticker.C:
+		}
+	}
+}
+
+// probeWorkspaceReady performs a single GET against the workspace readiness
+// endpoint. Returns (reason, ready, transportErr). reason is decoded from the
+// JSON body when available, or a synthesized "HTTP N" string otherwise.
+func probeWorkspaceReady(ctx context.Context, endpoint string) (string, bool, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return "", false, err
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return "", false, err
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode == http.StatusOK {
+		_, _ = io.Copy(io.Discard, resp.Body)
+		return "", true, nil
+	}
+	var decoded runtimeReadyResponse
+	if jsonErr := json.NewDecoder(resp.Body).Decode(&decoded); jsonErr == nil && decoded.Reason != "" {
+		return decoded.Reason, false, nil
+	}
+	return fmt.Sprintf("HTTP %d", resp.StatusCode), false, nil
 }
 
 func processRunning(pid int) bool {

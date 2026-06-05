@@ -128,6 +128,25 @@ func (c *AgentIPCClient) Update(issueID string, params backend.UpdateParams) err
 	return ipcResponseToError(resp, "ipc.update")
 }
 
+// ReleaseLock drops only the operational claim lock for an issue without
+// changing its status or assignee. Idempotent: missing lock returns nil.
+func (c *AgentIPCClient) ReleaseLock(issueID string) error {
+	req := AgentIPCRequest{
+		Operation:  IPCOpReleaseLock,
+		AgentName:  c.AgentName,
+		IssueID:    issueID,
+		SessionID:  c.SessionID,
+		LeaseID:    c.LeaseID,
+		LeaseToken: c.LeaseToken,
+	}
+
+	resp, err := sendAgentIPCRequest(c.SocketPath, req)
+	if err != nil {
+		return err
+	}
+	return ipcResponseToError(resp, "ipc.release_lock")
+}
+
 // Complete closes an issue and returns the CloseResult (including unblocked issues).
 func (c *AgentIPCClient) Complete(issueID string, params backend.CloseParams) (*backend.CloseResult, error) {
 	args, err := json.Marshal(params)
@@ -159,6 +178,27 @@ func (c *AgentIPCClient) Complete(issueID string, params backend.CloseParams) (*
 		return nil, backend.ErrInternal("ipc.complete", "failed to decode close result", err)
 	}
 	return &result, nil
+}
+
+// Release completes this agent's claim on an issue. The daemon validates this
+// agent's lease (the same fence as Claim/Update/Complete) and uses AgentName as
+// the release actor, so no args are carried. Idempotent on the server side:
+// releasing an unheld lock is not an error.
+func (c *AgentIPCClient) Release(issueID string) error {
+	req := AgentIPCRequest{
+		Operation:  IPCOpReleaseClaim,
+		AgentName:  c.AgentName,
+		IssueID:    issueID,
+		SessionID:  c.SessionID,
+		LeaseID:    c.LeaseID,
+		LeaseToken: c.LeaseToken,
+	}
+
+	resp, err := sendAgentIPCRequest(c.SocketPath, req)
+	if err != nil {
+		return err
+	}
+	return ipcResponseToError(resp, "ipc.release")
 }
 
 // sendAgentIPCRequest dials the Unix socket, sends one JSON-line request, reads

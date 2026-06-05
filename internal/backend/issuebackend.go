@@ -76,6 +76,18 @@ type IssueBackend interface {
 	// already claimed by another agent.
 	ClaimIssue(ctx context.Context, id string, lockTTL time.Duration) error
 
+	// ReleaseIssueLock releases only the distributed claim lock on the
+	// issue without changing its status or assignee. Idempotent: returns
+	// nil if no lock exists. Returns KindConflict if the lock is held by
+	// a different actor. Backends without a lock concept return
+	// KindNotImplemented.
+	//
+	// This is the supervisor-driven counterpart to claim release used on
+	// agent exit when the agent has already transitioned the task status
+	// to review/closed/etc. via Update/Close (which leave the operational
+	// lock untouched).
+	ReleaseIssueLock(ctx context.Context, id string, actor string) error
+
 	// DeferIssue defers an issue by setting status to "deferred" and
 	// optionally setting defer_until. A zero `until` (time.Time{}) means
 	// status-only defer with no end date. Returns KindValidation if id is
@@ -164,4 +176,25 @@ type IssueBackend interface {
 	// BackendName returns a string identifying this backend implementation
 	// (e.g., "fleet-db"). The value is immutable after construction.
 	BackendName() string
+}
+
+// ClaimReleaser is an optional interface implemented by backends that maintain
+// an explicit claim lock distinct from issue status (e.g., the fleet-db
+// backend). Callers type-assert to release a completed agent's claim using the
+// agent's stable actor identity.
+//
+// Implementations must be idempotent: return nil if the actor no longer owns
+// the issue, or if the lock is already released, expired, or never held. The
+// actor must be supplied by the caller's authenticated/session identity; it must
+// not be derived from mutable issue state, or a stale completion could release a
+// newer agent's lock.
+//
+// If the issue is still in_progress and assigned to actor, implementations
+// should transition it back to open/unassigned so the task is claimable again.
+// If the issue already moved to review/closed/etc., implementations should
+// release only the operational lock. Backends that don't model an explicit claim
+// lock should simply not implement this interface; callers detect support via
+// type assertion.
+type ClaimReleaser interface {
+	ReleaseClaim(ctx context.Context, id, actor string) error
 }

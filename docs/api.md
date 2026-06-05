@@ -90,35 +90,6 @@ Detailed health check including daemon connection, pool stats, and circuit break
 }
 ```
 
-### `GET /api/daemon/status`
-
-Daemon runtime configuration.
-
-- **Auth:** Required
-- **Response:** `200 OK`
-
-```json
-{
-  "success": true,
-  "data": {
-    "version": "1.0.0",
-    "workspace_path": "/path/to/workspace",
-    "database_path": "/path/to/db",
-    "socket_path": "/path/to/socket",
-    "pid": 12345,
-    "uptime_seconds": 3600.5,
-    "last_activity_time": "2024-01-15T12:00:00Z",
-    "exclusive_lock_active": false,
-    "exclusive_lock_holder": "",
-    "auto_commit": true,
-    "auto_push": false,
-    "auto_pull": false,
-    "local_mode": false,
-    "sync_interval": "5s"
-  }
-}
-```
-
 ### `GET /api/stats`
 
 Project-level statistics.
@@ -3986,17 +3957,17 @@ Get the dependency graph for visualization.
 - Same response shape as `GET /api/issues/graph` documented in [Issues](#issues)
 - **Errors:** `400` (invalid params), `503` (pool unavailable), `504` (timeout)
 
-### Daemon Status
+### Runtime Readiness
 
-#### `GET /api/workspaces/{ws}/daemon/status`
+#### `GET /api/workspaces/{ws}/readyz`
 
-Get daemon runtime status for the workspace.
+Check whether the runtime can serve agent work for the workspace.
 
 - **Auth:** Required
 - **Timeout:** 2 seconds
 - **No query params**
-- Same response shape as `GET /api/daemon/status` documented in [Health & Status](#health--status)
-- **Errors:** `503` (pool unavailable), `504` (timeout)
+- **Success:** `200` with `{"ready":true,"mode":"daemon"|"fleet","workspace":"..."}`
+- **Errors:** `503` with `ready:false` and a diagnostic `reason`; `400` if the workspace path parameter is missing
 
 ---
 

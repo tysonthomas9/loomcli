@@ -25,6 +25,7 @@ type AgentProcess struct {
 	Pid                    int               // PID of current subprocess (0 when not running)
 	LogFile                *os.File          // log file handle for subprocess output (nil if not logging)
 	LogFilePath            string            // path to agent log file for watchdog stat checks
+	ArchiveLogFile         *os.File          // canonical agent archive (~/.loom/logs/<ws>/agents/<worktree>.log) the web UI Logs tab reads; nil if unavailable
 	TranscriptPath         string            // path to session transcript.jsonl for watchdog liveness (set by superviseAgent)
 	Session                *sessions.Session // daemon-created session handle (nil when no session active)
 	AgentSessionID         string            // fleet-db control-plane session id (empty when no session active)
@@ -66,15 +67,16 @@ type AgentProcess struct {
 type StopReason string
 
 const (
-	StopReasonNoWork        StopReason = "no_work"
-	StopReasonRateLimited   StopReason = "rate_limited"
-	StopReasonMaxRetries    StopReason = "max_retries"
-	StopReasonFatalError    StopReason = "fatal_error"
-	StopReasonManualStop    StopReason = "manual_stop"
-	StopReasonConfigRemoved StopReason = "config_removed"
-	StopReasonShutdown      StopReason = "shutdown"
-	StopReasonYielded       StopReason = "yielded"
-	StopReasonWatchdog      StopReason = "watchdog"
+	StopReasonNoWork             StopReason = "no_work"
+	StopReasonRateLimited        StopReason = "rate_limited"
+	StopReasonMaxRetries         StopReason = "max_retries"
+	StopReasonFatalError         StopReason = "fatal_error"
+	StopReasonManualStop         StopReason = "manual_stop"
+	StopReasonConfigRemoved      StopReason = "config_removed"
+	StopReasonShutdown           StopReason = "shutdown"
+	StopReasonYielded            StopReason = "yielded"
+	StopReasonWatchdog           StopReason = "watchdog"
+	StopReasonBackendUnavailable StopReason = "backend_unavailable"
 )
 
 // resolveRemote returns the git remote name for this agent.

@@ -19,7 +19,7 @@ import (
 
 // AgentIPCRequest is sent by an agent subprocess to the daemon IPC socket.
 type AgentIPCRequest struct {
-	Operation      string          `json:"operation"`                  // "claim", "update", "complete", "heartbeat"
+	Operation      string          `json:"operation"`                  // "claim", "update", "complete", "heartbeat", "release_claim"
 	AgentName      string          `json:"agent_name"`                 // LOOM_AGENT_NAME identity (required)
 	IssueID        string          `json:"issue_id"`                   // target issue (required except for "heartbeat")
 	SessionID      string          `json:"session_id,omitempty"`       // fleet-db AgentSession id
@@ -38,11 +38,14 @@ type AgentIPCResponse struct {
 }
 
 // Operation name constants for agent IPC.
+// These string values must stay in sync with the cli package's IPCOp* constants.
 const (
-	ipcOpClaim     = "claim"
-	ipcOpUpdate    = "update"
-	ipcOpComplete  = "complete"
-	ipcOpHeartbeat = "heartbeat"
+	ipcOpClaim        = "claim"
+	ipcOpUpdate       = "update"
+	ipcOpComplete     = "complete"
+	ipcOpHeartbeat    = "heartbeat"
+	ipcOpReleaseLock  = "release_lock"
+	ipcOpReleaseClaim = "release_claim"
 )
 
 // ipcClaimArgs are the optional arguments for the claim operation.
@@ -160,7 +163,7 @@ func validateIPCRequest(req AgentIPCRequest) (AgentIPCResponse, bool) {
 // can thread it through to inherit the span as parent.
 func (d *Daemon) dispatchIPCOperation(req AgentIPCRequest) AgentIPCResponse {
 	switch req.Operation {
-	case ipcOpClaim, ipcOpUpdate, ipcOpComplete, ipcOpHeartbeat:
+	case ipcOpClaim, ipcOpUpdate, ipcOpComplete, ipcOpHeartbeat, ipcOpReleaseLock, ipcOpReleaseClaim:
 		// known method — fall through to traced dispatch below
 	default:
 		return AgentIPCResponse{Error: fmt.Sprintf("unknown operation: %q", req.Operation)}
@@ -180,6 +183,10 @@ func (d *Daemon) dispatchIPCOperation(req AgentIPCRequest) AgentIPCResponse {
 		resp = d.handleIPCComplete(req)
 	case ipcOpHeartbeat:
 		resp = d.handleIPCHeartbeat(req)
+	case ipcOpReleaseLock:
+		resp = d.handleIPCReleaseLock(req)
+	case ipcOpReleaseClaim:
+		resp = d.handleIPCReleaseClaim(req)
 	}
 	if resp.Success {
 		// Every successful op also advances per-agent liveness when a
@@ -326,6 +333,48 @@ func (d *Daemon) handleIPCComplete(req AgentIPCRequest) AgentIPCResponse {
 	d.publishMutation(mut)
 
 	return AgentIPCResponse{Success: true, Data: data}
+}
+
+// handleIPCReleaseLock handles the "release_lock" operation: drop only the
+// fleet-db claim lock for the agent's issue without changing its status.
+// Idempotent: a missing or already-released lock returns success.
+func (d *Daemon) handleIPCReleaseLock(req AgentIPCRequest) AgentIPCResponse {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	if resp, ok := d.validateIPCLease(ctx, req); !ok {
+		return resp
+	}
+	if err := d.issueBackend.ReleaseIssueLock(ctx, req.IssueID, req.AgentName); err != nil {
+		return ipcErrorResponse(err)
+	}
+	return AgentIPCResponse{Success: true}
+}
+
+// handleIPCReleaseClaim handles the "release_claim" operation behind the same
+// lease fence as the other mutations. The daemon supplies the authenticated
+// agent name as the release actor; the backend must not derive the actor from
+// mutable issue state. Backends without an explicit claim lock (non-fleet)
+// report success without acting — release is a no-op there.
+func (d *Daemon) handleIPCReleaseClaim(req AgentIPCRequest) AgentIPCResponse {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	if resp, ok := d.validateIPCLease(ctx, req); !ok {
+		return resp
+	}
+	releaser, ok := d.issueBackend.(backend.ClaimReleaser)
+	if !ok {
+		return AgentIPCResponse{Success: true}
+	}
+	if err := releaser.ReleaseClaim(ctx, req.IssueID, req.AgentName); err != nil {
+		return ipcErrorResponse(err)
+	}
+
+	// Do not publish a synthetic daemon mutation here. The backend either wrote
+	// the real in_progress→open release mutation, or it only dropped an
+	// operational lock for an issue whose status was already changed.
+	return AgentIPCResponse{Success: true}
 }
 
 func (d *Daemon) validateIPCLease(ctx context.Context, req AgentIPCRequest) (AgentIPCResponse, bool) {

@@ -280,15 +280,15 @@ export interface paths {
     patch: operations["patchWorkspaceBackend"];
     trace?: never;
   };
-  "/api/workspaces/{ws}/daemon/status": {
+  "/api/workspaces/{ws}/readyz": {
     parameters: {
       query?: never;
       header?: never;
       path?: never;
       cookie?: never;
     };
-    /** Workspace-scoped daemon status */
-    get: operations["getWorkspaceDaemonStatus"];
+    /** Workspace-scoped runtime readiness */
+    get: operations["getWorkspaceRuntimeReady"];
     put?: never;
     post?: never;
     delete?: never;
@@ -1924,6 +1924,13 @@ export interface components {
       success: true;
       message: string;
     };
+    RuntimeReadyResponse: {
+      ready: boolean;
+      /** @enum {string} */
+      mode: "daemon" | "fleet";
+      workspace: string;
+      reason?: string;
+    };
     /**
      * @description Core issue type used in list endpoints. Maps to `types.Issue` json
      *     serialization. Some list endpoints return this shape directly (not
@@ -3377,7 +3384,7 @@ export interface operations {
       };
     };
   };
-  getWorkspaceDaemonStatus: {
+  getWorkspaceRuntimeReady: {
     parameters: {
       query?: never;
       header?: never;
@@ -3389,13 +3396,22 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description Daemon status */
+      /** @description Runtime is ready to serve agent work for the workspace */
       200: {
         headers: {
           [name: string]: unknown;
         };
         content: {
-          "application/json": Record<string, never>;
+          "application/json": components["schemas"]["RuntimeReadyResponse"];
+        };
+      };
+      /** @description Runtime is not ready to serve agent work for the workspace */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["RuntimeReadyResponse"];
         };
       };
     };

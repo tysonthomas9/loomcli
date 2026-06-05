@@ -60,6 +60,9 @@ func (s *stubReadyBackend) Update(_ context.Context, _ string, _ backend.UpdateP
 func (s *stubReadyBackend) ClaimIssue(_ context.Context, _ string, _ time.Duration) error {
 	return fmt.Errorf("ClaimIssue not implemented in stubReadyBackend")
 }
+func (s *stubReadyBackend) ReleaseIssueLock(_ context.Context, _, _ string) error {
+	return fmt.Errorf("ReleaseIssueLock not implemented in stubReadyBackend")
+}
 func (s *stubReadyBackend) DeferIssue(_ context.Context, _ string, _ time.Time) error {
 	return fmt.Errorf("DeferIssue not implemented in stubReadyBackend")
 }
@@ -119,7 +122,7 @@ func (p *errorDaemonPool) Close() error                               { return n
 func TestHandleReady_BackendWhenNoPool(t *testing.T) {
 	be := &stubReadyBackend{
 		ready: []backend.IssueData{
-			{ID: "RDY-1", Title: "Ready One", Status: "open", Priority: 1, IssueType: "task", Parent: "EPIC-1", SourceRepo: "repoA"},
+			{ID: "RDY-1", Title: "Ready One", Status: "open", Priority: 1, IssueType: "task", Parent: "EPIC-1", SourceRepo: "repoA", Design: "approved plan body"},
 			{ID: "RDY-2", Title: "Ready Two", Status: "open", Priority: 2, IssueType: "bug"},
 		},
 	}
@@ -156,6 +159,12 @@ func TestHandleReady_BackendWhenNoPool(t *testing.T) {
 	}
 	if found.Repo == nil || *found.Repo != "repoA" {
 		t.Errorf("Repo = %v, want &repoA", found.Repo)
+	}
+	// Design must survive the projection: agents reading the ready queue via
+	// the API backend gate on has_design (ReadyToImplement). Dropping it here
+	// starved implementation agents with perpetual NoWork.
+	if found.Design != "approved plan body" {
+		t.Errorf("Design = %q, want %q (must be carried for the has_design task filter)", found.Design, "approved plan body")
 	}
 }
 

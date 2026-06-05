@@ -9,11 +9,37 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/backend"
 )
 
+// releaserMock embeds MockIssueBackend and adds ReleaseClaim so we can
+// exercise ipcIssueBackend's ClaimReleaser delegation. MockIssueBackend
+// (clitest) intentionally does not implement ClaimReleaser — LOOM-1 keeps
+// the interface optional, capability-detected via type assertion.
+type releaserMock struct {
+	*MockIssueBackend
+	calls     int
+	lastID    string
+	lastActor string
+	releaseE  error
+}
+
+var _ backend.ClaimReleaser = (*releaserMock)(nil)
+
+func (r *releaserMock) ReleaseClaim(_ context.Context, id, actor string) error {
+	if r.MockIssueBackend == nil {
+		r.MockIssueBackend = NewMockIssueBackend()
+	}
+	r.calls++
+	r.lastID = id
+	r.lastActor = actor
+	return r.releaseE
+}
+
 // mockIPCMutator implements ipcMutator for testing the decorator logic.
 type mockIPCMutator struct {
-	claimFn    func(issueID string, lockTTL time.Duration) error
-	updateFn   func(issueID string, params backend.UpdateParams) error
-	completeFn func(issueID string, params backend.CloseParams) (*backend.CloseResult, error)
+	claimFn       func(issueID string, lockTTL time.Duration) error
+	updateFn      func(issueID string, params backend.UpdateParams) error
+	completeFn    func(issueID string, params backend.CloseParams) (*backend.CloseResult, error)
+	releaseLockFn func(issueID string) error
+	releaseFn     func(issueID string) error
 }
 
 func (m *mockIPCMutator) Claim(issueID string, lockTTL time.Duration) error {
@@ -35,6 +61,20 @@ func (m *mockIPCMutator) Complete(issueID string, params backend.CloseParams) (*
 		return m.completeFn(issueID, params)
 	}
 	return &backend.CloseResult{}, nil
+}
+
+func (m *mockIPCMutator) ReleaseLock(issueID string) error {
+	if m.releaseLockFn != nil {
+		return m.releaseLockFn(issueID)
+	}
+	return nil
+}
+
+func (m *mockIPCMutator) Release(issueID string) error {
+	if m.releaseFn != nil {
+		return m.releaseFn(issueID)
+	}
+	return nil
 }
 
 // --- IPC routing tests ---
@@ -321,6 +361,54 @@ func TestIPCIssueBackend_SearchIssues_DelegatesToDirectBackend(t *testing.T) {
 	}
 	if !fb.Called("SearchIssues") {
 		t.Error("direct SearchIssues should have been called")
+	}
+}
+
+// TestIPCIssueBackend_ReleaseClaim_RoutesThroughIPC asserts that ReleaseClaim
+// goes through the IPC mutator (IPCOpReleaseClaim) — so the daemon applies the
+// lease fence — and does NOT touch the direct backend, even when the direct
+// backend implements ClaimReleaser. This is the inverse of the pre-LOOM-1
+// bypass: release is now daemon-mediated like Claim/Update/Close.
+func TestIPCIssueBackend_ReleaseClaim_RoutesThroughIPC(t *testing.T) {
+	var gotID string
+	releaseCalls := 0
+	ipc := &mockIPCMutator{
+		releaseFn: func(issueID string) error {
+			releaseCalls++
+			gotID = issueID
+			return nil
+		},
+	}
+	// A direct backend that WOULD service ReleaseClaim if (incorrectly) called.
+	direct := &releaserMock{}
+	b := newIPCIssueBackend(ipc, direct)
+
+	if err := b.ReleaseClaim(context.Background(), "issue-99", "planner"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if releaseCalls != 1 || gotID != "issue-99" {
+		t.Errorf("ipc.Release calls=%d id=%q, want 1 / issue-99", releaseCalls, gotID)
+	}
+	if direct.calls != 0 {
+		t.Errorf("direct.ReleaseClaim calls = %d, want 0 (release must not bypass IPC)", direct.calls)
+	}
+}
+
+// TestIPCIssueBackend_ReleaseClaim_PropagatesIPCError asserts that an error from
+// the daemon IPC release surfaces back to the caller unchanged.
+func TestIPCIssueBackend_ReleaseClaim_PropagatesIPCError(t *testing.T) {
+	want := backend.NewBackendError(backend.KindConflict, "ipc.release", "lock held by someone else", nil)
+	ipc := &mockIPCMutator{
+		releaseFn: func(string) error { return want },
+	}
+	b := newIPCIssueBackend(ipc, NewMockIssueBackend())
+
+	err := b.ReleaseClaim(context.Background(), "issue-99", "planner")
+	if err == nil {
+		t.Fatal("expected error from ipc.Release, got nil")
+	}
+	if !backend.IsKind(err, backend.KindConflict) {
+		t.Errorf("expected KindConflict, got %v", err)
 	}
 }
 

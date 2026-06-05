@@ -1,9 +1,11 @@
 // IPC-aware IssueBackend decorator.
 //
 // When a daemon-spawned subprocess has LOOM_DAEMON_SOCKET set, defaultIssueBackend()
-// returns an ipcIssueBackend that routes the three daemon-supported mutation operations
-// (Update, ClaimIssue, Close) through the AgentIPCClient while reading through the
-// underlying direct backend.
+// returns an ipcIssueBackend that routes the daemon-supported mutation operations
+// (Update, ClaimIssue, Close, ReleaseClaim) through the AgentIPCClient while reading
+// through the underlying direct backend. Routing every mutation through the daemon
+// keeps them behind the lease fence (see daemon.validateIPCLease) — LOOM-1 added
+// ReleaseClaim to this set via the IPCOpReleaseClaim operation.
 
 package cli
 
@@ -21,6 +23,8 @@ type ipcMutator interface {
 	Claim(issueID string, lockTTL time.Duration) error
 	Update(issueID string, params backend.UpdateParams) error
 	Complete(issueID string, params backend.CloseParams) (*backend.CloseResult, error)
+	ReleaseLock(issueID string) error
+	Release(issueID string) error
 }
 
 // ipcIssueBackend decorates an IssueBackend with IPC routing for mutations.
@@ -33,6 +37,7 @@ type ipcIssueBackend struct {
 
 // Compile-time interface check.
 var _ backend.IssueBackend = (*ipcIssueBackend)(nil)
+var _ backend.ClaimReleaser = (*ipcIssueBackend)(nil)
 
 // newIPCIssueBackend returns an IPC-aware decorator.
 func newIPCIssueBackend(ipc ipcMutator, direct backend.IssueBackend) *ipcIssueBackend {
@@ -51,9 +56,23 @@ func (b *ipcIssueBackend) ClaimIssue(ctx context.Context, id string, lockTTL tim
 	return b.ipc.Claim(id, lockTTL)
 }
 
+// ReleaseIssueLock routes through IPC. The IPC server uses the connected
+// agent's name as the lock-release actor regardless of what we pass in actor.
+func (b *ipcIssueBackend) ReleaseIssueLock(ctx context.Context, id, actor string) error {
+	return b.ipc.ReleaseLock(id)
+}
+
 // Close routes through IPC.
 func (b *ipcIssueBackend) Close(ctx context.Context, id string, params backend.CloseParams) (*backend.CloseResult, error) {
 	return b.ipc.Complete(id, params)
+}
+
+// ReleaseClaim routes through IPC (IPCOpReleaseClaim), so the daemon applies
+// the same lease fence it enforces for Claim/Update/Close before releasing the
+// claim on the agent's behalf. The daemon uses its authenticated AgentName as
+// the release actor. See LOOM-1.
+func (b *ipcIssueBackend) ReleaseClaim(ctx context.Context, id, actor string) error {
+	return b.ipc.Release(id)
 }
 
 // --- Direct backend methods ---
@@ -187,10 +206,12 @@ type AgentIPCResponse struct {
 
 // IPC operation name constants.
 const (
-	IPCOpClaim     = "claim"
-	IPCOpUpdate    = "update"
-	IPCOpComplete  = "complete"
-	IPCOpHeartbeat = "heartbeat" // liveness ping carrying LastActivityAt; no mutation
+	IPCOpClaim        = "claim"
+	IPCOpUpdate       = "update"
+	IPCOpComplete     = "complete"
+	IPCOpHeartbeat    = "heartbeat" // liveness ping carrying LastActivityAt; no mutation
+	IPCOpReleaseLock  = "release_lock"
+	IPCOpReleaseClaim = "release_claim"
 )
 
 // IPCClaimArgs are the optional arguments for the claim operation.

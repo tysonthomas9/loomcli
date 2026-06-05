@@ -3,11 +3,14 @@ package supervisor
 import (
 	"context"
 	"os"
+	"strconv"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	cfgpkg "github.com/tysonthomas9/loomcli/internal/cli/config"
+	"github.com/tysonthomas9/loomcli/internal/cli/daemonregistry"
 	"github.com/tysonthomas9/loomcli/internal/cli/sessionfinalize"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/events"
@@ -19,6 +22,8 @@ import (
 func TestSupervisorRegistersControlPlaneNodeOnStart(t *testing.T) {
 	st := memstore.New()
 	s := newControlPlaneTestSupervisor(st)
+	s.ProjectDir = "/tmp/project-dir"
+	s.IpcSocketPath = "/tmp/project-dir/.loom/agent.sock"
 
 	if err := s.Start(); err != nil {
 		t.Fatalf("Start: %v", err)
@@ -37,6 +42,99 @@ func TestSupervisorRegistersControlPlaneNodeOnStart(t *testing.T) {
 	}
 	if node.Capacity != 0 {
 		t.Fatalf("Capacity = %d, want 0", node.Capacity)
+	}
+
+	// LOOM-3: the supervisor must publish PID / Cwd / Socket labels so
+	// diagnose can detect a daemon that was launched from any cwd.
+	wantPID := daemonregistry.LabelPID + strconv.Itoa(os.Getpid())
+	wantCwd := daemonregistry.LabelCwd + "/tmp/project-dir"
+	wantSocket := daemonregistry.LabelSocket + "/tmp/project-dir/.loom/agent.sock"
+	if !containsString(node.Labels, wantPID) {
+		t.Errorf("labels = %v, want to contain %q", node.Labels, wantPID)
+	}
+	if !containsString(node.Labels, wantCwd) {
+		t.Errorf("labels = %v, want to contain %q", node.Labels, wantCwd)
+	}
+	if !containsString(node.Labels, wantSocket) {
+		t.Errorf("labels = %v, want to contain %q", node.Labels, wantSocket)
+	}
+}
+
+func containsString(haystack []string, needle string) bool {
+	for _, s := range haystack {
+		if s == needle {
+			return true
+		}
+	}
+	return false
+}
+
+func TestSupervisorDaemonRuntimeLabelsOmitMissingFields(t *testing.T) {
+	st := memstore.New()
+	s := newControlPlaneTestSupervisor(st)
+	// ProjectDir / IpcSocketPath intentionally blank.
+
+	if err := s.Start(); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer s.Stop()
+
+	node, err := st.Nodes().Get(t.Context(), "WS", "node-1")
+	if err != nil {
+		t.Fatalf("get node: %v", err)
+	}
+	// PID must still be present (it's the strongest liveness signal).
+	if !containsString(node.Labels, daemonregistry.LabelPID+strconv.Itoa(os.Getpid())) {
+		t.Errorf("labels = %v, want to contain pid label", node.Labels)
+	}
+	// Empty Cwd / Socket must not produce dangling "key=" labels.
+	for _, label := range node.Labels {
+		if strings.HasPrefix(label, daemonregistry.LabelCwd) || strings.HasPrefix(label, daemonregistry.LabelSocket) {
+			t.Errorf("unexpected empty label: %q", label)
+		}
+	}
+}
+
+// TestSupervisorRefreshNodeLabelsRepublishesSocket simulates the
+// real daemon ordering: Start runs before IpcSocketPath is set, then
+// RefreshNodeLabels is called from startDaemonSockets to publish the
+// loom.daemon.socket label.
+func TestSupervisorRefreshNodeLabelsRepublishesSocket(t *testing.T) {
+	st := memstore.New()
+	s := newControlPlaneTestSupervisor(st)
+	s.ProjectDir = "/tmp/project-dir"
+	// IpcSocketPath intentionally unset at Start time.
+
+	if err := s.Start(); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer s.Stop()
+
+	node, err := st.Nodes().Get(t.Context(), "WS", "node-1")
+	if err != nil {
+		t.Fatalf("get node: %v", err)
+	}
+	for _, label := range node.Labels {
+		if strings.HasPrefix(label, daemonregistry.LabelSocket) {
+			t.Fatalf("did not expect socket label before refresh, got %v", node.Labels)
+		}
+	}
+
+	// Mimic startDaemonSockets: socket becomes known, then we re-publish.
+	s.IpcSocketPath = "/tmp/project-dir/.loom/agent.sock"
+	s.RefreshNodeLabels()
+
+	node, err = st.Nodes().Get(t.Context(), "WS", "node-1")
+	if err != nil {
+		t.Fatalf("get node after refresh: %v", err)
+	}
+	want := daemonregistry.LabelSocket + "/tmp/project-dir/.loom/agent.sock"
+	if !containsString(node.Labels, want) {
+		t.Errorf("labels = %v, want to contain %q after refresh", node.Labels, want)
+	}
+	// PID label must still be present after refresh (we re-publish the full set).
+	if !containsString(node.Labels, daemonregistry.LabelPID+strconv.Itoa(os.Getpid())) {
+		t.Errorf("labels = %v, lost PID label after refresh", node.Labels)
 	}
 }
 

@@ -2,9 +2,9 @@ package supervisor
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
-	"os"
 	"path/filepath"
 	"sync"
 	"time"
@@ -86,6 +86,12 @@ type Supervisor struct {
 	NodeID       string
 	NodeTTL      time.Duration
 	NodeInterval time.Duration
+
+	// backendRecheckInterval is the fixed delay computeBackoff returns for a
+	// BackendUnavailable park (agent's backend CLI missing from PATH). Zero
+	// means use the package default (backendUnavailableRecheckInterval). Tests set a
+	// small value to avoid the 30s wait.
+	backendRecheckInterval time.Duration
 }
 
 // NewAgent creates an AgentProcess from an agent entry, resolving the worktree path
@@ -122,6 +128,11 @@ func (s *Supervisor) Start() error {
 	if err := s.startControlPlaneNode(); err != nil {
 		return err
 	}
+
+	// Sweep backend processes orphaned by a previous SIGKILL or crash (PPID==1
+	// with cwd under a managed worktree). Must happen before we spawn new
+	// workers so a brand-new agent doesn't get confused with a leftover one.
+	s.sweepOrphanedBackends()
 
 	// Sweep orphaned sessions from prior daemon runs before launching agents.
 	if sessStore, err := sessions.NewStore(cli.GetWorkspaceRuntimeDir()); err != nil {
@@ -189,82 +200,6 @@ const (
 )
 
 var controlPlaneOperationTimeout = 2 * time.Second
-
-func (s *Supervisor) startControlPlaneNode() error {
-	if s.ControlStore == nil || s.WorkspaceID == "" {
-		return nil
-	}
-	nodeID := s.resolveNodeID()
-	ttl := s.NodeTTL
-	if ttl <= 0 {
-		ttl = defaultNodeTTL
-	}
-	interval := s.NodeInterval
-	if interval <= 0 {
-		interval = defaultNodeInterval
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), controlPlaneOperationTimeout)
-	defer cancel()
-	if _, err := s.ControlStore.Nodes().Create(ctx, store.NodeCreate{
-		WorkspaceKey:    s.WorkspaceID,
-		NodeID:          nodeID,
-		OwnerActor:      resolveNodeOwnerActor(),
-		RuntimeProvider: domain.RuntimeProviderLocal,
-		Capabilities:    []string{"local-supervisor", "agent-process"},
-		Capacity:        len(s.Agents),
-		DrainState:      domain.NodeDrainActive,
-		TTL:             ttl,
-	}); err != nil {
-		return fmt.Errorf("register supervisor node %q: %w", nodeID, err)
-	}
-	s.NodeID = nodeID
-
-	s.RegisterTick(GoroutineNodeHeartbeat)
-	s.RunCritical(GoroutineNodeHeartbeat, func() {
-		s.runNodeHeartbeat(nodeID, ttl, interval)
-	})
-	return nil
-}
-
-func (s *Supervisor) runNodeHeartbeat(nodeID string, ttl, interval time.Duration) {
-	ticker := time.NewTicker(interval)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-s.Shutdown:
-			return
-		case <-ticker.C:
-			ctx, cancel := context.WithTimeout(context.Background(), controlPlaneOperationTimeout)
-			_, err := s.ControlStore.Nodes().Heartbeat(ctx, s.WorkspaceID, nodeID, ttl)
-			cancel()
-			if err != nil {
-				slog.Warn("supervisor node heartbeat failed", "workspace", s.WorkspaceID, "node_id", nodeID, "err", err)
-			}
-			s.RecordTick(GoroutineNodeHeartbeat)
-		}
-	}
-}
-
-func (s *Supervisor) resolveNodeID() string {
-	if s.NodeID != "" {
-		return s.NodeID
-	}
-	host, err := os.Hostname()
-	if err != nil || host == "" {
-		host = "unknown-host"
-	}
-	return fmt.Sprintf("loom-supervisor-%s-%d", host, os.Getpid())
-}
-
-func resolveNodeOwnerActor() string {
-	for _, key := range []string{"LOOM_FLEET_DB_ACTOR", "LOOM_AGENT_NAME", "USER"} {
-		if value := os.Getenv(key); value != "" {
-			return value
-		}
-	}
-	return "local"
-}
 
 // Stop gracefully shuts down all agents. Safe to call multiple times.
 func (s *Supervisor) Stop() {
@@ -438,8 +373,13 @@ func (s *Supervisor) RecordAgentActivity(agentName string, at time.Time) {
 	target.Mu.Unlock()
 }
 
-// preFlightSetup runs recovery, assigns epic, creates session, and clears yield file.
+// preFlightSetup verifies the backend is spawnable, then runs recovery, assigns
+// epic, creates session, and clears yield file.
 func (s *Supervisor) preFlightSetup(ap *AgentProcess) bool {
+	if err := s.gateBackendAvailable(ap); err != nil {
+		return false
+	}
+
 	if err := s.recoverAgent(ap, 0); err != nil {
 		slog.Warn("pre-flight recovery failed", "worktree", ap.Entry.Worktree, "err", err)
 	}
@@ -559,6 +499,26 @@ func (s *Supervisor) createControlPlaneAgentSession(ap *AgentProcess, sessionID,
 	ap.Mu.Unlock()
 }
 
+// markControlPlaneAgentState persists the given agent state onto the
+// fleet-db Agent record so UIs and `workspace ops diagnose` reflect
+// supervisor lifecycle transitions (currently used by the
+// backend-availability gate to flip between AgentStateBackendUnavailable
+// and AgentStateActive). Best-effort: failures are logged but do not
+// block the supervisor.
+func (s *Supervisor) markControlPlaneAgentState(ap *AgentProcess, state domain.AgentState) {
+	if s.ControlStore == nil || s.WorkspaceID == "" {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), controlPlaneOperationTimeout)
+	defer cancel()
+	if _, err := s.ControlStore.Agents().Update(ctx, s.WorkspaceID, ap.Entry.Worktree, store.AgentUpdate{
+		State: &state,
+	}); err != nil {
+		slog.Warn("control-plane agent state update failed",
+			"worktree", ap.Entry.Worktree, "state", state, "err", err)
+	}
+}
+
 func (s *Supervisor) markControlPlaneAgentSessionRunning(ap *AgentProcess) {
 	if s.ControlStore == nil || s.WorkspaceID == "" {
 		return
@@ -670,6 +630,25 @@ func (s *Supervisor) completeControlPlaneAgentSession(ap *AgentProcess, input ag
 			slog.Warn("control-plane agent lease release failed", "worktree", ap.Entry.Worktree, "session_id", input.sessionID, "lease_id", input.leaseID, "err", err)
 		}
 	}
+	s.releaseAssignedTaskClaim(ap, input.taskID)
+	s.deregisterWorker(ap)
+}
+
+// deregisterWorker removes the agent's fleet-db worker registration on exit,
+// keyed by the claim actor (ap.Entry.Worktree). This is the graceful fast path:
+// it collapses the common stop/drain case to instant board cleanup and releases
+// any issue lock the worker still holds. Best-effort and idempotent — the
+// server-side worker TTL + sweeper are the backstop for non-graceful death.
+func (s *Supervisor) deregisterWorker(ap *AgentProcess) {
+	if s.ControlStore == nil || s.WorkspaceID == "" || ap.Entry.Worktree == "" {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), controlPlaneOperationTimeout)
+	defer cancel()
+	if err := s.ControlStore.Workers().Deregister(ctx, s.WorkspaceID, ap.Entry.Worktree); err != nil {
+		slog.Debug("supervisor worker deregister failed",
+			"workspace", s.WorkspaceID, "worker_id", ap.Entry.Worktree, "err", err)
+	}
 }
 
 // spawnAndWait spawns the agent and waits for it to exit. A spawn failure is
@@ -678,6 +657,16 @@ func (s *Supervisor) completeControlPlaneAgentSession(ap *AgentProcess, input ag
 // backoff for both real exits and spawn failures.
 func (s *Supervisor) spawnAndWait(ap *AgentProcess) {
 	if err := s.spawnAgent(ap); err != nil {
+		if errors.Is(err, ErrBackendUnavailable) {
+			// gateBackendAvailable already set the BackendUnavailable state/error.
+			// The normal pre-flight gate runs before task claim, but this spawn-time
+			// gate remains as a race guard for a backend disappearing after claim and
+			// before exec. Clean up any already-created session/claim/worker before
+			// parking so the task is immediately claimable again.
+			s.completeBackendUnavailableCleanup(ap)
+			s.Concurrency.Release(ap.Entry.Role)
+			return
+		}
 		slog.Warn("spawn failed", "worktree", ap.Entry.Worktree, "err", err)
 		ap.Mu.Lock()
 		orphanSess := ap.Session
@@ -712,6 +701,30 @@ func (s *Supervisor) spawnAndWait(ap *AgentProcess) {
 	s.postMortemRecovery(ap, exitCode)
 	s.Concurrency.Release(ap.Entry.Role)
 	s.handleEpicTransition(ap)
+}
+
+func (s *Supervisor) completeBackendUnavailableCleanup(ap *AgentProcess) {
+	state := takeAgentSessionForFinalize(ap)
+	taskID := s.taskIDForLifecycle(ap, nil)
+	if state.session != nil {
+		_ = state.session.Finalize(sessions.FinalizeOptions{ExitCode: -1, ErrorClass: "backend_unavailable"})
+	}
+	if state.sessionID != "" {
+		s.completeControlPlaneAgentSession(ap, agentSessionCompletionInput{
+			sessionID:  state.sessionID,
+			leaseID:    state.leaseID,
+			leaseToken: state.leaseToken,
+			exitCode:   -1,
+			errClass:   "backend_unavailable",
+			taskID:     taskID,
+		})
+		return
+	}
+	if taskID == "" {
+		return
+	}
+	s.releaseAssignedTaskClaim(ap, taskID)
+	s.deregisterWorker(ap)
 }
 
 type agentSessionFinalizeState struct {

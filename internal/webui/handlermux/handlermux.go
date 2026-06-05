@@ -38,8 +38,7 @@ type WorkspaceOpsModule struct {
 // so issue query handlers can use the IssueBackend when no daemon pool exists.
 //
 // daemonExpected defaults to true; chain WithDaemonExpected(false) for
-// fleet client mode so /daemon/status returns a fleet-mode stub instead
-// of 503.
+// fleet client mode.
 func NewWorkspaceOpsModule(workspaceSvc service.WorkspaceService, multiPool daemon.Pool, agentQueueH http.HandlerFunc) *WorkspaceOpsModule {
 	return &WorkspaceOpsModule{workspaceSvc: workspaceSvc, multiPool: normalizePool(multiPool), agentQueueH: agentQueueH, daemonExpected: true}
 }
@@ -85,7 +84,8 @@ func (m *WorkspaceOpsModule) Register(mux *http.ServeMux) {
 		githandlers.HandleBlockedWithBackend(m.multiPool, githandlers.IssueBackendFn(m.issueBackendFn)))
 	mux.HandleFunc("GET /api/workspaces/{ws}/issues/graph",
 		githandlers.HandleGraphWithBackend(m.multiPool, githandlers.IssueBackendFn(m.issueBackendFn)))
-	mux.HandleFunc("GET /api/workspaces/{ws}/daemon/status", healthhandlers.HandleDaemonStatusWithMode(m.multiPool, m.daemonExpected))
+	mux.HandleFunc("GET /api/workspaces/{ws}/readyz",
+		healthhandlers.HandleWorkspaceRuntimeReady(m.multiPool, m.daemonExpected, healthhandlers.IssueBackendFn(m.issueBackendFn)))
 	mux.HandleFunc("GET /api/workspaces/{ws}/config/backend", workspace.HandleWorkspaceBackendGet(m.workspaceSvc))
 	if m.agentQueueH != nil {
 		mux.HandleFunc("GET /api/workspaces/{ws}/agents/{name}/queue", m.agentQueueH)

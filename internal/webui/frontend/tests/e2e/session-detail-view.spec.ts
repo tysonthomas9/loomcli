@@ -365,6 +365,7 @@ interface SessionMockOptions {
   transcriptDelay?: number;
   diffDelay?: number;
   emptyTranscript?: boolean;
+  transcript?: typeof MOCK_TRANSCRIPT;
   diff404?: boolean;
   transcriptError?: boolean;
   diffError?: boolean;
@@ -401,7 +402,9 @@ async function setupSessionMocks(
     if (options.transcriptDelay) {
       await new Promise((r) => setTimeout(r, options.transcriptDelay));
     }
-    const entries = options.emptyTranscript ? [] : MOCK_TRANSCRIPT;
+    const entries = options.emptyTranscript
+      ? []
+      : (options.transcript ?? MOCK_TRANSCRIPT);
     const url = route.request().url();
     const sessionId =
       url.match(/sessions\/([^/]+)\/transcript/)?.[1] ?? "unknown";
@@ -608,6 +611,43 @@ test.describe("Session Detail View - Transcript and Diff Tabs", () => {
       const transcript = page.getByTestId("session-transcript");
       // asst-1 turn groups one tool call
       await expect(transcript).toContainText("1 tool call");
+    });
+
+    test("long prompts do not push the transcript out of the runs panel", async ({
+      page,
+    }) => {
+      const longPrompt = Array.from(
+        { length: 120 },
+        (_, i) => `Workflow line ${i + 1}`,
+      ).join("\n");
+      const longTranscript = [
+        { ...MOCK_TRANSCRIPT[0], text: longPrompt },
+        ...Array.from({ length: 24 }, (_, i) => ({
+          seq: i + 2,
+          timestamp: "2026-01-20T10:00:05Z",
+          role: "assistant",
+          type: "text",
+          text: `Log line ${i + 1}`,
+          uuid: `asst-long-${i}`,
+        })),
+      ];
+      await installIssuesMock(page, [MOCK_ISSUE]);
+      await setupBaseMocks(page);
+      await setupSessionMocks(page, { transcript: longTranscript });
+      await navigateToSessionDetail(page);
+
+      const transcript = page.getByTestId("session-transcript");
+      const metrics = await transcript.evaluate((el) => ({
+        clientHeight: el.clientHeight,
+        scrollHeight: el.scrollHeight,
+      }));
+      expect(metrics.clientHeight).toBeGreaterThan(100);
+      expect(metrics.scrollHeight).toBeGreaterThan(metrics.clientHeight);
+
+      await transcript.evaluate((el) => {
+        el.scrollTop = el.scrollHeight;
+      });
+      await expect(transcript.locator("article").last()).toBeInViewport();
     });
 
     test("shows empty state when transcript has no entries", async ({

@@ -353,6 +353,14 @@ func (b *APIBackend) ClaimIssue(ctx context.Context, id string, lockTTL time.Dur
 	return err
 }
 
+// ReleaseIssueLock releases only the operational lock on the issue. The
+// generic API backend (a thin OpenAPI client) does not expose a lock-only
+// release endpoint, so this returns KindNotImplemented and lets callers fall
+// back to TTL expiry. Use the fleet backend for explicit lock release.
+func (b *APIBackend) ReleaseIssueLock(_ context.Context, _, _ string) error {
+	return backend.ErrNotImplemented("ReleaseIssueLock", "APIBackend does not support explicit lock release; rely on TTL expiry")
+}
+
 func claimIssueBody(lockTTL time.Duration) (any, error) {
 	if lockTTL < 0 {
 		return nil, backend.ErrValidation("ClaimIssue", "lockTTL must not be negative")

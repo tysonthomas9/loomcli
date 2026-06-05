@@ -235,6 +235,7 @@ func TestingGetDefaultDeps() *Deps {
 type fleetDBIssueBackend struct{}
 
 var _ backend.IssueBackend = (*fleetDBIssueBackend)(nil)
+var _ backend.ClaimReleaser = (*fleetDBIssueBackend)(nil)
 
 func newFleetDBIssueBackend() backend.IssueBackend {
 	return &fleetDBIssueBackend{}
@@ -381,6 +382,20 @@ func (b *fleetDBIssueBackend) ClaimIssue(ctx context.Context, id string, lockTTL
 	})
 }
 
+// ReleaseClaim implements backend.ClaimReleaser by forwarding to the
+// underlying FleetBackend (which is the only IssueBackend implementation
+// that maintains an explicit claim lock distinct from issue status).
+// Used by `loom complete` to close the planner-leaked-lock path in LOOM-1.
+func (b *fleetDBIssueBackend) ReleaseClaim(ctx context.Context, id, actor string) error {
+	return b.withBackend(ctx, "ReleaseClaim", func(ib backend.IssueBackend) error {
+		r, ok := ib.(backend.ClaimReleaser)
+		if !ok {
+			return nil
+		}
+		return r.ReleaseClaim(ctx, id, actor)
+	})
+}
+
 func (b *fleetDBIssueBackend) ClaimIssueAsActor(ctx context.Context, id string, lockTTL time.Duration, actor string) error {
 	return b.withBackend(ctx, "ClaimIssue", func(ib backend.IssueBackend) error {
 		if actorBackend, ok := ib.(interface {
@@ -389,6 +404,27 @@ func (b *fleetDBIssueBackend) ClaimIssueAsActor(ctx context.Context, id string, 
 			return actorBackend.ClaimIssueAsActor(ctx, id, lockTTL, actor)
 		}
 		return ib.ClaimIssue(ctx, id, lockTTL)
+	})
+}
+
+func (b *fleetDBIssueBackend) ReleaseIssueLock(ctx context.Context, id, actor string) error {
+	return b.withBackend(ctx, "ReleaseIssueLock", func(ib backend.IssueBackend) error {
+		return ib.ReleaseIssueLock(ctx, id, actor)
+	})
+}
+
+// ReleaseIssueAsActor is the actor-scoped release used by the supervisor to
+// free a lock acquired via ClaimIssueAsActor when the agent process exits.
+// Falls back to ReleaseIssueLock(id, actor) if the underlying backend does
+// not expose a dedicated actor variant.
+func (b *fleetDBIssueBackend) ReleaseIssueAsActor(ctx context.Context, id string, actor string) error {
+	return b.withBackend(ctx, "ReleaseIssue", func(ib backend.IssueBackend) error {
+		if actorBackend, ok := ib.(interface {
+			ReleaseIssueAsActor(context.Context, string, string) error
+		}); ok {
+			return actorBackend.ReleaseIssueAsActor(ctx, id, actor)
+		}
+		return ib.ReleaseIssueLock(ctx, id, actor)
 	})
 }
 
@@ -559,6 +595,9 @@ func (b *unavailableIssueBackend) Update(context.Context, string, backend.Update
 }
 func (b *unavailableIssueBackend) ClaimIssue(context.Context, string, time.Duration) error {
 	return b.unavailable("ClaimIssue")
+}
+func (b *unavailableIssueBackend) ReleaseIssueLock(context.Context, string, string) error {
+	return b.unavailable("ReleaseIssueLock")
 }
 func (b *unavailableIssueBackend) DeferIssue(context.Context, string, time.Time) error {
 	return b.unavailable("DeferIssue")
