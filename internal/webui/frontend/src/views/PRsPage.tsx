@@ -55,7 +55,14 @@ export function PRsPage(): JSX.Element {
         </div>
       ) : (
         <ul className={styles.list}>
-          {prIssues.map((issue) => (
+          {prIssues.map((issue) => {
+            // Only link out to a validated http(s) PR URL — external_ref is
+            // agent-controlled, so never render an unvalidated scheme (e.g.
+            // javascript:) in href. isPRUrl enforces protocol + /pull/ path.
+            const prUrl = isPRUrl(issue.external_ref)
+              ? issue.external_ref
+              : null;
+            return (
             <li key={issue.id} className={styles.row}>
               <button
                 type="button"
@@ -74,10 +81,10 @@ export function PRsPage(): JSX.Element {
                   {issue.repo ? ` · ${issue.repo}` : ""}
                 </span>
               </button>
-              {issue.external_ref && (
+              {prUrl && (
                 <a
                   className={styles.prLink}
-                  href={issue.external_ref}
+                  href={prUrl}
                   target="_blank"
                   rel="noopener noreferrer"
                 >
@@ -85,7 +92,8 @@ export function PRsPage(): JSX.Element {
                 </a>
               )}
             </li>
-          ))}
+            );
+          })}
         </ul>
       )}
     </div>
