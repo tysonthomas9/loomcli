@@ -242,6 +242,26 @@
 }
 
 /* =================================
+ * Quarantined badge styling
+ * Shown on blocked issues carrying the loom:quarantined label —
+ * distinguishes a daemon-quarantined card from a dependency-blocked one
+ * ================================= */
+
+.quarantinedBadge {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: var(--space-1) var(--space-2);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-medium);
+  line-height: 1;
+  border-radius: var(--radius-sm);
+  background-color: var(--color-warning-bg);
+  color: var(--color-warning);
+}
+
+/* =================================
  * Review type badge styling
  * ================================= */
 
