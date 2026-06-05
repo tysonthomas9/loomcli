@@ -13,6 +13,11 @@ type WithWorktreeOptions struct {
 	ExitCode     int
 	ErrorClass   string
 
+	// ClaudeSessionID is the Claude Code session UUID captured from the run's
+	// stream output. Used to resolve the native transcript exactly; empty
+	// falls back to newest-by-mtime in the worktree's project dir.
+	ClaudeSessionID string
+
 	InputTokens      int64
 	OutputTokens     int64
 	CacheReadTokens  int64
@@ -48,6 +53,9 @@ func WithWorktree(sess *sessions.Session, opts WithWorktreeOptions) (WithWorktre
 	}
 	if sess.Meta.Backend == backendnames.Codex {
 		_, _ = sess.SyncLatestCodexRollout(opts.WorktreePath, sess.Meta.StartedAt)
+	}
+	if sess.Meta.Backend == backendnames.Claude {
+		_, _ = sess.SyncLatestClaudeTranscript(opts.WorktreePath, opts.ClaudeSessionID, sess.Meta.StartedAt)
 	}
 	return result, sess.Finalize(sessions.FinalizeOptions{
 		TaskID:       opts.TaskID,

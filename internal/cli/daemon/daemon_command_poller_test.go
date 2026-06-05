@@ -102,6 +102,7 @@ func (s commandPollerTestStore) AgentOwnershipLeases() store.AgentOwnershipLease
 func (s commandPollerTestStore) AgentCommands() store.AgentCommandStore {
 	return s.commands
 }
+func (s commandPollerTestStore) Workers() store.WorkerStore       { return nil }
 func (s commandPollerTestStore) Roles() store.RoleStore           { return nil }
 func (s commandPollerTestStore) Daemon() store.DaemonProfileStore { return nil }
 func (s commandPollerTestStore) Close() error                     { return nil }

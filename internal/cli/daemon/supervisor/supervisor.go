@@ -376,7 +376,8 @@ func (s *Supervisor) RecordAgentActivity(agentName string, at time.Time) {
 	target.Mu.Unlock()
 }
 
-// preFlightSetup runs recovery, assigns epic, creates session, and clears yield file.
+// preFlightSetup verifies the backend is spawnable, then runs recovery, assigns
+// epic, creates session, and clears yield file.
 //
 // Resume-first / checkpoint-fallback: when the worktree carries a genuine crash
 // remnant (a dead agent PID with a carried Claude session + task within TTL),
@@ -388,6 +389,10 @@ func (s *Supervisor) RecordAgentActivity(agentName string, at time.Time) {
 // attempt's diff injected) before finally cold-starting a fresh task. See
 // detectRecovery.
 func (s *Supervisor) preFlightSetup(ap *AgentProcess) bool {
+	if err := s.gateBackendAvailable(ap); err != nil {
+		return false
+	}
+
 	taskID, mode := s.detectRecovery(ap)
 	switch mode {
 	case recoverResume:
@@ -653,6 +658,24 @@ func (s *Supervisor) completeControlPlaneAgentSession(ap *AgentProcess, input ag
 		}
 	}
 	s.releaseAssignedTaskClaim(ap, input.taskID)
+	s.deregisterWorker(ap)
+}
+
+// deregisterWorker removes the agent's fleet-db worker registration on exit,
+// keyed by the claim actor (ap.Entry.Worktree). This is the graceful fast path:
+// it collapses the common stop/drain case to instant board cleanup and releases
+// any issue lock the worker still holds. Best-effort and idempotent — the
+// server-side worker TTL + sweeper are the backstop for non-graceful death.
+func (s *Supervisor) deregisterWorker(ap *AgentProcess) {
+	if s.ControlStore == nil || s.WorkspaceID == "" || ap.Entry.Worktree == "" {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), controlPlaneOperationTimeout)
+	defer cancel()
+	if err := s.ControlStore.Workers().Deregister(ctx, s.WorkspaceID, ap.Entry.Worktree); err != nil {
+		slog.Debug("supervisor worker deregister failed",
+			"workspace", s.WorkspaceID, "worker_id", ap.Entry.Worktree, "err", err)
+	}
 }
 
 // spawnAndWait spawns the agent and waits for it to exit. A spawn failure is
@@ -662,14 +685,12 @@ func (s *Supervisor) completeControlPlaneAgentSession(ap *AgentProcess, input ag
 func (s *Supervisor) spawnAndWait(ap *AgentProcess) {
 	if err := s.spawnAgent(ap); err != nil {
 		if errors.Is(err, ErrBackendUnavailable) {
-			// Gate fired before buildCommand: gateBackendAvailable already set
-			// the BackendUnavailable state/error, and no session or subprocess
-			// was created, so there's nothing to finalize. Release concurrency
-			// and return; the single restart decision parks the agent —
-			// shouldRestart treats BackendUnavailable as retry-without-budget-
-			// erosion and computeBackoff returns the fixed backend re-check
-			// interval. The loop re-runs the gate next iteration and
-			// auto-recovers once the binary reappears.
+			// gateBackendAvailable already set the BackendUnavailable state/error.
+			// The normal pre-flight gate runs before task claim, but this spawn-time
+			// gate remains as a race guard for a backend disappearing after claim and
+			// before exec. Clean up any already-created session/claim/worker before
+			// parking so the task is immediately claimable again.
+			s.completeBackendUnavailableCleanup(ap)
 			s.Concurrency.Release(ap.Entry.Role)
 			return
 		}
@@ -707,6 +728,30 @@ func (s *Supervisor) spawnAndWait(ap *AgentProcess) {
 	s.postMortemRecovery(ap, exitCode)
 	s.Concurrency.Release(ap.Entry.Role)
 	s.handleEpicTransition(ap)
+}
+
+func (s *Supervisor) completeBackendUnavailableCleanup(ap *AgentProcess) {
+	state := takeAgentSessionForFinalize(ap)
+	taskID := s.taskIDForLifecycle(ap, nil)
+	if state.session != nil {
+		_ = state.session.Finalize(sessions.FinalizeOptions{ExitCode: -1, ErrorClass: "backend_unavailable"})
+	}
+	if state.sessionID != "" {
+		s.completeControlPlaneAgentSession(ap, agentSessionCompletionInput{
+			sessionID:  state.sessionID,
+			leaseID:    state.leaseID,
+			leaseToken: state.leaseToken,
+			exitCode:   -1,
+			errClass:   "backend_unavailable",
+			taskID:     taskID,
+		})
+		return
+	}
+	if taskID == "" {
+		return
+	}
+	s.releaseAssignedTaskClaim(ap, taskID)
+	s.deregisterWorker(ap)
 }
 
 type agentSessionFinalizeState struct {

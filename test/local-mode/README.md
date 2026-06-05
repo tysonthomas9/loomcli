@@ -59,6 +59,7 @@ Useful commands:
 
 ```sh
 make local-mode-verify
+make local-mode-codex-verify
 make local-mode-logs
 make local-mode-down
 ```
@@ -68,6 +69,9 @@ planner/coder tasks completed the daemon path, recorded sessions, exposed
 transcripts, and produced the coder diff artifact. Override
 `LOCAL_MODE_API_URL`, `LOOM_WORKSPACE`, `LOOM_LOCAL_MODE_PLAN_TASK_ID`, and
 `LOOM_LOCAL_MODE_CODE_TASK_ID` when verifying a non-default stack.
+Use `make local-mode-codex-verify` after `make local-mode-codex-up`; it
+defaults the verifier to the Codex stack's seeded `LOCALMODE-1` and
+`LOCALMODE-2` tasks.
 
 The stack uses Docker/Podman volumes, so sessions and workspace files survive
 container restarts until `make local-mode-down` removes the stack volumes.
@@ -75,9 +79,27 @@ container restarts until `make local-mode-down` removes the stack volumes.
 Codex variant knobs:
 
 ```sh
-LOCAL_MODE_CODEX_HOME=/path/to/.codex make local-mode-codex-up
+LOCAL_MODE_CODEX_HOME=<codex-home> make local-mode-codex-up
 LOCAL_MODE_CODEX_CLI_VERSION=0.128.0 make local-mode-codex-up
 ```
+
+Compose and parallel-stack knobs:
+
+```sh
+LOCAL_MODE_COMPOSE="docker compose" make local-mode-up
+LOCAL_MODE_COMPOSE_PROJECT=loomcli-local-mode-b \
+LOCAL_MODE_FLEETDB_PORT=8380 \
+LOCAL_MODE_API_PORT=8382 \
+LOCAL_MODE_UI_PORT=8383 \
+LOCAL_MODE_COMPOSE_UP_FLAGS="--build -d" \
+make local-mode-up
+
+LOCAL_MODE_API_PORT=8382 make local-mode-verify
+```
+
+Image tags default to the Compose project name for parallel builds. Override
+`LOCAL_MODE_FLEETDB_IMAGE`, `LOCAL_MODE_LOOM_IMAGE`, or
+`LOCAL_MODE_LOOM_CODEX_IMAGE` only when a run needs explicit image tags.
 
 Troubleshooting:
 

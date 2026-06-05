@@ -2,6 +2,7 @@ package supervisor
 
 import (
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"os/exec"
@@ -203,10 +204,7 @@ func (s *Supervisor) spawnAgent(ap *AgentProcess) error {
 	s.setupAgentLogFile(ap, cmd)
 
 	if err := cmd.Start(); err != nil {
-		if ap.LogFile != nil {
-			_ = ap.LogFile.Close()
-			ap.LogFile = nil
-		}
+		closeAgentLogs(ap)
 		ap.Mu.Unlock()
 		recordErr(span, err, "spawn.start")
 		return fmt.Errorf("failed to start subprocess: %w", err)
@@ -236,12 +234,52 @@ func (s *Supervisor) spawnAgent(ap *AgentProcess) error {
 	return nil
 }
 
-// setupAgentLogFile configures stdout/stderr log files for the agent subprocess.
-// Must be called while ap.Mu is held.
+// setupAgentLogFile wires the agent subprocess's stdout/stderr to its log
+// sinks. Up to two sinks are active:
+//
+//   - The daemon process log (<daemon.LogDir>/<ws>/<role>-<worktree>.log): the
+//     watchdog stats its mtime for liveness (see checkWatchdog) and the crash
+//     classifier reads its tail (see classify.go), so its path and append
+//     semantics are preserved exactly.
+//   - The canonical agent archive (~/.loom/logs/<ws>/agents/<worktree>.log): the
+//     web UI "Logs" tab reads this via webuilog.GetAgentLogPath. Without it,
+//     daemon-supervised agents 404 in the Logs tab even though tmux-mode agents
+//     — whose pane tmux routes here via `pipe-pane … loom log-router` — are
+//     inspectable. Daemon-mode agents bypass tmux, so we write it directly.
+//
+// When both sinks are open the child's output is fanned out with io.MultiWriter.
+// The watchdog still observes the daemon log's mtime because the os/exec copy
+// advances it as output arrives. Must be called while ap.Mu is held.
 func (s *Supervisor) setupAgentLogFile(ap *AgentProcess, cmd *exec.Cmd) {
+	var sinks []io.Writer
+
+	if f := s.openDaemonLogFile(ap); f != nil {
+		ap.LogFile = f
+		sinks = append(sinks, f)
+	}
+	if af := s.openAgentArchiveLog(ap); af != nil {
+		ap.ArchiveLogFile = af
+		sinks = append(sinks, af)
+	}
+
+	switch len(sinks) {
+	case 0:
+		return
+	case 1:
+		cmd.Stdout, cmd.Stderr = sinks[0], sinks[0]
+	default:
+		w := io.MultiWriter(sinks...)
+		cmd.Stdout, cmd.Stderr = w, w
+	}
+}
+
+// openDaemonLogFile opens the daemon process log consumed by the watchdog and
+// crash classifier. Returns nil (logging disabled for this sink) when no LogDir
+// is configured or the file can't be opened.
+func (s *Supervisor) openDaemonLogFile(ap *AgentProcess) *os.File {
 	cfg := s.ConfigSnapshot()
 	if cfg.Daemon.LogDir == "" {
-		return
+		return nil
 	}
 
 	logDir := cfg.Daemon.LogDir
@@ -254,7 +292,7 @@ func (s *Supervisor) setupAgentLogFile(ap *AgentProcess, cmd *exec.Cmd) {
 
 	if err := os.MkdirAll(logDir, 0700); err != nil {
 		log.Printf("[daemon] Agent %s: failed to create log directory: %v", ap.Entry.Worktree, err)
-		return
+		return nil
 	}
 
 	safeWorktree := filepath.Base(ap.Entry.Worktree)
@@ -269,11 +307,39 @@ func (s *Supervisor) setupAgentLogFile(ap *AgentProcess, cmd *exec.Cmd) {
 	f, err := os.OpenFile(logFilePath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600) //nolint:gosec // G304: log file path from daemon config
 	if err != nil {
 		log.Printf("[daemon] Agent %s: failed to open log file: %v", ap.Entry.Worktree, err)
-		return
+		return nil
 	}
-	cmd.Stdout = f
-	cmd.Stderr = f
-	ap.LogFile = f
+	return f
+}
+
+// openAgentArchiveLog opens the per-workspace agent archive that the web UI Logs
+// tab reads (resolved by agent.OpenAgentArchiveLog, which mirrors the reader so
+// writer and reader always agree). Best-effort: returns nil on any error so a
+// logging failure never blocks spawning the agent.
+func (s *Supervisor) openAgentArchiveLog(ap *AgentProcess) *os.File {
+	f, err := agent.OpenAgentArchiveLog(s.WorkspaceID, ap.Entry.Worktree)
+	if err != nil {
+		log.Printf("[daemon] Agent %s: archive log unavailable: %v", ap.Entry.Worktree, err)
+		return nil
+	}
+	return f
+}
+
+// closeAgentLogs closes both agent log sinks (best-effort) and clears the
+// handles. Must be called while ap.Mu is held.
+func closeAgentLogs(ap *AgentProcess) {
+	if ap.LogFile != nil {
+		if err := ap.LogFile.Close(); err != nil {
+			log.Printf("[daemon] Agent %s: failed to close log file: %v", ap.Entry.Worktree, err)
+		}
+		ap.LogFile = nil
+	}
+	if ap.ArchiveLogFile != nil {
+		if err := ap.ArchiveLogFile.Close(); err != nil {
+			log.Printf("[daemon] Agent %s: failed to close archive log: %v", ap.Entry.Worktree, err)
+		}
+		ap.ArchiveLogFile = nil
+	}
 }
 
 // waitForAgent blocks until subprocess exits, returns exit code.
@@ -289,8 +355,12 @@ func (s *Supervisor) waitForAgent(ap *AgentProcess) int {
 	// Keep this supervise goroutine's liveness tick fresh while we block in
 	// cmd.Wait() for the agent's unbounded lifetime; see startAgentWaitHeartbeat.
 	stopHeartbeat := s.startAgentWaitHeartbeat(ap)
+	// Renew the agent's fleet-db worker-registration lease for the same window,
+	// so a live agent is not reaped by the server-side TTL while it runs.
+	stopWorkerHeartbeat := s.startWorkerHeartbeat(ap)
 	err := cmd.Wait()
 	stopHeartbeat()
+	stopWorkerHeartbeat()
 
 	ap.Mu.Lock()
 	ap.LastExit = time.Now()
@@ -311,13 +381,8 @@ func (s *Supervisor) waitForAgent(ap *AgentProcess) int {
 	ap.Cmd = nil
 	ap.Pid = 0
 
-	// Close log file handle to prevent leaks
-	if ap.LogFile != nil {
-		if err := ap.LogFile.Close(); err != nil {
-			log.Printf("[daemon] Agent %s: failed to close log file: %v", ap.Entry.Worktree, err)
-		}
-		ap.LogFile = nil
-	}
+	// Close log file handles to prevent leaks
+	closeAgentLogs(ap)
 	ap.Mu.Unlock()
 
 	// Emit agent_stopped event outside the lock (best-effort)

@@ -394,6 +394,7 @@ export function AgentDetailPanel({
               </div>
             ) : activeTab === "logs" ? (
               <div
+                className={styles.scrollableContent}
                 id="agent-panel-tabpanel-logs"
                 role="tabpanel"
                 aria-labelledby="agent-panel-tab-logs"

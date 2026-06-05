@@ -165,7 +165,7 @@ func runTaskDaemon(deps *cli.Deps, worktreePath, agentName string) {
 	}
 
 	emitTaskLifecycleResult(agentName, worktreePath, startedAt, invokeErr)
-	finalizeAgentSession(sess, worktreePath, beforeRef, invokeErr)
+	finalizeAgentSession(sess, worktreePath, beforeRef, invokeErr, collector, startedAt, taskParentID)
 
 	if invokeErr != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", invokeErr)
@@ -228,7 +228,7 @@ func runTaskSingleTask(deps *cli.Deps, worktreePath, agentName string, routerChe
 	startedAt := time.Now()
 	invokeErr := deps.Agent.InvokeInteractive(worktreePath, prompt, agentName)
 	emitTaskLifecycleResult(agentName, worktreePath, startedAt, invokeErr)
-	finalizeAgentSession(sess, worktreePath, beforeRef, invokeErr)
+	finalizeAgentSession(sess, worktreePath, beforeRef, invokeErr, nil, startedAt, taskParentID)
 
 	if invokeErr != nil {
 		fmt.Fprintf(os.Stderr, "Error running agent: %v\n", invokeErr)

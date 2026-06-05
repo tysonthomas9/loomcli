@@ -24,6 +24,7 @@ type Store struct {
 	leases     *agentLeaseStore
 	ownership  *agentOwnershipLeaseStore
 	commands   *agentCommandStore
+	workers    *workerStore
 	roles      *roleStore
 	daemon     *daemonStore
 }
@@ -42,6 +43,7 @@ func New() *Store {
 		leases:     newAgentLeaseStore(),
 		ownership:  newAgentOwnershipLeaseStore(),
 		commands:   newAgentCommandStore(),
+		workers:    newWorkerStore(),
 		roles:      newRoleStore(),
 		daemon:     newDaemonStore(),
 	}
@@ -81,6 +83,9 @@ func (s *Store) AgentLeases() store.AgentLeaseStore { return s.leases }
 func (s *Store) AgentOwnershipLeases() store.AgentOwnershipLeaseStore { return s.ownership }
 
 func (s *Store) AgentCommands() store.AgentCommandStore { return s.commands }
+
+// Workers returns the WorkerStore.
+func (s *Store) Workers() store.WorkerStore { return s.workers }
 
 // Roles returns the RoleStore.
 func (s *Store) Roles() store.RoleStore { return s.roles }
