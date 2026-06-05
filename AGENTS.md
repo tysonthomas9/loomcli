@@ -2,6 +2,19 @@
 
 This project uses fleet-db-backed `loom data` commands for issue tracking.
 
+## Shared Agent Runbooks
+
+Agent-specific skill loaders are optional. All agent CLIs can use the repo
+runbooks directly:
+
+- `.agent-skills/loom-pr-test/SKILL.md` - real Loom PR runtime testing with
+  local-mode stacks, browser validation, FleetDB compatibility checks, and
+  real backend sandbox runs.
+
+When testing Loom runtime behavior, follow the runbook above. Do not manually
+create lock files, FleetDB state, sessions, transcripts, diffs, or other fake
+state as test evidence.
+
 ## Quick Reference
 
 ```bash

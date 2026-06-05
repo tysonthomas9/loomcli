@@ -1,0 +1,297 @@
+---
+name: loom-pr-test
+description: >-
+  Test loomcli pull requests with real Loom workflows: local-mode Podman stacks,
+  real daemon/UI/browser checks, and isolated real-backend agent runs. Use when
+  validating runtime behavior, Web UI behavior, daemon scheduling, sessions,
+  transcripts, diffs, FleetDB compatibility, or backend CLI integration. Never
+  use manual lock files, hand-seeded FleetDB state, fake sessions, or synthetic
+  stand-ins as evidence.
+---
+
+# Loom PR Runtime Testing
+
+Use this skill when a Loom change needs runtime evidence beyond unit tests.
+Default to the real repo workflow. Do not emulate state.
+
+## Non-Negotiables
+
+- Use real `make`, `loom`, `loom serve`, `loom daemon`, browser, API, and CLI workflows.
+- Do not manually create or edit `.agent.lock`, FleetDB Redis keys, workspace state files, session records, transcript records, or diff records.
+- Do not use synthetic fixtures or hand-seeded stand-ins to prove behavior.
+- If a behavior cannot be reached through the product workflow, report it as blocked or unverified.
+- Keep the user's real `~/.loom` safe. Use repo-provided containers or an explicit throwaway `LOOM_CONFIG_DIR`.
+- For Web UI validation, use `agent-browser` against the running app with an explicit `--profile`.
+
+## Choose The Test Path
+
+Use one of these paths:
+
+1. **UI, daemon, FleetDB, sessions, transcripts, diffs, scheduling**
+   - Use the local-mode Podman stack through `make local-mode-up`.
+   - Use `make local-mode-codex-up` when the claim depends on real Codex CLI behavior.
+
+2. **Single real backend agent behavior**
+   - Use the bundled sandbox scripts.
+   - This is for `loom plan` or `loom task` one-shot runs with real backend CLIs.
+
+3. **Pure code behavior**
+   - Run focused unit/integration tests from the PR worktree.
+   - Do not start a browser or stack unless the change touches runtime behavior.
+
+## Local-Mode Stack
+
+Run from the PR worktree:
+
+```bash
+make local-mode-up
+```
+
+Open:
+
+```text
+http://localhost:8283/ws/LOCALMODE/kanban
+```
+
+Verify:
+
+```bash
+make local-mode-verify
+```
+
+Stop:
+
+```bash
+make local-mode-down
+```
+
+The standard stack exercises real Loom services, daemon supervision, FleetDB, API routes, session recording, transcript recording, diff recording, and the Web UI. If the stack uses a deterministic local backend, treat that as stack validation only. Do not use it as proof of real AI backend behavior.
+
+## Real Codex Stack
+
+Use this when the claim depends on a real Codex CLI process:
+
+```bash
+make local-mode-codex-up
+```
+
+Common knobs:
+
+```bash
+LOCAL_MODE_CODEX_HOME=/path/to/.codex make local-mode-codex-up
+LOCAL_MODE_CODEX_CLI_VERSION=0.128.0 make local-mode-codex-up
+```
+
+If auth is missing, do not fake the result. Report the missing auth as a blocker or switch to a test path that does not claim real backend behavior.
+
+## Parallel Stacks
+
+Use separate Compose projects and ports. Keep the same project name for logs and teardown.
+
+```bash
+LOCAL_MODE_COMPOSE_PROJECT=loomcli-local-mode-b \
+LOCAL_MODE_FLEETDB_PORT=8380 \
+LOCAL_MODE_API_PORT=8382 \
+LOCAL_MODE_UI_PORT=8383 \
+LOCAL_MODE_COMPOSE_UP_FLAGS="--build -d" \
+make local-mode-up
+```
+
+Verify the alternate stack:
+
+```bash
+LOCAL_MODE_API_URL=http://127.0.0.1:8382 make local-mode-verify
+```
+
+Stop only that stack:
+
+```bash
+LOCAL_MODE_COMPOSE_PROJECT=loomcli-local-mode-b make local-mode-down
+```
+
+Use `127.0.0.1` in verifier/API commands if sandboxed `localhost` access is inconsistent with Podman-published ports.
+
+## Compose Overrides
+
+Use `LOCAL_MODE_COMPOSE_FILES` for real compatibility overrides, not for fabricated state.
+
+Example:
+
+```bash
+LOCAL_MODE_COMPOSE_PROJECT=loomcli-local-mode-review \
+LOCAL_MODE_COMPOSE_FILES=/tmp/fleetdb-review.yml \
+LOCAL_MODE_FLEETDB_PORT=8380 \
+LOCAL_MODE_API_PORT=8382 \
+LOCAL_MODE_UI_PORT=8383 \
+LOCAL_MODE_COMPOSE_UP_FLAGS="--build -d" \
+make local-mode-up
+```
+
+Good override uses:
+
+- Point `fleet-db` at the compatible FleetDB checkout.
+- Add real server flags required by the current branch.
+- Change ports or resource settings.
+
+Bad override uses:
+
+- Preload issues, locks, sessions, transcripts, or diffs.
+- Replace a missing workflow with fake state.
+- Hide a real API or daemon compatibility problem.
+
+## FleetDB Compatibility
+
+If agents stay idle, UI data stalls, or APIs return unexpected 404/500 responses:
+
+1. Check Loom and FleetDB logs first.
+2. Identify the missing route or server behavior.
+3. Read the relevant FleetDB tracking notes or branch history.
+4. Build FleetDB from the compatible real checkout using `LOCAL_MODE_COMPOSE_FILES`.
+5. Re-run the stack through `make`.
+
+Do not patch around missing FleetDB behavior with direct Redis writes or fake API responses.
+
+Useful checks:
+
+```bash
+podman ps
+podman logs --tail 120 <fleet-db-container>
+podman logs --tail 120 <loom-container>
+curl -sS http://127.0.0.1:8282/api/config
+curl -sS 'http://127.0.0.1:8282/api/monitor/agents?workspace=LOCALMODE'
+```
+
+## Browser Validation
+
+Use `agent-browser` after the stack is up. Always pass a dedicated profile path so cookies, storage, tabs, and browser state do not bleed between reviews or stacks. Use one profile per stack.
+
+```bash
+mkdir -p /tmp/loom-agent-browser/default
+agent-browser --profile /tmp/loom-agent-browser/default open http://localhost:8283/ws/LOCALMODE/kanban
+agent-browser --profile /tmp/loom-agent-browser/default wait
+agent-browser --profile /tmp/loom-agent-browser/default get text body
+agent-browser --profile /tmp/loom-agent-browser/default screenshot
+```
+
+For parallel stacks, use distinct profiles and session names:
+
+```bash
+mkdir -p /tmp/loom-agent-browser/stack-a /tmp/loom-agent-browser/stack-b
+
+agent-browser --profile /tmp/loom-agent-browser/stack-a \
+  --session localmode-a open http://localhost:8283/ws/LOCALMODE/kanban
+agent-browser --profile /tmp/loom-agent-browser/stack-a \
+  --session localmode-a get text body
+
+agent-browser --profile /tmp/loom-agent-browser/stack-b \
+  --session localmode-b open http://localhost:8383/ws/LOCALMODE/kanban
+agent-browser --profile /tmp/loom-agent-browser/stack-b \
+  --session localmode-b get text body
+```
+
+Verify the rendered UI and the API state agree. If they disagree, collect both pieces of evidence.
+
+## Inspecting Real State
+
+Use APIs and daemon commands; do not read or edit backing stores directly.
+
+```bash
+curl -sS http://127.0.0.1:8282/api/workspaces/LOCALMODE
+curl -sS http://127.0.0.1:8282/api/workspaces/LOCALMODE/issues/<TASK_ID>
+curl -sS http://127.0.0.1:8282/api/workspaces/LOCALMODE/tasks/<TASK_ID>/sessions
+```
+
+Inside the Loom container:
+
+```bash
+podman exec <loom-container> bash -lc \
+  'cd /root/.loom/workspaces/LOCALMODE && loom daemon queue local-coder'
+```
+
+If a task is open with a design, it is normally coder-eligible. If a task needs planning, it normally needs no design or an explicit revision workflow.
+
+## Real Backend Sandbox
+
+Use the bundled scripts for one-shot real backend CLI checks. They create an isolated `/tmp/loom-e2e/<name>` sandbox with its own `LOOM_CONFIG_DIR`, target repo, workspace, and PR-built `loom` binary.
+
+```bash
+SKILL=.agent-skills/loom-pr-test
+
+$SKILL/scripts/new-sandbox.sh <name> <PR_WORKTREE>
+$SKILL/scripts/run-agent.sh <name> plan claude
+$SKILL/scripts/run-agent.sh <name> task codex
+```
+
+Clean one sandbox:
+
+```bash
+$SKILL/scripts/new-sandbox.sh --clean <name>
+```
+
+Rules:
+
+- One concurrent agent run per sandbox.
+- Use one sandbox per PR/worktree.
+- Do not share `LOOM_CONFIG_DIR` across concurrent runs.
+- Live backend runs can take several minutes.
+
+Parallel one-shot runs across separate sandboxes:
+
+```bash
+$SKILL/scripts/parallel-review.sh plan claude \
+  pr-a=/path/to/worktree-a \
+  pr-b=/path/to/worktree-b
+```
+
+## Reporting
+
+Always report:
+
+- Exact command path used.
+- Stack URLs and ports.
+- Whether the backend was deterministic or a real CLI.
+- Browser evidence when UI behavior matters.
+- API/session/diff evidence when daemon behavior matters.
+- Any verifier mismatch or blocked condition.
+- How to stop any stack left running.
+
+Do not overclaim. If the run used a deterministic backend, say it validated stack/orchestration behavior only.
+
+## Cleanup After Testing
+
+Before finishing, clean up anything you started unless the user explicitly asks to leave it running.
+
+Default local-mode stack:
+
+```bash
+make local-mode-down
+```
+
+Parallel or named stack:
+
+```bash
+LOCAL_MODE_COMPOSE_PROJECT=<project-name> make local-mode-down
+```
+
+If the stack used compose override files, pass the same override list during teardown:
+
+```bash
+LOCAL_MODE_COMPOSE_PROJECT=<project-name> \
+LOCAL_MODE_COMPOSE_FILES=/tmp/fleetdb-review.yml \
+make local-mode-down
+```
+
+Real backend sandbox:
+
+```bash
+SKILL=.agent-skills/loom-pr-test
+$SKILL/scripts/new-sandbox.sh --clean <name>
+```
+
+Browser profiles:
+
+```bash
+agent-browser --profile /tmp/loom-agent-browser/<name> close
+```
+
+Do not run broad destructive cleanup commands such as `podman system prune`, `git clean`, or `rm -rf /tmp/...` unless the user explicitly asks and understands the scope. If a stack is intentionally left running, report its UI/API URLs and the exact command to stop it later.
