@@ -209,25 +209,23 @@ describe("CreateAgentModal: state preservation across re-renders", () => {
 // ---------- validation ----------
 
 describe("CreateAgentModal: client-side validation", () => {
-  it("rejects empty name with inline error and does not call API", async () => {
+  it("disables Create until a name is entered (does not call API)", () => {
     const { onSuccess } = renderModal();
-    fireEvent.click(screen.getByRole("button", { name: /create agent/i }));
     expect(
-      await screen.findByRole("alert", { name: undefined }),
-    ).toHaveTextContent(/name is required/i);
+      screen.getByRole("button", { name: /create agent/i }),
+    ).toBeDisabled();
     expect(mockCreateAgent).not.toHaveBeenCalled();
     expect(onSuccess).not.toHaveBeenCalled();
   });
 
-  it("rejects whitespace-only name", async () => {
+  it("keeps Create disabled for a whitespace-only name", () => {
     renderModal();
     fireEvent.change(screen.getByLabelText(/^name$/i), {
       target: { value: "   " },
     });
-    fireEvent.click(screen.getByRole("button", { name: /create agent/i }));
-    expect(await screen.findByRole("alert")).toHaveTextContent(
-      /name is required/i,
-    );
+    expect(
+      screen.getByRole("button", { name: /create agent/i }),
+    ).toBeDisabled();
     expect(mockCreateAgent).not.toHaveBeenCalled();
   });
 

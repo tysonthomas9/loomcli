@@ -274,7 +274,7 @@ export function CreateAgentModal({
             <button
               type="submit"
               className={styles.submitButton}
-              disabled={isSubmitting}
+              disabled={isSubmitting || name.trim() === ""}
             >
               {isSubmitting ? "Creating..." : "Create Agent"}
             </button>
