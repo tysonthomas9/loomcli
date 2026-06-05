@@ -127,19 +127,20 @@ func runTaskDaemon(deps *cli.Deps, worktreePath, agentName string) {
 		fmt.Fprintf(os.Stderr, "Warning: could not update lock state: %v\n", err)
 	}
 
+	assignedTaskID := os.Getenv("LOOM_ASSIGNED_TASK_ID")
+	// P4: if this is a same-task daemon restart, resume the prior Claude session
+	// carried forward in the lock instead of cold-starting (guarded). Done BEFORE
+	// building the prompt so it can skip the redundant checkpoint context.
+	maybeResumeDaemonSession(worktreePath, assignedTaskID)
+
 	ws, _ := config.ResolveActiveWorkspace()
 	prompt := GenerateTaskPrompt(agentName, ws, taskParentID, cli.GetBackendName())
-	assignedTaskID := os.Getenv("LOOM_ASSIGNED_TASK_ID")
 	if assignedTaskID != "" {
 		prompt = GenerateFleetTaskPrompt(agentName, assignedTaskID, ws, cli.GetBackendName())
 	}
 	sess := adoptOrCreateSession(agentName, taskParentID, prompt, "implementation")
 
 	emitTaskClaimedFromEnv(agentName, assignedTaskID)
-
-	// P4: if this is a same-task daemon restart, resume the prior Claude session
-	// carried forward in the lock instead of cold-starting. Guarded + conservative.
-	maybeResumeDaemonSession(worktreePath, assignedTaskID)
 
 	beforeRef := automode.CaptureHEADRef(worktreePath)
 	startedAt := time.Now()

@@ -135,18 +135,19 @@ func runPlanDaemon(deps *cli.Deps, worktreePath, agentName string) {
 		fmt.Fprintf(os.Stderr, "Warning: could not update lock state: %v\n", err)
 	}
 
+	assignedTaskID := os.Getenv("LOOM_ASSIGNED_TASK_ID")
+	// P4: arm same-task resume (guarded) BEFORE building the prompt, so prompt
+	// generation skips the redundant checkpoint context when resuming.
+	maybeResumeDaemonSession(worktreePath, assignedTaskID)
+
 	ws, _ := config.ResolveActiveWorkspace()
 	prompt := GeneratePlanningPrompt(agentName, ws, planParentID)
-	assignedTaskID := os.Getenv("LOOM_ASSIGNED_TASK_ID")
 	if assignedTaskID != "" {
 		prompt = GenerateFleetPlanningPrompt(agentName, assignedTaskID, ws)
 	}
 	sess := adoptOrCreateSession(agentName, planParentID, prompt, "planning")
 
 	emitTaskClaimedFromEnv(agentName, assignedTaskID)
-
-	// P4: same-task daemon restart → resume the prior Claude session (guarded).
-	maybeResumeDaemonSession(worktreePath, assignedTaskID)
 
 	beforeRef := automode.CaptureHEADRef(worktreePath)
 	startedAt := time.Now()
