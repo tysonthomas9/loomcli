@@ -11,9 +11,9 @@ package harness
 
 import (
 	"context"
-	"errors"
 	"time"
 
+	hwharness "github.com/olesho/harness-wrapper/pkg/harness"
 	"github.com/olesho/harness-wrapper/pkg/wrapper"
 )
 
@@ -43,15 +43,11 @@ type RetryPolicy struct {
 	// on a busy observer rather than queuing them.
 	OnActivity func(wrapper.Snapshot)
 
-	// ActivityInterval is the tick period for OnActivity. Zero means use
-	// DefaultActivityInterval. Ignored when OnActivity is nil.
+	// ActivityInterval is the tick period for OnActivity. Zero means use the
+	// harness default (harness.DefaultActivityInterval). Ignored when OnActivity
+	// is nil.
 	ActivityInterval time.Duration
 }
-
-// DefaultActivityInterval is the OnActivity tick cadence when none is set.
-// 10s is short enough to make a stuck agent obvious within the next page
-// refresh, long enough to keep IPC chatter inconsequential.
-const DefaultActivityInterval = 10 * time.Second
 
 // DefaultRetryPolicy is the policy applied when RunWithRetry receives
 // a zero-value RetryPolicy.
@@ -165,82 +161,25 @@ func backoffFor(p RetryPolicy, attempt int, hint time.Duration) time.Duration {
 	return d
 }
 
-// runOnceDefault is the production implementation of runOnceFn. It
-// starts a wrapper session, drains its event stream to capture the
-// latest RetryAfter hint and to remember whether an API-error event
-// fired mid-run, then waits for the terminal result. When p.OnActivity
-// is set, runOnceDefault also runs an activity-observer goroutine that
-// periodically samples sess.Snapshot() and forwards it to the caller.
+// runOnceDefault is the production implementation of runOnceFn. It routes the
+// invocation through harness.Run (the wrapper's orchestration layer), which
+// composes wrapper.Start, drains the event stream for the RetryAfter hint +
+// whether an API-error fired, and runs the OnActivity observer — so loom no
+// longer hand-rolls that supervision. The transcript-acquisition fields
+// (TranscriptMode/OnEvent/OnDisplayLine/HookCommand) are left zero here: this is
+// the entrypoint switch only (TranscriptMode defaults to Off → no acquisition,
+// no behavior change). The OnEvent/eventstore wiring lands behind flags next.
 func runOnceDefault(ctx context.Context, cfg wrapper.Config, p RetryPolicy) (attemptResult, error) {
-	sess, err := wrapper.Start(ctx, cfg)
-	if err != nil {
-		// Mirror wrapper.Run: when Start fails for a categorical reason
-		// (binary not on PATH today; potentially more later), surface
-		// it on Result.Status so downstream consumers that switch on
-		// Status (rather than errors.Is) can dispatch directly.
-		res := wrapper.Result{ExitCode: -1}
-		if errors.Is(err, wrapper.ErrBinaryNotFound) {
-			res.Status = wrapper.StatusBinaryNotFound
-			res.Reason = err.Error()
-		}
-		return attemptResult{Result: res}, err
-	}
-
-	var lastRetryAfter time.Duration
-	var sawAPIError bool
-	drained := make(chan struct{})
-	go func() {
-		defer close(drained)
-		for ev := range sess.Events() {
-			if ev.RetryAfter > 0 {
-				lastRetryAfter = ev.RetryAfter
-			}
-			if ev.Status == wrapper.StatusAPIError {
-				sawAPIError = true
-			}
-		}
-	}()
-
-	observerStop := startActivityObserver(sess, p)
-
-	res, err := sess.Wait()
-	<-drained
-	if observerStop != nil {
-		observerStop()
-	}
-	return attemptResult{Result: res, RetryAfter: lastRetryAfter, SawAPIError: sawAPIError}, err
-}
-
-// startActivityObserver runs p.OnActivity on a ticker until the returned
-// stop function is called. Returns nil when no observer is configured.
-func startActivityObserver(sess *wrapper.Session, p RetryPolicy) func() {
-	if p.OnActivity == nil {
-		return nil
-	}
-	interval := p.ActivityInterval
-	if interval <= 0 {
-		interval = DefaultActivityInterval
-	}
-	stop := make(chan struct{})
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		ticker := time.NewTicker(interval)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-stop:
-				p.OnActivity(sess.Snapshot())
-				return
-			case <-ticker.C:
-				p.OnActivity(sess.Snapshot())
-			}
-		}
-	}()
-	return func() {
-		close(stop)
-		<-done
-	}
+	res, err := hwharness.Run(ctx, hwharness.Config{
+		Wrapper:          cfg,
+		OnActivity:       p.OnActivity,
+		ActivityInterval: p.ActivityInterval,
+	})
+	return attemptResult{
+		Result:      res.Result,
+		RetryAfter:  res.RetryAfter,
+		SawAPIError: res.SawAPIError,
+	}, err
 }
 
 // sleepDefault is the production implementation of sleepFnT. It
