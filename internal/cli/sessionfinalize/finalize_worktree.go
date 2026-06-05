@@ -23,6 +23,10 @@ type WithWorktreeOptions struct {
 	CacheReadTokens  int64
 	CacheWriteTokens int64
 	EstimatedCostUSD float64
+
+	// Runtime is optional non-local execution metadata captured by the backend
+	// (e.g. a Flue Daytona-per-task sandbox). nil for ordinary local runs.
+	Runtime *sessions.RuntimeMetadata
 }
 
 type WithWorktreeResult struct {
@@ -70,5 +74,7 @@ func WithWorktree(sess *sessions.Session, opts WithWorktreeOptions) (WithWorktre
 		CacheReadTokens:  opts.CacheReadTokens,
 		CacheWriteTokens: opts.CacheWriteTokens,
 		EstimatedCostUSD: opts.EstimatedCostUSD,
+
+		Runtime: opts.Runtime,
 	})
 }

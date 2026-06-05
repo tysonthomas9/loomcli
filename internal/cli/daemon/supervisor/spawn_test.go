@@ -101,10 +101,11 @@ func TestAppendSessionEnvConcurrentLeaseAccess(t *testing.T) {
 		}
 	}()
 
+	sup := &Supervisor{}
 	go func() {
 		defer wg.Done()
 		for i := 0; i < 10000; i++ {
-			_ = appendSessionEnv(nil, ap)
+			_ = sup.appendSessionEnv(nil, ap)
 			runtime.Gosched()
 		}
 	}()

@@ -84,6 +84,13 @@ type Supervisor struct {
 	// session, lease, terminal, artifact, and command records.
 	ControlStore store.Store
 	NodeID       string
+
+	// TaskRunSigningKey is the shared fleet JWT signing key (resolved at daemon
+	// startup from LOOM_FLEET_JWT_KEY). When set, the supervisor mints a scoped
+	// per-TaskRun capability token at spawn and injects it as LOOM_TASKRUN_TOKEN
+	// so a flue runner can write to loom serve fenced (PRD Phase C). Empty → no
+	// token is minted and writes fall through to dev-mode auth.
+	TaskRunSigningKey []byte
 	NodeTTL      time.Duration
 	NodeInterval time.Duration
 
@@ -339,6 +346,7 @@ func (s *Supervisor) clearAgentSessionState(ap *AgentProcess) {
 	ap.AgentSessionID = ""
 	ap.AgentLeaseID = ""
 	ap.AgentLeaseToken = ""
+	ap.AgentLeaseFencingToken = 0
 	ap.TranscriptPath = ""
 	ap.BeforeRef = ""
 	ap.AssignedTaskID = ""
@@ -490,6 +498,7 @@ func (s *Supervisor) createControlPlaneAgentSession(ap *AgentProcess, sessionID,
 	if ap.AgentSessionID == sessionID {
 		ap.AgentLeaseID = lease.LeaseID
 		ap.AgentLeaseToken = lease.Token
+		ap.AgentLeaseFencingToken = lease.FencingToken
 	}
 	ap.Mu.Unlock()
 }

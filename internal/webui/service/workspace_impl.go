@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
@@ -25,7 +26,30 @@ const (
 
 const defaultWorkspaceBackend = "codex"
 
-var workspaceBackendOptions = []string{"claude", defaultWorkspaceBackend, "opencode", "gemini", "cursor", "shell"}
+// workspaceBackendOptions is the set of backends the Settings UI offers and the
+// "Talk to Lead" terminal picks from. Seeded with the known built-ins (+ the
+// "shell" pseudo-option) as a fallback, then replaced at serve startup from the
+// backend registry via SetWorkspaceBackendOptions so the list tracks every
+// registered backend (incl. flue) instead of drifting from a hardcoded set.
+var (
+	workspaceBackendOptionsMu sync.RWMutex
+	workspaceBackendOptions   = []string{"claude", defaultWorkspaceBackend, "opencode", "gemini", "cursor", "shell"}
+)
+
+// SetWorkspaceBackendOptions replaces the selectable workspace backend list.
+// The serve command calls this with cli.ListBackends() (plus "shell") at startup.
+func SetWorkspaceBackendOptions(names []string) {
+	cp := append([]string(nil), names...)
+	workspaceBackendOptionsMu.Lock()
+	workspaceBackendOptions = cp
+	workspaceBackendOptionsMu.Unlock()
+}
+
+func workspaceBackendOptionsList() []string {
+	workspaceBackendOptionsMu.RLock()
+	defer workspaceBackendOptionsMu.RUnlock()
+	return append([]string(nil), workspaceBackendOptions...)
+}
 
 // WorkspaceServiceConfig holds the dependencies for workspace service construction.
 type WorkspaceServiceConfig struct {
@@ -514,7 +538,7 @@ func (s *workspaceServiceImpl) GetWorkspaceBackend(ctx context.Context, wsID str
 		})
 	}
 
-	available := append([]string(nil), workspaceBackendOptions...)
+	available := workspaceBackendOptionsList()
 	return &BackendConfigData{
 		Backend:   backend,
 		Source:    source,

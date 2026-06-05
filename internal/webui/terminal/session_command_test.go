@@ -33,6 +33,8 @@ func TestArgvForSession(t *testing.T) {
 		{"lead-opencode", "lead-opencode-1", leadCommand("opencode")},
 		{"lead-gemini", "lead-gemini-1", leadCommand("gemini")},
 		{"lead-cursor", "lead-cursor-1", leadCommand("cursor")},
+		{"lead-flue", "lead-flue-1", leadCommand("flue")},
+		{"lead-flue with workspace prefix", "my-ws--lead-flue-2", leadCommand("flue")},
 		{"workspace prefix + AI", "v2-refactor--lead-claude-3", leadCommand("claude")},
 		{"unknown backend falls back", "lead-unknown-1", nil},
 		{"non-lead session falls back", "talk-to-lead", nil},
@@ -46,6 +48,28 @@ func TestArgvForSession(t *testing.T) {
 				t.Errorf("ArgvForSession(%q) = %v, want %v", tt.session, got, tt.want)
 			}
 		})
+	}
+}
+
+func TestSetValidBackendsRegistryDerived(t *testing.T) {
+	orig := ValidBackendList()
+	t.Cleanup(func() { SetValidBackends(orig) })
+
+	// Simulate the registry providing a different set (e.g. a loom-backend-*
+	// plugin present, flue absent) — validity must track it, not a hardcode.
+	SetValidBackends([]string{"claude", "myplugin"})
+
+	if !IsValidBackend("myplugin") {
+		t.Error("myplugin should be valid after SetValidBackends")
+	}
+	if IsValidBackend("flue") {
+		t.Error("flue should not be valid when not in the registry set")
+	}
+	if ArgvForSession("lead-myplugin-1") == nil {
+		t.Error("lead-myplugin-1 should resolve when myplugin is valid")
+	}
+	if ArgvForSession("lead-flue-1") != nil {
+		t.Error("lead-flue-1 should not resolve when flue is not in the set")
 	}
 }
 

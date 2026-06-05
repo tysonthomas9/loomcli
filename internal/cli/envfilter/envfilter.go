@@ -29,6 +29,9 @@ var envAllowlistExact = map[string]bool{
 	"ANTHROPIC_API_KEY": true, "OPENAI_API_KEY": true,
 	"GEMINI_API_KEY": true, "GOOGLE_API_KEY": true, "CURSOR_API_KEY": true,
 	"CODEX_HOME": true,
+	// Sandbox/runtime provider key — needed by the flue backend to provision a
+	// Daytona-per-task sandbox when the daemon fans out tasks (LOOM_FLUE_SANDBOX=daytona).
+	"DAYTONA_API_KEY": true,
 	// Git hosting tokens (needed by container agents for git push)
 	"GITHUB_TOKEN": true,
 	// Editor

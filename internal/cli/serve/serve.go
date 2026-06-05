@@ -31,6 +31,8 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/webui"
 	webuiapp "github.com/tysonthomas9/loomcli/internal/webui/app"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
+	webuiservice "github.com/tysonthomas9/loomcli/internal/webui/service"
+	webuiterminal "github.com/tysonthomas9/loomcli/internal/webui/terminal"
 )
 
 // envLoomFleetMode is the env var that toggles --fleet-mode when no flag is
@@ -156,6 +158,16 @@ func registerServeAuthFlags() {
 func runServe(cmd *cobra.Command, args []string) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+
+	// Derive the web UI's backend lists from the live registry instead of
+	// hardcoded lists, so they track every registered backend (incl. flue and
+	// any loom-backend-* plugin) without per-surface drift: the lead-terminal
+	// validity gate (SetValidBackends) and the selectable workspace backend
+	// options the "Talk to Lead" UI picks from (SetWorkspaceBackendOptions; the
+	// "shell" pseudo-option is preserved for the plain shell terminal).
+	registeredBackends := cli.ListBackends()
+	webuiterminal.SetValidBackends(registeredBackends)
+	webuiservice.SetWorkspaceBackendOptions(append(registeredBackends, "shell"))
 
 	stop := make(chan os.Signal, 1)
 	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)

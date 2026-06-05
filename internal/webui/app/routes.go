@@ -6,6 +6,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/webui"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlermux"
 	locsettings "github.com/tysonthomas9/loomcli/internal/webui/handlers/localsettings"
+	"github.com/tysonthomas9/loomcli/internal/webui/handlers/sessionwrite"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 )
 
@@ -153,6 +154,26 @@ func (app *Server) registerWorkspaceRoutes() {
 	app.mux.Handle("PATCH /api/workspaces/{ws}/name", workspaceMW(handlermux.HandleWorkspaceRename(app.workspaceSvc)))
 	app.mux.Handle("GET /api/workspaces/{ws}/config/backend", workspaceMW(handlermux.HandleWorkspaceBackendGet(app.workspaceSvc)))
 	app.mux.Handle("PATCH /api/workspaces/{ws}/config/backend", workspaceMW(handlermux.HandleWorkspaceBackendPatch(app.workspaceSvc)))
+
+	// TaskRun session write path (PRD Phase C: a flue runner reports artifacts/
+	// usage/logs and heartbeats its session via @loom/sdk). Store-backed only;
+	// skipped when serve has no control-plane store. Registered on the outer mux
+	// (more specific than the /api/workspaces/{ws}/ subtree, which therefore
+	// won't shadow them), guarded by the workspace middleware.
+	if st := app.config.Store; st != nil {
+		// Token-optional TaskRun auth + fencing in front of the write handlers:
+		// no token → dev-mode passthrough; a token-bearing write is fenced (stale
+		// fencing token → 409). workspaceMW runs first so the workspace is in ctx.
+		taskMW := taskRunWriteAuth(st, app.config.FleetJWTKey)
+		wrap := func(h http.Handler) http.Handler { return workspaceMW(taskMW(h)) }
+		// refresh re-mints the caller's token on heartbeat so a long run stays
+		// authenticated; nil in keyless dev-mode (no token in the response).
+		refresh := taskRunTokenRefresher(app.config.FleetJWTKey)
+		app.mux.Handle("POST /api/workspaces/{ws}/sessions/{sessionId}/artifacts", wrap(sessionwrite.HandlePostSessionArtifact(st.AgentSessions(), st.Artifacts())))
+		app.mux.Handle("POST /api/workspaces/{ws}/sessions/{sessionId}/usage", wrap(sessionwrite.HandleRecordSessionUsage(st.AgentSessions(), st.Artifacts())))
+		app.mux.Handle("POST /api/workspaces/{ws}/sessions/{sessionId}/logs", wrap(sessionwrite.HandleAppendSessionLog(st.AgentSessions())))
+		app.mux.Handle("POST /api/workspaces/{ws}/sessions/{sessionId}/heartbeat", wrap(sessionwrite.HandleHeartbeatSession(st.AgentSessions(), refresh)))
+	}
 	if statusHandler := app.config.MonitorHandlers.Status; statusHandler != nil {
 		app.mux.Handle("GET /api/workspaces/{ws}/monitor/status", workspaceMW(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			q := r.URL.Query()

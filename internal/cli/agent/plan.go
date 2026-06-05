@@ -289,6 +289,9 @@ func finalizeAgentSession(sess *sessions.Session, worktreePath, beforeRef string
 		TaskID:          taskID,
 		ExitCode:        exitCode,
 		ClaudeSessionID: backends.GetLastCapturedSessionID(),
+		// Runtime is non-nil only for non-local backends (e.g. a Flue
+		// Daytona-per-task sandbox); nil leaves the field absent.
+		Runtime: backends.GetLastRuntimeMetadata(),
 	}
 	if collector != nil {
 		rec := collector.Finalize(taskID, epicID, startedAt, time.Now(), exitCode)
@@ -302,6 +305,7 @@ func finalizeAgentSession(sess *sessions.Session, worktreePath, beforeRef string
 
 	_, _ = sessionfinalize.WithWorktree(sess, opts)
 	backends.ClearActiveSessionEnv()
+	backends.ClearLastRuntimeMetadata()
 }
 
 // exitCodeFromErr derives a process exit code from an invocation error.

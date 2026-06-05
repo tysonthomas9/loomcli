@@ -35,6 +35,16 @@ func TestFilterEnv_AllowsPrefixMatches(t *testing.T) {
 	}
 }
 
+// TestFilterEnv_AllowsDaytonaKey guards the daemon fan-out path: a Flue
+// Daytona-per-task subprocess needs DAYTONA_API_KEY to provision its sandbox,
+// so it must survive the allowlist (LOOM_FLUE_SANDBOX=daytona at scale).
+func TestFilterEnv_AllowsDaytonaKey(t *testing.T) {
+	got := FilterEnv([]string{"DAYTONA_API_KEY=dtn_xyz", "LOOM_FLUE_SANDBOX=daytona"})
+	if len(got) != 2 {
+		t.Fatalf("FilterEnv() returned %v, want both DAYTONA_API_KEY and LOOM_FLUE_SANDBOX", got)
+	}
+}
+
 func TestFilterEnv_BlocksSensitiveVars(t *testing.T) {
 	input := []string{
 		"AWS_SECRET_ACCESS_KEY=secret",

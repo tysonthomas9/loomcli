@@ -4,13 +4,47 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"sync"
 )
 
-// ValidBackends is the list of supported AI backend names. The web UI
-// validates its "backend" dropdown against this list and the per-session
-// command resolver uses it to distinguish valid `lead-{backend}-{n}`
-// session names from arbitrary ones.
-var ValidBackends = []string{"claude", "codex", "opencode", "gemini", "cursor"}
+// validBackends is the set of AI backend names the web UI treats as valid for
+// lead terminals (lead-{backend}-{n}) and workspace backend config. It is
+// seeded with the known built-ins as a fallback, then replaced at serve startup
+// from the backend registry via SetValidBackends — so the list is not hardcoded
+// and automatically tracks any newly-registered backend (built-in or plugin),
+// avoiding the drift the old per-surface lists suffered.
+var (
+	validBackendsMu sync.RWMutex
+	validBackends   = []string{"claude", "codex", "opencode", "gemini", "cursor", "flue"}
+)
+
+// SetValidBackends replaces the valid-backend set. The serve command calls this
+// once at startup with cli.ListBackends() so validity is registry-derived.
+func SetValidBackends(names []string) {
+	cp := append([]string(nil), names...)
+	validBackendsMu.Lock()
+	validBackends = cp
+	validBackendsMu.Unlock()
+}
+
+// ValidBackendList returns a copy of the current valid-backend names.
+func ValidBackendList() []string {
+	validBackendsMu.RLock()
+	defer validBackendsMu.RUnlock()
+	return append([]string(nil), validBackends...)
+}
+
+// IsValidBackend reports whether name is a registered/valid backend.
+func IsValidBackend(name string) bool {
+	validBackendsMu.RLock()
+	defer validBackendsMu.RUnlock()
+	for _, v := range validBackends {
+		if v == name {
+			return true
+		}
+	}
+	return false
+}
 
 var currentExecutable = os.Executable
 
@@ -63,10 +97,8 @@ func ArgvForSession(session string) []string {
 		return nil
 	}
 	backend := rest[:dash]
-	for _, valid := range ValidBackends {
-		if backend == valid {
-			return []string{"-c", leadCommandForBackend(backend)}
-		}
+	if IsValidBackend(backend) {
+		return []string{"-c", leadCommandForBackend(backend)}
 	}
 	return nil
 }

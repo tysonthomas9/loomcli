@@ -46,6 +46,7 @@ Related design docs:
 - `../design/agent-run-visibility-plan.md`
 - `../design/distributed-control-plane.md`
 - `../design/distributed-control-plane-data-model.md`
+- `../design/fleetdb-agent-platform-v2-proposal.md`
 
 Related runbooks:
 

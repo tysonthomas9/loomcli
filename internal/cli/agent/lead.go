@@ -75,6 +75,20 @@ func runLead(cmd *cobra.Command, args []string) {
 			"\n\nAddress this request using the lead mode conventions above."
 	}
 
+	// Backends that run lead against a long-lived server (multi-turn,
+	// resumable conversation) implement LeadServerBackend and are preferred
+	// over the one-shot interactive path. flue uses this.
+	if b, ok := cli.GetBackendByName(backendName); ok {
+		if caps := backends.InspectCapabilities(b); caps.HasLead {
+			if err := caps.Lead.InvokeLead(workDir, prompt); err != nil {
+				fmt.Fprintf(os.Stderr, "Error running lead agent: %v\n", err)
+				fmt.Fprintf(os.Stderr, "\nDropping into a shell. Fix the issue and run 'loom lead' to retry.\n\n")
+				execShell(workDir)
+			}
+			return
+		}
+	}
+
 	// Invoke agent interactively (no agent name needed - lead mode doesn't claim tasks)
 	if err := cli.InvokeAgent(workDir, prompt, ""); err != nil {
 		fmt.Fprintf(os.Stderr, "Error running agent: %v\n", err)

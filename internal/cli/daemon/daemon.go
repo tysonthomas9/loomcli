@@ -2,9 +2,12 @@ package daemon
 
 import (
 	"context"
+	"encoding/hex"
 	"fmt"
 	"log/slog"
 	"net"
+	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -106,6 +109,18 @@ func NewDaemon(config *cfgpkg.DaemonConfig, projectDir string, eventBus events.E
 		Agents:         make([]*supervisor.AgentProcess, 0, len(config.Agents)),
 		ControlStore:   st,
 		IssueBackend:   issueBackend,
+	}
+
+	// Resolve the shared fleet JWT signing key (PRD Phase C). When present, the
+	// supervisor mints scoped per-TaskRun tokens at spawn so runner writes to
+	// loom serve are fenced. loom serve resolves the same key (env or Redis), so
+	// a token minted here validates there. Invalid → minting stays disabled.
+	if k := strings.TrimSpace(os.Getenv("LOOM_FLEET_JWT_KEY")); k != "" {
+		if decoded, err := hex.DecodeString(k); err == nil && len(decoded) >= 32 {
+			sup.TaskRunSigningKey = decoded
+		} else {
+			slog.Warn("LOOM_FLEET_JWT_KEY invalid (need hex-encoded >=32 bytes); TaskRun token minting disabled")
+		}
 	}
 
 	wireSupervisorCallbacks(sup, issueBackend)

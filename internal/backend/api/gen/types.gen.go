@@ -377,6 +377,24 @@ func (e IssueTabType) Valid() bool {
 	}
 }
 
+// Defines values for LogRequestStream.
+const (
+	Stderr LogRequestStream = "stderr"
+	Stdout LogRequestStream = "stdout"
+)
+
+// Valid indicates whether the value is a known member of the LogRequestStream enum.
+func (e LogRequestStream) Valid() bool {
+	switch e {
+	case Stderr:
+		return true
+	case Stdout:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for MessageResponseSuccess.
 const (
 	True MessageResponseSuccess = true
@@ -1009,6 +1027,27 @@ type AgentStatusResponse struct {
 // AgentStatusResponseAgentState defines model for AgentStatusResponse.AgentState.
 type AgentStatusResponseAgentState string
 
+// ArtifactRecord defines model for ArtifactRecord.
+type ArtifactRecord struct {
+	ArtifactId string     `json:"artifact_id"`
+	CreatedAt  *time.Time `json:"created_at,omitempty"`
+	SessionId  *string    `json:"session_id,omitempty"`
+	Summary    *string    `json:"summary,omitempty"`
+	TaskId     *string    `json:"task_id,omitempty"`
+	Type       string     `json:"type"`
+	Uri        string     `json:"uri"`
+}
+
+// ArtifactRequest defines model for ArtifactRequest.
+type ArtifactRequest struct {
+	FilesChanged *int    `json:"files_changed,omitempty"`
+	Summary      *string `json:"summary,omitempty"`
+
+	// Type patch | commit | log | test | transcript | usage | …
+	Type string `json:"type"`
+	Uri  string `json:"uri"`
+}
+
 // BackendConfigResponse defines model for BackendConfigResponse.
 type BackendConfigResponse struct {
 	Data *struct {
@@ -1325,6 +1364,15 @@ type IssueTabState struct {
 	Tabs        []IssueTab `json:"tabs"`
 	UpdatedAt   time.Time  `json:"updated_at"`
 }
+
+// LogRequest defines model for LogRequest.
+type LogRequest struct {
+	Stream LogRequestStream `json:"stream"`
+	Text   string           `json:"text"`
+}
+
+// LogRequestStream defines model for LogRequest.Stream.
+type LogRequestStream string
 
 // MessageResponse defines model for MessageResponse.
 type MessageResponse struct {
@@ -1644,6 +1692,16 @@ type SeedRequest struct {
 	Title       string  `json:"title"`
 }
 
+// SessionHeartbeat defines model for SessionHeartbeat.
+type SessionHeartbeat struct {
+	LastHeartbeat *time.Time `json:"last_heartbeat,omitempty"`
+	SessionId     *string    `json:"session_id,omitempty"`
+	Status        *string    `json:"status,omitempty"`
+
+	// Token A freshly-minted TaskRun capability token bound to the same {workspace, task, session, fencing} as the request, with a renewed TTL. Present only when a signing key is configured. The SDK rotates onto it so a long run never expires mid-flight; a leaked token still dies once the runner stops heartbeating.
+	Token *string `json:"token,omitempty"`
+}
+
 // SessionHistoryRecord Session history record (Redis-backed, per-issue)
 type SessionHistoryRecord struct {
 	Backend        string                       `json:"backend"`
@@ -1877,6 +1935,14 @@ type UsageDailyCost struct {
 	Sessions int     `json:"sessions"`
 }
 
+// UsageRequest defines model for UsageRequest.
+type UsageRequest struct {
+	CacheReadTokens  *int64 `json:"cache_read_tokens,omitempty"`
+	CacheWriteTokens *int64 `json:"cache_write_tokens,omitempty"`
+	InputTokens      int64  `json:"input_tokens"`
+	OutputTokens     int64  `json:"output_tokens"`
+}
+
 // UsageResponse defines model for UsageResponse.
 type UsageResponse struct {
 	ByAgent               []UsageAgentSummary   `json:"by_agent"`
@@ -1983,6 +2049,9 @@ type AgentName = string
 
 // IssueId defines model for IssueId.
 type IssueId = string
+
+// SessionId defines model for SessionId.
+type SessionId = string
 
 // WorkspaceId defines model for WorkspaceId.
 type WorkspaceId = string
@@ -2353,6 +2422,15 @@ type RenameWorkspaceJSONRequestBody = WorkspaceRenameRequest
 
 // RunOnboardingFirstTaskJSONRequestBody defines body for RunOnboardingFirstTask for application/json ContentType.
 type RunOnboardingFirstTaskJSONRequestBody RunOnboardingFirstTaskJSONBody
+
+// PostSessionArtifactJSONRequestBody defines body for PostSessionArtifact for application/json ContentType.
+type PostSessionArtifactJSONRequestBody = ArtifactRequest
+
+// AppendSessionLogJSONRequestBody defines body for AppendSessionLog for application/json ContentType.
+type AppendSessionLogJSONRequestBody = LogRequest
+
+// RecordSessionUsageJSONRequestBody defines body for RecordSessionUsage for application/json ContentType.
+type RecordSessionUsageJSONRequestBody = UsageRequest
 
 // SeedTerminalSessionJSONRequestBody defines body for SeedTerminalSession for application/json ContentType.
 type SeedTerminalSessionJSONRequestBody = SeedRequest

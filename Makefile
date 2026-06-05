@@ -1,6 +1,6 @@
 # Makefile for loomcli project
 
-.PHONY: all build build-frontend build-all test test-integration test-all test-playground test-fleetdb-embedded test-fleetdb-supervisor test-fleetdb-ui test-fleetdb-empty-cli fleetdb-empty-up fleetdb-empty-down local-mode-up local-mode-codex-up local-mode-down local-mode-logs local-mode-verify test-local-mode-harness test-distributed-smoke lint lint-frontend test-frontend e2e test-e2e test-e2e-api test-e2e-api-local test-e2e-real-smoke test-e2e-real-smoke-local test-e2e-real-regression test-e2e-real-regression-local test-e2e-integration test-e2e-integration-local test-e2e-integration-full clean install help frontend check check-go check-frontend gate gate-e2e gate-e2e-full hooks ensure-hooks dev dev-check dev-loom dev-vite check-loc check-loc-stale check-no-raw-exec check-no-beads-prod test-coverage test-frontend-coverage test-race-cover test-integration-race-cover gen-go-api check-go-api-staleness
+.PHONY: all build build-frontend build-all test test-integration test-all test-playground test-fleetdb-embedded test-fleetdb-supervisor test-fleetdb-ui test-fleetdb-empty-cli fleetdb-empty-up fleetdb-empty-down local-mode-up local-mode-codex-up local-mode-down local-mode-logs local-mode-verify test-local-mode-harness test-distributed-smoke lint lint-frontend test-frontend e2e test-e2e test-e2e-api test-e2e-api-local test-e2e-real-smoke test-e2e-real-smoke-local test-e2e-real-regression test-e2e-real-regression-local test-e2e-integration test-e2e-integration-local test-e2e-integration-full clean install help frontend check check-go check-frontend check-sdk check-runner gate gate-e2e gate-e2e-full hooks ensure-hooks dev dev-check dev-loom dev-vite check-loc check-loc-stale check-no-raw-exec check-no-beads-prod test-coverage test-frontend-coverage test-race-cover test-integration-race-cover gen-go-api generate check-go-api-staleness
 
 # Default target
 all: build
@@ -279,6 +279,15 @@ gen-go-api:
 	@rm -f tmp/openapi-3.0.yaml
 	@echo "Generated: internal/backend/api/gen/types.gen.go"
 
+# Regenerate everything derived from api/openapi.yaml. The @loom/sdk TS types are
+# NOT committed (git-ignored; regenerated on `npm install` via the SDK's `prepare`
+# script and here); the Go types ARE committed so bare `go build` keeps working.
+# Run this after changing api/openapi.yaml, then commit the Go types if they moved.
+generate: gen-go-api
+	@echo "Generating @loom/sdk types from api/openapi.yaml..."
+	@cd sdk/typescript && (npm ci --silent || npm install --silent) && npm run generate
+	@echo "Done (SDK types are git-ignored; review internal/backend/api/gen/types.gen.go for Go changes)."
+
 # Check that committed types.gen.go is in sync with api/openapi.yaml
 check-go-api-staleness:
 	@./scripts/check-go-api-staleness.sh
@@ -445,28 +454,55 @@ check-frontend:
 	@cd $(FRONTEND_DIR) && npm run test:coverage
 	@echo "=== Frontend quality gates PASSED ==="
 
-# Unified quality gate — runs Go + frontend checks in parallel
+# TypeScript SDK (@loom/sdk) quality gate: install deps, verify the generated
+# types are in sync with api/openapi.yaml, verify the bundle vendored into the
+# flue template is in sync with the SDK source, typecheck, and test.
+# check:generated / check:vendored self-skip when the toolchain is absent.
+check-sdk:
+	@echo "=== SDK: install + generated/vendored staleness + typecheck + tests ==="
+	@cd sdk/typescript && (npm ci --silent || npm install --silent) && npm run check:vendored && npm run typecheck && npm test
+	@$(MAKE) check-runner
+	@echo "=== SDK quality gates PASSED ==="
+
+# Execute the flue runner workflow (runner.ts) against mocked flue/Daytona + real
+# git, so it's actually RUN — esbuild only syntax-checks it (which is how the
+# session.prompt().finally regression once slipped through). Self-skips if Node
+# is absent. Runs as part of check-sdk so the gate covers it.
+check-runner:
+	@if command -v node >/dev/null 2>&1; then \
+		echo "=== flue runner: execute runner.ts (mocked flue/Daytona + real git) ==="; \
+		cd internal/flue/runner-test && (npm ci --silent || npm install --silent) && npm test; \
+		echo "=== runner harness PASSED ==="; \
+	else echo "=== runner harness SKIPPED (node not found) ==="; fi
+
+# Unified quality gate — runs Go + frontend + SDK checks in parallel
 check:
-	@echo "=== Running Go and Frontend checks in parallel ==="
-	@go_log=$$(mktemp); fe_log=$$(mktemp); \
+	@echo "=== Running Go, Frontend, and SDK checks in parallel ==="
+	@go_log=$$(mktemp); fe_log=$$(mktemp); sdk_log=$$(mktemp); \
 	$(MAKE) check-go >"$$go_log" 2>&1 & go_pid=$$!; \
 	$(MAKE) check-frontend >"$$fe_log" 2>&1 & fe_pid=$$!; \
-	go_rc=0; fe_rc=0; \
+	$(MAKE) check-sdk >"$$sdk_log" 2>&1 & sdk_pid=$$!; \
+	go_rc=0; fe_rc=0; sdk_rc=0; \
 	wait $$go_pid || go_rc=$$?; \
 	wait $$fe_pid || fe_rc=$$?; \
-	if [ $$go_rc -ne 0 ] || [ $$fe_rc -ne 0 ]; then \
+	wait $$sdk_pid || sdk_rc=$$?; \
+	if [ $$go_rc -ne 0 ] || [ $$fe_rc -ne 0 ] || [ $$sdk_rc -ne 0 ]; then \
 		if [ $$go_rc -ne 0 ]; then \
 			echo ""; echo "━━━ Go output (FAILED) ━━━"; cat "$$go_log"; \
 		fi; \
 		if [ $$fe_rc -ne 0 ]; then \
 			echo ""; echo "━━━ Frontend output (FAILED) ━━━"; cat "$$fe_log"; \
 		fi; \
-		rm -f "$$go_log" "$$fe_log"; \
+		if [ $$sdk_rc -ne 0 ]; then \
+			echo ""; echo "━━━ SDK output (FAILED) ━━━"; cat "$$sdk_log"; \
+		fi; \
+		rm -f "$$go_log" "$$fe_log" "$$sdk_log"; \
 		exit 1; \
 	fi; \
 	echo "=== Go quality gates PASSED ==="; \
 	echo "=== Frontend quality gates PASSED ==="; \
-	rm -f "$$go_log" "$$fe_log"
+	echo "=== SDK quality gates PASSED ==="; \
+	rm -f "$$go_log" "$$fe_log" "$$sdk_log"
 	@echo "=== All quality gates PASSED ==="
 
 # Backward-compatible alias for 'make check'

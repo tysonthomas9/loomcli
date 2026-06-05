@@ -56,7 +56,8 @@ function commandFor(
     case "configure":
       return LOGIN_COMMANDS[backendName];
     case "test":
-      return `${backendName} --version`;
+      // Flue has no global CLI; its runtime is Node, so verify that instead.
+      return backendName === "flue" ? "node --version" : `${backendName} --version`;
     case "set-default":
       return undefined;
   }
@@ -84,10 +85,13 @@ export function getCliSetupInstructions(
   const action = actionTitle(request.action);
 
   if (!command) {
+    const description =
+      request.backendName === "flue"
+        ? "Flue is a managed Node runtime — there's no global CLI to install or log in to. loom bootstraps ~/.loom/flue automatically and uses your model-provider key (ANTHROPIC_API_KEY / OPENAI_API_KEY / …) or your local codex login. Just ensure Node >= 22.18 is on PATH."
+        : "No automated terminal command is available for this CLI. Use the vendor installer, then make sure the CLI is on PATH for this workspace.";
     return {
       title: `${action} ${request.displayName}`,
-      description:
-        "No automated terminal command is available for this CLI. Use the vendor installer, then make sure the CLI is on PATH for this workspace.",
+      description,
       buttonLabel: "Focus setup shell",
     };
   }

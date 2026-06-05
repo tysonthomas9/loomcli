@@ -31,6 +31,7 @@ type AgentProcess struct {
 	AgentSessionID         string            // fleet-db control-plane session id (empty when no session active)
 	AgentLeaseID           string            // fleet-db control-plane lease id (empty when no lease active)
 	AgentLeaseToken        string            // fleet-db control-plane lease token (empty when no lease active)
+	AgentLeaseFencingToken int64             // fencing token of the session lease (for minting the scoped TaskRun token)
 	OwnershipLeaseID       string            // fleet-db logical-agent ownership lease id (empty when not owner)
 	OwnershipLeaseToken    string            // fleet-db logical-agent ownership lease token (empty when not owner)
 	OwnershipFencingToken  int64             // fencing token for logical-agent ownership

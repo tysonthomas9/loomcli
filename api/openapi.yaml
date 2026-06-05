@@ -908,6 +908,139 @@ paths:
         "404":
           description: Issue not found
 
+  # ── TaskRun session writes (PRD Phase C: runner → loom serve via @loom/sdk) ──
+  /api/workspaces/{ws}/sessions/{sessionId}/artifacts:
+    post:
+      operationId: postSessionArtifact
+      tags: [sessions]
+      summary: Register a result artifact (patch/commit/log/…) on a TaskRun session
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/SessionId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ArtifactRequest"
+      responses:
+        "201":
+          description: Artifact registered
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success]
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    $ref: "#/components/schemas/ArtifactRecord"
+        "400":
+          description: Invalid artifact
+        "403":
+          description: Token not scoped to this session
+        "404":
+          description: Session not found
+        "409":
+          description: Stale fencing token
+
+  /api/workspaces/{ws}/sessions/{sessionId}/usage:
+    post:
+      operationId: recordSessionUsage
+      tags: [sessions]
+      summary: Record token usage for a TaskRun session
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/SessionId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UsageRequest"
+      responses:
+        "200":
+          description: Usage recorded
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success]
+                properties:
+                  success:
+                    type: boolean
+        "400":
+          description: Invalid usage
+        "403":
+          description: Token not scoped to this session
+        "404":
+          description: Session not found
+        "409":
+          description: Stale fencing token
+
+  /api/workspaces/{ws}/sessions/{sessionId}/logs:
+    post:
+      operationId: appendSessionLog
+      tags: [sessions]
+      summary: Append a log line to a TaskRun session
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/SessionId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LogRequest"
+      responses:
+        "202":
+          description: Log accepted
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success]
+                properties:
+                  success:
+                    type: boolean
+        "400":
+          description: Invalid log entry
+        "403":
+          description: Token not scoped to this session
+        "404":
+          description: Session not found
+        "409":
+          description: Stale fencing token
+
+  /api/workspaces/{ws}/sessions/{sessionId}/heartbeat:
+    post:
+      operationId: heartbeatSession
+      tags: [sessions]
+      summary: Heartbeat a TaskRun session to keep its lease alive
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/SessionId"
+      responses:
+        "200":
+          description: Heartbeat recorded
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success]
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    $ref: "#/components/schemas/SessionHeartbeat"
+        "403":
+          description: Token not scoped to this session
+        "404":
+          description: Session not found
+        "409":
+          description: Stale fencing token
+
   # ── Dependencies ────────────────────────────────────────────────────────
   /api/workspaces/{ws}/issues/{id}/dependencies:
     post:
@@ -3244,6 +3377,14 @@ components:
       schema:
         type: string
 
+    SessionId:
+      name: sessionId
+      in: path
+      required: true
+      description: AgentSession (TaskRun) identifier
+      schema:
+        type: string
+
     AgentName:
       name: name
       in: path
@@ -3817,6 +3958,86 @@ components:
       properties:
         text:
           type: string
+
+    ArtifactRequest:
+      type: object
+      required: [type, uri]
+      properties:
+        type:
+          type: string
+          description: "patch | commit | log | test | transcript | usage | …"
+        uri:
+          type: string
+        summary:
+          type: string
+        files_changed:
+          type: integer
+
+    ArtifactRecord:
+      type: object
+      required: [artifact_id, type, uri]
+      properties:
+        artifact_id:
+          type: string
+        session_id:
+          type: string
+        task_id:
+          type: string
+        type:
+          type: string
+        uri:
+          type: string
+        summary:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+
+    UsageRequest:
+      type: object
+      required: [input_tokens, output_tokens]
+      properties:
+        input_tokens:
+          type: integer
+          format: int64
+        output_tokens:
+          type: integer
+          format: int64
+        cache_read_tokens:
+          type: integer
+          format: int64
+        cache_write_tokens:
+          type: integer
+          format: int64
+
+    LogRequest:
+      type: object
+      required: [stream, text]
+      properties:
+        stream:
+          type: string
+          enum: [stdout, stderr]
+        text:
+          type: string
+
+    SessionHeartbeat:
+      type: object
+      properties:
+        session_id:
+          type: string
+        last_heartbeat:
+          type: string
+          format: date-time
+        status:
+          type: string
+        token:
+          type: string
+          description: >
+            A freshly-minted TaskRun capability token bound to the same
+            {workspace, task, session, fencing} as the request, with a renewed
+            TTL. Present only when a signing key is configured. The SDK rotates
+            onto it so a long run never expires mid-flight; a leaked token still
+            dies once the runner stops heartbeating.
 
     AddDependencyRequest:
       type: object

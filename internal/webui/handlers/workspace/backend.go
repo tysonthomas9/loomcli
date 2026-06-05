@@ -19,16 +19,6 @@ type BackendConfigResponse struct {
 	Error   string                     `json:"error,omitempty"`
 }
 
-// isValidBackend checks if the backend name is in the allowed list.
-func isValidBackend(name string) bool {
-	for _, b := range webuiterminal.ValidBackends {
-		if b == name {
-			return true
-		}
-	}
-	return false
-}
-
 // WorkspaceBackendPatchRequest is the JSON body for PATCH /api/workspaces/{ws}/config/backend.
 type WorkspaceBackendPatchRequest struct {
 	Backend string `json:"backend"`
@@ -79,10 +69,10 @@ func HandleWorkspaceBackendPatch(svc service.WorkspaceService) http.HandlerFunc 
 			return
 		}
 
-		if !isValidBackend(req.Backend) {
+		if !webuiterminal.IsValidBackend(req.Backend) {
 			handler.WriteJSON(w, http.StatusBadRequest, WorkspaceResponse{
 				Success: false,
-				Error:   fmt.Sprintf("invalid backend %q; valid options: %v", req.Backend, webuiterminal.ValidBackends),
+				Error:   fmt.Sprintf("invalid backend %q; valid options: %v", req.Backend, webuiterminal.ValidBackendList()),
 			})
 			return
 		}
