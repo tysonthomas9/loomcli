@@ -34,7 +34,8 @@ type AgentProcess struct {
 	OwnershipLeaseID       string            // fleet-db logical-agent ownership lease id (empty when not owner)
 	OwnershipLeaseToken    string            // fleet-db logical-agent ownership lease token (empty when not owner)
 	OwnershipFencingToken  int64             // fencing token for logical-agent ownership
-	OwnershipLastHeartbeat time.Time         // last successful ownership heartbeat
+	OwnershipLastHeartbeat time.Time         // last successful ownership heartbeat (server-derived; display/telemetry only)
+	OwnershipRenewedAt     time.Time         // local-clock anchor captured just before the last confirmed acquire/renew was sent; drives the bounded fail-open validity window — never server-derived
 	BeforeRef              string            // git HEAD ref before spawn (for diff stats at finalization)
 	AssignedTaskID         string            // task claimed by supervisor preflight for this run
 	RequestedTaskID        string            // task requested by a lifecycle command before normal queue selection
