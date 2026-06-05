@@ -41,7 +41,7 @@ Task 2 sessions: http://localhost:8282/api/workspaces/LOCALMODE/tasks/LOCALMODE-
 ```
 
 The deterministic `make local-mode-up` path uses the same services, but its
-seeded task IDs are `LM-PLAN-1` and `LM-CODE-1`.
+seeded task IDs are `LOCALMODE-1` and `LOCALMODE-2`.
 
 Stop and remove the stack volumes:
 

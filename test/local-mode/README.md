@@ -49,8 +49,8 @@ start picking up work without restarting the stack.
 
 Expected dogfood flow:
 
-- `local-planner` claims `LM-PLAN-1`, writes a design, and moves it to review.
-- `local-coder` claims `LM-CODE-1`, writes and commits
+- `local-planner` claims `LOCALMODE-1`, writes a design, and moves it to review.
+- `local-coder` claims `LOCALMODE-2`, writes and commits
   `local-mode-agent-output.txt`, then closes the task.
 - The task Sessions tab should show daemon-created sessions with logs,
   transcript presence, diff stats, and final status after each run exits.
