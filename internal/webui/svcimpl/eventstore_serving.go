@@ -2,7 +2,6 @@ package svcimpl
 
 import (
 	"os"
-	"path/filepath"
 	"strings"
 
 	hwtranscript "github.com/olesho/harness-wrapper/pkg/transcript"
@@ -26,9 +25,10 @@ func serveFromEventStoreEnabled() bool {
 }
 
 // sessionEventStore opens the event store for a session — events.jsonl lives in
-// the session dir, a sibling of the native transcript.
+// the session dir (resolved via the store's single source of truth, the same
+// path the OnEvent sink writes to).
 func sessionEventStore(store *sessions.Store, sessionID string) *eventstore.Store {
-	return eventstore.Open(filepath.Dir(store.NativeTranscriptPath(sessionID)))
+	return eventstore.Open(store.SessionDir(sessionID))
 }
 
 // eventStoreHasTranscript reports whether the session's event store holds events
