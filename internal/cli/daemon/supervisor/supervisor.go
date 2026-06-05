@@ -724,6 +724,9 @@ func (s *Supervisor) spawnAndWait(ap *AgentProcess) {
 	s.finalizeAgentSession(ap, exitCode)
 	s.handleAgentCheckpoint(ap, exitCode)
 	s.postMortemRecovery(ap, exitCode)
+	// Sweep AFTER recovery reset the task to open, so the quarantine write
+	// transitions open→blocked.
+	s.sweepQuarantineDue(ap)
 	s.Concurrency.Release(ap.Entry.Role)
 	s.handleEpicTransition(ap)
 }

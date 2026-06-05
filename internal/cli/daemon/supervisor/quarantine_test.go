@@ -6,6 +6,9 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -449,5 +452,413 @@ func TestQuarantineThreshold_EnvOverrideAndDisable(t *testing.T) {
 	s.recordTaskExitForQuarantine(ap, 137)
 	if rec := record(s, "T-13"); rec != nil {
 		t.Fatalf("threshold 0 must disable the record hook, got %+v", rec)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// sweep: the quarantine write
+// ---------------------------------------------------------------------------
+
+// openIssueMock returns a mock whose Get always reports an open issue with
+// the given (mutable) design pointer, so record-hook baselines and sweep
+// read-backs see consistent state.
+func openIssueMock(status, design *string) *clitest.MockIssueBackend {
+	mock := clitest.NewMockIssueBackend()
+	mock.GetFn = func(_ context.Context, _ string) (*backend.IssueDetailData, error) {
+		return &backend.IssueDetailData{IssueData: backend.IssueData{Status: *status, Design: *design}}, nil
+	}
+	return mock
+}
+
+// killNTimes drives the record hook n times for the agent.
+func killNTimes(s *Supervisor, ap *AgentProcess, n int) {
+	for i := 0; i < n; i++ {
+		s.recordTaskExitForQuarantine(ap, 137)
+	}
+}
+
+// updateParamsOf extracts the UpdateParams from a recorded mock call.
+func updateParamsOf(t *testing.T, c clitest.MockBackendCall) backend.UpdateParams {
+	t.Helper()
+	params, ok := c.Args[1].(backend.UpdateParams)
+	if !ok {
+		t.Fatalf("Update call args = %+v, want UpdateParams at [1]", c.Args)
+	}
+	return params
+}
+
+func updateCalls(mock *clitest.MockIssueBackend) []clitest.MockBackendCall {
+	var out []clitest.MockBackendCall
+	for _, c := range mock.Calls {
+		if c.Method == "Update" {
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
+func TestSweep_FiresExactlyOnceAtThreshold(t *testing.T) {
+	status, design := "open", "d1"
+	mock := openIssueMock(&status, &design)
+	s := newQuarantineSupervisor(mock)
+	ap := newKilledAgent(t, "falcon", "T-20", timeoutOutcome())
+
+	killNTimes(s, ap, 2)
+	s.sweepQuarantineDue(ap)
+	if got := mock.CallCount("Update"); got != 0 {
+		t.Fatalf("Update called %d times below threshold, want 0", got)
+	}
+
+	killNTimes(s, ap, 1) // reaches threshold 3
+	s.sweepQuarantineDue(ap)
+	if got := mock.CallCount("Update"); got != 1 {
+		t.Fatalf("Update called %d times at threshold, want 1", got)
+	}
+
+	rec := record(s, "T-20")
+	if rec == nil {
+		t.Fatal("record must be retained after quarantine (status visibility)")
+	}
+	if rec.QuarantinedAt.IsZero() || rec.Count != 0 || !rec.DaemonWrote {
+		t.Errorf("latch state = {QuarantinedAt:%v Count:%d DaemonWrote:%v}, want latched/0/true",
+			rec.QuarantinedAt, rec.Count, rec.DaemonWrote)
+	}
+
+	// The latch keeps it out of later sweeps: no second write.
+	s.sweepQuarantineDue(ap)
+	if got := mock.CallCount("Update"); got != 1 {
+		t.Fatalf("Update called %d times after latch, want still 1", got)
+	}
+}
+
+func TestSweep_ReQuarantineNeedsNFreshKills(t *testing.T) {
+	status, design := "open", "d1"
+	mock := openIssueMock(&status, &design)
+	s := newQuarantineSupervisor(mock)
+	ap := newKilledAgent(t, "falcon", "T-21", timeoutOutcome())
+
+	killNTimes(s, ap, 3)
+	s.sweepQuarantineDue(ap)
+	if got := mock.CallCount("Update"); got != 1 {
+		t.Fatalf("setup: Update count = %d, want 1", got)
+	}
+
+	// Human released the task; one fresh kill must NOT re-quarantine.
+	killNTimes(s, ap, 1)
+	s.sweepQuarantineDue(ap)
+	if got := mock.CallCount("Update"); got != 1 {
+		t.Fatalf("Update count = %d after 1 fresh kill, want still 1", got)
+	}
+
+	killNTimes(s, ap, 2) // back to threshold
+	s.sweepQuarantineDue(ap)
+	if got := mock.CallCount("Update"); got != 2 {
+		t.Fatalf("Update count = %d after N fresh kills, want 2 (re-quarantined)", got)
+	}
+}
+
+func TestSweep_SingleUpdateBlocksClearsAssigneeAddsLabel(t *testing.T) {
+	status, design := "open", "d1"
+	mock := openIssueMock(&status, &design)
+	s := newQuarantineSupervisor(mock)
+	ap := newKilledAgent(t, "falcon", "T-22", timeoutOutcome())
+
+	killNTimes(s, ap, 3)
+	s.sweepQuarantineDue(ap)
+
+	calls := updateCalls(mock)
+	if len(calls) != 1 {
+		t.Fatalf("Update calls = %d, want exactly 1 (one load-bearing write)", len(calls))
+	}
+	if id := calls[0].Args[0].(string); id != "T-22" {
+		t.Errorf("Update id = %q, want T-22", id)
+	}
+	params := updateParamsOf(t, calls[0])
+	if params.Status == nil || *params.Status != "blocked" {
+		t.Errorf("Status = %v, want blocked", params.Status)
+	}
+	if params.Assignee == nil || *params.Assignee != "" {
+		t.Errorf("Assignee = %v, want explicit empty (unassign)", params.Assignee)
+	}
+	if len(params.AddLabels) != 1 || params.AddLabels[0] != quarantineLabel {
+		t.Errorf("AddLabels = %v, want [%s]", params.AddLabels, quarantineLabel)
+	}
+}
+
+func TestSweep_PostsKillTimelineComment(t *testing.T) {
+	status, design := "open", "d1"
+	mock := openIssueMock(&status, &design)
+	s := newQuarantineSupervisor(mock)
+	ap := newKilledAgent(t, "falcon", "T-23", timeoutOutcome())
+	ap.StopReason = StopReasonWatchdog
+	ap.AgentSessionID = "fleet-sess-9"
+
+	killNTimes(s, ap, 3)
+	s.sweepQuarantineDue(ap)
+
+	if got := mock.CallCount("AddComment"); got != 1 {
+		t.Fatalf("AddComment count = %d, want 1", got)
+	}
+	var params backend.CommentAddParams
+	for _, c := range mock.Calls {
+		if c.Method == "AddComment" {
+			params = c.Args[0].(backend.CommentAddParams)
+		}
+	}
+	if params.IssueID != "T-23" {
+		t.Errorf("comment IssueID = %q, want T-23", params.IssueID)
+	}
+	if params.Author != "falcon" {
+		t.Errorf("comment Author = %q, want falcon (the sweeping agent)", params.Author)
+	}
+	for _, want := range []string{
+		"Task quarantined by loom daemon",
+		"| 1 |", "| 3 |", // timeline rows
+		"watchdog", "Timeout", "fleet-se", "claude-T",
+		"loom data update T-23 --status open",
+		quarantineLabel,
+	} {
+		if !strings.Contains(params.Text, want) {
+			t.Errorf("comment text missing %q:\n%s", want, params.Text)
+		}
+	}
+}
+
+func TestSweep_ReadBackSkipsClosedReviewBlockedDeferred(t *testing.T) {
+	for _, terminal := range []string{"closed", "tombstone", "review", "blocked", "deferred"} {
+		t.Run(terminal, func(t *testing.T) {
+			status, design := "open", "d1"
+			mock := openIssueMock(&status, &design)
+			s := newQuarantineSupervisor(mock)
+			ap := newKilledAgent(t, "falcon", "T-24", timeoutOutcome())
+
+			killNTimes(s, ap, 3)
+			status = terminal // the read-back must observe the new state
+			s.sweepQuarantineDue(ap)
+
+			if got := mock.CallCount("Update"); got != 0 {
+				t.Fatalf("Update count = %d for %s, want 0 (guard latches without writing)", got, terminal)
+			}
+			if got := mock.CallCount("AddComment"); got != 0 {
+				t.Fatalf("AddComment count = %d for %s, want 0", got, terminal)
+			}
+			rec := record(s, "T-24")
+			if rec == nil || rec.QuarantinedAt.IsZero() {
+				t.Fatalf("record = %+v, want latched", rec)
+			}
+			if rec.DaemonWrote {
+				t.Error("DaemonWrote = true, want false (guard latch, not a daemon write)")
+			}
+			if rec.Count != 0 {
+				t.Errorf("Count = %d, want 0 (latch zeroes the re-arm baseline)", rec.Count)
+			}
+		})
+	}
+}
+
+func TestSweep_InProgressSkipsWithoutLatch(t *testing.T) {
+	status, design := "open", "d1"
+	mock := openIssueMock(&status, &design)
+	s := newQuarantineSupervisor(mock)
+	ap := newKilledAgent(t, "falcon", "T-25", timeoutOutcome())
+
+	killNTimes(s, ap, 3)
+	status = "in_progress" // re-picked between the kills and the sweep
+	s.sweepQuarantineDue(ap)
+
+	if got := mock.CallCount("Update"); got != 0 {
+		t.Fatalf("Update count = %d, want 0 (never block a task mid-run)", got)
+	}
+	rec := record(s, "T-25")
+	if rec == nil {
+		t.Fatal("record must survive an in_progress skip")
+	}
+	if !rec.QuarantinedAt.IsZero() {
+		t.Error("record latched on in_progress skip; must stay due")
+	}
+	if rec.Count != 3 {
+		t.Errorf("Count = %d, want 3 (preserved)", rec.Count)
+	}
+	if rec.inFlight {
+		t.Error("inFlight not released after skip")
+	}
+
+	// Once that run exits and the task is open again, the sweep proceeds.
+	status = "open"
+	s.sweepQuarantineDue(ap)
+	if got := mock.CallCount("Update"); got != 1 {
+		t.Fatalf("Update count = %d after task re-opened, want 1", got)
+	}
+}
+
+func TestSweep_OpenWithChangedBaselineEvictsInsteadOfWrites(t *testing.T) {
+	status, design := "open", "d1"
+	mock := openIssueMock(&status, &design)
+	s := newQuarantineSupervisor(mock)
+	ap := newKilledAgent(t, "falcon", "T-26", timeoutOutcome())
+
+	killNTimes(s, ap, 3) // baseline anchored at d1
+	design = "d2"        // progressed in the open→sweep gap (stale retry shape)
+	s.sweepQuarantineDue(ap)
+
+	if got := mock.CallCount("Update"); got != 0 {
+		t.Fatalf("Update count = %d, want 0 (progressed task released from the spiral)", got)
+	}
+	if rec := record(s, "T-26"); rec != nil {
+		t.Fatalf("record = %+v, want evicted", rec)
+	}
+}
+
+func TestSweep_RetriesOnWriteFailureNonFatal(t *testing.T) {
+	status, design := "open", "d1"
+	mock := openIssueMock(&status, &design)
+	mock.UpdateErr = errors.New("fleet down")
+	s := newQuarantineSupervisor(mock)
+	ap := newKilledAgent(t, "falcon", "T-27", timeoutOutcome())
+
+	killNTimes(s, ap, 3)
+	s.sweepQuarantineDue(ap)
+
+	rec := record(s, "T-27")
+	if rec == nil {
+		t.Fatal("record must survive a failed write")
+	}
+	if !rec.WriteFailed {
+		t.Error("WriteFailed = false, want true")
+	}
+	if !rec.QuarantinedAt.IsZero() {
+		t.Error("record latched despite failed write")
+	}
+	if rec.inFlight {
+		t.Error("inFlight not released after failed write")
+	}
+	if got := mock.CallCount("AddComment"); got != 0 {
+		t.Fatalf("AddComment count = %d after failed status write, want 0", got)
+	}
+
+	// Any agent's next sweep retries via the normal predicate.
+	mock.UpdateErr = nil
+	s.sweepQuarantineDue(ap)
+	if got := mock.CallCount("Update"); got != 2 {
+		t.Fatalf("Update count = %d, want 2 (retry succeeded)", got)
+	}
+	rec = record(s, "T-27")
+	if rec == nil || rec.QuarantinedAt.IsZero() || !rec.DaemonWrote || rec.WriteFailed {
+		t.Fatalf("record = %+v, want latched daemon-write with WriteFailed cleared", rec)
+	}
+}
+
+func TestSweep_GetFailureStaysDueAndFlagsFailure(t *testing.T) {
+	mock := clitest.NewMockIssueBackend()
+	mock.GetErr = errors.New("fleet down")
+	s := newQuarantineSupervisor(mock)
+	ap := newKilledAgent(t, "falcon", "T-28", timeoutOutcome())
+
+	killNTimes(s, ap, 3)
+	s.sweepQuarantineDue(ap)
+
+	if got := mock.CallCount("Update"); got != 0 {
+		t.Fatalf("Update count = %d with failing read-back, want 0", got)
+	}
+	rec := record(s, "T-28")
+	if rec == nil || !rec.QuarantinedAt.IsZero() || !rec.WriteFailed || rec.inFlight {
+		t.Fatalf("record = %+v, want due + WriteFailed + released", rec)
+	}
+}
+
+func TestSweep_CommentFailureDoesNotUnlatch(t *testing.T) {
+	status, design := "open", "d1"
+	mock := openIssueMock(&status, &design)
+	mock.AddCommentErr = errors.New("comments route missing")
+	s := newQuarantineSupervisor(mock)
+	ap := newKilledAgent(t, "falcon", "T-29", timeoutOutcome())
+
+	killNTimes(s, ap, 3)
+	s.sweepQuarantineDue(ap)
+
+	rec := record(s, "T-29")
+	if rec == nil || rec.QuarantinedAt.IsZero() || !rec.DaemonWrote {
+		t.Fatalf("record = %+v, want latched daemon-write despite comment failure", rec)
+	}
+	s.sweepQuarantineDue(ap)
+	if got := mock.CallCount("Update"); got != 1 {
+		t.Fatalf("Update count = %d, want 1 (comment failure never re-triggers the write)", got)
+	}
+}
+
+func TestSweep_ActsOnLedgerNotCurrentAgentTask(t *testing.T) {
+	status, design := "open", "d1"
+	mock := openIssueMock(&status, &design)
+	s := newQuarantineSupervisor(mock)
+	worker := newKilledAgent(t, "falcon", "T-30", timeoutOutcome())
+
+	killNTimes(s, worker, 3)
+
+	// A DIFFERENT agent with no task attached exits; its sweep must still
+	// quarantine T-30 (worker-self-picked tasks leave AssignedTaskID empty
+	// and the lock cleared by recovery — the ledger is the source of truth).
+	bystander := newKilledAgent(t, "hawk", "", agenterr.Outcome{})
+	s.sweepQuarantineDue(bystander)
+
+	if got := mock.CallCount("Update"); got != 1 {
+		t.Fatalf("Update count = %d from bystander sweep, want 1", got)
+	}
+}
+
+func TestSweep_ConcurrentSweepsWriteOnce(t *testing.T) {
+	status, design := "open", "d1"
+	mock := openIssueMock(&status, &design)
+	var updates int32
+	release := make(chan struct{})
+	mock.UpdateFn = func(_ context.Context, _ string, _ backend.UpdateParams) error {
+		atomic.AddInt32(&updates, 1)
+		<-release // hold the write so the second sweep overlaps it
+		return nil
+	}
+	s := newQuarantineSupervisor(mock)
+	ap := newKilledAgent(t, "falcon", "T-31", timeoutOutcome())
+	killNTimes(s, ap, 3)
+
+	var wg sync.WaitGroup
+	wg.Add(2)
+	for i := 0; i < 2; i++ {
+		go func() {
+			defer wg.Done()
+			s.sweepQuarantineDue(ap)
+		}()
+	}
+	// Give both sweeps time to reach takeDue; the second must see inFlight.
+	time.Sleep(50 * time.Millisecond)
+	close(release)
+	wg.Wait()
+
+	if got := atomic.LoadInt32(&updates); got != 1 {
+		t.Fatalf("Update executed %d times under concurrent sweeps, want 1 (inFlight guard)", got)
+	}
+}
+
+func TestFormatKillTimeline_RendersASCIIMarkdownTable(t *testing.T) {
+	kills := []killEvent{
+		{At: time.Date(2026, 6, 5, 14, 2, 11, 0, time.UTC), Agent: "web-extractor-a", StopReason: "watchdog", ErrClass: "Timeout", ExitCode: 137, FleetSessionID: "sess-abc123def", ClaudeSessionID: "9f3e4a5b-1111"},
+		{At: time.Date(2026, 6, 5, 14, 40, 0, 0, time.UTC), Agent: "web-extractor-b", StopReason: "", ErrClass: "Unknown", ExitCode: -1},
+	}
+	text := formatKillTimeline("WEB-49", 3, 2, kills)
+
+	for i, r := range text {
+		if r > 127 {
+			t.Fatalf("non-ASCII rune %q at byte %d (daemon-generated text must be ASCII)", r, i)
+		}
+	}
+	for _, want := range []string{
+		"| # | time (UTC) | agent | kill | class | exit | fleet session | claude session |",
+		"| 1 | 2026-06-05T14:02:11Z | web-extractor-a | watchdog | Timeout | 137 | sess-abc | 9f3e4a5b |",
+		"| 2 | 2026-06-05T14:40:00Z | web-extractor-b | crash | Unknown | -1 | - | - |",
+		"loom data update WEB-49 --status open",
+		"loom data label remove WEB-49 loom:quarantined",
+		"re-quarantine after 3 fresh no-progress kills",
+	} {
+		if !strings.Contains(text, want) {
+			t.Errorf("timeline missing %q:\n%s", want, text)
+		}
 	}
 }
