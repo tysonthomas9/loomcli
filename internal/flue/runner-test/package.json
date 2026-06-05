@@ -1,0 +1,12 @@
+{
+  "name": "loom-runner-test",
+  "private": true,
+  "type": "module",
+  "description": "Executes the flue runner workflow (internal/flue/template/.flue/workflows/runner.ts) against mocked flue/Daytona + real git, so runner.ts is actually RUN in CI — not just esbuild-syntax-validated. Lives outside the go:embed'd template so it isn't bundled into loom.",
+  "scripts": {
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "vitest": "^2.1.0"
+  }
+}

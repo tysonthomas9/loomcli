@@ -1,6 +1,6 @@
 # Makefile for loomcli project
 
-.PHONY: all build build-frontend build-all test test-integration test-all test-playground test-fleetdb-embedded test-fleetdb-supervisor test-fleetdb-ui test-fleetdb-empty-cli fleetdb-empty-up fleetdb-empty-down local-mode-up local-mode-codex-up local-mode-down local-mode-logs local-mode-verify test-local-mode-harness test-distributed-smoke lint lint-frontend test-frontend e2e test-e2e test-e2e-api test-e2e-api-local test-e2e-real-smoke test-e2e-real-smoke-local test-e2e-real-regression test-e2e-real-regression-local test-e2e-integration test-e2e-integration-local test-e2e-integration-full clean install help frontend check check-go check-frontend check-sdk gate gate-e2e gate-e2e-full hooks ensure-hooks dev dev-check dev-loom dev-vite check-loc check-loc-stale check-no-raw-exec check-no-beads-prod test-coverage test-frontend-coverage test-race-cover test-integration-race-cover gen-go-api check-go-api-staleness
+.PHONY: all build build-frontend build-all test test-integration test-all test-playground test-fleetdb-embedded test-fleetdb-supervisor test-fleetdb-ui test-fleetdb-empty-cli fleetdb-empty-up fleetdb-empty-down local-mode-up local-mode-codex-up local-mode-down local-mode-logs local-mode-verify test-local-mode-harness test-distributed-smoke lint lint-frontend test-frontend e2e test-e2e test-e2e-api test-e2e-api-local test-e2e-real-smoke test-e2e-real-smoke-local test-e2e-real-regression test-e2e-real-regression-local test-e2e-integration test-e2e-integration-local test-e2e-integration-full clean install help frontend check check-go check-frontend check-sdk check-runner gate gate-e2e gate-e2e-full hooks ensure-hooks dev dev-check dev-loom dev-vite check-loc check-loc-stale check-no-raw-exec check-no-beads-prod test-coverage test-frontend-coverage test-race-cover test-integration-race-cover gen-go-api check-go-api-staleness
 
 # Default target
 all: build
@@ -452,7 +452,19 @@ check-frontend:
 check-sdk:
 	@echo "=== SDK: install + generated/vendored staleness + typecheck + tests ==="
 	@cd sdk/typescript && (npm ci --silent || npm install --silent) && npm run check:generated && npm run check:vendored && npm run typecheck && npm test
+	@$(MAKE) check-runner
 	@echo "=== SDK quality gates PASSED ==="
+
+# Execute the flue runner workflow (runner.ts) against mocked flue/Daytona + real
+# git, so it's actually RUN — esbuild only syntax-checks it (which is how the
+# session.prompt().finally regression once slipped through). Self-skips if Node
+# is absent. Runs as part of check-sdk so the gate covers it.
+check-runner:
+	@if command -v node >/dev/null 2>&1; then \
+		echo "=== flue runner: execute runner.ts (mocked flue/Daytona + real git) ==="; \
+		cd internal/flue/runner-test && (npm ci --silent || npm install --silent) && npm test; \
+		echo "=== runner harness PASSED ==="; \
+	else echo "=== runner harness SKIPPED (node not found) ==="; fi
 
 # Unified quality gate — runs Go + frontend + SDK checks in parallel
 check:

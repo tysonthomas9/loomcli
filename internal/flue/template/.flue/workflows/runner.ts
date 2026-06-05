@@ -393,7 +393,7 @@ const SYNC_STRATEGIES: Record<string, SyncStrategy> = {
 };
 
 /** Select the sync strategy by name (default patch-back); unknown → clear error. */
-function selectSyncStrategy(p: RunnerInput): SyncStrategy {
+export function selectSyncStrategy(p: RunnerInput): SyncStrategy {
 	const name = (p.sync_strategy || 'patch-back').trim().toLowerCase() || 'patch-back';
 	const strategy = SYNC_STRATEGIES[name];
 	if (!strategy) {
