@@ -263,3 +263,17 @@ type AgentCommandStore interface {
 	Ack(ctx context.Context, workspaceKey, commandID string) (*domain.AgentCommand, error)
 	Complete(ctx context.Context, workspaceKey, commandID string, update AgentCommandComplete) (*domain.AgentCommand, error)
 }
+
+// WorkerStore renews and removes fleet-db worker registrations. A worker's
+// registration is created server-side as a side-effect of claiming an issue
+// (keyed by the claim actor) and carries a lease TTL; the client must renew it
+// while the agent process is alive, and should deregister on graceful exit.
+// Methods return only an error — callers do not consume a worker object.
+type WorkerStore interface {
+	// Heartbeat renews the worker's registration lease. Best-effort: a worker
+	// whose lease already lapsed is reported via error, not resurrected.
+	Heartbeat(ctx context.Context, workspaceKey, workerID string) error
+	// Deregister removes the worker registration and releases any issue lock it
+	// still holds. Idempotent.
+	Deregister(ctx context.Context, workspaceKey, workerID string) error
+}
