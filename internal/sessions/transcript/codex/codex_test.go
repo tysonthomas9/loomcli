@@ -40,15 +40,18 @@ func TestEvents_CodexFlow(t *testing.T) {
 	}
 }
 
-func TestParseRollout_SkipsMalformed(t *testing.T) {
+// TestEvents_SkipsMalformedLine confirms a malformed (non-JSON) rollout line is
+// skipped (not fatal) — the wrapper's ParseRollout tolerance, exercised through
+// the delegating Events. A valid message after it still surfaces.
+func TestEvents_SkipsMalformedLine(t *testing.T) {
 	input := `not json
-{"timestamp":"2026-04-06T17:29:41.320Z","type":"session_meta","payload":{}}
+{"timestamp":"2026-04-06T17:29:41.321Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"hi"}]}}
 `
-	envelopes, err := ParseRollout([]byte(input))
+	events, err := Events([]byte(input))
 	if err != nil {
-		t.Fatalf("ParseRollout: %v", err)
+		t.Fatalf("Events: %v", err)
 	}
-	if len(envelopes) != 1 {
-		t.Fatalf("want 1 envelope, got %d", len(envelopes))
+	if len(events) != 1 || events[0].Text != "hi" {
+		t.Fatalf("want 1 event 'hi' (malformed line skipped), got %+v", events)
 	}
 }
