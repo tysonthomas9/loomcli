@@ -250,6 +250,10 @@ func classifyHTTPError(method, path string, status int, body []byte) error {
 		return fmt.Errorf("%s: %w", prefix, domain.ErrAlreadyExists)
 	case http.StatusBadRequest, http.StatusUnprocessableEntity:
 		return fmt.Errorf("%s: %w", prefix, domain.ErrInvalid)
+	case http.StatusGone:
+		// fleet-db heartbeat: lease exists, token is ours, but it is no
+		// longer live (expired or released) — re-acquire is safe.
+		return fmt.Errorf("%s: %w", prefix, domain.ErrGone)
 	}
 	if status >= 400 && status < 500 {
 		return fmt.Errorf("%s: %w", prefix, domain.ErrConflict)
