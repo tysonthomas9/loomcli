@@ -145,6 +145,9 @@ func runPlanDaemon(deps *cli.Deps, worktreePath, agentName string) {
 
 	emitTaskClaimedFromEnv(agentName, assignedTaskID)
 
+	// P4: same-task daemon restart → resume the prior Claude session (guarded).
+	maybeResumeDaemonSession(worktreePath, assignedTaskID)
+
 	beforeRef := automode.CaptureHEADRef(worktreePath)
 	startedAt := time.Now()
 
@@ -156,6 +159,9 @@ func runPlanDaemon(deps *cli.Deps, worktreePath, agentName string) {
 	shutdown := automode.SetupSignalHandler()
 	collector := usage.NewCollector(cli.GetBackendName(), agentName)
 	invokeErr := deps.Agent.InvokeNonInteractive(worktreePath, prompt, agentName, shutdown, collector)
+	if invokeErr == nil {
+		clearDaemonResumeOnSuccess(worktreePath)
+	}
 
 	emitTaskLifecycleResult(agentName, worktreePath, startedAt, invokeErr)
 	finalizeAgentSession(sess, worktreePath, beforeRef, invokeErr, collector, startedAt, planParentID)
