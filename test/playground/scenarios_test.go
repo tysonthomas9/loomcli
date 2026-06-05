@@ -988,19 +988,34 @@ func TestScenarioTaskQuarantine(t *testing.T) {
 		t.Errorf("stall task %s has no kill-timeline comment (comments: %d)", stallID, len(detail.Comments))
 	}
 
-	// daemon-agents.json surfaces the quarantine.
-	if state := readScenarioDaemonState(t, scenario); state != nil {
+	// daemon-agents.json surfaces the quarantine. The file is flushed by the
+	// state-updater ticker, not synchronously with the quarantine write, so
+	// poll up to a tick-plus-margin rather than reading once.
+	stateTimeout := durationFromEnv("PLAYGROUND_STALL_STATE_WAIT", 45*time.Second)
+	stateDeadline := time.Now().Add(stateTimeout)
+	for {
+		state := readScenarioDaemonState(t, scenario)
 		found := false
-		for _, qt := range state.QuarantinedTasks {
-			if qt.TaskID == stallID {
-				found = true
+		if state != nil {
+			for _, qt := range state.QuarantinedTasks {
+				if qt.TaskID == stallID {
+					found = true
+				}
 			}
 		}
-		if !found {
-			t.Errorf("daemon-agents.json quarantined_tasks = %+v, want %s listed", state.QuarantinedTasks, stallID)
+		if found {
+			break
 		}
-	} else {
-		t.Log("daemon-agents.json not found; skipping state-file assertion")
+		if time.Now().After(stateDeadline) {
+			if state == nil {
+				t.Log("daemon-agents.json not found; skipping state-file assertion")
+			} else {
+				t.Errorf("daemon-agents.json quarantined_tasks = %+v after %s, want %s listed",
+					state.QuarantinedTasks, stateTimeout, stallID)
+			}
+			break
+		}
+		time.Sleep(2 * time.Second)
 	}
 
 	// The healthy task closes — the agent escaped the boomerang.
