@@ -80,6 +80,12 @@ type Supervisor struct {
 	IssueBackendReady func(epicID string) (bool, error)
 	IssueBackend      backend.IssueBackend
 
+	// quarantine is the supervisor-scoped, task-ID-keyed ledger of repeated
+	// no-progress kills (see quarantine.go). Lazily initialized via qrec so
+	// the cross-package composite-literal construction site stays untouched.
+	quarantine     *taskQuarantine
+	quarantineOnce sync.Once
+
 	// ControlStore is the fleet-db-backed control plane used for node,
 	// session, lease, terminal, artifact, and command records.
 	ControlStore store.Store
@@ -712,6 +718,9 @@ func (s *Supervisor) spawnAndWait(ap *AgentProcess) {
 
 	exitCode := s.waitForAgent(ap)
 	s.classifyAgentExit(ap, exitCode)
+	// Ledger hook: LastError is set, the lock is still present, and
+	// AgentSessionID has not been cleared by finalize yet.
+	s.recordTaskExitForQuarantine(ap, exitCode)
 	s.finalizeAgentSession(ap, exitCode)
 	s.handleAgentCheckpoint(ap, exitCode)
 	s.postMortemRecovery(ap, exitCode)
