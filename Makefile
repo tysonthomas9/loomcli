@@ -1,6 +1,6 @@
 # Makefile for loomcli project
 
-.PHONY: all build build-frontend build-all test test-integration test-all test-playground test-fleetdb-embedded test-fleetdb-supervisor test-fleetdb-ui test-fleetdb-empty-cli fleetdb-empty-up fleetdb-empty-down local-mode-up local-mode-codex-up local-mode-down local-mode-logs local-mode-verify test-local-mode-harness test-distributed-smoke lint lint-frontend test-frontend e2e test-e2e test-e2e-api test-e2e-api-local test-e2e-real-smoke test-e2e-real-smoke-local test-e2e-real-regression test-e2e-real-regression-local test-e2e-integration test-e2e-integration-local test-e2e-integration-full clean install help frontend check check-go check-frontend check-sdk check-runner gate gate-e2e gate-e2e-full hooks ensure-hooks dev dev-check dev-loom dev-vite check-loc check-loc-stale check-no-raw-exec check-no-beads-prod test-coverage test-frontend-coverage test-race-cover test-integration-race-cover gen-go-api check-go-api-staleness
+.PHONY: all build build-frontend build-all test test-integration test-all test-playground test-fleetdb-embedded test-fleetdb-supervisor test-fleetdb-ui test-fleetdb-empty-cli fleetdb-empty-up fleetdb-empty-down local-mode-up local-mode-codex-up local-mode-down local-mode-logs local-mode-verify test-local-mode-harness test-distributed-smoke lint lint-frontend test-frontend e2e test-e2e test-e2e-api test-e2e-api-local test-e2e-real-smoke test-e2e-real-smoke-local test-e2e-real-regression test-e2e-real-regression-local test-e2e-integration test-e2e-integration-local test-e2e-integration-full clean install help frontend check check-go check-frontend check-sdk check-runner gate gate-e2e gate-e2e-full hooks ensure-hooks dev dev-check dev-loom dev-vite check-loc check-loc-stale check-no-raw-exec check-no-beads-prod test-coverage test-frontend-coverage test-race-cover test-integration-race-cover gen-go-api generate check-go-api-staleness
 
 # Default target
 all: build
@@ -279,6 +279,15 @@ gen-go-api:
 	@rm -f tmp/openapi-3.0.yaml
 	@echo "Generated: internal/backend/api/gen/types.gen.go"
 
+# Regenerate everything derived from api/openapi.yaml. The @loom/sdk TS types are
+# NOT committed (git-ignored; regenerated on `npm install` via the SDK's `prepare`
+# script and here); the Go types ARE committed so bare `go build` keeps working.
+# Run this after changing api/openapi.yaml, then commit the Go types if they moved.
+generate: gen-go-api
+	@echo "Generating @loom/sdk types from api/openapi.yaml..."
+	@cd sdk/typescript && (npm ci --silent || npm install --silent) && npm run generate
+	@echo "Done (SDK types are git-ignored; review internal/backend/api/gen/types.gen.go for Go changes)."
+
 # Check that committed types.gen.go is in sync with api/openapi.yaml
 check-go-api-staleness:
 	@./scripts/check-go-api-staleness.sh
@@ -451,7 +460,7 @@ check-frontend:
 # check:generated / check:vendored self-skip when the toolchain is absent.
 check-sdk:
 	@echo "=== SDK: install + generated/vendored staleness + typecheck + tests ==="
-	@cd sdk/typescript && (npm ci --silent || npm install --silent) && npm run check:generated && npm run check:vendored && npm run typecheck && npm test
+	@cd sdk/typescript && (npm ci --silent || npm install --silent) && npm run check:vendored && npm run typecheck && npm test
 	@$(MAKE) check-runner
 	@echo "=== SDK quality gates PASSED ==="
 

@@ -21,12 +21,12 @@
   },
   "scripts": {
     "generate": "openapi-typescript ../../api/openapi.yaml -o src/generated/openapi.ts",
+    "prepare": "npm run generate",
     "typecheck": "tsc --noEmit",
     "build": "tsc",
     "test": "vitest run",
     "bundle": "node scripts/vendor-sdk.mjs --out dist/bundle",
     "vendor": "node scripts/vendor-sdk.mjs",
-    "check:generated": "node scripts/check-generated.mjs",
     "check:vendored": "node scripts/check-vendored-sdk.mjs"
   },
   "dependencies": {
