@@ -9,7 +9,7 @@ runbooks directly:
 
 - `.agent-skills/loom-pr-test/SKILL.md` - real Loom PR runtime testing with
   local-mode stacks, browser validation, FleetDB compatibility checks, and
-  real backend sandbox runs.
+  real Codex local-mode checks.
 
 When testing Loom runtime behavior, follow the runbook above. Do not manually
 create lock files, FleetDB state, sessions, transcripts, diffs, or other fake

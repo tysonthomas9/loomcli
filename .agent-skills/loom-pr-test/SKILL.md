@@ -2,9 +2,9 @@
 name: loom-pr-test
 description: >-
   Test loomcli pull requests with real Loom workflows: local-mode Podman stacks,
-  real daemon/UI/browser checks, and isolated real-backend agent runs. Use when
+  real daemon/UI/browser checks, and real Codex stack checks. Use when
   validating runtime behavior, Web UI behavior, daemon scheduling, sessions,
-  transcripts, diffs, FleetDB compatibility, or backend CLI integration. Never
+  transcripts, diffs, FleetDB compatibility, or Codex CLI integration. Never
   use manual lock files, hand-seeded FleetDB state, fake sessions, or synthetic
   stand-ins as evidence.
 ---
@@ -31,13 +31,11 @@ Use one of these paths:
    - Use the local-mode Podman stack through `make local-mode-up`.
    - Use `make local-mode-codex-up` when the claim depends on real Codex CLI behavior.
 
-2. **Single real backend agent behavior**
-   - Use the bundled sandbox scripts.
-   - This is for `loom plan` or `loom task` one-shot runs with real backend CLIs.
-
-3. **Pure code behavior**
+2. **Pure code behavior**
    - Run focused unit/integration tests from the PR worktree.
    - Do not start a browser or stack unless the change touches runtime behavior.
+
+Do not add ad-hoc sandbox wrappers or toy repositories for runtime evidence. If a backend behavior cannot be tested through the repo Make/local-mode workflow, extend the real local-mode workflow first or report the behavior as unverified.
 
 ## Local-Mode Stack
 
@@ -228,42 +226,6 @@ podman exec <loom-container> bash -lc \
 
 If a task is open with a design, it is normally coder-eligible. If a task needs planning, it normally needs no design or an explicit revision workflow.
 
-## Real Backend Sandbox
-
-Use the bundled scripts for one-shot real backend CLI checks. They create an isolated `/tmp/loom-e2e/<name>` sandbox with its own `LOOM_CONFIG_DIR`, target repo, workspace, and PR-built `loom` binary.
-By default, sandbox setup seeds one planning task and one implementation-ready task with an approved design.
-
-```bash
-SKILL=.agent-skills/loom-pr-test
-
-$SKILL/scripts/new-sandbox.sh <name> <PR_WORKTREE>
-$SKILL/scripts/run-agent.sh <name> plan <backend>
-$SKILL/scripts/run-agent.sh <name> task <backend>
-```
-
-`<backend>` is any installed and authenticated Loom backend CLI, such as `claude`, `codex`, `cursor`, or `opencode`.
-
-Clean one sandbox:
-
-```bash
-$SKILL/scripts/new-sandbox.sh --clean <name> --yes
-```
-
-Rules:
-
-- One concurrent agent run per sandbox.
-- Use one sandbox per PR/worktree.
-- Do not share `LOOM_CONFIG_DIR` across concurrent runs.
-- Live backend runs can take several minutes.
-
-Parallel one-shot runs across separate sandboxes:
-
-```bash
-$SKILL/scripts/parallel-review.sh plan <backend> \
-  pr-a=<worktree-a> \
-  pr-b=<worktree-b>
-```
-
 ## Reporting
 
 Always report:
@@ -301,13 +263,6 @@ LOCAL_MODE_COMPOSE_PROJECT=<project-name> \
 LOCAL_MODE_COMPOSE=<compose-runner> \
 LOCAL_MODE_COMPOSE_FILES=/tmp/fleetdb-review.yml \
 make local-mode-down
-```
-
-Real backend sandbox:
-
-```bash
-SKILL=.agent-skills/loom-pr-test
-$SKILL/scripts/new-sandbox.sh --clean <name> --yes
 ```
 
 Browser profiles:
