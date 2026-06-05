@@ -854,7 +854,7 @@ func TestFormatKillTimeline_RendersASCIIMarkdownTable(t *testing.T) {
 		"| 1 | 2026-06-05T14:02:11Z | web-extractor-a | watchdog | Timeout | 137 | sess-abc | 9f3e4a5b |",
 		"| 2 | 2026-06-05T14:40:00Z | web-extractor-b | crash | Unknown | -1 | - | - |",
 		"loom data update WEB-49 --status open",
-		"loom data label remove WEB-49 loom:quarantined",
+		"DELETE /issues/WEB-49/labels/loom:quarantined",
 		"re-quarantine after 3 fresh no-progress kills",
 	} {
 		if !strings.Contains(text, want) {

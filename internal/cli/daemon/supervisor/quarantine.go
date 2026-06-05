@@ -497,7 +497,8 @@ func formatKillTimeline(taskID string, threshold, count int, kills []killEvent) 
 			shortSessionID(ev.FleetSessionID), shortSessionID(ev.ClaudeSessionID))
 	}
 	fmt.Fprintf(&b, "\nTo release: investigate the stall, then `loom data update %s --status open`\n", taskID)
-	fmt.Fprintf(&b, "(optionally `loom data label remove %s %s`). Manual `loom claim %s` also\n", taskID, quarantineLabel, taskID)
+	fmt.Fprintf(&b, "(the %s label stays as an audit marker; clear it via the fleet-db API\n", quarantineLabel)
+	fmt.Fprintf(&b, "`DELETE /issues/%s/labels/%s` if desired). Manual `loom claim %s` also\n", taskID, quarantineLabel, taskID)
 	fmt.Fprintf(&b, "works (blocked is claimable) -- it will re-quarantine after %d fresh no-progress kills.\n", threshold)
 	return b.String()
 }
