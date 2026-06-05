@@ -16,6 +16,7 @@ export type ViewMode =
   | "observability"
   | "terminal"
   | "agents"
+  | "prs"
   | "workspace"
   | "settings"
   | "files"

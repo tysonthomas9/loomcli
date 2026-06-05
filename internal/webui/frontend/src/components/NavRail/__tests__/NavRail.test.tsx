@@ -39,6 +39,12 @@ describe("NavRail", () => {
       expect(screen.getByLabelText("Agents")).toBeInTheDocument();
     });
 
+    it("renders a Pull Requests button", () => {
+      render(<NavRail activeView="kanban" onChange={() => {}} />);
+
+      expect(screen.getByLabelText("Pull Requests")).toBeInTheDocument();
+    });
+
     it("does not render a List button", () => {
       render(<NavRail activeView="kanban" onChange={() => {}} />);
 
@@ -59,11 +65,11 @@ describe("NavRail", () => {
       expect(screen.queryByLabelText("Workspace")).not.toBeInTheDocument();
     });
 
-    it("renders exactly four navigation buttons", () => {
+    it("renders exactly five navigation buttons", () => {
       render(<NavRail activeView="kanban" onChange={() => {}} />);
 
       const buttons = screen.getAllByRole("button");
-      expect(buttons).toHaveLength(4);
+      expect(buttons).toHaveLength(5);
     });
 
     it("renders tooltips for each button", () => {
@@ -77,6 +83,7 @@ describe("NavRail", () => {
       const tooltipTexts = Array.from(tooltips).map((t) => t.textContent);
       expect(tooltipTexts).toContain("Workspaces");
       expect(tooltipTexts).toContain("Agents");
+      expect(tooltipTexts).toContain("Pull Requests");
       expect(tooltipTexts).toContain("Terminal");
       expect(tooltipTexts).toContain("Settings");
     });
@@ -98,14 +105,15 @@ describe("NavRail", () => {
       );
     });
 
-    it("renders buttons in correct order: Workspaces, Agents, Terminal, Settings", () => {
+    it("renders buttons in correct order: Workspaces, Agents, Pull Requests, Terminal, Settings", () => {
       render(<NavRail activeView="kanban" onChange={() => {}} />);
 
       const buttons = screen.getAllByRole("button");
       expect(buttons[0]).toHaveAccessibleName("Workspaces");
       expect(buttons[1]).toHaveAccessibleName("Agents");
-      expect(buttons[2]).toHaveAccessibleName("Terminal");
-      expect(buttons[3]).toHaveAccessibleName("Settings");
+      expect(buttons[2]).toHaveAccessibleName("Pull Requests");
+      expect(buttons[3]).toHaveAccessibleName("Terminal");
+      expect(buttons[4]).toHaveAccessibleName("Settings");
     });
 
     it("has navigation landmark with aria-label", () => {

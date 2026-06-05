@@ -110,6 +110,45 @@ const TOP_ITEMS: NavItem[] = [
     ),
   },
   {
+    id: "prs",
+    label: "Pull Requests",
+    icon: (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <circle
+          cx="6"
+          cy="6"
+          r="2.5"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+        />
+        <circle
+          cx="6"
+          cy="18"
+          r="2.5"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+        />
+        <circle
+          cx="18"
+          cy="18"
+          r="2.5"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+        />
+        <path
+          d="M6 8.5v7M18 15.5V12a3 3 0 00-3-3h-3"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+        />
+      </svg>
+    ),
+  },
+  {
     id: "terminal",
     label: "Terminal",
     icon: (

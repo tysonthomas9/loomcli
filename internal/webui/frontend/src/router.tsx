@@ -123,6 +123,11 @@ const viewRoutes = [
       import("@/views/AgentsPage").then((m) => ({ Component: m.AgentsPage })),
   },
   {
+    path: "prs",
+    lazy: () =>
+      import("@/views/PRsPage").then((m) => ({ Component: m.PRsPage })),
+  },
+  {
     path: "settings",
     lazy: () =>
       import("@/views/SettingsPage").then((m) => ({
