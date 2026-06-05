@@ -10,6 +10,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/usage"
 )
 
@@ -192,6 +193,39 @@ func TestDeriveDaytonaInput_EpicBranch(t *testing.T) {
 	t.Setenv("LOOM_FLUE_EPIC_BRANCH", "")
 	if _, err := deriveDaytonaInput(repo, "do work", "nova"); err != nil {
 		t.Errorf("loom should not validate the epic branch; got error %v", err)
+	}
+}
+
+// TestRunFlueDaytonaTask_RecordsClaim verifies the host-side claim record: the
+// sandbox agent has no loom CLI to `loom claim`, so runFlueDaytonaTask writes
+// the assigned task id into the worktree lock — which is what automode's
+// agentClaimedTask() reads to count the run as progress.
+func TestRunFlueDaytonaTask_RecordsClaim(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+	repo, _ := newGitRepoWithRemoteT(t)
+	if err := cli.AcquireLock(repo, "task", "nova"); err != nil {
+		t.Fatalf("acquire lock: %v", err)
+	}
+	t.Cleanup(func() { _ = cli.ReleaseLock(repo) })
+	t.Setenv("LOOM_ASSIGNED_TASK_ID", "WS-7")
+
+	orig := flueRunnerExec
+	t.Cleanup(func() { flueRunnerExec = orig })
+	t.Cleanup(ClearLastRuntimeMetadata)
+	flueRunnerExec = func(_ context.Context, _, _ string, _ runnerInput, _ <-chan struct{}, _ *usage.Collector) (*runnerResult, error) {
+		return &runnerResult{status: "completed", sandboxID: "sb", cleanup: "deleted"}, nil
+	}
+	if err := runFlueDaytonaTask(repo, "do work", "nova", nil, nil); err != nil {
+		t.Fatalf("runFlueDaytonaTask: %v", err)
+	}
+	info, err := cli.ReadLockFile(repo)
+	if err != nil {
+		t.Fatalf("read lock: %v", err)
+	}
+	if info.TaskID != "WS-7" {
+		t.Errorf("lock TaskID = %q, want WS-7 (host-side claim for the credential-less sandbox)", info.TaskID)
 	}
 }
 

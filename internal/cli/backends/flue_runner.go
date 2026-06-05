@@ -153,6 +153,15 @@ func runFlueDaytonaTask(workDir, prompt, agentName string, shutdown <-chan struc
 		return err
 	}
 
+	// The sandbox agent has no loom CLI, so it can't `loom claim` the task it
+	// works on — record the claim host-side (best-effort) so automode's
+	// agentClaimedTask() sees the run as progress (`--auto -m N` stops correctly
+	// instead of looping to the no-progress backstop) and the monitor shows the
+	// task. A local agent does this itself via `loom claim`.
+	if taskID := resolveAssignedTaskID(workDir); taskID != "" {
+		_ = cli.UpdateLockTask(workDir, taskID, "")
+	}
+
 	// Always give the runner a patch path; only the patch-back strategy writes to
 	// it (branch-push / epic-branch push from the sandbox and leave it empty). loom
 	// then applies the patch iff one was produced — so loom stays agnostic to which
