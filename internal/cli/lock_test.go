@@ -652,42 +652,29 @@ func TestAcquireLockStale_ConcurrentRetry(t *testing.T) {
 		t.Fatalf("failed to write stale lock: %v", err)
 	}
 
-	// Racer injects a SECOND stale lock the moment AcquireLock has removed
-	// stale1 but not yet succeeded its own O_EXCL create. Stops as soon as
-	// it sees a non-stale lock (i.e. AcquireLock has won), so it can't
-	// clobber the valid lock on slow CI where the racer's WriteFile would
-	// otherwise complete after AcquireLock's own write.
-	racerDone := make(chan struct{})
-	go func() {
-		defer close(racerDone)
-		secondStale := []byte(`{"pid":999999998,"command":"stale2","agent_name":"dead-agent-2","started_at":"2024-01-01T00:00:00Z"}`)
-		injected := false
-		for {
-			data, err := os.ReadFile(lockPath)
-			switch {
-			case os.IsNotExist(err):
-				if !injected {
-					_ = os.WriteFile(lockPath, secondStale, 0644)
-					injected = true
-				}
-			case err == nil:
-				var inf LockInfo
-				if json.Unmarshal(data, &inf) == nil && inf.PID == os.Getpid() {
-					return
-				}
-			}
-			time.Sleep(time.Millisecond)
-		}
-	}()
+	// A racer goroutine simulates a SECOND process injecting another stale lock
+	// the moment AcquireLock has removed stale1 but not yet completed its own
+	// O_EXCL create. See spawnStaleLockRacer for why it injects with O_EXCL
+	// (never a truncating WriteFile) so it can't clobber the lock AcquireLock wins.
+	stop := make(chan struct{})
+	defer close(stop) // racer must not leak/busy-loop past the test (runs even on t.Fatal)
+	racerDone := spawnStaleLockRacer(lockPath, stop)
 
 	err := AcquireLock(tmpDir, "new-command", "new-agent")
 	if err != nil {
 		t.Fatalf("AcquireLock should succeed after retrying stale lock race: %v", err)
 	}
 	defer ReleaseLock(tmpDir)
-	// Wait for the racer to observe our PID and stop, so the post-acquire
-	// CheckLock cannot see a clobbered file.
-	<-racerDone
+
+	// Bounded wait for the racer to observe our PID and stop, so the post-acquire
+	// CheckLock can't see a transient injected lock. With O_EXCL injection the
+	// racer converges in a few ms; the timeout is a backstop that prevents the old
+	// 15-minute package wedge and fails fast on any regression.
+	select {
+	case <-racerDone:
+	case <-time.After(30 * time.Second):
+		t.Fatal("racer never observed our PID within 30s — lock file likely clobbered (regression of the WriteFile-clobber flake)")
+	}
 
 	info, running, err := CheckLock(tmpDir)
 	if err != nil {
@@ -702,6 +689,50 @@ func TestAcquireLockStale_ConcurrentRetry(t *testing.T) {
 	if info.PID != os.Getpid() {
 		t.Errorf("expected PID %d, got %d", os.Getpid(), info.PID)
 	}
+}
+
+// spawnStaleLockRacer simulates a second process injecting another stale lock
+// during AcquireLock's stale-lock remove->recreate window. It injects with
+// O_EXCL (never a truncating WriteFile) so it can only create the lock while the
+// file is absent — it can NEVER clobber AcquireLock's own freshly-created lock.
+// (A blind WriteFile could land after AcquireLock's write, overwriting our PID
+// and leaving the racer's exit predicate permanently unsatisfiable — the old
+// 15-minute test-timeout hang.) injected flips only on a SUCCESSFUL create, so
+// the racer injects at most once and can't starve AcquireLock's bounded retries.
+// It stops on observing our PID or when stop is closed; the returned channel is
+// closed when the goroutine exits.
+func spawnStaleLockRacer(lockPath string, stop <-chan struct{}) <-chan struct{} {
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		secondStale := []byte(`{"pid":999999998,"command":"stale2","agent_name":"dead-agent-2","started_at":"2024-01-01T00:00:00Z"}`)
+		injected := false
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+			}
+			data, err := os.ReadFile(lockPath)
+			switch {
+			case os.IsNotExist(err):
+				if !injected {
+					if f, e := os.OpenFile(lockPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0644); e == nil {
+						_, _ = f.Write(secondStale)
+						_ = f.Close()
+						injected = true
+					}
+				}
+			case err == nil:
+				var inf LockInfo
+				if json.Unmarshal(data, &inf) == nil && inf.PID == os.Getpid() {
+					return
+				}
+			}
+			time.Sleep(time.Millisecond)
+		}
+	}()
+	return done
 }
 
 func TestAcquireLockStale_RetryFindsLiveAgent(t *testing.T) {

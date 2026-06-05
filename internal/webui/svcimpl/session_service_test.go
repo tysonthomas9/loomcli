@@ -73,6 +73,98 @@ func TestSessionServiceListTaskSessionsUsesControlPlane(t *testing.T) {
 	}
 }
 
+func TestSessionServiceListTaskSessionsEnrichesControlPlaneWithLocalUsage(t *testing.T) {
+	ctx := t.Context()
+	runtimeDir := t.TempDir()
+
+	sessStore, err := sessions.NewStore(runtimeDir)
+	if err != nil {
+		t.Fatalf("new session store: %v", err)
+	}
+	sess, err := sessStore.CreateSession(sessions.CreateOptions{
+		AgentName: "worker-usage",
+		Backend:   "claude",
+		Phase:     "implementation",
+	})
+	if err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+	srcTranscript := filepath.Join(t.TempDir(), "claude.jsonl")
+	if err := os.WriteFile(srcTranscript, []byte("{\"type\":\"assistant\"}\n"), 0o600); err != nil {
+		t.Fatalf("write source transcript: %v", err)
+	}
+	if err := sessStore.SyncNativeTranscript(sess.SessionID(), srcTranscript); err != nil {
+		t.Fatalf("sync native transcript: %v", err)
+	}
+	if err := sess.Finalize(sessions.FinalizeOptions{
+		TaskID:           "TASK-USAGE-1",
+		ExitCode:         0,
+		InputTokens:      12,
+		OutputTokens:     1349,
+		CacheReadTokens:  323621,
+		CacheWriteTokens: 10687,
+		EstimatedCostUSD: 0.15743355,
+		DiffStats:        sessions.DiffStats{FilesChanged: 1, LinesAdded: 1},
+		FilesTouched:     []string{"local-mode-agent-output.txt"},
+		DiffPatch:        "diff --git a/local-mode-agent-output.txt b/local-mode-agent-output.txt\n",
+	}); err != nil {
+		t.Fatalf("finalize session: %v", err)
+	}
+
+	st := memstore.New()
+	finishedAt := time.Now().UTC()
+	exitCode := 0
+	status := domain.AgentSessionCompleted
+	finishedAtPtr := &finishedAt
+	exitCodePtr := &exitCode
+	if _, err := st.AgentSessions().Create(ctx, store.AgentSessionCreate{
+		WorkspaceKey: "WS",
+		SessionID:    sess.SessionID(),
+		AgentID:      "worker-usage",
+		TaskID:       "TASK-USAGE-1",
+		Status:       domain.AgentSessionRunning,
+		Phase:        "implementation",
+		Metadata: map[string]string{
+			"backend":         "claude",
+			"transcript_path": "/runtime/session/transcript.jsonl",
+		},
+	}); err != nil {
+		t.Fatalf("create control-plane session: %v", err)
+	}
+	if _, err := st.AgentSessions().Update(ctx, "WS", sess.SessionID(), store.AgentSessionUpdate{
+		Status:     &status,
+		FinishedAt: &finishedAtPtr,
+		ExitCode:   &exitCodePtr,
+	}); err != nil {
+		t.Fatalf("complete control-plane session: %v", err)
+	}
+
+	svc := NewSessionServiceWithRuntimeDir(st, nil, runtimeDir)
+	items, err := svc.ListTaskSessions(ctx, "WS", "TASK-USAGE-1")
+	if err != nil {
+		t.Fatalf("ListTaskSessions: %v", err)
+	}
+	if len(items) != 1 {
+		t.Fatalf("items = %d, want 1", len(items))
+	}
+	item := items[0]
+	if item.InputTokens != 12 || item.OutputTokens != 1349 || item.CacheReadTokens != 323621 || item.CacheWriteTokens != 10687 {
+		t.Fatalf("usage = in:%d out:%d read:%d write:%d", item.InputTokens, item.OutputTokens, item.CacheReadTokens, item.CacheWriteTokens)
+	}
+	if item.EstimatedCostUSD != 0.15743355 {
+		t.Fatalf("cost = %v, want 0.15743355", item.EstimatedCostUSD)
+	}
+	if item.FilesChanged != 1 || item.LinesAdded != 1 || len(item.FilesTouched) != 1 || item.FilesTouched[0] != "local-mode-agent-output.txt" {
+		t.Fatalf("diff stats = %+v", item.SessionRecord)
+	}
+	if !item.HasTranscript || !item.HasDiff {
+		t.Fatalf("transcript/diff flags = %v/%v, want true/true", item.HasTranscript, item.HasDiff)
+	}
+	if item.Status != sessions.StatusCompleted || item.ExitCode != 0 || item.IsActive {
+		t.Fatalf("control-plane lifecycle changed unexpectedly: status=%q exit=%d active=%v", item.Status, item.ExitCode, item.IsActive)
+	}
+}
+
 func TestSessionServiceListTaskSessionsFallsBackToFileStores(t *testing.T) {
 	loomConfigDir := t.TempDir()
 	t.Setenv("LOOM_CONFIG_DIR", loomConfigDir)

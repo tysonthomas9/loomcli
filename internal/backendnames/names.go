@@ -1,5 +1,6 @@
 package backendnames
 
 const (
-	Codex = "codex"
+	Claude = "claude"
+	Codex  = "codex"
 )
