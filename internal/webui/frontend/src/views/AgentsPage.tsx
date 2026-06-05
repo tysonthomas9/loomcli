@@ -14,7 +14,11 @@
 
 import { useEffect, useMemo, useRef, useState, lazy, Suspense } from "react";
 
-import { useWorkspaceViewData } from "@/contexts/WorkspaceViewContext";
+import {
+  useWorkspaceViewData,
+  useWorkspaceViewActions,
+} from "@/contexts/WorkspaceViewContext";
+import { updateIssue } from "@/api";
 import { GitTab } from "@/components/AgentDetailPanel";
 import {
   TerminalInstance,
@@ -94,9 +98,31 @@ const TABS: { id: AgentTab; label: string }[] = [
 ];
 
 export function AgentsPage(): JSX.Element {
-  const { agents, issues } = useWorkspaceViewData();
+  const { agents, issues, workspaceId } = useWorkspaceViewData();
+  const { refetch, showToast } = useWorkspaceViewActions();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<AgentTab>("terminal");
+  // Open Queue → assign an unclaimed task to an agent (Aether V3 flow), wired
+  // to the real issue-assignment API.
+  const [assignMenuId, setAssignMenuId] = useState<string | null>(null);
+  const [assigningId, setAssigningId] = useState<string | null>(null);
+
+  const assignTask = async (taskId: string, agentName: string): Promise<void> => {
+    if (!workspaceId) return;
+    setAssignMenuId(null);
+    setAssigningId(taskId);
+    try {
+      await updateIssue(workspaceId, taskId, { assignee: agentName });
+      refetch();
+    } catch (err) {
+      showToast(
+        err instanceof Error ? err.message : "Failed to assign task",
+        { type: "error" },
+      );
+    } finally {
+      setAssigningId(null);
+    }
+  };
 
   // Default to a lead agent, else the first agent.
   const selected = useMemo(() => {
@@ -346,16 +372,71 @@ export function AgentsPage(): JSX.Element {
           {openTasks.length === 0 ? (
             <p className={styles.epicClaim}>No open tasks.</p>
           ) : (
-            openTasks.slice(0, 4).map((t) => (
-              <article key={t.id} className={styles.queueCard}>
-                <div className={styles.queueCardRow}>
-                  <span className={styles.queueCardDot} aria-hidden="true" />
-                  <code className={styles.queueCardKey}>{t.id}</code>
-                  <span className={styles.p2Badge}>P{t.priority}</span>
-                </div>
-                <p className={styles.queueCardTitle}>{t.title}</p>
-              </article>
-            ))
+            openTasks.slice(0, 4).map((t) => {
+              // "Claimed" = an agent is assigned to work it (assignee). owner is
+              // just the creator, so it doesn't count as claimed.
+              const assignee = t.assignee;
+              return (
+                <article key={t.id} className={styles.queueCard}>
+                  <div className={styles.queueCardRow}>
+                    <span className={styles.queueCardDot} aria-hidden="true" />
+                    <code className={styles.queueCardKey}>{t.id}</code>
+                    <span className={styles.p2Badge}>P{t.priority}</span>
+                  </div>
+                  <p className={styles.queueCardTitle}>{t.title}</p>
+                  {assignee ? (
+                    <p className={styles.assignedTo}>
+                      <span className={styles.runningDot} aria-hidden="true" />
+                      assigned to {assignee} · starting…
+                    </p>
+                  ) : (
+                    <div className={styles.assignWrap}>
+                      <button
+                        type="button"
+                        className={styles.assignBtn}
+                        disabled={assigningId === t.id || agents.length === 0}
+                        aria-haspopup="menu"
+                        aria-expanded={assignMenuId === t.id}
+                        onClick={() =>
+                          setAssignMenuId((cur) => (cur === t.id ? null : t.id))
+                        }
+                      >
+                        {assigningId === t.id ? "Assigning…" : "Assign"}
+                      </button>
+                      {assignMenuId === t.id && (
+                        <div className={styles.assignMenu} role="menu">
+                          {agents.map((a) => {
+                            const c = getAvatarColor(a.name);
+                            return (
+                              <button
+                                key={a.name}
+                                type="button"
+                                role="menuitem"
+                                className={styles.assignOption}
+                                onClick={() => void assignTask(t.id, a.name)}
+                              >
+                                <span
+                                  className={styles.assignAvatar}
+                                  style={{
+                                    backgroundColor: c,
+                                    color: shouldUseWhiteText(c)
+                                      ? "#fff"
+                                      : "#171717",
+                                  }}
+                                >
+                                  {a.name.charAt(0).toUpperCase()}
+                                </span>
+                                {a.name}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </article>
+              );
+            })
           )}
         </section>
 
