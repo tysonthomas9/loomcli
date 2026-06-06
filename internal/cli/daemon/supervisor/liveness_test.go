@@ -216,5 +216,9 @@ func setTickForTest(s *Supervisor, name string, when time.Time) {
 	if !ok {
 		panic("tick is not *tickSlot")
 	}
-	sl.stamp.Store(when.UnixNano())
+	// Mirror record()'s storage: a monotonic duration from monoBase. Callers must
+	// pass a time.Now()-derived `when` (all current callers do), so it carries a
+	// monotonic reading and when.Sub(monoBase) stays on the monotonic clock and
+	// round-trips to the intended age.
+	sl.stamp.Store(int64(when.Sub(monoBase)))
 }

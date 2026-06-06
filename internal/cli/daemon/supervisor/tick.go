@@ -36,18 +36,29 @@ const (
 type tickSlot struct {
 	name    string
 	class   GoroutineClass
-	stamp   atomic.Int64 // UnixNano of last record()
+	stamp   atomic.Int64 // monotonic-clock duration (ns) since monoBase, set by record()
 	onStale func()       // quarantine action for ClassAgent; nil for ClassCore
 }
 
-// record stamps the current time on the slot.
+// monoBase anchors tick storage. Captured at process start, it carries a
+// monotonic clock reading; ticks are stored as nanosecond durations from it and
+// reconstructed via monoBase.Add, which preserves the monotonic reading. That
+// keeps staleness math (now.Sub(t) in scanTicks) on the monotonic clock, so a
+// host suspend — which freezes the monotonic clock but not the wall clock — does
+// not make ticks look stale and trip the watchdog. Ticks are never persisted, so
+// a per-process base never crosses a process.
+var monoBase = time.Now()
+
+// record stamps the current time on the slot, as a monotonic-clock duration
+// since monoBase so staleness survives a host suspend.
 func (sl *tickSlot) record() {
-	sl.stamp.Store(time.Now().UnixNano())
+	sl.stamp.Store(int64(time.Since(monoBase)))
 }
 
-// last returns the slot's last recorded time.
+// last returns the slot's last recorded time, reconstructed via monoBase.Add so
+// the returned time carries a monotonic reading for suspend-immune age math.
 func (sl *tickSlot) last() time.Time {
-	return time.Unix(0, sl.stamp.Load())
+	return monoBase.Add(time.Duration(sl.stamp.Load()))
 }
 
 // registerTick allocates a tick slot, primes it to now, and stores it under
