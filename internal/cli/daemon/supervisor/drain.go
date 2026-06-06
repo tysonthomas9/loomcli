@@ -15,6 +15,11 @@ import (
 // to exit after a yield file is written, before escalating to SIGTERM.
 const DefaultYieldTimeout = 60 // seconds
 
+// terminalReplacementWaitTimeout bounds explicit resume while max-retry/fatal
+// finalization is still unwinding. It matches the task-block/comment backend
+// deadline plus a small scheduling cushion.
+const terminalReplacementWaitTimeout = claimOperationTimeout + time.Second
+
 // DrainWithGrace implements a four-phase graceful shutdown sequence:
 // yield file -> wait for voluntary exit -> SIGTERM -> SIGKILL.
 // Returns true if the agent exited from yield alone (SIGTERM was not needed).
@@ -327,16 +332,48 @@ func (s *Supervisor) AddAgentForTask(entry config.AgentEntry, taskID string) err
 	return nil
 }
 
-// checkDuplicateAgent does a lock-free probe for an existing agent with the
-// same worktree. Cheap fast-fail before the I/O in AddAgentForTask; the
-// authoritative check happens under AgentsMu.Lock after the I/O.
+// checkDuplicateAgent probes for an existing agent with the same worktree.
+// It fast-fails for live agents, but waits briefly for terminal agents whose
+// Done channel has not closed yet so explicit resume cannot race max-retry
+// finalization. The authoritative check happens under AgentsMu.Lock after the
+// I/O in AddAgentForTask.
 func (s *Supervisor) checkDuplicateAgent(worktree string) error {
+	deadline := time.NewTimer(terminalReplacementWaitTimeout)
+	defer deadline.Stop()
+
+	for {
+		done, err := s.duplicateAgentDone(worktree)
+		if err != nil || done == nil {
+			return err
+		}
+		shutdown := (<-chan struct{})(nil)
+		if s.Shutdown != nil {
+			shutdown = s.Shutdown
+		}
+		select {
+		case <-done:
+		case <-deadline.C:
+			return fmt.Errorf("agent %q already exists", worktree)
+		case <-shutdown:
+			return fmt.Errorf("agent %q replacement interrupted by supervisor shutdown", worktree)
+		}
+	}
+}
+
+func (s *Supervisor) duplicateAgentDone(worktree string) (<-chan struct{}, error) {
 	s.AgentsMu.RLock()
 	defer s.AgentsMu.RUnlock()
 	for _, ap := range s.Agents {
-		if ap.Entry.Worktree == worktree && !isReplaceableTerminalAgent(ap) {
-			return fmt.Errorf("agent %q already exists", worktree)
+		if ap.Entry.Worktree != worktree {
+			continue
 		}
+		if isReplaceableTerminalAgent(ap) {
+			return nil, nil
+		}
+		if done, ok := pendingTerminalAgentDone(ap); ok {
+			return done, nil
+		}
+		return nil, fmt.Errorf("agent %q already exists", worktree)
 	}
-	return nil
+	return nil, nil
 }

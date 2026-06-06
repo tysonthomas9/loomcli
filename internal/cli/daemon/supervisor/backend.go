@@ -7,6 +7,8 @@ import (
 	"os/exec"
 	"time"
 
+	"github.com/olesho/harness-wrapper/pkg/discovery"
+
 	"github.com/tysonthomas9/loomcli/internal/agenterr"
 	"github.com/tysonthomas9/loomcli/internal/cli/backendcheck"
 	"github.com/tysonthomas9/loomcli/internal/domain"
@@ -44,40 +46,55 @@ func (s *Supervisor) gateBackendAvailable(ap *AgentProcess) error {
 			"worktree", ap.Entry.Worktree, "backend", backend, "err", lookupErr)
 		return nil
 	}
-	if !info.Installed {
-		if path, ok := lookupExternalBackendBinary(backend); ok {
-			info.Installed = true
-			info.Path = path
-			info.Binary = "loom-backend-" + backend
-		}
-	}
+	info = withExternalBackendBinary(info, backend)
 
 	if info.Installed {
-		// Recovery branch: if the agent was previously waiting on
-		// backend-unavailable and the binary is now back, clear the
-		// state so UIs reflect the recovery before the spawn proceeds.
-		ap.Mu.Lock()
-		wasUnavailable := ap.StopReason == StopReasonBackendUnavailable
-		if wasUnavailable {
-			ap.StopReason = ""
-			ap.LastError = nil
-		}
-		worktree := ap.Entry.Worktree
-		ap.Mu.Unlock()
-		if wasUnavailable {
-			s.markControlPlaneAgentState(ap, domain.AgentStateActive)
-			log.Printf("[daemon] Agent %s: backend %q now on PATH — resuming spawn",
-				worktree, backend)
-		}
+		s.markBackendAvailable(ap, backend)
 		return nil
 	}
 
+	s.markBackendUnavailable(ap, backend, info.InstallHint)
+	return ErrBackendUnavailable
+}
+
+func withExternalBackendBinary(info discovery.Info, backend string) discovery.Info {
+	if info.Installed {
+		return info
+	}
+	if path, ok := lookupExternalBackendBinary(backend); ok {
+		info.Installed = true
+		info.Path = path
+		info.Binary = "loom-backend-" + backend
+	}
+	return info
+}
+
+func (s *Supervisor) markBackendAvailable(ap *AgentProcess, backend string) {
+	// Recovery branch: if the agent was previously waiting on
+	// backend-unavailable and the binary is now back, clear the state so UIs
+	// reflect the recovery before the spawn proceeds.
+	ap.Mu.Lock()
+	wasUnavailable := ap.StopReason == StopReasonBackendUnavailable
+	if wasUnavailable {
+		ap.StopReason = ""
+		ap.LastError = nil
+	}
+	worktree := ap.Entry.Worktree
+	ap.Mu.Unlock()
+	if wasUnavailable {
+		s.markControlPlaneAgentState(ap, domain.AgentStateActive)
+		log.Printf("[daemon] Agent %s: backend %q now on PATH — resuming spawn",
+			worktree, backend)
+	}
+}
+
+func (s *Supervisor) markBackendUnavailable(ap *AgentProcess, backend, installHint string) {
 	ap.Mu.Lock()
 	wasUnavailable := ap.StopReason == StopReasonBackendUnavailable
 	ap.StopReason = StopReasonBackendUnavailable
 	ap.LastError = &agenterr.AgentError{
 		Class:     agenterr.BackendUnavailable,
-		Message:   info.InstallHint,
+		Message:   installHint,
 		Backend:   backend,
 		Timestamp: time.Now(),
 	}
@@ -87,9 +104,8 @@ func (s *Supervisor) gateBackendAvailable(ap *AgentProcess) error {
 	s.markControlPlaneAgentState(ap, domain.AgentStateBackendUnavailable)
 	if !wasUnavailable {
 		log.Printf("[daemon] Agent %s: backend %q not on PATH — skipping spawn (%s)",
-			worktree, backend, info.InstallHint)
+			worktree, backend, installHint)
 	}
-	return ErrBackendUnavailable
 }
 
 func lookupExternalBackendBinary(backend string) (string, bool) {

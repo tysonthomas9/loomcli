@@ -2,7 +2,6 @@ package supervisor
 
 import (
 	"fmt"
-	"log"
 	"log/slog"
 	"strings"
 
@@ -43,7 +42,10 @@ func newMaxRetriesExhaustedLocked(ap *AgentProcess, maxRetries int) *maxRetriesE
 }
 
 func (s *Supervisor) handleMaxRetriesExhausted(ap *AgentProcess, info maxRetriesExhausted) {
-	log.Printf("[daemon] Agent %s: restart budget exhausted, entering error state", info.AgentName)
+	slog.Warn("agent restart budget exhausted; entering error state",
+		"worktree", info.AgentName,
+		"max_retries", info.MaxRetries,
+		"restart_count", info.RestartCount)
 	s.markControlPlaneAgentState(ap, domain.AgentStateError)
 	s.markAgentStoppedForExplicitResume(info.AgentName)
 	if info.TaskID == "" || s.IssueBackend == nil {
@@ -68,7 +70,7 @@ func (s *Supervisor) blockTaskAfterMaxRetries(info maxRetriesExhausted) {
 	status := "blocked"
 	assignee := info.AgentName
 
-	ctx, cancel := s.operationContext(claimOperationTimeout)
+	ctx, cancel := s.operationContext()
 	defer cancel()
 	if err := s.IssueBackend.Update(ctx, info.TaskID, backend.UpdateParams{
 		Status:   &status,
@@ -107,16 +109,27 @@ func maxRetriesExhaustedComment(info maxRetriesExhausted) string {
 }
 
 func isReplaceableTerminalAgent(ap *AgentProcess) bool {
-	if ap == nil || ap.Done == nil {
+	done, ok := pendingTerminalAgentDone(ap)
+	if !ok {
 		return false
 	}
 	select {
-	case <-ap.Done:
+	case <-done:
+		return true
 	default:
 		return false
+	}
+}
+
+func pendingTerminalAgentDone(ap *AgentProcess) (<-chan struct{}, bool) {
+	if ap == nil || ap.Done == nil {
+		return nil, false
 	}
 	ap.Mu.Lock()
 	reason := ap.StopReason
 	ap.Mu.Unlock()
-	return reason == StopReasonMaxRetries || reason == StopReasonFatalError
+	if reason != StopReasonMaxRetries && reason != StopReasonFatalError {
+		return nil, false
+	}
+	return ap.Done, true
 }

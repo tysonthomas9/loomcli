@@ -21,36 +21,38 @@ const backendUnavailableRecheckInterval = 30 * time.Second
 // and the classified error from the most recent exit.
 func (s *Supervisor) shouldRestart(ap *AgentProcess) bool {
 	maxRetries := s.getMaxRetries()
-	var exhausted *maxRetriesExhausted
 
 	ap.Mu.Lock()
+	shouldRestart, exhausted := s.shouldRestartLocked(ap, maxRetries)
+	ap.Mu.Unlock()
 
+	if exhausted != nil {
+		exhausted.Backend = s.GetEffectiveBackend(ap)
+		s.handleMaxRetriesExhausted(ap, *exhausted)
+	}
+	return shouldRestart
+}
+
+// shouldRestartLocked returns the restart decision and optional max-retry
+// exhaustion snapshot. Caller holds ap.Mu.
+func (s *Supervisor) shouldRestartLocked(ap *AgentProcess, maxRetries int) (bool, *maxRetriesExhausted) {
 	// Clean success (exit 0, no error): always restart, reset counters.
 	// Long runs (>1 minute) also reset primary backend.
 	if ap.LastExitCode == 0 && ap.LastError == nil {
-		ap.RestartCount = 0
-		ap.RateRetryCount = 0
-		ap.NoWorkCount = 0
-		ap.StopReason = ""
-		if time.Since(ap.LastStart) > time.Minute {
-			ap.CurrentBackendIdx = 0 // reset to primary backend
-		}
-		ap.Mu.Unlock()
-		return true
+		resetAfterCleanSuccessLocked(ap)
+		return true, nil
 	}
 
 	if ap.LastError != nil && ap.LastError.Class == agenterr.NoWork {
 		s.applyNoWorkRestart(ap)
-		ap.Mu.Unlock()
-		return true
+		return true, nil
 	}
 
 	// Backend unavailable (CLI binary not on PATH): wait without eroding the
 	// restart budget; recoverable once the binary returns.
 	if ap.LastError != nil && ap.LastError.Class == agenterr.BackendUnavailable {
 		s.applyBackendUnavailableRestart(ap)
-		ap.Mu.Unlock()
-		return true
+		return true, nil
 	}
 
 	// Fatal errors: stop immediately, no retries
@@ -59,19 +61,13 @@ func (s *Supervisor) shouldRestart(ap *AgentProcess) bool {
 			ap.Entry.Worktree, ap.LastError.Class)
 		ap.NoWorkCount = 0
 		ap.StopReason = StopReasonFatalError
-		ap.Mu.Unlock()
-		return false
+		return false, nil
 	}
 
 	// Rate-limited: unlimited retries (don't count toward max_retries)
 	if ap.LastError != nil && ap.LastError.Class == agenterr.RateLimited && s.getRateLimitNoCount() {
-		ap.RateRetryCount++
-		ap.NoWorkCount = 0
-		ap.StopReason = ""
-		log.Printf("[daemon] Agent %s: rate limited (retry %d, not counted toward max_retries)",
-			ap.Entry.Worktree, ap.RateRetryCount)
-		ap.Mu.Unlock()
-		return true
+		applyRateLimitedRestartLocked(ap)
+		return true, nil
 	}
 
 	// All other errors: count toward max_retries, then enter a terminal error
@@ -79,15 +75,29 @@ func (s *Supervisor) shouldRestart(ap *AgentProcess) bool {
 	// backend calls can block.
 	shouldRestart := s.applyGenericErrorRestart(ap, maxRetries)
 	if !shouldRestart && ap.StopReason == StopReasonMaxRetries {
-		exhausted = newMaxRetriesExhaustedLocked(ap, maxRetries)
+		return false, newMaxRetriesExhaustedLocked(ap, maxRetries)
 	}
-	ap.Mu.Unlock()
+	return shouldRestart, nil
+}
 
-	if exhausted != nil {
-		exhausted.Backend = s.GetEffectiveBackend(ap)
-		s.handleMaxRetriesExhausted(ap, *exhausted)
+// Caller holds ap.Mu.
+func resetAfterCleanSuccessLocked(ap *AgentProcess) {
+	ap.RestartCount = 0
+	ap.RateRetryCount = 0
+	ap.NoWorkCount = 0
+	ap.StopReason = ""
+	if time.Since(ap.LastStart) > time.Minute {
+		ap.CurrentBackendIdx = 0 // reset to primary backend
 	}
-	return shouldRestart
+}
+
+// Caller holds ap.Mu.
+func applyRateLimitedRestartLocked(ap *AgentProcess) {
+	ap.RateRetryCount++
+	ap.NoWorkCount = 0
+	ap.StopReason = ""
+	log.Printf("[daemon] Agent %s: rate limited (retry %d, not counted toward max_retries)",
+		ap.Entry.Worktree, ap.RateRetryCount)
 }
 
 // applyGenericErrorRestart handles a non-special error (not fatal, NoWork,
