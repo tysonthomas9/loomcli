@@ -8,6 +8,7 @@ import (
 	"fmt"
 
 	"github.com/olesho/harness-wrapper/pkg/discovery"
+
 	"github.com/tysonthomas9/loomcli/internal/cli/backends"
 )
 
