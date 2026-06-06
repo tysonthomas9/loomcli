@@ -23,6 +23,19 @@ const (
 	AgentStateBackendUnavailable AgentState = "backend_unavailable"
 )
 
+// AgentLiveStatus is a DERIVED, read-only liveness signal carried straight from
+// fleet-db's agent response (fleet-db computes it from the session+lease join;
+// see its ComputeLiveWork). loom does not derive it — it only passes it through.
+// Distinct from State, which is the coarse stored intent.
+type AgentLiveStatus string
+
+const (
+	// AgentLiveWorking means the agent has a live session (running + fresh lease).
+	AgentLiveWorking AgentLiveStatus = "working"
+	// AgentLiveIdle means no live session was found.
+	AgentLiveIdle AgentLiveStatus = "idle"
+)
+
 // Agent is a long-lived assignment of a Role to one or more Repos within
 // a Workspace. Distinct from a Worker (fleet-db's per-claim record); an
 // Agent persists across many task claims.
@@ -49,4 +62,18 @@ type Agent struct {
 	DesiredState     AgentDesiredState `json:"desired_state,omitempty"`
 	CreatedAt        time.Time         `json:"created_at"`
 	UpdatedAt        time.Time         `json:"updated_at"`
+
+	// LiveStatus, ActiveTaskID, and ActivePhase are DERIVED, read-only fields
+	// carried from fleet-db's agent response (computed there from the live
+	// session+lease join). They are never persisted; ActiveTaskID/ActivePhase
+	// are set only when LiveStatus == AgentLiveWorking.
+	LiveStatus   AgentLiveStatus `json:"live_status,omitempty"`
+	ActiveTaskID string          `json:"active_task_id,omitempty"`
+	ActivePhase  string          `json:"active_phase,omitempty"`
+
+	// LastErrorClass is a DERIVED, read-only field carried from fleet-db: the
+	// error_class of the agent's most recent terminal session when that run
+	// failed, surfaced only while the agent is idle. Lets the UI explain why a
+	// stalled agent stopped instead of showing a bare "agent missing".
+	LastErrorClass string `json:"last_error_class,omitempty"`
 }

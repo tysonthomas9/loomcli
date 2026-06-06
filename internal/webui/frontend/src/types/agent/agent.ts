@@ -253,3 +253,92 @@ export function parseLoomStatus(status: string): ParsedLoomStatus {
   // Unknown status - treat as ready
   return { type: "ready" };
 }
+
+/**
+ * Effective display status for an agent, preferring fleet-db's derived
+ * live_status.
+ *
+ * On serve-only deployments the lock-derived `status` stays "idle"/"ready" even
+ * while an agent is provably working, but fleet-db's live_status (carried on the
+ * monitor response, computed there from the session+lease join) knows the truth.
+ * When the raw status already encodes working/planning (daemon mode, often with a
+ * duration we want to keep) it is returned verbatim. Otherwise, when live_status
+ * is "working" *and* the lock-derived status is only idle-like (idle/ready/empty),
+ * a "working: <task>" / "planning: <task>" string is synthesized so the existing
+ * status parsing, labels, dot colors, and active-agent counters all reflect it
+ * without re-deriving liveness. A more specific lock-derived status
+ * (done/review/error/dirty/N changes) is NOT masked by live_status. Falls back to
+ * the raw status.
+ */
+export function effectiveAgentStatus(agent: LoomAgentStatus): string {
+  const raw = agent.status ?? "";
+  if (raw.startsWith("working:") || raw.startsWith("planning:")) {
+    return raw;
+  }
+  if (agent.live_status === "working" && isIdleLikeStatus(raw)) {
+    const planning = agent.active_phase === "planning" || agent.role === "plan";
+    const prefix = planning ? "planning" : "working";
+    return agent.active_task_id ? `${prefix}: ${agent.active_task_id}` : prefix;
+  }
+  return raw;
+}
+
+/**
+ * Whether a lock-derived status is "idle-like" — only idle/ready (and the
+ * empty/unknown string, which parseLoomStatus maps to "ready"). These are the
+ * statuses the fleet-db live_status override is allowed to replace; anything more
+ * specific (done/review/error/dirty/N changes) is left untouched so a meaningful
+ * badge is never masked by a (possibly stale) "working" liveness signal.
+ */
+function isIdleLikeStatus(raw: string): boolean {
+  const { type } = parseLoomStatus(raw);
+  return type === "idle" || type === "ready";
+}
+
+/**
+ * Whether an agent counts as actively working/planning for the active-agent
+ * counter. Shares effectiveAgentStatus + parseLoomStatus with the AgentCard badge
+ * so the count and the badge can never disagree — including a bare "working" with
+ * no task id, which the badge renders and this therefore also counts.
+ */
+export function isAgentActive(agent: LoomAgentStatus): boolean {
+  const { type } = parseLoomStatus(effectiveAgentStatus(agent));
+  return type === "working" || type === "planning";
+}
+
+/**
+ * The agent claiming a task, by task id.
+ *
+ * CONTRACT: active_task_id outranks current_task_id for liveness. active_task_id
+ * is fleet-db's session+lease-derived claim — set only when a FRESH lease + a
+ * running session exist (expired/zombie leases are skipped server-side), so it
+ * cannot be stale. current_task_id is LOCK-derived and can outlive the process
+ * (the "immortal lock" pathology: a dead agent's .agent.lock persists on disk).
+ * So when two DIFFERENT agents match — a live session-holder vs a stale
+ * lock-holder — the live one must win. Two ordered finds (active first) make the
+ * precedence deterministic regardless of array order; the original one-pass
+ * `find(current || active)` let array order decide. The current_task_id fallback
+ * covers the daemon path where fleet-db liveness wasn't computed (active absent).
+ *
+ * Single-claimant invariant: a loom task is claimed via a single lease/lock at a
+ * time, so at most one agent should match. If two ever held active_task_id === T
+ * (a lease-layer bug that shouldn't occur), the first by array order is returned;
+ * that inconsistency belongs surfaced elsewhere, not silently tie-broken here.
+ */
+export function resolveAgentForTask(
+  agents: readonly LoomAgentStatus[],
+  taskId: string,
+): LoomAgentStatus | undefined {
+  return (
+    agents.find((a) => a.active_task_id === taskId) ??
+    agents.find((a) => a.current_task_id === taskId)
+  );
+}
+
+/** The agent with the given name, or undefined. */
+export function resolveAgentByName(
+  agents: readonly LoomAgentStatus[],
+  name: string,
+): LoomAgentStatus | undefined {
+  return agents.find((a) => a.name === name);
+}

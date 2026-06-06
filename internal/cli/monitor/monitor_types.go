@@ -46,7 +46,22 @@ type AgentStatus struct {
 	Commits        []CommitDetail `json:"commits,omitempty"`          // recent commits ahead of integration branch
 	Changes        []FileChange   `json:"changes,omitempty"`          // uncommitted file changes
 	CurrentTaskID  string         `json:"current_task_id,omitempty"`  // task this daemon-managed agent has claimed; empty between tasks
-	LastActivityAt time.Time      `json:"last_activity_at,omitempty"` // most recent PTY-output observation from the agent's supervised backend; zero when not reported
+	LastActivityAt *time.Time     `json:"last_activity_at,omitempty"` // most recent PTY-output observation from the agent's supervised backend; nil when not reported (a zero time.Time would serialize as "0001-01-01T00:00:00Z" and the UI would render it as a bogus "last seen" age)
+	// LiveStatus/ActiveTaskID/ActivePhase are fleet-db's DERIVED liveness signal
+	// (computed there from the running-session+fresh-lease join), carried through
+	// from the store agent record — never re-derived here. LiveStatus is "working"
+	// or "idle"; when "working", ActiveTaskID/ActivePhase describe the live session.
+	// Empty when liveness was not computed (e.g. no fleet-db store). The store-backed
+	// serve path sets these so the UI shows a provably-working agent that the
+	// lock-derived Status would otherwise report "idle".
+	LiveStatus   string `json:"live_status,omitempty"`
+	ActiveTaskID string `json:"active_task_id,omitempty"`
+	ActivePhase  string `json:"active_phase,omitempty"`
+	// LastErrorClass is fleet-db's DERIVED error_class of the agent's most recent
+	// terminal session when that run failed, carried through from the store agent
+	// record (idle agents only). The UI uses it to explain a stalled idle agent
+	// instead of a bare "agent missing". Empty when not computed or last run ok.
+	LastErrorClass string `json:"last_error_class,omitempty"`
 }
 
 // TaskInfo represents a task with basic info
