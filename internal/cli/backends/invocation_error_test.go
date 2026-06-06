@@ -3,10 +3,13 @@ package backends
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
 	"github.com/olesho/harness-wrapper/pkg/wrapper"
+
+	"github.com/tysonthomas9/loomcli/internal/agenterr"
 )
 
 func TestWrapWrapperResult_StatusMapping(t *testing.T) {
@@ -121,6 +124,49 @@ func TestWrapWrapperResult_StatusMapping(t *testing.T) {
 				if !strings.Contains(invErr.OutputTail, sub) {
 					t.Errorf("OutputTail %q missing %q", invErr.OutputTail, sub)
 				}
+			}
+		})
+	}
+}
+
+// TestWrapInvocationError_PTYLaunchFailure asserts the LOOM contract that a
+// harness-wrapper PTY allocation/read failure (the ENOEXEC "exec format error"
+// seen when the backend binary is mid self-update) surfaces the stable
+// AgentLaunchFailedMarker and round-trips through the classifier as a retryable
+// SpawnFailure carrying the real reason — instead of the generic Unknown /
+// "unclassified error (exit code 1)" that previously hid the cause from the UI.
+func TestWrapInvocationError_PTYLaunchFailure(t *testing.T) {
+	for _, sentinel := range []error{wrapper.ErrPTYAllocation, wrapper.ErrPTYRead} {
+		t.Run(sentinel.Error(), func(t *testing.T) {
+			// Shape mirrors session.go: fmt.Errorf("%w: %v", ErrPTYAllocation, osErr).
+			runErr := fmt.Errorf("%w: fork/exec /path/claude: exec format error", sentinel)
+
+			err := wrapInvocationError(runErr, "")
+			var invErr *InvocationError
+			if !errors.As(err, &invErr) {
+				t.Fatalf("err: got %T, want *InvocationError", err)
+			}
+			if invErr.ExitCode != 126 {
+				t.Errorf("ExitCode: got %d, want 126", invErr.ExitCode)
+			}
+			if !strings.Contains(invErr.OutputTail, agenterr.AgentLaunchFailedMarker) {
+				t.Errorf("OutputTail %q missing marker %q", invErr.OutputTail, agenterr.AgentLaunchFailedMarker)
+			}
+			if !strings.Contains(invErr.OutputTail, "exec format error") {
+				t.Errorf("OutputTail %q dropped underlying reason", invErr.OutputTail)
+			}
+
+			// End-to-end: the classifier must map the marker to a retryable
+			// SpawnFailure, not Unknown.
+			ae := agenterr.ClassifyFromOutput(invErr.OutputTail, invErr.ExitCode, "claude")
+			if ae.Class != agenterr.SpawnFailure {
+				t.Errorf("classified Class: got %v, want SpawnFailure", ae.Class)
+			}
+			if !ae.Class.IsRetryable() {
+				t.Error("SpawnFailure should be retryable")
+			}
+			if strings.Contains(ae.Message, "unclassified") {
+				t.Errorf("Message %q should be specific, not the generic exit-code fallback", ae.Message)
 			}
 		})
 	}
