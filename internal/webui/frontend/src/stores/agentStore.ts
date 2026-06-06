@@ -8,6 +8,7 @@
 import { createStore, type StoreApi } from "zustand/vanilla";
 
 import { fetchStatus } from "../api/agents";
+import { resolveAgentByName } from "../types";
 import type {
   LoomAgentStatus,
   LoomTaskSummary,
@@ -468,7 +469,7 @@ export function createAgentStore(
     },
 
     getAgentByName(name: string): LoomAgentStatus | undefined {
-      return get().agents.find((a) => a.name === name);
+      return resolveAgentByName(get().agents, name);
     },
 
     reset(): void {

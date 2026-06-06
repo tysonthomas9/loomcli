@@ -352,8 +352,9 @@ func TestDefaultCodexNonInteractiveInvoker_UsesWrapperWithCodexHarness(t *testin
 	if len(calls) != 1 || calls[0].Harness != "codex" {
 		t.Fatalf("wrapperRun calls: %+v, want one call with Harness=codex", calls)
 	}
-	if !containsArg(calls[0].Args, "exec") || !containsArg(calls[0].Args, "--json") {
-		t.Errorf("codex args: got %v, want to contain 'exec' and '--json'", calls[0].Args)
+	wantArgs := []string{"exec", "--json", "--dangerously-bypass-approvals-and-sandbox", "prompt body"}
+	if !equalStrings(calls[0].Args, wantArgs) {
+		t.Errorf("codex args: got %v, want %v", calls[0].Args, wantArgs)
 	}
 	if !containsArg(calls[0].Args, "prompt body") {
 		t.Errorf("codex args: got %v, want final positional prompt", calls[0].Args)

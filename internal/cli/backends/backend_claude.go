@@ -34,10 +34,14 @@ var claudeProfileCaps = sync.OnceValue(func() hwharness.ResolvedProfile {
 	return p.Resolve(hwharness.ResolveContext{})
 })
 
-// DefaultMaxBudgetUSD is the default per-session budget ceiling for non-interactive
-// Claude invocations. Analysis of 287 sessions shows median session cost well under $2;
-// $5 provides 2.5x headroom to prevent mid-response truncation.
-const DefaultMaxBudgetUSD = 5.0
+// DefaultMaxBudgetUSD is the default per-session spend ceiling for non-interactive
+// Claude invocations, passed through to the CLI as --max-budget-usd. It is a safety
+// rail against runaway sessions, not a target: median session cost is well under $2,
+// so tasks that finish normally are unaffected. $50 gives long-running tasks ample
+// headroom to finish — including their own commit/close finalize steps — instead of
+// truncating mid-task when the budget is exhausted. Override per-invocation with
+// LOOM_MAX_BUDGET_USD (or per-role max_budget_usd); set it to 0 to opt out.
+const DefaultMaxBudgetUSD = 50.0
 
 // resolveMaxBudgetUSD reads LOOM_MAX_BUDGET_USD from the environment and returns the
 // value to pass as --max-budget-usd. Returns "" if the flag should be omitted (opt-out).

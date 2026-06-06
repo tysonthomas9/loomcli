@@ -50,6 +50,16 @@ func wrapInvocationError(err error, outputTail string) error {
 		return binaryNotFoundInvocationError(err.Error(), outputTail)
 	}
 
+	// A PTY allocation/read failure means the wrapper could not launch the
+	// backend process at all. In practice this is the ENOEXEC "exec format
+	// error" seen when the backend binary is mid self-update and momentarily
+	// not a valid executable. Mark it so the outer classifier records a
+	// retryable SpawnFailure with the real reason, instead of a generic
+	// Unknown that hides the cause from the operator and the Kanban UI.
+	if errors.Is(err, wrapper.ErrPTYAllocation) || errors.Is(err, wrapper.ErrPTYRead) {
+		return agentLaunchFailedInvocationError(err.Error(), outputTail)
+	}
+
 	exitCode := 1
 	var exitErr *exec.ExitError
 	if errors.As(err, &exitErr) {
@@ -97,6 +107,34 @@ func binaryNotFoundInvocationError(reason, outputTail string) *InvocationError {
 		// itself exits with 1 via cobra; the marker text is the primary
 		// signal for the outer classifier).
 		ExitCode: 127,
+	}
+}
+
+// agentLaunchFailedInvocationError returns the canonical InvocationError for
+// the wrapper-detected "could not launch the backend process" case (PTY
+// allocation/read failure, which surfaces the OS-level ENOEXEC "exec format
+// error" when the backend binary is being replaced). Mirrors
+// binaryNotFoundInvocationError so the marker text is consistent and the outer
+// classifier maps it to a retryable SpawnFailure with the real reason.
+func agentLaunchFailedInvocationError(reason, outputTail string) *InvocationError {
+	msg := strings.TrimSpace(reason)
+	if msg == "" {
+		msg = "agent process failed to launch"
+	}
+	combined := agenterr.AgentLaunchFailedMarker + ": " + msg
+	evidence := strings.TrimSpace(outputTail)
+	if evidence == "" {
+		evidence = combined
+	} else if !strings.Contains(evidence, combined) {
+		evidence = combined + "\n" + evidence
+	}
+	return &InvocationError{
+		Err: errors.New(combined),
+		// 126 is the Unix convention for "command found but not executable"
+		// (exec format error / not executable), which matches a launch
+		// failure where the binary exists but cannot be exec'd.
+		OutputTail: evidence,
+		ExitCode:   126,
 	}
 }
 
