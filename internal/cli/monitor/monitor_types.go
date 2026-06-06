@@ -46,7 +46,7 @@ type AgentStatus struct {
 	Commits        []CommitDetail `json:"commits,omitempty"`          // recent commits ahead of integration branch
 	Changes        []FileChange   `json:"changes,omitempty"`          // uncommitted file changes
 	CurrentTaskID  string         `json:"current_task_id,omitempty"`  // task this daemon-managed agent has claimed; empty between tasks
-	LastActivityAt time.Time      `json:"last_activity_at,omitempty"` // most recent PTY-output observation from the agent's supervised backend; zero when not reported
+	LastActivityAt *time.Time     `json:"last_activity_at,omitempty"` // most recent PTY-output observation from the agent's supervised backend; nil when not reported (a zero time.Time would serialize as "0001-01-01T00:00:00Z" and the UI would render it as a bogus "last seen" age)
 	// LiveStatus/ActiveTaskID/ActivePhase are fleet-db's DERIVED liveness signal
 	// (computed there from the running-session+fresh-lease join), carried through
 	// from the store agent record — never re-derived here. LiveStatus is "working"
