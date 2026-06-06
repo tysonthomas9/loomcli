@@ -178,14 +178,18 @@ func (s *streamReadCloser) Close() error {
 
 // ContinueSession resumes an interactive Claude session by session ID.
 func (c *ClaudeBackend) ContinueSession(workDir, sessionID, agentName string) error {
-	cmd := exec.Command("claude", "--resume", "--session-id", sessionID, //nolint:gosec // G204: intentional subprocess launch for claude CLI
-		"--dangerously-skip-permissions")
+	cmd := exec.Command("claude", buildClaudeContinueSessionArgs(sessionID)...) //nolint:gosec // G204: intentional subprocess launch for claude CLI
 	cmd.Dir = workDir
 	cmd.Env = buildClaudeEnv(workDir, agentName)
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	return cmd.Run()
+}
+
+func buildClaudeContinueSessionArgs(sessionID string) []string {
+	args := claudeResumeArgs(sessionID)
+	return append(args, "--dangerously-skip-permissions")
 }
 
 // LastSessionID returns the most recent session ID. Returns "" because Claude
@@ -239,7 +243,7 @@ func buildClaudeEnv(workDir, agentName string) []string {
 }
 
 // buildClaudeNonInteractiveArgs returns the argument list for a
-// non-interactive Claude run. resumeSessionID prepends --resume flags.
+// non-interactive Claude run. resumeSessionID prepends wrapper-owned resume args.
 // When prompt is non-empty, it is appended as the final positional argument:
 // under the harness wrapper's PTY, claude's stdin looks like a TTY and `-p`
 // then requires the prompt as an argument rather than over stdin. The legacy
@@ -250,9 +254,7 @@ func buildClaudeNonInteractiveArgs(resumeSessionID, prompt string) []string {
 	// Resume prefix comes from the harness profile (pkg/harness/claude), not a
 	// hardcoded literal — so resume is owned in one place across harnesses.
 	if resumeSessionID != "" {
-		if caps := claudeProfileCaps(); caps.Resume != nil {
-			args = append(args, caps.Resume.ResumeArgs(resumeSessionID)...)
-		}
+		args = append(args, claudeResumeArgs(resumeSessionID)...)
 	}
 	args = append(args, "-p", "--verbose", "--output-format", "stream-json",
 		"--dangerously-skip-permissions")
@@ -265,8 +267,15 @@ func buildClaudeNonInteractiveArgs(resumeSessionID, prompt string) []string {
 	return args
 }
 
+func claudeResumeArgs(sessionID string) []string {
+	if caps := claudeProfileCaps(); caps.Resume != nil {
+		return caps.Resume.ResumeArgs(sessionID)
+	}
+	return []string{"--resume", sessionID}
+}
+
 // buildClaudeNonInteractiveCmd constructs the exec.Cmd for non-interactive Claude invocation.
-// When resumeSessionID is non-empty, the command includes --resume --session-id flags.
+// When resumeSessionID is non-empty, the command includes wrapper-owned resume args.
 // Appends --max-budget-usd when resolveMaxBudgetUSD returns a non-empty value.
 // The prompt is delivered via stdin by the caller (cmd.StdinPipe), not argv,
 // since this path does not go through the wrapper's PTY.

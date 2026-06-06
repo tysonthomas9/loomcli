@@ -4,10 +4,17 @@
 // fanout and file count under the project's per-package gates.
 package backendcheck
 
-import "github.com/olesho/harness-wrapper/pkg/discovery"
+import (
+	"fmt"
 
-// CheckBackend reports whether a named backend's CLI is installed on
-// PATH and, when a version probe is registered, at what version.
+	"github.com/olesho/harness-wrapper/pkg/discovery"
+	"github.com/tysonthomas9/loomcli/internal/cli/backends"
+)
+
+// CheckBackend reports whether a named backend is installed and, when a
+// version probe is registered, at what version. Registered Loom backends
+// with health checks are authoritative; raw CLI names fall back to
+// harness-wrapper PATH discovery.
 //
 // Production code reads CheckBackend; tests reassign it to inject a
 // fake without spawning subprocesses or mutating PATH:
@@ -15,4 +22,25 @@ import "github.com/olesho/harness-wrapper/pkg/discovery"
 //	prev := backendcheck.CheckBackend
 //	backendcheck.CheckBackend = func(string) (discovery.Info, error) { ... }
 //	t.Cleanup(func() { backendcheck.CheckBackend = prev })
-var CheckBackend = discovery.Lookup
+var CheckBackend = lookupBackend
+
+func lookupBackend(name string) (discovery.Info, error) {
+	if hs, ok := backends.CheckBackendHealth(name); ok {
+		info := discovery.Info{
+			Name:              name,
+			Binary:            name,
+			Installed:         hs.Installed,
+			DetectedVersion:   hs.Version,
+			VersionMatchesPin: true,
+		}
+		if !hs.Installed {
+			if hs.Message != "" {
+				info.InstallHint = hs.Message
+			} else {
+				info.InstallHint = fmt.Sprintf("%q not on PATH", name)
+			}
+		}
+		return info, nil
+	}
+	return discovery.Lookup(name)
+}
