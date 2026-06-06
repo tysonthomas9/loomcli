@@ -69,7 +69,15 @@ type TaskExecutor interface {
 	ExecuteTask(ctx context.Context, req TaskExecRequest) (TaskExecResult, error)
 }
 
+type TaskProviderPreflighter interface {
+	PreflightTaskProvider(ctx context.Context, opts TaskRunRequestOptions) (TaskRunRequestOptions, error)
+}
+
 type LocalTaskExecutor struct{}
+
+func (LocalTaskExecutor) PreflightTaskProvider(_ context.Context, opts TaskRunRequestOptions) (TaskRunRequestOptions, error) {
+	return resolveTaskProviderProfile(opts, false)
+}
 
 func (LocalTaskExecutor) ExecuteTask(_ context.Context, req TaskExecRequest) (TaskExecResult, error) {
 	metadata := map[string]string{
@@ -152,6 +160,16 @@ func RequestTaskRunWithResult(ctx context.Context, s store.Store, opts TaskRunRe
 	if opts.WorkspaceKey == "" || opts.DriverRunID == "" || opts.TaskID == "" {
 		return nil, fmt.Errorf("workspace key, driver run id, and task id required: %w", domain.ErrInvalid)
 	}
+	if executor == nil {
+		executor = LocalTaskExecutor{}
+	}
+	if preflighter, ok := executor.(TaskProviderPreflighter); ok {
+		resolved, err := preflighter.PreflightTaskProvider(ctx, opts)
+		if err != nil {
+			return nil, fmt.Errorf("provider profile preflight: %w", err)
+		}
+		opts = resolved
+	}
 	parent, err := s.DriverRuns().Get(ctx, opts.WorkspaceKey, opts.DriverRunID)
 	if err != nil {
 		return nil, fmt.Errorf("get parent driver run: %w", err)
@@ -229,9 +247,6 @@ func RequestTaskRunWithResult(ctx context.Context, s store.Store, opts TaskRunRe
 		}); err != nil {
 			return nil, fmt.Errorf("link driver step: %w", err)
 		}
-	}
-	if executor == nil {
-		executor = LocalTaskExecutor{}
 	}
 	hbCtx, stopHeartbeat := context.WithCancel(ctx)
 	defer stopHeartbeat()
@@ -429,8 +444,52 @@ func normalizeArtifactIDs(ids []string) []string {
 
 func taskRunSupportedProviders(opts TaskRunRequestOptions) []string {
 	values := append([]string(nil), opts.SupportedProviders...)
-	values = append(values, opts.ProviderProfile, opts.SandboxPlacement.Provider)
+	values = append(values, opts.SandboxPlacement.Provider)
 	return normalizeStringList(values)
+}
+
+func resolveTaskProviderProfile(opts TaskRunRequestOptions, hostBridgeAvailable bool) (TaskRunRequestOptions, error) {
+	profile := strings.TrimSpace(opts.ProviderProfile)
+	opts.ProviderProfile = profile
+	switch profile {
+	case "local-noop", "noop":
+		opts.ProviderProfile = "local-noop"
+		if opts.SandboxPlacement.Provider == "" {
+			opts.SandboxPlacement.Provider = "local-noop"
+		}
+		opts.SupportedProviders = append(opts.SupportedProviders, "local-noop", "noop")
+		return opts, nil
+	case "flue-daytona":
+		if !hostBridgeAvailable {
+			return opts, fmt.Errorf("provider profile %q requires a configured task runner command: %w", profile, domain.ErrInvalid)
+		}
+		if opts.RunnerPlacement.Provider == "" {
+			opts.RunnerPlacement.Provider = "flue"
+		}
+		if opts.SandboxPlacement.Provider == "" {
+			opts.SandboxPlacement.Provider = "daytona"
+		}
+		opts.SupportedProviders = append(opts.SupportedProviders, "daytona")
+		return opts, nil
+	case "":
+		return opts, fmt.Errorf("provider profile required: %w", domain.ErrInvalid)
+	default:
+		if !hostBridgeAvailable {
+			return opts, fmt.Errorf("provider profile %q is not supported by local exec-task: %w", profile, domain.ErrInvalid)
+		}
+		providers := normalizeStringList(opts.SupportedProviders)
+		if opts.SandboxPlacement.Provider == "" {
+			switch len(providers) {
+			case 0:
+				return opts, fmt.Errorf("provider profile %q requires --sandbox-provider or --supported-provider: %w", profile, domain.ErrInvalid)
+			case 1:
+				opts.SandboxPlacement.Provider = providers[0]
+			default:
+				return opts, fmt.Errorf("provider profile %q has multiple supported providers; --sandbox-provider is required: %w", profile, domain.ErrInvalid)
+			}
+		}
+		return opts, nil
+	}
 }
 
 func normalizeStringList(values []string) []string {

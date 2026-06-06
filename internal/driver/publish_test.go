@@ -219,9 +219,22 @@ if [ -z "$out" ]; then
 fi
 mkdir -p "$out"
 cat > "$out/server.mjs" <<'EOS'
+const leaked = [
+  'LOOM_FLEET_DB_URL',
+  'LOOM_FLEET_DB_API_KEY',
+  'LOOM_TASK_RUN_LEASE_TOKEN',
+  'OPENAI_API_KEY',
+  'AWS_SECRET_ACCESS_KEY',
+  'GITHUB_TOKEN',
+].filter((key) => process.env[key]);
+
 if (process.env.FLUE_MODE === 'local' && process.send) {
   process.send({ version: 1, type: 'ready', target: 'workflow', name: process.env.FLUE_CLI_NAME || 'complete-epic' });
   process.on('message', (message) => {
+    if (leaked.length) {
+      process.send({ version: 1, type: 'result', requestId: message.requestId, result: { status: 'failed', summary: 'leaked env: ' + leaked.join(','), errorClass: 'env_leak' } }, () => process.exit(0));
+      return;
+    }
     process.send({ version: 1, type: 'result', requestId: message.requestId, result: { status: 'completed', summary: 'fake flue' } }, () => process.exit(0));
   });
 } else {

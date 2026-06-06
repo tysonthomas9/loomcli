@@ -129,6 +129,13 @@ func TestNodeRunnerRunsBuiltFlueServer(t *testing.T) {
 	if _, err := exec.LookPath("node"); err != nil {
 		t.Skipf("node not available: %v", err)
 	}
+	t.Setenv("LOOM_FLEET_DB_URL", "https://fleet.invalid")
+	t.Setenv("LOOM_FLEET_DB_API_KEY", "broad-secret")
+	t.Setenv("LOOM_TASK_RUN_LEASE_TOKEN", "task-run-token")
+	t.Setenv("OPENAI_API_KEY", "model-secret")
+	t.Setenv("AWS_SECRET_ACCESS_KEY", "aws-secret")
+	t.Setenv("GITHUB_TOKEN", "github-secret")
+
 	ctx := context.Background()
 	root := t.TempDir()
 	st := memstore.New()

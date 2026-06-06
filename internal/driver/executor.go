@@ -451,7 +451,7 @@ func (r NodeRunner) Run(ctx context.Context, req RunRequest) (RunResult, error) 
 	if err != nil {
 		return RunResult{}, err
 	}
-	env := append(os.Environ(),
+	env := append(driverRuntimeBaseEnv(os.Environ()),
 		"LOOM_DRIVER_WORKSPACE="+req.Run.WorkspaceKey,
 		"LOOM_DRIVER_WORKFLOW="+req.WorkflowPath,
 		"LOOM_DRIVER_ENTRYPOINT="+entrypoint(req),
@@ -515,7 +515,7 @@ func (r NodeRunner) runBuiltFlueServer(ctx context.Context, req RunRequest, node
 	if err != nil {
 		return RunResult{}, err
 	}
-	env := append(os.Environ(),
+	env := append(driverRuntimeBaseEnv(os.Environ()),
 		"LOOM_DRIVER_WORKSPACE="+req.Run.WorkspaceKey,
 		"LOOM_DRIVER_RUN_ID="+req.Run.RunID,
 		"LOOM_DRIVER_NODE_ID="+req.Run.NodeID,

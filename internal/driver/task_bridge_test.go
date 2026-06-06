@@ -18,6 +18,9 @@ func TestHostBridgeTaskExecutorAppliesPatchUploadsAndFinalizesArtifact(t *testin
 	t.Setenv("LOOM_FLEET_DB_URL", "https://fleet.invalid")
 	t.Setenv("LOOM_FLEET_DB_API_KEY", "broad-secret")
 	t.Setenv("LOOM_TASK_RUN_LEASE_TOKEN", "task-run-token")
+	t.Setenv("OPENAI_API_KEY", "model-secret")
+	t.Setenv("AWS_SECRET_ACCESS_KEY", "aws-secret")
+	t.Setenv("GITHUB_TOKEN", "github-secret")
 	st := memstore.New()
 	repo := newPatchBackRepo(t)
 	base := repo.commitFile("file.txt", "old\n", "base")
@@ -166,7 +169,7 @@ func TestHostBridgeTaskExecutorHelperProcess(t *testing.T) {
 	if os.Getenv("LOOM_HOST_BRIDGE_HELPER") != "1" {
 		return
 	}
-	for _, key := range []string{"LOOM_FLEET_DB_URL", "LOOM_FLEET_DB_API_KEY", "LOOM_FLEET_DB_ACTOR", "LOOM_TASK_RUN_LEASE_TOKEN", "LOOM_RUNNER_LEASE_TOKEN"} {
+	for _, key := range []string{"LOOM_FLEET_DB_URL", "LOOM_FLEET_DB_API_KEY", "LOOM_FLEET_DB_ACTOR", "LOOM_TASK_RUN_LEASE_TOKEN", "LOOM_RUNNER_LEASE_TOKEN", "OPENAI_API_KEY", "AWS_SECRET_ACCESS_KEY", "GITHUB_TOKEN"} {
 		if os.Getenv(key) != "" {
 			t.Fatalf("%s leaked into task runner env", key)
 		}

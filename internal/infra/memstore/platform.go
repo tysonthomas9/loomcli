@@ -1171,6 +1171,9 @@ func (s *taskRunStore) Finish(_ context.Context, ws, taskRunID string, finish st
 			return nil, fmt.Errorf("task run %q in workspace %q: %w", taskRunID, ws, domain.ErrNotOwner)
 		}
 	}
+	if taskRunRequiresCloudSafeArtifactsMem(run) && !taskRunArtifactsRefCloudSafeForCompletionMem(finish.ArtifactsRef) {
+		return nil, fmt.Errorf("task run %q in workspace %q: %w", taskRunID, ws, domain.ErrInvalidTransition)
+	}
 	now := finish.FinishedAt
 	if now.IsZero() {
 		now = time.Now().UTC()
@@ -1262,6 +1265,9 @@ func (s *taskRunStore) Complete(ctx context.Context, ws, taskRunID string, compl
 			return nil, fmt.Errorf("task run %q in workspace %q: %w", taskRunID, ws, domain.ErrNotOwner)
 		}
 	}
+	if taskRunRequiresCloudSafeArtifactsMem(run) && !taskRunArtifactsRefCloudSafeForCompletionMem(complete.ArtifactsRef) {
+		return nil, fmt.Errorf("task run %q in workspace %q: %w", taskRunID, ws, domain.ErrInvalidTransition)
+	}
 	if err := s.validateCompletionArtifactsLocked(ctx, ws, run, complete.RequiredArtifactIDs); err != nil {
 		return nil, err
 	}
@@ -1309,6 +1315,9 @@ func (s *taskRunStore) validateCompletionArtifactsLocked(ctx context.Context, ws
 		if !artifactReadyForTaskRunCompletionMem(artifact) {
 			return fmt.Errorf("artifact %q in workspace %q: %w", artifact.ArtifactID, ws, domain.ErrInvalidTransition)
 		}
+		if taskRunRequiresCloudSafeArtifactsMem(run) && !artifactCloudSafeForTaskRunCompletionMem(artifact) {
+			return fmt.Errorf("artifact %q in workspace %q: %w", artifact.ArtifactID, ws, domain.ErrInvalidTransition)
+		}
 	}
 	return nil
 }
@@ -1325,6 +1334,52 @@ func artifactReadyForTaskRunCompletionMem(artifact *domain.Artifact) bool {
 		return false
 	}
 	return strings.TrimSpace(artifact.ContentHash) != "" || strings.TrimSpace(artifact.Checksum) != ""
+}
+
+func taskRunRequiresCloudSafeArtifactsMem(run *domain.TaskRun) bool {
+	if run == nil {
+		return false
+	}
+	switch strings.ToLower(strings.TrimSpace(run.SandboxPlacement.Provider)) {
+	case "", "local", "local-noop", "noop":
+		return false
+	default:
+		return true
+	}
+}
+
+func artifactCloudSafeForTaskRunCompletionMem(artifact *domain.Artifact) bool {
+	if artifact == nil {
+		return false
+	}
+	return taskRunArtifactURICloudSafeForCompletionMem(artifact.URI)
+}
+
+func taskRunArtifactsRefCloudSafeForCompletionMem(artifactsRef string) bool {
+	artifactsRef = strings.TrimSpace(artifactsRef)
+	if artifactsRef == "" {
+		return true
+	}
+	return taskRunArtifactURICloudSafeForCompletionMem(artifactsRef)
+}
+
+func taskRunArtifactURICloudSafeForCompletionMem(uri string) bool {
+	uri = strings.TrimSpace(uri)
+	if uri == "" {
+		return false
+	}
+	scheme, _, ok := strings.Cut(uri, ":")
+	if !ok || strings.TrimSpace(scheme) == "" {
+		return false
+	}
+	switch strings.ToLower(strings.TrimSpace(scheme)) {
+	case "artifact", "artifacts", "mem", "s3", "gs", "https":
+		return true
+	case "file", "local", "daytona":
+		return false
+	default:
+		return false
+	}
 }
 
 func taskRunUsageValuesValidMem(inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens int64, estimatedCostUSD float64) bool {

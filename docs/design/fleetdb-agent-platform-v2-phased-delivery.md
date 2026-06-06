@@ -41,17 +41,39 @@ closed the critical early-platform gaps:
 - FleetDB stale `TaskRun` recovery re-checks Redis heartbeats immediately before
   failing a run, which prevents a live heartbeat after the stale scan from being
   overwritten by recovery.
+- Loom now preflights `providerProfile` before creating a child `TaskRun`.
+  Built-in noop profiles stay local, `flue-daytona` maps to explicit Flue runner
+  and Daytona sandbox placement when a host task-runner command is configured,
+  and unsupported/local profiles fail before a child attempt is persisted.
+- FleetDB now exposes a registered trigger-route ingress path that resolves an
+  enabled `TriggerBinding` by `route_key`, records a `TriggerEvent`, queues the
+  pinned `DriverRun`, and records a dispatched `TriggerDelivery`. The existing
+  epic-run endpoint shares this dispatcher.
+- Cloud/non-local `TaskRun` completion now rejects required artifacts with local
+  `file://`, `local:`, or Daytona-local URI schemes. Redis, Postgres, and Loom
+  memstore paths still allow local artifacts for local/noop runs but require
+  server-visible artifact refs for non-local sandbox providers.
+- Loom driver and host task-runner subprocesses now start from a scoped base
+  environment instead of inheriting the full parent process environment. Broad
+  FleetDB, model-provider, cloud-provider, GitHub, token, password, secret, and
+  git-config credentials are stripped before per-run protocol variables are
+  appended.
 
 Known remaining validation:
 
 - Run a real local Flue toolchain smoke test once matching `flue` CLI
   dependencies are installed locally. The current coverage uses deterministic
   fake Flue builders and built-server runner tests.
-- Full V2 cloud readiness remains open: provider profile policy mapping,
-  cloud worker placement/capacity beyond the local executor loop, trigger
-  provider ingestion, scoped cloud credentials/artifacts, UI/ops surfaces, and
-  phase-level end-to-end acceptance still need dedicated implementation and
-  validation.
+- Full V2 cloud readiness remains open: provider-specific runtime adapters
+  beyond the initial preflight mapping, cloud worker placement/capacity beyond
+  the local executor loop, webhook
+  signature/filter/schedule providers beyond generic route ingress, scoped
+  per-run credential minting, object-store upload backend integration, UI/ops
+  surfaces, and phase-level end-to-end acceptance still need dedicated
+  implementation and validation.
+- Because broad FleetDB credentials are now stripped from driver subprocesses,
+  cloud-mode driver code still needs an explicit per-run FleetDB URL/token
+  handoff before child CLI calls can safely target the same FleetDB instance.
 
 ## Purpose
 

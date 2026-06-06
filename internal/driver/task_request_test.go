@@ -147,10 +147,10 @@ func TestRequestTaskRunCompatibilityWrapperReturnsRun(t *testing.T) {
 	}
 }
 
-func TestRequestTaskRunUnsupportedProviderRecordsFailedChild(t *testing.T) {
+func TestRequestTaskRunUnsupportedProviderFailsBeforeChildCreation(t *testing.T) {
 	ctx, st, run := setupRunningDriverRun(t)
 
-	final, err := RequestTaskRun(ctx, st, TaskRunRequestOptions{
+	_, err := RequestTaskRun(ctx, st, TaskRunRequestOptions{
 		WorkspaceKey:    "TEST",
 		DriverRunID:     run.RunID,
 		TaskRunID:       "task-run-unsupported",
@@ -160,17 +160,15 @@ func TestRequestTaskRunUnsupportedProviderRecordsFailedChild(t *testing.T) {
 		ParentLeaseID:   run.LeaseID,
 		ParentFence:     run.FencingToken,
 	}, LocalTaskExecutor{})
+	if !errors.Is(err, domain.ErrInvalid) {
+		t.Fatalf("RequestTaskRun unsupported provider err = %v, want ErrInvalid", err)
+	}
+	children, err := st.TaskRuns().List(ctx, "TEST", store.TaskRunFilter{DriverRunID: run.RunID})
 	if err != nil {
-		t.Fatalf("RequestTaskRun unsupported provider: %v", err)
+		t.Fatalf("List children: %v", err)
 	}
-	if final.Status != domain.TaskRunFailed || final.ErrorClass != "provider_unsupported" {
-		t.Fatalf("final = %+v, want failed provider_unsupported", final)
-	}
-	if final.ExitCode == nil || *final.ExitCode != 2 {
-		t.Fatalf("exit code = %v, want 2", final.ExitCode)
-	}
-	if final.ErrorMessage == "" {
-		t.Fatal("unsupported provider did not record an error message")
+	if len(children) != 0 {
+		t.Fatalf("children = %+v, want none for rejected provider", children)
 	}
 	parent, err := st.DriverRuns().Get(ctx, "TEST", run.RunID)
 	if err != nil {
@@ -178,6 +176,80 @@ func TestRequestTaskRunUnsupportedProviderRecordsFailedChild(t *testing.T) {
 	}
 	if parent.Status != domain.DriverRunRunning {
 		t.Fatalf("parent status = %s, want still running", parent.Status)
+	}
+}
+
+func TestRequestTaskRunHostBridgeMapsFlueDaytonaBeforeClaim(t *testing.T) {
+	ctx, st, run := setupRunningDriverRun(t)
+	executor := HostBridgeTaskExecutor{
+		Command: []string{"sh", "-c", "printf '%s\n' '{\"status\":\"completed\",\"exit_code\":0}'"},
+	}
+
+	final, err := RequestTaskRun(ctx, st, TaskRunRequestOptions{
+		WorkspaceKey:    "TEST",
+		DriverRunID:     run.RunID,
+		TaskRunID:       "task-run-flue-daytona",
+		TaskID:          "TEST-2",
+		ProviderProfile: "flue-daytona",
+		ParentNodeID:    run.NodeID,
+		ParentLeaseID:   run.LeaseID,
+		ParentFence:     run.FencingToken,
+	}, executor)
+	if err != nil {
+		t.Fatalf("RequestTaskRun host bridge: %v", err)
+	}
+	if final.Status != domain.TaskRunCompleted || final.ProviderProfile != "flue-daytona" {
+		t.Fatalf("final = %+v, want completed flue-daytona run", final)
+	}
+	if final.RunnerPlacement.Provider != "flue" || final.SandboxPlacement.Provider != "daytona" {
+		t.Fatalf("placement = %+v/%+v, want flue/daytona", final.RunnerPlacement, final.SandboxPlacement)
+	}
+}
+
+func TestRequestTaskRunHostBridgeCustomProviderRequiresExplicitBackend(t *testing.T) {
+	ctx, st, run := setupRunningDriverRun(t)
+	executor := HostBridgeTaskExecutor{
+		Command: []string{"sh", "-c", "printf '%s\n' '{\"status\":\"completed\",\"exit_code\":0}'"},
+	}
+
+	if _, err := RequestTaskRun(ctx, st, TaskRunRequestOptions{
+		WorkspaceKey:    "TEST",
+		DriverRunID:     run.RunID,
+		TaskRunID:       "task-run-custom-missing-backend",
+		TaskID:          "TEST-2",
+		ProviderProfile: "custom-cloud",
+		ParentNodeID:    run.NodeID,
+		ParentLeaseID:   run.LeaseID,
+		ParentFence:     run.FencingToken,
+	}, executor); !errors.Is(err, domain.ErrInvalid) {
+		t.Fatalf("RequestTaskRun custom missing backend err = %v, want ErrInvalid", err)
+	}
+	children, err := st.TaskRuns().List(ctx, "TEST", store.TaskRunFilter{DriverRunID: run.RunID})
+	if err != nil {
+		t.Fatalf("List children: %v", err)
+	}
+	if len(children) != 0 {
+		t.Fatalf("children = %+v, want none for rejected custom provider", children)
+	}
+
+	final, err := RequestTaskRun(ctx, st, TaskRunRequestOptions{
+		WorkspaceKey:       "TEST",
+		DriverRunID:        run.RunID,
+		TaskRunID:          "task-run-custom",
+		TaskID:             "TEST-2",
+		ProviderProfile:    "custom-cloud",
+		SupportedProviders: []string{"remote-sandbox"},
+		ParentNodeID:       run.NodeID,
+		ParentLeaseID:      run.LeaseID,
+		ParentFence:        run.FencingToken,
+		RunnerPlacement:    domain.TaskRunPlacement{Provider: "custom-runner"},
+		SandboxPlacement:   domain.TaskRunPlacement{CWD: "/workspace"},
+	}, executor)
+	if err != nil {
+		t.Fatalf("RequestTaskRun custom provider: %v", err)
+	}
+	if final.Status != domain.TaskRunCompleted || final.SandboxPlacement.Provider != "remote-sandbox" {
+		t.Fatalf("final = %+v, want completed with remote-sandbox placement", final)
 	}
 }
 

@@ -71,6 +71,23 @@ type bridgeTaskRunnerResult struct {
 	PatchRedactionStatusAlt string               `json:"patchRedactionStatus"`
 }
 
+func (e HostBridgeTaskExecutor) PreflightTaskProvider(ctx context.Context, opts TaskRunRequestOptions) (TaskRunRequestOptions, error) {
+	if taskProviderIsNoop(opts.ProviderProfile) {
+		return LocalTaskExecutor{}.PreflightTaskProvider(ctx, opts)
+	}
+	command, err := e.command()
+	if err != nil {
+		return opts, err
+	}
+	if len(command) == 0 {
+		if preflighter, ok := e.Fallback.(TaskProviderPreflighter); ok {
+			return preflighter.PreflightTaskProvider(ctx, opts)
+		}
+		return resolveTaskProviderProfile(opts, false)
+	}
+	return resolveTaskProviderProfile(opts, true)
+}
+
 func (e HostBridgeTaskExecutor) ExecuteTask(ctx context.Context, req TaskExecRequest) (TaskExecResult, error) {
 	if taskProviderIsNoop(req.ProviderProfile) {
 		return LocalTaskExecutor{}.ExecuteTask(ctx, req)
@@ -204,35 +221,7 @@ func taskRunPlacementJSON(placement domain.TaskRunPlacement) string {
 }
 
 func taskRunnerBaseEnv(env []string) []string {
-	out := make([]string, 0, len(env))
-	for _, entry := range env {
-		name, _, ok := strings.Cut(entry, "=")
-		if !ok || blockedTaskRunnerEnv(name) {
-			continue
-		}
-		out = append(out, entry)
-	}
-	return out
-}
-
-func blockedTaskRunnerEnv(name string) bool {
-	switch name {
-	case "LOOM_FLEET_DB_URL",
-		"LOOM_FLEET_DB_API_KEY",
-		"LOOM_FLEET_DB_ACTOR",
-		"LOOM_FLEET_API_KEY",
-		"LOOM_FLEETDB_REDIS_URL",
-		"LOOM_FLEETDB_REDIS_PASSWORD",
-		"LOOM_FLEET_DB_REDIS_ADDR",
-		"LOOM_FLEET_DB_REDIS_PASSWORD",
-		"LOOM_TASK_RUN_LEASE_TOKEN",
-		"LOOM_RUNNER_LEASE_TOKEN",
-		"LOOM_AGENT_LEASE_TOKEN",
-		"LOOM_WORKER_TOKEN":
-		return true
-	default:
-		return false
-	}
+	return scopedSubprocessBaseEnv(env)
 }
 
 func lastJSONLine(stdout []byte) ([]byte, error) {

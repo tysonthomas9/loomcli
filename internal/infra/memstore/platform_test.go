@@ -848,6 +848,90 @@ func TestPlatformTaskRunCompleteRequiresReadyArtifacts(t *testing.T) {
 	}
 }
 
+func TestPlatformTaskRunCompleteRequiresCloudSafeArtifactsForCloudSandbox(t *testing.T) {
+	ctx := t.Context()
+	s := New()
+
+	if _, err := s.TaskRuns().Create(ctx, store.TaskRunCreate{
+		WorkspaceKey: "WS",
+		TaskRunID:    "task-run-cloud-artifact",
+		TaskID:       "WS-4",
+		Status:       domain.TaskRunRunning,
+		NodeID:       "node-1",
+		LeaseID:      "lease-1",
+		SandboxPlacement: domain.TaskRunPlacement{
+			Provider:  "daytona",
+			SandboxID: "sandbox-1",
+		},
+	}); err != nil {
+		t.Fatalf("Create cloud artifact task run: %v", err)
+	}
+	if _, err := s.Artifacts().Create(ctx, store.ArtifactCreate{
+		WorkspaceKey:  "WS",
+		ArtifactID:    "artifact-cloud-file",
+		TaskID:        "WS-4",
+		OwnerType:     "task_run",
+		OwnerID:       "task-run-cloud-artifact",
+		Type:          "patch",
+		URI:           "file:///tmp/patch.diff",
+		ContentHash:   "sha256:cloud-file",
+		DurableStatus: "finalized",
+	}); err != nil {
+		t.Fatalf("Create cloud file artifact: %v", err)
+	}
+	running, err := s.TaskRuns().Get(ctx, "WS", "task-run-cloud-artifact")
+	if err != nil {
+		t.Fatalf("Get cloud artifact task run: %v", err)
+	}
+	if _, err := s.TaskRuns().Complete(ctx, "WS", "task-run-cloud-artifact", store.TaskRunComplete{
+		CompletionID:     "completion-cloud-local-ref",
+		NodeID:           "node-1",
+		LeaseID:          "lease-1",
+		FencingToken:     running.FencingToken,
+		Status:           domain.TaskRunCompleted,
+		ArtifactsRef:     "file:///tmp/result.tar",
+		RequireArtifacts: true,
+	}); !errors.Is(err, domain.ErrInvalidTransition) {
+		t.Fatalf("Complete cloud file artifacts_ref err = %v, want ErrInvalidTransition", err)
+	}
+	exitCode := 0
+	if _, err := s.TaskRuns().Finish(ctx, "WS", "task-run-cloud-artifact", store.TaskRunFinish{
+		NodeID:       "node-1",
+		LeaseID:      "lease-1",
+		FencingToken: running.FencingToken,
+		Status:       domain.TaskRunCompleted,
+		ExitCode:     &exitCode,
+		ArtifactsRef: "file:///tmp/result.tar",
+	}); !errors.Is(err, domain.ErrInvalidTransition) {
+		t.Fatalf("Finish cloud file artifacts_ref err = %v, want ErrInvalidTransition", err)
+	}
+	complete := store.TaskRunComplete{
+		CompletionID:        "completion-cloud-file",
+		NodeID:              "node-1",
+		LeaseID:             "lease-1",
+		FencingToken:        running.FencingToken,
+		Status:              domain.TaskRunCompleted,
+		RequiredArtifactIDs: []string{"artifact-cloud-file"},
+		RequireArtifacts:    true,
+	}
+	if _, err := s.TaskRuns().Complete(ctx, "WS", "task-run-cloud-artifact", complete); !errors.Is(err, domain.ErrInvalidTransition) {
+		t.Fatalf("Complete cloud file artifact err = %v, want ErrInvalidTransition", err)
+	}
+
+	uri := "artifact://artifact-cloud-file"
+	if _, err := s.Artifacts().Update(ctx, "WS", "artifact-cloud-file", store.ArtifactUpdate{URI: &uri}); err != nil {
+		t.Fatalf("Update cloud artifact URI: %v", err)
+	}
+	complete.CompletionID = "completion-cloud-safe"
+	completed, err := s.TaskRuns().Complete(ctx, "WS", "task-run-cloud-artifact", complete)
+	if err != nil {
+		t.Fatalf("Complete cloud safe artifact: %v", err)
+	}
+	if completed.Status != domain.TaskRunCompleted {
+		t.Fatalf("completed task status = %q, want completed", completed.Status)
+	}
+}
+
 func TestPlatformTaskRunCompleteRequireArtifactsNeedsEvidence(t *testing.T) {
 	ctx := t.Context()
 	s := New()
