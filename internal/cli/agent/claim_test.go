@@ -190,3 +190,46 @@ func TestGetTaskTitle_PassesCorrectID(t *testing.T) {
 		t.Errorf("expected GetIssue called with 'loom-123', got %q", capturedID)
 	}
 }
+
+func TestRunClaim_LockUpdateFailureIsNonFatal(t *testing.T) {
+	// No lock file is created: UpdateLockTask fails with "no active lock to
+	// update". The claim must still report success — the lock file is monitor
+	// bookkeeping, not the task claim itself. Before this behavior change the
+	// error path called cli.ExitWithFlush(1) (os.Exit), so this test also pins
+	// that runClaim returns normally.
+	tmpDir := t.TempDir()
+	tmpDir, _ = filepath.EvalSymlinks(tmpDir)
+	t.Setenv("LOOM_EVENTS_DIR", filepath.Join(tmpDir, "events"))
+	origDir, _ := os.Getwd()
+	os.Chdir(tmpDir)
+	t.Cleanup(func() { os.Chdir(origDir) })
+
+	mockTracker := &MockIssueBackend{
+		GetFn: func(ctx context.Context, id string) (*backend.IssueDetailData, error) {
+			return &backend.IssueDetailData{IssueData: backend.IssueData{ID: id, Title: "Test Task Title"}}, nil
+		},
+	}
+	setDefaultIssueBackend(mockTracker)
+	t.Cleanup(func() { setDefaultIssueBackend(nil) })
+
+	oldStdout, oldStderr := os.Stdout, os.Stderr
+	rOut, wOut, _ := os.Pipe()
+	rErr, wErr, _ := os.Pipe()
+	os.Stdout, os.Stderr = wOut, wErr
+
+	runClaim(nil, []string{"loom-789"})
+
+	wOut.Close()
+	wErr.Close()
+	os.Stdout, os.Stderr = oldStdout, oldStderr
+	var bufOut, bufErr bytes.Buffer
+	bufOut.ReadFrom(rOut)
+	bufErr.ReadFrom(rErr)
+
+	if !strings.Contains(bufOut.String(), "Claimed task: loom-789") {
+		t.Errorf("expected 'Claimed task: loom-789' in stdout, got: %s", bufOut.String())
+	}
+	if !strings.Contains(bufErr.String(), "lock file") || !strings.Contains(bufErr.String(), "bookkeeping") {
+		t.Errorf("expected non-fatal lock-file bookkeeping note on stderr, got: %s", bufErr.String())
+	}
+}
