@@ -32,12 +32,9 @@ type scriptedOwnershipLeaseStore struct {
 
 	heartbeatResults []error // dequeued per Heartbeat call; nil = success
 	acquireResults   []scriptedAcquireResult
-	getLease         *domain.AgentOwnershipLease
-	getErr           error
 
 	heartbeatCalls int
 	acquireCalls   int
-	getCalls       int
 }
 
 type scriptedAcquireResult struct {
@@ -64,16 +61,7 @@ func (f *scriptedOwnershipLeaseStore) Acquire(_ context.Context, in store.AgentO
 }
 
 func (f *scriptedOwnershipLeaseStore) Get(context.Context, string, string) (*domain.AgentOwnershipLease, error) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.getCalls++
-	if f.getErr != nil {
-		return nil, f.getErr
-	}
-	if f.getLease != nil {
-		return f.getLease, nil
-	}
-	return &domain.AgentOwnershipLease{AgentID: "agent-1", OwnerID: "other-node", FencingToken: 99}, nil
+	return nil, errors.New("scripted store: unexpected Get call")
 }
 
 func (f *scriptedOwnershipLeaseStore) List(context.Context, string, store.AgentOwnershipLeaseFilter) ([]*domain.AgentOwnershipLease, error) {
@@ -195,10 +183,8 @@ func captureSlog(t *testing.T) *syncBuffer {
 }
 
 // Headline: a 410/ErrGone heartbeat (lease lapsed, e.g. after a suspend
-// stall) re-acquires and continues — no kill, fence bumped, fresh token →
-// mode=lapsed-reacquired.
+// stall) re-acquires and continues — no kill, fence bumped, fresh token.
 func TestVerifyAgentOwnership_GoneReacquiresAndContinues(t *testing.T) {
-	logs := captureSlog(t)
 	fake := &scriptedOwnershipLeaseStore{
 		heartbeatResults: []error{wrappedSentinel(domain.ErrGone)},
 		acquireResults:   []scriptedAcquireResult{{lease: freshOwnershipLease("TOKEN_FRESH", 7)}},
@@ -222,28 +208,6 @@ func TestVerifyAgentOwnership_GoneReacquiresAndContinues(t *testing.T) {
 	}
 	if ap.OwnershipLeaseToken != "TOKEN_FRESH" {
 		t.Fatalf("token = %q, want re-acquired token", ap.OwnershipLeaseToken)
-	}
-	if !strings.Contains(logs.String(), "mode=lapsed-reacquired") {
-		t.Fatalf("logs missing mode=lapsed-reacquired:\n%s", logs.String())
-	}
-}
-
-// Same-token re-acquire (stale local state / transient 4xx; the lease never
-// lapsed) logs mode=still-live.
-func TestVerifyAgentOwnership_StillLiveReacquireLogsMode(t *testing.T) {
-	logs := captureSlog(t)
-	fake := &scriptedOwnershipLeaseStore{
-		heartbeatResults: []error{wrappedSentinel(domain.ErrGone)},
-		acquireResults:   []scriptedAcquireResult{{lease: freshOwnershipLease("TOKEN_FIRST", 8)}},
-	}
-	s := newOwnershipVerifyTestSupervisor(fake)
-	ap := newOwnershipVerifyAgent()
-
-	if !s.heartbeatAgentOwnership(ap, time.Minute) {
-		t.Fatal("heartbeat returned false, want continue")
-	}
-	if !strings.Contains(logs.String(), "mode=still-live") {
-		t.Fatalf("logs missing mode=still-live:\n%s", logs.String())
 	}
 }
 
@@ -330,33 +294,6 @@ func TestVerifyAgentOwnership_HeldByOtherDaemonKills(t *testing.T) {
 	}
 	if !strings.Contains(logs.String(), "reason=verifiably_lost") {
 		t.Fatalf("logs missing reason=verifiably_lost:\n%s", logs.String())
-	}
-}
-
-// The diagnostic GET is non-decisional: it failing must not change the
-// outcome of an otherwise successful re-acquire.
-func TestVerifyAgentOwnership_DiagnosticGetFailureDoesNotAffectOutcome(t *testing.T) {
-	fake := &scriptedOwnershipLeaseStore{
-		heartbeatResults: []error{wrappedSentinel(domain.ErrGone)},
-		acquireResults:   []scriptedAcquireResult{{lease: freshOwnershipLease("TOKEN_FRESH", 7)}},
-		getErr:           errors.New("get exploded"),
-	}
-	s := newOwnershipVerifyTestSupervisor(fake)
-	ap := newOwnershipVerifyAgent()
-
-	if !s.heartbeatAgentOwnership(ap, time.Minute) {
-		t.Fatal("heartbeat returned false, want continue despite Get failure")
-	}
-	if fake.getCalls != 1 {
-		t.Fatalf("get calls = %d, want 1 (diagnostic attempted)", fake.getCalls)
-	}
-	ap.Mu.Lock()
-	defer ap.Mu.Unlock()
-	if ap.LastError != nil {
-		t.Fatalf("LastError = %v, want nil", ap.LastError)
-	}
-	if ap.OwnershipFencingToken != 7 {
-		t.Fatalf("fencing token = %d, want 7", ap.OwnershipFencingToken)
 	}
 }
 

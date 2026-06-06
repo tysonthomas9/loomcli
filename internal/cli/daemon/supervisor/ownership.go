@@ -239,28 +239,17 @@ func (s *Supervisor) arbitrateOwnershipByReacquire(ap *AgentProcess, ttl time.Du
 	// moments later and releases/re-acquires normally. This guard is
 	// best-effort anti-resurrection; the loop is the corrector.)
 	dead := ap.Cmd == nil || ap.Pid == 0 || ap.Cmd.ProcessState != nil
-	priorToken := ap.OwnershipLeaseToken
 	ap.Mu.Unlock()
 	if dead {
 		slog.Info("ownership verification: agent process not running; not re-acquiring", "worktree", agentID)
 		return false
 	}
-	s.logOwnershipDiagnostic(agentID)
 	switch s.acquireAgentOwnership(ap) {
 	case ownershipAcquired:
 		ap.Mu.Lock()
-		newToken := ap.OwnershipLeaseToken
 		newFence := ap.OwnershipFencingToken
 		ap.Mu.Unlock()
-		// fleet-db's acquire preserves the token for same-owner-live and
-		// issues a fresh one for expired/released — so the comparison
-		// tells which recovery this was. Same control flow either way;
-		// the field makes soak results interpretable.
-		mode := "lapsed-reacquired"
-		if newToken == priorToken {
-			mode = "still-live"
-		}
-		slog.Info("ownership re-acquired after heartbeat failure", "worktree", agentID, "mode", mode, "fencing_token", newFence, "heartbeat_err", hbErr)
+		slog.Info("ownership re-acquired after heartbeat failure", "worktree", agentID, "fencing_token", newFence, "heartbeat_err", hbErr)
 		return true
 	case ownershipHeldByOther:
 		s.killAgentForOwnership(ap, "verifiably_lost", hbErr)
@@ -326,23 +315,6 @@ func isTypedDomainError(err error) bool {
 		errors.Is(err, domain.ErrAlreadyExists) ||
 		errors.Is(err, domain.ErrConflict) ||
 		errors.Is(err, domain.ErrInvalid)
-}
-
-// logOwnershipDiagnostic enriches the arbitration log with the current
-// holder's identity — diagnostics ONLY. Its result must not drive control
-// flow and never advances OwnershipRenewedAt: fleet-db's Get does not
-// normalize effective status (an expired lease still reads "active"), and
-// judging the returned ExpiresAt against the local clock would be the
-// forbidden cross-host clock comparison.
-func (s *Supervisor) logOwnershipDiagnostic(agentID string) {
-	ctx, cancel := context.WithTimeout(context.Background(), controlPlaneOperationTimeout)
-	defer cancel()
-	lease, err := s.ControlStore.AgentOwnershipLeases().Get(ctx, s.WorkspaceID, agentID)
-	if err != nil {
-		slog.Debug("ownership diagnostic get failed", "worktree", agentID, "err", err)
-		return
-	}
-	slog.Info("ownership lease state before re-acquire arbitration", "worktree", agentID, "owner_id", lease.OwnerID, "fencing_token", lease.FencingToken)
 }
 
 // killAgentForOwnership stops the agent for an ownership-loss reason,
