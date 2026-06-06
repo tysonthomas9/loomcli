@@ -101,26 +101,24 @@ func (s *Supervisor) startOwnershipHeartbeat(ap *AgentProcess) func() {
 	}
 
 	ttl := defaultLeaseTTL
-	interval := ttl / 4
-	if interval <= 0 || interval > defaultNodeInterval {
-		interval = defaultNodeInterval
-	}
+	interval := ownershipHeartbeatBaseInterval(ttl)
 	stop := make(chan struct{})
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		ticker := time.NewTicker(interval)
-		defer ticker.Stop()
+		timer := time.NewTimer(nextOwnershipHeartbeatDelay(ap, interval, ttl))
+		defer timer.Stop()
 		for {
 			select {
 			case <-stop:
 				return
 			case <-s.Shutdown:
 				return
-			case <-ticker.C:
+			case <-timer.C:
 				if !s.heartbeatAgentOwnership(ap, ttl) {
 					return
 				}
+				timer.Reset(nextOwnershipHeartbeatDelay(ap, interval, ttl))
 			}
 		}
 	}()
@@ -141,6 +139,31 @@ func (s *Supervisor) heartbeatAgentOwnership(ap *AgentProcess, ttl time.Duration
 		return s.verifyAgentOwnershipAfterHeartbeatFailure(ap, ttl, err)
 	}
 	return true
+}
+
+func ownershipHeartbeatBaseInterval(ttl time.Duration) time.Duration {
+	interval := ttl / 4
+	if interval <= 0 || interval > defaultNodeInterval {
+		return defaultNodeInterval
+	}
+	return interval
+}
+
+func nextOwnershipHeartbeatDelay(ap *AgentProcess, interval, ttl time.Duration) time.Duration {
+	if interval <= 0 {
+		return 0
+	}
+	ap.Mu.Lock()
+	renewedAt := ap.OwnershipRenewedAt
+	ap.Mu.Unlock()
+	remaining := ownershipRemainingValidity(renewedAt, ttl)
+	if remaining <= 0 {
+		return 0
+	}
+	if remaining < interval {
+		return remaining
+	}
+	return interval
 }
 
 // doOwnershipHeartbeat performs one heartbeat round-trip and, on success,
@@ -263,6 +286,22 @@ func (s *Supervisor) continueOwnershipIfWithinValidity(ap *AgentProcess, ttl tim
 	return false
 }
 
+func ownershipRemainingValidity(renewedAt time.Time, ttl time.Duration) time.Duration {
+	if renewedAt.IsZero() || ttl <= 0 {
+		return 0
+	}
+	now := time.Now()
+	monoRemaining := ttl - now.Sub(renewedAt)
+	wallRemaining := ttl - now.Round(0).Sub(renewedAt.Round(0))
+	if monoRemaining <= 0 || wallRemaining <= 0 {
+		return 0
+	}
+	if monoRemaining < wallRemaining {
+		return monoRemaining
+	}
+	return wallRemaining
+}
+
 // ownershipWithinValidity: fail-open is permitted only while BOTH clocks
 // agree less than ttl has elapsed since the last confirmed renewal. The
 // server stamps expires_at = server_processing_time + ttl, and processing
@@ -275,12 +314,7 @@ func (s *Supervisor) continueOwnershipIfWithinValidity(ap *AgentProcess, ttl tim
 // Residual assumption: the monotonic clock does not freeze during the same
 // window in which the wall clock steps backward.
 func ownershipWithinValidity(renewedAt time.Time, ttl time.Duration) bool {
-	if renewedAt.IsZero() {
-		return false
-	}
-	monoElapsed := time.Since(renewedAt)                       // monotonic when available
-	wallElapsed := time.Now().Round(0).Sub(renewedAt.Round(0)) // wall-clock
-	return monoElapsed < ttl && wallElapsed < ttl
+	return ownershipRemainingValidity(renewedAt, ttl) > 0
 }
 
 // isTypedDomainError reports whether the error carries a domain sentinel —

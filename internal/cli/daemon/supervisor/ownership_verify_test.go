@@ -452,6 +452,35 @@ func TestOwnershipWithinValidity_DualClockClauses(t *testing.T) {
 	}
 }
 
+func TestOwnershipHeartbeatDelay_CapsAtRemainingValidity(t *testing.T) {
+	ttl := 2 * time.Minute
+	interval := 30 * time.Second
+	ap := newOwnershipVerifyAgent()
+
+	ap.OwnershipRenewedAt = time.Now()
+	if got := nextOwnershipHeartbeatDelay(ap, interval, ttl); got != interval {
+		t.Fatalf("fresh renewal delay = %v, want base interval %v", got, interval)
+	}
+
+	remaining := 3 * time.Second
+	ap.OwnershipRenewedAt = time.Now().Add(-(ttl - remaining))
+	got := nextOwnershipHeartbeatDelay(ap, interval, ttl)
+	if got <= 0 {
+		t.Fatalf("near-expiry delay = %v, want positive remaining validity", got)
+	}
+	if got >= interval {
+		t.Fatalf("near-expiry delay = %v, want capped below base interval %v", got, interval)
+	}
+	if got > remaining {
+		t.Fatalf("near-expiry delay = %v, want <= remaining validity %v", got, remaining)
+	}
+
+	ap.OwnershipRenewedAt = time.Now().Add(-ttl)
+	if got := nextOwnershipHeartbeatDelay(ap, interval, ttl); got != 0 {
+		t.Fatalf("expired renewal delay = %v, want immediate verification", got)
+	}
+}
+
 // The renewal anchor is set from a pre-request time.Now() at BOTH wiring
 // sites, and only on success.
 func TestHeartbeatSuccess_AdvancesOwnershipRenewedAt(t *testing.T) {
