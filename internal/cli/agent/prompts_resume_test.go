@@ -51,3 +51,44 @@ func TestInjectCheckpointNoCheckpointNoop(t *testing.T) {
 		t.Errorf("no checkpoint: prompt should be unchanged, got %q", got)
 	}
 }
+
+func TestFleetPromptsInjectCheckpointFallback(t *testing.T) {
+	wt := t.TempDir()
+	t.Setenv("LOOM_WORKTREE_PATH", wt)
+	if err := config.SaveCheckpoint(cli.ResolveLockDir(wt), &config.Checkpoint{
+		AgentName: "a", TaskID: "t", GitDiff: "diff --git a/x b/x", ExitCode: 1,
+	}); err != nil {
+		t.Fatalf("SaveCheckpoint: %v", err)
+	}
+	backends.ClearResumeSessionID()
+
+	for name, prompt := range map[string]string{
+		"planning": GenerateFleetPlanningPrompt("planner", "T-1", nil),
+		"task":     GenerateFleetTaskPrompt("coder", "T-2", nil, "claude"),
+	} {
+		if !strings.Contains(prompt, "PREVIOUS ATTEMPT CONTEXT") {
+			t.Fatalf("%s prompt did not include checkpoint fallback:\n%s", name, prompt)
+		}
+	}
+}
+
+func TestFleetPromptsSkipCheckpointWhenResuming(t *testing.T) {
+	wt := t.TempDir()
+	t.Setenv("LOOM_WORKTREE_PATH", wt)
+	if err := config.SaveCheckpoint(cli.ResolveLockDir(wt), &config.Checkpoint{
+		AgentName: "a", TaskID: "t", GitDiff: "diff --git a/x b/x", ExitCode: 1,
+	}); err != nil {
+		t.Fatalf("SaveCheckpoint: %v", err)
+	}
+	backends.SetResumeSessionID("resume-uuid")
+	defer backends.ClearResumeSessionID()
+
+	for name, prompt := range map[string]string{
+		"planning": GenerateFleetPlanningPrompt("planner", "T-1", nil),
+		"task":     GenerateFleetTaskPrompt("coder", "T-2", nil, "claude"),
+	} {
+		if strings.Contains(prompt, "PREVIOUS ATTEMPT CONTEXT") {
+			t.Fatalf("%s prompt included checkpoint while resume was armed:\n%s", name, prompt)
+		}
+	}
+}
