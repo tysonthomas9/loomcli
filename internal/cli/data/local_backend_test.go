@@ -25,6 +25,7 @@ type localBackendStub struct {
 	detail      *backend.IssueDetailData
 	createItem  *backend.IssueData
 	closeResult *backend.CloseResult
+	closeErr    error
 }
 
 func (b *localBackendStub) record(method, id string, args interface{}) {
@@ -97,6 +98,9 @@ func (b *localBackendStub) UndeferIssue(context.Context, string) error          
 
 func (b *localBackendStub) Close(_ context.Context, id string, params backend.CloseParams) (*backend.CloseResult, error) {
 	b.record("Close", id, params)
+	if b.closeErr != nil {
+		return nil, b.closeErr
+	}
 	if b.closeResult != nil {
 		return b.closeResult, nil
 	}

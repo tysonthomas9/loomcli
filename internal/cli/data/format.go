@@ -91,17 +91,30 @@ func printIssueList(w io.Writer, items []backend.IssueData, format string) error
 	return nil
 }
 
-// printCreatedIssue renders the issue returned by a create call. JSON mode
-// emits the canonical issue object; text mode keeps the created ID prominent.
-func printCreatedIssue(w io.Writer, issue *backend.IssueData, format string) error {
+// printCreatedIssue renders the issue returned by a create call and always
+// emits one stable machine-checkable line, "CREATED <id>", so agents and
+// pipelines can confirm success even when the rest of the output is consumed
+// by a parser:
+//   - text mode: issue summary on stdout, then "CREATED <id>" as the LAST
+//     stdout line;
+//   - JSON mode: stdout stays pure JSON (the issue object); "CREATED <id>"
+//     goes to errW (stderr) so `... | jq .` keeps working.
+func printCreatedIssue(w, errW io.Writer, issue *backend.IssueData, format string) error {
 	if issue == nil {
 		return fmt.Errorf("created issue is nil")
 	}
 	if format == formatJSON {
-		return writeJSON(w, issue)
+		if err := writeJSON(w, issue); err != nil {
+			return err
+		}
+		fmt.Fprintf(errW, "CREATED %s\n", issue.ID)
+		return nil
 	}
-	fmt.Fprintf(w, "created %s\n", issue.ID)
-	return printIssueList(w, []backend.IssueData{*issue}, format)
+	if err := printIssueList(w, []backend.IssueData{*issue}, format); err != nil {
+		return err
+	}
+	fmt.Fprintf(w, "CREATED %s\n", issue.ID)
+	return nil
 }
 
 // printAgentList renders a []gen.AgentControlEntry in the requested format.
