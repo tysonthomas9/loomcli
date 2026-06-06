@@ -96,6 +96,70 @@ func TestAgentStatus_LastActivityAt_OmittedWhenNil(t *testing.T) {
 	}
 }
 
+func TestCollectAgentStatus_ActiveLockTaskIDPopulatesCurrentTask(t *testing.T) {
+	// not parallel: uses os.Chdir and defaultResolver global
+	deps, _, _, _, _ := NewTestDeps(t)
+	origDir, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	tmpDir := t.TempDir()
+	if err := os.Chdir(tmpDir); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Chdir(origDir) })
+
+	oldResolver := defaultResolver
+	defaultResolver = nil
+	t.Cleanup(func() { defaultResolver = oldResolver })
+	ResetWorkspaceRuntimeDirCache()
+
+	wtDir := filepath.Join(tmpDir, "worktrees", "alpha")
+	if err := os.MkdirAll(filepath.Join(wtDir, ".git"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	setupMonitorWorkspaceConfig(t, tmpDir, "alpha")
+
+	lockInfo := LockInfo{
+		PID:       os.Getpid(),
+		Command:   "task",
+		AgentName: "alpha",
+		TaskID:    "T-active",
+		State:     "active",
+		StartedAt: time.Now(),
+	}
+	lockData, err := json.Marshal(lockInfo)
+	if err != nil {
+		t.Fatalf("marshal lock: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(wtDir, ".agent.lock"), lockData, 0644); err != nil {
+		t.Fatalf("write lock: %v", err)
+	}
+
+	deps.Exec = &MockExecRunner{RunFunc: func(dir, name string, args ...string) CommandResult {
+		if name == "git" && len(args) > 0 && args[0] == "branch" {
+			return CommandResult{Stdout: "alpha"}
+		}
+		if name == "git" && len(args) > 0 && args[0] == "rev-list" {
+			return CommandResult{Stdout: "0\t0"}
+		}
+		return CommandResult{}
+	}}
+	deps.Git = &execBridgeGitRunner{Exec: deps.Exec}
+
+	agents, taskIDToAgents := collectAgentStatusDeps(deps, nil, "")
+	if len(agents) != 1 {
+		t.Fatalf("expected 1 agent, got %d", len(agents))
+	}
+	if got := agents[0].CurrentTaskID; got != "T-active" {
+		t.Fatalf("CurrentTaskID = %q, want active lock task ID", got)
+	}
+	gotAgents := taskIDToAgents["T-active"]
+	if len(gotAgents) != 1 || gotAgents[0] != "alpha" {
+		t.Fatalf("taskIDToAgents[T-active] = %#v, want [alpha]", gotAgents)
+	}
+}
+
 func TestCollectAgentStatus_IgnoresIdleLockTaskIDForCurrentTask(t *testing.T) {
 	// not parallel: uses os.Chdir and defaultResolver global
 	deps, _, _, _, _ := NewTestDeps(t)
