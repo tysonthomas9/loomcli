@@ -178,7 +178,23 @@ Verify the second stack through its API port:
 LOCAL_MODE_API_PORT=8382 make local-mode-codex-verify
 ```
 
-Use the same project name and compose file overrides for logs and teardown.
+Use the same project name for logs and teardown:
+
+```sh
+LOCAL_MODE_COMPOSE_PROJECT=loomcli-local-mode-b make local-mode-logs
+LOCAL_MODE_COMPOSE_PROJECT=loomcli-local-mode-b make local-mode-down
+```
+
+Append one or more Compose override files with `LOCAL_MODE_COMPOSE_FILES`.
+Overrides are applied after the base stack, and after
+`test/local-mode/docker-compose.codex.yml` for the Codex target:
+
+```sh
+LOCAL_MODE_COMPOSE_PROJECT=loomcli-local-mode-review \
+LOCAL_MODE_COMPOSE_FILES=/tmp/fleetdb-review.yml \
+make local-mode-up
+```
+
 Image tags default to the Compose project name for parallel builds. Override
 `LOCAL_MODE_FLEETDB_IMAGE`, `LOCAL_MODE_LOOM_IMAGE`, or
 `LOCAL_MODE_LOOM_CODEX_IMAGE` only when a run needs explicit image tags.
