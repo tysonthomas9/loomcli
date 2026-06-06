@@ -11,7 +11,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log/slog"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -156,42 +155,6 @@ func (b *FleetBackend) doRequest(ctx context.Context, method, path string, body 
 		return nil, resp.StatusCode, err
 	}
 	return apiResp, resp.StatusCode, nil
-}
-
-// doRequestHeaders is doRequest with extra request headers (the idempotency
-// headers on create — fleet-db's strict JSON decode rejects unknown body
-// fields, so they must travel out-of-band). It also surfaces the idempotency
-// response headers: dedup metadata would otherwise be invisible because the
-// backend contract returns only IssueData.
-func (b *FleetBackend) doRequestHeaders(ctx context.Context, method, path string, body interface{}, headers map[string]string) (*apiResponse, int, http.Header, error) {
-	b.mu.RLock()
-	auth := fleethttp.Auth{BearerToken: b.authToken, APIKey: b.apiKey, Actor: b.actor}
-	b.mu.RUnlock()
-
-	req, err := fleethttp.BuildJSONRequest(ctx, method, b.baseWorkspaceURL+path, auth, body)
-	if err != nil {
-		return nil, 0, nil, err
-	}
-	for k, v := range headers {
-		req.Header.Set(k, v)
-	}
-
-	resp, err := b.client.Do(req)
-	if err != nil {
-		return nil, 0, nil, err
-	}
-	defer resp.Body.Close()
-
-	respBody, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBody))
-	if err != nil {
-		return nil, resp.StatusCode, resp.Header, fmt.Errorf("read response body: %w", err)
-	}
-
-	apiResp, err := parseFleetResponse(respBody, resp.StatusCode)
-	if err != nil {
-		return nil, resp.StatusCode, resp.Header, err
-	}
-	return apiResp, resp.StatusCode, resp.Header, nil
 }
 
 // doRequestAsActor performs a POST request with the X-Actor header overridden.
@@ -556,22 +519,14 @@ func (b *FleetBackend) Create(ctx context.Context, params backend.CreateParams) 
 	if cerr := classifyHTTPError("Create", statusCode, *apiResp); cerr != nil {
 		return nil, cerr
 	}
-	resp := apiResp
-	if !hasData(resp) {
+	if !hasData(apiResp) {
 		return nil, backend.ErrInternal("Create", "empty response from server", nil)
 	}
 	var issue types.Issue
-	if err := json.Unmarshal(resp.Data, &issue); err != nil {
+	if err := json.Unmarshal(apiResp.Data, &issue); err != nil {
 		return nil, backend.ErrInternal("Create", "unmarshal response", err)
 	}
-	// Dedup observability: the backend contract returns only IssueData, so
-	// surface replay/soft-duplicate signals in the log (visible in serve logs).
-	if respHeaders.Get("X-Idempotency-Replayed") == "true" {
-		slog.Info("idempotent create replayed existing issue", "issue", issue.ID)
-	}
-	if warn := respHeaders.Get("X-Idempotency-Warning"); warn != "" {
-		slog.Info("create returned existing issue", "warning", warn, "issue", issue.ID)
-	}
+	logIdempotencyResponse(respHeaders, issue.ID)
 	result := issueToData(&issue)
 	return &result, nil
 }
