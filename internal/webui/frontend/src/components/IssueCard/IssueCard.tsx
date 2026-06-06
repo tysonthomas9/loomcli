@@ -76,6 +76,8 @@ export interface IssueCardProps {
   blockedByDetails?: BlockerRef[];
   /** Whether this card is in the Backlog column (dimmed appearance) */
   isBacklog?: boolean;
+  /** Whether this card should use muted column styling without backlog semantics */
+  isMuted?: boolean;
   /** Column ID this card is displayed in (for conditional rendering) */
   columnId?: string;
   /** Whether this issue has an active terminal session */
@@ -112,6 +114,7 @@ export const IssueCard = memo(function IssueCard({
   blockedBy,
   blockedByDetails,
   isBacklog = false,
+  isMuted = false,
   columnId,
   hasActiveSession,
 }: IssueCardProps): JSX.Element {
@@ -131,6 +134,7 @@ export const IssueCard = memo(function IssueCard({
   const isBlocked = (blockedByCount ?? 0) > 0;
   const reviewType = getReviewType(issue);
   const openStatus = columnId === "ready" ? getOpenStatus(issue) : null;
+  const isVisuallyMuted = isBacklog || isMuted;
 
   // Compute agent row data for in_progress and review cards with an assignee
   const showAgentRow =
@@ -176,6 +180,7 @@ export const IssueCard = memo(function IssueCard({
       data-column={columnId}
       data-blocked={isBlocked ? "true" : undefined}
       data-in-backlog={isBacklog ? "true" : undefined}
+      data-muted-card={isVisuallyMuted ? "true" : undefined}
       onClick={handleClick}
       onKeyDown={handleKeyDown}
       tabIndex={onClick ? 0 : undefined}

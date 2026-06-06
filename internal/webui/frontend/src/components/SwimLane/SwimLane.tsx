@@ -259,7 +259,8 @@ export function SwimLane({
                         blockedByDetails: blockedInfo.blockedByDetails,
                       }),
                     }),
-                    ...(isMutedColumn && { isBacklog: true }),
+                    ...(isMutedColumn && { isMuted: true }),
+                    ...(isBacklogColumn && { isBacklog: true }),
                     ...(pendingIds?.has(issue.id) && { isPending: true }),
                   };
                   return <DraggableIssueCard key={issue.id} {...cardProps} />;

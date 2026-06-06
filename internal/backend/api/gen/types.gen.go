@@ -18,6 +18,7 @@ const (
 const (
 	AgentStatusResponseAgentStateDead     AgentStatusResponseAgentState = "dead"
 	AgentStatusResponseAgentStateDone     AgentStatusResponseAgentState = "done"
+	AgentStatusResponseAgentStateError    AgentStatusResponseAgentState = "error"
 	AgentStatusResponseAgentStateIdle     AgentStatusResponseAgentState = "idle"
 	AgentStatusResponseAgentStateRunning  AgentStatusResponseAgentState = "running"
 	AgentStatusResponseAgentStateSpawning AgentStatusResponseAgentState = "spawning"
@@ -32,6 +33,8 @@ func (e AgentStatusResponseAgentState) Valid() bool {
 	case AgentStatusResponseAgentStateDead:
 		return true
 	case AgentStatusResponseAgentStateDone:
+		return true
+	case AgentStatusResponseAgentStateError:
 		return true
 	case AgentStatusResponseAgentStateIdle:
 		return true
@@ -54,6 +57,7 @@ func (e AgentStatusResponseAgentState) Valid() bool {
 const (
 	BlockedIssueAgentStateDead     BlockedIssueAgentState = "dead"
 	BlockedIssueAgentStateDone     BlockedIssueAgentState = "done"
+	BlockedIssueAgentStateError    BlockedIssueAgentState = "error"
 	BlockedIssueAgentStateIdle     BlockedIssueAgentState = "idle"
 	BlockedIssueAgentStateRunning  BlockedIssueAgentState = "running"
 	BlockedIssueAgentStateSpawning BlockedIssueAgentState = "spawning"
@@ -68,6 +72,8 @@ func (e BlockedIssueAgentState) Valid() bool {
 	case BlockedIssueAgentStateDead:
 		return true
 	case BlockedIssueAgentStateDone:
+		return true
+	case BlockedIssueAgentStateError:
 		return true
 	case BlockedIssueAgentStateIdle:
 		return true
@@ -207,6 +213,7 @@ func (e ErrorResponseSuccess) Valid() bool {
 const (
 	IssueAgentStateDead     IssueAgentState = "dead"
 	IssueAgentStateDone     IssueAgentState = "done"
+	IssueAgentStateError    IssueAgentState = "error"
 	IssueAgentStateIdle     IssueAgentState = "idle"
 	IssueAgentStateRunning  IssueAgentState = "running"
 	IssueAgentStateSpawning IssueAgentState = "spawning"
@@ -221,6 +228,8 @@ func (e IssueAgentState) Valid() bool {
 	case IssueAgentStateDead:
 		return true
 	case IssueAgentStateDone:
+		return true
+	case IssueAgentStateError:
 		return true
 	case IssueAgentStateIdle:
 		return true
@@ -519,6 +528,7 @@ func (e ObservabilityEventType) Valid() bool {
 const (
 	PatchIssueRequestAgentStateDead     PatchIssueRequestAgentState = "dead"
 	PatchIssueRequestAgentStateDone     PatchIssueRequestAgentState = "done"
+	PatchIssueRequestAgentStateError    PatchIssueRequestAgentState = "error"
 	PatchIssueRequestAgentStateIdle     PatchIssueRequestAgentState = "idle"
 	PatchIssueRequestAgentStateRunning  PatchIssueRequestAgentState = "running"
 	PatchIssueRequestAgentStateSpawning PatchIssueRequestAgentState = "spawning"
@@ -533,6 +543,8 @@ func (e PatchIssueRequestAgentState) Valid() bool {
 	case PatchIssueRequestAgentStateDead:
 		return true
 	case PatchIssueRequestAgentStateDone:
+		return true
+	case PatchIssueRequestAgentStateError:
 		return true
 	case PatchIssueRequestAgentStateIdle:
 		return true
@@ -684,6 +696,7 @@ func (e TranscriptEntryType) Valid() bool {
 const (
 	Dead     TreeNodeAgentState = "dead"
 	Done     TreeNodeAgentState = "done"
+	Error    TreeNodeAgentState = "error"
 	Idle     TreeNodeAgentState = "idle"
 	Running  TreeNodeAgentState = "running"
 	Spawning TreeNodeAgentState = "spawning"
@@ -698,6 +711,8 @@ func (e TreeNodeAgentState) Valid() bool {
 	case Dead:
 		return true
 	case Done:
+		return true
+	case Error:
 		return true
 	case Idle:
 		return true

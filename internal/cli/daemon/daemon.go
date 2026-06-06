@@ -189,7 +189,15 @@ func (d *Daemon) isAgentRunning(name string) bool {
 	defer d.sup.AgentsMu.RUnlock()
 	for _, ap := range d.sup.Agents {
 		if ap.Entry.Worktree == name {
-			return true
+			if ap.Done == nil {
+				return false
+			}
+			select {
+			case <-ap.Done:
+				return false
+			default:
+				return true
+			}
 		}
 	}
 	return false

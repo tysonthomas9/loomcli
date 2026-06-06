@@ -4,6 +4,7 @@ import (
 	"errors"
 	"log"
 	"log/slog"
+	"os/exec"
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/agenterr"
@@ -13,10 +14,12 @@ import (
 
 // ErrBackendUnavailable is the sentinel returned by spawnAgent when the
 // agent's effective backend CLI is not on PATH. The supervisor's
-// lifecycle treats this as a clean park — restart budget is preserved
-// and no backoff is set — because the supervise loop re-checks PATH
+// lifecycle treats this as a recoverable wait: restart budget is preserved
+// and no max-retries error is set, because the supervise loop re-checks PATH
 // each iteration and auto-recovers the agent once the binary appears.
 var ErrBackendUnavailable = errors.New("supervisor: backend binary not on PATH")
+
+var lookPath = exec.LookPath
 
 // gateBackendAvailable is the pre-spawn availability check. If the
 // agent's effective backend CLI is not on PATH, the agent is
@@ -41,9 +44,16 @@ func (s *Supervisor) gateBackendAvailable(ap *AgentProcess) error {
 			"worktree", ap.Entry.Worktree, "backend", backend, "err", lookupErr)
 		return nil
 	}
+	if !info.Installed {
+		if path, ok := lookupExternalBackendBinary(backend); ok {
+			info.Installed = true
+			info.Path = path
+			info.Binary = "loom-backend-" + backend
+		}
+	}
 
 	if info.Installed {
-		// Recovery branch: if the agent was previously parked for
+		// Recovery branch: if the agent was previously waiting on
 		// backend-unavailable and the binary is now back, clear the
 		// state so UIs reflect the recovery before the spawn proceeds.
 		ap.Mu.Lock()
@@ -80,6 +90,17 @@ func (s *Supervisor) gateBackendAvailable(ap *AgentProcess) error {
 			worktree, backend, info.InstallHint)
 	}
 	return ErrBackendUnavailable
+}
+
+func lookupExternalBackendBinary(backend string) (string, bool) {
+	if backend == "" {
+		return "", false
+	}
+	path, err := lookPath("loom-backend-" + backend)
+	if err != nil {
+		return "", false
+	}
+	return path, true
 }
 
 // GetEffectiveBackend returns the backend name for the agent's current failover position.

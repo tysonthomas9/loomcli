@@ -822,6 +822,39 @@ describe("SwimLane", () => {
       expect(card).not.toHaveAttribute("data-in-backlog");
     });
 
+    it("mutes blocked-column cards without backlog aria semantics", () => {
+      const blockedIssue = createMockIssue({
+        id: "blocked-1",
+        title: "Blocked Column Issue",
+        status: "blocked",
+      });
+
+      const columns: KanbanColumnConfig[] = [
+        {
+          id: "blocked",
+          label: "Blocked",
+          filter: (issue: Issue) => issue.status === "blocked",
+          targetStatus: "blocked",
+          style: "muted",
+        },
+      ];
+
+      renderWithDndContext(
+        <SwimLane
+          id="test-lane"
+          title="Test Lane"
+          issues={[blockedIssue]}
+          columns={columns}
+        />,
+      );
+
+      const card = screen
+        .getByLabelText("Issue: Blocked Column Issue")
+        .closest("article");
+      expect(card).toHaveAttribute("data-muted-card", "true");
+      expect(card).not.toHaveAttribute("data-in-backlog");
+    });
+
     it("renders EmptyColumn with backlog status for empty backlog column", () => {
       const columns: KanbanColumnConfig[] = [
         ...columnsFromStatuses(["open"]),

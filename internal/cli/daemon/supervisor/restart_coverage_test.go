@@ -1,11 +1,18 @@
 package supervisor
 
 import (
+	"context"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/agenterr"
+	"github.com/tysonthomas9/loomcli/internal/backend"
+	"github.com/tysonthomas9/loomcli/internal/cli/clitest"
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
+	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
+	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
 func newTestSupervisorWithConfig(cfg *config.DaemonConfig) *Supervisor {
@@ -166,31 +173,99 @@ func TestSupervisor_ShouldRestart_SuccessfulLongRun(t *testing.T) {
 	}
 }
 
-func TestSupervisor_ShouldRestart_MaxRetriesExceeded_Parks(t *testing.T) {
+func TestSupervisor_ShouldRestart_MaxRetriesExceeded_ErrorsAndBlocksTask(t *testing.T) {
 	maxRetries := 3
+	mock := clitest.NewMockIssueBackend()
+	control := memstore.New()
+	ctx := context.Background()
+	if _, err := control.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "TEST", Name: "Test"}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	if _, err := control.Agents().Create(ctx, store.AgentCreate{
+		WorkspaceKey: "TEST",
+		Name:         "wt",
+		RoleName:     "task",
+	}); err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
 	s := newTestSupervisorWithConfig(&config.DaemonConfig{
+		Backend: "claude",
 		Daemon: config.DaemonSettings{
 			RestartPolicy: config.RestartPolicy{
 				MaxRetries: &maxRetries,
 			},
 		},
 	})
+	s.IssueBackend = mock
+	s.ControlStore = control
+	s.WorkspaceID = "TEST"
 
 	ap := &AgentProcess{
-		LastExitCode: 1,
-		LastStart:    time.Now(),
-		RestartCount: 3, // Already at max; the next failure exhausts the budget
+		Entry:          config.AgentEntry{Worktree: "wt", Role: "task"},
+		LastExitCode:   1,
+		LastStart:      time.Now(),
+		LastError:      &agenterr.AgentError{Class: agenterr.Transient, Message: "backend crashed"},
+		RestartCount:   3, // Already at max; the next failure exhausts the budget
+		AssignedTaskID: "TASK-1",
 	}
 
-	// Exhausting the budget parks-and-retries instead of giving up.
-	if !s.shouldRestart(ap) {
-		t.Error("shouldRestart should return true (park) when the budget is exhausted")
+	if s.shouldRestart(ap) {
+		t.Error("shouldRestart should return false when the budget is exhausted")
 	}
-	if ap.StopReason != StopReasonMaxRetriesParked {
-		t.Errorf("StopReason = %q, want %q", ap.StopReason, StopReasonMaxRetriesParked)
+	if ap.StopReason != StopReasonMaxRetries {
+		t.Errorf("StopReason = %q, want %q", ap.StopReason, StopReasonMaxRetries)
 	}
-	if ap.RestartCount != 0 {
-		t.Errorf("RestartCount = %d, want 0 (reset on park)", ap.RestartCount)
+	if ap.RestartCount != maxRetries+1 {
+		t.Errorf("RestartCount = %d, want %d (preserved for observability)", ap.RestartCount, maxRetries+1)
+	}
+	if _, ok := s.StoppedAgents["wt"]; !ok {
+		t.Fatal("agent was not marked stopped for explicit resume")
+	}
+	agent, err := control.Agents().Get(ctx, "TEST", "wt")
+	if err != nil {
+		t.Fatalf("get control-plane agent: %v", err)
+	}
+	if agent.State != domain.AgentStateError {
+		t.Fatalf("control-plane agent state = %q, want %q", agent.State, domain.AgentStateError)
+	}
+
+	var update *backend.UpdateParams
+	var updateID string
+	var comment *backend.CommentAddParams
+	for _, call := range mock.Calls {
+		switch call.Method {
+		case "Update":
+			updateID = call.Args[0].(string)
+			params := call.Args[1].(backend.UpdateParams)
+			update = &params
+		case "AddComment":
+			params := call.Args[0].(backend.CommentAddParams)
+			comment = &params
+		}
+	}
+	if update == nil {
+		t.Fatal("IssueBackend.Update was not called")
+	}
+	if updateID != "TASK-1" {
+		t.Fatalf("Update issue id = %q, want TASK-1", updateID)
+	}
+	if update.Status == nil || *update.Status != "blocked" {
+		t.Fatalf("Update.Status = %v, want blocked", update.Status)
+	}
+	if update.Assignee == nil || *update.Assignee != "wt" {
+		t.Fatalf("Update.Assignee = %v, want wt", update.Assignee)
+	}
+	if comment == nil {
+		t.Fatal("IssueBackend.AddComment was not called")
+	}
+	if comment.IssueID != "TASK-1" || comment.Author != "loom-daemon" {
+		t.Fatalf("comment target/author = %q/%q, want TASK-1/loom-daemon", comment.IssueID, comment.Author)
+	}
+	if !strings.Contains(comment.Text, "stopped with error") || !strings.Contains(comment.Text, "Automatic retries are stopped") {
+		t.Fatalf("comment text does not explain terminal error: %q", comment.Text)
+	}
+	if strings.Contains(strings.ToLower(comment.Text), "park") {
+		t.Fatalf("comment text should not use parked wording: %q", comment.Text)
 	}
 }
 
@@ -256,81 +331,47 @@ func TestSupervisor_ShouldRestart_BackendUnavailable_PreservesBudget(t *testing.
 	}
 }
 
-// TestSupervisor_ShouldRestart_Exhaustion_ParksThenFreshBurst verifies the full
-// Layer-2 cycle: failures count up to maxRetries, the exhausting failure parks
-// (resetting the budget), and parking grants a fresh burst rather than an
-// immediate re-park — so a transient root cause that clears mid-burst recovers.
-func TestSupervisor_ShouldRestart_Exhaustion_ParksThenFreshBurst(t *testing.T) {
+// TestSupervisor_ShouldRestart_Exhaustion_StopsUntilExplicitResume verifies the
+// retry-burst contract: failures count up to maxRetries, the exhausting failure
+// enters an error state, and no fresh automatic burst is granted.
+func TestSupervisor_ShouldRestart_Exhaustion_StopsUntilExplicitResume(t *testing.T) {
 	maxRetries := 2
 	s := newTestSupervisorWithConfig(&config.DaemonConfig{
 		Daemon: config.DaemonSettings{RestartPolicy: config.RestartPolicy{MaxRetries: &maxRetries}},
 	})
 	ap := &AgentProcess{
+		Entry:        config.AgentEntry{Worktree: "wt"},
 		LastExitCode: 1,
 		LastStart:    time.Now(),
 		LastError:    &agenterr.AgentError{Class: agenterr.Transient},
 	}
 
-	// Failures within budget count up and do not park.
+	// Failures within budget count up and keep retrying.
 	for i := 1; i <= maxRetries; i++ {
 		if !s.shouldRestart(ap) {
 			t.Fatalf("iteration %d: shouldRestart = false, want true (within budget)", i)
 		}
-		if ap.StopReason == StopReasonMaxRetriesParked {
-			t.Fatalf("iteration %d: parked too early (RestartCount=%d, max=%d)", i, ap.RestartCount, maxRetries)
+		if ap.StopReason == StopReasonMaxRetries {
+			t.Fatalf("iteration %d: max-retries stop too early (RestartCount=%d, max=%d)", i, ap.RestartCount, maxRetries)
 		}
 	}
 
-	// The exhausting failure parks and resets the budget.
-	if !s.shouldRestart(ap) {
-		t.Fatal("exhausting failure: shouldRestart = false, want true (parks)")
+	// The exhausting failure enters error and stops automatic retries.
+	if s.shouldRestart(ap) {
+		t.Fatal("exhausting failure: shouldRestart = true, want false")
 	}
-	if ap.StopReason != StopReasonMaxRetriesParked {
-		t.Fatalf("StopReason = %q, want %q", ap.StopReason, StopReasonMaxRetriesParked)
+	if ap.StopReason != StopReasonMaxRetries {
+		t.Fatalf("StopReason = %q, want %q", ap.StopReason, StopReasonMaxRetries)
 	}
-	if ap.RestartCount != 0 {
-		t.Fatalf("RestartCount = %d, want 0 (reset on park)", ap.RestartCount)
-	}
-
-	// Park granted a fresh burst: the next failure counts from 1, not an
-	// immediate re-park.
-	if !s.shouldRestart(ap) {
-		t.Fatal("post-park: shouldRestart = false, want true")
-	}
-	if ap.StopReason == StopReasonMaxRetriesParked {
-		t.Fatal("post-park: re-parked immediately; budget did not reset")
-	}
-	if ap.RestartCount != 1 {
-		t.Fatalf("post-park RestartCount = %d, want 1 (fresh burst)", ap.RestartCount)
+	if ap.RestartCount != maxRetries+1 {
+		t.Fatalf("RestartCount = %d, want %d", ap.RestartCount, maxRetries+1)
 	}
 }
 
-// TestSupervisor_ComputeBackoff_Parked_ReturnsParkInterval verifies a parked
-// agent sleeps the fixed park interval (keyed on StopReason, not error class)
-// rather than a huge exponential backoff, and that the private override wins.
-func TestSupervisor_ComputeBackoff_Parked_ReturnsParkInterval(t *testing.T) {
-	s := newTestSupervisorWithConfig(&config.DaemonConfig{})
-	s.maxRetriesParkInterval = 50 * time.Millisecond // test override
-
-	ap := &AgentProcess{
-		LastError:    &agenterr.AgentError{Class: agenterr.Transient},
-		RestartCount: 99, // would be a maxed exponential backoff if not parked
-		StopReason:   StopReasonMaxRetriesParked,
-	}
-	if got := s.computeBackoff(ap); got != 50*time.Millisecond {
-		t.Errorf("computeBackoff(parked) = %v, want 50ms (override)", got)
-	}
-
-	s.maxRetriesParkInterval = 0 // fall back to the package default
-	if got := s.computeBackoff(ap); got != defaultMaxRetriesParkInterval {
-		t.Errorf("computeBackoff(parked, default) = %v, want %v", got, defaultMaxRetriesParkInterval)
-	}
-}
-
-// TestSupervisor_ShouldRestart_Fatal_StillStops_NotParked is the critical
+// TestSupervisor_ShouldRestart_Fatal_StillStops is the critical
 // regression guard: a fatal error (auth/billing) must stop the agent even when
-// the budget is well past exhausted — park must never swallow a fatal.
-func TestSupervisor_ShouldRestart_Fatal_StillStops_NotParked(t *testing.T) {
+// the budget is well past exhausted.
+func TestSupervisor_ShouldRestart_Fatal_StillStops(t *testing.T) {
 	maxRetries := 3
 	s := newTestSupervisorWithConfig(&config.DaemonConfig{
 		Daemon: config.DaemonSettings{RestartPolicy: config.RestartPolicy{MaxRetries: &maxRetries}},
@@ -345,7 +386,7 @@ func TestSupervisor_ShouldRestart_Fatal_StillStops_NotParked(t *testing.T) {
 			RestartCount: maxRetries + 5, // well past the budget
 		}
 		if s.shouldRestart(ap) {
-			t.Errorf("%v: shouldRestart = true, want false (fatal must stop, never park)", class)
+			t.Errorf("%v: shouldRestart = true, want false (fatal must stop)", class)
 		}
 		if ap.StopReason != StopReasonFatalError {
 			t.Errorf("%v: StopReason = %q, want %q", class, ap.StopReason, StopReasonFatalError)
@@ -353,10 +394,10 @@ func TestSupervisor_ShouldRestart_Fatal_StillStops_NotParked(t *testing.T) {
 	}
 }
 
-// TestSupervisor_Park_PreservesObservability verifies the durable signals
-// survive a park: even though RestartCount resets to 0, the status payload still
-// carries the parked stop reason and the error class that caused it.
-func TestSupervisor_Park_PreservesObservability(t *testing.T) {
+// TestSupervisor_Error_PreservesObservability verifies the durable signals
+// survive a max-retries error: status still carries the terminal reason and the
+// error class that caused it.
+func TestSupervisor_Error_PreservesObservability(t *testing.T) {
 	maxRetries := 1
 	s := newTestSupervisorWithConfig(&config.DaemonConfig{
 		Daemon: config.DaemonSettings{RestartPolicy: config.RestartPolicy{MaxRetries: &maxRetries}},
@@ -366,10 +407,10 @@ func TestSupervisor_Park_PreservesObservability(t *testing.T) {
 		LastExitCode: 1,
 		LastStart:    time.Now(),
 		LastError:    &agenterr.AgentError{Class: agenterr.Transient},
-		RestartCount: maxRetries, // next failure exhausts → park
+		RestartCount: maxRetries, // next failure exhausts
 	}
-	if !s.shouldRestart(ap) {
-		t.Fatal("shouldRestart = false, want true (park)")
+	if s.shouldRestart(ap) {
+		t.Fatal("shouldRestart = true, want false (error)")
 	}
 
 	s.Agents = []*AgentProcess{ap}
@@ -378,11 +419,11 @@ func TestSupervisor_Park_PreservesObservability(t *testing.T) {
 		t.Fatalf("len(GetAgents()) = %d, want 1", len(statuses))
 	}
 	st := statuses[0]
-	if st.StopReason != StopReasonMaxRetriesParked {
-		t.Errorf("status.StopReason = %q, want %q", st.StopReason, StopReasonMaxRetriesParked)
+	if st.StopReason != StopReasonMaxRetries {
+		t.Errorf("status.StopReason = %q, want %q", st.StopReason, StopReasonMaxRetries)
 	}
 	if st.LastErrorClass == "" {
-		t.Error("status.LastErrorClass is empty, want the class that caused the park")
+		t.Error("status.LastErrorClass is empty, want the class that caused the error")
 	}
 }
 

@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"go.opentelemetry.io/otel/attribute"
@@ -386,6 +387,8 @@ func monitorStatusFromAgentState(state domain.AgentState) string {
 	switch state {
 	case domain.AgentStateActive:
 		return "ready"
+	case domain.AgentStateError:
+		return "error"
 	default:
 		return "idle"
 	}
@@ -423,7 +426,7 @@ func mergeStoreAgentsWithRuntime(storeAgents []monitor.AgentStatus, runtimeAgent
 
 func mergeRuntimeAgentStatus(storeAgent monitor.AgentStatus, runtimeAgent monitor.AgentStatus) monitor.AgentStatus {
 	merged := storeAgent
-	if runtimeAgent.Status != "" {
+	if runtimeAgent.Status != "" && !shouldPreserveStoreAgentStatus(storeAgent.Status, runtimeAgent.Status) {
 		merged.Status = runtimeAgent.Status
 	}
 	if merged.Branch == "" || merged.Branch == "unknown" {
@@ -437,6 +440,26 @@ func mergeRuntimeAgentStatus(storeAgent monitor.AgentStatus, runtimeAgent monito
 	merged.Commits = runtimeAgent.Commits
 	merged.Changes = runtimeAgent.Changes
 	return merged
+}
+
+func shouldPreserveStoreAgentStatus(storeStatus, runtimeStatus string) bool {
+	if storeStatus != "error" {
+		return false
+	}
+	switch {
+	case runtimeStatus == "":
+		return true
+	case strings.HasPrefix(runtimeStatus, "working"):
+		return false
+	case strings.HasPrefix(runtimeStatus, "planning"):
+		return false
+	case strings.HasPrefix(runtimeStatus, "review"):
+		return false
+	case strings.HasPrefix(runtimeStatus, "done"):
+		return false
+	default:
+		return true
+	}
 }
 
 func monitorBranchFromAgent(ws *ops.WorkspaceData, agent *domain.Agent) string {

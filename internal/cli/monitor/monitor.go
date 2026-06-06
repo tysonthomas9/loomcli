@@ -79,6 +79,7 @@ func LoadDaemonManagedAgents(stateFilePath string) map[string]DaemonAgentInfo {
 				Managed:       true,
 				Role:          agent.Role,
 				Repo:          agent.Repo,
+				Status:        agent.Status,
 				CurrentTaskID: agent.TaskID,
 				LastActivity:  agent.LastActivity,
 			}

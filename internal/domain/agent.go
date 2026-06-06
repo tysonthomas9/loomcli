@@ -11,9 +11,13 @@ const (
 	AgentStateIdle    AgentState = "idle"
 	AgentStateActive  AgentState = "active"
 	AgentStateStopped AgentState = "stopped"
+	// AgentStateError means the supervisor stopped automatic runs after a
+	// terminal failure such as max_retries exhaustion. Explicit start/restart
+	// transitions the assignment back to active.
+	AgentStateError AgentState = "error"
 	// AgentStateBackendUnavailable means the agent is registered but
 	// the backend CLI it would invoke is not on PATH. Distinct from
-	// "stopped" (manual shutdown) or "failed" (exhausted retries): the
+	// "stopped" (manual shutdown) or "error" (exhausted retries): the
 	// daemon reconciler re-checks PATH each tick and auto-transitions
 	// back to AgentStateIdle once the binary appears.
 	AgentStateBackendUnavailable AgentState = "backend_unavailable"

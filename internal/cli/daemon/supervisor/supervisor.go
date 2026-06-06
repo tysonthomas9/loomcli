@@ -91,16 +91,10 @@ type Supervisor struct {
 	NodeInterval time.Duration
 
 	// backendRecheckInterval is the fixed delay computeBackoff returns for a
-	// BackendUnavailable park (agent's backend CLI missing from PATH). Zero
+	// BackendUnavailable wait (agent's backend CLI missing from PATH). Zero
 	// means use the package default (backendUnavailableRecheckInterval). Tests set a
 	// small value to avoid the 30s wait.
 	backendRecheckInterval time.Duration
-
-	// maxRetriesParkInterval is the fixed delay computeBackoff returns once an
-	// agent has exhausted its restart budget and parked (StopReasonMaxRetriesParked).
-	// Zero means use the package default (defaultMaxRetriesParkInterval). Tests set
-	// a small value to avoid the 60s wait.
-	maxRetriesParkInterval time.Duration
 }
 
 // NewAgent creates an AgentProcess from an agent entry, resolving the worktree path
@@ -298,8 +292,7 @@ func (s *Supervisor) superviseAgent(ap *AgentProcess) {
 
 		if !s.shouldRestart(ap) {
 			// shouldRestart now returns false only for genuine terminal stops
-			// (fatal error, or the max_retries=0 fail-fast opt-out); budget
-			// exhaustion parks-and-retries instead (returns true).
+			// (fatal error, or a max_retries error stop).
 			slog.Warn("supervisor stopping (terminal)", "worktree", ap.Entry.Worktree)
 			return
 		}
@@ -675,7 +668,7 @@ func (s *Supervisor) spawnAndWait(ap *AgentProcess) {
 			// The normal pre-flight gate runs before task claim, but this spawn-time
 			// gate remains as a race guard for a backend disappearing after claim and
 			// before exec. Clean up any already-created session/claim/worker before
-			// parking so the task is immediately claimable again.
+			// waiting so the task is immediately claimable again.
 			s.completeBackendUnavailableCleanup(ap)
 			s.Concurrency.Release(ap.Entry.Role)
 			return
@@ -845,7 +838,7 @@ func (s *Supervisor) postExitCleanup(ap *AgentProcess) {
 }
 
 // startBackoffHeartbeat keeps the agent's supervise tick fresh during a long
-// restart wait (a park, or a long exponential backoff) so the liveness watchdog
+// restart wait (a fixed wait, or a long exponential backoff) so the liveness watchdog
 // does not mistake a healthy, waiting supervise goroutine for a wedged one. It
 // returns a no-op stopper for short waits that cannot approach the staleness
 // threshold, so callers can always `defer` the returned function.

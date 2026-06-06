@@ -46,6 +46,8 @@ func statusToIcon(status string) string {
 		return "◐"
 	case "stopped":
 		return "○"
+	case "error":
+		return "✗"
 	case "failed":
 		return "✗"
 	default:

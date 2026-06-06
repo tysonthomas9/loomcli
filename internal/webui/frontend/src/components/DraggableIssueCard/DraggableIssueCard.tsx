@@ -68,6 +68,7 @@ export const DraggableIssueCard = memo(function DraggableIssueCard({
   blockedByDetails,
   columnId,
   isBacklog,
+  isMuted,
   hasActiveSession,
   isPending = false,
 }: DraggableIssueCardProps): JSX.Element {
@@ -87,6 +88,7 @@ export const DraggableIssueCard = memo(function DraggableIssueCard({
     ...(blockedBy !== undefined && { blockedBy }),
     ...(blockedByDetails !== undefined && { blockedByDetails }),
     ...(isBacklog !== undefined && { isBacklog }),
+    ...(isMuted !== undefined && { isMuted }),
     ...(columnId !== undefined && { columnId }),
     ...(hasActiveSession !== undefined && { hasActiveSession }),
   };

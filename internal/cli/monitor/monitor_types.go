@@ -118,6 +118,7 @@ type DaemonAgentInfo struct {
 	Managed       bool
 	Role          string
 	Repo          string
+	Status        string
 	CurrentTaskID string
 	LastActivity  time.Time
 }

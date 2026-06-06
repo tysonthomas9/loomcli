@@ -303,8 +303,14 @@ func (s *Supervisor) AddAgentForTask(entry config.AgentEntry, taskID string) err
 	// Authoritative duplicate check + slice append + WaitGroup increment under
 	// a single write lock so Wg.Add can't race with Stop()'s Wg.Wait.
 	s.AgentsMu.Lock()
-	for _, existing := range s.Agents {
+	for i := 0; i < len(s.Agents); i++ {
+		existing := s.Agents[i]
 		if existing.Entry.Worktree == entry.Worktree {
+			if isReplaceableTerminalAgent(existing) {
+				s.Agents = append(s.Agents[:i], s.Agents[i+1:]...)
+				i--
+				continue
+			}
 			s.AgentsMu.Unlock()
 			return fmt.Errorf("agent %q already exists", entry.Worktree)
 		}
@@ -328,7 +334,7 @@ func (s *Supervisor) checkDuplicateAgent(worktree string) error {
 	s.AgentsMu.RLock()
 	defer s.AgentsMu.RUnlock()
 	for _, ap := range s.Agents {
-		if ap.Entry.Worktree == worktree {
+		if ap.Entry.Worktree == worktree && !isReplaceableTerminalAgent(ap) {
 			return fmt.Errorf("agent %q already exists", worktree)
 		}
 	}
