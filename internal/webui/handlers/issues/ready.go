@@ -222,6 +222,13 @@ func serveReadyViaBackend(w http.ResponseWriter, r *http.Request, backendFn Issu
 // backend slim projection populates are carried; unknown fields stay at
 // their zero values (the FE already tolerates missing optional fields on a
 // ready list item).
+//
+// Design must be carried: agents reading the ready queue through the API
+// backend (LOOM_SERVER_URL set) apply the task router's has_design filter
+// (ReadyToImplement = HasDesign && !needs-revision). Dropping it here made
+// every ready task look design-less, so implementation agents could never
+// claim work (perpetual NoWork) while planners — gated on !HasDesign — were
+// unaffected. It is omitempty, so empty designs add nothing to the wire.
 func issueDataToTypesIssue(d *backend.IssueData) *types.Issue {
 	if d == nil {
 		return nil
@@ -236,6 +243,7 @@ func issueDataToTypesIssue(d *backend.IssueData) *types.Issue {
 		Owner:      d.Owner,
 		Labels:     d.Labels,
 		SourceRepo: d.SourceRepo,
+		Design:     d.Design,
 		CreatedAt:  d.CreatedAt,
 		UpdatedAt:  d.UpdatedAt,
 		DueAt:      d.DueAt,

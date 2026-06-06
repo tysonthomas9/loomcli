@@ -55,7 +55,14 @@ Follow logs:
 make local-mode-logs
 ```
 
-Verify the seeded daemon/agent/session flow from the host:
+Verify the Codex seeded daemon/agent/session flow from the host:
+
+```sh
+make local-mode-codex-verify
+```
+
+For the deterministic `make local-mode-up` stack, verify the deterministic
+task IDs:
 
 ```sh
 make local-mode-verify
@@ -72,7 +79,7 @@ transcript entries, and the coder session exposes a diff containing
 - A built Web UI, or enough host tooling for `make local-mode-codex-up` to
   build `internal/webui/frontend/dist` once.
 - Local Codex credentials at `${HOME}/.codex`, or set
-  `LOCAL_MODE_CODEX_HOME=/path/to/.codex`.
+  `LOCAL_MODE_CODEX_HOME=<codex-home>`.
 - Enough Podman VM disk for the Go image, FleetDB image, npm/Codex install,
   workspace volumes, and build cache. On macOS, allocate at least 25 GB for
   the Podman machine before rebuilding this stack repeatedly.
@@ -127,10 +134,16 @@ Run the real Codex local dogfood path:
 make local-mode-codex-up
 ```
 
+Force a specific Compose runner when auto-detection picks the wrong one:
+
+```sh
+LOCAL_MODE_COMPOSE="docker compose" make local-mode-codex-up
+```
+
 Use a different Codex home:
 
 ```sh
-LOCAL_MODE_CODEX_HOME=/path/to/.codex make local-mode-codex-up
+LOCAL_MODE_CODEX_HOME=<codex-home> make local-mode-codex-up
 ```
 
 Use a different Codex CLI version:
@@ -147,6 +160,28 @@ LOCAL_MODE_API_PORT=8382 \
 LOCAL_MODE_UI_PORT=8383 \
 make local-mode-codex-up
 ```
+
+Run a second stack in parallel by changing both the Compose project and ports:
+
+```sh
+LOCAL_MODE_COMPOSE_PROJECT=loomcli-local-mode-b \
+LOCAL_MODE_FLEETDB_PORT=8380 \
+LOCAL_MODE_API_PORT=8382 \
+LOCAL_MODE_UI_PORT=8383 \
+LOCAL_MODE_COMPOSE_UP_FLAGS="--build -d" \
+make local-mode-codex-up
+```
+
+Verify the second stack through its API port:
+
+```sh
+LOCAL_MODE_API_PORT=8382 make local-mode-codex-verify
+```
+
+Use the same project name and compose file overrides for logs and teardown.
+Image tags default to the Compose project name for parallel builds. Override
+`LOCAL_MODE_FLEETDB_IMAGE`, `LOCAL_MODE_LOOM_IMAGE`, or
+`LOCAL_MODE_LOOM_CODEX_IMAGE` only when a run needs explicit image tags.
 
 Verify the container has bash:
 
@@ -281,7 +316,7 @@ or empty, startup fails before agent registration.
 Use:
 
 ```sh
-LOCAL_MODE_CODEX_HOME=/path/to/.codex make local-mode-codex-up
+LOCAL_MODE_CODEX_HOME=<codex-home> make local-mode-codex-up
 ```
 
 ### Port Conflicts
@@ -295,6 +330,8 @@ Web UI: 8283
 ```
 
 Override all three ports when running multiple stacks.
+Also set `LOCAL_MODE_COMPOSE_PROJECT` so Compose container names and volumes
+do not collide with the default stack.
 
 ### Podman VM Is Full
 

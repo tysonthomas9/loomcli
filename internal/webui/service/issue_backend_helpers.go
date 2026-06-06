@@ -194,8 +194,8 @@ func issueDetailDataToWire(d *backend.IssueDetailData) map[string]any {
 	// Labels / Dependencies / Dependents / Comments are non-omitempty in
 	// types.IssueDetails to give the FE a stable shape.
 	out["labels"] = stringsOrEmpty(d.Labels)
-	out["dependencies"] = depsToWire(d.Dependencies)
-	out["dependents"] = depsToWire(d.Dependents)
+	out["dependencies"] = depsToWire(d.Dependencies, d.ID)
+	out["dependents"] = depsToWire(d.Dependents, d.ID)
 	out["comments"] = commentsToWire(d.Comments)
 
 	return out
@@ -212,14 +212,24 @@ func stringsOrEmpty(in []string) []string {
 
 // depsToWire maps backend.DependencyData to the FE's
 // IssueWithDependencyMetadata shape (embedded Issue + dependency_type).
-func depsToWire(in []backend.DependencyData) []map[string]any {
+//
+// selfID is the issue being viewed. The wire "id" must be the *related* issue
+// (the other side of the relationship), not selfID. For a dependency the
+// related issue is DependsOnID; for a dependent (e.g. an epic's child, where
+// DependsOnID == selfID) it is IssueID. Emitting DependsOnID unconditionally
+// is what made every dependent render as a self-reference to the epic.
+func depsToWire(in []backend.DependencyData, selfID string) []map[string]any {
 	if len(in) == 0 {
 		return []map[string]any{}
 	}
 	out := make([]map[string]any, 0, len(in))
 	for _, d := range in {
+		relatedID := d.DependsOnID
+		if d.DependsOnID == selfID && d.IssueID != "" {
+			relatedID = d.IssueID
+		}
 		entry := map[string]any{
-			"id":              d.DependsOnID,
+			"id":              relatedID,
 			"title":           d.Title,
 			"status":          d.Status,
 			"priority":        d.Priority,
