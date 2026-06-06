@@ -57,6 +57,11 @@ type AgentStatus struct {
 	LiveStatus   string `json:"live_status,omitempty"`
 	ActiveTaskID string `json:"active_task_id,omitempty"`
 	ActivePhase  string `json:"active_phase,omitempty"`
+	// LastErrorClass is fleet-db's DERIVED error_class of the agent's most recent
+	// terminal session when that run failed, carried through from the store agent
+	// record (idle agents only). The UI uses it to explain a stalled idle agent
+	// instead of a bare "agent missing". Empty when not computed or last run ok.
+	LastErrorClass string `json:"last_error_class,omitempty"`
 }
 
 // TaskInfo represents a task with basic info
