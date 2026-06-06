@@ -3,10 +3,11 @@
  * Compact single-row layout with circular avatar, status dot, and line diff stats.
  */
 
-import type { LoomAgentStatus, ParsedLoomStatus } from "@/types";
+import type { LoomAgentStatus } from "@/types";
 import { effectiveAgentStatus, parseLoomStatus } from "@/types";
 import { RepoBadge } from "@/components/RepoBadge";
 import { getAvatarColor, shouldUseWhiteText } from "@/utils/colorUtils";
+import { getStatusDotColor, getStatusLabel } from "@/utils/agent";
 
 import styles from "./AgentCard.module.css";
 
@@ -24,56 +25,6 @@ export interface AgentCardProps {
   onClick?: () => void;
   /** Whether to show the repo badge (default: true). Set false when already inside a repo group. */
   showRepoBadge?: boolean;
-}
-
-/**
- * Get status dot color based on parsed status type.
- */
-export function getStatusDotColor(type: ParsedLoomStatus["type"]): string {
-  switch (type) {
-    case "working":
-    case "planning":
-    case "dirty":
-    case "changes":
-      return "var(--color-status-working, #facc15)";
-    case "error":
-      return "var(--color-status-error, #ef4444)";
-    case "done":
-      return "var(--color-status-done, #22c55e)";
-    case "review":
-      return "var(--color-status-review, #3b82f6)";
-    case "idle":
-    case "ready":
-    default:
-      return "var(--color-status-idle, #9ca3af)";
-  }
-}
-
-/**
- * Build the status label text for the right-hand meta column.
- */
-export function getStatusLabel(parsed: ParsedLoomStatus): string {
-  switch (parsed.type) {
-    case "working":
-      return "Working";
-    case "planning":
-      return "Planning";
-    case "done":
-      return "Done";
-    case "review":
-      return "Review";
-    case "idle":
-      return "Idle";
-    case "error":
-      return "Error";
-    case "dirty":
-      return "Uncommitted changes";
-    case "changes":
-      return `${parsed.changeCount ?? 0} change${parsed.changeCount === 1 ? "" : "s"}`;
-    case "ready":
-    default:
-      return "Ready";
-  }
 }
 
 /**

@@ -1375,6 +1375,9 @@ type MonitorAgentStatus struct {
 	// LastActivityAt Most recent PTY-output observation from the agent's supervised backend (claude/codex/gemini), forwarded over IPC. Compare to "now" to detect stuck agents. Zero/absent when no observation yet or agent isn't daemon-managed.
 	LastActivityAt *time.Time `json:"last_activity_at,omitempty"`
 
+	// LastErrorClass Fleet-db's DERIVED error_class of the agent's most recent terminal session, set only when that latest run failed and the agent is currently idle (a newer success clears it). Lets the UI explain a stalled idle agent (e.g. "SpawnFailure") instead of a bare "agent missing". Absent when liveness was not computed or the last run succeeded.
+	LastErrorClass *string `json:"last_error_class,omitempty"`
+
 	// LiveStatus Fleet-db's DERIVED liveness signal ("working" or "idle"), computed server-side from the running-session + fresh-lease join (never re-derived by loom). "working" means the agent has a live session right now. Absent when liveness was not computed (no fleet-db store). The UI prefers this over the lock-derived status, which stays "idle" for a provably-working agent on serve-only deployments.
 	LiveStatus *string `json:"live_status,omitempty"`
 	Name       string  `json:"name"`

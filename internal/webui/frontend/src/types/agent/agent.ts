@@ -303,3 +303,40 @@ export function isAgentActive(agent: LoomAgentStatus): boolean {
   const { type } = parseLoomStatus(effectiveAgentStatus(agent));
   return type === "working" || type === "planning";
 }
+
+/**
+ * The agent claiming a task, by task id.
+ *
+ * CONTRACT: active_task_id outranks current_task_id for liveness. active_task_id
+ * is fleet-db's session+lease-derived claim — set only when a FRESH lease + a
+ * running session exist (expired/zombie leases are skipped server-side), so it
+ * cannot be stale. current_task_id is LOCK-derived and can outlive the process
+ * (the "immortal lock" pathology: a dead agent's .agent.lock persists on disk).
+ * So when two DIFFERENT agents match — a live session-holder vs a stale
+ * lock-holder — the live one must win. Two ordered finds (active first) make the
+ * precedence deterministic regardless of array order; the original one-pass
+ * `find(current || active)` let array order decide. The current_task_id fallback
+ * covers the daemon path where fleet-db liveness wasn't computed (active absent).
+ *
+ * Single-claimant invariant: a loom task is claimed via a single lease/lock at a
+ * time, so at most one agent should match. If two ever held active_task_id === T
+ * (a lease-layer bug that shouldn't occur), the first by array order is returned;
+ * that inconsistency belongs surfaced elsewhere, not silently tie-broken here.
+ */
+export function resolveAgentForTask(
+  agents: readonly LoomAgentStatus[],
+  taskId: string,
+): LoomAgentStatus | undefined {
+  return (
+    agents.find((a) => a.active_task_id === taskId) ??
+    agents.find((a) => a.current_task_id === taskId)
+  );
+}
+
+/** The agent with the given name, or undefined. */
+export function resolveAgentByName(
+  agents: readonly LoomAgentStatus[],
+  name: string,
+): LoomAgentStatus | undefined {
+  return agents.find((a) => a.name === name);
+}
