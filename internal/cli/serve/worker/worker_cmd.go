@@ -80,6 +80,8 @@ func init() {
 	workerCmd.Flags().IntVarP(&workerIdleTimeout, "idle-timeout", "t", 0, "Exit after N minutes with no tasks (0 = none)")
 	workerCmd.Flags().StringVar(&workerParentID, "parent", "", "Filter tasks to descendants of this epic ID")
 
+	initWorkerProfileCommands()
+	initWorkerServiceCommands()
 	cli.RegisterCommand(workerCmd)
 }
 

@@ -1,7 +1,9 @@
 package fleetdb
 
 import (
+	"bytes"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -148,6 +150,121 @@ func TestControlPlaneClientAgentSessionUpdateBodyUsesWireNames(t *testing.T) {
 	}
 	if session.TaskID != "T-1" || session.Status != domain.AgentSessionFailed {
 		t.Fatalf("session = %+v", session)
+	}
+}
+
+func TestControlPlaneClientArtifactUploadContent(t *testing.T) {
+	body := []byte("artifact bytes")
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPut || r.URL.Path != "/api/v1/WS/artifacts/artifact-1/content" {
+			t.Fatalf("unexpected request %s %s", r.Method, r.URL.String())
+		}
+		if got := r.Header.Get("Content-Type"); got != "text/plain" {
+			t.Fatalf("content type = %q, want text/plain", got)
+		}
+		if got := r.Header.Get("Accept"); got != "application/json" {
+			t.Fatalf("accept = %q, want application/json", got)
+		}
+		if got := r.Header.Get("X-Actor"); got != "tester" {
+			t.Fatalf("actor = %q, want tester", got)
+		}
+		got, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatalf("read body: %v", err)
+		}
+		if !bytes.Equal(got, body) {
+			t.Fatalf("body = %q, want %q", got, body)
+		}
+		writeJSON(t, w, domain.Artifact{
+			WorkspaceKey:  "WS",
+			ArtifactID:    "artifact-1",
+			URI:           "file:///tmp/artifact",
+			MIMEType:      "text/plain",
+			SizeBytes:     int64(len(body)),
+			Checksum:      "sha256:test",
+			ContentHash:   "sha256:test",
+			DurableStatus: "uploading",
+		})
+	}))
+	defer ts.Close()
+
+	client, err := New(Config{BaseURL: ts.URL, Actor: "tester"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	artifact, err := client.Artifacts().UploadContent(t.Context(), "WS", "artifact-1", store.ArtifactContentUpload{
+		Body:     bytes.NewReader(body),
+		MIMEType: "text/plain",
+	})
+	if err != nil {
+		t.Fatalf("upload content: %v", err)
+	}
+	if artifact.ArtifactID != "artifact-1" || artifact.DurableStatus != "uploading" || artifact.SizeBytes != int64(len(body)) {
+		t.Fatalf("artifact = %+v", artifact)
+	}
+}
+
+func TestControlPlaneClientArtifactFinalize(t *testing.T) {
+	size := int64(14)
+	contentHash := "sha256:test"
+	summary := "patch artifact"
+	metadata := map[string]string{"kind": "patch"}
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/api/v1/WS/artifacts/artifact-1/finalize" {
+			t.Fatalf("unexpected request %s %s", r.Method, r.URL.String())
+		}
+		if got := r.Header.Get("Accept"); got != "application/json" {
+			t.Fatalf("accept = %q, want application/json", got)
+		}
+		if got := r.Header.Get("X-Actor"); got != "tester" {
+			t.Fatalf("actor = %q, want tester", got)
+		}
+		var body map[string]json.RawMessage
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatalf("decode body: %v", err)
+		}
+		if _, ok := body["durable_status"]; ok {
+			t.Fatalf("finalize body contains durable_status: %#v", body)
+		}
+		var gotSummary string
+		if err := json.Unmarshal(body["summary"], &gotSummary); err != nil || gotSummary != summary {
+			t.Fatalf("summary raw=%s err=%v, want %q", body["summary"], err, summary)
+		}
+		var gotHash string
+		if err := json.Unmarshal(body["content_hash"], &gotHash); err != nil || gotHash != contentHash {
+			t.Fatalf("content_hash raw=%s err=%v, want %q", body["content_hash"], err, contentHash)
+		}
+		var gotSize int64
+		if err := json.Unmarshal(body["size_bytes"], &gotSize); err != nil || gotSize != size {
+			t.Fatalf("size_bytes raw=%s err=%v, want %d", body["size_bytes"], err, size)
+		}
+		writeJSON(t, w, domain.Artifact{
+			WorkspaceKey:  "WS",
+			ArtifactID:    "artifact-1",
+			Summary:       summary,
+			SizeBytes:     size,
+			Checksum:      contentHash,
+			ContentHash:   contentHash,
+			DurableStatus: "finalized",
+		})
+	}))
+	defer ts.Close()
+
+	client, err := New(Config{BaseURL: ts.URL, Actor: "tester"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	artifact, err := client.Artifacts().Finalize(t.Context(), "WS", "artifact-1", store.ArtifactFinalize{
+		Summary:     &summary,
+		SizeBytes:   &size,
+		ContentHash: &contentHash,
+		Metadata:    &metadata,
+	})
+	if err != nil {
+		t.Fatalf("finalize artifact: %v", err)
+	}
+	if artifact.ArtifactID != "artifact-1" || artifact.DurableStatus != "finalized" || artifact.ContentHash != contentHash {
+		t.Fatalf("artifact = %+v", artifact)
 	}
 }
 

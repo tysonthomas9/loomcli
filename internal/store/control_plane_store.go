@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"io"
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
@@ -136,19 +137,25 @@ type TerminalSessionStore interface {
 }
 
 type ArtifactCreate struct {
-	WorkspaceKey string
-	ArtifactID   string
-	AgentID      string
-	SessionID    string
-	TerminalID   string
-	TaskID       string
-	Type         string
-	URI          string
-	Summary      string
-	MIMEType     string
-	SizeBytes    int64
-	Checksum     string
-	Metadata     map[string]string
+	WorkspaceKey    string
+	ArtifactID      string
+	AgentID         string
+	SessionID       string
+	TerminalID      string
+	TaskID          string
+	OwnerType       string
+	OwnerID         string
+	Type            string
+	URI             string
+	Summary         string
+	MIMEType        string
+	SizeBytes       int64
+	Checksum        string
+	ContentHash     string
+	Visibility      string
+	RedactionStatus string
+	DurableStatus   string
+	Metadata        map[string]string
 }
 
 type ArtifactFilter struct {
@@ -156,28 +163,57 @@ type ArtifactFilter struct {
 	SessionID  string
 	TerminalID string
 	TaskID     string
+	OwnerType  string
+	OwnerID    string
 	Type       string
+	Status     string
 	Limit      int
 }
 
 type ArtifactUpdate struct {
-	AgentID    *string
-	SessionID  *string
-	TerminalID *string
-	TaskID     *string
-	Type       *string
-	URI        *string
-	Summary    *string
-	MIMEType   *string
-	SizeBytes  *int64
-	Checksum   *string
-	Metadata   *map[string]string
+	AgentID         *string
+	SessionID       *string
+	TerminalID      *string
+	TaskID          *string
+	OwnerType       *string
+	OwnerID         *string
+	Type            *string
+	URI             *string
+	Summary         *string
+	MIMEType        *string
+	SizeBytes       *int64
+	Checksum        *string
+	ContentHash     *string
+	Visibility      *string
+	RedactionStatus *string
+	DurableStatus   *string
+	Metadata        *map[string]string
+	FinalizedAt     *time.Time
+}
+
+type ArtifactFinalize struct {
+	URI             *string
+	Summary         *string
+	MIMEType        *string
+	SizeBytes       *int64
+	Checksum        *string
+	ContentHash     *string
+	Visibility      *string
+	RedactionStatus *string
+	Metadata        *map[string]string
+}
+
+type ArtifactContentUpload struct {
+	Body     io.Reader
+	MIMEType string
 }
 
 type ArtifactStore interface {
 	Create(ctx context.Context, in ArtifactCreate) (*domain.Artifact, error)
 	Get(ctx context.Context, workspaceKey, artifactID string) (*domain.Artifact, error)
 	List(ctx context.Context, workspaceKey string, filter ArtifactFilter) ([]*domain.Artifact, error)
+	UploadContent(ctx context.Context, workspaceKey, artifactID string, upload ArtifactContentUpload) (*domain.Artifact, error)
+	Finalize(ctx context.Context, workspaceKey, artifactID string, finalize ArtifactFinalize) (*domain.Artifact, error)
 	Update(ctx context.Context, workspaceKey, artifactID string, patch ArtifactUpdate) (*domain.Artifact, error)
 }
 

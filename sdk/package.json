@@ -1,0 +1,43 @@
+{
+  "name": "@loom/sdk",
+  "version": "0.1.0",
+  "description": "Scoped runner SDK for Loom task runs",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./index.d.ts",
+      "import": "./index.js"
+    },
+    "./runner": {
+      "types": "./runner.d.ts",
+      "import": "./runner.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "types": "./index.d.ts",
+  "scripts": {
+    "test": "node --test *.test.mjs"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "files": [
+    "index.js",
+    "index.d.ts",
+    "runner.js",
+    "runner.d.ts"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/tysonthomas9/loomcli.git",
+    "directory": "sdk"
+  },
+  "keywords": [
+    "loom",
+    "fleet-db",
+    "runner",
+    "task-run"
+  ],
+  "author": "Tyson Thomas",
+  "license": "MIT"
+}

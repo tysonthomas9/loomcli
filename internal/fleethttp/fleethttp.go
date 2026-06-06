@@ -4,8 +4,8 @@
 // Both target the same fleet-db API and previously duplicated the
 // request-building, auth-header, and error-extraction code.
 //
-// What's shared: header construction (Authorization / X-Fleet-API-Key
-// / X-Actor), request body marshaling, response error-message
+// What's shared: header construction (Authorization / X-API-Key /
+// X-Fleet-API-Key / X-Actor), request body marshaling, response error-message
 // extraction.
 //
 // What's not shared: status→sentinel mapping. The two callers map
@@ -27,7 +27,7 @@ import (
 // to empty (omitted from the request when zero).
 type Auth struct {
 	BearerToken string // → Authorization: Bearer <token>
-	APIKey      string // → X-Fleet-API-Key
+	APIKey      string // → X-API-Key and X-Fleet-API-Key
 	Actor       string // → X-Actor (used by --auth-dev-mode)
 }
 
@@ -37,6 +37,7 @@ func (a Auth) Apply(req *http.Request) {
 		req.Header.Set("Authorization", "Bearer "+a.BearerToken)
 	}
 	if a.APIKey != "" {
+		req.Header.Set("X-API-Key", a.APIKey)
 		req.Header.Set("X-Fleet-API-Key", a.APIKey)
 	}
 	if a.Actor != "" {

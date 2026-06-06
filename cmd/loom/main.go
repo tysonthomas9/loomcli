@@ -17,6 +17,7 @@ import (
 	_ "github.com/tysonthomas9/loomcli/internal/cli/cleanup"
 	_ "github.com/tysonthomas9/loomcli/internal/cli/daemon"
 	_ "github.com/tysonthomas9/loomcli/internal/cli/doctor"
+	_ "github.com/tysonthomas9/loomcli/internal/cli/driver"
 	_ "github.com/tysonthomas9/loomcli/internal/cli/git"
 	_ "github.com/tysonthomas9/loomcli/internal/cli/hooks"
 	_ "github.com/tysonthomas9/loomcli/internal/cli/local"

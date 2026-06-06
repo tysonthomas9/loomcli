@@ -9,6 +9,50 @@
 - `docs/design/flue-daytona-runtime-proposal.md`
 - `docs/product/loom-typescript-sdk-spec.md`
 
+## Implementation Audit - 2026-06-06
+
+The current implementation is not yet the full V2 contract. Recent audit work
+closed the critical early-platform gaps:
+
+- FleetDB `CompleteTaskRun(close_task=true)` now writes the same `issue.close`
+  event shape used by manual issue close, and replaying the same completion does
+  not duplicate the event.
+- Loom driver publish now invokes a Flue build, records a built
+  `dist/server.mjs` artifact in `server_ref`, and the default Node runner
+  executes that built artifact through a local IPC launcher. Unit coverage uses
+  a deterministic fake Flue builder; a real local Flue toolchain smoke test is
+  still required once the matching `flue` CLI dependencies are installed.
+- FleetDB `TaskRun` now records `worker_profile_id`, `runner_placement`, and
+  `sandbox_placement` as durable fields; `WorkerProfile` records
+  `runtime_policy` and `max_parallel`.
+- FleetDB exposes an atomic queued `TaskRun` claim API with worker-profile
+  eligibility, node drain/expiry checks, node capacity enforcement,
+  `WorkerProfile.max_parallel` enforcement, runner placement, and sandbox
+  placement. Redis, Postgres, HTTP API, client, and OpenAPI surfaces are
+  covered.
+- Loom child task execution now creates queued task runs, claims them through
+  the TaskRun store contract, and executes/heartbeats/finishes with the claimed
+  node, lease, fencing token, and placement payload.
+- FleetDB exposes stale `DriverRun` recovery that fails heartbeat-expired
+  running runs without owner credentials and releases active-epic admission;
+  Redis and Postgres storage paths plus HTTP API/client surfaces are covered.
+  Loom's driver executor loop invokes that recovery before claiming queued
+  runs.
+- FleetDB stale `TaskRun` recovery re-checks Redis heartbeats immediately before
+  failing a run, which prevents a live heartbeat after the stale scan from being
+  overwritten by recovery.
+
+Known remaining validation:
+
+- Run a real local Flue toolchain smoke test once matching `flue` CLI
+  dependencies are installed locally. The current coverage uses deterministic
+  fake Flue builders and built-server runner tests.
+- Full V2 cloud readiness remains open: provider profile policy mapping,
+  cloud worker placement/capacity beyond the local executor loop, trigger
+  provider ingestion, scoped cloud credentials/artifacts, UI/ops surfaces, and
+  phase-level end-to-end acceptance still need dedicated implementation and
+  validation.
+
 ## Purpose
 
 The broader V2 proposal describes the eventual platform shape, but it is too

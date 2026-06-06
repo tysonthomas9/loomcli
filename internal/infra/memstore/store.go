@@ -24,6 +24,14 @@ type Store struct {
 	leases     *agentLeaseStore
 	ownership  *agentOwnershipLeaseStore
 	commands   *agentCommandStore
+	drivers    *driverStore
+	versions   *driverVersionStore
+	profiles   *workerProfileStore
+	services   *agentServiceStore
+	bindings   *triggerBindingStore
+	runs       *driverRunStore
+	steps      *driverStepStore
+	taskRuns   *taskRunStore
 	roles      *roleStore
 	daemon     *daemonStore
 }
@@ -31,6 +39,22 @@ type Store struct {
 // New constructs an empty in-memory store. Tests call this directly;
 // production code uses internal/infra/fleetdb.New instead.
 func New() *Store {
+	drivers := newDriverStore()
+	versions := newDriverVersionStore(drivers)
+	profiles := newWorkerProfileStore()
+	roles := newRoleStore()
+	services := newAgentServiceStore(roles, profiles)
+	bindings := newTriggerBindingStore(versions, services)
+	services.bindings = bindings
+	roles.services = services
+	profiles.services = services
+	artifacts := newArtifactStore()
+	runs := newDriverRunStore(versions, bindings)
+	steps := newDriverStepStore(runs)
+	taskRuns := newTaskRunStore(runs, steps, artifacts, profiles)
+	runs.steps = steps
+	runs.taskRuns = taskRuns
+	steps.taskRuns = taskRuns
 	return &Store{
 		workspaces: newWorkspaceStore(),
 		repos:      newRepoStore(),
@@ -38,11 +62,19 @@ func New() *Store {
 		nodes:      newNodeStore(),
 		sessions:   newAgentSessionStore(),
 		terminals:  newTerminalSessionStore(),
-		artifacts:  newArtifactStore(),
+		artifacts:  artifacts,
 		leases:     newAgentLeaseStore(),
 		ownership:  newAgentOwnershipLeaseStore(),
 		commands:   newAgentCommandStore(),
-		roles:      newRoleStore(),
+		drivers:    drivers,
+		versions:   versions,
+		profiles:   profiles,
+		services:   services,
+		bindings:   bindings,
+		runs:       runs,
+		steps:      steps,
+		taskRuns:   taskRuns,
+		roles:      roles,
 		daemon:     newDaemonStore(),
 	}
 }
@@ -81,6 +113,22 @@ func (s *Store) AgentLeases() store.AgentLeaseStore { return s.leases }
 func (s *Store) AgentOwnershipLeases() store.AgentOwnershipLeaseStore { return s.ownership }
 
 func (s *Store) AgentCommands() store.AgentCommandStore { return s.commands }
+
+func (s *Store) Drivers() store.DriverStore { return s.drivers }
+
+func (s *Store) DriverVersions() store.DriverVersionStore { return s.versions }
+
+func (s *Store) WorkerProfiles() store.WorkerProfileStore { return s.profiles }
+
+func (s *Store) AgentServices() store.AgentServiceStore { return s.services }
+
+func (s *Store) TriggerBindings() store.TriggerBindingStore { return s.bindings }
+
+func (s *Store) DriverRuns() store.DriverRunStore { return s.runs }
+
+func (s *Store) DriverSteps() store.DriverStepStore { return s.steps }
+
+func (s *Store) TaskRuns() store.TaskRunStore { return s.taskRuns }
 
 // Roles returns the RoleStore.
 func (s *Store) Roles() store.RoleStore { return s.roles }
