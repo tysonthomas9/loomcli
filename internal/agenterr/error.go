@@ -7,7 +7,7 @@ import (
 
 // AgentError represents a classified agent subprocess failure.
 type AgentError struct {
-	Class      ErrorClass    // Classified error type
+	Class      Outcome       // Classified outcome: harness class OR loom-domain outcome
 	ExitCode   int           // Process exit code
 	Message    string        // Human-readable error message
 	RawOutput  string        // Tail of log that was parsed (for debugging)
@@ -22,14 +22,4 @@ func (e *AgentError) Error() string {
 		msg += fmt.Sprintf(" (retry after %s)", e.RetryAfter)
 	}
 	return msg
-}
-
-// IsRetryable returns true if this error is worth retrying.
-func (e *AgentError) IsRetryable() bool {
-	return e.Class.IsRetryable()
-}
-
-// IsFatal returns true if this error indicates a permanent failure.
-func (e *AgentError) IsFatal() bool {
-	return e.Class.IsFatal()
 }

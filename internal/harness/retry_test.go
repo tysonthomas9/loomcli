@@ -148,9 +148,9 @@ func TestRunWithRetry_Table(t *testing.T) {
 			wantSleeps: nil,
 		},
 		{
-			name: "failed_status_with_api_error_signal_retries",
+			name: "failed_status_with_retryable_class_retries",
 			script: []scriptStep{
-				{res: hwharness.Result{Result: wrapper.Result{Status: wrapper.StatusFailed, ExitCode: 1}, SawAPIError: true, RetryAfter: 0}},
+				{res: hwharness.Result{Result: wrapper.Result{Status: wrapper.StatusFailed, ExitCode: 1, Class: wrapper.ErrTransient}, RetryAfter: 0}},
 				{res: hwharness.Result{Result: wrapper.Result{Status: wrapper.StatusIdle}}},
 			},
 			policy:     RetryPolicy{Max: 3, BaseBackoff: time.Second, MaxBackoff: 10 * time.Second},
@@ -278,32 +278,41 @@ func TestBackoffFor(t *testing.T) {
 
 func TestShouldRetry(t *testing.T) {
 	type input struct {
-		status      wrapper.Status
-		sawAPIError bool
+		status wrapper.Status
+		class  wrapper.ErrorClass
 	}
 	cases := map[input]bool{
-		// Without API-error signal in events:
-		{wrapper.StatusIdle, false}:            false,
-		{wrapper.StatusFailed, false}:          false,
-		{wrapper.StatusBlockedByCost, false}:   false,
-		{wrapper.StatusInterrupted, false}:     false,
-		{wrapper.StatusUnknown, false}:         false,
-		{wrapper.StatusWaitingForInput, false}: false,
-		{wrapper.StatusStale, false}:           false,
-		{wrapper.StatusRetryLater, false}:      true,
-		{wrapper.StatusAPIError, false}:        true,
-		// API-error signal observed mid-run: failed/unknown become retryable.
-		{wrapper.StatusFailed, true}:  true,
-		{wrapper.StatusUnknown, true}: true,
-		// Other statuses still don't retry even with api-error signal —
-		// e.g. blocked_by_cost is a definitive non-retry verdict.
-		{wrapper.StatusBlockedByCost, true}: false,
-		{wrapper.StatusInterrupted, true}:   false,
-		{wrapper.StatusIdle, true}:          false,
+		// No carried class:
+		{wrapper.StatusIdle, wrapper.ErrNone}:            false,
+		{wrapper.StatusFailed, wrapper.ErrNone}:          false,
+		{wrapper.StatusBlockedByCost, wrapper.ErrNone}:   false,
+		{wrapper.StatusInterrupted, wrapper.ErrNone}:     false,
+		{wrapper.StatusUnknown, wrapper.ErrNone}:         false,
+		{wrapper.StatusWaitingForInput, wrapper.ErrNone}: false,
+		{wrapper.StatusStale, wrapper.ErrNone}:           false,
+		{wrapper.StatusRetryLater, wrapper.ErrNone}:      true,
+		{wrapper.StatusAPIError, wrapper.ErrNone}:        true,
+		// A retryable class inherited onto a failed exit (e.g. a mid-run
+		// non-terminal API error): failed/unknown become retryable.
+		{wrapper.StatusFailed, wrapper.ErrTransient}:   true,
+		{wrapper.StatusFailed, wrapper.ErrTimeout}:     true,
+		{wrapper.StatusFailed, wrapper.ErrRateLimited}: true,
+		{wrapper.StatusUnknown, wrapper.ErrTransient}:  true,
+		// Fatal/deterministic classes are NOT retried even on a failed exit —
+		// finer than the old SawAPIError bool, which retried any API error.
+		{wrapper.StatusFailed, wrapper.ErrAuth}:            false,
+		{wrapper.StatusFailed, wrapper.ErrBilling}:         false,
+		{wrapper.StatusFailed, wrapper.ErrContextOverflow}: false,
+		// Non-retryable terminal statuses stay definitive regardless of
+		// class — blocked_by_cost is the caller's to handle.
+		{wrapper.StatusBlockedByCost, wrapper.ErrRateLimited}: false,
+		{wrapper.StatusInterrupted, wrapper.ErrTransient}:     false,
+		{wrapper.StatusIdle, wrapper.ErrTransient}:            false,
 	}
 	for in, want := range cases {
-		if got := shouldRetry(in.status, in.sawAPIError); got != want {
-			t.Errorf("shouldRetry(%q, %v) = %v, want %v", in.status, in.sawAPIError, got, want)
+		res := hwharness.Result{Result: wrapper.Result{Status: in.status, Class: in.class}}
+		if got := shouldRetry(res); got != want {
+			t.Errorf("shouldRetry(%q, %v) = %v, want %v", in.status, in.class, got, want)
 		}
 	}
 }

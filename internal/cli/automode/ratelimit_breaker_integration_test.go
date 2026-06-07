@@ -5,6 +5,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/olesho/harness-wrapper/pkg/wrapper"
+
 	"github.com/tysonthomas9/loomcli/internal/agenterr"
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/events"
@@ -38,7 +40,7 @@ func TestHandleRateLimitError_TripsBreaker_EmitsCircuitOpened(t *testing.T) {
 	shutdown := make(chan struct{})
 
 	ae := &agenterr.AgentError{
-		Class:      agenterr.RateLimited,
+		Class:      agenterr.OutcomeFromHarness(wrapper.ErrRateLimited),
 		Message:    "rate limit",
 		RetryAfter: 1 * time.Millisecond,
 	}
@@ -108,7 +110,7 @@ func TestHandleRateLimitError_DoesNotReEmitWhileOpen(t *testing.T) {
 	shutdown := make(chan struct{})
 
 	ae := &agenterr.AgentError{
-		Class:      agenterr.RateLimited,
+		Class:      agenterr.OutcomeFromHarness(wrapper.ErrRateLimited),
 		Message:    "rate limit",
 		RetryAfter: 1 * time.Millisecond,
 	}
@@ -142,7 +144,7 @@ func TestHandleAutoTaskSuccess_ClosesBreaker_EmitsCircuitClosed(t *testing.T) {
 	shutdown := make(chan struct{})
 
 	ae := &agenterr.AgentError{
-		Class:      agenterr.RateLimited,
+		Class:      agenterr.OutcomeFromHarness(wrapper.ErrRateLimited),
 		Message:    "rate limit",
 		RetryAfter: 1 * time.Millisecond,
 	}
@@ -258,7 +260,7 @@ func TestWaitForCircuitBreaker_ShutdownDuringCooldown(t *testing.T) {
 	ctx := newBreakerTestCtx(1*time.Hour, 10*time.Second, 2, bus)
 	shutdown := make(chan struct{})
 
-	ae := &agenterr.AgentError{Class: agenterr.RateLimited, RetryAfter: 1 * time.Millisecond}
+	ae := &agenterr.AgentError{Class: agenterr.OutcomeFromHarness(wrapper.ErrRateLimited), RetryAfter: 1 * time.Millisecond}
 	handleAutoTaskError(ctx, ae, errors.New("exit 1"), shutdown)
 	handleAutoTaskError(ctx, ae, errors.New("exit 1"), shutdown)
 

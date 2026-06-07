@@ -16,17 +16,18 @@ import (
 
 // classifyResult is the internal result from a classification step.
 type classifyResult struct {
-	Class      ErrorClass
+	Class      Outcome
 	Message    string
 	RetryAfter time.Duration
 }
 
-// errorPattern defines a single regex→ErrorClass mapping. It now powers the
-// single residual table (loom-specific distinctions the wrapper does not
-// model) rather than five near-identical per-backend tables.
+// errorPattern defines a single regex→class mapping over the wrapper's
+// canonical harness-output taxonomy. It powers the residual table (signals
+// the wrapper's anchored matchers miss) rather than five near-identical
+// per-backend tables.
 type errorPattern struct {
 	re    *regexp.Regexp
-	class ErrorClass
+	class wrapper.ErrorClass
 	msg   string
 }
 
@@ -63,17 +64,11 @@ const AgentLaunchFailedMarker = "loom: agent process failed to launch"
 // agentLaunchFailedRe is the precompiled matcher used by classifyFromText.
 var agentLaunchFailedRe = regexp.MustCompile(regexp.QuoteMeta(AgentLaunchFailedMarker))
 
-// rateLimitHintRe distinguishes a retryable throttle from a fatal
-// budget/billing block within the wrapper's coarse blocked_by_cost status.
-// Anything matching here is treated as RateLimited; everything else under
-// blocked_by_cost defaults to the conservative fatal BillingError so a
-// genuine budget exhaustion is never retried forever.
-var rateLimitHintRe = regexp.MustCompile(`(?i)rate.?limit|usage.?limit|session.?limit|too many requests|hit your (?:session |usage )?limit|limit resets|resets\b|try again at|throttl|\b429\b|resource.?exhausted|tokens per min`)
-
-// timeoutHintRe recognizes timeout-worded errors. The wrapper lumps these into
-// retry_later, but loom keeps a distinct Timeout class (its own backoff), so we
-// re-derive it from the text rather than collapsing every retry_later into
-// Transient.
+// timeoutHintRe recognizes timeout-worded errors. The wrapper refines its
+// retry hits by the matched phrase; loom additionally upgrades a Transient
+// whose surrounding text names a timeout, preserving the distinct Timeout
+// class (its own backoff bucket) exactly as before the wrapper owned the
+// fine taxonomy.
 var timeoutHintRe = regexp.MustCompile(`(?i)\btimeout\b|etimedout|connection.?timed?.?out|timed?.?out|deadline.?exceeded`)
 
 // residualPatterns is the single, backend-agnostic fallback table. It encodes
@@ -87,13 +82,13 @@ var timeoutHintRe = regexp.MustCompile(`(?i)\btimeout\b|etimedout|connection.?ti
 // Ordered RateLimited-first, Transient-last, mirroring the precedence of the
 // former per-backend tables.
 var residualPatterns = []errorPattern{
-	{regexp.MustCompile(`(?i)\b429\b|too many requests|tokens per min|overloaded_error|resource.?exhausted|resource_exhausted|rate.?limit|usage.?limit|session.?limit|resets at|resets \d{1,2}:\d{2}|try again at\s+\d`), RateLimited, "rate limit exceeded"},
-	{regexp.MustCompile(`(?i)\b401\b|unauthorized|unauthenticated|permission.?denied|forbidden|invalid.?api.?key|incorrect.?api.?key|invalid.*key|authentication.?failed|ANTHROPIC_API_KEY|OPENAI_API_KEY|GEMINI_API_KEY|GOOGLE_API_KEY|CURSOR_API_KEY`), AuthFailure, "authentication failed"},
-	{regexp.MustCompile(`(?i)\b402\b|payment.?required|insufficient.?(?:credits|quota)|insufficient_quota|exceeded.*quota|quota.?exceeded|\bquota\b|\bcredits\b|\bbilling\b`), BillingError, "billing error"},
-	{regexp.MustCompile(`(?i)model.?not.?found|model.*not found|model.*does not exist|model.*not.*exist|model_not_found|unsupported.?model|unknown.?model|invalid.?model|selected model.*may not exist|selected model.*may not have access to it|\b404\b.*model`), ModelNotFound, "model not found"},
-	{regexp.MustCompile(`(?i)context.?length|context.?window|context_length_exceeded|maximum context length|max.?tokens|max.*tokens|token.?limit|prompt.?too.?long|too.?long`), ContextOverflow, "context length exceeded"},
-	{regexp.MustCompile(`(?i)\btimeout\b|etimedout|connection.?timed?.?out|timed?.?out|deadline.?exceeded`), Timeout, "connection timeout"},
-	{regexp.MustCompile(`(?i)\b50[023]\b|\b529\b|server.?error|server_error|internal.?server.?error|internal.?error|service.?unavailable|backend.?error|overloaded`), Transient, "server error"},
+	{regexp.MustCompile(`(?i)\b429\b|too many requests|tokens per min|overloaded_error|resource.?exhausted|resource_exhausted|rate.?limit|usage.?limit|session.?limit|resets at|resets \d{1,2}:\d{2}|try again at\s+\d`), wrapper.ErrRateLimited, "rate limit exceeded"},
+	{regexp.MustCompile(`(?i)\b401\b|unauthorized|unauthenticated|permission.?denied|forbidden|invalid.?api.?key|incorrect.?api.?key|invalid.*key|authentication.?failed|ANTHROPIC_API_KEY|OPENAI_API_KEY|GEMINI_API_KEY|GOOGLE_API_KEY|CURSOR_API_KEY`), wrapper.ErrAuth, "authentication failed"},
+	{regexp.MustCompile(`(?i)\b402\b|payment.?required|insufficient.?(?:credits|quota)|insufficient_quota|exceeded.*quota|quota.?exceeded|\bquota\b|\bcredits\b|\bbilling\b`), wrapper.ErrBilling, "billing error"},
+	{regexp.MustCompile(`(?i)model.?not.?found|model.*not found|model.*does not exist|model.*not.*exist|model_not_found|unsupported.?model|unknown.?model|invalid.?model|selected model.*may not exist|selected model.*may not have access to it|\b404\b.*model`), wrapper.ErrModelNotFound, "model not found"},
+	{regexp.MustCompile(`(?i)context.?length|context.?window|context_length_exceeded|maximum context length|max.?tokens|max.*tokens|token.?limit|prompt.?too.?long|too.?long`), wrapper.ErrContextOverflow, "context length exceeded"},
+	{regexp.MustCompile(`(?i)\btimeout\b|etimedout|connection.?timed?.?out|timed?.?out|deadline.?exceeded`), wrapper.ErrTimeout, "connection timeout"},
+	{regexp.MustCompile(`(?i)\b50[023]\b|\b529\b|server.?error|server_error|internal.?server.?error|internal.?error|service.?unavailable|backend.?error|overloaded`), wrapper.ErrTransient, "server error"},
 }
 
 // classifyWithPatterns runs an ordered pattern table against text, extracting a
@@ -105,10 +100,10 @@ func classifyWithPatterns(text string, patterns []errorPattern) *classifyResult 
 	for _, p := range patterns {
 		if p.re.MatchString(text) {
 			r := &classifyResult{
-				Class:   p.class,
+				Class:   OutcomeFromHarness(p.class),
 				Message: p.msg,
 			}
-			if p.class == RateLimited {
+			if p.class == wrapper.ErrRateLimited {
 				r.RetryAfter = parseRetryAfter(text)
 			}
 			return r
@@ -143,7 +138,7 @@ func classifyFromText(text string, exitCode int, backend string) *AgentError {
 	// 1. Cross-cutting wrapper signal: the loom-side translator prepends this
 	//    marker when the backend CLI is missing. It outranks everything else.
 	if backendUnavailableRe.MatchString(text) {
-		result = &classifyResult{Class: BackendUnavailable, Message: "backend binary not on PATH"}
+		result = &classifyResult{Class: OutcomeFromDomain(BackendUnavailableOutcome), Message: "backend binary not on PATH"}
 	}
 
 	// A wrapper launch failure (PTY/exec) means the backend process never
@@ -152,7 +147,7 @@ func classifyFromText(text string, exitCode int, backend string) *AgentError {
 	// and keep the reason so it surfaces instead of a generic Unknown.
 	if result == nil && agentLaunchFailedRe.MatchString(text) {
 		result = &classifyResult{
-			Class:   SpawnFailure,
+			Class:   OutcomeFromDomain(SpawnFailureOutcome),
 			Message: "agent process failed to launch (backend binary may be updating or incompatible)",
 		}
 	}
@@ -172,7 +167,7 @@ func classifyFromText(text string, exitCode int, backend string) *AgentError {
 	// 4. Exit-code fallback.
 	if result == nil {
 		result = &classifyResult{
-			Class:   classifyByExitCode(exitCode),
+			Class:   OutcomeFromHarness(classifyByExitCode(exitCode)),
 			Message: classifyByExitCodeMessage(exitCode),
 		}
 	}
@@ -188,65 +183,34 @@ func classifyFromText(text string, exitCode int, backend string) *AgentError {
 	}
 }
 
-// fromClassification maps a harness-wrapper Classification onto loom's
-// ErrorClass. It returns nil when the wrapper reported nothing actionable (or
-// an API-error code we don't special-case), leaving the residual table and
-// exit-code fallback to decide. text is the raw output, used to split the
-// wrapper's coarse blocked_by_cost status and to recover a Retry-After hint.
+// fromClassification adapts a harness-wrapper Classification. The wrapper now
+// owns the fine taxonomy (Classification.Class), so this collapses to a thin
+// mapping: take the wrapper's class verbatim, fold the binary-not-found signal
+// into loom's BackendUnavailable domain outcome, and keep two loom-side
+// behaviors — (a) an ErrUnknown/ErrNone result is treated as "nothing
+// actionable" so the residual table and exit-code fallback can refine it
+// (e.g. a 403 "forbidden" → ErrAuth via the residual), and (b) a Transient
+// whose surrounding text names a timeout is upgraded to loom's distinct
+// Timeout backoff bucket, exactly as before.
 func fromClassification(c wrapper.Classification, text string) *classifyResult {
-	switch c.Status {
-	case wrapper.StatusAPIError:
-		return apiErrorResult(c, text)
-	case wrapper.StatusRetryLater:
-		// Transient / transport / "try again later" — retryable. Preserve
-		// loom's distinct Timeout class when the wrapper's retry_later is
-		// actually a timeout (e.g. gemini "deadline exceeded").
+	if c.Status == wrapper.StatusBinaryNotFound {
+		return &classifyResult{Class: OutcomeFromDomain(BackendUnavailableOutcome), Message: "backend binary not on PATH"}
+	}
+	switch c.Class {
+	case wrapper.ErrNone, wrapper.ErrUnknown:
+		// Nothing actionable (idle / waiting_for_input / unmapped API code) —
+		// residual/exit-code decide.
+		return nil
+	case wrapper.ErrTransient:
 		if timeoutHintRe.MatchString(text) {
-			return &classifyResult{Class: Timeout, Message: reasonOr(c.Reason, "connection timeout"), RetryAfter: c.RetryAfter}
+			return &classifyResult{Class: OutcomeFromHarness(wrapper.ErrTimeout), Message: reasonOr(c.Reason, "connection timeout"), RetryAfter: c.RetryAfter}
 		}
-		return &classifyResult{Class: Transient, Message: reasonOr(c.Reason, "transient error"), RetryAfter: c.RetryAfter}
-	case wrapper.StatusBlockedByCost:
-		return blockedByCostResult(c, text)
-	case wrapper.StatusBinaryNotFound:
-		return &classifyResult{Class: BackendUnavailable, Message: "backend binary not on PATH"}
+		return &classifyResult{Class: OutcomeFromHarness(wrapper.ErrTransient), Message: reasonOr(c.Reason, "transient error"), RetryAfter: c.RetryAfter}
+	case wrapper.ErrRateLimited:
+		return &classifyResult{Class: OutcomeFromHarness(wrapper.ErrRateLimited), Message: reasonOr(c.Reason, "rate limit exceeded"), RetryAfter: retryAfterFrom(c, text)}
 	default:
-		// idle / failed / unknown / waiting_for_input / stale / interrupted /
-		// empty — nothing actionable here.
-		return nil
+		return &classifyResult{Class: OutcomeFromHarness(c.Class), Message: reasonOr(c.Reason, c.Class.String()), RetryAfter: c.RetryAfter}
 	}
-}
-
-// apiErrorResult dispatches a wrapper StatusAPIError on its upstream HTTP code.
-// Unmapped codes (400/403/422/…) return nil so the residual can refine them
-// from the text (e.g. a 403 "forbidden" → AuthFailure).
-func apiErrorResult(c wrapper.Classification, text string) *classifyResult {
-	switch {
-	case c.HTTPCode == 401:
-		return &classifyResult{Class: AuthFailure, Message: reasonOr(c.Reason, "authentication failed (401)")}
-	case c.HTTPCode == 402:
-		return &classifyResult{Class: BillingError, Message: reasonOr(c.Reason, "billing error (402)")}
-	case c.HTTPCode == 404:
-		return &classifyResult{Class: ModelNotFound, Message: reasonOr(c.Reason, "model not found (404)")}
-	case c.HTTPCode == 429:
-		return &classifyResult{Class: RateLimited, Message: reasonOr(c.Reason, "rate limit exceeded"), RetryAfter: retryAfterFrom(c, text)}
-	case c.HTTPCode == 408 || (c.HTTPCode >= 500 && c.HTTPCode <= 599):
-		return &classifyResult{Class: Transient, Message: reasonOr(c.Reason, "server error"), RetryAfter: c.RetryAfter}
-	case c.HTTPCode == 0:
-		// Transport-level error (socket closed, connection reset) — retryable.
-		return &classifyResult{Class: Transient, Message: reasonOr(c.Reason, "transport error"), RetryAfter: c.RetryAfter}
-	default:
-		return nil
-	}
-}
-
-// blockedByCostResult splits the wrapper's coarse blocked_by_cost: rate/usage/
-// session-limit signals are retryable RateLimited; budget/credit/billing
-// exhaustion (and the ambiguous remainder) are fatal BillingError.
-func blockedByCostResult(c wrapper.Classification, text string) *classifyResult {
-	if rateLimitHintRe.MatchString(text) {
-		return &classifyResult{Class: RateLimited, Message: reasonOr(c.Reason, "rate limit exceeded"), RetryAfter: retryAfterFrom(c, text)}
-	}
-	return &classifyResult{Class: BillingError, Message: reasonOr(c.Reason, "billing or quota limit")}
 }
 
 // reasonOr returns the wrapper's reason when present, else a fallback.
@@ -327,14 +291,14 @@ func readLogTail(path string, maxLines int) (string, error) {
 
 // classifyByExitCode provides a generic fallback classification based on
 // the process exit code when no pattern matches.
-func classifyByExitCode(exitCode int) ErrorClass {
+func classifyByExitCode(exitCode int) wrapper.ErrorClass {
 	switch exitCode {
 	case 137: // 128+9 = SIGKILL (OOM killer or watchdog)
-		return Timeout
+		return wrapper.ErrTimeout
 	case 143: // 128+15 = SIGTERM (graceful shutdown)
-		return Transient
+		return wrapper.ErrTransient
 	default:
-		return Unknown
+		return wrapper.ErrUnknown
 	}
 }
 

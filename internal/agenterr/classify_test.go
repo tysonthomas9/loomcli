@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/olesho/harness-wrapper/pkg/wrapper"
 )
 
 func TestClassifyClaude(t *testing.T) {
@@ -543,7 +545,7 @@ func TestClassifyByExitCode(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			got := classifyByExitCode(tt.exitCode)
+			got := OutcomeFromHarness(classifyByExitCode(tt.exitCode))
 			if got != tt.wantClass {
 				t.Errorf("classifyByExitCode(%d) = %s, want %s", tt.exitCode, got, tt.wantClass)
 			}
@@ -616,9 +618,8 @@ func TestClassifyFromLog(t *testing.T) {
 		if aerr.Class != AuthFailure {
 			t.Errorf("class = %s, want AuthFailure", aerr.Class)
 		}
-		if !aerr.IsFatal() {
-			t.Error("expected IsFatal() == true for AuthFailure")
-		}
+		// Fatality of AuthFailure is policy, asserted by the agentpolicy
+		// golden table (Decide -> StopFatal).
 	})
 
 	t.Run("missing log file", func(t *testing.T) {
@@ -740,42 +741,6 @@ func TestClassifyFromLog(t *testing.T) {
 			t.Fatal("ClassifyFromLog must never return nil")
 		}
 	})
-}
-
-func TestIsRetryable(t *testing.T) {
-	t.Parallel()
-
-	retryable := []ErrorClass{RateLimited, Timeout, Transient}
-	notRetryable := []ErrorClass{AuthFailure, BillingError, ModelNotFound, ContextOverflow, NoWork, Unknown}
-
-	for _, c := range retryable {
-		if !c.IsRetryable() {
-			t.Errorf("%s.IsRetryable() = false, want true", c)
-		}
-	}
-	for _, c := range notRetryable {
-		if c.IsRetryable() {
-			t.Errorf("%s.IsRetryable() = true, want false", c)
-		}
-	}
-}
-
-func TestIsFatal(t *testing.T) {
-	t.Parallel()
-
-	fatal := []ErrorClass{AuthFailure, BillingError}
-	notFatal := []ErrorClass{RateLimited, ModelNotFound, ContextOverflow, Timeout, Transient, NoWork, Unknown}
-
-	for _, c := range fatal {
-		if !c.IsFatal() {
-			t.Errorf("%s.IsFatal() = false, want true", c)
-		}
-	}
-	for _, c := range notFatal {
-		if c.IsFatal() {
-			t.Errorf("%s.IsFatal() = true, want false", c)
-		}
-	}
 }
 
 func TestErrorString(t *testing.T) {
@@ -1076,14 +1041,14 @@ func TestErrorClassString(t *testing.T) {
 		{Transient, "Transient"},
 		{NoWork, "NoWork"},
 		{Unknown, "Unknown"},
-		{ErrorClass(99), "Unknown"},
+		{Outcome{Harness: wrapper.ErrorClass(99)}, "Unknown"},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.want, func(t *testing.T) {
 			t.Parallel()
 			if got := tt.class.String(); got != tt.want {
-				t.Errorf("ErrorClass(%d).String() = %q, want %q", tt.class, got, tt.want)
+				t.Errorf("Outcome(%v).String() = %q, want %q", tt.class, got, tt.want)
 			}
 		})
 	}
