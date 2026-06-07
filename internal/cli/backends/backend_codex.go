@@ -80,7 +80,7 @@ func defaultCodexNonInteractiveInvoker(workDir, prompt, agentName string, shutdo
 
 	return runHarness(context.Background(), shutdown, harnessInvocation{
 		BinaryName:  "codex",
-		Args:        []string{"exec", "--json", "--dangerously-bypass-approvals-and-sandbox"},
+		Args:        []string{"exec", "--json", "--dangerously-bypass-approvals-and-sandbox", "-"},
 		WorkDir:     workDir,
 		Env:         buildBackendEnv(workDir, agentName),
 		Prompt:      prompt,
