@@ -253,7 +253,7 @@ a Loom run.
 - A supported source layout:
 
   ```text
-  workflows/complete-epic.ts
+  workflows/epic-runner.ts
   package.json
   ```
 
@@ -272,8 +272,8 @@ a Loom run.
 ### Example Command
 
 ```bash
-loom driver register --flue-dist ./dist --name complete-epic --activate
-loom driver run complete-epic --epic <epic_id>
+loom driver register --flue-dist ./dist --name epic-runner --activate
+loom driver run epic-runner --epic <epic_id>
 ```
 
 ### Proof

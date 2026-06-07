@@ -17,7 +17,7 @@ func TestPlatformRegisteredEpicRunViaTriggerBinding(t *testing.T) {
 	if _, err := s.Drivers().Create(ctx, store.DriverCreate{
 		WorkspaceKey: "WS",
 		DriverID:     "driver-1",
-		Name:         "complete-epic",
+		Name:         "epic-runner",
 		OwnerType:    domain.DriverOwnerSystem,
 		Status:       domain.DriverStatusActive,
 	}); err != nil {
@@ -37,7 +37,7 @@ func TestPlatformRegisteredEpicRunViaTriggerBinding(t *testing.T) {
 	if _, err := s.TriggerBindings().Create(ctx, store.TriggerBindingCreate{
 		WorkspaceKey:      "WS",
 		BindingID:         "binding-1",
-		Name:              "Complete epic",
+		Name:              "Epic runner",
 		SourceKind:        "http",
 		RouteKey:          "epics.runs.create",
 		Method:            "POST",
@@ -226,7 +226,7 @@ func TestPlatformRecoverStaleDriverRunsFailsStaleRunsAndReleasesAdmission(t *tes
 	if _, err := s.Drivers().Create(ctx, store.DriverCreate{
 		WorkspaceKey: "WS",
 		DriverID:     "driver-1",
-		Name:         "complete-epic",
+		Name:         "epic-runner",
 		OwnerType:    domain.DriverOwnerSystem,
 		Status:       domain.DriverStatusActive,
 	}); err != nil {
@@ -317,7 +317,7 @@ func TestPlatformDriverRunAndTaskRunLifecycle(t *testing.T) {
 	if _, err := s.Drivers().Create(ctx, store.DriverCreate{
 		WorkspaceKey: "WS",
 		DriverID:     "driver-1",
-		Name:         "complete-epic",
+		Name:         "epic-runner",
 		OwnerType:    domain.DriverOwnerSystem,
 		Status:       domain.DriverStatusActive,
 	}); err != nil {
@@ -973,7 +973,7 @@ func TestPlatformDriverStepLifecycle(t *testing.T) {
 	if _, err := s.Drivers().Create(ctx, store.DriverCreate{
 		WorkspaceKey: "WS",
 		DriverID:     "driver-1",
-		Name:         "complete-epic",
+		Name:         "epic-runner",
 		OwnerType:    domain.DriverOwnerSystem,
 		Status:       domain.DriverStatusActive,
 	}); err != nil {
@@ -1196,7 +1196,7 @@ func TestPlatformRecoverStaleTaskRunsFailsStaleRunsAndSteps(t *testing.T) {
 	if _, err := s.Drivers().Create(ctx, store.DriverCreate{
 		WorkspaceKey: "WS",
 		DriverID:     "driver-1",
-		Name:         "complete-epic",
+		Name:         "epic-runner",
 		OwnerType:    domain.DriverOwnerSystem,
 		Status:       domain.DriverStatusActive,
 	}); err != nil {

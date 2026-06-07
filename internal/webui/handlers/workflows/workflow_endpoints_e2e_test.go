@@ -41,8 +41,7 @@ func TestE2E_WorkflowEndpointsRunRealFlueEpicRunner(t *testing.T) {
 	dag := e2e.seedEpicDAG()
 	e2e.startLoomServe()
 
-	e2e.uploadWorkflowVersion("complete-epic", completeEpicWorkflowSource)
-	runID := e2e.startWorkflowRun("complete-epic", map[string]any{
+	runID := e2e.startWorkflowRun(BuiltinEpicRunnerWorkflowName, map[string]any{
 		"epicId":      dag.epicID,
 		"requestedBy": "workflow-endpoint-e2e",
 	})
@@ -307,24 +306,6 @@ func (e *workflowEndpointE2E) startLoomServe() {
 	e.waitForLoomHealth(&stderr)
 }
 
-func (e *workflowEndpointE2E) uploadWorkflowVersion(name, source string) {
-	e.t.Helper()
-	var response struct {
-		Activated bool `json:"activated"`
-		Version   struct {
-			VersionID string `json:"version_id"`
-		} `json:"version"`
-	}
-	e.postJSON("/api/workspaces/"+e.workspace+"/workflows/"+name+"/versions", map[string]any{
-		"files": map[string]string{
-			"workflows/" + name + ".ts": source,
-		},
-	}, http.StatusCreated, &response)
-	if !response.Activated || response.Version.VersionID == "" {
-		e.t.Fatalf("workflow version response = %+v, want activated version", response)
-	}
-}
-
 func (e *workflowEndpointE2E) startWorkflowRun(name string, payload map[string]any) string {
 	e.t.Helper()
 	var run domain.DriverRun
@@ -373,10 +354,13 @@ func (e *workflowEndpointE2E) expectRunPayload(run domain.DriverRun, epicID stri
 	if payload.EpicID != epicID || payload.RequestedBy != "workflow-endpoint-e2e" {
 		e.t.Fatalf("run payload = %+v, want epicId=%s requestedBy=workflow-endpoint-e2e", payload, epicID)
 	}
+	if run.DriverID != BuiltinEpicRunnerWorkflowName {
+		e.t.Fatalf("run driver = %s, want %s", run.DriverID, BuiltinEpicRunnerWorkflowName)
+	}
 	if run.Output["logs_ref"] != "driver-run://"+run.RunID+"/flue-local" {
 		e.t.Fatalf("run output logs_ref = %q", run.Output["logs_ref"])
 	}
-	if !strings.Contains(run.Output["flue_stderr_tail"], "endpoint-native-flue-driver-start "+epicID) {
+	if !strings.Contains(run.Output["flue_stderr_tail"], "epic-runner-start "+epicID) {
 		e.t.Fatalf("run output missing workflow log marker: %+v", run.Output)
 	}
 }
@@ -774,40 +758,3 @@ func jsonString(value string) string {
 	data, _ := json.Marshal(value)
 	return string(data)
 }
-
-const completeEpicWorkflowSource = `import { createLoomDriverClient } from '@loom/sdk/flue';
-
-export async function run(ctx) {
-  const input = ctx.payload || {};
-  const loom = createLoomDriverClient({ input });
-  console.log("endpoint-native-flue-driver-start " + input.epicId);
-  const completed = [];
-
-  while (true) {
-    const task = await loom.tasks.claimReady({ epicId: input.epicId });
-    if (!task) {
-      return loom.completed({ summary: "Epic drained: " + completed.join(",") });
-    }
-
-    const result = await loom.taskRuns.request({
-      taskId: task.id,
-      providerProfile: "flue-local",
-      supportedProviders: ["flue-local"],
-      sandboxPlacement: { provider: "flue-local" },
-    });
-
-    if (result.status === "completed") {
-      await loom.tasks.complete(task.id);
-      completed.push(task.id);
-    } else {
-      await loom.tasks.release(task.id);
-      return loom.needsHuman({
-        summary: "Task failed: " + task.id,
-        taskRunId: result.id,
-        logsRef: result.logsRef || "",
-        artifactsRef: result.artifactsRef || "",
-      });
-    }
-  }
-}
-`

@@ -16,7 +16,7 @@ import (
 func TestRegisterFlueDriverStagesNativeArtifactAndActivates(t *testing.T) {
 	ctx := context.Background()
 	root := t.TempDir()
-	writeFlueDist(t, root, "complete-epic", "one")
+	writeFlueDist(t, root, "epic-runner", "one")
 	st := memstore.New()
 	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "TEST", Name: "test"}); err != nil {
 		t.Fatalf("Create workspace: %v", err)
@@ -26,7 +26,7 @@ func TestRegisterFlueDriverStagesNativeArtifactAndActivates(t *testing.T) {
 		WorkspaceKey: "TEST",
 		WorkDir:      root,
 		DistPath:     "dist",
-		DriverName:   "complete-epic",
+		DriverName:   "epic-runner",
 		Activate:     true,
 		CreatedBy:    "tester",
 	})
@@ -46,7 +46,7 @@ func TestRegisterFlueDriverStagesNativeArtifactAndActivates(t *testing.T) {
 		result.Version.Manifest["artifact_kind"] != NativeFlueArtifactKind ||
 		result.Version.Manifest["artifact_ref"] != "dist" ||
 		result.Version.Manifest["server_ref"] != "dist/server.mjs" ||
-		result.Version.Manifest["workflow_name"] != "complete-epic" ||
+		result.Version.Manifest["workflow_name"] != "epic-runner" ||
 		result.Version.Manifest["loom_sdk_package"] != LoomFlueSDKPackage {
 		t.Fatalf("manifest = %+v, want native Flue manifest", result.Version.Manifest)
 	}
@@ -67,7 +67,7 @@ func TestRegisterFlueDriverStagesNativeArtifactAndActivates(t *testing.T) {
 		WorkspaceKey: "TEST",
 		WorkDir:      root,
 		DistPath:     "dist",
-		DriverName:   "complete-epic",
+		DriverName:   "epic-runner",
 		Activate:     true,
 		CreatedBy:    "tester",
 	})
@@ -82,7 +82,7 @@ func TestRegisterFlueDriverStagesNativeArtifactAndActivates(t *testing.T) {
 func TestRegisterFlueDriverNewDigestCreatesNewVersion(t *testing.T) {
 	ctx := context.Background()
 	root := t.TempDir()
-	writeFlueDist(t, root, "complete-epic", "one")
+	writeFlueDist(t, root, "epic-runner", "one")
 	st := memstore.New()
 	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "TEST", Name: "test"}); err != nil {
 		t.Fatalf("Create workspace: %v", err)
@@ -91,19 +91,19 @@ func TestRegisterFlueDriverNewDigestCreatesNewVersion(t *testing.T) {
 		WorkspaceKey: "TEST",
 		WorkDir:      root,
 		DistPath:     "dist",
-		DriverName:   "complete-epic",
+		DriverName:   "epic-runner",
 		Activate:     true,
 	})
 	if err != nil {
 		t.Fatalf("RegisterFlueDriver first: %v", err)
 	}
 
-	writeFlueDist(t, root, "complete-epic", "two")
+	writeFlueDist(t, root, "epic-runner", "two")
 	second, err := RegisterFlueDriver(ctx, st, RegisterFlueOptions{
 		WorkspaceKey: "TEST",
 		WorkDir:      root,
 		DistPath:     "dist",
-		DriverName:   "complete-epic",
+		DriverName:   "epic-runner",
 		Activate:     true,
 	})
 	if err != nil {
@@ -123,7 +123,7 @@ func TestRegisterFlueDriverNewDigestCreatesNewVersion(t *testing.T) {
 func TestRegisterFlueDriverRejectsInvalidManifest(t *testing.T) {
 	ctx := context.Background()
 	root := t.TempDir()
-	writeFlueDist(t, root, "complete-epic", "one")
+	writeFlueDist(t, root, "epic-runner", "one")
 	if err := os.WriteFile(filepath.Join(root, "dist", "loom-driver.json"), []byte(`{"server_ref":"../server.mjs"}`), 0o644); err != nil {
 		t.Fatalf("write manifest: %v", err)
 	}
@@ -136,12 +136,12 @@ func TestRegisterFlueDriverRejectsInvalidManifest(t *testing.T) {
 		WorkspaceKey: "TEST",
 		WorkDir:      root,
 		DistPath:     "dist",
-		DriverName:   "complete-epic",
+		DriverName:   "epic-runner",
 		Activate:     true,
 	}); !errors.Is(err, domain.ErrInvalid) {
 		t.Fatalf("RegisterFlueDriver invalid manifest err = %v, want ErrInvalid", err)
 	}
-	if _, err := st.Drivers().Get(ctx, "TEST", "complete-epic"); !errors.Is(err, domain.ErrNotFound) {
+	if _, err := st.Drivers().Get(ctx, "TEST", "epic-runner"); !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("driver after invalid manifest err = %v, want not found", err)
 	}
 }
@@ -149,8 +149,8 @@ func TestRegisterFlueDriverRejectsInvalidManifest(t *testing.T) {
 func TestRegisterFlueDriverRejectsGeneratedManifestRefs(t *testing.T) {
 	ctx := context.Background()
 	root := t.TempDir()
-	writeFlueDist(t, root, "complete-epic", "one")
-	if err := os.WriteFile(filepath.Join(root, "dist", "loom-driver.json"), []byte(`{"workflow_ref":".flue/workflows/complete-epic.ts"}`), 0o644); err != nil {
+	writeFlueDist(t, root, "epic-runner", "one")
+	if err := os.WriteFile(filepath.Join(root, "dist", "loom-driver.json"), []byte(`{"workflow_ref":".flue/workflows/epic-runner.ts"}`), 0o644); err != nil {
 		t.Fatalf("write manifest: %v", err)
 	}
 	st := memstore.New()
@@ -162,7 +162,7 @@ func TestRegisterFlueDriverRejectsGeneratedManifestRefs(t *testing.T) {
 		WorkspaceKey: "TEST",
 		WorkDir:      root,
 		DistPath:     "dist",
-		DriverName:   "complete-epic",
+		DriverName:   "epic-runner",
 		Activate:     true,
 	}); !errors.Is(err, domain.ErrInvalid) {
 		t.Fatalf("RegisterFlueDriver generated refs err = %v, want ErrInvalid", err)
@@ -184,12 +184,12 @@ func TestRegisterFlueDriverRejectsMissingServer(t *testing.T) {
 		WorkspaceKey: "TEST",
 		WorkDir:      root,
 		DistPath:     "dist",
-		DriverName:   "complete-epic",
+		DriverName:   "epic-runner",
 		Activate:     true,
 	}); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("RegisterFlueDriver missing server err = %v, want not exist", err)
 	}
-	if _, err := st.Drivers().Get(ctx, "TEST", "complete-epic"); !errors.Is(err, domain.ErrNotFound) {
+	if _, err := st.Drivers().Get(ctx, "TEST", "epic-runner"); !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("driver after missing server err = %v, want not found", err)
 	}
 }

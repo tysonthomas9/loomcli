@@ -136,7 +136,7 @@ func TestAgentServiceMemstoreReferenceValidation(t *testing.T) {
 	if _, err := s.Drivers().Create(ctx, store.DriverCreate{
 		WorkspaceKey: "WS",
 		DriverID:     "driver-1",
-		Name:         "complete-epic",
+		Name:         "epic-runner",
 		OwnerType:    domain.DriverOwnerSystem,
 		Status:       domain.DriverStatusActive,
 	}); err != nil {
@@ -180,7 +180,7 @@ func TestAgentServiceMemstoreReferenceValidation(t *testing.T) {
 	if _, err := s.TriggerBindings().Create(ctx, store.TriggerBindingCreate{
 		WorkspaceKey:         "WS",
 		BindingID:            "binding-1",
-		Name:                 "Complete epic",
+		Name:                 "Epic runner",
 		SourceKind:           "http",
 		RouteKey:             "epics.runs.create",
 		DriverID:             "driver-1",
@@ -235,7 +235,7 @@ func seedAgentServiceRefs(t *testing.T, s *Store) {
 	if _, err := s.Drivers().Create(ctx, store.DriverCreate{
 		WorkspaceKey: "WS",
 		DriverID:     "driver-1",
-		Name:         "complete-epic",
+		Name:         "epic-runner",
 		OwnerType:    domain.DriverOwnerSystem,
 		Status:       domain.DriverStatusActive,
 	}); err != nil {
@@ -255,7 +255,7 @@ func seedAgentServiceRefs(t *testing.T, s *Store) {
 	if _, err := s.TriggerBindings().Create(ctx, store.TriggerBindingCreate{
 		WorkspaceKey:     "WS",
 		BindingID:        "binding-1",
-		Name:             "Complete epic",
+		Name:             "Epic runner",
 		SourceKind:       "http",
 		RouteKey:         "epics.runs.create",
 		DriverID:         "driver-1",

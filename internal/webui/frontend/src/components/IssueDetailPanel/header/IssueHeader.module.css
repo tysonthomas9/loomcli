@@ -152,6 +152,44 @@
   outline-offset: 2px;
 }
 
+.runEpicButton {
+  margin-left: auto;
+  min-width: 86px;
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 0 10px;
+  background: var(--color-primary);
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1;
+  cursor: pointer;
+  white-space: nowrap;
+  transition:
+    background-color var(--transition-fast),
+    border-color var(--transition-fast),
+    color var(--transition-fast);
+}
+
+.runEpicButton:hover:not(:disabled) {
+  background-color: color-mix(in srgb, var(--color-primary) 88%, black);
+}
+
+.runEpicButton:disabled {
+  cursor: wait;
+  opacity: 0.68;
+}
+
+.runEpicButton:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
 .copyLinkButton {
   margin-left: auto;
   width: 28px;
@@ -207,6 +245,9 @@
 
 /* When copyLinkButton is present, it takes the margin-left: auto.
    closeButton only needs it when copyLinkButton is absent. */
+.runEpicButton + .copyLinkButton,
+.runEpicButton + .moveButton,
+.runEpicButton + .closeButton,
 .copyLinkButton + .moveButton,
 .copyLinkButton + .closeButton {
   margin-left: 0;

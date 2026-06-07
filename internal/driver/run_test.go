@@ -16,8 +16,8 @@ func TestCreateDriverRunUsesActivePassedVersion(t *testing.T) {
 	st := memstore.New()
 	if _, err := st.Drivers().Create(ctx, store.DriverCreate{
 		WorkspaceKey: "TEST",
-		DriverID:     "complete-epic",
-		Name:         "complete-epic",
+		DriverID:     "epic-runner",
+		Name:         "epic-runner",
 		Status:       domain.DriverStatusDraft,
 	}); err != nil {
 		t.Fatalf("Create driver: %v", err)
@@ -25,7 +25,7 @@ func TestCreateDriverRunUsesActivePassedVersion(t *testing.T) {
 	if _, err := st.DriverVersions().Create(ctx, store.DriverVersionCreate{
 		WorkspaceKey:     "TEST",
 		VersionID:        "version-1",
-		DriverID:         "complete-epic",
+		DriverID:         "epic-runner",
 		Version:          1,
 		SourceDigest:     "sha256:source1",
 		BundleDigest:     "sha256:bundle1",
@@ -36,7 +36,7 @@ func TestCreateDriverRunUsesActivePassedVersion(t *testing.T) {
 	if _, err := st.DriverVersions().Create(ctx, store.DriverVersionCreate{
 		WorkspaceKey:     "TEST",
 		VersionID:        "version-2",
-		DriverID:         "complete-epic",
+		DriverID:         "epic-runner",
 		Version:          2,
 		SourceDigest:     "sha256:source2",
 		BundleDigest:     "sha256:bundle2",
@@ -46,13 +46,13 @@ func TestCreateDriverRunUsesActivePassedVersion(t *testing.T) {
 	}
 	activeVersion := "version-1"
 	activeStatus := domain.DriverStatusActive
-	if _, err := st.Drivers().Update(ctx, "TEST", "complete-epic", store.DriverUpdate{ActiveVersionID: &activeVersion, Status: &activeStatus}); err != nil {
+	if _, err := st.Drivers().Update(ctx, "TEST", "epic-runner", store.DriverUpdate{ActiveVersionID: &activeVersion, Status: &activeStatus}); err != nil {
 		t.Fatalf("Activate driver: %v", err)
 	}
 
 	run, err := CreateDriverRun(ctx, st, RunOptions{
 		WorkspaceKey:   "TEST",
-		DriverID:       "complete-epic",
+		DriverID:       "epic-runner",
 		EpicID:         "TEST-1",
 		RunID:          "run-1",
 		IdempotencyKey: "idem-1",
@@ -67,7 +67,7 @@ func TestCreateDriverRunUsesActivePassedVersion(t *testing.T) {
 
 	replay, err := CreateDriverRun(ctx, st, RunOptions{
 		WorkspaceKey:   "TEST",
-		DriverID:       "complete-epic",
+		DriverID:       "epic-runner",
 		EpicID:         "TEST-1",
 		RunID:          "run-replay",
 		IdempotencyKey: "idem-1",
@@ -81,7 +81,7 @@ func TestCreateDriverRunUsesActivePassedVersion(t *testing.T) {
 
 	active, err := CreateDriverRun(ctx, st, RunOptions{
 		WorkspaceKey:   "TEST",
-		DriverID:       "complete-epic",
+		DriverID:       "epic-runner",
 		EpicID:         "TEST-1",
 		RunID:          "run-active",
 		IdempotencyKey: "idem-2",

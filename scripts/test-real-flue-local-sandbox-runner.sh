@@ -146,7 +146,7 @@ EOF
   [[ -f "$FLUE_REPO/packages/runtime/dist/node/index.mjs" ]] ||
     die "Flue runtime dist is missing; build the Flue repo before running this script"
 
-  [[ -f "$FLUE_LOOM_TS_DIR/complete-epic.ts" && -f "$FLUE_LOOM_TS_DIR/task-runner.ts" ]] ||
+  [[ -f "$FLUE_LOOM_TS_DIR/epic-runner.ts" && -f "$FLUE_LOOM_TS_DIR/task-runner.ts" ]] ||
     die "Flue/Loom TypeScript fixtures are missing under $FLUE_LOOM_TS_DIR"
 
   local node_ts_check="$TMP_ROOT/node-ts-check.ts"
@@ -168,7 +168,7 @@ build_binaries() {
 }
 
 install_flue_loom_typescript() {
-  cp "$FLUE_LOOM_TS_DIR/complete-epic.ts" "$WORKDIR/workflows/complete-epic.ts"
+  cp "$FLUE_LOOM_TS_DIR/epic-runner.ts" "$WORKDIR/workflows/epic-runner.ts"
   cp "$FLUE_LOOM_TS_DIR/task-runner.ts" "$WORKDIR/task-runner.ts"
 }
 
@@ -253,9 +253,9 @@ build_and_register_driver() {
     cd "$WORKDIR"
     "$BIN_DIR/loom" --workspace "$WORKSPACE" driver register \
       --flue-dist dist \
-      --name complete-epic \
-      --workflow complete-epic \
-      --source-ref workflows/complete-epic.ts \
+      --name epic-runner \
+      --workflow epic-runner \
+      --source-ref workflows/epic-runner.ts \
       --activate \
       --json
   ) >"$TMP_ROOT/register.json"
@@ -282,7 +282,7 @@ queue_driver_run() {
   log_step "queueing driver run"
   (
     cd "$WORKDIR"
-    "$BIN_DIR/loom" --workspace "$WORKSPACE" driver run complete-epic \
+    "$BIN_DIR/loom" --workspace "$WORKSPACE" driver run epic-runner \
       --epic "$EPIC_ID" \
       --run-id "$RUN_ID" \
       --json
@@ -392,7 +392,7 @@ verify_retry_is_idempotent() {
 
   (
     cd "$WORKDIR"
-    "$BIN_DIR/loom" --workspace "$WORKSPACE" driver run complete-epic \
+    "$BIN_DIR/loom" --workspace "$WORKSPACE" driver run epic-runner \
       --epic "$EPIC_ID" \
       --run-id "$retry_run_id" \
       --json

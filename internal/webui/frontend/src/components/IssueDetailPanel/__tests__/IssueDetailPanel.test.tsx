@@ -18,7 +18,7 @@ import "@testing-library/jest-dom";
 
 import type { Issue, IssueDetails, IssueWithDependencyMetadata } from "@/types";
 import type { SessionRecord } from "@/types/agent";
-import { updateIssue, startAgent } from "@/api";
+import { updateIssue, startAgent, startWorkflowRun } from "@/api";
 import { createAgentStore } from "@/stores/agentStore";
 
 import { IssueDetailPanel } from "../IssueDetailPanel";
@@ -32,6 +32,8 @@ const {
   mockUseWorkspaceContext,
   mockUseAgentStoreInstance,
   mockGetTaskSessions,
+  mockShowToast,
+  mockUseToast,
 } = vi.hoisted(() => ({
   mockUseRegisterEscapeLayer: vi.fn(),
   mockDeleteTabMetadata: vi.fn(() => Promise.resolve()),
@@ -61,17 +63,40 @@ const {
   })),
   mockUseAgentStoreInstance: vi.fn(),
   mockGetTaskSessions: vi.fn(() => Promise.resolve([])),
+  mockShowToast: vi.fn(),
+  mockUseToast: vi.fn(() => ({
+    toasts: [],
+    showToast: vi.fn(),
+    dismissToast: vi.fn(),
+    dismissAll: vi.fn(),
+  })),
 }));
 
 // Mock the API module
 vi.mock("@/api", () => ({
+  EPIC_RUNNER_WORKFLOW_NAME: "epic-runner",
   updateIssue: vi.fn(),
   startAgent: vi.fn().mockResolvedValue(undefined),
+  startWorkflowRun: vi.fn().mockResolvedValue({
+    workspace_key: "DESKTOP-QA",
+    run_id: "run-1",
+    driver_id: "driver-1",
+    driver_version_id: "version-1",
+    status: "queued",
+    created_at: "2026-01-23T00:00:00Z",
+    updated_at: "2026-01-23T00:00:00Z",
+  }),
   addDependency: vi.fn(),
   removeDependency: vi.fn(),
   getIssueEvents: vi.fn().mockImplementation(() => new Promise(() => {})),
   getTaskLogPhases: vi.fn().mockResolvedValue([]),
 }));
+
+vi.mock("@/hooks/ui", async () => {
+  const actual =
+    await vi.importActual<typeof import("@/hooks/ui")>("@/hooks/ui");
+  return { ...actual, useToast: mockUseToast };
+});
 
 // Mock terminal API for cleanup verification
 vi.mock("@/api/terminal", () => ({
@@ -236,6 +261,25 @@ describe("IssueDetailPanel", () => {
     mockUseWorkspaceContext.mockImplementation(() => createWorkspaceContext());
     mockGetTaskSessions.mockReset();
     mockGetTaskSessions.mockResolvedValue([]);
+    mockShowToast.mockReset();
+    mockUseToast.mockReset();
+    mockUseToast.mockImplementation(() => ({
+      toasts: [],
+      showToast: mockShowToast,
+      dismissToast: vi.fn(),
+      dismissAll: vi.fn(),
+    }));
+    const mockStartWorkflowRun = startWorkflowRun as ReturnType<typeof vi.fn>;
+    mockStartWorkflowRun.mockReset();
+    mockStartWorkflowRun.mockResolvedValue({
+      workspace_key: "DESKTOP-QA",
+      run_id: "run-1",
+      driver_id: "driver-1",
+      driver_version_id: "version-1",
+      status: "queued",
+      created_at: "2026-01-23T00:00:00Z",
+      updated_at: "2026-01-23T00:00:00Z",
+    });
   });
 
   // Reset body overflow after each test
@@ -1295,6 +1339,152 @@ describe("IssueDetailPanel", () => {
       expect(await screen.findByTestId("start-work-error")).toHaveTextContent(
         "daemon unavailable",
       );
+    });
+  });
+
+  describe("Epic runner", () => {
+    it("shows the epic runner action for open epics only", () => {
+      const epic = createTestIssueDetails({
+        id: "DESKTOP-QA-EPIC",
+        issue_type: "epic",
+        status: "open",
+      });
+      const task = createTestIssueDetails({
+        id: "DESKTOP-QA-3",
+        issue_type: "task",
+        status: "open",
+      });
+      const closedEpic = createTestIssueDetails({
+        id: "DESKTOP-QA-CLOSED",
+        issue_type: "epic",
+        status: "closed",
+      });
+
+      const { rerender } = render(
+        <IssueDetailPanel isOpen={true} issue={epic} onClose={() => {}} />,
+      );
+
+      expect(screen.getByTestId("header-run-epic-button")).toBeInTheDocument();
+
+      rerender(
+        <IssueDetailPanel isOpen={true} issue={task} onClose={() => {}} />,
+      );
+      expect(
+        screen.queryByTestId("header-run-epic-button"),
+      ).not.toBeInTheDocument();
+
+      rerender(
+        <IssueDetailPanel
+          isOpen={true}
+          issue={closedEpic}
+          onClose={() => {}}
+        />,
+      );
+      expect(
+        screen.queryByTestId("header-run-epic-button"),
+      ).not.toBeInTheDocument();
+    });
+
+    it("starts the epic runner workflow with the selected epic payload", async () => {
+      const mockStartWorkflowRun = startWorkflowRun as ReturnType<typeof vi.fn>;
+      mockUseWorkspaceContext.mockImplementation(() =>
+        createWorkspaceContext({ workspaceId: "DESKTOP-QA" }),
+      );
+      const epic = createTestIssueDetails({
+        id: "DESKTOP-QA-EPIC",
+        issue_type: "epic",
+        status: "open",
+      });
+
+      render(
+        <IssueDetailPanel isOpen={true} issue={epic} onClose={() => {}} />,
+      );
+
+      fireEvent.click(screen.getByTestId("header-run-epic-button"));
+
+      await waitFor(() => {
+        expect(mockStartWorkflowRun).toHaveBeenCalledWith(
+          "DESKTOP-QA",
+          "epic-runner",
+          {
+            epicId: "DESKTOP-QA-EPIC",
+            requestedBy: "ui",
+          },
+        );
+      });
+      expect(mockShowToast).toHaveBeenCalledWith("Epic runner queued: run-1", {
+        type: "success",
+      });
+    });
+
+    it("disables the epic runner action while the workflow request is in flight", async () => {
+      const mockStartWorkflowRun = startWorkflowRun as ReturnType<typeof vi.fn>;
+      let resolveRun: (value: unknown) => void = () => {};
+      mockStartWorkflowRun.mockReturnValueOnce(
+        new Promise((resolve) => {
+          resolveRun = resolve;
+        }),
+      );
+      mockUseWorkspaceContext.mockImplementation(() =>
+        createWorkspaceContext({ workspaceId: "DESKTOP-QA" }),
+      );
+      const epic = createTestIssueDetails({
+        id: "DESKTOP-QA-EPIC",
+        issue_type: "epic",
+        status: "open",
+      });
+
+      render(
+        <IssueDetailPanel isOpen={true} issue={epic} onClose={() => {}} />,
+      );
+
+      const button = screen.getByTestId("header-run-epic-button");
+      fireEvent.click(button);
+
+      await waitFor(() => {
+        expect(button).toBeDisabled();
+      });
+      expect(button).toHaveTextContent("Starting");
+
+      resolveRun({
+        workspace_key: "DESKTOP-QA",
+        run_id: "run-1",
+        driver_id: "driver-1",
+        driver_version_id: "version-1",
+        status: "queued",
+        created_at: "2026-01-23T00:00:00Z",
+        updated_at: "2026-01-23T00:00:00Z",
+      });
+
+      await waitFor(() => {
+        expect(button).not.toBeDisabled();
+      });
+    });
+
+    it("reports workflow start errors", async () => {
+      const mockStartWorkflowRun = startWorkflowRun as ReturnType<typeof vi.fn>;
+      mockStartWorkflowRun.mockRejectedValueOnce(new Error("workflow missing"));
+      mockUseWorkspaceContext.mockImplementation(() =>
+        createWorkspaceContext({ workspaceId: "DESKTOP-QA" }),
+      );
+      const epic = createTestIssueDetails({
+        id: "DESKTOP-QA-EPIC",
+        issue_type: "epic",
+        status: "open",
+      });
+
+      render(
+        <IssueDetailPanel isOpen={true} issue={epic} onClose={() => {}} />,
+      );
+
+      fireEvent.click(screen.getByTestId("header-run-epic-button"));
+
+      await waitFor(() => {
+        expect(mockShowToast).toHaveBeenCalledWith(
+          "Epic runner failed: workflow missing",
+          { type: "error" },
+        );
+      });
     });
   });
 

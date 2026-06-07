@@ -15,6 +15,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
@@ -25,7 +26,8 @@ import (
 const maxRunPayloadBytes = 4 << 20
 
 type Module struct {
-	store store.Store
+	store     store.Store
+	builtinMu sync.Mutex
 }
 
 func NewModule(st store.Store) *Module {
@@ -104,6 +106,11 @@ func (m *Module) createWorkflowVersion(w http.ResponseWriter, r *http.Request) {
 }
 
 func (m *Module) buildAndRegister(ctx context.Context, ws, name, entrypoint string, files map[string]string, activate bool) (*driver.RegisterFlueResult, string, error) {
+	digest := sourceDigest(files)
+	return m.buildAndRegisterWithSource(ctx, ws, name, entrypoint, files, activate, "api://workflows/"+name+"/versions/"+digest, digest, "api")
+}
+
+func (m *Module) buildAndRegisterWithSource(ctx context.Context, ws, name, entrypoint string, files map[string]string, activate bool, sourceRef, digest, createdBy string) (*driver.RegisterFlueResult, string, error) {
 	serverWorkDir, err := os.Getwd()
 	if err != nil {
 		return nil, "", fmt.Errorf("resolve server work dir: %w", err)
@@ -131,9 +138,9 @@ func (m *Module) buildAndRegister(ctx context.Context, ws, name, entrypoint stri
 		DistPath:     outputDir,
 		DriverName:   name,
 		WorkflowName: strings.TrimSuffix(filepath.Base(entrypoint), filepath.Ext(entrypoint)),
-		SourceRef:    "api://workflows/" + name + "/versions/" + sourceDigest(files),
-		SourceDigest: sourceDigest(files),
-		CreatedBy:    "api",
+		SourceRef:    sourceRef,
+		SourceDigest: digest,
+		CreatedBy:    createdBy,
 		Activate:     activate,
 	})
 	if err != nil {
@@ -235,7 +242,7 @@ func (m *Module) createWorkflowRun(w http.ResponseWriter, r *http.Request) {
 	}
 	ws := r.PathValue("ws")
 	name := strings.TrimSpace(r.PathValue("name"))
-	driverID, err := resolveDriverID(r.Context(), m.store, ws, name)
+	driverID, err := m.resolveWorkflowDriverID(r.Context(), ws, name)
 	if err != nil {
 		writeDomainError(w, err, "workflow not found")
 		return
@@ -253,6 +260,43 @@ func (m *Module) createWorkflowRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusAccepted, run)
+}
+
+func (m *Module) resolveWorkflowDriverID(ctx context.Context, ws, name string) (string, error) {
+	driverID, err := resolveDriverID(ctx, m.store, ws, name)
+	if err == nil {
+		return driverID, nil
+	}
+	if !errors.Is(err, domain.ErrNotFound) {
+		return "", err
+	}
+	if err := m.ensureBuiltinWorkflow(ctx, ws, name); err != nil {
+		return "", err
+	}
+	return resolveDriverID(ctx, m.store, ws, name)
+}
+
+func (m *Module) ensureBuiltinWorkflow(ctx context.Context, ws, name string) error {
+	spec, ok := builtinWorkflows[name]
+	if !ok {
+		return domain.ErrNotFound
+	}
+
+	m.builtinMu.Lock()
+	defer m.builtinMu.Unlock()
+
+	if _, err := resolveDriverID(ctx, m.store, ws, name); err == nil {
+		return nil
+	} else if !errors.Is(err, domain.ErrNotFound) {
+		return err
+	}
+
+	digest := sourceDigest(spec.files)
+	sourceRef := "builtin://workflows/" + name + "/versions/" + digest
+	if _, _, err := m.buildAndRegisterWithSource(ctx, ws, name, spec.entrypoint, spec.files, true, sourceRef, digest, "system"); err != nil {
+		return fmt.Errorf("register built-in workflow %q: %w", name, err)
+	}
+	return nil
 }
 
 func (m *Module) getRun(w http.ResponseWriter, r *http.Request) {

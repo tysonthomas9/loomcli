@@ -486,8 +486,8 @@ func setupQueuedDriverRun(t *testing.T) (context.Context, store.Store, *domain.D
 	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "TEST", Name: "test"}); err != nil {
 		t.Fatalf("Create workspace: %v", err)
 	}
-	writeFlueDist(t, root, "complete-epic", "done")
-	registered, err := RegisterFlueDriver(ctx, st, RegisterFlueOptions{WorkspaceKey: "TEST", WorkDir: root, DistPath: "dist", DriverName: "complete-epic", CreatedBy: "tester", Activate: true})
+	writeFlueDist(t, root, "epic-runner", "done")
+	registered, err := RegisterFlueDriver(ctx, st, RegisterFlueOptions{WorkspaceKey: "TEST", WorkDir: root, DistPath: "dist", DriverName: "epic-runner", CreatedBy: "tester", Activate: true})
 	if err != nil {
 		t.Fatalf("RegisterFlueDriver: %v", err)
 	}

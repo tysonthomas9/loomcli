@@ -114,7 +114,7 @@ echo "==> creating isolated workflow repo"
   printf '%s\n' '{"type":"module","dependencies":{"@loom/sdk":"file:./node_modules/@loom/sdk"}}' > package.json
 )
 
-cat > "$WORKDIR/workflows/complete-epic.ts" <<'EOF'
+cat > "$WORKDIR/workflows/epic-runner.ts" <<'EOF'
 import { createLoomDriverClient } from '@loom/sdk/flue';
 
 export async function run(ctx) {
@@ -265,7 +265,7 @@ echo "==> building native Flue driver"
 echo "==> registering native Flue driver"
 (
   cd "$WORKDIR"
-  "$BIN_DIR/loom" --workspace "$WS" driver register --flue-dist dist --name complete-epic --workflow complete-epic --source-ref workflows/complete-epic.ts --activate --json
+  "$BIN_DIR/loom" --workspace "$WS" driver register --flue-dist dist --name epic-runner --workflow epic-runner --source-ref workflows/epic-runner.ts --activate --json
 ) >"$TMP_ROOT/register.json"
 
 echo "==> starting loom serve driver executor on ${LOOM_PORT}"
@@ -283,7 +283,7 @@ wait_http "$LOOM_URL/health" "loom serve"
 echo "==> queueing driver run"
 (
   cd "$WORKDIR"
-  "$BIN_DIR/loom" --workspace "$WS" driver run complete-epic --epic "$EPIC_ID" --run-id "$RUN_ID" --json
+  "$BIN_DIR/loom" --workspace "$WS" driver run epic-runner --epic "$EPIC_ID" --run-id "$RUN_ID" --json
 ) | tee "$TMP_ROOT/driver-run.json" >/dev/null
 
 echo "==> waiting for run completion"
@@ -368,7 +368,7 @@ echo "==> verifying retry does not duplicate completed child tasks"
 RETRY_RUN_ID="${RUN_ID}-retry"
 (
   cd "$WORKDIR"
-  "$BIN_DIR/loom" --workspace "$WS" driver run complete-epic --epic "$EPIC_ID" --run-id "$RETRY_RUN_ID" --json
+  "$BIN_DIR/loom" --workspace "$WS" driver run epic-runner --epic "$EPIC_ID" --run-id "$RETRY_RUN_ID" --json
 ) >"$TMP_ROOT/driver-run-retry.json"
 for _ in $(seq 1 120); do
   retry_json="$(curl_json GET "/api/v1/${WS}/driver-runs/${RETRY_RUN_ID}")"

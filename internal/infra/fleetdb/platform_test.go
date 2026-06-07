@@ -23,7 +23,7 @@ func TestPlatformClientDriverRunLifecycleRoutesAndErrors(t *testing.T) {
 				Name     string `json:"name"`
 			}
 			decodeJSONBody(t, r, &req)
-			if req.DriverID != "driver-1" || req.Name != "complete-epic" {
+			if req.DriverID != "driver-1" || req.Name != "epic-runner" {
 				t.Fatalf("driver create body = %+v", req)
 			}
 			writeJSON(t, w, domain.Driver{WorkspaceKey: "WS", DriverID: req.DriverID, Name: req.Name, Status: domain.DriverStatusActive})
@@ -72,7 +72,7 @@ func TestPlatformClientDriverRunLifecycleRoutesAndErrors(t *testing.T) {
 				Enabled *bool   `json:"enabled"`
 			}
 			decodeJSONBody(t, r, &req)
-			if req.Name == nil || *req.Name != "Complete epic route" || req.Enabled == nil || *req.Enabled {
+			if req.Name == nil || *req.Name != "Epic runner route" || req.Enabled == nil || *req.Enabled {
 				t.Fatalf("trigger binding update body = %+v", req)
 			}
 			writeJSON(t, w, domain.TriggerBinding{WorkspaceKey: "WS", BindingID: "binding-1", Name: *req.Name, RouteKey: "epics.runs.create", DriverID: "driver-1", DriverVersionID: "version-1", Enabled: *req.Enabled})
@@ -357,7 +357,7 @@ func TestPlatformClientDriverRunLifecycleRoutesAndErrors(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, err := client.Drivers().Create(t.Context(), store.DriverCreate{WorkspaceKey: "WS", DriverID: "driver-1", Name: "complete-epic", Status: domain.DriverStatusActive}); err != nil {
+	if _, err := client.Drivers().Create(t.Context(), store.DriverCreate{WorkspaceKey: "WS", DriverID: "driver-1", Name: "epic-runner", Status: domain.DriverStatusActive}); err != nil {
 		t.Fatalf("Create driver: %v", err)
 	}
 	if _, err := client.DriverVersions().Create(t.Context(), store.DriverVersionCreate{WorkspaceKey: "WS", DriverID: "driver-1", VersionID: "version-1", Version: 1, SourceDigest: "sha256:source", BundleDigest: "sha256:bundle"}); err != nil {
@@ -369,7 +369,7 @@ func TestPlatformClientDriverRunLifecycleRoutesAndErrors(t *testing.T) {
 	if binding, err := client.TriggerBindings().Create(t.Context(), store.TriggerBindingCreate{
 		WorkspaceKey:      "WS",
 		BindingID:         "binding-1",
-		Name:              "Complete epic",
+		Name:              "Epic runner",
 		SourceKind:        "http",
 		RouteKey:          "epics.runs.create",
 		Method:            "POST",
@@ -394,7 +394,7 @@ func TestPlatformClientDriverRunLifecycleRoutesAndErrors(t *testing.T) {
 	if binding, err := client.TriggerBindings().Get(t.Context(), "WS", "binding-1"); err != nil || binding.RouteKey != "epics.runs.create" {
 		t.Fatalf("Get trigger binding = %+v err=%v, want epics route", binding, err)
 	}
-	name := "Complete epic route"
+	name := "Epic runner route"
 	enabled := false
 	if binding, err := client.TriggerBindings().Update(t.Context(), "WS", "binding-1", store.TriggerBindingUpdate{Name: &name, Enabled: &enabled}); err != nil || binding.Name != name || binding.Enabled {
 		t.Fatalf("Update trigger binding = %+v err=%v, want disabled renamed binding", binding, err)

@@ -16,6 +16,8 @@ import {
   deleteTabMetadata,
   getTaskLogPhases,
   startAgent,
+  EPIC_RUNNER_WORKFLOW_NAME,
+  startWorkflowRun,
 } from "@/hooks/api";
 import type { IssueTab } from "@/api/issues";
 import {
@@ -74,7 +76,7 @@ import { SplitDetailSummary } from "./SplitDetailSummary";
 import { EmbeddedTerminal } from "../EmbeddedTerminal";
 import { ResizeDivider } from "./actions";
 import { ErrorToast } from "../ErrorToast";
-import { useSplitRatio } from "@/hooks/ui";
+import { useSplitRatio, useToast } from "@/hooks/ui";
 import { CollapsibleSection } from "./CollapsibleSection";
 import { SessionHistorySection, SessionsTab } from "./sessions";
 import styles from "./IssueDetailPanel.module.css";
@@ -277,6 +279,10 @@ function runFailureMessage(run: SessionRecord): string {
   return run.last_error || run.error_class || "Agent run failed.";
 }
 
+function formatUnknownError(error: unknown, fallback: string): string {
+  return error instanceof Error && error.message ? error.message : fallback;
+}
+
 function LatestRunFailureBanner({
   run,
   onViewRuns,
@@ -397,6 +403,8 @@ function DefaultContent({
   const [rejectError, setRejectError] = useState<string | null>(null);
   const [showMoveDialog, setShowMoveDialog] = useState(false);
   const [moveError, setMoveError] = useState<string | null>(null);
+  const [isStartingEpicRun, setIsStartingEpicRun] = useState(false);
+  const { showToast } = useToast();
 
   // Split view state for terminal tabs
   const splitContainerRef = useRef<HTMLDivElement>(null);
@@ -891,6 +899,30 @@ function DefaultContent({
     [issue, onIssueUpdate, refetchAgents, workspaceId],
   );
 
+  const handleRunEpicWorkflow = useCallback(async () => {
+    if (!issue || issue.issue_type !== "epic" || isStartingEpicRun) return;
+
+    setIsStartingEpicRun(true);
+    try {
+      const run = await startWorkflowRun(
+        workspaceId,
+        EPIC_RUNNER_WORKFLOW_NAME,
+        {
+          epicId: issue.id,
+          requestedBy: "ui",
+        },
+      );
+      showToast(`Epic runner queued: ${run.run_id}`, { type: "success" });
+    } catch (err) {
+      showToast(
+        `Epic runner failed: ${formatUnknownError(err, "Unable to start workflow")}`,
+        { type: "error" },
+      );
+    } finally {
+      setIsStartingEpicRun(false);
+    }
+  }, [issue, isStartingEpicRun, showToast, workspaceId]);
+
   const handleAddDependency = useCallback(
     async (dependsOnId: string, type: DependencyType) => {
       if (!issue) return;
@@ -1005,6 +1037,7 @@ function DefaultContent({
     setRejectError(null);
     setShowMoveDialog(false);
     setMoveError(null);
+    setIsStartingEpicRun(false);
   }, [issue?.id]);
 
   // Loading state
@@ -1058,6 +1091,8 @@ function DefaultContent({
       ? issue.external_ref.match(/\/pulls?\/(\d+)/)?.[1]
       : undefined;
   const prProps = prNumber ? { prUrl: issue.external_ref!, prNumber } : {};
+  const canRunEpicWorkflow =
+    issue.issue_type === "epic" && issue.status !== "closed";
 
   // Auto-collapse logic for Notes (collapse if long, but keep expanded for review items)
   const shouldCollapseNotes =
@@ -1077,6 +1112,10 @@ function DefaultContent({
           onStatusChange={handleStatusChange}
           isSavingStatus={isSavingStatus}
           showPriority={true}
+          {...(canRunEpicWorkflow && {
+            onRunEpic: handleRunEpicWorkflow,
+            isRunningEpic: isStartingEpicRun,
+          })}
           {...(onCopyLink !== undefined && { onCopyLink })}
           {...(canMove && { onMove: () => setShowMoveDialog(true) })}
           {...prProps}

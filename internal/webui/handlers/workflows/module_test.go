@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -35,6 +37,44 @@ func TestCreateWorkflowRunPassesRawPayload(t *testing.T) {
 	}
 	if string(stored.Payload) != `{"nested":{"ok":true},"items":[1,2]}` {
 		t.Fatalf("payload = %s, want raw request JSON", stored.Payload)
+	}
+}
+
+func TestCreateWorkflowRunRegistersBuiltinEpicRunner(t *testing.T) {
+	ctx := context.Background()
+	st := memstore.New()
+	installFakeFlueBuild(t)
+	t.Chdir(t.TempDir())
+
+	mux := http.NewServeMux()
+	NewModule(st).Register(mux)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/workspaces/TEST/workflows/"+BuiltinEpicRunnerWorkflowName, stringsReader(`{"epicId":"EPIC-1","requestedBy":"ui"}`))
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("status = %d body=%s, want 202", rec.Code, rec.Body.String())
+	}
+	var run domain.DriverRun
+	if err := json.Unmarshal(rec.Body.Bytes(), &run); err != nil {
+		t.Fatalf("decode run: %v", err)
+	}
+	if run.DriverID != BuiltinEpicRunnerWorkflowName || string(run.Payload) != `{"epicId":"EPIC-1","requestedBy":"ui"}` {
+		t.Fatalf("run = %+v payload=%s, want built-in epic runner with raw payload", run, run.Payload)
+	}
+	driverRecord, err := st.Drivers().Get(ctx, "TEST", BuiltinEpicRunnerWorkflowName)
+	if err != nil {
+		t.Fatalf("get built-in driver: %v", err)
+	}
+	if driverRecord.Status != domain.DriverStatusActive || driverRecord.ActiveVersionID == "" {
+		t.Fatalf("driver = %+v, want active built-in driver", driverRecord)
+	}
+	version, err := st.DriverVersions().Get(ctx, "TEST", driverRecord.ActiveVersionID)
+	if err != nil {
+		t.Fatalf("get built-in version: %v", err)
+	}
+	if !strings.HasPrefix(version.SourceRef, "builtin://workflows/"+BuiltinEpicRunnerWorkflowName+"/versions/") || version.CreatedBy != "system" {
+		t.Fatalf("version = %+v, want system built-in source", version)
 	}
 }
 
@@ -112,4 +152,41 @@ func seededWorkflowStore(t *testing.T, ctx context.Context) store.Store {
 
 func stringsReader(s string) *strings.Reader {
 	return strings.NewReader(s)
+}
+
+func installFakeFlueBuild(t *testing.T) {
+	t.Helper()
+	dir := t.TempDir()
+	script := filepath.Join(dir, "fake-flue")
+	body := `#!/bin/sh
+out=""
+while [ "$#" -gt 0 ]; do
+  if [ "$1" = "--output" ]; then
+    shift
+    out="$1"
+  fi
+  shift
+done
+if [ "$out" = "" ]; then
+  echo "missing --output" >&2
+  exit 1
+fi
+mkdir -p "$out"
+cat > "$out/server.mjs" <<'EOF'
+export async function run() { return {}; }
+EOF
+`
+	if err := os.WriteFile(script, []byte(body), 0o755); err != nil {
+		t.Fatalf("write fake flue: %v", err)
+	}
+	sdkRoot := filepath.Join(dir, "sdk")
+	if err := os.MkdirAll(sdkRoot, 0o755); err != nil {
+		t.Fatalf("create fake sdk: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(sdkRoot, "package.json"), []byte(`{"name":"@loom/sdk"}`+"\n"), 0o644); err != nil {
+		t.Fatalf("write fake sdk package: %v", err)
+	}
+	t.Setenv("LOOM_REAL_FLUE_CMD", script)
+	t.Setenv("LOOM_REAL_FLUE_CMD_JSON", "")
+	t.Setenv("LOOM_SDK_ROOT", sdkRoot)
 }

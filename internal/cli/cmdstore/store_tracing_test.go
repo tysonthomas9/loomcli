@@ -139,7 +139,7 @@ func TestWrapStoreWithTracing_Smoke(t *testing.T) {
 	_, _ = cmds.Complete(ctx, "TEST", "cmd-1", store.AgentCommandComplete{Status: domain.AgentCommandSucceeded})
 
 	drivers := wrapped.Drivers()
-	_, _ = drivers.Create(ctx, store.DriverCreate{WorkspaceKey: "TEST", DriverID: "driver-1", Name: "complete-epic", OwnerType: domain.DriverOwnerSystem, Status: domain.DriverStatusActive})
+	_, _ = drivers.Create(ctx, store.DriverCreate{WorkspaceKey: "TEST", DriverID: "driver-1", Name: "epic-runner", OwnerType: domain.DriverOwnerSystem, Status: domain.DriverStatusActive})
 	_, _ = drivers.Get(ctx, "TEST", "driver-1")
 	_, _ = drivers.List(ctx, "TEST", store.DriverFilter{})
 	_, _ = drivers.Update(ctx, "TEST", "driver-1", store.DriverUpdate{})
@@ -179,7 +179,7 @@ func TestWrapStoreWithTracing_Smoke(t *testing.T) {
 	_, _ = bindings.Create(ctx, store.TriggerBindingCreate{
 		WorkspaceKey:      "TEST",
 		BindingID:         "binding-1",
-		Name:              "Complete epic",
+		Name:              "Epic runner",
 		SourceKind:        "http",
 		RouteKey:          "epics.runs.create",
 		Method:            "POST",

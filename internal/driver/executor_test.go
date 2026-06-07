@@ -23,8 +23,8 @@ func TestExecutorRunOnceClaimsVerifiesAndFinishes(t *testing.T) {
 	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "TEST", Name: "test"}); err != nil {
 		t.Fatalf("Create workspace: %v", err)
 	}
-	writeFlueDist(t, root, "complete-epic", "done")
-	registered, err := RegisterFlueDriver(ctx, st, RegisterFlueOptions{WorkspaceKey: "TEST", WorkDir: root, DistPath: "dist", DriverName: "complete-epic", CreatedBy: "tester", Activate: true})
+	writeFlueDist(t, root, "epic-runner", "done")
+	registered, err := RegisterFlueDriver(ctx, st, RegisterFlueOptions{WorkspaceKey: "TEST", WorkDir: root, DistPath: "dist", DriverName: "epic-runner", CreatedBy: "tester", Activate: true})
 	if err != nil {
 		t.Fatalf("RegisterFlueDriver: %v", err)
 	}
@@ -86,8 +86,8 @@ func TestExecutorRunOnceFailsTamperedBundleBeforeRunner(t *testing.T) {
 	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "TEST", Name: "test"}); err != nil {
 		t.Fatalf("Create workspace: %v", err)
 	}
-	writeFlueDist(t, root, "complete-epic", "done")
-	registered, err := RegisterFlueDriver(ctx, st, RegisterFlueOptions{WorkspaceKey: "TEST", WorkDir: root, DistPath: "dist", DriverName: "complete-epic", CreatedBy: "tester", Activate: true})
+	writeFlueDist(t, root, "epic-runner", "done")
+	registered, err := RegisterFlueDriver(ctx, st, RegisterFlueOptions{WorkspaceKey: "TEST", WorkDir: root, DistPath: "dist", DriverName: "epic-runner", CreatedBy: "tester", Activate: true})
 	if err != nil {
 		t.Fatalf("RegisterFlueDriver: %v", err)
 	}
@@ -136,8 +136,8 @@ func TestNodeRunnerRunsBuiltFlueServer(t *testing.T) {
 	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "TEST", Name: "test"}); err != nil {
 		t.Fatalf("Create workspace: %v", err)
 	}
-	writeFlueDist(t, root, "complete-epic", "fake flue")
-	registered, err := RegisterFlueDriver(ctx, st, RegisterFlueOptions{WorkspaceKey: "TEST", WorkDir: root, DistPath: "dist", DriverName: "complete-epic", CreatedBy: "tester", Activate: true})
+	writeFlueDist(t, root, "epic-runner", "fake flue")
+	registered, err := RegisterFlueDriver(ctx, st, RegisterFlueOptions{WorkspaceKey: "TEST", WorkDir: root, DistPath: "dist", DriverName: "epic-runner", CreatedBy: "tester", Activate: true})
 	if err != nil {
 		t.Fatalf("RegisterFlueDriver: %v", err)
 	}
@@ -169,7 +169,7 @@ func TestNodeRunnerRunsRegisteredNativeFlueArtifact(t *testing.T) {
 
 	ctx := context.Background()
 	root := t.TempDir()
-	writeFlueDist(t, root, "complete-epic", "native flue")
+	writeFlueDist(t, root, "epic-runner", "native flue")
 	st := memstore.New()
 	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "TEST", Name: "test"}); err != nil {
 		t.Fatalf("Create workspace: %v", err)
@@ -178,7 +178,7 @@ func TestNodeRunnerRunsRegisteredNativeFlueArtifact(t *testing.T) {
 		WorkspaceKey: "TEST",
 		WorkDir:      root,
 		DistPath:     "dist",
-		DriverName:   "complete-epic",
+		DriverName:   "epic-runner",
 		Activate:     true,
 		CreatedBy:    "tester",
 	})
@@ -240,7 +240,7 @@ process.once('SIGTERM', () => recordCancelled('SIGTERM'));
 
 if (process.send) {
   fs.writeFileSync(startedPath, 'started');
-  process.send({ version: 1, type: 'ready', target: 'workflow', name: process.env.FLUE_CLI_NAME || 'complete-epic' });
+  process.send({ version: 1, type: 'ready', target: 'workflow', name: process.env.FLUE_CLI_NAME || 'epic-runner' });
   process.on('message', () => {});
   setInterval(() => {}, 1000);
 }
@@ -262,12 +262,12 @@ if (process.send) {
 				LeaseID:         "lease-1",
 				FencingToken:    42,
 				Payload:         json.RawMessage(`{}`),
-				DriverID:        "complete-epic",
+				DriverID:        "epic-runner",
 				DriverVersionID: "version-1",
 			},
 			BundleRoot: root,
 			ServerPath: filepath.Join(dist, "server.mjs"),
-			Manifest:   map[string]string{"workflow_name": "complete-epic"},
+			Manifest:   map[string]string{"workflow_name": "epic-runner"},
 		})
 		done <- struct {
 			result RunResult
@@ -321,7 +321,7 @@ const handoffOk = process.env.LOOM_DRIVER_FLEET_DB_URL === 'https://fleet.invali
   && process.env.LOOM_DRIVER_FLEET_DB_API_KEY === 'scoped-secret'
   && process.env.LOOM_DRIVER_FLEET_DB_ACTOR === 'driver-run:run-1';
 if (process.send) {
-  process.send({ version: 1, type: 'ready', target: 'workflow', name: process.env.FLUE_CLI_NAME || 'complete-epic' });
+  process.send({ version: 1, type: 'ready', target: 'workflow', name: process.env.FLUE_CLI_NAME || 'epic-runner' });
   process.on('message', (message) => {
     const result = leaked.length || !handoffOk
       ? { status: 'failed', summary: 'bad handoff leaked=' + leaked.join(',') + ' handoffOk=' + handoffOk, errorClass: 'env_leak' }
@@ -347,7 +347,7 @@ if (process.send) {
 		},
 		BundleRoot: root,
 		ServerPath: filepath.Join(dist, "server.mjs"),
-		Manifest:   map[string]string{"workflow_name": "complete-epic"},
+		Manifest:   map[string]string{"workflow_name": "epic-runner"},
 	})
 	if err != nil {
 		t.Fatalf("NodeRunner.Run: %v", err)
@@ -379,8 +379,8 @@ func TestExecutorScansWorkspacesAndReportsNoQueuedRun(t *testing.T) {
 	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "TEST", Name: "test"}); err != nil {
 		t.Fatalf("Create TEST workspace: %v", err)
 	}
-	writeFlueDist(t, root, "complete-epic", "done")
-	registered, err := RegisterFlueDriver(ctx, st, RegisterFlueOptions{WorkspaceKey: "TEST", WorkDir: root, DistPath: "dist", DriverName: "complete-epic", CreatedBy: "tester", Activate: true})
+	writeFlueDist(t, root, "epic-runner", "done")
+	registered, err := RegisterFlueDriver(ctx, st, RegisterFlueOptions{WorkspaceKey: "TEST", WorkDir: root, DistPath: "dist", DriverName: "epic-runner", CreatedBy: "tester", Activate: true})
 	if err != nil {
 		t.Fatalf("RegisterFlueDriver: %v", err)
 	}

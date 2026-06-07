@@ -73,6 +73,51 @@ describe("IssueHeader", () => {
     expect(screen.getByTestId("issue-header")).toHaveClass("custom");
   });
 
+  it("does not render the epic runner action by default", () => {
+    render(<IssueHeader issue={mockIssue} onClose={() => {}} />);
+    expect(
+      screen.queryByTestId("header-run-epic-button"),
+    ).not.toBeInTheDocument();
+  });
+
+  it("renders the epic runner action when provided", () => {
+    render(
+      <IssueHeader issue={mockIssue} onClose={() => {}} onRunEpic={() => {}} />,
+    );
+    const button = screen.getByTestId("header-run-epic-button");
+    expect(button).toBeInTheDocument();
+    expect(button).toHaveTextContent("Run epic");
+    expect(button).toHaveAccessibleName("Run epic workflow");
+  });
+
+  it("calls onRunEpic when the epic runner action is clicked", () => {
+    const onRunEpic = vi.fn();
+    render(
+      <IssueHeader
+        issue={mockIssue}
+        onClose={() => {}}
+        onRunEpic={onRunEpic}
+      />,
+    );
+    fireEvent.click(screen.getByTestId("header-run-epic-button"));
+    expect(onRunEpic).toHaveBeenCalledTimes(1);
+  });
+
+  it("disables the epic runner action while starting", () => {
+    render(
+      <IssueHeader
+        issue={mockIssue}
+        onClose={() => {}}
+        onRunEpic={() => {}}
+        isRunningEpic={true}
+      />,
+    );
+    const button = screen.getByTestId("header-run-epic-button");
+    expect(button).toBeDisabled();
+    expect(button).toHaveTextContent("Starting");
+    expect(button).toHaveAccessibleName("Starting epic runner");
+  });
+
   it("renders open status with correct data attribute", () => {
     const openIssue = { ...mockIssue, status: "open" };
     render(<IssueHeader issue={openIssue} onClose={() => {}} />);

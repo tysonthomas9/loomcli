@@ -38,7 +38,7 @@ are rejected.
 The first supported runtime is a stored Flue Node artifact:
 
 1. The user or agent builds a Flue project with `flue build --target node`.
-2. `loom driver register --flue-dist ./dist --name complete-epic` stages the
+2. `loom driver register --flue-dist ./dist --name epic-runner` stages the
    already-built artifact under Loom's driver bundle store.
 3. Loom writes a registration manifest into that staged bundle.
 4. FleetDB records an immutable `DriverVersion` containing:

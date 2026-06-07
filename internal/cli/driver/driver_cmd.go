@@ -138,7 +138,7 @@ var driverRegisterCmd = &cobra.Command{
 The artifact must already be built by Flue, for example:
 
   flue build --target node
-  loom driver register --flue-dist ./dist --name complete-epic --activate
+  loom driver register --flue-dist ./dist --name epic-runner --activate
 
 Loom stages the built dist directory and records the DriverVersion. It does not
 generate a Flue project or adapter source.`,

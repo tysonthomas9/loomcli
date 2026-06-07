@@ -437,7 +437,7 @@ schema migration for every new provider. Provider-specific config lives behind
 
 The binding is the product/API contract. For example, `POST
 /epics/{epic_id}/runs` can be a Loom-owned HTTP route that resolves to
-`complete-epic@v3`. A Slack event, GitHub webhook, Kafka topic, schedule tick,
+`epic-runner@v3`. A Slack event, GitHub webhook, Kafka topic, schedule tick,
 or lead command uses the same binding shape.
 
 ### TriggerEvent
@@ -834,7 +834,7 @@ TriggerBinding
   route_key: epics.runs.create
   method: POST
   path_template: /epics/{epic_id}/runs
-  driver_version_id: complete-epic@v3
+  driver_version_id: epic-runner@v3
   target_entrypoint: run
   auth_policy: workspace_user
   idempotency_policy: header:Idempotency-Key
@@ -863,7 +863,7 @@ TriggerBinding
 TriggerBinding
   source_kind: message_bus
   topic: agent-workflows.epic-complete
-  driver_version_id: complete-epic@v3
+  driver_version_id: epic-runner@v3
   idempotency_policy: message_id
 ```
 
