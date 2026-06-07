@@ -23,7 +23,7 @@ Missing:
 - Mapping from GitHub event/action/repository to route keys.
 - Replay and redelivery tooling for persisted TriggerEvents.
 - UI/API for managing trigger bindings.
-- End-to-end tests where a GitHub-shaped webhook drives a real `.ts` workflow.
+- End-to-end tests where a signed GitHub pull request webhook drives a real PR review `.ts` workflow.
 
 ## Proposed Flow
 
@@ -73,7 +73,7 @@ Use existing fleet-db trigger route for lower-level tests and generic integratio
 
 Binding shape:
 
-- `route_key`: normalized route, such as `github.pull_request.opened`.
+- `route_key`: normalized route, such as `github.pull_request.opened` or `github.pull_request.synchronize`.
 - `driver_id` and `driver_version_id`: pinned immutable TS workflow.
 - `target_entrypoint`: default `run`.
 - `enabled`: false prevents dispatch while preserving history.
@@ -131,14 +131,18 @@ Integration tests:
 
 E2E test:
 
-- Seed a test repo/workspace with an epic and two fleet-db tasks.
-- Send a signed GitHub-shaped webhook payload that triggers the epic runner.
-- Assert the TS workflow receives the payload, creates TaskRuns, completes the tasks, and records `close_task` through ActionLedger.
-- Resend the same GitHub delivery ID and assert no duplicate DriverRun or duplicate close_task effect is produced.
+- Seed a local test Git repository with a base branch, a feature branch, and a GitHub pull request payload that references the PR number, head SHA, base SHA, repository, and installation/sender metadata.
+- Register a Flue `.ts` workflow named `github-pr-review` as a DriverVersion.
+- Create a TriggerBinding for `github.pull_request.opened` pinned to that DriverVersion.
+- Send a signed GitHub `pull_request.opened` webhook payload to the GitHub webhook route.
+- Assert the webhook persists one TriggerEvent, creates one TriggerDelivery, and enqueues one DriverRun with the original GitHub payload.
+- Start the Loom executor and assert the DriverRun completes after the TS workflow inspects the PR diff and records a review result.
+- Assert GET run/events/stream show the run lifecycle and include enough output to identify the PR number and reviewed commit.
+- Resend the same `X-GitHub-Delivery` ID and assert no duplicate DriverRun, TriggerDelivery side effect, or duplicate review result is produced.
 
 ## Deferred
 
-- GitHub App installation authentication and token minting.
+- Real GitHub App installation authentication and token minting; the first E2E can use a local repo and a fake review sink.
 - UI for editing trigger bindings.
 - Fanout to multiple workflows beyond one delivery per matching binding.
 - Schedule runner implementation.
@@ -148,7 +152,7 @@ E2E test:
 
 ## Acceptance Criteria
 
-- A signed GitHub webhook can enqueue a DriverRun for a pinned `.ts` workflow.
+- A signed GitHub pull request webhook can enqueue a DriverRun for a pinned PR review `.ts` workflow.
 - The webhook handler is durable and non-blocking: persistence happens before dispatch, and execution happens asynchronously.
 - Duplicate GitHub deliveries do not create duplicate effects.
 - The resulting run is inspectable with existing run GET/events/stream endpoints.
