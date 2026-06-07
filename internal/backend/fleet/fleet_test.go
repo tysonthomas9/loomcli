@@ -1235,9 +1235,24 @@ func TestRemoveLabel_UsesDedicatedEndpoint(t *testing.T) {
 
 func TestClose_HappyPath(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Second)
+	var claimReleased bool
 	fb, ts := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != "POST" {
 			t.Errorf("Method = %q, want POST", r.Method)
+		}
+		// Close releases the agent claim before closing (a closed issue is
+		// terminal and can no longer be unassigned).
+		if strings.HasSuffix(r.URL.Path, "/assign") {
+			var body struct {
+				Assignee string `json:"assignee"`
+			}
+			json.NewDecoder(r.Body).Decode(&body) //nolint:errcheck
+			if body.Assignee != "" {
+				t.Errorf("close assign assignee = %q, want empty (claim released)", body.Assignee)
+			}
+			claimReleased = true
+			respondOK(w, json.RawMessage(`{}`))
+			return
 		}
 		var gotBody map[string]interface{}
 		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
@@ -1269,6 +1284,9 @@ func TestClose_HappyPath(t *testing.T) {
 	}
 	if len(result.Unblocked) != 1 {
 		t.Fatalf("Unblocked len = %d, want 1", len(result.Unblocked))
+	}
+	if !claimReleased {
+		t.Error("expected close to release the agent claim before closing")
 	}
 }
 
@@ -1694,6 +1712,7 @@ func TestNonJSONResponse(t *testing.T) {
 func TestReopen_HappyPath(t *testing.T) {
 	var reopenPosted bool
 	var commentPosted bool
+	var claimReleased bool
 	fb, ts := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
 		// fleet-db reopen is POST /issues/{id}/reopen (dedicated endpoint);
 		// the previous PATCH status=open approach was rejected by
@@ -1718,6 +1737,18 @@ func TestReopen_HappyPath(t *testing.T) {
 			respondOK(w, map[string]interface{}{"id": 1, "body": body["body"]})
 			return
 		}
+		if r.Method == "POST" && strings.HasSuffix(r.URL.Path, "/assign") {
+			var body struct {
+				Assignee string `json:"assignee"`
+			}
+			json.NewDecoder(r.Body).Decode(&body) //nolint:errcheck
+			if body.Assignee != "" {
+				t.Errorf("reopen assign assignee = %q, want empty (claim released)", body.Assignee)
+			}
+			claimReleased = true
+			respondOK(w, json.RawMessage(`{}`))
+			return
+		}
 		t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
 	})
 	defer ts.Close()
@@ -1731,6 +1762,9 @@ func TestReopen_HappyPath(t *testing.T) {
 	}
 	if !commentPosted {
 		t.Error("expected comment to be posted with reason")
+	}
+	if !claimReleased {
+		t.Error("expected reopen to release the stale assignee claim")
 	}
 }
 

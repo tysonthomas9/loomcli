@@ -263,18 +263,19 @@ func GenerateTaskPrompt(agentName string, workspace *config.WorkspaceConfig, par
 // GenerateFleetPlanningPrompt creates the prompt for a fleet planning agent with a pre-assigned task.
 // Fleet workers receive their task from the Fleet API and skip task selection/claiming.
 func GenerateFleetPlanningPrompt(agentName, taskID string, workspace *config.WorkspaceConfig) string {
-	return renderPrompt("fleet_planning", promptTemplateData{
+	prompt := renderPrompt("fleet_planning", promptTemplateData{
 		AgentName:      agentName,
 		WorkspaceBlock: buildWorkspaceContextBlock(workspace),
 		SafetyBlock:    buildSafetyGuardrailsBlock(),
 		TaskID:         taskID,
 	})
+	return injectCheckpointIfNotResuming(prompt)
 }
 
 // GenerateFleetTaskPrompt creates the prompt for a fleet implementation agent with a pre-assigned task.
 // Fleet workers receive their task from the Fleet API and skip task selection/claiming.
 func GenerateFleetTaskPrompt(agentName, taskID string, workspace *config.WorkspaceConfig, backendName string) string {
-	return renderPrompt("fleet_task", promptTemplateData{
+	prompt := renderPrompt("fleet_task", promptTemplateData{
 		AgentName:         agentName,
 		WorkspaceBlock:    buildWorkspaceContextBlock(workspace),
 		SafetyBlock:       buildSafetyGuardrailsBlock(),
@@ -283,6 +284,7 @@ func GenerateFleetTaskPrompt(agentName, taskID string, workspace *config.Workspa
 		ReviewStep:        buildReviewStep(backendName),
 		InspectReviewStep: buildInspectReviewStep(backendName),
 	})
+	return injectCheckpointIfNotResuming(prompt)
 }
 
 // GenerateConflictResolutionPrompt creates the prompt for merge conflict resolution

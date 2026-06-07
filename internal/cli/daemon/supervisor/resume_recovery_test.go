@@ -165,3 +165,32 @@ func TestRecordResumeOutcome(t *testing.T) {
 		}
 	})
 }
+
+func TestPrepareCheckpointRetryClearsStaleOwnerSessionID(t *testing.T) {
+	wt := t.TempDir()
+	seedLock(t, wt, &cli.LockInfo{
+		PID:             deadPID,
+		TaskID:          "T-checkpoint",
+		ClaudeSessionID: "sess-stale",
+		TaskStartedAt:   time.Now(),
+	})
+
+	s := &Supervisor{}
+	ap := &AgentProcess{
+		Entry:        config.AgentEntry{Worktree: "agent"},
+		WorktreePath: wt,
+	}
+
+	s.prepareCheckpointRetry(ap, "T-checkpoint")
+
+	info, err := cli.ReadLockFile(wt)
+	if err != nil {
+		t.Fatalf("ReadLockFile: %v", err)
+	}
+	if info.ClaudeSessionID != "" {
+		t.Fatalf("ClaudeSessionID = %q, want cleared so checkpoint retry cold-starts", info.ClaudeSessionID)
+	}
+	if ap.ResumeTaskID != "T-checkpoint" {
+		t.Fatalf("ResumeTaskID = %q, want T-checkpoint", ap.ResumeTaskID)
+	}
+}

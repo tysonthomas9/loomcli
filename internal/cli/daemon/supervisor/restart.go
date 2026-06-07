@@ -51,19 +51,11 @@ func (s *Supervisor) shouldRestart(ap *AgentProcess) bool {
 
 	switch d := agentpolicy.Decide(outcome); d.Decision {
 	case agentpolicy.StopFatal:
-		log.Printf("[daemon] Agent %s: fatal error (%s), stopping supervisor",
-			ap.Entry.Worktree, outcome)
-		ap.NoWorkCount = 0
-		ap.StopReason = StopReasonFatalError
+		s.applyFatalStop(ap, outcome)
 		return false
 
 	case agentpolicy.FastFail:
-		// Deterministic failure (e.g. ContextOverflow): retrying cannot
-		// succeed, so surface it instead of burning the budget or parking.
-		log.Printf("[daemon] Agent %s: deterministic failure (%s), stopping supervisor (fast-fail)",
-			ap.Entry.Worktree, outcome)
-		ap.NoWorkCount = 0
-		ap.StopReason = StopReasonFastFail
+		s.applyFastFailStop(ap, outcome)
 		return false
 
 	case agentpolicy.Park:
@@ -71,6 +63,10 @@ func (s *Supervisor) shouldRestart(ap *AgentProcess) bool {
 		// budget — recoverable once the binary returns.
 		s.applyBackendUnavailableRestart(ap)
 		return true
+
+	case agentpolicy.Failover:
+		s.applyFailoverExhaustedStop(ap, outcome)
+		return false
 
 	case agentpolicy.RetryUncounted:
 		if outcome.Is(agenterr.NoWorkOutcome) {
@@ -86,9 +82,37 @@ func (s *Supervisor) shouldRestart(ap *AgentProcess) bool {
 		}
 		return s.applyCountedRestart(ap, d, maxRetries)
 
-	default: // Retry, Failover (failover execution lives in tryFallbackBackend)
+	default: // Retry
 		return s.applyCountedRestart(ap, d, maxRetries)
 	}
+}
+
+// applyFatalStop stops for auth/billing errors that need human intervention.
+// Caller holds ap.Mu.
+func (s *Supervisor) applyFatalStop(ap *AgentProcess, outcome agenterr.Outcome) {
+	log.Printf("[daemon] Agent %s: fatal error (%s), stopping supervisor",
+		ap.Entry.Worktree, outcome)
+	ap.NoWorkCount = 0
+	ap.StopReason = StopReasonFatalError
+}
+
+// applyFastFailStop stops for deterministic errors retrying cannot fix.
+// Caller holds ap.Mu.
+func (s *Supervisor) applyFastFailStop(ap *AgentProcess, outcome agenterr.Outcome) {
+	log.Printf("[daemon] Agent %s: deterministic failure (%s), stopping supervisor (fast-fail)",
+		ap.Entry.Worktree, outcome)
+	ap.NoWorkCount = 0
+	ap.StopReason = StopReasonFastFail
+}
+
+// applyFailoverExhaustedStop handles a failover-only error after the caller's
+// fallback attempt has already failed because no fallback exists or all
+// fallbacks are exhausted. Caller holds ap.Mu.
+func (s *Supervisor) applyFailoverExhaustedStop(ap *AgentProcess, outcome agenterr.Outcome) {
+	log.Printf("[daemon] Agent %s: failover-only error (%s) with no fallback remaining, stopping supervisor (fast-fail)",
+		ap.Entry.Worktree, outcome)
+	ap.NoWorkCount = 0
+	ap.StopReason = StopReasonFastFail
 }
 
 // applyCleanSuccessRestart resets every retry counter after a clean exit —

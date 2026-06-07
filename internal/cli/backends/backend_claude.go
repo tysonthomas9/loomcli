@@ -34,10 +34,14 @@ var claudeProfileCaps = sync.OnceValue(func() hwharness.ResolvedProfile {
 	return p.Resolve(hwharness.ResolveContext{})
 })
 
-// DefaultMaxBudgetUSD is the default per-session budget ceiling for non-interactive
-// Claude invocations. Analysis of 287 sessions shows median session cost well under $2;
-// $5 provides 2.5x headroom to prevent mid-response truncation.
-const DefaultMaxBudgetUSD = 5.0
+// DefaultMaxBudgetUSD is the default per-session spend ceiling for non-interactive
+// Claude invocations, passed through to the CLI as --max-budget-usd. It is a safety
+// rail against runaway sessions, not a target: median session cost is well under $2,
+// so tasks that finish normally are unaffected. $50 gives long-running tasks ample
+// headroom to finish — including their own commit/close finalize steps — instead of
+// truncating mid-task when the budget is exhausted. Override per-invocation with
+// LOOM_MAX_BUDGET_USD (or per-role max_budget_usd); set it to 0 to opt out.
+const DefaultMaxBudgetUSD = 50.0
 
 // resolveMaxBudgetUSD reads LOOM_MAX_BUDGET_USD from the environment and returns the
 // value to pass as --max-budget-usd. Returns "" if the flag should be omitted (opt-out).
@@ -181,17 +185,22 @@ func (s *streamReadCloser) Close() error {
 
 // ContinueSession resumes an interactive Claude session by session ID.
 func (c *ClaudeBackend) ContinueSession(workDir, sessionID, agentName string) error {
-	args := []string{"--resume", "--session-id", sessionID, "--dangerously-skip-permissions"}
-	if effort := resolveAgentEffort(); effort != "" {
-		args = append(args, "--effort", effort)
-	}
-	cmd := exec.Command("claude", args...) //nolint:gosec // G204: intentional subprocess launch for claude CLI
+	cmd := exec.Command("claude", buildClaudeContinueSessionArgs(sessionID)...) //nolint:gosec // G204: intentional subprocess launch for claude CLI
 	cmd.Dir = workDir
 	cmd.Env = buildClaudeEnv(workDir, agentName)
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	return cmd.Run()
+}
+
+func buildClaudeContinueSessionArgs(sessionID string) []string {
+	args := claudeResumeArgs(sessionID)
+	args = append(args, "--dangerously-skip-permissions")
+	if effort := resolveAgentEffort(); effort != "" {
+		args = append(args, "--effort", effort)
+	}
+	return args
 }
 
 // LastSessionID returns the most recent session ID. Returns "" because Claude
@@ -250,7 +259,7 @@ func buildClaudeEnv(workDir, agentName string) []string {
 }
 
 // buildClaudeNonInteractiveArgs returns the argument list for a
-// non-interactive Claude run. resumeSessionID prepends --resume flags.
+// non-interactive Claude run. resumeSessionID prepends wrapper-owned resume args.
 // When prompt is non-empty, it is appended as the final positional argument:
 // under the harness wrapper's PTY, claude's stdin looks like a TTY and `-p`
 // then requires the prompt as an argument rather than over stdin. The legacy
@@ -261,9 +270,7 @@ func buildClaudeNonInteractiveArgs(resumeSessionID, prompt string) []string {
 	// Resume prefix comes from the harness profile (pkg/harness/claude), not a
 	// hardcoded literal — so resume is owned in one place across harnesses.
 	if resumeSessionID != "" {
-		if caps := claudeProfileCaps(); caps.Resume != nil {
-			args = append(args, caps.Resume.ResumeArgs(resumeSessionID)...)
-		}
+		args = append(args, claudeResumeArgs(resumeSessionID)...)
 	}
 	args = append(args, "-p", "--verbose", "--output-format", "stream-json",
 		"--dangerously-skip-permissions")
@@ -279,8 +286,15 @@ func buildClaudeNonInteractiveArgs(resumeSessionID, prompt string) []string {
 	return args
 }
 
+func claudeResumeArgs(sessionID string) []string {
+	if caps := claudeProfileCaps(); caps.Resume != nil {
+		return caps.Resume.ResumeArgs(sessionID)
+	}
+	return []string{"--resume", sessionID}
+}
+
 // buildClaudeNonInteractiveCmd constructs the exec.Cmd for non-interactive Claude invocation.
-// When resumeSessionID is non-empty, the command includes --resume --session-id flags.
+// When resumeSessionID is non-empty, the command includes wrapper-owned resume args.
 // Appends --max-budget-usd when resolveMaxBudgetUSD returns a non-empty value.
 // The prompt is delivered via stdin by the caller (cmd.StdinPipe), not argv,
 // since this path does not go through the wrapper's PTY.

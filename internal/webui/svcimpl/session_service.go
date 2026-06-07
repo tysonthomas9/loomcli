@@ -411,11 +411,22 @@ func (s *sessionServiceImpl) ListSessionSubagents(ctx context.Context, wsID, tas
 		return nil, service.ErrInternal("failed to list subagents", err)
 	}
 	ids := make([]string, 0, len(names))
+	seen := make(map[string]struct{}, len(names))
 	for _, name := range names {
 		// Format: agent-<id>.jsonl
 		stripped := strings.TrimSuffix(strings.TrimPrefix(name, "agent-"), ".jsonl")
 		if stripped != "" {
+			seen[stripped] = struct{}{}
 			ids = append(ids, stripped)
+		}
+	}
+	if eventIDs, ok := eventStoreSubagentIDs(store, sessionID); ok {
+		for _, id := range eventIDs {
+			if _, exists := seen[id]; exists {
+				continue
+			}
+			seen[id] = struct{}{}
+			ids = append(ids, id)
 		}
 	}
 	return ids, nil
