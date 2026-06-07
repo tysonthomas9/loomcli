@@ -47,6 +47,22 @@ const BackendUnavailableMarker = "loom: backend binary not on PATH"
 // backendUnavailableRe is the precompiled matcher used by classifyFromText.
 var backendUnavailableRe = regexp.MustCompile(regexp.QuoteMeta(BackendUnavailableMarker))
 
+// AgentLaunchFailedMarker is the stable marker emitted when the harness
+// wrapper cannot launch the backend process at all — a PTY allocation/read
+// failure, which surfaces the OS-level ENOEXEC "exec format error" when the
+// backend binary is momentarily not a valid executable (e.g. mid self-update).
+// classifyFromText recognizes it before any classifier so the supervisor
+// records a retryable SpawnFailure carrying the real reason, instead of falling
+// through to Unknown / "unclassified error (exit code 1)" — the generic message
+// that previously hid this cause from the operator and UI.
+//
+// Stable string contract: changing it requires updating the emitter
+// (internal/cli/backends.agentLaunchFailedInvocationError).
+const AgentLaunchFailedMarker = "loom: agent process failed to launch"
+
+// agentLaunchFailedRe is the precompiled matcher used by classifyFromText.
+var agentLaunchFailedRe = regexp.MustCompile(regexp.QuoteMeta(AgentLaunchFailedMarker))
+
 // rateLimitHintRe distinguishes a retryable throttle from a fatal
 // budget/billing block within the wrapper's coarse blocked_by_cost status.
 // Anything matching here is treated as RateLimited; everything else under
@@ -128,6 +144,17 @@ func classifyFromText(text string, exitCode int, backend string) *AgentError {
 	//    marker when the backend CLI is missing. It outranks everything else.
 	if backendUnavailableRe.MatchString(text) {
 		result = &classifyResult{Class: BackendUnavailable, Message: "backend binary not on PATH"}
+	}
+
+	// A wrapper launch failure (PTY/exec) means the backend process never
+	// started — typically the backend binary was mid-update and momentarily
+	// unexecutable ("exec format error"). Treat it as a retryable SpawnFailure
+	// and keep the reason so it surfaces instead of a generic Unknown.
+	if result == nil && agentLaunchFailedRe.MatchString(text) {
+		result = &classifyResult{
+			Class:   SpawnFailure,
+			Message: "agent process failed to launch (backend binary may be updating or incompatible)",
+		}
 	}
 
 	// 2. Primary: harness-wrapper owns the cost/rate-limit/transport/API-error

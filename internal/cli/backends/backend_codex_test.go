@@ -262,6 +262,15 @@ func TestCodexBackend_DispatchViaNonInteractive(t *testing.T) {
 	}
 }
 
+func TestBuildCodexNonInteractiveArgsPromptIsPositional(t *testing.T) {
+	t.Parallel()
+	got := buildCodexNonInteractiveArgs("prompt body")
+	want := []string{"exec", "--json", "--dangerously-bypass-approvals-and-sandbox", "prompt body"}
+	if !equalStrings(got, want) {
+		t.Fatalf("args = %v, want %v", got, want)
+	}
+}
+
 func TestCollectCodexStreamUsage_TurnCompleted(t *testing.T) {
 	t.Parallel()
 	c := usage.NewCollector("codex", "test")
