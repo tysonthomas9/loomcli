@@ -87,7 +87,7 @@ func TestBuildMonitorCollectDataFnIsLazy(t *testing.T) {
 }
 
 func TestDriverExecutorEnabled(t *testing.T) {
-	for _, value := range []string{"1", "true", "TRUE", "yes", "on"} {
+	for _, value := range []string{"", "1", "true", "TRUE", "yes", "on", "unexpected"} {
 		t.Run(value, func(t *testing.T) {
 			t.Setenv(envLoomDriverExecutor, value)
 			if !driverExecutorEnabled() {
@@ -95,7 +95,7 @@ func TestDriverExecutorEnabled(t *testing.T) {
 			}
 		})
 	}
-	for _, value := range []string{"", "0", "false", "off", "no"} {
+	for _, value := range []string{"0", "false", "FALSE", "off", "no"} {
 		t.Run("disabled_"+value, func(t *testing.T) {
 			t.Setenv(envLoomDriverExecutor, value)
 			if driverExecutorEnabled() {

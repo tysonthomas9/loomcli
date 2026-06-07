@@ -103,6 +103,7 @@ ENVIRONMENT VARIABLES
   LOOM_AUTH_URL         External auth service base URL (enables JWT auth)
   LOOM_AUTH_ISSUER      Expected JWT issuer (defaults to LOOM_AUTH_URL)
   LOOM_AUTH_AUDIENCE    Expected JWT audience (defaults to "loom")
+  LOOM_DRIVER_EXECUTOR  DriverRun executor toggle (default: on; set 0/false/off/no to disable)
 
 EXAMPLES
   loom serve                                              # Default port 8080
@@ -294,10 +295,10 @@ func startDriverExecutorIfEnabled(ctx context.Context, st store.Store) {
 
 func driverExecutorEnabled() bool {
 	switch strings.ToLower(strings.TrimSpace(os.Getenv(envLoomDriverExecutor))) {
-	case "1", "true", "yes", "on":
-		return true
-	default:
+	case "0", "false", "off", "no":
 		return false
+	default:
+		return true
 	}
 }
 

@@ -38,7 +38,10 @@ export async function run(ctx) {
     });
 
     if (result.status === "completed") {
-      await loom.tasks.complete(task.id);
+      await loom.tasks.complete({
+        taskId: task.id,
+        taskRunId: result.taskRunId || result.id,
+      });
       completed.push(task.id);
     } else {
       await loom.tasks.release(task.id);
