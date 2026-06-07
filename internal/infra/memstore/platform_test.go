@@ -1,6 +1,7 @@
 package memstore
 
 import (
+	"encoding/json"
 	"errors"
 	"testing"
 	"time"
@@ -67,13 +68,13 @@ func TestPlatformRegisteredEpicRunViaTriggerBinding(t *testing.T) {
 	run, err := s.DriverRuns().CreateEpic(ctx, "WS", "WS-9", store.EpicRunCreate{
 		RunID:          "run-epic-1",
 		IdempotencyKey: "idem-epic-1",
-		Input:          map[string]string{"epicId": "wrong", "requestedBy": "ui"},
+		Payload:        json.RawMessage(`{"epicId":"wrong","requestedBy":"ui"}`),
 	})
 	if err != nil {
 		t.Fatalf("CreateEpic: %v", err)
 	}
-	if run.DriverVersionID != "version-1" || run.EpicID != "WS-9" || run.Input["epicId"] != "WS-9" {
-		t.Fatalf("registered epic run = %+v, want pinned version-1 and path epic", run)
+	if run.DriverVersionID != "version-1" || run.EpicID != "WS-9" || string(run.Payload) != `{"epicId":"wrong","requestedBy":"ui"}` {
+		t.Fatalf("registered epic run = %+v, want pinned version-1 and raw payload", run)
 	}
 
 	replay, err := s.DriverRuns().CreateEpic(ctx, "WS", "WS-9", store.EpicRunCreate{
@@ -335,7 +336,7 @@ func TestPlatformDriverRunAndTaskRunLifecycle(t *testing.T) {
 		t.Fatalf("Create driver version: %v", err)
 	}
 
-	input := map[string]string{"epicId": "WS-1"}
+	payload := json.RawMessage(`{"epicId":"WS-1"}`)
 	run, err := s.DriverRuns().Create(ctx, store.DriverRunCreate{
 		WorkspaceKey:    "WS",
 		RunID:           "run-1",
@@ -343,14 +344,14 @@ func TestPlatformDriverRunAndTaskRunLifecycle(t *testing.T) {
 		DriverVersionID: "version-1",
 		EpicID:          "WS-1",
 		IdempotencyKey:  "idem-1",
-		Input:           input,
+		Payload:         payload,
 	})
 	if err != nil {
 		t.Fatalf("Create driver run: %v", err)
 	}
-	input["epicId"] = "mutated"
-	if run.Status != domain.DriverRunQueued || run.Input["epicId"] != "WS-1" {
-		t.Fatalf("created run = %+v, want queued clone with original input", run)
+	payload[11] = 'X'
+	if run.Status != domain.DriverRunQueued || string(run.Payload) != `{"epicId":"WS-1"}` {
+		t.Fatalf("created run = %+v, want queued clone with original payload", run)
 	}
 
 	replay, err := s.DriverRuns().Create(ctx, store.DriverRunCreate{

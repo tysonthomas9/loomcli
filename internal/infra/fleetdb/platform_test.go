@@ -78,9 +78,9 @@ func TestPlatformClientDriverRunLifecycleRoutesAndErrors(t *testing.T) {
 			writeJSON(t, w, domain.TriggerBinding{WorkspaceKey: "WS", BindingID: "binding-1", Name: *req.Name, RouteKey: "epics.runs.create", DriverID: "driver-1", DriverVersionID: "version-1", Enabled: *req.Enabled})
 		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/WS/epics/WS-1/runs":
 			var req struct {
-				RunID          string            `json:"run_id"`
-				IdempotencyKey string            `json:"idempotency_key"`
-				Input          map[string]string `json:"input"`
+				RunID          string          `json:"run_id"`
+				IdempotencyKey string          `json:"idempotency_key"`
+				Payload        json.RawMessage `json:"payload"`
 			}
 			decodeJSONBody(t, r, &req)
 			if req.RunID != "run-epic-1" || req.IdempotencyKey != "idem-epic-1" || r.Header.Get("Idempotency-Key") != "idem-epic-1" {
@@ -89,14 +89,14 @@ func TestPlatformClientDriverRunLifecycleRoutesAndErrors(t *testing.T) {
 			writeJSON(t, w, domain.DriverRun{WorkspaceKey: "WS", RunID: req.RunID, DriverID: "driver-1", DriverVersionID: "version-1", EpicID: "WS-1", Status: domain.DriverRunQueued})
 		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/WS/driver-runs":
 			var req struct {
-				RunID           string            `json:"run_id"`
-				DriverID        string            `json:"driver_id"`
-				DriverVersionID string            `json:"driver_version_id"`
-				EpicID          string            `json:"epic_id"`
-				Input           map[string]string `json:"input"`
+				RunID           string          `json:"run_id"`
+				DriverID        string          `json:"driver_id"`
+				DriverVersionID string          `json:"driver_version_id"`
+				EpicID          string          `json:"epic_id"`
+				Payload         json.RawMessage `json:"payload"`
 			}
 			decodeJSONBody(t, r, &req)
-			if req.RunID != "run-1" || req.DriverID != "driver-1" || req.DriverVersionID != "version-1" || req.Input["epicId"] != "WS-1" {
+			if req.RunID != "run-1" || req.DriverID != "driver-1" || req.DriverVersionID != "version-1" || string(req.Payload) != `{"epicId":"WS-1"}` {
 				t.Fatalf("driver run create body = %+v", req)
 			}
 			writeJSON(t, w, domain.DriverRun{WorkspaceKey: "WS", RunID: req.RunID, DriverID: req.DriverID, DriverVersionID: req.DriverVersionID, EpicID: req.EpicID, Status: domain.DriverRunQueued})
@@ -402,11 +402,11 @@ func TestPlatformClientDriverRunLifecycleRoutesAndErrors(t *testing.T) {
 	if run, err := client.DriverRuns().CreateEpic(t.Context(), "WS", "WS-1", store.EpicRunCreate{
 		RunID:          "run-epic-1",
 		IdempotencyKey: "idem-epic-1",
-		Input:          map[string]string{"epicId": "wrong"},
+		Payload:        json.RawMessage(`{"epicId":"wrong"}`),
 	}); err != nil || run.DriverVersionID != "version-1" || run.EpicID != "WS-1" {
 		t.Fatalf("CreateEpic driver run = %+v err=%v, want pinned version-1 WS-1", run, err)
 	}
-	if _, err := client.DriverRuns().Create(t.Context(), store.DriverRunCreate{WorkspaceKey: "WS", RunID: "run-1", DriverID: "driver-1", DriverVersionID: "version-1", EpicID: "WS-1", Input: map[string]string{"epicId": "WS-1"}}); err != nil {
+	if _, err := client.DriverRuns().Create(t.Context(), store.DriverRunCreate{WorkspaceKey: "WS", RunID: "run-1", DriverID: "driver-1", DriverVersionID: "version-1", EpicID: "WS-1", Payload: json.RawMessage(`{"epicId":"WS-1"}`)}); err != nil {
 		t.Fatalf("Create driver run: %v", err)
 	}
 	if runs, err := client.DriverRuns().List(t.Context(), "WS", store.DriverRunFilter{EpicID: "WS-1", Status: domain.DriverRunQueued}); err != nil || len(runs) != 1 {

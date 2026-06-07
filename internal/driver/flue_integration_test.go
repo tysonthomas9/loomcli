@@ -57,7 +57,7 @@ func TestRealFlueBuildAndBuiltServerSmoke(t *testing.T) {
 		DriverID:     registered.Driver.DriverID,
 		EpicID:       "TEST-1",
 		RunID:        "run-1",
-		Input:        map[string]string{"message": "real flue ok"},
+		Payload:      json.RawMessage(`{"message":"real flue ok"}`),
 	})
 	if err != nil {
 		t.Fatalf("CreateDriverRun: %v", err)
@@ -138,7 +138,7 @@ export async function run(ctx) {
 		DriverID:     registered.Driver.DriverID,
 		EpicID:       "TEST-1",
 		RunID:        "run-epic-loop-1",
-		Input:        map[string]string{"epicId": "TEST-1"},
+		Payload:      json.RawMessage(`{"epicId":"TEST-1"}`),
 	})
 	if err != nil {
 		t.Fatalf("CreateDriverRun: %v", err)

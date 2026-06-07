@@ -1,6 +1,27 @@
 package domain
 
-import "time"
+import (
+	"encoding/json"
+	"time"
+)
+
+type PlatformEvent struct {
+	ID          string            `json:"id"`
+	Timestamp   time.Time         `json:"timestamp"`
+	Actor       string            `json:"actor"`
+	Action      string            `json:"action"`
+	EntityType  string            `json:"entity_type"`
+	EntityID    string            `json:"entity_id"`
+	WorkspaceID string            `json:"workspace_id"`
+	Before      string            `json:"before,omitempty"`
+	After       string            `json:"after,omitempty"`
+	Metadata    map[string]string `json:"metadata,omitempty"`
+}
+
+type PlatformEventsPage struct {
+	Events []PlatformEvent `json:"events"`
+	Cursor string          `json:"cursor"`
+}
 
 type DriverOwnerType string
 
@@ -195,7 +216,7 @@ type DriverRun struct {
 	LeaseID         string            `json:"lease_id,omitempty"`
 	FencingToken    int64             `json:"fencing_token,omitempty"`
 	IdempotencyKey  string            `json:"idempotency_key,omitempty"`
-	Input           map[string]string `json:"input,omitempty"`
+	Payload         json.RawMessage   `json:"payload,omitempty"`
 	Output          map[string]string `json:"output,omitempty"`
 	Summary         string            `json:"summary,omitempty"`
 	ErrorClass      string            `json:"error_class,omitempty"`

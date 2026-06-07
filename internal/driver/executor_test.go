@@ -2,6 +2,7 @@ package driver
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"os/exec"
@@ -260,7 +261,7 @@ if (process.send) {
 				NodeID:          "node-1",
 				LeaseID:         "lease-1",
 				FencingToken:    42,
-				Input:           map[string]string{},
+				Payload:         json.RawMessage(`{}`),
 				DriverID:        "complete-epic",
 				DriverVersionID: "version-1",
 			},
@@ -339,7 +340,7 @@ if (process.send) {
 			NodeID:          "node-1",
 			LeaseID:         "lease-1",
 			FencingToken:    42,
-			Input:           map[string]string{},
+			Payload:         json.RawMessage(`{}`),
 			Entrypoint:      EntrypointRun,
 			DriverID:        "driver-1",
 			DriverVersionID: "version-1",

@@ -2,6 +2,7 @@ package driver
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"strconv"
@@ -356,7 +357,7 @@ func runDriverRegister(_ *cobra.Command, _ []string) error {
 
 func runDriverRun(_ *cobra.Command, args []string) error {
 	return cmdstore.WithActiveWorkspace(func(ctx context.Context, h *bootstrap.StoreHandle, ws string) error {
-		input, err := parseDriverRunInput(driverRunInput)
+		payload, err := parseDriverRunPayload(driverRunInput, driverRunEpic)
 		if err != nil {
 			return err
 		}
@@ -367,7 +368,7 @@ func runDriverRun(_ *cobra.Command, args []string) error {
 			RunID:          driverRunID,
 			IdempotencyKey: driverRunIdempotencyKey,
 			Entrypoint:     driverRunEntrypoint,
-			Input:          input,
+			Payload:        payload,
 		})
 		if err != nil {
 			return fmt.Errorf("create driver run: %w", err)
@@ -507,7 +508,7 @@ func runDriverClaimReady(_ *cobra.Command, _ []string) error {
 		if err != nil {
 			return err
 		}
-		epicID := firstNonEmpty(driverClaimReadyEpicID, parent.EpicID, parent.Input["epicId"])
+		epicID := firstNonEmpty(driverClaimReadyEpicID, parent.EpicID, driverRunPayloadString(parent.Payload, "epicId"))
 		actor := firstNonEmpty(driverClaimReadyActor, driverRunActor(parent.RunID))
 		issueBackend, err := newDriverIssueBackend(h, ws, actor)
 		if err != nil {
@@ -812,11 +813,11 @@ func driverRunActor(runID string) string {
 	return "driver-run:" + runID
 }
 
-func parseDriverRunInput(values []string) (map[string]string, error) {
-	if len(values) == 0 {
-		return nil, nil
+func parseDriverRunPayload(values []string, epicID string) (json.RawMessage, error) {
+	out := map[string]string{}
+	if strings.TrimSpace(epicID) != "" {
+		out["epicId"] = strings.TrimSpace(epicID)
 	}
-	out := make(map[string]string, len(values))
 	for _, value := range values {
 		key, val, ok := strings.Cut(value, "=")
 		key = strings.TrimSpace(key)
@@ -825,7 +826,29 @@ func parseDriverRunInput(values []string) (map[string]string, error) {
 		}
 		out[key] = val
 	}
-	return out, nil
+	if len(out) == 0 {
+		return json.RawMessage(`{}`), nil
+	}
+	payload, err := json.Marshal(out)
+	if err != nil {
+		return nil, fmt.Errorf("encode payload: %w", err)
+	}
+	return payload, nil
+}
+
+func driverRunPayloadString(payload json.RawMessage, key string) string {
+	if len(payload) == 0 {
+		return ""
+	}
+	var object map[string]any
+	if err := json.Unmarshal(payload, &object); err != nil {
+		return ""
+	}
+	value, ok := object[key].(string)
+	if !ok {
+		return ""
+	}
+	return value
 }
 
 func firstNonEmpty(values ...string) string {

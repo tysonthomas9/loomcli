@@ -205,15 +205,20 @@ func TestWrapStoreWithTracing_Smoke(t *testing.T) {
 		DriverVersionID: "version-1",
 		EpicID:          "TEST-1",
 		IdempotencyKey:  "idem-driver-run-1",
-		Input:           map[string]string{"epicId": "TEST-1"},
+		Payload:         []byte(`{"epicId":"TEST-1"}`),
 	})
 	_, _ = driverRuns.CreateEpic(ctx, "TEST", "TEST-2", store.EpicRunCreate{
 		RunID:          "driver-run-epic",
 		IdempotencyKey: "idem-driver-run-epic",
-		Input:          map[string]string{"epicId": "wrong"},
+		Payload:        []byte(`{"epicId":"wrong"}`),
 	})
 	_, _ = driverRuns.Get(ctx, "TEST", "driver-run-1")
 	_, _ = driverRuns.List(ctx, "TEST", store.DriverRunFilter{})
+	if reader, ok := driverRuns.(store.DriverRunEventsReader); ok {
+		_, _ = reader.Events(ctx, "TEST", "driver-run-1", "", 10)
+	} else {
+		t.Error("traced DriverRuns store does not preserve event reader")
+	}
 	claimed, _ := driverRuns.Claim(ctx, "TEST", "driver-run-1", "node-1", "driver-lease-1")
 	fence := int64(1)
 	if claimed != nil {

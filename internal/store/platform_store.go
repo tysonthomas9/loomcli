@@ -2,6 +2,8 @@ package store
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
@@ -240,7 +242,7 @@ type TriggerBindingStore interface {
 type EpicRunCreate struct {
 	RunID          string
 	IdempotencyKey string
-	Input          map[string]string
+	Payload        json.RawMessage
 }
 
 type DriverRunCreate struct {
@@ -253,7 +255,7 @@ type DriverRunCreate struct {
 	SourceRef       string
 	EpicID          string
 	IdempotencyKey  string
-	Input           map[string]string
+	Payload         json.RawMessage
 }
 
 type DriverRunFilter struct {
@@ -326,6 +328,12 @@ type DriverRunStore interface {
 	Finish(ctx context.Context, workspaceKey, runID string, finish DriverRunFinish) (*domain.DriverRun, error)
 	RecoverStale(ctx context.Context, workspaceKey string, recover StaleDriverRunRecovery) (*StaleDriverRunRecoveryResult, error)
 	RecoverStaleTaskRuns(ctx context.Context, workspaceKey, runID string, recover StaleTaskRunRecovery) (*StaleTaskRunRecoveryResult, error)
+}
+
+var ErrDriverRunEventsUnavailable = errors.New("driver run event reader unsupported")
+
+type DriverRunEventsReader interface {
+	Events(ctx context.Context, workspaceKey, runID, after string, limit int) (*domain.PlatformEventsPage, error)
 }
 
 type DriverStepCreate struct {

@@ -2,6 +2,7 @@ package driver
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -17,7 +18,9 @@ type RunOptions struct {
 	RunID          string
 	IdempotencyKey string
 	Entrypoint     string
-	Input          map[string]string
+	SourceKind     string
+	SourceRef      string
+	Payload        json.RawMessage
 }
 
 func CreateDriverRun(ctx context.Context, s store.Store, opts RunOptions) (*domain.DriverRun, error) {
@@ -49,12 +52,20 @@ func CreateDriverRun(ctx context.Context, s store.Store, opts RunOptions) (*doma
 	if entrypoint == "" {
 		entrypoint = EntrypointRun
 	}
-	input := cloneStringMap(opts.Input)
-	if input == nil {
-		input = map[string]string{}
+	payload := clonePayload(opts.Payload)
+	if len(payload) == 0 {
+		payload = json.RawMessage(`{}`)
 	}
-	if opts.EpicID != "" {
-		input["epicId"] = opts.EpicID
+	if !json.Valid(payload) {
+		return nil, fmt.Errorf("payload must be valid JSON: %w", domain.ErrInvalid)
+	}
+	sourceKind := strings.TrimSpace(opts.SourceKind)
+	if sourceKind == "" {
+		sourceKind = "cli"
+	}
+	sourceRef := strings.TrimSpace(opts.SourceRef)
+	if sourceRef == "" {
+		sourceRef = "loom driver run"
 	}
 	return s.DriverRuns().Create(ctx, store.DriverRunCreate{
 		WorkspaceKey:    opts.WorkspaceKey,
@@ -62,12 +73,21 @@ func CreateDriverRun(ctx context.Context, s store.Store, opts RunOptions) (*doma
 		DriverID:        driver.DriverID,
 		DriverVersionID: version.VersionID,
 		Entrypoint:      entrypoint,
-		SourceKind:      "cli",
-		SourceRef:       "loom driver run",
+		SourceKind:      sourceKind,
+		SourceRef:       sourceRef,
 		EpicID:          opts.EpicID,
 		IdempotencyKey:  opts.IdempotencyKey,
-		Input:           input,
+		Payload:         payload,
 	})
+}
+
+func clonePayload(in json.RawMessage) json.RawMessage {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make(json.RawMessage, len(in))
+	copy(out, in)
+	return out
 }
 
 func cloneStringMap(in map[string]string) map[string]string {

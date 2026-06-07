@@ -2,6 +2,7 @@ package driver
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"testing"
 
@@ -55,13 +56,13 @@ func TestCreateDriverRunUsesActivePassedVersion(t *testing.T) {
 		EpicID:         "TEST-1",
 		RunID:          "run-1",
 		IdempotencyKey: "idem-1",
-		Input:          map[string]string{"epicId": "wrong", "requestedBy": "cli"},
+		Payload:        json.RawMessage(`{"epicId":"wrong","requestedBy":"cli"}`),
 	})
 	if err != nil {
 		t.Fatalf("CreateDriverRun: %v", err)
 	}
-	if run.Status != domain.DriverRunQueued || run.DriverVersionID != "version-1" || run.Input["epicId"] != "TEST-1" {
-		t.Fatalf("run = %+v, want queued pinned version-1 with path epic", run)
+	if run.Status != domain.DriverRunQueued || run.DriverVersionID != "version-1" || string(run.Payload) != `{"epicId":"wrong","requestedBy":"cli"}` {
+		t.Fatalf("run = %+v, want queued pinned version-1 with raw payload", run)
 	}
 
 	replay, err := CreateDriverRun(ctx, st, RunOptions{

@@ -385,14 +385,17 @@ func (r NodeRunner) Run(ctx context.Context, req RunRequest) (RunResult, error) 
 	if node == "" {
 		node = "node"
 	}
-	input, err := json.Marshal(req.Run.Input)
-	if err != nil {
-		return RunResult{}, fmt.Errorf("encode driver input: %w", err)
+	payload := req.Run.Payload
+	if len(payload) == 0 {
+		payload = json.RawMessage(`{}`)
+	}
+	if !json.Valid(payload) {
+		return RunResult{}, fmt.Errorf("driver payload is invalid JSON: %w", domain.ErrInvalid)
 	}
 	if req.ServerPath == "" {
 		return RunResult{}, fmt.Errorf("native Flue server path required: %w", domain.ErrInvalid)
 	}
-	return r.runBuiltFlueServer(ctx, req, node, input)
+	return r.runBuiltFlueServer(ctx, req, node, payload)
 }
 
 func (r NodeRunner) runBuiltFlueServer(ctx context.Context, req RunRequest, node string, input []byte) (RunResult, error) {

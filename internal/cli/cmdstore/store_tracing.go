@@ -1049,6 +1049,24 @@ func (t *tracedDriverRunStore) List(ctx context.Context, ws string, filter store
 	return out, err
 }
 
+func (t *tracedDriverRunStore) Events(ctx context.Context, ws, runID, after string, limit int) (*domain.PlatformEventsPage, error) {
+	ctx, span := startStoreSpan(ctx, "DriverRuns", "Events",
+		attribute.String("loom.workspace", ws),
+		attribute.String("loom.driver_run", runID),
+	)
+	reader, ok := t.inner.(store.DriverRunEventsReader)
+	if !ok {
+		finish(span, store.ErrDriverRunEventsUnavailable)
+		return nil, store.ErrDriverRunEventsUnavailable
+	}
+	out, err := reader.Events(ctx, ws, runID, after, limit)
+	if err == nil && out != nil {
+		span.SetAttributes(attribute.Int("result.count", len(out.Events)))
+	}
+	finish(span, err)
+	return out, err
+}
+
 func (t *tracedDriverRunStore) Claim(ctx context.Context, ws, runID, nodeID, leaseID string) (*domain.DriverRun, error) {
 	ctx, span := startStoreSpan(ctx, "DriverRuns", "Claim",
 		attribute.String("loom.workspace", ws),

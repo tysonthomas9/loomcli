@@ -2,6 +2,7 @@ package memstore
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"math"
 	"sort"
@@ -443,7 +444,7 @@ func (s *driverRunStore) Create(_ context.Context, in store.DriverRunCreate) (*d
 		EpicID:          in.EpicID,
 		Status:          domain.DriverRunQueued,
 		IdempotencyKey:  in.IdempotencyKey,
-		Input:           cloneMap(in.Input),
+		Payload:         cloneJSON(in.Payload),
 		CreatedAt:       now,
 		UpdatedAt:       now,
 	}
@@ -469,11 +470,6 @@ func (s *driverRunStore) CreateEpic(ctx context.Context, ws, epicID string, in s
 	if runID == "" {
 		runID = fmt.Sprintf("run-%d", time.Now().UTC().UnixNano())
 	}
-	input := cloneMap(in.Input)
-	if input == nil {
-		input = map[string]string{}
-	}
-	input["epicId"] = epicID
 	return s.Create(ctx, store.DriverRunCreate{
 		WorkspaceKey:    ws,
 		RunID:           runID,
@@ -484,7 +480,7 @@ func (s *driverRunStore) CreateEpic(ctx context.Context, ws, epicID string, in s
 		SourceRef:       binding.RouteKey,
 		EpicID:          epicID,
 		IdempotencyKey:  in.IdempotencyKey,
-		Input:           input,
+		Payload:         cloneJSON(in.Payload),
 	})
 }
 
@@ -496,6 +492,42 @@ func (s *driverRunStore) Get(_ context.Context, ws, runID string) (*domain.Drive
 		return nil, fmt.Errorf("driver run %q in workspace %q: %w", runID, ws, domain.ErrNotFound)
 	}
 	return cloneDriverRun(run), nil
+}
+
+func (s *driverRunStore) Events(ctx context.Context, ws, runID, after string, limit int) (*domain.PlatformEventsPage, error) {
+	run, err := s.Get(ctx, ws, runID)
+	if err != nil {
+		return nil, err
+	}
+	if after != "" && after != "0" {
+		return &domain.PlatformEventsPage{Events: []domain.PlatformEvent{}, Cursor: after}, nil
+	}
+	action := "driver_run.create"
+	if run.Status == domain.DriverRunRunning {
+		action = "driver_run.claim"
+	} else if run.Status.IsTerminal() {
+		action = "driver_run.finish"
+	}
+	timestamp := run.UpdatedAt
+	if timestamp.IsZero() {
+		timestamp = run.CreatedAt
+	}
+	event := domain.PlatformEvent{
+		ID:          "1-0",
+		Timestamp:   timestamp,
+		Actor:       "memstore",
+		Action:      action,
+		EntityType:  "driver_run",
+		EntityID:    run.RunID,
+		WorkspaceID: ws,
+		Metadata: map[string]string{
+			"driver_id":         run.DriverID,
+			"driver_version_id": run.DriverVersionID,
+			"source_kind":       run.SourceKind,
+			"source_ref":        run.SourceRef,
+		},
+	}
+	return &domain.PlatformEventsPage{Events: []domain.PlatformEvent{event}, Cursor: event.ID}, nil
 }
 
 func (s *driverRunStore) List(_ context.Context, ws string, filter store.DriverRunFilter) ([]*domain.DriverRun, error) {
@@ -1476,10 +1508,19 @@ func cloneTriggerBinding(b *domain.TriggerBinding) *domain.TriggerBinding {
 
 func cloneDriverRun(r *domain.DriverRun) *domain.DriverRun {
 	out := *r
-	out.Input = cloneMap(r.Input)
+	out.Payload = cloneJSON(r.Payload)
 	out.Output = cloneMap(r.Output)
 	out.FinishedAt = clonePtr(r.FinishedAt)
 	return &out
+}
+
+func cloneJSON(payload json.RawMessage) json.RawMessage {
+	if len(payload) == 0 {
+		return json.RawMessage(`{}`)
+	}
+	out := make(json.RawMessage, len(payload))
+	copy(out, payload)
+	return out
 }
 
 func cloneDriverStep(s *domain.DriverStep) *domain.DriverStep {

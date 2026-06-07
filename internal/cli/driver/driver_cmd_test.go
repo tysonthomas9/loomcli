@@ -2,6 +2,7 @@ package driver
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"testing"
 	"time"
@@ -10,22 +11,26 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
-func TestParseDriverRunInput(t *testing.T) {
-	got, err := parseDriverRunInput([]string{"provider=flue-daytona", "note=hello=world"})
+func TestParseDriverRunPayload(t *testing.T) {
+	payload, err := parseDriverRunPayload([]string{"provider=flue-daytona", "note=hello=world"}, "TEST-1")
 	if err != nil {
-		t.Fatalf("parseDriverRunInput: %v", err)
+		t.Fatalf("parseDriverRunPayload: %v", err)
 	}
-	if got["provider"] != "flue-daytona" || got["note"] != "hello=world" {
-		t.Fatalf("input = %+v, want parsed key-values", got)
+	var got map[string]string
+	if err := json.Unmarshal(payload, &got); err != nil {
+		t.Fatalf("payload JSON: %v", err)
+	}
+	if got["provider"] != "flue-daytona" || got["note"] != "hello=world" || got["epicId"] != "TEST-1" {
+		t.Fatalf("payload = %+v, want parsed key-values", got)
 	}
 }
 
-func TestParseDriverRunInputRejectsMissingKey(t *testing.T) {
-	if _, err := parseDriverRunInput([]string{"=value"}); err == nil {
-		t.Fatal("parseDriverRunInput accepted empty key")
+func TestParseDriverRunPayloadRejectsMissingKey(t *testing.T) {
+	if _, err := parseDriverRunPayload([]string{"=value"}, ""); err == nil {
+		t.Fatal("parseDriverRunPayload accepted empty key")
 	}
-	if _, err := parseDriverRunInput([]string{"missing-equals"}); err == nil {
-		t.Fatal("parseDriverRunInput accepted missing equals")
+	if _, err := parseDriverRunPayload([]string{"missing-equals"}, ""); err == nil {
+		t.Fatal("parseDriverRunPayload accepted missing equals")
 	}
 }
 

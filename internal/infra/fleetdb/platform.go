@@ -252,7 +252,7 @@ func (s *driverRunStore) Create(ctx context.Context, in store.DriverRunCreate) (
 		"source_ref":        in.SourceRef,
 		"epic_id":           in.EpicID,
 		"idempotency_key":   in.IdempotencyKey,
-		"input":             in.Input,
+		"payload":           in.Payload,
 	}
 	var out domain.DriverRun
 	if err := s.client.do(ctx, "POST", "/api/v1/"+pathEscape(in.WorkspaceKey)+"/driver-runs", body, &out); err != nil {
@@ -265,7 +265,7 @@ func (s *driverRunStore) CreateEpic(ctx context.Context, ws, epicID string, in s
 	body := map[string]any{
 		"run_id":          in.RunID,
 		"idempotency_key": in.IdempotencyKey,
-		"input":           in.Input,
+		"payload":         in.Payload,
 	}
 	headers := map[string]string{}
 	if in.IdempotencyKey != "" {
@@ -283,6 +283,28 @@ func (s *driverRunStore) Get(ctx context.Context, ws, runID string) (*domain.Dri
 	var out domain.DriverRun
 	if err := s.client.do(ctx, "GET", "/api/v1/"+pathEscape(ws)+"/driver-runs/"+pathEscape(runID), nil, &out); err != nil {
 		return nil, err
+	}
+	return &out, nil
+}
+
+func (s *driverRunStore) Events(ctx context.Context, ws, runID, after string, limit int) (*domain.PlatformEventsPage, error) {
+	q := url.Values{}
+	if after != "" {
+		q.Set("after", after)
+	}
+	if limit > 0 {
+		q.Set("limit", strconv.Itoa(limit))
+	}
+	path := "/api/v1/" + pathEscape(ws) + "/driver-runs/" + pathEscape(runID) + "/events"
+	if encoded := q.Encode(); encoded != "" {
+		path += "?" + encoded
+	}
+	var out domain.PlatformEventsPage
+	if err := s.client.do(ctx, "GET", path, nil, &out); err != nil {
+		return nil, err
+	}
+	if out.Events == nil {
+		out.Events = []domain.PlatformEvent{}
 	}
 	return &out, nil
 }
