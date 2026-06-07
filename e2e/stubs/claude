@@ -24,6 +24,7 @@ fi
 IS_PIPE=false
 IS_STREAM_JSON=false
 HAS_SKIP_PERMS=false
+PROMPT_TEXT=""
 
 while [ $# -gt 0 ]; do
     case "$1" in
@@ -33,6 +34,14 @@ while [ $# -gt 0 ]; do
             if [ "$1" = "stream-json" ]; then IS_STREAM_JSON=true; fi
             ;;
         --dangerously-skip-permissions) HAS_SKIP_PERMS=true ;;
+        --*) ;;
+        *)
+            if [ -z "$PROMPT_TEXT" ]; then
+                PROMPT_TEXT="$1"
+            else
+                PROMPT_TEXT="$PROMPT_TEXT $1"
+            fi
+            ;;
     esac
     shift
 done
@@ -47,12 +56,23 @@ if [ "$IS_PIPE" = "true" ] && [ "$IS_STREAM_JSON" = "true" ]; then
     jq -nc --arg t "$RESPONSE" '{"type":"assistant","message":{"content":[{"type":"text","text":$t}]}}'
     printf '{"type":"result","duration_ms":1234,"cost_usd":0.01,"is_error":false}\n'
 elif [ "$HAS_SKIP_PERMS" = "true" ]; then
-    # Interactive mode
+    # Minimal Claude Code TUI mode for Harness Wrapper RunTurn.
     echo "Claude Code"
-    echo ""
-    echo "$RESPONSE"
-    echo ""
-    echo "Done."
+    echo "❯"
+    if [ -n "$PROMPT_TEXT" ]; then
+        echo "$RESPONSE"
+        echo "claude --resume 123e4567-e89b-12d3-a456-426614174000"
+        echo "✻ Baked for 1s"
+    else
+        i=1
+        while IFS= read -r _line; do
+            echo "$RESPONSE"
+            echo "claude --resume 123e4567-e89b-12d3-a456-426614174000"
+            echo "✻ Baked for ${i}s"
+            echo "❯"
+            i=$((i + 1))
+        done
+    fi
 else
     # Fallback: just print response
     echo "$RESPONSE"

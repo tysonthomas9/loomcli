@@ -2,6 +2,7 @@ package backends
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -305,7 +306,7 @@ func TestClaudeBackendInvokeNonInteractive(t *testing.T) {
 }
 
 func TestBuildClaudeResumeArgsArePositional(t *testing.T) {
-	got := buildClaudeNonInteractiveArgs("session-123", "prompt")
+	got := buildClaudeRunTurnArgs("session-123")
 	wantPrefix := []string{"--resume", "session-123"}
 	if len(got) < len(wantPrefix) {
 		t.Fatalf("args too short: %v", got)
@@ -318,6 +319,9 @@ func TestBuildClaudeResumeArgsArePositional(t *testing.T) {
 	for _, arg := range got {
 		if arg == "--session-id" {
 			t.Fatalf("args contain invalid --session-id resume form: %v", got)
+		}
+		if arg == "-p" || arg == "--output-format" {
+			t.Fatalf("args contain print-mode arg %q: %v", arg, got)
 		}
 	}
 }
@@ -332,6 +336,46 @@ func TestBuildClaudeContinueSessionArgsArePositional(t *testing.T) {
 		if got[i] != want[i] {
 			t.Fatalf("arg[%d] = %q, want %q; args=%v", i, got[i], want[i], got)
 		}
+	}
+}
+
+func TestRunClaudeTurn_FakeClaudeTUI(t *testing.T) {
+	dir := t.TempDir()
+	bin := dir + "/fake-claude"
+	script := `#!/bin/sh
+echo "Fake Claude Code"
+echo "❯"
+while IFS= read -r line; do
+  echo "assistant reply: $line"
+  echo "claude --resume 123e4567-e89b-12d3-a456-426614174000"
+  echo "✻ Baked for 1s"
+done
+`
+	if err := os.WriteFile(bin, []byte(script), 0o755); err != nil {
+		t.Fatalf("write fake claude: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	var out bytes.Buffer
+	res, err := claudeRunTurn(ctx, claudeRunTurnConfig{
+		Harness:       "claude",
+		BinaryPath:    bin,
+		Prompt:        "hello",
+		ExitAfterTurn: true,
+		Output:        &out,
+	})
+	if err != nil {
+		t.Fatalf("claudeRunTurn: %v\noutput:\n%s", err, out.String())
+	}
+	if res.Turn.State != "complete" {
+		t.Fatalf("Turn.State = %q, want complete", res.Turn.State)
+	}
+	if !strings.Contains(claudeTurnText(res), "assistant reply: hello") {
+		t.Fatalf("assistant text missing reply, got %q; raw output:\n%s", claudeTurnText(res), out.String())
+	}
+	if res.Session.HarnessSessionID != "123e4567-e89b-12d3-a456-426614174000" {
+		t.Fatalf("HarnessSessionID = %q", res.Session.HarnessSessionID)
 	}
 }
 

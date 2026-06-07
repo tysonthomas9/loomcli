@@ -3,9 +3,11 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"os/exec"
 	"strconv"
+	"sync"
 	"testing"
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
@@ -119,6 +121,87 @@ type OutputCommandStub struct {
 	Name string
 	Args []string
 	Err  error
+}
+
+type TextAnalysisStub struct {
+	WorkDir string
+	Prompt  string
+	Stdout  string
+	Err     error
+}
+
+type TextAnalysisMock struct {
+	t     *testing.T
+	stubs []TextAnalysisStub
+	calls []TextAnalysisStub
+	idx   int
+	mu    sync.Mutex
+}
+
+func NewTextAnalysisMock(t *testing.T, stubs []TextAnalysisStub) *TextAnalysisMock {
+	t.Helper()
+	return &TextAnalysisMock{t: t, stubs: stubs}
+}
+
+func (m *TextAnalysisMock) AnalyzeText(_ context.Context, workDir, prompt string) (string, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	call := TextAnalysisStub{WorkDir: workDir, Prompt: prompt}
+	m.calls = append(m.calls, call)
+	if m.idx >= len(m.stubs) {
+		m.t.Fatalf("unexpected text analysis call #%d in %s", m.idx+1, workDir)
+	}
+	stub := m.stubs[m.idx]
+	m.idx++
+	if stub.WorkDir != "" && stub.WorkDir != workDir {
+		m.t.Fatalf("text analysis call #%d workdir: got %q, want %q", m.idx, workDir, stub.WorkDir)
+	}
+	if stub.Prompt != "" && stub.Prompt != prompt {
+		m.t.Fatalf("text analysis call #%d prompt mismatch", m.idx)
+	}
+	return stub.Stdout, stub.Err
+}
+
+func (m *TextAnalysisMock) Calls() []TextAnalysisStub {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	out := make([]TextAnalysisStub, len(m.calls))
+	copy(out, m.calls)
+	return out
+}
+
+func (m *TextAnalysisMock) Verify() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.idx != len(m.stubs) {
+		m.t.Errorf("expected %d text analysis calls, got %d", len(m.stubs), m.idx)
+	}
+}
+
+func (m *TextAnalysisMock) InstallOn(deps *cli.Deps) {
+	orig := deps.TextAnalyzer
+	deps.TextAnalyzer = m
+	m.t.Cleanup(func() {
+		m.Verify()
+		deps.TextAnalyzer = orig
+	})
+}
+
+func installTextAnalysisResult(t *testing.T, deps *cli.Deps, stdout string) *TextAnalysisMock {
+	t.Helper()
+	mock := NewTextAnalysisMock(t, []TextAnalysisStub{{Stdout: stdout}})
+	mock.InstallOn(deps)
+	return mock
+}
+
+func installTextAnalysisError(t *testing.T, deps *cli.Deps, err error) *TextAnalysisMock {
+	t.Helper()
+	if err == nil {
+		err = errors.New("text analysis failed")
+	}
+	mock := NewTextAnalysisMock(t, []TextAnalysisStub{{Err: err}})
+	mock.InstallOn(deps)
+	return mock
 }
 
 type CommandMock struct {
