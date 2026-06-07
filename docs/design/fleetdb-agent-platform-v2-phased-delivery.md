@@ -17,11 +17,17 @@ closed the critical early-platform gaps:
 - FleetDB `CompleteTaskRun(close_task=true)` now writes the same `issue.close`
   event shape used by manual issue close, and replaying the same completion does
   not duplicate the event.
-- Loom driver publish now invokes a Flue build, records a built
-  `dist/server.mjs` artifact in `server_ref`, and the default Node runner
-  executes that built artifact through a local IPC launcher. Unit coverage uses
-  a deterministic fake Flue builder; a real local Flue toolchain smoke test is
-  still required once the matching `flue` CLI dependencies are installed.
+- Loom now registers already-built native Flue artifacts with
+  `loom driver register --flue-dist ./dist`, records `dist/server.mjs` in
+  `server_ref`, and the default Node runner executes that built artifact
+  through a local IPC launcher. The removed `loom driver publish` path no longer
+  generates hidden Flue projects or adapters. An opt-in real Flue CLI smoke
+  exists for installed toolchains:
+  `LOOM_REAL_FLUE_TEST=1 go test ./internal/driver -run TestRealFlue`.
+  The default executor intentionally does not call `flue run`, because
+  `flue run` rebuilds at execution time and owns only process-local run history;
+  Loom's durable run path verifies and executes the already-registered
+  `server_ref` artifact.
 - FleetDB `TaskRun` now records `worker_profile_id`, `runner_placement`, and
   `sandbox_placement` as durable fields; `WorkerProfile` records
   `runtime_policy` and `max_parallel`.
@@ -33,6 +39,11 @@ closed the critical early-platform gaps:
 - Loom child task execution now creates queued task runs, claims them through
   the TaskRun store contract, and executes/heartbeats/finishes with the claimed
   node, lease, fencing token, and placement payload.
+- Loom worker runtimes can now claim an already queued FleetDB `TaskRun` and
+  execute it through the same host task-runner bridge via hidden
+  `loom driver work-task-run`. This gives cloud/remote workers a concrete
+  one-shot claim/heartbeat/finish surface without requiring parent DriverRun
+  credentials.
 - FleetDB exposes stale `DriverRun` recovery that fails heartbeat-expired
   running runs without owner credentials and releases active-epic admission;
   Redis and Postgres storage paths plus HTTP API/client surfaces are covered.
@@ -53,27 +64,61 @@ closed the critical early-platform gaps:
   `file://`, `local:`, or Daytona-local URI schemes. Redis, Postgres, and Loom
   memstore paths still allow local artifacts for local/noop runs but require
   server-visible artifact refs for non-local sandbox providers.
+- Loom host task-runners can now return finalized artifact descriptors
+  (`artifacts`, `artifact_descriptors`, or `artifactDescriptors`) with
+  server-visible URI/hash metadata. Loom registers/finalizes those artifacts
+  before returning `TaskRunResult.artifactIds`, so the explicit Flue driver SDK
+  can pass them through the existing FleetDB artifact gates.
+- FleetDB artifact content uploads now support a configurable HTTP object
+  backend (`FLEETDB_ARTIFACT_CONTENT_BACKEND=http`) in addition to the local
+  file store. The HTTP backend writes content-addressed objects with PUT,
+  returns server-visible URI/hash metadata, and verifies finalized HTTP(S)
+  artifacts by re-reading and hashing the object.
 - Loom driver and host task-runner subprocesses now start from a scoped base
   environment instead of inheriting the full parent process environment. Broad
   FleetDB, model-provider, cloud-provider, GitHub, token, password, secret, and
   git-config credentials are stripped before per-run protocol variables are
   appended.
+- Loom driver runtimes now expose an explicit child-CLI FleetDB handoff
+  namespace (`LOOM_DRIVER_FLEET_DB_*`). The `@loom/sdk/flue` helper translates
+  that namespace back to the standard FleetDB bootstrap variables only for the
+  child `loom driver ...` command, so cloud-mode child commands do not depend on
+  broad parent environment inheritance.
+- Loom driver runtimes now preserve the configured host task-runner command
+  (`LOOM_DRIVER_TASK_RUNNER_CMD_JSON` or `LOOM_DRIVER_TASK_RUNNER_CMD`) inside
+  the scoped runtime environment. That lets a real Flue-executed driver request
+  non-noop child `TaskRun`s through the host bridge instead of silently losing
+  the runner command at the sandbox boundary.
+- Native Flue driver execution now attaches Flue runner output to the completed
+  `DriverRun.output` (`logs_ref`, captured log tail, and event count), while
+  child task logs/artifacts attach to the child `TaskRun` records.
+- `scripts/test-real-flue-epic-runner.sh` is an opt-in full-stack MVP harness:
+  it builds local `loom` and `fleet-db` binaries, starts real Redis and FleetDB,
+  seeds an `A -> B,C -> D` epic, registers a real Flue-built driver, runs
+  `loom serve` with the driver executor enabled, and asserts all child tasks and
+  child `TaskRun`s complete in dependency order.
 
 Known remaining validation:
 
-- Run a real local Flue toolchain smoke test once matching `flue` CLI
-  dependencies are installed locally. The current coverage uses deterministic
-  fake Flue builders and built-server runner tests.
+- Run the opt-in real local Flue toolchain smoke in an environment with the
+  matching `flue` CLI and runtime dependencies installed. The default coverage
+  intentionally uses deterministic fake Flue builders and built-server runner
+  tests.
+- Run `scripts/test-real-flue-epic-runner.sh` with a built real Flue CLI
+  available on `PATH`, or with `LOOM_FLUE_BUILD_CMD_JSON` pointing at a built
+  Flue checkout. The local `../flue` checkout is not sufficient until
+  `packages/cli/dist/flue.js` has been generated.
 - Full V2 cloud readiness remains open: provider-specific runtime adapters
-  beyond the initial preflight mapping, cloud worker placement/capacity beyond
-  the local executor loop, webhook
+  beyond the initial preflight mapping, managed cloud worker placement/capacity
+  beyond the one-shot queued worker command, webhook
   signature/filter/schedule providers beyond generic route ingress, scoped
-  per-run credential minting, object-store upload backend integration, UI/ops
-  surfaces, and phase-level end-to-end acceptance still need dedicated
-  implementation and validation.
-- Because broad FleetDB credentials are now stripped from driver subprocesses,
-  cloud-mode driver code still needs an explicit per-run FleetDB URL/token
-  handoff before child CLI calls can safely target the same FleetDB instance.
+  per-run credential minting, native cloud object-store adapters and operational
+  object-store configuration, UI/ops surfaces, and phase-level end-to-end
+  acceptance still need dedicated implementation and validation.
+- Server-side minting of short-lived per-run FleetDB tokens is still open. The
+  task-run claim path now creates and verifies per-run lease tokens for claim,
+  heartbeat, finish, and completion, but this is not yet FleetDB API-key
+  minting/revocation for remote worker bootstrap.
 
 ## Purpose
 
@@ -149,7 +194,7 @@ operator views only after the core flow is proven.
 | Phase | Deliverable | Proof |
 |---|---|---|
 | 0 | Contract reset | FleetDB task claim remains the only task ownership primitive |
-| 1 | Local dynamic driver MVP | `.loom/workflows/*.ts` builds and runs as a `DriverRun` |
+| 1 | Local dynamic driver MVP | Native Flue TypeScript project builds, registers, and runs as a `DriverRun` |
 | 2 | One task end-to-end | Driver claims one FleetDB task and completes it through Flue + Daytona patch-back |
 | 3 | Epic loop with lead handoff | Driver drains an epic through FleetDB dependencies, or returns control to lead |
 | 4 | Cloud scale-out | Cloud Loom/FleetDB provisions many Flue-Daytona task runs safely |
@@ -200,18 +245,24 @@ The team can answer these questions without introducing a new scheduler:
 
 ### Goal
 
-Prove that a TypeScript file can become the driver for a Loom run.
+Prove that a normal Flue-authored TypeScript project can become the driver for
+a Loom run.
 
 ### Deliverables
 
 - A supported source layout:
 
   ```text
-  .loom/workflows/complete-epic.ts
+  workflows/complete-epic.ts
+  package.json
   ```
 
-- A driver packer that converts `.loom/workflows/*.ts` into a Flue-compatible
-  build layout.
+- A Flue build step owned by the user/agent project:
+
+  ```bash
+  flue build --target node --root . --output ./dist
+  ```
+
 - A `Driver` draft record.
 - A built immutable `DriverVersion` with source digest, bundle digest, build
   diagnostics, and manifest.
@@ -221,7 +272,7 @@ Prove that a TypeScript file can become the driver for a Loom run.
 ### Example Command
 
 ```bash
-loom driver publish .loom/workflows/complete-epic.ts
+loom driver register --flue-dist ./dist --name complete-epic --activate
 loom driver run complete-epic --epic <epic_id>
 ```
 
@@ -243,8 +294,9 @@ loom driver run complete-epic --epic <epic_id>
 
 ### Exit Criteria
 
-- Invalid TypeScript fails build and leaves the `DriverVersion` inactive.
-- Source changes after publish do not affect an existing version.
+- Invalid TypeScript fails in the Flue build before registration can activate a
+  version.
+- Source changes after registration do not affect an existing version.
 - The driver run output is visible from CLI and persisted in FleetDB-backed
   metadata.
 
@@ -260,7 +312,7 @@ the existing task-completion path.
 - Driver SDK method:
 
   ```ts
-  ctx.tasks.claimReady({ epicId })
+  loom.tasks.claimReady({ epicId })
   ```
 
   This delegates to FleetDB's existing claim behavior.
@@ -269,7 +321,7 @@ the existing task-completion path.
   `loom` binary and returns a `TaskRunResult` — there is no separate `wait`):
 
   ```ts
-  const result = await ctx.taskRuns.request({ taskId, providerProfile: "flue-daytona" });
+  const result = await loom.taskRuns.request({ taskId, providerProfile: "flue-daytona" });
   ```
 
 - Child `TaskRun` linked to the parent `DriverRun`.
@@ -282,11 +334,11 @@ the existing task-completion path.
 
 ```text
 DriverRun
-  -> ctx.tasks.claimReady(epic_id)
+  -> loom.tasks.claimReady(epic_id)
   -> FleetDB returns one claimed task or none
-  -> ctx.taskRuns.request(task_id, flue-daytona)  # runs agent + patch-back
+  -> loom.taskRuns.request(task_id, flue-daytona)  # runs agent + patch-back
   -> task agent produces patch/log artifacts, local Loom applies patch-back
-  -> ctx.tasks.complete(task_id) -> FleetDB accepts completion
+  -> loom.tasks.complete(task_id) -> FleetDB accepts completion
   -> dependency graph unlocks through existing FleetDB behavior
 ```
 
@@ -333,10 +385,10 @@ Prove the primary lead-agent workflow:
 
 ### Deliverables
 
-- Driver loop over `ctx.tasks.claimReady({ epicId })`.
-- `ctx.taskRuns.request({ taskId })` runs each task synchronously and returns its
-  `TaskRunResult` (status + exit code); the script then calls `ctx.tasks.complete`
-  or `ctx.tasks.release`.
+- Driver loop over `loom.tasks.claimReady({ epicId })`.
+- `loom.taskRuns.request({ taskId })` runs each task synchronously and returns
+  its `TaskRunResult` (status + exit code); the script then calls
+  `loom.tasks.complete` or `loom.tasks.release`.
 - Parent-child visibility from `DriverRun` to child `TaskRun`s.
 - Driver terminal outcomes:
   - `completed`;
@@ -348,36 +400,36 @@ Prove the primary lead-agent workflow:
 ### Example Driver Shape
 
 ```ts
-// A driver file is a flue workflow with a NAMED `run` export.
-export const run = defineDriver({
-  name: "complete-epic",
+import { createLoomDriverClient } from "@loom/sdk/flue";
 
-  async run(ctx) {
-    while (true) {
-      const task = await ctx.tasks.claimReady({ epicId: ctx.input.epicId });
+export async function run(ctx) {
+  const input = ctx.payload || {};
+  const loom = createLoomDriverClient({ input });
 
-      if (!task) {
-        return ctx.run.complete({ summary: "Epic drained" });
-      }
+  while (true) {
+    const task = await loom.tasks.claimReady({ epicId: input.epicId });
 
-      // request() runs the agent + patch-back and returns synchronously.
-      const result = await ctx.taskRuns.request({
-        taskId: task.id,
-        providerProfile: "flue-daytona",
-      });
-
-      if (result.status === "completed") {
-        await ctx.tasks.complete(task.id); // FleetDB unlocks dependents
-      } else {
-        await ctx.tasks.release(task.id);
-        return ctx.run.needsHuman({
-          summary: `Task ${task.id} failed`,
-          taskRunId: result.id,
-        });
-      }
+    if (!task) {
+      return loom.completed({ summary: "Epic drained" });
     }
-  },
-});
+
+    // request() runs the agent + patch-back and returns synchronously.
+    const result = await loom.taskRuns.request({
+      taskId: task.id,
+      providerProfile: "flue-daytona",
+    });
+
+    if (result.status === "completed") {
+      await loom.tasks.complete(task.id); // FleetDB unlocks dependents
+    } else {
+      await loom.tasks.release(task.id);
+      return loom.needsHuman({
+        summary: `Task ${task.id} failed`,
+        taskRunId: result.id,
+      });
+    }
+  }
+}
 ```
 
 ### Proof
@@ -533,10 +585,12 @@ These tests should be added as phases land.
 
 ### Phase 1 Tests
 
-- Publish `.loom/workflows/complete-epic.ts` into an immutable
+- Build a native Flue project and register `./dist` into an immutable
   `DriverVersion`.
-- Change source after publish; run still executes the original bundle digest.
-- Invalid TypeScript fails validation and cannot be invoked.
+- Change source after registration; run still executes the original bundle
+  digest.
+- Invalid TypeScript fails the Flue build or native registration and cannot be
+  invoked.
 
 ### Phase 2 Tests
 
@@ -575,7 +629,7 @@ These tests should be added as phases land.
 ## Proposed Implementation Order
 
 1. Update V2 docs to make FleetDB single-claim authority explicit.
-2. Implement local driver packaging from `.loom/workflows` to Flue layout.
+2. Implement native Flue artifact registration without Loom-generated layout.
 3. Add `Driver`, `DriverVersion`, and `DriverRun` persistence.
 4. Add read-only driver SDK for epic/task inspection.
 5. Add task claim/start/wait SDK methods that delegate to FleetDB and existing

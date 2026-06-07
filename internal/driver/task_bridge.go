@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -46,6 +47,9 @@ type bridgeTaskRunnerResult struct {
 	CacheWriteTokensCamel   int64                `json:"cacheWriteTokens"`
 	EstimatedCostUSD        float64              `json:"estimated_cost_usd"`
 	EstimatedCostUSDCamel   float64              `json:"estimatedCostUsd"`
+	Artifacts               []bridgeArtifact     `json:"artifacts"`
+	ArtifactDescriptors     []bridgeArtifact     `json:"artifact_descriptors"`
+	ArtifactDescriptorsAlt  []bridgeArtifact     `json:"artifactDescriptors"`
 	RuntimeMetadata         map[string]string    `json:"runtime_metadata"`
 	RuntimeMetadataCamel    map[string]string    `json:"runtimeMetadata"`
 	ErrorClass              string               `json:"error_class"`
@@ -69,6 +73,26 @@ type bridgeTaskRunnerResult struct {
 	PatchVisibilityCamel    string               `json:"patchVisibility"`
 	PatchRedactionStatus    string               `json:"patch_redaction_status"`
 	PatchRedactionStatusAlt string               `json:"patchRedactionStatus"`
+}
+
+type bridgeArtifact struct {
+	ArtifactID         string            `json:"artifact_id"`
+	ArtifactIDCamel    string            `json:"artifactId"`
+	ID                 string            `json:"id"`
+	Type               string            `json:"type"`
+	URI                string            `json:"uri"`
+	Summary            string            `json:"summary"`
+	MIMEType           string            `json:"mime_type"`
+	MIMETypeCamel      string            `json:"mimeType"`
+	SizeBytes          int64             `json:"size_bytes"`
+	SizeBytesCamel     int64             `json:"sizeBytes"`
+	Checksum           string            `json:"checksum"`
+	ContentHash        string            `json:"content_hash"`
+	ContentHashCamel   string            `json:"contentHash"`
+	Visibility         string            `json:"visibility"`
+	RedactionStatus    string            `json:"redaction_status"`
+	RedactionStatusAlt string            `json:"redactionStatus"`
+	Metadata           map[string]string `json:"metadata"`
 }
 
 func (e HostBridgeTaskExecutor) PreflightTaskProvider(ctx context.Context, opts TaskRunRequestOptions) (TaskRunRequestOptions, error) {
@@ -108,6 +132,12 @@ func (e HostBridgeTaskExecutor) ExecuteTask(ctx context.Context, req TaskExecReq
 		return TaskExecResult{}, err
 	}
 	result := runner.taskExecResult()
+	if artifacts := runner.finalizedArtifacts(); len(artifacts) > 0 {
+		result, err = e.registerRunnerArtifacts(ctx, req, artifacts, result)
+		if err != nil {
+			return TaskExecResult{}, err
+		}
+	}
 	patch, err := e.readPatch(ctx, runner)
 	if err != nil {
 		return TaskExecResult{}, err
@@ -203,6 +233,7 @@ func taskRunnerEnv(req TaskExecRequest, worktreePath, requestJSON string) []stri
 		"LOOM_TASK_PROVIDER_PROFILE=" + req.ProviderProfile,
 		"LOOM_TASK_RUN_NODE_ID=" + req.NodeID,
 		"LOOM_TASK_RUN_LEASE_ID=" + req.LeaseID,
+		"LOOM_TASK_RUN_LEASE_TOKEN=" + req.LeaseToken,
 		fmt.Sprintf("LOOM_TASK_RUN_FENCING_TOKEN=%d", req.FencingToken),
 		"LOOM_TASK_RUN_RUNNER_PLACEMENT_JSON=" + taskRunPlacementJSON(req.RunnerPlacement),
 		"LOOM_TASK_RUN_SANDBOX_PLACEMENT_JSON=" + taskRunPlacementJSON(req.SandboxPlacement),
@@ -218,6 +249,108 @@ func taskRunPlacementJSON(placement domain.TaskRunPlacement) string {
 		return "{}"
 	}
 	return string(b)
+}
+
+func (r bridgeTaskRunnerResult) finalizedArtifacts() []bridgeArtifact {
+	switch {
+	case len(r.Artifacts) > 0:
+		return r.Artifacts
+	case len(r.ArtifactDescriptors) > 0:
+		return r.ArtifactDescriptors
+	case len(r.ArtifactDescriptorsAlt) > 0:
+		return r.ArtifactDescriptorsAlt
+	default:
+		return nil
+	}
+}
+
+func (e HostBridgeTaskExecutor) registerRunnerArtifacts(ctx context.Context, req TaskExecRequest, artifacts []bridgeArtifact, result TaskExecResult) (TaskExecResult, error) {
+	if len(artifacts) == 0 {
+		return result, nil
+	}
+	if e.Store == nil {
+		return TaskExecResult{}, fmt.Errorf("store required for runner artifact registration: %w", domain.ErrInvalid)
+	}
+	artifactIDs := normalizeArtifactIDs(result.ArtifactIDs)
+	for i, artifact := range artifacts {
+		artifactID := firstNonEmpty(artifact.ArtifactID, artifact.ArtifactIDCamel, artifact.ID)
+		if artifactID == "" {
+			artifactID = fmt.Sprintf("artifact-%s-%d", req.TaskRunID, i+1)
+		}
+		uri := strings.TrimSpace(artifact.URI)
+		if uri == "" {
+			artifactIDs = normalizeArtifactIDs(append(artifactIDs, artifactID))
+			continue
+		}
+		metadata := cloneStringMap(artifact.Metadata)
+		if metadata == nil {
+			metadata = map[string]string{}
+		}
+		metadata["driver_run_id"] = req.DriverRunID
+		metadata["provider_profile"] = req.ProviderProfile
+		contentHash := firstNonEmpty(artifact.ContentHash, artifact.ContentHashCamel, artifact.Checksum)
+		checksum := firstNonEmpty(artifact.Checksum, contentHash)
+		mimeType := firstNonEmpty(artifact.MIMEType, artifact.MIMETypeCamel)
+		sizeBytes := firstNonZeroInt64(artifact.SizeBytes, artifact.SizeBytesCamel)
+		summary := artifact.Summary
+		visibility := artifact.Visibility
+		redactionStatus := firstNonEmpty(artifact.RedactionStatus, artifact.RedactionStatusAlt)
+		if _, err := e.Store.Artifacts().Create(ctx, store.ArtifactCreate{
+			WorkspaceKey:    req.WorkspaceKey,
+			ArtifactID:      artifactID,
+			TaskID:          req.TaskID,
+			OwnerType:       "task_run",
+			OwnerID:         req.TaskRunID,
+			Type:            firstNonEmpty(artifact.Type, "artifact"),
+			Summary:         summary,
+			MIMEType:        mimeType,
+			Visibility:      visibility,
+			RedactionStatus: redactionStatus,
+			DurableStatus:   "declared",
+			Metadata:        metadata,
+		}); err != nil && !errors.Is(err, domain.ErrAlreadyExists) {
+			return TaskExecResult{}, fmt.Errorf("create runner artifact %q: %w", artifactID, err)
+		}
+		finalized, err := e.Store.Artifacts().Finalize(ctx, req.WorkspaceKey, artifactID, store.ArtifactFinalize{
+			URI:             &uri,
+			Summary:         optionalString(summary),
+			MIMEType:        optionalString(mimeType),
+			SizeBytes:       optionalInt64(sizeBytes),
+			Checksum:        optionalString(checksum),
+			ContentHash:     optionalString(contentHash),
+			Visibility:      optionalString(visibility),
+			RedactionStatus: optionalString(redactionStatus),
+			Metadata:        &metadata,
+		})
+		if err != nil {
+			return TaskExecResult{}, fmt.Errorf("finalize runner artifact %q: %w", artifactID, err)
+		}
+		artifactIDs = normalizeArtifactIDs(append(artifactIDs, finalized.ArtifactID))
+		if result.RuntimeMetadata == nil {
+			result.RuntimeMetadata = map[string]string{}
+		}
+		result.RuntimeMetadata["artifact."+finalized.ArtifactID+".content_hash"] = finalized.ContentHash
+	}
+	result.ArtifactIDs = artifactIDs
+	if result.ArtifactsRef == "" && len(artifactIDs) > 0 {
+		result.ArtifactsRef = "artifacts://" + req.TaskRunID
+	}
+	return result, nil
+}
+
+func optionalString(value string) *string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return nil
+	}
+	return &value
+}
+
+func optionalInt64(value int64) *int64 {
+	if value == 0 {
+		return nil
+	}
+	return &value
 }
 
 func taskRunnerBaseEnv(env []string) []string {

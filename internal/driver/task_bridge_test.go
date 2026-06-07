@@ -165,11 +165,82 @@ func TestHostBridgeTaskExecutorThroughRequestTaskRun(t *testing.T) {
 	}
 }
 
+func TestHostBridgeTaskExecutorRegistersFinalizedRunnerArtifacts(t *testing.T) {
+	ctx, st, run := setupRunningDriverRun(t)
+	executor := HostBridgeTaskExecutor{
+		Store:        st,
+		WorktreePath: t.TempDir(),
+		Command:      hostBridgeHelperCommand(t, "artifact", "unused-base", "unused-patch"),
+	}
+
+	outcome, err := RequestTaskRunWithResult(ctx, st, TaskRunRequestOptions{
+		WorkspaceKey:    "TEST",
+		DriverRunID:     run.RunID,
+		TaskRunID:       "task-run-1",
+		TaskID:          "TEST-1",
+		ProviderProfile: "flue-daytona",
+		ParentNodeID:    run.NodeID,
+		ParentLeaseID:   run.LeaseID,
+		ParentFence:     run.FencingToken,
+		DeferCompletion: true,
+	}, executor)
+	if err != nil {
+		t.Fatalf("RequestTaskRunWithResult: %v", err)
+	}
+	if outcome.Run.Status != domain.TaskRunCompleted {
+		t.Fatalf("run status = %s error=%s, want completed", outcome.Run.Status, outcome.Run.ErrorMessage)
+	}
+	if len(outcome.ArtifactIDs) != 1 || outcome.ArtifactIDs[0] != "artifact-task-run-1" {
+		t.Fatalf("outcome artifact ids = %+v, want finalized runner artifact", outcome.ArtifactIDs)
+	}
+	if outcome.Run.ArtifactsRef != "artifacts://task-run-1" {
+		t.Fatalf("artifacts ref = %q, want default task-run artifact ref", outcome.Run.ArtifactsRef)
+	}
+	artifact, err := st.Artifacts().Get(ctx, "TEST", "artifact-task-run-1")
+	if err != nil {
+		t.Fatalf("get runner artifact: %v", err)
+	}
+	if artifact.DurableStatus != "finalized" || artifact.URI != "artifact://artifact-task-run-1" || artifact.ContentHash != "sha256:remote-artifact" || artifact.OwnerID != "task-run-1" {
+		t.Fatalf("artifact = %+v, want finalized server-visible task-run artifact", artifact)
+	}
+	stored, err := st.TaskRuns().Get(ctx, "TEST", "task-run-1")
+	if err != nil {
+		t.Fatalf("get stored task run: %v", err)
+	}
+	exitCode := 0
+	if _, err := st.TaskRuns().Complete(ctx, "TEST", "task-run-1", store.TaskRunComplete{
+		CompletionID:        "complete-finalized-artifact-task-run-1",
+		NodeID:              stored.NodeID,
+		LeaseID:             stored.LeaseID,
+		FencingToken:        stored.FencingToken,
+		Status:              domain.TaskRunCompleted,
+		ExitCode:            &exitCode,
+		ArtifactsRef:        outcome.Run.ArtifactsRef,
+		RequiredArtifactIDs: outcome.ArtifactIDs,
+		RequireArtifacts:    true,
+		CloseTask:           true,
+		CloseReason:         "runner finalized artifact",
+	}); err != nil {
+		t.Fatalf("complete task run with finalized runner artifact: %v", err)
+	}
+}
+
+func TestBridgeTaskRunnerResultDecodesFinalizedArtifacts(t *testing.T) {
+	var result bridgeTaskRunnerResult
+	if err := json.Unmarshal([]byte(`{"artifacts":[{"artifact_id":"artifact-1","uri":"artifact://artifact-1","content_hash":"sha256:x"}]}`), &result); err != nil {
+		t.Fatalf("unmarshal result: %v", err)
+	}
+	artifacts := result.finalizedArtifacts()
+	if len(artifacts) != 1 || artifacts[0].ArtifactID != "artifact-1" || artifacts[0].URI != "artifact://artifact-1" || artifacts[0].ContentHash != "sha256:x" {
+		t.Fatalf("decoded artifacts = %+v, want artifact descriptor", artifacts)
+	}
+}
+
 func TestHostBridgeTaskExecutorHelperProcess(t *testing.T) {
 	if os.Getenv("LOOM_HOST_BRIDGE_HELPER") != "1" {
 		return
 	}
-	for _, key := range []string{"LOOM_FLEET_DB_URL", "LOOM_FLEET_DB_API_KEY", "LOOM_FLEET_DB_ACTOR", "LOOM_TASK_RUN_LEASE_TOKEN", "LOOM_RUNNER_LEASE_TOKEN", "OPENAI_API_KEY", "AWS_SECRET_ACCESS_KEY", "GITHUB_TOKEN"} {
+	for _, key := range []string{"LOOM_FLEET_DB_URL", "LOOM_FLEET_DB_API_KEY", "LOOM_FLEET_DB_ACTOR", "LOOM_RUNNER_LEASE_TOKEN", "OPENAI_API_KEY", "AWS_SECRET_ACCESS_KEY", "GITHUB_TOKEN"} {
 		if os.Getenv(key) != "" {
 			t.Fatalf("%s leaked into task runner env", key)
 		}
@@ -195,6 +266,9 @@ func TestHostBridgeTaskExecutorHelperProcess(t *testing.T) {
 	if req.TaskRunID == "" || os.Getenv("LOOM_TASK_RUN_ID") != req.TaskRunID {
 		t.Fatalf("request/env task run mismatch: %+v env=%q", req, os.Getenv("LOOM_TASK_RUN_ID"))
 	}
+	if req.LeaseToken == "" || os.Getenv("LOOM_TASK_RUN_LEASE_TOKEN") != req.LeaseToken {
+		t.Fatalf("request/env task run lease token mismatch: req=%q env=%q", req.LeaseToken, os.Getenv("LOOM_TASK_RUN_LEASE_TOKEN"))
+	}
 	if os.Getenv("LOOM_TASK_RUN_PROVIDER_PROFILE") != req.ProviderProfile || os.Getenv("LOOM_TASK_PROVIDER_PROFILE") != req.ProviderProfile {
 		t.Fatalf("provider env mismatch: req=%q task_run=%q legacy=%q", req.ProviderProfile, os.Getenv("LOOM_TASK_RUN_PROVIDER_PROFILE"), os.Getenv("LOOM_TASK_PROVIDER_PROFILE"))
 	}
@@ -218,6 +292,28 @@ func TestHostBridgeTaskExecutorHelperProcess(t *testing.T) {
 		if err := json.NewEncoder(os.Stdout).Encode(result); err != nil {
 			t.Fatalf("encode result: %v", err)
 		}
+	case "artifact":
+		result := map[string]any{
+			"artifacts": []map[string]any{{
+				"artifact_id":  "artifact-" + req.TaskRunID,
+				"type":         "patch",
+				"uri":          "artifact://artifact-" + req.TaskRunID,
+				"content_hash": "sha256:remote-artifact",
+				"checksum":     "sha256:remote-artifact",
+				"mime_type":    "text/x-diff",
+				"size_bytes":   123,
+				"summary":      "remote patch",
+				"metadata": map[string]string{
+					"source": "remote-runner",
+				},
+			}},
+			"runtime_metadata": map[string]string{
+				"helper": "host_bridge",
+			},
+		}
+		if err := json.NewEncoder(os.Stdout).Encode(result); err != nil {
+			t.Fatalf("encode result: %v", err)
+		}
 	default:
 		t.Fatalf("unknown helper mode %q", mode)
 	}
@@ -233,6 +329,7 @@ func hostBridgeTaskExecRequest() TaskExecRequest {
 		ProviderProfile: "flue-daytona",
 		NodeID:          "node-1",
 		LeaseID:         "lease-1",
+		LeaseToken:      "scoped-task-token",
 		FencingToken:    42,
 	}
 }

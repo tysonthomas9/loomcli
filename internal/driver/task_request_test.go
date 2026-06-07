@@ -76,6 +76,9 @@ func TestRequestTaskRunCreatesExecutesAndFinishesChild(t *testing.T) {
 		t.Fatalf("final usage = %+v, want executor usage", final)
 	}
 	result := TaskRunResultFromOutcome(outcome)
+	if result.LeaseToken == "" {
+		t.Fatal("result lease token is empty, want scoped token for deferred task completion")
+	}
 	if result.DriverStepID != "step-1" {
 		t.Fatalf("result driver step id = %q, want step-1", result.DriverStepID)
 	}
@@ -93,6 +96,9 @@ func TestRequestTaskRunCreatesExecutesAndFinishesChild(t *testing.T) {
 	}
 	if executor.req.LeaseID != final.LeaseID || executor.req.FencingToken != final.FencingToken {
 		t.Fatalf("executor lease/fence = %q/%d, want final %q/%d", executor.req.LeaseID, executor.req.FencingToken, final.LeaseID, final.FencingToken)
+	}
+	if executor.req.LeaseToken == "" {
+		t.Fatal("executor lease token is empty, want generated scoped task-run token")
 	}
 	if executor.req.RunnerPlacement.RunnerID != "runner-2" || executor.req.SandboxPlacement.SandboxID != "sandbox-1" || final.SandboxPlacement.SandboxID != "sandbox-1" {
 		t.Fatalf("executor/final placement = %+v/%+v final=%+v, want runner-2 sandbox-1", executor.req.RunnerPlacement, executor.req.SandboxPlacement, final.SandboxPlacement)
@@ -124,6 +130,115 @@ func TestRequestTaskRunCreatesExecutesAndFinishesChild(t *testing.T) {
 	}
 	if parent.Status != domain.DriverRunRunning {
 		t.Fatalf("parent status = %s, want still running", parent.Status)
+	}
+}
+
+func TestClaimAndExecuteTaskRunWithResultClaimsQueuedChild(t *testing.T) {
+	ctx, st, run := setupRunningDriverRun(t)
+	if _, err := st.TaskRuns().Create(ctx, store.TaskRunCreate{
+		WorkspaceKey:    "TEST",
+		TaskRunID:       "task-run-worker-1",
+		DriverRunID:     run.RunID,
+		TaskID:          "TEST-7",
+		ProviderProfile: "codex-default",
+		Status:          domain.TaskRunQueued,
+		SandboxPlacement: domain.TaskRunPlacement{
+			Provider: "codex-default",
+			CWD:      "/workspace",
+		},
+	}); err != nil {
+		t.Fatalf("Create queued task run: %v", err)
+	}
+	executor := &recordingTaskExecutor{result: TaskExecResult{
+		ExitCode:        0,
+		LogsRef:         "logs://worker-task-run",
+		ArtifactsRef:    "artifacts://worker-task-run",
+		RuntimeMetadata: map[string]string{"runtime": "worker"},
+	}}
+
+	outcome, err := ClaimAndExecuteTaskRunWithResult(ctx, st, TaskRunWorkerOptions{
+		WorkspaceKey:       "TEST",
+		NodeID:             "worker-node-1",
+		RunnerID:           "runner-1",
+		SupportedProviders: []string{"codex-default"},
+		SandboxPlacement: domain.TaskRunPlacement{
+			Provider:  "codex-default",
+			SandboxID: "sandbox-worker-1",
+			CWD:       "/workspace",
+		},
+		HeartbeatInterval: -1,
+	}, executor)
+	if err != nil {
+		t.Fatalf("ClaimAndExecuteTaskRunWithResult: %v", err)
+	}
+	final := outcome.Run
+	if final.TaskRunID != "task-run-worker-1" || final.Status != domain.TaskRunCompleted || final.NodeID != "worker-node-1" {
+		t.Fatalf("final = %+v, want completed worker-owned task run", final)
+	}
+	if final.LeaseID == "" || final.FencingToken == 0 {
+		t.Fatalf("final lease/fence = %q/%d, want generated lease and fence", final.LeaseID, final.FencingToken)
+	}
+	if final.SandboxPlacement.SandboxID != "sandbox-worker-1" {
+		t.Fatalf("final sandbox = %+v, want worker sandbox placement", final.SandboxPlacement)
+	}
+	if final.RuntimeMetadata["runtime"] != "worker" || final.RuntimeMetadata["task_run_executor"] != "task_run_worker" {
+		t.Fatalf("metadata = %+v, want worker execution metadata", final.RuntimeMetadata)
+	}
+	if executor.req.TaskRunID != "task-run-worker-1" || executor.req.DriverRunID != run.RunID || executor.req.TaskID != "TEST-7" {
+		t.Fatalf("executor req = %+v, want queued task run identifiers", executor.req)
+	}
+	if executor.req.LeaseID != final.LeaseID || executor.req.LeaseToken == "" || executor.req.FencingToken != final.FencingToken {
+		t.Fatalf("executor owner = lease:%q token:%q fence:%d, want final lease/generated token/fence", executor.req.LeaseID, executor.req.LeaseToken, executor.req.FencingToken)
+	}
+}
+
+func TestClaimAndExecuteTaskRunWithResultCanDeferCompletion(t *testing.T) {
+	ctx, st, run := setupRunningDriverRun(t)
+	if _, err := st.TaskRuns().Create(ctx, store.TaskRunCreate{
+		WorkspaceKey:    "TEST",
+		TaskRunID:       "task-run-worker-defer",
+		DriverRunID:     run.RunID,
+		TaskID:          "TEST-8",
+		ProviderProfile: "local-noop",
+		Status:          domain.TaskRunQueued,
+	}); err != nil {
+		t.Fatalf("Create queued task run: %v", err)
+	}
+	executor := &recordingTaskExecutor{result: TaskExecResult{
+		ExitCode:     0,
+		LogsRef:      "logs://worker-defer",
+		ArtifactsRef: "artifacts://worker-defer",
+	}}
+
+	outcome, err := ClaimAndExecuteTaskRunWithResult(ctx, st, TaskRunWorkerOptions{
+		WorkspaceKey:       "TEST",
+		TaskRunID:          "task-run-worker-defer",
+		NodeID:             "worker-node-2",
+		RunnerID:           "runner-2",
+		LeaseID:            "worker-lease-2",
+		LeaseToken:         "worker-token-2",
+		SupportedProviders: []string{"local-noop"},
+		DeferCompletion:    true,
+		HeartbeatInterval:  -1,
+	}, executor)
+	if err != nil {
+		t.Fatalf("ClaimAndExecuteTaskRunWithResult defer: %v", err)
+	}
+	if outcome.Run.Status != domain.TaskRunCompleted || outcome.Run.ExitCode == nil || *outcome.Run.ExitCode != 0 {
+		t.Fatalf("synthetic outcome = %+v, want completed result", outcome.Run)
+	}
+	if outcome.LeaseToken != "worker-token-2" {
+		t.Fatalf("outcome lease token = %q, want provided scoped token", outcome.LeaseToken)
+	}
+	stored, err := st.TaskRuns().Get(ctx, "TEST", "task-run-worker-defer")
+	if err != nil {
+		t.Fatalf("Get deferred task run: %v", err)
+	}
+	if stored.Status != domain.TaskRunRunning || stored.LogsRef != "logs://worker-defer" || stored.ArtifactsRef != "artifacts://worker-defer" {
+		t.Fatalf("stored = %+v, want running with pending completion refs", stored)
+	}
+	if executor.req.LeaseToken != "worker-token-2" {
+		t.Fatalf("executor lease token = %q, want provided scoped token", executor.req.LeaseToken)
 	}
 }
 
@@ -371,17 +486,14 @@ func setupQueuedDriverRun(t *testing.T) (context.Context, store.Store, *domain.D
 	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "TEST", Name: "test"}); err != nil {
 		t.Fatalf("Create workspace: %v", err)
 	}
-	source := writeWorkflow(t, root, "complete-epic.ts", `export async function run(ctx) {
-  return ctx.run.complete({ summary: "done" });
-}
-`)
-	published, err := PublishWorkflow(ctx, st, PublishOptions{WorkspaceKey: "TEST", WorkDir: root, SourcePath: source, CreatedBy: "tester", FlueCommand: fakeFlueCommand(t)})
+	writeFlueDist(t, root, "complete-epic", "done")
+	registered, err := RegisterFlueDriver(ctx, st, RegisterFlueOptions{WorkspaceKey: "TEST", WorkDir: root, DistPath: "dist", DriverName: "complete-epic", CreatedBy: "tester", Activate: true})
 	if err != nil {
-		t.Fatalf("PublishWorkflow: %v", err)
+		t.Fatalf("RegisterFlueDriver: %v", err)
 	}
 	run, err := CreateDriverRun(ctx, st, RunOptions{
 		WorkspaceKey: "TEST",
-		DriverID:     published.Driver.DriverID,
+		DriverID:     registered.Driver.DriverID,
 		EpicID:       "TEST-EPIC",
 		RunID:        "run-1",
 	})

@@ -33,12 +33,12 @@ func TestDriverCommandContainsSubcommands(t *testing.T) {
 	if driverCmd.Commands() == nil {
 		t.Fatal("driver command has no subcommands")
 	}
-	for _, name := range []string{"publish", "run", "exec-task", "claim-ready", "complete-task", "release-task", "recover-stale-tasks"} {
+	for _, name := range []string{"register", "run", "exec-task", "work-task-run", "claim-ready", "complete-task", "release-task", "recover-stale-tasks"} {
 		found := false
 		for _, cmd := range driverCmd.Commands() {
 			if cmd.Name() == name {
 				found = true
-				if (name == "exec-task" || name == "claim-ready" || name == "complete-task" || name == "release-task" || name == "recover-stale-tasks") && !cmd.Hidden {
+				if (name == "exec-task" || name == "work-task-run" || name == "claim-ready" || name == "complete-task" || name == "release-task" || name == "recover-stale-tasks") && !cmd.Hidden {
 					t.Fatalf("%s command should stay hidden", name)
 				}
 				break

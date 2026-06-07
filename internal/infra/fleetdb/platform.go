@@ -351,6 +351,7 @@ func (s *driverRunStore) Finish(ctx context.Context, ws, runID string, finish st
 		"status":        finish.Status,
 		"summary":       finish.Summary,
 		"error_class":   finish.ErrorClass,
+		"output":        finish.Output,
 	}
 	var out domain.DriverRun
 	path := "/api/v1/" + pathEscape(ws) + "/driver-runs/" + pathEscape(runID) + "/finish"

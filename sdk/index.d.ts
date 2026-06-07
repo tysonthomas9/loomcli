@@ -1,4 +1,14 @@
 export {
+  FlueDriverClient,
+  FlueDriverClientOptions,
+  FlueDriverResult,
+  FlueTaskRunRequest,
+  FlueTaskSelector,
+  createLoomClient,
+  createLoomDriverClient,
+} from "./flue.js";
+
+export {
   Artifact,
   ArtifactDeclareInput,
   ArtifactFinalizeInput,

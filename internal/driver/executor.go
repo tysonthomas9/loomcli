@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -35,6 +36,7 @@ type RunResult struct {
 	Status     domain.DriverRunStatus
 	Summary    string
 	ErrorClass string
+	Output     map[string]string
 }
 
 type Executor struct {
@@ -221,6 +223,7 @@ func (e *Executor) finish(ctx context.Context, claimed *domain.DriverRun, result
 		Status:       result.Status,
 		Summary:      result.Summary,
 		ErrorClass:   result.ErrorClass,
+		Output:       result.Output,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("finish driver run: %w", err)
@@ -316,74 +319,29 @@ func loadRunRequest(ctx context.Context, workDir string, run *domain.DriverRun, 
 		return RunRequest{}, fmt.Errorf("decode bundle manifest: %w", err)
 	}
 	serverRef := manifest["server_ref"]
-	if serverRef != "" {
-		serverPath, err := safeBundleFile(bundleRoot, serverRef)
-		if err != nil {
-			return RunRequest{}, err
-		}
-		if info, err := os.Stat(serverPath); err != nil {
-			return RunRequest{}, fmt.Errorf("stat built Flue server: %w", err)
-		} else if info.IsDir() {
-			return RunRequest{}, fmt.Errorf("built Flue server %q is a directory: %w", serverRef, domain.ErrInvalid)
-		}
-		sourceRef := manifest["source_bundle_ref"]
-		if sourceRef == "" {
-			return RunRequest{}, fmt.Errorf("bundle manifest missing source_bundle_ref: %w", domain.ErrInvalid)
-		}
-		sourcePath, err := safeBundleFile(bundleRoot, sourceRef)
-		if err != nil {
-			return RunRequest{}, err
-		}
-		sourceBytes, err := os.ReadFile(sourcePath) //nolint:gosec // path is constrained under bundleRoot by safeBundleFile.
-		if err != nil {
-			return RunRequest{}, fmt.Errorf("read bundled workflow source: %w", err)
-		}
-		if got := digestBytes(sourceBytes); got != version.SourceDigest {
-			return RunRequest{}, fmt.Errorf("source digest mismatch: got %s want %s: %w", got, version.SourceDigest, domain.ErrInvalid)
-		}
-		if got, err := digestBundleTree(bundleRoot, manifestBytes); err != nil {
-			return RunRequest{}, err
-		} else if got != version.BundleDigest {
-			return RunRequest{}, fmt.Errorf("bundle digest mismatch: got %s want %s: %w", got, version.BundleDigest, domain.ErrInvalid)
-		}
-		workflowPath := ""
-		if workflowRef := manifest["workflow_ref"]; workflowRef != "" {
-			workflowPath, _ = safeBundleFile(bundleRoot, workflowRef)
-		}
-		return RunRequest{
-			Run:          run,
-			Version:      version,
-			BundleRoot:   bundleRoot,
-			WorkflowPath: workflowPath,
-			ServerPath:   serverPath,
-			Manifest:     manifest,
-		}, nil
+	if serverRef == "" {
+		return RunRequest{}, fmt.Errorf("native Flue bundle manifest missing server_ref: %w", domain.ErrInvalid)
 	}
-
-	workflowRef := manifest["workflow_ref"]
-	if workflowRef == "" {
-		return RunRequest{}, fmt.Errorf("bundle manifest missing server_ref or workflow_ref: %w", domain.ErrInvalid)
-	}
-	workflowPath, err := safeBundleFile(bundleRoot, workflowRef)
+	serverPath, err := safeBundleFile(bundleRoot, serverRef)
 	if err != nil {
 		return RunRequest{}, err
 	}
-	sourceBytes, err := os.ReadFile(workflowPath) //nolint:gosec // path is constrained under bundleRoot by safeBundleFile.
-	if err != nil {
-		return RunRequest{}, fmt.Errorf("read bundled workflow: %w", err)
+	if info, err := os.Stat(serverPath); err != nil {
+		return RunRequest{}, fmt.Errorf("stat built Flue server: %w", err)
+	} else if info.IsDir() {
+		return RunRequest{}, fmt.Errorf("built Flue server %q is a directory: %w", serverRef, domain.ErrInvalid)
 	}
-	if got := digestBytes(sourceBytes); got != version.SourceDigest {
-		return RunRequest{}, fmt.Errorf("source digest mismatch: got %s want %s: %w", got, version.SourceDigest, domain.ErrInvalid)
-	}
-	if got := digestBundleLegacy(manifestBytes, sourceBytes); got != version.BundleDigest {
+	if got, err := digestBundleTree(bundleRoot, manifestBytes); err != nil {
+		return RunRequest{}, err
+	} else if got != version.BundleDigest {
 		return RunRequest{}, fmt.Errorf("bundle digest mismatch: got %s want %s: %w", got, version.BundleDigest, domain.ErrInvalid)
 	}
 	return RunRequest{
-		Run:          run,
-		Version:      version,
-		BundleRoot:   bundleRoot,
-		WorkflowPath: workflowPath,
-		Manifest:     manifest,
+		Run:        run,
+		Version:    version,
+		BundleRoot: bundleRoot,
+		ServerPath: serverPath,
+		Manifest:   manifest,
 	}, nil
 }
 
@@ -431,70 +389,10 @@ func (r NodeRunner) Run(ctx context.Context, req RunRequest) (RunResult, error) 
 	if err != nil {
 		return RunResult{}, fmt.Errorf("encode driver input: %w", err)
 	}
-	if req.ServerPath != "" {
-		return r.runBuiltFlueServer(ctx, req, node, input)
+	if req.ServerPath == "" {
+		return RunResult{}, fmt.Errorf("native Flue server path required: %w", domain.ErrInvalid)
 	}
-	bootstrap, err := os.CreateTemp("", "loom-driver-runtime-*.mjs")
-	if err != nil {
-		return RunResult{}, fmt.Errorf("create driver runtime bootstrap: %w", err)
-	}
-	bootstrapPath := bootstrap.Name()
-	defer func() { _ = os.Remove(bootstrapPath) }()
-	if _, err := bootstrap.WriteString(nodeRuntimeBootstrap); err != nil {
-		_ = bootstrap.Close()
-		return RunResult{}, fmt.Errorf("write driver runtime bootstrap: %w", err)
-	}
-	if err := bootstrap.Close(); err != nil {
-		return RunResult{}, fmt.Errorf("close driver runtime bootstrap: %w", err)
-	}
-	execTaskCommand, err := r.execTaskCommand()
-	if err != nil {
-		return RunResult{}, err
-	}
-	env := append(driverRuntimeBaseEnv(os.Environ()),
-		"LOOM_DRIVER_WORKSPACE="+req.Run.WorkspaceKey,
-		"LOOM_DRIVER_WORKFLOW="+req.WorkflowPath,
-		"LOOM_DRIVER_ENTRYPOINT="+entrypoint(req),
-		"LOOM_DRIVER_INPUT="+string(input),
-		"LOOM_DRIVER_RUN_ID="+req.Run.RunID,
-		"LOOM_DRIVER_NODE_ID="+req.Run.NodeID,
-		"LOOM_DRIVER_LEASE_ID="+req.Run.LeaseID,
-		fmt.Sprintf("LOOM_DRIVER_FENCING_TOKEN=%d", req.Run.FencingToken),
-	)
-	if len(execTaskCommand) > 0 {
-		encoded, err := json.Marshal(execTaskCommand)
-		if err != nil {
-			return RunResult{}, fmt.Errorf("encode exec-task command: %w", err)
-		}
-		env = append(env, "LOOM_DRIVER_EXEC_TASK_CMD_JSON="+string(encoded))
-	}
-	cmd := exec.CommandContext(ctx, node, "--experimental-strip-types", bootstrapPath)
-	cmd.Dir = req.BundleRoot
-	cmd.Env = env
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-	if err := cmd.Run(); err != nil {
-		msg := strings.TrimSpace(stderr.String())
-		if msg == "" {
-			msg = err.Error()
-		}
-		return RunResult{Status: domain.DriverRunFailed, Summary: msg, ErrorClass: "driver_runtime"}, nil
-	}
-	out := strings.TrimSpace(stdout.String())
-	if out == "" {
-		return RunResult{Status: domain.DriverRunCompleted, Summary: "completed"}, nil
-	}
-	lines := strings.Split(out, "\n")
-	var payload struct {
-		Status     domain.DriverRunStatus `json:"status"`
-		Summary    string                 `json:"summary"`
-		ErrorClass string                 `json:"errorClass"`
-	}
-	if err := json.Unmarshal([]byte(lines[len(lines)-1]), &payload); err != nil {
-		return RunResult{}, fmt.Errorf("decode driver runtime result: %w", err)
-	}
-	return RunResult{Status: payload.Status, Summary: payload.Summary, ErrorClass: payload.ErrorClass}, nil
+	return r.runBuiltFlueServer(ctx, req, node, input)
 }
 
 func (r NodeRunner) runBuiltFlueServer(ctx context.Context, req RunRequest, node string, input []byte) (RunResult, error) {
@@ -515,7 +413,9 @@ func (r NodeRunner) runBuiltFlueServer(ctx context.Context, req RunRequest, node
 	if err != nil {
 		return RunResult{}, err
 	}
-	env := append(driverRuntimeBaseEnv(os.Environ()),
+	parentEnv := os.Environ()
+	env := append(driverRuntimeBaseEnv(parentEnv), driverRuntimeFleetDBHandoffEnv(parentEnv)...)
+	env = append(env,
 		"LOOM_DRIVER_WORKSPACE="+req.Run.WorkspaceKey,
 		"LOOM_DRIVER_RUN_ID="+req.Run.RunID,
 		"LOOM_DRIVER_NODE_ID="+req.Run.NodeID,
@@ -536,19 +436,34 @@ func (r NodeRunner) runBuiltFlueServer(ctx context.Context, req RunRequest, node
 	cmd := exec.CommandContext(ctx, node, launcherPath)
 	cmd.Dir = req.BundleRoot
 	cmd.Env = env
+	cmd.Cancel = func() error {
+		if cmd.Process == nil {
+			return nil
+		}
+		return cmd.Process.Signal(os.Interrupt)
+	}
+	cmd.WaitDelay = 5 * time.Second
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
+		if ctx.Err() != nil {
+			return RunResult{
+				Status:     domain.DriverRunCancelled,
+				Summary:    "Flue local runner cancelled",
+				ErrorClass: "driver_cancelled",
+				Output:     flueRunOutput(req, stdout.String(), stderr.String()),
+			}, nil
+		}
 		msg := strings.TrimSpace(stderr.String())
 		if msg == "" {
 			msg = err.Error()
 		}
-		return RunResult{Status: domain.DriverRunFailed, Summary: msg, ErrorClass: "driver_runtime"}, nil
+		return RunResult{Status: domain.DriverRunFailed, Summary: msg, ErrorClass: "driver_runtime", Output: flueRunOutput(req, stdout.String(), stderr.String())}, nil
 	}
 	out := strings.TrimSpace(stdout.String())
 	if out == "" {
-		return RunResult{Status: domain.DriverRunCompleted, Summary: "completed"}, nil
+		return RunResult{Status: domain.DriverRunCompleted, Summary: "completed", Output: flueRunOutput(req, stdout.String(), stderr.String())}, nil
 	}
 	lines := strings.Split(out, "\n")
 	var payload struct {
@@ -559,7 +474,61 @@ func (r NodeRunner) runBuiltFlueServer(ctx context.Context, req RunRequest, node
 	if err := json.Unmarshal([]byte(lines[len(lines)-1]), &payload); err != nil {
 		return RunResult{}, fmt.Errorf("decode Flue runtime result: %w", err)
 	}
-	return RunResult{Status: payload.Status, Summary: payload.Summary, ErrorClass: payload.ErrorClass}, nil
+	result := RunResult{Status: payload.Status, Summary: payload.Summary, ErrorClass: payload.ErrorClass, Output: flueRunOutput(req, stdout.String(), stderr.String())}
+	if result.Status == domain.DriverRunFailed {
+		if detail := strings.TrimSpace(stderr.String()); detail != "" {
+			if result.Summary != "" {
+				result.Summary += ": " + detail
+			} else {
+				result.Summary = detail
+			}
+		}
+	}
+	return result, nil
+}
+
+func flueRunOutput(req RunRequest, stdout, stderr string) map[string]string {
+	output := map[string]string{
+		"runtime":  RuntimeFlueNode,
+		"logs_ref": "driver-run://" + req.Run.RunID + "/flue-local",
+	}
+	if req.Manifest["artifact_kind"] != "" {
+		output["artifact_kind"] = req.Manifest["artifact_kind"]
+	}
+	if req.Manifest["workflow_name"] != "" {
+		output["workflow_name"] = req.Manifest["workflow_name"]
+	}
+	if tail := textTail(stderr, 4096); tail != "" {
+		output["flue_stderr_tail"] = tail
+	}
+	if tail := textTail(stdout, 4096); tail != "" {
+		output["flue_stdout_tail"] = tail
+	}
+	if count := nonEmptyLineCount(stdout) + nonEmptyLineCount(stderr); count > 0 {
+		output["flue_event_count"] = strconv.Itoa(count)
+	}
+	return output
+}
+
+func textTail(value string, maxBytes int) string {
+	value = strings.TrimSpace(value)
+	if value == "" || maxBytes <= 0 {
+		return ""
+	}
+	if len(value) <= maxBytes {
+		return value
+	}
+	return value[len(value)-maxBytes:]
+}
+
+func nonEmptyLineCount(value string) int {
+	count := 0
+	for _, line := range strings.Split(value, "\n") {
+		if strings.TrimSpace(line) != "" {
+			count++
+		}
+	}
+	return count
 }
 
 func (r NodeRunner) execTaskCommand() ([]string, error) {
@@ -579,21 +548,14 @@ func (r NodeRunner) execTaskCommand() ([]string, error) {
 	return nil, fmt.Errorf("resolve exec-task command: %w", err)
 }
 
-func entrypoint(req RunRequest) string {
-	if req.Run.Entrypoint != "" {
-		return req.Run.Entrypoint
-	}
-	if req.Manifest["entrypoint"] != "" {
-		return req.Manifest["entrypoint"]
-	}
-	return EntrypointRun
-}
-
 func workflowName(req RunRequest) string {
 	if req.Manifest["workflow_name"] != "" {
 		return req.Manifest["workflow_name"]
 	}
-	return strings.TrimSuffix(filepath.Base(req.WorkflowPath), filepath.Ext(req.WorkflowPath))
+	if req.Run != nil && req.Run.DriverID != "" {
+		return req.Run.DriverID
+	}
+	return EntrypointRun
 }
 
 const flueLocalLauncher = `
@@ -658,6 +620,24 @@ child.on('error', (error) => {
   finish({ status: 'failed', summary: error?.message || String(error), errorClass: 'driver_runtime' });
 });
 
+function shutdown(signal) {
+  if (completed) return;
+  completed = true;
+  try { child.kill(signal); } catch {}
+  setTimeout(() => {
+    try { child.kill('SIGKILL'); } catch {}
+  }, 1000).unref?.();
+  console.log(JSON.stringify({
+    status: 'cancelled',
+    summary: 'Flue local runner cancelled',
+    errorClass: 'driver_cancelled',
+  }));
+  process.exit(signal === 'SIGINT' ? 130 : 143);
+}
+
+process.once('SIGINT', () => shutdown('SIGINT'));
+process.once('SIGTERM', () => shutdown('SIGTERM'));
+
 child.on('exit', (code, signal) => {
   if (completed) return;
   finish({
@@ -666,303 +646,4 @@ child.on('exit', (code, signal) => {
     errorClass: 'driver_runtime',
   });
 });
-`
-
-const nodeRuntimeBootstrap = `
-globalThis.defineDriver = (definition) => definition;
-
-const workflowPath = process.env.LOOM_DRIVER_WORKFLOW;
-const entrypoint = process.env.LOOM_DRIVER_ENTRYPOINT || 'run';
-const input = JSON.parse(process.env.LOOM_DRIVER_INPUT || '{}');
-const workspace = process.env.LOOM_DRIVER_WORKSPACE || '';
-const driverRunId = process.env.LOOM_DRIVER_RUN_ID || '';
-const taskRunResultsByTaskId = new Map();
-const taskRunResultsByRunId = new Map();
-
-function complete(payload = {}) {
-  return { status: 'completed', summary: payload.summary || 'completed' };
-}
-
-function failed(payload = {}) {
-  return { status: 'failed', summary: payload.summary || 'failed', errorClass: payload.errorClass || 'driver_failed' };
-}
-
-function needsHuman(payload = {}) {
-  return { status: 'needs_human', summary: payload.summary || 'needs human', errorClass: payload.errorClass || 'needs_human' };
-}
-
-function execTaskCommand() {
-  const jsonCommand = process.env.LOOM_DRIVER_EXEC_TASK_CMD_JSON || '';
-  if (jsonCommand) {
-    const parsed = JSON.parse(jsonCommand);
-    if (!Array.isArray(parsed) || parsed.length === 0) {
-      throw new Error('LOOM_DRIVER_EXEC_TASK_CMD_JSON must be a non-empty string array');
-    }
-    return parsed.map(String);
-  }
-  const command = process.env.LOOM_DRIVER_EXEC_TASK_CMD || 'loom';
-  return [command];
-}
-
-async function requestTaskRun(payload = {}) {
-  const taskId = payload.taskId || payload.task_id;
-  if (!taskId) {
-    throw new Error('ctx.taskRuns.request requires taskId');
-  }
-  if (!driverRunId) {
-    throw new Error('ctx.taskRuns.request requires LOOM_DRIVER_RUN_ID');
-  }
-  const providerProfile = payload.providerProfile || payload.provider_profile || '';
-  const taskRunId = payload.taskRunId || payload.task_run_id || '';
-  const workerProfileId = payload.workerProfileId || payload.worker_profile_id || '';
-  const runnerId = payload.runnerId || payload.runner_id || '';
-  const supportedProviders = payload.supportedProviders || payload.supported_providers || [];
-  const capabilities = payload.capabilities || [];
-  const sandboxPlacement = payload.sandboxPlacement || payload.sandbox_placement || {};
-  const command = execTaskCommand();
-  const args = command.slice(1).concat([
-    'driver',
-    'exec-task',
-    '--driver-run-id',
-    driverRunId,
-    '--task-id',
-    String(taskId),
-    '--provider-profile',
-    String(providerProfile),
-    '--json',
-  ]);
-  if (workspace) {
-    args.push('--workspace-key', workspace);
-  }
-  if (taskRunId) {
-    args.push('--task-run-id', String(taskRunId));
-  }
-  if (workerProfileId) {
-    args.push('--worker-profile-id', String(workerProfileId));
-  }
-  if (runnerId) {
-    args.push('--runner-id', String(runnerId));
-  }
-  appendRepeatedFlag(args, '--supported-provider', supportedProviders);
-  appendRepeatedFlag(args, '--capability', capabilities);
-  appendStringFlag(args, '--sandbox-provider', sandboxPlacement.provider || payload.sandboxProvider || payload.sandbox_provider || '');
-  appendStringFlag(args, '--sandbox-id', sandboxPlacement.sandbox_id || sandboxPlacement.sandboxId || payload.sandboxId || payload.sandbox_id || '');
-  appendStringFlag(args, '--sandbox-cwd', sandboxPlacement.cwd || payload.sandboxCwd || payload.sandbox_cwd || '');
-  appendStringFlag(args, '--sandbox-repo-ref', sandboxPlacement.repo_ref || sandboxPlacement.repoRef || payload.sandboxRepoRef || payload.sandbox_repo_ref || '');
-  args.push('--defer-completion');
-  const { spawnSync } = await import('node:child_process');
-  const proc = spawnSync(command[0], args, { encoding: 'utf8', env: process.env });
-  if (proc.error) {
-    throw proc.error;
-  }
-  if (proc.status !== 0) {
-    const detail = (proc.stderr || proc.stdout || '').trim();
-    throw new Error('loom driver exec-task failed' + (detail ? ': ' + detail : ''));
-  }
-  const stdout = (proc.stdout || '').trim();
-  if (!stdout) {
-    throw new Error('loom driver exec-task returned empty output');
-  }
-  const result = JSON.parse(stdout);
-  rememberTaskRunResult(result);
-  return result;
-}
-
-function appendStringFlag(args, flag, value) {
-  if (value !== undefined && value !== null && String(value).trim() !== '') {
-    args.push(flag, String(value));
-  }
-}
-
-function appendRepeatedFlag(args, flag, values) {
-  const list = Array.isArray(values) ? values : (values ? [values] : []);
-  for (const value of list) appendStringFlag(args, flag, value);
-}
-
-function rememberTaskRunResult(result = {}) {
-  const runId = result.taskRunId || result.task_run_id || result.id || '';
-  const taskId = result.taskId || result.task_id || '';
-  if (runId) taskRunResultsByRunId.set(String(runId), result);
-  if (taskId) taskRunResultsByTaskId.set(String(taskId), result);
-}
-
-async function claimReadyTask(payload = {}) {
-  if (!driverRunId) {
-    throw new Error('ctx.tasks.claimReady requires LOOM_DRIVER_RUN_ID');
-  }
-  const epicId = payload.epicId || payload.epic_id || input.epicId || '';
-  const command = execTaskCommand();
-  const args = command.slice(1).concat([
-    'driver',
-    'claim-ready',
-    '--driver-run-id',
-    driverRunId,
-    '--json',
-  ]);
-  if (workspace) {
-    args.push('--workspace-key', workspace);
-  }
-  if (epicId) {
-    args.push('--epic-id', String(epicId));
-  }
-  const { spawnSync } = await import('node:child_process');
-  const proc = spawnSync(command[0], args, { encoding: 'utf8', env: process.env });
-  if (proc.error) {
-    throw proc.error;
-  }
-  if (proc.status !== 0) {
-    const detail = (proc.stderr || proc.stdout || '').trim();
-    throw new Error('loom driver claim-ready failed' + (detail ? ': ' + detail : ''));
-  }
-  const stdout = (proc.stdout || '').trim();
-  if (!stdout) {
-    return null;
-  }
-  return JSON.parse(stdout);
-}
-
-function taskPayloadID(payload) {
-  if (typeof payload === 'string') return payload;
-  return payload.taskId || payload.task_id || payload.id || '';
-}
-
-async function completeTask(payload = {}) {
-  const taskId = taskPayloadID(payload);
-  const requestedTaskRunId = payload.taskRunId || payload.task_run_id || '';
-  const remembered = requestedTaskRunId
-    ? taskRunResultsByRunId.get(String(requestedTaskRunId))
-    : taskRunResultsByTaskId.get(String(taskId));
-  const taskRunId = requestedTaskRunId || remembered?.taskRunId || remembered?.task_run_id || remembered?.id || '';
-  if (!taskId && !taskRunId) {
-    throw new Error('ctx.tasks.complete requires taskId or taskRunId');
-  }
-  if (!driverRunId) {
-    throw new Error('ctx.tasks.complete requires LOOM_DRIVER_RUN_ID');
-  }
-  const command = execTaskCommand();
-  const args = command.slice(1).concat([
-    'driver',
-    'complete-task',
-    '--driver-run-id',
-    driverRunId,
-    '--json',
-  ]);
-  if (taskId) {
-    args.push('--task-id', String(taskId));
-  }
-  if (workspace) {
-    args.push('--workspace-key', workspace);
-  }
-  if (payload.reason) {
-    args.push('--reason', String(payload.reason));
-  }
-  if (taskRunId) {
-    args.push('--task-run-id', String(taskRunId));
-  }
-  const completionId = payload.completionId || payload.completion_id || '';
-  if (completionId) {
-    args.push('--completion-id', String(completionId));
-  }
-  const leaseToken = payload.leaseToken || payload.lease_token || process.env.LOOM_TASK_RUN_LEASE_TOKEN || process.env.LOOM_RUNNER_LEASE_TOKEN || '';
-  if (leaseToken) {
-    args.push('--lease-token', String(leaseToken));
-  }
-  const logsRef = payload.logsRef || payload.logs_ref || remembered?.logsRef || remembered?.logs_ref || '';
-  if (logsRef) {
-    args.push('--logs-ref', String(logsRef));
-  }
-  const artifactsRef = payload.artifactsRef || payload.artifacts_ref || remembered?.artifactsRef || remembered?.artifacts_ref || '';
-  if (artifactsRef) {
-    args.push('--artifacts-ref', String(artifactsRef));
-  }
-  const artifactIds = payload.artifactIds || payload.artifact_ids || remembered?.artifactIds || remembered?.artifact_ids || [];
-  if (Array.isArray(artifactIds)) {
-    for (const artifactId of artifactIds) {
-      if (artifactId) args.push('--artifact-id', String(artifactId));
-    }
-  }
-  if (payload.session) {
-    args.push('--session', String(payload.session));
-  }
-  if (payload.force) {
-    args.push('--force');
-  }
-  const { spawnSync } = await import('node:child_process');
-  const proc = spawnSync(command[0], args, { encoding: 'utf8', env: process.env });
-  if (proc.error) {
-    throw proc.error;
-  }
-  if (proc.status !== 0) {
-    const detail = (proc.stderr || proc.stdout || '').trim();
-    throw new Error('loom driver complete-task failed' + (detail ? ': ' + detail : ''));
-  }
-  const stdout = (proc.stdout || '').trim();
-  return stdout ? JSON.parse(stdout) : { id: String(taskId) };
-}
-
-async function releaseTask(payload = {}) {
-  const taskId = taskPayloadID(payload);
-  if (!taskId) {
-    throw new Error('ctx.tasks.release requires taskId');
-  }
-  if (!driverRunId) {
-    throw new Error('ctx.tasks.release requires LOOM_DRIVER_RUN_ID');
-  }
-  const command = execTaskCommand();
-  const args = command.slice(1).concat([
-    'driver',
-    'release-task',
-    '--driver-run-id',
-    driverRunId,
-    '--task-id',
-    String(taskId),
-    '--json',
-  ]);
-  if (workspace) {
-    args.push('--workspace-key', workspace);
-  }
-  const { spawnSync } = await import('node:child_process');
-  const proc = spawnSync(command[0], args, { encoding: 'utf8', env: process.env });
-  if (proc.error) {
-    throw proc.error;
-  }
-  if (proc.status !== 0) {
-    const detail = (proc.stderr || proc.stdout || '').trim();
-    throw new Error('loom driver release-task failed' + (detail ? ': ' + detail : ''));
-  }
-  const stdout = (proc.stdout || '').trim();
-  return stdout ? JSON.parse(stdout) : { id: String(taskId), released: true };
-}
-
-const ctx = {
-  input,
-  run: { complete, failed, needsHuman },
-  tasks: {
-    claimReady: claimReadyTask,
-    complete: completeTask,
-    release: releaseTask,
-  },
-  taskRuns: {
-    request: requestTaskRun,
-  },
-};
-
-try {
-  const { pathToFileURL } = await import('node:url');
-  const mod = await import(pathToFileURL(workflowPath).href);
-  const entry = mod[entrypoint];
-  let result;
-  if (typeof entry === 'function') {
-    result = await entry(ctx);
-  } else if (entry && typeof entry.run === 'function') {
-    result = await entry.run(ctx);
-  } else {
-    throw new Error('driver entrypoint ' + entrypoint + ' is not a function or defineDriver object');
-  }
-  if (!result) result = complete();
-  if (!result.status) result.status = 'completed';
-  console.log(JSON.stringify(result));
-} catch (err) {
-  console.log(JSON.stringify({ status: 'failed', summary: err && err.stack ? err.stack : String(err), errorClass: 'driver_exception' }));
-}
 `

@@ -12,6 +12,10 @@
       "types": "./runner.d.ts",
       "import": "./runner.js"
     },
+    "./flue": {
+      "types": "./flue.d.ts",
+      "import": "./flue.js"
+    },
     "./package.json": "./package.json"
   },
   "types": "./index.d.ts",
@@ -24,6 +28,8 @@
   "files": [
     "index.js",
     "index.d.ts",
+    "flue.js",
+    "flue.d.ts",
     "runner.js",
     "runner.d.ts"
   ],

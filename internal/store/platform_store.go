@@ -272,6 +272,7 @@ type DriverRunFinish struct {
 	Status       domain.DriverRunStatus
 	Summary      string
 	ErrorClass   string
+	Output       map[string]string
 }
 
 type StaleDriverRunRecovery struct {

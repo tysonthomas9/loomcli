@@ -584,6 +584,7 @@ func (s *driverRunStore) Finish(_ context.Context, ws, runID string, finish stor
 	run.Status = finish.Status
 	run.Summary = finish.Summary
 	run.ErrorClass = finish.ErrorClass
+	run.Output = cloneMap(finish.Output)
 	run.FinishedAt = &now
 	run.UpdatedAt = now
 	return cloneDriverRun(run), nil

@@ -19,6 +19,8 @@ var subprocessEnvAllowExact = map[string]struct{}{
 
 	// Test helper marker for subprocess-backed driver tests.
 	"LOOM_HOST_BRIDGE_HELPER": {},
+	TaskRunnerCommandJSONEnv:  {},
+	TaskRunnerCommandEnv:      {},
 }
 
 var subprocessEnvAllowPrefixes = []string{
@@ -68,8 +70,35 @@ var subprocessEnvSensitiveFragments = []string{
 	"API_KEY",
 }
 
+const (
+	fleetDBURLEnv            = "LOOM_FLEET_DB_URL"
+	fleetDBAPIKeyEnv         = "LOOM_FLEET_DB_API_KEY" //nolint:gosec // env var name, not a credential
+	fleetDBActorEnv          = "LOOM_FLEET_DB_ACTOR"
+	driverFleetDBURLEnv      = "LOOM_DRIVER_FLEET_DB_URL"
+	driverFleetDBAPIKeyEnv   = "LOOM_DRIVER_FLEET_DB_API_KEY" //nolint:gosec // env var name, not a credential
+	driverFleetDBActorEnv    = "LOOM_DRIVER_FLEET_DB_ACTOR"
+	driverFleetDBURLPrefix   = driverFleetDBURLEnv + "="
+	driverFleetDBKeyPrefix   = driverFleetDBAPIKeyEnv + "="
+	driverFleetDBActorPrefix = driverFleetDBActorEnv + "="
+)
+
 func driverRuntimeBaseEnv(env []string) []string {
 	return scopedSubprocessBaseEnv(env)
+}
+
+func driverRuntimeFleetDBHandoffEnv(env []string) []string {
+	values := envValues(env)
+	out := make([]string, 0, 3)
+	if url := envFirstNonEmpty(values[driverFleetDBURLEnv], values[fleetDBURLEnv]); url != "" {
+		out = append(out, driverFleetDBURLPrefix+url)
+	}
+	if key := values[driverFleetDBAPIKeyEnv]; key != "" {
+		out = append(out, driverFleetDBKeyPrefix+key)
+	}
+	if actor := envFirstNonEmpty(values[driverFleetDBActorEnv], values[fleetDBActorEnv]); actor != "" {
+		out = append(out, driverFleetDBActorPrefix+actor)
+	}
+	return out
 }
 
 func scopedSubprocessBaseEnv(env []string) []string {
@@ -98,6 +127,27 @@ func subprocessEnvAllowed(name string) bool {
 		}
 	}
 	return false
+}
+
+func envValues(env []string) map[string]string {
+	values := make(map[string]string, len(env))
+	for _, entry := range env {
+		name, value, ok := strings.Cut(entry, "=")
+		if !ok {
+			continue
+		}
+		values[name] = value
+	}
+	return values
+}
+
+func envFirstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 func subprocessEnvSensitive(name string) bool {

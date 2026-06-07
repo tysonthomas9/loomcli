@@ -20,8 +20,15 @@ import (
 )
 
 var (
-	driverPublishName string
-	driverPublishJSON bool
+	driverRegisterFlueDist     string
+	driverRegisterManifest     string
+	driverRegisterName         string
+	driverRegisterID           string
+	driverRegisterWorkflow     string
+	driverRegisterSourceRef    string
+	driverRegisterSourceDigest string
+	driverRegisterActivate     bool
+	driverRegisterJSON         bool
 
 	driverRunEpic           string
 	driverRunID             string
@@ -49,6 +56,25 @@ var (
 	driverExecTaskSandboxRepoRef     string
 	driverExecTaskDeferCompletion    bool
 	driverExecTaskJSON               bool
+
+	driverWorkTaskWorkspaceKey       string
+	driverWorkTaskTaskRunID          string
+	driverWorkTaskNodeID             string
+	driverWorkTaskRunnerID           string
+	driverWorkTaskLeaseID            string
+	driverWorkTaskLeaseToken         string
+	driverWorkTaskSupportedProviders []string
+	driverWorkTaskCapabilities       []string
+	driverWorkTaskWorkerProfileIDs   []string
+	driverWorkTaskRunnerProvider     string
+	driverWorkTaskRunnerProcessRef   string
+	driverWorkTaskSandboxProvider    string
+	driverWorkTaskSandboxID          string
+	driverWorkTaskSandboxCWD         string
+	driverWorkTaskSandboxRepoRef     string
+	driverWorkTaskSandboxImage       string
+	driverWorkTaskDeferCompletion    bool
+	driverWorkTaskJSON               bool
 
 	driverClaimReadyWorkspaceKey string
 	driverClaimReadyDriverRunID  string
@@ -99,21 +125,24 @@ var (
 
 var driverCmd = &cobra.Command{
 	Use:     "driver",
-	Short:   "Publish and run dynamic Loom drivers",
+	Short:   "Register and run dynamic Loom drivers",
 	GroupID: "workspace",
 }
 
-var driverPublishCmd = &cobra.Command{
-	Use:   "publish <.loom/workflows/name.ts>",
-	Short: "Publish a TypeScript workflow as an immutable DriverVersion",
-	Long: `Publish a TypeScript workflow as an immutable DriverVersion.
+var driverRegisterCmd = &cobra.Command{
+	Use:   "register",
+	Short: "Register a built native Flue driver artifact as an immutable DriverVersion",
+	Long: `Register a built native Flue driver artifact as an immutable DriverVersion.
 
-The source must live under .loom/workflows and export a named run entrypoint.
-The publisher writes a deterministic Flue-compatible bundle under
-.loom/drivers/<driver>/<version> and records the Driver/DriverVersion in the
-active workspace.`,
-	Args: cobra.ExactArgs(1),
-	RunE: runDriverPublish,
+The artifact must already be built by Flue, for example:
+
+  flue build --target node
+  loom driver register --flue-dist ./dist --name complete-epic --activate
+
+Loom stages the built dist directory and records the DriverVersion. It does not
+generate a Flue project or adapter source.`,
+	Args: cobra.NoArgs,
+	RunE: runDriverRegister,
 }
 
 var driverRunCmd = &cobra.Command{
@@ -134,6 +163,14 @@ var driverExecTaskCmd = &cobra.Command{
 	Hidden: true,
 	Args:   cobra.NoArgs,
 	RunE:   runDriverExecTask,
+}
+
+var driverWorkTaskRunCmd = &cobra.Command{
+	Use:    "work-task-run",
+	Short:  "Claim and execute one queued task run for a worker runtime",
+	Hidden: true,
+	Args:   cobra.NoArgs,
+	RunE:   runDriverWorkTaskRun,
 }
 
 var driverClaimReadyCmd = &cobra.Command{
@@ -169,8 +206,16 @@ var driverRecoverStaleTasksCmd = &cobra.Command{
 }
 
 func init() {
-	driverPublishCmd.Flags().StringVar(&driverPublishName, "name", "", "Driver name (default: source filename without .ts)")
-	driverPublishCmd.Flags().BoolVar(&driverPublishJSON, "json", false, "JSON output")
+	driverRegisterCmd.Flags().StringVar(&driverRegisterFlueDist, "flue-dist", "", "Built Flue dist directory containing server.mjs")
+	driverRegisterCmd.Flags().StringVar(&driverRegisterManifest, "manifest", "", "Optional native Flue driver manifest JSON (default: <flue-dist>/loom-driver.json if present)")
+	driverRegisterCmd.Flags().StringVar(&driverRegisterName, "name", "", "Driver name")
+	driverRegisterCmd.Flags().StringVar(&driverRegisterID, "id", "", "Driver ID (default: slug of --name or manifest driver_name)")
+	driverRegisterCmd.Flags().StringVar(&driverRegisterWorkflow, "workflow", "", "Flue workflow name (default: driver ID or manifest workflow_name)")
+	driverRegisterCmd.Flags().StringVar(&driverRegisterSourceRef, "source-ref", "", "Optional source/provenance ref recorded on the DriverVersion")
+	driverRegisterCmd.Flags().StringVar(&driverRegisterSourceDigest, "source-digest", "", "Optional source digest recorded on the DriverVersion")
+	driverRegisterCmd.Flags().BoolVar(&driverRegisterActivate, "activate", false, "Activate the registered version after validation")
+	driverRegisterCmd.Flags().BoolVar(&driverRegisterJSON, "json", false, "JSON output")
+	_ = driverRegisterCmd.MarkFlagRequired("flue-dist")
 
 	driverRunCmd.Flags().StringVar(&driverRunEpic, "epic", "", "Epic ID to pass as input.epicId")
 	driverRunCmd.Flags().StringVar(&driverRunID, "run-id", "", "Run ID (default: generated)")
@@ -200,6 +245,25 @@ func init() {
 	driverExecTaskCmd.Flags().BoolVar(&driverExecTaskDeferCompletion, "defer-completion", false, "Return execution result but leave successful TaskRun running for CompleteRun")
 	driverExecTaskCmd.Flags().BoolVar(&driverExecTaskJSON, "json", false, "JSON output")
 	_ = driverExecTaskCmd.MarkFlagRequired("task-id")
+
+	driverWorkTaskRunCmd.Flags().StringVar(&driverWorkTaskWorkspaceKey, "workspace-key", "", "Workspace key (default: LOOM_WORKER_WORKSPACE, LOOM_DRIVER_WORKSPACE, or active workspace)")
+	driverWorkTaskRunCmd.Flags().StringVar(&driverWorkTaskTaskRunID, "task-run-id", "", "Specific queued TaskRun ID to claim")
+	driverWorkTaskRunCmd.Flags().StringVar(&driverWorkTaskNodeID, "node-id", "", "Worker node ID (default: LOOM_WORKER_NODE_ID, LOOM_DRIVER_NODE_ID, or host name)")
+	driverWorkTaskRunCmd.Flags().StringVar(&driverWorkTaskRunnerID, "runner-id", "", "Worker runner ID (default: LOOM_WORKER_RUNNER_ID or LOOM_DRIVER_RUNNER_ID)")
+	driverWorkTaskRunCmd.Flags().StringVar(&driverWorkTaskLeaseID, "lease-id", "", "TaskRun lease ID (default: generated per claim)")
+	driverWorkTaskRunCmd.Flags().StringVar(&driverWorkTaskLeaseToken, "lease-token", "", "TaskRun lease token (default: generated per claim)")
+	driverWorkTaskRunCmd.Flags().StringSliceVar(&driverWorkTaskSupportedProviders, "supported-provider", nil, "Supported task provider (repeatable)")
+	driverWorkTaskRunCmd.Flags().StringSliceVar(&driverWorkTaskCapabilities, "capability", nil, "Worker capability (repeatable)")
+	driverWorkTaskRunCmd.Flags().StringSliceVar(&driverWorkTaskWorkerProfileIDs, "worker-profile-id", nil, "Worker profile ID this worker may claim (repeatable)")
+	driverWorkTaskRunCmd.Flags().StringVar(&driverWorkTaskRunnerProvider, "runner-provider", "", "Runner placement provider")
+	driverWorkTaskRunCmd.Flags().StringVar(&driverWorkTaskRunnerProcessRef, "runner-process-ref", "", "Runner process reference")
+	driverWorkTaskRunCmd.Flags().StringVar(&driverWorkTaskSandboxProvider, "sandbox-provider", "", "Sandbox provider")
+	driverWorkTaskRunCmd.Flags().StringVar(&driverWorkTaskSandboxID, "sandbox-id", "", "Sandbox ID")
+	driverWorkTaskRunCmd.Flags().StringVar(&driverWorkTaskSandboxCWD, "sandbox-cwd", "", "Sandbox working directory")
+	driverWorkTaskRunCmd.Flags().StringVar(&driverWorkTaskSandboxRepoRef, "sandbox-repo-ref", "", "Sandbox repository ref")
+	driverWorkTaskRunCmd.Flags().StringVar(&driverWorkTaskSandboxImage, "sandbox-image", "", "Sandbox image or snapshot")
+	driverWorkTaskRunCmd.Flags().BoolVar(&driverWorkTaskDeferCompletion, "defer-completion", false, "Return execution result but leave successful TaskRun running for CompleteRun")
+	driverWorkTaskRunCmd.Flags().BoolVar(&driverWorkTaskJSON, "json", false, "JSON output")
 
 	driverClaimReadyCmd.Flags().StringVar(&driverClaimReadyWorkspaceKey, "workspace-key", "", "Workspace key (default: LOOM_DRIVER_WORKSPACE or active workspace)")
 	driverClaimReadyCmd.Flags().StringVar(&driverClaimReadyDriverRunID, "driver-run-id", "", "Parent DriverRun ID (default: LOOM_DRIVER_RUN_ID)")
@@ -248,38 +312,43 @@ func init() {
 	driverRecoverStaleTasksCmd.Flags().StringVar(&driverRecoverStaleErrorMessage, "error-message", "task run heartbeat is stale", "Error message recorded on recovered task runs")
 	driverRecoverStaleTasksCmd.Flags().BoolVar(&driverRecoverStaleJSON, "json", false, "JSON output")
 
-	driverCmd.AddCommand(driverPublishCmd, driverRunCmd, driverExecTaskCmd, driverClaimReadyCmd, driverCompleteTaskCmd, driverReleaseTaskCmd, driverRecoverStaleTasksCmd)
+	driverCmd.AddCommand(driverRegisterCmd, driverRunCmd, driverExecTaskCmd, driverWorkTaskRunCmd, driverClaimReadyCmd, driverCompleteTaskCmd, driverReleaseTaskCmd, driverRecoverStaleTasksCmd)
 	cli.RegisterCommand(driverCmd)
 }
 
-func runDriverPublish(_ *cobra.Command, args []string) error {
+func runDriverRegister(_ *cobra.Command, _ []string) error {
 	return cmdstore.WithActiveWorkspace(func(ctx context.Context, h *bootstrap.StoreHandle, ws string) error {
 		workDir, err := os.Getwd()
 		if err != nil {
 			return fmt.Errorf("resolve work dir: %w", err)
 		}
-		result, err := driverpkg.PublishWorkflow(ctx, h.Store, driverpkg.PublishOptions{
+		result, err := driverpkg.RegisterFlueDriver(ctx, h.Store, driverpkg.RegisterFlueOptions{
 			WorkspaceKey: ws,
 			WorkDir:      workDir,
-			SourcePath:   args[0],
-			DriverName:   driverPublishName,
+			DistPath:     driverRegisterFlueDist,
+			ManifestPath: driverRegisterManifest,
+			DriverName:   driverRegisterName,
+			DriverID:     driverRegisterID,
+			WorkflowName: driverRegisterWorkflow,
+			SourceRef:    driverRegisterSourceRef,
+			SourceDigest: driverRegisterSourceDigest,
 			CreatedBy:    publishActor(),
+			Activate:     driverRegisterActivate,
 		})
-		if driverPublishJSON && result != nil {
+		if driverRegisterJSON && result != nil {
 			if writeErr := cmdstore.WriteJSON(result); writeErr != nil && err == nil {
 				err = writeErr
 			}
 		}
 		if err != nil {
-			if result != nil && result.Version != nil && !driverPublishJSON {
-				fmt.Fprintf(os.Stderr, "Recorded failed driver version %s/%s (%s)\n", ws, result.Version.VersionID, result.Version.ValidationStatus)
-			}
-			return fmt.Errorf("publish driver: %w", err)
+			return fmt.Errorf("register driver: %w", err)
 		}
-		if !driverPublishJSON {
-			fmt.Printf("Published driver %s version %s\n", result.Driver.DriverID, result.Version.VersionID)
-			fmt.Printf("Source: %s %s\n", result.Version.SourceRef, result.Version.SourceDigest)
+		if !driverRegisterJSON {
+			fmt.Printf("Registered native Flue driver %s version %s\n", result.Driver.DriverID, result.Version.VersionID)
 			fmt.Printf("Bundle: %s %s\n", result.Version.BundleRef, result.Version.BundleDigest)
+			if result.Activated {
+				fmt.Printf("Activated: %s\n", result.Version.VersionID)
+			}
 		}
 		return nil
 	})
@@ -364,6 +433,64 @@ func runDriverExecTask(_ *cobra.Command, _ []string) error {
 		}
 		result := driverpkg.TaskRunResultFromOutcome(outcome)
 		if driverExecTaskJSON {
+			return cmdstore.WriteJSON(result)
+		}
+		fmt.Printf("Task run %s %s for task %s\n", result.ID, result.Status, result.TaskID)
+		if result.ErrorMessage != "" {
+			fmt.Println(result.ErrorMessage)
+		}
+		return nil
+	})
+}
+
+func runDriverWorkTaskRun(_ *cobra.Command, _ []string) error {
+	return cmdstore.WithStore(func(ctx context.Context, h *bootstrap.StoreHandle) error {
+		ws := firstNonEmpty(driverWorkTaskWorkspaceKey, os.Getenv("LOOM_WORKER_WORKSPACE"), os.Getenv("LOOM_DRIVER_WORKSPACE"))
+		if ws == "" {
+			resolved, err := cmdstore.ActiveWorkspace(ctx, h.Store)
+			if err != nil {
+				return err
+			}
+			ws = resolved
+		}
+		nodeID := firstNonEmpty(driverWorkTaskNodeID, os.Getenv("LOOM_WORKER_NODE_ID"), os.Getenv("LOOM_DRIVER_NODE_ID"), defaultWorkerNodeID())
+		if nodeID == "" {
+			return fmt.Errorf("worker node id required: %w", domain.ErrInvalid)
+		}
+		runnerID := firstNonEmpty(driverWorkTaskRunnerID, os.Getenv("LOOM_WORKER_RUNNER_ID"), os.Getenv("LOOM_DRIVER_RUNNER_ID"))
+		outcome, err := driverpkg.ClaimAndExecuteTaskRunWithResult(ctx, h.Store, driverpkg.TaskRunWorkerOptions{
+			WorkspaceKey:       ws,
+			TaskRunID:          driverWorkTaskTaskRunID,
+			NodeID:             nodeID,
+			RunnerID:           runnerID,
+			LeaseID:            driverWorkTaskLeaseID,
+			LeaseToken:         firstNonEmpty(driverWorkTaskLeaseToken, os.Getenv("LOOM_TASK_RUN_LEASE_TOKEN"), os.Getenv("LOOM_RUNNER_LEASE_TOKEN")),
+			SupportedProviders: driverWorkTaskSupportedProviders,
+			Capabilities:       driverWorkTaskCapabilities,
+			WorkerProfileIDs:   driverWorkTaskWorkerProfileIDs,
+			RunnerPlacement: domain.TaskRunPlacement{
+				Provider:   driverWorkTaskRunnerProvider,
+				NodeID:     nodeID,
+				RunnerID:   runnerID,
+				ProcessRef: driverWorkTaskRunnerProcessRef,
+			},
+			SandboxPlacement: domain.TaskRunPlacement{
+				Provider:        driverWorkTaskSandboxProvider,
+				SandboxID:       driverWorkTaskSandboxID,
+				CWD:             driverWorkTaskSandboxCWD,
+				RepoRef:         driverWorkTaskSandboxRepoRef,
+				ImageOrSnapshot: driverWorkTaskSandboxImage,
+			},
+			DeferCompletion: driverWorkTaskDeferCompletion,
+		}, driverpkg.HostBridgeTaskExecutor{
+			Store:        h.Store,
+			WorktreePath: currentWorkingDir(),
+		})
+		if err != nil {
+			return fmt.Errorf("work task run: %w", err)
+		}
+		result := driverpkg.TaskRunResultFromOutcome(outcome)
+		if driverWorkTaskJSON {
 			return cmdstore.WriteJSON(result)
 		}
 		fmt.Printf("Task run %s %s for task %s\n", result.ID, result.Status, result.TaskID)
@@ -516,6 +643,18 @@ func currentWorkingDir() string {
 		return ""
 	}
 	return wd
+}
+
+func defaultWorkerNodeID() string {
+	hostname, err := os.Hostname()
+	if err != nil {
+		return ""
+	}
+	hostname = strings.TrimSpace(hostname)
+	if hostname == "" {
+		return ""
+	}
+	return "worker-" + hostname
 }
 
 func runDriverReleaseTask(_ *cobra.Command, _ []string) error {

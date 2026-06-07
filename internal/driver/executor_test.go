@@ -6,7 +6,9 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"testing"
+	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
@@ -20,20 +22,14 @@ func TestExecutorRunOnceClaimsVerifiesAndFinishes(t *testing.T) {
 	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "TEST", Name: "test"}); err != nil {
 		t.Fatalf("Create workspace: %v", err)
 	}
-	source := writeWorkflow(t, root, "complete-epic.ts", `export const run = defineDriver({
-  name: "complete-epic",
-  async run(ctx) {
-    return ctx.run.complete({ summary: "done" });
-  },
-	});
-`)
-	published, err := PublishWorkflow(ctx, st, PublishOptions{WorkspaceKey: "TEST", WorkDir: root, SourcePath: source, CreatedBy: "tester", FlueCommand: fakeFlueCommand(t)})
+	writeFlueDist(t, root, "complete-epic", "done")
+	registered, err := RegisterFlueDriver(ctx, st, RegisterFlueOptions{WorkspaceKey: "TEST", WorkDir: root, DistPath: "dist", DriverName: "complete-epic", CreatedBy: "tester", Activate: true})
 	if err != nil {
-		t.Fatalf("PublishWorkflow: %v", err)
+		t.Fatalf("RegisterFlueDriver: %v", err)
 	}
 	run, err := CreateDriverRun(ctx, st, RunOptions{
 		WorkspaceKey:   "TEST",
-		DriverID:       published.Driver.DriverID,
+		DriverID:       registered.Driver.DriverID,
 		EpicID:         "TEST-1",
 		RunID:          "run-1",
 		IdempotencyKey: "idem-1",
@@ -64,11 +60,11 @@ func TestExecutorRunOnceClaimsVerifiesAndFinishes(t *testing.T) {
 	if runner.calls != 1 {
 		t.Fatalf("runner calls = %d, want 1", runner.calls)
 	}
-	if runner.req.Run.RunID != run.RunID || runner.req.Version.VersionID != published.Version.VersionID {
+	if runner.req.Run.RunID != run.RunID || runner.req.Version.VersionID != registered.Version.VersionID {
 		t.Fatalf("runner req = %+v version=%+v, want pinned run/version", runner.req.Run, runner.req.Version)
 	}
-	if _, err := os.Stat(runner.req.WorkflowPath); err != nil {
-		t.Fatalf("runner workflow path missing: %v", err)
+	if runner.req.WorkflowPath != "" {
+		t.Fatalf("runner workflow path = %q, want native Flue server only", runner.req.WorkflowPath)
 	}
 	if _, err := os.Stat(runner.req.ServerPath); err != nil {
 		t.Fatalf("runner server path missing: %v", err)
@@ -89,18 +85,15 @@ func TestExecutorRunOnceFailsTamperedBundleBeforeRunner(t *testing.T) {
 	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "TEST", Name: "test"}); err != nil {
 		t.Fatalf("Create workspace: %v", err)
 	}
-	source := writeWorkflow(t, root, "complete-epic.ts", `export async function run(ctx) {
-  return ctx.run.complete({ summary: "done" });
-}
-`)
-	published, err := PublishWorkflow(ctx, st, PublishOptions{WorkspaceKey: "TEST", WorkDir: root, SourcePath: source, CreatedBy: "tester", FlueCommand: fakeFlueCommand(t)})
+	writeFlueDist(t, root, "complete-epic", "done")
+	registered, err := RegisterFlueDriver(ctx, st, RegisterFlueOptions{WorkspaceKey: "TEST", WorkDir: root, DistPath: "dist", DriverName: "complete-epic", CreatedBy: "tester", Activate: true})
 	if err != nil {
-		t.Fatalf("PublishWorkflow: %v", err)
+		t.Fatalf("RegisterFlueDriver: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(root, filepath.FromSlash(published.Version.BundleRef), filepath.FromSlash(published.Version.Manifest["source_bundle_ref"])), []byte("export async function run() { return {}; }\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(root, filepath.FromSlash(registered.Version.BundleRef), "dist", "server.mjs"), []byte("tampered\n"), 0o644); err != nil {
 		t.Fatalf("tamper bundle: %v", err)
 	}
-	if _, err := CreateDriverRun(ctx, st, RunOptions{WorkspaceKey: "TEST", DriverID: published.Driver.DriverID, EpicID: "TEST-1", RunID: "run-1"}); err != nil {
+	if _, err := CreateDriverRun(ctx, st, RunOptions{WorkspaceKey: "TEST", DriverID: registered.Driver.DriverID, EpicID: "TEST-1", RunID: "run-1"}); err != nil {
 		t.Fatalf("CreateDriverRun: %v", err)
 	}
 
@@ -142,15 +135,12 @@ func TestNodeRunnerRunsBuiltFlueServer(t *testing.T) {
 	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "TEST", Name: "test"}); err != nil {
 		t.Fatalf("Create workspace: %v", err)
 	}
-	source := writeWorkflow(t, root, "complete-epic.ts", `export async function run(ctx) {
-  return ctx.run.complete({ summary: "done" });
-}
-`)
-	published, err := PublishWorkflow(ctx, st, PublishOptions{WorkspaceKey: "TEST", WorkDir: root, SourcePath: source, CreatedBy: "tester", FlueCommand: fakeFlueCommand(t)})
+	writeFlueDist(t, root, "complete-epic", "fake flue")
+	registered, err := RegisterFlueDriver(ctx, st, RegisterFlueOptions{WorkspaceKey: "TEST", WorkDir: root, DistPath: "dist", DriverName: "complete-epic", CreatedBy: "tester", Activate: true})
 	if err != nil {
-		t.Fatalf("PublishWorkflow: %v", err)
+		t.Fatalf("RegisterFlueDriver: %v", err)
 	}
-	run, err := CreateDriverRun(ctx, st, RunOptions{WorkspaceKey: "TEST", DriverID: published.Driver.DriverID, EpicID: "TEST-1", RunID: "run-1"})
+	run, err := CreateDriverRun(ctx, st, RunOptions{WorkspaceKey: "TEST", DriverID: registered.Driver.DriverID, EpicID: "TEST-1", RunID: "run-1"})
 	if err != nil {
 		t.Fatalf("CreateDriverRun: %v", err)
 	}
@@ -171,6 +161,213 @@ func TestNodeRunnerRunsBuiltFlueServer(t *testing.T) {
 	}
 }
 
+func TestNodeRunnerRunsRegisteredNativeFlueArtifact(t *testing.T) {
+	if _, err := exec.LookPath("node"); err != nil {
+		t.Skipf("node not available: %v", err)
+	}
+
+	ctx := context.Background()
+	root := t.TempDir()
+	writeFlueDist(t, root, "complete-epic", "native flue")
+	st := memstore.New()
+	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "TEST", Name: "test"}); err != nil {
+		t.Fatalf("Create workspace: %v", err)
+	}
+	registered, err := RegisterFlueDriver(ctx, st, RegisterFlueOptions{
+		WorkspaceKey: "TEST",
+		WorkDir:      root,
+		DistPath:     "dist",
+		DriverName:   "complete-epic",
+		Activate:     true,
+		CreatedBy:    "tester",
+	})
+	if err != nil {
+		t.Fatalf("RegisterFlueDriver: %v", err)
+	}
+	run, err := CreateDriverRun(ctx, st, RunOptions{WorkspaceKey: "TEST", DriverID: registered.Driver.DriverID, EpicID: "TEST-1", RunID: "run-1"})
+	if err != nil {
+		t.Fatalf("CreateDriverRun: %v", err)
+	}
+	claimed, err := st.DriverRuns().Claim(ctx, "TEST", run.RunID, "node-1", "lease-1")
+	if err != nil {
+		t.Fatalf("Claim: %v", err)
+	}
+	req, err := loadRunRequest(ctx, root, claimed, st)
+	if err != nil {
+		t.Fatalf("loadRunRequest: %v", err)
+	}
+	if req.WorkflowPath != "" {
+		t.Fatalf("WorkflowPath = %q, want no generated workflow path", req.WorkflowPath)
+	}
+	result, err := (NodeRunner{}).Run(ctx, req)
+	if err != nil {
+		t.Fatalf("NodeRunner.Run: %v", err)
+	}
+	if result.Status != domain.DriverRunCompleted || result.Summary != "native flue" {
+		t.Fatalf("result = %+v, want completed native flue", result)
+	}
+	if result.Output["logs_ref"] != "driver-run://run-1/flue-local" || result.Output["runtime"] != RuntimeFlueNode {
+		t.Fatalf("output = %+v, want driver-run logs ref and flue-node runtime", result.Output)
+	}
+}
+
+func TestNodeRunnerCancellationPropagatesToBuiltFlueServer(t *testing.T) {
+	if _, err := exec.LookPath("node"); err != nil {
+		t.Skipf("node not available: %v", err)
+	}
+
+	root := t.TempDir()
+	dist := filepath.Join(root, "dist")
+	if err := os.MkdirAll(dist, 0o755); err != nil {
+		t.Fatalf("mkdir dist: %v", err)
+	}
+	startedPath := filepath.Join(root, "started")
+	cancelledPath := filepath.Join(root, "cancelled")
+	if err := os.WriteFile(filepath.Join(dist, "server.mjs"), []byte(`
+import fs from 'node:fs';
+
+const startedPath = `+strconv.Quote(startedPath)+`;
+const cancelledPath = `+strconv.Quote(cancelledPath)+`;
+
+function recordCancelled(signal) {
+  fs.writeFileSync(cancelledPath, signal);
+  process.exit(0);
+}
+
+process.once('SIGINT', () => recordCancelled('SIGINT'));
+process.once('SIGTERM', () => recordCancelled('SIGTERM'));
+
+if (process.send) {
+  fs.writeFileSync(startedPath, 'started');
+  process.send({ version: 1, type: 'ready', target: 'workflow', name: process.env.FLUE_CLI_NAME || 'complete-epic' });
+  process.on('message', () => {});
+  setInterval(() => {}, 1000);
+}
+`), 0o644); err != nil {
+		t.Fatalf("write server: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct {
+		result RunResult
+		err    error
+	}, 1)
+	go func() {
+		result, err := (NodeRunner{}).Run(ctx, RunRequest{
+			Run: &domain.DriverRun{
+				WorkspaceKey:    "TEST",
+				RunID:           "run-cancel",
+				NodeID:          "node-1",
+				LeaseID:         "lease-1",
+				FencingToken:    42,
+				Input:           map[string]string{},
+				DriverID:        "complete-epic",
+				DriverVersionID: "version-1",
+			},
+			BundleRoot: root,
+			ServerPath: filepath.Join(dist, "server.mjs"),
+			Manifest:   map[string]string{"workflow_name": "complete-epic"},
+		})
+		done <- struct {
+			result RunResult
+			err    error
+		}{result: result, err: err}
+	}()
+	waitForFile(t, startedPath)
+	cancel()
+	select {
+	case out := <-done:
+		if out.err != nil {
+			t.Fatalf("NodeRunner.Run err = %v", out.err)
+		}
+		if out.result.Status != domain.DriverRunCancelled || out.result.ErrorClass != "driver_cancelled" {
+			t.Fatalf("result = %+v, want cancelled driver_cancelled", out.result)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("NodeRunner.Run did not return after cancellation")
+	}
+	waitForFile(t, cancelledPath)
+}
+
+func TestNodeRunnerBuiltFlueServerReceivesOnlyScopedFleetDBHandoff(t *testing.T) {
+	if _, err := exec.LookPath("node"); err != nil {
+		t.Skipf("node not available: %v", err)
+	}
+	t.Setenv("LOOM_FLEET_DB_URL", "https://fleet.invalid")
+	t.Setenv("LOOM_FLEET_DB_API_KEY", "broad-secret")
+	t.Setenv("LOOM_FLEET_DB_ACTOR", "broad-actor")
+	t.Setenv("LOOM_DRIVER_FLEET_DB_API_KEY", "scoped-secret")
+	t.Setenv("LOOM_DRIVER_FLEET_DB_ACTOR", "driver-run:run-1")
+	t.Setenv("OPENAI_API_KEY", "model-secret")
+	t.Setenv("AWS_SECRET_ACCESS_KEY", "aws-secret")
+	t.Setenv("GITHUB_TOKEN", "github-secret")
+
+	root := t.TempDir()
+	dist := filepath.Join(root, "dist")
+	if err := os.MkdirAll(dist, 0o755); err != nil {
+		t.Fatalf("mkdir dist: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dist, "server.mjs"), []byte(`
+const leaked = [
+  'LOOM_FLEET_DB_URL',
+  'LOOM_FLEET_DB_API_KEY',
+  'LOOM_TASK_RUN_LEASE_TOKEN',
+  'OPENAI_API_KEY',
+  'AWS_SECRET_ACCESS_KEY',
+  'GITHUB_TOKEN',
+].filter((key) => process.env[key]);
+const handoffOk = process.env.LOOM_DRIVER_FLEET_DB_URL === 'https://fleet.invalid'
+  && process.env.LOOM_DRIVER_FLEET_DB_API_KEY === 'scoped-secret'
+  && process.env.LOOM_DRIVER_FLEET_DB_ACTOR === 'driver-run:run-1';
+if (process.send) {
+  process.send({ version: 1, type: 'ready', target: 'workflow', name: process.env.FLUE_CLI_NAME || 'complete-epic' });
+  process.on('message', (message) => {
+    const result = leaked.length || !handoffOk
+      ? { status: 'failed', summary: 'bad handoff leaked=' + leaked.join(',') + ' handoffOk=' + handoffOk, errorClass: 'env_leak' }
+      : { status: 'completed', summary: 'handoff ok' };
+    process.send({ version: 1, type: 'result', requestId: message.requestId, result }, () => process.exit(0));
+  });
+}
+`), 0o644); err != nil {
+		t.Fatalf("write server: %v", err)
+	}
+
+	result, err := (NodeRunner{}).Run(context.Background(), RunRequest{
+		Run: &domain.DriverRun{
+			WorkspaceKey:    "TEST",
+			RunID:           "run-1",
+			NodeID:          "node-1",
+			LeaseID:         "lease-1",
+			FencingToken:    42,
+			Input:           map[string]string{},
+			Entrypoint:      EntrypointRun,
+			DriverID:        "driver-1",
+			DriverVersionID: "version-1",
+		},
+		BundleRoot: root,
+		ServerPath: filepath.Join(dist, "server.mjs"),
+		Manifest:   map[string]string{"workflow_name": "complete-epic"},
+	})
+	if err != nil {
+		t.Fatalf("NodeRunner.Run: %v", err)
+	}
+	if result.Status != domain.DriverRunCompleted || result.Summary != "handoff ok" {
+		t.Fatalf("result = %+v, want completed handoff ok", result)
+	}
+}
+
+func waitForFile(t *testing.T, path string) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if _, err := os.Stat(path); err == nil {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("timed out waiting for %s", path)
+}
+
 func TestExecutorScansWorkspacesAndReportsNoQueuedRun(t *testing.T) {
 	ctx := context.Background()
 	root := t.TempDir()
@@ -181,15 +378,12 @@ func TestExecutorScansWorkspacesAndReportsNoQueuedRun(t *testing.T) {
 	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "TEST", Name: "test"}); err != nil {
 		t.Fatalf("Create TEST workspace: %v", err)
 	}
-	source := writeWorkflow(t, root, "complete-epic.ts", `export async function run(ctx) {
-  return ctx.run.complete({ summary: "done" });
-}
-`)
-	published, err := PublishWorkflow(ctx, st, PublishOptions{WorkspaceKey: "TEST", WorkDir: root, SourcePath: source, CreatedBy: "tester", FlueCommand: fakeFlueCommand(t)})
+	writeFlueDist(t, root, "complete-epic", "done")
+	registered, err := RegisterFlueDriver(ctx, st, RegisterFlueOptions{WorkspaceKey: "TEST", WorkDir: root, DistPath: "dist", DriverName: "complete-epic", CreatedBy: "tester", Activate: true})
 	if err != nil {
-		t.Fatalf("PublishWorkflow: %v", err)
+		t.Fatalf("RegisterFlueDriver: %v", err)
 	}
-	if _, err := CreateDriverRun(ctx, st, RunOptions{WorkspaceKey: "TEST", DriverID: published.Driver.DriverID, EpicID: "TEST-1", RunID: "run-1"}); err != nil {
+	if _, err := CreateDriverRun(ctx, st, RunOptions{WorkspaceKey: "TEST", DriverID: registered.Driver.DriverID, EpicID: "TEST-1", RunID: "run-1"}); err != nil {
 		t.Fatalf("CreateDriverRun: %v", err)
 	}
 	result, err := (&Executor{

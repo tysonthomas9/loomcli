@@ -2,6 +2,8 @@ package driver
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
 	"strings"
 	"time"
@@ -34,6 +36,22 @@ type TaskRunRequestOptions struct {
 	DeferCompletion    bool
 }
 
+type TaskRunWorkerOptions struct {
+	WorkspaceKey       string
+	TaskRunID          string
+	NodeID             string
+	RunnerID           string
+	LeaseID            string
+	LeaseToken         string
+	SupportedProviders []string
+	Capabilities       []string
+	WorkerProfileIDs   []string
+	RunnerPlacement    domain.TaskRunPlacement
+	SandboxPlacement   domain.TaskRunPlacement
+	HeartbeatInterval  time.Duration
+	DeferCompletion    bool
+}
+
 type TaskExecRequest struct {
 	WorkspaceKey     string                  `json:"workspace_key"`
 	DriverRunID      string                  `json:"driver_run_id"`
@@ -44,6 +62,7 @@ type TaskExecRequest struct {
 	ProviderProfile  string                  `json:"provider_profile,omitempty"`
 	NodeID           string                  `json:"node_id,omitempty"`
 	LeaseID          string                  `json:"lease_id,omitempty"`
+	LeaseToken       string                  `json:"lease_token,omitempty"`
 	FencingToken     int64                   `json:"fencing_token,omitempty"`
 	RunnerPlacement  domain.TaskRunPlacement `json:"runner_placement,omitempty"`
 	SandboxPlacement domain.TaskRunPlacement `json:"sandbox_placement,omitempty"`
@@ -110,6 +129,7 @@ func (LocalTaskExecutor) ExecuteTask(_ context.Context, req TaskExecRequest) (Ta
 type TaskRunRequestResult struct {
 	ID               string               `json:"id"`
 	TaskRunID        string               `json:"taskRunId,omitempty"`
+	LeaseToken       string               `json:"leaseToken,omitempty"`
 	DriverStepID     string               `json:"driverStepId,omitempty"`
 	TaskID           string               `json:"taskId"`
 	Status           domain.TaskRunStatus `json:"status"`
@@ -130,6 +150,7 @@ type TaskRunRequestResult struct {
 
 type TaskRunRequestOutcome struct {
 	Run         *domain.TaskRun
+	LeaseToken  string
 	ArtifactIDs []string
 }
 
@@ -139,6 +160,62 @@ func RequestTaskRun(ctx context.Context, s store.Store, opts TaskRunRequestOptio
 		return nil, err
 	}
 	return outcome.Run, nil
+}
+
+func ClaimAndExecuteTaskRun(ctx context.Context, s store.Store, opts TaskRunWorkerOptions, executor TaskExecutor) (*domain.TaskRun, error) {
+	outcome, err := ClaimAndExecuteTaskRunWithResult(ctx, s, opts, executor)
+	if err != nil {
+		return nil, err
+	}
+	return outcome.Run, nil
+}
+
+func ClaimAndExecuteTaskRunWithResult(ctx context.Context, s store.Store, opts TaskRunWorkerOptions, executor TaskExecutor) (*TaskRunRequestOutcome, error) {
+	if s == nil {
+		return nil, fmt.Errorf("store required: %w", domain.ErrInvalid)
+	}
+	opts.WorkspaceKey = strings.TrimSpace(opts.WorkspaceKey)
+	opts.TaskRunID = strings.TrimSpace(opts.TaskRunID)
+	opts.NodeID = strings.TrimSpace(opts.NodeID)
+	opts.RunnerID = strings.TrimSpace(opts.RunnerID)
+	opts.LeaseID = strings.TrimSpace(opts.LeaseID)
+	opts.LeaseToken = strings.TrimSpace(opts.LeaseToken)
+	if opts.WorkspaceKey == "" || opts.NodeID == "" {
+		return nil, fmt.Errorf("workspace key and node id required: %w", domain.ErrInvalid)
+	}
+	if executor == nil {
+		executor = LocalTaskExecutor{}
+	}
+	leaseID := opts.LeaseID
+	if leaseID == "" {
+		leaseID = generatedTaskRunLeaseID(opts.NodeID)
+	}
+	leaseToken := opts.LeaseToken
+	if leaseToken == "" {
+		leaseToken = generatedTaskRunLeaseToken()
+	}
+	claimed, err := s.TaskRuns().ClaimQueued(ctx, opts.WorkspaceKey, store.TaskRunClaim{
+		TaskRunID:          opts.TaskRunID,
+		NodeID:             opts.NodeID,
+		RunnerID:           opts.RunnerID,
+		LeaseID:            leaseID,
+		LeaseToken:         leaseToken,
+		SupportedProviders: taskRunWorkerSupportedProviders(opts),
+		Capabilities:       normalizeStringList(opts.Capabilities),
+		WorkerProfileIDs:   normalizeStringList(opts.WorkerProfileIDs),
+		RunnerPlacement:    opts.RunnerPlacement,
+		SandboxPlacement:   opts.SandboxPlacement,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("claim queued task run: %w", err)
+	}
+	return executeClaimedTaskRunWithResult(ctx, s, claimed, executeClaimedTaskRunOptions{
+		WorkspaceKey:      opts.WorkspaceKey,
+		LeaseToken:        leaseToken,
+		HeartbeatInterval: opts.HeartbeatInterval,
+		DeferCompletion:   opts.DeferCompletion,
+		HeartbeatSource:   "task_run_worker",
+	}, executor)
 }
 
 func RequestTaskRunWithResult(ctx context.Context, s store.Store, opts TaskRunRequestOptions, executor TaskExecutor) (*TaskRunRequestOutcome, error) {
@@ -157,6 +234,7 @@ func RequestTaskRunWithResult(ctx context.Context, s store.Store, opts TaskRunRe
 	opts.NodeID = strings.TrimSpace(opts.NodeID)
 	opts.RunnerID = strings.TrimSpace(opts.RunnerID)
 	opts.LeaseID = strings.TrimSpace(opts.LeaseID)
+	opts.LeaseToken = strings.TrimSpace(opts.LeaseToken)
 	if opts.WorkspaceKey == "" || opts.DriverRunID == "" || opts.TaskID == "" {
 		return nil, fmt.Errorf("workspace key, driver run id, and task id required: %w", domain.ErrInvalid)
 	}
@@ -198,6 +276,10 @@ func RequestTaskRunWithResult(ctx context.Context, s store.Store, opts TaskRunRe
 	if leaseID == "" {
 		leaseID = taskRunID + "-lease"
 	}
+	leaseToken := opts.LeaseToken
+	if leaseToken == "" {
+		leaseToken = generatedTaskRunLeaseToken()
+	}
 	queued, err := s.TaskRuns().Create(ctx, store.TaskRunCreate{
 		WorkspaceKey:     opts.WorkspaceKey,
 		TaskRunID:        taskRunID,
@@ -226,7 +308,7 @@ func RequestTaskRunWithResult(ctx context.Context, s store.Store, opts TaskRunRe
 		NodeID:             nodeID,
 		RunnerID:           opts.RunnerID,
 		LeaseID:            leaseID,
-		LeaseToken:         opts.LeaseToken,
+		LeaseToken:         leaseToken,
 		SupportedProviders: taskRunSupportedProviders(opts),
 		Capabilities:       normalizeStringList(opts.Capabilities),
 		WorkerProfileIDs:   normalizeStringList(claimWorkerProfiles),
@@ -248,21 +330,72 @@ func RequestTaskRunWithResult(ctx context.Context, s store.Store, opts TaskRunRe
 			return nil, fmt.Errorf("link driver step: %w", err)
 		}
 	}
+	return executeClaimedTaskRunWithResult(ctx, s, claimed, executeClaimedTaskRunOptions{
+		WorkspaceKey:      opts.WorkspaceKey,
+		DriverRunID:       opts.DriverRunID,
+		DriverStepID:      opts.DriverStepID,
+		TaskID:            opts.TaskID,
+		ProviderProfile:   opts.ProviderProfile,
+		LeaseToken:        leaseToken,
+		HeartbeatInterval: opts.HeartbeatInterval,
+		DeferCompletion:   opts.DeferCompletion,
+		UpdateDriverStep:  opts.DriverStepID != "",
+		ParentNodeID:      opts.ParentNodeID,
+		ParentLeaseID:     opts.ParentLeaseID,
+		ParentFence:       opts.ParentFence,
+		HeartbeatSource:   "driver_task_request",
+	}, executor)
+}
+
+type executeClaimedTaskRunOptions struct {
+	WorkspaceKey      string
+	DriverRunID       string
+	DriverStepID      string
+	TaskID            string
+	ProviderProfile   string
+	LeaseToken        string
+	HeartbeatInterval time.Duration
+	DeferCompletion   bool
+	UpdateDriverStep  bool
+	ParentNodeID      string
+	ParentLeaseID     string
+	ParentFence       int64
+	HeartbeatSource   string
+}
+
+func executeClaimedTaskRunWithResult(ctx context.Context, s store.Store, claimed *domain.TaskRun, opts executeClaimedTaskRunOptions, executor TaskExecutor) (*TaskRunRequestOutcome, error) {
+	if claimed == nil {
+		return nil, fmt.Errorf("claimed task run required: %w", domain.ErrInvalid)
+	}
+	if executor == nil {
+		executor = LocalTaskExecutor{}
+	}
+	workspaceKey := firstNonEmpty(opts.WorkspaceKey, claimed.WorkspaceKey)
+	driverRunID := firstNonEmpty(opts.DriverRunID, claimed.DriverRunID)
+	driverStepID := firstNonEmpty(opts.DriverStepID, claimed.DriverStepID)
+	taskID := firstNonEmpty(opts.TaskID, claimed.TaskID)
+	providerProfile := firstNonEmpty(opts.ProviderProfile, claimed.ProviderProfile)
+	heartbeatSource := firstNonEmpty(opts.HeartbeatSource, "task_run_executor")
 	hbCtx, stopHeartbeat := context.WithCancel(ctx)
 	defer stopHeartbeat()
 	if interval := taskRunHeartbeatInterval(opts.HeartbeatInterval); interval > 0 {
-		go heartbeatTaskRun(hbCtx, s, claimed, opts.LeaseToken, interval)
+		go heartbeatTaskRun(hbCtx, s, claimed, opts.LeaseToken, interval, map[string]string{
+			"driver_run_id":    driverRunID,
+			"provider_profile": providerProfile,
+			"heartbeat_source": heartbeatSource,
+		})
 	}
 	execResult, execErr := executor.ExecuteTask(ctx, TaskExecRequest{
-		WorkspaceKey:     opts.WorkspaceKey,
-		DriverRunID:      opts.DriverRunID,
-		DriverStepID:     opts.DriverStepID,
+		WorkspaceKey:     workspaceKey,
+		DriverRunID:      driverRunID,
+		DriverStepID:     driverStepID,
 		TaskRunID:        claimed.TaskRunID,
-		TaskID:           opts.TaskID,
+		TaskID:           taskID,
 		WorkerProfileID:  claimed.WorkerProfileID,
-		ProviderProfile:  opts.ProviderProfile,
+		ProviderProfile:  providerProfile,
 		NodeID:           claimed.NodeID,
 		LeaseID:          claimed.LeaseID,
+		LeaseToken:       opts.LeaseToken,
 		FencingToken:     claimed.FencingToken,
 		RunnerPlacement:  claimed.RunnerPlacement,
 		SandboxPlacement: claimed.SandboxPlacement,
@@ -295,13 +428,16 @@ func RequestTaskRunWithResult(ctx context.Context, s store.Store, opts TaskRunRe
 	if metadata == nil {
 		metadata = map[string]string{}
 	}
-	metadata["driver_run_id"] = opts.DriverRunID
-	if opts.DriverStepID != "" {
-		metadata["driver_step_id"] = opts.DriverStepID
+	if driverRunID != "" {
+		metadata["driver_run_id"] = driverRunID
 	}
-	metadata["provider_profile"] = opts.ProviderProfile
+	if driverStepID != "" {
+		metadata["driver_step_id"] = driverStepID
+	}
+	metadata["provider_profile"] = providerProfile
+	metadata["task_run_executor"] = heartbeatSource
 	if opts.DeferCompletion && status == domain.TaskRunCompleted {
-		pending, err := s.TaskRuns().Heartbeat(ctx, opts.WorkspaceKey, claimed.TaskRunID, store.TaskRunHeartbeat{
+		pending, err := s.TaskRuns().Heartbeat(ctx, workspaceKey, claimed.TaskRunID, store.TaskRunHeartbeat{
 			NodeID:          claimed.NodeID,
 			LeaseID:         claimed.LeaseID,
 			LeaseToken:      opts.LeaseToken,
@@ -328,9 +464,9 @@ func RequestTaskRunWithResult(ctx context.Context, s store.Store, opts TaskRunRe
 		synthetic.ErrorMessage = errorMessage
 		now := time.Now().UTC()
 		synthetic.FinishedAt = &now
-		return &TaskRunRequestOutcome{Run: &synthetic, ArtifactIDs: normalizeArtifactIDs(execResult.ArtifactIDs)}, nil
+		return &TaskRunRequestOutcome{Run: &synthetic, LeaseToken: opts.LeaseToken, ArtifactIDs: normalizeArtifactIDs(execResult.ArtifactIDs)}, nil
 	}
-	final, err := s.TaskRuns().Finish(ctx, opts.WorkspaceKey, claimed.TaskRunID, store.TaskRunFinish{
+	final, err := s.TaskRuns().Finish(ctx, workspaceKey, claimed.TaskRunID, store.TaskRunFinish{
 		NodeID:           claimed.NodeID,
 		LeaseID:          claimed.LeaseID,
 		LeaseToken:       opts.LeaseToken,
@@ -351,13 +487,13 @@ func RequestTaskRunWithResult(ctx context.Context, s store.Store, opts TaskRunRe
 	if err != nil {
 		return nil, fmt.Errorf("finish task run: %w", err)
 	}
-	if opts.DriverStepID != "" {
+	if opts.UpdateDriverStep && driverStepID != "" {
 		stepStatus := driverStepStatusForTaskRun(status)
 		outputRef := execResult.ArtifactsRef
 		if outputRef == "" {
 			outputRef = execResult.LogsRef
 		}
-		if _, err := s.DriverSteps().Update(ctx, opts.WorkspaceKey, opts.DriverStepID, store.DriverStepUpdate{
+		if _, err := s.DriverSteps().Update(ctx, workspaceKey, driverStepID, store.DriverStepUpdate{
 			Status:       &stepStatus,
 			TaskRunID:    &claimed.TaskRunID,
 			OutputRef:    &outputRef,
@@ -368,7 +504,7 @@ func RequestTaskRunWithResult(ctx context.Context, s store.Store, opts TaskRunRe
 			return nil, fmt.Errorf("finish driver step: %w", err)
 		}
 	}
-	return &TaskRunRequestOutcome{Run: final, ArtifactIDs: normalizeArtifactIDs(execResult.ArtifactIDs)}, nil
+	return &TaskRunRequestOutcome{Run: final, LeaseToken: opts.LeaseToken, ArtifactIDs: normalizeArtifactIDs(execResult.ArtifactIDs)}, nil
 }
 
 func driverStepStatusForTaskRun(status domain.TaskRunStatus) domain.DriverStepStatus {
@@ -416,7 +552,9 @@ func TaskRunResultFromOutcome(outcome *TaskRunRequestOutcome) TaskRunRequestResu
 	if outcome == nil {
 		return TaskRunRequestResult{}
 	}
-	return TaskRunResultFromDomain(outcome.Run, outcome.ArtifactIDs)
+	result := TaskRunResultFromDomain(outcome.Run, outcome.ArtifactIDs)
+	result.LeaseToken = outcome.LeaseToken
+	return result
 }
 
 func normalizeArtifactIDs(ids []string) []string {
@@ -443,6 +581,12 @@ func normalizeArtifactIDs(ids []string) []string {
 }
 
 func taskRunSupportedProviders(opts TaskRunRequestOptions) []string {
+	values := append([]string(nil), opts.SupportedProviders...)
+	values = append(values, opts.SandboxPlacement.Provider)
+	return normalizeStringList(values)
+}
+
+func taskRunWorkerSupportedProviders(opts TaskRunWorkerOptions) []string {
 	values := append([]string(nil), opts.SupportedProviders...)
 	values = append(values, opts.SandboxPlacement.Provider)
 	return normalizeStringList(values)
@@ -527,6 +671,22 @@ func generatedTaskRunID(driverRunID, taskID string) string {
 	return fmt.Sprintf("task-run-%s-%s-%d", runPart, taskPart, time.Now().UTC().UnixNano())
 }
 
+func generatedTaskRunLeaseToken() string {
+	var b [24]byte
+	if _, err := rand.Read(b[:]); err == nil {
+		return hex.EncodeToString(b[:])
+	}
+	return fmt.Sprintf("task-run-token-%d", time.Now().UTC().UnixNano())
+}
+
+func generatedTaskRunLeaseID(nodeID string) string {
+	nodePart := slug(nodeID)
+	if nodePart == "" {
+		nodePart = "worker"
+	}
+	return fmt.Sprintf("task-run-lease-%s-%d", nodePart, time.Now().UTC().UnixNano())
+}
+
 func taskRunHeartbeatInterval(interval time.Duration) time.Duration {
 	if interval == 0 {
 		return 30 * time.Second
@@ -537,7 +697,7 @@ func taskRunHeartbeatInterval(interval time.Duration) time.Duration {
 	return interval
 }
 
-func heartbeatTaskRun(ctx context.Context, s store.Store, run *domain.TaskRun, leaseToken string, interval time.Duration) {
+func heartbeatTaskRun(ctx context.Context, s store.Store, run *domain.TaskRun, leaseToken string, interval time.Duration, metadata map[string]string) {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 	for {
@@ -546,15 +706,11 @@ func heartbeatTaskRun(ctx context.Context, s store.Store, run *domain.TaskRun, l
 			return
 		case <-ticker.C:
 			_, _ = s.TaskRuns().Heartbeat(ctx, run.WorkspaceKey, run.TaskRunID, store.TaskRunHeartbeat{
-				NodeID:       run.NodeID,
-				LeaseID:      run.LeaseID,
-				LeaseToken:   leaseToken,
-				FencingToken: run.FencingToken,
-				RuntimeMetadata: map[string]string{
-					"driver_run_id":    run.DriverRunID,
-					"provider_profile": run.ProviderProfile,
-					"heartbeat_source": "driver_task_request",
-				},
+				NodeID:          run.NodeID,
+				LeaseID:         run.LeaseID,
+				LeaseToken:      leaseToken,
+				FencingToken:    run.FencingToken,
+				RuntimeMetadata: cloneStringMap(metadata),
 			})
 		}
 	}
