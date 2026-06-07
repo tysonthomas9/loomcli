@@ -11,8 +11,8 @@ import { useStore } from "zustand";
 
 import { useAgentStoreInstance } from "@/hooks/common";
 import { useWorkspaceContext } from "@/hooks/workspace";
-import { parseLoomStatus } from "@/types";
-import { getStatusDotColor, getStatusLabel } from "@/components/AgentCard";
+import { parseLoomStatus, resolveAgentByName } from "@/types";
+import { getStatusDotColor, getStatusLabel } from "@/utils/agent";
 
 import styles from "./AgentStatusBadge.module.css";
 
@@ -45,7 +45,7 @@ export function AgentStatusBadge({
   const mountedRef = useRef(true);
 
   // Look up agent by name (returns new ref each poll, so derive a stable boolean)
-  const agent = agents.find((a) => a.name === agentName);
+  const agent = resolveAgentByName(agents, agentName);
   const agentExists = !!agent;
 
   // Reset PR state when agent changes

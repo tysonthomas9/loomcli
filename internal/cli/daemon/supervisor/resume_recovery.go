@@ -92,7 +92,7 @@ func (s *Supervisor) prepareCheckpointRetry(ap *AgentProcess, taskID string) {
 	s.sweepWorktreeBackends(ap)
 	// Drop the carried session so maybeResumeDaemonSession won't arm `--resume`;
 	// the agent then falls back to checkpoint injection for this task.
-	if err := cli.ClearLockClaudeSessionID(ap.WorktreePath); err != nil {
+	if err := cli.ClearStaleLockClaudeSessionID(ap.WorktreePath); err != nil {
 		slog.Warn("checkpoint retry: failed to clear carried session id",
 			"worktree", ap.Entry.Worktree, "task_id", taskID, "err", err)
 	}

@@ -679,11 +679,11 @@ func TestKillProcess_WithChildProcesses(t *testing.T) {
 		t.Error("parent process should not be running after kill")
 	}
 
-	// Verify no process in the group is still running.
-	// Sending signal 0 to the process group checks for existence.
-	err = syscall.Kill(-pid, 0)
-	if err != syscall.ESRCH {
-		t.Errorf("process group should not exist after kill, got err: %v", err)
+	// Verify no live process in the group is still running. On Linux, unreaped
+	// zombies can briefly keep kill(-pgid, 0) succeeding even though the group has
+	// no runnable members, so use the same live-member check as killProcess.
+	if processGroupHasLiveMember(pid) {
+		t.Error("process group should have no live members after kill")
 	}
 }
 

@@ -12,7 +12,6 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
 	"github.com/tysonthomas9/loomcli/internal/cli/git"
-	"github.com/tysonthomas9/loomcli/internal/lockfile"
 )
 
 // handleOrphanedTask decides whether to close or reopen an orphaned task
@@ -180,11 +179,8 @@ func killProcess(pid int) error {
 	}
 
 	// Wait up to 5 seconds for graceful exit
-	for i := 0; i < 50; i++ {
-		time.Sleep(100 * time.Millisecond)
-		if !lockfile.IsProcessRunning(pid) {
-			return nil
-		}
+	if waitForProcessGroupExit(pid, 5*time.Second) {
+		return nil
 	}
 
 	// Force kill the entire process group if still running
@@ -192,7 +188,37 @@ func killProcess(pid int) error {
 	if err == syscall.ESRCH {
 		return nil
 	}
-	return err
+	if err != nil {
+		return err
+	}
+	_ = waitForProcessGroupExit(pid, time.Second)
+	return nil
+}
+
+func waitForProcessGroupExit(pgid int, timeout time.Duration) bool {
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if !processGroupHasLiveMember(pgid) {
+			return true
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	return !processGroupHasLiveMember(pgid)
+}
+
+func processGroupHasLiveMember(pgid int) bool {
+	if pgid <= 0 {
+		return false
+	}
+	if live, ok := processGroupHasLiveMemberPlatform(pgid); ok {
+		return live
+	}
+	return processGroupSignalExists(pgid)
+}
+
+func processGroupSignalExists(pgid int) bool {
+	err := syscall.Kill(-pgid, 0)
+	return err == nil || err == syscall.EPERM
 }
 
 // confirmKill prompts the user to confirm killing the agent process
