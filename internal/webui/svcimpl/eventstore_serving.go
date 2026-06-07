@@ -68,6 +68,32 @@ func eventStoreSubagentEvents(store *sessions.Store, sessionID, subagentID strin
 	})
 }
 
+func eventStoreSubagentIDs(store *sessions.Store, sessionID string) ([]string, bool) {
+	if !serveFromEventStoreEnabled() {
+		return nil, false
+	}
+	envs, err := sessionEventStore(store, sessionID).Read()
+	if err != nil || len(envs) == 0 {
+		return nil, false
+	}
+	seen := make(map[string]struct{})
+	var out []string
+	for _, env := range envs {
+		if env.ParentSessionID == "" || env.HarnessSessionID == "" {
+			continue
+		}
+		if _, ok := seen[env.HarnessSessionID]; ok {
+			continue
+		}
+		seen[env.HarnessSessionID] = struct{}{}
+		out = append(out, env.HarnessSessionID)
+	}
+	if len(out) == 0 {
+		return nil, false
+	}
+	return out, true
+}
+
 func eventStoreEventsMatching(store *sessions.Store, sessionID string, keep func(hwtranscript.EventEnvelope) bool) ([]transcript.Event, bool) {
 	if !serveFromEventStoreEnabled() {
 		return nil, false

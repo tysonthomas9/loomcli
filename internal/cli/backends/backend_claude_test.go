@@ -304,6 +304,37 @@ func TestClaudeBackendInvokeNonInteractive(t *testing.T) {
 	}
 }
 
+func TestBuildClaudeResumeArgsArePositional(t *testing.T) {
+	got := buildClaudeNonInteractiveArgs("session-123", "prompt")
+	wantPrefix := []string{"--resume", "session-123"}
+	if len(got) < len(wantPrefix) {
+		t.Fatalf("args too short: %v", got)
+	}
+	for i, want := range wantPrefix {
+		if got[i] != want {
+			t.Fatalf("arg[%d] = %q, want %q; args=%v", i, got[i], want, got)
+		}
+	}
+	for _, arg := range got {
+		if arg == "--session-id" {
+			t.Fatalf("args contain invalid --session-id resume form: %v", got)
+		}
+	}
+}
+
+func TestBuildClaudeContinueSessionArgsArePositional(t *testing.T) {
+	got := buildClaudeContinueSessionArgs("session-123")
+	want := []string{"--resume", "session-123", "--dangerously-skip-permissions"}
+	if len(got) != len(want) {
+		t.Fatalf("args = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("arg[%d] = %q, want %q; args=%v", i, got[i], want[i], got)
+		}
+	}
+}
+
 // TestShutdownRace_NoSignalAfterExit verifies that no SIGTERM is sent when
 // the shutdown channel is triggered after the process has already exited.
 // This reproduces the race condition that the processGuard prevents:
@@ -698,8 +729,8 @@ func TestResolveMaxBudgetUSD_Default(t *testing.T) {
 	os.Unsetenv("LOOM_MAX_BUDGET_USD")
 
 	got := resolveMaxBudgetUSD()
-	if got != "5.00" {
-		t.Errorf("resolveMaxBudgetUSD() = %q, want %q", got, "5.00")
+	if got != "50.00" {
+		t.Errorf("resolveMaxBudgetUSD() = %q, want %q", got, "50.00")
 	}
 }
 
@@ -728,8 +759,8 @@ func TestResolveMaxBudgetUSD_Invalid(t *testing.T) {
 	t.Setenv("LOOM_MAX_BUDGET_USD", "abc")
 
 	got := resolveMaxBudgetUSD()
-	if got != "5.00" {
-		t.Errorf("resolveMaxBudgetUSD() = %q, want %q (default fallback)", got, "5.00")
+	if got != "50.00" {
+		t.Errorf("resolveMaxBudgetUSD() = %q, want %q (default fallback)", got, "50.00")
 	}
 }
 
@@ -738,8 +769,8 @@ func TestResolveMaxBudgetUSD_Negative(t *testing.T) {
 	t.Setenv("LOOM_MAX_BUDGET_USD", "-1")
 
 	got := resolveMaxBudgetUSD()
-	if got != "5.00" {
-		t.Errorf("resolveMaxBudgetUSD() = %q, want %q (default fallback)", got, "5.00")
+	if got != "50.00" {
+		t.Errorf("resolveMaxBudgetUSD() = %q, want %q (default fallback)", got, "50.00")
 	}
 }
 

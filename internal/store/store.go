@@ -29,6 +29,7 @@ type Store interface {
 	AgentLeases() AgentLeaseStore
 	AgentOwnershipLeases() AgentOwnershipLeaseStore
 	AgentCommands() AgentCommandStore
+	Workers() WorkerStore
 	Roles() RoleStore
 	Daemon() DaemonProfileStore
 	io.Closer

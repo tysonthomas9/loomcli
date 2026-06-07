@@ -406,6 +406,24 @@ func ClearLockClaudeSessionID(worktreePath string) error {
 	return err
 }
 
+// ClearStaleLockClaudeSessionID clears the carried Claude session UUID from a
+// dead-PID lock. This is for daemon recovery paths that intentionally preserve a
+// crash-remnant lock owned by the prior agent subprocess but need to force the
+// next acquisition to cold-start from checkpoint instead of --resume.
+func ClearStaleLockClaudeSessionID(worktreePath string) error {
+	err := UpdateLock(worktreePath, func(info *LockInfo) error {
+		if lockfile.IsProcessRunning(info.PID) {
+			return fmt.Errorf("lock belongs to running process (PID %d)", info.PID)
+		}
+		info.ClaudeSessionID = ""
+		return nil
+	})
+	if os.IsNotExist(err) {
+		return nil
+	}
+	return err
+}
+
 // GetLockStatus returns a human-readable status for a worktree's lock
 // Uses explicit state words: planning, working, done, review, idle
 func GetLockStatus(worktreePath string) string {

@@ -386,7 +386,8 @@ func (s *Supervisor) RecordAgentActivity(agentName string, at time.Time) {
 	target.Mu.Unlock()
 }
 
-// preFlightSetup runs recovery, assigns epic, creates session, and clears yield file.
+// preFlightSetup verifies the backend is spawnable, then runs recovery,
+// assigns epic, creates session, and clears yield file.
 //
 // Resume-first / checkpoint-fallback: when the worktree carries a genuine crash
 // remnant (a dead agent PID with a carried Claude session + task within TTL),
@@ -398,6 +399,10 @@ func (s *Supervisor) RecordAgentActivity(agentName string, at time.Time) {
 // attempt's diff injected) before finally cold-starting a fresh task. See
 // detectRecovery.
 func (s *Supervisor) preFlightSetup(ap *AgentProcess) bool {
+	if err := s.gateBackendAvailable(ap); err != nil {
+		return false
+	}
+
 	taskID, mode := s.detectRecovery(ap)
 	switch mode {
 	case recoverResume:
@@ -663,6 +668,24 @@ func (s *Supervisor) completeControlPlaneAgentSession(ap *AgentProcess, input ag
 		}
 	}
 	s.releaseAssignedTaskClaim(ap, input.taskID)
+	s.deregisterWorker(ap)
+}
+
+// deregisterWorker removes the agent's fleet-db worker registration on exit,
+// keyed by the claim actor (ap.Entry.Worktree). This is the graceful fast path:
+// it collapses the common stop/drain case to instant board cleanup and releases
+// any issue lock the worker still holds. Best-effort and idempotent — the
+// server-side worker TTL + sweeper are the backstop for non-graceful death.
+func (s *Supervisor) deregisterWorker(ap *AgentProcess) {
+	if s.ControlStore == nil || s.WorkspaceID == "" || ap.Entry.Worktree == "" {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), controlPlaneOperationTimeout)
+	defer cancel()
+	if err := s.ControlStore.Workers().Deregister(ctx, s.WorkspaceID, ap.Entry.Worktree); err != nil {
+		slog.Debug("supervisor worker deregister failed",
+			"workspace", s.WorkspaceID, "worker_id", ap.Entry.Worktree, "err", err)
+	}
 }
 
 // spawnAndWait spawns the agent and waits for it to exit. A spawn failure is
@@ -672,14 +695,12 @@ func (s *Supervisor) completeControlPlaneAgentSession(ap *AgentProcess, input ag
 func (s *Supervisor) spawnAndWait(ap *AgentProcess) {
 	if err := s.spawnAgent(ap); err != nil {
 		if errors.Is(err, ErrBackendUnavailable) {
-			// Gate fired before buildCommand: gateBackendAvailable already set
-			// the BackendUnavailable state/error, and no session or subprocess
-			// was created, so there's nothing to finalize. Release concurrency
-			// and return; the single restart decision parks the agent —
-			// shouldRestart treats BackendUnavailable as retry-without-budget-
-			// erosion and computeBackoff returns the fixed backend re-check
-			// interval. The loop re-runs the gate next iteration and
-			// auto-recovers once the binary reappears.
+			// gateBackendAvailable already set the BackendUnavailable state/error.
+			// The normal pre-flight gate runs before task claim, but this spawn-time
+			// gate remains as a race guard for a backend disappearing after claim and
+			// before exec. Clean up any already-created session/claim/worker before
+			// parking so the task is immediately claimable again.
+			s.completeBackendUnavailableCleanup(ap)
 			s.Concurrency.Release(ap.Entry.Role)
 			return
 		}
@@ -717,93 +738,6 @@ func (s *Supervisor) spawnAndWait(ap *AgentProcess) {
 	s.postMortemRecovery(ap, exitCode)
 	s.Concurrency.Release(ap.Entry.Role)
 	s.handleEpicTransition(ap)
-}
-
-type agentSessionFinalizeState struct {
-	session    *sessions.Session
-	sessionID  string
-	leaseID    string
-	leaseToken string
-	beforeRef  string
-}
-
-// finalizeAgentSession finalizes the daemon-created session after agent exit.
-func (s *Supervisor) finalizeAgentSession(ap *AgentProcess, exitCode int) {
-	state := takeAgentSessionForFinalize(ap)
-	if state.session == nil && state.sessionID == "" {
-		return
-	}
-	taskID := s.taskIDForFinalize(ap)
-	errClass := agentErrorClass(ap)
-	diffResult := finalizeLocalSession(state.session, ap, state.beforeRef, taskID, exitCode, errClass)
-	s.completeControlPlaneAgentSession(ap, agentSessionCompletionInput{
-		sessionID:  state.sessionID,
-		leaseID:    state.leaseID,
-		leaseToken: state.leaseToken,
-		exitCode:   exitCode,
-		errClass:   errClass,
-		taskID:     taskID,
-		diffResult: diffResult,
-	})
-}
-
-func takeAgentSessionForFinalize(ap *AgentProcess) agentSessionFinalizeState {
-	ap.Mu.Lock()
-	state := agentSessionFinalizeState{
-		session:    ap.Session,
-		sessionID:  ap.AgentSessionID,
-		leaseID:    ap.AgentLeaseID,
-		leaseToken: ap.AgentLeaseToken,
-		beforeRef:  ap.BeforeRef,
-	}
-	ap.Session = nil
-	ap.AgentSessionID = ""
-	ap.AgentLeaseID = ""
-	ap.AgentLeaseToken = ""
-	ap.Mu.Unlock()
-	return state
-}
-
-func (s *Supervisor) taskIDForFinalize(ap *AgentProcess) string {
-	taskID := ""
-	if info, lockErr := cli.ReadLockFile(ap.WorktreePath); lockErr == nil {
-		taskID = info.TaskID
-	}
-	if taskID == "" {
-		taskID = s.taskIDForLifecycle(ap, nil)
-	}
-	return taskID
-}
-
-func agentErrorClass(ap *AgentProcess) string {
-	ap.Mu.Lock()
-	errClass := ""
-	if ap.LastError != nil {
-		errClass = ap.LastError.Class.String()
-	}
-	ap.Mu.Unlock()
-	return errClass
-}
-
-func finalizeLocalSession(
-	sess *sessions.Session,
-	ap *AgentProcess,
-	beforeRef string,
-	taskID string,
-	exitCode int,
-	errClass string,
-) sessionfinalize.WithWorktreeResult {
-	result, err := sessionfinalize.WithWorktree(sess, sessionfinalize.WithWorktreeOptions{
-		WorktreePath: ap.WorktreePath,
-		BeforeRef:    beforeRef,
-		TaskID:       taskID,
-		ExitCode:     exitCode,
-		ErrorClass:   errClass,
-	})
-	if err != nil {
-		slog.Warn("session finalization failed", "worktree", ap.Entry.Worktree, "err", err)
-	}
-	return result
 }
 
 // postMortemRecovery runs recovery after agent exit, skipping for yield exits.

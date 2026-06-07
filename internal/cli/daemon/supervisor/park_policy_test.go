@@ -156,6 +156,33 @@ func TestShouldRestart_FastFailClasses(t *testing.T) {
 	}
 }
 
+// TestShouldRestart_FailoverExhausted_FastFails verifies the caller's fallback
+// attempt is authoritative: if shouldRestart sees a failover-only class, there
+// was no fallback left, so the agent must stop immediately instead of retrying
+// the same deterministic bad backend.
+func TestShouldRestart_FailoverExhausted_FastFails(t *testing.T) {
+	maxRetries := 3
+	s := newTestSupervisorWithConfig(&config.DaemonConfig{
+		Daemon: config.DaemonSettings{RestartPolicy: config.RestartPolicy{MaxRetries: &maxRetries}},
+	})
+	ap := &AgentProcess{
+		Entry:        config.AgentEntry{Worktree: "wt"},
+		LastExitCode: 1,
+		LastStart:    time.Now(),
+		LastError:    &agenterr.AgentError{Class: agenterr.OutcomeFromHarness(wrapper.ErrModelNotFound)},
+	}
+
+	if s.shouldRestart(ap) {
+		t.Fatal("shouldRestart = true for exhausted ModelNotFound failover, want false")
+	}
+	if ap.StopReason != StopReasonFastFail {
+		t.Errorf("StopReason = %q, want %q", ap.StopReason, StopReasonFastFail)
+	}
+	if ap.RestartCount != 0 {
+		t.Errorf("RestartCount = %d, want 0 (no retry-in-place for failover-only errors)", ap.RestartCount)
+	}
+}
+
 // TestShouldRestart_Fatal_StillStops_NotParked is the critical regression
 // guard: a fatal error (auth/billing) must stop the agent even when the
 // budget is well past exhausted — park must never swallow a fatal.
