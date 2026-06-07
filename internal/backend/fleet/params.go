@@ -303,10 +303,14 @@ func updateParamsToPatchRequest(params backend.UpdateParams) map[string]interfac
 //
 // Dropped (no equivalent on fleet-db's CreateIssueRequest):
 //   - id, acceptance_criteria, created_by, external_ref,
-//     estimated_minutes, dependencies
+//     estimated_minutes
 //
 // If any of those need round-tripping, file a fleet-db ticket to extend
 // the CreateIssueRequest schema rather than smuggling them through here.
+//
+// Dependencies are intentionally absent here too: they are not part of the
+// create body. Create composes them after the issue exists via the dedicated
+// POST /issues/{id}/deps endpoint (see addCreateDependencies).
 func createParamsToBody(params backend.CreateParams) map[string]interface{} {
 	req := make(map[string]interface{})
 	setNonEmptyStr(req, "title", params.Title)

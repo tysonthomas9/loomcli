@@ -524,6 +524,11 @@ func (b *FleetBackend) Create(ctx context.Context, params backend.CreateParams) 
 		return nil, backend.ErrInternal("Create", "unmarshal response", err)
 	}
 	result := issueToData(&issue)
+	if err := b.addCreateDependencies(ctx, result.ID, params.Dependencies); err != nil {
+		// The issue itself was created; return it alongside the error so
+		// callers that inspect the partial result can still see the ID.
+		return &result, err
+	}
 	return &result, nil
 }
 
