@@ -142,24 +142,12 @@ func TestClassifyClaude(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			result := classifyClaude(tt.log)
-			if tt.wantClass == Unknown && tt.log == "" {
-				if result != nil {
-					t.Errorf("expected nil for empty log, got %v", result)
-				}
-				return
+			aerr := ClassifyFromOutput(tt.log, tt.exitCode, "claude")
+			if aerr.Class != tt.wantClass {
+				t.Errorf("class = %s, want %s", aerr.Class, tt.wantClass)
 			}
-			if tt.wantClass == Unknown && result == nil {
-				return
-			}
-			if result == nil {
-				t.Fatalf("expected class %s, got nil", tt.wantClass)
-			}
-			if result.Class != tt.wantClass {
-				t.Errorf("class = %s, want %s", result.Class, tt.wantClass)
-			}
-			if result.RetryAfter != tt.wantRetry {
-				t.Errorf("retryAfter = %v, want %v", result.RetryAfter, tt.wantRetry)
+			if aerr.RetryAfter != tt.wantRetry {
+				t.Errorf("retryAfter = %v, want %v", aerr.RetryAfter, tt.wantRetry)
 			}
 		})
 	}
@@ -276,18 +264,12 @@ func TestClassifyCodex(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			result := classifyCodex(tt.log)
-			if tt.wantClass == Unknown && result == nil {
-				return
+			aerr := ClassifyFromOutput(tt.log, tt.exitCode, "codex")
+			if aerr.Class != tt.wantClass {
+				t.Errorf("class = %s, want %s", aerr.Class, tt.wantClass)
 			}
-			if result == nil {
-				t.Fatalf("expected class %s, got nil", tt.wantClass)
-			}
-			if result.Class != tt.wantClass {
-				t.Errorf("class = %s, want %s", result.Class, tt.wantClass)
-			}
-			if result.RetryAfter != tt.wantRetry {
-				t.Errorf("retryAfter = %v, want %v", result.RetryAfter, tt.wantRetry)
+			if aerr.RetryAfter != tt.wantRetry {
+				t.Errorf("retryAfter = %v, want %v", aerr.RetryAfter, tt.wantRetry)
 			}
 		})
 	}
@@ -370,18 +352,12 @@ func TestClassifyOpenCode(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			result := classifyOpenCode(tt.log)
-			if tt.wantClass == Unknown && result == nil {
-				return
+			aerr := ClassifyFromOutput(tt.log, tt.exitCode, "opencode")
+			if aerr.Class != tt.wantClass {
+				t.Errorf("class = %s, want %s", aerr.Class, tt.wantClass)
 			}
-			if result == nil {
-				t.Fatalf("expected class %s, got nil", tt.wantClass)
-			}
-			if result.Class != tt.wantClass {
-				t.Errorf("class = %s, want %s", result.Class, tt.wantClass)
-			}
-			if result.RetryAfter != tt.wantRetry {
-				t.Errorf("retryAfter = %v, want %v", result.RetryAfter, tt.wantRetry)
+			if aerr.RetryAfter != tt.wantRetry {
+				t.Errorf("retryAfter = %v, want %v", aerr.RetryAfter, tt.wantRetry)
 			}
 		})
 	}
@@ -457,18 +433,12 @@ func TestClassifyGemini(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			result := classifyGemini(tt.log)
-			if tt.wantClass == Unknown && result == nil {
-				return
+			aerr := ClassifyFromOutput(tt.log, tt.exitCode, "gemini")
+			if aerr.Class != tt.wantClass {
+				t.Errorf("class = %s, want %s", aerr.Class, tt.wantClass)
 			}
-			if result == nil {
-				t.Fatalf("expected class %s, got nil", tt.wantClass)
-			}
-			if result.Class != tt.wantClass {
-				t.Errorf("class = %s, want %s", result.Class, tt.wantClass)
-			}
-			if result.RetryAfter != tt.wantRetry {
-				t.Errorf("retryAfter = %v, want %v", result.RetryAfter, tt.wantRetry)
+			if aerr.RetryAfter != tt.wantRetry {
+				t.Errorf("retryAfter = %v, want %v", aerr.RetryAfter, tt.wantRetry)
 			}
 		})
 	}
@@ -544,18 +514,12 @@ func TestClassifyCursor(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			result := classifyCursor(tt.log)
-			if tt.wantClass == Unknown && result == nil {
-				return
+			aerr := ClassifyFromOutput(tt.log, tt.exitCode, "cursor")
+			if aerr.Class != tt.wantClass {
+				t.Errorf("class = %s, want %s", aerr.Class, tt.wantClass)
 			}
-			if result == nil {
-				t.Fatalf("expected class %s, got nil", tt.wantClass)
-			}
-			if result.Class != tt.wantClass {
-				t.Errorf("class = %s, want %s", result.Class, tt.wantClass)
-			}
-			if result.RetryAfter != tt.wantRetry {
-				t.Errorf("retryAfter = %v, want %v", result.RetryAfter, tt.wantRetry)
+			if aerr.RetryAfter != tt.wantRetry {
+				t.Errorf("retryAfter = %v, want %v", aerr.RetryAfter, tt.wantRetry)
 			}
 		})
 	}
