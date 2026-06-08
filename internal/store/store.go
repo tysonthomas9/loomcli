@@ -37,6 +37,7 @@ type Store interface {
 	DriverRuns() DriverRunStore
 	DriverSteps() DriverStepStore
 	TaskRuns() TaskRunStore
+	Workers() WorkerStore
 	Roles() RoleStore
 	Daemon() DaemonProfileStore
 	io.Closer

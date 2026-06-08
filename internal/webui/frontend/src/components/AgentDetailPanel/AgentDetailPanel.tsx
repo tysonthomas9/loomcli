@@ -23,7 +23,7 @@ import {
   LAYER_AGENT_PANEL,
 } from "@/hooks";
 import type { LoomAgentStatus, LoomTaskInfo } from "@/types";
-import { parseLoomStatus } from "@/types";
+import { parseLoomStatus, resolveAgentByName } from "@/types";
 
 const FileEditorPanel = lazy(() =>
   import("@/components/FileEditorPanel").then((m) => ({
@@ -117,7 +117,7 @@ export function AgentDetailPanel({
 
   // Find the agent from the array
   const monitorAgent = agentName
-    ? agents.find((a) => a.name === agentName)
+    ? resolveAgentByName(agents, agentName)
     : undefined;
   const workspaceAgent = agentName ? getAgentByName(agentName) : undefined;
   const agent =

@@ -3,6 +3,8 @@ package supervisor
 import (
 	"context"
 
+	"github.com/olesho/harness-wrapper/pkg/wrapper"
+
 	"github.com/tysonthomas9/loomcli/internal/agenterr"
 	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
 
@@ -55,19 +57,19 @@ func errorTypeFromAgentErr(e *agenterr.AgentError) string {
 	if e == nil {
 		return "unknown"
 	}
-	switch e.Class {
-	case agenterr.Timeout:
+	switch {
+	case e.Class.IsClass(wrapper.ErrTimeout):
 		return "timeout"
-	case agenterr.RateLimited:
+	case e.Class.IsClass(wrapper.ErrRateLimited):
 		return "rate_limited"
-	case agenterr.NoWork:
+	case e.Class.Is(agenterr.NoWorkOutcome):
 		return "no_work"
-	case agenterr.Unknown:
+	case e.Class.IsClass(wrapper.ErrUnknown):
 		return "unknown"
 	default:
-		// agenterr.ErrorClass.String() values are bounded by the agenterr
-		// package, so this stays low-cardinality even for classes we don't
-		// have explicit cases for here.
+		// agenterr.Outcome.String() values are bounded (canonical wire names),
+		// so this stays low-cardinality even for classes we don't have
+		// explicit cases for here.
 		return e.Class.String()
 	}
 }

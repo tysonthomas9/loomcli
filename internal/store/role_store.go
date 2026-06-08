@@ -16,6 +16,7 @@ type RoleCreate struct {
 	Model          string
 	TaskFilter     string
 	Backend        string
+	Effort         string
 	PathPatterns   []string
 	Skills         []string
 	MaxPriority    *int
@@ -33,6 +34,7 @@ type RoleUpdate struct {
 	Model          *string
 	TaskFilter     *string
 	Backend        *string
+	Effort         *string
 	PathPatterns   *[]string
 	Skills         *[]string
 	MaxPriority    **int

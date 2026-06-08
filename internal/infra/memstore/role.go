@@ -44,6 +44,7 @@ func (s *roleStore) Create(_ context.Context, in store.RoleCreate) (*domain.Role
 		Model:          in.Model,
 		TaskFilter:     in.TaskFilter,
 		Backend:        in.Backend,
+		Effort:         in.Effort,
 		PathPatterns:   append([]string(nil), in.PathPatterns...),
 		Skills:         append([]string(nil), in.Skills...),
 		MaxPriority:    clonePtr(in.MaxPriority),
@@ -102,6 +103,9 @@ func (s *roleStore) Update(_ context.Context, ws, name string, patch store.RoleU
 	}
 	if patch.Backend != nil {
 		r.Backend = *patch.Backend
+	}
+	if patch.Effort != nil {
+		r.Effort = *patch.Effort
 	}
 	if patch.PathPatterns != nil {
 		r.PathPatterns = append([]string(nil), (*patch.PathPatterns)...)

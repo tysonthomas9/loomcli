@@ -32,6 +32,7 @@ type Store struct {
 	runs       *driverRunStore
 	steps      *driverStepStore
 	taskRuns   *taskRunStore
+	workers    *workerStore
 	roles      *roleStore
 	daemon     *daemonStore
 }
@@ -74,6 +75,7 @@ func New() *Store {
 		runs:       runs,
 		steps:      steps,
 		taskRuns:   taskRuns,
+		workers:    newWorkerStore(),
 		roles:      roles,
 		daemon:     newDaemonStore(),
 	}
@@ -129,6 +131,9 @@ func (s *Store) DriverRuns() store.DriverRunStore { return s.runs }
 func (s *Store) DriverSteps() store.DriverStepStore { return s.steps }
 
 func (s *Store) TaskRuns() store.TaskRunStore { return s.taskRuns }
+
+// Workers returns the WorkerStore.
+func (s *Store) Workers() store.WorkerStore { return s.workers }
 
 // Roles returns the RoleStore.
 func (s *Store) Roles() store.RoleStore { return s.roles }

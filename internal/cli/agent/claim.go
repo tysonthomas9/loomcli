@@ -20,6 +20,8 @@ var claimCmd = &cobra.Command{
 
 This command is called after an agent claims a task through Loom. It updates
 the lock file so that 'loom monitor' can show which task each agent is working on.
+The lock-file update is bookkeeping for 'loom monitor'; failures do not affect
+the actual task claim.
 
 Arguments:
   task-id    The Loom task ID (e.g., loomcli-487 or loomcli-abc.1)
@@ -47,10 +49,13 @@ func runClaim(cmd *cobra.Command, args []string) {
 	// Resolve the task title through the active issue backend.
 	taskTitle := getTaskTitle(taskID)
 
-	// Update the lock file
+	// Update the lock file. Best-effort: the lock file is bookkeeping for
+	// 'loom monitor' only — the actual task claim is owned by the daemon/
+	// server, so a failure here must not read as a failed claim (and exiting
+	// non-zero made harness sessions treat exactly that way).
 	if err := cli.UpdateLockTask(cwd, taskID, taskTitle); err != nil {
-		fmt.Fprintf(os.Stderr, "Error updating lock: %v\n", err)
-		cli.ExitWithFlush(1)
+		fmt.Fprintf(os.Stderr, "[claim] note: could not record the task in the agent lock file (%v) - "+
+			"this is monitor bookkeeping only; the task claim itself is owned by the daemon/server and is unaffected\n", err)
 	}
 
 	// Emit task_claimed event (best-effort)
