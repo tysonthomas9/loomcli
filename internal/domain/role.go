@@ -14,6 +14,7 @@ type Role struct {
 	Model          string   `json:"model,omitempty"`
 	TaskFilter     string   `json:"task_filter,omitempty"`
 	Backend        string   `json:"backend,omitempty"`
+	Effort         string   `json:"effort,omitempty"`
 	PathPatterns   []string `json:"path_patterns,omitempty"`
 	Skills         []string `json:"skills,omitempty"`
 	MaxPriority    *int     `json:"max_priority,omitempty"`

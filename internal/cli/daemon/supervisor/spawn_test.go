@@ -84,6 +84,33 @@ func TestAppendRoleEnv_MaxBudgetUSD(t *testing.T) {
 	})
 }
 
+func TestAppendRoleEnv_Effort(t *testing.T) {
+	t.Parallel()
+
+	ap := &AgentProcess{
+		RoleConfig: cfgpkg.RoleConfig{
+			Effort: "max",
+		},
+	}
+
+	env := appendRoleEnv(nil, ap)
+
+	want := map[string]bool{
+		"LOOM_AGENT_EFFORT=max":  false,
+		"LOOM_CLAUDE_EFFORT=max": false,
+	}
+	for _, entry := range env {
+		if _, ok := want[entry]; ok {
+			want[entry] = true
+		}
+	}
+	for entry, found := range want {
+		if !found {
+			t.Fatalf("expected %s in env, got %v", entry, env)
+		}
+	}
+}
+
 func TestAppendSessionEnvConcurrentLeaseAccess(t *testing.T) {
 	ap := &AgentProcess{}
 
