@@ -21,6 +21,7 @@ type roleWire struct {
 	Model          string    `json:"model,omitempty"`
 	TaskFilter     string    `json:"task_filter,omitempty"`
 	Backend        string    `json:"backend,omitempty"`
+	Effort         string    `json:"effort,omitempty"`
 	PathPatterns   []string  `json:"path_patterns,omitempty"`
 	Skills         []string  `json:"skills,omitempty"`
 	MaxPriority    *int      `json:"max_priority,omitempty"`
@@ -42,6 +43,7 @@ func (r roleWire) toDomain() *domain.Role {
 		Model:          r.Model,
 		TaskFilter:     r.TaskFilter,
 		Backend:        r.Backend,
+		Effort:         r.Effort,
 		PathPatterns:   r.PathPatterns,
 		Skills:         r.Skills,
 		MaxPriority:    r.MaxPriority,
@@ -63,6 +65,7 @@ func (s *roleStore) Create(ctx context.Context, in store.RoleCreate) (*domain.Ro
 		Model          string   `json:"model,omitempty"`
 		TaskFilter     string   `json:"task_filter,omitempty"`
 		Backend        string   `json:"backend,omitempty"`
+		Effort         string   `json:"effort,omitempty"`
 		PathPatterns   []string `json:"path_patterns,omitempty"`
 		Skills         []string `json:"skills,omitempty"`
 		MaxPriority    *int     `json:"max_priority,omitempty"`
@@ -78,6 +81,7 @@ func (s *roleStore) Create(ctx context.Context, in store.RoleCreate) (*domain.Ro
 		Model:          in.Model,
 		TaskFilter:     in.TaskFilter,
 		Backend:        in.Backend,
+		Effort:         in.Effort,
 		PathPatterns:   in.PathPatterns,
 		Skills:         in.Skills,
 		MaxPriority:    in.MaxPriority,
@@ -129,6 +133,7 @@ func (s *roleStore) Update(ctx context.Context, ws, name string, patch store.Rol
 		Model             *string   `json:"model,omitempty"`
 		TaskFilter        *string   `json:"task_filter,omitempty"`
 		Backend           *string   `json:"backend,omitempty"`
+		Effort            *string   `json:"effort,omitempty"`
 		PathPatterns      *[]string `json:"path_patterns,omitempty"`
 		Skills            *[]string `json:"skills,omitempty"`
 		MaxPriority       *int      `json:"max_priority,omitempty"`
@@ -146,6 +151,7 @@ func (s *roleStore) Update(ctx context.Context, ws, name string, patch store.Rol
 		Model:        patch.Model,
 		TaskFilter:   patch.TaskFilter,
 		Backend:      patch.Backend,
+		Effort:       patch.Effort,
 		PathPatterns: patch.PathPatterns,
 		Skills:       patch.Skills,
 		ReadOnly:     patch.ReadOnly,

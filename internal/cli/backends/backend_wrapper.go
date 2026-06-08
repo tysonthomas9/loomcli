@@ -28,6 +28,7 @@ type harnessInvocation struct {
 	Env         []string
 	Prompt      string
 	HarnessName string // wrapper.Config.Harness; "" picks the generic classifier
+	Effort      string // wrapper.Config.Effort; "" leaves the harness default
 	LineHandler func(string)
 	RetryPolicy harness.RetryPolicy
 
@@ -88,6 +89,7 @@ func runHarness(parent context.Context, shutdown <-chan struct{}, inv harnessInv
 			Stdin:      io.NopCloser(strings.NewReader(inv.Prompt)),
 			Stdout:     pw,
 			Harness:    inv.HarnessName,
+			Effort:     inv.Effort,
 		},
 		// Transcript acquisition, gated by env flags (default Off ⇒ no behavior
 		// change). When enabled, harness.Run drives StreamParse/Hooks and emits
