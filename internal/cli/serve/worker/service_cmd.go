@@ -322,87 +322,109 @@ func printAgentService(svc *domain.AgentService) {
 	}
 }
 
+type agentServicePatchBuilder func(value string, unset bool) (store.AgentServiceUpdate, error)
+
+var agentServicePatchBuilders = map[string]agentServicePatchBuilder{
+	"name":             agentServiceRequiredStringPatch("name", func(p *store.AgentServiceUpdate, v string) { p.Name = &v }),
+	"role_name":        agentServiceRequiredStringPatch("role_name", func(p *store.AgentServiceUpdate, v string) { p.RoleName = &v }),
+	"profile_name":     agentServiceStringPatch(func(p *store.AgentServiceUpdate, v string) { p.ProfileName = &v }),
+	"schedule_id":      agentServiceStringPatch(func(p *store.AgentServiceUpdate, v string) { p.ScheduleID = &v }),
+	"placement_policy": agentServiceStringPatch(func(p *store.AgentServiceUpdate, v string) { p.PlacementPolicy = &v }),
+	"lease_id":         agentServiceStringPatch(func(p *store.AgentServiceUpdate, v string) { p.LeaseID = &v }),
+	"restart_policy":   agentServiceStringPatch(func(p *store.AgentServiceUpdate, v string) { p.RestartPolicy = &v }),
+	"budget_policy":    agentServiceStringPatch(func(p *store.AgentServiceUpdate, v string) { p.BudgetPolicy = &v }),
+	"state_ref":        agentServiceStringPatch(func(p *store.AgentServiceUpdate, v string) { p.StateRef = &v }),
+	"event_sources":    agentServiceListPatch(func(p *store.AgentServiceUpdate, v []string) { p.EventSources = &v }),
+	"trigger_refs":     agentServiceListPatch(func(p *store.AgentServiceUpdate, v []string) { p.TriggerRefs = &v }),
+	"permissions":      agentServiceListPatch(func(p *store.AgentServiceUpdate, v []string) { p.Permissions = &v }),
+	"kind":             buildAgentServiceKindPatch,
+	"desired_state":    buildAgentServiceDesiredStatePatch,
+	"max_instances":    buildAgentServiceMaxInstancesPatch,
+	"metadata":         buildAgentServiceMetadataPatch,
+}
+
 func buildAgentServicePatch(key, value string, unset bool) (store.AgentServiceUpdate, error) {
-	var patch store.AgentServiceUpdate
-	switch key {
-	case "name":
-		if unset {
-			return patch, fmt.Errorf("name cannot be unset")
-		}
-		patch.Name = &value
-	case "kind":
-		if unset {
-			return patch, fmt.Errorf("kind cannot be unset")
-		}
-		kind, err := parseAgentServiceKind(value)
-		if err != nil {
-			return patch, err
-		}
-		patch.Kind = &kind
-	case "desired_state":
-		if unset {
-			return patch, fmt.Errorf("desired_state cannot be unset")
-		}
-		state, err := parseAgentServiceDesiredState(value, false)
-		if err != nil {
-			return patch, err
-		}
-		patch.DesiredState = &state
-	case "role_name":
-		if unset {
-			return patch, fmt.Errorf("role_name cannot be unset")
-		}
-		patch.RoleName = &value
-	case "profile_name":
-		patch.ProfileName = &value
-	case "schedule_id":
-		patch.ScheduleID = &value
-	case "placement_policy":
-		patch.PlacementPolicy = &value
-	case "max_instances":
-		if unset {
-			return patch, fmt.Errorf("max_instances cannot be unset")
-		}
-		n, err := strconv.Atoi(value)
-		if err != nil {
-			return patch, fmt.Errorf("max_instances must be an integer: %w", err)
-		}
-		if n < 1 {
-			return patch, fmt.Errorf("max_instances must be positive")
-		}
-		patch.MaxInstances = &n
-	case "lease_id":
-		patch.LeaseID = &value
-	case "restart_policy":
-		patch.RestartPolicy = &value
-	case "budget_policy":
-		patch.BudgetPolicy = &value
-	case "state_ref":
-		patch.StateRef = &value
-	case "event_sources":
-		list := splitWorkerProfileList(value)
-		patch.EventSources = &list
-	case "trigger_refs":
-		list := splitWorkerProfileList(value)
-		patch.TriggerRefs = &list
-	case "permissions":
-		list := splitWorkerProfileList(value)
-		patch.Permissions = &list
-	case "metadata":
-		if unset {
-			metadata := map[string]string{}
-			patch.Metadata = &metadata
-			return patch, nil
-		}
-		metadata, err := parseWorkerProfileMetadata(strings.Split(value, ","))
-		if err != nil {
-			return patch, err
-		}
-		patch.Metadata = &metadata
-	default:
-		return patch, fmt.Errorf("unsupported agent service field %q", key)
+	builder, ok := agentServicePatchBuilders[key]
+	if !ok {
+		return store.AgentServiceUpdate{}, fmt.Errorf("unsupported agent service field %q", key)
 	}
-	return patch, nil
+	return builder(value, unset)
+}
+
+func agentServiceRequiredStringPatch(field string, set func(*store.AgentServiceUpdate, string)) agentServicePatchBuilder {
+	return func(value string, unset bool) (store.AgentServiceUpdate, error) {
+		if unset {
+			return store.AgentServiceUpdate{}, fmt.Errorf("%s cannot be unset", field)
+		}
+		var patch store.AgentServiceUpdate
+		set(&patch, value)
+		return patch, nil
+	}
+}
+
+func agentServiceStringPatch(set func(*store.AgentServiceUpdate, string)) agentServicePatchBuilder {
+	return func(value string, _ bool) (store.AgentServiceUpdate, error) {
+		var patch store.AgentServiceUpdate
+		set(&patch, value)
+		return patch, nil
+	}
+}
+
+func agentServiceListPatch(set func(*store.AgentServiceUpdate, []string)) agentServicePatchBuilder {
+	return func(value string, _ bool) (store.AgentServiceUpdate, error) {
+		var patch store.AgentServiceUpdate
+		list := splitWorkerProfileList(value)
+		set(&patch, list)
+		return patch, nil
+	}
+}
+
+func buildAgentServiceKindPatch(value string, unset bool) (store.AgentServiceUpdate, error) {
+	if unset {
+		return store.AgentServiceUpdate{}, fmt.Errorf("kind cannot be unset")
+	}
+	kind, err := parseAgentServiceKind(value)
+	if err != nil {
+		return store.AgentServiceUpdate{}, err
+	}
+	return store.AgentServiceUpdate{Kind: &kind}, nil
+}
+
+func buildAgentServiceDesiredStatePatch(value string, unset bool) (store.AgentServiceUpdate, error) {
+	if unset {
+		return store.AgentServiceUpdate{}, fmt.Errorf("desired_state cannot be unset")
+	}
+	state, err := parseAgentServiceDesiredState(value, false)
+	if err != nil {
+		return store.AgentServiceUpdate{}, err
+	}
+	return store.AgentServiceUpdate{DesiredState: &state}, nil
+}
+
+func buildAgentServiceMaxInstancesPatch(value string, unset bool) (store.AgentServiceUpdate, error) {
+	if unset {
+		return store.AgentServiceUpdate{}, fmt.Errorf("max_instances cannot be unset")
+	}
+	n, err := strconv.Atoi(value)
+	if err != nil {
+		return store.AgentServiceUpdate{}, fmt.Errorf("max_instances must be an integer: %w", err)
+	}
+	if n < 1 {
+		return store.AgentServiceUpdate{}, fmt.Errorf("max_instances must be positive")
+	}
+	return store.AgentServiceUpdate{MaxInstances: &n}, nil
+}
+
+func buildAgentServiceMetadataPatch(value string, unset bool) (store.AgentServiceUpdate, error) {
+	if unset {
+		metadata := map[string]string{}
+		return store.AgentServiceUpdate{Metadata: &metadata}, nil
+	}
+	metadata, err := parseWorkerProfileMetadata(strings.Split(value, ","))
+	if err != nil {
+		return store.AgentServiceUpdate{}, err
+	}
+	return store.AgentServiceUpdate{Metadata: &metadata}, nil
 }
 
 func parseAgentServiceKind(raw string) (domain.AgentServiceKind, error) {

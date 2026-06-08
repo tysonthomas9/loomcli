@@ -113,15 +113,12 @@ func (s *artifactStore) Create(_ context.Context, in store.ArtifactCreate) (*dom
 	if s.items[in.WorkspaceKey] == nil {
 		s.items[in.WorkspaceKey] = make(map[string]*domain.Artifact)
 	}
-	now := time.Now().UTC()
-	durableStatus := in.DurableStatus
-	if durableStatus == "" {
-		if in.URI == "" {
-			durableStatus = "declared"
-		} else {
-			durableStatus = "finalized"
-		}
-	}
+	artifact := newArtifactMem(in, time.Now().UTC())
+	s.items[in.WorkspaceKey][in.ArtifactID] = artifact
+	return cloneArtifact(artifact), nil
+}
+
+func newArtifactMem(in store.ArtifactCreate, now time.Time) *domain.Artifact {
 	artifact := &domain.Artifact{
 		WorkspaceKey:    in.WorkspaceKey,
 		ArtifactID:      in.ArtifactID,
@@ -140,22 +137,35 @@ func (s *artifactStore) Create(_ context.Context, in store.ArtifactCreate) (*dom
 		ContentHash:     in.ContentHash,
 		Visibility:      in.Visibility,
 		RedactionStatus: in.RedactionStatus,
-		DurableStatus:   durableStatus,
+		DurableStatus:   defaultArtifactDurableStatusMem(in),
 		Metadata:        cloneMap(in.Metadata),
 		CreatedAt:       now,
 		UpdatedAt:       now,
 	}
+	normalizeArtifactHashesMem(artifact)
+	if artifact.DurableStatus == "finalized" {
+		artifact.FinalizedAt = &now
+	}
+	return artifact
+}
+
+func defaultArtifactDurableStatusMem(in store.ArtifactCreate) string {
+	if in.DurableStatus != "" {
+		return in.DurableStatus
+	}
+	if in.URI == "" {
+		return "declared"
+	}
+	return "finalized"
+}
+
+func normalizeArtifactHashesMem(artifact *domain.Artifact) {
 	if artifact.ContentHash == "" {
 		artifact.ContentHash = artifact.Checksum
 	}
 	if artifact.Checksum == "" {
 		artifact.Checksum = artifact.ContentHash
 	}
-	if artifact.DurableStatus == "finalized" {
-		artifact.FinalizedAt = &now
-	}
-	s.items[in.WorkspaceKey][in.ArtifactID] = artifact
-	return cloneArtifact(artifact), nil
 }
 
 func (s *artifactStore) Get(_ context.Context, ws, artifactID string) (*domain.Artifact, error) {
@@ -254,15 +264,17 @@ func (s *artifactStore) Update(_ context.Context, ws, artifactID string, patch s
 	if !ok {
 		return nil, fmt.Errorf("artifact %q in workspace %q: %w", artifactID, ws, domain.ErrNotFound)
 	}
-	if patch.Summary != nil {
-		artifact.Summary = *patch.Summary
-	}
-	if patch.Metadata != nil {
-		artifact.Metadata = cloneMap(*patch.Metadata)
-	}
-	if patch.URI != nil {
-		artifact.URI = *patch.URI
-	}
+	applyArtifactUpdateMem(artifact, patch, time.Now().UTC())
+	return cloneArtifact(artifact), nil
+}
+
+func applyArtifactUpdateMem(artifact *domain.Artifact, patch store.ArtifactUpdate, now time.Time) {
+	applyArtifactOwnershipUpdateMem(artifact, patch)
+	applyArtifactContentUpdateMem(artifact, patch)
+	applyArtifactLifecycleUpdateMem(artifact, patch, now)
+}
+
+func applyArtifactOwnershipUpdateMem(artifact *domain.Artifact, patch store.ArtifactUpdate) {
 	if patch.AgentID != nil {
 		artifact.AgentID = *patch.AgentID
 	}
@@ -284,6 +296,18 @@ func (s *artifactStore) Update(_ context.Context, ws, artifactID string, patch s
 	if patch.Type != nil {
 		artifact.Type = *patch.Type
 	}
+}
+
+func applyArtifactContentUpdateMem(artifact *domain.Artifact, patch store.ArtifactUpdate) {
+	if patch.Summary != nil {
+		artifact.Summary = *patch.Summary
+	}
+	if patch.Metadata != nil {
+		artifact.Metadata = cloneMap(*patch.Metadata)
+	}
+	if patch.URI != nil {
+		artifact.URI = *patch.URI
+	}
 	if patch.MIMEType != nil {
 		artifact.MIMEType = *patch.MIMEType
 	}
@@ -296,6 +320,9 @@ func (s *artifactStore) Update(_ context.Context, ws, artifactID string, patch s
 	if patch.ContentHash != nil {
 		artifact.ContentHash = *patch.ContentHash
 	}
+}
+
+func applyArtifactLifecycleUpdateMem(artifact *domain.Artifact, patch store.ArtifactUpdate, now time.Time) {
 	if patch.Visibility != nil {
 		artifact.Visibility = *patch.Visibility
 	}
@@ -309,18 +336,12 @@ func (s *artifactStore) Update(_ context.Context, ws, artifactID string, patch s
 		finalizedAt := *patch.FinalizedAt
 		artifact.FinalizedAt = &finalizedAt
 	}
-	artifact.UpdatedAt = time.Now().UTC()
-	if artifact.ContentHash == "" {
-		artifact.ContentHash = artifact.Checksum
-	}
-	if artifact.Checksum == "" {
-		artifact.Checksum = artifact.ContentHash
-	}
+	artifact.UpdatedAt = now
+	normalizeArtifactHashesMem(artifact)
 	if artifact.DurableStatus == "finalized" && artifact.FinalizedAt == nil {
 		finalizedAt := artifact.UpdatedAt
 		artifact.FinalizedAt = &finalizedAt
 	}
-	return cloneArtifact(artifact), nil
 }
 
 func applyArtifactFinalizeMem(artifact *domain.Artifact, finalize store.ArtifactFinalize, now time.Time) {

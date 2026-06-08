@@ -1,3 +1,4 @@
+//nolint:revive // Tests use the established driver package name to exercise unexported helpers.
 package driver
 
 import (
@@ -144,7 +145,7 @@ func (r patchBackRepo) read(path string) string {
 
 func (r patchBackRepo) git(args ...string) string {
 	r.t.Helper()
-	cmd := exec.Command("git", args...) //nolint:gosec // test helper uses fixed git executable with test-controlled args.
+	cmd := exec.Command("git", args...) //nolint:gosec //nolint:norawexec // test helper uses fixed git executable with test-controlled args.
 	cmd.Dir = r.dir
 	out, err := cmd.CombinedOutput()
 	if err != nil {

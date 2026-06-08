@@ -398,23 +398,43 @@ func (r NodeRunner) Run(ctx context.Context, req RunRequest) (RunResult, error) 
 }
 
 func (r NodeRunner) runBuiltFlueServer(ctx context.Context, req RunRequest, node string, input []byte) (RunResult, error) {
-	launcher, err := os.CreateTemp("", "loom-flue-runtime-*.mjs")
+	launcherPath, cleanupLauncher, err := writeFlueRuntimeLauncher()
 	if err != nil {
-		return RunResult{}, fmt.Errorf("create Flue runtime launcher: %w", err)
+		return RunResult{}, err
 	}
-	launcherPath := launcher.Name()
-	defer func() { _ = os.Remove(launcherPath) }()
-	if _, err := launcher.WriteString(flueLocalLauncher); err != nil {
-		_ = launcher.Close()
-		return RunResult{}, fmt.Errorf("write Flue runtime launcher: %w", err)
-	}
-	if err := launcher.Close(); err != nil {
-		return RunResult{}, fmt.Errorf("close Flue runtime launcher: %w", err)
-	}
+	defer cleanupLauncher()
 	execTaskCommand, err := r.execTaskCommand()
 	if err != nil {
 		return RunResult{}, err
 	}
+	env, err := flueRuntimeEnv(req, input, execTaskCommand)
+	if err != nil {
+		return RunResult{}, err
+	}
+	cmd := flueRuntimeCommand(ctx, node, launcherPath, req.BundleRoot, env)
+	stdout, stderr, err := runFlueRuntimeCommand(cmd)
+	return flueRuntimeResult(ctx, req, stdout, stderr, err), nil
+}
+
+func writeFlueRuntimeLauncher() (string, func(), error) {
+	launcher, err := os.CreateTemp("", "loom-flue-runtime-*.mjs")
+	if err != nil {
+		return "", nil, fmt.Errorf("create Flue runtime launcher: %w", err)
+	}
+	cleanup := func() { _ = os.Remove(launcher.Name()) }
+	if _, err := launcher.WriteString(flueLocalLauncher); err != nil {
+		_ = launcher.Close()
+		cleanup()
+		return "", nil, fmt.Errorf("write Flue runtime launcher: %w", err)
+	}
+	if err := launcher.Close(); err != nil {
+		cleanup()
+		return "", nil, fmt.Errorf("close Flue runtime launcher: %w", err)
+	}
+	return launcher.Name(), cleanup, nil
+}
+
+func flueRuntimeEnv(req RunRequest, input []byte, execTaskCommand []string) ([]string, error) {
 	parentEnv := os.Environ()
 	env := append(driverRuntimeBaseEnv(parentEnv), driverRuntimeFleetDBHandoffEnv(parentEnv)...)
 	env = append(env,
@@ -431,12 +451,16 @@ func (r NodeRunner) runBuiltFlueServer(ctx context.Context, req RunRequest, node
 	if len(execTaskCommand) > 0 {
 		encoded, err := json.Marshal(execTaskCommand)
 		if err != nil {
-			return RunResult{}, fmt.Errorf("encode exec-task command: %w", err)
+			return nil, fmt.Errorf("encode exec-task command: %w", err)
 		}
 		env = append(env, "LOOM_DRIVER_EXEC_TASK_CMD_JSON="+string(encoded))
 	}
-	cmd := exec.CommandContext(ctx, node, launcherPath)
-	cmd.Dir = req.BundleRoot
+	return env, nil
+}
+
+func flueRuntimeCommand(ctx context.Context, node, launcherPath, bundleRoot string, env []string) *exec.Cmd {
+	cmd := exec.CommandContext(ctx, node, launcherPath) //nolint:gosec // node is operator-configured; launcherPath is a temp file created by this process.
+	cmd.Dir = bundleRoot
 	cmd.Env = env
 	cmd.Cancel = func() error {
 		if cmd.Process == nil {
@@ -445,27 +469,24 @@ func (r NodeRunner) runBuiltFlueServer(ctx context.Context, req RunRequest, node
 		return cmd.Process.Signal(os.Interrupt)
 	}
 	cmd.WaitDelay = 5 * time.Second
+	return cmd
+}
+
+func runFlueRuntimeCommand(cmd *exec.Cmd) (string, string, error) {
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
-	if err := cmd.Run(); err != nil {
-		if ctx.Err() != nil {
-			return RunResult{
-				Status:     domain.DriverRunCancelled,
-				Summary:    "Flue local runner cancelled",
-				ErrorClass: "driver_cancelled",
-				Output:     flueRunOutput(req, stdout.String(), stderr.String()),
-			}, nil
-		}
-		msg := strings.TrimSpace(stderr.String())
-		if msg == "" {
-			msg = err.Error()
-		}
-		return RunResult{Status: domain.DriverRunFailed, Summary: msg, ErrorClass: "driver_runtime", Output: flueRunOutput(req, stdout.String(), stderr.String())}, nil
+	err := cmd.Run()
+	return stdout.String(), stderr.String(), err
+}
+
+func flueRuntimeResult(ctx context.Context, req RunRequest, stdout, stderr string, runErr error) RunResult {
+	if runErr != nil {
+		return failedFlueRuntimeResult(ctx, req, stdout, stderr, runErr)
 	}
-	out := strings.TrimSpace(stdout.String())
+	out := strings.TrimSpace(stdout)
 	if out == "" {
-		return invalidDriverResult(req, "Flue workflow returned no result", stdout.String(), stderr.String()), nil
+		return invalidDriverResult(req, "Flue workflow returned no result", stdout, stderr)
 	}
 	lines := strings.Split(out, "\n")
 	var payload struct {
@@ -474,19 +495,40 @@ func (r NodeRunner) runBuiltFlueServer(ctx context.Context, req RunRequest, node
 		ErrorClass string                 `json:"errorClass"`
 	}
 	if err := json.Unmarshal([]byte(lines[len(lines)-1]), &payload); err != nil {
-		return invalidDriverResult(req, fmt.Sprintf("decode Flue runtime result: %v", err), stdout.String(), stderr.String()), nil
+		return invalidDriverResult(req, fmt.Sprintf("decode Flue runtime result: %v", err), stdout, stderr)
 	}
-	result := RunResult{Status: payload.Status, Summary: payload.Summary, ErrorClass: payload.ErrorClass, Output: flueRunOutput(req, stdout.String(), stderr.String())}
+	result := RunResult{Status: payload.Status, Summary: payload.Summary, ErrorClass: payload.ErrorClass, Output: flueRunOutput(req, stdout, stderr)}
 	if result.Status == domain.DriverRunFailed {
-		if detail := strings.TrimSpace(stderr.String()); detail != "" {
-			if result.Summary != "" {
-				result.Summary += ": " + detail
-			} else {
-				result.Summary = detail
-			}
+		result.Summary = flueFailedSummary(result.Summary, stderr)
+	}
+	return requireExplicitTerminalRunResult(result)
+}
+
+func failedFlueRuntimeResult(ctx context.Context, req RunRequest, stdout, stderr string, runErr error) RunResult {
+	if ctx.Err() != nil {
+		return RunResult{
+			Status:     domain.DriverRunCancelled,
+			Summary:    "Flue local runner cancelled",
+			ErrorClass: "driver_cancelled",
+			Output:     flueRunOutput(req, stdout, stderr),
 		}
 	}
-	return requireExplicitTerminalRunResult(result), nil
+	msg := strings.TrimSpace(stderr)
+	if msg == "" {
+		msg = runErr.Error()
+	}
+	return RunResult{Status: domain.DriverRunFailed, Summary: msg, ErrorClass: "driver_runtime", Output: flueRunOutput(req, stdout, stderr)}
+}
+
+func flueFailedSummary(summary, stderr string) string {
+	detail := strings.TrimSpace(stderr)
+	if detail == "" {
+		return summary
+	}
+	if summary != "" {
+		return summary + ": " + detail
+	}
+	return detail
 }
 
 func requireExplicitTerminalRunResult(result RunResult) RunResult {

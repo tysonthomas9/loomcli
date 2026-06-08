@@ -31,44 +31,9 @@ func newAgentServiceStore(roles *roleStore, profiles *workerProfileStore) *agent
 var _ store.AgentServiceStore = (*agentServiceStore)(nil)
 
 func (s *agentServiceStore) Create(_ context.Context, in store.AgentServiceCreate) (*domain.AgentService, error) {
-	serviceID := strings.TrimSpace(in.ServiceID)
-	if in.WorkspaceKey == "" || serviceID == "" || strings.TrimSpace(in.RoleName) == "" {
-		return nil, fmt.Errorf("workspace_key + service_id + role_name required: %w", domain.ErrInvalid)
-	}
-	name := in.Name
-	if strings.TrimSpace(name) == "" {
-		name = serviceID
-	}
-	desired := in.DesiredState
-	if desired == "" {
-		desired = domain.AgentServiceDesiredStopped
-	}
-	maxInstances := in.MaxInstances
-	if maxInstances == 0 {
-		maxInstances = 1
-	}
-	now := time.Now().UTC()
-	svc := &domain.AgentService{
-		WorkspaceKey:    in.WorkspaceKey,
-		ServiceID:       serviceID,
-		Name:            name,
-		Kind:            in.Kind,
-		DesiredState:    desired,
-		RoleName:        in.RoleName,
-		ProfileName:     in.ProfileName,
-		ScheduleID:      in.ScheduleID,
-		EventSources:    cloneStringSlice(in.EventSources),
-		TriggerRefs:     cloneStringSlice(in.TriggerRefs),
-		PlacementPolicy: in.PlacementPolicy,
-		MaxInstances:    maxInstances,
-		LeaseID:         in.LeaseID,
-		RestartPolicy:   in.RestartPolicy,
-		Permissions:     cloneStringSlice(in.Permissions),
-		BudgetPolicy:    in.BudgetPolicy,
-		StateRef:        in.StateRef,
-		Metadata:        cloneMap(in.Metadata),
-		CreatedAt:       now,
-		UpdatedAt:       now,
+	svc, err := newAgentServiceMem(in)
+	if err != nil {
+		return nil, err
 	}
 	if err := validateAgentServiceMem(svc); err != nil {
 		return nil, err
@@ -87,6 +52,59 @@ func (s *agentServiceStore) Create(_ context.Context, in store.AgentServiceCreat
 	}
 	s.items[svc.WorkspaceKey][svc.ServiceID] = svc
 	return cloneAgentService(svc), nil
+}
+
+func newAgentServiceMem(in store.AgentServiceCreate) (*domain.AgentService, error) {
+	serviceID := strings.TrimSpace(in.ServiceID)
+	if in.WorkspaceKey == "" || serviceID == "" || strings.TrimSpace(in.RoleName) == "" {
+		return nil, fmt.Errorf("workspace_key + service_id + role_name required: %w", domain.ErrInvalid)
+	}
+	now := time.Now().UTC()
+	return &domain.AgentService{
+		WorkspaceKey:    in.WorkspaceKey,
+		ServiceID:       serviceID,
+		Name:            firstNonEmptyMem(in.Name, serviceID),
+		Kind:            in.Kind,
+		DesiredState:    defaultAgentServiceDesiredStateMem(in.DesiredState),
+		RoleName:        in.RoleName,
+		ProfileName:     in.ProfileName,
+		ScheduleID:      in.ScheduleID,
+		EventSources:    cloneStringSlice(in.EventSources),
+		TriggerRefs:     cloneStringSlice(in.TriggerRefs),
+		PlacementPolicy: in.PlacementPolicy,
+		MaxInstances:    defaultAgentServiceMaxInstancesMem(in.MaxInstances),
+		LeaseID:         in.LeaseID,
+		RestartPolicy:   in.RestartPolicy,
+		Permissions:     cloneStringSlice(in.Permissions),
+		BudgetPolicy:    in.BudgetPolicy,
+		StateRef:        in.StateRef,
+		Metadata:        cloneMap(in.Metadata),
+		CreatedAt:       now,
+		UpdatedAt:       now,
+	}, nil
+}
+
+func defaultAgentServiceDesiredStateMem(state domain.AgentServiceDesiredState) domain.AgentServiceDesiredState {
+	if state == "" {
+		return domain.AgentServiceDesiredStopped
+	}
+	return state
+}
+
+func defaultAgentServiceMaxInstancesMem(maxInstances int) int {
+	if maxInstances == 0 {
+		return 1
+	}
+	return maxInstances
+}
+
+func firstNonEmptyMem(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 func (s *agentServiceStore) Get(_ context.Context, ws, serviceID string) (*domain.AgentService, error) {

@@ -1,3 +1,4 @@
+//nolint:revive // Tests use the established driver package name to exercise unexported helpers.
 package driver
 
 import (
@@ -26,6 +27,7 @@ func TestRequestTaskRunCreatesExecutesAndFinishesChild(t *testing.T) {
 		t.Fatalf("Create driver step: %v", err)
 	}
 	executor := &recordingTaskExecutor{result: TaskExecResult{
+		Status:           domain.TaskRunCompleted,
 		ExitCode:         0,
 		LogsRef:          "logs://task-run-1",
 		ArtifactsRef:     "artifacts://task-run-1",
@@ -150,6 +152,7 @@ func TestClaimAndExecuteTaskRunWithResultClaimsQueuedChild(t *testing.T) {
 		t.Fatalf("Create queued task run: %v", err)
 	}
 	executor := &recordingTaskExecutor{result: TaskExecResult{
+		Status:          domain.TaskRunCompleted,
 		ExitCode:        0,
 		LogsRef:         "logs://worker-task-run",
 		ArtifactsRef:    "artifacts://worker-task-run",
@@ -205,6 +208,7 @@ func TestClaimAndExecuteTaskRunWithResultCanDeferCompletion(t *testing.T) {
 		t.Fatalf("Create queued task run: %v", err)
 	}
 	executor := &recordingTaskExecutor{result: TaskExecResult{
+		Status:       domain.TaskRunCompleted,
 		ExitCode:     0,
 		LogsRef:      "logs://worker-defer",
 		ArtifactsRef: "artifacts://worker-defer",
@@ -536,6 +540,7 @@ func (e *waitingTaskHeartbeatExecutor) ExecuteTask(ctx context.Context, req Task
 			if run.RuntimeMetadata["heartbeat_source"] == "driver_task_request" {
 				e.sawHeartbeat = true
 				return TaskExecResult{
+					Status:          domain.TaskRunCompleted,
 					ExitCode:        0,
 					LogsRef:         "logs://task-run-heartbeat",
 					RuntimeMetadata: map[string]string{"observed_heartbeat": "true"},

@@ -508,60 +508,24 @@ func terminalSessionUpdateBody(patch store.TerminalSessionUpdate) map[string]any
 
 func artifactUpdateBody(patch store.ArtifactUpdate) map[string]any {
 	body := map[string]any{}
-	if patch.AgentID != nil {
-		body["agent_id"] = *patch.AgentID
-	}
-	if patch.SessionID != nil {
-		body["session_id"] = *patch.SessionID
-	}
-	if patch.TerminalID != nil {
-		body["terminal_id"] = *patch.TerminalID
-	}
-	if patch.TaskID != nil {
-		body["task_id"] = *patch.TaskID
-	}
-	if patch.OwnerType != nil {
-		body["owner_type"] = *patch.OwnerType
-	}
-	if patch.OwnerID != nil {
-		body["owner_id"] = *patch.OwnerID
-	}
-	if patch.Type != nil {
-		body["type"] = *patch.Type
-	}
-	if patch.URI != nil {
-		body["uri"] = *patch.URI
-	}
-	if patch.Summary != nil {
-		body["summary"] = *patch.Summary
-	}
-	if patch.MIMEType != nil {
-		body["mime_type"] = *patch.MIMEType
-	}
-	if patch.SizeBytes != nil {
-		body["size_bytes"] = *patch.SizeBytes
-	}
-	if patch.Checksum != nil {
-		body["checksum"] = *patch.Checksum
-	}
-	if patch.ContentHash != nil {
-		body["content_hash"] = *patch.ContentHash
-	}
-	if patch.Visibility != nil {
-		body["visibility"] = *patch.Visibility
-	}
-	if patch.RedactionStatus != nil {
-		body["redaction_status"] = *patch.RedactionStatus
-	}
-	if patch.DurableStatus != nil {
-		body["durable_status"] = *patch.DurableStatus
-	}
-	if patch.Metadata != nil {
-		body["metadata"] = *patch.Metadata
-	}
-	if patch.FinalizedAt != nil {
-		body["finalized_at"] = patch.FinalizedAt.Format(time.RFC3339Nano)
-	}
+	bodyPtr(body, "agent_id", patch.AgentID)
+	bodyPtr(body, "session_id", patch.SessionID)
+	bodyPtr(body, "terminal_id", patch.TerminalID)
+	bodyPtr(body, "task_id", patch.TaskID)
+	bodyPtr(body, "owner_type", patch.OwnerType)
+	bodyPtr(body, "owner_id", patch.OwnerID)
+	bodyPtr(body, "type", patch.Type)
+	bodyPtr(body, "uri", patch.URI)
+	bodyPtr(body, "summary", patch.Summary)
+	bodyPtr(body, "mime_type", patch.MIMEType)
+	bodyPtr(body, "size_bytes", patch.SizeBytes)
+	bodyPtr(body, "checksum", patch.Checksum)
+	bodyPtr(body, "content_hash", patch.ContentHash)
+	bodyPtr(body, "visibility", patch.Visibility)
+	bodyPtr(body, "redaction_status", patch.RedactionStatus)
+	bodyPtr(body, "durable_status", patch.DurableStatus)
+	bodyPtr(body, "metadata", patch.Metadata)
+	bodyTimeRFC3339NanoPtr(body, "finalized_at", patch.FinalizedAt)
 	return body
 }
 

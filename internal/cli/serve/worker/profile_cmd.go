@@ -265,69 +265,92 @@ func printWorkerProfile(p *domain.WorkerProfile) {
 	fmt.Printf("Enabled:      %t\n", p.Enabled)
 }
 
+type workerProfilePatchBuilder func(value string, unset bool) (store.WorkerProfileUpdate, error)
+
+var workerProfilePatchBuilders = map[string]workerProfilePatchBuilder{
+	"name":         workerProfileRequiredStringPatch("name", func(p *store.WorkerProfileUpdate, v string) { p.Name = &v }),
+	"role":         workerProfileRequiredStringPatch("role", func(p *store.WorkerProfileUpdate, v string) { p.Role = &v }),
+	"backend":      workerProfileStringPatch(func(p *store.WorkerProfileUpdate, v string) { p.Backend = &v }),
+	"parent_epic":  workerProfileStringPatch(func(p *store.WorkerProfileUpdate, v string) { p.ParentEpic = &v }),
+	"enabled":      buildWorkerProfileEnabledPatch,
+	"max_priority": buildWorkerProfileMaxPriorityPatch,
+	"repos":        workerProfileListPatch(func(p *store.WorkerProfileUpdate, v []string) { p.Repos = &v }),
+	"labels":       workerProfileListPatch(func(p *store.WorkerProfileUpdate, v []string) { p.Labels = &v }),
+	"capabilities": workerProfileListPatch(func(p *store.WorkerProfileUpdate, v []string) { p.Capabilities = &v }),
+	"metadata":     buildWorkerProfileMetadataPatch,
+}
+
 func buildWorkerProfilePatch(key, value string, unset bool) (store.WorkerProfileUpdate, error) {
-	var patch store.WorkerProfileUpdate
-	switch key {
-	case "name":
-		if unset {
-			return patch, fmt.Errorf("name cannot be unset")
-		}
-		patch.Name = &value
-	case "role":
-		if unset {
-			return patch, fmt.Errorf("role cannot be unset")
-		}
-		patch.Role = &value
-	case "backend":
-		patch.Backend = &value
-	case "parent_epic":
-		patch.ParentEpic = &value
-	case "enabled":
-		if unset {
-			return patch, fmt.Errorf("enabled cannot be unset")
-		}
-		b, err := strconv.ParseBool(value)
-		if err != nil {
-			return patch, fmt.Errorf("enabled must be true/false: %w", err)
-		}
-		patch.Enabled = &b
-	case "max_priority":
-		if unset {
-			patch.ClearMaxPriority = true
-			return patch, nil
-		}
-		n, err := strconv.Atoi(value)
-		if err != nil {
-			return patch, fmt.Errorf("max_priority must be an integer: %w", err)
-		}
-		if n < 0 || n > 4 {
-			return patch, fmt.Errorf("max_priority must be between 0 and 4")
-		}
-		patch.MaxPriority = &n
-	case "repos":
-		list := splitWorkerProfileList(value)
-		patch.Repos = &list
-	case "labels":
-		list := splitWorkerProfileList(value)
-		patch.Labels = &list
-	case "capabilities":
-		list := splitWorkerProfileList(value)
-		patch.Capabilities = &list
-	case "metadata":
-		if unset {
-			metadata := map[string]string{}
-			patch.Metadata = &metadata
-			return patch, nil
-		}
-		metadata, err := parseWorkerProfileMetadata(strings.Split(value, ","))
-		if err != nil {
-			return patch, err
-		}
-		patch.Metadata = &metadata
-	default:
-		return patch, fmt.Errorf("unsupported worker profile field %q", key)
+	builder, ok := workerProfilePatchBuilders[key]
+	if !ok {
+		return store.WorkerProfileUpdate{}, fmt.Errorf("unsupported worker profile field %q", key)
 	}
-	return patch, nil
+	return builder(value, unset)
+}
+
+func workerProfileRequiredStringPatch(field string, set func(*store.WorkerProfileUpdate, string)) workerProfilePatchBuilder {
+	return func(value string, unset bool) (store.WorkerProfileUpdate, error) {
+		if unset {
+			return store.WorkerProfileUpdate{}, fmt.Errorf("%s cannot be unset", field)
+		}
+		var patch store.WorkerProfileUpdate
+		set(&patch, value)
+		return patch, nil
+	}
+}
+
+func workerProfileStringPatch(set func(*store.WorkerProfileUpdate, string)) workerProfilePatchBuilder {
+	return func(value string, _ bool) (store.WorkerProfileUpdate, error) {
+		var patch store.WorkerProfileUpdate
+		set(&patch, value)
+		return patch, nil
+	}
+}
+
+func workerProfileListPatch(set func(*store.WorkerProfileUpdate, []string)) workerProfilePatchBuilder {
+	return func(value string, _ bool) (store.WorkerProfileUpdate, error) {
+		var patch store.WorkerProfileUpdate
+		list := splitWorkerProfileList(value)
+		set(&patch, list)
+		return patch, nil
+	}
+}
+
+func buildWorkerProfileEnabledPatch(value string, unset bool) (store.WorkerProfileUpdate, error) {
+	if unset {
+		return store.WorkerProfileUpdate{}, fmt.Errorf("enabled cannot be unset")
+	}
+	b, err := strconv.ParseBool(value)
+	if err != nil {
+		return store.WorkerProfileUpdate{}, fmt.Errorf("enabled must be true/false: %w", err)
+	}
+	return store.WorkerProfileUpdate{Enabled: &b}, nil
+}
+
+func buildWorkerProfileMaxPriorityPatch(value string, unset bool) (store.WorkerProfileUpdate, error) {
+	if unset {
+		return store.WorkerProfileUpdate{ClearMaxPriority: true}, nil
+	}
+	n, err := strconv.Atoi(value)
+	if err != nil {
+		return store.WorkerProfileUpdate{}, fmt.Errorf("max_priority must be an integer: %w", err)
+	}
+	if n < 0 || n > 4 {
+		return store.WorkerProfileUpdate{}, fmt.Errorf("max_priority must be between 0 and 4")
+	}
+	return store.WorkerProfileUpdate{MaxPriority: &n}, nil
+}
+
+func buildWorkerProfileMetadataPatch(value string, unset bool) (store.WorkerProfileUpdate, error) {
+	if unset {
+		metadata := map[string]string{}
+		return store.WorkerProfileUpdate{Metadata: &metadata}, nil
+	}
+	metadata, err := parseWorkerProfileMetadata(strings.Split(value, ","))
+	if err != nil {
+		return store.WorkerProfileUpdate{}, err
+	}
+	return store.WorkerProfileUpdate{Metadata: &metadata}, nil
 }
 
 func parseWorkerProfileMetadata(items []string) (map[string]string, error) {

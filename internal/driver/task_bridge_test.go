@@ -1,3 +1,4 @@
+//nolint:revive // Tests use the established driver package name to exercise unexported helpers.
 package driver
 
 import (
@@ -35,8 +36,8 @@ func TestHostBridgeTaskExecutorAppliesPatchUploadsAndFinalizesArtifact(t *testin
 	if err != nil {
 		t.Fatalf("ExecuteTask: %v", err)
 	}
-	if result.Status != "" || result.ExitCode != 0 {
-		t.Fatalf("result status/exit = %q/%d, want implicit completed and zero exit", result.Status, result.ExitCode)
+	if result.Status != domain.TaskRunCompleted || result.ExitCode != 0 {
+		t.Fatalf("result status/exit = %q/%d, want completed and zero exit", result.Status, result.ExitCode)
 	}
 	if repo.read("file.txt") != "new\n" {
 		t.Fatalf("file content = %q, want patched content", repo.read("file.txt"))
@@ -282,6 +283,8 @@ func TestHostBridgeTaskExecutorHelperProcess(t *testing.T) {
 	switch mode {
 	case "success":
 		result := map[string]any{
+			"status":         "completed",
+			"exit_code":      0,
 			"patch":          patch,
 			"patch_base_ref": base,
 			"logs_ref":       "logs://" + req.TaskRunID,
@@ -294,6 +297,8 @@ func TestHostBridgeTaskExecutorHelperProcess(t *testing.T) {
 		}
 	case "artifact":
 		result := map[string]any{
+			"status":    "completed",
+			"exit_code": 0,
 			"artifacts": []map[string]any{{
 				"artifact_id":  "artifact-" + req.TaskRunID,
 				"type":         "patch",

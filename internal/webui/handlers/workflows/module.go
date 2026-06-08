@@ -54,46 +54,61 @@ type createWorkflowVersionRequest struct {
 func (m *Module) createWorkflowVersion(w http.ResponseWriter, r *http.Request) {
 	ws := r.PathValue("ws")
 	name := strings.TrimSpace(r.PathValue("name"))
-	if name == "" {
-		writeError(w, http.StatusBadRequest, "workflow name is required")
-		return
-	}
-	var req createWorkflowVersionRequest
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxRunPayloadBytes)).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON body")
-		return
-	}
-	if len(req.Files) == 0 {
-		writeError(w, http.StatusBadRequest, "files is required")
-		return
-	}
-	entrypoint := strings.TrimSpace(req.Entrypoint)
-	if entrypoint == "" {
-		entrypoint = filepath.ToSlash(filepath.Join("workflows", name+".ts"))
-	}
-	if err := validateWorkflowEntrypoint(name, entrypoint); err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	files, err := validateWorkflowFiles(req.Files)
+	entrypoint, files, activate, err := parseCreateWorkflowVersionRequest(w, r, name)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
-	}
-	if _, ok := files[entrypoint]; !ok {
-		writeError(w, http.StatusBadRequest, "entrypoint file is missing")
-		return
-	}
-	activate := true
-	if req.Activate != nil {
-		activate = *req.Activate
 	}
 	result, buildOutput, err := m.buildAndRegister(r.Context(), ws, name, entrypoint, files, activate)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusCreated, map[string]any{
+	writeJSON(w, http.StatusCreated, createWorkflowVersionResponse(result, buildOutput))
+}
+
+func parseCreateWorkflowVersionRequest(w http.ResponseWriter, r *http.Request, name string) (string, map[string]string, bool, error) {
+	if name == "" {
+		return "", nil, false, fmt.Errorf("workflow name is required")
+	}
+	var req createWorkflowVersionRequest
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxRunPayloadBytes)).Decode(&req); err != nil {
+		return "", nil, false, fmt.Errorf("invalid JSON body")
+	}
+	if len(req.Files) == 0 {
+		return "", nil, false, fmt.Errorf("files is required")
+	}
+	entrypoint := workflowVersionEntrypoint(name, req.Entrypoint)
+	if err := validateWorkflowEntrypoint(name, entrypoint); err != nil {
+		return "", nil, false, err
+	}
+	files, err := validateWorkflowFiles(req.Files)
+	if err != nil {
+		return "", nil, false, err
+	}
+	if _, ok := files[entrypoint]; !ok {
+		return "", nil, false, fmt.Errorf("entrypoint file is missing")
+	}
+	return entrypoint, files, workflowVersionActivateDefault(req.Activate), nil
+}
+
+func workflowVersionEntrypoint(name, raw string) string {
+	entrypoint := strings.TrimSpace(raw)
+	if entrypoint == "" {
+		return filepath.ToSlash(filepath.Join("workflows", name+".ts"))
+	}
+	return entrypoint
+}
+
+func workflowVersionActivateDefault(value *bool) bool {
+	if value == nil {
+		return true
+	}
+	return *value
+}
+
+func createWorkflowVersionResponse(result *driver.RegisterFlueResult, buildOutput string) map[string]any {
+	return map[string]any{
 		"driver":            result.Driver,
 		"version":           result.Version,
 		"bundle":            result.Bundle,
@@ -102,7 +117,7 @@ func (m *Module) createWorkflowVersion(w http.ResponseWriter, r *http.Request) {
 		"reused_version":    result.ReusedVersion,
 		"activated":         result.Activated,
 		"build_diagnostics": buildOutput,
-	})
+	}
 }
 
 func (m *Module) buildAndRegister(ctx context.Context, ws, name, entrypoint string, files map[string]string, activate bool) (*driver.RegisterFlueResult, string, error) {

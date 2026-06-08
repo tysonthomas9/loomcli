@@ -1,3 +1,4 @@
+//nolint:revive // Tests use the established command package name to exercise unexported helpers.
 package driver
 
 import (

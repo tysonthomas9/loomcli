@@ -207,6 +207,20 @@ var driverRecoverStaleTasksCmd = &cobra.Command{
 }
 
 func init() {
+	registerDriverPublishFlags()
+	registerDriverRunFlags()
+	registerDriverExecTaskFlags()
+	registerDriverWorkTaskRunFlags()
+	registerDriverClaimReadyFlags()
+	registerDriverCompleteTaskFlags()
+	registerDriverReleaseTaskFlags()
+	registerDriverRecoverStaleTaskFlags()
+
+	driverCmd.AddCommand(driverRegisterCmd, driverRunCmd, driverExecTaskCmd, driverWorkTaskRunCmd, driverClaimReadyCmd, driverCompleteTaskCmd, driverReleaseTaskCmd, driverRecoverStaleTasksCmd)
+	cli.RegisterCommand(driverCmd)
+}
+
+func registerDriverPublishFlags() {
 	driverRegisterCmd.Flags().StringVar(&driverRegisterFlueDist, "flue-dist", "", "Built Flue dist directory containing server.mjs")
 	driverRegisterCmd.Flags().StringVar(&driverRegisterManifest, "manifest", "", "Optional native Flue driver manifest JSON (default: <flue-dist>/loom-driver.json if present)")
 	driverRegisterCmd.Flags().StringVar(&driverRegisterName, "name", "", "Driver name")
@@ -217,7 +231,9 @@ func init() {
 	driverRegisterCmd.Flags().BoolVar(&driverRegisterActivate, "activate", false, "Activate the registered version after validation")
 	driverRegisterCmd.Flags().BoolVar(&driverRegisterJSON, "json", false, "JSON output")
 	_ = driverRegisterCmd.MarkFlagRequired("flue-dist")
+}
 
+func registerDriverRunFlags() {
 	driverRunCmd.Flags().StringVar(&driverRunEpic, "epic", "", "Epic ID to pass as input.epicId")
 	driverRunCmd.Flags().StringVar(&driverRunID, "run-id", "", "Run ID (default: generated)")
 	driverRunCmd.Flags().StringVar(&driverRunIdempotencyKey, "idempotency-key", "", "DriverRun admission idempotency key")
@@ -225,7 +241,9 @@ func init() {
 	driverRunCmd.Flags().StringArrayVar(&driverRunInput, "input", nil, "Input key=value (repeatable)")
 	driverRunCmd.Flags().BoolVar(&driverRunJSON, "json", false, "JSON output")
 	_ = driverRunCmd.MarkFlagRequired("epic")
+}
 
+func registerDriverExecTaskFlags() {
 	driverExecTaskCmd.Flags().StringVar(&driverExecTaskWorkspaceKey, "workspace-key", "", "Workspace key (default: LOOM_DRIVER_WORKSPACE or active workspace)")
 	driverExecTaskCmd.Flags().StringVar(&driverExecTaskDriverRunID, "driver-run-id", "", "Parent DriverRun ID (default: LOOM_DRIVER_RUN_ID)")
 	driverExecTaskCmd.Flags().StringVar(&driverExecTaskDriverStepID, "driver-step-id", "", "DriverStep ID (default: LOOM_DRIVER_STEP_ID)")
@@ -246,7 +264,9 @@ func init() {
 	driverExecTaskCmd.Flags().BoolVar(&driverExecTaskDeferCompletion, "defer-completion", false, "Return execution result but leave successful TaskRun running for CompleteRun")
 	driverExecTaskCmd.Flags().BoolVar(&driverExecTaskJSON, "json", false, "JSON output")
 	_ = driverExecTaskCmd.MarkFlagRequired("task-id")
+}
 
+func registerDriverWorkTaskRunFlags() {
 	driverWorkTaskRunCmd.Flags().StringVar(&driverWorkTaskWorkspaceKey, "workspace-key", "", "Workspace key (default: LOOM_WORKER_WORKSPACE, LOOM_DRIVER_WORKSPACE, or active workspace)")
 	driverWorkTaskRunCmd.Flags().StringVar(&driverWorkTaskTaskRunID, "task-run-id", "", "Specific queued TaskRun ID to claim")
 	driverWorkTaskRunCmd.Flags().StringVar(&driverWorkTaskNodeID, "node-id", "", "Worker node ID (default: LOOM_WORKER_NODE_ID, LOOM_DRIVER_NODE_ID, or host name)")
@@ -265,7 +285,9 @@ func init() {
 	driverWorkTaskRunCmd.Flags().StringVar(&driverWorkTaskSandboxImage, "sandbox-image", "", "Sandbox image or snapshot")
 	driverWorkTaskRunCmd.Flags().BoolVar(&driverWorkTaskDeferCompletion, "defer-completion", false, "Return execution result but leave successful TaskRun running for CompleteRun")
 	driverWorkTaskRunCmd.Flags().BoolVar(&driverWorkTaskJSON, "json", false, "JSON output")
+}
 
+func registerDriverClaimReadyFlags() {
 	driverClaimReadyCmd.Flags().StringVar(&driverClaimReadyWorkspaceKey, "workspace-key", "", "Workspace key (default: LOOM_DRIVER_WORKSPACE or active workspace)")
 	driverClaimReadyCmd.Flags().StringVar(&driverClaimReadyDriverRunID, "driver-run-id", "", "Parent DriverRun ID (default: LOOM_DRIVER_RUN_ID)")
 	driverClaimReadyCmd.Flags().StringVar(&driverClaimReadyNodeID, "node-id", "", "Parent DriverRun node ID")
@@ -275,7 +297,9 @@ func init() {
 	driverClaimReadyCmd.Flags().StringVar(&driverClaimReadyActor, "actor", "", "Claim actor (default: driver-run:<driver-run-id>)")
 	driverClaimReadyCmd.Flags().IntVar(&driverClaimReadyLimit, "limit", 100, "Maximum ready tasks to inspect")
 	driverClaimReadyCmd.Flags().BoolVar(&driverClaimReadyJSON, "json", false, "JSON output")
+}
 
+func registerDriverCompleteTaskFlags() {
 	driverCompleteTaskCmd.Flags().StringVar(&driverCompleteTaskWorkspaceKey, "workspace-key", "", "Workspace key (default: LOOM_DRIVER_WORKSPACE or active workspace)")
 	driverCompleteTaskCmd.Flags().StringVar(&driverCompleteTaskDriverRunID, "driver-run-id", "", "Parent DriverRun ID (default: LOOM_DRIVER_RUN_ID)")
 	driverCompleteTaskCmd.Flags().StringVar(&driverCompleteTaskNodeID, "node-id", "", "Parent DriverRun node ID")
@@ -294,7 +318,9 @@ func init() {
 	driverCompleteTaskCmd.Flags().BoolVar(&driverCompleteTaskLegacyClose, "legacy-task-close", false, "Use legacy direct task close without a child TaskRun")
 	driverCompleteTaskCmd.Flags().BoolVar(&driverCompleteTaskForce, "force", false, "Force completion when backend permits it")
 	driverCompleteTaskCmd.Flags().BoolVar(&driverCompleteTaskJSON, "json", false, "JSON output")
+}
 
+func registerDriverReleaseTaskFlags() {
 	driverReleaseTaskCmd.Flags().StringVar(&driverReleaseTaskWorkspaceKey, "workspace-key", "", "Workspace key (default: LOOM_DRIVER_WORKSPACE or active workspace)")
 	driverReleaseTaskCmd.Flags().StringVar(&driverReleaseTaskDriverRunID, "driver-run-id", "", "Parent DriverRun ID (default: LOOM_DRIVER_RUN_ID)")
 	driverReleaseTaskCmd.Flags().StringVar(&driverReleaseTaskNodeID, "node-id", "", "Parent DriverRun node ID")
@@ -304,7 +330,9 @@ func init() {
 	driverReleaseTaskCmd.Flags().StringVar(&driverReleaseTaskActor, "actor", "", "Release actor (default: driver-run:<driver-run-id>)")
 	driverReleaseTaskCmd.Flags().BoolVar(&driverReleaseTaskJSON, "json", false, "JSON output")
 	_ = driverReleaseTaskCmd.MarkFlagRequired("task-id")
+}
 
+func registerDriverRecoverStaleTaskFlags() {
 	driverRecoverStaleTasksCmd.Flags().StringVar(&driverRecoverStaleWorkspaceKey, "workspace-key", "", "Workspace key (default: LOOM_DRIVER_WORKSPACE or active workspace)")
 	driverRecoverStaleTasksCmd.Flags().StringVar(&driverRecoverStaleDriverRunID, "driver-run-id", "", "Parent DriverRun ID (default: LOOM_DRIVER_RUN_ID or positional argument)")
 	driverRecoverStaleTasksCmd.Flags().StringVar(&driverRecoverStaleBefore, "stale-before", "", "Recover task runs last observed before this RFC3339 timestamp")
@@ -312,9 +340,6 @@ func init() {
 	driverRecoverStaleTasksCmd.Flags().StringVar(&driverRecoverStaleErrorClass, "error-class", "stale_task_run", "Error class recorded on recovered task runs")
 	driverRecoverStaleTasksCmd.Flags().StringVar(&driverRecoverStaleErrorMessage, "error-message", "task run heartbeat is stale", "Error message recorded on recovered task runs")
 	driverRecoverStaleTasksCmd.Flags().BoolVar(&driverRecoverStaleJSON, "json", false, "JSON output")
-
-	driverCmd.AddCommand(driverRegisterCmd, driverRunCmd, driverExecTaskCmd, driverWorkTaskRunCmd, driverClaimReadyCmd, driverCompleteTaskCmd, driverReleaseTaskCmd, driverRecoverStaleTasksCmd)
-	cli.RegisterCommand(driverCmd)
 }
 
 func runDriverRegister(_ *cobra.Command, _ []string) error {
@@ -386,119 +411,35 @@ func runDriverRun(_ *cobra.Command, args []string) error {
 
 func runDriverExecTask(_ *cobra.Command, _ []string) error {
 	return cmdstore.WithStore(func(ctx context.Context, h *bootstrap.StoreHandle) error {
-		ws := firstNonEmpty(driverExecTaskWorkspaceKey, os.Getenv("LOOM_DRIVER_WORKSPACE"))
-		if ws == "" {
-			resolved, err := cmdstore.ActiveWorkspace(ctx, h.Store)
-			if err != nil {
-				return err
-			}
-			ws = resolved
-		}
-		driverRunID := firstNonEmpty(driverExecTaskDriverRunID, os.Getenv("LOOM_DRIVER_RUN_ID"))
-		driverStepID := firstNonEmpty(driverExecTaskDriverStepID, os.Getenv("LOOM_DRIVER_STEP_ID"))
-		nodeID := firstNonEmpty(driverExecTaskNodeID, os.Getenv("LOOM_DRIVER_NODE_ID"))
-		leaseID := firstNonEmpty(driverExecTaskLeaseID, os.Getenv("LOOM_DRIVER_LEASE_ID"))
-		fencingToken, err := resolveDriverRunFencingToken(driverExecTaskFencingToken)
+		opts, err := driverExecTaskOptions(ctx, h.Store)
 		if err != nil {
 			return err
 		}
-		outcome, err := driverpkg.RequestTaskRunWithResult(ctx, h.Store, driverpkg.TaskRunRequestOptions{
-			WorkspaceKey:       ws,
-			DriverRunID:        driverRunID,
-			DriverStepID:       driverStepID,
-			TaskRunID:          driverExecTaskTaskRunID,
-			TaskID:             driverExecTaskTaskID,
-			WorkerProfileID:    driverExecTaskWorkerProfileID,
-			ProviderProfile:    driverExecTaskProviderProfile,
-			ParentNodeID:       nodeID,
-			ParentLeaseID:      leaseID,
-			ParentFence:        fencingToken,
-			NodeID:             nodeID,
-			RunnerID:           driverExecTaskRunnerID,
-			LeaseToken:         firstNonEmpty(os.Getenv("LOOM_TASK_RUN_LEASE_TOKEN"), os.Getenv("LOOM_RUNNER_LEASE_TOKEN")),
-			SupportedProviders: driverExecTaskSupportedProviders,
-			Capabilities:       driverExecTaskCapabilities,
-			SandboxPlacement: domain.TaskRunPlacement{
-				Provider:  driverExecTaskSandboxProvider,
-				SandboxID: driverExecTaskSandboxID,
-				CWD:       driverExecTaskSandboxCWD,
-				RepoRef:   driverExecTaskSandboxRepoRef,
-			},
-			DeferCompletion: driverExecTaskDeferCompletion,
-		}, driverpkg.HostBridgeTaskExecutor{
+		outcome, err := driverpkg.RequestTaskRunWithResult(ctx, h.Store, opts, driverpkg.HostBridgeTaskExecutor{
 			Store:        h.Store,
 			WorktreePath: currentWorkingDir(),
 		})
 		if err != nil {
 			return fmt.Errorf("exec task: %w", err)
 		}
-		result := driverpkg.TaskRunResultFromOutcome(outcome)
-		if driverExecTaskJSON {
-			return cmdstore.WriteJSON(result)
-		}
-		fmt.Printf("Task run %s %s for task %s\n", result.ID, result.Status, result.TaskID)
-		if result.ErrorMessage != "" {
-			fmt.Println(result.ErrorMessage)
-		}
-		return nil
+		return writeTaskRunCommandResult(driverpkg.TaskRunResultFromOutcome(outcome), driverExecTaskJSON)
 	})
 }
 
 func runDriverWorkTaskRun(_ *cobra.Command, _ []string) error {
 	return cmdstore.WithStore(func(ctx context.Context, h *bootstrap.StoreHandle) error {
-		ws := firstNonEmpty(driverWorkTaskWorkspaceKey, os.Getenv("LOOM_WORKER_WORKSPACE"), os.Getenv("LOOM_DRIVER_WORKSPACE"))
-		if ws == "" {
-			resolved, err := cmdstore.ActiveWorkspace(ctx, h.Store)
-			if err != nil {
-				return err
-			}
-			ws = resolved
+		opts, err := driverWorkTaskRunOptions(ctx, h.Store)
+		if err != nil {
+			return err
 		}
-		nodeID := firstNonEmpty(driverWorkTaskNodeID, os.Getenv("LOOM_WORKER_NODE_ID"), os.Getenv("LOOM_DRIVER_NODE_ID"), defaultWorkerNodeID())
-		if nodeID == "" {
-			return fmt.Errorf("worker node id required: %w", domain.ErrInvalid)
-		}
-		runnerID := firstNonEmpty(driverWorkTaskRunnerID, os.Getenv("LOOM_WORKER_RUNNER_ID"), os.Getenv("LOOM_DRIVER_RUNNER_ID"))
-		outcome, err := driverpkg.ClaimAndExecuteTaskRunWithResult(ctx, h.Store, driverpkg.TaskRunWorkerOptions{
-			WorkspaceKey:       ws,
-			TaskRunID:          driverWorkTaskTaskRunID,
-			NodeID:             nodeID,
-			RunnerID:           runnerID,
-			LeaseID:            driverWorkTaskLeaseID,
-			LeaseToken:         firstNonEmpty(driverWorkTaskLeaseToken, os.Getenv("LOOM_TASK_RUN_LEASE_TOKEN"), os.Getenv("LOOM_RUNNER_LEASE_TOKEN")),
-			SupportedProviders: driverWorkTaskSupportedProviders,
-			Capabilities:       driverWorkTaskCapabilities,
-			WorkerProfileIDs:   driverWorkTaskWorkerProfileIDs,
-			RunnerPlacement: domain.TaskRunPlacement{
-				Provider:   driverWorkTaskRunnerProvider,
-				NodeID:     nodeID,
-				RunnerID:   runnerID,
-				ProcessRef: driverWorkTaskRunnerProcessRef,
-			},
-			SandboxPlacement: domain.TaskRunPlacement{
-				Provider:        driverWorkTaskSandboxProvider,
-				SandboxID:       driverWorkTaskSandboxID,
-				CWD:             driverWorkTaskSandboxCWD,
-				RepoRef:         driverWorkTaskSandboxRepoRef,
-				ImageOrSnapshot: driverWorkTaskSandboxImage,
-			},
-			DeferCompletion: driverWorkTaskDeferCompletion,
-		}, driverpkg.HostBridgeTaskExecutor{
+		outcome, err := driverpkg.ClaimAndExecuteTaskRunWithResult(ctx, h.Store, opts, driverpkg.HostBridgeTaskExecutor{
 			Store:        h.Store,
 			WorktreePath: currentWorkingDir(),
 		})
 		if err != nil {
 			return fmt.Errorf("work task run: %w", err)
 		}
-		result := driverpkg.TaskRunResultFromOutcome(outcome)
-		if driverWorkTaskJSON {
-			return cmdstore.WriteJSON(result)
-		}
-		fmt.Printf("Task run %s %s for task %s\n", result.ID, result.Status, result.TaskID)
-		if result.ErrorMessage != "" {
-			fmt.Println(result.ErrorMessage)
-		}
-		return nil
+		return writeTaskRunCommandResult(driverpkg.TaskRunResultFromOutcome(outcome), driverWorkTaskJSON)
 	})
 }
 
@@ -542,50 +483,166 @@ func runDriverCompleteTask(_ *cobra.Command, _ []string) error {
 		}
 		taskRunID := strings.TrimSpace(driverCompleteTaskTaskRunID)
 		if taskRunID != "" {
-			result, err := completeDriverTaskRun(ctx, h.Store.TaskRuns(), ws, taskRunID, driverTaskRunCompletionOptions{
-				TaskID:       driverCompleteTaskTaskID,
-				CompletionID: driverCompleteTaskCompletionID,
-				LeaseToken:   resolveDriverCompleteTaskLeaseToken(),
-				ArtifactIDs:  driverCompleteTaskArtifactIDs,
-				LogsRef:      driverCompleteTaskLogsRef,
-				ArtifactsRef: driverCompleteTaskArtifactsRef,
-				Reason:       driverCompleteTaskReason,
-			})
-			if err != nil {
-				return fmt.Errorf("complete task run: %w", err)
-			}
-			if driverCompleteTaskJSON {
-				return cmdstore.WriteJSON(result)
-			}
-			fmt.Printf("Completed task %s\n", result.ID)
-			return nil
+			return runDriverCompleteTaskRun(ctx, h.Store.TaskRuns(), ws, taskRunID)
 		}
-		if !driverCompleteTaskLegacyClose {
-			return fmt.Errorf("--task-run-id is required for fenced driver completion: %w", domain.ErrInvalid)
-		}
-		if strings.TrimSpace(driverCompleteTaskTaskID) == "" {
-			return fmt.Errorf("--task-id is required when --task-run-id is not provided: %w", domain.ErrInvalid)
-		}
-		actor := firstNonEmpty(driverCompleteTaskActor, driverRunActor(parent.RunID))
-		issueBackend, err := newDriverIssueBackend(h, ws, actor)
-		if err != nil {
-			return err
-		}
-		result, err := driverpkg.CompleteTask(ctx, issueBackend, driverpkg.TaskCompleteOptions{
-			TaskID:  driverCompleteTaskTaskID,
-			Reason:  driverCompleteTaskReason,
-			Session: driverCompleteTaskSession,
-			Force:   driverCompleteTaskForce,
-		})
-		if err != nil {
-			return fmt.Errorf("complete task: %w", err)
-		}
-		if driverCompleteTaskJSON {
-			return cmdstore.WriteJSON(result)
-		}
-		fmt.Printf("Completed task %s\n", result.ID)
-		return nil
+		return runDriverCompleteLegacyTask(ctx, h, ws, parent)
 	})
+}
+
+func driverExecTaskOptions(ctx context.Context, s store.Store) (driverpkg.TaskRunRequestOptions, error) {
+	ws, err := resolveDriverWorkspace(ctx, s, driverExecTaskWorkspaceKey, "LOOM_DRIVER_WORKSPACE")
+	if err != nil {
+		return driverpkg.TaskRunRequestOptions{}, err
+	}
+	nodeID := firstNonEmpty(driverExecTaskNodeID, os.Getenv("LOOM_DRIVER_NODE_ID"))
+	fencingToken, err := resolveDriverRunFencingToken(driverExecTaskFencingToken)
+	if err != nil {
+		return driverpkg.TaskRunRequestOptions{}, err
+	}
+	return driverpkg.TaskRunRequestOptions{
+		WorkspaceKey:       ws,
+		DriverRunID:        firstNonEmpty(driverExecTaskDriverRunID, os.Getenv("LOOM_DRIVER_RUN_ID")),
+		DriverStepID:       firstNonEmpty(driverExecTaskDriverStepID, os.Getenv("LOOM_DRIVER_STEP_ID")),
+		TaskRunID:          driverExecTaskTaskRunID,
+		TaskID:             driverExecTaskTaskID,
+		WorkerProfileID:    driverExecTaskWorkerProfileID,
+		ProviderProfile:    driverExecTaskProviderProfile,
+		ParentNodeID:       nodeID,
+		ParentLeaseID:      firstNonEmpty(driverExecTaskLeaseID, os.Getenv("LOOM_DRIVER_LEASE_ID")),
+		ParentFence:        fencingToken,
+		NodeID:             nodeID,
+		RunnerID:           driverExecTaskRunnerID,
+		LeaseToken:         firstNonEmpty(os.Getenv("LOOM_TASK_RUN_LEASE_TOKEN"), os.Getenv("LOOM_RUNNER_LEASE_TOKEN")),
+		SupportedProviders: driverExecTaskSupportedProviders,
+		Capabilities:       driverExecTaskCapabilities,
+		SandboxPlacement:   driverExecTaskSandboxPlacement(),
+		DeferCompletion:    driverExecTaskDeferCompletion,
+	}, nil
+}
+
+func driverExecTaskSandboxPlacement() domain.TaskRunPlacement {
+	return domain.TaskRunPlacement{
+		Provider:  driverExecTaskSandboxProvider,
+		SandboxID: driverExecTaskSandboxID,
+		CWD:       driverExecTaskSandboxCWD,
+		RepoRef:   driverExecTaskSandboxRepoRef,
+	}
+}
+
+func driverWorkTaskRunOptions(ctx context.Context, s store.Store) (driverpkg.TaskRunWorkerOptions, error) {
+	ws, err := resolveDriverWorkspace(ctx, s, driverWorkTaskWorkspaceKey, "LOOM_WORKER_WORKSPACE", "LOOM_DRIVER_WORKSPACE")
+	if err != nil {
+		return driverpkg.TaskRunWorkerOptions{}, err
+	}
+	nodeID := firstNonEmpty(driverWorkTaskNodeID, os.Getenv("LOOM_WORKER_NODE_ID"), os.Getenv("LOOM_DRIVER_NODE_ID"), defaultWorkerNodeID())
+	if nodeID == "" {
+		return driverpkg.TaskRunWorkerOptions{}, fmt.Errorf("worker node id required: %w", domain.ErrInvalid)
+	}
+	runnerID := firstNonEmpty(driverWorkTaskRunnerID, os.Getenv("LOOM_WORKER_RUNNER_ID"), os.Getenv("LOOM_DRIVER_RUNNER_ID"))
+	return driverpkg.TaskRunWorkerOptions{
+		WorkspaceKey:       ws,
+		TaskRunID:          driverWorkTaskTaskRunID,
+		NodeID:             nodeID,
+		RunnerID:           runnerID,
+		LeaseID:            driverWorkTaskLeaseID,
+		LeaseToken:         firstNonEmpty(driverWorkTaskLeaseToken, os.Getenv("LOOM_TASK_RUN_LEASE_TOKEN"), os.Getenv("LOOM_RUNNER_LEASE_TOKEN")),
+		SupportedProviders: driverWorkTaskSupportedProviders,
+		Capabilities:       driverWorkTaskCapabilities,
+		WorkerProfileIDs:   driverWorkTaskWorkerProfileIDs,
+		RunnerPlacement:    driverWorkTaskRunnerPlacement(nodeID, runnerID),
+		SandboxPlacement:   driverWorkTaskSandboxPlacement(),
+		DeferCompletion:    driverWorkTaskDeferCompletion,
+	}, nil
+}
+
+func driverWorkTaskRunnerPlacement(nodeID, runnerID string) domain.TaskRunPlacement {
+	return domain.TaskRunPlacement{
+		Provider:   driverWorkTaskRunnerProvider,
+		NodeID:     nodeID,
+		RunnerID:   runnerID,
+		ProcessRef: driverWorkTaskRunnerProcessRef,
+	}
+}
+
+func driverWorkTaskSandboxPlacement() domain.TaskRunPlacement {
+	return domain.TaskRunPlacement{
+		Provider:        driverWorkTaskSandboxProvider,
+		SandboxID:       driverWorkTaskSandboxID,
+		CWD:             driverWorkTaskSandboxCWD,
+		RepoRef:         driverWorkTaskSandboxRepoRef,
+		ImageOrSnapshot: driverWorkTaskSandboxImage,
+	}
+}
+
+func resolveDriverWorkspace(ctx context.Context, s store.Store, explicit string, envKeys ...string) (string, error) {
+	values := []string{explicit}
+	for _, key := range envKeys {
+		values = append(values, os.Getenv(key))
+	}
+	ws := firstNonEmpty(values...)
+	if ws != "" {
+		return ws, nil
+	}
+	return cmdstore.ActiveWorkspace(ctx, s)
+}
+
+func writeTaskRunCommandResult(result driverpkg.TaskRunRequestResult, asJSON bool) error {
+	if asJSON {
+		return cmdstore.WriteJSON(result)
+	}
+	fmt.Printf("Task run %s %s for task %s\n", result.ID, result.Status, result.TaskID)
+	if result.ErrorMessage != "" {
+		fmt.Println(result.ErrorMessage)
+	}
+	return nil
+}
+
+func runDriverCompleteTaskRun(ctx context.Context, taskRuns store.TaskRunStore, ws, taskRunID string) error {
+	result, err := completeDriverTaskRun(ctx, taskRuns, ws, taskRunID, driverTaskRunCompletionOptions{
+		TaskID:       driverCompleteTaskTaskID,
+		CompletionID: driverCompleteTaskCompletionID,
+		LeaseToken:   resolveDriverCompleteTaskLeaseToken(),
+		ArtifactIDs:  driverCompleteTaskArtifactIDs,
+		LogsRef:      driverCompleteTaskLogsRef,
+		ArtifactsRef: driverCompleteTaskArtifactsRef,
+		Reason:       driverCompleteTaskReason,
+	})
+	if err != nil {
+		return fmt.Errorf("complete task run: %w", err)
+	}
+	return writeCompletedTaskResult(result, driverCompleteTaskJSON)
+}
+
+func runDriverCompleteLegacyTask(ctx context.Context, h *bootstrap.StoreHandle, ws string, parent *domain.DriverRun) error {
+	if !driverCompleteTaskLegacyClose {
+		return fmt.Errorf("--task-run-id is required for fenced driver completion: %w", domain.ErrInvalid)
+	}
+	if strings.TrimSpace(driverCompleteTaskTaskID) == "" {
+		return fmt.Errorf("--task-id is required when --task-run-id is not provided: %w", domain.ErrInvalid)
+	}
+	actor := firstNonEmpty(driverCompleteTaskActor, driverRunActor(parent.RunID))
+	issueBackend, err := newDriverIssueBackend(h, ws, actor)
+	if err != nil {
+		return err
+	}
+	result, err := driverpkg.CompleteTask(ctx, issueBackend, driverpkg.TaskCompleteOptions{
+		TaskID:  driverCompleteTaskTaskID,
+		Reason:  driverCompleteTaskReason,
+		Session: driverCompleteTaskSession,
+		Force:   driverCompleteTaskForce,
+	})
+	if err != nil {
+		return fmt.Errorf("complete task: %w", err)
+	}
+	return writeCompletedTaskResult(result, driverCompleteTaskJSON)
+}
+
+func writeCompletedTaskResult(result *driverpkg.TaskMutationResult, asJSON bool) error {
+	if asJSON {
+		return cmdstore.WriteJSON(result)
+	}
+	fmt.Printf("Completed task %s\n", result.ID)
+	return nil
 }
 
 type driverTaskRunCompletionOptions struct {

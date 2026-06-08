@@ -273,69 +273,106 @@ func (e HostBridgeTaskExecutor) registerRunnerArtifacts(ctx context.Context, req
 	}
 	artifactIDs := normalizeArtifactIDs(result.ArtifactIDs)
 	for i, artifact := range artifacts {
-		artifactID := firstNonEmpty(artifact.ArtifactID, artifact.ArtifactIDCamel, artifact.ID)
-		if artifactID == "" {
-			artifactID = fmt.Sprintf("artifact-%s-%d", req.TaskRunID, i+1)
-		}
-		uri := strings.TrimSpace(artifact.URI)
-		if uri == "" {
-			artifactIDs = normalizeArtifactIDs(append(artifactIDs, artifactID))
-			continue
-		}
-		metadata := cloneStringMap(artifact.Metadata)
-		if metadata == nil {
-			metadata = map[string]string{}
-		}
-		metadata["driver_run_id"] = req.DriverRunID
-		metadata["provider_profile"] = req.ProviderProfile
-		contentHash := firstNonEmpty(artifact.ContentHash, artifact.ContentHashCamel, artifact.Checksum)
-		checksum := firstNonEmpty(artifact.Checksum, contentHash)
-		mimeType := firstNonEmpty(artifact.MIMEType, artifact.MIMETypeCamel)
-		sizeBytes := firstNonZeroInt64(artifact.SizeBytes, artifact.SizeBytesCamel)
-		summary := artifact.Summary
-		visibility := artifact.Visibility
-		redactionStatus := firstNonEmpty(artifact.RedactionStatus, artifact.RedactionStatusAlt)
-		if _, err := e.Store.Artifacts().Create(ctx, store.ArtifactCreate{
-			WorkspaceKey:    req.WorkspaceKey,
-			ArtifactID:      artifactID,
-			TaskID:          req.TaskID,
-			OwnerType:       "task_run",
-			OwnerID:         req.TaskRunID,
-			Type:            firstNonEmpty(artifact.Type, "artifact"),
-			Summary:         summary,
-			MIMEType:        mimeType,
-			Visibility:      visibility,
-			RedactionStatus: redactionStatus,
-			DurableStatus:   "declared",
-			Metadata:        metadata,
-		}); err != nil && !errors.Is(err, domain.ErrAlreadyExists) {
-			return TaskExecResult{}, fmt.Errorf("create runner artifact %q: %w", artifactID, err)
-		}
-		finalized, err := e.Store.Artifacts().Finalize(ctx, req.WorkspaceKey, artifactID, store.ArtifactFinalize{
-			URI:             &uri,
-			Summary:         optionalString(summary),
-			MIMEType:        optionalString(mimeType),
-			SizeBytes:       optionalInt64(sizeBytes),
-			Checksum:        optionalString(checksum),
-			ContentHash:     optionalString(contentHash),
-			Visibility:      optionalString(visibility),
-			RedactionStatus: optionalString(redactionStatus),
-			Metadata:        &metadata,
-		})
+		finalized, err := e.registerRunnerArtifact(ctx, req, artifact, i)
 		if err != nil {
-			return TaskExecResult{}, fmt.Errorf("finalize runner artifact %q: %w", artifactID, err)
+			return TaskExecResult{}, err
 		}
 		artifactIDs = normalizeArtifactIDs(append(artifactIDs, finalized.ArtifactID))
-		if result.RuntimeMetadata == nil {
-			result.RuntimeMetadata = map[string]string{}
-		}
-		result.RuntimeMetadata["artifact."+finalized.ArtifactID+".content_hash"] = finalized.ContentHash
+		result.RuntimeMetadata = recordRunnerArtifactMetadata(result.RuntimeMetadata, finalized)
 	}
 	result.ArtifactIDs = artifactIDs
 	if result.ArtifactsRef == "" && len(artifactIDs) > 0 {
 		result.ArtifactsRef = "artifacts://" + req.TaskRunID
 	}
 	return result, nil
+}
+
+func (e HostBridgeTaskExecutor) registerRunnerArtifact(ctx context.Context, req TaskExecRequest, artifact bridgeArtifact, index int) (*domain.Artifact, error) {
+	spec := runnerArtifactSpec(req, artifact, index)
+	if spec.uri == "" {
+		return &domain.Artifact{ArtifactID: spec.artifactID}, nil
+	}
+	if _, err := e.Store.Artifacts().Create(ctx, spec.create); err != nil && !errors.Is(err, domain.ErrAlreadyExists) {
+		return nil, fmt.Errorf("create runner artifact %q: %w", spec.artifactID, err)
+	}
+	finalized, err := e.Store.Artifacts().Finalize(ctx, req.WorkspaceKey, spec.artifactID, spec.finalize)
+	if err != nil {
+		return nil, fmt.Errorf("finalize runner artifact %q: %w", spec.artifactID, err)
+	}
+	return finalized, nil
+}
+
+type runnerArtifactRegistration struct {
+	artifactID string
+	uri        string
+	create     store.ArtifactCreate
+	finalize   store.ArtifactFinalize
+}
+
+func runnerArtifactSpec(req TaskExecRequest, artifact bridgeArtifact, index int) runnerArtifactRegistration {
+	artifactID := firstNonEmpty(artifact.ArtifactID, artifact.ArtifactIDCamel, artifact.ID)
+	if artifactID == "" {
+		artifactID = fmt.Sprintf("artifact-%s-%d", req.TaskRunID, index+1)
+	}
+	metadata := runnerArtifactMetadata(req, artifact)
+	contentHash := firstNonEmpty(artifact.ContentHash, artifact.ContentHashCamel, artifact.Checksum)
+	checksum := firstNonEmpty(artifact.Checksum, contentHash)
+	mimeType := firstNonEmpty(artifact.MIMEType, artifact.MIMETypeCamel)
+	redactionStatus := firstNonEmpty(artifact.RedactionStatus, artifact.RedactionStatusAlt)
+	return runnerArtifactRegistration{
+		artifactID: artifactID,
+		uri:        strings.TrimSpace(artifact.URI),
+		create:     runnerArtifactCreate(req, artifactID, artifact, mimeType, redactionStatus, metadata),
+		finalize: store.ArtifactFinalize{
+			URI:             optionalString(artifact.URI),
+			Summary:         optionalString(artifact.Summary),
+			MIMEType:        optionalString(mimeType),
+			SizeBytes:       optionalInt64(firstNonZeroInt64(artifact.SizeBytes, artifact.SizeBytesCamel)),
+			Checksum:        optionalString(checksum),
+			ContentHash:     optionalString(contentHash),
+			Visibility:      optionalString(artifact.Visibility),
+			RedactionStatus: optionalString(redactionStatus),
+			Metadata:        &metadata,
+		},
+	}
+}
+
+func runnerArtifactMetadata(req TaskExecRequest, artifact bridgeArtifact) map[string]string {
+	metadata := cloneStringMap(artifact.Metadata)
+	if metadata == nil {
+		metadata = map[string]string{}
+	}
+	metadata["driver_run_id"] = req.DriverRunID
+	metadata["provider_profile"] = req.ProviderProfile
+	return metadata
+}
+
+func runnerArtifactCreate(req TaskExecRequest, artifactID string, artifact bridgeArtifact, mimeType, redactionStatus string, metadata map[string]string) store.ArtifactCreate {
+	return store.ArtifactCreate{
+		WorkspaceKey:    req.WorkspaceKey,
+		ArtifactID:      artifactID,
+		TaskID:          req.TaskID,
+		OwnerType:       "task_run",
+		OwnerID:         req.TaskRunID,
+		Type:            firstNonEmpty(artifact.Type, "artifact"),
+		Summary:         artifact.Summary,
+		MIMEType:        mimeType,
+		Visibility:      artifact.Visibility,
+		RedactionStatus: redactionStatus,
+		DurableStatus:   "declared",
+		Metadata:        metadata,
+	}
+}
+
+func recordRunnerArtifactMetadata(metadata map[string]string, artifact *domain.Artifact) map[string]string {
+	if artifact == nil || artifact.ContentHash == "" {
+		return metadata
+	}
+	if metadata == nil {
+		metadata = map[string]string{}
+	}
+	metadata["artifact."+artifact.ArtifactID+".content_hash"] = artifact.ContentHash
+	return metadata
 }
 
 func optionalString(value string) *string {
@@ -446,13 +483,64 @@ func (e HostBridgeTaskExecutor) finalizeAndApplyPatch(ctx context.Context, req T
 	if e.Store == nil {
 		return TaskExecResult{}, fmt.Errorf("store required for patch artifact finalization: %w", domain.ErrInvalid)
 	}
+	spec := patchArtifactSpec(req, runner)
+	finalized, err := e.finalizePatchArtifact(ctx, req, spec, patch)
+	if err != nil {
+		return TaskExecResult{}, err
+	}
+	result = recordPatchArtifactResult(req, result, finalized)
+	if strings.TrimSpace(e.WorktreePath) == "" || strings.TrimSpace(spec.baseRef) == "" {
+		result = patchBackBaseRequiredResult(result)
+		return result, nil
+	}
+	patchBack, err := ApplyPatchBack(ctx, PatchBackOptions{
+		WorktreePath: e.WorktreePath,
+		BaseRef:      spec.baseRef,
+		Patch:        patch,
+	})
+	if err != nil {
+		return TaskExecResult{}, err
+	}
+	return applyPatchBackResult(result, patchBack), nil
+}
+
+type patchArtifactRegistration struct {
+	artifactID string
+	mimeType   string
+	baseRef    string
+	create     store.ArtifactCreate
+}
+
+func patchArtifactSpec(req TaskExecRequest, runner bridgeTaskRunnerResult) patchArtifactRegistration {
 	artifactID := firstNonEmpty(runner.PatchArtifactID, runner.PatchArtifactIDCamel)
 	if artifactID == "" {
 		artifactID = "patch-" + req.TaskRunID
 	}
-	summary := firstNonEmpty(runner.PatchSummary, runner.PatchSummaryCamel, "task patch")
-	mimeType := firstNonEmpty(runner.PatchMIMEType, runner.PatchMIMETypeCamel, "text/x-diff")
 	baseRef := firstNonEmpty(runner.PatchBaseRef, runner.PatchBaseRefCamel, runner.BaseRef, runner.BaseRefCamel)
+	metadata := patchArtifactMetadata(req, baseRef)
+	mimeType := firstNonEmpty(runner.PatchMIMEType, runner.PatchMIMETypeCamel, "text/x-diff")
+	return patchArtifactRegistration{
+		artifactID: artifactID,
+		mimeType:   mimeType,
+		baseRef:    baseRef,
+		create: store.ArtifactCreate{
+			WorkspaceKey:    req.WorkspaceKey,
+			ArtifactID:      artifactID,
+			TaskID:          req.TaskID,
+			OwnerType:       "task_run",
+			OwnerID:         req.TaskRunID,
+			Type:            "patch",
+			Summary:         firstNonEmpty(runner.PatchSummary, runner.PatchSummaryCamel, "task patch"),
+			MIMEType:        mimeType,
+			Visibility:      firstNonEmpty(runner.PatchVisibility, runner.PatchVisibilityCamel),
+			RedactionStatus: firstNonEmpty(runner.PatchRedactionStatus, runner.PatchRedactionStatusAlt),
+			DurableStatus:   "declared",
+			Metadata:        metadata,
+		},
+	}
+}
+
+func patchArtifactMetadata(req TaskExecRequest, baseRef string) map[string]string {
 	metadata := map[string]string{
 		"driver_run_id":    req.DriverRunID,
 		"provider_profile": req.ProviderProfile,
@@ -460,35 +548,30 @@ func (e HostBridgeTaskExecutor) finalizeAndApplyPatch(ctx context.Context, req T
 	if baseRef != "" {
 		metadata["patch_base_ref"] = baseRef
 	}
-	if _, err := e.Store.Artifacts().Create(ctx, store.ArtifactCreate{
-		WorkspaceKey:    req.WorkspaceKey,
-		ArtifactID:      artifactID,
-		TaskID:          req.TaskID,
-		OwnerType:       "task_run",
-		OwnerID:         req.TaskRunID,
-		Type:            "patch",
-		Summary:         summary,
-		MIMEType:        mimeType,
-		Visibility:      firstNonEmpty(runner.PatchVisibility, runner.PatchVisibilityCamel),
-		RedactionStatus: firstNonEmpty(runner.PatchRedactionStatus, runner.PatchRedactionStatusAlt),
-		DurableStatus:   "declared",
-		Metadata:        metadata,
-	}); err != nil {
-		return TaskExecResult{}, fmt.Errorf("create patch artifact: %w", err)
+	return metadata
+}
+
+func (e HostBridgeTaskExecutor) finalizePatchArtifact(ctx context.Context, req TaskExecRequest, spec patchArtifactRegistration, patch []byte) (*domain.Artifact, error) {
+	if _, err := e.Store.Artifacts().Create(ctx, spec.create); err != nil {
+		return nil, fmt.Errorf("create patch artifact: %w", err)
 	}
-	uploaded, err := e.Store.Artifacts().UploadContent(ctx, req.WorkspaceKey, artifactID, store.ArtifactContentUpload{
+	uploaded, err := e.Store.Artifacts().UploadContent(ctx, req.WorkspaceKey, spec.artifactID, store.ArtifactContentUpload{
 		Body:     bytes.NewReader(patch),
-		MIMEType: mimeType,
+		MIMEType: spec.mimeType,
 	})
 	if err != nil {
-		return TaskExecResult{}, fmt.Errorf("upload patch artifact: %w", err)
+		return nil, fmt.Errorf("upload patch artifact: %w", err)
 	}
-	finalized, err := e.Store.Artifacts().Finalize(ctx, req.WorkspaceKey, artifactID, store.ArtifactFinalize{
+	finalized, err := e.Store.Artifacts().Finalize(ctx, req.WorkspaceKey, spec.artifactID, store.ArtifactFinalize{
 		ContentHash: &uploaded.ContentHash,
 	})
 	if err != nil {
-		return TaskExecResult{}, fmt.Errorf("finalize patch artifact: %w", err)
+		return nil, fmt.Errorf("finalize patch artifact: %w", err)
 	}
+	return finalized, nil
+}
+
+func recordPatchArtifactResult(req TaskExecRequest, result TaskExecResult, finalized *domain.Artifact) TaskExecResult {
 	result.ArtifactIDs = normalizeArtifactIDs(append(result.ArtifactIDs, finalized.ArtifactID))
 	if result.ArtifactsRef == "" {
 		result.ArtifactsRef = "artifacts://" + req.TaskRunID
@@ -498,24 +581,21 @@ func (e HostBridgeTaskExecutor) finalizeAndApplyPatch(ctx context.Context, req T
 	}
 	result.RuntimeMetadata["patch_artifact_id"] = finalized.ArtifactID
 	result.RuntimeMetadata["patch_content_hash"] = finalized.ContentHash
-	if strings.TrimSpace(e.WorktreePath) == "" || strings.TrimSpace(baseRef) == "" {
-		result.Status = domain.TaskRunFailed
-		if result.ExitCode == 0 {
-			result.ExitCode = 1
-		}
-		result.ErrorClass = "patch_back_base_required"
-		result.ErrorMessage = "patch artifact requires worktree path and base ref for local patch-back"
-		result.RuntimeMetadata["patch_back_status"] = PatchBackBaseUnreachable
-		return result, nil
+	return result
+}
+
+func patchBackBaseRequiredResult(result TaskExecResult) TaskExecResult {
+	result.Status = domain.TaskRunFailed
+	if result.ExitCode == 0 {
+		result.ExitCode = 1
 	}
-	patchBack, err := ApplyPatchBack(ctx, PatchBackOptions{
-		WorktreePath: e.WorktreePath,
-		BaseRef:      baseRef,
-		Patch:        patch,
-	})
-	if err != nil {
-		return TaskExecResult{}, err
-	}
+	result.ErrorClass = "patch_back_base_required"
+	result.ErrorMessage = "patch artifact requires worktree path and base ref for local patch-back"
+	result.RuntimeMetadata["patch_back_status"] = PatchBackBaseUnreachable
+	return result
+}
+
+func applyPatchBackResult(result TaskExecResult, patchBack *PatchBackResult) TaskExecResult {
 	result.RuntimeMetadata["patch_back_status"] = patchBack.Status
 	if patchBack.BaseSHA != "" {
 		result.RuntimeMetadata["patch_back_base_sha"] = patchBack.BaseSHA
@@ -524,7 +604,7 @@ func (e HostBridgeTaskExecutor) finalizeAndApplyPatch(ctx context.Context, req T
 		result.RuntimeMetadata["patch_back_head_sha"] = patchBack.CurrentHEAD
 	}
 	if patchBack.Applied {
-		return result, nil
+		return result
 	}
 	result.Status = domain.TaskRunFailed
 	if result.ExitCode == 0 {
@@ -533,7 +613,7 @@ func (e HostBridgeTaskExecutor) finalizeAndApplyPatch(ctx context.Context, req T
 	result.ErrorClass = firstNonEmpty(patchBack.ErrorClass, patchBack.Status)
 	result.ErrorMessage = patchBack.ErrorMessage
 	result.RuntimeMetadata["patch_preserved"] = "true"
-	return result, nil
+	return result
 }
 
 func firstNonNilStrings(values ...[]string) []string {
