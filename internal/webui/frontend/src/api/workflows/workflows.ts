@@ -7,7 +7,7 @@ export type WorkflowRunStatus =
   | "running"
   | "completed"
   | "failed"
-  | "needs_human"
+  | "needs_review"
   | "cancelled";
 
 export interface WorkflowRun {

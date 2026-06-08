@@ -140,7 +140,7 @@ export async function run(ctx) {
       completed.push(task.id);
     } else {
       await loom.tasks.release(task.id);
-      return loom.needsHuman({
+      return loom.needsReview({
         summary: "Task failed: " + task.id,
         taskRunId: result.id,
         logsRef: result.logsRef || "",
@@ -293,7 +293,7 @@ for _ in $(seq 1 120); do
   if [[ "$status" == "completed" ]]; then
     break
   fi
-  if [[ "$status" == "failed" || "$status" == "needs_human" || "$status" == "cancelled" ]]; then
+  if [[ "$status" == "failed" || "$status" == "needs_review" || "$status" == "cancelled" ]]; then
     echo "driver run reached terminal status ${status}" >&2
     jq . <<<"$run_json" >&2
     exit 1
@@ -376,7 +376,7 @@ for _ in $(seq 1 120); do
   if [[ "$retry_status" == "completed" ]]; then
     break
   fi
-  if [[ "$retry_status" == "failed" || "$retry_status" == "needs_human" || "$retry_status" == "cancelled" ]]; then
+  if [[ "$retry_status" == "failed" || "$retry_status" == "needs_review" || "$retry_status" == "cancelled" ]]; then
     echo "retry driver run reached terminal status ${retry_status}" >&2
     jq . <<<"$retry_json" >&2
     exit 1

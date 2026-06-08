@@ -393,7 +393,7 @@ Prove the primary lead-agent workflow:
 - Driver terminal outcomes:
   - `completed`;
   - `failed`;
-  - `needs_human`.
+  - `needs_review`.
 - Lead-agent handoff payload containing failed task, child run, logs, artifacts,
   and suggested next action.
 
@@ -423,7 +423,7 @@ export async function run(ctx) {
       await loom.tasks.complete(task.id); // FleetDB unlocks dependents
     } else {
       await loom.tasks.release(task.id);
-      return loom.needsHuman({
+      return loom.needsReview({
         summary: `Task ${task.id} failed`,
         taskRunId: result.id,
       });
@@ -603,7 +603,7 @@ These tests should be added as phases land.
 ### Phase 3 Tests
 
 - Epic DAG `A -> B,C -> D` completes in correct order.
-- Failure in `B` prevents `D` and returns `needs_human`.
+- Failure in `B` prevents `D` and returns `needs_review`.
 - Lead agent can display the failed task, child run, logs, and artifact refs.
 
 ### Phase 4 Tests

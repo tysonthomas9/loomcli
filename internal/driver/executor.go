@@ -100,9 +100,8 @@ func (e *Executor) RunOnce(ctx context.Context) (*ExecutionResult, error) {
 	runResult, runErr := runner.Run(ctx, req)
 	if runErr != nil {
 		runResult = RunResult{Status: domain.DriverRunFailed, Summary: runErr.Error(), ErrorClass: "driver_runtime"}
-	}
-	if !runResult.Status.IsTerminal() {
-		runResult.Status = domain.DriverRunCompleted
+	} else {
+		runResult = requireExplicitTerminalRunResult(runResult)
 	}
 	result.Final, err = e.finish(ctx, claimed, runResult)
 	if err != nil {
@@ -466,7 +465,7 @@ func (r NodeRunner) runBuiltFlueServer(ctx context.Context, req RunRequest, node
 	}
 	out := strings.TrimSpace(stdout.String())
 	if out == "" {
-		return RunResult{Status: domain.DriverRunCompleted, Summary: "completed", Output: flueRunOutput(req, stdout.String(), stderr.String())}, nil
+		return invalidDriverResult(req, "Flue workflow returned no result", stdout.String(), stderr.String()), nil
 	}
 	lines := strings.Split(out, "\n")
 	var payload struct {
@@ -475,7 +474,7 @@ func (r NodeRunner) runBuiltFlueServer(ctx context.Context, req RunRequest, node
 		ErrorClass string                 `json:"errorClass"`
 	}
 	if err := json.Unmarshal([]byte(lines[len(lines)-1]), &payload); err != nil {
-		return RunResult{}, fmt.Errorf("decode Flue runtime result: %w", err)
+		return invalidDriverResult(req, fmt.Sprintf("decode Flue runtime result: %v", err), stdout.String(), stderr.String()), nil
 	}
 	result := RunResult{Status: payload.Status, Summary: payload.Summary, ErrorClass: payload.ErrorClass, Output: flueRunOutput(req, stdout.String(), stderr.String())}
 	if result.Status == domain.DriverRunFailed {
@@ -487,7 +486,34 @@ func (r NodeRunner) runBuiltFlueServer(ctx context.Context, req RunRequest, node
 			}
 		}
 	}
-	return result, nil
+	return requireExplicitTerminalRunResult(result), nil
+}
+
+func requireExplicitTerminalRunResult(result RunResult) RunResult {
+	if result.Status.IsTerminal() {
+		return result
+	}
+	detail := "driver result missing terminal status"
+	if result.Status != "" {
+		detail = fmt.Sprintf("driver result status %q is not terminal", result.Status)
+	}
+	summary := detail
+	if existing := strings.TrimSpace(result.Summary); existing != "" {
+		summary += ": " + existing
+	}
+	result.Status = domain.DriverRunFailed
+	result.Summary = summary
+	result.ErrorClass = "invalid_driver_result"
+	return result
+}
+
+func invalidDriverResult(req RunRequest, summary, stdout, stderr string) RunResult {
+	return RunResult{
+		Status:     domain.DriverRunFailed,
+		Summary:    summary,
+		ErrorClass: "invalid_driver_result",
+		Output:     flueRunOutput(req, stdout, stderr),
+	}
 }
 
 func flueRunOutput(req RunRequest, stdout, stderr string) map[string]string {

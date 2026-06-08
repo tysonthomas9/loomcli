@@ -48,7 +48,7 @@ export async function run(ctx: WorkflowContext) {
     }
 
     await loom.tasks.release(task.id);
-    return loom.needsHuman({
+    return loom.needsReview({
       summary: 'Task failed: ' + task.id,
       taskRunId: result.id,
       logsRef: result.logsRef ?? result.logs_ref ?? '',

@@ -79,6 +79,46 @@ func TestExecutorRunOnceClaimsVerifiesAndFinishes(t *testing.T) {
 	}
 }
 
+func TestExecutorRunOnceFailsNonTerminalRunnerResult(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	st := memstore.New()
+	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "TEST", Name: "test"}); err != nil {
+		t.Fatalf("Create workspace: %v", err)
+	}
+	writeFlueDist(t, root, "epic-runner", "done")
+	registered, err := RegisterFlueDriver(ctx, st, RegisterFlueOptions{WorkspaceKey: "TEST", WorkDir: root, DistPath: "dist", DriverName: "epic-runner", CreatedBy: "tester", Activate: true})
+	if err != nil {
+		t.Fatalf("RegisterFlueDriver: %v", err)
+	}
+	if _, err := CreateDriverRun(ctx, st, RunOptions{
+		WorkspaceKey: "TEST",
+		DriverID:     registered.Driver.DriverID,
+		RunID:        "run-1",
+	}); err != nil {
+		t.Fatalf("CreateDriverRun: %v", err)
+	}
+
+	result, err := (&Executor{
+		Store:             st,
+		WorkspaceKey:      "TEST",
+		WorkDir:           root,
+		NodeID:            "node-1",
+		LeaseID:           "lease-1",
+		Runner:            &recordingRunner{result: RunResult{Status: domain.DriverRunRunning, Summary: "still working"}},
+		HeartbeatInterval: -1,
+	}).RunOnce(ctx)
+	if err != nil {
+		t.Fatalf("RunOnce: %v", err)
+	}
+	if result.Final == nil || result.Final.Status != domain.DriverRunFailed || result.Final.ErrorClass != "invalid_driver_result" {
+		t.Fatalf("final = %+v, want failed invalid_driver_result", result.Final)
+	}
+	if result.Final.Summary != `driver result status "running" is not terminal: still working` {
+		t.Fatalf("summary = %q, want non-terminal status detail", result.Final.Summary)
+	}
+}
+
 func TestExecutorRunOnceFailsTamperedBundleBeforeRunner(t *testing.T) {
 	ctx := context.Background()
 	root := t.TempDir()
@@ -209,6 +249,55 @@ func TestNodeRunnerRunsRegisteredNativeFlueArtifact(t *testing.T) {
 	}
 	if result.Output["logs_ref"] != "driver-run://run-1/flue-local" || result.Output["runtime"] != RuntimeFlueNode {
 		t.Fatalf("output = %+v, want driver-run logs ref and flue-node runtime", result.Output)
+	}
+}
+
+func TestNodeRunnerFailsWhenRuntimeReturnsNoResult(t *testing.T) {
+	root := t.TempDir()
+	nodePath := writeExecutable(t, root, "fake-node", "#!/bin/sh\nexit 0\n")
+	result, err := (NodeRunner{NodePath: nodePath}).Run(context.Background(), RunRequest{
+		Run: &domain.DriverRun{
+			WorkspaceKey:    "TEST",
+			RunID:           "run-empty",
+			Payload:         json.RawMessage(`{}`),
+			DriverID:        "driver-1",
+			DriverVersionID: "version-1",
+		},
+		BundleRoot: root,
+		ServerPath: filepath.Join(root, "dist", "server.mjs"),
+		Manifest:   map[string]string{"workflow_name": "epic-runner"},
+	})
+	if err != nil {
+		t.Fatalf("NodeRunner.Run: %v", err)
+	}
+	if result.Status != domain.DriverRunFailed || result.ErrorClass != "invalid_driver_result" || result.Summary != "Flue workflow returned no result" {
+		t.Fatalf("result = %+v, want failed invalid_driver_result for empty output", result)
+	}
+}
+
+func TestNodeRunnerFailsWhenWorkflowResultIsMissingTerminalStatus(t *testing.T) {
+	root := t.TempDir()
+	nodePath := writeExecutable(t, root, "fake-node", "#!/bin/sh\nprintf '%s\\n' '{\"summary\":\"done\"}'\n")
+	result, err := (NodeRunner{NodePath: nodePath}).Run(context.Background(), RunRequest{
+		Run: &domain.DriverRun{
+			WorkspaceKey:    "TEST",
+			RunID:           "run-missing-status",
+			Payload:         json.RawMessage(`{}`),
+			DriverID:        "driver-1",
+			DriverVersionID: "version-1",
+		},
+		BundleRoot: root,
+		ServerPath: filepath.Join(root, "dist", "server.mjs"),
+		Manifest:   map[string]string{"workflow_name": "epic-runner"},
+	})
+	if err != nil {
+		t.Fatalf("NodeRunner.Run: %v", err)
+	}
+	if result.Status != domain.DriverRunFailed || result.ErrorClass != "invalid_driver_result" {
+		t.Fatalf("result = %+v, want failed invalid_driver_result", result)
+	}
+	if result.Summary != "driver result missing terminal status: done" {
+		t.Fatalf("summary = %q, want missing status detail", result.Summary)
 	}
 }
 
@@ -367,6 +456,15 @@ func waitForFile(t *testing.T, path string) {
 		time.Sleep(10 * time.Millisecond)
 	}
 	t.Fatalf("timed out waiting for %s", path)
+}
+
+func writeExecutable(t *testing.T, dir, name, content string) string {
+	t.Helper()
+	path := filepath.Join(dir, name)
+	if err := os.WriteFile(path, []byte(content), 0o755); err != nil {
+		t.Fatalf("write executable: %v", err)
+	}
+	return path
 }
 
 func TestExecutorScansWorkspacesAndReportsNoQueuedRun(t *testing.T) {

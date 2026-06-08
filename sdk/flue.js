@@ -39,11 +39,11 @@ export class FlueDriverClient {
     };
   }
 
-  needsHuman(input = {}) {
+  needsReview(input = {}) {
     return {
-      status: "needs_human",
-      summary: input.summary || "needs human",
-      errorClass: input.errorClass || input.error_class || "needs_human",
+      status: "needs_review",
+      summary: input.summary || "needs review",
+      errorClass: input.errorClass || input.error_class || "needs_review",
       taskRunId: input.taskRunId || input.task_run_id,
       logsRef: input.logsRef || input.logs_ref,
       artifactsRef: input.artifactsRef || input.artifacts_ref,

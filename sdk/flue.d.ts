@@ -1,5 +1,5 @@
 export interface FlueDriverResult {
-  status: "completed" | "failed" | "needs_human" | "cancelled" | string;
+  status: "completed" | "failed" | "needs_review" | "cancelled" | string;
   summary?: string;
   errorClass?: string;
   taskRunId?: string;
@@ -86,7 +86,7 @@ export declare class FlueDriverClient {
 
   completed(input?: { summary?: string }): FlueDriverResult;
   failed(input?: { summary?: string; errorClass?: string; error_class?: string }): FlueDriverResult;
-  needsHuman(input?: {
+  needsReview(input?: {
     summary?: string;
     errorClass?: string;
     error_class?: string;

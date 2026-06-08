@@ -301,7 +301,7 @@ wait_for_completed_run() {
       completed)
         return 0
         ;;
-      failed|needs_human|cancelled)
+      failed|needs_review|cancelled)
         echo "driver run reached terminal status ${status}" >&2
         jq . <<<"$run_json" >&2
         exit 1

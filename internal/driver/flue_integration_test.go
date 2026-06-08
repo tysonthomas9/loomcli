@@ -111,7 +111,7 @@ export async function run(ctx) {
     });
     if (result.status !== "completed") {
       await loom.tasks.release(task.id);
-      return loom.needsHuman({ summary: "failed:" + task.id, taskRunId: result.id });
+      return loom.needsReview({ summary: "failed:" + task.id, taskRunId: result.id });
     }
     await loom.tasks.complete(task.id);
     completed.push(task.id);
