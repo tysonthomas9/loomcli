@@ -82,6 +82,7 @@ type Client struct {
 	leases     *agentLeaseStore
 	ownership  *agentOwnershipLeaseStore
 	commands   *agentCommandStore
+	workers    *workerStore
 	roles      *roleStore
 	daemon     *daemonStore
 }
@@ -114,6 +115,7 @@ func New(cfg Config) (*Client, error) {
 	c.leases = &agentLeaseStore{client: c}
 	c.ownership = &agentOwnershipLeaseStore{client: c}
 	c.commands = &agentCommandStore{client: c}
+	c.workers = &workerStore{client: c}
 	c.roles = &roleStore{client: c}
 	c.daemon = &daemonStore{client: c}
 	return c, nil
@@ -149,6 +151,9 @@ func (c *Client) AgentLeases() store.AgentLeaseStore { return c.leases }
 func (c *Client) AgentOwnershipLeases() store.AgentOwnershipLeaseStore { return c.ownership }
 
 func (c *Client) AgentCommands() store.AgentCommandStore { return c.commands }
+
+// Workers returns the WorkerStore.
+func (c *Client) Workers() store.WorkerStore { return c.workers }
 
 // Roles returns the RoleStore.
 func (c *Client) Roles() store.RoleStore { return c.roles }
@@ -250,6 +255,10 @@ func classifyHTTPError(method, path string, status int, body []byte) error {
 		return fmt.Errorf("%s: %w", prefix, domain.ErrAlreadyExists)
 	case http.StatusBadRequest, http.StatusUnprocessableEntity:
 		return fmt.Errorf("%s: %w", prefix, domain.ErrInvalid)
+	case http.StatusGone:
+		// fleet-db heartbeat: lease exists, token is ours, but it is no
+		// longer live (expired or released) — re-acquire is safe.
+		return fmt.Errorf("%s: %w", prefix, domain.ErrGone)
 	}
 	if status >= 400 && status < 500 {
 		return fmt.Errorf("%s: %w", prefix, domain.ErrConflict)

@@ -95,6 +95,12 @@ type Supervisor struct {
 	// means use the package default (backendUnavailableRecheckInterval). Tests set a
 	// small value to avoid the 30s wait.
 	backendRecheckInterval time.Duration
+
+	// maxRetriesParkInterval is the fixed delay computeBackoff returns once an
+	// agent has exhausted its restart budget and parked (StopReasonMaxRetriesParked).
+	// Zero means use the package default (defaultMaxRetriesParkInterval). Tests set
+	// a small value to avoid the 60s wait.
+	maxRetriesParkInterval time.Duration
 }
 
 // NewAgent creates an AgentProcess from an agent entry, resolving the worktree path
@@ -244,7 +250,7 @@ func (s *Supervisor) superviseAgent(ap *AgentProcess) {
 
 		s.clearAgentSessionState(ap)
 
-		if !s.acquireAgentOwnership(ap) {
+		if s.acquireAgentOwnership(ap) != ownershipAcquired {
 			if !s.sleepBeforeOwnershipRetry(ap) {
 				return
 			}
@@ -277,6 +283,7 @@ func (s *Supervisor) superviseAgent(ap *AgentProcess) {
 		}
 
 		s.spawnAndWait(ap)
+		s.recordResumeOutcome(ap) // resume-failure accounting (resume-first / cold-start fallback)
 
 		releaseOwnership()
 		s.postExitCleanup(ap)
@@ -291,7 +298,11 @@ func (s *Supervisor) superviseAgent(ap *AgentProcess) {
 		}
 
 		if !s.shouldRestart(ap) {
-			slog.Warn("max restarts exceeded, stopping supervisor", "worktree", ap.Entry.Worktree)
+			// Terminal stops only: fatal (auth/billing), fast-fail
+			// (deterministic / park-budget escalation), or the
+			// max_retries=0 fail-fast opt-out. Budget exhaustion on
+			// retryable classes parks-and-retries instead (returns true).
+			slog.Warn("supervisor stopping (terminal)", "worktree", ap.Entry.Worktree)
 			return
 		}
 
@@ -346,6 +357,8 @@ func (s *Supervisor) clearAgentSessionState(ap *AgentProcess) {
 	ap.TranscriptPath = ""
 	ap.BeforeRef = ""
 	ap.AssignedTaskID = ""
+	ap.ResumeTaskID = ""          // per-cycle; re-detected in preFlightSetup (ResumeFailures persists)
+	ap.RecoveryMode = recoverCold // per-cycle; re-classified in preFlightSetup
 	ap.LastActivity = time.Time{}
 	ap.Mu.Unlock()
 }
@@ -377,11 +390,40 @@ func (s *Supervisor) RecordAgentActivity(agentName string, at time.Time) {
 	target.Mu.Unlock()
 }
 
-// preFlightSetup runs recovery, assigns epic, creates session, and clears yield file.
+// preFlightSetup verifies the backend is spawnable, then runs recovery,
+// assigns epic, creates session, and clears yield file.
+//
+// Resume-first / checkpoint-fallback: when the worktree carries a genuine crash
+// remnant (a dead agent PID with a carried Claude session + task within TTL),
+// RESUME the interrupted task — preserve the lock, the in-progress worktree
+// files, and the fleet claim so the agent can `--resume` — instead of the
+// destructive recoverAgent path, which deletes the lock (discarding the session
+// id) and orphans the task. After repeated resume failures it escalates to a
+// CHECKPOINT retry of the same task (re-claim, but cold-start with the prior
+// attempt's diff injected) before finally cold-starting a fresh task. See
+// detectRecovery.
 func (s *Supervisor) preFlightSetup(ap *AgentProcess) bool {
-	if err := s.recoverAgent(ap, 0); err != nil {
-		slog.Warn("pre-flight recovery failed", "worktree", ap.Entry.Worktree, "err", err)
+	if err := s.gateBackendAvailable(ap); err != nil {
+		return false
 	}
+
+	taskID, mode := s.detectRecovery(ap)
+	switch mode {
+	case recoverResume:
+		s.prepareResume(ap, taskID)
+	case recoverCheckpoint:
+		s.prepareCheckpointRetry(ap, taskID)
+	default: // recoverCold
+		ap.Mu.Lock()
+		ap.ResumeFailures = 0 // cold-starting ⇒ let a future interruption recover again
+		ap.Mu.Unlock()
+		if err := s.recoverAgent(ap, 0); err != nil {
+			slog.Warn("pre-flight recovery failed", "worktree", ap.Entry.Worktree, "err", err)
+		}
+	}
+	ap.Mu.Lock()
+	ap.RecoveryMode = mode // consumed by recordResumeOutcome after the run
+	ap.Mu.Unlock()
 
 	if err := ClearYieldFile(ap.WorktreePath); err != nil {
 		slog.Warn("failed to clear stale yield file", "worktree", ap.Entry.Worktree, "err", err)
@@ -630,6 +672,24 @@ func (s *Supervisor) completeControlPlaneAgentSession(ap *AgentProcess, input ag
 		}
 	}
 	s.releaseAssignedTaskClaim(ap, input.taskID)
+	s.deregisterWorker(ap)
+}
+
+// deregisterWorker removes the agent's fleet-db worker registration on exit,
+// keyed by the claim actor (ap.Entry.Worktree). This is the graceful fast path:
+// it collapses the common stop/drain case to instant board cleanup and releases
+// any issue lock the worker still holds. Best-effort and idempotent — the
+// server-side worker TTL + sweeper are the backstop for non-graceful death.
+func (s *Supervisor) deregisterWorker(ap *AgentProcess) {
+	if s.ControlStore == nil || s.WorkspaceID == "" || ap.Entry.Worktree == "" {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), controlPlaneOperationTimeout)
+	defer cancel()
+	if err := s.ControlStore.Workers().Deregister(ctx, s.WorkspaceID, ap.Entry.Worktree); err != nil {
+		slog.Debug("supervisor worker deregister failed",
+			"workspace", s.WorkspaceID, "worker_id", ap.Entry.Worktree, "err", err)
+	}
 }
 
 // spawnAndWait spawns the agent and waits for it to exit. A spawn failure is
@@ -639,14 +699,12 @@ func (s *Supervisor) completeControlPlaneAgentSession(ap *AgentProcess, input ag
 func (s *Supervisor) spawnAndWait(ap *AgentProcess) {
 	if err := s.spawnAgent(ap); err != nil {
 		if errors.Is(err, ErrBackendUnavailable) {
-			// Gate fired before buildCommand: gateBackendAvailable already set
-			// the BackendUnavailable state/error, and no session or subprocess
-			// was created, so there's nothing to finalize. Release concurrency
-			// and return; the single restart decision parks the agent —
-			// shouldRestart treats BackendUnavailable as retry-without-budget-
-			// erosion and computeBackoff returns the fixed backend re-check
-			// interval. The loop re-runs the gate next iteration and
-			// auto-recovers once the binary reappears.
+			// gateBackendAvailable already set the BackendUnavailable state/error.
+			// The normal pre-flight gate runs before task claim, but this spawn-time
+			// gate remains as a race guard for a backend disappearing after claim and
+			// before exec. Clean up any already-created session/claim/worker before
+			// parking so the task is immediately claimable again.
+			s.completeBackendUnavailableCleanup(ap)
 			s.Concurrency.Release(ap.Entry.Role)
 			return
 		}
@@ -686,93 +744,6 @@ func (s *Supervisor) spawnAndWait(ap *AgentProcess) {
 	s.handleEpicTransition(ap)
 }
 
-type agentSessionFinalizeState struct {
-	session    *sessions.Session
-	sessionID  string
-	leaseID    string
-	leaseToken string
-	beforeRef  string
-}
-
-// finalizeAgentSession finalizes the daemon-created session after agent exit.
-func (s *Supervisor) finalizeAgentSession(ap *AgentProcess, exitCode int) {
-	state := takeAgentSessionForFinalize(ap)
-	if state.session == nil && state.sessionID == "" {
-		return
-	}
-	taskID := s.taskIDForFinalize(ap)
-	errClass := agentErrorClass(ap)
-	diffResult := finalizeLocalSession(state.session, ap, state.beforeRef, taskID, exitCode, errClass)
-	s.completeControlPlaneAgentSession(ap, agentSessionCompletionInput{
-		sessionID:  state.sessionID,
-		leaseID:    state.leaseID,
-		leaseToken: state.leaseToken,
-		exitCode:   exitCode,
-		errClass:   errClass,
-		taskID:     taskID,
-		diffResult: diffResult,
-	})
-}
-
-func takeAgentSessionForFinalize(ap *AgentProcess) agentSessionFinalizeState {
-	ap.Mu.Lock()
-	state := agentSessionFinalizeState{
-		session:    ap.Session,
-		sessionID:  ap.AgentSessionID,
-		leaseID:    ap.AgentLeaseID,
-		leaseToken: ap.AgentLeaseToken,
-		beforeRef:  ap.BeforeRef,
-	}
-	ap.Session = nil
-	ap.AgentSessionID = ""
-	ap.AgentLeaseID = ""
-	ap.AgentLeaseToken = ""
-	ap.Mu.Unlock()
-	return state
-}
-
-func (s *Supervisor) taskIDForFinalize(ap *AgentProcess) string {
-	taskID := ""
-	if info, lockErr := cli.ReadLockFile(ap.WorktreePath); lockErr == nil {
-		taskID = info.TaskID
-	}
-	if taskID == "" {
-		taskID = s.taskIDForLifecycle(ap, nil)
-	}
-	return taskID
-}
-
-func agentErrorClass(ap *AgentProcess) string {
-	ap.Mu.Lock()
-	errClass := ""
-	if ap.LastError != nil {
-		errClass = ap.LastError.Class.String()
-	}
-	ap.Mu.Unlock()
-	return errClass
-}
-
-func finalizeLocalSession(
-	sess *sessions.Session,
-	ap *AgentProcess,
-	beforeRef string,
-	taskID string,
-	exitCode int,
-	errClass string,
-) sessionfinalize.WithWorktreeResult {
-	result, err := sessionfinalize.WithWorktree(sess, sessionfinalize.WithWorktreeOptions{
-		WorktreePath: ap.WorktreePath,
-		BeforeRef:    beforeRef,
-		TaskID:       taskID,
-		ExitCode:     exitCode,
-		ErrorClass:   errClass,
-	})
-	if err != nil {
-		slog.Warn("session finalization failed", "worktree", ap.Entry.Worktree, "err", err)
-	}
-	return result
-}
-
 // postMortemRecovery runs recovery after agent exit, skipping for yield exits.
 func (s *Supervisor) postMortemRecovery(ap *AgentProcess, exitCode int) {
 	if IsYieldRequested(ap.WorktreePath) {
@@ -796,6 +767,17 @@ func (s *Supervisor) postExitCleanup(ap *AgentProcess) {
 // covers the backoff window plus the AgentRestarted event emit; the actual
 // re-spawn that follows is its own daemon.supervisor.spawn child span (via
 // the next iteration of the supervise loop).
+// startBackoffHeartbeat keeps the agent's supervise tick fresh during a long
+// restart wait (a park, or a long exponential backoff). It returns a no-op
+// stopper for short waits that cannot approach the staleness threshold, so
+// callers can always defer the returned function.
+func (s *Supervisor) startBackoffHeartbeat(ap *AgentProcess, backoff time.Duration) func() {
+	if backoff < agentWaitHeartbeatInterval {
+		return func() {}
+	}
+	return s.startAgentWaitHeartbeat(ap)
+}
+
 func (s *Supervisor) sleepBeforeRestart(ap *AgentProcess) bool {
 	backoff := s.computeBackoff(ap)
 	ap.Mu.Lock()
@@ -818,6 +800,13 @@ func (s *Supervisor) sleepBeforeRestart(ap *AgentProcess) bool {
 	if evt, err := events.NewEvent(events.AgentRestarted, ap.Entry.Worktree, ap.Entry.Role, "", events.AgentRestartedData{PID: 0, RestartCount: count}); err == nil {
 		s.EmitEvent(evt)
 	}
+
+	// Keep the agent's liveness tick fresh during a long wait (a park, or a
+	// long exponential backoff) so the watchdog cannot mistake a healthy,
+	// waiting supervise goroutine for a wedged one. The select below is
+	// bounded by backoff, so this masks no real deadlock.
+	stopHeartbeat := s.startBackoffHeartbeat(ap, backoff)
+	defer stopHeartbeat()
 
 	var backoffAction string
 	select {
@@ -878,6 +867,7 @@ func (s *Supervisor) GetAgents() []SupervisedAgentStatus {
 			AssignedEpicID:         ap.AssignedEpicID,
 			StopReason:             ap.StopReason,
 			NoWorkCount:            ap.NoWorkCount,
+			ParkCount:              ap.ParkCount,
 			BackoffUntil:           ap.BackoffUntil,
 			OwnershipLeaseID:       ap.OwnershipLeaseID,
 			OwnershipFencingToken:  ap.OwnershipFencingToken,

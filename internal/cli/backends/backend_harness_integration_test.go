@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	hwharness "github.com/olesho/harness-wrapper/pkg/harness"
 	"github.com/olesho/harness-wrapper/pkg/wrapper"
 
 	"github.com/tysonthomas9/loomcli/internal/harness"
@@ -161,7 +162,7 @@ exit 0
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	res, err := harness.RunWithRetry(ctx, wrapper.Config{
+	res, err := harness.RunWithRetry(ctx, hwharness.Config{Wrapper: wrapper.Config{
 		BinaryPath: bin,
 		Args:       nil,
 		WorkingDir: dir,
@@ -173,7 +174,7 @@ exit 0
 		Harness:      "claude",
 		IdleClassify: 500 * time.Millisecond,
 		IdleQuiet:    200 * time.Millisecond,
-	}, harness.RetryPolicy{Max: 3, BaseBackoff: 100 * time.Millisecond, MaxBackoff: 500 * time.Millisecond})
+	}}, harness.RetryPolicy{Max: 3, BaseBackoff: 100 * time.Millisecond, MaxBackoff: 500 * time.Millisecond})
 	if err != nil {
 		t.Fatalf("RunWithRetry returned err: %v", err)
 	}

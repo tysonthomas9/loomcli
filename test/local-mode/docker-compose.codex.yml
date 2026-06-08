@@ -5,7 +5,7 @@
 
 services:
   loom-local:
-    image: loomcli-local-mode-loom-codex:latest
+    image: ${LOCAL_MODE_LOOM_CODEX_IMAGE:-loomcli-local-mode-loom-codex:latest}
     build:
       args:
         INSTALL_CODEX: "true"

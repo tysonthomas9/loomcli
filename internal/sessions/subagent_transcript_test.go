@@ -75,7 +75,6 @@ func TestSubagentIDPattern_RejectsUnsafeInputs(t *testing.T) {
 		".",
 		"foo/bar",
 		"foo\\bar",
-		"foo-bar",
 		"foo.jsonl",
 		"",
 		"foo\x00bar",
@@ -88,7 +87,7 @@ func TestSubagentIDPattern_RejectsUnsafeInputs(t *testing.T) {
 }
 
 func TestSubagentIDPattern_AcceptsValidIDs(t *testing.T) {
-	good := []string{"abc123", "deadbeef", "A1B2C3", "0"}
+	good := []string{"abc123", "deadbeef", "A1B2C3", "0", "foo-bar", "foo_bar"}
 	for _, s := range good {
 		if !SubagentIDPattern.MatchString(s) {
 			t.Errorf("SubagentIDPattern rejected valid ID %q", s)

@@ -1,6 +1,7 @@
 package supervisor
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -172,6 +173,66 @@ func (s *Supervisor) startAgentWaitHeartbeatEvery(ap *AgentProcess, interval tim
 				// was re-added, RecordTick(name) would refresh the successor's
 				// slot. ap.recordTick only ever refreshes this goroutine's slot.
 				ap.recordTick()
+			}
+		}
+	}()
+	return func() {
+		close(stop)
+		<-done
+	}
+}
+
+// workerHeartbeatInterval is how often the supervisor renews a running agent's
+// fleet-db worker-registration lease. It must stay well below the server-side
+// worker TTL (default 90s) so a live agent is never reaped; 30s gives a 3x
+// margin and matches the node-heartbeat cadence. It is a var (not const) so the
+// waitForAgent wiring test can drive it without a real-time wait; production
+// never reassigns it.
+var workerHeartbeatInterval = 30 * time.Second
+
+// startWorkerHeartbeat renews the agent's fleet-db worker-registration lease
+// for as long as the supervise goroutine is blocked in cmd.Wait(). The worker
+// is keyed by the claim actor (ap.Entry.Worktree, the same identity the
+// supervisor claims/releases issues under). It returns a stop function that
+// signals the goroutine and blocks until it exits.
+//
+// Renewal is driven purely by process liveness — a plain ticker that runs only
+// while the PID is alive — NOT by agent output. A healthy agent that is quietly
+// thinking or compiling emits no output but is alive, so it keeps its lease and
+// does not flicker off the board. The server TTL + sweeper remain the backstop
+// for non-graceful death.
+func (s *Supervisor) startWorkerHeartbeat(ap *AgentProcess) func() {
+	return s.startWorkerHeartbeatEvery(ap, workerHeartbeatInterval)
+}
+
+// startWorkerHeartbeatEvery is startWorkerHeartbeat with an explicit interval,
+// allowing tests to drive the heartbeat without real-time waits. It is a no-op
+// (returns a no-op stop) when the control plane is not wired.
+func (s *Supervisor) startWorkerHeartbeatEvery(ap *AgentProcess, interval time.Duration) func() {
+	if s.ControlStore == nil || s.WorkspaceID == "" || ap.Entry.Worktree == "" {
+		return func() {}
+	}
+	workerID := ap.Entry.Worktree
+	stop := make(chan struct{})
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-stop:
+				return
+			case <-s.Shutdown:
+				return
+			case <-ticker.C:
+				ctx, cancel := context.WithTimeout(context.Background(), controlPlaneOperationTimeout)
+				err := s.ControlStore.Workers().Heartbeat(ctx, s.WorkspaceID, workerID)
+				cancel()
+				if err != nil {
+					slog.Debug("supervisor worker heartbeat failed",
+						"workspace", s.WorkspaceID, "worker_id", workerID, "err", err)
+				}
 			}
 		}
 	}()
