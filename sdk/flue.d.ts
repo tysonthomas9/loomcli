@@ -84,6 +84,12 @@ export interface FlueAgentParentUpdateInput extends FlueAgentInput {
   expect_parent?: string;
 }
 
+export interface FlueAgentMessageInput extends FlueAgentInput {
+  message?: string;
+  text?: string;
+  body?: string;
+}
+
 export interface FlueTaskRunActiveInput extends FlueEpicInput {
   limit?: number;
 }
@@ -121,6 +127,7 @@ export declare class FlueDriverClient {
     orchestrationSession(input?: FlueAgentInput): Promise<Record<string, unknown> | null>;
     updateParent(input?: FlueAgentParentUpdateInput): Promise<Record<string, unknown> | null>;
     deliverAssignment(input?: FlueAgentInput): Promise<Record<string, unknown> | null>;
+    message(input?: FlueAgentMessageInput): Promise<Record<string, unknown> | null>;
   };
   readonly tasks: {
     claimReady(input?: FlueEpicInput): Promise<Record<string, unknown> | null>;
@@ -153,6 +160,7 @@ export declare class FlueDriverClient {
   agentOrchestrationSession(input?: FlueAgentInput): Promise<Record<string, unknown> | null>;
   updateAgentParent(input?: FlueAgentParentUpdateInput): Promise<Record<string, unknown> | null>;
   deliverLeadAssignment(input?: FlueAgentInput): Promise<Record<string, unknown> | null>;
+  messageLeadAgent(input?: FlueAgentMessageInput): Promise<Record<string, unknown> | null>;
   requestTaskRun(input?: FlueTaskRunRequest): Promise<Record<string, unknown>>;
   activeTaskRuns(input?: FlueTaskRunActiveInput): Promise<Record<string, unknown> | null>;
   recoverStaleTaskRuns(input?: FlueTaskRunRecoverStaleInput): Promise<Record<string, unknown> | null>;

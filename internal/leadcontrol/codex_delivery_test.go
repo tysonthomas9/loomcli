@@ -114,6 +114,35 @@ func TestDeliverCurrentAssignmentToCodexDoesNotMarkUnsupportedRuntimeFailed(t *t
 	}
 }
 
+func TestDeliverLeadMessageToCodexStartsTurnWhenIdle(t *testing.T) {
+	ctx := context.Background()
+	st := memstore.New()
+	createAssignedLeadSession(t, st, "message", nil)
+
+	fake := installFakeCodexClient(t, CodexThreadStatus{Type: "idle"})
+	setCodexRuntimeMetadata(t, st, "WS", "lead-session", "ws://codex.test", "thread-1")
+
+	const message = "Task TASK-1 completed under the active epic-runner workflow."
+	result, err := DeliverLeadMessageToCodex(ctx, st, "WS", "nova", message)
+	if err != nil {
+		t.Fatalf("DeliverLeadMessageToCodex() error = %v", err)
+	}
+	if result.State != DeliveryStateDelivered {
+		t.Fatalf("delivery state = %q, want delivered (reason: %s)", result.State, result.Reason)
+	}
+	if fake.turnText != message {
+		t.Fatalf("turn text = %q, want %q", fake.turnText, message)
+	}
+
+	session, err := st.AgentSessions().Get(ctx, "WS", "lead-session")
+	if err != nil {
+		t.Fatalf("get session: %v", err)
+	}
+	if got := session.Metadata[MetadataDeliveryVersion]; got != "" {
+		t.Fatalf("message delivery should not mark assignment delivered version: %#v", session.Metadata)
+	}
+}
+
 func createAssignedLeadSession(t *testing.T, st store.Store, label string, metadata map[string]string) {
 	t.Helper()
 	ctx := context.Background()

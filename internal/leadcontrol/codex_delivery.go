@@ -62,6 +62,42 @@ func DeliverCurrentAssignmentToCodex(ctx context.Context, st store.Store, worksp
 	return deliverCodexAssignmentTurn(ctx, st, workspace, session.SessionID, assignment, runtime, result)
 }
 
+func DeliverLeadMessageToCodex(ctx context.Context, st store.Store, workspace, leadName, message string) (*DeliveryResult, error) {
+	leadName = strings.TrimSpace(leadName)
+	message = strings.TrimSpace(message)
+	if leadName == "" {
+		return nil, fmt.Errorf("lead agent required")
+	}
+	if message == "" {
+		return nil, fmt.Errorf("lead message required")
+	}
+
+	session, err := store.OrchestrationSessionFor(ctx, st, workspace, leadName)
+	if err != nil {
+		return nil, err
+	}
+	if session == nil {
+		return pendingDelivery("", "lead has no orchestration session"), nil
+	}
+	result := &DeliveryResult{State: DeliveryStatePending, SessionID: session.SessionID}
+	runtime := RuntimeMetadataFromSession(session)
+	result.Runtime = runtime
+	if !hasCodexRuntimeMetadata(session.Metadata) {
+		result.Reason = "controlled Codex runtime is not ready"
+		return result, nil
+	}
+	if codexRuntimeUnsupported(session.Metadata, runtime) {
+		result.State = DeliveryStateUnsupported
+		result.Reason = "lead session is not a controlled Codex runtime"
+		return result, nil
+	}
+	if pendingReason := codexRuntimePendingReason(runtime); pendingReason != "" {
+		result.Reason = pendingReason
+		return result, nil
+	}
+	return deliverCodexLeadTurn(ctx, st, workspace, session.SessionID, runtime, result, message, "lead message delivery complete")
+}
+
 func deliverCodexAssignmentTurn(
 	ctx context.Context,
 	st store.Store,
@@ -71,20 +107,46 @@ func deliverCodexAssignmentTurn(
 	runtime CodexRuntimeMetadata,
 	result *DeliveryResult,
 ) (*DeliveryResult, error) {
+	message := formatCodexAssignmentTurn(assignment)
+	delivered, err := deliverCodexLeadTurn(ctx, st, workspace, sessionID, runtime, result, message, "assignment delivery complete")
+	if err != nil {
+		return nil, err
+	}
+	if delivered.State != DeliveryStateDelivered {
+		if delivered.Reason != "" {
+			_ = MarkAssignmentDeliveryAttempt(ctx, st, workspace, sessionID, delivered.Reason)
+		}
+		return delivered, nil
+	}
+	if err := MarkAssignmentDelivered(ctx, st, workspace, sessionID, assignment.EpicID, assignment.AssignmentVersion); err != nil {
+		return nil, err
+	}
+	delivered.Reason = ""
+	return delivered, nil
+}
+
+func deliverCodexLeadTurn(
+	ctx context.Context,
+	st store.Store,
+	workspace string,
+	sessionID string,
+	runtime CodexRuntimeMetadata,
+	result *DeliveryResult,
+	message string,
+	closeReason string,
+) (*DeliveryResult, error) {
 	callCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 	client, err := dialCodexAppServerClient(callCtx, runtime.Endpoint)
 	if err != nil {
 		result.Reason = err.Error()
-		_ = MarkAssignmentDeliveryAttempt(ctx, st, workspace, sessionID, result.Reason)
 		return result, nil
 	}
-	defer func() { _ = client.Close("assignment delivery complete") }()
+	defer func() { _ = client.Close(closeReason) }()
 
 	thread, err := client.ReadThread(callCtx, runtime.ThreadID)
 	if err != nil {
 		result.Reason = err.Error()
-		_ = MarkAssignmentDeliveryAttempt(ctx, st, workspace, sessionID, result.Reason)
 		return result, nil
 	}
 	result.Thread = thread
@@ -92,18 +154,12 @@ func deliverCodexAssignmentTurn(
 	_ = UpdateCodexRuntimeMetadata(ctx, st, workspace, sessionID, runtime)
 	if !thread.Status.CanStartTurn() {
 		result.Reason = fmt.Sprintf("codex thread is %s", runtime.Status)
-		_ = MarkAssignmentDeliveryAttempt(ctx, st, workspace, sessionID, result.Reason)
 		return result, nil
 	}
 
-	message := formatCodexAssignmentTurn(assignment)
 	if err := client.StartTurn(callCtx, runtime.ThreadID, message); err != nil {
 		result.Reason = err.Error()
-		_ = MarkAssignmentDeliveryAttempt(ctx, st, workspace, sessionID, result.Reason)
 		return result, nil
-	}
-	if err := MarkAssignmentDelivered(ctx, st, workspace, sessionID, assignment.EpicID, assignment.AssignmentVersion); err != nil {
-		return nil, err
 	}
 	result.State = DeliveryStateDelivered
 	result.Reason = ""

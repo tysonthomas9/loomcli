@@ -138,6 +138,15 @@ var (
 	driverDeliverLeadName         string
 	driverDeliverLeadJSON         bool
 
+	driverDeliverLeadMessageWorkspaceKey string
+	driverDeliverLeadMessageDriverRunID  string
+	driverDeliverLeadMessageNodeID       string
+	driverDeliverLeadMessageLeaseID      string
+	driverDeliverLeadMessageFence        int64
+	driverDeliverLeadMessageName         string
+	driverDeliverLeadMessageText         string
+	driverDeliverLeadMessageJSON         bool
+
 	driverActiveTaskRunsWorkspaceKey string
 	driverActiveTaskRunsDriverRunID  string
 	driverActiveTaskRunsNodeID       string
@@ -288,6 +297,14 @@ var driverDeliverLeadAssignmentCmd = &cobra.Command{
 	Hidden: true,
 	Args:   cobra.NoArgs,
 	RunE:   runDriverDeliverLeadAssignment,
+}
+
+var driverDeliverLeadMessageCmd = &cobra.Command{
+	Use:    "deliver-lead-message",
+	Short:  "Deliver a workflow message to a lead runtime",
+	Hidden: true,
+	Args:   cobra.NoArgs,
+	RunE:   runDriverDeliverLeadMessage,
 }
 
 var driverActiveTaskRunsCmd = &cobra.Command{
@@ -445,6 +462,17 @@ func init() {
 	driverDeliverLeadAssignmentCmd.Flags().BoolVar(&driverDeliverLeadJSON, "json", false, "JSON output")
 	_ = driverDeliverLeadAssignmentCmd.MarkFlagRequired("agent")
 
+	driverDeliverLeadMessageCmd.Flags().StringVar(&driverDeliverLeadMessageWorkspaceKey, "workspace-key", "", "Workspace key (default: LOOM_DRIVER_WORKSPACE or active workspace)")
+	driverDeliverLeadMessageCmd.Flags().StringVar(&driverDeliverLeadMessageDriverRunID, "driver-run-id", "", "Parent DriverRun ID (default: LOOM_DRIVER_RUN_ID)")
+	driverDeliverLeadMessageCmd.Flags().StringVar(&driverDeliverLeadMessageNodeID, "node-id", "", "Parent DriverRun node ID")
+	driverDeliverLeadMessageCmd.Flags().StringVar(&driverDeliverLeadMessageLeaseID, "lease-id", "", "Parent DriverRun lease ID")
+	driverDeliverLeadMessageCmd.Flags().Int64Var(&driverDeliverLeadMessageFence, "fencing-token", 0, "Parent DriverRun fencing token")
+	driverDeliverLeadMessageCmd.Flags().StringVar(&driverDeliverLeadMessageName, "agent", "", "Lead agent name")
+	driverDeliverLeadMessageCmd.Flags().StringVar(&driverDeliverLeadMessageText, "message", "", "Message text to deliver")
+	driverDeliverLeadMessageCmd.Flags().BoolVar(&driverDeliverLeadMessageJSON, "json", false, "JSON output")
+	_ = driverDeliverLeadMessageCmd.MarkFlagRequired("agent")
+	_ = driverDeliverLeadMessageCmd.MarkFlagRequired("message")
+
 	driverActiveTaskRunsCmd.Flags().StringVar(&driverActiveTaskRunsWorkspaceKey, "workspace-key", "", "Workspace key (default: LOOM_DRIVER_WORKSPACE or active workspace)")
 	driverActiveTaskRunsCmd.Flags().StringVar(&driverActiveTaskRunsDriverRunID, "driver-run-id", "", "Parent DriverRun ID (default: LOOM_DRIVER_RUN_ID)")
 	driverActiveTaskRunsCmd.Flags().StringVar(&driverActiveTaskRunsNodeID, "node-id", "", "Parent DriverRun node ID")
@@ -491,7 +519,7 @@ func init() {
 	driverRecoverStaleTasksCmd.Flags().StringVar(&driverRecoverStaleErrorMessage, "error-message", "task run heartbeat is stale", "Error message recorded on recovered task runs")
 	driverRecoverStaleTasksCmd.Flags().BoolVar(&driverRecoverStaleJSON, "json", false, "JSON output")
 
-	driverCmd.AddCommand(driverRegisterCmd, driverRunCmd, driverExecTaskCmd, driverWorkTaskRunCmd, driverClaimReadyCmd, driverEpicGetCmd, driverEpicSnapshotCmd, driverListAgentsCmd, driverAgentOrchestrationSessionCmd, driverUpdateAgentParentCmd, driverDeliverLeadAssignmentCmd, driverActiveTaskRunsCmd, driverCompleteTaskCmd, driverReleaseTaskCmd, driverRecoverStaleTasksCmd)
+	driverCmd.AddCommand(driverRegisterCmd, driverRunCmd, driverExecTaskCmd, driverWorkTaskRunCmd, driverClaimReadyCmd, driverEpicGetCmd, driverEpicSnapshotCmd, driverListAgentsCmd, driverAgentOrchestrationSessionCmd, driverUpdateAgentParentCmd, driverDeliverLeadAssignmentCmd, driverDeliverLeadMessageCmd, driverActiveTaskRunsCmd, driverCompleteTaskCmd, driverReleaseTaskCmd, driverRecoverStaleTasksCmd)
 	cli.RegisterCommand(driverCmd)
 }
 
@@ -860,18 +888,7 @@ func runDriverDeliverLeadAssignment(_ *cobra.Command, _ []string) error {
 		if err != nil {
 			return fmt.Errorf("deliver lead assignment: %w", err)
 		}
-		result := leadAssignmentDeliveryResult{
-			AgentName: leadName,
-			State:     string(leadcontrol.DeliveryStateNone),
-		}
-		if delivery != nil {
-			result.State = string(delivery.State)
-			result.Reason = delivery.Reason
-			result.SessionID = delivery.SessionID
-			result.RuntimeStatus = delivery.Runtime.Status
-			result.RuntimeProvider = leadcontrol.RuntimeProviderCodex
-			result.Controlled = delivery.Runtime.Controlled
-		}
+		result := newLeadDeliveryResult(leadName, delivery)
 		if driverDeliverLeadJSON {
 			return cmdstore.WriteJSON(result)
 		}
@@ -884,7 +901,35 @@ func runDriverDeliverLeadAssignment(_ *cobra.Command, _ []string) error {
 	})
 }
 
-type leadAssignmentDeliveryResult struct {
+func runDriverDeliverLeadMessage(_ *cobra.Command, _ []string) error {
+	return cmdstore.WithStore(func(ctx context.Context, h *bootstrap.StoreHandle) error {
+		ws, _, err := resolveRunningDriverRun(ctx, h, driverDeliverLeadMessageWorkspaceKey, driverDeliverLeadMessageDriverRunID, driverDeliverLeadMessageNodeID, driverDeliverLeadMessageLeaseID, driverDeliverLeadMessageFence)
+		if err != nil {
+			return err
+		}
+		leadName := strings.TrimSpace(driverDeliverLeadMessageName)
+		message := strings.TrimSpace(driverDeliverLeadMessageText)
+		if leadName == "" || message == "" {
+			return fmt.Errorf("agent and message required: %w", domain.ErrInvalid)
+		}
+		delivery, err := leadcontrol.DeliverLeadMessageToCodex(ctx, h.Store, ws, leadName, message)
+		if err != nil {
+			return fmt.Errorf("deliver lead message: %w", err)
+		}
+		result := newLeadDeliveryResult(leadName, delivery)
+		if driverDeliverLeadMessageJSON {
+			return cmdstore.WriteJSON(result)
+		}
+		if result.Reason != "" {
+			fmt.Printf("Lead message delivery for %s: %s (%s)\n", leadName, result.State, result.Reason)
+		} else {
+			fmt.Printf("Lead message delivery for %s: %s\n", leadName, result.State)
+		}
+		return nil
+	})
+}
+
+type leadDeliveryResult struct {
 	AgentName       string `json:"agentName"`
 	State           string `json:"state"`
 	Reason          string `json:"reason,omitempty"`
@@ -892,6 +937,22 @@ type leadAssignmentDeliveryResult struct {
 	RuntimeProvider string `json:"runtimeProvider,omitempty"`
 	RuntimeStatus   string `json:"runtimeStatus,omitempty"`
 	Controlled      bool   `json:"controlled,omitempty"`
+}
+
+func newLeadDeliveryResult(agentName string, delivery *leadcontrol.DeliveryResult) leadDeliveryResult {
+	result := leadDeliveryResult{
+		AgentName: agentName,
+		State:     string(leadcontrol.DeliveryStateNone),
+	}
+	if delivery != nil {
+		result.State = string(delivery.State)
+		result.Reason = delivery.Reason
+		result.SessionID = delivery.SessionID
+		result.RuntimeStatus = delivery.Runtime.Status
+		result.RuntimeProvider = leadcontrol.RuntimeProviderCodex
+		result.Controlled = delivery.Runtime.Controlled
+	}
+	return result
 }
 
 func runDriverActiveTaskRuns(_ *cobra.Command, _ []string) error {

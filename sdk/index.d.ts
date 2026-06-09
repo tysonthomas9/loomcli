@@ -1,4 +1,5 @@
 export {
+  FlueAgentMessageInput,
   FlueDriverClient,
   FlueDriverClientOptions,
   FlueDriverResult,

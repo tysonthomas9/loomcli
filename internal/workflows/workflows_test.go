@@ -21,6 +21,7 @@ func TestBuiltinEpicRunnerWorkflowSourceIncludesReconcilePrimitives(t *testing.T
 		"loom.agents.orchestrationSession",
 		"loom.agents.updateParent",
 		"loom.agents.deliverAssignment",
+		"loom.agents.message",
 		"dryRun",
 		"targetNodeId",
 		"loom.taskRuns.recoverStale",

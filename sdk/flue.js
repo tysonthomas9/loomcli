@@ -26,6 +26,7 @@ export class FlueDriverClient {
       orchestrationSession: (input = {}) => this.agentOrchestrationSession(input),
       updateParent: (input = {}) => this.updateAgentParent(input),
       deliverAssignment: (input = {}) => this.deliverLeadAssignment(input),
+      message: (input = {}) => this.messageLeadAgent(input),
     });
     this.tasks = Object.freeze({
       claimReady: (input = {}) => this.claimReady(input),
@@ -116,6 +117,17 @@ export class FlueDriverClient {
     }
     const args = this.#baseArgs("deliver-lead-assignment");
     args.push("--agent", String(agent));
+    return this.#run(args);
+  }
+
+  async messageLeadAgent(input = {}) {
+    const agent = input.agent || input.agentName || input.agent_name || input.name || "";
+    const message = input.message || input.text || input.body || "";
+    if (!agent || !message) {
+      throw new Error("agents.message requires agent and message");
+    }
+    const args = this.#baseArgs("deliver-lead-message");
+    args.push("--agent", String(agent), "--message", String(message));
     return this.#run(args);
   }
 

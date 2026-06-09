@@ -88,6 +88,8 @@ if (args[1] === 'epic-get') {
   console.log(JSON.stringify({ name: 'nova', role_name: 'lead', parent: 'EPIC-1' }));
 } else if (args[1] === 'deliver-lead-assignment') {
   console.log(JSON.stringify({ agentName: 'nova', state: 'delivered', sessionId: 'session-1' }));
+} else if (args[1] === 'deliver-lead-message') {
+  console.log(JSON.stringify({ agentName: 'nova', state: 'delivered', sessionId: 'session-1' }));
 } else if (args[1] === 'active-task-runs') {
   console.log(JSON.stringify({ driverRunId: 'run-1', activeCount: 2 }));
 } else if (args[1] === 'recover-stale-tasks') {
@@ -112,6 +114,7 @@ if (args[1] === 'epic-get') {
   assert.equal((await client.agents.orchestrationSession({ agent: "nova" })).orchestratorSessionId, "session-1");
   assert.equal((await client.agents.updateParent({ agent: "nova", parent: "EPIC-1", expectParent: "" })).parent, "EPIC-1");
   assert.equal((await client.agents.deliverAssignment({ agent: "nova" })).state, "delivered");
+  assert.equal((await client.agents.message({ agent: "nova", message: "Task TASK-1 completed" })).state, "delivered");
   assert.equal((await client.taskRuns.active({ limit: 10 })).activeCount, 2);
   assert.equal((await client.taskRuns.recoverStale({ maxAgeSeconds: 30 })).recovered, 1);
 
@@ -123,6 +126,7 @@ if (args[1] === 'epic-get') {
     "agent-orchestration-session",
     "update-agent-parent",
     "deliver-lead-assignment",
+    "deliver-lead-message",
     "active-task-runs",
     "recover-stale-tasks",
   ]);
@@ -142,10 +146,14 @@ if (args[1] === 'epic-get') {
   assert.equal(calls[4].args[calls[4].args.indexOf("--parent") + 1], "EPIC-1");
   assert.ok(calls[5].args.includes("--agent"));
   assert.equal(calls[5].args[calls[5].args.indexOf("--agent") + 1], "nova");
-  assert.ok(calls[6].args.includes("--limit"));
-  assert.equal(calls[6].args[calls[6].args.indexOf("--limit") + 1], "10");
-  assert.ok(calls[7].args.includes("--max-age-seconds"));
-  assert.equal(calls[7].args[calls[7].args.indexOf("--max-age-seconds") + 1], "30");
+  assert.ok(calls[6].args.includes("--agent"));
+  assert.equal(calls[6].args[calls[6].args.indexOf("--agent") + 1], "nova");
+  assert.ok(calls[6].args.includes("--message"));
+  assert.equal(calls[6].args[calls[6].args.indexOf("--message") + 1], "Task TASK-1 completed");
+  assert.ok(calls[7].args.includes("--limit"));
+  assert.equal(calls[7].args[calls[7].args.indexOf("--limit") + 1], "10");
+  assert.ok(calls[8].args.includes("--max-age-seconds"));
+  assert.equal(calls[8].args[calls[8].args.indexOf("--max-age-seconds") + 1], "30");
 });
 
 function readJSONL(file) {

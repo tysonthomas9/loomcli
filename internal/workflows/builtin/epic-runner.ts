@@ -32,6 +32,7 @@ export async function run(ctx) {
   const intervalMs = Math.max(1000, numberValue(input.intervalSeconds || input.interval_seconds, 5) * 1000);
   const completed = [];
   const leadDelivery = startLeadDeliveryRetry(loom, started.leadName, started.deliveryState, intervalMs);
+  const taskNotifications = startLeadMessageDeliveryRetry(loom, started.leadName, intervalMs, leadDelivery);
 
   try {
     while (true) {
@@ -47,12 +48,14 @@ export async function run(ctx) {
 
       if (snapshot.openChildrenCount === 0 && activeCount === 0) {
         await leadDelivery.flush();
+        await taskNotifications.flush();
         const suffix = completed.length > 0 ? ": " + completed.join(",") : "";
         return loom.completed({ summary: "Epic drained " + epicId + suffix });
       }
 
       if (snapshot.readyCount === 0 && snapshot.blockedCount > 0 && activeCount === 0) {
         await leadDelivery.flush();
+        await taskNotifications.flush();
         return loom.needsHuman({
           summary: "Epic " + epicId + " blocked with " + snapshot.blockedCount + " child task(s): " + summarizeTasks(snapshot.blocked),
           errorClass: "epic_blocked",
@@ -77,6 +80,7 @@ export async function run(ctx) {
       if (claimed.length === 0) {
         if (activeCount === 0 && snapshot.readyCount === 0 && snapshot.blockedCount === 0 && snapshot.openChildrenCount > 0) {
           await leadDelivery.flush();
+          await taskNotifications.flush();
           return loom.needsHuman({
             summary: "Epic " + epicId + " has " + snapshot.openChildrenCount + " open child task(s), but none are ready, blocked, or active",
             errorClass: "epic_no_progress",
@@ -97,6 +101,7 @@ export async function run(ctx) {
       for (const result of results) {
         if (!result.ok) {
           await leadDelivery.flush();
+          await taskNotifications.flush();
           return loom.needsHuman({
             summary: result.summary,
             errorClass: result.errorClass || "child_task_failed",
@@ -106,11 +111,21 @@ export async function run(ctx) {
           });
         }
         completed.push(result.taskId);
+        taskNotifications.enqueue(formatTaskCompleteLeadMessage({
+          epicId,
+          taskId: result.taskId,
+          taskTitle: result.taskTitle,
+          taskRunId: result.taskRunId,
+          logsRef: result.logsRef,
+          artifactsRef: result.artifactsRef,
+        }));
       }
     }
   } finally {
     leadDelivery.stop();
+    taskNotifications.stop();
     await leadDelivery.done;
+    await taskNotifications.done;
   }
 }
 
@@ -252,6 +267,7 @@ function startLeadDeliveryRetry(loom, leadName, initialState, intervalMs) {
   const state = {
     leadName: stringValue(leadName),
     done: !stringValue(leadName) || initialState === "delivered" || initialState === "unsupported",
+    deliveryState: stringValue(initialState) || "pending",
     stopped: false,
     inFlight: null,
   };
@@ -264,6 +280,7 @@ function startLeadDeliveryRetry(loom, leadName, initialState, intervalMs) {
     }
     state.inFlight = (async () => {
       const delivery = await attemptLeadDelivery(loom, state.leadName);
+      state.deliveryState = delivery.state || "pending";
       if (delivery.state === "delivered" || delivery.state === "unsupported" || delivery.state === "none") {
         state.done = true;
       }
@@ -288,6 +305,106 @@ function startLeadDeliveryRetry(loom, leadName, initialState, intervalMs) {
       state.stopped = true;
     },
     flush: tryOnce,
+    isDone() {
+      return state.done;
+    },
+    deliveryState() {
+      return state.deliveryState;
+    },
+    done: loop(),
+  };
+}
+
+async function attemptLeadMessageDelivery(loom, leadName, message) {
+  const agent = stringValue(leadName);
+  const text = stringValue(message);
+  if (!agent || !text) {
+    return { state: "none" };
+  }
+  try {
+    const delivery = await loom.agents.message({ agent, message: text });
+    return {
+      state: stringValue(delivery && delivery.state) || "pending",
+      reason: stringValue(delivery && delivery.reason),
+    };
+  } catch (err) {
+    return {
+      state: "pending",
+      reason: errorMessage(err),
+    };
+  }
+}
+
+function startLeadMessageDeliveryRetry(loom, leadName, intervalMs, assignmentDelivery) {
+  const state = {
+    leadName: stringValue(leadName),
+    messages: [],
+    unsupported: false,
+    stopped: false,
+    inFlight: null,
+  };
+  async function tryOnce() {
+    if (!state.leadName || state.unsupported || state.messages.length === 0) {
+      return { state: state.unsupported ? "unsupported" : "none" };
+    }
+    if (state.inFlight) {
+      return state.inFlight;
+    }
+    state.inFlight = (async () => {
+      if (assignmentDelivery && assignmentDelivery.deliveryState() === "unsupported") {
+        state.unsupported = true;
+        state.messages = [];
+        return { state: "unsupported" };
+      }
+      if (assignmentDelivery && !assignmentDelivery.isDone()) {
+        const delivery = await assignmentDelivery.flush();
+        if ((delivery && delivery.state === "unsupported") || assignmentDelivery.deliveryState() === "unsupported") {
+          state.unsupported = true;
+          state.messages = [];
+          return { state: "unsupported" };
+        }
+        if (!assignmentDelivery.isDone()) {
+          return { state: "pending", reason: "lead assignment delivery is pending" };
+        }
+      }
+      const delivery = await attemptLeadMessageDelivery(loom, state.leadName, state.messages[0]);
+      if (delivery.state === "delivered" || delivery.state === "none") {
+        state.messages.shift();
+      } else if (delivery.state === "unsupported") {
+        state.unsupported = true;
+        state.messages = [];
+      }
+      return delivery;
+    })();
+    try {
+      return await state.inFlight;
+    } finally {
+      state.inFlight = null;
+    }
+  }
+  async function loop() {
+    while (!state.stopped) {
+      await tryOnce();
+      if (!state.stopped) {
+        await sleep(Math.max(1000, Math.min(intervalMs, 5000)));
+      }
+    }
+  }
+  return {
+    enqueue(message) {
+      const text = stringValue(message);
+      if (state.leadName && text && !state.unsupported) {
+        if (state.messages.length > 0 && !state.inFlight) {
+          state.messages[state.messages.length - 1] = state.messages[state.messages.length - 1] + "\n\n" + text;
+        } else {
+          state.messages.push(text);
+        }
+      }
+    },
+    flush: tryOnce,
+    stop() {
+      state.stopped = true;
+    },
     done: loop(),
   };
 }
@@ -322,13 +439,16 @@ async function runChildTask(loom, opts) {
   }
 
   if (result && result.status === "completed") {
+    const completedTaskRunId = result.taskRunId || result.id || taskRunId;
+    const logsRef = result.logsRef || "";
+    const artifactsRef = result.artifactsRef || "";
     try {
       await loom.tasks.complete({
         taskId: task.id,
-        taskRunId: result.taskRunId || result.id || taskRunId,
+        taskRunId: completedTaskRunId,
         leaseToken: result.leaseToken || "",
-        logsRef: result.logsRef || "",
-        artifactsRef: result.artifactsRef || "",
+        logsRef,
+        artifactsRef,
         artifactIds: result.artifactIds || [],
         reason: "completed by epic-runner workflow",
       });
@@ -336,14 +456,14 @@ async function runChildTask(loom, opts) {
       return {
         ok: false,
         taskId: task.id,
-        taskRunId: result.taskRunId || result.id || taskRunId,
-        logsRef: result.logsRef || "",
-        artifactsRef: result.artifactsRef || "",
+        taskRunId: completedTaskRunId,
+        logsRef,
+        artifactsRef,
         errorClass: "child_task_completion_failed",
         summary: "Task completion failed: " + task.id + " - " + errorMessage(err),
       };
     }
-    return { ok: true, taskId: task.id };
+    return { ok: true, taskId: task.id, taskTitle: stringValue(task.title), taskRunId: completedTaskRunId, logsRef, artifactsRef };
   }
 
   await safeRelease(loom, task.id);
@@ -405,6 +525,27 @@ function summarizeTasks(tasks) {
     parts.push("+" + (list.length - 5) + " more");
   }
   return parts.join(", ");
+}
+
+function formatTaskCompleteLeadMessage(input) {
+  const taskTitle = stringValue(input.taskTitle);
+  const taskLine = stringValue(input.taskId) + (taskTitle ? " - " + taskTitle : "");
+  const lines = [
+    "Loom completed a child task under the active epic-runner workflow.",
+    "",
+    "epic: " + stringValue(input.epicId),
+    "task: " + taskLine,
+    "task_run: " + stringValue(input.taskRunId),
+  ];
+  if (stringValue(input.logsRef)) {
+    lines.push("logs: " + stringValue(input.logsRef));
+  }
+  if (stringValue(input.artifactsRef)) {
+    lines.push("artifacts: " + stringValue(input.artifactsRef));
+  }
+  lines.push("");
+  lines.push("Acknowledge this completion in the visible conversation, update your epic status summary, and continue monitoring the remaining child tasks. Do not start another epic runner.");
+  return lines.join("\n");
 }
 
 function slug(value) {
