@@ -2,12 +2,9 @@ package fleetdb
 
 import (
 	"context"
-	"encoding/json"
-	"errors"
 	"fmt"
 	"net/url"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
@@ -246,26 +243,6 @@ type driverRunStore struct{ client *Client }
 var _ store.DriverRunStore = (*driverRunStore)(nil)
 
 func (s *driverRunStore) Create(ctx context.Context, in store.DriverRunCreate) (*domain.DriverRun, error) {
-	path := "/api/v1/" + pathEscape(in.WorkspaceKey) + "/driver-runs"
-	body := driverRunCreateBody(in, "payload")
-	var out fleetDriverRunWire
-	if err := s.client.do(ctx, "POST", path, body, &out); err != nil {
-		if !isUnknownPayloadFieldError(err) {
-			return nil, err
-		}
-		out = fleetDriverRunWire{}
-		if retryErr := s.client.do(ctx, "POST", path, driverRunCreateBody(in, "input"), &out); retryErr != nil {
-			return nil, retryErr
-		}
-	}
-	run := out.domain()
-	if len(run.Payload) == 0 {
-		run.Payload = cloneRawMessage(in.Payload)
-	}
-	return run, nil
-}
-
-func driverRunCreateBody(in store.DriverRunCreate, payloadField string) map[string]any {
 	body := map[string]any{
 		"run_id":            in.RunID,
 		"driver_id":         in.DriverID,
@@ -275,54 +252,39 @@ func driverRunCreateBody(in store.DriverRunCreate, payloadField string) map[stri
 		"source_ref":        in.SourceRef,
 		"epic_id":           in.EpicID,
 		"idempotency_key":   in.IdempotencyKey,
+		"payload":           in.Payload,
 	}
-	if payloadField != "" {
-		body[payloadField] = in.Payload
+	var out domain.DriverRun
+	if err := s.client.do(ctx, "POST", "/api/v1/"+pathEscape(in.WorkspaceKey)+"/driver-runs", body, &out); err != nil {
+		return nil, err
 	}
-	return body
+	return &out, nil
 }
 
 func (s *driverRunStore) CreateEpic(ctx context.Context, ws, epicID string, in store.EpicRunCreate) (*domain.DriverRun, error) {
-	path := "/api/v1/" + pathEscape(ws) + "/epics/" + pathEscape(epicID) + "/runs"
-	body := epicRunCreateBody(in, "payload")
+	body := map[string]any{
+		"run_id":          in.RunID,
+		"idempotency_key": in.IdempotencyKey,
+		"payload":         in.Payload,
+	}
 	headers := map[string]string{}
 	if in.IdempotencyKey != "" {
 		headers["Idempotency-Key"] = in.IdempotencyKey
 	}
-	var out fleetDriverRunWire
+	var out domain.DriverRun
+	path := "/api/v1/" + pathEscape(ws) + "/epics/" + pathEscape(epicID) + "/runs"
 	if err := s.client.doWithHeaders(ctx, "POST", path, body, &out, headers); err != nil {
-		if !isUnknownPayloadFieldError(err) {
-			return nil, err
-		}
-		out = fleetDriverRunWire{}
-		if retryErr := s.client.doWithHeaders(ctx, "POST", path, epicRunCreateBody(in, "input"), &out, headers); retryErr != nil {
-			return nil, retryErr
-		}
+		return nil, err
 	}
-	run := out.domain()
-	if len(run.Payload) == 0 {
-		run.Payload = cloneRawMessage(in.Payload)
-	}
-	return run, nil
-}
-
-func epicRunCreateBody(in store.EpicRunCreate, payloadField string) map[string]any {
-	body := map[string]any{
-		"run_id":          in.RunID,
-		"idempotency_key": in.IdempotencyKey,
-	}
-	if payloadField != "" {
-		body[payloadField] = in.Payload
-	}
-	return body
+	return &out, nil
 }
 
 func (s *driverRunStore) Get(ctx context.Context, ws, runID string) (*domain.DriverRun, error) {
-	var out fleetDriverRunWire
+	var out domain.DriverRun
 	if err := s.client.do(ctx, "GET", "/api/v1/"+pathEscape(ws)+"/driver-runs/"+pathEscape(runID), nil, &out); err != nil {
 		return nil, err
 	}
-	return out.domain(), nil
+	return &out, nil
 }
 
 func (s *driverRunStore) Events(ctx context.Context, ws, runID, after string, limit int) (*domain.PlatformEventsPage, error) {
@@ -372,59 +334,38 @@ func (s *driverRunStore) List(ctx context.Context, ws string, filter store.Drive
 		path += "?" + encoded
 	}
 	var resp struct {
-		DriverRuns []fleetDriverRunWire `json:"driver_runs"`
+		DriverRuns []*domain.DriverRun `json:"driver_runs"`
 	}
 	if err := s.client.do(ctx, "GET", path, nil, &resp); err != nil {
 		return nil, err
 	}
-	runs := make([]*domain.DriverRun, 0, len(resp.DriverRuns))
-	for i := range resp.DriverRuns {
-		runs = append(runs, resp.DriverRuns[i].domain())
+	if resp.DriverRuns == nil {
+		resp.DriverRuns = []*domain.DriverRun{}
 	}
-	return runs, nil
+	return resp.DriverRuns, nil
 }
 
 func (s *driverRunStore) Claim(ctx context.Context, ws, runID, nodeID, leaseID string) (*domain.DriverRun, error) {
 	body := map[string]string{"node_id": nodeID, "lease_id": leaseID}
-	var out fleetDriverRunWire
+	var out domain.DriverRun
 	path := "/api/v1/" + pathEscape(ws) + "/driver-runs/" + pathEscape(runID) + "/claim"
 	if err := s.client.do(ctx, "POST", path, body, &out); err != nil {
 		return nil, err
 	}
-	return out.domain(), nil
+	return &out, nil
 }
 
 func (s *driverRunStore) Heartbeat(ctx context.Context, ws, runID, nodeID, leaseID string, fencingToken int64) (*domain.DriverRun, error) {
 	body := map[string]any{"node_id": nodeID, "lease_id": leaseID, "fencing_token": fencingToken}
-	var out fleetDriverRunWire
+	var out domain.DriverRun
 	path := "/api/v1/" + pathEscape(ws) + "/driver-runs/" + pathEscape(runID) + "/heartbeat"
 	if err := s.client.do(ctx, "POST", path, body, &out); err != nil {
 		return nil, err
 	}
-	return out.domain(), nil
+	return &out, nil
 }
 
 func (s *driverRunStore) Finish(ctx context.Context, ws, runID string, finish store.DriverRunFinish) (*domain.DriverRun, error) {
-	path := "/api/v1/" + pathEscape(ws) + "/driver-runs/" + pathEscape(runID) + "/finish"
-	body := driverRunFinishBody(finish, true)
-	var out fleetDriverRunWire
-	if err := s.client.do(ctx, "POST", path, body, &out); err != nil {
-		if !isUnknownOutputFieldError(err) {
-			return nil, err
-		}
-		out = fleetDriverRunWire{}
-		if retryErr := s.client.do(ctx, "POST", path, driverRunFinishBody(finish, false), &out); retryErr != nil {
-			return nil, retryErr
-		}
-	}
-	run := out.domain()
-	if len(run.Output) == 0 && len(finish.Output) > 0 {
-		run.Output = cloneStringMap(finish.Output)
-	}
-	return run, nil
-}
-
-func driverRunFinishBody(finish store.DriverRunFinish, includeOutput bool) map[string]any {
 	body := map[string]any{
 		"node_id":       finish.NodeID,
 		"lease_id":      finish.LeaseID,
@@ -432,52 +373,14 @@ func driverRunFinishBody(finish store.DriverRunFinish, includeOutput bool) map[s
 		"status":        finish.Status,
 		"summary":       finish.Summary,
 		"error_class":   finish.ErrorClass,
+		"output":        finish.Output,
 	}
-	if includeOutput {
-		body["output"] = finish.Output
+	var out domain.DriverRun
+	path := "/api/v1/" + pathEscape(ws) + "/driver-runs/" + pathEscape(runID) + "/finish"
+	if err := s.client.do(ctx, "POST", path, body, &out); err != nil {
+		return nil, err
 	}
-	return body
-}
-
-type fleetDriverRunWire struct {
-	domain.DriverRun
-	Input json.RawMessage `json:"input,omitempty"`
-}
-
-func (w fleetDriverRunWire) domain() *domain.DriverRun {
-	run := w.DriverRun
-	if len(run.Payload) == 0 && len(w.Input) > 0 {
-		run.Payload = cloneRawMessage(w.Input)
-	}
-	return &run
-}
-
-func isUnknownPayloadFieldError(err error) bool {
-	return err != nil && errors.Is(err, domain.ErrInvalid) && strings.Contains(err.Error(), `unknown field "payload"`)
-}
-
-func isUnknownOutputFieldError(err error) bool {
-	return err != nil && errors.Is(err, domain.ErrInvalid) && strings.Contains(err.Error(), `unknown field "output"`)
-}
-
-func cloneRawMessage(in json.RawMessage) json.RawMessage {
-	if len(in) == 0 {
-		return nil
-	}
-	out := make(json.RawMessage, len(in))
-	copy(out, in)
-	return out
-}
-
-func cloneStringMap(in map[string]string) map[string]string {
-	if len(in) == 0 {
-		return nil
-	}
-	out := make(map[string]string, len(in))
-	for key, value := range in {
-		out[key] = value
-	}
-	return out
+	return &out, nil
 }
 
 func (s *driverRunStore) RecoverStale(ctx context.Context, ws string, recover store.StaleDriverRunRecovery) (*store.StaleDriverRunRecoveryResult, error) {

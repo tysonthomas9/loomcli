@@ -14,9 +14,6 @@ import (
 
 func TestPlatformClientDriverRunLifecycleRoutesAndErrors(t *testing.T) {
 	var claimCount int
-	var epicRunAttempts int
-	var driverRunAttempts int
-	var finishAttempts int
 	recoveryBefore := time.Date(2026, 6, 6, 12, 34, 56, 0, time.UTC)
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
@@ -80,53 +77,29 @@ func TestPlatformClientDriverRunLifecycleRoutesAndErrors(t *testing.T) {
 			}
 			writeJSON(t, w, domain.TriggerBinding{WorkspaceKey: "WS", BindingID: "binding-1", Name: *req.Name, RouteKey: "epics.runs.create", DriverID: "driver-1", DriverVersionID: "version-1", Enabled: *req.Enabled})
 		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/WS/epics/WS-1/runs":
-			epicRunAttempts++
-			var raw map[string]json.RawMessage
-			decodeJSONBody(t, r, &raw)
-			if _, ok := raw["payload"]; ok {
-				if epicRunAttempts != 1 {
-					t.Fatalf("unexpected payload retry for epic run: attempt %d body=%s", epicRunAttempts, raw["payload"])
-				}
-				writeJSONStatus(t, w, http.StatusBadRequest, map[string]any{"error": map[string]string{"code": "invalid_json", "message": `unknown field "payload"`}})
-				return
-			}
 			var req struct {
 				RunID          string          `json:"run_id"`
 				IdempotencyKey string          `json:"idempotency_key"`
-				Input          json.RawMessage `json:"input"`
+				Payload        json.RawMessage `json:"payload"`
 			}
-			if err := json.Unmarshal(mustMarshalJSON(t, raw), &req); err != nil {
-				t.Fatalf("decode epic run retry body: %v", err)
-			}
-			if req.RunID != "run-epic-1" || req.IdempotencyKey != "idem-epic-1" || string(req.Input) != `{"epicId":"wrong"}` || r.Header.Get("Idempotency-Key") != "idem-epic-1" {
+			decodeJSONBody(t, r, &req)
+			if req.RunID != "run-epic-1" || req.IdempotencyKey != "idem-epic-1" || string(req.Payload) != `{"epicId":"wrong"}` || r.Header.Get("Idempotency-Key") != "idem-epic-1" {
 				t.Fatalf("epic run body/header = %+v header=%q", req, r.Header.Get("Idempotency-Key"))
 			}
-			writeJSON(t, w, map[string]any{"workspace_key": "WS", "run_id": req.RunID, "driver_id": "driver-1", "driver_version_id": "version-1", "epic_id": "WS-1", "status": domain.DriverRunQueued, "input": req.Input})
+			writeJSON(t, w, domain.DriverRun{WorkspaceKey: "WS", RunID: req.RunID, DriverID: "driver-1", DriverVersionID: "version-1", EpicID: "WS-1", Status: domain.DriverRunQueued})
 		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/WS/driver-runs":
-			driverRunAttempts++
-			var raw map[string]json.RawMessage
-			decodeJSONBody(t, r, &raw)
-			if _, ok := raw["payload"]; ok {
-				if driverRunAttempts != 1 {
-					t.Fatalf("unexpected payload retry for driver run: attempt %d body=%s", driverRunAttempts, raw["payload"])
-				}
-				writeJSONStatus(t, w, http.StatusBadRequest, map[string]any{"error": map[string]string{"code": "invalid_json", "message": `unknown field "payload"`}})
-				return
-			}
 			var req struct {
 				RunID           string          `json:"run_id"`
 				DriverID        string          `json:"driver_id"`
 				DriverVersionID string          `json:"driver_version_id"`
 				EpicID          string          `json:"epic_id"`
-				Input           json.RawMessage `json:"input"`
+				Payload         json.RawMessage `json:"payload"`
 			}
-			if err := json.Unmarshal(mustMarshalJSON(t, raw), &req); err != nil {
-				t.Fatalf("decode driver run retry body: %v", err)
-			}
-			if req.RunID != "run-1" || req.DriverID != "driver-1" || req.DriverVersionID != "version-1" || string(req.Input) != `{"epicId":"WS-1"}` {
+			decodeJSONBody(t, r, &req)
+			if req.RunID != "run-1" || req.DriverID != "driver-1" || req.DriverVersionID != "version-1" || string(req.Payload) != `{"epicId":"WS-1"}` {
 				t.Fatalf("driver run create body = %+v", req)
 			}
-			writeJSON(t, w, map[string]any{"workspace_key": "WS", "run_id": req.RunID, "driver_id": req.DriverID, "driver_version_id": req.DriverVersionID, "epic_id": req.EpicID, "status": domain.DriverRunQueued, "input": req.Input})
+			writeJSON(t, w, domain.DriverRun{WorkspaceKey: "WS", RunID: req.RunID, DriverID: req.DriverID, DriverVersionID: req.DriverVersionID, EpicID: req.EpicID, Status: domain.DriverRunQueued})
 		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/WS/driver-runs":
 			if r.URL.Query().Get("status") != "queued" || r.URL.Query().Get("epic_id") != "WS-1" {
 				t.Fatalf("driver run list query = %s", r.URL.RawQuery)
@@ -149,16 +122,6 @@ func TestPlatformClientDriverRunLifecycleRoutesAndErrors(t *testing.T) {
 			}
 			writeJSON(t, w, domain.DriverRun{WorkspaceKey: "WS", RunID: "run-1", Status: domain.DriverRunRunning, NodeID: req.NodeID, LeaseID: req.LeaseID, FencingToken: 1})
 		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/WS/driver-runs/run-1/finish":
-			finishAttempts++
-			var raw map[string]json.RawMessage
-			decodeJSONBody(t, r, &raw)
-			if _, ok := raw["output"]; ok {
-				if finishAttempts != 1 {
-					t.Fatalf("unexpected output retry for driver run finish: attempt %d body=%s", finishAttempts, raw["output"])
-				}
-				writeJSONStatus(t, w, http.StatusBadRequest, map[string]any{"error": map[string]string{"code": "invalid_json", "message": `unknown field "output"`}})
-				return
-			}
 			var req struct {
 				NodeID       string                 `json:"node_id"`
 				LeaseID      string                 `json:"lease_id"`
@@ -166,10 +129,8 @@ func TestPlatformClientDriverRunLifecycleRoutesAndErrors(t *testing.T) {
 				Status       domain.DriverRunStatus `json:"status"`
 				Output       map[string]string      `json:"output"`
 			}
-			if err := json.Unmarshal(mustMarshalJSON(t, raw), &req); err != nil {
-				t.Fatalf("decode finish retry body: %v", err)
-			}
-			if req.NodeID != "node-1" || req.LeaseID != "lease-1" || req.FencingToken != 1 || req.Status != domain.DriverRunCompleted || len(req.Output) != 0 {
+			decodeJSONBody(t, r, &req)
+			if req.NodeID != "node-1" || req.LeaseID != "lease-1" || req.FencingToken != 1 || req.Status != domain.DriverRunCompleted || req.Output["logs_ref"] != "driver-run://run-1/flue-local" {
 				t.Fatalf("finish body = %+v", req)
 			}
 			writeJSON(t, w, domain.DriverRun{WorkspaceKey: "WS", RunID: "run-1", Status: domain.DriverRunCompleted, NodeID: req.NodeID})
@@ -443,13 +404,11 @@ func TestPlatformClientDriverRunLifecycleRoutesAndErrors(t *testing.T) {
 		RunID:          "run-epic-1",
 		IdempotencyKey: "idem-epic-1",
 		Payload:        json.RawMessage(`{"epicId":"wrong"}`),
-	}); err != nil || run.DriverVersionID != "version-1" || run.EpicID != "WS-1" || string(run.Payload) != `{"epicId":"wrong"}` {
-		t.Fatalf("CreateEpic driver run = %+v err=%v, want pinned version-1 WS-1 with translated payload", run, err)
+	}); err != nil || run.DriverVersionID != "version-1" || run.EpicID != "WS-1" {
+		t.Fatalf("CreateEpic driver run = %+v err=%v, want pinned version-1 WS-1", run, err)
 	}
-	if run, err := client.DriverRuns().Create(t.Context(), store.DriverRunCreate{WorkspaceKey: "WS", RunID: "run-1", DriverID: "driver-1", DriverVersionID: "version-1", EpicID: "WS-1", Payload: json.RawMessage(`{"epicId":"WS-1"}`)}); err != nil {
+	if _, err := client.DriverRuns().Create(t.Context(), store.DriverRunCreate{WorkspaceKey: "WS", RunID: "run-1", DriverID: "driver-1", DriverVersionID: "version-1", EpicID: "WS-1", Payload: json.RawMessage(`{"epicId":"WS-1"}`)}); err != nil {
 		t.Fatalf("Create driver run: %v", err)
-	} else if string(run.Payload) != `{"epicId":"WS-1"}` {
-		t.Fatalf("Create driver run payload = %s, want translated input payload", run.Payload)
 	}
 	if runs, err := client.DriverRuns().List(t.Context(), "WS", store.DriverRunFilter{EpicID: "WS-1", Status: domain.DriverRunQueued}); err != nil || len(runs) != 1 {
 		t.Fatalf("List driver runs = %+v err=%v, want one", runs, err)
@@ -481,10 +440,8 @@ func TestPlatformClientDriverRunLifecycleRoutesAndErrors(t *testing.T) {
 	if steps, err := client.DriverSteps().List(t.Context(), "WS", store.DriverStepFilter{DriverRunID: "run-1", TaskRunID: "task-run-1", Status: domain.DriverStepCompleted, Limit: 1}); err != nil || len(steps) != 1 {
 		t.Fatalf("List driver steps = %+v err=%v, want one", steps, err)
 	}
-	if run, err := client.DriverRuns().Finish(t.Context(), "WS", "run-1", store.DriverRunFinish{NodeID: "node-1", LeaseID: "lease-1", FencingToken: 1, Status: domain.DriverRunCompleted, Output: map[string]string{"logs_ref": "driver-run://run-1/flue-local"}}); err != nil {
+	if _, err := client.DriverRuns().Finish(t.Context(), "WS", "run-1", store.DriverRunFinish{NodeID: "node-1", LeaseID: "lease-1", FencingToken: 1, Status: domain.DriverRunCompleted, Output: map[string]string{"logs_ref": "driver-run://run-1/flue-local"}}); err != nil {
 		t.Fatalf("Finish driver run: %v", err)
-	} else if run.Output["logs_ref"] != "driver-run://run-1/flue-local" {
-		t.Fatalf("Finish driver run output = %+v, want request output preserved after retry", run.Output)
 	}
 	if recovered, err := client.DriverRuns().RecoverStale(t.Context(), "WS", store.StaleDriverRunRecovery{StaleBefore: recoveryBefore, MaxAgeSeconds: 60, ErrorClass: "stale_driver_run", Summary: "operator stale run recovery", Limit: 2}); err != nil || recovered.Recovered != 1 || recovered.SkippedFresh != 1 {
 		t.Fatalf("RecoverStale = %+v err=%v, want recovery counts", recovered, err)
@@ -533,23 +490,5 @@ func decodeJSONBody(t *testing.T, r *http.Request, out any) {
 	t.Helper()
 	if err := json.NewDecoder(r.Body).Decode(out); err != nil {
 		t.Fatalf("decode request body: %v", err)
-	}
-}
-
-func mustMarshalJSON(t *testing.T, in any) []byte {
-	t.Helper()
-	out, err := json.Marshal(in)
-	if err != nil {
-		t.Fatalf("marshal JSON: %v", err)
-	}
-	return out
-}
-
-func writeJSONStatus(t *testing.T, w http.ResponseWriter, status int, v any) {
-	t.Helper()
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	if err := json.NewEncoder(w).Encode(v); err != nil {
-		t.Fatalf("encode response: %v", err)
 	}
 }
