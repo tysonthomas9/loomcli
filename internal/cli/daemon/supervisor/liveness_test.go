@@ -1,7 +1,9 @@
 package supervisor
 
 import (
+	"os/exec"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -98,6 +100,72 @@ func TestScanTicksQuarantinesStaleAgentInsteadOfFatal(t *testing.T) {
 	case <-ap.StopCh:
 	default:
 		t.Error("quarantined agent's StopCh was not closed")
+	}
+
+	ap.Mu.Lock()
+	stopReason := ap.StopReason
+	ap.Mu.Unlock()
+	if stopReason != StopReasonWatchdog {
+		t.Errorf("quarantined agent stop reason = %q, want %q", stopReason, StopReasonWatchdog)
+	}
+}
+
+// TestScanTicksStopsStaleAgentProcess proves the quarantine path is not just
+// metadata: when a stale agent has a real subprocess, the watchdog starts an
+// asynchronous StopAgent attempt that terminates it while the daemon stays up.
+func TestScanTicksStopsStaleAgentProcess(t *testing.T) {
+	s := newHarnessSupervisor()
+	sigtermTimeout := 1
+	s.ConfigSnapshot = func() *cfgpkg.DaemonConfig {
+		return &cfgpkg.DaemonConfig{
+			Daemon: cfgpkg.DaemonSettings{
+				RestartPolicy: cfgpkg.RestartPolicy{SigtermTimeout: &sigtermTimeout},
+			},
+		}
+	}
+
+	cmd := exec.Command("sleep", "60") //nolint:gosec // test subprocess
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("start sleep: %v", err)
+	}
+	waitDone := make(chan struct{})
+	ap := &AgentProcess{
+		Entry:  cfgpkg.AgentEntry{Worktree: "stuck_process_agent", Role: "task"},
+		Cmd:    cmd,
+		Pid:    cmd.Process.Pid,
+		StopCh: make(chan struct{}),
+		Done:   make(chan struct{}),
+	}
+	t.Cleanup(func() {
+		_ = cmd.Process.Kill()
+		<-waitDone
+	})
+	go func() {
+		_ = cmd.Wait()
+		ap.Mu.Lock()
+		ap.Cmd = nil
+		ap.Pid = 0
+		ap.Mu.Unlock()
+		close(waitDone)
+	}()
+
+	name := agentTickName(ap)
+	s.registerAgentTick(ap)
+	setTickForTest(s, name, time.Now().Add(-1*time.Hour))
+
+	s.scanTicks(time.Now())
+
+	select {
+	case <-waitDone:
+	case <-time.After(5 * time.Second):
+		t.Fatal("quarantine did not stop the stale agent subprocess")
+	}
+
+	select {
+	case err := <-s.FatalChannel():
+		t.Fatalf("stale agent process escalated to fatal (should quarantine): %v", err)
+	default:
 	}
 }
 
