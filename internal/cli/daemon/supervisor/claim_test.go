@@ -101,7 +101,7 @@ func TestClaimTask_RequestedTaskNotReadyDoesNotClaimFallback(t *testing.T) {
 	if len(mock.Calls) != 1 {
 		t.Fatalf("calls = %#v, want only requested-task Ready", mock.Calls)
 	}
-	if ap.LastError == nil || ap.LastError.Class != agenterr.NoWork {
+	if ap.LastError == nil || ap.LastError.Class != agenterr.OutcomeFromDomain(agenterr.NoWorkOutcome) {
 		t.Fatalf("LastError = %#v, want NoWork", ap.LastError)
 	}
 }
@@ -194,7 +194,7 @@ func TestClaimTask_CapsConflictRetries(t *testing.T) {
 	if claimCalls != claimConflictRetryLimit {
 		t.Fatalf("claim calls = %d, want capped at %d", claimCalls, claimConflictRetryLimit)
 	}
-	if ap.LastError == nil || ap.LastError.Class != agenterr.LockConflict {
+	if ap.LastError == nil || ap.LastError.Class != agenterr.OutcomeFromDomain(agenterr.LockConflictOutcome) {
 		t.Fatalf("LastError = %#v, want LockConflict after conflict retry cap", ap.LastError)
 	}
 }
@@ -213,7 +213,7 @@ func TestClaimTask_NoMatchSetsNoWork(t *testing.T) {
 	if s.claimTask(ap, "") {
 		t.Fatal("claimTask returned true, want false")
 	}
-	if ap.LastError == nil || ap.LastError.Class != agenterr.NoWork {
+	if ap.LastError == nil || ap.LastError.Class != agenterr.OutcomeFromDomain(agenterr.NoWorkOutcome) {
 		t.Fatalf("LastError = %#v, want NoWork", ap.LastError)
 	}
 }

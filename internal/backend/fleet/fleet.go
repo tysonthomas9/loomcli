@@ -512,18 +512,27 @@ func (b *FleetBackend) SearchIssues(ctx context.Context, query string, limit int
 
 func (b *FleetBackend) Create(ctx context.Context, params backend.CreateParams) (*backend.IssueData, error) {
 	body := createParamsToBody(params)
-	resp, err := b.exec(ctx, "Create", "POST", "/issues", body)
+	apiResp, statusCode, respHeaders, err := b.doRequestHeaders(ctx, "POST", "/issues", body, params.IdempotencyHeaders())
 	if err != nil {
-		return nil, err
+		return nil, classifyTransportError("Create", err)
 	}
-	if !hasData(resp) {
+	if cerr := classifyHTTPError("Create", statusCode, *apiResp); cerr != nil {
+		return nil, cerr
+	}
+	if !hasData(apiResp) {
 		return nil, backend.ErrInternal("Create", "empty response from server", nil)
 	}
 	var issue types.Issue
-	if err := json.Unmarshal(resp.Data, &issue); err != nil {
+	if err := json.Unmarshal(apiResp.Data, &issue); err != nil {
 		return nil, backend.ErrInternal("Create", "unmarshal response", err)
 	}
+	logIdempotencyResponse(respHeaders, issue.ID)
 	result := issueToData(&issue)
+	if err := b.addCreateDependencies(ctx, result.ID, params.Dependencies); err != nil {
+		// The issue itself was created; return it alongside the error so
+		// callers that inspect the partial result can still see the ID.
+		return &result, err
+	}
 	return &result, nil
 }
 

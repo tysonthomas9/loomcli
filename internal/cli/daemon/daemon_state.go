@@ -139,6 +139,7 @@ func toDaemonAgentStatus(ap supervisor.SupervisedAgentStatus, maxRetries int) Da
 		WorktreePath:           ap.WorktreePath,
 		LastErrorClass:         ap.LastErrorClass,
 		NoWorkCount:            ap.NoWorkCount,
+		ParkCount:              ap.ParkCount,
 		BackoffUntil:           ap.BackoffUntil,
 		RemoteBranch:           ap.RemoteBranch,
 		OwnershipLeaseID:       ap.OwnershipLeaseID,
@@ -162,7 +163,10 @@ func computeAgentStatus(ap supervisor.SupervisedAgentStatus, maxRetries int) str
 		return "running"
 	}
 	// Not running - check if it failed via stop reason or restart count
-	if ap.StopReason == supervisor.StopReasonFatalError || ap.StopReason == supervisor.StopReasonMaxRetries {
+	if ap.StopReason == supervisor.StopReasonFatalError ||
+		ap.StopReason == supervisor.StopReasonMaxRetries ||
+		ap.StopReason == supervisor.StopReasonFastFail ||
+		ap.StopReason == supervisor.StopReasonMaxRetriesParked {
 		return "error"
 	}
 	// High restart count without stop reason still means error.

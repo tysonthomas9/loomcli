@@ -6,6 +6,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/olesho/harness-wrapper/pkg/wrapper"
+
 	"github.com/tysonthomas9/loomcli/internal/agenterr"
 	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/cli/clitest"
@@ -204,7 +206,7 @@ func TestSupervisor_ShouldRestart_MaxRetriesExceeded_ErrorsAndBlocksTask(t *test
 		Entry:          config.AgentEntry{Worktree: "wt", Role: "task"},
 		LastExitCode:   1,
 		LastStart:      time.Now(),
-		LastError:      &agenterr.AgentError{Class: agenterr.Transient, Message: "backend crashed"},
+		LastError:      &agenterr.AgentError{Class: agenterr.OutcomeFromHarness(wrapper.ErrTransient), Message: "backend crashed"},
 		RestartCount:   3, // Already at max; the next failure exhausts the budget
 		AssignedTaskID: "TASK-1",
 	}
@@ -307,7 +309,7 @@ func TestSupervisor_ShouldRestart_BackendUnavailable_PreservesBudget(t *testing.
 	ap := &AgentProcess{
 		LastExitCode: 1,
 		LastStart:    time.Now(),
-		LastError:    &agenterr.AgentError{Class: agenterr.BackendUnavailable},
+		LastError:    &agenterr.AgentError{Class: agenterr.OutcomeFromDomain(agenterr.BackendUnavailableOutcome)},
 		RestartCount: maxRetries, // already at the limit; a generic error would now fail
 	}
 
@@ -343,7 +345,7 @@ func TestSupervisor_ShouldRestart_Exhaustion_StopsUntilExplicitResume(t *testing
 		Entry:        config.AgentEntry{Worktree: "wt"},
 		LastExitCode: 1,
 		LastStart:    time.Now(),
-		LastError:    &agenterr.AgentError{Class: agenterr.Transient},
+		LastError:    &agenterr.AgentError{Class: agenterr.OutcomeFromHarness(wrapper.ErrTransient)},
 	}
 
 	// Failures within budget count up and keep retrying.
@@ -377,7 +379,10 @@ func TestSupervisor_ShouldRestart_Fatal_StillStops(t *testing.T) {
 		Daemon: config.DaemonSettings{RestartPolicy: config.RestartPolicy{MaxRetries: &maxRetries}},
 	})
 
-	for _, class := range []agenterr.ErrorClass{agenterr.AuthFailure, agenterr.BillingError} {
+	for _, class := range []agenterr.Outcome{
+		agenterr.OutcomeFromHarness(wrapper.ErrAuth),
+		agenterr.OutcomeFromHarness(wrapper.ErrBilling),
+	} {
 		ap := &AgentProcess{
 			Entry:        config.AgentEntry{Worktree: "wt"},
 			LastExitCode: 1,
@@ -406,7 +411,7 @@ func TestSupervisor_Error_PreservesObservability(t *testing.T) {
 		Entry:        config.AgentEntry{Worktree: "wt", Role: "plan"},
 		LastExitCode: 1,
 		LastStart:    time.Now(),
-		LastError:    &agenterr.AgentError{Class: agenterr.Transient},
+		LastError:    &agenterr.AgentError{Class: agenterr.OutcomeFromHarness(wrapper.ErrTransient)},
 		RestartCount: maxRetries, // next failure exhausts
 	}
 	if s.shouldRestart(ap) {
@@ -499,7 +504,7 @@ func TestSupervisor_ShouldRestart_NoWorkCount_Increments(t *testing.T) {
 	ap := &AgentProcess{
 		LastExitCode: 1,
 		LastStart:    time.Now(),
-		LastError:    &agenterr.AgentError{Class: agenterr.NoWork},
+		LastError:    &agenterr.AgentError{Class: agenterr.OutcomeFromDomain(agenterr.NoWorkOutcome)},
 	}
 
 	// Three consecutive NoWork exits
@@ -526,7 +531,7 @@ func TestSupervisor_ShouldRestart_NoWorkCount_ResetOnCleanSuccess(t *testing.T) 
 	ap := &AgentProcess{
 		LastExitCode: 1,
 		LastStart:    time.Now(),
-		LastError:    &agenterr.AgentError{Class: agenterr.NoWork},
+		LastError:    &agenterr.AgentError{Class: agenterr.OutcomeFromDomain(agenterr.NoWorkOutcome)},
 	}
 
 	// Two NoWork exits
@@ -559,7 +564,7 @@ func TestSupervisor_ShouldRestart_NoWorkCount_ResetOnError(t *testing.T) {
 	ap := &AgentProcess{
 		LastExitCode: 1,
 		LastStart:    time.Now(),
-		LastError:    &agenterr.AgentError{Class: agenterr.NoWork},
+		LastError:    &agenterr.AgentError{Class: agenterr.OutcomeFromDomain(agenterr.NoWorkOutcome)},
 	}
 
 	// Two NoWork exits
@@ -570,7 +575,7 @@ func TestSupervisor_ShouldRestart_NoWorkCount_ResetOnError(t *testing.T) {
 	}
 
 	// Timeout error
-	ap.LastError = &agenterr.AgentError{Class: agenterr.Timeout}
+	ap.LastError = &agenterr.AgentError{Class: agenterr.OutcomeFromHarness(wrapper.ErrTimeout)}
 	s.shouldRestart(ap)
 
 	if ap.NoWorkCount != 0 {
@@ -589,7 +594,7 @@ func TestSupervisor_GetAgents_Snapshot_NewFields(t *testing.T) {
 			Pid:          12345,
 			NoWorkCount:  5,
 			BackoffUntil: backoffTime,
-			LastError:    &agenterr.AgentError{Class: agenterr.RateLimited},
+			LastError:    &agenterr.AgentError{Class: agenterr.OutcomeFromHarness(wrapper.ErrRateLimited)},
 		},
 	}
 

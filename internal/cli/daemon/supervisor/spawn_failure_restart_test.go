@@ -2,10 +2,15 @@ package supervisor
 
 import (
 	"errors"
+	"os"
+	"path/filepath"
 	"testing"
+
+	"github.com/olesho/harness-wrapper/pkg/wrapper"
 
 	"github.com/tysonthomas9/loomcli/internal/agenterr"
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
+	"github.com/tysonthomas9/loomcli/internal/events"
 )
 
 func spawnFailureTestConfig(maxRetries int) *config.DaemonConfig {
@@ -39,7 +44,7 @@ func TestMarkSpawnFailure_SetsSyntheticExitState(t *testing.T) {
 	if ap.LastError == nil {
 		t.Fatal("LastError = nil, want non-nil SpawnFailure error")
 	}
-	if ap.LastError.Class != agenterr.SpawnFailure {
+	if ap.LastError.Class != agenterr.OutcomeFromDomain(agenterr.SpawnFailureOutcome) {
 		t.Errorf("LastError.Class = %v, want SpawnFailure", ap.LastError.Class)
 	}
 	if ap.LastNoWork {
@@ -95,10 +100,81 @@ func TestSpawnFailure_CountsOnceAndRespectsMaxRetries(t *testing.T) {
 	ap.Mu.Lock()
 	defer ap.Mu.Unlock()
 	if ap.RestartCount != maxRetries+1 {
-		t.Errorf("RestartCount = %d, want %d", ap.RestartCount, maxRetries+1)
+		t.Errorf("RestartCount = %d, want %d (preserved for observability)", ap.RestartCount, maxRetries+1)
 	}
 	if ap.StopReason != StopReasonMaxRetries {
 		t.Errorf("StopReason = %q, want %q", ap.StopReason, StopReasonMaxRetries)
+	}
+}
+
+func TestRealSubprocessExitExhaustsMaxRetriesIntoError(t *testing.T) {
+	const maxRetries = 0
+	binDir := t.TempDir()
+	loomPath := filepath.Join(binDir, "loom")
+	if err := os.WriteFile(loomPath, []byte("#!/bin/sh\necho 'transient crash from real subprocess'\nexit 1\n"), 0755); err != nil {
+		t.Fatalf("write loom shim: %v", err)
+	}
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("LOOM_CONFIG_DIR", filepath.Join(t.TempDir(), "loom-config"))
+	t.Setenv("LOOM_WORKSPACE", "")
+	t.Setenv("LOOM_WORKSPACE_ID", "")
+
+	s := newTestSupervisorWithConfig(&config.DaemonConfig{
+		Daemon: config.DaemonSettings{
+			LogDir:    t.TempDir(),
+			EventsDir: t.TempDir(),
+			RestartPolicy: config.RestartPolicy{
+				MaxRetries:     config.IntPtr(maxRetries),
+				BackoffInitial: config.IntPtr(0),
+				BackoffMax:     config.IntPtr(0),
+			},
+		},
+	})
+	s.ProjectDir = t.TempDir()
+	s.Concurrency = NewConcurrencyTracker(nil)
+	s.EmitEvent = func(events.Event) {}
+
+	ap := &AgentProcess{
+		Entry:        config.AgentEntry{Worktree: "real-fail", Role: "plan"},
+		WorktreePath: t.TempDir(),
+		StopCh:       make(chan struct{}),
+	}
+
+	if !s.Concurrency.Acquire(ap.Entry.Role) {
+		t.Fatal("failed to acquire concurrency slot")
+	}
+	if err := s.spawnAgent(ap); err != nil {
+		s.Concurrency.Release(ap.Entry.Role)
+		t.Fatalf("spawnAgent: %v", err)
+	}
+	exitCode := s.waitForAgent(ap)
+	s.classifyAgentExit(ap, exitCode)
+	s.Concurrency.Release(ap.Entry.Role)
+
+	ap.Mu.Lock()
+	recordedExitCode := ap.LastExitCode
+	lastErr := ap.LastError
+	ap.Mu.Unlock()
+	if recordedExitCode != 1 {
+		t.Fatalf("LastExitCode = %d, want 1 from real subprocess", recordedExitCode)
+	}
+	if lastErr == nil {
+		t.Fatal("LastError = nil, want classified subprocess failure")
+	}
+
+	if s.shouldRestart(ap) {
+		t.Fatal("shouldRestart = true after real subprocess exhausted maxRetries=0, want false")
+	}
+	ap.Mu.Lock()
+	defer ap.Mu.Unlock()
+	if ap.RestartCount != 1 {
+		t.Errorf("RestartCount = %d, want 1 (first real failure exceeds maxRetries=0)", ap.RestartCount)
+	}
+	if ap.StopReason != StopReasonMaxRetries {
+		t.Errorf("StopReason = %q, want %q", ap.StopReason, StopReasonMaxRetries)
+	}
+	if _, ok := s.StoppedAgents["real-fail"]; !ok {
+		t.Fatal("agent was not marked stopped for explicit resume")
 	}
 }
 
@@ -115,14 +191,14 @@ func TestSpawnFailure_AfterNonZeroExitNotDoubleCounted(t *testing.T) {
 		Entry: config.AgentEntry{Worktree: "wt"},
 		// Stale state from a prior non-zero exit that was already counted once.
 		LastExitCode: 1,
-		LastError:    &agenterr.AgentError{Class: agenterr.Transient, Message: "stale"},
+		LastError:    &agenterr.AgentError{Class: agenterr.OutcomeFromHarness(wrapper.ErrTransient), Message: "stale"},
 		RestartCount: 1,
 	}
 
 	s.markSpawnFailure(ap, errors.New("spawn failed"))
 
 	ap.Mu.Lock()
-	if ap.LastError == nil || ap.LastError.Class != agenterr.SpawnFailure {
+	if ap.LastError == nil || ap.LastError.Class != agenterr.OutcomeFromDomain(agenterr.SpawnFailureOutcome) {
 		ap.Mu.Unlock()
 		t.Fatalf("LastError = %v, want SpawnFailure (stale class must be overwritten)", ap.LastError)
 	}

@@ -30,7 +30,13 @@ var closeCmd = &cobra.Command{
 			Force:   closeForce,
 		}
 		if _, err := ib.Close(ctx, args[0], params); err != nil {
-			return err
+			// Idempotent close: already-closed means the desired state is
+			// true — succeed quietly (a doubled close must not exit 1 or
+			// spray ERROR logs). Other conflicts (blockers, dependencies)
+			// still fail.
+			if !isAlreadyClosedConflict(err) {
+				return err
+			}
 		}
 		return printMessageResult(os.Stdout, "closed "+args[0], outputFormat)
 	},

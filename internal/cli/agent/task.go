@@ -127,9 +127,19 @@ func runTaskDaemon(deps *cli.Deps, worktreePath, agentName string) {
 		fmt.Fprintf(os.Stderr, "Warning: could not update lock state: %v\n", err)
 	}
 
+	assignedTaskID := os.Getenv("LOOM_ASSIGNED_TASK_ID")
+	// P4: if this is a same-task daemon restart, resume the prior Claude session
+	// carried forward in the lock instead of cold-starting (guarded). Done BEFORE
+	// building the prompt so it can skip the redundant checkpoint context.
+	maybeResumeDaemonSession(worktreePath, assignedTaskID)
+	// Record the assigned task on the worktree lock (AFTER the resume decision)
+	// so a crash leaves a resumable remnant for the next restart's
+	// detectRecovery — the agent's own `loom claim` is CWD-dependent and can't be
+	// relied on to set this.
+	persistAssignedTaskToLock(worktreePath, assignedTaskID)
+
 	ws, _ := config.ResolveActiveWorkspace()
 	prompt := GenerateTaskPrompt(agentName, ws, taskParentID, cli.GetBackendName())
-	assignedTaskID := os.Getenv("LOOM_ASSIGNED_TASK_ID")
 	if assignedTaskID != "" {
 		prompt = GenerateFleetTaskPrompt(agentName, assignedTaskID, ws, cli.GetBackendName())
 	}
@@ -148,6 +158,11 @@ func runTaskDaemon(deps *cli.Deps, worktreePath, agentName string) {
 	shutdown := automode.SetupSignalHandler()
 	collector := usage.NewCollector(cli.GetBackendName(), agentName)
 	invokeErr := deps.Agent.InvokeNonInteractive(worktreePath, prompt, agentName, shutdown, collector)
+	if invokeErr == nil {
+		// Success: drop the carried session so the next restart starts the next
+		// task fresh. On failure we KEEP it (carry-forward → resume on respawn).
+		clearDaemonResumeOnSuccess(worktreePath)
+	}
 
 	emitTaskLifecycleResult(agentName, worktreePath, startedAt, invokeErr)
 	finalizeAgentSession(sess, worktreePath, beforeRef, invokeErr, collector, startedAt, taskParentID)

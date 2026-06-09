@@ -8,6 +8,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/olesho/harness-wrapper/pkg/wrapper"
+
 	"github.com/tysonthomas9/loomcli/internal/agenterr"
 	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/cli"
@@ -41,6 +43,24 @@ func (s *Supervisor) claimTask(ap *AgentProcess, epicID string) bool {
 	if s.IssueBackend == nil || !shouldClaimTaskForRole(ap) {
 		return true
 	}
+
+	// Resume-first: re-claim the agent's OWN interrupted task (set by
+	// prepareResume) directly, bypassing the ready-queue gate — an in_progress
+	// task is never "ready", so the normal claim path can't recover it. On
+	// failure, drop the resume target and fall through to a normal claim
+	// (cold-start), so resume never strands an agent.
+	ap.Mu.Lock()
+	resumeTaskID := ap.ResumeTaskID
+	ap.Mu.Unlock()
+	if resumeTaskID != "" {
+		if s.claimResumeTask(ap, resumeTaskID) {
+			return true
+		}
+		ap.Mu.Lock()
+		ap.ResumeTaskID = ""
+		ap.Mu.Unlock()
+	}
+
 	opts, constraints := s.buildClaimOpts(ap, epicID)
 
 	ap.Mu.Lock()
@@ -62,7 +82,7 @@ func (s *Supervisor) claimTask(ap *AgentProcess, epicID string) bool {
 	if claimed, decided := s.tryClaimFromReady(ap, opts, constraints); decided {
 		return claimed
 	}
-	s.setPreflightError(ap, agenterr.NoWork, "no claimable tasks")
+	s.setPreflightError(ap, agenterr.OutcomeFromDomain(agenterr.NoWorkOutcome), "no claimable tasks")
 	return false
 }
 
@@ -93,7 +113,7 @@ func (s *Supervisor) buildClaimOpts(ap *AgentProcess, epicID string) (backend.Re
 func (s *Supervisor) tryClaimFromReady(ap *AgentProcess, opts backend.ReadyOpts, constraints cli.RoleConstraints) (claimed, decided bool) {
 	issues, err := s.readyIssues(opts)
 	if err != nil {
-		s.setPreflightError(ap, agenterr.Unknown, fmt.Sprintf("ready query failed: %v", err))
+		s.setPreflightError(ap, agenterr.OutcomeFromHarness(wrapper.ErrUnknown), fmt.Sprintf("ready query failed: %v", err))
 		return false, true
 	}
 	claimed, failed := s.tryClaimBestTask(ap, issues, constraints)
@@ -119,7 +139,7 @@ func (s *Supervisor) claimRequestedTask(ap *AgentProcess, opts backend.ReadyOpts
 	}
 	issues, err := s.readyIssues(opts)
 	if err != nil {
-		s.setPreflightError(ap, agenterr.Unknown, fmt.Sprintf("ready query failed: %v", err))
+		s.setPreflightError(ap, agenterr.OutcomeFromHarness(wrapper.ErrUnknown), fmt.Sprintf("ready query failed: %v", err))
 		return false
 	}
 	for _, issue := range issues {
@@ -127,20 +147,44 @@ func (s *Supervisor) claimRequestedTask(ap *AgentProcess, opts backend.ReadyOpts
 			continue
 		}
 		if !cli.IsWorkableTask(issue) {
-			s.setPreflightError(ap, agenterr.NoWork, fmt.Sprintf("requested task %s is not claimable", taskID))
+			s.setPreflightError(ap, agenterr.OutcomeFromDomain(agenterr.NoWorkOutcome), fmt.Sprintf("requested task %s is not claimable", taskID))
 			return false
 		}
 		if err := s.claimIssueForAgent(ap, taskID, "requested task"); err != nil {
 			if backend.IsKind(err, backend.KindConflict) {
-				s.setPreflightError(ap, agenterr.LockConflict, fmt.Sprintf("requested task %s locked by %s", taskID, conflictHolder(err)))
+				s.setPreflightError(ap, agenterr.OutcomeFromDomain(agenterr.LockConflictOutcome), fmt.Sprintf("requested task %s locked by %s", taskID, conflictHolder(err)))
 				return false
 			}
-			s.setPreflightError(ap, agenterr.Unknown, fmt.Sprintf("claim failed for %s: %v", taskID, err))
+			s.setPreflightError(ap, agenterr.OutcomeFromHarness(wrapper.ErrUnknown), fmt.Sprintf("claim failed for %s: %v", taskID, err))
 			return false
 		}
 		return true
 	}
-	s.setPreflightError(ap, agenterr.NoWork, fmt.Sprintf("requested task %s is not ready", taskID))
+	s.setPreflightError(ap, agenterr.OutcomeFromDomain(agenterr.NoWorkOutcome), fmt.Sprintf("requested task %s is not ready", taskID))
+	return false
+}
+
+// claimResumeTask re-acquires the claim on the agent's OWN interrupted task for
+// a resume cycle. Unlike claimRequestedTask it does NOT consult the ready queue
+// (an in_progress task is never "ready") — recovering your own task is safe, and
+// the worktree actor already held the claim. Returns true when the task is ours
+// to resume: a successful (re-)claim, or a conflict whose holder is THIS
+// worktree (our own claim still within its TTL). Any other failure returns
+// false so the caller cold-starts rather than stranding the agent.
+func (s *Supervisor) claimResumeTask(ap *AgentProcess, taskID string) bool {
+	err := s.claimIssueForAgent(ap, taskID, "resume interrupted task")
+	if err == nil {
+		return true
+	}
+	if backend.IsKind(err, backend.KindConflict) && conflictHolder(err) == ap.Entry.Worktree {
+		ap.Mu.Lock()
+		ap.AssignedTaskID = taskID
+		ap.RequestedTaskID = ""
+		ap.Mu.Unlock()
+		slog.Info("resuming task already claimed by this worktree", "worktree", ap.Entry.Worktree, "task_id", taskID)
+		return true
+	}
+	slog.Warn("resume re-claim failed; cold-starting", "worktree", ap.Entry.Worktree, "task_id", taskID, "err", err)
 	return false
 }
 
@@ -160,13 +204,13 @@ func (s *Supervisor) tryClaimBestTask(ap *AgentProcess, issues []backend.IssueDa
 				if conflicts >= claimConflictRetryLimit {
 					msg := fmt.Sprintf("no claimable tasks after %d conflicts (last: %s locked by %s)",
 						conflicts, lastConflictID, lastConflictHolder)
-					s.setPreflightError(ap, agenterr.LockConflict, msg)
+					s.setPreflightError(ap, agenterr.OutcomeFromDomain(agenterr.LockConflictOutcome), msg)
 					return false, true
 				}
 				issues = removeIssueByID(issues, match.Issue.ID)
 				continue
 			}
-			s.setPreflightError(ap, agenterr.Unknown, fmt.Sprintf("claim failed for %s: %v", match.Issue.ID, err))
+			s.setPreflightError(ap, agenterr.OutcomeFromHarness(wrapper.ErrUnknown), fmt.Sprintf("claim failed for %s: %v", match.Issue.ID, err))
 			return false, true
 		}
 		return true, false
@@ -242,12 +286,12 @@ func shouldClaimTaskForRole(ap *AgentProcess) bool {
 	return BuiltInRoles[ap.Entry.Role] || ap.RoleConfig.TaskFilter != ""
 }
 
-func (s *Supervisor) setPreflightError(ap *AgentProcess, class agenterr.ErrorClass, message string) {
+func (s *Supervisor) setPreflightError(ap *AgentProcess, class agenterr.Outcome, message string) {
 	ap.Mu.Lock()
 	ap.LastExitCode = 0
 	ap.LastExit = time.Now()
 	ap.LastError = &agenterr.AgentError{Class: class, Message: message}
-	ap.LastNoWork = class == agenterr.NoWork
+	ap.LastNoWork = class.Is(agenterr.NoWorkOutcome)
 	ap.Mu.Unlock()
 }
 

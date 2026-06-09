@@ -84,7 +84,7 @@ func TestSpawnAgent_BackendNotOnPATH_DoesNotCrashLoop(t *testing.T) {
 	if ap.LastError == nil {
 		t.Fatal("LastError must be populated")
 	}
-	if ap.LastError.Class != agenterr.BackendUnavailable {
+	if ap.LastError.Class != agenterr.OutcomeFromDomain(agenterr.BackendUnavailableOutcome) {
 		t.Errorf("LastError.Class = %v, want BackendUnavailable", ap.LastError.Class)
 	}
 	if ap.LastError.Backend != "codex" {
@@ -169,7 +169,7 @@ func TestSpawnAgent_BackendRecoveryClearsState(t *testing.T) {
 	if ap.StopReason != "" {
 		t.Errorf("StopReason after recovery = %q, want empty", ap.StopReason)
 	}
-	if ap.LastError != nil && ap.LastError.Class == agenterr.BackendUnavailable {
+	if ap.LastError != nil && ap.LastError.Class == agenterr.OutcomeFromDomain(agenterr.BackendUnavailableOutcome) {
 		t.Errorf("LastError still carries BackendUnavailable after recovery: %+v", ap.LastError)
 	}
 }
@@ -192,7 +192,7 @@ func TestGateBackendAvailable_ExternalBackendOnPath(t *testing.T) {
 	ap := newBackendUnavailableAgentProcess()
 	ap.Entry.Backend = "localdogfood"
 	ap.StopReason = StopReasonBackendUnavailable
-	ap.LastError = &agenterr.AgentError{Class: agenterr.BackendUnavailable, Backend: "localdogfood"}
+	ap.LastError = &agenterr.AgentError{Class: agenterr.OutcomeFromDomain(agenterr.BackendUnavailableOutcome), Backend: "localdogfood"}
 
 	if err := s.gateBackendAvailable(ap); err != nil {
 		t.Fatalf("gateBackendAvailable = %v, want nil for external backend on PATH", err)
@@ -200,7 +200,7 @@ func TestGateBackendAvailable_ExternalBackendOnPath(t *testing.T) {
 	if ap.StopReason != "" {
 		t.Errorf("StopReason = %q, want cleared recovery state", ap.StopReason)
 	}
-	if ap.LastError != nil && ap.LastError.Class == agenterr.BackendUnavailable {
+	if ap.LastError != nil && ap.LastError.Class.Is(agenterr.BackendUnavailableOutcome) {
 		t.Errorf("LastError still carries BackendUnavailable after external backend recovery: %+v", ap.LastError)
 	}
 }
@@ -234,7 +234,7 @@ func TestSpawnAndWait_BackendUnavailable_WaitsWithoutSpawning(t *testing.T) {
 	if ap.StopReason != StopReasonBackendUnavailable {
 		t.Errorf("StopReason = %q, want %q", ap.StopReason, StopReasonBackendUnavailable)
 	}
-	if ap.LastError == nil || ap.LastError.Class != agenterr.BackendUnavailable {
+	if ap.LastError == nil || ap.LastError.Class != agenterr.OutcomeFromDomain(agenterr.BackendUnavailableOutcome) {
 		t.Errorf("LastError = %+v, want BackendUnavailable", ap.LastError)
 	}
 	if ap.Cmd != nil {
@@ -267,7 +267,7 @@ func TestPreFlightSetup_BackendUnavailableDoesNotClaimTask(t *testing.T) {
 	if ap.AssignedTaskID != "" {
 		t.Fatalf("AssignedTaskID = %q, want empty", ap.AssignedTaskID)
 	}
-	if ap.LastError == nil || ap.LastError.Class != agenterr.BackendUnavailable {
+	if ap.LastError == nil || ap.LastError.Class != agenterr.OutcomeFromDomain(agenterr.BackendUnavailableOutcome) {
 		t.Fatalf("LastError = %+v, want BackendUnavailable", ap.LastError)
 	}
 }
@@ -347,7 +347,7 @@ func TestShouldRestart_BackendUnavailable_WaitsWithoutEroding(t *testing.T) {
 	// State the gate leaves behind (see gateBackendAvailable): a
 	// BackendUnavailable LastError. Start at the retry limit — a generic error
 	// here would already fail the agent.
-	ap.LastError = &agenterr.AgentError{Class: agenterr.BackendUnavailable, Backend: "codex"}
+	ap.LastError = &agenterr.AgentError{Class: agenterr.OutcomeFromDomain(agenterr.BackendUnavailableOutcome), Backend: "codex"}
 	ap.RestartCount = s.getMaxRetries()
 
 	for i := 0; i < 5; i++ {
