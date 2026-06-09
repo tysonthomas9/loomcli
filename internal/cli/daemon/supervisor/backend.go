@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/agenterr"
+	"github.com/tysonthomas9/loomcli/internal/agentpolicy"
 	"github.com/tysonthomas9/loomcli/internal/cli/backendcheck"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 )
@@ -66,7 +67,7 @@ func (s *Supervisor) gateBackendAvailable(ap *AgentProcess) error {
 	wasUnavailable := ap.StopReason == StopReasonBackendUnavailable
 	ap.StopReason = StopReasonBackendUnavailable
 	ap.LastError = &agenterr.AgentError{
-		Class:     agenterr.BackendUnavailable,
+		Class:     agenterr.OutcomeFromDomain(agenterr.BackendUnavailableOutcome),
 		Message:   info.InstallHint,
 		Backend:   backend,
 		Timestamp: time.Now(),
@@ -130,14 +131,14 @@ func (s *Supervisor) tryFallbackBackend(ap *AgentProcess) bool {
 		return false
 	}
 
-	// Determine if failover should trigger
-	shouldFailover := false
-	switch {
-	case lastErr.Class == agenterr.ModelNotFound:
-		shouldFailover = true
-	case lastErr.Class == agenterr.RateLimited && rateCount > 3:
-		shouldFailover = true
-	}
+	// Determine if failover should trigger: the policy names the classes
+	// that fail over immediately (Decision Failover, e.g. ModelNotFound) and
+	// the uncounted-retry threshold (FailoverAfter — rate limits fail over on
+	// the observation AFTER the threshold, preserving the historical
+	// rateCount > 3 behavior).
+	d := agentpolicy.Decide(lastErr.Class)
+	shouldFailover := d.Decision == agentpolicy.Failover ||
+		(d.FailoverAfter > 0 && rateCount > d.FailoverAfter)
 
 	if !shouldFailover {
 		ap.Mu.Unlock()

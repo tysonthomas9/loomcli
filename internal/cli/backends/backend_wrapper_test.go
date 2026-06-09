@@ -16,6 +16,7 @@ import (
 	"testing"
 	"time"
 
+	hwharness "github.com/olesho/harness-wrapper/pkg/harness"
 	"github.com/olesho/harness-wrapper/pkg/wrapper"
 
 	"github.com/tysonthomas9/loomcli/internal/agenterr"
@@ -36,20 +37,20 @@ type fakeWrapperRun struct {
 	err        error
 }
 
-func (f *fakeWrapperRun) Run(ctx context.Context, cfg wrapper.Config, p harness.RetryPolicy) (wrapper.Result, error) {
+func (f *fakeWrapperRun) Run(ctx context.Context, cfg hwharness.Config, p harness.RetryPolicy) (hwharness.Result, error) {
 	f.mu.Lock()
-	f.calls = append(f.calls, cfg)
+	f.calls = append(f.calls, cfg.Wrapper)
 	body := f.stdoutBody
 	f.mu.Unlock()
-	if body != "" && cfg.Stdout != nil {
-		_, _ = io.WriteString(cfg.Stdout, body)
+	if body != "" && cfg.Wrapper.Stdout != nil {
+		_, _ = io.WriteString(cfg.Wrapper.Stdout, body)
 	}
 	// Drain stdin so the prompt reader doesn't sit unread (mirrors
 	// what wrapper.Start would do via the PTY).
-	if cfg.Stdin != nil {
-		_, _ = io.Copy(io.Discard, cfg.Stdin)
+	if cfg.Wrapper.Stdin != nil {
+		_, _ = io.Copy(io.Discard, cfg.Wrapper.Stdin)
 	}
-	return f.result, f.err
+	return hwharness.Result{Result: f.result}, f.err
 }
 
 func (f *fakeWrapperRun) Calls() []wrapper.Config {
@@ -266,14 +267,14 @@ func TestRunHarness_FinalizeHookOverridesDefault(t *testing.T) {
 func TestRunHarness_ShutdownCancelsContext(t *testing.T) {
 	requireBinaryOnPath(t, "fake-tool")
 	ctxObserved := make(chan context.Context, 1)
-	installWrapperRunMock(t, func(ctx context.Context, cfg wrapper.Config, p harness.RetryPolicy) (wrapper.Result, error) {
+	installWrapperRunMock(t, func(ctx context.Context, cfg hwharness.Config, p harness.RetryPolicy) (hwharness.Result, error) {
 		select {
 		case ctxObserved <- ctx:
 		default:
 		}
 		// Wait until ctx is cancelled by the shutdown adapter.
 		<-ctx.Done()
-		return wrapper.Result{Status: wrapper.StatusInterrupted, Reason: "ctx cancel"}, nil
+		return hwharness.Result{Result: wrapper.Result{Status: wrapper.StatusInterrupted, Reason: "ctx cancel"}}, nil
 	})
 
 	shutdown := make(chan struct{})
@@ -351,8 +352,12 @@ func TestDefaultCodexNonInteractiveInvoker_UsesWrapperWithCodexHarness(t *testin
 	if len(calls) != 1 || calls[0].Harness != "codex" {
 		t.Fatalf("wrapperRun calls: %+v, want one call with Harness=codex", calls)
 	}
-	if !containsArg(calls[0].Args, "exec") || !containsArg(calls[0].Args, "--json") {
-		t.Errorf("codex args: got %v, want to contain 'exec' and '--json'", calls[0].Args)
+	wantArgs := []string{"exec", "--json", "--dangerously-bypass-approvals-and-sandbox", "prompt body"}
+	if !equalStrings(calls[0].Args, wantArgs) {
+		t.Errorf("codex args: got %v, want %v", calls[0].Args, wantArgs)
+	}
+	if !containsArg(calls[0].Args, "prompt body") {
+		t.Errorf("codex args: got %v, want final positional prompt", calls[0].Args)
 	}
 }
 
@@ -419,9 +424,9 @@ func TestDefaultOpenCodeNonInteractiveInvoker_StreamErrorOverridesIdle(t *testin
 func TestRunHarness_RetryablePolicyPassedThrough(t *testing.T) {
 	requireBinaryOnPath(t, "fake-tool")
 	var sawPolicy atomic.Value
-	mockFn := func(ctx context.Context, cfg wrapper.Config, p harness.RetryPolicy) (wrapper.Result, error) {
+	mockFn := func(ctx context.Context, cfg hwharness.Config, p harness.RetryPolicy) (hwharness.Result, error) {
 		sawPolicy.Store(p)
-		return wrapper.Result{Status: wrapper.StatusIdle}, nil
+		return hwharness.Result{Result: wrapper.Result{Status: wrapper.StatusIdle}}, nil
 	}
 	installWrapperRunMock(t, mockFn)
 
@@ -464,12 +469,12 @@ func TestRunHarness_AutoAttachesDaemonActivityObserver(t *testing.T) {
 	t.Cleanup(cli.ResetDefaultIssueBackend)
 
 	activityAt := time.Unix(1700000000, 123456000).UTC()
-	installWrapperRunMock(t, func(ctx context.Context, cfg wrapper.Config, p harness.RetryPolicy) (wrapper.Result, error) {
+	installWrapperRunMock(t, func(ctx context.Context, cfg hwharness.Config, p harness.RetryPolicy) (hwharness.Result, error) {
 		if p.OnActivity == nil {
 			t.Fatal("runHarness did not auto-attach a daemon activity observer")
 		}
 		p.OnActivity(wrapper.Snapshot{LastOutputAt: activityAt})
-		return wrapper.Result{Status: wrapper.StatusIdle}, nil
+		return hwharness.Result{Result: wrapper.Result{Status: wrapper.StatusIdle}}, nil
 	})
 
 	if err := runHarness(context.Background(), nil, harnessInvocation{

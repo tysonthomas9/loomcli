@@ -304,6 +304,37 @@ func TestClaudeBackendInvokeNonInteractive(t *testing.T) {
 	}
 }
 
+func TestBuildClaudeResumeArgsArePositional(t *testing.T) {
+	got := buildClaudeNonInteractiveArgs("session-123", "prompt")
+	wantPrefix := []string{"--resume", "session-123"}
+	if len(got) < len(wantPrefix) {
+		t.Fatalf("args too short: %v", got)
+	}
+	for i, want := range wantPrefix {
+		if got[i] != want {
+			t.Fatalf("arg[%d] = %q, want %q; args=%v", i, got[i], want, got)
+		}
+	}
+	for _, arg := range got {
+		if arg == "--session-id" {
+			t.Fatalf("args contain invalid --session-id resume form: %v", got)
+		}
+	}
+}
+
+func TestBuildClaudeContinueSessionArgsArePositional(t *testing.T) {
+	got := buildClaudeContinueSessionArgs("session-123")
+	want := []string{"--resume", "session-123", "--dangerously-skip-permissions"}
+	if len(got) != len(want) {
+		t.Fatalf("args = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("arg[%d] = %q, want %q; args=%v", i, got[i], want[i], got)
+		}
+	}
+}
+
 // TestShutdownRace_NoSignalAfterExit verifies that no SIGTERM is sent when
 // the shutdown channel is triggered after the process has already exited.
 // This reproduces the race condition that the processGuard prevents:
@@ -566,6 +597,43 @@ func TestExtractClaudeSessionID_WrongSubtype(t *testing.T) {
 	}
 }
 
+// TestExtractClaudeSessionID_PTYEchoPrefix reproduces the headless daemon-resume
+// bug: under a non-raw PTY the wrapper's stdin-EOF bytes (\x04\x04) are echoed
+// and prepended (as "^D\b\b^D\b\b") to claude's first stream-json line — the
+// system:init event carrying session_id. Without trimToJSONObject the leading
+// control bytes break json.Unmarshal, the session id is never captured, and
+// daemon --resume can never arm. This locks in the strip-to-'{' fix.
+func TestExtractClaudeSessionID_PTYEchoPrefix(t *testing.T) {
+	t.Parallel()
+	// \x04 = EOT (^D), \x08 = backspace (\b): the exact prefix observed on the
+	// wire when the daemon runs claude under a non-raw PTY.
+	const echoPrefix = "\x04\b\b\x04\b\b"
+	line := echoPrefix + `{"type":"system","subtype":"init","session_id":"sess-pty-echo-7dbd"}`
+	sid, ok := extractClaudeSessionID(line)
+	if !ok {
+		t.Fatal("expected ok=true: a PTY-echoed control prefix must not defeat session capture")
+	}
+	if sid != "sess-pty-echo-7dbd" {
+		t.Errorf("session_id = %q, want %q", sid, "sess-pty-echo-7dbd")
+	}
+}
+
+func TestTrimToJSONObject(t *testing.T) {
+	t.Parallel()
+	cases := map[string]string{
+		`{"a":1}`:           `{"a":1}`,      // already clean — unchanged
+		"\x04\b\b{\"a\":1}": `{"a":1}`,      // control prefix stripped
+		"  {\"a\":1}":       `{"a":1}`,      // leading whitespace stripped
+		"no json here":      "no json here", // no '{' — unchanged
+		"":                  "",             // empty — unchanged
+	}
+	for in, want := range cases {
+		if got := trimToJSONObject(in); got != want {
+			t.Errorf("trimToJSONObject(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
 func TestOutputRingBuffer(t *testing.T) {
 	t.Parallel()
 
@@ -661,8 +729,8 @@ func TestResolveMaxBudgetUSD_Default(t *testing.T) {
 	os.Unsetenv("LOOM_MAX_BUDGET_USD")
 
 	got := resolveMaxBudgetUSD()
-	if got != "5.00" {
-		t.Errorf("resolveMaxBudgetUSD() = %q, want %q", got, "5.00")
+	if got != "50.00" {
+		t.Errorf("resolveMaxBudgetUSD() = %q, want %q", got, "50.00")
 	}
 }
 
@@ -691,8 +759,8 @@ func TestResolveMaxBudgetUSD_Invalid(t *testing.T) {
 	t.Setenv("LOOM_MAX_BUDGET_USD", "abc")
 
 	got := resolveMaxBudgetUSD()
-	if got != "5.00" {
-		t.Errorf("resolveMaxBudgetUSD() = %q, want %q (default fallback)", got, "5.00")
+	if got != "50.00" {
+		t.Errorf("resolveMaxBudgetUSD() = %q, want %q (default fallback)", got, "50.00")
 	}
 }
 
@@ -701,8 +769,8 @@ func TestResolveMaxBudgetUSD_Negative(t *testing.T) {
 	t.Setenv("LOOM_MAX_BUDGET_USD", "-1")
 
 	got := resolveMaxBudgetUSD()
-	if got != "5.00" {
-		t.Errorf("resolveMaxBudgetUSD() = %q, want %q (default fallback)", got, "5.00")
+	if got != "50.00" {
+		t.Errorf("resolveMaxBudgetUSD() = %q, want %q (default fallback)", got, "50.00")
 	}
 }
 

@@ -42,7 +42,7 @@ func (s *Supervisor) classifyAgentExit(ap *AgentProcess, exitCode int) {
 		// timeout classification when there is no task context.
 		ap.Mu.Lock()
 		ap.LastError = &agenterr.AgentError{
-			Class:   agenterr.NoWork,
+			Class:   agenterr.OutcomeFromDomain(agenterr.NoWorkOutcome),
 			Message: "no claimable tasks",
 			Backend: backend,
 		}
@@ -87,7 +87,7 @@ func (s *Supervisor) markSpawnFailure(ap *AgentProcess, spawnErr error) {
 	ap.LastExitCode = -1
 	ap.LastNoWork = false
 	ap.LastError = &agenterr.AgentError{
-		Class:     agenterr.SpawnFailure,
+		Class:     agenterr.OutcomeFromDomain(agenterr.SpawnFailureOutcome),
 		ExitCode:  -1,
 		Message:   msg,
 		Backend:   backend,

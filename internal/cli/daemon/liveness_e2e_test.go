@@ -25,6 +25,7 @@ import (
 	"testing"
 	"time"
 
+	hwharness "github.com/olesho/harness-wrapper/pkg/harness"
 	"github.com/olesho/harness-wrapper/pkg/wrapper"
 
 	"github.com/tysonthomas9/loomcli/internal/cli"
@@ -73,7 +74,7 @@ func TestE2E_PR82_WrapperTickerFiresOnActivity(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
-	res, err := harness.RunWithRetry(ctx, wrapper.Config{
+	res, err := harness.RunWithRetry(ctx, hwharness.Config{Wrapper: wrapper.Config{
 		BinaryPath: binPath,
 		// 5 steps × 200ms delay = ~1s of streaming output, plenty for a
 		// 100ms ticker to fire several times.
@@ -81,7 +82,7 @@ func TestE2E_PR82_WrapperTickerFiresOnActivity(t *testing.T) {
 		Stdout:       io.Discard,
 		IdleQuiet:    100 * time.Millisecond,
 		IdleClassify: 300 * time.Millisecond,
-	}, harness.RetryPolicy{
+	}}, harness.RetryPolicy{
 		Max:              0,
 		BaseBackoff:      time.Millisecond,
 		MaxBackoff:       time.Millisecond,
@@ -200,13 +201,13 @@ func TestE2E_PR82_FullChainWrapperToSupervisor(t *testing.T) {
 	defer cancel()
 
 	startedAt := time.Now()
-	res, err := harness.RunWithRetry(ctx, wrapper.Config{
+	res, err := harness.RunWithRetry(ctx, hwharness.Config{Wrapper: wrapper.Config{
 		BinaryPath:   binPath,
 		Args:         []string{"--mode", "completed", "--steps", "5", "--delay", "200ms"},
 		Stdout:       io.Discard,
 		IdleQuiet:    100 * time.Millisecond,
 		IdleClassify: 300 * time.Millisecond,
-	}, harness.RetryPolicy{
+	}}, harness.RetryPolicy{
 		Max:              0,
 		BaseBackoff:      time.Millisecond,
 		MaxBackoff:       time.Millisecond,
@@ -335,19 +336,19 @@ func TestE2E_PR82_DepartureClearsLiveness(t *testing.T) {
 	runCtx, cancelRun := context.WithCancel(context.Background())
 
 	type runOutcome struct {
-		res wrapper.Result
+		res hwharness.Result
 		err error
 	}
 	done := make(chan runOutcome, 1)
 	go func() {
-		res, err := harness.RunWithRetry(runCtx, wrapper.Config{
+		res, err := harness.RunWithRetry(runCtx, hwharness.Config{Wrapper: wrapper.Config{
 			BinaryPath:   binPath,
 			Args:         []string{"--mode", "completed", "--steps", "20", "--delay", "200ms"},
 			Stdout:       io.Discard,
 			IdleQuiet:    500 * time.Millisecond,
 			IdleClassify: time.Second,
 			WaitDelay:    500 * time.Millisecond, // SIGTERM→SIGKILL escalation
-		}, harness.RetryPolicy{
+		}}, harness.RetryPolicy{
 			Max:              0,
 			BaseBackoff:      time.Millisecond,
 			MaxBackoff:       time.Millisecond,

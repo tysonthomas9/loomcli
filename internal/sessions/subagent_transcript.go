@@ -20,7 +20,7 @@ const subagentsSubdir = "subagents"
 // hex-ish). Restricts to a safe character set before using in a filename.
 // Exported so upstream callers (e.g., the web service read path) can apply
 // the same validation the write path uses.
-var SubagentIDPattern = regexp.MustCompile(`^[a-zA-Z0-9]+$`)
+var SubagentIDPattern = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
 
 // SyncSubagentTranscript copies a subagent's JSONL transcript into the
 // session directory at sessions/<sid>/subagents/agent-<subagentID>.jsonl.

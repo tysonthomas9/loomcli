@@ -179,6 +179,71 @@ describe("AgentCard", () => {
       expect(screen.getByText("Planning")).toBeInTheDocument();
     });
 
+    it('shows "Working" from live_status when the lock-derived status reads idle', () => {
+      // Serve-only deployments: the monitor status stays "idle", but fleet-db's
+      // live_status proves the agent is working. The badge must flip.
+      render(
+        <AgentCard
+          agent={makeAgent({
+            status: "idle",
+            live_status: "working",
+            active_task_id: "loom-42",
+            branch: "b",
+          })}
+        />,
+      );
+
+      expect(screen.getByText("Working")).toBeInTheDocument();
+    });
+
+    it('shows "Planning" from live_status for a plan-role agent that reads idle', () => {
+      render(
+        <AgentCard
+          agent={makeAgent({
+            status: "idle",
+            live_status: "working",
+            active_task_id: "loom-43",
+            role: "plan",
+            branch: "b",
+          })}
+        />,
+      );
+
+      expect(screen.getByText("Planning")).toBeInTheDocument();
+    });
+
+    it('keeps "Idle" when live_status is idle', () => {
+      render(
+        <AgentCard
+          agent={makeAgent({
+            status: "idle",
+            live_status: "idle",
+            branch: "b",
+          })}
+        />,
+      );
+
+      expect(screen.getByText("Idle")).toBeInTheDocument();
+    });
+
+    it("does not let live_status override a more specific status (review)", () => {
+      // live_status="working" must not mask a meaningful lock-derived status:
+      // a review badge wins (the override only applies to idle-like statuses).
+      render(
+        <AgentCard
+          agent={makeAgent({
+            status: "review: loom-50 (3m)",
+            live_status: "working",
+            active_task_id: "loom-50",
+            branch: "b",
+          })}
+        />,
+      );
+
+      expect(screen.getByText("Review")).toBeInTheDocument();
+      expect(screen.queryByText("Working")).not.toBeInTheDocument();
+    });
+
     it('shows "Done" for done status', () => {
       render(<AgentCard agent={makeAgent({ status: "done", branch: "b" })} />);
 

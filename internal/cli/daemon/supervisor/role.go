@@ -77,8 +77,14 @@ func MergeRoleConfig(base, overlay cfgpkg.RoleConfig) cfgpkg.RoleConfig {
 	if overlay.MaxConcurrency != nil {
 		base.MaxConcurrency = overlay.MaxConcurrency
 	}
+	if overlay.MaxBudgetUSD != nil {
+		base.MaxBudgetUSD = overlay.MaxBudgetUSD
+	}
 	if overlay.Backend != "" {
 		base.Backend = overlay.Backend
+	}
+	if overlay.Effort != "" {
+		base.Effort = overlay.Effort
 	}
 	if overlay.Model != "" {
 		base.Model = overlay.Model

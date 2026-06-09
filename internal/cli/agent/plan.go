@@ -142,9 +142,18 @@ func runPlanDaemon(deps *cli.Deps, worktreePath, agentName string) {
 		fmt.Fprintf(os.Stderr, "Warning: could not update lock state: %v\n", err)
 	}
 
+	assignedTaskID := os.Getenv("LOOM_ASSIGNED_TASK_ID")
+	// P4: arm same-task resume (guarded) BEFORE building the prompt, so prompt
+	// generation skips the redundant checkpoint context when resuming.
+	maybeResumeDaemonSession(worktreePath, assignedTaskID)
+	// Record the assigned task on the worktree lock (AFTER the resume decision)
+	// so a crash leaves a resumable remnant for the next restart's
+	// detectRecovery — the agent's own `loom claim` is CWD-dependent (planners
+	// run it from the workspace root) and can't be relied on to set this.
+	persistAssignedTaskToLock(worktreePath, assignedTaskID)
+
 	ws, _ := config.ResolveActiveWorkspace()
 	prompt := GeneratePlanningPrompt(agentName, ws, planParentID)
-	assignedTaskID := os.Getenv("LOOM_ASSIGNED_TASK_ID")
 	if assignedTaskID != "" {
 		prompt = GenerateFleetPlanningPrompt(agentName, assignedTaskID, ws)
 	}
@@ -163,6 +172,9 @@ func runPlanDaemon(deps *cli.Deps, worktreePath, agentName string) {
 	shutdown := automode.SetupSignalHandler()
 	collector := usage.NewCollector(cli.GetBackendName(), agentName)
 	invokeErr := deps.Agent.InvokeNonInteractive(worktreePath, prompt, agentName, shutdown, collector)
+	if invokeErr == nil {
+		clearDaemonResumeOnSuccess(worktreePath)
+	}
 
 	emitTaskLifecycleResult(agentName, worktreePath, startedAt, invokeErr)
 	finalizeAgentSession(sess, worktreePath, beforeRef, invokeErr, collector, startedAt, planParentID)

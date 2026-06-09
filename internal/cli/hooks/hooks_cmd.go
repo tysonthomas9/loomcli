@@ -281,6 +281,10 @@ func init() {
 	hooksCmd.AddCommand(hooksUninstallCmd)
 	hooksCmd.AddCommand(hooksStatusCmd)
 
+	// The generic wrapper-driven entrypoint (loom hooks dispatch <harness> <event>),
+	// coexisting with the legacy claude-code handlers above.
+	hooksCmd.AddCommand(hooksDispatchCmd)
+
 	// Register hooksCmd under cli.GetRootCmd()
 	cli.RegisterCommand(hooksCmd)
 }
