@@ -30,6 +30,9 @@ type createIssueFlags struct {
 	sourceRepo         string
 	dueAt              string
 	deferUntil         string
+	idempotencyKey     string
+	noIdempotency      bool
+	force              bool
 }
 
 var createCmd = newCreateCmd()
@@ -39,7 +42,24 @@ func newCreateCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "create --title <title>",
 		Short: "Create an issue",
-		Args:  cobra.NoArgs,
+		Long: `Create an issue.
+
+Idempotency: by default the create sends an X-Idempotency-Key derived from
+the issue content and the current UTC date, so re-running the exact same
+command (e.g. after a lost response) returns the already-created issue
+instead of minting a duplicate. Use --idempotency-key to supply your own
+key, or --no-idempotency to disable deduplication entirely.
+
+--force only bypasses the server's soft-duplicate guard (same title+type
+created moments ago); with an identical command the idempotency key still
+returns the existing issue — combine with --no-idempotency to intentionally
+create an identical duplicate.
+
+Output: on success the last line of stdout is "CREATED <issue-id>" in text
+mode. With -o json, stdout stays pure JSON (the created issue) and the
+"CREATED <issue-id>" line goes to stderr. The exit code is non-zero only on
+real failure, so success is checkable from the exit code alone.`,
+		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			params, err := createParamsFromFlags(cmd, flags)
 			if err != nil {
@@ -54,10 +74,15 @@ func newCreateCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return printCreatedIssue(os.Stdout, created, outputFormat)
+			return printCreatedIssue(os.Stdout, os.Stderr, created, outputFormat)
 		},
 	}
 
+	registerCreateFlags(cmd, &flags)
+	return cmd
+}
+
+func registerCreateFlags(cmd *cobra.Command, flags *createIssueFlags) {
 	cmd.Flags().StringVar(&flags.parent, "parent", "", "Parent issue ID")
 	cmd.Flags().StringVar(&flags.title, "title", "", "Issue title")
 	cmd.Flags().StringVar(&flags.description, "description", "", "Issue description")
@@ -77,7 +102,9 @@ func newCreateCmd() *cobra.Command {
 	cmd.Flags().StringVar(&flags.sourceRepo, "source-repo", "", "Source repository ID")
 	cmd.Flags().StringVar(&flags.dueAt, "due-at", "", "Due timestamp")
 	cmd.Flags().StringVar(&flags.deferUntil, "defer-until", "", "Defer until timestamp")
-	return cmd
+	cmd.Flags().StringVar(&flags.idempotencyKey, "idempotency-key", "", "Explicit idempotency key (default: content hash of the create body + UTC date)")
+	cmd.Flags().BoolVar(&flags.noIdempotency, "no-idempotency", false, "Disable idempotent create (always mint a new issue)")
+	cmd.Flags().BoolVar(&flags.force, "force", false, "Bypass the soft-duplicate guard only; identical duplicates also need --no-idempotency")
 }
 
 func createParamsFromFlags(cmd *cobra.Command, flags createIssueFlags) (backend.CreateParams, error) {
@@ -107,6 +134,15 @@ func createParamsFromFlags(cmd *cobra.Command, flags createIssueFlags) (backend.
 	}
 	if cmd.Flags().Changed("estimated-minutes") {
 		params.EstimatedMinutes = &flags.estimatedMinutes
+	}
+	params.Force = flags.force
+	if !flags.noIdempotency {
+		if flags.idempotencyKey != "" {
+			params.IdempotencyKey = flags.idempotencyKey
+		} else if key, err := computeCreateKey(params); err == nil {
+			// Best-effort: an unhashable body just skips dedup.
+			params.IdempotencyKey = key
+		}
 	}
 	return params, nil
 }
