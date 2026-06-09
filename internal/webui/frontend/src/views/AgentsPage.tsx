@@ -28,7 +28,13 @@ import {
   orderAgentsForEpicRunner,
 } from "@/components/AgentIconRail/AgentIconRail";
 import { IssueDetailPanel } from "@/components/IssueDetailPanel/IssueDetailPanel";
-import { EPIC_RUNNER_WORKFLOW_NAME, startWorkflowRun } from "@/api";
+import {
+  EPIC_RUNNER_WORKFLOW_NAME,
+  getWorkflowRun,
+  isTerminalWorkflowRunStatus,
+  startWorkflowRun,
+  type WorkflowRun,
+} from "@/api";
 import { useAgentStoreInstance } from "@/hooks";
 import { useToast } from "@/hooks/ui/useToast";
 import type { Issue } from "@/types";
@@ -73,9 +79,72 @@ function AgentsPageInner(): JSX.Element {
   const [pendingTerminalInput, setPendingTerminalInput] = useState<
     TerminalInputRequest | undefined
   >(undefined);
+  const [epicRunnerRuns, setEpicRunnerRuns] = useState<
+    Record<string, WorkflowRun>
+  >({});
   useEffect(() => {
     setSelectedTask(null);
   }, [agentName]);
+  useEffect(() => {
+    setEpicRunnerRuns({});
+  }, [workspaceId]);
+
+  useEffect(() => {
+    if (!workspaceId) return;
+    const activeRuns = Object.entries(epicRunnerRuns).filter(
+      ([, run]) => run.run_id && !isTerminalWorkflowRunStatus(run.status),
+    );
+    if (activeRuns.length === 0) return;
+
+    let cancelled = false;
+    const interval = window.setInterval(() => {
+      void (async () => {
+        const results = await Promise.allSettled(
+          activeRuns.map(async ([epicId, run]) => ({
+            epicId,
+            run: await getWorkflowRun(workspaceId, run.run_id),
+          })),
+        );
+        if (cancelled) return;
+
+        const updates = results
+          .filter(
+            (
+              result,
+            ): result is PromiseFulfilledResult<{
+              epicId: string;
+              run: WorkflowRun;
+            }> => result.status === "fulfilled",
+          )
+          .map((result) => result.value);
+        if (updates.length === 0) return;
+
+        setEpicRunnerRuns((prev) => {
+          let next = prev;
+          for (const update of updates) {
+            const current = prev[update.epicId];
+            if (
+              current &&
+              current.status === update.run.status &&
+              current.updated_at === update.run.updated_at &&
+              current.last_heartbeat === update.run.last_heartbeat
+            ) {
+              continue;
+            }
+            if (next === prev) next = { ...prev };
+            next[update.epicId] = update.run;
+          }
+          return next;
+        });
+        void agentStore.getState().fetchData();
+      })();
+    }, 2500);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+    };
+  }, [agentStore, epicRunnerRuns, workspaceId]);
 
   // Queue the built-in epic runner workflow for the selected lead. The
   // workflow owns lead validation, binding, and child-task reconciliation.
@@ -92,6 +161,7 @@ function AgentsPageInner(): JSX.Element {
             requestedBy: "ui",
           },
         );
+        setEpicRunnerRuns((prev) => ({ ...prev, [epicId]: run }));
         await agentStore.getState().fetchData();
         showToast(`Epic runner queued for ${agentName}: ${run.run_id}`, {
           type: "success",
@@ -149,6 +219,7 @@ function AgentsPageInner(): JSX.Element {
       ) : (
         <AgentWorkPanel
           agentName={agentName}
+          epicRunnerRuns={epicRunnerRuns}
           onTaskClick={(task) => setSelectedTask(task)}
           onRunEpic={handleRunEpic}
           onAgentClick={handleAgentClick}

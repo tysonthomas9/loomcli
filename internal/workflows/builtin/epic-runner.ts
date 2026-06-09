@@ -31,76 +31,86 @@ export async function run(ctx) {
   const targetNodeId = stringValue(input.targetNodeId || input.target_node_id);
   const intervalMs = Math.max(1000, numberValue(input.intervalSeconds || input.interval_seconds, 5) * 1000);
   const completed = [];
+  const leadDelivery = startLeadDeliveryRetry(loom, started.leadName, started.deliveryState, intervalMs);
 
-  while (true) {
-    await loom.taskRuns.recoverStale({
-      maxAgeSeconds: numberValue(input.staleTaskRunMaxAgeSeconds || input.stale_task_run_max_age_seconds, 300),
-      errorClass: "stale_task_run",
-      errorMessage: "task run heartbeat is stale",
-    });
-
-    const snapshot = await loom.epics.snapshot({ epicId });
-    const active = await loom.taskRuns.active({ epicId });
-    const activeCount = numberValue(active && active.activeCount, 0);
-
-    if (snapshot.openChildrenCount === 0 && activeCount === 0) {
-      const suffix = completed.length > 0 ? ": " + completed.join(",") : "";
-      return loom.completed({ summary: "Epic drained " + epicId + suffix });
-    }
-
-    if (snapshot.readyCount === 0 && snapshot.blockedCount > 0 && activeCount === 0) {
-      return loom.needsHuman({
-        summary: "Epic " + epicId + " blocked with " + snapshot.blockedCount + " child task(s): " + summarizeTasks(snapshot.blocked),
-        errorClass: "epic_blocked",
+  try {
+    while (true) {
+      await loom.taskRuns.recoverStale({
+        maxAgeSeconds: numberValue(input.staleTaskRunMaxAgeSeconds || input.stale_task_run_max_age_seconds, 300),
+        errorClass: "stale_task_run",
+        errorMessage: "task run heartbeat is stale",
       });
-    }
 
-    const slots = maxConcurrency - activeCount;
-    if (slots <= 0) {
-      await sleep(intervalMs);
-      continue;
-    }
+      const snapshot = await loom.epics.snapshot({ epicId });
+      const active = await loom.taskRuns.active({ epicId });
+      const activeCount = numberValue(active && active.activeCount, 0);
 
-    const claimed = [];
-    for (let i = 0; i < slots; i++) {
-      const task = await loom.tasks.claimReady({ epicId });
-      if (!task) {
-        break;
+      if (snapshot.openChildrenCount === 0 && activeCount === 0) {
+        await leadDelivery.flush();
+        const suffix = completed.length > 0 ? ": " + completed.join(",") : "";
+        return loom.completed({ summary: "Epic drained " + epicId + suffix });
       }
-      claimed.push(task);
-    }
 
-    if (claimed.length === 0) {
-      if (activeCount === 0 && snapshot.readyCount === 0 && snapshot.blockedCount === 0 && snapshot.openChildrenCount > 0) {
+      if (snapshot.readyCount === 0 && snapshot.blockedCount > 0 && activeCount === 0) {
+        await leadDelivery.flush();
         return loom.needsHuman({
-          summary: "Epic " + epicId + " has " + snapshot.openChildrenCount + " open child task(s), but none are ready, blocked, or active",
-          errorClass: "epic_no_progress",
+          summary: "Epic " + epicId + " blocked with " + snapshot.blockedCount + " child task(s): " + summarizeTasks(snapshot.blocked),
+          errorClass: "epic_blocked",
         });
       }
-      await sleep(intervalMs);
-      continue;
-    }
 
-    const results = await Promise.all(claimed.map((task) => runChildTask(loom, {
-      task,
-      driverRunId: loom.driverRunId,
-      workerPrefix,
-      workerProfileId,
-      providerProfile,
-      targetNodeId,
-    })));
-    for (const result of results) {
-      if (!result.ok) {
-        return loom.needsHuman({
-          summary: result.summary,
-          errorClass: result.errorClass || "child_task_failed",
-          taskRunId: result.taskRunId,
-          logsRef: result.logsRef || "",
-          artifactsRef: result.artifactsRef || "",
-        });
+      const slots = maxConcurrency - activeCount;
+      if (slots <= 0) {
+        await sleep(intervalMs);
+        continue;
       }
-      completed.push(result.taskId);
+
+      const claimed = [];
+      for (let i = 0; i < slots; i++) {
+        const task = await loom.tasks.claimReady({ epicId });
+        if (!task) {
+          break;
+        }
+        claimed.push(task);
+      }
+
+      if (claimed.length === 0) {
+        if (activeCount === 0 && snapshot.readyCount === 0 && snapshot.blockedCount === 0 && snapshot.openChildrenCount > 0) {
+          await leadDelivery.flush();
+          return loom.needsHuman({
+            summary: "Epic " + epicId + " has " + snapshot.openChildrenCount + " open child task(s), but none are ready, blocked, or active",
+            errorClass: "epic_no_progress",
+          });
+        }
+        await sleep(intervalMs);
+        continue;
+      }
+
+      const results = await Promise.all(claimed.map((task) => runChildTask(loom, {
+        task,
+        driverRunId: loom.driverRunId,
+        workerPrefix,
+        workerProfileId,
+        providerProfile,
+        targetNodeId,
+      })));
+      for (const result of results) {
+        if (!result.ok) {
+          await leadDelivery.flush();
+          return loom.needsHuman({
+            summary: result.summary,
+            errorClass: result.errorClass || "child_task_failed",
+            taskRunId: result.taskRunId,
+            logsRef: result.logsRef || "",
+            artifactsRef: result.artifactsRef || "",
+          });
+        }
+        completed.push(result.taskId);
+      }
     }
+  } finally {
+    leadDelivery.stop();
+    await leadDelivery.done;
   }
 }
 
@@ -175,12 +185,14 @@ async function startEpicRun(loom, input, epicId) {
   const orchestratorSessionId = stringValue(session && (session.orchestratorSessionId || session.orchestrator_session_id));
 
   if (leadParent === epicId) {
+    const delivery = dryRun ? { state: "pending" } : await attemptLeadDelivery(loom, leadName);
     return {
       ok: true,
       state: "resumed",
       leadName,
       orchestratorSessionId,
-      deliveryState: "delivered",
+      deliveryState: delivery.state || "pending",
+      deliveryReason: delivery.reason || "",
     };
   }
 
@@ -206,12 +218,77 @@ async function startEpicRun(loom, input, epicId) {
       summary: "lead " + leadName + " could not be bound to epic " + epicId,
     };
   }
+  const delivery = await attemptLeadDelivery(loom, leadName);
   return {
     ok: true,
     state: "assigned",
     leadName,
     orchestratorSessionId,
-    deliveryState: "pending",
+    deliveryState: delivery.state || "pending",
+    deliveryReason: delivery.reason || "",
+  };
+}
+
+async function attemptLeadDelivery(loom, leadName) {
+  const agent = stringValue(leadName);
+  if (!agent) {
+    return { state: "none" };
+  }
+  try {
+    const delivery = await loom.agents.deliverAssignment({ agent });
+    return {
+      state: stringValue(delivery && delivery.state) || "pending",
+      reason: stringValue(delivery && delivery.reason),
+    };
+  } catch (err) {
+    return {
+      state: "pending",
+      reason: errorMessage(err),
+    };
+  }
+}
+
+function startLeadDeliveryRetry(loom, leadName, initialState, intervalMs) {
+  const state = {
+    leadName: stringValue(leadName),
+    done: !stringValue(leadName) || initialState === "delivered" || initialState === "unsupported",
+    stopped: false,
+    inFlight: null,
+  };
+  async function tryOnce() {
+    if (state.done) {
+      return { state: "delivered" };
+    }
+    if (state.inFlight) {
+      return state.inFlight;
+    }
+    state.inFlight = (async () => {
+      const delivery = await attemptLeadDelivery(loom, state.leadName);
+      if (delivery.state === "delivered" || delivery.state === "unsupported" || delivery.state === "none") {
+        state.done = true;
+      }
+      return delivery;
+    })();
+    try {
+      return await state.inFlight;
+    } finally {
+      state.inFlight = null;
+    }
+  }
+  async function loop() {
+    while (!state.stopped && !state.done) {
+      await tryOnce();
+      if (!state.stopped && !state.done) {
+        await sleep(Math.max(1000, Math.min(intervalMs, 5000)));
+      }
+    }
+  }
+  return {
+    stop() {
+      state.stopped = true;
+    },
+    flush: tryOnce,
+    done: loop(),
   };
 }
 

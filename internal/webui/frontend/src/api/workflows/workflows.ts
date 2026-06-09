@@ -1,4 +1,4 @@
-import { post, wsUrl } from "@/api/common";
+import { get, post, wsUrl } from "@/api/common";
 
 export const EPIC_RUNNER_WORKFLOW_NAME = "epic-runner";
 
@@ -43,5 +43,25 @@ export async function startWorkflowRun(
   return post<WorkflowRun>(
     wsUrl(workspaceId, `/workflows/${encodeURIComponent(workflowName)}`),
     payload,
+  );
+}
+
+export async function getWorkflowRun(
+  workspaceId: string,
+  runId: string,
+): Promise<WorkflowRun> {
+  return get<WorkflowRun>(
+    wsUrl(workspaceId, `/runs/${encodeURIComponent(runId)}`),
+  );
+}
+
+export function isTerminalWorkflowRunStatus(
+  status: WorkflowRunStatus | undefined,
+): boolean {
+  return (
+    status === "completed" ||
+    status === "failed" ||
+    status === "needs_human" ||
+    status === "cancelled"
   );
 }

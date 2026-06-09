@@ -155,6 +155,6 @@ func formatCodexAssignmentTurn(assignment *epicrunner.LeadAssignmentContext) str
 	var b strings.Builder
 	b.WriteString("Loom assigned this lead session an epic through backend state.\n\n")
 	b.WriteString(epicrunner.FormatLeadAssignmentContext(assignment))
-	b.WriteString("\n\nAcknowledge this backend assignment in the visible conversation, then start or resume the assigned epic using Loom's lead-mode conventions. Do not switch to a different epic unless the user explicitly asks.")
+	b.WriteString("\n\nAcknowledge this backend assignment in the visible conversation. The UI/backend has already queued the epic-runner workflow for this assignment, so monitor the assigned epic and in-progress child tasks instead of starting another `loom epic run` from this terminal. Do not switch to a different epic unless the user explicitly asks.")
 	return b.String()
 }

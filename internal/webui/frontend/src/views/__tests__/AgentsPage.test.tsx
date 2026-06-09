@@ -14,6 +14,7 @@ const mocks = vi.hoisted(() => {
     fetchData,
     navigate: vi.fn(),
     showToast: vi.fn(),
+    getWorkflowRun: vi.fn(),
     startWorkflowRun: vi.fn(),
     agentStore: {
       getState: () => ({ fetchData }),
@@ -37,6 +38,12 @@ vi.mock("zustand", () => ({
 
 vi.mock("@/api", () => ({
   EPIC_RUNNER_WORKFLOW_NAME: "epic-runner",
+  getWorkflowRun: mocks.getWorkflowRun,
+  isTerminalWorkflowRunStatus: (status: string | undefined) =>
+    status === "completed" ||
+    status === "failed" ||
+    status === "needs_human" ||
+    status === "cancelled",
   startWorkflowRun: mocks.startWorkflowRun,
 }));
 
@@ -61,14 +68,24 @@ vi.mock("@/components/AgentDetailMain/AgentDetailMain", () => ({
 
 vi.mock("@/components/AgentWorkPanel/AgentWorkPanel", () => ({
   AgentWorkPanel: ({
+    epicRunnerRuns,
     onRunEpic,
   }: {
+    epicRunnerRuns?: Record<string, { status?: string; run_id?: string }>;
     onRunEpic?: (epicId: string) => void | Promise<void>;
-  }) => (
-    <button type="button" onClick={() => void onRunEpic?.("EPIC-1")}>
-      Run lead epic
-    </button>
-  ),
+  }) => {
+    const run = epicRunnerRuns?.["EPIC-1"];
+    return (
+      <>
+        <button type="button" onClick={() => void onRunEpic?.("EPIC-1")}>
+          Run lead epic
+        </button>
+        <div data-testid="epic-runner-run-state">
+          {run ? `${run.run_id}:${run.status}` : "none"}
+        </div>
+      </>
+    );
+  },
 }));
 
 vi.mock("@/components/IssueDetailPanel/IssueDetailPanel", () => ({
@@ -80,6 +97,13 @@ describe("AgentsPage", () => {
     vi.clearAllMocks();
     mocks.startWorkflowRun.mockResolvedValue({
       run_id: "run-1",
+      status: "queued",
+      updated_at: "2026-01-23T00:00:00Z",
+    });
+    mocks.getWorkflowRun.mockResolvedValue({
+      run_id: "run-1",
+      status: "running",
+      updated_at: "2026-01-23T00:00:01Z",
     });
   });
 
@@ -103,6 +127,9 @@ describe("AgentsPage", () => {
     expect(mocks.showToast).toHaveBeenCalledWith(
       "Epic runner queued for lead-1: run-1",
       { type: "success" },
+    );
+    expect(screen.getByTestId("epic-runner-run-state").textContent).toBe(
+      "run-1:queued",
     );
   });
 });

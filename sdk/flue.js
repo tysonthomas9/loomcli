@@ -25,6 +25,7 @@ export class FlueDriverClient {
       list: (input = {}) => this.listAgents(input),
       orchestrationSession: (input = {}) => this.agentOrchestrationSession(input),
       updateParent: (input = {}) => this.updateAgentParent(input),
+      deliverAssignment: (input = {}) => this.deliverLeadAssignment(input),
     });
     this.tasks = Object.freeze({
       claimReady: (input = {}) => this.claimReady(input),
@@ -105,6 +106,16 @@ export class FlueDriverClient {
     const args = this.#baseArgs("update-agent-parent");
     args.push("--agent", String(agent), "--parent", String(parent));
     appendStringFlag(args, "--expect-parent", input.expectParent || input.expect_parent || "");
+    return this.#run(args);
+  }
+
+  async deliverLeadAssignment(input = {}) {
+    const agent = input.agent || input.agentName || input.agent_name || input.name || "";
+    if (!agent) {
+      throw new Error("agents.deliverAssignment requires agent");
+    }
+    const args = this.#baseArgs("deliver-lead-assignment");
+    args.push("--agent", String(agent));
     return this.#run(args);
   }
 

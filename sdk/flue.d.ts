@@ -120,6 +120,7 @@ export declare class FlueDriverClient {
     list(input?: Record<string, unknown>): Promise<Record<string, unknown>[] | null>;
     orchestrationSession(input?: FlueAgentInput): Promise<Record<string, unknown> | null>;
     updateParent(input?: FlueAgentParentUpdateInput): Promise<Record<string, unknown> | null>;
+    deliverAssignment(input?: FlueAgentInput): Promise<Record<string, unknown> | null>;
   };
   readonly tasks: {
     claimReady(input?: FlueEpicInput): Promise<Record<string, unknown> | null>;
@@ -151,6 +152,7 @@ export declare class FlueDriverClient {
   listAgents(input?: Record<string, unknown>): Promise<Record<string, unknown>[] | null>;
   agentOrchestrationSession(input?: FlueAgentInput): Promise<Record<string, unknown> | null>;
   updateAgentParent(input?: FlueAgentParentUpdateInput): Promise<Record<string, unknown> | null>;
+  deliverLeadAssignment(input?: FlueAgentInput): Promise<Record<string, unknown> | null>;
   requestTaskRun(input?: FlueTaskRunRequest): Promise<Record<string, unknown>>;
   activeTaskRuns(input?: FlueTaskRunActiveInput): Promise<Record<string, unknown> | null>;
   recoverStaleTaskRuns(input?: FlueTaskRunRecoverStaleInput): Promise<Record<string, unknown> | null>;

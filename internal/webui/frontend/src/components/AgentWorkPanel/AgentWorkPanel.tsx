@@ -17,6 +17,11 @@ import { useStore } from "zustand";
 
 import { useWorkspaceViewActions } from "@/contexts/WorkspaceViewContext";
 import { useAgentStoreInstance, useIssueStoreInstance } from "@/hooks";
+import {
+  isTerminalWorkflowRunStatus,
+  type WorkflowRun,
+  type WorkflowRunStatus,
+} from "@/api";
 import { type Issue, type LoomAgentStatus, parseLoomStatus } from "@/types";
 
 import styles from "./AgentWorkPanel.module.css";
@@ -33,6 +38,8 @@ interface AgentWorkPanelProps {
   onRunEpic?: (epicId: string) => void | Promise<void>;
   /** Open the terminal for the worker currently attached to a task. */
   onAgentClick?: (agentName: string) => void;
+  /** Active epic-runner workflow runs keyed by epic id. */
+  epicRunnerRuns?: Record<string, WorkflowRun | undefined>;
 }
 
 export interface EpicGroup {
@@ -94,6 +101,7 @@ export function AgentWorkPanel({
   onTaskClick,
   onRunEpic,
   onAgentClick,
+  epicRunnerRuns,
 }: AgentWorkPanelProps): JSX.Element {
   const { handleIssueClick } = useWorkspaceViewActions();
   const dispatchClick = onTaskClick ?? handleIssueClick;
@@ -255,19 +263,25 @@ export function AgentWorkPanel({
             // dead-end / silent-conflict cases the multi-lead UI walk
             // surfaced.
             const remainingOpen = group.totalCount - group.doneCount;
+            const epicRunnerRun = epicRunnerRuns?.[group.epicId];
+            const runnerActive =
+              epicRunnerRun != null &&
+              !isTerminalWorkflowRunStatus(epicRunnerRun.status);
             const canRunEpic =
               mode === "lead-open" &&
               selectedAgentIsLead &&
               group.epicId !== ORPHAN_EPIC_KEY &&
               onRunEpic != null &&
               remainingOpen > 0 &&
-              !claimedBy;
+              !claimedBy &&
+              !runnerActive;
             return (
               <EpicGroupCard
                 key={group.epicId}
                 group={group}
                 canRunEpic={canRunEpic}
                 claimedBy={claimedBy}
+                epicRunnerRun={epicRunnerRun}
                 onRunEpic={onRunEpic}
                 workerByTaskId={workerByTaskId}
                 workerHistory={workerHistoryByEpic.get(group.epicId) ?? []}
@@ -286,6 +300,7 @@ function EpicGroupCard({
   group,
   canRunEpic,
   claimedBy,
+  epicRunnerRun,
   onRunEpic,
   workerByTaskId,
   workerHistory,
@@ -296,6 +311,7 @@ function EpicGroupCard({
   canRunEpic: boolean;
   /** Lead name when another lead already owns this epic; renders a badge. */
   claimedBy?: string | undefined;
+  epicRunnerRun?: WorkflowRun | undefined;
   onRunEpic?: ((epicId: string) => void | Promise<void>) | undefined;
   workerByTaskId: Map<string, LoomAgentStatus>;
   workerHistory: WorkerHistoryItem[];
@@ -305,6 +321,14 @@ function EpicGroupCard({
   const pct =
     group.totalCount > 0 ? (group.doneCount / group.totalCount) * 100 : 0;
   const isOrphan = isOrphanGroup(group);
+  const runnerActive =
+    epicRunnerRun != null &&
+    !isTerminalWorkflowRunStatus(epicRunnerRun.status);
+  const claimedTasks = epicRunnerRun
+    ? group.tasks.filter((task) =>
+        isTaskClaimedByWorkflowRun(task, epicRunnerRun.run_id),
+      )
+    : [];
   return (
     <div className={styles.group}>
       <div className={styles.groupHeader}>
@@ -326,6 +350,14 @@ function EpicGroupCard({
           >
             Run
           </button>
+        ) : runnerActive ? (
+          <span
+            className={styles.epicClaim}
+            title={`Epic runner ${epicRunnerRun.run_id} is active`}
+            aria-label={`Epic runner ${epicRunnerRun.run_id} is active for ${group.epicId}`}
+          >
+            runner active
+          </span>
         ) : claimedBy ? (
           <span
             className={styles.epicClaim}
@@ -342,6 +374,13 @@ function EpicGroupCard({
           style={{ width: `${Math.min(100, Math.max(0, pct))}%` }}
         />
       </div>
+      {epicRunnerRun ? (
+        <EpicRunnerRunStrip
+          run={epicRunnerRun}
+          claimedTasks={claimedTasks}
+          totalTasks={group.totalCount}
+        />
+      ) : null}
       {group.tasks.map((task) => (
         <TaskCard
           key={task.id}
@@ -358,6 +397,48 @@ function EpicGroupCard({
         onTaskClick={onTaskClick}
       />
     </div>
+  );
+}
+
+function EpicRunnerRunStrip({
+  run,
+  claimedTasks,
+  totalTasks,
+}: {
+  run: WorkflowRun;
+  claimedTasks: Issue[];
+  totalTasks: number;
+}): JSX.Element {
+  const statusLabel = formatWorkflowRunStatus(run.status);
+  const claimedTaskIds = claimedTasks.map((task) => task.id).join(", ");
+  const logsRef = run.output?.logs_ref;
+
+  return (
+    <section
+      className={styles.runnerStrip}
+      data-status={run.status}
+      aria-label={`Epic runner ${run.run_id}`}
+    >
+      <div className={styles.runnerStripHeader}>
+        <span className={styles.runnerStatus}>Epic runner · {statusLabel}</span>
+        <code className={styles.runnerRunId}>{shortRunId(run.run_id)}</code>
+      </div>
+      <div className={styles.runnerMeta}>
+        {claimedTasks.length > 0
+          ? `Working ${claimedTasks.length}/${totalTasks}: ${claimedTaskIds}`
+          : isTerminalWorkflowRunStatus(run.status)
+            ? "No child tasks claimed by this run."
+            : "Waiting for the driver to claim child tasks."}
+      </div>
+      {run.summary ? (
+        <div className={styles.runnerSummary}>{run.summary}</div>
+      ) : null}
+      {logsRef ? (
+        <div className={styles.runnerMeta}>
+          Logs <code className={styles.runnerRunId}>{logsRef}</code>
+        </div>
+      ) : null}
+    </section>
   );
 }
 
@@ -527,6 +608,19 @@ function TaskCard({
 
 function CountChip({ label }: { label: string }): JSX.Element {
   return <span className={styles.countChip}>{label}</span>;
+}
+
+function isTaskClaimedByWorkflowRun(task: Issue, runId: string): boolean {
+  return task.assignee === `driver-run:${runId}`;
+}
+
+function formatWorkflowRunStatus(status: WorkflowRunStatus): string {
+  return status.replace(/_/g, " ");
+}
+
+function shortRunId(runId: string): string {
+  if (runId.length <= 18) return runId;
+  return `${runId.slice(0, 8)}...${runId.slice(-6)}`;
 }
 
 export function leadDeliveryStateLabel(
