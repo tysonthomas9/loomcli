@@ -77,6 +77,13 @@ func TestExecutorRunOnceClaimsVerifiesAndFinishes(t *testing.T) {
 	if stored.Status != domain.DriverRunCompleted || stored.FencingToken == 0 {
 		t.Fatalf("stored run = %+v, want completed with fencing token", stored)
 	}
+	node, err := st.Nodes().Get(ctx, "TEST", "node-1")
+	if err != nil {
+		t.Fatalf("Get executor node: %v", err)
+	}
+	if node.DrainState != domain.NodeDrainActive || node.RuntimeProvider != domain.RuntimeProviderLocal {
+		t.Fatalf("executor node = %+v, want active local node", node)
+	}
 }
 
 func TestExecutorRunOnceTargetsSpecificQueuedRunID(t *testing.T) {
@@ -347,6 +354,7 @@ func TestNodeRunnerBuiltFlueServerReceivesOnlyScopedFleetDBHandoff(t *testing.T)
 	t.Setenv("LOOM_FLEET_DB_ACTOR", "broad-actor")
 	t.Setenv("LOOM_DRIVER_FLEET_DB_API_KEY", "scoped-secret")
 	t.Setenv("LOOM_DRIVER_FLEET_DB_ACTOR", "driver-run:run-1")
+	t.Setenv("LOOM_CONFIG_DIR", "/tmp/loom-config")
 	t.Setenv("OPENAI_API_KEY", "model-secret")
 	t.Setenv("AWS_SECRET_ACCESS_KEY", "aws-secret")
 	t.Setenv("GITHUB_TOKEN", "github-secret")
@@ -367,7 +375,8 @@ const leaked = [
 ].filter((key) => process.env[key]);
 const handoffOk = process.env.LOOM_DRIVER_FLEET_DB_URL === 'https://fleet.invalid'
   && process.env.LOOM_DRIVER_FLEET_DB_API_KEY === 'scoped-secret'
-  && process.env.LOOM_DRIVER_FLEET_DB_ACTOR === 'driver-run:run-1';
+  && process.env.LOOM_DRIVER_FLEET_DB_ACTOR === 'driver-run:run-1'
+  && process.env.LOOM_CONFIG_DIR === '/tmp/loom-config';
 if (process.send) {
   process.send({ version: 1, type: 'ready', target: 'workflow', name: process.env.FLUE_CLI_NAME || 'epic-runner' });
   process.on('message', (message) => {

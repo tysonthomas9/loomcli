@@ -26,7 +26,8 @@ export async function run(ctx) {
 
   const maxConcurrency = Math.max(1, numberValue(input.maxConcurrency || input.max_concurrency, 2));
   const providerProfile = stringValue(input.providerProfile || input.provider_profile || "flue-local");
-  const workerPrefix = stringValue(input.workerPrefix || input.worker_prefix || slug(epicId));
+  const workerPrefix = stringValue(input.workerPrefix || input.worker_prefix);
+  const workerProfileId = stringValue(input.workerProfileId || input.worker_profile_id);
   const targetNodeId = stringValue(input.targetNodeId || input.target_node_id);
   const intervalMs = Math.max(1000, numberValue(input.intervalSeconds || input.interval_seconds, 5) * 1000);
   const completed = [];
@@ -84,6 +85,7 @@ export async function run(ctx) {
       task,
       driverRunId: loom.driverRunId,
       workerPrefix,
+      workerProfileId,
       providerProfile,
       targetNodeId,
     })));
@@ -216,17 +218,21 @@ async function startEpicRun(loom, input, epicId) {
 async function runChildTask(loom, opts) {
   const task = opts.task;
   const taskRunId = deterministicTaskRunId(opts.driverRunId, task.id);
+  const request = {
+    taskId: task.id,
+    taskRunId,
+    providerProfile: opts.providerProfile,
+    nodeId: opts.targetNodeId || "",
+    supportedProviders: [opts.providerProfile],
+    sandboxPlacement: { provider: opts.providerProfile },
+  };
+  const workerProfileId = opts.workerProfileId || (opts.workerPrefix ? opts.workerPrefix + "-" + slug(task.id) : "");
+  if (workerProfileId) {
+    request.workerProfileId = workerProfileId;
+  }
   let result;
   try {
-    result = await loom.taskRuns.request({
-      taskId: task.id,
-      taskRunId,
-      providerProfile: opts.providerProfile,
-      workerProfileId: opts.workerPrefix + "-" + slug(task.id),
-      nodeId: opts.targetNodeId || "",
-      supportedProviders: [opts.providerProfile],
-      sandboxPlacement: { provider: opts.providerProfile },
-    });
+    result = await loom.taskRuns.request(request);
   } catch (err) {
     await safeRelease(loom, task.id);
     return {

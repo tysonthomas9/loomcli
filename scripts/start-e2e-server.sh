@@ -165,6 +165,9 @@ echo "[e2e] Starting loom serve (port :${PORT})..."
 export LOOM_DISABLE_H2C=1
 export LOOM_ISSUE_BACKEND=fleetdb
 export LOOM_FLEET_DB_ACTOR=loom-e2e
+if [[ -z "${LOOM_SDK_ROOT:-}" && -f "$REPO_ROOT/sdk/package.json" ]]; then
+    export LOOM_SDK_ROOT="$REPO_ROOT/sdk"
+fi
 # Run from E2E workspace so the Loom API server discovers the isolated project.
 cd "$E2E_WORKSPACE"
 "$LOOM_BIN" serve \

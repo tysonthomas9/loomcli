@@ -9,6 +9,7 @@ func TestScopedSubprocessBaseEnvFiltersBroadCredentials(t *testing.T) {
 		"LANG=C.UTF-8",
 		"LC_ALL=C",
 		"TMPDIR=/tmp",
+		"LOOM_CONFIG_DIR=/tmp/loom-config",
 		"LOOM_HOST_BRIDGE_HELPER=1",
 		"LOOM_DRIVER_TASK_RUNNER_CMD_JSON=[\"/tmp/runner\"]",
 		"LOOM_DRIVER_TASK_RUNNER_CMD=/tmp/runner",
@@ -31,7 +32,7 @@ func TestScopedSubprocessBaseEnvFiltersBroadCredentials(t *testing.T) {
 	}
 
 	got := envMap(scopedSubprocessBaseEnv(env))
-	for _, key := range []string{"PATH", "HOME", "LANG", "LC_ALL", "TMPDIR", "LOOM_HOST_BRIDGE_HELPER", "LOOM_DRIVER_TASK_RUNNER_CMD_JSON", "LOOM_DRIVER_TASK_RUNNER_CMD"} {
+	for _, key := range []string{"PATH", "HOME", "LANG", "LC_ALL", "TMPDIR", "LOOM_CONFIG_DIR", "LOOM_HOST_BRIDGE_HELPER", "LOOM_DRIVER_TASK_RUNNER_CMD_JSON", "LOOM_DRIVER_TASK_RUNNER_CMD"} {
 		if _, ok := got[key]; !ok {
 			t.Fatalf("%s missing from filtered env: %+v", key, got)
 		}

@@ -28,9 +28,35 @@ func TestBuiltinEpicRunnerWorkflowSourceIncludesReconcilePrimitives(t *testing.T
 		"loom.tasks.claimReady",
 		"deterministicTaskRunId",
 		"epic_blocked",
+		"workerProfileId",
 	} {
 		if !strings.Contains(source, want) {
 			t.Fatalf("built-in epic-runner source missing %q", want)
+		}
+	}
+}
+
+func TestBuiltinEpicRunnerWorkflowWorkerProfilesAreOptIn(t *testing.T) {
+	spec, ok := BuiltinWorkflow(BuiltinEpicRunnerWorkflowName)
+	if !ok {
+		t.Fatal("built-in epic-runner workflow missing")
+	}
+	source := spec.Files[spec.Entrypoint]
+	for _, forbidden := range []string{
+		"input.workerPrefix || input.worker_prefix || slug(epicId)",
+		"workerProfileId: opts.workerPrefix +",
+	} {
+		if strings.Contains(source, forbidden) {
+			t.Fatalf("built-in epic-runner source still has default worker profile generation %q", forbidden)
+		}
+	}
+	for _, want := range []string{
+		"const workerPrefix = stringValue(input.workerPrefix || input.worker_prefix);",
+		"const workerProfileId = stringValue(input.workerProfileId || input.worker_profile_id);",
+		"request.workerProfileId = workerProfileId;",
+	} {
+		if !strings.Contains(source, want) {
+			t.Fatalf("built-in epic-runner source missing opt-in worker profile logic %q", want)
 		}
 	}
 }

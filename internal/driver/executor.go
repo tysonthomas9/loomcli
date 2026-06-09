@@ -73,6 +73,9 @@ func (e *Executor) RunOnce(ctx context.Context) (*ExecutionResult, error) {
 	}
 	nodeID := e.nodeID()
 	leaseID := e.leaseID(run.RunID)
+	if err := e.ensureNode(ctx, run.WorkspaceKey, nodeID); err != nil {
+		return nil, err
+	}
 	claimed, err := e.Store.DriverRuns().Claim(ctx, run.WorkspaceKey, run.RunID, nodeID, leaseID)
 	if err != nil {
 		if errors.Is(err, domain.ErrAlreadyClaimed) || errors.Is(err, domain.ErrInvalidTransition) {
@@ -89,6 +92,7 @@ func (e *Executor) RunOnce(ctx context.Context) (*ExecutionResult, error) {
 	defer stopHeartbeat()
 	if interval := e.heartbeatInterval(); interval > 0 {
 		go heartbeatDriverRun(hbCtx, e.Store, claimed, interval)
+		go heartbeatExecutorNode(hbCtx, e.Store, claimed.WorkspaceKey, nodeID, e.nodeTTL())
 	}
 	req, err := loadRunRequest(ctx, workDir, claimed, e.Store)
 	if err != nil {
@@ -279,6 +283,40 @@ func (e *Executor) leaseID(runID string) string {
 	return fmt.Sprintf("%s-%d", runID, time.Now().UTC().UnixNano())
 }
 
+func (e *Executor) ensureNode(ctx context.Context, ws, nodeID string) error {
+	ttl := e.nodeTTL()
+	_, err := e.Store.Nodes().Create(ctx, store.NodeCreate{
+		WorkspaceKey:    ws,
+		NodeID:          nodeID,
+		OwnerActor:      executorOwnerActor(),
+		RuntimeProvider: domain.RuntimeProviderLocal,
+		Labels:          []string{"loom-driver-executor"},
+		Capabilities:    []string{"driver-runner", "task-runner", "flue-local"},
+		ToolInventory:   []string{"loom-driver"},
+		DrainState:      domain.NodeDrainActive,
+		TTL:             ttl,
+	})
+	if err == nil {
+		return nil
+	}
+	if errors.Is(err, domain.ErrAlreadyExists) {
+		if _, hbErr := e.Store.Nodes().Heartbeat(ctx, ws, nodeID, ttl); hbErr != nil {
+			return fmt.Errorf("heartbeat executor node: %w", hbErr)
+		}
+		return nil
+	}
+	return fmt.Errorf("register executor node: %w", err)
+}
+
+func executorOwnerActor() string {
+	for _, key := range []string{"LOOM_FLEET_DB_ACTOR", "LOOM_DRIVER_FLEET_DB_ACTOR", "USER"} {
+		if value := strings.TrimSpace(os.Getenv(key)); value != "" {
+			return value
+		}
+	}
+	return "loom-driver-executor"
+}
+
 func (e *Executor) heartbeatInterval() time.Duration {
 	if e.HeartbeatInterval == 0 {
 		return 30 * time.Second
@@ -287,6 +325,14 @@ func (e *Executor) heartbeatInterval() time.Duration {
 		return 0
 	}
 	return e.HeartbeatInterval
+}
+
+func (e *Executor) nodeTTL() time.Duration {
+	ttl := 5 * time.Minute
+	if interval := e.heartbeatInterval(); interval > 0 && interval*3 > ttl {
+		ttl = interval * 3
+	}
+	return ttl
 }
 
 func (e *Executor) staleRunMaxAge() time.Duration {
@@ -305,6 +351,19 @@ func heartbeatDriverRun(ctx context.Context, s store.Store, claimed *domain.Driv
 			return
 		case <-ticker.C:
 			_, _ = s.DriverRuns().Heartbeat(ctx, claimed.WorkspaceKey, claimed.RunID, claimed.NodeID, claimed.LeaseID, claimed.FencingToken)
+		}
+	}
+}
+
+func heartbeatExecutorNode(ctx context.Context, s store.Store, ws, nodeID string, ttl time.Duration) {
+	ticker := time.NewTicker(ttl / 3)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			_, _ = s.Nodes().Heartbeat(ctx, ws, nodeID, ttl)
 		}
 	}
 }
