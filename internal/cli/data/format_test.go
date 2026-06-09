@@ -127,7 +127,7 @@ func TestPrintNilErrors(t *testing.T) {
 	if err := printIssueDetail(&out, nil, formatText); err == nil {
 		t.Fatal("printIssueDetail nil: expected error")
 	}
-	if err := printCreatedIssue(&out, nil, formatText); err == nil {
+	if err := printCreatedIssue(&out, &out, nil, formatText); err == nil {
 		t.Fatal("printCreatedIssue nil: expected error")
 	}
 	if err := printMonitorStatus(&out, nil, formatText); err == nil {
