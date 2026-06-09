@@ -105,10 +105,28 @@ func (ap *AgentProcess) recordTick() {
 	}
 }
 
+// trySetStopReasonDefault records a stop reason without ever blocking the
+// caller. It returns false when the agent mutex is currently owned elsewhere,
+// which is expected on watchdog quarantine paths where the suspect goroutine may
+// be the one holding the lock.
+func (ap *AgentProcess) trySetStopReasonDefault(reason StopReason) bool {
+	if !ap.Mu.TryLock() {
+		return false
+	}
+	defer ap.Mu.Unlock()
+	if ap.StopReason == "" {
+		ap.StopReason = reason
+	}
+	return true
+}
+
 // signalStop asks this agent's supervise loop to stop at its next checkpoint by
 // closing StopCh exactly once. Non-blocking and safe to call concurrently — the
 // liveness watchdog uses it to quarantine a wedged agent without taking locks.
 func (ap *AgentProcess) signalStop() {
+	if ap.StopCh == nil {
+		return
+	}
 	ap.StopOnce.Do(func() { close(ap.StopCh) })
 }
 

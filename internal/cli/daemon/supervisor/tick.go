@@ -93,22 +93,40 @@ func (s *Supervisor) deregister(sl *tickSlot) {
 
 // quarantineAgent contains a wedged per-agent supervise goroutine without
 // crashing the daemon. It is invoked only from the watchdog scan, so it must
-// stay lock-free: it never takes ap.Mu or AgentsMu, because the wedged
+// stay non-blocking: it never waits on ap.Mu or AgentsMu, because the wedged
 // goroutine may be holding one and the watchdog must stay responsive.
 //
 // It (1) stops tracking the leaked goroutine so the scan does not re-flag it on
-// every interval, and (2) signals that single agent to stop via its StopCh,
-// which the supervise loop honors at its next checkpoint if it is merely slow
-// rather than truly hung. A genuinely deadlocked goroutine leaks — but a
-// contained, logged single-goroutine leak is strictly preferable to the
-// fleet-wide outage of a process-fatal.
+// every interval, (2) records a watchdog stop reason when the agent mutex is
+// immediately available, (3) signals that single agent to stop via StopCh, and
+// (4) starts an asynchronous process stop attempt. A genuinely deadlocked
+// goroutine can still leak if it owns the state needed to find the process, but
+// the watchdog itself stays live and the daemon keeps supervising the rest of
+// the fleet.
 func (s *Supervisor) quarantineAgent(ap *AgentProcess, sl *tickSlot) {
 	slog.Error("liveness watchdog quarantining wedged agent supervisor (fleet stays up)",
 		"worktree", ap.Entry.Worktree,
 		"tick", sl.name,
 		"age", time.Since(sl.last()).Truncate(time.Second))
 	s.deregister(sl)
+	if !ap.trySetStopReasonDefault(StopReasonWatchdog) {
+		slog.Warn("could not mark quarantined agent stop reason without blocking",
+			"worktree", ap.Entry.Worktree,
+			"reason", StopReasonWatchdog)
+	}
 	ap.signalStop()
+	go s.stopQuarantinedAgent(ap)
+}
+
+// stopQuarantinedAgent runs outside the watchdog scan. StopAgent may need the
+// agent mutex to snapshot Cmd/Pid and may wait for process exit, so the watchdog
+// must never call it inline.
+func (s *Supervisor) stopQuarantinedAgent(ap *AgentProcess) {
+	timeout := time.Duration(DefaultSigtermTimeout) * time.Second
+	if s.ConfigSnapshot != nil {
+		timeout = s.GetSigtermTimeout()
+	}
+	s.StopAgent(ap, timeout)
 }
 
 // rangeSlots iterates over every registered tick slot.
