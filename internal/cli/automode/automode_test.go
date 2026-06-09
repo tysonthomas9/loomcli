@@ -60,6 +60,17 @@ func setTmuxRemainOnExit(t *testing.T) {
 	})
 }
 
+func prependSleepingLoomShim(t *testing.T) {
+	t.Helper()
+
+	binDir := t.TempDir()
+	loomPath := filepath.Join(binDir, "loom")
+	if err := os.WriteFile(loomPath, []byte("#!/bin/sh\nsleep 300\n"), 0o755); err != nil {
+		t.Fatalf("write loom shim: %v", err)
+	}
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+}
+
 func TestHasAvailablePlanningTasks(t *testing.T) {
 	tests := []struct {
 		name        string
@@ -2240,6 +2251,7 @@ func TestStartTmuxSession_Success(t *testing.T) {
 	if exec.Command("tmux", "-V").Run() != nil { //nolint:norawexec
 		t.Skip("tmux not available")
 	}
+	prependSleepingLoomShim(t)
 
 	tmpDir := t.TempDir()
 	sessionName := fmt.Sprintf("loom-test-start-%d", os.Getpid())
@@ -2252,9 +2264,6 @@ func TestStartTmuxSession_Success(t *testing.T) {
 		BackoffBase:  10 * time.Millisecond,
 		TaskPause:    10 * time.Millisecond,
 	}
-
-	// remain-on-exit keeps the pane alive even when loom exits (not installed in CI)
-	setTmuxRemainOnExit(t)
 
 	t.Cleanup(func() {
 		exec.Command("tmux", "kill-session", "-t", sessionName).Run() //nolint:norawexec
@@ -2275,9 +2284,7 @@ func TestStartTmuxSession_KillsExisting(t *testing.T) {
 	if exec.Command("tmux", "-V").Run() != nil { //nolint:norawexec
 		t.Skip("tmux not available")
 	}
-
-	// remain-on-exit keeps the pane alive even when loom exits (not installed in CI)
-	setTmuxRemainOnExit(t)
+	prependSleepingLoomShim(t)
 
 	tmpDir := t.TempDir()
 	sessionName := fmt.Sprintf("loom-test-kill-%d", os.Getpid())
@@ -2322,9 +2329,7 @@ func TestStartTmuxSession_QuotesShellMetachars(t *testing.T) {
 	if exec.Command("tmux", "-V").Run() != nil { //nolint:norawexec
 		t.Skip("tmux not available")
 	}
-
-	// remain-on-exit keeps the pane alive even when loom exits (not installed in CI)
-	setTmuxRemainOnExit(t)
+	prependSleepingLoomShim(t)
 
 	// Create a temp dir whose name contains shell metacharacters
 	baseDir := t.TempDir()

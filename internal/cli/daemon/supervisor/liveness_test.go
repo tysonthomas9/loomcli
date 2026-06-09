@@ -124,7 +124,7 @@ func TestScanTicksStopsStaleAgentProcess(t *testing.T) {
 		}
 	}
 
-	cmd := exec.Command("sleep", "60") //nolint:gosec // test subprocess
+	cmd := exec.Command("sleep", "60") //nolint:norawexec,gosec // test subprocess
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	if err := cmd.Start(); err != nil {
 		t.Fatalf("start sleep: %v", err)
