@@ -21,6 +21,7 @@ var (
 	roleAddPromptFile  string
 	roleAddModel       string
 	roleAddBackend     string
+	roleAddEffort      string
 	roleAddSkills      []string
 	roleAddMaxConc     int
 	roleAddReadOnly    bool
@@ -72,6 +73,7 @@ var roleSetCmd = &cobra.Command{
   model           string
   task_filter     string
   backend         string
+  effort          string (low/medium/high/xhigh/max)
   read_only       bool ("true"/"false")
   max_priority    integer
   max_concurrency integer
@@ -91,7 +93,7 @@ var roleUnsetCmd = &cobra.Command{
   max_priority    *int     (clear)
   max_concurrency *int     (clear)
   max_budget_usd  *float64 (clear)
-  description / prompt_file / model / task_filter / backend  (set to "")
+  description / prompt_file / model / task_filter / backend / effort  (set to "")
   skills / path_patterns / allowed_tools / denied_tools      (set to empty list)
   read_only                                                 (set to false)`,
 	Args: cobra.ExactArgs(2),
@@ -103,6 +105,7 @@ func init() {
 	roleAddCmd.Flags().StringVar(&roleAddPromptFile, "prompt-file", "", "Path to prompt file (relative to workspace)")
 	roleAddCmd.Flags().StringVar(&roleAddModel, "model", "", "Model identifier")
 	roleAddCmd.Flags().StringVar(&roleAddBackend, "backend", "", "AI backend (e.g., claude, codex)")
+	roleAddCmd.Flags().StringVar(&roleAddEffort, "effort", "", "Agent effort (low, medium, high, xhigh, max)")
 	roleAddCmd.Flags().StringSliceVar(&roleAddSkills, "skills", nil, "Skills (comma-separated or repeat flag)")
 	roleAddCmd.Flags().IntVar(&roleAddMaxConc, "max-concurrency", 0, "Max concurrent agents (0 = unlimited)")
 	roleAddCmd.Flags().BoolVar(&roleAddReadOnly, "read-only", false, "Read-only role")
@@ -123,6 +126,7 @@ func runRoleAdd(_ *cobra.Command, args []string) error {
 			PromptFile:   roleAddPromptFile,
 			Model:        roleAddModel,
 			Backend:      roleAddBackend,
+			Effort:       roleAddEffort,
 			Skills:       roleAddSkills,
 			ReadOnly:     roleAddReadOnly,
 		}
@@ -182,6 +186,9 @@ func runRoleShow(_ *cobra.Command, args []string) error {
 		}
 		if r.Backend != "" {
 			fmt.Printf("Backend:      %s\n", r.Backend)
+		}
+		if r.Effort != "" {
+			fmt.Printf("Effort:       %s\n", r.Effort)
 		}
 		if r.PromptFile != "" {
 			fmt.Printf("Prompt file:  %s\n", r.PromptFile)
@@ -257,6 +264,8 @@ func buildRolePatch(key, value string, unset bool) (store.RoleUpdate, error) {
 		patch.TaskFilter = strPtr(value)
 	case "backend":
 		patch.Backend = strPtr(value)
+	case "effort":
+		patch.Effort = strPtr(value)
 	case "read_only":
 		if unset {
 			b := false

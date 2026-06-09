@@ -40,8 +40,13 @@ func TestCreateCommand_UsesLocalBackend(t *testing.T) {
 		if err != nil {
 			t.Fatalf("create: %v", err)
 		}
-		if !strings.Contains(out, "created loom-123") || !strings.Contains(out, "Add local mode setup") {
+		if !strings.Contains(out, "Add local mode setup") {
 			t.Fatalf("create output = %q, want created issue", out)
+		}
+		// The stable success line is the LAST stdout line in text mode.
+		lines := strings.Split(strings.TrimRight(out, "\n"), "\n")
+		if lines[len(lines)-1] != "CREATED loom-123" {
+			t.Fatalf("last stdout line = %q, want %q", lines[len(lines)-1], "CREATED loom-123")
 		}
 		if len(stub.calls) != 1 || stub.calls[0].method != "Create" {
 			t.Fatalf("calls = %#v, want one Create call", stub.calls)

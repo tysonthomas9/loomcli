@@ -394,3 +394,24 @@ func TestAppendTranscript_PathTraversal(t *testing.T) {
 		}
 	}
 }
+
+// TestSessionDir locks the load-bearing path contract: SessionDir is
+// <runtimeDir>/sessions/<id> and is the directory the native transcript lives
+// in — so the event-store writer (OnEvent sink) and reader (serving), which both
+// resolve through SessionDir, can never diverge.
+func TestSessionDir(t *testing.T) {
+	rt := t.TempDir()
+	store, err := NewStore(rt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const sid = "20260601-120000-claude-abcd"
+	want := filepath.Join(rt, "sessions", sid)
+	if got := store.SessionDir(sid); got != want {
+		t.Errorf("SessionDir = %q, want %q", got, want)
+	}
+	// The native transcript lives in SessionDir (events.jsonl is its sibling).
+	if got := filepath.Dir(store.NativeTranscriptPath(sid)); got != store.SessionDir(sid) {
+		t.Errorf("NativeTranscriptPath dir %q != SessionDir %q", got, store.SessionDir(sid))
+	}
+}

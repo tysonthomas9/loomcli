@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	hwharness "github.com/olesho/harness-wrapper/pkg/harness"
 	"github.com/olesho/harness-wrapper/pkg/wrapper"
 )
 
@@ -26,7 +27,7 @@ func installFakes(t *testing.T, run runOnceFn, sleep sleepFnT) {
 
 // scriptStep is one entry in a scripted runOnceFn replay.
 type scriptStep struct {
-	res attemptResult
+	res hwharness.Result
 	err error
 }
 
@@ -35,7 +36,7 @@ type scriptStep struct {
 func scriptedRun(t *testing.T, script ...scriptStep) (runOnceFn, *int) {
 	t.Helper()
 	var calls int
-	return func(ctx context.Context, cfg wrapper.Config, _ RetryPolicy) (attemptResult, error) {
+	return func(ctx context.Context, cfg hwharness.Config, _ RetryPolicy) (hwharness.Result, error) {
 		if calls >= len(script) {
 			t.Fatalf("runOnce called %d times, script only has %d entries", calls+1, len(script))
 		}
@@ -73,7 +74,7 @@ func TestRunWithRetry_Table(t *testing.T) {
 		{
 			name: "success_first_try",
 			script: []scriptStep{
-				{res: attemptResult{Result: wrapper.Result{Status: wrapper.StatusIdle}}},
+				{res: hwharness.Result{Result: wrapper.Result{Status: wrapper.StatusIdle}}},
 			},
 			policy:     RetryPolicy{Max: 3, BaseBackoff: time.Second, MaxBackoff: 10 * time.Second},
 			wantStatus: wrapper.StatusIdle,
@@ -83,8 +84,8 @@ func TestRunWithRetry_Table(t *testing.T) {
 		{
 			name: "retry_then_success",
 			script: []scriptStep{
-				{res: attemptResult{Result: wrapper.Result{Status: wrapper.StatusAPIError}}},
-				{res: attemptResult{Result: wrapper.Result{Status: wrapper.StatusIdle}}},
+				{res: hwharness.Result{Result: wrapper.Result{Status: wrapper.StatusAPIError}}},
+				{res: hwharness.Result{Result: wrapper.Result{Status: wrapper.StatusIdle}}},
 			},
 			policy:     RetryPolicy{Max: 3, BaseBackoff: time.Second, MaxBackoff: 10 * time.Second},
 			wantStatus: wrapper.StatusIdle,
@@ -94,10 +95,10 @@ func TestRunWithRetry_Table(t *testing.T) {
 		{
 			name: "exhausted_retries",
 			script: []scriptStep{
-				{res: attemptResult{Result: wrapper.Result{Status: wrapper.StatusRetryLater}}},
-				{res: attemptResult{Result: wrapper.Result{Status: wrapper.StatusRetryLater}}},
-				{res: attemptResult{Result: wrapper.Result{Status: wrapper.StatusRetryLater}}},
-				{res: attemptResult{Result: wrapper.Result{Status: wrapper.StatusRetryLater}}},
+				{res: hwharness.Result{Result: wrapper.Result{Status: wrapper.StatusRetryLater}}},
+				{res: hwharness.Result{Result: wrapper.Result{Status: wrapper.StatusRetryLater}}},
+				{res: hwharness.Result{Result: wrapper.Result{Status: wrapper.StatusRetryLater}}},
+				{res: hwharness.Result{Result: wrapper.Result{Status: wrapper.StatusRetryLater}}},
 			},
 			policy:     RetryPolicy{Max: 3, BaseBackoff: time.Second, MaxBackoff: 10 * time.Second},
 			wantStatus: wrapper.StatusRetryLater,
@@ -107,8 +108,8 @@ func TestRunWithRetry_Table(t *testing.T) {
 		{
 			name: "respects_retry_after",
 			script: []scriptStep{
-				{res: attemptResult{Result: wrapper.Result{Status: wrapper.StatusAPIError}, RetryAfter: 7 * time.Second}},
-				{res: attemptResult{Result: wrapper.Result{Status: wrapper.StatusIdle}}},
+				{res: hwharness.Result{Result: wrapper.Result{Status: wrapper.StatusAPIError}, RetryAfter: 7 * time.Second}},
+				{res: hwharness.Result{Result: wrapper.Result{Status: wrapper.StatusIdle}}},
 			},
 			policy:     RetryPolicy{Max: 3, BaseBackoff: time.Second, MaxBackoff: 60 * time.Second},
 			wantStatus: wrapper.StatusIdle,
@@ -118,8 +119,8 @@ func TestRunWithRetry_Table(t *testing.T) {
 		{
 			name: "retry_after_capped_by_max",
 			script: []scriptStep{
-				{res: attemptResult{Result: wrapper.Result{Status: wrapper.StatusAPIError}, RetryAfter: 999 * time.Second}},
-				{res: attemptResult{Result: wrapper.Result{Status: wrapper.StatusIdle}}},
+				{res: hwharness.Result{Result: wrapper.Result{Status: wrapper.StatusAPIError}, RetryAfter: 999 * time.Second}},
+				{res: hwharness.Result{Result: wrapper.Result{Status: wrapper.StatusIdle}}},
 			},
 			policy:     RetryPolicy{Max: 3, BaseBackoff: time.Second, MaxBackoff: 30 * time.Second},
 			wantStatus: wrapper.StatusIdle,
@@ -129,7 +130,7 @@ func TestRunWithRetry_Table(t *testing.T) {
 		{
 			name: "non_retryable_status",
 			script: []scriptStep{
-				{res: attemptResult{Result: wrapper.Result{Status: wrapper.StatusBlockedByCost}}},
+				{res: hwharness.Result{Result: wrapper.Result{Status: wrapper.StatusBlockedByCost}}},
 			},
 			policy:     RetryPolicy{Max: 3, BaseBackoff: time.Second, MaxBackoff: 10 * time.Second},
 			wantStatus: wrapper.StatusBlockedByCost,
@@ -139,7 +140,7 @@ func TestRunWithRetry_Table(t *testing.T) {
 		{
 			name: "failed_status_not_retried",
 			script: []scriptStep{
-				{res: attemptResult{Result: wrapper.Result{Status: wrapper.StatusFailed, ExitCode: 2}}},
+				{res: hwharness.Result{Result: wrapper.Result{Status: wrapper.StatusFailed, ExitCode: 2}}},
 			},
 			policy:     RetryPolicy{Max: 3, BaseBackoff: time.Second, MaxBackoff: 10 * time.Second},
 			wantStatus: wrapper.StatusFailed,
@@ -147,10 +148,10 @@ func TestRunWithRetry_Table(t *testing.T) {
 			wantSleeps: nil,
 		},
 		{
-			name: "failed_status_with_api_error_signal_retries",
+			name: "failed_status_with_retryable_class_retries",
 			script: []scriptStep{
-				{res: attemptResult{Result: wrapper.Result{Status: wrapper.StatusFailed, ExitCode: 1}, SawAPIError: true, RetryAfter: 0}},
-				{res: attemptResult{Result: wrapper.Result{Status: wrapper.StatusIdle}}},
+				{res: hwharness.Result{Result: wrapper.Result{Status: wrapper.StatusFailed, ExitCode: 1, Class: wrapper.ErrTransient}, RetryAfter: 0}},
+				{res: hwharness.Result{Result: wrapper.Result{Status: wrapper.StatusIdle}}},
 			},
 			policy:     RetryPolicy{Max: 3, BaseBackoff: time.Second, MaxBackoff: 10 * time.Second},
 			wantStatus: wrapper.StatusIdle,
@@ -160,7 +161,7 @@ func TestRunWithRetry_Table(t *testing.T) {
 		{
 			name: "wrapper_level_error_no_retry",
 			script: []scriptStep{
-				{res: attemptResult{Result: wrapper.Result{ExitCode: -1}}, err: wrapper.ErrPTYAllocation},
+				{res: hwharness.Result{Result: wrapper.Result{ExitCode: -1}}, err: wrapper.ErrPTYAllocation},
 			},
 			policy:     RetryPolicy{Max: 3, BaseBackoff: time.Second, MaxBackoff: 10 * time.Second},
 			wantStatus: "",
@@ -180,7 +181,7 @@ func TestRunWithRetry_Table(t *testing.T) {
 			})
 			installFakes(t, run, sleep)
 
-			res, err := RunWithRetry(context.Background(), wrapper.Config{}, tc.policy)
+			res, err := RunWithRetry(context.Background(), hwharness.Config{}, tc.policy)
 			if tc.wantErrIs != nil {
 				if !errors.Is(err, tc.wantErrIs) {
 					t.Fatalf("err: got %v, want errors.Is %v", err, tc.wantErrIs)
@@ -204,12 +205,12 @@ func TestRunWithRetry_Table(t *testing.T) {
 func TestRunWithRetry_ContextCancelDuringBackoff(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	run, calls := scriptedRun(t,
-		scriptStep{res: attemptResult{Result: wrapper.Result{Status: wrapper.StatusRetryLater}}},
+		scriptStep{res: hwharness.Result{Result: wrapper.Result{Status: wrapper.StatusRetryLater}}},
 	)
 	sleep, slept := recordingSleep(cancel, 1)
 	installFakes(t, run, sleep)
 
-	res, err := RunWithRetry(ctx, wrapper.Config{}, RetryPolicy{Max: 3, BaseBackoff: time.Second})
+	res, err := RunWithRetry(ctx, hwharness.Config{}, RetryPolicy{Max: 3, BaseBackoff: time.Second})
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("err: got %v, want context.Canceled", err)
 	}
@@ -226,11 +227,11 @@ func TestRunWithRetry_ContextCancelDuringBackoff(t *testing.T) {
 
 func TestRunWithRetry_ZeroPolicyUsesDefaults(t *testing.T) {
 	run, _ := scriptedRun(t,
-		scriptStep{res: attemptResult{Result: wrapper.Result{Status: wrapper.StatusIdle}}},
+		scriptStep{res: hwharness.Result{Result: wrapper.Result{Status: wrapper.StatusIdle}}},
 	)
 	installFakes(t, run, func(ctx context.Context, d time.Duration) error { return nil })
 
-	if _, err := RunWithRetry(context.Background(), wrapper.Config{}, RetryPolicy{}); err != nil {
+	if _, err := RunWithRetry(context.Background(), hwharness.Config{}, RetryPolicy{}); err != nil {
 		t.Fatalf("unexpected err: %v", err)
 	}
 	// Default policy is just exercised via the call; the concrete
@@ -277,32 +278,41 @@ func TestBackoffFor(t *testing.T) {
 
 func TestShouldRetry(t *testing.T) {
 	type input struct {
-		status      wrapper.Status
-		sawAPIError bool
+		status wrapper.Status
+		class  wrapper.ErrorClass
 	}
 	cases := map[input]bool{
-		// Without API-error signal in events:
-		{wrapper.StatusIdle, false}:            false,
-		{wrapper.StatusFailed, false}:          false,
-		{wrapper.StatusBlockedByCost, false}:   false,
-		{wrapper.StatusInterrupted, false}:     false,
-		{wrapper.StatusUnknown, false}:         false,
-		{wrapper.StatusWaitingForInput, false}: false,
-		{wrapper.StatusStale, false}:           false,
-		{wrapper.StatusRetryLater, false}:      true,
-		{wrapper.StatusAPIError, false}:        true,
-		// API-error signal observed mid-run: failed/unknown become retryable.
-		{wrapper.StatusFailed, true}:  true,
-		{wrapper.StatusUnknown, true}: true,
-		// Other statuses still don't retry even with api-error signal —
-		// e.g. blocked_by_cost is a definitive non-retry verdict.
-		{wrapper.StatusBlockedByCost, true}: false,
-		{wrapper.StatusInterrupted, true}:   false,
-		{wrapper.StatusIdle, true}:          false,
+		// No carried class:
+		{wrapper.StatusIdle, wrapper.ErrNone}:            false,
+		{wrapper.StatusFailed, wrapper.ErrNone}:          false,
+		{wrapper.StatusBlockedByCost, wrapper.ErrNone}:   false,
+		{wrapper.StatusInterrupted, wrapper.ErrNone}:     false,
+		{wrapper.StatusUnknown, wrapper.ErrNone}:         false,
+		{wrapper.StatusWaitingForInput, wrapper.ErrNone}: false,
+		{wrapper.StatusStale, wrapper.ErrNone}:           false,
+		{wrapper.StatusRetryLater, wrapper.ErrNone}:      true,
+		{wrapper.StatusAPIError, wrapper.ErrNone}:        true,
+		// A retryable class inherited onto a failed exit (e.g. a mid-run
+		// non-terminal API error): failed/unknown become retryable.
+		{wrapper.StatusFailed, wrapper.ErrTransient}:   true,
+		{wrapper.StatusFailed, wrapper.ErrTimeout}:     true,
+		{wrapper.StatusFailed, wrapper.ErrRateLimited}: true,
+		{wrapper.StatusUnknown, wrapper.ErrTransient}:  true,
+		// Fatal/deterministic classes are NOT retried even on a failed exit —
+		// finer than the old SawAPIError bool, which retried any API error.
+		{wrapper.StatusFailed, wrapper.ErrAuth}:            false,
+		{wrapper.StatusFailed, wrapper.ErrBilling}:         false,
+		{wrapper.StatusFailed, wrapper.ErrContextOverflow}: false,
+		// Non-retryable terminal statuses stay definitive regardless of
+		// class — blocked_by_cost is the caller's to handle.
+		{wrapper.StatusBlockedByCost, wrapper.ErrRateLimited}: false,
+		{wrapper.StatusInterrupted, wrapper.ErrTransient}:     false,
+		{wrapper.StatusIdle, wrapper.ErrTransient}:            false,
 	}
 	for in, want := range cases {
-		if got := shouldRetry(in.status, in.sawAPIError); got != want {
-			t.Errorf("shouldRetry(%q, %v) = %v, want %v", in.status, in.sawAPIError, got, want)
+		res := hwharness.Result{Result: wrapper.Result{Status: in.status, Class: in.class}}
+		if got := shouldRetry(res); got != want {
+			t.Errorf("shouldRetry(%q, %v) = %v, want %v", in.status, in.class, got, want)
 		}
 	}
 }
@@ -362,10 +372,10 @@ func TestSleepDefault_FiresTimerOnShortSleep(t *testing.T) {
 }
 
 func TestRunOnceDefault_BinaryNotFoundReturnsWrapperError(t *testing.T) {
-	out, err := runOnceDefault(context.Background(), wrapper.Config{
+	out, err := runOnceDefault(context.Background(), hwharness.Config{Wrapper: wrapper.Config{
 		BinaryPath: "/path/that/does/not/exist/xyz123",
 		Stdout:     io.Discard,
-	}, RetryPolicy{})
+	}}, RetryPolicy{})
 	if err == nil {
 		t.Fatal("got nil, want wrapper-level error for missing binary")
 	}
@@ -393,14 +403,14 @@ func TestRunOnceDefault_HappyPathReachesIdle(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	out, err := runOnceDefault(ctx, wrapper.Config{
+	out, err := runOnceDefault(ctx, hwharness.Config{Wrapper: wrapper.Config{
 		BinaryPath: bin,
 		Stdout:     io.Discard,
 		// Tighter thresholds so the classifier picks up the clean
 		// exit quickly.
 		IdleQuiet:    100 * time.Millisecond,
 		IdleClassify: 300 * time.Millisecond,
-	}, RetryPolicy{})
+	}}, RetryPolicy{})
 	if err != nil {
 		t.Fatalf("runOnceDefault err: %v", err)
 	}

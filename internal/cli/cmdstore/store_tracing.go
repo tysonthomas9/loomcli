@@ -49,6 +49,7 @@ func WrapStoreWithTracing(inner store.Store) store.Store {
 		agentLeases:          &tracedAgentLeaseStore{inner: inner.AgentLeases()},
 		agentOwnershipLeases: &tracedAgentOwnershipLeaseStore{inner: inner.AgentOwnershipLeases()},
 		agentCommands:        &tracedAgentCommandStore{inner: inner.AgentCommands()},
+		workers:              &tracedWorkerStore{inner: inner.Workers()},
 		roles:                &tracedRoleStore{inner: inner.Roles()},
 		daemon:               &tracedDaemonStore{inner: inner.Daemon()},
 	}
@@ -66,6 +67,7 @@ type tracedStore struct {
 	agentLeases          *tracedAgentLeaseStore
 	agentOwnershipLeases *tracedAgentOwnershipLeaseStore
 	agentCommands        *tracedAgentCommandStore
+	workers              *tracedWorkerStore
 	roles                *tracedRoleStore
 	daemon               *tracedDaemonStore
 }
@@ -88,6 +90,7 @@ func (t *tracedStore) AgentOwnershipLeases() store.AgentOwnershipLeaseStore {
 func (t *tracedStore) AgentCommands() store.AgentCommandStore {
 	return t.agentCommands
 }
+func (t *tracedStore) Workers() store.WorkerStore       { return t.workers }
 func (t *tracedStore) Roles() store.RoleStore           { return t.roles }
 func (t *tracedStore) Daemon() store.DaemonProfileStore { return t.daemon }
 
@@ -747,4 +750,26 @@ func (t *tracedDaemonStore) Upsert(ctx context.Context, profile *domain.DaemonPr
 	out, err := t.inner.Upsert(ctx, profile)
 	finish(span, err)
 	return out, err
+}
+
+// --- WorkerStore ---
+
+type tracedWorkerStore struct{ inner store.WorkerStore }
+
+func (t *tracedWorkerStore) Heartbeat(ctx context.Context, ws, workerID string) error {
+	ctx, span := startStoreSpan(ctx, "Workers", "Heartbeat",
+		attribute.String("loom.workspace", ws),
+	)
+	err := t.inner.Heartbeat(ctx, ws, workerID)
+	finish(span, err)
+	return err
+}
+
+func (t *tracedWorkerStore) Deregister(ctx context.Context, ws, workerID string) error {
+	ctx, span := startStoreSpan(ctx, "Workers", "Deregister",
+		attribute.String("loom.workspace", ws),
+	)
+	err := t.inner.Deregister(ctx, ws, workerID)
+	finish(span, err)
+	return err
 }

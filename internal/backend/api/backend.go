@@ -100,6 +100,13 @@ func (b *APIBackend) workspaceBasePath() string {
 // doRequest executes an HTTP request against the workspace-scoped API and
 // parses the JSON envelope. Path must start with "/".
 func (b *APIBackend) doRequest(ctx context.Context, method, path string, body interface{}) (*apiResponse, int, error) {
+	return b.doRequestHeaders(ctx, method, path, body, nil)
+}
+
+// doRequestHeaders is doRequest with extra request headers (e.g. the
+// idempotency headers on create, which must travel out-of-band because
+// fleet-db's strict JSON decode rejects unknown body fields).
+func (b *APIBackend) doRequestHeaders(ctx context.Context, method, path string, body interface{}, headers map[string]string) (*apiResponse, int, error) {
 	fullURL := b.baseURL + b.workspaceBasePath() + path
 
 	var bodyReader io.Reader
@@ -117,6 +124,9 @@ func (b *APIBackend) doRequest(ctx context.Context, method, path string, body in
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json")
+	for k, v := range headers {
+		req.Header.Set(k, v)
+	}
 
 	resp, err := b.client.Do(req)
 	if err != nil {
@@ -138,7 +148,12 @@ func (b *APIBackend) doRequest(ctx context.Context, method, path string, body in
 
 // exec wraps doRequest with error classification.
 func (b *APIBackend) exec(ctx context.Context, op, method, path string, body interface{}) (*apiResponse, error) {
-	resp, statusCode, err := b.doRequest(ctx, method, path, body)
+	return b.execHeaders(ctx, op, method, path, body, nil)
+}
+
+// execHeaders is exec with extra request headers.
+func (b *APIBackend) execHeaders(ctx context.Context, op, method, path string, body interface{}, headers map[string]string) (*apiResponse, error) {
+	resp, statusCode, err := b.doRequestHeaders(ctx, method, path, body, headers)
 	if err != nil {
 		return nil, classifyTransportError(op, err)
 	}
@@ -311,7 +326,7 @@ func (b *APIBackend) SearchIssues(ctx context.Context, query string, limit int) 
 
 func (b *APIBackend) Create(ctx context.Context, params backend.CreateParams) (*backend.IssueData, error) {
 	req := createParamsToCreateRequest(params)
-	resp, err := b.exec(ctx, "Create", http.MethodPost, "/issues", req)
+	resp, err := b.execHeaders(ctx, "Create", http.MethodPost, "/issues", req, params.IdempotencyHeaders())
 	if err != nil {
 		return nil, err
 	}

@@ -27,30 +27,7 @@ func HandleCreateIssue(svc service.IssueService) http.HandlerFunc {
 			return
 		}
 
-		params := service.CreateIssueParams{
-			Title:              req.Title,
-			IssueType:          req.IssueType,
-			Priority:           req.Priority,
-			ID:                 req.ID,
-			Parent:             req.Parent,
-			Description:        req.Description,
-			Status:             req.Status,
-			Design:             req.Design,
-			AcceptanceCriteria: req.AcceptanceCriteria,
-			Notes:              req.Notes,
-			Assignee:           req.Assignee,
-			Owner:              req.Owner,
-			CreatedBy:          req.CreatedBy,
-			ExternalRef:        req.ExternalRef,
-			EstimatedMinutes:   req.EstimatedMinutes,
-			Labels:             req.Labels,
-			Dependencies:       req.Dependencies,
-			DueAt:              req.DueAt,
-			DeferUntil:         req.DeferUntil,
-			SourceRepo:         req.SourceRepo,
-		}
-
-		data, err := svc.CreateIssue(r.Context(), params)
+		data, err := svc.CreateIssue(r.Context(), createParamsFromRequest(r, &req))
 		if err != nil {
 			handler.HandleServiceError(w, err)
 			return
@@ -60,6 +37,37 @@ func HandleCreateIssue(svc service.IssueService) http.HandlerFunc {
 			Success: true,
 			Data:    data,
 		})
+	}
+}
+
+// createParamsFromRequest maps the decoded create request body plus the
+// idempotency headers onto service.CreateIssueParams. The idempotency values
+// are header-only end to end: fleet-db's strict JSON decode rejects unknown
+// body fields.
+func createParamsFromRequest(r *http.Request, req *IssueCreateRequest) service.CreateIssueParams {
+	return service.CreateIssueParams{
+		Title:              req.Title,
+		IssueType:          req.IssueType,
+		Priority:           req.Priority,
+		ID:                 req.ID,
+		Parent:             req.Parent,
+		Description:        req.Description,
+		Status:             req.Status,
+		Design:             req.Design,
+		AcceptanceCriteria: req.AcceptanceCriteria,
+		Notes:              req.Notes,
+		Assignee:           req.Assignee,
+		Owner:              req.Owner,
+		CreatedBy:          req.CreatedBy,
+		ExternalRef:        req.ExternalRef,
+		EstimatedMinutes:   req.EstimatedMinutes,
+		Labels:             req.Labels,
+		Dependencies:       req.Dependencies,
+		DueAt:              req.DueAt,
+		DeferUntil:         req.DeferUntil,
+		SourceRepo:         req.SourceRepo,
+		IdempotencyKey:     r.Header.Get("X-Idempotency-Key"),
+		Force:              r.Header.Get("X-Idempotency-Force") == "true",
 	}
 }
 

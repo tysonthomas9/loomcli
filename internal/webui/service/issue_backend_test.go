@@ -1080,3 +1080,62 @@ func TestNewIssueService_NoBackend_ListEvents_Unavailable(t *testing.T) {
 		t.Fatalf("expected ErrUnavailable from no-backend constructor, got %v", err)
 	}
 }
+
+func TestCloseIssue_Backend_AlreadyClosed_IsQuietNoOp(t *testing.T) {
+	// Old fleet-db surfaces a doubled close as a conflict; serve must treat
+	// "already closed" as success (the desired state is true), not an
+	// ERROR-level failure. New fleet-db returns 200 and never hits this.
+	fb := &fakeIssueBackend{
+		closeErr: backend.ErrConflict("Close", "issue is already closed"),
+	}
+	svc := newServiceWithFake(fb)
+
+	raw, err := svc.CloseIssue(context.Background(), CloseIssueParams{IssueID: "i-1"})
+	if err != nil {
+		t.Fatalf("already-closed close must be a no-op success, got %v", err)
+	}
+	var got map[string]any
+	if err := json.Unmarshal(raw, &got); err != nil {
+		t.Fatalf("unmarshal close response: %v", err)
+	}
+	closedMap, ok := got["closed"].(map[string]any)
+	if !ok || closedMap["id"] != "i-1" {
+		t.Errorf("expected synthetic closed result for i-1, got %v", got["closed"])
+	}
+}
+
+func TestCloseIssue_Backend_BlockerConflict_StillFails(t *testing.T) {
+	fb := &fakeIssueBackend{
+		closeErr: backend.ErrConflict("Close", "issue has open blockers"),
+	}
+	svc := newServiceWithFake(fb)
+	_, err := svc.CloseIssue(context.Background(), CloseIssueParams{IssueID: "i-1"})
+	var sErr *ServiceError
+	if !errors.As(err, &sErr) || sErr.Kind != KindConflict {
+		t.Fatalf("blocker conflicts must keep failing as conflicts, got %v", err)
+	}
+}
+
+func TestCreateIssue_Backend_ForwardsIdempotency(t *testing.T) {
+	now := time.Now().UTC()
+	fb := &fakeIssueBackend{
+		createResult: &backend.IssueData{ID: "i-9", Title: "t", Status: "open", CreatedAt: now, UpdatedAt: now},
+	}
+	svc := newServiceWithFake(fb)
+
+	_, err := svc.CreateIssue(context.Background(), CreateIssueParams{
+		Title:          "t",
+		IssueType:      "task",
+		IdempotencyKey: "key-xyz",
+		Force:          true,
+	})
+	if err != nil {
+		t.Fatalf("CreateIssue: %v", err)
+	}
+	if len(fb.createParams) != 1 {
+		t.Fatalf("expected one backend create, got %d", len(fb.createParams))
+	}
+	if fb.createParams[0].IdempotencyKey != "key-xyz" || !fb.createParams[0].Force {
+		t.Errorf("idempotency not forwarded to backend.CreateParams: %+v", fb.createParams[0])
+	}
+}

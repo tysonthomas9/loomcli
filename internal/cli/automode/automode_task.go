@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/agenterr"
+	"github.com/tysonthomas9/loomcli/internal/agentpolicy"
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/backends"
 	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
@@ -79,12 +80,16 @@ func handleAutoTaskError(ctx *autoLoopCtx, ae *agenterr.AgentError, rawErr error
 	failedTaskID := readFailedTaskID(ctx)
 	emitTaskFailedEvent(ctx, ae, rawErr, failedTaskID)
 
-	// Fatal errors (auth, billing) and non-retryable specifics: exit immediately.
-	// These never retry, so per-task tracking would only accumulate stale state.
-	if ae.IsFatal() || ae.Class == agenterr.ModelNotFound {
+	d := agentpolicy.Decide(ae.Class)
+
+	// Terminal decisions exit immediately — fatal (auth/billing), fast-fail
+	// (deterministic, e.g. context overflow), and failover (auto-mode has no
+	// fallback backend, so a wrong model is terminal here). These never
+	// retry, so per-task tracking would only accumulate stale state.
+	if d.Decision == agentpolicy.StopFatal || d.Decision == agentpolicy.FastFail || d.Decision == agentpolicy.Failover {
 		return exitWithReason(ctx, fmt.Sprintf("fatal error: %s", ae.Message))
 	}
-	if ae.Class == agenterr.NoWork {
+	if ae.Class.Is(agenterr.NoWorkOutcome) {
 		return exitWithReason(ctx, "no work available")
 	}
 
@@ -98,11 +103,12 @@ func handleAutoTaskError(ctx *autoLoopCtx, ae *agenterr.AgentError, rawErr error
 		return true
 	}
 
-	// Rate limits are global API throttling, not per-task failures. Route
-	// them before per-task tracking so a sustained rate limit against a
-	// single task doesn't drain its stuck-task budget — and so the rate-
-	// limit breaker and ConsecutiveRateLimits counter record every hit.
-	if ae.Class == agenterr.RateLimited {
+	// Rate limits are global API throttling, not per-task failures
+	// (RetryUncounted; NoWork — the only other uncounted outcome — exited
+	// above). Route them before per-task tracking so a sustained rate limit
+	// against a single task doesn't drain its stuck-task budget — and so the
+	// rate-limit breaker and ConsecutiveRateLimits counter record every hit.
+	if d.Decision == agentpolicy.RetryUncounted {
 		return handleRateLimitError(ctx, ae, shutdown)
 	}
 
@@ -119,13 +125,15 @@ func handleAutoTaskError(ctx *autoLoopCtx, ae *agenterr.AgentError, rawErr error
 		return skipStuckTask(ctx, failedTaskID, rawErr)
 	}
 
-	// Retryable transient errors: exponential backoff.
-	if ae.IsRetryable() {
-		return handleTransientError(ctx, shutdown)
+	// Park-decision outcomes (backend binary missing): fixed-interval wait
+	// for the binary to return, 3-error exit.
+	if d.Decision == agentpolicy.Park {
+		return handleDefaultError(ctx, shutdown)
 	}
 
-	// Default: Unknown, ContextOverflow — use fixed interval, 3-error exit.
-	return handleDefaultError(ctx, shutdown)
+	// Counted retries (timeout/transient/unknown/spawn/lock-conflict):
+	// exponential backoff, 3-error exit.
+	return handleTransientError(ctx, shutdown)
 }
 
 // readFailedTaskID returns the TaskID recorded in the lock file, or "" if no
