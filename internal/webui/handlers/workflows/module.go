@@ -15,19 +15,18 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/driver"
 	"github.com/tysonthomas9/loomcli/internal/store"
+	workflowdefs "github.com/tysonthomas9/loomcli/internal/workflows"
 )
 
 const maxRunPayloadBytes = 4 << 20
 
 type Module struct {
-	store     store.Store
-	builtinMu sync.Mutex
+	store store.Store
 }
 
 func NewModule(st store.Store) *Module {
@@ -277,26 +276,7 @@ func (m *Module) resolveWorkflowDriverID(ctx context.Context, ws, name string) (
 }
 
 func (m *Module) ensureBuiltinWorkflow(ctx context.Context, ws, name string) error {
-	spec, ok := builtinWorkflows[name]
-	if !ok {
-		return domain.ErrNotFound
-	}
-
-	m.builtinMu.Lock()
-	defer m.builtinMu.Unlock()
-
-	if _, err := resolveDriverID(ctx, m.store, ws, name); err == nil {
-		return nil
-	} else if !errors.Is(err, domain.ErrNotFound) {
-		return err
-	}
-
-	digest := sourceDigest(spec.files)
-	sourceRef := "builtin://workflows/" + name + "/versions/" + digest
-	if _, _, err := m.buildAndRegisterWithSource(ctx, ws, name, spec.entrypoint, spec.files, true, sourceRef, digest, "system"); err != nil {
-		return fmt.Errorf("register built-in workflow %q: %w", name, err)
-	}
-	return nil
+	return workflowdefs.EnsureBuiltinWorkflow(ctx, m.store, ws, name)
 }
 
 func (m *Module) getRun(w http.ResponseWriter, r *http.Request) {

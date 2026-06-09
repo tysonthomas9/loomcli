@@ -1,29 +1,27 @@
 // Package epic provides the `loom epic` command tree. The first subcommand -
-// `loom epic run` - is a foreground reconcile loop that drives an epic to
-// completion by spawning one ephemeral worker per ready task. Lead/orchestrator
-// AIs invoke this from chat ("take the auth epic") to fan out work; humans can
-// also run it directly. Workers spawned by this command inherit the lead's
-// LOOM_ORCHESTRATOR_SESSION_ID env var so the UI groups them under their lead.
+// `loom epic run` - queues the built-in epic-runner workflow.
 package epic
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"os/signal"
 	"strings"
 	"syscall"
-	"time"
 
 	"github.com/spf13/cobra"
 
-	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
-	"github.com/tysonthomas9/loomcli/internal/epicrunner"
+	"github.com/tysonthomas9/loomcli/internal/domain"
+	driverpkg "github.com/tysonthomas9/loomcli/internal/driver"
 	"github.com/tysonthomas9/loomcli/internal/store"
+	workflowdefs "github.com/tysonthomas9/loomcli/internal/workflows"
 )
 
 const (
@@ -40,6 +38,9 @@ var (
 	runDryRun          bool
 	runNodeID          string
 	runLead            string
+	runWorkflow        string
+	runDetach          bool
+	runProviderProfile string
 )
 
 var epicCmd = &cobra.Command{
@@ -49,29 +50,18 @@ var epicCmd = &cobra.Command{
 	Long: `Group commands for working with an epic and its child tasks.
 
 Today this is a single subcommand:
-  loom epic run --parent <epic-id>   drain the epic by fanning out ephemeral workers`,
+  loom epic run --parent <epic-id>   drain the epic by running the epic-runner workflow`,
 }
 
 var epicRunCmd = &cobra.Command{
 	Use:   "run",
-	Short: "Drain an epic by spawning one ephemeral worker per ready task",
-	Long: `Reconcile loop that drives an epic to completion.
+	Short: "Drain an epic by running the epic-runner workflow",
+	Long: `Queue or run the epic-runner workflow for an epic.
 
-Every interval the runner queries the issue backend for tasks under the epic
-that are ready (have no open blockers). For each ready task that does not
-already have a worker, the runner creates an ephemeral agent pinned to that
-task. As tasks close, downstream tasks become ready and the runner spawns
-workers for them on the next tick. The loop exits when no ready, in-progress,
-or blocked work remains under the epic.
-
-This command runs in the foreground. Workers it spawns are independent - if
-this process exits early they keep running and the daemon supervises them
-normally. Re-running the command with the same --parent picks up where it
-left off (worker names are deterministic per task ID, so duplicates are no-ops).
-
-Worker attribution: if LOOM_ORCHESTRATOR_SESSION_ID is set in the environment
-(loom lead injects it), spawned workers are attributed to that orchestrator
-session. The UI uses this to group "the workers Nova is coordinating".`,
+The command records a durable DriverRun for a workflow. Lead assignment,
+preflight, and child-task orchestration are handled by the workflow itself. By
+default the built-in epic-runner workflow is used; pass --workflow to run
+another registered workflow with the same payload shape.`,
 	RunE: runEpicRun,
 }
 
@@ -84,6 +74,9 @@ func init() {
 	epicRunCmd.Flags().StringVar(&runRole, "role", "task", "Role to spawn workers under")
 	epicRunCmd.Flags().StringVar(&runNodeID, "node-id", "", "Daemon node ID to run spawned workers on (default: the single active local node)")
 	epicRunCmd.Flags().StringVar(&runLead, "lead", "", "Lead agent running this epic (default: $LOOM_AGENT_NAME when set)")
+	epicRunCmd.Flags().StringVar(&runWorkflow, "workflow", workflowdefs.BuiltinEpicRunnerWorkflowName, "Workflow name to run")
+	epicRunCmd.Flags().StringVar(&runProviderProfile, "provider-profile", "flue-local", "Provider profile requested for child task runs")
+	epicRunCmd.Flags().BoolVar(&runDetach, "detach", false, "Queue the workflow run and return without executing it in this process")
 	epicRunCmd.Flags().BoolVar(&runDryRun, "dry-run", false, "Print what would be spawned but don't actually create agents")
 
 	epicCmd.AddCommand(epicRunCmd)
@@ -109,17 +102,41 @@ func runEpicRun(cmd *cobra.Command, _ []string) error {
 		return fmt.Errorf("resolve workspace: %w", err)
 	}
 
-	ib := cli.DefaultIssueBackend()
-	if ib == nil {
-		return errors.New("no issue backend available")
-	}
-
-	r, err := newRunnerFromFlags(ctx, handle.Store, ib, ws)
+	payload, err := workflowPayload()
 	if err != nil {
 		return err
 	}
-	r.PrintHeader()
-	return r.RunLoop(ctx)
+	workflowName := epicRunWorkflow()
+	if runDryRun {
+		printDryRunPayload(payload)
+		if workflowName != workflowdefs.BuiltinEpicRunnerWorkflowName {
+			return nil
+		}
+	}
+
+	if err := ensureWorkflow(ctx, handle.Store, ws, workflowName); err != nil {
+		return err
+	}
+	driverID, err := workflowdefs.ResolveDriverID(ctx, handle.Store, ws, workflowName)
+	if err != nil {
+		return fmt.Errorf("resolve workflow %q: %w", workflowName, err)
+	}
+	run, err := driverpkg.CreateDriverRun(ctx, handle.Store, driverpkg.RunOptions{
+		WorkspaceKey: ws,
+		DriverID:     driverID,
+		EpicID:       runParent,
+		SourceKind:   "cli",
+		SourceRef:    "loom epic run",
+		Payload:      payload,
+	})
+	if err != nil {
+		return fmt.Errorf("create epic workflow run: %w", err)
+	}
+	fmt.Printf("[epic-run] queued workflow %s run %s for epic %s\n", workflowName, run.RunID, runParent)
+	if runDetach && !runDryRun {
+		return nil
+	}
+	return executeWorkflowRun(ctx, handle.Store, ws, run.RunID)
 }
 
 func validateEpicRunFlags() error {
@@ -139,37 +156,89 @@ func epicRunWorkerPrefix() string {
 	if runWorkerPrefix != "" {
 		return runWorkerPrefix
 	}
-	return epicrunner.SanitizePrefix(runParent)
+	return sanitizePrefix(runParent)
 }
 
-func newRunnerFromFlags(ctx context.Context, st store.Store, ib backend.IssueBackend, ws string) (*epicrunner.Runner, error) {
-	orchestratorID := strings.TrimSpace(os.Getenv(envOrchestratorSessionID))
-	r, result, err := epicrunner.NewRunner(ctx, epicrunner.RunnerConfig{
-		Store:                 st,
-		IssueBackend:          ib,
-		WorkspaceKey:          ws,
-		EpicID:                runParent,
-		LeadName:              resolveLeadName(runLead),
-		Role:                  runRole,
-		Backend:               strings.TrimSpace(cli.GetBackendName()),
-		WorkerPrefix:          epicRunWorkerPrefix(),
-		MaxConcurrency:        runMaxConcurrency,
-		Interval:              time.Duration(runIntervalSeconds) * time.Second,
-		OrchestratorSessionID: orchestratorID,
-		TargetNodeID:          runNodeID,
-		DryRun:                runDryRun,
-		MutateLead:            !runDryRun,
-		PrepareWorktrees:      true,
-		Out:                   os.Stdout,
-		ErrOut:                os.Stderr,
-	})
+func workflowPayload() (json.RawMessage, error) {
+	payload := map[string]any{
+		"epicId":                runParent,
+		"leadName":              resolveLeadName(runLead),
+		"orchestratorSessionId": strings.TrimSpace(os.Getenv(envOrchestratorSessionID)),
+		"maxConcurrency":        runMaxConcurrency,
+		"workerPrefix":          epicRunWorkerPrefix(),
+		"intervalSeconds":       runIntervalSeconds,
+		"role":                  runRole,
+		"providerProfile":       runProviderProfile,
+		"requestedBy":           "cli",
+		"dryRun":                runDryRun,
+	}
+	for key, value := range payload {
+		if text, ok := value.(string); ok && strings.TrimSpace(text) == "" {
+			delete(payload, key)
+		}
+	}
+	if runNodeID != "" {
+		payload["targetNodeId"] = runNodeID
+	}
+	body, err := json.Marshal(payload)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("encode workflow payload: %w", err)
 	}
-	if runDryRun && result != nil && result.Lead != nil && result.Lead.Parent == "" {
-		fmt.Printf("[epic-run] DRY-RUN would assign lead %s to epic %s\n", result.LeadName, runParent)
+	return body, nil
+}
+
+func printDryRunPayload(payload json.RawMessage) {
+	var pretty bytes.Buffer
+	if err := json.Indent(&pretty, payload, "", "  "); err != nil {
+		fmt.Printf("[epic-run] DRY-RUN would queue workflow %s with payload %s\n", epicRunWorkflow(), payload)
+		return
 	}
-	return r, nil
+	fmt.Printf("[epic-run] DRY-RUN would queue workflow %s with payload:\n%s\n", epicRunWorkflow(), pretty.String())
+}
+
+func ensureWorkflow(ctx context.Context, st store.Store, ws, workflowName string) error {
+	if _, err := workflowdefs.ResolveDriverID(ctx, st, ws, workflowName); err == nil {
+		return nil
+	} else if workflowName != workflowdefs.BuiltinEpicRunnerWorkflowName {
+		return fmt.Errorf("resolve workflow %q: %w", workflowName, err)
+	}
+	return workflowdefs.EnsureBuiltinWorkflow(ctx, st, ws, workflowName)
+}
+
+func executeWorkflowRun(ctx context.Context, st store.Store, ws, runID string) error {
+	workDir, err := os.Getwd()
+	if err != nil {
+		return fmt.Errorf("resolve work dir: %w", err)
+	}
+	result, err := (&driverpkg.Executor{
+		Store:             st,
+		WorkspaceKey:      ws,
+		RunID:             runID,
+		WorkDir:           workDir,
+		NodeID:            runNodeID,
+		HeartbeatInterval: -1,
+	}).RunOnce(ctx)
+	if err != nil {
+		return fmt.Errorf("execute workflow run %s: %w", runID, err)
+	}
+	if result == nil || result.Final == nil {
+		return fmt.Errorf("execute workflow run %s returned no final state", runID)
+	}
+	fmt.Printf("[epic-run] workflow run %s finished: %s\n", runID, result.Final.Status)
+	if result.Final.Summary != "" {
+		fmt.Printf("[epic-run] %s\n", result.Final.Summary)
+	}
+	if result.Final.Status == domain.DriverRunFailed {
+		return fmt.Errorf("epic workflow run %s failed: %s", runID, result.Final.Summary)
+	}
+	return nil
+}
+
+func epicRunWorkflow() string {
+	if workflow := strings.TrimSpace(runWorkflow); workflow != "" {
+		return workflow
+	}
+	return workflowdefs.BuiltinEpicRunnerWorkflowName
 }
 
 func resolveLeadName(flagValue string) string {
@@ -177,6 +246,28 @@ func resolveLeadName(flagValue string) string {
 		return lead
 	}
 	return strings.TrimSpace(os.Getenv(envAgentName))
+}
+
+func sanitizePrefix(value string) string {
+	value = strings.ToLower(strings.TrimSpace(value))
+	var b strings.Builder
+	lastDash := false
+	for _, r := range value {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
+			b.WriteRune(r)
+			lastDash = false
+			continue
+		}
+		if b.Len() > 0 && !lastDash {
+			b.WriteByte('-')
+			lastDash = true
+		}
+	}
+	out := strings.Trim(b.String(), "-")
+	if out == "" {
+		return "epic"
+	}
+	return out
 }
 
 // signalContext returns a context cancelled by Ctrl-C / SIGTERM so the loop

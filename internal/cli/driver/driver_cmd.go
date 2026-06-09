@@ -17,6 +17,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	driverpkg "github.com/tysonthomas9/loomcli/internal/driver"
+	"github.com/tysonthomas9/loomcli/internal/epicrunner"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
@@ -86,6 +87,56 @@ var (
 	driverClaimReadyActor        string
 	driverClaimReadyLimit        int
 	driverClaimReadyJSON         bool
+
+	driverEpicGetWorkspaceKey string
+	driverEpicGetDriverRunID  string
+	driverEpicGetNodeID       string
+	driverEpicGetLeaseID      string
+	driverEpicGetFence        int64
+	driverEpicGetEpicID       string
+	driverEpicGetJSON         bool
+
+	driverEpicSnapshotWorkspaceKey string
+	driverEpicSnapshotDriverRunID  string
+	driverEpicSnapshotNodeID       string
+	driverEpicSnapshotLeaseID      string
+	driverEpicSnapshotFence        int64
+	driverEpicSnapshotEpicID       string
+	driverEpicSnapshotJSON         bool
+
+	driverListAgentsWorkspaceKey string
+	driverListAgentsDriverRunID  string
+	driverListAgentsNodeID       string
+	driverListAgentsLeaseID      string
+	driverListAgentsFence        int64
+	driverListAgentsJSON         bool
+
+	driverAgentSessionWorkspaceKey string
+	driverAgentSessionDriverRunID  string
+	driverAgentSessionNodeID       string
+	driverAgentSessionLeaseID      string
+	driverAgentSessionFence        int64
+	driverAgentSessionName         string
+	driverAgentSessionJSON         bool
+
+	driverUpdateAgentParentWorkspaceKey string
+	driverUpdateAgentParentDriverRunID  string
+	driverUpdateAgentParentNodeID       string
+	driverUpdateAgentParentLeaseID      string
+	driverUpdateAgentParentFence        int64
+	driverUpdateAgentParentName         string
+	driverUpdateAgentParentParent       string
+	driverUpdateAgentParentExpectParent string
+	driverUpdateAgentParentJSON         bool
+
+	driverActiveTaskRunsWorkspaceKey string
+	driverActiveTaskRunsDriverRunID  string
+	driverActiveTaskRunsNodeID       string
+	driverActiveTaskRunsLeaseID      string
+	driverActiveTaskRunsFence        int64
+	driverActiveTaskRunsEpicID       string
+	driverActiveTaskRunsLimit        int
+	driverActiveTaskRunsJSON         bool
 
 	driverCompleteTaskWorkspaceKey string
 	driverCompleteTaskDriverRunID  string
@@ -182,6 +233,54 @@ var driverClaimReadyCmd = &cobra.Command{
 	RunE:   runDriverClaimReady,
 }
 
+var driverEpicGetCmd = &cobra.Command{
+	Use:    "epic-get",
+	Short:  "Read epic issue detail for a driver runtime",
+	Hidden: true,
+	Args:   cobra.NoArgs,
+	RunE:   runDriverEpicGet,
+}
+
+var driverEpicSnapshotCmd = &cobra.Command{
+	Use:    "epic-snapshot",
+	Short:  "Snapshot epic child task state for a driver runtime",
+	Hidden: true,
+	Args:   cobra.NoArgs,
+	RunE:   runDriverEpicSnapshot,
+}
+
+var driverListAgentsCmd = &cobra.Command{
+	Use:    "list-agents",
+	Short:  "List agents for a driver runtime",
+	Hidden: true,
+	Args:   cobra.NoArgs,
+	RunE:   runDriverListAgents,
+}
+
+var driverAgentOrchestrationSessionCmd = &cobra.Command{
+	Use:    "agent-orchestration-session",
+	Short:  "Resolve the active orchestration session for an agent",
+	Hidden: true,
+	Args:   cobra.NoArgs,
+	RunE:   runDriverAgentOrchestrationSession,
+}
+
+var driverUpdateAgentParentCmd = &cobra.Command{
+	Use:    "update-agent-parent",
+	Short:  "Update an agent parent for a driver runtime",
+	Hidden: true,
+	Args:   cobra.NoArgs,
+	RunE:   runDriverUpdateAgentParent,
+}
+
+var driverActiveTaskRunsCmd = &cobra.Command{
+	Use:    "active-task-runs",
+	Short:  "List active child task runs for a driver runtime",
+	Hidden: true,
+	Args:   cobra.NoArgs,
+	RunE:   runDriverActiveTaskRuns,
+}
+
 var driverCompleteTaskCmd = &cobra.Command{
 	Use:    "complete-task",
 	Short:  "Complete a claimed FleetDB task for a driver runtime",
@@ -276,6 +375,59 @@ func init() {
 	driverClaimReadyCmd.Flags().IntVar(&driverClaimReadyLimit, "limit", 100, "Maximum ready tasks to inspect")
 	driverClaimReadyCmd.Flags().BoolVar(&driverClaimReadyJSON, "json", false, "JSON output")
 
+	driverEpicGetCmd.Flags().StringVar(&driverEpicGetWorkspaceKey, "workspace-key", "", "Workspace key (default: LOOM_DRIVER_WORKSPACE or active workspace)")
+	driverEpicGetCmd.Flags().StringVar(&driverEpicGetDriverRunID, "driver-run-id", "", "Parent DriverRun ID (default: LOOM_DRIVER_RUN_ID)")
+	driverEpicGetCmd.Flags().StringVar(&driverEpicGetNodeID, "node-id", "", "Parent DriverRun node ID")
+	driverEpicGetCmd.Flags().StringVar(&driverEpicGetLeaseID, "lease-id", "", "Parent DriverRun lease ID")
+	driverEpicGetCmd.Flags().Int64Var(&driverEpicGetFence, "fencing-token", 0, "Parent DriverRun fencing token")
+	driverEpicGetCmd.Flags().StringVar(&driverEpicGetEpicID, "epic-id", "", "Epic ID to read (default: parent DriverRun epic)")
+	driverEpicGetCmd.Flags().BoolVar(&driverEpicGetJSON, "json", false, "JSON output")
+
+	driverEpicSnapshotCmd.Flags().StringVar(&driverEpicSnapshotWorkspaceKey, "workspace-key", "", "Workspace key (default: LOOM_DRIVER_WORKSPACE or active workspace)")
+	driverEpicSnapshotCmd.Flags().StringVar(&driverEpicSnapshotDriverRunID, "driver-run-id", "", "Parent DriverRun ID (default: LOOM_DRIVER_RUN_ID)")
+	driverEpicSnapshotCmd.Flags().StringVar(&driverEpicSnapshotNodeID, "node-id", "", "Parent DriverRun node ID")
+	driverEpicSnapshotCmd.Flags().StringVar(&driverEpicSnapshotLeaseID, "lease-id", "", "Parent DriverRun lease ID")
+	driverEpicSnapshotCmd.Flags().Int64Var(&driverEpicSnapshotFence, "fencing-token", 0, "Parent DriverRun fencing token")
+	driverEpicSnapshotCmd.Flags().StringVar(&driverEpicSnapshotEpicID, "epic-id", "", "Epic ID to snapshot (default: parent DriverRun epic)")
+	driverEpicSnapshotCmd.Flags().BoolVar(&driverEpicSnapshotJSON, "json", false, "JSON output")
+
+	driverListAgentsCmd.Flags().StringVar(&driverListAgentsWorkspaceKey, "workspace-key", "", "Workspace key (default: LOOM_DRIVER_WORKSPACE or active workspace)")
+	driverListAgentsCmd.Flags().StringVar(&driverListAgentsDriverRunID, "driver-run-id", "", "Parent DriverRun ID (default: LOOM_DRIVER_RUN_ID)")
+	driverListAgentsCmd.Flags().StringVar(&driverListAgentsNodeID, "node-id", "", "Parent DriverRun node ID")
+	driverListAgentsCmd.Flags().StringVar(&driverListAgentsLeaseID, "lease-id", "", "Parent DriverRun lease ID")
+	driverListAgentsCmd.Flags().Int64Var(&driverListAgentsFence, "fencing-token", 0, "Parent DriverRun fencing token")
+	driverListAgentsCmd.Flags().BoolVar(&driverListAgentsJSON, "json", false, "JSON output")
+
+	driverAgentOrchestrationSessionCmd.Flags().StringVar(&driverAgentSessionWorkspaceKey, "workspace-key", "", "Workspace key (default: LOOM_DRIVER_WORKSPACE or active workspace)")
+	driverAgentOrchestrationSessionCmd.Flags().StringVar(&driverAgentSessionDriverRunID, "driver-run-id", "", "Parent DriverRun ID (default: LOOM_DRIVER_RUN_ID)")
+	driverAgentOrchestrationSessionCmd.Flags().StringVar(&driverAgentSessionNodeID, "node-id", "", "Parent DriverRun node ID")
+	driverAgentOrchestrationSessionCmd.Flags().StringVar(&driverAgentSessionLeaseID, "lease-id", "", "Parent DriverRun lease ID")
+	driverAgentOrchestrationSessionCmd.Flags().Int64Var(&driverAgentSessionFence, "fencing-token", 0, "Parent DriverRun fencing token")
+	driverAgentOrchestrationSessionCmd.Flags().StringVar(&driverAgentSessionName, "agent", "", "Agent name")
+	driverAgentOrchestrationSessionCmd.Flags().BoolVar(&driverAgentSessionJSON, "json", false, "JSON output")
+	_ = driverAgentOrchestrationSessionCmd.MarkFlagRequired("agent")
+
+	driverUpdateAgentParentCmd.Flags().StringVar(&driverUpdateAgentParentWorkspaceKey, "workspace-key", "", "Workspace key (default: LOOM_DRIVER_WORKSPACE or active workspace)")
+	driverUpdateAgentParentCmd.Flags().StringVar(&driverUpdateAgentParentDriverRunID, "driver-run-id", "", "Parent DriverRun ID (default: LOOM_DRIVER_RUN_ID)")
+	driverUpdateAgentParentCmd.Flags().StringVar(&driverUpdateAgentParentNodeID, "node-id", "", "Parent DriverRun node ID")
+	driverUpdateAgentParentCmd.Flags().StringVar(&driverUpdateAgentParentLeaseID, "lease-id", "", "Parent DriverRun lease ID")
+	driverUpdateAgentParentCmd.Flags().Int64Var(&driverUpdateAgentParentFence, "fencing-token", 0, "Parent DriverRun fencing token")
+	driverUpdateAgentParentCmd.Flags().StringVar(&driverUpdateAgentParentName, "agent", "", "Agent name")
+	driverUpdateAgentParentCmd.Flags().StringVar(&driverUpdateAgentParentParent, "parent", "", "New parent epic ID")
+	driverUpdateAgentParentCmd.Flags().StringVar(&driverUpdateAgentParentExpectParent, "expect-parent", "", "Expected current parent before update")
+	driverUpdateAgentParentCmd.Flags().BoolVar(&driverUpdateAgentParentJSON, "json", false, "JSON output")
+	_ = driverUpdateAgentParentCmd.MarkFlagRequired("agent")
+	_ = driverUpdateAgentParentCmd.MarkFlagRequired("parent")
+
+	driverActiveTaskRunsCmd.Flags().StringVar(&driverActiveTaskRunsWorkspaceKey, "workspace-key", "", "Workspace key (default: LOOM_DRIVER_WORKSPACE or active workspace)")
+	driverActiveTaskRunsCmd.Flags().StringVar(&driverActiveTaskRunsDriverRunID, "driver-run-id", "", "Parent DriverRun ID (default: LOOM_DRIVER_RUN_ID)")
+	driverActiveTaskRunsCmd.Flags().StringVar(&driverActiveTaskRunsNodeID, "node-id", "", "Parent DriverRun node ID")
+	driverActiveTaskRunsCmd.Flags().StringVar(&driverActiveTaskRunsLeaseID, "lease-id", "", "Parent DriverRun lease ID")
+	driverActiveTaskRunsCmd.Flags().Int64Var(&driverActiveTaskRunsFence, "fencing-token", 0, "Parent DriverRun fencing token")
+	driverActiveTaskRunsCmd.Flags().StringVar(&driverActiveTaskRunsEpicID, "epic-id", "", "Epic ID metadata (default: parent DriverRun epic)")
+	driverActiveTaskRunsCmd.Flags().IntVar(&driverActiveTaskRunsLimit, "limit", 100, "Maximum active task runs to return")
+	driverActiveTaskRunsCmd.Flags().BoolVar(&driverActiveTaskRunsJSON, "json", false, "JSON output")
+
 	driverCompleteTaskCmd.Flags().StringVar(&driverCompleteTaskWorkspaceKey, "workspace-key", "", "Workspace key (default: LOOM_DRIVER_WORKSPACE or active workspace)")
 	driverCompleteTaskCmd.Flags().StringVar(&driverCompleteTaskDriverRunID, "driver-run-id", "", "Parent DriverRun ID (default: LOOM_DRIVER_RUN_ID)")
 	driverCompleteTaskCmd.Flags().StringVar(&driverCompleteTaskNodeID, "node-id", "", "Parent DriverRun node ID")
@@ -313,7 +465,7 @@ func init() {
 	driverRecoverStaleTasksCmd.Flags().StringVar(&driverRecoverStaleErrorMessage, "error-message", "task run heartbeat is stale", "Error message recorded on recovered task runs")
 	driverRecoverStaleTasksCmd.Flags().BoolVar(&driverRecoverStaleJSON, "json", false, "JSON output")
 
-	driverCmd.AddCommand(driverRegisterCmd, driverRunCmd, driverExecTaskCmd, driverWorkTaskRunCmd, driverClaimReadyCmd, driverCompleteTaskCmd, driverReleaseTaskCmd, driverRecoverStaleTasksCmd)
+	driverCmd.AddCommand(driverRegisterCmd, driverRunCmd, driverExecTaskCmd, driverWorkTaskRunCmd, driverClaimReadyCmd, driverEpicGetCmd, driverEpicSnapshotCmd, driverListAgentsCmd, driverAgentOrchestrationSessionCmd, driverUpdateAgentParentCmd, driverActiveTaskRunsCmd, driverCompleteTaskCmd, driverReleaseTaskCmd, driverRecoverStaleTasksCmd)
 	cli.RegisterCommand(driverCmd)
 }
 
@@ -530,6 +682,164 @@ func runDriverClaimReady(_ *cobra.Command, _ []string) error {
 			return nil
 		}
 		fmt.Printf("Claimed task %s for %s\n", claimed.ID, actor)
+		return nil
+	})
+}
+
+func runDriverEpicGet(_ *cobra.Command, _ []string) error {
+	return cmdstore.WithStore(func(ctx context.Context, h *bootstrap.StoreHandle) error {
+		ws, parent, err := resolveRunningDriverRun(ctx, h, driverEpicGetWorkspaceKey, driverEpicGetDriverRunID, driverEpicGetNodeID, driverEpicGetLeaseID, driverEpicGetFence)
+		if err != nil {
+			return err
+		}
+		epicID := firstNonEmpty(driverEpicGetEpicID, parent.EpicID, driverRunPayloadString(parent.Payload, "epicId"))
+		if epicID == "" {
+			return fmt.Errorf("epic id required: %w", domain.ErrInvalid)
+		}
+		issueBackend, err := newDriverIssueBackend(h, ws, driverRunActor(parent.RunID))
+		if err != nil {
+			return err
+		}
+		epic, err := issueBackend.Get(ctx, epicID)
+		if err != nil {
+			return fmt.Errorf("get epic: %w", err)
+		}
+		if driverEpicGetJSON {
+			return cmdstore.WriteJSON(epic)
+		}
+		if epic == nil {
+			fmt.Printf("Epic %s not found\n", epicID)
+			return nil
+		}
+		fmt.Printf("Epic %s: %s\n", epic.ID, epic.Title)
+		return nil
+	})
+}
+
+func runDriverEpicSnapshot(_ *cobra.Command, _ []string) error {
+	return cmdstore.WithStore(func(ctx context.Context, h *bootstrap.StoreHandle) error {
+		ws, parent, err := resolveRunningDriverRun(ctx, h, driverEpicSnapshotWorkspaceKey, driverEpicSnapshotDriverRunID, driverEpicSnapshotNodeID, driverEpicSnapshotLeaseID, driverEpicSnapshotFence)
+		if err != nil {
+			return err
+		}
+		epicID := firstNonEmpty(driverEpicSnapshotEpicID, parent.EpicID, driverRunPayloadString(parent.Payload, "epicId"))
+		issueBackend, err := newDriverIssueBackend(h, ws, driverRunActor(parent.RunID))
+		if err != nil {
+			return err
+		}
+		snapshot, err := driverpkg.LoadEpicSnapshot(ctx, issueBackend, driverpkg.EpicSnapshotOptions{EpicID: epicID})
+		if err != nil {
+			return fmt.Errorf("snapshot epic: %w", err)
+		}
+		if driverEpicSnapshotJSON {
+			return cmdstore.WriteJSON(snapshot)
+		}
+		fmt.Printf("Epic %s: %d ready, %d blocked, %d open child task(s)\n", snapshot.EpicID, snapshot.ReadyCount, snapshot.BlockedCount, snapshot.OpenChildrenCount)
+		return nil
+	})
+}
+
+func runDriverListAgents(_ *cobra.Command, _ []string) error {
+	return cmdstore.WithStore(func(ctx context.Context, h *bootstrap.StoreHandle) error {
+		ws, _, err := resolveRunningDriverRun(ctx, h, driverListAgentsWorkspaceKey, driverListAgentsDriverRunID, driverListAgentsNodeID, driverListAgentsLeaseID, driverListAgentsFence)
+		if err != nil {
+			return err
+		}
+		agents, err := h.Store.Agents().List(ctx, ws)
+		if err != nil {
+			return fmt.Errorf("list agents: %w", err)
+		}
+		if driverListAgentsJSON {
+			return cmdstore.WriteJSON(agents)
+		}
+		for _, agent := range agents {
+			if agent == nil {
+				continue
+			}
+			fmt.Printf("%s\t%s\t%s\n", agent.Name, agent.RoleName, agent.Parent)
+		}
+		return nil
+	})
+}
+
+func runDriverAgentOrchestrationSession(_ *cobra.Command, _ []string) error {
+	return cmdstore.WithStore(func(ctx context.Context, h *bootstrap.StoreHandle) error {
+		ws, _, err := resolveRunningDriverRun(ctx, h, driverAgentSessionWorkspaceKey, driverAgentSessionDriverRunID, driverAgentSessionNodeID, driverAgentSessionLeaseID, driverAgentSessionFence)
+		if err != nil {
+			return err
+		}
+		agentName := strings.TrimSpace(driverAgentSessionName)
+		if agentName == "" {
+			return fmt.Errorf("agent required: %w", domain.ErrInvalid)
+		}
+		sessionID, err := store.OrchestrationSessionIDFor(ctx, h.Store, ws, agentName)
+		if err != nil {
+			return fmt.Errorf("resolve orchestration session: %w", err)
+		}
+		result := map[string]string{"agentName": agentName, "orchestratorSessionId": sessionID}
+		if driverAgentSessionJSON {
+			return cmdstore.WriteJSON(result)
+		}
+		fmt.Println(sessionID)
+		return nil
+	})
+}
+
+func runDriverUpdateAgentParent(_ *cobra.Command, _ []string) error {
+	return cmdstore.WithStore(func(ctx context.Context, h *bootstrap.StoreHandle) error {
+		ws, _, err := resolveRunningDriverRun(ctx, h, driverUpdateAgentParentWorkspaceKey, driverUpdateAgentParentDriverRunID, driverUpdateAgentParentNodeID, driverUpdateAgentParentLeaseID, driverUpdateAgentParentFence)
+		if err != nil {
+			return err
+		}
+		agentName := strings.TrimSpace(driverUpdateAgentParentName)
+		parentID := strings.TrimSpace(driverUpdateAgentParentParent)
+		if agentName == "" || parentID == "" {
+			return fmt.Errorf("agent and parent required: %w", domain.ErrInvalid)
+		}
+		unlock, err := epicrunner.AcquireBindLock(ws, agentName)
+		if err != nil {
+			return fmt.Errorf("acquire agent parent lock: %w", err)
+		}
+		defer unlock()
+		current, err := h.Store.Agents().Get(ctx, ws, agentName)
+		if err != nil {
+			return fmt.Errorf("get agent: %w", err)
+		}
+		if current.Parent != strings.TrimSpace(driverUpdateAgentParentExpectParent) {
+			return fmt.Errorf("agent %q parent changed from %q to %q: %w", agentName, strings.TrimSpace(driverUpdateAgentParentExpectParent), current.Parent, domain.ErrConflict)
+		}
+		updated, err := h.Store.Agents().Update(ctx, ws, agentName, store.AgentUpdate{Parent: &parentID})
+		if err != nil {
+			return fmt.Errorf("update agent parent: %w", err)
+		}
+		if driverUpdateAgentParentJSON {
+			return cmdstore.WriteJSON(updated)
+		}
+		fmt.Printf("Updated agent %s parent to %s\n", agentName, parentID)
+		return nil
+	})
+}
+
+func runDriverActiveTaskRuns(_ *cobra.Command, _ []string) error {
+	return cmdstore.WithStore(func(ctx context.Context, h *bootstrap.StoreHandle) error {
+		ws, parent, err := resolveRunningDriverRun(ctx, h, driverActiveTaskRunsWorkspaceKey, driverActiveTaskRunsDriverRunID, driverActiveTaskRunsNodeID, driverActiveTaskRunsLeaseID, driverActiveTaskRunsFence)
+		if err != nil {
+			return err
+		}
+		epicID := firstNonEmpty(driverActiveTaskRunsEpicID, parent.EpicID, driverRunPayloadString(parent.Payload, "epicId"))
+		active, err := driverpkg.ListActiveTaskRuns(ctx, h.Store, driverpkg.ActiveTaskRunsOptions{
+			WorkspaceKey: ws,
+			DriverRunID:  parent.RunID,
+			EpicID:       epicID,
+			Limit:        driverActiveTaskRunsLimit,
+		})
+		if err != nil {
+			return fmt.Errorf("list active task runs: %w", err)
+		}
+		if driverActiveTaskRunsJSON {
+			return cmdstore.WriteJSON(active)
+		}
+		fmt.Printf("Driver run %s has %d active child task run(s)\n", active.DriverRunID, active.ActiveCount)
 		return nil
 	})
 }

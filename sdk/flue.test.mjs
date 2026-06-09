@@ -45,7 +45,7 @@ if (args[1] === 'exec-task') {
       LOOM_DRIVER_FLEET_DB_ACTOR: "driver-run:run-1",
     },
   });
-  const result = await client.taskRuns.request({ taskId: "TASK-1", providerProfile: "local" });
+  const result = await client.taskRuns.request({ taskId: "TASK-1", providerProfile: "local", nodeId: "target-node" });
   assert.equal(result.status, "completed");
   await client.tasks.complete("TASK-1");
 
@@ -63,6 +63,83 @@ if (args[1] === 'exec-task') {
   assert.equal(calls[1].args[calls[1].args.indexOf("--task-run-id") + 1], "task-run-1");
   assert.ok(calls[1].args.includes("--lease-token"));
   assert.equal(calls[1].args[calls[1].args.indexOf("--lease-token") + 1], "lease-token-1");
+  assert.ok(calls[0].args.includes("--node-id"));
+  assert.equal(calls[0].args[calls[0].args.indexOf("--node-id") + 1], "target-node");
+});
+
+test("FlueDriverClient exposes epic snapshot, active runs, and stale recovery helpers", async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "loom-sdk-flue-helpers-"));
+  const recorder = path.join(dir, "calls.jsonl");
+  const fakeLoom = path.join(dir, "fake-loom.mjs");
+  writeFileSync(fakeLoom, `#!/usr/bin/env node
+import fs from 'node:fs';
+const recorder = ${JSON.stringify(recorder)};
+const args = process.argv.slice(2);
+fs.appendFileSync(recorder, JSON.stringify({ args }) + '\\n');
+if (args[1] === 'epic-get') {
+  console.log(JSON.stringify({ id: 'EPIC-1', issue_type: 'epic', title: 'Epic' }));
+} else if (args[1] === 'epic-snapshot') {
+  console.log(JSON.stringify({ epicId: 'EPIC-1', readyCount: 1, blockedCount: 0, openChildrenCount: 1 }));
+} else if (args[1] === 'list-agents') {
+  console.log(JSON.stringify([{ name: 'nova', role_name: 'lead', parent: '' }]));
+} else if (args[1] === 'agent-orchestration-session') {
+  console.log(JSON.stringify({ agentName: 'nova', orchestratorSessionId: 'session-1' }));
+} else if (args[1] === 'update-agent-parent') {
+  console.log(JSON.stringify({ name: 'nova', role_name: 'lead', parent: 'EPIC-1' }));
+} else if (args[1] === 'active-task-runs') {
+  console.log(JSON.stringify({ driverRunId: 'run-1', activeCount: 2 }));
+} else if (args[1] === 'recover-stale-tasks') {
+  console.log(JSON.stringify({ driverRunId: 'run-1', recovered: 1, released: 1 }));
+} else {
+  console.log(JSON.stringify({ ok: true }));
+}
+`);
+
+  const client = createLoomDriverClient({
+    input: { epicId: "EPIC-1" },
+    command: [process.execPath, fakeLoom],
+    env: {
+      LOOM_DRIVER_WORKSPACE: "WS",
+      LOOM_DRIVER_RUN_ID: "run-1",
+    },
+  });
+
+  assert.equal((await client.epics.get()).issue_type, "epic");
+  assert.equal((await client.epics.snapshot()).readyCount, 1);
+  assert.equal((await client.agents.list())[0].name, "nova");
+  assert.equal((await client.agents.orchestrationSession({ agent: "nova" })).orchestratorSessionId, "session-1");
+  assert.equal((await client.agents.updateParent({ agent: "nova", parent: "EPIC-1", expectParent: "" })).parent, "EPIC-1");
+  assert.equal((await client.taskRuns.active({ limit: 10 })).activeCount, 2);
+  assert.equal((await client.taskRuns.recoverStale({ maxAgeSeconds: 30 })).recovered, 1);
+
+  const calls = readJSONL(recorder);
+  assert.deepEqual(calls.map((call) => call.args[1]), [
+    "epic-get",
+    "epic-snapshot",
+    "list-agents",
+    "agent-orchestration-session",
+    "update-agent-parent",
+    "active-task-runs",
+    "recover-stale-tasks",
+  ]);
+  for (const call of calls) {
+    assert.ok(call.args.includes("--driver-run-id"));
+    assert.equal(call.args[call.args.indexOf("--driver-run-id") + 1], "run-1");
+    assert.ok(call.args.includes("--workspace-key"));
+    assert.equal(call.args[call.args.indexOf("--workspace-key") + 1], "WS");
+  }
+  assert.ok(calls[0].args.includes("--epic-id"));
+  assert.equal(calls[0].args[calls[0].args.indexOf("--epic-id") + 1], "EPIC-1");
+  assert.ok(calls[1].args.includes("--epic-id"));
+  assert.equal(calls[1].args[calls[1].args.indexOf("--epic-id") + 1], "EPIC-1");
+  assert.ok(calls[3].args.includes("--agent"));
+  assert.equal(calls[3].args[calls[3].args.indexOf("--agent") + 1], "nova");
+  assert.ok(calls[4].args.includes("--parent"));
+  assert.equal(calls[4].args[calls[4].args.indexOf("--parent") + 1], "EPIC-1");
+  assert.ok(calls[5].args.includes("--limit"));
+  assert.equal(calls[5].args[calls[5].args.indexOf("--limit") + 1], "10");
+  assert.ok(calls[6].args.includes("--max-age-seconds"));
+  assert.equal(calls[6].args[calls[6].args.indexOf("--max-age-seconds") + 1], "30");
 });
 
 function readJSONL(file) {

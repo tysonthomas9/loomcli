@@ -79,6 +79,54 @@ func TestExecutorRunOnceClaimsVerifiesAndFinishes(t *testing.T) {
 	}
 }
 
+func TestExecutorRunOnceTargetsSpecificQueuedRunID(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	st := memstore.New()
+	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "TEST", Name: "test"}); err != nil {
+		t.Fatalf("Create workspace: %v", err)
+	}
+	writeFlueDist(t, root, "epic-runner", "done")
+	registered, err := RegisterFlueDriver(ctx, st, RegisterFlueOptions{WorkspaceKey: "TEST", WorkDir: root, DistPath: "dist", DriverName: "epic-runner", CreatedBy: "tester", Activate: true})
+	if err != nil {
+		t.Fatalf("RegisterFlueDriver: %v", err)
+	}
+	if _, err := CreateDriverRun(ctx, st, RunOptions{WorkspaceKey: "TEST", DriverID: registered.Driver.DriverID, EpicID: "TEST-1", RunID: "run-1"}); err != nil {
+		t.Fatalf("Create first DriverRun: %v", err)
+	}
+	if _, err := CreateDriverRun(ctx, st, RunOptions{WorkspaceKey: "TEST", DriverID: registered.Driver.DriverID, EpicID: "TEST-2", RunID: "run-2"}); err != nil {
+		t.Fatalf("Create second DriverRun: %v", err)
+	}
+
+	runner := &recordingRunner{result: RunResult{Status: domain.DriverRunCompleted, Summary: "targeted"}}
+	result, err := (&Executor{
+		Store:             st,
+		WorkspaceKey:      "TEST",
+		RunID:             "run-2",
+		WorkDir:           root,
+		NodeID:            "node-1",
+		LeaseID:           "lease-2",
+		Runner:            runner,
+		HeartbeatInterval: -1,
+	}).RunOnce(ctx)
+	if err != nil {
+		t.Fatalf("RunOnce: %v", err)
+	}
+	if result.Final == nil || result.Final.RunID != "run-2" || result.Final.Status != domain.DriverRunCompleted {
+		t.Fatalf("final = %+v, want completed run-2", result.Final)
+	}
+	if runner.req.Run == nil || runner.req.Run.RunID != "run-2" {
+		t.Fatalf("runner saw run %+v, want run-2", runner.req.Run)
+	}
+	untouched, err := st.DriverRuns().Get(ctx, "TEST", "run-1")
+	if err != nil {
+		t.Fatalf("Get run-1: %v", err)
+	}
+	if untouched.Status != domain.DriverRunQueued {
+		t.Fatalf("run-1 status = %s, want queued", untouched.Status)
+	}
+}
+
 func TestExecutorRunOnceFailsTamperedBundleBeforeRunner(t *testing.T) {
 	ctx := context.Background()
 	root := t.TempDir()

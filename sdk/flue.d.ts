@@ -38,6 +38,8 @@ export interface FlueTaskRunRequest {
   provider_profile?: string;
   workerProfileId?: string;
   worker_profile_id?: string;
+  nodeId?: string;
+  node_id?: string;
   runnerId?: string;
   runner_id?: string;
   supportedProviders?: string[];
@@ -62,6 +64,41 @@ export interface FlueTaskRunRequest {
   sandbox_repo_ref?: string;
 }
 
+export interface FlueEpicInput {
+  epicId?: string;
+  epic_id?: string;
+}
+
+export interface FlueAgentInput {
+  agent?: string;
+  agentName?: string;
+  agent_name?: string;
+  name?: string;
+}
+
+export interface FlueAgentParentUpdateInput extends FlueAgentInput {
+  parent?: string;
+  parentEpicId?: string;
+  parent_epic_id?: string;
+  expectParent?: string;
+  expect_parent?: string;
+}
+
+export interface FlueTaskRunActiveInput extends FlueEpicInput {
+  limit?: number;
+}
+
+export interface FlueTaskRunRecoverStaleInput {
+  staleBefore?: string;
+  stale_before?: string;
+  maxAgeSeconds?: number;
+  max_age_seconds?: number;
+  errorClass?: string;
+  error_class?: string;
+  errorMessage?: string;
+  error_message?: string;
+}
+
 export interface FlueDriverClientOptions {
   env?: NodeJS.ProcessEnv | Record<string, string | undefined>;
   input?: Record<string, unknown>;
@@ -75,13 +112,24 @@ export declare class FlueDriverClient {
   readonly input: Record<string, unknown>;
   readonly workspace: string;
   readonly driverRunId: string;
+  readonly epics: {
+    get(input?: FlueEpicInput): Promise<Record<string, unknown> | null>;
+    snapshot(input?: FlueEpicInput): Promise<Record<string, unknown> | null>;
+  };
+  readonly agents: {
+    list(input?: Record<string, unknown>): Promise<Record<string, unknown>[] | null>;
+    orchestrationSession(input?: FlueAgentInput): Promise<Record<string, unknown> | null>;
+    updateParent(input?: FlueAgentParentUpdateInput): Promise<Record<string, unknown> | null>;
+  };
   readonly tasks: {
-    claimReady(input?: { epicId?: string; epic_id?: string }): Promise<Record<string, unknown> | null>;
+    claimReady(input?: FlueEpicInput): Promise<Record<string, unknown> | null>;
     complete(input?: FlueTaskSelector | string): Promise<Record<string, unknown> | null>;
     release(input?: FlueTaskSelector | string): Promise<Record<string, unknown> | null>;
   };
   readonly taskRuns: {
     request(input?: FlueTaskRunRequest): Promise<Record<string, unknown>>;
+    active(input?: FlueTaskRunActiveInput): Promise<Record<string, unknown> | null>;
+    recoverStale(input?: FlueTaskRunRecoverStaleInput): Promise<Record<string, unknown> | null>;
   };
 
   completed(input?: { summary?: string }): FlueDriverResult;
@@ -97,8 +145,15 @@ export declare class FlueDriverClient {
     artifactsRef?: string;
     artifacts_ref?: string;
   }): FlueDriverResult;
-  claimReady(input?: { epicId?: string; epic_id?: string }): Promise<Record<string, unknown> | null>;
+  claimReady(input?: FlueEpicInput): Promise<Record<string, unknown> | null>;
+  getEpic(input?: FlueEpicInput): Promise<Record<string, unknown> | null>;
+  epicSnapshot(input?: FlueEpicInput): Promise<Record<string, unknown> | null>;
+  listAgents(input?: Record<string, unknown>): Promise<Record<string, unknown>[] | null>;
+  agentOrchestrationSession(input?: FlueAgentInput): Promise<Record<string, unknown> | null>;
+  updateAgentParent(input?: FlueAgentParentUpdateInput): Promise<Record<string, unknown> | null>;
   requestTaskRun(input?: FlueTaskRunRequest): Promise<Record<string, unknown>>;
+  activeTaskRuns(input?: FlueTaskRunActiveInput): Promise<Record<string, unknown> | null>;
+  recoverStaleTaskRuns(input?: FlueTaskRunRecoverStaleInput): Promise<Record<string, unknown> | null>;
   completeTask(input?: FlueTaskSelector | string): Promise<Record<string, unknown> | null>;
   releaseTask(input?: FlueTaskSelector | string): Promise<Record<string, unknown> | null>;
 }

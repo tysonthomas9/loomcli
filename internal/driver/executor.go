@@ -42,6 +42,7 @@ type RunResult struct {
 type Executor struct {
 	Store             store.Store
 	WorkspaceKey      string
+	RunID             string
 	WorkDir           string
 	NodeID            string
 	LeaseID           string
@@ -179,6 +180,9 @@ func (e *Executor) RecoverStaleOnce(ctx context.Context) (*store.StaleDriverRunR
 }
 
 func (e *Executor) nextQueuedRun(ctx context.Context) (*domain.DriverRun, error) {
+	if strings.TrimSpace(e.RunID) != "" {
+		return queuedRunByID(ctx, e.Store, e.WorkspaceKey, e.RunID)
+	}
 	if e.WorkspaceKey != "" {
 		return nextQueuedRunInWorkspace(ctx, e.Store, e.WorkspaceKey)
 	}
@@ -199,6 +203,20 @@ func (e *Executor) nextQueuedRun(ctx context.Context) (*domain.DriverRun, error)
 		}
 	}
 	return nil, ErrNoQueuedRun
+}
+
+func queuedRunByID(ctx context.Context, s store.Store, ws, runID string) (*domain.DriverRun, error) {
+	if strings.TrimSpace(ws) == "" {
+		return nil, fmt.Errorf("workspace key required for run %q: %w", runID, domain.ErrInvalid)
+	}
+	run, err := s.DriverRuns().Get(ctx, ws, runID)
+	if err != nil {
+		return nil, fmt.Errorf("get queued driver run: %w", err)
+	}
+	if run.Status != domain.DriverRunQueued {
+		return nil, ErrNoQueuedRun
+	}
+	return run, nil
 }
 
 func nextQueuedRunInWorkspace(ctx context.Context, s store.Store, ws string) (*domain.DriverRun, error) {

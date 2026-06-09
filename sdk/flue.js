@@ -17,6 +17,15 @@ export class FlueDriverClient {
     this.driverRunId = pickEnv(this.env, "LOOM_DRIVER_RUN_ID");
     this.taskRunResultsByTaskId = new Map();
     this.taskRunResultsByRunId = new Map();
+    this.epics = Object.freeze({
+      get: (input = {}) => this.getEpic(input),
+      snapshot: (input = {}) => this.epicSnapshot(input),
+    });
+    this.agents = Object.freeze({
+      list: (input = {}) => this.listAgents(input),
+      orchestrationSession: (input = {}) => this.agentOrchestrationSession(input),
+      updateParent: (input = {}) => this.updateAgentParent(input),
+    });
     this.tasks = Object.freeze({
       claimReady: (input = {}) => this.claimReady(input),
       complete: (input = {}) => this.completeTask(input),
@@ -24,6 +33,8 @@ export class FlueDriverClient {
     });
     this.taskRuns = Object.freeze({
       request: (input = {}) => this.requestTaskRun(input),
+      active: (input = {}) => this.activeTaskRuns(input),
+      recoverStale: (input = {}) => this.recoverStaleTaskRuns(input),
     });
   }
 
@@ -57,6 +68,46 @@ export class FlueDriverClient {
     return this.#run(args);
   }
 
+  async getEpic(input = {}) {
+    const args = this.#baseArgs("epic-get");
+    const epicId = input.epicId || input.epic_id || this.input.epicId || this.input.epic_id || "";
+    appendStringFlag(args, "--epic-id", epicId);
+    return this.#run(args);
+  }
+
+  async epicSnapshot(input = {}) {
+    const args = this.#baseArgs("epic-snapshot");
+    const epicId = input.epicId || input.epic_id || this.input.epicId || this.input.epic_id || "";
+    appendStringFlag(args, "--epic-id", epicId);
+    return this.#run(args);
+  }
+
+  async listAgents(_input = {}) {
+    return this.#run(this.#baseArgs("list-agents"));
+  }
+
+  async agentOrchestrationSession(input = {}) {
+    const agent = input.agent || input.agentName || input.agent_name || input.name || "";
+    if (!agent) {
+      throw new Error("agents.orchestrationSession requires agent");
+    }
+    const args = this.#baseArgs("agent-orchestration-session");
+    args.push("--agent", String(agent));
+    return this.#run(args);
+  }
+
+  async updateAgentParent(input = {}) {
+    const agent = input.agent || input.agentName || input.agent_name || input.name || "";
+    const parent = input.parent || input.parentEpicId || input.parent_epic_id || "";
+    if (!agent || !parent) {
+      throw new Error("agents.updateParent requires agent and parent");
+    }
+    const args = this.#baseArgs("update-agent-parent");
+    args.push("--agent", String(agent), "--parent", String(parent));
+    appendStringFlag(args, "--expect-parent", input.expectParent || input.expect_parent || "");
+    return this.#run(args);
+  }
+
   async requestTaskRun(input = {}) {
     const taskId = input.taskId || input.task_id;
     if (!taskId) {
@@ -67,6 +118,7 @@ export class FlueDriverClient {
     appendStringFlag(args, "--provider-profile", input.providerProfile || input.provider_profile || "");
     appendStringFlag(args, "--task-run-id", input.taskRunId || input.task_run_id || "");
     appendStringFlag(args, "--worker-profile-id", input.workerProfileId || input.worker_profile_id || "");
+    appendStringFlag(args, "--node-id", input.nodeId || input.node_id || "");
     appendStringFlag(args, "--runner-id", input.runnerId || input.runner_id || "");
     appendRepeatedFlag(args, "--supported-provider", input.supportedProviders || input.supported_providers || []);
     appendRepeatedFlag(args, "--capability", input.capabilities || []);
@@ -79,6 +131,23 @@ export class FlueDriverClient {
     const result = this.#run(args);
     rememberTaskRunResult(this, result || {});
     return result;
+  }
+
+  async activeTaskRuns(input = {}) {
+    const args = this.#baseArgs("active-task-runs");
+    const epicId = input.epicId || input.epic_id || this.input.epicId || this.input.epic_id || "";
+    appendStringFlag(args, "--epic-id", epicId);
+    appendStringFlag(args, "--limit", input.limit || "");
+    return this.#run(args);
+  }
+
+  async recoverStaleTaskRuns(input = {}) {
+    const args = this.#baseArgs("recover-stale-tasks");
+    appendStringFlag(args, "--stale-before", input.staleBefore || input.stale_before || "");
+    appendStringFlag(args, "--max-age-seconds", input.maxAgeSeconds || input.max_age_seconds || "");
+    appendStringFlag(args, "--error-class", input.errorClass || input.error_class || "");
+    appendStringFlag(args, "--error-message", input.errorMessage || input.error_message || "");
+    return this.#run(args);
   }
 
   async completeTask(input = {}) {
