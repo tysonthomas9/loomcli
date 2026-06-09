@@ -119,6 +119,20 @@ func (t *tracedStore) AgentServices() store.AgentServiceStore {
 func (t *tracedStore) TriggerBindings() store.TriggerBindingStore {
 	return t.triggerBindings
 }
+
+// TriggerEvents, TriggerDeliveries, and TriggerRoutes delegate directly to the
+// inner store rather than wrapping each sub-store in a span decorator. Against
+// the production fleetdb client these calls are still traced at the HTTP
+// transport layer; against an in-memory store they are untraced.
+func (t *tracedStore) TriggerEvents() store.TriggerEventStore {
+	return t.inner.TriggerEvents()
+}
+func (t *tracedStore) TriggerDeliveries() store.TriggerDeliveryStore {
+	return t.inner.TriggerDeliveries()
+}
+func (t *tracedStore) TriggerRoutes() store.TriggerRouteDispatcher {
+	return t.inner.TriggerRoutes()
+}
 func (t *tracedStore) DriverRuns() store.DriverRunStore { return t.driverRuns }
 func (t *tracedStore) DriverSteps() store.DriverStepStore {
 	return t.driverSteps

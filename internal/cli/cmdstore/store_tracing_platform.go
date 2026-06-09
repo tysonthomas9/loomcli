@@ -253,6 +253,16 @@ func (t *tracedTriggerBindingStore) Update(ctx context.Context, ws, bindingID st
 	return out, err
 }
 
+func (t *tracedTriggerBindingStore) ResolveWebhookSecret(ctx context.Context, ws, bindingID string) (string, error) {
+	ctx, span := startStoreSpan(ctx, "TriggerBindings", "ResolveWebhookSecret",
+		attribute.String("loom.workspace", ws),
+		attribute.String("loom.binding", bindingID),
+	)
+	out, err := t.inner.ResolveWebhookSecret(ctx, ws, bindingID)
+	finish(span, err)
+	return out, err
+}
+
 // --- DriverRunStore ---
 
 type tracedDriverRunStore struct{ inner store.DriverRunStore }

@@ -196,6 +196,7 @@ type TriggerBindingCreate struct {
 	ConcurrencyPolicy    domain.TriggerBindingConcurrencyPolicy
 	IdempotencyPolicy    string
 	AuthPolicy           string
+	WebhookSecret        string
 	Permissions          []string
 	Enabled              bool
 }
@@ -227,6 +228,7 @@ type TriggerBindingUpdate struct {
 	ConcurrencyPolicy    *domain.TriggerBindingConcurrencyPolicy
 	IdempotencyPolicy    *string
 	AuthPolicy           *string
+	WebhookSecret        *string
 	Permissions          *[]string
 	Enabled              *bool
 }
@@ -237,6 +239,68 @@ type TriggerBindingStore interface {
 	GetByRouteKey(ctx context.Context, workspaceKey, routeKey string) (*domain.TriggerBinding, error)
 	List(ctx context.Context, workspaceKey string, filter TriggerBindingFilter) ([]*domain.TriggerBinding, error)
 	Update(ctx context.Context, workspaceKey, bindingID string, patch TriggerBindingUpdate) (*domain.TriggerBinding, error)
+	// ResolveWebhookSecret fetches a binding's plaintext webhook signing secret.
+	// Read/Get/List return the binding with the secret redacted; this is the
+	// privileged path the webhook verifier uses to check inbound signatures.
+	ResolveWebhookSecret(ctx context.Context, workspaceKey, bindingID string) (string, error)
+}
+
+// TriggerEventFilter narrows TriggerEvent listings.
+type TriggerEventFilter struct {
+	SourceKind       string
+	TriggerBindingID string
+	Limit            int
+}
+
+// TriggerEventStore is a read-only view of persisted trigger events.
+type TriggerEventStore interface {
+	Get(ctx context.Context, workspaceKey, eventID string) (*domain.TriggerEvent, error)
+	List(ctx context.Context, workspaceKey string, filter TriggerEventFilter) ([]*domain.TriggerEvent, error)
+}
+
+// TriggerDeliveryFilter narrows TriggerDelivery listings.
+type TriggerDeliveryFilter struct {
+	TriggerEventID   string
+	TriggerBindingID string
+	Status           domain.TriggerDeliveryStatus
+	Limit            int
+}
+
+// TriggerDeliveryStore is a read-only view of persisted trigger deliveries.
+type TriggerDeliveryStore interface {
+	Get(ctx context.Context, workspaceKey, deliveryID string) (*domain.TriggerDelivery, error)
+	List(ctx context.Context, workspaceKey string, filter TriggerDeliveryFilter) ([]*domain.TriggerDelivery, error)
+}
+
+// TriggerRouteDispatch carries the normalized fields an adapter resolves from
+// an inbound external event before handing off to the durable dispatch path.
+type TriggerRouteDispatch struct {
+	RunID            string
+	IdempotencyKey   string
+	SourceEventID    string
+	EventType        string
+	SubjectRef       string
+	ActorRef         string
+	EpicID           string
+	RawPayloadRef    string
+	RawPayloadDigest string
+	SignatureStatus  string
+	ReplayOfEventID  string
+	Payload          json.RawMessage
+}
+
+// TriggerRouteDispatcher resolves an enabled binding by route key, persists a
+// TriggerEvent, enqueues a queued DriverRun, then records a TriggerDelivery —
+// in that order. It fronts fleet-db's trigger-routes endpoint.
+//
+// Each write is individually idempotent (keyed off the dispatch idempotency
+// key / derived delivery id), but the three are NOT a single transaction: a
+// failure after the run is created surfaces as an error, leaving a queued run
+// whose delivery audit record is written on the caller's redelivery (which
+// dedups the event and run). Callers should treat dispatch as durable and
+// eventually-consistent, not transactional, and retry on error.
+type TriggerRouteDispatcher interface {
+	DispatchTriggerRoute(ctx context.Context, workspaceKey, routeKey string, in TriggerRouteDispatch) (*domain.DriverRun, error)
 }
 
 type EpicRunCreate struct {

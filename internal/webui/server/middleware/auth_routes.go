@@ -25,6 +25,13 @@ func isPublicRoute(method, path string) bool {
 		return true
 	}
 
+	// Inbound webhooks authenticate via a per-binding signature (e.g. GitHub's
+	// X-Hub-Signature-256 HMAC), verified inside the handler — not via user JWT.
+	// e.g. /api/workspaces/{ws}/webhooks/github → /api/webhooks/github
+	if strings.HasPrefix(normalizedPath, "/api/webhooks/") {
+		return true
+	}
+
 	// All auth routes are public — the BetterAuth service handles its own auth.
 	// Must be above the GET-only gate because sign-in/sign-up use POST.
 	if strings.HasPrefix(normalizedPath, "/api/auth/") {

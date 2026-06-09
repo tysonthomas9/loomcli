@@ -28,6 +28,15 @@ func cloneTriggerBinding(b *domain.TriggerBinding) *domain.TriggerBinding {
 	return &out
 }
 
+// redactedTriggerBinding clones b with the webhook signing secret cleared,
+// mirroring the fleet-db API which never returns the secret on read/list/create
+// responses. The secret is reachable only via ResolveWebhookSecret.
+func redactedTriggerBinding(b *domain.TriggerBinding) *domain.TriggerBinding {
+	out := cloneTriggerBinding(b)
+	out.WebhookSecret = ""
+	return out
+}
+
 func cloneDriverRun(r *domain.DriverRun) *domain.DriverRun {
 	out := *r
 	out.Payload = cloneJSON(r.Payload)
@@ -257,6 +266,9 @@ func applyTriggerBindingPolicyUpdateMem(b *domain.TriggerBinding, patch store.Tr
 	}
 	if patch.AuthPolicy != nil {
 		b.AuthPolicy = *patch.AuthPolicy
+	}
+	if patch.WebhookSecret != nil {
+		b.WebhookSecret = *patch.WebhookSecret
 	}
 	if patch.Permissions != nil {
 		b.Permissions = append([]string(nil), (*patch.Permissions)...)

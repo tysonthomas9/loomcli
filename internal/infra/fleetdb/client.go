@@ -87,6 +87,9 @@ type Client struct {
 	profiles   *workerProfileStore
 	services   *agentServiceStore
 	bindings   *triggerBindingStore
+	events     *triggerEventStore
+	deliveries *triggerDeliveryStore
+	routes     *triggerRouteStore
 	runs       *driverRunStore
 	steps      *driverStepStore
 	taskRuns   *taskRunStore
@@ -128,6 +131,9 @@ func New(cfg Config) (*Client, error) {
 	c.profiles = &workerProfileStore{client: c}
 	c.services = &agentServiceStore{client: c}
 	c.bindings = &triggerBindingStore{client: c}
+	c.events = &triggerEventStore{client: c}
+	c.deliveries = &triggerDeliveryStore{client: c}
+	c.routes = &triggerRouteStore{client: c}
 	c.runs = &driverRunStore{client: c}
 	c.steps = &driverStepStore{client: c}
 	c.taskRuns = &taskRunStore{client: c}
@@ -179,6 +185,15 @@ func (c *Client) WorkerProfiles() store.WorkerProfileStore { return c.profiles }
 func (c *Client) AgentServices() store.AgentServiceStore { return c.services }
 
 func (c *Client) TriggerBindings() store.TriggerBindingStore { return c.bindings }
+
+// TriggerEvents returns the TriggerEventStore.
+func (c *Client) TriggerEvents() store.TriggerEventStore { return c.events }
+
+// TriggerDeliveries returns the TriggerDeliveryStore.
+func (c *Client) TriggerDeliveries() store.TriggerDeliveryStore { return c.deliveries }
+
+// TriggerRoutes returns the TriggerRouteDispatcher.
+func (c *Client) TriggerRoutes() store.TriggerRouteDispatcher { return c.routes }
 
 // DriverRuns returns the DriverRunStore.
 func (c *Client) DriverRuns() store.DriverRunStore { return c.runs }

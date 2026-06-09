@@ -28,6 +28,7 @@ import (
 	_ "github.com/tysonthomas9/loomcli/internal/cli/serve/install"
 	_ "github.com/tysonthomas9/loomcli/internal/cli/serve/logroutercmd"
 	_ "github.com/tysonthomas9/loomcli/internal/cli/serve/worker"
+	_ "github.com/tysonthomas9/loomcli/internal/cli/trigger"
 	_ "github.com/tysonthomas9/loomcli/internal/cli/workspace"
 )
 

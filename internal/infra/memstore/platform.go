@@ -239,7 +239,7 @@ func (s *triggerBindingStore) Create(_ context.Context, in store.TriggerBindingC
 	}
 	binding := newTriggerBindingMem(in)
 	s.items[in.WorkspaceKey][in.BindingID] = binding
-	return cloneTriggerBinding(binding), nil
+	return redactedTriggerBinding(binding), nil
 }
 
 func (s *triggerBindingStore) validateTriggerBindingCreate(in store.TriggerBindingCreate) error {
@@ -289,6 +289,7 @@ func newTriggerBindingMem(in store.TriggerBindingCreate) *domain.TriggerBinding 
 		ConcurrencyPolicy:    defaultTriggerBindingConcurrencyMem(in.ConcurrencyPolicy),
 		IdempotencyPolicy:    firstNonEmptyMem(in.IdempotencyPolicy, "header:Idempotency-Key"),
 		AuthPolicy:           firstNonEmptyMem(in.AuthPolicy, "workspace_user"),
+		WebhookSecret:        in.WebhookSecret,
 		Permissions:          append([]string(nil), in.Permissions...),
 		Enabled:              in.Enabled,
 		CreatedAt:            now,
@@ -310,7 +311,7 @@ func (s *triggerBindingStore) Get(_ context.Context, ws, bindingID string) (*dom
 	if !ok {
 		return nil, fmt.Errorf("trigger binding %q in workspace %q: %w", bindingID, ws, domain.ErrNotFound)
 	}
-	return cloneTriggerBinding(binding), nil
+	return redactedTriggerBinding(binding), nil
 }
 
 func (s *triggerBindingStore) GetByRouteKey(_ context.Context, ws, routeKey string) (*domain.TriggerBinding, error) {
@@ -318,10 +319,22 @@ func (s *triggerBindingStore) GetByRouteKey(_ context.Context, ws, routeKey stri
 	defer s.mu.RUnlock()
 	for _, binding := range s.items[ws] {
 		if binding.RouteKey == routeKey {
-			return cloneTriggerBinding(binding), nil
+			return redactedTriggerBinding(binding), nil
 		}
 	}
 	return nil, fmt.Errorf("trigger binding route %q in workspace %q: %w", routeKey, ws, domain.ErrNotFound)
+}
+
+// ResolveWebhookSecret returns the stored plaintext secret (never redacted),
+// mirroring fleet-db's privileged webhook-secret endpoint.
+func (s *triggerBindingStore) ResolveWebhookSecret(_ context.Context, ws, bindingID string) (string, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	binding, ok := s.items[ws][bindingID]
+	if !ok {
+		return "", fmt.Errorf("trigger binding %q in workspace %q: %w", bindingID, ws, domain.ErrNotFound)
+	}
+	return binding.WebhookSecret, nil
 }
 
 func (s *triggerBindingStore) List(_ context.Context, ws string, filter store.TriggerBindingFilter) ([]*domain.TriggerBinding, error) {
@@ -330,7 +343,7 @@ func (s *triggerBindingStore) List(_ context.Context, ws string, filter store.Tr
 	out := make([]*domain.TriggerBinding, 0, len(s.items[ws]))
 	for _, binding := range s.items[ws] {
 		if triggerBindingMatchesMem(binding, filter) {
-			out = append(out, cloneTriggerBinding(binding))
+			out = append(out, redactedTriggerBinding(binding))
 		}
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].CreatedAt.After(out[j].CreatedAt) })
@@ -368,7 +381,7 @@ func (s *triggerBindingStore) Update(_ context.Context, ws, bindingID string, pa
 	}
 	updated.UpdatedAt = time.Now().UTC()
 	s.items[ws][bindingID] = updated
-	return cloneTriggerBinding(updated), nil
+	return redactedTriggerBinding(updated), nil
 }
 
 func (s *triggerBindingStore) getForValidation(ws, bindingID string) (*domain.TriggerBinding, bool) {

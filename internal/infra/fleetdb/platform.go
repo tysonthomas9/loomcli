@@ -162,6 +162,7 @@ func (s *triggerBindingStore) Create(ctx context.Context, in store.TriggerBindin
 		"concurrency_policy":      in.ConcurrencyPolicy,
 		"idempotency_policy":      in.IdempotencyPolicy,
 		"auth_policy":             in.AuthPolicy,
+		"webhook_secret":          in.WebhookSecret,
 		"permissions":             in.Permissions,
 		"enabled":                 in.Enabled,
 	}
@@ -236,6 +237,17 @@ func (s *triggerBindingStore) Update(ctx context.Context, ws, bindingID string, 
 		return nil, err
 	}
 	return &out, nil
+}
+
+func (s *triggerBindingStore) ResolveWebhookSecret(ctx context.Context, ws, bindingID string) (string, error) {
+	var out struct {
+		WebhookSecret string `json:"webhook_secret"`
+	}
+	path := "/api/v1/" + pathEscape(ws) + "/trigger-bindings/" + pathEscape(bindingID) + "/webhook-secret"
+	if err := s.client.do(ctx, "GET", path, nil, &out); err != nil {
+		return "", err
+	}
+	return out.WebhookSecret, nil
 }
 
 type driverRunStore struct{ client *Client }
@@ -821,7 +833,122 @@ func triggerBindingUpdateBody(patch store.TriggerBindingUpdate) map[string]any {
 	bodyPtr(body, "concurrency_policy", patch.ConcurrencyPolicy)
 	bodyPtr(body, "idempotency_policy", patch.IdempotencyPolicy)
 	bodyPtr(body, "auth_policy", patch.AuthPolicy)
+	bodyPtr(body, "webhook_secret", patch.WebhookSecret)
 	bodyPtr(body, "permissions", patch.Permissions)
 	bodyPtr(body, "enabled", patch.Enabled)
 	return body
+}
+
+type triggerEventStore struct{ client *Client }
+
+var _ store.TriggerEventStore = (*triggerEventStore)(nil)
+
+func (s *triggerEventStore) Get(ctx context.Context, ws, eventID string) (*domain.TriggerEvent, error) {
+	var out domain.TriggerEvent
+	path := "/api/v1/" + pathEscape(ws) + "/trigger-events/" + pathEscape(eventID)
+	if err := s.client.do(ctx, "GET", path, nil, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+func (s *triggerEventStore) List(ctx context.Context, ws string, filter store.TriggerEventFilter) ([]*domain.TriggerEvent, error) {
+	q := url.Values{}
+	if filter.SourceKind != "" {
+		q.Set("source_kind", filter.SourceKind)
+	}
+	if filter.TriggerBindingID != "" {
+		q.Set("trigger_binding_id", filter.TriggerBindingID)
+	}
+	if filter.Limit > 0 {
+		q.Set("limit", strconv.Itoa(filter.Limit))
+	}
+	path := "/api/v1/" + pathEscape(ws) + "/trigger-events"
+	if encoded := q.Encode(); encoded != "" {
+		path += "?" + encoded
+	}
+	var resp struct {
+		TriggerEvents []*domain.TriggerEvent `json:"trigger_events"`
+	}
+	if err := s.client.do(ctx, "GET", path, nil, &resp); err != nil {
+		return nil, err
+	}
+	if resp.TriggerEvents == nil {
+		resp.TriggerEvents = []*domain.TriggerEvent{}
+	}
+	return resp.TriggerEvents, nil
+}
+
+type triggerDeliveryStore struct{ client *Client }
+
+var _ store.TriggerDeliveryStore = (*triggerDeliveryStore)(nil)
+
+func (s *triggerDeliveryStore) Get(ctx context.Context, ws, deliveryID string) (*domain.TriggerDelivery, error) {
+	var out domain.TriggerDelivery
+	path := "/api/v1/" + pathEscape(ws) + "/trigger-deliveries/" + pathEscape(deliveryID)
+	if err := s.client.do(ctx, "GET", path, nil, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+func (s *triggerDeliveryStore) List(ctx context.Context, ws string, filter store.TriggerDeliveryFilter) ([]*domain.TriggerDelivery, error) {
+	q := url.Values{}
+	if filter.TriggerEventID != "" {
+		q.Set("trigger_event_id", filter.TriggerEventID)
+	}
+	if filter.TriggerBindingID != "" {
+		q.Set("trigger_binding_id", filter.TriggerBindingID)
+	}
+	if filter.Status != "" {
+		q.Set("status", string(filter.Status))
+	}
+	if filter.Limit > 0 {
+		q.Set("limit", strconv.Itoa(filter.Limit))
+	}
+	path := "/api/v1/" + pathEscape(ws) + "/trigger-deliveries"
+	if encoded := q.Encode(); encoded != "" {
+		path += "?" + encoded
+	}
+	var resp struct {
+		TriggerDeliveries []*domain.TriggerDelivery `json:"trigger_deliveries"`
+	}
+	if err := s.client.do(ctx, "GET", path, nil, &resp); err != nil {
+		return nil, err
+	}
+	if resp.TriggerDeliveries == nil {
+		resp.TriggerDeliveries = []*domain.TriggerDelivery{}
+	}
+	return resp.TriggerDeliveries, nil
+}
+
+type triggerRouteStore struct{ client *Client }
+
+var _ store.TriggerRouteDispatcher = (*triggerRouteStore)(nil)
+
+func (s *triggerRouteStore) DispatchTriggerRoute(ctx context.Context, ws, routeKey string, in store.TriggerRouteDispatch) (*domain.DriverRun, error) {
+	body := map[string]any{
+		"run_id":             in.RunID,
+		"idempotency_key":    in.IdempotencyKey,
+		"source_event_id":    in.SourceEventID,
+		"event_type":         in.EventType,
+		"subject_ref":        in.SubjectRef,
+		"actor_ref":          in.ActorRef,
+		"epic_id":            in.EpicID,
+		"raw_payload_ref":    in.RawPayloadRef,
+		"raw_payload_digest": in.RawPayloadDigest,
+		"signature_status":   in.SignatureStatus,
+		"replay_of_event_id": in.ReplayOfEventID,
+		"payload":            in.Payload,
+	}
+	headers := map[string]string{}
+	if in.IdempotencyKey != "" {
+		headers["Idempotency-Key"] = in.IdempotencyKey
+	}
+	var out domain.DriverRun
+	path := "/api/v1/" + pathEscape(ws) + "/trigger-routes/" + pathEscape(routeKey)
+	if err := s.client.doWithHeaders(ctx, "POST", path, body, &out, headers); err != nil {
+		return nil, err
+	}
+	return &out, nil
 }
