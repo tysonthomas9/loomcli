@@ -88,6 +88,19 @@ var fleetPrefixes = []string{
 	"fleet-db:",
 }
 
+// fleetExcludedSubstrings marks fragments that, when present in a
+// fleet-db:-prefixed key, identify regenerable full-text-search index
+// state we deliberately do NOT snapshot: fleet-db:{ws}:fts:tok:{token},
+// fleet-db:{ws}:fts:issue:{id}, fleet-db:{ws}:fts:registry, and the
+// fleet-db:{ws}:fts:version marker. The token namespace dominates the
+// keyspace (87% of keys in a live 60-issue workspace), bloating every
+// sweep, while the whole namespace is derived state: fleet-db rebuilds
+// it from issue hashes at startup whenever the version marker is absent
+// (BrowserOperator/fleet-db#81) — which is exactly what a restore from a
+// snapshot written with this exclusion produces. The match is scoped to
+// the fleet-db: namespace so no terminal:/ws: key can ever be dropped.
+var fleetExcludedSubstrings = []string{":fts:"}
+
 // Manager owns the miniredis lifecycle and snapshot persistence.
 type Manager struct {
 	mr           *miniredis.Miniredis
@@ -417,6 +430,13 @@ func (m *Manager) shouldPersist(key string) bool {
 		}
 	}
 	if m.fleetKeys {
+		if strings.HasPrefix(key, "fleet-db:") {
+			for _, frag := range fleetExcludedSubstrings {
+				if strings.Contains(key, frag) {
+					return false // regenerable FTS index — never snapshot
+				}
+			}
+		}
 		for _, p := range fleetPrefixes {
 			if strings.HasPrefix(key, p) {
 				return true
