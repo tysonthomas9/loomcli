@@ -6,9 +6,9 @@
 // double. Local mode still uses this client, pointed at an embedded fleet-db
 // subprocess; cloud mode points it at a remote fleet-db service.
 //
-// Authentication: the client sends X-Fleet-API-Key (when APIKey is
-// configured) and X-Actor (always — defaults to the loom agent name or
-// the OS user). Fleet-db's --auth-dev-mode treats X-Actor as the
+// Authentication: the client sends X-API-Key plus X-Fleet-API-Key
+// (when APIKey is configured) and X-Actor (always — defaults to the
+// loom agent name or the OS user). Fleet-db's --auth-dev-mode treats X-Actor as the
 // authenticated identity; production deployments should configure
 // JWT bearer tokens via SetAuthToken.
 package fleetdb
@@ -43,7 +43,7 @@ type Config struct {
 	// Required. Trailing slash trimmed.
 	BaseURL string
 
-	// APIKey is sent as X-Fleet-API-Key. Optional in dev mode.
+	// APIKey is sent as X-API-Key and X-Fleet-API-Key. Optional in dev mode.
 	APIKey string
 
 	// Actor is sent as X-Actor on every request. Identifies the caller
@@ -81,6 +81,14 @@ type Client struct {
 	leases     *agentLeaseStore
 	ownership  *agentOwnershipLeaseStore
 	commands   *agentCommandStore
+	drivers    *driverStore
+	versions   *driverVersionStore
+	profiles   *workerProfileStore
+	services   *agentServiceStore
+	bindings   *triggerBindingStore
+	runs       *driverRunStore
+	steps      *driverStepStore
+	taskRuns   *taskRunStore
 	roles      *roleStore
 	daemon     *daemonStore
 }
@@ -113,6 +121,14 @@ func New(cfg Config) (*Client, error) {
 	c.leases = &agentLeaseStore{client: c}
 	c.ownership = &agentOwnershipLeaseStore{client: c}
 	c.commands = &agentCommandStore{client: c}
+	c.drivers = &driverStore{client: c}
+	c.versions = &driverVersionStore{client: c}
+	c.profiles = &workerProfileStore{client: c}
+	c.services = &agentServiceStore{client: c}
+	c.bindings = &triggerBindingStore{client: c}
+	c.runs = &driverRunStore{client: c}
+	c.steps = &driverStepStore{client: c}
+	c.taskRuns = &taskRunStore{client: c}
 	c.roles = &roleStore{client: c}
 	c.daemon = &daemonStore{client: c}
 	return c, nil
@@ -149,6 +165,26 @@ func (c *Client) AgentOwnershipLeases() store.AgentOwnershipLeaseStore { return 
 
 func (c *Client) AgentCommands() store.AgentCommandStore { return c.commands }
 
+// Drivers returns the DriverStore.
+func (c *Client) Drivers() store.DriverStore { return c.drivers }
+
+// DriverVersions returns the DriverVersionStore.
+func (c *Client) DriverVersions() store.DriverVersionStore { return c.versions }
+
+func (c *Client) WorkerProfiles() store.WorkerProfileStore { return c.profiles }
+
+func (c *Client) AgentServices() store.AgentServiceStore { return c.services }
+
+func (c *Client) TriggerBindings() store.TriggerBindingStore { return c.bindings }
+
+// DriverRuns returns the DriverRunStore.
+func (c *Client) DriverRuns() store.DriverRunStore { return c.runs }
+
+func (c *Client) DriverSteps() store.DriverStepStore { return c.steps }
+
+// TaskRuns returns the TaskRunStore.
+func (c *Client) TaskRuns() store.TaskRunStore { return c.taskRuns }
+
 // Roles returns the RoleStore.
 func (c *Client) Roles() store.RoleStore { return c.roles }
 
@@ -181,7 +217,9 @@ func (c *Client) SetAPIKey(key string) {
 //
 // HTTP error responses are mapped to domain sentinel errors:
 //   - 404 → domain.ErrNotFound
-//   - 409 → domain.ErrAlreadyExists
+//   - 409 already_exists → domain.ErrAlreadyExists
+//   - 409 already_claimed → domain.ErrAlreadyClaimed
+//   - 409 invalid_transition → domain.ErrInvalidTransition
 //   - 400/422 → domain.ErrInvalid
 //   - 4xx other → domain.ErrConflict (best fit; callers can inspect msg)
 //   - 5xx → fmt.Errorf wrapping the body
@@ -204,6 +242,28 @@ func (c *Client) doWithHeaders(ctx context.Context, method, path string, body, o
 		req.Header.Set(k, v)
 	}
 
+	return c.doRequest(req, method, path, out)
+}
+
+func (c *Client) doRaw(ctx context.Context, method, path string, body io.Reader, contentType string, out any) error {
+	c.mu.RLock()
+	auth := fleethttp.Auth{BearerToken: c.authToken, APIKey: c.apiKey, Actor: c.actor}
+	c.mu.RUnlock()
+
+	req, err := http.NewRequestWithContext(ctx, method, c.baseURL+path, body)
+	if err != nil {
+		return fmt.Errorf("fleetdb: build request: %w", err)
+	}
+	req.Header.Set("Accept", "application/json")
+	if contentType = strings.TrimSpace(contentType); contentType != "" {
+		req.Header.Set("Content-Type", contentType)
+	}
+	auth.Apply(req)
+
+	return c.doRequest(req, method, path, out)
+}
+
+func (c *Client) doRequest(req *http.Request, method, path string, out any) error {
 	resp, err := c.http.Do(req)
 	if err != nil {
 		return fmt.Errorf("fleetdb: %s %s: %w", method, path, err)
@@ -238,6 +298,7 @@ func (c *Client) doWithHeaders(ctx context.Context, method, path string, body, o
 // domain sentinel + descriptive wrap.
 func classifyHTTPError(method, path string, status int, body []byte) error {
 	msg := extractErrorMessage(body)
+	code := extractErrorCode(body)
 	prefix := fmt.Sprintf("fleetdb: %s %s: HTTP %d", method, path, status)
 	if msg != "" {
 		prefix += ": " + msg
@@ -246,7 +307,20 @@ func classifyHTTPError(method, path string, status int, body []byte) error {
 	case http.StatusNotFound:
 		return fmt.Errorf("%s: %w", prefix, domain.ErrNotFound)
 	case http.StatusConflict:
+		switch code {
+		case "already_claimed":
+			return fmt.Errorf("%s: %w", prefix, domain.ErrAlreadyClaimed)
+		case "invalid_transition":
+			return fmt.Errorf("%s: %w", prefix, domain.ErrInvalidTransition)
+		case "conflict":
+			return fmt.Errorf("%s: %w", prefix, domain.ErrConflict)
+		}
 		return fmt.Errorf("%s: %w", prefix, domain.ErrAlreadyExists)
+	case http.StatusForbidden:
+		if strings.Contains(path, "/driver-runs/") {
+			return fmt.Errorf("%s: %w", prefix, domain.ErrNotOwner)
+		}
+		return fmt.Errorf("%s: %w", prefix, domain.ErrConflict)
 	case http.StatusBadRequest, http.StatusUnprocessableEntity:
 		return fmt.Errorf("%s: %w", prefix, domain.ErrInvalid)
 	}
@@ -272,6 +346,18 @@ func extractErrorMessage(body []byte) string {
 		s = s[:200] + "…"
 	}
 	return s
+}
+
+func extractErrorCode(body []byte) string {
+	var structured struct {
+		Error struct {
+			Code string `json:"code"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(body, &structured); err != nil {
+		return ""
+	}
+	return structured.Error.Code
 }
 
 // pathEscape wraps url.PathEscape so call sites stay compact.

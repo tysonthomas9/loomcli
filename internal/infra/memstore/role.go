@@ -12,8 +12,9 @@ import (
 )
 
 type roleStore struct {
-	mu    sync.RWMutex
-	items map[string]map[string]*domain.Role // wsKey → name → Role
+	mu       sync.RWMutex
+	items    map[string]map[string]*domain.Role // wsKey → name → Role
+	services *agentServiceStore
 }
 
 func newRoleStore() *roleStore {
@@ -131,6 +132,9 @@ func (s *roleStore) Update(_ context.Context, ws, name string, patch store.RoleU
 }
 
 func (s *roleStore) Delete(_ context.Context, ws, name string) error {
+	if s.services != nil && s.services.hasRole(ws, name) {
+		return fmt.Errorf("role %q in workspace %q is used by agent service: %w", name, ws, domain.ErrInvalidTransition)
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if _, ok := s.items[ws][name]; !ok {
@@ -138,6 +142,13 @@ func (s *roleStore) Delete(_ context.Context, ws, name string) error {
 	}
 	delete(s.items[ws], name)
 	return nil
+}
+
+func (s *roleStore) exists(ws, name string) bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	_, ok := s.items[ws][name]
+	return ok
 }
 
 func cloneRole(r *domain.Role) *domain.Role {

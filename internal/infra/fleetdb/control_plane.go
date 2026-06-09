@@ -306,18 +306,24 @@ var _ store.ArtifactStore = (*artifactStore)(nil)
 
 func (s *artifactStore) Create(ctx context.Context, in store.ArtifactCreate) (*domain.Artifact, error) {
 	body := map[string]any{
-		"artifact_id": in.ArtifactID,
-		"agent_id":    in.AgentID,
-		"session_id":  in.SessionID,
-		"terminal_id": in.TerminalID,
-		"task_id":     in.TaskID,
-		"type":        in.Type,
-		"uri":         in.URI,
-		"summary":     in.Summary,
-		"mime_type":   in.MIMEType,
-		"size_bytes":  in.SizeBytes,
-		"checksum":    in.Checksum,
-		"metadata":    in.Metadata,
+		"artifact_id":      in.ArtifactID,
+		"agent_id":         in.AgentID,
+		"session_id":       in.SessionID,
+		"terminal_id":      in.TerminalID,
+		"task_id":          in.TaskID,
+		"owner_type":       in.OwnerType,
+		"owner_id":         in.OwnerID,
+		"type":             in.Type,
+		"uri":              in.URI,
+		"summary":          in.Summary,
+		"mime_type":        in.MIMEType,
+		"size_bytes":       in.SizeBytes,
+		"checksum":         in.Checksum,
+		"content_hash":     in.ContentHash,
+		"visibility":       in.Visibility,
+		"redaction_status": in.RedactionStatus,
+		"durable_status":   in.DurableStatus,
+		"metadata":         in.Metadata,
 	}
 	var out domain.Artifact
 	if err := s.client.do(ctx, "POST", "/api/v1/"+pathEscape(in.WorkspaceKey)+"/artifacts", body, &out); err != nil {
@@ -348,8 +354,17 @@ func (s *artifactStore) List(ctx context.Context, ws string, filter store.Artifa
 	if filter.TaskID != "" {
 		q.Set("task_id", filter.TaskID)
 	}
+	if filter.OwnerType != "" {
+		q.Set("owner_type", filter.OwnerType)
+	}
+	if filter.OwnerID != "" {
+		q.Set("owner_id", filter.OwnerID)
+	}
 	if filter.Type != "" {
 		q.Set("type", filter.Type)
+	}
+	if filter.Status != "" {
+		q.Set("durable_status", filter.Status)
 	}
 	if filter.Limit > 0 {
 		q.Set("limit", strconv.Itoa(filter.Limit))
@@ -368,6 +383,22 @@ func (s *artifactStore) List(ctx context.Context, ws string, filter store.Artifa
 		resp.Artifacts = []*domain.Artifact{}
 	}
 	return resp.Artifacts, nil
+}
+
+func (s *artifactStore) UploadContent(ctx context.Context, ws, artifactID string, upload store.ArtifactContentUpload) (*domain.Artifact, error) {
+	var out domain.Artifact
+	if err := s.client.doRaw(ctx, "PUT", "/api/v1/"+pathEscape(ws)+"/artifacts/"+pathEscape(artifactID)+"/content", upload.Body, upload.MIMEType, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+func (s *artifactStore) Finalize(ctx context.Context, ws, artifactID string, finalize store.ArtifactFinalize) (*domain.Artifact, error) {
+	var out domain.Artifact
+	if err := s.client.do(ctx, "POST", "/api/v1/"+pathEscape(ws)+"/artifacts/"+pathEscape(artifactID)+"/finalize", artifactFinalizeBody(finalize), &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
 }
 
 func (s *artifactStore) Update(ctx context.Context, ws, artifactID string, patch store.ArtifactUpdate) (*domain.Artifact, error) {
@@ -506,6 +537,12 @@ func artifactUpdateBody(patch store.ArtifactUpdate) map[string]any {
 	if patch.TaskID != nil {
 		body["task_id"] = *patch.TaskID
 	}
+	if patch.OwnerType != nil {
+		body["owner_type"] = *patch.OwnerType
+	}
+	if patch.OwnerID != nil {
+		body["owner_id"] = *patch.OwnerID
+	}
 	if patch.Type != nil {
 		body["type"] = *patch.Type
 	}
@@ -524,8 +561,55 @@ func artifactUpdateBody(patch store.ArtifactUpdate) map[string]any {
 	if patch.Checksum != nil {
 		body["checksum"] = *patch.Checksum
 	}
+	if patch.ContentHash != nil {
+		body["content_hash"] = *patch.ContentHash
+	}
+	if patch.Visibility != nil {
+		body["visibility"] = *patch.Visibility
+	}
+	if patch.RedactionStatus != nil {
+		body["redaction_status"] = *patch.RedactionStatus
+	}
+	if patch.DurableStatus != nil {
+		body["durable_status"] = *patch.DurableStatus
+	}
 	if patch.Metadata != nil {
 		body["metadata"] = *patch.Metadata
+	}
+	if patch.FinalizedAt != nil {
+		body["finalized_at"] = patch.FinalizedAt.Format(time.RFC3339Nano)
+	}
+	return body
+}
+
+func artifactFinalizeBody(finalize store.ArtifactFinalize) map[string]any {
+	body := map[string]any{}
+	if finalize.URI != nil {
+		body["uri"] = *finalize.URI
+	}
+	if finalize.Summary != nil {
+		body["summary"] = *finalize.Summary
+	}
+	if finalize.MIMEType != nil {
+		body["mime_type"] = *finalize.MIMEType
+	}
+	if finalize.SizeBytes != nil {
+		body["size_bytes"] = *finalize.SizeBytes
+	}
+	if finalize.Checksum != nil {
+		body["checksum"] = *finalize.Checksum
+	}
+	if finalize.ContentHash != nil {
+		body["content_hash"] = *finalize.ContentHash
+	}
+	if finalize.Visibility != nil {
+		body["visibility"] = *finalize.Visibility
+	}
+	if finalize.RedactionStatus != nil {
+		body["redaction_status"] = *finalize.RedactionStatus
+	}
+	if finalize.Metadata != nil {
+		body["metadata"] = *finalize.Metadata
 	}
 	return body
 }

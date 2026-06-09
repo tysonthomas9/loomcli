@@ -117,6 +117,24 @@ func (s commandPollerTestStore) AgentOwnershipLeases() store.AgentOwnershipLease
 func (s commandPollerTestStore) AgentCommands() store.AgentCommandStore {
 	return s.commands
 }
+func (s commandPollerTestStore) Drivers() store.DriverStore { return nil }
+func (s commandPollerTestStore) DriverVersions() store.DriverVersionStore {
+	return nil
+}
+func (s commandPollerTestStore) WorkerProfiles() store.WorkerProfileStore {
+	return nil
+}
+func (s commandPollerTestStore) AgentServices() store.AgentServiceStore {
+	return nil
+}
+func (s commandPollerTestStore) TriggerBindings() store.TriggerBindingStore {
+	return nil
+}
+func (s commandPollerTestStore) DriverRuns() store.DriverRunStore { return nil }
+func (s commandPollerTestStore) DriverSteps() store.DriverStepStore {
+	return nil
+}
+func (s commandPollerTestStore) TaskRuns() store.TaskRunStore     { return nil }
 func (s commandPollerTestStore) Roles() store.RoleStore           { return nil }
 func (s commandPollerTestStore) Daemon() store.DaemonProfileStore { return nil }
 func (s commandPollerTestStore) Close() error                     { return nil }

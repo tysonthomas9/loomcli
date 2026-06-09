@@ -360,8 +360,9 @@ func (b *FleetBackend) Get(ctx context.Context, id string) (*backend.IssueDetail
 	// populated for callers that project dependencies/comments from Get().
 	// Failures are non-fatal: the primary Get already succeeded and
 	// empty-list is a reasonable degraded mode.
-	if deps, err := b.fetchDependencies(ctx, id); err == nil {
+	if deps, dependents, err := b.fetchDependencies(ctx, id); err == nil {
 		result.Dependencies = deps
+		result.Dependents = dependents
 	}
 	if comments, err := b.ListComments(ctx, id); err == nil {
 		result.Comments = comments

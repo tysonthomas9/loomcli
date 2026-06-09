@@ -295,6 +295,8 @@ func (b *runBackend) Update(_ context.Context, _ string, _ backend.UpdateParams)
 
 func (b *runBackend) ClaimIssue(_ context.Context, _ string, _ time.Duration) error { return nil }
 
+func (b *runBackend) ReleaseIssueLock(_ context.Context, _, _ string) error { return nil }
+
 func (b *runBackend) DeferIssue(_ context.Context, _ string, _ time.Time) error { return nil }
 
 func (b *runBackend) UndeferIssue(_ context.Context, _ string) error { return nil }

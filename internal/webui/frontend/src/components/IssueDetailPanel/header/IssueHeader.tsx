@@ -46,6 +46,10 @@ export interface IssueHeaderProps {
   onCopyLink?: () => void;
   /** Callback when move button is clicked */
   onMove?: () => void;
+  /** Callback when epic runner button is clicked */
+  onRunEpic?: () => void;
+  /** Whether the epic runner request is in flight */
+  isRunningEpic?: boolean;
   /** Full PR URL (e.g., https://github.com/owner/repo/pull/42) */
   prUrl?: string;
   /** Extracted PR number (e.g., "42") */
@@ -85,6 +89,8 @@ export function IssueHeader({
   onPriorityClick,
   onCopyLink,
   onMove,
+  onRunEpic,
+  isRunningEpic,
   prUrl,
   prNumber,
   sticky,
@@ -157,6 +163,29 @@ export function IssueHeader({
               → merge #{prNumber}
             </a>
           </>
+        )}
+        {onRunEpic && (
+          <button
+            type="button"
+            className={styles.runEpicButton}
+            onClick={onRunEpic}
+            disabled={isRunningEpic}
+            aria-label={
+              isRunningEpic ? "Starting epic runner" : "Run epic workflow"
+            }
+            data-testid="header-run-epic-button"
+          >
+            <svg
+              width="14"
+              height="14"
+              viewBox="0 0 16 16"
+              fill="none"
+              aria-hidden="true"
+            >
+              <path d="M5 3.5v9l7-4.5-7-4.5z" fill="currentColor" />
+            </svg>
+            <span>{isRunningEpic ? "Starting" : "Run epic"}</span>
+          </button>
         )}
         {onCopyLink && (
           <button

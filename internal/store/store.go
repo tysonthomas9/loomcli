@@ -29,6 +29,14 @@ type Store interface {
 	AgentLeases() AgentLeaseStore
 	AgentOwnershipLeases() AgentOwnershipLeaseStore
 	AgentCommands() AgentCommandStore
+	Drivers() DriverStore
+	DriverVersions() DriverVersionStore
+	WorkerProfiles() WorkerProfileStore
+	AgentServices() AgentServiceStore
+	TriggerBindings() TriggerBindingStore
+	DriverRuns() DriverRunStore
+	DriverSteps() DriverStepStore
+	TaskRuns() TaskRunStore
 	Roles() RoleStore
 	Daemon() DaemonProfileStore
 	io.Closer

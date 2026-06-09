@@ -119,6 +119,25 @@ func TestConfigureServeLocalRuntimeModeMarksDesktopService(t *testing.T) {
 	}
 }
 
+func TestDriverExecutorEnabled(t *testing.T) {
+	for _, value := range []string{"1", "true", "TRUE", "yes", "on"} {
+		t.Run(value, func(t *testing.T) {
+			t.Setenv(envLoomDriverExecutor, value)
+			if !driverExecutorEnabled() {
+				t.Fatalf("driverExecutorEnabled() = false for %q", value)
+			}
+		})
+	}
+	for _, value := range []string{"", "0", "false", "off", "no"} {
+		t.Run("disabled_"+value, func(t *testing.T) {
+			t.Setenv(envLoomDriverExecutor, value)
+			if driverExecutorEnabled() {
+				t.Fatalf("driverExecutorEnabled() = true for %q", value)
+			}
+		})
+	}
+}
+
 // withMockData runs a test with mocked collectDataFunc
 func withMockData(t *testing.T, data *MonitorData, fn func()) {
 	t.Helper()
