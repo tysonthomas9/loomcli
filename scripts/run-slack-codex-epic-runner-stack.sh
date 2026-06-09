@@ -4,6 +4,8 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 FIXTURE_DIR="${FIXTURE_DIR:-${ROOT_DIR}/scripts/fixtures/slack-src}"
 TASK_RUNNER="${TASK_RUNNER:-${ROOT_DIR}/scripts/slack-codex-task-runner.mjs}"
+EPIC_RUNNER_SOURCE="${EPIC_RUNNER_SOURCE:-${ROOT_DIR}/internal/workflows/builtin/epic-runner.ts}"
+LOOM_SDK_DIR="${LOOM_SDK_DIR:-${ROOT_DIR}/sdk}"
 
 CONTAINER="${CONTAINER:-loom-slack-epic}"
 IMAGE="${IMAGE:-loomcli-dev-slack-epic}"
@@ -22,8 +24,11 @@ BUILD_IMAGE="${BUILD_IMAGE:-auto}"
 CODEX_HOME="${CODEX_HOME:-${HOME}/.codex}"
 CLAUDE_HOME="${CLAUDE_HOME:-${HOME}/.claude}"
 CONTAINER_REPO_PATH="${CONTAINER_REPO_PATH:-/tmp/slack-src}"
+CONTAINER_EPIC_RUNNER_DIST="${CONTAINER_EPIC_RUNNER_DIST:-/tmp/epic-runner-dist}"
+CONTAINER_DRIVER_WORKDIR="${CONTAINER_DRIVER_WORKDIR:-/root/.loom/workspaces/alpha}"
 CONTAINER_CODEX_HOME="${CONTAINER_CODEX_HOME:-/root/.codex-rw}"
 CONTAINER_LOOM_URL="${CONTAINER_LOOM_URL:-http://127.0.0.1:8080}"
+REGISTER_EPIC_RUNNER="${REGISTER_EPIC_RUNNER:-1}"
 
 log() {
   printf '[slack-codex-stack] %s\n' "$*"
@@ -196,6 +201,115 @@ seed_loom() {
   post_json "/api/workspaces/${WORKSPACE_ID}/issues" "$(issue_payload "Team workspace switcher" "task" 2 "SLACK-UI-2" "Extend the existing Slack app shell with a usable team workspace switcher.")"
 }
 
+source_digest() {
+  node -e '
+const crypto = require("node:crypto");
+const fs = require("node:fs");
+const file = process.argv[1];
+const hash = crypto.createHash("sha256");
+hash.update("workflows/epic-runner.ts");
+hash.update(Buffer.from([0]));
+hash.update(fs.readFileSync(file));
+hash.update(Buffer.from([0]));
+console.log("sha256:" + hash.digest("hex"));
+' "$EPIC_RUNNER_SOURCE"
+}
+
+write_epic_runner_dist() {
+  local dist="$1"
+  mkdir -p "${dist}/node_modules/@loom/sdk"
+  cp "${LOOM_SDK_DIR}/package.json" "${dist}/node_modules/@loom/sdk/package.json"
+  cp "${LOOM_SDK_DIR}/flue.js" "${dist}/node_modules/@loom/sdk/flue.js"
+  node -e '
+const fs = require("node:fs");
+const [sourcePath, outPath] = process.argv.slice(1);
+const source = fs.readFileSync(sourcePath, "utf8")
+  .replace(/from ["'\'']@loom\/sdk\/flue["'\''];/, "from \"./node_modules/@loom/sdk/flue.js\";");
+fs.writeFileSync(outPath, source);
+' "$EPIC_RUNNER_SOURCE" "${dist}/workflow.mjs"
+  cat > "${dist}/server.mjs" <<'EOF'
+import { run } from "./workflow.mjs";
+
+let completed = false;
+
+function send(message) {
+  if (typeof process.send === "function") {
+    process.send({ version: 1, ...message });
+  } else {
+    console.log(JSON.stringify(message.result || message.error || message));
+  }
+}
+
+function normalizeResult(result) {
+  if (!result || typeof result !== "object") {
+    return { status: "completed", summary: "completed" };
+  }
+  return result;
+}
+
+async function invoke(message) {
+  if (completed) return;
+  completed = true;
+  try {
+    const result = await run({ payload: message.payload || {}, requestId: message.requestId });
+    send({ type: "result", requestId: message.requestId, result: normalizeResult(result) });
+  } catch (error) {
+    send({
+      type: "error",
+      requestId: message.requestId,
+      error: {
+        type: "driver_runtime",
+        message: error && error.message ? error.message : String(error),
+        details: error && error.stack ? error.stack : "",
+      },
+    });
+  }
+}
+
+process.on("message", (message) => {
+  if (!message || message.type !== "invoke") return;
+  void invoke(message);
+});
+
+send({ type: "ready" });
+EOF
+}
+
+register_epic_runner_workflow() {
+  if ! truthy "$REGISTER_EPIC_RUNNER"; then
+    return 0
+  fi
+  require_path "$EPIC_RUNNER_SOURCE"
+  require_path "${LOOM_SDK_DIR}/package.json"
+  require_path "${LOOM_SDK_DIR}/flue.js"
+
+  local build_dir digest
+  build_dir="$(mktemp -d "${TMPDIR:-/tmp}/loom-epic-runner-dist.XXXXXX")"
+  write_epic_runner_dist "$build_dir"
+  digest="$(source_digest)"
+
+  log "registering builtin epic-runner workflow"
+  podman exec "$CONTAINER" rm -rf "$CONTAINER_EPIC_RUNNER_DIST"
+  podman exec "$CONTAINER" mkdir -p "$CONTAINER_EPIC_RUNNER_DIST"
+  podman cp "${build_dir}/." "${CONTAINER}:${CONTAINER_EPIC_RUNNER_DIST}/"
+  podman exec \
+    -w "$CONTAINER_DRIVER_WORKDIR" \
+    -e LOOM_CONFIG_DIR=/root/.loom-config \
+    -e LOOM_WORKSPACE="$WORKSPACE_ID" \
+    -e LOOM_FLEET_DB_ACTOR=loom-dev \
+    "$CONTAINER" \
+    loom driver register \
+      --flue-dist "$CONTAINER_EPIC_RUNNER_DIST" \
+      --name epic-runner \
+      --id epic-runner \
+      --workflow epic-runner \
+      --source-ref "builtin://workflows/epic-runner/versions/${digest}" \
+      --source-digest "$digest" \
+      --activate \
+      --json >/dev/null
+  rm -rf "$build_dir"
+}
+
 main() {
   require_cmd curl
   require_cmd node
@@ -237,6 +351,7 @@ main() {
   wait_for_health
   seed_repo
   seed_loom
+  register_epic_runner_workflow
 
   log "ready"
   printf '%s\n' "UI:     ${BASE_URL}/ws/${WORKSPACE_ID}/agents/atlas"
