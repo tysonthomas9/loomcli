@@ -78,6 +78,7 @@ func RunCodexLeadRuntime(ctx context.Context, cfg CodexLeadRuntimeConfig) error 
 
 	discoverCtx, cancelDiscover := context.WithCancel(ctx)
 	defer cancelDiscover()
+	//nolint:gosec // G118 false positive: discoverCtx derives from the request-scoped ctx and is cancelled on return.
 	go discoverCodexLeadThread(discoverCtx, cfg, runtime, runtimeStartedAt)
 
 	tuiErr := runCodexRemoteTUI(ctx, cfg, endpoint)

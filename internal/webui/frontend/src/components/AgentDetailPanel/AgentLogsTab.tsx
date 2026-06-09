@@ -81,7 +81,9 @@ export function AgentLogsTab({
           Refresh
         </button>
         <div data-testid="log-viewer">
-          <span data-state={state}>{state === "empty" ? "no logs" : state}</span>
+          <span data-state={state}>
+            {state === "empty" ? "no logs" : state}
+          </span>
           {mode === "tmux" && terminalSession ? (
             <EmbeddedTerminal
               sessionName={terminalSession.sessionName}

@@ -705,7 +705,10 @@ func TestGenerateFleetTaskPrompt(t *testing.T) {
 				"loom data show loomcli-kv6.4 --output json",
 				"already claimed",
 				"JSON `design`",
-				"loom push \"spark\"",
+				// Fleet workers integrate via the v5 flow (push the branch +
+				// signal completion); the lead/orchestrator does the merge.
+				"git push origin HEAD",
+				"loom complete",
 			},
 		},
 		{
