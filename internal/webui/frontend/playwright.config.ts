@@ -13,9 +13,19 @@ const useFailureVideo = chromiumExecutablePath ? "off" : "retain-on-failure";
 // Self-contained mode: Playwright starts loom serve on a dedicated port (auth disabled by default).
 // Uses port 8090 to avoid conflict with dev server on 8080.
 const isSelfContained = isIntegration && !isLocalServer;
-const selfContainedPort = 8090;
+function resolvePort(name: string, fallback: number): number {
+  const raw = process.env[name];
+  if (!raw) return fallback;
+  const port = Number(raw);
+  if (!Number.isInteger(port) || port <= 0 || port > 65535) {
+    throw new Error(`${name} must be an integer TCP port`);
+  }
+  return port;
+}
+
+const selfContainedPort = resolvePort("E2E_PORT", 8090);
 // Vite preview serves the frontend for integration tests (backed by preview.proxy).
-const selfContainedFrontendPort = 3100;
+const selfContainedFrontendPort = resolvePort("E2E_FRONTEND_PORT", 3100);
 
 /** Resolve API key from env or key file for authenticated test projects. */
 function resolveApiKey(): string {
