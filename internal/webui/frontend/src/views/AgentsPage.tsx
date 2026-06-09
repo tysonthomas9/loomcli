@@ -28,7 +28,7 @@ import {
   orderAgentsForEpicRunner,
 } from "@/components/AgentIconRail/AgentIconRail";
 import { IssueDetailPanel } from "@/components/IssueDetailPanel/IssueDetailPanel";
-import { runEpic } from "@/api";
+import { EPIC_RUNNER_WORKFLOW_NAME, startWorkflowRun } from "@/api";
 import { useAgentStoreInstance } from "@/hooks";
 import { useToast } from "@/hooks/ui/useToast";
 import type { Issue } from "@/types";
@@ -77,40 +77,27 @@ function AgentsPageInner(): JSX.Element {
     setSelectedTask(null);
   }, [agentName]);
 
-  // handleRunEpic calls the shared backend command path
-  // (POST /api/workspaces/:ws/epics/:id/run). The backend validates that
-  // the selected agent is a lead, enforces "one epic per lead" + "one lead
-  // per epic", and binds agent.parent atomically. The lead's terminal
-  // picks up the new binding on next render. This replaces the prior
-  // "paste a shell command into the terminal" path, which silently no-op'd
-  // when the terminal was running an AI CLI like codex instead of a
-  // shell; see lead-agent-epic-runner-spec.md:37.
+  // Queue the built-in epic runner workflow for the selected lead. The
+  // workflow owns lead validation, binding, and child-task reconciliation.
   const handleRunEpic = useCallback(
     async (epicId: string) => {
       if (!agentName) return;
       try {
-        const result = await runEpic(workspaceId, epicId, agentName);
-        await agentStore.getState().fetchData();
-        const state = result.state === "resumed" ? "resumed" : "assigned";
-        const dispatched = result.reconcile?.dispatched_count ?? 0;
-        const suffix =
-          result.run_state === "already_running"
-            ? "runner already active"
-            : result.run_state === "drained"
-              ? "no open work"
-              : dispatched > 0
-                ? `dispatched ${dispatched} task${dispatched === 1 ? "" : "s"}`
-                : "waiting for ready work";
-        const delivery =
-          result.delivery_state === "pending" ? "; lead context pending" : "";
-        showToast(
-          `Epic ${epicId} ${state} for ${agentName}; ${suffix}${delivery}`,
+        const run = await startWorkflowRun(
+          workspaceId,
+          EPIC_RUNNER_WORKFLOW_NAME,
           {
-            type: "success",
+            epicId,
+            leadName: agentName,
+            requestedBy: "ui",
           },
         );
+        await agentStore.getState().fetchData();
+        showToast(`Epic runner queued for ${agentName}: ${run.run_id}`, {
+          type: "success",
+        });
       } catch (err) {
-        showToast(`run-epic failed: ${(err as Error).message}`, {
+        showToast(`Epic runner failed: ${(err as Error).message}`, {
           type: "error",
         });
       }
