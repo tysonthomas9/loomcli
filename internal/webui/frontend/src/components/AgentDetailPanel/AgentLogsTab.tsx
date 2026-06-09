@@ -16,6 +16,13 @@ interface AgentLogsTabProps {
   isActive: boolean;
 }
 
+// LogViewState widens ConnectionState with "empty": an archive fetch that
+// succeeded (or 404'd — see getAgentLogArchive) but returned no lines. We
+// surface that distinctly instead of showing the misleading "connected" label
+// over a blank viewer, which is what a daemon-mode agent with no archived log
+// used to render.
+type LogViewState = ConnectionState | "empty";
+
 export function AgentLogsTab({
   agentName,
   isActive,
@@ -28,7 +35,7 @@ export function AgentLogsTab({
     agentName: string;
   } | null>(null);
   const [lines, setLines] = useState<string[]>([]);
-  const [state, setState] = useState<ConnectionState>("connecting");
+  const [state, setState] = useState<LogViewState>("connecting");
 
   const load = useCallback(async () => {
     setState("connecting");
@@ -44,12 +51,16 @@ export function AgentLogsTab({
         });
         setMode("tmux");
         setLines([]);
+        // tmux connection state is driven by EmbeddedTerminal below.
       } else {
         const archive = await getAgentLogArchive(workspaceId, agentName);
         setMode("archive");
         setLines(archive.lines);
+        // "connected" only when there is actually something to show; an empty
+        // archive reports "empty" so the UI never claims a populated log when
+        // there isn't one.
+        setState(archive.lines.length > 0 ? "connected" : "empty");
       }
-      if (nextMode === "archive") setState("connected");
     } catch {
       setState("disconnected");
     }
@@ -70,7 +81,7 @@ export function AgentLogsTab({
           Refresh
         </button>
         <div data-testid="log-viewer">
-          <span data-state={state}>{state}</span>
+          <span data-state={state}>{state === "empty" ? "no logs" : state}</span>
           {mode === "tmux" && terminalSession ? (
             <EmbeddedTerminal
               sessionName={terminalSession.sessionName}
@@ -79,6 +90,10 @@ export function AgentLogsTab({
               isActive={isActive}
               onConnectionStateChange={setState}
             />
+          ) : state === "empty" ? (
+            <p data-testid="archive-empty" className={styles.emptyState}>
+              No logs available for this agent yet.
+            </p>
           ) : (
             <pre data-testid="terminal-container">{lines.join("\n")}</pre>
           )}

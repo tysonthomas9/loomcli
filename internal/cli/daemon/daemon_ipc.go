@@ -391,8 +391,8 @@ func (d *Daemon) validateIPCLease(ctx context.Context, req AgentIPCRequest) (Age
 	// IPC mutation extends the lease past a typical real-codex turn.
 	lease, err := d.store.AgentLeases().Heartbeat(ctx, d.sup.WorkspaceID, req.LeaseID, req.LeaseToken, 30*time.Minute)
 	if err != nil {
-		if errors.Is(err, domain.ErrAlreadyExists) {
-			slog.Warn("agent lease heartbeat returned already exists; verifying via get",
+		if errors.Is(err, domain.ErrAlreadyExists) || errors.Is(err, domain.ErrGone) {
+			slog.Warn("agent lease heartbeat returned already-exists/gone; verifying via get",
 				"workspace", d.sup.WorkspaceID,
 				"lease_id", req.LeaseID,
 				"err", err,

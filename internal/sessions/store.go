@@ -28,6 +28,16 @@ type Store struct {
 // Dir returns the absolute path to the sessions directory.
 func (s *Store) Dir() string { return s.dir }
 
+// SessionDir returns the absolute path to a single session's directory
+// (<runtimeDir>/sessions/<sessionID>), which holds prompt.txt, metadata.json,
+// the native transcript, and the event store's events.jsonl. It is the single
+// source of truth both the event-store WRITER (the OnEvent sink) and the READER
+// (transcript serving) resolve through, so the two can't diverge. No existence
+// check (cf. resolveSessionDir).
+func (s *Store) SessionDir(sessionID string) string {
+	return filepath.Join(s.dir, sessionID)
+}
+
 // NewStore creates a Store rooted at runtimeDir/sessions/.
 // It creates the sessions/ directory if it does not exist.
 func NewStore(runtimeDir string) (*Store, error) {

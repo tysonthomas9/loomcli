@@ -72,6 +72,7 @@ type RoleConfig struct {
 	Model          string   `yaml:"model,omitempty"`
 	TaskFilter     string   `yaml:"task_filter,omitempty"`
 	Backend        string   `yaml:"backend,omitempty"`
+	Effort         string   `yaml:"effort,omitempty"`
 	PathPatterns   []string `yaml:"path_patterns,omitempty"`
 	Skills         []string `yaml:"skills,omitempty"`
 	MaxPriority    *int     `yaml:"max_priority,omitempty"`
@@ -282,6 +283,7 @@ func roleConfigFromDomain(r *domain.Role) RoleConfig {
 		Model:          r.Model,
 		TaskFilter:     r.TaskFilter,
 		Backend:        r.Backend,
+		Effort:         r.Effort,
 		PathPatterns:   append([]string(nil), r.PathPatterns...),
 		Skills:         append([]string(nil), r.Skills...),
 		MaxPriority:    cloneIntPtr(r.MaxPriority),

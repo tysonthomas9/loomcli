@@ -7,6 +7,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/olesho/harness-wrapper/pkg/wrapper"
+
 	"github.com/tysonthomas9/loomcli/internal/agenterr"
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/events"
@@ -68,7 +70,7 @@ func TestHandleAutoTaskError_SameTaskStuck_EmitsEventAfterThreshold(t *testing.T
 	ctx := newStuckTestCtx("T-1", bus)
 	shutdown := make(chan struct{})
 
-	ae := &agenterr.AgentError{Class: agenterr.Transient, Message: "server error", Backend: "claude"}
+	ae := &agenterr.AgentError{Class: agenterr.OutcomeFromHarness(wrapper.ErrTransient), Message: "server error", Backend: "claude"}
 	rawErr := errors.New("exit code 1")
 
 	// First two failures: counter increments, no stuck event yet.
@@ -156,7 +158,7 @@ func TestHandleAutoTaskError_DifferentTasks_NotStuck(t *testing.T) {
 		stuckTaskIDs: make(map[string]bool),
 	}
 	shutdown := make(chan struct{})
-	ae := &agenterr.AgentError{Class: agenterr.Transient, Message: "server error", Backend: "claude"}
+	ae := &agenterr.AgentError{Class: agenterr.OutcomeFromHarness(wrapper.ErrTransient), Message: "server error", Backend: "claude"}
 
 	// Alternate A → B → A across 3 iterations. Because the task ID changes
 	// every failure, sameTaskFailures resets to 1 each time and the stuck
@@ -203,7 +205,7 @@ func TestHandleAutoTaskError_EmptyTaskID_DoesNotTriggerStuck(t *testing.T) {
 		stuckTaskIDs: make(map[string]bool),
 	}
 	shutdown := make(chan struct{})
-	ae := &agenterr.AgentError{Class: agenterr.Transient, Message: "server error", Backend: "claude"}
+	ae := &agenterr.AgentError{Class: agenterr.OutcomeFromHarness(wrapper.ErrTransient), Message: "server error", Backend: "claude"}
 
 	// Three consecutive failures with empty task ID — agent crashed before
 	// claiming. Per-task tracking must remain at zero, and the loop should
@@ -235,7 +237,7 @@ func TestHandleAutoTaskError_FatalBypassesStuckDetection(t *testing.T) {
 	ctx.sameTaskFailures = 2
 	shutdown := make(chan struct{})
 
-	ae := &agenterr.AgentError{Class: agenterr.AuthFailure, Message: "invalid api key", Backend: "claude"}
+	ae := &agenterr.AgentError{Class: agenterr.OutcomeFromHarness(wrapper.ErrAuth), Message: "invalid api key", Backend: "claude"}
 	cont := handleAutoTaskError(ctx, ae, errors.New("exit code 1"), shutdown)
 	if cont {
 		t.Error("fatal error must return false (exit), even when stuck threshold would otherwise fire")
@@ -362,7 +364,7 @@ func TestHandleAutoTaskError_StuckTaskDoesNotCountAgainstConsecutiveErrors(t *te
 	bus := &captureBus{}
 	ctx := newStuckTestCtx("T-1", bus)
 	shutdown := make(chan struct{})
-	ae := &agenterr.AgentError{Class: agenterr.Transient, Message: "server error", Backend: "claude"}
+	ae := &agenterr.AgentError{Class: agenterr.OutcomeFromHarness(wrapper.ErrTransient), Message: "server error", Backend: "claude"}
 
 	// Three same-task failures: the third triggers stuck-skip and resets
 	// ConsecutiveErrors to zero. The loop must remain alive.
@@ -388,7 +390,7 @@ func TestHandleAutoTaskError_AlreadyStuckTaskShortCircuits(t *testing.T) {
 	ctx.stuckTaskIDs["T-1"] = true
 	shutdown := make(chan struct{})
 
-	ae := &agenterr.AgentError{Class: agenterr.Transient, Message: "server error", Backend: "claude"}
+	ae := &agenterr.AgentError{Class: agenterr.OutcomeFromHarness(wrapper.ErrTransient), Message: "server error", Backend: "claude"}
 	cont := handleAutoTaskError(ctx, ae, errors.New("exit code 1"), shutdown)
 
 	if !cont {

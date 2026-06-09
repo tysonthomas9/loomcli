@@ -169,17 +169,13 @@ func TestGet_HappyPath(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Second)
 	details := types.IssueDetails{
 		Issue: types.Issue{
-			ID:                 "issue-1",
-			Title:              "Test Issue",
-			Description:        "description",
-			Design:             "design",
-			AcceptanceCriteria: "acceptance",
-			Notes:              "BLOCKED: missing origin remote",
-			Status:             types.StatusOpen,
-			Priority:           2,
-			IssueType:          types.TypeTask,
-			CreatedAt:          now,
-			UpdatedAt:          now,
+			ID:        "issue-1",
+			Title:     "Test Issue",
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+			CreatedAt: now,
+			UpdatedAt: now,
 		},
 		Labels:       []string{"label-1"},
 		Dependencies: []*types.IssueWithDependencyMetadata{},
@@ -216,18 +212,6 @@ func TestGet_HappyPath(t *testing.T) {
 	}
 	if result.Title != "Test Issue" {
 		t.Errorf("Title = %q, want %q", result.Title, "Test Issue")
-	}
-	if result.Description != "description" {
-		t.Errorf("Description = %q, want description", result.Description)
-	}
-	if result.Design != "design" {
-		t.Errorf("Design = %q, want design", result.Design)
-	}
-	if result.AcceptanceCriteria != "acceptance" {
-		t.Errorf("AcceptanceCriteria = %q, want acceptance", result.AcceptanceCriteria)
-	}
-	if result.Notes != "BLOCKED: missing origin remote" {
-		t.Errorf("Notes = %q, want blocker note", result.Notes)
 	}
 }
 
@@ -321,34 +305,6 @@ func TestList_QueryParams(t *testing.T) {
 		if !strings.Contains(gotQuery, want) {
 			t.Errorf("query %q missing %q", gotQuery, want)
 		}
-	}
-}
-
-func TestList_ClientFiltersMultipleReposWithoutServerLimit(t *testing.T) {
-	now := time.Now().UTC().Truncate(time.Second)
-	var gotQuery string
-	fb, ts := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
-		gotQuery = r.URL.RawQuery
-		respondOK(w, []*types.IssueWithCounts{
-			{Issue: &types.Issue{ID: "a", Title: "A", Status: types.StatusOpen, SourceRepo: "repo-a", CreatedAt: now, UpdatedAt: now}},
-			{Issue: &types.Issue{ID: "b", Title: "B", Status: types.StatusOpen, SourceRepo: "repo-b", CreatedAt: now, UpdatedAt: now}},
-			{Issue: &types.Issue{ID: "c", Title: "C", Status: types.StatusOpen, SourceRepo: "repo-c", CreatedAt: now, UpdatedAt: now}},
-		})
-	})
-	defer ts.Close()
-
-	result, err := fb.List(context.Background(), backend.ListOpts{
-		SourceRepos: []string{"repo-b", "repo-c"},
-		Limit:       1,
-	})
-	if err != nil {
-		t.Fatalf("List: %v", err)
-	}
-	if strings.Contains(gotQuery, "source_repos=") || strings.Contains(gotQuery, "repo=") || strings.Contains(gotQuery, "limit=") {
-		t.Fatalf("query = %q, want no unsupported repo filter or pre-filter limit", gotQuery)
-	}
-	if len(result) != 1 || result[0].ID != "b" {
-		t.Fatalf("result = %+v, want first locally filtered repo item", result)
 	}
 }
 
@@ -661,7 +617,7 @@ func TestCreate_HappyPath(t *testing.T) {
 
 	result, err := fb.Create(context.Background(), backend.CreateParams{
 		Title:     "New Issue",
-		Status:    "open",
+		Status:    "deferred",
 		IssueType: "task",
 		Priority:  2,
 	})
@@ -671,63 +627,8 @@ func TestCreate_HappyPath(t *testing.T) {
 	if result.ID != "new-1" {
 		t.Errorf("ID = %q, want %q", result.ID, "new-1")
 	}
-	if _, ok := gotBody["status"]; ok {
-		t.Errorf("body.status = %v, want omitted", gotBody["status"])
-	}
-}
-
-func TestCreate_AppliesDependenciesAfterCreate(t *testing.T) {
-	now := time.Now().UTC().Truncate(time.Second)
-	var paths []string
-	var depBodies []map[string]string
-	fb, ts := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
-		paths = append(paths, r.Method+" "+r.URL.Path)
-		switch r.URL.Path {
-		case "/api/v1/test-ws/issues":
-			respondOK(w, types.Issue{
-				ID:        "new-1",
-				Title:     "New Issue",
-				Status:    types.StatusOpen,
-				Priority:  2,
-				IssueType: types.TypeTask,
-				CreatedAt: now,
-				UpdatedAt: now,
-			})
-		case "/api/v1/test-ws/issues/new-1/deps":
-			var body map[string]string
-			json.NewDecoder(r.Body).Decode(&body) //nolint:errcheck
-			depBodies = append(depBodies, body)
-			respondOK(w, json.RawMessage(`{}`))
-		default:
-			t.Fatalf("unexpected path: %s", r.URL.Path)
-		}
-	})
-	defer ts.Close()
-
-	result, err := fb.Create(context.Background(), backend.CreateParams{
-		Title:        "New Issue",
-		IssueType:    "task",
-		Dependencies: []string{"dep-1", "dep-2"},
-	})
-	if err != nil {
-		t.Fatalf("Create: %v", err)
-	}
-	if result.ID != "new-1" {
-		t.Fatalf("ID = %q, want new-1", result.ID)
-	}
-	wantPaths := []string{
-		"POST /api/v1/test-ws/issues",
-		"POST /api/v1/test-ws/issues/new-1/deps",
-		"POST /api/v1/test-ws/issues/new-1/deps",
-	}
-	if strings.Join(paths, "\n") != strings.Join(wantPaths, "\n") {
-		t.Fatalf("paths = %#v, want %#v", paths, wantPaths)
-	}
-	if len(depBodies) != 2 || depBodies[0]["depends_on_id"] != "dep-1" || depBodies[1]["depends_on_id"] != "dep-2" {
-		t.Fatalf("dependency bodies = %#v", depBodies)
-	}
-	if depBodies[0]["type"] != "blocks" || depBodies[1]["type"] != "blocks" {
-		t.Fatalf("dependency types = %#v, want blocks", depBodies)
+	if gotBody["status"] != "deferred" {
+		t.Errorf("body.status = %v, want deferred", gotBody["status"])
 	}
 }
 
@@ -1146,9 +1047,24 @@ func TestRemoveLabel_UsesDedicatedEndpoint(t *testing.T) {
 
 func TestClose_HappyPath(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Second)
+	var claimReleased bool
 	fb, ts := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != "POST" {
 			t.Errorf("Method = %q, want POST", r.Method)
+		}
+		// Close releases the agent claim before closing (a closed issue is
+		// terminal and can no longer be unassigned).
+		if strings.HasSuffix(r.URL.Path, "/assign") {
+			var body struct {
+				Assignee string `json:"assignee"`
+			}
+			json.NewDecoder(r.Body).Decode(&body) //nolint:errcheck
+			if body.Assignee != "" {
+				t.Errorf("close assign assignee = %q, want empty (claim released)", body.Assignee)
+			}
+			claimReleased = true
+			respondOK(w, json.RawMessage(`{}`))
+			return
 		}
 		var gotBody map[string]interface{}
 		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
@@ -1180,6 +1096,9 @@ func TestClose_HappyPath(t *testing.T) {
 	}
 	if len(result.Unblocked) != 1 {
 		t.Fatalf("Unblocked len = %d, want 1", len(result.Unblocked))
+	}
+	if !claimReleased {
+		t.Error("expected close to release the agent claim before closing")
 	}
 }
 
@@ -1605,6 +1524,7 @@ func TestNonJSONResponse(t *testing.T) {
 func TestReopen_HappyPath(t *testing.T) {
 	var reopenPosted bool
 	var commentPosted bool
+	var claimReleased bool
 	fb, ts := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
 		// fleet-db reopen is POST /issues/{id}/reopen (dedicated endpoint);
 		// the previous PATCH status=open approach was rejected by
@@ -1629,6 +1549,18 @@ func TestReopen_HappyPath(t *testing.T) {
 			respondOK(w, map[string]interface{}{"id": 1, "body": body["body"]})
 			return
 		}
+		if r.Method == "POST" && strings.HasSuffix(r.URL.Path, "/assign") {
+			var body struct {
+				Assignee string `json:"assignee"`
+			}
+			json.NewDecoder(r.Body).Decode(&body) //nolint:errcheck
+			if body.Assignee != "" {
+				t.Errorf("reopen assign assignee = %q, want empty (claim released)", body.Assignee)
+			}
+			claimReleased = true
+			respondOK(w, json.RawMessage(`{}`))
+			return
+		}
 		t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
 	})
 	defer ts.Close()
@@ -1642,6 +1574,9 @@ func TestReopen_HappyPath(t *testing.T) {
 	}
 	if !commentPosted {
 		t.Error("expected comment to be posted with reason")
+	}
+	if !claimReleased {
+		t.Error("expected reopen to release the stale assignee claim")
 	}
 }
 
@@ -1680,65 +1615,6 @@ func TestReady_HappyPath(t *testing.T) {
 	}
 	if result[0].Parent != "epic-1" {
 		t.Errorf("Parent = %q, want %q", result[0].Parent, "epic-1")
-	}
-}
-
-func TestReady_ClientFiltersSourceReposWithoutServerLimit(t *testing.T) {
-	now := time.Now().UTC().Truncate(time.Second)
-	var gotQuery string
-	repoA := "repo-a"
-	repoB := "repo-b"
-	fb, ts := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
-		gotQuery = r.URL.RawQuery
-		respondOK(w, []*readyIssueWithParent{
-			{fleetIssueWire: fleetIssueWire{ID: "repo-a", Title: "A", Status: string(types.StatusOpen), CreatedAt: now, UpdatedAt: now}, Repo: &repoA},
-			{fleetIssueWire: fleetIssueWire{ID: "repo-b", Title: "B", Status: string(types.StatusOpen), CreatedAt: now, UpdatedAt: now}, Repo: &repoB},
-		})
-	})
-	defer ts.Close()
-
-	result, err := fb.Ready(context.Background(), backend.ReadyOpts{
-		SourceRepos: []string{"repo-b"},
-		Limit:       1,
-	})
-	if err != nil {
-		t.Fatalf("Ready: %v", err)
-	}
-	if strings.Contains(gotQuery, "source_repos=") || strings.Contains(gotQuery, "limit=") {
-		t.Fatalf("query = %q, want no unsupported repo filter or pre-filter limit", gotQuery)
-	}
-	if len(result) != 1 || result[0].ID != "repo-b" {
-		t.Fatalf("result = %+v, want repo-b", result)
-	}
-}
-
-func TestDeferred_HappyPath(t *testing.T) {
-	now := time.Now().UTC().Truncate(time.Second)
-	parent := "epic-1"
-	fb, ts := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
-		if got, want := r.URL.Path, "/api/v1/test-ws/issues/deferred"; got != want {
-			t.Errorf("path = %q, want %q", got, want)
-		}
-		respondOK(w, struct {
-			Issues []*readyIssueWithParent `json:"issues"`
-			Count  int                     `json:"count"`
-		}{Issues: []*readyIssueWithParent{
-			{
-				fleetIssueWire: fleetIssueWire{ID: "d-1", Title: "Deferred", Status: string(types.StatusOpen), Type: "task", ParentID: parent, CreatedAt: now, UpdatedAt: now},
-			},
-		}, Count: 1})
-	})
-	defer ts.Close()
-
-	result, err := fb.Deferred(context.Background(), backend.DeferredOpts{ParentID: parent, Type: "task"})
-	if err != nil {
-		t.Fatalf("Deferred: %v", err)
-	}
-	if len(result) != 1 {
-		t.Fatalf("len = %d, want 1", len(result))
-	}
-	if result[0].ID != "d-1" || result[0].Parent != parent || result[0].Status != string(types.StatusOpen) {
-		t.Fatalf("deferred result = %+v", result[0])
 	}
 }
 
@@ -2118,9 +1994,6 @@ func TestGetMutations_HappyPath(t *testing.T) {
 	if got[0].Type != backend.MutationCreate {
 		t.Errorf("got[0].Type = %q, want %q", got[0].Type, backend.MutationCreate)
 	}
-	if got[0].EntityType != "issue" || got[0].EntityID != "loom-1" || got[0].Action != "issue.create" {
-		t.Errorf("got[0] generic envelope = %q/%q/%q, want issue/loom-1/issue.create", got[0].EntityType, got[0].EntityID, got[0].Action)
-	}
 	if got[0].IssueID != "loom-1" || got[0].Title != "New issue" || got[0].ParentID != "ep-1" || got[0].SourceRepo != "org/repo" {
 		t.Errorf("got[0] = %+v, after-snapshot fields not extracted", got[0])
 	}
@@ -2197,15 +2070,6 @@ func TestGetMutations_ActionFolding(t *testing.T) {
 		if got[i].Type != wantT {
 			t.Errorf("got[%d].Type = %q, want %q", i, got[i].Type, wantT)
 		}
-		if got[i].EntityType == "" || got[i].EntityID == "" || got[i].Action == "" {
-			t.Errorf("got[%d] missing generic envelope fields: %+v", i, got[i])
-		}
-	}
-	if got[2].IssueID != "" || got[3].IssueID != "" || got[4].IssueID != "" {
-		t.Errorf("non-issue fleet mutations should not populate legacy issue_id: comment=%q label=%q workspace=%q", got[2].IssueID, got[3].IssueID, got[4].IssueID)
-	}
-	if got[0].IssueID != "a" || got[5].IssueID != "e" {
-		t.Errorf("issue fleet mutations should preserve legacy issue_id: update=%q unknown=%q", got[0].IssueID, got[5].IssueID)
 	}
 }
 

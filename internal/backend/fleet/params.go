@@ -336,56 +336,17 @@ func updateParamsToPatchRequest(params backend.UpdateParams) map[string]interfac
 }
 
 // createParamsToBody converts backend.CreateParams to the POST /issues body
-// shape fleet-db's CreateIssueRequest expects. Same dialect concerns as
-// updateParamsToPatchRequest — strict JSON validation rejects unknown
-// fields, so we drop loom-only fields rather than shipping them as-is.
+// shape fleet-db's CreateIssueRequest expects. The projection itself lives on
+// backend.CreateParams (FleetCreateBody) because the CLI hashes the identical
+// bytes into the default X-Idempotency-Key -- cli/data may not import this
+// package (depguard data-isolation), so the shared source of truth sits in
+// the backend package.
 //
-// Field renames vs CreateParams:
-//   - "issue_type"  → "type"
-//   - "parent"      → "parent_id"
-//   - "owner" stays "owner" but fleet-db expects *string (we send the
-//     scalar value directly; omitempty handles the unset case)
-//   - "source_repo" → "repo"
-//
-// Dropped from the POST body (no equivalent on fleet-db's CreateIssueRequest):
-//   - id, status, acceptance_criteria, created_by, external_ref,
-//     estimated_minutes, dependencies
-//
-// Status and dependencies are still applied by FleetBackend.Create after the
-// issue exists via workflow endpoints. They are only omitted from this strict
-// POST body.
-//
-// If any of those need round-tripping, file a fleet-db ticket to extend
-// the CreateIssueRequest schema rather than smuggling them through here.
+// Dependencies are intentionally absent here too: they are not part of the
+// create body. Create composes them after the issue exists via the dedicated
+// POST /issues/{id}/deps endpoint (see addCreateDependencies).
 func createParamsToBody(params backend.CreateParams) map[string]interface{} {
-	req := make(map[string]interface{})
-	setNonEmptyStr(req, "title", params.Title)
-	setNonEmptyStr(req, "description", params.Description)
-	if params.Priority != 0 {
-		req["priority"] = params.Priority
-	}
-	setNonEmptyStr(req, "type", params.IssueType)
-	setNonEmptyStr(req, "assignee", params.Assignee)
-	setNonEmptyStr(req, "owner", params.Owner)
-	if len(params.Labels) > 0 {
-		req["labels"] = params.Labels
-	}
-	setNonEmptyStr(req, "parent_id", params.Parent)
-	setNonEmptyStr(req, "repo", params.SourceRepo)
-	setNonEmptyStr(req, "design", params.Design)
-	setNonEmptyStr(req, "notes", params.Notes)
-	setNonEmptyStr(req, "defer_until", params.DeferUntil)
-	setNonEmptyStr(req, "due_at", params.DueAt)
-	return req
-}
-
-// setNonEmptyStr sets m[key] = val if val is non-empty. Companion to
-// setStrField (which is *string-based for PATCH semantics where nil
-// distinguishes "unset" from "empty").
-func setNonEmptyStr(m map[string]interface{}, key, val string) {
-	if val != "" {
-		m[key] = val
-	}
+	return params.FleetCreateBody()
 }
 
 // --- Helpers ---

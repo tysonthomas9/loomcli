@@ -91,16 +91,25 @@ func (s *sessionServiceImpl) storesForWorkspace(ctx context.Context, wsID string
 	return stores, nil
 }
 
+// storeOwningSession returns the first store whose metadata exists for
+// sessionID (i.e. the store that owns the session on disk), or nil.
+func storeOwningSession(stores []*sessions.Store, sessionID string) *sessions.Store {
+	for _, st := range stores {
+		if _, err := st.LoadMetadata(sessionID); err == nil {
+			return st
+		}
+	}
+	return nil
+}
+
 // findStoreForSession returns the first store that has metadata for the given session.
 func (s *sessionServiceImpl) findStoreForSession(ctx context.Context, wsID, sessionID string) (*sessions.Store, error) {
 	stores, err := s.storesForWorkspace(ctx, wsID)
 	if err != nil {
 		return nil, err
 	}
-	for _, store := range stores {
-		if _, err := store.LoadMetadata(sessionID); err == nil {
-			return store, nil
-		}
+	if st := storeOwningSession(stores, sessionID); st != nil {
+		return st, nil
 	}
 	return nil, service.ErrNotFound("session not found")
 }
@@ -110,6 +119,7 @@ func (s *sessionServiceImpl) ListTaskSessions(ctx context.Context, wsID, taskID 
 		return nil, service.ErrValidation("invalid task ID: must match [a-zA-Z0-9._-]+")
 	}
 	if items, err := s.controlPlaneTaskSessions(ctx, wsID, taskID); err == nil && len(items) > 0 {
+		s.enrichSessionListItemsFromFileStores(ctx, wsID, taskID, items)
 		return items, nil
 	}
 
@@ -132,6 +142,9 @@ func (s *sessionServiceImpl) ListTaskSessions(ctx context.Context, wsID, taskID 
 			if info, err := os.Stat(sessStore.NativeTranscriptPath(rec.SessionID)); err == nil && info.Size() > 0 {
 				item.HasTranscript = true
 			}
+			if !item.HasTranscript && eventStoreHasTranscript(sessStore, rec.SessionID) {
+				item.HasTranscript = true // F3: event store as a has_transcript source (native fallback above)
+			}
 			if diff, err := sessStore.ReadDiff(rec.SessionID); err == nil && diff != "" {
 				item.HasDiff = true
 			}
@@ -139,6 +152,78 @@ func (s *sessionServiceImpl) ListTaskSessions(ctx context.Context, wsID, taskID 
 		}
 	}
 	return items, nil
+}
+
+func (s *sessionServiceImpl) enrichSessionListItemsFromFileStores(ctx context.Context, wsID, taskID string, items []service.SessionListItem) {
+	stores, err := s.storesForWorkspace(ctx, wsID)
+	if err != nil {
+		return
+	}
+	for i := range items {
+		item := &items[i]
+		for _, sessStore := range stores {
+			meta, err := sessStore.LoadMetadata(item.SessionID)
+			if err != nil || meta.TaskID != taskID {
+				continue
+			}
+			enrichSessionRecordFromLocal(&item.SessionRecord, meta.SessionRecord)
+			if info, err := os.Stat(sessStore.NativeTranscriptPath(item.SessionID)); err == nil && info.Size() > 0 {
+				item.HasTranscript = true
+			}
+			if diff, err := sessStore.ReadDiff(item.SessionID); err == nil && diff != "" {
+				item.HasDiff = true
+			}
+			break
+		}
+	}
+}
+
+func enrichSessionRecordFromLocal(rec *sessions.SessionRecord, local sessions.SessionRecord) {
+	if rec.TaskID == "" {
+		rec.TaskID = local.TaskID
+	}
+	if rec.EpicID == "" {
+		rec.EpicID = local.EpicID
+	}
+	if rec.Backend == "" {
+		rec.Backend = local.Backend
+	}
+	if rec.Model == "" {
+		rec.Model = local.Model
+	}
+	if rec.Phase == "" {
+		rec.Phase = local.Phase
+	}
+	if localHasUsage(local) {
+		rec.InputTokens = local.InputTokens
+		rec.OutputTokens = local.OutputTokens
+		rec.CacheReadTokens = local.CacheReadTokens
+		rec.CacheWriteTokens = local.CacheWriteTokens
+		rec.EstimatedCostUSD = local.EstimatedCostUSD
+	}
+	if local.FilesChanged != 0 {
+		rec.FilesChanged = local.FilesChanged
+	}
+	if local.LinesAdded != 0 {
+		rec.LinesAdded = local.LinesAdded
+	}
+	if local.LinesRemoved != 0 {
+		rec.LinesRemoved = local.LinesRemoved
+	}
+	if len(local.FilesTouched) > 0 {
+		rec.FilesTouched = local.FilesTouched
+	}
+	if rec.ErrorClass == "" {
+		rec.ErrorClass = local.ErrorClass
+	}
+}
+
+func localHasUsage(rec sessions.SessionRecord) bool {
+	return rec.InputTokens != 0 ||
+		rec.OutputTokens != 0 ||
+		rec.CacheReadTokens != 0 ||
+		rec.CacheWriteTokens != 0 ||
+		rec.EstimatedCostUSD != 0
 }
 
 func (s *sessionServiceImpl) controlPlaneTaskSessions(ctx context.Context, wsID, taskID string) ([]service.SessionListItem, error) {
@@ -149,6 +234,13 @@ func (s *sessionServiceImpl) controlPlaneTaskSessions(ctx context.Context, wsID,
 	if err != nil {
 		return nil, err
 	}
+	// Resolve local stores once so artifact presence reflects on-disk truth, not the
+	// metadata keys (stamped at creation/completion). Best-effort: a remote-only
+	// deployment may have no local store, in which case we fall back to metadata.
+	var stores []*sessions.Store
+	if len(records) > 0 {
+		stores, _ = s.storesForWorkspace(ctx, wsID)
+	}
 	items := make([]service.SessionListItem, 0, len(records))
 	for _, rec := range records {
 		if rec == nil {
@@ -158,16 +250,37 @@ func (s *sessionServiceImpl) controlPlaneTaskSessions(ctx context.Context, wsID,
 			SessionRecord: sessionRecordFromAgentSession(rec),
 			IsActive:      isActiveAgentSession(rec.Status),
 		}
-		if rec.Metadata != nil {
-			item.HasTranscript = rec.Metadata["transcript_path"] != ""
-			item.HasDiff = rec.Metadata["diff_path"] != "" || rec.Metadata["diff_artifact_id"] != ""
-		}
+		fillControlPlaneArtifactFlags(&item, stores, rec)
 		items = append(items, item)
 	}
 	sort.Slice(items, func(i, j int) bool {
 		return items[i].StartedAt.After(items[j].StartedAt)
 	})
 	return items, nil
+}
+
+// fillControlPlaneArtifactFlags sets HasTranscript/HasDiff from on-disk truth when a
+// local store owns the session. The control-plane metadata keys (transcript_path is
+// stamped at creation, diff_path at completion) only record expected paths and don't
+// prove the artifact exists, so they're used only as a fallback for remote-only
+// sessions that have no local store.
+func fillControlPlaneArtifactFlags(item *service.SessionListItem, stores []*sessions.Store, rec *domain.AgentSession) {
+	if st := storeOwningSession(stores, rec.SessionID); st != nil {
+		if info, err := os.Stat(st.NativeTranscriptPath(rec.SessionID)); err == nil && info.Size() > 0 {
+			item.HasTranscript = true
+		}
+		if !item.HasTranscript && eventStoreHasTranscript(st, rec.SessionID) {
+			item.HasTranscript = true // F3: event store as a has_transcript source (native fallback above)
+		}
+		if diff, err := st.ReadDiff(rec.SessionID); err == nil && diff != "" {
+			item.HasDiff = true
+		}
+		return
+	}
+	if rec.Metadata != nil {
+		item.HasTranscript = rec.Metadata["transcript_path"] != ""
+		item.HasDiff = rec.Metadata["diff_path"] != "" || rec.Metadata["diff_artifact_id"] != ""
+	}
 }
 
 func sessionRecordFromAgentSession(rec *domain.AgentSession) sessions.SessionRecord {
@@ -271,6 +384,11 @@ func (s *sessionServiceImpl) GetSessionTranscript(ctx context.Context, wsID, tas
 	if err != nil {
 		return nil, err
 	}
+	// F3: serve from the event store when enabled + populated, else fall back to
+	// the native reader (transitional — transcripts never disappear mid-rollout).
+	if evs, ok := eventStoreParentEvents(store, sessionID); ok {
+		return evs, nil
+	}
 	events, loadErr := store.LoadNativeEvents(sessionID)
 	if loadErr != nil {
 		logger.Error("failed to load native transcript", "session_id", sessionID, "err", loadErr)
@@ -293,11 +411,22 @@ func (s *sessionServiceImpl) ListSessionSubagents(ctx context.Context, wsID, tas
 		return nil, service.ErrInternal("failed to list subagents", err)
 	}
 	ids := make([]string, 0, len(names))
+	seen := make(map[string]struct{}, len(names))
 	for _, name := range names {
 		// Format: agent-<id>.jsonl
 		stripped := strings.TrimSuffix(strings.TrimPrefix(name, "agent-"), ".jsonl")
 		if stripped != "" {
+			seen[stripped] = struct{}{}
 			ids = append(ids, stripped)
+		}
+	}
+	if eventIDs, ok := eventStoreSubagentIDs(store, sessionID); ok {
+		for _, id := range eventIDs {
+			if _, exists := seen[id]; exists {
+				continue
+			}
+			seen[id] = struct{}{}
+			ids = append(ids, id)
 		}
 	}
 	return ids, nil
@@ -313,6 +442,11 @@ func (s *sessionServiceImpl) GetSessionSubagentTranscript(ctx context.Context, w
 	}
 	if !sessions.SubagentIDPattern.MatchString(subagentID) {
 		return nil, service.ErrValidation("invalid subagent ID")
+	}
+	// F3: serve the subagent from the event store when enabled + populated, else
+	// fall back to the native subagent transcript.
+	if evs, ok := eventStoreSubagentEvents(store, sessionID, subagentID); ok {
+		return evs, nil
 	}
 	path := store.SubagentTranscriptPath(sessionID, subagentID)
 	if _, statErr := os.Stat(path); statErr != nil {

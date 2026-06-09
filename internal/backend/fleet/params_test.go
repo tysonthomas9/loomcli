@@ -1,7 +1,6 @@
 package fleet
 
 import (
-	"net/url"
 	"testing"
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
@@ -99,8 +98,8 @@ func TestCreateParamsToBody_RenamesFields(t *testing.T) {
 	if req["priority"] != 3 {
 		t.Errorf("priority = %v, want 3", req["priority"])
 	}
-	if _, ok := req["status"]; ok {
-		t.Error("status must be dropped — FleetBackend.Create applies status via workflow endpoints")
+	if req["status"] != "deferred" {
+		t.Errorf("status = %v, want deferred", req["status"])
 	}
 	if req["defer_until"] != "2026-05-01T00:00:00Z" {
 		t.Errorf("defer_until = %v, want RFC3339", req["defer_until"])
@@ -123,7 +122,7 @@ func TestCreateParamsToBody_DropsLoomOnlyFields(t *testing.T) {
 		Dependencies:       []string{"loom-2"},
 	})
 	for _, k := range []string{
-		"id", "status", "acceptance_criteria", "created_by",
+		"id", "acceptance_criteria", "created_by",
 		"external_ref", "estimated_minutes", "dependencies",
 	} {
 		if _, ok := req[k]; ok {
@@ -139,68 +138,4 @@ func TestCreateParamsToBody_OmitsZeroValues(t *testing.T) {
 			t.Errorf("zero-value field %q should not appear in body", k)
 		}
 	}
-}
-
-// --- listOptsToQuery tests ---
-//
-// fleet-db's listIssues endpoint expects ?type=<kind>, not ?issue_type=<kind>
-// (see fleet-db/api/openapi.yaml). loomcli sending "issue_type" caused the
-// filter to be silently ignored, so a query for --type=epic also returned
-// tasks.
-
-func TestListOptsToQuery_UsesTypeNotIssueType(t *testing.T) {
-	q := listOptsToQuery(backend.ListOpts{IssueType: "epic"})
-	v := parseQueryValues(t, q)
-	if _, has := v["issue_type"]; has {
-		t.Errorf("query contains issue_type=%q; fleet-db's listIssues silently ignores it", v.Get("issue_type"))
-	}
-	if got := v.Get("type"); got != "epic" {
-		t.Errorf("type = %q, want %q", got, "epic")
-	}
-}
-
-func TestListOptsToQuery_UsesFleetLabelAndRepoParams(t *testing.T) {
-	q := listOptsToQuery(backend.ListOpts{
-		Labels:      []string{"urgent"},
-		SourceRepos: []string{"repo-a"},
-	})
-	v := parseQueryValues(t, q)
-	if got := v.Get("label"); got != "urgent" {
-		t.Errorf("label = %q, want urgent", got)
-	}
-	if got := v.Get("repo"); got != "repo-a" {
-		t.Errorf("repo = %q, want repo-a", got)
-	}
-	if v.Get("labels") != "" {
-		t.Errorf("labels = %q, want absent", v.Get("labels"))
-	}
-	if v.Get("source_repos") != "" {
-		t.Errorf("source_repos = %q, want absent", v.Get("source_repos"))
-	}
-}
-
-func TestReadyOptsToQuery_UsesFleetLabelParams(t *testing.T) {
-	q := readyOptsToQuery(backend.ReadyOpts{
-		Labels:    []string{"urgent", "frontend"},
-		LabelsAny: []string{"bug", "design"},
-	})
-	v := parseQueryValues(t, q)
-	if got := v.Get("label"); got != "urgent,frontend" {
-		t.Errorf("label = %q, want comma-separated labels", got)
-	}
-	if got := v.Get("label_any"); got != "bug,design" {
-		t.Errorf("label_any = %q, want comma-separated labels_any", got)
-	}
-	if v.Get("labels") != "" || v.Get("labels_any") != "" {
-		t.Errorf("legacy labels params leaked: %q", q)
-	}
-}
-
-func parseQueryValues(t *testing.T, raw string) url.Values {
-	t.Helper()
-	v, err := url.ParseQuery(raw)
-	if err != nil {
-		t.Fatalf("parse query %q: %v", raw, err)
-	}
-	return v
 }

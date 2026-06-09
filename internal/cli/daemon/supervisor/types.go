@@ -25,6 +25,7 @@ type AgentProcess struct {
 	Pid                    int               // PID of current subprocess (0 when not running)
 	LogFile                *os.File          // log file handle for subprocess output (nil if not logging)
 	LogFilePath            string            // path to agent log file for watchdog stat checks
+	ArchiveLogFile         *os.File          // canonical agent archive (~/.loom/logs/<ws>/agents/<worktree>.log) the web UI Logs tab reads; nil if unavailable
 	TranscriptPath         string            // path to session transcript.jsonl for watchdog liveness (set by superviseAgent)
 	Session                *sessions.Session // daemon-created session handle (nil when no session active)
 	AgentSessionID         string            // fleet-db control-plane session id (empty when no session active)
@@ -34,10 +35,14 @@ type AgentProcess struct {
 	OwnershipLeaseID       string            // fleet-db logical-agent ownership lease id (empty when not owner)
 	OwnershipLeaseToken    string            // fleet-db logical-agent ownership lease token (empty when not owner)
 	OwnershipFencingToken  int64             // fencing token for logical-agent ownership
-	OwnershipLastHeartbeat time.Time         // last successful ownership heartbeat
+	OwnershipLastHeartbeat time.Time         // last successful ownership heartbeat (server-derived; display/telemetry only)
+	OwnershipRenewedAt     time.Time         // local-clock anchor captured just before the last confirmed acquire/renew was sent; drives the bounded fail-open validity window — never server-derived
 	BeforeRef              string            // git HEAD ref before spawn (for diff stats at finalization)
 	AssignedTaskID         string            // task claimed by supervisor preflight for this run
 	RequestedTaskID        string            // task requested by a lifecycle command before normal queue selection
+	ResumeTaskID           string            // interrupted task to re-claim this cycle (detected from a surviving crash-remnant lock); drives claimResumeTask for BOTH resume and checkpoint recovery. Per-cycle: cleared in clearAgentSessionState, re-detected in preFlightSetup
+	ResumeFailures         int               // consecutive failed RECOVERY attempts — resume AND checkpoint fallback (PERSISTS across cycles); escalation: resume×maxResumeFailures → checkpoint×1 → cold-start
+	RecoveryMode           recoveryMode      // this cycle's recovery classification (resume|checkpoint|cold); per-cycle, set in preFlightSetup, read by recordResumeOutcome to decide whether the run's outcome advances ResumeFailures
 	LastActivity           time.Time         // most recent PTY output observed by the agent's wrapper (driven by agent IPC heartbeats); zero between spawn and first observation
 
 	RestartCount   int       // consecutive restart attempts
@@ -50,6 +55,7 @@ type AgentProcess struct {
 	RateRetryCount int                  // consecutive rate-limit retries (separate from RestartCount)
 	LastNoWork     bool                 // true if last exit was due to no claimable tasks
 	NoWorkCount    int                  // consecutive NoWork exits (reset on non-NoWork exit)
+	ParkCount      int                  // park cycles since the last successful run (drives ParkBudget escalation; display-only in the state file, never hydrated across daemon restarts)
 
 	CurrentBackendIdx int       // 0=primary, 1+=fallback index into Entry.FallbackBackends
 	BackoffUntil      time.Time // when current backoff sleep ends (zero if not in backoff)
@@ -60,7 +66,7 @@ type AgentProcess struct {
 
 	StopReason StopReason // why the agent was stopped (set at decision site, empty while running)
 
-	Mu sync.Mutex // protects Cmd, Pid, LogFile, restart tracking, AssignedEpicID, AssignedTaskID, RequestedTaskID, LastError, CurrentBackendIdx, Session, AgentSessionID, ParentSessionID, AgentLeaseID, AgentLeaseToken, ownership fields, TranscriptPath, BeforeRef, StopReason, LastActivity
+	Mu sync.Mutex // protects Cmd, Pid, LogFile, restart tracking, AssignedEpicID, AssignedTaskID, RequestedTaskID, ResumeTaskID, ResumeFailures, RecoveryMode, LastError, CurrentBackendIdx, Session, AgentSessionID, ParentSessionID, AgentLeaseID, AgentLeaseToken, ownership fields, TranscriptPath, BeforeRef, StopReason, LastActivity
 }
 
 // StopReason identifies why an agent was stopped.
@@ -78,6 +84,17 @@ const (
 	StopReasonWatchdog           StopReason = "watchdog"
 	StopReasonBackendUnavailable StopReason = "backend_unavailable"
 	StopReasonEphemeralDone      StopReason = "ephemeral_done" // ephemeral-mode agent exited cleanly after one successful task
+	// StopReasonMaxRetriesParked marks an agent that exhausted its restart
+	// budget and is now park-and-retrying on a fixed interval (policy
+	// Decision Retry with OnExhaustion Park) instead of being abandoned.
+	// The supervise goroutine stays alive and the agent self-resumes once a
+	// transient root cause clears.
+	StopReasonMaxRetriesParked StopReason = "max_retries_parked"
+	// StopReasonFastFail marks a deterministic failure the policy refuses to
+	// retry or park (Decision FastFail — e.g. ContextOverflow, ModelNotFound
+	// with backends exhausted, or a capped park that never made progress).
+	// Surfaced as "failed" in daemon-status.
+	StopReasonFastFail StopReason = "fast_fail"
 )
 
 // resolveRemote returns the git remote name for this agent.
@@ -124,6 +141,7 @@ type SupervisedAgentStatus struct {
 	StopReason             StopReason // why the agent stopped (empty while running)
 	LastErrorClass         string     // string representation of last error class (e.g. "RateLimited")
 	NoWorkCount            int        // consecutive NoWork exits
+	ParkCount              int        // park cycles since the last successful run
 	BackoffUntil           time.Time  // when backoff sleep ends (zero if not in backoff)
 	RemoteBranch           string     // remote tracking ref (e.g. "origin/main")
 	OwnershipLeaseID       string

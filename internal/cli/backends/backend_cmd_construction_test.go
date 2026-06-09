@@ -283,8 +283,8 @@ func TestBuildClaudeNonInteractiveCmd_BudgetInArgs(t *testing.T) {
 				if i+1 >= len(args) {
 					t.Fatal("--max-budget-usd flag present but no value follows")
 				}
-				if args[i+1] != "5.00" {
-					t.Errorf("--max-budget-usd value = %q, want %q", args[i+1], "5.00")
+				if args[i+1] != "50.00" {
+					t.Errorf("--max-budget-usd value = %q, want %q", args[i+1], "50.00")
 				}
 				break
 			}

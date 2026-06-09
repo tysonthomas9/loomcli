@@ -310,10 +310,19 @@ func (s *issueServiceImpl) CloseIssue(ctx context.Context, params CloseIssuePara
 		Force:       params.Force,
 	})
 	if err != nil {
-		// "blocker" / cycle conflicts surface as KindConflict via the backend's
-		// classifier; KindNotFound is mapped already. Fall through to translate.
-		slog.Error("backend error in CloseIssue", "issue_id", params.IssueID, "err", err)
-		return nil, translateBackendError(err)
+		// Idempotent close: "already closed" means the desired state is
+		// true. Old fleet-db versions surface it as a conflict — treat it
+		// as a quiet no-op success instead of an ERROR-level failure (new
+		// fleet-db returns 200 and never reaches this branch).
+		if backend.IsAlreadyClosedConflict(err) {
+			slog.Info("close was a no-op: issue already closed", "issue_id", params.IssueID)
+			result = &backend.CloseResult{Closed: &backend.IssueData{ID: params.IssueID}}
+		} else {
+			// "blocker" / cycle conflicts surface as KindConflict via the backend's
+			// classifier; KindNotFound is mapped already. Fall through to translate.
+			slog.Error("backend error in CloseIssue", "issue_id", params.IssueID, "err", err)
+			return nil, translateBackendError(err)
+		}
 	}
 	if result == nil {
 		return nil, ErrInternal("backend returned nil close result", nil)
@@ -655,7 +664,7 @@ func (s *issueServiceImpl) ListDependencies(ctx context.Context, issueID string)
 		return nil, ErrNotFound(fmt.Sprintf("issue not found: %s", issueID))
 	}
 
-	out, err := json.Marshal(depsToWire(detail.Dependencies))
+	out, err := json.Marshal(depsToWire(detail.Dependencies, issueID))
 	if err != nil {
 		return nil, ErrInternal("failed to marshal dependencies", err)
 	}

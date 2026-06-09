@@ -7,6 +7,8 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/olesho/harness-wrapper/pkg/wrapper"
+
 	"github.com/tysonthomas9/loomcli/internal/agenterr"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/store"
@@ -14,9 +16,22 @@ import (
 
 const defaultOwnershipRetryInterval = 5 * time.Second
 
-func (s *Supervisor) acquireAgentOwnership(ap *AgentProcess) bool {
+// ownershipAcquireOutcome classifies an ownership acquire attempt so callers
+// can distinguish "someone else verifiably holds it" from "could not tell"
+// (network/5xx) — the verify-before-kill path branches on exactly that.
+type ownershipAcquireOutcome int
+
+const (
+	ownershipAcquired ownershipAcquireOutcome = iota
+	ownershipHeldByOther
+	ownershipAcquireInconclusive
+)
+
+func (s *Supervisor) acquireAgentOwnership(ap *AgentProcess) ownershipAcquireOutcome {
 	if s.ControlStore == nil || s.WorkspaceID == "" {
-		return true
+		// Disabled control plane maps to success so non-control-plane
+		// supervision keeps today's behavior exactly.
+		return ownershipAcquired
 	}
 	nodeID := s.NodeID
 	if nodeID == "" {
@@ -25,6 +40,7 @@ func (s *Supervisor) acquireAgentOwnership(ap *AgentProcess) bool {
 	ttl := defaultLeaseTTL
 	ctx, cancel := context.WithTimeout(context.Background(), controlPlaneOperationTimeout)
 	defer cancel()
+	sentAt := time.Now()
 	lease, err := s.ControlStore.AgentOwnershipLeases().Acquire(ctx, store.AgentOwnershipLeaseAcquire{
 		WorkspaceKey:    s.WorkspaceID,
 		AgentID:         ap.Entry.Worktree,
@@ -36,33 +52,20 @@ func (s *Supervisor) acquireAgentOwnership(ap *AgentProcess) bool {
 	if err != nil {
 		if errors.Is(err, domain.ErrAlreadyExists) || errors.Is(err, domain.ErrConflict) {
 			slog.Info("agent ownership held by another daemon", "worktree", ap.Entry.Worktree, "workspace", s.WorkspaceID, "err", err)
-			return false
-		}
-		if errors.Is(err, domain.ErrNotFound) {
-			clearAgentOwnershipLeaseState(ap)
-			slog.Info("agent ownership leases unavailable; continuing without ownership guard", "worktree", ap.Entry.Worktree, "workspace", s.WorkspaceID, "err", err)
-			return true
+			return ownershipHeldByOther
 		}
 		slog.Warn("agent ownership acquire failed", "worktree", ap.Entry.Worktree, "workspace", s.WorkspaceID, "err", err)
-		return false
+		return ownershipAcquireInconclusive
 	}
 	ap.Mu.Lock()
 	ap.OwnershipLeaseID = lease.LeaseID
 	ap.OwnershipLeaseToken = lease.Token
 	ap.OwnershipFencingToken = lease.FencingToken
-	ap.OwnershipLastHeartbeat = lease.LastHeartbeat
+	ap.OwnershipLastHeartbeat = lease.LastHeartbeat // server-derived: display/telemetry only
+	ap.OwnershipRenewedAt = sentAt                  // local-clock anchor: drives the fail-open validity window
 	ap.Mu.Unlock()
 	slog.Debug("agent ownership acquired", "worktree", ap.Entry.Worktree, "workspace", s.WorkspaceID, "node_id", nodeID, "fencing_token", lease.FencingToken)
-	return true
-}
-
-func clearAgentOwnershipLeaseState(ap *AgentProcess) {
-	ap.Mu.Lock()
-	ap.OwnershipLeaseID = ""
-	ap.OwnershipLeaseToken = ""
-	ap.OwnershipFencingToken = 0
-	ap.OwnershipLastHeartbeat = time.Time{}
-	ap.Mu.Unlock()
+	return ownershipAcquired
 }
 
 func (s *Supervisor) releaseAgentOwnership(ap *AgentProcess) {
@@ -100,26 +103,24 @@ func (s *Supervisor) startOwnershipHeartbeat(ap *AgentProcess) func() {
 	}
 
 	ttl := defaultLeaseTTL
-	interval := ttl / 4
-	if interval <= 0 || interval > defaultNodeInterval {
-		interval = defaultNodeInterval
-	}
+	interval := ownershipHeartbeatBaseInterval(ttl)
 	stop := make(chan struct{})
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		ticker := time.NewTicker(interval)
-		defer ticker.Stop()
+		timer := time.NewTimer(nextOwnershipHeartbeatDelay(ap, interval, ttl))
+		defer timer.Stop()
 		for {
 			select {
 			case <-stop:
 				return
 			case <-s.Shutdown:
 				return
-			case <-ticker.C:
+			case <-timer.C:
 				if !s.heartbeatAgentOwnership(ap, ttl) {
 					return
 				}
+				timer.Reset(nextOwnershipHeartbeatDelay(ap, interval, ttl))
 			}
 		}
 	}()
@@ -131,35 +132,209 @@ func (s *Supervisor) startOwnershipHeartbeat(ap *AgentProcess) func() {
 
 func (s *Supervisor) heartbeatAgentOwnership(ap *AgentProcess, ttl time.Duration) bool {
 	ap.Mu.Lock()
-	agentID := ap.Entry.Worktree
 	token := ap.OwnershipLeaseToken
 	ap.Mu.Unlock()
 	if token == "" {
 		return false
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), controlPlaneOperationTimeout)
-	lease, err := s.ControlStore.AgentOwnershipLeases().Heartbeat(ctx, s.WorkspaceID, agentID, token, ttl)
-	cancel()
-	if err != nil {
-		slog.Warn("agent ownership heartbeat failed; stopping agent process", "worktree", agentID, "workspace", s.WorkspaceID, "err", err)
-		backend := s.GetEffectiveBackend(ap)
-		ap.Mu.Lock()
-		ap.LastError = &agenterr.AgentError{
-			Class:     agenterr.Unknown,
-			ExitCode:  -1,
-			Message:   fmt.Sprintf("ownership heartbeat failed: %v", err),
-			Backend:   backend,
-			Timestamp: time.Now(),
-		}
-		ap.Mu.Unlock()
-		s.StopAgent(ap, s.GetSigtermTimeout())
-		return false
+	if err := s.doOwnershipHeartbeat(ap, ttl); err != nil {
+		return s.verifyAgentOwnershipAfterHeartbeatFailure(ap, ttl, err)
+	}
+	return true
+}
+
+func ownershipHeartbeatBaseInterval(ttl time.Duration) time.Duration {
+	interval := ttl / 4
+	if interval <= 0 || interval > defaultNodeInterval {
+		return defaultNodeInterval
+	}
+	return interval
+}
+
+func nextOwnershipHeartbeatDelay(ap *AgentProcess, interval, ttl time.Duration) time.Duration {
+	if interval <= 0 {
+		return 0
 	}
 	ap.Mu.Lock()
-	ap.OwnershipLastHeartbeat = lease.LastHeartbeat
-	ap.OwnershipFencingToken = lease.FencingToken
+	renewedAt := ap.OwnershipRenewedAt
 	ap.Mu.Unlock()
-	return true
+	remaining := ownershipRemainingValidity(renewedAt, ttl)
+	if remaining <= 0 {
+		return 0
+	}
+	if remaining < interval {
+		return remaining
+	}
+	return interval
+}
+
+// doOwnershipHeartbeat performs one heartbeat round-trip and, on success,
+// advances the server-derived display fields and the local-clock renewal
+// anchor (captured immediately before the request was sent, monotonic
+// reading preserved).
+func (s *Supervisor) doOwnershipHeartbeat(ap *AgentProcess, ttl time.Duration) error {
+	ap.Mu.Lock()
+	agentID := ap.Entry.Worktree
+	token := ap.OwnershipLeaseToken
+	ap.Mu.Unlock()
+	if token == "" {
+		return errors.New("ownership heartbeat: lease token cleared")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), controlPlaneOperationTimeout)
+	defer cancel()
+	sentAt := time.Now()
+	lease, err := s.ControlStore.AgentOwnershipLeases().Heartbeat(ctx, s.WorkspaceID, agentID, token, ttl)
+	if err != nil {
+		return err
+	}
+	ap.Mu.Lock()
+	ap.OwnershipLastHeartbeat = lease.LastHeartbeat // server-derived: display/telemetry only, never feeds validity
+	ap.OwnershipFencingToken = lease.FencingToken
+	ap.OwnershipRenewedAt = sentAt // local-clock anchor: drives the fail-open validity window
+	ap.Mu.Unlock()
+	return nil
+}
+
+// verifyAgentOwnershipAfterHeartbeatFailure decides whether a heartbeat
+// failure means ownership is verifiably lost (kill) or recoverable
+// (re-acquire / ride out). Every decision derives from a server-arbitrated
+// operation — a heartbeat retry or a re-acquire — never from comparing
+// server timestamps against the local clock. Returns true to keep the
+// heartbeat loop (and agent) running.
+func (s *Supervisor) verifyAgentOwnershipAfterHeartbeatFailure(ap *AgentProcess, ttl time.Duration, hbErr error) bool {
+	agentID := ap.Entry.Worktree
+	slog.Warn("agent ownership heartbeat failed; verifying before any kill", "worktree", agentID, "workspace", s.WorkspaceID, "err", hbErr)
+	if !isTypedDomainError(hbErr) {
+		// Untyped failure (timeout, connection error, 5xx): one immediate
+		// retry IS the false-alarm verification, and it is server-side
+		// proof (no client clock involved). It goes through the same
+		// heartbeat plumbing, so a success is a genuine renewal and
+		// OwnershipRenewedAt advances naturally.
+		retryErr := s.doOwnershipHeartbeat(ap, ttl)
+		if retryErr == nil {
+			slog.Info("ownership heartbeat retry succeeded; continuing", "worktree", agentID)
+			return true
+		}
+		if !isTypedDomainError(retryErr) {
+			// Inconclusive twice — bounded fail-open.
+			return s.continueOwnershipIfWithinValidity(ap, ttl, retryErr)
+		}
+		hbErr = retryErr
+	}
+	// The server itself ruled the lease non-renewable by us (410 gone,
+	// 404, legacy 409, 403, 4xx): re-acquire arbitration.
+	return s.arbitrateOwnershipByReacquire(ap, ttl, hbErr)
+}
+
+// arbitrateOwnershipByReacquire resolves an ownership dispute through one
+// tri-state re-acquire — fleet-db's acquire op is the arbiter (a
+// same-owner-live re-acquire preserves the token; an expired/released one
+// issues a fresh token).
+func (s *Supervisor) arbitrateOwnershipByReacquire(ap *AgentProcess, ttl time.Duration, hbErr error) bool {
+	agentID := ap.Entry.Worktree
+	ap.Mu.Lock()
+	// Dead-process guard from supervisor state, not signal-0: the
+	// supervisor clears Cmd/Pid only after cmd.Wait() returns, so an
+	// exited-but-unreaped process still passes kill(pid, 0), and PID reuse
+	// makes signal-0 worse. (Narrow race — exited, Wait not yet returned,
+	// ProcessState still nil — is acceptable: superviseAgent unwinds
+	// moments later and releases/re-acquires normally. This guard is
+	// best-effort anti-resurrection; the loop is the corrector.)
+	dead := ap.Cmd == nil || ap.Pid == 0 || ap.Cmd.ProcessState != nil
+	ap.Mu.Unlock()
+	if dead {
+		slog.Info("ownership verification: agent process not running; not re-acquiring", "worktree", agentID)
+		return false
+	}
+	switch s.acquireAgentOwnership(ap) {
+	case ownershipAcquired:
+		ap.Mu.Lock()
+		newFence := ap.OwnershipFencingToken
+		ap.Mu.Unlock()
+		slog.Info("ownership re-acquired after heartbeat failure", "worktree", agentID, "fencing_token", newFence, "heartbeat_err", hbErr)
+		return true
+	case ownershipHeldByOther:
+		s.killAgentForOwnership(ap, "verifiably_lost", hbErr)
+		return false
+	default: // ownershipAcquireInconclusive
+		return s.continueOwnershipIfWithinValidity(ap, ttl, hbErr)
+	}
+}
+
+// continueOwnershipIfWithinValidity is the bounded fail-open: ride out an
+// inconclusive verification only while the last confirmed renewal proves
+// the lease is still live server-side; past that bound ownership is
+// genuinely unknown AND acquirable by others, so fail closed.
+func (s *Supervisor) continueOwnershipIfWithinValidity(ap *AgentProcess, ttl time.Duration, hbErr error) bool {
+	ap.Mu.Lock()
+	renewedAt := ap.OwnershipRenewedAt
+	ap.Mu.Unlock()
+	if ownershipWithinValidity(renewedAt, ttl) {
+		slog.Warn("ownership verification inconclusive; continuing within lease validity window", "worktree", ap.Entry.Worktree, "err", hbErr)
+		return true
+	}
+	s.killAgentForOwnership(ap, "ownership_unverifiable", hbErr)
+	return false
+}
+
+func ownershipRemainingValidity(renewedAt time.Time, ttl time.Duration) time.Duration {
+	if renewedAt.IsZero() || ttl <= 0 {
+		return 0
+	}
+	now := time.Now()
+	monoRemaining := ttl - now.Sub(renewedAt)
+	wallRemaining := ttl - now.Round(0).Sub(renewedAt.Round(0))
+	if monoRemaining <= 0 || wallRemaining <= 0 {
+		return 0
+	}
+	if monoRemaining < wallRemaining {
+		return monoRemaining
+	}
+	return wallRemaining
+}
+
+// ownershipWithinValidity: fail-open is permitted only while BOTH clocks
+// agree less than ttl has elapsed since the last confirmed renewal. The
+// server stamps expires_at = server_processing_time + ttl, and processing
+// necessarily happens after the client sent, so "elapsed-since-send < ttl"
+// is a conservative lower bound on server-side validity that involves no
+// cross-host clock comparison (never use the server-returned ExpiresAt
+// here). The wall clause counts suspend gaps even where the monotonic clock
+// freezes across sleep; the monotonic clause counts backward wall-clock
+// steps. Either clause expiring ends fail-open — over-counting is safe.
+// Residual assumption: the monotonic clock does not freeze during the same
+// window in which the wall clock steps backward.
+func ownershipWithinValidity(renewedAt time.Time, ttl time.Duration) bool {
+	return ownershipRemainingValidity(renewedAt, ttl) > 0
+}
+
+// isTypedDomainError reports whether the error carries a domain sentinel —
+// i.e. the server itself classified the outcome (vs a transport-level
+// failure where the server's verdict is unknown).
+func isTypedDomainError(err error) bool {
+	return errors.Is(err, domain.ErrGone) ||
+		errors.Is(err, domain.ErrNotFound) ||
+		errors.Is(err, domain.ErrAlreadyExists) ||
+		errors.Is(err, domain.ErrConflict) ||
+		errors.Is(err, domain.ErrInvalid)
+}
+
+// killAgentForOwnership stops the agent for an ownership-loss reason,
+// preserving the existing LastError shape.
+func (s *Supervisor) killAgentForOwnership(ap *AgentProcess, reason string, hbErr error) {
+	agentID := ap.Entry.Worktree
+	slog.Warn("agent ownership heartbeat failed; stopping agent process", "worktree", agentID, "workspace", s.WorkspaceID, "reason", reason, "err", hbErr)
+	backend := s.GetEffectiveBackend(ap)
+	ap.Mu.Lock()
+	ap.LastError = &agenterr.AgentError{
+		Class:     agenterr.OutcomeFromHarness(wrapper.ErrUnknown),
+		ExitCode:  -1,
+		Message:   fmt.Sprintf("ownership heartbeat failed (%s): %v", reason, hbErr),
+		Backend:   backend,
+		Timestamp: time.Now(),
+	}
+	ap.Mu.Unlock()
+	s.StopAgent(ap, s.GetSigtermTimeout())
 }
 
 func (s *Supervisor) sleepBeforeOwnershipRetry(ap *AgentProcess) bool {

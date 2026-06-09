@@ -40,6 +40,23 @@ func TestValidateIPCLease_Heartbeat409_GetSucceeds(t *testing.T) {
 	assertLeaseStoreCalls(t, leases.calls, []string{"heartbeat", "get"})
 }
 
+// Heartbeat 410 (fleet-db lease_expired → domain.ErrGone) takes the same
+// verify-via-get fast path as the legacy 409 mislabel: a live, token-matched
+// record still validates the fenced mutation.
+func TestValidateIPCLease_Heartbeat410Gone_GetSucceeds(t *testing.T) {
+	leases := &scriptedAgentLeaseStore{
+		heartbeatErr: fmt.Errorf("fleetdb heartbeat: %w", domain.ErrGone),
+		getLease:     validIPCLease(),
+	}
+	d := newLeaseValidationDaemon(leases)
+
+	resp, ok := d.validateIPCLease(t.Context(), validIPCRequest())
+	if !ok {
+		t.Fatalf("validateIPCLease failed: %+v", resp)
+	}
+	assertLeaseStoreCalls(t, leases.calls, []string{"heartbeat", "get"})
+}
+
 func TestValidateIPCLease_Heartbeat409_GetReturnsExpiredLease_Rejects(t *testing.T) {
 	lease := validIPCLease()
 	lease.ExpiresAt = time.Now().Add(-time.Minute)

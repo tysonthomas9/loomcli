@@ -28,7 +28,7 @@ type DaemonAgentStatus struct {
 	Role                   string    `json:"role"`
 	Repo                   string    `json:"repo,omitempty"`
 	PID                    int       `json:"pid"`
-	Status                 string    `json:"status"` // "running", "starting", "stopped", "failed"
+	Status                 string    `json:"status"` // "running", "starting", "stopped", "failed", "parked"
 	TaskID                 string    `json:"task_id,omitempty"`
 	EpicID                 string    `json:"epic_id,omitempty"`
 	CurrentBackend         string    `json:"current_backend,omitempty"`
@@ -41,6 +41,7 @@ type DaemonAgentStatus struct {
 	WorktreePath           string    `json:"worktree_path,omitempty"`
 	LastErrorClass         string    `json:"last_error_class,omitempty"`
 	NoWorkCount            int       `json:"no_work_count,omitempty"`
+	ParkCount              int       `json:"park_count,omitempty"` // display-only: never hydrated back into supervision across daemon restarts
 	BackoffUntil           time.Time `json:"backoff_until,omitempty"`
 	RemoteBranch           string    `json:"remote_branch,omitempty"`
 	OwnershipLeaseID       string    `json:"ownership_lease_id,omitempty"`
@@ -232,6 +233,17 @@ func runDaemonBody() int {
 	lockFile := acquireDaemonLock(paths.lockFile)
 	defer lockFile.Close()
 	defer os.Remove(paths.lockFile)
+
+	// When a workspace is configured, also take a workspace-scoped lock
+	// so two daemons started from different cwds against the same
+	// workspace (which the per-cwd daemon.lock above cannot catch)
+	// refuse to coexist. No-op in single-project mode.
+	wsLock, wsErr := acquireWorkspaceDaemonLock()
+	if wsErr != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", wsErr)
+		os.Exit(1)
+	}
+	defer wsLock.Release()
 
 	initPIDFile(paths.pidFile)
 	defer os.Remove(paths.pidFile)
@@ -436,6 +448,32 @@ func startDaemonSockets(daemon *Daemon, projectDir string, config *cfgpkg.Daemon
 	}
 }
 
+func detectDaemonRuntimeForCommand(projectDir string) cli.DaemonRuntimeInfo {
+	rt := cli.DetectDaemonRuntime(projectDir)
+	if rt.Running {
+		return rt
+	}
+	if wsRT := detectWorkspaceDaemonRuntime(); wsRT.Running {
+		return wsRT
+	}
+	return rt
+}
+
+func printUnknownDaemonPIDRecovery(rt cli.DaemonRuntimeInfo) {
+	fmt.Fprintf(os.Stderr, "Error: daemon appears to be running (detected via %s) but PID could not be determined.\n", rt.Source)
+	if rt.Source == "workspace-lock" {
+		workspace := os.Getenv("LOOM_WORKSPACE")
+		wsDir := cfgpkg.GetWorkspaceDir(workspace)
+		fmt.Fprintf(os.Stderr, "To recover, inspect the workspace daemon lock files and retry:\n")
+		fmt.Fprintf(os.Stderr, "  cat %s\n", filepath.Join(wsDir, "daemon.pid"))
+		fmt.Fprintf(os.Stderr, "  ls -l %s\n", filepath.Join(wsDir, "daemon.lock"))
+		return
+	}
+	fmt.Fprintf(os.Stderr, "To recover, inspect or remove .loom/daemon.lock and retry:\n")
+	fmt.Fprintf(os.Stderr, "  cat .loom/daemon.lock        # check daemon metadata\n")
+	fmt.Fprintf(os.Stderr, "  rm .loom/daemon.lock          # force-clear stale lock\n")
+}
+
 func runDaemonStatus(cmd *cobra.Command, args []string) {
 	projectDir, err := os.Getwd()
 	if err != nil {
@@ -443,8 +481,8 @@ func runDaemonStatus(cmd *cobra.Command, args []string) {
 		os.Exit(1)
 	}
 
-	// Use shared runtime detection (lockfile -> state -> PID fallback)
-	rt := cli.DetectDaemonRuntime(projectDir)
+	// Use shared runtime detection, then fall back to the workspace lock
+	rt := detectDaemonRuntimeForCommand(projectDir)
 	if !rt.Running {
 		fmt.Println("Daemon: not running")
 		return
@@ -488,18 +526,15 @@ func runDaemonStop(cmd *cobra.Command, args []string) {
 		os.Exit(1)
 	}
 
-	// Use shared runtime detection (lockfile -> state -> PID fallback)
-	rt := cli.DetectDaemonRuntime(projectDir)
+	// Use shared runtime detection, then fall back to the workspace lock
+	rt := detectDaemonRuntimeForCommand(projectDir)
 	if !rt.Running {
 		fmt.Println("Daemon is not running.")
 		return
 	}
 
 	if rt.PID == 0 {
-		fmt.Fprintf(os.Stderr, "Error: daemon appears to be running (detected via %s) but PID could not be determined.\n", rt.Source)
-		fmt.Fprintf(os.Stderr, "To recover, inspect or remove .loom/daemon.lock and retry:\n")
-		fmt.Fprintf(os.Stderr, "  cat .loom/daemon.lock        # check daemon metadata\n")
-		fmt.Fprintf(os.Stderr, "  rm .loom/daemon.lock          # force-clear stale lock\n")
+		printUnknownDaemonPIDRecovery(rt)
 		os.Exit(1)
 	}
 

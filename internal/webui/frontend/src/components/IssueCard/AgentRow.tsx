@@ -2,50 +2,35 @@
  * AgentRow - Compact agent info row for IssueCard.
  * Shows mini avatar with status dot, agent name, and activity text.
  *
- * Activity slot resolution order (first non-null wins):
- *   1. agentMissing → red "agent missing"
- *   2. activity prop with lastActivityAt → "<activity> · active Ns ago"
- *   3. activity prop alone → unchanged (existing behavior)
- *   4. lastActivityAt alone → "active Ns ago" / "last seen Xm ago"
- *   5. agent present but no activity yet → "awaiting activity"
- *   6. nothing → no activity text rendered
+ * A TOTAL FUNCTION of a single CardAgentView: the kind decides everything, via
+ * an exhaustive switch. No `.find`, no boolean-precedence soup — the resolution
+ * and precedence live in cardAgentView.ts; this component only renders.
  *
- * The relative-time label self-refreshes every 10s so a stuck card
- * reads "12s ago", "22s ago", "32s ago…" without a parent re-render.
+ * Activity slot by kind:
+ *   - claimed → "<label>" / "<label> · active Ns ago" / "awaiting activity"
+ *   - missing → red "agent missing", enriched with the failure reason when known
+ *     ("agent missing · launch failed"); raw class is the hover title
+ *   - review  → "Submitted for review"
+ *   - none    → renders nothing
+ *
+ * The relative-time label self-refreshes every 10s (claimed only) so a stuck
+ * card reads "12s ago", "22s ago", "32s ago…" without a parent re-render.
  */
 
-import { useEffect, useState } from "react";
+import { memo, useEffect, useState } from "react";
 
-import type { ParsedLoomStatus } from "@/types";
+import { getAvatarColor } from "@/utils/colorUtils";
+import { getStatusDotColor, getStatusLabel } from "@/utils/agent";
 
+import type { CardAgentView } from "./cardAgentView";
 import styles from "./AgentRow.module.css";
 
 /**
  * Props for the AgentRow component.
  */
 export interface AgentRowProps {
-  /** Agent display name */
-  agentName: string;
-  /** Parsed loom status (null if agent not found in loom) */
-  status: ParsedLoomStatus | null;
-  /** Avatar background color */
-  avatarColor: string;
-  /** Status dot color (only shown when status is available) */
-  dotColor?: string | undefined;
-  /** Activity text (e.g., "Working: loomcli-123") */
-  activity?: string | undefined;
-  /**
-   * ISO-8601 timestamp of the most recent PTY-output observation forwarded
-   * over IPC. Used to render relative-time ("active 3s ago"). Null/undefined
-   * when the agent hasn't reported yet or isn't daemon-supervised.
-   */
-  lastActivityAt?: string | null | undefined;
-  /**
-   * True when the rendered task believes it has an assignee but no live
-   * agent is currently claiming it — i.e., orphaned in_progress. Renders
-   * a red "agent missing" label in the activity slot.
-   */
-  agentMissing?: boolean | undefined;
+  /** The resolved, semantic agent state for this card. */
+  view: CardAgentView;
   /**
    * Test seam: clock used for relative-time formatting. Defaults to
    * `() => Date.now()`. Providing a frozen clock from tests removes the
@@ -56,6 +41,30 @@ export interface AgentRowProps {
 
 /** Re-render the relative-time label this often. */
 const RELATIVE_TIME_TICK_MS = 10_000;
+
+/**
+ * Human labels for the agent error_class values fleet-db derives (which mirror
+ * loom's agenterr.ErrorClass). Anything unmapped falls back to "run failed" so
+ * a new class still reads as an error rather than vanishing. The raw class is
+ * kept as the badge's hover title for precision.
+ */
+const ERROR_CLASS_LABELS: Record<string, string> = {
+  SpawnFailure: "launch failed",
+  BackendUnavailable: "backend unavailable",
+  RateLimited: "rate limited",
+  AuthFailure: "auth failed",
+  BillingError: "billing error",
+  Timeout: "timed out",
+  ContextOverflow: "context overflow",
+  ModelNotFound: "model not found",
+  LockConflict: "lock conflict",
+};
+
+/** Map an error_class to a short badge label, or undefined when absent. */
+function errorClassLabel(cls: string | undefined): string | undefined {
+  if (!cls) return undefined;
+  return ERROR_CLASS_LABELS[cls] ?? "run failed";
+}
 
 /**
  * Format a relative-time label suitable for the activity slot.
@@ -84,26 +93,84 @@ function formatRelativeAgo(fromMs: number, nowMs: number): string {
   return `last seen ${diffDay}d ago`;
 }
 
-/**
- * AgentRow displays a compact agent info row on an IssueCard.
- */
-export function AgentRow({
-  agentName,
-  status,
-  avatarColor,
-  dotColor,
-  activity,
-  lastActivityAt,
-  agentMissing,
-  now = () => Date.now(),
-}: AgentRowProps): JSX.Element {
-  // Strip [H] prefix for human assignees
-  const displayName = agentName.replace(/^\[H\]\s*/, "");
-  const initial = displayName.charAt(0).toUpperCase() || "?";
+/** What fills the activity slot, plus its visual state and hover title. */
+interface ActivitySlot {
+  text: string | undefined;
+  state: "missing" | "neutral" | undefined;
+  title: string | undefined;
+}
 
+function assertNever(x: never): never {
+  throw new Error(`Unhandled CardAgentView kind: ${JSON.stringify(x)}`);
+}
+
+/** Compute the activity slot for a renderable view kind. */
+function computeSlot(
+  view: Exclude<CardAgentView, { kind: "none" }>,
+  now: () => number,
+): ActivitySlot {
+  switch (view.kind) {
+    case "review":
+      return {
+        text: "Submitted for review",
+        state: "neutral",
+        title: undefined,
+      };
+    case "missing": {
+      const label = errorClassLabel(view.errorClass);
+      return {
+        text: label ? `agent missing · ${label}` : "agent missing",
+        state: "missing",
+        title: view.errorClass,
+      };
+    }
+    case "claimed": {
+      const label = getStatusLabel(view.status);
+      const parsedAt = view.lastActivityAt
+        ? Date.parse(view.lastActivityAt)
+        : NaN;
+      const ago = Number.isFinite(parsedAt)
+        ? formatRelativeAgo(parsedAt, now())
+        : undefined;
+      if (label && ago) {
+        return {
+          text: `${label} · ${ago}`,
+          state: "neutral",
+          title: undefined,
+        };
+      }
+      if (label) {
+        return { text: label, state: "neutral", title: undefined };
+      }
+      if (ago) {
+        return { text: ago, state: "neutral", title: undefined };
+      }
+      if (view.lastActivityAt === null) {
+        return {
+          text: "awaiting activity",
+          state: "neutral",
+          title: undefined,
+        };
+      }
+      return { text: undefined, state: undefined, title: undefined };
+    }
+    default:
+      return assertNever(view);
+  }
+}
+
+/**
+ * AgentRow displays a compact agent info row on an IssueCard. Total function of
+ * the view-model: returns null for `kind: "none"`.
+ */
+export const AgentRow = memo(function AgentRow({
+  view,
+  now = () => Date.now(),
+}: AgentRowProps): JSX.Element | null {
   // Self-refresh: bump local state every RELATIVE_TIME_TICK_MS so the
-  // "Xs ago" label updates without a parent re-render. Mirrors the
-  // ConnectionBanner.tsx ticker pattern.
+  // "Xs ago" label updates without a parent re-render. Only the claimed kind
+  // carries a live timestamp. Mirrors the ConnectionBanner.tsx ticker pattern.
+  const lastActivityAt = view.kind === "claimed" ? view.lastActivityAt : null;
   const [, setTick] = useState(0);
   useEffect(() => {
     if (!lastActivityAt) return undefined;
@@ -111,32 +178,16 @@ export function AgentRow({
     return () => clearInterval(id);
   }, [lastActivityAt]);
 
-  let activityState: "missing" | "neutral" | undefined;
-  let activityText: string | undefined;
+  if (view.kind === "none") return null;
 
-  if (agentMissing) {
-    activityState = "missing";
-    activityText = "agent missing";
-  } else {
-    const parsedAt = lastActivityAt ? Date.parse(lastActivityAt) : NaN;
-    const ago = Number.isFinite(parsedAt)
-      ? formatRelativeAgo(parsedAt, now())
-      : undefined;
-    if (activity && ago) {
-      activityText = `${activity} · ${ago}`;
-      activityState = "neutral";
-    } else if (activity) {
-      activityText = activity;
-      activityState = "neutral";
-    } else if (ago) {
-      activityText = ago;
-      activityState = "neutral";
-    } else if (lastActivityAt === null) {
-      // Agent is supervised but no PTY output observed yet.
-      activityText = "awaiting activity";
-      activityState = "neutral";
-    }
-  }
+  // Strip [H] prefix for human assignees.
+  const displayName = view.displayName.replace(/^\[H\]\s*/, "");
+  const initial = displayName.charAt(0).toUpperCase() || "?";
+  const avatarColor = getAvatarColor(displayName);
+  const dotColor =
+    view.kind === "claimed" ? getStatusDotColor(view.status.type) : undefined;
+
+  const slot = computeSlot(view, now);
 
   return (
     <div className={styles.agentRow}>
@@ -144,7 +195,7 @@ export function AgentRow({
         <div className={styles.avatar} style={{ backgroundColor: avatarColor }}>
           {initial}
         </div>
-        {status && dotColor && !agentMissing && (
+        {dotColor && (
           <span
             className={styles.statusDot}
             style={{ backgroundColor: dotColor }}
@@ -153,15 +204,15 @@ export function AgentRow({
         )}
       </div>
       <span className={styles.name}>{displayName}</span>
-      {activityText && (
+      {slot.text && (
         <span
           className={styles.activity}
-          data-state={activityState}
-          title={activityText}
+          data-state={slot.state}
+          title={slot.title ?? slot.text}
         >
-          {activityText}
+          {slot.text}
         </span>
       )}
     </div>
   );
-}
+});
