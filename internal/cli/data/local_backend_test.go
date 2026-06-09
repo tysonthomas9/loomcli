@@ -107,10 +107,12 @@ func (b *localBackendStub) Reopen(context.Context, string, backend.ReopenParams)
 	return nil
 }
 func (b *localBackendStub) Delete(context.Context, backend.DeleteParams) error { return nil }
-func (b *localBackendStub) AddDependency(context.Context, backend.DepAddParams) error {
+func (b *localBackendStub) AddDependency(_ context.Context, params backend.DepAddParams) error {
+	b.record("AddDependency", params.FromID, params)
 	return nil
 }
-func (b *localBackendStub) RemoveDependency(context.Context, backend.DepRemoveParams) error {
+func (b *localBackendStub) RemoveDependency(_ context.Context, params backend.DepRemoveParams) error {
+	b.record("RemoveDependency", params.FromID, params)
 	return nil
 }
 func (b *localBackendStub) AddLabel(context.Context, string, string) error    { return nil }
