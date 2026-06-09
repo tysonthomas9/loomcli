@@ -23,7 +23,6 @@ func sampleCreateParams() backend.CreateParams {
 		ExternalRef:      "gh-42",
 		EstimatedMinutes: &est,
 		CreatedBy:        "agent-1",
-		Dependencies:     []string{"dep-1"},
 	}
 }
 

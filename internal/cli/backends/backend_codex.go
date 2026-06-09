@@ -39,7 +39,10 @@ var codexNonInteractiveInvoker func(workDir, prompt, agentName string, shutdown 
 // buildCodexInteractiveCmd constructs the exec.Cmd for interactive Codex invocation.
 // Extracted for testability — callers can inspect the returned cmd without execution.
 func buildCodexInteractiveCmd(workDir, prompt, agentName string) *exec.Cmd {
-	cmd := exec.Command("codex", "--dangerously-bypass-approvals-and-sandbox", prompt)
+	args := []string{"--dangerously-bypass-approvals-and-sandbox"}
+	args = appendCodexEffortArgs(args, resolveAgentEffort())
+	args = append(args, prompt)
+	cmd := exec.Command("codex", args...)
 	cmd.Dir = workDir
 	cmd.Env = buildBackendEnv(workDir, agentName)
 	cmd.Stdin = os.Stdin
@@ -78,12 +81,15 @@ func defaultCodexNonInteractiveInvoker(workDir, prompt, agentName string, shutdo
 	fmt.Println("Launching Codex agent (non-interactive)...")
 	fmt.Println("")
 
+	effort := resolveAgentEffort()
 	return runHarness(context.Background(), shutdown, harnessInvocation{
 		BinaryName:  "codex",
-		Args:        []string{"exec", "--json", "--dangerously-bypass-approvals-and-sandbox", prompt},
+		Args:        appendCodexEffortArgs(buildCodexNonInteractiveArgs(prompt), effort),
 		WorkDir:     workDir,
 		Env:         buildBackendEnv(workDir, agentName),
+		Prompt:      "",
 		HarnessName: "codex",
+		Effort:      effort,
 		LineHandler: func(line string) {
 			fmt.Println(line)
 			if collector != nil {
@@ -92,6 +98,18 @@ func defaultCodexNonInteractiveInvoker(workDir, prompt, agentName string, shutdo
 		},
 		RetryPolicy: harness.DefaultRetryPolicy(),
 	})
+}
+
+// buildCodexNonInteractiveArgs returns the argument list for a headless
+// Codex run. Under harness-wrapper's PTY, stdin is terminal-shaped, so
+// `codex exec` does not read the prompt from stdin. Pass it as the final
+// positional prompt argument instead.
+func buildCodexNonInteractiveArgs(prompt string) []string {
+	args := []string{"exec", "--json", "--dangerously-bypass-approvals-and-sandbox"}
+	if prompt != "" {
+		args = append(args, prompt)
+	}
+	return args
 }
 
 // buildBackendEnv constructs the standard environment for backend subprocess invocations.

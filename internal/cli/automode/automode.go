@@ -397,15 +397,19 @@ func runAutoTask(ctx *autoLoopCtx, shutdown chan struct{}) bool {
 
 	beforeRef := CaptureHEADRef(ctx.opts.WorktreePath)
 	workspace := resolveActiveWorkspaceForAutomode()
-	prompt := ctx.generatePrompt(ctx.opts.AgentName, workspace)
-	sess := createAutoSession(ctx, prompt)
 
+	// Arm resume BEFORE building the prompt so generatePrompt skips the redundant
+	// checkpoint context when we're resuming the prior Claude session (the
+	// resumed session already carries it). Resume-first / checkpoint-fallback.
 	ctx.resumeAttempted = false
 	if ctx.lastClaudeSessionID != "" {
 		ctx.resumeAttempted = true
 		backends.SetResumeSessionID(ctx.lastClaudeSessionID)
 	}
 	defer backends.ClearResumeSessionID()
+
+	prompt := ctx.generatePrompt(ctx.opts.AgentName, workspace)
+	sess := createAutoSession(ctx, prompt)
 
 	backendName := cli.GetBackendName()
 	collector := usage.NewCollector(backendName, ctx.opts.AgentName)

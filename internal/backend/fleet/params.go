@@ -292,9 +292,13 @@ func updateParamsToPatchRequest(params backend.UpdateParams) map[string]interfac
 // createParamsToBody converts backend.CreateParams to the POST /issues body
 // shape fleet-db's CreateIssueRequest expects. The projection itself lives on
 // backend.CreateParams (FleetCreateBody) because the CLI hashes the identical
-// bytes into the default X-Idempotency-Key — cli/data may not import this
+// bytes into the default X-Idempotency-Key -- cli/data may not import this
 // package (depguard data-isolation), so the shared source of truth sits in
 // the backend package.
+//
+// Dependencies are intentionally absent here too: they are not part of the
+// create body. Create composes them after the issue exists via the dedicated
+// POST /issues/{id}/deps endpoint (see addCreateDependencies).
 func createParamsToBody(params backend.CreateParams) map[string]interface{} {
 	return params.FleetCreateBody()
 }

@@ -10,6 +10,7 @@ import (
 	"github.com/olesho/harness-wrapper/pkg/wrapper"
 
 	"github.com/tysonthomas9/loomcli/internal/agenterr"
+	"github.com/tysonthomas9/loomcli/internal/agentpolicy"
 )
 
 func TestWrapWrapperResult_StatusMapping(t *testing.T) {
@@ -159,11 +160,11 @@ func TestWrapInvocationError_PTYLaunchFailure(t *testing.T) {
 			// End-to-end: the classifier must map the marker to a retryable
 			// SpawnFailure, not Unknown.
 			ae := agenterr.ClassifyFromOutput(invErr.OutputTail, invErr.ExitCode, "claude")
-			if ae.Class != agenterr.SpawnFailure {
+			if ae.Class != agenterr.OutcomeFromDomain(agenterr.SpawnFailureOutcome) {
 				t.Errorf("classified Class: got %v, want SpawnFailure", ae.Class)
 			}
-			if !ae.Class.IsRetryable() {
-				t.Error("SpawnFailure should be retryable")
+			if got := agentpolicy.Decide(ae.Class).Decision; got != agentpolicy.Retry {
+				t.Errorf("SpawnFailure decision = %v, want Retry", got)
 			}
 			if strings.Contains(ae.Message, "unclassified") {
 				t.Errorf("Message %q should be specific, not the generic exit-code fallback", ae.Message)

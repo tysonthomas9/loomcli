@@ -116,6 +116,12 @@ func appendRoleEnv(env []string, ap *AgentProcess) []string {
 	if ap.RoleConfig.MaxBudgetUSD != nil {
 		env = append(env, fmt.Sprintf("LOOM_MAX_BUDGET_USD=%.2f", *ap.RoleConfig.MaxBudgetUSD))
 	}
+	if ap.RoleConfig.Effort != "" {
+		env = append(env,
+			fmt.Sprintf("LOOM_AGENT_EFFORT=%s", ap.RoleConfig.Effort),
+			fmt.Sprintf("LOOM_CLAUDE_EFFORT=%s", ap.RoleConfig.Effort),
+		)
+	}
 	return env
 }
 
@@ -167,6 +173,12 @@ func appendSessionEnv(env []string, ap *AgentProcess) []string {
 	if ownershipLeaseID != "" {
 		env = append(env,
 			fmt.Sprintf("LOOM_AGENT_OWNERSHIP_LEASE_ID=%s", ownershipLeaseID),
+			// LOOM_AGENT_OWNERSHIP_FENCING_TOKEN is write-only by contract —
+			// if you add a runtime reader, the verify-re-acquire path in
+			// ownership.go must refresh the token (or kill instead of
+			// continuing): re-acquire can bump the fencing token while the
+			// running subprocess keeps its spawn-time env. Guarded by
+			// TestOwnershipFencingEnvHasNoRuntimeReader.
 			fmt.Sprintf("LOOM_AGENT_OWNERSHIP_FENCING_TOKEN=%d", ownershipFencingToken),
 		)
 	}

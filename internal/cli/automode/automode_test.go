@@ -2152,14 +2152,16 @@ func TestRunAutoModeLoop_ShutdownDuringBackoff(t *testing.T) {
 	}()
 
 	opts := AutoModeOptions{
-		Interval:     5, // Long backoff to ensure shutdown happens during wait
+		Interval:     5,
 		MaxTasks:     0,
 		IdleTimeout:  0,
 		AgentType:    "task",
 		AgentName:    "test",
 		WorktreePath: tmpDir,
-		BackoffBase:  10 * time.Millisecond,
-		TaskPause:    10 * time.Millisecond,
+		// Long exponential base so the (Unknown-classified) error's backoff
+		// sleep is still in progress when shutdown closes at 200ms.
+		BackoffBase: 5 * time.Second,
+		TaskPause:   10 * time.Millisecond,
 		CustomPromptGen: func(name string, _ *WorkspaceConfig) string {
 			return "test-prompt-for-" + name
 		},
