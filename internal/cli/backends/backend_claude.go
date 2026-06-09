@@ -14,15 +14,34 @@ import (
 	"sync"
 	"syscall"
 
+	hwharness "github.com/olesho/harness-wrapper/pkg/harness"
+	_ "github.com/olesho/harness-wrapper/pkg/harness/claude" // register the "claude" profile
+
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/harness"
 	"github.com/tysonthomas9/loomcli/internal/usage"
 )
 
-// DefaultMaxBudgetUSD is the default per-session budget ceiling for non-interactive
-// Claude invocations. Analysis of 287 sessions shows median session cost well under $2;
-// $5 provides 2.5x headroom to prevent mid-response truncation.
-const DefaultMaxBudgetUSD = 5.0
+// claudeProfileCaps resolves the Claude harness profile's capabilities once.
+// Session-id extraction and the --resume arg prefix now live in harness-wrapper
+// (pkg/harness/claude); loom delegates to them so the per-harness knowledge has
+// one home and other harnesses can gain the same capabilities centrally.
+var claudeProfileCaps = sync.OnceValue(func() hwharness.ResolvedProfile {
+	p, ok := hwharness.For("claude")
+	if !ok {
+		return hwharness.ResolvedProfile{}
+	}
+	return p.Resolve(hwharness.ResolveContext{})
+})
+
+// DefaultMaxBudgetUSD is the default per-session spend ceiling for non-interactive
+// Claude invocations, passed through to the CLI as --max-budget-usd. It is a safety
+// rail against runaway sessions, not a target: median session cost is well under $2,
+// so tasks that finish normally are unaffected. $50 gives long-running tasks ample
+// headroom to finish — including their own commit/close finalize steps — instead of
+// truncating mid-task when the budget is exhausted. Override per-invocation with
+// LOOM_MAX_BUDGET_USD (or per-role max_budget_usd); set it to 0 to opt out.
+const DefaultMaxBudgetUSD = 50.0
 
 // resolveMaxBudgetUSD reads LOOM_MAX_BUDGET_USD from the environment and returns the
 // value to pass as --max-budget-usd. Returns "" if the flag should be omitted (opt-out).
@@ -107,6 +126,9 @@ func (c *ClaudeBackend) InvokeStreaming(ctx context.Context, workDir, prompt, ag
 	if budget := resolveMaxBudgetUSD(); budget != "" {
 		args = append(args, "--max-budget-usd", budget)
 	}
+	if effort := resolveAgentEffort(); effort != "" {
+		args = append(args, "--effort", effort)
+	}
 	cmd := exec.Command("claude", args...) //nolint:gosec // G204: intentional subprocess launch for claude CLI
 	cmd.Dir = workDir
 	cmd.Env = buildClaudeEnv(workDir, agentName)
@@ -163,14 +185,22 @@ func (s *streamReadCloser) Close() error {
 
 // ContinueSession resumes an interactive Claude session by session ID.
 func (c *ClaudeBackend) ContinueSession(workDir, sessionID, agentName string) error {
-	cmd := exec.Command("claude", "--resume", "--session-id", sessionID, //nolint:gosec // G204: intentional subprocess launch for claude CLI
-		"--dangerously-skip-permissions")
+	cmd := exec.Command("claude", buildClaudeContinueSessionArgs(sessionID)...) //nolint:gosec // G204: intentional subprocess launch for claude CLI
 	cmd.Dir = workDir
 	cmd.Env = buildClaudeEnv(workDir, agentName)
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	return cmd.Run()
+}
+
+func buildClaudeContinueSessionArgs(sessionID string) []string {
+	args := claudeResumeArgs(sessionID)
+	args = append(args, "--dangerously-skip-permissions")
+	if effort := resolveAgentEffort(); effort != "" {
+		args = append(args, "--effort", effort)
+	}
+	return args
 }
 
 // LastSessionID returns the most recent session ID. Returns "" because Claude
@@ -192,7 +222,12 @@ var claudeInvoker = defaultClaudeInvoker
 // buildClaudeInteractiveCmd constructs the exec.Cmd for interactive Claude invocation.
 // Extracted for testability — callers can inspect the returned cmd without execution.
 func buildClaudeInteractiveCmd(workDir, prompt, agentName string) *exec.Cmd {
-	cmd := exec.Command("claude", "--dangerously-skip-permissions", prompt) //nolint:gosec // G204: intentional subprocess launch for claude CLI
+	args := []string{"--dangerously-skip-permissions"}
+	if effort := resolveAgentEffort(); effort != "" {
+		args = append(args, "--effort", effort)
+	}
+	args = append(args, prompt)
+	cmd := exec.Command("claude", args...) //nolint:gosec // G204: intentional subprocess launch for claude CLI
 	cmd.Dir = workDir
 	cmd.Env = buildClaudeEnv(workDir, agentName)
 	cmd.Stdin = os.Stdin
@@ -224,7 +259,7 @@ func buildClaudeEnv(workDir, agentName string) []string {
 }
 
 // buildClaudeNonInteractiveArgs returns the argument list for a
-// non-interactive Claude run. resumeSessionID prepends --resume flags.
+// non-interactive Claude run. resumeSessionID prepends wrapper-owned resume args.
 // When prompt is non-empty, it is appended as the final positional argument:
 // under the harness wrapper's PTY, claude's stdin looks like a TTY and `-p`
 // then requires the prompt as an argument rather than over stdin. The legacy
@@ -232,15 +267,18 @@ func buildClaudeEnv(workDir, agentName string) []string {
 // prompt via a real pipe through cmd.StdinPipe.
 func buildClaudeNonInteractiveArgs(resumeSessionID, prompt string) []string {
 	var args []string
+	// Resume prefix comes from the harness profile (pkg/harness/claude), not a
+	// hardcoded literal — so resume is owned in one place across harnesses.
 	if resumeSessionID != "" {
-		args = []string{"--resume", "--session-id", resumeSessionID, "-p", "--verbose",
-			"--output-format", "stream-json", "--dangerously-skip-permissions"}
-	} else {
-		args = []string{"-p", "--verbose", "--output-format", "stream-json",
-			"--dangerously-skip-permissions"}
+		args = append(args, claudeResumeArgs(resumeSessionID)...)
 	}
+	args = append(args, "-p", "--verbose", "--output-format", "stream-json",
+		"--dangerously-skip-permissions")
 	if budget := resolveMaxBudgetUSD(); budget != "" {
 		args = append(args, "--max-budget-usd", budget)
+	}
+	if effort := resolveAgentEffort(); effort != "" {
+		args = append(args, "--effort", effort)
 	}
 	if prompt != "" {
 		args = append(args, prompt)
@@ -248,8 +286,15 @@ func buildClaudeNonInteractiveArgs(resumeSessionID, prompt string) []string {
 	return args
 }
 
+func claudeResumeArgs(sessionID string) []string {
+	if caps := claudeProfileCaps(); caps.Resume != nil {
+		return caps.Resume.ResumeArgs(sessionID)
+	}
+	return []string{"--resume", sessionID}
+}
+
 // buildClaudeNonInteractiveCmd constructs the exec.Cmd for non-interactive Claude invocation.
-// When resumeSessionID is non-empty, the command includes --resume --session-id flags.
+// When resumeSessionID is non-empty, the command includes wrapper-owned resume args.
 // Appends --max-budget-usd when resolveMaxBudgetUSD returns a non-empty value.
 // The prompt is delivered via stdin by the caller (cmd.StdinPipe), not argv,
 // since this path does not go through the wrapper's PTY.
@@ -288,14 +333,15 @@ func defaultClaudeNonInteractiveInvoker(workDir, prompt, agentName string, shutd
 		Env:         buildClaudeEnv(workDir, agentName),
 		Prompt:      "",
 		HarnessName: "claude",
+		Effort:      resolveAgentEffort(),
 		LineHandler: newStreamLineHandler(workDir, collector),
 		RetryPolicy: harness.DefaultRetryPolicy(),
 	})
 
-	if cerr := cli.ClearLockClaudeSessionID(workDir); cerr != nil {
-		fmt.Fprintf(os.Stderr, "[loom] failed to clear claude session ID: %v\n", cerr)
-	}
-
+	// NOTE: the lock's Claude session ID is intentionally NOT cleared per-invoke.
+	// It must survive a failed/killed run so a daemon restart can carry it forward
+	// and --resume (P4). Clearing happens only on SUCCESS — in the daemon path
+	// (runTaskDaemon/runPlanDaemon) and the auto-loop's task-completion handler.
 	return err
 }
 
@@ -402,24 +448,33 @@ type StreamUsage struct {
 	CacheCreationInputTokens int64 `json:"cache_creation_input_tokens"`
 }
 
-// extractClaudeSessionID parses a stream-json line and returns the session_id
-// if the line is a system init event (type:"system", subtype:"init").
+// extractClaudeSessionID delegates to the Claude harness profile's session-id
+// extractor (pkg/harness/claude). The parsing logic now lives in harness-wrapper;
+// this thin shim preserves the existing call sites + tests with identical behavior.
+//
+// It first strips any leading non-JSON prefix (see trimToJSONObject): in headless
+// daemon mode the harness runs under a PTY that is not in raw mode, so terminal
+// ECHO can prepend the wrapper's stdin-EOF bytes (\x04\x04, rendered "^D\b\b^D\b\b")
+// to the FIRST stream-json line — the system:init event that carries session_id.
+// Those leading control bytes break json.Unmarshal, so without this the session id
+// is silently never captured and daemon --resume can never arm.
 func extractClaudeSessionID(line string) (string, bool) {
-	var event struct {
-		Type      string `json:"type"`
-		Subtype   string `json:"subtype"`
-		SessionID string `json:"session_id"`
-	}
-	if err := json.Unmarshal([]byte(line), &event); err != nil {
+	caps := claudeProfileCaps()
+	if caps.SessionID == nil {
 		return "", false
 	}
-	if event.Type != "system" || event.Subtype != "init" {
-		return "", false
+	return caps.SessionID.ExtractSessionID(trimToJSONObject(line))
+}
+
+// trimToJSONObject returns line starting at its first '{' so a leading non-JSON
+// prefix (PTY-echoed control bytes on the system:init line; see
+// extractClaudeSessionID) does not defeat json.Unmarshal. A line with no '{' (a
+// non-JSON line) is returned unchanged — the extractor rejects it anyway.
+func trimToJSONObject(line string) string {
+	if i := strings.IndexByte(line, '{'); i > 0 {
+		return line[i:]
 	}
-	if event.SessionID == "" {
-		return "", false
-	}
-	return event.SessionID, true
+	return line
 }
 
 // displayStreamEvent parses JSON event and displays relevant content

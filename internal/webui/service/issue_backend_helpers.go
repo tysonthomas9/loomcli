@@ -44,6 +44,8 @@ func createParamsToBackend(p *CreateIssueParams) backend.CreateParams {
 		SourceRepo:         p.SourceRepo,
 		DueAt:              p.DueAt,
 		DeferUntil:         p.DeferUntil,
+		IdempotencyKey:     p.IdempotencyKey,
+		Force:              p.Force,
 	}
 }
 

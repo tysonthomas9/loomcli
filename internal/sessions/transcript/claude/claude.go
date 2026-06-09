@@ -10,7 +10,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
-	"time"
+
+	hwclaude "github.com/olesho/harness-wrapper/pkg/transcript/claudecode"
 
 	"github.com/tysonthomas9/loomcli/internal/sessions/transcript"
 )
@@ -197,164 +198,31 @@ func isAlnum(b byte) bool {
 	return (b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z') || (b >= '0' && b <= '9')
 }
 
-// Events parses a Claude Code JSONL transcript and returns the canonical
-// backend-agnostic event stream. Malformed lines are skipped.
+// Events parses a Claude Code JSONL transcript into the canonical event stream
+// by DELEGATING to harness-wrapper's claudecode parser — the per-harness
+// parsing knowledge now lives in one place (the wrapper). The wrapper's events
+// are mapped into loom's transcript.Event (identical public fields; the
+// wrapper's internal Source/NativeID are not part of loom's Event). Field-level
+// parity with loom's former in-tree parser is guarded by wrapper_parity_test.go.
 func Events(data []byte) ([]transcript.Event, error) {
-	lines, err := transcript.ParseFromBytes(data)
+	wevs, err := hwclaude.Events(data)
 	if err != nil {
 		return nil, err //nolint:wrapcheck // caller adds context
 	}
-
-	events := make([]transcript.Event, 0, len(lines))
-	seq := 0
-
-	for _, line := range lines {
-		ts := parseLineTimestamp(line.Timestamp)
-		switch line.Type {
-		case transcript.TypeUser:
-			events = append(events, userLineEvents(line, ts, &seq)...)
-		case transcript.TypeAssistant:
-			events = append(events, assistantLineEvents(line, ts, &seq)...)
+	out := make([]transcript.Event, len(wevs))
+	for i, w := range wevs {
+		out[i] = transcript.Event{
+			Seq:       w.Seq,
+			Timestamp: w.Timestamp,
+			Role:      w.Role,
+			Type:      w.Type,
+			Text:      w.Text,
+			ToolName:  w.ToolName,
+			ToolUseID: w.ToolUseID,
+			ToolInput: w.ToolInput,
+			Output:    w.Output,
+			UUID:      w.UUID,
 		}
 	}
-	return events, nil
-}
-
-// parseLineTimestamp parses the optional top-level timestamp string Claude
-// writes on every JSONL line. Returns the zero time if empty or malformed.
-func parseLineTimestamp(s string) time.Time {
-	if s == "" {
-		return time.Time{}
-	}
-	if t, err := time.Parse(time.RFC3339Nano, s); err == nil {
-		return t
-	}
-	return time.Time{}
-}
-
-func userLineEvents(line transcript.Line, ts time.Time, seq *int) []transcript.Event {
-	// User line content is either a string prompt or an array that may
-	// contain text + tool_result blocks.
-	var msgEnvelope struct {
-		Content json.RawMessage `json:"content"`
-	}
-	if err := json.Unmarshal(line.Message, &msgEnvelope); err != nil {
-		return nil
-	}
-
-	// Try string content (direct user prompt).
-	var str string
-	if err := json.Unmarshal(msgEnvelope.Content, &str); err == nil {
-		text := transcript.StripIDEContextTags(str)
-		if text == "" {
-			return nil
-		}
-		e := transcript.Event{
-			Seq:       *seq,
-			Timestamp: ts,
-			Role:      transcript.RoleUser,
-			Type:      transcript.EventText,
-			Text:      text,
-			UUID:      line.UUID,
-		}
-		*seq++
-		return []transcript.Event{e}
-	}
-
-	// Array content — text blocks and tool_result blocks.
-	var blocks []struct {
-		Type      string          `json:"type"`
-		Text      string          `json:"text"`
-		ToolUseID string          `json:"tool_use_id"`
-		Content   json.RawMessage `json:"content"`
-	}
-	if err := json.Unmarshal(msgEnvelope.Content, &blocks); err != nil {
-		return nil
-	}
-
-	var out []transcript.Event
-	for _, b := range blocks {
-		switch b.Type {
-		case "text":
-			txt := transcript.StripIDEContextTags(b.Text)
-			if txt == "" {
-				continue
-			}
-			out = append(out, transcript.Event{
-				Seq:       *seq,
-				Timestamp: ts,
-				Role:      transcript.RoleUser,
-				Type:      transcript.EventText,
-				Text:      txt,
-				UUID:      line.UUID,
-			})
-			*seq++
-		case "tool_result":
-			out = append(out, transcript.Event{
-				Seq:       *seq,
-				Timestamp: ts,
-				Role:      transcript.RoleTool,
-				Type:      transcript.EventToolResult,
-				Output:    extractToolResultText(b.Content),
-				ToolUseID: b.ToolUseID,
-				UUID:      line.UUID,
-			})
-			*seq++
-		}
-	}
-	return out
-}
-
-func assistantLineEvents(line transcript.Line, ts time.Time, seq *int) []transcript.Event {
-	var msg transcript.AssistantMessage
-	if err := json.Unmarshal(line.Message, &msg); err != nil {
-		return nil
-	}
-
-	// Find the block-level tool_use id (Claude emits it on the block,
-	// mirroring the user's later tool_result.tool_use_id).
-	var toolUseIDs []struct {
-		ID string `json:"id"`
-	}
-	_ = json.Unmarshal(line.Message, &struct {
-		Content *[]struct {
-			ID string `json:"id"`
-		} `json:"content"`
-	}{Content: &toolUseIDs})
-
-	var out []transcript.Event
-	for i, block := range msg.Content {
-		switch block.Type {
-		case transcript.ContentTypeText:
-			if block.Text == "" {
-				continue
-			}
-			out = append(out, transcript.Event{
-				Seq:       *seq,
-				Timestamp: ts,
-				Role:      transcript.RoleAssistant,
-				Type:      transcript.EventText,
-				Text:      block.Text,
-				UUID:      line.UUID,
-			})
-			*seq++
-		case transcript.ContentTypeToolUse:
-			var id string
-			if i < len(toolUseIDs) {
-				id = toolUseIDs[i].ID
-			}
-			out = append(out, transcript.Event{
-				Seq:       *seq,
-				Timestamp: ts,
-				Role:      transcript.RoleAssistant,
-				Type:      transcript.EventToolUse,
-				ToolName:  block.Name,
-				ToolUseID: id,
-				ToolInput: block.Input,
-				UUID:      line.UUID,
-			})
-			*seq++
-		}
-	}
-	return out
+	return out, nil
 }

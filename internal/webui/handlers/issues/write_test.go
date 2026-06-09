@@ -1297,3 +1297,29 @@ func TestHandleReopenIssue_InvalidBody(t *testing.T) {
 		t.Fatalf("status = %d, want %d", w.Code, http.StatusBadRequest)
 	}
 }
+
+func TestHandleCreateIssueW_ForwardsIdempotencyHeaders(t *testing.T) {
+	svc := &mockIssueService{
+		createIssueFunc: func(ctx context.Context, params service.CreateIssueParams) (json.RawMessage, error) {
+			if params.IdempotencyKey != "key-77" {
+				t.Errorf("IdempotencyKey = %q, want key-77", params.IdempotencyKey)
+			}
+			if !params.Force {
+				t.Error("Force header must set params.Force")
+			}
+			return json.RawMessage(`{"id":"new-1","title":"T"}`), nil
+		},
+	}
+	handler := handleCreateIssue(svc)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/issues", strings.NewReader(`{"title":"T","issue_type":"task","priority":2}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Idempotency-Key", "key-77")
+	req.Header.Set("X-Idempotency-Force", "true")
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201 (body %s)", w.Code, w.Body.String())
+	}
+}

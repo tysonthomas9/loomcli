@@ -323,6 +323,83 @@ type CreateParams struct {
 	SourceRepo         string   `json:"source_repo,omitempty"`
 	DueAt              string   `json:"due_at,omitempty"`
 	DeferUntil         string   `json:"defer_until,omitempty"`
+
+	// IdempotencyKey rides as the X-Idempotency-Key HTTP header on create
+	// requests (fleet-db's strict JSON decode rejects unknown body fields,
+	// so it must never serialize into any wire body — hence json:"-").
+	IdempotencyKey string `json:"-"`
+	// Force bypasses fleet-db's soft-duplicate create guard
+	// (X-Idempotency-Force header). Header-only for the same reason.
+	Force bool `json:"-"`
+}
+
+// FleetCreateBody converts CreateParams to the POST /issues body shape
+// fleet-db's CreateIssueRequest expects. fleet-db's strict JSON validation
+// rejects unknown fields, so loom-only fields are dropped rather than
+// shipped as-is.
+//
+// Field renames vs CreateParams:
+//   - "issue_type"  → "type"
+//   - "parent"      → "parent_id"
+//   - "owner" stays "owner" but fleet-db expects *string (we send the
+//     scalar value directly; omitempty handles the unset case)
+//   - "source_repo" → "repo"
+//
+// Dropped (no equivalent on fleet-db's CreateIssueRequest):
+//   - id, acceptance_criteria, created_by, external_ref,
+//     estimated_minutes, dependencies
+//
+// If any of those need round-tripping, file a fleet-db ticket to extend
+// the CreateIssueRequest schema rather than smuggling them through here.
+//
+// This lives on CreateParams (not in the fleet package) because it is shared
+// by two consumers that must agree byte-for-byte: the fleet backend builds
+// the wire request from it, and cli/data hashes it (plus a date bucket) into
+// the default X-Idempotency-Key — fleet-db 409s when a key is reused with a
+// different body, so the key must be derived from the exact wire bytes.
+// cli/data is depguard-banned from importing the fleet package.
+func (p CreateParams) FleetCreateBody() map[string]interface{} {
+	req := make(map[string]interface{})
+	setNonEmptyMapStr(req, "title", p.Title)
+	setNonEmptyMapStr(req, "description", p.Description)
+	setNonEmptyMapStr(req, "status", p.Status)
+	if p.Priority != 0 {
+		req["priority"] = p.Priority
+	}
+	setNonEmptyMapStr(req, "type", p.IssueType)
+	setNonEmptyMapStr(req, "assignee", p.Assignee)
+	setNonEmptyMapStr(req, "owner", p.Owner)
+	if len(p.Labels) > 0 {
+		req["labels"] = p.Labels
+	}
+	setNonEmptyMapStr(req, "parent_id", p.Parent)
+	setNonEmptyMapStr(req, "repo", p.SourceRepo)
+	setNonEmptyMapStr(req, "design", p.Design)
+	setNonEmptyMapStr(req, "notes", p.Notes)
+	setNonEmptyMapStr(req, "defer_until", p.DeferUntil)
+	setNonEmptyMapStr(req, "due_at", p.DueAt)
+	return req
+}
+
+// setNonEmptyMapStr sets m[key] = val if val is non-empty.
+func setNonEmptyMapStr(m map[string]interface{}, key, val string) {
+	if val != "" {
+		m[key] = val
+	}
+}
+
+// IdempotencyHeaders returns the idempotency HTTP headers for a create
+// request; empty map when neither is set. Shared by the API and fleet
+// backends so the wire header names live in one place.
+func (p CreateParams) IdempotencyHeaders() map[string]string {
+	h := map[string]string{}
+	if p.IdempotencyKey != "" {
+		h["X-Idempotency-Key"] = p.IdempotencyKey
+	}
+	if p.Force {
+		h["X-Idempotency-Force"] = "true"
+	}
+	return h
 }
 
 // UpdateParams contains fields for updating an issue. Pointer fields

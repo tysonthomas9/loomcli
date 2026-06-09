@@ -3,6 +3,8 @@ package fleet
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"net/url"
 	"strings"
 	"time"
@@ -23,6 +25,29 @@ type fleetDepWire struct {
 	IssueType   string    `json:"issue_type,omitempty"`
 	CreatedAt   time.Time `json:"created_at,omitempty"`
 	CreatedBy   string    `json:"created_by,omitempty"`
+}
+
+// addCreateDependencies adds the requested blocks-edges for a freshly created
+// issue. fleet-db's CreateIssueRequest has no inline dependencies field, so
+// Create composes the dedicated POST /issues/{id}/deps calls after the issue
+// exists — the same compose-after-write pattern Update uses for labels. On
+// failure the returned error names the already-created issue so callers know
+// the create itself succeeded and which edge was lost.
+func (b *FleetBackend) addCreateDependencies(ctx context.Context, id string, deps []string) error {
+	for _, depID := range deps {
+		err := b.AddDependency(ctx, backend.DepAddParams{FromID: id, ToID: depID, DepType: "blocks"})
+		if err == nil {
+			continue
+		}
+		kind := backend.KindInternal
+		var be *backend.BackendError
+		if errors.As(err, &be) {
+			kind = be.Kind
+		}
+		return backend.NewBackendError(kind, "Create",
+			fmt.Sprintf("issue %s was created, but adding its dependency on %s failed", id, depID), err)
+	}
+	return nil
 }
 
 // fetchDependencies calls fleet-db's GET /issues/{id}/deps and projects the
