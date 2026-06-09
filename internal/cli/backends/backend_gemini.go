@@ -37,15 +37,20 @@ var geminiNonInteractiveInvoker func(workDir, prompt, agentName string, shutdown
 func buildGeminiInteractiveCmd(workDir, prompt, agentName string) *exec.Cmd {
 	cmd := exec.Command("gemini", "--approval-mode=yolo", prompt) //nolint:gosec // G204: prompt is from the CLI operator, not untrusted input
 	cmd.Dir = workDir
-	env := append(cli.FilteredEnv(), "LOOM_WORKTREE_PATH="+workDir)
-	if agentName != "" {
-		env = append(env, "LOOM_AGENT_NAME="+agentName)
-	}
-	cmd.Env = env
+	cmd.Env = buildGeminiEnv(workDir, agentName)
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	return cmd
+}
+
+// buildGeminiEnv constructs the environment variables for Gemini subprocess invocations.
+func buildGeminiEnv(workDir, agentName string) []string {
+	env := append(cli.FilteredEnv(), "LOOM_WORKTREE_PATH="+workDir)
+	if agentName != "" {
+		env = append(env, "LOOM_AGENT_NAME="+agentName)
+	}
+	return env
 }
 
 func defaultGeminiInvoker(workDir, prompt, agentName string) error {
@@ -57,11 +62,7 @@ func defaultGeminiInvoker(workDir, prompt, agentName string) error {
 
 		cmd := exec.Command("gemini", "--approval-mode=yolo", "-p", prompt) //nolint:gosec // G204: prompt is from the CLI operator, not untrusted input
 		cmd.Dir = workDir
-		env := append(cli.FilteredEnv(), "LOOM_WORKTREE_PATH="+workDir)
-		if agentName != "" {
-			env = append(env, "LOOM_AGENT_NAME="+agentName)
-		}
-		cmd.Env = env
+		cmd.Env = buildGeminiEnv(workDir, agentName)
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
 		return cmd.Run()
@@ -76,11 +77,6 @@ func defaultGeminiInvoker(workDir, prompt, agentName string) error {
 }
 
 func defaultGeminiNonInteractiveInvoker(workDir, prompt, agentName string, shutdown <-chan struct{}, collector *usage.Collector) error {
-	env := append(cli.FilteredEnv(), "LOOM_WORKTREE_PATH="+workDir)
-	if agentName != "" {
-		env = append(env, "LOOM_AGENT_NAME="+agentName)
-	}
-
 	fmt.Println("Launching Gemini agent (non-interactive)...")
 	fmt.Println("")
 
@@ -91,9 +87,10 @@ func defaultGeminiNonInteractiveInvoker(workDir, prompt, agentName string, shutd
 		BinaryName:  "gemini",
 		Args:        []string{"--approval-mode=yolo", "-p", prompt, "-o", "stream-json"},
 		WorkDir:     workDir,
-		Env:         env,
+		Env:         buildGeminiEnv(workDir, agentName),
 		Prompt:      "",
 		HarnessName: "gemini",
+		Effort:      resolveAgentEffort(),
 		LineHandler: func(line string) {
 			fmt.Println(line)
 			if collector != nil {

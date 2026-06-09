@@ -155,7 +155,11 @@ func (c *ClaudeBackend) ContinueSession(workDir, sessionID, agentName string) er
 
 func buildClaudeContinueSessionArgs(sessionID string) []string {
 	args := claudeResumeArgs(sessionID)
-	return append(args, "--dangerously-skip-permissions")
+	args = append(args, "--dangerously-skip-permissions")
+	if effort := resolveAgentEffort(); effort != "" {
+		args = append(args, "--effort", effort)
+	}
+	return args
 }
 
 // LastSessionID returns the most recent session ID. Returns "" because Claude
@@ -177,7 +181,12 @@ var claudeInvoker = defaultClaudeInvoker
 // buildClaudeInteractiveCmd constructs the exec.Cmd for interactive Claude invocation.
 // Extracted for testability — callers can inspect the returned cmd without execution.
 func buildClaudeInteractiveCmd(workDir, prompt, agentName string) *exec.Cmd {
-	cmd := exec.Command("claude", "--dangerously-skip-permissions", prompt) //nolint:gosec // G204: intentional subprocess launch for claude CLI
+	args := []string{"--dangerously-skip-permissions"}
+	if effort := resolveAgentEffort(); effort != "" {
+		args = append(args, "--effort", effort)
+	}
+	args = append(args, prompt)
+	cmd := exec.Command("claude", args...) //nolint:gosec // G204: intentional subprocess launch for claude CLI
 	cmd.Dir = workDir
 	cmd.Env = buildClaudeEnv(workDir, agentName)
 	cmd.Stdin = os.Stdin
@@ -218,6 +227,9 @@ func buildClaudeRunTurnArgs(resumeSessionID string) []string {
 		args = append(args, claudeResumeArgs(resumeSessionID)...)
 	}
 	args = append(args, "--dangerously-skip-permissions")
+	if effort := resolveAgentEffort(); effort != "" {
+		args = append(args, "--effort", effort)
+	}
 	return args
 }
 
