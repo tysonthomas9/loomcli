@@ -35,7 +35,8 @@ ENV SHELL=/bin/bash
 COPY --from=builder /out/loom /usr/local/bin/loom
 COPY test/local-mode/local-mode-entrypoint /usr/local/bin/local-mode-entrypoint
 COPY test/local-mode/loom-backend-localdogfood /usr/local/bin/loom-backend-localdogfood
-RUN chmod +x /usr/local/bin/local-mode-entrypoint /usr/local/bin/loom-backend-localdogfood
+RUN chmod +x /usr/local/bin/local-mode-entrypoint /usr/local/bin/loom-backend-localdogfood \
+    && ln -sf /usr/local/bin/loom-backend-localdogfood /usr/local/bin/localdogfood
 
 WORKDIR /workspace
 EXPOSE 8080

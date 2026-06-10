@@ -76,8 +76,8 @@ services:
       LOOM_WEBUI_URL: http://127.0.0.1:8080
       LOCAL_MODE_API_URL: "http://localhost:${LOCAL_MODE_API_PORT:-8282}"
       LOCAL_MODE_UI_URL: "http://localhost:${LOCAL_MODE_UI_PORT:-8283}"
-      LOOM_LOCAL_MODE_PLAN_TASK_ID: LM-PLAN-1
-      LOOM_LOCAL_MODE_CODE_TASK_ID: LM-CODE-1
+      LOOM_LOCAL_MODE_PLAN_TASK_ID: LOCALMODE-1
+      LOOM_LOCAL_MODE_CODE_TASK_ID: LOCALMODE-2
       LOOM_LOCAL_MODE_STEP_DELAY: "2"
     networks: [local-mode]
     ports:
