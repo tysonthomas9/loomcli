@@ -155,6 +155,66 @@ Second paragraph`;
   });
 });
 
+describe("MarkdownRenderer raw HTML passthrough", () => {
+  it("renders a pure-HTML design as formatted elements", () => {
+    render(
+      <MarkdownRenderer content="<h2>Approach</h2><p>hello <strong>world</strong></p>" />,
+    );
+    const container = screen.getByTestId("markdown-content");
+    expect(screen.getByRole("heading", { level: 2 })).toHaveTextContent(
+      "Approach",
+    );
+    const strong = container.querySelector("strong");
+    expect(strong).not.toBeNull();
+    expect(strong).toHaveTextContent("world");
+    // Heading is a real element, not literal "## Approach" / "<h2>" text.
+    expect(screen.queryByText("<h2>Approach</h2>")).toBeNull();
+  });
+
+  it("keeps safe attributes on mixed markdown and raw HTML", () => {
+    // Markdown-leading raw HTML is split into markdown and DOMPurify-sanitized
+    // HTML chunks. Safe attributes like class are preserved, matching the
+    // HTML-leading design path below.
+    render(
+      <MarkdownRenderer content={'## Notes\n\n<p class="danger">text</p>'} />,
+    );
+    const container = screen.getByTestId("markdown-content");
+    const p = container.querySelector("p");
+    expect(p).not.toBeNull();
+    expect(p).toHaveTextContent("text");
+    expect(p?.getAttribute("class")).toBe("danger");
+  });
+
+  it("renders HTML lists as list elements", () => {
+    render(<MarkdownRenderer content="<ul><li>One</li><li>Two</li></ul>" />);
+    const items = screen.getAllByRole("listitem");
+    expect(items).toHaveLength(2);
+    expect(items[0]).toHaveTextContent("One");
+    expect(items[1]).toHaveTextContent("Two");
+  });
+
+  it("renders mixed Markdown and HTML content", () => {
+    render(
+      <MarkdownRenderer
+        content={"## Markdown heading\n\n<p>An <code>html</code> paragraph</p>"}
+      />,
+    );
+    expect(screen.getByRole("heading", { level: 2 })).toHaveTextContent(
+      "Markdown heading",
+    );
+    const code = screen.getByText("html");
+    expect(code.tagName.toLowerCase()).toBe("code");
+  });
+
+  it("renders HTML links safely", () => {
+    render(
+      <MarkdownRenderer content='<a href="https://example.com">Click</a>' />,
+    );
+    const link = screen.getByRole("link", { name: "Click" });
+    expect(link).toHaveAttribute("href", "https://example.com");
+  });
+});
+
 describe("MarkdownRenderer XSS sanitization", () => {
   it("strips script tags from rendered output", () => {
     const malicious = `Hello <script>alert("xss")</script> World`;
