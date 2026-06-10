@@ -933,6 +933,77 @@ func TestPlatformTaskRunCompleteRequiresCloudSafeArtifactsForCloudSandbox(t *tes
 	}
 }
 
+func TestPlatformTaskRunAllowsLocalArtifactsForFlueLocal(t *testing.T) {
+	ctx := t.Context()
+	s := New()
+
+	if _, err := s.TaskRuns().Create(ctx, store.TaskRunCreate{
+		WorkspaceKey: "WS",
+		TaskRunID:    "task-run-flue-local-complete",
+		TaskID:       "WS-5",
+		Status:       domain.TaskRunRunning,
+		NodeID:       "node-1",
+		LeaseID:      "lease-1",
+		SandboxPlacement: domain.TaskRunPlacement{
+			Provider: "flue-local",
+		},
+	}); err != nil {
+		t.Fatalf("Create flue-local completion task run: %v", err)
+	}
+	running, err := s.TaskRuns().Get(ctx, "WS", "task-run-flue-local-complete")
+	if err != nil {
+		t.Fatalf("Get flue-local completion task run: %v", err)
+	}
+	completed, err := s.TaskRuns().Complete(ctx, "WS", "task-run-flue-local-complete", store.TaskRunComplete{
+		CompletionID:     "completion-flue-local-file-ref",
+		NodeID:           "node-1",
+		LeaseID:          "lease-1",
+		FencingToken:     running.FencingToken,
+		Status:           domain.TaskRunCompleted,
+		ArtifactsRef:     "file:///tmp/result.tar",
+		RequireArtifacts: true,
+	})
+	if err != nil {
+		t.Fatalf("Complete flue-local file ref: %v", err)
+	}
+	if completed.Status != domain.TaskRunCompleted || completed.ArtifactsRef != "file:///tmp/result.tar" {
+		t.Fatalf("completed task run = %+v, want local artifact ref", completed)
+	}
+
+	if _, err := s.TaskRuns().Create(ctx, store.TaskRunCreate{
+		WorkspaceKey: "WS",
+		TaskRunID:    "task-run-flue-local-finish",
+		TaskID:       "WS-6",
+		Status:       domain.TaskRunRunning,
+		NodeID:       "node-1",
+		LeaseID:      "lease-2",
+		SandboxPlacement: domain.TaskRunPlacement{
+			Provider: "flue-local",
+		},
+	}); err != nil {
+		t.Fatalf("Create flue-local finish task run: %v", err)
+	}
+	running, err = s.TaskRuns().Get(ctx, "WS", "task-run-flue-local-finish")
+	if err != nil {
+		t.Fatalf("Get flue-local finish task run: %v", err)
+	}
+	exitCode := 0
+	finished, err := s.TaskRuns().Finish(ctx, "WS", "task-run-flue-local-finish", store.TaskRunFinish{
+		NodeID:       "node-1",
+		LeaseID:      "lease-2",
+		FencingToken: running.FencingToken,
+		Status:       domain.TaskRunCompleted,
+		ExitCode:     &exitCode,
+		ArtifactsRef: "file:///tmp/result.tar",
+	})
+	if err != nil {
+		t.Fatalf("Finish flue-local file ref: %v", err)
+	}
+	if finished.Status != domain.TaskRunCompleted || finished.ArtifactsRef != "file:///tmp/result.tar" {
+		t.Fatalf("finished task run = %+v, want local artifact ref", finished)
+	}
+}
+
 func TestPlatformTaskRunCompleteRequireArtifactsNeedsEvidence(t *testing.T) {
 	ctx := t.Context()
 	s := New()

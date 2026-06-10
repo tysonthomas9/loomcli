@@ -11,6 +11,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/tysonthomas9/loomcli/internal/agentinbox"
 	"github.com/tysonthomas9/loomcli/internal/backend/fleet"
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/cli"
@@ -47,6 +48,7 @@ var (
 	driverExecTaskTaskID             string
 	driverExecTaskWorkerProfileID    string
 	driverExecTaskProviderProfile    string
+	driverExecTaskParentSessionID    string
 	driverExecTaskNodeID             string
 	driverExecTaskRunnerID           string
 	driverExecTaskLeaseID            string
@@ -138,14 +140,14 @@ var (
 	driverDeliverLeadName         string
 	driverDeliverLeadJSON         bool
 
-	driverDeliverLeadMessageWorkspaceKey string
-	driverDeliverLeadMessageDriverRunID  string
-	driverDeliverLeadMessageNodeID       string
-	driverDeliverLeadMessageLeaseID      string
-	driverDeliverLeadMessageFence        int64
-	driverDeliverLeadMessageName         string
-	driverDeliverLeadMessageText         string
-	driverDeliverLeadMessageJSON         bool
+	driverDeliverAgentMessageWorkspaceKey string
+	driverDeliverAgentMessageDriverRunID  string
+	driverDeliverAgentMessageNodeID       string
+	driverDeliverAgentMessageLeaseID      string
+	driverDeliverAgentMessageFence        int64
+	driverDeliverAgentMessageName         string
+	driverDeliverAgentMessageText         string
+	driverDeliverAgentMessageJSON         bool
 
 	driverActiveTaskRunsWorkspaceKey string
 	driverActiveTaskRunsDriverRunID  string
@@ -169,10 +171,6 @@ var (
 	driverCompleteTaskLogsRef      string
 	driverCompleteTaskArtifactsRef string
 	driverCompleteTaskReason       string
-	driverCompleteTaskSession      string
-	driverCompleteTaskActor        string
-	driverCompleteTaskLegacyClose  bool
-	driverCompleteTaskForce        bool
 	driverCompleteTaskJSON         bool
 
 	driverReleaseTaskWorkspaceKey string
@@ -299,12 +297,12 @@ var driverDeliverLeadAssignmentCmd = &cobra.Command{
 	RunE:   runDriverDeliverLeadAssignment,
 }
 
-var driverDeliverLeadMessageCmd = &cobra.Command{
-	Use:    "deliver-lead-message",
-	Short:  "Deliver a workflow message to a lead runtime",
+var driverDeliverAgentMessageCmd = &cobra.Command{
+	Use:    "deliver-agent-message",
+	Short:  "Queue or deliver a workflow message to an agent runtime",
 	Hidden: true,
 	Args:   cobra.NoArgs,
-	RunE:   runDriverDeliverLeadMessage,
+	RunE:   runDriverDeliverAgentMessage,
 }
 
 var driverActiveTaskRunsCmd = &cobra.Command{
@@ -366,6 +364,7 @@ func init() {
 	driverExecTaskCmd.Flags().StringVar(&driverExecTaskTaskID, "task-id", "", "FleetDB task ID")
 	driverExecTaskCmd.Flags().StringVar(&driverExecTaskWorkerProfileID, "worker-profile-id", "", "Worker profile ID")
 	driverExecTaskCmd.Flags().StringVar(&driverExecTaskProviderProfile, "provider-profile", "", "Provider profile requested by the driver")
+	driverExecTaskCmd.Flags().StringVar(&driverExecTaskParentSessionID, "parent-session-id", "", "Parent AgentSession ID")
 	driverExecTaskCmd.Flags().StringVar(&driverExecTaskNodeID, "node-id", "", "Executor node ID")
 	driverExecTaskCmd.Flags().StringVar(&driverExecTaskRunnerID, "runner-id", "", "Runner ID")
 	driverExecTaskCmd.Flags().StringVar(&driverExecTaskLeaseID, "lease-id", "", "Parent DriverRun lease ID")
@@ -462,16 +461,7 @@ func init() {
 	driverDeliverLeadAssignmentCmd.Flags().BoolVar(&driverDeliverLeadJSON, "json", false, "JSON output")
 	_ = driverDeliverLeadAssignmentCmd.MarkFlagRequired("agent")
 
-	driverDeliverLeadMessageCmd.Flags().StringVar(&driverDeliverLeadMessageWorkspaceKey, "workspace-key", "", "Workspace key (default: LOOM_DRIVER_WORKSPACE or active workspace)")
-	driverDeliverLeadMessageCmd.Flags().StringVar(&driverDeliverLeadMessageDriverRunID, "driver-run-id", "", "Parent DriverRun ID (default: LOOM_DRIVER_RUN_ID)")
-	driverDeliverLeadMessageCmd.Flags().StringVar(&driverDeliverLeadMessageNodeID, "node-id", "", "Parent DriverRun node ID")
-	driverDeliverLeadMessageCmd.Flags().StringVar(&driverDeliverLeadMessageLeaseID, "lease-id", "", "Parent DriverRun lease ID")
-	driverDeliverLeadMessageCmd.Flags().Int64Var(&driverDeliverLeadMessageFence, "fencing-token", 0, "Parent DriverRun fencing token")
-	driverDeliverLeadMessageCmd.Flags().StringVar(&driverDeliverLeadMessageName, "agent", "", "Lead agent name")
-	driverDeliverLeadMessageCmd.Flags().StringVar(&driverDeliverLeadMessageText, "message", "", "Message text to deliver")
-	driverDeliverLeadMessageCmd.Flags().BoolVar(&driverDeliverLeadMessageJSON, "json", false, "JSON output")
-	_ = driverDeliverLeadMessageCmd.MarkFlagRequired("agent")
-	_ = driverDeliverLeadMessageCmd.MarkFlagRequired("message")
+	bindDriverDeliverAgentMessageFlags(driverDeliverAgentMessageCmd)
 
 	driverActiveTaskRunsCmd.Flags().StringVar(&driverActiveTaskRunsWorkspaceKey, "workspace-key", "", "Workspace key (default: LOOM_DRIVER_WORKSPACE or active workspace)")
 	driverActiveTaskRunsCmd.Flags().StringVar(&driverActiveTaskRunsDriverRunID, "driver-run-id", "", "Parent DriverRun ID (default: LOOM_DRIVER_RUN_ID)")
@@ -495,10 +485,6 @@ func init() {
 	driverCompleteTaskCmd.Flags().StringVar(&driverCompleteTaskLogsRef, "logs-ref", "", "Logs artifact/ref for CompleteRun")
 	driverCompleteTaskCmd.Flags().StringVar(&driverCompleteTaskArtifactsRef, "artifacts-ref", "", "Artifact bundle/ref for CompleteRun")
 	driverCompleteTaskCmd.Flags().StringVar(&driverCompleteTaskReason, "reason", "", "Completion reason")
-	driverCompleteTaskCmd.Flags().StringVar(&driverCompleteTaskSession, "session", "", "Session identifier associated with completion")
-	driverCompleteTaskCmd.Flags().StringVar(&driverCompleteTaskActor, "actor", "", "Completion actor (default: driver-run:<driver-run-id>)")
-	driverCompleteTaskCmd.Flags().BoolVar(&driverCompleteTaskLegacyClose, "legacy-task-close", false, "Use legacy direct task close without a child TaskRun")
-	driverCompleteTaskCmd.Flags().BoolVar(&driverCompleteTaskForce, "force", false, "Force completion when backend permits it")
 	driverCompleteTaskCmd.Flags().BoolVar(&driverCompleteTaskJSON, "json", false, "JSON output")
 
 	driverReleaseTaskCmd.Flags().StringVar(&driverReleaseTaskWorkspaceKey, "workspace-key", "", "Workspace key (default: LOOM_DRIVER_WORKSPACE or active workspace)")
@@ -519,8 +505,21 @@ func init() {
 	driverRecoverStaleTasksCmd.Flags().StringVar(&driverRecoverStaleErrorMessage, "error-message", "task run heartbeat is stale", "Error message recorded on recovered task runs")
 	driverRecoverStaleTasksCmd.Flags().BoolVar(&driverRecoverStaleJSON, "json", false, "JSON output")
 
-	driverCmd.AddCommand(driverRegisterCmd, driverRunCmd, driverExecTaskCmd, driverWorkTaskRunCmd, driverClaimReadyCmd, driverEpicGetCmd, driverEpicSnapshotCmd, driverListAgentsCmd, driverAgentOrchestrationSessionCmd, driverUpdateAgentParentCmd, driverDeliverLeadAssignmentCmd, driverDeliverLeadMessageCmd, driverActiveTaskRunsCmd, driverCompleteTaskCmd, driverReleaseTaskCmd, driverRecoverStaleTasksCmd)
+	driverCmd.AddCommand(driverRegisterCmd, driverRunCmd, driverExecTaskCmd, driverWorkTaskRunCmd, driverClaimReadyCmd, driverEpicGetCmd, driverEpicSnapshotCmd, driverListAgentsCmd, driverAgentOrchestrationSessionCmd, driverUpdateAgentParentCmd, driverDeliverLeadAssignmentCmd, driverDeliverAgentMessageCmd, driverActiveTaskRunsCmd, driverCompleteTaskCmd, driverReleaseTaskCmd, driverRecoverStaleTasksCmd)
 	cli.RegisterCommand(driverCmd)
+}
+
+func bindDriverDeliverAgentMessageFlags(cmd *cobra.Command) {
+	cmd.Flags().StringVar(&driverDeliverAgentMessageWorkspaceKey, "workspace-key", "", "Workspace key (default: LOOM_DRIVER_WORKSPACE or active workspace)")
+	cmd.Flags().StringVar(&driverDeliverAgentMessageDriverRunID, "driver-run-id", "", "Parent DriverRun ID (default: LOOM_DRIVER_RUN_ID)")
+	cmd.Flags().StringVar(&driverDeliverAgentMessageNodeID, "node-id", "", "Parent DriverRun node ID")
+	cmd.Flags().StringVar(&driverDeliverAgentMessageLeaseID, "lease-id", "", "Parent DriverRun lease ID")
+	cmd.Flags().Int64Var(&driverDeliverAgentMessageFence, "fencing-token", 0, "Parent DriverRun fencing token")
+	cmd.Flags().StringVar(&driverDeliverAgentMessageName, "agent", "", "Agent name")
+	cmd.Flags().StringVar(&driverDeliverAgentMessageText, "message", "", "Message text to deliver")
+	cmd.Flags().BoolVar(&driverDeliverAgentMessageJSON, "json", false, "JSON output")
+	_ = cmd.MarkFlagRequired("agent")
+	_ = cmd.MarkFlagRequired("message")
 }
 
 func runDriverRegister(_ *cobra.Command, _ []string) error {
@@ -616,6 +615,7 @@ func runDriverExecTask(_ *cobra.Command, _ []string) error {
 			TaskID:             driverExecTaskTaskID,
 			WorkerProfileID:    driverExecTaskWorkerProfileID,
 			ProviderProfile:    driverExecTaskProviderProfile,
+			ParentSessionID:    firstNonEmpty(driverExecTaskParentSessionID, os.Getenv("LOOM_PARENT_SESSION_ID"), os.Getenv("LOOM_TASK_RUN_PARENT_SESSION_ID")),
 			ParentNodeID:       nodeID,
 			ParentLeaseID:      leaseID,
 			ParentFence:        fencingToken,
@@ -901,46 +901,89 @@ func runDriverDeliverLeadAssignment(_ *cobra.Command, _ []string) error {
 	})
 }
 
-func runDriverDeliverLeadMessage(_ *cobra.Command, _ []string) error {
+func runDriverDeliverAgentMessage(_ *cobra.Command, _ []string) error {
 	return cmdstore.WithStore(func(ctx context.Context, h *bootstrap.StoreHandle) error {
-		ws, _, err := resolveRunningDriverRun(ctx, h, driverDeliverLeadMessageWorkspaceKey, driverDeliverLeadMessageDriverRunID, driverDeliverLeadMessageNodeID, driverDeliverLeadMessageLeaseID, driverDeliverLeadMessageFence)
+		ws, parent, err := resolveRunningDriverRun(ctx, h, driverDeliverAgentMessageWorkspaceKey, driverDeliverAgentMessageDriverRunID, driverDeliverAgentMessageNodeID, driverDeliverAgentMessageLeaseID, driverDeliverAgentMessageFence)
 		if err != nil {
 			return err
 		}
-		leadName := strings.TrimSpace(driverDeliverLeadMessageName)
-		message := strings.TrimSpace(driverDeliverLeadMessageText)
-		if leadName == "" || message == "" {
+		agentName := strings.TrimSpace(driverDeliverAgentMessageName)
+		message := strings.TrimSpace(driverDeliverAgentMessageText)
+		if agentName == "" || message == "" {
 			return fmt.Errorf("agent and message required: %w", domain.ErrInvalid)
 		}
-		delivery, err := leadcontrol.DeliverLeadMessageToCodex(ctx, h.Store, ws, leadName, message)
+		result, err := deliverAgentMessageForDriver(ctx, h.Store, ws, parent.RunID, agentName, message)
 		if err != nil {
-			return fmt.Errorf("deliver lead message: %w", err)
+			return fmt.Errorf("deliver agent message: %w", err)
 		}
-		result := newLeadDeliveryResult(leadName, delivery)
-		if driverDeliverLeadMessageJSON {
+		if driverDeliverAgentMessageJSON {
 			return cmdstore.WriteJSON(result)
 		}
 		if result.Reason != "" {
-			fmt.Printf("Lead message delivery for %s: %s (%s)\n", leadName, result.State, result.Reason)
+			fmt.Printf("Agent message delivery for %s: %s (%s)\n", agentName, result.State, result.Reason)
 		} else {
-			fmt.Printf("Lead message delivery for %s: %s\n", leadName, result.State)
+			fmt.Printf("Agent message delivery for %s: %s\n", agentName, result.State)
 		}
 		return nil
 	})
 }
 
-type leadDeliveryResult struct {
+func deliverAgentMessageForDriver(ctx context.Context, st store.Store, workspace, driverRunID, agentName, message string) (agentMessageDeliveryResult, error) {
+	agent, err := st.Agents().Get(ctx, workspace, agentName)
+	if err != nil {
+		return agentMessageDeliveryResult{}, fmt.Errorf("get target agent: %w", err)
+	}
+	if isCodexLeadAgent(agent) {
+		delivery, err := leadcontrol.DeliverLeadMessageToCodexWithOptions(ctx, st, workspace, agentName, message, leadcontrol.LeadMessageDeliveryOptions{
+			SourceKind:  "workflow",
+			DriverRunID: driverRunID,
+		})
+		if err != nil {
+			return agentMessageDeliveryResult{}, err
+		}
+		return newAgentMessageDeliveryResult(agentName, delivery), nil
+	}
+	msg, err := agentinbox.Enqueue(ctx, st, workspace, agentName, message, agentinbox.MessageOptions{
+		SourceKind:  "workflow",
+		SourceRef:   "driver-run://" + strings.TrimSpace(driverRunID),
+		DriverRunID: driverRunID,
+	})
+	if err != nil {
+		return agentMessageDeliveryResult{}, err
+	}
+	return agentMessageDeliveryResult{
+		AgentName:      agentName,
+		State:          "queued",
+		Reason:         "agent message queued; no runtime delivery adapter is configured",
+		SessionID:      msg.SessionID,
+		InboxMessageID: msg.InboxMessageID,
+	}, nil
+}
+
+func isCodexLeadAgent(agent *domain.Agent) bool {
+	if agent == nil {
+		return false
+	}
+	return strings.EqualFold(strings.TrimSpace(agent.RoleName), "lead") && strings.EqualFold(strings.TrimSpace(agent.Backend), leadcontrol.RuntimeProviderCodex)
+}
+
+type agentMessageDeliveryResult struct {
 	AgentName       string `json:"agentName"`
 	State           string `json:"state"`
 	Reason          string `json:"reason,omitempty"`
 	SessionID       string `json:"sessionId,omitempty"`
+	InboxMessageID  string `json:"inboxMessageId,omitempty"`
 	RuntimeProvider string `json:"runtimeProvider,omitempty"`
 	RuntimeStatus   string `json:"runtimeStatus,omitempty"`
 	Controlled      bool   `json:"controlled,omitempty"`
 }
 
-func newLeadDeliveryResult(agentName string, delivery *leadcontrol.DeliveryResult) leadDeliveryResult {
-	result := leadDeliveryResult{
+func newLeadDeliveryResult(agentName string, delivery *leadcontrol.DeliveryResult) agentMessageDeliveryResult {
+	return newAgentMessageDeliveryResult(agentName, delivery)
+}
+
+func newAgentMessageDeliveryResult(agentName string, delivery *leadcontrol.DeliveryResult) agentMessageDeliveryResult {
+	result := agentMessageDeliveryResult{
 		AgentName: agentName,
 		State:     string(leadcontrol.DeliveryStateNone),
 	}
@@ -948,6 +991,7 @@ func newLeadDeliveryResult(agentName string, delivery *leadcontrol.DeliveryResul
 		result.State = string(delivery.State)
 		result.Reason = delivery.Reason
 		result.SessionID = delivery.SessionID
+		result.InboxMessageID = delivery.InboxMessageID
 		result.RuntimeStatus = delivery.Runtime.Status
 		result.RuntimeProvider = leadcontrol.RuntimeProviderCodex
 		result.Controlled = delivery.Runtime.Controlled
@@ -981,49 +1025,25 @@ func runDriverActiveTaskRuns(_ *cobra.Command, _ []string) error {
 
 func runDriverCompleteTask(_ *cobra.Command, _ []string) error {
 	return cmdstore.WithStore(func(ctx context.Context, h *bootstrap.StoreHandle) error {
-		ws, parent, err := resolveRunningDriverRun(ctx, h, driverCompleteTaskWorkspaceKey, driverCompleteTaskDriverRunID, driverCompleteTaskNodeID, driverCompleteTaskLeaseID, driverCompleteTaskFence)
+		ws, _, err := resolveRunningDriverRun(ctx, h, driverCompleteTaskWorkspaceKey, driverCompleteTaskDriverRunID, driverCompleteTaskNodeID, driverCompleteTaskLeaseID, driverCompleteTaskFence)
 		if err != nil {
 			return err
 		}
 		taskRunID := strings.TrimSpace(driverCompleteTaskTaskRunID)
-		if taskRunID != "" {
-			result, err := completeDriverTaskRun(ctx, h.Store.TaskRuns(), ws, taskRunID, driverTaskRunCompletionOptions{
-				TaskID:       driverCompleteTaskTaskID,
-				CompletionID: driverCompleteTaskCompletionID,
-				LeaseToken:   resolveDriverCompleteTaskLeaseToken(),
-				ArtifactIDs:  driverCompleteTaskArtifactIDs,
-				LogsRef:      driverCompleteTaskLogsRef,
-				ArtifactsRef: driverCompleteTaskArtifactsRef,
-				Reason:       driverCompleteTaskReason,
-			})
-			if err != nil {
-				return fmt.Errorf("complete task run: %w", err)
-			}
-			if driverCompleteTaskJSON {
-				return cmdstore.WriteJSON(result)
-			}
-			fmt.Printf("Completed task %s\n", result.ID)
-			return nil
-		}
-		if !driverCompleteTaskLegacyClose {
+		if taskRunID == "" {
 			return fmt.Errorf("--task-run-id is required for fenced driver completion: %w", domain.ErrInvalid)
 		}
-		if strings.TrimSpace(driverCompleteTaskTaskID) == "" {
-			return fmt.Errorf("--task-id is required when --task-run-id is not provided: %w", domain.ErrInvalid)
-		}
-		actor := firstNonEmpty(driverCompleteTaskActor, driverRunActor(parent.RunID))
-		issueBackend, err := newDriverIssueBackend(h, ws, actor)
-		if err != nil {
-			return err
-		}
-		result, err := driverpkg.CompleteTask(ctx, issueBackend, driverpkg.TaskCompleteOptions{
-			TaskID:  driverCompleteTaskTaskID,
-			Reason:  driverCompleteTaskReason,
-			Session: driverCompleteTaskSession,
-			Force:   driverCompleteTaskForce,
+		result, err := completeDriverTaskRun(ctx, h.Store.TaskRuns(), ws, taskRunID, driverTaskRunCompletionOptions{
+			TaskID:       driverCompleteTaskTaskID,
+			CompletionID: driverCompleteTaskCompletionID,
+			LeaseToken:   resolveDriverCompleteTaskLeaseToken(),
+			ArtifactIDs:  driverCompleteTaskArtifactIDs,
+			LogsRef:      driverCompleteTaskLogsRef,
+			ArtifactsRef: driverCompleteTaskArtifactsRef,
+			Reason:       driverCompleteTaskReason,
 		})
 		if err != nil {
-			return fmt.Errorf("complete task: %w", err)
+			return fmt.Errorf("complete task run: %w", err)
 		}
 		if driverCompleteTaskJSON {
 			return cmdstore.WriteJSON(result)

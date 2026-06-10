@@ -112,6 +112,12 @@ export type LoomAgentStatus = Omit<
   state?: string;
   /** Lead assignment delivery state returned by the fleet-backed agents API */
   delivery_state?: "pending" | "delivered" | "acknowledged" | string;
+  /** Queued agent inbox messages waiting for the runtime to accept a turn */
+  inbox_queued_count?: number;
+  /** Failed agent inbox messages that could not be delivered */
+  inbox_failed_count?: number;
+  /** Latest queued/failed inbox message body */
+  inbox_latest_message?: string;
 };
 
 /**

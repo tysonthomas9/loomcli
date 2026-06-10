@@ -143,6 +143,158 @@ func TestDeliverLeadMessageToCodexStartsTurnWhenIdle(t *testing.T) {
 	}
 }
 
+func TestDeliverLeadMessageToCodexQueuesBusyThreadAndDrainsWhenIdle(t *testing.T) {
+	ctx := context.Background()
+	st := memstore.New()
+	createAssignedLeadSession(t, st, "queued-message", nil)
+
+	fake := installFakeCodexClient(t, CodexThreadStatus{Type: "active"})
+	setCodexRuntimeMetadata(t, st, "WS", "lead-session", "ws://codex.test", "thread-1")
+
+	const message = "Task TASK-1 completed under the active epic-runner workflow."
+	result, err := DeliverLeadMessageToCodex(ctx, st, "WS", "nova", message)
+	if err != nil {
+		t.Fatalf("DeliverLeadMessageToCodex() error = %v", err)
+	}
+	if result.State != DeliveryStatePending {
+		t.Fatalf("delivery state = %q, want pending", result.State)
+	}
+	if fake.turnText != "" {
+		t.Fatalf("unexpected turn/start while busy: %s", fake.turnText)
+	}
+
+	queued := queuedInboxMessagesForTest(t, st, "WS", "nova", "lead-session")
+	if len(queued) != 1 || queued[0].Body != message {
+		t.Fatalf("queued inbox messages = %#v, want one queued completion message", queued)
+	}
+
+	if _, err := DeliverLeadMessageToCodex(ctx, st, "WS", "nova", message); err != nil {
+		t.Fatalf("retry DeliverLeadMessageToCodex() error = %v", err)
+	}
+	queued = queuedInboxMessagesForTest(t, st, "WS", "nova", "lead-session")
+	if len(queued) != 1 || queued[0].Body != message {
+		t.Fatalf("queued inbox after duplicate retry = %#v, want no duplicate", queued)
+	}
+
+	fake.status = CodexThreadStatus{Type: "idle"}
+	result, err = DeliverLeadMessageToCodex(ctx, st, "WS", "nova", message)
+	if err != nil {
+		t.Fatalf("idle DeliverLeadMessageToCodex() error = %v", err)
+	}
+	if result.State != DeliveryStateDelivered {
+		t.Fatalf("delivery state = %q, want delivered (reason: %s)", result.State, result.Reason)
+	}
+	if result.Runtime.Status != RuntimeStatusIdle {
+		t.Fatalf("result runtime status = %q, want idle after reading idle thread", result.Runtime.Status)
+	}
+	if fake.turnText != message {
+		t.Fatalf("turn text = %q, want queued message %q", fake.turnText, message)
+	}
+	if got := queuedInboxMessagesForTest(t, st, "WS", "nova", "lead-session"); len(got) != 0 {
+		t.Fatalf("queued inbox messages after delivery = %#v, want empty", got)
+	}
+}
+
+func TestDeliverLeadMessageToCodexQueuesBeforeSessionAndDrainsLater(t *testing.T) {
+	ctx := context.Background()
+	st := memstore.New()
+	if _, err := st.Agents().Create(ctx, store.AgentCreate{
+		WorkspaceKey: "WS",
+		Name:         "nova",
+		RoleName:     "lead",
+		Backend:      "codex",
+		Parent:       "EPIC-1",
+	}); err != nil {
+		t.Fatalf("create lead: %v", err)
+	}
+
+	const message = "Task TASK-1 completed before the lead runtime was ready."
+	result, err := DeliverLeadMessageToCodex(ctx, st, "WS", "nova", message)
+	if err != nil {
+		t.Fatalf("DeliverLeadMessageToCodex() error = %v", err)
+	}
+	if result.State != DeliveryStatePending || result.InboxMessageID == "" {
+		t.Fatalf("delivery result = %#v, want pending with inbox message", result)
+	}
+	queued := queuedInboxMessagesForTest(t, st, "WS", "nova", "")
+	if len(queued) != 1 || queued[0].Body != message || queued[0].SessionID != "" {
+		t.Fatalf("queued inbox messages = %#v, want one sessionless message", queued)
+	}
+
+	if _, err := st.AgentSessions().Create(ctx, store.AgentSessionCreate{
+		WorkspaceKey: "WS",
+		SessionID:    "lead-session",
+		AgentID:      "nova",
+		Kind:         domain.AgentSessionKindOrchestration,
+		Status:       domain.AgentSessionRunning,
+		Metadata:     map[string]string{"actor": "test"},
+	}); err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+	fake := installFakeCodexClient(t, CodexThreadStatus{Type: "idle"})
+	setCodexRuntimeMetadata(t, st, "WS", "lead-session", "ws://codex.test", "thread-1")
+
+	result, err = DeliverPendingLeadMessagesToCodex(ctx, st, "WS", "nova")
+	if err != nil {
+		t.Fatalf("DeliverPendingLeadMessagesToCodex() error = %v", err)
+	}
+	if result.State != DeliveryStateDelivered {
+		t.Fatalf("delivery state = %q, want delivered (reason: %s)", result.State, result.Reason)
+	}
+	if fake.turnText != message {
+		t.Fatalf("turn text = %q, want queued message %q", fake.turnText, message)
+	}
+	if got := queuedInboxMessagesForTest(t, st, "WS", "nova", "lead-session"); len(got) != 0 {
+		t.Fatalf("queued inbox messages after delivery = %#v, want empty", got)
+	}
+}
+
+func TestDeliverPendingLeadMessagesToCodexDrainsQueueWithoutNewMessage(t *testing.T) {
+	ctx := context.Background()
+	st := memstore.New()
+	createAssignedLeadSession(t, st, "pending-queue-drain", nil)
+
+	fake := installFakeCodexClient(t, CodexThreadStatus{Type: "active"})
+	setCodexRuntimeMetadata(t, st, "WS", "lead-session", "ws://codex.test", "thread-1")
+
+	const message = "Task TASK-2 completed after the workflow exited."
+	result, err := DeliverLeadMessageToCodex(ctx, st, "WS", "nova", message)
+	if err != nil {
+		t.Fatalf("queue DeliverLeadMessageToCodex() error = %v", err)
+	}
+	if result.State != DeliveryStatePending {
+		t.Fatalf("delivery state = %q, want pending", result.State)
+	}
+
+	fake.status = CodexThreadStatus{Type: "idle"}
+	result, err = DeliverPendingLeadMessagesToCodex(ctx, st, "WS", "nova")
+	if err != nil {
+		t.Fatalf("DeliverPendingLeadMessagesToCodex() error = %v", err)
+	}
+	if result.State != DeliveryStateDelivered {
+		t.Fatalf("delivery state = %q, want delivered (reason: %s)", result.State, result.Reason)
+	}
+	if fake.turnText != message {
+		t.Fatalf("turn text = %q, want queued message %q", fake.turnText, message)
+	}
+	if got := queuedInboxMessagesForTest(t, st, "WS", "nova", "lead-session"); len(got) != 0 {
+		t.Fatalf("queued inbox messages after pending drain = %#v, want empty", got)
+	}
+}
+
+func queuedInboxMessagesForTest(t *testing.T, st store.Store, workspace, leadName, sessionID string) []*domain.AgentInboxMessage {
+	t.Helper()
+	items, err := st.AgentInboxMessages().List(context.Background(), workspace, store.AgentInboxMessageFilter{
+		TargetAgentID: leadName,
+		SessionID:     sessionID,
+		Status:        domain.AgentInboxMessageQueued,
+	})
+	if err != nil {
+		t.Fatalf("list queued inbox messages: %v", err)
+	}
+	return items
+}
+
 func createAssignedLeadSession(t *testing.T, st store.Store, label string, metadata map[string]string) {
 	t.Helper()
 	ctx := context.Background()

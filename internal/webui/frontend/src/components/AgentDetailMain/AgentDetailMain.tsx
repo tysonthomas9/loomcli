@@ -385,6 +385,14 @@ function Header({
   const deliveryLabel = isLead
     ? leadDeliveryStateLabel(agent?.delivery_state)
     : "";
+  const queuedInbox = Math.max(0, Number(agent?.inbox_queued_count ?? 0));
+  const failedInbox = Math.max(0, Number(agent?.inbox_failed_count ?? 0));
+  const inboxLabel =
+    queuedInbox > 0
+      ? `${queuedInbox} queued message${queuedInbox === 1 ? "" : "s"}`
+      : failedInbox > 0
+        ? `${failedInbox} failed message${failedInbox === 1 ? "" : "s"}`
+        : "";
 
   return (
     <div
@@ -497,6 +505,14 @@ function Header({
               >
                 {parsed.taskId}
               </code>
+            </>
+          ) : null}
+          {inboxLabel ? (
+            <>
+              <span>·</span>
+              <span title={agent?.inbox_latest_message || inboxLabel}>
+                {inboxLabel}
+              </span>
             </>
           ) : null}
         </div>

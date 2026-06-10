@@ -4,6 +4,8 @@ type WorkflowContext = {
   payload?: {
     epicId?: string;
     epic_id?: string;
+    parentSessionId?: string;
+    parent_session_id?: string;
   };
 };
 
@@ -37,6 +39,7 @@ export async function run(ctx: WorkflowContext) {
     const result = (await loom.taskRuns.request({
       taskId: task.id,
       providerProfile: 'flue-local',
+      parentSessionId: input.parentSessionId ?? input.parent_session_id ?? '',
       supportedProviders: ['flue-local'],
       sandboxPlacement: { provider: 'flue-local' },
     })) as RequestedTaskRun;
@@ -48,7 +51,7 @@ export async function run(ctx: WorkflowContext) {
     }
 
     await loom.tasks.release(task.id);
-    return loom.needsHuman({
+    return loom.needsReview({
       summary: 'Task failed: ' + task.id,
       taskRunId: result.id,
       logsRef: result.logsRef ?? result.logs_ref ?? '',

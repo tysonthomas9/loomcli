@@ -45,6 +45,7 @@ func TestRequestTaskRunCreatesExecutesAndFinishesChild(t *testing.T) {
 		TaskRunID:       "task-run-1",
 		TaskID:          "TEST-1",
 		ProviderProfile: "codex-default",
+		ParentSessionID: "lead-session-1",
 		ParentNodeID:    run.NodeID,
 		ParentLeaseID:   run.LeaseID,
 		ParentFence:     run.FencingToken,
@@ -65,6 +66,9 @@ func TestRequestTaskRunCreatesExecutesAndFinishesChild(t *testing.T) {
 	}
 	if final.NodeID != "node-2" || final.ProviderProfile != "codex-default" {
 		t.Fatalf("final node/provider = %q/%q, want node-2/codex-default", final.NodeID, final.ProviderProfile)
+	}
+	if executor.req.ParentSessionID != "lead-session-1" || final.RuntimeMetadata["parent_session_id"] != "lead-session-1" {
+		t.Fatalf("parent session propagation req=%q metadata=%q, want lead-session-1", executor.req.ParentSessionID, final.RuntimeMetadata["parent_session_id"])
 	}
 	if final.LeaseID != "task-run-1-lease" || final.FencingToken == 0 {
 		t.Fatalf("final lease/fence = %q/%d, want generated lease with fence", final.LeaseID, final.FencingToken)

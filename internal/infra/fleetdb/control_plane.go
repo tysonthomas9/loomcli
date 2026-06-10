@@ -773,7 +773,7 @@ type agentCommandStore struct{ client *Client }
 var _ store.AgentCommandStore = (*agentCommandStore)(nil)
 
 func (s *agentCommandStore) Create(ctx context.Context, in store.AgentCommandCreate) (*domain.AgentCommand, error) {
-	body := map[string]any{"command_id": in.CommandID, "target_agent_id": in.TargetAgentID, "target_node_id": in.TargetNodeID, "session_id": in.SessionID, "type": in.Type, "payload": in.Payload, "status": string(domain.AgentCommandQueued)}
+	body := map[string]any{"command_id": in.CommandID, "target_agent_id": in.TargetAgentID, "target_node_id": in.TargetNodeID, "session_id": in.SessionID, "type": in.Type, "payload": in.Payload}
 	var out domain.AgentCommand
 	if err := s.client.do(ctx, "POST", "/api/v1/"+pathEscape(in.WorkspaceKey)+"/agent-commands", body, &out); err != nil {
 		return nil, err
@@ -836,6 +836,111 @@ func (s *agentCommandStore) Ack(ctx context.Context, ws, commandID string) (*dom
 func (s *agentCommandStore) Complete(ctx context.Context, ws, commandID string, update store.AgentCommandComplete) (*domain.AgentCommand, error) {
 	var out domain.AgentCommand
 	if err := s.client.do(ctx, "POST", "/api/v1/"+pathEscape(ws)+"/agent-commands/"+pathEscape(commandID)+"/complete", update, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+type agentInboxMessageStore struct{ client *Client }
+
+var _ store.AgentInboxMessageStore = (*agentInboxMessageStore)(nil)
+
+func (s *agentInboxMessageStore) Create(ctx context.Context, in store.AgentInboxMessageCreate) (*domain.AgentInboxMessage, error) {
+	body := map[string]any{
+		"inbox_message_id":    in.InboxMessageID,
+		"target_agent_id":     in.TargetAgentID,
+		"session_id":          in.SessionID,
+		"body":                in.Body,
+		"source_kind":         in.SourceKind,
+		"source_ref":          in.SourceRef,
+		"driver_run_id":       in.DriverRunID,
+		"task_run_id":         in.TaskRunID,
+		"trigger_event_id":    in.TriggerEventID,
+		"trigger_delivery_id": in.TriggerDeliveryID,
+		"dedupe_key":          in.DedupeKey,
+	}
+	var out domain.AgentInboxMessage
+	if err := s.client.do(ctx, "POST", "/api/v1/"+pathEscape(in.WorkspaceKey)+"/agent-inbox-messages", body, &out); err != nil {
+		return nil, err
+	}
+	if out.Status == "" {
+		out.Status = domain.AgentInboxMessageQueued
+	}
+	return &out, nil
+}
+
+func (s *agentInboxMessageStore) Get(ctx context.Context, ws, inboxMessageID string) (*domain.AgentInboxMessage, error) {
+	var out domain.AgentInboxMessage
+	if err := s.client.do(ctx, "GET", "/api/v1/"+pathEscape(ws)+"/agent-inbox-messages/"+pathEscape(inboxMessageID), nil, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+func (s *agentInboxMessageStore) List(ctx context.Context, ws string, filter store.AgentInboxMessageFilter) ([]*domain.AgentInboxMessage, error) {
+	q := url.Values{}
+	if filter.TargetAgentID != "" {
+		q.Set("target_agent_id", filter.TargetAgentID)
+	}
+	if filter.SessionID != "" {
+		q.Set("session_id", filter.SessionID)
+	}
+	if filter.Status != "" {
+		q.Set("status", string(filter.Status))
+	}
+	if filter.SourceKind != "" {
+		q.Set("source_kind", filter.SourceKind)
+	}
+	if filter.SourceRef != "" {
+		q.Set("source_ref", filter.SourceRef)
+	}
+	if filter.DriverRunID != "" {
+		q.Set("driver_run_id", filter.DriverRunID)
+	}
+	if filter.TaskRunID != "" {
+		q.Set("task_run_id", filter.TaskRunID)
+	}
+	if filter.AfterCursor > 0 {
+		q.Set("after_cursor", strconv.FormatInt(filter.AfterCursor, 10))
+	}
+	if filter.Limit > 0 {
+		q.Set("limit", strconv.Itoa(filter.Limit))
+	}
+	path := "/api/v1/" + pathEscape(ws) + "/agent-inbox-messages"
+	if encoded := q.Encode(); encoded != "" {
+		path += "?" + encoded
+	}
+	var resp struct {
+		AgentInboxMessages []*domain.AgentInboxMessage `json:"agent_inbox_messages"`
+	}
+	if err := s.client.do(ctx, "GET", path, nil, &resp); err != nil {
+		return nil, err
+	}
+	if resp.AgentInboxMessages == nil {
+		resp.AgentInboxMessages = []*domain.AgentInboxMessage{}
+	}
+	return resp.AgentInboxMessages, nil
+}
+
+func (s *agentInboxMessageStore) ClaimNext(ctx context.Context, in store.AgentInboxMessageClaim) (*domain.AgentInboxMessage, error) {
+	body := map[string]any{
+		"target_agent_id": in.TargetAgentID,
+		"session_id":      in.SessionID,
+		"claimed_by":      in.ClaimedBy,
+	}
+	if in.LeaseTTL > 0 {
+		body["lease_ttl_ms"] = in.LeaseTTL.Milliseconds()
+	}
+	var out domain.AgentInboxMessage
+	if err := s.client.do(ctx, "POST", "/api/v1/"+pathEscape(in.WorkspaceKey)+"/agent-inbox-messages/claim-next", body, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+func (s *agentInboxMessageStore) Complete(ctx context.Context, ws, inboxMessageID string, update store.AgentInboxMessageComplete) (*domain.AgentInboxMessage, error) {
+	var out domain.AgentInboxMessage
+	if err := s.client.do(ctx, "POST", "/api/v1/"+pathEscape(ws)+"/agent-inbox-messages/"+pathEscape(inboxMessageID)+"/complete", update, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil

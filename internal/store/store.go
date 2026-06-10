@@ -29,6 +29,7 @@ type Store interface {
 	AgentLeases() AgentLeaseStore
 	AgentOwnershipLeases() AgentOwnershipLeaseStore
 	AgentCommands() AgentCommandStore
+	AgentInboxMessages() AgentInboxMessageStore
 	Drivers() DriverStore
 	DriverVersions() DriverVersionStore
 	WorkerProfiles() WorkerProfileStore

@@ -31,6 +31,13 @@ type monitorStoreData struct {
 	Agents    []monitor.AgentStatus
 }
 
+type agentInboxSummary struct {
+	QueuedCount   int
+	FailedCount   int
+	LatestMessage string
+	LatestCursor  int64
+}
+
 type monitorStoreCacheEntry struct {
 	mu       sync.Mutex
 	cachedAt time.Time
@@ -132,7 +139,8 @@ func collectMonitorStoreData(ctx context.Context, st store.Store, workspaceHint 
 	workspaceData := monitorWorkspaceDataForAgents(ctx, st, wsKey, wsName)
 	latestSessions := latestAgentSessionsForMonitor(ctx, st, wsKey)
 	orchestrationByAgent := latestOrchestrationSessionsForMonitor(ctx, st, wsKey)
-	data.Agents = monitorAgentStatuses(assignments, workspaceData, latestSessions, orchestrationByAgent, wsName)
+	inboxByAgent := agentInboxSummariesForMonitor(ctx, st, wsKey)
+	data.Agents = monitorAgentStatuses(assignments, workspaceData, latestSessions, orchestrationByAgent, inboxByAgent, wsName)
 	return data
 }
 
@@ -141,6 +149,7 @@ func monitorAgentStatuses(
 	workspaceData *ops.WorkspaceData,
 	latestSessions map[string]*domain.AgentSession,
 	orchestrationByAgent map[string]*domain.AgentSession,
+	inboxByAgent map[string]agentInboxSummary,
 	wsName string,
 ) []monitor.AgentStatus {
 	agents := []monitor.AgentStatus{}
@@ -157,6 +166,7 @@ func monitorAgentStatuses(
 		if sess := orchestrationByAgent[assignment.Name]; sess != nil {
 			orchID = sess.SessionID
 		}
+		inboxSummary := inboxByAgent[assignment.Name]
 		agents = append(agents, monitor.AgentStatus{
 			Name:                  assignment.Name,
 			Branch:                monitorBranchFromAgent(workspaceData, assignment),
@@ -167,6 +177,9 @@ func monitorAgentStatuses(
 			DaemonManaged:         assignment.Auto,
 			Parent:                assignment.Parent,
 			DeliveryState:         monitorLeadDeliveryState(assignment, orchestrationByAgent[assignment.Name]),
+			InboxQueuedCount:      inboxSummary.QueuedCount,
+			InboxFailedCount:      inboxSummary.FailedCount,
+			InboxLatestMessage:    inboxSummary.LatestMessage,
 			OrchestratorSessionID: orchID,
 			TaskID:                taskID,
 			SessionID:             sessionID,
@@ -175,6 +188,37 @@ func monitorAgentStatuses(
 		})
 	}
 	return agents
+}
+
+func agentInboxSummariesForMonitor(ctx context.Context, st store.Store, wsKey string) map[string]agentInboxSummary {
+	out := make(map[string]agentInboxSummary)
+	if st == nil || st.AgentInboxMessages() == nil || wsKey == "" {
+		return out
+	}
+	for _, status := range []domain.AgentInboxMessageStatus{domain.AgentInboxMessageQueued, domain.AgentInboxMessageFailed} {
+		items, err := st.AgentInboxMessages().List(ctx, wsKey, store.AgentInboxMessageFilter{Status: status, Limit: 10000})
+		if err != nil {
+			slog.Warn("monitor: list agent inbox messages failed", "workspace", wsKey, "status", status, "err", err)
+			continue
+		}
+		for _, item := range items {
+			if item == nil || item.TargetAgentID == "" {
+				continue
+			}
+			summary := out[item.TargetAgentID]
+			if status == domain.AgentInboxMessageQueued {
+				summary.QueuedCount++
+			} else if status == domain.AgentInboxMessageFailed {
+				summary.FailedCount++
+			}
+			if item.Cursor >= summary.LatestCursor {
+				summary.LatestCursor = item.Cursor
+				summary.LatestMessage = item.Body
+			}
+			out[item.TargetAgentID] = summary
+		}
+	}
+	return out
 }
 
 func monitorLeadDeliveryState(agent *domain.Agent, session *domain.AgentSession) string {

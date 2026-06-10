@@ -331,7 +331,7 @@ func (e *workflowEndpointE2E) waitForRunCompleted(runID string) domain.DriverRun
 		switch run.Status {
 		case domain.DriverRunCompleted:
 			return run
-		case domain.DriverRunFailed, domain.DriverRunNeedsHuman, domain.DriverRunCancelled:
+		case domain.DriverRunFailed, domain.DriverRunNeedsReview, domain.DriverRunCancelled:
 			e.t.Fatalf("workflow run %s reached terminal status %s: %+v", runID, run.Status, run)
 		}
 		time.Sleep(500 * time.Millisecond)

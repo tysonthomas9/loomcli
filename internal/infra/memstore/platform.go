@@ -1374,7 +1374,7 @@ func taskRunRequiresCloudSafeArtifactsMem(run *domain.TaskRun) bool {
 		return false
 	}
 	switch strings.ToLower(strings.TrimSpace(run.SandboxPlacement.Provider)) {
-	case "", "local", "local-noop", "noop":
+	case "", "local", "local-noop", "noop", "flue-local":
 		return false
 	default:
 		return true

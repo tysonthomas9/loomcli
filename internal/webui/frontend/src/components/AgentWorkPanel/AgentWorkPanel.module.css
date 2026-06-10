@@ -285,7 +285,7 @@
 }
 
 .runnerStrip[data-status="failed"],
-.runnerStrip[data-status="needs_human"],
+.runnerStrip[data-status="needs_review"],
 .runnerStrip[data-status="cancelled"] {
   border-left-color: var(--color-status-error);
 }

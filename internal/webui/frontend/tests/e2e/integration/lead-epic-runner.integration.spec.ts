@@ -201,7 +201,7 @@ async function waitForRunCompleted(
     if (run.status === "completed") return run;
     if (
       run.status === "failed" ||
-      run.status === "needs_human" ||
+      run.status === "needs_review" ||
       run.status === "cancelled"
     ) {
       throw new Error(
@@ -318,7 +318,7 @@ interface WorkflowRun {
     | "running"
     | "completed"
     | "failed"
-    | "needs_human"
+    | "needs_review"
     | "cancelled";
   payload?: Record<string, unknown>;
   output?: Record<string, string>;

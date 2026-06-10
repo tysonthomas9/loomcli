@@ -63,6 +63,26 @@ func TestBuiltinEpicRunnerWorkflowWorkerProfilesAreOptIn(t *testing.T) {
 	}
 }
 
+func TestBuiltinEpicRunnerWorkflowDrainsQueuedLeadMessagesBeforeTerminalResult(t *testing.T) {
+	spec, ok := BuiltinWorkflow(BuiltinEpicRunnerWorkflowName)
+	if !ok {
+		t.Fatal("built-in epic-runner workflow missing")
+	}
+	source := spec.Files[spec.Entrypoint]
+	for _, want := range []string{
+		"const leadNotificationDrainMs =",
+		"taskNotifications.drain(leadNotificationDrainMs)",
+		"async drain(timeoutMs) {",
+	} {
+		if !strings.Contains(source, want) {
+			t.Fatalf("built-in epic-runner source missing lead notification drain logic %q", want)
+		}
+	}
+	if strings.Contains(source, "await taskNotifications.flush();\n        const suffix") {
+		t.Fatalf("built-in epic-runner still completes after a single task notification flush")
+	}
+}
+
 func TestBuiltinEpicRunnerWorkflowSourceParsesAsJavaScript(t *testing.T) {
 	node, err := exec.LookPath("node")
 	if err != nil {

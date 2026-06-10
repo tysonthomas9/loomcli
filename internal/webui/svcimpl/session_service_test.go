@@ -1,6 +1,7 @@
 package svcimpl
 
 import (
+	"bytes"
 	"errors"
 	"os"
 	"path/filepath"
@@ -70,6 +71,68 @@ func TestSessionServiceListTaskSessionsUsesControlPlane(t *testing.T) {
 	}
 	if item.FilesChanged != 1 || item.LinesAdded != 2 || item.LinesRemoved != 3 || len(item.FilesTouched) != 1 || item.FilesTouched[0] != "file.txt" {
 		t.Fatalf("item diff stats = %+v", item.SessionRecord)
+	}
+}
+
+func TestSessionServiceControlPlaneTranscriptRef(t *testing.T) {
+	ctx := t.Context()
+	st := memstore.New()
+	transcriptBody := []byte(`{"seq":1,"timestamp":"2026-06-09T12:00:00Z","role":"assistant","type":"text","text":"done"}` + "\n")
+	if _, err := st.Artifacts().Create(ctx, store.ArtifactCreate{
+		WorkspaceKey:  "WS",
+		ArtifactID:    "transcript-task-run-1",
+		SessionID:     "flue-task-run-1",
+		TaskID:        "TASK-FLUE-1",
+		OwnerType:     "task_run",
+		OwnerID:       "task-run-1",
+		Type:          "transcript",
+		MIMEType:      "application/x-ndjson",
+		DurableStatus: "declared",
+	}); err != nil {
+		t.Fatalf("create transcript artifact: %v", err)
+	}
+	uploaded, err := st.Artifacts().UploadContent(ctx, "WS", "transcript-task-run-1", store.ArtifactContentUpload{Body: bytes.NewReader(transcriptBody), MIMEType: "application/x-ndjson"})
+	if err != nil {
+		t.Fatalf("upload transcript artifact: %v", err)
+	}
+	if _, err := st.Artifacts().Finalize(ctx, "WS", "transcript-task-run-1", store.ArtifactFinalize{ContentHash: &uploaded.ContentHash}); err != nil {
+		t.Fatalf("finalize transcript artifact: %v", err)
+	}
+	if _, err := st.AgentSessions().Create(ctx, store.AgentSessionCreate{
+		WorkspaceKey:    "WS",
+		SessionID:       "flue-task-run-1",
+		AgentID:         "flue-task-agent",
+		Kind:            domain.AgentSessionKindTask,
+		TaskID:          "TASK-FLUE-1",
+		ParentSessionID: "lead-session-1",
+		Status:          domain.AgentSessionCompleted,
+		Phase:           "implementation",
+		Metadata: map[string]string{
+			"runtime":        "flue",
+			"task_run_id":    "task-run-1",
+			"driver_run_id":  "driver-run-1",
+			"flue_session":   "flue-task-run-1",
+			"flue_harness":   "task-agent",
+			"transcript_ref": "artifact://transcript-task-run-1",
+		},
+	}); err != nil {
+		t.Fatalf("create flue control-plane session: %v", err)
+	}
+
+	svc := NewSessionService(st, nil)
+	items, err := svc.ListTaskSessions(ctx, "WS", "TASK-FLUE-1")
+	if err != nil {
+		t.Fatalf("ListTaskSessions: %v", err)
+	}
+	if len(items) != 1 || !items[0].HasTranscript || items[0].Backend != "flue" {
+		t.Fatalf("items = %+v, want flue session with transcript", items)
+	}
+	events, err := svc.GetSessionTranscript(ctx, "WS", "TASK-FLUE-1", "flue-task-run-1")
+	if err != nil {
+		t.Fatalf("GetSessionTranscript: %v", err)
+	}
+	if len(events) != 1 || events[0].Role != "assistant" || events[0].Text != "done" {
+		t.Fatalf("events = %+v, want assistant transcript", events)
 	}
 }
 

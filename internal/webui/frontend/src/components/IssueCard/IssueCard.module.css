@@ -276,7 +276,7 @@
   color: var(--color-text);
 }
 
-/* Needs help - blocked and needs human assistance */
+/* Needs help - blocked and needs review */
 .reviewHelp {
   background-color: var(--color-danger-bg);
   color: var(--color-text);

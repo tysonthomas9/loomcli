@@ -486,6 +486,45 @@ func TestPlatformClientDriverRunLifecycleRoutesAndErrors(t *testing.T) {
 	}
 }
 
+func TestPlatformClientFinishesDriverRunWithNeedsReviewStatus(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/api/v1/WS/driver-runs/run-1/finish" {
+			t.Fatalf("unexpected request %s %s", r.Method, r.URL.String())
+		}
+		var req struct {
+			NodeID       string                 `json:"node_id"`
+			LeaseID      string                 `json:"lease_id"`
+			FencingToken int64                  `json:"fencing_token"`
+			Status       domain.DriverRunStatus `json:"status"`
+		}
+		decodeJSONBody(t, r, &req)
+		if req.NodeID != "node-1" || req.LeaseID != "lease-1" || req.FencingToken != 1 || req.Status != domain.DriverRunNeedsReview {
+			t.Fatalf("finish needs_review body = %+v", req)
+		}
+		writeJSON(t, w, domain.DriverRun{WorkspaceKey: "WS", RunID: "run-1", Status: domain.DriverRunNeedsReview, NodeID: req.NodeID, LeaseID: req.LeaseID, FencingToken: req.FencingToken})
+	}))
+	defer ts.Close()
+
+	client, err := New(Config{BaseURL: ts.URL, Actor: "tester"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	finished, err := client.DriverRuns().Finish(t.Context(), "WS", "run-1", store.DriverRunFinish{
+		NodeID:       "node-1",
+		LeaseID:      "lease-1",
+		FencingToken: 1,
+		Status:       domain.DriverRunNeedsReview,
+		Summary:      "blocked",
+		ErrorClass:   "epic_blocked",
+	})
+	if err != nil {
+		t.Fatalf("Finish needs_review driver run: %v", err)
+	}
+	if finished.Status != domain.DriverRunNeedsReview {
+		t.Fatalf("finished status = %q, want needs_review", finished.Status)
+	}
+}
+
 func decodeJSONBody(t *testing.T, r *http.Request, out any) {
 	t.Helper()
 	if err := json.NewDecoder(r.Body).Decode(out); err != nil {

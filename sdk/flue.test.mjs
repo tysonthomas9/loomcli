@@ -45,7 +45,7 @@ if (args[1] === 'exec-task') {
       LOOM_DRIVER_FLEET_DB_ACTOR: "driver-run:run-1",
     },
   });
-  const result = await client.taskRuns.request({ taskId: "TASK-1", providerProfile: "local", nodeId: "target-node" });
+  const result = await client.taskRuns.request({ taskId: "TASK-1", providerProfile: "local", parentSessionId: "lead-session-1", nodeId: "target-node" });
   assert.equal(result.status, "completed");
   await client.tasks.complete("TASK-1");
 
@@ -63,8 +63,12 @@ if (args[1] === 'exec-task') {
   assert.equal(calls[1].args[calls[1].args.indexOf("--task-run-id") + 1], "task-run-1");
   assert.ok(calls[1].args.includes("--lease-token"));
   assert.equal(calls[1].args[calls[1].args.indexOf("--lease-token") + 1], "lease-token-1");
+  assert.equal(calls[1].args.includes("--session"), false);
+  assert.equal(calls[1].args.includes("--force"), false);
   assert.ok(calls[0].args.includes("--node-id"));
   assert.equal(calls[0].args[calls[0].args.indexOf("--node-id") + 1], "target-node");
+  assert.ok(calls[0].args.includes("--parent-session-id"));
+  assert.equal(calls[0].args[calls[0].args.indexOf("--parent-session-id") + 1], "lead-session-1");
 });
 
 test("FlueDriverClient exposes epic snapshot, active runs, and stale recovery helpers", async () => {
@@ -88,7 +92,7 @@ if (args[1] === 'epic-get') {
   console.log(JSON.stringify({ name: 'nova', role_name: 'lead', parent: 'EPIC-1' }));
 } else if (args[1] === 'deliver-lead-assignment') {
   console.log(JSON.stringify({ agentName: 'nova', state: 'delivered', sessionId: 'session-1' }));
-} else if (args[1] === 'deliver-lead-message') {
+} else if (args[1] === 'deliver-agent-message') {
   console.log(JSON.stringify({ agentName: 'nova', state: 'delivered', sessionId: 'session-1' }));
 } else if (args[1] === 'active-task-runs') {
   console.log(JSON.stringify({ driverRunId: 'run-1', activeCount: 2 }));
@@ -107,6 +111,7 @@ if (args[1] === 'epic-get') {
       LOOM_DRIVER_RUN_ID: "run-1",
     },
   });
+  assert.equal(client.messageLeadAgent, undefined);
 
   assert.equal((await client.epics.get()).issue_type, "epic");
   assert.equal((await client.epics.snapshot()).readyCount, 1);
@@ -126,7 +131,7 @@ if (args[1] === 'epic-get') {
     "agent-orchestration-session",
     "update-agent-parent",
     "deliver-lead-assignment",
-    "deliver-lead-message",
+    "deliver-agent-message",
     "active-task-runs",
     "recover-stale-tasks",
   ]);
@@ -154,6 +159,26 @@ if (args[1] === 'epic-get') {
   assert.equal(calls[7].args[calls[7].args.indexOf("--limit") + 1], "10");
   assert.ok(calls[8].args.includes("--max-age-seconds"));
   assert.equal(calls[8].args[calls[8].args.indexOf("--max-age-seconds") + 1], "30");
+});
+
+test("FlueDriverClient returns needs_review results", () => {
+  const client = createLoomDriverClient({
+    input: {},
+    command: [process.execPath, "-e", "console.log('{}')"],
+    env: {
+      LOOM_DRIVER_WORKSPACE: "WS",
+      LOOM_DRIVER_RUN_ID: "run-1",
+    },
+  });
+
+  assert.deepEqual(client.needsReview({ summary: "blocked", errorClass: "epic_blocked" }), {
+    status: "needs_review",
+    summary: "blocked",
+    errorClass: "epic_blocked",
+    taskRunId: undefined,
+    logsRef: undefined,
+    artifactsRef: undefined,
+  });
 });
 
 function readJSONL(file) {

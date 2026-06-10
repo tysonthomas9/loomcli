@@ -12,28 +12,30 @@ import (
 )
 
 const (
-	MetadataRuntimeProvider       = "lead_runtime_provider"
-	MetadataRuntimeControlled     = "lead_runtime_controlled"
-	MetadataRuntimeStatus         = "lead_runtime_status"
-	MetadataRuntimeStatusUpdated  = "lead_runtime_status_updated_at"
-	MetadataCodexEndpoint         = "codex_app_server_endpoint"
-	MetadataCodexPID              = "codex_app_server_pid"
-	MetadataCodexRuntimeHome      = "codex_runtime_home"
-	MetadataCodexSQLiteHome       = "codex_sqlite_home"
-	MetadataCodexThreadID         = "codex_provider_thread_id"
-	MetadataDeliveryVersion       = "lead_assignment_delivered_version"
-	MetadataDeliveryEpic          = "lead_assignment_delivered_epic"
-	MetadataDeliveryError         = "lead_assignment_delivery_error"
-	MetadataDeliveryAttemptedAt   = "lead_assignment_delivery_attempted_at"
-	MetadataDeliveryAcknowledged  = "lead_assignment_acknowledged_version"
-	RuntimeProviderCodex          = "codex"
-	RuntimeStatusStarting         = "starting"
-	RuntimeStatusDisconnected     = "disconnected"
-	RuntimeStatusIdle             = "idle"
-	RuntimeStatusActive           = "active"
-	RuntimeStatusWaitingApproval  = "waiting_on_approval"
-	RuntimeStatusWaitingUserInput = "waiting_on_user_input"
-	RuntimeStatusFailed           = "failed"
+	MetadataRuntimeProvider        = "lead_runtime_provider"
+	MetadataRuntimeControlled      = "lead_runtime_controlled"
+	MetadataRuntimeStatus          = "lead_runtime_status"
+	MetadataRuntimeStatusUpdated   = "lead_runtime_status_updated_at"
+	MetadataCodexEndpoint          = "codex_app_server_endpoint"
+	MetadataCodexPID               = "codex_app_server_pid"
+	MetadataCodexRuntimeHome       = "codex_runtime_home"
+	MetadataCodexSQLiteHome        = "codex_sqlite_home"
+	MetadataCodexThreadID          = "codex_provider_thread_id"
+	MetadataDeliveryVersion        = "lead_assignment_delivered_version"
+	MetadataDeliveryEpic           = "lead_assignment_delivered_epic"
+	MetadataDeliveryError          = "lead_assignment_delivery_error"
+	MetadataDeliveryAttemptedAt    = "lead_assignment_delivery_attempted_at"
+	MetadataDeliveryAcknowledged   = "lead_assignment_acknowledged_version"
+	MetadataLeadMessageAttemptedAt = "lead_message_delivery_attempted_at"
+	MetadataLeadMessageError       = "lead_message_delivery_error"
+	RuntimeProviderCodex           = "codex"
+	RuntimeStatusStarting          = "starting"
+	RuntimeStatusDisconnected      = "disconnected"
+	RuntimeStatusIdle              = "idle"
+	RuntimeStatusActive            = "active"
+	RuntimeStatusWaitingApproval   = "waiting_on_approval"
+	RuntimeStatusWaitingUserInput  = "waiting_on_user_input"
+	RuntimeStatusFailed            = "failed"
 )
 
 type CodexRuntimeMetadata struct {
@@ -150,6 +152,30 @@ func MarkAssignmentDeliveryAttempt(ctx context.Context, st store.Store, workspac
 	metadata[MetadataDeliveryAttemptedAt] = time.Now().UTC().Format(time.RFC3339Nano)
 	if strings.TrimSpace(message) != "" {
 		metadata[MetadataDeliveryError] = strings.TrimSpace(message)
+	}
+	_, err = st.AgentSessions().Update(ctx, workspace, sessionID, store.AgentSessionUpdate{Metadata: &metadata})
+	return err
+}
+
+func MarkLeadMessageDeliveryAttempt(ctx context.Context, st store.Store, workspace, sessionID, message string) error {
+	if st == nil || st.AgentSessions() == nil {
+		return nil
+	}
+	sessionID = strings.TrimSpace(sessionID)
+	if strings.TrimSpace(workspace) == "" || sessionID == "" {
+		return nil
+	}
+	session, err := st.AgentSessions().Get(ctx, workspace, sessionID)
+	if errors.Is(err, domain.ErrNotFound) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	metadata := cloneMetadata(session.Metadata)
+	metadata[MetadataLeadMessageAttemptedAt] = time.Now().UTC().Format(time.RFC3339Nano)
+	if strings.TrimSpace(message) != "" {
+		metadata[MetadataLeadMessageError] = strings.TrimSpace(message)
 	}
 	_, err = st.AgentSessions().Update(ctx, workspace, sessionID, store.AgentSessionUpdate{Metadata: &metadata})
 	return err

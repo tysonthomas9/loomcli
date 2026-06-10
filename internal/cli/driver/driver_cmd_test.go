@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
@@ -38,12 +39,12 @@ func TestDriverCommandContainsSubcommands(t *testing.T) {
 	if driverCmd.Commands() == nil {
 		t.Fatal("driver command has no subcommands")
 	}
-	for _, name := range []string{"register", "run", "exec-task", "work-task-run", "claim-ready", "epic-get", "epic-snapshot", "list-agents", "agent-orchestration-session", "update-agent-parent", "deliver-lead-assignment", "deliver-lead-message", "active-task-runs", "complete-task", "release-task", "recover-stale-tasks"} {
+	for _, name := range []string{"register", "run", "exec-task", "work-task-run", "claim-ready", "epic-get", "epic-snapshot", "list-agents", "agent-orchestration-session", "update-agent-parent", "deliver-lead-assignment", "deliver-agent-message", "active-task-runs", "complete-task", "release-task", "recover-stale-tasks"} {
 		found := false
 		for _, cmd := range driverCmd.Commands() {
 			if cmd.Name() == name {
 				found = true
-				if (name == "exec-task" || name == "work-task-run" || name == "claim-ready" || name == "epic-get" || name == "epic-snapshot" || name == "list-agents" || name == "agent-orchestration-session" || name == "update-agent-parent" || name == "deliver-lead-assignment" || name == "deliver-lead-message" || name == "active-task-runs" || name == "complete-task" || name == "release-task" || name == "recover-stale-tasks") && !cmd.Hidden {
+				if (name == "exec-task" || name == "work-task-run" || name == "claim-ready" || name == "epic-get" || name == "epic-snapshot" || name == "list-agents" || name == "agent-orchestration-session" || name == "update-agent-parent" || name == "deliver-lead-assignment" || name == "deliver-agent-message" || name == "active-task-runs" || name == "complete-task" || name == "release-task" || name == "recover-stale-tasks") && !cmd.Hidden {
 					t.Fatalf("%s command should stay hidden", name)
 				}
 				break
@@ -53,11 +54,52 @@ func TestDriverCommandContainsSubcommands(t *testing.T) {
 			t.Fatalf("driver command missing %q subcommand", name)
 		}
 	}
-	if driverCompleteTaskCmd.Flags().Lookup("legacy-task-close") == nil {
-		t.Fatal("complete-task command missing legacy-task-close flag")
+	for _, cmd := range driverCmd.Commands() {
+		if cmd.Name() == "deliver-lead-message" {
+			t.Fatal("driver command should not register deliver-lead-message compatibility alias")
+		}
+	}
+	for _, flag := range []string{"legacy-task-close", "session", "actor", "force"} {
+		if driverCompleteTaskCmd.Flags().Lookup(flag) != nil {
+			t.Fatalf("complete-task command should not register removed compatibility flag %q", flag)
+		}
 	}
 	if driverExecTaskCmd.Flags().Lookup("defer-completion") == nil {
 		t.Fatal("exec-task command missing defer-completion flag")
+	}
+}
+
+func TestDeliverAgentMessageForDriverQueuesGenericMessage(t *testing.T) {
+	ctx := context.Background()
+	st := memstore.New()
+	if _, err := st.Agents().Create(ctx, store.AgentCreate{
+		WorkspaceKey: "WS",
+		Name:         "worker-1",
+		RoleName:     "task",
+		Backend:      "codex",
+	}); err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
+
+	result, err := deliverAgentMessageForDriver(ctx, st, "WS", "run-1", "worker-1", " task finished ")
+	if err != nil {
+		t.Fatalf("deliver generic agent message: %v", err)
+	}
+	if result.State != "queued" || result.AgentName != "worker-1" || result.InboxMessageID == "" {
+		t.Fatalf("result = %#v, want queued inbox message", result)
+	}
+	msgs, err := st.AgentInboxMessages().List(ctx, "WS", store.AgentInboxMessageFilter{
+		TargetAgentID: "worker-1",
+		Status:        domain.AgentInboxMessageQueued,
+	})
+	if err != nil {
+		t.Fatalf("list inbox messages: %v", err)
+	}
+	if len(msgs) != 1 {
+		t.Fatalf("queued inbox messages = %#v, want one", msgs)
+	}
+	if msgs[0].Body != "task finished" || msgs[0].SourceKind != "workflow" || msgs[0].SourceRef != "driver-run://run-1" || msgs[0].DriverRunID != "run-1" {
+		t.Fatalf("queued inbox message = %#v", msgs[0])
 	}
 }
 

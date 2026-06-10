@@ -117,6 +117,9 @@ func (s commandPollerTestStore) AgentOwnershipLeases() store.AgentOwnershipLease
 func (s commandPollerTestStore) AgentCommands() store.AgentCommandStore {
 	return s.commands
 }
+func (s commandPollerTestStore) AgentInboxMessages() store.AgentInboxMessageStore {
+	return nil
+}
 func (s commandPollerTestStore) Drivers() store.DriverStore { return nil }
 func (s commandPollerTestStore) DriverVersions() store.DriverVersionStore {
 	return nil

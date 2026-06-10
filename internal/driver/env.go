@@ -17,7 +17,8 @@ var subprocessEnvAllowExact = map[string]struct{}{
 	"TZ":      {},
 	"LANG":    {},
 
-	"LOOM_CONFIG_DIR": {},
+	"LOOM_CONFIG_DIR":       {},
+	"LOOM_FLUE_AGENT_MODEL": {},
 
 	// Test helper marker for subprocess-backed driver tests.
 	"LOOM_HOST_BRIDGE_HELPER": {},

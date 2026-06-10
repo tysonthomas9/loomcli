@@ -1,5 +1,5 @@
 export interface FlueDriverResult {
-  status: "completed" | "failed" | "needs_human" | "cancelled" | string;
+  status: "completed" | "failed" | "needs_review" | "cancelled" | string;
   summary?: string;
   errorClass?: string;
   taskRunId?: string;
@@ -25,8 +25,6 @@ export interface FlueTaskSelector {
   artifacts_ref?: string;
   artifactIds?: string[];
   artifact_ids?: string[];
-  session?: string;
-  force?: boolean;
 }
 
 export interface FlueTaskRunRequest {
@@ -38,6 +36,8 @@ export interface FlueTaskRunRequest {
   provider_profile?: string;
   workerProfileId?: string;
   worker_profile_id?: string;
+  parentSessionId?: string;
+  parent_session_id?: string;
   nodeId?: string;
   node_id?: string;
   runnerId?: string;
@@ -142,7 +142,7 @@ export declare class FlueDriverClient {
 
   completed(input?: { summary?: string }): FlueDriverResult;
   failed(input?: { summary?: string; errorClass?: string; error_class?: string }): FlueDriverResult;
-  needsHuman(input?: {
+  needsReview(input?: {
     summary?: string;
     errorClass?: string;
     error_class?: string;
@@ -160,7 +160,7 @@ export declare class FlueDriverClient {
   agentOrchestrationSession(input?: FlueAgentInput): Promise<Record<string, unknown> | null>;
   updateAgentParent(input?: FlueAgentParentUpdateInput): Promise<Record<string, unknown> | null>;
   deliverLeadAssignment(input?: FlueAgentInput): Promise<Record<string, unknown> | null>;
-  messageLeadAgent(input?: FlueAgentMessageInput): Promise<Record<string, unknown> | null>;
+  messageAgent(input?: FlueAgentMessageInput): Promise<Record<string, unknown> | null>;
   requestTaskRun(input?: FlueTaskRunRequest): Promise<Record<string, unknown>>;
   activeTaskRuns(input?: FlueTaskRunActiveInput): Promise<Record<string, unknown> | null>;
   recoverStaleTaskRuns(input?: FlueTaskRunRecoverStaleInput): Promise<Record<string, unknown> | null>;

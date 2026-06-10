@@ -3,9 +3,13 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 FIXTURE_DIR="${FIXTURE_DIR:-${ROOT_DIR}/scripts/fixtures/slack-src}"
-TASK_RUNNER="${TASK_RUNNER:-${ROOT_DIR}/scripts/slack-codex-task-runner.mjs}"
+TASK_RUNNER="${TASK_RUNNER:-${ROOT_DIR}/scripts/flue-task-agent-runner.mjs}"
+TASK_RUNNER_HELPER="${TASK_RUNNER_HELPER:-${ROOT_DIR}/scripts/flue-event-transcript.mjs}"
 EPIC_RUNNER_SOURCE="${EPIC_RUNNER_SOURCE:-${ROOT_DIR}/internal/workflows/builtin/epic-runner.ts}"
 LOOM_SDK_DIR="${LOOM_SDK_DIR:-${ROOT_DIR}/sdk}"
+FLUE_REPO="${FLUE_REPO:-${ROOT_DIR}/../flue}"
+FLUE_NODE_MODULES_DIR="${FLUE_NODE_MODULES_DIR:-${FLUE_REPO}/node_modules}"
+FLUE_RUNTIME_DIR="${FLUE_RUNTIME_DIR:-${FLUE_REPO}/packages/runtime}"
 
 CONTAINER="${CONTAINER:-loom-slack-epic}"
 IMAGE="${IMAGE:-loomcli-dev-slack-epic}"
@@ -22,6 +26,7 @@ BUILD_FLEET_DB="${BUILD_FLEET_DB:-auto}"
 BUILD_IMAGE="${BUILD_IMAGE:-auto}"
 
 CODEX_HOME="${CODEX_HOME:-${HOME}/.codex}"
+CONTAINER_CODEX_AUTH_FILE="${CONTAINER_CODEX_AUTH_FILE:-/root/.codex/auth.json}"
 CLAUDE_HOME="${CLAUDE_HOME:-${HOME}/.claude}"
 CONTAINER_REPO_PATH="${CONTAINER_REPO_PATH:-/tmp/slack-src}"
 CONTAINER_EPIC_RUNNER_DIST="${CONTAINER_EPIC_RUNNER_DIST:-/tmp/epic-runner-dist}"
@@ -29,6 +34,7 @@ CONTAINER_DRIVER_WORKDIR="${CONTAINER_DRIVER_WORKDIR:-/root/.loom/workspaces/alp
 CONTAINER_CODEX_HOME="${CONTAINER_CODEX_HOME:-/root/.codex-rw}"
 CONTAINER_LOOM_URL="${CONTAINER_LOOM_URL:-http://127.0.0.1:8080}"
 REGISTER_EPIC_RUNNER="${REGISTER_EPIC_RUNNER:-1}"
+LOOM_FLUE_AGENT_MODEL="${LOOM_FLUE_AGENT_MODEL:-openai-codex/gpt-5.3-codex-spark}"
 
 log() {
   printf '[slack-codex-stack] %s\n' "$*"
@@ -316,13 +322,17 @@ main() {
   require_cmd podman
   require_path "$FIXTURE_DIR"
   require_path "$TASK_RUNNER"
+  require_path "$TASK_RUNNER_HELPER"
   require_path "$CODEX_HOME"
+  require_path "${CODEX_HOME}/auth.json"
+  require_path "$FLUE_NODE_MODULES_DIR"
+  require_path "${FLUE_RUNTIME_DIR}/dist/index.mjs"
 
   ensure_fleet_db
   ensure_image
 
   local runner_cmd_json
-  runner_cmd_json="$(json_array node /usr/local/bin/slack-codex-task-runner.mjs "$CONTAINER_REPO_PATH" "$CONTAINER_CODEX_HOME" "$CONTAINER_LOOM_URL")"
+  runner_cmd_json="$(json_array node /usr/local/bin/flue-task-agent-runner.mjs "$CONTAINER_REPO_PATH" "$CONTAINER_CODEX_HOME" "$CONTAINER_LOOM_URL")"
 
   log "recreating container ${CONTAINER} from ${IMAGE}"
   podman rm -f "$CONTAINER" >/dev/null 2>&1 || true
@@ -336,8 +346,13 @@ main() {
     -e "LOOM_DRIVER_EXECUTOR=1"
     -e "LOOM_DRIVER_EXECUTOR_NODE_ID=${DRIVER_NODE_ID}"
     -e "LOOM_DRIVER_TASK_RUNNER_CMD_JSON=${runner_cmd_json}"
+    -e "LOOM_CODEX_AUTH_FILE=${CONTAINER_CODEX_AUTH_FILE}"
+    -e "LOOM_FLUE_AGENT_MODEL=${LOOM_FLUE_AGENT_MODEL}"
     -v "${FLEET_DB_BIN}:/usr/local/bin/fleet-db:ro"
-    -v "${TASK_RUNNER}:/usr/local/bin/slack-codex-task-runner.mjs:ro"
+    -v "${TASK_RUNNER}:/usr/local/bin/flue-task-agent-runner.mjs:ro"
+    -v "${TASK_RUNNER_HELPER}:/usr/local/bin/flue-event-transcript.mjs:ro"
+    -v "${FLUE_NODE_MODULES_DIR}:/usr/local/bin/node_modules:ro"
+    -v "${FLUE_RUNTIME_DIR}:/usr/local/bin/packages/runtime:ro"
     -v "${CODEX_HOME}:/root/.codex:ro"
   )
 

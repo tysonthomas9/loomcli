@@ -185,17 +185,17 @@ type TriggerBinding struct {
 type DriverRunStatus string
 
 const (
-	DriverRunQueued     DriverRunStatus = "queued"
-	DriverRunRunning    DriverRunStatus = "running"
-	DriverRunCompleted  DriverRunStatus = "completed"
-	DriverRunFailed     DriverRunStatus = "failed"
-	DriverRunNeedsHuman DriverRunStatus = "needs_human"
-	DriverRunCancelled  DriverRunStatus = "cancelled"
+	DriverRunQueued      DriverRunStatus = "queued"
+	DriverRunRunning     DriverRunStatus = "running"
+	DriverRunCompleted   DriverRunStatus = "completed"
+	DriverRunFailed      DriverRunStatus = "failed"
+	DriverRunNeedsReview DriverRunStatus = "needs_review"
+	DriverRunCancelled   DriverRunStatus = "cancelled"
 )
 
 func (s DriverRunStatus) IsTerminal() bool {
 	switch s {
-	case DriverRunCompleted, DriverRunFailed, DriverRunNeedsHuman, DriverRunCancelled:
+	case DriverRunCompleted, DriverRunFailed, DriverRunNeedsReview, DriverRunCancelled:
 		return true
 	default:
 		return false

@@ -223,3 +223,37 @@ type AgentCommand struct {
 	CreatedAt     time.Time          `json:"created_at"`
 	UpdatedAt     time.Time          `json:"updated_at"`
 }
+
+type AgentInboxMessageStatus string
+
+const (
+	AgentInboxMessageQueued    AgentInboxMessageStatus = "queued"
+	AgentInboxMessageDelivered AgentInboxMessageStatus = "delivered"
+	AgentInboxMessageFailed    AgentInboxMessageStatus = "failed"
+)
+
+type AgentInboxMessage struct {
+	WorkspaceKey      string                  `json:"workspace_key"`
+	InboxMessageID    string                  `json:"inbox_message_id"`
+	Cursor            int64                   `json:"cursor"`
+	TargetAgentID     string                  `json:"target_agent_id"`
+	SessionID         string                  `json:"session_id,omitempty"`
+	Body              string                  `json:"body"`
+	Status            AgentInboxMessageStatus `json:"status"`
+	SourceKind        string                  `json:"source_kind,omitempty"`
+	SourceRef         string                  `json:"source_ref,omitempty"`
+	DriverRunID       string                  `json:"driver_run_id,omitempty"`
+	TaskRunID         string                  `json:"task_run_id,omitempty"`
+	TriggerEventID    string                  `json:"trigger_event_id,omitempty"`
+	TriggerDeliveryID string                  `json:"trigger_delivery_id,omitempty"`
+	DedupeKey         string                  `json:"dedupe_key,omitempty"`
+	Attempt           int                     `json:"attempt,omitempty"`
+	ClaimedBy         string                  `json:"claimed_by,omitempty"`
+	ClaimExpiresAt    *time.Time              `json:"claim_expires_at,omitempty"`
+	LastError         string                  `json:"last_error,omitempty"`
+	ErrorClass        string                  `json:"error_class,omitempty"`
+	DeliveredThreadID string                  `json:"delivered_thread_id,omitempty"`
+	DeliveredAt       *time.Time              `json:"delivered_at,omitempty"`
+	CreatedAt         time.Time               `json:"created_at"`
+	UpdatedAt         time.Time               `json:"updated_at"`
+}

@@ -32,6 +32,7 @@ type Store struct {
 	leases     *agentLeaseStore
 	ownership  *agentOwnershipLeaseStore
 	commands   *agentCommandStore
+	inbox      *agentInboxMessageStore
 	drivers    *driverStore
 	versions   *driverVersionStore
 	profiles   *workerProfileStore
@@ -79,6 +80,7 @@ func New() *Store {
 		leases:     newAgentLeaseStore(),
 		ownership:  newAgentOwnershipLeaseStore(),
 		commands:   newAgentCommandStore(),
+		inbox:      newAgentInboxMessageStore(),
 		drivers:    drivers,
 		versions:   versions,
 		profiles:   profiles,
@@ -140,6 +142,8 @@ func (s *Store) AgentLeases() store.AgentLeaseStore { return s.leases }
 func (s *Store) AgentOwnershipLeases() store.AgentOwnershipLeaseStore { return s.ownership }
 
 func (s *Store) AgentCommands() store.AgentCommandStore { return s.commands }
+
+func (s *Store) AgentInboxMessages() store.AgentInboxMessageStore { return s.inbox }
 
 func (s *Store) Drivers() store.DriverStore { return s.drivers }
 

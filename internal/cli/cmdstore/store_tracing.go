@@ -49,6 +49,7 @@ func WrapStoreWithTracing(inner store.Store) store.Store {
 		agentLeases:          &tracedAgentLeaseStore{inner: inner.AgentLeases()},
 		agentOwnershipLeases: &tracedAgentOwnershipLeaseStore{inner: inner.AgentOwnershipLeases()},
 		agentCommands:        &tracedAgentCommandStore{inner: inner.AgentCommands()},
+		agentInboxMessages:   &tracedAgentInboxMessageStore{inner: inner.AgentInboxMessages()},
 		drivers:              &tracedDriverStore{inner: inner.Drivers()},
 		driverVersions:       &tracedDriverVersionStore{inner: inner.DriverVersions()},
 		workerProfiles:       &tracedWorkerProfileStore{inner: inner.WorkerProfiles()},
@@ -74,6 +75,7 @@ type tracedStore struct {
 	agentLeases          *tracedAgentLeaseStore
 	agentOwnershipLeases *tracedAgentOwnershipLeaseStore
 	agentCommands        *tracedAgentCommandStore
+	agentInboxMessages   *tracedAgentInboxMessageStore
 	drivers              *tracedDriverStore
 	driverVersions       *tracedDriverVersionStore
 	workerProfiles       *tracedWorkerProfileStore
@@ -103,6 +105,9 @@ func (t *tracedStore) AgentOwnershipLeases() store.AgentOwnershipLeaseStore {
 }
 func (t *tracedStore) AgentCommands() store.AgentCommandStore {
 	return t.agentCommands
+}
+func (t *tracedStore) AgentInboxMessages() store.AgentInboxMessageStore {
+	return t.agentInboxMessages
 }
 func (t *tracedStore) Drivers() store.DriverStore { return t.drivers }
 func (t *tracedStore) DriverVersions() store.DriverVersionStore {
@@ -755,6 +760,58 @@ func (t *tracedAgentCommandStore) Complete(ctx context.Context, ws, commandID st
 		attribute.String("loom.workspace", ws),
 	)
 	out, err := t.inner.Complete(ctx, ws, commandID, update)
+	finish(span, err)
+	return out, err
+}
+
+// --- AgentInboxMessageStore ---
+
+type tracedAgentInboxMessageStore struct{ inner store.AgentInboxMessageStore }
+
+func (t *tracedAgentInboxMessageStore) Create(ctx context.Context, in store.AgentInboxMessageCreate) (*domain.AgentInboxMessage, error) {
+	ctx, span := startStoreSpan(ctx, "AgentInboxMessages", "Create",
+		attribute.String("loom.workspace", in.WorkspaceKey),
+	)
+	out, err := t.inner.Create(ctx, in)
+	finish(span, err)
+	return out, err
+}
+
+func (t *tracedAgentInboxMessageStore) Get(ctx context.Context, ws, inboxMessageID string) (*domain.AgentInboxMessage, error) {
+	ctx, span := startStoreSpan(ctx, "AgentInboxMessages", "Get",
+		attribute.String("loom.workspace", ws),
+	)
+	out, err := t.inner.Get(ctx, ws, inboxMessageID)
+	finish(span, err)
+	return out, err
+}
+
+func (t *tracedAgentInboxMessageStore) List(ctx context.Context, ws string, filter store.AgentInboxMessageFilter) ([]*domain.AgentInboxMessage, error) {
+	ctx, span := startStoreSpan(ctx, "AgentInboxMessages", "List",
+		attribute.String("loom.workspace", ws),
+	)
+	out, err := t.inner.List(ctx, ws, filter)
+	if err == nil {
+		span.SetAttributes(attribute.Int("result.count", len(out)))
+	}
+	finish(span, err)
+	return out, err
+}
+
+func (t *tracedAgentInboxMessageStore) ClaimNext(ctx context.Context, in store.AgentInboxMessageClaim) (*domain.AgentInboxMessage, error) {
+	ctx, span := startStoreSpan(ctx, "AgentInboxMessages", "ClaimNext",
+		attribute.String("loom.workspace", in.WorkspaceKey),
+	)
+	out, err := t.inner.ClaimNext(ctx, in)
+	finish(span, err)
+	return out, err
+}
+
+func (t *tracedAgentInboxMessageStore) Complete(ctx context.Context, ws, inboxMessageID string, update store.AgentInboxMessageComplete) (*domain.AgentInboxMessage, error) {
+	ctx, span := startStoreSpan(ctx, "AgentInboxMessages", "Complete",
+		attribute.String("loom.workspace", ws),
+	)
+	out, err := t.inner.Complete(ctx, ws, inboxMessageID, update)
 	finish(span, err)
 	return out, err
 }

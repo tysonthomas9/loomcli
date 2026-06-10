@@ -81,6 +81,7 @@ type Client struct {
 	leases     *agentLeaseStore
 	ownership  *agentOwnershipLeaseStore
 	commands   *agentCommandStore
+	inbox      *agentInboxMessageStore
 	drivers    *driverStore
 	versions   *driverVersionStore
 	profiles   *workerProfileStore
@@ -121,6 +122,7 @@ func New(cfg Config) (*Client, error) {
 	c.leases = &agentLeaseStore{client: c}
 	c.ownership = &agentOwnershipLeaseStore{client: c}
 	c.commands = &agentCommandStore{client: c}
+	c.inbox = &agentInboxMessageStore{client: c}
 	c.drivers = &driverStore{client: c}
 	c.versions = &driverVersionStore{client: c}
 	c.profiles = &workerProfileStore{client: c}
@@ -164,6 +166,8 @@ func (c *Client) AgentLeases() store.AgentLeaseStore { return c.leases }
 func (c *Client) AgentOwnershipLeases() store.AgentOwnershipLeaseStore { return c.ownership }
 
 func (c *Client) AgentCommands() store.AgentCommandStore { return c.commands }
+
+func (c *Client) AgentInboxMessages() store.AgentInboxMessageStore { return c.inbox }
 
 // Drivers returns the DriverStore.
 func (c *Client) Drivers() store.DriverStore { return c.drivers }

@@ -205,7 +205,7 @@ func TestControlPlaneClientAgentSessionUpdateBodyUsesWireNames(t *testing.T) {
 	}
 }
 
-func TestControlPlaneClientAgentCommandCreateSendsQueuedStatus(t *testing.T) {
+func TestControlPlaneClientAgentCommandCreateOmitsStatus(t *testing.T) {
 	now := time.Now().UTC()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost || r.URL.Path != "/api/v1/WS/agent-commands" {
@@ -215,8 +215,8 @@ func TestControlPlaneClientAgentCommandCreateSendsQueuedStatus(t *testing.T) {
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			t.Fatalf("decode create: %v", err)
 		}
-		if body["status"] != string(domain.AgentCommandQueued) {
-			t.Fatalf("create body status = %#v, want queued; body=%#v", body["status"], body)
+		if _, ok := body["status"]; ok {
+			t.Fatalf("create body should omit status; body=%#v", body)
 		}
 		if body["target_agent_id"] != "agent-1" || body["target_node_id"] != "node-1" || body["type"] != "start" {
 			t.Fatalf("body = %#v", body)

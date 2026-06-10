@@ -227,6 +227,22 @@ func (s *artifactStore) UploadContent(ctx context.Context, ws, artifactID string
 	return cloneArtifact(artifact), nil
 }
 
+func (s *artifactStore) ReadContent(ctx context.Context, ws, artifactID string) ([]byte, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if _, ok := s.items[ws][artifactID]; !ok {
+		return nil, fmt.Errorf("artifact %q in workspace %q: %w", artifactID, ws, domain.ErrNotFound)
+	}
+	body, ok := s.content[ws][artifactID]
+	if !ok {
+		return nil, fmt.Errorf("artifact %q content in workspace %q: %w", artifactID, ws, domain.ErrNotFound)
+	}
+	return append([]byte(nil), body...), nil
+}
+
 func (s *artifactStore) Finalize(ctx context.Context, ws, artifactID string, finalize store.ArtifactFinalize) (*domain.Artifact, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -726,4 +742,211 @@ func cloneAgentCommand(c *domain.AgentCommand) *domain.AgentCommand {
 
 func commandMatchesMem(c *domain.AgentCommand, f store.AgentCommandFilter) bool {
 	return (f.TargetAgentID == "" || c.TargetAgentID == f.TargetAgentID) && (f.TargetNodeID == "" || c.TargetNodeID == f.TargetNodeID) && (f.Status == "" || c.Status == f.Status) && (f.AfterCursor <= 0 || c.Cursor > f.AfterCursor)
+}
+
+type agentInboxMessageStore struct {
+	mu      sync.RWMutex
+	items   map[string]map[string]*domain.AgentInboxMessage
+	dedupe  map[string]map[string]string
+	next    int64
+	nowFunc func() time.Time
+}
+
+func newAgentInboxMessageStore() *agentInboxMessageStore {
+	return &agentInboxMessageStore{
+		items:   make(map[string]map[string]*domain.AgentInboxMessage),
+		dedupe:  make(map[string]map[string]string),
+		nowFunc: func() time.Time { return time.Now().UTC() },
+	}
+}
+
+func (s *agentInboxMessageStore) Create(_ context.Context, in store.AgentInboxMessageCreate) (*domain.AgentInboxMessage, error) {
+	if in.WorkspaceKey == "" || in.TargetAgentID == "" || in.Body == "" {
+		return nil, fmt.Errorf("workspace_key + target_agent_id + body required: %w", domain.ErrInvalid)
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.items[in.WorkspaceKey] == nil {
+		s.items[in.WorkspaceKey] = make(map[string]*domain.AgentInboxMessage)
+	}
+	if s.dedupe[in.WorkspaceKey] == nil {
+		s.dedupe[in.WorkspaceKey] = make(map[string]string)
+	}
+	if in.DedupeKey != "" {
+		if id := s.dedupe[in.WorkspaceKey][in.DedupeKey]; id != "" {
+			return cloneAgentInboxMessage(s.items[in.WorkspaceKey][id]), nil
+		}
+	}
+	s.next++
+	now := s.nowFunc()
+	id := in.InboxMessageID
+	if id == "" {
+		id = fmt.Sprintf("inbox-%d", s.next)
+	}
+	if _, ok := s.items[in.WorkspaceKey][id]; ok {
+		return nil, fmt.Errorf("agent inbox message %q in workspace %q: %w", id, in.WorkspaceKey, domain.ErrAlreadyExists)
+	}
+	msg := &domain.AgentInboxMessage{
+		WorkspaceKey:      in.WorkspaceKey,
+		InboxMessageID:    id,
+		Cursor:            s.next,
+		TargetAgentID:     in.TargetAgentID,
+		SessionID:         in.SessionID,
+		Body:              in.Body,
+		Status:            domain.AgentInboxMessageQueued,
+		SourceKind:        in.SourceKind,
+		SourceRef:         in.SourceRef,
+		DriverRunID:       in.DriverRunID,
+		TaskRunID:         in.TaskRunID,
+		TriggerEventID:    in.TriggerEventID,
+		TriggerDeliveryID: in.TriggerDeliveryID,
+		DedupeKey:         in.DedupeKey,
+		CreatedAt:         now,
+		UpdatedAt:         now,
+	}
+	s.items[in.WorkspaceKey][id] = msg
+	if in.DedupeKey != "" {
+		s.dedupe[in.WorkspaceKey][in.DedupeKey] = id
+	}
+	return cloneAgentInboxMessage(msg), nil
+}
+
+func (s *agentInboxMessageStore) Get(_ context.Context, ws, inboxMessageID string) (*domain.AgentInboxMessage, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	msg, ok := s.items[ws][inboxMessageID]
+	if !ok {
+		return nil, fmt.Errorf("agent inbox message %q in workspace %q: %w", inboxMessageID, ws, domain.ErrNotFound)
+	}
+	return cloneAgentInboxMessage(msg), nil
+}
+
+func (s *agentInboxMessageStore) List(_ context.Context, ws string, filter store.AgentInboxMessageFilter) ([]*domain.AgentInboxMessage, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	now := s.nowFunc()
+	out := make([]*domain.AgentInboxMessage, 0, len(s.items[ws]))
+	for _, msg := range s.items[ws] {
+		if agentInboxMessageMatchesMem(msg, filter, now) {
+			out = append(out, cloneAgentInboxMessage(msg))
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Cursor < out[j].Cursor })
+	if filter.Limit > 0 && len(out) > filter.Limit {
+		out = out[:filter.Limit]
+	}
+	return out, nil
+}
+
+func (s *agentInboxMessageStore) ClaimNext(_ context.Context, in store.AgentInboxMessageClaim) (*domain.AgentInboxMessage, error) {
+	if in.WorkspaceKey == "" || in.TargetAgentID == "" || in.ClaimedBy == "" {
+		return nil, fmt.Errorf("workspace_key + target_agent_id + claimed_by required: %w", domain.ErrInvalid)
+	}
+	ttl := in.LeaseTTL
+	if ttl <= 0 {
+		ttl = time.Minute
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	now := s.nowFunc()
+	var selected *domain.AgentInboxMessage
+	for _, msg := range s.items[in.WorkspaceKey] {
+		if msg.Status != domain.AgentInboxMessageQueued || msg.TargetAgentID != in.TargetAgentID {
+			continue
+		}
+		if in.SessionID != "" && msg.SessionID != "" && msg.SessionID != in.SessionID {
+			continue
+		}
+		if msg.ClaimedBy != "" && msg.ClaimExpiresAt != nil && msg.ClaimExpiresAt.After(now) {
+			continue
+		}
+		if selected == nil || msg.Cursor < selected.Cursor {
+			selected = msg
+		}
+	}
+	if selected == nil {
+		return nil, fmt.Errorf("agent inbox message in workspace %q: %w", in.WorkspaceKey, domain.ErrNotFound)
+	}
+	expires := now.Add(ttl)
+	selected.ClaimedBy = in.ClaimedBy
+	selected.ClaimExpiresAt = &expires
+	selected.Attempt++
+	if selected.SessionID == "" {
+		selected.SessionID = in.SessionID
+	}
+	selected.UpdatedAt = now
+	return cloneAgentInboxMessage(selected), nil
+}
+
+func (s *agentInboxMessageStore) Complete(_ context.Context, ws, inboxMessageID string, update store.AgentInboxMessageComplete) (*domain.AgentInboxMessage, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	msg, ok := s.items[ws][inboxMessageID]
+	if !ok {
+		return nil, fmt.Errorf("agent inbox message %q in workspace %q: %w", inboxMessageID, ws, domain.ErrNotFound)
+	}
+	now := s.nowFunc()
+	switch update.Outcome {
+	case "delivered":
+		msg.Status = domain.AgentInboxMessageDelivered
+		msg.DeliveredThreadID = update.DeliveredThreadID
+		msg.DeliveredAt = &now
+		msg.LastError = ""
+		msg.ErrorClass = ""
+	case "retry":
+		msg.Status = domain.AgentInboxMessageQueued
+		msg.LastError = update.Error
+		msg.ErrorClass = update.ErrorClass
+	case "failed":
+		msg.Status = domain.AgentInboxMessageFailed
+		msg.LastError = update.Error
+		msg.ErrorClass = update.ErrorClass
+	default:
+		return nil, fmt.Errorf("agent inbox complete outcome %q: %w", update.Outcome, domain.ErrInvalid)
+	}
+	msg.ClaimedBy = ""
+	msg.ClaimExpiresAt = nil
+	msg.UpdatedAt = now
+	return cloneAgentInboxMessage(msg), nil
+}
+
+func cloneAgentInboxMessage(m *domain.AgentInboxMessage) *domain.AgentInboxMessage {
+	if m == nil {
+		return nil
+	}
+	out := *m
+	out.ClaimExpiresAt = clonePtr(m.ClaimExpiresAt)
+	out.DeliveredAt = clonePtr(m.DeliveredAt)
+	return &out
+}
+
+func agentInboxMessageMatchesMem(m *domain.AgentInboxMessage, f store.AgentInboxMessageFilter, now time.Time) bool {
+	if f.TargetAgentID != "" && m.TargetAgentID != f.TargetAgentID {
+		return false
+	}
+	if f.SessionID != "" && m.SessionID != f.SessionID {
+		return false
+	}
+	if f.Status != "" && m.Status != f.Status {
+		return false
+	}
+	if f.SourceKind != "" && m.SourceKind != f.SourceKind {
+		return false
+	}
+	if f.SourceRef != "" && m.SourceRef != f.SourceRef {
+		return false
+	}
+	if f.DriverRunID != "" && m.DriverRunID != f.DriverRunID {
+		return false
+	}
+	if f.TaskRunID != "" && m.TaskRunID != f.TaskRunID {
+		return false
+	}
+	if f.AfterCursor > 0 && m.Cursor <= f.AfterCursor {
+		return false
+	}
+	if m.Status == domain.AgentInboxMessageQueued && m.ClaimedBy != "" && m.ClaimExpiresAt != nil && !m.ClaimExpiresAt.After(now) {
+		return true
+	}
+	return true
 }

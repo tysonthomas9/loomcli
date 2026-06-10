@@ -20,6 +20,7 @@ type TaskRunRequestOptions struct {
 	TaskID             string
 	WorkerProfileID    string
 	ProviderProfile    string
+	ParentSessionID    string
 	ParentNodeID       string
 	ParentLeaseID      string
 	ParentFence        int64
@@ -60,6 +61,7 @@ type TaskExecRequest struct {
 	TaskID           string                  `json:"task_id"`
 	WorkerProfileID  string                  `json:"worker_profile_id,omitempty"`
 	ProviderProfile  string                  `json:"provider_profile,omitempty"`
+	ParentSessionID  string                  `json:"parent_session_id,omitempty"`
 	NodeID           string                  `json:"node_id,omitempty"`
 	LeaseID          string                  `json:"lease_id,omitempty"`
 	LeaseToken       string                  `json:"lease_token,omitempty"`
@@ -229,6 +231,7 @@ func RequestTaskRunWithResult(ctx context.Context, s store.Store, opts TaskRunRe
 	opts.TaskID = strings.TrimSpace(opts.TaskID)
 	opts.WorkerProfileID = strings.TrimSpace(opts.WorkerProfileID)
 	opts.ProviderProfile = strings.TrimSpace(opts.ProviderProfile)
+	opts.ParentSessionID = strings.TrimSpace(opts.ParentSessionID)
 	opts.ParentNodeID = strings.TrimSpace(opts.ParentNodeID)
 	opts.ParentLeaseID = strings.TrimSpace(opts.ParentLeaseID)
 	opts.NodeID = strings.TrimSpace(opts.NodeID)
@@ -280,6 +283,13 @@ func RequestTaskRunWithResult(ctx context.Context, s store.Store, opts TaskRunRe
 	if leaseToken == "" {
 		leaseToken = generatedTaskRunLeaseToken()
 	}
+	runtimeMetadata := map[string]string{
+		"driver_run_id": opts.DriverRunID,
+		"requested_by":  "driver",
+	}
+	if opts.ParentSessionID != "" {
+		runtimeMetadata["parent_session_id"] = opts.ParentSessionID
+	}
 	queued, err := s.TaskRuns().Create(ctx, store.TaskRunCreate{
 		WorkspaceKey:     opts.WorkspaceKey,
 		TaskRunID:        taskRunID,
@@ -291,10 +301,7 @@ func RequestTaskRunWithResult(ctx context.Context, s store.Store, opts TaskRunRe
 		Status:           domain.TaskRunQueued,
 		RunnerPlacement:  opts.RunnerPlacement,
 		SandboxPlacement: opts.SandboxPlacement,
-		RuntimeMetadata: map[string]string{
-			"driver_run_id": opts.DriverRunID,
-			"requested_by":  "driver",
-		},
+		RuntimeMetadata:  runtimeMetadata,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("create task run: %w", err)
@@ -336,6 +343,7 @@ func RequestTaskRunWithResult(ctx context.Context, s store.Store, opts TaskRunRe
 		DriverStepID:      opts.DriverStepID,
 		TaskID:            opts.TaskID,
 		ProviderProfile:   opts.ProviderProfile,
+		ParentSessionID:   opts.ParentSessionID,
 		LeaseToken:        leaseToken,
 		HeartbeatInterval: opts.HeartbeatInterval,
 		DeferCompletion:   opts.DeferCompletion,
@@ -353,6 +361,7 @@ type executeClaimedTaskRunOptions struct {
 	DriverStepID      string
 	TaskID            string
 	ProviderProfile   string
+	ParentSessionID   string
 	LeaseToken        string
 	HeartbeatInterval time.Duration
 	DeferCompletion   bool
@@ -375,6 +384,7 @@ func executeClaimedTaskRunWithResult(ctx context.Context, s store.Store, claimed
 	driverStepID := firstNonEmpty(opts.DriverStepID, claimed.DriverStepID)
 	taskID := firstNonEmpty(opts.TaskID, claimed.TaskID)
 	providerProfile := firstNonEmpty(opts.ProviderProfile, claimed.ProviderProfile)
+	parentSessionID := strings.TrimSpace(opts.ParentSessionID)
 	heartbeatSource := firstNonEmpty(opts.HeartbeatSource, "task_run_executor")
 	hbCtx, stopHeartbeat := context.WithCancel(ctx)
 	defer stopHeartbeat()
@@ -393,6 +403,7 @@ func executeClaimedTaskRunWithResult(ctx context.Context, s store.Store, claimed
 		TaskID:           taskID,
 		WorkerProfileID:  claimed.WorkerProfileID,
 		ProviderProfile:  providerProfile,
+		ParentSessionID:  parentSessionID,
 		NodeID:           claimed.NodeID,
 		LeaseID:          claimed.LeaseID,
 		LeaseToken:       opts.LeaseToken,
@@ -433,6 +444,9 @@ func executeClaimedTaskRunWithResult(ctx context.Context, s store.Store, claimed
 	}
 	if driverStepID != "" {
 		metadata["driver_step_id"] = driverStepID
+	}
+	if parentSessionID != "" {
+		metadata["parent_session_id"] = parentSessionID
 	}
 	metadata["provider_profile"] = providerProfile
 	metadata["task_run_executor"] = heartbeatSource

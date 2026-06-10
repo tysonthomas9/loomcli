@@ -29,7 +29,7 @@
   background-color: transparent;
 }
 
-/* Highlighted column style (Review - needs human attention) */
+/* Highlighted column style (Review) */
 .highlightedColumn {
   border-left: 3px solid var(--color-status-review);
 }

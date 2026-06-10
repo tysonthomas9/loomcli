@@ -45,6 +45,9 @@ type AgentStatus struct {
 	DaemonManaged         bool           `json:"daemon_managed,omitempty"`          // true if under daemon supervision
 	Parent                string         `json:"parent,omitempty"`                  // active epic for leads/workers
 	DeliveryState         string         `json:"delivery_state,omitempty"`          // lead assignment delivery state
+	InboxQueuedCount      int            `json:"inbox_queued_count,omitempty"`      // queued agent inbox messages
+	InboxFailedCount      int            `json:"inbox_failed_count,omitempty"`      // failed agent inbox messages
+	InboxLatestMessage    string         `json:"inbox_latest_message,omitempty"`    // newest queued/failed inbox message body
 	OrchestratorSessionID string         `json:"orchestrator_session_id,omitempty"` // lead/orchestrator session attribution
 	TaskID                string         `json:"task_id,omitempty"`                 // latest task session associated with this agent
 	SessionID             string         `json:"session_id,omitempty"`              // latest control-plane session for this agent

@@ -225,6 +225,60 @@ func TestHostBridgeTaskExecutorRegistersFinalizedRunnerArtifacts(t *testing.T) {
 	}
 }
 
+func TestHostBridgeTaskExecutorMapsFlueSessionAndTranscript(t *testing.T) {
+	ctx, st, run := setupRunningDriverRun(t)
+	executor := HostBridgeTaskExecutor{
+		Store:        st,
+		WorktreePath: t.TempDir(),
+		Command:      hostBridgeHelperCommand(t, "flue-transcript", "unused-base", "unused-patch"),
+	}
+
+	outcome, err := RequestTaskRunWithResult(ctx, st, TaskRunRequestOptions{
+		WorkspaceKey:    "TEST",
+		DriverRunID:     run.RunID,
+		TaskRunID:       "task-run-1",
+		TaskID:          "TEST-1",
+		ProviderProfile: "flue-daytona",
+		ParentSessionID: "lead-session-1",
+		ParentNodeID:    run.NodeID,
+		ParentLeaseID:   run.LeaseID,
+		ParentFence:     run.FencingToken,
+		DeferCompletion: true,
+	}, executor)
+	if err != nil {
+		t.Fatalf("RequestTaskRunWithResult: %v", err)
+	}
+	if outcome.Run.Status != domain.TaskRunCompleted {
+		t.Fatalf("run status = %s error=%s, want completed", outcome.Run.Status, outcome.Run.ErrorMessage)
+	}
+	if len(outcome.ArtifactIDs) != 2 || outcome.ArtifactIDs[0] != "transcript-task-run-1" || outcome.ArtifactIDs[1] != "logs-task-run-1" {
+		t.Fatalf("artifact ids = %+v, want transcript and logs artifacts", outcome.ArtifactIDs)
+	}
+	session, err := st.AgentSessions().Get(ctx, "TEST", "flue-task-run-1")
+	if err != nil {
+		t.Fatalf("get flue agent session: %v", err)
+	}
+	if session.Kind != domain.AgentSessionKindTask || session.TaskID != "TEST-1" || session.ParentSessionID != "lead-session-1" {
+		t.Fatalf("session identity = %+v, want task session under lead-session-1", session)
+	}
+	if session.Status != domain.AgentSessionCompleted || session.FinishedAt == nil {
+		t.Fatalf("session status = %s finished=%v, want completed", session.Status, session.FinishedAt)
+	}
+	if session.Metadata["runtime"] != "flue" || session.Metadata["flue_session"] != "flue-task-run-1" || session.Metadata["task_run_id"] != "task-run-1" {
+		t.Fatalf("session metadata = %+v, want flue task-run metadata", session.Metadata)
+	}
+	if session.Metadata["transcript_ref"] != "artifact://transcript-task-run-1" || session.Metadata["logs_ref"] != "artifact://logs-task-run-1" {
+		t.Fatalf("session refs = %+v, want transcript/log artifact refs", session.Metadata)
+	}
+	transcriptArtifact, err := st.Artifacts().Get(ctx, "TEST", "transcript-task-run-1")
+	if err != nil {
+		t.Fatalf("get transcript artifact: %v", err)
+	}
+	if transcriptArtifact.DurableStatus != "finalized" || transcriptArtifact.SessionID != "flue-task-run-1" || transcriptArtifact.Type != "transcript" {
+		t.Fatalf("transcript artifact = %+v, want finalized transcript owned by session", transcriptArtifact)
+	}
+}
+
 func TestBridgeTaskRunnerResultDecodesFinalizedArtifacts(t *testing.T) {
 	var result bridgeTaskRunnerResult
 	if err := json.Unmarshal([]byte(`{"artifacts":[{"artifact_id":"artifact-1","uri":"artifact://artifact-1","content_hash":"sha256:x"}]}`), &result); err != nil {
@@ -269,8 +323,14 @@ func TestHostBridgeTaskExecutorHelperProcess(t *testing.T) {
 	if req.LeaseToken == "" || os.Getenv("LOOM_TASK_RUN_LEASE_TOKEN") != req.LeaseToken {
 		t.Fatalf("request/env task run lease token mismatch: req=%q env=%q", req.LeaseToken, os.Getenv("LOOM_TASK_RUN_LEASE_TOKEN"))
 	}
-	if os.Getenv("LOOM_TASK_RUN_PROVIDER_PROFILE") != req.ProviderProfile || os.Getenv("LOOM_TASK_PROVIDER_PROFILE") != req.ProviderProfile {
-		t.Fatalf("provider env mismatch: req=%q task_run=%q legacy=%q", req.ProviderProfile, os.Getenv("LOOM_TASK_RUN_PROVIDER_PROFILE"), os.Getenv("LOOM_TASK_PROVIDER_PROFILE"))
+	if req.ParentSessionID != "" && (os.Getenv("LOOM_PARENT_SESSION_ID") != req.ParentSessionID || os.Getenv("LOOM_TASK_RUN_PARENT_SESSION_ID") != req.ParentSessionID) {
+		t.Fatalf("request/env parent session mismatch: req=%q parent=%q task_run_parent=%q", req.ParentSessionID, os.Getenv("LOOM_PARENT_SESSION_ID"), os.Getenv("LOOM_TASK_RUN_PARENT_SESSION_ID"))
+	}
+	if os.Getenv("LOOM_TASK_RUN_PROVIDER_PROFILE") != req.ProviderProfile {
+		t.Fatalf("provider env mismatch: req=%q task_run=%q", req.ProviderProfile, os.Getenv("LOOM_TASK_RUN_PROVIDER_PROFILE"))
+	}
+	if os.Getenv("LOOM_TASK_PROVIDER_PROFILE") != "" {
+		t.Fatalf("legacy provider env should not be set: %q", os.Getenv("LOOM_TASK_PROVIDER_PROFILE"))
 	}
 	if os.Getenv("LOOM_WORKTREE_PATH") == "" {
 		t.Fatal("LOOM_WORKTREE_PATH missing")
@@ -314,6 +374,26 @@ func TestHostBridgeTaskExecutorHelperProcess(t *testing.T) {
 		if err := json.NewEncoder(os.Stdout).Encode(result); err != nil {
 			t.Fatalf("encode result: %v", err)
 		}
+	case "flue-transcript":
+		result := map[string]any{
+			"status":    "completed",
+			"exit_code": 0,
+			"logs":      "flue runner log\n",
+			"transcript_entries": []map[string]any{{
+				"seq":       1,
+				"timestamp": "2026-06-09T12:00:00Z",
+				"role":      "assistant",
+				"type":      "text",
+				"text":      "implemented task",
+			}},
+			"runtime_metadata": map[string]string{
+				"helper":       "host_bridge",
+				"flue_harness": "task-agent",
+			},
+		}
+		if err := json.NewEncoder(os.Stdout).Encode(result); err != nil {
+			t.Fatalf("encode result: %v", err)
+		}
 	default:
 		t.Fatalf("unknown helper mode %q", mode)
 	}
@@ -327,6 +407,7 @@ func hostBridgeTaskExecRequest() TaskExecRequest {
 		TaskRunID:       "task-run-1",
 		TaskID:          "TASK-1",
 		ProviderProfile: "flue-daytona",
+		ParentSessionID: "lead-session-1",
 		NodeID:          "node-1",
 		LeaseID:         "lease-1",
 		LeaseToken:      "scoped-task-token",

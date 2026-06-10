@@ -7,7 +7,7 @@ export type WorkflowRunStatus =
   | "running"
   | "completed"
   | "failed"
-  | "needs_human"
+  | "needs_review"
   | "cancelled";
 
 export interface WorkflowRun {
@@ -61,7 +61,7 @@ export function isTerminalWorkflowRunStatus(
   return (
     status === "completed" ||
     status === "failed" ||
-    status === "needs_human" ||
+    status === "needs_review" ||
     status === "cancelled"
   );
 }

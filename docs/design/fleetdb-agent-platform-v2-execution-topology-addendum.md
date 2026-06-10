@@ -117,7 +117,7 @@ Introduce an honest `DriverRun` lifecycle:
 ```text
 queued
   -> running
-  -> completed | failed | needs_human | cancelled
+  -> completed | failed | needs_review | cancelled
 ```
 
 Definitions:
@@ -128,7 +128,7 @@ Definitions:
 | `running` | An executor has claimed the run and is heartbeating it. |
 | `completed` | The driver exited successfully and finalized the run. |
 | `failed` | The driver, bundle verification, executor, or recovery path failed the run. |
-| `needs_human` | The driver stopped intentionally and returned control to an operator or lead agent. |
+| `needs_review` | The driver stopped intentionally and returned control to an operator or lead agent. |
 | `cancelled` | An operator or policy stopped the run before normal completion. |
 
 Implementation note: existing stored `running` records with empty `NodeID` are
@@ -254,7 +254,7 @@ the final cloud V1 boundary.
 Proof:
 
 - The Epic Runs view shows a parent `DriverRun` with child attempts.
-- A failed child attempt is visible even if the parent returns `needs_human`.
+- A failed child attempt is visible even if the parent returns `needs_review`.
 - Completing a child `TaskRun` alone does not unlock dependencies; only FleetDB
   task completion does.
 
@@ -485,7 +485,7 @@ Proof:
 - Should stale run recovery fail the run only, or optionally create a new queued
   retry run?
 - Should task stale recovery be automatic by default or operator-triggered?
-- Should `needs_human` be a first-class terminal status now or deferred until
+- Should `needs_review` be a first-class terminal status now or deferred until
   lead-agent handoff is implemented?
 - Should `queued` be physically migrated into storage immediately or derived
   from existing `running && node_id=""` records during rollout?

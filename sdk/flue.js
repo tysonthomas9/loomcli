@@ -26,7 +26,7 @@ export class FlueDriverClient {
       orchestrationSession: (input = {}) => this.agentOrchestrationSession(input),
       updateParent: (input = {}) => this.updateAgentParent(input),
       deliverAssignment: (input = {}) => this.deliverLeadAssignment(input),
-      message: (input = {}) => this.messageLeadAgent(input),
+      message: (input = {}) => this.messageAgent(input),
     });
     this.tasks = Object.freeze({
       claimReady: (input = {}) => this.claimReady(input),
@@ -52,11 +52,11 @@ export class FlueDriverClient {
     };
   }
 
-  needsHuman(input = {}) {
+  needsReview(input = {}) {
     return {
-      status: "needs_human",
-      summary: input.summary || "needs human",
-      errorClass: input.errorClass || input.error_class || "needs_human",
+      status: "needs_review",
+      summary: input.summary || "needs review",
+      errorClass: input.errorClass || input.error_class || "needs_review",
       taskRunId: input.taskRunId || input.task_run_id,
       logsRef: input.logsRef || input.logs_ref,
       artifactsRef: input.artifactsRef || input.artifacts_ref,
@@ -120,13 +120,13 @@ export class FlueDriverClient {
     return this.#run(args);
   }
 
-  async messageLeadAgent(input = {}) {
+  async messageAgent(input = {}) {
     const agent = input.agent || input.agentName || input.agent_name || input.name || "";
     const message = input.message || input.text || input.body || "";
     if (!agent || !message) {
       throw new Error("agents.message requires agent and message");
     }
-    const args = this.#baseArgs("deliver-lead-message");
+    const args = this.#baseArgs("deliver-agent-message");
     args.push("--agent", String(agent), "--message", String(message));
     return this.#run(args);
   }
@@ -141,6 +141,7 @@ export class FlueDriverClient {
     appendStringFlag(args, "--provider-profile", input.providerProfile || input.provider_profile || "");
     appendStringFlag(args, "--task-run-id", input.taskRunId || input.task_run_id || "");
     appendStringFlag(args, "--worker-profile-id", input.workerProfileId || input.worker_profile_id || "");
+    appendStringFlag(args, "--parent-session-id", input.parentSessionId || input.parent_session_id || "");
     appendStringFlag(args, "--node-id", input.nodeId || input.node_id || "");
     appendStringFlag(args, "--runner-id", input.runnerId || input.runner_id || "");
     appendRepeatedFlag(args, "--supported-provider", input.supportedProviders || input.supported_providers || []);
@@ -192,10 +193,6 @@ export class FlueDriverClient {
     appendStringFlag(args, "--logs-ref", input.logsRef || input.logs_ref || remembered?.logsRef || remembered?.logs_ref || "");
     appendStringFlag(args, "--artifacts-ref", input.artifactsRef || input.artifacts_ref || remembered?.artifactsRef || remembered?.artifacts_ref || "");
     appendRepeatedFlag(args, "--artifact-id", input.artifactIds || input.artifact_ids || remembered?.artifactIds || remembered?.artifact_ids || []);
-    appendStringFlag(args, "--session", input.session || "");
-    if (input.force) {
-      args.push("--force");
-    }
     return this.#run(args);
   }
 

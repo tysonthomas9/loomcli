@@ -30,6 +30,7 @@ export async function run(ctx) {
   const workerProfileId = stringValue(input.workerProfileId || input.worker_profile_id);
   const targetNodeId = stringValue(input.targetNodeId || input.target_node_id);
   const intervalMs = Math.max(1000, numberValue(input.intervalSeconds || input.interval_seconds, 5) * 1000);
+  const leadNotificationDrainMs = Math.max(0, numberValue(input.leadNotificationDrainSeconds || input.lead_notification_drain_seconds, 30) * 1000);
   const completed = [];
   const leadDelivery = startLeadDeliveryRetry(loom, started.leadName, started.deliveryState, intervalMs);
   const taskNotifications = startLeadMessageDeliveryRetry(loom, started.leadName, intervalMs, leadDelivery);
@@ -48,15 +49,15 @@ export async function run(ctx) {
 
       if (snapshot.openChildrenCount === 0 && activeCount === 0) {
         await leadDelivery.flush();
-        await taskNotifications.flush();
+        await taskNotifications.drain(leadNotificationDrainMs);
         const suffix = completed.length > 0 ? ": " + completed.join(",") : "";
         return loom.completed({ summary: "Epic drained " + epicId + suffix });
       }
 
       if (snapshot.readyCount === 0 && snapshot.blockedCount > 0 && activeCount === 0) {
         await leadDelivery.flush();
-        await taskNotifications.flush();
-        return loom.needsHuman({
+        await taskNotifications.drain(leadNotificationDrainMs);
+        return loom.needsReview({
           summary: "Epic " + epicId + " blocked with " + snapshot.blockedCount + " child task(s): " + summarizeTasks(snapshot.blocked),
           errorClass: "epic_blocked",
         });
@@ -80,8 +81,8 @@ export async function run(ctx) {
       if (claimed.length === 0) {
         if (activeCount === 0 && snapshot.readyCount === 0 && snapshot.blockedCount === 0 && snapshot.openChildrenCount > 0) {
           await leadDelivery.flush();
-          await taskNotifications.flush();
-          return loom.needsHuman({
+          await taskNotifications.drain(leadNotificationDrainMs);
+          return loom.needsReview({
             summary: "Epic " + epicId + " has " + snapshot.openChildrenCount + " open child task(s), but none are ready, blocked, or active",
             errorClass: "epic_no_progress",
           });
@@ -97,12 +98,13 @@ export async function run(ctx) {
         workerProfileId,
         providerProfile,
         targetNodeId,
+        parentSessionId: started.orchestratorSessionId || stringValue(input.parentSessionId || input.parent_session_id),
       })));
       for (const result of results) {
         if (!result.ok) {
           await leadDelivery.flush();
-          await taskNotifications.flush();
-          return loom.needsHuman({
+          await taskNotifications.drain(leadNotificationDrainMs);
+          return loom.needsReview({
             summary: result.summary,
             errorClass: result.errorClass || "child_task_failed",
             taskRunId: result.taskRunId,
@@ -402,6 +404,21 @@ function startLeadMessageDeliveryRetry(loom, leadName, intervalMs, assignmentDel
       }
     },
     flush: tryOnce,
+    async drain(timeoutMs) {
+      const startedAt = Date.now();
+      let last = { state: state.messages.length > 0 ? "pending" : "none" };
+      while (!state.stopped && !state.unsupported && state.messages.length > 0) {
+        last = await tryOnce();
+        if (state.messages.length === 0 || state.unsupported) {
+          return last;
+        }
+        if (timeoutMs <= 0 || Date.now() - startedAt >= timeoutMs) {
+          return last;
+        }
+        await sleep(Math.min(1000, Math.max(0, timeoutMs - (Date.now() - startedAt))));
+      }
+      return last;
+    },
     stop() {
       state.stopped = true;
     },
@@ -416,6 +433,7 @@ async function runChildTask(loom, opts) {
     taskId: task.id,
     taskRunId,
     providerProfile: opts.providerProfile,
+    parentSessionId: opts.parentSessionId || "",
     nodeId: opts.targetNodeId || "",
     supportedProviders: [opts.providerProfile],
     sandboxPlacement: { provider: opts.providerProfile },

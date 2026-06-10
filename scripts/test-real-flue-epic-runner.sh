@@ -3,6 +3,7 @@ set -Eeuo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 FLEET_DB_REPO="${FLEET_DB_REPO:-$(cd "$ROOT/../fleet-db" 2>/dev/null && pwd || true)}"
+FLUE_REPO="${FLUE_REPO:-$(cd "$ROOT/../flue" 2>/dev/null && pwd || true)}"
 
 WS="${LOOM_REAL_FLUE_E2E_WORKSPACE:-FLUEE2E}"
 RUN_ID="${LOOM_REAL_FLUE_E2E_RUN_ID:-run-real-flue-e2e}"
@@ -41,6 +42,10 @@ fi
 
 if [[ -z "$FLEET_DB_REPO" || ! -d "$FLEET_DB_REPO/cmd/fleet-db" ]]; then
   echo "fleet-db repo not found; set FLEET_DB_REPO=/path/to/fleet-db" >&2
+  exit 2
+fi
+if [[ -z "$FLUE_REPO" || ! -d "$FLUE_REPO/packages/runtime" ]]; then
+  echo "flue repo not found; set FLUE_REPO=/path/to/flue" >&2
   exit 2
 fi
 
@@ -109,9 +114,10 @@ echo "==> creating isolated workflow repo"
   git config user.email "loom-real-flue-e2e@example.test"
   git config user.name "loom real flue e2e"
   git commit --allow-empty -m "seed" -q
-  mkdir -p workflows node_modules/@loom
+  mkdir -p workflows node_modules/@loom node_modules/@flue
   ln -s "$ROOT/sdk" node_modules/@loom/sdk
-  printf '%s\n' '{"type":"module","dependencies":{"@loom/sdk":"file:./node_modules/@loom/sdk"}}' > package.json
+  ln -s "$FLUE_REPO/packages/runtime" node_modules/@flue/runtime
+  printf '%s\n' '{"type":"module","dependencies":{"@loom/sdk":"file:./node_modules/@loom/sdk","@flue/runtime":"file:./node_modules/@flue/runtime"}}' > package.json
 )
 
 cat > "$WORKDIR/workflows/epic-runner.ts" <<'EOF'
@@ -140,7 +146,7 @@ export async function run(ctx) {
       completed.push(task.id);
     } else {
       await loom.tasks.release(task.id);
-      return loom.needsHuman({
+      return loom.needsReview({
         summary: "Task failed: " + task.id,
         taskRunId: result.id,
         logsRef: result.logsRef || "",
@@ -293,7 +299,7 @@ for _ in $(seq 1 120); do
   if [[ "$status" == "completed" ]]; then
     break
   fi
-  if [[ "$status" == "failed" || "$status" == "needs_human" || "$status" == "cancelled" ]]; then
+  if [[ "$status" == "failed" || "$status" == "needs_review" || "$status" == "cancelled" ]]; then
     echo "driver run reached terminal status ${status}" >&2
     jq . <<<"$run_json" >&2
     exit 1
@@ -376,7 +382,7 @@ for _ in $(seq 1 120); do
   if [[ "$retry_status" == "completed" ]]; then
     break
   fi
-  if [[ "$retry_status" == "failed" || "$retry_status" == "needs_human" || "$retry_status" == "cancelled" ]]; then
+  if [[ "$retry_status" == "failed" || "$retry_status" == "needs_review" || "$retry_status" == "cancelled" ]]; then
     echo "retry driver run reached terminal status ${retry_status}" >&2
     jq . <<<"$retry_json" >&2
     exit 1

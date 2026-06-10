@@ -88,7 +88,7 @@ describe("workflows API", () => {
   it("identifies terminal workflow run statuses", () => {
     expect(isTerminalWorkflowRunStatus("completed")).toBe(true);
     expect(isTerminalWorkflowRunStatus("failed")).toBe(true);
-    expect(isTerminalWorkflowRunStatus("needs_human")).toBe(true);
+    expect(isTerminalWorkflowRunStatus("needs_review")).toBe(true);
     expect(isTerminalWorkflowRunStatus("cancelled")).toBe(true);
     expect(isTerminalWorkflowRunStatus("queued")).toBe(false);
     expect(isTerminalWorkflowRunStatus("running")).toBe(false);

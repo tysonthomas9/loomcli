@@ -42,7 +42,7 @@ vi.mock("@/api", () => ({
   isTerminalWorkflowRunStatus: (status: string | undefined) =>
     status === "completed" ||
     status === "failed" ||
-    status === "needs_human" ||
+    status === "needs_review" ||
     status === "cancelled",
   startWorkflowRun: mocks.startWorkflowRun,
 }));
