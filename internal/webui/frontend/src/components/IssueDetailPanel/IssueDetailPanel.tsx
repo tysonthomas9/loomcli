@@ -28,7 +28,7 @@ import {
 } from "@/hooks";
 import { useStore } from "zustand";
 
-import { useAgentStoreInstance } from "@/hooks/common";
+import { useAgentStoreInstance, useIssueStoreInstance } from "@/hooks/common";
 import { useWorkspaceContext } from "@/hooks/workspace";
 import { useIssueTabPersistence } from "@/hooks/issues";
 import type {
@@ -57,9 +57,11 @@ import {
   DependencySection,
   EditableDescription,
   DesignPanel,
+  EpicTicketsSection,
   MarkdownRenderer,
   RejectCommentForm,
 } from "./sections";
+import { buildEpicLeadClaims } from "@/utils/agentRole";
 import { AgentStatusBadge, IssueHeader } from "./header";
 import {
   AssigneeDropdown,
@@ -543,6 +545,26 @@ function DefaultContent({
   const agentTasks = useStore(agentStore, (s) => s.agentTasks);
   const isLoomConnected = useStore(agentStore, (s) => s.isConnected);
   const refetchAgents = useStore(agentStore, (s) => s.fetchData);
+
+  // Epic overview data (Aether design, pin 25): the epic's child tickets
+  // from the already-fetched issue store, plus the lead currently running
+  // the epic (lead.parent === epic id) for the claim badge.
+  const issueStore = useIssueStoreInstance();
+  const issuesMap = useStore(issueStore, (s) => s.issuesMap);
+  const epicChildren = useMemo<Issue[]>(() => {
+    if (!issue || issue.issue_type !== "epic") return [];
+    const children: Issue[] = [];
+    for (const candidate of issuesMap.values()) {
+      if (candidate.parent !== issue.id) continue;
+      if (candidate.issue_type === "epic") continue;
+      children.push(candidate);
+    }
+    return children;
+  }, [issuesMap, issue]);
+  const epicClaimedBy = useMemo<string | undefined>(() => {
+    if (!issue || issue.issue_type !== "epic") return undefined;
+    return buildEpicLeadClaims(agents).get(issue.id);
+  }, [agents, issue]);
 
   // Reset tabs when issue changes — clean up orphaned terminal sessions first
   useEffect(() => {
@@ -1425,6 +1447,15 @@ function DefaultContent({
             </div>
 
             {/* Full-width sections below the columns */}
+
+            {/* Epic overview: claim status, progress, child tickets */}
+            {issue.issue_type === "epic" && (
+              <EpicTicketsSection
+                childIssues={epicChildren}
+                claimedBy={epicClaimedBy}
+                {...(onNavigateToIssue !== undefined && { onNavigateToIssue })}
+              />
+            )}
 
             {/* Notes (collapsible) */}
             {issue.notes && (

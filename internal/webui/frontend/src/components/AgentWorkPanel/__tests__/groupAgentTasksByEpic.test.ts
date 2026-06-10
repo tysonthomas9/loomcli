@@ -11,6 +11,7 @@ import {
   groupOpenByEpic,
   isWorkerTerminalOpenable,
   leadDeliveryStateLabel,
+  statusBucket,
 } from "../AgentWorkPanel";
 
 // Minimal Issue factory — fills in just the fields the grouping function reads.
@@ -49,7 +50,13 @@ describe("groupAgentTasksByEpic", () => {
     const res = groupAgentTasksByEpic(m, undefined);
     expect(res.totalTasks).toBe(0);
     expect(res.groups).toEqual([]);
-    expect(res.counts).toEqual({ active: 0, done: 0, open: 0, blocked: 0 });
+    expect(res.counts).toEqual({
+      active: 0,
+      done: 0,
+      open: 0,
+      review: 0,
+      blocked: 0,
+    });
   });
 
   it("filters issues to those assigned to the agent", () => {
@@ -118,9 +125,16 @@ describe("groupAgentTasksByEpic", () => {
       issue({ id: "T3", assignee: "nova", status: "blocked" }),
       issue({ id: "T4", assignee: "nova", status: "closed" }),
       issue({ id: "T5", assignee: "nova", status: "ready" }),
+      issue({ id: "T6", assignee: "nova", status: "review" }),
     );
     const res = groupAgentTasksByEpic(m, "nova");
-    expect(res.counts).toEqual({ active: 1, open: 2, blocked: 1, done: 1 });
+    expect(res.counts).toEqual({
+      active: 1,
+      open: 2,
+      review: 1,
+      blocked: 1,
+      done: 1,
+    });
   });
 
   it("sorts tasks within an epic by status: active, open, blocked, review, done", () => {
@@ -237,7 +251,13 @@ describe("groupOpenByEpic", () => {
     );
     const res = groupOpenByEpic(m);
     expect(res.totalTasks).toBe(2);
-    expect(res.counts).toEqual({ active: 0, done: 0, open: 1, blocked: 1 });
+    expect(res.counts).toEqual({
+      active: 0,
+      done: 0,
+      open: 1,
+      review: 0,
+      blocked: 1,
+    });
     expect(res.groups[0]?.tasks.map((t) => t.id)).toEqual([
       "T-OPEN",
       "T-BLOCKED",
@@ -369,9 +389,39 @@ describe("countTaskStatusesWithWorkers", () => {
     expect(countTaskStatusesWithWorkers(tasks, workers)).toEqual({
       active: 1,
       open: 1,
+      review: 0,
       blocked: 1,
       done: 1,
     });
+  });
+
+  it("counts review tasks separately from open ones", () => {
+    const tasks = [
+      issue({ id: "T-REVIEW", status: "review" }),
+      issue({ id: "T-OPEN", status: "open" }),
+    ];
+
+    expect(countTaskStatusesWithWorkers(tasks, new Map())).toEqual({
+      active: 0,
+      open: 1,
+      review: 1,
+      blocked: 0,
+      done: 0,
+    });
+  });
+});
+
+describe("statusBucket", () => {
+  it("collapses raw statuses into the filter-pill buckets", () => {
+    expect(statusBucket("in_progress")).toBe("in_progress");
+    expect(statusBucket("active")).toBe("in_progress");
+    expect(statusBucket("closed")).toBe("done");
+    expect(statusBucket("done")).toBe("done");
+    expect(statusBucket("blocked")).toBe("blocked");
+    expect(statusBucket("review")).toBe("review");
+    expect(statusBucket("open")).toBe("open");
+    expect(statusBucket("ready")).toBe("open");
+    expect(statusBucket("anything-else")).toBe("open");
   });
 });
 

@@ -26,6 +26,9 @@ export type { DesignPanelProps } from "./DesignPanel";
 export { EditableDescription } from "./EditableDescription";
 export type { EditableDescriptionProps } from "./EditableDescription";
 
+export { EpicTicketsSection } from "./EpicTicketsSection";
+export type { EpicTicketsSectionProps } from "./EpicTicketsSection";
+
 export { MarkdownRenderer } from "./MarkdownRenderer";
 export type { MarkdownRendererProps } from "./MarkdownRenderer";
 

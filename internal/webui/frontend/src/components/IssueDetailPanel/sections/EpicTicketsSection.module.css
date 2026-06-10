@@ -1,0 +1,226 @@
+/**
+ * EpicTicketsSection — epic overview inside the issue detail panel.
+ * Uses the shared design tokens so light/dark theme applies.
+ */
+
+.section {
+  margin-top: var(--space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.headerRow {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.sectionTitle {
+  margin: 0;
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-primary);
+}
+
+.progressText {
+  font-size: 0.6875rem;
+  color: var(--color-text-muted);
+  font-variant-numeric: tabular-nums;
+  flex: 1;
+}
+
+.runnerBadge {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  font-size: 0.6875rem;
+  font-weight: var(--font-weight-medium);
+  color: var(--color-text-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-full);
+  padding: 1px var(--space-2);
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.runnerDot {
+  width: 6px;
+  height: 6px;
+  border-radius: var(--radius-full);
+  background: var(--color-status-working);
+  flex-shrink: 0;
+}
+
+.unclaimedBadge {
+  font-size: 0.6875rem;
+  font-style: italic;
+  color: var(--color-text-muted);
+  border: 1px dashed var(--color-border);
+  border-radius: var(--radius-full);
+  padding: 1px var(--space-2);
+}
+
+.distBar {
+  display: flex;
+  height: 5px;
+  background: var(--color-bg-tertiary);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+
+.distSeg {
+  height: 100%;
+  flex-basis: 0;
+}
+
+.distSeg[data-k="in_progress"] {
+  background: var(--color-status-working);
+}
+
+.distSeg[data-k="open"] {
+  background: var(--color-status-ready);
+}
+
+.distSeg[data-k="review"] {
+  background: var(--color-status-review);
+}
+
+.distSeg[data-k="blocked"] {
+  background: var(--color-status-error);
+}
+
+.distSeg[data-k="done"] {
+  background: var(--color-status-done);
+}
+
+.ticketList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.ticketRow {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+  padding: var(--space-2) var(--space-3);
+  background: var(--color-bg-card);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  text-align: left;
+  font-family: inherit;
+  color: inherit;
+  cursor: pointer;
+  min-width: 0;
+}
+
+.ticketRow:hover:not(:disabled) {
+  background: var(--color-bg-hover);
+  border-color: var(--color-border-hover);
+}
+
+.ticketRow:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
+.ticketRow:disabled {
+  cursor: default;
+}
+
+.statusDot {
+  width: 7px;
+  height: 7px;
+  border-radius: var(--radius-full);
+  flex-shrink: 0;
+}
+
+.statusDot[data-k="in_progress"] {
+  background: var(--color-status-working);
+}
+
+.statusDot[data-k="open"] {
+  background: var(--color-status-ready);
+}
+
+.statusDot[data-k="review"] {
+  background: var(--color-status-review);
+}
+
+.statusDot[data-k="blocked"] {
+  background: var(--color-status-error);
+}
+
+.statusDot[data-k="done"] {
+  background: var(--color-status-done);
+}
+
+.ticketId {
+  font-family: var(--font-family-mono);
+  font-size: 0.6875rem;
+  color: var(--color-text-muted);
+  flex-shrink: 0;
+}
+
+.ticketTitle {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--font-size-xs);
+  color: var(--color-text-primary);
+}
+
+.ticketRow[data-status="done"] .ticketTitle {
+  text-decoration: line-through;
+  color: var(--color-text-muted);
+}
+
+.statusChip {
+  flex-shrink: 0;
+  font-size: 0.625rem;
+  font-weight: var(--font-weight-semibold);
+  border-radius: var(--radius-sm);
+  padding: 1px var(--space-2);
+  line-height: 1.4;
+  border: 1px solid transparent;
+}
+
+.statusChip[data-k="in_progress"] {
+  color: var(--color-status-working);
+  background: color-mix(in srgb, var(--color-status-working) 14%, transparent);
+  border-color: color-mix(in srgb, var(--color-status-working) 36%, transparent);
+}
+
+.statusChip[data-k="open"] {
+  color: var(--color-status-ready);
+  background: color-mix(in srgb, var(--color-status-ready) 14%, transparent);
+  border-color: color-mix(in srgb, var(--color-status-ready) 36%, transparent);
+}
+
+.statusChip[data-k="review"] {
+  color: var(--color-status-review);
+  background: color-mix(in srgb, var(--color-status-review) 14%, transparent);
+  border-color: color-mix(in srgb, var(--color-status-review) 36%, transparent);
+}
+
+.statusChip[data-k="blocked"] {
+  color: var(--color-status-error);
+  background: color-mix(in srgb, var(--color-status-error) 14%, transparent);
+  border-color: color-mix(in srgb, var(--color-status-error) 36%, transparent);
+}
+
+.statusChip[data-k="done"] {
+  color: var(--color-status-done);
+  background: color-mix(in srgb, var(--color-status-done) 14%, transparent);
+  border-color: color-mix(in srgb, var(--color-status-done) 36%, transparent);
+}

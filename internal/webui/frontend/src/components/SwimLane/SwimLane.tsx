@@ -43,6 +43,12 @@ export interface SwimLaneProps {
   headerIssue?: Issue;
   /** Callback when the clickable lane title is clicked */
   onHeaderIssueClick?: (issue: Issue) => void;
+  /**
+   * Lead agent running this epic lane: a name renders a live runner badge,
+   * null renders an "Unclaimed" badge, undefined hides the badge entirely
+   * (non-epic groupings).
+   */
+  epicRunner?: string | null;
   /** Map of issue ID to blocked info */
   blockedIssues?: Map<string, BlockedInfo>;
   /** Whether to show blocked issues */
@@ -70,6 +76,7 @@ export function SwimLane({
   onIssueClick,
   headerIssue,
   onHeaderIssueClick,
+  epicRunner,
   blockedIssues,
   showBlocked = true,
   className,
@@ -181,6 +188,24 @@ export function SwimLane({
         >
           {filteredIssues.length}
         </span>
+        {epicRunner !== undefined &&
+          (epicRunner !== null ? (
+            <span
+              className={styles.runnerBadge}
+              title={`Epic run by ${epicRunner}`}
+              data-testid="lane-runner-badge"
+            >
+              <span className={styles.runnerDot} aria-hidden="true" />
+              {epicRunner}
+            </span>
+          ) : (
+            <span
+              className={styles.unclaimedBadge}
+              data-testid="lane-unclaimed-badge"
+            >
+              Unclaimed
+            </span>
+          ))}
       </header>
       <div
         className={styles.laneContent}

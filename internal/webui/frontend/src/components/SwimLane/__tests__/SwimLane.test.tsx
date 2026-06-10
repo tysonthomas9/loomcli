@@ -126,6 +126,56 @@ describe("SwimLane", () => {
       );
     });
 
+    it("renders a runner badge when a lead has claimed the epic lane", () => {
+      renderWithDndContext(
+        <SwimLane
+          id="test-lane"
+          title="Epic: User Authentication"
+          issues={[]}
+          columns={defaultColumns}
+          epicRunner="atlas"
+        />,
+      );
+
+      const badge = screen.getByTestId("lane-runner-badge");
+      expect(badge).toHaveTextContent("atlas");
+      expect(
+        screen.queryByTestId("lane-unclaimed-badge"),
+      ).not.toBeInTheDocument();
+    });
+
+    it("renders an Unclaimed badge when no lead runs the epic lane", () => {
+      renderWithDndContext(
+        <SwimLane
+          id="test-lane"
+          title="Epic: User Authentication"
+          issues={[]}
+          columns={defaultColumns}
+          epicRunner={null}
+        />,
+      );
+
+      expect(screen.getByTestId("lane-unclaimed-badge")).toHaveTextContent(
+        "Unclaimed",
+      );
+    });
+
+    it("hides the runner badge entirely for non-epic groupings", () => {
+      renderWithDndContext(
+        <SwimLane
+          id="test-lane"
+          title="P1 (High)"
+          issues={[]}
+          columns={defaultColumns}
+        />,
+      );
+
+      expect(screen.queryByTestId("lane-runner-badge")).not.toBeInTheDocument();
+      expect(
+        screen.queryByTestId("lane-unclaimed-badge"),
+      ).not.toBeInTheDocument();
+    });
+
     it("shows correct issue count", () => {
       const issues = createMockIssues([
         "open",
