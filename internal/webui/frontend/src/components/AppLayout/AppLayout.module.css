@@ -17,10 +17,9 @@
   left: 0;
   right: 0;
   z-index: var(--z-sticky);
-  background-color: var(--color-bg);
+  background-color: var(--color-bg-secondary);
   border-bottom: 1px solid var(--color-border);
   height: var(--unified-header-height);
-  box-shadow: 0 1px 2px rgb(17 24 39 / 6%);
 }
 
 .headerContent {
@@ -45,8 +44,8 @@
 .title {
   margin: 0;
   font-size: 1rem;
-  font-weight: 700;
-  letter-spacing: 0.02em;
+  font-weight: 600;
+  letter-spacing: -0.01em;
   color: var(--color-text-primary);
 }
 
@@ -135,7 +134,7 @@
   }
 
   .title {
-    font-size: 0.9375rem;
+    font-size: 0.95rem;
   }
 }
 
@@ -178,4 +177,29 @@
   .skipLink {
     transition: none;
   }
+}
+
+/* Brand-as-button (design: clicking the logo returns to the board). */
+.brandButton {
+  display: flex;
+  align-items: center;
+  padding: 4px 8px;
+  margin-left: -8px;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+}
+
+.brandButton:hover {
+  background: var(--color-bg-hover);
+}
+
+.brandButton:hover .title {
+  color: var(--color-primary);
+}
+
+.brandButton:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
 }

@@ -99,140 +99,26 @@
   white-space: nowrap;
 }
 
-.addRepoWrap {
-  position: relative;
-  margin-top: 0.5rem;
-}
-
-.addRepoTrigger {
+/* Ghost "+ Add Repo" entry at the section bottom (Aether V3 add-repo-wrap). */
+.addRepo {
   display: inline-flex;
   align-items: center;
-  gap: 0.3125rem;
-  padding: 0.375rem 0.625rem;
-  border: 1.6px solid var(--color-border);
-  border-radius: 7px;
-  background: var(--color-bg-card);
-  color: var(--color-text-primary);
-  font-size: 0.75rem;
-  font-weight: 500;
-  cursor: pointer;
-  transition:
-    border-color 0.15s ease,
-    background-color 0.15s ease;
-}
-
-.addRepoTrigger:hover {
-  border-color: var(--color-primary);
-  background: var(--color-bg-hover);
-}
-
-.addRepoTrigger:focus-visible {
-  outline: 2px solid var(--color-focus);
-  outline-offset: 2px;
-}
-
-.addRepoIcon {
-  font-size: 0.8125rem;
-  line-height: 1;
-}
-
-.addRepoPanel {
-  margin-top: 0.5rem;
-  padding: 0.75rem;
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-md, 8px);
-  background: var(--color-bg);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
-}
-
-.addRepoLabel {
-  display: block;
-  margin-bottom: 0.375rem;
-  font-size: 0.625rem;
-  font-weight: 700;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--color-text-tertiary);
-}
-
-.addRepoInput {
-  width: 100%;
-  min-width: 0;
-  height: 2rem;
-  padding: 0 0.625rem;
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-sm);
-  background: var(--color-bg-card);
-  color: var(--color-text-primary);
-  font-size: 0.75rem;
-}
-
-.addRepoInput:focus {
-  outline: 2px solid var(--color-focus);
-  outline-offset: -1px;
-}
-
-.browseButton {
-  margin-top: 0.375rem;
-  height: 1.75rem;
-  padding: 0 0.625rem;
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-sm);
-  background: transparent;
-  color: var(--color-text-primary);
+  gap: 5px;
+  margin: 0.5rem 1rem 0.375rem;
+  padding: 5px 10px;
   font-size: 0.75rem;
   font-weight: 600;
-  cursor: pointer;
-}
-
-.browseButton:hover:not(:disabled) {
-  background: var(--color-bg-hover);
-}
-
-.browseButton:disabled {
-  opacity: 0.45;
-  cursor: not-allowed;
-}
-
-.addRepoActions {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  margin-top: 0.625rem;
-}
-
-.submitButton {
-  padding: 0.375rem 0.75rem;
-  border: none;
+  color: var(--color-text);
+  background: var(--color-bg-card);
+  border: 1px solid var(--color-border);
   border-radius: var(--radius-sm);
-  background: var(--color-primary);
-  color: white;
-  font-size: 0.75rem;
-  font-weight: 700;
   cursor: pointer;
+  transition:
+    border-color var(--transition-fast),
+    color var(--transition-fast);
 }
 
-.submitButton:disabled {
-  opacity: 0.45;
-  cursor: not-allowed;
-}
-
-.cancelButton {
-  padding: 0.25rem 0.375rem;
-  border: none;
-  background: transparent;
-  color: var(--color-text-tertiary);
-  font-size: 0.75rem;
-  cursor: pointer;
-}
-
-.cancelButton:hover:not(:disabled) {
-  color: var(--color-text-primary);
-}
-
-.addRepoError {
-  margin-top: 0.5rem;
-  color: var(--color-danger);
-  font-size: 0.75rem;
-  line-height: 1.3;
+.addRepo:hover {
+  border-color: var(--color-primary);
+  color: var(--color-primary);
 }

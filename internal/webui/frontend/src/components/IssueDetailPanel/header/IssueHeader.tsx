@@ -54,12 +54,12 @@ export interface IssueHeaderProps {
   prUrl?: string;
   /** Extracted PR number (e.g., "42") */
   prNumber?: string;
+  /** Whether the panel is currently maximized to full-page */
+  isMaximized?: boolean;
+  /** Toggle the panel between slide-over and full-page (omit to hide control) */
+  onToggleMaximize?: () => void;
   /** Enable sticky mode styling */
   sticky?: boolean;
-  /** Whether the panel is maximized to a 50/50 split */
-  isMaximized?: boolean;
-  /** Toggle panel maximize (50/50 split with the board) */
-  onToggleMaximize?: () => void;
   /** Additional CSS class name */
   className?: string;
 }
@@ -97,9 +97,9 @@ export function IssueHeader({
   isRunningEpic,
   prUrl,
   prNumber,
-  sticky,
   isMaximized,
   onToggleMaximize,
+  sticky,
   className,
 }: IssueHeaderProps): JSX.Element {
   const rootClassName = [styles.issueHeader, sticky && styles.sticky, className]
@@ -243,44 +243,44 @@ export function IssueHeader({
             </svg>
           </button>
         )}
-        {onToggleMaximize ? (
+        {onToggleMaximize && (
           <button
             type="button"
             className={styles.maximizeButton}
             onClick={onToggleMaximize}
-            aria-label={
-              isMaximized ? "Restore panel width" : "Maximize panel to half screen"
-            }
+            aria-label={isMaximized ? "Exit full screen" : "Expand to full screen"}
             aria-pressed={isMaximized}
             data-testid="header-maximize-button"
           >
-            <svg
-              width="20"
-              height="20"
-              viewBox="0 0 20 20"
-              fill="none"
-              aria-hidden="true"
-            >
-              {isMaximized ? (
+            {isMaximized ? (
+              <svg
+                width="18"
+                height="18"
+                viewBox="0 0 16 16"
+                fill="none"
+                aria-hidden="true"
+              >
                 <path
-                  d="M7 13H5V5h8v2M13 7h2v8H7v-2"
-                  stroke="currentColor"
-                  strokeWidth="1.5"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
+                  d="M4 10H2v4h4v-2H4v-2zM2 6h2V4h2V2H2v4zm10 6h-2v2h4v-4h-2v2zM10 2v2h2v2h2V2h-4z"
+                  fill="currentColor"
                 />
-              ) : (
+              </svg>
+            ) : (
+              <svg
+                width="18"
+                height="18"
+                viewBox="0 0 16 16"
+                fill="none"
+                aria-hidden="true"
+              >
                 <path
-                  d="M5 7h10v10H5V7zM7 5h10v10"
-                  stroke="currentColor"
-                  strokeWidth="1.5"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
+                  d="M2 10h2v2h2v2H2v-4zm2-4H2V2h4v2H4v2zm8 6h-2v2h4v-4h-2v2zM10 2v2h2v2h2V2h-4z"
+                  fill="currentColor"
                 />
-              )}
-            </svg>
+              </svg>
+            )}
           </button>
-        ) : null}
+        )}
         <button
           className={styles.closeButton}
           onClick={onClose}

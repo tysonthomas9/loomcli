@@ -24,10 +24,12 @@ export { DesignPanel } from "./DesignPanel";
 export type { DesignPanelProps } from "./DesignPanel";
 
 export { EditableDescription } from "./EditableDescription";
+export { PRSection } from "./PRSection";
+export type { PRSectionProps } from "./PRSection";
 export type { EditableDescriptionProps } from "./EditableDescription";
 
-export { EpicTicketsSection } from "./EpicTicketsSection";
-export type { EpicTicketsSectionProps } from "./EpicTicketsSection";
+export { EpicRollup } from "./EpicRollup";
+export type { EpicRollupProps } from "./EpicRollup";
 
 export { MarkdownRenderer } from "./MarkdownRenderer";
 export type { MarkdownRendererProps } from "./MarkdownRenderer";

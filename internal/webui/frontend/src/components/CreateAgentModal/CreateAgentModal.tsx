@@ -2,9 +2,21 @@ import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 
 import type { RepoInfo, WorkspaceAgentInfo } from "@/api/workspace";
 import { useCreateWorkspaceAgent } from "@/hooks/agents";
+import { useBackends } from "@/hooks/workspace";
 import { ApiError } from "@/types/common";
 
 import styles from "./CreateAgentModal.module.css";
+
+/**
+ * Role options as a segmented control (Aether Wireframe V3 Add-Agent dialog).
+ * Loom's backend validates roles — only task/plan are defined, so "lead" is
+ * intentionally absent (creating a lead agent 404s "role not found").
+ */
+const ROLE_OPTIONS: { value: string; label: string }[] = [
+  { value: "task", label: "Task" },
+  { value: "plan", label: "Plan" },
+  { value: "lead", label: "Lead" },
+];
 
 export interface CreateAgentModalProps {
   isOpen: boolean;
@@ -33,16 +45,38 @@ export function CreateAgentModal({
   const [name, setName] = useState(resolvedDefaultName);
   const [roleName, setRoleName] = useState<string>(resolvedDefaultRoleName);
   const [backend, setBackend] = useState(resolvedDefaultBackend);
-  const [repoName, setRepoName] = useState("");
-  const [crossRepo, setCrossRepo] = useState(false);
+  const [selectedRepos, setSelectedRepos] = useState<string[]>([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const wasOpenRef = useRef(false);
   const createAgent = useCreateWorkspaceAgent(workspaceId);
+  const { backends } = useBackends();
 
   const repoOptions = useMemo(() => repos.map((repo) => repo.name), [repos]);
-  const selectedRepo = repoName || repoOptions[0] || "";
-  const isLeadAgent = isLeadRole(roleName);
+  // Default selection mirrors the Aether dialog (first repo pre-picked).
+  const defaultRepos = useMemo(
+    () => (repoOptions[0] ? [repoOptions[0]] : []),
+    [repoOptions],
+  );
+
+  // Aether V3 made this a multi-select chip group: loom agents carry a full
+  // `repos[]` array, so an agent can span several repos. Leaving every chip
+  // unselected maps to loom's workspace scope (cross_repo, empty repos).
+  const crossRepo = selectedRepos.length === 0;
+  const toggleRepo = (repo: string): void =>
+    setSelectedRepos((prev) =>
+      prev.includes(repo) ? prev.filter((r) => r !== repo) : [...prev, repo],
+    );
+
+  // Real backend list (Aether V3 made this a dropdown, not free text). Keep the
+  // resolved/current value selectable even if it isn't in the live list.
+  const backendOptions = useMemo(() => {
+    const opts = backends.map((b) => ({ value: b.name, label: b.displayName }));
+    if (backend && !opts.some((o) => o.value === backend)) {
+      opts.unshift({ value: backend, label: backend });
+    }
+    return opts.length > 0 ? opts : [{ value: backend, label: backend }];
+  }, [backends, backend]);
 
   useEffect(() => {
     if (!isOpen) {
@@ -55,8 +89,7 @@ export function CreateAgentModal({
     setName(resolvedDefaultName);
     setRoleName(resolvedDefaultRoleName);
     setBackend(resolvedDefaultBackend);
-    setRepoName("");
-    setCrossRepo(false);
+    setSelectedRepos(defaultRepos);
     setIsSubmitting(false);
     setError(null);
   }, [
@@ -64,6 +97,7 @@ export function CreateAgentModal({
     resolvedDefaultName,
     resolvedDefaultRoleName,
     resolvedDefaultBackend,
+    defaultRepos,
   ]);
 
   if (!isOpen) return null;
@@ -82,10 +116,6 @@ export function CreateAgentModal({
       setError("Role is required");
       return;
     }
-    if (!isLeadAgent && !crossRepo && !selectedRepo) {
-      setError("Select a repo or enable workspace scope");
-      return;
-    }
 
     setIsSubmitting(true);
     try {
@@ -93,12 +123,8 @@ export function CreateAgentModal({
         name: trimmedName,
         role_name: trimmedRole,
         auto: false,
-        ...(isLeadAgent
-          ? {}
-          : {
-              cross_repo: crossRepo,
-              repos: crossRepo ? [] : [selectedRepo],
-            }),
+        cross_repo: crossRepo,
+        repos: crossRepo ? [] : selectedRepos,
       };
       const agent = await createAgent({
         ...request,
@@ -108,8 +134,7 @@ export function CreateAgentModal({
       setName(resolvedDefaultName);
       setRoleName(resolvedDefaultRoleName);
       setBackend(resolvedDefaultBackend);
-      setRepoName("");
-      setCrossRepo(false);
+      setSelectedRepos(defaultRepos);
     } catch (err) {
       if (err instanceof ApiError) {
         setError(err.message);
@@ -165,70 +190,91 @@ export function CreateAgentModal({
 
           <div className={styles.row}>
             <div className={styles.fieldGroup}>
-              <label className={styles.label} htmlFor="agent-role">
+              <span className={styles.label} id="agent-role-label">
                 Role
-              </label>
-              <select
-                id="agent-role"
-                className={styles.select}
-                value={roleName}
-                onChange={(event) => setRoleName(event.target.value)}
-                disabled={isSubmitting}
+              </span>
+              <div
+                className={styles.segControl}
+                role="group"
+                aria-labelledby="agent-role-label"
               >
-                <option value="task">task</option>
-                <option value="plan">plan</option>
-                <option value="lead">lead</option>
-              </select>
+                {ROLE_OPTIONS.map((option) => (
+                  <button
+                    key={option.value}
+                    type="button"
+                    className={styles.segOption}
+                    data-active={roleName === option.value || undefined}
+                    aria-pressed={roleName === option.value}
+                    onClick={() => setRoleName(option.value)}
+                    disabled={isSubmitting}
+                  >
+                    {option.label}
+                  </button>
+                ))}
+              </div>
             </div>
             <div className={styles.fieldGroup}>
               <label className={styles.label} htmlFor="agent-backend">
-                Backend
+                AI Backend
               </label>
-              <input
+              <select
                 id="agent-backend"
-                className={styles.input}
+                className={styles.select}
                 value={backend}
                 onChange={(event) => setBackend(event.target.value)}
-                placeholder="claude"
                 disabled={isSubmitting}
-              />
+              >
+                {backendOptions.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
             </div>
           </div>
 
-          {!isLeadAgent && (
-            <>
-              <label className={styles.checkboxRow}>
-                <input
-                  type="checkbox"
-                  checked={crossRepo}
-                  onChange={(event) => setCrossRepo(event.target.checked)}
-                  disabled={isSubmitting}
-                />
-                <span>Workspace scope</span>
-              </label>
-
-              {!crossRepo && (
-                <div className={styles.fieldGroup}>
-                  <label className={styles.label} htmlFor="agent-repo">
-                    Repo
-                  </label>
-                  <select
-                    id="agent-repo"
-                    className={styles.select}
-                    value={selectedRepo}
-                    onChange={(event) => setRepoName(event.target.value)}
-                    disabled={isSubmitting || repoOptions.length === 0}
-                  >
-                    {repoOptions.map((repo) => (
-                      <option key={repo} value={repo}>
-                        {repo}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              )}
-            </>
-          )}
+          <div className={styles.fieldGroup}>
+            <span className={styles.label} id="agent-repos-label">
+              Repos / Worktrees
+            </span>
+            {repoOptions.length === 0 ? (
+              <p className={styles.emptyHint}>
+                No repos yet — add one from the sidebar first. This agent will
+                run with workspace scope.
+              </p>
+            ) : (
+              <div
+                className={styles.repoChips}
+                role="group"
+                aria-labelledby="agent-repos-label"
+              >
+                {repoOptions.map((repo) => {
+                  const on = selectedRepos.includes(repo);
+                  return (
+                    <button
+                      key={repo}
+                      type="button"
+                      className={styles.repoChip}
+                      data-active={on || undefined}
+                      aria-pressed={on}
+                      onClick={() => toggleRepo(repo)}
+                      disabled={isSubmitting}
+                    >
+                      <span className={styles.repoChipBox} aria-hidden="true">
+                        {on ? "✓" : ""}
+                      </span>
+                      {repo}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+            <p className={styles.hint}>
+              {crossRepo
+                ? "No repo selected — the agent gets workspace-wide scope."
+                : "Pick every repo this agent works in. Leave all unselected for workspace scope."}
+            </p>
+          </div>
 
           {error && (
             <div className={styles.error} role="alert">
@@ -248,7 +294,7 @@ export function CreateAgentModal({
             <button
               type="submit"
               className={styles.submitButton}
-              disabled={isSubmitting}
+              disabled={isSubmitting || name.trim() === ""}
             >
               {isSubmitting ? "Creating..." : "Create Agent"}
             </button>
@@ -257,9 +303,4 @@ export function CreateAgentModal({
       </div>
     </div>
   );
-}
-
-function isLeadRole(roleName: string): boolean {
-  const normalized = roleName.trim().toLowerCase();
-  return normalized === "lead" || normalized === "orchestrator";
 }

@@ -6,18 +6,25 @@
 
 :root {
   /* ===========================
-   * Design System (Variant) — Dark defaults
+   * Design System (Aether) — Dark defaults
+   * Neutral near-black palette: backdrop #111, elevated cards #222,
+   * hairline borders #2e2e2e, bright text #f0f0f0, muted #888.
    * =========================== */
-  --bg-color: #1a1a2e;
-  --bg-card: #232336;
-  --line-color: #3a3a52;
-  --text-primary: #e2e2e8;
-  --text-secondary: #a0a0b0;
-  --accent-bg: #1e2a4a;
+  --bg-color: #111111;
+  --bg-card: #181818;
+  --line-color: #2e2e2e;
+  --text-primary: #f0f0f0;
+  --text-secondary: #888888;
+  --accent-bg: #16233c;
   --accent-text: #60a5fa;
-  --font-main: "Inter", "Helvetica Neue", Helvetica, Arial, sans-serif;
-  --unified-header-height: 46px;
-  --nav-rail-width: 58px;
+  --font-main:
+    ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
+    "Helvetica Neue", Arial, sans-serif;
+  --unified-header-height: 44px;
+  --nav-rail-width: 52px;
+  /* Elevated "chrome" surface for sidebar + board toolbar (Aether #1a1a1a),
+     sitting between the #111 app backdrop and the #222 cards. */
+  --color-chrome: #1a1a1a;
 
   /* ===========================
    * Colors - Priority
@@ -89,45 +96,45 @@
   /* ===========================
    * Colors - Kanban Column Backgrounds
    * =========================== */
-  --color-column-bg: #1e1e32;
-  --color-column-bg-muted: #1a1a2c;
+  --color-column-bg: #151515;
+  --color-column-bg-muted: #131313;
 
   /* ===========================
    * Colors - Neutral (Dark Theme)
    * =========================== */
   --color-bg: var(--bg-card);
-  --color-bg-card: #282842;
+  --color-bg-card: #222222;
   --color-bg-secondary: var(--bg-color);
-  --color-bg-tertiary: #2a2a40;
-  --color-bg-hover: #2e2e48;
-  --color-bg-active: #35354f;
-  --color-surface-subtle: #262640;
+  --color-bg-tertiary: #1e1e1e;
+  --color-bg-hover: #262626;
+  --color-bg-active: #2e2e2e;
+  --color-surface-subtle: #1a1a1a;
   --color-bg-subtle: var(--color-surface-subtle);
   --color-border: var(--line-color);
-  --color-border-light: #32324a;
-  --color-border-hover: #4a4a68;
+  --color-border-light: #262626;
+  --color-border-hover: #3d3d3d;
   --color-text: var(--text-primary);
   --color-text-primary: var(--text-primary);
   --color-text-secondary: var(--text-secondary);
-  --color-text-tertiary: #8888a0;
-  --color-text-muted: #6a6a82;
-  --color-text-inverse: #1a1a2e;
+  --color-text-tertiary: #888888;
+  --color-text-muted: #666666;
+  --color-text-inverse: #111111;
   --color-highlight: #854d0e;
   --color-focus: #3b82f6; /* blue-500, focus ring color */
   --color-bg-primary: var(--bg-card);
-  --color-panel-bg: #1e1e32;
+  --color-panel-bg: #1a1a1a;
   --color-primary-hover: #3b82f6;
 
   /* ===========================
    * Colors - Skeleton Loading
    * =========================== */
   --color-skeleton-bg: var(--color-bg-tertiary);
-  --color-skeleton-shimmer: #33334d;
+  --color-skeleton-shimmer: #2a2a2a;
 
   /* ===========================
    * Terminal Theme
    * =========================== */
-  --terminal-bg: #1e1e1e;
+  --terminal-bg: #0d0d0d; /* Aether terminal surface */
   --terminal-fg: #d4d4d4;
   --terminal-cursor: #d4d4d4;
   --terminal-selection: rgba(255, 255, 255, 0.15);
@@ -170,7 +177,7 @@
    * =========================== */
   --font-size-xs: 0.75rem; /* 12px */
   --font-size-sm: 0.875rem; /* 14px */
-  --font-size-base: 1rem; /* 16px */
+  --font-size-base: 0.8125rem; /* 13px — Aether body base */
   --font-size-lg: 1.125rem; /* 18px */
   --font-size-xl: 1.25rem; /* 20px */
   --font-size-2xl: 1.5rem; /* 24px */
@@ -255,36 +262,37 @@
  * Applied via [data-theme="light"] on <html>
  * =========================== */
 [data-theme="light"] {
-  /* Core palette */
-  --bg-color: #e6e4dc;
-  --bg-card: #f5f4f1;
-  --line-color: #c5c1b7;
-  --text-primary: #1f2937;
-  --text-secondary: #4b5563;
+  /* Core palette — warm beige (Aether light) */
+  --bg-color: #eceae4;
+  --bg-card: #f5f3ef;
+  --line-color: #dedad2;
+  --text-primary: #1a1a1a;
+  --text-secondary: #6b6661;
   --accent-bg: #e7ecff;
   --accent-text: #2563eb;
 
   /* Kanban column backgrounds */
-  --color-column-bg: #eae8e1;
-  --color-column-bg-muted: #e4e2db;
+  --color-column-bg: #e8e5df;
+  --color-column-bg-muted: #ece9e3;
 
   /* Neutral colors */
   --color-bg: var(--bg-card);
-  --color-bg-card: #f7f6f3;
+  --color-bg-card: #ffffff;
   --color-bg-secondary: var(--bg-color);
-  --color-bg-tertiary: #eeebe2;
-  --color-bg-hover: #ece9e1;
-  --color-bg-active: #e3dfd6;
-  --color-surface-subtle: #efede7;
+  --color-chrome: #f0ede8;
+  --color-bg-tertiary: #e8e5df;
+  --color-bg-hover: #e8e5df;
+  --color-bg-active: #e0ddd5;
+  --color-surface-subtle: #f0ede8;
   --color-bg-subtle: var(--color-surface-subtle);
   --color-border: var(--line-color);
-  --color-border-light: #d8d3c8;
-  --color-border-hover: #b8c0cb;
+  --color-border-light: #e4e0d8;
+  --color-border-hover: #c8c4bb;
   --color-text: var(--text-primary);
   --color-text-primary: var(--text-primary);
   --color-text-secondary: var(--text-secondary);
-  --color-text-tertiary: #6b7280;
-  --color-text-muted: #8a8f99;
+  --color-text-tertiary: #6b6661;
+  --color-text-muted: #a09b94;
   --color-text-inverse: #ffffff;
   --color-highlight: #fef08a;
   --color-focus: #3b82f6;

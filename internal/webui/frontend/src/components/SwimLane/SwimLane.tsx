@@ -12,6 +12,7 @@ import type { BlockedInfo } from "@/types/issue";
 import type { KanbanColumnConfig } from "@/components/KanbanBoard/types";
 import { StatusColumn } from "@/components/StatusColumn";
 import type { Issue } from "@/types";
+import { isPRUrl } from "@/utils/issue";
 
 import styles from "./SwimLane.module.css";
 
@@ -107,6 +108,13 @@ export function SwimLane({
     return issues.filter((issue) => !blockedIssues.has(issue.id));
   }, [issues, showBlocked, blockedIssues]);
 
+  // Roll up how many of this lane's tickets carry a linked pull request, so an
+  // epic lane can surface "N PRs" (design's epic-header PR rollup).
+  const prCount = useMemo(
+    () => filteredIssues.filter((issue) => isPRUrl(issue.external_ref)).length,
+    [filteredIssues],
+  );
+
   // Group issues by column using filter functions
   const issuesByColumn = useMemo(() => {
     const grouped = new Map<string, Issue[]>();
@@ -182,6 +190,26 @@ export function SwimLane({
             title
           )}
         </h3>
+        {headerIssue && prCount > 0 && (
+          <span
+            className={styles.lanePrCount}
+            aria-label={`${prCount} open pull request${prCount === 1 ? "" : "s"}`}
+            title={`${prCount} open pull request${prCount === 1 ? "" : "s"}`}
+          >
+            <svg viewBox="0 0 16 16" fill="none" aria-hidden="true">
+              <circle cx="4" cy="4" r="1.6" stroke="currentColor" strokeWidth="1.4" />
+              <circle cx="4" cy="12" r="1.6" stroke="currentColor" strokeWidth="1.4" />
+              <circle cx="12" cy="12" r="1.6" stroke="currentColor" strokeWidth="1.4" />
+              <path
+                d="M4 5.6v4.8M12 10.4V8a2 2 0 0 0-2-2H7.5"
+                stroke="currentColor"
+                strokeWidth="1.4"
+                strokeLinecap="round"
+              />
+            </svg>
+            {prCount} {prCount === 1 ? "PR" : "PRs"}
+          </span>
+        )}
         <span
           className={styles.laneCount}
           aria-label={`${filteredIssues.length} issues`}
@@ -212,87 +240,120 @@ export function SwimLane({
         data-collapsed={isCollapsed}
         aria-hidden={isCollapsed}
       >
-        {columns.map((col) => {
-          const colIssues = issuesByColumn.get(col.id) ?? [];
-          const columnClassName =
-            col.style === "muted"
-              ? styles.mutedColumn
-              : col.style === "highlighted"
-                ? styles.highlightedColumn
-                : undefined;
+        {/* Aether structure: a single shared column-header row (#1a1a1a)
+            sitting above the body grid, both using the same N-column grid so
+            headers align with their columns. */}
+        <div
+          className={styles.columnHeaderRow}
+          style={{
+            gridTemplateColumns: `repeat(${columns.length}, minmax(180px, 1fr))`,
+          }}
+        >
+          {columns.map((col) => {
+            const colCount = issuesByColumn.get(col.id)?.length ?? 0;
+            return (
+              <div key={col.id} className={styles.columnHeaderCell}>
+                <h3
+                  className={styles.columnTitle}
+                  data-empty={colCount === 0 || undefined}
+                >
+                  {col.label}
+                </h3>
+                <span className={styles.columnCount}>{colCount}</span>
+              </div>
+            );
+          })}
+        </div>
 
-          // Determine column type for backlog/blocked columns
-          const isBacklogColumn = col.id === "backlog";
-          const isBlockedColumn = col.id === "blocked";
-          const isMutedColumn = isBacklogColumn || isBlockedColumn;
-          const columnType = isBacklogColumn ? ("backlog" as const) : undefined;
+        <div
+          className={styles.columnBodyRow}
+          style={{
+            gridTemplateColumns: `repeat(${columns.length}, minmax(180px, 1fr))`,
+          }}
+        >
+          {columns.map((col) => {
+            const colIssues = issuesByColumn.get(col.id) ?? [];
+            const columnClassName =
+              col.style === "muted"
+                ? styles.mutedColumn
+                : col.style === "highlighted"
+                  ? styles.highlightedColumn
+                  : undefined;
 
-          // Determine if column should show limited cards
-          const isColumnExpanded = expandedColumns.has(col.id);
-          const hasMoreCards = colIssues.length > cardLimit;
-          const displayedIssues = isColumnExpanded
-            ? colIssues
-            : colIssues.slice(0, cardLimit);
+            const isBacklogColumn = col.id === "backlog";
+            const isBlockedColumn = col.id === "blocked";
+            const isMutedColumn = isBacklogColumn || isBlockedColumn;
+            const columnType = isBacklogColumn
+              ? ("backlog" as const)
+              : undefined;
 
-          // Build footer action if there are more cards to show
-          const footerAction = hasMoreCards ? (
-            <button
-              type="button"
-              onClick={() => toggleColumnExpanded(col.id)}
-              aria-label={
-                isColumnExpanded
-                  ? `Show fewer ${col.label} issues`
-                  : `Show all ${colIssues.length} ${col.label} issues`
-              }
-              data-testid={`toggle-column-${col.id}`}
-            >
-              {isColumnExpanded ? "Show fewer" : `Show all ${colIssues.length}`}
-            </button>
-          ) : undefined;
+            const isColumnExpanded = expandedColumns.has(col.id);
+            const hasMoreCards = colIssues.length > cardLimit;
+            const displayedIssues = isColumnExpanded
+              ? colIssues
+              : colIssues.slice(0, cardLimit);
 
-          // Build props conditionally to satisfy exactOptionalPropertyTypes
-          const isDropDisabled = isCollapsed || col.droppableDisabled === true;
-          const statusColumnProps = {
-            status: col.id,
-            statusLabel: col.label,
-            count: colIssues.length,
-            ...(isDropDisabled && { droppableDisabled: true }),
-            ...(columnClassName !== undefined && {
-              className: columnClassName,
-            }),
-            ...(columnType !== undefined && { columnType }),
-            ...(footerAction !== undefined && { footerAction }),
-          };
+            const footerAction = hasMoreCards ? (
+              <button
+                type="button"
+                onClick={() => toggleColumnExpanded(col.id)}
+                aria-label={
+                  isColumnExpanded
+                    ? `Show fewer ${col.label} issues`
+                    : `Show all ${colIssues.length} ${col.label} issues`
+                }
+                data-testid={`toggle-column-${col.id}`}
+              >
+                {isColumnExpanded
+                  ? "Show fewer"
+                  : `Show all ${colIssues.length}`}
+              </button>
+            ) : undefined;
 
-          return (
-            <StatusColumn key={col.id} {...statusColumnProps}>
-              {colIssues.length === 0 ? (
-                <EmptyColumn status={col.id} />
-              ) : (
-                displayedIssues.map((issue) => {
-                  const blockedInfo = blockedIssues?.get(issue.id);
-                  const cardProps = {
-                    issue,
-                    columnId: col.id,
-                    ...(onIssueClick !== undefined && {
-                      onClick: onIssueClick,
-                    }),
-                    ...(blockedInfo !== undefined && {
-                      blockedByCount: blockedInfo.blockedByCount,
-                      blockedBy: blockedInfo.blockedBy,
-                      ...(blockedInfo.blockedByDetails !== undefined && {
-                        blockedByDetails: blockedInfo.blockedByDetails,
+            const isDropDisabled = isCollapsed || col.droppableDisabled === true;
+            const statusColumnProps = {
+              status: col.id,
+              statusLabel: col.label,
+              count: colIssues.length,
+              hideHeader: true,
+              ...(isDropDisabled && { droppableDisabled: true }),
+              ...(columnClassName !== undefined && {
+                className: columnClassName,
+              }),
+              ...(columnType !== undefined && { columnType }),
+              ...(footerAction !== undefined && { footerAction }),
+            };
+
+            return (
+              <StatusColumn key={col.id} {...statusColumnProps}>
+                {colIssues.length === 0 ? (
+                  <EmptyColumn status={col.id} />
+                ) : (
+                  displayedIssues.map((issue) => {
+                    const blockedInfo = blockedIssues?.get(issue.id);
+                    const cardProps = {
+                      issue,
+                      columnId: col.id,
+                      ...(onIssueClick !== undefined && {
+                        onClick: onIssueClick,
                       }),
-                    }),
-                    ...(isMutedColumn && { isBacklog: true }),
-                    ...(pendingIds?.has(issue.id) && { isPending: true }),
-                  };
-                  return <DraggableIssueCard key={issue.id} {...cardProps} />;
-                })
-              )}
-            </StatusColumn>
-          );
-        })}
+                      ...(blockedInfo !== undefined && {
+                        blockedByCount: blockedInfo.blockedByCount,
+                        blockedBy: blockedInfo.blockedBy,
+                        ...(blockedInfo.blockedByDetails !== undefined && {
+                          blockedByDetails: blockedInfo.blockedByDetails,
+                        }),
+                      }),
+                      ...(isMutedColumn && { isBacklog: true }),
+                      ...(pendingIds?.has(issue.id) && { isPending: true }),
+                    };
+                    return <DraggableIssueCard key={issue.id} {...cardProps} />;
+                  })
+                )}
+              </StatusColumn>
+            );
+          })}
+        </div>
       </div>
     </section>
   );

@@ -4,24 +4,28 @@
  */
 
 .settingsView {
+  /* Aether settings: centered, contained column on the #111 backdrop */
   padding: var(--space-6);
   overflow: auto;
   height: 100%;
-  max-width: 860px;
+  width: 100%;
+  max-width: 780px;
+  margin: 0 auto;
 }
 
 .pageTitle {
-  font-size: var(--font-size-xl);
-  font-weight: var(--font-weight-semibold);
+  font-size: var(--font-size-sm); /* Aether: text-sm font-black */
+  font-weight: 900;
+  letter-spacing: -0.01em;
   color: var(--color-text);
-  margin: 0 0 var(--space-6) 0;
+  margin: 0 0 var(--space-5) 0;
 }
 
-/* Panel */
+/* Panel — Aether settings card (#1e1e1e, rounded-lg, p-5) */
 .panel {
-  background-color: var(--color-bg-card);
+  background-color: var(--color-panel-bg);
   border: 1px solid var(--color-border);
-  border-radius: 12px;
+  border-radius: var(--radius-lg);
   overflow: hidden;
   margin-bottom: var(--space-4);
 }

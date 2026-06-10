@@ -1,0 +1,303 @@
+/* EpicRollup section — progress distribution bar + child ticket list. */
+
+.section {
+  margin-bottom: 28px;
+}
+
+.sectionTitle {
+  font-size: 10px;
+  font-weight: var(--font-weight-bold);
+  color: var(--color-text-muted);
+  margin: 0;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.progressHead {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.progressCaption {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-secondary);
+}
+
+.empty {
+  margin: 8px 0 0;
+  font-size: var(--font-size-xs);
+  color: var(--color-text-secondary);
+}
+
+/* Distribution bar */
+.bar {
+  display: flex;
+  width: 100%;
+  height: 8px;
+  border-radius: var(--radius-full);
+  overflow: hidden;
+  background: var(--color-bg-active);
+}
+
+.barSeg {
+  height: 100%;
+}
+
+.barSeg[data-status="in_progress"] {
+  background: var(--color-status-in-progress);
+}
+
+.barSeg[data-status="review"] {
+  background: var(--color-status-review);
+}
+
+.barSeg[data-status="open"] {
+  background: var(--color-status-open);
+}
+
+.barSeg[data-status="blocked"] {
+  background: var(--color-blocked);
+}
+
+.barSeg[data-status="closed"] {
+  background: var(--color-status-closed);
+}
+
+/* Ticket list */
+.ticketsTitle {
+  font-size: 10px;
+  font-weight: var(--font-weight-bold);
+  color: var(--color-text-muted);
+  margin: 20px 0 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.ticketList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.ticket {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: var(--radius-md);
+  background: transparent;
+  transition: background-color var(--transition-fast);
+}
+
+.clickable {
+  cursor: pointer;
+}
+
+.clickable:hover {
+  background: var(--color-bg-hover);
+}
+
+.clickable:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: -2px;
+}
+
+.dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: var(--color-status-open);
+}
+
+.dot[data-status="in_progress"] {
+  background: var(--color-status-in-progress);
+}
+
+.dot[data-status="review"] {
+  background: var(--color-status-review);
+}
+
+.dot[data-status="open"] {
+  background: var(--color-status-open);
+}
+
+.dot[data-status="blocked"] {
+  background: var(--color-blocked);
+}
+
+.dot[data-status="closed"] {
+  background: var(--color-status-closed);
+}
+
+.ticketId {
+  font-family: var(--font-family-mono);
+  font-size: 11px;
+  color: var(--color-text-tertiary);
+  flex-shrink: 0;
+}
+
+.ticketTitle {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--font-size-xs);
+  color: var(--color-text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Colored status badge per ticket (matches the design's per-row status pill). */
+.ticketStatus {
+  flex-shrink: 0;
+  padding: 1px 8px;
+  font-size: 10px;
+  font-weight: var(--font-weight-bold);
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  border-radius: var(--radius-full);
+  background: var(--color-bg-active);
+  color: var(--color-text-secondary);
+}
+
+.ticketStatus[data-status="in_progress"] {
+  background: var(--color-warning-bg);
+  color: var(--color-warning);
+}
+
+.ticketStatus[data-status="review"] {
+  background: var(--color-primary-bg);
+  color: var(--color-status-review);
+}
+
+.ticketStatus[data-status="blocked"] {
+  background: var(--color-danger-bg);
+  color: var(--color-danger);
+}
+
+.ticketStatus[data-status="closed"] {
+  background: var(--color-success-bg);
+  color: var(--color-success);
+}
+
+.ticketStatus[data-status="open"] {
+  background: var(--color-info-bg);
+  color: var(--color-info);
+}
+
+/* PR chip on a ticket row */
+.prChip {
+  flex-shrink: 0;
+  font-family: var(--font-family-mono);
+  font-size: 11px;
+  font-weight: var(--font-weight-bold);
+  color: var(--color-primary);
+  background: var(--color-primary-bg);
+  padding: 1px 6px;
+  border-radius: var(--radius-sm);
+}
+
+/* Assignee avatar */
+.avatar {
+  flex-shrink: 0;
+  width: 20px;
+  height: 20px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  font-size: 10px;
+  font-weight: var(--font-weight-bold);
+}
+
+.avatarEmpty {
+  flex-shrink: 0;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  border: 1px dashed var(--color-border);
+}
+
+/* Summary chips row (tickets / done / PRs / repos) */
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 14px;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-secondary);
+  background: var(--color-bg-active);
+  border-radius: var(--radius-full);
+}
+
+.chip[data-pr="true"] {
+  color: var(--color-primary);
+  background: var(--color-primary-bg);
+}
+
+.chip svg {
+  width: 12px;
+  height: 12px;
+}
+
+.repoChip {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-medium);
+  font-family: var(--font-family-mono);
+  color: var(--color-text-secondary);
+  background: var(--color-bg-tertiary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+}
+
+/* Lead claim badge in the summary-chip row (Aether pins 10/25). */
+.runnerChip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: 1px var(--space-2);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-medium);
+  color: var(--color-text-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-full);
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.runnerDot {
+  width: 6px;
+  height: 6px;
+  border-radius: var(--radius-full);
+  background: var(--color-status-working);
+  flex-shrink: 0;
+}
+
+.unclaimedChip {
+  padding: 1px var(--space-2);
+  font-size: var(--font-size-xs);
+  font-style: italic;
+  color: var(--color-text-muted);
+  border: 1px dashed var(--color-border);
+  border-radius: var(--radius-full);
+}

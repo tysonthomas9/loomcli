@@ -235,9 +235,13 @@ function SwimLaneBoardContent({
     const active: LaneGroup[] = [];
     let completed = 0;
     for (const lane of allLanes) {
+      // A lane is "completed" when every card is closed — or when it's an
+      // empty lane whose epic itself is closed (a zero-child closed epic
+      // would otherwise render a full empty lane forever).
       const allClosed =
-        lane.issues.length > 0 &&
-        lane.issues.every((i) => i.status === "closed");
+        lane.issues.length > 0
+          ? lane.issues.every((i) => i.status === "closed")
+          : lane.groupIssue?.status === "closed";
       if (allClosed) {
         completed++;
         if (showCompletedLanes) active.push(lane);

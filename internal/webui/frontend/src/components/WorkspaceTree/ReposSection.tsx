@@ -1,76 +1,28 @@
 /**
- * ReposSection displays workspace repos in the sidebar (Aether wireframe REPOS block).
+ * ReposSection displays workspace repos in the sidebar (Aether wireframe
+ * REPOS block): folder icon + name on the left, open-issue count and branch
+ * pills on the right, with the "+ Add Repo" entry (opens the Add Repo
+ * dialog) at the bottom of the section.
  */
-
-import { useEffect, useRef, useState, type FormEvent } from "react";
 
 import type { RepoInfo } from "@/api/workspace";
 
 import styles from "./ReposSection.module.css";
 
-export interface ReposSectionAddRepoConfig {
-  repoPathInput: string;
-  onRepoPathInputChange: (value: string) => void;
-  onSubmit: (e: FormEvent<HTMLFormElement>) => void | Promise<void>;
-  isAdding: boolean;
-  error: string | null;
-  canBrowseFolders: boolean;
-  onBrowse: () => void;
-  isBrowsing: boolean;
-  browseDisabled: boolean;
-  browseTitle?: string | undefined;
-  /** Expand the add-repo panel on first render (empty workspaces). */
-  defaultExpanded?: boolean | undefined;
-}
-
 export interface ReposSectionProps {
   repos: RepoInfo[];
   /** Open issue counts per repo name (non-done tasks). */
   openIssueCountByRepo?: Record<string, number> | undefined;
-  addRepo?: ReposSectionAddRepoConfig | undefined;
+  /** When provided, renders the "+ Add Repo" button at the section bottom. */
+  onAddRepo?: () => void;
 }
 
 export function ReposSection({
   repos,
   openIssueCountByRepo = {},
-  addRepo,
-}: ReposSectionProps): JSX.Element {
-  const [addRepoOpen, setAddRepoOpen] = useState(
-    () => addRepo?.defaultExpanded ?? false,
-  );
-  const inputRef = useRef<HTMLInputElement>(null);
-
-  useEffect(() => {
-    if (addRepo?.defaultExpanded) {
-      setAddRepoOpen(true);
-    }
-  }, [addRepo?.defaultExpanded]);
-
-  useEffect(() => {
-    if (addRepoOpen) {
-      inputRef.current?.focus();
-    }
-  }, [addRepoOpen]);
-
-  useEffect(() => {
-    if (repos.length > 0) {
-      setAddRepoOpen(false);
-    }
-  }, [repos.length]);
-
-  const handleToggleAddRepo = () => {
-    setAddRepoOpen((prev) => !prev);
-    if (addRepoOpen && addRepo) {
-      addRepo.onRepoPathInputChange("");
-    }
-  };
-
-  const handleCancel = () => {
-    setAddRepoOpen(false);
-    if (addRepo) {
-      addRepo.onRepoPathInputChange("");
-    }
-  };
+  onAddRepo,
+}: ReposSectionProps): JSX.Element | null {
+  if (repos.length === 0 && !onAddRepo) return null;
 
   return (
     <section className={styles.section} aria-labelledby="repos-heading">
@@ -116,84 +68,11 @@ export function ReposSection({
           })}
         </div>
       ) : null}
-      {addRepo ? (
-        <div className={styles.addRepoWrap}>
-          <button
-            type="button"
-            className={styles.addRepoTrigger}
-            onClick={handleToggleAddRepo}
-            aria-expanded={addRepoOpen}
-            aria-label="Add repository"
-          >
-            <span className={styles.addRepoIcon} aria-hidden="true">
-              +
-            </span>
-            Add Repo
-          </button>
-          {addRepoOpen ? (
-            <form
-              className={styles.addRepoPanel}
-              onSubmit={addRepo.onSubmit}
-              aria-label="Add repository form"
-            >
-              <label className={styles.addRepoLabel} htmlFor="sidebar-repo-url">
-                Repository URL
-              </label>
-              <input
-                ref={inputRef}
-                id="sidebar-repo-url"
-                className={styles.addRepoInput}
-                type="text"
-                value={addRepo.repoPathInput}
-                onChange={(e) => addRepo.onRepoPathInputChange(e.target.value)}
-                placeholder="https://github.com/... or /path/to/repo"
-                aria-label="Repository path or URL"
-                disabled={addRepo.isAdding}
-              />
-              {addRepo.canBrowseFolders ? (
-                <button
-                  type="button"
-                  className={styles.browseButton}
-                  onClick={addRepo.onBrowse}
-                  disabled={
-                    addRepo.browseDisabled ||
-                    addRepo.isAdding ||
-                    addRepo.isBrowsing
-                  }
-                  title={addRepo.browseTitle}
-                  aria-label="Browse for repository folder"
-                >
-                  Browse
-                </button>
-              ) : null}
-              <div className={styles.addRepoActions}>
-                <button
-                  type="submit"
-                  className={styles.submitButton}
-                  disabled={
-                    addRepo.isAdding || addRepo.repoPathInput.trim() === ""
-                  }
-                >
-                  {addRepo.isAdding ? "Adding..." : "Add"}
-                </button>
-                <button
-                  type="button"
-                  className={styles.cancelButton}
-                  onClick={handleCancel}
-                  disabled={addRepo.isAdding}
-                >
-                  Cancel
-                </button>
-              </div>
-              {addRepo.error ? (
-                <div className={styles.addRepoError} role="alert">
-                  {addRepo.error}
-                </div>
-              ) : null}
-            </form>
-          ) : null}
-        </div>
-      ) : null}
+      {onAddRepo && (
+        <button type="button" className={styles.addRepo} onClick={onAddRepo}>
+          + Add Repo
+        </button>
+      )}
     </section>
   );
 }

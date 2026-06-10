@@ -1,24 +1,24 @@
 /**
  * WorkspaceTree component — v2 sidebar redesign.
- * Simplified layout: WorkspaceSelectorBar → AgentSection → ReposSection →
- * RunningSection, with SidebarStatusBar pinned at the bottom.
+ * Simplified layout (Aether V3): WorkspaceSelectorBar → AgentSection →
+ * RunningSection → ReposSection (with the Add Repo entry at its bottom),
+ * and SidebarStatusBar pinned below. Collapsing the tree swaps in the
+ * vertical CollapsedAgentRail (wireframe pin 24).
  */
 
 import {
   useState,
   useCallback,
   useEffect,
-  useRef,
-  type FormEvent,
 } from "react";
 
 import { useStore } from "zustand";
 import { useWorkspaceContext, useAgentStoreInstance } from "@/hooks";
-import { useFolderPicker, type ConnectionState } from "@/hooks/common";
+import { type ConnectionState } from "@/hooks/common";
 import { wsGet, wsSet } from "@/utils/scopedStorage";
 import { ONBOARDING_REPO_URL } from "@/utils/onboardingDefaults";
 import { ErrorDisplay } from "@/components/ErrorDisplay";
-import { addWorkspaceRepos } from "@/hooks/api";
+import { AddRepoModal } from "@/components/AddRepoModal";
 
 import { WorkspaceSelectorBar } from "./WorkspaceSelectorBar";
 import { AgentSection } from "./AgentSection";
@@ -62,7 +62,6 @@ export interface WorkspaceTreeProps {
 
 // Scoped key suffix for workspace-specific collapse state
 const SK_COLLAPSED = "tree-collapsed";
-const CLONE_URL_RE = /^(https:\/\/|git@)/;
 
 export function WorkspaceTree({
   className,
@@ -89,10 +88,7 @@ export function WorkspaceTree({
     error,
     refetch,
   } = workspaceContext;
-  const [repoPathInput, setRepoPathInput] = useState("");
-  const [isAddingRepo, setIsAddingRepo] = useState(false);
-  const [addRepoError, setAddRepoError] = useState<string | null>(null);
-  const prefilledAddRepoWorkspaceRef = useRef<string | null>(null);
+  const [addRepoOpen, setAddRepoOpen] = useState(false);
 
   // Load initial collapsed state from scoped localStorage
   const [isCollapsed, setIsCollapsed] = useState(() => {
@@ -126,28 +122,12 @@ export function WorkspaceTree({
   const agents = useStore(agentStore, (s) => s.agents);
   const workspaceRepos = repos ?? [];
 
-  useEffect(() => {
-    if (workspaceRepos.length > 0) {
-      setRepoPathInput((current) =>
-        current === ONBOARDING_REPO_URL ? "" : current,
-      );
-      return;
-    }
-
-    if (
-      !workspaceId ||
-      isLoading ||
-      error ||
-      prefilledAddRepoWorkspaceRef.current === workspaceId
-    ) {
-      return;
-    }
-
-    prefilledAddRepoWorkspaceRef.current = workspaceId;
-    setRepoPathInput((current) =>
-      current.trim() ? current : ONBOARDING_REPO_URL,
-    );
-  }, [workspaceId, workspaceRepos.length, isLoading, error]);
+  // One-click empty-workspace setup: seed the Add-Repo dialog with the sample
+  // repo when the workspace has no repos yet.
+  const onboardingRepoUrl =
+    workspaceRepos.length === 0 && workspaceId && !isLoading && !error
+      ? ONBOARDING_REPO_URL
+      : "";
 
   // Re-read scoped state when workspace changes (SPA navigation)
   useEffect(() => {
@@ -166,41 +146,6 @@ export function WorkspaceTree({
   const handleToggle = useCallback(() => {
     setIsCollapsed((prev) => !prev);
   }, []);
-
-  const handleAddRepo = useCallback(
-    async (e: FormEvent<HTMLFormElement>) => {
-      e.preventDefault();
-      const repoPath = repoPathInput.trim();
-      if (!workspaceId || !repoPath || isAddingRepo) return;
-
-      setIsAddingRepo(true);
-      setAddRepoError(null);
-      try {
-        await addWorkspaceRepos(
-          workspaceId,
-          CLONE_URL_RE.test(repoPath)
-            ? { clone_urls: [repoPath] }
-            : { repos: [repoPath] },
-        );
-        setRepoPathInput("");
-        await refetch();
-      } catch (err) {
-        setAddRepoError(
-          err instanceof Error ? err.message : "Failed to add repository",
-        );
-      } finally {
-        setIsAddingRepo(false);
-      }
-    },
-    [workspaceId, repoPathInput, isAddingRepo, refetch],
-  );
-
-  const repoFolderPicker = useFolderPicker({
-    disabled: isAddingRepo,
-    onStart: () => setAddRepoError(null),
-    onPick: setRepoPathInput,
-    onError: setAddRepoError,
-  });
 
   const workspaces = workspace?.workspaces ?? [];
 
@@ -291,6 +236,20 @@ export function WorkspaceTree({
             </div>
           )}
 
+          {!isLoading && !error && workspaceRepos.length === 0 && (
+            <div className={styles.emptyState}>No repos in workspace</div>
+          )}
+
+          <AddRepoModal
+            isOpen={addRepoOpen}
+            workspaceId={workspaceId ?? ""}
+            initialUrl={onboardingRepoUrl}
+            onClose={() => setAddRepoOpen(false)}
+            onSuccess={() => {
+              void refetch();
+            }}
+          />
+
           {/* Flat agent list with repo·branch metadata */}
           <AgentSection
             onAgentClick={onAgentClick}
@@ -298,32 +257,15 @@ export function WorkspaceTree({
             onAddClick={onAddClick}
           />
 
-          <ReposSection
-            repos={workspaceRepos}
-            openIssueCountByRepo={openIssueCountByRepo}
-            addRepo={
-              !isLoading && !error && workspaceId
-                ? {
-                    repoPathInput,
-                    onRepoPathInputChange: setRepoPathInput,
-                    onSubmit: handleAddRepo,
-                    isAdding: isAddingRepo,
-                    error: addRepoError,
-                    canBrowseFolders: repoFolderPicker.canBrowseFolders,
-                    onBrowse: repoFolderPicker.browseFolder,
-                    isBrowsing: repoFolderPicker.isBrowsing,
-                    browseDisabled: !repoFolderPicker.canBrowseFolders,
-                    browseTitle: repoFolderPicker.canBrowseFolders
-                      ? "Browse for repository folder"
-                      : "Filesystem browsing is only available in the desktop app",
-                    defaultExpanded: workspaceRepos.length === 0,
-                  }
-                : undefined
-            }
-          />
-
           {/* Running tasks grouped by epic — only shows when agents active */}
           <RunningSection onSelect={onTreeSelect} />
+
+          {/* Repo inventory with the Add Repo entry at its bottom (Aether V3) */}
+          <ReposSection
+            repos={workspaceRepos}
+            {...(openIssueCountByRepo !== undefined && { openIssueCountByRepo })}
+            {...(workspaceId && { onAddRepo: () => setAddRepoOpen(true) })}
+          />
         </div>
       )}
 

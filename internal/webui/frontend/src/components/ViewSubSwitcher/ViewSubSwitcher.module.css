@@ -4,11 +4,11 @@
 
 .subSwitcher {
   display: inline-flex;
-  gap: var(--space-1);
-  padding: 2px;
-  background-color: var(--color-bg-hover);
-  border-radius: 8px;
-  margin-bottom: var(--space-3);
+  gap: var(--space-2);
+  padding: 0;
+  background-color: transparent;
+  border-radius: 10px;
+  margin-bottom: 0;
   flex-shrink: 0;
 }
 
@@ -17,13 +17,13 @@
 }
 
 .tab {
-  padding: 4px 12px;
+  padding: 6px 12px;
   border: none;
-  border-radius: 6px;
+  border-radius: 10px;
   background: transparent;
   color: var(--color-text-secondary);
-  font-size: 13px;
-  font-weight: 500;
+  font-size: 14px;
+  font-weight: 700;
   cursor: pointer;
   transition:
     background-color var(--transition-fast),
@@ -37,7 +37,7 @@
 .tab[data-active="true"] {
   background-color: var(--color-bg-card);
   color: var(--color-text-primary);
-  box-shadow: 0 1px 3px rgb(0 0 0 / 8%);
+  font-weight: 900;
 }
 
 .tab:focus-visible {

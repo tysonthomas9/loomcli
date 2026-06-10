@@ -19,7 +19,9 @@ export interface ViewSubSwitcherProps {
 
 const SUB_VIEWS: { id: ViewMode; label: string }[] = [
   { id: "kanban", label: "Kanban" },
-  { id: "table", label: "List" },
+  // The design's List layout (epic-grouped rows). The data table remains
+  // reachable at /table and keeps the List tab highlighted.
+  { id: "list", label: "List" },
 ];
 
 export function ViewSubSwitcher({
@@ -27,12 +29,19 @@ export function ViewSubSwitcher({
   onChange,
   embedded = false,
 }: ViewSubSwitcherProps): JSX.Element | null {
-  if (activeView !== "kanban" && activeView !== "table") {
+  if (
+    activeView !== "kanban" &&
+    activeView !== "list" &&
+    activeView !== "table"
+  ) {
     return null;
   }
 
+  // The /table data view counts as the List tab for highlight purposes.
+  const effectiveView: ViewMode = activeView === "table" ? "list" : activeView;
+
   function handleKeyDown(event: KeyboardEvent<HTMLDivElement>) {
-    const currentIndex = SUB_VIEWS.findIndex((v) => v.id === activeView);
+    const currentIndex = SUB_VIEWS.findIndex((v) => v.id === effectiveView);
     let nextIndex = -1;
 
     if (event.key === "ArrowRight" || event.key === "ArrowDown") {
@@ -59,7 +68,7 @@ export function ViewSubSwitcher({
       onKeyDown={handleKeyDown}
     >
       {SUB_VIEWS.map((view) => {
-        const isActive = activeView === view.id;
+        const isActive = effectiveView === view.id;
         return (
           <button
             key={view.id}

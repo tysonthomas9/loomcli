@@ -101,8 +101,11 @@ describe("DraggableIssueCard", () => {
       render(<DraggableIssueCard issue={mockIssue} />);
 
       expect(screen.getByText("My Custom Title")).toBeInTheDocument();
-      // Priority badge should show P1
-      expect(screen.getByText("P1")).toBeInTheDocument();
+      // Priority surfaces only as a data attribute (no visible badge).
+      expect(screen.queryByText("P1")).not.toBeInTheDocument();
+      expect(
+        screen.getByText("My Custom Title").closest("article"),
+      ).toHaveAttribute("data-priority", "1");
     });
 
     it("passes onClick prop through to IssueCard", () => {
@@ -587,20 +590,28 @@ describe("DraggableIssueCard", () => {
       );
     });
 
-    it("handles priority 0 (critical)", () => {
+    it("handles priority 0 (critical) via data attribute", () => {
       const mockIssue = createMockIssue({ priority: 0 });
 
-      render(<DraggableIssueCard issue={mockIssue} />);
+      const { container } = render(<DraggableIssueCard issue={mockIssue} />);
 
-      expect(screen.getByText("P0")).toBeInTheDocument();
+      expect(screen.queryByText("P0")).not.toBeInTheDocument();
+      expect(container.querySelector("article")).toHaveAttribute(
+        "data-priority",
+        "0",
+      );
     });
 
-    it("handles priority 4 (backlog)", () => {
+    it("handles priority 4 (backlog) via data attribute", () => {
       const mockIssue = createMockIssue({ priority: 4 });
 
-      render(<DraggableIssueCard issue={mockIssue} />);
+      const { container } = render(<DraggableIssueCard issue={mockIssue} />);
 
-      expect(screen.getByText("P4")).toBeInTheDocument();
+      expect(screen.queryByText("P4")).not.toBeInTheDocument();
+      expect(container.querySelector("article")).toHaveAttribute(
+        "data-priority",
+        "4",
+      );
     });
 
     it("handles undefined onClick gracefully", () => {

@@ -16,11 +16,14 @@ import { type ViewMode, DEFAULT_VIEW } from "@/types";
  */
 const VALID_VIEW_SEGMENTS: ReadonlySet<string> = new Set<ViewMode>([
   "kanban",
+  "list",
   "table",
   "graph",
   "monitor",
   "observability",
   "terminal",
+  "agents",
+  "prs",
   "workspace",
   "settings",
   "files",

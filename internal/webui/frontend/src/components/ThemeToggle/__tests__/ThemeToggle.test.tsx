@@ -31,37 +31,32 @@ describe("ThemeToggle", () => {
     });
   });
 
-  describe("icons", () => {
-    it("renders moon icon in light mode", () => {
+  describe("pill switch", () => {
+    it("renders a sliding knob (no icon svg)", () => {
       const { container } = render(
         <ThemeToggle theme="light" onToggle={() => {}} />,
       );
-      const svg = container.querySelector("svg");
-      expect(svg).toBeInTheDocument();
-      // Moon icon uses a path with the crescent shape, no circle element
-      const circle = svg?.querySelector("circle");
-      const path = svg?.querySelector("path");
-      expect(circle).toBeNull();
-      expect(path).toBeInTheDocument();
+      // Aether pill switch has no sun/moon svg — just a knob span.
+      expect(container.querySelector("svg")).toBeNull();
+      expect(container.querySelector("span[aria-hidden]")).toBeInTheDocument();
     });
 
-    it("renders sun icon in dark mode", () => {
-      const { container } = render(
-        <ThemeToggle theme="dark" onToggle={() => {}} />,
-      );
-      const svg = container.querySelector("svg");
-      expect(svg).toBeInTheDocument();
-      // Sun icon has a circle element (the sun body)
-      const circle = svg?.querySelector("circle");
-      expect(circle).toBeInTheDocument();
+    it("marks dark state via data-dark in dark mode", () => {
+      render(<ThemeToggle theme="dark" onToggle={() => {}} />);
+      expect(screen.getByRole("button")).toHaveAttribute("data-dark", "true");
     });
 
-    it("svg has aria-hidden true", () => {
-      const { container } = render(
-        <ThemeToggle theme="light" onToggle={() => {}} />,
+    it("does not set data-dark in light mode", () => {
+      render(<ThemeToggle theme="light" onToggle={() => {}} />);
+      expect(screen.getByRole("button")).not.toHaveAttribute("data-dark");
+    });
+
+    it("reflects state via aria-pressed (pressed = light)", () => {
+      render(<ThemeToggle theme="light" onToggle={() => {}} />);
+      expect(screen.getByRole("button")).toHaveAttribute(
+        "aria-pressed",
+        "true",
       );
-      const svg = container.querySelector("svg");
-      expect(svg).toHaveAttribute("aria-hidden", "true");
     });
   });
 
@@ -123,20 +118,18 @@ describe("ThemeToggle", () => {
   });
 
   describe("theme transitions", () => {
-    it("updates icon when theme prop changes from light to dark", () => {
-      const { container, rerender } = render(
+    it("updates the data-dark state when theme prop changes from light to dark", () => {
+      const { rerender } = render(
         <ThemeToggle theme="light" onToggle={() => {}} />,
       );
 
-      // Light mode: moon icon (no circle)
-      let svg = container.querySelector("svg");
-      expect(svg?.querySelector("circle")).toBeNull();
+      // Light mode: no data-dark
+      expect(screen.getByRole("button")).not.toHaveAttribute("data-dark");
 
       rerender(<ThemeToggle theme="dark" onToggle={() => {}} />);
 
-      // Dark mode: sun icon (has circle)
-      svg = container.querySelector("svg");
-      expect(svg?.querySelector("circle")).toBeInTheDocument();
+      // Dark mode: data-dark set
+      expect(screen.getByRole("button")).toHaveAttribute("data-dark", "true");
     });
 
     it("updates aria-label when theme prop changes", () => {

@@ -54,22 +54,11 @@
   transform: translateX(0);
 }
 
-/* Pin 16: maximize to a 50/50 split so the board stays visible. */
-.overlay.maximized {
-  background-color: transparent;
-  pointer-events: none;
-}
-
-.overlay.maximized.open {
-  background-color: transparent;
-}
-
-.overlay.maximized .panel {
-  width: 50%;
-  min-width: 360px;
-  max-width: none;
-  pointer-events: auto;
-  box-shadow: var(--panel-shadow-strong);
+/* Full-page maximize: fill the content area (overlay is already inset past the
+   nav rail and unified header), instead of the capped slide-over width. */
+.panelMaximized {
+  width: 100%;
+  max-width: 100%;
 }
 
 .content {
@@ -505,7 +494,7 @@
 .tab.activeTab {
   color: var(--color-text-primary);
   font-weight: 700;
-  border-bottom-color: #111827;
+  border-bottom-color: var(--color-text-primary);
 }
 
 /* ============= Logs Container ============= */
@@ -875,4 +864,10 @@
   .statusRow {
     flex-direction: column;
   }
+}
+
+.diffLoading {
+  padding: var(--space-4);
+  font-size: var(--font-size-sm);
+  color: var(--color-text-muted);
 }

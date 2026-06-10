@@ -58,8 +58,10 @@
 
 /* Scroll container */
 .scrollContainer {
-  max-height: 50vh;
-  overflow-y: auto;
+  /* No inner cap in the normal (non-fullscreen) layout — the detail column
+     owns the scroll. The 50vh cap clipped ~128px behind a redundant nested
+     scrollbar while the column above had room. Fullscreen overrides below. */
+  overflow-y: visible;
   padding: 12px;
   background-color: var(--color-bg-subtle);
   border-radius: var(--radius-sm);

@@ -308,6 +308,38 @@ export function AgentDetailPanel({
                 role="tabpanel"
                 aria-labelledby="agent-panel-tab-info"
               >
+                {/* Overview stat cards. Derived from the agent's live state —
+                    per-agent historical totals aren't exposed to this panel yet. */}
+                <div className={styles.section}>
+                  <h3 className={styles.sectionTitle}>Overview</h3>
+                  <div className={styles.statGrid}>
+                    <div className={styles.statCard}>
+                      <span className={styles.statValue} data-tone="success">
+                        {parsed.type === "done" ? 1 : 0}
+                      </span>
+                      <span className={styles.statLabel}>Completed</span>
+                    </div>
+                    <div className={styles.statCard}>
+                      <span className={styles.statValue} data-tone="warning">
+                        {isActive ? 1 : 0}
+                      </span>
+                      <span className={styles.statLabel}>In Progress</span>
+                    </div>
+                    <div className={styles.statCard}>
+                      <span className={styles.statValue} data-tone="danger">
+                        {parsed.type === "error" ? 1 : 0}
+                      </span>
+                      <span className={styles.statLabel}>Blocked</span>
+                    </div>
+                    <div className={styles.statCard}>
+                      <span className={styles.statValue} data-tone="info">
+                        {task && !isActive ? 1 : 0}
+                      </span>
+                      <span className={styles.statLabel}>Queued</span>
+                    </div>
+                  </div>
+                </div>
+
                 {/* Current Task Section */}
                 <div className={styles.section}>
                   <h3 className={styles.sectionTitle}>Current Task</h3>
@@ -361,7 +393,7 @@ export function AgentDetailPanel({
                       </>
                     )}
                     <dt>Status</dt>
-                    <dd>{agent.status}</dd>
+                    <dd>{getStatusLabel(parsed.type)}</dd>
                     {parsed.taskId && (
                       <>
                         <dt>Task ID</dt>
