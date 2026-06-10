@@ -19,7 +19,6 @@ type LeadAssignmentContext struct {
 	EpicID                string
 	AssignmentVersion     string
 	OrchestratorSessionID string
-	LeadUpdatedAt         time.Time
 }
 
 // LoadLeadAssignmentContext returns the current backend assignment for a lead,
@@ -57,7 +56,6 @@ func LoadLeadAssignmentContext(ctx context.Context, st store.Store, workspace, l
 		EpicID:                lead.Parent,
 		AssignmentVersion:     version,
 		OrchestratorSessionID: orchestratorID,
-		LeadUpdatedAt:         lead.UpdatedAt,
 	}, nil
 }
 

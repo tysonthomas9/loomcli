@@ -34,7 +34,6 @@ var (
 	runMaxConcurrency  int
 	runWorkerPrefix    string
 	runIntervalSeconds int
-	runRole            string
 	runDryRun          bool
 	runNodeID          string
 	runLead            string
@@ -71,7 +70,6 @@ func init() {
 	epicRunCmd.Flags().IntVar(&runMaxConcurrency, "max-concurrency", 2, "Maximum simultaneous workers spawned by this run")
 	epicRunCmd.Flags().StringVar(&runWorkerPrefix, "worker-prefix", "", "Prefix for spawned worker names (default derived from --parent)")
 	epicRunCmd.Flags().IntVar(&runIntervalSeconds, "interval-seconds", 5, "Seconds between reconcile passes")
-	epicRunCmd.Flags().StringVar(&runRole, "role", "task", "Role to spawn workers under")
 	epicRunCmd.Flags().StringVar(&runNodeID, "node-id", "", "Daemon node ID to run spawned workers on (default: the single active local node)")
 	epicRunCmd.Flags().StringVar(&runLead, "lead", "", "Lead agent running this epic (default: $LOOM_AGENT_NAME when set)")
 	epicRunCmd.Flags().StringVar(&runWorkflow, "workflow", workflowdefs.BuiltinEpicRunnerWorkflowName, "Workflow name to run")
@@ -167,7 +165,6 @@ func workflowPayload() (json.RawMessage, error) {
 		"maxConcurrency":        runMaxConcurrency,
 		"workerPrefix":          epicRunWorkerPrefix(),
 		"intervalSeconds":       runIntervalSeconds,
-		"role":                  runRole,
 		"providerProfile":       runProviderProfile,
 		"requestedBy":           "cli",
 		"dryRun":                runDryRun,
