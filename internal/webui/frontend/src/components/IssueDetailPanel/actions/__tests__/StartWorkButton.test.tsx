@@ -93,9 +93,25 @@ describe("StartWorkButton", () => {
       expect(container.innerHTML).toBe("");
     });
 
-    it("returns null when issue status is review", () => {
+    it('renders "Review with Agent" for unassigned review issues', () => {
+      // Review issues get the design's PR-review-agent entry point, using the
+      // same assignment flow.
+      render(<StartWorkButton {...defaultProps} issueStatus="review" />);
+      const button = screen.getByTestId("start-work-button");
+      expect(button).toHaveTextContent("Review with Agent");
+      expect(button).toHaveAttribute(
+        "aria-label",
+        "Review with Agent - assign an agent",
+      );
+    });
+
+    it("returns null for review issues that already have an assignee", () => {
       const { container } = render(
-        <StartWorkButton {...defaultProps} issueStatus="review" />,
+        <StartWorkButton
+          {...defaultProps}
+          issueStatus="review"
+          currentAssignee="nova"
+        />,
       );
       expect(container.innerHTML).toBe("");
     });
@@ -500,7 +516,9 @@ describe("StartWorkButton", () => {
       expect(screen.queryByText(/All.*agents? busy/)).not.toBeInTheDocument();
     });
 
-    it('shows "No agents configured" when all agents are filtered out by role', () => {
+    it("falls back to the full roster when no agent matches the preferred role", () => {
+      // A picker that filters every agent away is a dead end — when the
+      // workspace has agents but none match the stage role, offer them all.
       const agents = [
         makeAgent("alpha", "ready", "plan"),
         makeAgent("beta", "ready", "plan"),
@@ -508,7 +526,11 @@ describe("StartWorkButton", () => {
       render(<StartWorkButton {...defaultProps} agents={agents} />);
       fireEvent.click(screen.getByTestId("start-work-button"));
 
-      expect(screen.getByText("No agents configured")).toBeInTheDocument();
+      expect(
+        screen.queryByText("No agents configured"),
+      ).not.toBeInTheDocument();
+      expect(screen.getByText("alpha")).toBeInTheDocument();
+      expect(screen.getByText("beta")).toBeInTheDocument();
     });
   });
 
@@ -738,12 +760,12 @@ describe("StartWorkButton", () => {
       expect(button).toHaveAttribute("aria-haspopup", "listbox");
     });
 
-    it('has aria-label "Start work - assign an agent"', () => {
+    it('has aria-label "Start Work - assign an agent" for open issues', () => {
       render(<StartWorkButton {...defaultProps} />);
       const button = screen.getByTestId("start-work-button");
       expect(button).toHaveAttribute(
         "aria-label",
-        "Start work - assign an agent",
+        "Start Work - assign an agent",
       );
     });
 

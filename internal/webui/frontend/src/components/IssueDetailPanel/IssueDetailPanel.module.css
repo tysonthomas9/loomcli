@@ -54,6 +54,13 @@
   transform: translateX(0);
 }
 
+/* Full-page maximize: fill the content area (overlay is already inset past the
+   nav rail and unified header), instead of the capped slide-over width. */
+.panelMaximized {
+  width: 100%;
+  max-width: 100%;
+}
+
 .content {
   flex: 1;
   overflow: hidden auto;
@@ -487,7 +494,7 @@
 .tab.activeTab {
   color: var(--color-text-primary);
   font-weight: 700;
-  border-bottom-color: #111827;
+  border-bottom-color: var(--color-text-primary);
 }
 
 /* ============= Logs Container ============= */
@@ -857,4 +864,10 @@
   .statusRow {
     flex-direction: column;
   }
+}
+
+.diffLoading {
+  padding: var(--space-4);
+  font-size: var(--font-size-sm);
+  color: var(--color-text-muted);
 }

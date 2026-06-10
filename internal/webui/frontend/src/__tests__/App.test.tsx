@@ -1031,7 +1031,7 @@ describe("App", () => {
       expect(children?.length).toBe(3);
     });
 
-    it("renders ConnectionStatus in header when loading", () => {
+    it("does not render a ConnectionStatus dot while loading (Aether V3 header)", () => {
       const mockReturn = createMockUseIssuesReturn({
         isLoading: true,
         connectionState: "connecting",
@@ -1040,9 +1040,9 @@ describe("App", () => {
 
       const { container } = render(<App />);
 
-      // ConnectionStatus should be visible with the connection state (showText=false, so check data-state)
+      // The header connection indicator was removed for the Aether V3 design.
       const status = container.querySelector('[data-state="connecting"]');
-      expect(status).toBeInTheDocument();
+      expect(status).not.toBeInTheDocument();
     });
   });
 
@@ -1107,7 +1107,7 @@ describe("App", () => {
       expect(screen.getByText("Specific error message")).toBeInTheDocument();
     });
 
-    it("renders ConnectionStatus with reconnecting state in error state", () => {
+    it("does not render a ConnectionStatus dot in error state (Aether V3)", () => {
       const retryConnection = vi.fn();
       const mockReturn = createMockUseIssuesReturn({
         error: "Connection failed",
@@ -1120,9 +1120,8 @@ describe("App", () => {
 
       const { container } = render(<App />);
 
-      // ConnectionStatus should show reconnecting state (showText=false, check data-state)
       const status = container.querySelector('[data-state="reconnecting"]');
-      expect(status).toBeInTheDocument();
+      expect(status).not.toBeInTheDocument();
     });
 
     it("does not render KanbanBoard when error is present", () => {
@@ -1186,7 +1185,7 @@ describe("App", () => {
       expect(screen.getByText("Third Issue")).toBeInTheDocument();
     });
 
-    it("renders ConnectionStatus in header actions", () => {
+    it("does not render ConnectionStatus in header actions (Aether V3)", () => {
       const mockReturn = createMockUseIssuesReturn({
         connectionState: "connected",
       });
@@ -1194,9 +1193,8 @@ describe("App", () => {
 
       const { container } = render(<App />);
 
-      // Use data-state attribute to find ConnectionStatus (showText=false, no visible text)
       const statusElement = container.querySelector('[data-state="connected"]');
-      expect(statusElement).toBeInTheDocument();
+      expect(statusElement).not.toBeInTheDocument();
     });
 
     it("does not render ErrorDisplay when no error", () => {
@@ -1339,77 +1337,25 @@ describe("App", () => {
     });
   });
 
-  describe("ConnectionStatus in header", () => {
-    it("renders ConnectionStatus with connected state", () => {
-      const mockReturn = createMockUseIssuesReturn({
-        connectionState: "connected",
-        isConnected: true,
-      });
-      mockStoreState = mockReturn;
+  // The header connection-status dot was removed for the Aether V3 design
+  // (the design header is logo · theme toggle · profile only). These tests
+  // pin its absence across connection states.
+  describe("ConnectionStatus removed from header (Aether V3)", () => {
+    it.each(["connected", "disconnected", "reconnecting", "connecting"])(
+      'renders no connection dot for state "%s"',
+      (state) => {
+        const mockReturn = createMockUseIssuesReturn({
+          connectionState: state,
+          isConnected: state === "connected",
+        });
+        mockStoreState = mockReturn;
 
-      const { container } = render(<App />);
+        const { container } = render(<App />);
 
-      // ConnectionStatus rendered with showText=false — verify via data-state
-      const status = container.querySelector('[data-state="connected"]');
-      expect(status).toBeInTheDocument();
-    });
-
-    it("renders ConnectionStatus with disconnected state", () => {
-      const mockReturn = createMockUseIssuesReturn({
-        connectionState: "disconnected",
-        isConnected: false,
-      });
-      mockStoreState = mockReturn;
-
-      const { container } = render(<App />);
-
-      const status = container.querySelector('[data-state="disconnected"]');
-      expect(status).toBeInTheDocument();
-    });
-
-    it("renders ConnectionStatus with reconnecting state and attempt count", () => {
-      const mockReturn = createMockUseIssuesReturn({
-        connectionState: "reconnecting",
-        isConnected: false,
-        reconnectAttempts: 3,
-      });
-      mockStoreState = mockReturn;
-
-      const { container } = render(<App />);
-
-      const status = container.querySelector('[data-state="reconnecting"]');
-      expect(status).toBeInTheDocument();
-    });
-
-    it("renders ConnectionStatus with connecting state", () => {
-      const mockReturn = createMockUseIssuesReturn({
-        connectionState: "connecting",
-        isConnected: false,
-      });
-      mockStoreState = mockReturn;
-
-      const { container } = render(<App />);
-
-      const status = container.querySelector('[data-state="connecting"]');
-      expect(status).toBeInTheDocument();
-    });
-
-    it("passes retryConnection to ConnectionStatus onRetry", () => {
-      const retryConnection = vi.fn();
-      const mockReturn = createMockUseIssuesReturn({
-        connectionState: "reconnecting",
-        reconnectAttempts: 1,
-        retryConnection,
-      });
-      mockStoreState = mockReturn;
-
-      const { container } = render(<App />);
-
-      // ConnectionStatus is rendered with showRetryButton=false in the new layout,
-      // so verify the status element exists with correct state instead
-      const status = container.querySelector('[data-state="reconnecting"]');
-      expect(status).toBeInTheDocument();
-    });
+        const status = container.querySelector(`[data-state="${state}"]`);
+        expect(status).not.toBeInTheDocument();
+      },
+    );
   });
 
   describe("AppLayout integration", () => {
@@ -1557,7 +1503,7 @@ describe("App", () => {
   });
 
   describe("filter integration", () => {
-    it("renders SearchInput in the navigation slot", () => {
+    it("renders SearchInput in the board toolbar", () => {
       const mockReturn = createMockUseIssuesReturn({
         issues: [createMockIssue()],
       });
@@ -1572,7 +1518,7 @@ describe("App", () => {
       ).toBeInTheDocument();
     });
 
-    it("renders FilterBar in the navigation slot", () => {
+    it("renders no FilterBar in the board toolbar (Aether V3: tabs · search · New Issue)", () => {
       const mockReturn = createMockUseIssuesReturn({
         issues: [createMockIssue()],
       });
@@ -1580,11 +1526,16 @@ describe("App", () => {
 
       render(<App />);
 
-      // FilterBar should be rendered with priority/type dropdowns and more-filters button
-      expect(screen.getByTestId("filter-bar")).toBeInTheDocument();
-      expect(screen.getByTestId("priority-filter")).toBeInTheDocument();
-      expect(screen.getByTestId("type-filter")).toBeInTheDocument();
-      expect(screen.getByTestId("more-filters-trigger")).toBeInTheDocument();
+      // The design board-head has only the view tabs, search, and New Issue —
+      // no filter controls.
+      expect(screen.queryByTestId("filter-bar")).not.toBeInTheDocument();
+      expect(screen.queryByTestId("priority-filter")).not.toBeInTheDocument();
+      expect(screen.queryByTestId("type-filter")).not.toBeInTheDocument();
+      expect(
+        screen.queryByTestId("more-filters-trigger"),
+      ).not.toBeInTheDocument();
+      expect(screen.getByTestId("search-input")).toBeInTheDocument();
+      expect(screen.getByTestId("new-issue-button")).toBeInTheDocument();
     });
 
     it("renders filter navigation even in loading state", () => {
@@ -1595,9 +1546,9 @@ describe("App", () => {
 
       render(<App />);
 
-      // In the new layout, search and filters are always in the header
+      // Search stays in the board toolbar; the FilterBar is gone (Aether V3).
       expect(screen.getByTestId("search-input")).toBeInTheDocument();
-      expect(screen.getByTestId("filter-bar")).toBeInTheDocument();
+      expect(screen.queryByTestId("filter-bar")).not.toBeInTheDocument();
     });
 
     it("renders filter navigation even in error state", () => {
@@ -1609,9 +1560,9 @@ describe("App", () => {
 
       render(<App />);
 
-      // In the new layout, search and filters are always in the header
+      // Search stays in the board toolbar; the FilterBar is gone (Aether V3).
       expect(screen.getByTestId("search-input")).toBeInTheDocument();
-      expect(screen.getByTestId("filter-bar")).toBeInTheDocument();
+      expect(screen.queryByTestId("filter-bar")).not.toBeInTheDocument();
     });
 
     it("passes filtered issues to KanbanBoard", () => {
@@ -1843,8 +1794,9 @@ describe("App", () => {
 
       render(<App />);
 
-      // FilterBar should be rendered with groupBy props
-      expect(screen.getByTestId("filter-bar")).toBeInTheDocument();
+      // FilterBar is gone from the toolbar (Aether V3); groupBy still flows
+      // from filter state into the board.
+      expect(screen.queryByTestId("filter-bar")).not.toBeInTheDocument();
     });
 
     it("updates SwimLaneBoard groupBy when FilterBar groupBy changes", () => {
@@ -2433,9 +2385,25 @@ describe("App", () => {
   });
 
   describe("TerminalView integration", () => {
-    it("does not render the floating TalkToLeadButton in the app", () => {
+    // The floating Talk-to-Lead pill was removed for the Aether V3 design
+    // (no design counterpart); the Terminal rail item covers the flow.
+    it("does not render TalkToLeadButton in the app (Aether V3)", () => {
       const mockReturn = createMockUseIssuesReturn({});
       mockStoreState = mockReturn;
+
+      render(<App />);
+
+      expect(
+        screen.queryByTestId("talk-to-lead-button"),
+      ).not.toBeInTheDocument();
+    });
+
+    it("does not render TalkToLeadButton on the terminal view either", () => {
+      const mockReturn = createMockUseIssuesReturn({});
+      mockStoreState = mockReturn;
+      vi.mocked(useRouteView).mockReturnValue(
+        createViewStateReturn("terminal"),
+      );
 
       render(<App />);
 
@@ -3090,7 +3058,7 @@ describe("App", () => {
       });
     });
 
-    it("clicking agent calls openPanel with agent type", () => {
+    it("clicking agent navigates to the agents view with selection", () => {
       const mockReturn = createMockUseIssuesReturn({
         agents: [
           {
@@ -3113,19 +3081,21 @@ describe("App", () => {
 
       render(<App />);
 
-      // Click first agent — should call openPanel
+      // Clicking an agent navigates to the agents view with the agent
+      // selected (Aether V3) — it no longer opens the legacy slide-over.
       fireEvent.click(screen.getByText("agent-1"));
-      expect(mockOpenPanel).toHaveBeenCalledWith({
+      expect(mockOpenPanel).not.toHaveBeenCalledWith({
         type: "agent",
         name: "agent-1",
       });
+      expect(mockNavigate).toHaveBeenCalledWith(
+        expect.stringContaining("/agents/agent-1"),
+      );
 
-      // Click second agent — should call openPanel again (hook handles dedup)
       fireEvent.click(screen.getByText("agent-2"));
-      expect(mockOpenPanel).toHaveBeenCalledWith({
-        type: "agent",
-        name: "agent-2",
-      });
+      expect(mockNavigate).toHaveBeenCalledWith(
+        expect.stringContaining("/agents/agent-2"),
+      );
     });
 
     it("agent panel close calls closePanel", () => {
@@ -3971,8 +3941,8 @@ describe("App", () => {
 
       render(<App />);
 
-      // FilterBar should be present — repo filter dropdown renders when availableRepos > 1
-      expect(screen.getByTestId("filter-bar")).toBeInTheDocument();
+      // No FilterBar even in multi-repo workspaces (Aether V3 toolbar).
+      expect(screen.queryByTestId("filter-bar")).not.toBeInTheDocument();
     });
   });
 });

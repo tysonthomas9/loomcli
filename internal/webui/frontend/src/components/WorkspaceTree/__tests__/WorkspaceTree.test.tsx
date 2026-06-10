@@ -192,55 +192,51 @@ describe("WorkspaceTree", () => {
       expect(screen.getByText("beta")).toBeInTheDocument();
     });
 
-    it("adds a repository to an empty workspace", async () => {
+    it("adds a repository through the Add Repo dialog", async () => {
       const refetch = vi.fn();
       mockAddWorkspaceRepos.mockResolvedValue({});
       reposOverride = { repos: [], refetch };
 
       render(<WorkspaceTree defaultCollapsed={false} />);
 
-      fireEvent.change(screen.getByLabelText("Repository path or URL"), {
+      fireEvent.click(screen.getByRole("button", { name: "+ Add Repo" }));
+      fireEvent.change(screen.getByLabelText("Repository URL"), {
         target: { value: "/repos/api" },
       });
-      fireEvent.click(screen.getByRole("button", { name: "Add Repo" }));
+      fireEvent.click(screen.getByRole("button", { name: "Add Repository" }));
 
       await waitFor(() => {
         expect(mockAddWorkspaceRepos).toHaveBeenCalledWith(TEST_WS_ID, {
           repos: ["/repos/api"],
+          branch: "main",
         });
       });
       expect(refetch).toHaveBeenCalled();
     });
 
-    it("prefills the sample repo for one-click empty workspace setup", async () => {
+    it("prefills the sample repo in the dialog for one-click empty setup", async () => {
       const refetch = vi.fn();
       mockAddWorkspaceRepos.mockResolvedValue({});
       reposOverride = { repos: [], refetch };
 
       render(<WorkspaceTree defaultCollapsed={false} />);
 
-      expect(screen.getByLabelText("Repository path or URL")).toHaveValue(
+      fireEvent.click(screen.getByRole("button", { name: "+ Add Repo" }));
+      expect(screen.getByLabelText("Repository URL")).toHaveValue(
         "https://github.com/octocat/Hello-World",
       );
-      fireEvent.click(screen.getByRole("button", { name: "Add Repo" }));
+      fireEvent.click(screen.getByRole("button", { name: "Add Repository" }));
 
       await waitFor(() => {
         expect(mockAddWorkspaceRepos).toHaveBeenCalledWith(TEST_WS_ID, {
           clone_urls: ["https://github.com/octocat/Hello-World"],
+          branch: "main",
         });
       });
       expect(refetch).toHaveBeenCalled();
     });
 
-    it("clears the sample prefill when repo data arrives", async () => {
-      reposOverride = { repos: [], isLoading: false };
-
-      const { rerender } = render(<WorkspaceTree defaultCollapsed={false} />);
-
-      expect(screen.getByLabelText("Repository path or URL")).toHaveValue(
-        "https://github.com/octocat/Hello-World",
-      );
-
+    it("opens the dialog empty once repos exist (no sample prefill)", async () => {
       reposOverride = {
         repos: [
           {
@@ -252,29 +248,31 @@ describe("WorkspaceTree", () => {
         ],
         isLoading: false,
       };
-      rerender(<WorkspaceTree defaultCollapsed={false} />);
 
-      await waitFor(() => {
-        expect(screen.getByLabelText("Repository path or URL")).toHaveValue("");
-      });
+      render(<WorkspaceTree defaultCollapsed={false} />);
+
       expect(screen.getByText("hello-world")).toBeInTheDocument();
+      fireEvent.click(screen.getByRole("button", { name: "+ Add Repo" }));
+      expect(screen.getByLabelText("Repository URL")).toHaveValue("");
     });
 
-    it("clones a remote repository URL into an empty workspace", async () => {
+    it("clones a remote repository URL via the dialog", async () => {
       const refetch = vi.fn();
       mockAddWorkspaceRepos.mockResolvedValue({});
       reposOverride = { repos: [], refetch };
 
       render(<WorkspaceTree defaultCollapsed={false} />);
 
-      fireEvent.change(screen.getByLabelText("Repository path or URL"), {
+      fireEvent.click(screen.getByRole("button", { name: "+ Add Repo" }));
+      fireEvent.change(screen.getByLabelText("Repository URL"), {
         target: { value: "https://github.com/octocat/Hello-World" },
       });
-      fireEvent.click(screen.getByRole("button", { name: "Add Repo" }));
+      fireEvent.click(screen.getByRole("button", { name: "Add Repository" }));
 
       await waitFor(() => {
         expect(mockAddWorkspaceRepos).toHaveBeenCalledWith(TEST_WS_ID, {
           clone_urls: ["https://github.com/octocat/Hello-World"],
+          branch: "main",
         });
       });
       expect(refetch).toHaveBeenCalled();

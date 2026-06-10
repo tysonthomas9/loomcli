@@ -28,6 +28,7 @@ vi.mock("react-router-dom", async (importOriginal) => {
     ...actual,
     useNavigate: () => mocks.navigate,
     useParams: () => ({ workspaceId: "DESKTOP-QA", agentName: "lead-1" }),
+    useSearchParams: () => [new URLSearchParams(), vi.fn()],
   };
 });
 

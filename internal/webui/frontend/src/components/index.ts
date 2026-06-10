@@ -27,6 +27,7 @@ export * from "./ConfirmDialog";
 export * from "./CreateWorkspaceModal";
 export * from "./CreateIssueModal";
 export * from "./CreateAgentModal";
+export * from "./AddRepoModal";
 export * from "./EmbeddedTerminal";
 export * from "./ErrorBoundary";
 export * from "./ErrorDisplay";

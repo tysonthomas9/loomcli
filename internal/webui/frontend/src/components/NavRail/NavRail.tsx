@@ -4,8 +4,14 @@
  */
 
 import type { ViewMode } from "@/types";
+import { getAvatarColor, shouldUseWhiteText } from "@/utils/colorUtils";
 
 import styles from "./NavRail.module.css";
+
+export interface NavRailWorkspace {
+  id: string;
+  name: string;
+}
 
 export interface NavRailProps {
   activeView: ViewMode;
@@ -13,6 +19,14 @@ export interface NavRailProps {
   className?: string;
   sessionCount?: number;
   badges?: Partial<Record<ViewMode, boolean>>;
+  /** Workspaces shown as switcher avatars at the rail bottom. */
+  workspaces?: NavRailWorkspace[];
+  /** Currently active workspace id (highlighted avatar). */
+  activeWorkspaceId?: string;
+  /** Switch to a workspace by id. */
+  onWorkspaceSwitch?: (id: string) => void;
+  /** Open the create-workspace flow. */
+  onAddWorkspace?: () => void;
 }
 
 type NavItem = {
@@ -86,7 +100,46 @@ const TOP_ITEMS: NavItem[] = [
           strokeWidth="2"
         />
         <path
-          d="M4 21c0-4 4-7 8-7s8 3 8 7"
+          d="M4 21v-1a6 6 0 016-6h4a6 6 0 016 6v1"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+        />
+      </svg>
+    ),
+  },
+  {
+    id: "prs",
+    label: "Pull Requests",
+    icon: (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <circle
+          cx="6"
+          cy="6"
+          r="2.5"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+        />
+        <circle
+          cx="6"
+          cy="18"
+          r="2.5"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+        />
+        <circle
+          cx="18"
+          cy="18"
+          r="2.5"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+        />
+        <path
+          d="M6 8.5v7M18 15.5V12a3 3 0 00-3-3h-3"
           fill="none"
           stroke="currentColor"
           strokeWidth="2"
@@ -97,7 +150,7 @@ const TOP_ITEMS: NavItem[] = [
   },
   {
     id: "terminal",
-    label: "Monitor",
+    label: "Terminal",
     icon: (
       <svg viewBox="0 0 24 24" aria-hidden="true">
         <rect
@@ -166,6 +219,10 @@ export function NavRail({
   className,
   sessionCount,
   badges,
+  workspaces,
+  activeWorkspaceId,
+  onWorkspaceSwitch,
+  onAddWorkspace,
 }: NavRailProps): JSX.Element {
   const rootClassName = [styles.navRail, className].filter(Boolean).join(" ");
 
@@ -205,10 +262,49 @@ export function NavRail({
     );
   };
 
+  const hasWorkspaceAvatars =
+    (workspaces && workspaces.length > 0) || Boolean(onAddWorkspace);
+
   return (
     <nav className={rootClassName} aria-label="Primary">
       {TOP_ITEMS.map(renderButton)}
       <div className={styles.spacer} />
+      {hasWorkspaceAvatars && (
+        <div className={styles.workspaceAvatars}>
+          {workspaces?.map((ws) => {
+            const color = getAvatarColor(ws.name);
+            return (
+              <button
+                key={ws.id}
+                type="button"
+                className={styles.wsAvatar}
+                data-active={ws.id === activeWorkspaceId || undefined}
+                onClick={() => onWorkspaceSwitch?.(ws.id)}
+                style={{
+                  backgroundColor: color,
+                  color: shouldUseWhiteText(color) ? "#fff" : "#171717",
+                }}
+                aria-label={`Switch to ${ws.name}`}
+                title={ws.name}
+              >
+                {ws.name.charAt(0).toUpperCase()}
+                <span className={styles.tooltip}>{ws.name}</span>
+              </button>
+            );
+          })}
+          {onAddWorkspace && (
+            <button
+              type="button"
+              className={styles.wsAdd}
+              onClick={onAddWorkspace}
+              aria-label="Add workspace"
+              title="Add workspace"
+            >
+              +<span className={styles.tooltip}>Add workspace</span>
+            </button>
+          )}
+        </div>
+      )}
       {BOTTOM_ITEMS.map(renderButton)}
     </nav>
   );

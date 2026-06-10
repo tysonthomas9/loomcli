@@ -92,6 +92,11 @@ const viewRoutes = [
       import("@/views/KanbanPage").then((m) => ({ Component: m.KanbanPage })),
   },
   {
+    path: "list",
+    lazy: () =>
+      import("@/views/ListPage").then((m) => ({ Component: m.ListPage })),
+  },
+  {
     path: "table",
     lazy: () =>
       import("@/views/TablePage").then((m) => ({ Component: m.TablePage })),
@@ -118,6 +123,16 @@ const viewRoutes = [
     Component: () => null,
   },
   {
+    path: "agents",
+    lazy: () =>
+      import("@/views/AgentsPage").then((m) => ({ Component: m.AgentsPage })),
+  },
+  {
+    path: "prs",
+    lazy: () =>
+      import("@/views/PRsPage").then((m) => ({ Component: m.PRsPage })),
+  },
+  {
     path: "settings",
     lazy: () =>
       import("@/views/SettingsPage").then((m) => ({
@@ -142,11 +157,6 @@ const viewRoutes = [
       import("@/views/IssueDetailPage").then((m) => ({
         Component: m.IssueDetailPage,
       })),
-  },
-  {
-    path: "agents",
-    lazy: () =>
-      import("@/views/AgentsPage").then((m) => ({ Component: m.AgentsPage })),
   },
   {
     path: "agents/:agentName",

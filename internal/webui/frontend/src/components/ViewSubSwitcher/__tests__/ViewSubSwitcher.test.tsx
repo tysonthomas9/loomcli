@@ -81,14 +81,14 @@ describe("ViewSubSwitcher", () => {
   });
 
   describe("interactions", () => {
-    it('clicking "List" calls onChange("table")', () => {
+    it('clicking "List" calls onChange("list")', () => {
       const onChange = vi.fn();
       render(<ViewSubSwitcher activeView="kanban" onChange={onChange} />);
 
       fireEvent.click(screen.getByRole("tab", { name: "List" }));
 
       expect(onChange).toHaveBeenCalledTimes(1);
-      expect(onChange).toHaveBeenCalledWith("table");
+      expect(onChange).toHaveBeenCalledWith("list");
     });
 
     it('clicking "Kanban" calls onChange("kanban")', () => {

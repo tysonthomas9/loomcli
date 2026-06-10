@@ -35,7 +35,7 @@ describe("CreateAgentModal", () => {
     });
   });
 
-  it("creates a lead agent without repo scope", async () => {
+  it("creates a lead agent with workspace scope when no repo chip is selected", async () => {
     const onSuccess = vi.fn();
 
     render(
@@ -49,23 +49,23 @@ describe("CreateAgentModal", () => {
       />,
     );
 
-    fireEvent.change(screen.getByLabelText("Name"), {
+    fireEvent.change(screen.getByLabelText(/^name$/i), {
       target: { value: "lead-nova" },
     });
-    fireEvent.change(screen.getByLabelText("Role"), {
-      target: { value: "lead" },
-    });
+    fireEvent.click(screen.getByRole("button", { name: "Lead" }));
+    // The first repo chip is pre-selected; deselect it so the lead gets
+    // workspace-wide scope (empty selection = cross_repo).
+    fireEvent.click(screen.getByRole("button", { name: /hello-world/ }));
 
-    expect(screen.queryByLabelText("Repo")).not.toBeInTheDocument();
-    expect(screen.queryByText("Workspace scope")).not.toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole("button", { name: "Create Agent" }));
+    fireEvent.click(screen.getByRole("button", { name: /create agent/i }));
 
     await waitFor(() => {
       expect(mockCreateAgent).toHaveBeenCalledWith({
         name: "lead-nova",
         role_name: "lead",
         auto: false,
+        cross_repo: true,
+        repos: [],
         backend: "codex",
       });
     });

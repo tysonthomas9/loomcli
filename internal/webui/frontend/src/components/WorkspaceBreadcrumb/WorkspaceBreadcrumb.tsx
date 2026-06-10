@@ -15,11 +15,13 @@ const VIEW_LABELS: Record<ViewMode, string> = {
   monitor: "Monitor",
   observability: "Observability",
   terminal: "Monitor",
+  agents: "Agents",
+  list: "List",
+  prs: "Pull Requests",
   workspace: "Workspace",
   settings: "Settings",
   files: "Files",
   "issue-detail": "Issue",
-  agents: "Agents",
 };
 
 export interface WorkspaceBreadcrumbProps {

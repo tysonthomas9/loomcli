@@ -27,7 +27,7 @@ import {
 } from "@/api/workspace";
 import type { IssueContext } from "@/api/terminal";
 import { buildShareUrl } from "@/utils/buildShareUrl";
-import { getReviewType, getWorkQueueCounts } from "@/utils/issue";
+import { getReviewType } from "@/utils/issue";
 import {
   isOnboardingRepo,
   ONBOARDING_AGENT_NAME,
@@ -48,12 +48,9 @@ import { requestCliSetup } from "@/utils/cliSetup";
 import { AppLayout } from "@/components/AppLayout/AppLayout";
 import { WorkspaceBreadcrumb } from "@/components/WorkspaceBreadcrumb/WorkspaceBreadcrumb";
 import { LoadingSkeleton } from "@/components/LoadingSkeleton/LoadingSkeleton";
-import { ConnectionStatus } from "@/components/ConnectionStatus/ConnectionStatus";
 import { StaleDataBanner } from "@/components/StaleDataBanner/StaleDataBanner";
 import { WorkspaceStatusBadge } from "@/components/WorkspaceStatusBadge/WorkspaceStatusBadge";
 import { ToastContainer } from "@/components/Toast/ToastContainer";
-import { FilterBar } from "@/components/FilterBar/FilterBar";
-import { MoreFiltersMenu } from "@/components/MoreFiltersMenu/MoreFiltersMenu";
 import { SearchInput } from "@/components/search/SearchInput";
 import { SearchScopeIndicator } from "@/components/search/SearchScopeIndicator";
 import { IssueDetailPanel } from "@/components/IssueDetailPanel/IssueDetailPanel";
@@ -204,12 +201,6 @@ function App() {
   // Repo filter URL param sync (deep linking for repo selection)
   const [repoFilterParam] = useRepoFilterParam();
 
-  // Available repo names for repo selector
-  const availableRepoNames = useMemo(
-    () => workspaceRepos.map((r) => r.name),
-    [workspaceRepos],
-  );
-
   const agentDefaultBackend = useMemo(() => {
     const configuredBackend = onboardingBackendConfig?.backend?.trim();
     if (configuredBackend) return configuredBackend;
@@ -232,12 +223,6 @@ function App() {
     aiBackends,
   ]);
   const hasMultipleWorkspaces = (workspace?.workspaces?.length ?? 0) > 1;
-
-  // Convert Set<string> to string[] for components that expect arrays
-  const selectedRepoNamesArray = useMemo(
-    () => [...selectedRepoNames],
-    [selectedRepoNames],
-  );
 
   // Search scope (workspace-scoped search indicator)
   const { scopeName: searchScopeName, clearScope: handleScopeClear } =
@@ -313,16 +298,21 @@ function App() {
   const issueModeByView: Partial<Record<ViewMode, "graph" | "kanban">> = {
     graph: "graph",
     kanban: "kanban",
+    list: "kanban",
     table: "kanban",
     "issue-detail": "kanban",
-    // Agents view filters issues by assignee + groups by parent epic, so it
-    // needs the same broad fetch the kanban view uses.
-    agents: "kanban",
     terminal: "kanban",
     settings: "kanban",
     workspace: "kanban",
     files: "kanban",
     observability: "kanban",
+    // PRs view needs every status (review issues are the PR queue), so use the
+    // full "kanban" fetch mode rather than the default "ready" (open-only).
+    prs: "kanban",
+    // Agents view needs every status too: the Open Queue shows epic groups
+    // (parent links), review/blocked tasks, and assigned (running) tasks —
+    // the default "ready" mode drops all of those.
+    agents: "kanban",
   };
   const issueMode = issueModeByView[activeView] ?? ("ready" as const);
 
@@ -438,15 +428,12 @@ function App() {
     return map;
   }, [activeView, issues, blockedIssuesData]);
 
-  // Compute Work Queue counts from workspace-scoped issues for sidebar display.
-  const workQueueCounts = useMemo(() => getWorkQueueCounts(issues), [issues]);
-
   const { toasts, showToast, dismissToast } = useToast();
   const mountedRef = useRef(true);
 
   // Centralized panel state (issue detail panel + agent detail panel).
   // Enforces mutual exclusivity with 300ms close-then-open transitions.
-  const { activePanel, pendingPanel, openPanel, closePanel, isOpen } =
+  const { activePanel, pendingPanel, openPanel, closePanel } =
     usePanelManager();
 
   // Derive panel visibility booleans from the centralized panel state.
@@ -689,34 +676,6 @@ function App() {
     filterActions.setSearch(undefined);
   }, [filterActions]);
 
-  const syncedFilterActions = useMemo(
-    () => ({
-      ...filterActions,
-      setSearch: (search: string | undefined) => {
-        const nextSearch = search || undefined;
-        hasPendingSearchEditRef.current = false;
-        pendingSearchCommitRef.current = { value: nextSearch };
-        setSearchValueState(nextSearch ?? "");
-        filterActions.setSearch(nextSearch);
-      },
-      clearFilter: (key: keyof typeof filters) => {
-        if (key === "search") {
-          hasPendingSearchEditRef.current = false;
-          pendingSearchCommitRef.current = { value: undefined };
-          setSearchValueState("");
-        }
-        filterActions.clearFilter(key);
-      },
-      clearAll: () => {
-        hasPendingSearchEditRef.current = false;
-        pendingSearchCommitRef.current = { value: undefined };
-        setSearchValueState("");
-        filterActions.clearAll();
-      },
-    }),
-    [filterActions],
-  );
-
   // Handle issue click from SwimLaneBoard/IssueTable
   const handleIssueClick = useCallback(
     (issue: Issue) => {
@@ -813,44 +772,29 @@ function App() {
     [workspaceId, refetch, handlePanelClose, showToast],
   );
 
-  // Handle agent click from MonitorDashboard / WorkspaceTree.
-  //
-  // On the /agents view the click is a primary navigation action — we update
-  // the URL so the embedded TerminalView can switch sessions and the right
-  // panel re-derives its scope. Opening the AgentDetailPanel slide-out on top
-  // of that would just be a redundant second surface.
-  //
-  // On every other view the legacy slide-out behavior is preserved.
+  // Close all panels synchronously (no animation) for workspace switch
+  const closeAllPanels = useCallback(() => {
+    closePanel();
+    clearIssue();
+  }, [closePanel, clearIssue]);
+
+  // Handle agent click (sidebar, monitor, etc.) — one consistent destination:
+  // the agents view with that agent selected (/agents/<name>), instead of the
+  // legacy minimal AgentDetailPanel slide-over.
   const handleAgentClick = useCallback(
     (agentName: string) => {
-      if (activeView === "agents") {
-        navigate(`/ws/${workspaceId}/agents/${encodeURIComponent(agentName)}`);
-        return;
-      }
-      const hadIssuePanel = isOpen("issue");
-      // Mutual exclusivity + no-op guard handled by usePanelManager
-      openPanel({ type: "agent", name: agentName });
-      // Clear stale issue data after close animation when swapping from issue panel
-      if (hadIssuePanel) {
-        setTimeout(() => {
-          if (!mountedRef.current) return;
-          clearIssue();
-        }, 300);
-      }
+      closeAllPanels();
+      navigate(
+        `/ws/${encodeURIComponent(workspaceId)}/agents/${encodeURIComponent(agentName)}`,
+      );
     },
-    [activeView, navigate, workspaceId, openPanel, isOpen, clearIssue],
+    [navigate, workspaceId, closeAllPanels],
   );
 
   // Handle agent panel close
   const handleAgentPanelClose = useCallback(() => {
     closePanel();
   }, [closePanel]);
-
-  // Close all panels synchronously (no animation) for workspace switch
-  const closeAllPanels = useCallback(() => {
-    closePanel();
-    clearIssue();
-  }, [closePanel, clearIssue]);
 
   useEffect(() => {
     if (activeView === "terminal") {
@@ -1298,60 +1242,62 @@ function App() {
   // Whether the current view depends on issue data (for stale banner suppression)
   const isIssueBasedView =
     activeView === "kanban" ||
+    activeView === "list" ||
     activeView === "table" ||
     activeView === "graph" ||
     activeView === "issue-detail";
 
-  const headerNavigation = (
-    <div className={styles.headerControls}>
-      <div className={styles.searchWrapper}>
-        {searchScopeName && (
-          <SearchScopeIndicator
-            scopeName={searchScopeName}
-            onClear={handleScopeClear}
-          />
-        )}
-        <SearchInput
-          ref={searchInputRef as RefObject<HTMLInputElement>}
-          value={searchValue}
-          onChange={setSearchValue}
-          onClear={handleSearchClear}
-          placeholder={
-            searchScopeName
-              ? `Search in ${searchScopeName}...`
-              : "Search tasks..."
-          }
-          size="md"
+  // Issue controls (search · filters · New Issue) now live in the board toolbar
+  // (next to the Kanban/List tabs), not the top bar — matching the Aether design's
+  // minimal header. Composed below into `boardToolbar`.
+  const searchControl = (
+    <div className={styles.searchWrapper}>
+      {searchScopeName && (
+        <SearchScopeIndicator
+          scopeName={searchScopeName}
+          onClear={handleScopeClear}
         />
+      )}
+      <SearchInput
+        ref={searchInputRef as RefObject<HTMLInputElement>}
+        value={searchValue}
+        onChange={setSearchValue}
+        onClear={handleSearchClear}
+        placeholder={
+          searchScopeName
+            ? `Search in ${searchScopeName}...`
+            : "Search tasks..."
+        }
+        size="md"
+      />
+    </div>
+  );
+  const newIssueButton = (
+    <button
+      className={styles.newIssueButton}
+      onClick={() => setShowCreateIssue(true)}
+      aria-label="New Issue"
+      data-testid="new-issue-button"
+    >
+      + New Issue
+    </button>
+  );
+
+  // Board toolbar: view tabs on the left; search · New Issue on the right —
+  // exactly the Aether design's board-head (tabs / centered search / New
+  // Issue), with no extra filter controls. Shown only for issue-based views.
+  const showBoardToolbar =
+    activeView === "kanban" ||
+    activeView === "list" ||
+    activeView === "table" ||
+    activeView === "graph";
+  const boardToolbar = (
+    <div className={styles.boardToolbar} data-testid="board-toolbar">
+      <ViewSubSwitcher activeView={activeView} onChange={navigateToView} />
+      <div className={styles.boardToolbarControls}>
+        {searchControl}
+        {newIssueButton}
       </div>
-      <div className={styles.filtersWrapper}>
-        <FilterBar
-          filters={filters}
-          actions={syncedFilterActions}
-          showPriority={true}
-          showType={true}
-          showLabels={false}
-          showGroupBy={false}
-          showRepos={availableRepoNames.length > 1}
-          availableRepos={availableRepoNames}
-          selectedRepos={selectedRepoNamesArray}
-          onRepoChange={selectRepos}
-          variant="header"
-          showClear={true}
-        />
-        <MoreFiltersMenu
-          groupBy={filters.groupBy ?? DEFAULT_GROUP_BY}
-          onGroupByChange={syncedFilterActions.setGroupBy}
-        />
-      </div>
-      <button
-        className={styles.newIssueButton}
-        onClick={() => setShowCreateIssue(true)}
-        aria-label="New Issue"
-        data-testid="new-issue-button"
-      >
-        + New Issue
-      </button>
     </div>
   );
 
@@ -1373,15 +1319,6 @@ function App() {
       />
       <UserMenu />
       <ThemeToggle theme={theme} onToggle={toggleTheme} />
-      <ConnectionStatus
-        state={connectionState}
-        onRetry={retryConnection}
-        reconnectAttempts={reconnectAttempts}
-        showText={false}
-        showRetryButton={false}
-        connectionLost={sseConnectionLost}
-        compact
-      />
     </div>
   );
 
@@ -1401,7 +1338,6 @@ function App() {
         connectionLost={isConnectionLost}
         disconnectedSince={staleBannerDisconnectedSince}
         onRetryConnection={staleBannerRetry}
-        workQueueCounts={workQueueCounts}
         onTreeSelect={handleTreeIssueSelect}
       />
     );
@@ -1426,7 +1362,7 @@ function App() {
       <SearchTermProvider value={activeSearchTerm}>
         <AppLayout
           title={headerTitle}
-          navigation={headerNavigation}
+          onTitleClick={() => navigateToView("kanban")}
           actions={headerActions}
           navRail={
             <NavRail
@@ -1434,6 +1370,13 @@ function App() {
               onChange={handleNavChange}
               sessionCount={activeSessionCount}
               badges={{ terminal: hasTerminalUnread }}
+              workspaces={(workspace?.workspaces ?? []).map((ws) => ({
+                id: ws.id,
+                name: ws.name,
+              }))}
+              activeWorkspaceId={workspaceId}
+              onWorkspaceSwitch={handleWorkspaceSwitcherSelect}
+              onAddWorkspace={() => setShowCreateWorkspace(true)}
             />
           }
           sidebar={sidebarContent}
@@ -1446,10 +1389,7 @@ function App() {
             }
           >
             <div className={styles.workspaceMainContent}>
-              <ViewSubSwitcher
-                activeView={activeView}
-                onChange={navigateToView}
-              />
+              {showBoardToolbar && boardToolbar}
               {(showStaleBanner || isConnectionLost) &&
                 staleBannerDisconnectedSince !== null &&
                 !(
@@ -1536,6 +1476,11 @@ function App() {
             isOpen={showCreateIssue}
             onClose={() => setShowCreateIssue(false)}
             onSuccess={handleCreateIssueSuccess}
+            epics={issues
+              .filter(
+                (i) => i.issue_type === "epic" && i.status !== "closed",
+              )
+              .map((i) => ({ id: i.id, title: i.title }))}
           />
         </AppLayout>
       </SearchTermProvider>

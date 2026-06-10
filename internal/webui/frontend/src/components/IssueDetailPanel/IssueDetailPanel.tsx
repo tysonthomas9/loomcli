@@ -5,7 +5,15 @@
  * and markdown rendering for design field.
  */
 
-import { useEffect, useRef, useState, useCallback, useMemo } from "react";
+import {
+  useEffect,
+  useRef,
+  useState,
+  useCallback,
+  useMemo,
+  lazy,
+  Suspense,
+} from "react";
 
 import {
   updateIssue,
@@ -42,7 +50,12 @@ import type {
   Event,
 } from "@/types";
 import type { Status } from "@/types/issue";
-import { getOpenStatus, getReviewType, isPRUrl } from "@/utils/issue";
+import {
+  formatStatusLabel,
+  getOpenStatus,
+  getReviewType,
+  isPRUrl,
+} from "@/utils/issue";
 
 import {
   getBackendFromSessionName,
@@ -57,8 +70,9 @@ import {
   DependencySection,
   EditableDescription,
   DesignPanel,
-  EpicTicketsSection,
+  EpicRollup,
   MarkdownRenderer,
+  PRSection,
   RejectCommentForm,
 } from "./sections";
 import { buildEpicLeadClaims } from "@/utils/agentRole";
@@ -82,6 +96,14 @@ import { useSplitRatio, useToast } from "@/hooks/ui";
 import { CollapsibleSection } from "./CollapsibleSection";
 import { SessionHistorySection, SessionsTab } from "./sessions";
 import styles from "./IssueDetailPanel.module.css";
+
+// "Files changed" diff viewer is heavy — code-split like the agents view
+// does. PRFilesTab is the design's two-pane DiffPane (file rail + diff).
+const LazyPRFilesTab = lazy(() =>
+  import("./PRFilesTab").then((m) => ({
+    default: m.PRFilesTab,
+  })),
+);
 import { formatDate, formatIssueType, isIssueDetails } from "./utils";
 
 /**
@@ -214,7 +236,9 @@ function renderDependencyChip(
       <span className={styles.dependencyId}>{dep.id}</span>
       <span className={styles.dependencyTitle}>{dep.title}</span>
       {dep.dependency_type && (
-        <span className={styles.dependencyType}>{dep.dependency_type}</span>
+        <span className={styles.dependencyType}>
+          {formatStatusLabel(dep.dependency_type.replace(/-/g, "_"))}
+        </span>
       )}
     </li>
   );
@@ -239,6 +263,10 @@ interface DefaultContentProps {
   onCopyLink?: () => void;
   /** Callback when a dependency/dependent issue is clicked for navigation */
   onNavigateToIssue?: (issue: Issue) => void;
+  /** Whether the panel is maximized to full-page */
+  isMaximized?: boolean;
+  /** Toggle full-page maximize */
+  onToggleMaximize?: () => void;
 }
 
 /**
@@ -253,7 +281,7 @@ interface DetailTabMetadata {
 
 interface DetailTab {
   id: string;
-  type: "details" | "terminal" | "sessions" | "task-log";
+  type: "details" | "terminal" | "sessions" | "task-log" | "diff";
   label: string;
   closable: boolean;
   metadata?: DetailTabMetadata | undefined;
@@ -271,6 +299,16 @@ const SESSIONS_TAB: DetailTab = {
   id: "sessions",
   type: "sessions",
   label: "Runs",
+  closable: false,
+};
+
+// "Files changed" — the design's PR-panel diff viewer, backed by loom's real
+// per-agent branch-diff API. Shown when the issue is assigned to a live
+// agent (the PR author): the diff is that agent's worktree vs its target.
+const DIFF_TAB: DetailTab = {
+  id: "diff",
+  type: "diff",
+  label: "Files changed",
   closable: false,
 };
 
@@ -337,6 +375,7 @@ function canRenderDetailTab(tab: DetailTab | undefined): boolean {
     case "details":
     case "sessions":
     case "task-log":
+    case "diff":
       return true;
     case "terminal":
       return Boolean(tab.metadata?.sessionName && tab.metadata.backend);
@@ -373,7 +412,7 @@ function TaskPhaseLogPanel({
       <div className={styles.section}>
         <h3 className={styles.sectionTitle}>{formatPhaseLabel(phase)}</h3>
         <div data-testid="log-viewer">
-          <span data-state={state}>{state}</span>
+          <span data-state={state}>{formatStatusLabel(state)}</span>
           <pre data-testid="terminal-container">{text}</pre>
         </div>
       </div>
@@ -395,6 +434,8 @@ function DefaultContent({
   onReject,
   onCopyLink,
   onNavigateToIssue,
+  isMaximized: isPanelMaximized,
+  onToggleMaximize,
 }: DefaultContentProps): JSX.Element {
   const { workspaceId, workspace, repos } = useWorkspaceContext();
   const [isSavingTitle, setIsSavingTitle] = useState(false);
@@ -438,6 +479,8 @@ function DefaultContent({
     ("planning" | "implementation")[]
   >([]);
 
+  // Child tickets of an epic (issues whose parent is this epic), for the
+  // EpicRollup progress + ticket list. Empty for non-epics.
   // Tab persistence hook - loads/saves tab state to Redis
   const issueId = issue?.id ?? "";
   const {
@@ -674,6 +717,15 @@ function DefaultContent({
     persistTabs(tabsToSave, activeTabIsPersistable ? activeTabId : "details");
   }, [tabs, activeTabId, issue?.id, isLoadingPersistedTabs, persistTabs]);
 
+  // The PR author's live agent — drives the "Files changed" diff tab.
+  const assigneeAgent = useMemo(
+    () =>
+      issue?.assignee
+        ? agents.find((a) => a.name === issue.assignee)
+        : undefined,
+    [agents, issue?.assignee],
+  );
+
   const visibleTabs = useMemo(() => {
     const phaseTabs: DetailTab[] = taskLogPhases.map((phase) => ({
       id: `task-log-${phase}`,
@@ -681,14 +733,16 @@ function DefaultContent({
       label: formatPhaseLabel(phase),
       closable: false,
     }));
+    const diffTabs: DetailTab[] = assigneeAgent ? [DIFF_TAB] : [];
     const detailsIndex = tabs.findIndex((tab) => tab.id === "details");
-    if (detailsIndex === -1) return [...phaseTabs, ...tabs];
+    if (detailsIndex === -1) return [...phaseTabs, ...tabs, ...diffTabs];
     return [
       ...tabs.slice(0, detailsIndex + 1),
       ...phaseTabs,
       ...tabs.slice(detailsIndex + 1),
+      ...diffTabs,
     ];
-  }, [tabs, taskLogPhases]);
+  }, [tabs, taskLogPhases, assigneeAgent]);
   const activeTab = useMemo(
     () => visibleTabs.find((tab) => tab.id === activeTabId),
     [activeTabId, visibleTabs],
@@ -904,9 +958,13 @@ function DefaultContent({
     async (agentName: string) => {
       if (!issue) return;
 
+      // "Start Work" on an open issue moves it to in_progress; "Review with
+      // Agent" on a review issue assigns the reviewer but keeps the issue in
+      // review (the PR stays in the review queue while the agent works it).
+      const isReviewStage = issue.status === "review";
       const updatedIssue = await updateIssue(workspaceId, issue.id, {
         assignee: agentName,
-        status: "in_progress",
+        ...(isReviewStage ? {} : { status: "in_progress" }),
       });
       try {
         await startAgent(workspaceId, agentName, { taskId: issue.id });
@@ -916,7 +974,7 @@ function DefaultContent({
         try {
           const rolledBackIssue = await updateIssue(workspaceId, issue.id, {
             assignee: "",
-            status: "open",
+            status: isReviewStage ? "review" : "open",
           });
           onIssueUpdate?.(rolledBackIssue);
         } catch {
@@ -1105,6 +1163,13 @@ function DefaultContent({
   const issueHasDetails = isIssueDetails(issue);
   const dependencies = issueHasDetails ? issue.dependencies : undefined;
   const dependents = issueHasDetails ? issue.dependents : undefined;
+  // "Blocks" should list genuine blocking relations only. Parent-child edges
+  // are a containment relation (an epic's children / a task's subtasks), not a
+  // block — and for epics they fully duplicate the EpicRollup ticket list, a
+  // redundancy the design's epic panel doesn't have. Exclude them here.
+  const blockingDependents = dependents?.filter(
+    (dep) => dep.dependency_type !== "parent-child",
+  );
 
   // Determine if this is a review item
   const reviewType = getReviewType(issue);
@@ -1148,6 +1213,10 @@ function DefaultContent({
           {...(onCopyLink !== undefined && { onCopyLink })}
           {...(canMove && { onMove: () => setShowMoveDialog(true) })}
           {...prProps}
+          {...(onToggleMaximize !== undefined && {
+            onToggleMaximize,
+            isMaximized: isPanelMaximized ?? false,
+          })}
           sticky={true}
         />
 
@@ -1433,6 +1502,10 @@ function DefaultContent({
                     }}
                   />
                 </section>
+
+                {/* Pull request card / "no PR yet" placeholder (design
+                    pr-card + pr-empty) — non-epics only. */}
+                {issue.issue_type !== "epic" && <PRSection issue={issue} />}
               </div>
 
               {/* Design in right column */}
@@ -1448,12 +1521,14 @@ function DefaultContent({
 
             {/* Full-width sections below the columns */}
 
-            {/* Epic overview: claim status, progress, child tickets */}
+            {/* Epic roll-up: claim status, progress distribution + child tickets */}
             {issue.issue_type === "epic" && (
-              <EpicTicketsSection
-                childIssues={epicChildren}
+              <EpicRollup
+                tickets={epicChildren}
                 claimedBy={epicClaimedBy}
-                {...(onNavigateToIssue !== undefined && { onNavigateToIssue })}
+                {...(onNavigateToIssue !== undefined && {
+                  onTicketClick: onNavigateToIssue,
+                })}
               />
             )}
 
@@ -1480,14 +1555,16 @@ function DefaultContent({
               />
             )}
 
-            {/* Dependents (this issue blocks) */}
-            {dependents && dependents.length > 0 && (
+            {/* Dependents (this issue blocks) — parent-child containment edges
+                excluded (see blockingDependents); the EpicRollup already lists
+                an epic's children. */}
+            {blockingDependents && blockingDependents.length > 0 && (
               <section className={styles.section}>
                 <h3 className={styles.sectionTitle}>
-                  Blocks ({dependents.length})
+                  Blocks ({blockingDependents.length})
                 </h3>
                 <ul className={styles.dependencyList}>
-                  {dependents.map((dep) =>
+                  {blockingDependents.map((dep) =>
                     renderDependencyChip(dep, onNavigateToIssue),
                   )}
                 </ul>
@@ -1550,6 +1627,23 @@ function DefaultContent({
           aria-labelledby="issue-panel-tab-sessions"
         >
           <SessionsTab taskId={issue.id} />
+        </div>
+      )}
+
+      {/* Files changed — the design's PR diff viewer over the assignee
+          agent's real branch diff. */}
+      {renderedActiveTabId === "diff" && assigneeAgent && (
+        <div
+          className={styles.logsContainer}
+          role="tabpanel"
+          id="issue-panel-tabpanel-diff"
+          aria-labelledby="issue-panel-tab-diff"
+        >
+          <Suspense
+            fallback={<div className={styles.diffLoading}>Loading diff…</div>}
+          >
+            <LazyPRFilesTab agent={assigneeAgent} isActive />
+          </Suspense>
         </div>
       )}
 
@@ -1627,6 +1721,18 @@ export function IssueDetailPanel({
 }: IssueDetailPanelProps): JSX.Element {
   const panelRef = useRef<HTMLElement>(null);
 
+  // Full-page maximize toggle for the slide-over.
+  const [isMaximized, setIsMaximized] = useState(false);
+  const toggleMaximize = useCallback(() => setIsMaximized((v) => !v), []);
+  // Reset to the default slide-over width when the panel closes or the
+  // selected issue changes, so a maximized panel doesn't "stick" across opens.
+  useEffect(() => {
+    if (!isOpen) setIsMaximized(false);
+  }, [isOpen]);
+  useEffect(() => {
+    setIsMaximized(false);
+  }, [issue?.id]);
+
   // Handle Escape key to close panel via global shortcut layer system.
   // Inline mode skips this — the embedding view owns close semantics.
   useRegisterEscapeLayer(LAYER_ISSUE_PANEL, onClose, isOpen && !inline);
@@ -1659,6 +1765,8 @@ export function IssueDetailPanel({
       {...(onIssueUpdate !== undefined && { onIssueUpdate })}
       {...(onCopyLink !== undefined && { onCopyLink })}
       {...(onNavigateToIssue !== undefined && { onNavigateToIssue })}
+      isMaximized={isMaximized}
+      onToggleMaximize={toggleMaximize}
     />
   );
 
@@ -1705,8 +1813,11 @@ export function IssueDetailPanel({
     >
       <aside
         ref={panelRef}
-        className={styles.panel}
+        className={[styles.panel, isMaximized && styles.panelMaximized]
+          .filter(Boolean)
+          .join(" ")}
         onClick={(e) => e.stopPropagation()}
+        data-maximized={isMaximized || undefined}
         role="dialog"
         aria-modal="true"
         aria-label={issue ? `Details for ${issue.title}` : "Issue details"}

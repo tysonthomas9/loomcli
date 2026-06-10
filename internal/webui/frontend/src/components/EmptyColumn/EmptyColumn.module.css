@@ -24,6 +24,7 @@
 .message {
   margin: 0;
   font-size: var(--font-size-sm);
+  font-style: italic; /* Aether empty-column copy is italic */
   color: var(--color-text-muted);
   line-height: var(--line-height-normal);
 }
