@@ -1,0 +1,429 @@
+package leadcontrol
+
+import (
+	"context"
+	"io"
+	"strings"
+	"sync"
+	"testing"
+	"time"
+
+	"github.com/olesho/harness-wrapper/pkg/chat"
+	"github.com/olesho/harness-wrapper/pkg/wrapper"
+
+	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
+	"github.com/tysonthomas9/loomcli/internal/store"
+)
+
+func TestDeliverLeadMessageToHarnessLeadDeliversWhenQuiet(t *testing.T) {
+	ctx := context.Background()
+	st := memstore.New()
+	createHarnessLeadSession(t, st)
+	setHarnessRuntimeMetadata(t, st, RuntimeStatusIdle)
+	fake := newFakeHarnessConversation()
+	installFakeHarnessConversation(t, "lead-session", fake)
+
+	const message = "Task TASK-1 completed under the active epic-runner workflow."
+	result, err := DeliverLeadMessage(ctx, st, "WS", "nova", message)
+	if err != nil {
+		t.Fatalf("DeliverLeadMessage() error = %v", err)
+	}
+	if result.State != DeliveryStateDelivered {
+		t.Fatalf("delivery state = %q, want delivered (reason: %s)", result.State, result.Reason)
+	}
+	if result.Provider != "claude" {
+		t.Fatalf("result provider = %q, want claude", result.Provider)
+	}
+	if got := string(fake.stdinBytes()); got != message {
+		t.Fatalf("staged stdin = %q, want message text", got)
+	}
+	if got := fake.sentTexts(); len(got) != 1 || got[0] != "" {
+		t.Fatalf("sent texts = %#v, want one empty submit Send", got)
+	}
+	session := getLeadSession(t, st)
+	if got := session.Metadata[MetadataRuntimeStatus]; got != RuntimeStatusActive {
+		t.Fatalf("runtime status after delivery = %q, want active", got)
+	}
+	if got := queuedInboxMessagesForTest(t, st, "WS", "nova", "lead-session"); len(got) != 0 {
+		t.Fatalf("queued inbox messages after delivery = %#v, want empty", got)
+	}
+}
+
+func TestDeliverCurrentAssignmentToHarnessLeadUsesBracketedPaste(t *testing.T) {
+	ctx := context.Background()
+	st := memstore.New()
+	createAssignedLeadSessionWithBackend(t, st, "claude")
+	setHarnessRuntimeMetadata(t, st, RuntimeStatusIdle)
+	fake := newFakeHarnessConversation()
+	installFakeHarnessConversation(t, "lead-session", fake)
+
+	result, err := DeliverCurrentAssignment(ctx, st, "WS", "nova")
+	if err != nil {
+		t.Fatalf("DeliverCurrentAssignment() error = %v", err)
+	}
+	if result.State != DeliveryStateDelivered {
+		t.Fatalf("delivery state = %q, want delivered (reason: %s)", result.State, result.Reason)
+	}
+	stdin := string(fake.stdinBytes())
+	if !strings.HasPrefix(stdin, "\x1b[200~") || !strings.HasSuffix(stdin, "\x1b[201~") {
+		t.Fatalf("multi-line assignment was not bracketed-pasted: %q", stdin)
+	}
+	if !strings.Contains(stdin, "assigned_epic: EPIC-1") {
+		t.Fatalf("pasted assignment missing context: %q", stdin)
+	}
+	if got := fake.sentTexts(); len(got) != 1 || got[0] != "" {
+		t.Fatalf("sent texts = %#v, want one empty submit Send", got)
+	}
+	session := getLeadSession(t, st)
+	if got := session.Metadata[MetadataDeliveryVersion]; got == "" {
+		t.Fatalf("delivered version was not recorded: %#v", session.Metadata)
+	}
+}
+
+func TestHarnessDeliveryRegistryMissStaysPending(t *testing.T) {
+	ctx := context.Background()
+	st := memstore.New()
+	createHarnessLeadSession(t, st)
+	setHarnessRuntimeMetadata(t, st, RuntimeStatusIdle)
+
+	const message = "Task TASK-1 completed."
+	result, err := DeliverLeadMessage(ctx, st, "WS", "nova", message)
+	if err != nil {
+		t.Fatalf("DeliverLeadMessage() error = %v", err)
+	}
+	if result.State != DeliveryStatePending {
+		t.Fatalf("delivery state = %q, want pending", result.State)
+	}
+	if result.Reason != harnessRegistryMissReason {
+		t.Fatalf("reason = %q, want registry-miss reason", result.Reason)
+	}
+	queued := queuedInboxMessagesForTest(t, st, "WS", "nova", "lead-session")
+	if len(queued) != 1 || queued[0].Body != message {
+		t.Fatalf("queued inbox messages = %#v, want message kept for in-runtime drain", queued)
+	}
+}
+
+func TestHarnessDeliveryWaitsForTurnInFlightThenDrains(t *testing.T) {
+	ctx := context.Background()
+	st := memstore.New()
+	createHarnessLeadSession(t, st)
+	setHarnessRuntimeMetadata(t, st, RuntimeStatusActive)
+	fake := newFakeHarnessConversation()
+	handle := installFakeHarnessConversation(t, "lead-session", fake)
+	handle.markTurnStarted()
+
+	const message = "Task TASK-1 completed."
+	result, err := DeliverLeadMessage(ctx, st, "WS", "nova", message)
+	if err != nil {
+		t.Fatalf("DeliverLeadMessage() error = %v", err)
+	}
+	if result.State != DeliveryStatePending {
+		t.Fatalf("delivery state = %q, want pending", result.State)
+	}
+	if !strings.Contains(result.Reason, "turn is in flight") {
+		t.Fatalf("reason = %q, want turn-in-flight detail", result.Reason)
+	}
+	if got := fake.sentTexts(); len(got) != 0 {
+		t.Fatalf("unexpected send while turn in flight: %#v", got)
+	}
+
+	handle.markTurnDone()
+	result, err = DeliverPendingLeadMessages(ctx, st, "WS", "nova")
+	if err != nil {
+		t.Fatalf("DeliverPendingLeadMessages() error = %v", err)
+	}
+	if result.State != DeliveryStateDelivered {
+		t.Fatalf("delivery state = %q, want delivered (reason: %s)", result.State, result.Reason)
+	}
+	if got := string(fake.stdinBytes()); got != message {
+		t.Fatalf("staged stdin after drain = %q, want queued message", got)
+	}
+}
+
+func TestHarnessDeliveryQuietGateHoldsRecentOutput(t *testing.T) {
+	ctx := context.Background()
+	st := memstore.New()
+	createHarnessLeadSession(t, st)
+	setHarnessRuntimeMetadata(t, st, RuntimeStatusActive)
+	fake := newFakeHarnessConversation()
+	fake.setSnapshot(wrapper.Snapshot{LastOutputAt: time.Now()})
+	installFakeHarnessConversation(t, "lead-session", fake)
+
+	result, err := DeliverLeadMessage(ctx, st, "WS", "nova", "Task TASK-1 completed.")
+	if err != nil {
+		t.Fatalf("DeliverLeadMessage() error = %v", err)
+	}
+	if result.State != DeliveryStatePending {
+		t.Fatalf("delivery state = %q, want pending", result.State)
+	}
+	if !strings.Contains(result.Reason, "not settled") {
+		t.Fatalf("reason = %q, want output-not-settled detail", result.Reason)
+	}
+	if got := fake.sentTexts(); len(got) != 0 {
+		t.Fatalf("unexpected send during quiet window: %#v", got)
+	}
+}
+
+func TestHarnessDeliveryFailedSnapshotStaysPending(t *testing.T) {
+	ctx := context.Background()
+	st := memstore.New()
+	createHarnessLeadSession(t, st)
+	setHarnessRuntimeMetadata(t, st, RuntimeStatusActive)
+	fake := newFakeHarnessConversation()
+	fake.setSnapshot(wrapper.Snapshot{Status: wrapper.StatusBlockedByCost, LastOutputAt: time.Now().Add(-time.Minute)})
+	installFakeHarnessConversation(t, "lead-session", fake)
+
+	result, err := DeliverLeadMessage(ctx, st, "WS", "nova", "Task TASK-1 completed.")
+	if err != nil {
+		t.Fatalf("DeliverLeadMessage() error = %v", err)
+	}
+	if result.State != DeliveryStatePending {
+		t.Fatalf("delivery state = %q, want pending", result.State)
+	}
+	if !strings.Contains(result.Reason, "failed") {
+		t.Fatalf("reason = %q, want failed detail", result.Reason)
+	}
+	session := getLeadSession(t, st)
+	if got := session.Metadata[MetadataRuntimeStatus]; got != RuntimeStatusFailed {
+		t.Fatalf("runtime status = %q, want failed persisted from snapshot", got)
+	}
+}
+
+func TestHarnessDeliveryUncontrolledSessionUnsupported(t *testing.T) {
+	ctx := context.Background()
+	st := memstore.New()
+	createHarnessLeadSession(t, st)
+	// Provider set but controlled flag absent: not a controlled runtime.
+	session := getLeadSession(t, st)
+	metadata := cloneMetadata(session.Metadata)
+	metadata[MetadataRuntimeProvider] = "claude"
+	if _, err := st.AgentSessions().Update(ctx, "WS", "lead-session", store.AgentSessionUpdate{Metadata: &metadata}); err != nil {
+		t.Fatalf("seed metadata: %v", err)
+	}
+
+	result, err := DeliverLeadMessage(ctx, st, "WS", "nova", "Task TASK-1 completed.")
+	if err != nil {
+		t.Fatalf("DeliverLeadMessage() error = %v", err)
+	}
+	if result.State != DeliveryStateUnsupported {
+		t.Fatalf("delivery state = %q, want unsupported", result.State)
+	}
+}
+
+func TestHarnessRuntimeStatusMapping(t *testing.T) {
+	cases := []struct {
+		status wrapper.Status
+		want   string
+	}{
+		{wrapper.StatusWaitingForInput, RuntimeStatusWaitingUserInput},
+		{wrapper.StatusIdle, RuntimeStatusIdle},
+		{wrapper.StatusStale, RuntimeStatusIdle},
+		{wrapper.StatusInterrupted, RuntimeStatusWaitingUserInput},
+		{wrapper.StatusFailed, RuntimeStatusFailed},
+		{wrapper.StatusBlockedByCost, RuntimeStatusFailed},
+		{wrapper.StatusRetryLater, RuntimeStatusFailed},
+		{wrapper.StatusAPIError, RuntimeStatusFailed},
+		{wrapper.StatusBinaryNotFound, RuntimeStatusFailed},
+		{wrapper.Status(""), RuntimeStatusActive},
+	}
+	for _, tc := range cases {
+		if got := harnessRuntimeStatus(wrapper.Snapshot{Status: tc.status}); got != tc.want {
+			t.Errorf("harnessRuntimeStatus(%q) = %q, want %q", tc.status, got, tc.want)
+		}
+	}
+}
+
+func TestSendHarnessTurnFraming(t *testing.T) {
+	ctx := context.Background()
+
+	single := newFakeHarnessConversation()
+	if _, err := sendHarnessTurn(ctx, single, "one line"); err != nil {
+		t.Fatalf("sendHarnessTurn(single) error = %v", err)
+	}
+	if got := string(single.stdinBytes()); got != "one line" {
+		t.Fatalf("single-line staged stdin = %q", got)
+	}
+	if got := single.sentTexts(); len(got) != 1 || got[0] != "" {
+		t.Fatalf("single-line submit sends = %#v, want one empty Send", got)
+	}
+
+	multi := newFakeHarnessConversation()
+	if _, err := sendHarnessTurn(ctx, multi, "line one\nline two"); err != nil {
+		t.Fatalf("sendHarnessTurn(multi) error = %v", err)
+	}
+	if got := string(multi.stdinBytes()); got != "\x1b[200~line one\nline two\x1b[201~" {
+		t.Fatalf("multi-line paste = %q", got)
+	}
+	if got := multi.sentTexts(); len(got) != 1 || got[0] != "" {
+		t.Fatalf("multi-line submit sends = %#v, want one empty Send", got)
+	}
+}
+
+func TestLeadConversationHandleInFlightOverride(t *testing.T) {
+	fake := newFakeHarnessConversation()
+	fake.setSnapshot(wrapper.Snapshot{LastOutputAt: time.Now().Add(-2 * harnessInFlightOverrideWindow)})
+	handle := &leadConversationHandle{conv: fake}
+	handle.markTurnStarted()
+	if handle.turnInFlight() {
+		t.Fatalf("turnInFlight() = true, want missed-marker override after long quiet")
+	}
+}
+
+// --- helpers and fakes ---
+
+func createHarnessLeadSession(t *testing.T, st store.Store) {
+	t.Helper()
+	createAssignedLeadSessionWithBackend(t, st, "claude")
+}
+
+func createAssignedLeadSessionWithBackend(t *testing.T, st store.Store, backend string) {
+	t.Helper()
+	ctx := context.Background()
+	if _, err := st.Agents().Create(ctx, store.AgentCreate{
+		WorkspaceKey: "WS",
+		Name:         "nova",
+		RoleName:     "lead",
+		Backend:      backend,
+		Parent:       "EPIC-1",
+	}); err != nil {
+		t.Fatalf("create lead: %v", err)
+	}
+	if _, err := st.AgentSessions().Create(ctx, store.AgentSessionCreate{
+		WorkspaceKey: "WS",
+		SessionID:    "lead-session",
+		AgentID:      "nova",
+		Kind:         domain.AgentSessionKindOrchestration,
+		Status:       domain.AgentSessionRunning,
+		Metadata:     map[string]string{"actor": "test"},
+	}); err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+}
+
+func setHarnessRuntimeMetadata(t *testing.T, st store.Store, status string) {
+	t.Helper()
+	if err := UpdateHarnessRuntimeMetadata(context.Background(), st, "WS", "lead-session", HarnessRuntimeMetadata{
+		Provider:      "claude",
+		HarnessName:   HarnessNameClaudeCode,
+		ChatSessionID: "chat-1",
+		PID:           42,
+		Status:        status,
+		Controlled:    true,
+	}); err != nil {
+		t.Fatalf("set harness runtime metadata: %v", err)
+	}
+}
+
+func getLeadSession(t *testing.T, st store.Store) *domain.AgentSession {
+	t.Helper()
+	session, err := st.AgentSessions().Get(context.Background(), "WS", "lead-session")
+	if err != nil {
+		t.Fatalf("get session: %v", err)
+	}
+	return session
+}
+
+func installFakeHarnessConversation(t *testing.T, sessionID string, fake *fakeHarnessConversation) *leadConversationHandle {
+	t.Helper()
+	handle, unregister := registerLeadConversation(sessionID, fake)
+	t.Cleanup(unregister)
+	return handle
+}
+
+type fakeHarnessConversation struct {
+	mu               sync.Mutex
+	sends            []string
+	stdin            []byte
+	snapshot         wrapper.Snapshot
+	sendErr          error
+	harnessSessionID string
+	events           chan chat.TurnEvent
+	waitCh           chan struct{}
+	waitResult       wrapper.Result
+	closed           bool
+}
+
+func newFakeHarnessConversation() *fakeHarnessConversation {
+	return &fakeHarnessConversation{
+		// Default: quiet long ago, unclassified — deliverable.
+		snapshot: wrapper.Snapshot{LastOutputAt: time.Now().Add(-time.Minute)},
+		events:   make(chan chat.TurnEvent, 8),
+		waitCh:   make(chan struct{}),
+	}
+}
+
+func (f *fakeHarnessConversation) setSnapshot(snap wrapper.Snapshot) {
+	f.mu.Lock()
+	f.snapshot = snap
+	f.mu.Unlock()
+}
+
+func (f *fakeHarnessConversation) sentTexts() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string{}, f.sends...)
+}
+
+func (f *fakeHarnessConversation) stdinBytes() []byte {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]byte{}, f.stdin...)
+}
+
+func (f *fakeHarnessConversation) AcquireControl(context.Context) (func(), error) {
+	return func() {}, nil
+}
+
+func (f *fakeHarnessConversation) Send(_ context.Context, text string) (string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.sendErr != nil {
+		return "", f.sendErr
+	}
+	f.sends = append(f.sends, text)
+	return "turn-1", nil
+}
+
+func (f *fakeHarnessConversation) WriteStdin(p []byte) (int, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.stdin = append(f.stdin, p...)
+	return len(p), nil
+}
+
+func (f *fakeHarnessConversation) AttachOutput(io.Writer) func() { return func() {} }
+
+func (f *fakeHarnessConversation) Resize(uint16, uint16) error { return nil }
+
+func (f *fakeHarnessConversation) Snapshot() wrapper.Snapshot {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.snapshot
+}
+
+func (f *fakeHarnessConversation) PID() int { return 42 }
+
+func (f *fakeHarnessConversation) ChatSessionID() string { return "chat-1" }
+
+func (f *fakeHarnessConversation) HarnessSessionID() string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.harnessSessionID
+}
+
+func (f *fakeHarnessConversation) Events() <-chan chat.TurnEvent { return f.events }
+
+func (f *fakeHarnessConversation) Wait() (wrapper.Result, error) {
+	<-f.waitCh
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.waitResult, nil
+}
+
+func (f *fakeHarnessConversation) Close(context.Context) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.closed = true
+	return nil
+}

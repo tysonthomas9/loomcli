@@ -873,7 +873,7 @@ func runDriverDeliverLeadAssignment(_ *cobra.Command, _ []string) error {
 		if leadName == "" {
 			return fmt.Errorf("agent required: %w", domain.ErrInvalid)
 		}
-		delivery, err := leadcontrol.DeliverCurrentAssignmentToCodex(ctx, h.Store, ws, leadName)
+		delivery, err := leadcontrol.DeliverCurrentAssignment(ctx, h.Store, ws, leadName)
 		if err != nil {
 			return fmt.Errorf("deliver lead assignment: %w", err)
 		}
@@ -922,8 +922,8 @@ func deliverAgentMessageForDriver(ctx context.Context, st store.Store, workspace
 	if err != nil {
 		return agentMessageDeliveryResult{}, fmt.Errorf("get target agent: %w", err)
 	}
-	if isCodexLeadAgent(agent) {
-		delivery, err := leadcontrol.DeliverLeadMessageToCodexWithOptions(ctx, st, workspace, agentName, message, leadcontrol.LeadMessageDeliveryOptions{
+	if isControlledLeadAgent(agent) {
+		delivery, err := leadcontrol.DeliverLeadMessageWithOptions(ctx, st, workspace, agentName, message, leadcontrol.LeadMessageDeliveryOptions{
 			SourceKind:  "workflow",
 			DriverRunID: driverRunID,
 		})
@@ -949,11 +949,11 @@ func deliverAgentMessageForDriver(ctx context.Context, st store.Store, workspace
 	}, nil
 }
 
-func isCodexLeadAgent(agent *domain.Agent) bool {
+func isControlledLeadAgent(agent *domain.Agent) bool {
 	if agent == nil {
 		return false
 	}
-	return strings.EqualFold(strings.TrimSpace(agent.RoleName), "lead") && strings.EqualFold(strings.TrimSpace(agent.Backend), leadcontrol.RuntimeProviderCodex)
+	return strings.EqualFold(strings.TrimSpace(agent.RoleName), "lead") && leadcontrol.IsControlledLeadBackend(agent.Backend)
 }
 
 type agentMessageDeliveryResult struct {
@@ -981,9 +981,14 @@ func newAgentMessageDeliveryResult(agentName string, delivery *leadcontrol.Deliv
 		result.Reason = delivery.Reason
 		result.SessionID = delivery.SessionID
 		result.InboxMessageID = delivery.InboxMessageID
-		result.RuntimeStatus = delivery.Runtime.Status
-		result.RuntimeProvider = leadcontrol.RuntimeProviderCodex
-		result.Controlled = delivery.Runtime.Controlled
+		result.RuntimeProvider = delivery.Provider
+		if delivery.Provider != "" && delivery.Provider != leadcontrol.RuntimeProviderCodex {
+			result.RuntimeStatus = delivery.HarnessRuntime.Status
+			result.Controlled = delivery.HarnessRuntime.Controlled
+		} else {
+			result.RuntimeStatus = delivery.Runtime.Status
+			result.Controlled = delivery.Runtime.Controlled
+		}
 	}
 	return result
 }

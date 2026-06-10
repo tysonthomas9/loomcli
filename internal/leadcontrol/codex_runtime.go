@@ -19,10 +19,9 @@ import (
 
 const (
 	defaultCodexBinary            = "codex"
-	codexAppServerReadyTimeout    = 10 * time.Second
-	codexThreadDiscoveryTimeout   = 45 * time.Second
-	codexThreadDiscoveryInterval  = 500 * time.Millisecond
-	codexLeadMessageDrainInterval = 2 * time.Second
+	codexAppServerReadyTimeout   = 10 * time.Second
+	codexThreadDiscoveryTimeout  = 45 * time.Second
+	codexThreadDiscoveryInterval = 500 * time.Millisecond
 )
 
 type CodexLeadRuntimeConfig struct {
@@ -82,7 +81,7 @@ func RunCodexLeadRuntime(ctx context.Context, cfg CodexLeadRuntimeConfig) error 
 	go discoverCodexLeadThread(discoverCtx, cfg, runtime, runtimeStartedAt)
 	drainCtx, cancelDrain := context.WithCancel(ctx)
 	defer cancelDrain()
-	go drainCodexLeadMessageQueue(drainCtx, cfg)
+	go drainLeadMessageQueue(drainCtx, cfg.Store, cfg.Workspace, cfg.LeadName, cfg.Logger)
 
 	tuiErr := runCodexRemoteTUI(ctx, cfg, endpoint)
 
@@ -94,29 +93,6 @@ func RunCodexLeadRuntime(ctx context.Context, cfg CodexLeadRuntimeConfig) error 
 	runtime.Status = RuntimeStatusDisconnected
 	_ = UpdateCodexRuntimeMetadata(context.Background(), cfg.Store, cfg.Workspace, cfg.SessionID, runtime)
 	return tuiErr
-}
-
-func drainCodexLeadMessageQueue(ctx context.Context, cfg CodexLeadRuntimeConfig) {
-	if cfg.Store == nil || strings.TrimSpace(cfg.Workspace) == "" || strings.TrimSpace(cfg.LeadName) == "" {
-		return
-	}
-	ticker := time.NewTicker(codexLeadMessageDrainInterval)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-			result, err := DeliverPendingLeadMessagesToCodex(ctx, cfg.Store, cfg.Workspace, cfg.LeadName)
-			if err != nil {
-				cfg.Logger.Debug("codex lead message queue drain failed", "err", err)
-				continue
-			}
-			if result != nil && result.State == DeliveryStateDelivered {
-				cfg.Logger.Debug("codex lead message queue drained", "lead", cfg.LeadName, "session", result.SessionID)
-			}
-		}
-	}
 }
 
 func startCodexAppServer(

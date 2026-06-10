@@ -107,18 +107,20 @@ func runLead(cmd *cobra.Command, args []string) {
 	}
 
 	// Invoke agent interactively (no agent name needed - lead mode doesn't claim tasks).
-	var invokeErr error
-	if strings.EqualFold(backendName, backends.NameCodex) {
-		invokeErr = backends.RunCodexLeadRuntime(
-			context.Background(),
-			registration.Store(),
-			registration.Workspace,
-			registration.AgentID,
-			registration.SessionID,
-			workDir,
-			prompt,
-		)
-	} else {
+	// Backends with a controlled runtime (codex app-server, harness-wrapper PTY
+	// supervision for claude and others) get queued message delivery; anything
+	// else falls back to a plain interactive launch.
+	handled, invokeErr := backends.RunControlledLeadRuntime(
+		context.Background(),
+		registration.Store(),
+		registration.Workspace,
+		registration.AgentID,
+		registration.SessionID,
+		workDir,
+		prompt,
+		backendName,
+	)
+	if !handled {
 		invokeErr = cli.InvokeAgent(workDir, prompt, "")
 	}
 	if invokeErr != nil {

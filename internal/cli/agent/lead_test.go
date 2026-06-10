@@ -16,6 +16,11 @@ import (
 )
 
 func TestRunLead_InvokesClaude(t *testing.T) {
+	// Disable the controlled (harness-wrapper) lead runtime so runLead falls
+	// back to the backend registry and hits the mock instead of launching a
+	// real claude process under PTY supervision.
+	t.Setenv("LOOM_LEAD_CONTROLLED", "0")
+
 	// Setup temp directory as working directory
 	tmpDir := t.TempDir()
 	tmpDir, _ = filepath.EvalSymlinks(tmpDir) // macOS /var -> /private/var
