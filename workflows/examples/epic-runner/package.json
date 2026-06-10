@@ -1,0 +1,19 @@
+{
+	"name": "@loom/example-epic-runner",
+	"private": true,
+	"type": "module",
+	"scripts": {
+		"dev": "flue dev",
+		"build": "flue build --target node",
+		"check": "tsc -p tsconfig.json --noEmit"
+	},
+	"dependencies": {
+		"@flue/runtime": "^0.10.1",
+		"@loom/workflow-sdk": "workspace:*",
+		"hono": "^4.7.0"
+	},
+	"devDependencies": {
+		"@flue/cli": "^0.10.1",
+		"typescript": "^5.7.0"
+	}
+}

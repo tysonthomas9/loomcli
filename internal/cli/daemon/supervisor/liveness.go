@@ -76,7 +76,7 @@ func (s *Supervisor) thresholdFor(name string) time.Duration {
 	}
 
 	switch name {
-	case GoroutineHealthChecker, GoroutineConfigReconciler, GoroutineNodeHeartbeat:
+	case GoroutineHealthChecker, GoroutineConfigReconciler, GoroutineNodeHeartbeat, GoroutineWorkflowRunner:
 		return 2 * time.Minute
 	case GoroutineStateUpdater:
 		return minLivenessThreshold

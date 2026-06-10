@@ -1,0 +1,11 @@
+{
+	"name": "loom-workflows",
+	"private": true,
+	"type": "module",
+	"scripts": {
+		"build": "pnpm -r build"
+	},
+	"devDependencies": {
+		"typescript": "^5.7.0"
+	}
+}

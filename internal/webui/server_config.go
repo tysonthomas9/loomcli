@@ -17,6 +17,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/webui/fleet"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/agentcontrol"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
+	"github.com/tysonthomas9/loomcli/internal/workflows/platform"
 )
 
 const (
@@ -84,7 +85,11 @@ type ServerConfig struct {
 	// Store is the unified state store for workspaces, repos, agents, roles,
 	// and daemon profiles. Local and distributed modes both use this store
 	// as the authoritative workspace/config source.
-	Store                store.Store
+	Store store.Store
+	// PlatformStore is the fleet-db platform-entity client (drivers,
+	// driver runs, action ledger) backing the workflow-runs API. Nil
+	// disables the workflow routes.
+	PlatformStore        platform.Store
 	BackendOps           ops.BackendOps                                       // Backend health operations interface (optional; nil disables backend health endpoint)
 	ScrollbackMaxLines   int                                                  // Maximum lines per scrollback buffer (0 = default 10000)
 	NotifyTokenDir       string                                               // Directory to write notify.token (typically runtime dir); empty = token file not written

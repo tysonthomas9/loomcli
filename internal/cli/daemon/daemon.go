@@ -57,7 +57,15 @@ type Daemon struct {
 	// store is the fleet-db backed source of agent assignments and daemon
 	// profile data.
 	store store.Store
+
+	// fleetURL is the fleet-db base URL, used by the dynamic-workflow
+	// runner's platform client. Empty disables the workflow runner.
+	fleetURL string
 }
+
+// SetFleetURL records the fleet-db base URL for the workflow runner.
+// Must be called before Start.
+func (d *Daemon) SetFleetURL(url string) { d.fleetURL = url }
 
 // configSnapshot returns a snapshot of the current config pointer under RLock.
 // Safe for concurrent use with reloadAndReconcile which swaps d.config under Lock.
@@ -137,6 +145,7 @@ func (d *Daemon) Start() error {
 	d.sup.RunCritical(supervisor.GoroutineConfigReconciler, d.configReconciler)
 
 	d.startAgentCommandPoller()
+	d.startWorkflowRunner(d.fleetURL)
 	return nil
 }
 

@@ -15,6 +15,7 @@ import (
 const (
 	GoroutineHealthChecker    = "health_checker"
 	GoroutineConfigReconciler = "config_reconciler"
+	GoroutineWorkflowRunner   = "workflow_runner"
 	GoroutineNodeHeartbeat    = "node_heartbeat"
 	GoroutineStateUpdater     = "state_updater"
 	GoroutineLivenessWatchdog = "liveness_watchdog"

@@ -328,6 +328,7 @@ func initDaemonServices(config *cfgpkg.DaemonConfig, projectDir string, paths da
 		fmt.Fprintf(os.Stderr, "Error: creating daemon: %v\n", err)
 		os.Exit(1)
 	}
+	daemon.SetFleetURL(storeHandle.URL())
 
 	return shutdown, daemon
 }

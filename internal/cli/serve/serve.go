@@ -27,6 +27,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/cli/serve/serveadapter"
 	"github.com/tysonthomas9/loomcli/internal/cli/serve/usagecmd"
 	"github.com/tysonthomas9/loomcli/internal/cli/serve/workspacemgr"
+	"github.com/tysonthomas9/loomcli/internal/infra/platformdb"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui"
 	webuiapp "github.com/tysonthomas9/loomcli/internal/webui/app"
@@ -375,6 +376,9 @@ func buildServerConfig(monitorHandlers webui.MonitorHandlers, fs fleetState, sto
 		if url := storeHandle.URL(); url != "" {
 			cfg.IssueBackendFn = cli.WorkspaceAwareIssueBackendForURL(url, fs.clientCfg.Actor)
 			fs = withStoreFleetURL(fs, url)
+			if pc, err := platformdb.New(platformdb.Config{BaseURL: url, Actor: "loom-serve"}); err == nil {
+				cfg.PlatformStore = pc
+			}
 		}
 	}
 	applyFleetConfig(&cfg, fs)
