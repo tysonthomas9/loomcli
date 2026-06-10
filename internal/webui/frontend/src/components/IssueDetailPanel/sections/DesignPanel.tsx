@@ -23,18 +23,44 @@ interface Section {
 }
 
 /**
- * Split markdown content into sections delimited by H2 headings.
+ * Match an HTML `<h2>...</h2>` heading occupying a whole line.
+ * Captures the inner content (which may contain nested inline tags).
+ */
+const HTML_H2_RE = /^\s*<h2(?:\s[^>]*)?>(.*?)<\/h2>\s*$/i;
+
+/**
+ * Extract a section heading from a line, recognizing both the Markdown
+ * `## ` syntax and a whole-line HTML `<h2>` element. Returns the heading
+ * text (inline HTML tags stripped) or null if the line is not a heading.
+ */
+function matchHeading(line: string): string | null {
+  const mdMatch = line.match(/^## (.+?)\s*$/);
+  if (mdMatch) {
+    return mdMatch[1] ?? "";
+  }
+  const htmlMatch = line.match(HTML_H2_RE);
+  if (htmlMatch) {
+    // Strip any nested inline tags so the heading renders as plain text.
+    return (htmlMatch[1] ?? "").replace(/<[^>]+>/g, "").trim();
+  }
+  return null;
+}
+
+/**
+ * Split design content into sections delimited by H2 headings. Recognizes
+ * both Markdown `## ` headings and whole-line HTML `<h2>` elements so that
+ * HTML designs keep the same collapsible-section UX as Markdown designs.
  * Content before the first H2 becomes a section with an empty heading.
  */
-function splitIntoSections(markdown: string): Section[] {
+export function splitIntoSections(markdown: string): Section[] {
   const lines = markdown.split("\n");
   const sections: Section[] = [];
   let currentHeading = "";
   let currentLines: string[] = [];
 
   for (const line of lines) {
-    const h2Match = line.match(/^## (.+?)\s*$/);
-    if (h2Match) {
+    const heading = matchHeading(line);
+    if (heading !== null) {
       // Save previous section if it has content
       if (currentLines.length > 0 || currentHeading) {
         sections.push({
@@ -42,7 +68,7 @@ function splitIntoSections(markdown: string): Section[] {
           content: currentLines.join("\n").trim(),
         });
       }
-      currentHeading = h2Match[1] ?? "";
+      currentHeading = heading;
       currentLines = [];
     } else {
       currentLines.push(line);
