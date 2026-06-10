@@ -355,6 +355,7 @@ func (s *agentServiceImpl) CreateAgent(ctx context.Context, in service.AgentCrea
 		RepoGroups:       in.RepoGroups,
 		CrossRepo:        in.CrossRepo,
 		Parent:           in.Parent,
+		Mode:             in.Mode,
 		DesiredState:     in.DesiredState,
 	})
 	if err != nil {
@@ -470,6 +471,7 @@ func (s *agentServiceImpl) UpdateAgent(ctx context.Context, wsKey, name string, 
 		CrossRepo:        patch.CrossRepo,
 		Parent:           patch.Parent,
 		State:            patch.State,
+		Mode:             patch.Mode,
 		DesiredState:     patch.DesiredState,
 	})
 	if err != nil {

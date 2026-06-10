@@ -81,6 +81,7 @@ type AgentCreateInput struct {
 	RepoGroups       []string                 `json:"repo_groups,omitempty"`
 	CrossRepo        bool                     `json:"cross_repo,omitempty"`
 	Parent           string                   `json:"parent,omitempty"`
+	Mode             domain.AgentMode         `json:"mode,omitempty"`
 	DesiredState     domain.AgentDesiredState `json:"desired_state,omitempty"`
 }
 
@@ -95,6 +96,7 @@ type AgentUpdateInput struct {
 	CrossRepo        *bool                     `json:"cross_repo,omitempty"`
 	Parent           *string                   `json:"parent,omitempty"`
 	State            *domain.AgentState        `json:"state,omitempty"`
+	Mode             *domain.AgentMode         `json:"mode,omitempty"`
 	DesiredState     *domain.AgentDesiredState `json:"desired_state,omitempty"`
 }
 

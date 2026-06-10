@@ -49,6 +49,12 @@ func HandleCreate(agentSvc service.AgentService, hub *realtime.Hub) http.Handler
 			handler.HandleServiceError(w, err)
 			return
 		}
+		if !validAgentMode(in.Mode) {
+			err := service.ErrValidation("invalid mode")
+			recordErr(span, err)
+			handler.HandleServiceError(w, err)
+			return
+		}
 		// Agent name is an internal short identifier (per-workspace handle like
 		// "falcon"), not user-supplied free-form text — safe to record.
 		span.SetAttributes(attribute.String("loom.agent", in.Name))
@@ -76,6 +82,10 @@ func HandleUpdate(agentSvc service.AgentService, hub *realtime.Hub) http.Handler
 		}
 		if patch.DesiredState != nil && !validAgentDesiredState(*patch.DesiredState) {
 			handler.HandleServiceError(w, service.ErrValidation("invalid desired_state"))
+			return
+		}
+		if patch.Mode != nil && !validAgentMode(*patch.Mode) {
+			handler.HandleServiceError(w, service.ErrValidation("invalid mode"))
 			return
 		}
 		ws := requestWorkspaceID(r)
@@ -237,6 +247,15 @@ func validAgentState(state domain.AgentState) bool {
 func validAgentDesiredState(state domain.AgentDesiredState) bool {
 	switch state {
 	case "", domain.AgentDesiredStopped, domain.AgentDesiredIdle, domain.AgentDesiredRunning, domain.AgentDesiredDraining:
+		return true
+	default:
+		return false
+	}
+}
+
+func validAgentMode(mode domain.AgentMode) bool {
+	switch mode {
+	case "", domain.AgentModeEphemeral, domain.AgentModeService:
 		return true
 	default:
 		return false

@@ -83,6 +83,44 @@ func TestCreateAgentLeadEnsuresRoleAndDoesNotRequireRepo(t *testing.T) {
 	}
 }
 
+func TestCreateAndUpdateAgentPersistMode(t *testing.T) {
+	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
+
+	ctx := context.Background()
+	st := memstore.New()
+	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{
+		Key:           "TEST2",
+		Name:          "Test 2",
+		DefaultBranch: "main",
+	}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+
+	svc := NewAgentService(nil, nil, nil, st)
+	created, err := svc.CreateAgent(ctx, service.AgentCreateInput{
+		WorkspaceKey: "TEST2",
+		Name:         "ephem",
+		RoleName:     "lead",
+		Backend:      "codex",
+		Mode:         domain.AgentModeEphemeral,
+	})
+	if err != nil {
+		t.Fatalf("CreateAgent returned error: %v", err)
+	}
+	if created.Mode != domain.AgentModeEphemeral {
+		t.Fatalf("created.Mode = %q, want ephemeral", created.Mode)
+	}
+
+	svcMode := domain.AgentModeService
+	updated, err := svc.UpdateAgent(ctx, "TEST2", "ephem", service.AgentUpdateInput{Mode: &svcMode})
+	if err != nil {
+		t.Fatalf("UpdateAgent returned error: %v", err)
+	}
+	if updated.Mode != domain.AgentModeService {
+		t.Fatalf("updated.Mode = %q, want service", updated.Mode)
+	}
+}
+
 func TestRequestAgentLifecycleUpdatesStateAndQueuesCommand(t *testing.T) {
 	ctx := context.Background()
 	st := memstore.New()
