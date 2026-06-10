@@ -12,6 +12,7 @@ import type { BlockedInfo } from "@/types/issue";
 import type { KanbanColumnConfig } from "@/components/KanbanBoard/types";
 import { StatusColumn } from "@/components/StatusColumn";
 import type { Issue } from "@/types";
+import { isPRUrl } from "@/utils/issue";
 
 import styles from "./SwimLane.module.css";
 
@@ -100,6 +101,13 @@ export function SwimLane({
     return issues.filter((issue) => !blockedIssues.has(issue.id));
   }, [issues, showBlocked, blockedIssues]);
 
+  // Roll up how many of this lane's tickets carry a linked pull request, so an
+  // epic lane can surface "N PRs" (design's epic-header PR rollup).
+  const prCount = useMemo(
+    () => filteredIssues.filter((issue) => isPRUrl(issue.external_ref)).length,
+    [filteredIssues],
+  );
+
   // Group issues by column using filter functions
   const issuesByColumn = useMemo(() => {
     const grouped = new Map<string, Issue[]>();
@@ -175,6 +183,26 @@ export function SwimLane({
             title
           )}
         </h3>
+        {headerIssue && prCount > 0 && (
+          <span
+            className={styles.lanePrCount}
+            aria-label={`${prCount} open pull request${prCount === 1 ? "" : "s"}`}
+            title={`${prCount} open pull request${prCount === 1 ? "" : "s"}`}
+          >
+            <svg viewBox="0 0 16 16" fill="none" aria-hidden="true">
+              <circle cx="4" cy="4" r="1.6" stroke="currentColor" strokeWidth="1.4" />
+              <circle cx="4" cy="12" r="1.6" stroke="currentColor" strokeWidth="1.4" />
+              <circle cx="12" cy="12" r="1.6" stroke="currentColor" strokeWidth="1.4" />
+              <path
+                d="M4 5.6v4.8M12 10.4V8a2 2 0 0 0-2-2H7.5"
+                stroke="currentColor"
+                strokeWidth="1.4"
+                strokeLinecap="round"
+              />
+            </svg>
+            {prCount} {prCount === 1 ? "PR" : "PRs"}
+          </span>
+        )}
         <span
           className={styles.laneCount}
           aria-label={`${filteredIssues.length} issues`}

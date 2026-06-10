@@ -116,6 +116,25 @@
   text-align: center;
 }
 
+/* Epic-header PR rollup pill ("N PRs"), shown on epic lanes that have PRs. */
+.lanePrCount {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: var(--space-1) var(--space-2);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-primary);
+  background-color: var(--color-primary-bg);
+  border-radius: var(--radius-full);
+}
+
+.lanePrCount svg {
+  width: 12px;
+  height: 12px;
+}
+
 /* Aether kanban: header-row strip stacked above the body grid; the whole
    block scrolls horizontally when columns hit their min width. */
 .laneContent {
