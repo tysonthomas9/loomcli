@@ -705,7 +705,7 @@ func TestGenerateFleetTaskPrompt(t *testing.T) {
 				"loom data show loomcli-kv6.4 --output json",
 				"already claimed",
 				"JSON `design`",
-				"loom push \"spark\"",
+				"git push origin HEAD",
 			},
 		},
 		{
