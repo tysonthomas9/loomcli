@@ -167,7 +167,4 @@ jobs:
           git config --global user.email "ci@loomcli.test"
 
       - name: Test
-        # -p 1 (one package at a time) avoids macOS process-limit exhaustion when
-        # process-spawning tests (e.g. supervisor) run concurrently under -race.
-        # Mirrors the Go Quality Gate, which runs the same -race suite serially.
-        run: go test -v -race -p 1 -timeout 15m ./...
+        run: go test -v -race -timeout 15m ./...
