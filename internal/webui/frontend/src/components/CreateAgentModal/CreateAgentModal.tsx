@@ -44,8 +44,7 @@ export function CreateAgentModal({
   const [name, setName] = useState(resolvedDefaultName);
   const [roleName, setRoleName] = useState<string>(resolvedDefaultRoleName);
   const [backend, setBackend] = useState(resolvedDefaultBackend);
-  const [repoName, setRepoName] = useState("");
-  const [crossRepo, setCrossRepo] = useState(false);
+  const [selectedRepos, setSelectedRepos] = useState<string[]>([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const wasOpenRef = useRef(false);
@@ -53,7 +52,20 @@ export function CreateAgentModal({
   const { backends } = useBackends();
 
   const repoOptions = useMemo(() => repos.map((repo) => repo.name), [repos]);
-  const selectedRepo = repoName || repoOptions[0] || "";
+  // Default selection mirrors the Aether dialog (first repo pre-picked).
+  const defaultRepos = useMemo(
+    () => (repoOptions[0] ? [repoOptions[0]] : []),
+    [repoOptions],
+  );
+
+  // Aether V3 made this a multi-select chip group: loom agents carry a full
+  // `repos[]` array, so an agent can span several repos. Leaving every chip
+  // unselected maps to loom's workspace scope (cross_repo, empty repos).
+  const crossRepo = selectedRepos.length === 0;
+  const toggleRepo = (repo: string): void =>
+    setSelectedRepos((prev) =>
+      prev.includes(repo) ? prev.filter((r) => r !== repo) : [...prev, repo],
+    );
 
   // Real backend list (Aether V3 made this a dropdown, not free text). Keep the
   // resolved/current value selectable even if it isn't in the live list.
@@ -76,8 +88,7 @@ export function CreateAgentModal({
     setName(resolvedDefaultName);
     setRoleName(resolvedDefaultRoleName);
     setBackend(resolvedDefaultBackend);
-    setRepoName("");
-    setCrossRepo(false);
+    setSelectedRepos(defaultRepos);
     setIsSubmitting(false);
     setError(null);
   }, [
@@ -85,6 +96,7 @@ export function CreateAgentModal({
     resolvedDefaultName,
     resolvedDefaultRoleName,
     resolvedDefaultBackend,
+    defaultRepos,
   ]);
 
   if (!isOpen) return null;
@@ -103,10 +115,6 @@ export function CreateAgentModal({
       setError("Role is required");
       return;
     }
-    if (!crossRepo && !selectedRepo) {
-      setError("Select a repo or enable workspace scope");
-      return;
-    }
 
     setIsSubmitting(true);
     try {
@@ -115,7 +123,7 @@ export function CreateAgentModal({
         role_name: trimmedRole,
         auto: false,
         cross_repo: crossRepo,
-        repos: crossRepo ? [] : [selectedRepo],
+        repos: crossRepo ? [] : selectedRepos,
       };
       const agent = await createAgent({
         ...request,
@@ -125,8 +133,7 @@ export function CreateAgentModal({
       setName(resolvedDefaultName);
       setRoleName(resolvedDefaultRoleName);
       setBackend(resolvedDefaultBackend);
-      setRepoName("");
-      setCrossRepo(false);
+      setSelectedRepos(defaultRepos);
     } catch (err) {
       if (err instanceof ApiError) {
         setError(err.message);
@@ -225,36 +232,48 @@ export function CreateAgentModal({
             </div>
           </div>
 
-          <label className={styles.checkboxRow}>
-            <input
-              type="checkbox"
-              checked={crossRepo}
-              onChange={(event) => setCrossRepo(event.target.checked)}
-              disabled={isSubmitting}
-            />
-            <span>Workspace scope</span>
-          </label>
-
-          {!crossRepo && (
-            <div className={styles.fieldGroup}>
-              <label className={styles.label} htmlFor="agent-repo">
-                Repo
-              </label>
-              <select
-                id="agent-repo"
-                className={styles.select}
-                value={selectedRepo}
-                onChange={(event) => setRepoName(event.target.value)}
-                disabled={isSubmitting || repoOptions.length === 0}
+          <div className={styles.fieldGroup}>
+            <span className={styles.label} id="agent-repos-label">
+              Repos / Worktrees
+            </span>
+            {repoOptions.length === 0 ? (
+              <p className={styles.emptyHint}>
+                No repos yet — add one from the sidebar first. This agent will
+                run with workspace scope.
+              </p>
+            ) : (
+              <div
+                className={styles.repoChips}
+                role="group"
+                aria-labelledby="agent-repos-label"
               >
-                {repoOptions.map((repo) => (
-                  <option key={repo} value={repo}>
-                    {repo}
-                  </option>
-                ))}
-              </select>
-            </div>
-          )}
+                {repoOptions.map((repo) => {
+                  const on = selectedRepos.includes(repo);
+                  return (
+                    <button
+                      key={repo}
+                      type="button"
+                      className={styles.repoChip}
+                      data-active={on || undefined}
+                      aria-pressed={on}
+                      onClick={() => toggleRepo(repo)}
+                      disabled={isSubmitting}
+                    >
+                      <span className={styles.repoChipBox} aria-hidden="true">
+                        {on ? "✓" : ""}
+                      </span>
+                      {repo}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+            <p className={styles.hint}>
+              {crossRepo
+                ? "No repo selected — the agent gets workspace-wide scope."
+                : "Pick every repo this agent works in. Leave all unselected for workspace scope."}
+            </p>
+          </div>
 
           {error && (
             <div className={styles.error} role="alert">

@@ -229,13 +229,17 @@ describe("CreateAgentModal: client-side validation", () => {
     expect(mockCreateAgent).not.toHaveBeenCalled();
   });
 
-  it("rejects missing repo when workspace scope is off", async () => {
+  it("treats a workspace with no repos as workspace scope (cross_repo)", async () => {
+    // With no repos available there are no chips to pick, so the agent is
+    // created with workspace scope rather than erroring.
+    mockCreateAgent.mockResolvedValueOnce(sampleAgent);
     renderModal({ defaultName: "agent-x", repos: [] });
     fireEvent.click(screen.getByRole("button", { name: /create agent/i }));
-    expect(await screen.findByRole("alert")).toHaveTextContent(
-      /repo|workspace scope/i,
-    );
-    expect(mockCreateAgent).not.toHaveBeenCalled();
+    await waitFor(() => expect(mockCreateAgent).toHaveBeenCalled());
+    expect(mockCreateAgent.mock.calls[0][0]).toMatchObject({
+      cross_repo: true,
+      repos: [],
+    });
   });
 });
 
@@ -265,15 +269,30 @@ describe("CreateAgentModal: submission", () => {
   // (The "omit backend when empty" case is unreachable now that AI Backend is a
   // required dropdown — it always carries a value — so that test was removed.)
 
-  it("sends cross_repo with empty repos array when workspace scope is on", async () => {
+  it("sends cross_repo with empty repos when every repo chip is deselected", async () => {
     mockCreateAgent.mockResolvedValueOnce(sampleAgent);
     renderModal({ defaultName: "global" });
-    fireEvent.click(screen.getByRole("checkbox", { name: /workspace scope/i }));
+    // The first repo ("alpha") is selected by default — deselect it so nothing
+    // is picked, which maps to workspace scope.
+    fireEvent.click(screen.getByRole("button", { name: /alpha/i }));
     fireEvent.click(screen.getByRole("button", { name: /create agent/i }));
     await waitFor(() => expect(mockCreateAgent).toHaveBeenCalled());
     expect(mockCreateAgent.mock.calls[0][0]).toMatchObject({
       cross_repo: true,
       repos: [],
+    });
+  });
+
+  it("sends every selected repo (multi-repo agent)", async () => {
+    mockCreateAgent.mockResolvedValueOnce(sampleAgent);
+    renderModal({ defaultName: "spanner" });
+    // "alpha" is pre-selected; add "beta" so the agent spans both repos.
+    fireEvent.click(screen.getByRole("button", { name: /beta/i }));
+    fireEvent.click(screen.getByRole("button", { name: /create agent/i }));
+    await waitFor(() => expect(mockCreateAgent).toHaveBeenCalled());
+    expect(mockCreateAgent.mock.calls[0][0]).toMatchObject({
+      cross_repo: false,
+      repos: ["alpha", "beta"],
     });
   });
 
