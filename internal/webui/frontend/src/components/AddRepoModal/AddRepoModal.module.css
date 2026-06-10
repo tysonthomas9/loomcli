@@ -3,7 +3,7 @@
   position: fixed;
   inset: 0;
   background: rgba(0, 0, 0, 0.5);
-  z-index: 1000;
+  z-index: var(--z-modal);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -83,7 +83,7 @@
   font-size: 12px;
   margin: 0 0 14px;
   padding: 6px 10px;
-  background: rgba(239, 68, 68, 0.1);
+  background: var(--color-danger-bg);
   border-radius: var(--radius-sm);
 }
 

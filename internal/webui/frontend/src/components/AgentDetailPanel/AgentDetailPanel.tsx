@@ -393,7 +393,7 @@ export function AgentDetailPanel({
                       </>
                     )}
                     <dt>Status</dt>
-                    <dd>{agent.status}</dd>
+                    <dd>{getStatusLabel(parsed.type)}</dd>
                     {parsed.taskId && (
                       <>
                         <dt>Task ID</dt>

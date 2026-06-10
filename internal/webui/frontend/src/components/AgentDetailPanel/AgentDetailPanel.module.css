@@ -236,7 +236,7 @@
 .tab.activeTab {
   color: var(--color-text-primary);
   font-weight: 700;
-  border-bottom-color: #111827;
+  border-bottom-color: var(--color-text-primary);
 }
 
 /* ============= Files Container ============= */

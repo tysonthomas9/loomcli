@@ -4,6 +4,7 @@ import { getAgentLogArchive, getAgentTerminalInfo } from "@/hooks/api";
 import { EmbeddedTerminal } from "@/components/EmbeddedTerminal";
 import type { ConnectionState } from "@/components/TerminalView";
 import { useWorkspaceContext } from "@/hooks/workspace";
+import { formatStatusLabel } from "@/utils/issue";
 
 import styles from "./AgentDetailPanel.module.css";
 
@@ -63,7 +64,9 @@ export function AgentLogsTab({
         Refresh
       </button>
       <div data-testid="log-viewer">
-        <span data-state={state}>{state === "empty" ? "no logs" : state}</span>
+        <span data-state={state}>
+          {state === "empty" ? "No logs" : formatStatusLabel(state)}
+        </span>
         {mode === "tmux" ? (
           <EmbeddedTerminal
             sessionName={`agent-${agentName}`}

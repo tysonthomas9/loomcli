@@ -205,10 +205,41 @@
   outline-offset: 2px;
 }
 
+.maximizeButton {
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-sm);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  transition:
+    background-color var(--transition-fast),
+    color var(--transition-fast);
+}
+
+.maximizeButton:hover {
+  background-color: var(--color-bg-hover);
+  color: var(--color-text);
+}
+
+.maximizeButton:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
 /* When copyLinkButton is present, it takes the margin-left: auto.
-   closeButton only needs it when copyLinkButton is absent. */
+   closeButton only needs it when copyLinkButton is absent. The action group
+   (copy → move → maximize → close) stays right-aligned via that single auto;
+   every following button resets its own margin so close ends flush. */
 .copyLinkButton + .moveButton,
-.copyLinkButton + .closeButton {
+.copyLinkButton + .closeButton,
+.copyLinkButton + .maximizeButton,
+.moveButton + .maximizeButton,
+.maximizeButton + .closeButton {
   margin-left: 0;
 }
 
