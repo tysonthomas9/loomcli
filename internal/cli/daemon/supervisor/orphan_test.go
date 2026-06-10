@@ -114,9 +114,13 @@ func runFakeBackendSleep(_ *testing.T) {
 }
 
 // helperLingerSleep is how long a fake worker/backend lingers awaiting the
-// signals the tests deliver. The test acceptance windows are ≤8s, so 15s is
-// ample headroom while keeping a leaked helper from squatting for minutes.
-const helperLingerSleep = 15 * time.Second
+// signals the tests deliver. The startup-sweep test needs its orphaned child
+// to stay alive until the sweep runs; under -race on the (PR-57-enlarged)
+// supervisor package that pre-sweep phase can take 30-60s on a loaded CI
+// runner, so 15s is too short and the orphan exits early (child alive=false).
+// watchRootPID still bounds the blast radius on abort (helpers exit within a
+// poll interval once the test binary is gone), so a generous linger is safe.
+const helperLingerSleep = 120 * time.Second
 
 // spawnFakeWorker starts the helper "worker" with Setpgid:true and returns the
 // *exec.Cmd plus the PID of the helper's isolated child (the codex stand-in).
