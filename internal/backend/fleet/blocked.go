@@ -6,7 +6,9 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/backend"
 )
 
-func (b *FleetBackend) canonicalBlocked(ctx context.Context, opts backend.BlockedOpts) ([]backend.IssueData, error) {
+// Blocked lists blocked issues from fleet-db's canonical /issues/blocked
+// view, applying client-side filters the server doesn't support.
+func (b *FleetBackend) Blocked(ctx context.Context, opts backend.BlockedOpts) ([]backend.IssueData, error) {
 	path := "/issues/blocked"
 	serverOpts := blockedServerOpts(opts)
 	if q := blockedOptsToQuery(serverOpts); q != "" {

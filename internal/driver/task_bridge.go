@@ -26,7 +26,6 @@ type HostBridgeTaskExecutor struct {
 	Store        store.Store
 	WorktreePath string
 	Command      []string
-	Fallback     TaskExecutor
 }
 
 type bridgeTaskRunnerResult struct {
@@ -126,9 +125,6 @@ func (e HostBridgeTaskExecutor) PreflightTaskProvider(ctx context.Context, opts 
 		return opts, err
 	}
 	if len(command) == 0 {
-		if preflighter, ok := e.Fallback.(TaskProviderPreflighter); ok {
-			return preflighter.PreflightTaskProvider(ctx, opts)
-		}
 		return resolveTaskProviderProfile(opts, false)
 	}
 	return resolveTaskProviderProfile(opts, true)
@@ -143,11 +139,7 @@ func (e HostBridgeTaskExecutor) ExecuteTask(ctx context.Context, req TaskExecReq
 		return TaskExecResult{}, err
 	}
 	if len(command) == 0 {
-		fallback := e.Fallback
-		if fallback == nil {
-			fallback = LocalTaskExecutor{}
-		}
-		return fallback.ExecuteTask(ctx, req)
+		return LocalTaskExecutor{}.ExecuteTask(ctx, req)
 	}
 	session, err := e.startFlueTaskSession(ctx, req)
 	if err != nil {

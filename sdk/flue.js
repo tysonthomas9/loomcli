@@ -1,3 +1,5 @@
+// NOTE: this module must stay self-contained (no local imports): callers such as
+// scripts/run-slack-codex-epic-runner-stack.sh vendor flue.js as a single file.
 import { spawnSync } from "node:child_process";
 
 export class FlueDriverClient {
@@ -64,24 +66,15 @@ export class FlueDriverClient {
   }
 
   async claimReady(input = {}) {
-    const args = this.#baseArgs("claim-ready");
-    const epicId = input.epicId || input.epic_id || this.input.epicId || this.input.epic_id || "";
-    appendStringFlag(args, "--epic-id", epicId);
-    return this.#run(args);
+    return this.#run(this.#epicArgs("claim-ready", input));
   }
 
   async getEpic(input = {}) {
-    const args = this.#baseArgs("epic-get");
-    const epicId = input.epicId || input.epic_id || this.input.epicId || this.input.epic_id || "";
-    appendStringFlag(args, "--epic-id", epicId);
-    return this.#run(args);
+    return this.#run(this.#epicArgs("epic-get", input));
   }
 
   async epicSnapshot(input = {}) {
-    const args = this.#baseArgs("epic-snapshot");
-    const epicId = input.epicId || input.epic_id || this.input.epicId || this.input.epic_id || "";
-    appendStringFlag(args, "--epic-id", epicId);
-    return this.#run(args);
+    return this.#run(this.#epicArgs("epic-snapshot", input));
   }
 
   async listAgents(_input = {}) {
@@ -89,7 +82,7 @@ export class FlueDriverClient {
   }
 
   async agentOrchestrationSession(input = {}) {
-    const agent = input.agent || input.agentName || input.agent_name || input.name || "";
+    const agent = agentNameOf(input);
     if (!agent) {
       throw new Error("agents.orchestrationSession requires agent");
     }
@@ -99,19 +92,19 @@ export class FlueDriverClient {
   }
 
   async updateAgentParent(input = {}) {
-    const agent = input.agent || input.agentName || input.agent_name || input.name || "";
+    const agent = agentNameOf(input);
     const parent = input.parent || input.parentEpicId || input.parent_epic_id || "";
     if (!agent || !parent) {
       throw new Error("agents.updateParent requires agent and parent");
     }
     const args = this.#baseArgs("update-agent-parent");
     args.push("--agent", String(agent), "--parent", String(parent));
-    appendStringFlag(args, "--expect-parent", input.expectParent || input.expect_parent || "");
+    appendStringFlag(args, "--expect-parent", input.expectParent || input.expect_parent);
     return this.#run(args);
   }
 
   async deliverLeadAssignment(input = {}) {
-    const agent = input.agent || input.agentName || input.agent_name || input.name || "";
+    const agent = agentNameOf(input);
     if (!agent) {
       throw new Error("agents.deliverAssignment requires agent");
     }
@@ -121,7 +114,7 @@ export class FlueDriverClient {
   }
 
   async messageAgent(input = {}) {
-    const agent = input.agent || input.agentName || input.agent_name || input.name || "";
+    const agent = agentNameOf(input);
     const message = input.message || input.text || input.body || "";
     if (!agent || !message) {
       throw new Error("agents.message requires agent and message");
@@ -138,19 +131,19 @@ export class FlueDriverClient {
     }
     const args = this.#baseArgs("exec-task");
     args.push("--task-id", String(taskId));
-    appendStringFlag(args, "--provider-profile", input.providerProfile || input.provider_profile || "");
-    appendStringFlag(args, "--task-run-id", input.taskRunId || input.task_run_id || "");
-    appendStringFlag(args, "--worker-profile-id", input.workerProfileId || input.worker_profile_id || "");
-    appendStringFlag(args, "--parent-session-id", input.parentSessionId || input.parent_session_id || "");
-    appendStringFlag(args, "--node-id", input.nodeId || input.node_id || "");
-    appendStringFlag(args, "--runner-id", input.runnerId || input.runner_id || "");
-    appendRepeatedFlag(args, "--supported-provider", input.supportedProviders || input.supported_providers || []);
-    appendRepeatedFlag(args, "--capability", input.capabilities || []);
+    appendStringFlag(args, "--provider-profile", input.providerProfile || input.provider_profile);
+    appendStringFlag(args, "--task-run-id", input.taskRunId || input.task_run_id);
+    appendStringFlag(args, "--worker-profile-id", input.workerProfileId || input.worker_profile_id);
+    appendStringFlag(args, "--parent-session-id", input.parentSessionId || input.parent_session_id);
+    appendStringFlag(args, "--node-id", input.nodeId || input.node_id);
+    appendStringFlag(args, "--runner-id", input.runnerId || input.runner_id);
+    appendRepeatedFlag(args, "--supported-provider", input.supportedProviders || input.supported_providers);
+    appendRepeatedFlag(args, "--capability", input.capabilities);
     const sandboxPlacement = input.sandboxPlacement || input.sandbox_placement || {};
-    appendStringFlag(args, "--sandbox-provider", sandboxPlacement.provider || input.sandboxProvider || input.sandbox_provider || "");
-    appendStringFlag(args, "--sandbox-id", sandboxPlacement.sandbox_id || sandboxPlacement.sandboxId || input.sandboxId || input.sandbox_id || "");
-    appendStringFlag(args, "--sandbox-cwd", sandboxPlacement.cwd || input.sandboxCwd || input.sandbox_cwd || "");
-    appendStringFlag(args, "--sandbox-repo-ref", sandboxPlacement.repo_ref || sandboxPlacement.repoRef || input.sandboxRepoRef || input.sandbox_repo_ref || "");
+    appendStringFlag(args, "--sandbox-provider", sandboxPlacement.provider || input.sandboxProvider || input.sandbox_provider);
+    appendStringFlag(args, "--sandbox-id", sandboxPlacement.sandbox_id || sandboxPlacement.sandboxId || input.sandboxId || input.sandbox_id);
+    appendStringFlag(args, "--sandbox-cwd", sandboxPlacement.cwd || input.sandboxCwd || input.sandbox_cwd);
+    appendStringFlag(args, "--sandbox-repo-ref", sandboxPlacement.repo_ref || sandboxPlacement.repoRef || input.sandboxRepoRef || input.sandbox_repo_ref);
     args.push("--defer-completion");
     const result = this.#run(args);
     rememberTaskRunResult(this, result || {});
@@ -158,19 +151,17 @@ export class FlueDriverClient {
   }
 
   async activeTaskRuns(input = {}) {
-    const args = this.#baseArgs("active-task-runs");
-    const epicId = input.epicId || input.epic_id || this.input.epicId || this.input.epic_id || "";
-    appendStringFlag(args, "--epic-id", epicId);
+    const args = this.#epicArgs("active-task-runs", input);
     appendStringFlag(args, "--limit", input.limit || "");
     return this.#run(args);
   }
 
   async recoverStaleTaskRuns(input = {}) {
     const args = this.#baseArgs("recover-stale-tasks");
-    appendStringFlag(args, "--stale-before", input.staleBefore || input.stale_before || "");
+    appendStringFlag(args, "--stale-before", input.staleBefore || input.stale_before);
     appendStringFlag(args, "--max-age-seconds", input.maxAgeSeconds || input.max_age_seconds || "");
-    appendStringFlag(args, "--error-class", input.errorClass || input.error_class || "");
-    appendStringFlag(args, "--error-message", input.errorMessage || input.error_message || "");
+    appendStringFlag(args, "--error-class", input.errorClass || input.error_class);
+    appendStringFlag(args, "--error-message", input.errorMessage || input.error_message);
     return this.#run(args);
   }
 
@@ -187,12 +178,12 @@ export class FlueDriverClient {
     const args = this.#baseArgs("complete-task");
     appendStringFlag(args, "--task-id", taskId);
     appendStringFlag(args, "--task-run-id", taskRunId);
-    appendStringFlag(args, "--reason", input.reason || "");
-    appendStringFlag(args, "--completion-id", input.completionId || input.completion_id || "");
-    appendStringFlag(args, "--lease-token", input.leaseToken || input.lease_token || remembered?.leaseToken || remembered?.lease_token || "");
-    appendStringFlag(args, "--logs-ref", input.logsRef || input.logs_ref || remembered?.logsRef || remembered?.logs_ref || "");
-    appendStringFlag(args, "--artifacts-ref", input.artifactsRef || input.artifacts_ref || remembered?.artifactsRef || remembered?.artifacts_ref || "");
-    appendRepeatedFlag(args, "--artifact-id", input.artifactIds || input.artifact_ids || remembered?.artifactIds || remembered?.artifact_ids || []);
+    appendStringFlag(args, "--reason", input.reason);
+    appendStringFlag(args, "--completion-id", input.completionId || input.completion_id);
+    appendStringFlag(args, "--lease-token", input.leaseToken || input.lease_token || remembered?.leaseToken || remembered?.lease_token);
+    appendStringFlag(args, "--logs-ref", input.logsRef || input.logs_ref || remembered?.logsRef || remembered?.logs_ref);
+    appendStringFlag(args, "--artifacts-ref", input.artifactsRef || input.artifacts_ref || remembered?.artifactsRef || remembered?.artifacts_ref);
+    appendRepeatedFlag(args, "--artifact-id", input.artifactIds || input.artifact_ids || remembered?.artifactIds || remembered?.artifact_ids);
     return this.#run(args);
   }
 
@@ -204,6 +195,13 @@ export class FlueDriverClient {
     const args = this.#baseArgs("release-task");
     args.push("--task-id", String(taskId));
     return this.#run(args);
+  }
+
+  #epicArgs(command, input) {
+    const args = this.#baseArgs(command);
+    const epicId = input.epicId || input.epic_id || this.input.epicId || this.input.epic_id;
+    appendStringFlag(args, "--epic-id", epicId);
+    return args;
   }
 
   #baseArgs(command) {
@@ -294,6 +292,14 @@ function rememberTaskRunResult(client, result = {}) {
   }
 }
 
+function pickEnv(env, key) {
+  return String(env?.[key] || "").trim();
+}
+
+function agentNameOf(input) {
+  return input.agent || input.agentName || input.agent_name || input.name || "";
+}
+
 function taskPayloadID(input) {
   if (typeof input === "string") {
     return input;
@@ -301,6 +307,3 @@ function taskPayloadID(input) {
   return input.taskId || input.task_id || input.id || "";
 }
 
-function pickEnv(env, key) {
-  return String(env?.[key] || "").trim();
-}

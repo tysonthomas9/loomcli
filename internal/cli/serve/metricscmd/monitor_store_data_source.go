@@ -11,6 +11,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/cli/monitor"
 	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/epicrunner"
 	"github.com/tysonthomas9/loomcli/internal/ops"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui/storeadapter"
@@ -222,7 +223,7 @@ func agentInboxSummariesForMonitor(ctx context.Context, st store.Store, wsKey st
 }
 
 func monitorLeadDeliveryState(agent *domain.Agent, session *domain.AgentSession) string {
-	if agent == nil || !monitorIsLeadRole(agent.RoleName) || strings.TrimSpace(agent.Parent) == "" {
+	if agent == nil || !epicrunner.IsLeadRole(agent.RoleName) || strings.TrimSpace(agent.Parent) == "" {
 		return ""
 	}
 	version := monitorLeadAssignmentVersion(agent)
@@ -236,15 +237,6 @@ func monitorLeadDeliveryState(agent *domain.Agent, session *domain.AgentSession)
 		return "delivered"
 	}
 	return "pending"
-}
-
-func monitorIsLeadRole(role string) bool {
-	switch strings.ToLower(strings.TrimSpace(role)) {
-	case "lead", "orchestrator":
-		return true
-	default:
-		return false
-	}
 }
 
 func monitorLeadAssignmentVersion(agent *domain.Agent) string {

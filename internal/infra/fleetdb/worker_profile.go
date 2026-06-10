@@ -73,10 +73,7 @@ func (s *workerProfileStore) List(ctx context.Context, ws string, filter store.W
 	if filter.Limit > 0 {
 		q.Set("limit", strconv.Itoa(filter.Limit))
 	}
-	path := "/api/v1/" + pathEscape(ws) + "/worker-profiles"
-	if encoded := q.Encode(); encoded != "" {
-		path += "?" + encoded
-	}
+	path := withQuery("/api/v1/"+pathEscape(ws)+"/worker-profiles", q)
 	var resp struct {
 		WorkerProfiles []*domain.WorkerProfile `json:"worker_profiles"`
 	}

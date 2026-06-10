@@ -47,9 +47,7 @@ type Executor struct {
 	NodeID            string
 	LeaseID           string
 	Runner            Runner
-	PollInterval      time.Duration
 	HeartbeatInterval time.Duration
-	StaleRunMaxAge    time.Duration
 }
 
 type ExecutionResult struct {
@@ -116,38 +114,11 @@ func (e *Executor) RunOnce(ctx context.Context) (*ExecutionResult, error) {
 	return result, nil
 }
 
-func (e *Executor) RunLoop(ctx context.Context) error {
-	interval := e.PollInterval
-	if interval <= 0 {
-		interval = 2 * time.Second
-	}
-	timer := time.NewTimer(0)
-	defer timer.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-timer.C:
-			if _, err := e.RecoverStaleOnce(ctx); err != nil {
-				return err
-			}
-			_, err := e.RunOnce(ctx)
-			if err != nil && !errors.Is(err, ErrNoQueuedRun) {
-				return err
-			}
-			timer.Reset(interval)
-		}
-	}
-}
-
 func (e *Executor) RecoverStaleOnce(ctx context.Context) (*store.StaleDriverRunRecoveryResult, error) {
 	if e == nil || e.Store == nil {
 		return nil, fmt.Errorf("store required: %w", domain.ErrInvalid)
 	}
-	maxAge := e.staleRunMaxAge()
-	if maxAge < 0 {
-		return &store.StaleDriverRunRecoveryResult{}, nil
-	}
+	maxAge := 5 * time.Minute
 	recover := store.StaleDriverRunRecovery{
 		MaxAgeSeconds: int64(maxAge / time.Second),
 		Summary:       "driver executor heartbeat expired",
@@ -333,13 +304,6 @@ func (e *Executor) nodeTTL() time.Duration {
 		ttl = interval * 3
 	}
 	return ttl
-}
-
-func (e *Executor) staleRunMaxAge() time.Duration {
-	if e.StaleRunMaxAge == 0 {
-		return 5 * time.Minute
-	}
-	return e.StaleRunMaxAge
 }
 
 func heartbeatDriverRun(ctx context.Context, s store.Store, claimed *domain.DriverRun, interval time.Duration) {

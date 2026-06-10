@@ -275,8 +275,11 @@ func waitForCodexAppServer(ctx context.Context, endpoint string, appErr <-chan e
 func discoverCodexLeadThread(ctx context.Context, cfg CodexLeadRuntimeConfig, runtime CodexRuntimeMetadata, runtimeStartedAt time.Time) {
 	deadline := time.NewTimer(codexThreadDiscoveryTimeout)
 	defer deadline.Stop()
-	ticker := time.NewTicker(codexThreadDiscoveryInterval)
-	defer ticker.Stop()
+	// Each probe dials the app server, so back off exponentially on misses
+	// instead of paying a fixed-rate connection cost for slow startups.
+	interval := codexThreadDiscoveryInterval
+	probe := time.NewTimer(interval)
+	defer probe.Stop()
 	for {
 		select {
 		case <-ctx.Done():
@@ -284,9 +287,14 @@ func discoverCodexLeadThread(ctx context.Context, cfg CodexLeadRuntimeConfig, ru
 		case <-deadline.C:
 			_ = MarkAssignmentDeliveryAttempt(context.Background(), cfg.Store, cfg.Workspace, cfg.SessionID, "codex thread discovery timed out")
 			return
-		case <-ticker.C:
+		case <-probe.C:
 			thread, err := findNewestCodexThread(ctx, runtime.Endpoint, cfg.WorkDir, runtimeStartedAt)
 			if err != nil || thread == nil {
+				interval *= 2
+				if interval > 5*time.Second {
+					interval = 5 * time.Second
+				}
+				probe.Reset(interval)
 				continue
 			}
 			runtime.ThreadID = thread.ID

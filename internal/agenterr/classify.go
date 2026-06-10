@@ -42,6 +42,19 @@ const BackendUnavailableMarker = "loom: backend binary not on PATH"
 // backendUnavailableRe is the precompiled matcher used by classifyFromText.
 var backendUnavailableRe = regexp.MustCompile(regexp.QuoteMeta(BackendUnavailableMarker))
 
+// classifiers maps a backend name to its provider-specific classify function.
+// classifyFromText dispatches through this table; unknown backends fall back
+// to exit-code classification. To add a backend, implement a
+// func(string) *classifyResult (typically via classifyWithPatterns) and
+// register it here.
+var classifiers = map[string]func(string) *classifyResult{
+	"claude":   classifyClaude,
+	"codex":    classifyCodex,
+	"cursor":   classifyCursor,
+	"gemini":   classifyGemini,
+	"opencode": classifyOpenCode,
+}
+
 // classifyWithPatterns runs the shared classification logic against a pattern
 // table. Every per-backend classifier delegates to this function.
 func classifyWithPatterns(text string, patterns []errorPattern) *classifyResult {
@@ -100,17 +113,8 @@ func classifyFromText(text string, exitCode int, backend string) *AgentError {
 	}
 
 	if result == nil {
-		switch backend {
-		case "claude":
-			result = classifyClaude(text)
-		case "codex":
-			result = classifyCodex(text)
-		case "cursor":
-			result = classifyCursor(text)
-		case "gemini":
-			result = classifyGemini(text)
-		case "opencode":
-			result = classifyOpenCode(text)
+		if classify, ok := classifiers[backend]; ok {
+			result = classify(text)
 		}
 	}
 
@@ -155,10 +159,7 @@ func readLogTail(path string, maxLines int) (string, error) {
 		return "", nil
 	}
 
-	readSize := maxLogTailBytes
-	if size < readSize {
-		readSize = size
-	}
+	readSize := min(size, maxLogTailBytes)
 
 	offset := size - readSize
 

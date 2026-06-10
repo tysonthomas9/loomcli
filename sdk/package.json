@@ -28,6 +28,7 @@
   "files": [
     "index.js",
     "index.d.ts",
+    "internal.js",
     "flue.js",
     "flue.d.ts",
     "runner.js",

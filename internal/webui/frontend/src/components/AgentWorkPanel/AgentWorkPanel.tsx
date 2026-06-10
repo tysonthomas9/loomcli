@@ -182,14 +182,12 @@ export function AgentWorkPanel({
       ),
     [groups, workerByTaskId],
   );
-  const activeEpicLabel =
-    focused && selectedAgentIsLead && selectedAgent?.parent === activeEpicId
-      ? "Assigned epic"
-      : "Active epic";
-  const deliveryLabel =
-    focused && selectedAgentIsLead && selectedAgent?.parent === activeEpicId
-      ? leadDeliveryStateLabel(selectedAgent?.delivery_state)
-      : "";
+  const isAssignedEpicFocused =
+    focused && selectedAgentIsLead && selectedAgent?.parent === activeEpicId;
+  const activeEpicLabel = isAssignedEpicFocused ? "Assigned epic" : "Active epic";
+  const deliveryLabel = isAssignedEpicFocused
+    ? leadDeliveryStateLabel(selectedAgent?.delivery_state)
+    : "";
 
   if (!agentName) {
     return (

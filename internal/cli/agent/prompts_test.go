@@ -1188,3 +1188,74 @@ func TestResolveActiveWorkspace_NoConfig(t *testing.T) {
 		t.Errorf("expected nil workspace when config dir is empty, got: %+v", ws)
 	}
 }
+
+func TestCapabilitiesFor(t *testing.T) {
+	tests := []struct {
+		name        string
+		backendName string
+		want        backendCapabilities
+	}{
+		{
+			name:        "claude has all capabilities",
+			backendName: "claude",
+			want: backendCapabilities{
+				supportsSubagentSpawn: true,
+				supportsInspectReview: true,
+			},
+		},
+		{
+			name:        "codex has no special capabilities",
+			backendName: "codex",
+			want:        backendCapabilities{},
+		},
+		{
+			name:        "opencode has no special capabilities",
+			backendName: "opencode",
+			want:        backendCapabilities{},
+		},
+		{
+			name:        "unknown backend has no special capabilities",
+			backendName: "some-future-backend",
+			want:        backendCapabilities{},
+		},
+		{
+			name:        "empty backend name has no special capabilities",
+			backendName: "",
+			want:        backendCapabilities{},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := capabilitiesFor(tc.backendName); got != tc.want {
+				t.Errorf("capabilitiesFor(%q) = %+v, want %+v", tc.backendName, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestStepBuilders_CapabilityDriven(t *testing.T) {
+	spawn := backendCapabilities{supportsSubagentSpawn: true, supportsInspectReview: true}
+	none := backendCapabilities{}
+
+	if got := buildTestStep(spawn); !strings.Contains(got, "spawn agent") {
+		t.Errorf("buildTestStep with subagent spawn should mention spawning an agent, got: %q", got)
+	}
+	if got := buildTestStep(none); strings.Contains(got, "spawn") || strings.Contains(got, "Task tool") {
+		t.Errorf("buildTestStep without subagent spawn should not mention spawn/Task tool, got: %q", got)
+	}
+
+	if got := buildReviewStep(spawn); !strings.Contains(got, "Task tool") {
+		t.Errorf("buildReviewStep with subagent spawn should mention the Task tool, got: %q", got)
+	}
+	if got := buildReviewStep(none); strings.Contains(got, "spawn") || strings.Contains(got, "Task tool") {
+		t.Errorf("buildReviewStep without subagent spawn should not mention spawn/Task tool, got: %q", got)
+	}
+
+	if got := buildInspectReviewStep(spawn); !strings.Contains(got, "inspect-reviewer") {
+		t.Errorf("buildInspectReviewStep with inspect review should mention inspect-reviewer, got: %q", got)
+	}
+	if got := buildInspectReviewStep(none); got != "" {
+		t.Errorf("buildInspectReviewStep without inspect review should be empty, got: %q", got)
+	}
+}

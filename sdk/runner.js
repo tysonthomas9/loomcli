@@ -1,3 +1,5 @@
+import { pickEnv, trim } from "./internal.js";
+
 export const RunnerEnv = Object.freeze({
   baseUrl: "LOOM_FLEET_DB_URL",
   apiKey: "LOOM_FLEET_DB_API_KEY",
@@ -335,23 +337,6 @@ function required(name, value) {
     throw new TypeError(`${name} is required`);
   }
   return out;
-}
-
-function pickEnv(env, ...names) {
-  for (const name of names) {
-    const value = trim(env?.[name]);
-    if (value) {
-      return value;
-    }
-  }
-  return "";
-}
-
-function trim(value) {
-  if (value === undefined || value === null) {
-    return "";
-  }
-  return String(value).trim();
 }
 
 function parseFencingToken(value) {

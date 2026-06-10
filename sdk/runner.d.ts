@@ -6,14 +6,11 @@ export declare const RunnerEnv: Readonly<{
   workspace: "LOOM_WORKSPACE";
   taskRunId: "LOOM_TASK_RUN_ID";
   taskId: "LOOM_TASK_ID";
-  workerProfileId: "LOOM_TASK_RUN_WORKER_PROFILE_ID";
   nodeId: "LOOM_TASK_RUN_NODE_ID";
   leaseId: "LOOM_TASK_RUN_LEASE_ID";
   leaseToken: "LOOM_TASK_RUN_LEASE_TOKEN";
   runnerLeaseToken: "LOOM_RUNNER_LEASE_TOKEN";
   fencingToken: "LOOM_TASK_RUN_FENCING_TOKEN";
-  runnerPlacement: "LOOM_TASK_RUN_RUNNER_PLACEMENT_JSON";
-  sandboxPlacement: "LOOM_TASK_RUN_SANDBOX_PLACEMENT_JSON";
 }>;
 
 export type FetchLike = (input: string, init?: {

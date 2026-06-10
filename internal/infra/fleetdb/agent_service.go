@@ -84,10 +84,7 @@ func (s *agentServiceStore) List(ctx context.Context, ws string, filter store.Ag
 	if filter.Limit > 0 {
 		q.Set("limit", strconv.Itoa(filter.Limit))
 	}
-	path := "/api/v1/" + pathEscape(ws) + "/agent-services"
-	if encoded := q.Encode(); encoded != "" {
-		path += "?" + encoded
-	}
+	path := withQuery("/api/v1/"+pathEscape(ws)+"/agent-services", q)
 	var resp struct {
 		AgentServices []*domain.AgentService `json:"agent_services"`
 	}

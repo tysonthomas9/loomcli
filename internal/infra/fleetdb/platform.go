@@ -52,10 +52,7 @@ func (s *driverStore) List(ctx context.Context, ws string, filter store.DriverFi
 	if filter.Limit > 0 {
 		q.Set("limit", strconv.Itoa(filter.Limit))
 	}
-	path := "/api/v1/" + pathEscape(ws) + "/drivers"
-	if encoded := q.Encode(); encoded != "" {
-		path += "?" + encoded
-	}
+	path := withQuery("/api/v1/"+pathEscape(ws)+"/drivers", q)
 	var resp struct {
 		Drivers []*domain.Driver `json:"drivers"`
 	}
@@ -123,9 +120,7 @@ func (s *driverVersionStore) List(ctx context.Context, ws string, filter store.D
 	if filter.DriverID != "" {
 		path = "/api/v1/" + pathEscape(ws) + "/drivers/" + pathEscape(filter.DriverID) + "/versions"
 	}
-	if encoded := q.Encode(); encoded != "" {
-		path += "?" + encoded
-	}
+	path = withQuery(path, q)
 	var resp struct {
 		DriverVersions []*domain.DriverVersion `json:"driver_versions"`
 	}
@@ -213,10 +208,7 @@ func (s *triggerBindingStore) List(ctx context.Context, ws string, filter store.
 	if filter.Limit > 0 {
 		q.Set("limit", strconv.Itoa(filter.Limit))
 	}
-	path := "/api/v1/" + pathEscape(ws) + "/trigger-bindings"
-	if encoded := q.Encode(); encoded != "" {
-		path += "?" + encoded
-	}
+	path := withQuery("/api/v1/"+pathEscape(ws)+"/trigger-bindings", q)
 	var resp struct {
 		TriggerBindings []*domain.TriggerBinding `json:"trigger_bindings"`
 	}
@@ -295,10 +287,7 @@ func (s *driverRunStore) Events(ctx context.Context, ws, runID, after string, li
 	if limit > 0 {
 		q.Set("limit", strconv.Itoa(limit))
 	}
-	path := "/api/v1/" + pathEscape(ws) + "/driver-runs/" + pathEscape(runID) + "/events"
-	if encoded := q.Encode(); encoded != "" {
-		path += "?" + encoded
-	}
+	path := withQuery("/api/v1/"+pathEscape(ws)+"/driver-runs/"+pathEscape(runID)+"/events", q)
 	var out domain.PlatformEventsPage
 	if err := s.client.do(ctx, "GET", path, nil, &out); err != nil {
 		return nil, err
@@ -329,10 +318,7 @@ func (s *driverRunStore) List(ctx context.Context, ws string, filter store.Drive
 	if filter.Limit > 0 {
 		q.Set("limit", strconv.Itoa(filter.Limit))
 	}
-	path := "/api/v1/" + pathEscape(ws) + "/driver-runs"
-	if encoded := q.Encode(); encoded != "" {
-		path += "?" + encoded
-	}
+	path := withQuery("/api/v1/"+pathEscape(ws)+"/driver-runs", q)
 	var resp struct {
 		DriverRuns []*domain.DriverRun `json:"driver_runs"`
 	}
@@ -544,6 +530,15 @@ func driverStepListQuery(filter store.DriverStepFilter, includeDriverRunID bool)
 	return ""
 }
 
+// leaseTokenHeaders returns the X-Lease-Token header map for lease-fenced
+// task-run operations; nil (no extra headers) when the token is unset.
+func leaseTokenHeaders(token string) map[string]string {
+	if token == "" {
+		return nil
+	}
+	return map[string]string{"X-Lease-Token": token}
+}
+
 type taskRunStore struct{ client *Client }
 
 var _ store.TaskRunStore = (*taskRunStore)(nil)
@@ -583,10 +578,7 @@ func (s *taskRunStore) ClaimQueued(ctx context.Context, ws string, claim store.T
 		"runner_placement":    claim.RunnerPlacement,
 		"sandbox_placement":   claim.SandboxPlacement,
 	}
-	headers := map[string]string{}
-	if claim.LeaseToken != "" {
-		headers["X-Lease-Token"] = claim.LeaseToken
-	}
+	headers := leaseTokenHeaders(claim.LeaseToken)
 	var out domain.TaskRun
 	if err := s.client.doWithHeaders(ctx, "POST", "/api/v1/"+pathEscape(ws)+"/task-runs/claim", body, &out, headers); err != nil {
 		return nil, err
@@ -622,10 +614,7 @@ func (s *taskRunStore) List(ctx context.Context, ws string, filter store.TaskRun
 	if filter.Limit > 0 {
 		q.Set("limit", strconv.Itoa(filter.Limit))
 	}
-	path := "/api/v1/" + pathEscape(ws) + "/task-runs"
-	if encoded := q.Encode(); encoded != "" {
-		path += "?" + encoded
-	}
+	path := withQuery("/api/v1/"+pathEscape(ws)+"/task-runs", q)
 	var resp struct {
 		TaskRuns []*domain.TaskRun `json:"task_runs"`
 	}
@@ -658,10 +647,7 @@ func (s *taskRunStore) Finish(ctx context.Context, ws, taskRunID string, finish 
 	}
 	var out domain.TaskRun
 	path := "/api/v1/" + pathEscape(ws) + "/task-runs/" + pathEscape(taskRunID) + "/finish"
-	headers := map[string]string{}
-	if finish.LeaseToken != "" {
-		headers["X-Lease-Token"] = finish.LeaseToken
-	}
+	headers := leaseTokenHeaders(finish.LeaseToken)
 	if err := s.client.doWithHeaders(ctx, "POST", path, body, &out, headers); err != nil {
 		return nil, err
 	}
@@ -679,10 +665,7 @@ func (s *taskRunStore) Heartbeat(ctx context.Context, ws, taskRunID string, hear
 	}
 	var out domain.TaskRun
 	path := "/api/v1/" + pathEscape(ws) + "/task-runs/" + pathEscape(taskRunID) + "/heartbeat"
-	headers := map[string]string{}
-	if heartbeat.LeaseToken != "" {
-		headers["X-Lease-Token"] = heartbeat.LeaseToken
-	}
+	headers := leaseTokenHeaders(heartbeat.LeaseToken)
 	if err := s.client.doWithHeaders(ctx, "POST", path, body, &out, headers); err != nil {
 		return nil, err
 	}
@@ -716,10 +699,7 @@ func (s *taskRunStore) Complete(ctx context.Context, ws, taskRunID string, compl
 		TaskRun *domain.TaskRun `json:"task_run"`
 	}
 	path := "/api/v1/" + pathEscape(ws) + "/task-runs/" + pathEscape(taskRunID) + "/complete"
-	headers := map[string]string{}
-	if complete.LeaseToken != "" {
-		headers["X-Lease-Token"] = complete.LeaseToken
-	}
+	headers := leaseTokenHeaders(complete.LeaseToken)
 	if err := s.client.doWithHeaders(ctx, "POST", path, body, &resp, headers); err != nil {
 		return nil, err
 	}
@@ -742,10 +722,7 @@ func (s *taskRunStore) AppendLog(ctx context.Context, ws, taskRunID string, appe
 	}
 	var out domain.TaskRunLogEntry
 	path := "/api/v1/" + pathEscape(ws) + "/task-runs/" + pathEscape(taskRunID) + "/logs"
-	headers := map[string]string{}
-	if appendLog.LeaseToken != "" {
-		headers["X-Lease-Token"] = appendLog.LeaseToken
-	}
+	headers := leaseTokenHeaders(appendLog.LeaseToken)
 	if err := s.client.doWithHeaders(ctx, "POST", path, body, &out, headers); err != nil {
 		return nil, err
 	}
@@ -760,10 +737,7 @@ func (s *taskRunStore) ListLogs(ctx context.Context, ws, taskRunID string, filte
 	if filter.Limit > 0 {
 		q.Set("limit", strconv.Itoa(filter.Limit))
 	}
-	path := "/api/v1/" + pathEscape(ws) + "/task-runs/" + pathEscape(taskRunID) + "/logs"
-	if encoded := q.Encode(); encoded != "" {
-		path += "?" + encoded
-	}
+	path := withQuery("/api/v1/"+pathEscape(ws)+"/task-runs/"+pathEscape(taskRunID)+"/logs", q)
 	var resp struct {
 		Logs []*domain.TaskRunLogEntry `json:"logs"`
 	}

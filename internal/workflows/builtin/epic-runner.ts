@@ -328,6 +328,7 @@ async function attemptLeadMessageDelivery(loom, leadName, message) {
     return {
       state: stringValue(delivery && delivery.state) || "pending",
       reason: stringValue(delivery && delivery.reason),
+      inboxMessageId: stringValue(delivery && (delivery.inboxMessageId || delivery.inbox_message_id)),
     };
   } catch (err) {
     return {
@@ -353,24 +354,11 @@ function startLeadMessageDeliveryRetry(loom, leadName, intervalMs, assignmentDel
       return state.inFlight;
     }
     state.inFlight = (async () => {
-      if (assignmentDelivery && assignmentDelivery.deliveryState() === "unsupported") {
-        state.unsupported = true;
-        state.messages = [];
-        return { state: "unsupported" };
-      }
       if (assignmentDelivery && !assignmentDelivery.isDone()) {
-        const delivery = await assignmentDelivery.flush();
-        if ((delivery && delivery.state === "unsupported") || assignmentDelivery.deliveryState() === "unsupported") {
-          state.unsupported = true;
-          state.messages = [];
-          return { state: "unsupported" };
-        }
-        if (!assignmentDelivery.isDone()) {
-          return { state: "pending", reason: "lead assignment delivery is pending" };
-        }
+        await assignmentDelivery.flush();
       }
       const delivery = await attemptLeadMessageDelivery(loom, state.leadName, state.messages[0]);
-      if (delivery.state === "delivered" || delivery.state === "none") {
+      if (delivery.state === "delivered" || delivery.state === "none" || delivery.state === "queued" || delivery.inboxMessageId) {
         state.messages.shift();
       } else if (delivery.state === "unsupported") {
         state.unsupported = true;

@@ -366,3 +366,12 @@ func extractErrorCode(body []byte) string {
 
 // pathEscape wraps url.PathEscape so call sites stay compact.
 func pathEscape(s string) string { return url.PathEscape(s) }
+
+// withQuery appends the encoded query to path, or returns path unchanged
+// when q is empty. Shared by every list endpoint.
+func withQuery(path string, q url.Values) string {
+	if encoded := q.Encode(); encoded != "" {
+		return path + "?" + encoded
+	}
+	return path
+}

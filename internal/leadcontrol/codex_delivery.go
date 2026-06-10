@@ -40,6 +40,11 @@ type LeadMessageDeliveryOptions struct {
 	TriggerDeliveryID string
 }
 
+const (
+	assignmentInboxSourceKind      = "lead_assignment"
+	assignmentInboxSourceRefPrefix = "lead-assignment://"
+)
+
 func DeliverCurrentAssignmentToCodex(ctx context.Context, st store.Store, workspace, leadName string) (*DeliveryResult, error) {
 	assignment, err := epicrunner.LoadLeadAssignmentContext(ctx, st, workspace, leadName)
 	if err != nil || assignment == nil {
@@ -51,28 +56,42 @@ func DeliverCurrentAssignmentToCodex(ctx context.Context, st store.Store, worksp
 		return nil, err
 	}
 	if session == nil {
-		return pendingDelivery("", "lead has no orchestration session"), nil
+		inbox, err := createLeadAssignmentInboxMessage(ctx, st, workspace, assignment, "")
+		if err != nil {
+			return nil, err
+		}
+		result := pendingDelivery("", "lead has no orchestration session")
+		if inbox != nil {
+			result.InboxMessageID = inbox.InboxMessageID
+		}
+		return result, nil
 	}
-	result := &DeliveryResult{State: DeliveryStatePending, SessionID: session.SessionID}
+	runtime := RuntimeMetadataFromSession(session)
+	result := &DeliveryResult{State: DeliveryStatePending, SessionID: session.SessionID, Runtime: runtime}
 	if strings.TrimSpace(session.Metadata[MetadataDeliveryVersion]) == assignment.AssignmentVersion {
 		result.State = DeliveryStateDelivered
 		return result, nil
 	}
 
-	runtime := RuntimeMetadataFromSession(session)
-	result.Runtime = runtime
-	if !hasCodexRuntimeMetadata(session.Metadata) {
-		return recordPendingDelivery(ctx, st, workspace, session.SessionID, result, "controlled Codex runtime is not ready"), nil
-	}
-	if codexRuntimeUnsupported(session.Metadata, runtime) {
+	if hasCodexRuntimeMetadata(session.Metadata) && codexRuntimeUnsupported(session.Metadata, runtime) {
 		result.State = DeliveryStateUnsupported
 		result.Reason = "lead session is not a controlled Codex runtime"
 		return result, nil
 	}
+	inbox, err := createLeadAssignmentInboxMessage(ctx, st, workspace, assignment, session.SessionID)
+	if err != nil {
+		return nil, err
+	}
+	if inbox != nil {
+		result.InboxMessageID = inbox.InboxMessageID
+	}
+	if !hasCodexRuntimeMetadata(session.Metadata) {
+		return recordPendingDelivery(ctx, st, workspace, session.SessionID, result, "controlled Codex runtime is not ready"), nil
+	}
 	if pendingReason := codexRuntimePendingReason(runtime); pendingReason != "" {
 		return recordPendingDelivery(ctx, st, workspace, session.SessionID, result, pendingReason), nil
 	}
-	return deliverCodexAssignmentTurn(ctx, st, workspace, session.SessionID, assignment, runtime, result)
+	return deliverNextCodexInboxMessage(ctx, st, workspace, assignment.LeadName, session.SessionID, runtime, result)
 }
 
 func DeliverLeadMessageToCodex(ctx context.Context, st store.Store, workspace, leadName, message string) (*DeliveryResult, error) {
@@ -175,33 +194,6 @@ func DeliverPendingLeadMessagesToCodex(ctx context.Context, st store.Store, work
 	return deliverNextCodexInboxMessage(ctx, st, workspace, leadName, session.SessionID, runtime, result)
 }
 
-func deliverCodexAssignmentTurn(
-	ctx context.Context,
-	st store.Store,
-	workspace string,
-	sessionID string,
-	assignment *epicrunner.LeadAssignmentContext,
-	runtime CodexRuntimeMetadata,
-	result *DeliveryResult,
-) (*DeliveryResult, error) {
-	message := formatCodexAssignmentTurn(assignment)
-	delivered, err := deliverCodexLeadTurn(ctx, st, workspace, sessionID, runtime, result, message, "assignment delivery complete")
-	if err != nil {
-		return nil, err
-	}
-	if delivered.State != DeliveryStateDelivered {
-		if delivered.Reason != "" {
-			_ = MarkAssignmentDeliveryAttempt(ctx, st, workspace, sessionID, delivered.Reason)
-		}
-		return delivered, nil
-	}
-	if err := MarkAssignmentDelivered(ctx, st, workspace, sessionID, assignment.EpicID, assignment.AssignmentVersion); err != nil {
-		return nil, err
-	}
-	delivered.Reason = ""
-	return delivered, nil
-}
-
 func deliverNextCodexInboxMessage(
 	ctx context.Context,
 	st store.Store,
@@ -235,13 +227,21 @@ func deliverNextCodexInboxMessage(
 		return nil, err
 	}
 	result.InboxMessageID = msg.InboxMessageID
-	delivered, err := deliverCodexLeadTurn(ctx, st, workspace, sessionID, runtime, result, msg.Body, "lead message delivery complete")
+	closeReason := "lead message delivery complete"
+	if isAssignmentInboxMessage(msg) {
+		closeReason = "assignment delivery complete"
+	}
+	delivered, err := deliverCodexLeadTurn(ctx, st, workspace, sessionID, runtime, result, msg.Body, closeReason)
 	if err != nil {
 		return nil, err
 	}
 	if delivered.State != DeliveryStateDelivered {
 		if delivered.Reason != "" {
-			_ = MarkLeadMessageDeliveryAttempt(ctx, st, workspace, sessionID, delivered.Reason)
+			if isAssignmentInboxMessage(msg) {
+				_ = MarkAssignmentDeliveryAttempt(ctx, st, workspace, sessionID, delivered.Reason)
+			} else {
+				_ = MarkLeadMessageDeliveryAttempt(ctx, st, workspace, sessionID, delivered.Reason)
+			}
 		}
 		if _, err := st.AgentInboxMessages().Complete(ctx, workspace, msg.InboxMessageID, store.AgentInboxMessageComplete{
 			Outcome:    "retry",
@@ -257,6 +257,11 @@ func deliverNextCodexInboxMessage(
 		DeliveredThreadID: runtime.ThreadID,
 	}); err != nil {
 		return nil, err
+	}
+	if epicID, version, ok := assignmentFromInboxMessage(msg); ok {
+		if err := MarkAssignmentDelivered(ctx, st, workspace, sessionID, epicID, version); err != nil {
+			return nil, err
+		}
 	}
 	return delivered, nil
 }
@@ -318,7 +323,20 @@ func createLeadInboxMessage(ctx context.Context, st store.Store, workspace, lead
 		TaskRunID:         opts.TaskRunID,
 		TriggerEventID:    opts.TriggerEventID,
 		TriggerDeliveryID: opts.TriggerDeliveryID,
-		DedupeKey:         leadInboxDedupeKey(sessionID, message),
+		DedupeKey:         leadInboxDedupeKey(workspace, leadName, message, opts),
+	})
+}
+
+func createLeadAssignmentInboxMessage(ctx context.Context, st store.Store, workspace string, assignment *epicrunner.LeadAssignmentContext, sessionID string) (*domain.AgentInboxMessage, error) {
+	if assignment == nil {
+		return nil, nil
+	}
+	message := formatCodexAssignmentTurn(assignment)
+	return agentinbox.Enqueue(ctx, st, workspace, assignment.LeadName, message, agentinbox.MessageOptions{
+		SessionID:  sessionID,
+		SourceKind: assignmentInboxSourceKind,
+		SourceRef:  assignmentInboxSourceRef(assignment),
+		DedupeKey:  leadAssignmentInboxDedupeKey(workspace, assignment),
 	})
 }
 
@@ -342,8 +360,53 @@ func hasQueuedLeadInboxMessages(ctx context.Context, st store.Store, workspace, 
 	return false
 }
 
-func leadInboxDedupeKey(sessionID, message string) string {
-	return agentinbox.ContentDedupeKey("agent-message:"+strings.TrimSpace(sessionID), sessionID, message)
+func leadInboxDedupeKey(workspace, leadName, message string, opts LeadMessageDeliveryOptions) string {
+	return agentinbox.ContentDedupeKey(
+		"agent-message",
+		workspace,
+		leadName,
+		opts.SourceKind,
+		opts.SourceRef,
+		opts.DriverRunID,
+		opts.TaskRunID,
+		opts.TriggerEventID,
+		opts.TriggerDeliveryID,
+		message,
+	)
+}
+
+func leadAssignmentInboxDedupeKey(workspace string, assignment *epicrunner.LeadAssignmentContext) string {
+	if assignment == nil {
+		return ""
+	}
+	return agentinbox.ContentDedupeKey("lead-assignment", workspace, assignment.LeadName, assignment.EpicID, assignment.AssignmentVersion)
+}
+
+func assignmentInboxSourceRef(assignment *epicrunner.LeadAssignmentContext) string {
+	if assignment == nil {
+		return assignmentInboxSourceRefPrefix
+	}
+	return assignmentInboxSourceRefPrefix + strings.TrimSpace(assignment.EpicID) + "/" + strings.TrimSpace(assignment.AssignmentVersion)
+}
+
+func isAssignmentInboxMessage(msg *domain.AgentInboxMessage) bool {
+	return msg != nil && strings.TrimSpace(msg.SourceKind) == assignmentInboxSourceKind
+}
+
+func assignmentFromInboxMessage(msg *domain.AgentInboxMessage) (string, string, bool) {
+	if !isAssignmentInboxMessage(msg) {
+		return "", "", false
+	}
+	ref := strings.TrimSpace(msg.SourceRef)
+	if !strings.HasPrefix(ref, assignmentInboxSourceRefPrefix) {
+		return "", "", false
+	}
+	payload := strings.TrimPrefix(ref, assignmentInboxSourceRefPrefix)
+	slash := strings.LastIndex(payload, "/")
+	if slash <= 0 || slash == len(payload)-1 {
+		return "", "", false
+	}
+	return payload[:slash], payload[slash+1:], true
 }
 
 func codexRuntimePendingReason(runtime CodexRuntimeMetadata) string {

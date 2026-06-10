@@ -158,10 +158,7 @@ func (s *agentSessionStore) List(ctx context.Context, ws string, filter store.Ag
 	if clientSideKind == "" && clientSideParent == "" && filter.Limit > 0 {
 		q.Set("limit", strconv.Itoa(filter.Limit))
 	}
-	path := "/api/v1/" + pathEscape(ws) + "/agent-sessions"
-	if encoded := q.Encode(); encoded != "" {
-		path += "?" + encoded
-	}
+	path := withQuery("/api/v1/"+pathEscape(ws)+"/agent-sessions", q)
 	var resp struct {
 		AgentSessions []*domain.AgentSession `json:"agent_sessions"`
 	}
@@ -276,10 +273,7 @@ func (s *terminalSessionStore) List(ctx context.Context, ws string, filter store
 	if filter.Limit > 0 {
 		q.Set("limit", strconv.Itoa(filter.Limit))
 	}
-	path := "/api/v1/" + pathEscape(ws) + "/terminal-sessions"
-	if encoded := q.Encode(); encoded != "" {
-		path += "?" + encoded
-	}
+	path := withQuery("/api/v1/"+pathEscape(ws)+"/terminal-sessions", q)
 	var resp struct {
 		TerminalSessions []*domain.TerminalSession `json:"terminal_sessions"`
 	}
@@ -369,10 +363,7 @@ func (s *artifactStore) List(ctx context.Context, ws string, filter store.Artifa
 	if filter.Limit > 0 {
 		q.Set("limit", strconv.Itoa(filter.Limit))
 	}
-	path := "/api/v1/" + pathEscape(ws) + "/artifacts"
-	if encoded := q.Encode(); encoded != "" {
-		path += "?" + encoded
-	}
+	path := withQuery("/api/v1/"+pathEscape(ws)+"/artifacts", q)
 	var resp struct {
 		Artifacts []*domain.Artifact `json:"artifacts"`
 	}
@@ -652,10 +643,7 @@ func (s *agentLeaseStore) List(ctx context.Context, ws string, filter store.Agen
 	if filter.Limit > 0 {
 		q.Set("limit", strconv.Itoa(filter.Limit))
 	}
-	path := "/api/v1/" + pathEscape(ws) + "/agent-leases"
-	if encoded := q.Encode(); encoded != "" {
-		path += "?" + encoded
-	}
+	path := withQuery("/api/v1/"+pathEscape(ws)+"/agent-leases", q)
 	var resp struct {
 		AgentLeases []*domain.AgentLease `json:"agent_leases"`
 	}
@@ -732,10 +720,7 @@ func (s *agentOwnershipLeaseStore) List(ctx context.Context, ws string, filter s
 	if filter.Limit > 0 {
 		q.Set("limit", strconv.Itoa(filter.Limit))
 	}
-	path := "/api/v1/" + pathEscape(ws) + "/agent-ownership-leases"
-	if encoded := q.Encode(); encoded != "" {
-		path += "?" + encoded
-	}
+	path := withQuery("/api/v1/"+pathEscape(ws)+"/agent-ownership-leases", q)
 	var resp struct {
 		AgentOwnershipLeases []*domain.AgentOwnershipLease `json:"agent_ownership_leases"`
 	}
@@ -809,10 +794,7 @@ func (s *agentCommandStore) List(ctx context.Context, ws string, filter store.Ag
 	if filter.Limit > 0 {
 		q.Set("limit", strconv.Itoa(filter.Limit))
 	}
-	path := "/api/v1/" + pathEscape(ws) + "/agent-commands"
-	if encoded := q.Encode(); encoded != "" {
-		path += "?" + encoded
-	}
+	path := withQuery("/api/v1/"+pathEscape(ws)+"/agent-commands", q)
 	var resp struct {
 		AgentCommands []*domain.AgentCommand `json:"agent_commands"`
 	}
@@ -906,10 +888,7 @@ func (s *agentInboxMessageStore) List(ctx context.Context, ws string, filter sto
 	if filter.Limit > 0 {
 		q.Set("limit", strconv.Itoa(filter.Limit))
 	}
-	path := "/api/v1/" + pathEscape(ws) + "/agent-inbox-messages"
-	if encoded := q.Encode(); encoded != "" {
-		path += "?" + encoded
-	}
+	path := withQuery("/api/v1/"+pathEscape(ws)+"/agent-inbox-messages", q)
 	var resp struct {
 		AgentInboxMessages []*domain.AgentInboxMessage `json:"agent_inbox_messages"`
 	}

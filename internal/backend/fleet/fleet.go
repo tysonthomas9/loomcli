@@ -405,10 +405,6 @@ func (b *FleetBackend) Ready(ctx context.Context, opts backend.ReadyOpts) ([]bac
 	return filterReadyIssues(readyIssuesToData(issues), opts), nil
 }
 
-func (b *FleetBackend) Blocked(ctx context.Context, opts backend.BlockedOpts) ([]backend.IssueData, error) {
-	return b.canonicalBlocked(ctx, opts)
-}
-
 // Stats builds lifecycle counts from fleet-db's status count endpoint and
 // canonical operational counts from FleetDB's computed ready/blocked/deferred
 // views.

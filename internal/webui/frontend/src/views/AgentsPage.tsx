@@ -30,13 +30,13 @@ import {
 import { IssueDetailPanel } from "@/components/IssueDetailPanel/IssueDetailPanel";
 import {
   EPIC_RUNNER_WORKFLOW_NAME,
-  getWorkflowRun,
   isTerminalWorkflowRunStatus,
   startWorkflowRun,
   type WorkflowRun,
 } from "@/api";
 import { useAgentStoreInstance } from "@/hooks";
 import { useToast } from "@/hooks/ui/useToast";
+import { useWorkflowRunStreams } from "@/hooks/workflows/useWorkflowRunStreams";
 import type { Issue } from "@/types";
 import type { TerminalInputRequest } from "@/components/TerminalView/TerminalView";
 
@@ -89,62 +89,60 @@ function AgentsPageInner(): JSX.Element {
     setEpicRunnerRuns({});
   }, [workspaceId]);
 
-  useEffect(() => {
-    if (!workspaceId) return;
-    const activeRuns = Object.entries(epicRunnerRuns).filter(
-      ([, run]) => run.run_id && !isTerminalWorkflowRunStatus(run.status),
-    );
-    if (activeRuns.length === 0) return;
-
-    let cancelled = false;
-    const interval = window.setInterval(() => {
-      void (async () => {
-        const results = await Promise.allSettled(
-          activeRuns.map(async ([epicId, run]) => ({
-            epicId,
-            run: await getWorkflowRun(workspaceId, run.run_id),
-          })),
-        );
-        if (cancelled) return;
-
-        const updates = results
-          .filter(
-            (
-              result,
-            ): result is PromiseFulfilledResult<{
-              epicId: string;
-              run: WorkflowRun;
-            }> => result.status === "fulfilled",
-          )
-          .map((result) => result.value);
-        if (updates.length === 0) return;
-
-        setEpicRunnerRuns((prev) => {
-          let next = prev;
-          for (const update of updates) {
-            const current = prev[update.epicId];
-            if (
-              current &&
-              current.status === update.run.status &&
-              current.updated_at === update.run.updated_at &&
-              current.last_heartbeat === update.run.last_heartbeat
-            ) {
-              continue;
-            }
-            if (next === prev) next = { ...prev };
-            next[update.epicId] = update.run;
-          }
-          return next;
-        });
+  // Live run-status updates: one SSE stream per active epic-runner run
+  // (with slow-poll fallback inside the hook), replacing the old 2.5s
+  // getWorkflowRun polling loop.
+  const handleRunUpdate = useCallback(
+    (epicId: string, run: WorkflowRun) => {
+      setEpicRunnerRuns((prev) => {
+        const current = prev[epicId];
+        if (
+          current &&
+          current.status === run.status &&
+          current.updated_at === run.updated_at &&
+          current.last_heartbeat === run.last_heartbeat
+        ) {
+          return prev;
+        }
+        return { ...prev, [epicId]: run };
+      });
+      if (isTerminalWorkflowRunStatus(run.status)) {
+        // Final refresh so workers spawned by the run settle into their
+        // end-of-run state once the periodic refresh below stops.
         void agentStore.getState().fetchData();
-      })();
-    }, 2500);
+      }
+    },
+    [agentStore],
+  );
+  useWorkflowRunStreams({
+    workspaceId,
+    runs: epicRunnerRuns,
+    onRunUpdate: handleRunUpdate,
+  });
 
-    return () => {
-      cancelled = true;
-      window.clearInterval(interval);
-    };
-  }, [agentStore, epicRunnerRuns, workspaceId]);
+  // Workers appear while a run is active, so keep refreshing the agent list
+  // on a slow cadence independent of run-status updates. Ticks are skipped
+  // while a previous fetch is still in flight, and the interval stops as
+  // soon as no run is active.
+  const hasActiveRuns = useMemo(
+    () =>
+      Object.values(epicRunnerRuns).some(
+        (run) => run.run_id && !isTerminalWorkflowRunStatus(run.status),
+      ),
+    [epicRunnerRuns],
+  );
+  useEffect(() => {
+    if (!workspaceId || !hasActiveRuns) return;
+    let inFlight = false;
+    const interval = window.setInterval(() => {
+      if (inFlight) return;
+      inFlight = true;
+      void Promise.resolve(agentStore.getState().fetchData()).finally(() => {
+        inFlight = false;
+      });
+    }, 5000);
+    return () => window.clearInterval(interval);
+  }, [agentStore, hasActiveRuns, workspaceId]);
 
   // Queue the built-in epic runner workflow for the selected lead. The
   // workflow owns lead validation, binding, and child-task reconciliation.
