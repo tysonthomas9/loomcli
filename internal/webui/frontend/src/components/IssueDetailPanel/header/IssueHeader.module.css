@@ -253,8 +253,37 @@
   margin-left: 0;
 }
 
-.moveButton + .closeButton {
+.moveButton + .closeButton,
+.moveButton + .maximizeButton,
+.maximizeButton + .closeButton {
   margin-left: 0;
+}
+
+.maximizeButton {
+  margin-left: auto;
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-sm);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  transition:
+    background-color var(--transition-fast),
+    color var(--transition-fast);
+}
+
+.maximizeButton:hover {
+  background-color: var(--color-bg-hover);
+  color: var(--color-text);
+}
+
+.maximizeButton:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
 }
 
 .closeButton {

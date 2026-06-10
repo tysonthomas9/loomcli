@@ -9,6 +9,11 @@
   background-color: var(--color-bg-hover);
   border-radius: 8px;
   margin-bottom: var(--space-3);
+  flex-shrink: 0;
+}
+
+.subSwitcher[data-embedded="true"] {
+  margin-bottom: 0;
 }
 
 .tab {

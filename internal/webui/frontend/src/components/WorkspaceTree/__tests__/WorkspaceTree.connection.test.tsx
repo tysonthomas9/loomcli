@@ -287,7 +287,9 @@ describe("WorkspaceTree connection status", () => {
         />,
       );
 
-      const badge = container.querySelector('[class*="collapsedBadge"]');
+      const badge = container.querySelector(
+        '[class*="collapsedConnectionBadge"]',
+      );
       expect(badge).toBeInTheDocument();
       expect(badge!.textContent).toBe("!");
       expect(badge!.getAttribute("data-disconnected")).toBe("true");
@@ -304,13 +306,15 @@ describe("WorkspaceTree connection status", () => {
         />,
       );
 
-      const badge = container.querySelector('[class*="collapsedBadge"]');
+      const badge = container.querySelector(
+        '[class*="collapsedConnectionBadge"]',
+      );
       expect(badge).toBeInTheDocument();
       expect(badge!.textContent).toBe("!");
       expect(badge!.getAttribute("data-disconnected")).toBe("true");
     });
 
-    it("does not show collapsed badge when collapsed and connected (even with agents)", () => {
+    it("shows agent pills when collapsed and connected", () => {
       reposOverride = { repos: oneRepo };
       agentOverride = {
         agents: [
@@ -325,12 +329,15 @@ describe("WorkspaceTree connection status", () => {
         ],
       };
 
-      const { container } = render(
+      render(
         <WorkspaceTree defaultCollapsed={true} connectionState="connected" />,
       );
 
-      const badge = container.querySelector('[class*="collapsedBadge"]');
-      expect(badge).not.toBeInTheDocument();
+      expect(screen.getByTestId("collapsed-agent-rail")).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: /a1/i })).toBeInTheDocument();
+      expect(
+        document.querySelector('[class*="collapsedConnectionBadge"]'),
+      ).not.toBeInTheDocument();
     });
   });
 
@@ -361,13 +368,15 @@ describe("WorkspaceTree connection status", () => {
       expect(screen.queryByText("Connection lost")).not.toBeInTheDocument();
     });
 
-    it("does not show collapsed badge when no agents and no connection props", () => {
+    it("shows empty collapsed agent rail when no agents", () => {
       reposOverride = { repos: oneRepo };
 
-      const { container } = render(<WorkspaceTree defaultCollapsed={true} />);
+      render(<WorkspaceTree defaultCollapsed={true} />);
 
-      const badge = container.querySelector('[class*="collapsedBadge"]');
-      expect(badge).not.toBeInTheDocument();
+      expect(screen.getByTestId("collapsed-agent-rail")).toBeInTheDocument();
+      expect(
+        document.querySelector('[class*="collapsedConnectionBadge"]'),
+      ).not.toBeInTheDocument();
     });
   });
 });

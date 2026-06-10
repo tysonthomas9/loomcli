@@ -3,7 +3,7 @@
  * A "..." button with a popover containing secondary filter controls (GroupBy).
  */
 
-import { useState, useCallback, useEffect, useRef } from "react";
+import { useState, useCallback, useEffect, useRef, type ReactNode } from "react";
 
 import type { GroupByOption } from "@/components/FilterBar";
 
@@ -24,16 +24,22 @@ export interface MoreFiltersMenuProps {
   groupBy: GroupByOption;
   /** Callback when group by changes */
   onGroupByChange: (value: GroupByOption) => void;
+  /** Priority/type/repo filters active — shows indicator dot */
+  hasSecondaryFilters?: boolean;
+  /** Extra filter controls rendered inside the popover */
+  children?: ReactNode;
 }
 
 export function MoreFiltersMenu({
   groupBy,
   onGroupByChange,
+  hasSecondaryFilters = false,
+  children,
 }: MoreFiltersMenuProps): JSX.Element {
   const [isOpen, setIsOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
 
-  const hasActiveGroupBy = groupBy !== "none";
+  const hasActiveGroupBy = groupBy !== "none" && groupBy !== "epic";
 
   // Close on outside click
   useEffect(() => {
@@ -80,7 +86,9 @@ export function MoreFiltersMenu({
       >
         &#x2026;
       </button>
-      {hasActiveGroupBy && <span className={styles.indicator} />}
+      {(hasActiveGroupBy || hasSecondaryFilters) && (
+        <span className={styles.indicator} />
+      )}
       {isOpen && (
         <div className={styles.menu} data-testid="more-filters-menu">
           <div className={styles.menuItem}>
@@ -102,6 +110,7 @@ export function MoreFiltersMenu({
               ))}
             </select>
           </div>
+          {children ? <div className={styles.menuFilters}>{children}</div> : null}
         </div>
       )}
     </div>

@@ -44,9 +44,9 @@
 
 .title {
   margin: 0;
-  font-size: 2rem;
+  font-size: 1rem;
   font-weight: 700;
-  letter-spacing: -0.03em;
+  letter-spacing: 0.02em;
   color: var(--color-text-primary);
 }
 
@@ -97,7 +97,7 @@
   }
 
   .title {
-    font-size: 1.75rem;
+    font-size: 1rem;
   }
 }
 
@@ -120,7 +120,7 @@
   }
 
   .title {
-    font-size: 1.5rem;
+    font-size: 0.9375rem;
   }
 
   .main {
@@ -135,7 +135,7 @@
   }
 
   .title {
-    font-size: 1.3rem;
+    font-size: 0.9375rem;
   }
 }
 

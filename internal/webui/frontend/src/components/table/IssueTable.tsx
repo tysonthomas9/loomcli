@@ -4,11 +4,14 @@
  */
 
 import { Fragment, useMemo, useRef } from "react";
+import { useStore } from "zustand";
 
 import type { BlockedInfo } from "@/types/issue";
 import type { SortDirection } from "@/hooks";
 import { useSort } from "@/hooks";
+import { useAgentStoreInstance } from "@/hooks/common";
 import { useWorkspaceContext } from "@/hooks/workspace";
+import { buildEpicLeadClaims } from "@/utils/agentRole";
 import type { Issue } from "@/types";
 
 import type { ColumnDef } from "./columns";
@@ -88,6 +91,12 @@ export function IssueTable({
   // Show repo column only in multi-repo workspaces with "All Workspaces" selected
   const { isMultiRepo, isAllSelected } = useWorkspaceContext();
   const showRepoColumn = isMultiRepo && isAllSelected;
+  const agentStore = useAgentStoreInstance();
+  const agents = useStore(agentStore, (s) => s.agents);
+  const epicLeadClaims = useMemo(
+    () => (groupByEpic ? buildEpicLeadClaims(agents) : new Map<string, string>()),
+    [agents, groupByEpic],
+  );
   const effectiveColumns = useMemo(
     () => (showRepoColumn ? columns : columns.filter((c) => c.id !== "repo")),
     [columns, showRepoColumn],
@@ -214,6 +223,28 @@ export function IssueTable({
               {stats.doneCount} done · {stats.activeCount} active ·{" "}
               {stats.blockedCount} blocked
             </span>
+            {group.epic ? (
+              epicLeadClaims.has(group.id) ? (
+                <span
+                  className="issue-table__runner-badge"
+                  title={`Epic run by ${epicLeadClaims.get(group.id)}`}
+                  data-testid={`issue-table-runner-${group.id}`}
+                >
+                  <span
+                    className="issue-table__runner-dot"
+                    aria-hidden="true"
+                  />
+                  {epicLeadClaims.get(group.id)}
+                </span>
+              ) : (
+                <span
+                  className="issue-table__unclaimed-badge"
+                  data-testid={`issue-table-unclaimed-${group.id}`}
+                >
+                  Unclaimed
+                </span>
+              )
+            ) : null}
           </div>
         </td>
       </tr>

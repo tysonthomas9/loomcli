@@ -56,6 +56,10 @@ export interface IssueHeaderProps {
   prNumber?: string;
   /** Enable sticky mode styling */
   sticky?: boolean;
+  /** Whether the panel is maximized to a 50/50 split */
+  isMaximized?: boolean;
+  /** Toggle panel maximize (50/50 split with the board) */
+  onToggleMaximize?: () => void;
   /** Additional CSS class name */
   className?: string;
 }
@@ -94,6 +98,8 @@ export function IssueHeader({
   prUrl,
   prNumber,
   sticky,
+  isMaximized,
+  onToggleMaximize,
   className,
 }: IssueHeaderProps): JSX.Element {
   const rootClassName = [styles.issueHeader, sticky && styles.sticky, className]
@@ -237,6 +243,44 @@ export function IssueHeader({
             </svg>
           </button>
         )}
+        {onToggleMaximize ? (
+          <button
+            type="button"
+            className={styles.maximizeButton}
+            onClick={onToggleMaximize}
+            aria-label={
+              isMaximized ? "Restore panel width" : "Maximize panel to half screen"
+            }
+            aria-pressed={isMaximized}
+            data-testid="header-maximize-button"
+          >
+            <svg
+              width="20"
+              height="20"
+              viewBox="0 0 20 20"
+              fill="none"
+              aria-hidden="true"
+            >
+              {isMaximized ? (
+                <path
+                  d="M7 13H5V5h8v2M13 7h2v8H7v-2"
+                  stroke="currentColor"
+                  strokeWidth="1.5"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              ) : (
+                <path
+                  d="M5 7h10v10H5V7zM7 5h10v10"
+                  stroke="currentColor"
+                  strokeWidth="1.5"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              )}
+            </svg>
+          </button>
+        ) : null}
         <button
           className={styles.closeButton}
           onClick={onClose}

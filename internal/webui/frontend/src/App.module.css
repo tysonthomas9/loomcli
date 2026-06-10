@@ -5,6 +5,45 @@
  */
 
 /* ===========================
+ * Brand (wireframe wf-header pin 1)
+ * =========================== */
+.brandButton {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 4px 8px;
+  margin: 0;
+  border: none;
+  border-radius: var(--radius-md);
+  background: transparent;
+  cursor: pointer;
+  font: inherit;
+  color: var(--color-text-primary);
+  transition: background-color var(--transition-fast);
+}
+
+.brandButton:hover {
+  background: var(--color-bg-hover);
+}
+
+.brandButton:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
+.brandMark {
+  color: var(--color-primary);
+  font-size: 1.125rem;
+  line-height: 1;
+}
+
+.brandName {
+  font-size: 1rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+/* ===========================
  * Actions Container (user-area)
  * =========================== */
 .headerControls {

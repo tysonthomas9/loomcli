@@ -202,7 +202,7 @@ describe("WorkspaceTree", () => {
       fireEvent.change(screen.getByLabelText("Repository path or URL"), {
         target: { value: "/repos/api" },
       });
-      fireEvent.click(screen.getByRole("button", { name: "Add Repo" }));
+      fireEvent.click(screen.getByRole("button", { name: "Add" }));
 
       await waitFor(() => {
         expect(mockAddWorkspaceRepos).toHaveBeenCalledWith(TEST_WS_ID, {
@@ -222,7 +222,7 @@ describe("WorkspaceTree", () => {
       expect(screen.getByLabelText("Repository path or URL")).toHaveValue(
         "https://github.com/octocat/Hello-World",
       );
-      fireEvent.click(screen.getByRole("button", { name: "Add Repo" }));
+      fireEvent.click(screen.getByRole("button", { name: "Add" }));
 
       await waitFor(() => {
         expect(mockAddWorkspaceRepos).toHaveBeenCalledWith(TEST_WS_ID, {
@@ -255,9 +255,11 @@ describe("WorkspaceTree", () => {
       rerender(<WorkspaceTree defaultCollapsed={false} />);
 
       await waitFor(() => {
-        expect(screen.getByLabelText("Repository path or URL")).toHaveValue("");
+        expect(screen.getByText("hello-world")).toBeInTheDocument();
       });
-      expect(screen.getByText("hello-world")).toBeInTheDocument();
+      expect(
+        screen.queryByRole("form", { name: "Add repository form" }),
+      ).not.toBeInTheDocument();
     });
 
     it("clones a remote repository URL into an empty workspace", async () => {
@@ -270,7 +272,7 @@ describe("WorkspaceTree", () => {
       fireEvent.change(screen.getByLabelText("Repository path or URL"), {
         target: { value: "https://github.com/octocat/Hello-World" },
       });
-      fireEvent.click(screen.getByRole("button", { name: "Add Repo" }));
+      fireEvent.click(screen.getByRole("button", { name: "Add" }));
 
       await waitFor(() => {
         expect(mockAddWorkspaceRepos).toHaveBeenCalledWith(TEST_WS_ID, {
@@ -402,12 +404,15 @@ describe("WorkspaceTree", () => {
   });
 
   describe("empty state", () => {
-    it("shows empty message when no repos", () => {
+    it("shows add-repo panel in repos section when no repos", () => {
       reposOverride = { repos: [], isLoading: false, error: null };
 
       render(<WorkspaceTree defaultCollapsed={false} />);
 
-      expect(screen.getByText("No repos in workspace")).toBeInTheDocument();
+      expect(screen.getByRole("heading", { name: "Repos" })).toBeInTheDocument();
+      expect(
+        screen.getByRole("form", { name: "Add repository form" }),
+      ).toBeInTheDocument();
     });
   });
 
@@ -456,13 +461,15 @@ describe("WorkspaceTree", () => {
         />,
       );
 
-      const badge = container.querySelector('[class*="collapsedBadge"]');
+      const badge = container.querySelector(
+        '[class*="collapsedConnectionBadge"]',
+      );
       expect(badge).toBeInTheDocument();
       expect(badge!.textContent).toBe("!");
       expect(badge!.getAttribute("data-disconnected")).toBe("true");
     });
 
-    it("does not show collapsed badge when connected and no disconnected state", () => {
+    it("shows collapsed agent rail when connected", () => {
       reposOverride = {
         repos: [
           {
@@ -474,12 +481,11 @@ describe("WorkspaceTree", () => {
         ],
       };
 
-      const { container } = render(
+      render(
         <WorkspaceTree defaultCollapsed={true} connectionState="connected" />,
       );
 
-      const badge = container.querySelector('[class*="collapsedBadge"]');
-      expect(badge).not.toBeInTheDocument();
+      expect(screen.getByTestId("collapsed-agent-rail")).toBeInTheDocument();
     });
   });
 

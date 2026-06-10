@@ -54,6 +54,24 @@
   transform: translateX(0);
 }
 
+/* Pin 16: maximize to a 50/50 split so the board stays visible. */
+.overlay.maximized {
+  background-color: transparent;
+  pointer-events: none;
+}
+
+.overlay.maximized.open {
+  background-color: transparent;
+}
+
+.overlay.maximized .panel {
+  width: 50%;
+  min-width: 360px;
+  max-width: none;
+  pointer-events: auto;
+  box-shadow: var(--panel-shadow-strong);
+}
+
 .content {
   flex: 1;
   overflow: hidden auto;

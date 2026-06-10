@@ -288,24 +288,42 @@ export function AgentWorkPanel({
       <div className={styles.header}>
         {focused && groups[0] ? (
           <>
-            <div className={styles.activeEpicTag}>
-              <span aria-hidden="true" className={styles.activeEpicTagDot} />
-              {activeEpicLabel}
-              {deliveryLabel ? (
-                <span className={styles.deliveryStatePill}>
-                  {deliveryLabel}
-                </span>
-              ) : null}
+            <div className={styles.queueHeadRow}>
+              <span className={styles.label}>Open queue</span>
+              <span className={styles.openTotal}>
+                <strong>{totalTasks - displayCounts.done}</strong> open
+              </span>
             </div>
             <div className={styles.activeEpicTitle}>
+              <span className={isOrphanGroup(groups[0]) ? styles.orphanChip : styles.epicChip}>
+                {isOrphanGroup(groups[0]) ? "UNASSIGNED" : "EPIC"}
+              </span>
               <span className={styles.activeEpicTitleText}>
                 {groups[0].epicTitle}
               </span>
               <code className={styles.activeEpicId}>{groups[0].epicId}</code>
             </div>
             <div className={styles.progressLine}>
-              {displayCounts.done} of {totalTasks} done
+              {agentName ? (
+                <>
+                  claimed by {agentName} · {displayCounts.done} of {totalTasks}{" "}
+                  done
+                </>
+              ) : (
+                <>
+                  {displayCounts.done} of {totalTasks} done
+                </>
+              )}
             </div>
+            {deliveryLabel ? (
+              <div className={styles.activeEpicTag}>
+                <span aria-hidden="true" className={styles.activeEpicTagDot} />
+                {activeEpicLabel}
+                <span className={styles.deliveryStatePill}>
+                  {deliveryLabel}
+                </span>
+              </div>
+            ) : null}
           </>
         ) : (
           <div className={styles.label}>
@@ -438,6 +456,7 @@ export function AgentWorkPanel({
                 key={group.epicId}
                 group={group}
                 visibleTasks={visibleTasks}
+                remainingOpen={remainingOpen}
                 collapsible={collapsible}
                 collapsed={collapsed}
                 onToggleCollapse={() =>
@@ -483,6 +502,7 @@ export function AgentWorkPanel({
 function EpicGroupCard({
   group,
   visibleTasks,
+  remainingOpen,
   collapsible,
   collapsed,
   onToggleCollapse,
@@ -498,6 +518,8 @@ function EpicGroupCard({
   group: EpicGroup;
   /** Tasks after the header status filter; superset is group.tasks. */
   visibleTasks: Issue[];
+  /** Open (non-done) tasks in this epic group. */
+  remainingOpen: number;
   /** Lead mode: epic cards collapse to their header row. */
   collapsible: boolean;
   collapsed: boolean;
@@ -536,10 +558,10 @@ function EpicGroupCard({
             className={styles.expandPill}
             onClick={onToggleCollapse}
             aria-expanded={!collapsed}
-            aria-label={`${collapsed ? "Expand" : "Collapse"} epic ${group.epicId} (${group.totalCount} open)`}
+            aria-label={`${collapsed ? "Expand" : "Collapse"} epic ${group.epicId} (${remainingOpen} open)`}
           >
             <span aria-hidden="true">{collapsed ? "›" : "⌄"}</span>
-            {group.totalCount}
+            {remainingOpen}
           </button>
         ) : (
           <span className={styles.epicCount}>
@@ -571,7 +593,15 @@ function EpicGroupCard({
             title={`Claimed by lead ${claimedBy}`}
             aria-label={`Epic ${group.epicId} claimed by lead ${claimedBy}`}
           >
-            claimed by {claimedBy}
+            claimed by {claimedBy} · {remainingOpen} open
+          </span>
+        ) : collapsible && remainingOpen > 0 ? (
+          <span
+            className={styles.epicClaim}
+            title={`${remainingOpen} open tasks`}
+            aria-label={`Epic ${group.epicId} unclaimed with ${remainingOpen} open tasks`}
+          >
+            Unclaimed · {remainingOpen} open
           </span>
         ) : null}
       </div>

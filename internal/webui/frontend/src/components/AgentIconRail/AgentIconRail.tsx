@@ -97,7 +97,7 @@ export function AgentIconRail({ onAddClick }: AgentIconRailProps): JSX.Element {
         </div>
       ) : (
         orderedAgents.map((agent) => (
-          <AgentIcon
+          <AgentAvatarButton
             key={agent.name}
             agent={agent}
             selected={agent.name === selectedName}
@@ -172,14 +172,16 @@ function isLeadRole(role: string | undefined): boolean {
   return normalized === "lead" || normalized === "orchestrator";
 }
 
-function AgentIcon({
+export function AgentAvatarButton({
   agent,
   selected,
   onClick,
+  size = 38,
 }: {
   agent: LoomAgentStatus;
   selected: boolean;
   onClick: () => void;
+  size?: number;
 }): JSX.Element {
   const parsed = useMemo(
     () => parseLoomStatus(agent.status ?? ""),
@@ -207,8 +209,8 @@ function AgentIcon({
       data-selected={selected || undefined}
       style={{
         position: "relative",
-        width: 38,
-        height: 38,
+        width: size,
+        height: size,
         padding: 0,
         borderRadius: "50%",
         background: avatarBg,
@@ -220,7 +222,7 @@ function AgentIcon({
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
-        fontSize: 14,
+        fontSize: size <= 32 ? 12 : 14,
         fontWeight: 700,
         cursor: "pointer",
         flexShrink: 0,

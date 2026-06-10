@@ -228,6 +228,8 @@ interface DefaultContentProps {
   isLoading: boolean;
   error: string | null;
   onClose: () => void;
+  isPanelMaximized?: boolean;
+  onTogglePanelMaximize?: () => void;
   onRetry?: () => void;
   /** Callback when issue is updated (e.g., title changed) */
   onIssueUpdate?: (issue: Issue) => void;
@@ -389,6 +391,8 @@ function DefaultContent({
   isLoading,
   error,
   onClose,
+  isPanelMaximized,
+  onTogglePanelMaximize,
   onRetry,
   onIssueUpdate,
   onApprove,
@@ -1141,6 +1145,10 @@ function DefaultContent({
           onStatusChange={handleStatusChange}
           isSavingStatus={isSavingStatus}
           showPriority={true}
+          {...(onTogglePanelMaximize !== undefined && {
+            onToggleMaximize: onTogglePanelMaximize,
+            isMaximized: isPanelMaximized,
+          })}
           {...(canRunEpicWorkflow && {
             onRunEpic: handleRunEpicWorkflow,
             isRunningEpic: isStartingEpicRun,
@@ -1626,6 +1634,15 @@ export function IssueDetailPanel({
   inline = false,
 }: IssueDetailPanelProps): JSX.Element {
   const panelRef = useRef<HTMLElement>(null);
+  const [isPanelMaximized, setIsPanelMaximized] = useState(false);
+
+  useEffect(() => {
+    if (!isOpen) setIsPanelMaximized(false);
+  }, [isOpen]);
+
+  const togglePanelMaximize = useCallback(() => {
+    setIsPanelMaximized((prev) => !prev);
+  }, []);
 
   // Handle Escape key to close panel via global shortcut layer system.
   // Inline mode skips this — the embedding view owns close semantics.
@@ -1654,6 +1671,10 @@ export function IssueDetailPanel({
       isLoading={isLoading ?? false}
       error={error ?? null}
       onClose={onClose}
+      {...(!inline && {
+        isPanelMaximized,
+        onTogglePanelMaximize: togglePanelMaximize,
+      })}
       {...(onApprove !== undefined && { onApprove })}
       {...(onReject !== undefined && { onReject })}
       {...(onIssueUpdate !== undefined && { onIssueUpdate })}
@@ -1692,14 +1713,19 @@ export function IssueDetailPanel({
   }
 
   // Build root class name
-  const rootClassName = [styles.overlay, isOpen && styles.open, className]
+  const rootClassName = [
+    styles.overlay,
+    isOpen && styles.open,
+    isPanelMaximized && styles.maximized,
+    className,
+  ]
     .filter(Boolean)
     .join(" ");
 
   return (
     <div
       className={rootClassName}
-      onClick={onClose}
+      onClick={isPanelMaximized ? undefined : onClose}
       data-testid="issue-detail-overlay"
       aria-hidden={!isOpen}
     >

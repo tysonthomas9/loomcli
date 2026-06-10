@@ -6,7 +6,7 @@ import type { Page } from "@playwright/test";
  *
  * Tests the full user journey of a project lead checking current project status:
  *   1. Kanban board renders issues in correct columns with priority badges
- *   2. Work Queue counts match the loom status data
+ *   2. Repos section lists workspace repositories
  *   3. Agent cards render in sidebar with correct status
  *   4. Click agent card opens AgentDetailPanel
  *   5. Switch to Logs tab shows log content area
@@ -573,17 +573,11 @@ test.describe("E2E Journey: Project status at a glance", () => {
     await expect(readyColumn.locator('article[data-priority="2"]')).toHaveCount(1);
   });
 
-  test("Work Queue counts match issue distribution", async () => {
-    // Wait for Work Queue section to be visible (computed from issue list)
+  test("Repos section lists workspace repositories", async () => {
     const sidebar = page.getByRole("complementary");
-    await expect(sidebar.getByText("Work Queue")).toBeVisible({ timeout: 10000 });
-
-    // Work Queue counts are derived from issues in the workspace:
-    // Backlog (deferred) = 1, Open = 3, Blocked = 1, In Progress = 1, Needs Review = 1, Done = 1
-    await expect(sidebar.getByText("Backlog")).toBeVisible();
-    await expect(sidebar.getByText("Open")).toBeVisible();
-    await expect(sidebar.getByText("In Progress")).toBeVisible();
-    await expect(sidebar.getByText("Needs Review")).toBeVisible();
+    await expect(sidebar.getByRole("heading", { name: "Repos" })).toBeVisible({
+      timeout: 10000,
+    });
 
     // Verify sidebar footer shows agent activity summary (depends on async agent data)
     await expect(page.getByText(/\d+ working/)).toBeVisible({ timeout: 10000 });

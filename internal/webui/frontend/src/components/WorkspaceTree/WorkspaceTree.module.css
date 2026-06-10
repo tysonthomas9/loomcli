@@ -17,8 +17,8 @@
 }
 
 .sidebar.collapsed {
-  width: 40px;
-  min-width: 40px;
+  width: 56px;
+  min-width: 56px;
 }
 
 .toggleButton {
@@ -86,6 +86,11 @@
   border-left: 1px solid var(--color-border);
   padding: 0;
   justify-content: center;
+}
+
+.sidebar.collapsed .selectorRow .toggleButton {
+  width: 100%;
+  border-left: none;
 }
 
 .content {
@@ -289,21 +294,23 @@
   }
 }
 
-.collapsedBadge {
+.collapsedConnectionBadge {
   position: absolute;
-  top: 50px;
+  bottom: var(--space-3);
   left: 50%;
   transform: translateX(-50%);
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 24px;
-  height: 24px;
-  background: var(--color-status-working);
+  width: 20px;
+  height: 20px;
+  background: var(--color-warning, #f59e0b);
   color: white;
-  border-radius: 50%;
-  font-size: 0.75rem;
-  font-weight: 600;
+  border-radius: var(--radius-full);
+  font-size: 0.6875rem;
+  font-weight: var(--font-weight-bold);
+  flex-shrink: 0;
+  z-index: 1;
 }
 
 /* Radio indicator for workspace/repo selection */
@@ -819,20 +826,6 @@
 .daemonPromptDesc {
   font-size: 0.6875rem;
   color: var(--color-text-tertiary);
-}
-
-/* Collapsed badge health-based colors */
-.collapsedBadge[data-health="green"] {
-  background: var(--color-success);
-}
-
-.collapsedBadge[data-health="red"] {
-  background: var(--color-status-error);
-}
-
-/* Collapsed badge in disconnected state (overrides health color) */
-.collapsedBadge[data-disconnected="true"] {
-  background: var(--color-warning, #f59e0b);
 }
 
 /* Error badge for collapsed sidebar */

@@ -1,53 +1,238 @@
 /**
- * ReposSection styles.
- * Static repo inventory list.
+ * ReposSection styles — Aether wireframe REPOS block.
  */
 
 .section {
-  padding: 0.25rem 0;
-  border-bottom: 1px solid var(--color-border);
+  padding: 0.875rem 0.625rem;
+  border-bottom: none;
 }
 
-.header {
-  padding: 0.375rem 1rem 0.25rem;
-  font-size: 0.6875rem;
-  font-weight: 600;
+.heading {
+  margin: 0 0 0.625rem;
+  padding: 0 0.25rem;
+  font-size: 0.625rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
   text-transform: uppercase;
-  letter-spacing: 0.05em;
   color: var(--color-text-tertiary);
 }
 
 .list {
   display: flex;
   flex-direction: column;
+  gap: 0.125rem;
 }
 
 .row {
   display: flex;
   align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  gap: 0.75rem;
+  margin-top: 0.125rem;
+  padding: 0.4375rem 0.5rem;
+  border: none;
+  border-radius: 9px;
+  background: transparent;
+  cursor: pointer;
+  font: inherit;
+  color: var(--color-text-primary);
+  text-align: left;
+  transition: background-color 0.15s ease;
+}
+
+.row:hover {
+  background: var(--color-bg-hover);
+}
+
+.row:focus-visible {
+  outline: 2px solid var(--color-focus);
+  outline-offset: -2px;
+}
+
+.rowLeft {
+  display: flex;
+  align-items: center;
   gap: 0.5rem;
-  padding: 0.375rem 1rem;
+  min-width: 0;
   font-size: 0.8125rem;
 }
 
 .icon {
-  width: 14px;
-  height: 14px;
   flex-shrink: 0;
   color: var(--color-text-tertiary);
 }
 
 .name {
-  flex: 1;
-  color: var(--color-text-primary);
-  white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 500;
 }
 
-.branch {
-  font-size: 0.75rem;
+.rowRight {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  flex-shrink: 0;
+}
+
+.countPill {
+  border: 1.5px solid var(--color-border);
+  background: var(--color-bg-card);
+  border-radius: 999px;
+  padding: 0 0.375rem;
+  font-size: 0.625rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-text-secondary);
+  line-height: 1.4;
+}
+
+.branchPill {
+  border: 1.4px solid var(--color-border);
+  background: var(--color-bg-card);
+  border-radius: 999px;
+  padding: 0.0625rem 0.5rem;
+  font-size: 0.625rem;
   color: var(--color-text-tertiary);
-  font-family: monospace;
   white-space: nowrap;
+}
+
+.addRepoWrap {
+  position: relative;
+  margin-top: 0.5rem;
+}
+
+.addRepoTrigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3125rem;
+  padding: 0.375rem 0.625rem;
+  border: 1.6px solid var(--color-border);
+  border-radius: 7px;
+  background: var(--color-bg-card);
+  color: var(--color-text-primary);
+  font-size: 0.75rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition:
+    border-color 0.15s ease,
+    background-color 0.15s ease;
+}
+
+.addRepoTrigger:hover {
+  border-color: var(--color-primary);
+  background: var(--color-bg-hover);
+}
+
+.addRepoTrigger:focus-visible {
+  outline: 2px solid var(--color-focus);
+  outline-offset: 2px;
+}
+
+.addRepoIcon {
+  font-size: 0.8125rem;
+  line-height: 1;
+}
+
+.addRepoPanel {
+  margin-top: 0.5rem;
+  padding: 0.75rem;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md, 8px);
+  background: var(--color-bg);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+}
+
+.addRepoLabel {
+  display: block;
+  margin-bottom: 0.375rem;
+  font-size: 0.625rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--color-text-tertiary);
+}
+
+.addRepoInput {
+  width: 100%;
+  min-width: 0;
+  height: 2rem;
+  padding: 0 0.625rem;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-card);
+  color: var(--color-text-primary);
+  font-size: 0.75rem;
+}
+
+.addRepoInput:focus {
+  outline: 2px solid var(--color-focus);
+  outline-offset: -1px;
+}
+
+.browseButton {
+  margin-top: 0.375rem;
+  height: 1.75rem;
+  padding: 0 0.625rem;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text-primary);
+  font-size: 0.75rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.browseButton:hover:not(:disabled) {
+  background: var(--color-bg-hover);
+}
+
+.browseButton:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.addRepoActions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.625rem;
+}
+
+.submitButton {
+  padding: 0.375rem 0.75rem;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: var(--color-primary);
+  color: white;
+  font-size: 0.75rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.submitButton:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.cancelButton {
+  padding: 0.25rem 0.375rem;
+  border: none;
+  background: transparent;
+  color: var(--color-text-tertiary);
+  font-size: 0.75rem;
+  cursor: pointer;
+}
+
+.cancelButton:hover:not(:disabled) {
+  color: var(--color-text-primary);
+}
+
+.addRepoError {
+  margin-top: 0.5rem;
+  color: var(--color-danger);
+  font-size: 0.75rem;
+  line-height: 1.3;
 }

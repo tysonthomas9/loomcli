@@ -27,7 +27,7 @@ import {
 } from "@/api/workspace";
 import type { IssueContext } from "@/api/terminal";
 import { buildShareUrl } from "@/utils/buildShareUrl";
-import { getReviewType, getWorkQueueCounts } from "@/utils/issue";
+import { getOpenIssueCountByRepo, getReviewType } from "@/utils/issue";
 import {
   isOnboardingRepo,
   ONBOARDING_AGENT_NAME,
@@ -52,16 +52,15 @@ import { ConnectionStatus } from "@/components/ConnectionStatus/ConnectionStatus
 import { StaleDataBanner } from "@/components/StaleDataBanner/StaleDataBanner";
 import { WorkspaceStatusBadge } from "@/components/WorkspaceStatusBadge/WorkspaceStatusBadge";
 import { ToastContainer } from "@/components/Toast/ToastContainer";
+import { BoardToolbar } from "@/components/BoardToolbar";
 import { FilterBar } from "@/components/FilterBar/FilterBar";
-import { MoreFiltersMenu } from "@/components/MoreFiltersMenu/MoreFiltersMenu";
 import { SearchInput } from "@/components/search/SearchInput";
 import { SearchScopeIndicator } from "@/components/search/SearchScopeIndicator";
 import { IssueDetailPanel } from "@/components/IssueDetailPanel/IssueDetailPanel";
 import { AgentDetailPanel } from "@/components/AgentDetailPanel/AgentDetailPanel";
-import { AgentIconRail } from "@/components/AgentIconRail/AgentIconRail";
+import { AgentIconRail } from "@/components/AgentIconRail";
 import { WorkspaceTree } from "@/components/WorkspaceTree/WorkspaceTree";
 import { NavRail } from "@/components/NavRail/NavRail";
-import { ViewSubSwitcher } from "@/components/ViewSubSwitcher/ViewSubSwitcher";
 import { ThemeToggle } from "@/components/ThemeToggle/ThemeToggle";
 import { KeyboardCheatsheet } from "@/components/KeyboardCheatsheet/KeyboardCheatsheet";
 import { WorkspaceSwitcher } from "@/components/WorkspaceSwitcher/WorkspaceSwitcher";
@@ -438,8 +437,10 @@ function App() {
     return map;
   }, [activeView, issues, blockedIssuesData]);
 
-  // Compute Work Queue counts from workspace-scoped issues for sidebar display.
-  const workQueueCounts = useMemo(() => getWorkQueueCounts(issues), [issues]);
+  const openIssueCountByRepo = useMemo(
+    () => getOpenIssueCountByRepo(issues),
+    [issues],
+  );
 
   const { toasts, showToast, dismissToast } = useToast();
   const mountedRef = useRef(true);
@@ -1302,7 +1303,10 @@ function App() {
     activeView === "graph" ||
     activeView === "issue-detail";
 
-  const headerNavigation = (
+  const isIssueBoardView =
+    activeView === "kanban" || activeView === "table";
+
+  const headerNavigation = isIssueBoardView ? undefined : (
     <div className={styles.headerControls}>
       <div className={styles.searchWrapper}>
         {searchScopeName && (
@@ -1339,23 +1343,23 @@ function App() {
           variant="header"
           showClear={true}
         />
-        <MoreFiltersMenu
-          groupBy={filters.groupBy ?? DEFAULT_GROUP_BY}
-          onGroupByChange={syncedFilterActions.setGroupBy}
-        />
       </div>
-      <button
-        className={styles.newIssueButton}
-        onClick={() => setShowCreateIssue(true)}
-        aria-label="New Issue"
-        data-testid="new-issue-button"
-      >
-        + New Issue
-      </button>
     </div>
   );
 
-  const headerTitle = (
+  const headerTitle = isIssueBoardView ? (
+    <button
+      type="button"
+      className={styles.brandButton}
+      onClick={() => navigateToView("kanban")}
+      aria-label="Aether home — return to Kanban board"
+    >
+      <span className={styles.brandMark} aria-hidden="true">
+        ◇
+      </span>
+      <span className={styles.brandName}>Aether</span>
+    </button>
+  ) : (
     <WorkspaceBreadcrumb
       workspaceName={isMultiRepo ? (workspace?.name ?? null) : null}
       activeView={activeView}
@@ -1364,6 +1368,8 @@ function App() {
 
   const headerActions = (
     <div className={styles.headerActions}>
+      <ThemeToggle theme={theme} onToggle={toggleTheme} />
+      <UserMenu />
       <WorkspaceStatusBadge
         isWorkspaceAvailable={isWorkspaceAvailable}
         mode={connectionMode}
@@ -1371,8 +1377,6 @@ function App() {
         lastError={lastError}
         onRetry={workspaceRetryNow}
       />
-      <UserMenu />
-      <ThemeToggle theme={theme} onToggle={toggleTheme} />
       <ConnectionStatus
         state={connectionState}
         onRetry={retryConnection}
@@ -1401,7 +1405,7 @@ function App() {
         connectionLost={isConnectionLost}
         disconnectedSince={staleBannerDisconnectedSince}
         onRetryConnection={staleBannerRetry}
-        workQueueCounts={workQueueCounts}
+        openIssueCountByRepo={openIssueCountByRepo}
         onTreeSelect={handleTreeIssueSelect}
       />
     );
@@ -1446,10 +1450,24 @@ function App() {
             }
           >
             <div className={styles.workspaceMainContent}>
-              <ViewSubSwitcher
-                activeView={activeView}
-                onChange={navigateToView}
-              />
+              {isIssueBoardView ? (
+                <BoardToolbar
+                  activeView={activeView}
+                  onViewChange={navigateToView}
+                  searchValue={searchValue}
+                  onSearchChange={setSearchValue}
+                  onSearchClear={handleSearchClear}
+                  searchInputRef={searchInputRef as RefObject<HTMLInputElement>}
+                  searchScopeName={searchScopeName}
+                  onScopeClear={handleScopeClear}
+                  searchPlaceholder={
+                    searchScopeName
+                      ? `Search in ${searchScopeName}...`
+                      : "Search tasks..."
+                  }
+                  onNewIssue={() => setShowCreateIssue(true)}
+                />
+              ) : null}
               {(showStaleBanner || isConnectionLost) &&
                 staleBannerDisconnectedSince !== null &&
                 !(

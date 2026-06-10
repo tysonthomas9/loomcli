@@ -13,6 +13,8 @@ import styles from "./ViewSubSwitcher.module.css";
 export interface ViewSubSwitcherProps {
   activeView: ViewMode;
   onChange: (view: ViewMode) => void;
+  /** When true, drops standalone margin (used inside BoardToolbar). */
+  embedded?: boolean;
 }
 
 const SUB_VIEWS: { id: ViewMode; label: string }[] = [
@@ -23,6 +25,7 @@ const SUB_VIEWS: { id: ViewMode; label: string }[] = [
 export function ViewSubSwitcher({
   activeView,
   onChange,
+  embedded = false,
 }: ViewSubSwitcherProps): JSX.Element | null {
   if (activeView !== "kanban" && activeView !== "table") {
     return null;
@@ -52,6 +55,7 @@ export function ViewSubSwitcher({
       className={styles.subSwitcher}
       role="tablist"
       aria-label="View mode"
+      data-embedded={embedded || undefined}
       onKeyDown={handleKeyDown}
     >
       {SUB_VIEWS.map((view) => {
