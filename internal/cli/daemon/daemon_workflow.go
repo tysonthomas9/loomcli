@@ -99,23 +99,24 @@ func (d *Daemon) runWorkflowReconciler(ctx context.Context, fleetURL, flueURL st
 	if err != nil {
 		return err
 	}
-	issueBackend := d.issueBackend
+	workspace := d.sup.WorkspaceID
 	rec, err := workflows.NewEpicReconciler(workflows.EpicReconcilerConfig{
-		Workspace: d.sup.WorkspaceID,
-		NodeID:    workflowNodeID(),
-		Store:     store,
-		Plane:     plane,
-		Logger:    logger,
-		Tick:      func() { d.sup.RecordTick(supervisor.GoroutineWorkflowRunner) },
+		Workspace:    workspace,
+		NodeID:       workflowNodeID(),
+		Store:        store,
+		Plane:        plane,
+		FleetBaseURL: fleetURL,
+		Logger:       logger,
+		Tick:         func() { d.sup.RecordTick(supervisor.GoroutineWorkflowRunner) },
+		// Resolve the parent epic straight from fleet-db: the
+		// IssueBackend detail conversion drops parent_id today, and the
+		// reconciler must not silently lose wake signals to that.
 		ResolveEpic: func(ctx context.Context, issueID string) (string, bool) {
-			if issueBackend == nil {
+			parent, err := store.IssueParent(ctx, workspace, issueID)
+			if err != nil || parent == "" {
 				return "", false
 			}
-			detail, err := issueBackend.Get(ctx, issueID)
-			if err != nil || detail == nil || detail.Parent == "" {
-				return "", false
-			}
-			return detail.Parent, true
+			return parent, true
 		},
 	})
 	if err != nil {

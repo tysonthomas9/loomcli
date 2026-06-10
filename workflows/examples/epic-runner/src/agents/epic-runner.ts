@@ -100,7 +100,9 @@ const closeEpic = defineTool({
 export default createAgent(() => ({
 	name: 'epic-runner',
 	description: 'Level-triggered epic reconciler: advances one epic per wake.',
-	model: 'anthropic/claude-sonnet-4-6',
+	// Override with e.g. LOOM_WORKFLOW_MODEL=openai-codex/gpt-5.4 to run
+	// on Codex CLI auth (see app.ts) instead of an Anthropic API key.
+	model: process.env.LOOM_WORKFLOW_MODEL ?? 'anthropic/claude-sonnet-4-6',
 	instructions: `You are an epic runner — a reconciler that advances one epic per wake.
 
 Each message you receive is one wake: a JSON object with action,

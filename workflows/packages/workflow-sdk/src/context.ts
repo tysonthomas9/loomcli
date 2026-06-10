@@ -12,6 +12,8 @@ export interface WakeContext {
 	workspace: string;
 	epicId: string;
 	runId: string;
+	/** FleetDB base URL for this wake; falls back to LOOM_FLEET_BASE_URL. */
+	fleetBaseUrl: string;
 }
 
 /** Parses the reconciler's wake message. Throws on malformed input. */
@@ -28,6 +30,9 @@ export function parseWakeMessage(message: string): WakeContext {
 		workspace: str('workspace') || envWorkspace(),
 		epicId: str('epic_id'),
 		runId: str('run_id'),
+		// Prefer the per-wake URL: the env value is frozen at dev-server
+		// start and goes stale when the embedded fleet-db restarts.
+		fleetBaseUrl: str('fleet_base_url'),
 	};
 	if (!ctx.workspace) {
 		throw new Error('wake message missing workspace (and LOOM_WORKSPACE unset)');

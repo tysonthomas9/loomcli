@@ -38,6 +38,10 @@ func (s DriverRunStatus) Terminal() bool {
 }
 
 // Driver is an installed workflow program (fleet-db Driver record).
+//
+// The struct doubles as the create request body; fleet-db's decoder
+// rejects unknown fields, so response-only fields (timestamps) carry
+// omitzero to stay out of requests.
 type Driver struct {
 	DriverID        string            `json:"driver_id"`
 	Name            string            `json:"name"`
@@ -46,15 +50,18 @@ type Driver struct {
 	ActiveVersionID string            `json:"active_version_id,omitempty"`
 	Status          string            `json:"status,omitempty"`
 	Metadata        map[string]string `json:"metadata,omitempty"`
-	CreatedAt       time.Time         `json:"created_at"`
-	UpdatedAt       time.Time         `json:"updated_at"`
+	CreatedAt       time.Time         `json:"created_at,omitzero"`
+	UpdatedAt       time.Time         `json:"updated_at,omitzero"`
 }
 
 // DriverVersion is an immutable build of a driver. fleet-db requires
 // source_digest and bundle_digest; dev-mode stamps placeholder digests.
+// Doubles as the create request body (see Driver): driver_id rides in
+// the URL on create, and created_at is response-only, so both must be
+// omitted from requests when empty.
 type DriverVersion struct {
 	VersionID        string            `json:"version_id"`
-	DriverID         string            `json:"driver_id"`
+	DriverID         string            `json:"driver_id,omitempty"`
 	Version          int               `json:"version"`
 	SourceRef        string            `json:"source_ref,omitempty"`
 	SourceDigest     string            `json:"source_digest"`
@@ -64,7 +71,7 @@ type DriverVersion struct {
 	Manifest         map[string]string `json:"manifest,omitempty"`
 	ValidationStatus string            `json:"validation_status,omitempty"`
 	CreatedBy        string            `json:"created_by,omitempty"`
-	CreatedAt        time.Time         `json:"created_at"`
+	CreatedAt        time.Time         `json:"created_at,omitzero"`
 }
 
 // DriverRun is one admission-checked execution of a driver. For the

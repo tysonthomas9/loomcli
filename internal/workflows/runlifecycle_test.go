@@ -90,7 +90,7 @@ func TestCaptureStream_AggregatesAndTerminates(t *testing.T) {
 			{Type: "text_delta", Data: json.RawMessage(`{"type":"text_delta","text":"hello "}`)},
 			{Type: "text_delta", Data: json.RawMessage(`{"type":"text_delta","text":"world"}`)},
 			{Type: "tool_call", Data: json.RawMessage(`{"type":"tool_call","toolName":"advance_epic"}`)},
-			{Type: "turn", Data: json.RawMessage(`{"type":"turn","usage":{"inputTokens":100,"outputTokens":42}}`)},
+			{Type: "turn", Data: json.RawMessage(`{"type":"turn","usage":{"input":100,"output":42}}`)},
 			{Type: "idle", Data: json.RawMessage(`{"type":"idle"}`)},
 		}
 	})

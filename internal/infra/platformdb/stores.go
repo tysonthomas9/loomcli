@@ -242,6 +242,24 @@ func (s *ledgerStore) Complete(ctx context.Context, ws, actionID string, status 
 	return &out, nil
 }
 
+// IssueParent resolves an issue's parent epic ID straight from
+// fleet-db ("" when the issue has no parent). The reconciler uses this
+// for issue-event wake routing instead of the IssueBackend detail
+// path, which currently drops fleet-db's parent_id in conversion.
+func (c *Client) IssueParent(ctx context.Context, ws, issueID string) (string, error) {
+	var out struct {
+		ParentID string `json:"parent_id"`
+		Parent   string `json:"parent"`
+	}
+	if err := c.do(ctx, "GET", wsPath(ws, "issues/"+pathEscape(issueID)), nil, &out); err != nil {
+		return "", err
+	}
+	if out.ParentID != "" {
+		return out.ParentID, nil
+	}
+	return out.Parent, nil
+}
+
 type eventStore struct{ c *Client }
 
 var _ platform.EventStore = (*eventStore)(nil)

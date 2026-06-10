@@ -100,15 +100,16 @@ func CaptureStream(ctx context.Context, h execplane.StreamHandle, opts CaptureOp
 				res.ToolCalls++
 				logger.Debug("flue tool call", "data", string(e.Data))
 			case "turn":
+				// pi-ai turn usage: {"usage":{"input":N,"output":N,...}}.
 				var body struct {
 					Usage struct {
-						InputTokens  int64 `json:"inputTokens"`
-						OutputTokens int64 `json:"outputTokens"`
+						Input  int64 `json:"input"`
+						Output int64 `json:"output"`
 					} `json:"usage"`
 				}
 				_ = json.Unmarshal(e.Data, &body)
-				res.Usage.InputTokens += body.Usage.InputTokens
-				res.Usage.OutputTokens += body.Usage.OutputTokens
+				res.Usage.InputTokens += body.Usage.Input
+				res.Usage.OutputTokens += body.Usage.Output
 			case execplane.EventError:
 				res.Terminal = true
 				res.ErrorMessage = e.ErrorMessage()

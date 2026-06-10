@@ -7,12 +7,14 @@ import { FleetClient } from './fleet.js';
 import { envFleetBaseUrl, type WakeContext } from './context.js';
 
 /**
- * Convenience constructor: a FleetClient scoped to one wake, using the
- * environment Loom injected and the run identity as actor.
+ * Convenience constructor: a FleetClient scoped to one wake. Prefers
+ * the per-wake fleet_base_url from the wake message (always current),
+ * falling back to the LOOM_FLEET_BASE_URL the dev server captured at
+ * start. The run identity becomes the actor.
  */
 export function fleetClientForWake(ctx: WakeContext): FleetClient {
 	return new FleetClient({
-		baseUrl: envFleetBaseUrl(),
+		baseUrl: ctx.fleetBaseUrl || envFleetBaseUrl(),
 		workspace: ctx.workspace,
 		actor: `workflow:${ctx.runId || 'adhoc'}`,
 	});

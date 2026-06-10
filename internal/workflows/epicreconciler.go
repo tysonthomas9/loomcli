@@ -38,6 +38,11 @@ type EpicReconcilerConfig struct {
 	// SourceRef is recorded on dev-stamped DriverVersions (typically
 	// the workflow project dir).
 	SourceRef string
+	// FleetBaseURL is fleet-db's base URL, delivered to the workflow
+	// agent inside each wake message so its SDK calls survive embedded
+	// fleet-db restarts (the Flue child's env captures only the URL at
+	// dev-start time).
+	FleetBaseURL string
 	// Store is the platform data plane.
 	Store platform.Store
 	// Plane is the execution plane.
@@ -448,7 +453,7 @@ func (r *EpicReconciler) executeWake(ctx context.Context, epicID string, preAdmi
 	logger.Info("wake started", "run_id", run.RunID)
 
 	stream, err := r.cfg.Plane.Invoke(ctx, r.cfg.DriverName, instanceID(epicID, run.RunID), execplane.InvokeRequest{
-		Message: wakeMessage(r.cfg.Workspace, epicID, run.RunID),
+		Message: wakeMessage(r.cfg.Workspace, epicID, run.RunID, r.cfg.FleetBaseURL),
 	})
 	if err != nil {
 		logger.Warn("execution plane invoke failed", "run_id", run.RunID, "err", err)
@@ -528,14 +533,18 @@ func instanceID(epicID, runID string) string {
 }
 
 // wakeMessage is the prompt delivered to the epic-runner agent. The
-// run-scoped identifiers ride inside the message so the agent's tools
-// can call back into FleetDB with them.
-func wakeMessage(ws, epicID, runID string) string {
+// run-scoped identifiers (and the current fleet-db URL) ride inside
+// the message so the agent's tools can call back into FleetDB with
+// them regardless of when the Flue child's environment was captured.
+func wakeMessage(ws, epicID, runID, fleetBaseURL string) string {
 	msg := map[string]string{
 		"action":    "advance",
 		"workspace": ws,
 		"epic_id":   epicID,
 		"run_id":    runID,
+	}
+	if fleetBaseURL != "" {
+		msg["fleet_base_url"] = fleetBaseURL
 	}
 	raw, _ := json.Marshal(msg)
 	return string(raw)
