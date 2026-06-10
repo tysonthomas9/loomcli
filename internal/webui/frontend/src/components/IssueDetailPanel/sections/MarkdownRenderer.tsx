@@ -13,7 +13,7 @@ export interface MarkdownRendererProps {
   /** Markdown content to render */
   content: string | undefined | null;
   /** Additional CSS class name */
-  className?: string;
+  className?: string | undefined;
 }
 
 /**
