@@ -48,18 +48,14 @@ import { requestCliSetup } from "@/utils/cliSetup";
 import { AppLayout } from "@/components/AppLayout/AppLayout";
 import { WorkspaceBreadcrumb } from "@/components/WorkspaceBreadcrumb/WorkspaceBreadcrumb";
 import { LoadingSkeleton } from "@/components/LoadingSkeleton/LoadingSkeleton";
-import { ConnectionStatus } from "@/components/ConnectionStatus/ConnectionStatus";
 import { StaleDataBanner } from "@/components/StaleDataBanner/StaleDataBanner";
 import { WorkspaceStatusBadge } from "@/components/WorkspaceStatusBadge/WorkspaceStatusBadge";
 import { ToastContainer } from "@/components/Toast/ToastContainer";
-import { FilterBar } from "@/components/FilterBar/FilterBar";
-import { MoreFiltersMenu } from "@/components/MoreFiltersMenu/MoreFiltersMenu";
 import { SearchInput } from "@/components/search/SearchInput";
 import { SearchScopeIndicator } from "@/components/search/SearchScopeIndicator";
 import { IssueDetailPanel } from "@/components/IssueDetailPanel/IssueDetailPanel";
 import { AgentDetailPanel } from "@/components/AgentDetailPanel/AgentDetailPanel";
 import { WorkspaceTree } from "@/components/WorkspaceTree/WorkspaceTree";
-import { TalkToLeadButton } from "@/components/TalkToLeadButton/TalkToLeadButton";
 import { NavRail } from "@/components/NavRail/NavRail";
 import { ViewSubSwitcher } from "@/components/ViewSubSwitcher/ViewSubSwitcher";
 import { ThemeToggle } from "@/components/ThemeToggle/ThemeToggle";
@@ -204,12 +200,6 @@ function App() {
   // Repo filter URL param sync (deep linking for repo selection)
   const [repoFilterParam] = useRepoFilterParam();
 
-  // Available repo names for repo selector
-  const availableRepoNames = useMemo(
-    () => workspaceRepos.map((r) => r.name),
-    [workspaceRepos],
-  );
-
   const agentDefaultBackend = useMemo(() => {
     const configuredBackend = onboardingBackendConfig?.backend?.trim();
     if (configuredBackend) return configuredBackend;
@@ -232,12 +222,6 @@ function App() {
     aiBackends,
   ]);
   const hasMultipleWorkspaces = (workspace?.workspaces?.length ?? 0) > 1;
-
-  // Convert Set<string> to string[] for components that expect arrays
-  const selectedRepoNamesArray = useMemo(
-    () => [...selectedRepoNames],
-    [selectedRepoNames],
-  );
 
   // Search scope (workspace-scoped search indicator)
   const { scopeName: searchScopeName, clearScope: handleScopeClear } =
@@ -313,6 +297,7 @@ function App() {
   const issueModeByView: Partial<Record<ViewMode, "graph" | "kanban">> = {
     graph: "graph",
     kanban: "kanban",
+    list: "kanban",
     table: "kanban",
     "issue-detail": "kanban",
     terminal: "kanban",
@@ -323,6 +308,10 @@ function App() {
     // PRs view needs every status (review issues are the PR queue), so use the
     // full "kanban" fetch mode rather than the default "ready" (open-only).
     prs: "kanban",
+    // Agents view needs every status too: the Open Queue shows epic groups
+    // (parent links), review/blocked tasks, and assigned (running) tasks —
+    // the default "ready" mode drops all of those.
+    agents: "kanban",
   };
   const issueMode = issueModeByView[activeView] ?? ("ready" as const);
 
@@ -438,52 +427,12 @@ function App() {
     return map;
   }, [activeView, issues, blockedIssuesData]);
 
-  // Compute Work Queue counts from workspace-scoped issues for sidebar display
-  const workQueueCounts = useMemo(() => {
-    let backlog = 0;
-    let open = 0;
-    let blocked = 0;
-    let inProgress = 0;
-    let needsReview = 0;
-    let done = 0;
-    for (const issue of issues) {
-      switch (issue.status) {
-        case "deferred":
-          backlog++;
-          break;
-        case "open":
-        case undefined:
-          if (issue.is_blocked) {
-            blocked++;
-          } else {
-            open++;
-          }
-          break;
-        case "blocked":
-          blocked++;
-          break;
-        case "in_progress":
-          inProgress++;
-          break;
-        case "review":
-          needsReview++;
-          break;
-        case "closed":
-          done++;
-          break;
-        default:
-          break;
-      }
-    }
-    return { backlog, open, blocked, inProgress, needsReview, done };
-  }, [issues]);
-
   const { toasts, showToast, dismissToast } = useToast();
   const mountedRef = useRef(true);
 
   // Centralized panel state (issue detail panel + agent detail panel).
   // Enforces mutual exclusivity with 300ms close-then-open transitions.
-  const { activePanel, pendingPanel, openPanel, closePanel, isOpen } =
+  const { activePanel, pendingPanel, openPanel, closePanel } =
     usePanelManager();
 
   // Derive panel visibility booleans from the centralized panel state.
@@ -726,34 +675,6 @@ function App() {
     filterActions.setSearch(undefined);
   }, [filterActions]);
 
-  const syncedFilterActions = useMemo(
-    () => ({
-      ...filterActions,
-      setSearch: (search: string | undefined) => {
-        const nextSearch = search || undefined;
-        hasPendingSearchEditRef.current = false;
-        pendingSearchCommitRef.current = { value: nextSearch };
-        setSearchValueState(nextSearch ?? "");
-        filterActions.setSearch(nextSearch);
-      },
-      clearFilter: (key: keyof typeof filters) => {
-        if (key === "search") {
-          hasPendingSearchEditRef.current = false;
-          pendingSearchCommitRef.current = { value: undefined };
-          setSearchValueState("");
-        }
-        filterActions.clearFilter(key);
-      },
-      clearAll: () => {
-        hasPendingSearchEditRef.current = false;
-        pendingSearchCommitRef.current = { value: undefined };
-        setSearchValueState("");
-        filterActions.clearAll();
-      },
-    }),
-    [filterActions],
-  );
-
   // Handle issue click from SwimLaneBoard/IssueTable
   const handleIssueClick = useCallback(
     (issue: Issue) => {
@@ -850,33 +771,29 @@ function App() {
     [workspaceId, refetch, handlePanelClose, showToast],
   );
 
-  // Handle agent click from MonitorDashboard
+  // Close all panels synchronously (no animation) for workspace switch
+  const closeAllPanels = useCallback(() => {
+    closePanel();
+    clearIssue();
+  }, [closePanel, clearIssue]);
+
+  // Handle agent click (sidebar, monitor, etc.) — one consistent destination:
+  // the Aether agents view with that agent selected (?agent=<name>), instead
+  // of the legacy minimal AgentDetailPanel slide-over.
   const handleAgentClick = useCallback(
     (agentName: string) => {
-      const hadIssuePanel = isOpen("issue");
-      // Mutual exclusivity + no-op guard handled by usePanelManager
-      openPanel({ type: "agent", name: agentName });
-      // Clear stale issue data after close animation when swapping from issue panel
-      if (hadIssuePanel) {
-        setTimeout(() => {
-          if (!mountedRef.current) return;
-          clearIssue();
-        }, 300);
-      }
+      closeAllPanels();
+      navigate(
+        `/ws/${encodeURIComponent(workspaceId)}/agents?agent=${encodeURIComponent(agentName)}`,
+      );
     },
-    [openPanel, isOpen, clearIssue],
+    [navigate, workspaceId, closeAllPanels],
   );
 
   // Handle agent panel close
   const handleAgentPanelClose = useCallback(() => {
     closePanel();
   }, [closePanel]);
-
-  // Close all panels synchronously (no animation) for workspace switch
-  const closeAllPanels = useCallback(() => {
-    closePanel();
-    clearIssue();
-  }, [closePanel, clearIssue]);
 
   useEffect(() => {
     if (activeView === "terminal") {
@@ -902,12 +819,6 @@ function App() {
     },
     [activeWorkspaceName, closeAllPanels, setActiveWorkspace],
   );
-
-  // Handle Talk to Lead button click
-  const handleTalkToLeadClick = useCallback(() => {
-    closeAllPanels();
-    navigateToView("terminal");
-  }, [closeAllPanels, navigateToView]);
 
   const hasWorkspaceRepo = workspaceRepos.length > 0;
   const hasWorkspaceAgent = Boolean(
@@ -1330,6 +1241,7 @@ function App() {
   // Whether the current view depends on issue data (for stale banner suppression)
   const isIssueBasedView =
     activeView === "kanban" ||
+    activeView === "list" ||
     activeView === "table" ||
     activeView === "graph" ||
     activeView === "issue-detail";
@@ -1359,28 +1271,6 @@ function App() {
       />
     </div>
   );
-  const filterControls = (
-    <div className={styles.filtersWrapper}>
-      <FilterBar
-        filters={filters}
-        actions={syncedFilterActions}
-        showPriority={true}
-        showType={true}
-        showLabels={false}
-        showGroupBy={false}
-        showRepos={availableRepoNames.length > 1}
-        availableRepos={availableRepoNames}
-        selectedRepos={selectedRepoNamesArray}
-        onRepoChange={selectRepos}
-        variant="header"
-        showClear={true}
-      />
-      <MoreFiltersMenu
-        groupBy={filters.groupBy ?? DEFAULT_GROUP_BY}
-        onGroupByChange={syncedFilterActions.setGroupBy}
-      />
-    </div>
-  );
   const newIssueButton = (
     <button
       className={styles.newIssueButton}
@@ -1392,17 +1282,18 @@ function App() {
     </button>
   );
 
-  // Board toolbar: view tabs on the left; filters · search · New Issue on the
-  // right (New Issue sits next to Search). Shown only for issue-based views.
+  // Board toolbar: view tabs on the left; search · New Issue on the right —
+  // exactly the Aether design's board-head (tabs / centered search / New
+  // Issue), with no extra filter controls. Shown only for issue-based views.
   const showBoardToolbar =
     activeView === "kanban" ||
+    activeView === "list" ||
     activeView === "table" ||
     activeView === "graph";
   const boardToolbar = (
     <div className={styles.boardToolbar} data-testid="board-toolbar">
       <ViewSubSwitcher activeView={activeView} onChange={navigateToView} />
       <div className={styles.boardToolbarControls}>
-        {filterControls}
         {searchControl}
         {newIssueButton}
       </div>
@@ -1427,15 +1318,6 @@ function App() {
       />
       <UserMenu />
       <ThemeToggle theme={theme} onToggle={toggleTheme} />
-      <ConnectionStatus
-        state={connectionState}
-        onRetry={retryConnection}
-        reconnectAttempts={reconnectAttempts}
-        showText={false}
-        showRetryButton={false}
-        connectionLost={sseConnectionLost}
-        compact
-      />
     </div>
   );
 
@@ -1452,7 +1334,6 @@ function App() {
       connectionLost={isConnectionLost}
       disconnectedSince={staleBannerDisconnectedSince}
       onRetryConnection={staleBannerRetry}
-      workQueueCounts={workQueueCounts}
       onTreeSelect={handleTreeIssueSelect}
     />
   );
@@ -1477,6 +1358,7 @@ function App() {
       <SearchTermProvider value={activeSearchTerm}>
         <AppLayout
           title={headerTitle}
+          onTitleClick={() => navigateToView("kanban")}
           actions={headerActions}
           navRail={
             <NavRail
@@ -1575,6 +1457,7 @@ function App() {
             onIssueUpdate={updateIssueDetails}
             onCopyLink={handleCopyLink}
             onNavigateToIssue={handleIssueClick}
+            workspaceIssues={issues}
           />
           <AgentDetailPanel
             isOpen={isAgentPanelOpen}
@@ -1588,12 +1471,11 @@ function App() {
             isOpen={showCreateIssue}
             onClose={() => setShowCreateIssue(false)}
             onSuccess={handleCreateIssueSuccess}
-          />
-          <TalkToLeadButton
-            onClick={handleTalkToLeadClick}
-            isActive={activeView === "terminal"}
-            sessionCount={activeSessionCount}
-            avoidSidePanel={shouldShowWorkspaceOnboarding}
+            epics={issues
+              .filter(
+                (i) => i.issue_type === "epic" && i.status !== "closed",
+              )
+              .map((i) => ({ id: i.id, title: i.title }))}
           />
         </AppLayout>
       </SearchTermProvider>

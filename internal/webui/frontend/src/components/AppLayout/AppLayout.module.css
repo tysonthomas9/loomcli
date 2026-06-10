@@ -178,3 +178,28 @@
     transition: none;
   }
 }
+
+/* Brand-as-button (design: clicking the logo returns to the board). */
+.brandButton {
+  display: flex;
+  align-items: center;
+  padding: 4px 8px;
+  margin-left: -8px;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+}
+
+.brandButton:hover {
+  background: var(--color-bg-hover);
+}
+
+.brandButton:hover .title {
+  color: var(--color-primary);
+}
+
+.brandButton:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}

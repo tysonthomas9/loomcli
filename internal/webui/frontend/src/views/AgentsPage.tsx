@@ -13,6 +13,7 @@
  */
 
 import { useEffect, useMemo, useRef, useState, lazy, Suspense } from "react";
+import { useSearchParams } from "react-router-dom";
 
 import {
   useWorkspaceViewData,
@@ -30,8 +31,15 @@ import {
 } from "@/components/TerminalView";
 import { getAvatarColor, shouldUseWhiteText } from "@/utils/colorUtils";
 import { parseLoomStatus } from "@/types";
+import type { Issue } from "@/types";
+import { formatStatusLabel } from "@/utils/issue";
 
 import styles from "./AgentsPage.module.css";
+
+/** A queue task is "running" when an agent is on it (assigned or in progress). */
+function isRunningTask(t: Issue): boolean {
+  return Boolean(t.assignee) || t.status === "in_progress";
+}
 
 /**
  * Real interactive lead-agent terminal: a wterm pane bound to the agent's PTY
@@ -67,12 +75,17 @@ function AgentTerminal({
         }}
         onReconnectStateChange={setReconnectState}
       />
-      <TerminalConnectionOverlay
-        connectionState={connectionState}
-        hasConnected={hasConnected}
-        onReconnect={reconnect}
-      />
-      <ReconnectingOverlay state={reconnectState} onReconnect={reconnect} />
+      {/* Exactly one overlay at a time: stacking both leaves the reconnect
+          button underneath the other overlay's backdrop (unclickable). */}
+      {reconnectState ? (
+        <ReconnectingOverlay state={reconnectState} onReconnect={reconnect} />
+      ) : (
+        <TerminalConnectionOverlay
+          connectionState={connectionState}
+          hasConnected={hasConnected}
+          onReconnect={reconnect}
+        />
+      )}
     </div>
   );
 }
@@ -99,13 +112,37 @@ const TABS: { id: AgentTab; label: string }[] = [
 
 export function AgentsPage(): JSX.Element {
   const { agents, issues, workspaceId } = useWorkspaceViewData();
-  const { refetch, showToast } = useWorkspaceViewActions();
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const { refetch, showToast, handleIssueClick } = useWorkspaceViewActions();
+  // Selection is deep-linkable: ?agent=<name> (set when an agent is clicked
+  // anywhere in the app, e.g. the sidebar roster) seeds and tracks it.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const agentParam = searchParams.get("agent");
+  const [selectedId, setSelectedId] = useState<string | null>(agentParam);
+
+  useEffect(() => {
+    if (agentParam) setSelectedId(agentParam);
+  }, [agentParam]);
+
+  const selectAgent = (name: string): void => {
+    setSelectedId(name);
+    setSearchParams({ agent: name }, { replace: true });
+  };
   const [activeTab, setActiveTab] = useState<AgentTab>("terminal");
   // Open Queue → assign an unclaimed task to an agent (Aether V3 flow), wired
   // to the real issue-assignment API.
   const [assignMenuId, setAssignMenuId] = useState<string | null>(null);
   const [assigningId, setAssigningId] = useState<string | null>(null);
+  // Open Queue run-state filter (design: All / Running / Not running).
+  const [queueFilter, setQueueFilter] = useState<"all" | "running" | "not_running">(
+    "all",
+  );
+  // Per-epic expand/collapse in the queue (design: epics start collapsed
+  // behind their count; the ungrouped section is always open).
+  const [expandedEpics, setExpandedEpics] = useState<Record<string, boolean>>(
+    {},
+  );
+  const toggleEpic = (key: string): void =>
+    setExpandedEpics((prev) => ({ ...prev, [key]: !prev[key] }));
 
   const assignTask = async (taskId: string, agentName: string): Promise<void> => {
     if (!workspaceId) return;
@@ -157,19 +194,66 @@ export function AgentsPage(): JSX.Element {
     { id: "queued", label: "Queued", value: counts.queued, tone: "info" },
   ];
 
-  // Open (queued) and unassigned tasks from real issues.
+  // Open queue = every non-closed task (design: status !== Done). Epic issues
+  // are lane headers (children group under parent_title), never queue cards.
   const openTasks = useMemo(
     () =>
-      issues.filter((i) => {
-        const s = i.status ?? "open";
-        return s === "open" || s === "deferred" || s === "in_progress";
-      }),
+      issues.filter(
+        (i) => i.issue_type !== "epic" && (i.status ?? "open") !== "closed",
+      ),
     [issues],
   );
-  const unassignedTasks = useMemo(
-    () => issues.filter((i) => !i.assignee && !i.owner).slice(0, 3),
-    [issues],
+
+  // An agent is "busy" when it's already assigned a live task — the design's
+  // one-agent-one-job rule for the assign picker.
+  const busyAgentTask = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const t of openTasks) {
+      if (t.assignee && !m.has(t.assignee)) m.set(t.assignee, t.id);
+    }
+    return m;
+  }, [openTasks]);
+
+  // Run-state filter + epic grouping for the Open Queue (design's structure).
+  const runningCount = useMemo(
+    () => openTasks.filter(isRunningTask).length,
+    [openTasks],
   );
+  const filteredOpen = useMemo(() => {
+    if (queueFilter === "running") return openTasks.filter(isRunningTask);
+    if (queueFilter === "not_running")
+      return openTasks.filter((t) => !isRunningTask(t));
+    return openTasks;
+  }, [openTasks, queueFilter]);
+  const queueGroups = useMemo(() => {
+    const m = new Map<string, Issue[]>();
+    for (const t of filteredOpen) {
+      const k = t.parent_title || "No epic";
+      const bucket = m.get(k);
+      if (bucket) bucket.push(t);
+      else m.set(k, [t]);
+    }
+    return [...m.entries()];
+  }, [filteredOpen]);
+  // Status-distribution meter for the queue header.
+  const meter = useMemo(
+    () =>
+      [
+        { k: "in_progress", v: counts.inProgress },
+        { k: "open", v: counts.queued },
+        { k: "review", v: counts.review },
+        { k: "blocked", v: counts.blocked },
+        { k: "closed", v: counts.done },
+      ].filter((s) => s.v > 0),
+    [counts],
+  );
+  const meterTotal = meter.reduce((s, x) => s + x.v, 0);
+  const queueFilterTabs: { k: "all" | "running" | "not_running"; label: string; n: number }[] =
+    [
+      { k: "all", label: "All", n: openTasks.length },
+      { k: "running", label: "Running", n: runningCount },
+      { k: "not_running", label: "Not running", n: openTasks.length - runningCount },
+    ];
 
   useEffect(() => {
     setActiveTab("terminal");
@@ -201,7 +285,7 @@ export function AgentsPage(): JSX.Element {
               className={styles.selectorAvatar}
               data-active={agent.name === selected.name || undefined}
               style={{ backgroundColor: c, color: shouldUseWhiteText(c) ? "#fff" : "#171717" }}
-              onClick={() => setSelectedId(agent.name)}
+              onClick={() => selectAgent(agent.name)}
               aria-label={`Show ${agent.name} terminal`}
               title={agent.name}
             >
@@ -238,9 +322,9 @@ export function AgentsPage(): JSX.Element {
                 <h1 className={styles.agentName}>{selected.name}</h1>
                 <p className={styles.agentMeta}>
                   <span className={styles.statusDot} aria-hidden="true" />
-                  <span>{statusType}</span>
+                  <span>{formatStatusLabel(statusType)}</span>
                   <span>·</span>
-                  <span>{roleName}</span>
+                  <span>{formatStatusLabel(roleName)}</span>
                   <span>·</span>
                   <span>no epic assigned</span>
                 </p>
@@ -265,7 +349,7 @@ export function AgentsPage(): JSX.Element {
                 </span>
                 <div>
                   <h1 className={styles.agentName}>{selected.name}</h1>
-                  <p className={styles.infoSub}>{roleName} agent · isolated workspace runtime</p>
+                  <p className={styles.infoSub}>{formatStatusLabel(roleName)} agent · isolated workspace runtime</p>
                 </div>
               </div>
               <dl className={styles.statGrid}>
@@ -282,11 +366,11 @@ export function AgentsPage(): JSX.Element {
               <dl className={styles.configGrid}>
                 <div>
                   <dt>Status</dt>
-                  <dd>{selected.status}</dd>
+                  <dd>{formatStatusLabel(statusType)}</dd>
                 </div>
                 <div>
                   <dt>Role</dt>
-                  <dd>{roleName}</dd>
+                  <dd>{formatStatusLabel(roleName)}</dd>
                 </div>
                 <div>
                   <dt>Branch</dt>
@@ -351,94 +435,197 @@ export function AgentsPage(): JSX.Element {
       <aside className={styles.queuePanel} aria-label="Open queue">
         <section>
           <h2 className={styles.queueHeading}>
-            OPEN QUEUE · {openTasks.length} OPEN · {agents.length} WORKERS
+            OPEN QUEUE · {openTasks.length} OPEN
           </h2>
-          <div className={styles.pillRow}>
-            <span className={styles.qpill}>{counts.done} done</span>
-            <span className={styles.qpill} data-tone="success">{counts.inProgress} in progress</span>
-            <span className={styles.qpill}>{counts.queued} queued</span>
-            <span className={styles.qpill}>{counts.blocked} blocked</span>
+          {/* Status-distribution meter (replaces the static count pills). */}
+          {meterTotal > 0 && (
+            <div
+              className={styles.meter}
+              role="img"
+              aria-label="Workspace task distribution"
+            >
+              {meter.map((s) => (
+                <span
+                  key={s.k}
+                  className={styles.meterSeg}
+                  data-k={s.k}
+                  style={{ width: `${(s.v / meterTotal) * 100}%` }}
+                  title={`${formatStatusLabel(s.k)}: ${s.v}`}
+                />
+              ))}
+            </div>
+          )}
+          <p className={styles.meterLine}>
+            {counts.inProgress} in progress · {counts.queued} open ·{" "}
+            {counts.review} review · {counts.blocked} blocked
+          </p>
+          {/* Run-state filter */}
+          <div
+            className={styles.queueFilter}
+            role="group"
+            aria-label="Filter open queue"
+          >
+            {queueFilterTabs.map((f) => (
+              <button
+                key={f.k}
+                type="button"
+                className={styles.queueFilterBtn}
+                data-active={queueFilter === f.k || undefined}
+                aria-pressed={queueFilter === f.k}
+                onClick={() => setQueueFilter(f.k)}
+              >
+                {f.label} <span className={styles.queueFilterN}>{f.n}</span>
+              </button>
+            ))}
           </div>
         </section>
 
-        <section className={styles.queueSection}>
-          <div className={styles.queueSubRow}>
-            <p className={styles.epicTitleRow}>
-              <span className={styles.epicBadge}>OPEN</span>
-              <strong className={styles.epicTitle}>Open tasks</strong>
-            </p>
-            <span className={styles.epicCount}>{openTasks.length}</span>
-          </div>
-          {openTasks.length === 0 ? (
+        {/* Open tasks grouped by epic (design's queue structure). */}
+        {queueGroups.length === 0 ? (
+          <section className={styles.queueSection}>
             <p className={styles.epicClaim}>No open tasks.</p>
-          ) : (
-            openTasks.slice(0, 4).map((t) => {
-              // "Claimed" = an agent is assigned to work it (assignee). owner is
-              // just the creator, so it doesn't count as claimed.
-              const assignee = t.assignee;
-              return (
-                <article key={t.id} className={styles.queueCard}>
-                  <div className={styles.queueCardRow}>
-                    <span className={styles.queueCardDot} aria-hidden="true" />
-                    <code className={styles.queueCardKey}>{t.id}</code>
-                    <span className={styles.p2Badge}>P{t.priority}</span>
-                  </div>
-                  <p className={styles.queueCardTitle}>{t.title}</p>
-                  {assignee ? (
-                    <p className={styles.assignedTo}>
-                      <span className={styles.runningDot} aria-hidden="true" />
-                      assigned to {assignee} · starting…
-                    </p>
+          </section>
+        ) : (
+          queueGroups.map(([epic, tasks]) => {
+            const isEpicGroup = epic !== "No epic";
+            // Epics collapse behind their count (design); ungrouped is open.
+            const isExpanded = !isEpicGroup || (expandedEpics[epic] ?? false);
+            const freeAgents = agents.filter((a) => !busyAgentTask.has(a.name));
+            return (
+              <section key={epic} className={styles.queueSection}>
+                <div className={styles.queueSubRow}>
+                  {isEpicGroup ? (
+                    <button
+                      type="button"
+                      className={styles.epicToggle}
+                      onClick={() => toggleEpic(epic)}
+                      aria-expanded={isExpanded}
+                    >
+                      <span className={styles.epicBadge}>EPIC</span>
+                      <strong className={styles.epicTitle}>{epic}</strong>
+                      <span className={styles.epicChevron} aria-hidden="true">
+                        {isExpanded ? "▾" : "▸"}
+                      </span>
+                    </button>
                   ) : (
-                    <div className={styles.assignWrap}>
-                      <button
-                        type="button"
-                        className={styles.assignBtn}
-                        disabled={assigningId === t.id || agents.length === 0}
-                        aria-haspopup="menu"
-                        aria-expanded={assignMenuId === t.id}
-                        onClick={() =>
-                          setAssignMenuId((cur) => (cur === t.id ? null : t.id))
-                        }
-                      >
-                        {assigningId === t.id ? "Assigning…" : "Assign"}
-                      </button>
-                      {assignMenuId === t.id && (
-                        <div className={styles.assignMenu} role="menu">
-                          {agents.map((a) => {
-                            const c = getAvatarColor(a.name);
-                            return (
-                              <button
-                                key={a.name}
-                                type="button"
-                                role="menuitem"
-                                className={styles.assignOption}
-                                onClick={() => void assignTask(t.id, a.name)}
-                              >
-                                <span
-                                  className={styles.assignAvatar}
-                                  style={{
-                                    backgroundColor: c,
-                                    color: shouldUseWhiteText(c)
-                                      ? "#fff"
-                                      : "#171717",
-                                  }}
-                                >
-                                  {a.name.charAt(0).toUpperCase()}
-                                </span>
-                                {a.name}
-                              </button>
-                            );
-                          })}
-                        </div>
-                      )}
-                    </div>
+                    <p className={styles.epicTitleRow}>
+                      <span className={styles.epicBadge}>OPEN</span>
+                      <strong className={styles.epicTitle}>{epic}</strong>
+                    </p>
                   )}
-                </article>
-              );
-            })
-          )}
-        </section>
+                  <span className={styles.epicCount}>{tasks.length}</span>
+                </div>
+                {isExpanded &&
+                  tasks.map((t) => {
+                    // "Claimed" = an agent is assigned to work it (assignee).
+                    // owner is just the creator, so it doesn't count.
+                    const assignee = t.assignee;
+                    return (
+                      <article key={t.id} className={styles.queueCard}>
+                        {/* Card body opens the issue detail (design's
+                            oq-card-btn); Assign stays a sibling control. */}
+                        <button
+                          type="button"
+                          className={styles.queueCardBtn}
+                          onClick={() => handleIssueClick(t)}
+                        >
+                          <div className={styles.queueCardRow}>
+                            <span
+                              className={styles.queueCardDot}
+                              aria-hidden="true"
+                            />
+                            <code className={styles.queueCardKey}>{t.id}</code>
+                          </div>
+                          <p className={styles.queueCardTitle}>{t.title}</p>
+                        </button>
+                        {assignee ? (
+                          <p className={styles.assignedTo}>
+                            <span
+                              className={styles.runningDot}
+                              aria-hidden="true"
+                            />
+                            assigned to {assignee}
+                          </p>
+                        ) : (
+                          <div className={styles.assignWrap}>
+                            <button
+                              type="button"
+                              className={styles.assignBtn}
+                              disabled={
+                                assigningId === t.id || agents.length === 0
+                              }
+                              aria-haspopup="menu"
+                              aria-expanded={assignMenuId === t.id}
+                              onClick={() =>
+                                setAssignMenuId((cur) =>
+                                  cur === t.id ? null : t.id,
+                                )
+                              }
+                            >
+                              {assigningId === t.id ? "Assigning…" : "Assign"}
+                            </button>
+                            {assignMenuId === t.id && (
+                              <div className={styles.assignMenu} role="menu">
+                                <div className={styles.assignMenuHead}>
+                                  ASSIGN TO AGENT
+                                </div>
+                                {agents.map((a) => {
+                                  const c = getAvatarColor(a.name);
+                                  const busyOn = busyAgentTask.get(a.name);
+                                  return (
+                                    <button
+                                      key={a.name}
+                                      type="button"
+                                      role="menuitem"
+                                      className={styles.assignOption}
+                                      data-busy={busyOn ? "true" : undefined}
+                                      disabled={Boolean(busyOn)}
+                                      title={
+                                        busyOn
+                                          ? `Already on ${busyOn}`
+                                          : `Assign to ${a.name}`
+                                      }
+                                      onClick={() =>
+                                        void assignTask(t.id, a.name)
+                                      }
+                                    >
+                                      <span
+                                        className={styles.assignAvatar}
+                                        style={{
+                                          backgroundColor: c,
+                                          color: shouldUseWhiteText(c)
+                                            ? "#fff"
+                                            : "#171717",
+                                        }}
+                                      >
+                                        {a.name.charAt(0).toUpperCase()}
+                                      </span>
+                                      {a.name}
+                                      {busyOn && (
+                                        <span className={styles.assignBusy}>
+                                          on task
+                                        </span>
+                                      )}
+                                    </button>
+                                  );
+                                })}
+                                {freeAgents.length === 0 && (
+                                  <p className={styles.assignEmpty}>
+                                    All agents are busy. Free one up or add an
+                                    agent.
+                                  </p>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </article>
+                    );
+                  })}
+              </section>
+            );
+          })
+        )}
 
         <section className={styles.queueSection}>
           <div className={styles.queueSubRow}>
@@ -449,7 +636,7 @@ export function AgentsPage(): JSX.Element {
             <article key={a.name} className={styles.queueCard}>
               <div className={styles.queueCardRow}>
                 <strong className={styles.workerName}>{a.name}</strong>
-                <span className={styles.workerTag}>{parseLoomStatus(a.status).type}</span>
+                <span className={styles.workerTag}>{formatStatusLabel(parseLoomStatus(a.status).type)}</span>
                 <span className={styles.workerTag2}>{a.branch ? "active" : "idle"}</span>
               </div>
               <p className={styles.workerMeta}>{a.branch ?? a.name}</p>
@@ -457,26 +644,6 @@ export function AgentsPage(): JSX.Element {
           ))}
         </section>
 
-        {unassignedTasks.length > 0 && (
-          <section className={styles.queueSection}>
-            <div className={styles.queueSubRow}>
-              <p className={styles.epicTitleRow}>
-                <span className={styles.unassignedBadge}>UNASSIGNED</span>
-                <strong className={styles.epicTitle}>Unassigned</strong>
-              </p>
-              <span className={styles.epicCount}>{unassignedTasks.length}</span>
-            </div>
-            {unassignedTasks.map((t) => (
-              <article key={t.id} className={styles.queueCard}>
-                <div className={styles.queueCardRow}>
-                  <code className={styles.queueCardKey}>{t.id}</code>
-                  <span className={styles.p2Badge}>P{t.priority}</span>
-                </div>
-                <p className={styles.queueCardTitle}>{t.title}</p>
-              </article>
-            ))}
-          </section>
-        )}
       </aside>
     </div>
   );
