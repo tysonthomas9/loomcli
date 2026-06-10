@@ -614,8 +614,12 @@ describe("KanbanBoard", () => {
       // Title should be displayed
       expect(screen.getByText("Complete Test Issue")).toBeInTheDocument();
 
-      // Priority badge should show P1
-      expect(screen.getByText("P1")).toBeInTheDocument();
+      // Priority surfaces only as a data attribute (no visible badge —
+      // Aether design tickets carry no priority chip).
+      expect(screen.queryByText("P1")).not.toBeInTheDocument();
+      expect(
+        screen.getByText("Complete Test Issue").closest("article"),
+      ).toHaveAttribute("data-priority", "1");
     });
 
     it("multiple issues in same column preserve order", () => {

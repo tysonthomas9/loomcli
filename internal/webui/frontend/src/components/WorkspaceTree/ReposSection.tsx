@@ -1,6 +1,7 @@
 /**
  * ReposSection displays a static inventory of repos in the workspace.
- * Shows repo name and default branch for each repo.
+ * Shows repo name and default branch for each repo, with the "+ Add Repo"
+ * entry at the bottom of the section (Aether V3 sidebar placement).
  */
 
 import type { RepoInfo } from "@/api/workspace";
@@ -9,10 +10,15 @@ import styles from "./ReposSection.module.css";
 
 export interface ReposSectionProps {
   repos: RepoInfo[];
+  /** When provided, renders the "+ Add Repo" button at the section bottom. */
+  onAddRepo?: () => void;
 }
 
-export function ReposSection({ repos }: ReposSectionProps): JSX.Element | null {
-  if (repos.length === 0) return null;
+export function ReposSection({
+  repos,
+  onAddRepo,
+}: ReposSectionProps): JSX.Element | null {
+  if (repos.length === 0 && !onAddRepo) return null;
 
   return (
     <div className={styles.section}>
@@ -39,6 +45,11 @@ export function ReposSection({ repos }: ReposSectionProps): JSX.Element | null {
           </div>
         ))}
       </div>
+      {onAddRepo && (
+        <button type="button" className={styles.addRepo} onClick={onAddRepo}>
+          + Add Repo
+        </button>
+      )}
     </div>
   );
 }

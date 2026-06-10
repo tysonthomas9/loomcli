@@ -5,57 +5,36 @@
 
 import { memo } from "react";
 
-import { getStatusDotColor, getStatusLabel } from "@/components/AgentCard";
 import { BlockedBadge } from "@/components/BlockedBadge";
 import { HighlightText } from "@/components/HighlightText";
 import { RepoBadge } from "@/components/RepoBadge";
 import { TypeIcon } from "@/components/TypeIcon";
-import { getAvatarColor } from "@/utils/colorUtils";
 import { useHasActiveSession } from "@/contexts/IssueSessionContext";
 import { useSearchTerm } from "@/contexts/SearchTermContext";
-import { useStore } from "zustand";
 
-import { useAgentStoreInstance } from "@/hooks";
 import { useWorkspaceContext } from "@/hooks/workspace";
 import type { BlockerRef, Issue } from "@/types";
-import { isKnownIssueType, parseLoomStatus } from "@/types";
+import { isKnownIssueType } from "@/types";
 import {
   formatIssueId,
-  getOpenStatus,
   getReviewType,
   isPRUrl,
-  type OpenStatus,
   type ReviewType,
 } from "@/utils/issue";
 
-import { AgentRow } from "./AgentRow";
 import styles from "./IssueCard.module.css";
 
 /**
- * Review badge configuration by type.
+ * Review badge configuration by type — plain text labels per the Aether
+ * design's plan-badge (no emoji adornments).
  */
 const REVIEW_BADGE_CONFIG: Record<
   ReviewType,
-  { icon: string; label: string; className: string }
+  { label: string; className: string }
 > = {
-  plan: { icon: "📝", label: "Plan", className: styles.reviewPlan ?? "" },
-  code: { icon: "🔍", label: "Code", className: styles.reviewCode ?? "" },
-  help: { icon: "❓", label: "Help", className: styles.reviewHelp ?? "" },
-};
-
-/**
- * Open status badge configuration by type.
- */
-const OPEN_BADGE_CONFIG: Record<
-  OpenStatus,
-  { icon: string; label: string; className: string }
-> = {
-  needs_plan: {
-    icon: "📋",
-    label: "Needs Plan",
-    className: styles.openNeedsPlan ?? "",
-  },
-  ready: { icon: "✅", label: "Ready", className: styles.openReady ?? "" },
+  plan: { label: "Plan", className: styles.reviewPlan ?? "" },
+  code: { label: "Code", className: styles.reviewCode ?? "" },
+  help: { label: "Help", className: styles.reviewHelp ?? "" },
 };
 
 /**
@@ -82,16 +61,10 @@ export interface IssueCardProps {
   hasActiveSession?: boolean;
 }
 
-const PRIORITY_LABELS: Record<number, string> = {
-  0: "Critical",
-  1: "High",
-  2: "Medium",
-  3: "Normal",
-  4: "Backlog",
-};
-
 /**
  * Get priority level, defaulting to 4 (backlog) if undefined or out of range.
+ * Exposed on the card only as a data attribute (no visible badge — the Aether
+ * design's tickets carry no priority chip).
  */
 function getPriorityLevel(priority: number | undefined): 0 | 1 | 2 | 3 | 4 {
   if (priority === undefined || priority === null) return 4;
@@ -115,8 +88,6 @@ export const IssueCard = memo(function IssueCard({
   columnId,
   hasActiveSession,
 }: IssueCardProps): JSX.Element {
-  const agentStore = useAgentStoreInstance();
-  const agents = useStore(agentStore, (s) => s.agents);
   const { isMultiRepo, isAllSelected } = useWorkspaceContext();
   const searchTerm = useSearchTerm();
   const checkActiveSession = useHasActiveSession();
@@ -130,27 +101,6 @@ export const IssueCard = memo(function IssueCard({
   const displayTitle = issue.title || "Untitled";
   const isBlocked = (blockedByCount ?? 0) > 0;
   const reviewType = getReviewType(issue);
-  const openStatus = columnId === "ready" ? getOpenStatus(issue) : null;
-
-  // Compute agent row data for in_progress and review cards with an assignee
-  const showAgentRow =
-    (columnId === "in_progress" || columnId === "review") && !!issue.assignee;
-  const isReviewColumn = columnId === "review";
-  // Liveness join: the live agent claiming this task is the one whose
-  // current_task_id points at this issue, not the one whose name matches
-  // the saved assignee. The two can diverge (stale assignee after a
-  // worker crash, mid-handoff between siblings) — and that divergence is
-  // exactly what "agent missing" needs to surface.
-  const assignedAgent = agents.find((a) => a.current_task_id === issue.id);
-  const agentParsedStatus = assignedAgent
-    ? parseLoomStatus(assignedAgent.status)
-    : null;
-  // On in_progress cards where the issue claims an assignee, but no live
-  // agent has current_task_id === issue.id, the task is orphaned. Review
-  // cards intentionally don't show "missing" — the agent legitimately
-  // releases the task at handoff.
-  const isAgentMissing =
-    columnId === "in_progress" && !!issue.assignee && !assignedAgent;
 
   const rootClassName = className
     ? `${styles.issueCard} ${className}`
@@ -221,9 +171,6 @@ export const IssueCard = memo(function IssueCard({
             className={`${styles.reviewTypeBadge} ${REVIEW_BADGE_CONFIG[reviewType].className}`}
             aria-label={`${REVIEW_BADGE_CONFIG[reviewType].label} review`}
           >
-            <span className={styles.reviewIcon} aria-hidden="true">
-              {REVIEW_BADGE_CONFIG[reviewType].icon}
-            </span>
             {REVIEW_BADGE_CONFIG[reviewType].label}
           </span>
         )}
@@ -241,17 +188,6 @@ export const IssueCard = memo(function IssueCard({
               PR ↗
             </a>
           )}
-        {openStatus && (
-          <span
-            className={`${styles.openStatusBadge} ${OPEN_BADGE_CONFIG[openStatus].className}`}
-            aria-label={OPEN_BADGE_CONFIG[openStatus].label}
-          >
-            <span className={styles.openStatusIcon} aria-hidden="true">
-              {OPEN_BADGE_CONFIG[openStatus].icon}
-            </span>
-            {OPEN_BADGE_CONFIG[openStatus].label}
-          </span>
-        )}
         {isBlocked && (
           <BlockedBadge
             count={blockedByCount ?? 0}
@@ -263,16 +199,9 @@ export const IssueCard = memo(function IssueCard({
         )}
         {issue.status === "deferred" && (
           <span className={styles.deferredBadge} aria-label="Deferred">
-            <span aria-hidden="true">⏸</span> Deferred
+            Deferred
           </span>
         )}
-        <span
-          className={`${styles.priorityBadge} ${styles[`priority${priority}`]}`}
-          data-priority={priority}
-          aria-label={`Priority: P${priority} - ${PRIORITY_LABELS[priority] ?? "Unknown"}`}
-        >
-          P{priority}
-        </span>
       </header>
       <h3 className={styles.title}>
         <HighlightText text={displayTitle} searchTerm={searchTerm} />
@@ -295,33 +224,6 @@ export const IssueCard = memo(function IssueCard({
         <div className={styles.cardFooter}>
           <RepoBadge repoName={issue.repo} />
         </div>
-      )}
-      {showAgentRow && issue.assignee && (
-        <AgentRow
-          agentName={issue.assignee}
-          status={isReviewColumn ? null : agentParsedStatus}
-          avatarColor={getAvatarColor(issue.assignee.replace(/^\[H\]\s*/, ""))}
-          dotColor={
-            isReviewColumn
-              ? undefined
-              : agentParsedStatus
-                ? getStatusDotColor(agentParsedStatus.type)
-                : undefined
-          }
-          activity={
-            isReviewColumn
-              ? "Submitted for review"
-              : agentParsedStatus && assignedAgent
-                ? getStatusLabel(agentParsedStatus)
-                : undefined
-          }
-          lastActivityAt={
-            isReviewColumn
-              ? undefined
-              : (assignedAgent?.last_activity_at ?? null)
-          }
-          agentMissing={isAgentMissing}
-        />
       )}
     </article>
   );

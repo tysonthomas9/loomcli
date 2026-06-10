@@ -1,7 +1,7 @@
 /**
  * WorkspaceTree component — v2 sidebar redesign.
- * Simplified layout: WorkspaceSelectorBar → AgentSection → RunningSection →
- * EpicTaskTree → ReposSection, with QueueStatsBar pinned at the bottom.
+ * Simplified layout (Aether V3): WorkspaceSelectorBar → AgentSection →
+ * RunningSection → ReposSection (with the Add Repo entry at its bottom).
  */
 
 import {
@@ -22,8 +22,6 @@ import { WorkspaceSelectorBar } from "./WorkspaceSelectorBar";
 import { AgentSection } from "./AgentSection";
 import { RunningSection } from "./RunningSection";
 import { ReposSection } from "./ReposSection";
-import { QueueStatsBar, type WorkQueueCounts } from "./QueueStatsBar";
-import { SidebarStatusBar, WorkQueueSection } from "./nav";
 import styles from "./WorkspaceTree.module.css";
 
 /**
@@ -52,8 +50,6 @@ export interface WorkspaceTreeProps {
   disconnectedSince?: number | null;
   /** Callback for retry button in daemon prompt */
   onRetryConnection?: () => void;
-  /** Work Queue counts derived from workspace-scoped issues */
-  workQueueCounts?: WorkQueueCounts;
   /** Callback when a task is selected in the tree */
   onTreeSelect?: (issueId: string) => void;
 }
@@ -73,7 +69,6 @@ export function WorkspaceTree({
   connectionLost,
   disconnectedSince,
   onRetryConnection,
-  workQueueCounts,
   onTreeSelect,
 }: WorkspaceTreeProps): JSX.Element {
   const workspaceContext = useWorkspaceContext();
@@ -197,8 +192,6 @@ export function WorkspaceTree({
 
       {!isCollapsed && (
         <div className={styles.content}>
-          <div className={styles.workspaceHeading}>Workspaces</div>
-
           {isLoading && workspaceRepos.length === 0 && (
             <div className={styles.loading}>
               <div className={styles.skeletonRow} />
@@ -241,18 +234,6 @@ export function WorkspaceTree({
             <div className={styles.emptyState}>No repos in workspace</div>
           )}
 
-          {!isLoading && !error && workspaceId && (
-            <div className={styles.addRepoForm}>
-              <button
-                type="button"
-                className={styles.addRepoButton}
-                onClick={() => setAddRepoOpen(true)}
-              >
-                + Add Repo
-              </button>
-            </div>
-          )}
-
           <AddRepoModal
             isOpen={addRepoOpen}
             workspaceId={workspaceId ?? ""}
@@ -270,21 +251,16 @@ export function WorkspaceTree({
             onAddClick={onAddClick}
           />
 
-          {workQueueCounts && <WorkQueueSection counts={workQueueCounts} />}
-
           {/* Running tasks grouped by epic — only shows when agents active */}
           <RunningSection onSelect={onTreeSelect} />
 
-          {/* Static repo inventory */}
-          <ReposSection repos={workspaceRepos} />
+          {/* Repo inventory with the Add Repo entry at its bottom (Aether V3) */}
+          <ReposSection
+            repos={workspaceRepos}
+            {...(workspaceId && { onAddRepo: () => setAddRepoOpen(true) })}
+          />
         </div>
       )}
-
-      {/* Compact queue stats pinned at bottom */}
-      {!isCollapsed && workQueueCounts && (
-        <QueueStatsBar counts={workQueueCounts} />
-      )}
-      {!isCollapsed && <SidebarStatusBar agents={agents} />}
 
       {!isCollapsed && connectionLost && (
         <div className={styles.daemonPrompt} role="alert">
