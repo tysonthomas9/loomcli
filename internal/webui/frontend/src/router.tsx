@@ -92,6 +92,11 @@ const viewRoutes = [
       import("@/views/KanbanPage").then((m) => ({ Component: m.KanbanPage })),
   },
   {
+    path: "list",
+    lazy: () =>
+      import("@/views/ListPage").then((m) => ({ Component: m.ListPage })),
+  },
+  {
     path: "table",
     lazy: () =>
       import("@/views/TablePage").then((m) => ({ Component: m.TablePage })),

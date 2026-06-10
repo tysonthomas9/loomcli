@@ -1,5 +1,6 @@
 export { KanbanPage } from "./KanbanPage";
 export { AgentsPage } from "./AgentsPage";
+export { ListPage } from "./ListPage";
 export { PRsPage } from "./PRsPage";
 export { TablePage } from "./TablePage";
 export { GraphPage } from "./GraphPage";
