@@ -1,6 +1,6 @@
 // NOTE: this module must stay self-contained (no local imports): callers such as
 // scripts/run-slack-codex-epic-runner-stack.sh vendor flue.js as a single file.
-import { spawnSync } from "node:child_process";
+import { spawn } from "node:child_process";
 
 export class FlueDriverClient {
   static fromEnv(options = {}) {
@@ -145,7 +145,7 @@ export class FlueDriverClient {
     appendStringFlag(args, "--sandbox-cwd", sandboxPlacement.cwd || input.sandboxCwd || input.sandbox_cwd);
     appendStringFlag(args, "--sandbox-repo-ref", sandboxPlacement.repo_ref || sandboxPlacement.repoRef || input.sandboxRepoRef || input.sandbox_repo_ref);
     args.push("--defer-completion");
-    const result = this.#run(args);
+    const result = await this.#run(args);
     rememberTaskRunResult(this, result || {});
     return result;
   }
@@ -214,19 +214,40 @@ export class FlueDriverClient {
   }
 
   #run(args) {
-    const proc = spawnSync(this.command[0], this.command.slice(1).concat(args), {
-      encoding: "utf8",
-      env: driverCommandEnv(this.env),
+    return new Promise((resolve, reject) => {
+      const proc = spawn(this.command[0], this.command.slice(1).concat(args), {
+        env: driverCommandEnv(this.env),
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+      let stdout = "";
+      let stderr = "";
+      proc.stdout.setEncoding("utf8");
+      proc.stdout.on("data", (chunk) => {
+        stdout += chunk;
+      });
+      proc.stderr.setEncoding("utf8");
+      proc.stderr.on("data", (chunk) => {
+        stderr += chunk;
+      });
+      proc.on("error", reject);
+      proc.on("close", (status) => {
+        if (status !== 0) {
+          const detail = (stderr || stdout || "").trim();
+          reject(new Error("loom " + args.join(" ") + " failed" + (detail ? ": " + detail : "")));
+          return;
+        }
+        const text = stdout.trim();
+        if (!text) {
+          resolve(null);
+          return;
+        }
+        try {
+          resolve(JSON.parse(text));
+        } catch (err) {
+          reject(err);
+        }
+      });
     });
-    if (proc.error) {
-      throw proc.error;
-    }
-    if (proc.status !== 0) {
-      const detail = (proc.stderr || proc.stdout || "").trim();
-      throw new Error("loom " + args.join(" ") + " failed" + (detail ? ": " + detail : ""));
-    }
-    const stdout = (proc.stdout || "").trim();
-    return stdout ? JSON.parse(stdout) : null;
   }
 }
 
@@ -306,4 +327,3 @@ function taskPayloadID(input) {
   }
   return input.taskId || input.task_id || input.id || "";
 }
-

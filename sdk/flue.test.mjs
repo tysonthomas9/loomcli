@@ -161,6 +161,87 @@ if (args[1] === 'epic-get') {
   assert.equal(calls[8].args[calls[8].args.indexOf("--max-age-seconds") + 1], "30");
 });
 
+test("FlueDriverClient lets completed child requests be completed while slower siblings still run", async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "loom-sdk-flue-concurrent-"));
+  const recorder = path.join(dir, "calls.jsonl");
+  const fakeLoom = path.join(dir, "fake-loom.mjs");
+  writeFileSync(fakeLoom, `#!/usr/bin/env node
+import fs from 'node:fs';
+import { setTimeout as sleep } from 'node:timers/promises';
+
+const recorder = ${JSON.stringify(recorder)};
+const args = process.argv.slice(2);
+
+function argValue(flag) {
+  const idx = args.indexOf(flag);
+  return idx >= 0 && idx + 1 < args.length ? args[idx + 1] : '';
+}
+
+function record(event) {
+  fs.appendFileSync(recorder, JSON.stringify({ event, args }) + '\\n');
+}
+
+if (args[1] === 'exec-task') {
+  const task = argValue('--task-id');
+  record('exec-start-' + task);
+  await sleep(task === 'SLOW' ? 250 : 20);
+  record('exec-end-' + task);
+  const taskRunId = 'task-run-' + task.toLowerCase();
+  console.log(JSON.stringify({
+    id: taskRunId,
+    taskRunId,
+    taskId: task,
+    leaseToken: 'token-' + task,
+    status: 'completed',
+    logsRef: 'logs://' + taskRunId,
+    artifactsRef: 'artifacts://' + taskRunId
+  }));
+} else if (args[1] === 'complete-task') {
+  const task = argValue('--task-id');
+  record('complete-' + task);
+  console.log(JSON.stringify({ id: task, status: 'completed' }));
+} else {
+  record(args[1] || 'unknown');
+  console.log(JSON.stringify({ ok: true }));
+}
+`);
+
+  const client = createLoomDriverClient({
+    input: { epicId: "EPIC-1" },
+    command: [process.execPath, fakeLoom],
+    env: {
+      LOOM_DRIVER_WORKSPACE: "WS",
+      LOOM_DRIVER_RUN_ID: "run-1",
+    },
+  });
+
+  async function requestAndComplete(taskId) {
+    const result = await client.taskRuns.request({ taskId, providerProfile: "local" });
+    await client.tasks.complete({
+      taskId,
+      taskRunId: result.taskRunId,
+      leaseToken: result.leaseToken,
+      logsRef: result.logsRef,
+      artifactsRef: result.artifactsRef,
+    });
+  }
+
+  await Promise.all([
+    requestAndComplete("FAST"),
+    requestAndComplete("SLOW"),
+  ]);
+
+  const events = readJSONL(recorder).map((call) => call.event);
+  assert.ok(events.indexOf("exec-start-FAST") >= 0, "FAST task should start");
+  assert.ok(events.indexOf("exec-start-SLOW") >= 0, "SLOW task should start");
+  assert.ok(events.indexOf("complete-FAST") >= 0, "FAST task should complete");
+  assert.ok(events.indexOf("exec-end-SLOW") >= 0, "SLOW task should finish");
+  assert.ok(
+    events.indexOf("complete-FAST") < events.indexOf("exec-end-SLOW"),
+    "FAST complete-task should not wait for SLOW exec-task to finish; events: " + events.join(",")
+  );
+});
+
 test("FlueDriverClient returns needs_review results", () => {
   const client = createLoomDriverClient({
     input: {},
