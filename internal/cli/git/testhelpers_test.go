@@ -339,7 +339,13 @@ func setupWorkspaceConfigInDir(t *testing.T, configDir string, cfg *config.LoomC
 		}
 		state.Workspaces[key] = bootstrap.WorkspaceLocalState{Path: ws.Path, Repos: localRepos}
 	}
-	if err := bootstrap.SaveStateCache(state); err != nil {
+	if err := bootstrap.MutateStateCache(func(sc *bootstrap.StateCache) error {
+		sc.LastWorkspace = state.LastWorkspace
+		for k, v := range state.Workspaces {
+			sc.Workspaces[k] = v
+		}
+		return nil
+	}); err != nil {
 		t.Fatalf("save state cache: %v", err)
 	}
 	if _, err := config.TestingPrimeConfigCacheFromStore(ctx, st); err != nil {

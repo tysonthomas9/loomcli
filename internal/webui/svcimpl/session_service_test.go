@@ -91,13 +91,12 @@ func TestSessionServiceListTaskSessionsFallsBackToFileStores(t *testing.T) {
 	if _, err := st.Repos().Create(ctx, store.RepoCreate{WorkspaceKey: "WS", Name: "source-repo"}); err != nil {
 		t.Fatalf("create repo: %v", err)
 	}
-	if err := bootstrap.SaveStateCache(&bootstrap.StateCache{
-		Workspaces: map[string]bootstrap.WorkspaceLocalState{
-			"WS": {
-				Path:  workspacePath,
-				Repos: map[string]string{"source-repo": repoPath},
-			},
-		},
+	if err := bootstrap.MutateStateCache(func(sc *bootstrap.StateCache) error {
+		sc.Workspaces["WS"] = bootstrap.WorkspaceLocalState{
+			Path:  workspacePath,
+			Repos: map[string]string{"source-repo": repoPath},
+		}
+		return nil
 	}); err != nil {
 		t.Fatalf("save state cache: %v", err)
 	}
@@ -148,6 +147,8 @@ func TestSessionServiceListTaskSessionsFallsBackToFileStores(t *testing.T) {
 }
 
 func TestSessionServiceListTaskSessionsSearchesRuntimeDir(t *testing.T) {
+	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
+
 	ctx := t.Context()
 	workspacePath := t.TempDir()
 	runtimeDir := t.TempDir()
@@ -156,10 +157,9 @@ func TestSessionServiceListTaskSessionsSearchesRuntimeDir(t *testing.T) {
 	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "WS", Name: "Workspace"}); err != nil {
 		t.Fatalf("create workspace: %v", err)
 	}
-	if err := bootstrap.SaveStateCache(&bootstrap.StateCache{
-		Workspaces: map[string]bootstrap.WorkspaceLocalState{
-			"WS": {Path: workspacePath},
-		},
+	if err := bootstrap.MutateStateCache(func(sc *bootstrap.StateCache) error {
+		sc.Workspaces["WS"] = bootstrap.WorkspaceLocalState{Path: workspacePath}
+		return nil
 	}); err != nil {
 		t.Fatalf("save state cache: %v", err)
 	}

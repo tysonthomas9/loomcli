@@ -173,11 +173,13 @@ func buildTestStep(backendName string) string {
 - Use the Task tool to spawn an agent to write tests
 - Prompt: 'Write unit tests for the changes made in [files]. Follow existing test patterns in the codebase.'
 - Verify tests pass by running the test command (e.g., 'go test ./...' or 'npm test')
+- For Go suites, isolate config state: run 'LOOM_CONFIG_DIR=$(mktemp -d) go test ./...' (or use scripts/test.sh, which isolates automatically)
 - If tests fail, fix the code or tests until they pass`
 	}
 	return `### Step 5: Write Tests
 - Write unit tests for your changes, following existing test patterns in the codebase
 - Verify tests pass by running the test command (e.g., 'go test ./...' or 'npm test')
+- For Go suites, isolate config state: run 'LOOM_CONFIG_DIR=$(mktemp -d) go test ./...' (or use scripts/test.sh, which isolates automatically)
 - If tests fail, fix the code or tests until they pass`
 }
 

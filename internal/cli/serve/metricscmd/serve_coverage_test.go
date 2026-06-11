@@ -107,15 +107,13 @@ func TestHandleAgents_UsesStoreAgentsAsSourceOfTruth(t *testing.T) {
 	if err := runGitForMetricsTest(t, falconWorktree, "init", "-b", "feature/falcon"); err != nil {
 		t.Fatalf("init falcon worktree: %v", err)
 	}
-	if err := bootstrap.SaveStateCache(&bootstrap.StateCache{
-		Version:       1,
-		LastWorkspace: "WS1",
-		Workspaces: map[string]bootstrap.WorkspaceLocalState{
-			"WS1": {
-				Path:  wsRoot,
-				Repos: map[string]string{"repo-a": filepath.Join(wsRoot, "repo-a")},
-			},
-		},
+	if err := bootstrap.MutateStateCache(func(sc *bootstrap.StateCache) error {
+		sc.LastWorkspace = "WS1"
+		sc.Workspaces["WS1"] = bootstrap.WorkspaceLocalState{
+			Path:  wsRoot,
+			Repos: map[string]string{"repo-a": filepath.Join(wsRoot, "repo-a")},
+		}
+		return nil
 	}); err != nil {
 		t.Fatalf("save state cache: %v", err)
 	}

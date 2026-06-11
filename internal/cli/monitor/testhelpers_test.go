@@ -87,15 +87,14 @@ func setupMonitorWorkspaceConfig(t *testing.T, workspaceDir string, agentNames .
 			Worktree: filepath.Join(workspaceDir, "worktrees", name),
 		}
 	}
-	if err := bootstrap.SaveStateCache(&bootstrap.StateCache{
-		LastWorkspace: workspaceKey,
-		Workspaces: map[string]bootstrap.WorkspaceLocalState{
-			workspaceKey: {
-				Path:   workspaceDir,
-				Repos:  map[string]string{repoName: filepath.Join(workspaceDir, repoName)},
-				Agents: agents,
-			},
-		},
+	if err := bootstrap.MutateStateCache(func(sc *bootstrap.StateCache) error {
+		sc.LastWorkspace = workspaceKey
+		sc.Workspaces[workspaceKey] = bootstrap.WorkspaceLocalState{
+			Path:   workspaceDir,
+			Repos:  map[string]string{repoName: filepath.Join(workspaceDir, repoName)},
+			Agents: agents,
+		}
+		return nil
 	}); err != nil {
 		t.Fatalf("save state cache: %v", err)
 	}

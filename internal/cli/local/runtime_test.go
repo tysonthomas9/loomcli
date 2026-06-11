@@ -88,10 +88,11 @@ func TestDesktopRuntimePathDeduplicatesEntries(t *testing.T) {
 func TestLocalDaemonWorkspaceKeyUsesDesktopState(t *testing.T) {
 	t.Setenv("LOOM_WORKSPACE", "")
 	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
-	if err := bootstrap.SaveStateCache(&bootstrap.StateCache{
-		LastWorkspace: "DESKTOP-QA",
+	if err := bootstrap.MutateStateCache(func(sc *bootstrap.StateCache) error {
+		sc.LastWorkspace = "DESKTOP-QA"
+		return nil
 	}); err != nil {
-		t.Fatalf("SaveStateCache() error = %v", err)
+		t.Fatalf("MutateStateCache() error = %v", err)
 	}
 
 	workspaceKey, err := localDaemonWorkspaceKey()
