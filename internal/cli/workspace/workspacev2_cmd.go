@@ -15,12 +15,21 @@ import (
 )
 
 var (
-	wsAddDescription string
-	wsAddBranch      string
+	wsAddDescription  string
+	wsAddBranch       string
+	wsAddDesignFormat string
+
+	wsSetDesignFormat string
 
 	wsShowJSON   bool
 	wsStatusJSON bool
 )
+
+// validDesignFormat reports whether v is an accepted design_format value.
+// Empty clears the setting (markdown behavior).
+func validDesignFormat(v string) bool {
+	return v == "" || v == "markdown" || v == "html"
+}
 
 var workspaceAddCmd = &cobra.Command{
 	Use:   "add <KEY>",
@@ -45,6 +54,18 @@ LOOM_WORKSPACE or pass --workspace for command execution.`,
 	RunE: runWorkspaceUse,
 }
 
+var workspaceSetCmd = &cobra.Command{
+	Use:   "set <KEY>",
+	Short: "Update workspace settings in fleet-db",
+	Long: `Update settings on an existing workspace.
+
+Examples:
+  loom workspace set MYPROJ --design-format html
+  loom workspace set MYPROJ --design-format markdown`,
+	Args: cobra.ExactArgs(1),
+	RunE: runWorkspaceSet,
+}
+
 var workspaceShowCmd = &cobra.Command{
 	Use:   "show [KEY]",
 	Short: "Show workspace details (defaults to active)",
@@ -62,16 +83,22 @@ var workspaceStatusCmd = &cobra.Command{
 func init() {
 	workspaceAddCmd.Flags().StringVar(&wsAddDescription, "description", "", "Optional description")
 	workspaceAddCmd.Flags().StringVar(&wsAddBranch, "branch", "", "Default branch (default: main)")
+	workspaceAddCmd.Flags().StringVar(&wsAddDesignFormat, "design-format", "", "Planner design output format: markdown or html (default: markdown)")
+	workspaceSetCmd.Flags().StringVar(&wsSetDesignFormat, "design-format", "", "Planner design output format: markdown or html (empty clears)")
 	workspaceShowCmd.Flags().BoolVar(&wsShowJSON, "json", false, "JSON output")
 	workspaceStatusCmd.Flags().BoolVar(&wsStatusJSON, "json", false, "JSON output")
 
 	workspaceCmd.AddCommand(workspaceAddCmd)
+	workspaceCmd.AddCommand(workspaceSetCmd)
 	workspaceCmd.AddCommand(workspaceUseCmd)
 	workspaceCmd.AddCommand(workspaceShowCmd)
 	workspaceCmd.AddCommand(workspaceStatusCmd)
 }
 
 func runWorkspaceAdd(_ *cobra.Command, args []string) error {
+	if !validDesignFormat(wsAddDesignFormat) {
+		return fmt.Errorf("invalid --design-format %q: must be \"markdown\" or \"html\"", wsAddDesignFormat)
+	}
 	return cmdstore.WithStore(func(ctx context.Context, h *bootstrap.StoreHandle) error {
 		key := args[0]
 		ws, err := h.Store.Workspaces().Create(ctx, store.WorkspaceCreate{
@@ -79,6 +106,7 @@ func runWorkspaceAdd(_ *cobra.Command, args []string) error {
 			Name:          key,
 			Description:   wsAddDescription,
 			DefaultBranch: wsAddBranch,
+			DesignFormat:  wsAddDesignFormat,
 		})
 		if err != nil {
 			return fmt.Errorf("create workspace: %w", err)
@@ -89,6 +117,40 @@ func runWorkspaceAdd(_ *cobra.Command, args []string) error {
 		fmt.Printf("Created workspace %s (mode=%s)\n", ws.Key, h.Mode())
 		return nil
 	})
+}
+
+func runWorkspaceSet(cmd *cobra.Command, args []string) error {
+	if !cmd.Flags().Changed("design-format") {
+		return fmt.Errorf("nothing to set: pass --design-format <markdown|html>")
+	}
+	if !validDesignFormat(wsSetDesignFormat) {
+		return fmt.Errorf("invalid --design-format %q: must be \"markdown\" or \"html\"", wsSetDesignFormat)
+	}
+	return cmdstore.WithStore(func(ctx context.Context, h *bootstrap.StoreHandle) error {
+		key := args[0]
+		v := wsSetDesignFormat
+		ws, err := h.Store.Workspaces().Update(ctx, key, store.WorkspaceUpdate{DesignFormat: &v})
+		if err != nil {
+			if cmdstore.IsNotFound(err) {
+				return fmt.Errorf("workspace %q not found", key)
+			}
+			return fmt.Errorf("update workspace: %w", err)
+		}
+		if ws.DesignFormat != v {
+			fmt.Fprintf(os.Stderr, "Warning: design_format did not persist (store returned %q); the fleet-db server may be too old to support it\n", ws.DesignFormat)
+		}
+		fmt.Printf("Updated workspace %s: design_format=%s\n", ws.Key, displayDesignFormat(ws.DesignFormat))
+		return nil
+	})
+}
+
+// displayDesignFormat renders the effective value for user output:
+// empty means the markdown default.
+func displayDesignFormat(v string) string {
+	if v == "" {
+		return "markdown (default)"
+	}
+	return v
 }
 
 func runWorkspaceUse(_ *cobra.Command, args []string) error {
@@ -134,6 +196,9 @@ func runWorkspaceShow(_ *cobra.Command, args []string) error {
 		}
 		if ws.DefaultBranch != "" {
 			fmt.Printf("Default branch: %s\n", ws.DefaultBranch)
+		}
+		if ws.DesignFormat != "" {
+			fmt.Printf("Design format: %s\n", ws.DesignFormat)
 		}
 		fmt.Printf("Repos:        %d\n", len(repos))
 		fmt.Printf("Agents:       %d\n", len(agents))

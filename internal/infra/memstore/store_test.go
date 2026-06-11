@@ -75,6 +75,59 @@ func TestWorkspaceCRUD(t *testing.T) {
 	}
 }
 
+// TestWorkspaceDesignFormatRoundTrip verifies design_format survives the
+// Create/Get/Update cycle, including clearing it via a pointer to "".
+func TestWorkspaceDesignFormatRoundTrip(t *testing.T) {
+	ctx := context.Background()
+	s := New()
+
+	created, err := s.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "MYWS", Name: "My Workspace", DesignFormat: "html"})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if created.DesignFormat != "html" {
+		t.Errorf("Create DesignFormat = %q, want html", created.DesignFormat)
+	}
+
+	got, err := s.Workspaces().Get(ctx, "MYWS")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if got.DesignFormat != "html" {
+		t.Errorf("Get DesignFormat = %q, want html", got.DesignFormat)
+	}
+
+	// Update to markdown.
+	markdown := "markdown"
+	if _, err := s.Workspaces().Update(ctx, "MYWS", store.WorkspaceUpdate{DesignFormat: &markdown}); err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+	got, _ = s.Workspaces().Get(ctx, "MYWS")
+	if got.DesignFormat != "markdown" {
+		t.Errorf("after Update DesignFormat = %q, want markdown", got.DesignFormat)
+	}
+
+	// Update with nil pointer leaves the value untouched.
+	newName := "Renamed"
+	if _, err := s.Workspaces().Update(ctx, "MYWS", store.WorkspaceUpdate{Name: &newName}); err != nil {
+		t.Fatalf("Update name: %v", err)
+	}
+	got, _ = s.Workspaces().Get(ctx, "MYWS")
+	if got.DesignFormat != "markdown" {
+		t.Errorf("DesignFormat after unrelated update = %q, want markdown", got.DesignFormat)
+	}
+
+	// Clear via pointer-to-"".
+	empty := ""
+	if _, err := s.Workspaces().Update(ctx, "MYWS", store.WorkspaceUpdate{DesignFormat: &empty}); err != nil {
+		t.Fatalf("Update clear: %v", err)
+	}
+	got, _ = s.Workspaces().Get(ctx, "MYWS")
+	if got.DesignFormat != "" {
+		t.Errorf("cleared DesignFormat = %q, want empty", got.DesignFormat)
+	}
+}
+
 // TestRepoCRUD smoke-tests the workspace-scoped repo store. Most of the
 // interesting bugs live in the workspace+name compound key — make sure
 // repos under different workspaces don't collide.

@@ -129,3 +129,28 @@ func TestLoadConfigFromStoreProjectsFleetDBWithLocalState(t *testing.T) {
 		t.Fatalf("repo projection = %+v", repo)
 	}
 }
+
+func TestLoadConfigFromStoreCopiesDesignFormat(t *testing.T) {
+	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
+	ctx := context.Background()
+	st := memstore.New()
+	t.Cleanup(func() { _ = st.Close() })
+
+	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "WSHTML", Name: "HTML WS", DesignFormat: "html"}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "WSPLAIN", Name: "Plain WS"}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+
+	cfg, err := loadConfigFromStore(ctx, st)
+	if err != nil {
+		t.Fatalf("loadConfigFromStore() error = %v", err)
+	}
+	if got := cfg.Workspaces["WSHTML"].DesignFormat; got != "html" {
+		t.Errorf("WSHTML DesignFormat = %q, want html", got)
+	}
+	if got := cfg.Workspaces["WSPLAIN"].DesignFormat; got != "" {
+		t.Errorf("WSPLAIN DesignFormat = %q, want empty", got)
+	}
+}

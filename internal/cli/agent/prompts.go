@@ -36,6 +36,18 @@ type promptTemplateData struct {
 	TargetBranch      string
 	ConflictList      string
 	PushRef           string
+	DesignFormat      string
+}
+
+// resolveDesignFormat returns the design output format for planner prompts.
+// Only an explicit workspace setting of "html" switches the format; anything
+// else (nil workspace, empty, "markdown", unrecognized values) falls back to
+// "markdown" so plan generation never breaks on bad data.
+func resolveDesignFormat(workspace *config.WorkspaceConfig) string {
+	if workspace != nil && workspace.DesignFormat == "html" {
+		return "html"
+	}
+	return "markdown"
 }
 
 // renderPrompt loads a template by name, checks for per-project override,
@@ -217,6 +229,7 @@ func GeneratePlanningPrompt(agentName string, workspace *config.WorkspaceConfig,
 		SafetyBlock:    buildSafetyGuardrailsBlock(),
 		ReadyJSON:      readyJSON,
 		ReadyFallback:  readyFallback,
+		DesignFormat:   resolveDesignFormat(workspace),
 	})
 
 	// Inject checkpoint context if available
@@ -275,6 +288,7 @@ func GenerateFleetPlanningPrompt(agentName, taskID string, workspace *config.Wor
 		WorkspaceBlock: buildWorkspaceContextBlock(workspace),
 		SafetyBlock:    buildSafetyGuardrailsBlock(),
 		TaskID:         taskID,
+		DesignFormat:   resolveDesignFormat(workspace),
 	})
 }
 

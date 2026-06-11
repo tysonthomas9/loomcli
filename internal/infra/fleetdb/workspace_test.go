@@ -131,6 +131,217 @@ func TestWorkspaceStoreUpdateSendsSupportedFleetDBFields(t *testing.T) {
 	}
 }
 
+func TestWorkspaceStoreCreateSendsDesignFormat(t *testing.T) {
+	now := time.Now().UTC()
+	httpClient := newWorkspaceHTTPClient(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/api/v1/admin/workspaces" {
+			t.Fatalf("unexpected request %s %s", r.Method, r.URL.String())
+		}
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatalf("decode body: %v", err)
+		}
+		if body["design_format"] != "html" {
+			t.Fatalf("create body design_format = %v, want html (body=%+v)", body["design_format"], body)
+		}
+		w.WriteHeader(http.StatusCreated)
+		writeJSON(t, w, domain.Workspace{
+			Key:          "LOCALMODE",
+			Name:         "Local Mode",
+			DesignFormat: "html",
+			CreatedAt:    now,
+			UpdatedAt:    now,
+		})
+	}))
+
+	client, err := New(Config{BaseURL: "http://fleet.test", Actor: "tester", HTTPClient: httpClient})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ws, err := client.Workspaces().Create(t.Context(), store.WorkspaceCreate{
+		Key:          "LOCALMODE",
+		Name:         "Local Mode",
+		DesignFormat: "html",
+	})
+	if err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	if ws.DesignFormat != "html" {
+		t.Fatalf("DesignFormat = %q, want html", ws.DesignFormat)
+	}
+}
+
+func TestWorkspaceStoreCreateOmitsEmptyDesignFormat(t *testing.T) {
+	now := time.Now().UTC()
+	httpClient := newWorkspaceHTTPClient(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/api/v1/admin/workspaces" {
+			t.Fatalf("unexpected request %s %s", r.Method, r.URL.String())
+		}
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatalf("decode body: %v", err)
+		}
+		if _, ok := body["design_format"]; ok {
+			t.Fatalf("create body must omit design_format when empty: %+v", body)
+		}
+		w.WriteHeader(http.StatusCreated)
+		writeJSON(t, w, domain.Workspace{Key: "LOCALMODE", Name: "Local Mode", CreatedAt: now, UpdatedAt: now})
+	}))
+
+	client, err := New(Config{BaseURL: "http://fleet.test", Actor: "tester", HTTPClient: httpClient})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ws, err := client.Workspaces().Create(t.Context(), store.WorkspaceCreate{Key: "LOCALMODE", Name: "Local Mode"})
+	if err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	if ws.DesignFormat != "" {
+		t.Fatalf("DesignFormat = %q, want empty", ws.DesignFormat)
+	}
+}
+
+func TestWorkspaceStoreUpdateSendsDesignFormat(t *testing.T) {
+	now := time.Now().UTC()
+	var sawPatch bool
+	httpClient := newWorkspaceHTTPClient(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPatch && r.URL.Path == "/api/v1/admin/workspaces/LOCALMODE":
+			sawPatch = true
+			var body map[string]any
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Fatalf("decode patch: %v", err)
+			}
+			if len(body) != 1 || body["design_format"] != "html" {
+				t.Fatalf("patch body = %+v, want design_format only", body)
+			}
+			w.WriteHeader(http.StatusNoContent)
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/admin/workspaces/LOCALMODE":
+			writeJSON(t, w, domain.Workspace{
+				Key:          "LOCALMODE",
+				Name:         "Local Mode",
+				DesignFormat: "html",
+				CreatedAt:    now,
+				UpdatedAt:    now,
+			})
+		default:
+			t.Fatalf("unexpected request %s %s", r.Method, r.URL.String())
+		}
+	}))
+
+	client, err := New(Config{BaseURL: "http://fleet.test", Actor: "tester", HTTPClient: httpClient})
+	if err != nil {
+		t.Fatal(err)
+	}
+	format := "html"
+	ws, err := client.Workspaces().Update(t.Context(), "LOCALMODE", store.WorkspaceUpdate{DesignFormat: &format})
+	if err != nil {
+		t.Fatalf("update workspace: %v", err)
+	}
+	if !sawPatch {
+		t.Fatal("expected PATCH request")
+	}
+	if ws.DesignFormat != "html" {
+		t.Fatalf("DesignFormat = %q, want html", ws.DesignFormat)
+	}
+}
+
+func TestWorkspaceStoreUpdateSendsNameAndDesignFormat(t *testing.T) {
+	now := time.Now().UTC()
+	httpClient := newWorkspaceHTTPClient(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPatch && r.URL.Path == "/api/v1/admin/workspaces/LOCALMODE":
+			var body map[string]any
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Fatalf("decode patch: %v", err)
+			}
+			if len(body) != 2 || body["name"] != "Renamed" || body["design_format"] != "markdown" {
+				t.Fatalf("patch body = %+v, want name + design_format", body)
+			}
+			w.WriteHeader(http.StatusNoContent)
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/admin/workspaces/LOCALMODE":
+			writeJSON(t, w, domain.Workspace{Key: "LOCALMODE", Name: "Renamed", DesignFormat: "markdown", CreatedAt: now, UpdatedAt: now})
+		default:
+			t.Fatalf("unexpected request %s %s", r.Method, r.URL.String())
+		}
+	}))
+
+	client, err := New(Config{BaseURL: "http://fleet.test", Actor: "tester", HTTPClient: httpClient})
+	if err != nil {
+		t.Fatal(err)
+	}
+	name := "Renamed"
+	format := "markdown"
+	ws, err := client.Workspaces().Update(t.Context(), "LOCALMODE", store.WorkspaceUpdate{Name: &name, DesignFormat: &format})
+	if err != nil {
+		t.Fatalf("update workspace: %v", err)
+	}
+	if ws.Name != "Renamed" || ws.DesignFormat != "markdown" {
+		t.Fatalf("workspace = %+v, want Renamed/markdown", ws)
+	}
+}
+
+func TestWorkspaceStoreUpdateUnsupportedFieldsOnlySkipsFleetDBPatch(t *testing.T) {
+	now := time.Now().UTC()
+	state := domain.WorkspaceStateReady
+	description := "desc"
+	defaultBranch := "main"
+	httpClient := newWorkspaceHTTPClient(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPatch && r.URL.Path == "/api/v1/admin/workspaces/LOCALMODE":
+			t.Fatalf("update with only unsupported fields must not PATCH")
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/admin/workspaces/LOCALMODE":
+			writeJSON(t, w, domain.Workspace{Key: "LOCALMODE", Name: "Local Mode", CreatedAt: now, UpdatedAt: now})
+		default:
+			t.Fatalf("unexpected request %s %s", r.Method, r.URL.String())
+		}
+	}))
+
+	client, err := New(Config{BaseURL: "http://fleet.test", Actor: "tester", HTTPClient: httpClient})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ws, err := client.Workspaces().Update(t.Context(), "LOCALMODE", store.WorkspaceUpdate{
+		State:         &state,
+		Description:   &description,
+		DefaultBranch: &defaultBranch,
+	})
+	if err != nil {
+		t.Fatalf("update workspace: %v", err)
+	}
+	if ws.Key != "LOCALMODE" {
+		t.Fatalf("Key = %q, want LOCALMODE", ws.Key)
+	}
+}
+
+func TestWorkspaceStoreGetDecodesDesignFormat(t *testing.T) {
+	now := time.Now().UTC()
+	httpClient := newWorkspaceHTTPClient(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/api/v1/admin/workspaces/LOCALMODE" {
+			t.Fatalf("unexpected request %s %s", r.Method, r.URL.String())
+		}
+		writeJSON(t, w, map[string]any{
+			"key":           "LOCALMODE",
+			"name":          "Local Mode",
+			"design_format": "html",
+			"created_at":    now,
+			"updated_at":    now,
+		})
+	}))
+
+	client, err := New(Config{BaseURL: "http://fleet.test", Actor: "tester", HTTPClient: httpClient})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ws, err := client.Workspaces().Get(t.Context(), "LOCALMODE")
+	if err != nil {
+		t.Fatalf("get workspace: %v", err)
+	}
+	if ws.DesignFormat != "html" {
+		t.Fatalf("DesignFormat = %q, want html", ws.DesignFormat)
+	}
+}
+
 func TestWorkspaceStoreUpdateStateOnlySkipsUnsupportedFleetDBPatch(t *testing.T) {
 	now := time.Now().UTC()
 	state := domain.WorkspaceStateReady
