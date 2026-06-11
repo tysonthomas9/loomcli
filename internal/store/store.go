@@ -35,6 +35,9 @@ type Store interface {
 	WorkerProfiles() WorkerProfileStore
 	AgentServices() AgentServiceStore
 	TriggerBindings() TriggerBindingStore
+	TriggerEvents() TriggerEventStore
+	TriggerDeliveries() TriggerDeliveryStore
+	TriggerRoutes() TriggerRouteDispatcher
 	DriverRuns() DriverRunStore
 	DriverSteps() DriverStepStore
 	TaskRuns() TaskRunStore

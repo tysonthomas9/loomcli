@@ -16,6 +16,11 @@ registered into FleetDB as a `DriverVersion`; it is not self-registered by a
 runtime process on startup. The active driver version changes only when the
 registering operator explicitly activates the version.
 
+For workflow authors, see
+[`workflow-driver-authoring-guide.md`](workflow-driver-authoring-guide.md) for
+the split between platform-owned `DriverRun` behavior and explicit TypeScript
+workflow policy.
+
 ## Removed Generated-Project Code
 
 The old `loom driver publish <.loom/workflows/name.ts>` path was the wrong

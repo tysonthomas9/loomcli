@@ -38,6 +38,9 @@ type Store struct {
 	profiles   *workerProfileStore
 	services   *agentServiceStore
 	bindings   *triggerBindingStore
+	events     *triggerEventStore
+	deliveries *triggerDeliveryStore
+	routes     *triggerRouteStore
 	runs       *driverRunStore
 	steps      *driverStepStore
 	taskRuns   *taskRunStore
@@ -70,6 +73,9 @@ func New() *Store {
 	runs.steps = steps
 	runs.taskRuns = taskRuns
 	steps.taskRuns = taskRuns
+	events := newTriggerEventStore()
+	deliveries := newTriggerDeliveryStore()
+	routes := &triggerRouteStore{bindings: bindings, events: events, deliveries: deliveries, runs: runs}
 	return &Store{
 		workspaces: newWorkspaceStore(),
 		repos:      newRepoStore(),
@@ -87,6 +93,9 @@ func New() *Store {
 		profiles:   profiles,
 		services:   services,
 		bindings:   bindings,
+		events:     events,
+		deliveries: deliveries,
+		routes:     routes,
 		runs:       runs,
 		steps:      steps,
 		taskRuns:   taskRuns,
@@ -156,6 +165,12 @@ func (s *Store) WorkerProfiles() store.WorkerProfileStore { return s.profiles }
 func (s *Store) AgentServices() store.AgentServiceStore { return s.services }
 
 func (s *Store) TriggerBindings() store.TriggerBindingStore { return s.bindings }
+
+func (s *Store) TriggerEvents() store.TriggerEventStore { return s.events }
+
+func (s *Store) TriggerDeliveries() store.TriggerDeliveryStore { return s.deliveries }
+
+func (s *Store) TriggerRoutes() store.TriggerRouteDispatcher { return s.routes }
 
 func (s *Store) DriverRuns() store.DriverRunStore { return s.runs }
 

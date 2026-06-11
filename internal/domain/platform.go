@@ -176,10 +176,64 @@ type TriggerBinding struct {
 	ConcurrencyPolicy    TriggerBindingConcurrencyPolicy `json:"concurrency_policy"`
 	IdempotencyPolicy    string                          `json:"idempotency_policy,omitempty"`
 	AuthPolicy           string                          `json:"auth_policy,omitempty"`
-	Permissions          []string                        `json:"permissions,omitempty"`
-	Enabled              bool                            `json:"enabled"`
-	CreatedAt            time.Time                       `json:"created_at"`
-	UpdatedAt            time.Time                       `json:"updated_at"`
+	// WebhookSecret is the shared secret used to verify inbound webhook
+	// signatures (e.g. GitHub's X-Hub-Signature-256 HMAC) for this route.
+	WebhookSecret string    `json:"webhook_secret,omitempty"`
+	Permissions   []string  `json:"permissions,omitempty"`
+	Enabled       bool      `json:"enabled"`
+	CreatedAt     time.Time `json:"created_at"`
+	UpdatedAt     time.Time `json:"updated_at"`
+}
+
+// TriggerEvent is a durable record of an external event ingested by the
+// trigger layer (e.g. a verified GitHub webhook delivery), persisted before
+// any dispatch happens.
+type TriggerEvent struct {
+	WorkspaceKey     string    `json:"workspace_key"`
+	EventID          string    `json:"event_id"`
+	TriggerBindingID string    `json:"trigger_binding_id,omitempty"`
+	SourceKind       string    `json:"source_kind"`
+	SourceEventID    string    `json:"source_event_id,omitempty"`
+	EventType        string    `json:"event_type"`
+	SubjectRef       string    `json:"subject_ref,omitempty"`
+	ActorRef         string    `json:"actor_ref,omitempty"`
+	OccurredAt       time.Time `json:"occurred_at"`
+	ReceivedAt       time.Time `json:"received_at"`
+	IdempotencyKey   string    `json:"idempotency_key,omitempty"`
+	RawPayloadRef    string    `json:"raw_payload_ref,omitempty"`
+	RawPayloadDigest string    `json:"raw_payload_digest,omitempty"`
+	SignatureStatus  string    `json:"signature_status,omitempty"`
+	ReplayOfEventID  string    `json:"replay_of_event_id,omitempty"`
+}
+
+// TriggerDeliveryStatus enumerates the lifecycle of a TriggerDelivery.
+type TriggerDeliveryStatus string
+
+const (
+	TriggerDeliveryAccepted   TriggerDeliveryStatus = "accepted"
+	TriggerDeliveryRejected   TriggerDeliveryStatus = "rejected"
+	TriggerDeliveryDuplicate  TriggerDeliveryStatus = "duplicate"
+	TriggerDeliveryQueued     TriggerDeliveryStatus = "queued"
+	TriggerDeliveryDispatched TriggerDeliveryStatus = "dispatched"
+	TriggerDeliveryFailed     TriggerDeliveryStatus = "failed"
+	TriggerDeliveryReplayed   TriggerDeliveryStatus = "replayed"
+)
+
+// TriggerDelivery links a TriggerEvent to the binding that matched it and the
+// DriverRun it enqueued.
+type TriggerDelivery struct {
+	WorkspaceKey     string                `json:"workspace_key"`
+	DeliveryID       string                `json:"delivery_id"`
+	TriggerEventID   string                `json:"trigger_event_id"`
+	TriggerBindingID string                `json:"trigger_binding_id"`
+	Status           TriggerDeliveryStatus `json:"status"`
+	RejectionReason  string                `json:"rejection_reason,omitempty"`
+	DriverRunID      string                `json:"driver_run_id,omitempty"`
+	Attempt          int                   `json:"attempt"`
+	NextRetryAt      *time.Time            `json:"next_retry_at,omitempty"`
+	ErrorClass       string                `json:"error_class,omitempty"`
+	CreatedAt        time.Time             `json:"created_at"`
+	UpdatedAt        time.Time             `json:"updated_at"`
 }
 
 type DriverRunStatus string

@@ -128,7 +128,7 @@ Definitions:
 | `running` | An executor has claimed the run and is heartbeating it. |
 | `completed` | The driver exited successfully and finalized the run. |
 | `failed` | The driver, bundle verification, executor, or recovery path failed the run. |
-| `needs_review` | The driver stopped intentionally and returned control to an operator or lead agent. |
+| `needs_review` | The driver stopped intentionally and returned control to an operator, reviewer, or lead agent. |
 | `cancelled` | An operator or policy stopped the run before normal completion. |
 
 Implementation note: existing stored `running` records with empty `NodeID` are

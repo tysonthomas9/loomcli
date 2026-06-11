@@ -39,46 +39,55 @@ func newTaskRunStore(parent *driverRunStore, steps *driverStepStore, artifacts *
 var _ store.TaskRunStore = (*taskRunStore)(nil)
 
 func (s *taskRunStore) Create(ctx context.Context, in store.TaskRunCreate) (*domain.TaskRun, error) {
-	if in.WorkspaceKey == "" || in.TaskRunID == "" || in.TaskID == "" {
-		return nil, fmt.Errorf("workspace_key + task_run_id + task_id required: %w", domain.ErrInvalid)
-	}
-	if in.DriverStepID != "" && s.steps != nil {
-		step, err := s.steps.Get(ctx, in.WorkspaceKey, in.DriverStepID)
-		if err != nil {
-			return nil, err
-		}
-		if in.DriverRunID != "" && step.DriverRunID != in.DriverRunID {
-			return nil, fmt.Errorf("driver step %q belongs to driver run %q: %w", in.DriverStepID, step.DriverRunID, domain.ErrInvalidTransition)
-		}
-		if in.DriverRunID == "" {
-			in.DriverRunID = step.DriverRunID
-		}
-	}
-	if in.DriverRunID != "" && s.parent != nil && !s.parent.exists(in.WorkspaceKey, in.DriverRunID) {
-		return nil, fmt.Errorf("driver run %q in workspace %q: %w", in.DriverRunID, in.WorkspaceKey, domain.ErrNotFound)
+	prepared, err := s.prepareTaskRunCreateMem(ctx, in)
+	if err != nil {
+		return nil, err
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.items[in.WorkspaceKey] == nil {
-		s.items[in.WorkspaceKey] = make(map[string]*domain.TaskRun)
+	if s.items[prepared.WorkspaceKey] == nil {
+		s.items[prepared.WorkspaceKey] = make(map[string]*domain.TaskRun)
 	}
-	if _, ok := s.items[in.WorkspaceKey][in.TaskRunID]; ok {
-		return nil, fmt.Errorf("task run %q in workspace %q: %w", in.TaskRunID, in.WorkspaceKey, domain.ErrAlreadyExists)
+	if _, ok := s.items[prepared.WorkspaceKey][prepared.TaskRunID]; ok {
+		return nil, fmt.Errorf("task run %q in workspace %q: %w", prepared.TaskRunID, prepared.WorkspaceKey, domain.ErrAlreadyExists)
 	}
-	run := newTaskRunFromCreateMem(in, time.Now().UTC())
-	s.items[in.WorkspaceKey][in.TaskRunID] = run
+	run := newTaskRunMem(prepared, time.Now().UTC())
+	s.items[prepared.WorkspaceKey][prepared.TaskRunID] = run
 	return cloneTaskRun(run), nil
 }
 
-func newTaskRunFromCreateMem(in store.TaskRunCreate, now time.Time) *domain.TaskRun {
-	status := in.Status
-	if status == "" {
-		status = domain.TaskRunQueued
+func (s *taskRunStore) prepareTaskRunCreateMem(ctx context.Context, in store.TaskRunCreate) (store.TaskRunCreate, error) {
+	if in.WorkspaceKey == "" || in.TaskRunID == "" || in.TaskID == "" {
+		return store.TaskRunCreate{}, fmt.Errorf("workspace_key + task_run_id + task_id required: %w", domain.ErrInvalid)
 	}
-	fencingToken := in.FencingToken
-	if in.LeaseID != "" && fencingToken == 0 {
-		fencingToken = now.UnixNano()
+	if err := s.applyDriverStepToTaskRunCreateMem(ctx, &in); err != nil {
+		return store.TaskRunCreate{}, err
 	}
+	if in.DriverRunID != "" && s.parent != nil && !s.parent.exists(in.WorkspaceKey, in.DriverRunID) {
+		return store.TaskRunCreate{}, fmt.Errorf("driver run %q in workspace %q: %w", in.DriverRunID, in.WorkspaceKey, domain.ErrNotFound)
+	}
+	return in, nil
+}
+
+func (s *taskRunStore) applyDriverStepToTaskRunCreateMem(ctx context.Context, in *store.TaskRunCreate) error {
+	if in.DriverStepID == "" || s.steps == nil {
+		return nil
+	}
+	step, err := s.steps.Get(ctx, in.WorkspaceKey, in.DriverStepID)
+	if err != nil {
+		return err
+	}
+	if in.DriverRunID != "" && step.DriverRunID != in.DriverRunID {
+		return fmt.Errorf("driver step %q belongs to driver run %q: %w", in.DriverStepID, step.DriverRunID, domain.ErrInvalidTransition)
+	}
+	if in.DriverRunID == "" {
+		in.DriverRunID = step.DriverRunID
+	}
+	return nil
+}
+
+func newTaskRunMem(in store.TaskRunCreate, now time.Time) *domain.TaskRun {
+	status := defaultTaskRunStatusMem(in.Status)
 	run := &domain.TaskRun{
 		WorkspaceKey:     in.WorkspaceKey,
 		TaskRunID:        in.TaskRunID,
@@ -90,7 +99,7 @@ func newTaskRunFromCreateMem(in store.TaskRunCreate, now time.Time) *domain.Task
 		Status:           status,
 		NodeID:           in.NodeID,
 		LeaseID:          in.LeaseID,
-		FencingToken:     fencingToken,
+		FencingToken:     taskRunCreateFencingTokenMem(in, now),
 		RunnerPlacement:  in.RunnerPlacement,
 		SandboxPlacement: in.SandboxPlacement,
 		RuntimeMetadata:  cloneMap(in.RuntimeMetadata),
@@ -104,77 +113,103 @@ func newTaskRunFromCreateMem(in store.TaskRunCreate, now time.Time) *domain.Task
 	return run
 }
 
+func defaultTaskRunStatusMem(status domain.TaskRunStatus) domain.TaskRunStatus {
+	if status == "" {
+		return domain.TaskRunQueued
+	}
+	return status
+}
+
+func taskRunCreateFencingTokenMem(in store.TaskRunCreate, now time.Time) int64 {
+	if in.LeaseID != "" && in.FencingToken == 0 {
+		return now.UnixNano()
+	}
+	return in.FencingToken
+}
+
 func (s *taskRunStore) ClaimQueued(_ context.Context, ws string, claim store.TaskRunClaim) (*domain.TaskRun, error) {
-	claim = normalizeTaskRunClaimMem(claim)
+	normalized, now, err := normalizeTaskRunClaimMem(ws, claim)
+	if err != nil {
+		return nil, err
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	runningOnNode := s.runningTaskRunsOnNodeLocked(ws, normalized.NodeID)
+	for _, run := range claimCandidatesMem(s.items[ws], normalized.TaskRunID) {
+		profile := s.profileLocked(ws, run.WorkerProfileID)
+		if !taskRunMatchesClaimMem(run, profile, normalized) {
+			continue
+		}
+		if profile != nil && profile.MaxParallel > 0 && runningOnNode >= profile.MaxParallel {
+			return nil, fmt.Errorf("node %q capacity for task runs in workspace %q: %w", normalized.NodeID, ws, domain.ErrInvalidTransition)
+		}
+		applyTaskRunClaimMem(run, normalized, now)
+		return cloneTaskRun(run), nil
+	}
+	if normalized.TaskRunID != "" {
+		return nil, fmt.Errorf("task run %q in workspace %q: %w", normalized.TaskRunID, ws, domain.ErrInvalidTransition)
+	}
+	return nil, fmt.Errorf("queued task run in workspace %q: %w", ws, domain.ErrNotFound)
+}
+
+func normalizeTaskRunClaimMem(ws string, claim store.TaskRunClaim) (store.TaskRunClaim, time.Time, error) {
+	claim.TaskRunID = strings.TrimSpace(claim.TaskRunID)
+	claim.NodeID = strings.TrimSpace(claim.NodeID)
+	claim.RunnerID = strings.TrimSpace(claim.RunnerID)
+	claim.LeaseID = strings.TrimSpace(claim.LeaseID)
 	if claim.NodeID == "" || claim.LeaseID == "" {
-		return nil, fmt.Errorf("task run claim owner required in workspace %q: %w", ws, domain.ErrInvalidTransition)
+		return store.TaskRunClaim{}, time.Time{}, fmt.Errorf("task run claim owner required in workspace %q: %w", ws, domain.ErrInvalidTransition)
 	}
 	now := claim.ClaimedAt
 	if now.IsZero() {
 		now = time.Now().UTC()
 	}
-	claim = applyTaskRunClaimPlacementDefaultsMem(claim, now)
+	claim.RunnerPlacement = defaultTaskRunRunnerPlacementMem(claim.RunnerPlacement, claim, now)
+	return claim, now, nil
+}
 
-	s.mu.Lock()
-	defer s.mu.Unlock()
+func defaultTaskRunRunnerPlacementMem(placement domain.TaskRunPlacement, claim store.TaskRunClaim, now time.Time) domain.TaskRunPlacement {
+	if placement.Provider == "" {
+		placement.Provider = "daemon"
+	}
+	if placement.NodeID == "" {
+		placement.NodeID = claim.NodeID
+	}
+	if placement.RunnerID == "" {
+		placement.RunnerID = claim.RunnerID
+	}
+	if placement.StartedAt.IsZero() {
+		placement.StartedAt = now
+	}
+	if placement.HeartbeatAt.IsZero() {
+		placement.HeartbeatAt = now
+	}
+	return placement
+}
+
+func (s *taskRunStore) runningTaskRunsOnNodeLocked(ws, nodeID string) int {
 	runningOnNode := 0
 	for _, run := range s.items[ws] {
-		if run.Status == domain.TaskRunRunning && run.NodeID == claim.NodeID {
+		if run.Status == domain.TaskRunRunning && run.NodeID == nodeID {
 			runningOnNode++
 		}
 	}
-	for _, run := range claimCandidatesMem(s.items[ws], claim.TaskRunID) {
-		if !taskRunMatchesClaimMem(run, s.profileLocked(ws, run.WorkerProfileID), claim) {
-			continue
-		}
-		profile := s.profileLocked(ws, run.WorkerProfileID)
-		if profile != nil && profile.MaxParallel > 0 && runningOnNode >= profile.MaxParallel {
-			return nil, fmt.Errorf("node %q capacity for task runs in workspace %q: %w", claim.NodeID, ws, domain.ErrInvalidTransition)
-		}
-		run.Status = domain.TaskRunRunning
-		run.NodeID = claim.NodeID
-		run.LeaseID = claim.LeaseID
-		run.FencingToken = now.UnixNano()
-		run.StartedAt = now
-		run.LastHeartbeat = now
-		run.UpdatedAt = now
-		run.RunnerPlacement = claim.RunnerPlacement
-		if !claim.SandboxPlacement.Empty() {
-			run.SandboxPlacement = claim.SandboxPlacement
-		}
-		return cloneTaskRun(run), nil
-	}
-	if claim.TaskRunID != "" {
-		return nil, fmt.Errorf("task run %q in workspace %q: %w", claim.TaskRunID, ws, domain.ErrInvalidTransition)
-	}
-	return nil, fmt.Errorf("queued task run in workspace %q: %w", ws, domain.ErrNotFound)
+	return runningOnNode
 }
 
-func normalizeTaskRunClaimMem(claim store.TaskRunClaim) store.TaskRunClaim {
-	claim.TaskRunID = strings.TrimSpace(claim.TaskRunID)
-	claim.NodeID = strings.TrimSpace(claim.NodeID)
-	claim.RunnerID = strings.TrimSpace(claim.RunnerID)
-	claim.LeaseID = strings.TrimSpace(claim.LeaseID)
-	return claim
-}
-
-func applyTaskRunClaimPlacementDefaultsMem(claim store.TaskRunClaim, now time.Time) store.TaskRunClaim {
-	if claim.RunnerPlacement.Provider == "" {
-		claim.RunnerPlacement.Provider = "daemon"
+func applyTaskRunClaimMem(run *domain.TaskRun, claim store.TaskRunClaim, now time.Time) {
+	run.Status = domain.TaskRunRunning
+	run.NodeID = claim.NodeID
+	run.LeaseID = claim.LeaseID
+	run.FencingToken = now.UnixNano()
+	run.StartedAt = now
+	run.LastHeartbeat = now
+	run.UpdatedAt = now
+	run.RunnerPlacement = claim.RunnerPlacement
+	if !claim.SandboxPlacement.Empty() {
+		run.SandboxPlacement = claim.SandboxPlacement
 	}
-	if claim.RunnerPlacement.NodeID == "" {
-		claim.RunnerPlacement.NodeID = claim.NodeID
-	}
-	if claim.RunnerPlacement.RunnerID == "" {
-		claim.RunnerPlacement.RunnerID = claim.RunnerID
-	}
-	if claim.RunnerPlacement.StartedAt.IsZero() {
-		claim.RunnerPlacement.StartedAt = now
-	}
-	if claim.RunnerPlacement.HeartbeatAt.IsZero() {
-		claim.RunnerPlacement.HeartbeatAt = now
-	}
-	return claim
 }
 
 func (s *taskRunStore) profileLocked(ws, profileID string) *domain.WorkerProfile {
@@ -285,22 +320,15 @@ func (s *taskRunStore) Heartbeat(_ context.Context, ws, taskRunID string, heartb
 }
 
 func (s *taskRunStore) Complete(ctx context.Context, ws, taskRunID string, complete store.TaskRunComplete) (*domain.TaskRun, error) {
-	complete.CompletionID = strings.TrimSpace(complete.CompletionID)
-	if err := validateTaskRunCompleteMem(ws, taskRunID, complete); err != nil {
+	normalized, err := normalizeTaskRunCompleteMem(ws, taskRunID, complete)
+	if err != nil {
 		return nil, err
 	}
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if existingTaskRunID, ok := s.completions[ws][complete.CompletionID]; ok {
-		if existingTaskRunID != taskRunID {
-			return nil, fmt.Errorf("task run completion %q in workspace %q: %w", complete.CompletionID, ws, domain.ErrAlreadyExists)
-		}
-		run, ok := s.items[ws][existingTaskRunID]
-		if !ok {
-			return nil, fmt.Errorf("task run %q in workspace %q: %w", existingTaskRunID, ws, domain.ErrNotFound)
-		}
-		return cloneTaskRun(run), nil
+	if run, handled, err := s.completedTaskRunByCompletionIDLocked(ws, taskRunID, normalized.CompletionID); handled || err != nil {
+		return run, err
 	}
 	run, ok := s.items[ws][taskRunID]
 	if !ok {
@@ -309,31 +337,71 @@ func (s *taskRunStore) Complete(ctx context.Context, ws, taskRunID string, compl
 	if run.Status.IsTerminal() {
 		return nil, fmt.Errorf("task run %q in workspace %q: %w", taskRunID, ws, domain.ErrInvalidTransition)
 	}
-	if run.LeaseID != "" || run.FencingToken != 0 {
-		if complete.NodeID != run.NodeID || complete.LeaseID != run.LeaseID || complete.FencingToken != run.FencingToken {
-			return nil, fmt.Errorf("task run %q in workspace %q: %w", taskRunID, ws, domain.ErrNotOwner)
-		}
+	if err := validateTaskRunCompleteOwnerMem(ws, taskRunID, run, normalized); err != nil {
+		return nil, err
 	}
-	if taskRunRequiresCloudSafeArtifactsMem(run) && !taskRunArtifactsRefCloudSafeForCompletionMem(complete.ArtifactsRef) {
+	if taskRunRequiresCloudSafeArtifactsMem(run) && !taskRunArtifactsRefCloudSafeForCompletionMem(normalized.ArtifactsRef) {
 		return nil, fmt.Errorf("task run %q in workspace %q: %w", taskRunID, ws, domain.ErrInvalidTransition)
 	}
-	if err := s.validateCompletionArtifactsLocked(ctx, ws, run, complete.RequiredArtifactIDs); err != nil {
+	if err := s.validateCompletionArtifactsLocked(ctx, ws, run, normalized.RequiredArtifactIDs); err != nil {
 		return nil, err
 	}
 
+	applyTaskRunCompleteMem(run, normalized)
+	if s.completions[ws] == nil {
+		s.completions[ws] = make(map[string]string)
+	}
+	s.completions[ws][normalized.CompletionID] = taskRunID
+	return cloneTaskRun(run), nil
+}
+
+func normalizeTaskRunCompleteMem(ws, taskRunID string, complete store.TaskRunComplete) (store.TaskRunComplete, error) {
+	complete.CompletionID = strings.TrimSpace(complete.CompletionID)
+	if complete.CompletionID == "" || !complete.Status.IsTerminal() {
+		return store.TaskRunComplete{}, fmt.Errorf("task run %q in workspace %q: %w", taskRunID, ws, domain.ErrInvalidTransition)
+	}
+	if complete.CloseTask && complete.Status != domain.TaskRunCompleted {
+		return store.TaskRunComplete{}, fmt.Errorf("task run %q in workspace %q: %w", taskRunID, ws, domain.ErrInvalidTransition)
+	}
+	if complete.RequireArtifacts && len(complete.RequiredArtifactIDs) == 0 && strings.TrimSpace(complete.ArtifactsRef) == "" {
+		return store.TaskRunComplete{}, fmt.Errorf("task run %q in workspace %q: %w", taskRunID, ws, domain.ErrInvalidTransition)
+	}
+	if !taskRunUsageValuesValidMem(complete.InputTokens, complete.OutputTokens, complete.CacheReadTokens, complete.CacheWriteTokens, complete.EstimatedCostUSD) {
+		return store.TaskRunComplete{}, fmt.Errorf("task run usage values must be finite and non-negative")
+	}
+	return complete, nil
+}
+
+func (s *taskRunStore) completedTaskRunByCompletionIDLocked(ws, taskRunID, completionID string) (*domain.TaskRun, bool, error) {
+	existingTaskRunID, ok := s.completions[ws][completionID]
+	if !ok {
+		return nil, false, nil
+	}
+	if existingTaskRunID != taskRunID {
+		return nil, true, fmt.Errorf("task run completion %q in workspace %q: %w", completionID, ws, domain.ErrAlreadyExists)
+	}
+	run, ok := s.items[ws][existingTaskRunID]
+	if !ok {
+		return nil, true, fmt.Errorf("task run %q in workspace %q: %w", existingTaskRunID, ws, domain.ErrNotFound)
+	}
+	return cloneTaskRun(run), true, nil
+}
+
+func validateTaskRunCompleteOwnerMem(ws, taskRunID string, run *domain.TaskRun, complete store.TaskRunComplete) error {
+	if run.LeaseID == "" && run.FencingToken == 0 {
+		return nil
+	}
+	if complete.NodeID != run.NodeID || complete.LeaseID != run.LeaseID || complete.FencingToken != run.FencingToken {
+		return fmt.Errorf("task run %q in workspace %q: %w", taskRunID, ws, domain.ErrNotOwner)
+	}
+	return nil
+}
+
+func applyTaskRunCompleteMem(run *domain.TaskRun, complete store.TaskRunComplete) {
 	now := complete.FinishedAt
 	if now.IsZero() {
 		now = time.Now().UTC()
 	}
-	applyTaskRunCompletionMem(run, complete, now)
-	if s.completions[ws] == nil {
-		s.completions[ws] = make(map[string]string)
-	}
-	s.completions[ws][complete.CompletionID] = taskRunID
-	return cloneTaskRun(run), nil
-}
-
-func applyTaskRunCompletionMem(run *domain.TaskRun, complete store.TaskRunComplete, now time.Time) {
 	run.Status = complete.Status
 	run.ExitCode = clonePtr(complete.ExitCode)
 	run.LogsRef = complete.LogsRef
@@ -348,22 +416,6 @@ func applyTaskRunCompletionMem(run *domain.TaskRun, complete store.TaskRunComple
 	run.ErrorMessage = complete.ErrorMessage
 	run.FinishedAt = &now
 	run.UpdatedAt = now
-}
-
-func validateTaskRunCompleteMem(ws, taskRunID string, complete store.TaskRunComplete) error {
-	if complete.CompletionID == "" || !complete.Status.IsTerminal() {
-		return fmt.Errorf("task run %q in workspace %q: %w", taskRunID, ws, domain.ErrInvalidTransition)
-	}
-	if complete.CloseTask && complete.Status != domain.TaskRunCompleted {
-		return fmt.Errorf("task run %q in workspace %q: %w", taskRunID, ws, domain.ErrInvalidTransition)
-	}
-	if complete.RequireArtifacts && len(complete.RequiredArtifactIDs) == 0 && strings.TrimSpace(complete.ArtifactsRef) == "" {
-		return fmt.Errorf("task run %q in workspace %q: %w", taskRunID, ws, domain.ErrInvalidTransition)
-	}
-	if !taskRunUsageValuesValidMem(complete.InputTokens, complete.OutputTokens, complete.CacheReadTokens, complete.CacheWriteTokens, complete.EstimatedCostUSD) {
-		return fmt.Errorf("task run usage values must be finite and non-negative")
-	}
-	return nil
 }
 
 func (s *taskRunStore) validateCompletionArtifactsLocked(ctx context.Context, ws string, run *domain.TaskRun, artifactIDs []string) error {
@@ -521,112 +573,4 @@ func (s *taskRunStore) ListLogs(_ context.Context, ws, taskRunID string, filter 
 		}
 	}
 	return out, nil
-}
-
-func cloneTaskRun(r *domain.TaskRun) *domain.TaskRun {
-	out := *r
-	out.ExitCode = clonePtr(r.ExitCode)
-	out.RunnerPlacement = cloneTaskRunPlacement(r.RunnerPlacement)
-	out.SandboxPlacement = cloneTaskRunPlacement(r.SandboxPlacement)
-	out.RuntimeMetadata = cloneMap(r.RuntimeMetadata)
-	out.FinishedAt = clonePtr(r.FinishedAt)
-	return &out
-}
-
-func cloneTaskRunPlacement(p domain.TaskRunPlacement) domain.TaskRunPlacement {
-	out := p
-	out.RetainedUntil = clonePtr(p.RetainedUntil)
-	return out
-}
-
-func cloneTaskRunLogEntry(entry *domain.TaskRunLogEntry) *domain.TaskRunLogEntry {
-	if entry == nil {
-		return nil
-	}
-	out := *entry
-	return &out
-}
-
-func mergeStringMapMem(base, patch map[string]string) map[string]string {
-	if len(base) == 0 && len(patch) == 0 {
-		return nil
-	}
-	out := make(map[string]string, len(base)+len(patch))
-	for k, v := range base {
-		out[k] = v
-	}
-	for k, v := range patch {
-		out[k] = v
-	}
-	return out
-}
-
-func taskRunMatchesMem(r *domain.TaskRun, f store.TaskRunFilter) bool {
-	return (f.DriverRunID == "" || r.DriverRunID == f.DriverRunID) &&
-		(f.DriverStepID == "" || r.DriverStepID == f.DriverStepID) &&
-		(f.TaskID == "" || r.TaskID == f.TaskID) &&
-		(f.WorkerProfileID == "" || r.WorkerProfileID == f.WorkerProfileID) &&
-		(f.Status == "" || r.Status == f.Status)
-}
-
-func claimCandidatesMem(runs map[string]*domain.TaskRun, taskRunID string) []*domain.TaskRun {
-	out := make([]*domain.TaskRun, 0, len(runs))
-	for _, run := range runs {
-		if taskRunID != "" && run.TaskRunID != taskRunID {
-			continue
-		}
-		out = append(out, run)
-	}
-	sort.Slice(out, func(i, j int) bool { return out[i].CreatedAt.Before(out[j].CreatedAt) })
-	return out
-}
-
-func taskRunMatchesClaimMem(run *domain.TaskRun, profile *domain.WorkerProfile, claim store.TaskRunClaim) bool {
-	if run == nil || run.Status != domain.TaskRunQueued {
-		return false
-	}
-	if claim.TaskRunID != "" && run.TaskRunID != claim.TaskRunID {
-		return false
-	}
-	if run.WorkerProfileID != "" {
-		if !stringListEmptyOrContainsMem(claim.WorkerProfileIDs, run.WorkerProfileID) {
-			return false
-		}
-		if profile == nil || !profile.Enabled {
-			return false
-		}
-		if profile.Backend != "" && !stringListEmptyOrContainsMem(claim.SupportedProviders, profile.Backend) {
-			return false
-		}
-		if !stringListContainsAllMem(claim.Capabilities, profile.Capabilities) {
-			return false
-		}
-	}
-	provider := run.SandboxPlacement.Provider
-	if provider == "" {
-		provider = run.ProviderProfile
-	}
-	return provider == "" || stringListEmptyOrContainsMem(claim.SupportedProviders, provider)
-}
-
-func stringListEmptyOrContainsMem(values []string, want string) bool {
-	want = strings.TrimSpace(want)
-	if want == "" || len(values) == 0 {
-		return true
-	}
-	for _, value := range values {
-		if strings.TrimSpace(value) == want {
-			return true
-		}
-	}
-	return false
-}
-
-func stringListContainsAllMem(have, required []string) bool {
-	for _, want := range required {
-		if !stringListEmptyOrContainsMem(have, want) {
-			return false
-		}
-	}
-	return true
 }

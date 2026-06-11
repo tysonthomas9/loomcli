@@ -128,34 +128,34 @@ func (s *driverStepStore) Update(ctx context.Context, ws, stepID string, update 
 	if err := validateDriverRunOwnerForStepMem(s.parent, ws, step.DriverRunID, update.NodeID, update.LeaseID, update.FencingToken); err != nil {
 		return nil, err
 	}
-	if update.TaskRunID != nil && strings.TrimSpace(*update.TaskRunID) != "" && s.taskRuns != nil {
-		taskRun, err := s.taskRuns.Get(ctx, ws, *update.TaskRunID)
-		if err != nil {
-			return nil, err
-		}
-		if taskRun.DriverRunID != step.DriverRunID || taskRun.DriverStepID != stepID {
-			return nil, fmt.Errorf("task run %q does not point back to driver step %q: %w", *update.TaskRunID, stepID, domain.ErrInvalidTransition)
-		}
+	if err := s.validateDriverStepUpdateMem(ctx, ws, stepID, step, update); err != nil {
+		return nil, err
 	}
-	if update.Status != nil {
-		if !driverStepStatusValid(*update.Status) {
-			return nil, fmt.Errorf("driver step status %q: %w", *update.Status, domain.ErrInvalid)
-		}
-		step.Status = *update.Status
-	}
-	applyDriverStepUpdateFieldsMem(step, update)
-	now := time.Now().UTC()
-	if step.Status == domain.DriverStepRunning && step.StartedAt.IsZero() {
-		step.StartedAt = now
-	}
-	if step.Status.IsTerminal() && step.EndedAt == nil {
-		step.EndedAt = &now
-	}
-	step.UpdatedAt = now
+	applyDriverStepUpdateMem(step, update, time.Now().UTC())
 	return cloneDriverStep(step), nil
 }
 
-func applyDriverStepUpdateFieldsMem(step *domain.DriverStep, update store.DriverStepUpdate) {
+func (s *driverStepStore) validateDriverStepUpdateMem(ctx context.Context, ws, stepID string, step *domain.DriverStep, update store.DriverStepUpdate) error {
+	if update.Status != nil && !driverStepStatusValid(*update.Status) {
+		return fmt.Errorf("driver step status %q: %w", *update.Status, domain.ErrInvalid)
+	}
+	if update.TaskRunID == nil || strings.TrimSpace(*update.TaskRunID) == "" || s.taskRuns == nil {
+		return nil
+	}
+	taskRun, err := s.taskRuns.Get(ctx, ws, *update.TaskRunID)
+	if err != nil {
+		return err
+	}
+	if taskRun.DriverRunID != step.DriverRunID || taskRun.DriverStepID != stepID {
+		return fmt.Errorf("task run %q does not point back to driver step %q: %w", *update.TaskRunID, stepID, domain.ErrInvalidTransition)
+	}
+	return nil
+}
+
+func applyDriverStepUpdateMem(step *domain.DriverStep, update store.DriverStepUpdate, now time.Time) {
+	if update.Status != nil {
+		step.Status = *update.Status
+	}
 	if update.TaskRunID != nil {
 		step.TaskRunID = *update.TaskRunID
 	}
@@ -183,6 +183,13 @@ func applyDriverStepUpdateFieldsMem(step *domain.DriverStep, update store.Driver
 	if update.EndedAt != nil {
 		step.EndedAt = clonePtr(update.EndedAt)
 	}
+	if step.Status == domain.DriverStepRunning && step.StartedAt.IsZero() {
+		step.StartedAt = now
+	}
+	if step.Status.IsTerminal() && step.EndedAt == nil {
+		step.EndedAt = &now
+	}
+	step.UpdatedAt = now
 }
 
 func validateDriverRunOwnerForStepMem(parent *driverRunStore, ws, runID, nodeID, leaseID string, fencingToken int64) error {
@@ -217,21 +224,4 @@ func driverStepStatusValid(status domain.DriverStepStatus) bool {
 	default:
 		return false
 	}
-}
-
-func cloneDriverStep(s *domain.DriverStep) *domain.DriverStep {
-	if s == nil {
-		return nil
-	}
-	out := *s
-	out.EndedAt = clonePtr(s.EndedAt)
-	return &out
-}
-
-func driverStepMatchesMem(s *domain.DriverStep, f store.DriverStepFilter) bool {
-	return (f.DriverRunID == "" || s.DriverRunID == f.DriverRunID) &&
-		(f.TaskRunID == "" || s.TaskRunID == f.TaskRunID) &&
-		(f.ActionLedgerID == "" || s.ActionLedgerID == f.ActionLedgerID) &&
-		(f.StepKind == "" || s.StepKind == f.StepKind) &&
-		(f.Status == "" || s.Status == f.Status)
 }

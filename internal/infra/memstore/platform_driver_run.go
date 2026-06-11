@@ -2,10 +2,8 @@ package memstore
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"sort"
-	"strings"
 	"sync"
 	"time"
 
@@ -249,26 +247,9 @@ func (s *driverRunStore) Finish(_ context.Context, ws, runID string, finish stor
 }
 
 func (s *driverRunStore) RecoverStale(_ context.Context, ws string, recover store.StaleDriverRunRecovery) (*store.StaleDriverRunRecoveryResult, error) {
-	if ws == "" {
-		return nil, fmt.Errorf("workspace_key required: %w", domain.ErrInvalid)
-	}
-	if recover.MaxAgeSeconds < 0 || recover.Limit < 0 {
-		return nil, fmt.Errorf("stale driver run recovery values must be non-negative: %w", domain.ErrInvalid)
-	}
-	recoveredAt := time.Now().UTC()
-	staleBefore := staleRecoveryCutoffMem(recover.StaleBefore, recover.MaxAgeSeconds, recoveredAt)
-	errorClass := strings.TrimSpace(recover.ErrorClass)
-	if errorClass == "" {
-		errorClass = "stale_driver_run"
-	}
-	summary := strings.TrimSpace(recover.Summary)
-	if summary == "" {
-		summary = "driver run heartbeat stale before " + staleBefore.Format(time.RFC3339Nano)
-	}
-	result := &store.StaleDriverRunRecoveryResult{
-		WorkspaceKey: ws,
-		StaleBefore:  staleBefore,
-		RecoveredAt:  recoveredAt,
+	plan, err := newStaleDriverRunRecoveryMem(ws, recover)
+	if err != nil {
+		return nil, err
 	}
 
 	s.mu.Lock()
@@ -278,34 +259,60 @@ func (s *driverRunStore) RecoverStale(_ context.Context, ws string, recover stor
 			continue
 		}
 		lastHeartbeat := driverRunRecoveryHeartbeatMem(run)
-		if lastHeartbeat.IsZero() || !lastHeartbeat.Before(staleBefore) {
-			result.SkippedFresh++
-			result.SkippedFreshRunIDs = append(result.SkippedFreshRunIDs, run.RunID)
+		if lastHeartbeat.IsZero() || !lastHeartbeat.Before(plan.staleBefore) {
+			plan.result.SkippedFresh++
+			plan.result.SkippedFreshRunIDs = append(plan.result.SkippedFreshRunIDs, run.RunID)
 			continue
 		}
-		if recover.Limit > 0 && result.Recovered >= recover.Limit {
+		if recover.Limit > 0 && plan.result.Recovered >= recover.Limit {
 			break
 		}
 		run.Status = domain.DriverRunFailed
-		run.Summary = summary
-		run.ErrorClass = errorClass
-		run.FinishedAt = &recoveredAt
-		run.UpdatedAt = recoveredAt
-		result.Recovered++
-		result.RecoveredRunIDs = append(result.RecoveredRunIDs, run.RunID)
+		run.Summary = plan.summary
+		run.ErrorClass = plan.errorClass
+		run.FinishedAt = &plan.recoveredAt
+		run.UpdatedAt = plan.recoveredAt
+		plan.result.Recovered++
+		plan.result.RecoveredRunIDs = append(plan.result.RecoveredRunIDs, run.RunID)
 	}
-	return result, nil
+	return plan.result, nil
 }
 
-func staleRecoveryCutoffMem(staleBefore time.Time, maxAgeSeconds int64, now time.Time) time.Time {
-	if !staleBefore.IsZero() {
-		return staleBefore
+type staleDriverRunRecoveryMem struct {
+	result      *store.StaleDriverRunRecoveryResult
+	recoveredAt time.Time
+	staleBefore time.Time
+	errorClass  string
+	summary     string
+}
+
+func newStaleDriverRunRecoveryMem(ws string, recover store.StaleDriverRunRecovery) (*staleDriverRunRecoveryMem, error) {
+	if ws == "" {
+		return nil, fmt.Errorf("workspace_key required: %w", domain.ErrInvalid)
+	}
+	if recover.MaxAgeSeconds < 0 || recover.Limit < 0 {
+		return nil, fmt.Errorf("stale driver run recovery values must be non-negative: %w", domain.ErrInvalid)
+	}
+	recoveredAt := time.Now().UTC()
+	staleBefore := staleBeforeMem(recover.StaleBefore, recoveredAt, recover.MaxAgeSeconds)
+	return &staleDriverRunRecoveryMem{
+		result:      &store.StaleDriverRunRecoveryResult{WorkspaceKey: ws, StaleBefore: staleBefore, RecoveredAt: recoveredAt},
+		recoveredAt: recoveredAt,
+		staleBefore: staleBefore,
+		errorClass:  firstNonEmptyMem(recover.ErrorClass, "stale_driver_run"),
+		summary:     firstNonEmptyMem(recover.Summary, "driver run heartbeat stale before "+staleBefore.Format(time.RFC3339Nano)),
+	}, nil
+}
+
+func staleBeforeMem(explicit time.Time, recoveredAt time.Time, maxAgeSeconds int64) time.Time {
+	if !explicit.IsZero() {
+		return explicit
 	}
 	maxAge := 5 * time.Minute
 	if maxAgeSeconds > 0 {
 		maxAge = time.Duration(maxAgeSeconds) * time.Second
 	}
-	return now.Add(-maxAge)
+	return recoveredAt.Add(-maxAge)
 }
 
 func driverRunRecoveryHeartbeatMem(run *domain.DriverRun) time.Time {
@@ -322,6 +329,35 @@ func driverRunRecoveryHeartbeatMem(run *domain.DriverRun) time.Time {
 }
 
 func (s *driverRunStore) RecoverStaleTaskRuns(_ context.Context, ws, runID string, recover store.StaleTaskRunRecovery) (*store.StaleTaskRunRecoveryResult, error) {
+	plan, err := newStaleTaskRunRecoveryMem(ws, runID, recover)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.ensureDriverRunExistsMem(ws, runID); err != nil {
+		return nil, err
+	}
+	if s.taskRuns == nil {
+		return plan.result, nil
+	}
+
+	s.taskRuns.mu.Lock()
+	recoveredTaskRunIDs, recoveredStepIDs := recoverStaleTaskRunsLocked(s.taskRuns.items[ws], runID, plan)
+	s.taskRuns.mu.Unlock()
+	sort.Strings(plan.result.RecoveredTaskRunIDs)
+
+	s.recoverLinkedDriverStepsMem(ws, runID, recoveredTaskRunIDs, recoveredStepIDs, plan.recoveredAt)
+	return plan.result, nil
+}
+
+type staleTaskRunRecoveryMem struct {
+	result       *store.StaleTaskRunRecoveryResult
+	recoveredAt  time.Time
+	staleBefore  time.Time
+	errorClass   string
+	errorMessage string
+}
+
+func newStaleTaskRunRecoveryMem(ws, runID string, recover store.StaleTaskRunRecovery) (*staleTaskRunRecoveryMem, error) {
 	if ws == "" || runID == "" {
 		return nil, fmt.Errorf("workspace_key + run_id required: %w", domain.ErrInvalid)
 	}
@@ -329,87 +365,86 @@ func (s *driverRunStore) RecoverStaleTaskRuns(_ context.Context, ws, runID strin
 		return nil, fmt.Errorf("max_age_seconds must be non-negative: %w", domain.ErrInvalid)
 	}
 	recoveredAt := time.Now().UTC()
-	staleBefore := staleRecoveryCutoffMem(recover.StaleBefore, recover.MaxAgeSeconds, recoveredAt)
-	errorClass := strings.TrimSpace(recover.ErrorClass)
-	if errorClass == "" {
-		errorClass = "stale_task_run"
-	}
-	errorMessage := strings.TrimSpace(recover.ErrorMessage)
-	if errorMessage == "" {
-		errorMessage = "task run heartbeat is stale"
-	}
-
-	s.mu.RLock()
-	if _, ok := s.items[ws][runID]; !ok {
-		s.mu.RUnlock()
-		return nil, fmt.Errorf("driver run %q in workspace %q: %w", runID, ws, domain.ErrNotFound)
-	}
-	s.mu.RUnlock()
-
-	result := &store.StaleTaskRunRecoveryResult{
-		WorkspaceKey: ws,
-		DriverRunID:  runID,
-		StaleBefore:  staleBefore.UTC(),
-		RecoveredAt:  recoveredAt,
-	}
-	if s.taskRuns == nil {
-		return result, nil
-	}
-
-	recoveredTaskRunIDs := make(map[string]struct{})
-	recoveredStepIDs := make(map[string]struct{})
-	s.failStaleTaskRunsMem(ws, runID, staleBefore, recoveredAt, errorClass, errorMessage, result, recoveredTaskRunIDs, recoveredStepIDs)
-	sort.Strings(result.RecoveredTaskRunIDs)
-	s.failStepsForRecoveredTaskRunsMem(ws, runID, recoveredAt, recoveredTaskRunIDs, recoveredStepIDs)
-	return result, nil
+	staleBefore := staleBeforeMem(recover.StaleBefore, recoveredAt, recover.MaxAgeSeconds)
+	return &staleTaskRunRecoveryMem{
+		result:       &store.StaleTaskRunRecoveryResult{WorkspaceKey: ws, DriverRunID: runID, StaleBefore: staleBefore.UTC(), RecoveredAt: recoveredAt},
+		recoveredAt:  recoveredAt,
+		staleBefore:  staleBefore,
+		errorClass:   firstNonEmptyMem(recover.ErrorClass, "stale_task_run"),
+		errorMessage: firstNonEmptyMem(recover.ErrorMessage, "task run heartbeat is stale"),
+	}, nil
 }
 
-func (s *driverRunStore) failStaleTaskRunsMem(ws, runID string, staleBefore, recoveredAt time.Time, errorClass, errorMessage string, result *store.StaleTaskRunRecoveryResult, recoveredTaskRunIDs, recoveredStepIDs map[string]struct{}) {
-	s.taskRuns.mu.Lock()
-	for _, taskRun := range s.taskRuns.items[ws] {
-		if taskRun.DriverRunID != runID || taskRun.Status != domain.TaskRunRunning {
+func (s *driverRunStore) ensureDriverRunExistsMem(ws, runID string) error {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if _, ok := s.items[ws][runID]; !ok {
+		return fmt.Errorf("driver run %q in workspace %q: %w", runID, ws, domain.ErrNotFound)
+	}
+	return nil
+}
+
+func recoverStaleTaskRunsLocked(taskRuns map[string]*domain.TaskRun, runID string, plan *staleTaskRunRecoveryMem) (map[string]struct{}, map[string]struct{}) {
+	recoveredTaskRunIDs := make(map[string]struct{})
+	recoveredStepIDs := make(map[string]struct{})
+	for _, taskRun := range taskRuns {
+		if !recoverStaleTaskRunMem(taskRun, runID, plan) {
 			continue
 		}
-		if !taskRunLastObservedMem(taskRun).Before(staleBefore) {
-			result.SkippedFresh++
-			continue
-		}
-		taskRun.Status = domain.TaskRunFailed
-		taskRun.ErrorClass = errorClass
-		taskRun.ErrorMessage = errorMessage
-		taskRun.FinishedAt = &recoveredAt
-		taskRun.UpdatedAt = recoveredAt
-		result.Recovered++
-		result.RecoveredTaskRunIDs = append(result.RecoveredTaskRunIDs, taskRun.TaskRunID)
 		recoveredTaskRunIDs[taskRun.TaskRunID] = struct{}{}
 		if taskRun.DriverStepID != "" {
 			recoveredStepIDs[taskRun.DriverStepID] = struct{}{}
 		}
 	}
-	s.taskRuns.mu.Unlock()
+	return recoveredTaskRunIDs, recoveredStepIDs
 }
 
-func (s *driverRunStore) failStepsForRecoveredTaskRunsMem(ws, runID string, recoveredAt time.Time, recoveredTaskRunIDs, recoveredStepIDs map[string]struct{}) {
+func recoverStaleTaskRunMem(taskRun *domain.TaskRun, runID string, plan *staleTaskRunRecoveryMem) bool {
+	if taskRun.DriverRunID != runID || taskRun.Status != domain.TaskRunRunning {
+		return false
+	}
+	if !taskRunLastObservedMem(taskRun).Before(plan.staleBefore) {
+		plan.result.SkippedFresh++
+		return false
+	}
+	taskRun.Status = domain.TaskRunFailed
+	taskRun.ErrorClass = plan.errorClass
+	taskRun.ErrorMessage = plan.errorMessage
+	taskRun.FinishedAt = &plan.recoveredAt
+	taskRun.UpdatedAt = plan.recoveredAt
+	plan.result.Recovered++
+	plan.result.RecoveredTaskRunIDs = append(plan.result.RecoveredTaskRunIDs, taskRun.TaskRunID)
+	return true
+}
+
+func (s *driverRunStore) recoverLinkedDriverStepsMem(ws, runID string, recoveredTaskRunIDs, recoveredStepIDs map[string]struct{}, recoveredAt time.Time) {
 	if s.steps == nil || len(recoveredTaskRunIDs) == 0 {
 		return
 	}
 	s.steps.mu.Lock()
+	defer s.steps.mu.Unlock()
 	for _, step := range s.steps.items[ws] {
-		if step.DriverRunID != runID || step.Status.IsTerminal() {
-			continue
+		if driverStepRecoveredByTaskRunMem(step, runID, recoveredTaskRunIDs, recoveredStepIDs) {
+			markDriverStepRecoveredMem(step, recoveredAt)
 		}
-		_, linkedByStepID := recoveredStepIDs[step.StepID]
-		_, linkedByTaskRunID := recoveredTaskRunIDs[step.TaskRunID]
-		if !linkedByStepID && !linkedByTaskRunID {
-			continue
-		}
-		step.Status = domain.DriverStepFailed
-		if step.EndedAt == nil {
-			step.EndedAt = &recoveredAt
-		}
-		step.UpdatedAt = recoveredAt
 	}
-	s.steps.mu.Unlock()
+}
+
+func driverStepRecoveredByTaskRunMem(step *domain.DriverStep, runID string, recoveredTaskRunIDs, recoveredStepIDs map[string]struct{}) bool {
+	if step.DriverRunID != runID || step.Status.IsTerminal() {
+		return false
+	}
+	_, linkedByStepID := recoveredStepIDs[step.StepID]
+	_, linkedByTaskRunID := recoveredTaskRunIDs[step.TaskRunID]
+	return linkedByStepID || linkedByTaskRunID
+}
+
+func markDriverStepRecoveredMem(step *domain.DriverStep, recoveredAt time.Time) {
+	step.Status = domain.DriverStepFailed
+	if step.EndedAt == nil {
+		step.EndedAt = &recoveredAt
+	}
+	step.UpdatedAt = recoveredAt
 }
 
 func taskRunLastObservedMem(run *domain.TaskRun) time.Time {
@@ -428,29 +463,4 @@ func (s *driverRunStore) exists(ws, runID string) bool {
 	defer s.mu.RUnlock()
 	_, ok := s.items[ws][runID]
 	return ok
-}
-
-func cloneDriverRun(r *domain.DriverRun) *domain.DriverRun {
-	out := *r
-	out.Payload = cloneJSON(r.Payload)
-	out.Output = cloneMap(r.Output)
-	out.FinishedAt = clonePtr(r.FinishedAt)
-	return &out
-}
-
-func cloneJSON(payload json.RawMessage) json.RawMessage {
-	if len(payload) == 0 {
-		return json.RawMessage(`{}`)
-	}
-	out := make(json.RawMessage, len(payload))
-	copy(out, payload)
-	return out
-}
-
-func driverRunMatchesMem(r *domain.DriverRun, f store.DriverRunFilter) bool {
-	return (f.DriverID == "" || r.DriverID == f.DriverID) &&
-		(f.DriverVersionID == "" || r.DriverVersionID == f.DriverVersionID) &&
-		(f.EpicID == "" || r.EpicID == f.EpicID) &&
-		(f.NodeID == "" || r.NodeID == f.NodeID) &&
-		(f.Status == "" || r.Status == f.Status)
 }

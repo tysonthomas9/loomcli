@@ -133,6 +133,15 @@ func (s commandPollerTestStore) AgentServices() store.AgentServiceStore {
 func (s commandPollerTestStore) TriggerBindings() store.TriggerBindingStore {
 	return nil
 }
+func (s commandPollerTestStore) TriggerEvents() store.TriggerEventStore {
+	return nil
+}
+func (s commandPollerTestStore) TriggerDeliveries() store.TriggerDeliveryStore {
+	return nil
+}
+func (s commandPollerTestStore) TriggerRoutes() store.TriggerRouteDispatcher {
+	return nil
+}
 func (s commandPollerTestStore) DriverRuns() store.DriverRunStore { return nil }
 func (s commandPollerTestStore) DriverSteps() store.DriverStepStore {
 	return nil

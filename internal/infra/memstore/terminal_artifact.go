@@ -113,20 +113,12 @@ func (s *artifactStore) Create(_ context.Context, in store.ArtifactCreate) (*dom
 	if s.items[in.WorkspaceKey] == nil {
 		s.items[in.WorkspaceKey] = make(map[string]*domain.Artifact)
 	}
-	artifact := newArtifactFromCreateMem(in, time.Now().UTC())
+	artifact := newArtifactMem(in, time.Now().UTC())
 	s.items[in.WorkspaceKey][in.ArtifactID] = artifact
 	return cloneArtifact(artifact), nil
 }
 
-func newArtifactFromCreateMem(in store.ArtifactCreate, now time.Time) *domain.Artifact {
-	durableStatus := in.DurableStatus
-	if durableStatus == "" {
-		if in.URI == "" {
-			durableStatus = "declared"
-		} else {
-			durableStatus = "finalized"
-		}
-	}
+func newArtifactMem(in store.ArtifactCreate, now time.Time) *domain.Artifact {
 	artifact := &domain.Artifact{
 		WorkspaceKey:    in.WorkspaceKey,
 		ArtifactID:      in.ArtifactID,
@@ -145,21 +137,35 @@ func newArtifactFromCreateMem(in store.ArtifactCreate, now time.Time) *domain.Ar
 		ContentHash:     in.ContentHash,
 		Visibility:      in.Visibility,
 		RedactionStatus: in.RedactionStatus,
-		DurableStatus:   durableStatus,
+		DurableStatus:   defaultArtifactDurableStatusMem(in),
 		Metadata:        cloneMap(in.Metadata),
 		CreatedAt:       now,
 		UpdatedAt:       now,
 	}
+	normalizeArtifactHashesMem(artifact)
+	if artifact.DurableStatus == "finalized" {
+		artifact.FinalizedAt = &now
+	}
+	return artifact
+}
+
+func defaultArtifactDurableStatusMem(in store.ArtifactCreate) string {
+	if in.DurableStatus != "" {
+		return in.DurableStatus
+	}
+	if in.URI == "" {
+		return "declared"
+	}
+	return "finalized"
+}
+
+func normalizeArtifactHashesMem(artifact *domain.Artifact) {
 	if artifact.ContentHash == "" {
 		artifact.ContentHash = artifact.Checksum
 	}
 	if artifact.Checksum == "" {
 		artifact.Checksum = artifact.ContentHash
 	}
-	if artifact.DurableStatus == "finalized" {
-		artifact.FinalizedAt = &now
-	}
-	return artifact
 }
 
 func (s *artifactStore) Get(_ context.Context, ws, artifactID string) (*domain.Artifact, error) {
@@ -274,36 +280,17 @@ func (s *artifactStore) Update(_ context.Context, ws, artifactID string, patch s
 	if !ok {
 		return nil, fmt.Errorf("artifact %q in workspace %q: %w", artifactID, ws, domain.ErrNotFound)
 	}
-	applyArtifactUpdateFieldsMem(artifact, patch)
-	artifact.UpdatedAt = time.Now().UTC()
-	if artifact.ContentHash == "" {
-		artifact.ContentHash = artifact.Checksum
-	}
-	if artifact.Checksum == "" {
-		artifact.Checksum = artifact.ContentHash
-	}
-	if artifact.DurableStatus == "finalized" && artifact.FinalizedAt == nil {
-		finalizedAt := artifact.UpdatedAt
-		artifact.FinalizedAt = &finalizedAt
-	}
+	applyArtifactUpdateMem(artifact, patch, time.Now().UTC())
 	return cloneArtifact(artifact), nil
 }
 
-func applyArtifactUpdateFieldsMem(artifact *domain.Artifact, patch store.ArtifactUpdate) {
+func applyArtifactUpdateMem(artifact *domain.Artifact, patch store.ArtifactUpdate, now time.Time) {
 	applyArtifactOwnershipUpdateMem(artifact, patch)
 	applyArtifactContentUpdateMem(artifact, patch)
+	applyArtifactLifecycleUpdateMem(artifact, patch, now)
 }
 
 func applyArtifactOwnershipUpdateMem(artifact *domain.Artifact, patch store.ArtifactUpdate) {
-	if patch.Summary != nil {
-		artifact.Summary = *patch.Summary
-	}
-	if patch.Metadata != nil {
-		artifact.Metadata = cloneMap(*patch.Metadata)
-	}
-	if patch.URI != nil {
-		artifact.URI = *patch.URI
-	}
 	if patch.AgentID != nil {
 		artifact.AgentID = *patch.AgentID
 	}
@@ -322,11 +309,20 @@ func applyArtifactOwnershipUpdateMem(artifact *domain.Artifact, patch store.Arti
 	if patch.OwnerID != nil {
 		artifact.OwnerID = *patch.OwnerID
 	}
+	if patch.Type != nil {
+		artifact.Type = *patch.Type
+	}
 }
 
 func applyArtifactContentUpdateMem(artifact *domain.Artifact, patch store.ArtifactUpdate) {
-	if patch.Type != nil {
-		artifact.Type = *patch.Type
+	if patch.Summary != nil {
+		artifact.Summary = *patch.Summary
+	}
+	if patch.Metadata != nil {
+		artifact.Metadata = cloneMap(*patch.Metadata)
+	}
+	if patch.URI != nil {
+		artifact.URI = *patch.URI
 	}
 	if patch.MIMEType != nil {
 		artifact.MIMEType = *patch.MIMEType
@@ -340,6 +336,9 @@ func applyArtifactContentUpdateMem(artifact *domain.Artifact, patch store.Artifa
 	if patch.ContentHash != nil {
 		artifact.ContentHash = *patch.ContentHash
 	}
+}
+
+func applyArtifactLifecycleUpdateMem(artifact *domain.Artifact, patch store.ArtifactUpdate, now time.Time) {
 	if patch.Visibility != nil {
 		artifact.Visibility = *patch.Visibility
 	}
@@ -351,6 +350,12 @@ func applyArtifactContentUpdateMem(artifact *domain.Artifact, patch store.Artifa
 	}
 	if patch.FinalizedAt != nil {
 		finalizedAt := *patch.FinalizedAt
+		artifact.FinalizedAt = &finalizedAt
+	}
+	artifact.UpdatedAt = now
+	normalizeArtifactHashesMem(artifact)
+	if artifact.DurableStatus == "finalized" && artifact.FinalizedAt == nil {
+		finalizedAt := artifact.UpdatedAt
 		artifact.FinalizedAt = &finalizedAt
 	}
 }

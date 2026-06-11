@@ -2,6 +2,7 @@ package memstore
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"sync"
@@ -11,118 +12,122 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
-type triggerBindingStore struct {
-	mu       sync.RWMutex
-	items    map[string]map[string]*domain.TriggerBinding
-	versions *driverVersionStore
-	services *agentServiceStore
+// triggerEventStore is the in-memory TriggerEvent repository. It dedups on
+// idempotency key the same way fleet-db's storage layer does: a create with a
+// previously-seen key returns the existing event instead of inserting again.
+type triggerEventStore struct {
+	mu     sync.RWMutex
+	items  map[string]map[string]*domain.TriggerEvent // ws -> eventID -> event
+	idempo map[string]map[string]string               // ws -> idempotencyKey -> eventID
+	seq    int64
 }
 
-func newTriggerBindingStore(versions *driverVersionStore, services *agentServiceStore) *triggerBindingStore {
-	return &triggerBindingStore{items: make(map[string]map[string]*domain.TriggerBinding), versions: versions, services: services}
+func newTriggerEventStore() *triggerEventStore {
+	return &triggerEventStore{
+		items:  make(map[string]map[string]*domain.TriggerEvent),
+		idempo: make(map[string]map[string]string),
+	}
 }
 
-var _ store.TriggerBindingStore = (*triggerBindingStore)(nil)
+var _ store.TriggerEventStore = (*triggerEventStore)(nil)
 
-func (s *triggerBindingStore) Create(_ context.Context, in store.TriggerBindingCreate) (*domain.TriggerBinding, error) {
-	if in.WorkspaceKey == "" || in.BindingID == "" || in.Name == "" || in.SourceKind == "" || in.DriverID == "" || in.DriverVersionID == "" {
-		return nil, fmt.Errorf("workspace_key + binding_id + name + source_kind + driver_id + driver_version_id required: %w", domain.ErrInvalid)
+func (s *triggerEventStore) Get(_ context.Context, ws, eventID string) (*domain.TriggerEvent, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	event, ok := s.items[ws][eventID]
+	if !ok {
+		return nil, fmt.Errorf("trigger event %q in workspace %q: %w", eventID, ws, domain.ErrNotFound)
 	}
-	if s.versions != nil && !s.versions.belongsToDriver(in.WorkspaceKey, in.DriverVersionID, in.DriverID) {
-		return nil, fmt.Errorf("driver version %q for driver %q in workspace %q: %w", in.DriverVersionID, in.DriverID, in.WorkspaceKey, domain.ErrNotFound)
+	out := *event
+	return &out, nil
+}
+
+func (s *triggerEventStore) List(_ context.Context, ws string, filter store.TriggerEventFilter) ([]*domain.TriggerEvent, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out := make([]*domain.TriggerEvent, 0, len(s.items[ws]))
+	for _, event := range s.items[ws] {
+		if filter.SourceKind != "" && event.SourceKind != filter.SourceKind {
+			continue
+		}
+		if filter.TriggerBindingID != "" && event.TriggerBindingID != filter.TriggerBindingID {
+			continue
+		}
+		clone := *event
+		out = append(out, &clone)
 	}
-	if in.TargetAgentServiceID != "" && s.services != nil && !s.services.exists(in.WorkspaceKey, in.TargetAgentServiceID) {
-		return nil, fmt.Errorf("target agent service %q in workspace %q: %w", in.TargetAgentServiceID, in.WorkspaceKey, domain.ErrNotFound)
+	sort.Slice(out, func(i, j int) bool { return out[i].ReceivedAt.After(out[j].ReceivedAt) })
+	if filter.Limit > 0 && len(out) > filter.Limit {
+		out = out[:filter.Limit]
 	}
+	return out, nil
+}
+
+// create inserts the event, deduping on idempotency key. The returned bool is
+// true when an existing event was returned instead of inserting a new one.
+func (s *triggerEventStore) create(event *domain.TriggerEvent) (*domain.TriggerEvent, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.items[in.WorkspaceKey] == nil {
-		s.items[in.WorkspaceKey] = make(map[string]*domain.TriggerBinding)
+	if s.items[event.WorkspaceKey] == nil {
+		s.items[event.WorkspaceKey] = make(map[string]*domain.TriggerEvent)
+		s.idempo[event.WorkspaceKey] = make(map[string]string)
 	}
-	if _, ok := s.items[in.WorkspaceKey][in.BindingID]; ok {
-		return nil, fmt.Errorf("trigger binding %q in workspace %q: %w", in.BindingID, in.WorkspaceKey, domain.ErrAlreadyExists)
-	}
-	if in.RouteKey != "" {
-		for _, binding := range s.items[in.WorkspaceKey] {
-			if binding.RouteKey == in.RouteKey {
-				return nil, fmt.Errorf("trigger binding route %q in workspace %q: %w", in.RouteKey, in.WorkspaceKey, domain.ErrAlreadyExists)
-			}
+	if event.IdempotencyKey != "" {
+		if existingID, ok := s.idempo[event.WorkspaceKey][event.IdempotencyKey]; ok {
+			existing := *s.items[event.WorkspaceKey][existingID]
+			return &existing, true
 		}
 	}
-	binding := newTriggerBindingFromCreateMem(in, time.Now().UTC())
-	s.items[in.WorkspaceKey][in.BindingID] = binding
-	return cloneTriggerBinding(binding), nil
+	s.seq++
+	event.EventID = fmt.Sprintf("event-%d", s.seq)
+	stored := *event
+	s.items[event.WorkspaceKey][event.EventID] = &stored
+	if event.IdempotencyKey != "" {
+		s.idempo[event.WorkspaceKey][event.IdempotencyKey] = event.EventID
+	}
+	out := stored
+	return &out, false
 }
 
-func newTriggerBindingFromCreateMem(in store.TriggerBindingCreate, now time.Time) *domain.TriggerBinding {
-	policy := in.ConcurrencyPolicy
-	if policy == "" {
-		policy = domain.TriggerBindingConcurrencyOneActivePerEpic
-	}
-	idempotencyPolicy := in.IdempotencyPolicy
-	if idempotencyPolicy == "" {
-		idempotencyPolicy = "header:Idempotency-Key"
-	}
-	authPolicy := in.AuthPolicy
-	if authPolicy == "" {
-		authPolicy = "workspace_user"
-	}
-	return &domain.TriggerBinding{
-		WorkspaceKey:         in.WorkspaceKey,
-		BindingID:            in.BindingID,
-		Name:                 in.Name,
-		SourceKind:           in.SourceKind,
-		SourceRef:            in.SourceRef,
-		SourceConfigRef:      in.SourceConfigRef,
-		RouteKey:             in.RouteKey,
-		Method:               in.Method,
-		PathTemplate:         in.PathTemplate,
-		Topic:                in.Topic,
-		EventTypePatterns:    append([]string(nil), in.EventTypePatterns...),
-		FilterRef:            in.FilterRef,
-		DriverID:             in.DriverID,
-		DriverVersionID:      in.DriverVersionID,
-		TargetEntrypoint:     in.TargetEntrypoint,
-		TargetAgentServiceID: in.TargetAgentServiceID,
-		ConcurrencyPolicy:    policy,
-		IdempotencyPolicy:    idempotencyPolicy,
-		AuthPolicy:           authPolicy,
-		Permissions:          append([]string(nil), in.Permissions...),
-		Enabled:              in.Enabled,
-		CreatedAt:            now,
-		UpdatedAt:            now,
-	}
+// triggerDeliveryStore is the in-memory TriggerDelivery repository.
+type triggerDeliveryStore struct {
+	mu    sync.RWMutex
+	items map[string]map[string]*domain.TriggerDelivery // ws -> deliveryID -> delivery
 }
 
-func (s *triggerBindingStore) Get(_ context.Context, ws, bindingID string) (*domain.TriggerBinding, error) {
+func newTriggerDeliveryStore() *triggerDeliveryStore {
+	return &triggerDeliveryStore{items: make(map[string]map[string]*domain.TriggerDelivery)}
+}
+
+var _ store.TriggerDeliveryStore = (*triggerDeliveryStore)(nil)
+
+func (s *triggerDeliveryStore) Get(_ context.Context, ws, deliveryID string) (*domain.TriggerDelivery, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	binding, ok := s.items[ws][bindingID]
+	delivery, ok := s.items[ws][deliveryID]
 	if !ok {
-		return nil, fmt.Errorf("trigger binding %q in workspace %q: %w", bindingID, ws, domain.ErrNotFound)
+		return nil, fmt.Errorf("trigger delivery %q in workspace %q: %w", deliveryID, ws, domain.ErrNotFound)
 	}
-	return cloneTriggerBinding(binding), nil
+	out := *delivery
+	return &out, nil
 }
 
-func (s *triggerBindingStore) GetByRouteKey(_ context.Context, ws, routeKey string) (*domain.TriggerBinding, error) {
+func (s *triggerDeliveryStore) List(_ context.Context, ws string, filter store.TriggerDeliveryFilter) ([]*domain.TriggerDelivery, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	for _, binding := range s.items[ws] {
-		if binding.RouteKey == routeKey {
-			return cloneTriggerBinding(binding), nil
+	out := make([]*domain.TriggerDelivery, 0, len(s.items[ws]))
+	for _, delivery := range s.items[ws] {
+		if filter.TriggerEventID != "" && delivery.TriggerEventID != filter.TriggerEventID {
+			continue
 		}
-	}
-	return nil, fmt.Errorf("trigger binding route %q in workspace %q: %w", routeKey, ws, domain.ErrNotFound)
-}
-
-func (s *triggerBindingStore) List(_ context.Context, ws string, filter store.TriggerBindingFilter) ([]*domain.TriggerBinding, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	out := make([]*domain.TriggerBinding, 0, len(s.items[ws]))
-	for _, binding := range s.items[ws] {
-		if triggerBindingMatchesMem(binding, filter) {
-			out = append(out, cloneTriggerBinding(binding))
+		if filter.TriggerBindingID != "" && delivery.TriggerBindingID != filter.TriggerBindingID {
+			continue
 		}
+		if filter.Status != "" && delivery.Status != filter.Status {
+			continue
+		}
+		clone := *delivery
+		out = append(out, &clone)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].CreatedAt.After(out[j].CreatedAt) })
 	if filter.Limit > 0 && len(out) > filter.Limit {
@@ -131,143 +136,124 @@ func (s *triggerBindingStore) List(_ context.Context, ws string, filter store.Tr
 	return out, nil
 }
 
-func (s *triggerBindingStore) Update(_ context.Context, ws, bindingID string, patch store.TriggerBindingUpdate) (*domain.TriggerBinding, error) {
+// create inserts a delivery, returning domain.ErrAlreadyExists when one with
+// the same ID is already present (so replays are idempotent).
+func (s *triggerDeliveryStore) create(delivery *domain.TriggerDelivery) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	binding, ok := s.items[ws][bindingID]
-	if !ok {
-		return nil, fmt.Errorf("trigger binding %q in workspace %q: %w", bindingID, ws, domain.ErrNotFound)
+	if s.items[delivery.WorkspaceKey] == nil {
+		s.items[delivery.WorkspaceKey] = make(map[string]*domain.TriggerDelivery)
 	}
-	oldRoute := binding.RouteKey
-	updated := cloneTriggerBinding(binding)
-	applyTriggerBindingUpdateMem(updated, patch)
-	if s.versions != nil && !s.versions.belongsToDriver(updated.WorkspaceKey, updated.DriverVersionID, updated.DriverID) {
-		return nil, fmt.Errorf("driver version %q for driver %q in workspace %q: %w", updated.DriverVersionID, updated.DriverID, updated.WorkspaceKey, domain.ErrNotFound)
+	if _, ok := s.items[delivery.WorkspaceKey][delivery.DeliveryID]; ok {
+		return domain.ErrAlreadyExists
 	}
-	if updated.TargetAgentServiceID != "" && s.services != nil && !s.services.exists(updated.WorkspaceKey, updated.TargetAgentServiceID) {
-		return nil, fmt.Errorf("target agent service %q in workspace %q: %w", updated.TargetAgentServiceID, updated.WorkspaceKey, domain.ErrNotFound)
-	}
-	if s.services != nil && !s.services.triggerRefTargetCompatible(updated.WorkspaceKey, updated.BindingID, updated.TargetAgentServiceID) {
-		return nil, fmt.Errorf("trigger binding %q target %q would invalidate agent service trigger refs: %w", updated.BindingID, updated.TargetAgentServiceID, domain.ErrInvalidTransition)
-	}
-	if updated.RouteKey != "" && updated.RouteKey != oldRoute {
-		for id, existing := range s.items[ws] {
-			if id != bindingID && existing.RouteKey == updated.RouteKey {
-				return nil, fmt.Errorf("trigger binding route %q in workspace %q: %w", updated.RouteKey, ws, domain.ErrAlreadyExists)
-			}
-		}
-	}
-	updated.UpdatedAt = time.Now().UTC()
-	s.items[ws][bindingID] = updated
-	return cloneTriggerBinding(updated), nil
+	stored := *delivery
+	s.items[delivery.WorkspaceKey][delivery.DeliveryID] = &stored
+	return nil
 }
 
-func (s *triggerBindingStore) getForValidation(ws, bindingID string) (*domain.TriggerBinding, bool) {
-	if s == nil {
-		return nil, false
-	}
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	binding, ok := s.items[ws][bindingID]
-	if !ok {
-		return nil, false
-	}
-	return cloneTriggerBinding(binding), true
+// triggerRouteStore implements the dispatch path against the in-memory stores,
+// mirroring fleet-db's dispatchTriggerRouteRun: resolve enabled binding by route
+// key, persist a TriggerEvent, enqueue a queued DriverRun, then record a
+// TriggerDelivery linking the three. The writes are individually idempotent but
+// not a single transaction (see store.TriggerRouteDispatcher); a failure after
+// run creation returns an error and is healed on redelivery.
+type triggerRouteStore struct {
+	bindings   *triggerBindingStore
+	events     *triggerEventStore
+	deliveries *triggerDeliveryStore
+	runs       *driverRunStore
+	seq        int64
+	mu         sync.Mutex
 }
 
-func (s *triggerBindingStore) hasTargetAgentService(ws, serviceID string) bool {
-	if s == nil {
-		return false
+var _ store.TriggerRouteDispatcher = (*triggerRouteStore)(nil)
+
+func (s *triggerRouteStore) DispatchTriggerRoute(ctx context.Context, ws, routeKey string, in store.TriggerRouteDispatch) (*domain.DriverRun, error) {
+	binding, err := s.bindings.GetByRouteKey(ctx, ws, routeKey)
+	if err != nil {
+		return nil, err
 	}
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	for _, binding := range s.items[ws] {
-		if binding.TargetAgentServiceID == serviceID {
-			return true
-		}
+	if !binding.Enabled {
+		return nil, fmt.Errorf("trigger binding route %q in workspace %q: %w", routeKey, ws, domain.ErrNotFound)
 	}
-	return false
+	now := time.Now().UTC()
+	event, _ := s.events.create(dispatchTriggerEvent(ws, binding, in, now))
+
+	run, err := s.runs.Create(ctx, store.DriverRunCreate{
+		WorkspaceKey:    ws,
+		RunID:           s.runID(in.RunID),
+		DriverID:        binding.DriverID,
+		DriverVersionID: binding.DriverVersionID,
+		Entrypoint:      binding.TargetEntrypoint,
+		SourceKind:      binding.SourceKind,
+		SourceRef:       event.EventID,
+		EpicID:          in.EpicID,
+		IdempotencyKey:  in.IdempotencyKey,
+		Payload:         in.Payload,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	deliveryErr := s.deliveries.create(&domain.TriggerDelivery{
+		WorkspaceKey:     ws,
+		DeliveryID:       "delivery-" + event.EventID,
+		TriggerEventID:   event.EventID,
+		TriggerBindingID: binding.BindingID,
+		Status:           domain.TriggerDeliveryDispatched,
+		DriverRunID:      run.RunID,
+		Attempt:          1,
+		CreatedAt:        now,
+		UpdatedAt:        now,
+	})
+	if deliveryErr != nil && !errors.Is(deliveryErr, domain.ErrAlreadyExists) {
+		return nil, deliveryErr
+	}
+	return run, nil
 }
 
-func cloneTriggerBinding(b *domain.TriggerBinding) *domain.TriggerBinding {
-	out := *b
-	out.EventTypePatterns = append([]string(nil), b.EventTypePatterns...)
-	out.Permissions = append([]string(nil), b.Permissions...)
-	return &out
+// runID returns the caller-supplied id, or a generated monotonic one. fleet-db
+// generates run ids server-side; the in-memory store does it here.
+func (s *triggerRouteStore) runID(supplied string) string {
+	if supplied != "" {
+		return supplied
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.seq++
+	return fmt.Sprintf("run-%d", s.seq)
 }
 
-func triggerBindingMatchesMem(b *domain.TriggerBinding, f store.TriggerBindingFilter) bool {
-	return (f.SourceKind == "" || b.SourceKind == f.SourceKind) &&
-		(f.RouteKey == "" || b.RouteKey == f.RouteKey) &&
-		(f.DriverID == "" || b.DriverID == f.DriverID) &&
-		(f.TargetAgentServiceID == "" || b.TargetAgentServiceID == f.TargetAgentServiceID) &&
-		(f.Enabled == nil || b.Enabled == *f.Enabled)
-}
-
-func applyTriggerBindingUpdateMem(b *domain.TriggerBinding, patch store.TriggerBindingUpdate) {
-	applyTriggerBindingSourceUpdateMem(b, patch)
-	applyTriggerBindingTargetUpdateMem(b, patch)
-}
-
-func applyTriggerBindingSourceUpdateMem(b *domain.TriggerBinding, patch store.TriggerBindingUpdate) {
-	if patch.Name != nil {
-		b.Name = *patch.Name
+// dispatchTriggerEvent builds the TriggerEvent to persist, applying the same
+// field defaults as fleet-db's dispatch path.
+func dispatchTriggerEvent(ws string, binding *domain.TriggerBinding, in store.TriggerRouteDispatch, now time.Time) *domain.TriggerEvent {
+	eventType := in.EventType
+	if eventType == "" {
+		eventType = "trigger_route_requested"
 	}
-	if patch.SourceKind != nil {
-		b.SourceKind = *patch.SourceKind
+	sourceEventID := in.SourceEventID
+	if sourceEventID == "" {
+		sourceEventID = in.IdempotencyKey
 	}
-	if patch.SourceRef != nil {
-		b.SourceRef = *patch.SourceRef
+	signatureStatus := in.SignatureStatus
+	if signatureStatus == "" {
+		signatureStatus = "not_applicable"
 	}
-	if patch.SourceConfigRef != nil {
-		b.SourceConfigRef = *patch.SourceConfigRef
-	}
-	if patch.RouteKey != nil {
-		b.RouteKey = *patch.RouteKey
-	}
-	if patch.Method != nil {
-		b.Method = *patch.Method
-	}
-	if patch.PathTemplate != nil {
-		b.PathTemplate = *patch.PathTemplate
-	}
-	if patch.Topic != nil {
-		b.Topic = *patch.Topic
-	}
-	if patch.EventTypePatterns != nil {
-		b.EventTypePatterns = append([]string(nil), (*patch.EventTypePatterns)...)
-	}
-	if patch.FilterRef != nil {
-		b.FilterRef = *patch.FilterRef
-	}
-}
-
-func applyTriggerBindingTargetUpdateMem(b *domain.TriggerBinding, patch store.TriggerBindingUpdate) {
-	if patch.DriverID != nil {
-		b.DriverID = *patch.DriverID
-	}
-	if patch.DriverVersionID != nil {
-		b.DriverVersionID = *patch.DriverVersionID
-	}
-	if patch.TargetEntrypoint != nil {
-		b.TargetEntrypoint = *patch.TargetEntrypoint
-	}
-	if patch.TargetAgentServiceID != nil {
-		b.TargetAgentServiceID = *patch.TargetAgentServiceID
-	}
-	if patch.ConcurrencyPolicy != nil {
-		b.ConcurrencyPolicy = *patch.ConcurrencyPolicy
-	}
-	if patch.IdempotencyPolicy != nil {
-		b.IdempotencyPolicy = *patch.IdempotencyPolicy
-	}
-	if patch.AuthPolicy != nil {
-		b.AuthPolicy = *patch.AuthPolicy
-	}
-	if patch.Permissions != nil {
-		b.Permissions = append([]string(nil), (*patch.Permissions)...)
-	}
-	if patch.Enabled != nil {
-		b.Enabled = *patch.Enabled
+	return &domain.TriggerEvent{
+		WorkspaceKey:     ws,
+		TriggerBindingID: binding.BindingID,
+		SourceKind:       binding.SourceKind,
+		SourceEventID:    sourceEventID,
+		EventType:        eventType,
+		SubjectRef:       in.SubjectRef,
+		ActorRef:         in.ActorRef,
+		OccurredAt:       now,
+		ReceivedAt:       now,
+		IdempotencyKey:   in.IdempotencyKey,
+		RawPayloadRef:    in.RawPayloadRef,
+		RawPayloadDigest: in.RawPayloadDigest,
+		SignatureStatus:  signatureStatus,
+		ReplayOfEventID:  in.ReplayOfEventID,
 	}
 }

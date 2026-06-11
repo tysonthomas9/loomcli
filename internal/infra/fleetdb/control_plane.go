@@ -531,36 +531,26 @@ func terminalSessionUpdateBody(patch store.TerminalSessionUpdate) map[string]any
 	return body
 }
 
-// setBodyPtr writes *v under key when the patch pointer is set. Shared by
-// the PATCH-body builders, which only serialize explicitly-updated fields.
-func setBodyPtr[T any](body map[string]any, key string, v *T) {
-	if v != nil {
-		body[key] = *v
-	}
-}
-
 func artifactUpdateBody(patch store.ArtifactUpdate) map[string]any {
 	body := map[string]any{}
-	setBodyPtr(body, "agent_id", patch.AgentID)
-	setBodyPtr(body, "session_id", patch.SessionID)
-	setBodyPtr(body, "terminal_id", patch.TerminalID)
-	setBodyPtr(body, "task_id", patch.TaskID)
-	setBodyPtr(body, "owner_type", patch.OwnerType)
-	setBodyPtr(body, "owner_id", patch.OwnerID)
-	setBodyPtr(body, "type", patch.Type)
-	setBodyPtr(body, "uri", patch.URI)
-	setBodyPtr(body, "summary", patch.Summary)
-	setBodyPtr(body, "mime_type", patch.MIMEType)
-	setBodyPtr(body, "size_bytes", patch.SizeBytes)
-	setBodyPtr(body, "checksum", patch.Checksum)
-	setBodyPtr(body, "content_hash", patch.ContentHash)
-	setBodyPtr(body, "visibility", patch.Visibility)
-	setBodyPtr(body, "redaction_status", patch.RedactionStatus)
-	setBodyPtr(body, "durable_status", patch.DurableStatus)
-	setBodyPtr(body, "metadata", patch.Metadata)
-	if patch.FinalizedAt != nil {
-		body["finalized_at"] = patch.FinalizedAt.Format(time.RFC3339Nano)
-	}
+	bodyPtr(body, "agent_id", patch.AgentID)
+	bodyPtr(body, "session_id", patch.SessionID)
+	bodyPtr(body, "terminal_id", patch.TerminalID)
+	bodyPtr(body, "task_id", patch.TaskID)
+	bodyPtr(body, "owner_type", patch.OwnerType)
+	bodyPtr(body, "owner_id", patch.OwnerID)
+	bodyPtr(body, "type", patch.Type)
+	bodyPtr(body, "uri", patch.URI)
+	bodyPtr(body, "summary", patch.Summary)
+	bodyPtr(body, "mime_type", patch.MIMEType)
+	bodyPtr(body, "size_bytes", patch.SizeBytes)
+	bodyPtr(body, "checksum", patch.Checksum)
+	bodyPtr(body, "content_hash", patch.ContentHash)
+	bodyPtr(body, "visibility", patch.Visibility)
+	bodyPtr(body, "redaction_status", patch.RedactionStatus)
+	bodyPtr(body, "durable_status", patch.DurableStatus)
+	bodyPtr(body, "metadata", patch.Metadata)
+	bodyTimeRFC3339NanoPtr(body, "finalized_at", patch.FinalizedAt)
 	return body
 }
 

@@ -277,7 +277,7 @@ func (e *workflowEndpointE2E) startLoomServe() {
 		"LOOM_FLEET_URL":                   "",
 		"LOOM_SERVER_URL":                  "",
 		"LOOM_DISABLE_H2C":                 "1",
-		"LOOM_DRIVER_EXECUTOR":             "1",
+		"LOOM_DRIVER_EXECUTOR":             "",
 		"LOOM_DRIVER_EXECUTOR_NODE_ID":     e.nodeID,
 		"LOOM_DRIVER_TASK_RUNNER_CMD_JSON": taskRunnerCommand,
 		"LOOM_REAL_FLUE_CMD_JSON":          string(flueCommandJSON),
@@ -438,11 +438,14 @@ func (e *workflowEndpointE2E) expectDAGCompleted(dag workflowEndpointDAG, runID 
 	if len(taskRuns) != 4 {
 		e.t.Fatalf("task run count = %d, want 4; taskRuns=%+v", len(taskRuns), taskRuns)
 	}
+	taskRunByTaskID := make(map[string]*domain.TaskRun, len(taskRuns))
 	for _, taskRun := range taskRuns {
 		if taskRun.Status != domain.TaskRunCompleted || taskRun.LogsRef == "" {
 			e.t.Fatalf("task run = %+v, want completed with logs_ref", taskRun)
 		}
+		taskRunByTaskID[taskRun.TaskID] = taskRun
 	}
+	e.expectCloseTaskLedger(taskRunByTaskID)
 
 	executed := workflowEndpointReadLines(e.t, e.taskRunnerLog)
 	if len(executed) != 4 {
@@ -457,6 +460,76 @@ func (e *workflowEndpointE2E) expectDAGCompleted(dag workflowEndpointDAG, runID 
 	sort.Strings(wantMiddle)
 	if strings.Join(middle, ",") != strings.Join(wantMiddle, ",") {
 		e.t.Fatalf("middle tasks = %v, want %v", middle, wantMiddle)
+	}
+}
+
+func (e *workflowEndpointE2E) expectCloseTaskLedger(taskRunByTaskID map[string]*domain.TaskRun) {
+	e.t.Helper()
+	var listed struct {
+		Actions []struct {
+			ActionID    string `json:"action_id"`
+			ActionType  string `json:"action_type"`
+			TargetRef   string `json:"target_ref"`
+			RequestedBy string `json:"requested_by"`
+			Status      string `json:"status"`
+			RequestRef  string `json:"request_ref"`
+			ResponseRef string `json:"response_ref"`
+		} `json:"actions"`
+		Count int `json:"count"`
+	}
+	e.getFleetJSON("/api/v1/"+e.workspace+"/action-ledger?action_type=close_task&status=applied&limit=50", http.StatusOK, &listed)
+	if listed.Count != len(taskRunByTaskID) {
+		e.t.Fatalf("close_task action count = %d, want %d: %+v", listed.Count, len(taskRunByTaskID), listed.Actions)
+	}
+	seen := make(map[string]bool, len(listed.Actions))
+	for _, action := range listed.Actions {
+		taskRun := taskRunByTaskID[action.TargetRef]
+		if taskRun == nil {
+			e.t.Fatalf("close_task action target = %s, want one of task IDs %v", action.TargetRef, sortedTaskIDs(taskRunByTaskID))
+		}
+		if action.ActionType != "close_task" || action.Status != "applied" {
+			e.t.Fatalf("close_task action = %+v, want applied close_task", action)
+		}
+		if action.RequestedBy != "task-run:"+taskRun.TaskRunID {
+			e.t.Fatalf("close_task requested_by = %q, want task-run:%s", action.RequestedBy, taskRun.TaskRunID)
+		}
+		if action.ResponseRef != "issue://"+taskRun.TaskID+"#closed" {
+			e.t.Fatalf("close_task response_ref = %q, want issue://%s#closed", action.ResponseRef, taskRun.TaskID)
+		}
+		seen[action.TargetRef] = true
+	}
+	for taskID := range taskRunByTaskID {
+		if !seen[taskID] {
+			e.t.Fatalf("missing close_task action for %s; actions=%+v", taskID, listed.Actions)
+		}
+	}
+	for _, taskRun := range taskRunByTaskID {
+		e.expectTaskRunCompletionReplay(taskRun)
+		return
+	}
+}
+
+func (e *workflowEndpointE2E) expectTaskRunCompletionReplay(taskRun *domain.TaskRun) {
+	e.t.Helper()
+	var replay struct {
+		TaskRun *domain.TaskRun `json:"task_run"`
+		Action  *struct {
+			ActionID   string `json:"action_id"`
+			ActionType string `json:"action_type"`
+			TargetRef  string `json:"target_ref"`
+			Status     string `json:"status"`
+		} `json:"action"`
+	}
+	e.postFleetJSON("/api/v1/"+e.workspace+"/task-runs/"+taskRun.TaskRunID+"/complete", map[string]any{
+		"completion_id": "complete-" + taskRun.TaskRunID,
+		"status":        "completed",
+		"close_task":    true,
+	}, http.StatusOK, &replay)
+	if replay.TaskRun == nil || replay.TaskRun.TaskRunID != taskRun.TaskRunID || replay.TaskRun.Status != domain.TaskRunCompleted {
+		e.t.Fatalf("completion replay task_run = %+v, want completed %s", replay.TaskRun, taskRun.TaskRunID)
+	}
+	if replay.Action == nil || replay.Action.ActionType != "close_task" || replay.Action.Status != "applied" || replay.Action.TargetRef != taskRun.TaskID {
+		e.t.Fatalf("completion replay action = %+v, want applied close_task for %s", replay.Action, taskRun.TaskID)
 	}
 }
 
@@ -498,6 +571,41 @@ func (e *workflowEndpointE2E) getJSON(path string, wantStatus int, out any) {
 	resp, err := e.httpClient.Do(req)
 	if err != nil {
 		e.t.Fatalf("GET %s: %v", path, err)
+	}
+	defer resp.Body.Close()
+	workflowEndpointDecodeResponse(e.t, resp, wantStatus, out)
+}
+
+func (e *workflowEndpointE2E) getFleetJSON(path string, wantStatus int, out any) {
+	e.t.Helper()
+	req, err := http.NewRequest(http.MethodGet, e.fleetURL+path, nil)
+	if err != nil {
+		e.t.Fatalf("create fleet GET %s: %v", path, err)
+	}
+	req.Header.Set("X-Actor", e.actor)
+	resp, err := e.httpClient.Do(req)
+	if err != nil {
+		e.t.Fatalf("fleet GET %s: %v", path, err)
+	}
+	defer resp.Body.Close()
+	workflowEndpointDecodeResponse(e.t, resp, wantStatus, out)
+}
+
+func (e *workflowEndpointE2E) postFleetJSON(path string, body any, wantStatus int, out any) {
+	e.t.Helper()
+	data, err := json.Marshal(body)
+	if err != nil {
+		e.t.Fatalf("encode fleet POST %s: %v", path, err)
+	}
+	req, err := http.NewRequest(http.MethodPost, e.fleetURL+path, bytes.NewReader(data))
+	if err != nil {
+		e.t.Fatalf("create fleet POST %s: %v", path, err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Actor", e.actor)
+	resp, err := e.httpClient.Do(req)
+	if err != nil {
+		e.t.Fatalf("fleet POST %s: %v", path, err)
 	}
 	defer resp.Body.Close()
 	workflowEndpointDecodeResponse(e.t, resp, wantStatus, out)
@@ -746,6 +854,15 @@ func workflowEndpointReadLines(t *testing.T, path string) []string {
 }
 
 func sortedKeys(values map[string]bool) []string {
+	keys := make([]string, 0, len(values))
+	for key := range values {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+func sortedTaskIDs(values map[string]*domain.TaskRun) []string {
 	keys := make([]string, 0, len(values))
 	for key := range values {
 		keys = append(keys, key)
