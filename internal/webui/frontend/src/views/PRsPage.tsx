@@ -1,9 +1,12 @@
 /**
- * PRsPage — Pull Requests view backed by real GitHub data (gh pr list).
+ * PRsPage — Loom-first review queue with GitHub enrichment.
  *
- * GitHub is the source of truth for title, state, draft status, and review
- * decision. Loom issues are joined by matching external_ref to the PR URL so
- * review can open the in-app diff workspace when a ticket is linked.
+ * Loom issues are the primary row source: every issue in review (or carrying
+ * a PR external_ref) appears even when gh is unavailable, so the queue keeps
+ * working offline. GitHub metadata (gh pr list) enriches rows — title, draft/
+ * merged state, review decision, author — joined by the stable owner/repo#n
+ * key. GitHub PRs with no linked issue render as unlinked rows that open
+ * externally, and gh failures degrade to a warning banner, never a blank page.
  */
 import { useMemo, useState, type KeyboardEvent } from "react";
 import { useSearchParams } from "react-router-dom";
@@ -12,7 +15,7 @@ import type { GitPullRequest } from "@/api/workspace";
 import type { Issue } from "@/types";
 import { useWorkspaceViewData } from "@/contexts/WorkspaceViewContext";
 import { usePullRequests } from "@/hooks/workspace";
-import { normalizePrUrl } from "@/utils/issue";
+import { getReviewType, isPRUrl, prKeyFromRef } from "@/utils/issue";
 import { getAvatarColor, shouldUseWhiteText } from "@/utils/colorUtils";
 
 import { PRReviewWorkspace } from "./PRReviewWorkspace";
@@ -35,38 +38,48 @@ const GROUPS: { id: GroupMode; label: string }[] = [
 ];
 
 export interface PullRequestRow {
-  pr: GitPullRequest;
+  /** Loom issue backing the row — primary source when present. */
   issue?: Issue | undefined;
+  /** GitHub metadata enrichment; rows without it are loom-only. */
+  pr?: GitPullRequest | undefined;
 }
 
 function isOpenPr(pr: GitPullRequest): boolean {
   return pr.state === "OPEN" && !pr.is_draft;
 }
 
-function needsReview(pr: GitPullRequest): boolean {
-  if (!isOpenPr(pr)) return false;
-  if (pr.review_decision === "APPROVED") return false;
-  return true;
+function needsReview(row: PullRequestRow): boolean {
+  if (row.pr) {
+    return isOpenPr(row.pr) && row.pr.review_decision !== "APPROVED";
+  }
+  // Loom-only rows are in the queue exactly when the task awaits review
+  // (e.g. a plan review with no PR yet).
+  return row.issue?.status === "review";
+}
+
+function isOpenRow(row: PullRequestRow): boolean {
+  if (row.pr) return isOpenPr(row.pr);
+  return row.issue?.status === "review";
 }
 
 function matchesFilter(row: PullRequestRow, filter: PRFilter): boolean {
-  const { pr } = row;
   switch (filter) {
     case "all":
       return true;
     case "review":
-      return needsReview(pr);
+      return needsReview(row);
     case "open":
-      return isOpenPr(pr);
+      return isOpenRow(row);
     case "merged":
-      return pr.state === "MERGED";
+      return row.pr?.state === "MERGED";
     default:
       return true;
   }
 }
 
 function groupKeyFor(row: PullRequestRow, mode: GroupMode): string {
-  if (mode === "repo") return row.pr.repo_name || row.issue?.repo || "No repo";
+  if (mode === "repo")
+    return row.pr?.repo_name || row.issue?.repo || "No repo";
   if (mode === "epic") return row.issue?.parent_title || "No epic";
   return "";
 }
@@ -89,15 +102,53 @@ export function prStateFromGithub(
   return { label: "Open", key: "open" };
 }
 
-function buildIssueByPrUrl(issues: Issue[]): Map<string, Issue> {
-  const map = new Map<string, Issue>();
-  for (const issue of issues) {
-    const key = normalizePrUrl(issue.external_ref);
-    if (key && !map.has(key)) {
-      map.set(key, issue);
-    }
+/** Display state for any row, with or without GitHub metadata. */
+export function rowState(row: PullRequestRow): { label: string; key: string } {
+  if (row.pr) return prStateFromGithub(row.pr, row.issue);
+  const issue = row.issue;
+  if (issue && getReviewType(issue) === "plan") {
+    return { label: "Plan review", key: "review" };
   }
-  return map;
+  return { label: "Review", key: "review" };
+}
+
+/**
+ * Build the review queue: loom issues first (status=review or PR-linked),
+ * enriched with GitHub metadata by owner/repo#number; then unlinked GitHub
+ * PRs. Sorted by most recent update.
+ */
+export function buildPullRequestRows(
+  issues: Issue[],
+  pullRequests: GitPullRequest[],
+): PullRequestRow[] {
+  const prByKey = new Map<string, GitPullRequest>();
+  for (const pr of pullRequests) {
+    const key = prKeyFromRef(pr.url);
+    if (key && !prByKey.has(key)) prByKey.set(key, pr);
+  }
+
+  const linkedKeys = new Set<string>();
+  const rows: PullRequestRow[] = [];
+  for (const issue of issues) {
+    const inQueue = issue.status === "review" || isPRUrl(issue.external_ref);
+    if (!inQueue) continue;
+    const key = prKeyFromRef(issue.external_ref);
+    const pr = key ? prByKey.get(key) : undefined;
+    if (key && pr) linkedKeys.add(key);
+    rows.push(pr ? { issue, pr } : { issue });
+  }
+
+  for (const pr of pullRequests) {
+    const key = prKeyFromRef(pr.url);
+    if (key && linkedKeys.has(key)) continue;
+    rows.push({ pr });
+  }
+
+  return rows.sort((a, b) => {
+    const aTime = a.pr?.updated_at ?? a.issue?.updated_at ?? "";
+    const bTime = b.pr?.updated_at ?? b.issue?.updated_at ?? "";
+    return bTime.localeCompare(aTime);
+  });
 }
 
 /** Leading pull-request glyph for a row. */
@@ -135,24 +186,28 @@ function Avatar({ name }: { name: string }): JSX.Element {
 
 export function PRsPage(): JSX.Element {
   const { issues } = useWorkspaceViewData();
-  const { pullRequests, loading, error } = usePullRequests({ state: "all" });
+  const { pullRequests, warnings, loading, error } = usePullRequests({
+    state: "all",
+  });
   const [filter, setFilter] = useState<PRFilter>("all");
   const [groupMode, setGroupMode] = useState<GroupMode>("none");
   const [searchParams, setSearchParams] = useSearchParams();
   const reviewId = searchParams.get("review");
 
-  const rows = useMemo((): PullRequestRow[] => {
-    const issueByUrl = buildIssueByPrUrl(issues);
-    return pullRequests.map((pr): PullRequestRow => {
-      const issue = issueByUrl.get(normalizePrUrl(pr.url) ?? "");
-      return issue ? { pr, issue } : { pr };
-    });
-  }, [pullRequests, issues]);
-
-  const openCount = useMemo(
-    () => rows.filter((r) => isOpenPr(r.pr)).length,
-    [rows],
+  const rows = useMemo(
+    () => buildPullRequestRows(issues, pullRequests),
+    [issues, pullRequests],
   );
+
+  // GitHub metadata is an enrichment: a fetch error or per-repo warning
+  // degrades to a banner while loom-backed rows keep rendering.
+  const githubWarning = error
+    ? `GitHub metadata unavailable: ${error.message}`
+    : warnings.length > 0
+      ? `GitHub metadata incomplete: ${warnings[0]}${warnings.length > 1 ? ` (+${warnings.length - 1} more)` : ""}`
+      : null;
+
+  const openCount = useMemo(() => rows.filter(isOpenRow).length, [rows]);
 
   const counts = useMemo(() => {
     const c: Record<PRFilter, number> = { all: 0, review: 0, open: 0, merged: 0 };
@@ -186,17 +241,19 @@ export function PRsPage(): JSX.Element {
       setSearchParams({ review: row.issue.id });
       return;
     }
-    window.open(row.pr.url, "_blank", "noopener,noreferrer");
+    if (row.pr) {
+      window.open(row.pr.url, "_blank", "noopener,noreferrer");
+    }
   };
 
   function renderRow(row: PullRequestRow): JSX.Element {
     const { pr, issue } = row;
-    const state = prStateFromGithub(pr, issue);
+    const state = rowState(row);
     const showRepo =
-      groupMode !== "repo" && Boolean(pr.repo_name || issue?.repo);
+      groupMode !== "repo" && Boolean(pr?.repo_name || issue?.repo);
     const showEpic = groupMode !== "epic" && Boolean(issue?.parent_title);
-    const avatarName = issue?.assignee || pr.author_login;
-    const title = pr.title || issue?.title || "Untitled pull request";
+    const avatarName = issue?.assignee || pr?.author_login;
+    const title = pr?.title || issue?.title || "Untitled pull request";
     const handleKeyDown = (event: KeyboardEvent<HTMLLIElement>) => {
       if (event.key !== "Enter" && event.key !== " ") return;
       event.preventDefault();
@@ -205,7 +262,7 @@ export function PRsPage(): JSX.Element {
 
     return (
       <li
-        key={pr.url}
+        key={pr?.url ?? issue?.id}
         className={styles.row}
         role="button"
         tabIndex={0}
@@ -218,13 +275,13 @@ export function PRsPage(): JSX.Element {
         </span>
         <div className={styles.rowMain}>
           <span className={styles.rowHead}>
-            <code className={styles.key}>#{pr.number}</code>
+            {pr && <code className={styles.key}>#{pr.number}</code>}
             <span className={styles.status} data-pr-state={state.key}>
               {state.label}
             </span>
             {showRepo && (
               <span className={styles.repoChip}>
-                {pr.repo_name || issue?.repo}
+                {pr?.repo_name || issue?.repo}
               </span>
             )}
             {showEpic && (
@@ -235,6 +292,11 @@ export function PRsPage(): JSX.Element {
             {issue && (
               <span className={styles.ticketChip} title={issue.id}>
                 {issue.id}
+              </span>
+            )}
+            {!issue && pr && (
+              <span className={styles.ticketChip} title="No linked loom issue">
+                Unlinked
               </span>
             )}
           </span>
@@ -278,9 +340,7 @@ export function PRsPage(): JSX.Element {
       </header>
       <p className={styles.subtitle}>
         {loading && rows.length === 0 ? (
-          <>Loading pull requests from GitHub…</>
-        ) : error ? (
-          <>Could not load pull requests: {error.message}</>
+          <>Loading pull requests…</>
         ) : rows.length > 0 ? (
           <>
             <strong className={styles.subtitleCount}>{openCount} open</strong>
@@ -288,16 +348,26 @@ export function PRsPage(): JSX.Element {
             {counts.review} awaiting review
           </>
         ) : (
-          <>Open pull requests from GitHub in this workspace.</>
+          <>Review-stage tasks and GitHub pull requests in this workspace.</>
         )}
       </p>
 
-      {!loading && !error && rows.length === 0 ? (
+      {githubWarning && (
+        <p
+          className={styles.githubWarning}
+          role="status"
+          data-testid="prs-github-warning"
+        >
+          {githubWarning}
+        </p>
+      )}
+
+      {!loading && rows.length === 0 ? (
         <div className={styles.empty}>
           <p className={styles.emptyTitle}>No pull requests</p>
           <p className={styles.emptyHint}>
-            When an agent pushes a branch and opens a PR on GitHub, it appears
-            here for review.
+            When a task moves to review or an agent opens a PR on GitHub, it
+            appears here for review.
           </p>
         </div>
       ) : rows.length > 0 ? (

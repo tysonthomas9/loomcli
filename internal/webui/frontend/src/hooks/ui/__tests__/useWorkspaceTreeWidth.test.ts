@@ -1,9 +1,9 @@
-import { act, renderHook } from "@testing-library/react";
 /**
  * @vitest-environment jsdom
  */
 
-import { beforeEach, describe, expect, it } from "vitest";
+import { act, renderHook } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   WORKSPACE_TREE_DEFAULT_WIDTH,
@@ -16,9 +16,14 @@ const WS_ID = "ws-tree-width";
 describe("useWorkspaceTreeWidth", () => {
   beforeEach(() => {
     localStorage.clear();
+    vi.useFakeTimers();
   });
 
-  it("starts at the default width and persists resize deltas", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("starts at the default width and persists resize deltas (debounced)", () => {
     const { result } = renderHook(() => useWorkspaceTreeWidth(WS_ID));
 
     expect(result.current.width).toBe(WORKSPACE_TREE_DEFAULT_WIDTH);
@@ -28,6 +33,23 @@ describe("useWorkspaceTreeWidth", () => {
     });
 
     expect(result.current.width).toBe(250);
+
+    act(() => {
+      vi.runAllTimers();
+    });
+    expect(localStorage.getItem(`loom:${WS_ID}:workspace-tree-width`)).toBe(
+      "250",
+    );
+  });
+
+  it("flushes a pending write on unmount", () => {
+    const { result, unmount } = renderHook(() => useWorkspaceTreeWidth(WS_ID));
+
+    act(() => {
+      result.current.applyDelta(40);
+    });
+    unmount();
+
     expect(localStorage.getItem(`loom:${WS_ID}:workspace-tree-width`)).toBe(
       "250",
     );

@@ -80,6 +80,26 @@ export function normalizePrUrl(ref?: string | null): string | null {
 }
 
 /**
+ * Stable join key for a PR reference: "owner/repo#number".
+ * Robust to URL variants that break exact-string matching (http vs https,
+ * www host, trailing ".git", sub-paths like /pull/42/files, trailing slash).
+ */
+export function prKeyFromRef(ref?: string | null): string | null {
+  if (!ref) return null;
+  try {
+    const url = new URL(ref);
+    if (url.protocol !== "https:" && url.protocol !== "http:") return null;
+    const match = url.pathname.match(
+      /^\/([^/]+)\/([^/]+?)(?:\.git)?\/pulls?\/(\d+)(?:\/|$)/i,
+    );
+    if (!match) return null;
+    return `${match[1]!.toLowerCase()}/${match[2]!.toLowerCase()}#${match[3]!}`;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Get the review type for an issue based on status, external_ref, and notes.
  * Returns null if the issue doesn't need review.
  */

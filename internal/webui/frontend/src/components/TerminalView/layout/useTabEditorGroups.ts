@@ -59,6 +59,18 @@ export function reconcileTabEditorGroups(
     return singleGroup(tabIds, fallbackActiveId);
   }
 
+  // The live active tab wins within the group that contains it: single-group
+  // mode never calls activateInGroup, so without this the group's active id
+  // goes stale after tab switches (splitting would then move the wrong tab),
+  // and a newly created tab appended above would stay hidden behind the
+  // group's previous active tab.
+  next = next.map((group) =>
+    group.tabIds.includes(fallbackActiveId) &&
+    group.activeTabId !== fallbackActiveId
+      ? { ...group, activeTabId: fallbackActiveId }
+      : group,
+  );
+
   return normalizeTabEditorGroups(next);
 }
 

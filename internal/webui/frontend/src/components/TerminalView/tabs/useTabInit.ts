@@ -45,8 +45,8 @@ function tabStateFromMetadata(
 ): TabState & { _sortOrder: number; _pinned: boolean } {
   const agentName = isAgentMetadata(metadata)
     ? (metadata.agent_id ??
-      (metadata.label.startsWith("agent-")
-        ? metadata.label.slice("agent-".length)
+      (metadata.session_name.startsWith("agent-")
+        ? metadata.session_name.slice("agent-".length)
         : undefined))
     : undefined;
   return {

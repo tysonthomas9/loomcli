@@ -34,10 +34,9 @@ type ghPRItem struct {
 }
 
 // ListPullRequests returns open/closed/merged PRs for a repo via gh CLI.
+// Callers are expected to have verified gh availability once per request
+// (a missing binary still surfaces as a run error).
 func ListPullRequests(repoPath, state string, limit int) ([]ops.GitPullRequest, error) {
-	if err := CheckGhInstalled(); err != nil {
-		return nil, err
-	}
 	if limit <= 0 {
 		limit = 100
 	}

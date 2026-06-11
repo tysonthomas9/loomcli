@@ -24,10 +24,17 @@ export interface GitPullRequest {
 
 export type PullRequestListState = "all" | "open" | "merged" | "review";
 
+export interface PullRequestList {
+  pullRequests: GitPullRequest[];
+  /** Per-repo listing failures (non-GitHub remote, missing gh, auth, …). */
+  warnings: string[];
+}
+
 interface PullRequestsResponse {
   success: boolean;
   data: {
     pull_requests: GitPullRequest[];
+    warnings?: string[];
   };
   error?: string;
 }
@@ -36,8 +43,11 @@ interface PullRequestsResponse {
 export async function fetchPullRequests(
   workspaceId: string,
   state: PullRequestListState = "all",
-): Promise<GitPullRequest[]> {
+): Promise<PullRequestList> {
   const url = `${wsUrl(workspaceId, "/pull-requests")}?state=${encodeURIComponent(state)}`;
   const result = await get<PullRequestsResponse>(url);
-  return result.data?.pull_requests ?? [];
+  return {
+    pullRequests: result.data?.pull_requests ?? [],
+    warnings: result.data?.warnings ?? [],
+  };
 }

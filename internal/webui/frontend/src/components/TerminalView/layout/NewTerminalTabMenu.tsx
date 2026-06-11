@@ -54,6 +54,12 @@ export function NewTerminalTabMenu({
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, [isOpen]);
 
+  // Move focus into the menu on open so Arrow/Home/End/Enter reach the
+  // keydown handler (the trigger is a sibling, not an ancestor, of the menu).
+  useEffect(() => {
+    if (isOpen) menuRef.current?.focus();
+  }, [isOpen]);
+
   const handleTriggerClick = useCallback(() => {
     if (disabled) {
       onDisabledAttempt?.();
@@ -115,7 +121,9 @@ export function NewTerminalTabMenu({
   );
 
   return (
-    <div ref={rootRef} className={styles.menuRoot}>
+    // Keydown is handled at the root so navigation works whether focus sits
+    // on the trigger or inside the menu.
+    <div ref={rootRef} className={styles.menuRoot} onKeyDown={handleMenuKeyDown}>
       <button
         ref={triggerRef}
         type="button"
@@ -143,7 +151,7 @@ export function NewTerminalTabMenu({
           role="menu"
           aria-label="New terminal session"
           data-testid="new-terminal-tab-menu"
-          onKeyDown={handleMenuKeyDown}
+          tabIndex={-1}
         >
           <div className={styles.menuHeader}>New session</div>
           {isLoading ? (

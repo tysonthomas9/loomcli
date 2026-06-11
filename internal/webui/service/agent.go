@@ -39,8 +39,9 @@ type AgentService interface {
 	// CreatePR creates a GitHub PR from the agent's worktree branch.
 	CreatePR(ctx context.Context, wsID, agentName, target string) (*ops.GitPRResult, error)
 
-	// ListPullRequests returns GitHub PRs for all repos in the workspace.
-	ListPullRequests(ctx context.Context, wsID, state string) ([]ops.GitPullRequest, error)
+	// ListPullRequests returns GitHub PRs for all repos in the workspace,
+	// with per-repo failures reported as warnings rather than errors.
+	ListPullRequests(ctx context.Context, wsID, state string) (*ops.GitPullRequestList, error)
 
 	// GitReset hard-resets the agent's worktree to a branch.
 	GitReset(ctx context.Context, wsID, agentName, branch string, force, push bool) (*ops.GitResetResult, error)

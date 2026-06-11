@@ -70,7 +70,10 @@ describe("SortableTab", () => {
     it("calls useSortable with the correct id", () => {
       render(<SortableTab {...defaultProps} id="my-tab" />);
 
-      expect(mockUseSortable).toHaveBeenCalledWith({ id: "my-tab" });
+      expect(mockUseSortable).toHaveBeenCalledWith({
+        id: "my-tab",
+        disabled: false,
+      });
     });
   });
 

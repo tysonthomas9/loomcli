@@ -36,27 +36,32 @@ export interface TabState {
   writable?: boolean;
 }
 
-/** True when persisted metadata describes an agent harness PTY. */
+/**
+ * True when persisted metadata describes an agent harness PTY.
+ * The session-name prefix is a fallback for legacy sessions persisted before
+ * kind/agent_id existed; the user-editable label is deliberately NOT
+ * consulted, so renaming a plain tab to "agent-…" can't reclassify it.
+ */
 export function isAgentMetadata(meta: {
   kind?: string;
   agent_id?: string;
-  label?: string;
+  session_name?: string;
 }): boolean {
   return (
     meta.kind === "agent" ||
     (meta.agent_id != null && meta.agent_id !== "") ||
-    (meta.label?.startsWith("agent-") ?? false)
+    (meta.session_name?.startsWith("agent-") ?? false)
   );
 }
 
 /** True when the tab is an agent harness PTY (Agents view only). */
 export function isAgentTab(
-  tab: Pick<TabState, "kind" | "agentName" | "label">,
+  tab: Pick<TabState, "kind" | "agentName" | "sessionName">,
 ): boolean {
   return (
     tab.kind === "agent" ||
     tab.agentName != null ||
-    tab.label.startsWith("agent-")
+    tab.sessionName.startsWith("agent-")
   );
 }
 

@@ -262,9 +262,14 @@ func (s *agentServiceImpl) GitSync(_ context.Context, wsID, agentName string) (*
 	}, nil
 }
 
-func (s *agentServiceImpl) ListPullRequests(_ context.Context, wsID, state string) ([]ops.GitPullRequest, error) {
+func (s *agentServiceImpl) ListPullRequests(_ context.Context, wsID, state string) (*ops.GitPullRequestList, error) {
 	if err := s.gitOps.CheckGhInstalled(); err != nil {
-		return nil, service.ErrUnavailable("gh CLI not installed: install from https://cli.github.com/ and run 'gh auth login'")
+		// GitHub metadata is an enrichment, not a hard dependency — report
+		// the missing CLI as a warning so loom-backed views keep working.
+		return &ops.GitPullRequestList{
+			PullRequests: []ops.GitPullRequest{},
+			Warnings:     []string{"gh CLI not installed: install from https://cli.github.com/ and run 'gh auth login'"},
+		}, nil
 	}
 	if state == "" {
 		state = "all"

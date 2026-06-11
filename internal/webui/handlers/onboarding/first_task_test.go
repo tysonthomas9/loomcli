@@ -316,8 +316,8 @@ func (s *stubAgentService) CreatePR(context.Context, string, string, string) (*o
 	return nil, service.ErrNotImplemented("not implemented")
 }
 
-func (s *stubAgentService) ListPullRequests(context.Context, string, string) ([]ops.GitPullRequest, error) {
-	return []ops.GitPullRequest{}, nil
+func (s *stubAgentService) ListPullRequests(context.Context, string, string) (*ops.GitPullRequestList, error) {
+	return &ops.GitPullRequestList{PullRequests: []ops.GitPullRequest{}}, nil
 }
 
 func (s *stubAgentService) GitReset(context.Context, string, string, string, bool, bool) (*ops.GitResetResult, error) {

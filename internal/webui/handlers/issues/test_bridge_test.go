@@ -80,8 +80,8 @@ func (m *mockGitOps) CreatePR(_, _, _, _ string) (*ops.GitPRResult, error) {
 	return &ops.GitPRResult{}, nil
 }
 
-func (m *mockGitOps) ListWorkspacePullRequests(string, string, int) ([]ops.GitPullRequest, error) {
-	return []ops.GitPullRequest{}, nil
+func (m *mockGitOps) ListWorkspacePullRequests(string, string, int) (*ops.GitPullRequestList, error) {
+	return &ops.GitPullRequestList{PullRequests: []ops.GitPullRequest{}}, nil
 }
 
 func (m *mockGitOps) Reset(_, _, _ string, _, _ bool) (*ops.GitResetResult, error) {

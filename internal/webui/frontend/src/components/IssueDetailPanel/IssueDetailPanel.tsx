@@ -21,6 +21,7 @@ import {
   moveIssue,
   deleteTabMetadata,
   getTaskLogPhases,
+  startAgent,
   EPIC_RUNNER_WORKFLOW_NAME,
   startWorkflowRun,
 } from "@/hooks/api";
@@ -818,15 +819,52 @@ function DefaultContent({
 
       setIsSavingAssignee(true);
       try {
+        // Assigning an agent to an open or review issue starts work, like
+        // the old Start Work flow: an open issue moves to in_progress and
+        // the agent daemon claims the task; a review issue keeps its status
+        // (the PR stays in the review queue while the agent works it).
+        const isAgentAssignment =
+          newAssignee !== "" &&
+          !newAssignee.startsWith("[H]") &&
+          agents.some((a) => a.name === newAssignee);
+        const startsWork =
+          isAgentAssignment &&
+          (issue.status === "open" || issue.status === "review");
+
+        if (!startsWork) {
+          const updatedIssue = await updateIssue(workspaceId, issue.id, {
+            assignee: newAssignee,
+          });
+          onIssueUpdate?.(updatedIssue);
+          return;
+        }
+
+        const previousAssignee = issue.assignee ?? "";
+        const previousStatus = issue.status ?? "open";
         const updatedIssue = await updateIssue(workspaceId, issue.id, {
           assignee: newAssignee,
+          ...(issue.status === "review" ? {} : { status: "in_progress" }),
         });
-        onIssueUpdate?.(updatedIssue);
+        try {
+          await startAgent(workspaceId, newAssignee, { taskId: issue.id });
+          onIssueUpdate?.(updatedIssue);
+        } catch (err) {
+          try {
+            const rolledBackIssue = await updateIssue(workspaceId, issue.id, {
+              assignee: previousAssignee,
+              status: previousStatus,
+            });
+            onIssueUpdate?.(rolledBackIssue);
+          } catch {
+            // Keep the original start failure visible to the dropdown.
+          }
+          throw err;
+        }
       } finally {
         setIsSavingAssignee(false);
       }
     },
-    [issue, onIssueUpdate],
+    [agents, issue, onIssueUpdate, workspaceId],
   );
 
   const handleRepoSave = useCallback(

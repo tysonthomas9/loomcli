@@ -267,6 +267,14 @@ vi.mock("@/hooks", () => ({
   useIssueDetail: mockUseIssueDetail,
   useToast: mockUseToast,
   useRouteView: mockUseRouteView,
+  useWorkspaceTreeWidth: () => ({
+    width: 210,
+    applyDelta: vi.fn(),
+    resetWidth: vi.fn(),
+  }),
+  WORKSPACE_TREE_DEFAULT_WIDTH: 210,
+  WORKSPACE_TREE_MIN_WIDTH: 160,
+  WORKSPACE_TREE_MAX_WIDTH: 420,
   DEFAULT_GROUP_BY: "epic",
   useFilterState: vi.fn(() => [
     {}, // FilterState - empty means App.tsx will apply DEFAULT_GROUP_BY fallback

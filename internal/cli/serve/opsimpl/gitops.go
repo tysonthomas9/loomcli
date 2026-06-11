@@ -10,6 +10,8 @@ import (
 	"strings"
 	"time"
 
+	"golang.org/x/sync/errgroup"
+
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
 	"github.com/tysonthomas9/loomcli/internal/cli/git"
@@ -214,13 +216,10 @@ func (g *GitOpsImpl) CreatePR(worktreePath, sourceBranch, targetBranch, remote s
 	}, nil
 }
 
-func (g *GitOpsImpl) ListWorkspacePullRequests(workspaceID, state string, limit int) ([]ops.GitPullRequest, error) {
+func (g *GitOpsImpl) ListWorkspacePullRequests(workspaceID, state string, limit int) (*ops.GitPullRequestList, error) {
 	repos, err := g.listWorkspaceRepos(workspaceID)
 	if err != nil {
 		return nil, err
-	}
-	if len(repos) == 0 {
-		return []ops.GitPullRequest{}, nil
 	}
 
 	ghState := state
@@ -228,17 +227,51 @@ func (g *GitOpsImpl) ListWorkspacePullRequests(workspaceID, state string, limit 
 		ghState = "open"
 	}
 
-	seen := make(map[string]struct{})
-	all := make([]ops.GitPullRequest, 0)
+	// One gh query per repo identity — a repo with several agent worktrees
+	// shares a single GitHub PR list.
+	type repoQuery struct {
+		repo ops.WorkspaceRepo
+		prs  []ops.GitPullRequest
+		err  error
+	}
+	seenRepo := make(map[string]struct{})
+	queries := make([]*repoQuery, 0, len(repos))
 	for _, repo := range repos {
 		if repo.Path == "" {
 			continue
 		}
-		prs, listErr := git.ListPullRequests(repo.Path, ghState, limit)
-		if listErr != nil {
-			return nil, listErr
+		key := repo.Remote
+		if key == "" {
+			key = repo.Name
 		}
-		for _, pr := range prs {
+		if _, ok := seenRepo[key]; ok {
+			continue
+		}
+		seenRepo[key] = struct{}{}
+		queries = append(queries, &repoQuery{repo: repo})
+	}
+
+	var eg errgroup.Group
+	eg.SetLimit(4)
+	for _, q := range queries {
+		eg.Go(func() error {
+			q.prs, q.err = git.ListPullRequests(q.repo.Path, ghState, limit)
+			return nil
+		})
+	}
+	_ = eg.Wait()
+
+	result := &ops.GitPullRequestList{PullRequests: []ops.GitPullRequest{}}
+	seen := make(map[string]struct{})
+	all := result.PullRequests
+	for _, q := range queries {
+		if q.err != nil {
+			// A repo that gh can't list (non-GitHub remote, missing auth, …)
+			// must not take down the listing for the rest of the workspace.
+			result.Warnings = append(result.Warnings, fmt.Sprintf("%s: %v", q.repo.Name, q.err))
+			continue
+		}
+		for _, pr := range q.prs {
 			if pr.URL == "" {
 				continue
 			}
@@ -246,7 +279,7 @@ func (g *GitOpsImpl) ListWorkspacePullRequests(workspaceID, state string, limit 
 				continue
 			}
 			seen[pr.URL] = struct{}{}
-			pr.RepoName = repo.Name
+			pr.RepoName = q.repo.Name
 			all = append(all, pr)
 		}
 	}
@@ -274,7 +307,8 @@ func (g *GitOpsImpl) ListWorkspacePullRequests(workspaceID, state string, limit 
 	sort.Slice(all, func(i, j int) bool {
 		return all[i].UpdatedAt > all[j].UpdatedAt
 	})
-	return all, nil
+	result.PullRequests = all
+	return result, nil
 }
 
 func (g *GitOpsImpl) listWorkspaceRepos(workspaceID string) ([]ops.WorkspaceRepo, error) {

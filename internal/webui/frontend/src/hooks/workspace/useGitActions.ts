@@ -6,7 +6,7 @@
 import { useState, useCallback, useRef, useEffect } from "react";
 
 import { ApiError } from "@/api/common";
-import { updateIssue } from "@/api/issues/issues";
+import { getIssue, updateIssue } from "@/api/issues/issues";
 import {
   gitPush,
   gitPull,
@@ -201,10 +201,21 @@ export function useGitActions({
         const result = await gitCreatePR(workspaceId, agentName, target);
         if (result.url && taskId) {
           try {
-            await updateIssue(workspaceId, taskId, {
-              external_ref: result.url,
-              status: "review",
-            });
+            if (result.already_exists) {
+              // Backfill a missing link, but never touch status — the task
+              // may have moved on (or closed) since the PR was created.
+              const issue = await getIssue(workspaceId, taskId);
+              if (!issue.external_ref) {
+                await updateIssue(workspaceId, taskId, {
+                  external_ref: result.url,
+                });
+              }
+            } else {
+              await updateIssue(workspaceId, taskId, {
+                external_ref: result.url,
+                status: "review",
+              });
+            }
           } catch {
             // PR was created; linking the ticket is best-effort.
           }

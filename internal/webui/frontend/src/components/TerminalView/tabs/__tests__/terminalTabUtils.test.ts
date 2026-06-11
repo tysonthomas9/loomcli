@@ -247,20 +247,28 @@ describe("BACKEND_BRAND_COLORS", () => {
 
 describe("isAgentTab", () => {
   it("returns true for kind agent", () => {
-    expect(isAgentTab({ kind: "agent" })).toBe(true);
+    expect(isAgentTab({ kind: "agent", sessionName: "uuid-1" })).toBe(true);
   });
 
   it("returns true when agentName is set", () => {
-    expect(isAgentTab({ agentName: "fox" })).toBe(true);
+    expect(isAgentTab({ agentName: "fox", sessionName: "uuid-2" })).toBe(true);
   });
 
-  it("returns true for agent- label prefix", () => {
-    expect(isAgentTab({ label: "agent-local-planner" })).toBe(true);
+  it("returns true for legacy agent- session-name prefix", () => {
+    expect(isAgentTab({ sessionName: "agent-local-planner" })).toBe(true);
   });
 
   it("returns false for lead tabs", () => {
-    expect(isAgentTab({ kind: "lead", label: "lead-codex-1" })).toBe(false);
-    expect(isAgentTab({ label: "lead-codex-1" })).toBe(false);
+    expect(isAgentTab({ kind: "lead", sessionName: "lead-codex-1" })).toBe(
+      false,
+    );
+    expect(isAgentTab({ sessionName: "lead-codex-1" })).toBe(false);
+  });
+
+  it("ignores the user-editable label — a renamed tab stays a plain tab", () => {
+    // Renaming a shell tab to "agent-debug" must not hide it from the
+    // Terminal view; classification keys on kind/agentName/sessionName only.
+    expect(isAgentTab({ sessionName: "lead-shell-1" })).toBe(false);
   });
 });
 

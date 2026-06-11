@@ -27,7 +27,9 @@ type GitOps interface {
 	CreatePR(worktreePath, sourceBranch, targetBranch, remote string) (*GitPRResult, error)
 
 	// ListWorkspacePullRequests lists GitHub PRs across all repos in a workspace.
-	ListWorkspacePullRequests(workspaceID, state string, limit int) ([]GitPullRequest, error)
+	// Repos whose listing fails are skipped and reported via Warnings so one
+	// bad repo doesn't take down the whole listing.
+	ListWorkspacePullRequests(workspaceID, state string, limit int) (*GitPullRequestList, error)
 
 	// Reset hard-resets a worktree to a target branch.
 	// If push is true, force-pushes the branch to origin after resetting.
@@ -110,6 +112,14 @@ type GitPullRequest struct {
 	Additions      int    `json:"additions,omitempty"`
 	Deletions      int    `json:"deletions,omitempty"`
 	ChangedFiles   int    `json:"changed_files,omitempty"`
+}
+
+// GitPullRequestList is the aggregate result of listing PRs across workspace
+// repos. Warnings carry per-repo failures (non-GitHub remote, auth, …) that
+// did not prevent the rest of the listing.
+type GitPullRequestList struct {
+	PullRequests []GitPullRequest `json:"pull_requests"`
+	Warnings     []string         `json:"warnings,omitempty"`
 }
 
 // GitPRResult contains the result of a PR creation.

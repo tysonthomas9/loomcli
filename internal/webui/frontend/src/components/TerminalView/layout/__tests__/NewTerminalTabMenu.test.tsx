@@ -65,6 +65,82 @@ describe("NewTerminalTabMenu", () => {
     expect(screen.queryByTestId("new-terminal-tab-menu")).not.toBeInTheDocument();
   });
 
+  it("moves focus into the menu on open", () => {
+    render(
+      <NewTerminalTabMenu
+        availableBackends={["claude", "codex"]}
+        onSelect={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getByTestId("terminal-new-tab-button"));
+    expect(screen.getByTestId("new-terminal-tab-menu")).toHaveFocus();
+  });
+
+  it("supports keyboard navigation: ArrowDown + Enter selects a backend", () => {
+    const onSelect = vi.fn();
+    render(
+      <NewTerminalTabMenu
+        availableBackends={["claude", "codex"]}
+        onSelect={onSelect}
+      />,
+    );
+
+    fireEvent.click(screen.getByTestId("terminal-new-tab-button"));
+    const menu = screen.getByTestId("new-terminal-tab-menu");
+
+    // Focus starts on the first item (shell); ArrowDown moves to claude.
+    expect(screen.getByTestId("new-tab-backend-shell")).toHaveAttribute(
+      "data-focused",
+    );
+    fireEvent.keyDown(menu, { key: "ArrowDown" });
+    expect(screen.getByTestId("new-tab-backend-claude")).toHaveAttribute(
+      "data-focused",
+    );
+
+    fireEvent.keyDown(menu, { key: "Enter" });
+    expect(onSelect).toHaveBeenCalledWith("claude");
+    expect(
+      screen.queryByTestId("new-terminal-tab-menu"),
+    ).not.toBeInTheDocument();
+  });
+
+  it("handles keys even if focus stays on the trigger", () => {
+    const onSelect = vi.fn();
+    render(
+      <NewTerminalTabMenu
+        availableBackends={["claude"]}
+        onSelect={onSelect}
+      />,
+    );
+
+    const trigger = screen.getByTestId("terminal-new-tab-button");
+    fireEvent.click(trigger);
+    // Keydown on the trigger bubbles to the root handler.
+    fireEvent.keyDown(trigger, { key: "ArrowDown" });
+    fireEvent.keyDown(trigger, { key: "Enter" });
+    expect(onSelect).toHaveBeenCalledWith("claude");
+  });
+
+  it("Escape closes the menu and returns focus to the trigger", () => {
+    render(
+      <NewTerminalTabMenu
+        availableBackends={["claude"]}
+        onSelect={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getByTestId("terminal-new-tab-button"));
+    fireEvent.keyDown(screen.getByTestId("new-terminal-tab-menu"), {
+      key: "Escape",
+    });
+
+    expect(
+      screen.queryByTestId("new-terminal-tab-menu"),
+    ).not.toBeInTheDocument();
+    expect(screen.getByTestId("terminal-new-tab-button")).toHaveFocus();
+  });
+
   it("lists Terminal (shell) first and omits provider company names", () => {
     render(
       <NewTerminalTabMenu

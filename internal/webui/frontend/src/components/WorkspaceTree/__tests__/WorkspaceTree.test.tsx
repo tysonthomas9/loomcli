@@ -539,7 +539,7 @@ describe("WorkspaceTree", () => {
       ).not.toBeInTheDocument();
     });
 
-    it("widens sidebar via keyboard resize and persists width", () => {
+    it("widens sidebar via keyboard resize and persists width", async () => {
       render(<WorkspaceTree defaultCollapsed={false} />);
       const handle = screen.getByTestId("workspace-tree-resize-handle");
       const aside = handle.closest("aside");
@@ -547,9 +547,12 @@ describe("WorkspaceTree", () => {
       fireEvent.keyDown(handle, { key: "ArrowRight" });
 
       expect(aside).toHaveStyle({ "--workspace-tree-sidebar-width": "226px" });
-      expect(
-        localStorage.getItem(`loom:${TEST_WS_ID}:workspace-tree-width`),
-      ).toBe("226");
+      // Persistence is debounced (~200ms) to avoid per-pointermove writes.
+      await waitFor(() => {
+        expect(
+          localStorage.getItem(`loom:${TEST_WS_ID}:workspace-tree-width`),
+        ).toBe("226");
+      });
     });
   });
 
