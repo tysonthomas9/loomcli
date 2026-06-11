@@ -73,8 +73,20 @@ type CloseIssueParams struct {
 }
 
 // ClaimIssueParams holds the parameters for atomically claiming an issue.
+// Actor optionally carries the true worker identity (X-Actor header); when
+// empty, the claim is recorded against the server-side configured actor.
 type ClaimIssueParams struct {
 	IssueID string
+	Actor   string
+}
+
+// ReleaseIssueParams holds the parameters for releasing a claimed issue back
+// to open. Actor scopes the release: releasing a lock held by a different
+// actor is a conflict, not a success. Empty Actor uses the legacy
+// status-transition path under the server-side configured actor.
+type ReleaseIssueParams struct {
+	IssueID string
+	Actor   string
 }
 
 // CreateIssueParams mirrors IssueCreateRequest but is not HTTP-bound.
@@ -173,6 +185,7 @@ type IssueService interface {
 	CloseIssue(ctx context.Context, params CloseIssueParams) (json.RawMessage, error)
 	ReopenIssue(ctx context.Context, params ReopenIssueParams) error
 	ClaimIssue(ctx context.Context, params ClaimIssueParams) (json.RawMessage, error)
+	ReleaseIssue(ctx context.Context, params ReleaseIssueParams) error
 	DeleteIssue(ctx context.Context, issueID string) (json.RawMessage, error)
 	AddComment(ctx context.Context, params AddCommentParams) (*types.Comment, error)
 	ListComments(ctx context.Context, issueID string) ([]*types.Comment, error)

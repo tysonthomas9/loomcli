@@ -97,7 +97,7 @@ func runRecover(cmd *cobra.Command, args []string) {
 	clearStaleLock(worktreePath, lockInfo.PID)
 
 	if lockInfo.TaskID != "" {
-		handleOrphanedTask(deps, worktreePath, lockInfo.TaskID, !recoverNoAnalyze)
+		handleOrphanedTask(deps, worktreePath, lockInfo.TaskID, lockInfo.AgentName, !recoverNoAnalyze)
 	}
 
 	resetOrphanedAgentTasks(deps, worktreePath, lockInfo.AgentName, lockInfo.TaskID, !recoverNoAnalyze)
@@ -178,7 +178,7 @@ func RecoverWorktree(worktreePath, agentName string, exitCode int) error {
 			} else {
 				fmt.Printf("[recover] Agent %s exited with code %d, resetting task %s\n",
 					agentName, exitCode, lockInfo.TaskID)
-				resetTask(deps, lockInfo.TaskID)
+				resetTask(deps, lockInfo.TaskID, agentName)
 			}
 		}
 	}

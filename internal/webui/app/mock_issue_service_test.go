@@ -17,6 +17,7 @@ type mockIssueService struct {
 	closeIssueFunc       func(ctx context.Context, params service.CloseIssueParams) (json.RawMessage, error)
 	reopenIssueFunc      func(ctx context.Context, params service.ReopenIssueParams) error
 	claimIssueFunc       func(ctx context.Context, params service.ClaimIssueParams) (json.RawMessage, error)
+	releaseIssueFunc     func(ctx context.Context, params service.ReleaseIssueParams) error
 	deleteIssueFunc      func(ctx context.Context, issueID string) (json.RawMessage, error)
 	addCommentFunc       func(ctx context.Context, params service.AddCommentParams) (*types.Comment, error)
 	listCommentsFunc     func(ctx context.Context, issueID string) ([]*types.Comment, error)
@@ -68,6 +69,13 @@ func (m *mockIssueService) ClaimIssue(ctx context.Context, params service.ClaimI
 		return m.claimIssueFunc(ctx, params)
 	}
 	return nil, nil
+}
+
+func (m *mockIssueService) ReleaseIssue(ctx context.Context, params service.ReleaseIssueParams) error {
+	if m.releaseIssueFunc != nil {
+		return m.releaseIssueFunc(ctx, params)
+	}
+	return nil
 }
 
 func (m *mockIssueService) DeleteIssue(ctx context.Context, issueID string) (json.RawMessage, error) {

@@ -392,6 +392,17 @@ func (b *fleetDBIssueBackend) ClaimIssueAsActor(ctx context.Context, id string, 
 	})
 }
 
+func (b *fleetDBIssueBackend) ReleaseIssueAsActor(ctx context.Context, id, actor string) error {
+	return b.withBackend(ctx, "ReleaseIssue", func(ib backend.IssueBackend) error {
+		if actorBackend, ok := ib.(interface {
+			ReleaseIssueAsActor(context.Context, string, string) error
+		}); ok {
+			return actorBackend.ReleaseIssueAsActor(ctx, id, actor)
+		}
+		return backend.ErrNotImplemented("ReleaseIssue", "backend does not support actor-scoped release")
+	})
+}
+
 func (b *fleetDBIssueBackend) DeferIssue(ctx context.Context, id string, until time.Time) error {
 	return b.withBackend(ctx, "DeferIssue", func(ib backend.IssueBackend) error {
 		return ib.DeferIssue(ctx, id, until)

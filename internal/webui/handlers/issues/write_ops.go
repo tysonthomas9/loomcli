@@ -3,8 +3,11 @@ package issues
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
+	"strings"
+	"unicode"
 
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
@@ -109,9 +112,38 @@ func HandleCloseIssue(svc service.IssueService) http.HandlerFunc {
 	}
 }
 
-// HandleClaimIssue returns a handler that atomically claims an issue by ID
-// for the server-side actor. Returns 409 if the issue is already claimed by
-// another agent.
+// maxActorHeaderLen bounds the X-Actor header before it is forwarded to the
+// backing store.
+const maxActorHeaderLen = 128
+
+// actorFromRequest extracts and validates the optional X-Actor header that
+// carries the true worker identity through serve-mediated claim/release. An
+// absent header returns ("", nil) — the legacy server-side actor applies.
+// Over-long values or control characters are rejected.
+//
+// Trust model: serve forwards the client-supplied actor verbatim (matching
+// fleet-db's dev-mode X-Actor handling). Like the rest of the serve API, this
+// assumes a trusted network — there is no binding of actor to caller.
+func actorFromRequest(r *http.Request) (string, error) {
+	actor := strings.TrimSpace(r.Header.Get("X-Actor"))
+	if actor == "" {
+		return "", nil
+	}
+	if len(actor) > maxActorHeaderLen {
+		return "", fmt.Errorf("X-Actor header exceeds %d characters", maxActorHeaderLen)
+	}
+	for _, c := range actor {
+		if unicode.IsControl(c) {
+			return "", errors.New("X-Actor header contains control characters")
+		}
+	}
+	return actor, nil
+}
+
+// HandleClaimIssue returns a handler that atomically claims an issue by ID.
+// The optional X-Actor header scopes the claim to the calling worker; without
+// it the claim is recorded against the server-side actor. Returns 409 if the
+// issue is already claimed by another agent.
 func HandleClaimIssue(svc service.IssueService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		issueID := r.PathValue("id")
@@ -120,7 +152,13 @@ func HandleClaimIssue(svc service.IssueService) http.HandlerFunc {
 			return
 		}
 
-		data, err := svc.ClaimIssue(r.Context(), service.ClaimIssueParams{IssueID: issueID})
+		actor, err := actorFromRequest(r)
+		if err != nil {
+			handler.RespondError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+
+		data, err := svc.ClaimIssue(r.Context(), service.ClaimIssueParams{IssueID: issueID, Actor: actor})
 		if err != nil {
 			handler.HandleServiceError(w, err)
 			return
@@ -129,6 +167,35 @@ func HandleClaimIssue(svc service.IssueService) http.HandlerFunc {
 		handler.WriteJSON(w, http.StatusOK, IssuesResponse{
 			Success: true,
 			Data:    data,
+		})
+	}
+}
+
+// HandleReleaseIssue returns a handler that releases a claimed issue back to
+// open. The optional X-Actor header scopes the release to the calling worker:
+// releasing a lock held by a different actor returns 409 instead of silently
+// un-claiming it.
+func HandleReleaseIssue(svc service.IssueService) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		issueID := r.PathValue("id")
+		if issueID == "" {
+			handler.RespondError(w, http.StatusBadRequest, "missing issue ID")
+			return
+		}
+
+		actor, err := actorFromRequest(r)
+		if err != nil {
+			handler.RespondError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+
+		if err := svc.ReleaseIssue(r.Context(), service.ReleaseIssueParams{IssueID: issueID, Actor: actor}); err != nil {
+			handler.HandleServiceError(w, err)
+			return
+		}
+
+		handler.WriteJSON(w, http.StatusOK, IssuesResponse{
+			Success: true,
 		})
 	}
 }
