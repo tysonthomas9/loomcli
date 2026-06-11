@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 
 	"github.com/tysonthomas9/loomcli/internal/cli"
@@ -402,15 +403,37 @@ type StreamUsage struct {
 	CacheCreationInputTokens int64 `json:"cache_creation_input_tokens"`
 }
 
+// streamUsageParsedLines / streamUsageSkippedLines count stream-json lines the
+// usage collector parsed vs skipped (unparseable JSON), so a regression that
+// silently zeroes the collector is visible via LOOM_DEBUG_STREAM.
+var (
+	streamUsageParsedLines  atomic.Int64
+	streamUsageSkippedLines atomic.Int64
+)
+
+// trimToJSONObject returns line starting at its first '{' so a leading
+// non-JSON prefix (PTY-echoed control bytes, e.g. "^D\b\b^D\b\b" on the first
+// stream-json line) does not defeat json.Unmarshal. A line with no '{' is
+// returned unchanged — the parser rejects it anyway.
+func trimToJSONObject(line string) string {
+	if i := strings.IndexByte(line, '{'); i > 0 {
+		return line[i:]
+	}
+	return line
+}
+
 // extractClaudeSessionID parses a stream-json line and returns the session_id
-// if the line is a system init event (type:"system", subtype:"init").
+// if the line is a system init event (type:"system", subtype:"init"). The line
+// is trimmed to its leading '{' first: PTY echo can mangle the first
+// stream-json line (the system:init event), which would otherwise silently
+// defeat session-id capture.
 func extractClaudeSessionID(line string) (string, bool) {
 	var event struct {
 		Type      string `json:"type"`
 		Subtype   string `json:"subtype"`
 		SessionID string `json:"session_id"`
 	}
-	if err := json.Unmarshal([]byte(line), &event); err != nil {
+	if err := json.Unmarshal([]byte(trimToJSONObject(line)), &event); err != nil {
 		return "", false
 	}
 	if event.Type != "system" || event.Subtype != "init" {
@@ -474,11 +497,24 @@ func displayStreamEvent(line string) {
 //
 // We use message_delta usage (cumulative final) when available, falling back
 // to message.usage from message_start. Deduplication is by message ID.
+//
+// The line is first trimmed to its leading '{' (trimToJSONObject): under the
+// wrapper's non-raw PTY, terminal echo can prepend control bytes to
+// stream-json lines — the same mangling class that broke the session-id
+// extractor — which would otherwise defeat json.Unmarshal and silently zero
+// the collector.
 func collectClaudeStreamUsage(line string, collector *usage.Collector) {
 	var event StreamEvent
-	if err := json.Unmarshal([]byte(line), &event); err != nil {
+	if err := json.Unmarshal([]byte(trimToJSONObject(line)), &event); err != nil {
+		// Log only the first and every 100th skip to avoid flooding stderr
+		// on streams with many non-JSON lines.
+		if n := streamUsageSkippedLines.Add(1); debugStreamParsing && (n == 1 || n%100 == 0) {
+			fmt.Fprintf(os.Stderr, "[debug] usage collector skipped unparseable stream line (skipped=%d parsed=%d)\n",
+				n, streamUsageParsedLines.Load())
+		}
 		return
 	}
+	streamUsageParsedLines.Add(1)
 
 	// Extract message ID for dedup
 	var messageID string

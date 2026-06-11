@@ -721,3 +721,59 @@ func TestScanStreamOutputReturnsTail(t *testing.T) {
 		t.Errorf("seen lines = %q, want %q", strings.Join(seen, "\n"), got)
 	}
 }
+
+func TestTrimToJSONObject(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{"pty echo prefix", "\x04\b\b\x04\b\b{\"type\":\"system\"}", `{"type":"system"}`},
+		{"no brace unchanged", "plain text line", "plain text line"},
+		{"starts with brace unchanged", `{"a":1}`, `{"a":1}`},
+		{"empty", "", ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := trimToJSONObject(tc.in); got != tc.want {
+				t.Errorf("trimToJSONObject(%q) = %q, want %q", tc.in, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestCollectClaudeStreamUsage_PTYEchoPrefix(t *testing.T) {
+	t.Parallel()
+	c := usage.NewCollector("claude", "t")
+
+	line := "\x04\b\b\x04\b\b" + `{"type":"message_delta","message":{"id":"msg-pty"},"usage":{"input_tokens":1000,"output_tokens":300,"cache_read_input_tokens":200,"cache_creation_input_tokens":50}}`
+	collectClaudeStreamUsage(line, c)
+
+	su := c.Finalize("", "", time.Now(), time.Now(), 0)
+	if su.InputTokens != 1000 {
+		t.Errorf("InputTokens = %d, want 1000", su.InputTokens)
+	}
+	if su.OutputTokens != 300 {
+		t.Errorf("OutputTokens = %d, want 300", su.OutputTokens)
+	}
+	if su.CacheReadTokens != 200 {
+		t.Errorf("CacheReadTokens = %d, want 200", su.CacheReadTokens)
+	}
+	if su.CacheWriteTokens != 50 {
+		t.Errorf("CacheWriteTokens = %d, want 50", su.CacheWriteTokens)
+	}
+}
+
+func TestExtractClaudeSessionID_PTYEchoPrefix(t *testing.T) {
+	t.Parallel()
+
+	line := "\x04\b\b\x04\b\b" + `{"type":"system","subtype":"init","session_id":"abc-123"}`
+	sid, ok := extractClaudeSessionID(line)
+	if !ok {
+		t.Fatal("extractClaudeSessionID() ok = false, want true")
+	}
+	if sid != "abc-123" {
+		t.Errorf("session id = %q, want %q", sid, "abc-123")
+	}
+}
