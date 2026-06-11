@@ -126,8 +126,7 @@ describe("IssueCard RepoBadge", () => {
     const issue = createTestIssue({ repo: "backend" });
     const { container } = render(<IssueCard issue={issue} />);
 
-    // cardFooter div should not be present
-    const footer = container.querySelector("[class*='cardFooter']");
+    const footer = container.querySelector("footer");
     expect(footer).not.toBeInTheDocument();
   });
 
@@ -136,16 +135,16 @@ describe("IssueCard RepoBadge", () => {
     const issue = createTestIssue();
     const { container } = render(<IssueCard issue={issue} />);
 
-    const footer = container.querySelector("[class*='cardFooter']");
+    const footer = container.querySelector("footer");
     expect(footer).not.toBeInTheDocument();
   });
 
-  it("renders footer div with cardFooter class when both conditions are met", () => {
+  it("renders footer when both multi-repo and issue.repo are set", () => {
     setIsMultiRepo(true);
     const issue = createTestIssue({ repo: "api-service" });
     const { container } = render(<IssueCard issue={issue} />);
 
-    const footer = container.querySelector("[class*='cardFooter']");
+    const footer = container.querySelector("footer");
     expect(footer).toBeInTheDocument();
   });
 

@@ -2,7 +2,7 @@
  * AgentsPage — full-page agent workspace (Aether `/agents`).
  *
  * Layout (driven by App.tsx):
- *   [AgentIconRail (App-level sidebar on /agents only)]
+ *   [WorkspaceTree — same sidebar as kanban]
  *   [tabbed main panel — Terminal / Info / Git / Diff / Files]
  *   [right column — either AgentWorkPanel OR inline IssueDetailPanel]
  *
@@ -47,6 +47,7 @@ import {
 } from "@/api";
 import { useWorkspaceViewData } from "@/contexts/WorkspaceViewContext";
 import { useAgentStoreInstance } from "@/hooks";
+import { useOpenQueuePanelWidth } from "@/hooks/ui/useOpenQueuePanelWidth";
 import { useToast } from "@/hooks/ui/useToast";
 import { useWorkflowRunStreams } from "@/hooks/workflows/useWorkflowRunStreams";
 import { parseLoomStatus } from "@/types";
@@ -55,6 +56,10 @@ import { getAvatarColor, shouldUseWhiteText } from "@/utils/colorUtils";
 import { formatStatusLabel } from "@/utils/issue";
 import type { TerminalInputRequest } from "@/components/TerminalView/TerminalView";
 
+import {
+  AgentEditorGroups,
+  type AgentEditorTab,
+} from "./AgentEditorGroups";
 import styles from "./AgentsPage.module.css";
 
 // Heavy tabs (CodeMirror/diff) are code-split, mirroring AgentDetailPanel.
@@ -66,16 +71,6 @@ const FileEditorPanel = lazy(() =>
     default: m.FileEditorPanel,
   })),
 );
-
-type AgentTab = "terminal" | "info" | "git" | "diff" | "files";
-
-const TABS: { id: AgentTab; label: string }[] = [
-  { id: "terminal", label: "Terminal" },
-  { id: "info", label: "Info" },
-  { id: "git", label: "Git" },
-  { id: "diff", label: "Diff" },
-  { id: "files", label: "Files" },
-];
 
 export function AgentsPage(): JSX.Element {
   return (
@@ -98,6 +93,8 @@ function AgentsPageInner(): JSX.Element {
   const agents = useStore(agentStore, (s) => s.agents);
   const { issues } = useWorkspaceViewData();
   const { showToast } = useToast();
+  const { width: openQueueWidth, applyDelta: applyOpenQueueWidthDelta, resetWidth: resetOpenQueueWidth } =
+    useOpenQueuePanelWidth(workspaceId);
 
   // Auto-select an agent when URL is bare /agents: honor a legacy
   // ?agent=<name> deep link first, else fall back to the first rail agent.
@@ -120,11 +117,6 @@ function AgentsPageInner(): JSX.Element {
     () => (agentName ? agents.find((a) => a.name === agentName) : undefined),
     [agents, agentName],
   );
-
-  const [activeTab, setActiveTab] = useState<AgentTab>("terminal");
-  useEffect(() => {
-    setActiveTab("terminal");
-  }, [agentName]);
 
   // Inline task-detail selection. Cleared when the user switches agents so
   // the right column starts fresh on every agent change.
@@ -272,140 +264,178 @@ function AgentsPageInner(): JSX.Element {
   const selColor = getAvatarColor(selected?.name ?? "agent");
   const selText = shouldUseWhiteText(selColor) ? "#fff" : "#171717";
 
+  const renderAgentPane = useCallback(
+    (tab: AgentEditorTab, isActive: boolean) => {
+      switch (tab) {
+        case "terminal":
+          return (
+            <div className={styles.realTabBody}>
+              <AgentDetailMain
+                agentName={agentName}
+                pendingTerminalInput={pendingTerminalInput}
+                onTerminalInputConsumed={() =>
+                  setPendingTerminalInput(undefined)
+                }
+              />
+            </div>
+          );
+        case "info":
+          if (!selected) {
+            return (
+              <div className={styles.tabFallback}>Select an agent to view info.</div>
+            );
+          }
+          return (
+            <div className={styles.scrollPanel}>
+              <section className={styles.card}>
+                <div className={styles.infoHead}>
+                  <span
+                    className={styles.infoAvatar}
+                    style={{ backgroundColor: selColor, color: selText }}
+                  >
+                    {selected.name.charAt(0).toUpperCase()}
+                  </span>
+                  <div>
+                    <h1 className={styles.agentName}>{selected.name}</h1>
+                    <p className={styles.infoSub}>
+                      {formatStatusLabel(roleName)} agent
+                    </p>
+                  </div>
+                </div>
+                <dl className={styles.statGrid}>
+                  {infoStats.map((s) => (
+                    <div key={s.id} className={styles.statCard}>
+                      <dt className={styles.statLabel}>{s.label}</dt>
+                      <dd className={styles.statValue} data-tone={s.tone}>
+                        {s.value}
+                      </dd>
+                    </div>
+                  ))}
+                </dl>
+              </section>
+              <section className={styles.card}>
+                <h2 className={styles.cardLabel}>Agent Info</h2>
+                <dl className={styles.configGrid}>
+                  <div>
+                    <dt>Status</dt>
+                    <dd>{formatStatusLabel(statusType)}</dd>
+                  </div>
+                  <div>
+                    <dt>Role</dt>
+                    <dd>{formatStatusLabel(roleName)}</dd>
+                  </div>
+                  <div>
+                    <dt>Branch</dt>
+                    <dd>{selected.branch ?? "—"}</dd>
+                  </div>
+                  <div>
+                    <dt>Scope</dt>
+                    <dd>
+                      {selected.cross_repo
+                        ? "All repos"
+                        : (selected.repo ?? "—")}
+                    </dd>
+                  </div>
+                  {selected.worktree_path ? (
+                    <div>
+                      <dt>Worktree</dt>
+                      <dd>{selected.worktree_path}</dd>
+                    </div>
+                  ) : null}
+                  {selected.workspace ? (
+                    <div>
+                      <dt>Workspace</dt>
+                      <dd>{selected.workspace}</dd>
+                    </div>
+                  ) : null}
+                </dl>
+              </section>
+            </div>
+          );
+        case "git":
+          if (!selected) {
+            return (
+              <div className={styles.tabFallback}>Select an agent to view git.</div>
+            );
+          }
+          return (
+            <div
+              className={`${styles.realTabBody} ${styles.realTabBodyScroll}`}
+            >
+              <GitTab agent={selected} isActive={isActive} />
+            </div>
+          );
+        case "diff":
+          if (!selected) {
+            return (
+              <div className={styles.tabFallback}>Select an agent to view diff.</div>
+            );
+          }
+          return (
+            <div className={styles.realTabBody}>
+              <Suspense
+                fallback={
+                  <div className={styles.tabFallback}>Loading diff…</div>
+                }
+              >
+                <DiffTab agent={selected} isActive={isActive} />
+              </Suspense>
+            </div>
+          );
+        case "files":
+          if (!selected) {
+            return (
+              <div className={styles.tabFallback}>
+                Select an agent to browse files.
+              </div>
+            );
+          }
+          return (
+            <div className={styles.realTabBody}>
+              <Suspense
+                fallback={
+                  <div className={styles.tabFallback}>Loading files…</div>
+                }
+              >
+                <FileEditorPanel
+                  agentName={selected.name}
+                  isActive={isActive}
+                />
+              </Suspense>
+            </div>
+          );
+        default:
+          return null;
+      }
+    },
+    [
+      agentName,
+      pendingTerminalInput,
+      selected,
+      selColor,
+      selText,
+      roleName,
+      infoStats,
+      statusType,
+    ],
+  );
+
   return (
     <div className={styles.page} data-testid="agents-page">
       {/* Main panel: Aether tab strip over the live agent surfaces */}
       <section className={styles.main} aria-label="Agent details">
-        <nav className={styles.tabBar} aria-label="Agent detail tabs">
-          {TABS.map((tab) => (
-            <button
-              key={tab.id}
-              type="button"
-              className={styles.tab}
-              data-active={activeTab === tab.id || undefined}
-              onClick={() => setActiveTab(tab.id)}
-              aria-current={activeTab === tab.id ? "page" : undefined}
-            >
-              {tab.label}
-            </button>
-          ))}
-        </nav>
-
-        {/* Terminal stays mounted across tab switches so the PTY websocket
-            and xterm scrollback survive; other tabs mount on demand. */}
-        <div
-          className={styles.realTabBody}
-          style={activeTab === "terminal" ? undefined : { display: "none" }}
-        >
-          <AgentDetailMain
-            agentName={agentName}
-            pendingTerminalInput={pendingTerminalInput}
-            onTerminalInputConsumed={() => setPendingTerminalInput(undefined)}
-          />
-        </div>
-
-        {activeTab === "info" && selected && (
-          <div className={styles.scrollPanel}>
-            <section className={styles.card}>
-              <div className={styles.infoHead}>
-                <span
-                  className={styles.infoAvatar}
-                  style={{ backgroundColor: selColor, color: selText }}
-                >
-                  {selected.name.charAt(0).toUpperCase()}
-                </span>
-                <div>
-                  <h1 className={styles.agentName}>{selected.name}</h1>
-                  <p className={styles.infoSub}>
-                    {formatStatusLabel(roleName)} agent · isolated workspace
-                    runtime
-                  </p>
-                </div>
-              </div>
-              <dl className={styles.statGrid}>
-                {infoStats.map((s) => (
-                  <div key={s.id} className={styles.statCard}>
-                    <dt className={styles.statLabel}>{s.label}</dt>
-                    <dd className={styles.statValue} data-tone={s.tone}>
-                      {s.value}
-                    </dd>
-                  </div>
-                ))}
-              </dl>
-            </section>
-            <section className={styles.card}>
-              <h2 className={styles.cardLabel}>Agent Info</h2>
-              <dl className={styles.configGrid}>
-                <div>
-                  <dt>Status</dt>
-                  <dd>{formatStatusLabel(statusType)}</dd>
-                </div>
-                <div>
-                  <dt>Role</dt>
-                  <dd>{formatStatusLabel(roleName)}</dd>
-                </div>
-                <div>
-                  <dt>Branch</dt>
-                  <dd>{selected.branch ?? "—"}</dd>
-                </div>
-                <div>
-                  <dt>Scope</dt>
-                  <dd>
-                    {selected.cross_repo ? "All repos" : (selected.repo ?? "—")}
-                  </dd>
-                </div>
-                {selected.worktree_path ? (
-                  <div>
-                    <dt>Worktree</dt>
-                    <dd>{selected.worktree_path}</dd>
-                  </div>
-                ) : null}
-                {selected.workspace ? (
-                  <div>
-                    <dt>Workspace</dt>
-                    <dd>{selected.workspace}</dd>
-                  </div>
-                ) : null}
-              </dl>
-            </section>
-          </div>
-        )}
-
-        {activeTab === "git" && selected && (
-          <div className={styles.realTabBody}>
-            <GitTab agent={selected} isActive={activeTab === "git"} />
-          </div>
-        )}
-
-        {activeTab === "diff" && selected && (
-          <div className={styles.realTabBody}>
-            <Suspense
-              fallback={<div className={styles.tabFallback}>Loading diff…</div>}
-            >
-              <DiffTab agent={selected} isActive={activeTab === "diff"} />
-            </Suspense>
-          </div>
-        )}
-
-        {activeTab === "files" && selected && (
-          <div className={styles.realTabBody}>
-            <Suspense
-              fallback={
-                <div className={styles.tabFallback}>Loading files…</div>
-              }
-            >
-              <FileEditorPanel
-                agentName={selected.name}
-                isActive={activeTab === "files"}
-              />
-            </Suspense>
-          </div>
-        )}
+        <AgentEditorGroups
+          resetKey={agentName}
+          renderPane={renderAgentPane}
+        />
       </section>
 
       {/* Right column: epic-runner Open Queue or inline task detail */}
       {selectedTask ? (
-        <div className={styles.inlineDetail}>
+        <div
+          className={styles.inlineDetail}
+          style={{ width: openQueueWidth }}
+        >
           <IssueDetailPanel
             inline
             isOpen={true}
@@ -416,6 +446,9 @@ function AgentsPageInner(): JSX.Element {
       ) : (
         <AgentWorkPanel
           agentName={agentName}
+          panelWidth={openQueueWidth}
+          onPanelWidthDelta={applyOpenQueueWidthDelta}
+          onPanelWidthReset={resetOpenQueueWidth}
           epicRunnerRuns={epicRunnerRuns}
           onTaskClick={(task) => setSelectedTask(task)}
           onRunEpic={handleRunEpic}

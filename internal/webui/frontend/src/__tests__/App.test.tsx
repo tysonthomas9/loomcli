@@ -2902,7 +2902,7 @@ describe("App", () => {
 
       // Click first issue — should open panel, not navigate
       fireEvent.click(
-        screen.getByRole("button", { name: /Issue: First Issue/ }),
+        screen.getByLabelText(/Issue: First Issue/),
       );
       expect(mockOpenPanel).toHaveBeenCalledWith({
         type: "issue",
@@ -2912,7 +2912,7 @@ describe("App", () => {
 
       // Click second issue — same pattern
       fireEvent.click(
-        screen.getByRole("button", { name: /Issue: Second Issue/ }),
+        screen.getByLabelText(/Issue: Second Issue/),
       );
       expect(mockOpenPanel).toHaveBeenCalledWith({
         type: "issue",
@@ -3021,7 +3021,7 @@ describe("App", () => {
 
       // Click issue
       fireEvent.click(
-        screen.getByRole("button", { name: /Issue: Test Issue/ }),
+        screen.getByLabelText(/Issue: Test Issue/),
       );
 
       // Unmount — should not cause any errors
@@ -3047,9 +3047,7 @@ describe("App", () => {
 
       render(<App />);
 
-      const issueCard = screen.getByRole("button", {
-        name: /Issue: Same Issue/,
-      });
+      const issueCard = screen.getByLabelText(/Issue: Same Issue/);
       fireEvent.click(issueCard);
       expect(fetchIssue).toHaveBeenCalledTimes(1);
       expect(mockOpenPanel).toHaveBeenCalledWith({
@@ -3596,7 +3594,7 @@ describe("App", () => {
       expect(screen.getByLabelText(/workspace tree/i)).toBeInTheDocument();
     });
 
-    it("renders the live-agent rail instead of WorkspaceTree on agents view", () => {
+    it("renders WorkspaceTree sidebar on agents view", () => {
       vi.mocked(useWorkspaceContext).mockReturnValue({
         workspace: { name: "my-workspace" },
         repos: [],
@@ -3628,10 +3626,7 @@ describe("App", () => {
 
       render(<App />);
 
-      expect(screen.getByTestId("agent-icon-rail")).toBeInTheDocument();
-      expect(
-        screen.queryByLabelText(/workspace tree/i),
-      ).not.toBeInTheDocument();
+      expect(screen.getByLabelText(/workspace tree/i)).toBeInTheDocument();
     });
 
     it("renders WorkspaceTree sidebar during loading when isMultiRepo is false", () => {

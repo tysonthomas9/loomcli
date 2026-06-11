@@ -32,23 +32,22 @@ describe("ThemeToggle", () => {
   });
 
   describe("pill switch", () => {
-    it("renders a sliding knob (no icon svg)", () => {
+    it("renders sun and moon icons with a sliding knob", () => {
       const { container } = render(
         <ThemeToggle theme="light" onToggle={() => {}} />,
       );
-      // Aether pill switch has no sun/moon svg — just a knob span.
-      expect(container.querySelector("svg")).toBeNull();
+      expect(container.querySelectorAll("svg")).toHaveLength(2);
       expect(container.querySelector("span[aria-hidden]")).toBeInTheDocument();
     });
 
-    it("marks dark state via data-dark in dark mode", () => {
+    it("marks dark state via dark class in dark mode", () => {
       render(<ThemeToggle theme="dark" onToggle={() => {}} />);
-      expect(screen.getByRole("button")).toHaveAttribute("data-dark", "true");
+      expect(screen.getByRole("button").className).toMatch(/dark/);
     });
 
-    it("does not set data-dark in light mode", () => {
+    it("does not use dark class in light mode", () => {
       render(<ThemeToggle theme="light" onToggle={() => {}} />);
-      expect(screen.getByRole("button")).not.toHaveAttribute("data-dark");
+      expect(screen.getByRole("button").className).not.toMatch(/\bdark\b/);
     });
 
     it("reflects state via aria-pressed (pressed = light)", () => {
@@ -118,18 +117,16 @@ describe("ThemeToggle", () => {
   });
 
   describe("theme transitions", () => {
-    it("updates the data-dark state when theme prop changes from light to dark", () => {
+    it("updates the dark class when theme prop changes from light to dark", () => {
       const { rerender } = render(
         <ThemeToggle theme="light" onToggle={() => {}} />,
       );
 
-      // Light mode: no data-dark
-      expect(screen.getByRole("button")).not.toHaveAttribute("data-dark");
+      expect(screen.getByRole("button").className).not.toMatch(/\bdark\b/);
 
       rerender(<ThemeToggle theme="dark" onToggle={() => {}} />);
 
-      // Dark mode: data-dark set
-      expect(screen.getByRole("button")).toHaveAttribute("data-dark", "true");
+      expect(screen.getByRole("button").className).toMatch(/dark/);
     });
 
     it("updates aria-label when theme prop changes", () => {

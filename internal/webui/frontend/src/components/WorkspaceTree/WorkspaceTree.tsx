@@ -1,8 +1,8 @@
 /**
  * WorkspaceTree component — v2 sidebar redesign.
  * Simplified layout (Aether V3): WorkspaceSelectorBar → AgentSection →
- * RunningSection → ReposSection (with the Add Repo entry at its bottom),
- * and SidebarStatusBar pinned below. Collapsing the tree swaps in the
+ * RunningSection → ReposSection (with the Add Repo entry at its bottom).
+ * Collapsing the tree swaps in the
  * vertical CollapsedAgentRail (wireframe pin 24).
  */
 
@@ -10,10 +10,15 @@ import {
   useState,
   useCallback,
   useEffect,
+  type CSSProperties,
 } from "react";
 
-import { useStore } from "zustand";
-import { useWorkspaceContext, useAgentStoreInstance } from "@/hooks";
+import {
+  useWorkspaceContext,
+  WORKSPACE_TREE_MAX_WIDTH,
+  WORKSPACE_TREE_MIN_WIDTH,
+  useWorkspaceTreeWidth,
+} from "@/hooks";
 import { type ConnectionState } from "@/hooks/common";
 import { wsGet, wsSet } from "@/utils/scopedStorage";
 import { ONBOARDING_REPO_URL } from "@/utils/onboardingDefaults";
@@ -24,8 +29,8 @@ import { WorkspaceSelectorBar } from "./WorkspaceSelectorBar";
 import { AgentSection } from "./AgentSection";
 import { RunningSection } from "./RunningSection";
 import { ReposSection } from "./ReposSection";
-import { SidebarStatusBar } from "./nav";
 import { CollapsedAgentRail } from "./CollapsedAgentRail";
+import { SidebarResizeHandle } from "./SidebarResizeHandle";
 import styles from "./WorkspaceTree.module.css";
 
 /**
@@ -54,14 +59,54 @@ export interface WorkspaceTreeProps {
   disconnectedSince?: number | null;
   /** Callback for retry button in daemon prompt */
   onRetryConnection?: () => void;
-  /** Open issue counts per repo for the REPOS section */
-  openIssueCountByRepo?: Record<string, number>;
   /** Callback when a task is selected in the tree */
   onTreeSelect?: (issueId: string) => void;
 }
 
 // Scoped key suffix for workspace-specific collapse state
 const SK_COLLAPSED = "tree-collapsed";
+
+function ChevronLeftIcon(): JSX.Element {
+  return (
+    <svg
+      className={styles.chevronIcon}
+      width="16"
+      height="16"
+      viewBox="0 0 16 16"
+      fill="none"
+      aria-hidden="true"
+    >
+      <path
+        d="M10 3L5 8L10 13"
+        stroke="currentColor"
+        strokeWidth="1.75"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+function ChevronRightIcon(): JSX.Element {
+  return (
+    <svg
+      className={styles.chevronIcon}
+      width="16"
+      height="16"
+      viewBox="0 0 16 16"
+      fill="none"
+      aria-hidden="true"
+    >
+      <path
+        d="M6 3L11 8L6 13"
+        stroke="currentColor"
+        strokeWidth="1.75"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
 
 export function WorkspaceTree({
   className,
@@ -75,7 +120,6 @@ export function WorkspaceTree({
   connectionLost,
   disconnectedSince,
   onRetryConnection,
-  openIssueCountByRepo,
   onTreeSelect,
 }: WorkspaceTreeProps): JSX.Element {
   const workspaceContext = useWorkspaceContext();
@@ -89,6 +133,9 @@ export function WorkspaceTree({
     refetch,
   } = workspaceContext;
   const [addRepoOpen, setAddRepoOpen] = useState(false);
+  const [isResizing, setIsResizing] = useState(false);
+  const { width: sidebarWidth, applyDelta, resetWidth } =
+    useWorkspaceTreeWidth(workspaceId);
 
   // Load initial collapsed state from scoped localStorage
   const [isCollapsed, setIsCollapsed] = useState(() => {
@@ -118,8 +165,6 @@ export function WorkspaceTree({
   const retryCountdown = workspaceConnection.retryCountdown ?? null;
   const retryNow = workspaceConnection.retryNow ?? refetch;
 
-  const agentStore = useAgentStoreInstance();
-  const agents = useStore(agentStore, (s) => s.agents);
   const workspaceRepos = repos ?? [];
 
   // One-click empty-workspace setup: seed the Add-Repo dialog with the sample
@@ -143,6 +188,16 @@ export function WorkspaceTree({
     if (workspaceId) wsSet(workspaceId, SK_COLLAPSED, String(isCollapsed));
   }, [isCollapsed, workspaceId]);
 
+  // Keep maximized issue panels aligned to the right of the workspace tree.
+  useEffect(() => {
+    const root = document.documentElement;
+    const width = isCollapsed ? "56px" : `${sidebarWidth}px`;
+    root.style.setProperty("--workspace-tree-active-width", width);
+    return () => {
+      root.style.removeProperty("--workspace-tree-active-width");
+    };
+  }, [isCollapsed, sidebarWidth]);
+
   const handleToggle = useCallback(() => {
     setIsCollapsed((prev) => !prev);
   }, []);
@@ -158,36 +213,71 @@ export function WorkspaceTree({
   const rootClassName = [
     styles.sidebar,
     isCollapsed && styles.collapsed,
+    isResizing && styles.resizing,
     className,
   ]
     .filter(Boolean)
     .join(" ");
 
+  const sidebarStyle = isCollapsed
+    ? undefined
+    : ({
+        "--workspace-tree-sidebar-width": `${sidebarWidth}px`,
+      } as CSSProperties);
+
   return (
-    <aside className={rootClassName} data-collapsed={isCollapsed}>
-      {/* Top bar: workspace selector + collapse toggle */}
-      <div className={styles.selectorRow}>
-        {!isCollapsed && activeWorkspaceName && (
-          <WorkspaceSelectorBar
-            workspaceName={activeWorkspaceName}
-            workspaces={workspaces}
-            activeWorkspaceId={workspaceId}
-            onWorkspaceSwitch={onWorkspaceSwitch ?? (() => {})}
-            onAddWorkspace={onAddWorkspaceClick}
-          />
-        )}
-        <button
-          type="button"
-          className={styles.toggleButton}
-          onClick={handleToggle}
-          aria-expanded={!isCollapsed}
-          aria-label={
-            isCollapsed ? "Expand workspace tree" : "Collapse workspace tree"
-          }
-        >
-          <span className={styles.toggleIcon}>{isCollapsed ? ">" : "<"}</span>
-        </button>
-      </div>
+    <aside
+      className={rootClassName}
+      data-collapsed={isCollapsed}
+      style={sidebarStyle}
+    >
+      {isCollapsed ? (
+        <div className={styles.collapsedChrome}>
+          {activeWorkspaceName ? (
+            <WorkspaceSelectorBar
+              variant="collapsed"
+              workspaceName={activeWorkspaceName}
+              workspaces={workspaces}
+              activeWorkspaceId={workspaceId}
+              onWorkspaceSwitch={onWorkspaceSwitch ?? (() => {})}
+              onAddWorkspace={onAddWorkspaceClick}
+            />
+          ) : null}
+          <button
+            type="button"
+            className={styles.expandButton}
+            onClick={handleToggle}
+            aria-expanded={false}
+            title="Expand sidebar"
+            aria-label="Expand workspace tree"
+          >
+            <ChevronRightIcon />
+          </button>
+          <div className={styles.railDivider} aria-hidden="true" />
+        </div>
+      ) : (
+        <div className={styles.selectorRow}>
+          {activeWorkspaceName ? (
+            <WorkspaceSelectorBar
+              workspaceName={activeWorkspaceName}
+              workspaces={workspaces}
+              activeWorkspaceId={workspaceId}
+              onWorkspaceSwitch={onWorkspaceSwitch ?? (() => {})}
+              onAddWorkspace={onAddWorkspaceClick}
+            />
+          ) : null}
+          <button
+            type="button"
+            className={`${styles.toggleButton} ${styles.collapseButton}`}
+            onClick={handleToggle}
+            aria-expanded={true}
+            title="Collapse sidebar"
+            aria-label="Collapse workspace tree"
+          >
+            <ChevronLeftIcon />
+          </button>
+        </div>
+      )}
 
       {isCollapsed ? (
         <CollapsedAgentRail
@@ -250,7 +340,7 @@ export function WorkspaceTree({
             }}
           />
 
-          {/* Flat agent list with repo·branch metadata */}
+          {/* Flat agent list */}
           <AgentSection
             onAgentClick={onAgentClick}
             agentTasks={agentTasks}
@@ -263,13 +353,10 @@ export function WorkspaceTree({
           {/* Repo inventory with the Add Repo entry at its bottom (Aether V3) */}
           <ReposSection
             repos={workspaceRepos}
-            {...(openIssueCountByRepo !== undefined && { openIssueCountByRepo })}
             {...(workspaceId && { onAddRepo: () => setAddRepoOpen(true) })}
           />
         </div>
       )}
-
-      {!isCollapsed && <SidebarStatusBar agents={agents} />}
 
       {!isCollapsed && connectionLost && (
         <div className={styles.daemonPrompt} role="alert">
@@ -316,6 +403,18 @@ export function WorkspaceTree({
             !
           </div>
         )}
+
+      {!isCollapsed && (
+        <SidebarResizeHandle
+          width={sidebarWidth}
+          onDelta={applyDelta}
+          onReset={resetWidth}
+          onDragStart={() => setIsResizing(true)}
+          onDragEnd={() => setIsResizing(false)}
+          minWidth={WORKSPACE_TREE_MIN_WIDTH}
+          maxWidth={WORKSPACE_TREE_MAX_WIDTH}
+        />
+      )}
     </aside>
   );
 }

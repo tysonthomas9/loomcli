@@ -5,7 +5,12 @@
  */
 
 import { useDroppable } from "@dnd-kit/core";
-import { useCallback, type ReactNode, type RefObject } from "react";
+import {
+  useCallback,
+  type CSSProperties,
+  type ReactNode,
+  type RefObject,
+} from "react";
 
 import type { Status } from "@/types";
 
@@ -47,6 +52,8 @@ export interface StatusColumnProps {
    * shared column-header row above the body grid (matching the Aether design).
    */
   hideHeader?: boolean;
+  /** Optional inline styles (e.g. grid placement in SwimLane) */
+  style?: CSSProperties;
 }
 
 /**
@@ -66,6 +73,7 @@ export function StatusColumn({
   footerAction,
   contentRef,
   hideHeader = false,
+  style,
 }: StatusColumnProps): JSX.Element {
   const { setNodeRef, isOver } = useDroppable({
     id: status,
@@ -102,6 +110,7 @@ export function StatusColumn({
   return (
     <section
       className={rootClassName}
+      style={style}
       data-status={status}
       data-column-type={columnType}
       data-has-items={count > 0 ? "true" : undefined}

@@ -115,10 +115,15 @@ export const DraggableIssueCard = memo(function DraggableIssueCard({
       className={styles.draggable}
       data-dragging={isDragging ? "true" : undefined}
       data-optimistic={isPending ? "pending" : undefined}
-      {...listeners}
-      {...attributes}
     >
-      <DragHandleIcon className={styles.dragHandle} />
+      <span
+        className={styles.dragHandle}
+        {...attributes}
+        {...listeners}
+        aria-label={`Drag issue ${issue.title || issue.id}`}
+      >
+        <DragHandleIcon />
+      </span>
       <IssueCard {...cardProps} />
     </div>
   );

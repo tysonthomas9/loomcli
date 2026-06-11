@@ -179,24 +179,17 @@
   }
 }
 
-/* Brand-as-button (design: clicking the logo returns to the board). */
+/* Brand home control — plain text; click navigates without button chrome. */
 .brandButton {
   display: flex;
   align-items: center;
-  padding: 4px 8px;
-  margin-left: -8px;
+  padding: 0;
+  margin: 0;
   border: none;
   background: transparent;
-  cursor: pointer;
-  border-radius: var(--radius-sm);
-}
-
-.brandButton:hover {
-  background: var(--color-bg-hover);
-}
-
-.brandButton:hover .title {
-  color: var(--color-primary);
+  cursor: default;
+  font: inherit;
+  color: inherit;
 }
 
 .brandButton:focus-visible {

@@ -132,9 +132,7 @@ describe("SwimLaneBoard", () => {
         />,
       );
 
-      const card = screen.getByRole("button", {
-        name: /Issue: Clickable Issue/i,
-      });
+      const card = screen.getByLabelText(/Issue: Clickable Issue/i);
       fireEvent.click(card);
 
       expect(handleIssueClick).toHaveBeenCalledTimes(1);
@@ -507,9 +505,7 @@ describe("SwimLaneBoard", () => {
         />,
       );
 
-      const card = screen.getByRole("button", {
-        name: /Issue: Clickable Issue/i,
-      });
+      const card = screen.getByLabelText(/Issue: Clickable Issue/i);
       fireEvent.click(card);
 
       expect(handleIssueClick).toHaveBeenCalledTimes(1);
@@ -544,10 +540,8 @@ describe("SwimLaneBoard", () => {
         />,
       );
 
-      const aliceCard = screen.getByRole("button", {
-        name: /Issue: Alice Issue/i,
-      });
-      const bobCard = screen.getByRole("button", { name: /Issue: Bob Issue/i });
+      const aliceCard = screen.getByLabelText(/Issue: Alice Issue/i);
+      const bobCard = screen.getByLabelText(/Issue: Bob Issue/i);
 
       fireEvent.click(aliceCard);
       expect(handleIssueClick).toHaveBeenLastCalledWith(
@@ -988,7 +982,7 @@ describe("SwimLaneBoard", () => {
 
       expect(screen.queryByText("Ungrouped")).not.toBeInTheDocument();
       expect(
-        screen.queryByRole("button", { name: /Issue: Epic Issue/i }),
+        screen.queryByLabelText(/Issue: Epic Issue/i),
       ).not.toBeInTheDocument();
       expect(screen.getByText("Task Issue")).toBeInTheDocument();
     });

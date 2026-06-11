@@ -9,7 +9,7 @@
   gap: var(--space-3);
   padding: 0;
   overflow-y: auto; /* Allow scrolling between swim lanes */
-  overflow-x: hidden;
+  overflow-x: auto;
   flex: 1 1 0; /* Fill available space to constrain column height */
   min-height: 0; /* Allow flex item to shrink below content height */
 }
@@ -19,6 +19,7 @@
  */
 .toolbar {
   display: flex;
+  flex-shrink: 0;
   gap: var(--space-2);
   padding: var(--space-2) var(--space-4) 0;
   margin-bottom: 0;

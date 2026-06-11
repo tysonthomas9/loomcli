@@ -315,6 +315,11 @@ func (s *stubAgentService) GitSync(context.Context, string, string) (*service.Gi
 func (s *stubAgentService) CreatePR(context.Context, string, string, string) (*ops.GitPRResult, error) {
 	return nil, service.ErrNotImplemented("not implemented")
 }
+
+func (s *stubAgentService) ListPullRequests(context.Context, string, string) ([]ops.GitPullRequest, error) {
+	return []ops.GitPullRequest{}, nil
+}
+
 func (s *stubAgentService) GitReset(context.Context, string, string, string, bool, bool) (*ops.GitResetResult, error) {
 	return nil, service.ErrNotImplemented("not implemented")
 }

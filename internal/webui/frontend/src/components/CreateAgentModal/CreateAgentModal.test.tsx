@@ -49,7 +49,7 @@ describe("CreateAgentModal", () => {
       />,
     );
 
-    fireEvent.change(screen.getByLabelText(/^name$/i), {
+    fireEvent.change(screen.getByTestId("create-agent-name"), {
       target: { value: "lead-nova" },
     });
     fireEvent.click(screen.getByRole("button", { name: "Lead" }));

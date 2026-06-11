@@ -6,6 +6,8 @@ import type { BackendConfigData } from "@/api/common";
 import type { ConnectionState } from "@/components/TerminalView/instances";
 import {
   getBackendFromSessionName,
+  isAgentMetadata,
+  isAgentTab,
   sanitizeSessionName,
   type TabState,
 } from "./terminalTabUtils";
@@ -25,13 +27,28 @@ interface TabInitArgs {
   isViewActive: boolean;
   /** When true, do not auto-create the default lead tab for an empty workspace. */
   skipDefaultTabInit?: boolean;
+  /** When true, omit agent PTY tabs (global Terminal view; Agents view keeps them). */
+  excludeAgentTabs?: boolean;
+}
+
+function metadataForInit(
+  tabMetadata: TabMetadata[],
+  excludeAgentTabs: boolean,
+): TabMetadata[] {
+  if (!excludeAgentTabs) return tabMetadata;
+  return tabMetadata.filter((m) => !isAgentMetadata(m));
 }
 
 function tabStateFromMetadata(
   metadata: TabMetadata,
   defaultBackend?: string,
 ): TabState & { _sortOrder: number; _pinned: boolean } {
-  const agentName = metadata.kind === "agent" ? metadata.agent_id : undefined;
+  const agentName = isAgentMetadata(metadata)
+    ? (metadata.agent_id ??
+      (metadata.label.startsWith("agent-")
+        ? metadata.label.slice("agent-".length)
+        : undefined))
+    : undefined;
   return {
     id: metadata.session_name,
     label: metadata.label,
@@ -74,6 +91,7 @@ export function useTabInit(args: TabInitArgs) {
     workspace,
     isViewActive,
     skipDefaultTabInit = false,
+    excludeAgentTabs = false,
   } = args;
   const initializedMetadataRef = useRef<TabMetadata[] | null>(null);
 
@@ -82,10 +100,12 @@ export function useTabInit(args: TabInitArgs) {
       return;
     initializedRef.current = true;
 
-    if (tabMetadata.length > 0) {
+    const initMetadata = metadataForInit(tabMetadata, excludeAgentTabs);
+
+    if (initMetadata.length > 0) {
       initializedMetadataRef.current = tabMetadata;
       const defaultBackend = config?.backend;
-      const restoredTabs: TabState[] = tabMetadata
+      const restoredTabs: TabState[] = initMetadata
         .map((m) => tabStateFromMetadata(m, defaultBackend))
         .sort((a, b) => {
           if (a._pinned !== b._pinned) return a._pinned ? -1 : 1;
@@ -162,6 +182,7 @@ export function useTabInit(args: TabInitArgs) {
     workspace,
     isViewActive,
     skipDefaultTabInit,
+    excludeAgentTabs,
   ]);
 
   useEffect(() => {
@@ -175,9 +196,12 @@ export function useTabInit(args: TabInitArgs) {
     if (tabMetadata.length === 0) return;
     if (initializedMetadataRef.current === tabMetadata) return;
 
+    const syncMetadata = metadataForInit(tabMetadata, excludeAgentTabs);
+    if (syncMetadata.length === 0) return;
+
     const defaultBackend = config?.backend;
     const metadataTabs = sortMetadataTabs(
-      tabMetadata.map((m) => tabStateFromMetadata(m, defaultBackend)),
+      syncMetadata.map((m) => tabStateFromMetadata(m, defaultBackend)),
     );
 
     setTabs((current) => {
@@ -199,14 +223,18 @@ export function useTabInit(args: TabInitArgs) {
       });
 
       for (const tab of current) {
+        if (excludeAgentTabs && isAgentTab(tab)) continue;
         if (!metadataSessionNames.has(tab.sessionName)) {
           nextTabs.push(tab);
         }
       }
 
+      const filtered = excludeAgentTabs
+        ? nextTabs.filter((t) => !isAgentTab(t))
+        : nextTabs;
       const unchanged =
-        nextTabs.length === current.length &&
-        nextTabs.every((tab, index) => {
+        filtered.length === current.length &&
+        filtered.every((tab, index) => {
           const currentTab = current[index];
           return (
             currentTab != null &&
@@ -218,7 +246,7 @@ export function useTabInit(args: TabInitArgs) {
             tab.pinned === currentTab.pinned
           );
         });
-      return unchanged ? current : nextTabs;
+      return unchanged ? current : filtered;
     });
 
     setActiveTabId((current) => {
@@ -239,5 +267,6 @@ export function useTabInit(args: TabInitArgs) {
     setActiveTabId,
     setTabs,
     isViewActive,
+    excludeAgentTabs,
   ]);
 }

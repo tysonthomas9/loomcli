@@ -22,6 +22,9 @@
     "Helvetica Neue", Arial, sans-serif;
   --unified-header-height: 44px;
   --nav-rail-width: 52px;
+  /* WorkspaceTree sidebar — synced from WorkspaceTree on collapse toggle. */
+  --workspace-tree-width: 210px;
+  --workspace-tree-width-collapsed: 56px;
   /* Elevated "chrome" surface for sidebar + board toolbar (Aether #1a1a1a),
      sitting between the #111 app backdrop and the #222 cards. */
   --color-chrome: #1a1a1a;

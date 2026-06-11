@@ -1,7 +1,7 @@
 /**
  * ReposSection displays workspace repos in the sidebar (Aether wireframe
- * REPOS block): folder icon + name on the left, open-issue count and branch
- * pills on the right, with the "+ Add Repo" entry (opens the Add Repo
+ * REPOS block): folder icon + repo name,
+ * with the "+ Add Repo" entry (opens the Add Repo
  * dialog) at the bottom of the section.
  */
 
@@ -11,15 +11,12 @@ import styles from "./ReposSection.module.css";
 
 export interface ReposSectionProps {
   repos: RepoInfo[];
-  /** Open issue counts per repo name (non-done tasks). */
-  openIssueCountByRepo?: Record<string, number> | undefined;
   /** When provided, renders the "+ Add Repo" button at the section bottom. */
   onAddRepo?: () => void;
 }
 
 export function ReposSection({
   repos,
-  openIssueCountByRepo = {},
   onAddRepo,
 }: ReposSectionProps): JSX.Element | null {
   if (repos.length === 0 && !onAddRepo) return null;
@@ -31,17 +28,12 @@ export function ReposSection({
       </h2>
       {repos.length > 0 ? (
         <div className={styles.list}>
-          {repos.map((repo) => {
-            const branch =
-              repo.current_branch || repo.default_branch || "main";
-            const openCount = openIssueCountByRepo[repo.name] ?? 0;
-
-            return (
+          {repos.map((repo) => (
               <button
                 key={repo.name}
                 type="button"
                 className={styles.row}
-                aria-label={`${repo.name}, branch ${branch}, ${openCount} open issues`}
+                aria-label={repo.name}
               >
                 <span className={styles.rowLeft}>
                   <svg
@@ -59,13 +51,8 @@ export function ReposSection({
                   </svg>
                   <span className={styles.name}>{repo.name}</span>
                 </span>
-                <span className={styles.rowRight}>
-                  <span className={styles.countPill}>{openCount}</span>
-                  <span className={styles.branchPill}>{branch}</span>
-                </span>
               </button>
-            );
-          })}
+          ))}
         </div>
       ) : null}
       {onAddRepo && (

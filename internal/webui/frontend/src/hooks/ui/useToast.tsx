@@ -90,8 +90,15 @@ function toastReducer(state: Toast[], action: ToastAction): Toast[] {
   }
 }
 
-// Create context with undefined default (will be provided by ToastProvider)
-const ToastContext = createContext<ToastContextValue | undefined>(undefined);
+/** No-op fallback for components rendered outside ToastProvider (e.g. unit tests). */
+const noopToastContext: ToastContextValue = {
+  toasts: [],
+  showToast: () => "",
+  dismissToast: () => {},
+  dismissAll: () => {},
+};
+
+const ToastContext = createContext<ToastContextValue>(noopToastContext);
 
 /**
  * Props for ToastProvider.
@@ -243,9 +250,5 @@ export function ToastProvider({
  * ```
  */
 export function useToast(): ToastContextValue {
-  const context = useContext(ToastContext);
-  if (context === undefined) {
-    throw new Error("useToast must be used within a ToastProvider");
-  }
-  return context;
+  return useContext(ToastContext);
 }

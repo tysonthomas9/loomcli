@@ -83,6 +83,11 @@ func (m *mockAgentService) GitSync(ctx context.Context, wsID, agentName string) 
 func (m *mockAgentService) CreatePR(ctx context.Context, wsID, agentName, target string) (*ops.GitPRResult, error) {
 	return &ops.GitPRResult{}, nil
 }
+
+func (m *mockAgentService) ListPullRequests(context.Context, string, string) ([]ops.GitPullRequest, error) {
+	return []ops.GitPullRequest{}, nil
+}
+
 func (m *mockAgentService) GitReset(ctx context.Context, wsID, agentName, branch string, force, push bool) (*ops.GitResetResult, error) {
 	return &ops.GitResetResult{}, nil
 }

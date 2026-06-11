@@ -19,6 +19,8 @@ import { useAgentStoreInstance } from "@/hooks";
 import { type LoomAgentStatus, parseLoomStatus } from "@/types";
 import { getAvatarColor, shouldUseWhiteText } from "@/utils/colorUtils";
 
+import styles from "./AgentIconRail.module.css";
+
 const STATUS_DOT_COLOR: Record<string, string> = {
   ready: "var(--color-status-ready, #aab)",
   working: "var(--color-status-working, #d99700)",
@@ -55,46 +57,12 @@ export function AgentIconRail({ onAddClick }: AgentIconRailProps): JSX.Element {
   );
 
   return (
-    <nav
-      aria-label="Agents"
-      style={{
-        width: 60,
-        flexShrink: 0,
-        display: "flex",
-        flexDirection: "column",
-        alignItems: "center",
-        gap: 6,
-        padding: "10px 0",
-        background: "var(--color-bg-soft, #faf8f3)",
-        borderRight: "1px solid var(--color-border, #ddd)",
-        overflow: "auto",
-        height: "100%",
-      }}
-    >
-      <div
-        style={{
-          fontSize: 9,
-          fontWeight: 700,
-          letterSpacing: 0.4,
-          textTransform: "uppercase",
-          color: "var(--color-text-muted, #666)",
-          marginBottom: 4,
-        }}
-        aria-hidden="true"
-      >
+    <nav aria-label="Agents" className={styles.rail}>
+      <div className={styles.railLabel} aria-hidden="true">
         Agents
       </div>
       {orderedAgents.length === 0 ? (
-        <div
-          style={{
-            fontSize: 9,
-            color: "var(--color-text-muted, #888)",
-            textAlign: "center",
-            padding: "12px 4px",
-          }}
-        >
-          No live agents
-        </div>
+        <div className={styles.railEmpty}>No live agents</div>
       ) : (
         orderedAgents.map((agent) => (
           <AgentAvatarButton
@@ -108,28 +76,14 @@ export function AgentIconRail({ onAddClick }: AgentIconRailProps): JSX.Element {
       {onAddClick ? (
         <button
           type="button"
+          className={`${styles.addButton} ${styles.hasTooltip}`}
           onClick={onAddClick}
-          title="Add agent"
           aria-label="Add agent"
-          style={{
-            width: 38,
-            height: 38,
-            padding: 0,
-            borderRadius: "50%",
-            background: "var(--color-bg, #fff)",
-            color: "var(--color-text-primary, #333)",
-            border: "1px dashed var(--color-border-strong, #aaa)",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            fontSize: 20,
-            lineHeight: 1,
-            fontWeight: 600,
-            cursor: "pointer",
-            flexShrink: 0,
-          }}
         >
           +
+          <span className={styles.tooltip} role="tooltip">
+            Add agent
+          </span>
         </button>
       ) : null}
     </nav>
@@ -172,6 +126,17 @@ function isLeadRole(role: string | undefined): boolean {
   return normalized === "lead" || normalized === "orchestrator";
 }
 
+export function agentAvatarTooltip(agent: LoomAgentStatus): string {
+  const parsed = parseLoomStatus(agent.status ?? "");
+  if (parsed.taskId && parsed.taskId.length > 0) {
+    return `${agent.name} — ${parsed.type} · ${parsed.taskId}`;
+  }
+  if (agent.parent) {
+    return `${agent.name} — ${parsed.type || "idle"} · ${agent.parent}`;
+  }
+  return `${agent.name} — ${parsed.type || "idle"}`;
+}
+
 export function AgentAvatarButton({
   agent,
   selected,
@@ -191,58 +156,38 @@ export function AgentAvatarButton({
   const initial = (agent.name?.[0] ?? "?").toUpperCase();
   const avatarBg = getAvatarColor(agent.name ?? "");
   const avatarFg = shouldUseWhiteText(avatarBg) ? "#fff" : "#1a1a1a";
-  const tooltip =
-    parsed.taskId && parsed.taskId.length > 0
-      ? `${agent.name} — ${parsed.type} · ${parsed.taskId}`
-      : agent.parent
-        ? `${agent.name} — ${parsed.type || "idle"} · ${agent.parent}`
-        : `${agent.name} — ${parsed.type || "idle"}`;
+  const tooltip = agentAvatarTooltip(agent);
 
   return (
     <button
       type="button"
       onClick={onClick}
-      title={tooltip}
       aria-label={tooltip}
       aria-current={selected ? "page" : undefined}
       data-agent-name={agent.name}
       data-selected={selected || undefined}
+      className={`${styles.avatarButton} ${styles.hasTooltip}`}
       style={{
-        position: "relative",
         width: size,
         height: size,
-        padding: 0,
-        borderRadius: "50%",
+        fontSize: size <= 32 ? 12 : 14,
         background: avatarBg,
         color: avatarFg,
         border: selected
           ? "2px solid var(--color-accent, #c96442)"
           : "1px solid rgba(0,0,0,0.18)",
         boxShadow: selected ? "0 0 0 2px rgba(201,100,66,0.18)" : "none",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        fontSize: size <= 32 ? 12 : 14,
-        fontWeight: 700,
-        cursor: "pointer",
-        flexShrink: 0,
-        transition: "border-color 120ms ease, box-shadow 120ms ease",
       }}
     >
       {initial}
       <span
         aria-hidden="true"
-        style={{
-          position: "absolute",
-          right: -2,
-          bottom: -2,
-          width: 10,
-          height: 10,
-          borderRadius: "50%",
-          background: dotColor,
-          border: "2px solid var(--color-bg-soft, #faf8f3)",
-        }}
+        className={styles.statusDot}
+        style={{ background: dotColor }}
       />
+      <span className={styles.tooltip} role="tooltip">
+        {tooltip}
+      </span>
     </button>
   );
 }

@@ -11,19 +11,13 @@
   display: inline-flex;
   align-items: center;
   gap: 7px;
-  padding: 4px 8px;
+  padding: 0;
   margin: 0;
   border: none;
-  border-radius: var(--radius-md);
   background: transparent;
-  cursor: pointer;
+  cursor: default;
   font: inherit;
   color: var(--color-text-primary);
-  transition: background-color var(--transition-fast);
-}
-
-.brandButton:hover {
-  background: var(--color-bg-hover);
 }
 
 .brandButton:focus-visible {
@@ -99,7 +93,7 @@
 .headerActions {
   display: flex;
   align-items: center;
-  gap: var(--space-1);
+  gap: 0.625rem;
 }
 
 .searchWrapper {

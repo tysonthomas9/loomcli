@@ -1,0 +1,22 @@
+.handle {
+  position: absolute;
+  top: 0;
+  right: -2px;
+  bottom: 0;
+  width: 4px;
+  cursor: col-resize;
+  touch-action: none;
+  user-select: none;
+  background: transparent;
+  transition: background-color 0.15s ease;
+  z-index: 1;
+}
+
+.handle:hover,
+.handle:focus-visible {
+  background: var(--color-primary);
+}
+
+.handle:focus-visible {
+  outline: none;
+}

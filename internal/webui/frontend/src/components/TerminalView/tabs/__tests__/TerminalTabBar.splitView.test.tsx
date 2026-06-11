@@ -1,18 +1,11 @@
-/**
- * @vitest-environment jsdom
- */
+// @vitest-environment jsdom
 
-/**
- * Unit tests for split view toggle button in TerminalTabBar.
- */
-
-import { render, screen, fireEvent } from "@testing-library/react";
-import { describe, it, expect, vi } from "vitest";
-
+import { fireEvent, render, screen } from "@testing-library/react";
+import { describe, expect, it, vi } from "vitest";
 import "@testing-library/jest-dom";
-import { TerminalTabBar, type TerminalTab } from "../TerminalTabBar";
 
-// Mock ResizeObserver (not available in jsdom)
+import { TerminalTabBar } from "../TerminalTabBar";
+
 class MockResizeObserver {
   observe = vi.fn();
   unobserve = vi.fn();
@@ -22,186 +15,85 @@ class MockResizeObserver {
 globalThis.ResizeObserver =
   MockResizeObserver as unknown as typeof ResizeObserver;
 
-function makeTabs(count: number): TerminalTab[] {
-  return Array.from({ length: count }, (_, i) => ({
-    id: `tab-${i + 1}`,
-    label: `Terminal ${i + 1}`,
-    connectionState: "connected" as const,
-  }));
-}
-
 const defaultProps = {
-  tabs: makeTabs(3),
+  tabs: [
+    { id: "tab-1", label: "Tab 1", connectionState: "connected" as const },
+    { id: "tab-2", label: "Tab 2", connectionState: "connected" as const },
+  ],
   activeTabId: "tab-1",
   onTabChange: vi.fn(),
   onTabClose: vi.fn(),
   onNewTab: vi.fn(),
-  onToggleFullHeight: vi.fn(),
-  isFullHeight: false,
 };
 
-describe("TerminalTabBar - split view toggle", () => {
-  describe("rendering", () => {
-    it("renders split toggle button when onToggleSplit is provided", () => {
-      render(
-        <TerminalTabBar
-          {...defaultProps}
-          onToggleSplit={vi.fn()}
-          canSplit={true}
-          isSplitView={false}
-        />,
-      );
+describe("TerminalTabBar - split right", () => {
+  it("renders split-right button when onSplitRight is provided", () => {
+    render(
+      <TerminalTabBar
+        {...defaultProps}
+        onSplitRight={vi.fn()}
+        canSplitRight={true}
+      />,
+    );
 
-      const toggle = screen.getByTestId("terminal-split-toggle");
-      expect(toggle).toBeInTheDocument();
-    });
-
-    it("does not render split toggle button when onToggleSplit is not provided", () => {
-      render(<TerminalTabBar {...defaultProps} />);
-
-      expect(
-        screen.queryByTestId("terminal-split-toggle"),
-      ).not.toBeInTheDocument();
-    });
-
-    it("has correct aria-label", () => {
-      render(
-        <TerminalTabBar
-          {...defaultProps}
-          onToggleSplit={vi.fn()}
-          canSplit={true}
-          isSplitView={false}
-        />,
-      );
-
-      const toggle = screen.getByTestId("terminal-split-toggle");
-      expect(toggle).toHaveAttribute("aria-label", "Toggle split view");
-    });
+    expect(screen.getByTestId("terminal-split-right")).toBeInTheDocument();
   });
 
-  describe("disabled state", () => {
-    it("is disabled when canSplit is false", () => {
-      render(
-        <TerminalTabBar
-          {...defaultProps}
-          tabs={makeTabs(1)}
-          activeTabId="tab-1"
-          onToggleSplit={vi.fn()}
-          canSplit={false}
-          isSplitView={false}
-        />,
-      );
-
-      const toggle = screen.getByTestId("terminal-split-toggle");
-      expect(toggle).toBeDisabled();
-    });
-
-    it("is enabled when canSplit is true", () => {
-      render(
-        <TerminalTabBar
-          {...defaultProps}
-          onToggleSplit={vi.fn()}
-          canSplit={true}
-          isSplitView={false}
-        />,
-      );
-
-      const toggle = screen.getByTestId("terminal-split-toggle");
-      expect(toggle).not.toBeDisabled();
-    });
+  it("does not render split-right button when onSplitRight is omitted", () => {
+    render(<TerminalTabBar {...defaultProps} />);
+    expect(screen.queryByTestId("terminal-split-right")).not.toBeInTheDocument();
   });
 
-  describe("aria-pressed state", () => {
-    it("has aria-pressed=false when split view is disabled", () => {
-      render(
-        <TerminalTabBar
-          {...defaultProps}
-          onToggleSplit={vi.fn()}
-          canSplit={true}
-          isSplitView={false}
-        />,
-      );
+  it("uses the agent editor split label", () => {
+    render(
+      <TerminalTabBar
+        {...defaultProps}
+        onSplitRight={vi.fn()}
+        canSplitRight={true}
+      />,
+    );
 
-      const toggle = screen.getByTestId("terminal-split-toggle");
-      expect(toggle).toHaveAttribute("aria-pressed", "false");
-    });
-
-    it("has aria-pressed=true when split view is enabled", () => {
-      render(
-        <TerminalTabBar
-          {...defaultProps}
-          onToggleSplit={vi.fn()}
-          canSplit={true}
-          isSplitView={true}
-        />,
-      );
-
-      const toggle = screen.getByTestId("terminal-split-toggle");
-      expect(toggle).toHaveAttribute("aria-pressed", "true");
-    });
-
-    it("updates aria-pressed when isSplitView prop changes", () => {
-      const { rerender } = render(
-        <TerminalTabBar
-          {...defaultProps}
-          onToggleSplit={vi.fn()}
-          canSplit={true}
-          isSplitView={false}
-        />,
-      );
-
-      expect(screen.getByTestId("terminal-split-toggle")).toHaveAttribute(
-        "aria-pressed",
-        "false",
-      );
-
-      rerender(
-        <TerminalTabBar
-          {...defaultProps}
-          onToggleSplit={vi.fn()}
-          canSplit={true}
-          isSplitView={true}
-        />,
-      );
-
-      expect(screen.getByTestId("terminal-split-toggle")).toHaveAttribute(
-        "aria-pressed",
-        "true",
-      );
-    });
+    expect(
+      screen.getByRole("button", { name: "Split editor right" }),
+    ).toBeInTheDocument();
   });
 
-  describe("interactions", () => {
-    it("calls onToggleSplit when clicked", () => {
-      const onToggleSplit = vi.fn();
-      render(
-        <TerminalTabBar
-          {...defaultProps}
-          onToggleSplit={onToggleSplit}
-          canSplit={true}
-          isSplitView={false}
-        />,
-      );
+  it("disables split-right when canSplitRight is false", () => {
+    render(
+      <TerminalTabBar
+        {...defaultProps}
+        onSplitRight={vi.fn()}
+        canSplitRight={false}
+      />,
+    );
 
-      fireEvent.click(screen.getByTestId("terminal-split-toggle"));
+    expect(screen.getByTestId("terminal-split-right")).toBeDisabled();
+  });
 
-      expect(onToggleSplit).toHaveBeenCalledTimes(1);
-    });
+  it("shows close button for a lone group tab when totalTabCount > 1", () => {
+    render(
+      <TerminalTabBar
+        {...defaultProps}
+        tabs={[{ id: "tab-2", label: "Tab 2", connectionState: "connected" }]}
+        activeTabId="tab-2"
+        totalTabCount={2}
+      />,
+    );
 
-    it("does not call onToggleSplit when disabled and clicked", () => {
-      const onToggleSplit = vi.fn();
-      render(
-        <TerminalTabBar
-          {...defaultProps}
-          onToggleSplit={onToggleSplit}
-          canSplit={false}
-          isSplitView={false}
-        />,
-      );
+    expect(screen.getByTestId("terminal-tab-close-tab-2")).toBeInTheDocument();
+  });
 
-      fireEvent.click(screen.getByTestId("terminal-split-toggle"));
+  it("calls onSplitRight when clicked", () => {
+    const onSplitRight = vi.fn();
+    render(
+      <TerminalTabBar
+        {...defaultProps}
+        onSplitRight={onSplitRight}
+        canSplitRight={true}
+      />,
+    );
 
-      expect(onToggleSplit).not.toHaveBeenCalled();
-    });
+    fireEvent.click(screen.getByTestId("terminal-split-right"));
+    expect(onSplitRight).toHaveBeenCalledTimes(1);
   });
 });

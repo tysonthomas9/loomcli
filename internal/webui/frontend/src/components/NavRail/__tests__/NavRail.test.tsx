@@ -11,7 +11,10 @@ import { describe, it, expect, vi } from "vitest";
 
 import "@testing-library/jest-dom";
 import { expectNoA11yViolations } from "@/test-utils/a11y-helpers";
-import { NavRail } from "../NavRail";
+import {
+  NavRail,
+  WORKSPACE_SWITCHER_LIST_MAX_HEIGHT_PX,
+} from "../NavRail";
 
 describe("NavRail", () => {
   describe("rendering", () => {
@@ -88,21 +91,12 @@ describe("NavRail", () => {
       expect(tooltipTexts).toContain("Settings");
     });
 
-    it("each button has a title attribute matching its label", () => {
+    it("each button exposes a hover tooltip with its label", () => {
       render(<NavRail activeView="kanban" onChange={() => {}} />);
 
-      expect(screen.getByLabelText("Workspaces")).toHaveAttribute(
-        "title",
-        "Workspaces",
-      );
-      expect(screen.getByLabelText("Terminal")).toHaveAttribute(
-        "title",
-        "Terminal",
-      );
-      expect(screen.getByLabelText("Settings")).toHaveAttribute(
-        "title",
-        "Settings",
-      );
+      expect(screen.getByRole("tooltip", { name: "Workspaces" })).toBeInTheDocument();
+      expect(screen.getByRole("tooltip", { name: "Terminal" })).toBeInTheDocument();
+      expect(screen.getByRole("tooltip", { name: "Settings" })).toBeInTheDocument();
     });
 
     it("renders buttons in correct order: Workspaces, Agents, Pull Requests, Terminal, Settings", () => {
@@ -300,6 +294,48 @@ describe("NavRail", () => {
       );
 
       await expectNoA11yViolations(container);
+    });
+  });
+
+  describe("workspace switcher", () => {
+    const manyWorkspaces = Array.from({ length: 8 }, (_, i) => ({
+      id: `ws-${i}`,
+      name: `Workspace ${i}`,
+    }));
+
+    it("uses the wireframe max-height for the scrollable workspace list", () => {
+      const { container } = render(
+        <NavRail
+          activeView="kanban"
+          onChange={() => {}}
+          workspaces={manyWorkspaces}
+          activeWorkspaceId="ws-0"
+          onWorkspaceSwitch={() => {}}
+        />,
+      );
+
+      const list = container.querySelector('[class*="workspaceList"]');
+      expect(list).toBeInTheDocument();
+      expect(WORKSPACE_SWITCHER_LIST_MAX_HEIGHT_PX).toBe(210);
+    });
+
+    it("renders workspace selector with dividers and pinned add button", () => {
+      render(
+        <NavRail
+          activeView="kanban"
+          onChange={() => {}}
+          workspaces={manyWorkspaces}
+          activeWorkspaceId="ws-1"
+          onWorkspaceSwitch={() => {}}
+          onAddWorkspace={() => {}}
+        />,
+      );
+
+      expect(
+        screen.getByRole("region", { name: "Workspace selector" }),
+      ).toBeInTheDocument();
+      expect(screen.getByLabelText("Switch to Workspace 7")).toBeInTheDocument();
+      expect(screen.getByLabelText("Add workspace")).toBeInTheDocument();
     });
   });
 

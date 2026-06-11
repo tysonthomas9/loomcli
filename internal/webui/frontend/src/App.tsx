@@ -27,7 +27,7 @@ import {
 } from "@/api/workspace";
 import type { IssueContext } from "@/api/terminal";
 import { buildShareUrl } from "@/utils/buildShareUrl";
-import { getOpenIssueCountByRepo, getReviewType } from "@/utils/issue";
+import { getReviewType } from "@/utils/issue";
 import { ViewSubSwitcher } from "@/components/ViewSubSwitcher/ViewSubSwitcher";
 import {
   isOnboardingRepo,
@@ -50,13 +50,11 @@ import { AppLayout } from "@/components/AppLayout/AppLayout";
 import { WorkspaceBreadcrumb } from "@/components/WorkspaceBreadcrumb/WorkspaceBreadcrumb";
 import { LoadingSkeleton } from "@/components/LoadingSkeleton/LoadingSkeleton";
 import { StaleDataBanner } from "@/components/StaleDataBanner/StaleDataBanner";
-import { WorkspaceStatusBadge } from "@/components/WorkspaceStatusBadge/WorkspaceStatusBadge";
 import { ToastContainer } from "@/components/Toast/ToastContainer";
 import { SearchInput } from "@/components/search/SearchInput";
 import { SearchScopeIndicator } from "@/components/search/SearchScopeIndicator";
 import { IssueDetailPanel } from "@/components/IssueDetailPanel/IssueDetailPanel";
 import { AgentDetailPanel } from "@/components/AgentDetailPanel/AgentDetailPanel";
-import { AgentIconRail } from "@/components/AgentIconRail";
 import { WorkspaceTree } from "@/components/WorkspaceTree/WorkspaceTree";
 import { NavRail } from "@/components/NavRail/NavRail";
 import { ThemeToggle } from "@/components/ThemeToggle/ThemeToggle";
@@ -103,7 +101,6 @@ import { KeyboardShortcutProvider } from "@/hooks/ui/useKeyboardShortcuts";
 import { useWorkspaceContext } from "@/hooks/workspace/useWorkspaceContext";
 import { useWorkspaceState } from "@/hooks/workspace/useWorkspaceState";
 import { useRepoFilterParam } from "@/hooks/workspace/useRepoFilterParam";
-import { useWorkspaceHealth } from "@/hooks/workspace/useWorkspaceHealth";
 import { useBackends } from "@/hooks/workspace/useBackends";
 import { useBackendConfig } from "@/hooks/workspace/useBackendConfig";
 import type { BackendInfo } from "@/utils/workspace";
@@ -157,15 +154,6 @@ function App() {
     issueId: string;
   }>();
   const navigate = useNavigate();
-
-  // Workspace service health monitoring
-  const {
-    isWorkspaceAvailable,
-    connectionMode,
-    retryCountdown,
-    lastError,
-    retryNow: workspaceRetryNow,
-  } = useWorkspaceHealth();
 
   // Theme state
   const { theme, toggleTheme } = useTheme();
@@ -427,11 +415,6 @@ function App() {
     }
     return map;
   }, [activeView, issues, blockedIssuesData]);
-
-  const openIssueCountByRepo = useMemo(
-    () => getOpenIssueCountByRepo(issues),
-    [issues],
-  );
 
   const { toasts, showToast, dismissToast } = useToast();
   const mountedRef = useRef(true);
@@ -1329,38 +1312,23 @@ function App() {
     <div className={styles.headerActions}>
       <ThemeToggle theme={theme} onToggle={toggleTheme} />
       <UserMenu />
-      <WorkspaceStatusBadge
-        isWorkspaceAvailable={isWorkspaceAvailable}
-        mode={connectionMode}
-        retryCountdown={retryCountdown}
-        lastError={lastError}
-        onRetry={workspaceRetryNow}
-      />
-      <UserMenu />
-      <ThemeToggle theme={theme} onToggle={toggleTheme} />
     </div>
   );
 
-  // Sidebar: the agents view swaps the workspace tree for the live-agent rail.
-  // Completed ephemeral workers remain available in AgentWorkPanel history.
-  const sidebarContent =
-    activeView === "agents" ? (
-      <AgentIconRail onAddClick={() => setShowCreateAgent(true)} />
-    ) : (
-      <WorkspaceTree
-        onWorkspaceSwitch={handleWorkspaceSwitch}
-        onAgentClick={handleAgentClick}
-        agentTasks={agentTasks}
-        onAddClick={() => setShowCreateAgent(true)}
-        onAddWorkspaceClick={() => setShowCreateWorkspace(true)}
-        connectionState={connectionState}
-        connectionLost={isConnectionLost}
-        disconnectedSince={staleBannerDisconnectedSince}
-        onRetryConnection={staleBannerRetry}
-        openIssueCountByRepo={openIssueCountByRepo}
-        onTreeSelect={handleTreeIssueSelect}
-      />
-    );
+  const sidebarContent = (
+    <WorkspaceTree
+      onWorkspaceSwitch={handleWorkspaceSwitch}
+      onAgentClick={handleAgentClick}
+      agentTasks={agentTasks}
+      onAddClick={() => setShowCreateAgent(true)}
+      onAddWorkspaceClick={() => setShowCreateWorkspace(true)}
+      connectionState={connectionState}
+      connectionLost={isConnectionLost}
+      disconnectedSince={staleBannerDisconnectedSince}
+      onRetryConnection={staleBannerRetry}
+      onTreeSelect={handleTreeIssueSelect}
+    />
+  );
 
   const terminalContainerClassName =
     activeView === "terminal"

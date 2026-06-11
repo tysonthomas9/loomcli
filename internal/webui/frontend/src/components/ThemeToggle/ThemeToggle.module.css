@@ -1,37 +1,36 @@
 /**
- * ThemeToggle component styles.
+ * ThemeToggle — Aether wireframe theme-toggle (pin 2).
  */
 
-/* Aether pill switch: amber track (light) / blue track (dark), sliding knob */
 .toggle {
-  position: relative;
   display: inline-flex;
   align-items: center;
-  width: 36px;
-  height: 20px;
-  padding: 2px;
+  gap: 3px;
+  padding: 3px 5px;
   border: none;
   border-radius: var(--radius-full);
-  background: var(--color-warning); /* light mode → amber */
+  background: var(--color-status-open, #3b82f6);
+  color: #ffffff;
   cursor: pointer;
-  transition: background-color var(--transition-normal);
 }
 
-.toggle[data-dark="true"] {
-  background: var(--color-status-open); /* dark mode → blue #3b82f6 */
+.icon {
+  display: block;
+  flex-shrink: 0;
 }
 
 .knob {
-  width: 16px;
-  height: 16px;
+  width: 13px;
+  height: 13px;
   border-radius: 50%;
   background: #ffffff;
-  transform: translateX(0);
-  transition: transform var(--transition-normal);
+  flex-shrink: 0;
+  order: 0;
+  transition: order 0.1s ease;
 }
 
-.toggle[data-dark="true"] .knob {
-  transform: translateX(16px);
+.toggle.dark .knob {
+  order: 2;
 }
 
 .toggle:focus:not(:focus-visible) {
@@ -44,7 +43,6 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .toggle,
   .knob {
     transition: none;
   }

@@ -108,6 +108,13 @@ describe("AgentsPage", () => {
     });
   });
 
+  it("shows the editor-group split control for agent detail tabs", async () => {
+    render(<AgentsPage />);
+
+    const toggle = await screen.findByTestId("agent-editor-split");
+    expect(toggle.getAttribute("aria-label")).toBe("Split editor right");
+  });
+
   it("queues the built-in epic runner workflow from the lead-panel Run button", async () => {
     render(<AgentsPage />);
 

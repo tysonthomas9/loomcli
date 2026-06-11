@@ -80,10 +80,12 @@ export function CollapsedAgentRail({
           type="button"
           className={styles.addButton}
           onClick={onAddClick}
-          title="Add agent"
           aria-label="Add agent"
         >
           +
+          <span className={styles.tooltip} role="tooltip">
+            Add agent
+          </span>
         </button>
       ) : null}
     </nav>

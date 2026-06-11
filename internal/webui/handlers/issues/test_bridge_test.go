@@ -79,6 +79,11 @@ func (m *mockGitOps) Pull(_, _, _, _ string) (*ops.GitPullResult, error) {
 func (m *mockGitOps) CreatePR(_, _, _, _ string) (*ops.GitPRResult, error) {
 	return &ops.GitPRResult{}, nil
 }
+
+func (m *mockGitOps) ListWorkspacePullRequests(string, string, int) ([]ops.GitPullRequest, error) {
+	return []ops.GitPullRequest{}, nil
+}
+
 func (m *mockGitOps) Reset(_, _, _ string, _, _ bool) (*ops.GitResetResult, error) {
 	return &ops.GitResetResult{}, nil
 }

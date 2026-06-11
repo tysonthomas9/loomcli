@@ -9,6 +9,7 @@ import {
   generateTabName,
   getBackendFromSessionName,
   getNextDuplicateName,
+  isAgentTab,
   sanitizeSessionName,
   BACKEND_BRAND_COLORS,
   MAX_TABS,
@@ -241,6 +242,25 @@ describe("BACKEND_BRAND_COLORS", () => {
     expect(Object.keys(BACKEND_BRAND_COLORS).sort()).toEqual(
       Object.keys(KNOWN_BACKEND_DEFAULTS).sort(),
     );
+  });
+});
+
+describe("isAgentTab", () => {
+  it("returns true for kind agent", () => {
+    expect(isAgentTab({ kind: "agent" })).toBe(true);
+  });
+
+  it("returns true when agentName is set", () => {
+    expect(isAgentTab({ agentName: "fox" })).toBe(true);
+  });
+
+  it("returns true for agent- label prefix", () => {
+    expect(isAgentTab({ label: "agent-local-planner" })).toBe(true);
+  });
+
+  it("returns false for lead tabs", () => {
+    expect(isAgentTab({ kind: "lead", label: "lead-codex-1" })).toBe(false);
+    expect(isAgentTab({ label: "lead-codex-1" })).toBe(false);
   });
 });
 

@@ -4,7 +4,6 @@ import type {
 } from "./TerminalInstance";
 import { TerminalInstance } from "./TerminalInstance";
 import { CrashOverlay } from "./CrashOverlay";
-import { NotesBar } from "@/components/TerminalView/controls";
 import {
   ReconnectingOverlay,
   type ReconnectOverlayState,
@@ -29,9 +28,6 @@ export interface TerminalPaneProps {
   onTerminalFocus: (() => void) | undefined;
   hasConnected: boolean;
   reconnectState: ReconnectOverlayState;
-  notes: string;
-  onSaveNotes: (text: string) => Promise<void>;
-  isMetaLoading: boolean;
   /**
    * False when the backend reports this tab's PTY is not running — either
    * metadata survived a server restart without the shell, or the shell
@@ -61,9 +57,6 @@ export function TerminalPane({
   onTerminalFocus,
   hasConnected,
   reconnectState,
-  notes,
-  onSaveNotes,
-  isMetaLoading,
   ptyAlive,
   autoStartStaleSession,
   autoReconnect,
@@ -104,7 +97,6 @@ export function TerminalPane({
           />
         </>
       )}
-      <NotesBar notes={notes} onSave={onSaveNotes} isLoading={isMetaLoading} />
     </>
   );
 }

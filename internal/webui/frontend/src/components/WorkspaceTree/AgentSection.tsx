@@ -1,6 +1,5 @@
 /**
  * AgentSection displays a flat list of agents in the sidebar.
- * Each agent shows name + status on line 1, repo · branch on line 2.
  * Merges fleet (live) agents with workspace config (placeholder) agents.
  */
 
@@ -85,26 +84,10 @@ export function AgentSection({
             >
               <AgentCard
                 agent={agent}
-                showRepoBadge={true}
+                compact
+                showRepoBadge={false}
                 taskTitle={agentTasks?.[agent.name]?.title}
               />
-              <div className={styles.scopeLine}>
-                {agent.cross_repo ? (
-                  <span className={styles.scopeLabel}>workspace</span>
-                ) : agent.repo ? (
-                  <span className={styles.scopeLabel}>
-                    {agent.repo}
-                    {agent.branch ? (
-                      <>
-                        {" "}
-                        <span className={styles.scopeBranch}>
-                          &middot; {agent.branch}
-                        </span>
-                      </>
-                    ) : null}
-                  </span>
-                ) : null}
-              </div>
             </div>
           );
         })}

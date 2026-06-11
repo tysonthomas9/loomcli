@@ -93,12 +93,12 @@ describe("CreateAgentModal: open/close gate", () => {
 describe("CreateAgentModal: default prop seeding", () => {
   it("seeds name input from defaultName", () => {
     renderModal({ defaultName: "starter-agent" });
-    expect(screen.getByLabelText(/^name$/i)).toHaveValue("starter-agent");
+    expect(screen.getByTestId("create-agent-name")).toHaveValue("starter-agent");
   });
 
   it("trims whitespace in defaultName", () => {
     renderModal({ defaultName: "  pad  " });
-    expect(screen.getByLabelText(/^name$/i)).toHaveValue("pad");
+    expect(screen.getByTestId("create-agent-name")).toHaveValue("pad");
   });
 
   it("seeds the role segmented control from defaultRoleName", () => {
@@ -119,12 +119,12 @@ describe("CreateAgentModal: default prop seeding", () => {
 
   it("seeds backend from defaultBackend (falling back to 'codex')", () => {
     renderModal({ defaultBackend: "claude" });
-    expect(screen.getByLabelText(/ai backend/i)).toHaveValue("claude");
+    expect(screen.getByTestId("create-agent-backend")).toHaveValue("claude");
   });
 
   it("falls back to 'codex' backend when defaultBackend is empty", () => {
     renderModal({ defaultBackend: "   " });
-    expect(screen.getByLabelText(/ai backend/i)).toHaveValue("codex");
+    expect(screen.getByTestId("create-agent-backend")).toHaveValue("codex");
   });
 });
 
@@ -142,7 +142,7 @@ describe("CreateAgentModal: state preservation across re-renders", () => {
         onSuccess={vi.fn()}
       />,
     );
-    const nameInput = screen.getByLabelText(/^name$/i);
+    const nameInput = screen.getByTestId("create-agent-name");
     expect(nameInput).toHaveValue("seeded");
 
     // User edits the name.
@@ -162,7 +162,7 @@ describe("CreateAgentModal: state preservation across re-renders", () => {
     );
 
     // The wasOpenRef gate must prevent the effect from re-seeding.
-    expect(screen.getByLabelText(/^name$/i)).toHaveValue("my-custom-name");
+    expect(screen.getByTestId("create-agent-name")).toHaveValue("my-custom-name");
   });
 
   it("re-seeds defaults on close → open transition", () => {
@@ -177,7 +177,7 @@ describe("CreateAgentModal: state preservation across re-renders", () => {
       />,
     );
     // User edits.
-    fireEvent.change(screen.getByLabelText(/^name$/i), {
+    fireEvent.change(screen.getByTestId("create-agent-name"), {
       target: { value: "user-typed" },
     });
     // Close.
@@ -202,7 +202,7 @@ describe("CreateAgentModal: state preservation across re-renders", () => {
         onSuccess={vi.fn()}
       />,
     );
-    expect(screen.getByLabelText(/^name$/i)).toHaveValue("second-default");
+    expect(screen.getByTestId("create-agent-name")).toHaveValue("second-default");
   });
 });
 
@@ -220,7 +220,7 @@ describe("CreateAgentModal: client-side validation", () => {
 
   it("keeps Create disabled for a whitespace-only name", () => {
     renderModal();
-    fireEvent.change(screen.getByLabelText(/^name$/i), {
+    fireEvent.change(screen.getByTestId("create-agent-name"), {
       target: { value: "   " },
     });
     expect(
@@ -301,7 +301,7 @@ describe("CreateAgentModal: submission", () => {
     renderModal({ defaultName: "seed-name", defaultRoleName: "plan" });
 
     // User overrides the name.
-    fireEvent.change(screen.getByLabelText(/^name$/i), {
+    fireEvent.change(screen.getByTestId("create-agent-name"), {
       target: { value: "one-off" },
     });
     fireEvent.click(screen.getByRole("button", { name: /create agent/i }));
@@ -310,7 +310,7 @@ describe("CreateAgentModal: submission", () => {
     // After success the form returns to the defaults the parent supplied,
     // not the prior v5-era hard-coded blank/"task".
     await waitFor(() => {
-      expect(screen.getByLabelText(/^name$/i)).toHaveValue("seed-name");
+      expect(screen.getByTestId("create-agent-name")).toHaveValue("seed-name");
     });
     expect(screen.getByRole("button", { name: "Plan" })).toHaveAttribute(
       "aria-pressed",

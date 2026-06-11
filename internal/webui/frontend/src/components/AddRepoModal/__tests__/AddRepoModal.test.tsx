@@ -45,6 +45,13 @@ describe("AddRepoModal", () => {
       />,
     );
     expect(container).toBeEmptyDOMElement();
+    expect(screen.queryByTestId("add-repo-overlay")).not.toBeInTheDocument();
+  });
+
+  it("renders the overlay on document.body so it covers the full app", () => {
+    renderModal();
+    const overlay = screen.getByTestId("add-repo-overlay");
+    expect(overlay.parentElement).toBe(document.body);
   });
 
   it("seeds the URL field from initialUrl and defaults branch to main", () => {

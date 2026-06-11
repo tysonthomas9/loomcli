@@ -9,7 +9,9 @@ import "@testing-library/jest-dom";
 
 import type { LoomAgentStatus } from "@/types";
 import {
+  AgentAvatarButton,
   AgentIconRail,
+  agentAvatarTooltip,
   isLiveAgentRailVisible,
   orderAgentsForEpicRunner,
 } from "./AgentIconRail";
@@ -95,6 +97,31 @@ describe("orderAgentsForEpicRunner", () => {
   });
 });
 
+describe("agentAvatarTooltip", () => {
+  it("includes agent name and status type", () => {
+    expect(
+      agentAvatarTooltip(agent({ name: "local-coder", status: "3 changes" })),
+    ).toBe("local-coder — changes");
+  });
+});
+
+describe("AgentAvatarButton", () => {
+  it("renders a hover tooltip with agent details", () => {
+    render(
+      createElement(AgentAvatarButton, {
+        agent: agent({ name: "local-coder", status: "3 changes" }),
+        selected: false,
+        onClick: vi.fn(),
+        size: 32,
+      }),
+    );
+
+    expect(
+      screen.getByRole("tooltip", { name: "local-coder — changes" }),
+    ).toBeInTheDocument();
+  });
+});
+
 describe("AgentIconRail", () => {
   it("surfaces the add-agent action", () => {
     const onAddClick = vi.fn();
@@ -103,5 +130,13 @@ describe("AgentIconRail", () => {
     fireEvent.click(screen.getByRole("button", { name: "Add agent" }));
 
     expect(onAddClick).toHaveBeenCalledTimes(1);
+  });
+
+  it("renders an add-agent hover tooltip", () => {
+    render(createElement(AgentIconRail, { onAddClick: vi.fn() }));
+
+    expect(
+      screen.getByRole("tooltip", { name: "Add agent" }),
+    ).toBeInTheDocument();
   });
 });

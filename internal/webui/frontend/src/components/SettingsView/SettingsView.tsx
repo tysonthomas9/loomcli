@@ -609,28 +609,6 @@ export function SettingsView({
           </div>
         </div>
       </div>
-
-      {/* Observability Navigation */}
-      {onNavigate && (
-        <div className={styles.panel} data-testid="observability-nav-panel">
-          <div className={styles.panelHeader}>
-            <h3 className={styles.panelTitle}>Observability</h3>
-          </div>
-          <div className={styles.panelContent}>
-            <p className={styles.description}>
-              View system metrics and agent activity.
-            </p>
-            <button
-              type="button"
-              className={styles.navButton}
-              onClick={() => onNavigate("observability")}
-              data-testid="observability-nav-button"
-            >
-              Open Observability
-            </button>
-          </div>
-        </div>
-      )}
     </div>
   );
 }

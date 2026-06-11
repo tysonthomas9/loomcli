@@ -6,6 +6,7 @@
 import { useState, useCallback, useRef, useEffect } from "react";
 
 import { ApiError } from "@/api/common";
+import { updateIssue } from "@/api/issues/issues";
 import {
   gitPush,
   gitPull,
@@ -20,6 +21,8 @@ import { useWorkspaceContext } from "./useWorkspaceContext";
 
 export interface UseGitActionsOptions {
   agentName: string | null;
+  /** Linked loom task — PR URL is written to external_ref after create. */
+  taskId?: string | null;
   onStatusChange?: () => void;
 }
 
@@ -64,6 +67,7 @@ function extractErrorMessage(err: unknown): string {
 
 export function useGitActions({
   agentName,
+  taskId,
   onStatusChange,
 }: UseGitActionsOptions): UseGitActionsReturn {
   const { workspaceId } = useWorkspaceContext();
@@ -195,6 +199,16 @@ export function useGitActions({
       setPrState({ isLoading: true, error: null });
       try {
         const result = await gitCreatePR(workspaceId, agentName, target);
+        if (result.url && taskId) {
+          try {
+            await updateIssue(workspaceId, taskId, {
+              external_ref: result.url,
+              status: "review",
+            });
+          } catch {
+            // PR was created; linking the ticket is best-effort.
+          }
+        }
         if (mountedRef.current) {
           setPrState({ isLoading: false, error: null });
           if (result.already_exists) {
@@ -222,7 +236,7 @@ export function useGitActions({
         }
       }
     },
-    [workspaceId, agentName, showToast, handleApiError],
+    [workspaceId, agentName, taskId, showToast, handleApiError],
   );
 
   const reset = useCallback(

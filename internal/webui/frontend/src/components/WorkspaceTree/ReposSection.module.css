@@ -70,35 +70,6 @@
   font-weight: 500;
 }
 
-.rowRight {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.375rem;
-  flex-shrink: 0;
-}
-
-.countPill {
-  border: 1.5px solid var(--color-border);
-  background: var(--color-bg-card);
-  border-radius: 999px;
-  padding: 0 0.375rem;
-  font-size: 0.625rem;
-  font-weight: 600;
-  font-variant-numeric: tabular-nums;
-  color: var(--color-text-secondary);
-  line-height: 1.4;
-}
-
-.branchPill {
-  border: 1.4px solid var(--color-border);
-  background: var(--color-bg-card);
-  border-radius: 999px;
-  padding: 0.0625rem 0.5rem;
-  font-size: 0.625rem;
-  color: var(--color-text-tertiary);
-  white-space: nowrap;
-}
-
 /* Ghost "+ Add Repo" entry at the section bottom (Aether V3 add-repo-wrap). */
 .addRepo {
   display: inline-flex;

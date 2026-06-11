@@ -36,6 +36,30 @@ export interface TabState {
   writable?: boolean;
 }
 
+/** True when persisted metadata describes an agent harness PTY. */
+export function isAgentMetadata(meta: {
+  kind?: string;
+  agent_id?: string;
+  label?: string;
+}): boolean {
+  return (
+    meta.kind === "agent" ||
+    (meta.agent_id != null && meta.agent_id !== "") ||
+    (meta.label?.startsWith("agent-") ?? false)
+  );
+}
+
+/** True when the tab is an agent harness PTY (Agents view only). */
+export function isAgentTab(
+  tab: Pick<TabState, "kind" | "agentName" | "label">,
+): boolean {
+  return (
+    tab.kind === "agent" ||
+    tab.agentName != null ||
+    tab.label.startsWith("agent-")
+  );
+}
+
 /**
  * Extract backend name from a session name.
  * Parses `lead-{backend}-{n}` or `{workspace}--lead-{backend}-{n}` pattern;

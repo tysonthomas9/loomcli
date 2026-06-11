@@ -378,6 +378,10 @@ func (m *mockAgentService) CreatePR(ctx context.Context, wsID, agentName, target
 	return &ops.GitPRResult{URL: "https://github.com/test/pr/1", Created: true}, nil
 }
 
+func (m *mockAgentService) ListPullRequests(context.Context, string, string) ([]ops.GitPullRequest, error) {
+	return []ops.GitPullRequest{}, nil
+}
+
 func (m *mockAgentService) GitReset(ctx context.Context, wsID, agentName, branch string, force, push bool) (*ops.GitResetResult, error) {
 	if m.gitResetFunc != nil {
 		return m.gitResetFunc(ctx, wsID, agentName, branch, force, push)

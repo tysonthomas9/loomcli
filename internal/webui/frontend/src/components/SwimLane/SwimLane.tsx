@@ -22,6 +22,9 @@ import styles from "./SwimLane.module.css";
  */
 const DEFAULT_CARD_LIMIT = 5;
 
+/** Minimum kanban column width — keeps ticket keys, badges, and titles readable. */
+const SWIM_LANE_COLUMN_MIN_PX = 260;
+
 /**
  * Props for the SwimLane component.
  */
@@ -135,6 +138,9 @@ export function SwimLane({
 
   const headerId = `lane-header-${id}`;
   const rootClassName = [styles.swimLane, className].filter(Boolean).join(" ");
+  const laneGridStyle = {
+    gridTemplateColumns: `repeat(${columns.length}, minmax(${SWIM_LANE_COLUMN_MIN_PX}px, 1fr))`,
+  } as const;
   const isHeaderClickable =
     headerIssue !== undefined && onHeaderIssueClick !== undefined;
   const handleHeaderIssueClick = (): void => {
@@ -142,6 +148,18 @@ export function SwimLane({
       onHeaderIssueClick(headerIssue);
     }
   };
+
+  const columnHeaderClassName = (
+    col: KanbanColumnConfig,
+    columnIndex: number,
+  ): string =>
+    [
+      styles.columnHeaderCell,
+      columnIndex === columns.length - 1 ? styles.lastColumn : undefined,
+      col.style === "highlighted" ? styles.highlightedColumn : undefined,
+    ]
+      .filter(Boolean)
+      .join(" ");
 
   return (
     <section
@@ -237,48 +255,44 @@ export function SwimLane({
       </header>
       <div
         className={styles.laneContent}
+        style={laneGridStyle}
         data-collapsed={isCollapsed}
+        data-testid="lane-content"
         aria-hidden={isCollapsed}
       >
-        {/* Aether structure: a single shared column-header row (#1a1a1a)
-            sitting above the body grid, both using the same N-column grid so
-            headers align with their columns. */}
-        <div
-          className={styles.columnHeaderRow}
-          style={{
-            gridTemplateColumns: `repeat(${columns.length}, minmax(180px, 1fr))`,
-          }}
-        >
-          {columns.map((col) => {
-            const colCount = issuesByColumn.get(col.id)?.length ?? 0;
-            return (
-              <div key={col.id} className={styles.columnHeaderCell}>
-                <h3
-                  className={styles.columnTitle}
-                  data-empty={colCount === 0 || undefined}
-                >
-                  {col.label}
-                </h3>
-                <span className={styles.columnCount}>{colCount}</span>
-              </div>
-            );
-          })}
-        </div>
+        {/* Single shared grid: header cells (row 1) and body columns (row 2)
+            share column tracks so dividers stay aligned under their labels. */}
+        {columns.map((col, columnIndex) => {
+          const colCount = issuesByColumn.get(col.id)?.length ?? 0;
+          return (
+            <div
+              key={`header-${col.id}`}
+              className={columnHeaderClassName(col, columnIndex)}
+              style={{ gridColumn: columnIndex + 1, gridRow: 1 }}
+            >
+              <h3
+                className={styles.columnTitle}
+                data-empty={colCount === 0 || undefined}
+              >
+                {col.label}
+              </h3>
+            </div>
+          );
+        })}
 
-        <div
-          className={styles.columnBodyRow}
-          style={{
-            gridTemplateColumns: `repeat(${columns.length}, minmax(180px, 1fr))`,
-          }}
-        >
-          {columns.map((col) => {
+        {columns.map((col, columnIndex) => {
             const colIssues = issuesByColumn.get(col.id) ?? [];
             const columnClassName =
-              col.style === "muted"
-                ? styles.mutedColumn
-                : col.style === "highlighted"
-                  ? styles.highlightedColumn
-                  : undefined;
+              [
+                col.style === "muted"
+                  ? styles.mutedColumn
+                  : col.style === "highlighted"
+                    ? styles.highlightedColumn
+                    : undefined,
+                columnIndex === columns.length - 1 ? styles.lastColumn : undefined,
+              ]
+                .filter(Boolean)
+                .join(" ") || undefined;
 
             const isBacklogColumn = col.id === "backlog";
             const isBlockedColumn = col.id === "blocked";
@@ -325,7 +339,11 @@ export function SwimLane({
             };
 
             return (
-              <StatusColumn key={col.id} {...statusColumnProps}>
+              <StatusColumn
+                key={col.id}
+                {...statusColumnProps}
+                style={{ gridColumn: columnIndex + 1, gridRow: 2 }}
+              >
                 {colIssues.length === 0 ? (
                   <EmptyColumn status={col.id} />
                 ) : (
@@ -353,7 +371,6 @@ export function SwimLane({
               </StatusColumn>
             );
           })}
-        </div>
       </div>
     </section>
   );

@@ -1,5 +1,5 @@
 /**
- * AddRepoModal — Aether Wireframe V3 "Add Repo" dialog.
+ * AddRepoModal — "Add Repo" dialog.
  *
  * Replaces the old inline sidebar form with a focused two-field modal:
  * Repository URL + Default branch. Both are wired to the real
@@ -9,6 +9,7 @@
  */
 import { useEffect, useRef, useState, type FormEvent } from "react";
 
+import { AetherModal, aetherModalStyles } from "@/components/AetherModal";
 import { addWorkspaceRepos } from "@/hooks/api";
 
 import styles from "./AddRepoModal.module.css";
@@ -50,8 +51,6 @@ export function AddRepoModal({
     return () => window.clearTimeout(id);
   }, [isOpen, initialUrl]);
 
-  if (!isOpen) return null;
-
   const trimmedUrl = url.trim();
   const valid = trimmedUrl.length > 0 && workspaceId.length > 0;
 
@@ -80,80 +79,66 @@ export function AddRepoModal({
   };
 
   return (
-    <div className={styles.overlay} onClick={onClose}>
-      <div
-        className={styles.dialog}
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="add-repo-title"
-        onClick={(event) => event.stopPropagation()}
-      >
-        <div className={styles.headerRow}>
-          <h2 id="add-repo-title" className={styles.title}>
-            Add Repo
-          </h2>
+    <AetherModal
+      isOpen={isOpen}
+      title="Add Repo"
+      onClose={onClose}
+      overlayTestId="add-repo-overlay"
+      footer={
+        <>
           <button
             type="button"
-            className={styles.closeButton}
+            className={aetherModalStyles.linkButton}
             onClick={onClose}
-            aria-label="Close"
             disabled={isSubmitting}
           >
-            ×
+            Cancel
           </button>
+          <button
+            type="submit"
+            form="add-repo-form"
+            className={aetherModalStyles.primaryButton}
+            disabled={isSubmitting || !valid}
+          >
+            {isSubmitting ? "Adding..." : "Add Repository"}
+          </button>
+        </>
+      }
+    >
+      <form id="add-repo-form" onSubmit={handleSubmit}>
+        <div className={styles.fieldGroup}>
+          <label className={styles.label} htmlFor="repo-url">
+            Repository URL
+          </label>
+          <input
+            id="repo-url"
+            ref={urlRef}
+            className={`${styles.input} ${styles.mono}`}
+            value={url}
+            onChange={(event) => setUrl(event.target.value)}
+            placeholder="https://github.com/org/repo"
+            disabled={isSubmitting}
+          />
         </div>
-        <form onSubmit={handleSubmit}>
-          <div className={styles.fieldGroup}>
-            <label className={styles.label} htmlFor="repo-url">
-              Repository URL
-            </label>
-            <input
-              id="repo-url"
-              ref={urlRef}
-              className={`${styles.input} ${styles.mono}`}
-              value={url}
-              onChange={(event) => setUrl(event.target.value)}
-              placeholder="https://github.com/org/repo"
-              disabled={isSubmitting}
-            />
+        <div className={styles.fieldGroup}>
+          <label className={styles.label} htmlFor="repo-branch">
+            Default branch
+          </label>
+          <input
+            id="repo-branch"
+            className={`${styles.input} ${styles.mono}`}
+            value={branch}
+            onChange={(event) => setBranch(event.target.value)}
+            placeholder="main"
+            disabled={isSubmitting}
+          />
+        </div>
+        {error && (
+          <div className={styles.error} role="alert">
+            {error}
           </div>
-          <div className={styles.fieldGroup}>
-            <label className={styles.label} htmlFor="repo-branch">
-              Default branch
-            </label>
-            <input
-              id="repo-branch"
-              className={`${styles.input} ${styles.mono}`}
-              value={branch}
-              onChange={(event) => setBranch(event.target.value)}
-              placeholder="main"
-              disabled={isSubmitting}
-            />
-          </div>
-          {error && (
-            <div className={styles.error} role="alert">
-              {error}
-            </div>
-          )}
-          <div className={styles.actions}>
-            <button
-              type="button"
-              className={styles.cancelButton}
-              onClick={onClose}
-              disabled={isSubmitting}
-            >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              className={styles.submitButton}
-              disabled={isSubmitting || !valid}
-            >
-              {isSubmitting ? "Adding..." : "Add Repository"}
-            </button>
-          </div>
-        </form>
-      </div>
-    </div>
+        )}
+      </form>
+    </AetherModal>
   );
 }

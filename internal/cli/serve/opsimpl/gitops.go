@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
+	"strings"
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/cli"
@@ -210,6 +212,127 @@ func (g *GitOpsImpl) CreatePR(worktreePath, sourceBranch, targetBranch, remote s
 		AlreadyExists: result.AlreadyExists,
 		NoCommits:     result.NoCommits,
 	}, nil
+}
+
+func (g *GitOpsImpl) ListWorkspacePullRequests(workspaceID, state string, limit int) ([]ops.GitPullRequest, error) {
+	repos, err := g.listWorkspaceRepos(workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	if len(repos) == 0 {
+		return []ops.GitPullRequest{}, nil
+	}
+
+	ghState := state
+	if strings.EqualFold(state, "review") {
+		ghState = "open"
+	}
+
+	seen := make(map[string]struct{})
+	all := make([]ops.GitPullRequest, 0)
+	for _, repo := range repos {
+		if repo.Path == "" {
+			continue
+		}
+		prs, listErr := git.ListPullRequests(repo.Path, ghState, limit)
+		if listErr != nil {
+			return nil, listErr
+		}
+		for _, pr := range prs {
+			if pr.URL == "" {
+				continue
+			}
+			if _, ok := seen[pr.URL]; ok {
+				continue
+			}
+			seen[pr.URL] = struct{}{}
+			pr.RepoName = repo.Name
+			all = append(all, pr)
+		}
+	}
+
+	if strings.EqualFold(state, "review") {
+		all = git.FilterPullRequestsForReview(all)
+	} else if strings.EqualFold(state, "open") {
+		filtered := make([]ops.GitPullRequest, 0, len(all))
+		for _, pr := range all {
+			if strings.EqualFold(pr.State, "OPEN") && !pr.IsDraft {
+				filtered = append(filtered, pr)
+			}
+		}
+		all = filtered
+	} else if strings.EqualFold(state, "merged") {
+		filtered := make([]ops.GitPullRequest, 0, len(all))
+		for _, pr := range all {
+			if strings.EqualFold(pr.State, "MERGED") {
+				filtered = append(filtered, pr)
+			}
+		}
+		all = filtered
+	}
+
+	sort.Slice(all, func(i, j int) bool {
+		return all[i].UpdatedAt > all[j].UpdatedAt
+	})
+	return all, nil
+}
+
+func (g *GitOpsImpl) listWorkspaceRepos(workspaceID string) ([]ops.WorkspaceRepo, error) {
+	if g != nil && g.store != nil {
+		ws, err := storeadapter.BuildWorkspaceDataForKey(context.Background(), g.store, workspaceID)
+		if err != nil {
+			return nil, fmt.Errorf("load fleet-db workspace %q: %w", workspaceID, err)
+		}
+		return ws.Repos, nil
+	}
+
+	resolver, err := cli.NewResolver()
+	if err != nil {
+		return nil, fmt.Errorf("creating resolver: %v", err)
+	}
+	if err := scopeResolverToWorkspace(resolver, workspaceID); err != nil {
+		return nil, err
+	}
+
+	worktrees, err := resolver.DiscoverWorktrees()
+	if err != nil {
+		return nil, fmt.Errorf("discovering repos: %v", err)
+	}
+
+	byPath := make(map[string]ops.WorkspaceRepo)
+	for _, wt := range worktrees {
+		if wt.Path == "" {
+			continue
+		}
+		if _, ok := byPath[wt.Path]; ok {
+			continue
+		}
+		repo := ops.WorkspaceRepo{
+			Name:          wt.Name,
+			Path:          wt.Path,
+			CurrentBranch: wt.Branch,
+			DefaultBranch: "main",
+		}
+		if wt.Repo != nil {
+			if wt.Repo.Name != "" {
+				repo.Name = wt.Repo.Name
+			}
+			if wt.Repo.DefaultBranch != "" {
+				repo.DefaultBranch = wt.Repo.DefaultBranch
+			}
+			repo.Remote = wt.Repo.Remote
+		}
+		byPath[wt.Path] = repo
+	}
+
+	repos := make([]ops.WorkspaceRepo, 0, len(byPath))
+	for _, repo := range byPath {
+		repos = append(repos, repo)
+	}
+	sort.Slice(repos, func(i, j int) bool {
+		return repos[i].Name < repos[j].Name
+	})
+	return repos, nil
 }
 
 func (g *GitOpsImpl) Reset(worktreePath, worktreeName, targetBranch string, force, push bool) (*ops.GitResetResult, error) {

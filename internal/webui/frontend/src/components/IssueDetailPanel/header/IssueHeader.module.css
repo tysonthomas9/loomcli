@@ -4,6 +4,8 @@
  */
 
 .issueHeader {
+  min-width: 0;
+  max-width: 100%;
   padding: 0 var(--panel-padding-md) var(--panel-padding-md);
 }
 
@@ -15,54 +17,14 @@
 .topRow {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 10px;
+  row-gap: 8px;
+  min-width: 0;
   min-height: 64px;
   margin: 0 calc(var(--panel-padding-md) * -1) 20px;
   padding: 0 var(--panel-padding-md);
   border-bottom: 1px solid var(--color-border-light);
-}
-
-/* Priority badge in header */
-.priorityBadge {
-  display: inline-flex;
-  align-items: center;
-  padding: 2px 6px;
-  font-size: 10px;
-  font-weight: 700;
-  line-height: 1.1;
-  border-radius: 4px;
-  background-color: var(--color-bg-tertiary);
-  color: var(--color-text-secondary);
-  cursor: pointer;
-  border: 1px solid var(--color-border-light);
-  transition:
-    background-color var(--transition-fast),
-    border-color var(--transition-fast);
-}
-
-.priorityBadge:hover {
-  background-color: var(--color-bg-active);
-}
-
-.priorityBadge[data-priority="0"],
-.priorityBadge[data-priority="1"] {
-  background-color: var(--color-priority-0);
-  color: #fff;
-  border-color: transparent;
-}
-
-.priorityBadge[data-priority="0"]:hover,
-.priorityBadge[data-priority="1"]:hover {
-  background-color: color-mix(in srgb, var(--color-priority-0) 88%, black);
-}
-
-.priorityBadge[data-priority="2"] {
-  background-color: var(--color-warning-bg);
-  color: var(--color-text);
-}
-
-.priorityBadge[data-priority="2"]:hover {
-  background-color: color-mix(in srgb, var(--color-warning-bg) 88%, black);
 }
 
 .issueId {
@@ -352,4 +314,6 @@
   margin: 0;
   line-height: 1.25;
   word-break: break-word;
+  overflow-wrap: anywhere;
+  min-width: 0;
 }

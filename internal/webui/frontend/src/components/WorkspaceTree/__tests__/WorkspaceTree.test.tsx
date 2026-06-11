@@ -71,7 +71,10 @@ vi.mock("zustand", () => ({
     selector({ ...defaultAgentContext, ...agentOverride }),
 }));
 
-vi.mock("@/hooks", () => ({
+vi.mock("@/hooks", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/hooks")>();
+  return {
+  ...actual,
   useDebouncedCallback: (fn: (...args: unknown[]) => unknown) => fn,
   useWorkspaceRepos: () => ({ ...defaultReposReturn, ...reposOverride }),
   useAgentStoreInstance: () => ({}), // dummy — useStore mock ignores store arg
@@ -95,6 +98,9 @@ vi.mock("@/hooks", () => ({
     error: null,
     refetch: vi.fn(),
   }),
+  useWorkspaceTreeWidth: actual.useWorkspaceTreeWidth,
+  WORKSPACE_TREE_MIN_WIDTH: actual.WORKSPACE_TREE_MIN_WIDTH,
+  WORKSPACE_TREE_MAX_WIDTH: actual.WORKSPACE_TREE_MAX_WIDTH,
   useToast: () => ({ showToast: vi.fn() }),
   useIssueDiffStat: () => ({
     data: null,
@@ -126,7 +132,8 @@ vi.mock("@/hooks", () => ({
   LAYER_WORKSPACE_SWITCHER: 42,
   useFocusTrap: vi.fn(),
   useFocusReturn: vi.fn(),
-}));
+  };
+});
 
 vi.mock("@/hooks/api", () => ({
   addWorkspaceRepos: (...args: unknown[]) => mockAddWorkspaceRepos(...args),
@@ -481,6 +488,68 @@ describe("WorkspaceTree", () => {
       );
 
       expect(screen.getByTestId("collapsed-agent-rail")).toBeInTheDocument();
+    });
+  });
+
+  describe("sidebar layout", () => {
+    it("renders sections in linear scroll order with repos after agents", () => {
+      reposOverride = {
+        repos: [
+          {
+            name: "alpha",
+            path: "/repos/alpha",
+            default_branch: "main",
+            remote: "origin",
+          },
+        ],
+      };
+
+      const { container } = render(
+        <WorkspaceTree defaultCollapsed={false} onAddClick={() => {}} />,
+      );
+
+      const content = container.querySelector('[class*="content"]');
+      const addAgentButton = screen.getByRole("button", { name: "+ Add agent" });
+      const reposHeading = screen.getByRole("heading", { name: "Repos" });
+
+      expect(content).toBeInTheDocument();
+      expect(container.querySelector('[class*="mainScroll"]')).not.toBeInTheDocument();
+      expect(container.querySelector('[class*="reposDock"]')).not.toBeInTheDocument();
+      expect(content!.contains(addAgentButton)).toBe(true);
+      expect(content!.contains(reposHeading)).toBe(true);
+      expect(
+        addAgentButton.compareDocumentPosition(reposHeading) &
+          Node.DOCUMENT_POSITION_FOLLOWING,
+      ).toBeTruthy();
+    });
+  });
+
+  describe("sidebar resize", () => {
+    it("shows resize handle when expanded", () => {
+      render(<WorkspaceTree defaultCollapsed={false} />);
+      expect(
+        screen.getByTestId("workspace-tree-resize-handle"),
+      ).toBeInTheDocument();
+    });
+
+    it("hides resize handle when collapsed", () => {
+      render(<WorkspaceTree defaultCollapsed={true} />);
+      expect(
+        screen.queryByTestId("workspace-tree-resize-handle"),
+      ).not.toBeInTheDocument();
+    });
+
+    it("widens sidebar via keyboard resize and persists width", () => {
+      render(<WorkspaceTree defaultCollapsed={false} />);
+      const handle = screen.getByTestId("workspace-tree-resize-handle");
+      const aside = handle.closest("aside");
+
+      fireEvent.keyDown(handle, { key: "ArrowRight" });
+
+      expect(aside).toHaveStyle({ "--workspace-tree-sidebar-width": "226px" });
+      expect(
+        localStorage.getItem(`loom:${TEST_WS_ID}:workspace-tree-width`),
+      ).toBe("226");
     });
   });
 

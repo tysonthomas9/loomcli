@@ -8,13 +8,12 @@ import { memo } from "react";
 import { BlockedBadge } from "@/components/BlockedBadge";
 import { HighlightText } from "@/components/HighlightText";
 import { RepoBadge } from "@/components/RepoBadge";
-import { TypeIcon } from "@/components/TypeIcon";
 import { useHasActiveSession } from "@/contexts/IssueSessionContext";
 import { useSearchTerm } from "@/contexts/SearchTermContext";
 
+import { useToast } from "@/hooks/ui";
 import { useWorkspaceContext } from "@/hooks/workspace";
 import type { BlockerRef, Issue } from "@/types";
-import { isKnownIssueType } from "@/types";
 import {
   formatIssueId,
   getReviewType,
@@ -29,10 +28,9 @@ import styles from "./IssueCard.module.css";
  * design's plan-badge (no emoji adornments).
  */
 const REVIEW_BADGE_CONFIG: Record<
-  ReviewType,
+  Exclude<ReviewType, "plan">,
   { label: string; className: string }
 > = {
-  plan: { label: "Plan", className: styles.reviewPlan ?? "" },
   code: { label: "Code", className: styles.reviewCode ?? "" },
   help: { label: "Help", className: styles.reviewHelp ?? "" },
 };
@@ -73,6 +71,60 @@ function getPriorityLevel(priority: number | undefined): 0 | 1 | 2 | 3 | 4 {
   return priority as 0 | 1 | 2 | 3 | 4;
 }
 
+function personInitials(name: string): string {
+  return name
+    .split(/\s+/)
+    .map((w) => w[0])
+    .join("")
+    .toUpperCase()
+    .slice(0, 2);
+}
+
+/** Copies the full issue key to the clipboard (Aether ticket clipboard affordance). */
+function CopyIssueIdButton({ issueId }: { issueId: string }): JSX.Element {
+  const { showToast } = useToast();
+
+  const handleCopy = async (event: React.MouseEvent<HTMLButtonElement>) => {
+    event.stopPropagation();
+    event.preventDefault();
+    try {
+      await navigator.clipboard.writeText(issueId);
+      showToast(`${issueId} copied`, { type: "success" });
+    } catch {
+      showToast("Failed to copy issue ID", { type: "error" });
+    }
+  };
+
+  return (
+    <button
+      type="button"
+      className={`${styles.copyIdButton} ${styles.hoverReveal}`}
+      onClick={handleCopy}
+      aria-label={`Copy issue ID ${issueId}`}
+      title={`Copy ${issueId}`}
+      data-testid="issue-card-copy-id"
+    >
+      <svg
+        className={styles.ticketVariantIcon}
+        data-variant="task"
+        width={15}
+        height={15}
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        aria-hidden="true"
+      >
+        <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2" />
+        <rect x="8" y="2" width="8" height="4" rx="1" ry="1" />
+        <path d="M9 12h6M9 16h6" />
+      </svg>
+    </button>
+  );
+}
+
 /**
  * IssueCard displays a single issue in the Kanban board.
  * Shows title, ID, priority badge, and optional blocked indicator.
@@ -102,6 +154,9 @@ export const IssueCard = memo(function IssueCard({
   const isBlocked = (blockedByCount ?? 0) > 0;
   const isDeferred = issue.is_deferred === true || issue.status === "deferred";
   const reviewType = getReviewType(issue);
+  const personLabel = issue.owner ?? issue.assignee;
+  const showRepoBadge = isMultiRepo && isAllSelected && !!issue.repo;
+  const showFooter = showRepoBadge || !!personLabel;
 
   const rootClassName = className
     ? `${styles.issueCard} ${className}`
@@ -130,101 +185,99 @@ export const IssueCard = memo(function IssueCard({
       onClick={handleClick}
       onKeyDown={handleKeyDown}
       tabIndex={onClick ? 0 : undefined}
-      role={onClick ? "button" : undefined}
       aria-label={`Issue: ${displayTitle}${isBlocked ? " (blocked)" : ""}${isBacklog ? " (backlog)" : ""}`}
     >
-      <header className={styles.header}>
+      <header className={styles.top}>
         <span className={styles.id} title={issue.id}>
           {displayId}
         </span>
-        {showSessionBadge && (
-          <span
-            className={styles.sessionBadge}
-            aria-label="Active terminal session"
-            title="Active terminal session"
-          >
-            <svg
-              width="14"
-              height="14"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              aria-hidden="true"
-            >
-              <rect x="2" y="3" width="20" height="18" rx="2" />
-              <polyline points="8 10 12 14 8 18" />
-              <line x1="16" y1="18" x2="16" y2="18.01" />
-            </svg>
-          </span>
-        )}
-        {issue.issue_type && isKnownIssueType(issue.issue_type) && (
-          <TypeIcon
-            type={issue.issue_type}
-            size={14}
-            className={styles.typeIcon ?? ""}
-          />
-        )}
-        {reviewType && (
-          <span
-            className={`${styles.reviewTypeBadge} ${REVIEW_BADGE_CONFIG[reviewType].className}`}
-            aria-label={`${REVIEW_BADGE_CONFIG[reviewType].label} review`}
-          >
-            {REVIEW_BADGE_CONFIG[reviewType].label}
-          </span>
-        )}
-        {reviewType === "code" &&
-          issue.external_ref &&
-          isPRUrl(issue.external_ref) && (
-            <a
-              className={styles.prLink}
-              href={issue.external_ref}
-              target="_blank"
-              rel="noopener noreferrer"
-              onClick={(e) => e.stopPropagation()}
-              aria-label="View pull request"
-            >
-              PR ↗
-            </a>
+        <span className={styles.icons}>
+          {columnId !== "done" && (
+            <CopyIssueIdButton issueId={issue.id} />
           )}
-        {isBlocked && (
-          <BlockedBadge
-            count={blockedByCount ?? 0}
-            {...(blockedBy !== undefined && { issueIds: blockedBy })}
-            {...(blockedByDetails !== undefined && {
-              issueDetails: blockedByDetails,
-            })}
-          />
-        )}
-        {isDeferred && (
-          <span className={styles.deferredBadge} aria-label="Deferred">
-            Deferred
-          </span>
-        )}
+          {reviewType &&
+            reviewType !== "plan" &&
+            columnId !== "review" && (
+            <span
+              className={`${styles.reviewTypeBadge} ${styles.hoverReveal} ${REVIEW_BADGE_CONFIG[reviewType].className}`}
+              aria-label={`${REVIEW_BADGE_CONFIG[reviewType].label} review`}
+            >
+              {REVIEW_BADGE_CONFIG[reviewType].label}
+            </span>
+          )}
+          {showSessionBadge && (
+            <span
+              className={styles.sessionBadge}
+              aria-label="Active terminal session"
+              title="Active terminal session"
+            >
+              <svg
+                width="14"
+                height="14"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden="true"
+              >
+                <rect x="2" y="3" width="20" height="18" rx="2" />
+                <polyline points="8 10 12 14 8 18" />
+                <line x1="16" y1="18" x2="16" y2="18.01" />
+              </svg>
+            </span>
+          )}
+          {reviewType === "code" &&
+            issue.external_ref &&
+            isPRUrl(issue.external_ref) && (
+              <a
+                className={styles.prLink}
+                href={issue.external_ref}
+                target="_blank"
+                rel="noopener noreferrer"
+                onClick={(e) => e.stopPropagation()}
+                aria-label="View pull request"
+              >
+                PR ↗
+              </a>
+            )}
+          {isBlocked && (
+            <BlockedBadge
+              count={blockedByCount ?? 0}
+              {...(blockedBy !== undefined && { issueIds: blockedBy })}
+              {...(blockedByDetails !== undefined && {
+                issueDetails: blockedByDetails,
+              })}
+            />
+          )}
+          {isDeferred && (
+            <span className={styles.deferredBadge} aria-label="Deferred">
+              Deferred
+            </span>
+          )}
+        </span>
       </header>
       <h3 className={styles.title}>
         <HighlightText text={displayTitle} searchTerm={searchTerm} />
       </h3>
-      {issue.owner && (
-        <span
-          className={styles.ownerBadge}
-          title={`Owner: ${issue.owner}`}
-          data-testid="issue-card-owner"
-        >
-          {issue.owner
-            .split(/\s+/)
-            .map((w) => w[0])
-            .join("")
-            .toUpperCase()
-            .slice(0, 2)}
-        </span>
-      )}
-      {isMultiRepo && isAllSelected && issue.repo && (
-        <div className={styles.cardFooter}>
-          <RepoBadge repoName={issue.repo} />
-        </div>
+      {showFooter && (
+        <footer className={styles.footer}>
+          <div className={styles.footerLeft}>
+            {showRepoBadge && issue.repo && (
+              <RepoBadge repoName={issue.repo} />
+            )}
+          </div>
+          {personLabel && (
+            <span
+              className={styles.ownerBadge}
+              title={`Owner: ${personLabel}`}
+              data-testid="issue-card-owner"
+            >
+              {personInitials(personLabel)}
+            </span>
+          )}
+        </footer>
       )}
     </article>
   );

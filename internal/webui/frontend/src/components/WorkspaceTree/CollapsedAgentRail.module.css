@@ -7,10 +7,14 @@
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: var(--space-2);
-  padding: var(--space-2) 0;
+  gap: 11px;
+  padding: 2px 1px;
   overflow-y: auto;
+  overflow-x: visible;
   min-height: 0;
+  width: 100%;
+  position: relative;
+  z-index: calc(var(--z-overlay) + 2);
 }
 
 .emptyHint {
@@ -20,6 +24,7 @@
 }
 
 .addButton {
+  position: relative;
   width: 32px;
   height: 32px;
   padding: 0;
@@ -48,4 +53,38 @@
 .addButton:focus-visible {
   outline: 2px solid var(--color-focus);
   outline-offset: 2px;
+}
+
+.addButton:hover .tooltip {
+  opacity: 1;
+}
+
+.tooltip {
+  position: absolute;
+  left: calc(100% + 8px);
+  top: 50%;
+  transform: translateY(-50%);
+  background-color: var(--color-text-primary);
+  color: var(--color-text-inverse);
+  padding: 4px 8px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.2;
+  white-space: nowrap;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--transition-fast);
+  z-index: var(--z-dropdown);
+  box-shadow: 0 2px 8px rgb(0 0 0 / 18%);
+}
+
+.tooltip::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  right: 100%;
+  transform: translateY(-50%);
+  border: 4px solid transparent;
+  border-right-color: var(--color-text-primary);
 }

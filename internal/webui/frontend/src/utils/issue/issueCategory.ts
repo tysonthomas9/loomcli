@@ -67,6 +67,18 @@ export function isPRUrl(ref?: string | null): boolean {
   }
 }
 
+/** Normalize a PR URL for matching issue external_ref to GitHub list entries. */
+export function normalizePrUrl(ref?: string | null): string | null {
+  if (!isPRUrl(ref)) return null;
+  try {
+    const url = new URL(ref!);
+    const path = url.pathname.replace(/\/$/, "").toLowerCase();
+    return `${url.origin.toLowerCase()}${path}`;
+  } catch {
+    return ref?.trim().toLowerCase() ?? null;
+  }
+}
+
 /**
  * Get the review type for an issue based on status, external_ref, and notes.
  * Returns null if the issue doesn't need review.

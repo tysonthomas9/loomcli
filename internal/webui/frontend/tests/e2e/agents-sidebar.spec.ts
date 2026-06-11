@@ -1,10 +1,10 @@
 /**
  * E2E: Agents sidebar rendered through WorkspaceTree.
  *
- * Tests agent rendering, card details, work queue, status bar, sidebar
- * collapse/expand, and connection states. All agent data flows through
- * the production sidebar (WorkspaceTree → AgentCard / WorkQueueSection /
- * SidebarStatusBar), NOT the standalone AgentsSidebar component.
+ * Tests agent rendering, card details, work queue, sidebar collapse/expand,
+ * and connection states. All agent data flows through the production sidebar
+ * (WorkspaceTree → AgentCard / WorkQueueSection), NOT the standalone
+ * AgentsSidebar component.
  *
  * Mocks: /api/config, /api/workspaces/active, workspace-scoped sub-routes,
  * /api/health, /api/auth/token, and all 3 loom endpoints
@@ -684,105 +684,6 @@ test.describe("Agents Sidebar", () => {
         name: /open issues/i,
       });
       await expect(repoRow.first()).toBeVisible({ timeout: 10000 });
-    });
-  });
-
-  // ------- status bar -------
-
-  test.describe("status bar", () => {
-    test("status bar shows working/reviewing/idle counts", async ({ page }) => {
-      await setupMocks(page);
-      await navigateAndWait(page);
-
-      // Default agents: nova=working, falcon=ready(→idle)
-      const statusBar = page.locator('[class*="statusBar"]');
-      await expect(statusBar).toBeVisible({ timeout: 10000 });
-      await expect(statusBar).toContainText("1 working");
-      await expect(statusBar).toContainText("0 reviewing");
-      await expect(statusBar).toContainText("1 idle");
-    });
-
-    test("status bar hidden when no agents", async ({ page }) => {
-      // Must also remove workspace config agents to get zero total agents
-      await setupMocks(page, { emptyAgents: true, workspaceAgents: [] });
-      await navigateAndWait(page);
-
-      // Wait for sidebar to render
-      const sb = sidebar(page);
-      await expect(sb.getByRole("heading", { name: "Repos" })).toBeVisible({
-        timeout: 10000,
-      });
-
-      // Status bar should not be present (agents.length === 0)
-      await expect(page.locator('[class*="statusBar"]')).not.toBeVisible();
-    });
-
-    test("status bar counts update with multiple working agents", async ({
-      page,
-    }) => {
-      const threeAgents = [
-        {
-          name: "alpha",
-          branch: "feat-a",
-          status: "working: loom-201 (3m)",
-          ahead: 1,
-          behind: 0,
-          role: "task",
-          workspace: "",
-          repo: "loomcli",
-        },
-        {
-          name: "beta",
-          branch: "feat-b",
-          status: "working: loom-202 (7m)",
-          ahead: 0,
-          behind: 0,
-          role: "task",
-          workspace: "",
-          repo: "loomcli",
-        },
-        {
-          name: "gamma",
-          branch: "main",
-          status: "ready",
-          ahead: 0,
-          behind: 0,
-          role: "plan",
-          workspace: "",
-          repo: "loomcli",
-        },
-      ];
-
-      await setupMocks(page, {
-        agents: threeAgents,
-        workspaceAgents: [
-          {
-            name: "alpha",
-            repos: ["loomcli"],
-            repo_groups: [],
-            cross_repo: false,
-          },
-          {
-            name: "beta",
-            repos: ["loomcli"],
-            repo_groups: [],
-            cross_repo: false,
-          },
-          {
-            name: "gamma",
-            repos: ["loomcli"],
-            repo_groups: [],
-            cross_repo: false,
-          },
-        ],
-      });
-      await navigateAndWait(page);
-
-      const statusBar = page.locator('[class*="statusBar"]');
-      await expect(statusBar).toBeVisible({ timeout: 10000 });
-      await expect(statusBar).toContainText("2 working");
-      await expect(statusBar).toContainText("0 reviewing");
-      await expect(statusBar).toContainText("1 idle");
     });
   });
 

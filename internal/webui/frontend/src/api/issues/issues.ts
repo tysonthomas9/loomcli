@@ -369,6 +369,7 @@ export interface UpdateIssueRequest {
   status?: Status;
   assignee?: string;
   owner?: string;
+  external_ref?: string;
   labels?: string[];
   add_labels?: string[];
   remove_labels?: string[];
@@ -436,6 +437,7 @@ export async function updateIssue(
     status: reqData.status as string | undefined,
     assignee: reqData.assignee,
     owner: reqData.owner,
+    external_ref: reqData.external_ref,
     set_labels: reqData.labels,
     add_labels: reqData.add_labels,
     remove_labels: reqData.remove_labels,

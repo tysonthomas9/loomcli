@@ -17,13 +17,20 @@ import { useNavigate } from "react-router-dom";
 import { updateIssue } from "@/api";
 import { startAgent } from "@/hooks/api";
 import { CreateAgentModal } from "@/components/CreateAgentModal/CreateAgentModal";
+import {
+  buildWorkerByTaskId,
+  isWorkerTerminalOpenable,
+} from "@/components/AgentWorkPanel/AgentWorkPanel";
 import { PRFilesTab } from "@/components/IssueDetailPanel";
+import { TaskSessionDiffPane } from "@/components/IssueDetailPanel/sessions/TaskSessionDiffPane";
 import {
   useWorkspaceViewData,
   useWorkspaceViewActions,
 } from "@/contexts/WorkspaceViewContext";
 import { useWorkspaceContext } from "@/hooks/workspace";
-import type { Issue } from "@/types";
+import type { GitPullRequest } from "@/api/workspace";
+import type { Issue, LoomAgentStatus } from "@/types";
+import { parseLoomStatus } from "@/types";
 import { isPRUrl } from "@/utils/issue";
 import { getAvatarColor, shouldUseWhiteText } from "@/utils/colorUtils";
 
@@ -31,12 +38,59 @@ import styles from "./PRReviewWorkspace.module.css";
 
 export interface PRReviewWorkspaceProps {
   issue: Issue;
+  /** GitHub metadata when the PR list was loaded. */
+  pullRequest?: GitPullRequest | undefined;
   /** Return to the PR list. */
   onBack: () => void;
 }
 
+/** Agents linked to a task issue (worker, status/task_id match, assignee). */
+export function agentsLinkedToIssue(
+  issue: Issue,
+  agents: LoomAgentStatus[],
+): LoomAgentStatus[] {
+  const byName = new Map<string, LoomAgentStatus>();
+  const worker = buildWorkerByTaskId(agents).get(issue.id);
+  if (worker) byName.set(worker.name, worker);
+
+  for (const agent of agents) {
+    const taskId =
+      agent.task_id || parseLoomStatus(agent.status ?? "").taskId || "";
+    if (taskId === issue.id) {
+      byName.set(agent.name, agent);
+    }
+  }
+
+  if (issue.assignee) {
+    const assignee = agents.find((a) => a.name === issue.assignee);
+    if (assignee) byName.set(assignee.name, assignee);
+  }
+
+  return [...byName.values()];
+}
+
+/** Prefer a branch with commits; fall back to any linked worker/assignee. */
+export function resolveDiffAgentForIssue(
+  issue: Issue,
+  agents: LoomAgentStatus[],
+): LoomAgentStatus | undefined {
+  const linked = agentsLinkedToIssue(issue, agents);
+  if (linked.length === 0) return undefined;
+
+  const withAhead = linked
+    .filter((a) => (a.ahead ?? 0) > 0)
+    .sort((a, b) => (b.ahead ?? 0) - (a.ahead ?? 0));
+  if (withAhead.length > 0) return withAhead[0];
+
+  const openable = linked.find((a) => isWorkerTerminalOpenable(a));
+  if (openable) return openable;
+
+  return linked[0];
+}
+
 export function PRReviewWorkspace({
   issue,
+  pullRequest,
   onBack,
 }: PRReviewWorkspaceProps): JSX.Element {
   const navigate = useNavigate();
@@ -49,6 +103,11 @@ export function PRReviewWorkspace({
   const [createOpen, setCreateOpen] = useState(false);
   const [isAssigning, setIsAssigning] = useState(false);
   const [isDeciding, setIsDeciding] = useState(false);
+
+  const diffAgent = useMemo(
+    () => resolveDiffAgentForIssue(issue, agents),
+    [issue, agents],
+  );
 
   const reviewer = useMemo(
     () =>
@@ -75,8 +134,23 @@ export function PRReviewWorkspace({
     return m;
   }, [issues, issue.id]);
 
-  const prUrl = isPRUrl(issue.external_ref) ? issue.external_ref : null;
-  const prNumber = prUrl?.match(/\/pulls?\/(\d+)/)?.[1] ?? null;
+  const prUrl =
+    pullRequest?.url ||
+    (isPRUrl(issue.external_ref) ? issue.external_ref : null);
+  const prNumber =
+    pullRequest?.number?.toString() ??
+    prUrl?.match(/\/pulls?\/(\d+)/)?.[1] ??
+    null;
+  const displayTitle = pullRequest?.title || issue.title;
+  const reviewStateLabel = (() => {
+    if (pullRequest?.is_draft) return "Draft";
+    if (pullRequest?.state === "MERGED") return "Merged";
+    if (pullRequest?.review_decision === "CHANGES_REQUESTED") {
+      return "Changes requested";
+    }
+    if (pullRequest?.review_decision === "APPROVED") return "Approved";
+    return "Review";
+  })();
 
   const assignReviewer = async (agentName: string): Promise<void> => {
     setAgentMenuOpen(false);
@@ -142,13 +216,13 @@ export function PRReviewWorkspace({
             ←
           </button>
           <div className={styles.titleWrap}>
-            <h1 className={styles.title}>{issue.title}</h1>
+            <h1 className={styles.title}>{displayTitle}</h1>
             <p className={styles.meta}>
-              <span className={styles.stateTag}>Review</span>
+              <span className={styles.stateTag}>{reviewStateLabel}</span>
               <code className={styles.metaMono}>{issue.id}</code>
-              {reviewer?.branch && (
+              {diffAgent?.branch && (
                 <span className={styles.branch}>
-                  <code className={styles.metaMono}>{reviewer.branch}</code>
+                  <code className={styles.metaMono}>{diffAgent.branch}</code>
                 </span>
               )}
               {prNumber && prUrl && (
@@ -280,24 +354,19 @@ export function PRReviewWorkspace({
 
       {/* The focus: full-bleed file diff (design DiffPane). */}
       <div className={styles.diffArea}>
-        {reviewer ? (
-          <PRFilesTab agent={reviewer} isActive />
+        {diffAgent ? (
+          <PRFilesTab
+            agent={diffAgent}
+            isActive
+            emptyFallback={
+              <TaskSessionDiffPane
+                taskId={issue.id}
+                worktreeAgentName={diffAgent.name}
+              />
+            }
+          />
         ) : (
-          <div className={styles.cta}>
-            <h3 className={styles.ctaTitle}>Review with an agent</h3>
-            <p className={styles.ctaText}>
-              The diff comes from the review agent&apos;s branch. Assign an
-              agent — or create a fresh PR review agent — to load the changed
-              files.
-            </p>
-            <button
-              type="button"
-              className={styles.ctaButton}
-              onClick={() => setCreateOpen(true)}
-            >
-              ＋ New review agent
-            </button>
-          </div>
+          <TaskSessionDiffPane taskId={issue.id} />
         )}
       </div>
 

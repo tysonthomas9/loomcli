@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 
+import { AetherModal, aetherModalStyles } from "@/components/AetherModal";
 import type { RepoInfo, WorkspaceAgentInfo } from "@/api/workspace";
 import { useCreateWorkspaceAgent } from "@/hooks/agents";
 import { useBackends } from "@/hooks/workspace";
@@ -7,11 +8,6 @@ import { ApiError } from "@/types/common";
 
 import styles from "./CreateAgentModal.module.css";
 
-/**
- * Role options as a segmented control (Aether Wireframe V3 Add-Agent dialog).
- * Loom's backend validates roles — only task/plan are defined, so "lead" is
- * intentionally absent (creating a lead agent 404s "role not found").
- */
 const ROLE_OPTIONS: { value: string; label: string }[] = [
   { value: "task", label: "Task" },
   { value: "plan", label: "Plan" },
@@ -49,34 +45,35 @@ export function CreateAgentModal({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const wasOpenRef = useRef(false);
+  const nameRef = useRef<HTMLInputElement>(null);
   const createAgent = useCreateWorkspaceAgent(workspaceId);
   const { backends } = useBackends();
 
-  const repoOptions = useMemo(() => repos.map((repo) => repo.name), [repos]);
-  // Default selection mirrors the Aether dialog (first repo pre-picked).
+  const repoOptions = useMemo(
+    () =>
+      repos
+        .filter((repo) => !repo.is_linked_worktree)
+        .map((repo) => repo.name),
+    [repos],
+  );
   const defaultRepos = useMemo(
     () => (repoOptions[0] ? [repoOptions[0]] : []),
     [repoOptions],
   );
 
-  // Aether V3 made this a multi-select chip group: loom agents carry a full
-  // `repos[]` array, so an agent can span several repos. Leaving every chip
-  // unselected maps to loom's workspace scope (cross_repo, empty repos).
   const crossRepo = selectedRepos.length === 0;
   const toggleRepo = (repo: string): void =>
     setSelectedRepos((prev) =>
       prev.includes(repo) ? prev.filter((r) => r !== repo) : [...prev, repo],
     );
 
-  // Real backend list (Aether V3 made this a dropdown, not free text). Keep the
-  // resolved/current value selectable even if it isn't in the live list.
   const backendOptions = useMemo(() => {
     const opts = backends.map((b) => ({ value: b.name, label: b.displayName }));
     if (backend && !opts.some((o) => o.value === backend)) {
       opts.unshift({ value: backend, label: backend });
     }
     return opts.length > 0 ? opts : [{ value: backend, label: backend }];
-  }, [backends, backend]);
+  }, [backend, backends]);
 
   useEffect(() => {
     if (!isOpen) {
@@ -100,7 +97,13 @@ export function CreateAgentModal({
     defaultRepos,
   ]);
 
-  if (!isOpen) return null;
+  useEffect(() => {
+    if (isOpen) {
+      nameRef.current?.focus();
+    }
+  }, [isOpen]);
+
+  const canSubmit = name.trim() !== "" && !isSubmitting;
 
   const handleSubmit = async (event: FormEvent) => {
     event.preventDefault();
@@ -148,159 +151,149 @@ export function CreateAgentModal({
     }
   };
 
+  const repoHint = crossRepo
+    ? "No repo selected — the agent gets workspace-wide scope."
+    : "Pick every repo this agent works in. Leave all unselected for workspace scope.";
+
   return (
-    <div className={styles.overlay} onClick={onClose}>
-      <div
-        className={styles.dialog}
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="create-agent-title"
-        onClick={(event) => event.stopPropagation()}
-      >
-        <div className={styles.headerRow}>
-          <h2 id="create-agent-title" className={styles.title}>
-            New Agent
-          </h2>
+    <AetherModal
+      isOpen={isOpen}
+      title="New Agent"
+      ariaLabel="New Agent"
+      onClose={onClose}
+      overlayTestId="create-agent-overlay"
+      closeTestId="create-agent-close"
+      footer={
+        <>
           <button
             type="button"
-            className={styles.closeButton}
+            className={aetherModalStyles.linkButton}
             onClick={onClose}
-            aria-label="Close"
             disabled={isSubmitting}
           >
-            x
+            Cancel
           </button>
+          <button
+            type="submit"
+            form="create-agent-form"
+            className={`${aetherModalStyles.primaryButton}${isSubmitting ? ` ${aetherModalStyles.submitting}` : ""}`}
+            disabled={!canSubmit}
+            data-testid="create-agent-submit"
+          >
+            {isSubmitting ? "Creating..." : "Create Agent"}
+          </button>
+        </>
+      }
+    >
+      <form id="create-agent-form" onSubmit={handleSubmit}>
+        <div className={styles.fieldGroup}>
+          <label className={styles.label} htmlFor="agent-name">
+            Name
+          </label>
+          <input
+            id="agent-name"
+            ref={nameRef}
+            className={styles.input}
+            value={name}
+            onChange={(event) => setName(event.target.value)}
+            placeholder="planner"
+            disabled={isSubmitting}
+            data-testid="create-agent-name"
+          />
         </div>
 
-        <form onSubmit={handleSubmit}>
+        <div className={styles.row}>
           <div className={styles.fieldGroup}>
-            <label className={styles.label} htmlFor="agent-name">
-              Name
-            </label>
-            <input
-              id="agent-name"
-              className={styles.input}
-              value={name}
-              onChange={(event) => setName(event.target.value)}
-              placeholder="planner"
-              disabled={isSubmitting}
-              autoFocus
-            />
+            <span className={styles.label} id="agent-role-label">
+              Role
+            </span>
+            <div
+              className={styles.segControl}
+              role="group"
+              aria-labelledby="agent-role-label"
+            >
+              {ROLE_OPTIONS.map((option) => (
+                <button
+                  key={option.value}
+                  type="button"
+                  className={styles.segOption}
+                  data-active={roleName === option.value || undefined}
+                  aria-pressed={roleName === option.value}
+                  onClick={() => setRoleName(option.value)}
+                  disabled={isSubmitting}
+                >
+                  {option.label}
+                </button>
+              ))}
+            </div>
           </div>
+          <div className={styles.fieldGroup}>
+            <label className={styles.label} htmlFor="agent-backend">
+              AI Backend
+            </label>
+            <select
+              id="agent-backend"
+              className={styles.select}
+              value={backend}
+              onChange={(event) => setBackend(event.target.value)}
+              disabled={isSubmitting}
+              data-testid="create-agent-backend"
+            >
+              {backendOptions.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </div>
+        </div>
 
-          <div className={styles.row}>
-            <div className={styles.fieldGroup}>
-              <span className={styles.label} id="agent-role-label">
-                Role
-              </span>
-              <div
-                className={styles.segControl}
-                role="group"
-                aria-labelledby="agent-role-label"
-              >
-                {ROLE_OPTIONS.map((option) => (
+        <div className={styles.fieldGroup}>
+          <span className={styles.label} id="agent-repos-label">
+            Repos / Worktrees
+          </span>
+          {repoOptions.length === 0 ? (
+            <p className={styles.emptyHint} data-testid="create-agent-no-repos">
+              No repos yet — add one from the sidebar first. This agent will
+              run with workspace scope.
+            </p>
+          ) : (
+            <div
+              className={styles.repoChips}
+              role="group"
+              aria-labelledby="agent-repos-label"
+              data-testid="create-agent-repo-chips"
+            >
+              {repoOptions.map((repo) => {
+                const on = selectedRepos.includes(repo);
+                return (
                   <button
-                    key={option.value}
+                    key={repo}
                     type="button"
-                    className={styles.segOption}
-                    data-active={roleName === option.value || undefined}
-                    aria-pressed={roleName === option.value}
-                    onClick={() => setRoleName(option.value)}
+                    className={styles.repoChip}
+                    data-active={on || undefined}
+                    aria-pressed={on}
+                    onClick={() => toggleRepo(repo)}
                     disabled={isSubmitting}
                   >
-                    {option.label}
+                    <span className={styles.repoChipBox} aria-hidden="true">
+                      {on ? "✓" : ""}
+                    </span>
+                    {repo}
                   </button>
-                ))}
-              </div>
-            </div>
-            <div className={styles.fieldGroup}>
-              <label className={styles.label} htmlFor="agent-backend">
-                AI Backend
-              </label>
-              <select
-                id="agent-backend"
-                className={styles.select}
-                value={backend}
-                onChange={(event) => setBackend(event.target.value)}
-                disabled={isSubmitting}
-              >
-                {backendOptions.map((option) => (
-                  <option key={option.value} value={option.value}>
-                    {option.label}
-                  </option>
-                ))}
-              </select>
-            </div>
-          </div>
-
-          <div className={styles.fieldGroup}>
-            <span className={styles.label} id="agent-repos-label">
-              Repos / Worktrees
-            </span>
-            {repoOptions.length === 0 ? (
-              <p className={styles.emptyHint}>
-                No repos yet — add one from the sidebar first. This agent will
-                run with workspace scope.
-              </p>
-            ) : (
-              <div
-                className={styles.repoChips}
-                role="group"
-                aria-labelledby="agent-repos-label"
-              >
-                {repoOptions.map((repo) => {
-                  const on = selectedRepos.includes(repo);
-                  return (
-                    <button
-                      key={repo}
-                      type="button"
-                      className={styles.repoChip}
-                      data-active={on || undefined}
-                      aria-pressed={on}
-                      onClick={() => toggleRepo(repo)}
-                      disabled={isSubmitting}
-                    >
-                      <span className={styles.repoChipBox} aria-hidden="true">
-                        {on ? "✓" : ""}
-                      </span>
-                      {repo}
-                    </button>
-                  );
-                })}
-              </div>
-            )}
-            <p className={styles.hint}>
-              {crossRepo
-                ? "No repo selected — the agent gets workspace-wide scope."
-                : "Pick every repo this agent works in. Leave all unselected for workspace scope."}
-            </p>
-          </div>
-
-          {error && (
-            <div className={styles.error} role="alert">
-              {error}
+                );
+              })}
             </div>
           )}
+          <p className={styles.hint}>{repoHint}</p>
+        </div>
 
-          <div className={styles.actions}>
-            <button
-              type="button"
-              className={styles.cancelButton}
-              onClick={onClose}
-              disabled={isSubmitting}
-            >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              className={styles.submitButton}
-              disabled={isSubmitting || name.trim() === ""}
-            >
-              {isSubmitting ? "Creating..." : "Create Agent"}
-            </button>
+        {error && (
+          <div className={styles.error} role="alert" data-testid="create-agent-error">
+            {error}
           </div>
-        </form>
-      </div>
-    </div>
+        )}
+      </form>
+    </AetherModal>
   );
 }

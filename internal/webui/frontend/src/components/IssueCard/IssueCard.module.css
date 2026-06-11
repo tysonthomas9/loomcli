@@ -4,20 +4,21 @@
  */
 
 .issueCard {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-2);
-  padding: var(--space-3);
+  display: block;
+  width: 100%;
+  min-width: 220px;
+  box-sizing: border-box;
+  padding: 11px;
   background-color: var(--color-bg-card);
   border: 1px solid var(--color-border);
-  border-radius: 10px;
-  box-shadow: 0 1px 2px rgb(17 24 39 / 7%);
+  border-radius: 8px;
+  box-shadow: none;
   cursor: default;
+  text-align: left;
+  overflow: hidden;
   transition:
-    box-shadow 0.15s ease,
     border-color var(--transition-fast),
-    transform var(--transition-fast),
-    background-color var(--transition-fast);
+    transform 0.12s ease;
 }
 
 /* Hover state for all cards — Aether: lift + amber border */
@@ -32,7 +33,7 @@
 }
 
 .issueCard[role="button"]:hover {
-  background-color: var(--color-bg-hover);
+  background-color: var(--color-bg-card);
 }
 
 .issueCard[role="button"]:focus {
@@ -56,11 +57,30 @@
   box-shadow: 0 0 0 1px var(--color-primary);
 }
 
-.header {
+.top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+}
+
+.icons {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: var(--space-2);
+  gap: 6px;
+  flex-shrink: 0;
+  color: var(--color-text-tertiary);
+}
+
+/* Clipboard / variant chrome — reveal on hover so the resting card stays compact */
+.hoverReveal {
+  display: none;
+}
+
+.issueCard:hover .hoverReveal,
+.issueCard:focus-visible .hoverReveal {
+  display: inline-flex;
 }
 
 .id {
@@ -69,20 +89,38 @@
   text-transform: uppercase;
   letter-spacing: 0.12em;
   color: var(--color-text-tertiary);
-  /* Keep the issue key readable: don't shrink below its content (short keys
-     like HELLO-1 show in full); only very long keys cap and ellipsize. */
-  flex-shrink: 0;
-  max-width: 65%;
+  flex: 1 1 auto;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.typeIcon {
-  display: inline-flex;
+.copyIdButton {
+  display: none;
   flex-shrink: 0;
-  width: 14px;
-  height: 14px;
+  padding: 0;
+  margin: 0;
+  border: none;
+  background: none;
+  color: var(--color-text-tertiary);
+  cursor: pointer;
+  line-height: 0;
+  border-radius: var(--radius-sm);
+}
+
+.copyIdButton:hover {
+  color: var(--color-text-secondary);
+}
+
+.copyIdButton:focus-visible {
+  outline: 2px solid var(--color-focus-ring);
+  outline-offset: 2px;
+}
+
+.ticketVariantIcon {
+  flex-shrink: 0;
+  color: inherit;
 }
 
 .priorityBadge {
@@ -169,11 +207,12 @@
 }
 
 .title {
-  margin: 0;
-  font-size: var(--font-size-sm); /* 14px — Aether ticket title (text-sm) */
-  font-weight: 500; /* font-medium */
-  color: var(--color-text, #111827);
-  line-height: var(--line-height-normal);
+  margin: 14px 0;
+  font-size: 13px;
+  font-weight: 400;
+  color: var(--color-text-primary);
+  line-height: 1.4;
+  min-height: 36px;
   /* Truncate to 2 lines */
   display: -webkit-box;
   -webkit-line-clamp: 2;
@@ -262,24 +301,17 @@
   display: inline-flex;
   align-items: center;
   gap: var(--space-1);
-  padding: var(--space-1) var(--space-2);
-  font-size: var(--font-size-xs);
-  font-weight: var(--font-weight-medium);
-  line-height: 1;
-  border-radius: var(--radius-sm);
-  background-color: var(--color-warning-bg);
-  color: var(--color-text);
+  padding: 0 6px;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1.4;
+  border-radius: 5px;
+  border: 1.4px solid transparent;
 }
 
 .reviewTypeBadge .reviewIcon {
   font-size: 0.7em;
   line-height: 1;
-}
-
-/* Plan review - needs plan approval */
-.reviewPlan {
-  background-color: var(--color-warning-bg);
-  color: var(--color-text);
 }
 
 /* Code review - needs code approval */
@@ -364,27 +396,33 @@
  * Shows repo badge below title in multi-repo workspaces
  * ================================= */
 
+.footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.footerLeft {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  flex-wrap: wrap;
+}
+
 .ownerBadge {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 28px;
-  height: 28px;
-  font-size: var(--font-size-xs); /* 12px */
-  font-weight: 900;
-  /* Aether ticket assignee avatar is a plain backdrop-colored circle with
-     bright text (NOT a vivid identity chip — only agent/workspace avatars are
-     colored). */
-  color: var(--color-text-primary);
+  width: 26px;
+  height: 26px;
+  font-size: 11px;
+  font-weight: 700;
+  /* Aether ticket assignee avatar: neutral card2 circle, not a vivid chip. */
+  color: var(--color-text-secondary);
   background-color: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
   border-radius: 50%;
   flex-shrink: 0;
-}
-
-.cardFooter {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  padding-top: var(--space-1);
-  border-top: 1px solid color-mix(in srgb, var(--color-border) 40%, transparent);
 }

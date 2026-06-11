@@ -6,8 +6,9 @@
 .sidebar {
   display: flex;
   flex-direction: column;
-  width: 210px;
-  min-width: 210px;
+  width: var(--workspace-tree-sidebar-width, 210px);
+  min-width: var(--workspace-tree-sidebar-width, 210px);
+  min-height: 0;
   background: var(--color-chrome);
   border-right: 1px solid var(--color-border);
   transition:
@@ -22,6 +23,12 @@
 .sidebar.collapsed {
   width: 56px;
   min-width: 56px;
+  align-items: center;
+  overflow: visible;
+}
+
+.sidebar.resizing {
+  transition: none;
 }
 
 .toggleButton {
@@ -82,25 +89,69 @@
   border-bottom: 1px solid var(--color-border);
 }
 
-.selectorRow .toggleButton {
+.selectorRow .collapseButton {
   flex-shrink: 0;
-  width: 32px;
-  border-bottom: none;
-  border-left: 1px solid var(--color-border);
+  width: 28px;
+  height: 36px;
+  border: none;
   padding: 0;
   justify-content: center;
+  background: transparent;
 }
 
-.sidebar.collapsed .selectorRow .toggleButton {
+.collapsedChrome {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 9px;
   width: 100%;
-  border-left: none;
+  padding: 10px 0;
+  flex-shrink: 0;
+}
+
+.expandButton {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border: 1.6px solid var(--color-border);
+  border-radius: 9px;
+  background: var(--color-bg-card);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  transition:
+    border-color 0.15s ease,
+    color 0.15s ease;
+}
+
+.expandButton:hover {
+  border-color: var(--color-primary);
+  color: var(--color-primary);
+}
+
+.expandButton:focus-visible {
+  outline: 2px solid var(--color-focus);
+  outline-offset: 2px;
+}
+
+.railDivider {
+  width: 26px;
+  border-top: 1.6px solid var(--color-border);
+  margin: 3px 0;
+  flex-shrink: 0;
+}
+
+.chevronIcon {
+  display: block;
+  flex-shrink: 0;
 }
 
 .content {
   flex: 1;
-  display: flex;
-  flex-direction: column;
   overflow-y: auto;
+  min-height: 0;
 }
 
 .workspaceHeading {

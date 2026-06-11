@@ -18,6 +18,11 @@ export interface SortableTabProps {
   onContextMenu: (e: React.MouseEvent) => void;
   onKeyDown: (e: React.KeyboardEvent) => void;
   "data-testid": string;
+  /** Native drag between editor groups (split view); disables dnd-kit reorder. */
+  groupDrag?: {
+    onDragStart: () => void;
+    onDragEnd: () => void;
+  };
 }
 
 export function SortableTab({
@@ -30,6 +35,7 @@ export function SortableTab({
   onContextMenu,
   onKeyDown,
   "data-testid": testId,
+  groupDrag,
 }: SortableTabProps) {
   const {
     attributes,
@@ -38,27 +44,30 @@ export function SortableTab({
     transform,
     transition,
     isDragging,
-  } = useSortable({ id });
+  } = useSortable({ id, disabled: groupDrag != null });
 
-  const style: React.CSSProperties = {
-    transform: transform ? `translate3d(${transform.x}px, 0, 0)` : undefined,
-    transition: transition ?? undefined,
-    opacity: isDragging ? 0.5 : 1,
-    zIndex: isDragging ? 10 : undefined,
-  };
+  const style: React.CSSProperties = groupDrag
+    ? {}
+    : {
+        transform: transform ? `translate3d(${transform.x}px, 0, 0)` : undefined,
+        transition: transition ?? undefined,
+        opacity: isDragging ? 0.5 : 1,
+        zIndex: isDragging ? 10 : undefined,
+      };
 
   const tabClassName = [
     className,
     isPinned && styles.pinned,
-    isDragging && styles.dragging,
+    !groupDrag && isDragging && styles.dragging,
+    groupDrag && styles.groupDraggable,
   ]
     .filter(Boolean)
     .join(" ");
 
   return (
     <div
-      {...attributes}
-      {...listeners}
+      {...(groupDrag ? {} : attributes)}
+      {...(groupDrag ? {} : listeners)}
       ref={setNodeRef}
       style={style}
       id={`terminal-tab-${id}`}
@@ -67,6 +76,16 @@ export function SortableTab({
       aria-controls={`terminal-panel-${id}`}
       tabIndex={isActive ? 0 : -1}
       className={tabClassName}
+      draggable={groupDrag != null}
+      onDragStart={
+        groupDrag
+          ? (event) => {
+              event.dataTransfer.effectAllowed = "move";
+              groupDrag.onDragStart();
+            }
+          : undefined
+      }
+      onDragEnd={groupDrag ? () => groupDrag.onDragEnd() : undefined}
       onClick={onClick}
       onContextMenu={onContextMenu}
       onKeyDown={onKeyDown}

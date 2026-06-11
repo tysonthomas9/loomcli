@@ -1,51 +1,4 @@
-/* AddRepoModal — mirrors the CreateAgentModal dialog vocabulary. */
-.overlay {
-  position: fixed;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.5);
-  z-index: var(--z-modal);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.dialog {
-  background: var(--color-panel-bg);
-  border: 1px solid var(--color-border);
-  border-radius: 8px;
-  padding: 24px;
-  max-width: 460px;
-  width: 90%;
-}
-
-.headerRow {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 16px;
-}
-
-.title {
-  font-weight: 600;
-  font-size: 16px;
-  margin: 0;
-  color: var(--color-text);
-}
-
-.closeButton {
-  background: none;
-  border: none;
-  color: var(--color-text-muted);
-  cursor: pointer;
-  font-size: 18px;
-  line-height: 1;
-  padding: 2px 6px;
-  border-radius: var(--radius-sm);
-}
-
-.closeButton:hover:not(:disabled) {
-  color: var(--color-text);
-}
+/* AddRepoModal form styles (shell lives in AetherModal). */
 
 .fieldGroup {
   margin-bottom: 14px;
@@ -81,49 +34,8 @@
 .error {
   color: var(--color-danger);
   font-size: 12px;
-  margin: 0 0 14px;
+  margin: 0;
   padding: 6px 10px;
   background: var(--color-danger-bg);
   border-radius: var(--radius-sm);
-}
-
-.actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 8px;
-  margin-top: 20px;
-}
-
-.cancelButton,
-.submitButton {
-  padding: 6px 14px;
-  border-radius: var(--radius-sm);
-  font-size: 13px;
-  cursor: pointer;
-}
-
-.cancelButton {
-  border: 1px solid var(--color-border);
-  background: transparent;
-  color: var(--color-text);
-}
-
-.cancelButton:hover:not(:disabled) {
-  background: var(--color-bg-hover);
-}
-
-.submitButton {
-  border: 1px solid var(--color-primary);
-  background: var(--color-primary);
-  color: #fff;
-}
-
-.submitButton:hover:not(:disabled) {
-  background: var(--color-primary-hover);
-}
-
-.cancelButton:disabled,
-.submitButton:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
 }

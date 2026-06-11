@@ -11,8 +11,6 @@ import {
   useState,
   useCallback,
   useMemo,
-  lazy,
-  Suspense,
 } from "react";
 
 import {
@@ -23,7 +21,6 @@ import {
   moveIssue,
   deleteTabMetadata,
   getTaskLogPhases,
-  startAgent,
   EPIC_RUNNER_WORKFLOW_NAME,
   startWorkflowRun,
 } from "@/hooks/api";
@@ -43,8 +40,6 @@ import type {
   Issue,
   IssueDetails,
   IssueWithDependencyMetadata,
-  Priority,
-  IssueType,
   DependencyType,
   Comment,
   Event,
@@ -52,7 +47,6 @@ import type {
 import type { Status } from "@/types/issue";
 import {
   formatStatusLabel,
-  getOpenStatus,
   getReviewType,
   isPRUrl,
 } from "@/utils/issue";
@@ -75,17 +69,8 @@ import {
   PRSection,
   RejectCommentForm,
 } from "./sections";
-import { buildEpicLeadClaims } from "@/utils/agentRole";
-import { AgentStatusBadge, IssueHeader } from "./header";
-import {
-  AssigneeDropdown,
-  OwnerDropdown,
-  PriorityDropdown,
-  RepoDropdown,
-  TypeDropdown,
-  LabelEditor,
-} from "./fields";
-import { StartWorkButton } from "./actions";
+import { IssueHeader } from "./header";
+import { AssigneeDropdown, RepoDropdown } from "./fields";
 import { ConfirmDialog } from "../ConfirmDialog";
 import { MoveIssueDialog } from "./actions";
 import { SplitDetailSummary } from "./SplitDetailSummary";
@@ -94,16 +79,8 @@ import { ResizeDivider } from "./actions";
 import { ErrorToast } from "../ErrorToast";
 import { useSplitRatio, useToast } from "@/hooks/ui";
 import { CollapsibleSection } from "./CollapsibleSection";
-import { SessionHistorySection, SessionsTab } from "./sessions";
+import { SessionsTab } from "./sessions";
 import styles from "./IssueDetailPanel.module.css";
-
-// "Files changed" diff viewer is heavy — code-split like the agents view
-// does. PRFilesTab is the design's two-pane DiffPane (file rail + diff).
-const LazyPRFilesTab = lazy(() =>
-  import("./PRFilesTab").then((m) => ({
-    default: m.PRFilesTab,
-  })),
-);
 import { formatDate, formatIssueType, isIssueDetails } from "./utils";
 
 /**
@@ -281,7 +258,7 @@ interface DetailTabMetadata {
 
 interface DetailTab {
   id: string;
-  type: "details" | "terminal" | "sessions" | "task-log" | "diff";
+  type: "details" | "terminal" | "sessions" | "task-log";
   label: string;
   closable: boolean;
   metadata?: DetailTabMetadata | undefined;
@@ -299,16 +276,6 @@ const SESSIONS_TAB: DetailTab = {
   id: "sessions",
   type: "sessions",
   label: "Runs",
-  closable: false,
-};
-
-// "Files changed" — the design's PR-panel diff viewer, backed by loom's real
-// per-agent branch-diff API. Shown when the issue is assigned to a live
-// agent (the PR author): the diff is that agent's worktree vs its target.
-const DIFF_TAB: DetailTab = {
-  id: "diff",
-  type: "diff",
-  label: "Files changed",
   closable: false,
 };
 
@@ -375,7 +342,6 @@ function canRenderDetailTab(tab: DetailTab | undefined): boolean {
     case "details":
     case "sessions":
     case "task-log":
-    case "diff":
       return true;
     case "terminal":
       return Boolean(tab.metadata?.sessionName && tab.metadata.backend);
@@ -440,10 +406,7 @@ function DefaultContent({
   const { workspaceId, workspace, repos } = useWorkspaceContext();
   const [isSavingTitle, setIsSavingTitle] = useState(false);
   const [isSavingStatus, setIsSavingStatus] = useState(false);
-  const [isSavingPriority, setIsSavingPriority] = useState(false);
-  const [isSavingType, setIsSavingType] = useState(false);
   const [isSavingAssignee, setIsSavingAssignee] = useState(false);
-  const [isSavingOwner, setIsSavingOwner] = useState(false);
   const [isSavingRepo, setIsSavingRepo] = useState(false);
   const [statusError, setStatusError] = useState<string | null>(null);
   const [titleError, setTitleError] = useState<string | null>(null);
@@ -475,6 +438,7 @@ function DefaultContent({
     const repoLabel = issue?.labels?.find((l) => l.startsWith("repo:"));
     return repoLabel ? repoLabel.slice(5) : null;
   }, [issue?.labels, issue?.repo, issue?.source_repo]);
+
   const [taskLogPhases, setTaskLogPhases] = useState<
     ("planning" | "implementation")[]
   >([]);
@@ -490,7 +454,10 @@ function DefaultContent({
   } = useIssueTabPersistence(issueId);
 
   // Tab state - managed tab array with dynamic add/remove
-  const [tabs, setTabs] = useState<DetailTab[]>([DETAILS_TAB, SESSIONS_TAB]);
+  const [tabs, setTabs] = useState<DetailTab[]>([
+    DETAILS_TAB,
+    SESSIONS_TAB,
+  ]);
   const [activeTabId, setActiveTabId] = useState("details");
   // Track whether we've already restored tabs from persistence for this issue
   const restoredIssueIdRef = useRef<string | null>(null);
@@ -586,8 +553,6 @@ function DefaultContent({
   const agentStore = useAgentStoreInstance();
   const agents = useStore(agentStore, (s) => s.agents);
   const agentTasks = useStore(agentStore, (s) => s.agentTasks);
-  const isLoomConnected = useStore(agentStore, (s) => s.isConnected);
-  const refetchAgents = useStore(agentStore, (s) => s.fetchData);
 
   // Epic overview data (Aether design, pin 25): the epic's child tickets
   // from the already-fetched issue store, plus the lead currently running
@@ -604,10 +569,6 @@ function DefaultContent({
     }
     return children;
   }, [issuesMap, issue]);
-  const epicClaimedBy = useMemo<string | undefined>(() => {
-    if (!issue || issue.issue_type !== "epic") return undefined;
-    return buildEpicLeadClaims(agents).get(issue.id);
-  }, [agents, issue]);
 
   // Reset tabs when issue changes — clean up orphaned terminal sessions first
   useEffect(() => {
@@ -661,16 +622,16 @@ function DefaultContent({
     if (!restoredTabs.some((t) => t.id === "details")) {
       restoredTabs.unshift(DETAILS_TAB);
     }
-    // Ensure sessions tab is always present
     if (!restoredTabs.some((t) => t.id === "sessions")) {
-      // Insert after details tab
       const detailsIdx = restoredTabs.findIndex((t) => t.id === "details");
       restoredTabs.splice(detailsIdx + 1, 0, SESSIONS_TAB);
     }
-
     if (restoredTabs.length > 0) {
       setTabs(restoredTabs);
-      const activeId = persistedTabState.active_tab_id;
+      const activeId =
+        persistedTabState.active_tab_id === "diff"
+          ? "details"
+          : persistedTabState.active_tab_id;
       if (activeId && restoredTabs.some((t) => t.id === activeId)) {
         setActiveTabId(activeId);
       }
@@ -687,7 +648,7 @@ function DefaultContent({
     ) {
       return;
     }
-    // Only persist if there's something beyond the default tabs (details + sessions)
+    // Only persist if there's something beyond the default Details + Runs tabs
     const isDefault =
       tabs.length === 2 &&
       tabs[0]?.id === "details" &&
@@ -717,15 +678,6 @@ function DefaultContent({
     persistTabs(tabsToSave, activeTabIsPersistable ? activeTabId : "details");
   }, [tabs, activeTabId, issue?.id, isLoadingPersistedTabs, persistTabs]);
 
-  // The PR author's live agent — drives the "Files changed" diff tab.
-  const assigneeAgent = useMemo(
-    () =>
-      issue?.assignee
-        ? agents.find((a) => a.name === issue.assignee)
-        : undefined,
-    [agents, issue?.assignee],
-  );
-
   const visibleTabs = useMemo(() => {
     const phaseTabs: DetailTab[] = taskLogPhases.map((phase) => ({
       id: `task-log-${phase}`,
@@ -733,16 +685,14 @@ function DefaultContent({
       label: formatPhaseLabel(phase),
       closable: false,
     }));
-    const diffTabs: DetailTab[] = assigneeAgent ? [DIFF_TAB] : [];
     const detailsIndex = tabs.findIndex((tab) => tab.id === "details");
-    if (detailsIndex === -1) return [...phaseTabs, ...tabs, ...diffTabs];
+    if (detailsIndex === -1) return [...phaseTabs, ...tabs];
     return [
       ...tabs.slice(0, detailsIndex + 1),
       ...phaseTabs,
       ...tabs.slice(detailsIndex + 1),
-      ...diffTabs,
     ];
-  }, [tabs, taskLogPhases, assigneeAgent]);
+  }, [tabs, taskLogPhases]);
   const activeTab = useMemo(
     () => visibleTabs.find((tab) => tab.id === activeTabId),
     [activeTabId, visibleTabs],
@@ -862,40 +812,6 @@ function DefaultContent({
     [issue, onIssueUpdate],
   );
 
-  const handlePrioritySave = useCallback(
-    async (newPriority: Priority) => {
-      if (!issue) return;
-
-      setIsSavingPriority(true);
-      try {
-        const updatedIssue = await updateIssue(workspaceId, issue.id, {
-          priority: newPriority,
-        });
-        onIssueUpdate?.(updatedIssue);
-      } finally {
-        setIsSavingPriority(false);
-      }
-    },
-    [issue, onIssueUpdate],
-  );
-
-  const handleTypeSave = useCallback(
-    async (newType: IssueType) => {
-      if (!issue) return;
-
-      setIsSavingType(true);
-      try {
-        const updatedIssue = await updateIssue(workspaceId, issue.id, {
-          issue_type: newType,
-        });
-        onIssueUpdate?.(updatedIssue);
-      } finally {
-        setIsSavingType(false);
-      }
-    },
-    [issue, onIssueUpdate],
-  );
-
   const handleAssigneeSave = useCallback(
     async (newAssignee: string) => {
       if (!issue) return;
@@ -908,23 +824,6 @@ function DefaultContent({
         onIssueUpdate?.(updatedIssue);
       } finally {
         setIsSavingAssignee(false);
-      }
-    },
-    [issue, onIssueUpdate],
-  );
-
-  const handleOwnerSave = useCallback(
-    async (newOwner: string) => {
-      if (!issue) return;
-
-      setIsSavingOwner(true);
-      try {
-        const updatedIssue = await updateIssue(workspaceId, issue.id, {
-          owner: newOwner,
-        });
-        onIssueUpdate?.(updatedIssue);
-      } finally {
-        setIsSavingOwner(false);
       }
     },
     [issue, onIssueUpdate],
@@ -951,39 +850,7 @@ function DefaultContent({
         setIsSavingRepo(false);
       }
     },
-    [issue, onIssueUpdate],
-  );
-
-  const handleStartWork = useCallback(
-    async (agentName: string) => {
-      if (!issue) return;
-
-      // "Start Work" on an open issue moves it to in_progress; "Review with
-      // Agent" on a review issue assigns the reviewer but keeps the issue in
-      // review (the PR stays in the review queue while the agent works it).
-      const isReviewStage = issue.status === "review";
-      const updatedIssue = await updateIssue(workspaceId, issue.id, {
-        assignee: agentName,
-        ...(isReviewStage ? {} : { status: "in_progress" }),
-      });
-      try {
-        await startAgent(workspaceId, agentName, { taskId: issue.id });
-        onIssueUpdate?.(updatedIssue);
-        void refetchAgents();
-      } catch (err) {
-        try {
-          const rolledBackIssue = await updateIssue(workspaceId, issue.id, {
-            assignee: "",
-            status: isReviewStage ? "review" : "open",
-          });
-          onIssueUpdate?.(rolledBackIssue);
-        } catch {
-          // Keep the original start failure visible to the Start Work control.
-        }
-        throw err;
-      }
-    },
-    [issue, onIssueUpdate, refetchAgents, workspaceId],
+    [issue, onIssueUpdate, workspaceId],
   );
 
   const handleRunEpicWorkflow = useCallback(async () => {
@@ -1026,34 +893,6 @@ function DefaultContent({
       // The parent component should refresh issue details via SSE or manual refetch
     },
     [issue],
-  );
-
-  const handleAddLabel = useCallback(
-    async (label: string) => {
-      if (!issue) return;
-      const updatedIssue = await updateIssue(workspaceId, issue.id, {
-        add_labels: [label],
-      });
-      const labels = updatedIssue.labels?.includes(label)
-        ? updatedIssue.labels
-        : [...(updatedIssue.labels ?? issue.labels ?? []), label];
-      onIssueUpdate?.({ ...updatedIssue, labels });
-    },
-    [issue, onIssueUpdate],
-  );
-
-  const handleRemoveLabel = useCallback(
-    async (label: string) => {
-      if (!issue) return;
-      const updatedIssue = await updateIssue(workspaceId, issue.id, {
-        remove_labels: [label],
-      });
-      const labels = (updatedIssue.labels ?? issue.labels ?? []).filter(
-        (current) => current !== label,
-      );
-      onIssueUpdate?.({ ...updatedIssue, labels });
-    },
-    [issue, onIssueUpdate],
   );
 
   // Approve handler
@@ -1197,7 +1036,7 @@ function DefaultContent({
     <>
       {/* Sticky Header Wrapper */}
       <div className={styles.stickyHeaderWrapper}>
-        {/* Header with ID, status dropdown, priority badge, close button, and title */}
+        {/* Header with ID, status dropdown, close button, and title */}
         <IssueHeader
           issue={issue}
           onClose={onClose}
@@ -1205,7 +1044,6 @@ function DefaultContent({
           isSavingTitle={isSavingTitle}
           onStatusChange={handleStatusChange}
           isSavingStatus={isSavingStatus}
-          showPriority={true}
           {...(canRunEpicWorkflow && {
             onRunEpic: handleRunEpicWorkflow,
             isRunningEpic: isStartingEpicRun,
@@ -1233,11 +1071,6 @@ function DefaultContent({
             </svg>
             {formatIssueType(issue.issue_type)}
           </span>
-          <OwnerDropdown
-            owner={issue.owner}
-            onSave={handleOwnerSave}
-            isSaving={isSavingOwner}
-          />
           <AssigneeDropdown
             assignee={issue.assignee}
             onSave={handleAssigneeSave}
@@ -1245,6 +1078,14 @@ function DefaultContent({
             agents={agents}
             agentTasks={agentTasks}
           />
+          {(repos.length > 0 || currentRepo !== null) && (
+            <RepoDropdown
+              currentRepo={currentRepo}
+              repos={repos.map((r) => r.name)}
+              onSave={handleRepoSave}
+              isSaving={isSavingRepo}
+            />
+          )}
           {issue.created_at && (
             <span
               className={styles.metadataItem}
@@ -1381,14 +1222,6 @@ function DefaultContent({
               >
                 <SplitDetailSummary
                   issue={issue}
-                  isSavingPriority={isSavingPriority}
-                  isSavingType={isSavingType}
-                  isSavingAssignee={isSavingAssignee}
-                  agents={agents}
-                  agentTasks={agentTasks}
-                  onPrioritySave={handlePrioritySave}
-                  onTypeSave={handleTypeSave}
-                  onAssigneeSave={handleAssigneeSave}
                   onIssueUpdate={onIssueUpdate}
                 />
               </div>
@@ -1437,53 +1270,6 @@ function DefaultContent({
                     : styles.detailColumnFull
                 }
               >
-                {/* Priority/Type dropdowns for editing */}
-                <div className={styles.statusRow}>
-                  <PriorityDropdown
-                    priority={issue.priority as Priority}
-                    onSave={handlePrioritySave}
-                    isSaving={isSavingPriority}
-                  />
-                  <TypeDropdown
-                    type={issue.issue_type}
-                    onSave={handleTypeSave}
-                    isSaving={isSavingType}
-                  />
-                  <AssigneeDropdown
-                    assignee={issue.assignee}
-                    onSave={handleAssigneeSave}
-                    isSaving={isSavingAssignee}
-                    agents={agents}
-                    agentTasks={agentTasks}
-                  />
-                  {(repos.length > 0 || currentRepo !== null) && (
-                    <RepoDropdown
-                      currentRepo={currentRepo}
-                      repos={repos.map((r) => r.name)}
-                      onSave={handleRepoSave}
-                      isSaving={isSavingRepo}
-                    />
-                  )}
-                  {issue.assignee && !issue.assignee.startsWith("[H]") && (
-                    <AgentStatusBadge
-                      agentName={issue.assignee}
-                      onOpenTerminal={() => setActiveTabId("sessions")}
-                    />
-                  )}
-                  <StartWorkButton
-                    issueId={issue.id}
-                    issueStatus={issue.status}
-                    currentAssignee={issue.assignee}
-                    agents={agents}
-                    agentTasks={agentTasks}
-                    isConnected={isLoomConnected}
-                    preferredRole={
-                      getOpenStatus(issue) === "needs_plan" ? "plan" : "task"
-                    }
-                    onAssign={handleStartWork}
-                  />
-                </div>
-
                 {/* Description */}
                 <section className={styles.section}>
                   <h3 className={styles.sectionTitle}>Description</h3>
@@ -1521,11 +1307,10 @@ function DefaultContent({
 
             {/* Full-width sections below the columns */}
 
-            {/* Epic roll-up: claim status, progress distribution + child tickets */}
+            {/* Epic roll-up: progress distribution + child tickets */}
             {issue.issue_type === "epic" && (
               <EpicRollup
                 tickets={epicChildren}
-                claimedBy={epicClaimedBy}
                 {...(onNavigateToIssue !== undefined && {
                   onTicketClick: onNavigateToIssue,
                 })}
@@ -1571,24 +1356,6 @@ function DefaultContent({
               </section>
             )}
 
-            {/* Terminal history */}
-            <CollapsibleSection
-              title="Terminal History"
-              defaultExpanded={false}
-              testId="session-history-section"
-            >
-              <SessionHistorySection
-                issueId={issue.id}
-                onJumpToSession={(sessionName) => {
-                  const tabId = `terminal-${sessionName}`;
-                  const tab = tabs.find((t) => t.id === tabId);
-                  if (tab) {
-                    setActiveTabId(tabId);
-                  }
-                }}
-              />
-            </CollapsibleSection>
-
             {/* Activity Log (comments + events) */}
             <ActivityLog
               comments={localComments ?? []}
@@ -1598,14 +1365,6 @@ function DefaultContent({
             <CommentForm
               issueId={issue.id}
               onCommentAdded={handleCommentAdded}
-            />
-
-            {/* Labels */}
-            <LabelEditor
-              labels={issue.labels ?? []}
-              onAddLabel={handleAddLabel}
-              onRemoveLabel={handleRemoveLabel}
-              disabled={isLoading}
             />
           </div>
         </div>
@@ -1627,23 +1386,6 @@ function DefaultContent({
           aria-labelledby="issue-panel-tab-sessions"
         >
           <SessionsTab taskId={issue.id} />
-        </div>
-      )}
-
-      {/* Files changed — the design's PR diff viewer over the assignee
-          agent's real branch diff. */}
-      {renderedActiveTabId === "diff" && assigneeAgent && (
-        <div
-          className={styles.logsContainer}
-          role="tabpanel"
-          id="issue-panel-tabpanel-diff"
-          aria-labelledby="issue-panel-tab-diff"
-        >
-          <Suspense
-            fallback={<div className={styles.diffLoading}>Loading diff…</div>}
-          >
-            <LazyPRFilesTab agent={assigneeAgent} isActive />
-          </Suspense>
         </div>
       )}
 

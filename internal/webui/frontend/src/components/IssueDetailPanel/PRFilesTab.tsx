@@ -8,7 +8,7 @@
  * DiffFileViewer's parsed unified diff.
  */
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 
 import { DiffFileViewer } from "@/components/AgentDetailPanel";
 import { useDiff } from "@/hooks/terminal";
@@ -20,9 +20,15 @@ export interface PRFilesTabProps {
   /** The PR author's live agent (diff source). */
   agent: LoomAgentStatus;
   isActive?: boolean;
+  /** Rendered when the worktree diff is empty (e.g. task session diff). */
+  emptyFallback?: ReactNode;
 }
 
-export function PRFilesTab({ agent, isActive }: PRFilesTabProps): JSX.Element {
+export function PRFilesTab({
+  agent,
+  isActive,
+  emptyFallback,
+}: PRFilesTabProps): JSX.Element {
   const {
     files,
     isLoading,
@@ -65,6 +71,9 @@ export function PRFilesTab({ agent, isActive }: PRFilesTabProps): JSX.Element {
     return <div className={styles.message}>{error.message}</div>;
   }
   if (files.length === 0) {
+    if (emptyFallback) {
+      return <>{emptyFallback}</>;
+    }
     return (
       <div className={styles.message}>
         No changes on {agent.name}&apos;s branch yet.

@@ -150,7 +150,6 @@ export function RedirectToWorkspace() {
           onClose={() => setShowCreate(false)}
           initialValues={{
             name: ONBOARDING_WORKSPACE_NAME,
-            type: "clone",
             urlInput: ONBOARDING_REPO_URL,
           }}
           onSuccess={(data, createdName) => {

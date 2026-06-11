@@ -26,10 +26,21 @@ import { type Issue, type LoomAgentStatus, parseLoomStatus } from "@/types";
 import { isLeadRole } from "@/utils/agentRole";
 import { statusBucket, type StatusBucket } from "@/utils/statusBuckets";
 
+import {
+  OPEN_QUEUE_PANEL_DEFAULT_WIDTH,
+  OPEN_QUEUE_PANEL_MAX_WIDTH,
+  OPEN_QUEUE_PANEL_MIN_WIDTH,
+} from "@/hooks/ui/useOpenQueuePanelWidth";
+
+import { PanelWidthResizeHandle } from "./PanelWidthResizeHandle";
 import styles from "./AgentWorkPanel.module.css";
 
 interface AgentWorkPanelProps {
   agentName: string | undefined;
+  /** Resizable panel width in px (defaults to 420). */
+  panelWidth?: number | undefined;
+  onPanelWidthDelta?: ((deltaPx: number) => void) | undefined;
+  onPanelWidthReset?: (() => void) | undefined;
   /**
    * Override the default task-card click behavior. When provided, the panel
    * calls this instead of WorkspaceViewActions.handleIssueClick — used by
@@ -91,24 +102,11 @@ const STATUS_GLYPH: Record<string, string> = {
   closed: "✓",
 };
 
-const PRIORITY_LABEL: Record<number, string> = {
-  0: "P0",
-  1: "P1",
-  2: "P2",
-  3: "P3",
-  4: "P4",
-};
-
-const PRIORITY_CLASS: Record<number, string | undefined> = {
-  0: styles.priority0,
-  1: styles.priority1,
-  2: styles.priority2,
-  3: styles.priority3,
-  4: styles.priority4,
-};
-
 export function AgentWorkPanel({
   agentName,
+  panelWidth = OPEN_QUEUE_PANEL_DEFAULT_WIDTH,
+  onPanelWidthDelta,
+  onPanelWidthReset,
   onTaskClick,
   onRunEpic,
   onAgentClick,
@@ -273,8 +271,19 @@ export function AgentWorkPanel({
 
   if (!agentName) {
     return (
-      <div className={styles.empty}>
-        Select an agent from the rail to see their work.
+      <div className={styles.empty} style={{ width: panelWidth }}>
+        {onPanelWidthDelta ? (
+          <PanelWidthResizeHandle
+            width={panelWidth}
+            onDelta={onPanelWidthDelta}
+            onReset={onPanelWidthReset}
+            minWidth={OPEN_QUEUE_PANEL_MIN_WIDTH}
+            maxWidth={OPEN_QUEUE_PANEL_MAX_WIDTH}
+          />
+        ) : null}
+        <div className={styles.emptyMessage}>
+          Select an agent from the rail to see their work.
+        </div>
       </div>
     );
   }
@@ -284,7 +293,21 @@ export function AgentWorkPanel({
     : [];
 
   return (
-    <aside className={styles.panel} aria-label="Agent work">
+    <aside
+      className={styles.panel}
+      style={{ width: panelWidth }}
+      aria-label="Agent work"
+    >
+      {onPanelWidthDelta ? (
+        <PanelWidthResizeHandle
+          width={panelWidth}
+          onDelta={onPanelWidthDelta}
+          onReset={onPanelWidthReset}
+          minWidth={OPEN_QUEUE_PANEL_MIN_WIDTH}
+          maxWidth={OPEN_QUEUE_PANEL_MAX_WIDTH}
+        />
+      ) : null}
+      <div className={styles.panelContent}>
       <div className={styles.header}>
         {focused && groups[0] ? (
           <>
@@ -491,6 +514,7 @@ export function AgentWorkPanel({
           />
         </div>
       ) : null}
+      </div>
     </aside>
   );
 
@@ -625,7 +649,6 @@ function EpicGroupCard({
               key={task.id}
               task={task}
               workerAgent={workerByTaskId.get(task.id)}
-              onWorkerClick={onAgentClick}
               onClick={() => onTaskClick(task)}
             />
           ))}
@@ -855,30 +878,21 @@ function isOrphanGroup(group: EpicGroup): boolean {
 function TaskCard({
   task,
   workerAgent,
-  onWorkerClick,
   onClick,
 }: {
   task: Issue;
   workerAgent?: LoomAgentStatus | undefined;
-  onWorkerClick?: ((agentName: string) => void) | undefined;
   onClick: () => void;
 }): JSX.Element {
   const status = effectiveTaskStatus(task, workerAgent);
   const glyph = STATUS_GLYPH[status] ?? STATUS_GLYPH["open"];
-  const priority = task.priority ?? 2;
-  const priorityClass = PRIORITY_CLASS[priority] ?? PRIORITY_CLASS[2];
-  const priorityLabel = PRIORITY_LABEL[priority] ?? "P2";
   const handleKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     if (event.key !== "Enter" && event.key !== " ") return;
     event.preventDefault();
     onClick();
   };
   return (
-    <div
-      data-status={status}
-      data-priority={priority}
-      className={styles.taskCard}
-    >
+    <div data-status={status} className={styles.taskCard}>
       <div
         role="button"
         tabIndex={0}
@@ -891,9 +905,6 @@ function TaskCard({
             {glyph}
           </span>
           <span className={styles.taskId}>{task.id}</span>
-          <span className={`${styles.priorityChip} ${priorityClass ?? ""}`}>
-            {priorityLabel}
-          </span>
           {workerAgent ? (
             <span className={styles.workerCluster}>
               <span className={styles.workerChip} title={workerAgent.name}>
@@ -904,17 +915,6 @@ function TaskCard({
         </div>
         <div className={styles.taskTitle}>{task.title}</div>
       </div>
-      {workerAgent && onWorkerClick && isWorkerTerminalOpenable(workerAgent) ? (
-        <button
-          type="button"
-          className={styles.workerTerminalButton}
-          title="Open worker terminal"
-          aria-label={`Open ${workerAgent.name} terminal for ${task.id}`}
-          onClick={() => onWorkerClick(workerAgent.name)}
-        >
-          &gt;_
-        </button>
-      ) : null}
     </div>
   );
 }

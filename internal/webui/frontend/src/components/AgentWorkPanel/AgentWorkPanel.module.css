@@ -8,26 +8,40 @@
  */
 
 .panel {
-  width: 420px;
   flex-shrink: 0;
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
   min-height: 0;
+  min-width: 0;
   background: var(--color-bg-secondary);
   border-left: 1px solid var(--color-border);
   font-family: var(--font-main);
   color: var(--color-text-primary);
 }
 
+.panelContent {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
 .empty {
-  width: 420px;
   flex-shrink: 0;
-  padding: var(--space-4);
+  display: flex;
+  flex-direction: row;
+  min-height: 0;
   background: var(--color-bg-secondary);
   border-left: 1px solid var(--color-border);
   color: var(--color-text-muted);
   font-size: var(--font-size-xs);
   font-family: var(--font-main);
+}
+
+.emptyMessage {
+  flex: 1;
+  padding: var(--space-4);
 }
 
 /* ============= Header ============= */
@@ -470,10 +484,7 @@
 /* ============= Task card ============= */
 
 .taskCard {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: start;
-  gap: var(--space-2);
+  display: block;
   width: 100%;
   padding: var(--space-2) var(--space-3);
   background: var(--color-bg-card);
@@ -573,15 +584,6 @@
   flex-shrink: 0;
 }
 
-.priorityChip {
-  font-size: 0.625rem; /* 10px */
-  font-weight: var(--font-weight-semibold);
-  padding: 1px var(--space-2);
-  border-radius: var(--radius-sm);
-  line-height: 1.4;
-  flex-shrink: 0;
-}
-
 .workerCluster {
   display: inline-flex;
   align-items: center;
@@ -604,34 +606,6 @@
   background: var(--color-bg-secondary);
   padding: 1px var(--space-1);
   line-height: 1.4;
-}
-
-.workerTerminalButton {
-  width: 26px;
-  height: 22px;
-  flex-shrink: 0;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-sm);
-  background: var(--color-bg-card);
-  color: var(--color-text-secondary);
-  font-family: var(--font-family-mono);
-  font-size: 0.625rem;
-  line-height: 1;
-  cursor: pointer;
-}
-
-.workerTerminalButton:hover {
-  border-color: var(--color-border-hover);
-  background: var(--color-bg-hover);
-  color: var(--color-text-primary);
-}
-
-.workerTerminalButton:focus-visible {
-  outline: 2px solid var(--color-primary);
-  outline-offset: 2px;
 }
 
 /* ============= Worker history ============= */
@@ -753,29 +727,6 @@
   font-size: 0.625rem;
   line-height: 1.3;
   padding: 2px var(--space-2);
-}
-
-.priority0 {
-  background: var(--color-priority-0);
-  color: #fff;
-}
-.priority1 {
-  background: var(--color-priority-1);
-  color: #fff;
-}
-.priority2 {
-  background: var(--color-priority-2);
-  color: var(--color-text);
-}
-.priority3 {
-  background: color-mix(in srgb, var(--color-priority-3) 22%, transparent);
-  color: var(--color-priority-3);
-  border: 1px solid color-mix(in srgb, var(--color-priority-3) 50%, transparent);
-}
-.priority4 {
-  background: color-mix(in srgb, var(--color-priority-4) 22%, transparent);
-  color: var(--color-text-muted);
-  border: 1px solid color-mix(in srgb, var(--color-priority-4) 50%, transparent);
 }
 
 .taskTitle {

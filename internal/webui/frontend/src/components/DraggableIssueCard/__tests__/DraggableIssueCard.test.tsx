@@ -115,9 +115,7 @@ describe("DraggableIssueCard", () => {
       render(<DraggableIssueCard issue={mockIssue} onClick={handleClick} />);
 
       // IssueCard should have button role when onClick is provided
-      const card = screen.getByRole("button", {
-        name: /Issue: Test Issue Title/i,
-      });
+      const card = screen.getByLabelText(/Issue: Test Issue Title/i);
       expect(card).toBeInTheDocument();
     });
 
@@ -174,7 +172,7 @@ describe("DraggableIssueCard", () => {
       );
     });
 
-    it("listeners are applied to wrapper element", () => {
+    it("listeners are applied to the drag handle only", () => {
       const mockListeners = {
         onKeyDown: vi.fn(),
         onPointerDown: vi.fn(),
@@ -186,13 +184,14 @@ describe("DraggableIssueCard", () => {
 
       const { container } = render(<DraggableIssueCard issue={mockIssue} />);
 
-      const wrapper = container.firstChild as HTMLElement;
-      // Listeners should be spread onto the wrapper
-      expect(wrapper).toHaveProperty("onkeydown");
-      expect(wrapper).toHaveProperty("onpointerdown");
+      const dragHandle = container.querySelector(
+        'span[class*="dragHandle"]',
+      ) as HTMLElement;
+      expect(dragHandle).toHaveProperty("onkeydown");
+      expect(dragHandle).toHaveProperty("onpointerdown");
     });
 
-    it("attributes are applied to wrapper element", () => {
+    it("attributes are applied to the drag handle", () => {
       const mockAttributes = {
         role: "button",
         tabIndex: 0,
@@ -206,11 +205,13 @@ describe("DraggableIssueCard", () => {
 
       const { container } = render(<DraggableIssueCard issue={mockIssue} />);
 
-      const wrapper = container.firstChild as HTMLElement;
-      expect(wrapper).toHaveAttribute("role", "button");
-      expect(wrapper).toHaveAttribute("tabIndex", "0");
-      expect(wrapper).toHaveAttribute("aria-roledescription", "draggable");
-      expect(wrapper).toHaveAttribute(
+      const dragHandle = container.querySelector(
+        'span[class*="dragHandle"]',
+      ) as HTMLElement;
+      expect(dragHandle).toHaveAttribute("role", "button");
+      expect(dragHandle).toHaveAttribute("tabIndex", "0");
+      expect(dragHandle).toHaveAttribute("aria-roledescription", "draggable");
+      expect(dragHandle).toHaveAttribute(
         "aria-describedby",
         "dnd-describedby-test",
       );
@@ -376,7 +377,7 @@ describe("DraggableIssueCard", () => {
   });
 
   describe("accessibility", () => {
-    it("ARIA attributes from useDraggable are present", () => {
+    it("ARIA attributes from useDraggable are present on the drag handle", () => {
       const mockAttributes = {
         role: "button",
         tabIndex: 0,
@@ -390,15 +391,17 @@ describe("DraggableIssueCard", () => {
 
       const { container } = render(<DraggableIssueCard issue={mockIssue} />);
 
-      const wrapper = container.firstChild as HTMLElement;
-      expect(wrapper).toHaveAttribute("aria-roledescription", "draggable");
-      expect(wrapper).toHaveAttribute(
+      const dragHandle = container.querySelector(
+        'span[class*="dragHandle"]',
+      ) as HTMLElement;
+      expect(dragHandle).toHaveAttribute("aria-roledescription", "draggable");
+      expect(dragHandle).toHaveAttribute(
         "aria-describedby",
         "dnd-describedby-test",
       );
     });
 
-    it("wrapper is focusable via tabIndex", () => {
+    it("drag handle is focusable via tabIndex", () => {
       const mockAttributes = {
         tabIndex: 0,
       };
@@ -409,8 +412,10 @@ describe("DraggableIssueCard", () => {
 
       const { container } = render(<DraggableIssueCard issue={mockIssue} />);
 
-      const wrapper = container.firstChild as HTMLElement;
-      expect(wrapper).toHaveAttribute("tabIndex", "0");
+      const dragHandle = container.querySelector(
+        'span[class*="dragHandle"]',
+      ) as HTMLElement;
+      expect(dragHandle).toHaveAttribute("tabIndex", "0");
     });
   });
 
@@ -520,12 +525,12 @@ describe("DraggableIssueCard", () => {
   });
 
   describe("drag handle", () => {
-    it("renders SVG element with 6 circle elements", () => {
+    it("renders grip SVG with 6 circle elements", () => {
       const mockIssue = createMockIssue();
 
       const { container } = render(<DraggableIssueCard issue={mockIssue} />);
 
-      const svg = container.querySelector("svg");
+      const svg = container.querySelector('span[class*="dragHandle"] svg');
       expect(svg).toBeInTheDocument();
 
       const circles = svg?.querySelectorAll("circle");
@@ -537,20 +542,18 @@ describe("DraggableIssueCard", () => {
 
       const { container } = render(<DraggableIssueCard issue={mockIssue} />);
 
-      const svg = container.querySelector("svg");
-      expect(svg).toBeInTheDocument();
-      // SVG uses className.baseVal for the string value
-      expect(svg?.classList.toString()).toContain("dragHandle");
+      const dragHandle = container.querySelector('span[class*="dragHandle"]');
+      expect(dragHandle).toBeInTheDocument();
     });
 
-    it('has aria-hidden="true" for accessibility', () => {
+    it('grip icon has aria-hidden="true" for accessibility', () => {
       const mockIssue = createMockIssue();
 
       const { container } = render(<DraggableIssueCard issue={mockIssue} />);
 
-      const svg = container.querySelector("svg");
-      expect(svg).toBeInTheDocument();
-      expect(svg).toHaveAttribute("aria-hidden", "true");
+      const gripSvg = container.querySelector('span[class*="dragHandle"] svg');
+      expect(gripSvg).toBeInTheDocument();
+      expect(gripSvg).toHaveAttribute("aria-hidden", "true");
     });
 
     it("is not rendered in overlay mode", () => {
@@ -560,9 +563,7 @@ describe("DraggableIssueCard", () => {
         <DraggableIssueCard issue={mockIssue} isOverlay={true} />,
       );
 
-      const dragHandle = container.querySelector(
-        'svg.dragHandle, svg[class*="dragHandle"]',
-      );
+      const dragHandle = container.querySelector('span[class*="dragHandle"]');
       expect(dragHandle).not.toBeInTheDocument();
     });
   });
@@ -630,27 +631,26 @@ describe("DraggableIssueCard", () => {
 
       const { container } = render(<DraggableIssueCard issue={mockIssue} />);
 
-      const dragHandle = container.querySelector("svg");
+      const dragHandle = container.querySelector('span[class*="dragHandle"]');
       expect(dragHandle).toBeInTheDocument();
     });
 
-    it('has correct aria-hidden="true" for accessibility', () => {
+    it('has correct aria-hidden="true" on the grip icon', () => {
       const mockIssue = createMockIssue();
 
       const { container } = render(<DraggableIssueCard issue={mockIssue} />);
 
-      const dragHandle = container.querySelector("svg");
-      expect(dragHandle).toHaveAttribute("aria-hidden", "true");
+      const gripSvg = container.querySelector('span[class*="dragHandle"] svg');
+      expect(gripSvg).toHaveAttribute("aria-hidden", "true");
     });
 
-    it("has the correct CSS class", () => {
+    it("has the correct CSS class on the handle wrapper", () => {
       const mockIssue = createMockIssue();
 
       const { container } = render(<DraggableIssueCard issue={mockIssue} />);
 
-      const dragHandle = container.querySelector("svg");
-      // SVG elements use getAttribute for class, not className property
-      expect(dragHandle?.getAttribute("class")).toContain("dragHandle");
+      const dragHandle = container.querySelector('span[class*="dragHandle"]');
+      expect(dragHandle?.className).toContain("dragHandle");
     });
 
     it("does NOT render in overlay mode", () => {
@@ -660,9 +660,7 @@ describe("DraggableIssueCard", () => {
         <DraggableIssueCard issue={mockIssue} isOverlay={true} />,
       );
 
-      const dragHandle = container.querySelector(
-        'svg.dragHandle, svg[class*="dragHandle"]',
-      );
+      const dragHandle = container.querySelector('span[class*="dragHandle"]');
       expect(dragHandle).not.toBeInTheDocument();
     });
 

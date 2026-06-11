@@ -25,7 +25,10 @@ import {
 import { useStore } from "zustand";
 
 import { LoadingSkeleton } from "@/components";
-import type { TerminalInputRequest } from "@/components/TerminalView";
+import type {
+  TerminalInputRequest,
+  TerminalSplitControls,
+} from "@/components/TerminalView";
 import { useAgentStoreInstance } from "@/hooks";
 import { wsUrl } from "@/hooks/api";
 import { type LoomAgentStatus, parseLoomStatus } from "@/types";
@@ -41,6 +44,9 @@ interface AgentDetailMainProps {
   agentName: string | undefined;
   pendingTerminalInput?: TerminalInputRequest | undefined;
   onTerminalInputConsumed?: (() => void) | undefined;
+  onTerminalSplitControlsChange?: (
+    controls: TerminalSplitControls | null,
+  ) => void;
 }
 
 const STATUS_DOT_COLOR: Record<string, string> = {
@@ -59,6 +65,7 @@ export function AgentDetailMain({
   agentName,
   pendingTerminalInput,
   onTerminalInputConsumed,
+  onTerminalSplitControlsChange,
 }: AgentDetailMainProps): JSX.Element {
   const agentStore = useAgentStoreInstance();
   const agents = useStore(agentStore, (s) => s.agents);
@@ -141,6 +148,9 @@ export function AgentDetailMain({
               pendingTerminalInput={pendingTerminalInput}
               onTerminalInputConsumed={onTerminalInputConsumed}
               hideTabs
+              {...(onTerminalSplitControlsChange != null && {
+                onSplitControlsChange: onTerminalSplitControlsChange,
+              })}
             />
           </Suspense>
         )}

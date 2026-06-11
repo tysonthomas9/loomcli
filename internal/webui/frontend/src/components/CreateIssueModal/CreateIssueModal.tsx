@@ -42,13 +42,7 @@ const ISSUE_TYPES: { value: IssueType; label: string }[] = [
   { value: "chore", label: "Chore" },
 ];
 
-const PRIORITIES: { value: Priority; label: string }[] = [
-  { value: 0, label: "P0 — Critical" },
-  { value: 1, label: "P1 — High" },
-  { value: 2, label: "P2 — Medium" },
-  { value: 3, label: "P3 — Low" },
-  { value: 4, label: "P4 — Backlog" },
-];
+const DEFAULT_PRIORITY: Priority = 2;
 
 export function CreateIssueModal({
   isOpen,
@@ -60,7 +54,6 @@ export function CreateIssueModal({
   const { workspaceId, repos, agents = [] } = useWorkspaceContext();
   const [title, setTitle] = useState("");
   const [issueType, setIssueType] = useState<IssueType>("task");
-  const [priority, setPriority] = useState<Priority>(2);
   const [sourceRepo, setSourceRepo] = useState("");
   const [parentEpic, setParentEpic] = useState("");
   const [status, setStatus] = useState<"open" | "deferred">("open");
@@ -105,7 +98,6 @@ export function CreateIssueModal({
     wasOpenRef.current = true;
     setTitle(initialValues?.title ?? "");
     setIssueType(initialValues?.issueType ?? "task");
-    setPriority(initialValues?.priority ?? 2);
     setSourceRepo(initialValues?.sourceRepo ?? "");
     setParentEpic("");
     setStatus("open");
@@ -117,7 +109,6 @@ export function CreateIssueModal({
     isOpen,
     initialValues?.title,
     initialValues?.issueType,
-    initialValues?.priority,
     initialValues?.sourceRepo,
     initialValues?.description,
   ]);
@@ -148,7 +139,7 @@ export function CreateIssueModal({
       const req: CreateIssueRequest = {
         title: title.trim(),
         issue_type: issueType,
-        priority,
+        priority: initialValues?.priority ?? DEFAULT_PRIORITY,
       };
 
       if (description.trim()) {
@@ -200,7 +191,7 @@ export function CreateIssueModal({
       canSubmit,
       title,
       issueType,
-      priority,
+      initialValues?.priority,
       sourceRepo,
       parentEpic,
       status,
@@ -251,48 +242,24 @@ export function CreateIssueModal({
             />
           </div>
 
-          <div className={styles.row}>
-            <div className={styles.fieldGroup}>
-              <label className={styles.label} htmlFor="issue-type">
-                Type
-              </label>
-              <select
-                id="issue-type"
-                className={styles.select}
-                value={issueType}
-                onChange={(e) => setIssueType(e.target.value as IssueType)}
-                disabled={isSubmitting}
-                data-testid="create-issue-type"
-              >
-                {ISSUE_TYPES.map((t) => (
-                  <option key={t.value} value={t.value}>
-                    {t.label}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <div className={styles.fieldGroup}>
-              <label className={styles.label} htmlFor="issue-priority">
-                Priority
-              </label>
-              <select
-                id="issue-priority"
-                className={styles.select}
-                value={priority}
-                onChange={(e) =>
-                  setPriority(Number(e.target.value) as Priority)
-                }
-                disabled={isSubmitting}
-                data-testid="create-issue-priority"
-              >
-                {PRIORITIES.map((p) => (
-                  <option key={p.value} value={p.value}>
-                    {p.label}
-                  </option>
-                ))}
-              </select>
-            </div>
+          <div className={styles.fieldGroup}>
+            <label className={styles.label} htmlFor="issue-type">
+              Type
+            </label>
+            <select
+              id="issue-type"
+              className={styles.select}
+              value={issueType}
+              onChange={(e) => setIssueType(e.target.value as IssueType)}
+              disabled={isSubmitting}
+              data-testid="create-issue-type"
+            >
+              {ISSUE_TYPES.map((t) => (
+                <option key={t.value} value={t.value}>
+                  {t.label}
+                </option>
+              ))}
+            </select>
           </div>
 
           <div className={styles.row}>

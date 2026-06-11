@@ -3,10 +3,15 @@
  * Icon-only navigation rail for switching between views.
  */
 
+import { useEffect, useRef } from "react";
+
 import type { ViewMode } from "@/types";
 import { getAvatarColor, shouldUseWhiteText } from "@/utils/colorUtils";
 
 import styles from "./NavRail.module.css";
+
+/** Aether wireframe pin 5: ~5 workspace dots visible, then scroll. */
+export const WORKSPACE_SWITCHER_LIST_MAX_HEIGHT_PX = 210;
 
 export interface NavRailWorkspace {
   id: string;
@@ -225,6 +230,11 @@ export function NavRail({
   onAddWorkspace,
 }: NavRailProps): JSX.Element {
   const rootClassName = [styles.navRail, className].filter(Boolean).join(" ");
+  const activeWorkspaceRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    activeWorkspaceRef.current?.scrollIntoView?.({ block: "nearest" });
+  }, [activeWorkspaceId, workspaces]);
 
   const renderButton = (item: NavItem) => {
     const isActive = (item.activeForViews ?? [item.id]).includes(activeView);
@@ -239,7 +249,6 @@ export function NavRail({
         data-active={isActive || undefined}
         onClick={() => onChange(item.id)}
         aria-label={item.label}
-        title={item.label}
       >
         <span className={styles.icon}>{item.icon}</span>
         {showBadge && (
@@ -257,7 +266,9 @@ export function NavRail({
             aria-label="has unread output"
           />
         )}
-        <span className={styles.tooltip}>{item.label}</span>
+        <span className={styles.tooltip} role="tooltip">
+          {item.label}
+        </span>
       </button>
     );
   };
@@ -270,40 +281,58 @@ export function NavRail({
       {TOP_ITEMS.map(renderButton)}
       <div className={styles.spacer} />
       {hasWorkspaceAvatars && (
-        <div className={styles.workspaceAvatars}>
-          {workspaces?.map((ws) => {
-            const color = getAvatarColor(ws.name);
-            return (
+        <>
+          <div className={styles.wsDivider} aria-hidden="true" />
+          <section
+            className={styles.workspaceSwitcher}
+            aria-label="Workspace selector"
+          >
+            <div className={styles.workspaceList}>
+              {workspaces?.map((ws) => {
+                const color = getAvatarColor(ws.name);
+                const isActive = ws.id === activeWorkspaceId;
+                return (
+                  <button
+                    key={ws.id}
+                    ref={isActive ? activeWorkspaceRef : undefined}
+                    type="button"
+                    className={styles.wsAvatar}
+                    data-active={isActive || undefined}
+                    onClick={() => onWorkspaceSwitch?.(ws.id)}
+                    aria-label={`Switch to ${ws.name}`}
+                  >
+                    <span
+                      className={styles.wsAvatarCircle}
+                      style={{
+                        backgroundColor: color,
+                        color: shouldUseWhiteText(color) ? "#fff" : "#171717",
+                      }}
+                      aria-hidden="true"
+                    >
+                      {ws.name.charAt(0).toUpperCase()}
+                    </span>
+                    <span className={styles.tooltip} role="tooltip">
+                      {ws.name}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+            {onAddWorkspace && (
               <button
-                key={ws.id}
                 type="button"
-                className={styles.wsAvatar}
-                data-active={ws.id === activeWorkspaceId || undefined}
-                onClick={() => onWorkspaceSwitch?.(ws.id)}
-                style={{
-                  backgroundColor: color,
-                  color: shouldUseWhiteText(color) ? "#fff" : "#171717",
-                }}
-                aria-label={`Switch to ${ws.name}`}
-                title={ws.name}
+                className={styles.wsAdd}
+                onClick={onAddWorkspace}
+                aria-label="Add workspace"
               >
-                {ws.name.charAt(0).toUpperCase()}
-                <span className={styles.tooltip}>{ws.name}</span>
+                +<span className={styles.tooltip} role="tooltip">
+                  Add workspace
+                </span>
               </button>
-            );
-          })}
-          {onAddWorkspace && (
-            <button
-              type="button"
-              className={styles.wsAdd}
-              onClick={onAddWorkspace}
-              aria-label="Add workspace"
-              title="Add workspace"
-            >
-              +<span className={styles.tooltip}>Add workspace</span>
-            </button>
-          )}
-        </div>
+            )}
+          </section>
+          <div className={styles.wsDivider} aria-hidden="true" />
+        </>
       )}
       {BOTTOM_ITEMS.map(renderButton)}
     </nav>

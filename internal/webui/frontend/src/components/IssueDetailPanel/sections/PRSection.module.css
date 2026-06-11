@@ -71,12 +71,12 @@
 }
 
 .emptyText {
-  font-size: 13px;
+  font-size: var(--font-size-base);
   color: var(--color-text-secondary);
 }
 
 .emptyHint {
-  font-size: 12px;
+  font-size: var(--font-size-xs);
   font-style: italic;
   color: var(--color-text-muted);
 }

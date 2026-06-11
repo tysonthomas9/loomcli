@@ -13,7 +13,8 @@
   background-color: var(--color-bg-secondary);
   border-right: 1px solid var(--color-border);
   position: relative;
-  z-index: 1;
+  z-index: calc(var(--z-overlay) + 2);
+  overflow: visible;
 }
 
 .navButton {
@@ -72,49 +73,117 @@
   flex: 1;
 }
 
-/* ---- workspace switcher avatars (rail bottom) ---- */
-.workspaceAvatars {
+/* ---- workspace switcher (Aether pin 5: scroll after ~5 dots) ---- */
+.wsDivider {
+  width: 26px;
+  border-top: 1.5px solid var(--color-border);
+  margin: 3px 0;
+  flex-shrink: 0;
+}
+
+.workspaceSwitcher {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: var(--space-2);
-  padding-bottom: var(--space-1);
+  gap: 9px;
+  min-height: 0;
+  flex-shrink: 0;
+  width: 100%;
 }
 
-.wsAvatar,
-.wsAdd {
+.workspaceList {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 11px;
+  max-height: 210px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  /* Room for active double-ring so overflow clipping does not squash circles */
+  padding: 4px 6px;
+  width: 100%;
+  scrollbar-gutter: stable;
+}
+
+.workspaceList::-webkit-scrollbar {
+  width: 5px;
+}
+
+.workspaceList::-webkit-scrollbar-thumb {
+  background: var(--color-border-strong, #c3bdb0);
+  border: none;
+  border-radius: 999px;
+}
+
+.wsAvatar {
   position: relative;
-  width: 30px;
-  height: 30px;
+  padding: 0;
+  border: none;
+  background: none;
   border-radius: 50%;
-  border: 2px solid transparent;
+  line-height: 0;
+  flex-shrink: 0;
+  cursor: pointer;
   display: inline-flex;
   align-items: center;
   justify-content: center;
+}
+
+.wsAvatarCircle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 30px;
+  height: 30px;
+  min-width: 30px;
+  min-height: 30px;
+  aspect-ratio: 1;
+  border-radius: 50%;
+  border: 1.6px solid rgb(0 0 0 / 18%);
   font-size: 12px;
   font-weight: 800;
-  cursor: pointer;
+  line-height: 1;
+  box-sizing: border-box;
   transition:
     box-shadow var(--transition-fast),
     border-color var(--transition-fast);
 }
 
-.wsAvatar[data-active="true"] {
+.wsAvatar[data-active="true"] .wsAvatarCircle {
   border-color: var(--color-text-primary);
-  box-shadow: 0 0 0 2px var(--color-bg-secondary);
+  box-shadow:
+    0 0 0 2px var(--color-bg-secondary),
+    0 0 0 4px var(--color-text-primary);
 }
 
-.wsAvatar:hover,
-.wsAdd:hover {
+.wsAvatar:hover .wsAvatarCircle {
   box-shadow: 0 0 12px rgb(0 0 0 / 35%);
 }
 
 .wsAdd {
+  position: relative;
+  flex-shrink: 0;
+  width: 30px;
+  height: 30px;
+  min-width: 30px;
+  min-height: 30px;
+  aspect-ratio: 1;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   background: var(--color-bg-card);
   color: var(--color-text-secondary);
   border: 1px solid var(--color-border);
   font-size: 18px;
   line-height: 1;
+  cursor: pointer;
+  transition: box-shadow var(--transition-fast);
+}
+
+.wsAdd:hover {
+  box-shadow: 0 0 12px rgb(0 0 0 / 35%);
 }
 
 .wsAvatar:focus-visible,
@@ -125,7 +194,7 @@
 
 .tooltip {
   position: absolute;
-  left: 44px;
+  left: calc(100% + 8px);
   top: 50%;
   transform: translateY(-50%);
   background-color: var(--color-text-primary);
@@ -133,15 +202,28 @@
   padding: 4px 8px;
   border-radius: 6px;
   font-size: 11px;
+  font-weight: 600;
+  line-height: 1.2;
   white-space: nowrap;
   opacity: 0;
   pointer-events: none;
   transition: opacity var(--transition-fast);
   z-index: var(--z-dropdown);
+  box-shadow: 0 2px 8px rgb(0 0 0 / 18%);
 }
 
-/* Hover-only: showing on :focus-visible left the tooltip stuck open over the
-   sidebar after a nav click. Keyboard users still get aria-label + native title. */
+.tooltip::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  right: 100%;
+  transform: translateY(-50%);
+  border: 4px solid transparent;
+  border-right-color: var(--color-text-primary);
+}
+
+/* Hover-only: showing on :focus-visible left the tooltip stuck open after a
+   nav click. Keyboard users still get aria-label on the button. */
 .navButton:hover .tooltip,
 .wsAvatar:hover .tooltip,
 .wsAdd:hover .tooltip {

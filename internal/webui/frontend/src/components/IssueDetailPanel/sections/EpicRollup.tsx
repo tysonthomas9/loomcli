@@ -2,8 +2,8 @@
  * EpicRollup section.
  *
  * Shown in the issue detail panel when the open issue is an epic. Gives the
- * epic the "minimal epic view" from the Aether V3 design: a summary-chip row
- * (tickets / done / PRs / repos), a progress roll-up (distribution bar + "N of
+ * epic the "minimal epic view" from the Aether V3 design: a progress roll-up
+ * (distribution bar + "N of
  * M complete"), and a clickable list of its child tickets — each row carrying a
  * status dot, ID, title, a PR chip (when the ticket has a linked PR), a colored
  * status badge, and an assignee avatar (matching the design's data placement).
@@ -23,8 +23,6 @@ import styles from "./EpicRollup.module.css";
 export interface EpicRollupProps {
   /** Child tickets of this epic (issues whose parent === epic.id). */
   tickets: Issue[];
-  /** Lead agent currently running this epic, when one has claimed it. */
-  claimedBy?: string | undefined;
   /** Open a child ticket in the panel. */
   onTicketClick?: (issue: Issue) => void;
 }
@@ -81,10 +79,9 @@ function Avatar({ name }: { name: string }): JSX.Element {
 
 export function EpicRollup({
   tickets,
-  claimedBy,
   onTicketClick,
 }: EpicRollupProps): JSX.Element | null {
-  const { counts, total, done, prCount, repos } = useMemo(() => {
+  const { counts, total, done } = useMemo(() => {
     const c: Record<Bucket, number> = {
       in_progress: 0,
       review: 0,
@@ -92,19 +89,13 @@ export function EpicRollup({
       blocked: 0,
       closed: 0,
     };
-    let prs = 0;
-    const repoSet = new Set<string>();
     for (const t of tickets) {
       c[bucketFor(t.status)] += 1;
-      if (isPRUrl(t.external_ref)) prs += 1;
-      if (t.repo) repoSet.add(t.repo);
     }
     return {
       counts: c,
       total: tickets.length,
       done: c.closed,
-      prCount: prs,
-      repos: [...repoSet],
     };
   }, [tickets]);
 
@@ -132,49 +123,6 @@ export function EpicRollup({
 
   return (
     <section className={styles.section} data-testid="epic-rollup">
-      {/* Summary chips — tickets / done / PRs / repos (design's epic header row) */}
-      <div className={styles.chips}>
-        <span className={styles.chip}>
-          {total} {total === 1 ? "ticket" : "tickets"}
-        </span>
-        <span className={styles.chip}>✓ {done} done</span>
-        {prCount > 0 && (
-          <span className={styles.chip} data-pr="true">
-            <svg viewBox="0 0 16 16" fill="none" aria-hidden="true">
-              <circle cx="4" cy="4" r="1.6" stroke="currentColor" strokeWidth="1.4" />
-              <circle cx="4" cy="12" r="1.6" stroke="currentColor" strokeWidth="1.4" />
-              <circle cx="12" cy="12" r="1.6" stroke="currentColor" strokeWidth="1.4" />
-              <path
-                d="M4 5.6v4.8M12 10.4V8a2 2 0 0 0-2-2H7.5"
-                stroke="currentColor"
-                strokeWidth="1.4"
-                strokeLinecap="round"
-              />
-            </svg>
-            {prCount} {prCount === 1 ? "PR" : "PRs"}
-          </span>
-        )}
-        {repos.map((r) => (
-          <span key={r} className={styles.repoChip}>
-            {r}
-          </span>
-        ))}
-        {claimedBy ? (
-          <span
-            className={styles.runnerChip}
-            title={`Epic run by ${claimedBy}`}
-            data-testid="epic-runner-chip"
-          >
-            <span className={styles.runnerDot} aria-hidden="true" />
-            {claimedBy}
-          </span>
-        ) : (
-          <span className={styles.unclaimedChip} data-testid="epic-unclaimed-chip">
-            Unclaimed
-          </span>
-        )}
-      </div>
-
       <div className={styles.progressHead}>
         <h3 className={styles.sectionTitle}>Epic Progress</h3>
         <span className={styles.progressCaption}>
