@@ -201,6 +201,47 @@ func TestWorkspaceStoreCreateOmitsEmptyDesignFormat(t *testing.T) {
 	}
 }
 
+func TestWorkspaceStoreUpdateClearsDesignFormat(t *testing.T) {
+	now := time.Now().UTC()
+	var sawPatch bool
+	httpClient := newWorkspaceHTTPClient(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPatch && r.URL.Path == "/api/v1/admin/workspaces/LOCALMODE":
+			sawPatch = true
+			var body map[string]any
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Fatalf("decode patch: %v", err)
+			}
+			// A non-nil pointer to "" must serialize the field so the
+			// server can clear it; omitempty only drops nil pointers.
+			if len(body) != 1 || body["design_format"] != "" {
+				t.Fatalf("patch body = %+v, want design_format=\"\" only", body)
+			}
+			w.WriteHeader(http.StatusNoContent)
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/admin/workspaces/LOCALMODE":
+			writeJSON(t, w, domain.Workspace{Key: "LOCALMODE", Name: "Local Mode", CreatedAt: now, UpdatedAt: now})
+		default:
+			t.Fatalf("unexpected request %s %s", r.Method, r.URL.String())
+		}
+	}))
+
+	client, err := New(Config{BaseURL: "http://fleet.test", Actor: "tester", HTTPClient: httpClient})
+	if err != nil {
+		t.Fatal(err)
+	}
+	empty := ""
+	ws, err := client.Workspaces().Update(t.Context(), "LOCALMODE", store.WorkspaceUpdate{DesignFormat: &empty})
+	if err != nil {
+		t.Fatalf("update workspace: %v", err)
+	}
+	if !sawPatch {
+		t.Fatal("expected PATCH request")
+	}
+	if ws.DesignFormat != "" {
+		t.Fatalf("DesignFormat = %q, want empty", ws.DesignFormat)
+	}
+}
+
 func TestWorkspaceStoreUpdateSendsDesignFormat(t *testing.T) {
 	now := time.Now().UTC()
 	var sawPatch bool
