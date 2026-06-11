@@ -137,7 +137,7 @@ func runWorkspaceSet(cmd *cobra.Command, args []string) error {
 			return fmt.Errorf("update workspace: %w", err)
 		}
 		if ws.DesignFormat != v {
-			fmt.Fprintf(os.Stderr, "Warning: design_format did not persist (store returned %q); the fleet-db server may be too old to support it\n", ws.DesignFormat)
+			fmt.Fprintf(os.Stderr, "Warning: requested design_format %q but store returned %q; the fleet-db server may not support this field\n", v, ws.DesignFormat)
 		}
 		fmt.Printf("Updated workspace %s: design_format=%s\n", ws.Key, displayDesignFormat(ws.DesignFormat))
 		return nil
