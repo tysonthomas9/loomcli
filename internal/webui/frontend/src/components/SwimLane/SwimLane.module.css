@@ -14,10 +14,13 @@
   min-height: 0;
 }
 
-/* Expanded lanes share the board's vertical space so column backgrounds
-   stretch to the bottom of the viewport (matching flat KanbanBoard). */
+/* Each expanded epic lane is sized to its visible cards (no fixed floor) but
+   capped at the board viewport height; flex-shrink:0 keeps lanes from being
+   compressed so the board scrolls vertically between epics. Columns scroll
+   internally when their cards exceed the cap (see the role="list" override). */
 .swimLane:not([data-collapsed="true"]) {
-  flex: 1 1 0;
+  flex: 0 0 auto;
+  max-height: 100%;
 }
 
 .swimLane[data-collapsed="true"] {
@@ -187,7 +190,7 @@
 .laneContent {
   display: grid;
   grid-template-rows: auto 1fr;
-  flex: 1 1 0;
+  flex: 1 1 auto;
   width: 100%;
   max-width: 100%;
   min-width: 0;
@@ -235,7 +238,7 @@
 .laneContent > section[data-column-type="backlog"] {
   overflow: hidden;
   min-width: 0;
-  min-height: 188px;
+  min-height: 0;
   height: 100%;
   align-self: stretch;
   border-right: 1px solid var(--color-border);
@@ -244,8 +247,9 @@
 }
 
 .laneContent > section > div[role="list"] {
-  overflow: visible;
-  flex: 1 1 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  flex: 1 1 auto;
   min-height: 0;
 }
 

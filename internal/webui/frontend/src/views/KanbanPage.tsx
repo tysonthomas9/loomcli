@@ -123,6 +123,7 @@ export function KanbanPage() {
             onIssueClick={handleIssueClick}
             isMultiRepo={isMultiRepo}
             hasFiltersActive={hasActiveFilters}
+            cardLimit={15}
             {...(blockedIssuesMap !== undefined && {
               blockedIssues: blockedIssuesMap,
             })}
