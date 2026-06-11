@@ -7,7 +7,7 @@
  * user messages render as distinct interjection blocks.
  */
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import { CodeMirrorEditor } from "@/components/CodeMirrorEditor";
 import { useSessionTranscript, useSessionDiff } from "@/hooks/terminal";
@@ -60,12 +60,36 @@ function formatTokens(n: number): string {
   return `${(n / 1000000).toFixed(1)}M`;
 }
 
-function formatDuration(s: number | undefined): string {
+export function formatDuration(s: number | undefined): string {
   if (!s || s <= 0) return "—";
-  if (s < 60) return `${s.toFixed(1)}s`;
-  const m = Math.floor(s / 60);
-  const rem = s - m * 60;
-  return `${m}m ${rem.toFixed(0)}s`;
+  // 59.95+ would render "60.0s" via toFixed; let it fall through to "1m 0s".
+  if (s < 59.95) return `${s.toFixed(1)}s`;
+  // Round to whole seconds first so 1019.6s renders 17m 0s, not 16m 60s.
+  const total = Math.round(s);
+  const m = Math.floor(total / 60);
+  const rem = total - m * 60;
+  return `${m}m ${rem}s`;
+}
+
+/**
+ * Elapsed seconds since startedAt, ticking once per second while active.
+ * Returns undefined when inactive or startedAt is unparsable.
+ */
+function useTickingElapsed(
+  startedAt: string,
+  active: boolean,
+): number | undefined {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!active) return;
+    setNow(Date.now());
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, [active]);
+  if (!active) return undefined;
+  const start = new Date(startedAt).getTime();
+  if (isNaN(start)) return undefined;
+  return Math.max(0, (now - start) / 1000);
 }
 
 function runErrorSummary(session: SessionRecord): string | null {
@@ -327,6 +351,11 @@ export function SessionDetailView({
     });
   };
 
+  const liveElapsed = useTickingElapsed(
+    session.started_at,
+    session.is_active && !session.duration_s,
+  );
+
   const totalTokens =
     (session.input_tokens ?? 0) +
     (session.output_tokens ?? 0) +
@@ -387,13 +416,13 @@ export function SessionDetailView({
           <div className={styles.stat}>
             <div className={styles.statLabel}>Exit</div>
             <div className={styles.statValue}>
-              {formatExitCode(session.exit_code)}
+              {session.is_active ? "—" : formatExitCode(session.exit_code)}
             </div>
           </div>
           <div className={styles.stat}>
             <div className={styles.statLabel}>Duration</div>
             <div className={styles.statValue}>
-              {formatDuration(session.duration_s)}
+              {formatDuration(session.duration_s || liveElapsed)}
             </div>
           </div>
           <div className={styles.stat}>
