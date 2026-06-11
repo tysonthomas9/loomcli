@@ -114,6 +114,9 @@ func runWorkspaceAdd(_ *cobra.Command, args []string) error {
 		if err := bootstrap.SetActiveWorkspaceKey(key); err != nil {
 			fmt.Fprintf(os.Stderr, "Warning: workspace created but selected-workspace hint update failed (run 'loom workspace use %s' to retry): %v\n", key, err)
 		}
+		if ws.DesignFormat != wsAddDesignFormat {
+			fmt.Fprintf(os.Stderr, "Warning: requested design_format %q but store returned %q; the fleet-db server may not support this field\n", wsAddDesignFormat, ws.DesignFormat)
+		}
 		fmt.Printf("Created workspace %s (mode=%s)\n", ws.Key, h.Mode())
 		return nil
 	})
