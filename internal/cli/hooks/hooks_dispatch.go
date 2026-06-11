@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/sessions"
@@ -12,7 +13,8 @@ import (
 
 // dispatchHookEvent captures the backend's native transcript (and any
 // completed subagent transcripts) into the loom session directory, and on
-// SessionEnd patches the session metadata with token usage.
+// every hook event patches the session metadata with token usage (throttled;
+// SessionEnd always captures).
 //
 // Designed for use inside hook subprocesses: errors are logged to stderr and
 // the function always returns nil so the hook process exits 0. Returns nil
@@ -88,8 +90,17 @@ const tokenUsageThrottle = 10 * time.Second
 // shouldCaptureTokenUsage reports whether enough time has passed since the
 // session's metadata.json was last written to justify another transcript
 // rescan. A missing or unreadable metadata file counts as stale (capture
-// proceeds and surfaces any real error there).
+// proceeds and surfaces any real error there; LoadMetadata also validates
+// the session ID, so a malformed ID is rejected on that path).
+//
+// Best-effort throttle: the mtime reflects any metadata write (not only
+// token captures), and two concurrent hook subprocesses can both pass the
+// check — both then compute identical sums from the same transcript, so
+// this only costs an extra rescan, never incorrect data.
 func shouldCaptureTokenUsage(store *sessions.Store, sessionID string, throttle time.Duration) bool {
+	if strings.ContainsAny(sessionID, "/\\") {
+		return false
+	}
 	info, err := os.Stat(filepath.Join(store.Dir(), sessionID, "metadata.json"))
 	if err != nil {
 		return true
