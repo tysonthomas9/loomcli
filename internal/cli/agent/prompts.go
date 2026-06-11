@@ -152,6 +152,10 @@ You are running in a parallel multi-agent environment. Follow these rules strict
 - **Commit only your changes** — do not stage unrelated modifications with ` + "`git add -A`" + ` or ` + "`git add .`" + `; use specific file paths
 - **If your worktree has unexpected state**, report it via task notes or ` + "`loom complete`" + ` rather than cleaning it up
 - **Do not switch branches** — you are confined to your assigned worktree branch
+- **Never add Co-Authored-By lines** to commit messages
+- **Never kill processes by name pattern** — ` + "`pkill -f`" + `/` + "`killall`" + ` on shared binary names (` + "`loom serve`" + `, ` + "`loom daemon`" + `, ` + "`fleet-db`" + `, ` + "`vite`" + `, ` + "`claude`" + `) will kill OTHER sessions' and the production stack's processes
+- **Tear down only what you started, by recorded PID or by port** — capture ` + "`$!`" + ` (or a pidfile) when you spawn a scratch server and ` + "`kill`" + ` that PID; or kill by the scratch instance's listening port: ` + "`lsof -iTCP:<scratch-port> -sTCP:LISTEN -t | xargs kill`" + `. Prefer the helper ` + "`scripts/scratch-stack.sh`" + ` (start records PIDs; stop kills only those)
+- **Never touch the shared stack's ports** (e.g. :8080 serve, :3000 UI) — if a scratch process won't die cleanly, report it via task notes rather than escalating to broad kills
 `
 }
 
