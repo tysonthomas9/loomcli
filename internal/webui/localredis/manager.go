@@ -6,13 +6,16 @@
 // The snapshot file lives under ~/.loom/terminal-state/snapshot.json and
 // is rewritten atomically every 30 seconds and on shutdown. The previous
 // snapshot is retained as snapshot.json.bak so a partial write during a
-// hard kill cannot wipe user state.
+// hard kill cannot wipe user state. A sweep that cannot read every
+// persistable key ABORTS without touching the on-disk files, so a partial
+// keyspace read can never replace a good snapshot with a truncated one.
 package localredis
 
 import (
 	"context"
 	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -36,7 +39,27 @@ const (
 	// v2: + set, list, zset, stream  (required for embedded fleet-db)
 	currentSchemaVersion = 2
 	defaultInterval      = 30 * time.Second
-	dumpTimeout          = 5 * time.Second
+
+	// Sweep budgets. A sweep used to run under one shared 5s deadline;
+	// once a write-heavy burst pushed per-key latency up, the deadline
+	// expired mid-sweep and every remaining key failed instantly — and
+	// because keys are read in sorted order, the alphabetical tail
+	// (idx:*, issues:*, locks, workspaces) was what silently fell out of
+	// the snapshot. Reads now proceed in batches with a FRESH deadline
+	// per batch, so total sweep time scales with keyspace size while a
+	// wedged store still fails fast (its first batch times out and the
+	// rest is abandoned without further round trips).
+	defaultScanTimeout  = 5 * time.Second   // key enumeration (a handful of SCAN pages)
+	defaultBatchSize    = 500               // keys per read batch
+	defaultBatchTimeout = 5 * time.Second   // per-batch read budget
+	defaultSweepCap     = 120 * time.Second // whole-sweep ceiling for slow-but-succeeding stores
+
+	// defaultCloseSweepCap bounds the final dump in Close. The embedded
+	// CLI flow Closes a Manager at the end of every `loom <cmd>`, so the
+	// final dump must not inherit the generous periodic cap: if it cannot
+	// finish in this budget it aborts, leaving the last periodic snapshot
+	// (at most one interval old) as the durable state.
+	defaultCloseSweepCap = 15 * time.Second
 
 	// maxStreamEntriesPerKey caps how many entries from a single Redis
 	// Stream are serialized into the snapshot. Fleet-db's compaction
@@ -73,6 +96,21 @@ type Manager struct {
 	fleetKeys    bool
 	logger       *slog.Logger
 
+	// Sweep budgets. Default to the package constants; overridable at
+	// construction (test seams — production callers pass no Options).
+	scanTimeout   time.Duration
+	batchSize     int
+	batchTimeout  time.Duration
+	sweepCap      time.Duration
+	closeSweepCap time.Duration
+
+	// baseCtx parents every periodic/manual sweep; baseCancel fires at
+	// the START of Close so an in-flight sweep aborts promptly instead
+	// of blocking shutdown for up to sweepCap. The final dump in Close
+	// runs under a fresh context (it must survive this cancellation).
+	baseCtx    context.Context
+	baseCancel context.CancelFunc
+
 	stopCh    chan struct{}
 	stoppedCh chan struct{}
 	started   bool
@@ -88,12 +126,22 @@ type Manager struct {
 	lastDumpSet  bool
 }
 
+// Option configures a Manager at construction. The only options today
+// are sweep-budget test seams; production callers pass none.
+type Option func(*Manager)
+
+func withScanTimeout(d time.Duration) Option   { return func(m *Manager) { m.scanTimeout = d } }
+func withBatchSize(n int) Option               { return func(m *Manager) { m.batchSize = n } }
+func withBatchTimeout(d time.Duration) Option  { return func(m *Manager) { m.batchTimeout = d } }
+func withSweepCap(d time.Duration) Option      { return func(m *Manager) { m.sweepCap = d } }
+func withCloseSweepCap(d time.Duration) Option { return func(m *Manager) { m.closeSweepCap = d } }
+
 // NewManager starts an in-process miniredis and returns a Manager.
 // If snapshotPath is non-empty, the Manager loads an existing snapshot
 // from disk but does NOT start the periodic dump goroutine — call Start
 // for that. Pass an empty snapshotPath to disable persistence entirely
 // (tests).
-func NewManager(snapshotPath string, fleetKeys bool, logger *slog.Logger) (*Manager, error) {
+func NewManager(snapshotPath string, fleetKeys bool, logger *slog.Logger, opts ...Option) (*Manager, error) {
 	if logger == nil {
 		logger = slog.Default()
 	}
@@ -101,14 +149,28 @@ func NewManager(snapshotPath string, fleetKeys bool, logger *slog.Logger) (*Mana
 	if err != nil {
 		return nil, fmt.Errorf("start miniredis: %w", err)
 	}
+	baseCtx, baseCancel := context.WithCancel(context.Background())
 	m := &Manager{
-		mr:           mr,
-		client:       redis.NewClient(&redis.Options{Addr: mr.Addr()}),
-		snapshotPath: snapshotPath,
-		fleetKeys:    fleetKeys,
-		logger:       logger,
-		stopCh:       make(chan struct{}),
-		stoppedCh:    make(chan struct{}),
+		mr:            mr,
+		client:        redis.NewClient(&redis.Options{Addr: mr.Addr()}),
+		snapshotPath:  snapshotPath,
+		fleetKeys:     fleetKeys,
+		logger:        logger,
+		scanTimeout:   defaultScanTimeout,
+		batchSize:     defaultBatchSize,
+		batchTimeout:  defaultBatchTimeout,
+		sweepCap:      defaultSweepCap,
+		closeSweepCap: defaultCloseSweepCap,
+		baseCtx:       baseCtx,
+		baseCancel:    baseCancel,
+		stopCh:        make(chan struct{}),
+		stoppedCh:     make(chan struct{}),
+	}
+	for _, opt := range opts {
+		opt(m)
+	}
+	if m.batchSize <= 0 {
+		m.batchSize = defaultBatchSize
 	}
 	if snapshotPath != "" {
 		if err := m.load(); err != nil {
@@ -139,9 +201,9 @@ func (m *Manager) Start(ctx context.Context) {
 	go m.run(ctx)
 }
 
-// run is the periodic-dump loop. It uses context.Background() for the
-// dump call itself so shutdown dumps still go through after the parent
-// ctx is cancelled.
+// run is the periodic-dump loop. Dump derives its own context from the
+// Manager's lifetime (baseCtx), so it is independent of the Start ctx
+// and is interrupted promptly when Close begins shutdown.
 func (m *Manager) run(ctx context.Context) {
 	defer close(m.stoppedCh)
 	ticker := time.NewTicker(defaultInterval)
@@ -154,6 +216,12 @@ func (m *Manager) run(ctx context.Context) {
 			return
 		case <-ticker.C:
 			if err := m.Dump(); err != nil {
+				if m.baseCtx.Err() != nil {
+					// Shutdown interrupted this sweep; the final dump in
+					// Close supersedes it — keep the log quiet.
+					m.logger.Debug("periodic snapshot dump canceled by shutdown", "err", err)
+					continue
+				}
 				m.logger.Warn("periodic snapshot dump failed", "err", err)
 			}
 		}
@@ -162,24 +230,57 @@ func (m *Manager) run(ctx context.Context) {
 
 // Dump writes the current keyspace to the snapshot file. Safe to call
 // from any goroutine; the miniredis SCAN is serialized internally.
-// Uses context.Background() with a short timeout, so this keeps working
-// even when the parent ctx has been cancelled at shutdown.
+//
+// The sweep runs under the Manager's lifetime context capped at
+// sweepCap, with per-batch read deadlines inside (see collectEntries).
+// If ANY persistable key cannot be read, Dump aborts WITHOUT touching
+// the snapshot or its backup — a stale-but-complete snapshot beats a
+// fresh-but-truncated one — and returns a single summary error (the
+// per-key detail is at Debug level).
 //
 // Skips the disk write when the entries hash matches the previous dump
 // (no-op churn detector). DumpedAt is intentionally NOT included in the
 // hash so the dump is content-addressed, not time-addressed.
-//
-//nolint:funlen // Snapshot traversal is linear by Redis type and intentionally explicit.
 func (m *Manager) Dump() error {
 	if m.snapshotPath == "" {
 		return nil
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), dumpTimeout)
+	ctx, cancel := context.WithTimeout(m.baseCtx, m.sweepCap)
 	defer cancel()
+	return m.dump(ctx)
+}
 
-	entries, err := m.collectEntries(ctx)
+// dump runs one sweep+write attempt and records its outcome in the
+// package metrics. Single instrumentation point: every failure mode
+// (partial-read abort, scan failure, marshal, file I/O) increments the
+// failure counter, and every healthy sweep — including the idle
+// hash-match short-circuit — refreshes the last-success timestamp,
+// because a verified-unchanged keyspace is just as durable as a
+// rewritten one.
+func (m *Manager) dump(ctx context.Context) error {
+	if err := m.dumpOnce(ctx); err != nil {
+		snapshotFailuresTotal.Inc()
+		return err
+	}
+	snapshotLastSuccess.SetToCurrentTime()
+	return nil
+}
+
+//nolint:funlen // Snapshot assembly is linear and intentionally explicit.
+func (m *Manager) dumpOnce(ctx context.Context) error {
+	entries, st, err := m.collectEntries(ctx)
 	if err != nil {
 		return fmt.Errorf("collect entries: %w", err)
+	}
+	if st.aborted() {
+		// Some keys were unreadable (deadline, shutdown, transport).
+		// Writing what we have would silently drop the sorted tail of
+		// the keyspace from the snapshot AND rotate the good previous
+		// snapshot to .bak — two bad sweeps in a row would then leave
+		// no complete generation at all. Keep both files untouched and
+		// let the next tick retry; lastDumpHash is also left alone so
+		// the next healthy sweep always writes.
+		return st.abortError()
 	}
 	// Hash the entries (excluding DumpedAt timestamp) so an idle
 	// keyspace doesn't cause a write every tick. JSON-marshaled entries
@@ -243,9 +344,15 @@ func (m *Manager) Dump() error {
 
 // Close stops the periodic dump goroutine, writes a final snapshot, and
 // shuts down the miniredis server. Safe to call multiple times.
+//
+// Shutdown is bounded: baseCancel interrupts any in-flight periodic
+// sweep (which aborts without writing), and the final dump runs under
+// closeSweepCap on a fresh context. If even that budget is blown, the
+// last periodic snapshot remains the durable state.
 func (m *Manager) Close() error {
 	var closeErr error
 	m.closeOnce.Do(func() {
+		m.baseCancel()
 		m.mu.Lock()
 		running := m.started
 		m.mu.Unlock()
@@ -253,9 +360,14 @@ func (m *Manager) Close() error {
 			close(m.stopCh)
 			<-m.stoppedCh
 		}
-		if err := m.Dump(); err != nil {
-			m.logger.Warn("final snapshot dump failed", "err", err)
-			closeErr = err
+		if m.snapshotPath != "" {
+			ctx, cancel := context.WithTimeout(context.Background(), m.closeSweepCap)
+			err := m.dump(ctx)
+			cancel()
+			if err != nil {
+				m.logger.Warn("final snapshot dump failed", "err", err)
+				closeErr = err
+			}
 		}
 		_ = m.client.Close()
 		m.mr.Close()
@@ -314,17 +426,52 @@ func (m *Manager) shouldPersist(key string) bool {
 	return false
 }
 
-// collectEntries walks the miniredis keyspace and returns all persistable
-// entries in deterministic order (sorted by key) for stable snapshots.
+// sweepStats records the outcome of one collectEntries pass so dumpOnce
+// can decide whether the result is trustworthy enough to rotate+write.
+// The invariant read + skipped + unread == persisted always holds.
+type sweepStats struct {
+	scanned   int           // keys returned by SCAN
+	persisted int           // keys that matched shouldPersist (the read set)
+	read      int           // entries successfully serialized
+	skipped   int           // silent skips (expired/empty/unsupported) — not failures
+	unread    int           // keys whose read failed — the abort trigger
+	firstErr  error         // first read failure, verbatim, for the summary
+	elapsed   time.Duration // wall time of the whole sweep
+}
+
+func (s sweepStats) aborted() bool { return s.unread > 0 }
+
+// abortError condenses a failed sweep into the single summary line the
+// run loop logs — replacing the old one-WARN-per-key storm (6,800+
+// lines in one serve.log) with one actionable message.
+func (s sweepStats) abortError() error {
+	return fmt.Errorf("snapshot aborted: %d/%d keys unread (first: %v), elapsed=%s",
+		s.unread, s.persisted, s.firstErr, s.elapsed.Round(100*time.Millisecond))
+}
+
+// isVanishedKeyErr reports whether a per-key read error only means the
+// key vanished between SCAN and the read. TTL'd keys (fleet-db locks,
+// worker leases) expire constantly, so this is normal churn — treating
+// it as a failure would abort, and under steady churn starve, the
+// snapshot. Only the string-type GET errors this way (redis.Nil): the
+// aggregate reads return empty results and TYPE returns "none" for a
+// vanished key, both of which readEntry already skips.
+func isVanishedKeyErr(err error) bool { return errors.Is(err, redis.Nil) }
+
+// listKeys SCANs the entire keyspace under its own deadline (a handful
+// of SCAN pages — independent of the per-batch read budgets) and
+// returns the keys sorted for deterministic snapshots.
 //
 // Uses SCAN rather than KEYS to avoid the canonical "blocks the entire
 // server" issue — even though miniredis is in-process, the dump runs on
 // a 30s timer alongside live traffic.
-func (m *Manager) collectEntries(ctx context.Context) ([]snapshotEntry, error) {
+func (m *Manager) listKeys(ctx context.Context) ([]string, error) {
+	scanCtx, cancel := context.WithTimeout(ctx, m.scanTimeout)
+	defer cancel()
 	var keys []string
 	var cursor uint64
 	for {
-		batch, next, err := m.client.Scan(ctx, cursor, "*", 1000).Result()
+		batch, next, err := m.client.Scan(scanCtx, cursor, "*", 1000).Result()
 		if err != nil {
 			return nil, fmt.Errorf("scan: %w", err)
 		}
@@ -335,22 +482,84 @@ func (m *Manager) collectEntries(ctx context.Context) ([]snapshotEntry, error) {
 		}
 	}
 	sort.Strings(keys)
-	entries := make([]snapshotEntry, 0, len(keys))
-	for _, key := range keys {
-		if !m.shouldPersist(key) {
-			continue
-		}
+	return keys, nil
+}
+
+// readBatch reads one slice of keys under a fresh per-batch deadline,
+// appending successful entries and folding failures/skips into st. It
+// never returns an error: the abort signal lives in st.unread so the
+// caller can account for the keys it then abandons.
+func (m *Manager) readBatch(parent context.Context, keys []string, out *[]snapshotEntry, st *sweepStats) {
+	ctx, cancel := context.WithTimeout(parent, m.batchTimeout)
+	defer cancel()
+	for i, key := range keys {
 		entry, err := m.readEntry(ctx, key)
-		if err != nil {
-			m.logger.Warn("failed to read key for snapshot", "key", key, "err", err)
-			continue
+		switch {
+		case err != nil && isVanishedKeyErr(err):
+			st.skipped++
+		case err != nil:
+			st.unread++
+			if st.firstErr == nil {
+				st.firstErr = err
+			}
+			m.logger.Debug("failed to read key for snapshot", "key", key, "err", err)
+			if ctx.Err() != nil {
+				// The batch deadline (or the sweep cap / shutdown cancel
+				// above it) expired: every later read would fail the same
+				// way. Account for the keys after this one without issuing
+				// doomed round trips or logging once per key.
+				st.unread += len(keys) - i - 1
+				return
+			}
+		case entry == nil:
+			st.skipped++
+		default:
+			st.read++
+			*out = append(*out, *entry)
 		}
-		if entry == nil {
-			continue
-		}
-		entries = append(entries, *entry)
 	}
-	return entries, nil
+}
+
+// collectEntries walks the persistable keyspace in deterministic order
+// and returns the entries plus a sweepStats describing completeness.
+// Reads are chunked into batches each with their own deadline, so total
+// sweep time scales with keyspace size instead of being capped by one
+// shared timeout (the old 5s budget silently truncated the sorted tail
+// under write-heavy load). The caller MUST consult stats.aborted()
+// before trusting the result.
+func (m *Manager) collectEntries(ctx context.Context) ([]snapshotEntry, sweepStats, error) {
+	start := time.Now()
+	var st sweepStats
+	keys, err := m.listKeys(ctx)
+	if err != nil {
+		st.elapsed = time.Since(start)
+		return nil, st, err
+	}
+	st.scanned = len(keys)
+	persist := keys[:0] // filter in place; write index never passes read index
+	for _, key := range keys {
+		if m.shouldPersist(key) {
+			persist = append(persist, key)
+		}
+	}
+	st.persisted = len(persist)
+	entries := make([]snapshotEntry, 0, len(persist))
+	for i := 0; i < len(persist); i += m.batchSize {
+		end := i + m.batchSize
+		if end > len(persist) {
+			end = len(persist)
+		}
+		m.readBatch(ctx, persist[i:end], &entries, &st)
+		if st.aborted() {
+			// The sweep is already doomed (dumpOnce will not write), so
+			// reading the remaining batches is pure waste — account for
+			// them and stop.
+			st.unread += len(persist) - end
+			break
+		}
+	}
+	st.elapsed = time.Since(start)
+	return entries, st, nil
 }
 
 //nolint:gocognit,cyclop,funlen // Redis type-specific snapshot reads stay together for symmetry with replay.

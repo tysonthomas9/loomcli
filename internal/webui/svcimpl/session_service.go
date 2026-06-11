@@ -146,6 +146,9 @@ func (s *sessionServiceImpl) ListTaskSessions(ctx context.Context, wsID, taskID 
 			if info, err := os.Stat(sessStore.NativeTranscriptPath(rec.SessionID)); err == nil && info.Size() > 0 {
 				item.HasTranscript = true
 			}
+			if !item.HasTranscript && eventStoreHasTranscript(sessStore, rec.SessionID) {
+				item.HasTranscript = true // F3: event store as a has_transcript source (native fallback above)
+			}
 			if diff, err := sessStore.ReadDiff(rec.SessionID); err == nil && diff != "" {
 				item.HasDiff = true
 			}
@@ -279,6 +282,9 @@ func fillControlPlaneArtifactFlags(item *service.SessionListItem, stores []*sess
 		if info, err := os.Stat(st.NativeTranscriptPath(rec.SessionID)); err == nil && info.Size() > 0 {
 			item.HasTranscript = true
 		}
+		if !item.HasTranscript && eventStoreHasTranscript(st, rec.SessionID) {
+			item.HasTranscript = true // F3: event store as a has_transcript source (native fallback above)
+		}
 		if diff, err := st.ReadDiff(rec.SessionID); err == nil && diff != "" {
 			item.HasDiff = true
 		}
@@ -393,6 +399,11 @@ func (s *sessionServiceImpl) GetSessionTranscript(ctx context.Context, wsID, tas
 			return nil, err
 		}
 		return s.controlPlaneSessionTranscript(ctx, wsID, taskID, sessionID)
+	}
+	// F3: serve from the event store when enabled + populated, else fall back to
+	// the native reader (transitional — transcripts never disappear mid-rollout).
+	if evs, ok := eventStoreParentEvents(store, sessionID); ok {
+		return evs, nil
 	}
 	events, loadErr := store.LoadNativeEvents(sessionID)
 	if loadErr != nil {
@@ -557,11 +568,22 @@ func (s *sessionServiceImpl) ListSessionSubagents(ctx context.Context, wsID, tas
 		return nil, service.ErrInternal("failed to list subagents", err)
 	}
 	ids := make([]string, 0, len(names))
+	seen := make(map[string]struct{}, len(names))
 	for _, name := range names {
 		// Format: agent-<id>.jsonl
 		stripped := strings.TrimSuffix(strings.TrimPrefix(name, "agent-"), ".jsonl")
 		if stripped != "" {
+			seen[stripped] = struct{}{}
 			ids = append(ids, stripped)
+		}
+	}
+	if eventIDs, ok := eventStoreSubagentIDs(store, sessionID); ok {
+		for _, id := range eventIDs {
+			if _, exists := seen[id]; exists {
+				continue
+			}
+			seen[id] = struct{}{}
+			ids = append(ids, id)
 		}
 	}
 	return ids, nil
@@ -577,6 +599,11 @@ func (s *sessionServiceImpl) GetSessionSubagentTranscript(ctx context.Context, w
 	}
 	if !sessions.SubagentIDPattern.MatchString(subagentID) {
 		return nil, service.ErrValidation("invalid subagent ID")
+	}
+	// F3: serve the subagent from the event store when enabled + populated, else
+	// fall back to the native subagent transcript.
+	if evs, ok := eventStoreSubagentEvents(store, sessionID, subagentID); ok {
+		return evs, nil
 	}
 	path := store.SubagentTranscriptPath(sessionID, subagentID)
 	if _, statErr := os.Stat(path); statErr != nil {

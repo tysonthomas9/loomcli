@@ -218,6 +218,23 @@ func ttlSeconds(ttl time.Duration) int {
 	return int(ttl.Round(time.Second) / time.Second)
 }
 
+// workerStore renews/removes fleet-db worker registrations over HTTP.
+type workerStore struct{ client *Client }
+
+var _ store.WorkerStore = (*workerStore)(nil)
+
+// Heartbeat renews the worker registration lease via the fleet-db worker
+// heartbeat endpoint. The response body (HeartbeatResult) is not consumed.
+func (s *workerStore) Heartbeat(ctx context.Context, ws, workerID string) error {
+	return s.client.do(ctx, "POST", "/api/v1/"+pathEscape(ws)+"/workers/"+pathEscape(workerID)+"/heartbeat", nil, nil)
+}
+
+// Deregister removes the worker registration (and releases any held issue
+// lock) via the fleet-db worker DELETE endpoint. Idempotent server-side.
+func (s *workerStore) Deregister(ctx context.Context, ws, workerID string) error {
+	return s.client.do(ctx, "DELETE", "/api/v1/"+pathEscape(ws)+"/workers/"+pathEscape(workerID), nil, nil)
+}
+
 type terminalSessionStore struct{ client *Client }
 
 var _ store.TerminalSessionStore = (*terminalSessionStore)(nil)

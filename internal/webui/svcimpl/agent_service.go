@@ -329,7 +329,9 @@ func (s *agentServiceImpl) GitStatus(_ context.Context, wsID, agentName string) 
 }
 
 // ListAgents returns all agents registered for the workspace via the
-// fleet-db store. Returns ErrUnavailable when no store handle was
+// fleet-db store. The derived live status (live_status/active_task_id/
+// active_phase) is computed by fleet-db and carried through on each record;
+// loom does not derive it. Returns ErrUnavailable when no store handle was
 // provided at construction time.
 func (s *agentServiceImpl) ListAgents(ctx context.Context, wsKey string) ([]*domain.Agent, error) {
 	if s.store == nil {

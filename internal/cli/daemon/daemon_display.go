@@ -53,6 +53,9 @@ func printAgentDiagnostics(agent DaemonAgentStatus) {
 	if agent.NoWorkCount > 0 {
 		fmt.Printf("      NoWork: %d\n", agent.NoWorkCount)
 	}
+	if agent.ParkCount > 0 {
+		fmt.Printf("      Park cycles: %d\n", agent.ParkCount)
+	}
 	if !agent.BackoffUntil.IsZero() && agent.BackoffUntil.After(time.Now()) {
 		remaining := time.Until(agent.BackoffUntil)
 		fmt.Printf("      Backoff: %s remaining\n", formatDaemonDuration(remaining))

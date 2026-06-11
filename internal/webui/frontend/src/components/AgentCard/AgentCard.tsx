@@ -3,10 +3,11 @@
  * Compact single-row layout with circular avatar, status dot, and line diff stats.
  */
 
-import type { LoomAgentStatus, ParsedLoomStatus } from "@/types";
-import { parseLoomStatus } from "@/types";
+import type { LoomAgentStatus } from "@/types";
+import { effectiveAgentStatus, parseLoomStatus } from "@/types";
 import { RepoBadge } from "@/components/RepoBadge";
 import { getAvatarColor, shouldUseWhiteText } from "@/utils/colorUtils";
+import { getStatusDotColor, getStatusLabel } from "@/utils/agent";
 
 import styles from "./AgentCard.module.css";
 
@@ -29,56 +30,6 @@ export interface AgentCardProps {
 }
 
 /**
- * Get status dot color based on parsed status type.
- */
-export function getStatusDotColor(type: ParsedLoomStatus["type"]): string {
-  switch (type) {
-    case "working":
-    case "planning":
-    case "dirty":
-    case "changes":
-      return "var(--color-status-working, #facc15)";
-    case "error":
-      return "var(--color-status-error, #ef4444)";
-    case "done":
-      return "var(--color-status-done, #22c55e)";
-    case "review":
-      return "var(--color-status-review, #3b82f6)";
-    case "idle":
-    case "ready":
-    default:
-      return "var(--color-status-idle, #9ca3af)";
-  }
-}
-
-/**
- * Build the status label text for the right-hand meta column.
- */
-export function getStatusLabel(parsed: ParsedLoomStatus): string {
-  switch (parsed.type) {
-    case "working":
-      return "Working";
-    case "planning":
-      return "Planning";
-    case "done":
-      return "Done";
-    case "review":
-      return "Review";
-    case "idle":
-      return "Idle";
-    case "error":
-      return "Error";
-    case "dirty":
-      return "Uncommitted changes";
-    case "changes":
-      return `${parsed.changeCount ?? 0} change${parsed.changeCount === 1 ? "" : "s"}`;
-    case "ready":
-    default:
-      return "Ready";
-  }
-}
-
-/**
  * AgentCard displays a single agent's status in a compact row with circular avatar.
  */
 export function AgentCard({
@@ -89,10 +40,16 @@ export function AgentCard({
   showRepoBadge = true,
   compact = false,
 }: AgentCardProps): JSX.Element {
-  const parsed = parseLoomStatus(agent.status);
+  const parsed = parseLoomStatus(effectiveAgentStatus(agent));
   const avatarColor = getAvatarColor(agent.name);
   const dotColor = getStatusDotColor(parsed.type);
   const statusLabel = getStatusLabel(parsed);
+  // When the badge reflects fleet-db's live_status (serve-only deployments,
+  // where no task title is loaded), surface the active task/phase on hover.
+  const liveDetail =
+    agent.live_status === "working"
+      ? [agent.active_task_id, agent.active_phase].filter(Boolean).join(" · ")
+      : "";
   const isError = parsed.type === "error";
   const initial = agent.name.charAt(0) || "?";
   const textColor = shouldUseWhiteText(avatarColor) ? "#fff" : "#1f2937";
@@ -161,7 +118,7 @@ export function AgentCard({
         <span
           className={styles.statusLine}
           data-error={isError || undefined}
-          title={taskTitle || statusLabel}
+          title={taskTitle || liveDetail || statusLabel}
         >
           {statusLabel}
         </span>

@@ -99,8 +99,8 @@ func TestCreateParamsToBody_RenamesFields(t *testing.T) {
 	if req["priority"] != 3 {
 		t.Errorf("priority = %v, want 3", req["priority"])
 	}
-	if _, ok := req["status"]; ok {
-		t.Error("status must be dropped — FleetBackend.Create applies status via workflow endpoints")
+	if req["status"] != "deferred" {
+		t.Errorf("status = %v, want deferred", req["status"])
 	}
 	if req["defer_until"] != "2026-05-01T00:00:00Z" {
 		t.Errorf("defer_until = %v, want RFC3339", req["defer_until"])
@@ -123,7 +123,7 @@ func TestCreateParamsToBody_DropsLoomOnlyFields(t *testing.T) {
 		Dependencies:       []string{"loom-2"},
 	})
 	for _, k := range []string{
-		"id", "status", "acceptance_criteria", "created_by",
+		"id", "acceptance_criteria", "created_by",
 		"external_ref", "estimated_minutes", "dependencies",
 	} {
 		if _, ok := req[k]; ok {

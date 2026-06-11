@@ -28,8 +28,8 @@ func TestAcquireAgentOwnershipContinuesWhenBackendDoesNotSupportOwnershipLeases(
 	ap.OwnershipFencingToken = 99
 	ap.OwnershipLastHeartbeat = time.Now()
 
-	if !s.acquireAgentOwnership(ap) {
-		t.Fatal("acquireAgentOwnership returned false for unsupported ownership lease backend")
+	if got := s.acquireAgentOwnership(ap); got != ownershipAcquired {
+		t.Fatalf("acquireAgentOwnership = %v, want ownershipAcquired for unsupported ownership lease backend", got)
 	}
 
 	ap.Mu.Lock()

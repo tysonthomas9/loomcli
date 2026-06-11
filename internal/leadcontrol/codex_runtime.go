@@ -18,7 +18,7 @@ import (
 )
 
 const (
-	defaultCodexBinary            = "codex"
+	defaultCodexBinary           = "codex"
 	codexAppServerReadyTimeout   = 10 * time.Second
 	codexThreadDiscoveryTimeout  = 45 * time.Second
 	codexThreadDiscoveryInterval = 500 * time.Millisecond

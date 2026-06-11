@@ -1,10 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-API_URL="${LOCAL_MODE_API_URL:-http://localhost:8282}"
+API_URL="${LOCAL_MODE_API_URL:-http://localhost:${LOCAL_MODE_API_PORT:-8282}}"
 WORKSPACE="${LOOM_WORKSPACE:-LOCALMODE}"
-PLAN_TASK_ID="${LOOM_LOCAL_MODE_PLAN_TASK_ID:-${WORKSPACE}-1}"
-CODE_TASK_ID="${LOOM_LOCAL_MODE_CODE_TASK_ID:-${WORKSPACE}-2}"
+PLAN_TASK_ID="${LOOM_LOCAL_MODE_PLAN_TASK_ID:-LM-PLAN-1}"
+CODE_TASK_ID="${LOOM_LOCAL_MODE_CODE_TASK_ID:-LM-CODE-1}"
+PLAN_TASK_TITLE="${LOOM_LOCAL_MODE_PLAN_TASK_TITLE:-Local mode planner dogfood}"
+CODE_TASK_TITLE="${LOOM_LOCAL_MODE_CODE_TASK_TITLE:-Local mode coder dogfood}"
 TIMEOUT_SECONDS="${LOCAL_MODE_VERIFY_TIMEOUT:-240}"
 POLL_SECONDS="${LOCAL_MODE_VERIFY_POLL_SECONDS:-2}"
 
@@ -53,6 +55,31 @@ issue_json() {
   api_get "api/workspaces/${WORKSPACE}/issues/${task_id}"
 }
 
+resolve_task_id() {
+  task_id="$1"
+  title="$2"
+  if issue_json "$task_id" >/dev/null 2>&1; then
+    printf '%s\n' "$task_id"
+    return 0
+  fi
+  api_get "api/workspaces/${WORKSPACE}/issues" | jq -r --arg title "$title" '
+    (.data // .issues // []) |
+    map(select(.title == $title)) |
+    sort_by(.created_at // "") |
+    reverse |
+    .[0].id // empty
+  '
+}
+
+resolve_configured_task_ids() {
+  resolved_plan="$(resolve_task_id "$PLAN_TASK_ID" "$PLAN_TASK_TITLE")"
+  [ "$resolved_plan" != "" ]
+  resolved_code="$(resolve_task_id "$CODE_TASK_ID" "$CODE_TASK_TITLE")"
+  [ "$resolved_code" != "" ]
+  PLAN_TASK_ID="$resolved_plan"
+  CODE_TASK_ID="$resolved_code"
+}
+
 issue_status_is() {
   task_id="$1"
   expected="$2"
@@ -83,7 +110,20 @@ sessions_json() {
 first_session_id() {
   task_id="$1"
   sessions_json "$task_id" | jq -r \
-    '(.data.sessions // .sessions // [])[0].session_id // empty'
+    '(.data.sessions // .sessions // []) |
+    map(select(.status == "completed" and .is_active == false)) |
+    sort_by(.ended_at // .started_at // "") |
+    reverse |
+    .[0].session_id // empty'
+}
+
+code_diff_session_id() {
+  sessions_json "$CODE_TASK_ID" | jq -r \
+    '(.data.sessions // .sessions // []) |
+    map(select(.status == "completed" and (.has_diff == true or ((.files_changed // 0) > 0)))) |
+    sort_by(.ended_at // .started_at // "") |
+    reverse |
+    .[0].session_id // empty'
 }
 
 task_has_completed_session() {
@@ -119,7 +159,7 @@ transcript_has_entries() {
 }
 
 code_diff_mentions_output_file() {
-  session_id="$(first_session_id "$CODE_TASK_ID")"
+  session_id="$(code_diff_session_id)"
   [ "$session_id" != "" ]
   curl -fsS --max-time 10 \
     "${API_URL}/api/workspaces/${WORKSPACE}/tasks/${CODE_TASK_ID}/sessions/${session_id}/diff" |
@@ -137,6 +177,8 @@ echo "[local-mode-verify] api=${API_URL} workspace=${WORKSPACE}"
 echo "[local-mode-verify] planner=${PLAN_TASK_ID} coder=${CODE_TASK_ID}"
 
 wait_for "Loom API is reachable" api_reachable
+wait_for "local-mode tasks exist" resolve_configured_task_ids
+echo "[local-mode-verify] resolved planner=${PLAN_TASK_ID} coder=${CODE_TASK_ID}"
 
 wait_for "planner task moved to review" issue_status_is "$PLAN_TASK_ID" review
 wait_for "planner task has design" issue_has_design "$PLAN_TASK_ID"

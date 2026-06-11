@@ -90,6 +90,7 @@ type Client struct {
 	runs       *driverRunStore
 	steps      *driverStepStore
 	taskRuns   *taskRunStore
+	workers    *workerStore
 	roles      *roleStore
 	daemon     *daemonStore
 }
@@ -131,6 +132,7 @@ func New(cfg Config) (*Client, error) {
 	c.runs = &driverRunStore{client: c}
 	c.steps = &driverStepStore{client: c}
 	c.taskRuns = &taskRunStore{client: c}
+	c.workers = &workerStore{client: c}
 	c.roles = &roleStore{client: c}
 	c.daemon = &daemonStore{client: c}
 	return c, nil
@@ -188,6 +190,9 @@ func (c *Client) DriverSteps() store.DriverStepStore { return c.steps }
 
 // TaskRuns returns the TaskRunStore.
 func (c *Client) TaskRuns() store.TaskRunStore { return c.taskRuns }
+
+// Workers returns the WorkerStore.
+func (c *Client) Workers() store.WorkerStore { return c.workers }
 
 // Roles returns the RoleStore.
 func (c *Client) Roles() store.RoleStore { return c.roles }
@@ -327,6 +332,10 @@ func classifyHTTPError(method, path string, status int, body []byte) error {
 		return fmt.Errorf("%s: %w", prefix, domain.ErrConflict)
 	case http.StatusBadRequest, http.StatusUnprocessableEntity:
 		return fmt.Errorf("%s: %w", prefix, domain.ErrInvalid)
+	case http.StatusGone:
+		// fleet-db heartbeat: lease exists, token is ours, but it is no
+		// longer live (expired or released) — re-acquire is safe.
+		return fmt.Errorf("%s: %w", prefix, domain.ErrGone)
 	}
 	if status >= 400 && status < 500 {
 		return fmt.Errorf("%s: %w", prefix, domain.ErrConflict)

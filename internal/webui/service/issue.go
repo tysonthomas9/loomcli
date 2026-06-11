@@ -101,6 +101,11 @@ type CreateIssueParams struct {
 	DueAt              string
 	DeferUntil         string
 	SourceRepo         string
+	// IdempotencyKey / Force arrive as X-Idempotency-Key / X-Idempotency-Force
+	// request headers and are forwarded header-only to fleet-db (its strict
+	// JSON decode rejects unknown body fields).
+	IdempotencyKey string
+	Force          bool
 }
 
 // PatchIssueParams mirrors PatchIssueRequest but is not HTTP-bound.

@@ -1,13 +1,19 @@
 package supervisor
 
 import (
+	"context"
 	"errors"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/olesho/harness-wrapper/pkg/discovery"
 
 	"github.com/tysonthomas9/loomcli/internal/agenterr"
+	"github.com/tysonthomas9/loomcli/internal/backend"
+	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/backendcheck"
+	"github.com/tysonthomas9/loomcli/internal/cli/clitest"
 	cfgpkg "github.com/tysonthomas9/loomcli/internal/cli/config"
 	"github.com/tysonthomas9/loomcli/internal/events"
 )
@@ -76,7 +82,7 @@ func TestSpawnAgent_BackendNotOnPATH_DoesNotCrashLoop(t *testing.T) {
 	if ap.LastError == nil {
 		t.Fatal("LastError must be populated")
 	}
-	if ap.LastError.Class != agenterr.BackendUnavailable {
+	if ap.LastError.Class != agenterr.OutcomeFromDomain(agenterr.BackendUnavailableOutcome) {
 		t.Errorf("LastError.Class = %v, want BackendUnavailable", ap.LastError.Class)
 	}
 	if ap.LastError.Backend != "codex" {
@@ -161,7 +167,7 @@ func TestSpawnAgent_BackendRecoveryClearsState(t *testing.T) {
 	if ap.StopReason != "" {
 		t.Errorf("StopReason after recovery = %q, want empty", ap.StopReason)
 	}
-	if ap.LastError != nil && ap.LastError.Class == agenterr.BackendUnavailable {
+	if ap.LastError != nil && ap.LastError.Class == agenterr.OutcomeFromDomain(agenterr.BackendUnavailableOutcome) {
 		t.Errorf("LastError still carries BackendUnavailable after recovery: %+v", ap.LastError)
 	}
 }
@@ -195,11 +201,104 @@ func TestSpawnAndWait_BackendUnavailable_ParksWithoutSpawning(t *testing.T) {
 	if ap.StopReason != StopReasonBackendUnavailable {
 		t.Errorf("StopReason = %q, want %q", ap.StopReason, StopReasonBackendUnavailable)
 	}
-	if ap.LastError == nil || ap.LastError.Class != agenterr.BackendUnavailable {
+	if ap.LastError == nil || ap.LastError.Class != agenterr.OutcomeFromDomain(agenterr.BackendUnavailableOutcome) {
 		t.Errorf("LastError = %+v, want BackendUnavailable", ap.LastError)
 	}
 	if ap.Cmd != nil {
 		t.Errorf("Cmd = %v, want nil (gate fires before buildCommand; no subprocess)", ap.Cmd)
+	}
+}
+
+func TestPreFlightSetup_BackendUnavailableDoesNotClaimTask(t *testing.T) {
+	stubCheckBackend(t, func(name string) (discovery.Info, error) {
+		return discovery.Info{Name: name, Binary: name, Installed: false, InstallHint: "missing"}, nil
+	})
+
+	mock := clitest.NewMockIssueBackend()
+	mock.ReadyResult = []backend.IssueData{
+		{ID: "task-1", IssueType: "task", Status: "open", Title: "Ready", Design: "design"},
+	}
+	s := newBackendUnavailableSupervisor()
+	s.IssueBackend = mock
+	ap := newBackendUnavailableAgentProcess()
+	ap.Entry.Role = "task"
+	ap.RoleConfig = cfgpkg.RoleConfig{TaskFilter: "has_design"}
+	ap.WorktreePath = t.TempDir()
+
+	if s.preFlightSetup(ap) {
+		t.Fatal("preFlightSetup returned true, want backend-unavailable park")
+	}
+	if len(mock.Calls) != 0 {
+		t.Fatalf("issue backend was called before backend gate: %#v", mock.Calls)
+	}
+	if ap.AssignedTaskID != "" {
+		t.Fatalf("AssignedTaskID = %q, want empty", ap.AssignedTaskID)
+	}
+	if ap.LastError == nil || ap.LastError.Class != agenterr.OutcomeFromDomain(agenterr.BackendUnavailableOutcome) {
+		t.Fatalf("LastError = %+v, want BackendUnavailable", ap.LastError)
+	}
+}
+
+type backendUnavailableActorIssueBackend struct {
+	*clitest.MockIssueBackend
+	releases atomic.Int64
+}
+
+func (b *backendUnavailableActorIssueBackend) ClaimIssueAsActor(ctx context.Context, id string, ttl time.Duration, _ string) error {
+	return b.ClaimIssue(ctx, id, ttl)
+}
+
+func (b *backendUnavailableActorIssueBackend) ReleaseIssueAsActor(ctx context.Context, id, actor string) error {
+	b.releases.Add(1)
+	return b.ReleaseIssueLock(ctx, id, actor)
+}
+
+func TestSpawnAndWait_BackendUnavailableAfterClaimCleansWorkerState(t *testing.T) {
+	stubCheckBackend(t, func(name string) (discovery.Info, error) {
+		return discovery.Info{Name: name, Binary: name, Installed: false, InstallHint: "missing"}, nil
+	})
+
+	runtimeDir := t.TempDir()
+	t.Setenv("LOOM_WORKSPACE_RUNTIME_DIR", runtimeDir)
+	cli.ResetWorkspaceRuntimeDirCache()
+	t.Cleanup(cli.ResetWorkspaceRuntimeDirCache)
+
+	ib := &backendUnavailableActorIssueBackend{MockIssueBackend: clitest.NewMockIssueBackend()}
+	ib.ReadyResult = []backend.IssueData{
+		{ID: "task-1", IssueType: "task", Status: "open", Title: "Ready", Design: "design"},
+	}
+	s, workers := newWorkerWiringSupervisor()
+	s.IssueBackend = ib
+	s.Concurrency = NewConcurrencyTracker(nil)
+
+	ap := &AgentProcess{
+		Entry:        cfgpkg.AgentEntry{Worktree: "falcon", Role: "task", Backend: "codex"},
+		RoleConfig:   cfgpkg.RoleConfig{TaskFilter: "has_design"},
+		WorktreePath: t.TempDir(),
+		StopCh:       make(chan struct{}),
+	}
+
+	if !s.claimTask(ap, "") {
+		t.Fatal("claimTask returned false")
+	}
+	s.createAgentSession(ap, "")
+	if ap.AssignedTaskID != "task-1" {
+		t.Fatalf("AssignedTaskID = %q, want task-1", ap.AssignedTaskID)
+	}
+	if ap.AgentSessionID == "" {
+		t.Fatal("AgentSessionID is empty; test setup failed")
+	}
+
+	s.spawnAndWait(ap)
+
+	if got := ib.releases.Load(); got != 1 {
+		t.Fatalf("task claim releases = %d, want 1", got)
+	}
+	if got := workers.deregisters.Load(); got != 1 {
+		t.Fatalf("worker deregisters = %d, want 1", got)
+	}
+	if ap.AgentSessionID != "" || ap.AgentLeaseID != "" || ap.AgentLeaseToken != "" {
+		t.Fatalf("session state not cleared: session=%q lease=%q token=%q", ap.AgentSessionID, ap.AgentLeaseID, ap.AgentLeaseToken)
 	}
 }
 
@@ -215,7 +314,7 @@ func TestShouldRestart_BackendUnavailable_ParksWithoutEroding(t *testing.T) {
 	// State the gate leaves behind (see gateBackendAvailable): a
 	// BackendUnavailable LastError. Start at the retry limit — a generic error
 	// here would already fail the agent.
-	ap.LastError = &agenterr.AgentError{Class: agenterr.BackendUnavailable, Backend: "codex"}
+	ap.LastError = &agenterr.AgentError{Class: agenterr.OutcomeFromDomain(agenterr.BackendUnavailableOutcome), Backend: "codex"}
 	ap.RestartCount = s.getMaxRetries()
 
 	for i := 0; i < 5; i++ {

@@ -526,47 +526,28 @@ func (b *FleetBackend) SearchIssues(ctx context.Context, query string, limit int
 
 func (b *FleetBackend) Create(ctx context.Context, params backend.CreateParams) (*backend.IssueData, error) {
 	body := createParamsToBody(params)
-	resp, err := b.exec(ctx, "Create", "POST", "/issues", body)
+	apiResp, statusCode, respHeaders, err := b.doRequestHeaders(ctx, "POST", "/issues", body, params.IdempotencyHeaders())
 	if err != nil {
-		return nil, err
+		return nil, classifyTransportError("Create", err)
 	}
-	if !hasData(resp) {
+	if cerr := classifyHTTPError("Create", statusCode, *apiResp); cerr != nil {
+		return nil, cerr
+	}
+	if !hasData(apiResp) {
 		return nil, backend.ErrInternal("Create", "empty response from server", nil)
 	}
 	var issue types.Issue
-	if err := json.Unmarshal(resp.Data, &issue); err != nil {
+	if err := json.Unmarshal(apiResp.Data, &issue); err != nil {
 		return nil, backend.ErrInternal("Create", "unmarshal response", err)
 	}
+	logIdempotencyResponse(respHeaders, issue.ID)
 	result := issueToData(&issue)
-	for _, depID := range params.Dependencies {
-		if strings.TrimSpace(depID) == "" {
-			continue
-		}
-		if err := b.postDependency(ctx, backend.DepAddParams{
-			FromID:  result.ID,
-			ToID:    depID,
-			DepType: "blocks",
-		}); err != nil {
-			return nil, err
-		}
-	}
-	if err := b.applyCreateStatus(ctx, result.ID, params); err != nil {
-		return nil, err
+	if err := b.addCreateDependencies(ctx, result.ID, params.Dependencies); err != nil {
+		// The issue itself was created; return it alongside the error so
+		// callers that inspect the partial result can still see the ID.
+		return &result, err
 	}
 	return &result, nil
-}
-
-func (b *FleetBackend) applyCreateStatus(ctx context.Context, id string, params backend.CreateParams) error {
-	target := strings.TrimSpace(params.Status)
-	if target == "" || target == "open" {
-		return nil
-	}
-	update := backend.UpdateParams{Status: &target}
-	if params.DeferUntil != "" {
-		update.DeferUntil = &params.DeferUntil
-	}
-	_, err := b.applyStatusUpdate(ctx, id, update)
-	return err
 }
 
 // shouldAssignBeforeStatus reports whether a requested assignee change must be
@@ -670,6 +651,9 @@ func (b *FleetBackend) applyStatusUpdate(ctx context.Context, id string, params 
 	case "open":
 		return false, b.transitionToOpen(ctx, id, current, clearAssigneeOnOpen)
 	case "closed":
+		// Release the claim before closing (see Close): the issue is terminal
+		// afterward and can't be unassigned. Best-effort.
+		_ = b.releaseClaim(ctx, id)
 		_, err := b.exec(ctx, "Update", "POST", "/issues/"+url.PathEscape(id)+"/close", map[string]interface{}{})
 		return false, err
 	case "deferred":
@@ -779,6 +763,15 @@ func (b *FleetBackend) assignIssue(ctx context.Context, id, assignee string) err
 	}{Assignee: assignee}
 	_, err := b.exec(ctx, "Update", "POST", "/issues/"+url.PathEscape(id)+"/assign", body)
 	return err
+}
+
+// releaseClaim clears the assignee ("the agent currently working this") when a
+// task leaves the in_progress workflow. Without it the claim lingers and the
+// kanban renders a stale agent row on the reopened/closed card. It is a no-op
+// server-side when there's no assignee. fleet-db rejects /assign on terminal
+// issues, so close callers must release *before* closing.
+func (b *FleetBackend) releaseClaim(ctx context.Context, id string) error {
+	return b.assignIssue(ctx, id, "")
 }
 
 func (b *FleetBackend) deferIssue(ctx context.Context, id string, until time.Time) error {
@@ -934,6 +927,10 @@ func (b *FleetBackend) Close(ctx context.Context, id string, params backend.Clos
 	req := closeReq{
 		Reason: params.Reason,
 	}
+	// Release the agent claim before closing: a closed issue is terminal and
+	// can't be re-assigned afterward, so the assignee would otherwise linger.
+	// Best-effort — closing is the primary intent.
+	_ = b.releaseClaim(ctx, id)
 	resp, err := b.exec(ctx, "Close", "POST", "/issues/"+url.PathEscape(id)+"/close", req)
 	if err != nil {
 		return nil, err
@@ -981,6 +978,11 @@ func (b *FleetBackend) Reopen(ctx context.Context, id string, params backend.Reo
 		}
 		_, _ = b.exec(ctx, "Reopen", "POST", "/issues/"+url.PathEscape(id)+"/comments", commentReq{Body: params.Reason})
 	}
+	// A reopened task is no longer claimed by whoever last worked it; clear the
+	// stale assignee so the kanban doesn't render a lingering agent on the
+	// now-open card. Mirrors transitionToOpen's clearAfterTransition.
+	// Best-effort: the reopen transition already succeeded.
+	_ = b.releaseClaim(ctx, id)
 	return nil
 }
 

@@ -186,6 +186,13 @@ func monitorAgentStatuses(
 			SessionID:             sessionID,
 			Mode:                  string(assignment.Mode),
 			DesiredState:          string(assignment.DesiredState),
+			// Carry fleet-db's derived liveness through unchanged. The lock-derived
+			// Status above never advances to "working" on the store-only serve path,
+			// so the UI reads live_status to flip a provably-working agent off "idle".
+			LiveStatus:     string(assignment.LiveStatus),
+			ActiveTaskID:   assignment.ActiveTaskID,
+			ActivePhase:    assignment.ActivePhase,
+			LastErrorClass: assignment.LastErrorClass,
 		})
 	}
 	return agents

@@ -57,9 +57,9 @@ func (s *Supervisor) handleEpicTransition(ap *AgentProcess) {
 		ap.Mu.Lock()
 		// Only set NoWork if LastError isn't already a real crash error —
 		// don't mask a legitimate failure with an exhaustion signal.
-		if ap.LastError == nil || ap.LastError.Class == agenterr.NoWork {
+		if ap.LastError == nil || ap.LastError.Class.Is(agenterr.NoWorkOutcome) {
 			ap.LastError = &agenterr.AgentError{
-				Class:   agenterr.NoWork,
+				Class:   agenterr.OutcomeFromDomain(agenterr.NoWorkOutcome),
 				Message: "configured epic exhausted",
 				Backend: backend,
 			}

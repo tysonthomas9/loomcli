@@ -661,7 +661,7 @@ func TestCreate_HappyPath(t *testing.T) {
 
 	result, err := fb.Create(context.Background(), backend.CreateParams{
 		Title:     "New Issue",
-		Status:    "open",
+		Status:    "deferred",
 		IssueType: "task",
 		Priority:  2,
 	})
@@ -671,63 +671,8 @@ func TestCreate_HappyPath(t *testing.T) {
 	if result.ID != "new-1" {
 		t.Errorf("ID = %q, want %q", result.ID, "new-1")
 	}
-	if _, ok := gotBody["status"]; ok {
-		t.Errorf("body.status = %v, want omitted", gotBody["status"])
-	}
-}
-
-func TestCreate_AppliesDependenciesAfterCreate(t *testing.T) {
-	now := time.Now().UTC().Truncate(time.Second)
-	var paths []string
-	var depBodies []map[string]string
-	fb, ts := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
-		paths = append(paths, r.Method+" "+r.URL.Path)
-		switch r.URL.Path {
-		case "/api/v1/test-ws/issues":
-			respondOK(w, types.Issue{
-				ID:        "new-1",
-				Title:     "New Issue",
-				Status:    types.StatusOpen,
-				Priority:  2,
-				IssueType: types.TypeTask,
-				CreatedAt: now,
-				UpdatedAt: now,
-			})
-		case "/api/v1/test-ws/issues/new-1/deps":
-			var body map[string]string
-			json.NewDecoder(r.Body).Decode(&body) //nolint:errcheck
-			depBodies = append(depBodies, body)
-			respondOK(w, json.RawMessage(`{}`))
-		default:
-			t.Fatalf("unexpected path: %s", r.URL.Path)
-		}
-	})
-	defer ts.Close()
-
-	result, err := fb.Create(context.Background(), backend.CreateParams{
-		Title:        "New Issue",
-		IssueType:    "task",
-		Dependencies: []string{"dep-1", "dep-2"},
-	})
-	if err != nil {
-		t.Fatalf("Create: %v", err)
-	}
-	if result.ID != "new-1" {
-		t.Fatalf("ID = %q, want new-1", result.ID)
-	}
-	wantPaths := []string{
-		"POST /api/v1/test-ws/issues",
-		"POST /api/v1/test-ws/issues/new-1/deps",
-		"POST /api/v1/test-ws/issues/new-1/deps",
-	}
-	if strings.Join(paths, "\n") != strings.Join(wantPaths, "\n") {
-		t.Fatalf("paths = %#v, want %#v", paths, wantPaths)
-	}
-	if len(depBodies) != 2 || depBodies[0]["depends_on_id"] != "dep-1" || depBodies[1]["depends_on_id"] != "dep-2" {
-		t.Fatalf("dependency bodies = %#v", depBodies)
-	}
-	if depBodies[0]["type"] != "blocks" || depBodies[1]["type"] != "blocks" {
-		t.Fatalf("dependency types = %#v, want blocks", depBodies)
+	if gotBody["status"] != "deferred" {
+		t.Errorf("body.status = %v, want deferred", gotBody["status"])
 	}
 }
 
@@ -1146,9 +1091,24 @@ func TestRemoveLabel_UsesDedicatedEndpoint(t *testing.T) {
 
 func TestClose_HappyPath(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Second)
+	var claimReleased bool
 	fb, ts := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != "POST" {
 			t.Errorf("Method = %q, want POST", r.Method)
+		}
+		// Close releases the agent claim before closing (a closed issue is
+		// terminal and can no longer be unassigned).
+		if strings.HasSuffix(r.URL.Path, "/assign") {
+			var body struct {
+				Assignee string `json:"assignee"`
+			}
+			json.NewDecoder(r.Body).Decode(&body) //nolint:errcheck
+			if body.Assignee != "" {
+				t.Errorf("close assign assignee = %q, want empty (claim released)", body.Assignee)
+			}
+			claimReleased = true
+			respondOK(w, json.RawMessage(`{}`))
+			return
 		}
 		var gotBody map[string]interface{}
 		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
@@ -1180,6 +1140,9 @@ func TestClose_HappyPath(t *testing.T) {
 	}
 	if len(result.Unblocked) != 1 {
 		t.Fatalf("Unblocked len = %d, want 1", len(result.Unblocked))
+	}
+	if !claimReleased {
+		t.Error("expected close to release the agent claim before closing")
 	}
 }
 
@@ -1605,6 +1568,7 @@ func TestNonJSONResponse(t *testing.T) {
 func TestReopen_HappyPath(t *testing.T) {
 	var reopenPosted bool
 	var commentPosted bool
+	var claimReleased bool
 	fb, ts := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
 		// fleet-db reopen is POST /issues/{id}/reopen (dedicated endpoint);
 		// the previous PATCH status=open approach was rejected by
@@ -1629,6 +1593,18 @@ func TestReopen_HappyPath(t *testing.T) {
 			respondOK(w, map[string]interface{}{"id": 1, "body": body["body"]})
 			return
 		}
+		if r.Method == "POST" && strings.HasSuffix(r.URL.Path, "/assign") {
+			var body struct {
+				Assignee string `json:"assignee"`
+			}
+			json.NewDecoder(r.Body).Decode(&body) //nolint:errcheck
+			if body.Assignee != "" {
+				t.Errorf("reopen assign assignee = %q, want empty (claim released)", body.Assignee)
+			}
+			claimReleased = true
+			respondOK(w, json.RawMessage(`{}`))
+			return
+		}
 		t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
 	})
 	defer ts.Close()
@@ -1642,6 +1618,9 @@ func TestReopen_HappyPath(t *testing.T) {
 	}
 	if !commentPosted {
 		t.Error("expected comment to be posted with reason")
+	}
+	if !claimReleased {
+		t.Error("expected reopen to release the stale assignee claim")
 	}
 }
 

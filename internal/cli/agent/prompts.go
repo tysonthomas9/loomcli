@@ -13,6 +13,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/tysonthomas9/loomcli/internal/cli"
+	"github.com/tysonthomas9/loomcli/internal/cli/backends"
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
 	"github.com/tysonthomas9/loomcli/internal/cli/git"
 )
@@ -245,13 +246,9 @@ func GeneratePlanningPrompt(agentName string, workspace *config.WorkspaceConfig,
 		ReadyFallback:  readyFallback,
 	})
 
-	// Inject checkpoint context if available
-	if wtPath := os.Getenv("LOOM_WORKTREE_PATH"); wtPath != "" {
-		lockDir := cli.ResolveLockDir(wtPath)
-		if cp, err := config.LoadCheckpoint(lockDir); err == nil && cp != nil {
-			prompt = injectCheckpointContext(prompt, cp)
-		}
-	}
+	// Inject the prior-attempt checkpoint as a FALLBACK — skipped when a session
+	// resume is armed (the resumed session already carries the context).
+	prompt = injectCheckpointIfNotResuming(prompt)
 	return prompt
 }
 
@@ -284,32 +281,29 @@ func GenerateTaskPrompt(agentName string, workspace *config.WorkspaceConfig, par
 		InspectReviewStep: buildInspectReviewStep(caps),
 	})
 
-	// Inject checkpoint context if available
-	if wtPath := os.Getenv("LOOM_WORKTREE_PATH"); wtPath != "" {
-		lockDir := cli.ResolveLockDir(wtPath)
-		if cp, err := config.LoadCheckpoint(lockDir); err == nil && cp != nil {
-			prompt = injectCheckpointContext(prompt, cp)
-		}
-	}
+	// Inject the prior-attempt checkpoint as a FALLBACK — skipped when a session
+	// resume is armed (the resumed session already carries the context).
+	prompt = injectCheckpointIfNotResuming(prompt)
 	return prompt
 }
 
 // GenerateFleetPlanningPrompt creates the prompt for a fleet planning agent with a pre-assigned task.
 // Fleet workers receive their task from the Fleet API and skip task selection/claiming.
 func GenerateFleetPlanningPrompt(agentName, taskID string, workspace *config.WorkspaceConfig) string {
-	return renderPrompt("fleet_planning", promptTemplateData{
+	prompt := renderPrompt("fleet_planning", promptTemplateData{
 		AgentName:      agentName,
 		WorkspaceBlock: buildWorkspaceContextBlock(workspace),
 		SafetyBlock:    buildSafetyGuardrailsBlock(),
 		TaskID:         taskID,
 	})
+	return injectCheckpointIfNotResuming(prompt)
 }
 
 // GenerateFleetTaskPrompt creates the prompt for a fleet implementation agent with a pre-assigned task.
 // Fleet workers receive their task from the Fleet API and skip task selection/claiming.
 func GenerateFleetTaskPrompt(agentName, taskID string, workspace *config.WorkspaceConfig, backendName string) string {
 	caps := capabilitiesFor(backendName)
-	return renderPrompt("fleet_task", promptTemplateData{
+	prompt := renderPrompt("fleet_task", promptTemplateData{
 		AgentName:         agentName,
 		WorkspaceBlock:    buildWorkspaceContextBlock(workspace),
 		SafetyBlock:       buildSafetyGuardrailsBlock(),
@@ -318,6 +312,7 @@ func GenerateFleetTaskPrompt(agentName, taskID string, workspace *config.Workspa
 		ReviewStep:        buildReviewStep(caps),
 		InspectReviewStep: buildInspectReviewStep(caps),
 	})
+	return injectCheckpointIfNotResuming(prompt)
 }
 
 // GenerateConflictResolutionPrompt creates the prompt for merge conflict resolution
@@ -342,6 +337,28 @@ func GenerateLeadPrompt() string {
 	return renderPrompt("lead", promptTemplateData{
 		SafetyBlock: buildSafetyGuardrailsBlock(),
 	})
+}
+
+// injectCheckpointIfNotResuming adds the prior-attempt checkpoint to the prompt
+// as a FALLBACK, but SKIPS it when a session resume is armed
+// (backends.GetResumeSessionID() != ""). Resume-first / checkpoint-fallback (P4):
+// a resumed session already carries the full prior conversation, so re-injecting
+// the git-diff "## PREVIOUS ATTEMPT CONTEXT" block would re-pay for context the
+// model already has. Callers must arm the resume (SetResumeSessionID) BEFORE
+// building the prompt for this to take effect.
+func injectCheckpointIfNotResuming(prompt string) string {
+	if backends.GetResumeSessionID() != "" {
+		return prompt // resuming → the session carries the context; no checkpoint
+	}
+	wtPath := os.Getenv("LOOM_WORKTREE_PATH")
+	if wtPath == "" {
+		return prompt
+	}
+	cp, err := config.LoadCheckpoint(cli.ResolveLockDir(wtPath))
+	if err != nil || cp == nil {
+		return prompt
+	}
+	return injectCheckpointContext(prompt, cp)
 }
 
 // injectCheckpointContext inserts a "PREVIOUS ATTEMPT CONTEXT" section into the prompt.

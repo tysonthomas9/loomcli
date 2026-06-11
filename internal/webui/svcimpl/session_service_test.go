@@ -8,10 +8,13 @@ import (
 	"testing"
 	"time"
 
+	hwtranscript "github.com/olesho/harness-wrapper/pkg/transcript"
+
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	"github.com/tysonthomas9/loomcli/internal/sessions"
+	"github.com/tysonthomas9/loomcli/internal/sessions/eventstore"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
 )
@@ -345,6 +348,54 @@ func TestSessionServiceListTaskSessionsSearchesRuntimeDir(t *testing.T) {
 	}
 	if items[0].SessionID != sess.SessionID() || items[0].TaskID != "DESKTOP-QA-3" || items[0].AgentName != "desktopqa" {
 		t.Fatalf("item identity = %+v", items[0].SessionRecord)
+	}
+}
+
+func TestSessionServiceEventStoreSubagentsAreDiscoverable(t *testing.T) {
+	t.Setenv("LOOM_SERVE_FROM_EVENTSTORE", "1")
+	runtimeDir := t.TempDir()
+	sessStore, err := sessions.NewStore(runtimeDir)
+	if err != nil {
+		t.Fatalf("new session store: %v", err)
+	}
+	sess, err := sessStore.CreateSession(sessions.CreateOptions{
+		AgentName: "worker-1",
+		Backend:   "claude",
+		Phase:     "implementation",
+	})
+	if err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+	sessionID := sess.SessionID()
+	if err := sess.Finalize(sessions.FinalizeOptions{TaskID: "TASK-3", ExitCode: 0}); err != nil {
+		t.Fatalf("finalize session: %v", err)
+	}
+
+	es := eventstore.Open(sessStore.SessionDir(sessionID))
+	if err := es.AppendEnvelope(hwtranscript.EventEnvelope{
+		RunID: "run-1", Harness: "claude", HarnessSessionID: "agent-789", ParentSessionID: "parent-native",
+		Event: hwtranscript.Event{
+			Seq: 0, Timestamp: time.Unix(2, 0), Role: "assistant", Type: "text",
+			Text: "subagent from event store", Source: hwtranscript.SourceFile, NativeID: "msg:sub-1",
+		},
+	}); err != nil {
+		t.Fatalf("append eventstore subagent: %v", err)
+	}
+
+	svc := NewSessionServiceWithRuntimeDir(nil, nil, runtimeDir)
+	ids, err := svc.ListSessionSubagents(t.Context(), "WS", "TASK-3", sessionID)
+	if err != nil {
+		t.Fatalf("ListSessionSubagents: %v", err)
+	}
+	if len(ids) != 1 || ids[0] != "agent-789" {
+		t.Fatalf("subagent ids = %v, want [agent-789]", ids)
+	}
+	events, err := svc.GetSessionSubagentTranscript(t.Context(), "WS", "TASK-3", sessionID, "agent-789")
+	if err != nil {
+		t.Fatalf("GetSessionSubagentTranscript: %v", err)
+	}
+	if len(events) != 1 || events[0].Text != "subagent from event store" {
+		t.Fatalf("subagent events = %+v", events)
 	}
 }
 

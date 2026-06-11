@@ -3,6 +3,7 @@ package backend
 import (
 	"errors"
 	"fmt"
+	"strings"
 )
 
 // ErrFilterNotSupported is a sentinel error indicating that a backend does not
@@ -88,6 +89,22 @@ func IsKind(err error, kind ErrorKind) bool {
 		return be.Kind == kind
 	}
 	return false
+}
+
+// IsAlreadyClosedConflict reports whether err is the "issue is already
+// closed" close conflict — the one close failure that means the desired
+// state is already true, so callers may treat it as an idempotent success.
+// Deliberately narrow: other KindConflict closes (open blockers,
+// dependencies, claim races) must keep failing.
+func IsAlreadyClosedConflict(err error) bool {
+	if !IsKind(err, KindConflict) {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	if strings.Contains(msg, "blocker") || strings.Contains(msg, "blocked") || strings.Contains(msg, "dependenc") {
+		return false
+	}
+	return strings.Contains(msg, "already closed") || strings.Contains(msg, "is closed")
 }
 
 // Convenience constructors — one per ErrorKind.

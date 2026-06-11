@@ -138,6 +138,7 @@ func (s commandPollerTestStore) DriverSteps() store.DriverStepStore {
 	return nil
 }
 func (s commandPollerTestStore) TaskRuns() store.TaskRunStore     { return nil }
+func (s commandPollerTestStore) Workers() store.WorkerStore       { return nil }
 func (s commandPollerTestStore) Roles() store.RoleStore           { return nil }
 func (s commandPollerTestStore) Daemon() store.DaemonProfileStore { return nil }
 func (s commandPollerTestStore) Close() error                     { return nil }

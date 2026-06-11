@@ -38,4 +38,10 @@ var (
 	// ErrInvalidTransition indicates a status transition is not allowed from
 	// the current lifecycle state.
 	ErrInvalidTransition = errors.New("domain: invalid status transition")
+
+	// ErrGone indicates the entity exists but is no longer available —
+	// e.g. a lease that has expired or been released (fleet-db 410
+	// lease_expired). Distinct from ErrNotFound (never existed here) and
+	// ErrConflict (someone else holds it): re-acquire is safe.
+	ErrGone = errors.New("domain: gone")
 )

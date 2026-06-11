@@ -20,6 +20,7 @@ import type {
   LoomTaskInfo,
   WorktreeSyncDetail,
 } from "@/types";
+import { isAgentActive } from "@/types";
 
 import { TaskDrawer } from "../TaskDrawer";
 import type { TaskCategory } from "../TaskDrawer";
@@ -299,10 +300,12 @@ export function AgentsSidebar({
     .filter(Boolean)
     .join(" ");
 
-  // Count active agents (working or planning)
-  const activeCount = agents.filter(
-    (a) => a.status.startsWith("working:") || a.status.startsWith("planning:"),
-  ).length;
+  // Count active agents (working or planning) via the shared isAgentActive helper,
+  // which parses the same effective status the AgentCard badge renders (preferring
+  // fleet-db's live_status). Sharing the predicate keeps the count and the badges in
+  // lockstep — including a bare "working" with no task id, which earlier slipped the
+  // colon-prefix check here while still showing a "Working" badge.
+  const activeCount = agents.filter(isAgentActive).length;
 
   // Check if there are sync warnings for the footer (push count moved to banner)
   const hasSyncWarning = sync.git_needs_pull > 0 || !sync.db_synced;

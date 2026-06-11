@@ -154,7 +154,7 @@ func TestHandleAgents_UsesStoreAgentsAsSourceOfTruth(t *testing.T) {
 				Ahead:          1,
 				DaemonManaged:  true,
 				CurrentTaskID:  "HELLO-WORLD-1",
-				LastActivityAt: lastActivity,
+				LastActivityAt: &lastActivity,
 			},
 			{Name: "stray", Branch: "feature/stray", Status: "ready", Workspace: "Test"},
 		},
@@ -191,7 +191,7 @@ func TestHandleAgents_UsesStoreAgentsAsSourceOfTruth(t *testing.T) {
 	if falcon.CurrentTaskID != "HELLO-WORLD-1" {
 		t.Fatalf("falcon CurrentTaskID = %q, want HELLO-WORLD-1", falcon.CurrentTaskID)
 	}
-	if !falcon.LastActivityAt.Equal(lastActivity) {
+	if falcon.LastActivityAt == nil || !falcon.LastActivityAt.Equal(lastActivity) {
 		t.Fatalf("falcon LastActivityAt = %v, want %v", falcon.LastActivityAt, lastActivity)
 	}
 	if got := byName["falcon"]; got.Parent != "EPIC-1" || got.OrchestratorSessionID != "lead-session" || got.Mode != "ephemeral" || got.DesiredState != "stopped" {

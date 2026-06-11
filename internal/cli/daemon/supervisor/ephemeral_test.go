@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/olesho/harness-wrapper/pkg/wrapper"
 	"github.com/tysonthomas9/loomcli/internal/agenterr"
 	cfgpkg "github.com/tysonthomas9/loomcli/internal/cli/config"
 	"github.com/tysonthomas9/loomcli/internal/domain"
@@ -91,7 +92,7 @@ func TestShouldRestart_Ephemeral_ErrorExit_RetriesPerExistingPolicy(t *testing.T
 		Entry:          cfgpkg.AgentEntry{Worktree: "test", Role: "task", Mode: domain.AgentModeEphemeral},
 		RestartCount:   1,
 		LastExitCode:   1,
-		LastError:      &agenterr.AgentError{Class: agenterr.Unknown},
+		LastError:      &agenterr.AgentError{Class: agenterr.OutcomeFromHarness(wrapper.ErrUnknown)},
 		AssignedTaskID: "auth-3",
 	}
 
