@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/sessions"
 	"github.com/tysonthomas9/loomcli/internal/usage"
@@ -31,6 +32,11 @@ func dispatchHookEvent(event *HookEvent, runtimeDir, sessionID string) error { /
 		return nil
 	}
 
+	captureTokens := false
+	if event.SessionRef != "" {
+		captureTokens = event.Type == HookSessionEnd || shouldCaptureTokenUsage(store, sessionID, tokenUsageThrottle)
+	}
+
 	// Mirror the backend's native JSONL transcript into the session directory.
 	// The capture is idempotent (full snapshot copy, skip-if-unchanged), so
 	// calling on every hook event is safe and keeps the UI's view close to
@@ -51,9 +57,12 @@ func dispatchHookEvent(event *HookEvent, runtimeDir, sessionID string) error { /
 		}
 	}
 
-	// On SessionEnd, capture token usage from Claude's transcript and patch
-	// session metadata.
-	if event.Type == HookSessionEnd && event.SessionRef != "" {
+	// Capture token usage from Claude's transcript on every event that
+	// carries a transcript reference, so metadata token/cost fields tick up
+	// live during a run. Throttled by metadata.json mtime to bound full
+	// transcript rescans; SessionEnd is always captured (final authoritative
+	// sum).
+	if captureTokens {
 		captureTokenUsage(store, sessionID, event.SessionRef, event.Backend)
 	}
 
@@ -69,6 +78,23 @@ func deriveSubagentPath(parentTranscriptPath, subagentID string) string {
 		return ""
 	}
 	return filepath.Join(filepath.Dir(parentTranscriptPath), "subagents", "agent-"+subagentID+".jsonl")
+}
+
+// tokenUsageThrottle is the minimum interval between live (non-SessionEnd)
+// token-usage captures for a session. Each capture rescans the full
+// transcript, so the throttle bounds the rescan rate.
+const tokenUsageThrottle = 10 * time.Second
+
+// shouldCaptureTokenUsage reports whether enough time has passed since the
+// session's metadata.json was last written to justify another transcript
+// rescan. A missing or unreadable metadata file counts as stale (capture
+// proceeds and surfaces any real error there).
+func shouldCaptureTokenUsage(store *sessions.Store, sessionID string, throttle time.Duration) bool {
+	info, err := os.Stat(filepath.Join(store.Dir(), sessionID, "metadata.json"))
+	if err != nil {
+		return true
+	}
+	return time.Since(info.ModTime()) >= throttle
 }
 
 // captureTokenUsage reads the Claude transcript, sums token usage, and
