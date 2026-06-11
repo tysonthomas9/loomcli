@@ -15,6 +15,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	hwharness "github.com/olesho/harness-wrapper/pkg/harness"
@@ -618,6 +619,14 @@ type StreamUsage struct {
 	CacheCreationInputTokens int64 `json:"cache_creation_input_tokens"`
 }
 
+// streamUsageParsedLines / streamUsageSkippedLines count stream-json lines the
+// usage collector parsed vs skipped (unparseable JSON), so a regression that
+// silently zeroes the collector is visible via LOOM_DEBUG_STREAM.
+var (
+	streamUsageParsedLines  atomic.Int64
+	streamUsageSkippedLines atomic.Int64
+)
+
 // extractClaudeSessionID delegates to the Claude harness profile's session-id
 // extractor (pkg/harness/claude). The parsing logic now lives in harness-wrapper;
 // this thin shim preserves the existing call sites + tests with identical behavior.
@@ -699,11 +708,24 @@ func displayStreamEvent(line string) {
 //
 // We use message_delta usage (cumulative final) when available, falling back
 // to message.usage from message_start. Deduplication is by message ID.
+//
+// The line is first trimmed to its leading '{' (trimToJSONObject): under the
+// wrapper's non-raw PTY, terminal echo can prepend control bytes to
+// stream-json lines — the same mangling class that broke the session-id
+// extractor — which would otherwise defeat json.Unmarshal and silently zero
+// the collector.
 func collectClaudeStreamUsage(line string, collector *usage.Collector) {
 	var event StreamEvent
-	if err := json.Unmarshal([]byte(line), &event); err != nil {
+	if err := json.Unmarshal([]byte(trimToJSONObject(line)), &event); err != nil {
+		// Log only the first and every 100th skip to avoid flooding stderr
+		// on streams with many non-JSON lines.
+		if n := streamUsageSkippedLines.Add(1); debugStreamParsing && (n == 1 || n%100 == 0) {
+			fmt.Fprintf(os.Stderr, "[debug] usage collector skipped unparseable stream line (skipped=%d parsed=%d)\n",
+				n, streamUsageParsedLines.Load())
+		}
 		return
 	}
+	streamUsageParsedLines.Add(1)
 
 	// Extract message ID for dedup
 	var messageID string
