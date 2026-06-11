@@ -31,6 +31,7 @@ type workspaceWire struct {
 	State         string `json:"state,omitempty"`
 	ErrorMessage  string `json:"error_message,omitempty"`
 	DefaultBranch string `json:"default_branch,omitempty"`
+	DesignFormat  string `json:"design_format,omitempty"`
 }
 
 func (w workspaceWire) toDomain() *domain.Workspace {
@@ -41,6 +42,7 @@ func (w workspaceWire) toDomain() *domain.Workspace {
 		State:         domain.WorkspaceState(w.State),
 		ErrorMessage:  w.ErrorMessage,
 		DefaultBranch: w.DefaultBranch,
+		DesignFormat:  w.DesignFormat,
 		CreatedAt:     w.CreatedAt,
 		UpdatedAt:     w.UpdatedAt,
 	}
@@ -48,13 +50,15 @@ func (w workspaceWire) toDomain() *domain.Workspace {
 
 func (s *workspaceStore) Create(ctx context.Context, in store.WorkspaceCreate) (*domain.Workspace, error) {
 	body := struct {
-		Key         string `json:"key"`
-		Name        string `json:"name"`
-		Description string `json:"description,omitempty"`
+		Key          string `json:"key"`
+		Name         string `json:"name"`
+		Description  string `json:"description,omitempty"`
+		DesignFormat string `json:"design_format,omitempty"`
 	}{
-		Key:         in.Key,
-		Name:        in.Name,
-		Description: in.Description,
+		Key:          in.Key,
+		Name:         in.Name,
+		Description:  in.Description,
+		DesignFormat: in.DesignFormat,
 	}
 	var resp workspaceWire
 	if err := s.client.do(ctx, "POST", "/api/v1/admin/workspaces", body, &resp); err != nil {
@@ -106,19 +110,18 @@ func (s *workspaceStore) List(ctx context.Context) ([]*domain.Workspace, error) 
 }
 
 func (s *workspaceStore) Update(ctx context.Context, key string, patch store.WorkspaceUpdate) (*domain.Workspace, error) {
-	if patch.Name == nil && patch.Description == nil && patch.DefaultBranch == nil && patch.State == nil && patch.ErrorMessage == nil {
-		return s.Get(ctx, key)
-	}
-	// fleet-db's current admin PATCH contract is strict and only accepts name
-	// changes from this client-side patch shape. Lifecycle/default-branch fields
-	// are supported by in-process stores but are not persisted through fleet-db.
-	if patch.Name == nil {
+	// Of this client-side patch shape, fleet-db's admin PATCH persists name
+	// and design_format. Lifecycle/default-branch fields are supported by
+	// in-process stores but are not persisted through fleet-db.
+	if patch.Name == nil && patch.DesignFormat == nil {
 		return s.Get(ctx, key)
 	}
 	body := struct {
-		Name *string `json:"name,omitempty"`
+		Name         *string `json:"name,omitempty"`
+		DesignFormat *string `json:"design_format,omitempty"`
 	}{
-		Name: patch.Name,
+		Name:         patch.Name,
+		DesignFormat: patch.DesignFormat,
 	}
 	if err := s.client.do(ctx, "PATCH", "/api/v1/admin/workspaces/"+pathEscape(key), body, nil); err != nil {
 		return nil, err

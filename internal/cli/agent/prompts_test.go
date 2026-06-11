@@ -1230,6 +1230,83 @@ func TestResolveActiveWorkspace_NoConfig(t *testing.T) {
 	}
 }
 
+func TestResolveDesignFormat(t *testing.T) {
+	tests := []struct {
+		name      string
+		workspace *WorkspaceConfig
+		want      string
+	}{
+		{name: "nil workspace", workspace: nil, want: "markdown"},
+		{name: "empty design format", workspace: &WorkspaceConfig{}, want: "markdown"},
+		{name: "explicit markdown", workspace: &WorkspaceConfig{DesignFormat: "markdown"}, want: "markdown"},
+		{name: "html", workspace: &WorkspaceConfig{DesignFormat: "html"}, want: "html"},
+		{name: "garbage value falls back to markdown", workspace: &WorkspaceConfig{DesignFormat: "yaml"}, want: "markdown"},
+		{name: "case-sensitive: HTML is not html", workspace: &WorkspaceConfig{DesignFormat: "HTML"}, want: "markdown"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := resolveDesignFormat(tc.workspace); got != tc.want {
+				t.Errorf("resolveDesignFormat() = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+const designFormatHTMLGuidance = "Design format: HTML"
+
+func TestGeneratePlanningPrompt_DesignFormat(t *testing.T) {
+	tests := []struct {
+		name      string
+		workspace *WorkspaceConfig
+		wantHTML  bool
+	}{
+		{name: "nil workspace", workspace: nil, wantHTML: false},
+		{name: "empty design format", workspace: &WorkspaceConfig{}, wantHTML: false},
+		{name: "markdown", workspace: &WorkspaceConfig{DesignFormat: "markdown"}, wantHTML: false},
+		{name: "garbage value", workspace: &WorkspaceConfig{DesignFormat: "garbage"}, wantHTML: false},
+		{name: "html", workspace: &WorkspaceConfig{DesignFormat: "html"}, wantHTML: true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			prompt := GeneratePlanningPrompt("falcon", tc.workspace, "")
+			gotHTML := strings.Contains(prompt, designFormatHTMLGuidance)
+			if gotHTML != tc.wantHTML {
+				t.Errorf("planning prompt contains %q = %v, want %v", designFormatHTMLGuidance, gotHTML, tc.wantHTML)
+			}
+			// The standard plan-content instruction must remain regardless of format.
+			if !strings.Contains(prompt, "Write a comprehensive plan that includes:") {
+				t.Error("planning prompt missing comprehensive plan instruction")
+			}
+		})
+	}
+}
+
+func TestGenerateFleetPlanningPrompt_DesignFormat(t *testing.T) {
+	tests := []struct {
+		name      string
+		workspace *WorkspaceConfig
+		wantHTML  bool
+	}{
+		{name: "nil workspace", workspace: nil, wantHTML: false},
+		{name: "empty design format", workspace: &WorkspaceConfig{}, wantHTML: false},
+		{name: "markdown", workspace: &WorkspaceConfig{DesignFormat: "markdown"}, wantHTML: false},
+		{name: "garbage value", workspace: &WorkspaceConfig{DesignFormat: "garbage"}, wantHTML: false},
+		{name: "html", workspace: &WorkspaceConfig{DesignFormat: "html"}, wantHTML: true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			prompt := GenerateFleetPlanningPrompt("falcon", "loom-test.1", tc.workspace)
+			gotHTML := strings.Contains(prompt, designFormatHTMLGuidance)
+			if gotHTML != tc.wantHTML {
+				t.Errorf("fleet planning prompt contains %q = %v, want %v", designFormatHTMLGuidance, gotHTML, tc.wantHTML)
+			}
+			if !strings.Contains(prompt, "Write a comprehensive plan that includes:") {
+				t.Error("fleet planning prompt missing comprehensive plan instruction")
+			}
+		})
+	}
+}
+
 func TestCapabilitiesFor(t *testing.T) {
 	tests := []struct {
 		name        string
