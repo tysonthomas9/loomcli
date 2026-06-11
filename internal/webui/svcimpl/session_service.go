@@ -13,6 +13,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/sessions"
 	"github.com/tysonthomas9/loomcli/internal/sessions/transcript"
@@ -70,6 +71,7 @@ func (s *sessionServiceImpl) storesForWorkspace(ctx context.Context, wsID string
 	}
 
 	addStore(s.runtimeDir)
+	addStore(workspaceRuntimeRoot(wsID))
 
 	if s.store != nil {
 		wsData, err := storeadapter.BuildWorkspaceDataForKey(ctx, s.store, wsID)
@@ -104,6 +106,26 @@ func storeOwningSession(stores []*sessions.Store, sessionID string) *sessions.St
 		}
 	}
 	return nil
+}
+
+// workspaceRuntimeRoot returns the conventional workspace runtime directory
+// (~/.loom/workspaces/<wsID>) where daemon/desktop workers write their session
+// stores, or "" when the directory does not exist. The existence check keeps
+// storesForWorkspace from creating runtime dirs for unknown workspace IDs.
+func workspaceRuntimeRoot(wsID string) string {
+	if wsID == "" || wsID == "." || wsID == ".." || strings.ContainsAny(wsID, "/\\") {
+		return ""
+	}
+	loomDir := bootstrap.LoomDir()
+	if loomDir == "" {
+		return ""
+	}
+	// Same convention as config.GetWorkspaceDir (webui must not import internal/cli).
+	dir := filepath.Join(loomDir, "workspaces", wsID)
+	if info, err := os.Stat(dir); err != nil || !info.IsDir() {
+		return ""
+	}
+	return dir
 }
 
 // findStoreForSession returns the first store that has metadata for the given session.
