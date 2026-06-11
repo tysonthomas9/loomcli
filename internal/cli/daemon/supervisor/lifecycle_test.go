@@ -1407,9 +1407,9 @@ func TestBuildCommand_CustomRoleAllFlags(t *testing.T) {
 	}
 
 	// Verify args: loom agent <path> --prompt <file> --auto --daemon-mode --task-filter <filter> --backend <backend> --parent <epic>
-	loomPath, err := os.Executable()
+	loomPath, err := loomExecutablePath()
 	if err != nil {
-		t.Fatalf("os.Executable(): %v", err)
+		t.Fatalf("loomExecutablePath(): %v", err)
 	}
 	expectedArgs := []string{
 		loomPath, "agent", tmpDir, "--prompt", promptFile, "--auto", "--daemon-mode",
@@ -1477,9 +1477,9 @@ func TestBuildCommand_CustomRoleMinimal(t *testing.T) {
 		t.Fatalf("buildCommand error: %v", err)
 	}
 
-	loomPath, err := os.Executable()
+	loomPath, err := loomExecutablePath()
 	if err != nil {
-		t.Fatalf("os.Executable(): %v", err)
+		t.Fatalf("loomExecutablePath(): %v", err)
 	}
 	expectedArgs := []string{
 		loomPath, "agent", tmpDir, "--prompt", promptFile, "--auto", "--daemon-mode",
@@ -1646,9 +1646,9 @@ func TestBuildCommand_BuiltInRoleWithBackendAndEpic(t *testing.T) {
 		t.Fatalf("buildCommand error: %v", err)
 	}
 
-	loomPath, err := os.Executable()
+	loomPath, err := loomExecutablePath()
 	if err != nil {
-		t.Fatalf("os.Executable(): %v", err)
+		t.Fatalf("loomExecutablePath(): %v", err)
 	}
 	expectedArgs := []string{
 		loomPath, "plan", tmpDir, "--auto", "--daemon-mode",

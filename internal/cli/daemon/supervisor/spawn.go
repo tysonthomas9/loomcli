@@ -77,8 +77,15 @@ func (s *Supervisor) buildCommand(ap *AgentProcess) (*exec.Cmd, error) {
 }
 
 // buildAgentExecCmd creates the exec.Cmd with the correct arguments for the agent role.
+// loomExecutablePath resolves the loom binary that agent workers re-exec.
+// It is a seam for tests: under `go test`, os.Executable() is the test binary
+// itself, so spawning it would recursively run the whole test suite — every
+// spawned "agent" spawns more agents (fork bomb). Tests override this to a
+// harmless stub; see TestMain in main_test.go.
+var loomExecutablePath = os.Executable
+
 func buildAgentExecCmd(ap *AgentProcess, backend, epicID string) (*exec.Cmd, error) {
-	loomPath, err := os.Executable()
+	loomPath, err := loomExecutablePath()
 	if err != nil {
 		return nil, fmt.Errorf("resolve loom executable: %w", err)
 	}
