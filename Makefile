@@ -1,6 +1,6 @@
 # Makefile for loomcli project
 
-.PHONY: all build build-frontend build-all test test-integration test-all test-playground test-fleetdb-embedded test-fleetdb-supervisor test-fleetdb-ui test-fleetdb-empty-cli fleetdb-empty-up fleetdb-empty-down local-mode-frontend-dist local-mode-up local-mode-codex-up local-mode-down local-mode-logs local-mode-verify local-mode-codex-verify test-local-mode-harness test-distributed-smoke lint lint-frontend test-frontend e2e test-e2e test-e2e-api test-e2e-api-local test-e2e-real-smoke test-e2e-real-smoke-local test-e2e-real-regression test-e2e-real-regression-local test-e2e-integration test-e2e-integration-local test-e2e-integration-full clean install help frontend check check-go check-frontend gate gate-e2e gate-e2e-full hooks ensure-hooks dev dev-check dev-loom dev-vite check-loc check-loc-stale check-control-plane-paths check-no-raw-exec check-no-beads-prod test-coverage test-frontend-coverage test-race-cover test-integration-race-cover gen-go-api check-go-api-staleness
+.PHONY: all build build-frontend build-all test test-integration test-all test-playground test-fleetdb-embedded test-fleetdb-supervisor test-fleetdb-ui test-fleetdb-empty-cli fleetdb-empty-up fleetdb-empty-down local-mode-frontend-dist local-mode-up local-mode-codex-up local-mode-down local-mode-logs local-mode-verify local-mode-codex-verify test-local-mode-harness test-distributed-smoke lint lint-frontend test-frontend e2e test-e2e test-e2e-api test-e2e-api-local test-e2e-real-smoke test-e2e-real-smoke-local test-e2e-real-regression test-e2e-real-regression-local test-e2e-integration test-e2e-integration-local test-e2e-integration-full clean install help frontend check check-go check-frontend gate gate-e2e gate-e2e-full hooks ensure-hooks dev dev-check dev-loom dev-vite check-loc check-loc-stale check-control-plane-paths check-no-raw-exec check-no-beads-prod test-coverage test-forkwatch test-frontend-coverage test-race-cover test-integration-race-cover gen-go-api check-go-api-staleness
 
 # Default target
 all: build
@@ -254,6 +254,15 @@ check-control-plane-paths:
 # Check for stale LOC allowlist entries
 check-loc-stale:
 	@./scripts/check-loc-stale.sh --check-stale 1000
+
+# Run tests under a fork-bomb watchdog: kills the run and fails fast if test
+# binaries start multiplying (a test spawning os.Executable() re-runs the whole
+# suite recursively) instead of taking down the machine. Also fails on test
+# processes leaked past the end of the run.
+#   make test-forkwatch                                   # whole repo
+#   make test-forkwatch PKG=./internal/cli/daemon/...     # one subtree
+test-forkwatch:
+	@./scripts/test-forkwatch.sh $(or $(PKG),./...)
 
 # Check for raw exec.Command in unit tests (enforces DI)
 check-no-raw-exec:
@@ -532,6 +541,7 @@ help:
 	@echo "  make test-integration-race-cover - Run integration tests with race + coverage"
 	@echo "  make test-coverage     - Run Go tests with coverage threshold"
 	@echo "  make test-frontend-coverage - Run frontend tests with coverage threshold"
+	@echo "  make test-forkwatch    - Run tests under a fork-bomb/process-leak watchdog (PKG=./path/...)"
 	@echo "  make check-no-raw-exec - Check for raw exec.Command in unit tests"
 	@echo "  make check-control-plane-paths - Check local/cloud fleet-db runtime path invariants"
 	@echo "  make check-loc-stale   - Check for stale LOC allowlist entries"
