@@ -479,6 +479,12 @@ func TestBuildSafetyGuardrailsBlock(t *testing.T) {
 		"unexpected state",
 		"Do not switch branches",
 		"worktree branch",
+		"Never add Co-Authored-By lines",
+		"Never kill processes by name pattern",
+		"by recorded PID or by port",
+		"lsof -iTCP:<scratch-port> -sTCP:LISTEN -t | xargs kill",
+		"scripts/scratch-stack.sh",
+		"Never touch the shared stack's ports",
 	}
 
 	for _, phrase := range wantPhrases {
@@ -504,6 +510,9 @@ func TestAllPromptsContainSafetyRules(t *testing.T) {
 		}
 		if !strings.Contains(prompt, "Do not switch branches") {
 			t.Errorf("%s prompt missing safety rule about branch switching", name)
+		}
+		if got := strings.Count(prompt, "Multi-Agent Safety Rules"); got != 1 {
+			t.Errorf("%s prompt contains %d 'Multi-Agent Safety Rules' sections, want exactly 1", name, got)
 		}
 	}
 }
