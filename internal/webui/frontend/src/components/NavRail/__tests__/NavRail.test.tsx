@@ -11,10 +11,7 @@ import { describe, it, expect, vi } from "vitest";
 
 import "@testing-library/jest-dom";
 import { expectNoA11yViolations } from "@/test-utils/a11y-helpers";
-import {
-  NavRail,
-  WORKSPACE_SWITCHER_LIST_MAX_HEIGHT_PX,
-} from "../NavRail";
+import { NavRail, WORKSPACE_SWITCHER_LIST_MAX_HEIGHT_PX } from "../NavRail";
 
 describe("NavRail", () => {
   describe("rendering", () => {
@@ -94,9 +91,15 @@ describe("NavRail", () => {
     it("each button exposes a hover tooltip with its label", () => {
       render(<NavRail activeView="kanban" onChange={() => {}} />);
 
-      expect(screen.getByRole("tooltip", { name: "Workspaces" })).toBeInTheDocument();
-      expect(screen.getByRole("tooltip", { name: "Terminal" })).toBeInTheDocument();
-      expect(screen.getByRole("tooltip", { name: "Settings" })).toBeInTheDocument();
+      expect(
+        screen.getByRole("tooltip", { name: "Workspaces" }),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByRole("tooltip", { name: "Terminal" }),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByRole("tooltip", { name: "Settings" }),
+      ).toBeInTheDocument();
     });
 
     it("renders buttons in correct order: Workspaces, Agents, Pull Requests, Terminal, Settings", () => {
@@ -334,7 +337,9 @@ describe("NavRail", () => {
       expect(
         screen.getByRole("region", { name: "Workspace selector" }),
       ).toBeInTheDocument();
-      expect(screen.getByLabelText("Switch to Workspace 7")).toBeInTheDocument();
+      expect(
+        screen.getByLabelText("Switch to Workspace 7"),
+      ).toBeInTheDocument();
       expect(screen.getByLabelText("Add workspace")).toBeInTheDocument();
     });
   });

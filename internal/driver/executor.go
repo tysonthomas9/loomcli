@@ -82,23 +82,27 @@ func (e *Executor) RunOnce(ctx context.Context) (*ExecutionResult, error) {
 		return nil, fmt.Errorf("claim driver run: %w", err)
 	}
 	result := &ExecutionResult{Run: run, Claimed: claimed}
-	runner := e.Runner
-	if runner == nil {
-		runner = NodeRunner{}
-	}
 	hbCtx, stopHeartbeat := context.WithCancel(ctx)
 	defer stopHeartbeat()
 	if interval := e.heartbeatInterval(); interval > 0 {
 		go heartbeatDriverRun(hbCtx, e.Store, claimed, interval)
 		go heartbeatExecutorNode(hbCtx, e.Store, claimed.WorkspaceKey, nodeID, e.nodeTTL())
 	}
+	result.Final, err = e.finish(ctx, claimed, e.runClaimed(ctx, workDir, claimed))
+	if err != nil {
+		return result, err
+	}
+	return result, nil
+}
+
+func (e *Executor) runClaimed(ctx context.Context, workDir string, claimed *domain.DriverRun) RunResult {
+	runner := e.Runner
+	if runner == nil {
+		runner = NodeRunner{}
+	}
 	req, err := loadRunRequest(ctx, workDir, claimed, e.Store)
 	if err != nil {
-		result.Final, err = e.finish(ctx, claimed, RunResult{Status: domain.DriverRunFailed, Summary: err.Error(), ErrorClass: "bundle_verification"})
-		if err != nil {
-			return result, err
-		}
-		return result, nil
+		return RunResult{Status: domain.DriverRunFailed, Summary: err.Error(), ErrorClass: "bundle_verification"}
 	}
 	runResult, runErr := runner.Run(ctx, req)
 	if runErr != nil {
@@ -107,11 +111,7 @@ func (e *Executor) RunOnce(ctx context.Context) (*ExecutionResult, error) {
 	if !runResult.Status.IsTerminal() {
 		runResult.Status = domain.DriverRunCompleted
 	}
-	result.Final, err = e.finish(ctx, claimed, runResult)
-	if err != nil {
-		return result, err
-	}
-	return result, nil
+	return runResult
 }
 
 func (e *Executor) RecoverStaleOnce(ctx context.Context) (*store.StaleDriverRunRecoveryResult, error) {
@@ -440,44 +440,16 @@ func (r NodeRunner) Run(ctx context.Context, req RunRequest) (RunResult, error) 
 }
 
 func (r NodeRunner) runBuiltFlueServer(ctx context.Context, req RunRequest, node string, input []byte) (RunResult, error) {
-	launcher, err := os.CreateTemp("", "loom-flue-runtime-*.mjs")
-	if err != nil {
-		return RunResult{}, fmt.Errorf("create Flue runtime launcher: %w", err)
-	}
-	launcherPath := launcher.Name()
-	defer func() { _ = os.Remove(launcherPath) }()
-	if _, err := launcher.WriteString(flueLocalLauncher); err != nil {
-		_ = launcher.Close()
-		return RunResult{}, fmt.Errorf("write Flue runtime launcher: %w", err)
-	}
-	if err := launcher.Close(); err != nil {
-		return RunResult{}, fmt.Errorf("close Flue runtime launcher: %w", err)
-	}
-	execTaskCommand, err := r.execTaskCommand()
+	launcherPath, err := writeFlueRuntimeLauncher()
 	if err != nil {
 		return RunResult{}, err
 	}
-	parentEnv := os.Environ()
-	env := append(driverRuntimeBaseEnv(parentEnv), driverRuntimeFleetDBHandoffEnv(parentEnv)...)
-	env = append(env,
-		"LOOM_DRIVER_WORKSPACE="+req.Run.WorkspaceKey,
-		"LOOM_DRIVER_RUN_ID="+req.Run.RunID,
-		"LOOM_DRIVER_NODE_ID="+req.Run.NodeID,
-		"LOOM_DRIVER_LEASE_ID="+req.Run.LeaseID,
-		fmt.Sprintf("LOOM_DRIVER_FENCING_TOKEN=%d", req.Run.FencingToken),
-		"LOOM_FLUE_SERVER_PATH="+req.ServerPath,
-		"LOOM_FLUE_BUNDLE_ROOT="+req.BundleRoot,
-		"LOOM_FLUE_WORKFLOW_NAME="+workflowName(req),
-		"LOOM_FLUE_INVOKE_PAYLOAD="+string(input),
-	)
-	if len(execTaskCommand) > 0 {
-		encoded, err := json.Marshal(execTaskCommand)
-		if err != nil {
-			return RunResult{}, fmt.Errorf("encode exec-task command: %w", err)
-		}
-		env = append(env, "LOOM_DRIVER_EXEC_TASK_CMD_JSON="+string(encoded))
+	defer func() { _ = os.Remove(launcherPath) }()
+	env, err := r.flueRuntimeEnv(req, input)
+	if err != nil {
+		return RunResult{}, err
 	}
-	cmd := exec.CommandContext(ctx, node, launcherPath)
+	cmd := exec.CommandContext(ctx, node, launcherPath) //nolint:gosec // G204: intentionally runs the registered driver bundle via the node interpreter and a generated launcher path.
 	cmd.Dir = req.BundleRoot
 	cmd.Env = env
 	cmd.Cancel = func() error {
@@ -505,9 +477,59 @@ func (r NodeRunner) runBuiltFlueServer(ctx context.Context, req RunRequest, node
 		}
 		return RunResult{Status: domain.DriverRunFailed, Summary: msg, ErrorClass: "driver_runtime", Output: flueRunOutput(req, stdout.String(), stderr.String())}, nil
 	}
-	out := strings.TrimSpace(stdout.String())
+	return decodeFlueRunResult(req, stdout.String(), stderr.String())
+}
+
+func writeFlueRuntimeLauncher() (string, error) {
+	launcher, err := os.CreateTemp("", "loom-flue-runtime-*.mjs")
+	if err != nil {
+		return "", fmt.Errorf("create Flue runtime launcher: %w", err)
+	}
+	launcherPath := launcher.Name()
+	if _, err := launcher.WriteString(flueLocalLauncher); err != nil {
+		_ = launcher.Close()
+		_ = os.Remove(launcherPath)
+		return "", fmt.Errorf("write Flue runtime launcher: %w", err)
+	}
+	if err := launcher.Close(); err != nil {
+		_ = os.Remove(launcherPath)
+		return "", fmt.Errorf("close Flue runtime launcher: %w", err)
+	}
+	return launcherPath, nil
+}
+
+func (r NodeRunner) flueRuntimeEnv(req RunRequest, input []byte) ([]string, error) {
+	execTaskCommand, err := r.execTaskCommand()
+	if err != nil {
+		return nil, err
+	}
+	parentEnv := os.Environ()
+	env := append(driverRuntimeBaseEnv(parentEnv), driverRuntimeFleetDBHandoffEnv(parentEnv)...)
+	env = append(env,
+		"LOOM_DRIVER_WORKSPACE="+req.Run.WorkspaceKey,
+		"LOOM_DRIVER_RUN_ID="+req.Run.RunID,
+		"LOOM_DRIVER_NODE_ID="+req.Run.NodeID,
+		"LOOM_DRIVER_LEASE_ID="+req.Run.LeaseID,
+		fmt.Sprintf("LOOM_DRIVER_FENCING_TOKEN=%d", req.Run.FencingToken),
+		"LOOM_FLUE_SERVER_PATH="+req.ServerPath,
+		"LOOM_FLUE_BUNDLE_ROOT="+req.BundleRoot,
+		"LOOM_FLUE_WORKFLOW_NAME="+workflowName(req),
+		"LOOM_FLUE_INVOKE_PAYLOAD="+string(input),
+	)
+	if len(execTaskCommand) > 0 {
+		encoded, err := json.Marshal(execTaskCommand)
+		if err != nil {
+			return nil, fmt.Errorf("encode exec-task command: %w", err)
+		}
+		env = append(env, "LOOM_DRIVER_EXEC_TASK_CMD_JSON="+string(encoded))
+	}
+	return env, nil
+}
+
+func decodeFlueRunResult(req RunRequest, stdout, stderr string) (RunResult, error) {
+	out := strings.TrimSpace(stdout)
 	if out == "" {
-		return RunResult{Status: domain.DriverRunCompleted, Summary: "completed", Output: flueRunOutput(req, stdout.String(), stderr.String())}, nil
+		return RunResult{Status: domain.DriverRunCompleted, Summary: "completed", Output: flueRunOutput(req, stdout, stderr)}, nil
 	}
 	lines := strings.Split(out, "\n")
 	var payload struct {
@@ -518,9 +540,9 @@ func (r NodeRunner) runBuiltFlueServer(ctx context.Context, req RunRequest, node
 	if err := json.Unmarshal([]byte(lines[len(lines)-1]), &payload); err != nil {
 		return RunResult{}, fmt.Errorf("decode Flue runtime result: %w", err)
 	}
-	result := RunResult{Status: payload.Status, Summary: payload.Summary, ErrorClass: payload.ErrorClass, Output: flueRunOutput(req, stdout.String(), stderr.String())}
+	result := RunResult{Status: payload.Status, Summary: payload.Summary, ErrorClass: payload.ErrorClass, Output: flueRunOutput(req, stdout, stderr)}
 	if result.Status == domain.DriverRunFailed {
-		if detail := strings.TrimSpace(stderr.String()); detail != "" {
+		if detail := strings.TrimSpace(stderr); detail != "" {
 			if result.Summary != "" {
 				result.Summary += ": " + detail
 			} else {

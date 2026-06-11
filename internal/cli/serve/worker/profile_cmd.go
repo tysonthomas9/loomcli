@@ -266,6 +266,20 @@ func printWorkerProfile(p *domain.WorkerProfile) {
 }
 
 func buildWorkerProfilePatch(key, value string, unset bool) (store.WorkerProfileUpdate, error) {
+	switch key {
+	case "name", "role", "backend", "parent_epic", "enabled", "max_priority":
+		return buildWorkerProfileScalarPatch(key, value, unset)
+	case "repos", "labels", "capabilities", "metadata":
+		return buildWorkerProfileListPatch(key, value, unset)
+	default:
+		var patch store.WorkerProfileUpdate
+		return patch, fmt.Errorf("unsupported worker profile field %q", key)
+	}
+}
+
+// buildWorkerProfileScalarPatch handles the scalar worker profile fields
+// (strings, bools, ints) for buildWorkerProfilePatch.
+func buildWorkerProfileScalarPatch(key, value string, unset bool) (store.WorkerProfileUpdate, error) {
 	var patch store.WorkerProfileUpdate
 	switch key {
 	case "name":
@@ -304,6 +318,15 @@ func buildWorkerProfilePatch(key, value string, unset bool) (store.WorkerProfile
 			return patch, fmt.Errorf("max_priority must be between 0 and 4")
 		}
 		patch.MaxPriority = &n
+	}
+	return patch, nil
+}
+
+// buildWorkerProfileListPatch handles the list- and map-valued worker
+// profile fields for buildWorkerProfilePatch.
+func buildWorkerProfileListPatch(key, value string, unset bool) (store.WorkerProfileUpdate, error) {
+	var patch store.WorkerProfileUpdate
+	switch key {
 	case "repos":
 		list := splitWorkerProfileList(value)
 		patch.Repos = &list
@@ -324,8 +347,6 @@ func buildWorkerProfilePatch(key, value string, unset bool) (store.WorkerProfile
 			return patch, err
 		}
 		patch.Metadata = &metadata
-	default:
-		return patch, fmt.Errorf("unsupported worker profile field %q", key)
 	}
 	return patch, nil
 }

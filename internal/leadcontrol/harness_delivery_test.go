@@ -238,7 +238,7 @@ func TestSendHarnessTurnFraming(t *testing.T) {
 	ctx := context.Background()
 
 	single := newFakeHarnessConversation()
-	if _, err := sendHarnessTurn(ctx, single, "one line"); err != nil {
+	if err := sendHarnessTurn(ctx, single, "one line"); err != nil {
 		t.Fatalf("sendHarnessTurn(single) error = %v", err)
 	}
 	if got := string(single.stdinBytes()); got != "one line" {
@@ -249,7 +249,7 @@ func TestSendHarnessTurnFraming(t *testing.T) {
 	}
 
 	multi := newFakeHarnessConversation()
-	if _, err := sendHarnessTurn(ctx, multi, "line one\nline two"); err != nil {
+	if err := sendHarnessTurn(ctx, multi, "line one\nline two"); err != nil {
 		t.Fatalf("sendHarnessTurn(multi) error = %v", err)
 	}
 	if got := string(multi.stdinBytes()); got != "\x1b[200~line one\nline two\x1b[201~" {

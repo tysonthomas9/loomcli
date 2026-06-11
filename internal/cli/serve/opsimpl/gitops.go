@@ -216,6 +216,13 @@ func (g *GitOpsImpl) CreatePR(worktreePath, sourceBranch, targetBranch, remote s
 	}, nil
 }
 
+// prRepoQuery pairs a workspace repo with its gh PR listing result.
+type prRepoQuery struct {
+	repo ops.WorkspaceRepo
+	prs  []ops.GitPullRequest
+	err  error
+}
+
 func (g *GitOpsImpl) ListWorkspacePullRequests(workspaceID, state string, limit int) (*ops.GitPullRequestList, error) {
 	repos, err := g.listWorkspaceRepos(workspaceID)
 	if err != nil {
@@ -227,29 +234,7 @@ func (g *GitOpsImpl) ListWorkspacePullRequests(workspaceID, state string, limit 
 		ghState = "open"
 	}
 
-	// One gh query per repo identity — a repo with several agent worktrees
-	// shares a single GitHub PR list.
-	type repoQuery struct {
-		repo ops.WorkspaceRepo
-		prs  []ops.GitPullRequest
-		err  error
-	}
-	seenRepo := make(map[string]struct{})
-	queries := make([]*repoQuery, 0, len(repos))
-	for _, repo := range repos {
-		if repo.Path == "" {
-			continue
-		}
-		key := repo.Remote
-		if key == "" {
-			key = repo.Name
-		}
-		if _, ok := seenRepo[key]; ok {
-			continue
-		}
-		seenRepo[key] = struct{}{}
-		queries = append(queries, &repoQuery{repo: repo})
-	}
+	queries := dedupeRepoPRQueries(repos)
 
 	var eg errgroup.Group
 	eg.SetLimit(4)
@@ -262,6 +247,41 @@ func (g *GitOpsImpl) ListWorkspacePullRequests(workspaceID, state string, limit 
 	_ = eg.Wait()
 
 	result := &ops.GitPullRequestList{PullRequests: []ops.GitPullRequest{}}
+	all := collectRepoQueryPRs(queries, result)
+	all = filterPullRequestsByState(all, state)
+
+	sort.Slice(all, func(i, j int) bool {
+		return all[i].UpdatedAt > all[j].UpdatedAt
+	})
+	result.PullRequests = all
+	return result, nil
+}
+
+// dedupeRepoPRQueries builds one gh query per repo identity — a repo with
+// several agent worktrees shares a single GitHub PR list.
+func dedupeRepoPRQueries(repos []ops.WorkspaceRepo) []*prRepoQuery {
+	seenRepo := make(map[string]struct{})
+	queries := make([]*prRepoQuery, 0, len(repos))
+	for _, repo := range repos {
+		if repo.Path == "" {
+			continue
+		}
+		key := repo.Remote
+		if key == "" {
+			key = repo.Name
+		}
+		if _, ok := seenRepo[key]; ok {
+			continue
+		}
+		seenRepo[key] = struct{}{}
+		queries = append(queries, &prRepoQuery{repo: repo})
+	}
+	return queries
+}
+
+// collectRepoQueryPRs merges per-repo results into one list, deduping by PR
+// URL and recording per-repo failures as warnings on result.
+func collectRepoQueryPRs(queries []*prRepoQuery, result *ops.GitPullRequestList) []ops.GitPullRequest {
 	seen := make(map[string]struct{})
 	all := result.PullRequests
 	for _, q := range queries {
@@ -283,32 +303,32 @@ func (g *GitOpsImpl) ListWorkspacePullRequests(workspaceID, state string, limit 
 			all = append(all, pr)
 		}
 	}
+	return all
+}
 
-	if strings.EqualFold(state, "review") {
-		all = git.FilterPullRequestsForReview(all)
-	} else if strings.EqualFold(state, "open") {
+func filterPullRequestsByState(all []ops.GitPullRequest, state string) []ops.GitPullRequest {
+	switch {
+	case strings.EqualFold(state, "review"):
+		return git.FilterPullRequestsForReview(all)
+	case strings.EqualFold(state, "open"):
 		filtered := make([]ops.GitPullRequest, 0, len(all))
 		for _, pr := range all {
 			if strings.EqualFold(pr.State, "OPEN") && !pr.IsDraft {
 				filtered = append(filtered, pr)
 			}
 		}
-		all = filtered
-	} else if strings.EqualFold(state, "merged") {
+		return filtered
+	case strings.EqualFold(state, "merged"):
 		filtered := make([]ops.GitPullRequest, 0, len(all))
 		for _, pr := range all {
 			if strings.EqualFold(pr.State, "MERGED") {
 				filtered = append(filtered, pr)
 			}
 		}
-		all = filtered
+		return filtered
+	default:
+		return all
 	}
-
-	sort.Slice(all, func(i, j int) bool {
-		return all[i].UpdatedAt > all[j].UpdatedAt
-	})
-	result.PullRequests = all
-	return result, nil
 }
 
 func (g *GitOpsImpl) listWorkspaceRepos(workspaceID string) ([]ops.WorkspaceRepo, error) {
@@ -332,7 +352,12 @@ func (g *GitOpsImpl) listWorkspaceRepos(workspaceID string) ([]ops.WorkspaceRepo
 	if err != nil {
 		return nil, fmt.Errorf("discovering repos: %v", err)
 	}
+	return workspaceReposFromWorktrees(worktrees), nil
+}
 
+// workspaceReposFromWorktrees maps discovered worktrees to workspace repos,
+// deduping by path and sorting by name.
+func workspaceReposFromWorktrees(worktrees []cli.WorktreeInfo) []ops.WorkspaceRepo {
 	byPath := make(map[string]ops.WorkspaceRepo)
 	for _, wt := range worktrees {
 		if wt.Path == "" {
@@ -366,7 +391,7 @@ func (g *GitOpsImpl) listWorkspaceRepos(workspaceID string) ([]ops.WorkspaceRepo
 	sort.Slice(repos, func(i, j int) bool {
 		return repos[i].Name < repos[j].Name
 	})
-	return repos, nil
+	return repos
 }
 
 func (g *GitOpsImpl) Reset(worktreePath, worktreeName, targetBranch string, force, push bool) (*ops.GitResetResult, error) {

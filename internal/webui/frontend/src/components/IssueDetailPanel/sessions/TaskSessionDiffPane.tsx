@@ -21,15 +21,22 @@ export function TaskSessionDiffPane({
   taskId,
   worktreeAgentName,
 }: TaskSessionDiffPaneProps): JSX.Element {
-  const { sessions, isLoading: sessionsLoading, error: sessionsError } =
-    useTaskSessions(taskId);
+  const {
+    sessions,
+    isLoading: sessionsLoading,
+    error: sessionsError,
+  } = useTaskSessions(taskId);
 
   const session = useMemo(
     () => sessions.find((s) => s.has_diff) ?? sessions[0],
     [sessions],
   );
 
-  const { diff, isLoading: diffLoading, error: diffError } = useSessionDiff(
+  const {
+    diff,
+    isLoading: diffLoading,
+    error: diffError,
+  } = useSessionDiff(
     taskId,
     session?.session_id ?? null,
     Boolean(session?.has_diff),

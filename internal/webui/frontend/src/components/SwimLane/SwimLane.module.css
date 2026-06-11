@@ -80,7 +80,9 @@
   flex: 1;
   min-width: 0;
   margin: 0;
-  font-size: var(--font-size-sm); /* 14px — Aether epic header (text-sm font-black) */
+  font-size: var(
+    --font-size-sm
+  ); /* 14px — Aether epic header (text-sm font-black) */
   font-weight: 900;
   color: var(--color-text);
   line-height: var(--line-height-tight);

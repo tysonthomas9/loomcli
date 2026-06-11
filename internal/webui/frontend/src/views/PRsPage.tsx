@@ -78,8 +78,7 @@ function matchesFilter(row: PullRequestRow, filter: PRFilter): boolean {
 }
 
 function groupKeyFor(row: PullRequestRow, mode: GroupMode): string {
-  if (mode === "repo")
-    return row.pr?.repo_name || row.issue?.repo || "No repo";
+  if (mode === "repo") return row.pr?.repo_name || row.issue?.repo || "No repo";
   if (mode === "epic") return row.issue?.parent_title || "No epic";
   return "";
 }
@@ -170,12 +169,19 @@ function PRGlyph(): JSX.Element {
 
 /** Small avatar circle for an assignee or PR author. */
 function Avatar({ name }: { name: string }): JSX.Element {
-  const initial = name.replace(/^\[H\]\s*/, "").charAt(0).toUpperCase() || "?";
+  const initial =
+    name
+      .replace(/^\[H\]\s*/, "")
+      .charAt(0)
+      .toUpperCase() || "?";
   const color = getAvatarColor(name);
   return (
     <span
       className={styles.avatar}
-      style={{ background: color, color: shouldUseWhiteText(color) ? "#fff" : "#111" }}
+      style={{
+        background: color,
+        color: shouldUseWhiteText(color) ? "#fff" : "#111",
+      }}
       title={name}
       aria-label={`Assignee ${name}`}
     >
@@ -210,7 +216,12 @@ export function PRsPage(): JSX.Element {
   const openCount = useMemo(() => rows.filter(isOpenRow).length, [rows]);
 
   const counts = useMemo(() => {
-    const c: Record<PRFilter, number> = { all: 0, review: 0, open: 0, merged: 0 };
+    const c: Record<PRFilter, number> = {
+      all: 0,
+      review: 0,
+      open: 0,
+      merged: 0,
+    };
     for (const row of rows) {
       for (const f of FILTERS) {
         if (matchesFilter(row, f.id)) c[f.id] += 1;
@@ -285,7 +296,10 @@ export function PRsPage(): JSX.Element {
               </span>
             )}
             {showEpic && (
-              <span className={styles.epicChip} title={issue?.parent_title ?? ""}>
+              <span
+                className={styles.epicChip}
+                title={issue?.parent_title ?? ""}
+              >
                 {issue?.parent_title}
               </span>
             )}
@@ -437,7 +451,9 @@ export function PRsPage(): JSX.Element {
                 <section key={key} className={styles.group}>
                   <header className={styles.groupHeader}>
                     <span className={styles.groupName}>{key}</span>
-                    <span className={styles.groupCount}>{groupRows.length}</span>
+                    <span className={styles.groupCount}>
+                      {groupRows.length}
+                    </span>
                   </header>
                   <ul className={styles.list}>{groupRows.map(renderRow)}</ul>
                 </section>

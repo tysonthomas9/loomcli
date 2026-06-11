@@ -30,19 +30,9 @@ func CreateDriverRun(ctx context.Context, s store.Store, opts RunOptions) (*doma
 	if strings.TrimSpace(opts.WorkspaceKey) == "" || strings.TrimSpace(opts.DriverID) == "" {
 		return nil, fmt.Errorf("workspace key and driver id required: %w", domain.ErrInvalid)
 	}
-	driver, err := s.Drivers().Get(ctx, opts.WorkspaceKey, opts.DriverID)
+	driver, version, err := activeDriverVersion(ctx, s, opts.WorkspaceKey, opts.DriverID)
 	if err != nil {
-		return nil, fmt.Errorf("get driver: %w", err)
-	}
-	if driver.ActiveVersionID == "" {
-		return nil, fmt.Errorf("driver %q has no active version: %w", opts.DriverID, domain.ErrInvalid)
-	}
-	version, err := s.DriverVersions().Get(ctx, opts.WorkspaceKey, driver.ActiveVersionID)
-	if err != nil {
-		return nil, fmt.Errorf("get active driver version: %w", err)
-	}
-	if version.DriverID != driver.DriverID || version.ValidationStatus != domain.DriverVersionValidationPassed {
-		return nil, fmt.Errorf("driver %q active version %q is not a passed version: %w", driver.DriverID, driver.ActiveVersionID, domain.ErrInvalid)
+		return nil, err
 	}
 	runID := opts.RunID
 	if runID == "" {
@@ -79,6 +69,24 @@ func CreateDriverRun(ctx context.Context, s store.Store, opts RunOptions) (*doma
 		IdempotencyKey:  opts.IdempotencyKey,
 		Payload:         payload,
 	})
+}
+
+func activeDriverVersion(ctx context.Context, s store.Store, workspaceKey, driverID string) (*domain.Driver, *domain.DriverVersion, error) {
+	driver, err := s.Drivers().Get(ctx, workspaceKey, driverID)
+	if err != nil {
+		return nil, nil, fmt.Errorf("get driver: %w", err)
+	}
+	if driver.ActiveVersionID == "" {
+		return nil, nil, fmt.Errorf("driver %q has no active version: %w", driverID, domain.ErrInvalid)
+	}
+	version, err := s.DriverVersions().Get(ctx, workspaceKey, driver.ActiveVersionID)
+	if err != nil {
+		return nil, nil, fmt.Errorf("get active driver version: %w", err)
+	}
+	if version.DriverID != driver.DriverID || version.ValidationStatus != domain.DriverVersionValidationPassed {
+		return nil, nil, fmt.Errorf("driver %q active version %q is not a passed version: %w", driver.DriverID, driver.ActiveVersionID, domain.ErrInvalid)
+	}
+	return driver, version, nil
 }
 
 func clonePayload(in json.RawMessage) json.RawMessage {

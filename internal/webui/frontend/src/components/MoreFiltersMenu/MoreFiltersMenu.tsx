@@ -3,7 +3,13 @@
  * A "..." button with a popover containing secondary filter controls (GroupBy).
  */
 
-import { useState, useCallback, useEffect, useRef, type ReactNode } from "react";
+import {
+  useState,
+  useCallback,
+  useEffect,
+  useRef,
+  type ReactNode,
+} from "react";
 
 import type { GroupByOption } from "@/components/FilterBar";
 
@@ -110,7 +116,9 @@ export function MoreFiltersMenu({
               ))}
             </select>
           </div>
-          {children ? <div className={styles.menuFilters}>{children}</div> : null}
+          {children ? (
+            <div className={styles.menuFilters}>{children}</div>
+          ) : null}
         </div>
       )}
     </div>

@@ -49,7 +49,9 @@ export function SortableTab({
   const style: React.CSSProperties = groupDrag
     ? {}
     : {
-        transform: transform ? `translate3d(${transform.x}px, 0, 0)` : undefined,
+        transform: transform
+          ? `translate3d(${transform.x}px, 0, 0)`
+          : undefined,
         transition: transition ?? undefined,
         opacity: isDragging ? 0.5 : 1,
         zIndex: isDragging ? 10 : undefined,

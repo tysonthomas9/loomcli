@@ -1,7 +1,9 @@
 import type { Issue } from "@/types";
 
 /** Open (non-done) issue counts keyed by repo name. */
-export function getOpenIssueCountByRepo(issues: Issue[]): Record<string, number> {
+export function getOpenIssueCountByRepo(
+  issues: Issue[],
+): Record<string, number> {
   const counts: Record<string, number> = {};
 
   for (const issue of issues) {

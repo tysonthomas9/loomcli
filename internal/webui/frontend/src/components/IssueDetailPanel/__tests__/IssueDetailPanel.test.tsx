@@ -18,7 +18,7 @@ import "@testing-library/jest-dom";
 
 import type { Issue, IssueDetails, IssueWithDependencyMetadata } from "@/types";
 import type { SessionRecord } from "@/types/agent";
-import { updateIssue, startAgent, startWorkflowRun } from "@/api";
+import { updateIssue, startWorkflowRun } from "@/api";
 import { createAgentStore } from "@/stores/agentStore";
 
 import { IssueDetailPanel } from "../IssueDetailPanel";
@@ -1172,7 +1172,9 @@ describe("IssueDetailPanel", () => {
       expect(
         screen.queryByRole("tab", { name: "Files changed" }),
       ).not.toBeInTheDocument();
-      expect(screen.queryByTestId("issue-panel-tab-diff")).not.toBeInTheDocument();
+      expect(
+        screen.queryByTestId("issue-panel-tab-diff"),
+      ).not.toBeInTheDocument();
     });
   });
 

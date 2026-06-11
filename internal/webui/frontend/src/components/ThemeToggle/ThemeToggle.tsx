@@ -52,7 +52,10 @@ function MoonIcon(): JSX.Element {
   );
 }
 
-export function ThemeToggle({ theme, onToggle }: ThemeToggleProps): JSX.Element {
+export function ThemeToggle({
+  theme,
+  onToggle,
+}: ThemeToggleProps): JSX.Element {
   const isDark = theme === "dark";
   const label = isDark ? "Switch to light mode" : "Switch to dark mode";
 

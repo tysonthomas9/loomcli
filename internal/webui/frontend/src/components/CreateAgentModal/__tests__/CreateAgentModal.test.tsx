@@ -93,7 +93,9 @@ describe("CreateAgentModal: open/close gate", () => {
 describe("CreateAgentModal: default prop seeding", () => {
   it("seeds name input from defaultName", () => {
     renderModal({ defaultName: "starter-agent" });
-    expect(screen.getByTestId("create-agent-name")).toHaveValue("starter-agent");
+    expect(screen.getByTestId("create-agent-name")).toHaveValue(
+      "starter-agent",
+    );
   });
 
   it("trims whitespace in defaultName", () => {
@@ -162,7 +164,9 @@ describe("CreateAgentModal: state preservation across re-renders", () => {
     );
 
     // The wasOpenRef gate must prevent the effect from re-seeding.
-    expect(screen.getByTestId("create-agent-name")).toHaveValue("my-custom-name");
+    expect(screen.getByTestId("create-agent-name")).toHaveValue(
+      "my-custom-name",
+    );
   });
 
   it("re-seeds defaults on close → open transition", () => {
@@ -202,7 +206,9 @@ describe("CreateAgentModal: state preservation across re-renders", () => {
         onSuccess={vi.fn()}
       />,
     );
-    expect(screen.getByTestId("create-agent-name")).toHaveValue("second-default");
+    expect(screen.getByTestId("create-agent-name")).toHaveValue(
+      "second-default",
+    );
   });
 });
 

@@ -323,6 +323,23 @@ func printAgentService(svc *domain.AgentService) {
 }
 
 func buildAgentServicePatch(key, value string, unset bool) (store.AgentServiceUpdate, error) {
+	switch key {
+	case "name", "role_name", "profile_name", "schedule_id", "placement_policy",
+		"lease_id", "restart_policy", "budget_policy", "state_ref":
+		return buildAgentServiceStringPatch(key, value, unset)
+	case "kind", "desired_state", "max_instances":
+		return buildAgentServiceTypedPatch(key, value, unset)
+	case "event_sources", "trigger_refs", "permissions", "metadata":
+		return buildAgentServiceListPatch(key, value, unset)
+	default:
+		var patch store.AgentServiceUpdate
+		return patch, fmt.Errorf("unsupported agent service field %q", key)
+	}
+}
+
+// buildAgentServiceStringPatch handles the plain string agent service
+// fields for buildAgentServicePatch.
+func buildAgentServiceStringPatch(key, value string, unset bool) (store.AgentServiceUpdate, error) {
 	var patch store.AgentServiceUpdate
 	switch key {
 	case "name":
@@ -330,6 +347,34 @@ func buildAgentServicePatch(key, value string, unset bool) (store.AgentServiceUp
 			return patch, fmt.Errorf("name cannot be unset")
 		}
 		patch.Name = &value
+	case "role_name":
+		if unset {
+			return patch, fmt.Errorf("role_name cannot be unset")
+		}
+		patch.RoleName = &value
+	case "profile_name":
+		patch.ProfileName = &value
+	case "schedule_id":
+		patch.ScheduleID = &value
+	case "placement_policy":
+		patch.PlacementPolicy = &value
+	case "lease_id":
+		patch.LeaseID = &value
+	case "restart_policy":
+		patch.RestartPolicy = &value
+	case "budget_policy":
+		patch.BudgetPolicy = &value
+	case "state_ref":
+		patch.StateRef = &value
+	}
+	return patch, nil
+}
+
+// buildAgentServiceTypedPatch handles the agent service fields that parse
+// into typed values (enums, ints) for buildAgentServicePatch.
+func buildAgentServiceTypedPatch(key, value string, unset bool) (store.AgentServiceUpdate, error) {
+	var patch store.AgentServiceUpdate
+	switch key {
 	case "kind":
 		if unset {
 			return patch, fmt.Errorf("kind cannot be unset")
@@ -348,17 +393,6 @@ func buildAgentServicePatch(key, value string, unset bool) (store.AgentServiceUp
 			return patch, err
 		}
 		patch.DesiredState = &state
-	case "role_name":
-		if unset {
-			return patch, fmt.Errorf("role_name cannot be unset")
-		}
-		patch.RoleName = &value
-	case "profile_name":
-		patch.ProfileName = &value
-	case "schedule_id":
-		patch.ScheduleID = &value
-	case "placement_policy":
-		patch.PlacementPolicy = &value
 	case "max_instances":
 		if unset {
 			return patch, fmt.Errorf("max_instances cannot be unset")
@@ -371,14 +405,15 @@ func buildAgentServicePatch(key, value string, unset bool) (store.AgentServiceUp
 			return patch, fmt.Errorf("max_instances must be positive")
 		}
 		patch.MaxInstances = &n
-	case "lease_id":
-		patch.LeaseID = &value
-	case "restart_policy":
-		patch.RestartPolicy = &value
-	case "budget_policy":
-		patch.BudgetPolicy = &value
-	case "state_ref":
-		patch.StateRef = &value
+	}
+	return patch, nil
+}
+
+// buildAgentServiceListPatch handles the list- and map-valued agent service
+// fields for buildAgentServicePatch.
+func buildAgentServiceListPatch(key, value string, unset bool) (store.AgentServiceUpdate, error) {
+	var patch store.AgentServiceUpdate
+	switch key {
 	case "event_sources":
 		list := splitWorkerProfileList(value)
 		patch.EventSources = &list
@@ -399,8 +434,6 @@ func buildAgentServicePatch(key, value string, unset bool) (store.AgentServiceUp
 			return patch, err
 		}
 		patch.Metadata = &metadata
-	default:
-		return patch, fmt.Errorf("unsupported agent service field %q", key)
 	}
 	return patch, nil
 }

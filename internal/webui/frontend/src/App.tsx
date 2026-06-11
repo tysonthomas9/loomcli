@@ -1465,9 +1465,7 @@ function App() {
             onClose={() => setShowCreateIssue(false)}
             onSuccess={handleCreateIssueSuccess}
             epics={issues
-              .filter(
-                (i) => i.issue_type === "epic" && i.status !== "closed",
-              )
+              .filter((i) => i.issue_type === "epic" && i.status !== "closed")
               .map((i) => ({ id: i.id, title: i.title }))}
           />
         </AppLayout>

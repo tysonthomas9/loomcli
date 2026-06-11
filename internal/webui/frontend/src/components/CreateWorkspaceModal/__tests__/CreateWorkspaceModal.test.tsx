@@ -168,7 +168,6 @@ describe("CreateWorkspaceModal", () => {
       );
       expect(screen.getByTestId("create-workspace-submit")).toBeEnabled();
     });
-
   });
 
   describe("submit button state", () => {

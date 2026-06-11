@@ -531,59 +531,33 @@ func terminalSessionUpdateBody(patch store.TerminalSessionUpdate) map[string]any
 	return body
 }
 
+// setBodyPtr writes *v under key when the patch pointer is set. Shared by
+// the PATCH-body builders, which only serialize explicitly-updated fields.
+func setBodyPtr[T any](body map[string]any, key string, v *T) {
+	if v != nil {
+		body[key] = *v
+	}
+}
+
 func artifactUpdateBody(patch store.ArtifactUpdate) map[string]any {
 	body := map[string]any{}
-	if patch.AgentID != nil {
-		body["agent_id"] = *patch.AgentID
-	}
-	if patch.SessionID != nil {
-		body["session_id"] = *patch.SessionID
-	}
-	if patch.TerminalID != nil {
-		body["terminal_id"] = *patch.TerminalID
-	}
-	if patch.TaskID != nil {
-		body["task_id"] = *patch.TaskID
-	}
-	if patch.OwnerType != nil {
-		body["owner_type"] = *patch.OwnerType
-	}
-	if patch.OwnerID != nil {
-		body["owner_id"] = *patch.OwnerID
-	}
-	if patch.Type != nil {
-		body["type"] = *patch.Type
-	}
-	if patch.URI != nil {
-		body["uri"] = *patch.URI
-	}
-	if patch.Summary != nil {
-		body["summary"] = *patch.Summary
-	}
-	if patch.MIMEType != nil {
-		body["mime_type"] = *patch.MIMEType
-	}
-	if patch.SizeBytes != nil {
-		body["size_bytes"] = *patch.SizeBytes
-	}
-	if patch.Checksum != nil {
-		body["checksum"] = *patch.Checksum
-	}
-	if patch.ContentHash != nil {
-		body["content_hash"] = *patch.ContentHash
-	}
-	if patch.Visibility != nil {
-		body["visibility"] = *patch.Visibility
-	}
-	if patch.RedactionStatus != nil {
-		body["redaction_status"] = *patch.RedactionStatus
-	}
-	if patch.DurableStatus != nil {
-		body["durable_status"] = *patch.DurableStatus
-	}
-	if patch.Metadata != nil {
-		body["metadata"] = *patch.Metadata
-	}
+	setBodyPtr(body, "agent_id", patch.AgentID)
+	setBodyPtr(body, "session_id", patch.SessionID)
+	setBodyPtr(body, "terminal_id", patch.TerminalID)
+	setBodyPtr(body, "task_id", patch.TaskID)
+	setBodyPtr(body, "owner_type", patch.OwnerType)
+	setBodyPtr(body, "owner_id", patch.OwnerID)
+	setBodyPtr(body, "type", patch.Type)
+	setBodyPtr(body, "uri", patch.URI)
+	setBodyPtr(body, "summary", patch.Summary)
+	setBodyPtr(body, "mime_type", patch.MIMEType)
+	setBodyPtr(body, "size_bytes", patch.SizeBytes)
+	setBodyPtr(body, "checksum", patch.Checksum)
+	setBodyPtr(body, "content_hash", patch.ContentHash)
+	setBodyPtr(body, "visibility", patch.Visibility)
+	setBodyPtr(body, "redaction_status", patch.RedactionStatus)
+	setBodyPtr(body, "durable_status", patch.DurableStatus)
+	setBodyPtr(body, "metadata", patch.Metadata)
 	if patch.FinalizedAt != nil {
 		body["finalized_at"] = patch.FinalizedAt.Format(time.RFC3339Nano)
 	}

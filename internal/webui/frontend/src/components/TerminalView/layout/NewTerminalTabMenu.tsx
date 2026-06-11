@@ -41,10 +41,7 @@ export function NewTerminalTabMenu({
     if (!isOpen) return;
 
     const handleClickOutside = (event: MouseEvent) => {
-      if (
-        rootRef.current &&
-        !rootRef.current.contains(event.target as Node)
-      ) {
+      if (rootRef.current && !rootRef.current.contains(event.target as Node)) {
         setIsOpen(false);
         setFocusedIndex(-1);
       }
@@ -123,7 +120,11 @@ export function NewTerminalTabMenu({
   return (
     // Keydown is handled at the root so navigation works whether focus sits
     // on the trigger or inside the menu.
-    <div ref={rootRef} className={styles.menuRoot} onKeyDown={handleMenuKeyDown}>
+    <div
+      ref={rootRef}
+      className={styles.menuRoot}
+      onKeyDown={handleMenuKeyDown}
+    >
       <button
         ref={triggerRef}
         type="button"
@@ -133,11 +134,7 @@ export function NewTerminalTabMenu({
         aria-expanded={isOpen}
         aria-haspopup="menu"
         aria-label="New terminal tab"
-        title={
-          disabled
-            ? "Maximum terminal tabs reached"
-            : "New terminal tab"
-        }
+        title={disabled ? "Maximum terminal tabs reached" : "New terminal tab"}
         data-open={isOpen || undefined}
         data-testid="terminal-new-tab-button"
       >
@@ -155,7 +152,10 @@ export function NewTerminalTabMenu({
         >
           <div className={styles.menuHeader}>New session</div>
           {isLoading ? (
-            <div className={styles.statusText} data-testid="new-tab-menu-loading">
+            <div
+              className={styles.statusText}
+              data-testid="new-tab-menu-loading"
+            >
               Loading backends...
             </div>
           ) : menuBackends.length === 0 ? (
@@ -179,7 +179,8 @@ export function NewTerminalTabMenu({
                   <span
                     className={styles.brandDot}
                     style={{
-                      backgroundColor: info?.brandColor ?? "var(--color-text-muted)",
+                      backgroundColor:
+                        info?.brandColor ?? "var(--color-text-muted)",
                     }}
                     aria-hidden="true"
                   />

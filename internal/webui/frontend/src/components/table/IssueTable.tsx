@@ -94,7 +94,8 @@ export function IssueTable({
   const agentStore = useAgentStoreInstance();
   const agents = useStore(agentStore, (s) => s.agents);
   const epicLeadClaims = useMemo(
-    () => (groupByEpic ? buildEpicLeadClaims(agents) : new Map<string, string>()),
+    () =>
+      groupByEpic ? buildEpicLeadClaims(agents) : new Map<string, string>(),
     [agents, groupByEpic],
   );
   const effectiveColumns = useMemo(

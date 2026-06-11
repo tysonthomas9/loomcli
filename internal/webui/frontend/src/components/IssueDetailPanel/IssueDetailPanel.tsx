@@ -5,13 +5,7 @@
  * and markdown rendering for design field.
  */
 
-import {
-  useEffect,
-  useRef,
-  useState,
-  useCallback,
-  useMemo,
-} from "react";
+import { useEffect, useRef, useState, useCallback, useMemo } from "react";
 
 import {
   updateIssue,
@@ -46,11 +40,7 @@ import type {
   Event,
 } from "@/types";
 import type { Status } from "@/types/issue";
-import {
-  formatStatusLabel,
-  getReviewType,
-  isPRUrl,
-} from "@/utils/issue";
+import { formatStatusLabel, getReviewType, isPRUrl } from "@/utils/issue";
 
 import {
   getBackendFromSessionName,
@@ -455,10 +445,7 @@ function DefaultContent({
   } = useIssueTabPersistence(issueId);
 
   // Tab state - managed tab array with dynamic add/remove
-  const [tabs, setTabs] = useState<DetailTab[]>([
-    DETAILS_TAB,
-    SESSIONS_TAB,
-  ]);
+  const [tabs, setTabs] = useState<DetailTab[]>([DETAILS_TAB, SESSIONS_TAB]);
   const [activeTabId, setActiveTabId] = useState("details");
   // Track whether we've already restored tabs from persistence for this issue
   const restoredIssueIdRef = useRef<string | null>(null);
@@ -1582,11 +1569,7 @@ export function IssueDetailPanel({
   }
 
   // Build root class name
-  const rootClassName = [
-    styles.overlay,
-    isOpen && styles.open,
-    className,
-  ]
+  const rootClassName = [styles.overlay, isOpen && styles.open, className]
     .filter(Boolean)
     .join(" ");
 

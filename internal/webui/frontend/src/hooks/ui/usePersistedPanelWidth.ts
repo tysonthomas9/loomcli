@@ -42,7 +42,9 @@ export function usePersistedPanelWidth(
   config: PanelWidthConfig,
 ): UsePersistedPanelWidthReturn {
   const { storageKey, defaultWidth, minWidth, maxWidth } = config;
-  const [width, setWidth] = useState(() => readStoredWidth(workspaceId, config));
+  const [width, setWidth] = useState(() =>
+    readStoredWidth(workspaceId, config),
+  );
 
   const clamp = useCallback(
     (value: number) => Math.min(maxWidth, Math.max(minWidth, value)),

@@ -778,62 +778,24 @@ func driverUpdateBody(patch store.DriverUpdate) map[string]any {
 
 func triggerBindingUpdateBody(patch store.TriggerBindingUpdate) map[string]any {
 	body := map[string]any{}
-	if patch.Name != nil {
-		body["name"] = *patch.Name
-	}
-	if patch.SourceKind != nil {
-		body["source_kind"] = *patch.SourceKind
-	}
-	if patch.SourceRef != nil {
-		body["source_ref"] = *patch.SourceRef
-	}
-	if patch.SourceConfigRef != nil {
-		body["source_config_ref"] = *patch.SourceConfigRef
-	}
-	if patch.RouteKey != nil {
-		body["route_key"] = *patch.RouteKey
-	}
-	if patch.Method != nil {
-		body["method"] = *patch.Method
-	}
-	if patch.PathTemplate != nil {
-		body["path_template"] = *patch.PathTemplate
-	}
-	if patch.Topic != nil {
-		body["topic"] = *patch.Topic
-	}
-	if patch.EventTypePatterns != nil {
-		body["event_type_patterns"] = *patch.EventTypePatterns
-	}
-	if patch.FilterRef != nil {
-		body["filter_ref"] = *patch.FilterRef
-	}
-	if patch.DriverID != nil {
-		body["driver_id"] = *patch.DriverID
-	}
-	if patch.DriverVersionID != nil {
-		body["driver_version_id"] = *patch.DriverVersionID
-	}
-	if patch.TargetEntrypoint != nil {
-		body["target_entrypoint"] = *patch.TargetEntrypoint
-	}
-	if patch.TargetAgentServiceID != nil {
-		body["target_agent_service_id"] = *patch.TargetAgentServiceID
-	}
-	if patch.ConcurrencyPolicy != nil {
-		body["concurrency_policy"] = *patch.ConcurrencyPolicy
-	}
-	if patch.IdempotencyPolicy != nil {
-		body["idempotency_policy"] = *patch.IdempotencyPolicy
-	}
-	if patch.AuthPolicy != nil {
-		body["auth_policy"] = *patch.AuthPolicy
-	}
-	if patch.Permissions != nil {
-		body["permissions"] = *patch.Permissions
-	}
-	if patch.Enabled != nil {
-		body["enabled"] = *patch.Enabled
-	}
+	setBodyPtr(body, "name", patch.Name)
+	setBodyPtr(body, "source_kind", patch.SourceKind)
+	setBodyPtr(body, "source_ref", patch.SourceRef)
+	setBodyPtr(body, "source_config_ref", patch.SourceConfigRef)
+	setBodyPtr(body, "route_key", patch.RouteKey)
+	setBodyPtr(body, "method", patch.Method)
+	setBodyPtr(body, "path_template", patch.PathTemplate)
+	setBodyPtr(body, "topic", patch.Topic)
+	setBodyPtr(body, "event_type_patterns", patch.EventTypePatterns)
+	setBodyPtr(body, "filter_ref", patch.FilterRef)
+	setBodyPtr(body, "driver_id", patch.DriverID)
+	setBodyPtr(body, "driver_version_id", patch.DriverVersionID)
+	setBodyPtr(body, "target_entrypoint", patch.TargetEntrypoint)
+	setBodyPtr(body, "target_agent_service_id", patch.TargetAgentServiceID)
+	setBodyPtr(body, "concurrency_policy", patch.ConcurrencyPolicy)
+	setBodyPtr(body, "idempotency_policy", patch.IdempotencyPolicy)
+	setBodyPtr(body, "auth_policy", patch.AuthPolicy)
+	setBodyPtr(body, "permissions", patch.Permissions)
+	setBodyPtr(body, "enabled", patch.Enabled)
 	return body
 }

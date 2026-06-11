@@ -193,7 +193,10 @@ export function useWorkflowRunStreams({
         current.run_id === runId &&
         current.last_heartbeat !== heartbeat
       ) {
-        onRunUpdateRef.current(epicId, { ...current, last_heartbeat: heartbeat });
+        onRunUpdateRef.current(epicId, {
+          ...current,
+          last_heartbeat: heartbeat,
+        });
       }
     };
 

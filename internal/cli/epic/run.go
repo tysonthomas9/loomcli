@@ -112,14 +112,26 @@ func runEpicRun(cmd *cobra.Command, _ []string) error {
 		}
 	}
 
-	if err := ensureWorkflow(ctx, handle.Store, ws, workflowName); err != nil {
+	run, err := queueEpicWorkflowRun(ctx, handle.Store, ws, workflowName, payload)
+	if err != nil {
 		return err
 	}
-	driverID, err := workflowdefs.ResolveDriverID(ctx, handle.Store, ws, workflowName)
-	if err != nil {
-		return fmt.Errorf("resolve workflow %q: %w", workflowName, err)
+	fmt.Printf("[epic-run] queued workflow %s run %s for epic %s\n", workflowName, run.RunID, runParent)
+	if runDetach && !runDryRun {
+		return nil
 	}
-	run, err := driverpkg.CreateDriverRun(ctx, handle.Store, driverpkg.RunOptions{
+	return executeWorkflowRun(ctx, handle.Store, ws, run.RunID)
+}
+
+func queueEpicWorkflowRun(ctx context.Context, st store.Store, ws, workflowName string, payload json.RawMessage) (*domain.DriverRun, error) {
+	if err := ensureWorkflow(ctx, st, ws, workflowName); err != nil {
+		return nil, err
+	}
+	driverID, err := workflowdefs.ResolveDriverID(ctx, st, ws, workflowName)
+	if err != nil {
+		return nil, fmt.Errorf("resolve workflow %q: %w", workflowName, err)
+	}
+	run, err := driverpkg.CreateDriverRun(ctx, st, driverpkg.RunOptions{
 		WorkspaceKey: ws,
 		DriverID:     driverID,
 		EpicID:       runParent,
@@ -128,13 +140,9 @@ func runEpicRun(cmd *cobra.Command, _ []string) error {
 		Payload:      payload,
 	})
 	if err != nil {
-		return fmt.Errorf("create epic workflow run: %w", err)
+		return nil, fmt.Errorf("create epic workflow run: %w", err)
 	}
-	fmt.Printf("[epic-run] queued workflow %s run %s for epic %s\n", workflowName, run.RunID, runParent)
-	if runDetach && !runDryRun {
-		return nil
-	}
-	return executeWorkflowRun(ctx, handle.Store, ws, run.RunID)
+	return run, nil
 }
 
 func validateEpicRunFlags() error {

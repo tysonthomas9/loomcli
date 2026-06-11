@@ -2909,9 +2909,7 @@ describe("App", () => {
       render(<App />);
 
       // Click first issue — should open panel, not navigate
-      fireEvent.click(
-        screen.getByLabelText(/Issue: First Issue/),
-      );
+      fireEvent.click(screen.getByLabelText(/Issue: First Issue/));
       expect(mockOpenPanel).toHaveBeenCalledWith({
         type: "issue",
         id: "issue-1",
@@ -2919,9 +2917,7 @@ describe("App", () => {
       expect(fetchIssue).toHaveBeenCalledWith("issue-1");
 
       // Click second issue — same pattern
-      fireEvent.click(
-        screen.getByLabelText(/Issue: Second Issue/),
-      );
+      fireEvent.click(screen.getByLabelText(/Issue: Second Issue/));
       expect(mockOpenPanel).toHaveBeenCalledWith({
         type: "issue",
         id: "issue-2",
@@ -3028,9 +3024,7 @@ describe("App", () => {
       const { unmount } = render(<App />);
 
       // Click issue
-      fireEvent.click(
-        screen.getByLabelText(/Issue: Test Issue/),
-      );
+      fireEvent.click(screen.getByLabelText(/Issue: Test Issue/));
 
       // Unmount — should not cause any errors
       expect(() => unmount()).not.toThrow();

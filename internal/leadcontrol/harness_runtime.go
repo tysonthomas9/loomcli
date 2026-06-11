@@ -11,6 +11,7 @@ import (
 
 	"github.com/olesho/harness-wrapper/pkg/chat"
 	"github.com/olesho/harness-wrapper/pkg/chat/memstore"
+	"github.com/olesho/harness-wrapper/pkg/wrapper"
 	"golang.org/x/term"
 
 	"github.com/tysonthomas9/loomcli/internal/store"
@@ -83,23 +84,9 @@ func HarnessNameForBackend(backend string) string {
 func RunHarnessLeadRuntime(ctx context.Context, cfg HarnessLeadRuntimeConfig) error {
 	cfg = normalizeHarnessLeadRuntimeConfig(cfg)
 
-	cols, rows := harnessTerminalSize(cfg.Stdout)
-	conv, err := openHarnessConversation(ctx, chat.Options{
-		Harness:    cfg.HarnessName,
-		BinaryPath: cfg.BinaryPath,
-		Args:       harnessLeadArgs(cfg),
-		WorkingDir: cfg.WorkDir,
-		Env:        cfg.Env,
-		Cols:       cols,
-		Rows:       rows,
-		// memstore is sufficient: the chat store holds only turn metadata for
-		// this process's lifetime. The durable transcript is the harness's
-		// own session log, and the resume UUID is persisted onto the loom
-		// session metadata below.
-		Store: memstore.New(),
-	})
+	conv, err := openHarnessLeadConversation(ctx, cfg)
 	if err != nil {
-		return fmt.Errorf("start controlled %s lead session: %w", cfg.Backend, err)
+		return err
 	}
 
 	runtime := HarnessRuntimeMetadata{
@@ -136,6 +123,36 @@ func RunHarnessLeadRuntime(ctx context.Context, cfg HarnessLeadRuntimeConfig) er
 	cancelDrain()
 	unregister()
 	restoreTerminal()
+	return finalizeHarnessLeadRuntime(cfg, conv, runtime, result, waitErr)
+}
+
+// openHarnessLeadConversation starts the harness under harness-wrapper PTY
+// supervision, sized to the human terminal.
+func openHarnessLeadConversation(ctx context.Context, cfg HarnessLeadRuntimeConfig) (harnessConversation, error) {
+	cols, rows := harnessTerminalSize(cfg.Stdout)
+	conv, err := openHarnessConversation(ctx, chat.Options{
+		Harness:    cfg.HarnessName,
+		BinaryPath: cfg.BinaryPath,
+		Args:       harnessLeadArgs(cfg),
+		WorkingDir: cfg.WorkDir,
+		Env:        cfg.Env,
+		Cols:       cols,
+		Rows:       rows,
+		// memstore is sufficient: the chat store holds only turn metadata for
+		// this process's lifetime. The durable transcript is the harness's
+		// own session log, and the resume UUID is persisted onto the loom
+		// session metadata by RunHarnessLeadRuntime.
+		Store: memstore.New(),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("start controlled %s lead session: %w", cfg.Backend, err)
+	}
+	return conv, nil
+}
+
+// finalizeHarnessLeadRuntime closes the conversation, marks the runtime
+// disconnected, and maps the harness exit into the runtime's return error.
+func finalizeHarnessLeadRuntime(cfg HarnessLeadRuntimeConfig, conv harnessConversation, runtime HarnessRuntimeMetadata, result wrapper.Result, waitErr error) error {
 	closeCtx, cancelClose := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancelClose()
 	if err := conv.Close(closeCtx); err != nil {
@@ -256,23 +273,16 @@ func watchHarnessLeadRuntime(
 	handle *leadConversationHandle,
 	runtime HarnessRuntimeMetadata,
 ) {
+	w := &harnessLeadRuntimeWatcher{
+		cfg:        cfg,
+		conv:       conv,
+		handle:     handle,
+		runtime:    runtime,
+		lastStatus: runtime.Status,
+	}
 	events := conv.Events()
 	ticker := time.NewTicker(harnessStatusPollInterval)
 	defer ticker.Stop()
-	lastStatus := runtime.Status
-	var turnPendingSince time.Time
-
-	persist := func(status string) {
-		if status == "" || status == lastStatus {
-			return
-		}
-		lastStatus = status
-		runtime.Status = status
-		if err := UpdateHarnessRuntimeMetadata(ctx, cfg.Store, cfg.Workspace, cfg.SessionID, runtime); err != nil {
-			cfg.Logger.Debug("failed to persist harness runtime status", "status", status, "err", err)
-		}
-	}
-
 	for {
 		select {
 		case <-ctx.Done():
@@ -282,43 +292,87 @@ func watchHarnessLeadRuntime(
 				events = nil
 				continue
 			}
-			if handle != nil {
-				handle.observeTurnEvent(ev)
-			}
-			if ev.Turn.Role != chat.RoleAssistant {
-				continue
-			}
-			switch ev.Turn.State {
-			case chat.TurnStatePending, chat.TurnStateStreaming:
-				turnPendingSince = time.Now()
-				persist(RuntimeStatusActive)
-			case chat.TurnStateComplete:
-				turnPendingSince = time.Time{}
-				persist(RuntimeStatusIdle)
-			case chat.TurnStateErrored:
-				turnPendingSince = time.Time{}
-				persist(RuntimeStatusWaitingUserInput)
-			}
+			w.observeTurnEvent(ctx, ev)
 		case <-ticker.C:
-			snap := conv.Snapshot()
-			if status := harnessRuntimeStatus(snap); status != RuntimeStatusActive || lastStatus == RuntimeStatusStarting {
-				persist(status)
-			}
-			if runtime.HarnessSessionID == "" {
-				if hsid := conv.HarnessSessionID(); hsid != "" {
-					runtime.HarnessSessionID = hsid
-					if err := UpdateHarnessRuntimeMetadata(ctx, cfg.Store, cfg.Workspace, cfg.SessionID, runtime); err != nil {
-						cfg.Logger.Debug("failed to persist harness session id", "err", err)
-					}
-				}
-			}
-			if !turnPendingSince.IsZero() && time.Since(turnPendingSince) > harnessWedgedTurnLogWindow {
-				if !snap.LastOutputAt.IsZero() && time.Since(snap.LastOutputAt) > harnessWedgedTurnLogWindow {
-					cfg.Logger.Warn("harness turn has been pending without output; turn-completion marker may have been missed",
-						"lead", cfg.LeadName, "pending_since", turnPendingSince)
-					turnPendingSince = time.Time{}
-				}
-			}
+			w.poll(ctx)
 		}
 	}
+}
+
+// harnessLeadRuntimeWatcher holds the mutable state of one
+// watchHarnessLeadRuntime loop; its methods are the loop body phases and are
+// only ever called from that single goroutine.
+type harnessLeadRuntimeWatcher struct {
+	cfg              HarnessLeadRuntimeConfig
+	conv             harnessConversation
+	handle           *leadConversationHandle
+	runtime          HarnessRuntimeMetadata
+	lastStatus       string
+	turnPendingSince time.Time
+}
+
+func (w *harnessLeadRuntimeWatcher) persist(ctx context.Context, status string) {
+	if status == "" || status == w.lastStatus {
+		return
+	}
+	w.lastStatus = status
+	w.runtime.Status = status
+	if err := UpdateHarnessRuntimeMetadata(ctx, w.cfg.Store, w.cfg.Workspace, w.cfg.SessionID, w.runtime); err != nil {
+		w.cfg.Logger.Debug("failed to persist harness runtime status", "status", status, "err", err)
+	}
+}
+
+func (w *harnessLeadRuntimeWatcher) observeTurnEvent(ctx context.Context, ev chat.TurnEvent) {
+	if w.handle != nil {
+		w.handle.observeTurnEvent(ev)
+	}
+	if ev.Turn.Role != chat.RoleAssistant {
+		return
+	}
+	switch ev.Turn.State {
+	case chat.TurnStatePending, chat.TurnStateStreaming:
+		w.turnPendingSince = time.Now()
+		w.persist(ctx, RuntimeStatusActive)
+	case chat.TurnStateComplete:
+		w.turnPendingSince = time.Time{}
+		w.persist(ctx, RuntimeStatusIdle)
+	case chat.TurnStateErrored:
+		w.turnPendingSince = time.Time{}
+		w.persist(ctx, RuntimeStatusWaitingUserInput)
+	}
+}
+
+func (w *harnessLeadRuntimeWatcher) poll(ctx context.Context) {
+	snap := w.conv.Snapshot()
+	if status := harnessRuntimeStatus(snap); status != RuntimeStatusActive || w.lastStatus == RuntimeStatusStarting {
+		w.persist(ctx, status)
+	}
+	w.backfillHarnessSessionID(ctx)
+	w.logWedgedTurn(snap)
+}
+
+func (w *harnessLeadRuntimeWatcher) backfillHarnessSessionID(ctx context.Context) {
+	if w.runtime.HarnessSessionID != "" {
+		return
+	}
+	hsid := w.conv.HarnessSessionID()
+	if hsid == "" {
+		return
+	}
+	w.runtime.HarnessSessionID = hsid
+	if err := UpdateHarnessRuntimeMetadata(ctx, w.cfg.Store, w.cfg.Workspace, w.cfg.SessionID, w.runtime); err != nil {
+		w.cfg.Logger.Debug("failed to persist harness session id", "err", err)
+	}
+}
+
+func (w *harnessLeadRuntimeWatcher) logWedgedTurn(snap wrapper.Snapshot) {
+	if w.turnPendingSince.IsZero() || time.Since(w.turnPendingSince) <= harnessWedgedTurnLogWindow {
+		return
+	}
+	if snap.LastOutputAt.IsZero() || time.Since(snap.LastOutputAt) <= harnessWedgedTurnLogWindow {
+		return
+	}
+	w.cfg.Logger.Warn("harness turn has been pending without output; turn-completion marker may have been missed",
+		"lead", w.cfg.LeadName, "pending_since", w.turnPendingSince)
+	w.turnPendingSince = time.Time{}
 }

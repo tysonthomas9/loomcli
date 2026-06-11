@@ -49,8 +49,7 @@ export function CollapsedAgentRail({
       }
     }
     return orderAgentsForEpicRunner(merged).filter(
-      (agent) =>
-        agent.status === "configured" || isLiveAgentRailVisible(agent),
+      (agent) => agent.status === "configured" || isLiveAgentRailVisible(agent),
     );
   }, [fleetAgents, workspaceConfigAgents, workspace?.name]);
 

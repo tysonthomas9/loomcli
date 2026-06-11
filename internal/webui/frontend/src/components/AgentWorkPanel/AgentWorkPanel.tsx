@@ -21,7 +21,7 @@ import {
   isTerminalWorkflowRunStatus,
   type WorkflowRun,
   type WorkflowRunStatus,
-} from "@/api";
+} from "@/hooks/api";
 import { type Issue, type LoomAgentStatus, parseLoomStatus } from "@/types";
 import { isLeadRole } from "@/utils/agentRole";
 import { statusBucket, type StatusBucket } from "@/utils/statusBuckets";
@@ -264,7 +264,9 @@ export function AgentWorkPanel({
   ]);
   const isAssignedEpicFocused =
     focused && selectedAgentIsLead && selectedAgent?.parent === activeEpicId;
-  const activeEpicLabel = isAssignedEpicFocused ? "Assigned epic" : "Active epic";
+  const activeEpicLabel = isAssignedEpicFocused
+    ? "Assigned epic"
+    : "Active epic";
   const deliveryLabel = isAssignedEpicFocused
     ? leadDeliveryStateLabel(selectedAgent?.delivery_state)
     : "";
@@ -308,212 +310,220 @@ export function AgentWorkPanel({
         />
       ) : null}
       <div className={styles.panelContent}>
-      <div className={styles.header}>
-        {focused && groups[0] ? (
-          <>
-            <div className={styles.queueHeadRow}>
-              <span className={styles.label}>Open queue</span>
-              <span className={styles.openTotal}>
-                <strong>{totalTasks - displayCounts.done}</strong> open
-              </span>
-            </div>
-            <div className={styles.activeEpicTitle}>
-              <span className={isOrphanGroup(groups[0]) ? styles.orphanChip : styles.epicChip}>
-                {isOrphanGroup(groups[0]) ? "UNASSIGNED" : "EPIC"}
-              </span>
-              <span className={styles.activeEpicTitleText}>
-                {groups[0].epicTitle}
-              </span>
-              <code className={styles.activeEpicId}>{groups[0].epicId}</code>
-            </div>
-            <div className={styles.progressLine}>
-              {agentName ? (
-                <>
-                  claimed by {agentName} · {displayCounts.done} of {totalTasks}{" "}
-                  done
-                </>
-              ) : (
-                <>
-                  {displayCounts.done} of {totalTasks} done
-                </>
-              )}
-            </div>
-            {deliveryLabel ? (
-              <div className={styles.activeEpicTag}>
-                <span aria-hidden="true" className={styles.activeEpicTagDot} />
-                {activeEpicLabel}
-                <span className={styles.deliveryStatePill}>
-                  {deliveryLabel}
+        <div className={styles.header}>
+          {focused && groups[0] ? (
+            <>
+              <div className={styles.queueHeadRow}>
+                <span className={styles.label}>Open queue</span>
+                <span className={styles.openTotal}>
+                  <strong>{totalTasks - displayCounts.done}</strong> open
                 </span>
               </div>
-            ) : null}
-          </>
-        ) : (
-          <div className={styles.label}>
-            {formatQueueLabel(mode, groups, totalTasks, agentName)}
-          </div>
-        )}
+              <div className={styles.activeEpicTitle}>
+                <span
+                  className={
+                    isOrphanGroup(groups[0])
+                      ? styles.orphanChip
+                      : styles.epicChip
+                  }
+                >
+                  {isOrphanGroup(groups[0]) ? "UNASSIGNED" : "EPIC"}
+                </span>
+                <span className={styles.activeEpicTitleText}>
+                  {groups[0].epicTitle}
+                </span>
+                <code className={styles.activeEpicId}>{groups[0].epicId}</code>
+              </div>
+              <div className={styles.progressLine}>
+                {agentName ? (
+                  <>
+                    claimed by {agentName} · {displayCounts.done} of{" "}
+                    {totalTasks} done
+                  </>
+                ) : (
+                  <>
+                    {displayCounts.done} of {totalTasks} done
+                  </>
+                )}
+              </div>
+              {deliveryLabel ? (
+                <div className={styles.activeEpicTag}>
+                  <span
+                    aria-hidden="true"
+                    className={styles.activeEpicTagDot}
+                  />
+                  {activeEpicLabel}
+                  <span className={styles.deliveryStatePill}>
+                    {deliveryLabel}
+                  </span>
+                </div>
+              ) : null}
+            </>
+          ) : (
+            <div className={styles.label}>
+              {formatQueueLabel(mode, groups, totalTasks, agentName)}
+            </div>
+          )}
 
-        <DistributionBar counts={displayCounts} total={totalTasks} />
+          <DistributionBar counts={displayCounts} total={totalTasks} />
 
-        {mode === "lead-open" ? (
-          <div
-            className={styles.filterRow}
-            role="group"
-            aria-label="Filter epics"
-          >
-            <FilterPill
-              label="All"
-              count={leadCounts.running + leadCounts.idle}
-              active={leadFilter === "all"}
-              onClick={() => setLeadFilter("all")}
-            />
-            <FilterPill
-              label="Running"
-              count={leadCounts.running}
-              active={leadFilter === "running"}
-              dotKind="in_progress"
-              onClick={() => setLeadFilter("running")}
-            />
-            <FilterPill
-              label="Not running"
-              count={leadCounts.idle}
-              active={leadFilter === "idle"}
-              dotKind="open"
-              onClick={() => setLeadFilter("idle")}
-            />
-          </div>
-        ) : (
-          <div
-            className={styles.filterRow}
-            role="group"
-            aria-label="Filter tasks by status"
-          >
-            <FilterPill
-              label="All"
-              count={totalTasks}
-              active={statusFilter === "all"}
-              onClick={() => setStatusFilter("all")}
-            />
-            <FilterPill
-              label="In Progress"
-              count={displayCounts.active}
-              active={statusFilter === "in_progress"}
-              dotKind="in_progress"
-              onClick={() => toggleStatusFilter("in_progress")}
-            />
-            <FilterPill
-              label="Open"
-              count={displayCounts.open}
-              active={statusFilter === "open"}
-              dotKind="open"
-              onClick={() => toggleStatusFilter("open")}
-            />
-            <FilterPill
-              label="Review"
-              count={displayCounts.review}
-              active={statusFilter === "review"}
-              dotKind="review"
-              onClick={() => toggleStatusFilter("review")}
-            />
-            <FilterPill
-              label="Blocked"
-              count={displayCounts.blocked}
-              active={statusFilter === "blocked"}
-              dotKind="blocked"
-              onClick={() => toggleStatusFilter("blocked")}
-            />
-            <FilterPill
-              label="Done"
-              count={displayCounts.done}
-              active={statusFilter === "done"}
-              dotKind="done"
-              onClick={() => toggleStatusFilter("done")}
-            />
-          </div>
-        )}
-      </div>
-
-      <div className={styles.body}>
-        {visibleGroups.length === 0 ? (
-          <div className={styles.emptyState}>
-            {groups.length > 0
-              ? "Nothing matches this filter."
-              : focused
-                ? "Active epic has no child tasks."
-                : mode === "lead-open"
-                  ? "No open epics or tasks in this workspace."
-                  : mode === "workspace"
-                    ? "No issues in this workspace yet."
-                    : `No tasks assigned to ${agentName} yet.`}
-          </div>
-        ) : (
-          visibleGroups.map((group) => {
-            const claimedBy = epicClaims.get(group.epicId);
-            // Don't offer Run for drained epics (no open work left) or
-            // ones already claimed by another lead. Both prevent the
-            // dead-end / silent-conflict cases the multi-lead UI walk
-            // surfaced.
-            const remainingOpen = group.totalCount - group.doneCount;
-            const epicRunnerRun = epicRunnerRuns?.[group.epicId];
-            const runnerActive =
-              epicRunnerRun != null &&
-              !isTerminalWorkflowRunStatus(epicRunnerRun.status);
-            const canRunEpic =
-              mode === "lead-open" &&
-              selectedAgentIsLead &&
-              group.epicId !== ORPHAN_EPIC_KEY &&
-              onRunEpic != null &&
-              remainingOpen > 0 &&
-              !claimedBy &&
-              !runnerActive;
-            const visibleTasks =
-              mode === "lead-open" ? group.tasks : filterTasks(group.tasks);
-            // Lead-mode epic cards collapse to a single header row by
-            // default (the design's "› N" pill); Unassigned stays open.
-            const collapsible =
-              mode === "lead-open" && !isOrphanGroup(group);
-            const collapsed = collapsible && !expandedEpics[group.epicId];
-            return (
-              <EpicGroupCard
-                key={group.epicId}
-                group={group}
-                visibleTasks={visibleTasks}
-                remainingOpen={remainingOpen}
-                collapsible={collapsible}
-                collapsed={collapsed}
-                onToggleCollapse={() =>
-                  setExpandedEpics((prev) => ({
-                    ...prev,
-                    [group.epicId]: !prev[group.epicId],
-                  }))
-                }
-                canRunEpic={canRunEpic}
-                claimedBy={claimedBy}
-                epicRunnerRun={epicRunnerRun}
-                onRunEpic={onRunEpic}
-                workerByTaskId={workerByTaskId}
-                workerHistory={
-                  focused ? [] : (workerHistoryByEpic.get(group.epicId) ?? [])
-                }
-                onAgentClick={onAgentClick}
-                onTaskClick={(task) => dispatchClick(task)}
+          {mode === "lead-open" ? (
+            <div
+              className={styles.filterRow}
+              role="group"
+              aria-label="Filter epics"
+            >
+              <FilterPill
+                label="All"
+                count={leadCounts.running + leadCounts.idle}
+                active={leadFilter === "all"}
+                onClick={() => setLeadFilter("all")}
               />
-            );
-          })
-        )}
-      </div>
-
-      {focused && focusedHistory.length > 0 && groups[0] ? (
-        <div className={styles.footer}>
-          <WorkerHistory
-            items={focusedHistory}
-            tasks={groups[0].tasks}
-            onWorkerClick={onAgentClick}
-            onTaskClick={(task) => dispatchClick(task)}
-          />
+              <FilterPill
+                label="Running"
+                count={leadCounts.running}
+                active={leadFilter === "running"}
+                dotKind="in_progress"
+                onClick={() => setLeadFilter("running")}
+              />
+              <FilterPill
+                label="Not running"
+                count={leadCounts.idle}
+                active={leadFilter === "idle"}
+                dotKind="open"
+                onClick={() => setLeadFilter("idle")}
+              />
+            </div>
+          ) : (
+            <div
+              className={styles.filterRow}
+              role="group"
+              aria-label="Filter tasks by status"
+            >
+              <FilterPill
+                label="All"
+                count={totalTasks}
+                active={statusFilter === "all"}
+                onClick={() => setStatusFilter("all")}
+              />
+              <FilterPill
+                label="In Progress"
+                count={displayCounts.active}
+                active={statusFilter === "in_progress"}
+                dotKind="in_progress"
+                onClick={() => toggleStatusFilter("in_progress")}
+              />
+              <FilterPill
+                label="Open"
+                count={displayCounts.open}
+                active={statusFilter === "open"}
+                dotKind="open"
+                onClick={() => toggleStatusFilter("open")}
+              />
+              <FilterPill
+                label="Review"
+                count={displayCounts.review}
+                active={statusFilter === "review"}
+                dotKind="review"
+                onClick={() => toggleStatusFilter("review")}
+              />
+              <FilterPill
+                label="Blocked"
+                count={displayCounts.blocked}
+                active={statusFilter === "blocked"}
+                dotKind="blocked"
+                onClick={() => toggleStatusFilter("blocked")}
+              />
+              <FilterPill
+                label="Done"
+                count={displayCounts.done}
+                active={statusFilter === "done"}
+                dotKind="done"
+                onClick={() => toggleStatusFilter("done")}
+              />
+            </div>
+          )}
         </div>
-      ) : null}
+
+        <div className={styles.body}>
+          {visibleGroups.length === 0 ? (
+            <div className={styles.emptyState}>
+              {groups.length > 0
+                ? "Nothing matches this filter."
+                : focused
+                  ? "Active epic has no child tasks."
+                  : mode === "lead-open"
+                    ? "No open epics or tasks in this workspace."
+                    : mode === "workspace"
+                      ? "No issues in this workspace yet."
+                      : `No tasks assigned to ${agentName} yet.`}
+            </div>
+          ) : (
+            visibleGroups.map((group) => {
+              const claimedBy = epicClaims.get(group.epicId);
+              // Don't offer Run for drained epics (no open work left) or
+              // ones already claimed by another lead. Both prevent the
+              // dead-end / silent-conflict cases the multi-lead UI walk
+              // surfaced.
+              const remainingOpen = group.totalCount - group.doneCount;
+              const epicRunnerRun = epicRunnerRuns?.[group.epicId];
+              const runnerActive =
+                epicRunnerRun != null &&
+                !isTerminalWorkflowRunStatus(epicRunnerRun.status);
+              const canRunEpic =
+                mode === "lead-open" &&
+                selectedAgentIsLead &&
+                group.epicId !== ORPHAN_EPIC_KEY &&
+                onRunEpic != null &&
+                remainingOpen > 0 &&
+                !claimedBy &&
+                !runnerActive;
+              const visibleTasks =
+                mode === "lead-open" ? group.tasks : filterTasks(group.tasks);
+              // Lead-mode epic cards collapse to a single header row by
+              // default (the design's "› N" pill); Unassigned stays open.
+              const collapsible = mode === "lead-open" && !isOrphanGroup(group);
+              const collapsed = collapsible && !expandedEpics[group.epicId];
+              return (
+                <EpicGroupCard
+                  key={group.epicId}
+                  group={group}
+                  visibleTasks={visibleTasks}
+                  remainingOpen={remainingOpen}
+                  collapsible={collapsible}
+                  collapsed={collapsed}
+                  onToggleCollapse={() =>
+                    setExpandedEpics((prev) => ({
+                      ...prev,
+                      [group.epicId]: !prev[group.epicId],
+                    }))
+                  }
+                  canRunEpic={canRunEpic}
+                  claimedBy={claimedBy}
+                  epicRunnerRun={epicRunnerRun}
+                  onRunEpic={onRunEpic}
+                  workerByTaskId={workerByTaskId}
+                  workerHistory={
+                    focused ? [] : (workerHistoryByEpic.get(group.epicId) ?? [])
+                  }
+                  onAgentClick={onAgentClick}
+                  onTaskClick={(task) => dispatchClick(task)}
+                />
+              );
+            })
+          )}
+        </div>
+
+        {focused && focusedHistory.length > 0 && groups[0] ? (
+          <div className={styles.footer}>
+            <WorkerHistory
+              items={focusedHistory}
+              tasks={groups[0].tasks}
+              onWorkerClick={onAgentClick}
+              onTaskClick={(task) => dispatchClick(task)}
+            />
+          </div>
+        ) : null}
       </div>
     </aside>
   );
@@ -562,8 +572,7 @@ function EpicGroupCard({
     group.totalCount > 0 ? (group.doneCount / group.totalCount) * 100 : 0;
   const isOrphan = isOrphanGroup(group);
   const runnerActive =
-    epicRunnerRun != null &&
-    !isTerminalWorkflowRunStatus(epicRunnerRun.status);
+    epicRunnerRun != null && !isTerminalWorkflowRunStatus(epicRunnerRun.status);
   const claimedTasks = epicRunnerRun
     ? group.tasks.filter((task) =>
         isTaskClaimedByWorkflowRun(task, epicRunnerRun.run_id),

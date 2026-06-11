@@ -204,7 +204,9 @@ describe("IssueCard", () => {
 
     it("exposes a copy-id button without nesting it inside a button role", () => {
       const issue = createTestIssue({ id: "loom-xyz" });
-      renderIssueCard(<IssueCard issue={issue} onClick={() => {}} columnId="review" />);
+      renderIssueCard(
+        <IssueCard issue={issue} onClick={() => {}} columnId="review" />,
+      );
 
       expect(getIssueCard(issue)).not.toHaveAttribute("role", "button");
       expect(
@@ -281,7 +283,9 @@ describe("IssueCard", () => {
 
     it('renders data-column attribute with "done" columnId', () => {
       const issue = createTestIssue();
-      const { container } = renderIssueCard(<IssueCard issue={issue} columnId="done" />);
+      const { container } = renderIssueCard(
+        <IssueCard issue={issue} columnId="done" />,
+      );
 
       const article = container.querySelector("article");
       expect(article).toHaveAttribute("data-column", "done");
@@ -547,7 +551,9 @@ describe("IssueCard", () => {
 
     it("aria-label includes both (blocked) and (backlog) when both are true", () => {
       const issue = createTestIssue({ title: "Complex Issue" });
-      renderIssueCard(<IssueCard issue={issue} blockedByCount={1} isBacklog={true} />);
+      renderIssueCard(
+        <IssueCard issue={issue} blockedByCount={1} isBacklog={true} />,
+      );
 
       expect(
         screen.getByLabelText("Issue: Complex Issue (blocked) (backlog)"),
@@ -580,7 +586,6 @@ describe("IssueCard", () => {
 
       expect(screen.getByLabelText("Deferred")).toBeInTheDocument();
     });
-
   });
 
   describe("review type badge", () => {
@@ -878,7 +883,9 @@ describe("IssueCard", () => {
   describe("review column interactions", () => {
     it("does not render inline approve/reject buttons in review column", () => {
       const issue = createTestIssue();
-      renderIssueCard(<IssueCard issue={issue} columnId="review" onClick={vi.fn()} />);
+      renderIssueCard(
+        <IssueCard issue={issue} columnId="review" onClick={vi.fn()} />,
+      );
 
       expect(screen.queryByTestId("approve-button")).not.toBeInTheDocument();
       expect(screen.queryByTestId("reject-button")).not.toBeInTheDocument();
@@ -889,7 +896,9 @@ describe("IssueCard", () => {
     it("still opens detail flow by clicking the review card", () => {
       const issue = createTestIssue({ id: "review-card-click-123" });
       const onClick = vi.fn();
-      renderIssueCard(<IssueCard issue={issue} columnId="review" onClick={onClick} />);
+      renderIssueCard(
+        <IssueCard issue={issue} columnId="review" onClick={onClick} />,
+      );
 
       fireEvent.click(getIssueCard(issue));
 

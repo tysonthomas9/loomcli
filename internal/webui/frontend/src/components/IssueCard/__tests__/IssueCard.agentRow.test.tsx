@@ -44,7 +44,9 @@ describe("IssueCard agent-row removal (Aether V3)", () => {
       const agentRow = container.querySelector('[class*="agentRow"]');
       expect(agentRow).not.toBeInTheDocument();
       // No live-activity strings either.
-      expect(screen.queryByText("Submitted for review")).not.toBeInTheDocument();
+      expect(
+        screen.queryByText("Submitted for review"),
+      ).not.toBeInTheDocument();
       expect(screen.queryByText("agent missing")).not.toBeInTheDocument();
     },
   );

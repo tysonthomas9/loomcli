@@ -68,9 +68,7 @@ function toDisplayCommit(
     ? (commit as DiffCommit).short_hash
     : commit.hash.slice(0, 7);
   const fullHash = isDiff ? (commit as DiffCommit).hash : commit.hash;
-  const message = isDiff
-    ? (commit as DiffCommit).subject
-    : commit.message;
+  const message = isDiff ? (commit as DiffCommit).subject : commit.message;
   const author = isDiff
     ? (commit as DiffCommit).author || agentName
     : agentName;
@@ -305,9 +303,7 @@ export function GitTab({ agent, isActive }: GitTabProps): JSX.Element {
               )}
             </>
           ) : ahead === 0 ? (
-            <p className={styles.emptyState}>
-              In sync with {targetBranch}
-            </p>
+            <p className={styles.emptyState}>In sync with {targetBranch}</p>
           ) : (
             <p className={styles.emptyState}>No commit data</p>
           )}

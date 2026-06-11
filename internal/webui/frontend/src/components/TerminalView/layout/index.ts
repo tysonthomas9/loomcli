@@ -5,7 +5,10 @@
 export { SplitDivider } from "./SplitDivider";
 export { SplitPaneSelector } from "./SplitPaneSelector";
 export { useSplitView } from "./useSplitView";
-export { useTabEditorGroups, reconcileTabEditorGroups } from "./useTabEditorGroups";
+export {
+  useTabEditorGroups,
+  reconcileTabEditorGroups,
+} from "./useTabEditorGroups";
 export type { TabEditorGroup } from "./useTabEditorGroups";
 
 export { BackendPickerPrompt } from "./BackendPickerPrompt";

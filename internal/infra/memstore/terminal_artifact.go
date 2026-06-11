@@ -113,7 +113,12 @@ func (s *artifactStore) Create(_ context.Context, in store.ArtifactCreate) (*dom
 	if s.items[in.WorkspaceKey] == nil {
 		s.items[in.WorkspaceKey] = make(map[string]*domain.Artifact)
 	}
-	now := time.Now().UTC()
+	artifact := newArtifactFromCreateMem(in, time.Now().UTC())
+	s.items[in.WorkspaceKey][in.ArtifactID] = artifact
+	return cloneArtifact(artifact), nil
+}
+
+func newArtifactFromCreateMem(in store.ArtifactCreate, now time.Time) *domain.Artifact {
 	durableStatus := in.DurableStatus
 	if durableStatus == "" {
 		if in.URI == "" {
@@ -154,8 +159,7 @@ func (s *artifactStore) Create(_ context.Context, in store.ArtifactCreate) (*dom
 	if artifact.DurableStatus == "finalized" {
 		artifact.FinalizedAt = &now
 	}
-	s.items[in.WorkspaceKey][in.ArtifactID] = artifact
-	return cloneArtifact(artifact), nil
+	return artifact
 }
 
 func (s *artifactStore) Get(_ context.Context, ws, artifactID string) (*domain.Artifact, error) {
@@ -270,6 +274,27 @@ func (s *artifactStore) Update(_ context.Context, ws, artifactID string, patch s
 	if !ok {
 		return nil, fmt.Errorf("artifact %q in workspace %q: %w", artifactID, ws, domain.ErrNotFound)
 	}
+	applyArtifactUpdateFieldsMem(artifact, patch)
+	artifact.UpdatedAt = time.Now().UTC()
+	if artifact.ContentHash == "" {
+		artifact.ContentHash = artifact.Checksum
+	}
+	if artifact.Checksum == "" {
+		artifact.Checksum = artifact.ContentHash
+	}
+	if artifact.DurableStatus == "finalized" && artifact.FinalizedAt == nil {
+		finalizedAt := artifact.UpdatedAt
+		artifact.FinalizedAt = &finalizedAt
+	}
+	return cloneArtifact(artifact), nil
+}
+
+func applyArtifactUpdateFieldsMem(artifact *domain.Artifact, patch store.ArtifactUpdate) {
+	applyArtifactOwnershipUpdateMem(artifact, patch)
+	applyArtifactContentUpdateMem(artifact, patch)
+}
+
+func applyArtifactOwnershipUpdateMem(artifact *domain.Artifact, patch store.ArtifactUpdate) {
 	if patch.Summary != nil {
 		artifact.Summary = *patch.Summary
 	}
@@ -297,6 +322,9 @@ func (s *artifactStore) Update(_ context.Context, ws, artifactID string, patch s
 	if patch.OwnerID != nil {
 		artifact.OwnerID = *patch.OwnerID
 	}
+}
+
+func applyArtifactContentUpdateMem(artifact *domain.Artifact, patch store.ArtifactUpdate) {
 	if patch.Type != nil {
 		artifact.Type = *patch.Type
 	}
@@ -325,18 +353,6 @@ func (s *artifactStore) Update(_ context.Context, ws, artifactID string, patch s
 		finalizedAt := *patch.FinalizedAt
 		artifact.FinalizedAt = &finalizedAt
 	}
-	artifact.UpdatedAt = time.Now().UTC()
-	if artifact.ContentHash == "" {
-		artifact.ContentHash = artifact.Checksum
-	}
-	if artifact.Checksum == "" {
-		artifact.Checksum = artifact.ContentHash
-	}
-	if artifact.DurableStatus == "finalized" && artifact.FinalizedAt == nil {
-		finalizedAt := artifact.UpdatedAt
-		artifact.FinalizedAt = &finalizedAt
-	}
-	return cloneArtifact(artifact), nil
 }
 
 func applyArtifactFinalizeMem(artifact *domain.Artifact, finalize store.ArtifactFinalize, now time.Time) {
@@ -930,6 +946,19 @@ func agentInboxMessageMatchesMem(m *domain.AgentInboxMessage, f store.AgentInbox
 	if f.Status != "" && m.Status != f.Status {
 		return false
 	}
+	if !agentInboxMessageMatchesRefsMem(m, f) {
+		return false
+	}
+	if f.AfterCursor > 0 && m.Cursor <= f.AfterCursor {
+		return false
+	}
+	if m.Status == domain.AgentInboxMessageQueued && m.ClaimedBy != "" && m.ClaimExpiresAt != nil && !m.ClaimExpiresAt.After(now) {
+		return true
+	}
+	return true
+}
+
+func agentInboxMessageMatchesRefsMem(m *domain.AgentInboxMessage, f store.AgentInboxMessageFilter) bool {
 	if f.SourceKind != "" && m.SourceKind != f.SourceKind {
 		return false
 	}
@@ -941,12 +970,6 @@ func agentInboxMessageMatchesMem(m *domain.AgentInboxMessage, f store.AgentInbox
 	}
 	if f.TaskRunID != "" && m.TaskRunID != f.TaskRunID {
 		return false
-	}
-	if f.AfterCursor > 0 && m.Cursor <= f.AfterCursor {
-		return false
-	}
-	if m.Status == domain.AgentInboxMessageQueued && m.ClaimedBy != "" && m.ClaimExpiresAt != nil && !m.ClaimExpiresAt.After(now) {
-		return true
 	}
 	return true
 }

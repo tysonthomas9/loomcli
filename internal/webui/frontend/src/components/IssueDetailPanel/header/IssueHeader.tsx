@@ -214,7 +214,9 @@ export function IssueHeader({
             type="button"
             className={styles.maximizeButton}
             onClick={onToggleMaximize}
-            aria-label={isMaximized ? "Exit full screen" : "Expand to full screen"}
+            aria-label={
+              isMaximized ? "Exit full screen" : "Expand to full screen"
+            }
             aria-pressed={isMaximized}
             data-testid="header-maximize-button"
           >

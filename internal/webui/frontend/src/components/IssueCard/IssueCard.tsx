@@ -192,12 +192,8 @@ export const IssueCard = memo(function IssueCard({
           {displayId}
         </span>
         <span className={styles.icons}>
-          {columnId !== "done" && (
-            <CopyIssueIdButton issueId={issue.id} />
-          )}
-          {reviewType &&
-            reviewType !== "plan" &&
-            columnId !== "review" && (
+          {columnId !== "done" && <CopyIssueIdButton issueId={issue.id} />}
+          {reviewType && reviewType !== "plan" && columnId !== "review" && (
             <span
               className={`${styles.reviewTypeBadge} ${styles.hoverReveal} ${REVIEW_BADGE_CONFIG[reviewType].className}`}
               aria-label={`${REVIEW_BADGE_CONFIG[reviewType].label} review`}
@@ -264,9 +260,7 @@ export const IssueCard = memo(function IssueCard({
       {showFooter && (
         <footer className={styles.footer}>
           <div className={styles.footerLeft}>
-            {showRepoBadge && issue.repo && (
-              <RepoBadge repoName={issue.repo} />
-            )}
+            {showRepoBadge && issue.repo && <RepoBadge repoName={issue.repo} />}
           </div>
           {personLabel && (
             <span

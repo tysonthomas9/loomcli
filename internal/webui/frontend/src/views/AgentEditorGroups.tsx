@@ -15,13 +15,7 @@ import styles from "./AgentEditorGroups.module.css";
 
 export type AgentEditorTab = "terminal" | "info" | "git" | "diff" | "files";
 
-const ALL_TABS: AgentEditorTab[] = [
-  "terminal",
-  "info",
-  "git",
-  "diff",
-  "files",
-];
+const ALL_TABS: AgentEditorTab[] = ["terminal", "info", "git", "diff", "files"];
 
 const TAB_LABELS: Record<AgentEditorTab, string> = {
   terminal: "Terminal",
@@ -111,8 +105,7 @@ export function AgentEditorGroups({
       const moving = group.active;
       const remaining = group.tabs.filter((t) => t !== moving);
       const leftActive =
-        remaining[Math.max(0, group.tabs.indexOf(moving) - 1)] ??
-        remaining[0]!;
+        remaining[Math.max(0, group.tabs.indexOf(moving) - 1)] ?? remaining[0]!;
       return [
         { tabs: remaining, active: leftActive },
         { tabs: [moving], active: moving },
@@ -131,10 +124,7 @@ export function AgentEditorGroups({
         prev.map((g, i) => {
           if (i === fromGroup) {
             const tabs = g.tabs.filter((t) => t !== tab);
-            const active =
-              g.active === tab
-                ? (tabs[0] ?? g.active)
-                : g.active;
+            const active = g.active === tab ? (tabs[0] ?? g.active) : g.active;
             return { tabs, active };
           }
           if (i === toGroup) {

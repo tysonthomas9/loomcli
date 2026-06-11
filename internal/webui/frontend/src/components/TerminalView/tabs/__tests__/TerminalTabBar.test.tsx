@@ -148,7 +148,6 @@ describe("TerminalTabBar", () => {
       expect(button).toBeInTheDocument();
       expect(button).toHaveAttribute("aria-label", "New terminal tab");
     });
-
   });
 
   describe("interactions", () => {
@@ -201,7 +200,6 @@ describe("TerminalTabBar", () => {
 
       expect(onNewTab).toHaveBeenCalledTimes(1);
     });
-
   });
 
   describe("keyboard navigation", () => {

@@ -134,7 +134,9 @@ describe("DesignPanel", () => {
       const panel = screen.getByTestId("design-panel");
       expect(panel.className).toMatch(/fullscreen/);
       expect(panel.parentElement).toBe(document.body);
-      expect(container.querySelector('[data-testid="design-panel"]')).toBeNull();
+      expect(
+        container.querySelector('[data-testid="design-panel"]'),
+      ).toBeNull();
       expect(screen.getByLabelText("Exit fullscreen")).toBeInTheDocument();
     });
 
@@ -142,7 +144,9 @@ describe("DesignPanel", () => {
       const { container } = render(<DesignPanel content="Some content" />);
 
       fireEvent.click(screen.getByLabelText("Enter fullscreen"));
-      expect(screen.getByTestId("design-panel").className).toMatch(/fullscreen/);
+      expect(screen.getByTestId("design-panel").className).toMatch(
+        /fullscreen/,
+      );
 
       fireEvent.keyDown(document, { key: "Escape" });
 

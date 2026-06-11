@@ -56,10 +56,7 @@ import { getAvatarColor, shouldUseWhiteText } from "@/utils/colorUtils";
 import { formatStatusLabel } from "@/utils/issue";
 import type { TerminalInputRequest } from "@/components/TerminalView/TerminalView";
 
-import {
-  AgentEditorGroups,
-  type AgentEditorTab,
-} from "./AgentEditorGroups";
+import { AgentEditorGroups, type AgentEditorTab } from "./AgentEditorGroups";
 import styles from "./AgentsPage.module.css";
 
 // Heavy tabs (CodeMirror/diff) are code-split, mirroring AgentDetailPanel.
@@ -93,8 +90,11 @@ function AgentsPageInner(): JSX.Element {
   const agents = useStore(agentStore, (s) => s.agents);
   const { issues } = useWorkspaceViewData();
   const { showToast } = useToast();
-  const { width: openQueueWidth, applyDelta: applyOpenQueueWidthDelta, resetWidth: resetOpenQueueWidth } =
-    useOpenQueuePanelWidth(workspaceId);
+  const {
+    width: openQueueWidth,
+    applyDelta: applyOpenQueueWidthDelta,
+    resetWidth: resetOpenQueueWidth,
+  } = useOpenQueuePanelWidth(workspaceId);
 
   // Auto-select an agent when URL is bare /agents: honor a legacy
   // ?agent=<name> deep link first, else fall back to the first rail agent.
@@ -282,7 +282,9 @@ function AgentsPageInner(): JSX.Element {
         case "info":
           if (!selected) {
             return (
-              <div className={styles.tabFallback}>Select an agent to view info.</div>
+              <div className={styles.tabFallback}>
+                Select an agent to view info.
+              </div>
             );
           }
           return (
@@ -355,7 +357,9 @@ function AgentsPageInner(): JSX.Element {
         case "git":
           if (!selected) {
             return (
-              <div className={styles.tabFallback}>Select an agent to view git.</div>
+              <div className={styles.tabFallback}>
+                Select an agent to view git.
+              </div>
             );
           }
           return (
@@ -368,7 +372,9 @@ function AgentsPageInner(): JSX.Element {
         case "diff":
           if (!selected) {
             return (
-              <div className={styles.tabFallback}>Select an agent to view diff.</div>
+              <div className={styles.tabFallback}>
+                Select an agent to view diff.
+              </div>
             );
           }
           return (
@@ -424,18 +430,12 @@ function AgentsPageInner(): JSX.Element {
     <div className={styles.page} data-testid="agents-page">
       {/* Main panel: Aether tab strip over the live agent surfaces */}
       <section className={styles.main} aria-label="Agent details">
-        <AgentEditorGroups
-          resetKey={agentName}
-          renderPane={renderAgentPane}
-        />
+        <AgentEditorGroups resetKey={agentName} renderPane={renderAgentPane} />
       </section>
 
       {/* Right column: epic-runner Open Queue or inline task detail */}
       {selectedTask ? (
-        <div
-          className={styles.inlineDetail}
-          style={{ width: openQueueWidth }}
-        >
+        <div className={styles.inlineDetail} style={{ width: openQueueWidth }}>
           <IssueDetailPanel
             inline
             isOpen={true}

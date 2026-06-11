@@ -480,48 +480,9 @@ func (e HostBridgeTaskExecutor) registerRunnerArtifacts(ctx context.Context, req
 			artifactIDs = normalizeArtifactIDs(append(artifactIDs, artifactID))
 			continue
 		}
-		metadata := cloneStringMap(artifact.Metadata)
-		if metadata == nil {
-			metadata = map[string]string{}
-		}
-		metadata["driver_run_id"] = req.DriverRunID
-		metadata["provider_profile"] = req.ProviderProfile
-		contentHash := firstNonEmpty(artifact.ContentHash, artifact.ContentHashCamel, artifact.Checksum)
-		checksum := firstNonEmpty(artifact.Checksum, contentHash)
-		mimeType := firstNonEmpty(artifact.MIMEType, artifact.MIMETypeCamel)
-		sizeBytes := firstNonZeroInt64(artifact.SizeBytes, artifact.SizeBytesCamel)
-		summary := artifact.Summary
-		visibility := artifact.Visibility
-		redactionStatus := firstNonEmpty(artifact.RedactionStatus, artifact.RedactionStatusAlt)
-		if _, err := e.Store.Artifacts().Create(ctx, store.ArtifactCreate{
-			WorkspaceKey:    req.WorkspaceKey,
-			ArtifactID:      artifactID,
-			TaskID:          req.TaskID,
-			OwnerType:       "task_run",
-			OwnerID:         req.TaskRunID,
-			Type:            firstNonEmpty(artifact.Type, "artifact"),
-			Summary:         summary,
-			MIMEType:        mimeType,
-			Visibility:      visibility,
-			RedactionStatus: redactionStatus,
-			DurableStatus:   "declared",
-			Metadata:        metadata,
-		}); err != nil && !errors.Is(err, domain.ErrAlreadyExists) {
-			return TaskExecResult{}, fmt.Errorf("create runner artifact %q: %w", artifactID, err)
-		}
-		finalized, err := e.Store.Artifacts().Finalize(ctx, req.WorkspaceKey, artifactID, store.ArtifactFinalize{
-			URI:             &uri,
-			Summary:         optionalString(summary),
-			MIMEType:        optionalString(mimeType),
-			SizeBytes:       optionalInt64(sizeBytes),
-			Checksum:        optionalString(checksum),
-			ContentHash:     optionalString(contentHash),
-			Visibility:      optionalString(visibility),
-			RedactionStatus: optionalString(redactionStatus),
-			Metadata:        &metadata,
-		})
+		finalized, err := e.registerRunnerArtifact(ctx, req, artifact, artifactID, uri)
 		if err != nil {
-			return TaskExecResult{}, fmt.Errorf("finalize runner artifact %q: %w", artifactID, err)
+			return TaskExecResult{}, err
 		}
 		artifactIDs = normalizeArtifactIDs(append(artifactIDs, finalized.ArtifactID))
 		if result.RuntimeMetadata == nil {
@@ -534,6 +495,53 @@ func (e HostBridgeTaskExecutor) registerRunnerArtifacts(ctx context.Context, req
 		result.ArtifactsRef = "artifacts://" + req.TaskRunID
 	}
 	return result, nil
+}
+
+func (e HostBridgeTaskExecutor) registerRunnerArtifact(ctx context.Context, req TaskExecRequest, artifact bridgeArtifact, artifactID, uri string) (*domain.Artifact, error) {
+	metadata := cloneStringMap(artifact.Metadata)
+	if metadata == nil {
+		metadata = map[string]string{}
+	}
+	metadata["driver_run_id"] = req.DriverRunID
+	metadata["provider_profile"] = req.ProviderProfile
+	contentHash := firstNonEmpty(artifact.ContentHash, artifact.ContentHashCamel, artifact.Checksum)
+	checksum := firstNonEmpty(artifact.Checksum, contentHash)
+	mimeType := firstNonEmpty(artifact.MIMEType, artifact.MIMETypeCamel)
+	sizeBytes := firstNonZeroInt64(artifact.SizeBytes, artifact.SizeBytesCamel)
+	summary := artifact.Summary
+	visibility := artifact.Visibility
+	redactionStatus := firstNonEmpty(artifact.RedactionStatus, artifact.RedactionStatusAlt)
+	if _, err := e.Store.Artifacts().Create(ctx, store.ArtifactCreate{
+		WorkspaceKey:    req.WorkspaceKey,
+		ArtifactID:      artifactID,
+		TaskID:          req.TaskID,
+		OwnerType:       "task_run",
+		OwnerID:         req.TaskRunID,
+		Type:            firstNonEmpty(artifact.Type, "artifact"),
+		Summary:         summary,
+		MIMEType:        mimeType,
+		Visibility:      visibility,
+		RedactionStatus: redactionStatus,
+		DurableStatus:   "declared",
+		Metadata:        metadata,
+	}); err != nil && !errors.Is(err, domain.ErrAlreadyExists) {
+		return nil, fmt.Errorf("create runner artifact %q: %w", artifactID, err)
+	}
+	finalized, err := e.Store.Artifacts().Finalize(ctx, req.WorkspaceKey, artifactID, store.ArtifactFinalize{
+		URI:             &uri,
+		Summary:         optionalString(summary),
+		MIMEType:        optionalString(mimeType),
+		SizeBytes:       optionalInt64(sizeBytes),
+		Checksum:        optionalString(checksum),
+		ContentHash:     optionalString(contentHash),
+		Visibility:      optionalString(visibility),
+		RedactionStatus: optionalString(redactionStatus),
+		Metadata:        &metadata,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("finalize runner artifact %q: %w", artifactID, err)
+	}
+	return finalized, nil
 }
 
 func (e HostBridgeTaskExecutor) persistRunnerOutputArtifacts(ctx context.Context, req TaskExecRequest, session *flueTaskSession, runner bridgeTaskRunnerResult, result TaskExecResult) (TaskExecResult, error) {
@@ -799,6 +807,33 @@ func (e HostBridgeTaskExecutor) finalizeAndApplyPatch(ctx context.Context, req T
 	if e.Store == nil {
 		return TaskExecResult{}, fmt.Errorf("store required for patch artifact finalization: %w", domain.ErrInvalid)
 	}
+	finalized, baseRef, err := e.createPatchArtifact(ctx, req, runner, patch)
+	if err != nil {
+		return TaskExecResult{}, err
+	}
+	result.ArtifactIDs = normalizeArtifactIDs(append(result.ArtifactIDs, finalized.ArtifactID))
+	if result.ArtifactsRef == "" {
+		result.ArtifactsRef = "artifacts://" + req.TaskRunID
+	}
+	if result.RuntimeMetadata == nil {
+		result.RuntimeMetadata = map[string]string{}
+	}
+	result.RuntimeMetadata["patch_artifact_id"] = finalized.ArtifactID
+	result.RuntimeMetadata["patch_content_hash"] = finalized.ContentHash
+	if strings.TrimSpace(e.WorktreePath) == "" || strings.TrimSpace(baseRef) == "" {
+		result.Status = domain.TaskRunFailed
+		if result.ExitCode == 0 {
+			result.ExitCode = 1
+		}
+		result.ErrorClass = "patch_back_base_required"
+		result.ErrorMessage = "patch artifact requires worktree path and base ref for local patch-back"
+		result.RuntimeMetadata["patch_back_status"] = PatchBackBaseUnreachable
+		return result, nil
+	}
+	return e.applyPatchBack(ctx, baseRef, patch, result)
+}
+
+func (e HostBridgeTaskExecutor) createPatchArtifact(ctx context.Context, req TaskExecRequest, runner bridgeTaskRunnerResult, patch []byte) (*domain.Artifact, string, error) {
 	artifactID := firstNonEmpty(runner.PatchArtifactID, runner.PatchArtifactIDCamel)
 	if artifactID == "" {
 		artifactID = "patch-" + req.TaskRunID
@@ -827,40 +862,25 @@ func (e HostBridgeTaskExecutor) finalizeAndApplyPatch(ctx context.Context, req T
 		DurableStatus:   "declared",
 		Metadata:        metadata,
 	}); err != nil {
-		return TaskExecResult{}, fmt.Errorf("create patch artifact: %w", err)
+		return nil, "", fmt.Errorf("create patch artifact: %w", err)
 	}
 	uploaded, err := e.Store.Artifacts().UploadContent(ctx, req.WorkspaceKey, artifactID, store.ArtifactContentUpload{
 		Body:     bytes.NewReader(patch),
 		MIMEType: mimeType,
 	})
 	if err != nil {
-		return TaskExecResult{}, fmt.Errorf("upload patch artifact: %w", err)
+		return nil, "", fmt.Errorf("upload patch artifact: %w", err)
 	}
 	finalized, err := e.Store.Artifacts().Finalize(ctx, req.WorkspaceKey, artifactID, store.ArtifactFinalize{
 		ContentHash: &uploaded.ContentHash,
 	})
 	if err != nil {
-		return TaskExecResult{}, fmt.Errorf("finalize patch artifact: %w", err)
+		return nil, "", fmt.Errorf("finalize patch artifact: %w", err)
 	}
-	result.ArtifactIDs = normalizeArtifactIDs(append(result.ArtifactIDs, finalized.ArtifactID))
-	if result.ArtifactsRef == "" {
-		result.ArtifactsRef = "artifacts://" + req.TaskRunID
-	}
-	if result.RuntimeMetadata == nil {
-		result.RuntimeMetadata = map[string]string{}
-	}
-	result.RuntimeMetadata["patch_artifact_id"] = finalized.ArtifactID
-	result.RuntimeMetadata["patch_content_hash"] = finalized.ContentHash
-	if strings.TrimSpace(e.WorktreePath) == "" || strings.TrimSpace(baseRef) == "" {
-		result.Status = domain.TaskRunFailed
-		if result.ExitCode == 0 {
-			result.ExitCode = 1
-		}
-		result.ErrorClass = "patch_back_base_required"
-		result.ErrorMessage = "patch artifact requires worktree path and base ref for local patch-back"
-		result.RuntimeMetadata["patch_back_status"] = PatchBackBaseUnreachable
-		return result, nil
-	}
+	return finalized, baseRef, nil
+}
+
+func (e HostBridgeTaskExecutor) applyPatchBack(ctx context.Context, baseRef string, patch []byte, result TaskExecResult) (TaskExecResult, error) {
 	patchBack, err := ApplyPatchBack(ctx, PatchBackOptions{
 		WorktreePath: e.WorktreePath,
 		BaseRef:      baseRef,

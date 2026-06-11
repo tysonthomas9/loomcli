@@ -170,15 +170,7 @@ func DeliverLeadMessageWithOptions(ctx context.Context, st store.Store, workspac
 		return nil, err
 	}
 	if session == nil {
-		inbox, err := createLeadInboxMessage(ctx, st, workspace, leadName, "", message, opts)
-		if err != nil {
-			return nil, err
-		}
-		result := pendingDelivery("", "lead has no orchestration session")
-		if inbox != nil {
-			result.InboxMessageID = inbox.InboxMessageID
-		}
-		return result, nil
+		return enqueueLeadMessageWithoutSession(ctx, st, workspace, leadName, message, opts)
 	}
 	d := delivererForSession(session)
 	result := &DeliveryResult{State: DeliveryStatePending, SessionID: session.SessionID}
@@ -203,22 +195,46 @@ func DeliverLeadMessageWithOptions(ctx context.Context, st store.Store, workspac
 	}
 	d = delivererForSession(session)
 	d.populate(result, session)
+	if blocked := leadMessageDeliveryBlock(ctx, st, workspace, session, d, result); blocked != nil {
+		return blocked, nil
+	}
+	return deliverNextLeadInboxMessage(ctx, st, workspace, leadName, session.SessionID, d, result)
+}
+
+// enqueueLeadMessageWithoutSession queues a lead message when the lead has no
+// orchestration session yet, reporting the enqueue as a pending delivery.
+func enqueueLeadMessageWithoutSession(ctx context.Context, st store.Store, workspace, leadName, message string, opts LeadMessageDeliveryOptions) (*DeliveryResult, error) {
+	inbox, err := createLeadInboxMessage(ctx, st, workspace, leadName, "", message, opts)
+	if err != nil {
+		return nil, err
+	}
+	result := pendingDelivery("", "lead has no orchestration session")
+	if inbox != nil {
+		result.InboxMessageID = inbox.InboxMessageID
+	}
+	return result, nil
+}
+
+// leadMessageDeliveryBlock applies the runtime readiness gates for direct lead
+// message delivery, returning the (mutated) result when delivery cannot
+// proceed and nil when the runtime is ready for a turn.
+func leadMessageDeliveryBlock(ctx context.Context, st store.Store, workspace string, session *domain.AgentSession, d leadTurnDeliverer, result *DeliveryResult) *DeliveryResult {
 	if !d.hasRuntimeMetadata(session.Metadata) {
 		result.Reason = d.notReadyReason()
 		_ = MarkLeadMessageDeliveryAttempt(ctx, st, workspace, session.SessionID, result.Reason)
-		return result, nil
+		return result
 	}
 	if reason := d.unsupportedReason(session.Metadata); reason != "" {
 		result.State = DeliveryStateUnsupported
 		result.Reason = reason
-		return result, nil
+		return result
 	}
 	if pendingReason := d.pendingReason(); pendingReason != "" {
 		result.Reason = pendingReason
 		_ = MarkLeadMessageDeliveryAttempt(ctx, st, workspace, session.SessionID, result.Reason)
-		return result, nil
+		return result
 	}
-	return deliverNextLeadInboxMessage(ctx, st, workspace, leadName, session.SessionID, d, result)
+	return nil
 }
 
 func DeliverPendingLeadMessages(ctx context.Context, st store.Store, workspace, leadName string) (*DeliveryResult, error) {
@@ -295,22 +311,50 @@ func deliverNextLeadInboxMessage(
 		return nil, err
 	}
 	if delivered.State != DeliveryStateDelivered {
-		if delivered.Reason != "" {
-			if isAssignmentInboxMessage(msg) {
-				_ = MarkAssignmentDeliveryAttempt(ctx, st, workspace, sessionID, delivered.Reason)
-			} else {
-				_ = MarkLeadMessageDeliveryAttempt(ctx, st, workspace, sessionID, delivered.Reason)
-			}
-		}
-		if _, err := st.AgentInboxMessages().Complete(ctx, workspace, msg.InboxMessageID, store.AgentInboxMessageComplete{
-			Outcome:    "retry",
-			ErrorClass: d.provider() + "_delivery_pending",
-			Error:      delivered.Reason,
-		}); err != nil {
-			return nil, err
-		}
-		return delivered, nil
+		return completeLeadInboxRetry(ctx, st, workspace, sessionID, d, msg, delivered)
 	}
+	return completeLeadInboxDelivered(ctx, st, workspace, sessionID, d, msg, delivered)
+}
+
+// completeLeadInboxRetry records the delivery attempt and returns the claimed
+// inbox message to the queue for retry after a non-delivered turn.
+func completeLeadInboxRetry(
+	ctx context.Context,
+	st store.Store,
+	workspace string,
+	sessionID string,
+	d leadTurnDeliverer,
+	msg *domain.AgentInboxMessage,
+	delivered *DeliveryResult,
+) (*DeliveryResult, error) {
+	if delivered.Reason != "" {
+		if isAssignmentInboxMessage(msg) {
+			_ = MarkAssignmentDeliveryAttempt(ctx, st, workspace, sessionID, delivered.Reason)
+		} else {
+			_ = MarkLeadMessageDeliveryAttempt(ctx, st, workspace, sessionID, delivered.Reason)
+		}
+	}
+	if _, err := st.AgentInboxMessages().Complete(ctx, workspace, msg.InboxMessageID, store.AgentInboxMessageComplete{
+		Outcome:    "retry",
+		ErrorClass: d.provider() + "_delivery_pending",
+		Error:      delivered.Reason,
+	}); err != nil {
+		return nil, err
+	}
+	return delivered, nil
+}
+
+// completeLeadInboxDelivered finalizes a delivered inbox message and, for
+// assignment messages, marks the assignment delivered on the session.
+func completeLeadInboxDelivered(
+	ctx context.Context,
+	st store.Store,
+	workspace string,
+	sessionID string,
+	d leadTurnDeliverer,
+	msg *domain.AgentInboxMessage,
+	delivered *DeliveryResult,
+) (*DeliveryResult, error) {
 	if _, err := st.AgentInboxMessages().Complete(ctx, workspace, msg.InboxMessageID, store.AgentInboxMessageComplete{
 		Outcome:           "delivered",
 		DeliveredThreadID: d.deliveredThreadID(),

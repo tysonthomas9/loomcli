@@ -171,12 +171,7 @@ describe("MoreFiltersMenu", () => {
     });
 
     it("shows active indicator for each non-default groupBy value", () => {
-      const activeValues = [
-        "assignee",
-        "priority",
-        "type",
-        "label",
-      ] as const;
+      const activeValues = ["assignee", "priority", "type", "label"] as const;
 
       activeValues.forEach((groupByValue) => {
         const { container, unmount } = render(

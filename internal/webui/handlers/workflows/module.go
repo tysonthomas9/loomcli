@@ -43,6 +43,51 @@ type createWorkflowVersionRequest struct {
 	Activate   *bool             `json:"activate,omitempty"`
 }
 
+type workflowVersionInput struct {
+	entrypoint string
+	files      map[string]string
+	activate   bool
+}
+
+// parseCreateWorkflowVersionRequest decodes and validates the request body
+// for createWorkflowVersion. On failure it writes the HTTP error response
+// itself and returns ok=false.
+func parseCreateWorkflowVersionRequest(w http.ResponseWriter, r *http.Request, name string) (workflowVersionInput, bool) {
+	var in workflowVersionInput
+	var req createWorkflowVersionRequest
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxRunPayloadBytes)).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		return in, false
+	}
+	if len(req.Files) == 0 {
+		writeError(w, http.StatusBadRequest, "files is required")
+		return in, false
+	}
+	in.entrypoint = strings.TrimSpace(req.Entrypoint)
+	if in.entrypoint == "" {
+		in.entrypoint = filepath.ToSlash(filepath.Join("workflows", name+".ts"))
+	}
+	if err := workflowdefs.ValidateWorkflowEntrypoint(name, in.entrypoint); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return in, false
+	}
+	files, err := workflowdefs.ValidateWorkflowFiles(req.Files)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return in, false
+	}
+	if _, ok := files[in.entrypoint]; !ok {
+		writeError(w, http.StatusBadRequest, "entrypoint file is missing")
+		return in, false
+	}
+	in.files = files
+	in.activate = true
+	if req.Activate != nil {
+		in.activate = *req.Activate
+	}
+	return in, true
+}
+
 func (m *Module) createWorkflowVersion(w http.ResponseWriter, r *http.Request) {
 	ws := r.PathValue("ws")
 	name := strings.TrimSpace(r.PathValue("name"))
@@ -50,42 +95,16 @@ func (m *Module) createWorkflowVersion(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "workflow name is required")
 		return
 	}
-	var req createWorkflowVersionRequest
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxRunPayloadBytes)).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON body")
+	in, ok := parseCreateWorkflowVersionRequest(w, r, name)
+	if !ok {
 		return
-	}
-	if len(req.Files) == 0 {
-		writeError(w, http.StatusBadRequest, "files is required")
-		return
-	}
-	entrypoint := strings.TrimSpace(req.Entrypoint)
-	if entrypoint == "" {
-		entrypoint = filepath.ToSlash(filepath.Join("workflows", name+".ts"))
-	}
-	if err := workflowdefs.ValidateWorkflowEntrypoint(name, entrypoint); err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	files, err := workflowdefs.ValidateWorkflowFiles(req.Files)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	if _, ok := files[entrypoint]; !ok {
-		writeError(w, http.StatusBadRequest, "entrypoint file is missing")
-		return
-	}
-	activate := true
-	if req.Activate != nil {
-		activate = *req.Activate
 	}
 	result, buildOutput, err := workflowdefs.BuildAndRegister(r.Context(), m.store, workflowdefs.BuildAndRegisterOptions{
 		WorkspaceKey: ws,
 		Name:         name,
-		Entrypoint:   entrypoint,
-		Files:        files,
-		Activate:     activate,
+		Entrypoint:   in.entrypoint,
+		Files:        in.files,
+		Activate:     in.activate,
 	})
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())

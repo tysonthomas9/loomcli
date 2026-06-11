@@ -48,7 +48,10 @@ function Avatar({ name }: { name: string }): JSX.Element {
       title={name}
       aria-label={`Assignee ${name}`}
     >
-      {name.replace(/^\[H\]\s*/, "").charAt(0).toUpperCase() || "?"}
+      {name
+        .replace(/^\[H\]\s*/, "")
+        .charAt(0)
+        .toUpperCase() || "?"}
     </span>
   );
 }
@@ -63,8 +66,7 @@ export function ListPage(): JSX.Element {
     // Hide empty sections (design returns null for empty epic groups) unless
     // the epic itself is still open.
     const visible = grouped.filter(
-      (lane) =>
-        lane.issues.length > 0 || lane.groupIssue?.status !== "closed",
+      (lane) => lane.issues.length > 0 || lane.groupIssue?.status !== "closed",
     );
     return sortLanes(visible, "title");
   }, [filteredIssues]);

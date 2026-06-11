@@ -90,7 +90,10 @@ export function ResizeHandle({
         callbacksRef.current.onDragEnd?.();
       };
 
-      activeListeners.current = { move: handlePointerMove, up: handlePointerUp };
+      activeListeners.current = {
+        move: handlePointerMove,
+        up: handlePointerUp,
+      };
       document.addEventListener("pointermove", handlePointerMove);
       document.addEventListener("pointerup", handlePointerUp);
     },

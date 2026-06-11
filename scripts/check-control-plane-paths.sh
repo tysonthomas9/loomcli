@@ -34,9 +34,12 @@ fail_with_matches() {
 }
 
 # Runtime code must not import or construct the test-only in-memory store.
+# Match the package import only: a bare `memstore.New(` pattern would also
+# flag other packages named memstore (e.g. harness-wrapper's chat/memstore,
+# an in-process chat turn-metadata store), and any use of the loomcli
+# memstore requires importing it.
 rg -n \
   -e 'github\.com/tysonthomas9/loomcli/internal/infra/memstore' \
-  -e 'memstore\.New\(' \
   cmd internal \
   --glob '*.go' \
   --glob '!**/*_test.go' \

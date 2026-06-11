@@ -70,9 +70,7 @@ export function AddRepoModal({
       onSuccess();
       onClose();
     } catch (err) {
-      setError(
-        err instanceof Error ? err.message : "Failed to add repository",
-      );
+      setError(err instanceof Error ? err.message : "Failed to add repository");
     } finally {
       setIsSubmitting(false);
     }

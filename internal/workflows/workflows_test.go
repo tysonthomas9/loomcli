@@ -96,7 +96,7 @@ func TestBuiltinEpicRunnerWorkflowSourceParsesAsJavaScript(t *testing.T) {
 	if err := os.WriteFile(path, []byte(spec.Files[spec.Entrypoint]), 0o644); err != nil {
 		t.Fatalf("write workflow source: %v", err)
 	}
-	if out, err := exec.Command(node, "--check", path).CombinedOutput(); err != nil {
+	if out, err := exec.Command(node, "--check", path).CombinedOutput(); err != nil { //nolint:norawexec // syntax-check via the node binary located by the test itself
 		t.Fatalf("node --check failed: %v\n%s", err, out)
 	}
 }

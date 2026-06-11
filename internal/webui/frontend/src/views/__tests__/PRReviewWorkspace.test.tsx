@@ -63,9 +63,11 @@ describe("resolveDiffAgentForIssue", () => {
       makeAgent({ name: "local-coder", task_id: "LOCALMODE-1" }),
     ];
 
-    expect(agentsLinkedToIssue(issue, agents).map((a) => a.name).sort()).toEqual(
-      ["local-coder", "local-planner"],
-    );
+    expect(
+      agentsLinkedToIssue(issue, agents)
+        .map((a) => a.name)
+        .sort(),
+    ).toEqual(["local-coder", "local-planner"]);
   });
 
   it("falls back to a direct agent assignee when no worker is bound", () => {

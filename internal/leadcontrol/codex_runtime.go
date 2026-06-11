@@ -57,17 +57,7 @@ func RunCodexLeadRuntime(ctx context.Context, cfg CodexLeadRuntimeConfig) error 
 	defer func() { _ = logFile.Close() }()
 	defer cancelApp()
 
-	runtime := CodexRuntimeMetadata{
-		Endpoint:    endpoint,
-		RuntimeHome: runtimeHome,
-		SQLiteHome:  sqliteHome,
-		PID:         appCmd.Process.Pid,
-		Status:      RuntimeStatusStarting,
-		Controlled:  true,
-	}
-	if err := UpdateCodexRuntimeMetadata(ctx, cfg.Store, cfg.Workspace, cfg.SessionID, runtime); err != nil {
-		cfg.Logger.Warn("failed to persist codex runtime metadata", "err", err)
-	}
+	runtime := persistStartingCodexRuntime(ctx, cfg, endpoint, runtimeHome, sqliteHome, appCmd.Process.Pid)
 
 	if err := waitForCodexAppServer(ctx, endpoint, appErr); err != nil {
 		_ = stopCodexAppServer(appCmd, appErr, cancelApp)
@@ -93,6 +83,23 @@ func RunCodexLeadRuntime(ctx context.Context, cfg CodexLeadRuntimeConfig) error 
 	runtime.Status = RuntimeStatusDisconnected
 	_ = UpdateCodexRuntimeMetadata(context.Background(), cfg.Store, cfg.Workspace, cfg.SessionID, runtime)
 	return tuiErr
+}
+
+// persistStartingCodexRuntime builds the starting runtime metadata for a
+// freshly launched app server and persists it onto the lead session.
+func persistStartingCodexRuntime(ctx context.Context, cfg CodexLeadRuntimeConfig, endpoint, runtimeHome, sqliteHome string, pid int) CodexRuntimeMetadata {
+	runtime := CodexRuntimeMetadata{
+		Endpoint:    endpoint,
+		RuntimeHome: runtimeHome,
+		SQLiteHome:  sqliteHome,
+		PID:         pid,
+		Status:      RuntimeStatusStarting,
+		Controlled:  true,
+	}
+	if err := UpdateCodexRuntimeMetadata(ctx, cfg.Store, cfg.Workspace, cfg.SessionID, runtime); err != nil {
+		cfg.Logger.Warn("failed to persist codex runtime metadata", "err", err)
+	}
+	return runtime
 }
 
 func startCodexAppServer(

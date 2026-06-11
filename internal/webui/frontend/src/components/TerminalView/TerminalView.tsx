@@ -14,10 +14,7 @@ import {
   type CliSetupRequest,
 } from "@/utils/cliSetup";
 
-import {
-  NoBackendsEmptyState,
-  useTabEditorGroups,
-} from "./layout";
+import { NoBackendsEmptyState, useTabEditorGroups } from "./layout";
 import groupStyles from "./layout/TerminalGroupLayout.module.css";
 import {
   TerminalPane,
@@ -168,10 +165,7 @@ export function TerminalView({
     () => (hideTabs ? tabs : tabs.filter((tab) => !isAgentTab(tab))),
     [hideTabs, tabs],
   );
-  const tabIds = useMemo(
-    () => visibleTabs.map((tab) => tab.id),
-    [visibleTabs],
-  );
+  const tabIds = useMemo(() => visibleTabs.map((tab) => tab.id), [visibleTabs]);
   const {
     groups,
     isSplit,
@@ -644,7 +638,14 @@ export function TerminalView({
       setActiveTabId(sessionName);
       announce(`New tab ${label} created`);
     },
-    [createTab, handleTabLimitReached, tabs, visibleTabs.length, workspaceId, announce],
+    [
+      createTab,
+      handleTabLimitReached,
+      tabs,
+      visibleTabs.length,
+      workspaceId,
+      announce,
+    ],
   );
 
   const setInstanceRef = useCallback(

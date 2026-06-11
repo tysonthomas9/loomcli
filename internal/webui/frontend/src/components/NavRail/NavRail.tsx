@@ -325,7 +325,8 @@ export function NavRail({
                 onClick={onAddWorkspace}
                 aria-label="Add workspace"
               >
-                +<span className={styles.tooltip} role="tooltip">
+                +
+                <span className={styles.tooltip} role="tooltip">
                   Add workspace
                 </span>
               </button>

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/olesho/harness-wrapper/pkg/chat"
+	"github.com/olesho/harness-wrapper/pkg/wrapper"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/store"
@@ -199,20 +200,8 @@ func (d *harnessTurnDeliverer) deliverTurn(
 	d.runtime.Status = status
 	result.HarnessRuntime = d.runtime
 	_ = UpdateHarnessRuntimeMetadata(ctx, st, workspace, sessionID, d.runtime)
-	if status == RuntimeStatusFailed {
-		result.Reason = "lead harness is failed"
-		return result, nil
-	}
-	if handle.turnInFlight() {
-		result.Reason = "lead harness assistant turn is in flight"
-		return result, nil
-	}
-	quiet := harnessOutputQuietWindow
-	if strings.EqualFold(d.runtime.HarnessName, HarnessNameGeneric) {
-		quiet = harnessGenericQuietWindow
-	}
-	if !snap.LastOutputAt.IsZero() && time.Since(snap.LastOutputAt) < quiet {
-		result.Reason = "lead harness output has not settled"
+	if reason := d.turnBlockReason(handle, status, snap); reason != "" {
+		result.Reason = reason
 		return result, nil
 	}
 
@@ -225,7 +214,7 @@ func (d *harnessTurnDeliverer) deliverTurn(
 	}
 	defer release()
 
-	if _, err := sendHarnessTurn(ctx, handle.conv, message); err != nil {
+	if err := sendHarnessTurn(ctx, handle.conv, message); err != nil {
 		if errors.Is(err, chat.ErrTurnInFlight) {
 			result.Reason = "lead harness assistant turn is in flight"
 		} else {
@@ -242,6 +231,26 @@ func (d *harnessTurnDeliverer) deliverTurn(
 	return result, nil
 }
 
+// turnBlockReason returns a non-empty pending reason when the harness is not
+// ready to accept an injected turn: the harness failed, an assistant turn is
+// in flight, or PTY output has not been quiet long enough.
+func (d *harnessTurnDeliverer) turnBlockReason(handle *leadConversationHandle, status string, snap wrapper.Snapshot) string {
+	if status == RuntimeStatusFailed {
+		return "lead harness is failed"
+	}
+	if handle.turnInFlight() {
+		return "lead harness assistant turn is in flight"
+	}
+	quiet := harnessOutputQuietWindow
+	if strings.EqualFold(d.runtime.HarnessName, HarnessNameGeneric) {
+		quiet = harnessGenericQuietWindow
+	}
+	if !snap.LastOutputAt.IsZero() && time.Since(snap.LastOutputAt) < quiet {
+		return "lead harness output has not settled"
+	}
+	return ""
+}
+
 // harnessSubmitDelay separates staging the message text from the submitting
 // carriage return. Claude Code treats text and a trailing CR arriving in one
 // stdin chunk as a paste and swallows the newline instead of submitting, so
@@ -253,18 +262,19 @@ const harnessSubmitDelay = 300 * time.Millisecond
 // content rather than per-line submits. The final empty Send writes a bare
 // carriage return in a separate chunk (the submit keystroke) and registers
 // the assistant turn with the chat layer.
-func sendHarnessTurn(ctx context.Context, conv harnessConversation, message string) (string, error) {
+func sendHarnessTurn(ctx context.Context, conv harnessConversation, message string) error {
 	payload := message
 	if strings.ContainsAny(message, "\r\n") {
 		payload = "\x1b[200~" + message + "\x1b[201~"
 	}
 	if _, err := conv.WriteStdin([]byte(payload)); err != nil {
-		return "", err
+		return err
 	}
 	select {
 	case <-ctx.Done():
-		return "", ctx.Err()
+		return ctx.Err()
 	case <-time.After(harnessSubmitDelay):
 	}
-	return conv.Send(ctx, "")
+	_, err := conv.Send(ctx, "")
+	return err
 }

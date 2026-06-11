@@ -6,12 +6,7 @@
  * vertical CollapsedAgentRail (wireframe pin 24).
  */
 
-import {
-  useState,
-  useCallback,
-  useEffect,
-  type CSSProperties,
-} from "react";
+import { useState, useCallback, useEffect, type CSSProperties } from "react";
 
 import {
   useWorkspaceContext,
@@ -134,8 +129,11 @@ export function WorkspaceTree({
   } = workspaceContext;
   const [addRepoOpen, setAddRepoOpen] = useState(false);
   const [isResizing, setIsResizing] = useState(false);
-  const { width: sidebarWidth, applyDelta, resetWidth } =
-    useWorkspaceTreeWidth(workspaceId);
+  const {
+    width: sidebarWidth,
+    applyDelta,
+    resetWidth,
+  } = useWorkspaceTreeWidth(workspaceId);
 
   // Load initial collapsed state from scoped localStorage
   const [isCollapsed, setIsCollapsed] = useState(() => {

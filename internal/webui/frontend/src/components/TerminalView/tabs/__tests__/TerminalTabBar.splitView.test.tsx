@@ -41,7 +41,9 @@ describe("TerminalTabBar - split right", () => {
 
   it("does not render split-right button when onSplitRight is omitted", () => {
     render(<TerminalTabBar {...defaultProps} />);
-    expect(screen.queryByTestId("terminal-split-right")).not.toBeInTheDocument();
+    expect(
+      screen.queryByTestId("terminal-split-right"),
+    ).not.toBeInTheDocument();
   });
 
   it("uses the agent editor split label", () => {

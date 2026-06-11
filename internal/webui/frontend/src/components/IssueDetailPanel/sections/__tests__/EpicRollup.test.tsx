@@ -11,9 +11,7 @@ import type { Issue } from "@/types";
 import styles from "../EpicRollup.module.css";
 import { EpicRollup } from "../EpicRollup";
 
-function createTicket(
-  overrides: Partial<Issue> = {},
-): Issue {
+function createTicket(overrides: Partial<Issue> = {}): Issue {
   return {
     id: "TASK-1",
     title: "Example ticket",
@@ -61,7 +59,9 @@ describe("EpicRollup", () => {
     render(<EpicRollup tickets={tickets} />);
 
     expect(screen.getByText("Local mode planner dogfood")).toBeInTheDocument();
-    expect(screen.getByText("Backlog grooming placeholder")).toBeInTheDocument();
+    expect(
+      screen.getByText("Backlog grooming placeholder"),
+    ).toBeInTheDocument();
     expect(screen.getByText("1 of 4 complete")).toBeInTheDocument();
     expect(screen.getByText("Tickets (4)")).toBeInTheDocument();
   });
@@ -102,9 +102,7 @@ describe("EpicRollup", () => {
       status: "open",
     });
 
-    render(
-      <EpicRollup tickets={[ticket]} onTicketClick={onTicketClick} />,
-    );
+    render(<EpicRollup tickets={[ticket]} onTicketClick={onTicketClick} />);
 
     fireEvent.click(screen.getByText("Clickable ticket"));
     expect(onTicketClick).toHaveBeenCalledWith(ticket);

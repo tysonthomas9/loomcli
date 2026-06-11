@@ -113,11 +113,7 @@ export function useTabEditorGroups(
       return;
     }
     setGroups((prev) =>
-      reconcileTabEditorGroups(
-        prev,
-        ids,
-        activeTabId || ids[0] || "",
-      ),
+      reconcileTabEditorGroups(prev, ids, activeTabId || ids[0] || ""),
     );
   }, [workspaceId, tabIdsKey, activeTabId]);
 

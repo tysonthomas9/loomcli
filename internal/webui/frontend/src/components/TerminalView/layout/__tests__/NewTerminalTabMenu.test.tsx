@@ -25,7 +25,9 @@ describe("NewTerminalTabMenu", () => {
       />,
     );
 
-    expect(screen.queryByTestId("new-terminal-tab-menu")).not.toBeInTheDocument();
+    expect(
+      screen.queryByTestId("new-terminal-tab-menu"),
+    ).not.toBeInTheDocument();
     fireEvent.click(screen.getByTestId("terminal-new-tab-button"));
     expect(screen.getByTestId("new-terminal-tab-menu")).toBeInTheDocument();
     expect(screen.getByTestId("new-tab-backend-shell")).toBeInTheDocument();
@@ -46,7 +48,9 @@ describe("NewTerminalTabMenu", () => {
     fireEvent.click(screen.getByTestId("new-tab-backend-codex"));
 
     expect(onSelect).toHaveBeenCalledWith("codex");
-    expect(screen.queryByTestId("new-terminal-tab-menu")).not.toBeInTheDocument();
+    expect(
+      screen.queryByTestId("new-terminal-tab-menu"),
+    ).not.toBeInTheDocument();
   });
 
   it("calls onDisabledAttempt when disabled", () => {
@@ -62,7 +66,9 @@ describe("NewTerminalTabMenu", () => {
 
     fireEvent.click(screen.getByTestId("terminal-new-tab-button"));
     expect(onDisabledAttempt).toHaveBeenCalledTimes(1);
-    expect(screen.queryByTestId("new-terminal-tab-menu")).not.toBeInTheDocument();
+    expect(
+      screen.queryByTestId("new-terminal-tab-menu"),
+    ).not.toBeInTheDocument();
   });
 
   it("moves focus into the menu on open", () => {
@@ -108,10 +114,7 @@ describe("NewTerminalTabMenu", () => {
   it("handles keys even if focus stays on the trigger", () => {
     const onSelect = vi.fn();
     render(
-      <NewTerminalTabMenu
-        availableBackends={["claude"]}
-        onSelect={onSelect}
-      />,
+      <NewTerminalTabMenu availableBackends={["claude"]} onSelect={onSelect} />,
     );
 
     const trigger = screen.getByTestId("terminal-new-tab-button");
@@ -124,10 +127,7 @@ describe("NewTerminalTabMenu", () => {
 
   it("Escape closes the menu and returns focus to the trigger", () => {
     render(
-      <NewTerminalTabMenu
-        availableBackends={["claude"]}
-        onSelect={vi.fn()}
-      />,
+      <NewTerminalTabMenu availableBackends={["claude"]} onSelect={vi.fn()} />,
     );
 
     fireEvent.click(screen.getByTestId("terminal-new-tab-button"));

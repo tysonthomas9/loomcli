@@ -144,7 +144,7 @@ func (r patchBackRepo) read(path string) string {
 
 func (r patchBackRepo) git(args ...string) string {
 	r.t.Helper()
-	cmd := exec.Command("git", args...) //nolint:gosec // test helper uses fixed git executable with test-controlled args.
+	cmd := exec.Command("git", args...) //nolint:norawexec,gosec // test helper uses fixed git executable with test-controlled args.
 	cmd.Dir = r.dir
 	out, err := cmd.CombinedOutput()
 	if err != nil {

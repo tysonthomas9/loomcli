@@ -56,36 +56,66 @@ func RegisterFlueDriver(ctx context.Context, s store.Store, opts RegisterFlueOpt
 	if strings.TrimSpace(opts.WorkspaceKey) == "" {
 		return nil, fmt.Errorf("workspace key required: %w", domain.ErrInvalid)
 	}
-	workDir := opts.WorkDir
-	if workDir == "" {
-		workDir = "."
-	}
-	absWorkDir, err := filepath.Abs(workDir)
+	reg, err := resolveFlueRegistrationInput(opts)
 	if err != nil {
-		return nil, fmt.Errorf("resolve work dir: %w", err)
-	}
-	distPath := strings.TrimSpace(opts.DistPath)
-	if distPath == "" {
-		return nil, fmt.Errorf("flue dist path required: %w", domain.ErrInvalid)
-	}
-	if !filepath.IsAbs(distPath) {
-		distPath = filepath.Join(absWorkDir, distPath)
-	}
-	absDist, err := filepath.Abs(distPath)
-	if err != nil {
-		return nil, fmt.Errorf("resolve flue dist path: %w", err)
-	}
-	if info, err := os.Stat(absDist); err != nil {
-		return nil, fmt.Errorf("stat flue dist path: %w", err)
-	} else if !info.IsDir() {
-		return nil, fmt.Errorf("flue dist path must be a directory: %w", domain.ErrInvalid)
-	}
-	if info, err := os.Stat(filepath.Join(absDist, "server.mjs")); err != nil {
-		return nil, fmt.Errorf("flue dist missing server.mjs: %w", err)
-	} else if info.IsDir() {
-		return nil, fmt.Errorf("flue dist server.mjs is a directory: %w", domain.ErrInvalid)
+		return nil, err
 	}
 
+	result := &RegisterFlueResult{}
+	driver, createdDriver, err := ensureRegisteredDriver(ctx, s, opts.WorkspaceKey, reg.driverID, reg.driverName, reg.sourceRef)
+	if err != nil {
+		return nil, err
+	}
+	result.Driver = driver
+	result.CreatedDriver = createdDriver
+
+	staged, err := stageFlueBundle(reg)
+	cleanupTmp := staged != nil
+	defer func() {
+		if cleanupTmp {
+			_ = os.RemoveAll(staged.tmpRoot)
+		}
+	}()
+	if err != nil {
+		return result, err
+	}
+
+	if existing, err := s.DriverVersions().Get(ctx, opts.WorkspaceKey, staged.versionID); err == nil {
+		return result, reuseRegisteredFlueVersion(ctx, s, opts, result, existing, reg.driverID, staged)
+	} else if !errors.Is(err, domain.ErrNotFound) {
+		return result, fmt.Errorf("get driver version: %w", err)
+	}
+
+	nextVersion, err := nextDriverVersion(ctx, s, opts.WorkspaceKey, reg.driverID)
+	if err != nil {
+		return result, err
+	}
+	if err := promoteFlueBundle(staged.tmpRoot, staged.finalRoot); err != nil {
+		return result, err
+	}
+	cleanupTmp = false
+	if err := persistRegisteredFlueVersion(ctx, s, opts, reg, staged, result, nextVersion); err != nil {
+		return result, err
+	}
+	return result, nil
+}
+
+type flueRegistrationInput struct {
+	absWorkDir   string
+	absDist      string
+	manifest     map[string]string
+	driverName   string
+	driverID     string
+	workflowName string
+	sourceRef    string
+	sourceDigest string
+}
+
+func resolveFlueRegistrationInput(opts RegisterFlueOptions) (*flueRegistrationInput, error) {
+	absWorkDir, absDist, err := resolveFlueDistPath(opts.WorkDir, opts.DistPath)
+	if err != nil {
+		return nil, err
+	}
 	externalManifest, err := readRegistrationManifest(absWorkDir, absDist, opts.ManifestPath)
 	if err != nil {
 		return nil, err
@@ -102,116 +132,162 @@ func RegisterFlueDriver(ctx context.Context, s store.Store, opts RegisterFlueOpt
 	if workflowName == "" {
 		return nil, fmt.Errorf("workflow name required: %w", domain.ErrInvalid)
 	}
-	sourceRef := firstNonEmpty(opts.SourceRef, externalManifest["source_ref"], relativeRef(absWorkDir, absDist))
-	sourceDigest := firstNonEmpty(opts.SourceDigest, externalManifest["source_digest"])
+	return &flueRegistrationInput{
+		absWorkDir:   absWorkDir,
+		absDist:      absDist,
+		manifest:     externalManifest,
+		driverName:   driverName,
+		driverID:     driverID,
+		workflowName: workflowName,
+		sourceRef:    firstNonEmpty(opts.SourceRef, externalManifest["source_ref"], relativeRef(absWorkDir, absDist)),
+		sourceDigest: firstNonEmpty(opts.SourceDigest, externalManifest["source_digest"]),
+	}, nil
+}
 
-	result := &RegisterFlueResult{}
-	driver, createdDriver, err := ensureRegisteredDriver(ctx, s, opts.WorkspaceKey, driverID, driverName, sourceRef)
-	if err != nil {
-		return nil, err
+func resolveFlueDistPath(workDir, distPath string) (string, string, error) {
+	if workDir == "" {
+		workDir = "."
 	}
-	result.Driver = driver
-	result.CreatedDriver = createdDriver
+	absWorkDir, err := filepath.Abs(workDir)
+	if err != nil {
+		return "", "", fmt.Errorf("resolve work dir: %w", err)
+	}
+	distPath = strings.TrimSpace(distPath)
+	if distPath == "" {
+		return "", "", fmt.Errorf("flue dist path required: %w", domain.ErrInvalid)
+	}
+	if !filepath.IsAbs(distPath) {
+		distPath = filepath.Join(absWorkDir, distPath)
+	}
+	absDist, err := filepath.Abs(distPath)
+	if err != nil {
+		return "", "", fmt.Errorf("resolve flue dist path: %w", err)
+	}
+	if info, err := os.Stat(absDist); err != nil {
+		return "", "", fmt.Errorf("stat flue dist path: %w", err)
+	} else if !info.IsDir() {
+		return "", "", fmt.Errorf("flue dist path must be a directory: %w", domain.ErrInvalid)
+	}
+	if info, err := os.Stat(filepath.Join(absDist, "server.mjs")); err != nil {
+		return "", "", fmt.Errorf("flue dist missing server.mjs: %w", err)
+	} else if info.IsDir() {
+		return "", "", fmt.Errorf("flue dist server.mjs is a directory: %w", domain.ErrInvalid)
+	}
+	return absWorkDir, absDist, nil
+}
 
-	driverRoot := filepath.Join(absWorkDir, ".loom", "drivers")
+type stagedFlueBundle struct {
+	tmpRoot      string
+	finalRoot    string
+	versionID    string
+	bundleRef    string
+	bundleDigest string
+	manifest     map[string]string
+}
+
+// stageFlueBundle copies the dist tree into a temporary bundle root and
+// computes digests and identifiers. On errors after the temporary root has
+// been created it returns a non-nil bundle so the caller can clean it up.
+func stageFlueBundle(reg *flueRegistrationInput) (*stagedFlueBundle, error) {
+	driverRoot := filepath.Join(reg.absWorkDir, ".loom", "drivers")
 	if err := os.MkdirAll(driverRoot, 0o755); err != nil {
-		return result, fmt.Errorf("create driver bundle root: %w", err)
+		return nil, fmt.Errorf("create driver bundle root: %w", err)
 	}
 	tmpRoot, err := os.MkdirTemp(driverRoot, ".register-flue-*")
 	if err != nil {
-		return result, fmt.Errorf("create temporary driver bundle: %w", err)
+		return nil, fmt.Errorf("create temporary driver bundle: %w", err)
 	}
-	cleanupTmp := true
-	defer func() {
-		if cleanupTmp {
-			_ = os.RemoveAll(tmpRoot)
-		}
-	}()
-	if err := copyTree(absDist, filepath.Join(tmpRoot, "dist")); err != nil {
-		return result, err
+	staged := &stagedFlueBundle{tmpRoot: tmpRoot}
+	if err := copyTree(reg.absDist, filepath.Join(tmpRoot, "dist")); err != nil {
+		return staged, err
 	}
 	artifactDigest, err := digestDirectory(filepath.Join(tmpRoot, "dist"))
 	if err != nil {
-		return result, err
+		return staged, err
 	}
-	if sourceDigest == "" {
-		sourceDigest = artifactDigest
+	if reg.sourceDigest == "" {
+		reg.sourceDigest = artifactDigest
 	}
-	manifest := nativeFlueManifest(driverID, driverName, workflowName, sourceRef, sourceDigest, artifactDigest, externalManifest)
+	staged.manifest = nativeFlueManifest(reg.driverID, reg.driverName, reg.workflowName, reg.sourceRef, reg.sourceDigest, artifactDigest, reg.manifest)
+	manifestBytes, err := writeFlueBundleManifest(tmpRoot, staged.manifest)
+	if err != nil {
+		return staged, err
+	}
+	staged.bundleDigest, err = digestBundleTree(tmpRoot, manifestBytes)
+	if err != nil {
+		return staged, err
+	}
+	staged.versionID = reg.driverID + "-v-" + digestShort(staged.bundleDigest)
+	staged.bundleRef = filepath.ToSlash(filepath.Join(".loom", "drivers", reg.driverID, staged.versionID))
+	staged.finalRoot = filepath.Join(reg.absWorkDir, filepath.FromSlash(staged.bundleRef))
+	return staged, nil
+}
+
+func writeFlueBundleManifest(tmpRoot string, manifest map[string]string) ([]byte, error) {
 	manifestBytes, err := json.MarshalIndent(manifest, "", "  ")
 	if err != nil {
-		return result, fmt.Errorf("encode native Flue manifest: %w", err)
+		return nil, fmt.Errorf("encode native Flue manifest: %w", err)
 	}
 	manifestBytes = append(manifestBytes, '\n')
 	if err := os.WriteFile(filepath.Join(tmpRoot, "manifest.json"), manifestBytes, 0o644); err != nil {
-		return result, fmt.Errorf("write native Flue manifest: %w", err)
+		return nil, fmt.Errorf("write native Flue manifest: %w", err)
 	}
-	bundleDigest, err := digestBundleTree(tmpRoot, manifestBytes)
-	if err != nil {
-		return result, err
-	}
-	versionID := driverID + "-v-" + digestShort(bundleDigest)
-	bundleRef := filepath.ToSlash(filepath.Join(".loom", "drivers", driverID, versionID))
-	finalRoot := filepath.Join(absWorkDir, filepath.FromSlash(bundleRef))
+	return manifestBytes, nil
+}
 
-	if existing, err := s.DriverVersions().Get(ctx, opts.WorkspaceKey, versionID); err == nil {
-		result.Version = existing
-		result.ReusedVersion = true
-		if existing.DriverID != driverID || existing.BundleDigest != bundleDigest {
-			return result, fmt.Errorf("driver version %q already exists with different content: %w", versionID, domain.ErrAlreadyExists)
-		}
-		if opts.Activate && driver.ActiveVersionID != existing.VersionID {
-			if err := activateRegisteredDriver(ctx, s, result, opts.WorkspaceKey, driverID, existing.VersionID, manifest); err != nil {
-				return result, err
-			}
-		}
-		result.Bundle = &Bundle{Root: finalRoot, BundleRef: existing.BundleRef, SourceRef: existing.SourceRef, SourceDigest: existing.SourceDigest, BundleDigest: existing.BundleDigest, Manifest: existing.Manifest}
-		return result, nil
-	} else if !errors.Is(err, domain.ErrNotFound) {
-		return result, fmt.Errorf("get driver version: %w", err)
+func reuseRegisteredFlueVersion(ctx context.Context, s store.Store, opts RegisterFlueOptions, result *RegisterFlueResult, existing *domain.DriverVersion, driverID string, staged *stagedFlueBundle) error {
+	result.Version = existing
+	result.ReusedVersion = true
+	if existing.DriverID != driverID || existing.BundleDigest != staged.bundleDigest {
+		return fmt.Errorf("driver version %q already exists with different content: %w", staged.versionID, domain.ErrAlreadyExists)
 	}
+	if opts.Activate && result.Driver.ActiveVersionID != existing.VersionID {
+		if err := activateRegisteredDriver(ctx, s, result, opts.WorkspaceKey, driverID, existing.VersionID, staged.manifest); err != nil {
+			return err
+		}
+	}
+	result.Bundle = &Bundle{Root: staged.finalRoot, BundleRef: existing.BundleRef, SourceRef: existing.SourceRef, SourceDigest: existing.SourceDigest, BundleDigest: existing.BundleDigest, Manifest: existing.Manifest}
+	return nil
+}
 
-	nextVersion, err := nextDriverVersion(ctx, s, opts.WorkspaceKey, driverID)
-	if err != nil {
-		return result, err
-	}
+func promoteFlueBundle(tmpRoot, finalRoot string) error {
 	if err := os.RemoveAll(finalRoot); err != nil {
-		return result, fmt.Errorf("reset native Flue bundle root: %w", err)
+		return fmt.Errorf("reset native Flue bundle root: %w", err)
 	}
 	if err := os.MkdirAll(filepath.Dir(finalRoot), 0o755); err != nil {
-		return result, fmt.Errorf("create native Flue bundle parent: %w", err)
+		return fmt.Errorf("create native Flue bundle parent: %w", err)
 	}
 	if err := os.Rename(tmpRoot, finalRoot); err != nil {
-		return result, fmt.Errorf("stage native Flue bundle: %w", err)
+		return fmt.Errorf("stage native Flue bundle: %w", err)
 	}
-	cleanupTmp = false
+	return nil
+}
 
+func persistRegisteredFlueVersion(ctx context.Context, s store.Store, opts RegisterFlueOptions, reg *flueRegistrationInput, staged *stagedFlueBundle, result *RegisterFlueResult, nextVersion int) error {
 	version, err := s.DriverVersions().Create(ctx, store.DriverVersionCreate{
 		WorkspaceKey:     opts.WorkspaceKey,
-		VersionID:        versionID,
-		DriverID:         driverID,
+		VersionID:        staged.versionID,
+		DriverID:         reg.driverID,
 		Version:          nextVersion,
-		SourceRef:        sourceRef,
-		SourceDigest:     sourceDigest,
-		BundleRef:        bundleRef,
-		BundleDigest:     bundleDigest,
+		SourceRef:        reg.sourceRef,
+		SourceDigest:     reg.sourceDigest,
+		BundleRef:        staged.bundleRef,
+		BundleDigest:     staged.bundleDigest,
 		Runtime:          RuntimeFlueNode,
-		Manifest:         manifest,
+		Manifest:         staged.manifest,
 		ValidationStatus: domain.DriverVersionValidationPassed,
 		CreatedBy:        opts.CreatedBy,
 	})
 	if err != nil {
-		return result, fmt.Errorf("create native Flue driver version: %w", err)
+		return fmt.Errorf("create native Flue driver version: %w", err)
 	}
 	result.Version = version
 	result.CreatedVersion = true
-	result.Bundle = &Bundle{Root: finalRoot, BundleRef: bundleRef, SourceRef: sourceRef, SourceDigest: sourceDigest, BundleDigest: bundleDigest, Manifest: manifest}
+	result.Bundle = &Bundle{Root: staged.finalRoot, BundleRef: staged.bundleRef, SourceRef: reg.sourceRef, SourceDigest: reg.sourceDigest, BundleDigest: staged.bundleDigest, Manifest: staged.manifest}
 	if opts.Activate {
-		if err := activateRegisteredDriver(ctx, s, result, opts.WorkspaceKey, driverID, versionID, manifest); err != nil {
-			return result, err
-		}
+		return activateRegisteredDriver(ctx, s, result, opts.WorkspaceKey, reg.driverID, staged.versionID, staged.manifest)
 	}
-	return result, nil
+	return nil
 }
 
 func ensureRegisteredDriver(ctx context.Context, s store.Store, ws, driverID, driverName, sourceRef string) (*domain.Driver, bool, error) {
@@ -362,7 +438,7 @@ func copyTree(src, dst string) error {
 		if err != nil {
 			return err
 		}
-		out, err := os.OpenFile(target, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, info.Mode().Perm())
+		out, err := os.OpenFile(target, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, info.Mode().Perm()) //nolint:gosec // G304: target is dst joined with a path produced by walking src.
 		if err != nil {
 			_ = in.Close()
 			return err

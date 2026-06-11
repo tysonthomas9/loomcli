@@ -4,12 +4,12 @@ import { normalizePrUrl, prKeyFromRef } from "@/utils/issue";
 
 describe("normalizePrUrl", () => {
   it("normalizes pull URLs for matching", () => {
-    expect(
-      normalizePrUrl("https://github.com/org/repo/pull/42/"),
-    ).toBe("https://github.com/org/repo/pull/42");
-    expect(
-      normalizePrUrl("https://github.com/org/repo/pull/42"),
-    ).toBe("https://github.com/org/repo/pull/42");
+    expect(normalizePrUrl("https://github.com/org/repo/pull/42/")).toBe(
+      "https://github.com/org/repo/pull/42",
+    );
+    expect(normalizePrUrl("https://github.com/org/repo/pull/42")).toBe(
+      "https://github.com/org/repo/pull/42",
+    );
   });
 
   it("returns null for non-PR refs", () => {
@@ -37,13 +37,9 @@ describe("prKeyFromRef", () => {
     expect(prKeyFromRef("https://github.com/org/repo/pull/42/files")).toBe(
       expected,
     );
-    expect(prKeyFromRef("https://github.com/org/repo/pull/42/")).toBe(
-      expected,
-    );
+    expect(prKeyFromRef("https://github.com/org/repo/pull/42/")).toBe(expected);
     // GitHub Enterprise-style "pulls" path
-    expect(prKeyFromRef("https://github.com/org/repo/pulls/42")).toBe(
-      expected,
-    );
+    expect(prKeyFromRef("https://github.com/org/repo/pulls/42")).toBe(expected);
   });
 
   it("returns null for non-PR refs", () => {

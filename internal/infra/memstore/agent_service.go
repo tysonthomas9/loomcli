@@ -35,6 +35,27 @@ func (s *agentServiceStore) Create(_ context.Context, in store.AgentServiceCreat
 	if in.WorkspaceKey == "" || serviceID == "" || strings.TrimSpace(in.RoleName) == "" {
 		return nil, fmt.Errorf("workspace_key + service_id + role_name required: %w", domain.ErrInvalid)
 	}
+	svc := newAgentServiceFromCreateMem(in, serviceID, time.Now().UTC())
+	if err := validateAgentServiceMem(svc); err != nil {
+		return nil, err
+	}
+	if err := s.validateReferences(svc); err != nil {
+		return nil, err
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.items[svc.WorkspaceKey] == nil {
+		s.items[svc.WorkspaceKey] = make(map[string]*domain.AgentService)
+	}
+	if _, ok := s.items[svc.WorkspaceKey][svc.ServiceID]; ok {
+		return nil, fmt.Errorf("agent service %q in workspace %q: %w", svc.ServiceID, svc.WorkspaceKey, domain.ErrAlreadyExists)
+	}
+	s.items[svc.WorkspaceKey][svc.ServiceID] = svc
+	return cloneAgentService(svc), nil
+}
+
+func newAgentServiceFromCreateMem(in store.AgentServiceCreate, serviceID string, now time.Time) *domain.AgentService {
 	name := in.Name
 	if strings.TrimSpace(name) == "" {
 		name = serviceID
@@ -47,8 +68,7 @@ func (s *agentServiceStore) Create(_ context.Context, in store.AgentServiceCreat
 	if maxInstances == 0 {
 		maxInstances = 1
 	}
-	now := time.Now().UTC()
-	svc := &domain.AgentService{
+	return &domain.AgentService{
 		WorkspaceKey:    in.WorkspaceKey,
 		ServiceID:       serviceID,
 		Name:            name,
@@ -70,23 +90,6 @@ func (s *agentServiceStore) Create(_ context.Context, in store.AgentServiceCreat
 		CreatedAt:       now,
 		UpdatedAt:       now,
 	}
-	if err := validateAgentServiceMem(svc); err != nil {
-		return nil, err
-	}
-	if err := s.validateReferences(svc); err != nil {
-		return nil, err
-	}
-
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.items[svc.WorkspaceKey] == nil {
-		s.items[svc.WorkspaceKey] = make(map[string]*domain.AgentService)
-	}
-	if _, ok := s.items[svc.WorkspaceKey][svc.ServiceID]; ok {
-		return nil, fmt.Errorf("agent service %q in workspace %q: %w", svc.ServiceID, svc.WorkspaceKey, domain.ErrAlreadyExists)
-	}
-	s.items[svc.WorkspaceKey][svc.ServiceID] = svc
-	return cloneAgentService(svc), nil
 }
 
 func (s *agentServiceStore) Get(_ context.Context, ws, serviceID string) (*domain.AgentService, error) {

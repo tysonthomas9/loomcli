@@ -30,9 +30,9 @@ describe("prStateFromGithub", () => {
   };
 
   it("shows merged state from GitHub", () => {
-    expect(
-      prStateFromGithub({ ...base, state: "MERGED" }).label,
-    ).toBe("Merged");
+    expect(prStateFromGithub({ ...base, state: "MERGED" }).label).toBe(
+      "Merged",
+    );
   });
 
   it("shows draft state", () => {
@@ -50,7 +50,10 @@ describe("prStateFromGithub", () => {
 });
 
 describe("buildPullRequestRows (loom-first queue)", () => {
-  const ghPr = (n: number, overrides: Partial<GitPullRequest> = {}): GitPullRequest => ({
+  const ghPr = (
+    n: number,
+    overrides: Partial<GitPullRequest> = {},
+  ): GitPullRequest => ({
     number: n,
     title: `PR ${n}`,
     url: `https://github.com/org/repo/pull/${n}`,

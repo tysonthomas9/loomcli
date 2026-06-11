@@ -63,12 +63,19 @@ function prNumberFrom(ref: string | null | undefined): string | null {
 
 /** Small avatar circle for a ticket assignee. */
 function Avatar({ name }: { name: string }): JSX.Element {
-  const initial = name.replace(/^\[H\]\s*/, "").charAt(0).toUpperCase() || "?";
+  const initial =
+    name
+      .replace(/^\[H\]\s*/, "")
+      .charAt(0)
+      .toUpperCase() || "?";
   const color = getAvatarColor(name);
   return (
     <span
       className={styles.avatar}
-      style={{ background: color, color: shouldUseWhiteText(color) ? "#fff" : "#111" }}
+      style={{
+        background: color,
+        color: shouldUseWhiteText(color) ? "#fff" : "#111",
+      }}
       title={name}
       aria-label={`Assignee ${name}`}
     >
@@ -100,7 +107,13 @@ export function EpicRollup({
   }, [tickets]);
 
   // Sort tickets by workflow stage so the most active work surfaces first.
-  const order: Bucket[] = ["in_progress", "blocked", "review", "open", "closed"];
+  const order: Bucket[] = [
+    "in_progress",
+    "blocked",
+    "review",
+    "open",
+    "closed",
+  ];
   const sortedTickets = useMemo(
     () =>
       [...tickets].sort(

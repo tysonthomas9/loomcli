@@ -51,9 +51,7 @@ export function CreateAgentModal({
 
   const repoOptions = useMemo(
     () =>
-      repos
-        .filter((repo) => !repo.is_linked_worktree)
-        .map((repo) => repo.name),
+      repos.filter((repo) => !repo.is_linked_worktree).map((repo) => repo.name),
     [repos],
   );
   const defaultRepos = useMemo(
@@ -254,8 +252,8 @@ export function CreateAgentModal({
           </span>
           {repoOptions.length === 0 ? (
             <p className={styles.emptyHint} data-testid="create-agent-no-repos">
-              No repos yet — add one from the sidebar first. This agent will
-              run with workspace scope.
+              No repos yet — add one from the sidebar first. This agent will run
+              with workspace scope.
             </p>
           ) : (
             <div
@@ -289,7 +287,11 @@ export function CreateAgentModal({
         </div>
 
         {error && (
-          <div className={styles.error} role="alert" data-testid="create-agent-error">
+          <div
+            className={styles.error}
+            role="alert"
+            data-testid="create-agent-error"
+          >
             {error}
           </div>
         )}

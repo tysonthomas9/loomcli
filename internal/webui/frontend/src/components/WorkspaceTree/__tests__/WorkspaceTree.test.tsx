@@ -74,64 +74,64 @@ vi.mock("zustand", () => ({
 vi.mock("@/hooks", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/hooks")>();
   return {
-  ...actual,
-  useDebouncedCallback: (fn: (...args: unknown[]) => unknown) => fn,
-  useWorkspaceRepos: () => ({ ...defaultReposReturn, ...reposOverride }),
-  useAgentStoreInstance: () => ({}), // dummy — useStore mock ignores store arg
-  useWorkspaceContext: () => ({
-    workspaceId: TEST_WS_ID,
-    activeWorkspaceName: null,
-    defaultWorkspaceName: null,
-    setDefaultWorkspace: vi.fn(),
-    agents: [],
-    workspace: reposOverride.workspace ?? null,
-    repos: reposOverride.repos ?? [],
-    isLoading: reposOverride.isLoading ?? defaultReposReturn.isLoading,
-    error: reposOverride.error ?? defaultReposReturn.error,
-    refetch: reposOverride.refetch ?? defaultReposReturn.refetch,
-  }),
-  useWorkspaceTree: () => ({
-    epics: [],
-    orphanTasks: [],
-    closedEpicCount: 0,
-    isLoading: false,
-    error: null,
-    refetch: vi.fn(),
-  }),
-  useWorkspaceTreeWidth: actual.useWorkspaceTreeWidth,
-  WORKSPACE_TREE_MIN_WIDTH: actual.WORKSPACE_TREE_MIN_WIDTH,
-  WORKSPACE_TREE_MAX_WIDTH: actual.WORKSPACE_TREE_MAX_WIDTH,
-  useToast: () => ({ showToast: vi.fn() }),
-  useIssueDiffStat: () => ({
-    data: null,
-    isLoading: false,
-    error: null,
-    refetch: vi.fn(),
-  }),
-  useAgentDiffStat: () => ({
-    data: null,
-    isLoading: false,
-    error: null,
-    refetch: vi.fn(),
-  }),
-  useRegisterEscapeLayer: vi.fn(),
-  useKeyboardShortcuts: vi.fn(() => ({
-    isCheatsheetOpen: false,
-    toggleCheatsheet: vi.fn(),
-    closeCheatsheet: vi.fn(),
-  })),
-  KeyboardShortcutProvider: ({ children }: { children: React.ReactNode }) =>
-    children,
-  LAYER_CONFIRM_DIALOG: 60,
-  LAYER_TOAST: 50,
-  LAYER_CHEATSHEET: 45,
-  LAYER_MODAL: 40,
-  LAYER_TERMINAL_PANEL: 30,
-  LAYER_AGENT_PANEL: 20,
-  LAYER_ISSUE_PANEL: 10,
-  LAYER_WORKSPACE_SWITCHER: 42,
-  useFocusTrap: vi.fn(),
-  useFocusReturn: vi.fn(),
+    ...actual,
+    useDebouncedCallback: (fn: (...args: unknown[]) => unknown) => fn,
+    useWorkspaceRepos: () => ({ ...defaultReposReturn, ...reposOverride }),
+    useAgentStoreInstance: () => ({}), // dummy — useStore mock ignores store arg
+    useWorkspaceContext: () => ({
+      workspaceId: TEST_WS_ID,
+      activeWorkspaceName: null,
+      defaultWorkspaceName: null,
+      setDefaultWorkspace: vi.fn(),
+      agents: [],
+      workspace: reposOverride.workspace ?? null,
+      repos: reposOverride.repos ?? [],
+      isLoading: reposOverride.isLoading ?? defaultReposReturn.isLoading,
+      error: reposOverride.error ?? defaultReposReturn.error,
+      refetch: reposOverride.refetch ?? defaultReposReturn.refetch,
+    }),
+    useWorkspaceTree: () => ({
+      epics: [],
+      orphanTasks: [],
+      closedEpicCount: 0,
+      isLoading: false,
+      error: null,
+      refetch: vi.fn(),
+    }),
+    useWorkspaceTreeWidth: actual.useWorkspaceTreeWidth,
+    WORKSPACE_TREE_MIN_WIDTH: actual.WORKSPACE_TREE_MIN_WIDTH,
+    WORKSPACE_TREE_MAX_WIDTH: actual.WORKSPACE_TREE_MAX_WIDTH,
+    useToast: () => ({ showToast: vi.fn() }),
+    useIssueDiffStat: () => ({
+      data: null,
+      isLoading: false,
+      error: null,
+      refetch: vi.fn(),
+    }),
+    useAgentDiffStat: () => ({
+      data: null,
+      isLoading: false,
+      error: null,
+      refetch: vi.fn(),
+    }),
+    useRegisterEscapeLayer: vi.fn(),
+    useKeyboardShortcuts: vi.fn(() => ({
+      isCheatsheetOpen: false,
+      toggleCheatsheet: vi.fn(),
+      closeCheatsheet: vi.fn(),
+    })),
+    KeyboardShortcutProvider: ({ children }: { children: React.ReactNode }) =>
+      children,
+    LAYER_CONFIRM_DIALOG: 60,
+    LAYER_TOAST: 50,
+    LAYER_CHEATSHEET: 45,
+    LAYER_MODAL: 40,
+    LAYER_TERMINAL_PANEL: 30,
+    LAYER_AGENT_PANEL: 20,
+    LAYER_ISSUE_PANEL: 10,
+    LAYER_WORKSPACE_SWITCHER: 42,
+    useFocusTrap: vi.fn(),
+    useFocusReturn: vi.fn(),
   };
 });
 
@@ -412,7 +412,9 @@ describe("WorkspaceTree", () => {
 
       render(<WorkspaceTree defaultCollapsed={false} />);
 
-      expect(screen.getByRole("heading", { name: "Repos" })).toBeInTheDocument();
+      expect(
+        screen.getByRole("heading", { name: "Repos" }),
+      ).toBeInTheDocument();
       fireEvent.click(screen.getByRole("button", { name: "+ Add Repo" }));
       expect(screen.getByLabelText("Repository URL")).toBeInTheDocument();
     });
@@ -509,12 +511,18 @@ describe("WorkspaceTree", () => {
       );
 
       const content = container.querySelector('[class*="content"]');
-      const addAgentButton = screen.getByRole("button", { name: "+ Add agent" });
+      const addAgentButton = screen.getByRole("button", {
+        name: "+ Add agent",
+      });
       const reposHeading = screen.getByRole("heading", { name: "Repos" });
 
       expect(content).toBeInTheDocument();
-      expect(container.querySelector('[class*="mainScroll"]')).not.toBeInTheDocument();
-      expect(container.querySelector('[class*="reposDock"]')).not.toBeInTheDocument();
+      expect(
+        container.querySelector('[class*="mainScroll"]'),
+      ).not.toBeInTheDocument();
+      expect(
+        container.querySelector('[class*="reposDock"]'),
+      ).not.toBeInTheDocument();
       expect(content!.contains(addAgentButton)).toBe(true);
       expect(content!.contains(reposHeading)).toBe(true);
       expect(
