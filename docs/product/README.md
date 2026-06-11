@@ -45,6 +45,10 @@ Read these in order:
    Web UI redesign that turns the new-user journey from `loom serve` into a
    guided, dismissable checklist with backend-status visibility, scoped to
    the local-dev audience.
+13. `pr-review-spec.md`
+   Pull requests as a first-class object: the loom-first review queue, a
+   full-screen GitHub-style PR page with inline/split diff and review
+   decisions, and the persisted PR review agent.
 
 Related design docs:
 
