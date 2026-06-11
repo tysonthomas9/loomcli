@@ -716,6 +716,10 @@ func (b *FleetBackend) transitionToOpen(ctx context.Context, id string, current 
 		_, err = b.exec(ctx, "Update", "POST", "/issues/"+url.PathEscape(id)+"/undefer", nil)
 	case "in_progress":
 		if current.Assignee != "" {
+			// Legacy-only: releasing as the current assignee impersonates
+			// whoever holds the lock, defeating FleetDB's NOT_OWNER check.
+			// Kept for actor-less callers (e.g. human `loom data update
+			// --status open`); actor-aware flows must use ReleaseIssueAsActor.
 			return b.execAsActor(ctx, "Update", "/issues/"+url.PathEscape(id)+"/release", nil, current.Assignee)
 		}
 		_, err = b.exec(ctx, "Update", "PATCH", "/issues/"+url.PathEscape(id), map[string]interface{}{"status": "open"})
