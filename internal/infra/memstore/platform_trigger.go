@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -180,9 +181,11 @@ func (s *triggerRouteStore) DispatchTriggerRoute(ctx context.Context, ws, routeK
 	now := time.Now().UTC()
 	event, _ := s.events.create(dispatchTriggerEvent(ws, binding, in, now))
 
+	// runID() is monotonic when in.RunID is empty, so resolve it exactly once.
+	requestedRunID := s.runID(in.RunID)
 	run, err := s.runs.Create(ctx, store.DriverRunCreate{
 		WorkspaceKey:    ws,
-		RunID:           s.runID(in.RunID),
+		RunID:           requestedRunID,
 		DriverID:        binding.DriverID,
 		DriverVersionID: binding.DriverVersionID,
 		Entrypoint:      binding.TargetEntrypoint,
@@ -210,7 +213,36 @@ func (s *triggerRouteStore) DispatchTriggerRoute(ctx context.Context, ws, routeK
 	if deliveryErr != nil && !errors.Is(deliveryErr, domain.ErrAlreadyExists) {
 		return nil, deliveryErr
 	}
+	// Subject-level supersede (mirrors fleet-db's dispatch path): when the
+	// binding's concurrency policy is `replace` and this is a freshly admitted
+	// run for a known subject, collapse older still-queued runs for the same
+	// subject so a push storm doesn't queue N stale reviews.
+	if run.RunID == requestedRunID && binding.ConcurrencyPolicy == domain.TriggerBindingConcurrencyReplace {
+		if subject := strings.TrimSpace(in.SubjectRef); subject != "" {
+			s.supersedeQueuedSiblingRuns(ctx, ws, binding, subject, run.RunID)
+		}
+	}
 	return run, nil
+}
+
+// supersedeQueuedSiblingRuns cancels still-queued runs for the same
+// (binding, subject) as keepRunID, matching each candidate by its source
+// TriggerEvent. Best-effort: a run already claimed is left running.
+func (s *triggerRouteStore) supersedeQueuedSiblingRuns(ctx context.Context, ws string, binding *domain.TriggerBinding, subject, keepRunID string) {
+	queued, err := s.runs.List(ctx, ws, store.DriverRunFilter{DriverID: binding.DriverID, Status: domain.DriverRunQueued})
+	if err != nil {
+		return
+	}
+	for _, run := range queued {
+		if run == nil || run.RunID == keepRunID {
+			continue
+		}
+		event, err := s.events.Get(ctx, ws, run.SourceRef)
+		if err != nil || event.TriggerBindingID != binding.BindingID || strings.TrimSpace(event.SubjectRef) != subject {
+			continue
+		}
+		s.runs.cancelQueuedForSupersede(ws, run.RunID, "superseded by "+keepRunID+" for "+subject)
+	}
 }
 
 // runID returns the caller-supplied id, or a generated monotonic one. fleet-db

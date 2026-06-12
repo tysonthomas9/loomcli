@@ -246,6 +246,26 @@ func (s *driverRunStore) Finish(_ context.Context, ws, runID string, finish stor
 	return cloneDriverRun(run), nil
 }
 
+// cancelQueuedForSupersede terminalizes a still-queued run as cancelled, with
+// no owner check. Mirrors fleet-db's CancelQueuedDriverRun: a claimed/running
+// run is left alone (returns false) so a superseding event never cancels a run
+// already executing. Returns true when it cancelled a queued run.
+func (s *driverRunStore) cancelQueuedForSupersede(ws, runID, summary string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	run, ok := s.items[ws][runID]
+	if !ok || run.Status != domain.DriverRunQueued {
+		return false
+	}
+	now := time.Now().UTC()
+	run.Status = domain.DriverRunCancelled
+	run.Summary = summary
+	run.ErrorClass = "superseded"
+	run.FinishedAt = &now
+	run.UpdatedAt = now
+	return true
+}
+
 func (s *driverRunStore) RecoverStale(_ context.Context, ws string, recover store.StaleDriverRunRecovery) (*store.StaleDriverRunRecoveryResult, error) {
 	plan, err := newStaleDriverRunRecoveryMem(ws, recover)
 	if err != nil {
