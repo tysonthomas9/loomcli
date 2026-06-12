@@ -46,6 +46,8 @@ func TestBuiltinEpicRunnerWorkflowWorkerProfilesAreOptIn(t *testing.T) {
 	source := spec.Files[spec.Entrypoint]
 	for _, forbidden := range []string{
 		"input.workerPrefix || input.worker_prefix || slug(epicId)",
+		"input.worker_prefix",
+		"input.worker_profile_id",
 		"workerProfileId: opts.workerPrefix +",
 	} {
 		if strings.Contains(source, forbidden) {
@@ -53,12 +55,39 @@ func TestBuiltinEpicRunnerWorkflowWorkerProfilesAreOptIn(t *testing.T) {
 		}
 	}
 	for _, want := range []string{
-		"const workerPrefix = stringValue(input.workerPrefix || input.worker_prefix);",
-		"const workerProfileId = stringValue(input.workerProfileId || input.worker_profile_id);",
+		"const workerPrefix = stringValue(input.workerPrefix);",
+		"const workerProfileId = stringValue(input.workerProfileId);",
 		"request.workerProfileId = workerProfileId;",
 	} {
 		if !strings.Contains(source, want) {
 			t.Fatalf("built-in epic-runner source missing opt-in worker profile logic %q", want)
+		}
+	}
+}
+
+func TestBuiltinEpicRunnerWorkflowUsesCamelCaseInputContract(t *testing.T) {
+	spec, ok := BuiltinWorkflow(BuiltinEpicRunnerWorkflowName)
+	if !ok {
+		t.Fatal("built-in epic-runner workflow missing")
+	}
+	source := spec.Files[spec.Entrypoint]
+	for _, forbidden := range []string{
+		"input.epic_id",
+		"input.dry_run",
+		"input.max_concurrency",
+		"input.provider_profile",
+		"input.worker_prefix",
+		"input.worker_profile_id",
+		"input.target_node_id",
+		"input.interval_seconds",
+		"input.lead_notification_drain_seconds",
+		"input.stale_task_run_max_age_seconds",
+		"input.parent_session_id",
+		"input.lead_name",
+		"input.orchestrator_session_id",
+	} {
+		if strings.Contains(source, forbidden) {
+			t.Fatalf("built-in epic-runner source still accepts legacy input field %q", forbidden)
 		}
 	}
 }
@@ -80,6 +109,24 @@ func TestBuiltinEpicRunnerWorkflowDrainsQueuedLeadMessagesBeforeTerminalResult(t
 	}
 	if strings.Contains(source, "await taskNotifications.flush();\n        const suffix") {
 		t.Fatalf("built-in epic-runner still completes after a single task notification flush")
+	}
+}
+
+func TestBuiltinEpicRunnerWorkflowAwaitsQueuedTaskRuns(t *testing.T) {
+	spec, ok := BuiltinWorkflow(BuiltinEpicRunnerWorkflowName)
+	if !ok {
+		t.Fatal("built-in epic-runner workflow missing")
+	}
+	source := spec.Files[spec.Entrypoint]
+	for _, want := range []string{
+		"loom.taskRuns.await",
+		"taskRunStillActive(result.status)",
+		"function taskRunStillActive(status)",
+		"if (!leaseToken) {",
+	} {
+		if !strings.Contains(source, want) {
+			t.Fatalf("built-in epic-runner source missing async task-run behavior %q", want)
+		}
 	}
 }
 

@@ -6,6 +6,7 @@ export {
 } from "./runner.js";
 
 export {
+  DriverApiError,
   FlueDriverClient,
   createLoomClient,
   createLoomDriverClient,

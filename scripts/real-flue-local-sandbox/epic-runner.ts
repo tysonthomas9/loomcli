@@ -3,9 +3,7 @@ import { createLoomDriverClient } from '@loom/sdk/flue';
 type WorkflowContext = {
   payload?: {
     epicId?: string;
-    epic_id?: string;
     parentSessionId?: string;
-    parent_session_id?: string;
   };
 };
 
@@ -16,15 +14,16 @@ type ClaimedTask = {
 type RequestedTaskRun = {
   status?: string;
   id?: string;
+  taskRunId?: string;
+  leaseToken?: string;
   logsRef?: string;
-  logs_ref?: string;
   artifactsRef?: string;
-  artifacts_ref?: string;
+  artifactIds?: string[];
 };
 
 export async function run(ctx: WorkflowContext) {
   const input = ctx.payload ?? {};
-  const epicId = input.epicId ?? input.epic_id ?? '';
+  const epicId = input.epicId ?? '';
   const loom = createLoomDriverClient({ input });
 
   console.log('native-flue-driver-start ' + epicId);
@@ -39,13 +38,29 @@ export async function run(ctx: WorkflowContext) {
     const result = (await loom.taskRuns.request({
       taskId: task.id,
       providerProfile: 'flue-local',
-      parentSessionId: input.parentSessionId ?? input.parent_session_id ?? '',
+      parentSessionId: input.parentSessionId ?? '',
       supportedProviders: ['flue-local'],
       sandboxPlacement: { provider: 'flue-local' },
     })) as RequestedTaskRun;
+    if (result.status === 'queued' || result.status === 'running') {
+      const awaited = (await loom.taskRuns.await({
+        taskRunId: result.taskRunId || result.id || '',
+        pollMs: 500,
+      })) as RequestedTaskRun;
+      Object.assign(result, awaited);
+    }
 
     if (result.status === 'completed') {
-      await loom.tasks.complete(task.id);
+      if (result.leaseToken) {
+        await loom.tasks.complete({
+          taskId: task.id,
+          taskRunId: result.taskRunId || result.id || '',
+          leaseToken: result.leaseToken,
+          logsRef: result.logsRef || '',
+          artifactsRef: result.artifactsRef || '',
+          artifactIds: result.artifactIds || [],
+        });
+      }
       completed.push(task.id);
       continue;
     }
@@ -53,9 +68,9 @@ export async function run(ctx: WorkflowContext) {
     await loom.tasks.release(task.id);
     return loom.needsReview({
       summary: 'Task failed: ' + task.id,
-      taskRunId: result.id,
-      logsRef: result.logsRef ?? result.logs_ref ?? '',
-      artifactsRef: result.artifactsRef ?? result.artifacts_ref ?? '',
+      taskRunId: result.taskRunId || result.id,
+      logsRef: result.logsRef ?? '',
+      artifactsRef: result.artifactsRef ?? '',
     });
   }
 }

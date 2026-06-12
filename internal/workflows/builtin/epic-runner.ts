@@ -3,7 +3,7 @@ import { createLoomDriverClient } from '@loom/sdk/flue';
 export async function run(ctx) {
   const input = ctx.payload || {};
   const loom = createLoomDriverClient({ input });
-  const epicId = stringValue(input.epicId || input.epic_id);
+  const epicId = stringValue(input.epicId);
   if (!epicId) {
     return loom.failed({
       summary: "epic-runner requires epicId",
@@ -18,19 +18,19 @@ export async function run(ctx) {
       errorClass: started.errorClass || "epic_start_failed",
     });
   }
-  if (booleanValue(input.dryRun || input.dry_run)) {
+  if (booleanValue(input.dryRun)) {
     return loom.completed({
       summary: "Dry-run validated epic " + epicId + (started.leadName ? " for lead " + started.leadName : ""),
     });
   }
 
-  const maxConcurrency = Math.max(1, numberValue(input.maxConcurrency || input.max_concurrency, 2));
-  const providerProfile = stringValue(input.providerProfile || input.provider_profile || "flue-local");
-  const workerPrefix = stringValue(input.workerPrefix || input.worker_prefix);
-  const workerProfileId = stringValue(input.workerProfileId || input.worker_profile_id);
-  const targetNodeId = stringValue(input.targetNodeId || input.target_node_id);
-  const intervalMs = Math.max(1000, numberValue(input.intervalSeconds || input.interval_seconds, 5) * 1000);
-  const leadNotificationDrainMs = Math.max(0, numberValue(input.leadNotificationDrainSeconds || input.lead_notification_drain_seconds, 30) * 1000);
+  const maxConcurrency = Math.max(1, numberValue(input.maxConcurrency, 2));
+  const providerProfile = stringValue(input.providerProfile || "flue-local");
+  const workerPrefix = stringValue(input.workerPrefix);
+  const workerProfileId = stringValue(input.workerProfileId);
+  const targetNodeId = stringValue(input.targetNodeId);
+  const intervalMs = Math.max(1000, numberValue(input.intervalSeconds, 5) * 1000);
+  const leadNotificationDrainMs = Math.max(0, numberValue(input.leadNotificationDrainSeconds, 30) * 1000);
   const completed = [];
   const leadDelivery = startLeadDeliveryRetry(loom, started.leadName, started.deliveryState, intervalMs);
   const taskNotifications = startLeadMessageDeliveryRetry(loom, started.leadName, intervalMs, leadDelivery);
@@ -38,7 +38,7 @@ export async function run(ctx) {
   try {
     while (true) {
       await loom.taskRuns.recoverStale({
-        maxAgeSeconds: numberValue(input.staleTaskRunMaxAgeSeconds || input.stale_task_run_max_age_seconds, 300),
+        maxAgeSeconds: numberValue(input.staleTaskRunMaxAgeSeconds, 300),
         errorClass: "stale_task_run",
         errorMessage: "task run heartbeat is stale",
       });
@@ -98,7 +98,7 @@ export async function run(ctx) {
         workerProfileId,
         providerProfile,
         targetNodeId,
-        parentSessionId: started.orchestratorSessionId || stringValue(input.parentSessionId || input.parent_session_id),
+        parentSessionId: started.orchestratorSessionId || stringValue(input.parentSessionId),
       })));
       for (const result of results) {
         if (!result.ok) {
@@ -132,7 +132,7 @@ export async function run(ctx) {
 }
 
 async function startEpicRun(loom, input, epicId) {
-  const dryRun = booleanValue(input.dryRun || input.dry_run);
+  const dryRun = booleanValue(input.dryRun);
   const epic = await loom.epics.get({ epicId });
   if (!epic) {
     return {
@@ -150,8 +150,8 @@ async function startEpicRun(loom, input, epicId) {
     };
   }
 
-  const leadName = stringValue(input.leadName || input.lead_name);
-  const requestedOrchestrator = stringValue(input.orchestratorSessionId || input.orchestrator_session_id);
+  const leadName = stringValue(input.leadName);
+  const requestedOrchestrator = stringValue(input.orchestratorSessionId);
   if (!leadName) {
     return {
       ok: true,
@@ -443,16 +443,37 @@ async function runChildTask(loom, opts) {
       summary: "Task request failed: " + task.id + " - " + errorMessage(err),
     };
   }
+  if (result && taskRunStillActive(result.status)) {
+    try {
+      result = await loom.taskRuns.await({
+        taskRunId: result.taskRunId || result.id || taskRunId,
+        pollMs: 2000,
+      });
+    } catch (err) {
+      await safeRelease(loom, task.id);
+      return {
+        ok: false,
+        taskId: task.id,
+        taskRunId,
+        errorClass: "child_task_await_failed",
+        summary: "Task await failed: " + task.id + " - " + errorMessage(err),
+      };
+    }
+  }
 
   if (result && result.status === "completed") {
     const completedTaskRunId = result.taskRunId || result.id || taskRunId;
     const logsRef = result.logsRef || "";
     const artifactsRef = result.artifactsRef || "";
+    const leaseToken = result.leaseToken || "";
+    if (!leaseToken) {
+      return { ok: true, taskId: task.id, taskTitle: stringValue(task.title), taskRunId: completedTaskRunId, logsRef, artifactsRef };
+    }
     try {
       await loom.tasks.complete({
         taskId: task.id,
         taskRunId: completedTaskRunId,
-        leaseToken: result.leaseToken || "",
+        leaseToken,
         logsRef,
         artifactsRef,
         artifactIds: result.artifactIds || [],
@@ -482,6 +503,10 @@ async function runChildTask(loom, opts) {
     errorClass: result ? result.errorClass || "child_task_failed" : "child_task_failed",
     summary: "Task failed: " + task.id + (result && result.errorMessage ? " - " + result.errorMessage : ""),
   };
+}
+
+function taskRunStillActive(status) {
+  return status === "queued" || status === "running";
 }
 
 async function safeRelease(loom, taskId) {

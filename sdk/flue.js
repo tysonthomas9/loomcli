@@ -1,20 +1,41 @@
 // NOTE: this module must stay self-contained (no local imports): callers such as
 // scripts/run-slack-codex-epic-runner-stack.sh vendor flue.js as a single file.
-import { spawn } from "node:child_process";
+//
+// Workflow driver operations use the loom serve driver-op HTTP API with
+// camelCase JSON and structured errors.
+
+const DEFAULT_HTTP_TIMEOUT_MS = 30_000;
+
+// DriverApiError carries the structured v2 error envelope:
+// {code, message, retryable} plus the HTTP status.
+export class DriverApiError extends Error {
+  constructor(message, { code, retryable, status, details } = {}) {
+    super(message);
+    this.name = "DriverApiError";
+    this.code = code || "internal";
+    this.retryable = Boolean(retryable);
+    this.status = status || 0;
+    if (details !== undefined) {
+      this.details = details;
+    }
+  }
+}
 
 export class FlueDriverClient {
   static fromEnv(options = {}) {
     return new FlueDriverClient({
       env: options.env || process.env,
       input: options.input,
-      command: options.command,
+      apiUrl: options.apiUrl,
+      apiToken: options.apiToken,
     });
   }
 
   constructor(options = {}) {
     this.env = options.env || process.env;
     this.input = options.input || {};
-    this.command = options.command || execTaskCommand(this.env);
+    this.apiUrl = stripTrailingSlash(String(options.apiUrl || pickEnv(this.env, "LOOM_DRIVER_API_URL")));
+    this.apiToken = String(options.apiToken || pickEnv(this.env, "LOOM_DRIVER_API_TOKEN"));
     this.workspace = pickEnv(this.env, "LOOM_DRIVER_WORKSPACE");
     this.driverRunId = pickEnv(this.env, "LOOM_DRIVER_RUN_ID");
     this.taskRunResultsByTaskId = new Map();
@@ -37,6 +58,8 @@ export class FlueDriverClient {
     });
     this.taskRuns = Object.freeze({
       request: (input = {}) => this.requestTaskRun(input),
+      get: (input = {}) => this.getTaskRun(input),
+      await: (input = {}) => this.awaitTaskRun(input),
       active: (input = {}) => this.activeTaskRuns(input),
       recoverStale: (input = {}) => this.recoverStaleTaskRuns(input),
     });
@@ -50,7 +73,7 @@ export class FlueDriverClient {
     return {
       status: "failed",
       summary: input.summary || "failed",
-      errorClass: input.errorClass || input.error_class || "driver_failed",
+      errorClass: input.errorClass || "driver_failed",
     };
   }
 
@@ -58,27 +81,31 @@ export class FlueDriverClient {
     return {
       status: "needs_review",
       summary: input.summary || "needs review",
-      errorClass: input.errorClass || input.error_class || "needs_review",
-      taskRunId: input.taskRunId || input.task_run_id,
-      logsRef: input.logsRef || input.logs_ref,
-      artifactsRef: input.artifactsRef || input.artifacts_ref,
+      errorClass: input.errorClass || "needs_review",
+      taskRunId: input.taskRunId,
+      logsRef: input.logsRef,
+      artifactsRef: input.artifactsRef,
     };
   }
 
   async claimReady(input = {}) {
-    return this.#run(this.#epicArgs("claim-ready", input));
+    return this.#httpCall("claim-ready", {
+      epicId: this.#epicID(input),
+      actor: input.actor || "",
+      limit: input.limit || "",
+    });
   }
 
   async getEpic(input = {}) {
-    return this.#run(this.#epicArgs("epic-get", input));
+    return this.#httpCall("epic-get", { epicId: this.#epicID(input) });
   }
 
   async epicSnapshot(input = {}) {
-    return this.#run(this.#epicArgs("epic-snapshot", input));
+    return this.#httpCall("epic-snapshot", { epicId: this.#epicID(input) });
   }
 
   async listAgents(_input = {}) {
-    return this.#run(this.#baseArgs("list-agents"));
+    return this.#httpCall("list-agents", {});
   }
 
   async agentOrchestrationSession(input = {}) {
@@ -86,21 +113,21 @@ export class FlueDriverClient {
     if (!agent) {
       throw new Error("agents.orchestrationSession requires agent");
     }
-    const args = this.#baseArgs("agent-orchestration-session");
-    args.push("--agent", String(agent));
-    return this.#run(args);
+    return this.#httpCall("agent-orchestration-session", { agent: String(agent) });
   }
 
   async updateAgentParent(input = {}) {
     const agent = agentNameOf(input);
-    const parent = input.parent || input.parentEpicId || input.parent_epic_id || "";
+    const parent = input.parent || input.parentEpicId || "";
     if (!agent || !parent) {
       throw new Error("agents.updateParent requires agent and parent");
     }
-    const args = this.#baseArgs("update-agent-parent");
-    args.push("--agent", String(agent), "--parent", String(parent));
-    appendStringFlag(args, "--expect-parent", input.expectParent || input.expect_parent);
-    return this.#run(args);
+    const params = {
+      agent: String(agent),
+      parent: String(parent),
+      expectParent: input.expectParent || "",
+    };
+    return this.#httpCall("update-agent-parent", params);
   }
 
   async deliverLeadAssignment(input = {}) {
@@ -108,9 +135,7 @@ export class FlueDriverClient {
     if (!agent) {
       throw new Error("agents.deliverAssignment requires agent");
     }
-    const args = this.#baseArgs("deliver-lead-assignment");
-    args.push("--agent", String(agent));
-    return this.#run(args);
+    return this.#httpCall("deliver-lead-assignment", { agent: String(agent) });
   }
 
   async messageAgent(input = {}) {
@@ -119,72 +144,108 @@ export class FlueDriverClient {
     if (!agent || !message) {
       throw new Error("agents.message requires agent and message");
     }
-    const args = this.#baseArgs("deliver-agent-message");
-    args.push("--agent", String(agent), "--message", String(message));
-    return this.#run(args);
+    return this.#httpCall("deliver-agent-message", { agent: String(agent), message: String(message) });
   }
 
   async requestTaskRun(input = {}) {
-    const taskId = input.taskId || input.task_id;
+    const taskId = input.taskId;
     if (!taskId) {
       throw new Error("taskRuns.request requires taskId");
     }
-    const args = this.#baseArgs("exec-task");
-    args.push("--task-id", String(taskId));
-    appendStringFlag(args, "--provider-profile", input.providerProfile || input.provider_profile);
-    appendStringFlag(args, "--task-run-id", input.taskRunId || input.task_run_id);
-    appendStringFlag(args, "--worker-profile-id", input.workerProfileId || input.worker_profile_id);
-    appendStringFlag(args, "--parent-session-id", input.parentSessionId || input.parent_session_id);
-    appendStringFlag(args, "--node-id", input.nodeId || input.node_id);
-    appendStringFlag(args, "--runner-id", input.runnerId || input.runner_id);
-    appendRepeatedFlag(args, "--supported-provider", input.supportedProviders || input.supported_providers);
-    appendRepeatedFlag(args, "--capability", input.capabilities);
-    const sandboxPlacement = input.sandboxPlacement || input.sandbox_placement || {};
-    appendStringFlag(args, "--sandbox-provider", sandboxPlacement.provider || input.sandboxProvider || input.sandbox_provider);
-    appendStringFlag(args, "--sandbox-id", sandboxPlacement.sandbox_id || sandboxPlacement.sandboxId || input.sandboxId || input.sandbox_id);
-    appendStringFlag(args, "--sandbox-cwd", sandboxPlacement.cwd || input.sandboxCwd || input.sandbox_cwd);
-    appendStringFlag(args, "--sandbox-repo-ref", sandboxPlacement.repo_ref || sandboxPlacement.repoRef || input.sandboxRepoRef || input.sandbox_repo_ref);
-    args.push("--defer-completion");
-    const result = await this.#run(args);
+    const sandboxPlacement = input.sandboxPlacement || {};
+    const params = {
+      taskId: String(taskId),
+      providerProfile: input.providerProfile || "",
+      taskRunId: input.taskRunId || "",
+      workerProfileId: input.workerProfileId || "",
+      parentSessionId: input.parentSessionId || "",
+      nodeId: input.nodeId || "",
+      runnerId: input.runnerId || "",
+      driverStepId: input.driverStepId || "",
+      supportedProviders: stringList(input.supportedProviders),
+      capabilities: stringList(input.capabilities),
+      sandboxPlacement: {
+        provider: sandboxPlacement.provider || "",
+        sandboxId: sandboxPlacement.sandboxId || "",
+        cwd: sandboxPlacement.cwd || "",
+        repoRef: sandboxPlacement.repoRef || "",
+      },
+      leaseToken: input.leaseToken || pickEnv(this.env, "LOOM_TASK_RUN_LEASE_TOKEN") || pickEnv(this.env, "LOOM_RUNNER_LEASE_TOKEN"),
+      deferCompletion: true,
+    };
+    const result = await this.#httpCall("exec-task", { ...params, enqueueOnly: true });
     rememberTaskRunResult(this, result || {});
     return result;
   }
 
+  async getTaskRun(input = {}) {
+    const taskRunId = input.taskRunId || "";
+    if (!taskRunId) {
+      throw new Error("taskRuns.get requires taskRunId");
+    }
+    return this.#httpCall("task-run-get", { taskRunId: String(taskRunId) });
+  }
+
+  async awaitTaskRun(input = {}) {
+    const taskRunId = input.taskRunId || "";
+    if (!taskRunId) {
+      throw new Error("taskRuns.await requires taskRunId");
+    }
+    const pollMs = Math.max(100, Number(input.pollMs || 2000));
+    const timeoutMs = Math.max(0, Number(input.timeoutMs || 0));
+    const started = Date.now();
+    while (true) {
+      const result = await this.getTaskRun({ taskRunId });
+      if (isTerminalTaskRunStatus(result?.status)) {
+        rememberTaskRunResult(this, result || {});
+        return result;
+      }
+      if (timeoutMs > 0 && Date.now() - started >= timeoutMs) {
+        throw new DriverApiError(`task run ${taskRunId} did not finish within ${timeoutMs}ms`, { code: "timeout", retryable: true });
+      }
+      await sleep(Math.min(pollMs, timeoutMs > 0 ? Math.max(1, timeoutMs - (Date.now() - started)) : pollMs));
+    }
+  }
+
   async activeTaskRuns(input = {}) {
-    const args = this.#epicArgs("active-task-runs", input);
-    appendStringFlag(args, "--limit", input.limit || "");
-    return this.#run(args);
+    return this.#httpCall("active-task-runs", {
+      epicId: this.#epicID(input),
+      limit: input.limit || "",
+    });
   }
 
   async recoverStaleTaskRuns(input = {}) {
-    const args = this.#baseArgs("recover-stale-tasks");
-    appendStringFlag(args, "--stale-before", input.staleBefore || input.stale_before);
-    appendStringFlag(args, "--max-age-seconds", input.maxAgeSeconds || input.max_age_seconds || "");
-    appendStringFlag(args, "--error-class", input.errorClass || input.error_class);
-    appendStringFlag(args, "--error-message", input.errorMessage || input.error_message);
-    return this.#run(args);
+    return this.#httpCall("recover-stale-tasks", {
+      staleBefore: input.staleBefore || "",
+      maxAgeSeconds: input.maxAgeSeconds || "",
+      errorClass: input.errorClass || "",
+      errorMessage: input.errorMessage || "",
+    });
   }
 
   async completeTask(input = {}) {
     const taskId = taskPayloadID(input);
-    const requestedTaskRunId = input.taskRunId || input.task_run_id || "";
+    const requestedTaskRunId = input.taskRunId || "";
     const remembered = requestedTaskRunId
       ? this.taskRunResultsByRunId.get(String(requestedTaskRunId))
       : this.taskRunResultsByTaskId.get(String(taskId));
-    const taskRunId = requestedTaskRunId || remembered?.taskRunId || remembered?.task_run_id || remembered?.id || "";
+    const taskRunId = requestedTaskRunId || remembered?.taskRunId || remembered?.id || "";
     if (!taskId && !taskRunId) {
       throw new Error("tasks.complete requires taskId or taskRunId");
     }
-    const args = this.#baseArgs("complete-task");
-    appendStringFlag(args, "--task-id", taskId);
-    appendStringFlag(args, "--task-run-id", taskRunId);
-    appendStringFlag(args, "--reason", input.reason);
-    appendStringFlag(args, "--completion-id", input.completionId || input.completion_id);
-    appendStringFlag(args, "--lease-token", input.leaseToken || input.lease_token || remembered?.leaseToken || remembered?.lease_token);
-    appendStringFlag(args, "--logs-ref", input.logsRef || input.logs_ref || remembered?.logsRef || remembered?.logs_ref);
-    appendStringFlag(args, "--artifacts-ref", input.artifactsRef || input.artifacts_ref || remembered?.artifactsRef || remembered?.artifacts_ref);
-    appendRepeatedFlag(args, "--artifact-id", input.artifactIds || input.artifact_ids || remembered?.artifactIds || remembered?.artifact_ids);
-    return this.#run(args);
+    const params = {
+      taskId: taskId || "",
+      taskRunId: taskRunId || "",
+      reason: input.reason || "",
+      completionId: input.completionId || "",
+      leaseToken:
+        input.leaseToken || remembered?.leaseToken ||
+        pickEnv(this.env, "LOOM_TASK_RUN_LEASE_TOKEN") || pickEnv(this.env, "LOOM_RUNNER_LEASE_TOKEN"),
+      logsRef: input.logsRef || remembered?.logsRef || "",
+      artifactsRef: input.artifactsRef || remembered?.artifactsRef || "",
+      artifactIds: stringList(input.artifactIds || remembered?.artifactIds),
+    };
+    return this.#httpCall("complete-task", params);
   }
 
   async releaseTask(input = {}) {
@@ -192,67 +253,91 @@ export class FlueDriverClient {
     if (!taskId) {
       throw new Error("tasks.release requires taskId");
     }
-    const args = this.#baseArgs("release-task");
-    args.push("--task-id", String(taskId));
-    return this.#run(args);
+    const params = { taskId: String(taskId), actor: input.actor || "" };
+    return this.#httpCall("release-task", params);
   }
 
-  #epicArgs(command, input) {
-    const args = this.#baseArgs(command);
-    const epicId = input.epicId || input.epic_id || this.input.epicId || this.input.epic_id;
-    appendStringFlag(args, "--epic-id", epicId);
-    return args;
+  #epicID(input) {
+    return input.epicId || this.input.epicId || "";
   }
 
-  #baseArgs(command) {
+  async #httpCall(op, params, options = {}) {
     if (!this.driverRunId) {
       throw new Error("LOOM_DRIVER_RUN_ID is required");
     }
-    const args = ["driver", command, "--driver-run-id", this.driverRunId, "--json"];
-    appendStringFlag(args, "--workspace-key", this.workspace);
-    return args;
-  }
-
-  #run(args) {
-    return new Promise((resolve, reject) => {
-      const proc = spawn(this.command[0], this.command.slice(1).concat(args), {
-        env: driverCommandEnv(this.env),
-        stdio: ["ignore", "pipe", "pipe"],
+    if (!this.workspace) {
+      throw new Error("LOOM_DRIVER_WORKSPACE is required for the driver HTTP API");
+    }
+    if (!this.apiUrl) {
+      throw new Error("LOOM_DRIVER_API_URL is required for the driver HTTP API");
+    }
+    const url = `${this.apiUrl}/api/workspaces/${encodeURIComponent(this.workspace)}/driver/${op}`;
+    const headers = {
+      "Content-Type": "application/json",
+      "X-Loom-Driver-Run-Id": this.driverRunId,
+    };
+    setHeaderIfSet(headers, "X-Loom-Driver-Node-Id", pickEnv(this.env, "LOOM_DRIVER_NODE_ID"));
+    setHeaderIfSet(headers, "X-Loom-Driver-Lease-Id", pickEnv(this.env, "LOOM_DRIVER_LEASE_ID"));
+    setHeaderIfSet(headers, "X-Loom-Driver-Fencing-Token", pickEnv(this.env, "LOOM_DRIVER_FENCING_TOKEN"));
+    if (this.apiToken) {
+      headers.Authorization = "Bearer " + this.apiToken;
+    }
+    const timeoutMs = options.timeoutMs === undefined ? DEFAULT_HTTP_TIMEOUT_MS : options.timeoutMs;
+    const controller = timeoutMs > 0 ? new AbortController() : null;
+    const timer = controller
+      ? setTimeout(() => controller.abort(new DriverApiError(`driver op ${op} timed out after ${timeoutMs}ms`, { code: "timeout", retryable: true })), timeoutMs)
+      : null;
+    let response;
+    let text;
+    try {
+      response = await fetch(url, {
+        method: "POST",
+        headers,
+        body: JSON.stringify(compactParams(params)),
+        signal: controller ? controller.signal : undefined,
       });
-      let stdout = "";
-      let stderr = "";
-      proc.stdout.setEncoding("utf8");
-      proc.stdout.on("data", (chunk) => {
-        stdout += chunk;
-      });
-      proc.stderr.setEncoding("utf8");
-      proc.stderr.on("data", (chunk) => {
-        stderr += chunk;
-      });
-      proc.on("error", reject);
-      proc.on("close", (status) => {
-        if (status !== 0) {
-          const detail = (stderr || stdout || "").trim();
-          reject(new Error("loom " + args.join(" ") + " failed" + (detail ? ": " + detail : "")));
-          return;
+      text = await response.text();
+    } catch (err) {
+      if (err instanceof DriverApiError) {
+        throw err;
+      }
+      if (controller && controller.signal.aborted && controller.signal.reason instanceof DriverApiError) {
+        throw controller.signal.reason;
+      }
+      throw new DriverApiError(`driver op ${op} request failed: ${err?.message || err}`, { code: "unavailable", retryable: true });
+    } finally {
+      if (timer) {
+        clearTimeout(timer);
+      }
+    }
+    let parsed = null;
+    if (text && text.trim() !== "") {
+      try {
+        parsed = JSON.parse(text);
+      } catch (err) {
+        if (response.ok) {
+          throw new DriverApiError(`driver op ${op} returned invalid JSON: ${err.message}`, { code: "internal", status: response.status });
         }
-        const text = stdout.trim();
-        if (!text) {
-          resolve(null);
-          return;
-        }
-        try {
-          resolve(JSON.parse(text));
-        } catch (err) {
-          reject(err);
-        }
+      }
+    }
+    if (!response.ok) {
+      const envelope = parsed && typeof parsed.error === "object" && parsed.error !== null ? parsed.error : null;
+      const message = envelope?.message
+        || (typeof parsed?.error === "string" ? parsed.error : "")
+        || `driver op ${op} failed with HTTP ${response.status}`;
+      throw new DriverApiError(message, {
+        code: envelope?.code,
+        retryable: envelope?.retryable,
+        status: response.status,
+        details: envelope?.details,
       });
-    });
+    }
+    return parsed;
   }
 }
 
 export function createLoomDriverClient(options = {}) {
-  if (options && !("input" in options) && !("env" in options) && !("command" in options)) {
+  if (options && !("input" in options) && !("env" in options) && !("apiUrl" in options) && !("apiToken" in options)) {
     return FlueDriverClient.fromEnv({ input: options });
   }
   return FlueDriverClient.fromEnv(options);
@@ -260,51 +345,67 @@ export function createLoomDriverClient(options = {}) {
 
 export const createLoomClient = createLoomDriverClient;
 
-function execTaskCommand(env) {
-  const encoded = pickEnv(env, "LOOM_DRIVER_EXEC_TASK_CMD_JSON");
-  if (encoded) {
-    const parsed = JSON.parse(encoded);
-    if (!Array.isArray(parsed) || parsed.length === 0) {
-      throw new Error("LOOM_DRIVER_EXEC_TASK_CMD_JSON must be a non-empty string array");
+// compactParams strips empty values so the wire payload only carries what the
+// caller actually set; nested objects are compacted recursively and dropped
+// when empty.
+function compactParams(params) {
+  const out = {};
+  for (const [key, value] of Object.entries(params || {})) {
+    if (value === undefined || value === null || value === "") {
+      continue;
     }
-    return parsed.map(String);
+    if (Array.isArray(value)) {
+      if (value.length > 0) {
+        out[key] = value;
+      }
+      continue;
+    }
+    if (typeof value === "object") {
+      const nested = compactParams(value);
+      if (Object.keys(nested).length > 0) {
+        out[key] = nested;
+      }
+      continue;
+    }
+    out[key] = value;
   }
-  return [pickEnv(env, "LOOM_DRIVER_EXEC_TASK_CMD") || "loom"];
-}
-
-function driverCommandEnv(env) {
-  const out = { ...env };
-  if (out.LOOM_DRIVER_FLEET_DB_URL && !out.LOOM_FLEET_DB_URL) {
-    out.LOOM_FLEET_DB_URL = out.LOOM_DRIVER_FLEET_DB_URL;
-  }
-  if (out.LOOM_DRIVER_FLEET_DB_API_KEY && !out.LOOM_FLEET_DB_API_KEY) {
-    out.LOOM_FLEET_DB_API_KEY = out.LOOM_DRIVER_FLEET_DB_API_KEY;
-  }
-  if (out.LOOM_DRIVER_FLEET_DB_ACTOR && !out.LOOM_FLEET_DB_ACTOR) {
-    out.LOOM_FLEET_DB_ACTOR = out.LOOM_DRIVER_FLEET_DB_ACTOR;
-  }
-  delete out.LOOM_DRIVER_FLEET_DB_URL;
-  delete out.LOOM_DRIVER_FLEET_DB_API_KEY;
-  delete out.LOOM_DRIVER_FLEET_DB_ACTOR;
   return out;
 }
 
-function appendStringFlag(args, flag, value) {
-  if (value !== undefined && value !== null && String(value).trim() !== "") {
-    args.push(flag, String(value));
+function stringList(values) {
+  const list = Array.isArray(values) ? values : values ? [values] : [];
+  return list.map(String).filter((value) => value.trim() !== "");
+}
+
+function setHeaderIfSet(headers, name, value) {
+  if (value) {
+    headers[name] = value;
   }
 }
 
-function appendRepeatedFlag(args, flag, values) {
-  const list = Array.isArray(values) ? values : values ? [values] : [];
-  for (const value of list) {
-    appendStringFlag(args, flag, value);
+function stripTrailingSlash(value) {
+  return value.replace(/\/+$/, "");
+}
+
+function isTerminalTaskRunStatus(status) {
+  switch (String(status || "")) {
+    case "completed":
+    case "failed":
+    case "cancelled":
+    case "needs_review":
+      return true;
+    default:
+      return false;
   }
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function rememberTaskRunResult(client, result = {}) {
-  const runId = result.taskRunId || result.task_run_id || result.id || "";
-  const taskId = result.taskId || result.task_id || "";
+  const runId = result.taskRunId || result.id || "";
+  const taskId = result.taskId || "";
   if (runId) {
     client.taskRunResultsByRunId.set(String(runId), result);
   }
@@ -318,12 +419,12 @@ function pickEnv(env, key) {
 }
 
 function agentNameOf(input) {
-  return input.agent || input.agentName || input.agent_name || input.name || "";
+  return input.agent || input.agentName || input.name || "";
 }
 
 function taskPayloadID(input) {
   if (typeof input === "string") {
     return input;
   }
-  return input.taskId || input.task_id || input.id || "";
+  return input.taskId || input.id || "";
 }

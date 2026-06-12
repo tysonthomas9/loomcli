@@ -43,7 +43,7 @@ const (
 	HeaderDriverRunID        = "X-Loom-Driver-Run-Id"
 	HeaderDriverNodeID       = "X-Loom-Driver-Node-Id"
 	HeaderDriverLeaseID      = "X-Loom-Driver-Lease-Id"
-	HeaderDriverFencingToken = "X-Loom-Driver-Fencing-Token"
+	HeaderDriverFencingToken = "X-Loom-Driver-Fencing-Token" //nolint:gosec // header name, not a credential
 )
 
 // IssueBackendFactory builds a workspace-scoped fleet-db issue backend acting
@@ -201,6 +201,7 @@ func (m *Module) opHandlers() map[string]opHandler {
 		"deliver-lead-assignment":     m.deliverLeadAssignment,
 		"deliver-agent-message":       m.deliverAgentMessage,
 		"exec-task":                   m.execTask,
+		"task-run-get":                m.taskRunGet,
 		"active-task-runs":            m.activeTaskRuns,
 		"recover-stale-tasks":         m.recoverStaleTasks,
 		"complete-task":               m.completeTask,
@@ -418,26 +419,58 @@ func (m *Module) deliverAgentMessage(ctx context.Context, ws string, id driverId
 	return result, nil
 }
 
+// execTaskParams is the exec-task request body.
+type execTaskParams struct {
+	TaskID             string   `json:"taskId"`
+	TaskRunID          string   `json:"taskRunId"`
+	DriverStepID       string   `json:"driverStepId"`
+	WorkerProfileID    string   `json:"workerProfileId"`
+	ProviderProfile    string   `json:"providerProfile"`
+	ParentSessionID    string   `json:"parentSessionId"`
+	RunnerID           string   `json:"runnerId"`
+	LeaseToken         string   `json:"leaseToken"`
+	SupportedProviders []string `json:"supportedProviders"`
+	Capabilities       []string `json:"capabilities"`
+	SandboxPlacement   struct {
+		Provider  string `json:"provider"`
+		SandboxID string `json:"sandboxId"`
+		CWD       string `json:"cwd"`
+		RepoRef   string `json:"repoRef"`
+	} `json:"sandboxPlacement"`
+	DeferCompletion bool `json:"deferCompletion"`
+	EnqueueOnly     bool `json:"enqueueOnly"`
+}
+
+func (p execTaskParams) requestOptions(ws string, id driverIdentity, fencingToken int64) driverpkg.TaskRunRequestOptions {
+	return driverpkg.TaskRunRequestOptions{
+		WorkspaceKey:       ws,
+		DriverRunID:        id.RunID,
+		DriverStepID:       p.DriverStepID,
+		TaskRunID:          p.TaskRunID,
+		TaskID:             p.TaskID,
+		WorkerProfileID:    p.WorkerProfileID,
+		ProviderProfile:    p.ProviderProfile,
+		ParentSessionID:    p.ParentSessionID,
+		ParentNodeID:       id.NodeID,
+		ParentLeaseID:      id.LeaseID,
+		ParentFence:        fencingToken,
+		NodeID:             id.NodeID,
+		RunnerID:           p.RunnerID,
+		LeaseToken:         p.LeaseToken,
+		SupportedProviders: p.SupportedProviders,
+		Capabilities:       p.Capabilities,
+		SandboxPlacement: domain.TaskRunPlacement{
+			Provider:  p.SandboxPlacement.Provider,
+			SandboxID: p.SandboxPlacement.SandboxID,
+			CWD:       p.SandboxPlacement.CWD,
+			RepoRef:   p.SandboxPlacement.RepoRef,
+		},
+		DeferCompletion: p.DeferCompletion,
+	}
+}
+
 func (m *Module) execTask(ctx context.Context, ws string, id driverIdentity, body []byte) (any, error) {
-	params, err := decodeParams[struct {
-		TaskID             string   `json:"taskId"`
-		TaskRunID          string   `json:"taskRunId"`
-		DriverStepID       string   `json:"driverStepId"`
-		WorkerProfileID    string   `json:"workerProfileId"`
-		ProviderProfile    string   `json:"providerProfile"`
-		ParentSessionID    string   `json:"parentSessionId"`
-		RunnerID           string   `json:"runnerId"`
-		LeaseToken         string   `json:"leaseToken"`
-		SupportedProviders []string `json:"supportedProviders"`
-		Capabilities       []string `json:"capabilities"`
-		SandboxPlacement   struct {
-			Provider  string `json:"provider"`
-			SandboxID string `json:"sandboxId"`
-			CWD       string `json:"cwd"`
-			RepoRef   string `json:"repoRef"`
-		} `json:"sandboxPlacement"`
-		DeferCompletion bool `json:"deferCompletion"`
-	}](body)
+	params, err := decodeParams[execTaskParams](body)
 	if err != nil {
 		return nil, err
 	}
@@ -448,38 +481,48 @@ func (m *Module) execTask(ctx context.Context, ws string, id driverIdentity, bod
 	if err != nil {
 		return nil, err
 	}
-	outcome, err := driverpkg.RequestTaskRunWithResult(ctx, m.store, driverpkg.TaskRunRequestOptions{
-		WorkspaceKey:       ws,
-		DriverRunID:        id.RunID,
-		DriverStepID:       params.DriverStepID,
-		TaskRunID:          params.TaskRunID,
-		TaskID:             params.TaskID,
-		WorkerProfileID:    params.WorkerProfileID,
-		ProviderProfile:    params.ProviderProfile,
-		ParentSessionID:    params.ParentSessionID,
-		ParentNodeID:       id.NodeID,
-		ParentLeaseID:      id.LeaseID,
-		ParentFence:        fencingToken,
-		NodeID:             id.NodeID,
-		RunnerID:           params.RunnerID,
-		LeaseToken:         params.LeaseToken,
-		SupportedProviders: params.SupportedProviders,
-		Capabilities:       params.Capabilities,
-		SandboxPlacement: domain.TaskRunPlacement{
-			Provider:  params.SandboxPlacement.Provider,
-			SandboxID: params.SandboxPlacement.SandboxID,
-			CWD:       params.SandboxPlacement.CWD,
-			RepoRef:   params.SandboxPlacement.RepoRef,
-		},
-		DeferCompletion: params.DeferCompletion,
-	}, driverpkg.HostBridgeTaskExecutor{
+	opts := params.requestOptions(ws, id, fencingToken)
+	executor := driverpkg.HostBridgeTaskExecutor{
 		Store:        m.store,
 		WorktreePath: m.worktreePath,
-	})
+	}
+	if params.EnqueueOnly {
+		outcome, err := driverpkg.EnqueueTaskRunWithResult(ctx, m.store, opts, executor)
+		if err != nil {
+			return nil, fmt.Errorf("enqueue task: %w", err)
+		}
+		return driverpkg.TaskRunResultFromOutcome(outcome), nil
+	}
+	outcome, err := driverpkg.RequestTaskRunWithResult(ctx, m.store, opts, executor)
 	if err != nil {
 		return nil, fmt.Errorf("exec task: %w", err)
 	}
 	return driverpkg.TaskRunResultFromOutcome(outcome), nil
+}
+
+func (m *Module) taskRunGet(ctx context.Context, ws string, id driverIdentity, body []byte) (any, error) {
+	params, err := decodeParams[struct {
+		TaskRunID string `json:"taskRunId"`
+	}](body)
+	if err != nil {
+		return nil, err
+	}
+	parent, err := m.verifyParent(ctx, ws, id)
+	if err != nil {
+		return nil, err
+	}
+	taskRunID := strings.TrimSpace(params.TaskRunID)
+	if taskRunID == "" {
+		return nil, fmt.Errorf("taskRunId required: %w", domain.ErrInvalid)
+	}
+	run, err := m.store.TaskRuns().Get(ctx, ws, taskRunID)
+	if err != nil {
+		return nil, fmt.Errorf("get task run: %w", err)
+	}
+	if run.DriverRunID != parent.RunID {
+		return nil, fmt.Errorf("task run %q does not belong to driver run %q: %w", taskRunID, parent.RunID, domain.ErrNotFound)
+	}
+	return driverpkg.TaskRunResultFromDomain(run), nil
 }
 
 func (m *Module) activeTaskRuns(ctx context.Context, ws string, id driverIdentity, body []byte) (any, error) {
@@ -521,6 +564,12 @@ func (m *Module) recoverStaleTasks(ctx context.Context, ws string, id driverIden
 	if err != nil {
 		return nil, err
 	}
+	// Unlike the CLI path (already inside an authenticated process), the HTTP
+	// surface must prove run ownership before failing its task runs.
+	parent, err := m.verifyParent(ctx, ws, id)
+	if err != nil {
+		return nil, err
+	}
 	staleBefore := time.Time{}
 	if raw := strings.TrimSpace(params.StaleBefore); raw != "" {
 		parsed, err := time.Parse(time.RFC3339, raw)
@@ -533,7 +582,7 @@ func (m *Module) recoverStaleTasks(ctx context.Context, ws string, id driverIden
 	if maxAgeSeconds <= 0 {
 		maxAgeSeconds = 300
 	}
-	result, err := m.store.DriverRuns().RecoverStaleTaskRuns(ctx, ws, id.RunID, store.StaleTaskRunRecovery{
+	result, err := m.store.DriverRuns().RecoverStaleTaskRuns(ctx, ws, parent.RunID, store.StaleTaskRunRecovery{
 		StaleBefore:   staleBefore,
 		MaxAgeSeconds: maxAgeSeconds,
 		ErrorClass:    firstNonEmpty(params.ErrorClass, "stale_task_run"),

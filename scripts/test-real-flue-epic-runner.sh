@@ -140,15 +140,30 @@ export async function run(ctx) {
       supportedProviders: ["flue-local"],
       sandboxPlacement: { provider: "flue-local" },
     });
+    if (result.status === "queued" || result.status === "running") {
+      Object.assign(result, await loom.taskRuns.await({
+        taskRunId: result.taskRunId || result.id,
+        pollMs: 500,
+      }));
+    }
 
     if (result.status === "completed") {
-      await loom.tasks.complete(task.id);
+      if (result.leaseToken) {
+        await loom.tasks.complete({
+          taskId: task.id,
+          taskRunId: result.taskRunId || result.id,
+          leaseToken: result.leaseToken,
+          logsRef: result.logsRef || "",
+          artifactsRef: result.artifactsRef || "",
+          artifactIds: result.artifactIds || [],
+        });
+      }
       completed.push(task.id);
     } else {
       await loom.tasks.release(task.id);
       return loom.needsReview({
         summary: "Task failed: " + task.id,
-        taskRunId: result.id,
+        taskRunId: result.taskRunId || result.id,
         logsRef: result.logsRef || "",
         artifactsRef: result.artifactsRef || "",
       });
