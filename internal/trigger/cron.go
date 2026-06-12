@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strconv"
 	"sync"
 	"time"
@@ -226,7 +227,27 @@ func (s *CronScheduler) dispatchTick(ctx context.Context, ws string, binding *do
 	if err != nil {
 		return fmt.Errorf("dispatch cron tick for binding %q in workspace %q: %w", binding.BindingID, ws, err)
 	}
+	s.dispatchTickAwaits(ctx, ws, binding.BindingID, tickKey, payload)
 	return nil
+}
+
+// dispatchTickAwaits hands the admitted tick to the dispatch-time await
+// matcher (AW7): an await parked on "cron.tick:{bindingID}" resumes on the
+// binding's next due tick. Best-effort — the tick already dispatched durably,
+// so matcher errors are logged, never returned (the next sweep's idempotent
+// re-dispatch retries naturally while the window has not advanced past it).
+func (s *CronScheduler) dispatchTickAwaits(ctx context.Context, ws, bindingID, tickKey string, payload json.RawMessage) {
+	matcher := &AwaitMatcher{Store: s.Store}
+	if _, err := matcher.Dispatch(ctx, ws, AwaitDispatchEvent{
+		EventID:    tickKey,
+		EventType:  CronEventType,
+		SubjectRef: bindingID,
+		ActorRef:   CronActorRef,
+		Payload:    payload,
+	}); err != nil {
+		slog.Default().Warn("cron tick await dispatch failed",
+			"workspace", ws, "binding", bindingID, "tick", tickKey, "error", err)
+	}
 }
 
 // CronTickIdempotencyKey is the deterministic per-tick dedup key:

@@ -59,6 +59,7 @@ func WrapStoreWithTracing(inner store.Store) store.Store {
 		taskRuns:             &tracedTaskRunStore{inner: inner.TaskRuns()},
 		taskRunEvents:        &tracedTaskRunEventStore{inner: inner.TaskRunEvents()},
 		outbox:               &tracedOutboxStore{inner: inner.Outbox()},
+		awaits:               &tracedAwaitStore{inner: inner.Awaits()},
 		workers:              &tracedWorkerStore{inner: inner.Workers()},
 		roles:                &tracedRoleStore{inner: inner.Roles()},
 		daemon:               &tracedDaemonStore{inner: inner.Daemon()},
@@ -91,6 +92,7 @@ type tracedStore struct {
 	taskRuns             *tracedTaskRunStore
 	taskRunEvents        *tracedTaskRunEventStore
 	outbox               *tracedOutboxStore
+	awaits               *tracedAwaitStore
 	workers              *tracedWorkerStore
 	roles                *tracedRoleStore
 	daemon               *tracedDaemonStore
@@ -156,6 +158,10 @@ func (t *tracedStore) Outbox() store.OutboxStore {
 func (t *tracedStore) Workers() store.WorkerStore       { return t.workers }
 func (t *tracedStore) Roles() store.RoleStore           { return t.roles }
 func (t *tracedStore) Daemon() store.DaemonProfileStore { return t.daemon }
+
+// Awaits returns the traced await wrapper (chunk AW5): spans per call with
+// workspace / instance / run / pattern attributes.
+func (t *tracedStore) Awaits() store.AwaitStore { return t.awaits }
 
 func (t *tracedStore) Close() error {
 	if c, ok := t.inner.(io.Closer); ok {

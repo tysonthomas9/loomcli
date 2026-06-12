@@ -46,6 +46,7 @@ type Store struct {
 	taskRuns   *taskRunStore
 	taskEvents *taskRunEventStore
 	outbox     *outboxStore
+	awaits     *awaitStore
 	workers    *workerStore
 	roles      *roleStore
 	daemon     *daemonStore
@@ -99,6 +100,7 @@ func New() *Store {
 		taskRuns:   taskRuns,
 		taskEvents: newTaskRunEventStore(),
 		outbox:     newOutboxStore(),
+		awaits:     newAwaitStore(events),
 		workers:    newWorkerStore(),
 		roles:      roles,
 		daemon:     newDaemonStore(),
@@ -207,6 +209,11 @@ func (s *Store) TaskRunEvents() store.TaskRunEventStore { return s.taskEvents }
 
 // Outbox returns the OutboxStore.
 func (s *Store) Outbox() store.OutboxStore { return s.outbox }
+
+// Awaits returns the AwaitStore (chunk AW4). The await index shares the
+// trigger-event journal's lock so check-then-park is atomic with event
+// appends; see awaitStore.
+func (s *Store) Awaits() store.AwaitStore { return s.awaits }
 
 // Workers returns the WorkerStore.
 func (s *Store) Workers() store.WorkerStore { return s.workers }

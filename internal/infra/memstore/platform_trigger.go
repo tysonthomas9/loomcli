@@ -34,7 +34,10 @@ func newTriggerEventStore() *triggerEventStore {
 	}
 }
 
-var _ store.TriggerEventStore = (*triggerEventStore)(nil)
+var (
+	_ store.TriggerEventStore    = (*triggerEventStore)(nil)
+	_ store.TriggerEventAppender = (*triggerEventStore)(nil)
+)
 
 func (s *triggerEventStore) Get(_ context.Context, ws, eventID string) (*domain.TriggerEvent, error) {
 	s.mu.RLock()
@@ -66,6 +69,43 @@ func (s *triggerEventStore) List(_ context.Context, ws string, filter store.Trig
 		out = out[:filter.Limit]
 	}
 	return out, nil
+}
+
+// AppendTriggerEvent is the store.TriggerEventAppender capability: journal
+// one server-stamped event without route dispatch (the run.finished lifecycle
+// lane, AW6). Unlike create it preserves the caller's deterministic EventID
+// and is idempotent on it; the idempotency-key index is shared with the
+// dispatch lane, so a later loopback dispatch of the same emission dedups
+// against the journaled record instead of double-writing. Appends take the
+// journal mutex, so an await registration scan (platform_await.go) either
+// sees this event or parks strictly before it (RULE 2 — no lost wakeup).
+func (s *triggerEventStore) AppendTriggerEvent(_ context.Context, event *domain.TriggerEvent) (*domain.TriggerEvent, error) {
+	if event == nil || event.WorkspaceKey == "" || event.EventID == "" || event.EventType == "" {
+		return nil, fmt.Errorf("trigger event append requires workspace, event id and event type: %w", domain.ErrInvalid)
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.items[event.WorkspaceKey] == nil {
+		s.items[event.WorkspaceKey] = make(map[string]*domain.TriggerEvent)
+		s.idempo[event.WorkspaceKey] = make(map[string]string)
+	}
+	if existing, ok := s.items[event.WorkspaceKey][event.EventID]; ok {
+		out := *existing
+		return &out, nil
+	}
+	if event.IdempotencyKey != "" {
+		if existingID, ok := s.idempo[event.WorkspaceKey][event.IdempotencyKey]; ok {
+			out := *s.items[event.WorkspaceKey][existingID]
+			return &out, nil
+		}
+	}
+	stored := *event
+	s.items[event.WorkspaceKey][event.EventID] = &stored
+	if event.IdempotencyKey != "" {
+		s.idempo[event.WorkspaceKey][event.IdempotencyKey] = event.EventID
+	}
+	out := stored
+	return &out, nil
 }
 
 // create inserts the event, deduping on idempotency key. The returned bool is

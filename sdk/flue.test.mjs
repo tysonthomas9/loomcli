@@ -2,7 +2,7 @@ import { createServer } from "node:http";
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { DriverApiError, createLoomDriverClient } from "./flue.js";
+import { DriverApiError, WorkflowSuspended, createLoomDriverClient, isWorkflowSuspended } from "./flue.js";
 
 test("FlueDriverClient sends camelCase task run requests and remembers child task lease over HTTP", async () => {
   await withDriverServer(async (call) => {
@@ -638,6 +638,312 @@ test("FlueDriverClient connectors auto-increment callSeq per action and replay d
     await client.connectors.github.merge({ owner: "o", repo: "r", number: 1, expectedHeadSha: "s1", callSeq: 9 });
     await client.connectors.github.merge({ owner: "o", repo: "r", number: 1, expectedHeadSha: "s1" });
     assert.deepEqual(calls.map((call) => call.body.callSeq), [9, 1]);
+  });
+});
+
+test("FlueDriverClient events.await sends camelCase wire and derives awaitIndex from call order", async () => {
+  await withDriverServer(async (call) => {
+    if (call.url === "/api/workspaces/WS/driver/events/await") {
+      return {
+        status: "satisfied",
+        instanceKey: "run-1#await-" + call.body.awaitIndex,
+        pattern: call.body.pattern,
+        deadline: "2026-06-13T00:00:00Z",
+        event: { id: "evt-" + call.body.awaitIndex, payload: { turn: call.body.awaitIndex }, actor: "alice", occurredAt: "2026-06-12T00:00:00Z" },
+      };
+    }
+    return notFound();
+  }, async ({ apiUrl, calls }) => {
+    const client = watchTestClient(apiUrl);
+
+    const first = await client.events.await({
+      pattern: "approval:octo/hello#123@sha-1",
+      actor: ["alice", "bob"],
+      timeoutMs: 60_000,
+    });
+    assert.equal(first.status, "satisfied");
+    assert.equal(first.instanceKey, "run-1#await-1");
+    assert.deepEqual(first.event.payload, { turn: 1 });
+
+    const second = await client.events.await({
+      pattern: "slack.thread_reply:C123/1718012345.0001",
+      actor: "requester",
+      timeout: 30_000,
+    });
+    assert.equal(second.instanceKey, "run-1#await-2");
+
+    assert.equal(calls.length, 2);
+    assert.equal(calls[0].method, "POST");
+    assert.equal(calls[0].url, "/api/workspaces/WS/driver/events/await");
+    assert.equal(calls[0].headers["x-loom-driver-run-id"], "run-1");
+    assert.equal(calls[0].headers["x-loom-driver-node-id"], "node-1");
+    assert.equal(calls[0].headers["x-loom-driver-lease-id"], "lease-1");
+    assert.equal(calls[0].headers["x-loom-driver-fencing-token"], "7");
+    assert.equal(calls[0].headers.authorization, "Bearer api-token");
+    assert.deepEqual(calls[0].body, {
+      pattern: "approval:octo/hello#123@sha-1",
+      actor: ["alice", "bob"],
+      timeoutMs: 60_000,
+      awaitIndex: 1,
+    });
+    assert.deepEqual(calls[1].body, {
+      pattern: "slack.thread_reply:C123/1718012345.0001",
+      actor: ["requester"],
+      timeoutMs: 30_000,
+      awaitIndex: 2,
+    });
+    for (const call of calls) {
+      assertNoSnakeCaseKeys(call.body);
+    }
+  });
+});
+
+test("FlueDriverClient events.await replays satisfied awaits then throws the suspend sentinel", async () => {
+  // Re-entry fast-forward: awaits 1 and 2 were satisfied before the resume,
+  // await 3 parks the run again.
+  await withDriverServer(async (call) => {
+    if (call.url !== "/api/workspaces/WS/driver/events/await") {
+      return notFound();
+    }
+    if (call.body.awaitIndex <= 2) {
+      return {
+        status: "satisfied",
+        instanceKey: "run-1#await-" + call.body.awaitIndex,
+        pattern: call.body.pattern,
+        deadline: "2026-06-13T00:00:00Z",
+        event: { id: "evt-" + call.body.awaitIndex, payload: { turn: call.body.awaitIndex }, occurredAt: "2026-06-12T00:00:00Z" },
+      };
+    }
+    return { status: "suspended" };
+  }, async ({ apiUrl, calls }) => {
+    const client = watchTestClient(apiUrl);
+    const turns = [];
+    let suspendErr;
+    try {
+      for (;;) {
+        const { event } = await client.events.await({ pattern: "slack.thread_reply:C1/1.0", timeoutMs: 1000 });
+        turns.push(event.payload.turn);
+      }
+    } catch (err) {
+      suspendErr = err;
+    }
+
+    assert.deepEqual(turns, [1, 2]);
+    assert.ok(suspendErr instanceof WorkflowSuspended);
+    assert.ok(isWorkflowSuspended(suspendErr));
+    assert.equal(suspendErr.type, "workflow_suspended");
+    assert.equal(suspendErr.awaitIndex, 3);
+    assert.ok(suspendErr.message.startsWith("workflow_suspended:"), suspendErr.message);
+    assert.deepEqual(suspendErr.result, {
+      status: "suspended_awaiting_event",
+      summary: "workflow suspended awaiting event",
+    });
+    assert.deepEqual(calls.map((call) => call.body.awaitIndex), [1, 2, 3]);
+  });
+});
+
+test("FlueDriverClient awaits refuse missing pattern/timeout synchronously without consuming an index", async () => {
+  await withDriverServer(async () => ({
+    status: "satisfied",
+    instanceKey: "run-1#await-1",
+    pattern: "p:1",
+    deadline: "2026-06-13T00:00:00Z",
+    event: { id: "evt-1", occurredAt: "2026-06-12T00:00:00Z" },
+  }), async ({ apiUrl, calls }) => {
+    const client = watchTestClient(apiUrl);
+    const table = [
+      { name: "events.await no timeout", call: () => client.events.await({ pattern: "p:1" }), code: "await_timeout_required" },
+      { name: "events.await zero timeout", call: () => client.events.await({ pattern: "p:1", timeoutMs: 0 }), code: "await_timeout_required" },
+      { name: "events.await NaN timeout", call: () => client.events.await({ pattern: "p:1", timeout: "soon" }), code: "await_timeout_required" },
+      { name: "workflows.await no timeout", call: () => client.workflows.await({ childRunId: "run-c" }), code: "await_timeout_required" },
+    ];
+    for (const row of table) {
+      assert.throws(row.call, (err) => {
+        assert.ok(err instanceof DriverApiError, row.name);
+        assert.equal(err.code, row.code, row.name);
+        assert.equal(err.retryable, false, row.name);
+        return true;
+      }, row.name);
+    }
+    assert.throws(() => client.events.await({ timeoutMs: 1000 }), /events\.await requires pattern/);
+    assert.equal(calls.length, 0, "synchronous refusals must not reach the wire");
+
+    // None of the refusals consumed an await slot: the first valid await is #1.
+    const ok = await client.events.await({ pattern: "p:1", timeoutMs: 1000 });
+    assert.equal(ok.instanceKey, "run-1#await-1");
+    assert.equal(calls[0].body.awaitIndex, 1);
+  });
+});
+
+test("FlueDriverClient workflows.start derives startIndex from call order and is re-entry deterministic", async () => {
+  const handler = async (call) => {
+    if (call.url !== "/api/workspaces/WS/driver/workflows/start") {
+      return notFound();
+    }
+    return {
+      childRunId: "run-child-" + (call.body.idempotencyKey || "start-" + call.body.startIndex),
+      workflowName: call.body.workflowName,
+      status: "queued",
+      parentRunId: "run-1",
+    };
+  };
+  let firstRun;
+  const sequence = async (client) => {
+    const out = [];
+    out.push(await client.workflows.start({ workflow: "deploy", input: { env: "prod", note: "" } }));
+    out.push(await client.workflows.start({ workflow: "deploy" }));
+    out.push(await client.workflows.start({ workflow: "notify", idempotencyKey: "notify-1" }));
+    return out;
+  };
+  await withDriverServer(handler, async ({ apiUrl, calls }) => {
+    const children = await sequence(watchTestClient(apiUrl));
+    assert.deepEqual(children.map((child) => child.childRunId), [
+      "run-child-start-1",
+      "run-child-start-2",
+      "run-child-notify-1",
+    ]);
+    assert.deepEqual(calls[0].body, {
+      workflowName: "deploy",
+      startIndex: 1,
+      input: { env: "prod", note: "" },
+    });
+    assert.equal(calls[0].body.input.note, "", "child input crosses the wire verbatim, not compacted");
+    assert.deepEqual(calls[1].body, { workflowName: "deploy", startIndex: 2 });
+    assert.deepEqual(calls[2].body, { workflowName: "notify", idempotencyKey: "notify-1" });
+    assert.equal(calls[2].body.startIndex, undefined, "an explicit idempotencyKey replaces the counter");
+    for (const call of calls) {
+      assertNoSnakeCaseKeys(call.body);
+    }
+    firstRun = calls.map((call) => [call.body.startIndex, call.body.idempotencyKey]);
+  });
+
+  // Re-entry: a fresh client issuing the same starts in the same order
+  // derives the same identities, so the server replays the same children.
+  await withDriverServer(handler, async ({ apiUrl, calls }) => {
+    await sequence(watchTestClient(apiUrl));
+    assert.deepEqual(calls.map((call) => [call.body.startIndex, call.body.idempotencyKey]), firstRun);
+  });
+});
+
+test("FlueDriverClient workflows.await shares the await counter and returns the child outcome", async () => {
+  await withDriverServer(async (call) => {
+    if (call.url === "/api/workspaces/WS/driver/events/await") {
+      return {
+        status: "satisfied",
+        instanceKey: "run-1#await-" + call.body.awaitIndex,
+        pattern: call.body.pattern,
+        deadline: "2026-06-13T00:00:00Z",
+        event: { id: "evt-1", occurredAt: "2026-06-12T00:00:00Z" },
+      };
+    }
+    if (call.url === "/api/workspaces/WS/driver/workflows/await") {
+      return {
+        status: "satisfied",
+        instanceKey: "run-1#await-" + call.body.awaitIndex,
+        pattern: "run.finished:" + call.body.childRunId,
+        deadline: "2026-06-13T00:00:00Z",
+        event: { id: "evt-finish", payload: { runId: call.body.childRunId, status: "completed" }, occurredAt: "2026-06-12T00:00:00Z" },
+        child: { runId: call.body.childRunId, status: "completed", summary: "child done" },
+      };
+    }
+    return notFound();
+  }, async ({ apiUrl, calls }) => {
+    const client = watchTestClient(apiUrl);
+    await client.events.await({ pattern: "p:1", timeoutMs: 1000 });
+    const finished = await client.workflows.await({ childRunId: "run-child-1", timeoutMs: 5000 });
+
+    assert.equal(finished.status, "satisfied");
+    assert.equal(finished.child.status, "completed");
+    assert.equal(finished.child.summary, "child done");
+    assert.equal(finished.event.payload.runId, "run-child-1");
+
+    assert.equal(calls[1].url, "/api/workspaces/WS/driver/workflows/await");
+    assert.deepEqual(calls[1].body, { childRunId: "run-child-1", timeoutMs: 5000, awaitIndex: 2 });
+    assertNoSnakeCaseKeys(calls[1].body);
+  });
+});
+
+test("FlueDriverClient workflows.await throws the suspend sentinel on suspended", async () => {
+  await withDriverServer(async (call) => {
+    if (call.url === "/api/workspaces/WS/driver/workflows/await") {
+      return { status: "suspended" };
+    }
+    return notFound();
+  }, async ({ apiUrl }) => {
+    const client = watchTestClient(apiUrl);
+    await assert.rejects(
+      () => client.workflows.await({ childRunId: "run-child-1", timeoutMs: 5000 }),
+      (err) => {
+        assert.ok(err instanceof WorkflowSuspended);
+        assert.ok(isWorkflowSuspended(err));
+        assert.equal(err.awaitIndex, 1);
+        return true;
+      }
+    );
+  });
+});
+
+test("FlueDriverClient events.await surfaces structured await errors as DriverApiError", async () => {
+  const table = [
+    { name: "unscoped pattern", statusCode: 400, code: "await_pattern_unscoped" },
+    { name: "timeout above cap", statusCode: 400, code: "await_timeout_required" },
+    { name: "actor forbidden", statusCode: 403, code: "await_actor_forbidden" },
+    { name: "composition depth", statusCode: 400, code: "composition_depth_exceeded" },
+  ];
+  for (const row of table) {
+    await withDriverServer(async () => ({
+      statusCode: row.statusCode,
+      body: { error: { code: row.code, message: row.name, retryable: false } },
+    }), async ({ apiUrl }) => {
+      const client = watchTestClient(apiUrl);
+      await assert.rejects(
+        () => client.events.await({ pattern: "p:1", timeoutMs: 1000 }),
+        (err) => {
+          assert.ok(err instanceof DriverApiError, row.name);
+          assert.equal(err.code, row.code, row.name);
+          assert.equal(err.status, row.statusCode, row.name);
+          assert.equal(isWorkflowSuspended(err), false, row.name);
+          return true;
+        },
+        row.name
+      );
+    });
+  }
+});
+
+test("FlueDriverClient events.list fetches the run's awaits without consuming a slot", async () => {
+  await withDriverServer(async (call) => {
+    if (call.url === "/api/workspaces/WS/driver/events/awaits") {
+      return {
+        runId: "run-1",
+        awaits: [
+          { instanceKey: "run-1#await-1", status: "satisfied", satisfiedByEventId: "evt-1" },
+          { instanceKey: "run-1#await-2", status: "pending" },
+        ],
+      };
+    }
+    if (call.url === "/api/workspaces/WS/driver/events/await") {
+      return {
+        status: "satisfied",
+        instanceKey: "run-1#await-" + call.body.awaitIndex,
+        pattern: call.body.pattern,
+        deadline: "2026-06-13T00:00:00Z",
+        event: { id: "evt-1", occurredAt: "2026-06-12T00:00:00Z" },
+      };
+    }
+    return notFound();
+  }, async ({ apiUrl, calls }) => {
+    const client = watchTestClient(apiUrl);
+    const listing = await client.events.list();
+    assert.equal(listing.runId, "run-1");
+    assert.equal(listing.awaits.length, 2);
+    assert.equal(calls[0].method, "GET");
+    assert.equal(calls[0].url, "/api/workspaces/WS/driver/events/awaits");
+    assert.equal(calls[0].headers["x-loom-driver-run-id"], "run-1");
+
+    // Listing consumed no await slot: the next await is still #1.
+    const next = await client.events.await({ pattern: "p:1", timeoutMs: 1000 });
+    assert.equal(next.instanceKey, "run-1#await-1");
   });
 });
 

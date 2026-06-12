@@ -95,6 +95,7 @@ type Client struct {
 	taskRuns   *taskRunStore
 	taskEvents *taskRunEventStore
 	outbox     *outboxStore
+	awaits     *awaitStore
 	workers    *workerStore
 	roles      *roleStore
 	daemon     *daemonStore
@@ -146,6 +147,7 @@ func New(cfg Config) (*Client, error) {
 	c.taskRuns = &taskRunStore{client: c}
 	c.taskEvents = &taskRunEventStore{client: c}
 	c.outbox = &outboxStore{client: c}
+	c.awaits = &awaitStore{client: c}
 	c.workers = &workerStore{client: c}
 	c.roles = &roleStore{client: c}
 	c.daemon = &daemonStore{client: c}
@@ -222,6 +224,9 @@ func (c *Client) TaskRunEvents() store.TaskRunEventStore { return c.taskEvents }
 
 // Outbox returns the OutboxStore.
 func (c *Client) Outbox() store.OutboxStore { return c.outbox }
+
+// Awaits returns the AwaitStore (fleet-db await routes, chunk AW5).
+func (c *Client) Awaits() store.AwaitStore { return c.awaits }
 
 // Workers returns the WorkerStore.
 func (c *Client) Workers() store.WorkerStore { return c.workers }
@@ -355,14 +360,26 @@ func classifyHTTPError(method, path string, status int, body []byte) error {
 			return fmt.Errorf("%s: %w", prefix, domain.ErrInvalidTransition)
 		case "conflict":
 			return fmt.Errorf("%s: %w", prefix, domain.ErrConflict)
+		case "driver_run_already_resumed":
+			// Park->suspend window: the await resolved before the suspend
+			// landed — the run must continue inline, never park.
+			return fmt.Errorf("%s: %w", prefix, domain.ErrDriverRunAlreadyResumed)
 		}
 		return fmt.Errorf("%s: %w", prefix, domain.ErrAlreadyExists)
 	case http.StatusForbidden:
+		if code == "await_actor_forbidden" {
+			return fmt.Errorf("%s: %w", prefix, domain.ErrAwaitActorForbidden)
+		}
 		if strings.Contains(path, "/driver-runs/") {
 			return fmt.Errorf("%s: %w", prefix, domain.ErrNotOwner)
 		}
 		return fmt.Errorf("%s: %w", prefix, domain.ErrConflict)
 	case http.StatusBadRequest, http.StatusUnprocessableEntity:
+		// Structured await validation codes map back onto their domain
+		// sentinels (each wraps domain.ErrInvalid).
+		if sentinel := awaitErrSentinel(code); sentinel != nil {
+			return fmt.Errorf("%s: %w", prefix, sentinel)
+		}
 		return fmt.Errorf("%s: %w", prefix, domain.ErrInvalid)
 	case http.StatusGone:
 		// fleet-db heartbeat: lease exists, token is ours, but it is no

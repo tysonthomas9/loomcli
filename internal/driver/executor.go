@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -15,6 +16,7 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/store"
+	"github.com/tysonthomas9/loomcli/internal/trigger"
 )
 
 var ErrNoQueuedRun = errors.New("driver executor: no queued run")
@@ -52,6 +54,11 @@ type Executor struct {
 	// runtimes via the default NodeRunner (LOOM_DRIVER_API_URL/_TOKEN).
 	APIBaseURL string
 	APIToken   string
+	// InternalEvents, when set, is the shared C14 loopback the run.finished
+	// lifecycle emission rides (AW6) — sharing keeps the hop-depth ledger
+	// warm across emissions. Nil is fine: emission falls back to a
+	// zero-config loopback over Store.
+	InternalEvents *trigger.InternalSource
 }
 
 type ExecutionResult struct {
@@ -88,11 +95,16 @@ func (e *Executor) RunOnce(ctx context.Context) (*ExecutionResult, error) {
 	result := &ExecutionResult{Run: run, Claimed: claimed}
 	hbCtx, stopHeartbeat := context.WithCancel(ctx)
 	defer stopHeartbeat()
+	// runCtx is the runner's context: the heartbeat cancels it when it
+	// observes a cooperative cancel request (composition cascade, AW10),
+	// and the runner then reports cancelled through the normal finish.
+	runCtx, cancelRun := context.WithCancel(ctx)
+	defer cancelRun()
 	if interval := e.heartbeatInterval(); interval > 0 {
-		go heartbeatDriverRun(hbCtx, e.Store, claimed, interval)
+		go heartbeatDriverRun(hbCtx, e.Store, claimed, interval, cancelRun)
 		go heartbeatExecutorNode(hbCtx, e.Store, claimed.WorkspaceKey, nodeID, e.nodeTTL())
 	}
-	result.Final, err = e.finish(ctx, claimed, e.runClaimed(ctx, workDir, claimed))
+	result.Final, err = e.settleClaimed(ctx, claimed, e.runClaimed(runCtx, workDir, claimed))
 	if err != nil {
 		return result, err
 	}
@@ -109,7 +121,12 @@ func (e *Executor) runClaimed(ctx context.Context, workDir string, claimed *doma
 		return RunResult{Status: domain.DriverRunFailed, Summary: err.Error(), ErrorClass: "bundle_verification"}
 	}
 	runResult, runErr := runner.Run(ctx, req)
-	if runErr != nil {
+	if runErr != nil && ctx.Err() != nil {
+		// The runner context was cancelled under it (cooperative cancel
+		// request or executor shutdown): the run is cancelled, not failed —
+		// mirroring NodeRunner's own ctx-cancelled mapping.
+		runResult = RunResult{Status: domain.DriverRunCancelled, Summary: "driver run cancelled: " + runErr.Error(), ErrorClass: "driver_cancelled"}
+	} else if runErr != nil {
 		runResult = RunResult{Status: domain.DriverRunFailed, Summary: runErr.Error(), ErrorClass: "driver_runtime"}
 	} else {
 		runResult = requireExplicitTerminalRunResult(runResult)
@@ -127,7 +144,7 @@ func (e *Executor) RecoverStaleOnce(ctx context.Context) (*store.StaleDriverRunR
 		Summary:       "driver executor heartbeat expired",
 	}
 	if e.WorkspaceKey != "" {
-		return e.Store.DriverRuns().RecoverStale(ctx, e.WorkspaceKey, recover)
+		return e.recoverStaleWorkspace(ctx, e.WorkspaceKey, recover)
 	}
 	workspaces, err := e.Store.Workspaces().List(ctx)
 	if err != nil {
@@ -138,7 +155,7 @@ func (e *Executor) RecoverStaleOnce(ctx context.Context) (*store.StaleDriverRunR
 		if ws == nil {
 			continue
 		}
-		result, err := e.Store.DriverRuns().RecoverStale(ctx, ws.Key, recover)
+		result, err := e.recoverStaleWorkspace(ctx, ws.Key, recover)
 		if err != nil {
 			return nil, err
 		}
@@ -155,6 +172,28 @@ func (e *Executor) RecoverStaleOnce(ctx context.Context) (*store.StaleDriverRunR
 		out.SkippedFreshRunIDs = append(out.SkippedFreshRunIDs, result.SkippedFreshRunIDs...)
 	}
 	return out, nil
+}
+
+// recoverStaleWorkspace runs one workspace's stale-run sweep and publishes
+// run.finished for every recovered run (AW6): a stale-failed run is a
+// terminal transition like any other, so a parent awaiting the child must
+// learn about it. The store stamps error class stale_driver_run by default.
+func (e *Executor) recoverStaleWorkspace(ctx context.Context, ws string, recover store.StaleDriverRunRecovery) (*store.StaleDriverRunRecoveryResult, error) {
+	result, err := e.Store.DriverRuns().RecoverStale(ctx, ws, recover)
+	if err != nil {
+		return nil, err
+	}
+	for _, runID := range result.RecoveredRunIDs {
+		run, getErr := e.Store.DriverRuns().Get(ctx, ws, runID)
+		if getErr != nil {
+			slog.WarnContext(ctx, "load recovered driver run for run.finished emission failed",
+				"workspace", ws, "runID", runID, "error", getErr)
+			continue
+		}
+		emitRunFinishedEvent(ctx, e.Store, e.InternalEvents, run)
+		cascadeCancelChildren(ctx, e.Store, e.InternalEvents, run, 0)
+	}
+	return result, nil
 }
 
 func (e *Executor) nextQueuedRun(ctx context.Context) (*domain.DriverRun, error) {
@@ -208,6 +247,33 @@ func nextQueuedRunInWorkspace(ctx context.Context, s store.Store, ws string) (*d
 	return runs[0], nil
 }
 
+// settleClaimed finishes a terminal runner result, or acknowledges a
+// suspended one (AW11): an await op already parked the run server-side and
+// released the slot, so the executor must NOT Finish — it re-reads the run,
+// which may legitimately already be queued or running again (park->suspend
+// window tolerance: the resolver can resume before the runner exits). A
+// runner that reports suspended while the run is still running under OUR
+// lease lied (no await actually parked it); it is finished failed so the
+// slot does not leak to the stale sweeper.
+func (e *Executor) settleClaimed(ctx context.Context, claimed *domain.DriverRun, result RunResult) (*domain.DriverRun, error) {
+	if result.Status != domain.DriverRunSuspendedAwaitingEvent {
+		return e.finish(ctx, claimed, result)
+	}
+	run, err := e.Store.DriverRuns().Get(ctx, claimed.WorkspaceKey, claimed.RunID)
+	if err != nil {
+		return nil, fmt.Errorf("read suspended driver run: %w", err)
+	}
+	if run.Status == domain.DriverRunRunning && run.NodeID == claimed.NodeID && run.LeaseID == claimed.LeaseID {
+		return e.finish(ctx, claimed, RunResult{
+			Status:     domain.DriverRunFailed,
+			Summary:    "driver reported suspended but no await parked the run",
+			ErrorClass: "invalid_driver_result",
+			Output:     result.Output,
+		})
+	}
+	return run, nil
+}
+
 func (e *Executor) finish(ctx context.Context, claimed *domain.DriverRun, result RunResult) (*domain.DriverRun, error) {
 	if strings.TrimSpace(result.Summary) == "" {
 		result.Summary = string(result.Status)
@@ -222,9 +288,48 @@ func (e *Executor) finish(ctx context.Context, claimed *domain.DriverRun, result
 		Output:       result.Output,
 	})
 	if err != nil {
+		if settled, ok := e.settleDisownedFinish(ctx, claimed, err); ok {
+			return settled, nil
+		}
 		return nil, fmt.Errorf("finish driver run: %w", err)
 	}
+	// Every server-side terminal transition publishes run.finished (AW6):
+	// completed, failed, needs_review and cancelled all land here (a
+	// cancelled runner reports DriverRunCancelled through the same finish).
+	emitRunFinishedEvent(ctx, e.Store, e.InternalEvents, final)
+	// Composition cascade (AW10): a terminal parent cancels its queued
+	// children and cancel-requests its running ones.
+	cascadeCancelChildren(ctx, e.Store, e.InternalEvents, final, 0)
 	return final, nil
+}
+
+// settleDisownedFinish tolerates the one legitimate way a finish can lose
+// ownership mid-run: an events/await op parked the run server-side
+// (releasing the slot and clearing the owner triple) but the workflow
+// runtime distorted the suspension signal into a terminal-looking result —
+// e.g. a framework that serializes the SDK's WorkflowSuspended sentinel into
+// a generic internal error, so the launcher reports failed instead of
+// suspended (observed with the real Flue runtime, AW12). The server-side
+// suspension is authoritative: acknowledge it like settleClaimed does for a
+// clean suspended report. A run already resolved and re-queued is the same
+// accepted park->suspend window. Anything else (zombie lease, stale
+// recovery) stays an error.
+func (e *Executor) settleDisownedFinish(ctx context.Context, claimed *domain.DriverRun, finishErr error) (*domain.DriverRun, bool) {
+	if !errors.Is(finishErr, domain.ErrNotOwner) {
+		return nil, false
+	}
+	run, err := e.Store.DriverRuns().Get(ctx, claimed.WorkspaceKey, claimed.RunID)
+	if err != nil {
+		return nil, false
+	}
+	suspended := run.Status == domain.DriverRunSuspendedAwaitingEvent
+	requeued := run.Status == domain.DriverRunQueued && run.ResumeSourceEventID != ""
+	if !suspended && !requeued {
+		return nil, false
+	}
+	slog.WarnContext(ctx, "driver run finish superseded by server-side await suspension; acknowledging parked run",
+		"runID", claimed.RunID, "status", string(run.Status))
+	return run, true
 }
 
 func (e *Executor) resolveWorkDir() (string, error) {
@@ -352,7 +457,11 @@ func (e *Executor) nodeTTL() time.Duration {
 	return ttl
 }
 
-func heartbeatDriverRun(ctx context.Context, s store.Store, claimed *domain.DriverRun, interval time.Duration) {
+// heartbeatDriverRun renews the run lease and observes cooperative cancel
+// requests (composition cascade, AW10): a heartbeat that comes back with
+// CancelRequestedAt set fires onCancelRequested, canceling the runner's
+// context so the run terminalizes as cancelled through the normal finish.
+func heartbeatDriverRun(ctx context.Context, s store.Store, claimed *domain.DriverRun, interval time.Duration, onCancelRequested func()) {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 	for {
@@ -360,7 +469,10 @@ func heartbeatDriverRun(ctx context.Context, s store.Store, claimed *domain.Driv
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			_, _ = s.DriverRuns().Heartbeat(ctx, claimed.WorkspaceKey, claimed.RunID, claimed.NodeID, claimed.LeaseID, claimed.FencingToken)
+			run, err := s.DriverRuns().Heartbeat(ctx, claimed.WorkspaceKey, claimed.RunID, claimed.NodeID, claimed.LeaseID, claimed.FencingToken)
+			if err == nil && run != nil && run.CancelRequestedAt != nil && onCancelRequested != nil {
+				onCancelRequested()
+			}
 		}
 	}
 }
@@ -636,6 +748,12 @@ func requireExplicitTerminalRunResult(result RunResult) RunResult {
 	if result.Status.IsTerminal() {
 		return result
 	}
+	if result.Status == domain.DriverRunSuspendedAwaitingEvent {
+		// A suspended report is the runner's clean exit after an await op
+		// parked the run server-side (AW9/AW11): not a terminal result and
+		// not an error — settleClaimed acknowledges it without a Finish.
+		return result
+	}
 	detail := "driver result missing terminal status"
 	if result.Status != "" {
 		detail = fmt.Sprintf("driver result status %q is not terminal", result.Status)
@@ -767,6 +885,25 @@ function finish(result) {
   try { child.disconnect(); } catch {}
 }
 
+// Suspension (AW11): an await op parked the run server-side; the workflow
+// signals it by letting the SDK's WorkflowSuspended sentinel propagate
+// (recognized by type/name or the 'workflow_suspended:' message prefix) or
+// by returning a suspended-status result. Either way the launcher exits
+// cleanly with the suspended shape — the executor skips Finish and the
+// resumed run re-runs from the top.
+const suspendedShape = { status: 'suspended_awaiting_event', summary: 'workflow suspended awaiting event' };
+
+function isSuspendedResult(result) {
+  const status = String((result && result.status) || '');
+  return status === 'suspended' || status === 'suspended_awaiting_event';
+}
+
+function isSuspendedError(error) {
+  const type = String((error && (error.type || error.name)) || '');
+  if (type === 'workflow_suspended' || type === 'WorkflowSuspended') return true;
+  return String((error && error.message) || '').startsWith('workflow_suspended:');
+}
+
 child.on('message', (message) => {
   if (!message || typeof message !== 'object') return;
   if (message.type === 'ready' && !invoked) {
@@ -775,11 +912,16 @@ child.on('message', (message) => {
     return;
   }
   if (message.type === 'result') {
-    finish(message.result || {});
+    const result = message.result || {};
+    finish(isSuspendedResult(result) ? suspendedShape : result);
     return;
   }
   if (message.type === 'error') {
     const error = message.error || {};
+    if (isSuspendedError(error)) {
+      finish(suspendedShape);
+      return;
+    }
     finish({
       status: 'failed',
       summary: error.message || error.details || 'Flue workflow failed',

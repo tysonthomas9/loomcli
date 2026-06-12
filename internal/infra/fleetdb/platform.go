@@ -250,10 +250,6 @@ func (s *triggerBindingStore) ResolveWebhookSecret(ctx context.Context, ws, bind
 	return out.WebhookSecret, nil
 }
 
-type driverRunStore struct{ client *Client }
-
-var _ store.DriverRunStore = (*driverRunStore)(nil)
-
 func (s *driverRunStore) Create(ctx context.Context, in store.DriverRunCreate) (*domain.DriverRun, error) {
 	body := map[string]any{
 		"run_id":            in.RunID,
@@ -263,6 +259,7 @@ func (s *driverRunStore) Create(ctx context.Context, in store.DriverRunCreate) (
 		"source_kind":       in.SourceKind,
 		"source_ref":        in.SourceRef,
 		"epic_id":           in.EpicID,
+		"parent_run_id":     in.ParentRunID,
 		"idempotency_key":   in.IdempotencyKey,
 		"payload":           in.Payload,
 	}

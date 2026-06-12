@@ -43,6 +43,7 @@ type Store interface {
 	TaskRuns() TaskRunStore
 	TaskRunEvents() TaskRunEventStore
 	Outbox() OutboxStore
+	Awaits() AwaitStore
 	Connectors() ConnectorStore
 	ConnectorGrants() ConnectorGrantStore
 	ConnectorCalls() ConnectorAuditStore

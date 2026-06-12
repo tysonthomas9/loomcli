@@ -21,6 +21,34 @@ export class DriverApiError extends Error {
   }
 }
 
+// WorkflowSuspended is the suspend sentinel thrown by loom.events.await and
+// loom.workflows.await when the server parked the run (await registered, no
+// matching event yet). It is NOT a failure: the runner recognizes it (by
+// .type/.name, or by the "workflow_suspended:" message prefix when only the
+// message survives serialization) and exits cleanly with a suspended
+// completion shape — no loom.completed call. Resume re-runs the workflow
+// from the top; the same await call then replays its recorded event inline.
+// Never swallow it: a catch block around an await must rethrow when
+// isWorkflowSuspended(err) is true (or `return err.result`).
+export class WorkflowSuspended extends Error {
+  constructor(awaitIndex) {
+    super(`workflow_suspended: await #${awaitIndex} parked the run; exiting until the event arrives`);
+    this.name = "WorkflowSuspended";
+    this.type = "workflow_suspended";
+    this.awaitIndex = awaitIndex;
+    // result is the suspended completion shape for harnesses that prefer
+    // `return err.result` over letting the sentinel propagate.
+    this.result = Object.freeze({
+      status: "suspended_awaiting_event",
+      summary: "workflow suspended awaiting event",
+    });
+  }
+}
+
+export function isWorkflowSuspended(err) {
+  return Boolean(err) && (err.type === "workflow_suspended" || err.name === "WorkflowSuspended");
+}
+
 export class FlueDriverClient {
   static fromEnv(options = {}) {
     return new FlueDriverClient({
@@ -66,6 +94,16 @@ export class FlueDriverClient {
     });
     this.connectorCallSeqs = new Map();
     this.connectors = buildConnectorsNamespace(this);
+    this.awaitSeq = 0;
+    this.workflowStartSeq = 0;
+    this.events = Object.freeze({
+      await: (input = {}) => this.awaitEvent(input),
+      list: (input = {}) => this.listAwaits(input),
+    });
+    this.workflows = Object.freeze({
+      start: (input = {}) => this.startWorkflow(input),
+      await: (input = {}) => this.awaitChildWorkflow(input),
+    });
   }
 
   completed(input = {}) {
@@ -386,6 +424,127 @@ export class FlueDriverClient {
     return next;
   }
 
+  // awaitEvent (loom.events.await) registers the run's next await on an
+  // EXACT rendered subject key (no glob) and either returns the recorded
+  // event inline — {status:"satisfied"|"timed_out", instanceKey, pattern,
+  // deadline, event:{id,payload,actor,occurredAt}} — or throws the
+  // WorkflowSuspended sentinel once the server parked the run. A timed-out
+  // await returns normally with the synthetic timeout event: branch on
+  // status, do not expect a throw.
+  //
+  // DETERMINISM (RULE 3): awaitIndex derives from CALL ORDER via a
+  // per-process monotonic counter. Resume re-runs the workflow from the
+  // top, so the nth events.await/workflows.await call always maps to
+  // runId#await-{n} and replays its recorded event (multi-turn loops
+  // fast-forward through already-consumed turns this way). Awaits must
+  // NEVER be conditionally skipped or reordered across re-entries — the
+  // same determinism rule as deterministic task run ids and connector
+  // callSeq.
+  //
+  // FRESHNESS (vet A2): state observed before a satisfied await may be
+  // arbitrarily stale by the time it returns (a suspend can last days).
+  // Re-run non-memoized freshness checks after every await before acting:
+  //   const { event } = await loom.events.await({
+  //     pattern: "approval:octo/hello#123@" + headSha,
+  //     actor: eligibleApprovers, timeoutMs: 7 * 24 * 3600e3,
+  //   });
+  //   const pr = await loom.connectors.github.readPullRequest({ ... });
+  //   if (pr.body.head.sha !== headSha) return loom.failed({ summary: "stale" });
+  // Slack-thread flow: pattern "slack.thread_reply:C123/1718012345.0001",
+  // actor: requester.
+  awaitEvent(input = {}) {
+    const pattern = String(input.pattern || "").trim();
+    if (!pattern) {
+      throw new Error('events.await requires pattern (the fully rendered subject key, e.g. "approval:owner/repo#123@sha")');
+    }
+    // Validation throws SYNCHRONOUSLY (before the index is consumed and
+    // before any network I/O), matching the connector refusal convention.
+    const timeoutMs = requiredAwaitTimeoutMs(input, "events.await");
+    const params = {
+      pattern,
+      actor: stringList(input.actor),
+      timeoutMs,
+      awaitIndex: this.#nextAwaitIndex(input),
+    };
+    return this.#postAwait("events/await", params);
+  }
+
+  // listAwaits (loom.events.list) returns {runId, awaits:[...]} — terminal
+  // awaits with their recorded events plus pending rows, in index order —
+  // for rebuilding context on re-entry without consuming await slots.
+  async listAwaits(_input = {}) {
+    return this.#httpCall("events/awaits", undefined, { method: "GET" });
+  }
+
+  // startWorkflow (loom.workflows.start) creates the deterministic child
+  // run: identity is keyed by idempotencyKey when given, else by a
+  // per-process 1-based start counter (the same call-order determinism as
+  // awaitIndex), so a re-entered parent re-issuing the same start gets the
+  // same childRunId back, never a duplicate. The child does NOT inherit the
+  // parent's epicId. Returns {childRunId, workflowName, status, parentRunId}.
+  startWorkflow(input = {}) {
+    const workflowName = String(input.workflow || input.workflowName || "").trim();
+    if (!workflowName) {
+      throw new Error("workflows.start requires workflow");
+    }
+    const params = { workflowName, idempotencyKey: String(input.idempotencyKey || "").trim() };
+    if (!params.idempotencyKey) {
+      params.startIndex = this.#nextWorkflowStartIndex(input);
+    }
+    if (input.input !== undefined && input.input !== null) {
+      params.input = input.input;
+    }
+    // rawKeys: the child's input payload crosses the wire verbatim — the
+    // usual empty-value compaction must not rewrite user data.
+    return this.#httpCall("workflows/start", params, { rawKeys: ["input"] });
+  }
+
+  // awaitChildWorkflow (loom.workflows.await) awaits the child's
+  // run.finished event through the normal await machinery — it consumes the
+  // SAME awaitIndex counter as events.await (RULE 3 applies). Satisfied and
+  // timed_out responses additionally carry child:{runId,status,summary,
+  // errorClass} (the fresher read; event.payload holds the journaled
+  // run-finished payload). Suspension throws WorkflowSuspended like
+  // events.await.
+  awaitChildWorkflow(input = {}) {
+    const childRunId = String(input.childRunId || input.runId || "").trim();
+    if (!childRunId) {
+      throw new Error("workflows.await requires childRunId");
+    }
+    const timeoutMs = requiredAwaitTimeoutMs(input, "workflows.await");
+    const params = {
+      childRunId,
+      timeoutMs,
+      awaitIndex: this.#nextAwaitIndex(input),
+    };
+    return this.#postAwait("workflows/await", params);
+  }
+
+  // #postAwait posts one await op and converts a suspended response into the
+  // WorkflowSuspended sentinel.
+  async #postAwait(op, params) {
+    return throwIfSuspended(await this.#httpCall(op, params), params.awaitIndex);
+  }
+
+  // #nextAwaitIndex consumes the run-local await ordinal (1-based, call
+  // order). An explicit awaitIndex overrides without advancing the counter,
+  // mirroring connector callSeq.
+  #nextAwaitIndex(input) {
+    if (input.awaitIndex !== undefined && input.awaitIndex !== null && input.awaitIndex !== "") {
+      return Number(input.awaitIndex);
+    }
+    this.awaitSeq += 1;
+    return this.awaitSeq;
+  }
+
+  #nextWorkflowStartIndex(input) {
+    if (input.startIndex !== undefined && input.startIndex !== null && input.startIndex !== "") {
+      return Number(input.startIndex);
+    }
+    this.workflowStartSeq += 1;
+    return this.workflowStartSeq;
+  }
+
   #epicID(input) {
     return input.epicId || this.input.epicId || "";
   }
@@ -418,8 +577,21 @@ export class FlueDriverClient {
   async #httpCall(op, params, options = {}) {
     this.#requireHttpConfig();
     const url = `${this.apiUrl}/api/workspaces/${encodeURIComponent(this.workspace)}/driver/${op}`;
+    const method = options.method || "POST";
     const headers = this.#identityHeaders();
-    headers["Content-Type"] = "application/json";
+    let requestBody;
+    if (method !== "GET") {
+      headers["Content-Type"] = "application/json";
+      const compacted = compactParams(params);
+      // rawKeys bypass compaction for keys whose values are caller data
+      // (e.g. a child workflow's input payload) rather than wire params.
+      for (const key of options.rawKeys || []) {
+        if (params && params[key] !== undefined && params[key] !== null) {
+          compacted[key] = params[key];
+        }
+      }
+      requestBody = JSON.stringify(compacted);
+    }
     const timeoutMs = options.timeoutMs === undefined ? DEFAULT_HTTP_TIMEOUT_MS : options.timeoutMs;
     const controller = timeoutMs > 0 ? new AbortController() : null;
     const timer = controller
@@ -429,9 +601,9 @@ export class FlueDriverClient {
     let text;
     try {
       response = await fetch(url, {
-        method: "POST",
+        method,
         headers,
-        body: JSON.stringify(compactParams(params)),
+        body: requestBody,
         signal: controller ? controller.signal : undefined,
       });
       text = await response.text();
@@ -604,6 +776,33 @@ function compactParams(params) {
     out[key] = value;
   }
   return out;
+}
+
+// requiredAwaitTimeoutMs surfaces RULE 5 at the API the developer touches:
+// every await must carry a positive bounded timeout (milliseconds; the
+// server additionally caps it). Thrown SYNCHRONOUSLY — before any
+// awaitIndex is consumed and before any network I/O — matching the
+// connector precondition refusal convention.
+function requiredAwaitTimeoutMs(input, op) {
+  const raw = input.timeoutMs ?? input.timeout;
+  const ms = Number(raw);
+  if (raw === undefined || raw === null || raw === "" || !Number.isFinite(ms) || ms <= 0) {
+    throw new DriverApiError(
+      op + " requires a positive timeoutMs (RULE 5: every await carries a bounded timeout; on expiry the run resumes with a timeout event)",
+      { code: "await_timeout_required", retryable: false },
+    );
+  }
+  return Math.floor(ms);
+}
+
+// throwIfSuspended converts the server's {status:"suspended"} await response
+// into the WorkflowSuspended sentinel; satisfied / timed_out responses pass
+// through with the recorded event inline.
+function throwIfSuspended(response, awaitIndex) {
+  if (response && response.status === "suspended") {
+    throw new WorkflowSuspended(awaitIndex);
+  }
+  return response;
 }
 
 function stringList(values) {

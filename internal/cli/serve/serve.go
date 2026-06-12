@@ -224,6 +224,7 @@ func runServe(cmd *cobra.Command, args []string) {
 	startOutboxDispatcher(ctx, storeHandle.Store)
 	startTriggerCronScheduler(ctx, storeHandle.Store)
 	startTriggerDeliverySweeper(ctx, storeHandle.Store)
+	startAwaitTimeoutSweeper(ctx, storeHandle.Store)
 
 	issueBackendFn := cli.WorkspaceAwareIssueBackendForURL(storeHandle.URL(), fleetState.clientCfg.Actor)
 	monitorDefaultWorkspace := resolveMonitorCollectorWorkspace(storeHandle.Store, fleetState.clientCfg.Workspace)
@@ -473,6 +474,49 @@ func startTriggerDeliverySweeper(ctx context.Context, st store.Store) {
 				slog.Error("trigger delivery sweeper failed", "err", err)
 			} else if result != nil && result.Dispatched+result.Rescheduled+result.Exhausted > 0 {
 				slog.Info("trigger delivery sweeper pass", "dispatched", result.Dispatched, "rescheduled", result.Rescheduled, "exhausted", result.Exhausted)
+			}
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+			}
+		}
+	}()
+}
+
+// startAwaitTimeoutSweeper launches the always-on await deadline sweeper
+// (RULE 5 enforcement, AW8): past-deadline await instances are resolved with
+// a synthetic timeout event and their runs re-queued onto the workflow's
+// timeout arm — the sweeper never terminalizes a run itself. Like the
+// delivery sweeper it is NOT gated behind LOOM_DRIVER_EXECUTOR — await
+// expiry is server policy. LOOM_AWAIT_SWEEP_INTERVAL tunes the interval in
+// seconds (default 30, capped at one hour); LOOM_AWAIT_SWEEP_BATCH the
+// per-workspace ListDueAwaitDeadlines page (default 50, capped at 500).
+func startAwaitTimeoutSweeper(ctx context.Context, st store.Store) {
+	if st == nil {
+		return
+	}
+	const (
+		envLoomAwaitSweepInterval = "LOOM_AWAIT_SWEEP_INTERVAL"
+		envLoomAwaitSweepBatch    = "LOOM_AWAIT_SWEEP_BATCH"
+	)
+	sweeper := &driverexecutor.AwaitTimeoutSweeper{
+		Store:        st,
+		WorkspaceKey: os.Getenv(bootstrap.EnvWorkspace),
+		BatchLimit:   boundedIntEnv(envLoomAwaitSweepBatch, driverexecutor.DefaultAwaitTimeoutSweepBatch, 500),
+	}
+	interval := time.Duration(boundedIntEnv(envLoomAwaitSweepInterval, 30, 3600)) * time.Second
+	slog.Info("Await timeout sweeper enabled", "workspace", sweeper.WorkspaceKey, "interval", interval, "batch", sweeper.BatchLimit)
+	go func() {
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		for {
+			if result, err := sweeper.RunOnce(ctx); err != nil && !errors.Is(err, context.Canceled) {
+				slog.Error("await timeout sweeper failed", "err", err)
+			} else if result != nil && result.TimedOut+result.ResumeDeferred > 0 {
+				slog.Info("await timeout sweeper resolved due awaits",
+					"timed_out", result.TimedOut, "resume_deferred", result.ResumeDeferred,
+					"instance_keys", result.TimedOutInstanceKeys)
 			}
 			select {
 			case <-ctx.Done():

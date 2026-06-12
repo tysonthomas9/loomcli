@@ -8,6 +8,8 @@ package cmdstore
 
 import (
 	"context"
+	"encoding/json"
+	"time"
 
 	"go.opentelemetry.io/otel/attribute"
 
@@ -341,6 +343,86 @@ func (t *tracedDriverRunStore) RecoverStaleTaskRuns(ctx context.Context, ws, run
 	}
 	finish(span, err)
 	return out, err
+}
+
+func (t *tracedDriverRunStore) Suspend(ctx context.Context, ws, runID, nodeID, leaseID string, fencingToken int64, awaitInstanceKey string) (*domain.DriverRun, error) {
+	return traced(ctx, "DriverRuns", "Suspend", func(ctx context.Context) (*domain.DriverRun, error) {
+		return t.inner.Suspend(ctx, ws, runID, nodeID, leaseID, fencingToken, awaitInstanceKey)
+	},
+		attribute.String("loom.workspace", ws),
+		attribute.String("loom.driver_run", runID),
+		attribute.String("loom.await_instance", awaitInstanceKey),
+	)
+}
+
+func (t *tracedDriverRunStore) ResumeAwaiting(ctx context.Context, ws, runID, awaitInstanceKey, resumeSourceEventID string) (*domain.DriverRun, error) {
+	return traced(ctx, "DriverRuns", "ResumeAwaiting", func(ctx context.Context) (*domain.DriverRun, error) {
+		return t.inner.ResumeAwaiting(ctx, ws, runID, awaitInstanceKey, resumeSourceEventID)
+	},
+		attribute.String("loom.workspace", ws),
+		attribute.String("loom.driver_run", runID),
+		attribute.String("loom.await_instance", awaitInstanceKey),
+		attribute.String("loom.event", resumeSourceEventID),
+	)
+}
+
+// --- AwaitStore ---
+
+type tracedAwaitStore struct{ inner store.AwaitStore }
+
+func (t *tracedAwaitStore) RegisterAwaitAndCheck(ctx context.Context, ws string, in store.AwaitRegistration) (*store.AwaitResult, error) {
+	ctx, span := startStoreSpan(ctx, "Awaits", "RegisterAwaitAndCheck",
+		attribute.String("loom.workspace", ws),
+		attribute.String("loom.await_instance", in.InstanceKey),
+		attribute.String("loom.driver_run", in.RunID),
+		attribute.String("loom.await_pattern", in.Pattern),
+	)
+	out, err := t.inner.RegisterAwaitAndCheck(ctx, ws, in)
+	if err == nil && out != nil {
+		span.SetAttributes(attribute.Bool("loom.await_satisfied", out.Satisfied))
+	}
+	finish(span, err)
+	return out, err
+}
+
+func (t *tracedAwaitStore) ResolveAwait(ctx context.Context, ws, instanceKey, eventID string, payload json.RawMessage, actor string) (*store.AwaitResolution, error) {
+	ctx, span := startStoreSpan(ctx, "Awaits", "ResolveAwait",
+		attribute.String("loom.workspace", ws),
+		attribute.String("loom.await_instance", instanceKey),
+		attribute.String("loom.event", eventID),
+	)
+	out, err := t.inner.ResolveAwait(ctx, ws, instanceKey, eventID, payload, actor)
+	if err == nil && out != nil {
+		span.SetAttributes(attribute.Bool("loom.await_resume", out.Resume))
+	}
+	finish(span, err)
+	return out, err
+}
+
+func (t *tracedAwaitStore) ListAwaitsByPattern(ctx context.Context, ws, pattern string) ([]*domain.AwaitInstance, error) {
+	return tracedList(ctx, "Awaits", "ListAwaitsByPattern", func(ctx context.Context) ([]*domain.AwaitInstance, error) {
+		return t.inner.ListAwaitsByPattern(ctx, ws, pattern)
+	},
+		attribute.String("loom.workspace", ws),
+		attribute.String("loom.await_pattern", pattern),
+	)
+}
+
+func (t *tracedAwaitStore) ListDueAwaitDeadlines(ctx context.Context, ws string, before time.Time, limit int) ([]*domain.AwaitInstance, error) {
+	return tracedList(ctx, "Awaits", "ListDueAwaitDeadlines", func(ctx context.Context) ([]*domain.AwaitInstance, error) {
+		return t.inner.ListDueAwaitDeadlines(ctx, ws, before, limit)
+	},
+		attribute.String("loom.workspace", ws),
+	)
+}
+
+func (t *tracedAwaitStore) GetSatisfiedAwait(ctx context.Context, ws, instanceKey string) (*domain.AwaitInstance, error) {
+	return traced(ctx, "Awaits", "GetSatisfiedAwait", func(ctx context.Context) (*domain.AwaitInstance, error) {
+		return t.inner.GetSatisfiedAwait(ctx, ws, instanceKey)
+	},
+		attribute.String("loom.workspace", ws),
+		attribute.String("loom.await_instance", instanceKey),
+	)
 }
 
 // --- DriverStepStore ---

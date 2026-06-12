@@ -166,6 +166,124 @@ export interface FlueConnectorsNamespace {
   dispatch(input: FlueConnectorDispatchInput): Promise<FlueConnectorCallResult>;
 }
 
+/**
+ * Input for loom.events.await. timeoutMs (or its alias timeout) is REQUIRED
+ * (RULE 5) — the call throws synchronously without it, before any network
+ * I/O and before an awaitIndex is consumed.
+ *
+ * DETERMINISM (RULE 3): awaitIndex derives from CALL ORDER. Resume re-runs
+ * the workflow from the top, so the nth events.await/workflows.await call
+ * always maps to runId#await-{n} and replays its recorded event. Awaits
+ * must NEVER be conditionally skipped or reordered across re-entries (same
+ * rule as deterministic task run ids and connector callSeq).
+ */
+export interface FlueAwaitEventInput {
+  /**
+   * Fully rendered subject key, EXACT equality (no glob), e.g.
+   * "approval:owner/repo#123@sha" or
+   * "slack.thread_reply:C123/1718012345.0001".
+   */
+  pattern: string;
+  /** Optional eligible-resolver allow-list (single actor or array). */
+  actor?: string | string[];
+  /**
+   * REQUIRED await timeout in milliseconds (server-capped). On expiry the
+   * run resumes with a synthetic timeout event and the await returns
+   * status "timed_out" — it does not throw.
+   */
+  timeoutMs?: number;
+  /** Alias for timeoutMs. */
+  timeout?: number;
+  /** Explicit 1-based ordinal; overrides without advancing the counter. */
+  awaitIndex?: number;
+}
+
+/** The recorded resolving event, replayed inline on every re-entry. */
+export interface FlueAwaitWireEvent {
+  id: string;
+  /** Size-capped resume payload persisted on the satisfied await row. */
+  payload?: unknown;
+  /** Verified resolving actor (absent on synthetic timeout events). */
+  actor?: string;
+  occurredAt: string;
+}
+
+/**
+ * Resolved await. FRESHNESS (vet A2): state observed before the await may
+ * be arbitrarily stale by the time it returns (a suspend can last days) —
+ * re-run non-memoized freshness checks (e.g. the PR head sha) after every
+ * await before acting on the event.
+ */
+export interface FlueAwaitEventResult {
+  status: "satisfied" | "timed_out";
+  instanceKey: string;
+  pattern: string;
+  deadline: string;
+  event: FlueAwaitWireEvent;
+}
+
+export interface FlueAwaitListResult {
+  runId: string;
+  awaits: Record<string, unknown>[];
+}
+
+export interface FlueWorkflowStartInput {
+  /** Registered workflow (driver) name; the active passed version is pinned. */
+  workflow?: string;
+  /** Alias for workflow. */
+  workflowName?: string;
+  /** Child input payload, passed verbatim (not compacted). */
+  input?: unknown;
+  /**
+   * Explicit child identity key. Omitted = identity derives from the
+   * per-process start counter (call order, RULE 3 determinism), so a
+   * re-entered parent re-issuing the same start gets the same childRunId.
+   */
+  idempotencyKey?: string;
+  /** Explicit 1-based start ordinal; overrides without advancing the counter. */
+  startIndex?: number;
+}
+
+export interface FlueWorkflowStartResult {
+  childRunId: string;
+  workflowName: string;
+  status: string;
+  parentRunId: string;
+}
+
+export interface FlueWorkflowAwaitInput {
+  childRunId?: string;
+  /** Alias for childRunId. */
+  runId?: string;
+  /** REQUIRED (RULE 5), milliseconds. */
+  timeoutMs?: number;
+  /** Alias for timeoutMs. */
+  timeout?: number;
+  /** Explicit 1-based ordinal (shared counter with events.await). */
+  awaitIndex?: number;
+}
+
+export interface FlueWorkflowAwaitResult extends FlueAwaitEventResult {
+  /** The child's outcome at response time (fresher than event.payload). */
+  child?: { runId: string; status: string; summary?: string; errorClass?: string };
+}
+
+/**
+ * Suspend sentinel thrown by events.await / workflows.await when the server
+ * parked the run. NOT a failure: let it propagate (the runner exits cleanly
+ * with a suspended completion shape and resume re-runs from the top), or
+ * `return err.result`. Catch blocks around awaits MUST rethrow when
+ * isWorkflowSuspended(err) is true.
+ */
+export declare class WorkflowSuspended extends Error {
+  readonly type: "workflow_suspended";
+  readonly awaitIndex: number;
+  readonly result: { status: "suspended_awaiting_event"; summary: string };
+  constructor(awaitIndex: number);
+}
+
+export declare function isWorkflowSuspended(err: unknown): boolean;
+
 export interface FlueDriverClientOptions {
   env?: NodeJS.ProcessEnv | Record<string, string | undefined>;
   input?: Record<string, unknown>;
@@ -213,6 +331,17 @@ export declare class FlueDriverClient {
     recoverStale(input?: FlueTaskRunRecoverStaleInput): Promise<Record<string, unknown> | null>;
   };
   readonly connectors: FlueConnectorsNamespace;
+  readonly events: {
+    /** Throws WorkflowSuspended when the run parks; see FlueAwaitEventInput for the determinism and freshness rules. */
+    await(input: FlueAwaitEventInput): Promise<FlueAwaitEventResult>;
+    /** Re-entry context: the run's awaits in index order; consumes no await slot. */
+    list(input?: Record<string, unknown>): Promise<FlueAwaitListResult>;
+  };
+  readonly workflows: {
+    start(input: FlueWorkflowStartInput): Promise<FlueWorkflowStartResult>;
+    /** Throws WorkflowSuspended when the run parks; shares the awaitIndex counter with events.await. */
+    await(input: FlueWorkflowAwaitInput): Promise<FlueWorkflowAwaitResult>;
+  };
 
   completed(input?: { summary?: string }): FlueDriverResult;
   failed(input?: { summary?: string; errorClass?: string }): FlueDriverResult;
@@ -245,6 +374,10 @@ export declare class FlueDriverClient {
    * irreversible/precondition-gated action lacks its required precondition.
    */
   dispatchConnector(input?: FlueConnectorDispatchInput): Promise<FlueConnectorCallResult>;
+  awaitEvent(input: FlueAwaitEventInput): Promise<FlueAwaitEventResult>;
+  listAwaits(input?: Record<string, unknown>): Promise<FlueAwaitListResult>;
+  startWorkflow(input: FlueWorkflowStartInput): Promise<FlueWorkflowStartResult>;
+  awaitChildWorkflow(input: FlueWorkflowAwaitInput): Promise<FlueWorkflowAwaitResult>;
 }
 
 export declare function createLoomDriverClient(options?: FlueDriverClientOptions | Record<string, unknown>): FlueDriverClient;

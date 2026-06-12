@@ -354,12 +354,19 @@ const (
 	DriverRunFailed      DriverRunStatus = "failed"
 	DriverRunNeedsReview DriverRunStatus = "needs_review"
 	DriverRunCancelled   DriverRunStatus = "cancelled"
+	// DriverRunSuspendedAwaitingEvent parks a run that registered an
+	// await-event and is waiting for a matching event (or its deadline).
+	// Explicitly NOT terminal: the run resumes when its await resolves.
+	DriverRunSuspendedAwaitingEvent DriverRunStatus = "suspended_awaiting_event"
 )
 
 func (s DriverRunStatus) IsTerminal() bool {
 	switch s {
 	case DriverRunCompleted, DriverRunFailed, DriverRunNeedsReview, DriverRunCancelled:
 		return true
+	case DriverRunSuspendedAwaitingEvent:
+		// Suspended runs are alive — they resume on event/timeout.
+		return false
 	default:
 		return false
 	}
@@ -386,8 +393,29 @@ type DriverRun struct {
 	StartedAt       time.Time         `json:"started_at,omitempty"`
 	LastHeartbeat   time.Time         `json:"last_heartbeat,omitempty"`
 	FinishedAt      *time.Time        `json:"finished_at,omitempty"`
-	CreatedAt       time.Time         `json:"created_at"`
-	UpdatedAt       time.Time         `json:"updated_at"`
+	// Composition + await fields (Phase D). snake_case tags like the rest
+	// of this struct: the fleet-db client decodes v1 responses directly
+	// into DriverRun (tag-identical round-trip, AW5); the driver/watch wire
+	// carries runs through its own DTOs (internal/driver/run_events.go).
+	//
+	// ParentRunID links a child run spawned by a parent workflow run.
+	// Empty means detached/root (no cancel cascade). Orthogonal to EpicID:
+	// a run can belong to an epic, a parent run, both, or neither.
+	ParentRunID string `json:"parent_run_id,omitempty"`
+	// SuspendedAt is set when the run parks in suspended_awaiting_event.
+	SuspendedAt *time.Time `json:"suspended_at,omitempty"`
+	// CancelRequestedAt records a cooperative cancel request against a
+	// RUNNING run (composition cascade: parent terminal -> running children
+	// cancel-requested). The owning executor observes it on heartbeat and
+	// cancels its runner; the run still terminalizes through the normal
+	// fenced Finish.
+	CancelRequestedAt     *time.Time `json:"cancel_requested_at,omitempty"`
+	CancelRequestedReason string     `json:"cancel_requested_reason,omitempty"`
+	// ResumeSourceEventID records the trigger event that resolved the
+	// await and resumed the run (or the synthetic timeout event).
+	ResumeSourceEventID string    `json:"resume_source_event_id,omitempty"`
+	CreatedAt           time.Time `json:"created_at"`
+	UpdatedAt           time.Time `json:"updated_at"`
 }
 
 type DriverStepStatus string

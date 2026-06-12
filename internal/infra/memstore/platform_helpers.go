@@ -62,6 +62,8 @@ func cloneDriverRun(r *domain.DriverRun) *domain.DriverRun {
 	out.Payload = cloneJSON(r.Payload)
 	out.Output = cloneMap(r.Output)
 	out.FinishedAt = clonePtr(r.FinishedAt)
+	out.SuspendedAt = clonePtr(r.SuspendedAt)
+	out.CancelRequestedAt = clonePtr(r.CancelRequestedAt)
 	return &out
 }
 

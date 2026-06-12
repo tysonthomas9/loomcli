@@ -198,11 +198,15 @@ type internalProvenanceEnvelope struct {
 // trigger router via DispatchTriggerRouteV2 on route key
 // "internal.{event_type}". Workflow-originated events carry hop_depth =
 // parent+1 and are dropped (result.Dropped, audit-logged, no error) once the
-// depth would exceed the cap; system events sit at depth 0 and never trip the
-// guard. Dispatch errors return as-is (a route with no matching binding wraps
-// domain.ErrNotFound — "nobody listening" is the caller's call). Re-emitting
-// the same EventID is safe: the loopback idempotency key dedups the event and
-// every fan-out leg.
+// depth would exceed the cap; system ROOTS (no ParentEventID — cron,
+// schedulers) sit at depth 0 and never trip the guard, while a system event
+// that names a parent (server lifecycle events continuing a trigger chain,
+// e.g. run.finished per AW6's C19 stamping) accumulates parent+1 and is
+// capped like the workflow lane, so internal.* bindings cannot recursively
+// amplify off lifecycle events. Dispatch errors return as-is (a route with no
+// matching binding wraps domain.ErrNotFound — "nobody listening" is the
+// caller's call). Re-emitting the same EventID is safe: the loopback
+// idempotency key dedups the event and every fan-out leg.
 func (s *InternalSource) Emit(ctx context.Context, ws string, ev InternalEvent) (*InternalEmitResult, error) {
 	ws = strings.TrimSpace(ws)
 	eventID := strings.TrimSpace(ev.EventID)
@@ -220,15 +224,9 @@ func (s *InternalSource) Emit(ctx context.Context, ws string, ev InternalEvent) 
 		return dropped, err
 	}
 
-	payload, err := json.Marshal(internalProvenanceEnvelope{
-		Origin:         string(origin),
-		HopDepth:       hopDepth,
-		ParentEventID:  strings.TrimSpace(ev.ParentEventID),
-		EmittedByRunID: ev.EmittedByRunID,
-		Event:          ev.Payload,
-	})
+	payload, err := marshalInternalEnvelope(origin, hopDepth, ev)
 	if err != nil {
-		return nil, fmt.Errorf("encode internal event payload: %w", err)
+		return nil, err
 	}
 
 	idempotencyKey := InternalEventIdempotencyKey(ws, eventID)
@@ -247,6 +245,7 @@ func (s *InternalSource) Emit(ctx context.Context, ws string, ev InternalEvent) 
 		return nil, fmt.Errorf("dispatch internal trigger route %q in workspace %q: %w", routeKey, ws, err)
 	}
 	s.recordHopDepth(idempotencyKey, hopDepth)
+	s.dispatchAwaits(ctx, ws, eventID, eventType, ev)
 	return &InternalEmitResult{
 		EventType: eventType,
 		RouteKey:  routeKey,
@@ -256,10 +255,53 @@ func (s *InternalSource) Emit(ctx context.Context, ws string, ev InternalEvent) 
 	}, nil
 }
 
+// marshalInternalEnvelope encodes the loopback dispatch payload: stamped
+// provenance wrapping the emitter's original payload.
+func marshalInternalEnvelope(origin domain.TriggerEventOrigin, hopDepth int, ev InternalEvent) (json.RawMessage, error) {
+	payload, err := json.Marshal(internalProvenanceEnvelope{
+		Origin:         string(origin),
+		HopDepth:       hopDepth,
+		ParentEventID:  strings.TrimSpace(ev.ParentEventID),
+		EmittedByRunID: ev.EmittedByRunID,
+		Event:          ev.Payload,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("encode internal event payload: %w", err)
+	}
+	return payload, nil
+}
+
+// dispatchAwaits feeds one admitted loopback event to the dispatch-time await
+// matcher (AW7). The matcher receives the emitter's payload, not the
+// provenance envelope: an awaiting run resumes with the event the emitter
+// produced, provenance stays a routing concern. Best-effort — the emission
+// already dispatched durably, so matcher errors are logged, never returned.
+// Events the guard dropped or that found no binding never reach this point;
+// the run.finished lifecycle lane runs its own journal-anchored matcher pass
+// (internal/driver) so composition is independent of binding configuration.
+func (s *InternalSource) dispatchAwaits(ctx context.Context, ws, eventID, eventType string, ev InternalEvent) {
+	matcher := &AwaitMatcher{Store: s.Store, Logger: s.Logger}
+	if _, err := matcher.Dispatch(ctx, ws, AwaitDispatchEvent{
+		EventID:    eventID,
+		EventType:  eventType,
+		SubjectRef: ev.SubjectRef,
+		ActorRef:   ev.ActorRef,
+		Payload:    ev.Payload,
+	}); err != nil {
+		logger := s.Logger
+		if logger == nil {
+			logger = slog.Default()
+		}
+		logger.Warn("internal event await dispatch failed",
+			"workspace", ws, "event_id", eventID, "event_type", eventType, "error", err)
+	}
+}
+
 // guardProvenance applies the structural loop guard: it defaults the origin
 // to workflow, accumulates hop depth from the parent chain, and either drops
-// a workflow event that would exceed the cap (returning the audit-logged
-// drop result) or rejects a forged/unknown origin outright.
+// an event that would exceed the cap (returning the audit-logged drop result)
+// or rejects a forged/unknown origin outright. Depth-0 system roots never
+// reach the cap check (the cap is always positive).
 func (s *InternalSource) guardProvenance(ctx context.Context, ws, eventID, eventType, routeKey string, ev InternalEvent) (domain.TriggerEventOrigin, int, *InternalEmitResult, error) {
 	origin := ev.Origin
 	if origin == "" {
@@ -268,24 +310,40 @@ func (s *InternalSource) guardProvenance(ctx context.Context, ws, eventID, event
 	hopDepth := 0
 	switch origin {
 	case domain.TriggerEventOriginSystem:
-		// System lane: scheduler-produced roots, depth 0, never capped.
+		// System lane: parentless emissions are scheduler-produced roots at
+		// depth 0. A system lifecycle event continuing a chain (run.finished
+		// for a run admitted by a trigger event, AW6) names its parent and
+		// accumulates depth structurally, same as the workflow lane.
+		if strings.TrimSpace(ev.ParentEventID) != "" {
+			hopDepth = s.parentHopDepth(ctx, ws, ev.ParentEventID) + 1
+		}
 	case domain.TriggerEventOriginWorkflow:
 		hopDepth = s.parentHopDepth(ctx, ws, ev.ParentEventID) + 1
-		if capDepth := s.effectiveHopDepthCap(); hopDepth > capDepth {
-			s.auditDrop(ws, eventID, eventType, ev, hopDepth, capDepth)
-			return origin, hopDepth, &InternalEmitResult{
-				Dropped:    true,
-				DropReason: DropReasonHopDepthExceeded,
-				EventType:  eventType,
-				RouteKey:   routeKey,
-				Origin:     origin,
-				HopDepth:   hopDepth,
-			}, nil
-		}
 	default:
 		return origin, 0, nil, fmt.Errorf("internal event origin %q: emitters may stamp workflow or system only (external is reserved for the webhook ingest path): %w", origin, domain.ErrInvalid)
 	}
+	if capDepth := s.effectiveHopDepthCap(); hopDepth > capDepth {
+		s.auditDrop(ws, eventID, eventType, ev, hopDepth, capDepth)
+		return origin, hopDepth, &InternalEmitResult{
+			Dropped:    true,
+			DropReason: DropReasonHopDepthExceeded,
+			EventType:  eventType,
+			RouteKey:   routeKey,
+			Origin:     origin,
+			HopDepth:   hopDepth,
+		}, nil
+	}
 	return origin, hopDepth, nil, nil
+}
+
+// ChainHopDepth resolves the chain depth of the named parent trigger event —
+// serve-local ledger first, persisted depth as fallback, 0 for an empty or
+// unknown parent. Exposed for trusted server-side lifecycle emitters (AW6's
+// run.finished) that journal an event BEFORE handing it to Emit and must
+// stamp the same parent+1 depth on the journaled record the loopback
+// envelope will carry.
+func (s *InternalSource) ChainHopDepth(ctx context.Context, ws, parentEventID string) int {
+	return s.parentHopDepth(ctx, ws, parentEventID)
 }
 
 // parentHopDepth resolves the hop depth of the named parent trigger event:

@@ -111,6 +111,7 @@ func (app *Server) buildInfraModules() {
 		app.wsModules = append(app.wsModules, onboarding.NewModule(app.issueSvc, app.agentSvc))
 		app.wsModules = append(app.wsModules, workflows.NewModule(app.config.Store))
 		app.wsModules = append(app.wsModules, webhooks.NewModule(app.config.Store))
+		app.wsModules = append(app.wsModules, modbuilder.NewApprovalsModule(app.config.Store))
 		app.wsModules = append(app.wsModules, driverapi.NewModule(driverapi.Config{
 			Store:        app.config.Store,
 			FleetBaseURL: app.config.FleetDBBaseURL,

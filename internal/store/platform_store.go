@@ -272,6 +272,24 @@ type TriggerEventStore interface {
 	List(ctx context.Context, workspaceKey string, filter TriggerEventFilter) ([]*domain.TriggerEvent, error)
 }
 
+// TriggerEventAppender is an OPTIONAL TriggerEventStore capability (detected
+// by type assertion, like DriverRunEventsReader): append one server-stamped
+// event directly to the trigger-event journal without route dispatch. This is
+// the run.finished lifecycle lane (AW6): journal-first so the await
+// registration scan (AwaitStore.RegisterAwaitAndCheck) sees terminal runs
+// even when no binding listens on the internal route — composition awaits can
+// never be suppressed by binding configuration or the loop guard.
+//
+// Implementations preserve the caller's EventID (lifecycle event IDs are
+// deterministic for idempotent re-emission) and dedup on both EventID and
+// IdempotencyKey, returning the existing record unchanged on a replay. The
+// fleet-db backend does not implement this client-side capability: there the
+// journal append happens server-side in fleet-db's dispatch wiring
+// (IndexAwaitEvent, AW2/AW7).
+type TriggerEventAppender interface {
+	AppendTriggerEvent(ctx context.Context, event *domain.TriggerEvent) (*domain.TriggerEvent, error)
+}
+
 // TriggerDeliveryFilter narrows TriggerDelivery listings.
 type TriggerDeliveryFilter struct {
 	TriggerEventID   string
@@ -410,8 +428,13 @@ type DriverRunCreate struct {
 	SourceKind      string
 	SourceRef       string
 	EpicID          string
-	IdempotencyKey  string
-	Payload         json.RawMessage
+	// ParentRunID links a child run to the workflow run that spawned it
+	// (Phase D composition). Empty means detached/root — no cancel cascade.
+	// Orthogonal to EpicID: a run may carry an epic, a parent, both, or
+	// neither.
+	ParentRunID    string
+	IdempotencyKey string
+	Payload        json.RawMessage
 }
 
 type DriverRunFilter struct {
@@ -484,6 +507,48 @@ type DriverRunStore interface {
 	Finish(ctx context.Context, workspaceKey, runID string, finish DriverRunFinish) (*domain.DriverRun, error)
 	RecoverStale(ctx context.Context, workspaceKey string, recover StaleDriverRunRecovery) (*StaleDriverRunRecoveryResult, error)
 	RecoverStaleTaskRuns(ctx context.Context, workspaceKey, runID string, recover StaleTaskRunRecovery) (*StaleTaskRunRecoveryResult, error)
+
+	// Suspend parks a running run on its await instance
+	// (running -> suspended_awaiting_event), owner-fenced with the same
+	// node+lease+token guard as Finish, releasing the executor slot
+	// (node/lease cleared). awaitInstanceKey names the await cycle the run
+	// parks on (runID#await-{n}) and is required. Idempotent on re-suspend.
+	// A backend that recorded a pending resume for this await cycle (the
+	// accepted park->suspend window) returns
+	// domain.ErrDriverRunAlreadyResumed: do not park, continue inline.
+	Suspend(ctx context.Context, workspaceKey, runID, nodeID, leaseID string, fencingToken int64, awaitInstanceKey string) (*domain.DriverRun, error)
+
+	// ResumeAwaiting re-queues a suspended run
+	// (suspended_awaiting_event -> queued) after the await cycle named by
+	// awaitInstanceKey resolved, recording resumeSourceEventID (a trigger
+	// event or the sweeper's synthetic timeout event) for the resumed
+	// execution's replay fetch. Of two racing resumes exactly one wins; the
+	// loser gets domain.ErrInvalidTransition, which resume callers (AW7)
+	// tolerate.
+	ResumeAwaiting(ctx context.Context, workspaceKey, runID, awaitInstanceKey, resumeSourceEventID string) (*domain.DriverRun, error)
+}
+
+// DriverRunCancelSupport is an OPTIONAL DriverRunStore capability (detected
+// via type assertion, like TriggerEventAppender) backing the composition
+// cancel cascade (AW10): when a parent run reaches a terminal status its
+// queued children are cancelled and its running children get a cooperative
+// cancel request. Backends without the capability (the fleet-db client until
+// its server-side cascade wiring lands; the CLI tracing wrapper) skip the
+// cascade — children there are bounded by their own await deadlines and the
+// stale sweeps.
+type DriverRunCancelSupport interface {
+	// CancelQueuedRun terminalizes a still-QUEUED run as cancelled with no
+	// owner check (mirroring the supersede lane's CancelQueuedDriverRun).
+	// Idempotent on an already-cancelled run; any other status returns
+	// domain.ErrInvalidTransition so a run claimed in the race window is
+	// never terminalized under its executor.
+	CancelQueuedRun(ctx context.Context, workspaceKey, runID, summary, errorClass string) (*domain.DriverRun, error)
+	// RequestCancel stamps CancelRequestedAt on a RUNNING run. The owning
+	// executor observes the marker on its next heartbeat and cancels the
+	// runner, which then reports cancelled through the normal fenced Finish.
+	// Idempotent once requested; non-running runs return
+	// domain.ErrInvalidTransition.
+	RequestCancel(ctx context.Context, workspaceKey, runID, reason string) (*domain.DriverRun, error)
 }
 
 var ErrDriverRunEventsUnavailable = errors.New("driver run event reader unsupported")

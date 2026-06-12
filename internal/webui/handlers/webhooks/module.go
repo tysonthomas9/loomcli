@@ -1,18 +1,21 @@
 package webhooks
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/store"
+	"github.com/tysonthomas9/loomcli/internal/trigger"
 )
 
 // maxWebhookPayloadBytes caps the inbound webhook body. GitHub deliveries are
@@ -24,12 +27,15 @@ const maxWebhookPayloadBytes = 8 << 20
 type Module struct {
 	store    store.Store
 	adapters registry
+	// awaits is the dispatch-time await matcher (AW7): admitted events are
+	// matched against parked await instances right after durable dispatch.
+	awaits *trigger.AwaitMatcher
 }
 
 // NewModule constructs the webhooks module backed by the given store. Returns
 // nil-safe behavior: with a nil store, Register registers nothing.
 func NewModule(st store.Store) *Module {
-	return &Module{store: st, adapters: defaultRegistry()}
+	return &Module{store: st, adapters: defaultRegistry(), awaits: &trigger.AwaitMatcher{Store: st}}
 }
 
 func (m *Module) Register(mux *http.ServeMux) {
@@ -138,6 +144,9 @@ func (m *Module) dispatchWebhook(w http.ResponseWriter, r *http.Request, ws, nam
 		writeDomainError(w, err, "dispatch webhook failed")
 		return
 	}
+	// Dispatch-time await matching (AW7) runs after the durable fan-out so a
+	// matcher failure can never lose an admitted delivery.
+	m.notifyAwaits(r.Context(), ws, event, body)
 	// BREAKING router-v2 wire (locked decision): the 202 body carries
 	// deliveries[] only — no top-level driver_run_id / driver_run. loom-dev
 	// consumers update at redeploy; callers that need the run body fetch it
@@ -148,6 +157,29 @@ func (m *Module) dispatchWebhook(w http.ResponseWriter, r *http.Request, ws, nam
 		"idempotency_key": idempotencyKey,
 		"deliveries":      result.Deliveries,
 	})
+}
+
+// notifyAwaits hands the admitted event to the dispatch-time await matcher
+// (AW7): exact rendered-subject-key lookup against parked awaits, RULE 4
+// actor enforcement, atomic resolve + resume of suspended runs. Best-effort
+// after durable dispatch — a matcher error must not turn an accepted
+// delivery into a webhook failure (redelivery and the deadline machinery
+// converge); it is logged with the event identity instead.
+func (m *Module) notifyAwaits(ctx context.Context, ws string, event NormalizedEvent, body []byte) {
+	if m.awaits == nil {
+		return
+	}
+	if _, err := m.awaits.Dispatch(ctx, ws, trigger.AwaitDispatchEvent{
+		EventID:    event.DeliveryID,
+		EventType:  event.EventType,
+		SubjectRef: event.SubjectRef,
+		ActorRef:   event.ActorRef,
+		Payload:    json.RawMessage(body),
+	}); err != nil {
+		slog.WarnContext(ctx, "webhook await dispatch failed",
+			"workspace", ws, "source_event_id", event.DeliveryID,
+			"event_type", event.EventType, "error", err)
+	}
 }
 
 func (m *Module) listTriggerEvents(w http.ResponseWriter, r *http.Request) {

@@ -167,6 +167,12 @@ func (m *Module) Register(mux *http.ServeMux) {
 	}
 	mux.HandleFunc("POST /api/workspaces/{ws}/driver/{op}", m.handleOp)
 	mux.HandleFunc("GET /api/workspaces/{ws}/driver/watch/epic", m.handleWatchEpic)
+	// Await-event ops (AW9): two-segment paths the {op} pattern cannot match.
+	mux.HandleFunc("POST /api/workspaces/{ws}/driver/events/await", m.handleAwaitEvent)
+	mux.HandleFunc("GET /api/workspaces/{ws}/driver/events/awaits", m.handleListAwaits)
+	// Composition ops (AW10): same two-segment-path situation.
+	mux.HandleFunc("POST /api/workspaces/{ws}/driver/workflows/start", m.handleWorkflowsStart)
+	mux.HandleFunc("POST /api/workspaces/{ws}/driver/workflows/await", m.handleWorkflowsAwait)
 }
 
 // driverIdentity is the per-request parent DriverRun identity resolved from
@@ -197,13 +203,20 @@ func (m *Module) handleOp(w http.ResponseWriter, r *http.Request) {
 	if !m.authorize(w, r) {
 		return
 	}
-	ws := r.PathValue("ws")
 	op := strings.TrimSpace(r.PathValue("op"))
 	handler, ok := m.ops[op]
 	if !ok {
 		writeOpError(w, http.StatusNotFound, "unknown_op", fmt.Sprintf("unknown driver op %q", op), false)
 		return
 	}
+	m.serveAuthorizedOp(w, r, handler)
+}
+
+// serveAuthorizedOp runs the shared post-authorize op pipeline (body read,
+// identity headers, handler dispatch, error envelope) for both the generic
+// {op} route and explicitly registered op paths (events/await).
+func (m *Module) serveAuthorizedOp(w http.ResponseWriter, r *http.Request, handler opHandler) {
+	ws := r.PathValue("ws")
 	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxDriverOpBodyBytes))
 	if err != nil {
 		writeOpError(w, http.StatusBadRequest, "invalid", "read driver op payload: "+err.Error(), false)
@@ -212,12 +225,7 @@ func (m *Module) handleOp(w http.ResponseWriter, r *http.Request) {
 	if len(strings.TrimSpace(string(body))) == 0 {
 		body = []byte("{}")
 	}
-	id := driverIdentity{
-		RunID:   strings.TrimSpace(r.Header.Get(HeaderDriverRunID)),
-		NodeID:  strings.TrimSpace(r.Header.Get(HeaderDriverNodeID)),
-		LeaseID: strings.TrimSpace(r.Header.Get(HeaderDriverLeaseID)),
-		fence:   r.Header.Get(HeaderDriverFencingToken),
-	}
+	id := driverIdentityFromHeaders(r)
 	if id.RunID == "" {
 		writeOpError(w, http.StatusUnauthorized, "unauthenticated", HeaderDriverRunID+" header required", false)
 		return
@@ -228,6 +236,17 @@ func (m *Module) handleOp(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, result)
+}
+
+// driverIdentityFromHeaders resolves the per-request parent DriverRun
+// identity from the driver headers.
+func driverIdentityFromHeaders(r *http.Request) driverIdentity {
+	return driverIdentity{
+		RunID:   strings.TrimSpace(r.Header.Get(HeaderDriverRunID)),
+		NodeID:  strings.TrimSpace(r.Header.Get(HeaderDriverNodeID)),
+		LeaseID: strings.TrimSpace(r.Header.Get(HeaderDriverLeaseID)),
+		fence:   r.Header.Get(HeaderDriverFencingToken),
+	}
 }
 
 // authorize enforces the optional shared bearer token.
@@ -747,6 +766,9 @@ func writeOpError(w http.ResponseWriter, status int, code, message string, retry
 // classes (timeouts, cancellation) advertise retryability.
 func writeDomainOpError(w http.ResponseWriter, err error) {
 	if writeConnectorOpError(w, err) {
+		return
+	}
+	if writeAwaitOpError(w, err) {
 		return
 	}
 	switch {

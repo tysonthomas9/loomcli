@@ -25,7 +25,10 @@ func newDriverRunStore(versions *driverVersionStore, bindings *triggerBindingSto
 	return &driverRunStore{items: make(map[string]map[string]*domain.DriverRun), versions: versions, bindings: bindings}
 }
 
-var _ store.DriverRunStore = (*driverRunStore)(nil)
+var (
+	_ store.DriverRunStore         = (*driverRunStore)(nil)
+	_ store.DriverRunCancelSupport = (*driverRunStore)(nil)
+)
 
 func (s *driverRunStore) Create(_ context.Context, in store.DriverRunCreate) (*domain.DriverRun, error) {
 	if in.WorkspaceKey == "" || in.RunID == "" || in.DriverID == "" || in.DriverVersionID == "" {
@@ -66,6 +69,7 @@ func (s *driverRunStore) Create(_ context.Context, in store.DriverRunCreate) (*d
 		SourceKind:      in.SourceKind,
 		SourceRef:       in.SourceRef,
 		EpicID:          in.EpicID,
+		ParentRunID:     in.ParentRunID,
 		Status:          domain.DriverRunQueued,
 		IdempotencyKey:  in.IdempotencyKey,
 		Payload:         cloneJSON(in.Payload),
@@ -208,6 +212,12 @@ func (s *driverRunStore) Heartbeat(_ context.Context, ws, runID, nodeID, leaseID
 	if !ok {
 		return nil, fmt.Errorf("driver run %q in workspace %q: %w", runID, ws, domain.ErrNotFound)
 	}
+	// Explicit suspended rejection BEFORE owner validation (mirrors
+	// fleet-db's heartbeat guard, AW3): a suspended run released its slot,
+	// so even the formerly-owning executor must not renew it.
+	if run.Status == domain.DriverRunSuspendedAwaitingEvent {
+		return nil, fmt.Errorf("driver run %q in workspace %q: %w", runID, ws, domain.ErrInvalidTransition)
+	}
 	if run.NodeID != nodeID || run.LeaseID != leaseID || run.FencingToken != fencingToken {
 		return nil, fmt.Errorf("driver run %q in workspace %q: %w", runID, ws, domain.ErrNotOwner)
 	}
@@ -246,6 +256,75 @@ func (s *driverRunStore) Finish(_ context.Context, ws, runID string, finish stor
 	return cloneDriverRun(run), nil
 }
 
+// Suspend parks a running run in suspended_awaiting_event after its await
+// parked (chunk AW4, mirroring fleet-db's suspend_driver_run.lua, AW3). Only
+// the owning executor — matching node + lease + fencing token, the same
+// owner guard as Finish — may suspend, and the transition releases the
+// execution slot by clearing node and lease. Suspending an already-suspended
+// run is an idempotent no-op (current row returned) so the driver-op layer
+// can retry the park->suspend leg safely. awaitInstanceKey names the await
+// cycle the run parks on; memstore requires it (interface parity with the
+// fleet-db wire) but does not persist it — the key is derivable as
+// runID#await-{n} and the payload ref lives on the satisfied await row.
+func (s *driverRunStore) Suspend(_ context.Context, ws, runID, nodeID, leaseID string, fencingToken int64, awaitInstanceKey string) (*domain.DriverRun, error) {
+	if awaitInstanceKey == "" {
+		return nil, fmt.Errorf("await instance key required: %w", domain.ErrInvalid)
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	run, ok := s.items[ws][runID]
+	if !ok {
+		return nil, fmt.Errorf("driver run %q in workspace %q: %w", runID, ws, domain.ErrNotFound)
+	}
+	if run.Status == domain.DriverRunSuspendedAwaitingEvent {
+		return cloneDriverRun(run), nil
+	}
+	if run.NodeID != nodeID || run.LeaseID != leaseID || run.FencingToken != fencingToken {
+		return nil, fmt.Errorf("driver run %q in workspace %q: %w", runID, ws, domain.ErrNotOwner)
+	}
+	if run.Status != domain.DriverRunRunning {
+		return nil, fmt.Errorf("driver run %q in workspace %q: %w", runID, ws, domain.ErrInvalidTransition)
+	}
+	now := time.Now().UTC()
+	run.Status = domain.DriverRunSuspendedAwaitingEvent
+	run.NodeID = ""
+	run.LeaseID = ""
+	run.SuspendedAt = &now
+	run.UpdatedAt = now
+	return cloneDriverRun(run), nil
+}
+
+// ResumeAwaiting re-queues a suspended run after its await resolved
+// (fleet-db's resume_awaiting_driver_run.lua, AW3). Only from
+// suspended_awaiting_event, recording the resolving event id so the resumed
+// execution fetches its replay payload via GetSatisfiedAwait. Of two racing
+// resume attempts (matched event vs timeout) exactly one wins; the loser —
+// and a resume hitting a run still inside the accepted park->suspend window —
+// gets ErrInvalidTransition, which the resume path (AW7) tolerates and
+// retries once the suspend lands. The re-queued run is claimable again with
+// a fresh lease and fencing token.
+func (s *driverRunStore) ResumeAwaiting(_ context.Context, ws, runID, awaitInstanceKey, resumeSourceEventID string) (*domain.DriverRun, error) {
+	if awaitInstanceKey == "" {
+		return nil, fmt.Errorf("await instance key required: %w", domain.ErrInvalid)
+	}
+	if resumeSourceEventID == "" {
+		return nil, fmt.Errorf("resume source event id required: %w", domain.ErrInvalid)
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	run, ok := s.items[ws][runID]
+	if !ok {
+		return nil, fmt.Errorf("driver run %q in workspace %q: %w", runID, ws, domain.ErrNotFound)
+	}
+	if run.Status != domain.DriverRunSuspendedAwaitingEvent {
+		return nil, fmt.Errorf("driver run %q in workspace %q: %w", runID, ws, domain.ErrInvalidTransition)
+	}
+	run.Status = domain.DriverRunQueued
+	run.ResumeSourceEventID = resumeSourceEventID
+	run.UpdatedAt = time.Now().UTC()
+	return cloneDriverRun(run), nil
+}
+
 // cancelQueuedForSupersede terminalizes a still-queued run as cancelled, with
 // no owner check. Mirrors fleet-db's CancelQueuedDriverRun: a claimed/running
 // run is left alone (returns false) so a superseding event never cancels a run
@@ -266,6 +345,59 @@ func (s *driverRunStore) cancelQueuedForSupersede(ws, runID, summary string) boo
 	return true
 }
 
+// CancelQueuedRun is the store.DriverRunCancelSupport queued leg (composition
+// cascade, AW10): a still-queued run terminalizes as cancelled with no owner
+// check — there is no owner to fence against. Idempotent on an
+// already-cancelled run; any other status (claimed in the race window,
+// suspended, otherwise terminal) returns ErrInvalidTransition so an executing
+// run is never terminalized out from under its executor.
+func (s *driverRunStore) CancelQueuedRun(_ context.Context, ws, runID, summary, errorClass string) (*domain.DriverRun, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	run, ok := s.items[ws][runID]
+	if !ok {
+		return nil, fmt.Errorf("driver run %q in workspace %q: %w", runID, ws, domain.ErrNotFound)
+	}
+	if run.Status == domain.DriverRunCancelled {
+		return cloneDriverRun(run), nil
+	}
+	if run.Status != domain.DriverRunQueued {
+		return nil, fmt.Errorf("driver run %q in workspace %q: %w", runID, ws, domain.ErrInvalidTransition)
+	}
+	now := time.Now().UTC()
+	run.Status = domain.DriverRunCancelled
+	run.Summary = summary
+	run.ErrorClass = errorClass
+	run.FinishedAt = &now
+	run.UpdatedAt = now
+	return cloneDriverRun(run), nil
+}
+
+// RequestCancel is the store.DriverRunCancelSupport running leg: it stamps a
+// cooperative cancel request on a RUNNING run. The owning executor sees the
+// marker on its next heartbeat, cancels its runner, and the run terminalizes
+// through the normal fenced Finish as cancelled. Idempotent once requested;
+// non-running runs return ErrInvalidTransition.
+func (s *driverRunStore) RequestCancel(_ context.Context, ws, runID, reason string) (*domain.DriverRun, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	run, ok := s.items[ws][runID]
+	if !ok {
+		return nil, fmt.Errorf("driver run %q in workspace %q: %w", runID, ws, domain.ErrNotFound)
+	}
+	if run.CancelRequestedAt != nil {
+		return cloneDriverRun(run), nil
+	}
+	if run.Status != domain.DriverRunRunning {
+		return nil, fmt.Errorf("driver run %q in workspace %q: %w", runID, ws, domain.ErrInvalidTransition)
+	}
+	now := time.Now().UTC()
+	run.CancelRequestedAt = &now
+	run.CancelRequestedReason = reason
+	run.UpdatedAt = now
+	return cloneDriverRun(run), nil
+}
+
 func (s *driverRunStore) RecoverStale(_ context.Context, ws string, recover store.StaleDriverRunRecovery) (*store.StaleDriverRunRecoveryResult, error) {
 	plan, err := newStaleDriverRunRecoveryMem(ws, recover)
 	if err != nil {
@@ -275,6 +407,13 @@ func (s *driverRunStore) RecoverStale(_ context.Context, ws string, recover stor
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for _, run := range s.items[ws] {
+		// Defensive twin of the running-only filter below (mirrors
+		// fleet-db's recover guard, AW3): a suspended run holds no lease and
+		// is never stale work, however ancient its last heartbeat — only the
+		// await timeout sweeper may move it on.
+		if run.Status == domain.DriverRunSuspendedAwaitingEvent {
+			continue
+		}
 		if run.Status != domain.DriverRunRunning {
 			continue
 		}

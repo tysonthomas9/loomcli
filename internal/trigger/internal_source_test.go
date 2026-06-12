@@ -244,18 +244,64 @@ func TestInternalSourceSystemOriginDepthZero(t *testing.T) {
 	setupInternalBinding(t, s)
 	src := &trigger.InternalSource{Store: s}
 
+	// A parentless system emission is a scheduler root: depth 0, never capped.
 	result, err := src.Emit(t.Context(), "WS", trigger.InternalEvent{
 		EventID:   "sys-1",
 		EventType: "issue.created",
 		Origin:    domain.TriggerEventOriginSystem,
-		// A system root ignores any parent: schedulers start fresh chains.
-		ParentEventID: "whatever",
 	})
 	if err != nil {
 		t.Fatalf("Emit system: %v", err)
 	}
 	if result.Dropped || result.Origin != domain.TriggerEventOriginSystem || result.HopDepth != 0 {
 		t.Fatalf("system result = %+v, want dispatched system depth 0", result)
+	}
+}
+
+func TestInternalSourceSystemOriginContinuesParentChain(t *testing.T) {
+	s := memstore.New()
+	setupInternalBinding(t, s)
+	src := &trigger.InternalSource{Store: s}
+
+	if _, err := src.Emit(t.Context(), "WS", trigger.InternalEvent{
+		EventID: "root", EventType: "issue.created", SubjectRef: "issue#1",
+	}); err != nil {
+		t.Fatalf("Emit root: %v", err)
+	}
+	// A system event that names a parent (AW6 run.finished C19 stamping)
+	// accumulates parent+1 instead of restarting the chain at 0.
+	result, err := src.Emit(t.Context(), "WS", trigger.InternalEvent{
+		EventID:       "sys-child",
+		EventType:     "issue.created",
+		Origin:        domain.TriggerEventOriginSystem,
+		ParentEventID: "root",
+	})
+	if err != nil {
+		t.Fatalf("Emit system child: %v", err)
+	}
+	if result.Dropped || result.HopDepth != 2 {
+		t.Fatalf("system child = %+v, want depth 2 via ledger", result)
+	}
+
+	// And the cap applies to chained system events exactly like workflow
+	// ones (same source instance, so the ledger carries the root's depth).
+	capped := &trigger.InternalSource{Store: s, HopDepthCap: 1}
+	if _, err := capped.Emit(t.Context(), "WS", trigger.InternalEvent{
+		EventID: "capped-root", EventType: "issue.created", SubjectRef: "issue#2",
+	}); err != nil {
+		t.Fatalf("Emit capped root: %v", err)
+	}
+	result, err = capped.Emit(t.Context(), "WS", trigger.InternalEvent{
+		EventID:       "sys-capped",
+		EventType:     "issue.created",
+		Origin:        domain.TriggerEventOriginSystem,
+		ParentEventID: "capped-root",
+	})
+	if err != nil {
+		t.Fatalf("Emit capped system child: %v", err)
+	}
+	if !result.Dropped || result.DropReason != trigger.DropReasonHopDepthExceeded {
+		t.Fatalf("capped system child = %+v, want hop-depth drop", result)
 	}
 }
 

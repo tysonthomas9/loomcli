@@ -151,6 +151,7 @@ func (s commandPollerTestStore) TaskRunEvents() store.TaskRunEventStore {
 	return nil
 }
 func (s commandPollerTestStore) Outbox() store.OutboxStore                  { return nil }
+func (s commandPollerTestStore) Awaits() store.AwaitStore                   { return nil }
 func (s commandPollerTestStore) Connectors() store.ConnectorStore           { return nil }
 func (s commandPollerTestStore) ConnectorGrants() store.ConnectorGrantStore { return nil }
 func (s commandPollerTestStore) ConnectorCalls() store.ConnectorAuditStore  { return nil }
