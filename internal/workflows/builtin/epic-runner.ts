@@ -1,5 +1,18 @@
 import { createLoomDriverClient } from '@loom/sdk/flue';
 
+// epic-runner: watch-driven epic drain loop.
+//
+// The workflow is edge-triggered: it claims ready tasks up to maxConcurrency,
+// enqueues each as a TaskRun (the serve task workers execute and close them),
+// and consumes the epic watch stream for terminal TaskRun events to top the
+// pipeline back up. There is no polling cadence, no per-batch barrier, and
+// no workflow-side notification machinery: lead assignment + task-completion
+// messages are delivered by the server-side outbox dispatcher, and stale-run
+// recovery is owned by the server-side sweeper.
+//
+// The loop is naive + re-entrant: deterministic task run ids and the watch
+// handshake snapshot re-derive in-flight state after a restart, and
+// completionId keeps re-completion idempotent.
 export async function run(ctx) {
   const input = ctx.payload || {};
   const loom = createLoomDriverClient({ input });
@@ -24,122 +37,287 @@ export async function run(ctx) {
     });
   }
 
+  return runEpicWatchLoop(loom, input, epicId, started);
+}
+
+async function runEpicWatchLoop(loom, input, epicId, started) {
   const maxConcurrency = Math.max(1, numberValue(input.maxConcurrency, 2));
-  const providerProfile = stringValue(input.providerProfile || "flue-local");
-  const workerPrefix = stringValue(input.workerPrefix);
-  const workerProfileId = stringValue(input.workerProfileId);
-  const targetNodeId = stringValue(input.targetNodeId);
-  const intervalMs = Math.max(1000, numberValue(input.intervalSeconds, 5) * 1000);
-  const leadNotificationDrainMs = Math.max(0, numberValue(input.leadNotificationDrainSeconds, 30) * 1000);
+  const requestDefaults = {
+    providerProfile: stringValue(input.providerProfile || "flue-local"),
+    workerPrefix: stringValue(input.workerPrefix),
+    workerProfileId: stringValue(input.workerProfileId),
+    targetNodeId: stringValue(input.targetNodeId),
+    parentSessionId: started.orchestratorSessionId || stringValue(input.parentSessionId),
+  };
+  const inFlight = new Map(); // taskId -> taskRunId
   const completed = [];
   const parked = [];
-  const leadDelivery = startLeadDeliveryRetry(loom, started.leadName, started.deliveryState, intervalMs);
-  const taskNotifications = startLeadMessageDeliveryRetry(loom, started.leadName, intervalMs, leadDelivery);
 
-  try {
-    while (true) {
-      await loom.taskRuns.recoverStale({
-        maxAgeSeconds: numberValue(input.staleTaskRunMaxAgeSeconds, 300),
-        errorClass: "stale_task_run",
-        errorMessage: "task run heartbeat is stale",
-      });
-
-      const snapshot = await loom.epics.snapshot({ epicId });
-      const active = await loom.taskRuns.active({ epicId });
-      const activeCount = numberValue(active && active.activeCount, 0);
-
-      if (snapshot.openChildrenCount === 0 && activeCount === 0 && parked.length === 0) {
-        await leadDelivery.flush();
-        await taskNotifications.drain(leadNotificationDrainMs);
-        const suffix = completed.length > 0 ? ": " + completed.join(",") : "";
-        return loom.completed({ summary: "Epic drained " + epicId + suffix });
+  // topUp claims ready tasks and enqueues a TaskRun for each until the
+  // in-flight set reaches maxConcurrency or the ready queue is empty.
+  async function topUp() {
+    while (inFlight.size < maxConcurrency) {
+      const task = await loom.tasks.claimReady({ epicId });
+      if (!task) {
+        return;
       }
-
-      if (snapshot.readyCount === 0 && activeCount === 0 && parked.length > 0) {
-        await leadDelivery.flush();
-        await taskNotifications.drain(leadNotificationDrainMs);
-        return loom.needsReview({
-          summary: parked.length + " parked task(s): " + summarizeParkedTasks(parked),
-          errorClass: "epic_tasks_parked",
-        });
-      }
-
-      if (snapshot.readyCount === 0 && snapshot.blockedCount > 0 && activeCount === 0) {
-        await leadDelivery.flush();
-        await taskNotifications.drain(leadNotificationDrainMs);
-        return loom.needsReview({
-          summary: "Epic " + epicId + " blocked with " + snapshot.blockedCount + " child task(s): " + summarizeTasks(snapshot.blocked),
-          errorClass: "epic_blocked",
-        });
-      }
-
-      const slots = maxConcurrency - activeCount;
-      if (slots <= 0) {
-        await sleep(intervalMs);
-        continue;
-      }
-
-      const claimed = [];
-      for (let i = 0; i < slots; i++) {
-        const task = await loom.tasks.claimReady({ epicId });
-        if (!task) {
-          break;
-        }
-        claimed.push(task);
-      }
-
-      if (claimed.length === 0) {
-        if (activeCount === 0 && snapshot.readyCount === 0 && snapshot.blockedCount === 0 && snapshot.openChildrenCount > 0) {
-          await leadDelivery.flush();
-          await taskNotifications.drain(leadNotificationDrainMs);
-          return loom.needsReview({
-            summary: "Epic " + epicId + " has " + snapshot.openChildrenCount + " open child task(s), but none are ready, blocked, or active",
-            errorClass: "epic_no_progress",
-          });
-        }
-        await sleep(intervalMs);
-        continue;
-      }
-
-      const results = await Promise.all(claimed.map((task) => runChildTask(loom, {
-        task,
-        driverRunId: loom.driverRunId,
-        workerPrefix,
-        workerProfileId,
-        providerProfile,
-        targetNodeId,
-        parentSessionId: started.orchestratorSessionId || stringValue(input.parentSessionId),
-      })));
-      for (const result of results) {
-        if (!result.ok) {
-          // A terminal-failed child was already retried then parked by the
-          // server scheduler; record it and keep draining the rest of the DAG.
-          parked.push({
-            taskId: result.taskId,
-            taskRunId: result.taskRunId,
-            errorClass: result.errorClass || "child_task_failed",
-            summary: result.summary || "",
-            logsRef: result.logsRef || "",
-            artifactsRef: result.artifactsRef || "",
-          });
-          continue;
-        }
-        completed.push(result.taskId);
-        taskNotifications.enqueue(formatTaskCompleteLeadMessage({
-          epicId,
-          taskId: result.taskId,
-          taskTitle: result.taskTitle,
-          taskRunId: result.taskRunId,
-          logsRef: result.logsRef,
-          artifactsRef: result.artifactsRef,
-        }));
+      const enqueued = await enqueueChildTask(loom, task, requestDefaults);
+      if (enqueued.ok) {
+        inFlight.set(task.id, enqueued.taskRunId);
+      } else {
+        parked.push(enqueued.parked);
       }
     }
-  } finally {
-    leadDelivery.stop();
-    taskNotifications.stop();
-    await leadDelivery.done;
-    await taskNotifications.done;
+  }
+
+  // finishedResult evaluates the end conditions against a fresh snapshot
+  // once nothing is in flight locally. Returns null while the epic should
+  // keep running.
+  async function finishedResult() {
+    if (inFlight.size > 0) {
+      return null;
+    }
+    const snapshot = await loom.epics.snapshot({ epicId });
+    const active = await loom.taskRuns.active({ epicId });
+    return endStateResult(loom, epicId, snapshot, numberValue(active && active.activeCount, 0), completed, parked);
+  }
+
+  // Seed the pipeline before connecting; the handshake snapshot reconciles
+  // anything this first pass cannot see (e.g. runs left active by a restart).
+  await topUp();
+
+  for await (const event of loom.epics.watch({ epicId })) {
+    if (event.type === "closed") {
+      return loom.failed({
+        summary: "epic watch for " + epicId + " closed: " + (stringValue(event.data && event.data.code) || "unknown"),
+        errorClass: "epic_watch_closed",
+      });
+    }
+    if (event.type === "snapshot") {
+      const data = event.data || {};
+      reconcileInFlight(inFlight, data.active);
+      const fromSnapshot = endStateResult(loom, epicId, data.epic, activeCountOf(data.active, inFlight), completed, parked);
+      if (fromSnapshot) {
+        return fromSnapshot;
+      }
+      await topUp();
+      const result = await finishedResult();
+      if (result) {
+        return result;
+      }
+      continue;
+    }
+    if (event.type !== "taskRun") {
+      continue;
+    }
+    const data = event.data || {};
+    // Journal events are epic-scoped; only this run's children drive the
+    // loop (a retry run re-derives prior progress from snapshots instead).
+    if (stringValue(data.driverRunID) !== stringValue(loom.driverRunId)) {
+      continue;
+    }
+    const taskId = stringValue(data.taskID);
+    switch (stringValue(data.type)) {
+      case "taskRunCompleted": {
+        const completion = await completeChildTask(loom, data);
+        if (completion.ok) {
+          completed.push(taskId);
+        } else {
+          parked.push(completion.parked);
+        }
+        break;
+      }
+      case "taskRunParked":
+      case "taskRunFailed":
+      case "taskRunCancelled":
+        // The server scheduler already retried and parked the run (and
+        // released the claim); record it and keep draining the DAG.
+        parked.push({
+          taskId,
+          taskRunId: stringValue(data.taskRunID),
+          errorClass: stringValue(data.errorClass) || "child_task_failed",
+          summary: "Task failed: " + taskId + (stringValue(data.errorMessage) ? " - " + stringValue(data.errorMessage) : ""),
+          logsRef: stringValue(data.logsRef),
+          artifactsRef: stringValue(data.artifactsRef),
+        });
+        break;
+      default:
+        // queued/claimed/requeued lifecycle events need no action: the run
+        // stays in flight until a terminal event or snapshot reconciles it.
+        continue;
+    }
+    inFlight.delete(taskId);
+    await topUp();
+    const result = await finishedResult();
+    if (result) {
+      return result;
+    }
+  }
+
+  // The watch iterator reconnects internally, so reaching stream end without
+  // a closed event means the consumer was aborted out from under us.
+  return loom.failed({
+    summary: "epic watch stream for " + epicId + " ended unexpectedly",
+    errorClass: "epic_watch_ended",
+  });
+}
+
+// endStateResult ports the I1 terminal conditions onto snapshot data:
+// drained -> completed; parked-only remainder -> needsReview (locally parked
+// children or snapshot children with the explicit parked status); blocked
+// with nothing runnable -> needsReview; open-but-unsatisfiable -> needsReview.
+function endStateResult(loom, epicId, snapshot, activeCount, completed, parked) {
+  if (!snapshot || activeCount > 0) {
+    return null;
+  }
+  const ready = numberValue(snapshot.readyCount, 0);
+  const blocked = numberValue(snapshot.blockedCount, 0);
+  const open = numberValue(snapshot.openChildrenCount, 0);
+  const parkedChildren = (Array.isArray(snapshot.openChildren) ? snapshot.openChildren : [])
+    .filter((child) => stringValue(child && child.status).toLowerCase() === "parked");
+  if (open === 0 && parked.length === 0) {
+    const suffix = completed.length > 0 ? ": " + completed.join(",") : "";
+    return loom.completed({ summary: "Epic drained " + epicId + suffix });
+  }
+  if (ready > 0) {
+    return null;
+  }
+  if (parked.length > 0 || parkedChildren.length > 0) {
+    const entries = parked.length > 0
+      ? parked
+      : parkedChildren.map((child) => ({ taskId: child.id, errorClass: child.status }));
+    return loom.needsReview({
+      summary: entries.length + " parked task(s): " + summarizeParkedTasks(entries),
+      errorClass: "epic_tasks_parked",
+    });
+  }
+  if (blocked > 0) {
+    return loom.needsReview({
+      summary: "Epic " + epicId + " blocked with " + blocked + " child task(s): " + summarizeTasks(snapshot.blocked),
+      errorClass: "epic_blocked",
+    });
+  }
+  if (open > 0) {
+    return loom.needsReview({
+      summary: "Epic " + epicId + " has " + open + " open child task(s), but none are ready, blocked, or active",
+      errorClass: "epic_no_progress",
+    });
+  }
+  return null;
+}
+
+// reconcileInFlight aligns the local in-flight map with the snapshot's
+// active-run list: adopt active runs this process does not know (restart
+// re-entry) and drop entries whose runs are no longer active (their terminal
+// journal events, or the next snapshot's end-state check, settle the rest).
+function reconcileInFlight(inFlight, active) {
+  const runs = active && Array.isArray(active.taskRuns) ? active.taskRuns : [];
+  const activeRunIds = new Set();
+  for (const run of runs) {
+    const taskId = stringValue(run && run.taskId);
+    const taskRunId = stringValue(run && (run.taskRunId || run.id));
+    if (taskRunId) {
+      activeRunIds.add(taskRunId);
+    }
+    if (taskId && taskRunId && !inFlight.has(taskId)) {
+      inFlight.set(taskId, taskRunId);
+    }
+  }
+  for (const [taskId, taskRunId] of Array.from(inFlight)) {
+    if (!activeRunIds.has(taskRunId)) {
+      inFlight.delete(taskId);
+    }
+  }
+}
+
+function activeCountOf(active, inFlight) {
+  return Math.max(numberValue(active && active.activeCount, 0), inFlight ? inFlight.size : 0);
+}
+
+// enqueueChildTask requests an enqueue-only TaskRun with the deterministic
+// run id. Conflicts mean the run already exists from a previous pass of this
+// driver run, so the task is simply back in flight.
+async function enqueueChildTask(loom, task, defaults) {
+  const taskRunId = deterministicTaskRunId(loom.driverRunId, task.id);
+  const request = {
+    taskId: task.id,
+    taskRunId,
+    providerProfile: defaults.providerProfile,
+    parentSessionId: defaults.parentSessionId || "",
+    nodeId: defaults.targetNodeId || "",
+    supportedProviders: [defaults.providerProfile],
+    sandboxPlacement: { provider: defaults.providerProfile },
+  };
+  const workerProfileId = defaults.workerProfileId || (defaults.workerPrefix ? defaults.workerPrefix + "-" + slug(task.id) : "");
+  if (workerProfileId) {
+    request.workerProfileId = workerProfileId;
+  }
+  try {
+    await loom.taskRuns.request(request);
+    return { ok: true, taskRunId };
+  } catch (err) {
+    if (isConflictError(err)) {
+      return { ok: true, taskRunId };
+    }
+    // Pre-execution request failure: nothing is running, so release the
+    // claim instead of stranding the task until the lock TTL expires.
+    await safeRelease(loom, task.id);
+    return {
+      ok: false,
+      parked: {
+        taskId: task.id,
+        taskRunId,
+        errorClass: "child_task_request_failed",
+        summary: "Task request failed: " + task.id + " - " + errorMessage(err),
+      },
+    };
+  }
+}
+
+// completeChildTask finalizes a completed run observed on the watch stream.
+// The serve task worker completes-and-closes successful runs itself, so a
+// conflict here means the work is already done; completionId keeps genuine
+// deferred completions idempotent across replays.
+async function completeChildTask(loom, data) {
+  const taskId = stringValue(data.taskID);
+  const taskRunId = stringValue(data.taskRunID);
+  try {
+    await loom.tasks.complete({
+      taskId,
+      taskRunId,
+      completionId: "complete-" + taskRunId,
+      leaseToken: stringValue(data.leaseToken),
+      logsRef: stringValue(data.logsRef),
+      artifactsRef: stringValue(data.artifactsRef),
+      reason: "completed by epic-runner workflow",
+    });
+    return { ok: true };
+  } catch (err) {
+    if (isConflictError(err)) {
+      return { ok: true };
+    }
+    return {
+      ok: false,
+      parked: {
+        taskId,
+        taskRunId,
+        errorClass: "child_task_completion_failed",
+        summary: "Task completion failed: " + taskId + " - " + errorMessage(err),
+        logsRef: stringValue(data.logsRef),
+        artifactsRef: stringValue(data.artifactsRef),
+      },
+    };
+  }
+}
+
+function isConflictError(err) {
+  switch (stringValue(err && err.code)) {
+    case "conflict":
+    case "already_exists":
+    case "invalid_transition":
+      return true;
+    default:
+      return false;
   }
 }
 
@@ -258,6 +436,9 @@ async function startEpicRun(loom, input, epicId) {
   };
 }
 
+// attemptLeadDelivery fires the assignment delivery op exactly once: the
+// server attempts an inline delivery and durably enqueues an outbox row for
+// anything short of delivered/unsupported, so retries live server-side.
 async function attemptLeadDelivery(loom, leadName) {
   const agent = stringValue(leadName);
   if (!agent) {
@@ -275,255 +456,6 @@ async function attemptLeadDelivery(loom, leadName) {
       reason: errorMessage(err),
     };
   }
-}
-
-function startLeadDeliveryRetry(loom, leadName, initialState, intervalMs) {
-  const state = {
-    leadName: stringValue(leadName),
-    done: !stringValue(leadName) || initialState === "delivered" || initialState === "unsupported",
-    deliveryState: stringValue(initialState) || "pending",
-    stopped: false,
-    inFlight: null,
-  };
-  async function tryOnce() {
-    if (state.done) {
-      return { state: "delivered" };
-    }
-    if (state.inFlight) {
-      return state.inFlight;
-    }
-    state.inFlight = (async () => {
-      const delivery = await attemptLeadDelivery(loom, state.leadName);
-      state.deliveryState = delivery.state || "pending";
-      if (delivery.state === "delivered" || delivery.state === "unsupported" || delivery.state === "none") {
-        state.done = true;
-      }
-      return delivery;
-    })();
-    try {
-      return await state.inFlight;
-    } finally {
-      state.inFlight = null;
-    }
-  }
-  async function loop() {
-    while (!state.stopped && !state.done) {
-      await tryOnce();
-      if (!state.stopped && !state.done) {
-        await sleep(Math.max(1000, Math.min(intervalMs, 5000)));
-      }
-    }
-  }
-  return {
-    stop() {
-      state.stopped = true;
-    },
-    flush: tryOnce,
-    isDone() {
-      return state.done;
-    },
-    deliveryState() {
-      return state.deliveryState;
-    },
-    done: loop(),
-  };
-}
-
-async function attemptLeadMessageDelivery(loom, leadName, message) {
-  const agent = stringValue(leadName);
-  const text = stringValue(message);
-  if (!agent || !text) {
-    return { state: "none" };
-  }
-  try {
-    const delivery = await loom.agents.message({ agent, message: text });
-    return {
-      state: stringValue(delivery && delivery.state) || "pending",
-      reason: stringValue(delivery && delivery.reason),
-      inboxMessageId: stringValue(delivery && (delivery.inboxMessageId || delivery.inbox_message_id)),
-    };
-  } catch (err) {
-    return {
-      state: "pending",
-      reason: errorMessage(err),
-    };
-  }
-}
-
-function startLeadMessageDeliveryRetry(loom, leadName, intervalMs, assignmentDelivery) {
-  const state = {
-    leadName: stringValue(leadName),
-    messages: [],
-    unsupported: false,
-    stopped: false,
-    inFlight: null,
-  };
-  async function tryOnce() {
-    if (!state.leadName || state.unsupported || state.messages.length === 0) {
-      return { state: state.unsupported ? "unsupported" : "none" };
-    }
-    if (state.inFlight) {
-      return state.inFlight;
-    }
-    state.inFlight = (async () => {
-      if (assignmentDelivery && !assignmentDelivery.isDone()) {
-        await assignmentDelivery.flush();
-      }
-      const delivery = await attemptLeadMessageDelivery(loom, state.leadName, state.messages[0]);
-      if (delivery.state === "delivered" || delivery.state === "none" || delivery.state === "queued" || delivery.inboxMessageId) {
-        state.messages.shift();
-      } else if (delivery.state === "unsupported") {
-        state.unsupported = true;
-        state.messages = [];
-      }
-      return delivery;
-    })();
-    try {
-      return await state.inFlight;
-    } finally {
-      state.inFlight = null;
-    }
-  }
-  async function loop() {
-    while (!state.stopped) {
-      await tryOnce();
-      if (!state.stopped) {
-        await sleep(Math.max(1000, Math.min(intervalMs, 5000)));
-      }
-    }
-  }
-  return {
-    enqueue(message) {
-      const text = stringValue(message);
-      if (state.leadName && text && !state.unsupported) {
-        if (state.messages.length > 0 && !state.inFlight) {
-          state.messages[state.messages.length - 1] = state.messages[state.messages.length - 1] + "\n\n" + text;
-        } else {
-          state.messages.push(text);
-        }
-      }
-    },
-    flush: tryOnce,
-    async drain(timeoutMs) {
-      const startedAt = Date.now();
-      let last = { state: state.messages.length > 0 ? "pending" : "none" };
-      while (!state.stopped && !state.unsupported && state.messages.length > 0) {
-        last = await tryOnce();
-        if (state.messages.length === 0 || state.unsupported) {
-          return last;
-        }
-        if (timeoutMs <= 0 || Date.now() - startedAt >= timeoutMs) {
-          return last;
-        }
-        await sleep(Math.min(1000, Math.max(0, timeoutMs - (Date.now() - startedAt))));
-      }
-      return last;
-    },
-    stop() {
-      state.stopped = true;
-    },
-    done: loop(),
-  };
-}
-
-async function runChildTask(loom, opts) {
-  const task = opts.task;
-  const taskRunId = deterministicTaskRunId(opts.driverRunId, task.id);
-  const request = {
-    taskId: task.id,
-    taskRunId,
-    providerProfile: opts.providerProfile,
-    parentSessionId: opts.parentSessionId || "",
-    nodeId: opts.targetNodeId || "",
-    supportedProviders: [opts.providerProfile],
-    sandboxPlacement: { provider: opts.providerProfile },
-  };
-  const workerProfileId = opts.workerProfileId || (opts.workerPrefix ? opts.workerPrefix + "-" + slug(task.id) : "");
-  if (workerProfileId) {
-    request.workerProfileId = workerProfileId;
-  }
-  let result;
-  try {
-    result = await loom.taskRuns.request(request);
-  } catch (err) {
-    await safeRelease(loom, task.id);
-    return {
-      ok: false,
-      taskId: task.id,
-      taskRunId,
-      errorClass: "child_task_request_failed",
-      summary: "Task request failed: " + task.id + " - " + errorMessage(err),
-    };
-  }
-  if (result && taskRunStillActive(result.status)) {
-    try {
-      result = await loom.taskRuns.await({
-        taskRunId: result.taskRunId || result.id || taskRunId,
-        pollMs: 2000,
-      });
-    } catch (err) {
-      // The run is already enqueued; keep the task claimed so claimReady does
-      // not hot-loop it while the existing run is still in flight or terminal.
-      return {
-        ok: false,
-        taskId: task.id,
-        taskRunId,
-        errorClass: "child_task_await_failed",
-        summary: "Task await failed: " + task.id + " - " + errorMessage(err),
-      };
-    }
-  }
-
-  if (result && result.status === "completed") {
-    const completedTaskRunId = result.taskRunId || result.id || taskRunId;
-    const logsRef = result.logsRef || "";
-    const artifactsRef = result.artifactsRef || "";
-    const leaseToken = result.leaseToken || "";
-    if (!leaseToken) {
-      return { ok: true, taskId: task.id, taskTitle: stringValue(task.title), taskRunId: completedTaskRunId, logsRef, artifactsRef };
-    }
-    try {
-      await loom.tasks.complete({
-        taskId: task.id,
-        taskRunId: completedTaskRunId,
-        completionId: "complete-" + completedTaskRunId,
-        leaseToken,
-        logsRef,
-        artifactsRef,
-        artifactIds: result.artifactIds || [],
-        reason: "completed by epic-runner workflow",
-      });
-    } catch (err) {
-      return {
-        ok: false,
-        taskId: task.id,
-        taskRunId: completedTaskRunId,
-        logsRef,
-        artifactsRef,
-        errorClass: "child_task_completion_failed",
-        summary: "Task completion failed: " + task.id + " - " + errorMessage(err),
-      };
-    }
-    return { ok: true, taskId: task.id, taskTitle: stringValue(task.title), taskRunId: completedTaskRunId, logsRef, artifactsRef };
-  }
-
-  // Terminal failure (the server already retried then parked the run). Do NOT
-  // release the claim: leaving the task claimed keeps claimReady from handing
-  // it straight back, and the deterministic taskRunId means a re-claim would
-  // only observe the same terminal run again.
-  return {
-    ok: false,
-    taskId: task.id,
-    taskRunId: result ? result.taskRunId || result.id || taskRunId : taskRunId,
-    logsRef: result ? result.logsRef || "" : "",
-    artifactsRef: result ? result.artifactsRef || "" : "",
-    errorClass: result ? result.errorClass || "child_task_failed" : "child_task_failed",
-    summary: "Task failed: " + task.id + (result && result.errorMessage ? " - " + result.errorMessage : ""),
-  };
-}
-
-function taskRunStillActive(status) {
-  return status === "queued" || status === "running";
 }
 
 async function safeRelease(loom, taskId) {
@@ -580,27 +512,6 @@ function summarizeParkedTasks(parked) {
   return summarizeTasks(list.map((entry) => ({ id: entry.taskId, title: entry.errorClass })));
 }
 
-function formatTaskCompleteLeadMessage(input) {
-  const taskTitle = stringValue(input.taskTitle);
-  const taskLine = stringValue(input.taskId) + (taskTitle ? " - " + taskTitle : "");
-  const lines = [
-    "Loom completed a child task under the active epic-runner workflow.",
-    "",
-    "epic: " + stringValue(input.epicId),
-    "task: " + taskLine,
-    "task_run: " + stringValue(input.taskRunId),
-  ];
-  if (stringValue(input.logsRef)) {
-    lines.push("logs: " + stringValue(input.logsRef));
-  }
-  if (stringValue(input.artifactsRef)) {
-    lines.push("artifacts: " + stringValue(input.artifactsRef));
-  }
-  lines.push("");
-  lines.push("Acknowledge this completion in the visible conversation, update your epic status summary, and continue monitoring the remaining child tasks. Do not start another epic runner.");
-  return lines.join("\n");
-}
-
 function slug(value) {
   return stringValue(value).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "item";
 }
@@ -626,10 +537,6 @@ function booleanValue(value) {
     default:
       return false;
   }
-}
-
-function sleep(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function errorMessage(err) {

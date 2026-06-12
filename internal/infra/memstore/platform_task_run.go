@@ -18,6 +18,10 @@ type taskRunStore struct {
 	items       map[string]map[string]*domain.TaskRun
 	logs        map[string]map[string][]*domain.TaskRunLogEntry
 	completions map[string]map[string]string
+	// parkedTasks records task IDs parked via TaskRunFinish.ParkTask.
+	// memstore has no issue model (issues live in fleet-db), so this is
+	// the in-memory stand-in tests use to observe the park signal.
+	parkedTasks map[string]map[string]bool
 	parent      *driverRunStore
 	steps       *driverStepStore
 	artifacts   *artifactStore
@@ -30,6 +34,7 @@ func newTaskRunStore(parent *driverRunStore, steps *driverStepStore, artifacts *
 		items:       make(map[string]map[string]*domain.TaskRun),
 		logs:        make(map[string]map[string][]*domain.TaskRunLogEntry),
 		completions: make(map[string]map[string]string),
+		parkedTasks: make(map[string]map[string]bool),
 		parent:      parent,
 		steps:       steps,
 		artifacts:   artifacts,
@@ -287,6 +292,9 @@ func (s *taskRunStore) Finish(_ context.Context, ws, taskRunID string, finish st
 	if !finish.Status.IsTerminal() {
 		return nil, fmt.Errorf("task run %q in workspace %q: %w", taskRunID, ws, domain.ErrInvalidTransition)
 	}
+	if finish.ParkTask && finish.Status != domain.TaskRunFailed {
+		return nil, fmt.Errorf("task run %q in workspace %q: %w", taskRunID, ws, domain.ErrInvalidTransition)
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	run, ok := s.items[ws][taskRunID]
@@ -322,7 +330,22 @@ func (s *taskRunStore) Finish(_ context.Context, ws, taskRunID string, finish st
 	run.ErrorMessage = finish.ErrorMessage
 	run.FinishedAt = &now
 	run.UpdatedAt = now
+	if finish.ParkTask && strings.TrimSpace(run.TaskID) != "" {
+		if s.parkedTasks[ws] == nil {
+			s.parkedTasks[ws] = make(map[string]bool)
+		}
+		s.parkedTasks[ws][run.TaskID] = true
+	}
 	return cloneTaskRun(run), nil
+}
+
+// TaskParked reports whether a ParkTask finish marked the given task ID
+// parked. memstore has no issue model, so this is the test-side observable
+// for the fleet-db issue transition.
+func (s *taskRunStore) TaskParked(ws, taskID string) bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.parkedTasks[ws][taskID]
 }
 
 func (s *taskRunStore) Heartbeat(_ context.Context, ws, taskRunID string, heartbeat store.TaskRunHeartbeat) (*domain.TaskRun, error) {

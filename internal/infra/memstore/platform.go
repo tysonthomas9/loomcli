@@ -252,6 +252,9 @@ func (s *triggerBindingStore) validateTriggerBindingCreate(in store.TriggerBindi
 	if in.TargetAgentServiceID != "" && s.services != nil && !s.services.exists(in.WorkspaceKey, in.TargetAgentServiceID) {
 		return fmt.Errorf("target agent service %q in workspace %q: %w", in.TargetAgentServiceID, in.WorkspaceKey, domain.ErrNotFound)
 	}
+	if in.RetryMaxAttempts < 0 || in.RetryBackoffSeconds < 0 {
+		return fmt.Errorf("retry_max_attempts and retry_backoff_seconds must be non-negative: %w", domain.ErrInvalid)
+	}
 	return nil
 }
 
@@ -290,6 +293,12 @@ func newTriggerBindingMem(in store.TriggerBindingCreate) *domain.TriggerBinding 
 		IdempotencyPolicy:    firstNonEmptyMem(in.IdempotencyPolicy, "header:Idempotency-Key"),
 		AuthPolicy:           firstNonEmptyMem(in.AuthPolicy, "workspace_user"),
 		WebhookSecret:        in.WebhookSecret,
+		SubjectKeyTemplate:   in.SubjectKeyTemplate,
+		ActorFilter:          normalizedActorFilterMem(in.ActorFilter),
+		RetryMaxAttempts:     defaultRetryFieldMem(in.RetryMaxAttempts, domain.DefaultTriggerRetryMaxAttempts),
+		RetryBackoffSeconds:  defaultRetryFieldMem(in.RetryBackoffSeconds, domain.DefaultTriggerRetryBackoffSeconds),
+		Schedule:             in.Schedule,
+		ScheduleTimezone:     in.ScheduleTimezone,
 		Permissions:          append([]string(nil), in.Permissions...),
 		Enabled:              in.Enabled,
 		CreatedAt:            now,

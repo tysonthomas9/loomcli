@@ -1,4 +1,14 @@
 #!/usr/bin/env bash
+# Real-Flue E2E for the builtin watch-driven epic-runner workflow.
+#
+# Scenario 1: a 4-task DAG drains through the epic watch stream (no polling
+#             cadence; wall time is asserted), the bound lead receives one
+#             task-completed inbox message per child FROM THE SERVER OUTBOX
+#             (asserted via the outbox dedupe key), and a retry run is a no-op
+#             that does not duplicate task runs or lead messages.
+# Scenario 2: a deliberately failing branch is retried then parked server-side
+#             while sibling branches drain; the run lands in needs_review
+#             (epic_tasks_parked) and a rerun stays idempotent.
 set -Eeuo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -7,11 +17,16 @@ FLUE_REPO="${FLUE_REPO:-$(cd "$ROOT/../flue" 2>/dev/null && pwd || true)}"
 
 WS="${LOOM_REAL_FLUE_E2E_WORKSPACE:-FLUEE2E}"
 RUN_ID="${LOOM_REAL_FLUE_E2E_RUN_ID:-run-real-flue-e2e}"
+LEAD_NAME="${LOOM_REAL_FLUE_E2E_LEAD:-e2e-lead}"
 REDIS_PORT="${REDIS_PORT:-16379}"
 FLEET_PORT="${FLEET_PORT:-18095}"
 LOOM_PORT="${LOOM_PORT:-18096}"
 FLEET_URL="http://127.0.0.1:${FLEET_PORT}"
 LOOM_URL="http://127.0.0.1:${LOOM_PORT}"
+# The watch-driven loop reacts to journal events instead of sleeping between
+# polls, so the whole DAG must drain well inside this budget (the old
+# cadence-based loop burned ~5s per scheduling round).
+MAX_DAG_WALL_SECONDS="${LOOM_REAL_FLUE_E2E_MAX_DAG_WALL_SECONDS:-30}"
 
 require_cmd() {
   if ! command -v "$1" >/dev/null 2>&1; then
@@ -107,7 +122,7 @@ echo "==> building fleet-db and loom"
   GOCACHE="${GOCACHE:-/tmp/go-build-cache}" go build -o "$BIN_DIR/loom" ./cmd/loom
 )
 
-echo "==> creating isolated workflow repo"
+echo "==> creating isolated workflow repo with the builtin epic-runner"
 (
   cd "$WORKDIR"
   git init -q
@@ -119,61 +134,7 @@ echo "==> creating isolated workflow repo"
   ln -s "$FLUE_REPO/packages/runtime" node_modules/@flue/runtime
   printf '%s\n' '{"type":"module","dependencies":{"@loom/sdk":"file:./node_modules/@loom/sdk","@flue/runtime":"file:./node_modules/@flue/runtime"}}' > package.json
 )
-
-cat > "$WORKDIR/workflows/epic-runner.ts" <<'EOF'
-import { createLoomDriverClient } from '@loom/sdk/flue';
-
-export async function run(ctx) {
-  const input = ctx.payload || {};
-  const loom = createLoomDriverClient({ input });
-  console.log("native-flue-driver-start " + input.epicId);
-  const completed = [];
-  while (true) {
-    const task = await loom.tasks.claimReady({ epicId: input.epicId });
-    if (!task) {
-      return loom.completed({ summary: "Epic drained: " + completed.join(",") });
-    }
-
-    const result = await loom.taskRuns.request({
-      taskId: task.id,
-      providerProfile: "flue-local",
-      supportedProviders: ["flue-local"],
-      sandboxPlacement: { provider: "flue-local" },
-    });
-    if (result.status === "queued" || result.status === "running") {
-      Object.assign(result, await loom.taskRuns.await({
-        taskRunId: result.taskRunId || result.id,
-        pollMs: 500,
-      }));
-    }
-
-    if (result.status === "completed") {
-      if (result.leaseToken) {
-        await loom.tasks.complete({
-          taskId: task.id,
-          taskRunId: result.taskRunId || result.id,
-          leaseToken: result.leaseToken,
-          logsRef: result.logsRef || "",
-          artifactsRef: result.artifactsRef || "",
-          artifactIds: result.artifactIds || [],
-        });
-      }
-      completed.push(task.id);
-    } else {
-      await loom.tasks.release(task.id);
-      return loom.needsReview({
-        summary: "Task failed: " + task.id,
-        taskRunId: result.taskRunId || result.id,
-        logsRef: result.logsRef || "",
-        artifactsRef: result.artifactsRef || "",
-      });
-    }
-  }
-}
-EOF
-
-echo "==> staging builtin epic-runner workflow alongside the inline harness workflow"
-cp "$ROOT/internal/workflows/builtin/epic-runner.ts" "$WORKDIR/workflows/epic-runner-builtin.ts"
+cp "$ROOT/internal/workflows/builtin/epic-runner.ts" "$WORKDIR/workflows/epic-runner.ts"
 
 # When this file exists and contains a task id, the task runner fails that
 # task on every attempt so the server retry-then-park policy exhausts
@@ -257,6 +218,41 @@ curl_json() {
   fi
 }
 
+# lead_task_message_count counts the lead's inbox messages created by the
+# server outbox dispatcher: only outbox rows carry the lead-task-message
+# dedupe key (forwarded into the inbox), so this is the provenance assertion
+# AND the exactly-once assertion in one number.
+lead_task_message_count() {
+  curl_json GET "/api/v1/${WS}/agent-inbox-messages?target_agent_id=${LEAD_NAME}&limit=200" \
+    | jq '[.agent_inbox_messages[]? | select((.dedupe_key // "") | startswith("lead-task-message:"))] | length'
+}
+
+wait_driver_run_status() {
+  local run_id="$1"
+  local want="$2"
+  local attempts="${3:-240}"
+  local run_json status
+  for _ in $(seq 1 "$attempts"); do
+    run_json="$(curl_json GET "/api/v1/${WS}/driver-runs/${run_id}")"
+    status="$(jq -r '.status' <<<"$run_json")"
+    if [[ "$status" == "$want" ]]; then
+      printf '%s' "$run_json"
+      return 0
+    fi
+    case "$status" in
+      completed|failed|needs_review|cancelled)
+        echo "driver run ${run_id} reached terminal status ${status}, want ${want}" >&2
+        jq . <<<"$run_json" >&2
+        return 1
+        ;;
+    esac
+    sleep 0.5
+  done
+  echo "driver run ${run_id} did not reach ${want}" >&2
+  jq . <<<"$run_json" >&2
+  return 1
+}
+
 echo "==> starting Redis on ${REDIS_PORT}"
 redis-server --port "$REDIS_PORT" --save "" --appendonly no >"$TMP_ROOT/redis.log" 2>&1 &
 PIDS+=("$!")
@@ -278,8 +274,10 @@ echo "==> starting fleet-db on ${FLEET_PORT}"
 PIDS+=("$!")
 wait_http "$FLEET_URL/healthz" "fleet-db"
 
-echo "==> seeding workspace and DAG epic"
+echo "==> seeding workspace, lead agent, and DAG epic"
 curl_json POST /api/v1/admin/workspaces "$(jq -nc --arg key "$WS" '{key:$key,name:"Real Flue E2E",repos:["local/repo"],state:"ready"}')" >/dev/null
+curl_json POST "/api/v1/${WS}/roles" '{"name":"lead","description":"e2e lead role"}' >/dev/null
+curl_json POST "/api/v1/${WS}/agents" "$(jq -nc --arg name "$LEAD_NAME" '{name:$name,role_name:"lead"}')" >/dev/null
 
 export LOOM_CONFIG_DIR
 export LOOM_WORKSPACE="$WS"
@@ -296,7 +294,7 @@ TASK_B="$(create_issue --title "B" --type task --parent "$EPIC_ID" --depends-on 
 TASK_C="$(create_issue --title "C" --type task --parent "$EPIC_ID" --depends-on "$TASK_A" --priority 1)"
 TASK_D="$(create_issue --title "D" --type task --parent "$EPIC_ID" --depends-on "$TASK_B" --depends-on "$TASK_C" --priority 1)"
 
-echo "    epic=${EPIC_ID} dag=${TASK_A}->${TASK_B},${TASK_C}->${TASK_D}"
+echo "    epic=${EPIC_ID} dag=${TASK_A}->${TASK_B},${TASK_C}->${TASK_D} lead=${LEAD_NAME}"
 
 echo "==> registering executor node"
 curl_json POST "/api/v1/${WS}/nodes" "$(jq -nc --arg node "real-flue-e2e-node" '{node_id:$node,owner_actor:"real-flue-e2e",runtime_provider:"local",drain_state:"active",capacity:8,ttl_seconds:300}')" >/dev/null
@@ -307,17 +305,11 @@ echo "==> building native Flue driver"
   run_flue build --target node --root "$WORKDIR" --output "$WORKDIR/dist"
 ) >"$TMP_ROOT/flue-build.log" 2>&1
 
-echo "==> registering native Flue driver"
+echo "==> registering builtin epic-runner driver"
 (
   cd "$WORKDIR"
   "$BIN_DIR/loom" --workspace "$WS" driver register --flue-dist dist --name epic-runner --workflow epic-runner --source-ref workflows/epic-runner.ts --activate --json
 ) >"$TMP_ROOT/register.json"
-
-echo "==> registering builtin epic-runner driver from the same dist"
-(
-  cd "$WORKDIR"
-  "$BIN_DIR/loom" --workspace "$WS" driver register --flue-dist dist --name epic-runner-builtin --workflow epic-runner-builtin --source-ref workflows/epic-runner-builtin.ts --activate --json
-) >"$TMP_ROOT/register-builtin.json"
 
 echo "==> starting loom serve driver executor on ${LOOM_PORT}"
 (
@@ -332,31 +324,19 @@ echo "==> starting loom serve driver executor on ${LOOM_PORT}"
 PIDS+=("$!")
 wait_http "$LOOM_URL/health" "loom serve"
 
-echo "==> queueing driver run"
+echo "==> scenario 1: watch-driven DAG drain with bound lead"
+DAG_STARTED_AT="$SECONDS"
 (
   cd "$WORKDIR"
-  "$BIN_DIR/loom" --workspace "$WS" driver run epic-runner --epic "$EPIC_ID" --run-id "$RUN_ID" --json
+  "$BIN_DIR/loom" --workspace "$WS" driver run epic-runner --epic "$EPIC_ID" --run-id "$RUN_ID" --input "leadName=${LEAD_NAME}" --json
 ) | tee "$TMP_ROOT/driver-run.json" >/dev/null
 
 echo "==> waiting for run completion"
-for _ in $(seq 1 120); do
-  run_json="$(curl_json GET "/api/v1/${WS}/driver-runs/${RUN_ID}")"
-  status="$(jq -r '.status' <<<"$run_json")"
-  if [[ "$status" == "completed" ]]; then
-    break
-  fi
-  if [[ "$status" == "failed" || "$status" == "needs_review" || "$status" == "cancelled" ]]; then
-    echo "driver run reached terminal status ${status}" >&2
-    jq . <<<"$run_json" >&2
-    exit 1
-  fi
-  sleep 0.5
-done
-
-run_json="$(curl_json GET "/api/v1/${WS}/driver-runs/${RUN_ID}")"
-if [[ "$(jq -r '.status' <<<"$run_json")" != "completed" ]]; then
-  echo "driver run did not complete" >&2
-  jq . <<<"$run_json" >&2
+run_json="$(wait_driver_run_status "$RUN_ID" completed)"
+DAG_WALL_SECONDS="$((SECONDS - DAG_STARTED_AT))"
+echo "    DAG drained in ${DAG_WALL_SECONDS}s (budget ${MAX_DAG_WALL_SECONDS}s)"
+if [[ "$DAG_WALL_SECONDS" -gt "$MAX_DAG_WALL_SECONDS" ]]; then
+  echo "watch-driven drain took ${DAG_WALL_SECONDS}s, exceeding the ${MAX_DAG_WALL_SECONDS}s no-polling budget" >&2
   exit 1
 fi
 if [[ "$(jq -r '.output.logs_ref // ""' <<<"$run_json")" != "driver-run://${RUN_ID}/flue-local" ]]; then
@@ -364,8 +344,8 @@ if [[ "$(jq -r '.output.logs_ref // ""' <<<"$run_json")" != "driver-run://${RUN_
   jq . <<<"$run_json" >&2
   exit 1
 fi
-if ! jq -e '.output.flue_stderr_tail | contains("native-flue-driver-start")' <<<"$run_json" >/dev/null; then
-  echo "driver run output missing captured Flue log marker" >&2
+if ! jq -e --arg epic "$EPIC_ID" '.summary | contains("Epic drained " + $epic)' <<<"$run_json" >/dev/null; then
+  echo "driver run summary is not the watch-driven drain summary" >&2
   jq . <<<"$run_json" >&2
   exit 1
 fi
@@ -416,36 +396,51 @@ if [[ "$middle" != "$want_middle" ]]; then
   exit 1
 fi
 
-echo "==> verifying retry does not duplicate completed child tasks"
-RETRY_RUN_ID="${RUN_ID}-retry"
-(
-  cd "$WORKDIR"
-  "$BIN_DIR/loom" --workspace "$WS" driver run epic-runner --epic "$EPIC_ID" --run-id "$RETRY_RUN_ID" --json
-) >"$TMP_ROOT/driver-run-retry.json"
-for _ in $(seq 1 120); do
-  retry_json="$(curl_json GET "/api/v1/${WS}/driver-runs/${RETRY_RUN_ID}")"
-  retry_status="$(jq -r '.status' <<<"$retry_json")"
-  if [[ "$retry_status" == "completed" ]]; then
+echo "==> verifying lead received task-completed messages from the server outbox"
+lead_messages=0
+for _ in $(seq 1 60); do
+  lead_messages="$(lead_task_message_count)"
+  if [[ "$lead_messages" == "4" ]]; then
     break
-  fi
-  if [[ "$retry_status" == "failed" || "$retry_status" == "needs_review" || "$retry_status" == "cancelled" ]]; then
-    echo "retry driver run reached terminal status ${retry_status}" >&2
-    jq . <<<"$retry_json" >&2
-    exit 1
   fi
   sleep 0.5
 done
-retry_json="$(curl_json GET "/api/v1/${WS}/driver-runs/${RETRY_RUN_ID}")"
-if [[ "$(jq -r '.status' <<<"$retry_json")" != "completed" ]]; then
-  echo "retry driver run did not complete" >&2
-  jq . <<<"$retry_json" >&2
+if [[ "$lead_messages" != "4" ]]; then
+  echo "expected four outbox-delivered lead task messages, got ${lead_messages}" >&2
+  curl_json GET "/api/v1/${WS}/agent-inbox-messages?target_agent_id=${LEAD_NAME}&limit=200" | jq . >&2
   exit 1
 fi
-retry_task_runs_json="$(curl_json GET "/api/v1/${WS}/task-runs?driver_run_id=${RETRY_RUN_ID}")"
-retry_task_runs="$(jq '[.task_runs[]] | length' <<<"$retry_task_runs_json")"
+lead_inbox_json="$(curl_json GET "/api/v1/${WS}/agent-inbox-messages?target_agent_id=${LEAD_NAME}&limit=200")"
+outbox_message_bodies_ok="$(jq '[.agent_inbox_messages[]? | select((.dedupe_key // "") | startswith("lead-task-message:")) | select((.body | contains("Loom completed a child task")) and ((.task_run_id // "") != ""))] | length' <<<"$lead_inbox_json")"
+if [[ "$outbox_message_bodies_ok" != "4" ]]; then
+  echo "outbox-delivered lead messages are missing the server-side template or task_run_id linkage" >&2
+  jq . <<<"$lead_inbox_json" >&2
+  exit 1
+fi
+if ! jq -e '[.agent_inbox_messages[]? | select((.source_kind // "") == "lead_assignment")] | length >= 1' <<<"$lead_inbox_json" >/dev/null; then
+  echo "lead assignment inbox message missing (deliver-lead-assignment fire-once + outbox)" >&2
+  jq . <<<"$lead_inbox_json" >&2
+  exit 1
+fi
+
+echo "==> verifying retry does not duplicate completed child tasks or lead messages"
+RETRY_RUN_ID="${RUN_ID}-retry"
+(
+  cd "$WORKDIR"
+  "$BIN_DIR/loom" --workspace "$WS" driver run epic-runner --epic "$EPIC_ID" --run-id "$RETRY_RUN_ID" --input "leadName=${LEAD_NAME}" --json
+) >"$TMP_ROOT/driver-run-retry.json"
+wait_driver_run_status "$RETRY_RUN_ID" completed >/dev/null
+retry_task_runs="$(curl_json GET "/api/v1/${WS}/task-runs?driver_run_id=${RETRY_RUN_ID}" | jq '[.task_runs[]] | length')"
 if [[ "$retry_task_runs" != "0" ]]; then
   echo "retry driver run created duplicate child TaskRuns" >&2
-  jq . <<<"$retry_task_runs_json" >&2
+  curl_json GET "/api/v1/${WS}/task-runs?driver_run_id=${RETRY_RUN_ID}" | jq . >&2
+  exit 1
+fi
+sleep 3
+lead_messages_after_retry="$(lead_task_message_count)"
+if [[ "$lead_messages_after_retry" != "4" ]]; then
+  echo "rerun duplicated outbox lead messages (dedupe broken): ${lead_messages_after_retry}, want 4" >&2
+  curl_json GET "/api/v1/${WS}/agent-inbox-messages?target_agent_id=${LEAD_NAME}&limit=200" | jq . >&2
   exit 1
 fi
 
@@ -461,29 +456,11 @@ echo "    epic=${EPIC2_ID} failing=${TASK2_C} sibling-branch=${TASK2_B}->${TASK2
 PARKED_RUN_ID="${RUN_ID}-parked"
 (
   cd "$WORKDIR"
-  "$BIN_DIR/loom" --workspace "$WS" driver run epic-runner-builtin --epic "$EPIC2_ID" --run-id "$PARKED_RUN_ID" --input intervalSeconds=1 --input leadNotificationDrainSeconds=0 --json
+  "$BIN_DIR/loom" --workspace "$WS" driver run epic-runner --epic "$EPIC2_ID" --run-id "$PARKED_RUN_ID" --json
 ) >"$TMP_ROOT/driver-run-parked.json"
 
 echo "==> waiting for parked-branch run to reach needs_review"
-parked_run_json=""
-for _ in $(seq 1 240); do
-  parked_run_json="$(curl_json GET "/api/v1/${WS}/driver-runs/${PARKED_RUN_ID}")"
-  parked_status="$(jq -r '.status' <<<"$parked_run_json")"
-  if [[ "$parked_status" == "needs_review" ]]; then
-    break
-  fi
-  if [[ "$parked_status" == "completed" || "$parked_status" == "failed" || "$parked_status" == "cancelled" ]]; then
-    echo "parked-branch driver run reached unexpected terminal status ${parked_status}" >&2
-    jq . <<<"$parked_run_json" >&2
-    exit 1
-  fi
-  sleep 0.5
-done
-if [[ "$(jq -r '.status' <<<"$parked_run_json")" != "needs_review" ]]; then
-  echo "parked-branch driver run did not reach needs_review" >&2
-  jq . <<<"$parked_run_json" >&2
-  exit 1
-fi
+parked_run_json="$(wait_driver_run_status "$PARKED_RUN_ID" needs_review)"
 if [[ "$(jq -r '.error_class // ""' <<<"$parked_run_json")" != "epic_tasks_parked" ]]; then
   echo "parked-branch driver run error_class is not epic_tasks_parked" >&2
   jq . <<<"$parked_run_json" >&2
@@ -506,8 +483,8 @@ for sibling in "$TASK2_A" "$TASK2_B" "$TASK2_D"; do
   fi
 done
 failed_task_status="$(jq -r --arg id "$TASK2_C" '.issues[] | select(.id == $id) | .status' <<<"$issues2_json")"
-if [[ "$failed_task_status" == "closed" || -z "$failed_task_status" ]]; then
-  echo "parked task ${TASK2_C} should stay open, got ${failed_task_status:-missing}" >&2
+if [[ "$failed_task_status" != "parked" ]]; then
+  echo "parked task ${TASK2_C} should have the explicit parked status, got ${failed_task_status:-missing}" >&2
   jq . <<<"$issues2_json" >&2
   exit 1
 fi
@@ -530,29 +507,23 @@ if [[ "$fail_attempts" != "2" ]]; then
   echo "expected the failing task to run exactly twice (retry then park), got ${fail_attempts}" >&2
   exit 1
 fi
+# Epic 2 has no bound lead, so the parked/completed transitions there must
+# not have produced additional outbox lead messages.
+lead_messages_after_parked="$(lead_task_message_count)"
+if [[ "$lead_messages_after_parked" != "4" ]]; then
+  echo "lead-less epic produced outbox lead messages: ${lead_messages_after_parked}, want 4" >&2
+  exit 1
+fi
 
 echo "==> verifying rerun does not duplicate task runs for the parked epic"
 PARKED_RETRY_RUN_ID="${PARKED_RUN_ID}-retry"
 (
   cd "$WORKDIR"
-  "$BIN_DIR/loom" --workspace "$WS" driver run epic-runner-builtin --epic "$EPIC2_ID" --run-id "$PARKED_RETRY_RUN_ID" --input intervalSeconds=1 --input leadNotificationDrainSeconds=0 --json
+  "$BIN_DIR/loom" --workspace "$WS" driver run epic-runner --epic "$EPIC2_ID" --run-id "$PARKED_RETRY_RUN_ID" --json
 ) >"$TMP_ROOT/driver-run-parked-retry.json"
-parked_retry_json=""
-for _ in $(seq 1 240); do
-  parked_retry_json="$(curl_json GET "/api/v1/${WS}/driver-runs/${PARKED_RETRY_RUN_ID}")"
-  parked_retry_status="$(jq -r '.status' <<<"$parked_retry_json")"
-  if [[ "$parked_retry_status" == "needs_review" ]]; then
-    break
-  fi
-  if [[ "$parked_retry_status" == "completed" || "$parked_retry_status" == "failed" || "$parked_retry_status" == "cancelled" ]]; then
-    echo "parked-branch rerun reached unexpected terminal status ${parked_retry_status}" >&2
-    jq . <<<"$parked_retry_json" >&2
-    exit 1
-  fi
-  sleep 0.5
-done
-if [[ "$(jq -r '.status' <<<"$parked_retry_json")" != "needs_review" ]]; then
-  echo "parked-branch rerun did not reach needs_review" >&2
+parked_retry_json="$(wait_driver_run_status "$PARKED_RETRY_RUN_ID" needs_review)"
+if [[ "$(jq -r '.error_class // ""' <<<"$parked_retry_json")" != "epic_tasks_parked" ]]; then
+  echo "parked-branch rerun error_class is not epic_tasks_parked" >&2
   jq . <<<"$parked_retry_json" >&2
   exit 1
 fi
@@ -570,5 +541,6 @@ fi
 echo "real Flue epic runner E2E passed"
 echo "  FleetDB: ${FLEET_URL}"
 echo "  Loom:    ${LOOM_URL}"
-echo "  DAG:     ${executed[*]}"
+echo "  DAG:     ${executed[*]} (drained in ${DAG_WALL_SECONDS}s, watch-driven)"
+echo "  Lead:    ${LEAD_NAME} received 4 outbox task messages (exactly-once on rerun)"
 echo "  Parked:  epic=${EPIC2_ID} task=${TASK2_C} (siblings drained, run needs_review epic_tasks_parked)"

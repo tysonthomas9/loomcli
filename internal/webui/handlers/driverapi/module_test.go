@@ -21,14 +21,24 @@ import (
 // touch need real implementations; anything else panics loudly.
 type fakeIssueBackend struct {
 	backend.IssueBackend
-	ready   []backend.IssueData
-	epic    *backend.IssueDetailData
-	actor   string
-	claimed []string
+	ready    []backend.IssueData
+	blocked  []backend.IssueData
+	children []backend.IssueData
+	epic     *backend.IssueDetailData
+	actor    string
+	claimed  []string
 }
 
 func (f *fakeIssueBackend) Ready(_ context.Context, _ backend.ReadyOpts) ([]backend.IssueData, error) {
 	return f.ready, nil
+}
+
+func (f *fakeIssueBackend) Blocked(_ context.Context, _ backend.BlockedOpts) ([]backend.IssueData, error) {
+	return f.blocked, nil
+}
+
+func (f *fakeIssueBackend) List(_ context.Context, _ backend.ListOpts) ([]backend.IssueData, error) {
+	return f.children, nil
 }
 
 func (f *fakeIssueBackend) ClaimIssue(_ context.Context, id string, _ time.Duration) error {
@@ -49,6 +59,7 @@ func (f *fakeIssueBackend) Get(_ context.Context, _ string) (*backend.IssueDetai
 type testHarness struct {
 	server  *httptest.Server
 	store   store.Store
+	module  *Module
 	backend *fakeIssueBackend
 	runID   string
 	nodeID  string
@@ -109,6 +120,7 @@ func newTestHarness(t *testing.T, apiToken string) *testHarness {
 	return &testHarness{
 		server:  server,
 		store:   st,
+		module:  module,
 		backend: fake,
 		runID:   claimed.RunID,
 		nodeID:  claimed.NodeID,

@@ -60,7 +60,10 @@ type TaskRunEvent struct {
 	LogsRef        string           `json:"logsRef,omitempty"`
 	ArtifactsRef   string           `json:"artifactsRef,omitempty"`
 	LeaseToken     string           `json:"leaseToken,omitempty"`
-	OccurredAt     time.Time        `json:"occurredAt"`
+	// NextEligibleAt is set on taskRunRequeued events: the run is held by
+	// retry backoff and only becomes claimable at this time.
+	NextEligibleAt *time.Time `json:"nextEligibleAt,omitempty"`
+	OccurredAt     time.Time  `json:"occurredAt"`
 }
 
 // OutboxKind classifies what an OutboxRecord delivers.

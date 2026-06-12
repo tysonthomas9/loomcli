@@ -25,11 +25,27 @@ type AgentMessageDeliveryResult struct {
 	Controlled      bool   `json:"controlled,omitempty"`
 }
 
+// AgentMessageDeliveryOptions carries optional delivery metadata for
+// DeliverAgentMessageForDriverWithOptions. DedupeKey, when set, overrides the
+// inbox-side dedupe key so redelivery (e.g. the outbox dispatcher retrying)
+// never enqueues the same message twice.
+type AgentMessageDeliveryOptions struct {
+	TaskRunID string
+	DedupeKey string
+}
+
 // DeliverAgentMessageForDriver routes a driver-run message to an agent:
 // controlled lead agents get live lead-control delivery, everything else is
 // queued into the agent inbox. Shared by the driver CLI deliver-agent-message
 // subcommand and the driver-op HTTP API.
 func DeliverAgentMessageForDriver(ctx context.Context, st store.Store, workspace, driverRunID, agentName, message string) (AgentMessageDeliveryResult, error) {
+	return DeliverAgentMessageForDriverWithOptions(ctx, st, workspace, driverRunID, agentName, message, AgentMessageDeliveryOptions{})
+}
+
+// DeliverAgentMessageForDriverWithOptions is DeliverAgentMessageForDriver
+// with explicit delivery options; the outbox dispatcher uses it to forward
+// the row's DedupeKey into the agent inbox.
+func DeliverAgentMessageForDriverWithOptions(ctx context.Context, st store.Store, workspace, driverRunID, agentName, message string, opts AgentMessageDeliveryOptions) (AgentMessageDeliveryResult, error) {
 	agent, err := st.Agents().Get(ctx, workspace, agentName)
 	if err != nil {
 		return AgentMessageDeliveryResult{}, fmt.Errorf("get target agent: %w", err)
@@ -38,6 +54,8 @@ func DeliverAgentMessageForDriver(ctx context.Context, st store.Store, workspace
 		delivery, err := leadcontrol.DeliverLeadMessageWithOptions(ctx, st, workspace, agentName, message, leadcontrol.LeadMessageDeliveryOptions{
 			SourceKind:  "workflow",
 			DriverRunID: driverRunID,
+			TaskRunID:   opts.TaskRunID,
+			DedupeKey:   opts.DedupeKey,
 		})
 		if err != nil {
 			return AgentMessageDeliveryResult{}, err
@@ -48,6 +66,8 @@ func DeliverAgentMessageForDriver(ctx context.Context, st store.Store, workspace
 		SourceKind:  "workflow",
 		SourceRef:   "driver-run://" + strings.TrimSpace(driverRunID),
 		DriverRunID: driverRunID,
+		TaskRunID:   opts.TaskRunID,
+		DedupeKey:   opts.DedupeKey,
 	})
 	if err != nil {
 		return AgentMessageDeliveryResult{}, err

@@ -44,6 +44,22 @@ export interface FlueEpicInput {
   epicId?: string;
 }
 
+export interface FlueEpicWatchInput extends FlueEpicInput {
+  /** Exclusive journal cursor: only events with Seq greater than this are yielded. */
+  afterSeq?: number | string;
+  /** Aborting the signal ends iteration without throwing. */
+  signal?: AbortSignal;
+  /** Reconnect backoff in milliseconds (default 2000); server `retry:` hints override it. */
+  reconnectMs?: number;
+}
+
+export interface FlueEpicWatchEvent {
+  type: "snapshot" | "taskRun" | "closed" | string;
+  /** Last-Event-ID cursor for the frame (journal Seq as a string). */
+  id: string;
+  data: unknown;
+}
+
 export interface FlueAgentInput {
   agent?: string;
   agentName?: string;
@@ -108,6 +124,7 @@ export declare class FlueDriverClient {
   readonly epics: {
     get(input?: FlueEpicInput): Promise<Record<string, unknown> | null>;
     snapshot(input?: FlueEpicInput): Promise<Record<string, unknown> | null>;
+    watch(input?: FlueEpicWatchInput): AsyncGenerator<FlueEpicWatchEvent, void, undefined>;
   };
   readonly agents: {
     list(input?: Record<string, unknown>): Promise<Record<string, unknown>[] | null>;
@@ -141,6 +158,7 @@ export declare class FlueDriverClient {
   claimReady(input?: FlueEpicInput): Promise<Record<string, unknown> | null>;
   getEpic(input?: FlueEpicInput): Promise<Record<string, unknown> | null>;
   epicSnapshot(input?: FlueEpicInput): Promise<Record<string, unknown> | null>;
+  watchEpic(input?: FlueEpicWatchInput): AsyncGenerator<FlueEpicWatchEvent, void, undefined>;
   listAgents(input?: Record<string, unknown>): Promise<Record<string, unknown>[] | null>;
   agentOrchestrationSession(input?: FlueAgentInput): Promise<Record<string, unknown> | null>;
   updateAgentParent(input?: FlueAgentParentUpdateInput): Promise<Record<string, unknown> | null>;

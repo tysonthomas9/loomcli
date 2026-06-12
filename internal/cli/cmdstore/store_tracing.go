@@ -57,6 +57,8 @@ func WrapStoreWithTracing(inner store.Store) store.Store {
 		driverRuns:           &tracedDriverRunStore{inner: inner.DriverRuns()},
 		driverSteps:          &tracedDriverStepStore{inner: inner.DriverSteps()},
 		taskRuns:             &tracedTaskRunStore{inner: inner.TaskRuns()},
+		taskRunEvents:        &tracedTaskRunEventStore{inner: inner.TaskRunEvents()},
+		outbox:               &tracedOutboxStore{inner: inner.Outbox()},
 		workers:              &tracedWorkerStore{inner: inner.Workers()},
 		roles:                &tracedRoleStore{inner: inner.Roles()},
 		daemon:               &tracedDaemonStore{inner: inner.Daemon()},
@@ -84,6 +86,8 @@ type tracedStore struct {
 	driverRuns           *tracedDriverRunStore
 	driverSteps          *tracedDriverStepStore
 	taskRuns             *tracedTaskRunStore
+	taskRunEvents        *tracedTaskRunEventStore
+	outbox               *tracedOutboxStore
 	workers              *tracedWorkerStore
 	roles                *tracedRoleStore
 	daemon               *tracedDaemonStore
@@ -138,10 +142,10 @@ func (t *tracedStore) DriverSteps() store.DriverStepStore {
 }
 func (t *tracedStore) TaskRuns() store.TaskRunStore { return t.taskRuns }
 func (t *tracedStore) TaskRunEvents() store.TaskRunEventStore {
-	return t.inner.TaskRunEvents()
+	return t.taskRunEvents
 }
 func (t *tracedStore) Outbox() store.OutboxStore {
-	return t.inner.Outbox()
+	return t.outbox
 }
 func (t *tracedStore) Workers() store.WorkerStore       { return t.workers }
 func (t *tracedStore) Roles() store.RoleStore           { return t.roles }

@@ -74,6 +74,16 @@ type Module struct {
 	worktreePath  string
 	issueBackends IssueBackendFactory
 	ops           map[string]opHandler
+
+	// Watch stream cadence (see watch.go). Defaults set in NewModule;
+	// overridden in tests.
+	watchPollInterval      time.Duration
+	watchHeartbeatInterval time.Duration
+	watchReconcileInterval time.Duration
+
+	// deliverAssignment is a test seam over
+	// leadcontrol.DeliverCurrentAssignment for deliver-lead-assignment.
+	deliverAssignment func(ctx context.Context, st store.Store, workspace, leadName string) (*leadcontrol.DeliveryResult, error)
 }
 
 // NewModule constructs the driver API module. Returns nil-safe behavior: with
@@ -84,6 +94,12 @@ func NewModule(cfg Config) *Module {
 		apiToken:      strings.TrimSpace(cfg.APIToken),
 		worktreePath:  cfg.WorktreePath,
 		issueBackends: cfg.IssueBackends,
+
+		watchPollInterval:      defaultWatchPollInterval,
+		watchHeartbeatInterval: defaultWatchHeartbeatInterval,
+		watchReconcileInterval: defaultWatchReconcileInterval,
+
+		deliverAssignment: leadcontrol.DeliverCurrentAssignment,
 	}
 	m.ops = map[string]opHandler{
 		"claim-ready":                 m.claimReady,
@@ -129,6 +145,7 @@ func (m *Module) Register(mux *http.ServeMux) {
 		return
 	}
 	mux.HandleFunc("POST /api/workspaces/{ws}/driver/{op}", m.handleOp)
+	mux.HandleFunc("GET /api/workspaces/{ws}/driver/watch/epic", m.handleWatchEpic)
 }
 
 // driverIdentity is the per-request parent DriverRun identity resolved from
@@ -377,16 +394,38 @@ func (m *Module) deliverLeadAssignment(ctx context.Context, ws string, id driver
 	if err != nil {
 		return nil, err
 	}
-	if _, err := m.verifyParent(ctx, ws, id); err != nil {
+	parent, err := m.verifyParent(ctx, ws, id)
+	if err != nil {
 		return nil, err
 	}
 	leadName := strings.TrimSpace(params.Agent)
 	if leadName == "" {
 		return nil, fmt.Errorf("agent required: %w", domain.ErrInvalid)
 	}
-	delivery, err := leadcontrol.DeliverCurrentAssignment(ctx, m.store, ws, leadName)
+	// Attempt-then-enqueue: one inline delivery attempt covers the fast
+	// path; anything short of delivered/unsupported durably enqueues an
+	// outbox row (deduped per driver run + lead) so the server-side
+	// dispatcher owns the retries and the workflow calls this op exactly
+	// once. The response shape (AgentMessageDeliveryResult) is unchanged.
+	delivery, err := m.deliverAssignment(ctx, m.store, ws, leadName)
 	if err != nil {
 		return nil, fmt.Errorf("deliver lead assignment: %w", err)
+	}
+	state := leadcontrol.DeliveryStateNone
+	if delivery != nil {
+		state = delivery.State
+	}
+	if state != leadcontrol.DeliveryStateDelivered && state != leadcontrol.DeliveryStateUnsupported {
+		if _, err := m.store.Outbox().Create(ctx, store.OutboxCreate{
+			WorkspaceKey: ws,
+			Kind:         domain.OutboxKindLeadAssignment,
+			EpicID:       firstNonEmpty(parent.EpicID, driverpkg.DriverRunPayloadEpicID(parent.Payload)),
+			DriverRunID:  parent.RunID,
+			TargetAgent:  leadName,
+			DedupeKey:    "lead-assignment:" + parent.RunID + ":" + leadName,
+		}); err != nil {
+			return nil, fmt.Errorf("enqueue lead assignment outbox: %w", err)
+		}
 	}
 	return driverpkg.NewAgentMessageDeliveryResult(leadName, delivery), nil
 }

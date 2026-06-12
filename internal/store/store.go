@@ -43,6 +43,9 @@ type Store interface {
 	TaskRuns() TaskRunStore
 	TaskRunEvents() TaskRunEventStore
 	Outbox() OutboxStore
+	Connectors() ConnectorStore
+	ConnectorGrants() ConnectorGrantStore
+	ConnectorCalls() ConnectorAuditStore
 	Workers() WorkerStore
 	Roles() RoleStore
 	Daemon() DaemonProfileStore

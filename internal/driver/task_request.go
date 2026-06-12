@@ -208,6 +208,7 @@ func EnqueueTaskRunWithResult(ctx context.Context, s store.Store, opts TaskRunRe
 	if err := linkQueuedTaskRunRequestDriverStep(ctx, s, opts, queued); err != nil {
 		return nil, err
 	}
+	appendTaskRunEvent(ctx, s, queued, domain.TaskRunEventQueued, taskExecCompletion{}, taskRunEventContext{EpicID: parent.EpicID})
 	return &TaskRunRequestOutcome{Run: queued}, nil
 }
 
@@ -516,6 +517,8 @@ func executeClaimedTaskRunWithResult(ctx context.Context, s store.Store, claimed
 		executor = LocalTaskExecutor{}
 	}
 	refs := claimedTaskRunRefsFromOptions(claimed, opts)
+	evctx := taskRunEventContext{EpicID: taskRunEpicID(ctx, s, claimed), LeaseToken: opts.LeaseToken}
+	appendTaskRunEvent(ctx, s, claimed, domain.TaskRunEventClaimed, taskExecCompletion{}, evctx)
 	stopHeartbeat := startClaimedTaskRunHeartbeat(ctx, s, claimed, opts, refs)
 	defer stopHeartbeat()
 
@@ -526,14 +529,7 @@ func executeClaimedTaskRunWithResult(ctx context.Context, s store.Store, claimed
 		return deferClaimedTaskRunCompletion(ctx, s, claimed, opts, execResult, completion, metadata)
 	}
 	if opts.CloseTaskOnSuccess && completion.Status == domain.TaskRunCompleted {
-		final, err := completeClaimedTaskRun(ctx, s, claimed, opts, refs, execResult, completion, metadata)
-		if err != nil {
-			return nil, err
-		}
-		if err := finishLinkedDriverStep(ctx, s, claimed, opts, refs, execResult, completion.Status); err != nil {
-			return nil, err
-		}
-		return &TaskRunRequestOutcome{Run: final, LeaseToken: opts.LeaseToken, ArtifactIDs: normalizeArtifactIDs(execResult.ArtifactIDs)}, nil
+		return completeAndCloseClaimedTaskRun(ctx, s, claimed, opts, refs, execResult, completion, metadata, evctx)
 	}
 	if retryTaskRun := taskRunRetryDecision(claimed, opts, completion); retryTaskRun.Retry {
 		requeued, err := requeueClaimedTaskRun(ctx, s, claimed, opts, execResult, completion, metadata, retryTaskRun)
@@ -545,13 +541,17 @@ func executeClaimedTaskRunWithResult(ctx context.Context, s store.Store, claimed
 		}
 		return &TaskRunRequestOutcome{Run: requeued, LeaseToken: opts.LeaseToken, ArtifactIDs: normalizeArtifactIDs(execResult.ArtifactIDs)}, nil
 	}
-	if completion.Status == domain.TaskRunFailed {
+	// Terminal failure past the retry budget: park the run and mark the
+	// underlying task issue parked in the same fenced finish call.
+	parkTask := completion.Status == domain.TaskRunFailed
+	if parkTask {
 		metadata = taskRunParkedMetadata(claimed, opts, completion, metadata)
 	}
-	final, err := finishClaimedTaskRun(ctx, s, claimed, opts, refs, execResult, completion, metadata)
+	final, err := finishClaimedTaskRun(ctx, s, claimed, opts, refs, execResult, completion, metadata, parkTask)
 	if err != nil {
 		return nil, err
 	}
+	emitTerminalTaskRunEvents(ctx, s, final, completion, evctx)
 	if err := finishLinkedDriverStep(ctx, s, claimed, opts, refs, execResult, completion.Status); err != nil {
 		return nil, err
 	}
@@ -721,6 +721,22 @@ func taskRunSyntheticCompletion(pending *domain.TaskRun, execResult TaskExecResu
 	return &synthetic
 }
 
+// completeAndCloseClaimedTaskRun is the CloseTaskOnSuccess branch of
+// executeClaimedTaskRunWithResult: complete the run (closing the task),
+// emit the terminal journal event + lead outbox row, and finish the
+// linked driver step.
+func completeAndCloseClaimedTaskRun(ctx context.Context, s store.Store, claimed *domain.TaskRun, opts executeClaimedTaskRunOptions, refs claimedTaskRunRefs, execResult TaskExecResult, completion taskExecCompletion, metadata map[string]string, evctx taskRunEventContext) (*TaskRunRequestOutcome, error) {
+	final, err := completeClaimedTaskRun(ctx, s, claimed, opts, refs, execResult, completion, metadata)
+	if err != nil {
+		return nil, err
+	}
+	emitTerminalTaskRunEvents(ctx, s, final, completion, evctx)
+	if err := finishLinkedDriverStep(ctx, s, claimed, opts, refs, execResult, completion.Status); err != nil {
+		return nil, err
+	}
+	return &TaskRunRequestOutcome{Run: final, LeaseToken: opts.LeaseToken, ArtifactIDs: normalizeArtifactIDs(execResult.ArtifactIDs)}, nil
+}
+
 func completeClaimedTaskRun(ctx context.Context, s store.Store, claimed *domain.TaskRun, opts executeClaimedTaskRunOptions, refs claimedTaskRunRefs, execResult TaskExecResult, completion taskExecCompletion, metadata map[string]string) (*domain.TaskRun, error) {
 	artifactIDs := normalizeArtifactIDs(execResult.ArtifactIDs)
 	final, err := s.TaskRuns().Complete(ctx, refs.WorkspaceKey, claimed.TaskRunID, store.TaskRunComplete{
@@ -752,13 +768,19 @@ func completeClaimedTaskRun(ctx context.Context, s store.Store, claimed *domain.
 	return final, nil
 }
 
-func finishClaimedTaskRun(ctx context.Context, s store.Store, claimed *domain.TaskRun, opts executeClaimedTaskRunOptions, refs claimedTaskRunRefs, execResult TaskExecResult, completion taskExecCompletion, metadata map[string]string) (*domain.TaskRun, error) {
+// finishClaimedTaskRun records the terminal state of a claimed run. parkTask
+// additionally marks the underlying task issue parked server-side (fenced by
+// the same lease/fencing checks, idempotent, best-effort like the other
+// policy hooks); pass it only for failed runs whose retry budget is
+// exhausted.
+func finishClaimedTaskRun(ctx context.Context, s store.Store, claimed *domain.TaskRun, opts executeClaimedTaskRunOptions, refs claimedTaskRunRefs, execResult TaskExecResult, completion taskExecCompletion, metadata map[string]string, parkTask bool) (*domain.TaskRun, error) {
 	final, err := s.TaskRuns().Finish(ctx, refs.WorkspaceKey, claimed.TaskRunID, store.TaskRunFinish{
 		NodeID:           claimed.NodeID,
 		LeaseID:          claimed.LeaseID,
 		LeaseToken:       opts.LeaseToken,
 		FencingToken:     claimed.FencingToken,
 		Status:           completion.Status,
+		ParkTask:         parkTask,
 		ExitCode:         &completion.ExitCode,
 		LogsRef:          execResult.LogsRef,
 		ArtifactsRef:     execResult.ArtifactsRef,

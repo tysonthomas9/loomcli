@@ -25,8 +25,27 @@ func cloneDriverVersion(v *domain.DriverVersion) *domain.DriverVersion {
 func cloneTriggerBinding(b *domain.TriggerBinding) *domain.TriggerBinding {
 	out := *b
 	out.EventTypePatterns = append([]string(nil), b.EventTypePatterns...)
+	out.ActorFilter = b.ActorFilter.Clone()
 	out.Permissions = append([]string(nil), b.Permissions...)
 	return &out
+}
+
+// normalizedActorFilterMem deep-copies an actor filter, normalizing a filter
+// with no constraints to nil the way fleet-db's write path does.
+func normalizedActorFilterMem(f *domain.TriggerActorFilter) *domain.TriggerActorFilter {
+	if f.IsZero() {
+		return nil
+	}
+	return f.Clone()
+}
+
+// defaultRetryFieldMem mirrors fleet-db's write-time retry defaulting: zero
+// means "unset, use the default" (negatives are rejected upstream).
+func defaultRetryFieldMem(value, fallback int) int {
+	if value == 0 {
+		return fallback
+	}
+	return value
 }
 
 // redactedTriggerBinding clones b with the webhook signing secret cleared,
@@ -262,6 +281,7 @@ func applyTriggerBindingUpdateMem(b *domain.TriggerBinding, patch store.TriggerB
 	applyTriggerBindingSourceUpdateMem(b, patch)
 	applyTriggerBindingTargetUpdateMem(b, patch)
 	applyTriggerBindingPolicyUpdateMem(b, patch)
+	applyTriggerBindingRouterUpdateMem(b, patch)
 }
 
 func applyTriggerBindingSourceUpdateMem(b *domain.TriggerBinding, patch store.TriggerBindingUpdate) {
@@ -330,5 +350,29 @@ func applyTriggerBindingPolicyUpdateMem(b *domain.TriggerBinding, patch store.Tr
 	}
 	if patch.Enabled != nil {
 		b.Enabled = *patch.Enabled
+	}
+}
+
+// applyTriggerBindingRouterUpdateMem applies the Router v2 binding fields.
+// ActorFilter is replace-whole: a zero-valued filter clears it (normalized to
+// nil), mirroring fleet-db's patch semantics.
+func applyTriggerBindingRouterUpdateMem(b *domain.TriggerBinding, patch store.TriggerBindingUpdate) {
+	if patch.SubjectKeyTemplate != nil {
+		b.SubjectKeyTemplate = *patch.SubjectKeyTemplate
+	}
+	if patch.ActorFilter != nil {
+		b.ActorFilter = normalizedActorFilterMem(patch.ActorFilter)
+	}
+	if patch.RetryMaxAttempts != nil {
+		b.RetryMaxAttempts = *patch.RetryMaxAttempts
+	}
+	if patch.RetryBackoffSeconds != nil {
+		b.RetryBackoffSeconds = *patch.RetryBackoffSeconds
+	}
+	if patch.Schedule != nil {
+		b.Schedule = *patch.Schedule
+	}
+	if patch.ScheduleTimezone != nil {
+		b.ScheduleTimezone = *patch.ScheduleTimezone
 	}
 }

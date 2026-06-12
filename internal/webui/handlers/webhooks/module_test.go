@@ -62,6 +62,27 @@ func signedRequest(name, delivery string, body []byte) *http.Request {
 
 var prOpenedBody = []byte(`{"action":"opened","pull_request":{"number":7},"repository":{"full_name":"acme/widgets"},"sender":{"login":"octocat"}}`)
 
+// webhookResponse decodes the 202 body on the BREAKING router-v2 wire:
+// deliveries[] only, no top-level driver_run_id / driver_run.
+type webhookResponse struct {
+	Status         string                       `json:"status"`
+	RouteKey       string                       `json:"route_key"`
+	IdempotencyKey string                       `json:"idempotency_key"`
+	Deliveries     []store.TriggerRouteDelivery `json:"deliveries"`
+}
+
+func decodeWebhookResponse(t *testing.T, rr *httptest.ResponseRecorder) webhookResponse {
+	t.Helper()
+	if rr.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
+	}
+	var resp webhookResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	return resp
+}
+
 func TestReceiveWebhookDispatchesDriverRun(t *testing.T) {
 	st := seedStore(t, true)
 	mux := newServer(st)
@@ -70,18 +91,28 @@ func TestReceiveWebhookDispatchesDriverRun(t *testing.T) {
 	rr := httptest.NewRecorder()
 	mux.ServeHTTP(rr, signedRequest("github", "delivery-1", prOpenedBody))
 
-	if rr.Code != http.StatusAccepted {
-		t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
+	resp := decodeWebhookResponse(t, rr)
+	if resp.Status != "accepted" || resp.RouteKey != testRoute || resp.IdempotencyKey != "github:delivery-1" {
+		t.Fatalf("unexpected response envelope: %+v", resp)
 	}
-	var resp struct {
-		RouteKey    string `json:"route_key"`
-		DriverRunID string `json:"driver_run_id"`
+	// Single-binding lane on the new wire: exactly one delivery leg. The old
+	// top-level driver_run_id/driver_run keys are gone (BREAKING fan-out wire,
+	// locked decision overriding the pre-fan-out single-run response).
+	if len(resp.Deliveries) != 1 {
+		t.Fatalf("want 1 delivery leg, got %d: %+v", len(resp.Deliveries), resp.Deliveries)
 	}
-	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("decode response: %v", err)
+	leg := resp.Deliveries[0]
+	if leg.BindingID != "b1" || leg.RunID == "" || leg.DeliveryID == "" || leg.Status != domain.TriggerDeliveryDispatched {
+		t.Fatalf("unexpected delivery leg: %+v", leg)
 	}
-	if resp.RouteKey != testRoute || resp.DriverRunID == "" {
-		t.Fatalf("unexpected response: %+v", resp)
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(rr.Body.Bytes(), &raw); err != nil {
+		t.Fatalf("decode raw response: %v", err)
+	}
+	for _, key := range []string{"driver_run_id", "driver_run"} {
+		if _, ok := raw[key]; ok {
+			t.Errorf("response still carries removed top-level key %q", key)
+		}
 	}
 
 	// TriggerEvent persisted with verified signature + digest.
@@ -105,8 +136,11 @@ func TestReceiveWebhookDispatchesDriverRun(t *testing.T) {
 	if len(deliveries) != 1 {
 		t.Fatalf("want 1 delivery, got %d", len(deliveries))
 	}
-	if deliveries[0].DriverRunID != resp.DriverRunID || deliveries[0].TriggerEventID != ev.EventID {
+	if deliveries[0].DriverRunID != leg.RunID || deliveries[0].TriggerEventID != ev.EventID {
 		t.Errorf("delivery not linked: %+v", deliveries[0])
+	}
+	if deliveries[0].DeliveryID != leg.DeliveryID {
+		t.Errorf("persisted delivery id %q != response leg %q", deliveries[0].DeliveryID, leg.DeliveryID)
 	}
 
 	// Queued DriverRun carrying the original payload.
@@ -148,13 +182,21 @@ func TestReceiveWebhookDuplicateDeliveryIsIdempotent(t *testing.T) {
 
 	first := httptest.NewRecorder()
 	mux.ServeHTTP(first, signedRequest("github", "delivery-dup", prOpenedBody))
-	if first.Code != http.StatusAccepted {
-		t.Fatalf("first status = %d", first.Code)
-	}
+	firstResp := decodeWebhookResponse(t, first)
 	second := httptest.NewRecorder()
 	mux.ServeHTTP(second, signedRequest("github", "delivery-dup", prOpenedBody))
-	if second.Code != http.StatusAccepted {
-		t.Fatalf("second status = %d, body %s", second.Code, second.Body.String())
+	secondResp := decodeWebhookResponse(t, second)
+
+	// Redelivery of the same X-GitHub-Delivery must surface the same run and
+	// delivery ids — the dispatch path dedups per leg.
+	if len(firstResp.Deliveries) != 1 || len(secondResp.Deliveries) != 1 {
+		t.Fatalf("want 1 delivery leg each, got %d and %d", len(firstResp.Deliveries), len(secondResp.Deliveries))
+	}
+	if firstResp.Deliveries[0].RunID != secondResp.Deliveries[0].RunID {
+		t.Errorf("redelivery changed run id: %q != %q", firstResp.Deliveries[0].RunID, secondResp.Deliveries[0].RunID)
+	}
+	if firstResp.Deliveries[0].DeliveryID != secondResp.Deliveries[0].DeliveryID {
+		t.Errorf("redelivery changed delivery id: %q != %q", firstResp.Deliveries[0].DeliveryID, secondResp.Deliveries[0].DeliveryID)
 	}
 
 	events, _ := st.TriggerEvents().List(ctx, testWS, store.TriggerEventFilter{})
@@ -163,6 +205,139 @@ func TestReceiveWebhookDuplicateDeliveryIsIdempotent(t *testing.T) {
 	if len(events) != 1 || len(deliveries) != 1 || len(runs) != 1 {
 		t.Fatalf("duplicate delivery created extra state: events=%d deliveries=%d runs=%d",
 			len(events), len(deliveries), len(runs))
+	}
+}
+
+func TestReceiveWebhookFanOutResponseListsAllDeliveries(t *testing.T) {
+	st := seedStore(t, true)
+	ctx := context.Background()
+	// Pattern-only binding (no RouteKey) matching the ingress route: fans out
+	// alongside the exact b1 owner. Signature verification stays keyed to b1's
+	// secret — pattern bindings carry none (locked interim decision).
+	if _, err := st.TriggerBindings().Create(ctx, store.TriggerBindingCreate{
+		WorkspaceKey: testWS, BindingID: "b2-pattern", Name: "pr-audit", SourceKind: "github",
+		EventTypePatterns: []string{"github.pull_request.*"},
+		DriverID:          "github-pr-review", DriverVersionID: "v1", Enabled: true,
+	}); err != nil {
+		t.Fatalf("seed pattern binding: %v", err)
+	}
+	mux := newServer(st)
+
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, signedRequest("github", "delivery-fan", prOpenedBody))
+	resp := decodeWebhookResponse(t, rr)
+
+	// Exact RouteKey owner first, then pattern matches in binding-id order.
+	if len(resp.Deliveries) != 2 {
+		t.Fatalf("want 2 delivery legs, got %d: %+v", len(resp.Deliveries), resp.Deliveries)
+	}
+	if resp.Deliveries[0].BindingID != "b1" || resp.Deliveries[1].BindingID != "b2-pattern" {
+		t.Fatalf("unexpected leg order: %+v", resp.Deliveries)
+	}
+	for i, leg := range resp.Deliveries {
+		if leg.RunID == "" || leg.DeliveryID == "" || leg.Status != domain.TriggerDeliveryDispatched {
+			t.Errorf("leg %d incomplete: %+v", i, leg)
+		}
+	}
+	if resp.Deliveries[0].RunID == resp.Deliveries[1].RunID {
+		t.Errorf("legs share run id %q", resp.Deliveries[0].RunID)
+	}
+
+	// One event, one delivery + run per leg.
+	events, _ := st.TriggerEvents().List(ctx, testWS, store.TriggerEventFilter{})
+	deliveries, _ := st.TriggerDeliveries().List(ctx, testWS, store.TriggerDeliveryFilter{})
+	runs, _ := st.DriverRuns().List(ctx, testWS, store.DriverRunFilter{})
+	if len(events) != 1 || len(deliveries) != 2 || len(runs) != 2 {
+		t.Fatalf("fan-out state: events=%d deliveries=%d runs=%d, want 1/2/2",
+			len(events), len(deliveries), len(runs))
+	}
+
+	// Redelivery returns the same legs with stable ids and creates no state.
+	again := httptest.NewRecorder()
+	mux.ServeHTTP(again, signedRequest("github", "delivery-fan", prOpenedBody))
+	replay := decodeWebhookResponse(t, again)
+	if len(replay.Deliveries) != 2 {
+		t.Fatalf("replay want 2 legs, got %d", len(replay.Deliveries))
+	}
+	for i := range replay.Deliveries {
+		if replay.Deliveries[i].RunID != resp.Deliveries[i].RunID {
+			t.Errorf("replay leg %d run id %q != %q", i, replay.Deliveries[i].RunID, resp.Deliveries[i].RunID)
+		}
+	}
+	runs, _ = st.DriverRuns().List(ctx, testWS, store.DriverRunFilter{})
+	if len(runs) != 2 {
+		t.Fatalf("replay created runs: got %d, want 2", len(runs))
+	}
+}
+
+// stubDispatcher is a canned TriggerRouteDispatcher that records its input so
+// handler tests can pin the dispatch wire (incl. SubjectAttrs plumbing) and
+// surface result shapes the memstore never produces, e.g. a rejected leg from
+// a forbid concurrency policy (admission lives in fleet-db).
+type stubDispatcher struct {
+	gotWS    string
+	gotRoute string
+	gotIn    store.TriggerRouteDispatch
+	result   *store.TriggerRouteDispatchResult
+}
+
+func (s *stubDispatcher) DispatchTriggerRoute(ctx context.Context, ws, routeKey string, in store.TriggerRouteDispatch) (*domain.DriverRun, error) {
+	result, err := s.DispatchTriggerRouteV2(ctx, ws, routeKey, in)
+	if err != nil {
+		return nil, err
+	}
+	return result.PrimaryRun, nil
+}
+
+func (s *stubDispatcher) DispatchTriggerRouteV2(_ context.Context, ws, routeKey string, in store.TriggerRouteDispatch) (*store.TriggerRouteDispatchResult, error) {
+	s.gotWS, s.gotRoute, s.gotIn = ws, routeKey, in
+	return s.result, nil
+}
+
+// dispatcherOverrideStore swaps the dispatcher while keeping memstore's
+// binding/secret lookups so authorizeWebhook still runs for real.
+type dispatcherOverrideStore struct {
+	store.Store
+	dispatcher store.TriggerRouteDispatcher
+}
+
+func (s dispatcherOverrideStore) TriggerRoutes() store.TriggerRouteDispatcher { return s.dispatcher }
+
+func TestReceiveWebhookSurfacesRejectedLegAndPlumbsSubjectAttrs(t *testing.T) {
+	stub := &stubDispatcher{result: &store.TriggerRouteDispatchResult{
+		Deliveries: []store.TriggerRouteDelivery{
+			{DeliveryID: "delivery-e1-b1", BindingID: "b1", RunID: "run-aaa", Status: domain.TriggerDeliveryDispatched},
+			{DeliveryID: "delivery-e1-b3", BindingID: "b3-forbid", Status: domain.TriggerDeliveryRejected,
+				RejectionReason: "concurrency policy forbid: active run for subject acme/widgets#7"},
+		},
+	}}
+	mux := newServer(dispatcherOverrideStore{Store: seedStore(t, true), dispatcher: stub})
+
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, signedRequest("github", "delivery-rej", prOpenedBody))
+	resp := decodeWebhookResponse(t, rr)
+
+	if len(resp.Deliveries) != 2 {
+		t.Fatalf("want 2 delivery legs, got %d: %+v", len(resp.Deliveries), resp.Deliveries)
+	}
+	rejected := resp.Deliveries[1]
+	if rejected.Status != domain.TriggerDeliveryRejected || rejected.RejectionReason == "" || rejected.RunID != "" {
+		t.Errorf("rejected leg not surfaced: %+v", rejected)
+	}
+
+	// Dispatch input wire: SubjectAttrs from the adapter (C15) reach the
+	// dispatcher alongside the normalized routing fields.
+	if stub.gotWS != testWS || stub.gotRoute != testRoute {
+		t.Errorf("dispatch routing = (%q, %q), want (%q, %q)", stub.gotWS, stub.gotRoute, testWS, testRoute)
+	}
+	if stub.gotIn.IdempotencyKey != "github:delivery-rej" || stub.gotIn.SignatureStatus != "verified" {
+		t.Errorf("dispatch input envelope: %+v", stub.gotIn)
+	}
+	wantAttrs := map[string]string{"repo": "acme/widgets", "pr_number": "7"}
+	for key, want := range wantAttrs {
+		if got := stub.gotIn.SubjectAttrs[key]; got != want {
+			t.Errorf("SubjectAttrs[%q] = %q, want %q (all: %v)", key, got, want, stub.gotIn.SubjectAttrs)
+		}
 	}
 }
 

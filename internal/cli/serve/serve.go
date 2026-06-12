@@ -30,6 +30,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/cli/serve/workspacemgr"
 	driverexecutor "github.com/tysonthomas9/loomcli/internal/driver"
 	"github.com/tysonthomas9/loomcli/internal/store"
+	"github.com/tysonthomas9/loomcli/internal/trigger"
 	"github.com/tysonthomas9/loomcli/internal/webui"
 	webuiapp "github.com/tysonthomas9/loomcli/internal/webui/app"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
@@ -43,6 +44,7 @@ const envLoomDriverExecutor = "LOOM_DRIVER_EXECUTOR"
 const envLoomDriverTaskWorkerConcurrency = "LOOM_DRIVER_TASK_WORKER_CONCURRENCY"
 const envLoomDriverTaskRunMaxAttempts = "LOOM_DRIVER_TASK_RUN_MAX_ATTEMPTS"
 const envLoomDriverStaleTaskMaxAge = "LOOM_DRIVER_STALE_TASK_MAX_AGE"
+const envLoomTriggerCronInterval = "LOOM_TRIGGER_CRON_INTERVAL"
 
 const monitorCollectionCacheTTL = 10 * time.Second
 
@@ -117,6 +119,7 @@ ENVIRONMENT VARIABLES
   LOOM_DRIVER_EXECUTOR  DriverRun executor toggle (default: on; set 0/false/off/no to disable)
   LOOM_DRIVER_TASK_WORKER_CONCURRENCY  Local TaskRun worker loops (default: 2)
   LOOM_DRIVER_TASK_RUN_MAX_ATTEMPTS     TaskRun attempts before parking failed (default: 2)
+  LOOM_TRIGGER_CRON_INTERVAL            Cron trigger sweep interval in seconds (default: 30)
 
 EXAMPLES
   loom serve                                              # Default port 8080
@@ -218,6 +221,8 @@ func runServe(cmd *cobra.Command, args []string) {
 	defer func() { _ = storeHandle.Close() }()
 	startDriverExecutorIfEnabled(ctx, storeHandle.Store)
 	startStaleTaskSweeper(ctx, storeHandle.Store)
+	startOutboxDispatcher(ctx, storeHandle.Store)
+	startTriggerCronScheduler(ctx, storeHandle.Store)
 
 	issueBackendFn := cli.WorkspaceAwareIssueBackendForURL(storeHandle.URL(), fleetState.clientCfg.Actor)
 	monitorDefaultWorkspace := resolveMonitorCollectorWorkspace(storeHandle.Store, fleetState.clientCfg.Workspace)
@@ -364,6 +369,79 @@ func startStaleTaskSweeper(ctx context.Context, st store.Store) {
 			}
 		}
 	}()
+}
+
+// startOutboxDispatcher launches the always-on server-side outbox delivery
+// loop. Like the stale task sweeper it is NOT gated behind
+// LOOM_DRIVER_EXECUTOR: lead-notification delivery with retry/backoff is
+// server policy, so it runs whenever serve has a store. It replaces the
+// workflow-side lead-delivery retry loops.
+func startOutboxDispatcher(ctx context.Context, st store.Store) {
+	if st == nil {
+		return
+	}
+	dispatcher := &driverexecutor.OutboxDispatcher{
+		Store:        st,
+		WorkspaceKey: os.Getenv(bootstrap.EnvWorkspace),
+	}
+	slog.Info("Outbox dispatcher enabled", "workspace", dispatcher.WorkspaceKey)
+	go func() {
+		ticker := time.NewTicker(2 * time.Second)
+		defer ticker.Stop()
+		for {
+			if delivered, err := dispatcher.RunOnce(ctx); err != nil && !errors.Is(err, context.Canceled) {
+				slog.Error("outbox dispatcher failed", "err", err)
+			} else if delivered > 0 {
+				slog.Info("outbox dispatcher delivered notifications", "count", delivered)
+			}
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+			}
+		}
+	}()
+}
+
+// startTriggerCronScheduler launches the always-on built-in cron event
+// source: a sweep loop that fires cron.tick TriggerEvents for enabled
+// source_kind=cron bindings into the normal trigger-route dispatch path.
+// Like the outbox dispatcher it is NOT gated behind LOOM_DRIVER_EXECUTOR —
+// schedule evaluation is server policy. Tick-level idempotency keys make
+// overlapping schedulers safe. LOOM_TRIGGER_CRON_INTERVAL tunes the sweep
+// interval in seconds (default 30s).
+func startTriggerCronScheduler(ctx context.Context, st store.Store) {
+	if st == nil {
+		return
+	}
+	scheduler := &trigger.CronScheduler{
+		Store:        st,
+		WorkspaceKey: os.Getenv(bootstrap.EnvWorkspace),
+	}
+	interval := triggerCronInterval()
+	slog.Info("Trigger cron scheduler enabled", "workspace", scheduler.WorkspaceKey, "interval", interval)
+	go func() {
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		for {
+			if result, err := scheduler.RunOnce(ctx, time.Now()); err != nil && !errors.Is(err, context.Canceled) {
+				slog.Error("trigger cron scheduler sweep failed", "err", err)
+			} else if result != nil && result.Fired > 0 {
+				slog.Info("trigger cron scheduler fired ticks", "count", result.Fired)
+			}
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+			}
+		}
+	}()
+}
+
+// triggerCronInterval reads the cron sweep interval in seconds from
+// LOOM_TRIGGER_CRON_INTERVAL (default 30s, capped at one hour).
+func triggerCronInterval() time.Duration {
+	return time.Duration(boundedIntEnv(envLoomTriggerCronInterval, 30, 3600)) * time.Second
 }
 
 // driverStaleTaskMaxAge reads the stale TaskRun heartbeat threshold in

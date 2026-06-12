@@ -197,6 +197,12 @@ type TriggerBindingCreate struct {
 	IdempotencyPolicy    string
 	AuthPolicy           string
 	WebhookSecret        string
+	SubjectKeyTemplate   string
+	ActorFilter          *domain.TriggerActorFilter
+	RetryMaxAttempts     int
+	RetryBackoffSeconds  int
+	Schedule             string
+	ScheduleTimezone     string
 	Permissions          []string
 	Enabled              bool
 }
@@ -229,8 +235,16 @@ type TriggerBindingUpdate struct {
 	IdempotencyPolicy    *string
 	AuthPolicy           *string
 	WebhookSecret        *string
-	Permissions          *[]string
-	Enabled              *bool
+	SubjectKeyTemplate   *string
+	// ActorFilter replaces the whole filter when set; a zero-valued filter
+	// (no constraints) clears it, mirroring fleet-db's patch semantics.
+	ActorFilter         *domain.TriggerActorFilter
+	RetryMaxAttempts    *int
+	RetryBackoffSeconds *int
+	Schedule            *string
+	ScheduleTimezone    *string
+	Permissions         *[]string
+	Enabled             *bool
 }
 
 type TriggerBindingStore interface {
@@ -266,10 +280,49 @@ type TriggerDeliveryFilter struct {
 	Limit            int
 }
 
-// TriggerDeliveryStore is a read-only view of persisted trigger deliveries.
+// TriggerDeliveryDueFilter narrows TriggerDeliveryStore.ListDue. A delivery
+// is due when it is retry-sweeper work — held (queue-policy promotion rides
+// the sweeper) or failed without error class retries_exhausted — and its
+// NextRetryAt is nil (immediately due) or not after Now. A zero Now means
+// the implementation's current time.
+type TriggerDeliveryDueFilter struct {
+	Now   time.Time
+	Limit int
+}
+
+// TriggerDeliveryResultUpdate is the input to
+// TriggerDeliveryStore.UpdateResult after one retry-sweeper (or dispatch)
+// attempt. Status failed with a NextRetryAt reschedules the delivery; held
+// keeps it parked for queue promotion; dispatched/rejected/superseded (and
+// failed once the binding's RetryMaxAttempts is reached) make it final.
+// A zero Attempt keeps the stored attempt count.
+type TriggerDeliveryResultUpdate struct {
+	Status      domain.TriggerDeliveryStatus
+	Attempt     int
+	NextRetryAt *time.Time
+	ErrorClass  string
+	// DriverRunID stamps the admitted run when a retry finally dispatches.
+	DriverRunID string
+}
+
+// TriggerDeliveryStore reads persisted trigger deliveries and records
+// retry-sweeper attempt outcomes. Deliveries themselves are created by the
+// dispatch path (TriggerRouteDispatcher), never directly through this store.
 type TriggerDeliveryStore interface {
 	Get(ctx context.Context, workspaceKey, deliveryID string) (*domain.TriggerDelivery, error)
 	List(ctx context.Context, workspaceKey string, filter TriggerDeliveryFilter) ([]*domain.TriggerDelivery, error)
+	// ListDue returns deliveries awaiting the retry sweeper whose due time
+	// is <= filter.Now, in due order (earliest first).
+	ListDue(ctx context.Context, workspaceKey string, filter TriggerDeliveryDueFilter) ([]*domain.TriggerDelivery, error)
+	// UpdateResult records one attempt outcome. A failed result whose
+	// Attempt reaches the binding's RetryMaxAttempts is forced terminal:
+	// status stays failed, ErrorClass becomes
+	// domain.TriggerDeliveryErrorRetriesExhausted and NextRetryAt clears.
+	// Final deliveries (dispatched, rejected, duplicate, superseded,
+	// replayed, terminal failed) reject transitions to a different status
+	// with domain.ErrInvalidTransition; re-applying the same status is
+	// idempotent.
+	UpdateResult(ctx context.Context, workspaceKey, deliveryID string, update TriggerDeliveryResultUpdate) (*domain.TriggerDelivery, error)
 }
 
 // TriggerRouteDispatch carries the normalized fields an adapter resolves from
@@ -287,20 +340,59 @@ type TriggerRouteDispatch struct {
 	SignatureStatus  string
 	ReplayOfEventID  string
 	Payload          json.RawMessage
+	// SubjectAttrs carries adapter-enriched subject attributes consumed by
+	// subject-key templating ({{attrs.X}}). Webhook adapters populate it
+	// (C15); templates never read the raw payload. Not yet sent on the
+	// fleet-db wire — the server-side templating lane lands separately.
+	SubjectAttrs map[string]string
 }
 
-// TriggerRouteDispatcher resolves an enabled binding by route key, persists a
-// TriggerEvent, enqueues a queued DriverRun, then records a TriggerDelivery —
+// TriggerRouteDelivery is one fan-out leg of a trigger-route dispatch. The
+// JSON tags pin fleet-db's BREAKING router-v2 webhook wire: the response
+// carries deliveries[] only, with no top-level driver_run_id.
+type TriggerRouteDelivery struct {
+	DeliveryID      string                       `json:"delivery_id"`
+	BindingID       string                       `json:"trigger_binding_id"`
+	RunID           string                       `json:"driver_run_id"`
+	Status          domain.TriggerDeliveryStatus `json:"status"`
+	RejectionReason string                       `json:"rejection_reason,omitempty"`
+}
+
+// TriggerRouteDispatchResult collects the fan-out legs of one dispatch in
+// dispatch order: the exact RouteKey owner first (when present and enabled),
+// then pattern matches in binding-id order.
+type TriggerRouteDispatchResult struct {
+	// PrimaryRun is the admitted run for the first matched binding. In-process
+	// backends populate it directly; HTTP backends may leave it nil because the
+	// router-v2 wire no longer returns run bodies (callers needing the run
+	// fetch it by Deliveries[0].RunID).
+	PrimaryRun *domain.DriverRun
+	Deliveries []TriggerRouteDelivery
+}
+
+// TriggerRouteDispatcher resolves the matched binding set for a route key —
+// the exact-RouteKey binding unioned with enabled bindings whose
+// event_type_patterns match the key — persists ONE TriggerEvent, then per
+// matched binding enqueues a queued DriverRun and records a TriggerDelivery,
 // in that order. It fronts fleet-db's trigger-routes endpoint.
 //
-// Each write is individually idempotent (keyed off the dispatch idempotency
-// key / derived delivery id), but the three are NOT a single transaction: a
-// failure after the run is created surfaces as an error, leaving a queued run
-// whose delivery audit record is written on the caller's redelivery (which
-// dedups the event and run). Callers should treat dispatch as durable and
-// eventually-consistent, not transactional, and retry on error.
+// Each write is individually idempotent: the event dedups on the dispatch
+// idempotency key, each leg's run dedups on a per-binding composite
+// {idempotencyKey}#{bindingID} key (the legacy single-binding exact path keeps
+// the bare key), and each leg's delivery id is deterministic. The sequence is
+// NOT a single transaction: a failure after earlier legs are durable surfaces
+// as an error, and the caller's redelivery re-runs the sequence, deduping the
+// event and every already-admitted run while writing only the missing
+// deliveries — redelivery heals each leg independently. Callers should treat
+// dispatch as durable and eventually-consistent, not transactional, and retry
+// on error.
 type TriggerRouteDispatcher interface {
+	// DispatchTriggerRoute is the legacy single-run lane: it runs the same
+	// fan-out dispatch and returns only the primary run. Kept so existing
+	// webhook callers compile until they move to DispatchTriggerRouteV2.
 	DispatchTriggerRoute(ctx context.Context, workspaceKey, routeKey string, in TriggerRouteDispatch) (*domain.DriverRun, error)
+	// DispatchTriggerRouteV2 surfaces every fan-out leg of the dispatch.
+	DispatchTriggerRouteV2(ctx context.Context, workspaceKey, routeKey string, in TriggerRouteDispatch) (*TriggerRouteDispatchResult, error)
 }
 
 type EpicRunCreate struct {
@@ -510,6 +602,15 @@ type TaskRunFinish struct {
 	ErrorClass       string
 	ErrorMessage     string
 	FinishedAt       time.Time
+	// ParkTask marks the run's underlying task issue as parked when the
+	// run finishes failed with its retry budget exhausted. Only valid with
+	// Status == TaskRunFailed. Server-side the issue update is fenced by
+	// the same lease/fencing checks as the finish itself, idempotent, and
+	// best-effort: a missing, already-parked, or terminal issue is skipped
+	// without failing the finish. Parking releases the issue claim; the
+	// parked status prevents re-claim until a human moves the issue back
+	// to open.
+	ParkTask bool
 }
 
 type TaskRunRequeue struct {

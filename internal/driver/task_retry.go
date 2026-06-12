@@ -66,6 +66,10 @@ func requeueClaimedTaskRun(ctx context.Context, s store.Store, claimed *domain.T
 	if err != nil {
 		return nil, fmt.Errorf("requeue task run: %w", err)
 	}
+	appendTaskRunEvent(ctx, s, requeued, domain.TaskRunEventRequeued, completion, taskRunEventContext{
+		EpicID:     taskRunEpicID(ctx, s, requeued),
+		LeaseToken: opts.LeaseToken,
+	})
 	return requeued, nil
 }
 
@@ -92,7 +96,7 @@ func taskRunRetryBackoff(attempt int) time.Duration {
 	if attempt >= 5 {
 		return taskRunRetryBackoffMax
 	}
-	backoff := taskRunRetryBackoffBase << uint(attempt)
+	backoff := taskRunRetryBackoffBase << attempt
 	if backoff > taskRunRetryBackoffMax {
 		return taskRunRetryBackoffMax
 	}

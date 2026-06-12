@@ -158,8 +158,16 @@ func (s *triggerBindingStore) Create(ctx context.Context, in store.TriggerBindin
 		"idempotency_policy":      in.IdempotencyPolicy,
 		"auth_policy":             in.AuthPolicy,
 		"webhook_secret":          in.WebhookSecret,
+		"subject_key_template":    in.SubjectKeyTemplate,
+		"retry_max_attempts":      in.RetryMaxAttempts,
+		"retry_backoff_seconds":   in.RetryBackoffSeconds,
+		"schedule":                in.Schedule,
+		"schedule_timezone":       in.ScheduleTimezone,
 		"permissions":             in.Permissions,
 		"enabled":                 in.Enabled,
+	}
+	if !in.ActorFilter.IsZero() {
+		body["actor_filter"] = in.ActorFilter
 	}
 	var out domain.TriggerBinding
 	path := "/api/v1/" + pathEscape(in.WorkspaceKey) + "/trigger-bindings"
@@ -656,6 +664,7 @@ func (s *taskRunStore) Finish(ctx context.Context, ws, taskRunID string, finish 
 		"runtime_metadata":   finish.RuntimeMetadata,
 		"error_class":        finish.ErrorClass,
 		"error_message":      finish.ErrorMessage,
+		"park_task":          finish.ParkTask,
 	}
 	var out domain.TaskRun
 	path := "/api/v1/" + pathEscape(ws) + "/task-runs/" + pathEscape(taskRunID) + "/finish"
@@ -831,6 +840,15 @@ func triggerBindingUpdateBody(patch store.TriggerBindingUpdate) map[string]any {
 	bodyPtr(body, "idempotency_policy", patch.IdempotencyPolicy)
 	bodyPtr(body, "auth_policy", patch.AuthPolicy)
 	bodyPtr(body, "webhook_secret", patch.WebhookSecret)
+	bodyPtr(body, "subject_key_template", patch.SubjectKeyTemplate)
+	if patch.ActorFilter != nil {
+		// Replace-whole semantics: an empty object clears the filter.
+		body["actor_filter"] = patch.ActorFilter
+	}
+	bodyPtr(body, "retry_max_attempts", patch.RetryMaxAttempts)
+	bodyPtr(body, "retry_backoff_seconds", patch.RetryBackoffSeconds)
+	bodyPtr(body, "schedule", patch.Schedule)
+	bodyPtr(body, "schedule_timezone", patch.ScheduleTimezone)
 	bodyPtr(body, "permissions", patch.Permissions)
 	bodyPtr(body, "enabled", patch.Enabled)
 	return body
@@ -846,6 +864,7 @@ func (s *triggerEventStore) Get(ctx context.Context, ws, eventID string) (*domai
 	if err := s.client.do(ctx, "GET", path, nil, &out); err != nil {
 		return nil, err
 	}
+	out.NormalizeProvenance()
 	return &out, nil
 }
 
@@ -872,6 +891,9 @@ func (s *triggerEventStore) List(ctx context.Context, ws string, filter store.Tr
 	}
 	if resp.TriggerEvents == nil {
 		resp.TriggerEvents = []*domain.TriggerEvent{}
+	}
+	for _, event := range resp.TriggerEvents {
+		event.NormalizeProvenance()
 	}
 	return resp.TriggerEvents, nil
 }
@@ -923,7 +945,32 @@ type triggerRouteStore struct{ client *Client }
 
 var _ store.TriggerRouteDispatcher = (*triggerRouteStore)(nil)
 
+// DispatchTriggerRoute is the legacy single-run lane over the router-v2 wire:
+// it dispatches via DispatchTriggerRouteV2 and then fetches the primary leg's
+// run, so existing webhook callers keep receiving the admitted run.
 func (s *triggerRouteStore) DispatchTriggerRoute(ctx context.Context, ws, routeKey string, in store.TriggerRouteDispatch) (*domain.DriverRun, error) {
+	result, err := s.DispatchTriggerRouteV2(ctx, ws, routeKey, in)
+	if err != nil {
+		return nil, err
+	}
+	if len(result.Deliveries) == 0 {
+		return nil, fmt.Errorf("trigger route %q in workspace %q dispatched no deliveries: %w", routeKey, ws, domain.ErrNotFound)
+	}
+	var run domain.DriverRun
+	runPath := "/api/v1/" + pathEscape(ws) + "/driver-runs/" + pathEscape(result.Deliveries[0].RunID)
+	if err := s.client.do(ctx, "GET", runPath, nil, &run); err != nil {
+		return nil, err
+	}
+	return &run, nil
+}
+
+// DispatchTriggerRouteV2 posts the trigger-routes endpoint and decodes the
+// BREAKING router-v2 fan-out wire: 201 {"deliveries":[...]} with NO top-level
+// driver_run_id. PrimaryRun stays nil — the wire no longer returns run bodies;
+// callers needing the run fetch it by Deliveries[0].RunID. SubjectAttrs is
+// deliberately not sent: fleet-db's strict decoder rejects unknown fields and
+// the server-side subject-key templating lane lands with a later chunk.
+func (s *triggerRouteStore) DispatchTriggerRouteV2(ctx context.Context, ws, routeKey string, in store.TriggerRouteDispatch) (*store.TriggerRouteDispatchResult, error) {
 	body := map[string]any{
 		"run_id":             in.RunID,
 		"idempotency_key":    in.IdempotencyKey,
@@ -942,10 +989,12 @@ func (s *triggerRouteStore) DispatchTriggerRoute(ctx context.Context, ws, routeK
 	if in.IdempotencyKey != "" {
 		headers["Idempotency-Key"] = in.IdempotencyKey
 	}
-	var out domain.DriverRun
+	var resp struct {
+		Deliveries []store.TriggerRouteDelivery `json:"deliveries"`
+	}
 	path := "/api/v1/" + pathEscape(ws) + "/trigger-routes/" + pathEscape(routeKey)
-	if err := s.client.doWithHeaders(ctx, "POST", path, body, &out, headers); err != nil {
+	if err := s.client.doWithHeaders(ctx, "POST", path, body, &resp, headers); err != nil {
 		return nil, err
 	}
-	return &out, nil
+	return &store.TriggerRouteDispatchResult{Deliveries: resp.Deliveries}, nil
 }

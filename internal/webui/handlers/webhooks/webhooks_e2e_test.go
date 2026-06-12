@@ -39,16 +39,17 @@ func TestE2E_GitHubWebhookDispatchesDriverRunWithEphemeralStack(t *testing.T) {
 	binding := e2e.registerGitHubDriver()
 
 	first := e2e.postGitHubWebhook("e2e-delivery-1", http.StatusAccepted)
-	run := e2e.expectQueuedDriverRun(first.DriverRunID)
+	firstRunID := first.primaryRunID(t)
+	run := e2e.expectQueuedDriverRun(firstRunID)
 	event := e2e.expectTriggerEvent(binding)
 	e2e.expectTriggerDelivery(event, binding, run)
 	e2e.expectRunEvents(run.RunID, "driver_run.create")
 
 	second := e2e.postGitHubWebhook("e2e-delivery-1", http.StatusAccepted)
-	if second.DriverRunID != first.DriverRunID {
-		t.Fatalf("redelivery driver_run_id = %q, want original %q", second.DriverRunID, first.DriverRunID)
+	if second.primaryRunID(t) != firstRunID {
+		t.Fatalf("redelivery driver_run_id = %q, want original %q", second.primaryRunID(t), firstRunID)
 	}
-	e2e.expectIdempotentRedelivery(first.DriverRunID)
+	e2e.expectIdempotentRedelivery(firstRunID)
 }
 
 func TestE2E_GitHubWebhookRunsDriverAgainstLiveGitHubPR(t *testing.T) {
@@ -75,7 +76,8 @@ func TestE2E_GitHubWebhookRunsDriverAgainstLiveGitHubPR(t *testing.T) {
 
 	deliveryID := "live-" + live.ID
 	first := e2e.postGitHubWebhookPayload(deliveryID, live.WebhookPayload(), http.StatusAccepted)
-	run := e2e.waitForRunCompleted(first.DriverRunID)
+	firstRunID := first.primaryRunID(t)
+	run := e2e.waitForRunCompleted(firstRunID)
 	if !strings.Contains(run.Summary, live.Repo+"#"+strconv.Itoa(live.Number)) {
 		t.Fatalf("completed run summary = %q, want repo and PR number", run.Summary)
 	}
@@ -87,10 +89,10 @@ func TestE2E_GitHubWebhookRunsDriverAgainstLiveGitHubPR(t *testing.T) {
 	e2e.expectRunEvents(run.RunID, "driver_run.create", "driver_run.claim", "driver_run.finish")
 
 	second := e2e.postGitHubWebhookPayload(deliveryID, live.WebhookPayload(), http.StatusAccepted)
-	if second.DriverRunID != first.DriverRunID {
-		t.Fatalf("redelivery driver_run_id = %q, want original %q", second.DriverRunID, first.DriverRunID)
+	if second.primaryRunID(t) != firstRunID {
+		t.Fatalf("redelivery driver_run_id = %q, want original %q", second.primaryRunID(t), firstRunID)
 	}
-	e2e.expectIdempotentLiveRedelivery(first.DriverRunID)
+	e2e.expectIdempotentLiveRedelivery(firstRunID)
 }
 
 type githubWebhookE2E struct {
@@ -132,12 +134,23 @@ type liveGitHubPR struct {
 	BaseSHA     string
 }
 
+// githubWebhookResponse pins the BREAKING router-v2 202 wire: deliveries[]
+// only, no top-level driver_run_id / driver_run.
 type githubWebhookResponse struct {
-	Status         string           `json:"status"`
-	RouteKey       string           `json:"route_key"`
-	IdempotencyKey string           `json:"idempotency_key"`
-	DriverRunID    string           `json:"driver_run_id"`
-	DriverRun      domain.DriverRun `json:"driver_run"`
+	Status         string                       `json:"status"`
+	RouteKey       string                       `json:"route_key"`
+	IdempotencyKey string                       `json:"idempotency_key"`
+	Deliveries     []store.TriggerRouteDelivery `json:"deliveries"`
+}
+
+// primaryRunID returns the first delivery leg's run id — the exact-RouteKey
+// owner's run, which is what these single-binding E2E flows track.
+func (r githubWebhookResponse) primaryRunID(t *testing.T) string {
+	t.Helper()
+	if len(r.Deliveries) == 0 {
+		t.Fatalf("webhook response has no deliveries: %+v", r)
+	}
+	return r.Deliveries[0].RunID
 }
 
 const githubPRAnalysisSchema = `{
@@ -588,11 +601,13 @@ func (e *githubWebhookE2E) postGitHubWebhookPayload(deliveryID string, body []by
 	var out githubWebhookResponse
 	githubWebhookDecodeResponse(e.t, resp, wantStatus, &out)
 	if wantStatus == http.StatusAccepted {
-		if out.Status != "accepted" || out.RouteKey != "github.pull_request.opened" || out.DriverRunID == "" {
+		if out.Status != "accepted" || out.RouteKey != "github.pull_request.opened" || len(out.Deliveries) == 0 {
 			e.t.Fatalf("unexpected webhook response: %+v", out)
 		}
-		if out.DriverRun.RunID != out.DriverRunID {
-			e.t.Fatalf("embedded driver_run = %+v, want run_id %s", out.DriverRun, out.DriverRunID)
+		for i, leg := range out.Deliveries {
+			if leg.RunID == "" || leg.DeliveryID == "" || leg.BindingID == "" {
+				e.t.Fatalf("webhook response leg %d incomplete: %+v", i, out.Deliveries)
+			}
 		}
 		if out.IdempotencyKey != "github:"+deliveryID {
 			e.t.Fatalf("idempotency_key = %q, want github:%s", out.IdempotencyKey, deliveryID)

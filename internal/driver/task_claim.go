@@ -12,6 +12,11 @@ import (
 
 const defaultClaimReadyLimit = 100
 
+// parkedIssueStatus is fleet-db's explicit parked issue status: task runs
+// exhausted their retry budget and the issue is held for human review.
+// Un-parking is a human action (move the issue back to open).
+const parkedIssueStatus = "parked"
+
 type TaskClaimOptions struct {
 	EpicID  string
 	Actor   string
@@ -52,6 +57,12 @@ func ClaimReadyTask(ctx context.Context, issueBackend backend.IssueBackend, opts
 	actor := strings.TrimSpace(opts.Actor)
 	for _, issue := range ready {
 		if strings.TrimSpace(issue.ID) == "" {
+			continue
+		}
+		// Parked issues (retry budget exhausted, held for human review)
+		// are excluded server-side from the ready view; skip them here
+		// too in case a backend still returns them.
+		if strings.EqualFold(strings.TrimSpace(issue.Status), parkedIssueStatus) {
 			continue
 		}
 		err := claimIssue(ctx, issueBackend, issue.ID, opts.LockTTL, actor)

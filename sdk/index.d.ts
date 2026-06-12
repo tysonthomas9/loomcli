@@ -4,6 +4,8 @@ export {
   FlueDriverClient,
   FlueDriverClientOptions,
   FlueDriverResult,
+  FlueEpicWatchEvent,
+  FlueEpicWatchInput,
   FlueTaskRunRequest,
   FlueTaskSelector,
   createLoomClient,

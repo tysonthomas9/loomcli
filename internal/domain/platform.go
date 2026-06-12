@@ -146,6 +146,40 @@ type AgentService struct {
 	UpdatedAt       time.Time                `json:"updated_at"`
 }
 
+// Retry defaults mirror fleet-db's write-time defaults for trigger binding
+// retry fields: 5 attempts with 30s exponential backoff (the sweeper caps
+// backoff at 1h).
+const (
+	DefaultTriggerRetryMaxAttempts    = 5
+	DefaultTriggerRetryBackoffSeconds = 30
+)
+
+// TriggerActorFilter scopes which event actors a binding reacts to. It is most
+// relevant for source_kind=internal bindings where workflow-emitted events
+// could otherwise feed back into workflows. Loopback protection itself is
+// structural (event origin + hop_depth), so the filter is advisory and a
+// missing filter on an internal binding is accepted.
+type TriggerActorFilter struct {
+	ExcludeActorKinds []string `json:"exclude_actor_kinds,omitempty"`
+	AllowActors       []string `json:"allow_actors,omitempty"`
+}
+
+// IsZero reports whether the filter is nil or carries no constraints.
+func (f *TriggerActorFilter) IsZero() bool {
+	return f == nil || (len(f.ExcludeActorKinds) == 0 && len(f.AllowActors) == 0)
+}
+
+// Clone returns a deep copy of the filter (nil-safe).
+func (f *TriggerActorFilter) Clone() *TriggerActorFilter {
+	if f == nil {
+		return nil
+	}
+	return &TriggerActorFilter{
+		ExcludeActorKinds: append([]string(nil), f.ExcludeActorKinds...),
+		AllowActors:       append([]string(nil), f.AllowActors...),
+	}
+}
+
 type TriggerBindingConcurrencyPolicy string
 
 const (
@@ -178,25 +212,63 @@ type TriggerBinding struct {
 	AuthPolicy           string                          `json:"auth_policy,omitempty"`
 	// WebhookSecret is the shared secret used to verify inbound webhook
 	// signatures (e.g. GitHub's X-Hub-Signature-256 HMAC) for this route.
-	WebhookSecret string    `json:"webhook_secret,omitempty"`
-	Permissions   []string  `json:"permissions,omitempty"`
-	Enabled       bool      `json:"enabled"`
-	CreatedAt     time.Time `json:"created_at"`
-	UpdatedAt     time.Time `json:"updated_at"`
+	WebhookSecret string `json:"webhook_secret,omitempty"`
+	// SubjectKeyTemplate renders the concurrency subject key for deliveries
+	// using {{subject_ref}}, {{event_type}} and {{attrs.X}} tokens (templates
+	// never read the raw payload). Empty means the default key
+	// binding_id|subject_ref.
+	SubjectKeyTemplate string `json:"subject_key_template,omitempty"`
+	// ActorFilter scopes which actors this binding reacts to; advisory for
+	// source_kind=internal bindings (see TriggerActorFilter).
+	ActorFilter *TriggerActorFilter `json:"actor_filter,omitempty"`
+	// RetryMaxAttempts and RetryBackoffSeconds drive the delivery retry
+	// sweeper; zero values are defaulted at write time (see
+	// DefaultTriggerRetryMaxAttempts / DefaultTriggerRetryBackoffSeconds).
+	RetryMaxAttempts    int `json:"retry_max_attempts,omitempty"`
+	RetryBackoffSeconds int `json:"retry_backoff_seconds,omitempty"`
+	// Schedule is a standard 5-field cron expression (or @descriptor);
+	// required when SourceKind is "cron". ScheduleTimezone is an IANA zone
+	// name evaluated against Schedule (UTC when empty).
+	Schedule         string    `json:"schedule,omitempty"`
+	ScheduleTimezone string    `json:"schedule_timezone,omitempty"`
+	Permissions      []string  `json:"permissions,omitempty"`
+	Enabled          bool      `json:"enabled"`
+	CreatedAt        time.Time `json:"created_at"`
+	UpdatedAt        time.Time `json:"updated_at"`
 }
+
+// TriggerEventOrigin mirrors fleet-db's structural event provenance: every
+// trigger event carries a server-stamped origin so workflow-originated events
+// are distinguishable from genuine external ones. Webhook ingest stamps
+// external (hop depth 0), the workflow events API stamps workflow (hop depth
+// parent+1, capped), and system schedulers stamp system.
+type TriggerEventOrigin string
+
+const (
+	TriggerEventOriginExternal TriggerEventOrigin = "external"
+	TriggerEventOriginWorkflow TriggerEventOrigin = "workflow"
+	TriggerEventOriginSystem   TriggerEventOrigin = "system"
+)
 
 // TriggerEvent is a durable record of an external event ingested by the
 // trigger layer (e.g. a verified GitHub webhook delivery), persisted before
 // any dispatch happens.
 type TriggerEvent struct {
-	WorkspaceKey     string    `json:"workspace_key"`
-	EventID          string    `json:"event_id"`
-	TriggerBindingID string    `json:"trigger_binding_id,omitempty"`
-	SourceKind       string    `json:"source_kind"`
-	SourceEventID    string    `json:"source_event_id,omitempty"`
-	EventType        string    `json:"event_type"`
-	SubjectRef       string    `json:"subject_ref,omitempty"`
-	ActorRef         string    `json:"actor_ref,omitempty"`
+	WorkspaceKey     string `json:"workspace_key"`
+	EventID          string `json:"event_id"`
+	TriggerBindingID string `json:"trigger_binding_id,omitempty"`
+	SourceKind       string `json:"source_kind"`
+	SourceEventID    string `json:"source_event_id,omitempty"`
+	EventType        string `json:"event_type"`
+	SubjectRef       string `json:"subject_ref,omitempty"`
+	ActorRef         string `json:"actor_ref,omitempty"`
+	// Origin is the server-stamped provenance (external|workflow|system).
+	// Records persisted before provenance existed round-trip with an empty
+	// origin and normalize to external on read (zero-value back-compat).
+	Origin TriggerEventOrigin `json:"origin,omitempty"`
+	// HopDepth counts workflow re-trigger hops from the originating
+	// external or system event (which sit at depth 0).
+	HopDepth         int       `json:"hop_depth,omitempty"`
 	OccurredAt       time.Time `json:"occurred_at"`
 	ReceivedAt       time.Time `json:"received_at"`
 	IdempotencyKey   string    `json:"idempotency_key,omitempty"`
@@ -204,6 +276,14 @@ type TriggerEvent struct {
 	RawPayloadDigest string    `json:"raw_payload_digest,omitempty"`
 	SignatureStatus  string    `json:"signature_status,omitempty"`
 	ReplayOfEventID  string    `json:"replay_of_event_id,omitempty"`
+}
+
+// NormalizeProvenance applies zero-value back-compat on read: events written
+// before structural provenance existed were all externally ingested.
+func (e *TriggerEvent) NormalizeProvenance() {
+	if e.Origin == "" {
+		e.Origin = TriggerEventOriginExternal
+	}
 }
 
 // TriggerDeliveryStatus enumerates the lifecycle of a TriggerDelivery.
@@ -217,7 +297,32 @@ const (
 	TriggerDeliveryDispatched TriggerDeliveryStatus = "dispatched"
 	TriggerDeliveryFailed     TriggerDeliveryStatus = "failed"
 	TriggerDeliveryReplayed   TriggerDeliveryStatus = "replayed"
+	// TriggerDeliverySuperseded marks a delivery replaced by a newer event for
+	// the same subject key (replace concurrency policy). TriggerDeliveryHeld
+	// parks a delivery behind an active run for its subject key (queue
+	// concurrency policy); the retry sweeper promotes it. Both are additive
+	// enum values on the fleet-db v1 wire.
+	TriggerDeliverySuperseded TriggerDeliveryStatus = "superseded"
+	TriggerDeliveryHeld       TriggerDeliveryStatus = "held"
 )
+
+// TriggerDeliveryErrorRetriesExhausted is the terminal error class stamped on
+// a failed delivery once its binding's RetryMaxAttempts budget is spent
+// (mirrors fleet-db's write-time rule). A failed delivery carrying it is
+// final and leaves the retry due-index.
+const TriggerDeliveryErrorRetriesExhausted = "retries_exhausted"
+
+// IsValid reports whether the status is a known TriggerDeliveryStatus
+// (mirrors fleet-db's models.TriggerDeliveryStatus.IsValid).
+func (s TriggerDeliveryStatus) IsValid() bool {
+	switch s {
+	case TriggerDeliveryAccepted, TriggerDeliveryRejected, TriggerDeliveryDuplicate,
+		TriggerDeliveryQueued, TriggerDeliveryDispatched, TriggerDeliveryFailed,
+		TriggerDeliveryReplayed, TriggerDeliverySuperseded, TriggerDeliveryHeld:
+		return true
+	}
+	return false
+}
 
 // TriggerDelivery links a TriggerEvent to the binding that matched it and the
 // DriverRun it enqueued.
@@ -227,13 +332,17 @@ type TriggerDelivery struct {
 	TriggerEventID   string                `json:"trigger_event_id"`
 	TriggerBindingID string                `json:"trigger_binding_id"`
 	Status           TriggerDeliveryStatus `json:"status"`
-	RejectionReason  string                `json:"rejection_reason,omitempty"`
-	DriverRunID      string                `json:"driver_run_id,omitempty"`
-	Attempt          int                   `json:"attempt"`
-	NextRetryAt      *time.Time            `json:"next_retry_at,omitempty"`
-	ErrorClass       string                `json:"error_class,omitempty"`
-	CreatedAt        time.Time             `json:"created_at"`
-	UpdatedAt        time.Time             `json:"updated_at"`
+	// SubjectKey is the rendered concurrency subject key for this delivery:
+	// the binding's SubjectKeyTemplate output, or the default
+	// binding_id|subject_ref when the binding has no template.
+	SubjectKey      string     `json:"subject_key,omitempty"`
+	RejectionReason string     `json:"rejection_reason,omitempty"`
+	DriverRunID     string     `json:"driver_run_id,omitempty"`
+	Attempt         int        `json:"attempt"`
+	NextRetryAt     *time.Time `json:"next_retry_at,omitempty"`
+	ErrorClass      string     `json:"error_class,omitempty"`
+	CreatedAt       time.Time  `json:"created_at"`
+	UpdatedAt       time.Time  `json:"updated_at"`
 }
 
 type DriverRunStatus string

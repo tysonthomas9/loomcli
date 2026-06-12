@@ -49,6 +49,9 @@ type Store struct {
 	workers    *workerStore
 	roles      *roleStore
 	daemon     *daemonStore
+	conns      *connectorStore
+	grants     *connectorGrantStore
+	audits     *connectorAuditStore
 }
 
 // New constructs an empty in-memory store for tests.
@@ -77,7 +80,7 @@ func New() *Store {
 	runs.taskRuns = taskRuns
 	steps.taskRuns = taskRuns
 	events := newTriggerEventStore()
-	deliveries := newTriggerDeliveryStore()
+	deliveries := newTriggerDeliveryStore(bindings)
 	routes := &triggerRouteStore{bindings: bindings, events: events, deliveries: deliveries, runs: runs}
 	return &Store{
 		workspaces: newWorkspaceStore(),
@@ -107,6 +110,9 @@ func New() *Store {
 		workers:    newWorkerStore(),
 		roles:      roles,
 		daemon:     newDaemonStore(),
+		conns:      newConnectorStore(),
+		grants:     newConnectorGrantStore(),
+		audits:     newConnectorAuditStore(),
 	}
 }
 
@@ -182,6 +188,11 @@ func (s *Store) DriverRuns() store.DriverRunStore { return s.runs }
 func (s *Store) DriverSteps() store.DriverStepStore { return s.steps }
 
 func (s *Store) TaskRuns() store.TaskRunStore { return s.taskRuns }
+
+// TaskParked reports whether a TaskRunFinish with ParkTask marked the given
+// task ID parked. memstore has no issue model (issues live in fleet-db), so
+// this is the test-side observable for the parked-issue transition.
+func (s *Store) TaskParked(ws, taskID string) bool { return s.taskRuns.TaskParked(ws, taskID) }
 
 // TaskRunEvents returns the TaskRunEventStore.
 func (s *Store) TaskRunEvents() store.TaskRunEventStore { return s.taskEvents }

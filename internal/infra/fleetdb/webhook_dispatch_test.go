@@ -37,7 +37,14 @@ func TestTriggerRouteDispatchAndAudit(t *testing.T) {
 			if r.Header.Get("Idempotency-Key") != "github:d-1" {
 				t.Fatalf("missing Idempotency-Key header: %q", r.Header.Get("Idempotency-Key"))
 			}
-			writeJSON(t, w, domain.DriverRun{WorkspaceKey: "WS", RunID: "run-1", DriverID: "d", DriverVersionID: "v1", Status: domain.DriverRunQueued, Payload: req.Payload})
+			// BREAKING router-v2 wire: deliveries[] only, no top-level run.
+			writeJSON(t, w, map[string]any{"deliveries": []map[string]any{{
+				"delivery_id": "delivery-event-1", "trigger_binding_id": "binding-1",
+				"driver_run_id": "run-1", "status": "dispatched",
+			}}})
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/WS/driver-runs/run-1":
+			// The legacy DispatchTriggerRoute wrapper fetches the primary run.
+			writeJSON(t, w, domain.DriverRun{WorkspaceKey: "WS", RunID: "run-1", DriverID: "d", DriverVersionID: "v1", Status: domain.DriverRunQueued})
 		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/WS/trigger-events":
 			if got := r.URL.Query().Get("source_kind"); got != "github" {
 				t.Fatalf("source_kind filter = %q", got)

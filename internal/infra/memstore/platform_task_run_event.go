@@ -4,6 +4,7 @@ import (
 	"context"
 	"sort"
 	"sync"
+	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/store"
@@ -43,6 +44,11 @@ func (s *taskRunEventStore) Append(_ context.Context, in store.TaskRunEventAppen
 		s.items[in.WorkspaceKey] = make(map[string]*domain.TaskRunEvent)
 	}
 	s.seqs[in.WorkspaceKey]++
+	var nextEligibleAt *time.Time
+	if !in.NextEligibleAt.IsZero() {
+		at := in.NextEligibleAt
+		nextEligibleAt = &at
+	}
 	stored := domain.TaskRunEvent{
 		WorkspaceKey:   in.WorkspaceKey,
 		EventID:        eventID,
@@ -60,6 +66,7 @@ func (s *taskRunEventStore) Append(_ context.Context, in store.TaskRunEventAppen
 		LogsRef:        in.LogsRef,
 		ArtifactsRef:   in.ArtifactsRef,
 		LeaseToken:     in.LeaseToken,
+		NextEligibleAt: nextEligibleAt,
 		OccurredAt:     in.OccurredAt,
 	}
 	s.items[in.WorkspaceKey][eventID] = &stored

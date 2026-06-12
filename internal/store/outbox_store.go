@@ -27,6 +27,9 @@ type TaskRunEventAppend struct {
 	LogsRef        string
 	ArtifactsRef   string
 	LeaseToken     string
+	// NextEligibleAt is only meaningful on taskRunRequeued events (retry
+	// backoff); the zero value means unset and is omitted from the event.
+	NextEligibleAt time.Time
 	OccurredAt     time.Time
 }
 

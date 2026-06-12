@@ -345,6 +345,165 @@ test("FlueDriverClient maps structured driver API errors", async () => {
   });
 });
 
+test("FlueDriverClient epics.watch yields snapshot then taskRun frames and stops on closed", async () => {
+  const snapshotData = {
+    epic: { epicId: "EPIC-1", readyCount: 1, blockedCount: 0 },
+    active: { driverRunId: "run-1", activeCount: 0 },
+  };
+  await withSSEServer((call, res) => {
+    res.writeHead(200, { "Content-Type": "text/event-stream" });
+    res.write(": heartbeat\n\n");
+    writeSSEFrame(res, "0", "snapshot", snapshotData);
+    writeSSEFrame(res, "1", "taskRun", { seq: 1, type: "task_run_started", taskRunId: "task-run-1" });
+    writeSSEFrame(res, "2", "taskRun", { seq: 2, type: "task_run_completed", taskRunId: "task-run-1" });
+    writeSSEFrame(res, "2", "closed", { code: "parent_not_running" });
+    res.end();
+  }, async ({ apiUrl, calls }) => {
+    const client = watchTestClient(apiUrl);
+    const events = await collectWatchEvents(client.epics.watch({ epicId: "EPIC-1" }));
+
+    assert.deepEqual(
+      events.map((event) => [event.type, event.id]),
+      [["snapshot", "0"], ["taskRun", "1"], ["taskRun", "2"], ["closed", "2"]]
+    );
+    assert.deepEqual(events[0].data, snapshotData);
+    assert.equal(events[1].data.taskRunId, "task-run-1");
+    assert.deepEqual(events[3].data, { code: "parent_not_running" });
+
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].method, "GET");
+    assert.equal(calls[0].url, "/api/workspaces/WS/driver/watch/epic?epicId=EPIC-1");
+    assert.equal(calls[0].headers["x-loom-driver-run-id"], "run-1");
+    assert.equal(calls[0].headers["x-loom-driver-node-id"], "node-1");
+    assert.equal(calls[0].headers["x-loom-driver-lease-id"], "lease-1");
+    assert.equal(calls[0].headers["x-loom-driver-fencing-token"], "7");
+    assert.equal(calls[0].headers.authorization, "Bearer api-token");
+    assert.equal(calls[0].headers["last-event-id"], undefined);
+  });
+});
+
+test("FlueDriverClient epics.watch reconnects with Last-Event-ID after disconnect", async () => {
+  await withSSEServer((call, res, calls) => {
+    res.writeHead(200, { "Content-Type": "text/event-stream" });
+    if (calls.length === 1) {
+      writeSSEFrame(res, "3", "snapshot", { epic: { epicId: "EPIC-1" }, active: null });
+      writeSSEFrame(res, "5", "taskRun", { seq: 5, type: "task_run_started" });
+      res.end(); // Drop without a closed frame so the client reconnects.
+      return;
+    }
+    writeSSEFrame(res, "6", "taskRun", { seq: 6, type: "task_run_completed" });
+    writeSSEFrame(res, "6", "closed", { code: "parent_not_running" });
+    res.end();
+  }, async ({ apiUrl, calls }) => {
+    const client = watchTestClient(apiUrl);
+    const events = await collectWatchEvents(
+      client.epics.watch({ epicId: "EPIC-1", afterSeq: 3, reconnectMs: 10 })
+    );
+
+    assert.deepEqual(
+      events.map((event) => [event.type, event.id]),
+      [["snapshot", "3"], ["taskRun", "5"], ["taskRun", "6"], ["closed", "6"]]
+    );
+    assert.equal(calls.length, 2);
+    assert.equal(calls[0].headers["last-event-id"], "3");
+    assert.equal(calls[1].headers["last-event-id"], "5");
+  });
+});
+
+test("FlueDriverClient epics.watch ends iteration when the AbortSignal fires", async () => {
+  await withSSEServer((call, res) => {
+    res.writeHead(200, { "Content-Type": "text/event-stream" });
+    writeSSEFrame(res, "1", "snapshot", { epic: { epicId: "EPIC-1" }, active: null });
+    // Hold the stream open; the client aborts mid-iteration.
+  }, async ({ apiUrl }) => {
+    const controller = new AbortController();
+    const client = watchTestClient(apiUrl);
+    const events = [];
+    for await (const event of client.epics.watch({ epicId: "EPIC-1", signal: controller.signal })) {
+      events.push(event);
+      controller.abort();
+    }
+    assert.equal(events.length, 1);
+    assert.equal(events[0].type, "snapshot");
+  });
+});
+
+test("FlueDriverClient epics.watch surfaces HTTP 401 as DriverApiError", async () => {
+  await withSSEServer((call, res) => {
+    res.writeHead(401, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({
+      error: { code: "unauthenticated", message: "driver API token required", retryable: false },
+    }));
+  }, async ({ apiUrl }) => {
+    const client = watchTestClient(apiUrl);
+    await assert.rejects(
+      () => collectWatchEvents(client.epics.watch({ epicId: "EPIC-1" })),
+      (err) => {
+        assert.ok(err instanceof DriverApiError);
+        assert.equal(err.code, "unauthenticated");
+        assert.equal(err.message, "driver API token required");
+        assert.equal(err.retryable, false);
+        assert.equal(err.status, 401);
+        return true;
+      }
+    );
+  });
+});
+
+function watchTestClient(apiUrl) {
+  return createLoomDriverClient({
+    input: { epicId: "EPIC-1" },
+    apiToken: "api-token",
+    env: {
+      LOOM_DRIVER_WORKSPACE: "WS",
+      LOOM_DRIVER_RUN_ID: "run-1",
+      LOOM_DRIVER_NODE_ID: "node-1",
+      LOOM_DRIVER_LEASE_ID: "lease-1",
+      LOOM_DRIVER_FENCING_TOKEN: "7",
+      LOOM_DRIVER_API_URL: apiUrl,
+    },
+  });
+}
+
+async function collectWatchEvents(iterator) {
+  const events = [];
+  for await (const event of iterator) {
+    events.push(event);
+  }
+  return events;
+}
+
+function writeSSEFrame(res, id, event, data) {
+  res.write(`id: ${id}\nevent: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+}
+
+// withSSEServer hands the handler the raw response so tests control the SSE
+// wire bytes directly; open sockets are destroyed on teardown so a stream the
+// client abandoned cannot hang server.close.
+async function withSSEServer(handler, fn) {
+  const calls = [];
+  const sockets = new Set();
+  const server = createServer((req, res) => {
+    const call = { method: req.method, url: req.url, headers: req.headers };
+    calls.push(call);
+    handler(call, res, calls);
+  });
+  server.on("connection", (socket) => {
+    sockets.add(socket);
+    socket.on("close", () => sockets.delete(socket));
+  });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address();
+  try {
+    await fn({ apiUrl: `http://127.0.0.1:${address.port}`, calls });
+  } finally {
+    for (const socket of sockets) {
+      socket.destroy();
+    }
+    await new Promise((resolve) => server.close(resolve));
+  }
+}
+
 async function withDriverServer(handler, fn) {
   const calls = [];
   const server = createServer(async (req, res) => {

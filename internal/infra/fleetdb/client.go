@@ -93,6 +93,8 @@ type Client struct {
 	runs       *driverRunStore
 	steps      *driverStepStore
 	taskRuns   *taskRunStore
+	taskEvents *taskRunEventStore
+	outbox     *outboxStore
 	workers    *workerStore
 	roles      *roleStore
 	daemon     *daemonStore
@@ -138,6 +140,8 @@ func New(cfg Config) (*Client, error) {
 	c.runs = &driverRunStore{client: c}
 	c.steps = &driverStepStore{client: c}
 	c.taskRuns = &taskRunStore{client: c}
+	c.taskEvents = &taskRunEventStore{client: c}
+	c.outbox = &outboxStore{client: c}
 	c.workers = &workerStore{client: c}
 	c.roles = &roleStore{client: c}
 	c.daemon = &daemonStore{client: c}
@@ -206,13 +210,11 @@ func (c *Client) DriverSteps() store.DriverStepStore { return c.steps }
 // TaskRuns returns the TaskRunStore.
 func (c *Client) TaskRuns() store.TaskRunStore { return c.taskRuns }
 
-// TaskRunEvents is a compile stub; the fleet-db-backed implementation
-// lands in a follow-up chunk.
-func (c *Client) TaskRunEvents() store.TaskRunEventStore { return nil }
+// TaskRunEvents returns the TaskRunEventStore.
+func (c *Client) TaskRunEvents() store.TaskRunEventStore { return c.taskEvents }
 
-// Outbox is a compile stub; the fleet-db-backed implementation lands in
-// a follow-up chunk.
-func (c *Client) Outbox() store.OutboxStore { return nil }
+// Outbox returns the OutboxStore.
+func (c *Client) Outbox() store.OutboxStore { return c.outbox }
 
 // Workers returns the WorkerStore.
 func (c *Client) Workers() store.WorkerStore { return c.workers }

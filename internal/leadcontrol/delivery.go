@@ -41,6 +41,10 @@ type LeadMessageDeliveryOptions struct {
 	TaskRunID         string
 	TriggerEventID    string
 	TriggerDeliveryID string
+	// DedupeKey, when set, overrides the content-derived inbox dedupe key so
+	// callers with a durable identity (e.g. outbox rows) stay idempotent
+	// across redelivery.
+	DedupeKey string
 }
 
 const (
@@ -406,6 +410,10 @@ func createLeadInboxMessage(ctx context.Context, st store.Store, workspace, lead
 	if opts.SourceRef == "" && opts.DriverRunID != "" {
 		opts.SourceRef = "driver-run://" + opts.DriverRunID
 	}
+	dedupeKey := strings.TrimSpace(opts.DedupeKey)
+	if dedupeKey == "" {
+		dedupeKey = leadInboxDedupeKey(workspace, leadName, message, opts)
+	}
 	return agentinbox.Enqueue(ctx, st, workspace, leadName, message, agentinbox.MessageOptions{
 		SessionID:         sessionID,
 		SourceKind:        opts.SourceKind,
@@ -414,7 +422,7 @@ func createLeadInboxMessage(ctx context.Context, st store.Store, workspace, lead
 		TaskRunID:         opts.TaskRunID,
 		TriggerEventID:    opts.TriggerEventID,
 		TriggerDeliveryID: opts.TriggerDeliveryID,
-		DedupeKey:         leadInboxDedupeKey(workspace, leadName, message, opts),
+		DedupeKey:         dedupeKey,
 	})
 }
 

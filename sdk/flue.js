@@ -43,6 +43,7 @@ export class FlueDriverClient {
     this.epics = Object.freeze({
       get: (input = {}) => this.getEpic(input),
       snapshot: (input = {}) => this.epicSnapshot(input),
+      watch: (input = {}) => this.watchEpic(input),
     });
     this.agents = Object.freeze({
       list: (input = {}) => this.listAgents(input),
@@ -102,6 +103,84 @@ export class FlueDriverClient {
 
   async epicSnapshot(input = {}) {
     return this.#httpCall("epic-snapshot", { epicId: this.#epicID(input) });
+  }
+
+  // watchEpic returns an async iterator over the epic watch SSE stream
+  // (GET /api/workspaces/{ws}/driver/watch/epic), yielding {type, id, data}
+  // where type is "snapshot" | "taskRun" | "closed". The iterator reconnects
+  // automatically after stream end or network errors, resuming with the
+  // Last-Event-ID cursor; it honors server "retry:" hints, ends after a
+  // "closed" event, ends silently when input.signal aborts, and throws
+  // DriverApiError for non-retryable HTTP failures (e.g. 401).
+  watchEpic(input = {}) {
+    this.#requireHttpConfig();
+    return this.#watchEpicStream(input);
+  }
+
+  async *#watchEpicStream(input) {
+    const epicId = this.#epicID(input);
+    const signal = input.signal;
+    let retryMs = Math.max(0, Number(input.reconnectMs ?? 2000));
+    let lastEventId =
+      input.afterSeq === undefined || input.afterSeq === null || input.afterSeq === ""
+        ? ""
+        : String(input.afterSeq);
+    const query = new URLSearchParams();
+    if (epicId) {
+      query.set("epicId", String(epicId));
+    }
+    const queryString = query.toString();
+    const url = `${this.apiUrl}/api/workspaces/${encodeURIComponent(this.workspace)}/driver/watch/epic`
+      + (queryString ? `?${queryString}` : "");
+    while (true) {
+      if (signal?.aborted) {
+        return;
+      }
+      const controller = new AbortController();
+      const onAbort = () => controller.abort(signal?.reason);
+      signal?.addEventListener("abort", onAbort, { once: true });
+      try {
+        const headers = this.#identityHeaders();
+        headers.Accept = "text/event-stream";
+        if (lastEventId !== "") {
+          headers["Last-Event-ID"] = lastEventId;
+        }
+        const response = await fetch(url, { headers, signal: controller.signal });
+        if (!response.ok) {
+          throw await watchHttpError(response);
+        }
+        for await (const frame of sseFrames(response.body)) {
+          if (frame.retryMs !== undefined) {
+            retryMs = frame.retryMs;
+          }
+          if (frame.id !== undefined && frame.id !== "") {
+            lastEventId = frame.id;
+          }
+          if (frame.data === undefined) {
+            continue;
+          }
+          const event = { type: frame.event || "message", id: lastEventId, data: parseSSEData(frame.data) };
+          yield event;
+          if (event.type === "closed") {
+            return;
+          }
+        }
+        // Stream ended without a "closed" event: reconnect with the cursor.
+      } catch (err) {
+        if (signal?.aborted) {
+          return;
+        }
+        if (err instanceof DriverApiError && !err.retryable) {
+          throw err;
+        }
+        // Retryable API errors and network/stream failures fall through to
+        // the reconnect path below.
+      } finally {
+        signal?.removeEventListener("abort", onAbort);
+        controller.abort();
+      }
+      await watchDelay(retryMs, signal);
+    }
   }
 
   async listAgents(_input = {}) {
@@ -261,7 +340,7 @@ export class FlueDriverClient {
     return input.epicId || this.input.epicId || "";
   }
 
-  async #httpCall(op, params, options = {}) {
+  #requireHttpConfig() {
     if (!this.driverRunId) {
       throw new Error("LOOM_DRIVER_RUN_ID is required");
     }
@@ -271,9 +350,10 @@ export class FlueDriverClient {
     if (!this.apiUrl) {
       throw new Error("LOOM_DRIVER_API_URL is required for the driver HTTP API");
     }
-    const url = `${this.apiUrl}/api/workspaces/${encodeURIComponent(this.workspace)}/driver/${op}`;
+  }
+
+  #identityHeaders() {
     const headers = {
-      "Content-Type": "application/json",
       "X-Loom-Driver-Run-Id": this.driverRunId,
     };
     setHeaderIfSet(headers, "X-Loom-Driver-Node-Id", pickEnv(this.env, "LOOM_DRIVER_NODE_ID"));
@@ -282,6 +362,14 @@ export class FlueDriverClient {
     if (this.apiToken) {
       headers.Authorization = "Bearer " + this.apiToken;
     }
+    return headers;
+  }
+
+  async #httpCall(op, params, options = {}) {
+    this.#requireHttpConfig();
+    const url = `${this.apiUrl}/api/workspaces/${encodeURIComponent(this.workspace)}/driver/${op}`;
+    const headers = this.#identityHeaders();
+    headers["Content-Type"] = "application/json";
     const timeoutMs = options.timeoutMs === undefined ? DEFAULT_HTTP_TIMEOUT_MS : options.timeoutMs;
     const controller = timeoutMs > 0 ? new AbortController() : null;
     const timer = controller
@@ -401,6 +489,118 @@ function isTerminalTaskRunStatus(status) {
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+// watchHttpError maps a non-OK watch response onto DriverApiError using the
+// structured {code, message, retryable} envelope when present. Without an
+// envelope, 5xx/429 default to retryable so transient proxy errors reconnect.
+async function watchHttpError(response) {
+  let envelope = null;
+  try {
+    const parsed = JSON.parse(await response.text());
+    if (parsed && typeof parsed.error === "object" && parsed.error !== null) {
+      envelope = parsed.error;
+    }
+  } catch {
+    // Non-JSON error bodies fall back to the status-based defaults.
+  }
+  const retryable = envelope
+    ? Boolean(envelope.retryable)
+    : response.status >= 500 || response.status === 429;
+  return new DriverApiError(envelope?.message || `epic watch failed with HTTP ${response.status}`, {
+    code: envelope?.code,
+    retryable,
+    status: response.status,
+    details: envelope?.details,
+  });
+}
+
+// sseFrames is a minimal SSE parser over a fetch body stream: frames are
+// separated by blank lines; "event:", "id:", "data:" and "retry:" fields are
+// recognized; comment lines (leading ":") are ignored. A trailing partial
+// frame at stream end is dropped, per the SSE spec.
+async function* sseFrames(body) {
+  const decoder = new TextDecoder();
+  let buffer = "";
+  for await (const chunk of body) {
+    buffer += decoder.decode(chunk, { stream: true });
+    let boundary;
+    while ((boundary = buffer.indexOf("\n\n")) !== -1) {
+      const raw = buffer.slice(0, boundary);
+      buffer = buffer.slice(boundary + 2);
+      const frame = parseSSEFrame(raw);
+      if (frame) {
+        yield frame;
+      }
+    }
+  }
+}
+
+function parseSSEFrame(raw) {
+  const frame = { event: "", id: undefined, data: undefined, retryMs: undefined };
+  let sawField = false;
+  for (const rawLine of raw.split("\n")) {
+    const line = rawLine.endsWith("\r") ? rawLine.slice(0, -1) : rawLine;
+    if (line === "" || line.startsWith(":")) {
+      continue;
+    }
+    const colon = line.indexOf(":");
+    const field = colon === -1 ? line : line.slice(0, colon);
+    let value = colon === -1 ? "" : line.slice(colon + 1);
+    if (value.startsWith(" ")) {
+      value = value.slice(1);
+    }
+    switch (field) {
+      case "event":
+        frame.event = value;
+        sawField = true;
+        break;
+      case "id":
+        frame.id = value;
+        sawField = true;
+        break;
+      case "data":
+        frame.data = frame.data === undefined ? value : frame.data + "\n" + value;
+        sawField = true;
+        break;
+      case "retry": {
+        const ms = Number(value);
+        if (Number.isFinite(ms) && ms >= 0) {
+          frame.retryMs = ms;
+          sawField = true;
+        }
+        break;
+      }
+      default:
+        break;
+    }
+  }
+  return sawField ? frame : null;
+}
+
+function parseSSEData(text) {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return text;
+  }
+}
+
+// watchDelay sleeps for the reconnect backoff but resolves early when the
+// caller's abort signal fires so iteration can end promptly.
+function watchDelay(ms, signal) {
+  if (signal?.aborted) {
+    return Promise.resolve();
+  }
+  return new Promise((resolve) => {
+    const timer = setTimeout(done, ms);
+    function done() {
+      clearTimeout(timer);
+      signal?.removeEventListener("abort", done);
+      resolve();
+    }
+    signal?.addEventListener("abort", done, { once: true });
+  });
 }
 
 function rememberTaskRunResult(client, result = {}) {

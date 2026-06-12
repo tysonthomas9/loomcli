@@ -2,8 +2,9 @@ package cmdstore
 
 // Traced wrappers for the platform stores (drivers, driver versions, worker
 // profiles, agent services, trigger bindings, driver runs, driver steps,
-// task runs), mirroring internal/store/platform_store.go. Shared span
-// helpers live in store_tracing.go.
+// task runs, task run events, outbox), mirroring
+// internal/store/platform_store.go and internal/store/outbox_store.go.
+// Shared span helpers live in store_tracing.go.
 
 import (
 	"context"
@@ -476,6 +477,62 @@ func (t *tracedTaskRunStore) AppendLog(ctx context.Context, ws, taskRunID string
 func (t *tracedTaskRunStore) ListLogs(ctx context.Context, ws, taskRunID string, filter store.TaskRunLogFilter) ([]*domain.TaskRunLogEntry, error) {
 	return tracedList(ctx, "TaskRuns", "ListLogs", func(ctx context.Context) ([]*domain.TaskRunLogEntry, error) {
 		return t.inner.ListLogs(ctx, ws, taskRunID, filter)
+	},
+		attribute.String("loom.workspace", ws),
+	)
+}
+
+// --- TaskRunEventStore ---
+
+type tracedTaskRunEventStore struct{ inner store.TaskRunEventStore }
+
+func (t *tracedTaskRunEventStore) Append(ctx context.Context, in store.TaskRunEventAppend) (*domain.TaskRunEvent, error) {
+	return traced(ctx, "TaskRunEvents", "Append", func(ctx context.Context) (*domain.TaskRunEvent, error) {
+		return t.inner.Append(ctx, in)
+	},
+		attribute.String("loom.workspace", in.WorkspaceKey),
+	)
+}
+
+func (t *tracedTaskRunEventStore) ListSince(ctx context.Context, ws string, filter store.TaskRunEventFilter) ([]*domain.TaskRunEvent, error) {
+	return tracedList(ctx, "TaskRunEvents", "ListSince", func(ctx context.Context) ([]*domain.TaskRunEvent, error) {
+		return t.inner.ListSince(ctx, ws, filter)
+	},
+		attribute.String("loom.workspace", ws),
+	)
+}
+
+// --- OutboxStore ---
+
+type tracedOutboxStore struct{ inner store.OutboxStore }
+
+func (t *tracedOutboxStore) Create(ctx context.Context, in store.OutboxCreate) (*domain.OutboxRecord, error) {
+	return traced(ctx, "Outbox", "Create", func(ctx context.Context) (*domain.OutboxRecord, error) {
+		return t.inner.Create(ctx, in)
+	},
+		attribute.String("loom.workspace", in.WorkspaceKey),
+	)
+}
+
+func (t *tracedOutboxStore) ListDue(ctx context.Context, ws string, filter store.OutboxDueFilter) ([]*domain.OutboxRecord, error) {
+	return tracedList(ctx, "Outbox", "ListDue", func(ctx context.Context) ([]*domain.OutboxRecord, error) {
+		return t.inner.ListDue(ctx, ws, filter)
+	},
+		attribute.String("loom.workspace", ws),
+	)
+}
+
+func (t *tracedOutboxStore) MarkResult(ctx context.Context, ws, outboxID string, update store.OutboxDeliveryUpdate) (*domain.OutboxRecord, error) {
+	return traced(ctx, "Outbox", "MarkResult", func(ctx context.Context) (*domain.OutboxRecord, error) {
+		return t.inner.MarkResult(ctx, ws, outboxID, update)
+	},
+		attribute.String("loom.workspace", ws),
+	)
+}
+
+func (t *tracedOutboxStore) Get(ctx context.Context, ws, outboxID string) (*domain.OutboxRecord, error) {
+	return traced(ctx, "Outbox", "Get", func(ctx context.Context) (*domain.OutboxRecord, error) {
+		return t.inner.Get(ctx, ws, outboxID)
 	},
 		attribute.String("loom.workspace", ws),
 	)

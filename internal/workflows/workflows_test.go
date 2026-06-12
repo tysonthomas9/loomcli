@@ -21,10 +21,9 @@ func TestBuiltinEpicRunnerWorkflowSourceIncludesReconcilePrimitives(t *testing.T
 		"loom.agents.orchestrationSession",
 		"loom.agents.updateParent",
 		"loom.agents.deliverAssignment",
-		"loom.agents.message",
+		"loom.epics.watch",
 		"dryRun",
 		"targetNodeId",
-		"loom.taskRuns.recoverStale",
 		"loom.epics.snapshot",
 		"loom.taskRuns.active",
 		"loom.tasks.claimReady",
@@ -34,6 +33,90 @@ func TestBuiltinEpicRunnerWorkflowSourceIncludesReconcilePrimitives(t *testing.T
 	} {
 		if !strings.Contains(source, want) {
 			t.Fatalf("built-in epic-runner source missing %q", want)
+		}
+	}
+}
+
+// The main loop is edge-triggered off the epic watch stream: no polling
+// cadence, no per-batch barrier, and no workflow-side awaiting of queued
+// task runs (terminal journal events drive the bookkeeping instead).
+func TestBuiltinEpicRunnerWorkflowIsWatchDriven(t *testing.T) {
+	spec, ok := BuiltinWorkflow(BuiltinEpicRunnerWorkflowName)
+	if !ok {
+		t.Fatal("built-in epic-runner workflow missing")
+	}
+	source := spec.Files[spec.Entrypoint]
+	for _, want := range []string{
+		"for await (const event of loom.epics.watch({ epicId }))",
+		"const inFlight = new Map();",
+		"reconcileInFlight(",
+		`case "taskRunCompleted":`,
+		`case "taskRunParked":`,
+		`case "taskRunFailed":`,
+		`case "taskRunCancelled":`,
+		"completeChildTask(loom, data)",
+	} {
+		if !strings.Contains(source, want) {
+			t.Fatalf("built-in epic-runner source missing watch-driven loop element %q", want)
+		}
+	}
+	for _, forbidden := range []string{
+		"Promise.all",
+		"loom.taskRuns.await",
+		"function sleep(",
+		"setTimeout",
+		"intervalSeconds",
+		"intervalMs",
+	} {
+		if strings.Contains(source, forbidden) {
+			t.Fatalf("built-in epic-runner source still has polling-loop machinery %q", forbidden)
+		}
+	}
+}
+
+// Lead notification delivery is owned by the server outbox dispatcher:
+// startEpicRun makes exactly one fire-once deliverAssignment call per
+// delivery site and the workflow carries no retry/drain machinery and no
+// per-task lead messages.
+func TestBuiltinEpicRunnerWorkflowDelegatesLeadDeliveryToServerOutbox(t *testing.T) {
+	spec, ok := BuiltinWorkflow(BuiltinEpicRunnerWorkflowName)
+	if !ok {
+		t.Fatal("built-in epic-runner workflow missing")
+	}
+	source := spec.Files[spec.Entrypoint]
+	for _, forbidden := range []string{
+		"loom.agents.message",
+		"startLeadDeliveryRetry",
+		"startLeadMessageDeliveryRetry",
+		"attemptLeadMessageDelivery",
+		"formatTaskCompleteLeadMessage",
+		"leadNotificationDrainMs",
+		"taskNotifications",
+		"leadDelivery.flush",
+	} {
+		if strings.Contains(source, forbidden) {
+			t.Fatalf("built-in epic-runner source still has workflow-side lead delivery machinery %q", forbidden)
+		}
+	}
+	if got := strings.Count(source, "loom.agents.deliverAssignment"); got != 1 {
+		t.Fatalf("loom.agents.deliverAssignment call sites = %d, want exactly 1 fire-once call (server outbox owns retries)", got)
+	}
+}
+
+// Stale task-run recovery is owned by the server-side sweeper; the workflow
+// must not call recoverStale.
+func TestBuiltinEpicRunnerWorkflowDoesNotRecoverStaleTaskRuns(t *testing.T) {
+	spec, ok := BuiltinWorkflow(BuiltinEpicRunnerWorkflowName)
+	if !ok {
+		t.Fatal("built-in epic-runner workflow missing")
+	}
+	source := spec.Files[spec.Entrypoint]
+	for _, forbidden := range []string{
+		"loom.taskRuns.recoverStale",
+		"staleTaskRunMaxAgeSeconds",
+	} {
+		if strings.Contains(source, forbidden) {
+			t.Fatalf("built-in epic-runner source still has workflow-side stale recovery %q (server sweeper owns it)", forbidden)
 		}
 	}
 }
@@ -55,8 +138,8 @@ func TestBuiltinEpicRunnerWorkflowWorkerProfilesAreOptIn(t *testing.T) {
 		}
 	}
 	for _, want := range []string{
-		"const workerPrefix = stringValue(input.workerPrefix);",
-		"const workerProfileId = stringValue(input.workerProfileId);",
+		"workerPrefix: stringValue(input.workerPrefix),",
+		"workerProfileId: stringValue(input.workerProfileId),",
 		"request.workerProfileId = workerProfileId;",
 	} {
 		if !strings.Contains(source, want) {
@@ -88,44 +171,6 @@ func TestBuiltinEpicRunnerWorkflowUsesCamelCaseInputContract(t *testing.T) {
 	} {
 		if strings.Contains(source, forbidden) {
 			t.Fatalf("built-in epic-runner source still accepts legacy input field %q", forbidden)
-		}
-	}
-}
-
-func TestBuiltinEpicRunnerWorkflowDrainsQueuedLeadMessagesBeforeTerminalResult(t *testing.T) {
-	spec, ok := BuiltinWorkflow(BuiltinEpicRunnerWorkflowName)
-	if !ok {
-		t.Fatal("built-in epic-runner workflow missing")
-	}
-	source := spec.Files[spec.Entrypoint]
-	for _, want := range []string{
-		"const leadNotificationDrainMs =",
-		"taskNotifications.drain(leadNotificationDrainMs)",
-		"async drain(timeoutMs) {",
-	} {
-		if !strings.Contains(source, want) {
-			t.Fatalf("built-in epic-runner source missing lead notification drain logic %q", want)
-		}
-	}
-	if strings.Contains(source, "await taskNotifications.flush();\n        const suffix") {
-		t.Fatalf("built-in epic-runner still completes after a single task notification flush")
-	}
-}
-
-func TestBuiltinEpicRunnerWorkflowAwaitsQueuedTaskRuns(t *testing.T) {
-	spec, ok := BuiltinWorkflow(BuiltinEpicRunnerWorkflowName)
-	if !ok {
-		t.Fatal("built-in epic-runner workflow missing")
-	}
-	source := spec.Files[spec.Entrypoint]
-	for _, want := range []string{
-		"loom.taskRuns.await",
-		"taskRunStillActive(result.status)",
-		"function taskRunStillActive(status)",
-		"if (!leaseToken) {",
-	} {
-		if !strings.Contains(source, want) {
-			t.Fatalf("built-in epic-runner source missing async task-run behavior %q", want)
 		}
 	}
 }

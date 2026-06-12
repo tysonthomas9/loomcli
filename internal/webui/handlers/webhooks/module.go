@@ -86,6 +86,11 @@ func (m *Module) receiveWebhook(w http.ResponseWriter, r *http.Request) {
 // authorizeWebhook resolves the enabled binding for the event's route key,
 // fetches its signing secret via the privileged path, and verifies the request
 // signature. It writes the appropriate error and returns false on any failure.
+//
+// Interim signature model (locked decision): verification is keyed to the
+// exact-RouteKey ingress binding's secret. Pattern-matched fan-out bindings
+// need no secrets of their own — verification happens here at ingress, before
+// dispatch; per-source secrets arrive with step-7 connectors.
 func (m *Module) authorizeWebhook(w http.ResponseWriter, r *http.Request, adapter Adapter, ws string, event NormalizedEvent, body []byte) bool {
 	binding, err := m.store.TriggerBindings().GetByRouteKey(r.Context(), ws, event.RouteKey)
 	if err != nil {
@@ -109,7 +114,9 @@ func (m *Module) authorizeWebhook(w http.ResponseWriter, r *http.Request, adapte
 }
 
 // dispatchWebhook normalizes the payload to valid JSON, hands off to the durable
-// idempotent dispatch path (redelivery is a no-op), and writes the 202 response.
+// idempotent fan-out dispatch path (redelivery heals each leg independently),
+// and writes the 202 response. The handler still only persists + enqueues —
+// it never executes work inline.
 func (m *Module) dispatchWebhook(w http.ResponseWriter, r *http.Request, ws, name string, event NormalizedEvent, body []byte) {
 	if len(strings.TrimSpace(string(body))) == 0 {
 		body = []byte("{}")
@@ -118,7 +125,7 @@ func (m *Module) dispatchWebhook(w http.ResponseWriter, r *http.Request, ws, nam
 		return
 	}
 	idempotencyKey := name + ":" + event.DeliveryID
-	run, err := m.store.TriggerRoutes().DispatchTriggerRoute(r.Context(), ws, event.RouteKey, store.TriggerRouteDispatch{
+	result, err := m.store.TriggerRoutes().DispatchTriggerRouteV2(r.Context(), ws, event.RouteKey, store.TriggerRouteDispatch{
 		IdempotencyKey:   idempotencyKey,
 		SourceEventID:    event.DeliveryID,
 		EventType:        event.EventType,
@@ -127,17 +134,21 @@ func (m *Module) dispatchWebhook(w http.ResponseWriter, r *http.Request, ws, nam
 		SignatureStatus:  "verified",
 		RawPayloadDigest: payloadDigest(body),
 		Payload:          json.RawMessage(body),
+		SubjectAttrs:     event.SubjectAttrs,
 	})
 	if err != nil {
 		writeDomainError(w, err, "dispatch webhook failed")
 		return
 	}
+	// BREAKING router-v2 wire (locked decision): the 202 body carries
+	// deliveries[] only — no top-level driver_run_id / driver_run. loom-dev
+	// consumers update at redeploy; callers that need the run body fetch it
+	// by deliveries[i].driver_run_id.
 	writeJSON(w, http.StatusAccepted, map[string]any{
 		"status":          "accepted",
 		"route_key":       event.RouteKey,
 		"idempotency_key": idempotencyKey,
-		"driver_run_id":   run.RunID,
-		"driver_run":      run,
+		"deliveries":      result.Deliveries,
 	})
 }
 
