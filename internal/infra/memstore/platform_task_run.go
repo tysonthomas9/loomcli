@@ -147,7 +147,7 @@ func (s *taskRunStore) ClaimQueued(ctx context.Context, ws string, claim store.T
 	}
 	for _, run := range claimCandidatesMem(s.items[ws], normalized.TaskRunID) {
 		profile := s.profileLocked(ws, run.WorkerProfileID)
-		if !taskRunMatchesClaimMem(run, profile, normalized) {
+		if !taskRunMatchesClaimMem(run, profile, normalized, now) {
 			continue
 		}
 		if profile != nil && profile.MaxParallel > 0 && runningOnNode >= profile.MaxParallel {
@@ -391,6 +391,7 @@ func (s *taskRunStore) Requeue(_ context.Context, ws, taskRunID string, requeue 
 		run.ArtifactsRef = requeue.ArtifactsRef
 	}
 	run.RuntimeMetadata = mergeStringMapMem(run.RuntimeMetadata, requeue.RuntimeMetadata)
+	run.NextEligibleAt = requeue.NextEligibleAt
 	run.UpdatedAt = now
 	return cloneTaskRun(run), nil
 }

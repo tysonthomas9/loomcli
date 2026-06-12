@@ -31,6 +31,8 @@ type TaskWorker struct {
 	HeartbeatInterval  time.Duration
 	MaxAttempts        int
 	Executor           TaskExecutor
+	// Now is a clock seam for tests; nil uses time.Now.
+	Now func() time.Time
 }
 
 func (w *TaskWorker) RunOnce(ctx context.Context) (*TaskRunRequestOutcome, error) {
@@ -93,6 +95,7 @@ func (w *TaskWorker) runOnceInWorkspace(ctx context.Context, ws, workDir string)
 		HeartbeatInterval:  w.HeartbeatInterval,
 		CloseTaskOnSuccess: true,
 		MaxAttempts:        w.maxAttempts(),
+		Now:                w.Now,
 	}, executor)
 	if err != nil {
 		if errors.Is(err, domain.ErrNotFound) {

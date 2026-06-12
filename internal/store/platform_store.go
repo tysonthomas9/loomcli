@@ -523,6 +523,9 @@ type TaskRunRequeue struct {
 	ErrorClass      string
 	ErrorMessage    string
 	RequeuedAt      time.Time
+	// NextEligibleAt delays the requeued run from being claimed again until
+	// the given time. The zero value keeps the run immediately claimable.
+	NextEligibleAt time.Time
 }
 
 type TaskRunHeartbeat struct {

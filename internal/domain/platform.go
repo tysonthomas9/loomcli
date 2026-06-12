@@ -360,6 +360,7 @@ type TaskRun struct {
 	CacheWriteTokens int64             `json:"cache_write_tokens,omitempty"`
 	EstimatedCostUSD float64           `json:"estimated_cost_usd,omitempty"`
 	RuntimeMetadata  map[string]string `json:"runtime_metadata,omitempty"`
+	NextEligibleAt   time.Time         `json:"next_eligible_at,omitempty"`
 	StartedAt        time.Time         `json:"started_at,omitempty"`
 	LastHeartbeat    time.Time         `json:"last_heartbeat,omitempty"`
 	FinishedAt       *time.Time        `json:"finished_at,omitempty"`

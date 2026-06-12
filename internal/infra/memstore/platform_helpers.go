@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/store"
@@ -153,8 +154,12 @@ func claimCandidatesMem(runs map[string]*domain.TaskRun, taskRunID string) []*do
 	return out
 }
 
-func taskRunMatchesClaimMem(run *domain.TaskRun, profile *domain.WorkerProfile, claim store.TaskRunClaim) bool {
+func taskRunMatchesClaimMem(run *domain.TaskRun, profile *domain.WorkerProfile, claim store.TaskRunClaim, now time.Time) bool {
 	if run == nil || run.Status != domain.TaskRunQueued {
+		return false
+	}
+	// Retry backoff: a zero NextEligibleAt keeps the run immediately claimable.
+	if !run.NextEligibleAt.IsZero() && run.NextEligibleAt.After(now) {
 		return false
 	}
 	if claim.TaskRunID != "" && run.TaskRunID != claim.TaskRunID {

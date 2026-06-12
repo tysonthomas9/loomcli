@@ -4,6 +4,7 @@ package driver
 import (
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/store"
@@ -172,6 +173,7 @@ func TestTaskWorkerRunOnceRetriesThenParksFailedTaskRun(t *testing.T) {
 		ErrorClass:   "task_runner_error",
 		ErrorMessage: "boom",
 	}}
+	now := time.Now().UTC()
 	worker := &TaskWorker{
 		Store:             st,
 		WorkspaceKey:      "TEST",
@@ -180,6 +182,7 @@ func TestTaskWorkerRunOnceRetriesThenParksFailedTaskRun(t *testing.T) {
 		HeartbeatInterval: -1,
 		MaxAttempts:       2,
 		Executor:          executor,
+		Now:               func() time.Time { return now },
 	}
 
 	first, err := worker.RunOnce(ctx)
@@ -199,6 +202,17 @@ func TestTaskWorkerRunOnceRetriesThenParksFailedTaskRun(t *testing.T) {
 	if step.Status != domain.DriverStepQueued || step.TaskRunID != "task-run-worker-retry" {
 		t.Fatalf("step after retry = %+v, want queued linked step", step)
 	}
+	requeued, err := st.TaskRuns().Get(ctx, "TEST", "task-run-worker-retry")
+	if err != nil {
+		t.Fatalf("Get requeued task run: %v", err)
+	}
+	if requeued.NextEligibleAt.IsZero() || !requeued.NextEligibleAt.After(now) {
+		t.Fatalf("requeued NextEligibleAt = %v, want future retry backoff after %v", requeued.NextEligibleAt, now)
+	}
+
+	// Advance the clock past the retry backoff so the requeued run is
+	// claimable again.
+	now = now.Add(taskRunRetryBackoff(1))
 
 	second, err := worker.RunOnce(ctx)
 	if err != nil {

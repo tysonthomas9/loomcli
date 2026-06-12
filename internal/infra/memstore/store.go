@@ -44,6 +44,8 @@ type Store struct {
 	runs       *driverRunStore
 	steps      *driverStepStore
 	taskRuns   *taskRunStore
+	taskEvents *taskRunEventStore
+	outbox     *outboxStore
 	workers    *workerStore
 	roles      *roleStore
 	daemon     *daemonStore
@@ -100,6 +102,8 @@ func New() *Store {
 		runs:       runs,
 		steps:      steps,
 		taskRuns:   taskRuns,
+		taskEvents: newTaskRunEventStore(),
+		outbox:     newOutboxStore(),
 		workers:    newWorkerStore(),
 		roles:      roles,
 		daemon:     newDaemonStore(),
@@ -179,13 +183,11 @@ func (s *Store) DriverSteps() store.DriverStepStore { return s.steps }
 
 func (s *Store) TaskRuns() store.TaskRunStore { return s.taskRuns }
 
-// TaskRunEvents is a compile stub; the in-memory implementation lands in
-// a follow-up chunk.
-func (s *Store) TaskRunEvents() store.TaskRunEventStore { return nil }
+// TaskRunEvents returns the TaskRunEventStore.
+func (s *Store) TaskRunEvents() store.TaskRunEventStore { return s.taskEvents }
 
-// Outbox is a compile stub; the in-memory implementation lands in a
-// follow-up chunk.
-func (s *Store) Outbox() store.OutboxStore { return nil }
+// Outbox returns the OutboxStore.
+func (s *Store) Outbox() store.OutboxStore { return s.outbox }
 
 // Workers returns the WorkerStore.
 func (s *Store) Workers() store.WorkerStore { return s.workers }

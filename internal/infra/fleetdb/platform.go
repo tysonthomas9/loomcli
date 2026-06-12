@@ -695,6 +695,9 @@ func (s *taskRunStore) Requeue(ctx context.Context, ws, taskRunID string, requeu
 		"error_class":      requeue.ErrorClass,
 		"error_message":    requeue.ErrorMessage,
 	}
+	if !requeue.NextEligibleAt.IsZero() {
+		body["next_eligible_at"] = requeue.NextEligibleAt
+	}
 	var out domain.TaskRun
 	path := "/api/v1/" + pathEscape(ws) + "/task-runs/" + pathEscape(taskRunID) + "/requeue"
 	headers := leaseTokenHeaders(requeue.LeaseToken)

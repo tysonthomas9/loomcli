@@ -53,6 +53,8 @@ type TaskRunWorkerOptions struct {
 	DeferCompletion    bool
 	CloseTaskOnSuccess bool
 	MaxAttempts        int
+	// Now is a clock seam for tests; nil uses time.Now.
+	Now func() time.Time
 }
 
 type TaskExecRequest struct {
@@ -252,6 +254,7 @@ func ClaimAndExecuteTaskRunWithResult(ctx context.Context, s store.Store, opts T
 		WorkerProfileIDs:   normalizeStringList(opts.WorkerProfileIDs),
 		RunnerPlacement:    opts.RunnerPlacement,
 		SandboxPlacement:   opts.SandboxPlacement,
+		ClaimedAt:          taskRunNow(opts.Now),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("claim queued task run: %w", err)
@@ -264,6 +267,7 @@ func ClaimAndExecuteTaskRunWithResult(ctx context.Context, s store.Store, opts T
 		CloseTaskOnSuccess: opts.CloseTaskOnSuccess,
 		MaxAttempts:        opts.MaxAttempts,
 		HeartbeatSource:    "task_run_worker",
+		Now:                opts.Now,
 	}, executor)
 }
 
@@ -500,6 +504,8 @@ type executeClaimedTaskRunOptions struct {
 	ParentLeaseID      string
 	ParentFence        int64
 	HeartbeatSource    string
+	// Now is a clock seam for tests; nil uses time.Now.
+	Now func() time.Time
 }
 
 func executeClaimedTaskRunWithResult(ctx context.Context, s store.Store, claimed *domain.TaskRun, opts executeClaimedTaskRunOptions, executor TaskExecutor) (*TaskRunRequestOutcome, error) {

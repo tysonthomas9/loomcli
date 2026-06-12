@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/store"
@@ -60,11 +61,42 @@ func requeueClaimedTaskRun(ctx context.Context, s store.Store, claimed *domain.T
 		ArtifactsRef:    execResult.ArtifactsRef,
 		ErrorClass:      completion.ErrorClass,
 		ErrorMessage:    completion.ErrorMessage,
+		NextEligibleAt:  taskRunNow(opts.Now).Add(taskRunRetryBackoff(retry.Attempt)),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("requeue task run: %w", err)
 	}
 	return requeued, nil
+}
+
+const (
+	taskRunRetryBackoffBase = time.Second
+	taskRunRetryBackoffMax  = 30 * time.Second
+)
+
+// taskRunNow resolves the injectable clock seam; a nil now uses time.Now.
+func taskRunNow(now func() time.Time) time.Time {
+	if now != nil {
+		return now().UTC()
+	}
+	return time.Now().UTC()
+}
+
+// taskRunRetryBackoff computes the exponential retry backoff for a failed
+// attempt: min(30s, 1s<<attempt).
+func taskRunRetryBackoff(attempt int) time.Duration {
+	if attempt < 0 {
+		attempt = 0
+	}
+	// 1s<<5 = 32s already exceeds the cap; avoid shift overflow for large attempts.
+	if attempt >= 5 {
+		return taskRunRetryBackoffMax
+	}
+	backoff := taskRunRetryBackoffBase << uint(attempt)
+	if backoff > taskRunRetryBackoffMax {
+		return taskRunRetryBackoffMax
+	}
+	return backoff
 }
 
 func taskRunRetryMetadata(_ *domain.TaskRun, retry taskRunRetryDecisionResult, completion taskExecCompletion, metadata map[string]string) map[string]string {
