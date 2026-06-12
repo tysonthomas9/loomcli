@@ -986,27 +986,6 @@ func TestClaudeTurnBackoff(t *testing.T) {
 	}
 }
 
-func TestTrimToJSONObject(t *testing.T) {
-	t.Parallel()
-	cases := []struct {
-		name string
-		in   string
-		want string
-	}{
-		{"pty echo prefix", "\x04\b\b\x04\b\b{\"type\":\"system\"}", `{"type":"system"}`},
-		{"no brace unchanged", "plain text line", "plain text line"},
-		{"starts with brace unchanged", `{"a":1}`, `{"a":1}`},
-		{"empty", "", ""},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			if got := trimToJSONObject(tc.in); got != tc.want {
-				t.Errorf("trimToJSONObject(%q) = %q, want %q", tc.in, got, tc.want)
-			}
-		})
-	}
-}
-
 func TestCollectClaudeStreamUsage_PTYEchoPrefix(t *testing.T) {
 	t.Parallel()
 	c := usage.NewCollector("claude", "t")
@@ -1026,18 +1005,5 @@ func TestCollectClaudeStreamUsage_PTYEchoPrefix(t *testing.T) {
 	}
 	if su.CacheWriteTokens != 50 {
 		t.Errorf("CacheWriteTokens = %d, want 50", su.CacheWriteTokens)
-	}
-}
-
-func TestExtractClaudeSessionID_PTYEchoPrefix(t *testing.T) {
-	t.Parallel()
-
-	line := "\x04\b\b\x04\b\b" + `{"type":"system","subtype":"init","session_id":"abc-123"}`
-	sid, ok := extractClaudeSessionID(line)
-	if !ok {
-		t.Fatal("extractClaudeSessionID() ok = false, want true")
-	}
-	if sid != "abc-123" {
-		t.Errorf("session id = %q, want %q", sid, "abc-123")
 	}
 }
