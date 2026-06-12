@@ -7,10 +7,10 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/tysonthomas9/loomcli/internal/agentinbox"
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
 	"github.com/tysonthomas9/loomcli/internal/domain"
+	driverpkg "github.com/tysonthomas9/loomcli/internal/driver"
 	"github.com/tysonthomas9/loomcli/internal/epicrunner"
 	"github.com/tysonthomas9/loomcli/internal/leadcontrol"
 	"github.com/tysonthomas9/loomcli/internal/store"
@@ -293,78 +293,12 @@ func runDriverDeliverAgentMessage(_ *cobra.Command, _ []string) error {
 	})
 }
 
+type agentMessageDeliveryResult = driverpkg.AgentMessageDeliveryResult
+
 func deliverAgentMessageForDriver(ctx context.Context, st store.Store, workspace, driverRunID, agentName, message string) (agentMessageDeliveryResult, error) {
-	agent, err := st.Agents().Get(ctx, workspace, agentName)
-	if err != nil {
-		return agentMessageDeliveryResult{}, fmt.Errorf("get target agent: %w", err)
-	}
-	if isControlledLeadAgent(agent) {
-		delivery, err := leadcontrol.DeliverLeadMessageWithOptions(ctx, st, workspace, agentName, message, leadcontrol.LeadMessageDeliveryOptions{
-			SourceKind:  "workflow",
-			DriverRunID: driverRunID,
-		})
-		if err != nil {
-			return agentMessageDeliveryResult{}, err
-		}
-		return newAgentMessageDeliveryResult(agentName, delivery), nil
-	}
-	msg, err := agentinbox.Enqueue(ctx, st, workspace, agentName, message, agentinbox.MessageOptions{
-		SourceKind:  "workflow",
-		SourceRef:   "driver-run://" + strings.TrimSpace(driverRunID),
-		DriverRunID: driverRunID,
-	})
-	if err != nil {
-		return agentMessageDeliveryResult{}, err
-	}
-	return agentMessageDeliveryResult{
-		AgentName:      agentName,
-		State:          "queued",
-		Reason:         "agent message queued; no runtime delivery adapter is configured",
-		SessionID:      msg.SessionID,
-		InboxMessageID: msg.InboxMessageID,
-	}, nil
-}
-
-func isControlledLeadAgent(agent *domain.Agent) bool {
-	if agent == nil {
-		return false
-	}
-	return strings.EqualFold(strings.TrimSpace(agent.RoleName), "lead") && leadcontrol.IsControlledLeadBackend(agent.Backend)
-}
-
-type agentMessageDeliveryResult struct {
-	AgentName       string `json:"agentName"`
-	State           string `json:"state"`
-	Reason          string `json:"reason,omitempty"`
-	SessionID       string `json:"sessionId,omitempty"`
-	InboxMessageID  string `json:"inboxMessageId,omitempty"`
-	RuntimeProvider string `json:"runtimeProvider,omitempty"`
-	RuntimeStatus   string `json:"runtimeStatus,omitempty"`
-	Controlled      bool   `json:"controlled,omitempty"`
+	return driverpkg.DeliverAgentMessageForDriver(ctx, st, workspace, driverRunID, agentName, message)
 }
 
 func newLeadDeliveryResult(agentName string, delivery *leadcontrol.DeliveryResult) agentMessageDeliveryResult {
-	return newAgentMessageDeliveryResult(agentName, delivery)
-}
-
-func newAgentMessageDeliveryResult(agentName string, delivery *leadcontrol.DeliveryResult) agentMessageDeliveryResult {
-	result := agentMessageDeliveryResult{
-		AgentName: agentName,
-		State:     string(leadcontrol.DeliveryStateNone),
-	}
-	if delivery != nil {
-		result.State = string(delivery.State)
-		result.Reason = delivery.Reason
-		result.SessionID = delivery.SessionID
-		result.InboxMessageID = delivery.InboxMessageID
-		result.RuntimeProvider = delivery.Provider
-		if delivery.Provider != "" && delivery.Provider != leadcontrol.RuntimeProviderCodex {
-			result.RuntimeStatus = delivery.HarnessRuntime.Status
-			result.Controlled = delivery.HarnessRuntime.Controlled
-		} else {
-			result.RuntimeStatus = delivery.Runtime.Status
-			result.Controlled = delivery.Runtime.Controlled
-		}
-	}
-	return result
+	return driverpkg.NewAgentMessageDeliveryResult(agentName, delivery)
 }
