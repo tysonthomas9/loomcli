@@ -259,15 +259,21 @@ func (e *Executor) leaseID(runID string) string {
 
 func (e *Executor) ensureNode(ctx context.Context, ws, nodeID string) error {
 	ttl := e.nodeTTL()
+	ownerActor := executorOwnerActor()
+	runtimeProvider := domain.RuntimeProviderLocal
+	labels := []string{"loom-driver-executor"}
+	capabilities := []string{"driver-runner", "task-runner", "flue-local"}
+	toolInventory := []string{"loom-driver"}
+	drainState := domain.NodeDrainActive
 	_, err := e.Store.Nodes().Create(ctx, store.NodeCreate{
 		WorkspaceKey:    ws,
 		NodeID:          nodeID,
-		OwnerActor:      executorOwnerActor(),
-		RuntimeProvider: domain.RuntimeProviderLocal,
-		Labels:          []string{"loom-driver-executor"},
-		Capabilities:    []string{"driver-runner", "task-runner", "flue-local"},
-		ToolInventory:   []string{"loom-driver"},
-		DrainState:      domain.NodeDrainActive,
+		OwnerActor:      ownerActor,
+		RuntimeProvider: runtimeProvider,
+		Labels:          labels,
+		Capabilities:    capabilities,
+		ToolInventory:   toolInventory,
+		DrainState:      drainState,
 		TTL:             ttl,
 	})
 	if err == nil {
@@ -277,9 +283,46 @@ func (e *Executor) ensureNode(ctx context.Context, ws, nodeID string) error {
 		if _, hbErr := e.Store.Nodes().Heartbeat(ctx, ws, nodeID, ttl); hbErr != nil {
 			return fmt.Errorf("heartbeat executor node: %w", hbErr)
 		}
+		if existing, getErr := e.Store.Nodes().Get(ctx, ws, nodeID); getErr == nil {
+			labels = mergeNodeStringSet(existing.Labels, labels)
+			capabilities = mergeNodeStringSet(existing.Capabilities, capabilities)
+			toolInventory = mergeNodeStringSet(existing.ToolInventory, toolInventory)
+		}
+		if _, updateErr := e.Store.Nodes().Update(ctx, ws, nodeID, store.NodeUpdate{
+			OwnerActor:      &ownerActor,
+			RuntimeProvider: &runtimeProvider,
+			Labels:          &labels,
+			Capabilities:    &capabilities,
+			ToolInventory:   &toolInventory,
+			DrainState:      &drainState,
+		}); updateErr != nil {
+			return fmt.Errorf("refresh executor node: %w", updateErr)
+		}
 		return nil
 	}
 	return fmt.Errorf("register executor node: %w", err)
+}
+
+func mergeNodeStringSet(existing, desired []string) []string {
+	if len(existing) == 0 {
+		return append([]string(nil), desired...)
+	}
+	out := make([]string, 0, len(existing)+len(desired))
+	seen := map[string]struct{}{}
+	for _, values := range [][]string{existing, desired} {
+		for _, value := range values {
+			value = strings.TrimSpace(value)
+			if value == "" {
+				continue
+			}
+			if _, ok := seen[value]; ok {
+				continue
+			}
+			seen[value] = struct{}{}
+			out = append(out, value)
+		}
+	}
+	return out
 }
 
 func executorOwnerActor() string {

@@ -135,6 +135,40 @@ func TestExecutorRunOnceTargetsSpecificQueuedRunID(t *testing.T) {
 	}
 }
 
+func TestExecutorEnsureNodeRefreshesExistingNodeCapabilities(t *testing.T) {
+	ctx := context.Background()
+	st := memstore.New()
+	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "TEST", Name: "test"}); err != nil {
+		t.Fatalf("Create workspace: %v", err)
+	}
+	if _, err := st.Nodes().Create(ctx, store.NodeCreate{
+		WorkspaceKey:    "TEST",
+		NodeID:          "node-1",
+		RuntimeProvider: domain.RuntimeProviderOther,
+		Capabilities:    []string{"stale"},
+		DrainState:      domain.NodeDrainDrained,
+		TTL:             time.Minute,
+	}); err != nil {
+		t.Fatalf("Create stale node: %v", err)
+	}
+
+	if err := (&Executor{Store: st, HeartbeatInterval: -1}).ensureNode(ctx, "TEST", "node-1"); err != nil {
+		t.Fatalf("ensureNode: %v", err)
+	}
+	node, err := st.Nodes().Get(ctx, "TEST", "node-1")
+	if err != nil {
+		t.Fatalf("Get node: %v", err)
+	}
+	if node.RuntimeProvider != domain.RuntimeProviderLocal || node.DrainState != domain.NodeDrainActive {
+		t.Fatalf("node runtime/drain = %s/%s, want local/active", node.RuntimeProvider, node.DrainState)
+	}
+	for _, capability := range []string{"driver-runner", "task-runner", "flue-local"} {
+		if !nodeHasCapability(node, capability) {
+			t.Fatalf("node capabilities = %v, want %q", node.Capabilities, capability)
+		}
+	}
+}
+
 func TestExecutorRunOnceFailsNonTerminalRunnerResult(t *testing.T) {
 	ctx := context.Background()
 	root := t.TempDir()
@@ -567,6 +601,18 @@ type recordingRunner struct {
 	req    RunRequest
 	result RunResult
 	err    error
+}
+
+func nodeHasCapability(node *domain.Node, want string) bool {
+	if node == nil {
+		return false
+	}
+	for _, capability := range node.Capabilities {
+		if capability == want {
+			return true
+		}
+	}
+	return false
 }
 
 func (r *recordingRunner) Run(_ context.Context, req RunRequest) (RunResult, error) {

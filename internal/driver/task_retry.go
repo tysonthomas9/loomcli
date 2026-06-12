@@ -68,20 +68,7 @@ func requeueClaimedTaskRun(ctx context.Context, s store.Store, claimed *domain.T
 }
 
 func taskRunRetryMetadata(_ *domain.TaskRun, retry taskRunRetryDecisionResult, completion taskExecCompletion, metadata map[string]string) map[string]string {
-	out := cloneStringMap(metadata)
-	if out == nil {
-		out = map[string]string{}
-	}
-	out["scheduler_state"] = "retrying"
-	out["scheduler_attempt"] = strconv.Itoa(retry.Attempt)
-	out["scheduler_max_attempts"] = strconv.Itoa(retry.MaxAttempts)
-	if completion.ErrorClass != "" {
-		out["scheduler_last_error_class"] = completion.ErrorClass
-	}
-	if completion.ErrorMessage != "" {
-		out["scheduler_last_error_message"] = completion.ErrorMessage
-	}
-	return out
+	return schedulerMetadata(metadata, "retrying", retry.Attempt, retry.MaxAttempts, completion)
 }
 
 func taskRunParkedMetadata(claimed *domain.TaskRun, opts executeClaimedTaskRunOptions, completion taskExecCompletion, metadata map[string]string) map[string]string {
@@ -89,12 +76,17 @@ func taskRunParkedMetadata(claimed *domain.TaskRun, opts executeClaimedTaskRunOp
 	if maxAttempts < 1 {
 		maxAttempts = 1
 	}
-	attempt := taskRunAttempt(claimed) + 1
+	return schedulerMetadata(metadata, "parked", taskRunAttempt(claimed)+1, maxAttempts, completion)
+}
+
+// schedulerMetadata stamps the retry-then-park scheduler state onto a copy of
+// the run's runtime metadata.
+func schedulerMetadata(metadata map[string]string, state string, attempt, maxAttempts int, completion taskExecCompletion) map[string]string {
 	out := cloneStringMap(metadata)
 	if out == nil {
 		out = map[string]string{}
 	}
-	out["scheduler_state"] = "parked"
+	out["scheduler_state"] = state
 	out["scheduler_attempt"] = strconv.Itoa(attempt)
 	out["scheduler_max_attempts"] = strconv.Itoa(maxAttempts)
 	if completion.ErrorClass != "" {
@@ -105,6 +97,7 @@ func taskRunParkedMetadata(claimed *domain.TaskRun, opts executeClaimedTaskRunOp
 	}
 	return out
 }
+
 func requeueLinkedDriverStep(ctx context.Context, s store.Store, claimed, requeued *domain.TaskRun) error {
 	if claimed == nil || requeued == nil || claimed.DriverStepID == "" {
 		return nil

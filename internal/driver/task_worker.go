@@ -68,11 +68,7 @@ func (w *TaskWorker) runOnceInWorkspace(ctx context.Context, ws, workDir string)
 	if nodeID == "" {
 		return nil, fmt.Errorf("worker node id required: %w", domain.ErrInvalid)
 	}
-	if err := (&Executor{
-		Store:             w.Store,
-		NodeID:            nodeID,
-		HeartbeatInterval: w.HeartbeatInterval,
-	}).ensureNode(ctx, ws, nodeID); err != nil {
+	if err := w.ensureNode(ctx, ws, nodeID); err != nil {
 		return nil, err
 	}
 	executor := w.Executor
@@ -167,4 +163,58 @@ func (w *TaskWorker) maxAttempts() int {
 		return 2
 	}
 	return w.MaxAttempts
+}
+
+func (w *TaskWorker) ensureNode(ctx context.Context, ws, nodeID string) error {
+	ttl := (&Executor{HeartbeatInterval: w.HeartbeatInterval}).nodeTTL()
+	ownerActor := executorOwnerActor()
+	runtimeProvider := domain.RuntimeProviderLocal
+	labels := []string{"loom-driver-executor", "loom-task-worker"}
+	capabilities := w.nodeCapabilities()
+	toolInventory := []string{"loom-driver", "loom-task-worker"}
+	drainState := domain.NodeDrainActive
+	_, err := w.Store.Nodes().Create(ctx, store.NodeCreate{
+		WorkspaceKey:    ws,
+		NodeID:          nodeID,
+		OwnerActor:      ownerActor,
+		RuntimeProvider: runtimeProvider,
+		Labels:          labels,
+		Capabilities:    capabilities,
+		ToolInventory:   toolInventory,
+		DrainState:      drainState,
+		TTL:             ttl,
+	})
+	if err == nil {
+		return nil
+	}
+	if !errors.Is(err, domain.ErrAlreadyExists) {
+		return fmt.Errorf("register task worker node: %w", err)
+	}
+	if _, hbErr := w.Store.Nodes().Heartbeat(ctx, ws, nodeID, ttl); hbErr != nil {
+		return fmt.Errorf("heartbeat task worker node: %w", hbErr)
+	}
+	if existing, getErr := w.Store.Nodes().Get(ctx, ws, nodeID); getErr == nil {
+		labels = mergeNodeStringSet(existing.Labels, labels)
+		capabilities = mergeNodeStringSet(existing.Capabilities, capabilities)
+		toolInventory = mergeNodeStringSet(existing.ToolInventory, toolInventory)
+	}
+	if _, updateErr := w.Store.Nodes().Update(ctx, ws, nodeID, store.NodeUpdate{
+		OwnerActor:      &ownerActor,
+		RuntimeProvider: &runtimeProvider,
+		Labels:          &labels,
+		Capabilities:    &capabilities,
+		ToolInventory:   &toolInventory,
+		DrainState:      &drainState,
+	}); updateErr != nil {
+		return fmt.Errorf("refresh task worker node: %w", updateErr)
+	}
+	return nil
+}
+
+func (w *TaskWorker) nodeCapabilities() []string {
+	values := []string{"driver-runner", "task-runner", "flue-local"}
+	values = append(values, w.SupportedProviders...)
+	values = append(values, w.Capabilities...)
+	values = append(values, w.SandboxPlacement.Provider)
+	return normalizeStringList(values)
 }

@@ -12,6 +12,7 @@
 package driverapi
 
 import (
+	"bytes"
 	"context"
 	"crypto/subtle"
 	"encoding/json"
@@ -72,6 +73,7 @@ type Module struct {
 	apiToken      string
 	worktreePath  string
 	issueBackends IssueBackendFactory
+	ops           map[string]opHandler
 }
 
 // NewModule constructs the driver API module. Returns nil-safe behavior: with
@@ -82,6 +84,22 @@ func NewModule(cfg Config) *Module {
 		apiToken:      strings.TrimSpace(cfg.APIToken),
 		worktreePath:  cfg.WorktreePath,
 		issueBackends: cfg.IssueBackends,
+	}
+	m.ops = map[string]opHandler{
+		"claim-ready":                 m.claimReady,
+		"epic-get":                    m.epicGet,
+		"epic-snapshot":               m.epicSnapshot,
+		"list-agents":                 m.listAgents,
+		"agent-orchestration-session": m.agentOrchestrationSession,
+		"update-agent-parent":         m.updateAgentParent,
+		"deliver-lead-assignment":     m.deliverLeadAssignment,
+		"deliver-agent-message":       m.deliverAgentMessage,
+		"exec-task":                   m.execTask,
+		"task-run-get":                m.taskRunGet,
+		"active-task-runs":            m.activeTaskRuns,
+		"recover-stale-tasks":         m.recoverStaleTasks,
+		"complete-task":               m.completeTask,
+		"release-task":                m.releaseTask,
 	}
 	if m.worktreePath == "" {
 		if wd, err := os.Getwd(); err == nil {
@@ -143,7 +161,7 @@ func (m *Module) handleOp(w http.ResponseWriter, r *http.Request) {
 	}
 	ws := r.PathValue("ws")
 	op := strings.TrimSpace(r.PathValue("op"))
-	handler, ok := m.opHandlers()[op]
+	handler, ok := m.ops[op]
 	if !ok {
 		writeOpError(w, http.StatusNotFound, "unknown_op", fmt.Sprintf("unknown driver op %q", op), false)
 		return
@@ -190,25 +208,6 @@ func (m *Module) authorize(w http.ResponseWriter, r *http.Request) bool {
 
 type opHandler func(ctx context.Context, ws string, id driverIdentity, body []byte) (any, error)
 
-func (m *Module) opHandlers() map[string]opHandler {
-	return map[string]opHandler{
-		"claim-ready":                 m.claimReady,
-		"epic-get":                    m.epicGet,
-		"epic-snapshot":               m.epicSnapshot,
-		"list-agents":                 m.listAgents,
-		"agent-orchestration-session": m.agentOrchestrationSession,
-		"update-agent-parent":         m.updateAgentParent,
-		"deliver-lead-assignment":     m.deliverLeadAssignment,
-		"deliver-agent-message":       m.deliverAgentMessage,
-		"exec-task":                   m.execTask,
-		"task-run-get":                m.taskRunGet,
-		"active-task-runs":            m.activeTaskRuns,
-		"recover-stale-tasks":         m.recoverStaleTasks,
-		"complete-task":               m.completeTask,
-		"release-task":                m.releaseTask,
-	}
-}
-
 // verifyParent proves the caller owns a running parent DriverRun.
 func (m *Module) verifyParent(ctx context.Context, ws string, id driverIdentity) (*domain.DriverRun, error) {
 	return driverpkg.VerifyRunningDriverRun(ctx, m.store, ws, id.RunID, id.NodeID, id.LeaseID, id.FencingToken)
@@ -216,7 +215,7 @@ func (m *Module) verifyParent(ctx context.Context, ws string, id driverIdentity)
 
 func decodeParams[T any](body []byte) (T, error) {
 	var params T
-	decoder := json.NewDecoder(strings.NewReader(string(body)))
+	decoder := json.NewDecoder(bytes.NewReader(body))
 	if err := decoder.Decode(&params); err != nil {
 		return params, fmt.Errorf("decode driver op params: %s: %w", err.Error(), domain.ErrInvalid)
 	}
@@ -242,14 +241,11 @@ func (m *Module) claimReady(ctx context.Context, ws string, id driverIdentity, b
 	if err != nil {
 		return nil, err
 	}
-	limit := params.Limit
-	if limit <= 0 {
-		limit = 100
-	}
+	// ClaimReadyTask defaults a non-positive limit itself.
 	claimed, err := driverpkg.ClaimReadyTask(ctx, issueBackend, driverpkg.TaskClaimOptions{
 		EpicID: epicID,
 		Actor:  actor,
-		Limit:  limit,
+		Limit:  params.Limit,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("claim ready task: %w", err)
@@ -695,6 +691,8 @@ func writeDomainOpError(w http.ResponseWriter, err error) {
 		writeOpError(w, http.StatusNotFound, "not_found", err.Error(), false)
 	case errors.Is(err, domain.ErrNotOwner):
 		writeOpError(w, http.StatusForbidden, "not_owner", err.Error(), false)
+	case errors.Is(err, domain.ErrUnschedulable):
+		writeOpError(w, http.StatusConflict, "unschedulable", err.Error(), true)
 	case errors.Is(err, domain.ErrInvalidTransition):
 		writeOpError(w, http.StatusConflict, "invalid_transition", err.Error(), false)
 	case errors.Is(err, domain.ErrConflict), errors.Is(err, domain.ErrAlreadyExists), errors.Is(err, domain.ErrAlreadyClaimed):

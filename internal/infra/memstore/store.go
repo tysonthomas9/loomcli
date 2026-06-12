@@ -66,10 +66,11 @@ func New() *Store {
 	services.bindings = bindings
 	roles.services = services
 	profiles.services = services
+	nodes := newNodeStore()
 	artifacts := newArtifactStore()
 	runs := newDriverRunStore(versions, bindings)
 	steps := newDriverStepStore(runs)
-	taskRuns := newTaskRunStore(runs, steps, artifacts, profiles)
+	taskRuns := newTaskRunStore(runs, steps, artifacts, profiles, nodes)
 	runs.steps = steps
 	runs.taskRuns = taskRuns
 	steps.taskRuns = taskRuns
@@ -80,7 +81,7 @@ func New() *Store {
 		workspaces: newWorkspaceStore(),
 		repos:      newRepoStore(),
 		agents:     newAgentStore(),
-		nodes:      newNodeStore(),
+		nodes:      nodes,
 		sessions:   newAgentSessionStore(),
 		terminals:  newTerminalSessionStore(),
 		artifacts:  artifacts,

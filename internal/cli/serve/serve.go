@@ -295,7 +295,7 @@ func startDriverExecutorIfEnabled(ctx context.Context, st store.Store) {
 		WorkDir:      workDir,
 		NodeID:       os.Getenv("LOOM_DRIVER_EXECUTOR_NODE_ID"),
 		APIBaseURL:   driverAPIBaseURL(),
-		APIToken:     os.Getenv("LOOM_DRIVER_API_TOKEN"),
+		APIToken:     driverAPIToken(),
 	}
 	taskWorkerConcurrency := driverTaskWorkerConcurrency()
 	taskRunMaxAttempts := driverTaskRunMaxAttempts()
@@ -376,6 +376,12 @@ func driverAPIBaseURL() string {
 	return fmt.Sprintf("http://%s:%d", host, servePort)
 }
 
+// driverAPIToken is the shared bearer token required by the driver-op HTTP
+// API; the executor forwards it to driver runtimes. Empty disables the gate.
+func driverAPIToken() string {
+	return os.Getenv("LOOM_DRIVER_API_TOKEN")
+}
+
 func driverExecutorEnabled() bool {
 	switch strings.ToLower(strings.TrimSpace(os.Getenv(envLoomDriverExecutor))) {
 	case "0", "false", "off", "no":
@@ -386,37 +392,29 @@ func driverExecutorEnabled() bool {
 }
 
 func driverTaskWorkerConcurrency() int {
-	raw := strings.TrimSpace(os.Getenv(envLoomDriverTaskWorkerConcurrency))
-	if raw == "" {
-		return 2
-	}
-	n, err := strconv.Atoi(raw)
-	if err != nil {
-		return 2
-	}
-	if n < 1 {
-		return 1
-	}
-	if n > 32 {
-		return 32
-	}
-	return n
+	return boundedIntEnv(envLoomDriverTaskWorkerConcurrency, 2, 32)
 }
 
 func driverTaskRunMaxAttempts() int {
-	raw := strings.TrimSpace(os.Getenv(envLoomDriverTaskRunMaxAttempts))
+	return boundedIntEnv(envLoomDriverTaskRunMaxAttempts, 2, 10)
+}
+
+// boundedIntEnv reads an integer env var, falling back to def when unset or
+// unparseable and clamping the result to [1, max].
+func boundedIntEnv(name string, def, max int) int {
+	raw := strings.TrimSpace(os.Getenv(name))
 	if raw == "" {
-		return 2
+		return def
 	}
 	n, err := strconv.Atoi(raw)
 	if err != nil {
-		return 2
+		return def
 	}
 	if n < 1 {
 		return 1
 	}
-	if n > 10 {
-		return 10
+	if n > max {
+		return max
 	}
 	return n
 }
@@ -548,7 +546,7 @@ func buildServerConfig(monitorHandlers webui.MonitorHandlers, fs fleetState, sto
 			cfg.FleetDBBaseURL = url
 			fs = withStoreFleetURL(fs, url)
 		}
-		cfg.DriverAPIToken = os.Getenv("LOOM_DRIVER_API_TOKEN")
+		cfg.DriverAPIToken = driverAPIToken()
 	}
 	applyFleetConfig(&cfg, fs)
 	applyWorkspaceConfig(&cfg)

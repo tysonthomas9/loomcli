@@ -306,6 +306,37 @@ func TestDriverAPIActiveTaskRunsEmpty(t *testing.T) {
 	}
 }
 
+func TestDriverAPIExecTaskEnqueueUnschedulable(t *testing.T) {
+	h := newTestHarness(t, "")
+	resp, decoded := h.do(t, opRequest{
+		op: "exec-task",
+		body: map[string]any{
+			"taskId":          "TASK-9",
+			"taskRunId":       "task-run-unschedulable",
+			"providerProfile": "local-noop",
+			"enqueueOnly":     true,
+		},
+		headers: h.ownerHeaders(),
+	})
+	if resp.StatusCode != http.StatusConflict {
+		t.Fatalf("status = %d, want 409", resp.StatusCode)
+	}
+	if code := errorCode(t, decoded); code != "unschedulable" {
+		t.Fatalf("error code = %q, want unschedulable", code)
+	}
+	envelope := decoded["error"].(map[string]any)
+	if retryable, _ := envelope["retryable"].(bool); !retryable {
+		t.Fatalf("retryable = %v, want true", envelope["retryable"])
+	}
+	children, err := h.store.TaskRuns().List(context.Background(), "WS", store.TaskRunFilter{DriverRunID: h.runID})
+	if err != nil {
+		t.Fatalf("List children: %v", err)
+	}
+	if len(children) != 0 {
+		t.Fatalf("children = %+v, want none for unschedulable enqueue", children)
+	}
+}
+
 func TestDriverAPITaskRunGetNotFound(t *testing.T) {
 	h := newTestHarness(t, "")
 	resp, decoded := h.do(t, opRequest{

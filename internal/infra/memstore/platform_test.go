@@ -212,6 +212,16 @@ func TestDispatchTriggerRouteSupersedesQueuedRunsForSubject(t *testing.T) {
 func TestTaskRunClaimQueuedAssignsPlacementAndHonorsProfileCapacity(t *testing.T) {
 	ctx := t.Context()
 	s := New()
+	if _, err := s.Nodes().Create(ctx, store.NodeCreate{
+		WorkspaceKey:    "WS",
+		NodeID:          "node-1",
+		RuntimeProvider: domain.RuntimeProviderLocal,
+		Capabilities:    []string{"daytona", "git", "shell"},
+		DrainState:      domain.NodeDrainActive,
+		TTL:             time.Minute,
+	}); err != nil {
+		t.Fatalf("Create node: %v", err)
+	}
 	if _, err := s.WorkerProfiles().Create(ctx, store.WorkerProfileCreate{
 		WorkspaceKey:  "WS",
 		ProfileID:     "falcon",
@@ -276,6 +286,37 @@ func TestTaskRunClaimQueuedAssignsPlacementAndHonorsProfileCapacity(t *testing.T
 		WorkerProfileIDs:   []string{"falcon"},
 	}); !errors.Is(err, domain.ErrInvalidTransition) {
 		t.Fatalf("capacity ClaimQueued err = %v, want ErrInvalidTransition", err)
+	}
+	if _, err := s.WorkerProfiles().Create(ctx, store.WorkerProfileCreate{
+		WorkspaceKey:  "WS",
+		ProfileID:     "browser",
+		Role:          "task",
+		Backend:       "flue-local",
+		Capabilities:  []string{"browser"},
+		RuntimePolicy: map[string]string{"network": "restricted"},
+	}); err != nil {
+		t.Fatalf("Create browser worker profile: %v", err)
+	}
+	if _, err := s.TaskRuns().Create(ctx, store.TaskRunCreate{
+		WorkspaceKey:     "WS",
+		TaskRunID:        "task-run-browser",
+		TaskID:           "WS-2",
+		WorkerProfileID:  "browser",
+		Status:           domain.TaskRunQueued,
+		SandboxPlacement: domain.TaskRunPlacement{Provider: "flue-local"},
+	}); err != nil {
+		t.Fatalf("Create browser task run: %v", err)
+	}
+	if _, err := s.TaskRuns().ClaimQueued(ctx, "WS", store.TaskRunClaim{
+		TaskRunID:          "task-run-browser",
+		NodeID:             "node-1",
+		RunnerID:           "runner-browser",
+		LeaseID:            "lease-browser",
+		SupportedProviders: []string{"flue-local"},
+		Capabilities:       []string{"browser"},
+		WorkerProfileIDs:   []string{"browser"},
+	}); !errors.Is(err, domain.ErrInvalidTransition) {
+		t.Fatalf("lying capability ClaimQueued err = %v, want ErrInvalidTransition", err)
 	}
 }
 

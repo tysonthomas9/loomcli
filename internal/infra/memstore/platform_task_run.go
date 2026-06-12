@@ -22,9 +22,10 @@ type taskRunStore struct {
 	steps       *driverStepStore
 	artifacts   *artifactStore
 	profiles    *workerProfileStore
+	nodes       *nodeStore
 }
 
-func newTaskRunStore(parent *driverRunStore, steps *driverStepStore, artifacts *artifactStore, profiles *workerProfileStore) *taskRunStore {
+func newTaskRunStore(parent *driverRunStore, steps *driverStepStore, artifacts *artifactStore, profiles *workerProfileStore, nodes *nodeStore) *taskRunStore {
 	return &taskRunStore{
 		items:       make(map[string]map[string]*domain.TaskRun),
 		logs:        make(map[string]map[string][]*domain.TaskRunLogEntry),
@@ -33,6 +34,7 @@ func newTaskRunStore(parent *driverRunStore, steps *driverStepStore, artifacts *
 		steps:       steps,
 		artifacts:   artifacts,
 		profiles:    profiles,
+		nodes:       nodes,
 	}
 }
 
@@ -127,8 +129,12 @@ func taskRunCreateFencingTokenMem(in store.TaskRunCreate, now time.Time) int64 {
 	return in.FencingToken
 }
 
-func (s *taskRunStore) ClaimQueued(_ context.Context, ws string, claim store.TaskRunClaim) (*domain.TaskRun, error) {
+func (s *taskRunStore) ClaimQueued(ctx context.Context, ws string, claim store.TaskRunClaim) (*domain.TaskRun, error) {
 	normalized, now, err := normalizeTaskRunClaimMem(ws, claim)
+	if err != nil {
+		return nil, err
+	}
+	node, normalized, err := s.bindTaskRunClaimToNodeMem(ctx, ws, normalized, now)
 	if err != nil {
 		return nil, err
 	}
@@ -136,6 +142,9 @@ func (s *taskRunStore) ClaimQueued(_ context.Context, ws string, claim store.Tas
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	runningOnNode := s.runningTaskRunsOnNodeLocked(ws, normalized.NodeID)
+	if node != nil && node.Capacity > 0 && runningOnNode >= node.Capacity {
+		return nil, fmt.Errorf("node %q capacity for task runs in workspace %q: %w", normalized.NodeID, ws, domain.ErrInvalidTransition)
+	}
 	for _, run := range claimCandidatesMem(s.items[ws], normalized.TaskRunID) {
 		profile := s.profileLocked(ws, run.WorkerProfileID)
 		if !taskRunMatchesClaimMem(run, profile, normalized) {
@@ -167,6 +176,34 @@ func normalizeTaskRunClaimMem(ws string, claim store.TaskRunClaim) (store.TaskRu
 	}
 	claim.RunnerPlacement = defaultTaskRunRunnerPlacementMem(claim.RunnerPlacement, claim, now)
 	return claim, now, nil
+}
+
+func (s *taskRunStore) bindTaskRunClaimToNodeMem(ctx context.Context, ws string, claim store.TaskRunClaim, now time.Time) (*domain.Node, store.TaskRunClaim, error) {
+	if s.nodes == nil {
+		return nil, claim, nil
+	}
+	node, err := s.nodes.Get(ctx, ws, claim.NodeID)
+	if err != nil {
+		return nil, store.TaskRunClaim{}, err
+	}
+	if node.DrainState != domain.NodeDrainActive {
+		return nil, store.TaskRunClaim{}, fmt.Errorf("node %q is %s: %w", claim.NodeID, node.DrainState, domain.ErrInvalidTransition)
+	}
+	if !node.ExpiresAt.IsZero() && !node.ExpiresAt.After(now) {
+		return nil, store.TaskRunClaim{}, fmt.Errorf("node %q lease expired: %w", claim.NodeID, domain.ErrInvalidTransition)
+	}
+	providers := nodeAdvertisedProvidersMem(node)
+	if len(claim.SupportedProviders) == 0 {
+		claim.SupportedProviders = providers
+	} else if !stringListContainsAllStrictMem(providers, claim.SupportedProviders) {
+		return nil, store.TaskRunClaim{}, fmt.Errorf("node %q does not advertise requested task providers: %w", claim.NodeID, domain.ErrInvalidTransition)
+	}
+	if len(claim.Capabilities) == 0 {
+		claim.Capabilities = normalizeStringListMem(node.Capabilities)
+	} else if !stringListContainsAllStrictMem(node.Capabilities, claim.Capabilities) {
+		return nil, store.TaskRunClaim{}, fmt.Errorf("node %q does not advertise requested task capabilities: %w", claim.NodeID, domain.ErrInvalidTransition)
+	}
+	return node, claim, nil
 }
 
 func defaultTaskRunRunnerPlacementMem(placement domain.TaskRunPlacement, claim store.TaskRunClaim, now time.Time) domain.TaskRunPlacement {

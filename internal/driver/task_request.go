@@ -195,6 +195,9 @@ func EnqueueTaskRunWithResult(ctx context.Context, s store.Store, opts TaskRunRe
 	if err != nil {
 		return nil, err
 	}
+	if err := verifyTaskRunRequestSchedulable(ctx, s, opts); err != nil {
+		return nil, err
+	}
 	refs := newTaskRunRequestRefs(opts, parent)
 	queued, err := createQueuedTaskRun(ctx, s, opts, refs)
 	if err != nil {

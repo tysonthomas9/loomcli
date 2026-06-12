@@ -203,6 +203,56 @@ func stringListContainsAllMem(have, required []string) bool {
 	return true
 }
 
+func nodeAdvertisedProvidersMem(node *domain.Node) []string {
+	if node == nil {
+		return nil
+	}
+	values := []string{string(node.RuntimeProvider)}
+	values = append(values, node.Capabilities...)
+	return normalizeStringListMem(values)
+}
+
+func normalizeStringListMem(values []string) []string {
+	if len(values) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(values))
+	seen := map[string]struct{}{}
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		out = append(out, value)
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+func stringListContainsAllStrictMem(have, required []string) bool {
+	have = normalizeStringListMem(have)
+	required = normalizeStringListMem(required)
+	if len(required) == 0 {
+		return true
+	}
+	values := map[string]struct{}{}
+	for _, value := range have {
+		values[value] = struct{}{}
+	}
+	for _, want := range required {
+		if _, ok := values[want]; !ok {
+			return false
+		}
+	}
+	return true
+}
+
 func applyTriggerBindingUpdateMem(b *domain.TriggerBinding, patch store.TriggerBindingUpdate) {
 	applyTriggerBindingSourceUpdateMem(b, patch)
 	applyTriggerBindingTargetUpdateMem(b, patch)

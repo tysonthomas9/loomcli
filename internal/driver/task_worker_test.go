@@ -111,12 +111,13 @@ func TestTaskWorkerRunOnceMapsFlueSessionUnderParent(t *testing.T) {
 	}
 
 	outcome, err := (&TaskWorker{
-		Store:             st,
-		WorkspaceKey:      "TEST",
-		NodeID:            "task-worker-node-1",
-		RunnerID:          "task-worker-runner-1",
-		HeartbeatInterval: -1,
-		Executor:          executor,
+		Store:              st,
+		WorkspaceKey:       "TEST",
+		NodeID:             "task-worker-node-1",
+		RunnerID:           "task-worker-runner-1",
+		SupportedProviders: []string{"daytona"},
+		HeartbeatInterval:  -1,
+		Executor:           executor,
 	}).RunOnce(ctx)
 	if err != nil {
 		t.Fatalf("RunOnce: %v", err)
