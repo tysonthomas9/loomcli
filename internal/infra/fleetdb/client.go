@@ -206,6 +206,14 @@ func (c *Client) DriverSteps() store.DriverStepStore { return c.steps }
 // TaskRuns returns the TaskRunStore.
 func (c *Client) TaskRuns() store.TaskRunStore { return c.taskRuns }
 
+// TaskRunEvents is a compile stub; the fleet-db-backed implementation
+// lands in a follow-up chunk.
+func (c *Client) TaskRunEvents() store.TaskRunEventStore { return nil }
+
+// Outbox is a compile stub; the fleet-db-backed implementation lands in
+// a follow-up chunk.
+func (c *Client) Outbox() store.OutboxStore { return nil }
+
 // Workers returns the WorkerStore.
 func (c *Client) Workers() store.WorkerStore { return c.workers }
 

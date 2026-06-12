@@ -136,7 +136,13 @@ func (t *tracedStore) DriverRuns() store.DriverRunStore { return t.driverRuns }
 func (t *tracedStore) DriverSteps() store.DriverStepStore {
 	return t.driverSteps
 }
-func (t *tracedStore) TaskRuns() store.TaskRunStore     { return t.taskRuns }
+func (t *tracedStore) TaskRuns() store.TaskRunStore { return t.taskRuns }
+func (t *tracedStore) TaskRunEvents() store.TaskRunEventStore {
+	return t.inner.TaskRunEvents()
+}
+func (t *tracedStore) Outbox() store.OutboxStore {
+	return t.inner.Outbox()
+}
 func (t *tracedStore) Workers() store.WorkerStore       { return t.workers }
 func (t *tracedStore) Roles() store.RoleStore           { return t.roles }
 func (t *tracedStore) Daemon() store.DaemonProfileStore { return t.daemon }

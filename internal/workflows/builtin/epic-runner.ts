@@ -32,6 +32,7 @@ export async function run(ctx) {
   const intervalMs = Math.max(1000, numberValue(input.intervalSeconds, 5) * 1000);
   const leadNotificationDrainMs = Math.max(0, numberValue(input.leadNotificationDrainSeconds, 30) * 1000);
   const completed = [];
+  const parked = [];
   const leadDelivery = startLeadDeliveryRetry(loom, started.leadName, started.deliveryState, intervalMs);
   const taskNotifications = startLeadMessageDeliveryRetry(loom, started.leadName, intervalMs, leadDelivery);
 
@@ -47,11 +48,20 @@ export async function run(ctx) {
       const active = await loom.taskRuns.active({ epicId });
       const activeCount = numberValue(active && active.activeCount, 0);
 
-      if (snapshot.openChildrenCount === 0 && activeCount === 0) {
+      if (snapshot.openChildrenCount === 0 && activeCount === 0 && parked.length === 0) {
         await leadDelivery.flush();
         await taskNotifications.drain(leadNotificationDrainMs);
         const suffix = completed.length > 0 ? ": " + completed.join(",") : "";
         return loom.completed({ summary: "Epic drained " + epicId + suffix });
+      }
+
+      if (snapshot.readyCount === 0 && activeCount === 0 && parked.length > 0) {
+        await leadDelivery.flush();
+        await taskNotifications.drain(leadNotificationDrainMs);
+        return loom.needsReview({
+          summary: parked.length + " parked task(s): " + summarizeParkedTasks(parked),
+          errorClass: "epic_tasks_parked",
+        });
       }
 
       if (snapshot.readyCount === 0 && snapshot.blockedCount > 0 && activeCount === 0) {
@@ -102,15 +112,17 @@ export async function run(ctx) {
       })));
       for (const result of results) {
         if (!result.ok) {
-          await leadDelivery.flush();
-          await taskNotifications.drain(leadNotificationDrainMs);
-          return loom.needsReview({
-            summary: result.summary,
-            errorClass: result.errorClass || "child_task_failed",
+          // A terminal-failed child was already retried then parked by the
+          // server scheduler; record it and keep draining the rest of the DAG.
+          parked.push({
+            taskId: result.taskId,
             taskRunId: result.taskRunId,
+            errorClass: result.errorClass || "child_task_failed",
+            summary: result.summary || "",
             logsRef: result.logsRef || "",
             artifactsRef: result.artifactsRef || "",
           });
+          continue;
         }
         completed.push(result.taskId);
         taskNotifications.enqueue(formatTaskCompleteLeadMessage({
@@ -450,7 +462,8 @@ async function runChildTask(loom, opts) {
         pollMs: 2000,
       });
     } catch (err) {
-      await safeRelease(loom, task.id);
+      // The run is already enqueued; keep the task claimed so claimReady does
+      // not hot-loop it while the existing run is still in flight or terminal.
       return {
         ok: false,
         taskId: task.id,
@@ -473,6 +486,7 @@ async function runChildTask(loom, opts) {
       await loom.tasks.complete({
         taskId: task.id,
         taskRunId: completedTaskRunId,
+        completionId: "complete-" + completedTaskRunId,
         leaseToken,
         logsRef,
         artifactsRef,
@@ -493,7 +507,10 @@ async function runChildTask(loom, opts) {
     return { ok: true, taskId: task.id, taskTitle: stringValue(task.title), taskRunId: completedTaskRunId, logsRef, artifactsRef };
   }
 
-  await safeRelease(loom, task.id);
+  // Terminal failure (the server already retried then parked the run). Do NOT
+  // release the claim: leaving the task claimed keeps claimReady from handing
+  // it straight back, and the deterministic taskRunId means a re-claim would
+  // only observe the same terminal run again.
   return {
     ok: false,
     taskId: task.id,
@@ -556,6 +573,11 @@ function summarizeTasks(tasks) {
     parts.push("+" + (list.length - 5) + " more");
   }
   return parts.join(", ");
+}
+
+function summarizeParkedTasks(parked) {
+  const list = Array.isArray(parked) ? parked : [];
+  return summarizeTasks(list.map((entry) => ({ id: entry.taskId, title: entry.errorClass })));
 }
 
 function formatTaskCompleteLeadMessage(input) {

@@ -42,6 +42,7 @@ const envLoomFleetMode = "LOOM_FLEET_MODE"
 const envLoomDriverExecutor = "LOOM_DRIVER_EXECUTOR"
 const envLoomDriverTaskWorkerConcurrency = "LOOM_DRIVER_TASK_WORKER_CONCURRENCY"
 const envLoomDriverTaskRunMaxAttempts = "LOOM_DRIVER_TASK_RUN_MAX_ATTEMPTS"
+const envLoomDriverStaleTaskMaxAge = "LOOM_DRIVER_STALE_TASK_MAX_AGE"
 
 const monitorCollectionCacheTTL = 10 * time.Second
 
@@ -216,6 +217,7 @@ func runServe(cmd *cobra.Command, args []string) {
 	}
 	defer func() { _ = storeHandle.Close() }()
 	startDriverExecutorIfEnabled(ctx, storeHandle.Store)
+	startStaleTaskSweeper(ctx, storeHandle.Store)
 
 	issueBackendFn := cli.WorkspaceAwareIssueBackendForURL(storeHandle.URL(), fleetState.clientCfg.Actor)
 	monitorDefaultWorkspace := resolveMonitorCollectorWorkspace(storeHandle.Store, fleetState.clientCfg.Workspace)
@@ -329,6 +331,46 @@ func startDriverExecutorIfEnabled(ctx context.Context, st store.Store) {
 		}
 	}()
 	startDriverTaskWorkers(ctx, taskWorker, taskWorkerConcurrency)
+}
+
+// startStaleTaskSweeper launches the always-on server-side stale TaskRun
+// sweeper. Unlike the driver executor it is NOT gated behind
+// LOOM_DRIVER_EXECUTOR: stale-task fault recovery is server policy, so it
+// runs whenever serve has a store. Workflows must not call recoverStale
+// themselves.
+func startStaleTaskSweeper(ctx context.Context, st store.Store) {
+	if st == nil {
+		return
+	}
+	sweeper := &driverexecutor.StaleTaskSweeper{
+		Store:        st,
+		WorkspaceKey: os.Getenv(bootstrap.EnvWorkspace),
+		MaxAge:       driverStaleTaskMaxAge(),
+	}
+	slog.Info("Stale task sweeper enabled", "workspace", sweeper.WorkspaceKey, "max_age", sweeper.MaxAge)
+	go func() {
+		ticker := time.NewTicker(2 * time.Second)
+		defer ticker.Stop()
+		for {
+			if result, err := sweeper.RunOnce(ctx); err != nil && !errors.Is(err, context.Canceled) {
+				slog.Error("stale task sweeper failed", "err", err)
+			} else if result != nil && result.Recovered > 0 {
+				slog.Info("stale task sweeper recovered stale task runs", "count", result.Recovered, "task_run_ids", result.RecoveredTaskRunIDs)
+			}
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+			}
+		}
+	}()
+}
+
+// driverStaleTaskMaxAge reads the stale TaskRun heartbeat threshold in
+// seconds from LOOM_DRIVER_STALE_TASK_MAX_AGE (default 300s, capped at one
+// day).
+func driverStaleTaskMaxAge() time.Duration {
+	return time.Duration(boundedIntEnv(envLoomDriverStaleTaskMaxAge, 300, 86400)) * time.Second
 }
 
 // startDriverTaskWorkers launches the local TaskRun worker claim loops, one

@@ -179,6 +179,14 @@ func (s *Store) DriverSteps() store.DriverStepStore { return s.steps }
 
 func (s *Store) TaskRuns() store.TaskRunStore { return s.taskRuns }
 
+// TaskRunEvents is a compile stub; the in-memory implementation lands in
+// a follow-up chunk.
+func (s *Store) TaskRunEvents() store.TaskRunEventStore { return nil }
+
+// Outbox is a compile stub; the in-memory implementation lands in a
+// follow-up chunk.
+func (s *Store) Outbox() store.OutboxStore { return nil }
+
 // Workers returns the WorkerStore.
 func (s *Store) Workers() store.WorkerStore { return s.workers }
 
