@@ -288,7 +288,7 @@ func (s *connectorGrantStore) ListByConnector(_ context.Context, ws, connectorID
 }
 
 // connectorAuditStore is the in-memory append-only connector-call journal
-// (the ZSET analogue of fleet-db's dedicated journal, separate from
+// (the ZSET analog of fleet-db's dedicated journal, separate from
 // TaskRunEvent). Append on a duplicate CallID fails wrapping
 // domain.ErrAlreadyExists so retried writes stay idempotent.
 type connectorAuditStore struct {

@@ -62,6 +62,9 @@ func WrapStoreWithTracing(inner store.Store) store.Store {
 		workers:              &tracedWorkerStore{inner: inner.Workers()},
 		roles:                &tracedRoleStore{inner: inner.Roles()},
 		daemon:               &tracedDaemonStore{inner: inner.Daemon()},
+		connectors:           &tracedConnectorStore{inner: inner.Connectors()},
+		connectorGrants:      &tracedConnectorGrantStore{inner: inner.ConnectorGrants()},
+		connectorCalls:       &tracedConnectorAuditStore{inner: inner.ConnectorCalls()},
 	}
 }
 
@@ -91,6 +94,9 @@ type tracedStore struct {
 	workers              *tracedWorkerStore
 	roles                *tracedRoleStore
 	daemon               *tracedDaemonStore
+	connectors           *tracedConnectorStore
+	connectorGrants      *tracedConnectorGrantStore
+	connectorCalls       *tracedConnectorAuditStore
 }
 
 func (t *tracedStore) Workspaces() store.WorkspaceStore       { return t.workspaces }

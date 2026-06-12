@@ -99,6 +99,73 @@ export interface FlueTaskRunAwaitInput extends FlueTaskRunGetInput {
   timeoutMs?: number;
 }
 
+/** camelCase freshness assertions for connector egress (CV9 wire shape). */
+export interface FlueConnectorPreconditions {
+  expectedHeadSha?: string;
+  expectedIssueRevision?: string;
+  expectedMessageTs?: string;
+  expectedMonitorRevision?: string;
+}
+
+/**
+ * Flat input for loom.connectors.{source}.{method}: connectorId/resource/
+ * callSeq address the dispatch envelope, expected* fields become
+ * preconditions, every other key is a camelCase provider arg.
+ */
+export interface FlueConnectorCallInput extends FlueConnectorPreconditions {
+  connectorId?: string;
+  resource?: string;
+  /** Explicit sequence override; omitted = auto-increment per action. */
+  callSeq?: number;
+  args?: Record<string, unknown>;
+  preconditions?: FlueConnectorPreconditions;
+  [key: string]: unknown;
+}
+
+/** Irreversible merge: expectedHeadSha is a first-class REQUIRED parameter. */
+export interface FlueConnectorGitHubMergeInput extends FlueConnectorCallInput {
+  expectedHeadSha: string;
+}
+
+/** Review post is gated by a pre-egress liveness read at expectedHeadSha. */
+export interface FlueConnectorGitHubReviewInput extends FlueConnectorCallInput {
+  expectedHeadSha: string;
+}
+
+export interface FlueConnectorDispatchInput extends FlueConnectorCallInput {
+  /** Dotted connector action, e.g. "github.merge". */
+  action: string;
+}
+
+export interface FlueConnectorCallResult {
+  callId: string;
+  decision: "granted" | string;
+  status?: number;
+  body?: Record<string, unknown>;
+  [key: string]: unknown;
+}
+
+export interface FlueConnectorsNamespace {
+  github: {
+    merge(input: FlueConnectorGitHubMergeInput): Promise<FlueConnectorCallResult>;
+    postReview(input: FlueConnectorGitHubReviewInput): Promise<FlueConnectorCallResult>;
+    readPullRequest(input?: FlueConnectorCallInput): Promise<FlueConnectorCallResult>;
+    listPulls(input?: FlueConnectorCallInput): Promise<FlueConnectorCallResult>;
+    compare(input?: FlueConnectorCallInput): Promise<FlueConnectorCallResult>;
+    postIssueComment(input?: FlueConnectorCallInput): Promise<FlueConnectorCallResult>;
+  };
+  slack: {
+    post(input?: FlueConnectorCallInput): Promise<FlueConnectorCallResult>;
+    readConversations(input?: FlueConnectorCallInput): Promise<FlueConnectorCallResult>;
+  };
+  datadog: {
+    readMonitors(input?: FlueConnectorCallInput): Promise<FlueConnectorCallResult>;
+    readAlert(input?: FlueConnectorCallInput): Promise<FlueConnectorCallResult>;
+    declareIncident(input?: FlueConnectorCallInput): Promise<FlueConnectorCallResult>;
+  };
+  dispatch(input: FlueConnectorDispatchInput): Promise<FlueConnectorCallResult>;
+}
+
 export interface FlueDriverClientOptions {
   env?: NodeJS.ProcessEnv | Record<string, string | undefined>;
   input?: Record<string, unknown>;
@@ -145,6 +212,7 @@ export declare class FlueDriverClient {
     active(input?: FlueTaskRunActiveInput): Promise<Record<string, unknown> | null>;
     recoverStale(input?: FlueTaskRunRecoverStaleInput): Promise<Record<string, unknown> | null>;
   };
+  readonly connectors: FlueConnectorsNamespace;
 
   completed(input?: { summary?: string }): FlueDriverResult;
   failed(input?: { summary?: string; errorClass?: string }): FlueDriverResult;
@@ -171,6 +239,12 @@ export declare class FlueDriverClient {
   recoverStaleTaskRuns(input?: FlueTaskRunRecoverStaleInput): Promise<Record<string, unknown> | null>;
   completeTask(input?: FlueTaskSelector | string): Promise<Record<string, unknown> | null>;
   releaseTask(input?: FlueTaskSelector | string): Promise<Record<string, unknown> | null>;
+  /**
+   * Generic connector egress; throws SYNCHRONOUSLY (DriverApiError
+   * precondition_required, before any network call) when a registered
+   * irreversible/precondition-gated action lacks its required precondition.
+   */
+  dispatchConnector(input?: FlueConnectorDispatchInput): Promise<FlueConnectorCallResult>;
 }
 
 export declare function createLoomDriverClient(options?: FlueDriverClientOptions | Record<string, unknown>): FlueDriverClient;

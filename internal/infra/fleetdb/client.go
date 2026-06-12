@@ -98,6 +98,10 @@ type Client struct {
 	workers    *workerStore
 	roles      *roleStore
 	daemon     *daemonStore
+
+	connectors      *connectorStore
+	connectorGrants *connectorGrantStore
+	connectorCalls  *connectorAuditStore
 }
 
 // New constructs a fleet-db client. Returns an error if BaseURL is empty.
@@ -145,6 +149,9 @@ func New(cfg Config) (*Client, error) {
 	c.workers = &workerStore{client: c}
 	c.roles = &roleStore{client: c}
 	c.daemon = &daemonStore{client: c}
+	c.connectors = &connectorStore{client: c}
+	c.connectorGrants = &connectorGrantStore{client: c}
+	c.connectorCalls = &connectorAuditStore{client: c}
 	return c, nil
 }
 

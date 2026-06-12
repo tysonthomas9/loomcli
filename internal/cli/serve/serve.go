@@ -223,6 +223,7 @@ func runServe(cmd *cobra.Command, args []string) {
 	startStaleTaskSweeper(ctx, storeHandle.Store)
 	startOutboxDispatcher(ctx, storeHandle.Store)
 	startTriggerCronScheduler(ctx, storeHandle.Store)
+	startTriggerDeliverySweeper(ctx, storeHandle.Store)
 
 	issueBackendFn := cli.WorkspaceAwareIssueBackendForURL(storeHandle.URL(), fleetState.clientCfg.Actor)
 	monitorDefaultWorkspace := resolveMonitorCollectorWorkspace(storeHandle.Store, fleetState.clientCfg.Workspace)
@@ -428,6 +429,50 @@ func startTriggerCronScheduler(ctx context.Context, st store.Store) {
 				slog.Error("trigger cron scheduler sweep failed", "err", err)
 			} else if result != nil && result.Fired > 0 {
 				slog.Info("trigger cron scheduler fired ticks", "count", result.Fired)
+			}
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+			}
+		}
+	}()
+}
+
+// startTriggerDeliverySweeper launches the always-on delivery retry sweeper:
+// it re-drives retryable failed trigger deliveries and promotes held
+// (queue-policy) ones with exponential backoff and bounded attempts. Like the
+// outbox dispatcher it is NOT gated behind LOOM_DRIVER_EXECUTOR — delivery
+// retry is server policy. Single serve instance today, so no distributed
+// lock; for multi-replica later use fleet-db's SetNX sweep-lock recipe (lock
+// key with TTL just above the interval; per-leg idempotency already makes
+// overlapping sweeps safe). LOOM_TRIGGER_SWEEP_INTERVAL tunes the sweep
+// interval in seconds (default 15s, capped at one hour) and
+// LOOM_TRIGGER_SWEEP_BATCH the per-workspace ListDue batch (default 50,
+// capped at 500).
+func startTriggerDeliverySweeper(ctx context.Context, st store.Store) {
+	if st == nil {
+		return
+	}
+	const (
+		envLoomTriggerSweepInterval = "LOOM_TRIGGER_SWEEP_INTERVAL"
+		envLoomTriggerSweepBatch    = "LOOM_TRIGGER_SWEEP_BATCH"
+	)
+	sweeper := &trigger.DeliverySweeper{
+		Store:        st,
+		WorkspaceKey: os.Getenv(bootstrap.EnvWorkspace),
+		BatchLimit:   boundedIntEnv(envLoomTriggerSweepBatch, trigger.DefaultDeliverySweepBatch, 500),
+	}
+	interval := time.Duration(boundedIntEnv(envLoomTriggerSweepInterval, 15, 3600)) * time.Second
+	slog.Info("Trigger delivery sweeper enabled", "workspace", sweeper.WorkspaceKey, "interval", interval, "batch", sweeper.BatchLimit)
+	go func() {
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		for {
+			if result, err := sweeper.RunOnce(ctx); err != nil && !errors.Is(err, context.Canceled) {
+				slog.Error("trigger delivery sweeper failed", "err", err)
+			} else if result != nil && result.Dispatched+result.Rescheduled+result.Exhausted > 0 {
+				slog.Info("trigger delivery sweeper pass", "dispatched", result.Dispatched, "rescheduled", result.Rescheduled, "exhausted", result.Exhausted)
 			}
 			select {
 			case <-ctx.Done():

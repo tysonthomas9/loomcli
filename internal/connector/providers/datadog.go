@@ -161,7 +161,42 @@ func (d *Datadog) incidentsWrite(ctx context.Context, spec CallSpec) (CallResult
 			fmt.Errorf("%s requires args.title: %w", spec.Action, domain.ErrInvalid)
 	}
 
-	// Best-effort pre-egress alert-still-firing check.
+	if result, err := d.monitorFreshnessCheck(ctx, spec, id); err != nil {
+		return result, err
+	}
+
+	attrs := map[string]any{"title": title}
+	if v, ok := spec.Args["customerImpacted"].(bool); ok {
+		attrs["customer_impacted"] = v
+	}
+	payload := map[string]any{
+		"data": map[string]any{"type": "incidents", "attributes": attrs},
+	}
+	res, err := d.do(ctx, spec, http.MethodPost, "/api/v2/incidents", nil, payload)
+	if err != nil {
+		return CallResult{Decision: domain.ConnectorCallUpstreamError}, err
+	}
+	if res.status != http.StatusOK && res.status != http.StatusCreated {
+		return CallResult{Status: res.status, Decision: domain.ConnectorCallUpstreamError},
+			d.upstreamError(spec, res)
+	}
+	obj := decodeObject(res.body)
+	data, _ := obj["data"].(map[string]any)
+	return CallResult{
+		Status: res.status,
+		Body: map[string]any{
+			"id":    data["id"],
+			"title": nestedString(obj, "data", "attributes", "title"),
+		},
+		Decision: domain.ConnectorCallGranted,
+	}, nil
+}
+
+// monitorFreshnessCheck is incidentsWrite's best-effort pre-egress
+// alert-still-firing check: it reads the source monitor and refuses with
+// StaleSubject when it is gone or no longer actionable. A nil error means
+// the incident POST may proceed.
+func (d *Datadog) monitorFreshnessCheck(ctx context.Context, spec CallSpec, id int) (CallResult, error) {
 	res, err := d.do(ctx, spec, http.MethodGet, "/api/v1/monitor/"+strconv.Itoa(id), nil, nil)
 	if err != nil {
 		return CallResult{Decision: domain.ConnectorCallUpstreamError}, err
@@ -190,32 +225,7 @@ func (d *Datadog) incidentsWrite(ctx context.Context, spec CallSpec) (CallResult
 				Reason:   fmt.Sprintf("alert no longer firing (monitor state %q, not recently resolved)", state),
 			}
 	}
-
-	attrs := map[string]any{"title": title}
-	if v, ok := spec.Args["customerImpacted"].(bool); ok {
-		attrs["customer_impacted"] = v
-	}
-	payload := map[string]any{
-		"data": map[string]any{"type": "incidents", "attributes": attrs},
-	}
-	res, err = d.do(ctx, spec, http.MethodPost, "/api/v2/incidents", nil, payload)
-	if err != nil {
-		return CallResult{Decision: domain.ConnectorCallUpstreamError}, err
-	}
-	if res.status != http.StatusOK && res.status != http.StatusCreated {
-		return CallResult{Status: res.status, Decision: domain.ConnectorCallUpstreamError},
-			d.upstreamError(spec, res)
-	}
-	obj := decodeObject(res.body)
-	data, _ := obj["data"].(map[string]any)
-	return CallResult{
-		Status: res.status,
-		Body: map[string]any{
-			"id":    data["id"],
-			"title": nestedString(obj, "data", "attributes", "title"),
-		},
-		Decision: domain.ConnectorCallGranted,
-	}, nil
+	return CallResult{}, nil
 }
 
 // alertActionable reports whether a monitor still warrants an incident:

@@ -64,6 +64,8 @@ export class FlueDriverClient {
       active: (input = {}) => this.activeTaskRuns(input),
       recoverStale: (input = {}) => this.recoverStaleTaskRuns(input),
     });
+    this.connectorCallSeqs = new Map();
+    this.connectors = buildConnectorsNamespace(this);
   }
 
   completed(input = {}) {
@@ -336,6 +338,54 @@ export class FlueDriverClient {
     return this.#httpCall("release-task", params);
   }
 
+  // dispatchConnector posts one connector egress call to the run-scoped
+  // "connector-dispatch" driver op. Actions registered as precondition-gated
+  // (irreversible server-side, or provider-enforced like github.review.post)
+  // are refused with a SYNCHRONOUS throw when the required freshness field is
+  // missing — before any callSeq is consumed and before any network I/O — so
+  // a workflow bug cannot reach egress, and the server enforces the same
+  // registry as defense in depth. Server refusals (grant_denied,
+  // precondition_required, stale_subject, rate_limited, upstream_error)
+  // surface as DriverApiError with that code; stale_subject is never
+  // auto-retried — the workflow decides (typically ending skipped).
+  dispatchConnector(input = {}) {
+    const action = String(input.action || "").trim();
+    if (!action) {
+      throw new Error("connectors.dispatch requires action");
+    }
+    const preconditions = { ...(input.preconditions || {}) };
+    const missing = (CONNECTOR_REQUIRED_PRECONDITIONS[action] || [])
+      .filter((field) => String(preconditions[field] ?? "").trim() === "");
+    if (missing.length > 0) {
+      throw new DriverApiError(
+        `connector action ${action} requires ${missing.map((f) => "preconditions." + f).join(", ")}: `
+          + "pass the value observed when the run decided to act (refused client-side, no request was sent)",
+        { code: "precondition_required", retryable: false },
+      );
+    }
+    const callSeq = input.callSeq === undefined || input.callSeq === null || input.callSeq === ""
+      ? this.#nextConnectorCallSeq(action)
+      : Number(input.callSeq);
+    return this.#httpCall("connector-dispatch", {
+      connectorId: input.connectorId || "",
+      action,
+      resource: input.resource || "",
+      args: input.args || {},
+      preconditions,
+      callSeq,
+    });
+  }
+
+  // #nextConnectorCallSeq auto-increments the run-local sequence per action:
+  // the server derives the call/idempotency id from (runId, action, callSeq),
+  // so a re-entered driver issuing the same calls in the same order produces
+  // the same idempotency keys.
+  #nextConnectorCallSeq(action) {
+    const next = (this.connectorCallSeqs.get(action) || 0) + 1;
+    this.connectorCallSeqs.set(action, next);
+    return next;
+  }
+
   #epicID(input) {
     return input.epicId || this.input.epicId || "";
   }
@@ -432,6 +482,102 @@ export function createLoomDriverClient(options = {}) {
 }
 
 export const createLoomClient = createLoomDriverClient;
+
+// CONNECTOR_OPS maps the workflow-facing loom.connectors.{source}.{method}
+// surface onto the dotted connector action names the dispatch layer
+// implements. Methods are thin: friendly input fields become camelCase
+// provider args, the four expected* freshness fields become preconditions,
+// and everything rides the single "connector-dispatch" driver op.
+const CONNECTOR_OPS = {
+  github: {
+    merge: "github.merge",
+    postReview: "github.review.post",
+    readPullRequest: "github.pull_request.read",
+    listPulls: "github.pulls.list",
+    compare: "github.compare.read",
+    postIssueComment: "github.issue_comment.post",
+  },
+  slack: {
+    post: "slack.chat.post",
+    readConversations: "slack.conversations.read",
+  },
+  datadog: {
+    readMonitors: "datadog.monitors.read",
+    readAlert: "datadog.alert.read",
+    declareIncident: "datadog.incidents.write",
+  },
+};
+
+// CONNECTOR_REQUIRED_PRECONDITIONS mirrors the server-side irreversible
+// registry (internal/connector/grants.go irreversiblePreconditions) plus
+// provider-enforced precondition gates (github.review.post demands the
+// expected head sha for its pre-egress liveness read). The client refuses
+// these BEFORE any network call; the server enforces the same rules, so this
+// is defense in depth, not the authority.
+const CONNECTOR_REQUIRED_PRECONDITIONS = {
+  "github.merge": ["expectedHeadSha"],
+  "github.review.post": ["expectedHeadSha"],
+  "github.branch.delete": ["expectedHeadSha"],
+  "github.pull_request.close": ["expectedHeadSha"],
+  "issues.set_priority": ["expectedIssueRevision"],
+  "slack.chat.delete": ["expectedMessageTs"],
+  "datadog.monitor.delete": ["expectedMonitorRevision"],
+  "datadog.monitor.mute": ["expectedMonitorRevision"],
+};
+
+// connectorPreconditionFields are the camelCase wire fields recognized inside
+// "preconditions"; they may be passed flat on a connectors.* input and are
+// routed here instead of into args.
+const connectorPreconditionFields = new Set([
+  "expectedHeadSha",
+  "expectedIssueRevision",
+  "expectedMessageTs",
+  "expectedMonitorRevision",
+]);
+
+// connectorReservedFields are connectors.* input keys that address the
+// dispatch envelope itself rather than the provider call.
+const connectorReservedFields = new Set(["action", "connectorId", "resource", "callSeq", "args", "preconditions"]);
+
+function buildConnectorsNamespace(client) {
+  const namespace = {
+    dispatch: (input = {}) => client.dispatchConnector(input),
+  };
+  for (const [source, ops] of Object.entries(CONNECTOR_OPS)) {
+    const surface = {};
+    for (const [method, action] of Object.entries(ops)) {
+      surface[method] = (input = {}) => client.dispatchConnector({ ...splitConnectorInput(input), action });
+    }
+    namespace[source] = Object.freeze(surface);
+  }
+  return Object.freeze(namespace);
+}
+
+// splitConnectorInput routes a flat connectors.* input into the dispatch
+// envelope: reserved keys address the envelope, expected* freshness keys
+// become preconditions, every other key is a provider arg. Explicit args /
+// preconditions objects win over flat fields of the same name.
+function splitConnectorInput(input) {
+  const args = {};
+  const preconditions = {};
+  for (const [key, value] of Object.entries(input || {})) {
+    if (connectorReservedFields.has(key)) {
+      continue;
+    }
+    if (connectorPreconditionFields.has(key)) {
+      preconditions[key] = value;
+      continue;
+    }
+    args[key] = value;
+  }
+  return {
+    connectorId: input.connectorId || "",
+    resource: input.resource || "",
+    callSeq: input.callSeq,
+    args: { ...args, ...(input.args || {}) },
+    preconditions: { ...preconditions, ...(input.preconditions || {}) },
+  };
+}
 
 // compactParams strips empty values so the wire payload only carries what the
 // caller actually set; nested objects are compacted recursively and dropped

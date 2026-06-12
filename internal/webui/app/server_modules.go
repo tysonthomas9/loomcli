@@ -115,6 +115,7 @@ func (app *Server) buildInfraModules() {
 			Store:        app.config.Store,
 			FleetBaseURL: app.config.FleetDBBaseURL,
 			APIToken:     app.config.DriverAPIToken,
+			Dispatcher:   app.buildConnectorDispatcher(),
 		}))
 	} else if app.config.AgentControlFn != nil {
 		app.wsModules = append(app.wsModules, webui.NewAgentControlModule(app.config.AgentControlFn))

@@ -450,6 +450,197 @@ test("FlueDriverClient epics.watch surfaces HTTP 401 as DriverApiError", async (
   });
 });
 
+test("FlueDriverClient connectors send camelCase connector-dispatch wire with run headers", async () => {
+  await withDriverServer(async (call) => {
+    if (call.url === "/api/workspaces/WS/driver/connector-dispatch") {
+      // withDriverServer treats a top-level "body" key as the response
+      // wrapper, so the connector result rides inside it.
+      return {
+        statusCode: 200,
+        body: { callId: "cc:run-1:" + call.body.action + ":" + call.body.callSeq, decision: "granted", status: 200, body: { merged: true } },
+      };
+    }
+    return notFound();
+  }, async ({ apiUrl, calls }) => {
+    const client = watchTestClient(apiUrl);
+
+    const result = await client.connectors.github.merge({
+      connectorId: "gh-main",
+      resource: "repo:octo/hello",
+      owner: "octo",
+      repo: "hello",
+      number: 7,
+      mergeMethod: "squash",
+      expectedHeadSha: "abc123",
+    });
+    assert.equal(result.decision, "granted");
+    assert.equal(result.callId, "cc:run-1:github.merge:1");
+    assert.deepEqual(result.body, { merged: true });
+
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].method, "POST");
+    assert.equal(calls[0].url, "/api/workspaces/WS/driver/connector-dispatch");
+    assert.equal(calls[0].headers["x-loom-driver-run-id"], "run-1");
+    assert.equal(calls[0].headers["x-loom-driver-node-id"], "node-1");
+    assert.equal(calls[0].headers["x-loom-driver-lease-id"], "lease-1");
+    assert.equal(calls[0].headers["x-loom-driver-fencing-token"], "7");
+    assert.equal(calls[0].headers.authorization, "Bearer api-token");
+    assert.deepEqual(calls[0].body, {
+      connectorId: "gh-main",
+      action: "github.merge",
+      resource: "repo:octo/hello",
+      args: { owner: "octo", repo: "hello", number: 7, mergeMethod: "squash" },
+      preconditions: { expectedHeadSha: "abc123" },
+      callSeq: 1,
+    });
+    assertNoSnakeCaseKeys(calls[0].body);
+  });
+});
+
+test("FlueDriverClient connectors map every surface method onto its dispatch action", async () => {
+  const table = [
+    { source: "github", method: "merge", action: "github.merge", input: { expectedHeadSha: "sha-1" } },
+    { source: "github", method: "postReview", action: "github.review.post", input: { expectedHeadSha: "sha-1", event: "APPROVE" } },
+    { source: "github", method: "readPullRequest", action: "github.pull_request.read", input: { owner: "o", repo: "r", number: 1 } },
+    { source: "github", method: "listPulls", action: "github.pulls.list", input: { owner: "o", repo: "r", state: "open" } },
+    { source: "github", method: "compare", action: "github.compare.read", input: { owner: "o", repo: "r", base: "main", head: "dev" } },
+    { source: "github", method: "postIssueComment", action: "github.issue_comment.post", input: { owner: "o", repo: "r", number: 1, body: "hi" } },
+    { source: "slack", method: "post", action: "slack.chat.post", input: { channel: "C1", text: "hi" } },
+    { source: "slack", method: "readConversations", action: "slack.conversations.read", input: { channel: "C1" } },
+    { source: "datadog", method: "readMonitors", action: "datadog.monitors.read", input: { name: "api" } },
+    { source: "datadog", method: "readAlert", action: "datadog.alert.read", input: { monitorId: 42 } },
+    { source: "datadog", method: "declareIncident", action: "datadog.incidents.write", input: { monitorId: 42, title: "down" } },
+  ];
+  await withDriverServer(async (call) => {
+    if (call.url === "/api/workspaces/WS/driver/connector-dispatch") {
+      return { callId: "cc", decision: "granted" };
+    }
+    return notFound();
+  }, async ({ apiUrl, calls }) => {
+    const client = watchTestClient(apiUrl);
+    for (const row of table) {
+      await client.connectors[row.source][row.method]({ connectorId: "conn-1", resource: "res:1", ...row.input });
+    }
+    assert.equal(calls.length, table.length);
+    for (const [i, row] of table.entries()) {
+      assert.equal(calls[i].body.action, row.action, `${row.source}.${row.method}`);
+      assert.equal(calls[i].body.connectorId, "conn-1");
+      assert.equal(calls[i].body.callSeq, 1, `${row.source}.${row.method} starts its own per-action sequence`);
+      assertNoSnakeCaseKeys(calls[i].body);
+    }
+  });
+});
+
+test("FlueDriverClient connectors refuse precondition-gated ops synchronously before any network call", async () => {
+  const table = [
+    { name: "github.merge flat", call: (c) => c.connectors.github.merge({ owner: "o", repo: "r", number: 1 }), want: /expectedHeadSha/ },
+    { name: "github.merge empty sha", call: (c) => c.connectors.github.merge({ owner: "o", repo: "r", number: 1, expectedHeadSha: "  " }), want: /expectedHeadSha/ },
+    { name: "github.postReview", call: (c) => c.connectors.github.postReview({ owner: "o", repo: "r", number: 1, event: "APPROVE" }), want: /expectedHeadSha/ },
+    { name: "registry-only action via dispatch", call: (c) => c.connectors.dispatch({ action: "slack.chat.delete", channel: "C1" }), want: /expectedMessageTs/ },
+  ];
+  await withDriverServer(async () => notFound(), async ({ apiUrl, calls }) => {
+    const client = watchTestClient(apiUrl);
+    for (const row of table) {
+      assert.throws(() => row.call(client), (err) => {
+        assert.ok(err instanceof DriverApiError, row.name);
+        assert.equal(err.code, "precondition_required", row.name);
+        assert.equal(err.retryable, false, row.name);
+        assert.match(err.message, row.want, row.name);
+        return true;
+      }, row.name);
+    }
+    assert.equal(calls.length, 0, "client-side refusal must not reach the wire");
+
+    // The refusals above consumed no sequence numbers: the first granted
+    // merge still gets callSeq 1.
+    await assert.rejects(() => client.connectors.github.merge({ owner: "o", repo: "r", number: 1, expectedHeadSha: "sha" }));
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].body.callSeq, 1);
+  });
+});
+
+test("FlueDriverClient connectors accept preconditions via the nested object", async () => {
+  await withDriverServer(async () => ({ callId: "cc", decision: "granted" }), async ({ apiUrl, calls }) => {
+    const client = watchTestClient(apiUrl);
+    await client.connectors.github.merge({
+      owner: "o",
+      repo: "r",
+      number: 1,
+      preconditions: { expectedHeadSha: "nested-sha" },
+    });
+    assert.deepEqual(calls[0].body.preconditions, { expectedHeadSha: "nested-sha" });
+    assert.deepEqual(calls[0].body.args, { owner: "o", repo: "r", number: 1 });
+  });
+});
+
+test("FlueDriverClient connectors surface structured connector refusals as DriverApiError", async () => {
+  const table = [
+    { name: "grant denied", statusCode: 403, code: "grant_denied", retryable: false },
+    { name: "precondition required (server)", statusCode: 400, code: "precondition_required", retryable: false },
+    { name: "stale subject is not auto-retried", statusCode: 409, code: "stale_subject", retryable: false },
+    { name: "rate limited", statusCode: 429, code: "rate_limited", retryable: true },
+    { name: "upstream error", statusCode: 502, code: "upstream_error", retryable: true },
+    { name: "egress unavailable (no vault key)", statusCode: 503, code: "unavailable", retryable: false },
+  ];
+  for (const row of table) {
+    await withDriverServer(async () => ({
+      statusCode: row.statusCode,
+      body: { error: { code: row.code, message: row.name, retryable: row.retryable } },
+    }), async ({ apiUrl }) => {
+      const client = watchTestClient(apiUrl);
+      await assert.rejects(
+        () => client.connectors.slack.post({ connectorId: "slack-1", resource: "channel:C1", channel: "C1", text: "hi" }),
+        (err) => {
+          assert.ok(err instanceof DriverApiError, row.name);
+          assert.equal(err.code, row.code, row.name);
+          assert.equal(err.retryable, row.retryable, row.name);
+          assert.equal(err.status, row.statusCode, row.name);
+          assert.equal(err.message, row.name);
+          return true;
+        },
+        row.name
+      );
+    });
+  }
+});
+
+test("FlueDriverClient connectors auto-increment callSeq per action and replay deterministically", async () => {
+  const handler = async () => ({ callId: "cc", decision: "granted" });
+  const sequence = async (client) => {
+    await client.connectors.github.merge({ owner: "o", repo: "r", number: 1, expectedHeadSha: "s1" });
+    await client.connectors.slack.post({ channel: "C1", text: "one" });
+    await client.connectors.github.merge({ owner: "o", repo: "r", number: 2, expectedHeadSha: "s2" });
+    await client.connectors.slack.post({ channel: "C1", text: "two" });
+  };
+
+  let firstRun;
+  await withDriverServer(handler, async ({ apiUrl, calls }) => {
+    await sequence(watchTestClient(apiUrl));
+    firstRun = calls.map((call) => [call.body.action, call.body.callSeq]);
+  });
+  assert.deepEqual(firstRun, [
+    ["github.merge", 1],
+    ["slack.chat.post", 1],
+    ["github.merge", 2],
+    ["slack.chat.post", 2],
+  ]);
+
+  // Re-entry: a fresh client issuing the same calls in the same order derives
+  // the same (action, callSeq) pairs, hence the same idempotency keys.
+  await withDriverServer(handler, async ({ apiUrl, calls }) => {
+    await sequence(watchTestClient(apiUrl));
+    assert.deepEqual(calls.map((call) => [call.body.action, call.body.callSeq]), firstRun);
+  });
+
+  // An explicit callSeq overrides the counter without advancing it.
+  await withDriverServer(handler, async ({ apiUrl, calls }) => {
+    const client = watchTestClient(apiUrl);
+    await client.connectors.github.merge({ owner: "o", repo: "r", number: 1, expectedHeadSha: "s1", callSeq: 9 });
+    await client.connectors.github.merge({ owner: "o", repo: "r", number: 1, expectedHeadSha: "s1" });
+    assert.deepEqual(calls.map((call) => call.body.callSeq), [9, 1]);
+  });
+});
+
 function watchTestClient(apiUrl) {
   return createLoomDriverClient({
     input: { epicId: "EPIC-1" },

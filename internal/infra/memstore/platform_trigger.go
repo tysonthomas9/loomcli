@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"log/slog"
 	"sort"
 	"strings"
 	"sync"
@@ -242,7 +243,7 @@ func applyTriggerDeliveryResult(d *domain.TriggerDelivery, update store.TriggerD
 	if !update.Status.IsValid() {
 		return fmt.Errorf("update trigger delivery result: delivery status %q: %w", update.Status, domain.ErrInvalid)
 	}
-	if triggerDeliveryResultFinal(d) && update.Status != d.Status {
+	if triggerDeliveryResultFinal(d) && update.Status != d.Status && !triggerDeliverySupersedeTransition(d.Status, update.Status) {
 		return fmt.Errorf("update trigger delivery result: delivery already %s: %w", d.Status, domain.ErrInvalidTransition)
 	}
 	d.Status = update.Status
@@ -276,6 +277,14 @@ func triggerDeliveryInDueIndex(d *domain.TriggerDelivery) bool {
 	default:
 		return false
 	}
+}
+
+// triggerDeliverySupersedeTransition permits the one out-of-final transition
+// the replace concurrency policy needs (mirrors fleet-db): a dispatched
+// delivery whose queued run is later superseded by a newer event for the
+// same subject.
+func triggerDeliverySupersedeTransition(from, to domain.TriggerDeliveryStatus) bool {
+	return from == domain.TriggerDeliveryDispatched && to == domain.TriggerDeliverySuperseded
 }
 
 // triggerDeliveryResultFinal reports whether the delivery reached a state
@@ -398,19 +407,16 @@ func (s *triggerRouteStore) DispatchTriggerRouteV2(ctx context.Context, ws, rout
 				IdempotencyKey: in.IdempotencyKey,
 			}
 		}
-		run, err := s.dispatchTriggerRouteLeg(ctx, ws, binding, event, leg, in, now)
+		outcome, err := s.dispatchTriggerRouteLeg(ctx, ws, binding, event, leg, in, now)
 		if err != nil {
 			return nil, err
 		}
-		if result.PrimaryRun == nil {
-			result.PrimaryRun = run
+		// PrimaryRun is the first leg that HAS a run — a forbid/queue-gated
+		// leg resolves without one and cannot back the legacy single-run wire.
+		if result.PrimaryRun == nil && outcome.run != nil {
+			result.PrimaryRun = outcome.run
 		}
-		result.Deliveries = append(result.Deliveries, store.TriggerRouteDelivery{
-			DeliveryID: leg.DeliveryID,
-			BindingID:  binding.BindingID,
-			RunID:      run.RunID,
-			Status:     domain.TriggerDeliveryDispatched,
-		})
+		result.Deliveries = append(result.Deliveries, outcome.delivery)
 	}
 	return result, nil
 }
@@ -421,6 +427,31 @@ type triggerRouteLeg struct {
 	DeliveryID     string
 	IdempotencyKey string
 }
+
+// triggerRouteLegOutcome is one leg's dispatch resolution: the admitted run
+// (nil when the concurrency policy resolved the leg without one) and its wire
+// delivery, mirroring fleet-db's triggerRouteLegOutcome.
+type triggerRouteLegOutcome struct {
+	run      *domain.DriverRun
+	delivery store.TriggerRouteDelivery
+}
+
+// triggerRouteLegResult shapes one leg's wire delivery (fleet-db's
+// triggerRouteLegResult, on loomcli's camelCase-tagged store type).
+func triggerRouteLegResult(leg triggerRouteLeg, bindingID, runID string, status domain.TriggerDeliveryStatus, rejectionReason string) store.TriggerRouteDelivery {
+	return store.TriggerRouteDelivery{
+		DeliveryID:      leg.DeliveryID,
+		BindingID:       bindingID,
+		RunID:           runID,
+		Status:          status,
+		RejectionReason: rejectionReason,
+	}
+}
+
+// triggerRejectionConcurrencyForbid is the rejection_reason recorded on a
+// delivery refused by the forbid concurrency policy (same wire constant as
+// fleet-db).
+const triggerRejectionConcurrencyForbid = "concurrency_forbid"
 
 // matchTriggerRouteBindings computes the fan-out set for a route key: the
 // exact-RouteKey binding (legacy single-binding lane) unioned with enabled
@@ -459,12 +490,23 @@ func (s *triggerRouteStore) matchTriggerRouteBindings(ctx context.Context, ws, r
 }
 
 // dispatchTriggerRouteLeg admits the queued run and records the delivery for
-// one matched binding. The run create dedups on the leg's idempotency key and
-// the delivery create is first-writer-wins on the deterministic delivery id,
-// so a retry after partial failure heals the leg. Supersede only fires when
-// the delivery was freshly written — an idempotent redelivery must not
-// re-collapse queued siblings.
-func (s *triggerRouteStore) dispatchTriggerRouteLeg(ctx context.Context, ws string, binding *domain.TriggerBinding, event *domain.TriggerEvent, leg triggerRouteLeg, in store.TriggerRouteDispatch, now time.Time) (*domain.DriverRun, error) {
+// one matched binding, enforcing the binding's concurrency policy against the
+// rendered subject key (mirrors fleet-db's dispatchTriggerRouteLeg): allow
+// and one_active_per_epic pass through, forbid/queue gate admission BEFORE
+// any run exists, and replace supersedes queued siblings AFTER the new run is
+// durable. The run create dedups on the leg's idempotency key and the
+// delivery create is first-writer-wins on the deterministic delivery id, so a
+// retry after partial failure heals the leg. The route store's mutex
+// serializes legs end-to-end — the in-memory twin of the atomicity fleet-db's
+// Lua subject gate provides, closing the race where two concurrent dispatches
+// both observe a free subject.
+func (s *triggerRouteStore) dispatchTriggerRouteLeg(ctx context.Context, ws string, binding *domain.TriggerBinding, event *domain.TriggerEvent, leg triggerRouteLeg, in store.TriggerRouteDispatch, now time.Time) (*triggerRouteLegOutcome, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	subjectKey := renderTriggerSubjectKey(binding, event, in.SubjectAttrs)
+	if outcome, handled, err := s.gateTriggerLegConcurrency(ctx, ws, binding, event, leg, subjectKey, now); handled || err != nil {
+		return outcome, err
+	}
 	run, err := s.runs.Create(ctx, store.DriverRunCreate{
 		WorkspaceKey:    ws,
 		RunID:           leg.RunID,
@@ -485,6 +527,7 @@ func (s *triggerRouteStore) dispatchTriggerRouteLeg(ctx context.Context, ws stri
 		DeliveryID:       leg.DeliveryID,
 		TriggerEventID:   event.EventID,
 		TriggerBindingID: binding.BindingID,
+		SubjectKey:       subjectKey,
 		Status:           domain.TriggerDeliveryDispatched,
 		DriverRunID:      run.RunID,
 		Attempt:          1,
@@ -493,21 +536,272 @@ func (s *triggerRouteStore) dispatchTriggerRouteLeg(ctx context.Context, ws stri
 	})
 	if deliveryErr != nil {
 		if errors.Is(deliveryErr, domain.ErrAlreadyExists) {
-			// Idempotent redelivery of an already-recorded leg.
-			return run, nil
+			return s.healTriggerRouteLeg(ctx, ws, binding, leg, run), nil
 		}
 		return nil, deliveryErr
 	}
-	// Subject-level supersede (mirrors fleet-db's dispatch path): when the
-	// binding's concurrency policy is `replace` and this leg's delivery was
-	// freshly recorded, collapse older still-queued runs for the same subject
-	// so a push storm doesn't queue N stale reviews.
+	// Subject-level supersede only fires when the delivery was freshly
+	// written — an idempotent redelivery must not re-collapse queued siblings.
+	status := domain.TriggerDeliveryDispatched
 	if binding.ConcurrencyPolicy == domain.TriggerBindingConcurrencyReplace {
-		if subject := strings.TrimSpace(in.SubjectRef); subject != "" {
-			s.supersedeQueuedSiblingRuns(ctx, ws, binding, subject, run.RunID)
+		status = s.applyTriggerReplacePolicy(ctx, ws, binding, run, subjectKey)
+	}
+	return &triggerRouteLegOutcome{run: run, delivery: triggerRouteLegResult(leg, binding.BindingID, run.RunID, status, "")}, nil
+}
+
+// gateTriggerLegConcurrency enforces the forbid/queue admission policies for
+// one leg before any run exists (fleet-db's gateTriggerLegConcurrency; the
+// caller's route mutex stands in for the atomic Redis subject gate).
+// handled=true means the leg was fully resolved here without a run: forbid
+// writes a rejected delivery (rejection_reason concurrency_forbid), queue
+// parks a held delivery with next_retry_at = now + retry_backoff_seconds so
+// the retry sweeper re-attempts admission once the subject frees. An
+// idempotency-key hit on an existing run bypasses the gate entirely — the leg
+// was already admitted and the run/delivery creates heal it. Legs with no
+// subject key or other policies pass through unchanged.
+func (s *triggerRouteStore) gateTriggerLegConcurrency(ctx context.Context, ws string, binding *domain.TriggerBinding, event *domain.TriggerEvent, leg triggerRouteLeg, subjectKey string, now time.Time) (outcome *triggerRouteLegOutcome, handled bool, err error) {
+	policy := binding.ConcurrencyPolicy
+	if policy != domain.TriggerBindingConcurrencyForbid && policy != domain.TriggerBindingConcurrencyQueue {
+		return nil, false, nil
+	}
+	if subjectKey == "" {
+		return nil, false, nil
+	}
+	if leg.IdempotencyKey != "" && s.runs.hasIdempotencyKey(ws, leg.IdempotencyKey) {
+		return nil, false, nil
+	}
+	if busy := s.busySubjectRun(ctx, ws, binding.BindingID, subjectKey, leg.RunID); busy == "" {
+		return nil, false, nil
+	}
+	delivery := &domain.TriggerDelivery{
+		WorkspaceKey:     ws,
+		DeliveryID:       leg.DeliveryID,
+		TriggerEventID:   event.EventID,
+		TriggerBindingID: binding.BindingID,
+		SubjectKey:       subjectKey,
+		Attempt:          1,
+		CreatedAt:        now,
+		UpdatedAt:        now,
+	}
+	if policy == domain.TriggerBindingConcurrencyForbid {
+		delivery.Status = domain.TriggerDeliveryRejected
+		delivery.RejectionReason = triggerRejectionConcurrencyForbid
+	} else {
+		delivery.Status = domain.TriggerDeliveryHeld
+		next := now.Add(triggerBindingRetryBackoff(binding))
+		delivery.NextRetryAt = &next
+	}
+	if err := s.deliveries.create(delivery); err != nil {
+		if errors.Is(err, domain.ErrAlreadyExists) {
+			// Redelivery of a leg already parked/rejected (or dispatched
+			// before the subject got busy again): report the recorded state.
+			if existing, gerr := s.deliveries.Get(ctx, ws, leg.DeliveryID); gerr == nil {
+				return &triggerRouteLegOutcome{delivery: triggerRouteLegResult(leg, binding.BindingID, existing.DriverRunID, existing.Status, existing.RejectionReason)}, true, nil
+			}
+		}
+		return nil, true, err
+	}
+	return &triggerRouteLegOutcome{delivery: triggerRouteLegResult(leg, binding.BindingID, "", delivery.Status, delivery.RejectionReason)}, true, nil
+}
+
+// busySubjectRun reports the run keeping a (binding, subject key) busy: a
+// dispatched delivery for the pair whose run is still queued or running. The
+// delivery is the only record carrying the rendered subject key, so busy
+// detection walks deliveries — the functional twin of fleet-db's subject
+// queued-ZSET + active-run check.
+func (s *triggerRouteStore) busySubjectRun(ctx context.Context, ws, bindingID, subjectKey, excludeRunID string) string {
+	dispatched, err := s.deliveries.List(ctx, ws, store.TriggerDeliveryFilter{
+		TriggerBindingID: bindingID,
+		Status:           domain.TriggerDeliveryDispatched,
+	})
+	if err != nil {
+		return ""
+	}
+	for _, delivery := range dispatched {
+		if delivery.SubjectKey != subjectKey || delivery.DriverRunID == "" || delivery.DriverRunID == excludeRunID {
+			continue
+		}
+		run, err := s.runs.Get(ctx, ws, delivery.DriverRunID)
+		if err != nil {
+			continue
+		}
+		if run.Status == domain.DriverRunQueued || run.Status == domain.DriverRunRunning {
+			return run.RunID
 		}
 	}
-	return run, nil
+	return ""
+}
+
+// healTriggerRouteLeg resolves a leg whose delivery already exists (fleet-db's
+// healTriggerRouteLeg): an idempotent redelivery of a dispatched (or
+// since-superseded) leg reports the recorded status unchanged, while a held
+// queue-policy delivery whose subject has freed is promoted to dispatched
+// against the newly admitted run — the promotion path the retry sweeper
+// drives.
+func (s *triggerRouteStore) healTriggerRouteLeg(ctx context.Context, ws string, binding *domain.TriggerBinding, leg triggerRouteLeg, run *domain.DriverRun) *triggerRouteLegOutcome {
+	existing, err := s.deliveries.Get(ctx, ws, leg.DeliveryID)
+	if err != nil {
+		// The conflicting delivery vanished between writes; the run is
+		// durable either way, report the dispatched leg.
+		return &triggerRouteLegOutcome{run: run, delivery: triggerRouteLegResult(leg, binding.BindingID, run.RunID, domain.TriggerDeliveryDispatched, "")}
+	}
+	if existing.Status == domain.TriggerDeliveryHeld {
+		promoted, perr := s.deliveries.UpdateResult(ctx, ws, leg.DeliveryID, store.TriggerDeliveryResultUpdate{
+			Status:      domain.TriggerDeliveryDispatched,
+			Attempt:     existing.Attempt + 1,
+			DriverRunID: run.RunID,
+		})
+		if perr == nil {
+			return &triggerRouteLegOutcome{run: run, delivery: triggerRouteLegResult(leg, binding.BindingID, run.RunID, promoted.Status, "")}
+		}
+		slog.Warn("queue policy: held delivery promotion failed", "err", perr, "delivery", leg.DeliveryID, "run", run.RunID)
+	}
+	return &triggerRouteLegOutcome{run: run, delivery: triggerRouteLegResult(leg, binding.BindingID, run.RunID, existing.Status, existing.RejectionReason)}
+}
+
+// applyTriggerReplacePolicy collapses the subject's queued runs to the newest
+// one after a fresh replace-policy admission (fleet-db's
+// applyTriggerReplacePolicy + SupersedeTriggerSubjectRuns), so a push storm
+// leaves one queued run instead of N stale reviews. Candidates come from the
+// rendered subject key on dispatched deliveries — never from event-subject
+// matching. Losers are cancelled (queued only — running work finishes) and
+// their deliveries transitioned to superseded for audit. Best-effort and
+// post-admission: the new run is already durable, so a supersede failure
+// never fails dispatch. Returns the status of THIS leg's delivery: superseded
+// when a concurrent newer dispatch out-raced the freshly admitted run,
+// dispatched otherwise.
+func (s *triggerRouteStore) applyTriggerReplacePolicy(ctx context.Context, ws string, binding *domain.TriggerBinding, admitted *domain.DriverRun, subjectKey string) domain.TriggerDeliveryStatus {
+	if subjectKey == "" {
+		return domain.TriggerDeliveryDispatched
+	}
+	queued := s.queuedSubjectRuns(ctx, ws, binding.BindingID, subjectKey)
+	if len(queued) == 0 {
+		return domain.TriggerDeliveryDispatched
+	}
+	// Winner = newest queued run for the subject: created-at order, run-id
+	// tie-break (mirrors fleet-db's supersede pass).
+	winner := queued[0]
+	for _, run := range queued[1:] {
+		if run.CreatedAt.After(winner.CreatedAt) || (run.CreatedAt.Equal(winner.CreatedAt) && run.RunID > winner.RunID) {
+			winner = run
+		}
+	}
+	status := domain.TriggerDeliveryDispatched
+	for _, run := range queued {
+		if run.RunID == winner.RunID {
+			continue
+		}
+		if !s.runs.cancelQueuedForSupersede(ws, run.RunID, "superseded by "+winner.RunID+" for "+subjectKey) {
+			continue // claimed or removed between list and cancel — fine
+		}
+		s.markTriggerRunDeliveriesSuperseded(ctx, ws, run)
+		if run.RunID == admitted.RunID {
+			status = domain.TriggerDeliverySuperseded
+		}
+	}
+	return status
+}
+
+// queuedSubjectRuns resolves the still-queued runs dispatched for one
+// (binding, rendered subject key), via the deliveries that carry the key.
+func (s *triggerRouteStore) queuedSubjectRuns(ctx context.Context, ws, bindingID, subjectKey string) []*domain.DriverRun {
+	dispatched, err := s.deliveries.List(ctx, ws, store.TriggerDeliveryFilter{
+		TriggerBindingID: bindingID,
+		Status:           domain.TriggerDeliveryDispatched,
+	})
+	if err != nil {
+		return nil
+	}
+	seen := make(map[string]bool, len(dispatched))
+	queued := make([]*domain.DriverRun, 0, len(dispatched))
+	for _, delivery := range dispatched {
+		if delivery.SubjectKey != subjectKey || delivery.DriverRunID == "" || seen[delivery.DriverRunID] {
+			continue
+		}
+		seen[delivery.DriverRunID] = true
+		run, err := s.runs.Get(ctx, ws, delivery.DriverRunID)
+		if err != nil || run.Status != domain.DriverRunQueued {
+			continue
+		}
+		queued = append(queued, run)
+	}
+	return queued
+}
+
+// markTriggerRunDeliveriesSuperseded transitions the deliveries that
+// dispatched a now-superseded run to status superseded, keeping the audit
+// trail consistent with the cancelled run (fleet-db's
+// markTriggerRunDeliveriesSuperseded). lost.SourceRef is the trigger event
+// id, the same linkage fleet-db filters on.
+func (s *triggerRouteStore) markTriggerRunDeliveriesSuperseded(ctx context.Context, ws string, lost *domain.DriverRun) {
+	deliveries, err := s.deliveries.List(ctx, ws, store.TriggerDeliveryFilter{TriggerEventID: lost.SourceRef})
+	if err != nil {
+		return
+	}
+	for _, delivery := range deliveries {
+		if delivery.DriverRunID != lost.RunID || delivery.Status == domain.TriggerDeliverySuperseded {
+			continue
+		}
+		if _, err := s.deliveries.UpdateResult(ctx, ws, delivery.DeliveryID, store.TriggerDeliveryResultUpdate{
+			Status:     domain.TriggerDeliverySuperseded,
+			Attempt:    delivery.Attempt,
+			ErrorClass: "superseded",
+		}); err != nil {
+			slog.Warn("supersede: delivery transition failed", "err", err, "delivery", delivery.DeliveryID, "run", lost.RunID)
+		}
+	}
+}
+
+// triggerBindingRetryBackoff resolves the binding's retry backoff used for
+// held (queue-policy) deliveries, defaulting defensively for records written
+// before the retry fields existed (mirrors fleet-db).
+func triggerBindingRetryBackoff(binding *domain.TriggerBinding) time.Duration {
+	seconds := binding.RetryBackoffSeconds
+	if seconds <= 0 {
+		seconds = domain.DefaultTriggerRetryBackoffSeconds
+	}
+	return time.Duration(seconds) * time.Second
+}
+
+// renderTriggerSubjectKey renders the binding's concurrency subject key for a
+// dispatched event (fleet-db's renderTriggerSubjectKey): the
+// subject_key_template output, or the default "<binding_id>|<subject_ref>"
+// key (empty when the event has no subject_ref — such deliveries carry no
+// concurrency subject). attrs is the adapter-enriched subject attribute map
+// from the dispatch input ({{attrs.X}} tokens); templates never read the raw
+// payload. A render failure (e.g. a template referencing a missing attr)
+// falls back to the default key with a warning instead of failing ingest: the
+// default groups the delivery under the implicit per-binding subject scope,
+// the conservative concurrency grouping.
+func renderTriggerSubjectKey(binding *domain.TriggerBinding, event *domain.TriggerEvent, attrs map[string]string) string {
+	in := trigger.SubjectInputs{
+		WorkspaceKey: event.WorkspaceKey,
+		BindingID:    binding.BindingID,
+		EventType:    event.EventType,
+		SubjectRef:   event.SubjectRef,
+		ActorRef:     event.ActorRef,
+		Attrs:        attrs,
+	}
+	subjectKey, err := trigger.RenderSubjectKey(binding.SubjectKeyTemplate, in)
+	if err != nil {
+		slog.Warn("subject key template render failed; using default subject key",
+			"err", err, "binding", binding.BindingID, "event", event.EventID)
+		subjectKey, _ = trigger.RenderSubjectKey("", in)
+	}
+	return subjectKey
+}
+
+// hasIdempotencyKey reports whether any run in the workspace already carries
+// the idempotency key — the gate-bypass signal for redelivery healing.
+func (s *driverRunStore) hasIdempotencyKey(ws, idempotencyKey string) bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	for _, run := range s.items[ws] {
+		if run.IdempotencyKey == idempotencyKey {
+			return true
+		}
+	}
+	return false
 }
 
 // shortTriggerHash derives the deterministic short id suffix for fan-out legs,
@@ -527,26 +821,6 @@ func compositeTriggerIdempotencyKey(idempotencyKey, bindingID string) string {
 		return ""
 	}
 	return idempotencyKey + "#" + bindingID
-}
-
-// supersedeQueuedSiblingRuns cancels still-queued runs for the same
-// (binding, subject) as keepRunID, matching each candidate by its source
-// TriggerEvent. Best-effort: a run already claimed is left running.
-func (s *triggerRouteStore) supersedeQueuedSiblingRuns(ctx context.Context, ws string, binding *domain.TriggerBinding, subject, keepRunID string) {
-	queued, err := s.runs.List(ctx, ws, store.DriverRunFilter{DriverID: binding.DriverID, Status: domain.DriverRunQueued})
-	if err != nil {
-		return
-	}
-	for _, run := range queued {
-		if run == nil || run.RunID == keepRunID {
-			continue
-		}
-		event, err := s.events.Get(ctx, ws, run.SourceRef)
-		if err != nil || event.TriggerBindingID != binding.BindingID || strings.TrimSpace(event.SubjectRef) != subject {
-			continue
-		}
-		s.runs.cancelQueuedForSupersede(ws, run.RunID, "superseded by "+keepRunID+" for "+subject)
-	}
 }
 
 // runID returns the caller-supplied id, or a generated monotonic one. fleet-db

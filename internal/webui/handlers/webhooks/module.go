@@ -84,13 +84,16 @@ func (m *Module) receiveWebhook(w http.ResponseWriter, r *http.Request) {
 }
 
 // authorizeWebhook resolves the enabled binding for the event's route key,
-// fetches its signing secret via the privileged path, and verifies the request
-// signature. It writes the appropriate error and returns false on any failure.
+// resolves the inbound signing secret(s), and verifies the request signature.
+// It writes the appropriate error and returns false on any failure.
 //
-// Interim signature model (locked decision): verification is keyed to the
-// exact-RouteKey ingress binding's secret. Pattern-matched fan-out bindings
-// need no secrets of their own — verification happens here at ingress, before
-// dispatch; per-source secrets arrive with step-7 connectors.
+// Signature model (step-7 connectors): verification resolves the per-source
+// connector's inbound secret — one rotation point per source — accepting the
+// previous secret inside the dual-secret rotation window (stale matches emit
+// an audit signal). Bindings whose source kind has no connector yet keep
+// verifying against the exact-RouteKey binding's secret (back-compat, no flag
+// day). Pattern-matched fan-out bindings need no secrets of their own —
+// verification happens here at ingress, before dispatch.
 func (m *Module) authorizeWebhook(w http.ResponseWriter, r *http.Request, adapter Adapter, ws string, event NormalizedEvent, body []byte) bool {
 	binding, err := m.store.TriggerBindings().GetByRouteKey(r.Context(), ws, event.RouteKey)
 	if err != nil {
@@ -101,12 +104,7 @@ func (m *Module) authorizeWebhook(w http.ResponseWriter, r *http.Request, adapte
 		writeError(w, http.StatusNotFound, fmt.Sprintf("trigger binding for route %q is disabled", event.RouteKey))
 		return false
 	}
-	secret, err := m.store.TriggerBindings().ResolveWebhookSecret(r.Context(), ws, binding.BindingID)
-	if err != nil {
-		writeDomainError(w, err, "resolve webhook secret failed")
-		return false
-	}
-	if err := adapter.Verify(r, body, secret); err != nil {
+	if err := m.verifyInboundSignature(r, adapter, ws, binding, body); err != nil {
 		writeAdapterError(w, err)
 		return false
 	}

@@ -1,6 +1,13 @@
 export {
   DriverApiError,
   FlueAgentMessageInput,
+  FlueConnectorCallInput,
+  FlueConnectorCallResult,
+  FlueConnectorDispatchInput,
+  FlueConnectorGitHubMergeInput,
+  FlueConnectorGitHubReviewInput,
+  FlueConnectorPreconditions,
+  FlueConnectorsNamespace,
   FlueDriverClient,
   FlueDriverClientOptions,
   FlueDriverResult,

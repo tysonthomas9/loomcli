@@ -15,6 +15,7 @@ import (
 	_ "github.com/tysonthomas9/loomcli/internal/cli/automode"
 	_ "github.com/tysonthomas9/loomcli/internal/cli/backends"
 	_ "github.com/tysonthomas9/loomcli/internal/cli/cleanup"
+	_ "github.com/tysonthomas9/loomcli/internal/cli/connector"
 	_ "github.com/tysonthomas9/loomcli/internal/cli/daemon"
 	_ "github.com/tysonthomas9/loomcli/internal/cli/doctor"
 	_ "github.com/tysonthomas9/loomcli/internal/cli/driver"

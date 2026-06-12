@@ -178,7 +178,35 @@ func (g *GitHub) reviewPost(ctx context.Context, spec CallSpec) (CallResult, err
 			fmt.Errorf("%s requires args.event: %w", spec.Action, domain.ErrInvalid)
 	}
 
-	// Pre-egress liveness read.
+	if result, err := g.reviewLivenessCheck(ctx, spec, owner, repo, number); err != nil {
+		return result, err
+	}
+
+	payload := map[string]any{"event": event}
+	if body, ok := stringArg(spec.Args, "body"); ok {
+		payload["body"] = body
+	}
+	res, err := g.do(ctx, spec, http.MethodPost,
+		fmt.Sprintf("/repos/%s/%s/pulls/%d/reviews", owner, repo, number), nil, payload)
+	if err != nil {
+		return CallResult{Decision: domain.ConnectorCallUpstreamError}, err
+	}
+	if res.status != http.StatusOK && res.status != http.StatusCreated {
+		return CallResult{Status: res.status, Decision: domain.ConnectorCallUpstreamError},
+			g.upstreamError(spec, res)
+	}
+	obj := decodeObject(res.body)
+	return CallResult{
+		Status:   res.status,
+		Body:     map[string]any{"id": obj["id"], "state": obj["state"]},
+		Decision: domain.ConnectorCallGranted,
+	}, nil
+}
+
+// reviewLivenessCheck is reviewPost's pre-egress liveness read: it GETs the
+// PR and refuses with StaleSubject unless it is still open at the expected
+// head sha. A nil error means the write may proceed.
+func (g *GitHub) reviewLivenessCheck(ctx context.Context, spec CallSpec, owner, repo string, number int) (CallResult, error) {
 	res, err := g.do(ctx, spec, http.MethodGet,
 		fmt.Sprintf("/repos/%s/%s/pulls/%d", owner, repo, number), nil, nil)
 	if err != nil {
@@ -207,26 +235,7 @@ func (g *GitHub) reviewPost(ctx context.Context, spec CallSpec) (CallResult, err
 				Reason:   "head sha moved since review was prepared",
 			}
 	}
-
-	payload := map[string]any{"event": event}
-	if body, ok := stringArg(spec.Args, "body"); ok {
-		payload["body"] = body
-	}
-	res, err = g.do(ctx, spec, http.MethodPost,
-		fmt.Sprintf("/repos/%s/%s/pulls/%d/reviews", owner, repo, number), nil, payload)
-	if err != nil {
-		return CallResult{Decision: domain.ConnectorCallUpstreamError}, err
-	}
-	if res.status != http.StatusOK && res.status != http.StatusCreated {
-		return CallResult{Status: res.status, Decision: domain.ConnectorCallUpstreamError},
-			g.upstreamError(spec, res)
-	}
-	obj := decodeObject(res.body)
-	return CallResult{
-		Status:   res.status,
-		Body:     map[string]any{"id": obj["id"], "state": obj["state"]},
-		Decision: domain.ConnectorCallGranted,
-	}, nil
+	return CallResult{}, nil
 }
 
 // pullRequestRead reads one pull request.

@@ -97,21 +97,9 @@ func (s *Slack) Call(ctx context.Context, spec CallSpec) (CallResult, error) {
 // precondition, so the check-to-post TOCTOU window is accepted — a posted
 // message is deletable.
 func (s *Slack) chatPost(ctx context.Context, spec CallSpec) (CallResult, error) {
-	if err := requireIdempotencyKey(spec); err != nil {
-		return CallResult{Decision: domain.ConnectorCallUpstreamError}, err
-	}
-	channel, ok := stringArg(spec.Args, "channel")
-	if !ok {
-		return CallResult{Decision: domain.ConnectorCallUpstreamError},
-			fmt.Errorf("%s requires args.channel: %w", spec.Action, domain.ErrInvalid)
-	}
-	text, ok := stringArg(spec.Args, "text")
-	if !ok {
-		return CallResult{Decision: domain.ConnectorCallUpstreamError},
-			fmt.Errorf("%s requires args.text: %w", spec.Action, domain.ErrInvalid)
-	}
-	if err := requireChannelScope(spec, channel); err != nil {
-		return CallResult{Decision: domain.ConnectorCallDenied}, err
+	channel, text, result, err := chatPostInputs(spec)
+	if err != nil {
+		return result, err
 	}
 
 	// Best-effort pre-egress access check.
@@ -153,6 +141,30 @@ func (s *Slack) chatPost(ctx context.Context, spec CallSpec) (CallResult, error)
 		Body:     map[string]any{"channel": obj["channel"], "ts": obj["ts"]},
 		Decision: domain.ConnectorCallGranted,
 	}, nil
+}
+
+// chatPostInputs validates the chat-post call inputs: the idempotency key is
+// required (deterministic client_msg_id), channel/text args are required, and
+// the channel must sit inside the granted resource scope. On refusal it
+// returns the CallResult to surface alongside the error.
+func chatPostInputs(spec CallSpec) (channel, text string, result CallResult, err error) {
+	if err := requireIdempotencyKey(spec); err != nil {
+		return "", "", CallResult{Decision: domain.ConnectorCallUpstreamError}, err
+	}
+	channel, ok := stringArg(spec.Args, "channel")
+	if !ok {
+		return "", "", CallResult{Decision: domain.ConnectorCallUpstreamError},
+			fmt.Errorf("%s requires args.channel: %w", spec.Action, domain.ErrInvalid)
+	}
+	text, ok = stringArg(spec.Args, "text")
+	if !ok {
+		return "", "", CallResult{Decision: domain.ConnectorCallUpstreamError},
+			fmt.Errorf("%s requires args.text: %w", spec.Action, domain.ErrInvalid)
+	}
+	if err := requireChannelScope(spec, channel); err != nil {
+		return "", "", CallResult{Decision: domain.ConnectorCallDenied}, err
+	}
+	return channel, text, CallResult{}, nil
 }
 
 // conversationsRead reads recent conversation history (read-only), scoped to

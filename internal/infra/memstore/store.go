@@ -62,15 +62,7 @@ type Store struct {
 func New() *Store {
 	requireTestProcess()
 
-	drivers := newDriverStore()
-	versions := newDriverVersionStore(drivers)
-	profiles := newWorkerProfileStore()
-	roles := newRoleStore()
-	services := newAgentServiceStore(roles, profiles)
-	bindings := newTriggerBindingStore(versions, services)
-	services.bindings = bindings
-	roles.services = services
-	profiles.services = services
+	drivers, versions, profiles, roles, services, bindings := newCatalogGraph()
 	nodes := newNodeStore()
 	artifacts := newArtifactStore()
 	runs := newDriverRunStore(versions, bindings)
@@ -114,6 +106,22 @@ func New() *Store {
 		grants:     newConnectorGrantStore(),
 		audits:     newConnectorAuditStore(),
 	}
+}
+
+// newCatalogGraph wires the mutually-referencing catalog stores (drivers,
+// versions, profiles, roles, services, bindings) and returns the handles New
+// needs for the rest of the dependency graph.
+func newCatalogGraph() (*driverStore, *driverVersionStore, *workerProfileStore, *roleStore, *agentServiceStore, *triggerBindingStore) {
+	drivers := newDriverStore()
+	versions := newDriverVersionStore(drivers)
+	profiles := newWorkerProfileStore()
+	roles := newRoleStore()
+	services := newAgentServiceStore(roles, profiles)
+	bindings := newTriggerBindingStore(versions, services)
+	services.bindings = bindings
+	roles.services = services
+	profiles.services = services
+	return drivers, versions, profiles, roles, services, bindings
 }
 
 func requireTestProcess() {

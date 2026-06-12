@@ -28,11 +28,13 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/backend/fleet"
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
+	"github.com/tysonthomas9/loomcli/internal/connector"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	driverpkg "github.com/tysonthomas9/loomcli/internal/driver"
 	"github.com/tysonthomas9/loomcli/internal/epicrunner"
 	"github.com/tysonthomas9/loomcli/internal/leadcontrol"
 	"github.com/tysonthomas9/loomcli/internal/store"
+	"github.com/tysonthomas9/loomcli/internal/trigger"
 )
 
 // maxDriverOpBodyBytes caps inbound driver-op payloads.
@@ -65,6 +67,10 @@ type Config struct {
 	WorktreePath string
 	// IssueBackends overrides the default fleet-db issue backend factory.
 	IssueBackends IssueBackendFactory
+	// Dispatcher is the connector egress choke point for connector-dispatch.
+	// Nil means connector egress is unconfigured and fails closed (see
+	// connectors.go).
+	Dispatcher *connector.Dispatcher
 }
 
 // Module serves the workspace-scoped driver-op routes.
@@ -73,7 +79,12 @@ type Module struct {
 	apiToken      string
 	worktreePath  string
 	issueBackends IssueBackendFactory
+	dispatcher    *connector.Dispatcher
 	ops           map[string]opHandler
+
+	// internalEvents is the C14 internal-event loopback ingress backing the
+	// emit-event op (see internal/trigger/internal_source.go).
+	internalEvents *trigger.InternalSource
 
 	// Watch stream cadence (see watch.go). Defaults set in NewModule;
 	// overridden in tests.
@@ -94,12 +105,15 @@ func NewModule(cfg Config) *Module {
 		apiToken:      strings.TrimSpace(cfg.APIToken),
 		worktreePath:  cfg.WorktreePath,
 		issueBackends: cfg.IssueBackends,
+		dispatcher:    cfg.Dispatcher,
 
 		watchPollInterval:      defaultWatchPollInterval,
 		watchHeartbeatInterval: defaultWatchHeartbeatInterval,
 		watchReconcileInterval: defaultWatchReconcileInterval,
 
 		deliverAssignment: leadcontrol.DeliverCurrentAssignment,
+
+		internalEvents: &trigger.InternalSource{Store: cfg.Store},
 	}
 	m.ops = map[string]opHandler{
 		"claim-ready":                 m.claimReady,
@@ -116,6 +130,8 @@ func NewModule(cfg Config) *Module {
 		"recover-stale-tasks":         m.recoverStaleTasks,
 		"complete-task":               m.completeTask,
 		"release-task":                m.releaseTask,
+		"connector-dispatch":          m.connectorDispatch,
+		"emit-event":                  m.emitEvent,
 	}
 	if m.worktreePath == "" {
 		if wd, err := os.Getwd(); err == nil {
@@ -123,21 +139,26 @@ func NewModule(cfg Config) *Module {
 		}
 	}
 	if m.issueBackends == nil {
-		baseURL := cfg.FleetBaseURL
-		m.issueBackends = func(ws, actor string) (backend.IssueBackend, error) {
-			issueBackend, err := fleet.New(fleet.Config{
-				BaseURL:     baseURL,
-				WorkspaceID: ws,
-				APIKey:      os.Getenv(bootstrap.EnvFleetDBAPIKey),
-				Actor:       actor,
-			})
-			if err != nil {
-				return nil, fmt.Errorf("create fleet-db issue backend: %w", err)
-			}
-			return issueBackend, nil
-		}
+		m.issueBackends = defaultIssueBackends(cfg.FleetBaseURL)
 	}
 	return m
+}
+
+// defaultIssueBackends builds the production issue-backend factory: a
+// fleet-db client per (workspace, actor) against the configured base URL.
+func defaultIssueBackends(baseURL string) func(ws, actor string) (backend.IssueBackend, error) {
+	return func(ws, actor string) (backend.IssueBackend, error) {
+		issueBackend, err := fleet.New(fleet.Config{
+			BaseURL:     baseURL,
+			WorkspaceID: ws,
+			APIKey:      os.Getenv(bootstrap.EnvFleetDBAPIKey),
+			Actor:       actor,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("create fleet-db issue backend: %w", err)
+		}
+		return issueBackend, nil
+	}
 }
 
 func (m *Module) Register(mux *http.ServeMux) {
@@ -725,6 +746,9 @@ func writeOpError(w http.ResponseWriter, status int, code, message string, retry
 // envelope. Defaults to a non-retryable internal error: only transient
 // classes (timeouts, cancellation) advertise retryability.
 func writeDomainOpError(w http.ResponseWriter, err error) {
+	if writeConnectorOpError(w, err) {
+		return
+	}
 	switch {
 	case errors.Is(err, domain.ErrNotFound):
 		writeOpError(w, http.StatusNotFound, "not_found", err.Error(), false)

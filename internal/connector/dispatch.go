@@ -169,28 +169,13 @@ func (d *Dispatcher) Dispatch(ctx context.Context, req Request) (Result, error) 
 		return d.refuse(ctx, req, res, kind, domain.ConnectorCallDenied, derr)
 	}
 
-	// (2) Deny-by-default grant evaluation, re-resolved on every call. Only
-	// grants issued against THIS connector count: a grant on another named
-	// connector of the same kind never authorizes egress here.
-	grants, err := d.Grants.ListByBinding(ctx, req.WorkspaceKey, req.BindingID)
-	if err != nil {
-		return res, fmt.Errorf("connector dispatch grants for binding %q: %w", req.BindingID, err)
-	}
-	scoped := make([]*domain.ConnectorGrant, 0, len(grants))
-	for _, g := range grants {
-		if g != nil && g.ConnectorID == req.ConnectorID {
-			scoped = append(scoped, g)
+	// (2)+(3) Deny-by-default grant evaluation, then the irreversible-action
+	// precondition gate — both refuse before any egress or credential access.
+	if refusal, rerr := d.authorizeCall(ctx, req, res, kind); rerr != nil || refusal != nil {
+		if refusal != nil {
+			return *refusal, rerr
 		}
-	}
-	if decision := Evaluate(req.BindingID, scoped, req.Action, req.Resource); !decision.Allowed {
-		return d.refuse(ctx, req, res, kind, domain.ConnectorCallDenied, decision.Denied)
-	}
-
-	// (3) Irreversible actions demand their registered freshness field
-	// before any egress (or credential access) happens.
-	if missing := missingPreconditions(req.Action, req.Preconditions); len(missing) > 0 {
-		perr := &providers.PreconditionRequired{Action: req.Action, Fields: missing}
-		return d.refuse(ctx, req, res, kind, domain.ConnectorCallPreconditionRequired, perr)
+		return res, rerr
 	}
 
 	// Resolve the provider before touching the credential: a missing adapter
@@ -204,18 +189,12 @@ func (d *Dispatcher) Dispatch(ctx context.Context, req Request) (Result, error) 
 	// (4) Just-in-time unseal. The plaintext slice is zeroed on the way out;
 	// the string copy below lives only on this call's stack and the
 	// provider's Authorization header.
-	sealed, err := d.Connectors.ResolveOutboundCredentialSealed(ctx, req.WorkspaceKey, req.ConnectorID)
-	if err != nil {
-		return res, fmt.Errorf("connector dispatch sealed credential for %q: %w", req.ConnectorID, err)
-	}
-	if len(sealed) == 0 {
-		derr := fmt.Errorf("connector %q: %w", req.ConnectorID, ErrNoOutboundCredential)
-		return d.refuse(ctx, req, res, kind, domain.ConnectorCallDenied, derr)
-	}
-	plaintext, err := d.Vault.Unseal(sealed, CredentialAAD(req.WorkspaceKey, req.ConnectorID))
-	if err != nil {
-		derr := fmt.Errorf("connector %q: %w", req.ConnectorID, err)
-		return d.refuse(ctx, req, res, kind, domain.ConnectorCallDenied, derr)
+	plaintext, refusal, err := d.unsealCredential(ctx, req, res, kind)
+	if err != nil || refusal != nil {
+		if refusal != nil {
+			return *refusal, err
+		}
+		return res, err
 	}
 	defer zeroBytes(plaintext)
 
@@ -230,8 +209,66 @@ func (d *Dispatcher) Dispatch(ctx context.Context, req Request) (Result, error) 
 		Credential:     string(plaintext),
 	})
 
-	// (6) Journal the outcome. Providers populate CallResult.Decision even
-	// on error; fall back to the error mapping defensively.
+	return d.journalOutcome(ctx, req, res, kind, callRes, callErr)
+}
+
+// authorizeCall is Dispatch steps (2) and (3): deny-by-default grant
+// evaluation (re-resolved on every call — only grants issued against THIS
+// connector count; a grant on another named connector of the same kind never
+// authorizes egress here), then the registered freshness-field gate for
+// irreversible actions. A non-nil refusal is the journaled refusal Result to
+// return alongside the error.
+func (d *Dispatcher) authorizeCall(ctx context.Context, req Request, res Result, kind domain.ConnectorSourceKind) (*Result, error) {
+	grants, err := d.Grants.ListByBinding(ctx, req.WorkspaceKey, req.BindingID)
+	if err != nil {
+		return nil, fmt.Errorf("connector dispatch grants for binding %q: %w", req.BindingID, err)
+	}
+	scoped := make([]*domain.ConnectorGrant, 0, len(grants))
+	for _, g := range grants {
+		if g != nil && g.ConnectorID == req.ConnectorID {
+			scoped = append(scoped, g)
+		}
+	}
+	if decision := Evaluate(req.BindingID, scoped, req.Action, req.Resource); !decision.Allowed {
+		refused, rerr := d.refuse(ctx, req, res, kind, domain.ConnectorCallDenied, decision.Denied)
+		return &refused, rerr
+	}
+	if missing := missingPreconditions(req.Action, req.Preconditions); len(missing) > 0 {
+		perr := &providers.PreconditionRequired{Action: req.Action, Fields: missing}
+		refused, rerr := d.refuse(ctx, req, res, kind, domain.ConnectorCallPreconditionRequired, perr)
+		return &refused, rerr
+	}
+	return nil, nil
+}
+
+// unsealCredential resolves and unseals the connector's outbound credential
+// just-in-time for Dispatch step (4). A non-nil refusal is the journaled
+// deny Result to return alongside err; the caller owns zeroing plaintext.
+func (d *Dispatcher) unsealCredential(ctx context.Context, req Request, res Result, kind domain.ConnectorSourceKind) (plaintext []byte, refusal *Result, err error) {
+	sealed, err := d.Connectors.ResolveOutboundCredentialSealed(ctx, req.WorkspaceKey, req.ConnectorID)
+	if err != nil {
+		return nil, nil, fmt.Errorf("connector dispatch sealed credential for %q: %w", req.ConnectorID, err)
+	}
+	if len(sealed) == 0 {
+		derr := fmt.Errorf("connector %q: %w", req.ConnectorID, ErrNoOutboundCredential)
+		refused, rerr := d.refuse(ctx, req, res, kind, domain.ConnectorCallDenied, derr)
+		return nil, &refused, rerr
+	}
+	plaintext, err = d.Vault.Unseal(sealed, CredentialAAD(req.WorkspaceKey, req.ConnectorID))
+	if err != nil {
+		derr := fmt.Errorf("connector %q: %w", req.ConnectorID, err)
+		refused, rerr := d.refuse(ctx, req, res, kind, domain.ConnectorCallDenied, derr)
+		return nil, &refused, rerr
+	}
+	return plaintext, nil, nil
+}
+
+// journalOutcome is Dispatch step (6): it normalizes the provider decision,
+// appends the audit record (duplicate CallID appends are success), and
+// returns the provider error joined with any audit failure.
+func (d *Dispatcher) journalOutcome(ctx context.Context, req Request, res Result, kind domain.ConnectorSourceKind, callRes providers.CallResult, callErr error) (Result, error) {
+	// Providers populate CallResult.Decision even on error; fall back to the
+	// error mapping defensively.
 	decision := callRes.Decision
 	if !decision.Valid() {
 		if callErr != nil {
