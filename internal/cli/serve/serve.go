@@ -290,6 +290,8 @@ func startDriverExecutorIfEnabled(ctx context.Context, st store.Store) {
 		WorkspaceKey: os.Getenv(bootstrap.EnvWorkspace),
 		WorkDir:      workDir,
 		NodeID:       os.Getenv("LOOM_DRIVER_EXECUTOR_NODE_ID"),
+		APIBaseURL:   driverAPIBaseURL(),
+		APIToken:     os.Getenv("LOOM_DRIVER_API_TOKEN"),
 	}
 	slog.Info("Driver executor enabled", "workspace", executor.WorkspaceKey, "work_dir", workDir)
 	go func() {
@@ -312,6 +314,25 @@ func startDriverExecutorIfEnabled(ctx context.Context, st store.Store) {
 			}
 		}
 	}()
+}
+
+// driverAPIBaseURL is the loopback URL of this serve process's driver-op
+// HTTP API, exported to driver runtimes as LOOM_DRIVER_API_URL. Driver
+// runtimes are local children of the executor, so loopback is always
+// reachable regardless of the public bind address. Set
+// LOOM_DRIVER_API_URL on the serve process to override (e.g. TLS front).
+func driverAPIBaseURL() string {
+	if override := strings.TrimSpace(os.Getenv("LOOM_DRIVER_API_URL")); override != "" {
+		return override
+	}
+	host := serveBindAddr
+	switch host {
+	case "", "0.0.0.0", "::":
+		host = "127.0.0.1"
+	case "::1":
+		host = "[::1]"
+	}
+	return fmt.Sprintf("http://%s:%d", host, servePort)
 }
 
 func driverExecutorEnabled() bool {

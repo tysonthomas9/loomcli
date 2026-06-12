@@ -48,6 +48,10 @@ type Executor struct {
 	LeaseID           string
 	Runner            Runner
 	HeartbeatInterval time.Duration
+	// APIBaseURL/APIToken configure the driver-op HTTP API exported to driver
+	// runtimes via the default NodeRunner (LOOM_DRIVER_API_URL/_TOKEN).
+	APIBaseURL string
+	APIToken   string
 }
 
 type ExecutionResult struct {
@@ -98,7 +102,7 @@ func (e *Executor) RunOnce(ctx context.Context) (*ExecutionResult, error) {
 func (e *Executor) runClaimed(ctx context.Context, workDir string, claimed *domain.DriverRun) RunResult {
 	runner := e.Runner
 	if runner == nil {
-		runner = NodeRunner{}
+		runner = NodeRunner{APIBaseURL: e.APIBaseURL, APIToken: e.APIToken}
 	}
 	req, err := loadRunRequest(ctx, workDir, claimed, e.Store)
 	if err != nil {
@@ -418,6 +422,13 @@ func safeBundleFile(bundleRoot, ref string) (string, error) {
 type NodeRunner struct {
 	NodePath        string
 	ExecTaskCommand []string
+	// APIBaseURL, when set, is exported to the driver runtime as
+	// LOOM_DRIVER_API_URL so the workflow SDK uses the driver-op HTTP API on
+	// loom serve instead of spawning CLI subprocesses.
+	APIBaseURL string
+	// APIToken is the shared driver API bearer token forwarded as
+	// LOOM_DRIVER_API_TOKEN when APIBaseURL is set.
+	APIToken string
 }
 
 func (r NodeRunner) Run(ctx context.Context, req RunRequest) (RunResult, error) {
@@ -451,6 +462,12 @@ func (r NodeRunner) runBuiltFlueServer(ctx context.Context, req RunRequest, node
 	env, err := flueRuntimeEnv(req, input, execTaskCommand)
 	if err != nil {
 		return RunResult{}, err
+	}
+	if apiBaseURL := strings.TrimSpace(r.APIBaseURL); apiBaseURL != "" {
+		env = append(env, "LOOM_DRIVER_API_URL="+apiBaseURL)
+		if apiToken := strings.TrimSpace(r.APIToken); apiToken != "" {
+			env = append(env, "LOOM_DRIVER_API_TOKEN="+apiToken)
+		}
 	}
 	cmd := flueRuntimeCommand(ctx, node, launcherPath, req.BundleRoot, env)
 	stdout, stderr, err := runFlueRuntimeCommand(cmd)
