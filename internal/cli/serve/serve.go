@@ -447,8 +447,10 @@ func buildServerConfig(monitorHandlers webui.MonitorHandlers, fs fleetState, sto
 		gitOps.WithStore(storeHandle.Store)
 		if url := storeHandle.URL(); url != "" {
 			cfg.IssueBackendFn = cli.WorkspaceAwareIssueBackendForURL(url, fs.clientCfg.Actor)
+			cfg.FleetDBBaseURL = url
 			fs = withStoreFleetURL(fs, url)
 		}
+		cfg.DriverAPIToken = os.Getenv("LOOM_DRIVER_API_TOKEN")
 	}
 	applyFleetConfig(&cfg, fs)
 	applyWorkspaceConfig(&cfg)

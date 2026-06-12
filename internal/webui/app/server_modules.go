@@ -9,6 +9,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/webui/appstores"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlermux"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/agents"
+	"github.com/tysonthomas9/loomcli/internal/webui/handlers/driverapi"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/onboarding"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/webhooks"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/workflows"
@@ -110,6 +111,11 @@ func (app *Server) buildInfraModules() {
 		app.wsModules = append(app.wsModules, onboarding.NewModule(app.issueSvc, app.agentSvc))
 		app.wsModules = append(app.wsModules, workflows.NewModule(app.config.Store))
 		app.wsModules = append(app.wsModules, webhooks.NewModule(app.config.Store))
+		app.wsModules = append(app.wsModules, driverapi.NewModule(driverapi.Config{
+			Store:        app.config.Store,
+			FleetBaseURL: app.config.FleetDBBaseURL,
+			APIToken:     app.config.DriverAPIToken,
+		}))
 	} else if app.config.AgentControlFn != nil {
 		app.wsModules = append(app.wsModules, webui.NewAgentControlModule(app.config.AgentControlFn))
 	}

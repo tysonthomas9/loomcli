@@ -99,6 +99,8 @@ type ServerConfig struct {
 	FleetClientWorkspace string                                               // Explicit fleet server workspace ID; empty = unset.
 	FleetClientAPIKey    string                                               // Pre-shared API key for fleet worker backend auth
 	FleetClientActor     string                                               // X-Actor header value for fleet-db --auth-dev-mode (typically the loom agent name)
+	FleetDBBaseURL       string                                               // fleet-db HTTP base URL backing Store; used by the driver-op API to build issue backends
+	DriverAPIToken       string                                               // Optional shared bearer token required by the driver-op HTTP API (LOOM_DRIVER_API_TOKEN)
 	DaemonStartupFn      func(ctx context.Context, onReady func(wsID string)) // Starts daemons for secondary workspaces; calls onReady(wsID) when each is reachable
 	Logger               *slog.Logger                                         // Structured logger (optional; nil falls back to slog.Default())
 	SentryDSN            string                                               // Sentry/GlitchTip DSN for error tracking (optional; empty disables)

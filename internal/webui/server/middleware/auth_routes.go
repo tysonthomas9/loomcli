@@ -32,6 +32,14 @@ func isPublicRoute(method, path string) bool {
 		return true
 	}
 
+	// Driver-op API routes authenticate via run-scoped DriverRun credentials
+	// (X-Loom-Driver-* headers, fenced heartbeat) plus an optional shared
+	// bearer token — not via user JWT.
+	// e.g. /api/workspaces/{ws}/driver/claim-ready → /api/driver/claim-ready
+	if strings.HasPrefix(normalizedPath, "/api/driver/") {
+		return true
+	}
+
 	// All auth routes are public — the BetterAuth service handles its own auth.
 	// Must be above the GET-only gate because sign-in/sign-up use POST.
 	if strings.HasPrefix(normalizedPath, "/api/auth/") {
