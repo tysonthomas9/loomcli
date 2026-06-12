@@ -56,6 +56,7 @@ export class FlueDriverClient {
       input: options.input,
       apiUrl: options.apiUrl,
       apiToken: options.apiToken,
+      runToken: options.runToken,
     });
   }
 
@@ -64,6 +65,14 @@ export class FlueDriverClient {
     this.input = options.input || {};
     this.apiUrl = stripTrailingSlash(String(options.apiUrl || pickEnv(this.env, "LOOM_DRIVER_API_URL")));
     this.apiToken = String(options.apiToken || pickEnv(this.env, "LOOM_DRIVER_API_TOKEN"));
+    // runToken is the run-scoped bearer token minted at claim (LOOM_RUN_TOKEN,
+    // injected by the executor). When present it is the ONLY credential the
+    // client sends: Authorization: Bearer <run token>, no X-Loom-Driver-*
+    // identity headers and no static apiToken — the server derives
+    // {run, node, lease, fence} from the verified claims. Without it the
+    // legacy transport (header quad + optional shared static token) is
+    // unchanged, so existing deployments keep working.
+    this.runToken = String(options.runToken || pickEnv(this.env, "LOOM_RUN_TOKEN"));
     this.workspace = pickEnv(this.env, "LOOM_DRIVER_WORKSPACE");
     this.driverRunId = pickEnv(this.env, "LOOM_DRIVER_RUN_ID");
     this.taskRunResultsByTaskId = new Map();
@@ -550,8 +559,10 @@ export class FlueDriverClient {
   }
 
   #requireHttpConfig() {
-    if (!this.driverRunId) {
-      throw new Error("LOOM_DRIVER_RUN_ID is required");
+    // With a run-scoped token the run identity travels inside the token
+    // claims, so the LOOM_DRIVER_RUN_ID env is not needed.
+    if (!this.driverRunId && !this.runToken) {
+      throw new Error("LOOM_DRIVER_RUN_ID is required (or LOOM_RUN_TOKEN for token-only auth)");
     }
     if (!this.workspace) {
       throw new Error("LOOM_DRIVER_WORKSPACE is required for the driver HTTP API");
@@ -561,7 +572,17 @@ export class FlueDriverClient {
     }
   }
 
+  // #identityHeaders builds the per-request auth headers for both the JSON
+  // ops and the watch SSE transport. Token-only path first: with a run token
+  // the ONLY header is Authorization: Bearer <run token> — no X-Loom-Driver-*
+  // quad (the server derives identity from claims and treats a conflicting
+  // header as identity_mismatch) and the static apiToken is ignored. The
+  // legacy header-quad + static-token transport is byte-identical otherwise
+  // (CLI/ops transition path).
   #identityHeaders() {
+    if (this.runToken) {
+      return { Authorization: "Bearer " + this.runToken };
+    }
     const headers = {
       "X-Loom-Driver-Run-Id": this.driverRunId,
     };
@@ -637,7 +658,7 @@ export class FlueDriverClient {
         || `driver op ${op} failed with HTTP ${response.status}`;
       throw new DriverApiError(message, {
         code: envelope?.code,
-        retryable: envelope?.retryable,
+        retryable: envelopeRetryable(envelope),
         status: response.status,
         details: envelope?.details,
       });
@@ -836,6 +857,18 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+// envelopeRetryable maps a structured error envelope's retryable flag,
+// forcing token_expired (HTTP 401) to NON-retryable regardless of what the
+// envelope says: the run token's TTL is the hard max-run-duration cap, so a
+// retry with the same token can never succeed — the run must end (a watch
+// loop in particular must not reconnect forever on an expired token).
+function envelopeRetryable(envelope) {
+  if (envelope?.code === "token_expired") {
+    return false;
+  }
+  return Boolean(envelope?.retryable);
+}
+
 // watchHttpError maps a non-OK watch response onto DriverApiError using the
 // structured {code, message, retryable} envelope when present. Without an
 // envelope, 5xx/429 default to retryable so transient proxy errors reconnect.
@@ -850,7 +883,7 @@ async function watchHttpError(response) {
     // Non-JSON error bodies fall back to the status-based defaults.
   }
   const retryable = envelope
-    ? Boolean(envelope.retryable)
+    ? envelopeRetryable(envelope)
     : response.status >= 500 || response.status === 429;
   return new DriverApiError(envelope?.message || `epic watch failed with HTTP ${response.status}`, {
     code: envelope?.code,

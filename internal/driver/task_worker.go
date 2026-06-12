@@ -31,6 +31,9 @@ type TaskWorker struct {
 	HeartbeatInterval  time.Duration
 	MaxAttempts        int
 	Executor           TaskExecutor
+	// APIBaseURL is the serve task-run API base URL exported to bridge task
+	// runners as LOOM_TASK_RUN_API_URL (see HostBridgeTaskExecutor).
+	APIBaseURL string
 	// Now is a clock seam for tests; nil uses time.Now.
 	Now func() time.Time
 }
@@ -78,6 +81,7 @@ func (w *TaskWorker) runOnceInWorkspace(ctx context.Context, ws, workDir string)
 		executor = HostBridgeTaskExecutor{
 			Store:        w.Store,
 			WorktreePath: workDir,
+			APIBaseURL:   w.APIBaseURL,
 		}
 	}
 	outcome, err := ClaimAndExecuteTaskRunWithResult(ctx, w.Store, TaskRunWorkerOptions{

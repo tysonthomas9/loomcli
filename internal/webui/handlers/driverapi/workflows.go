@@ -155,16 +155,18 @@ func (m *Module) workflowsAwaitChild(ctx context.Context, ws string, child *doma
 // handleWorkflowsStart serves POST /driver/workflows/start (two-segment path,
 // explicitly registered like events/await).
 func (m *Module) handleWorkflowsStart(w http.ResponseWriter, r *http.Request) {
-	if !m.authorize(w, r) {
+	tokenID, ok := m.authenticate(w, r)
+	if !ok {
 		return
 	}
-	m.serveAuthorizedOp(w, r, m.workflowsStart)
+	m.serveAuthorizedOp(w, r, m.workflowsStart, tokenID)
 }
 
 // handleWorkflowsAwait serves POST /driver/workflows/await.
 func (m *Module) handleWorkflowsAwait(w http.ResponseWriter, r *http.Request) {
-	if !m.authorize(w, r) {
+	tokenID, ok := m.authenticate(w, r)
+	if !ok {
 		return
 	}
-	m.serveAuthorizedOp(w, r, m.workflowsAwait)
+	m.serveAuthorizedOp(w, r, m.workflowsAwait, tokenID)
 }

@@ -41,6 +41,26 @@ const (
 	DriverStatusArchived DriverStatus = "archived"
 )
 
+// DriverTrustLevel classifies who vouches for a driver's bundle content and
+// gates where its workflow runtimes may execute (§7 step 9 sandbox placement
+// policy): trusted drivers (builtin/operator-registered) may run in a host
+// process; untrusted drivers (externally submitted bundles) require an
+// isolating sandbox launcher and the executor refuses anything else.
+type DriverTrustLevel string
+
+const (
+	DriverTrustTrusted   DriverTrustLevel = "trusted"
+	DriverTrustUntrusted DriverTrustLevel = "untrusted"
+)
+
+// Trusted reports whether the level grants host-process execution. Unknown or
+// missing levels are untrusted — fail closed (step-9 locked decision: the
+// one-time fleet-db backfill stamps pre-existing rows trusted; thereafter
+// unknown/missing means sandbox).
+func (t DriverTrustLevel) Trusted() bool {
+	return t == DriverTrustTrusted
+}
+
 type Driver struct {
 	WorkspaceKey    string            `json:"workspace_key"`
 	DriverID        string            `json:"driver_id"`
@@ -50,6 +70,7 @@ type Driver struct {
 	Description     string            `json:"description,omitempty"`
 	ActiveVersionID string            `json:"active_version_id,omitempty"`
 	Status          DriverStatus      `json:"status"`
+	TrustLevel      DriverTrustLevel  `json:"trust_level,omitempty"`
 	Metadata        map[string]string `json:"metadata,omitempty"`
 	CreatedAt       time.Time         `json:"created_at"`
 	UpdatedAt       time.Time         `json:"updated_at"`
@@ -517,6 +538,8 @@ type TaskRunPlacement struct {
 	CWD             string     `json:"cwd,omitempty"`
 	RepoRef         string     `json:"repo_ref,omitempty"`
 	CleanupPolicy   string     `json:"cleanup_policy,omitempty"`
+	EgressMode      string     `json:"egress_mode,omitempty"`
+	EgressMechanism string     `json:"egress_mechanism,omitempty"`
 	StartedAt       time.Time  `json:"started_at,omitempty"`
 	HeartbeatAt     time.Time  `json:"heartbeat_at,omitempty"`
 	RetainedUntil   *time.Time `json:"retained_until,omitempty"`
@@ -532,6 +555,8 @@ func (p TaskRunPlacement) Empty() bool {
 		p.CWD == "" &&
 		p.RepoRef == "" &&
 		p.CleanupPolicy == "" &&
+		p.EgressMode == "" &&
+		p.EgressMechanism == "" &&
 		p.StartedAt.IsZero() &&
 		p.HeartbeatAt.IsZero() &&
 		p.RetainedUntil == nil

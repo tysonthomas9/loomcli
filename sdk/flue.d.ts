@@ -1,5 +1,65 @@
+/**
+ * FROZEN (SDK v1 contract, sdk/api-surface.v1.json): terminal driver-result
+ * statuses. The suspend path is NOT a result status — it is the
+ * WorkflowSuspended sentinel (whose `result.status` is the distinct literal
+ * "suspended_awaiting_event"). Extending this union is a breaking change.
+ */
+export type FlueDriverResultStatus = "completed" | "failed" | "needs_review" | "cancelled";
+
+/**
+ * FROZEN (SDK v1 contract): epic watch SSE frame types.
+ * "snapshot" (handshake) -> "taskRun"* (journal) -> "closed" (terminal).
+ */
+export type FlueEpicWatchEventType = "snapshot" | "taskRun" | "closed";
+
+/**
+ * FROZEN (SDK v1 contract): resolved-await statuses returned to the caller.
+ * The third wire status, "suspended", never reaches workflow code — the
+ * client converts it into the thrown WorkflowSuspended sentinel.
+ */
+export type FlueAwaitStatus = "satisfied" | "timed_out";
+
+/**
+ * FROZEN (SDK v1 contract): every code the {code, message, retryable,
+ * details?} error envelope can carry — server-emitted plus the client-side
+ * transport codes (timeout/unavailable/internal) and synchronous refusals
+ * (precondition_required, await_timeout_required). Removing or renaming a
+ * code is a breaking change; additions require a manifest + minor bump.
+ */
+export type DriverApiErrorCode =
+  // Client transport + generic server mapping.
+  | "internal"
+  | "invalid"
+  | "timeout"
+  | "canceled"
+  | "unavailable"
+  | "unknown_op"
+  | "not_found"
+  | "not_owner"
+  | "conflict"
+  | "unschedulable"
+  | "invalid_transition"
+  // Auth (token_expired is ALWAYS non-retryable: the token TTL is the
+  // max-run-duration cap, so the run must end rather than retry).
+  | "unauthenticated"
+  | "identity_mismatch"
+  | "token_expired"
+  // Connector egress.
+  | "grant_denied"
+  | "precondition_required"
+  | "stale_subject"
+  | "rate_limited"
+  | "upstream_error"
+  // Awaits + composition.
+  | "await_pattern_unscoped"
+  | "await_timeout_required"
+  | "await_instance_key_malformed"
+  | "await_actor_forbidden"
+  | "driver_run_already_resumed"
+  | "composition_depth_exceeded";
+
 export interface FlueDriverResult {
-  status: "completed" | "failed" | "needs_review" | "cancelled" | string;
+  status: FlueDriverResultStatus;
   summary?: string;
   errorClass?: string;
   taskRunId?: string;
@@ -54,7 +114,7 @@ export interface FlueEpicWatchInput extends FlueEpicInput {
 }
 
 export interface FlueEpicWatchEvent {
-  type: "snapshot" | "taskRun" | "closed" | string;
+  type: FlueEpicWatchEventType;
   /** Last-Event-ID cursor for the frame (journal Seq as a string). */
   id: string;
   data: unknown;
@@ -139,7 +199,8 @@ export interface FlueConnectorDispatchInput extends FlueConnectorCallInput {
 
 export interface FlueConnectorCallResult {
   callId: string;
-  decision: "granted" | string;
+  /** FROZEN: a dispatch that returns (rather than throws) was granted. */
+  decision: "granted";
   status?: number;
   body?: Record<string, unknown>;
   [key: string]: unknown;
@@ -215,7 +276,7 @@ export interface FlueAwaitWireEvent {
  * await before acting on the event.
  */
 export interface FlueAwaitEventResult {
-  status: "satisfied" | "timed_out";
+  status: FlueAwaitStatus;
   instanceKey: string;
   pattern: string;
   deadline: string;
@@ -288,15 +349,32 @@ export interface FlueDriverClientOptions {
   env?: NodeJS.ProcessEnv | Record<string, string | undefined>;
   input?: Record<string, unknown>;
   apiUrl?: string;
+  /**
+   * Legacy shared static API token (LOOM_DRIVER_API_TOKEN). Used only on the
+   * legacy header-quad transport; IGNORED whenever a run token is present.
+   */
   apiToken?: string;
+  /**
+   * Run-scoped bearer token minted at claim. Precedence: this option, then
+   * the LOOM_RUN_TOKEN env (injected by the executor). When set, every
+   * request — JSON ops and the watch SSE stream — authenticates token-only:
+   * `Authorization: Bearer <run token>` with NO X-Loom-Driver-* identity
+   * headers and no apiToken; the server derives {run, node, lease, fence}
+   * from the verified claims. When absent, the legacy transport (header quad
+   * + optional static token) is unchanged. An expired token surfaces as
+   * DriverApiError {code: "token_expired", retryable: false} — the token TTL
+   * is the max-run-duration cap, so the run must end rather than retry.
+   */
+  runToken?: string;
 }
 
 export declare class DriverApiError extends Error {
-  readonly code: string;
+  readonly code: DriverApiErrorCode;
   readonly retryable: boolean;
   readonly status: number;
+  /** Optional machine-readable context from the error envelope (additive). */
   readonly details?: unknown;
-  constructor(message: string, options?: { code?: string; retryable?: boolean; status?: number; details?: unknown });
+  constructor(message: string, options?: { code?: DriverApiErrorCode; retryable?: boolean; status?: number; details?: unknown });
 }
 
 export declare class FlueDriverClient {
@@ -306,6 +384,8 @@ export declare class FlueDriverClient {
   readonly input: Record<string, unknown>;
   readonly workspace: string;
   readonly driverRunId: string;
+  /** Run-scoped bearer token in effect ("" = legacy header-quad transport). */
+  readonly runToken: string;
   readonly epics: {
     get(input?: FlueEpicInput): Promise<Record<string, unknown> | null>;
     snapshot(input?: FlueEpicInput): Promise<Record<string, unknown> | null>;
@@ -326,6 +406,11 @@ export declare class FlueDriverClient {
   readonly taskRuns: {
     request(input?: FlueTaskRunRequest): Promise<Record<string, unknown>>;
     get(input?: FlueTaskRunGetInput): Promise<Record<string, unknown> | null>;
+    /**
+     * CLIENT-SIDE POLLING (kept for compat): repeatedly calls taskRuns.get
+     * until the run reaches a terminal status. Prefer epics.watch — the
+     * server-push SSE stream — for reacting to task-run progress.
+     */
     await(input?: FlueTaskRunAwaitInput): Promise<Record<string, unknown> | null>;
     active(input?: FlueTaskRunActiveInput): Promise<Record<string, unknown> | null>;
     recoverStale(input?: FlueTaskRunRecoverStaleInput): Promise<Record<string, unknown> | null>;
@@ -363,6 +448,7 @@ export declare class FlueDriverClient {
   messageAgent(input?: FlueAgentMessageInput): Promise<Record<string, unknown> | null>;
   requestTaskRun(input?: FlueTaskRunRequest): Promise<Record<string, unknown>>;
   getTaskRun(input?: FlueTaskRunGetInput): Promise<Record<string, unknown> | null>;
+  /** Client-side polling loop (see taskRuns.await); epics.watch is the push alternative. */
   awaitTaskRun(input?: FlueTaskRunAwaitInput): Promise<Record<string, unknown> | null>;
   activeTaskRuns(input?: FlueTaskRunActiveInput): Promise<Record<string, unknown> | null>;
   recoverStaleTaskRuns(input?: FlueTaskRunRecoverStaleInput): Promise<Record<string, unknown> | null>;

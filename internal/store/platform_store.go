@@ -18,7 +18,11 @@ type DriverCreate struct {
 	Description     string
 	ActiveVersionID string
 	Status          domain.DriverStatus
-	Metadata        map[string]string
+	// TrustLevel gates sandbox placement (§7 step 9). Stamped by the
+	// registration path server-side, never from client input; empty means
+	// untrusted (fail closed).
+	TrustLevel domain.DriverTrustLevel
+	Metadata   map[string]string
 }
 
 type DriverFilter struct {
@@ -34,7 +38,10 @@ type DriverUpdate struct {
 	Description     *string
 	ActiveVersionID *string
 	Status          *domain.DriverStatus
-	Metadata        *map[string]string
+	// TrustLevel is the explicit ops elevation/demotion path; workflow
+	// runtimes never reach a surface that sets it.
+	TrustLevel *domain.DriverTrustLevel
+	Metadata   *map[string]string
 }
 
 type DriverStore interface {

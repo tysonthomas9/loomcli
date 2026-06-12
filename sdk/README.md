@@ -1,0 +1,196 @@
+# @loom/sdk
+
+Workflow SDK for Loom. Two clients, one package:
+
+- **`@loom/sdk/flue`** — the driver client used *inside* a workflow run. A
+  workflow is an ES module executed under a registered driver bundle; it talks
+  to the Loom serve driver-op HTTP API with a run-scoped token.
+- **`@loom/sdk/runner`** — the task-run client used by runner harnesses
+  (claiming env, logs, artifacts, completion) against fleet-db.
+
+All wire fields are **camelCase**. The frozen v1 surface ships with the
+package as [`api-surface.v1.json`](./api-surface.v1.json) and is enforced by
+contract tests on both sides of the wire.
+
+> **Package name.** The intended name is `@loom/sdk`. If the `@loom` npm scope
+> turns out not to be ours, the decided fallback is
+> **`@browseroperator/loom-sdk`** — same contents, same versioning. Scope
+> ownership must be verified from an authenticated machine before the first
+> publish (see [Publishing](#publishing-maintainers)).
+
+## Install
+
+```sh
+npm install @loom/sdk
+```
+
+Until the package is published, vendor it: `flue.js` is a **single file with
+zero local imports** and can be embedded as-is (this is the path the driver
+bundle scripts use). `runner.js` imports exactly one local file,
+`internal.js`. A test (`package.test.mjs`) pins both facts.
+
+## Quickstart: a workflow
+
+A workflow is an ES module with a default export. The driver executes it under
+a registered bundle; `createLoomClient()` picks up everything it needs from
+the environment the driver injects.
+
+```js
+// my-workflow.mjs
+import { createLoomClient, isWorkflowSuspended } from "@loom/sdk/flue";
+
+export default async function run() {
+  const loom = createLoomClient();
+
+  // Fan out task runs, then push-follow the epic until they settle.
+  await loom.taskRuns.request({ taskId: "task-1" });
+  await loom.taskRuns.request({ taskId: "task-2" });
+
+  for await (const ev of loom.epics.watch({ epicId: loom.input.epicId })) {
+    if (ev.type === "closed") break;
+    if (ev.type === "taskRun") console.error("progress:", ev.data);
+  }
+
+  return loom.completed({ summary: "both tasks settled" });
+}
+```
+
+Durable waits park the run instead of blocking it — let `WorkflowSuspended`
+propagate (or rethrow it) and the platform resumes the run when the event
+arrives:
+
+```js
+try {
+  const res = await loom.events.await({
+    pattern: "pr.merged",
+    instanceKey: pr.url,
+    timeoutMs: 60 * 60 * 1000, // REQUIRED — refused with await_timeout_required otherwise
+  });
+  if (res.status === "timed_out") return loom.needsReview({ summary: "PR never merged" });
+} catch (err) {
+  if (isWorkflowSuspended(err)) throw err; // park; the run resumes here
+  throw err;
+}
+```
+
+Determinism rule: `awaitIndex` derives from **call order**, shared between
+`events.await` and `workflows.await`. On resume your module re-runs from the
+top, so keep await calls in a stable order.
+
+## Authentication
+
+Workflow calls are **token-only**: a run-scoped bearer token minted by serve
+when the run is claimed, injected as `LOOM_RUN_TOKEN`. The client then sends
+`Authorization: Bearer <token>` and **no** `X-Loom-Driver-*` headers. There
+are no ambient credentials — the token is the run's identity.
+
+- **TTL = maximum run duration.** Default 24h; operators tune it with
+  `LOOM_RUN_TOKEN_TTL` (Go duration) on serve. Expiry is the hard runtime
+  ceiling, not the security boundary.
+- **Revocation is fenced-run verification.** Every call re-verifies the run
+  against the live lease, regardless of expiry. A token for a fenced,
+  completed, or superseded run is rejected immediately; the TTL only bounds
+  how long a stolen token for a still-live run could be replayed.
+- **401 `token_expired`** means the run exceeded its maximum duration (or the
+  token outlived the run). It is **never retryable**: do not retry, return a
+  terminal result. A fresh token only exists for a fresh claim.
+- The legacy header-quad (`X-Loom-Driver-Run-Id` / `-Node-Id` / `-Lease-Id` /
+  `-Fencing-Token` + `Authorization`) is retained for CLI/ops tooling only;
+  workflow code should never set it.
+
+Client env (injected by the driver — you normally set none of these):
+
+| Variable | Meaning |
+| --- | --- |
+| `LOOM_RUN_TOKEN` | Run-scoped bearer token (enables token-only auth) |
+| `LOOM_DRIVER_API_URL` | Base URL of the serve driver-op API |
+| `LOOM_DRIVER_WORKSPACE` | Workspace the run belongs to |
+| `LOOM_DRIVER_RUN_ID` | Run id (legacy transport only; implied by the token) |
+
+## Operation reference
+
+Full signatures and JSDoc live in [`flue.d.ts`](./flue.d.ts) — the published
+types are the reference. Namespaced surface of `FlueDriverClient`
+(`createLoomClient()` / `createLoomDriverClient()`):
+
+| Namespace | Operations |
+| --- | --- |
+| `epics` | `get`, `snapshot`, `watch` (SSE push: `snapshot` / `taskRun` / `closed`, resumes via `Last-Event-ID`) |
+| `agents` | `list`, `orchestrationSession`, `updateParent`, `deliverAssignment`, `message` |
+| `tasks` | `claimReady`, `complete`, `release` |
+| `taskRuns` | `request`, `get`, `await` (client-side polling; prefer `epics.watch`), `active`, `recoverStale` |
+| `connectors` | `github.merge` / `github.postReview` (require `expectedHeadSha`), `github.readPullRequest`, `github.listPulls`, `github.compare`, `github.postIssueComment`, `slack.post`, `slack.readConversations`, `datadog.readMonitors`, `datadog.readAlert`, `datadog.declareIncident`, `dispatch` |
+| `events` | `await` (durable; throws `WorkflowSuspended` on park), `list` |
+| `workflows` | `start`, `await` (shares the awaitIndex counter with `events.await`) |
+| results | `completed`, `failed`, `needsReview` — terminal statuses `completed` / `failed` / `needs_review` / `cancelled` |
+
+Flat method aliases (`requestTaskRun`, `watchEpic`, …) exist for older
+workflows; new code should use the namespaces. The runner entry exports
+`TaskRunClient`, `ArtifactHandle`, `RunnerEnv`, `LoomAPIError`.
+
+## Errors and retries
+
+Every non-2xx driver-op response is a `DriverApiError` carrying the frozen
+envelope: `{ code, message, retryable, details? }`. The `code` union is
+published as `DriverApiErrorCode`.
+
+**The SDK ships no automatic retry.** `retryable` is the server's guidance;
+honor it with your own loop:
+
+```js
+import { DriverApiError } from "@loom/sdk/flue";
+
+async function withRetry(fn, attempts = 3) {
+  for (let i = 0; ; i++) {
+    try {
+      return await fn();
+    } catch (err) {
+      if (!(err instanceof DriverApiError) || !err.retryable || i >= attempts - 1) throw err;
+      await new Promise((r) => setTimeout(r, 250 * 2 ** i));
+    }
+  }
+}
+```
+
+| Code | Meaning / guidance |
+| --- | --- |
+| `timeout`, `unavailable`, `rate_limited` | Transient; safe to retry with backoff when `retryable` is true. |
+| `upstream_error` | Connector provider failure; retry only if `retryable`. |
+| `token_expired` | Run exceeded its max duration. **Never retryable** (the client pins this even if a response claims otherwise). Terminal. |
+| `unauthenticated`, `identity_mismatch` | Credentials wrong or not this run's. Terminal; fix the environment. |
+| `not_owner`, `stale_subject`, `conflict`, `invalid_transition` | Lost a race or acting on stale state. Re-read state; do not blind-retry. |
+| `precondition_required` | Irreversible connector action missing its freshness assertion (e.g. `expectedHeadSha`). Thrown synchronously, before egress. |
+| `grant_denied` | Connector grant does not allow this action. Terminal. |
+| `await_timeout_required`, `await_pattern_unscoped`, `await_instance_key_malformed`, `await_actor_forbidden` | Await contract violations. Fix the call. |
+| `driver_run_already_resumed`, `composition_depth_exceeded` | Workflow composition limits. Terminal. |
+| `invalid`, `not_found`, `unknown_op`, `unschedulable`, `canceled`, `internal` | Standard request/state errors; retry only if `retryable`. |
+
+## Versioning and breaking-change policy
+
+Semver, with the wire contract as the compatibility unit:
+
+- **Major**: any change to camelCase wire field names/shapes of a frozen op,
+  the error envelope (`code`/`message`/`retryable`/`details?`) or the meaning
+  of an existing error code, the SSE event types, await/suspend semantics, or
+  removal of an export.
+- **Minor**: new ops, new exported types, new error codes, additive optional
+  fields.
+- **Patch**: fixes that change no wire bytes and no types.
+
+The frozen surface is machine-checked: `api-surface.v1.json` +
+`contract.test.mjs` (client) and `contract_test.go` (server) fail on drift.
+
+## Publishing (maintainers)
+
+Publishing is currently **deferred**. Manual steps, in order:
+
+1. **Verify scope ownership from an authenticated machine** (`npm whoami`,
+   `npm access ls-packages` / org page for `@loom`). Never publish into a
+   squatted scope — fall back to `@browseroperator/loom-sdk` by renaming in
+   `package.json` only.
+2. `npm test` (node tests + typecheck) must be green.
+3. `npm pack --dry-run` — contents must be exactly the golden file list pinned
+   in `package.test.mjs` (the `files` entries + `package.json` and
+   `README.md`, which npm adds itself).
+4. `npm publish` from CI with provenance (`publishConfig.provenance` is set;
+   publishing from a laptop without OIDC will fail by design).

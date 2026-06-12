@@ -947,6 +947,166 @@ test("FlueDriverClient events.list fetches the run's awaits without consuming a 
   });
 });
 
+test("FlueDriverClient sends token-only auth when LOOM_RUN_TOKEN is set", async () => {
+  await withDriverServer(async (call) => {
+    if (call.url === "/api/workspaces/WS/driver/epic-get") {
+      return { id: "EPIC-1", issueType: "epic" };
+    }
+    if (call.url === "/api/workspaces/WS/driver/events/await") {
+      return {
+        status: "satisfied",
+        instanceKey: "run-1#await-" + call.body.awaitIndex,
+        pattern: call.body.pattern,
+        deadline: "2026-06-13T00:00:00Z",
+        event: { id: "evt-1", occurredAt: "2026-06-12T00:00:00Z" },
+      };
+    }
+    return notFound();
+  }, async ({ apiUrl, calls }) => {
+    // The legacy header-quad env AND the static apiToken are deliberately
+    // present: the run token must win and the quad must NOT leak onto the
+    // wire (a conflicting X-Loom-Driver-Run-Id is a server-side 401
+    // identity_mismatch).
+    const client = tokenTestClient(apiUrl);
+    assert.equal(client.runToken, "run-token-jwt");
+
+    await client.epics.get();
+    await client.events.await({ pattern: "p:1", timeoutMs: 1000 });
+
+    assert.equal(calls.length, 2);
+    for (const call of calls) {
+      assert.equal(call.headers.authorization, "Bearer run-token-jwt", call.url);
+      assertNoDriverIdentityHeaders(call.headers, call.url);
+    }
+    assert.deepEqual(calls[1].body, { pattern: "p:1", timeoutMs: 1000, awaitIndex: 1 });
+  });
+});
+
+test("FlueDriverClient token-only auth needs no LOOM_DRIVER_RUN_ID (identity rides the claims)", async () => {
+  await withDriverServer(async (call) => {
+    if (call.url === "/api/workspaces/WS/driver/epic-get") {
+      return { id: "EPIC-1", issueType: "epic" };
+    }
+    return notFound();
+  }, async ({ apiUrl, calls }) => {
+    const client = createLoomDriverClient({
+      input: { epicId: "EPIC-1" },
+      env: {
+        LOOM_DRIVER_WORKSPACE: "WS",
+        LOOM_DRIVER_API_URL: apiUrl,
+        LOOM_RUN_TOKEN: "run-token-jwt",
+      },
+    });
+    assert.equal((await client.epics.get()).issueType, "epic");
+    assert.equal(calls[0].headers.authorization, "Bearer run-token-jwt");
+    assertNoDriverIdentityHeaders(calls[0].headers, calls[0].url);
+
+    // Without either credential source the run id is still required.
+    const legacy = createLoomDriverClient({
+      input: {},
+      env: { LOOM_DRIVER_WORKSPACE: "WS", LOOM_DRIVER_API_URL: apiUrl },
+    });
+    await assert.rejects(() => legacy.epics.get(), /LOOM_DRIVER_RUN_ID is required/);
+  });
+});
+
+test("FlueDriverClient maps 401 token_expired to a non-retryable DriverApiError", async () => {
+  // retryable:true row guards the normalization: an expired run token can
+  // never be retried (the TTL is the max-run-duration cap), whatever a future
+  // server envelope claims.
+  for (const envelopeRetryable of [false, true]) {
+    await withDriverServer(async () => ({
+      statusCode: 401,
+      body: {
+        error: {
+          code: "token_expired",
+          message: "run token expired (max run duration reached)",
+          retryable: envelopeRetryable,
+        },
+      },
+    }), async ({ apiUrl }) => {
+      const client = tokenTestClient(apiUrl);
+      await assert.rejects(() => client.epics.get(), (err) => {
+        assert.ok(err instanceof DriverApiError);
+        assert.equal(err.code, "token_expired");
+        assert.equal(err.retryable, false, `envelope retryable=${envelopeRetryable} must normalize to false`);
+        assert.equal(err.status, 401);
+        assert.equal(err.message, "run token expired (max run duration reached)");
+        return true;
+      });
+    });
+  }
+});
+
+test("FlueDriverClient epics.watch is token-only with LOOM_RUN_TOKEN and treats token_expired as fatal", async () => {
+  await withSSEServer((call, res) => {
+    res.writeHead(200, { "Content-Type": "text/event-stream" });
+    writeSSEFrame(res, "1", "snapshot", { epic: { epicId: "EPIC-1" }, active: null });
+    writeSSEFrame(res, "1", "closed", { code: "parent_not_running" });
+    res.end();
+  }, async ({ apiUrl, calls }) => {
+    const client = tokenTestClient(apiUrl);
+    const events = await collectWatchEvents(client.epics.watch({ epicId: "EPIC-1" }));
+    assert.equal(events.length, 2);
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].headers.authorization, "Bearer run-token-jwt");
+    assertNoDriverIdentityHeaders(calls[0].headers, calls[0].url);
+  });
+
+  // token_expired must throw on the FIRST response — never reconnect-loop —
+  // even when the envelope (wrongly) says retryable.
+  await withSSEServer((call, res) => {
+    res.writeHead(401, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({
+      error: { code: "token_expired", message: "run token expired (max run duration reached)", retryable: true },
+    }));
+  }, async ({ apiUrl, calls }) => {
+    const client = tokenTestClient(apiUrl);
+    await assert.rejects(
+      () => collectWatchEvents(client.epics.watch({ epicId: "EPIC-1", reconnectMs: 1 })),
+      (err) => {
+        assert.ok(err instanceof DriverApiError);
+        assert.equal(err.code, "token_expired");
+        assert.equal(err.retryable, false);
+        assert.equal(err.status, 401);
+        return true;
+      }
+    );
+    assert.equal(calls.length, 1, "expired token must not reconnect");
+  });
+});
+
+// tokenTestClient layers LOOM_RUN_TOKEN over the full legacy env (header quad
+// + static apiToken) so token-only tests prove precedence, not just presence.
+function tokenTestClient(apiUrl) {
+  return createLoomDriverClient({
+    input: { epicId: "EPIC-1" },
+    apiToken: "api-token",
+    env: {
+      LOOM_DRIVER_WORKSPACE: "WS",
+      LOOM_DRIVER_RUN_ID: "run-1",
+      LOOM_DRIVER_NODE_ID: "node-1",
+      LOOM_DRIVER_LEASE_ID: "lease-1",
+      LOOM_DRIVER_FENCING_TOKEN: "7",
+      LOOM_DRIVER_API_URL: apiUrl,
+      LOOM_RUN_TOKEN: "run-token-jwt",
+    },
+  });
+}
+
+// assertNoDriverIdentityHeaders asserts the ABSENCE of every X-Loom-Driver-*
+// header (token-only transport): node:http lowercases incoming header names,
+// so scanning the keys catches any current or future identity header.
+function assertNoDriverIdentityHeaders(headers, context) {
+  for (const name of Object.keys(headers)) {
+    assert.equal(
+      name.startsWith("x-loom-driver-"),
+      false,
+      `token-only request must not carry ${name} (${context})`
+    );
+  }
+}
+
 function watchTestClient(apiUrl) {
   return createLoomDriverClient({
     input: { epicId: "EPIC-1" },

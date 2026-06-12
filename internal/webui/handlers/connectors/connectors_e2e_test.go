@@ -758,6 +758,9 @@ func TestConnectorE2EWorkflowEnvNeverSeesSecrets(t *testing.T) {
 		},
 		BundleRoot: bundleRoot,
 		ServerPath: filepath.Join(bundleRoot, "flue-server.mjs"),
+		// The env seam is under test, not the SB3 trust gate: a trusted
+		// request passes the process launcher.
+		TrustLevel: domain.DriverTrustTrusted,
 	})
 	if err != nil {
 		t.Fatalf("NodeRunner.Run: %v", err)

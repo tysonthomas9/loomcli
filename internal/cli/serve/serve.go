@@ -298,17 +298,12 @@ func startDriverExecutorIfEnabled(ctx context.Context, st store.Store) {
 		slog.Error("driver executor disabled: cannot resolve work dir", "err", err)
 		return
 	}
-	executor := &driverexecutor.Executor{
-		Store:        st,
-		WorkspaceKey: os.Getenv(bootstrap.EnvWorkspace),
-		WorkDir:      workDir,
-		NodeID:       os.Getenv("LOOM_DRIVER_EXECUTOR_NODE_ID"),
-		APIBaseURL:   driverAPIBaseURL(),
-		APIToken:     driverAPIToken(),
+	executor, ok := buildDriverExecutor(st, workDir)
+	if !ok {
+		return
 	}
 	taskWorkerConcurrency := driverTaskWorkerConcurrency()
 	taskRunMaxAttempts := driverTaskRunMaxAttempts()
-	slog.Info("Driver executor enabled", "workspace", executor.WorkspaceKey, "work_dir", workDir, "task_worker_concurrency", taskWorkerConcurrency, "task_run_max_attempts", taskRunMaxAttempts)
 	taskWorker := &driverexecutor.TaskWorker{
 		Store:        st,
 		WorkspaceKey: executor.WorkspaceKey,
@@ -316,6 +311,7 @@ func startDriverExecutorIfEnabled(ctx context.Context, st store.Store) {
 		NodeID:       executor.NodeID,
 		RunnerID:     os.Getenv("LOOM_DRIVER_TASK_WORKER_RUNNER_ID"),
 		MaxAttempts:  taskRunMaxAttempts,
+		APIBaseURL:   driverAPIBaseURL(),
 	}
 	go func() {
 		ticker := time.NewTicker(2 * time.Second)
@@ -338,6 +334,42 @@ func startDriverExecutorIfEnabled(ctx context.Context, st store.Store) {
 		}
 	}()
 	startDriverTaskWorkers(ctx, taskWorker, taskWorkerConcurrency)
+}
+
+// buildDriverExecutor assembles serve's DriverRun executor, resolving the
+// workflow sandbox launcher (SB2): LOOM_DRIVER_SANDBOX=container runs
+// workflow bundles in rootless containers; the default stays the local
+// node-process launcher. An invalid sandbox configuration disables the
+// executor (fail closed) rather than silently degrading isolation.
+func buildDriverExecutor(st store.Store, workDir string) (*driverexecutor.Executor, bool) {
+	sandboxLauncher, err := driverexecutor.ResolveSandboxLauncher()
+	if err != nil {
+		slog.Error("driver executor disabled: invalid sandbox configuration", "err", err)
+		return nil, false
+	}
+	sandboxMode := driverexecutor.SandboxModeProcess
+	sandboxEgress := "host"
+	if sandboxLauncher != nil {
+		sandboxMode = driverexecutor.SandboxModeContainer
+		// SB4: empty resolves per run trust level (trusted all, else serve-only).
+		if sandboxEgress = os.Getenv(driverexecutor.SandboxEgressEnvVar); sandboxEgress == "" {
+			sandboxEgress = "per-trust-default"
+		}
+	}
+	executor := &driverexecutor.Executor{
+		Store:           st,
+		WorkspaceKey:    os.Getenv(bootstrap.EnvWorkspace),
+		WorkDir:         workDir,
+		NodeID:          os.Getenv("LOOM_DRIVER_EXECUTOR_NODE_ID"),
+		APIBaseURL:      driverAPIBaseURL(),
+		APIToken:        driverAPIToken(),
+		RunTokenKey:     driverRunTokenKey(),
+		SandboxLauncher: sandboxLauncher,
+	}
+	slog.Info("Driver executor enabled", "workspace", executor.WorkspaceKey, "work_dir", workDir, "sandbox", sandboxMode,
+		"sandbox_egress", sandboxEgress,
+		"task_worker_concurrency", driverTaskWorkerConcurrency(), "task_run_max_attempts", driverTaskRunMaxAttempts())
+	return executor, true
 }
 
 // startStaleTaskSweeper launches the always-on server-side stale TaskRun
@@ -591,6 +623,20 @@ func driverAPIToken() string {
 	return os.Getenv("LOOM_DRIVER_API_TOKEN")
 }
 
+// driverRunTokenKey resolves the HS256 signing key for run-scoped driver-op
+// tokens (LOOM_RUN_TOKEN_SIGNING_KEY, with an ephemeral per-process fallback
+// for single-instance deployments). A malformed env key logs and disables the
+// run-token auth path — legacy header-quad auth keeps working — rather than
+// aborting serve.
+func driverRunTokenKey() []byte {
+	key, err := driverexecutor.ResolveRunTokenSigningKey()
+	if err != nil {
+		slog.Error("driver run-token auth disabled: resolve signing key", "err", err)
+		return nil
+	}
+	return key
+}
+
 func driverExecutorEnabled() bool {
 	switch strings.ToLower(strings.TrimSpace(os.Getenv(envLoomDriverExecutor))) {
 	case "0", "false", "off", "no":
@@ -756,6 +802,8 @@ func buildServerConfig(monitorHandlers webui.MonitorHandlers, fs fleetState, sto
 			fs = withStoreFleetURL(fs, url)
 		}
 		cfg.DriverAPIToken = driverAPIToken()
+		cfg.DriverAPIBaseURL = driverAPIBaseURL()
+		cfg.DriverRunTokenKey = driverRunTokenKey()
 	}
 	applyFleetConfig(&cfg, fs)
 	applyWorkspaceConfig(&cfg)

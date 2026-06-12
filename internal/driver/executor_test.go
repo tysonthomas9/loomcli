@@ -356,6 +356,7 @@ func TestNodeRunnerFailsWhenRuntimeReturnsNoResult(t *testing.T) {
 		BundleRoot: root,
 		ServerPath: filepath.Join(root, "dist", "server.mjs"),
 		Manifest:   map[string]string{"workflow_name": "epic-runner"},
+		TrustLevel: domain.DriverTrustTrusted,
 	})
 	if err != nil {
 		t.Fatalf("NodeRunner.Run: %v", err)
@@ -379,6 +380,7 @@ func TestNodeRunnerFailsWhenWorkflowResultIsMissingTerminalStatus(t *testing.T) 
 		BundleRoot: root,
 		ServerPath: filepath.Join(root, "dist", "server.mjs"),
 		Manifest:   map[string]string{"workflow_name": "epic-runner"},
+		TrustLevel: domain.DriverTrustTrusted,
 	})
 	if err != nil {
 		t.Fatalf("NodeRunner.Run: %v", err)
@@ -447,6 +449,7 @@ if (process.send) {
 			BundleRoot: root,
 			ServerPath: filepath.Join(dist, "server.mjs"),
 			Manifest:   map[string]string{"workflow_name": "epic-runner"},
+			TrustLevel: domain.DriverTrustTrusted,
 		})
 		done <- struct {
 			result RunResult
@@ -469,13 +472,14 @@ if (process.send) {
 	waitForFile(t, cancelledPath)
 }
 
-func TestNodeRunnerBuiltFlueServerReceivesOnlyScopedFleetDBHandoff(t *testing.T) {
+func TestNodeRunnerBuiltFlueServerReceivesNoFleetDBHandoff(t *testing.T) {
 	if _, err := exec.LookPath("node"); err != nil {
 		t.Skipf("node not available: %v", err)
 	}
 	t.Setenv("LOOM_FLEET_DB_URL", "https://fleet.invalid")
 	t.Setenv("LOOM_FLEET_DB_API_KEY", "broad-secret")
 	t.Setenv("LOOM_FLEET_DB_ACTOR", "broad-actor")
+	t.Setenv("LOOM_DRIVER_FLEET_DB_URL", "https://driver-fleet.invalid")
 	t.Setenv("LOOM_DRIVER_FLEET_DB_API_KEY", "scoped-secret")
 	t.Setenv("LOOM_DRIVER_FLEET_DB_ACTOR", "driver-run:run-1")
 	t.Setenv("LOOM_CONFIG_DIR", "/tmp/loom-config")
@@ -492,21 +496,22 @@ func TestNodeRunnerBuiltFlueServerReceivesOnlyScopedFleetDBHandoff(t *testing.T)
 const leaked = [
   'LOOM_FLEET_DB_URL',
   'LOOM_FLEET_DB_API_KEY',
+  'LOOM_FLEET_DB_ACTOR',
+  'LOOM_DRIVER_FLEET_DB_URL',
+  'LOOM_DRIVER_FLEET_DB_API_KEY',
+  'LOOM_DRIVER_FLEET_DB_ACTOR',
   'LOOM_TASK_RUN_LEASE_TOKEN',
   'OPENAI_API_KEY',
   'AWS_SECRET_ACCESS_KEY',
   'GITHUB_TOKEN',
 ].filter((key) => process.env[key]);
-const handoffOk = process.env.LOOM_DRIVER_FLEET_DB_URL === 'https://fleet.invalid'
-  && process.env.LOOM_DRIVER_FLEET_DB_API_KEY === 'scoped-secret'
-  && process.env.LOOM_DRIVER_FLEET_DB_ACTOR === 'driver-run:run-1'
-  && process.env.LOOM_CONFIG_DIR === '/tmp/loom-config';
+const baseEnvOk = process.env.LOOM_CONFIG_DIR === '/tmp/loom-config';
 if (process.send) {
   process.send({ version: 1, type: 'ready', target: 'workflow', name: process.env.FLUE_CLI_NAME || 'epic-runner' });
   process.on('message', (message) => {
-    const result = leaked.length || !handoffOk
-      ? { status: 'failed', summary: 'bad handoff leaked=' + leaked.join(',') + ' handoffOk=' + handoffOk, errorClass: 'env_leak' }
-      : { status: 'completed', summary: 'handoff ok' };
+    const result = leaked.length || !baseEnvOk
+      ? { status: 'failed', summary: 'bad env leaked=' + leaked.join(',') + ' baseEnvOk=' + baseEnvOk, errorClass: 'env_leak' }
+      : { status: 'completed', summary: 'handoff dropped' };
     process.send({ version: 1, type: 'result', requestId: message.requestId, result }, () => process.exit(0));
   });
 }
@@ -529,12 +534,13 @@ if (process.send) {
 		BundleRoot: root,
 		ServerPath: filepath.Join(dist, "server.mjs"),
 		Manifest:   map[string]string{"workflow_name": "epic-runner"},
+		TrustLevel: domain.DriverTrustTrusted,
 	})
 	if err != nil {
 		t.Fatalf("NodeRunner.Run: %v", err)
 	}
-	if result.Status != domain.DriverRunCompleted || result.Summary != "handoff ok" {
-		t.Fatalf("result = %+v, want completed handoff ok", result)
+	if result.Status != domain.DriverRunCompleted || result.Summary != "handoff dropped" {
+		t.Fatalf("result = %+v, want completed handoff dropped", result)
 	}
 }
 

@@ -2,6 +2,7 @@
 package driver
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -93,6 +94,11 @@ func TestRealFlueBuildAndBuiltServerSmoke(t *testing.T) {
 // completes-and-closes (or parks) the task server-side, and appends the
 // terminal journal event the watch stream delivers; the workflow's follow-up
 // complete-task gets the worker-conflict the real server would return.
+//
+// The smoke runs under the §9.5 locked-down token-only env (TK5): the legacy
+// auth fallback is switched off, a run-scoped token is minted for the claimed
+// lease, and the fake rejects any request that presents legacy
+// X-Loom-Driver-* identity headers or a bad bearer token.
 func TestRealFlueBuiltinEpicRunnerWatchLoopSmoke(t *testing.T) {
 	if os.Getenv("LOOM_REAL_FLUE_TEST") != "1" {
 		t.Skip("set LOOM_REAL_FLUE_TEST=1 to run the real Flue CLI smoke")
@@ -102,6 +108,8 @@ func TestRealFlueBuiltinEpicRunnerWatchLoopSmoke(t *testing.T) {
 	}
 	flueCommand := realFlueCommandForTest(t)
 	nodePath := nodePathForTest(t)
+	t.Setenv(LegacyDriverAuthEnvVar, "0")
+	runTokenKey := bytes.Repeat([]byte{0x42}, 32)
 
 	ctx := context.Background()
 	root := t.TempDir()
@@ -192,6 +200,17 @@ func TestRealFlueBuiltinEpicRunnerWatchLoopSmoke(t *testing.T) {
 			if err != nil {
 				t.Fatalf("loadRunRequest: %v", err)
 			}
+			req.RunToken, err = MintRunToken(RunTokenClaims{
+				WorkspaceKey: claimed.WorkspaceKey,
+				RunID:        claimed.RunID,
+				NodeID:       claimed.NodeID,
+				LeaseID:      claimed.LeaseID,
+				FencingToken: claimed.FencingToken,
+			}, runTokenKey, time.Hour)
+			if err != nil {
+				t.Fatalf("MintRunToken: %v", err)
+			}
+			fake.requireRunToken(runTokenKey, claimed.RunID)
 
 			runCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 			defer cancel()
@@ -233,6 +252,9 @@ func TestRealFlueBuiltinEpicRunnerWatchLoopSmoke(t *testing.T) {
 			if tc.failTask != "" && fake.taskStatus(tc.failTask) != "parked" {
 				t.Fatalf("task %s status = %q, want parked", tc.failTask, fake.taskStatus(tc.failTask))
 			}
+			if violations := fake.authViolations(); len(violations) != 0 {
+				t.Fatalf("token-only auth violations: %v", violations)
+			}
 		})
 	}
 }
@@ -266,6 +288,12 @@ type fakeEpicAPI struct {
 	events    []fakeEpicEvent
 	executed  []string
 	completes []fakeCompleteCall
+	// tokenKey, when set, makes the fake enforce the TK5 token-only
+	// transport: every request must carry a parseable run-scoped bearer for
+	// wantRunID and no legacy X-Loom-Driver-* identity headers.
+	tokenKey   []byte
+	wantRunID  string
+	violations []string
 }
 
 type fakeEpicTask struct {
@@ -322,7 +350,72 @@ func (f *fakeEpicAPI) debugState() string {
 	return string(encoded)
 }
 
+// requireRunToken switches the fake into token-only enforcement for one run.
+func (f *fakeEpicAPI) requireRunToken(key []byte, runID string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.tokenKey = append([]byte(nil), key...)
+	f.wantRunID = runID
+	f.violations = nil
+}
+
+func (f *fakeEpicAPI) authViolations() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string(nil), f.violations...)
+}
+
+func (f *fakeEpicAPI) recordViolation(r *http.Request, detail string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.violations = append(f.violations, r.Method+" "+r.URL.Path+": "+detail)
+}
+
+// verifyTokenOnlyAuth mirrors the serve-side TK2 contract: a token-only call
+// presents Authorization: Bearer <run token> and nothing else — any legacy
+// X-Loom-Driver-* identity header alongside it is an identity violation.
+func (f *fakeEpicAPI) verifyTokenOnlyAuth(r *http.Request) {
+	for name := range r.Header {
+		if strings.HasPrefix(strings.ToLower(name), "x-loom-driver-") {
+			f.recordViolation(r, "legacy identity header "+name+" present under token-only transport")
+		}
+	}
+	claims, err := f.bearerRunClaims(r)
+	if err != nil {
+		f.recordViolation(r, err.Error())
+		return
+	}
+	if claims.RunID != f.wantRunID {
+		f.recordViolation(r, "token run id "+claims.RunID+", want "+f.wantRunID)
+	}
+}
+
+func (f *fakeEpicAPI) bearerRunClaims(r *http.Request) (*RunTokenClaims, error) {
+	auth := strings.TrimSpace(r.Header.Get("Authorization"))
+	token, ok := strings.CutPrefix(auth, "Bearer ")
+	if !ok || strings.TrimSpace(token) == "" {
+		return nil, fmt.Errorf("missing run token bearer (Authorization=%q)", auth)
+	}
+	return ParseRunToken(strings.TrimSpace(token), f.tokenKey)
+}
+
+// driverRunID resolves the calling run's identity: from the run token claims
+// under token-only enforcement, from the legacy identity header otherwise.
+func (f *fakeEpicAPI) driverRunID(r *http.Request) string {
+	if len(f.tokenKey) == 0 {
+		return r.Header.Get("X-Loom-Driver-Run-Id")
+	}
+	claims, err := f.bearerRunClaims(r)
+	if err != nil {
+		return ""
+	}
+	return claims.RunID
+}
+
 func (f *fakeEpicAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if len(f.tokenKey) > 0 {
+		f.verifyTokenOnlyAuth(r)
+	}
 	if r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/driver/watch/epic") {
 		f.handleWatch(w, r)
 		return
@@ -346,7 +439,7 @@ func (f *fakeEpicAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case "epic-snapshot":
 		writeFakeJSON(w, f.snapshot())
 	case "active-task-runs":
-		writeFakeJSON(w, map[string]any{"driverRunId": r.Header.Get("X-Loom-Driver-Run-Id"), "activeCount": 0})
+		writeFakeJSON(w, map[string]any{"driverRunId": f.driverRunID(r), "activeCount": 0})
 	default:
 		writeFakeError(w, http.StatusNotFound, "unknown_op", "unknown driver op "+op)
 	}
@@ -381,7 +474,7 @@ func (f *fakeEpicAPI) depsClosedLocked(task *fakeEpicTask) bool {
 func (f *fakeEpicAPI) execTask(r *http.Request, params map[string]any) any {
 	taskID := stringParam(params, "taskId")
 	taskRunID := stringParam(params, "taskRunId")
-	driverRunID := r.Header.Get("X-Loom-Driver-Run-Id")
+	driverRunID := f.driverRunID(r)
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.executed = append(f.executed, taskID)

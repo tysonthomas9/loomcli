@@ -1,14 +1,12 @@
 package driver
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -32,6 +30,16 @@ type RunRequest struct {
 	WorkflowPath string
 	ServerPath   string
 	Manifest     map[string]string
+	// RunToken is the run-scoped bearer token minted at claim time, bound to
+	// this run's lease + fencing token, and exported to the workflow runtime
+	// as LOOM_RUN_TOKEN. Empty when minting is disabled (no RunTokenKey).
+	// Carried on the request — not the runner — so every launcher behind the
+	// SB1 sandbox seam injects it the same way.
+	RunToken string
+	// TrustLevel is the run's driver trust level, loaded server-side by
+	// loadRunRequest (SB3 placement policy). Anything but trusted — including
+	// empty/unknown — refuses non-isolating launchers (sandbox_required).
+	TrustLevel domain.DriverTrustLevel
 }
 
 type RunResult struct {
@@ -54,6 +62,21 @@ type Executor struct {
 	// runtimes via the default NodeRunner (LOOM_DRIVER_API_URL/_TOKEN).
 	APIBaseURL string
 	APIToken   string
+	// RunTokenKey, when set, is the HS256 signing key used to mint the
+	// run-scoped bearer token injected into the workflow runtime as
+	// LOOM_RUN_TOKEN at claim time. Nil disables minting and keeps the
+	// legacy LOOM_DRIVER_API_TOKEN + identity-quad env authenticating (no
+	// flag-day). Token-carrying runs drop that legacy env once the
+	// deprecated LegacyDriverAuthEnvVar fallback is switched off. Must be
+	// the same key the serve driver-op API verifies with
+	// (ResolveRunTokenSigningKey: one key per process).
+	RunTokenKey []byte
+	// SandboxLauncher, when set, launches workflow runtimes through the SB1
+	// sandbox seam — e.g. the rootless container launcher selected by
+	// LOOM_DRIVER_SANDBOX=container in serve (ResolveSandboxLauncher). Nil
+	// keeps the default local node-process launcher. Ignored when Runner is
+	// set explicitly.
+	SandboxLauncher SandboxLauncher
 	// InternalEvents, when set, is the shared C14 loopback the run.finished
 	// lifecycle emission rides (AW6) — sharing keeps the hop-depth ledger
 	// warm across emissions. Nil is fine: emission falls back to a
@@ -114,12 +137,13 @@ func (e *Executor) RunOnce(ctx context.Context) (*ExecutionResult, error) {
 func (e *Executor) runClaimed(ctx context.Context, workDir string, claimed *domain.DriverRun) RunResult {
 	runner := e.Runner
 	if runner == nil {
-		runner = NodeRunner{APIBaseURL: e.APIBaseURL, APIToken: e.APIToken}
+		runner = NodeRunner{APIBaseURL: e.APIBaseURL, APIToken: e.APIToken, Launcher: e.SandboxLauncher}
 	}
 	req, err := loadRunRequest(ctx, workDir, claimed, e.Store)
 	if err != nil {
 		return RunResult{Status: domain.DriverRunFailed, Summary: err.Error(), ErrorClass: "bundle_verification"}
 	}
+	req.RunToken = e.mintRunToken(ctx, claimed)
 	runResult, runErr := runner.Run(ctx, req)
 	if runErr != nil && ctx.Err() != nil {
 		// The runner context was cancelled under it (cooperative cancel
@@ -132,6 +156,40 @@ func (e *Executor) runClaimed(ctx context.Context, workDir string, claimed *doma
 		runResult = requireExplicitTerminalRunResult(runResult)
 	}
 	return runResult
+}
+
+// mintRunToken mints the run-scoped bearer token for a freshly claimed run
+// (§4: minted at claim time), binding the claim's lease + fencing token into
+// the claims so fenced run verification doubles as revocation: a superseded
+// lease rejects the token regardless of expiry. TTL = maximum run duration
+// (LOOM_RUN_TOKEN_TTL, default 24h) per the locked step-9 decision — expiry
+// is the hard run-duration cap, not the lease window. Failures degrade to ""
+// with a warning rather than failing the claimed run: a token-less run keeps
+// the legacy LOOM_DRIVER_API_TOKEN + identity-quad env, which still
+// authenticates.
+func (e *Executor) mintRunToken(ctx context.Context, claimed *domain.DriverRun) string {
+	if len(e.RunTokenKey) == 0 || claimed == nil {
+		return ""
+	}
+	ttl, err := RunTokenTTL()
+	if err != nil {
+		slog.WarnContext(ctx, "driver run token TTL env invalid; using default",
+			"default", DefaultRunTokenTTL, "err", err)
+		ttl = DefaultRunTokenTTL
+	}
+	token, err := MintRunToken(RunTokenClaims{
+		WorkspaceKey: claimed.WorkspaceKey,
+		RunID:        claimed.RunID,
+		NodeID:       claimed.NodeID,
+		LeaseID:      claimed.LeaseID,
+		FencingToken: claimed.FencingToken,
+	}, e.RunTokenKey, ttl)
+	if err != nil {
+		slog.WarnContext(ctx, "mint driver run token failed; runtime falls back to legacy driver API auth",
+			"runID", claimed.RunID, "err", err)
+		return ""
+	}
+	return token
 }
 
 func (e *Executor) RecoverStaleOnce(ctx context.Context) (*store.StaleDriverRunRecoveryResult, error) {
@@ -508,32 +566,13 @@ func loadRunRequest(ctx context.Context, workDir string, run *domain.DriverRun, 
 	if err != nil {
 		return RunRequest{}, err
 	}
-	manifestPath := filepath.Join(bundleRoot, "manifest.json")
-	manifestBytes, err := os.ReadFile(manifestPath) //nolint:gosec // path is constrained under workDir by safeBundleRoot.
-	if err != nil {
-		return RunRequest{}, fmt.Errorf("read bundle manifest: %w", err)
-	}
-	manifest := map[string]string{}
-	if err := json.Unmarshal(manifestBytes, &manifest); err != nil {
-		return RunRequest{}, fmt.Errorf("decode bundle manifest: %w", err)
-	}
-	serverRef := manifest["server_ref"]
-	if serverRef == "" {
-		return RunRequest{}, fmt.Errorf("native Flue bundle manifest missing server_ref: %w", domain.ErrInvalid)
-	}
-	serverPath, err := safeBundleFile(bundleRoot, serverRef)
+	manifest, serverPath, err := verifyBundleManifest(bundleRoot, version.BundleDigest)
 	if err != nil {
 		return RunRequest{}, err
 	}
-	if info, err := os.Stat(serverPath); err != nil {
-		return RunRequest{}, fmt.Errorf("stat built Flue server: %w", err)
-	} else if info.IsDir() {
-		return RunRequest{}, fmt.Errorf("built Flue server %q is a directory: %w", serverRef, domain.ErrInvalid)
-	}
-	if got, err := digestBundleTree(bundleRoot, manifestBytes); err != nil {
+	trust, err := driverTrustLevel(ctx, s, run)
+	if err != nil {
 		return RunRequest{}, err
-	} else if got != version.BundleDigest {
-		return RunRequest{}, fmt.Errorf("bundle digest mismatch: got %s want %s: %w", got, version.BundleDigest, domain.ErrInvalid)
 	}
 	return RunRequest{
 		Run:        run,
@@ -541,7 +580,42 @@ func loadRunRequest(ctx context.Context, workDir string, run *domain.DriverRun, 
 		BundleRoot: bundleRoot,
 		ServerPath: serverPath,
 		Manifest:   manifest,
+		TrustLevel: trust,
 	}, nil
+}
+
+// verifyBundleManifest reads the staged bundle's manifest, resolves the built
+// Flue server path inside the bundle, and checks the bundle tree digest
+// against the pinned version digest.
+func verifyBundleManifest(bundleRoot, wantDigest string) (map[string]string, string, error) {
+	manifestPath := filepath.Join(bundleRoot, "manifest.json")
+	manifestBytes, err := os.ReadFile(manifestPath) //nolint:gosec // path is constrained under workDir by safeBundleRoot.
+	if err != nil {
+		return nil, "", fmt.Errorf("read bundle manifest: %w", err)
+	}
+	manifest := map[string]string{}
+	if err := json.Unmarshal(manifestBytes, &manifest); err != nil {
+		return nil, "", fmt.Errorf("decode bundle manifest: %w", err)
+	}
+	serverRef := manifest["server_ref"]
+	if serverRef == "" {
+		return nil, "", fmt.Errorf("native Flue bundle manifest missing server_ref: %w", domain.ErrInvalid)
+	}
+	serverPath, err := safeBundleFile(bundleRoot, serverRef)
+	if err != nil {
+		return nil, "", err
+	}
+	if info, err := os.Stat(serverPath); err != nil {
+		return nil, "", fmt.Errorf("stat built Flue server: %w", err)
+	} else if info.IsDir() {
+		return nil, "", fmt.Errorf("built Flue server %q is a directory: %w", serverRef, domain.ErrInvalid)
+	}
+	if got, err := digestBundleTree(bundleRoot, manifestBytes); err != nil {
+		return nil, "", err
+	} else if got != wantDigest {
+		return nil, "", fmt.Errorf("bundle digest mismatch: got %s want %s: %w", got, wantDigest, domain.ErrInvalid)
+	}
+	return manifest, serverPath, nil
 }
 
 func safeBundleRoot(workDir, bundleRef string) (string, error) {
@@ -574,6 +648,47 @@ func safeBundleFile(bundleRoot, ref string) (string, error) {
 	return path, nil
 }
 
+// LegacyDriverAuthEnvVar names the env switch that keeps the deprecated
+// static-bearer auth surface flowing to workflow runtimes that already
+// receive a run-scoped token: LOOM_DRIVER_API_TOKEN (node-wide shared bearer,
+// cross-run authority) plus the LOOM_DRIVER_LEASE_ID/LOOM_DRIVER_FENCING_TOKEN
+// identity vars used by header-quad auth. While enabled, workflow bundles
+// built against the pre-token SDK keep authenticating; bundles on the
+// token-aware SDK ignore the legacy vars and go token-only.
+//
+// Deprecated — removal path (§9.5 workflow env lockdown):
+//  1. This release: default ON, so loom-dev keeps working at deploy. Rebuild
+//     workflow bundles against the token-aware SDK, then set
+//     LOOM_DRIVER_LEGACY_AUTH_ENV=0 on serve to lock the env down.
+//  2. Next release: the default flips OFF (=1 stays as break-glass).
+//  3. The release after: the switch and the legacy export are removed.
+//
+// Runs without a minted token (no RunTokenKey, e.g. CLI/ops executors) always
+// get the legacy env regardless of this switch — no flag-day.
+const LegacyDriverAuthEnvVar = "LOOM_DRIVER_LEGACY_AUTH_ENV"
+
+// legacyDriverAuthEnv reports whether this run's workflow env carries the
+// legacy static-bearer auth surface. Token-less runs always do (it is their
+// only auth); token-carrying runs only while the deprecated
+// LegacyDriverAuthEnvVar fallback stays enabled.
+func legacyDriverAuthEnv(req RunRequest) bool {
+	if strings.TrimSpace(req.RunToken) == "" {
+		return true
+	}
+	return legacyDriverAuthEnvEnabled(os.Getenv(LegacyDriverAuthEnvVar))
+}
+
+// legacyDriverAuthEnvEnabled parses the switch value: default ON for one
+// release; only an explicit false-y value locks the env down.
+func legacyDriverAuthEnvEnabled(raw string) bool {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "0", "false", "off", "no":
+		return false
+	default:
+		return true
+	}
+}
+
 type NodeRunner struct {
 	NodePath        string
 	ExecTaskCommand []string
@@ -582,8 +697,15 @@ type NodeRunner struct {
 	// loom serve instead of spawning CLI subprocesses.
 	APIBaseURL string
 	// APIToken is the shared driver API bearer token forwarded as
-	// LOOM_DRIVER_API_TOKEN when APIBaseURL is set.
+	// LOOM_DRIVER_API_TOKEN when APIBaseURL is set — but only to runs on the
+	// legacy auth surface (no run token, or the deprecated
+	// LegacyDriverAuthEnvVar fallback still on). Token-carrying runs are
+	// token-only: the static bearer never reaches their workflow env.
 	APIToken string
+	// Launcher launches the workflow-bundle runtime (SB1 sandbox seam).
+	// Nil means the default local node-process launcher — today's
+	// flue-local behavior, unchanged.
+	Launcher SandboxLauncher
 }
 
 func (r NodeRunner) Run(ctx context.Context, req RunRequest) (RunResult, error) {
@@ -605,62 +727,92 @@ func (r NodeRunner) Run(ctx context.Context, req RunRequest) (RunResult, error) 
 }
 
 func (r NodeRunner) runBuiltFlueServer(ctx context.Context, req RunRequest, node string, input []byte) (RunResult, error) {
-	launcherPath, cleanupLauncher, err := writeFlueRuntimeLauncher()
+	env, err := r.runtimeEnv(req, input)
 	if err != nil {
 		return RunResult{}, err
 	}
-	defer cleanupLauncher()
-	execTaskCommand, err := r.execTaskCommand()
+	launcher := r.Launcher
+	if launcher == nil {
+		launcher = processLauncher{NodePath: node}
+	}
+	// SB3 trust placement policy: an untrusted bundle never launches outside
+	// an isolating sandbox — the run fails sandbox_required with no process
+	// spawned, never a silent fallback.
+	if refusal, refused := refuseUntrustedPlacement(req, launcher); refused {
+		return refusal, nil
+	}
+	process, err := launcher.Launch(ctx, LaunchSpec{
+		BundleRoot: req.BundleRoot,
+		ServerPath: req.ServerPath,
+		WorkDir:    req.BundleRoot,
+		Env:        env,
+		Manifest:   req.Manifest,
+		TrustLevel: req.TrustLevel,
+	})
 	if err != nil {
 		return RunResult{}, err
+	}
+	exit, waitErr := process.Wait()
+	result := flueRuntimeResult(ctx, req, exit.Stdout, exit.Stderr, waitErr)
+	recordSandboxPlacement(&result, process.Placement())
+	recordTrustPlacementDecision(&result, req.TrustLevel, launcherPlacementProvider(launcher))
+	return result, nil
+}
+
+// runtimeEnv assembles the complete workflow runtime environment: the
+// identity/auth env from flueRuntimeEnv plus the driver-op API endpoint. The
+// node-wide static bearer is cross-run authority, so token-carrying runs drop
+// it (workflow calls are token-only per the step-9 locked decision) unless
+// the deprecated LegacyDriverAuthEnvVar fallback is still on.
+func (r NodeRunner) runtimeEnv(req RunRequest, input []byte) ([]string, error) {
+	execTaskCommand, err := r.execTaskCommand()
+	if err != nil {
+		return nil, err
 	}
 	env, err := flueRuntimeEnv(req, input, execTaskCommand)
 	if err != nil {
-		return RunResult{}, err
+		return nil, err
 	}
-	if apiBaseURL := strings.TrimSpace(r.APIBaseURL); apiBaseURL != "" {
-		env = append(env, "LOOM_DRIVER_API_URL="+apiBaseURL)
-		if apiToken := strings.TrimSpace(r.APIToken); apiToken != "" {
-			env = append(env, "LOOM_DRIVER_API_TOKEN="+apiToken)
-		}
+	apiBaseURL := strings.TrimSpace(r.APIBaseURL)
+	if apiBaseURL == "" {
+		return env, nil
 	}
-	cmd := flueRuntimeCommand(ctx, node, launcherPath, req.BundleRoot, env)
-	stdout, stderr, err := runFlueRuntimeCommand(cmd)
-	return flueRuntimeResult(ctx, req, stdout, stderr, err), nil
-}
-
-func writeFlueRuntimeLauncher() (string, func(), error) {
-	launcher, err := os.CreateTemp("", "loom-flue-runtime-*.mjs")
-	if err != nil {
-		return "", nil, fmt.Errorf("create Flue runtime launcher: %w", err)
+	env = append(env, "LOOM_DRIVER_API_URL="+apiBaseURL)
+	if apiToken := strings.TrimSpace(r.APIToken); apiToken != "" && legacyDriverAuthEnv(req) {
+		env = append(env, "LOOM_DRIVER_API_TOKEN="+apiToken)
 	}
-	cleanup := func() { _ = os.Remove(launcher.Name()) }
-	if _, err := launcher.WriteString(flueLocalLauncher); err != nil {
-		_ = launcher.Close()
-		cleanup()
-		return "", nil, fmt.Errorf("write Flue runtime launcher: %w", err)
-	}
-	if err := launcher.Close(); err != nil {
-		cleanup()
-		return "", nil, fmt.Errorf("close Flue runtime launcher: %w", err)
-	}
-	return launcher.Name(), cleanup, nil
+	return env, nil
 }
 
 func flueRuntimeEnv(req RunRequest, input []byte, execTaskCommand []string) ([]string, error) {
-	parentEnv := os.Environ()
-	env := append(driverRuntimeBaseEnv(parentEnv), driverRuntimeFleetDBHandoffEnv(parentEnv)...)
+	env := driverRuntimeBaseEnv(os.Environ())
 	env = append(env,
 		"LOOM_DRIVER_WORKSPACE="+req.Run.WorkspaceKey,
 		"LOOM_DRIVER_RUN_ID="+req.Run.RunID,
 		"LOOM_DRIVER_NODE_ID="+req.Run.NodeID,
-		"LOOM_DRIVER_LEASE_ID="+req.Run.LeaseID,
-		fmt.Sprintf("LOOM_DRIVER_FENCING_TOKEN=%d", req.Run.FencingToken),
+	)
+	// Lease identity doubles as auth material under header-quad auth, so a
+	// token-carrying run keeps it out of the workflow env (§9.5 lockdown:
+	// blast radius = one run x one lease TTL) unless the deprecated
+	// LegacyDriverAuthEnvVar fallback is still on.
+	if legacyDriverAuthEnv(req) {
+		env = append(env,
+			"LOOM_DRIVER_LEASE_ID="+req.Run.LeaseID,
+			fmt.Sprintf("LOOM_DRIVER_FENCING_TOKEN=%d", req.Run.FencingToken),
+		)
+	}
+	env = append(env,
 		"LOOM_FLUE_SERVER_PATH="+req.ServerPath,
 		"LOOM_FLUE_BUNDLE_ROOT="+req.BundleRoot,
 		"LOOM_FLUE_WORKFLOW_NAME="+workflowName(req),
 		"LOOM_FLUE_INVOKE_PAYLOAD="+string(input),
 	)
+	// Run-scoped bearer token (LOOM_RUN_TOKEN), minted at claim time. The
+	// parent-env filter strips any inherited *TOKEN* variable, so the only
+	// token a workflow process ever sees is the one minted for its own run.
+	if token := strings.TrimSpace(req.RunToken); token != "" {
+		env = append(env, "LOOM_RUN_TOKEN="+token)
+	}
 	if len(execTaskCommand) > 0 {
 		encoded, err := json.Marshal(execTaskCommand)
 		if err != nil {
@@ -669,28 +821,6 @@ func flueRuntimeEnv(req RunRequest, input []byte, execTaskCommand []string) ([]s
 		env = append(env, "LOOM_DRIVER_EXEC_TASK_CMD_JSON="+string(encoded))
 	}
 	return env, nil
-}
-
-func flueRuntimeCommand(ctx context.Context, node, launcherPath, bundleRoot string, env []string) *exec.Cmd {
-	cmd := exec.CommandContext(ctx, node, launcherPath) //nolint:gosec // node is operator-configured; launcherPath is a temp file created by this process.
-	cmd.Dir = bundleRoot
-	cmd.Env = env
-	cmd.Cancel = func() error {
-		if cmd.Process == nil {
-			return nil
-		}
-		return cmd.Process.Signal(os.Interrupt)
-	}
-	cmd.WaitDelay = 5 * time.Second
-	return cmd
-}
-
-func runFlueRuntimeCommand(cmd *exec.Cmd) (string, string, error) {
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-	err := cmd.Run()
-	return stdout.String(), stderr.String(), err
 }
 
 func flueRuntimeResult(ctx context.Context, req RunRequest, stdout, stderr string, runErr error) RunResult {
@@ -847,117 +977,3 @@ func workflowName(req RunRequest) string {
 	}
 	return EntrypointRun
 }
-
-const flueLocalLauncher = `
-import { fork } from 'node:child_process';
-
-const serverPath = process.env.LOOM_FLUE_SERVER_PATH;
-const bundleRoot = process.env.LOOM_FLUE_BUNDLE_ROOT || process.cwd();
-const workflowName = process.env.LOOM_FLUE_WORKFLOW_NAME;
-const payload = JSON.parse(process.env.LOOM_FLUE_INVOKE_PAYLOAD || '{}');
-const requestId = process.env.LOOM_DRIVER_RUN_ID || 'loom-driver-run';
-
-if (!serverPath || !workflowName) {
-  console.log(JSON.stringify({ status: 'failed', summary: 'missing Flue server path or workflow name', errorClass: 'driver_runtime' }));
-  process.exit(0);
-}
-
-let completed = false;
-let invoked = false;
-const child = fork(serverPath, [], {
-  cwd: bundleRoot,
-  env: {
-    ...process.env,
-    FLUE_MODE: 'local',
-    FLUE_CLI_TARGET: 'workflow',
-    FLUE_CLI_NAME: workflowName,
-  },
-  stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
-});
-
-child.stdout?.on('data', (data) => process.stderr.write(data));
-child.stderr?.on('data', (data) => process.stderr.write(data));
-
-function finish(result) {
-  if (completed) return;
-  completed = true;
-  console.log(JSON.stringify(result || {}));
-  try { child.disconnect(); } catch {}
-}
-
-// Suspension (AW11): an await op parked the run server-side; the workflow
-// signals it by letting the SDK's WorkflowSuspended sentinel propagate
-// (recognized by type/name or the 'workflow_suspended:' message prefix) or
-// by returning a suspended-status result. Either way the launcher exits
-// cleanly with the suspended shape — the executor skips Finish and the
-// resumed run re-runs from the top.
-const suspendedShape = { status: 'suspended_awaiting_event', summary: 'workflow suspended awaiting event' };
-
-function isSuspendedResult(result) {
-  const status = String((result && result.status) || '');
-  return status === 'suspended' || status === 'suspended_awaiting_event';
-}
-
-function isSuspendedError(error) {
-  const type = String((error && (error.type || error.name)) || '');
-  if (type === 'workflow_suspended' || type === 'WorkflowSuspended') return true;
-  return String((error && error.message) || '').startsWith('workflow_suspended:');
-}
-
-child.on('message', (message) => {
-  if (!message || typeof message !== 'object') return;
-  if (message.type === 'ready' && !invoked) {
-    invoked = true;
-    child.send({ version: 1, type: 'invoke', requestId, payload });
-    return;
-  }
-  if (message.type === 'result') {
-    const result = message.result || {};
-    finish(isSuspendedResult(result) ? suspendedShape : result);
-    return;
-  }
-  if (message.type === 'error') {
-    const error = message.error || {};
-    if (isSuspendedError(error)) {
-      finish(suspendedShape);
-      return;
-    }
-    finish({
-      status: 'failed',
-      summary: error.message || error.details || 'Flue workflow failed',
-      errorClass: error.type || 'driver_runtime',
-    });
-  }
-});
-
-child.on('error', (error) => {
-  finish({ status: 'failed', summary: error?.message || String(error), errorClass: 'driver_runtime' });
-});
-
-function shutdown(signal) {
-  if (completed) return;
-  completed = true;
-  try { child.kill(signal); } catch {}
-  setTimeout(() => {
-    try { child.kill('SIGKILL'); } catch {}
-  }, 1000).unref?.();
-  console.log(JSON.stringify({
-    status: 'cancelled',
-    summary: 'Flue local runner cancelled',
-    errorClass: 'driver_cancelled',
-  }));
-  process.exit(signal === 'SIGINT' ? 130 : 143);
-}
-
-process.once('SIGINT', () => shutdown('SIGINT'));
-process.once('SIGTERM', () => shutdown('SIGTERM'));
-
-child.on('exit', (code, signal) => {
-  if (completed) return;
-  finish({
-    status: 'failed',
-    summary: 'Flue local runner exited before result' + (signal ? ' signal=' + signal : ' code=' + code),
-    errorClass: 'driver_runtime',
-  });
-});
-`

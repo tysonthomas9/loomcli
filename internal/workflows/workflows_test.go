@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/tysonthomas9/loomcli/internal/domain"
 )
 
 func TestBuiltinEpicRunnerWorkflowSourceIncludesReconcilePrimitives(t *testing.T) {
@@ -190,5 +192,17 @@ func TestBuiltinEpicRunnerWorkflowSourceParsesAsJavaScript(t *testing.T) {
 	}
 	if out, err := exec.Command(node, "--check", path).CombinedOutput(); err != nil { //nolint:norawexec // syntax-check via the node binary located by the test itself
 		t.Fatalf("node --check failed: %v\n%s", err, out)
+	}
+}
+
+func TestSubmissionTrustDefaultsUntrustedFailClosed(t *testing.T) {
+	if got := submissionTrust(""); got != domain.DriverTrustUntrusted {
+		t.Fatalf("submissionTrust(\"\") = %q, want untrusted (external submissions fail closed)", got)
+	}
+	if got := submissionTrust(domain.DriverTrustTrusted); got != domain.DriverTrustTrusted {
+		t.Fatalf("submissionTrust(trusted) = %q, want trusted (builtin path)", got)
+	}
+	if got := submissionTrust(domain.DriverTrustUntrusted); got != domain.DriverTrustUntrusted {
+		t.Fatalf("submissionTrust(untrusted) = %q, want untrusted", got)
 	}
 }

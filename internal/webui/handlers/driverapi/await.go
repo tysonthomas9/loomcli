@@ -180,10 +180,11 @@ func (m *Module) awaitWireEvent(ctx context.Context, ws string, inst *domain.Awa
 // two-segment path cannot ride the generic {op} route, so it registers its
 // own pattern and reuses the shared authorized-op pipeline.
 func (m *Module) handleAwaitEvent(w http.ResponseWriter, r *http.Request) {
-	if !m.authorize(w, r) {
+	tokenID, ok := m.authenticate(w, r)
+	if !ok {
 		return
 	}
-	m.serveAuthorizedOp(w, r, m.awaitEvent)
+	m.serveAuthorizedOp(w, r, m.awaitEvent, tokenID)
 }
 
 // awaitListResponse is the GET events/awaits response. AwaitInstance is
@@ -196,13 +197,13 @@ type awaitListResponse struct {
 // handleListAwaits serves GET /api/workspaces/{ws}/driver/events/awaits: the
 // verified run's awaits in index order for re-entry context rebuilding.
 func (m *Module) handleListAwaits(w http.ResponseWriter, r *http.Request) {
-	if !m.authorize(w, r) {
+	tokenID, ok := m.authenticate(w, r)
+	if !ok {
 		return
 	}
 	ws := r.PathValue("ws")
-	id := driverIdentityFromHeaders(r)
-	if id.RunID == "" {
-		writeOpError(w, http.StatusUnauthorized, "unauthenticated", HeaderDriverRunID+" header required", false)
+	id, ok := requestIdentity(w, r, tokenID)
+	if !ok {
 		return
 	}
 	parent, err := m.verifyParent(r.Context(), ws, id)

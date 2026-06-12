@@ -75,6 +75,10 @@ func New() *Store {
 	events := newTriggerEventStore()
 	deliveries := newTriggerDeliveryStore(bindings)
 	routes := &triggerRouteStore{bindings: bindings, events: events, deliveries: deliveries, runs: runs}
+	awaits := newAwaitStore(events)
+	// ResumeAwaiting's security gate: only a resolved (satisfied/timed_out)
+	// await releases its suspended run.
+	runs.setAwaitResumeEligible(awaits.resumeEligible)
 	return &Store{
 		workspaces: newWorkspaceStore(),
 		repos:      newRepoStore(),
@@ -100,7 +104,7 @@ func New() *Store {
 		taskRuns:   taskRuns,
 		taskEvents: newTaskRunEventStore(),
 		outbox:     newOutboxStore(),
-		awaits:     newAwaitStore(events),
+		awaits:     awaits,
 		workers:    newWorkerStore(),
 		roles:      roles,
 		daemon:     newDaemonStore(),

@@ -37,6 +37,14 @@ type RegisterFlueOptions struct {
 	SourceDigest string
 	CreatedBy    string
 	Activate     bool
+	// Trust is the trust level the SERVER stamps on the driver row (§7 step 9
+	// sandbox placement policy) — it is never read from client input or the
+	// bundle manifest, so a submission cannot self-elevate. Empty defaults to
+	// trusted: calling RegisterFlueDriver directly is the operator/source-tree
+	// path (CLI `loom driver register`). External submission paths (the
+	// workflows HTTP API via workflows.BuildAndRegister) must stamp
+	// domain.DriverTrustUntrusted explicitly.
+	Trust domain.DriverTrustLevel
 }
 
 type RegisterFlueResult struct {
@@ -62,7 +70,7 @@ func RegisterFlueDriver(ctx context.Context, s store.Store, opts RegisterFlueOpt
 	}
 
 	result := &RegisterFlueResult{}
-	driver, createdDriver, err := ensureRegisteredDriver(ctx, s, opts.WorkspaceKey, reg.driverID, reg.driverName, reg.sourceRef)
+	driver, createdDriver, err := ensureRegisteredDriver(ctx, s, opts.WorkspaceKey, reg.driverID, reg.driverName, reg.sourceRef, registrationTrust(opts.Trust))
 	if err != nil {
 		return nil, err
 	}
@@ -290,10 +298,20 @@ func persistRegisteredFlueVersion(ctx context.Context, s store.Store, opts Regis
 	return nil
 }
 
-func ensureRegisteredDriver(ctx context.Context, s store.Store, ws, driverID, driverName, sourceRef string) (*domain.Driver, bool, error) {
+// registrationTrust resolves the trust level a registration stamps: empty
+// means the operator/source-tree default (trusted). See
+// RegisterFlueOptions.Trust for the contract.
+func registrationTrust(trust domain.DriverTrustLevel) domain.DriverTrustLevel {
+	if trust == "" {
+		return domain.DriverTrustTrusted
+	}
+	return trust
+}
+
+func ensureRegisteredDriver(ctx context.Context, s store.Store, ws, driverID, driverName, sourceRef string, trust domain.DriverTrustLevel) (*domain.Driver, bool, error) {
 	driver, err := s.Drivers().Get(ctx, ws, driverID)
 	if err == nil {
-		return driver, false, nil
+		return demoteReregisteredDriver(ctx, s, driver, trust)
 	}
 	if !errors.Is(err, domain.ErrNotFound) {
 		return nil, false, fmt.Errorf("get driver: %w", err)
@@ -305,6 +323,7 @@ func ensureRegisteredDriver(ctx context.Context, s store.Store, ws, driverID, dr
 		OwnerType:    domain.DriverOwnerUser,
 		Description:  "Native Flue driver registered from " + sourceRef,
 		Status:       domain.DriverStatusDraft,
+		TrustLevel:   trust,
 		Metadata: map[string]string{
 			"source_ref":    sourceRef,
 			"runtime":       RuntimeFlueNode,
@@ -316,6 +335,23 @@ func ensureRegisteredDriver(ctx context.Context, s store.Store, ws, driverID, dr
 		return nil, false, fmt.Errorf("create driver: %w", err)
 	}
 	return driver, true, nil
+}
+
+// demoteReregisteredDriver enforces no-self-elevation on re-registration of
+// an existing driver: an untrusted submission onto a trusted driver demotes
+// the row (its newest content is untrusted), while a trusted registration
+// never elevates an untrusted driver — elevation is an explicit ops action
+// (driver update), not a registration side effect.
+func demoteReregisteredDriver(ctx context.Context, s store.Store, driver *domain.Driver, trust domain.DriverTrustLevel) (*domain.Driver, bool, error) {
+	if trust.Trusted() || !driver.TrustLevel.Trusted() {
+		return driver, false, nil
+	}
+	demoted := domain.DriverTrustUntrusted
+	updated, err := s.Drivers().Update(ctx, driver.WorkspaceKey, driver.DriverID, store.DriverUpdate{TrustLevel: &demoted})
+	if err != nil {
+		return nil, false, fmt.Errorf("demote re-registered driver trust: %w", err)
+	}
+	return updated, false, nil
 }
 
 func activateRegisteredDriver(ctx context.Context, s store.Store, result *RegisterFlueResult, ws, driverID, versionID string, manifest map[string]string) error {
@@ -414,6 +450,10 @@ func readRegistrationManifest(workDir, distPath, manifestPath string) (map[strin
 			return nil, fmt.Errorf("native Flue manifest must not contain generated-project field %s: %w", generatedRef, domain.ErrInvalid)
 		}
 	}
+	// Trust is stamped server-side by the registration path (§7 step 9): a
+	// client-supplied manifest value is ignored so a submitted bundle cannot
+	// self-elevate to trusted.
+	delete(raw, "trust_level")
 	return raw, nil
 }
 
@@ -496,4 +536,94 @@ func relativeRef(root, path string) string {
 		return filepath.ToSlash(path)
 	}
 	return filepath.ToSlash(rel)
+}
+
+const (
+	RuntimeFlueNode = "flue-node"
+	EntrypointRun   = "run"
+)
+
+type Bundle struct {
+	Root         string            `json:"root"`
+	BundleRef    string            `json:"bundle_ref"`
+	SourceRef    string            `json:"source_ref"`
+	SourceDigest string            `json:"source_digest"`
+	BundleDigest string            `json:"bundle_digest"`
+	Manifest     map[string]string `json:"manifest"`
+	Diagnostics  string            `json:"diagnostics,omitempty"`
+}
+
+func digestBundleTree(bundleRoot string, manifest []byte) (string, error) {
+	h := sha256.New()
+	_, _ = h.Write([]byte("loom-driver-bundle-v2\nmanifest\n"))
+	_, _ = h.Write(manifest)
+	_, _ = h.Write([]byte("\nfiles\n"))
+	paths := []string{}
+	for _, root := range []string{"dist"} {
+		err := filepath.WalkDir(filepath.Join(bundleRoot, filepath.FromSlash(root)), func(path string, entry fs.DirEntry, walkErr error) error {
+			if walkErr != nil {
+				return walkErr
+			}
+			if entry.IsDir() {
+				return nil
+			}
+			rel, err := filepath.Rel(bundleRoot, path)
+			if err != nil {
+				return err
+			}
+			paths = append(paths, filepath.ToSlash(rel))
+			return nil
+		})
+		if err != nil {
+			if errors.Is(err, fs.ErrNotExist) {
+				continue
+			}
+			return "", fmt.Errorf("digest bundle tree: %w", err)
+		}
+	}
+	sort.Strings(paths)
+	for _, rel := range paths {
+		data, err := os.ReadFile(filepath.Join(bundleRoot, filepath.FromSlash(rel))) //nolint:gosec // rel is generated by WalkDir under bundleRoot.
+		if err != nil {
+			return "", fmt.Errorf("digest bundle file %s: %w", rel, err)
+		}
+		_, _ = h.Write([]byte("file\n"))
+		_, _ = h.Write([]byte(rel))
+		_, _ = h.Write([]byte("\n"))
+		_, _ = h.Write(data)
+		_, _ = h.Write([]byte("\n"))
+	}
+	return "sha256:" + hex.EncodeToString(h.Sum(nil)), nil
+}
+
+func digestBytes(data []byte) string {
+	sum := sha256.Sum256(data)
+	return "sha256:" + hex.EncodeToString(sum[:])
+}
+
+func digestShort(digest string) string {
+	digest = strings.TrimPrefix(digest, "sha256:")
+	if len(digest) > 12 {
+		return digest[:12]
+	}
+	return digest
+}
+
+func slug(name string) string {
+	name = strings.ToLower(strings.TrimSpace(name))
+	var b strings.Builder
+	lastDash := false
+	for _, r := range name {
+		switch {
+		case r >= 'a' && r <= 'z', r >= '0' && r <= '9':
+			b.WriteRune(r)
+			lastDash = false
+		case r == '-' || r == '_' || r == ' ' || r == '.':
+			if !lastDash && b.Len() > 0 {
+				b.WriteByte('-')
+				lastDash = true
+			}
+		}
+	}
+	return strings.Trim(b.String(), "-")
 }

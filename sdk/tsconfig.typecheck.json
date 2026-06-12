@@ -1,0 +1,15 @@
+{
+  "compilerOptions": {
+    "strict": true,
+    "noEmit": true,
+    "module": "node16",
+    "moduleResolution": "node16",
+    "target": "es2022",
+    "lib": ["es2022"],
+    "types": ["node"],
+    "noUnusedLocals": true,
+    "noUnusedParameters": false,
+    "skipLibCheck": false
+  },
+  "files": ["typecheck.test-d.ts"]
+}

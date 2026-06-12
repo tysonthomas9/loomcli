@@ -40,6 +40,12 @@ type BuildAndRegisterOptions struct {
 	SourceDigest string
 	CreatedBy    string
 	WorkDir      string
+	// Trust is stamped server-side (§7 step 9 sandbox placement policy) and
+	// is never plumbed from request input. BuildAndRegister is the external
+	// submission path (workflows HTTP API), so empty defaults to UNTRUSTED —
+	// fail closed; only EnsureBuiltinWorkflow passes trusted for the embedded
+	// source-tree workflows.
+	Trust domain.DriverTrustLevel
 }
 
 var builtinMu sync.Mutex
@@ -92,10 +98,22 @@ func EnsureBuiltinWorkflow(ctx context.Context, st store.Store, ws, name string)
 		SourceRef:    sourceRef,
 		SourceDigest: digest,
 		CreatedBy:    "system",
+		Trust:        domain.DriverTrustTrusted,
 	}); err != nil {
 		return fmt.Errorf("register built-in workflow %q: %w", name, err)
 	}
 	return nil
+}
+
+// submissionTrust resolves the trust level a BuildAndRegister submission
+// stamps: empty defaults to UNTRUSTED (fail closed) because this is the
+// external user path — only server-side callers like EnsureBuiltinWorkflow
+// pass trusted explicitly, and nothing maps request input onto Trust.
+func submissionTrust(trust domain.DriverTrustLevel) domain.DriverTrustLevel {
+	if trust == "" {
+		return domain.DriverTrustUntrusted
+	}
+	return trust
 }
 
 func BuildAndRegister(ctx context.Context, st store.Store, opts BuildAndRegisterOptions) (*driver.RegisterFlueResult, string, error) {
@@ -143,6 +161,7 @@ func BuildAndRegister(ctx context.Context, st store.Store, opts BuildAndRegister
 		SourceDigest: opts.SourceDigest,
 		CreatedBy:    opts.CreatedBy,
 		Activate:     opts.Activate,
+		Trust:        submissionTrust(opts.Trust),
 	})
 	if err != nil {
 		return nil, output, err

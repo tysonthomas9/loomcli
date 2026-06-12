@@ -4,17 +4,20 @@
 // subprocesses. New/v2 surface: camelCase JSON on the wire, structured
 // errors {code, message, retryable}.
 //
-// Authentication is run-scoped: every request carries the parent DriverRun
-// identity (X-Loom-Driver-Run-Id plus owner credentials), verified through
-// the same fenced-heartbeat path the CLI uses. When the server is configured
-// with a shared driver API token, requests must additionally present it as a
-// bearer token.
+// Authentication is run-scoped. The preferred credential is a short-lived
+// run-scoped Bearer token (see internal/driver run_token.go): the server
+// derives the parent DriverRun identity (run/node/lease/fencing) from the
+// token claims, so workflows never handle fencing headers or ambient creds.
+// The legacy transport — the X-Loom-Driver-* header quad plus the optional
+// shared static API token — keeps working for CLI subcommands and ops
+// tooling. Either way the resolved identity is verified through the same
+// fenced-heartbeat path the CLI uses, which is also what revokes tokens:
+// terminal runs and superseded leases reject regardless of token expiry.
 package driverapi
 
 import (
 	"bytes"
 	"context"
-	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -59,9 +62,20 @@ type Config struct {
 	// FleetBaseURL is the fleet-db HTTP base URL used to build issue
 	// backends for task claim/release and epic reads.
 	FleetBaseURL string
+	// APIBaseURL is this serve process's own driver/task-run API base URL,
+	// handed to bridge-spawned task runners as LOOM_TASK_RUN_API_URL so they
+	// talk back to serve with their lease token instead of dialing fleet-db.
+	// Empty keeps runners on the legacy direct-fleet-db env.
+	APIBaseURL string
 	// APIToken, when non-empty, must be presented by clients as
-	// "Authorization: Bearer <token>".
+	// "Authorization: Bearer <token>". Requests authenticated by a valid
+	// run-scoped token (RunTokenKey) are exempt: workflow calls are
+	// token-only.
 	APIToken string
+	// RunTokenKey is the HS256 signing key for run-scoped driver tokens
+	// (internal/driver ParseRunToken). Nil disables the run-token auth path;
+	// the legacy header-quad transport is unaffected.
+	RunTokenKey []byte
 	// WorktreePath is the working directory handed to the host-bridge task
 	// executor for exec-task. Defaults to the server's working directory.
 	WorktreePath string
@@ -77,6 +91,8 @@ type Config struct {
 type Module struct {
 	store         store.Store
 	apiToken      string
+	runTokenKey   []byte
+	apiBaseURL    string
 	worktreePath  string
 	issueBackends IssueBackendFactory
 	dispatcher    *connector.Dispatcher
@@ -103,6 +119,8 @@ func NewModule(cfg Config) *Module {
 	m := &Module{
 		store:         cfg.Store,
 		apiToken:      strings.TrimSpace(cfg.APIToken),
+		runTokenKey:   cfg.RunTokenKey,
+		apiBaseURL:    strings.TrimSpace(cfg.APIBaseURL),
 		worktreePath:  cfg.WorktreePath,
 		issueBackends: cfg.IssueBackends,
 		dispatcher:    cfg.Dispatcher,
@@ -200,22 +218,24 @@ func (id driverIdentity) FencingToken() (int64, error) {
 }
 
 func (m *Module) handleOp(w http.ResponseWriter, r *http.Request) {
-	if !m.authorize(w, r) {
+	tokenID, ok := m.authenticate(w, r)
+	if !ok {
 		return
 	}
 	op := strings.TrimSpace(r.PathValue("op"))
 	handler, ok := m.ops[op]
 	if !ok {
-		writeOpError(w, http.StatusNotFound, "unknown_op", fmt.Sprintf("unknown driver op %q", op), false)
+		writeOpErrorDetails(w, http.StatusNotFound, "unknown_op", fmt.Sprintf("unknown driver op %q", op), false, map[string]any{"op": op})
 		return
 	}
-	m.serveAuthorizedOp(w, r, handler)
+	m.serveAuthorizedOp(w, r, handler, tokenID)
 }
 
-// serveAuthorizedOp runs the shared post-authorize op pipeline (body read,
-// identity headers, handler dispatch, error envelope) for both the generic
-// {op} route and explicitly registered op paths (events/await).
-func (m *Module) serveAuthorizedOp(w http.ResponseWriter, r *http.Request, handler opHandler) {
+// serveAuthorizedOp runs the shared post-authenticate op pipeline (body read,
+// identity resolution, handler dispatch, error envelope) for both the generic
+// {op} route and explicitly registered op paths (events/await). tokenID is
+// the run-token identity from authenticate, nil on the legacy header path.
+func (m *Module) serveAuthorizedOp(w http.ResponseWriter, r *http.Request, handler opHandler, tokenID *driverIdentity) {
 	ws := r.PathValue("ws")
 	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxDriverOpBodyBytes))
 	if err != nil {
@@ -225,9 +245,8 @@ func (m *Module) serveAuthorizedOp(w http.ResponseWriter, r *http.Request, handl
 	if len(strings.TrimSpace(string(body))) == 0 {
 		body = []byte("{}")
 	}
-	id := driverIdentityFromHeaders(r)
-	if id.RunID == "" {
-		writeOpError(w, http.StatusUnauthorized, "unauthenticated", HeaderDriverRunID+" header required", false)
+	id, ok := requestIdentity(w, r, tokenID)
+	if !ok {
 		return
 	}
 	result, err := handler(r.Context(), ws, id, body)
@@ -247,20 +266,6 @@ func driverIdentityFromHeaders(r *http.Request) driverIdentity {
 		LeaseID: strings.TrimSpace(r.Header.Get(HeaderDriverLeaseID)),
 		fence:   r.Header.Get(HeaderDriverFencingToken),
 	}
-}
-
-// authorize enforces the optional shared bearer token.
-func (m *Module) authorize(w http.ResponseWriter, r *http.Request) bool {
-	if m.apiToken == "" {
-		return true
-	}
-	auth := strings.TrimSpace(r.Header.Get("Authorization"))
-	token, ok := strings.CutPrefix(auth, "Bearer ")
-	if !ok || subtle.ConstantTimeCompare([]byte(strings.TrimSpace(token)), []byte(m.apiToken)) != 1 {
-		writeOpError(w, http.StatusUnauthorized, "unauthenticated", "missing or invalid driver API token", false)
-		return false
-	}
-	return true
 }
 
 type opHandler func(ctx context.Context, ws string, id driverIdentity, body []byte) (any, error)
@@ -560,6 +565,7 @@ func (m *Module) execTask(ctx context.Context, ws string, id driverIdentity, bod
 	executor := driverpkg.HostBridgeTaskExecutor{
 		Store:        m.store,
 		WorktreePath: m.worktreePath,
+		APIBaseURL:   m.apiBaseURL,
 	}
 	if params.EnqueueOnly {
 		outcome, err := driverpkg.EnqueueTaskRunWithResult(ctx, m.store, opts, executor)
@@ -744,11 +750,14 @@ func firstNonEmpty(values ...string) string {
 	return ""
 }
 
-// opError is the structured v2 error envelope.
+// opError is the structured v2 error envelope. The shape is FROZEN as the
+// SDK v1 contract (sdk/api-surface.v1.json): {code, message, retryable}
+// with an OPTIONAL additive details object for machine-readable context.
 type opError struct {
-	Code      string `json:"code"`
-	Message   string `json:"message"`
-	Retryable bool   `json:"retryable"`
+	Code      string         `json:"code"`
+	Message   string         `json:"message"`
+	Retryable bool           `json:"retryable"`
+	Details   map[string]any `json:"details,omitempty"`
 }
 
 func writeJSON(w http.ResponseWriter, status int, value any) {
@@ -758,7 +767,13 @@ func writeJSON(w http.ResponseWriter, status int, value any) {
 }
 
 func writeOpError(w http.ResponseWriter, status int, code, message string, retryable bool) {
-	writeJSON(w, status, map[string]any{"error": opError{Code: code, Message: message, Retryable: retryable}})
+	writeOpErrorDetails(w, status, code, message, retryable, nil)
+}
+
+// writeOpErrorDetails writes the envelope with the optional details object;
+// details is additive — clients that predate it ignore the extra key.
+func writeOpErrorDetails(w http.ResponseWriter, status int, code, message string, retryable bool, details map[string]any) {
+	writeJSON(w, status, map[string]any{"error": opError{Code: code, Message: message, Retryable: retryable, Details: details}})
 }
 
 // writeDomainOpError maps domain sentinel errors onto the structured error

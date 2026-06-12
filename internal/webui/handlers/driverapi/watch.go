@@ -82,18 +82,13 @@ func (m *Module) handleWatchEpic(w http.ResponseWriter, r *http.Request) {
 // produce a structured JSON error instead of a dead stream. On failure the
 // error is already written and ok is false.
 func (m *Module) prepareWatch(w http.ResponseWriter, r *http.Request) (watchSession, *watchSnapshotData, bool) {
-	if !m.authorize(w, r) {
+	tokenID, ok := m.authenticate(w, r)
+	if !ok {
 		return watchSession{}, nil, false
 	}
 	ws := r.PathValue("ws")
-	id := driverIdentity{
-		RunID:   strings.TrimSpace(r.Header.Get(HeaderDriverRunID)),
-		NodeID:  strings.TrimSpace(r.Header.Get(HeaderDriverNodeID)),
-		LeaseID: strings.TrimSpace(r.Header.Get(HeaderDriverLeaseID)),
-		fence:   r.Header.Get(HeaderDriverFencingToken),
-	}
-	if id.RunID == "" {
-		writeOpError(w, http.StatusUnauthorized, "unauthenticated", HeaderDriverRunID+" header required", false)
+	id, ok := requestIdentity(w, r, tokenID)
+	if !ok {
 		return watchSession{}, nil, false
 	}
 	ctx := r.Context()

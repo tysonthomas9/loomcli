@@ -101,6 +101,8 @@ type ServerConfig struct {
 	FleetClientActor     string                                               // X-Actor header value for fleet-db --auth-dev-mode (typically the loom agent name)
 	FleetDBBaseURL       string                                               // fleet-db HTTP base URL backing Store; used by the driver-op API to build issue backends
 	DriverAPIToken       string                                               // Optional shared bearer token required by the driver-op HTTP API (LOOM_DRIVER_API_TOKEN)
+	DriverAPIBaseURL     string                                               // This serve process's own driver/task-run API base URL, exported to task runners as LOOM_TASK_RUN_API_URL; empty keeps runners on the legacy direct-fleet-db env
+	DriverRunTokenKey    []byte                                               // HS256 signing key for run-scoped driver-op tokens (LOOM_RUN_TOKEN_SIGNING_KEY or ephemeral); nil disables the token auth path
 	DaemonStartupFn      func(ctx context.Context, onReady func(wsID string)) // Starts daemons for secondary workspaces; calls onReady(wsID) when each is reachable
 	Logger               *slog.Logger                                         // Structured logger (optional; nil falls back to slog.Default())
 	SentryDSN            string                                               // Sentry/GlitchTip DSN for error tracking (optional; empty disables)

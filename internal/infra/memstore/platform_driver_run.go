@@ -19,10 +19,21 @@ type driverRunStore struct {
 	taskRuns *taskRunStore
 	steps    *driverStepStore
 	next     int64
+	// awaitResumeEligible probes whether an await cycle has resolved
+	// (satisfied/timed_out) — ResumeAwaiting's security gate. Wired by the
+	// Store constructor after the await store exists; called OUTSIDE s.mu.
+	awaitResumeEligible func(ws, instanceKey string) bool
 }
 
 func newDriverRunStore(versions *driverVersionStore, bindings *triggerBindingStore) *driverRunStore {
 	return &driverRunStore{items: make(map[string]map[string]*domain.DriverRun), versions: versions, bindings: bindings}
+}
+
+// setAwaitResumeEligible wires the await-status probe ResumeAwaiting consults
+// (set during Store construction; the await store is built after the run
+// store). Probe runs outside the run mutex — the await store locks itself.
+func (s *driverRunStore) setAwaitResumeEligible(probe func(ws, instanceKey string) bool) {
+	s.awaitResumeEligible = probe
 }
 
 var (
@@ -309,6 +320,17 @@ func (s *driverRunStore) ResumeAwaiting(_ context.Context, ws, runID, awaitInsta
 	}
 	if resumeSourceEventID == "" {
 		return nil, fmt.Errorf("resume source event id required: %w", domain.ErrInvalid)
+	}
+	// The await cycle must belong to THIS run and must have resolved
+	// (satisfied/timed_out) before the run may leave suspended_awaiting_event
+	// — only ResolveAwait gates resume (security review fix, mirroring
+	// fleet-db's INVALID/AWAIT_NOT_TERMINAL Lua guards). Checked before the
+	// run lock; the await store guards itself.
+	if keyRunID, _, err := domain.ParseAwaitInstanceKey(awaitInstanceKey); err != nil || keyRunID != runID {
+		return nil, fmt.Errorf("await %q does not belong to driver run %q: %w", awaitInstanceKey, runID, domain.ErrInvalidTransition)
+	}
+	if s.awaitResumeEligible != nil && !s.awaitResumeEligible(ws, awaitInstanceKey) {
+		return nil, fmt.Errorf("await %q has not resolved; resume denied: %w", awaitInstanceKey, domain.ErrInvalidTransition)
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()

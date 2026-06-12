@@ -24,6 +24,7 @@ func (s *driverStore) Create(ctx context.Context, in store.DriverCreate) (*domai
 		"description":       in.Description,
 		"active_version_id": in.ActiveVersionID,
 		"status":            in.Status,
+		"trust_level":       in.TrustLevel,
 		"metadata":          in.Metadata,
 	}
 	var out domain.Driver
@@ -179,8 +180,7 @@ func (s *triggerBindingStore) Create(ctx context.Context, in store.TriggerBindin
 
 func (s *triggerBindingStore) Get(ctx context.Context, ws, bindingID string) (*domain.TriggerBinding, error) {
 	var out domain.TriggerBinding
-	path := "/api/v1/" + pathEscape(ws) + "/trigger-bindings/" + pathEscape(bindingID)
-	if err := s.client.do(ctx, "GET", path, nil, &out); err != nil {
+	if err := s.client.do(ctx, "GET", "/api/v1/"+pathEscape(ws)+"/trigger-bindings/"+pathEscape(bindingID), nil, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -232,8 +232,7 @@ func (s *triggerBindingStore) List(ctx context.Context, ws string, filter store.
 
 func (s *triggerBindingStore) Update(ctx context.Context, ws, bindingID string, patch store.TriggerBindingUpdate) (*domain.TriggerBinding, error) {
 	var out domain.TriggerBinding
-	path := "/api/v1/" + pathEscape(ws) + "/trigger-bindings/" + pathEscape(bindingID)
-	if err := s.client.do(ctx, "PATCH", path, triggerBindingUpdateBody(patch), &out); err != nil {
+	if err := s.client.do(ctx, "PATCH", "/api/v1/"+pathEscape(ws)+"/trigger-bindings/"+pathEscape(bindingID), triggerBindingUpdateBody(patch), &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -810,6 +809,9 @@ func driverUpdateBody(patch store.DriverUpdate) map[string]any {
 	}
 	if patch.Status != nil {
 		body["status"] = *patch.Status
+	}
+	if patch.TrustLevel != nil {
+		body["trust_level"] = *patch.TrustLevel
 	}
 	if patch.Metadata != nil {
 		body["metadata"] = *patch.Metadata

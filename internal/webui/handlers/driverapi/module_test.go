@@ -57,14 +57,15 @@ func (f *fakeIssueBackend) Get(_ context.Context, _ string) (*backend.IssueDetai
 }
 
 type testHarness struct {
-	server  *httptest.Server
-	store   store.Store
-	module  *Module
-	backend *fakeIssueBackend
-	runID   string
-	nodeID  string
-	leaseID string
-	fence   int64
+	server      *httptest.Server
+	store       store.Store
+	module      *Module
+	backend     *fakeIssueBackend
+	runID       string
+	nodeID      string
+	leaseID     string
+	fence       int64
+	runTokenKey []byte
 }
 
 func newTestHarness(t *testing.T, apiToken string) *testHarness {
@@ -105,9 +106,14 @@ func newTestHarness(t *testing.T, apiToken string) *testHarness {
 		t.Fatalf("Claim driver run: %v", err)
 	}
 	fake := &fakeIssueBackend{}
+	// Every harness carries a run-token signing key so all existing
+	// header-quad/static-bearer tests double as proof the legacy path is
+	// unchanged when the token auth path is enabled.
+	runTokenKey := bytes.Repeat([]byte{0x42}, 32)
 	module := NewModule(Config{
-		Store:    st,
-		APIToken: apiToken,
+		Store:       st,
+		APIToken:    apiToken,
+		RunTokenKey: runTokenKey,
 		IssueBackends: func(_, actor string) (backend.IssueBackend, error) {
 			fake.actor = actor
 			return fake, nil
@@ -118,14 +124,15 @@ func newTestHarness(t *testing.T, apiToken string) *testHarness {
 	server := httptest.NewServer(mux)
 	t.Cleanup(server.Close)
 	return &testHarness{
-		server:  server,
-		store:   st,
-		module:  module,
-		backend: fake,
-		runID:   claimed.RunID,
-		nodeID:  claimed.NodeID,
-		leaseID: claimed.LeaseID,
-		fence:   claimed.FencingToken,
+		server:      server,
+		store:       st,
+		module:      module,
+		backend:     fake,
+		runID:       claimed.RunID,
+		nodeID:      claimed.NodeID,
+		leaseID:     claimed.LeaseID,
+		fence:       claimed.FencingToken,
+		runTokenKey: runTokenKey,
 	}
 }
 

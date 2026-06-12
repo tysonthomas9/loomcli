@@ -558,6 +558,21 @@ func testResumeOnlyFromSuspendedFirstWinner(t *testing.T, h *AwaitHarness) {
 	if _, err := runs.Resume(ctx, "run-a", ""); !errors.Is(err, domain.ErrInvalid) {
 		t.Fatalf("resume without source event: err = %v, want ErrInvalid", err)
 	}
+	// Security gate: resume is granted by resolution, never by knowing the
+	// run id + await key. An unregistered then a pending await both deny.
+	if _, err := runs.Resume(ctx, "run-a", "event-9"); !errors.Is(err, domain.ErrInvalidTransition) {
+		t.Fatalf("resume with no await registered: err = %v, want ErrInvalidTransition", err)
+	}
+	reg := mustRegister(t, ctx, h, awaitReg("run-a", 1, "pr.approved:repo-resume"))
+	if reg.Satisfied {
+		t.Fatalf("registration unexpectedly satisfied; test wants a pending await")
+	}
+	if _, err := runs.Resume(ctx, "run-a", "event-9"); !errors.Is(err, domain.ErrInvalidTransition) {
+		t.Fatalf("resume with pending await: err = %v, want ErrInvalidTransition", err)
+	}
+	if _, err := h.Awaits.ResolveAwait(ctx, h.Workspace, reg.Instance.InstanceKey, "event-9", nil, "alice"); err != nil {
+		t.Fatalf("ResolveAwait: %v", err)
+	}
 	resumed, err := runs.Resume(ctx, "run-a", "event-9")
 	if err != nil || resumed.Status != domain.DriverRunQueued || resumed.ResumeSourceEventID != "event-9" {
 		t.Fatalf("resume = %+v err=%v, want queued with resume source event-9", resumed, err)

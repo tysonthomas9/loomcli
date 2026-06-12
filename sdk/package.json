@@ -1,7 +1,7 @@
 {
   "name": "@loom/sdk",
-  "version": "0.1.0",
-  "description": "Scoped runner SDK for Loom task runs",
+  "version": "1.0.0",
+  "description": "Loom workflow SDK: run-scoped driver client (flue) and task-run runner client with published TypeScript types",
   "type": "module",
   "exports": {
     ".": {
@@ -16,11 +16,15 @@
       "types": "./flue.d.ts",
       "import": "./flue.js"
     },
+    "./api-surface.v1.json": "./api-surface.v1.json",
     "./package.json": "./package.json"
   },
   "types": "./index.d.ts",
+  "sideEffects": false,
   "scripts": {
-    "test": "node --test *.test.mjs"
+    "test": "node --test *.test.mjs && npm run typecheck",
+    "typecheck": "tsc -p tsconfig.typecheck.json",
+    "pack:check": "npm pack --dry-run"
   },
   "engines": {
     "node": ">=18"
@@ -32,8 +36,18 @@
     "flue.js",
     "flue.d.ts",
     "runner.js",
-    "runner.d.ts"
+    "runner.d.ts",
+    "api-surface.v1.json",
+    "CHANGELOG.md"
   ],
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "typescript": "^5.9.0"
+  },
   "repository": {
     "type": "git",
     "url": "https://github.com/tysonthomas9/loomcli.git",

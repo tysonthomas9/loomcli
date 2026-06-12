@@ -131,8 +131,13 @@ func (s *awaitStore) ResolveAwait(ctx context.Context, workspaceKey, instanceKey
 			instanceKey, len(payload), domain.DefaultAwaitResumePayloadCap, domain.ErrInvalid)
 	}
 	status := domain.AwaitSatisfied
+	resolveRoute := "/resolve"
 	if domain.IsAwaitTimeoutEventID(eventID) {
+		// Non-satisfied resolutions are the privileged system lane: fleet-db
+		// rejects them on the public route so a plain await.update key can
+		// never bypass the actor predicate (security review fix).
 		status = domain.AwaitTimedOut
+		resolveRoute = "/resolve-system"
 	}
 	body := map[string]any{
 		"event_id": eventID,
@@ -148,7 +153,7 @@ func (s *awaitStore) ResolveAwait(ctx context.Context, workspaceKey, instanceKey
 		Await  *awaitInstanceWire `json:"await"`
 		Resume bool               `json:"resume"`
 	}
-	path := s.awaitsPath(workspaceKey) + "/" + pathEscape(instanceKey) + "/resolve"
+	path := s.awaitsPath(workspaceKey) + "/" + pathEscape(instanceKey) + resolveRoute
 	if err := s.client.do(ctx, "POST", path, body, &resp); err != nil {
 		return nil, err
 	}

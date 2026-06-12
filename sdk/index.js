@@ -8,6 +8,8 @@ export {
 export {
   DriverApiError,
   FlueDriverClient,
+  WorkflowSuspended,
   createLoomClient,
   createLoomDriverClient,
+  isWorkflowSuspended,
 } from "./flue.js";

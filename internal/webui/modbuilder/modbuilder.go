@@ -12,6 +12,7 @@ import (
 	githandlers "github.com/tysonthomas9/loomcli/internal/webui/handlers/git"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/issues"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/misc"
+	"github.com/tysonthomas9/loomcli/internal/webui/handlers/taskrunapi"
 	hterminal "github.com/tysonthomas9/loomcli/internal/webui/handlers/terminal"
 	"github.com/tysonthomas9/loomcli/internal/webui/issuetabs"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
@@ -82,4 +83,11 @@ func NewFileModule(fileSvc service.FileService) interface{ Register(*http.ServeM
 // session identity, never request data).
 func NewApprovalsModule(st store.Store) interface{ Register(*http.ServeMux) } {
 	return approvals.NewModule(st)
+}
+
+// NewTaskRunAPIModule creates the task-runner HTTP API module
+// (POST /api/workspaces/{ws}/task-run/{op}, lease-token auth) so task runner
+// processes talk to serve instead of holding fleet-db credentials.
+func NewTaskRunAPIModule(st store.Store, fleetBaseURL string) interface{ Register(*http.ServeMux) } {
+	return taskrunapi.NewModule(taskrunapi.Config{Store: st, FleetBaseURL: fleetBaseURL})
 }

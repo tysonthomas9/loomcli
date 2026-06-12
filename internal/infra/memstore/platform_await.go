@@ -56,6 +56,20 @@ var _ store.AwaitStore = (*awaitStore)(nil)
 // passes limit <= 0 (the "implementation default" of the store contract).
 const defaultAwaitDeadlineListLimit = 100
 
+// resumeEligible reports whether the named await cycle has resolved to a
+// status that grants resuming its suspended run: satisfied or timed_out.
+// Pending and cancel-cascaded awaits never grant resume — the security gate
+// mirroring fleet-db's resume Lua AWAIT_NOT_TERMINAL guard.
+func (s *awaitStore) resumeEligible(ws, instanceKey string) bool {
+	s.events.mu.RLock()
+	defer s.events.mu.RUnlock()
+	row, ok := s.items[ws][instanceKey]
+	if !ok {
+		return false
+	}
+	return row.Status == domain.AwaitSatisfied || row.Status == domain.AwaitTimedOut
+}
+
 // RegisterAwaitAndCheck atomically checks the journal and otherwise parks the
 // await (RULE 2: one call, one critical section). Idempotent on InstanceKey:
 // a pending row is returned unchanged (crash-before-suspend replay) and a

@@ -43,6 +43,12 @@ func (s *driverStore) Create(_ context.Context, in store.DriverCreate) (*domain.
 	if status == "" {
 		status = domain.DriverStatusDraft
 	}
+	trust := in.TrustLevel
+	if trust == "" {
+		// Unknown/missing = untrusted (fail closed) — mirrors fleet-db's
+		// Driver.Validate stamp; registration paths set an explicit level.
+		trust = domain.DriverTrustUntrusted
+	}
 	driver := &domain.Driver{
 		WorkspaceKey:    in.WorkspaceKey,
 		DriverID:        in.DriverID,
@@ -52,6 +58,7 @@ func (s *driverStore) Create(_ context.Context, in store.DriverCreate) (*domain.
 		Description:     in.Description,
 		ActiveVersionID: in.ActiveVersionID,
 		Status:          status,
+		TrustLevel:      trust,
 		Metadata:        cloneMap(in.Metadata),
 		CreatedAt:       now,
 		UpdatedAt:       now,
@@ -110,6 +117,9 @@ func (s *driverStore) Update(_ context.Context, ws, driverID string, patch store
 	}
 	if patch.Status != nil {
 		driver.Status = *patch.Status
+	}
+	if patch.TrustLevel != nil {
+		driver.TrustLevel = *patch.TrustLevel
 	}
 	if patch.Metadata != nil {
 		driver.Metadata = cloneMap(*patch.Metadata)
