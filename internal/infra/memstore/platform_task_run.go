@@ -319,6 +319,45 @@ func (s *taskRunStore) Heartbeat(_ context.Context, ws, taskRunID string, heartb
 	return cloneTaskRun(run), nil
 }
 
+func (s *taskRunStore) Requeue(_ context.Context, ws, taskRunID string, requeue store.TaskRunRequeue) (*domain.TaskRun, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	run, ok := s.items[ws][taskRunID]
+	if !ok {
+		return nil, fmt.Errorf("task run %q in workspace %q: %w", taskRunID, ws, domain.ErrNotFound)
+	}
+	if run.Status != domain.TaskRunRunning {
+		return nil, fmt.Errorf("task run %q in workspace %q: %w", taskRunID, ws, domain.ErrInvalidTransition)
+	}
+	if run.LeaseID != "" || run.FencingToken != 0 {
+		if requeue.NodeID != run.NodeID || requeue.LeaseID != run.LeaseID || requeue.FencingToken != run.FencingToken {
+			return nil, fmt.Errorf("task run %q in workspace %q: %w", taskRunID, ws, domain.ErrNotOwner)
+		}
+	}
+	now := requeue.RequeuedAt
+	if now.IsZero() {
+		now = time.Now().UTC()
+	}
+	run.Status = domain.TaskRunQueued
+	run.NodeID = ""
+	run.LeaseID = ""
+	run.FencingToken = 0
+	run.RunnerPlacement = domain.TaskRunPlacement{}
+	run.ExitCode = nil
+	run.FinishedAt = nil
+	run.ErrorClass = requeue.ErrorClass
+	run.ErrorMessage = requeue.ErrorMessage
+	if requeue.LogsRef != "" {
+		run.LogsRef = requeue.LogsRef
+	}
+	if requeue.ArtifactsRef != "" {
+		run.ArtifactsRef = requeue.ArtifactsRef
+	}
+	run.RuntimeMetadata = mergeStringMapMem(run.RuntimeMetadata, requeue.RuntimeMetadata)
+	run.UpdatedAt = now
+	return cloneTaskRun(run), nil
+}
+
 func (s *taskRunStore) Complete(ctx context.Context, ws, taskRunID string, complete store.TaskRunComplete) (*domain.TaskRun, error) {
 	normalized, err := normalizeTaskRunCompleteMem(ws, taskRunID, complete)
 	if err != nil {

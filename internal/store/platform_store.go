@@ -512,6 +512,19 @@ type TaskRunFinish struct {
 	FinishedAt       time.Time
 }
 
+type TaskRunRequeue struct {
+	NodeID          string
+	LeaseID         string
+	LeaseToken      string
+	FencingToken    int64
+	RuntimeMetadata map[string]string
+	LogsRef         string
+	ArtifactsRef    string
+	ErrorClass      string
+	ErrorMessage    string
+	RequeuedAt      time.Time
+}
+
 type TaskRunHeartbeat struct {
 	NodeID          string
 	LeaseID         string
@@ -569,6 +582,7 @@ type TaskRunStore interface {
 	Get(ctx context.Context, workspaceKey, taskRunID string) (*domain.TaskRun, error)
 	List(ctx context.Context, workspaceKey string, filter TaskRunFilter) ([]*domain.TaskRun, error)
 	Heartbeat(ctx context.Context, workspaceKey, taskRunID string, heartbeat TaskRunHeartbeat) (*domain.TaskRun, error)
+	Requeue(ctx context.Context, workspaceKey, taskRunID string, requeue TaskRunRequeue) (*domain.TaskRun, error)
 	Finish(ctx context.Context, workspaceKey, taskRunID string, finish TaskRunFinish) (*domain.TaskRun, error)
 	Complete(ctx context.Context, workspaceKey, taskRunID string, complete TaskRunComplete) (*domain.TaskRun, error)
 	AppendLog(ctx context.Context, workspaceKey, taskRunID string, appendLog TaskRunLogAppend) (*domain.TaskRunLogEntry, error)

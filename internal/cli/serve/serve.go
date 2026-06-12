@@ -40,6 +40,8 @@ import (
 // fleet-aware issue routing at a different layer.
 const envLoomFleetMode = "LOOM_FLEET_MODE"
 const envLoomDriverExecutor = "LOOM_DRIVER_EXECUTOR"
+const envLoomDriverTaskWorkerConcurrency = "LOOM_DRIVER_TASK_WORKER_CONCURRENCY"
+const envLoomDriverTaskRunMaxAttempts = "LOOM_DRIVER_TASK_RUN_MAX_ATTEMPTS"
 
 const monitorCollectionCacheTTL = 10 * time.Second
 
@@ -112,6 +114,8 @@ ENVIRONMENT VARIABLES
   LOOM_AUTH_ISSUER      Expected JWT issuer (defaults to LOOM_AUTH_URL)
   LOOM_AUTH_AUDIENCE    Expected JWT audience (defaults to "loom")
   LOOM_DRIVER_EXECUTOR  DriverRun executor toggle (default: on; set 0/false/off/no to disable)
+  LOOM_DRIVER_TASK_WORKER_CONCURRENCY  Local TaskRun worker loops (default: 2)
+  LOOM_DRIVER_TASK_RUN_MAX_ATTEMPTS     TaskRun attempts before parking failed (default: 2)
 
 EXAMPLES
   loom serve                                              # Default port 8080
@@ -293,7 +297,17 @@ func startDriverExecutorIfEnabled(ctx context.Context, st store.Store) {
 		APIBaseURL:   driverAPIBaseURL(),
 		APIToken:     os.Getenv("LOOM_DRIVER_API_TOKEN"),
 	}
-	slog.Info("Driver executor enabled", "workspace", executor.WorkspaceKey, "work_dir", workDir)
+	taskWorkerConcurrency := driverTaskWorkerConcurrency()
+	taskRunMaxAttempts := driverTaskRunMaxAttempts()
+	slog.Info("Driver executor enabled", "workspace", executor.WorkspaceKey, "work_dir", workDir, "task_worker_concurrency", taskWorkerConcurrency, "task_run_max_attempts", taskRunMaxAttempts)
+	taskWorker := &driverexecutor.TaskWorker{
+		Store:        st,
+		WorkspaceKey: executor.WorkspaceKey,
+		WorkDir:      workDir,
+		NodeID:       executor.NodeID,
+		RunnerID:     os.Getenv("LOOM_DRIVER_TASK_WORKER_RUNNER_ID"),
+		MaxAttempts:  taskRunMaxAttempts,
+	}
 	go func() {
 		ticker := time.NewTicker(2 * time.Second)
 		defer ticker.Stop()
@@ -314,6 +328,33 @@ func startDriverExecutorIfEnabled(ctx context.Context, st store.Store) {
 			}
 		}
 	}()
+	startDriverTaskWorkers(ctx, taskWorker, taskWorkerConcurrency)
+}
+
+// startDriverTaskWorkers launches the local TaskRun worker claim loops, one
+// goroutine per concurrency slot, each with a distinct runner identity.
+func startDriverTaskWorkers(ctx context.Context, template *driverexecutor.TaskWorker, concurrency int) {
+	for i := 0; i < concurrency; i++ {
+		worker := *template
+		if worker.RunnerID == "" {
+			worker.RunnerID = fmt.Sprintf("loom-serve-task-worker-%d", i+1)
+		}
+		go func() {
+			ticker := time.NewTicker(1 * time.Second)
+			defer ticker.Stop()
+			for {
+				_, err := worker.RunOnce(ctx)
+				if err != nil && !errors.Is(err, driverexecutor.ErrNoQueuedTaskRun) && !errors.Is(err, context.Canceled) {
+					slog.Error("driver task worker run failed", "err", err)
+				}
+				select {
+				case <-ctx.Done():
+					return
+				case <-ticker.C:
+				}
+			}
+		}()
+	}
 }
 
 // driverAPIBaseURL is the loopback URL of this serve process's driver-op
@@ -342,6 +383,42 @@ func driverExecutorEnabled() bool {
 	default:
 		return true
 	}
+}
+
+func driverTaskWorkerConcurrency() int {
+	raw := strings.TrimSpace(os.Getenv(envLoomDriverTaskWorkerConcurrency))
+	if raw == "" {
+		return 2
+	}
+	n, err := strconv.Atoi(raw)
+	if err != nil {
+		return 2
+	}
+	if n < 1 {
+		return 1
+	}
+	if n > 32 {
+		return 32
+	}
+	return n
+}
+
+func driverTaskRunMaxAttempts() int {
+	raw := strings.TrimSpace(os.Getenv(envLoomDriverTaskRunMaxAttempts))
+	if raw == "" {
+		return 2
+	}
+	n, err := strconv.Atoi(raw)
+	if err != nil {
+		return 2
+	}
+	if n < 1 {
+		return 1
+	}
+	if n > 10 {
+		return 10
+	}
+	return n
 }
 
 func ensureFleetStoreEnv(cfg config.FleetClientConfig) {

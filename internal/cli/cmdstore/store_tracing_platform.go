@@ -441,6 +441,14 @@ func (t *tracedTaskRunStore) Heartbeat(ctx context.Context, ws, taskRunID string
 	)
 }
 
+func (t *tracedTaskRunStore) Requeue(ctx context.Context, ws, taskRunID string, requeue store.TaskRunRequeue) (*domain.TaskRun, error) {
+	return traced(ctx, "TaskRuns", "Requeue", func(ctx context.Context) (*domain.TaskRun, error) {
+		return t.inner.Requeue(ctx, ws, taskRunID, requeue)
+	},
+		attribute.String("loom.workspace", ws),
+	)
+}
+
 func (t *tracedTaskRunStore) Finish(ctx context.Context, ws, taskRunID string, taskFinish store.TaskRunFinish) (*domain.TaskRun, error) {
 	return traced(ctx, "TaskRuns", "Finish", func(ctx context.Context) (*domain.TaskRun, error) {
 		return t.inner.Finish(ctx, ws, taskRunID, taskFinish)

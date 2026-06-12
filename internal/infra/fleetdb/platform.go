@@ -684,6 +684,26 @@ func (s *taskRunStore) Heartbeat(ctx context.Context, ws, taskRunID string, hear
 	return &out, nil
 }
 
+func (s *taskRunStore) Requeue(ctx context.Context, ws, taskRunID string, requeue store.TaskRunRequeue) (*domain.TaskRun, error) {
+	body := map[string]any{
+		"node_id":          requeue.NodeID,
+		"lease_id":         requeue.LeaseID,
+		"fencing_token":    requeue.FencingToken,
+		"runtime_metadata": requeue.RuntimeMetadata,
+		"logs_ref":         requeue.LogsRef,
+		"artifacts_ref":    requeue.ArtifactsRef,
+		"error_class":      requeue.ErrorClass,
+		"error_message":    requeue.ErrorMessage,
+	}
+	var out domain.TaskRun
+	path := "/api/v1/" + pathEscape(ws) + "/task-runs/" + pathEscape(taskRunID) + "/requeue"
+	headers := leaseTokenHeaders(requeue.LeaseToken)
+	if err := s.client.doWithHeaders(ctx, "POST", path, body, &out, headers); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
 func (s *taskRunStore) Complete(ctx context.Context, ws, taskRunID string, complete store.TaskRunComplete) (*domain.TaskRun, error) {
 	body := map[string]any{
 		"completion_id":         complete.CompletionID,

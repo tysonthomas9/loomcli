@@ -139,6 +139,62 @@ func TestRequestTaskRunCreatesExecutesAndFinishesChild(t *testing.T) {
 	}
 }
 
+func TestEnqueueTaskRunWithResultCreatesQueuedChildWithoutExecuting(t *testing.T) {
+	ctx, st, run := setupRunningDriverRun(t)
+	if _, err := st.DriverSteps().Create(ctx, store.DriverStepCreate{
+		WorkspaceKey: "TEST",
+		StepID:       "step-enqueue",
+		DriverRunID:  run.RunID,
+		StepKind:     "task_run",
+		Status:       domain.DriverStepQueued,
+		NodeID:       run.NodeID,
+		LeaseID:      run.LeaseID,
+		FencingToken: run.FencingToken,
+	}); err != nil {
+		t.Fatalf("Create driver step: %v", err)
+	}
+
+	outcome, err := EnqueueTaskRunWithResult(ctx, st, TaskRunRequestOptions{
+		WorkspaceKey:       "TEST",
+		DriverRunID:        run.RunID,
+		DriverStepID:       "step-enqueue",
+		TaskRunID:          "task-run-enqueue",
+		TaskID:             "TEST-9",
+		ProviderProfile:    "custom-cloud",
+		SupportedProviders: []string{"remote-sandbox"},
+		ParentSessionID:    "lead-session-1",
+		ParentNodeID:       run.NodeID,
+		ParentLeaseID:      run.LeaseID,
+		ParentFence:        run.FencingToken,
+		WorkerProfileID:    "worker-profile-1",
+		RunnerPlacement:    domain.TaskRunPlacement{Provider: "custom-runner"},
+		SandboxPlacement:   domain.TaskRunPlacement{CWD: "/workspace"},
+	}, HostBridgeTaskExecutor{Command: []string{"unused"}})
+	if err != nil {
+		t.Fatalf("EnqueueTaskRunWithResult: %v", err)
+	}
+	if outcome.LeaseToken != "" {
+		t.Fatalf("outcome lease token = %q, want empty until a worker claims the task run", outcome.LeaseToken)
+	}
+	queued := outcome.Run
+	if queued.TaskRunID != "task-run-enqueue" || queued.Status != domain.TaskRunQueued || queued.NodeID != "" || queued.LeaseID != "" || queued.FencingToken != 0 {
+		t.Fatalf("queued = %+v, want unclaimed queued task run", queued)
+	}
+	if queued.ProviderProfile != "custom-cloud" || queued.SandboxPlacement.Provider != "remote-sandbox" || queued.WorkerProfileID != "worker-profile-1" {
+		t.Fatalf("queued provider/profile/placement = %+v, want resolved queued placement", queued)
+	}
+	if queued.RuntimeMetadata["parent_session_id"] != "lead-session-1" || queued.RuntimeMetadata["requested_by"] != "driver" {
+		t.Fatalf("queued metadata = %+v, want driver request metadata", queued.RuntimeMetadata)
+	}
+	step, err := st.DriverSteps().Get(ctx, "TEST", "step-enqueue")
+	if err != nil {
+		t.Fatalf("Get driver step: %v", err)
+	}
+	if step.Status != domain.DriverStepQueued || step.TaskRunID != "task-run-enqueue" || !step.StartedAt.IsZero() || step.EndedAt != nil {
+		t.Fatalf("step = %+v, want queued step linked to queued task run", step)
+	}
+}
+
 func TestClaimAndExecuteTaskRunWithResultClaimsQueuedChild(t *testing.T) {
 	ctx, st, run := setupRunningDriverRun(t)
 	if _, err := st.TaskRuns().Create(ctx, store.TaskRunCreate{

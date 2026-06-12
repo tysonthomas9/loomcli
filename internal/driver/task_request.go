@@ -51,6 +51,8 @@ type TaskRunWorkerOptions struct {
 	SandboxPlacement   domain.TaskRunPlacement
 	HeartbeatInterval  time.Duration
 	DeferCompletion    bool
+	CloseTaskOnSuccess bool
+	MaxAttempts        int
 }
 
 type TaskExecRequest struct {
@@ -165,6 +167,45 @@ func RequestTaskRun(ctx context.Context, s store.Store, opts TaskRunRequestOptio
 	return outcome.Run, nil
 }
 
+func EnqueueTaskRun(ctx context.Context, s store.Store, opts TaskRunRequestOptions, preflighter TaskProviderPreflighter) (*domain.TaskRun, error) {
+	outcome, err := EnqueueTaskRunWithResult(ctx, s, opts, preflighter)
+	if err != nil {
+		return nil, err
+	}
+	return outcome.Run, nil
+}
+
+func EnqueueTaskRunWithResult(ctx context.Context, s store.Store, opts TaskRunRequestOptions, preflighter TaskProviderPreflighter) (*TaskRunRequestOutcome, error) {
+	if s == nil {
+		return nil, fmt.Errorf("store required: %w", domain.ErrInvalid)
+	}
+	opts = normalizeTaskRunRequestOptions(opts)
+	if err := validateTaskRunRequestOptions(opts); err != nil {
+		return nil, err
+	}
+	if preflighter == nil {
+		preflighter = LocalTaskExecutor{}
+	}
+	resolved, err := preflightTaskRunRequest(ctx, opts, preflighter)
+	if err != nil {
+		return nil, err
+	}
+	opts = resolved
+	parent, err := verifyTaskRunRequestParent(ctx, s, opts)
+	if err != nil {
+		return nil, err
+	}
+	refs := newTaskRunRequestRefs(opts, parent)
+	queued, err := createQueuedTaskRun(ctx, s, opts, refs)
+	if err != nil {
+		return nil, fmt.Errorf("create task run: %w", err)
+	}
+	if err := linkQueuedTaskRunRequestDriverStep(ctx, s, opts, queued); err != nil {
+		return nil, err
+	}
+	return &TaskRunRequestOutcome{Run: queued}, nil
+}
+
 func ClaimAndExecuteTaskRun(ctx context.Context, s store.Store, opts TaskRunWorkerOptions, executor TaskExecutor) (*domain.TaskRun, error) {
 	outcome, err := ClaimAndExecuteTaskRunWithResult(ctx, s, opts, executor)
 	if err != nil {
@@ -213,11 +254,13 @@ func ClaimAndExecuteTaskRunWithResult(ctx context.Context, s store.Store, opts T
 		return nil, fmt.Errorf("claim queued task run: %w", err)
 	}
 	return executeClaimedTaskRunWithResult(ctx, s, claimed, executeClaimedTaskRunOptions{
-		WorkspaceKey:      opts.WorkspaceKey,
-		LeaseToken:        leaseToken,
-		HeartbeatInterval: opts.HeartbeatInterval,
-		DeferCompletion:   opts.DeferCompletion,
-		HeartbeatSource:   "task_run_worker",
+		WorkspaceKey:       opts.WorkspaceKey,
+		LeaseToken:         leaseToken,
+		HeartbeatInterval:  opts.HeartbeatInterval,
+		DeferCompletion:    opts.DeferCompletion,
+		CloseTaskOnSuccess: opts.CloseTaskOnSuccess,
+		MaxAttempts:        opts.MaxAttempts,
+		HeartbeatSource:    "task_run_worker",
 	}, executor)
 }
 
@@ -303,8 +346,8 @@ func validateTaskRunRequestOptions(opts TaskRunRequestOptions) error {
 	return nil
 }
 
-func preflightTaskRunRequest(ctx context.Context, opts TaskRunRequestOptions, executor TaskExecutor) (TaskRunRequestOptions, error) {
-	preflighter, ok := executor.(TaskProviderPreflighter)
+func preflightTaskRunRequest(ctx context.Context, opts TaskRunRequestOptions, candidate any) (TaskRunRequestOptions, error) {
+	preflighter, ok := candidate.(TaskProviderPreflighter)
 	if !ok {
 		return opts, nil
 	}
@@ -419,21 +462,41 @@ func linkTaskRunRequestDriverStep(ctx context.Context, s store.Store, opts TaskR
 	return nil
 }
 
+func linkQueuedTaskRunRequestDriverStep(ctx context.Context, s store.Store, opts TaskRunRequestOptions, queued *domain.TaskRun) error {
+	if opts.DriverStepID == "" {
+		return nil
+	}
+	status := domain.DriverStepQueued
+	_, err := s.DriverSteps().Update(ctx, opts.WorkspaceKey, opts.DriverStepID, store.DriverStepUpdate{
+		Status:       &status,
+		TaskRunID:    &queued.TaskRunID,
+		NodeID:       opts.ParentNodeID,
+		LeaseID:      opts.ParentLeaseID,
+		FencingToken: opts.ParentFence,
+	})
+	if err != nil {
+		return fmt.Errorf("link queued driver step: %w", err)
+	}
+	return nil
+}
+
 type executeClaimedTaskRunOptions struct {
-	WorkspaceKey      string
-	DriverRunID       string
-	DriverStepID      string
-	TaskID            string
-	ProviderProfile   string
-	ParentSessionID   string
-	LeaseToken        string
-	HeartbeatInterval time.Duration
-	DeferCompletion   bool
-	UpdateDriverStep  bool
-	ParentNodeID      string
-	ParentLeaseID     string
-	ParentFence       int64
-	HeartbeatSource   string
+	WorkspaceKey       string
+	DriverRunID        string
+	DriverStepID       string
+	TaskID             string
+	ProviderProfile    string
+	ParentSessionID    string
+	LeaseToken         string
+	HeartbeatInterval  time.Duration
+	DeferCompletion    bool
+	CloseTaskOnSuccess bool
+	MaxAttempts        int
+	UpdateDriverStep   bool
+	ParentNodeID       string
+	ParentLeaseID      string
+	ParentFence        int64
+	HeartbeatSource    string
 }
 
 func executeClaimedTaskRunWithResult(ctx context.Context, s store.Store, claimed *domain.TaskRun, opts executeClaimedTaskRunOptions, executor TaskExecutor) (*TaskRunRequestOutcome, error) {
@@ -452,6 +515,29 @@ func executeClaimedTaskRunWithResult(ctx context.Context, s store.Store, claimed
 	metadata := taskExecRuntimeMetadata(execResult, refs)
 	if opts.DeferCompletion && completion.Status == domain.TaskRunCompleted {
 		return deferClaimedTaskRunCompletion(ctx, s, claimed, opts, execResult, completion, metadata)
+	}
+	if opts.CloseTaskOnSuccess && completion.Status == domain.TaskRunCompleted {
+		final, err := completeClaimedTaskRun(ctx, s, claimed, opts, refs, execResult, completion, metadata)
+		if err != nil {
+			return nil, err
+		}
+		if err := finishLinkedDriverStep(ctx, s, claimed, opts, refs, execResult, completion.Status); err != nil {
+			return nil, err
+		}
+		return &TaskRunRequestOutcome{Run: final, LeaseToken: opts.LeaseToken, ArtifactIDs: normalizeArtifactIDs(execResult.ArtifactIDs)}, nil
+	}
+	if retryTaskRun := taskRunRetryDecision(claimed, opts, completion); retryTaskRun.Retry {
+		requeued, err := requeueClaimedTaskRun(ctx, s, claimed, opts, execResult, completion, metadata, retryTaskRun)
+		if err != nil {
+			return nil, err
+		}
+		if err := requeueLinkedDriverStep(ctx, s, claimed, requeued); err != nil {
+			return nil, err
+		}
+		return &TaskRunRequestOutcome{Run: requeued, LeaseToken: opts.LeaseToken, ArtifactIDs: normalizeArtifactIDs(execResult.ArtifactIDs)}, nil
+	}
+	if completion.Status == domain.TaskRunFailed {
+		metadata = taskRunParkedMetadata(claimed, opts, completion, metadata)
 	}
 	final, err := finishClaimedTaskRun(ctx, s, claimed, opts, refs, execResult, completion, metadata)
 	if err != nil {
@@ -487,7 +573,7 @@ func claimedTaskRunRefsFromOptions(claimed *domain.TaskRun, opts executeClaimedT
 		DriverStepID:    firstNonEmpty(opts.DriverStepID, claimed.DriverStepID),
 		TaskID:          firstNonEmpty(opts.TaskID, claimed.TaskID),
 		ProviderProfile: firstNonEmpty(opts.ProviderProfile, claimed.ProviderProfile),
-		ParentSessionID: strings.TrimSpace(opts.ParentSessionID),
+		ParentSessionID: firstNonEmpty(opts.ParentSessionID, claimed.RuntimeMetadata["parent_session_id"]),
 		HeartbeatSource: firstNonEmpty(opts.HeartbeatSource, "task_run_executor"),
 	}
 }
@@ -626,6 +712,37 @@ func taskRunSyntheticCompletion(pending *domain.TaskRun, execResult TaskExecResu
 	return &synthetic
 }
 
+func completeClaimedTaskRun(ctx context.Context, s store.Store, claimed *domain.TaskRun, opts executeClaimedTaskRunOptions, refs claimedTaskRunRefs, execResult TaskExecResult, completion taskExecCompletion, metadata map[string]string) (*domain.TaskRun, error) {
+	artifactIDs := normalizeArtifactIDs(execResult.ArtifactIDs)
+	final, err := s.TaskRuns().Complete(ctx, refs.WorkspaceKey, claimed.TaskRunID, store.TaskRunComplete{
+		CompletionID:        "worker-complete-" + claimed.TaskRunID,
+		NodeID:              claimed.NodeID,
+		LeaseID:             claimed.LeaseID,
+		LeaseToken:          opts.LeaseToken,
+		FencingToken:        claimed.FencingToken,
+		Status:              completion.Status,
+		ExitCode:            &completion.ExitCode,
+		LogsRef:             execResult.LogsRef,
+		ArtifactsRef:        execResult.ArtifactsRef,
+		RequiredArtifactIDs: artifactIDs,
+		RequireArtifacts:    len(artifactIDs) > 0,
+		InputTokens:         execResult.InputTokens,
+		OutputTokens:        execResult.OutputTokens,
+		CacheReadTokens:     execResult.CacheReadTokens,
+		CacheWriteTokens:    execResult.CacheWriteTokens,
+		EstimatedCostUSD:    execResult.EstimatedCostUSD,
+		RuntimeMetadata:     metadata,
+		ErrorClass:          completion.ErrorClass,
+		ErrorMessage:        completion.ErrorMessage,
+		CloseTask:           true,
+		CloseReason:         "completed by task worker",
+	})
+	if err != nil {
+		return nil, fmt.Errorf("complete task run: %w", err)
+	}
+	return final, nil
+}
+
 func finishClaimedTaskRun(ctx context.Context, s store.Store, claimed *domain.TaskRun, opts executeClaimedTaskRunOptions, refs claimedTaskRunRefs, execResult TaskExecResult, completion taskExecCompletion, metadata map[string]string) (*domain.TaskRun, error) {
 	final, err := s.TaskRuns().Finish(ctx, refs.WorkspaceKey, claimed.TaskRunID, store.TaskRunFinish{
 		NodeID:           claimed.NodeID,
@@ -649,37 +766,6 @@ func finishClaimedTaskRun(ctx context.Context, s store.Store, claimed *domain.Ta
 		return nil, fmt.Errorf("finish task run: %w", err)
 	}
 	return final, nil
-}
-
-func finishLinkedDriverStep(ctx context.Context, s store.Store, claimed *domain.TaskRun, opts executeClaimedTaskRunOptions, refs claimedTaskRunRefs, execResult TaskExecResult, status domain.TaskRunStatus) error {
-	if !opts.UpdateDriverStep || refs.DriverStepID == "" {
-		return nil
-	}
-	stepStatus := driverStepStatusForTaskRun(status)
-	outputRef := firstNonEmpty(execResult.ArtifactsRef, execResult.LogsRef)
-	_, err := s.DriverSteps().Update(ctx, refs.WorkspaceKey, refs.DriverStepID, store.DriverStepUpdate{
-		Status:       &stepStatus,
-		TaskRunID:    &claimed.TaskRunID,
-		OutputRef:    &outputRef,
-		NodeID:       opts.ParentNodeID,
-		LeaseID:      opts.ParentLeaseID,
-		FencingToken: opts.ParentFence,
-	})
-	if err != nil {
-		return fmt.Errorf("finish driver step: %w", err)
-	}
-	return nil
-}
-
-func driverStepStatusForTaskRun(status domain.TaskRunStatus) domain.DriverStepStatus {
-	switch status {
-	case domain.TaskRunCompleted:
-		return domain.DriverStepCompleted
-	case domain.TaskRunCancelled:
-		return domain.DriverStepSkipped
-	default:
-		return domain.DriverStepFailed
-	}
 }
 
 func TaskRunResultFromDomain(run *domain.TaskRun, artifactIDs ...[]string) TaskRunRequestResult {
