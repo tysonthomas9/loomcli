@@ -12,6 +12,8 @@ import (
 	"testing"
 	"time"
 
+	hwharness "github.com/olesho/harness-wrapper/pkg/harness"
+
 	"github.com/tysonthomas9/loomcli/internal/usage"
 )
 
@@ -831,5 +833,135 @@ func TestScanStreamOutputReturnsTail(t *testing.T) {
 	}
 	if strings.Join(seen, "\n") != got {
 		t.Errorf("seen lines = %q, want %q", strings.Join(seen, "\n"), got)
+	}
+}
+
+// mkClaudeTurnResult builds an errored-turn result carrying the given HTTP code
+// and RetryAfter hint, without importing pkg/chat (fields set via assignment).
+func mkClaudeTurnResult(code int, retryAfter time.Duration) claudeRunTurnResult {
+	var r claudeRunTurnResult
+	r.Turn.HTTPCode = code
+	r.Turn.RetryAfter = retryAfter
+	return r
+}
+
+func TestClaudeTurnShouldRetry(t *testing.T) {
+	cases := []struct {
+		name string
+		code int
+		ra   time.Duration
+		err  error
+		want bool
+	}{
+		{"429 rate-limited", 429, 0, hwharness.ErrTurnErrored, true},
+		{"529 overloaded", 529, 0, hwharness.ErrTurnErrored, true},
+		{"503 unavailable", 503, 0, hwharness.ErrTurnErrored, true},
+		{"408 timeout", 408, 0, hwharness.ErrTurnErrored, true},
+		{"retry-after hint, no code", 0, 5 * time.Second, hwharness.ErrTurnErrored, true},
+		{"401 auth is fatal", 401, 0, hwharness.ErrTurnErrored, false},
+		{"402 billing is fatal", 402, 0, hwharness.ErrTurnErrored, false},
+		{"400 bad request", 400, 0, hwharness.ErrTurnErrored, false},
+		{"errored with no signal", 0, 0, hwharness.ErrTurnErrored, false},
+		{"non-turn error (pty/ctx)", 529, 0, errors.New("pty open failed"), false},
+		{"nil error never retries", 529, 0, nil, false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got, hint := claudeTurnShouldRetry(mkClaudeTurnResult(c.code, c.ra), c.err)
+			if got != c.want {
+				t.Errorf("claudeTurnShouldRetry(code=%d, err=%v) = %v, want %v", c.code, c.err, got, c.want)
+			}
+			if c.ra > 0 && hint != c.ra {
+				t.Errorf("expected RetryAfter hint %s to propagate, got %s", c.ra, hint)
+			}
+		})
+	}
+}
+
+func TestRunClaudeTurnWithRetry_RetriesTransientThenSucceeds(t *testing.T) {
+	prevSleep := claudeTurnSleep
+	var slept []time.Duration
+	claudeTurnSleep = func(_ context.Context, d time.Duration) error { slept = append(slept, d); return nil }
+	defer func() { claudeTurnSleep = prevSleep }()
+
+	calls := 0
+	res, err := runClaudeTurnWithRetry(context.Background(), func() (claudeRunTurnResult, error) {
+		calls++
+		if calls <= 2 {
+			return mkClaudeTurnResult(529, 0), hwharness.ErrTurnErrored
+		}
+		var ok claudeRunTurnResult
+		ok.Turn.Text = "done"
+		return ok, nil
+	})
+	if err != nil {
+		t.Fatalf("expected success after transient retries, got %v", err)
+	}
+	if calls != 3 {
+		t.Fatalf("expected 3 attempts (2 transient + 1 success), got %d", calls)
+	}
+	if len(slept) != 2 {
+		t.Fatalf("expected 2 backoff sleeps, got %d (%v)", len(slept), slept)
+	}
+	if res.Turn.Text != "done" {
+		t.Fatalf("expected final success result, got Text=%q", res.Turn.Text)
+	}
+}
+
+func TestRunClaudeTurnWithRetry_StopsAtMaxRetries(t *testing.T) {
+	prevSleep := claudeTurnSleep
+	claudeTurnSleep = func(context.Context, time.Duration) error { return nil }
+	defer func() { claudeTurnSleep = prevSleep }()
+
+	calls := 0
+	_, err := runClaudeTurnWithRetry(context.Background(), func() (claudeRunTurnResult, error) {
+		calls++
+		return mkClaudeTurnResult(503, 0), hwharness.ErrTurnErrored
+	})
+	if !errors.Is(err, hwharness.ErrTurnErrored) {
+		t.Fatalf("expected ErrTurnErrored after exhausting retries, got %v", err)
+	}
+	if want := claudeTurnMaxRetries + 1; calls != want {
+		t.Fatalf("expected %d attempts (1 initial + %d retries), got %d", want, claudeTurnMaxRetries, calls)
+	}
+}
+
+func TestRunClaudeTurnWithRetry_NoRetryOnFatal(t *testing.T) {
+	prevSleep := claudeTurnSleep
+	sleeps := 0
+	claudeTurnSleep = func(context.Context, time.Duration) error { sleeps++; return nil }
+	defer func() { claudeTurnSleep = prevSleep }()
+
+	calls := 0
+	_, err := runClaudeTurnWithRetry(context.Background(), func() (claudeRunTurnResult, error) {
+		calls++
+		return mkClaudeTurnResult(401, 0), hwharness.ErrTurnErrored
+	})
+	if !errors.Is(err, hwharness.ErrTurnErrored) {
+		t.Fatalf("expected the original error, got %v", err)
+	}
+	if calls != 1 {
+		t.Fatalf("expected exactly 1 attempt (no retry on auth/401), got %d", calls)
+	}
+	if sleeps != 0 {
+		t.Fatalf("expected no backoff sleeps on fatal class, got %d", sleeps)
+	}
+}
+
+func TestClaudeTurnBackoff(t *testing.T) {
+	if got := claudeTurnBackoff(0, 5*time.Second); got != 5*time.Second {
+		t.Errorf("hint backoff = %s, want 5s", got)
+	}
+	if got := claudeTurnBackoff(0, 10*time.Minute); got != claudeTurnMaxBackoff {
+		t.Errorf("oversized hint = %s, want cap %s", got, claudeTurnMaxBackoff)
+	}
+	if got := claudeTurnBackoff(0, 0); got != claudeTurnBaseBackoff {
+		t.Errorf("attempt0 backoff = %s, want %s", got, claudeTurnBaseBackoff)
+	}
+	if got := claudeTurnBackoff(1, 0); got != 2*claudeTurnBaseBackoff {
+		t.Errorf("attempt1 backoff = %s, want %s", got, 2*claudeTurnBaseBackoff)
+	}
+	if got := claudeTurnBackoff(20, 0); got != claudeTurnMaxBackoff {
+		t.Errorf("large-attempt backoff = %s, want cap %s", got, claudeTurnMaxBackoff)
 	}
 }

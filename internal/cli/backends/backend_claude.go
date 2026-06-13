@@ -227,6 +227,13 @@ func buildClaudeRunTurnArgs(resumeSessionID string) []string {
 		args = append(args, claudeResumeArgs(resumeSessionID)...)
 	}
 	args = append(args, "--dangerously-skip-permissions")
+	// Per-run USD guardrail. Claude Code's interactive mode accepts
+	// --max-budget-usd (same flag as print mode), so the LOOM_MAX_BUDGET_USD
+	// cap carries over to the RunTurn path. Omitted only when
+	// resolveMaxBudgetUSD opts out (returns "").
+	if budget := resolveMaxBudgetUSD(); budget != "" {
+		args = append(args, "--max-budget-usd", budget)
+	}
 	if effort := resolveAgentEffort(); effort != "" {
 		args = append(args, "--effort", effort)
 	}
@@ -258,7 +265,9 @@ func defaultClaudeNonInteractiveInvoker(workDir, prompt, agentName string, shutd
 	ctx, cancel := contextFromShutdown(context.Background(), shutdown)
 	defer cancel()
 
-	res, err := invokeClaudeRunTurn(ctx, workDir, prompt, agentName, resumeID, cli.DaemonActivityObserver(), collector)
+	res, err := runClaudeTurnWithRetry(ctx, func() (claudeRunTurnResult, error) {
+		return invokeClaudeRunTurn(ctx, workDir, prompt, agentName, resumeID, cli.DaemonActivityObserver(), collector)
+	})
 	outputTail := claudeRunTurnEvidence(res, "")
 	if err != nil {
 		if errors.Is(err, hwharness.ErrTurnErrored) {
@@ -313,6 +322,99 @@ func invokeClaudeRunTurn(ctx context.Context, workDir, prompt, agentName, resume
 		res.Turn.Text = raw.String()
 	}
 	return res, err
+}
+
+// Retry tunables for the RunTurn path. The in-tree harness.RunWithRetry wraps
+// the older hwharness.Run API and can't be reused for RunTurn, so these are
+// kept in sync with harness.DefaultRetryPolicy (Max 3, 2s base, 60s cap).
+const (
+	claudeTurnMaxRetries  = 3
+	claudeTurnBaseBackoff = 2 * time.Second
+	claudeTurnMaxBackoff  = 60 * time.Second
+)
+
+// claudeTurnSleep is the backoff sleep, honoring context cancellation. It is a
+// package var so tests can stub it out to avoid real delays.
+var claudeTurnSleep = func(ctx context.Context, d time.Duration) error {
+	if d <= 0 {
+		return nil
+	}
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-t.C:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+// runClaudeTurnWithRetry transparently respawns a Claude turn on transient API
+// failures — restoring the retry behavior the pre-RunTurn path got from
+// harness.RunWithRetry, which every other backend still uses. invoke runs one
+// turn; the loop re-invokes (up to claudeTurnMaxRetries) while the failure is
+// transient, honoring any RetryAfter hint.
+func runClaudeTurnWithRetry(ctx context.Context, invoke func() (claudeRunTurnResult, error)) (claudeRunTurnResult, error) {
+	var (
+		res claudeRunTurnResult
+		err error
+	)
+	for attempt := 0; ; attempt++ {
+		res, err = invoke()
+		if err == nil {
+			return res, nil
+		}
+		retry, hint := claudeTurnShouldRetry(res, err)
+		if !retry || attempt >= claudeTurnMaxRetries {
+			return res, err
+		}
+		delay := claudeTurnBackoff(attempt, hint)
+		fmt.Fprintf(os.Stderr, "[loom] claude turn transient failure (HTTP %d); retry %d/%d in %s\n",
+			res.Turn.HTTPCode, attempt+1, claudeTurnMaxRetries, delay)
+		if serr := claudeTurnSleep(ctx, delay); serr != nil {
+			return res, serr
+		}
+	}
+}
+
+// claudeTurnShouldRetry reports whether an errored RunTurn result is a transient
+// condition worth retrying, plus the backoff floor the harness suggested. On the
+// errored path RunTurn leaves WrapperResult zero, so the only reliable signals
+// are on the turn itself: the upstream HTTP status the wrapper parsed from an
+// api_error banner, and any RetryAfter hint. Mirrors harness.shouldRetry intent:
+// retry rate-limit / overloaded / server-side 5xx (and anything carrying a
+// RetryAfter hint); never auth (401/403), billing (402), or other 4xx.
+// Non-turn errors (PTY setup, ctx cancel, transport with no code) fall through
+// to the caller / daemon-supervisor restart.
+func claudeTurnShouldRetry(res claudeRunTurnResult, err error) (bool, time.Duration) {
+	if !errors.Is(err, hwharness.ErrTurnErrored) {
+		return false, 0
+	}
+	switch res.Turn.HTTPCode {
+	case 408, 429, 500, 502, 503, 504, 529:
+		return true, res.Turn.RetryAfter
+	}
+	if res.Turn.RetryAfter > 0 {
+		return true, res.Turn.RetryAfter
+	}
+	return false, res.Turn.RetryAfter
+}
+
+// claudeTurnBackoff selects the wait before the next attempt. A non-zero
+// RetryAfter hint wins over the exponential schedule; both are capped at
+// claudeTurnMaxBackoff. Mirrors harness.backoffFor.
+func claudeTurnBackoff(attempt int, hint time.Duration) time.Duration {
+	if hint > 0 {
+		if hint > claudeTurnMaxBackoff {
+			return claudeTurnMaxBackoff
+		}
+		return hint
+	}
+	d := claudeTurnBaseBackoff << attempt
+	if d > claudeTurnMaxBackoff || d < claudeTurnBaseBackoff {
+		return claudeTurnMaxBackoff
+	}
+	return d
 }
 
 type capturedOutput struct {
