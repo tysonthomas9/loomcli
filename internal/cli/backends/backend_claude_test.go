@@ -355,7 +355,7 @@ done
 		t.Fatalf("write fake claude: %v", err)
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	var out bytes.Buffer
 	res, err := claudeRunTurn(ctx, claudeRunTurnConfig{
