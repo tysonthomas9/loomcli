@@ -27,6 +27,56 @@ NM="$WORK_DIR/node_modules"
 FLUE_RUNTIME="${LOOM_FLUE_RUNTIME_ROOT:-/opt/flue/packages/runtime}"
 SDK_ROOT="${LOOM_SDK_ROOT:-/opt/loom-sdk}"
 
+# ── Codex auth: mirror the read-only host ~/.codex into a writable copy ──────
+# The A1 github-review-agent task runner spawns the codex CLI. The host's
+# ~/.codex is mounted READ-ONLY (compose) at LOOM_STACK_CODEX_RO_DIR so the
+# operator's auth is never mutated; codex, however, writes session/log state
+# under CODEX_HOME at runtime and crashes with "Read-only file system" if
+# pointed at the RO mount. Mirror the auth + benign config into the writable
+# CODEX_HOME, omitting host MCP/plugin/notify config and runtime state DBs
+# (platform-specific; a stale state DB makes codex print "file is not a
+# database"). This is the same sanitized mirror the proven single-container path
+# performs (scripts/dev-container-start.sh mirror_codex_rw). Only runs when the
+# RO mount is present, so the stack still boots without codex for non-A1 runs.
+CODEX_RO_DIR="${LOOM_STACK_CODEX_RO_DIR:-$HOME/.codex}"
+CODEX_RW_DIR="${LOOM_STACK_CODEX_RW_DIR:-$HOME/.codex-rw}"
+
+sanitize_codex_config() {
+  # Drop notify hooks, [mcp_servers.*] and [plugins.*] sections (host desktop
+  # binaries are not present/executable in this container).
+  awk '
+    /^notify[[:space:]]*=/ { next }
+    /^\[mcp_servers(\.|])/ { skip = 1; next }
+    /^\[plugins\./        { skip = 1; next }
+    /^\[/                 { skip = 0 }
+    !skip { print }
+  ' "$1" >"$2" 2>/dev/null || true
+}
+
+mirror_codex_rw() {
+  src="$1"
+  dst="$2"
+  [ -d "$src" ] || return 0
+  # auth.json is the only must-have; if the RO mount has none there is nothing
+  # to mirror and codex would fail at runtime regardless — warn and move on.
+  if [ ! -e "$src/auth.json" ]; then
+    echo "serve-entrypoint: WARNING ${src}/auth.json absent — codex review TaskRuns will fail until host ~/.codex is mounted with valid auth" >&2
+    return 0
+  fi
+  mkdir -p "$dst"
+  for f in auth.json AGENTS.md installation_id internal_storage.json \
+           version.json .codex-global-state.json .personality_migration; do
+    [ -e "$src/$f" ] && cp -p "$src/$f" "$dst/$f" 2>/dev/null || true
+  done
+  [ -e "$src/config.toml" ] && sanitize_codex_config "$src/config.toml" "$dst/config.toml"
+  for d in rules skills plugins memories vendor_imports; do
+    [ -d "$src/$d" ] && cp -R "$src/$d" "$dst/$d" 2>/dev/null || true
+  done
+  echo "serve-entrypoint: mirrored codex auth ${src} -> ${dst} (writable CODEX_HOME)" >&2
+}
+
+mirror_codex_rw "$CODEX_RO_DIR" "$CODEX_RW_DIR"
+
 if [ -d "$FLUE_RUNTIME" ]; then
   mkdir -p "$NM/@flue" "$NM/@loom"
   ln -sfn "$FLUE_RUNTIME" "$NM/@flue/runtime"

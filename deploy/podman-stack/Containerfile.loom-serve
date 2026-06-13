@@ -12,6 +12,29 @@
 #                                in-image so native deps (esbuild, etc.) match
 #                                the container platform. Serve invokes the CLI
 #                                via LOOM_REAL_FLUE_CMD_JSON.
+#   - @openai/codex (global)     the codex CLI the A1 github-review-agent task
+#                                runner spawns. The embedded driver executor
+#                                lives in THIS container (LOOM_DRIVER_EXECUTOR=1),
+#                                so the codex-backed review TaskRun executes here
+#                                — the worker container's `loom worker` route is
+#                                an automode agent loop, not a driver TaskWorker
+#                                (internal/cli/serve/worker/worker_cmd.go), so it
+#                                cannot claim driver TaskRuns. Co-locating codex
+#                                with the executor keeps the stack DISTRIBUTED
+#                                (redis/fleet-db/serve/worker/stub as separate
+#                                containers) while running the SAME proven codex
+#                                recipe as the single-container loomcli-dev path
+#                                (Dockerfile.dev + run-github-review-codex-stack.sh).
+#   - /usr/local/bin/codex-review-runner.mjs  the A1 task runner (reused
+#                                verbatim from deploy/agents/a1-github-review/);
+#                                LOOM_DRIVER_TASK_RUNNER_CMD_JSON points at it,
+#                                wrapped in `env CODEX_HOME=…` (the task bridge
+#                                strips CODEX_* from the runner's inherited env —
+#                                internal/driver/env.go).
+#   - /usr/local/bin/a1-setup.sh the connector+grant+binding provisioner
+#                                (reused verbatim from
+#                                deploy/agents/a1-github-review/setup.sh); the
+#                                multi-container driver execs it in this container.
 #
 # Node 22 base because flue requires node >=22.18 and workflow runtimes are
 # node processes spawned inside this container (process launcher: with
@@ -19,13 +42,19 @@
 # boundary — see README "sandbox posture").
 #
 # Build context: the staging dir assembled by build.sh
-# (bin/ loom-sdk/ flue-src/).
+# (bin/ loom-sdk/ flue-src/ a1-github-review/).
 
 FROM docker.io/library/node:22-slim
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends git curl ca-certificates \
     && rm -rf /var/lib/apt/lists/*
+
+# The codex CLI the A1 review task runner spawns. Pinned to the same package
+# the proven single-container path installs (Dockerfile.dev runtime stage).
+# Installed globally so `codex` is on PATH for the node-user executor subprocess.
+RUN npm install -g @openai/codex \
+    && codex --version >/dev/null
 
 # pnpm pinned to flue's packageManager field (flue/package.json: pnpm@11.1.1).
 RUN corepack enable && corepack prepare pnpm@11.1.1 --activate
@@ -44,12 +73,25 @@ RUN chown -R node:node /opt/loom-sdk
 
 COPY bin/loom /usr/local/bin/loom
 
+# A1 github-review-agent runner + provisioner, reused verbatim from
+# deploy/agents/a1-github-review/ (staged into the build context by build.sh).
+# The runner is the codex-backed review task runner; a1-setup.sh wires the
+# connector/grant/binding. Both are agnostic to where the executor runs.
+COPY a1-github-review/codex-review-runner.mjs /usr/local/bin/codex-review-runner.mjs
+COPY a1-github-review/setup.sh /usr/local/bin/a1-setup.sh
+RUN chmod 0755 /usr/local/bin/codex-review-runner.mjs /usr/local/bin/a1-setup.sh
+
 # Seeds /work/node_modules (the runtime volume) so server-side workflow-bundle
 # builds can resolve @flue/runtime -> @hono/node-server/hono; see the script.
 COPY serve-entrypoint.sh /usr/local/bin/serve-entrypoint.sh
 RUN chmod 0755 /usr/local/bin/serve-entrypoint.sh
 
-RUN install -d -m 0755 -o node -g node /work /home/node/.loom
+# /home/node/.codex      <- host ~/.codex mounted READ-ONLY at runtime (compose)
+# /home/node/.codex-rw   <- writable sanitized mirror the entrypoint populates;
+#                           codex writes session/log state there and reads auth
+#                           from the mirrored auth.json. Owned by node so the
+#                           non-root executor subprocess can write it.
+RUN install -d -m 0755 -o node -g node /work /home/node/.loom /home/node/.codex /home/node/.codex-rw
 
 ENV HOME=/home/node \
     LOOM_SDK_ROOT=/opt/loom-sdk \

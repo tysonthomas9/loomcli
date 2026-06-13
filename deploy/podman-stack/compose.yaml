@@ -144,6 +144,25 @@ services:
       # isolation boundary. "container" requires nested podman (native
       # Linux hosts only — not macOS podman machine). See README.
       LOOM_DRIVER_SANDBOX: ${LOOM_STACK_DRIVER_SANDBOX:-}
+      # --- A1 github-review-agent: codex-backed review TaskRun ---
+      # The embedded driver executor (above) runs the review TaskRun in THIS
+      # container. The codex CLI it spawns reads auth from the sanitized
+      # writable mirror the entrypoint builds from the read-only host ~/.codex
+      # mount (see serve-entrypoint.sh mirror_codex_rw + the volumes below).
+      #
+      # LOOM_DRIVER_TASK_RUNNER_CMD_JSON wraps the runner in `env CODEX_HOME=…`
+      # because the task bridge strips CODEX_* from the runner's inherited env
+      # (internal/driver/env.go subprocessEnvSensitive); the wrapper re-injects
+      # the writable CODEX_HOME for the runner and the codex child it spawns.
+      # Empty default = no codex runner wired (e.g. the acceptance suite, which
+      # overrides this with its deterministic stub in compose.e2e.yaml); the A1
+      # multi-container driver sets it to the codex runner command.
+      LOOM_DRIVER_TASK_RUNNER_CMD_JSON: ${LOOM_STACK_TASK_RUNNER_CMD_JSON:-}
+      LOOM_STACK_CODEX_RW_DIR: ${LOOM_STACK_CODEX_RW_DIR:-/home/node/.codex-rw}
+      # Flue agent model for codex-backed runs (passes the env allowlist —
+      # internal/driver/env.go subprocessEnvAllowExact). Empty default keeps
+      # non-A1 stacks unchanged.
+      LOOM_FLUE_AGENT_MODEL: ${LOOM_STACK_FLUE_AGENT_MODEL:-}
       # --- connectors ---
       LOOM_CONNECTOR_VAULT_KEY: ${LOOM_CONNECTOR_VAULT_KEY}
     networks: [loom-stack]
@@ -152,6 +171,12 @@ services:
     volumes:
       - loom-data:/home/node/.loom
       - loom-work:/work
+      # The A1 codex review runner needs the host ~/.codex mounted read-only at
+      # /home/node/.codex (the entrypoint mirrors it into a writable CODEX_HOME,
+      # never mutating the host copy). That bind is supplied by the A1-only
+      # overlay compose.codex.yaml (layered by the multi-container review
+      # driver), NOT here — the base stack and the acceptance suite must boot
+      # without a host ~/.codex dependency.
     mem_limit: 2g
     cpus: 2.0
     pids_limit: 512
