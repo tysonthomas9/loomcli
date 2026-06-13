@@ -105,7 +105,11 @@ function parseReviewSubject(input) {
     headSha,
     baseRef,
     draft,
-    connectorId: stringValue(input.connectorId),
+    // connectorId names the workspace connector the dispatch egress flows
+    // through. The webhook payload carries no connector id, so default to the
+    // conventional "github" connector (overridable via input.connectorId);
+    // dispatch validation rejects an empty connector id.
+    connectorId: stringValue(input.connectorId) || "github",
     subjectRef: repo + "#" + prNumber,
   };
 }
@@ -118,6 +122,7 @@ async function readLivePullRequest(loom, subject) {
   try {
     const result = await loom.connectors.github.readPullRequest({
       connectorId: subject.connectorId,
+      resource: "repo:" + subject.repoFullName,
       owner: subject.owner,
       repo: subject.repo,
       number: subject.prNumber,
@@ -147,12 +152,23 @@ async function fetchDiff(loom, subject) {
   try {
     const result = await loom.connectors.github.compare({
       connectorId: subject.connectorId,
+      resource: "repo:" + subject.repoFullName,
       owner: subject.owner,
       repo: subject.repo,
       base: subject.baseRef || "HEAD",
       head: subject.headSha,
     });
-    return { ok: true, base, body: (result && result.body) || {} };
+    // The compare connector returns the change summary plus the actual
+    // unified diff (body.diff) stitched from files[].patch. The review
+    // runner reasons over the raw diff text, so hand it the diff string
+    // (falling back to re-stitching the file patches when only files[] is
+    // present). A diff-less compare means an empty changeset.
+    const body = (result && result.body) || {};
+    const diffText = stringValue(body.diff) || stitchDiff(body.files);
+    if (!diffText) {
+      return { ok: false, errorClass: "empty_diff", summary: "diff compare for " + subject.subjectRef + " produced no changes" };
+    }
+    return { ok: true, base, text: diffText };
   } catch (err) {
     if (isStaleSubjectError(err)) {
       return { ok: false, errorClass: "stale_subject", summary: "diff compare for " + subject.subjectRef + " is stale: " + errorMessage(err) };
@@ -181,7 +197,7 @@ async function runReviewTask(loom, subject, diff) {
       prNumber: subject.prNumber,
       headSha: subject.headSha,
       baseRef: subject.baseRef,
-      diff: diff.body,
+      diff: diff.text,
       rubric: reviewRubric(),
     },
   };
@@ -263,6 +279,7 @@ async function postReview(loom, subject, findings) {
   try {
     const result = await loom.connectors.github.postReview({
       connectorId: subject.connectorId,
+      resource: "repo:" + subject.repoFullName,
       owner: subject.owner,
       repo: subject.repo,
       number: subject.prNumber,
@@ -287,13 +304,44 @@ async function postReview(loom, subject, findings) {
   }
 }
 
-// renderReviewBody composes the human-facing review summary; inline findings
-// ride in the connector's comments array, so the body is the overview.
+// renderReviewBody composes the human-facing review summary. The github
+// connector's review post carries the body + event but not the per-line
+// comments array, so each inline finding is also rendered into the body as a
+// `path:line — body` bullet; that way every finding is visible on the posted
+// COMMENT review even when the provider does not attach line comments.
 function renderReviewBody(findings, subject) {
   const summary = stringValue(findings.summary) || "Automated review of " + subject.subjectRef + " at " + subject.headSha + ".";
   const count = findings.comments.length;
-  const tail = count > 0 ? "\n\n" + count + " inline finding(s) below." : "\n\nNo blocking issues found.";
-  return summary + tail;
+  if (count === 0) {
+    return summary + "\n\nNo blocking issues found.";
+  }
+  const lines = findings.comments.map((c) => {
+    const loc = c.line ? c.path + ":" + c.line : c.path;
+    return "- **" + loc + "** — " + stringValue(c.body);
+  });
+  return summary + "\n\n" + count + " inline finding(s):\n" + lines.join("\n");
+}
+
+// stitchDiff re-builds a unified-diff string from a compare files[] array when
+// the connector did not already provide body.diff. Each file's patch is
+// prefixed with the synthesized diff/--- /+++ header lines.
+function stitchDiff(files) {
+  if (!Array.isArray(files)) {
+    return "";
+  }
+  const parts = [];
+  for (const f of files) {
+    if (!f || typeof f !== "object") {
+      continue;
+    }
+    const filename = stringValue(f.filename);
+    const patch = stringValue(f.patch);
+    if (!filename || !patch) {
+      continue;
+    }
+    parts.push("diff --git a/" + filename + " b/" + filename + "\n--- a/" + filename + "\n+++ b/" + filename + "\n" + patch);
+  }
+  return parts.join("\n");
 }
 
 // reviewRubric is the static review instruction set handed to the runner.

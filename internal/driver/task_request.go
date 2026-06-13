@@ -160,6 +160,11 @@ type TaskRunRequestResult struct {
 	ErrorMessage     string               `json:"errorMessage,omitempty"`
 	FinishedAt       *time.Time           `json:"finishedAt,omitempty"`
 	ProviderProfile  string               `json:"providerProfile,omitempty"`
+	// RuntimeMetadata surfaces the runner's runtimeMetadata to the awaiting
+	// workflow (e.g. the github-review-agent reads review_findings off it).
+	// The task-run-get op must carry it through, else a completed run looks
+	// empty to the driver.
+	RuntimeMetadata map[string]string `json:"runtimeMetadata,omitempty"`
 }
 
 type TaskRunRequestOutcome struct {
@@ -835,6 +840,7 @@ func TaskRunResultFromDomain(run *domain.TaskRun, artifactIDs ...[]string) TaskR
 		ErrorMessage:     run.ErrorMessage,
 		FinishedAt:       run.FinishedAt,
 		ProviderProfile:  run.ProviderProfile,
+		RuntimeMetadata:  cloneStringMap(run.RuntimeMetadata),
 	}
 }
 

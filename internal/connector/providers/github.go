@@ -327,6 +327,7 @@ func (g *GitHub) compareRead(ctx context.Context, spec CallSpec) (CallResult, er
 			g.upstreamError(spec, res)
 	}
 	obj := decodeObject(res.body)
+	files, diff := compareFiles(obj["files"])
 	return CallResult{
 		Status: res.status,
 		Body: map[string]any{
@@ -334,9 +335,55 @@ func (g *GitHub) compareRead(ctx context.Context, spec CallSpec) (CallResult, er
 			"aheadBy":      obj["ahead_by"],
 			"behindBy":     obj["behind_by"],
 			"totalCommits": obj["total_commits"],
+			// files carries the per-file changed-file summary (filename,
+			// status, patch); diff is those patches stitched into a single
+			// unified-diff string for a reviewer/LLM that reasons over the
+			// raw diff. Both are derived from the same /compare JSON response
+			// (the GitHub compare endpoint embeds files[].patch), so no extra
+			// request and no media-type change is needed.
+			"files": files,
+			"diff":  diff,
 		},
 		Decision: domain.ConnectorCallGranted,
 	}, nil
+}
+
+// compareFiles projects the /compare response's files[] array into a sanitized
+// camelCase list (filename, status, additions, deletions, patch) and stitches
+// the per-file patches into one unified-diff string. A nil or non-array input
+// yields an empty list and an empty diff.
+func compareFiles(raw any) ([]map[string]any, string) {
+	arr, ok := raw.([]any)
+	if !ok {
+		return []map[string]any{}, ""
+	}
+	files := make([]map[string]any, 0, len(arr))
+	var diff strings.Builder
+	for _, entry := range arr {
+		obj, ok := entry.(map[string]any)
+		if !ok {
+			continue
+		}
+		filename, _ := obj["filename"].(string)
+		status, _ := obj["status"].(string)
+		patch, _ := obj["patch"].(string)
+		files = append(files, map[string]any{
+			"filename":  filename,
+			"status":    status,
+			"additions": obj["additions"],
+			"deletions": obj["deletions"],
+			"patch":     patch,
+		})
+		if patch == "" {
+			continue
+		}
+		// A minimal but valid unified-diff file header so an LLM (or a human)
+		// sees which file each hunk belongs to. GitHub omits the diff --git
+		// preamble from files[].patch, so we synthesize the path lines.
+		fmt.Fprintf(&diff, "diff --git a/%s b/%s\n--- a/%s\n+++ b/%s\n%s\n",
+			filename, filename, filename, filename, patch)
+	}
+	return files, diff.String()
 }
 
 // issueCommentPost posts a comment on an issue or pull request.
