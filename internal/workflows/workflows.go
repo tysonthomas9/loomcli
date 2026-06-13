@@ -20,10 +20,16 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
-const BuiltinEpicRunnerWorkflowName = "epic-runner"
+const (
+	BuiltinEpicRunnerWorkflowName        = "epic-runner"
+	BuiltinGitHubReviewAgentWorkflowName = "github-review-agent"
+)
 
 //go:embed builtin/epic-runner.ts
 var builtinEpicRunnerWorkflowSource string
+
+//go:embed builtin/github-review-agent.ts
+var builtinGitHubReviewAgentWorkflowSource string
 
 type Spec struct {
 	Entrypoint string
@@ -51,12 +57,31 @@ type BuildAndRegisterOptions struct {
 var builtinMu sync.Mutex
 
 var builtinWorkflows = map[string]Spec{
-	BuiltinEpicRunnerWorkflowName: {
-		Entrypoint: "workflows/" + BuiltinEpicRunnerWorkflowName + ".ts",
-		Files: map[string]string{
-			"workflows/" + BuiltinEpicRunnerWorkflowName + ".ts": builtinEpicRunnerWorkflowSource,
-		},
-	},
+	BuiltinEpicRunnerWorkflowName:        builtinSpec(BuiltinEpicRunnerWorkflowName, builtinEpicRunnerWorkflowSource),
+	BuiltinGitHubReviewAgentWorkflowName: builtinSpec(BuiltinGitHubReviewAgentWorkflowName, builtinGitHubReviewAgentWorkflowSource),
+}
+
+// builtinSpec builds the single-entrypoint Spec for an embedded source-tree
+// workflow: the entrypoint is workflows/{name}.ts and the only file is that
+// embedded source. Adding a builtin is one map entry + one //go:embed.
+func builtinSpec(name, source string) Spec {
+	entrypoint := "workflows/" + name + ".ts"
+	return Spec{
+		Entrypoint: entrypoint,
+		Files:      map[string]string{entrypoint: source},
+	}
+}
+
+// BuiltinWorkflowNames returns the registered built-in workflow names sorted,
+// so callers (EnsureBuiltinWorkflow loops, registration round-trip tests) get
+// a stable list independent of map iteration order.
+func BuiltinWorkflowNames() []string {
+	names := make([]string, 0, len(builtinWorkflows))
+	for name := range builtinWorkflows {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
 }
 
 func BuiltinWorkflow(name string) (Spec, bool) {

@@ -138,6 +138,7 @@ func (m *Module) createWorkflowRun(w http.ResponseWriter, r *http.Request) {
 	run, err := driver.CreateDriverRun(r.Context(), m.store, driver.RunOptions{
 		WorkspaceKey:   ws,
 		DriverID:       driverID,
+		EpicID:         driver.DriverRunPayloadEpicID(payload),
 		IdempotencyKey: strings.TrimSpace(r.Header.Get("Idempotency-Key")),
 		SourceKind:     "api",
 		SourceRef:      r.URL.Path,

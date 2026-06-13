@@ -9,8 +9,10 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/driver"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
@@ -76,6 +78,146 @@ func TestCreateWorkflowRunRegistersBuiltinEpicRunner(t *testing.T) {
 	if !strings.HasPrefix(version.SourceRef, "builtin://workflows/"+BuiltinEpicRunnerWorkflowName+"/versions/") || version.CreatedBy != "system" {
 		t.Fatalf("version = %+v, want system built-in source", version)
 	}
+}
+
+// TestCreateWorkflowRunPromotesPayloadEpicID proves the HTTP-triggered run
+// path mirrors the `loom epic run` CLI: payload.epicId is promoted onto the
+// DriverRun. Without it, terminal task transitions never fire the lead-task
+// outbox (createLeadTaskOutbox gates on the run's EpicID), so webhook/HTTP
+// epics silently skip lead notifications. The outbox assertion is end-to-end:
+// a row only appears when createWorkflowRun set EpicID on the run.
+func TestCreateWorkflowRunPromotesPayloadEpicID(t *testing.T) {
+	cases := []struct {
+		name       string
+		payload    string
+		wantEpicID string
+		leadEpicID string // "" means no lead agent is bound
+		wantOutbox int
+	}{
+		{
+			name:       "epicId with lead bound creates lead-task outbox",
+			payload:    `{"epicId":"EPIC-42","requestedBy":"webhook"}`,
+			wantEpicID: "EPIC-42",
+			leadEpicID: "EPIC-42",
+			wantOutbox: 1,
+		},
+		{
+			name:       "epicId without lead skips outbox",
+			payload:    `{"epicId":"EPIC-42"}`,
+			wantEpicID: "EPIC-42",
+			leadEpicID: "",
+			wantOutbox: 0,
+		},
+		{
+			name:       "no epicId leaves run unbound and skips outbox",
+			payload:    `{"requestedBy":"webhook"}`,
+			wantEpicID: "",
+			leadEpicID: "EPIC-42",
+			wantOutbox: 0,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.Background()
+			st := seededWorkflowStore(t, ctx)
+			mux := http.NewServeMux()
+			NewModule(st).Register(mux)
+
+			req := httptest.NewRequest(http.MethodPost, "/api/workspaces/TEST/workflows/demo", stringsReader(tc.payload))
+			rec := httptest.NewRecorder()
+			mux.ServeHTTP(rec, req)
+			if rec.Code != http.StatusAccepted {
+				t.Fatalf("status = %d body=%s, want 202", rec.Code, rec.Body.String())
+			}
+			var run domain.DriverRun
+			if err := json.Unmarshal(rec.Body.Bytes(), &run); err != nil {
+				t.Fatalf("decode run: %v", err)
+			}
+			stored, err := st.DriverRuns().Get(ctx, "TEST", run.RunID)
+			if err != nil {
+				t.Fatalf("get stored run: %v", err)
+			}
+			if stored.EpicID != tc.wantEpicID {
+				t.Fatalf("stored run EpicID = %q, want %q", stored.EpicID, tc.wantEpicID)
+			}
+
+			if tc.leadEpicID != "" {
+				bindWorkflowEpicLead(t, ctx, st, "epic-lead-1", tc.leadEpicID)
+			}
+			driveTerminalTaskRun(t, ctx, st, stored.RunID)
+
+			rows := listWorkflowOutboxRows(t, ctx, st)
+			if len(rows) != tc.wantOutbox {
+				t.Fatalf("outbox rows = %d (%+v), want %d", len(rows), rows, tc.wantOutbox)
+			}
+			if tc.wantOutbox == 0 {
+				return
+			}
+			row := rows[0]
+			if row.Kind != domain.OutboxKindLeadTaskMessage || row.TargetAgent != "epic-lead-1" || row.EpicID != tc.wantEpicID {
+				t.Fatalf("outbox row = %+v, want leadTaskMessage targeting epic-lead-1 under %q", row, tc.wantEpicID)
+			}
+		})
+	}
+}
+
+// driveTerminalTaskRun enqueues a queued task run under the given driver run,
+// registers a worker node, then claims and executes it to a completed terminal
+// transition — the path that resolves the epic via the parent run and creates
+// the lead-task outbox.
+func driveTerminalTaskRun(t *testing.T, ctx context.Context, st store.Store, driverRunID string) {
+	t.Helper()
+	if _, err := st.Nodes().Create(ctx, store.NodeCreate{
+		WorkspaceKey:    "TEST",
+		NodeID:          "wf-node-1",
+		RuntimeProvider: domain.RuntimeProviderLocal,
+		Capabilities:    []string{"driver-runner", "task-runner", "local-noop"},
+		DrainState:      domain.NodeDrainActive,
+		TTL:             time.Minute,
+	}); err != nil {
+		t.Fatalf("create worker node: %v", err)
+	}
+	taskRunID := "wf-task-run-1"
+	if _, err := st.TaskRuns().Create(ctx, store.TaskRunCreate{
+		WorkspaceKey:    "TEST",
+		TaskRunID:       taskRunID,
+		DriverRunID:     driverRunID,
+		TaskID:          "WF-TASK-1",
+		ProviderProfile: "local-noop",
+		Status:          domain.TaskRunQueued,
+	}); err != nil {
+		t.Fatalf("create queued task run: %v", err)
+	}
+	if _, err := driver.ClaimAndExecuteTaskRunWithResult(ctx, st, driver.TaskRunWorkerOptions{
+		WorkspaceKey:       "TEST",
+		TaskRunID:          taskRunID,
+		NodeID:             "wf-node-1",
+		SupportedProviders: []string{"local-noop"},
+		HeartbeatInterval:  -1,
+	}, nil); err != nil {
+		t.Fatalf("claim and execute task run: %v", err)
+	}
+}
+
+func bindWorkflowEpicLead(t *testing.T, ctx context.Context, st store.Store, name, epicID string) {
+	t.Helper()
+	if _, err := st.Agents().Create(ctx, store.AgentCreate{
+		WorkspaceKey: "TEST",
+		Name:         name,
+		RoleName:     "lead",
+		Parent:       epicID,
+	}); err != nil {
+		t.Fatalf("create lead agent: %v", err)
+	}
+}
+
+func listWorkflowOutboxRows(t *testing.T, ctx context.Context, st store.Store) []*domain.OutboxRecord {
+	t.Helper()
+	rows, err := st.Outbox().ListDue(ctx, "TEST", store.OutboxDueFilter{Now: time.Now().UTC()})
+	if err != nil {
+		t.Fatalf("list due outbox: %v", err)
+	}
+	return rows
 }
 
 func TestGetRunEventsReturnsDriverRunEvents(t *testing.T) {

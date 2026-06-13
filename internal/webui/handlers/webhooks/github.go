@@ -36,7 +36,8 @@ type githubPayload struct {
 	After       string `json:"after"`
 	Number      int    `json:"number"`
 	PullRequest *struct {
-		Number int `json:"number"`
+		Number int  `json:"number"`
+		Draft  bool `json:"draft"`
 		Head   *struct {
 			SHA string `json:"sha"`
 		} `json:"head"`
@@ -142,6 +143,11 @@ func githubSubjectAttrs(event string, p githubPayload) map[string]string {
 		if pr.Base != nil && pr.Base.Ref != "" {
 			attrs["base_ref"] = pr.Base.Ref
 		}
+		// draft is a non-optional bool on every pull_request payload, so it is
+		// set whenever a PR subject is present (unlike head_sha/base_ref, which
+		// are sub-objects that may be absent). This lets ready_for_review
+		// bindings and workflows branch on the PR's draft state.
+		attrs["draft"] = strconv.FormatBool(pr.Draft)
 	}
 	if p.Issue != nil && p.Issue.Number > 0 {
 		attrs["issue_number"] = strconv.Itoa(p.Issue.Number)
