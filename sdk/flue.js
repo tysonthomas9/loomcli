@@ -301,7 +301,14 @@ export class FlueDriverClient {
       leaseToken: input.leaseToken || pickEnv(this.env, "LOOM_TASK_RUN_LEASE_TOKEN") || pickEnv(this.env, "LOOM_RUNNER_LEASE_TOKEN"),
       deferCompletion: true,
     };
-    const result = await this.#httpCall("exec-task", { ...params, enqueueOnly: true });
+    // input.input is the optional task-run payload (e.g. a review diff+rubric):
+    // it is persisted on the run and delivered verbatim to the runner. Sent
+    // only when present, and via rawKeys so compactParams never rewrites the
+    // caller's nested data.
+    if (input.input !== undefined && input.input !== null) {
+      params.input = input.input;
+    }
+    const result = await this.#httpCall("exec-task", { ...params, enqueueOnly: true }, { rawKeys: ["input"] });
     rememberTaskRunResult(this, result || {});
     return result;
   }

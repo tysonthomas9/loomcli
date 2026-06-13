@@ -110,6 +110,7 @@ func newTaskRunMem(in store.TaskRunCreate, now time.Time) *domain.TaskRun {
 		RunnerPlacement:  in.RunnerPlacement,
 		SandboxPlacement: in.SandboxPlacement,
 		RuntimeMetadata:  cloneMap(in.RuntimeMetadata),
+		Input:            cloneRawMessage(in.Input),
 		CreatedAt:        now,
 		UpdatedAt:        now,
 	}

@@ -519,6 +519,9 @@ type execTaskParams struct {
 	} `json:"sandboxPlacement"`
 	DeferCompletion bool `json:"deferCompletion"`
 	EnqueueOnly     bool `json:"enqueueOnly"`
+	// Input is the optional task-run payload (camelCase driver wire). It is
+	// persisted on the run and delivered verbatim to the runner.
+	Input json.RawMessage `json:"input,omitempty"`
 }
 
 func (p execTaskParams) requestOptions(ws string, id driverIdentity, fencingToken int64) driverpkg.TaskRunRequestOptions {
@@ -546,6 +549,7 @@ func (p execTaskParams) requestOptions(ws string, id driverIdentity, fencingToke
 			RepoRef:   p.SandboxPlacement.RepoRef,
 		},
 		DeferCompletion: p.DeferCompletion,
+		Input:           p.Input,
 	}
 }
 

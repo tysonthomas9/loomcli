@@ -225,3 +225,32 @@ func (w *TaskWorker) nodeCapabilities() []string {
 	values = append(values, w.SandboxPlacement.Provider)
 	return normalizeStringList(values)
 }
+
+func taskRunHeartbeatInterval(interval time.Duration) time.Duration {
+	if interval == 0 {
+		return 30 * time.Second
+	}
+	if interval < 0 {
+		return 0
+	}
+	return interval
+}
+
+func heartbeatTaskRun(ctx context.Context, s store.Store, run *domain.TaskRun, leaseToken string, interval time.Duration, metadata map[string]string) {
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			_, _ = s.TaskRuns().Heartbeat(ctx, run.WorkspaceKey, run.TaskRunID, store.TaskRunHeartbeat{
+				NodeID:          run.NodeID,
+				LeaseID:         run.LeaseID,
+				LeaseToken:      leaseToken,
+				FencingToken:    run.FencingToken,
+				RuntimeMetadata: cloneStringMap(metadata),
+			})
+		}
+	}
+}

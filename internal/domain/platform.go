@@ -496,19 +496,24 @@ func (s TaskRunStatus) IsTerminal() bool {
 }
 
 type TaskRun struct {
-	WorkspaceKey     string            `json:"workspace_key"`
-	TaskRunID        string            `json:"task_run_id"`
-	DriverRunID      string            `json:"driver_run_id,omitempty"`
-	DriverStepID     string            `json:"driver_step_id,omitempty"`
-	TaskID           string            `json:"task_id"`
-	WorkerProfileID  string            `json:"worker_profile_id,omitempty"`
-	ProviderProfile  string            `json:"provider_profile,omitempty"`
-	Status           TaskRunStatus     `json:"status"`
-	NodeID           string            `json:"node_id,omitempty"`
-	LeaseID          string            `json:"lease_id,omitempty"`
-	FencingToken     int64             `json:"fencing_token,omitempty"`
-	RunnerPlacement  TaskRunPlacement  `json:"runner_placement,omitempty"`
-	SandboxPlacement TaskRunPlacement  `json:"sandbox_placement,omitempty"`
+	WorkspaceKey     string           `json:"workspace_key"`
+	TaskRunID        string           `json:"task_run_id"`
+	DriverRunID      string           `json:"driver_run_id,omitempty"`
+	DriverStepID     string           `json:"driver_step_id,omitempty"`
+	TaskID           string           `json:"task_id"`
+	WorkerProfileID  string           `json:"worker_profile_id,omitempty"`
+	ProviderProfile  string           `json:"provider_profile,omitempty"`
+	Status           TaskRunStatus    `json:"status"`
+	NodeID           string           `json:"node_id,omitempty"`
+	LeaseID          string           `json:"lease_id,omitempty"`
+	FencingToken     int64            `json:"fencing_token,omitempty"`
+	RunnerPlacement  TaskRunPlacement `json:"runner_placement,omitempty"`
+	SandboxPlacement TaskRunPlacement `json:"sandbox_placement,omitempty"`
+	// Input is the optional task-run payload supplied by the requester
+	// (e.g. a github-review-agent's diff+rubric). It is persisted verbatim
+	// and delivered to the runner so the task harness can act on it.
+	// Optional / back-compat: runs created without it behave as before.
+	Input            json.RawMessage   `json:"input,omitempty"`
 	ExitCode         *int              `json:"exit_code,omitempty"`
 	LogsRef          string            `json:"logs_ref,omitempty"`
 	ArtifactsRef     string            `json:"artifacts_ref,omitempty"`

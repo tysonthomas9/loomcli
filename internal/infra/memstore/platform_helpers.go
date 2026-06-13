@@ -76,6 +76,17 @@ func cloneJSON(payload json.RawMessage) json.RawMessage {
 	return out
 }
 
+// cloneRawMessage deep-copies an optional raw payload, preserving nil so that
+// omitempty fields round-trip unchanged for runs created without one.
+func cloneRawMessage(payload json.RawMessage) json.RawMessage {
+	if len(payload) == 0 {
+		return nil
+	}
+	out := make(json.RawMessage, len(payload))
+	copy(out, payload)
+	return out
+}
+
 func cloneDriverStep(s *domain.DriverStep) *domain.DriverStep {
 	if s == nil {
 		return nil
@@ -91,6 +102,7 @@ func cloneTaskRun(r *domain.TaskRun) *domain.TaskRun {
 	out.RunnerPlacement = cloneTaskRunPlacement(r.RunnerPlacement)
 	out.SandboxPlacement = cloneTaskRunPlacement(r.SandboxPlacement)
 	out.RuntimeMetadata = cloneMap(r.RuntimeMetadata)
+	out.Input = cloneRawMessage(r.Input)
 	out.FinishedAt = clonePtr(r.FinishedAt)
 	return &out
 }

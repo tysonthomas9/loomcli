@@ -91,6 +91,67 @@ test("FlueDriverClient sends camelCase task run requests and remembers child tas
   });
 });
 
+test("FlueDriverClient.taskRuns.request puts the optional input payload (diff+rubric) on the exec-task wire verbatim", async () => {
+  // Closes the dropped-payload gap: input.input must reach exec-task body.input
+  // unmodified (the review TaskRun runner reads the diff+rubric from there).
+  const reviewInput = {
+    kind: "github-review",
+    repo: "octo/hello",
+    prNumber: 7,
+    headSha: "sha-head",
+    baseRef: "main",
+    diff: "--- a/x.go\n+++ b/x.go\n@@ -1 +1 @@\n-old\n+new\n",
+    rubric: { mustPass: ["builds", "tests"], notes: "" },
+  };
+  await withDriverServer(async (call) => {
+    if (call.url === "/api/workspaces/WS/driver/exec-task") {
+      return { id: "task-run-1", taskRunId: "task-run-1", taskId: "TASK-1", status: "queued" };
+    }
+    return notFound();
+  }, async ({ apiUrl, calls }) => {
+    const client = createLoomDriverClient({
+      input: { epicId: "EPIC-1" },
+      env: { LOOM_DRIVER_WORKSPACE: "WS", LOOM_DRIVER_RUN_ID: "run-1", LOOM_DRIVER_API_URL: apiUrl },
+    });
+
+    await client.taskRuns.request({
+      taskId: "TASK-1",
+      providerProfile: "flue-local",
+      input: reviewInput,
+    });
+
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].url, "/api/workspaces/WS/driver/exec-task");
+    // The field name the server handler reads (driverapi execTaskParams.Input,
+    // json:"input") — a raw JSON object, never stringified.
+    assert.equal(typeof calls[0].body.input, "object");
+    // Verbatim: rawKeys bypasses compactParams, so nested empties (rubric.notes:
+    // "") and falsy-but-meaningful values survive intact.
+    assert.deepEqual(calls[0].body.input, reviewInput);
+    assert.deepEqual(calls[0].body.deferCompletion, true);
+    assert.deepEqual(calls[0].body.enqueueOnly, true);
+  });
+});
+
+test("FlueDriverClient.taskRuns.request omits input from the wire when none is given (back-compat)", async () => {
+  await withDriverServer(async (call) => {
+    if (call.url === "/api/workspaces/WS/driver/exec-task") {
+      return { id: "task-run-1", taskRunId: "task-run-1", taskId: "TASK-1", status: "queued" };
+    }
+    return notFound();
+  }, async ({ apiUrl, calls }) => {
+    const client = createLoomDriverClient({
+      input: { epicId: "EPIC-1" },
+      env: { LOOM_DRIVER_WORKSPACE: "WS", LOOM_DRIVER_RUN_ID: "run-1", LOOM_DRIVER_API_URL: apiUrl },
+    });
+
+    await client.taskRuns.request({ taskId: "TASK-1", providerProfile: "flue-local" });
+
+    assert.equal(calls.length, 1);
+    assert.equal(Object.hasOwn(calls[0].body, "input"), false, "no input key when caller omits it");
+  });
+});
+
 test("FlueDriverClient exposes epic, agent, active run, and stale recovery helpers over HTTP", async () => {
   await withDriverServer(async (call) => {
     switch (call.url) {

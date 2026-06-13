@@ -73,6 +73,8 @@ export async function exerciseFlueClientSurface(): Promise<void> {
     supportedProviders: ["local"],
     capabilities: ["git"],
     sandboxPlacement: { provider: "local", sandboxId: "sb", cwd: "/w", repoRef: "main" },
+    // Optional task-run payload (diff+rubric) delivered verbatim to the runner.
+    input: { kind: "github-review", diff: "patch", rubric: { mustPass: ["builds"] } },
   }));
   await client.taskRuns.get({ taskRunId: "task-run-1" });
   await client.taskRuns.await({ taskRunId: "task-run-1", pollMs: 500, timeoutMs: 60_000 });

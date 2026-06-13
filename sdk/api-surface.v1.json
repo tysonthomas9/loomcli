@@ -95,7 +95,8 @@
         "sandboxPlacement",
         "leaseToken",
         "deferCompletion",
-        "enqueueOnly"
+        "enqueueOnly",
+        "input"
       ],
       "nested": { "sandboxPlacement": ["provider", "sandboxId", "cwd", "repoRef"] }
     },

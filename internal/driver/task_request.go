@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -35,6 +36,9 @@ type TaskRunRequestOptions struct {
 	SandboxPlacement   domain.TaskRunPlacement
 	HeartbeatInterval  time.Duration
 	DeferCompletion    bool
+	// Input is the optional task-run payload (e.g. a review diff+rubric)
+	// persisted on the run and delivered to the runner.
+	Input json.RawMessage
 }
 
 type TaskRunWorkerOptions struct {
@@ -72,6 +76,9 @@ type TaskExecRequest struct {
 	FencingToken     int64                   `json:"fencing_token,omitempty"`
 	RunnerPlacement  domain.TaskRunPlacement `json:"runner_placement,omitempty"`
 	SandboxPlacement domain.TaskRunPlacement `json:"sandbox_placement,omitempty"`
+	// Input is the task-run payload delivered verbatim to the runner via
+	// LOOM_TASK_RUN_REQUEST_JSON. Optional (omitempty) for back-compat.
+	Input json.RawMessage `json:"input,omitempty"`
 }
 
 type TaskExecResult struct {
@@ -426,6 +433,7 @@ func createQueuedTaskRun(ctx context.Context, s store.Store, opts TaskRunRequest
 		RunnerPlacement:  opts.RunnerPlacement,
 		SandboxPlacement: opts.SandboxPlacement,
 		RuntimeMetadata:  runtimeMetadata,
+		Input:            opts.Input,
 	})
 }
 
@@ -615,6 +623,7 @@ func taskExecRequest(claimed *domain.TaskRun, opts executeClaimedTaskRunOptions,
 		FencingToken:     claimed.FencingToken,
 		RunnerPlacement:  claimed.RunnerPlacement,
 		SandboxPlacement: claimed.SandboxPlacement,
+		Input:            claimed.Input,
 	}
 }
 
@@ -966,33 +975,4 @@ func generatedTaskRunLeaseID(nodeID string) string {
 		nodePart = "worker"
 	}
 	return fmt.Sprintf("task-run-lease-%s-%d", nodePart, time.Now().UTC().UnixNano())
-}
-
-func taskRunHeartbeatInterval(interval time.Duration) time.Duration {
-	if interval == 0 {
-		return 30 * time.Second
-	}
-	if interval < 0 {
-		return 0
-	}
-	return interval
-}
-
-func heartbeatTaskRun(ctx context.Context, s store.Store, run *domain.TaskRun, leaseToken string, interval time.Duration, metadata map[string]string) {
-	ticker := time.NewTicker(interval)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-			_, _ = s.TaskRuns().Heartbeat(ctx, run.WorkspaceKey, run.TaskRunID, store.TaskRunHeartbeat{
-				NodeID:          run.NodeID,
-				LeaseID:         run.LeaseID,
-				LeaseToken:      leaseToken,
-				FencingToken:    run.FencingToken,
-				RuntimeMetadata: cloneStringMap(metadata),
-			})
-		}
-	}
 }

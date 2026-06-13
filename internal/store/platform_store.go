@@ -631,6 +631,9 @@ type TaskRunCreate struct {
 	RunnerPlacement  domain.TaskRunPlacement
 	SandboxPlacement domain.TaskRunPlacement
 	RuntimeMetadata  map[string]string
+	// Input is the optional task-run payload persisted on the run and
+	// delivered to the runner (omitempty / back-compat).
+	Input json.RawMessage
 }
 
 type TaskRunFilter struct {

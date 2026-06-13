@@ -98,6 +98,12 @@ export interface FlueTaskRunRequest {
     repoRef?: string;
   };
   leaseToken?: string;
+  /**
+   * Optional task-run payload (e.g. a review diff+rubric), persisted on the
+   * run and delivered verbatim to the runner via LOOM_TASK_RUN_REQUEST_JSON.
+   * Passed verbatim (not compacted).
+   */
+  input?: unknown;
 }
 
 export interface FlueEpicInput {
