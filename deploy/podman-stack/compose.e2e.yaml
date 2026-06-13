@@ -1,0 +1,40 @@
+# Acceptance-suite overlay for the podman stack, applied by
+# scripts/test-podman-stack.sh on top of compose.yaml:
+#
+#   podman compose -f compose.yaml -f compose.e2e.yaml up -d
+#
+# It adds exactly what the staged e2e suite needs and nothing else:
+#
+#   1. Session auth on loom serve (LOOM_AUTH_URL -> the driver script's
+#      host-side JWKS stub). The approvals endpoint (§7 step 8) takes the
+#      approver identity ONLY from a verified session JWT — there is no
+#      anonymous approval — so the await/approval stage requires this.
+#      --auth-allow-insecure permits the http:// JWKS URL on the container
+#      network (flag-only escape hatch; see internal/cli/serve/serve.go).
+#   2. A deterministic TaskRun runner stub (e2e/task-runner.mjs, mounted
+#      read-only) so epic drains are fast, hermetic, and leave an
+#      execution-order log on the loom-work volume for DAG assertions.
+#
+# LOOM_STACK_AUTH_URL is generated into .env by the driver script
+# (http://host.containers.internal:<port>). Resource caps and everything
+# else stay exactly as compose.yaml defines them.
+
+services:
+  loom-serve:
+    command: ["serve", "--auth-allow-insecure"]
+    environment:
+      LOOM_AUTH_URL: ${LOOM_STACK_AUTH_URL:?generated into .env by scripts/test-podman-stack.sh}
+      LOOM_AUTH_ISSUER: ${LOOM_STACK_AUTH_ISSUER:-loom-stack-e2e}
+      LOOM_AUTH_AUDIENCE: ${LOOM_STACK_AUTH_AUDIENCE:-loom}
+      LOOM_DRIVER_TASK_RUNNER_CMD_JSON: '["node","/opt/e2e/task-runner.mjs"]'
+      # Route github connector egress at the in-stack stub upstream so the
+      # granted-read leg (S3) is asserted hermetically — the stub records
+      # the request and whether the unsealed vault credential was presented.
+      LOOM_CONNECTOR_GITHUB_BASE_URL: http://stub-upstream:8080
+      LOOM_E2E_TASK_LOG: /work/e2e/task-runner.log
+      LOOM_E2E_FAIL_TASK_FILE: /work/e2e/fail-task-id
+      # Fast stale-TaskRun recovery (seconds) so the mid-epic serve-restart
+      # stage recovers interrupted in-flight tasks inside the suite budget.
+      LOOM_DRIVER_STALE_TASK_MAX_AGE: "20"
+    volumes:
+      - ./e2e:/opt/e2e:ro

@@ -1,0 +1,63 @@
+# loom serve (control plane + driver executor + task workers) for the local
+# podman e2e stack.
+#
+# Contents:
+#   - /usr/local/bin/loom        linux binary cross-compiled on the host by
+#                                build.sh (no Go toolchain in the image)
+#   - /opt/loom-sdk              the published @loom/sdk package root
+#                                (LOOM_SDK_ROOT) used for server-side
+#                                workflow-bundle builds
+#   - /opt/flue                  the flue workspace: source + host-built dist/,
+#                                with a linux `pnpm install --prod` performed
+#                                in-image so native deps (esbuild, etc.) match
+#                                the container platform. Serve invokes the CLI
+#                                via LOOM_REAL_FLUE_CMD_JSON.
+#
+# Node 22 base because flue requires node >=22.18 and workflow runtimes are
+# node processes spawned inside this container (process launcher: with
+# LOOM_DRIVER_SANDBOX unset/process, THIS capped container is the isolation
+# boundary — see README "sandbox posture").
+#
+# Build context: the staging dir assembled by build.sh
+# (bin/ loom-sdk/ flue-src/).
+
+FROM docker.io/library/node:22-slim
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends git curl ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+# pnpm pinned to flue's packageManager field (flue/package.json: pnpm@11.1.1).
+RUN corepack enable && corepack prepare pnpm@11.1.1 --activate
+
+# Flue workspace: source + dist staged by build.sh (node_modules excluded —
+# host node_modules are darwin-native). Prod install resolves linux deps.
+COPY flue-src /opt/flue
+RUN cd /opt/flue \
+    && pnpm install --frozen-lockfile --prod \
+    && test -f /opt/flue/packages/cli/dist/flue.js \
+    && test -x /opt/flue/packages/cli/bin/flue.mjs \
+    && chown -R node:node /opt/flue
+
+COPY loom-sdk /opt/loom-sdk
+RUN chown -R node:node /opt/loom-sdk
+
+COPY bin/loom /usr/local/bin/loom
+
+# Seeds /work/node_modules (the runtime volume) so server-side workflow-bundle
+# builds can resolve @flue/runtime -> @hono/node-server/hono; see the script.
+COPY serve-entrypoint.sh /usr/local/bin/serve-entrypoint.sh
+RUN chmod 0755 /usr/local/bin/serve-entrypoint.sh
+
+RUN install -d -m 0755 -o node -g node /work /home/node/.loom
+
+ENV HOME=/home/node \
+    LOOM_SDK_ROOT=/opt/loom-sdk \
+    LOOM_REAL_FLUE_CMD_JSON='["node","/opt/flue/packages/cli/bin/flue.mjs"]'
+
+USER node:node
+WORKDIR /work
+EXPOSE 8080
+
+ENTRYPOINT ["/usr/local/bin/serve-entrypoint.sh"]
+CMD ["serve"]
