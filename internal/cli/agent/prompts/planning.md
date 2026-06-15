@@ -85,6 +85,8 @@ Write a comprehensive plan that includes:
 {{- if eq .DesignFormat "html"}}
 
 **Design format: HTML.** Author the design as semantic HTML instead of Markdown: `<h2>` for section headings, `<p>` for prose, `<ul>`/`<li>` for lists, and `<pre><code>` for code or commands. Produce the same sections listed below (Summary, Technical Approach, Files to Create, Files to Modify, Dependencies, Edge Cases & Error Handling, Testing Strategy, etc.). Do NOT include an `<html>`, `<head>`, or `<body>` wrapper, and do NOT use inline styles or scripts.
+
+**Visual diagrams (use your judgment).** When a diagram would materially clarify the design — system architecture, component relationships, data/control flow, a state machine, or a sequence — embed a self-contained inline `<svg>` figure at the relevant point; the board renders SVG. Keep it simple and legible: use elements like `<rect>`, `<line>`, `<path>`, `<polyline>`, `<circle>`, and `<text>` with presentation attributes (e.g. `fill`, `stroke`, `stroke-width`) rather than a `style=` attribute, and set an explicit `width`, `height`, and `viewBox`. Do NOT use `<script>`, `<img>` or data-URI images, external image links, or mermaid — they will not render. Only include a diagram when it genuinely aids understanding; omit it for simple, mechanical tasks.
 {{- end}}
 
 #### 3a. Summary
