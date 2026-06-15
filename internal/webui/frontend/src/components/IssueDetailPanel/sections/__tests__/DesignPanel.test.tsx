@@ -23,6 +23,22 @@ describe("DesignPanel", () => {
     expect(screen.getByText("Ship it")).toHaveClass("safe");
   });
 
+  it("renders safe inline SVG and strips executable SVG content", () => {
+    render(
+      <DesignPanel
+        format="html"
+        content={
+          '<svg width="40" height="40" viewBox="0 0 40 40"><script>window.bad=1</script><rect width="40" height="40" fill="none" onload="window.bad=2"/></svg>'
+        }
+      />,
+    );
+    const root = screen.getByTestId("design-html-content");
+    expect(root.querySelector("svg rect")).not.toBeNull();
+    expect(root.querySelector("script")).toBeNull();
+    expect(root.innerHTML).not.toContain("onload");
+    expect(root.innerHTML).not.toContain("window.bad");
+  });
+
   it("keeps explicit markdown authoritative even when it starts with HTML", () => {
     render(<DesignPanel format="markdown" content='<p class="raw">text</p>' />);
     expect(
