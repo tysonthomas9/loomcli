@@ -64,6 +64,18 @@ type Supervisor struct {
 	// for the liveness watchdog. Zero means use built-in defaults.
 	LivenessTimeout time.Duration
 
+	// livenessStreak counts how many consecutive scans each goroutine's tick
+	// has been observed stale. The watchdog only signals fatal once a tick has
+	// been stale for livenessStaleScansBeforeFatal scans in a row, so a single
+	// transient stall (a slow control-plane cycle, brief mutex contention) does
+	// not crash the daemon. lastLivenessScan records when scanTicks last ran so
+	// it can detect a process-wide suspension (sleep/swap/SIGSTOP) — after which
+	// every tick looks ancient — and skip the fatal for that scan. Both fields
+	// are owned exclusively by the single livenessWatchdog goroutine (tests call
+	// scanTicks serially), so they need no synchronization.
+	livenessStreak   map[string]int
+	lastLivenessScan time.Time
+
 	Concurrency *ConcurrencyTracker
 	EventBus    EventEmitter
 	EmitEvent   func(events.Event)
