@@ -54,3 +54,4 @@ services/auth/dist/
 worktrees/
 .agent.yield
 node_modules/
+*.agent.lock.flock

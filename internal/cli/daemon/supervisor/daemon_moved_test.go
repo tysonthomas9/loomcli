@@ -1146,6 +1146,57 @@ func TestCheckAgentHealth_Watchdog(t *testing.T) {
 		// but the code path should execute without panic
 	})
 
+	t.Run("does not kill busy agent on fresh heartbeat despite stale log", func(t *testing.T) {
+		// Regression: on the RunTurn path the stdout log (and hook transcript) go
+		// stale even while the agent is busy; the live signal is the agent's
+		// PTY-output heartbeat (ap.LastActivity), delivered over agent IPC. The
+		// watchdog must honor it instead of killing a working agent.
+		tmpDir := t.TempDir()
+		logPath := filepath.Join(tmpDir, "task-test.log")
+		if err := os.WriteFile(logPath, []byte("old output\n"), 0600); err != nil {
+			t.Fatal(err)
+		}
+		oldTime := time.Now().Add(-20 * time.Minute) // stale log -> would trip the timeout
+		if err := os.Chtimes(logPath, oldTime, oldTime); err != nil {
+			t.Fatal(err)
+		}
+
+		config := makeSupervisorConfig(
+			[]cfgpkg.AgentEntry{{Worktree: "test", Role: "task"}},
+			nil,
+		)
+		config.Daemon.RestartPolicy.OutputTimeout = cfgpkg.IntPtr(60) // 60 seconds
+
+		ap := &AgentProcess{
+			Entry:        cfgpkg.AgentEntry{Worktree: "test", Role: "task"},
+			Pid:          99999999, // fake PID that won't exist
+			LogFilePath:  logPath,
+			LastStart:    time.Now().Add(-25 * time.Minute),
+			LastActivity: time.Now(), // fresh PTY-output heartbeat from the wrapper
+		}
+
+		s := &Supervisor{
+			ConfigSnapshot: func() *cfgpkg.DaemonConfig { return config },
+			Agents:         []*AgentProcess{ap},
+			Shutdown:       make(chan struct{}),
+			StoppedAgents:  make(map[string]struct{}),
+			EmitEvent:      func(events.Event) {},
+		}
+
+		s.checkAgentHealth()
+
+		ap.Mu.Lock()
+		pid := ap.Pid
+		reason := ap.StopReason
+		ap.Mu.Unlock()
+		if pid != 99999999 {
+			t.Errorf("pid = %d, want 99999999 (busy agent with fresh heartbeat must not be killed)", pid)
+		}
+		if reason == StopReasonWatchdog {
+			t.Error("StopReason = Watchdog, want unset (fresh heartbeat should prevent the kill)")
+		}
+	})
+
 	t.Run("skips watchdog when disabled", func(t *testing.T) {
 		tmpDir := t.TempDir()
 		logPath := filepath.Join(tmpDir, "task-test.log")
