@@ -329,18 +329,14 @@ func resolveClaudeTurnIdleTimeout() time.Duration {
 	return 120 * time.Second
 }
 
-func invokeClaudeRunTurn(ctx context.Context, workDir, prompt, agentName, resumeID string, onActivity func(wrapper.Snapshot), collector *usage.Collector) (claudeRunTurnResult, error) {
-	raw := &capturedOutput{}
-	output := io.Writer(raw)
-
-	// Idle guard for the RunTurn (interactive TUI) path. harness-wrapper v0.6.1
-	// can fail to detect turn completion on long/complex Claude turns and then
-	// hang at the idle prompt until the liveness watchdog SIGKILLs the agent
-	// (~15m wasted, the successful session marked failed, no graceful finalize).
-	// The TUI animates a spinner during work (continuous PTY output), so once
-	// output stops the turn is over and Claude is sitting idle. Track output via
-	// onActivity; if it stops for longer than the idle window, cancel the turn
-	// ctx so RunTurn returns, and treat that as a normal completion below.
+// startClaudeIdleGuard wires an idle-output watchdog onto raw.onActivity (wrapping
+// the caller's onActivity, which it still invokes) and, when idle > 0, starts a
+// goroutine that cancels turnCtx once PTY output has stalled for longer than idle.
+// The interactive TUI animates a spinner during work, so a sustained output gap
+// means the turn finished and Claude is idle at the prompt. The returned flag
+// reports whether the guard fired, letting the caller distinguish an idle-ended
+// turn (finalize as complete) from a real parent-ctx cancellation (keep the error).
+func startClaudeIdleGuard(turnCtx context.Context, cancelTurn context.CancelFunc, raw *capturedOutput, onActivity func(wrapper.Snapshot), idle time.Duration) *atomic.Bool {
 	var lastAct atomic.Int64
 	var sawAct atomic.Bool
 	lastAct.Store(time.Now().UnixNano())
@@ -351,29 +347,43 @@ func invokeClaudeRunTurn(ctx context.Context, workDir, prompt, agentName, resume
 			onActivity(snap)
 		}
 	}
-
-	turnCtx, cancelTurn := context.WithCancel(ctx)
-	defer cancelTurn()
 	var idleGuardFired atomic.Bool
-	if idle := resolveClaudeTurnIdleTimeout(); idle > 0 {
-		go func() {
-			tk := time.NewTicker(5 * time.Second)
-			defer tk.Stop()
-			for {
-				select {
-				case <-turnCtx.Done():
+	if idle <= 0 {
+		return &idleGuardFired
+	}
+	go func() {
+		tk := time.NewTicker(5 * time.Second)
+		defer tk.Stop()
+		for {
+			select {
+			case <-turnCtx.Done():
+				return
+			case <-tk.C:
+				if sawAct.Load() && time.Since(time.Unix(0, lastAct.Load())) > idle {
+					idleGuardFired.Store(true)
+					fmt.Fprintf(os.Stderr, "[loom] claude turn produced no output for >%s — ending idle turn (RunTurn did not self-complete)\n", idle)
+					cancelTurn()
 					return
-				case <-tk.C:
-					if sawAct.Load() && time.Since(time.Unix(0, lastAct.Load())) > idle {
-						idleGuardFired.Store(true)
-						fmt.Fprintf(os.Stderr, "[loom] claude turn produced no output for >%s — ending idle turn (RunTurn did not self-complete)\n", idle)
-						cancelTurn()
-						return
-					}
 				}
 			}
-		}()
-	}
+		}
+	}()
+	return &idleGuardFired
+}
+
+func invokeClaudeRunTurn(ctx context.Context, workDir, prompt, agentName, resumeID string, onActivity func(wrapper.Snapshot), collector *usage.Collector) (claudeRunTurnResult, error) {
+	raw := &capturedOutput{}
+	output := io.Writer(raw)
+
+	// Idle guard for the RunTurn (interactive TUI) path. harness-wrapper v0.6.1
+	// can fail to detect turn completion on long/complex Claude turns and then
+	// hang at the idle prompt until the liveness watchdog SIGKILLs the agent
+	// (~15m wasted, the successful session marked failed, no graceful finalize).
+	// startClaudeIdleGuard cancels turnCtx if PTY output stalls past the idle
+	// window; we treat that idle-driven cancellation as a normal completion below.
+	turnCtx, cancelTurn := context.WithCancel(ctx)
+	defer cancelTurn()
+	idleGuardFired := startClaudeIdleGuard(turnCtx, cancelTurn, raw, onActivity, resolveClaudeTurnIdleTimeout())
 
 	res, err := claudeRunTurn(turnCtx, claudeRunTurnConfig{
 		Harness:       "claude",
