@@ -62,34 +62,34 @@ func appendTaskRunEvent(ctx context.Context, s store.Store, run *domain.TaskRun,
 }
 
 // emitTerminalTaskRunEvents appends the terminal journal event for a
-// finished run and, on completed/parked transitions under a lead-bound
+// finished run and, on completed/retry-exhausted transitions under a lead-bound
 // epic, creates the lead-notification outbox row.
 func emitTerminalTaskRunEvents(ctx context.Context, s store.Store, final *domain.TaskRun, completion taskExecCompletion, evctx taskRunEventContext) {
 	if s == nil || final == nil {
 		return
 	}
-	typ := terminalTaskRunEventType(final, completion)
+	typ := terminalTaskRunEventType(completion)
 	appendTaskRunEvent(ctx, s, final, typ, completion, evctx)
-	if typ == domain.TaskRunEventCompleted || typ == domain.TaskRunEventParked {
+	if typ == domain.TaskRunEventCompleted || taskRunBlockedByRetryExhaustion(final) {
 		createLeadTaskOutbox(ctx, s, final, evctx.EpicID)
 	}
 }
 
 // terminalTaskRunEventType maps a terminal completion to its journal
-// event type. A failed run that the retry scheduler stamped as parked
-// (retries exhausted; epic continues) emits taskRunParked.
-func terminalTaskRunEventType(run *domain.TaskRun, completion taskExecCompletion) domain.TaskRunEventType {
+// event type.
+func terminalTaskRunEventType(completion taskExecCompletion) domain.TaskRunEventType {
 	switch completion.Status {
 	case domain.TaskRunCompleted:
 		return domain.TaskRunEventCompleted
 	case domain.TaskRunCancelled:
 		return domain.TaskRunEventCancelled
 	default:
-		if run.RuntimeMetadata["scheduler_state"] == "parked" {
-			return domain.TaskRunEventParked
-		}
 		return domain.TaskRunEventFailed
 	}
+}
+
+func taskRunBlockedByRetryExhaustion(run *domain.TaskRun) bool {
+	return run != nil && run.RuntimeMetadata["scheduler_state"] == "blocked"
 }
 
 // taskRunEpicID resolves the epic a run belongs to via its parent driver
@@ -108,7 +108,7 @@ func taskRunEpicID(ctx context.Context, s store.Store, run *domain.TaskRun) stri
 }
 
 // createLeadTaskOutbox creates the lead-notification outbox row for a
-// terminal (completed/parked) run under a lead-bound epic. The lead is
+// terminal completed or retry-exhausted run under a lead-bound epic. The lead is
 // resolved at row-creation time; with no lead bound, no row is created.
 // DedupeKey keeps dispatcher redelivery exactly-once when the completion
 // path re-runs. Best-effort: failures are logged, never returned.
@@ -177,14 +177,14 @@ func isLeadRole(roleName string) bool {
 
 // buildLeadTaskMessage is the Go port of epic-runner's
 // formatTaskCompleteLeadMessage, including the "Do not start another
-// epic runner" guardrail. A parked status swaps the headline and the
+// epic runner" guardrail. A failed status swaps the headline and the
 // acknowledgement subject; the rest of the template is shared.
 func buildLeadTaskMessage(epicID, taskID, title, taskRunID, logsRef, artifactsRef string, status domain.TaskRunStatus) string {
 	headline := "Loom completed a child task under the active epic-runner workflow."
 	subject := "completion"
 	if status != domain.TaskRunCompleted {
-		headline = "Loom parked a child task under the active epic-runner workflow; retries are exhausted and the run needs review."
-		subject = "parked task"
+		headline = "Loom blocked a child task under the active epic-runner workflow; retries are exhausted and the run needs review."
+		subject = "blocked task"
 	}
 	taskLine := taskID
 	if strings.TrimSpace(title) != "" {

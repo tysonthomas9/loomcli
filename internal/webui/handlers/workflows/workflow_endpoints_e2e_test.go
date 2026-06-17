@@ -669,8 +669,8 @@ if (process.env.LOOM_TASK_RUN_LEASE_TOKEN !== request.lease_token) {
   console.error('task-run lease token did not reach task runner');
   process.exit(3);
 }
-if (request.provider_profile !== 'flue-local') {
-  console.error('unexpected provider profile ' + request.provider_profile);
+if (request.runner !== 'local-task-runner') {
+  console.error('unexpected runner ' + request.runner);
   process.exit(4);
 }
 
@@ -681,6 +681,7 @@ console.log(JSON.stringify({
   logsRef: 'logs://' + request.task_run_id,
   runtimeMetadata: {
     task_runner: 'workflow-endpoint-e2e',
+    runner: request.runner || '',
     sandbox_provider: request.sandbox_placement?.provider || '',
   },
 }));

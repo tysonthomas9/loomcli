@@ -5,9 +5,9 @@ package store
 // Locked decisions baked into this contract:
 //   - Multi-waiter: one event resolves ALL pending awaits whose Pattern
 //     equals the event's rendered subject key (exact equality, no glob).
-//   - Atomic check-then-park (RULE 2): RegisterAwaitAndCheck is the only
+//   - Atomic register-and-check (RULE 2): RegisterAwaitAndCheck is the only
 //     registration entry point — one call, one transaction. There are no
-//     separate check/park methods. The immediate-satisfaction scan covers
+//     separate check/register methods. The immediate-satisfaction scan covers
 //     the trigger-event journal plus run.finished events.
 //   - Timeout: ListDueAwaitDeadlines feeds a sweeper that resumes runs
 //     with a synthetic timeout event (resume-with-timeout-event).
@@ -70,11 +70,11 @@ func (r AwaitRegistration) Instance(workspaceKey string, now time.Time) (*domain
 
 // AwaitResult is the outcome of RegisterAwaitAndCheck.
 type AwaitResult struct {
-	// Instance is the persisted row: Status pending when parked, or
+	// Instance is the persisted row: Status pending when pending, or
 	// satisfied (with SatisfiedByEventID/SatisfiedPayload populated) when
 	// an already-journaled event matched at registration time.
 	Instance *domain.AwaitInstance
-	// Satisfied reports immediate satisfaction; false means parked and the
+	// Satisfied reports immediate satisfaction; false means pending and the
 	// caller should suspend the run.
 	Satisfied bool
 }
@@ -98,7 +98,7 @@ type AwaitResolution struct {
 // wrap domain.ErrInvalid.
 type AwaitStore interface {
 	// RegisterAwaitAndCheck atomically checks for an already-matching event
-	// and otherwise parks the await (RULE 2: one call, one transaction).
+	// and otherwise leaves the await pending (RULE 2: one call, one transaction).
 	// Idempotent on InstanceKey: re-registering an existing key returns the
 	// current row without writing a duplicate.
 	RegisterAwaitAndCheck(ctx context.Context, workspaceKey string, in AwaitRegistration) (*AwaitResult, error)

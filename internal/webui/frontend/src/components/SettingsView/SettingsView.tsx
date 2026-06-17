@@ -46,6 +46,8 @@ interface RedisFormState {
   tls: boolean;
 }
 
+type AgentRuntimeDefault = "local" | "daytona";
+
 const EMPTY_REDIS_FORM: RedisFormState = {
   enabled: false,
   url: "",
@@ -81,10 +83,18 @@ export function SettingsView({
     settings: localSettings,
     isSaving: isSavingLocalSettings,
     error: localSettingsError,
+    updateAgentRuntime,
     updateRedis,
+    updateRuntimeCredentials,
   } = useLocalSettings();
   const redisSettings = localSettings?.fleetdb_redis;
+  const runtimeSettings = localSettings?.agent_runtime;
+  const runtimeCredentials = localSettings?.runtime_credentials;
   const [redisForm, setRedisForm] = useState<RedisFormState>(EMPTY_REDIS_FORM);
+  const [agentRuntime, setAgentRuntime] =
+    useState<AgentRuntimeDefault>("local");
+  const [daytonaApiKey, setDaytonaApiKey] = useState("");
+  const [githubToken, setGithubToken] = useState("");
 
   const { fontFamily, fontSize, setFontFamily, setFontSize } =
     useTerminalFont();
@@ -111,6 +121,11 @@ export function SettingsView({
       url: "",
     });
   }, [redisSettings]);
+
+  useEffect(() => {
+    if (!runtimeSettings?.default) return;
+    setAgentRuntime(runtimeSettings.default);
+  }, [runtimeSettings?.default]);
 
   const rootClassName = [styles.settingsView, className]
     .filter(Boolean)
@@ -241,6 +256,54 @@ export function SettingsView({
     } else {
       showToast("Failed to save Redis settings", { type: "error" });
     }
+  };
+
+  const handleAgentRuntimeSave = async () => {
+    if (isSavingLocalSettings) return;
+    const ok = await updateAgentRuntime({ default: agentRuntime });
+    showToast(
+      ok ? "Agent runtime settings saved" : "Failed to save agent runtime",
+      {
+        type: ok ? "success" : "error",
+      },
+    );
+  };
+
+  const handleRuntimeCredentialsSave = async () => {
+    if (isSavingLocalSettings) return;
+    const payload = {
+      ...(daytonaApiKey.trim()
+        ? { daytona: { api_key: daytonaApiKey.trim() } }
+        : {}),
+      ...(githubToken.trim() ? { github: { token: githubToken.trim() } } : {}),
+    };
+    if (Object.keys(payload).length === 0) {
+      showToast("Enter a Daytona API key or GitHub token to save", {
+        type: "error",
+      });
+      return;
+    }
+    const ok = await updateRuntimeCredentials(payload);
+    if (ok) {
+      setDaytonaApiKey("");
+      setGithubToken("");
+      showToast("Runtime credentials saved", { type: "success" });
+    } else {
+      showToast("Failed to save runtime credentials", { type: "error" });
+    }
+  };
+
+  const handleRuntimeCredentialClear = async (
+    provider: "daytona" | "github",
+  ) => {
+    if (isSavingLocalSettings) return;
+    const ok = await updateRuntimeCredentials({ [provider]: { clear: true } });
+    showToast(
+      ok
+        ? `${provider === "daytona" ? "Daytona" : "GitHub"} credential cleared`
+        : `Failed to clear ${provider === "daytona" ? "Daytona" : "GitHub"} credential`,
+      { type: ok ? "success" : "error" },
+    );
   };
 
   return (
@@ -375,6 +438,130 @@ export function SettingsView({
               No per-agent overrides configured.
             </p>
           )}
+        </div>
+      </div>
+
+      {/* Agent Runtime */}
+      <div className={styles.panel} data-testid="agent-runtime-panel">
+        <div className={styles.panelHeader}>
+          <h3 className={styles.panelTitle}>Agent Runtime</h3>
+        </div>
+        <div className={styles.panelContent}>
+          <div className={styles.formGroup}>
+            <label className={styles.label} htmlFor="agent-runtime-select">
+              Run task agents
+            </label>
+            <p className={styles.description}>
+              App-triggered epic runs use this runtime for child task agents.
+            </p>
+            <select
+              id="agent-runtime-select"
+              className={styles.select}
+              value={agentRuntime}
+              onChange={(e) =>
+                setAgentRuntime(e.target.value as AgentRuntimeDefault)
+              }
+              data-testid="agent-runtime-select"
+            >
+              <option value="local">Locally</option>
+              <option value="daytona">On Daytona</option>
+            </select>
+          </div>
+          <div className={styles.formGroup}>
+            <button
+              type="button"
+              className={styles.saveButton}
+              disabled={
+                isSavingLocalSettings ||
+                agentRuntime === (runtimeSettings?.default ?? "local")
+              }
+              onClick={handleAgentRuntimeSave}
+              data-testid="agent-runtime-save-button"
+            >
+              {isSavingLocalSettings ? "Saving..." : "Save Agent Runtime"}
+            </button>
+          </div>
+          <div className={styles.fieldGrid}>
+            <div className={styles.formGroup}>
+              <label className={styles.label} htmlFor="daytona-api-key-input">
+                Daytona API Key
+              </label>
+              <input
+                id="daytona-api-key-input"
+                type="password"
+                className={styles.input}
+                value={daytonaApiKey}
+                onChange={(e) => setDaytonaApiKey(e.target.value)}
+                placeholder={
+                  runtimeCredentials?.daytona.configured
+                    ? "Saved key unchanged"
+                    : "dtn_..."
+                }
+                data-testid="daytona-api-key-input"
+              />
+              <p className={styles.description}>
+                {runtimeCredentials?.daytona.configured
+                  ? "Daytona credential saved"
+                  : "No Daytona credential saved"}
+              </p>
+              {runtimeCredentials?.daytona.configured && (
+                <button
+                  type="button"
+                  className={styles.navButton}
+                  disabled={isSavingLocalSettings}
+                  onClick={() => handleRuntimeCredentialClear("daytona")}
+                  data-testid="daytona-credential-clear-button"
+                >
+                  Clear Daytona Key
+                </button>
+              )}
+            </div>
+            <div className={styles.formGroup}>
+              <label className={styles.label} htmlFor="github-token-input">
+                GitHub Token
+              </label>
+              <input
+                id="github-token-input"
+                type="password"
+                className={styles.input}
+                value={githubToken}
+                onChange={(e) => setGithubToken(e.target.value)}
+                placeholder={
+                  runtimeCredentials?.github.configured
+                    ? "Saved token unchanged"
+                    : "github_pat_..."
+                }
+                data-testid="github-token-input"
+              />
+              <p className={styles.description}>
+                {runtimeCredentials?.github.configured
+                  ? "GitHub credential saved"
+                  : "No GitHub credential saved"}
+              </p>
+              {runtimeCredentials?.github.configured && (
+                <button
+                  type="button"
+                  className={styles.navButton}
+                  disabled={isSavingLocalSettings}
+                  onClick={() => handleRuntimeCredentialClear("github")}
+                  data-testid="github-credential-clear-button"
+                >
+                  Clear GitHub Token
+                </button>
+              )}
+            </div>
+          </div>
+          <div className={styles.formGroup}>
+            <button
+              type="button"
+              className={styles.saveButton}
+              disabled={isSavingLocalSettings}
+              onClick={handleRuntimeCredentialsSave}
+              data-testid="runtime-credentials-save-button"
+            >
+              {isSavingLocalSettings ? "Saving..." : "Save Runtime Credentials"}
+            </button>
+          </div>
         </div>
       </div>
 

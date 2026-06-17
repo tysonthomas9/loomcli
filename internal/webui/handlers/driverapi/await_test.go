@@ -126,7 +126,7 @@ func TestDriverAPIAwaitEventSatisfiedInline(t *testing.T) {
 	}
 }
 
-func TestDriverAPIAwaitEventParkedSuspendsRun(t *testing.T) {
+func TestDriverAPIAwaitEventPendingSuspendsRun(t *testing.T) {
 	h := newTestHarness(t, "")
 
 	resp, decoded := h.do(t, opRequest{op: "events/await", headers: h.ownerHeaders(), body: awaitBody("pr.merged:pr#9", 60_000, 1)})
@@ -148,7 +148,7 @@ func TestDriverAPIAwaitEventParkedSuspendsRun(t *testing.T) {
 	}
 }
 
-// TestDriverAPIAwaitEventReplayAfterResume drives the full park -> resolve ->
+// TestDriverAPIAwaitEventReplayAfterResume drives the full suspend -> resolve ->
 // resume -> re-entry cycle: the re-entered run hitting the same awaitIndex
 // gets the recorded event with its persisted payload inline.
 func TestDriverAPIAwaitEventReplayAfterResume(t *testing.T) {
@@ -240,7 +240,7 @@ func TestDriverAPIAwaitEventActorNormalization(t *testing.T) {
 		t.Fatalf("string-actor await = %d %v, want satisfied", resp.StatusCode, decoded)
 	}
 
-	// Await 2 parks; the array form is normalized before persisting.
+	// Await 2 suspends; the array form is normalized before persisting.
 	body2 := awaitBody("approval.granted:deploy#2", 60_000, 2)
 	body2["actor"] = []string{" alice ", "", "bob", "alice"}
 	resp, decoded = h.do(t, opRequest{op: "events/await", headers: h.ownerHeaders(), body: body2})
@@ -249,7 +249,7 @@ func TestDriverAPIAwaitEventActorNormalization(t *testing.T) {
 	}
 	pending, err := h.store.Awaits().ListDueAwaitDeadlines(ctx, "WS", time.Now().Add(time.Hour), 10)
 	if err != nil || len(pending) != 1 {
-		t.Fatalf("ListDueAwaitDeadlines = %v, %v; want the parked await", pending, err)
+		t.Fatalf("ListDueAwaitDeadlines = %v, %v; want the pending await", pending, err)
 	}
 	got := pending[0].ActorAllow
 	if len(got) != 2 || got[0] != "alice" || got[1] != "bob" {
@@ -293,7 +293,7 @@ func TestDriverAPIListAwaits(t *testing.T) {
 	if resp.StatusCode != http.StatusOK || decoded["status"] != string(domain.AwaitSatisfied) {
 		t.Fatalf("await 1 = %d %v, want satisfied", resp.StatusCode, decoded)
 	}
-	// Await 2: parked directly through the store (the crash-before-suspend
+	// Await 2: pending directly through the store (the crash-before-suspend
 	// shape — a pending row while the run is still running).
 	if _, err := h.store.Awaits().RegisterAwaitAndCheck(ctx, "WS", store.AwaitRegistration{
 		InstanceKey: domain.AwaitInstanceKey(h.runID, 2),

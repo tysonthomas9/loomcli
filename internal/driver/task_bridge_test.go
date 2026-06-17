@@ -5,11 +5,14 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
@@ -262,7 +265,7 @@ func TestHostBridgeTaskExecutorMapsFlueSessionAndTranscript(t *testing.T) {
 		DriverRunID:     run.RunID,
 		TaskRunID:       "task-run-1",
 		TaskID:          "TEST-1",
-		ProviderProfile: "flue-daytona",
+		Runner:          "local-task-runner",
 		ParentSessionID: "lead-session-1",
 		ParentNodeID:    run.NodeID,
 		ParentLeaseID:   run.LeaseID,
@@ -300,6 +303,355 @@ func TestHostBridgeTaskExecutorMapsFlueSessionAndTranscript(t *testing.T) {
 	}
 	if transcriptArtifact.DurableStatus != "finalized" || transcriptArtifact.SessionID != "flue-task-run-1" || transcriptArtifact.Type != "transcript" {
 		t.Fatalf("transcript artifact = %+v, want finalized transcript owned by session", transcriptArtifact)
+	}
+	contentReader, ok := st.Artifacts().(interface {
+		ReadContent(context.Context, string, string) ([]byte, error)
+	})
+	if !ok {
+		t.Fatal("artifact store does not expose ReadContent")
+	}
+	content, err := contentReader.ReadContent(ctx, "TEST", "transcript-task-run-1")
+	if err != nil {
+		t.Fatalf("read transcript artifact content: %v", err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(content)), "\n")
+	if len(lines) != 3 {
+		t.Fatalf("transcript lines = %d, want 3: %s", len(lines), content)
+	}
+	var first map[string]any
+	if err := json.Unmarshal([]byte(lines[0]), &first); err != nil {
+		t.Fatalf("parse first transcript line: %v", err)
+	}
+	if first["seq"] == nil || first["timestamp"] == nil || first["role"] != "user" || first["type"] != "text" {
+		t.Fatalf("first transcript line = %+v, want canonical user text", first)
+	}
+	if first["type"] == "turn_request" {
+		t.Fatalf("first transcript line looks like raw event: %+v", first)
+	}
+	var result map[string]any
+	if err := json.Unmarshal([]byte(lines[2]), &result); err != nil {
+		t.Fatalf("parse tool result transcript line: %v", err)
+	}
+	if result["role"] != "tool" || result["type"] != "tool_result" || result["tool_use_id"] != "tool-1" || result["output"] != "ok" {
+		t.Fatalf("tool result line = %+v, want canonical tool result output", result)
+	}
+	if _, hasText := result["text"]; hasText {
+		t.Fatalf("tool result line should use output, not text: %+v", result)
+	}
+}
+
+func TestHostBridgeTaskExecutorReusesOutputArtifactsOnRetry(t *testing.T) {
+	ctx, st, _ := setupRunningDriverRun(t)
+	executor := HostBridgeTaskExecutor{
+		Store:        st,
+		WorktreePath: t.TempDir(),
+		Command:      hostBridgeHelperCommand(t, "flue-transcript", "unused-base", "unused-patch"),
+	}
+	req := hostBridgeTaskExecRequest()
+	req.RunnerKind = RunnerKindFlueWorkflow
+
+	first, err := executor.ExecuteTask(ctx, req)
+	if err != nil {
+		t.Fatalf("first ExecuteTask: %v", err)
+	}
+	if first.Status != domain.TaskRunCompleted {
+		t.Fatalf("first status = %s, want completed", first.Status)
+	}
+	second, err := executor.ExecuteTask(ctx, req)
+	if err != nil {
+		t.Fatalf("second ExecuteTask: %v", err)
+	}
+	if second.Status != domain.TaskRunCompleted {
+		t.Fatalf("second status = %s, want completed", second.Status)
+	}
+	want := []string{"transcript-task-run-1", "logs-task-run-1"}
+	if !slices.Equal(second.ArtifactIDs, want) {
+		t.Fatalf("second artifact ids = %+v, want %+v", second.ArtifactIDs, want)
+	}
+}
+
+func TestHostBridgeTaskExecutorRunsNodeModuleThroughGenericInvoker(t *testing.T) {
+	ctx := context.Background()
+	worktree := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(worktree, "runners"), 0o755); err != nil {
+		t.Fatalf("mkdir runners: %v", err)
+	}
+	module := `export async function run(ctx) {
+  if (ctx.request.task_run_id !== "task-run-1") throw new Error("missing request");
+  if (ctx.env.LOOM_TASK_RUNNER_KIND !== "node-module") throw new Error("missing runner kind env");
+  return {
+    status: "completed",
+    exitCode: 0,
+    logsRef: "logs://" + ctx.request.task_run_id,
+    runtimeMetadata: {
+      module_runner: "ok",
+      input_message: (ctx.input && ctx.input.message) || ""
+    }
+  };
+}
+`
+	if err := os.WriteFile(filepath.Join(worktree, "runners", "local-command-runner.mjs"), []byte(module), 0o644); err != nil {
+		t.Fatalf("write runner module: %v", err)
+	}
+	req := hostBridgeTaskExecRequest()
+	req.ProviderProfile = ""
+	req.Runner = "local-command-runner"
+	req.RunnerKind = RunnerKindNodeModule
+	req.RunnerEntrypoint = "runners/local-command-runner.mjs"
+	req.Input = json.RawMessage(`{"message":"hello"}`)
+	executor := HostBridgeTaskExecutor{
+		WorktreePath: worktree,
+		Command:      []string{"node", genericTaskRunnerInvokerPath(t)},
+	}
+	result, err := executor.ExecuteTask(ctx, req)
+	if err != nil {
+		t.Fatalf("ExecuteTask: %v", err)
+	}
+	if result.Status != domain.TaskRunCompleted || result.ExitCode != 0 || result.LogsRef != "logs://task-run-1" {
+		t.Fatalf("result = %+v, want completed node-module result", result)
+	}
+	if result.RuntimeMetadata["module_runner"] != "ok" ||
+		result.RuntimeMetadata["input_message"] != "hello" ||
+		result.RuntimeMetadata["task_runner_invoker"] != "loom-task-runner-invoker" ||
+		result.RuntimeMetadata["runner"] != "local-command-runner" ||
+		result.RuntimeMetadata["runner_kind"] != RunnerKindNodeModule ||
+		result.RuntimeMetadata["runner_entrypoint"] != "runners/local-command-runner.mjs" {
+		t.Fatalf("runtime metadata = %+v, want node-module runner metadata", result.RuntimeMetadata)
+	}
+}
+
+func TestStackScriptsUseGenericTaskRunnerInvoker(t *testing.T) {
+	tests := []struct {
+		name      string
+		path      string
+		forbidden string
+	}{
+		{name: "slack", path: "../../scripts/run-slack-codex-epic-runner-stack.sh", forbidden: "flue-task-agent-runner.mjs"},
+		{name: "github-review", path: "../../scripts/run-github-review-codex-stack.sh", forbidden: "codex-review-runner.mjs"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			data, err := os.ReadFile(tt.path)
+			if err != nil {
+				t.Fatalf("read %s: %v", tt.path, err)
+			}
+			source := string(data)
+			if !strings.Contains(source, "scripts/loom-task-runner-invoker.mjs") ||
+				!strings.Contains(source, "LOOM_DRIVER_TASK_RUNNER_CMD_JSON") ||
+				!strings.Contains(source, "loom-task-runner-invoker.mjs") {
+				t.Fatalf("%s does not wire the generic task runner invoker", tt.path)
+			}
+			if strings.Contains(source, tt.forbidden) {
+				t.Fatalf("%s still references retired runner %q", tt.path, tt.forbidden)
+			}
+		})
+	}
+}
+
+func TestHostBridgeTaskExecutorPreflightsBuiltInFlueWorkflowWithoutCommand(t *testing.T) {
+	executor := HostBridgeTaskExecutor{}
+	if _, err := executor.PreflightTaskProvider(context.Background(), TaskRunRequestOptions{
+		Runner:     "daytona-task-runner",
+		RunnerKind: RunnerKindFlueWorkflow,
+	}); err != nil {
+		t.Fatalf("PreflightTaskProvider flue-workflow err = %v, want nil", err)
+	}
+	if _, err := executor.PreflightTaskProvider(context.Background(), TaskRunRequestOptions{
+		Runner:     "node-runner",
+		RunnerKind: RunnerKindNodeModule,
+	}); !errors.Is(err, domain.ErrInvalid) {
+		t.Fatalf("PreflightTaskProvider node-module err = %v, want ErrInvalid", err)
+	}
+}
+
+func TestHostBridgeTaskExecutorRunsFlueWorkflowThroughGenericInvoker(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	st := memstore.New()
+	worktree := t.TempDir()
+	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "WS", Name: "ws"}); err != nil {
+		t.Fatalf("Create workspace: %v", err)
+	}
+	if _, err := st.Drivers().Create(ctx, store.DriverCreate{
+		WorkspaceKey: "WS",
+		DriverID:     "epic-runner",
+		Name:         "epic-runner",
+		OwnerType:    domain.DriverOwnerUser,
+		Status:       domain.DriverStatusActive,
+		TrustLevel:   domain.DriverTrustTrusted,
+	}); err != nil {
+		t.Fatalf("Create driver: %v", err)
+	}
+	bundleRoot := filepath.Join(worktree, ".loom", "drivers", "epic-runner", "driver-version-1")
+	if err := os.MkdirAll(filepath.Join(bundleRoot, "dist"), 0o755); err != nil {
+		t.Fatalf("mkdir bundle: %v", err)
+	}
+	server := `
+function send(message) {
+  if (typeof process.send === "function") process.send({ version: 1, ...message });
+}
+process.on("message", (message) => {
+  if (!message || message.type !== "invoke") return;
+  send({
+    type: "result",
+    requestId: message.requestId,
+    result: {
+      status: "completed",
+      exitCode: 0,
+      logsRef: "logs://" + message.payload.task_run_id,
+      runtimeMetadata: {
+        workflow: process.env.FLUE_CLI_NAME,
+        request_task_run: message.payload.task_run_id
+      }
+    }
+  });
+});
+send({ type: "ready" });
+setInterval(() => {}, 1000);
+`
+	if err := os.WriteFile(filepath.Join(bundleRoot, "dist", "server.mjs"), []byte(server), 0o644); err != nil {
+		t.Fatalf("write server: %v", err)
+	}
+	manifest := map[string]string{
+		"server_ref":    "dist/server.mjs",
+		"workflow_name": "epic-runner",
+	}
+	manifestBytes, err := writeFlueBundleManifest(bundleRoot, manifest)
+	if err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+	bundleDigest, err := digestBundleTree(bundleRoot, manifestBytes)
+	if err != nil {
+		t.Fatalf("digest bundle: %v", err)
+	}
+	if _, err := st.DriverVersions().Create(ctx, store.DriverVersionCreate{
+		WorkspaceKey:     "WS",
+		VersionID:        "driver-version-1",
+		DriverID:         "epic-runner",
+		Version:          1,
+		SourceRef:        "test://driver",
+		SourceDigest:     "sha256:source",
+		BundleRef:        filepath.ToSlash(filepath.Join(".loom", "drivers", "epic-runner", "driver-version-1")),
+		BundleDigest:     bundleDigest,
+		Runtime:          RuntimeFlueNode,
+		Manifest:         manifest,
+		ValidationStatus: domain.DriverVersionValidationPassed,
+		CreatedBy:        "tester",
+	}); err != nil {
+		t.Fatalf("Create driver version: %v", err)
+	}
+
+	req := hostBridgeTaskExecRequest()
+	req.ProviderProfile = ""
+	req.Runner = "local-task-runner"
+	req.RunnerKind = RunnerKindFlueWorkflow
+	req.RunnerEntrypoint = "local-task-runner"
+	req.RunnerVersionID = "driver-version-1"
+	executor := HostBridgeTaskExecutor{
+		Store:        st,
+		WorktreePath: worktree,
+		Command:      []string{"node", genericTaskRunnerInvokerPath(t)},
+	}
+	result, err := executor.ExecuteTask(ctx, req)
+	if err != nil {
+		t.Fatalf("ExecuteTask: %v", err)
+	}
+	if result.Status != domain.TaskRunCompleted || result.ExitCode != 0 || result.LogsRef != "logs://task-run-1" {
+		t.Fatalf("result = %+v, want completed flue-workflow result", result)
+	}
+	if result.RuntimeMetadata["workflow"] != "local-task-runner" ||
+		result.RuntimeMetadata["task_runner_invoker"] != "loom-task-runner-invoker" ||
+		result.RuntimeMetadata["runner"] != "local-task-runner" ||
+		result.RuntimeMetadata["runner_kind"] != RunnerKindFlueWorkflow ||
+		result.RuntimeMetadata["runner_entrypoint"] != "local-task-runner" {
+		t.Fatalf("runtime metadata = %+v, want flue workflow metadata", result.RuntimeMetadata)
+	}
+
+	directReq := req
+	directReq.TaskRunID = "task-run-2"
+	directReq.TaskID = "TASK-2"
+	directReq.LeaseToken = "scoped-task-token-2"
+	directResult, err := (HostBridgeTaskExecutor{
+		Store:        st,
+		WorktreePath: worktree,
+	}).ExecuteTask(ctx, directReq)
+	if err != nil {
+		t.Fatalf("direct ExecuteTask: %v", err)
+	}
+	if directResult.Status != domain.TaskRunCompleted || directResult.ExitCode != 0 || directResult.LogsRef != "logs://task-run-2" {
+		t.Fatalf("direct result = %+v, want completed flue-workflow result", directResult)
+	}
+	if directResult.RuntimeMetadata["workflow"] != "local-task-runner" ||
+		directResult.RuntimeMetadata["task_runner_invoker"] != "loom-builtin-flue-runner" ||
+		directResult.RuntimeMetadata["runner"] != "local-task-runner" ||
+		directResult.RuntimeMetadata["runner_kind"] != RunnerKindFlueWorkflow ||
+		directResult.RuntimeMetadata["runner_entrypoint"] != "local-task-runner" {
+		t.Fatalf("direct runtime metadata = %+v, want built-in flue workflow metadata", directResult.RuntimeMetadata)
+	}
+}
+
+func TestTaskRunnerEnvIncludesFlueBundleForRunnerVersion(t *testing.T) {
+	ctx := context.Background()
+	st := memstore.New()
+	worktree := t.TempDir()
+	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "WS", Name: "ws"}); err != nil {
+		t.Fatalf("Create workspace: %v", err)
+	}
+	if _, err := st.Drivers().Create(ctx, store.DriverCreate{
+		WorkspaceKey: "WS",
+		DriverID:     "epic-runner",
+		Name:         "epic-runner",
+		OwnerType:    domain.DriverOwnerUser,
+		Status:       domain.DriverStatusActive,
+		TrustLevel:   domain.DriverTrustTrusted,
+	}); err != nil {
+		t.Fatalf("Create driver: %v", err)
+	}
+	bundleRoot := filepath.Join(worktree, ".loom", "drivers", "epic-runner", "driver-version-1")
+	if err := os.MkdirAll(filepath.Join(bundleRoot, "dist"), 0o755); err != nil {
+		t.Fatalf("mkdir bundle: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(bundleRoot, "dist", "server.mjs"), []byte("export {};\n"), 0o644); err != nil {
+		t.Fatalf("write server: %v", err)
+	}
+	manifest := map[string]string{
+		"server_ref":    "dist/server.mjs",
+		"workflow_name": "epic-runner",
+	}
+	manifestBytes, err := writeFlueBundleManifest(bundleRoot, manifest)
+	if err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+	digest, err := digestBundleTree(bundleRoot, manifestBytes)
+	if err != nil {
+		t.Fatalf("digest bundle: %v", err)
+	}
+	if _, err := st.DriverVersions().Create(ctx, store.DriverVersionCreate{
+		WorkspaceKey:     "WS",
+		VersionID:        "driver-version-1",
+		DriverID:         "epic-runner",
+		Version:          1,
+		SourceDigest:     "sha256:source",
+		BundleRef:        filepath.ToSlash(filepath.Join(".loom", "drivers", "epic-runner", "driver-version-1")),
+		BundleDigest:     digest,
+		Runtime:          RuntimeFlueNode,
+		Manifest:         manifest,
+		ValidationStatus: domain.DriverVersionValidationPassed,
+	}); err != nil {
+		t.Fatalf("Create driver version: %v", err)
+	}
+	req := hostBridgeTaskExecRequest()
+	req.RunnerKind = RunnerKindFlueWorkflow
+	req.RunnerVersionID = "driver-version-1"
+	env := HostBridgeTaskExecutor{Store: st, WorktreePath: worktree}.taskRunnerEnv(req, "{}")
+	if !envContains(env, "LOOM_TASK_RUNNER_BUNDLE_ROOT="+bundleRoot) {
+		t.Fatalf("env missing bundle root: %v", env)
+	}
+	if !envContains(env, "LOOM_TASK_RUNNER_SERVER_PATH="+filepath.Join(bundleRoot, "dist", "server.mjs")) {
+		t.Fatalf("env missing server path: %v", env)
+	}
+	if !envContainsPrefix(env, "LOOM_TASK_RUNNER_MANIFEST_JSON=") {
+		t.Fatalf("env missing manifest JSON: %v", env)
 	}
 }
 
@@ -407,13 +759,33 @@ func TestHostBridgeTaskExecutorHelperProcess(t *testing.T) {
 			"status":    "completed",
 			"exit_code": 0,
 			"logs":      "flue runner log\n",
-			"transcript_entries": []map[string]any{{
-				"seq":       1,
-				"timestamp": "2026-06-09T12:00:00Z",
-				"role":      "assistant",
-				"type":      "text",
-				"text":      "implemented task",
-			}},
+			"transcript_entries": []map[string]any{
+				{
+					"seq":       1,
+					"timestamp": "2026-06-09T12:00:00Z",
+					"role":      "user",
+					"type":      "text",
+					"text":      "Implement TEST-1",
+				},
+				{
+					"seq":         2,
+					"timestamp":   "2026-06-09T12:00:01Z",
+					"role":        "assistant",
+					"type":        "tool_use",
+					"tool_name":   "bash",
+					"tool_use_id": "tool-1",
+					"tool_input":  map[string]any{"command": "npm test"},
+				},
+				{
+					"seq":         3,
+					"timestamp":   "2026-06-09T12:00:02Z",
+					"role":        "tool",
+					"type":        "tool_result",
+					"tool_name":   "bash",
+					"tool_use_id": "tool-1",
+					"output":      "ok",
+				},
+			},
 			"runtime_metadata": map[string]string{
 				"helper":       "host_bridge",
 				"flue_harness": "task-agent",
@@ -422,11 +794,28 @@ func TestHostBridgeTaskExecutorHelperProcess(t *testing.T) {
 		if err := json.NewEncoder(os.Stdout).Encode(result); err != nil {
 			t.Fatalf("encode result: %v", err)
 		}
+	case "invalid-empty":
+		os.Stdout.WriteString("{}\n")
+	case "invalid-null":
+		os.Stdout.WriteString("null\n")
+	case "invalid-missing-status":
+		// Carries patch + artifacts that MUST NOT be persisted.
+		os.Stdout.WriteString(`{"exit_code":0,"patch":"` + invalidHelperPatch + `","patch_base_ref":"` + base + `","artifacts":[{"artifact_id":"artifact-` + req.TaskRunID + `","uri":"artifact://x","content_hash":"sha256:x"}],"logs":"should not persist\n"}` + "\n")
+	case "invalid-unknown-status":
+		os.Stdout.WriteString(`{"status":"weird","exit_code":0,"patch":"` + invalidHelperPatch + `","patch_base_ref":"` + base + `"}` + "\n")
+	case "invalid-nonterminal":
+		os.Stdout.WriteString(`{"status":"running","patch":"` + invalidHelperPatch + `","patch_base_ref":"` + base + `"}` + "\n")
+	case "invalid-completed-nonzero":
+		os.Stdout.WriteString(`{"status":"completed","exit_code":3,"patch":"` + invalidHelperPatch + `","patch_base_ref":"` + base + `","logs":"should not persist\n"}` + "\n")
 	default:
 		t.Fatalf("unknown helper mode %q", mode)
 	}
 	os.Exit(0)
 }
+
+// invalidHelperPatch is a syntactically valid patch the invalid-result helper
+// modes emit so the test can prove an invalid result never applies it.
+const invalidHelperPatch = "diff --git a/file.txt b/file.txt\\n--- a/file.txt\\n+++ b/file.txt\\n@@ -1 +1 @@\\n-old\\n+new\\n"
 
 func hostBridgeTaskExecRequest() TaskExecRequest {
 	return TaskExecRequest{
@@ -451,6 +840,36 @@ func hostBridgeHelperCommand(t *testing.T, mode, base, patch string) []string {
 	}
 	t.Setenv("LOOM_HOST_BRIDGE_HELPER", "1")
 	return []string{exe, "-test.run=TestHostBridgeTaskExecutorHelperProcess", "--", mode, base, patch}
+}
+
+func genericTaskRunnerInvokerPath(t *testing.T) string {
+	t.Helper()
+	path, err := filepath.Abs(filepath.Join("..", "..", "scripts", "loom-task-runner-invoker.mjs"))
+	if err != nil {
+		t.Fatalf("resolve generic invoker path: %v", err)
+	}
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("stat generic invoker: %v", err)
+	}
+	return path
+}
+
+func envContains(env []string, want string) bool {
+	for _, entry := range env {
+		if entry == want {
+			return true
+		}
+	}
+	return false
+}
+
+func envContainsPrefix(env []string, prefix string) bool {
+	for _, entry := range env {
+		if strings.HasPrefix(entry, prefix) {
+			return true
+		}
+	}
+	return false
 }
 
 func TestLastJSONLine(t *testing.T) {

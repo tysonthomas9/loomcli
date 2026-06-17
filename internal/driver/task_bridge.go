@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -20,7 +19,28 @@ import (
 const (
 	TaskRunnerCommandJSONEnv = "LOOM_DRIVER_TASK_RUNNER_CMD_JSON"
 	TaskRunnerCommandEnv     = "LOOM_DRIVER_TASK_RUNNER_CMD"
+
+	// LocalTaskRunnerEntrypoint is the bundled local task runner entrypoint.
+	// Only this runner gets the resolved backend env + the trusted-local
+	// provider-credential env allowlist (§4.3); Daytona/remote runners keep the
+	// strict driver filter.
+	LocalTaskRunnerEntrypoint = "local-task-runner"
+
+	// TaskRunnerBackendEnv carries the resolved backend CLI to the local task
+	// runner (§4.5).
+	TaskRunnerBackendEnv = "LOOM_TASK_RUNNER_BACKEND"
+
+	// defaultTaskRunnerBackend mirrors service.GetWorkspaceBackend's default
+	// (DaemonProfile.AgentBackend empty -> codex).
+	defaultTaskRunnerBackend = "codex"
 )
+
+// isLocalTaskRunner reports whether the request targets the bundled local task
+// runner. The env widening in §4.3 is gated strictly by the runner entrypoint
+// so a leak cannot reach Daytona/remote runners.
+func isLocalTaskRunner(req TaskExecRequest) bool {
+	return strings.TrimSpace(req.RunnerEntrypoint) == LocalTaskRunnerEntrypoint
+}
 
 type HostBridgeTaskExecutor struct {
 	Store        store.Store
@@ -123,6 +143,19 @@ type flueTaskSession struct {
 }
 
 func (e HostBridgeTaskExecutor) PreflightTaskProvider(ctx context.Context, opts TaskRunRequestOptions) (TaskRunRequestOptions, error) {
+	if taskRunHasNamedRunner(opts) {
+		command, err := e.command()
+		if err != nil {
+			return opts, err
+		}
+		if len(command) == 0 && strings.TrimSpace(opts.RunnerKind) == RunnerKindFlueWorkflow {
+			return opts, nil
+		}
+		if len(command) == 0 {
+			return opts, fmt.Errorf("runner %q requires a configured task runner command: %w", opts.Runner, domain.ErrInvalid)
+		}
+		return opts, nil
+	}
 	if taskProviderIsNoop(opts.ProviderProfile) {
 		return LocalTaskExecutor{}.PreflightTaskProvider(ctx, opts)
 	}
@@ -140,13 +173,14 @@ func (e HostBridgeTaskExecutor) ExecuteTask(ctx context.Context, req TaskExecReq
 	if taskProviderIsNoop(req.ProviderProfile) {
 		return LocalTaskExecutor{}.ExecuteTask(ctx, req)
 	}
-	command, err := e.command()
+	runBridge, err := e.bridgeRunner(ctx, req)
 	if err != nil {
 		return TaskExecResult{}, err
 	}
-	if len(command) == 0 {
+	if runBridge == nil {
 		return LocalTaskExecutor{}.ExecuteTask(ctx, req)
 	}
+
 	session, err := e.startFlueTaskSession(ctx, req)
 	if err != nil {
 		return TaskExecResult{}, err
@@ -159,11 +193,20 @@ func (e HostBridgeTaskExecutor) ExecuteTask(ctx context.Context, req TaskExecReq
 			}
 		}
 	}()
-	runnerResult, err := e.runCommand(ctx, req, command)
+	runnerResult, err := runBridge()
 	if err != nil {
 		return TaskExecResult{}, err
 	}
 	runner = &runnerResult
+	// Pre-persist validation gate (§4.2): the decoded runner result must be a
+	// non-empty terminal result with a zero exit when completed. An invalid
+	// result fails closed (invalid_task_result, exit 1) and NEVER reaches the
+	// artifact/patch/log/transcript persistence below — we must not stamp real
+	// evidence onto a run the runner did not actually finish.
+	if reason, ok := validateBridgeTaskRunnerResult(runnerResult); !ok {
+		result = invalidBridgeTaskExecResult(runnerResult, reason)
+		return result, nil
+	}
 	result = runnerResult.taskExecResult()
 	if artifacts := runner.finalizedArtifacts(); len(artifacts) > 0 {
 		result, err = e.registerRunnerArtifacts(ctx, req, artifacts, result)
@@ -185,6 +228,79 @@ func (e HostBridgeTaskExecutor) ExecuteTask(ctx context.Context, req TaskExecReq
 	return e.finalizeAndApplyPatch(ctx, req, runnerResult, patch, result)
 }
 
+func (e HostBridgeTaskExecutor) bridgeRunner(ctx context.Context, req TaskExecRequest) (func() (bridgeTaskRunnerResult, error), error) {
+	command, err := e.command()
+	if err != nil {
+		return nil, err
+	}
+	switch {
+	case len(command) > 0:
+		return func() (bridgeTaskRunnerResult, error) {
+			return e.runCommand(ctx, req, command)
+		}, nil
+	case taskExecUsesFlueRuntime(req):
+		return func() (bridgeTaskRunnerResult, error) {
+			return e.runBuiltInFlueWorkflow(ctx, req)
+		}, nil
+	case taskExecHasNamedRunner(req):
+		return nil, fmt.Errorf("runner %q requires a configured task runner command: %w", req.Runner, domain.ErrInvalid)
+	default:
+		return nil, nil
+	}
+}
+
+// validateBridgeTaskRunnerResult mirrors §4.1/§4.2: a decoded runner result is
+// valid only when it carries a terminal status and — for completed — a zero
+// exit code. Empty/`{}`/`null` results decode to a zero struct whose status is
+// "" (non-terminal) and so are rejected. Returns (reason, false) when invalid.
+func validateBridgeTaskRunnerResult(r bridgeTaskRunnerResult) (string, bool) {
+	status := strings.TrimSpace(string(r.Status))
+	if status == "" {
+		return "task runner result missing terminal status", false
+	}
+	if !r.Status.IsTerminal() {
+		return fmt.Sprintf("task runner result status %q is not terminal", status), false
+	}
+	if r.Status == domain.TaskRunCompleted {
+		exit := bridgeResultExitCode(r)
+		if exit != 0 {
+			return fmt.Sprintf("task runner reported completed with non-zero exit code %d", exit), false
+		}
+	}
+	return "", true
+}
+
+// bridgeResultExitCode resolves the runner exit code from either casing,
+// defaulting to 0 when unset.
+func bridgeResultExitCode(r bridgeTaskRunnerResult) int {
+	if r.ExitCode != nil {
+		return *r.ExitCode
+	}
+	if r.ExitCodeCamel != nil {
+		return *r.ExitCodeCamel
+	}
+	return 0
+}
+
+// invalidBridgeTaskExecResult builds the fail-closed result for an invalid
+// runner result: failed/exit 1/invalid_task_result, carrying the runner's own
+// runtime metadata (so the failure is traceable) but no artifact/log refs.
+func invalidBridgeTaskExecResult(r bridgeTaskRunnerResult, reason string) TaskExecResult {
+	metadata := cloneStringMap(firstNonNilMap(r.RuntimeMetadata, r.RuntimeMetadataCamel))
+	if metadata == nil {
+		metadata = map[string]string{}
+	}
+	metadata["invalid_task_result_reason"] = reason
+	errorMessage := firstNonEmpty(r.ErrorMessage, r.ErrorMessageCamel, reason)
+	return TaskExecResult{
+		Status:          domain.TaskRunFailed,
+		ExitCode:        1,
+		RuntimeMetadata: metadata,
+		ErrorClass:      "invalid_task_result",
+		ErrorMessage:    errorMessage,
+	}
+}
+
 func taskProviderIsNoop(provider string) bool {
 	switch strings.TrimSpace(provider) {
 	case "local-noop", "noop":
@@ -192,6 +308,13 @@ func taskProviderIsNoop(provider string) bool {
 	default:
 		return false
 	}
+}
+
+func taskExecHasNamedRunner(req TaskExecRequest) bool {
+	return strings.TrimSpace(req.Runner) != "" ||
+		strings.TrimSpace(req.RunnerKind) != "" ||
+		strings.TrimSpace(req.RunnerEntrypoint) != "" ||
+		strings.TrimSpace(req.RunnerRef) != ""
 }
 
 func (e HostBridgeTaskExecutor) startFlueTaskSession(ctx context.Context, req TaskExecRequest) (*flueTaskSession, error) {
@@ -313,7 +436,7 @@ func flueTaskSessionStatus(result TaskExecResult, execErr error) domain.AgentSes
 		return domain.AgentSessionFailed
 	}
 	switch result.Status {
-	case "", domain.TaskRunCompleted:
+	case domain.TaskRunCompleted:
 		if result.ExitCode == 0 {
 			return domain.AgentSessionCompleted
 		}
@@ -321,15 +444,14 @@ func flueTaskSessionStatus(result TaskExecResult, execErr error) domain.AgentSes
 	case domain.TaskRunCancelled:
 		return domain.AgentSessionCancelled
 	default:
+		// Empty/non-terminal status is never success: an empty result maps to
+		// failed (no fake completion).
 		return domain.AgentSessionFailed
 	}
 }
 
 func taskExecUsesFlueRuntime(req TaskExecRequest) bool {
-	profile := strings.TrimSpace(req.ProviderProfile)
-	return strings.HasPrefix(profile, "flue") ||
-		strings.TrimSpace(req.RunnerPlacement.Provider) == "flue" ||
-		strings.HasPrefix(strings.TrimSpace(req.SandboxPlacement.Provider), "flue")
+	return strings.TrimSpace(req.RunnerKind) == RunnerKindFlueWorkflow
 }
 
 func flueTaskSessionID(req TaskExecRequest) string {
@@ -342,14 +464,19 @@ func flueTaskAgentID(req TaskExecRequest) string {
 
 func flueTaskSessionMetadata(req TaskExecRequest, sessionID string) map[string]string {
 	metadata := map[string]string{
-		"backend":          "flue",
-		"runtime":          "flue",
-		"task_id":          req.TaskID,
-		"task_run_id":      req.TaskRunID,
-		"driver_run_id":    req.DriverRunID,
-		"provider_profile": req.ProviderProfile,
-		"flue_session":     sessionID,
-		"flue_harness":     "task-agent",
+		"backend":                  "flue",
+		"runtime":                  "flue",
+		"task_id":                  req.TaskID,
+		"task_run_id":              req.TaskRunID,
+		"driver_run_id":            req.DriverRunID,
+		"runner":                   req.Runner,
+		"runner_ref":               req.RunnerRef,
+		"runner_kind":              req.RunnerKind,
+		"runner_entrypoint":        req.RunnerEntrypoint,
+		"runner_driver_version_id": req.RunnerVersionID,
+		"provider_profile":         req.ProviderProfile,
+		"flue_session":             sessionID,
+		"flue_harness":             "task-agent",
 	}
 	if req.DriverStepID != "" {
 		metadata["driver_step_id"] = req.DriverStepID
@@ -390,6 +517,69 @@ func normalizeCommand(command []string) ([]string, error) {
 	return out, nil
 }
 
+func (e HostBridgeTaskExecutor) runBuiltInFlueWorkflow(ctx context.Context, req TaskExecRequest) (bridgeTaskRunnerResult, error) {
+	input, err := json.Marshal(req)
+	if err != nil {
+		return bridgeTaskRunnerResult{}, fmt.Errorf("encode task runner request: %w", err)
+	}
+	launcherPath, cleanup, err := writeFlueTaskRunnerLauncher()
+	if err != nil {
+		return bridgeTaskRunnerResult{}, err
+	}
+	defer cleanup()
+
+	cmd := exec.CommandContext(ctx, "node", launcherPath) //nolint:gosec // fixed local runtime for bundled Flue workflow runners.
+	if worktree := strings.TrimSpace(e.WorktreePath); worktree != "" {
+		cmd.Dir = worktree
+	}
+	cmd.Env = append(taskRunnerBaseEnvForRequest(req, os.Environ()), e.taskRunnerEnv(req, string(input))...)
+	cmd.Stdin = bytes.NewReader(input)
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	cmd.Cancel = func() error {
+		if cmd.Process == nil {
+			return nil
+		}
+		return cmd.Process.Signal(os.Interrupt)
+	}
+	cmd.WaitDelay = 5 * time.Second
+	if err := cmd.Run(); err != nil {
+		msg := strings.TrimSpace(stderr.String())
+		if msg == "" {
+			msg = err.Error()
+		}
+		return bridgeTaskRunnerResult{}, fmt.Errorf("built-in Flue task runner failed: %s", msg)
+	}
+	payload, err := lastJSONLine(stdout.Bytes())
+	if err != nil {
+		return bridgeTaskRunnerResult{}, err
+	}
+	var result bridgeTaskRunnerResult
+	if err := json.Unmarshal(payload, &result); err != nil {
+		return bridgeTaskRunnerResult{}, fmt.Errorf("decode built-in Flue task runner result: %w", err)
+	}
+	return result, nil
+}
+
+func writeFlueTaskRunnerLauncher() (string, func(), error) {
+	launcher, err := os.CreateTemp("", "loom-flue-task-runner-*.mjs")
+	if err != nil {
+		return "", nil, fmt.Errorf("create Flue task runner launcher: %w", err)
+	}
+	cleanup := func() { _ = os.Remove(launcher.Name()) }
+	if _, err := launcher.WriteString(flueTaskRunnerLauncher); err != nil {
+		_ = launcher.Close()
+		cleanup()
+		return "", nil, fmt.Errorf("write Flue task runner launcher: %w", err)
+	}
+	if err := launcher.Close(); err != nil {
+		cleanup()
+		return "", nil, fmt.Errorf("close Flue task runner launcher: %w", err)
+	}
+	return launcher.Name(), cleanup, nil
+}
+
 func (e HostBridgeTaskExecutor) runCommand(ctx context.Context, req TaskExecRequest, command []string) (bridgeTaskRunnerResult, error) {
 	input, err := json.Marshal(req)
 	if err != nil {
@@ -399,7 +589,7 @@ func (e HostBridgeTaskExecutor) runCommand(ctx context.Context, req TaskExecRequ
 	if worktree := strings.TrimSpace(e.WorktreePath); worktree != "" {
 		cmd.Dir = worktree
 	}
-	cmd.Env = append(taskRunnerBaseEnv(os.Environ()), e.taskRunnerEnv(req, string(input))...)
+	cmd.Env = append(taskRunnerBaseEnvForRequest(req, os.Environ()), e.taskRunnerEnv(req, string(input))...)
 	cmd.Stdin = bytes.NewReader(input)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
@@ -422,6 +612,205 @@ func (e HostBridgeTaskExecutor) runCommand(ctx context.Context, req TaskExecRequ
 	return result, nil
 }
 
+const flueTaskRunnerLauncher = `
+import { fork } from 'node:child_process';
+
+function firstNonEmpty(...values) {
+  for (const value of values) {
+    const text = String(value || '').trim();
+    if (text) return text;
+  }
+  return '';
+}
+
+function stringMetadata(values = {}) {
+  const out = {};
+  for (const [key, value] of Object.entries(values || {})) {
+    if (value === undefined || value === null) continue;
+    out[key] = typeof value === 'string' ? value : String(value);
+  }
+  return out;
+}
+
+function failure(errorClass, error) {
+  return {
+    status: 'failed',
+    exit_code: 1,
+    error_class: errorClass,
+    error_message: error && error.message ? error.message : String(error || 'task runner failed'),
+    runtime_metadata: {
+      task_runner_invoker: 'loom-builtin-flue-runner',
+    },
+  };
+}
+
+const TERMINAL_STATUSES = new Set(['completed', 'failed', 'cancelled']);
+
+function ownKeyCount(value) {
+  if (!value || typeof value !== 'object') return 0;
+  return Object.keys(value).length;
+}
+
+// validateBridgeResult applies the strict §4.1 algorithm: the result must be a
+// non-null object with >=1 own key and a terminal status; completed requires a
+// zero (or absent) exit. Anything else is INVALID and NEVER defaults to
+// completed. Returns { ok, reason }.
+function validateBridgeResult(result) {
+  if (!result || typeof result !== 'object' || ownKeyCount(result) < 1) {
+    return { ok: false, reason: 'task runner returned an empty result' };
+  }
+  const status = typeof result.status === 'string' ? result.status.trim() : '';
+  if (!status || !TERMINAL_STATUSES.has(status)) {
+    return { ok: false, reason: 'task runner result status ' + JSON.stringify(result.status) + ' is not terminal' };
+  }
+  const rawExit = result.exit_code !== undefined ? result.exit_code : result.exitCode;
+  let exit;
+  if (rawExit === undefined || rawExit === null) {
+    exit = undefined;
+  } else {
+    const n = Number(rawExit);
+    if (!Number.isFinite(n)) {
+      return { ok: false, reason: 'task runner reported a non-numeric exit code ' + JSON.stringify(rawExit) };
+    }
+    exit = n;
+  }
+  if (status === 'completed' && exit !== undefined && exit !== 0) {
+    return { ok: false, reason: 'task runner reported completed with non-zero exit code ' + exit };
+  }
+  return { ok: true, reason: '' };
+}
+
+function normalizeBridgeResult(result, request, entrypoint) {
+  const verdict = validateBridgeResult(result);
+  if (!verdict.ok) {
+    const invalid = failure('invalid_task_result', new Error(verdict.reason));
+    invalid.runtime_metadata = stringMetadata({
+      ...invalid.runtime_metadata,
+      runner: firstNonEmpty(request.runner, process.env.LOOM_TASK_RUNNER),
+      runner_kind: 'flue-workflow',
+      runner_entrypoint: entrypoint,
+    });
+    return invalid;
+  }
+  const out = { ...result };
+  out.status = (typeof out.status === 'string' ? out.status.trim() : out.status);
+  const rawExit = out.exit_code !== undefined ? out.exit_code : out.exitCode;
+  let exit;
+  if (rawExit === undefined || rawExit === null) {
+    exit = undefined;
+  } else {
+    const n = Number(rawExit);
+    exit = Number.isFinite(n) ? n : undefined;
+  }
+  out.exit_code = (exit === undefined) ? (out.status === 'completed' ? 0 : 1) : exit;
+  const runtimeMetadata = out.runtime_metadata || out.runtimeMetadata || {};
+  out.runtime_metadata = stringMetadata({
+    ...runtimeMetadata,
+    task_runner_invoker: 'loom-builtin-flue-runner',
+    runner: firstNonEmpty(request.runner, process.env.LOOM_TASK_RUNNER),
+    runner_kind: 'flue-workflow',
+    runner_entrypoint: entrypoint,
+  });
+  delete out.runtimeMetadata;
+  return out;
+}
+
+function emit(value) {
+  console.log(JSON.stringify(value || {}));
+}
+
+const rawRequest = process.env.LOOM_TASK_RUN_REQUEST_JSON || '{}';
+const request = JSON.parse(rawRequest);
+const serverPath = firstNonEmpty(process.env.LOOM_TASK_RUNNER_SERVER_PATH, process.env.LOOM_FLUE_SERVER_PATH);
+const bundleRoot = firstNonEmpty(process.env.LOOM_TASK_RUNNER_BUNDLE_ROOT, process.env.LOOM_FLUE_BUNDLE_ROOT, process.cwd());
+const entrypoint = firstNonEmpty(process.env.LOOM_TASK_RUNNER_ENTRYPOINT, request.runner_entrypoint);
+
+if (process.env.LOOM_TASK_RUN_LEASE_TOKEN !== request.lease_token) {
+  emit(failure('task_runner_invoker_failed', new Error('task-run lease token did not reach task runner')));
+  process.exit(0);
+}
+if (!serverPath) {
+  emit(failure('task_runner_invoker_failed', new Error('flue-workflow runner requires LOOM_TASK_RUNNER_SERVER_PATH')));
+  process.exit(0);
+}
+if (!entrypoint) {
+  emit(failure('task_runner_invoker_failed', new Error('flue-workflow runner entrypoint is required')));
+  process.exit(0);
+}
+
+let settled = false;
+let invoked = false;
+const child = fork(serverPath, [], {
+  cwd: bundleRoot,
+  env: {
+    ...process.env,
+    FLUE_MODE: 'local',
+    FLUE_CLI_TARGET: 'workflow',
+    FLUE_CLI_NAME: entrypoint,
+  },
+  stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
+});
+
+child.stdout?.on('data', (data) => process.stderr.write(data));
+child.stderr?.on('data', (data) => process.stderr.write(data));
+
+function stopChild() {
+  try { child.disconnect(); } catch {}
+  if (!child.killed) {
+    try { child.kill(); } catch {}
+  }
+}
+
+function finish(value) {
+  if (settled) return;
+  settled = true;
+  stopChild();
+  emit(normalizeBridgeResult(value || {}, request, entrypoint));
+}
+
+function fail(error) {
+  if (settled) return;
+  settled = true;
+  stopChild();
+  emit(failure('task_runner_invoker_failed', error));
+}
+
+child.on('message', (message) => {
+  if (!message || typeof message !== 'object') return;
+  if (message.type === 'ready' && !invoked) {
+    invoked = true;
+    child.send({
+      version: 1,
+      type: 'invoke',
+      requestId: request.task_run_id || process.env.LOOM_TASK_RUN_ID || 'task-runner',
+      payload: request,
+    });
+    return;
+  }
+  if (message.type === 'result') {
+    finish(message.result || {});
+    return;
+  }
+  if (message.type === 'error') {
+    const error = message.error || {};
+    fail(new Error(error.message || error.details || 'Flue workflow runner failed'));
+  }
+});
+
+child.on('error', fail);
+child.on('exit', (code, signal) => {
+  if (settled) return;
+  fail(new Error('Flue workflow runner exited before result (code=' + (code ?? '') + ' signal=' + (signal || '') + ')'));
+});
+
+process.once('SIGINT', () => {
+  finish({ status: 'cancelled', exit_code: 130, errorClass: 'driver_cancelled', errorMessage: 'Flue task runner cancelled' });
+});
+process.once('SIGTERM', () => {
+  finish({ status: 'cancelled', exit_code: 143, errorClass: 'driver_cancelled', errorMessage: 'Flue task runner cancelled' });
+});
+`
+
 func (e HostBridgeTaskExecutor) taskRunnerEnv(req TaskExecRequest, requestJSON string) []string {
 	env := []string{
 		"LOOM_TASK_RUN_REQUEST_JSON=" + requestJSON,
@@ -434,6 +823,11 @@ func (e HostBridgeTaskExecutor) taskRunnerEnv(req TaskExecRequest, requestJSON s
 		"LOOM_TASK_ID=" + req.TaskID,
 		"LOOM_TASK_RUN_PARENT_SESSION_ID=" + req.ParentSessionID,
 		"LOOM_TASK_RUN_WORKER_PROFILE_ID=" + req.WorkerProfileID,
+		"LOOM_TASK_RUNNER=" + req.Runner,
+		"LOOM_TASK_RUNNER_REF=" + req.RunnerRef,
+		"LOOM_TASK_RUNNER_KIND=" + req.RunnerKind,
+		"LOOM_TASK_RUNNER_ENTRYPOINT=" + req.RunnerEntrypoint,
+		"LOOM_TASK_RUNNER_DRIVER_VERSION_ID=" + req.RunnerVersionID,
 		"LOOM_TASK_RUN_PROVIDER_PROFILE=" + req.ProviderProfile,
 		"LOOM_TASK_RUN_NODE_ID=" + req.NodeID,
 		"LOOM_TASK_RUN_LEASE_ID=" + req.LeaseID,
@@ -445,7 +839,64 @@ func (e HostBridgeTaskExecutor) taskRunnerEnv(req TaskExecRequest, requestJSON s
 	if apiBaseURL := strings.TrimSpace(e.APIBaseURL); apiBaseURL != "" {
 		env = append(env, "LOOM_TASK_RUN_API_URL="+apiBaseURL)
 	}
+	env = append(env, e.taskRunnerBundleEnv(req)...)
+	if isLocalTaskRunner(req) {
+		env = append(env, TaskRunnerBackendEnv+"="+e.resolveTaskRunnerBackend(req))
+	}
 	return env
+}
+
+// resolveTaskRunnerBackend resolves the backend CLI for the local task runner,
+// mirroring service.GetWorkspaceBackend precedence (§4.3): a per-agent override
+// (the worker's agent row Backend) wins, else DaemonProfile.AgentBackend, else
+// the default codex. The store is consulted best-effort; any lookup failure
+// falls through to the next source so the runner always receives a backend.
+func (e HostBridgeTaskExecutor) resolveTaskRunnerBackend(req TaskExecRequest) string {
+	if e.Store == nil {
+		return defaultTaskRunnerBackend
+	}
+	ctx := context.Background()
+	if worker := strings.TrimSpace(req.WorkerProfileID); worker != "" {
+		if agent, err := e.Store.Agents().Get(ctx, req.WorkspaceKey, worker); err == nil && agent != nil {
+			if backend := strings.TrimSpace(agent.Backend); backend != "" {
+				return backend
+			}
+		}
+	}
+	if profile, err := e.Store.Daemon().Get(ctx, req.WorkspaceKey); err == nil && profile != nil {
+		if backend := strings.TrimSpace(profile.AgentBackend); backend != "" {
+			return backend
+		}
+	}
+	return defaultTaskRunnerBackend
+}
+
+func (e HostBridgeTaskExecutor) taskRunnerBundleEnv(req TaskExecRequest) []string {
+	if e.Store == nil || strings.TrimSpace(e.WorktreePath) == "" || strings.TrimSpace(req.RunnerVersionID) == "" {
+		return nil
+	}
+	ctx := context.Background()
+	version, err := e.Store.DriverVersions().Get(ctx, req.WorkspaceKey, req.RunnerVersionID)
+	if err != nil || version.BundleRef == "" {
+		return nil
+	}
+	bundleRoot, err := safeBundleRoot(e.WorktreePath, version.BundleRef)
+	if err != nil {
+		return nil
+	}
+	manifest, serverPath, err := verifyBundleManifest(bundleRoot, version.BundleDigest)
+	if err != nil {
+		return nil
+	}
+	encoded, err := json.Marshal(manifest)
+	if err != nil {
+		return nil
+	}
+	return []string{
+		"LOOM_TASK_RUNNER_BUNDLE_ROOT=" + bundleRoot,
+		"LOOM_TASK_RUNNER_SERVER_PATH=" + serverPath,
+		"LOOM_TASK_RUNNER_MANIFEST_JSON=" + string(encoded),
+	}
 }
 
 func taskRunPlacementJSON(placement domain.TaskRunPlacement) string {
@@ -457,360 +908,6 @@ func taskRunPlacementJSON(placement domain.TaskRunPlacement) string {
 		return "{}"
 	}
 	return string(b)
-}
-
-func (r bridgeTaskRunnerResult) finalizedArtifacts() []bridgeArtifact {
-	switch {
-	case len(r.Artifacts) > 0:
-		return r.Artifacts
-	case len(r.ArtifactDescriptors) > 0:
-		return r.ArtifactDescriptors
-	case len(r.ArtifactDescriptorsAlt) > 0:
-		return r.ArtifactDescriptorsAlt
-	default:
-		return nil
-	}
-}
-
-func (e HostBridgeTaskExecutor) registerRunnerArtifacts(ctx context.Context, req TaskExecRequest, artifacts []bridgeArtifact, result TaskExecResult) (TaskExecResult, error) {
-	if len(artifacts) == 0 {
-		return result, nil
-	}
-	if e.Store == nil {
-		return TaskExecResult{}, fmt.Errorf("store required for runner artifact registration: %w", domain.ErrInvalid)
-	}
-	artifactIDs := normalizeArtifactIDs(result.ArtifactIDs)
-	for i, artifact := range artifacts {
-		artifactID := firstNonEmpty(artifact.ArtifactID, artifact.ArtifactIDCamel, artifact.ID)
-		if artifactID == "" {
-			artifactID = fmt.Sprintf("artifact-%s-%d", req.TaskRunID, i+1)
-		}
-		uri := strings.TrimSpace(artifact.URI)
-		if uri == "" {
-			artifactIDs = normalizeArtifactIDs(append(artifactIDs, artifactID))
-			continue
-		}
-		finalized, err := e.registerRunnerArtifact(ctx, req, artifact, artifactID, uri)
-		if err != nil {
-			return TaskExecResult{}, err
-		}
-		artifactIDs = normalizeArtifactIDs(append(artifactIDs, finalized.ArtifactID))
-		if result.RuntimeMetadata == nil {
-			result.RuntimeMetadata = map[string]string{}
-		}
-		result.RuntimeMetadata["artifact."+finalized.ArtifactID+".content_hash"] = finalized.ContentHash
-	}
-	result.ArtifactIDs = artifactIDs
-	if result.ArtifactsRef == "" && len(artifactIDs) > 0 {
-		result.ArtifactsRef = "artifacts://" + req.TaskRunID
-	}
-	return result, nil
-}
-
-func (e HostBridgeTaskExecutor) registerRunnerArtifact(ctx context.Context, req TaskExecRequest, artifact bridgeArtifact, artifactID, uri string) (*domain.Artifact, error) {
-	metadata := cloneStringMap(artifact.Metadata)
-	if metadata == nil {
-		metadata = map[string]string{}
-	}
-	metadata["driver_run_id"] = req.DriverRunID
-	metadata["provider_profile"] = req.ProviderProfile
-	contentHash := firstNonEmpty(artifact.ContentHash, artifact.ContentHashCamel, artifact.Checksum)
-	checksum := firstNonEmpty(artifact.Checksum, contentHash)
-	mimeType := firstNonEmpty(artifact.MIMEType, artifact.MIMETypeCamel)
-	sizeBytes := firstNonZeroInt64(artifact.SizeBytes, artifact.SizeBytesCamel)
-	summary := artifact.Summary
-	visibility := artifact.Visibility
-	redactionStatus := firstNonEmpty(artifact.RedactionStatus, artifact.RedactionStatusAlt)
-	if _, err := e.Store.Artifacts().Create(ctx, store.ArtifactCreate{
-		WorkspaceKey:    req.WorkspaceKey,
-		ArtifactID:      artifactID,
-		TaskID:          req.TaskID,
-		OwnerType:       "task_run",
-		OwnerID:         req.TaskRunID,
-		Type:            firstNonEmpty(artifact.Type, "artifact"),
-		Summary:         summary,
-		MIMEType:        mimeType,
-		Visibility:      visibility,
-		RedactionStatus: redactionStatus,
-		DurableStatus:   "declared",
-		Metadata:        metadata,
-	}); err != nil && !errors.Is(err, domain.ErrAlreadyExists) {
-		return nil, fmt.Errorf("create runner artifact %q: %w", artifactID, err)
-	}
-	finalized, err := e.Store.Artifacts().Finalize(ctx, req.WorkspaceKey, artifactID, store.ArtifactFinalize{
-		URI:             &uri,
-		Summary:         optionalString(summary),
-		MIMEType:        optionalString(mimeType),
-		SizeBytes:       optionalInt64(sizeBytes),
-		Checksum:        optionalString(checksum),
-		ContentHash:     optionalString(contentHash),
-		Visibility:      optionalString(visibility),
-		RedactionStatus: optionalString(redactionStatus),
-		Metadata:        &metadata,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("finalize runner artifact %q: %w", artifactID, err)
-	}
-	return finalized, nil
-}
-
-func (e HostBridgeTaskExecutor) persistRunnerOutputArtifacts(ctx context.Context, req TaskExecRequest, session *flueTaskSession, runner bridgeTaskRunnerResult, result TaskExecResult) (TaskExecResult, error) {
-	if result.RuntimeMetadata == nil {
-		result.RuntimeMetadata = map[string]string{}
-	}
-	if transcriptRef := firstNonEmpty(runner.TranscriptRef, runner.TranscriptRefCamel); transcriptRef != "" {
-		result.RuntimeMetadata["transcript_ref"] = transcriptRef
-	}
-	transcriptContent, err := e.runnerFileOrInlineBytes(runner.transcriptInline(), firstNonEmpty(runner.TranscriptPath, runner.TranscriptPathCamel), "transcript")
-	if err != nil {
-		return TaskExecResult{}, err
-	}
-	if len(transcriptContent) > 0 && result.RuntimeMetadata["transcript_ref"] == "" {
-		artifactID := "transcript-" + req.TaskRunID
-		finalized, err := e.createContentArtifact(ctx, req, sessionIDFromFlueTaskSession(session), artifactID, "transcript", "task run transcript", "application/x-ndjson", transcriptContent)
-		if err != nil {
-			return TaskExecResult{}, err
-		}
-		result.ArtifactIDs = normalizeArtifactIDs(append(result.ArtifactIDs, finalized.ArtifactID))
-		result.RuntimeMetadata["transcript_ref"] = "artifact://" + finalized.ArtifactID
-		result.RuntimeMetadata["transcript_artifact_id"] = finalized.ArtifactID
-	}
-	if result.RuntimeMetadata["transcript_ref"] != "" && session != nil {
-		session.Metadata["transcript_ref"] = result.RuntimeMetadata["transcript_ref"]
-	}
-
-	logContent, err := e.runnerFileOrInlineBytes(runner.logsInline(), firstNonEmpty(runner.LogsPath, runner.LogsPathCamel), "logs")
-	if err != nil {
-		return TaskExecResult{}, err
-	}
-	if len(logContent) > 0 && result.LogsRef == "" {
-		artifactID := "logs-" + req.TaskRunID
-		finalized, err := e.createContentArtifact(ctx, req, sessionIDFromFlueTaskSession(session), artifactID, "logs", "task run logs", "text/plain; charset=utf-8", logContent)
-		if err != nil {
-			return TaskExecResult{}, err
-		}
-		result.ArtifactIDs = normalizeArtifactIDs(append(result.ArtifactIDs, finalized.ArtifactID))
-		result.LogsRef = "artifact://" + finalized.ArtifactID
-		result.RuntimeMetadata["logs_artifact_id"] = finalized.ArtifactID
-	}
-	if result.LogsRef != "" {
-		result.RuntimeMetadata["logs_ref"] = result.LogsRef
-		if session != nil {
-			session.Metadata["logs_ref"] = result.LogsRef
-		}
-	}
-	if result.ArtifactsRef == "" && len(result.ArtifactIDs) > 0 {
-		result.ArtifactsRef = "artifacts://" + req.TaskRunID
-	}
-	return result, nil
-}
-
-func (r bridgeTaskRunnerResult) transcriptInline() []byte {
-	switch {
-	case len(r.TranscriptEntries) > 0:
-		return marshalTranscriptJSONL(r.TranscriptEntries)
-	case len(r.TranscriptEntriesCamel) > 0:
-		return marshalTranscriptJSONL(r.TranscriptEntriesCamel)
-	case len(r.TranscriptEvents) > 0:
-		return marshalTranscriptJSONL(r.TranscriptEvents)
-	case len(r.TranscriptEventsCamel) > 0:
-		return marshalTranscriptJSONL(r.TranscriptEventsCamel)
-	case strings.TrimSpace(r.Transcript) != "":
-		return []byte(r.Transcript)
-	default:
-		return nil
-	}
-}
-
-func (r bridgeTaskRunnerResult) logsInline() []byte {
-	if strings.TrimSpace(r.Logs) == "" {
-		return nil
-	}
-	return []byte(r.Logs)
-}
-
-func marshalTranscriptJSONL(events []transcript.Event) []byte {
-	var out bytes.Buffer
-	for _, event := range events {
-		if err := json.NewEncoder(&out).Encode(event); err != nil {
-			return nil
-		}
-	}
-	return out.Bytes()
-}
-
-func (e HostBridgeTaskExecutor) runnerFileOrInlineBytes(inline []byte, filePath, label string) ([]byte, error) {
-	if len(inline) > 0 {
-		return inline, nil
-	}
-	if strings.TrimSpace(filePath) == "" {
-		return nil, nil
-	}
-	path, err := e.safeRunnerPath(filePath, label)
-	if err != nil {
-		return nil, err
-	}
-	content, err := os.ReadFile(path) //nolint:gosec // constrained by safeRunnerPath.
-	if err != nil {
-		return nil, fmt.Errorf("read %s file: %w", label, err)
-	}
-	return content, nil
-}
-
-func (e HostBridgeTaskExecutor) createContentArtifact(ctx context.Context, req TaskExecRequest, sessionID, artifactID, artifactType, summary, mimeType string, content []byte) (*domain.Artifact, error) {
-	if e.Store == nil {
-		return nil, fmt.Errorf("store required for %s artifact finalization: %w", artifactType, domain.ErrInvalid)
-	}
-	metadata := map[string]string{
-		"driver_run_id":    req.DriverRunID,
-		"provider_profile": req.ProviderProfile,
-		"runtime":          "flue",
-		"task_run_id":      req.TaskRunID,
-	}
-	if _, err := e.Store.Artifacts().Create(ctx, store.ArtifactCreate{
-		WorkspaceKey:  req.WorkspaceKey,
-		ArtifactID:    artifactID,
-		SessionID:     sessionID,
-		TaskID:        req.TaskID,
-		OwnerType:     "task_run",
-		OwnerID:       req.TaskRunID,
-		Type:          artifactType,
-		Summary:       summary,
-		MIMEType:      mimeType,
-		DurableStatus: "declared",
-		Metadata:      metadata,
-	}); err != nil {
-		return nil, fmt.Errorf("create %s artifact: %w", artifactType, err)
-	}
-	uploaded, err := e.Store.Artifacts().UploadContent(ctx, req.WorkspaceKey, artifactID, store.ArtifactContentUpload{
-		Body:     bytes.NewReader(content),
-		MIMEType: mimeType,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("upload %s artifact: %w", artifactType, err)
-	}
-	finalized, err := e.Store.Artifacts().Finalize(ctx, req.WorkspaceKey, artifactID, store.ArtifactFinalize{
-		ContentHash: &uploaded.ContentHash,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("finalize %s artifact: %w", artifactType, err)
-	}
-	return finalized, nil
-}
-
-func sessionIDFromFlueTaskSession(session *flueTaskSession) string {
-	if session == nil {
-		return ""
-	}
-	return session.SessionID
-}
-
-func optionalString(value string) *string {
-	value = strings.TrimSpace(value)
-	if value == "" {
-		return nil
-	}
-	return &value
-}
-
-func optionalInt64(value int64) *int64 {
-	if value == 0 {
-		return nil
-	}
-	return &value
-}
-
-func taskRunnerBaseEnv(env []string) []string {
-	return scopedSubprocessBaseEnv(env)
-}
-
-func lastJSONLine(stdout []byte) ([]byte, error) {
-	lines := bytes.Split(bytes.TrimSpace(stdout), []byte("\n"))
-	for i := len(lines) - 1; i >= 0; i-- {
-		line := bytes.TrimSpace(lines[i])
-		if len(line) == 0 {
-			continue
-		}
-		return line, nil
-	}
-	return nil, fmt.Errorf("task runner command returned empty output: %w", domain.ErrInvalid)
-}
-
-func (r bridgeTaskRunnerResult) taskExecResult() TaskExecResult {
-	exitCode := 0
-	if r.ExitCode != nil {
-		exitCode = *r.ExitCode
-	} else if r.ExitCodeCamel != nil {
-		exitCode = *r.ExitCodeCamel
-	}
-	return TaskExecResult{
-		Status:           r.Status,
-		ExitCode:         exitCode,
-		LogsRef:          firstNonEmpty(r.LogsRef, r.LogsRefCamel),
-		ArtifactsRef:     firstNonEmpty(r.ArtifactsRef, r.ArtifactsRefCamel),
-		ArtifactIDs:      normalizeArtifactIDs(firstNonNilStrings(r.ArtifactIDs, r.ArtifactIDsCamel)),
-		InputTokens:      firstNonZeroInt64(r.InputTokens, r.InputTokensCamel),
-		OutputTokens:     firstNonZeroInt64(r.OutputTokens, r.OutputTokensCamel),
-		CacheReadTokens:  firstNonZeroInt64(r.CacheReadTokens, r.CacheReadTokensCamel),
-		CacheWriteTokens: firstNonZeroInt64(r.CacheWriteTokens, r.CacheWriteTokensCamel),
-		EstimatedCostUSD: firstNonZeroFloat64(r.EstimatedCostUSD, r.EstimatedCostUSDCamel),
-		RuntimeMetadata:  cloneStringMap(firstNonNilMap(r.RuntimeMetadata, r.RuntimeMetadataCamel)),
-		ErrorClass:       firstNonEmpty(r.ErrorClass, r.ErrorClassCamel),
-		ErrorMessage:     firstNonEmpty(r.ErrorMessage, r.ErrorMessageCamel),
-	}
-}
-
-func (e HostBridgeTaskExecutor) readPatch(ctx context.Context, r bridgeTaskRunnerResult) ([]byte, error) {
-	if err := ctx.Err(); err != nil {
-		return nil, err
-	}
-	if r.Patch != "" {
-		return []byte(r.Patch), nil
-	}
-	patchPath := firstNonEmpty(r.PatchPath, r.PatchPathCamel)
-	if patchPath == "" {
-		return nil, nil
-	}
-	path, err := e.safePatchPath(patchPath)
-	if err != nil {
-		return nil, err
-	}
-	patch, err := os.ReadFile(path) //nolint:gosec // constrained by safePatchPath.
-	if err != nil {
-		return nil, fmt.Errorf("read patch file: %w", err)
-	}
-	return patch, ctx.Err()
-}
-
-func (e HostBridgeTaskExecutor) safePatchPath(patchPath string) (string, error) {
-	return e.safeRunnerPath(patchPath, "patch")
-}
-
-func (e HostBridgeTaskExecutor) safeRunnerPath(rawPath, label string) (string, error) {
-	rawPath = strings.TrimSpace(rawPath)
-	if rawPath == "" {
-		return "", fmt.Errorf("%s path required: %w", label, domain.ErrInvalid)
-	}
-	if filepath.IsAbs(rawPath) {
-		return rawPath, nil
-	}
-	root := strings.TrimSpace(e.WorktreePath)
-	if root == "" {
-		root = "."
-	}
-	absRoot, err := filepath.Abs(root)
-	if err != nil {
-		return "", fmt.Errorf("resolve worktree path: %w", err)
-	}
-	path := filepath.Clean(filepath.Join(absRoot, filepath.FromSlash(rawPath)))
-	rel, err := filepath.Rel(absRoot, path)
-	if err != nil {
-		return "", fmt.Errorf("resolve %s path: %w", label, err)
-	}
-	if rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-		return "", fmt.Errorf("%s path escapes worktree: %w", label, domain.ErrInvalid)
-	}
-	return path, nil
 }
 
 func (e HostBridgeTaskExecutor) finalizeAndApplyPatch(ctx context.Context, req TaskExecRequest, runner bridgeTaskRunnerResult, patch []byte, result TaskExecResult) (TaskExecResult, error) {
@@ -852,8 +949,13 @@ func (e HostBridgeTaskExecutor) createPatchArtifact(ctx context.Context, req Tas
 	mimeType := firstNonEmpty(runner.PatchMIMEType, runner.PatchMIMETypeCamel, "text/x-diff")
 	baseRef := firstNonEmpty(runner.PatchBaseRef, runner.PatchBaseRefCamel, runner.BaseRef, runner.BaseRefCamel)
 	metadata := map[string]string{
-		"driver_run_id":    req.DriverRunID,
-		"provider_profile": req.ProviderProfile,
+		"driver_run_id":            req.DriverRunID,
+		"runner":                   req.Runner,
+		"runner_ref":               req.RunnerRef,
+		"runner_kind":              req.RunnerKind,
+		"runner_entrypoint":        req.RunnerEntrypoint,
+		"runner_driver_version_id": req.RunnerVersionID,
+		"provider_profile":         req.ProviderProfile,
 	}
 	if baseRef != "" {
 		metadata["patch_base_ref"] = baseRef

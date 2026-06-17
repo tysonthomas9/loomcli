@@ -35,7 +35,7 @@ RUN --mount=type=cache,target=/root/.npm \
 # ── Stage 3: Runtime (alpine) ──
 FROM node:24-alpine AS runtime
 
-RUN apk add --no-cache tmux git jq curl ca-certificates bash github-cli
+RUN apk add --no-cache tmux git jq curl ca-certificates bash github-cli lsof
 
 # Real AI backend CLIs. Users can override any of these at runtime:
 #   -v $(which claude):/usr/local/bin/claude:ro

@@ -264,7 +264,7 @@ func TestEmitRunFinishedEventSatisfiesAwaitRegistrationScan(t *testing.T) {
 }
 
 // suspendedCompositionParent seeds the composer catalog (no internal binding)
-// and parks run-parent suspended on the child's run.finished key.
+// and suspends run-parent suspended on the child's run.finished key.
 func suspendedCompositionParent(t *testing.T, st *memstore.Store, childRunID string) string {
 	t.Helper()
 	ctx := context.Background()
@@ -295,7 +295,7 @@ func suspendedCompositionParent(t *testing.T, st *memstore.Store, childRunID str
 		Deadline: time.Now().UTC().Add(time.Hour),
 	})
 	if err != nil || reg.Satisfied {
-		t.Fatalf("RegisterAwaitAndCheck = %+v, %v; want parked", reg, err)
+		t.Fatalf("RegisterAwaitAndCheck = %+v, %v; want pending", reg, err)
 	}
 	if _, err := st.DriverRuns().Suspend(ctx, "TEST", "run-parent",
 		parent.NodeID, parent.LeaseID, parent.FencingToken, key); err != nil {

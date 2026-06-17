@@ -152,6 +152,76 @@ func TestRegister_ReplacesExisting(t *testing.T) {
 	}
 }
 
+func TestEnsureRegistered_RegistersMissingWorkspace(t *testing.T) {
+	mm := newTestMultiManager(t, 0)
+	dir := t.TempDir()
+
+	if err := mm.EnsureRegistered("ws1", dir); err != nil {
+		t.Fatalf("EnsureRegistered: %v", err)
+	}
+	if mm.hasManager("ws1") {
+		t.Errorf("hasManager(ws1)=true immediately after EnsureRegistered; expected lazy")
+	}
+
+	_, _, err := mm.AttachSession(SessionKey{Workspace: "ws1", Name: "s"}, 80, 24, &LaunchSpec{Argv: []string{"-c", "cat"}})
+	if err != nil {
+		t.Fatalf("AttachSession after EnsureRegistered: %v", err)
+	}
+}
+
+func TestEnsureRegistered_SamePathPreservesExistingManager(t *testing.T) {
+	mm := newTestMultiManager(t, 0)
+	dir := t.TempDir()
+	if err := mm.Register("ws1", dir); err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+	key := SessionKey{Workspace: "ws1", Name: "s"}
+	if _, _, err := mm.AttachSession(key, 80, 24, &LaunchSpec{Argv: []string{"-c", "cat"}}); err != nil {
+		t.Fatalf("AttachSession: %v", err)
+	}
+	before := captureManager(t, mm, "ws1")
+
+	if err := mm.EnsureRegistered("ws1", dir); err != nil {
+		t.Fatalf("EnsureRegistered: %v", err)
+	}
+	after := captureManager(t, mm, "ws1")
+	if after != before {
+		t.Fatal("EnsureRegistered replaced existing manager for unchanged path")
+	}
+}
+
+func TestEnsureRegistered_PathChangeReplacesExistingManager(t *testing.T) {
+	mm := newTestMultiManager(t, 0)
+	dirA := t.TempDir()
+	dirB := t.TempDir()
+	if err := mm.Register("ws1", dirA); err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+	key := SessionKey{Workspace: "ws1", Name: "s"}
+	att, _, err := mm.AttachSession(key, 80, 24, &LaunchSpec{Argv: []string{"-c", "cat"}})
+	if err != nil {
+		t.Fatalf("AttachSession: %v", err)
+	}
+
+	if err := mm.EnsureRegistered("ws1", dirB); err != nil {
+		t.Fatalf("EnsureRegistered: %v", err)
+	}
+	if mm.hasManager("ws1") {
+		t.Errorf("hasManager(ws1)=true after path-change EnsureRegistered; new entry should be lazy")
+	}
+	deadline := time.After(2 * time.Second)
+	for {
+		select {
+		case _, ok := <-att.Output():
+			if !ok {
+				return
+			}
+		case <-deadline:
+			t.Fatal("timeout waiting for old attachment output to close")
+		}
+	}
+}
+
 func TestAttachSession_UnknownWorkspace(t *testing.T) {
 	mm := newTestMultiManager(t, 0)
 	_, _, err := mm.AttachSession(SessionKey{Workspace: "nope", Name: "s"}, 80, 24, nil)

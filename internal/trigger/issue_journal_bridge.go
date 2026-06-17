@@ -139,7 +139,7 @@ type IssueJournalBridge struct {
 	// failures counts consecutive reader failures per workspace, driving the
 	// exponential skip backoff; reset on the first clean poll.
 	failures map[string]int
-	// skipRemaining counts how many upcoming sweeps a workspace is still parked
+	// skipRemaining counts how many upcoming sweeps a workspace is still paused
 	// for by the failure backoff; decremented each pass, replenished on a fresh
 	// failure (clock-free window — no wall clock needed in serve or tests).
 	skipRemaining map[string]int
@@ -410,7 +410,7 @@ func (b *IssueJournalBridge) saveCursor(ws, cursor string) {
 }
 
 // inBackoffWindow reports whether this pass should skip the workspace because
-// of recent consecutive reader failures, decrementing the parked-sweep
+// of recent consecutive reader failures, decrementing the paused-sweep
 // countdown. The window doubles per consecutive failure (recordFailure sets
 // 2^min(f,cap)-1 upcoming sweeps to skip), so a flapping reader is retried with
 // exponential backoff measured in sweeps — clock-free, like CronScheduler's
@@ -428,7 +428,7 @@ func (b *IssueJournalBridge) inBackoffWindow(ws string) bool {
 	return true
 }
 
-// recordFailure bumps the workspace's consecutive-failure count and parks the
+// recordFailure bumps the workspace's consecutive-failure count and suspends the
 // next 2^min(failures,cap)-1 sweeps (the doubled backoff window): one failure
 // skips the next sweep, two failures the next three, and so on up to the cap.
 func (b *IssueJournalBridge) recordFailure(ws string) {

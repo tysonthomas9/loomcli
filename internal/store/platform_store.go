@@ -318,7 +318,7 @@ type TriggerDeliveryDueFilter struct {
 // TriggerDeliveryResultUpdate is the input to
 // TriggerDeliveryStore.UpdateResult after one retry-sweeper (or dispatch)
 // attempt. Status failed with a NextRetryAt reschedules the delivery; held
-// keeps it parked for queue promotion; dispatched/rejected/superseded (and
+// keeps it held for queue promotion; dispatched/rejected/superseded (and
 // failed once the binding's RetryMaxAttempts is reached) make it final.
 // A zero Attempt keeps the stored attempt count.
 type TriggerDeliveryResultUpdate struct {
@@ -515,14 +515,14 @@ type DriverRunStore interface {
 	RecoverStale(ctx context.Context, workspaceKey string, recover StaleDriverRunRecovery) (*StaleDriverRunRecoveryResult, error)
 	RecoverStaleTaskRuns(ctx context.Context, workspaceKey, runID string, recover StaleTaskRunRecovery) (*StaleTaskRunRecoveryResult, error)
 
-	// Suspend parks a running run on its await instance
+	// Suspend suspends a running run on its await instance
 	// (running -> suspended_awaiting_event), owner-fenced with the same
 	// node+lease+token guard as Finish, releasing the executor slot
 	// (node/lease cleared). awaitInstanceKey names the await cycle the run
-	// parks on (runID#await-{n}) and is required. Idempotent on re-suspend.
+	// suspends on (runID#await-{n}) and is required. Idempotent on re-suspend.
 	// A backend that recorded a pending resume for this await cycle (the
-	// accepted park->suspend window) returns
-	// domain.ErrDriverRunAlreadyResumed: do not park, continue inline.
+	// accepted pending->suspend window) returns
+	// domain.ErrDriverRunAlreadyResumed: do not suspend, continue inline.
 	Suspend(ctx context.Context, workspaceKey, runID, nodeID, leaseID string, fencingToken int64, awaitInstanceKey string) (*domain.DriverRun, error)
 
 	// ResumeAwaiting re-queues a suspended run
@@ -623,6 +623,11 @@ type TaskRunCreate struct {
 	DriverStepID     string
 	TaskID           string
 	WorkerProfileID  string
+	Runner           string
+	RunnerRef        string
+	RunnerKind       string
+	RunnerEntrypoint string
+	RunnerVersionID  string
 	ProviderProfile  string
 	Status           domain.TaskRunStatus
 	NodeID           string
@@ -677,15 +682,14 @@ type TaskRunFinish struct {
 	ErrorClass       string
 	ErrorMessage     string
 	FinishedAt       time.Time
-	// ParkTask marks the run's underlying task issue as parked when the
+	// BlockTask marks the run's underlying task issue as blocked when the
 	// run finishes failed with its retry budget exhausted. Only valid with
 	// Status == TaskRunFailed. Server-side the issue update is fenced by
 	// the same lease/fencing checks as the finish itself, idempotent, and
-	// best-effort: a missing, already-parked, or terminal issue is skipped
-	// without failing the finish. Parking releases the issue claim; the
-	// parked status prevents re-claim until a human moves the issue back
-	// to open.
-	ParkTask bool
+	// best-effort: a missing, already-blocked, or terminal issue is skipped
+	// without failing the finish. Blocking releases the issue claim; moving
+	// the issue back to open makes it eligible for the ready queue again.
+	BlockTask bool
 }
 
 type TaskRunRequeue struct {

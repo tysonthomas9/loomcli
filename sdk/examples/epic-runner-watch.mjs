@@ -7,7 +7,7 @@
 //   taskRun  — a task run changed
 //   closed   — the epic reached a terminal state (generator ends)
 // Reconnection and Last-Event-ID resume are handled inside the SDK.
-import { createLoomClient } from "@loom/sdk/flue";
+import { createLoomClient } from "@loom/sdk/driver";
 
 export default async function run() {
   const loom = createLoomClient();
@@ -15,6 +15,11 @@ export default async function run() {
   if (!epicId) return loom.failed({ summary: "input.epicId is required", errorClass: "bad_input" });
 
   let dispatched = 0;
+  // `local-task-runner` is the real local runner: it runs the user-selected
+  // backend CLI (claude/codex/opencode/gemini/cursor) over the worktree and
+  // requires that CLI + its auth locally, failing closed otherwise. Pass
+  // `loom.input.runner` (e.g. "daytona-task-runner") to run elsewhere.
+  const runner = loom.input.runner || "local-task-runner";
 
   // Claim everything that is ready right now, then again on every change.
   const claimReady = async () => {
@@ -22,7 +27,7 @@ export default async function run() {
       const claimed = await loom.tasks.claimReady({ epicId });
       if (!claimed) return;
       dispatched++;
-      await loom.taskRuns.request({ taskId: claimed.taskId });
+      await loom.taskRuns.request({ taskId: claimed.taskId, runner });
     }
   };
 

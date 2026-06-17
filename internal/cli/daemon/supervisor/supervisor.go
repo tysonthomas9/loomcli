@@ -88,16 +88,16 @@ type Supervisor struct {
 	NodeInterval time.Duration
 
 	// backendRecheckInterval is the fixed delay computeBackoff returns for a
-	// BackendUnavailable park (agent's backend CLI missing from PATH). Zero
+	// BackendUnavailable block (agent's backend CLI missing from PATH). Zero
 	// means use the package default (backendUnavailableRecheckInterval). Tests set a
 	// small value to avoid the 30s wait.
 	backendRecheckInterval time.Duration
 
-	// maxRetriesParkInterval is the fixed delay computeBackoff returns once an
-	// agent has exhausted its restart budget and parked (StopReasonMaxRetriesParked).
-	// Zero means use the package default (defaultMaxRetriesParkInterval). Tests set
+	// maxRetriesBlockInterval is the fixed delay computeBackoff returns once an
+	// agent has exhausted its restart budget and blocked (StopReasonMaxRetriesBlocked).
+	// Zero means use the package default (defaultMaxRetriesBlockInterval). Tests set
 	// a small value to avoid the 60s wait.
-	maxRetriesParkInterval time.Duration
+	maxRetriesBlockInterval time.Duration
 }
 
 // NewAgent creates an AgentProcess from an agent entry, resolving the worktree path
@@ -302,9 +302,9 @@ func (s *Supervisor) superviseAgent(ap *AgentProcess) {
 
 		if !s.shouldRestart(ap) {
 			// Terminal stops only: fatal (auth/billing), fast-fail
-			// (deterministic / park-budget escalation), or the
+			// (deterministic / block-budget escalation), or the
 			// max_retries=0 fail-fast opt-out. Budget exhaustion on
-			// retryable classes parks-and-retries instead (returns true).
+			// retryable classes blocks-and-retries instead (returns true).
 			slog.Warn("supervisor stopping (terminal)", "worktree", ap.Entry.Worktree)
 			return
 		}
@@ -711,7 +711,7 @@ func (s *Supervisor) spawnAndWait(ap *AgentProcess) {
 			// The normal pre-flight gate runs before task claim, but this spawn-time
 			// gate remains as a race guard for a backend disappearing after claim and
 			// before exec. Clean up any already-created session/claim/worker before
-			// parking so the task is immediately claimable again.
+			// blocking so the task is immediately claimable again.
 			s.completeBackendUnavailableCleanup(ap)
 			s.Concurrency.Release(ap.Entry.Role)
 			return
@@ -776,7 +776,7 @@ func (s *Supervisor) postExitCleanup(ap *AgentProcess) {
 // re-spawn that follows is its own daemon.supervisor.spawn child span (via
 // the next iteration of the supervise loop).
 // startBackoffHeartbeat keeps the agent's supervise tick fresh during a long
-// restart wait (a park, or a long exponential backoff). It returns a no-op
+// restart wait (a block, or a long exponential backoff). It returns a no-op
 // stopper for short waits that cannot approach the staleness threshold, so
 // callers can always defer the returned function.
 func (s *Supervisor) startBackoffHeartbeat(ap *AgentProcess, backoff time.Duration) func() {
@@ -809,7 +809,7 @@ func (s *Supervisor) sleepBeforeRestart(ap *AgentProcess) bool {
 		s.EmitEvent(evt)
 	}
 
-	// Keep the agent's liveness tick fresh during a long wait (a park, or a
+	// Keep the agent's liveness tick fresh during a long wait (a block, or a
 	// long exponential backoff) so the watchdog cannot mistake a healthy,
 	// waiting supervise goroutine for a wedged one. The select below is
 	// bounded by backoff, so this masks no real deadlock.
@@ -875,7 +875,7 @@ func (s *Supervisor) GetAgents() []SupervisedAgentStatus {
 			AssignedEpicID:         ap.AssignedEpicID,
 			StopReason:             ap.StopReason,
 			NoWorkCount:            ap.NoWorkCount,
-			ParkCount:              ap.ParkCount,
+			BlockCount:             ap.BlockCount,
 			BackoffUntil:           ap.BackoffUntil,
 			OwnershipLeaseID:       ap.OwnershipLeaseID,
 			OwnershipFencingToken:  ap.OwnershipFencingToken,

@@ -84,7 +84,7 @@ type DeliverySweepResult struct {
 	// a run: held promotions and failed-delivery redispatches.
 	Dispatched int
 	// Rescheduled counts deliveries whose attempt did not admit a run and
-	// were re-parked with a backed-off next_retry_at.
+	// were re-held with a backed-off next_retry_at.
 	Rescheduled int
 	// Exhausted counts deliveries forced terminal failed/retries_exhausted
 	// because the attempt budget is spent.
@@ -171,7 +171,7 @@ func (s *DeliverySweeper) sweepDelivery(ctx context.Context, ws, deliveryID stri
 	}
 	if leg.RunID == "" {
 		// The leg resolved without a run: the subject is still busy (held
-		// stays parked) or the policy refused admission again. Not an error —
+		// stays held) or the policy refused admission again. Not an error —
 		// burn the attempt and back off.
 		return s.recordRetry(ctx, ws, delivery, binding, now, "", out)
 	}
@@ -348,8 +348,8 @@ func deliveryRetryMaxAttempts(binding *domain.TriggerBinding) int {
 
 // deliveryRetryBackoff is the delay after the given attempt count:
 // retry_backoff_seconds * 2^(attempt-1), capped at one hour. Attempt 1 (the
-// dispatch path's initial held park) is the base backoff, so the sweeper's
-// first re-park doubles it.
+// dispatch path's initial held suspend) is the base backoff, so the sweeper's
+// first re-suspend doubles it.
 func deliveryRetryBackoff(binding *domain.TriggerBinding, attempt int) time.Duration {
 	seconds := domain.DefaultTriggerRetryBackoffSeconds
 	if binding != nil && binding.RetryBackoffSeconds > 0 {

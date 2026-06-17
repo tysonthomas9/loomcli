@@ -74,7 +74,7 @@ func finishRun(t *testing.T, s *memstore.Store, runID string) {
 }
 
 // heldDeliveryFixture dispatches two events for the same subject against a
-// queue-policy binding: the first admits a run, the second parks held with
+// queue-policy binding: the first admits a run, the second queues held with
 // next_retry_at = now + binding backoff. It returns the blocking run id and
 // the held delivery.
 func heldDeliveryFixture(t *testing.T, s *memstore.Store) (blockingRunID string, held *domain.TriggerDelivery) {
@@ -193,8 +193,8 @@ func TestDeliverySweeperPromotesHeldDelivery(t *testing.T) {
 }
 
 // TestDeliverySweeperHeldStillBusyBackoffDoubling: while the subject stays
-// busy the held delivery is re-parked with attempt++ and exponentially
-// doubled backoff (base 30s parked at attempt 1, then 60s, then 120s), and no
+// busy the held delivery is re-held with attempt++ and exponentially
+// doubled backoff (base 30s held at attempt 1, then 60s, then 120s), and no
 // run is admitted.
 func TestDeliverySweeperHeldStillBusyBackoffDoubling(t *testing.T) {
 	ctx := t.Context()
@@ -218,20 +218,20 @@ func TestDeliverySweeperHeldStillBusyBackoffDoubling(t *testing.T) {
 		if result.Rescheduled != 1 || result.Dispatched != 0 || result.Exhausted != 0 {
 			t.Fatalf("attempt %d sweep = %+v, want exactly one reschedule", want.attempt, result)
 		}
-		parked, err := st.TriggerDeliveries().Get(ctx, "WS", held.DeliveryID)
-		if err != nil || parked.Status != domain.TriggerDeliveryHeld {
-			t.Fatalf("attempt %d delivery = %+v (err %v), want still held", want.attempt, parked, err)
+		held, err := st.TriggerDeliveries().Get(ctx, "WS", held.DeliveryID)
+		if err != nil || held.Status != domain.TriggerDeliveryHeld {
+			t.Fatalf("attempt %d delivery = %+v (err %v), want still held", want.attempt, held, err)
 		}
-		if parked.Attempt != want.attempt {
-			t.Fatalf("attempt = %d, want %d", parked.Attempt, want.attempt)
+		if held.Attempt != want.attempt {
+			t.Fatalf("attempt = %d, want %d", held.Attempt, want.attempt)
 		}
-		if parked.NextRetryAt == nil || !parked.NextRetryAt.Equal(now.Add(want.backoff)) {
+		if held.NextRetryAt == nil || !held.NextRetryAt.Equal(now.Add(want.backoff)) {
 			t.Fatalf("attempt %d next_retry_at = %v, want %v (now + %s doubled backoff)",
-				want.attempt, parked.NextRetryAt, now.Add(want.backoff), want.backoff)
+				want.attempt, held.NextRetryAt, now.Add(want.backoff), want.backoff)
 		}
-		now = parked.NextRetryAt.Add(time.Second)
+		now = held.NextRetryAt.Add(time.Second)
 	}
-	// Still exactly one run: re-parking never admits.
+	// Still exactly one run: re-holding never admits.
 	if _, runs, _ := storeCounts(t, st); runs != 1 {
 		t.Fatalf("runs = %d, want 1 (subject stayed busy)", runs)
 	}
@@ -255,11 +255,11 @@ func TestDeliverySweeperRetriesExhaustedTerminal(t *testing.T) {
 	if result := runDeliverySweep(t, sweeper, now); result.Rescheduled != 1 {
 		t.Fatalf("attempt 2 sweep = %+v, want one reschedule", result)
 	}
-	parked, err := st.TriggerDeliveries().Get(ctx, "WS", held.DeliveryID)
-	if err != nil || parked.NextRetryAt == nil {
-		t.Fatalf("parked delivery = %+v (err %v), want rescheduled", parked, err)
+	held, err := st.TriggerDeliveries().Get(ctx, "WS", held.DeliveryID)
+	if err != nil || held.NextRetryAt == nil {
+		t.Fatalf("held delivery = %+v (err %v), want rescheduled", held, err)
 	}
-	now = parked.NextRetryAt.Add(time.Second)
+	now = held.NextRetryAt.Add(time.Second)
 	result := runDeliverySweep(t, sweeper, now)
 	if result.Exhausted != 1 || result.Rescheduled != 0 || result.Dispatched != 0 {
 		t.Fatalf("attempt 3 sweep = %+v, want exactly one exhaustion", result)
@@ -293,7 +293,7 @@ func TestDeliverySweeperRedispatchesFailedDelivery(t *testing.T) {
 	})
 	blockingRunID, held := heldDeliveryFixture(t, st)
 
-	// Simulate a delivery-side failure recorded on the parked delivery (the
+	// Simulate a delivery-side failure recorded on the held delivery (the
 	// retryable failed lane), then free the subject.
 	retryAt := held.NextRetryAt.Add(time.Minute)
 	failed, err := st.TriggerDeliveries().UpdateResult(ctx, "WS", held.DeliveryID, store.TriggerDeliveryResultUpdate{
@@ -349,21 +349,21 @@ func TestDeliverySweeperDispatchErrorBacksOff(t *testing.T) {
 	if result := runDeliverySweep(t, sweeper, now); result.Rescheduled != 1 || result.Dispatched != 0 {
 		t.Fatalf("disabled-binding sweep = %+v, want one reschedule", result)
 	}
-	parked, err := st.TriggerDeliveries().Get(ctx, "WS", held.DeliveryID)
-	if err != nil || parked.Status != domain.TriggerDeliveryHeld || parked.Attempt != 2 {
-		t.Fatalf("parked delivery = %+v (err %v), want held attempt 2", parked, err)
+	held, err := st.TriggerDeliveries().Get(ctx, "WS", held.DeliveryID)
+	if err != nil || held.Status != domain.TriggerDeliveryHeld || held.Attempt != 2 {
+		t.Fatalf("held delivery = %+v (err %v), want held attempt 2", held, err)
 	}
-	if parked.ErrorClass != "sweep_dispatch_failed" {
-		t.Fatalf("parked error class = %q, want sweep_dispatch_failed", parked.ErrorClass)
+	if held.ErrorClass != "sweep_dispatch_failed" {
+		t.Fatalf("held error class = %q, want sweep_dispatch_failed", held.ErrorClass)
 	}
-	if parked.NextRetryAt == nil || !parked.NextRetryAt.Equal(now.Add(60*time.Second)) {
-		t.Fatalf("parked next_retry_at = %v, want %v (doubled 30s backoff)", parked.NextRetryAt, now.Add(60*time.Second))
+	if held.NextRetryAt == nil || !held.NextRetryAt.Equal(now.Add(60*time.Second)) {
+		t.Fatalf("held next_retry_at = %v, want %v (doubled 30s backoff)", held.NextRetryAt, now.Add(60*time.Second))
 	}
 
 	// Recovery: binding back on, subject freed — the next due sweep promotes.
 	setEnabled(true)
 	finishRun(t, st, blockingRunID)
-	now = parked.NextRetryAt.Add(time.Second)
+	now = held.NextRetryAt.Add(time.Second)
 	if result := runDeliverySweep(t, sweeper, now); result.Dispatched != 1 {
 		t.Fatalf("recovery sweep = %+v, want one promotion", result)
 	}

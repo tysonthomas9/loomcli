@@ -9,7 +9,7 @@
 // Env-gated like TestEmbeddedFleetDBPersistenceSmoke: it needs a fleet-db
 // binary BUILT FROM A TREE THAT INCLUDES THE AW5 AWAIT ROUTES on PATH (an
 // older binary 404s every await call). The run-lifecycle harness is nil:
-// fleet-db's park->suspend window semantics (pending-resume marker +
+// fleet-db's pending->suspend window semantics (pending-resume marker +
 // driver_run_already_resumed) deliberately diverge from memstore's strict
 // ErrInvalidTransition mechanism, and are covered by fleet-db's own storage
 // suite (platform_suspend_test.go) plus the stub-server wire tests here.

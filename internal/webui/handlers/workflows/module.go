@@ -135,6 +135,13 @@ func (m *Module) createWorkflowRun(w http.ResponseWriter, r *http.Request) {
 		writeDomainError(w, err, "workflow not found")
 		return
 	}
+	// Fail-closed BEFORE creating the run: when the epic-runner routes child
+	// task runs to the local task runner, the resolved backend CLI must be
+	// installed and authenticated, else the run would fail deep in the worker.
+	if err := m.preflightRunnerForRun(r.Context(), ws, name, payload); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 	run, err := driver.CreateDriverRun(r.Context(), m.store, driver.RunOptions{
 		WorkspaceKey:   ws,
 		DriverID:       driverID,

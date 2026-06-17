@@ -14,6 +14,7 @@ export const RunnerEnv = Object.freeze({
   leaseToken: "LOOM_TASK_RUN_LEASE_TOKEN",
   runnerLeaseToken: "LOOM_RUNNER_LEASE_TOKEN",
   fencingToken: "LOOM_TASK_RUN_FENCING_TOKEN",
+  requestJson: "LOOM_TASK_RUN_REQUEST_JSON",
 });
 
 export class LoomAPIError extends Error {
@@ -28,6 +29,8 @@ export class LoomAPIError extends Error {
 }
 
 export class TaskRunClient {
+  #requestPayload;
+
   static fromEnv(env = process.env, options = {}) {
     return new TaskRunClient({
       apiUrl: options.apiUrl || pickEnv(env, RunnerEnv.apiUrl),
@@ -43,6 +46,7 @@ export class TaskRunClient {
       leaseId: options.leaseId || pickEnv(env, RunnerEnv.leaseId),
       leaseToken: options.leaseToken || pickEnv(env, RunnerEnv.leaseToken, RunnerEnv.runnerLeaseToken),
       fencingToken: options.fencingToken || pickEnv(env, RunnerEnv.fencingToken),
+      requestJson: options.requestJson ?? pickEnv(env, RunnerEnv.requestJson),
     });
   }
 
@@ -61,7 +65,11 @@ export class TaskRunClient {
     this.nodeId = required("nodeId", options.nodeId);
     this.leaseId = required("leaseId", options.leaseId);
     this.leaseToken = required("leaseToken", options.leaseToken);
-    this.fencingToken = parseFencingToken(required("fencingToken", options.fencingToken));
+    this.fencingToken = parseFencingToken(required("fencingToken", options.fencingToken), {
+      preserveString: this.serveMode,
+    });
+    this.requestJson = trim(options.requestJson);
+    this.#requestPayload = parseRequestJson(this.requestJson);
     this.apiKey = trim(options.apiKey);
     this.actor = trim(options.actor);
     this.authToken = trim(options.authToken);
@@ -78,6 +86,21 @@ export class TaskRunClient {
       get: (artifactId, requestOptions) => this.getArtifact(artifactId, requestOptions),
       list: (input, requestOptions) => this.listArtifacts(input, requestOptions),
     });
+    this.runtimeCredentials = Object.freeze({
+      get: (input, requestOptions) => this.getRuntimeCredential(input, requestOptions),
+    });
+  }
+
+  request() {
+    return cloneRequestPayload(this.#requestPayload);
+  }
+
+  input() {
+    const request = this.#requestPayload;
+    if (!request || request.input === undefined || request.input === null) {
+      return undefined;
+    }
+    return cloneRequestPayload(request.input);
   }
 
   async getTaskRun(options = {}) {
@@ -270,6 +293,17 @@ export class TaskRunClient {
       metadata: input.metadata,
     });
     return this.#json("POST", `${this.#artifactPath(artifactId)}/finalize`, body, options);
+  }
+
+  async getRuntimeCredential(input = {}, options = {}) {
+    if (!this.serveMode) {
+      throw new LoomAPIError("runtime credentials require the loom serve task-run API", {
+        code: "serve_transport_required",
+      });
+    }
+    return this.#op("runtime-credential", {
+      provider: required("credential provider", input.provider),
+    }, options);
   }
 
   async completeRun(input = {}, options = {}) {
@@ -465,12 +499,39 @@ function required(name, value) {
   return out;
 }
 
-function parseFencingToken(value) {
-  const token = Number(value);
-  if (!Number.isSafeInteger(token) || token <= 0) {
+function parseFencingToken(value, options = {}) {
+  const raw = trim(value);
+  if (!/^[1-9]\d*$/.test(raw)) {
+    throw new TypeError("fencingToken must be a positive integer");
+  }
+  if (options.preserveString) {
+    return raw;
+  }
+  const token = Number(raw);
+  if (!Number.isSafeInteger(token)) {
     throw new TypeError("fencingToken must be a positive integer");
   }
   return token;
+}
+
+function parseRequestJson(raw) {
+  raw = trim(raw);
+  if (!raw) {
+    return {};
+  }
+  try {
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
+  } catch (err) {
+    throw new TypeError(`LOOM_TASK_RUN_REQUEST_JSON is invalid JSON: ${err.message}`);
+  }
+}
+
+function cloneRequestPayload(value) {
+  if (value === undefined || value === null) {
+    return value;
+  }
+  return JSON.parse(JSON.stringify(value));
 }
 
 function escapePath(value) {

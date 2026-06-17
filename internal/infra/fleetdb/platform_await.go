@@ -11,8 +11,8 @@
 //	POST /api/v1/{ws}/driver-runs/{run_id}/resume
 //
 // RULE 2 note: registration is one endpoint — register-and-check — so the
-// atomic check-then-park transaction lives server-side and this client
-// cannot mis-sequence a separate check/park pair.
+// atomic register-and-check transaction lives server-side and this client
+// cannot mis-sequence a separate check/register pair.
 //
 // Instance keys contain '#' and are therefore always path-escaped (%23).
 // Responses are snake_case v1 wire shapes decoded into local DTOs; await
@@ -90,7 +90,7 @@ func (s *awaitStore) awaitsPath(ws string) string {
 	return "/api/v1/" + pathEscape(ws) + "/awaits"
 }
 
-// RegisterAwaitAndCheck implements the atomic check-then-park registration.
+// RegisterAwaitAndCheck implements the atomic register-and-check registration.
 // The registration is validated client-side first (store.AwaitRegistration
 // .Instance enforces RULES 1/3/5 with the domain sentinels); the server
 // re-validates and re-checks the deadline against its own clock.
@@ -211,10 +211,10 @@ type driverRunStore struct{ client *Client }
 
 var _ store.DriverRunStore = (*driverRunStore)(nil)
 
-// Suspend parks a running run on its await instance. A 409
+// Suspend suspends a running run on its await instance. A 409
 // driver_run_already_resumed response (the await resolved inside the
-// park->suspend window) surfaces as domain.ErrDriverRunAlreadyResumed: the
-// caller must not park and continues the run inline.
+// pending->suspend window) surfaces as domain.ErrDriverRunAlreadyResumed: the
+// caller must not suspend and continues the run inline.
 func (s *driverRunStore) Suspend(ctx context.Context, ws, runID, nodeID, leaseID string, fencingToken int64, awaitInstanceKey string) (*domain.DriverRun, error) {
 	body := map[string]any{
 		"node_id":            nodeID,

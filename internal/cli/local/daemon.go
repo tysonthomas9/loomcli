@@ -2,9 +2,13 @@ package local
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
+	"net/url"
 	"os"
-	"os/exec"
+	"strings"
 	"syscall"
 	"time"
 
@@ -22,14 +26,14 @@ var (
 	localDaemonWorkspaceHasRepos = workspaceHasReposForLocalDaemon
 )
 
-func startLocalDaemonSupervisor(ctx context.Context, dataDir, exe string, port int) {
-	go superviseLocalDaemon(ctx, dataDir, exe, port)
+func startLocalDaemonSupervisor(ctx context.Context, dataDir, exe string, port int, runtimeURL string) {
+	go superviseLocalDaemon(ctx, dataDir, exe, port, runtimeURL)
 }
 
-func superviseLocalDaemon(ctx context.Context, dataDir, exe string, port int) {
+func superviseLocalDaemon(ctx context.Context, dataDir, exe string, port int, runtimeURL string) {
 	backoff := time.Second
 	for {
-		workspaceKey, runnable, err := localDaemonRunnableWorkspace(dataDir)
+		workspaceKey, runnable, err := localDaemonRunnableWorkspace(ctx, dataDir, runtimeURL)
 		if err != nil {
 			appendLocalDaemonLog(dataDir, "waiting for daemon config: "+err.Error())
 		}
@@ -60,12 +64,12 @@ func superviseLocalDaemon(ctx context.Context, dataDir, exe string, port int) {
 	}
 }
 
-func localDaemonRunnableWorkspace(dataDir string) (string, bool, error) {
+func localDaemonRunnableWorkspace(ctx context.Context, dataDir, runtimeURL string) (string, bool, error) {
 	workspaceKey, err := localDaemonWorkspaceKey()
 	if err != nil || workspaceKey == "" {
 		return workspaceKey, false, err
 	}
-	hasRepos, err := localDaemonWorkspaceHasRepos(dataDir, workspaceKey)
+	hasRepos, err := localDaemonWorkspaceHasRepos(ctx, runtimeURL, workspaceKey)
 	if err != nil {
 		return workspaceKey, false, err
 	}
@@ -100,19 +104,37 @@ func loadLocalDaemonConfigForWorkspace(dataDir, workspaceKey string) (*cfgpkg.Da
 	return cfgpkg.LoadDaemonConfig(dataDir)
 }
 
-func workspaceHasReposForLocalDaemon(dataDir, workspaceKey string) (bool, error) {
-	ctx := context.Background()
-	handle, err := bootstrap.OpenStore(ctx, dataDir, nil)
-	if err != nil {
-		return false, err
+func workspaceHasReposForLocalDaemon(ctx context.Context, runtimeURL, workspaceKey string) (bool, error) {
+	if runtimeURL == "" {
+		return false, fmt.Errorf("runtime URL is empty")
 	}
-	defer func() { _ = handle.Close() }()
+	if workspaceKey == "" {
+		return false, fmt.Errorf("workspace key is empty")
+	}
+	reqCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
 
-	repos, err := handle.Store.Repos().List(ctx, workspaceKey)
+	endpoint := strings.TrimRight(runtimeURL, "/") + "/api/workspaces/" + url.PathEscape(workspaceKey) + "/repos"
+	req, err := http.NewRequestWithContext(reqCtx, http.MethodGet, endpoint, nil)
 	if err != nil {
 		return false, err
 	}
-	return len(repos) > 0, nil
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return false, err
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
+		return false, fmt.Errorf("list workspace repos via runtime returned %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+	}
+	var payload struct {
+		Repos []json.RawMessage `json:"repos"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		return false, fmt.Errorf("decode workspace repos response: %w", err)
+	}
+	return len(payload.Repos) > 0, nil
 }
 
 func localDaemonWorkspaceKey() (string, error) {
@@ -133,7 +155,10 @@ func runLocalDaemonOnce(ctx context.Context, dataDir, exe string, port int, work
 	}
 	defer func() { _ = logFile.Close() }()
 
-	cmd := exec.Command(exe, "daemon") //nolint:gosec // runs this loom binary as the local agent supervisor
+	cmd, err := loomReexecCommand(exe, "daemon")
+	if err != nil {
+		return err
+	}
 	cmd.Dir = dataDir
 	cmd.Env = append(localEnv(dataDir, port), "LOOM_WORKSPACE="+workspaceKey)
 	cmd.Stdout = logFile

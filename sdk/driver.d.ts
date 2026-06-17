@@ -4,20 +4,20 @@
  * WorkflowSuspended sentinel (whose `result.status` is the distinct literal
  * "suspended_awaiting_event"). Extending this union is a breaking change.
  */
-export type FlueDriverResultStatus = "completed" | "failed" | "needs_review" | "cancelled";
+export type LoomDriverResultStatus = "completed" | "failed" | "needs_review" | "cancelled";
 
 /**
  * FROZEN (SDK v1 contract): epic watch SSE frame types.
  * "snapshot" (handshake) -> "taskRun"* (journal) -> "closed" (terminal).
  */
-export type FlueEpicWatchEventType = "snapshot" | "taskRun" | "closed";
+export type LoomEpicWatchEventType = "snapshot" | "taskRun" | "closed";
 
 /**
  * FROZEN (SDK v1 contract): resolved-await statuses returned to the caller.
  * The third wire status, "suspended", never reaches workflow code — the
  * client converts it into the thrown WorkflowSuspended sentinel.
  */
-export type FlueAwaitStatus = "satisfied" | "timed_out";
+export type LoomAwaitStatus = "satisfied" | "timed_out";
 
 /**
  * FROZEN (SDK v1 contract): every code the {code, message, retryable,
@@ -58,8 +58,8 @@ export type DriverApiErrorCode =
   | "driver_run_already_resumed"
   | "composition_depth_exceeded";
 
-export interface FlueDriverResult {
-  status: FlueDriverResultStatus;
+export interface LoomDriverResult {
+  status: LoomDriverResultStatus;
   summary?: string;
   errorClass?: string;
   taskRunId?: string;
@@ -68,7 +68,7 @@ export interface FlueDriverResult {
   [key: string]: unknown;
 }
 
-export interface FlueTaskSelector {
+export interface LoomTaskSelector {
   taskId?: string;
   id?: string;
   taskRunId?: string;
@@ -80,23 +80,21 @@ export interface FlueTaskSelector {
   artifactIds?: string[];
 }
 
-export interface FlueTaskRunRequest {
+export interface LoomTaskRunRequest {
   taskId?: string;
   taskRunId?: string;
   driverStepId?: string;
-  providerProfile?: string;
+  /**
+   * User-authored runner name declared by the pinned driver version manifest.
+   * This is the runtime strategy selector. It is distinct from runnerId, which
+   * identifies the worker process that claims the TaskRun.
+   */
+  runner?: string;
   workerProfileId?: string;
   parentSessionId?: string;
   nodeId?: string;
   runnerId?: string;
-  supportedProviders?: string[];
   capabilities?: string[];
-  sandboxPlacement?: {
-    provider?: string;
-    sandboxId?: string;
-    cwd?: string;
-    repoRef?: string;
-  };
   leaseToken?: string;
   /**
    * Optional task-run payload (e.g. a review diff+rubric), persisted on the
@@ -106,11 +104,11 @@ export interface FlueTaskRunRequest {
   input?: unknown;
 }
 
-export interface FlueEpicInput {
+export interface LoomEpicInput {
   epicId?: string;
 }
 
-export interface FlueEpicWatchInput extends FlueEpicInput {
+export interface LoomEpicWatchInput extends LoomEpicInput {
   /** Exclusive journal cursor: only events with Seq greater than this are yielded. */
   afterSeq?: number | string;
   /** Aborting the signal ends iteration without throwing. */
@@ -119,54 +117,54 @@ export interface FlueEpicWatchInput extends FlueEpicInput {
   reconnectMs?: number;
 }
 
-export interface FlueEpicWatchEvent {
-  type: FlueEpicWatchEventType;
+export interface LoomEpicWatchEvent {
+  type: LoomEpicWatchEventType;
   /** Last-Event-ID cursor for the frame (journal Seq as a string). */
   id: string;
   data: unknown;
 }
 
-export interface FlueAgentInput {
+export interface LoomAgentInput {
   agent?: string;
   agentName?: string;
   name?: string;
 }
 
-export interface FlueAgentParentUpdateInput extends FlueAgentInput {
+export interface LoomAgentParentUpdateInput extends LoomAgentInput {
   parent?: string;
   parentEpicId?: string;
   expectParent?: string;
 }
 
-export interface FlueAgentMessageInput extends FlueAgentInput {
+export interface LoomAgentMessageInput extends LoomAgentInput {
   message?: string;
   text?: string;
   body?: string;
 }
 
-export interface FlueTaskRunActiveInput extends FlueEpicInput {
+export interface LoomTaskRunActiveInput extends LoomEpicInput {
   limit?: number;
 }
 
-export interface FlueTaskRunRecoverStaleInput {
+export interface LoomTaskRunRecoverStaleInput {
   staleBefore?: string;
   maxAgeSeconds?: number;
   errorClass?: string;
   errorMessage?: string;
 }
 
-export interface FlueTaskRunGetInput {
+export interface LoomTaskRunGetInput {
   taskRunId?: string;
   id?: string;
 }
 
-export interface FlueTaskRunAwaitInput extends FlueTaskRunGetInput {
+export interface LoomTaskRunAwaitInput extends LoomTaskRunGetInput {
   pollMs?: number;
   timeoutMs?: number;
 }
 
 /** camelCase freshness assertions for connector egress (CV9 wire shape). */
-export interface FlueConnectorPreconditions {
+export interface LoomConnectorPreconditions {
   expectedHeadSha?: string;
   expectedIssueRevision?: string;
   expectedMessageTs?: string;
@@ -178,32 +176,32 @@ export interface FlueConnectorPreconditions {
  * callSeq address the dispatch envelope, expected* fields become
  * preconditions, every other key is a camelCase provider arg.
  */
-export interface FlueConnectorCallInput extends FlueConnectorPreconditions {
+export interface LoomConnectorCallInput extends LoomConnectorPreconditions {
   connectorId?: string;
   resource?: string;
   /** Explicit sequence override; omitted = auto-increment per action. */
   callSeq?: number;
   args?: Record<string, unknown>;
-  preconditions?: FlueConnectorPreconditions;
+  preconditions?: LoomConnectorPreconditions;
   [key: string]: unknown;
 }
 
 /** Irreversible merge: expectedHeadSha is a first-class REQUIRED parameter. */
-export interface FlueConnectorGitHubMergeInput extends FlueConnectorCallInput {
+export interface LoomConnectorGitHubMergeInput extends LoomConnectorCallInput {
   expectedHeadSha: string;
 }
 
 /** Review post is gated by a pre-egress liveness read at expectedHeadSha. */
-export interface FlueConnectorGitHubReviewInput extends FlueConnectorCallInput {
+export interface LoomConnectorGitHubReviewInput extends LoomConnectorCallInput {
   expectedHeadSha: string;
 }
 
-export interface FlueConnectorDispatchInput extends FlueConnectorCallInput {
+export interface LoomConnectorDispatchInput extends LoomConnectorCallInput {
   /** Dotted connector action, e.g. "github.merge". */
   action: string;
 }
 
-export interface FlueConnectorCallResult {
+export interface LoomConnectorCallResult {
   callId: string;
   /** FROZEN: a dispatch that returns (rather than throws) was granted. */
   decision: "granted";
@@ -212,25 +210,25 @@ export interface FlueConnectorCallResult {
   [key: string]: unknown;
 }
 
-export interface FlueConnectorsNamespace {
+export interface LoomConnectorsNamespace {
   github: {
-    merge(input: FlueConnectorGitHubMergeInput): Promise<FlueConnectorCallResult>;
-    postReview(input: FlueConnectorGitHubReviewInput): Promise<FlueConnectorCallResult>;
-    readPullRequest(input?: FlueConnectorCallInput): Promise<FlueConnectorCallResult>;
-    listPulls(input?: FlueConnectorCallInput): Promise<FlueConnectorCallResult>;
-    compare(input?: FlueConnectorCallInput): Promise<FlueConnectorCallResult>;
-    postIssueComment(input?: FlueConnectorCallInput): Promise<FlueConnectorCallResult>;
+    merge(input: LoomConnectorGitHubMergeInput): Promise<LoomConnectorCallResult>;
+    postReview(input: LoomConnectorGitHubReviewInput): Promise<LoomConnectorCallResult>;
+    readPullRequest(input?: LoomConnectorCallInput): Promise<LoomConnectorCallResult>;
+    listPulls(input?: LoomConnectorCallInput): Promise<LoomConnectorCallResult>;
+    compare(input?: LoomConnectorCallInput): Promise<LoomConnectorCallResult>;
+    postIssueComment(input?: LoomConnectorCallInput): Promise<LoomConnectorCallResult>;
   };
   slack: {
-    post(input?: FlueConnectorCallInput): Promise<FlueConnectorCallResult>;
-    readConversations(input?: FlueConnectorCallInput): Promise<FlueConnectorCallResult>;
+    post(input?: LoomConnectorCallInput): Promise<LoomConnectorCallResult>;
+    readConversations(input?: LoomConnectorCallInput): Promise<LoomConnectorCallResult>;
   };
   datadog: {
-    readMonitors(input?: FlueConnectorCallInput): Promise<FlueConnectorCallResult>;
-    readAlert(input?: FlueConnectorCallInput): Promise<FlueConnectorCallResult>;
-    declareIncident(input?: FlueConnectorCallInput): Promise<FlueConnectorCallResult>;
+    readMonitors(input?: LoomConnectorCallInput): Promise<LoomConnectorCallResult>;
+    readAlert(input?: LoomConnectorCallInput): Promise<LoomConnectorCallResult>;
+    declareIncident(input?: LoomConnectorCallInput): Promise<LoomConnectorCallResult>;
   };
-  dispatch(input: FlueConnectorDispatchInput): Promise<FlueConnectorCallResult>;
+  dispatch(input: LoomConnectorDispatchInput): Promise<LoomConnectorCallResult>;
 }
 
 /**
@@ -244,7 +242,7 @@ export interface FlueConnectorsNamespace {
  * must NEVER be conditionally skipped or reordered across re-entries (same
  * rule as deterministic task run ids and connector callSeq).
  */
-export interface FlueAwaitEventInput {
+export interface LoomAwaitEventInput {
   /**
    * Fully rendered subject key, EXACT equality (no glob), e.g.
    * "approval:owner/repo#123@sha" or
@@ -266,7 +264,7 @@ export interface FlueAwaitEventInput {
 }
 
 /** The recorded resolving event, replayed inline on every re-entry. */
-export interface FlueAwaitWireEvent {
+export interface LoomAwaitWireEvent {
   id: string;
   /** Size-capped resume payload persisted on the satisfied await row. */
   payload?: unknown;
@@ -281,20 +279,20 @@ export interface FlueAwaitWireEvent {
  * re-run non-memoized freshness checks (e.g. the PR head sha) after every
  * await before acting on the event.
  */
-export interface FlueAwaitEventResult {
-  status: FlueAwaitStatus;
+export interface LoomAwaitEventResult {
+  status: LoomAwaitStatus;
   instanceKey: string;
   pattern: string;
   deadline: string;
-  event: FlueAwaitWireEvent;
+  event: LoomAwaitWireEvent;
 }
 
-export interface FlueAwaitListResult {
+export interface LoomAwaitListResult {
   runId: string;
   awaits: Record<string, unknown>[];
 }
 
-export interface FlueWorkflowStartInput {
+export interface LoomWorkflowStartInput {
   /** Registered workflow (driver) name; the active passed version is pinned. */
   workflow?: string;
   /** Alias for workflow. */
@@ -311,14 +309,14 @@ export interface FlueWorkflowStartInput {
   startIndex?: number;
 }
 
-export interface FlueWorkflowStartResult {
+export interface LoomWorkflowStartResult {
   childRunId: string;
   workflowName: string;
   status: string;
   parentRunId: string;
 }
 
-export interface FlueWorkflowAwaitInput {
+export interface LoomWorkflowAwaitInput {
   childRunId?: string;
   /** Alias for childRunId. */
   runId?: string;
@@ -330,14 +328,14 @@ export interface FlueWorkflowAwaitInput {
   awaitIndex?: number;
 }
 
-export interface FlueWorkflowAwaitResult extends FlueAwaitEventResult {
+export interface LoomWorkflowAwaitResult extends LoomAwaitEventResult {
   /** The child's outcome at response time (fresher than event.payload). */
   child?: { runId: string; status: string; summary?: string; errorClass?: string };
 }
 
 /**
  * Suspend sentinel thrown by events.await / workflows.await when the server
- * parked the run. NOT a failure: let it propagate (the runner exits cleanly
+ * suspended the run. NOT a failure: let it propagate (the runner exits cleanly
  * with a suspended completion shape and resume re-runs from the top), or
  * `return err.result`. Catch blocks around awaits MUST rethrow when
  * isWorkflowSuspended(err) is true.
@@ -351,7 +349,7 @@ export declare class WorkflowSuspended extends Error {
 
 export declare function isWorkflowSuspended(err: unknown): boolean;
 
-export interface FlueDriverClientOptions {
+export interface LoomDriverClientOptions {
   env?: NodeJS.ProcessEnv | Record<string, string | undefined>;
   input?: Record<string, unknown>;
   apiUrl?: string;
@@ -383,9 +381,9 @@ export declare class DriverApiError extends Error {
   constructor(message: string, options?: { code?: DriverApiErrorCode; retryable?: boolean; status?: number; details?: unknown });
 }
 
-export declare class FlueDriverClient {
-  static fromEnv(options?: FlueDriverClientOptions): FlueDriverClient;
-  constructor(options?: FlueDriverClientOptions);
+export declare class LoomDriverClient {
+  static fromEnv(options?: LoomDriverClientOptions): LoomDriverClient;
+  constructor(options?: LoomDriverClientOptions);
 
   readonly input: Record<string, unknown>;
   readonly workspace: string;
@@ -393,84 +391,84 @@ export declare class FlueDriverClient {
   /** Run-scoped bearer token in effect ("" = legacy header-quad transport). */
   readonly runToken: string;
   readonly epics: {
-    get(input?: FlueEpicInput): Promise<Record<string, unknown> | null>;
-    snapshot(input?: FlueEpicInput): Promise<Record<string, unknown> | null>;
-    watch(input?: FlueEpicWatchInput): AsyncGenerator<FlueEpicWatchEvent, void, undefined>;
+    get(input?: LoomEpicInput): Promise<Record<string, unknown> | null>;
+    snapshot(input?: LoomEpicInput): Promise<Record<string, unknown> | null>;
+    watch(input?: LoomEpicWatchInput): AsyncGenerator<LoomEpicWatchEvent, void, undefined>;
   };
   readonly agents: {
     list(input?: Record<string, unknown>): Promise<Record<string, unknown>[] | null>;
-    orchestrationSession(input?: FlueAgentInput): Promise<Record<string, unknown> | null>;
-    updateParent(input?: FlueAgentParentUpdateInput): Promise<Record<string, unknown> | null>;
-    deliverAssignment(input?: FlueAgentInput): Promise<Record<string, unknown> | null>;
-    message(input?: FlueAgentMessageInput): Promise<Record<string, unknown> | null>;
+    orchestrationSession(input?: LoomAgentInput): Promise<Record<string, unknown> | null>;
+    updateParent(input?: LoomAgentParentUpdateInput): Promise<Record<string, unknown> | null>;
+    deliverAssignment(input?: LoomAgentInput): Promise<Record<string, unknown> | null>;
+    message(input?: LoomAgentMessageInput): Promise<Record<string, unknown> | null>;
   };
   readonly tasks: {
-    claimReady(input?: FlueEpicInput): Promise<Record<string, unknown> | null>;
-    complete(input?: FlueTaskSelector | string): Promise<Record<string, unknown> | null>;
-    release(input?: FlueTaskSelector | string): Promise<Record<string, unknown> | null>;
+    claimReady(input?: LoomEpicInput): Promise<Record<string, unknown> | null>;
+    complete(input?: LoomTaskSelector | string): Promise<Record<string, unknown> | null>;
+    release(input?: LoomTaskSelector | string): Promise<Record<string, unknown> | null>;
   };
   readonly taskRuns: {
-    request(input?: FlueTaskRunRequest): Promise<Record<string, unknown>>;
-    get(input?: FlueTaskRunGetInput): Promise<Record<string, unknown> | null>;
+    request(input?: LoomTaskRunRequest): Promise<Record<string, unknown>>;
+    get(input?: LoomTaskRunGetInput): Promise<Record<string, unknown> | null>;
     /**
      * CLIENT-SIDE POLLING (kept for compat): repeatedly calls taskRuns.get
      * until the run reaches a terminal status. Prefer epics.watch — the
      * server-push SSE stream — for reacting to task-run progress.
      */
-    await(input?: FlueTaskRunAwaitInput): Promise<Record<string, unknown> | null>;
-    active(input?: FlueTaskRunActiveInput): Promise<Record<string, unknown> | null>;
-    recoverStale(input?: FlueTaskRunRecoverStaleInput): Promise<Record<string, unknown> | null>;
+    await(input?: LoomTaskRunAwaitInput): Promise<Record<string, unknown> | null>;
+    active(input?: LoomTaskRunActiveInput): Promise<Record<string, unknown> | null>;
+    recoverStale(input?: LoomTaskRunRecoverStaleInput): Promise<Record<string, unknown> | null>;
   };
-  readonly connectors: FlueConnectorsNamespace;
+  readonly connectors: LoomConnectorsNamespace;
   readonly events: {
-    /** Throws WorkflowSuspended when the run parks; see FlueAwaitEventInput for the determinism and freshness rules. */
-    await(input: FlueAwaitEventInput): Promise<FlueAwaitEventResult>;
+    /** Throws WorkflowSuspended when the run suspends; see LoomAwaitEventInput for the determinism and freshness rules. */
+    await(input: LoomAwaitEventInput): Promise<LoomAwaitEventResult>;
     /** Re-entry context: the run's awaits in index order; consumes no await slot. */
-    list(input?: Record<string, unknown>): Promise<FlueAwaitListResult>;
+    list(input?: Record<string, unknown>): Promise<LoomAwaitListResult>;
   };
   readonly workflows: {
-    start(input: FlueWorkflowStartInput): Promise<FlueWorkflowStartResult>;
-    /** Throws WorkflowSuspended when the run parks; shares the awaitIndex counter with events.await. */
-    await(input: FlueWorkflowAwaitInput): Promise<FlueWorkflowAwaitResult>;
+    start(input: LoomWorkflowStartInput): Promise<LoomWorkflowStartResult>;
+    /** Throws WorkflowSuspended when the run suspends; shares the awaitIndex counter with events.await. */
+    await(input: LoomWorkflowAwaitInput): Promise<LoomWorkflowAwaitResult>;
   };
 
-  completed(input?: { summary?: string }): FlueDriverResult;
-  failed(input?: { summary?: string; errorClass?: string }): FlueDriverResult;
+  completed(input?: { summary?: string }): LoomDriverResult;
+  failed(input?: { summary?: string; errorClass?: string }): LoomDriverResult;
   needsReview(input?: {
     summary?: string;
     errorClass?: string;
     taskRunId?: string;
     logsRef?: string;
     artifactsRef?: string;
-  }): FlueDriverResult;
-  claimReady(input?: FlueEpicInput): Promise<Record<string, unknown> | null>;
-  getEpic(input?: FlueEpicInput): Promise<Record<string, unknown> | null>;
-  epicSnapshot(input?: FlueEpicInput): Promise<Record<string, unknown> | null>;
-  watchEpic(input?: FlueEpicWatchInput): AsyncGenerator<FlueEpicWatchEvent, void, undefined>;
+  }): LoomDriverResult;
+  claimReady(input?: LoomEpicInput): Promise<Record<string, unknown> | null>;
+  getEpic(input?: LoomEpicInput): Promise<Record<string, unknown> | null>;
+  epicSnapshot(input?: LoomEpicInput): Promise<Record<string, unknown> | null>;
+  watchEpic(input?: LoomEpicWatchInput): AsyncGenerator<LoomEpicWatchEvent, void, undefined>;
   listAgents(input?: Record<string, unknown>): Promise<Record<string, unknown>[] | null>;
-  agentOrchestrationSession(input?: FlueAgentInput): Promise<Record<string, unknown> | null>;
-  updateAgentParent(input?: FlueAgentParentUpdateInput): Promise<Record<string, unknown> | null>;
-  deliverLeadAssignment(input?: FlueAgentInput): Promise<Record<string, unknown> | null>;
-  messageAgent(input?: FlueAgentMessageInput): Promise<Record<string, unknown> | null>;
-  requestTaskRun(input?: FlueTaskRunRequest): Promise<Record<string, unknown>>;
-  getTaskRun(input?: FlueTaskRunGetInput): Promise<Record<string, unknown> | null>;
+  agentOrchestrationSession(input?: LoomAgentInput): Promise<Record<string, unknown> | null>;
+  updateAgentParent(input?: LoomAgentParentUpdateInput): Promise<Record<string, unknown> | null>;
+  deliverLeadAssignment(input?: LoomAgentInput): Promise<Record<string, unknown> | null>;
+  messageAgent(input?: LoomAgentMessageInput): Promise<Record<string, unknown> | null>;
+  requestTaskRun(input?: LoomTaskRunRequest): Promise<Record<string, unknown>>;
+  getTaskRun(input?: LoomTaskRunGetInput): Promise<Record<string, unknown> | null>;
   /** Client-side polling loop (see taskRuns.await); epics.watch is the push alternative. */
-  awaitTaskRun(input?: FlueTaskRunAwaitInput): Promise<Record<string, unknown> | null>;
-  activeTaskRuns(input?: FlueTaskRunActiveInput): Promise<Record<string, unknown> | null>;
-  recoverStaleTaskRuns(input?: FlueTaskRunRecoverStaleInput): Promise<Record<string, unknown> | null>;
-  completeTask(input?: FlueTaskSelector | string): Promise<Record<string, unknown> | null>;
-  releaseTask(input?: FlueTaskSelector | string): Promise<Record<string, unknown> | null>;
+  awaitTaskRun(input?: LoomTaskRunAwaitInput): Promise<Record<string, unknown> | null>;
+  activeTaskRuns(input?: LoomTaskRunActiveInput): Promise<Record<string, unknown> | null>;
+  recoverStaleTaskRuns(input?: LoomTaskRunRecoverStaleInput): Promise<Record<string, unknown> | null>;
+  completeTask(input?: LoomTaskSelector | string): Promise<Record<string, unknown> | null>;
+  releaseTask(input?: LoomTaskSelector | string): Promise<Record<string, unknown> | null>;
   /**
    * Generic connector egress; throws SYNCHRONOUSLY (DriverApiError
    * precondition_required, before any network call) when a registered
    * irreversible/precondition-gated action lacks its required precondition.
    */
-  dispatchConnector(input?: FlueConnectorDispatchInput): Promise<FlueConnectorCallResult>;
-  awaitEvent(input: FlueAwaitEventInput): Promise<FlueAwaitEventResult>;
-  listAwaits(input?: Record<string, unknown>): Promise<FlueAwaitListResult>;
-  startWorkflow(input: FlueWorkflowStartInput): Promise<FlueWorkflowStartResult>;
-  awaitChildWorkflow(input: FlueWorkflowAwaitInput): Promise<FlueWorkflowAwaitResult>;
+  dispatchConnector(input?: LoomConnectorDispatchInput): Promise<LoomConnectorCallResult>;
+  awaitEvent(input: LoomAwaitEventInput): Promise<LoomAwaitEventResult>;
+  listAwaits(input?: Record<string, unknown>): Promise<LoomAwaitListResult>;
+  startWorkflow(input: LoomWorkflowStartInput): Promise<LoomWorkflowStartResult>;
+  awaitChildWorkflow(input: LoomWorkflowAwaitInput): Promise<LoomWorkflowAwaitResult>;
 }
 
-export declare function createLoomDriverClient(options?: FlueDriverClientOptions | Record<string, unknown>): FlueDriverClient;
+export declare function createLoomDriverClient(options?: LoomDriverClientOptions | Record<string, unknown>): LoomDriverClient;
 export declare const createLoomClient: typeof createLoomDriverClient;

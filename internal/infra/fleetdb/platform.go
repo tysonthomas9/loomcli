@@ -561,19 +561,24 @@ var _ store.TaskRunStore = (*taskRunStore)(nil)
 
 func (s *taskRunStore) Create(ctx context.Context, in store.TaskRunCreate) (*domain.TaskRun, error) {
 	body := map[string]any{
-		"task_run_id":       in.TaskRunID,
-		"driver_run_id":     in.DriverRunID,
-		"driver_step_id":    in.DriverStepID,
-		"task_id":           in.TaskID,
-		"worker_profile_id": in.WorkerProfileID,
-		"provider_profile":  in.ProviderProfile,
-		"status":            in.Status,
-		"node_id":           in.NodeID,
-		"lease_id":          in.LeaseID,
-		"fencing_token":     in.FencingToken,
-		"runner_placement":  in.RunnerPlacement,
-		"sandbox_placement": in.SandboxPlacement,
-		"runtime_metadata":  in.RuntimeMetadata,
+		"task_run_id":              in.TaskRunID,
+		"driver_run_id":            in.DriverRunID,
+		"driver_step_id":           in.DriverStepID,
+		"task_id":                  in.TaskID,
+		"worker_profile_id":        in.WorkerProfileID,
+		"runner":                   in.Runner,
+		"runner_ref":               in.RunnerRef,
+		"runner_kind":              in.RunnerKind,
+		"runner_entrypoint":        in.RunnerEntrypoint,
+		"runner_driver_version_id": in.RunnerVersionID,
+		"provider_profile":         in.ProviderProfile,
+		"status":                   in.Status,
+		"node_id":                  in.NodeID,
+		"lease_id":                 in.LeaseID,
+		"fencing_token":            in.FencingToken,
+		"runner_placement":         in.RunnerPlacement,
+		"sandbox_placement":        in.SandboxPlacement,
+		"runtime_metadata":         in.RuntimeMetadata,
 	}
 	if len(in.Input) > 0 {
 		body["input"] = in.Input
@@ -663,7 +668,7 @@ func (s *taskRunStore) Finish(ctx context.Context, ws, taskRunID string, finish 
 		"runtime_metadata":   finish.RuntimeMetadata,
 		"error_class":        finish.ErrorClass,
 		"error_message":      finish.ErrorMessage,
-		"park_task":          finish.ParkTask,
+		"block_task":         finish.BlockTask,
 	}
 	var out domain.TaskRun
 	path := "/api/v1/" + pathEscape(ws) + "/task-runs/" + pathEscape(taskRunID) + "/finish"

@@ -232,7 +232,7 @@ func (s *CronScheduler) dispatchTick(ctx context.Context, ws string, binding *do
 }
 
 // dispatchTickAwaits hands the admitted tick to the dispatch-time await
-// matcher (AW7): an await parked on "cron.tick:{bindingID}" resumes on the
+// matcher (AW7): an await pending on "cron.tick:{bindingID}" resumes on the
 // binding's next due tick. Best-effort — the tick already dispatched durably,
 // so matcher errors are logged, never returned (the next sweep's idempotent
 // re-dispatch retries naturally while the window has not advanced past it).

@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"os"
+	"strings"
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/rpc"
@@ -40,6 +42,11 @@ type runtimeReadyPool interface {
 	Discard(client runtimeReadyClient)
 }
 
+// WorkspaceLocalPathFn resolves a workspace's machine-local root path. FleetDB
+// is the source of truth for workspace existence, but local terminals and
+// local agent runtimes require this per-machine path to exist.
+type WorkspaceLocalPathFn func(workspace string) string
+
 type runtimeReadyPoolAdapter struct {
 	pool daemon.Pool
 }
@@ -72,16 +79,22 @@ func (a *runtimeReadyPoolAdapter) Discard(client runtimeReadyClient) {
 // This is the missing "is this workspace serviceable right now" probe consumed
 // by ensure-runtime; /api/health stays as the LB liveness signal.
 func HandleWorkspaceRuntimeReady(pool daemon.Pool, daemonExpected bool, backendFn IssueBackendFn) http.HandlerFunc {
+	return HandleWorkspaceRuntimeReadyWithLocalPath(pool, daemonExpected, backendFn, nil)
+}
+
+// HandleWorkspaceRuntimeReadyWithLocalPath reports runtime readiness and also
+// verifies local workspace path availability when localPathFn is provided.
+func HandleWorkspaceRuntimeReadyWithLocalPath(pool daemon.Pool, daemonExpected bool, backendFn IssueBackendFn, localPathFn WorkspaceLocalPathFn) http.HandlerFunc {
 	var adapter runtimeReadyPool
 	if pool != nil {
 		adapter = &runtimeReadyPoolAdapter{pool: pool}
 	}
-	return handleWorkspaceRuntimeReady(adapter, daemonExpected, backendFn)
+	return handleWorkspaceRuntimeReady(adapter, daemonExpected, backendFn, localPathFn)
 }
 
 // handleWorkspaceRuntimeReady is the internal implementation that accepts the
 // narrow pool interface used by the tests.
-func handleWorkspaceRuntimeReady(pool runtimeReadyPool, daemonExpected bool, backendFn IssueBackendFn) http.HandlerFunc {
+func handleWorkspaceRuntimeReady(pool runtimeReadyPool, daemonExpected bool, backendFn IssueBackendFn, localPathFn WorkspaceLocalPathFn) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		ws := r.PathValue("ws")
 		if ws == "" {
@@ -93,6 +106,16 @@ func handleWorkspaceRuntimeReady(pool runtimeReadyPool, daemonExpected bool, bac
 		}
 
 		var resp RuntimeReadyResponse
+		if reason := localWorkspacePathNotReady(localPathFn, ws); reason != "" {
+			resp = RuntimeReadyResponse{
+				Ready:     false,
+				Mode:      runtimeReadyMode(daemonExpected),
+				Workspace: ws,
+				Reason:    reason,
+			}
+			handler.WriteJSON(w, http.StatusServiceUnavailable, resp)
+			return
+		}
 		if daemonExpected {
 			resp = probeDaemon(r.Context(), pool, ws)
 		} else {
@@ -105,6 +128,31 @@ func handleWorkspaceRuntimeReady(pool runtimeReadyPool, daemonExpected bool, bac
 		}
 		handler.WriteJSON(w, httpStatus, resp)
 	}
+}
+
+func runtimeReadyMode(daemonExpected bool) string {
+	if daemonExpected {
+		return "daemon"
+	}
+	return "fleet"
+}
+
+func localWorkspacePathNotReady(localPathFn WorkspaceLocalPathFn, ws string) string {
+	if localPathFn == nil {
+		return ""
+	}
+	path := strings.TrimSpace(localPathFn(ws))
+	if path == "" {
+		return "workspace has no local path on this machine"
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		return "workspace local path unavailable: " + err.Error()
+	}
+	if !info.IsDir() {
+		return "workspace local path is not a directory: " + path
+	}
+	return ""
 }
 
 // probeDaemon checks daemon-mode workspace readiness: a registered workspace

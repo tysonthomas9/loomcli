@@ -177,13 +177,26 @@ func TestStopAgent_KillsIsolatedGrandchildProcessGroup(t *testing.T) {
 	t.Fatalf("isolated grandchild PID %d survived StopAgent — descendant pgroup not signaled", childPID)
 }
 
-// processAlive reports whether pid is still a live process.
+// processAlive reports whether pid is still a live, non-zombie process. In a
+// PID-1 test container, killed orphan descendants can remain as zombies until
+// container exit; kill -0 still sees those PIDs, but they are no longer running.
 func processAlive(pid int) bool {
 	if pid <= 0 {
 		return false
 	}
+	if processZombie(pid) {
+		return false
+	}
 	err := syscall.Kill(pid, 0)
 	return err == nil || err == syscall.EPERM
+}
+
+func processZombie(pid int) bool {
+	out, err := exec.Command("ps", "-p", strconv.Itoa(pid), "-o", "stat=").Output() //nolint:norawexec // test-only process status via ps
+	if err != nil {
+		return false
+	}
+	return strings.HasPrefix(strings.TrimSpace(string(out)), "Z")
 }
 
 // readPPID best-effort parses ps to return the current parent PID of pid (so a

@@ -3910,6 +3910,8 @@ components:
           type: string
         remote:
           type: string
+        remote_url:
+          type: string
         source_repo_id:
           type: string
         groups:

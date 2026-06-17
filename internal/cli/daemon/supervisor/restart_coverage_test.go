@@ -168,7 +168,7 @@ func TestSupervisor_ShouldRestart_SuccessfulLongRun(t *testing.T) {
 	}
 }
 
-func TestSupervisor_ShouldRestart_MaxRetriesExceeded_Parks(t *testing.T) {
+func TestSupervisor_ShouldRestart_MaxRetriesExceeded_Blocks(t *testing.T) {
 	maxRetries := 3
 	s := newTestSupervisorWithConfig(&config.DaemonConfig{
 		Daemon: config.DaemonSettings{
@@ -184,15 +184,15 @@ func TestSupervisor_ShouldRestart_MaxRetriesExceeded_Parks(t *testing.T) {
 		RestartCount: 3, // Already at max; the next failure exhausts the budget
 	}
 
-	// Exhausting the budget parks-and-retries instead of giving up.
+	// Exhausting the budget blocks-and-retries instead of giving up.
 	if !s.shouldRestart(ap) {
-		t.Error("shouldRestart should return true (park) when the budget is exhausted")
+		t.Error("shouldRestart should return true (block) when the budget is exhausted")
 	}
-	if ap.StopReason != StopReasonMaxRetriesParked {
-		t.Errorf("StopReason = %q, want %q", ap.StopReason, StopReasonMaxRetriesParked)
+	if ap.StopReason != StopReasonMaxRetriesBlocked {
+		t.Errorf("StopReason = %q, want %q", ap.StopReason, StopReasonMaxRetriesBlocked)
 	}
 	if ap.RestartCount != 0 {
-		t.Errorf("RestartCount = %d, want 0 (reset on park)", ap.RestartCount)
+		t.Errorf("RestartCount = %d, want 0 (reset on block)", ap.RestartCount)
 	}
 }
 

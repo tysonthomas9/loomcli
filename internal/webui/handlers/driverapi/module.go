@@ -505,6 +505,7 @@ type execTaskParams struct {
 	TaskRunID          string   `json:"taskRunId"`
 	DriverStepID       string   `json:"driverStepId"`
 	WorkerProfileID    string   `json:"workerProfileId"`
+	Runner             string   `json:"runner"`
 	ProviderProfile    string   `json:"providerProfile"`
 	ParentSessionID    string   `json:"parentSessionId"`
 	RunnerID           string   `json:"runnerId"`
@@ -525,32 +526,36 @@ type execTaskParams struct {
 }
 
 func (p execTaskParams) requestOptions(ws string, id driverIdentity, fencingToken int64) driverpkg.TaskRunRequestOptions {
-	return driverpkg.TaskRunRequestOptions{
-		WorkspaceKey:       ws,
-		DriverRunID:        id.RunID,
-		DriverStepID:       p.DriverStepID,
-		TaskRunID:          p.TaskRunID,
-		TaskID:             p.TaskID,
-		WorkerProfileID:    p.WorkerProfileID,
-		ProviderProfile:    p.ProviderProfile,
-		ParentSessionID:    p.ParentSessionID,
-		ParentNodeID:       id.NodeID,
-		ParentLeaseID:      id.LeaseID,
-		ParentFence:        fencingToken,
-		NodeID:             id.NodeID,
-		RunnerID:           p.RunnerID,
-		LeaseToken:         p.LeaseToken,
-		SupportedProviders: p.SupportedProviders,
-		Capabilities:       p.Capabilities,
-		SandboxPlacement: domain.TaskRunPlacement{
+	opts := driverpkg.TaskRunRequestOptions{
+		WorkspaceKey:    ws,
+		DriverRunID:     id.RunID,
+		DriverStepID:    p.DriverStepID,
+		TaskRunID:       p.TaskRunID,
+		TaskID:          p.TaskID,
+		WorkerProfileID: p.WorkerProfileID,
+		Runner:          p.Runner,
+		ParentSessionID: p.ParentSessionID,
+		ParentNodeID:    id.NodeID,
+		ParentLeaseID:   id.LeaseID,
+		ParentFence:     fencingToken,
+		NodeID:          id.NodeID,
+		RunnerID:        p.RunnerID,
+		LeaseToken:      p.LeaseToken,
+		Capabilities:    p.Capabilities,
+		DeferCompletion: p.DeferCompletion,
+		Input:           p.Input,
+	}
+	if strings.TrimSpace(p.Runner) == "" {
+		opts.ProviderProfile = p.ProviderProfile
+		opts.SupportedProviders = p.SupportedProviders
+		opts.SandboxPlacement = domain.TaskRunPlacement{
 			Provider:  p.SandboxPlacement.Provider,
 			SandboxID: p.SandboxPlacement.SandboxID,
 			CWD:       p.SandboxPlacement.CWD,
 			RepoRef:   p.SandboxPlacement.RepoRef,
-		},
-		DeferCompletion: p.DeferCompletion,
-		Input:           p.Input,
+		}
 	}
+	return opts
 }
 
 func (m *Module) execTask(ctx context.Context, ws string, id driverIdentity, body []byte) (any, error) {

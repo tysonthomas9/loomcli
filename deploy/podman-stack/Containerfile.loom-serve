@@ -25,12 +25,11 @@
 #                                containers) while running the SAME proven codex
 #                                recipe as the single-container loomcli-dev path
 #                                (Dockerfile.dev + run-github-review-codex-stack.sh).
-#   - /usr/local/bin/codex-review-runner.mjs  the A1 task runner (reused
-#                                verbatim from deploy/agents/a1-github-review/);
-#                                LOOM_DRIVER_TASK_RUNNER_CMD_JSON points at it,
-#                                wrapped in `env CODEX_HOME=…` (the task bridge
-#                                strips CODEX_* from the runner's inherited env —
-#                                internal/driver/env.go).
+#   - /usr/local/bin/loom-task-runner-invoker.mjs  the generic task runner
+#                                invoker. LOOM_DRIVER_TASK_RUNNER_CMD_JSON
+#                                points at it, wrapped in `env CODEX_HOME=…`
+#                                (the task bridge strips CODEX_* from the
+#                                runner's inherited env — internal/driver/env.go).
 #   - /usr/local/bin/a1-setup.sh the connector+grant+binding provisioner
 #                                (reused verbatim from
 #                                deploy/agents/a1-github-review/setup.sh); the
@@ -47,7 +46,7 @@
 FROM docker.io/library/node:22-slim
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends git curl ca-certificates \
+    && apt-get install -y --no-install-recommends git curl ca-certificates lsof \
     && rm -rf /var/lib/apt/lists/*
 
 # The codex CLI the A1 review task runner spawns. Pinned to the same package
@@ -73,13 +72,13 @@ RUN chown -R node:node /opt/loom-sdk
 
 COPY bin/loom /usr/local/bin/loom
 
-# A1 github-review-agent runner + provisioner, reused verbatim from
-# deploy/agents/a1-github-review/ (staged into the build context by build.sh).
-# The runner is the codex-backed review task runner; a1-setup.sh wires the
-# connector/grant/binding. Both are agnostic to where the executor runs.
-COPY a1-github-review/codex-review-runner.mjs /usr/local/bin/codex-review-runner.mjs
+# A1 github-review-agent provisioner plus the generic task runner invoker
+# staged into the build context by build.sh. The codex-backed review runner
+# itself is the sibling github-review-task-runner workflow registered in the
+# driver bundle; a1-setup.sh wires connector/grant/binding.
+COPY loom-task-runner-invoker.mjs /usr/local/bin/loom-task-runner-invoker.mjs
 COPY a1-github-review/setup.sh /usr/local/bin/a1-setup.sh
-RUN chmod 0755 /usr/local/bin/codex-review-runner.mjs /usr/local/bin/a1-setup.sh
+RUN chmod 0755 /usr/local/bin/loom-task-runner-invoker.mjs /usr/local/bin/a1-setup.sh
 
 # Seeds /work/node_modules (the runtime volume) so server-side workflow-bundle
 # builds can resolve @flue/runtime -> @hono/node-server/hono; see the script.

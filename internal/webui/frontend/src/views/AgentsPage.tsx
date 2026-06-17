@@ -47,12 +47,17 @@ import {
 } from "@/api";
 import { useWorkspaceViewData } from "@/contexts/WorkspaceViewContext";
 import { useAgentStoreInstance } from "@/hooks";
+import { useLocalSettings, useWorkspaceContext } from "@/hooks/workspace";
 import { useOpenQueuePanelWidth } from "@/hooks/ui/useOpenQueuePanelWidth";
 import { useToast } from "@/hooks/ui/useToast";
 import { useWorkflowRunStreams } from "@/hooks/workflows/useWorkflowRunStreams";
 import { parseLoomStatus } from "@/types";
 import type { Issue } from "@/types";
 import { getAvatarColor, shouldUseWhiteText } from "@/utils/colorUtils";
+import {
+  epicRunnerRuntimePayload,
+  issueRepoName,
+} from "@/utils/epicRunnerPayload";
 import { formatStatusLabel } from "@/utils/issue";
 import type { TerminalInputRequest } from "@/components/TerminalView/TerminalView";
 
@@ -89,6 +94,8 @@ function AgentsPageInner(): JSX.Element {
   const agentStore = useAgentStoreInstance();
   const agents = useStore(agentStore, (s) => s.agents);
   const { issues } = useWorkspaceViewData();
+  const { repos } = useWorkspaceContext();
+  const { settings: localSettings } = useLocalSettings();
   const { showToast } = useToast();
   const {
     width: openQueueWidth,
@@ -194,6 +201,12 @@ function AgentsPageInner(): JSX.Element {
     async (epicId: string) => {
       if (!agentName) return;
       try {
+        const epic = issues.find((issue) => issue.id === epicId);
+        const runtimePayload = epicRunnerRuntimePayload({
+          localSettings,
+          repos,
+          currentRepo: issueRepoName(epic),
+        });
         const run = await startWorkflowRun(
           workspaceId,
           EPIC_RUNNER_WORKFLOW_NAME,
@@ -201,6 +214,7 @@ function AgentsPageInner(): JSX.Element {
             epicId,
             leadName: agentName,
             requestedBy: "ui",
+            ...runtimePayload,
           },
         );
         setEpicRunnerRuns((prev) => ({ ...prev, [epicId]: run }));
@@ -209,12 +223,24 @@ function AgentsPageInner(): JSX.Element {
           type: "success",
         });
       } catch (err) {
+        // Surface server-side failures, including the fail-closed preflight
+        // rejection (e.g. backend CLI/auth missing) that startWorkflowRun
+        // raises as an ApiError carrying the server's error message. Never
+        // swallow it and proceed as if the run was queued.
         showToast(`Epic runner failed: ${(err as Error).message}`, {
           type: "error",
         });
       }
     },
-    [agentName, workspaceId, showToast, agentStore],
+    [
+      agentName,
+      workspaceId,
+      issues,
+      localSettings,
+      repos,
+      showToast,
+      agentStore,
+    ],
   );
 
   const handleAgentClick = useCallback(

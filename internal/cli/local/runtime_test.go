@@ -5,7 +5,9 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -257,6 +259,52 @@ func TestEnsureRuntimeStartedRestartsUnhealthyRecordedRuntime(t *testing.T) {
 	if status == nil || !status.Healthy || status.Runtime == nil || status.Runtime.PID != 456 {
 		t.Fatalf("status = %#v, want healthy restarted runtime", status)
 	}
+}
+
+func TestStopRuntimeProcessesStopsServiceAndServePIDs(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("uses POSIX sleep process")
+	}
+
+	service := startSleepProcess(t)
+	serve := startSleepProcess(t)
+	info := &runtimeInfo{
+		PID:      service.Process.Pid,
+		ServePID: serve.Process.Pid,
+	}
+
+	if err := stopRuntimeProcesses(info, 3*time.Second); err != nil {
+		t.Fatalf("stopRuntimeProcesses() error = %v", err)
+	}
+	if processRunning(service.Process.Pid) {
+		t.Fatalf("service pid %d still running", service.Process.Pid)
+	}
+	if processRunning(serve.Process.Pid) {
+		t.Fatalf("serve pid %d still running", serve.Process.Pid)
+	}
+}
+
+func startSleepProcess(t *testing.T) *exec.Cmd {
+	t.Helper()
+	cmd := exec.Command("/bin/sleep", "30")
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("start sleep process: %v", err)
+	}
+	done := make(chan error, 1)
+	go func() {
+		done <- cmd.Wait()
+	}()
+	t.Cleanup(func() {
+		if cmd.ProcessState != nil && cmd.ProcessState.Exited() {
+			return
+		}
+		_ = cmd.Process.Kill()
+		select {
+		case <-done:
+		case <-time.After(time.Second):
+		}
+	})
+	return cmd
 }
 
 // TestWaitForWorkspaceReadyReturnsOnSuccess verifies the happy path: when the

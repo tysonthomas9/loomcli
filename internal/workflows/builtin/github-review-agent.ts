@@ -1,4 +1,4 @@
-import { createLoomDriverClient } from '@loom/sdk/flue';
+import { createLoomDriverClient } from '@loom/sdk/driver';
 
 // github-review-agent: trigger-driven COMMENT-only PR review.
 //
@@ -185,12 +185,11 @@ async function fetchDiff(loom, subject) {
 // (maxAttempts/backoff) is applied server-side from the binding overrides.
 async function runReviewTask(loom, subject, diff) {
   const taskRunId = deterministicTaskRunId(loom.driverRunId, "review");
+  const runner = stringValue(loom.input.runner || "github-review-task-runner");
   const request = {
     taskId: reviewTaskId(subject),
     taskRunId,
-    providerProfile: stringValue(loom.input.providerProfile || "flue-local"),
-    supportedProviders: [stringValue(loom.input.providerProfile || "flue-local")],
-    sandboxPlacement: { provider: stringValue(loom.input.providerProfile || "flue-local") },
+    runner,
     input: {
       kind: "github_pr_review",
       repo: subject.repoFullName,

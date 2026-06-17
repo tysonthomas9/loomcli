@@ -7,7 +7,7 @@
 // identity, approvals arrive through the session-authenticated approval
 // endpoint with a verified actor, and every suspend/resume crosses executor
 // instances (a different node claims each re-entry), proving zero lost
-// wakeups across the park->suspend->resume lifecycle.
+// wakeups across the pending->suspend->resume lifecycle.
 //
 // External test package: the harness mounts the webui handler modules
 // (driverapi, approvals), which import internal/driver.
@@ -375,7 +375,7 @@ func requireJournalAppender(t *testing.T, h *awaitFlows) {
 }
 
 // suspendedResult is the runner-side suspension acknowledgment after an
-// await op parked the run server-side.
+// await op suspended the run server-side.
 func suspendedResult() driver.RunResult {
 	return driver.RunResult{Status: domain.DriverRunSuspendedAwaitingEvent, Summary: "workflow suspended awaiting event"}
 }
@@ -489,7 +489,7 @@ func testApprovalGateFlow(t *testing.T, h *awaitFlows) {
 	runner := h.approvalGateRunner(t, pattern, []string{awaitE2EApprover})
 	h.createRun(t, "run-gate")
 
-	// Turn 1 on executor node-1: the await parks and the run suspends.
+	// Turn 1 on executor node-1: the await suspends and the run suspends.
 	res1 := h.runExecutorOnce(t, "node-1", "run-gate", runner)
 	if res1.Final.Status != domain.DriverRunSuspendedAwaitingEvent {
 		t.Fatalf("first pass = %+v, want suspended", res1.Final)
@@ -506,7 +506,7 @@ func testApprovalGateFlow(t *testing.T, h *awaitFlows) {
 	}
 	h.requireRun(t, "run-gate", domain.DriverRunSuspendedAwaitingEvent, "")
 
-	// A parked run is never re-claimed or stale-swept.
+	// A suspended run is never re-claimed or stale-swept.
 	if _, err := h.st.DriverRuns().Claim(h.ctx, h.ws, "run-gate", "node-thief", "lease-thief"); err == nil {
 		t.Fatal("Claim succeeded on a suspended run, want refusal")
 	}
@@ -528,7 +528,7 @@ func testApprovalGateFlow(t *testing.T, h *awaitFlows) {
 	}
 	h.requireRun(t, "run-gate", domain.DriverRunSuspendedAwaitingEvent, "")
 	if pending, err := h.st.Awaits().ListAwaitsByPattern(h.ctx, h.ws, pattern); err != nil || len(pending) != 1 {
-		t.Fatalf("pending awaits = %+v, %v; want the gate still parked", pending, err)
+		t.Fatalf("pending awaits = %+v, %v; want the gate still suspended", pending, err)
 	}
 
 	// The eligible approver resolves the await and re-queues the run.
@@ -583,7 +583,7 @@ func testApprovalBeforeRegistration(t *testing.T, h *awaitFlows) {
 // testMultiTurnLoopFlow: three sequential awaits on the SAME thread pattern.
 // The executor "dies" between turns (each resume is claimed by a different
 // node); re-entry fast-forwards the finished turns from satisfied history
-// (RULE 3: awaitIndex = call order) and parks the next one. The bot's own
+// (RULE 3: awaitIndex = call order) and suspends the next one. The bot's own
 // message never resumes the loop (RULE 4 self-trigger guard).
 func testMultiTurnLoopFlow(t *testing.T, h *awaitFlows) {
 	thread := domain.AwaitEventKey("slack.message", "thread-9")
@@ -618,7 +618,7 @@ func testMultiTurnLoopFlow(t *testing.T, h *awaitFlows) {
 	}
 
 	// Self-trigger guard: the bot's own message is actor-rejected and the
-	// loop stays parked.
+	// loop stays suspended.
 	records := h.dispatchEvent(t, "msg-bot", "slack.message", "thread-9", "loom-bot", map[string]any{"text": "bot-echo"})
 	if len(records) != 1 || records[0].Outcome != trigger.AwaitMatchActorRejected {
 		t.Fatalf("bot dispatch records = %+v, want one actor_rejected", records)
@@ -656,7 +656,7 @@ func testMultiTurnLoopFlow(t *testing.T, h *awaitFlows) {
 	}
 
 	// RULE 3 fast-forward proof: every re-entry replayed exactly the turns
-	// already satisfied (in order) before parking the next index.
+	// already satisfied (in order) before registrationing the next index.
 	want := [][]string{{}, {"m1"}, {"m1", "m2"}, {"m1", "m2", "m3"}}
 	if len(invocations) != len(want) {
 		t.Fatalf("invocations = %d (%v), want %d", len(invocations), invocations, len(want))
@@ -712,7 +712,7 @@ func testCompositionFlow(t *testing.T, h *awaitFlows) {
 	parent := h.compositionParentRunner(t, &childIDs)
 	h.createRun(t, "run-parent")
 
-	// Parent starts the child and parks on its run.finished.
+	// Parent starts the child and suspends on its run.finished.
 	res1 := h.runExecutorOnce(t, "node-p1", "run-parent", parent)
 	if res1.Final.Status != domain.DriverRunSuspendedAwaitingEvent || len(childIDs) != 1 {
 		t.Fatalf("parent pass 1 = %+v (children %v), want suspended after one start", res1.Final, childIDs)
@@ -759,12 +759,12 @@ func testCompositionFlow(t *testing.T, h *awaitFlows) {
 
 // testCompositionInlineResolve: a child that reaches terminal BEFORE the
 // parent registers its await resolves inline from the journaled run.finished
-// (RULE 2 for composition) — the parent never parks on the child.
+// (RULE 2 for composition) — the parent never suspends on the child.
 func testCompositionInlineResolve(t *testing.T, h *awaitFlows) {
 	requireJournalAppender(t, h)
 	gate := domain.AwaitEventKey("gate.event", "parent2-go")
 	var childIDs []string
-	parkedOnChild := false
+	suspendedOnChild := false
 	parent := opRunner{fn: func(req driver.RunRequest) driver.RunResult {
 		childID := h.startChild(t, req.Run, 1)
 		childIDs = append(childIDs, childID)
@@ -777,7 +777,7 @@ func testCompositionInlineResolve(t *testing.T, h *awaitFlows) {
 		}
 		resp := h.awaitChild(t, req.Run, childID, 2)
 		if resp.Status == driver.AwaitOutcomeSuspended {
-			parkedOnChild = true
+			suspendedOnChild = true
 			return suspendedResult()
 		}
 		if resp.Status != string(domain.AwaitSatisfied) || resp.Child == nil {
@@ -789,12 +789,12 @@ func testCompositionInlineResolve(t *testing.T, h *awaitFlows) {
 	h.createRun(t, "run-parent2")
 	res1 := h.runExecutorOnce(t, "node-p1", "run-parent2", parent)
 	if res1.Final.Status != domain.DriverRunSuspendedAwaitingEvent || len(childIDs) != 1 {
-		t.Fatalf("parent pass 1 = %+v (children %v), want parked on the gate", res1.Final, childIDs)
+		t.Fatalf("parent pass 1 = %+v (children %v), want suspended on the gate", res1.Final, childIDs)
 	}
 	childID := childIDs[0]
 
 	// The child finishes (journaling its run.finished) while the parent is
-	// still parked on the unrelated gate.
+	// still suspended on the unrelated gate.
 	if res := h.runExecutorOnce(t, "node-c1", childID, h.childRunner()); res.Final.Status != domain.DriverRunCompleted {
 		t.Fatalf("child final = %+v, want completed", res.Final)
 	}
@@ -809,8 +809,8 @@ func testCompositionInlineResolve(t *testing.T, h *awaitFlows) {
 	if res2.Final.Status != domain.DriverRunCompleted || res2.Final.Summary != "inline-child=completed" {
 		t.Fatalf("parent final = %+v, want completed inline", res2.Final)
 	}
-	if parkedOnChild {
-		t.Fatal("parent parked on the already-terminal child, want inline resolve (lost wakeup)")
+	if suspendedOnChild {
+		t.Fatal("parent suspended on the already-terminal child, want inline resolve (lost wakeup)")
 	}
 	inst, err := h.st.Awaits().GetSatisfiedAwait(h.ctx, h.ws, domain.AwaitInstanceKey("run-parent2", 2))
 	if err != nil || inst.SatisfiedByEventID != driver.RunFinishedEventID(childID, domain.DriverRunCompleted) {
@@ -893,11 +893,11 @@ func testTimeoutRaceExactlyOnce(t *testing.T, h *awaitFlows) {
 		return failedResult("unexpected await status " + resp.Status)
 	}}
 
-	park := func(runID string) string {
+	suspendAndAwaitDue := func(runID string) string {
 		h.createRun(t, runID)
 		res := h.runExecutorOnce(t, "node-r-"+runID, runID, runner)
 		if res.Final.Status != domain.DriverRunSuspendedAwaitingEvent {
-			t.Fatalf("park %s = %+v, want suspended", runID, res.Final)
+			t.Fatalf("suspend %s = %+v, want suspended", runID, res.Final)
 		}
 		key := domain.AwaitInstanceKey(runID, 1)
 		h.waitAwaitDue(t, key)
@@ -906,7 +906,7 @@ func testTimeoutRaceExactlyOnce(t *testing.T, h *awaitFlows) {
 
 	// Interleaving 1: the real event lands just before the sweep. The await
 	// is satisfied, the run resumes once, and the sweep finds nothing left.
-	key1 := park("run-race1")
+	key1 := suspendAndAwaitDue("run-race1")
 	records := h.dispatchEvent(t, "race-evt-1", "race.event", "subject-1", awaitE2EHumanActor, map[string]any{"won": "event"})
 	if len(records) != 1 || records[0].Outcome != trigger.AwaitMatchResolved {
 		t.Fatalf("event dispatch records = %+v, want one resolved", records)
@@ -927,7 +927,7 @@ func testTimeoutRaceExactlyOnce(t *testing.T, h *awaitFlows) {
 	// is untouched. The mid-flight resolve race — where a candidate is
 	// found but ResolveAwait replays Resume=false as already_resolved — is
 	// pinned by the AW7 matcher suite under -race.
-	key2 := park("run-race2")
+	key2 := suspendAndAwaitDue("run-race2")
 	swept, err = sweeper.RunOnce(h.ctx)
 	if err != nil || swept.TimedOut != 1 {
 		t.Fatalf("sweep = %+v, %v; want the race2 instance timed out", swept, err)
@@ -950,7 +950,7 @@ func testTimeoutRaceExactlyOnce(t *testing.T, h *awaitFlows) {
 // A workflow runtime that distorts the suspension sentinel into a failure
 // shape (observed with the real Flue runtime: WorkflowSuspended serializes
 // into a generic internal error, so the launcher reports failed) must never
-// fail the parked run: the server-side suspension is authoritative and the
+// fail the suspended run: the server-side suspension is authoritative and the
 // finish that lost ownership is acknowledged (Executor.settleDisownedFinish).
 func TestAwaitFlowsDistortedSuspensionReportMemstore(t *testing.T) {
 	h := newAwaitFlows(t, memstore.New(), "WS")
@@ -960,7 +960,7 @@ func TestAwaitFlowsDistortedSuspensionReportMemstore(t *testing.T) {
 		if resp.Status != driver.AwaitOutcomeSuspended {
 			return failedResult("unexpected await status " + resp.Status)
 		}
-		// The runtime lies: a terminal failure shape despite the park.
+		// The runtime lies: a terminal failure shape despite the suspend.
 		return driver.RunResult{Status: domain.DriverRunFailed,
 			Summary: "An internal error occurred.", ErrorClass: "internal_error"}
 	}}
@@ -975,7 +975,7 @@ func TestAwaitFlowsDistortedSuspensionReportMemstore(t *testing.T) {
 	if err != nil || len(events) != 0 {
 		t.Fatalf("journal = %d events (%v), want none after the acknowledged suspension", len(events), err)
 	}
-	// The parked run resumes normally afterwards.
+	// The suspended run resumes normally afterwards.
 	records := h.dispatchEvent(t, "evt-distorted", "approval", "distorted#1@sha", awaitE2EHumanActor, map[string]any{"decision": "approved"})
 	if len(records) != 1 || records[0].Outcome != trigger.AwaitMatchResolved {
 		t.Fatalf("dispatch records = %+v, want one resolved", records)

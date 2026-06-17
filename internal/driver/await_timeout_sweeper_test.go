@@ -41,11 +41,11 @@ func newAwaitSweepStore(t *testing.T, workspaces ...string) *memstore.Store {
 	return st
 }
 
-// parkAwaitingRun creates, claims, registers (await index 1, deadline
+// suspendAwaitingRun creates, claims, registers (await index 1, deadline
 // deadlineIn from now) and suspends one run; returns the instance key.
 // Deadlines must be future at registration (RULE 5), so tests make them
 // "due" by running the sweeper with a future clock.
-func parkAwaitingRun(t *testing.T, st *memstore.Store, ws, runID, pattern string, actorAllow []string, deadlineIn time.Duration) string {
+func suspendAwaitingRun(t *testing.T, st *memstore.Store, ws, runID, pattern string, actorAllow []string, deadlineIn time.Duration) string {
 	t.Helper()
 	ctx := context.Background()
 	if _, err := st.DriverRuns().Create(ctx, store.DriverRunCreate{
@@ -63,7 +63,7 @@ func parkAwaitingRun(t *testing.T, st *memstore.Store, ws, runID, pattern string
 		Deadline: time.Now().UTC().Add(deadlineIn),
 	})
 	if err != nil || reg.Satisfied {
-		t.Fatalf("RegisterAwaitAndCheck(%s) = %+v, %v; want parked", key, reg, err)
+		t.Fatalf("RegisterAwaitAndCheck(%s) = %+v, %v; want pending", key, reg, err)
 	}
 	if _, err := st.DriverRuns().Suspend(ctx, ws, runID,
 		claimed.NodeID, claimed.LeaseID, claimed.FencingToken, key); err != nil {
@@ -84,7 +84,7 @@ func futureClock(ahead time.Duration) func() time.Time {
 func TestAwaitTimeoutSweeperResumesDueAwait(t *testing.T) {
 	ctx := context.Background()
 	st := newAwaitSweepStore(t, "WS")
-	key := parkAwaitingRun(t, st, "WS", "run-1", "pr.merged:pr#7", []string{"alice"}, time.Hour)
+	key := suspendAwaitingRun(t, st, "WS", "run-1", "pr.merged:pr#7", []string{"alice"}, time.Hour)
 	sweeper := &AwaitTimeoutSweeper{Store: st, Now: futureClock(2 * time.Hour)}
 
 	result, err := sweeper.RunOnce(ctx)
@@ -131,12 +131,12 @@ func TestAwaitTimeoutSweeperResumesDueAwait(t *testing.T) {
 
 // TestAwaitTimeoutSweeperTargetsOnlyDueInstance pins RULE 3 against the
 // multi-waiter index: two runs await the same pattern, only the due one
-// times out — the co-waiter keeps its own (later) deadline and stays parked.
+// times out — the co-waiter keeps its own (later) deadline and stays pending.
 func TestAwaitTimeoutSweeperTargetsOnlyDueInstance(t *testing.T) {
 	ctx := context.Background()
 	st := newAwaitSweepStore(t, "WS")
-	dueKey := parkAwaitingRun(t, st, "WS", "run-due", "pr.merged:pr#7", nil, time.Hour)
-	lateKey := parkAwaitingRun(t, st, "WS", "run-late", "pr.merged:pr#7", nil, 10*time.Hour)
+	dueKey := suspendAwaitingRun(t, st, "WS", "run-due", "pr.merged:pr#7", nil, time.Hour)
+	lateKey := suspendAwaitingRun(t, st, "WS", "run-late", "pr.merged:pr#7", nil, 10*time.Hour)
 	sweeper := &AwaitTimeoutSweeper{Store: st, Now: futureClock(2 * time.Hour)}
 
 	result, err := sweeper.RunOnce(ctx)
@@ -162,13 +162,13 @@ func TestAwaitTimeoutSweeperTargetsOnlyDueInstance(t *testing.T) {
 func TestAwaitTimeoutSweeperRaceAlreadySatisfied(t *testing.T) {
 	ctx := context.Background()
 	st := newAwaitSweepStore(t, "WS")
-	key := parkAwaitingRun(t, st, "WS", "run-1", "pr.merged:pr#7", nil, time.Hour)
+	key := suspendAwaitingRun(t, st, "WS", "run-1", "pr.merged:pr#7", nil, time.Hour)
 	sweeper := &AwaitTimeoutSweeper{Store: st, Now: futureClock(2 * time.Hour)}
 
 	// Snapshot the due instance the way RunOnce's scan would.
 	due, err := st.Awaits().ListDueAwaitDeadlines(ctx, "WS", time.Now().UTC().Add(2*time.Hour), 10)
 	if err != nil || len(due) != 1 {
-		t.Fatalf("ListDueAwaitDeadlines = %d, %v; want the parked instance", len(due), err)
+		t.Fatalf("ListDueAwaitDeadlines = %d, %v; want the pending instance", len(due), err)
 	}
 	// The real event lands between scan and timeout dispatch.
 	realEvent := trigger.AwaitDispatchEvent{
@@ -201,8 +201,8 @@ func TestAwaitTimeoutSweeperRaceAlreadySatisfied(t *testing.T) {
 func TestAwaitTimeoutSweeperWorkspaceScope(t *testing.T) {
 	ctx := context.Background()
 	st := newAwaitSweepStore(t, "WS1", "WS2")
-	parkAwaitingRun(t, st, "WS1", "run-a", "pr.merged:pr#1", nil, time.Hour)
-	parkAwaitingRun(t, st, "WS2", "run-b", "pr.merged:pr#2", nil, time.Hour)
+	suspendAwaitingRun(t, st, "WS1", "run-a", "pr.merged:pr#1", nil, time.Hour)
+	suspendAwaitingRun(t, st, "WS2", "run-b", "pr.merged:pr#2", nil, time.Hour)
 
 	scoped := &AwaitTimeoutSweeper{Store: st, WorkspaceKey: "WS1", Now: futureClock(2 * time.Hour)}
 	result, err := scoped.RunOnce(ctx)
@@ -228,7 +228,7 @@ func TestAwaitTimeoutSweeperDrainsBacklog(t *testing.T) {
 	ctx := context.Background()
 	st := newAwaitSweepStore(t, "WS")
 	for i, runID := range []string{"run-1", "run-2", "run-3"} {
-		parkAwaitingRun(t, st, "WS", runID, "pr.merged:pr#7", nil, time.Duration(i+1)*time.Hour)
+		suspendAwaitingRun(t, st, "WS", runID, "pr.merged:pr#7", nil, time.Duration(i+1)*time.Hour)
 	}
 	sweeper := &AwaitTimeoutSweeper{Store: st, BatchLimit: 1, Now: futureClock(5 * time.Hour)}
 
@@ -255,8 +255,8 @@ func TestAwaitTimeoutSweeperDrainsBacklog(t *testing.T) {
 func TestAwaitMatcherTimeoutCarveOutSweeperLaneOnly(t *testing.T) {
 	ctx := context.Background()
 	st := newAwaitSweepStore(t, "WS")
-	key := parkAwaitingRun(t, st, "WS", "run-1", "pr.merged:pr#7", []string{"alice"}, time.Hour)
-	otherKey := parkAwaitingRun(t, st, "WS", "run-2", "pr.merged:pr#7", nil, time.Hour)
+	key := suspendAwaitingRun(t, st, "WS", "run-1", "pr.merged:pr#7", []string{"alice"}, time.Hour)
+	otherKey := suspendAwaitingRun(t, st, "WS", "run-2", "pr.merged:pr#7", nil, time.Hour)
 
 	forged := trigger.AwaitDispatchEvent{
 		EventID:    domain.AwaitTimeoutEventID(key),

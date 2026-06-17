@@ -150,6 +150,7 @@ func loadRepos(ctx context.Context, s store.Store, wsKey string) ([]ops.Workspac
 			Path:          repoPath,
 			DefaultBranch: db,
 			Remote:        remote,
+			RemoteURL:     r.RemoteURL,
 			SourceRepoID:  r.SourceRepoID,
 			Groups:        r.Groups,
 		})

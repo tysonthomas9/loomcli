@@ -149,11 +149,20 @@ function createMockLocalSettingsReturn(
         tls: false,
         password_set: false,
       },
+      agent_runtime: {
+        default: "local",
+      },
+      runtime_credentials: {
+        daytona: { configured: false },
+        github: { configured: false },
+      },
     },
     isLoading: false,
     isSaving: false,
     error: null,
     updateRedis: vi.fn().mockResolvedValue(true),
+    updateAgentRuntime: vi.fn().mockResolvedValue(true),
+    updateRuntimeCredentials: vi.fn().mockResolvedValue(true),
     refetch: vi.fn(),
     ...overrides,
   };

@@ -49,12 +49,13 @@ func TestTaskWorkerRunOnceClaimsQueuedTaskRunAndClosesTask(t *testing.T) {
 	}}
 
 	outcome, err := (&TaskWorker{
-		Store:             st,
-		WorkspaceKey:      "TEST",
-		NodeID:            "task-worker-node-1",
-		RunnerID:          "task-worker-runner-1",
-		HeartbeatInterval: -1,
-		Executor:          executor,
+		Store:              st,
+		WorkspaceKey:       "TEST",
+		NodeID:             "task-worker-node-1",
+		RunnerID:           "task-worker-runner-1",
+		SupportedProviders: []string{"flue-local"},
+		HeartbeatInterval:  -1,
+		Executor:           executor,
 	}).RunOnce(ctx)
 	if err != nil {
 		t.Fatalf("RunOnce: %v", err)
@@ -90,15 +91,14 @@ func TestTaskWorkerRunOnceClaimsQueuedTaskRunAndClosesTask(t *testing.T) {
 func TestTaskWorkerRunOnceMapsFlueSessionUnderParent(t *testing.T) {
 	ctx, st, run := setupRunningDriverRun(t)
 	if _, err := st.TaskRuns().Create(ctx, store.TaskRunCreate{
-		WorkspaceKey:    "TEST",
-		TaskRunID:       "task-run-worker-flue",
-		DriverRunID:     run.RunID,
-		TaskID:          "TEST-12",
-		ProviderProfile: "flue-daytona",
-		Status:          domain.TaskRunQueued,
-		SandboxPlacement: domain.TaskRunPlacement{
-			Provider: "daytona",
-		},
+		WorkspaceKey:     "TEST",
+		TaskRunID:        "task-run-worker-flue",
+		DriverRunID:      run.RunID,
+		TaskID:           "TEST-12",
+		Runner:           "local-task-runner",
+		RunnerKind:       RunnerKindFlueWorkflow,
+		RunnerEntrypoint: "local-task-runner",
+		Status:           domain.TaskRunQueued,
 		RuntimeMetadata: map[string]string{
 			"parent_session_id": "lead-session-1",
 		},
@@ -112,13 +112,12 @@ func TestTaskWorkerRunOnceMapsFlueSessionUnderParent(t *testing.T) {
 	}
 
 	outcome, err := (&TaskWorker{
-		Store:              st,
-		WorkspaceKey:       "TEST",
-		NodeID:             "task-worker-node-1",
-		RunnerID:           "task-worker-runner-1",
-		SupportedProviders: []string{"daytona"},
-		HeartbeatInterval:  -1,
-		Executor:           executor,
+		Store:             st,
+		WorkspaceKey:      "TEST",
+		NodeID:            "task-worker-node-1",
+		RunnerID:          "task-worker-runner-1",
+		HeartbeatInterval: -1,
+		Executor:          executor,
 	}).RunOnce(ctx)
 	if err != nil {
 		t.Fatalf("RunOnce: %v", err)
@@ -138,7 +137,7 @@ func TestTaskWorkerRunOnceMapsFlueSessionUnderParent(t *testing.T) {
 	}
 }
 
-func TestTaskWorkerRunOnceRetriesThenParksFailedTaskRun(t *testing.T) {
+func TestTaskWorkerRunOnceRetriesThenBlocksFailedTaskRun(t *testing.T) {
 	ctx, st, run := setupRunningDriverRun(t)
 	if _, err := st.DriverSteps().Create(ctx, store.DriverStepCreate{
 		WorkspaceKey: "TEST",
@@ -175,14 +174,15 @@ func TestTaskWorkerRunOnceRetriesThenParksFailedTaskRun(t *testing.T) {
 	}}
 	now := time.Now().UTC()
 	worker := &TaskWorker{
-		Store:             st,
-		WorkspaceKey:      "TEST",
-		NodeID:            "task-worker-node-1",
-		RunnerID:          "task-worker-runner-1",
-		HeartbeatInterval: -1,
-		MaxAttempts:       2,
-		Executor:          executor,
-		Now:               func() time.Time { return now },
+		Store:              st,
+		WorkspaceKey:       "TEST",
+		NodeID:             "task-worker-node-1",
+		RunnerID:           "task-worker-runner-1",
+		SupportedProviders: []string{"flue-local"},
+		HeartbeatInterval:  -1,
+		MaxAttempts:        2,
+		Executor:           executor,
+		Now:                func() time.Time { return now },
 	}
 
 	first, err := worker.RunOnce(ctx)
@@ -219,17 +219,17 @@ func TestTaskWorkerRunOnceRetriesThenParksFailedTaskRun(t *testing.T) {
 		t.Fatalf("RunOnce second: %v", err)
 	}
 	if second.Run.Status != domain.TaskRunFailed || second.Run.NodeID != "task-worker-node-1" {
-		t.Fatalf("second outcome = %+v, want parked failed owned terminal task run", second.Run)
+		t.Fatalf("second outcome = %+v, want blocked failed owned terminal task run", second.Run)
 	}
-	if second.Run.RuntimeMetadata["scheduler_state"] != "parked" || second.Run.RuntimeMetadata["scheduler_attempt"] != "2" || second.Run.RuntimeMetadata["scheduler_max_attempts"] != "2" {
-		t.Fatalf("second metadata = %+v, want parked scheduler metadata", second.Run.RuntimeMetadata)
+	if second.Run.RuntimeMetadata["scheduler_state"] != "blocked" || second.Run.RuntimeMetadata["scheduler_attempt"] != "2" || second.Run.RuntimeMetadata["scheduler_max_attempts"] != "2" {
+		t.Fatalf("second metadata = %+v, want blocked scheduler metadata", second.Run.RuntimeMetadata)
 	}
 	step, err = st.DriverSteps().Get(ctx, "TEST", "step-worker-retry")
 	if err != nil {
-		t.Fatalf("Get step after parked: %v", err)
+		t.Fatalf("Get step after blocked: %v", err)
 	}
 	if step.Status != domain.DriverStepFailed || step.TaskRunID != "task-run-worker-retry" || step.OutputRef != "logs://task-run-worker-retry" {
-		t.Fatalf("step after parked = %+v, want failed linked step with logs output", step)
+		t.Fatalf("step after blocked = %+v, want failed linked step with logs output", step)
 	}
 }
 

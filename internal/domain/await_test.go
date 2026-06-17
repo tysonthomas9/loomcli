@@ -119,7 +119,7 @@ func TestAwaitInstanceValidateAt(t *testing.T) {
 		{"key belongs to other run", func(a *AwaitInstance) { a.InstanceKey = "run-2#await-1" }, ErrAwaitInstanceKeyMalformed},
 		{"unscoped pattern", func(a *AwaitInstance) { a.Pattern = "github.pr.merged" }, ErrAwaitPatternUnscoped},
 		{"empty pattern", func(a *AwaitInstance) { a.Pattern = "" }, ErrAwaitPatternUnscoped},
-		{"unknown status", func(a *AwaitInstance) { a.Status = "parked" }, ErrInvalid},
+		{"unknown status", func(a *AwaitInstance) { a.Status = "unknown" }, ErrInvalid},
 		{"zero deadline", func(a *AwaitInstance) { a.Deadline = time.Time{} }, ErrAwaitTimeoutRequired},
 		{"past deadline", func(a *AwaitInstance) { a.Deadline = now.Add(-time.Minute) }, ErrAwaitTimeoutRequired},
 		{"deadline exactly now", func(a *AwaitInstance) { a.Deadline = now }, ErrAwaitTimeoutRequired},
@@ -157,7 +157,7 @@ func TestAwaitStatusEnum(t *testing.T) {
 		{AwaitSatisfied, true, true},
 		{AwaitTimedOut, true, true},
 		{AwaitCancelled, true, true},
-		{AwaitStatus("parked"), false, false},
+		{AwaitStatus("unknown"), false, false},
 		{AwaitStatus(""), false, false},
 	}
 	for _, tc := range cases {

@@ -1,6 +1,10 @@
 package leadcontrol
 
 import (
+	"errors"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -40,5 +44,51 @@ func TestNewestCodexThreadReturnsNilUntilFreshLeadThreadExists(t *testing.T) {
 	got := newestCodexThread(threads, "/repo", startedAt)
 	if got != nil {
 		t.Fatalf("newestCodexThread() = %+v, want nil before fresh lead thread exists", got)
+	}
+}
+
+func TestCodexAppServerTimeoutErrorIncludesProbeAndLogTail(t *testing.T) {
+	t.Parallel()
+
+	logPath := filepath.Join(t.TempDir(), "app-server.log")
+	logBody := strings.Repeat("x", int(codexAppServerLogTailBytes)+32) + "\nstartup detail\n"
+	if err := os.WriteFile(logPath, []byte(logBody), 0600); err != nil {
+		t.Fatalf("write app-server log: %v", err)
+	}
+
+	err := codexAppServerTimeoutError(
+		"ws://127.0.0.1:62085",
+		5*time.Second,
+		errors.New("connection refused"),
+		logPath,
+	)
+	got := err.Error()
+	for _, want := range []string{
+		"codex app-server did not become ready at ws://127.0.0.1:62085 within 5s",
+		"last readiness probe: connection refused",
+		"app-server log tail:",
+		"startup detail",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("timeout error missing %q:\n%s", want, got)
+		}
+	}
+}
+
+func TestCodexAppServerTimeoutErrorOmitsMissingLogTail(t *testing.T) {
+	t.Parallel()
+
+	err := codexAppServerTimeoutError(
+		"ws://127.0.0.1:62085",
+		5*time.Second,
+		nil,
+		filepath.Join(t.TempDir(), "missing.log"),
+	)
+	got := err.Error()
+	if strings.Contains(got, "app-server log tail:") {
+		t.Fatalf("timeout error included missing log tail:\n%s", got)
+	}
+	if strings.Contains(got, "last readiness probe:") {
+		t.Fatalf("timeout error included missing probe error:\n%s", got)
 	}
 }

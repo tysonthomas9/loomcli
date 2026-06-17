@@ -6,9 +6,9 @@
 #             task-completed inbox message per child FROM THE SERVER OUTBOX
 #             (asserted via the outbox dedupe key), and a retry run is a no-op
 #             that does not duplicate task runs or lead messages.
-# Scenario 2: a deliberately failing branch is retried then parked server-side
+# Scenario 2: a deliberately failing branch is retried then blocked server-side
 #             while sibling branches drain; the run lands in needs_review
-#             (epic_tasks_parked) and a rerun stays idempotent.
+#             (epic_tasks_blocked) and a rerun stays idempotent.
 set -Eeuo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -137,8 +137,8 @@ echo "==> creating isolated workflow repo with the builtin epic-runner"
 cp "$ROOT/internal/workflows/builtin/epic-runner.ts" "$WORKDIR/workflows/epic-runner.ts"
 
 # When this file exists and contains a task id, the task runner fails that
-# task on every attempt so the server retry-then-park policy exhausts
-# maxAttempts and parks the run (scenario 2 below).
+# task on every attempt so the server retry-then-block policy exhausts
+# maxAttempts and blocks the issue (scenario 2 below).
 FAIL_TASK_FILE="$TMP_ROOT/fail-task-id"
 FAIL_TASK_FILE_JSON="$(jq -nc --arg path "$FAIL_TASK_FILE" '$path')"
 
@@ -154,8 +154,8 @@ if (process.env.LOOM_TASK_RUN_LEASE_TOKEN !== request.lease_token) {
   console.error('task-run lease token did not reach task runner');
   process.exit(3);
 }
-if (request.provider_profile !== 'flue-local') {
-  console.error('unexpected provider profile ' + request.provider_profile);
+if (request.runner !== 'local-task-runner') {
+  console.error('unexpected runner ' + request.runner);
   process.exit(4);
 }
 
@@ -180,6 +180,7 @@ console.log(JSON.stringify({
   logsRef: 'logs://' + request.task_run_id,
   runtimeMetadata: {
     task_runner: 'real-flue-e2e',
+    runner: request.runner || '',
     sandbox_provider: request.sandbox_placement?.provider || '',
   },
 }));
@@ -445,8 +446,8 @@ if [[ "$lead_messages_after_retry" != "4" ]]; then
   exit 1
 fi
 
-echo "==> scenario 2: builtin epic-runner parks a failed branch and drains siblings"
-EPIC2_ID="$(create_issue --title "Real Flue E2E Parked Epic" --type epic --priority 1)"
+echo "==> scenario 2: builtin epic-runner blocks a failed branch and drains siblings"
+EPIC2_ID="$(create_issue --title "Real Flue E2E Blocked Epic" --type epic --priority 1)"
 TASK2_A="$(create_issue --title "A2" --type task --parent "$EPIC2_ID" --priority 1)"
 TASK2_B="$(create_issue --title "B2" --type task --parent "$EPIC2_ID" --depends-on "$TASK2_A" --priority 1)"
 TASK2_C="$(create_issue --title "C2 deliberately fails" --type task --parent "$EPIC2_ID" --depends-on "$TASK2_A" --priority 1)"
@@ -454,26 +455,26 @@ TASK2_D="$(create_issue --title "D2" --type task --parent "$EPIC2_ID" --depends-
 printf '%s\n' "$TASK2_C" > "$FAIL_TASK_FILE"
 echo "    epic=${EPIC2_ID} failing=${TASK2_C} sibling-branch=${TASK2_B}->${TASK2_D}"
 
-PARKED_RUN_ID="${RUN_ID}-parked"
+BLOCKED_RUN_ID="${RUN_ID}-blocked"
 (
   cd "$WORKDIR"
-  "$BIN_DIR/loom" --workspace "$WS" driver run epic-runner --epic "$EPIC2_ID" --run-id "$PARKED_RUN_ID" --json
-) >"$TMP_ROOT/driver-run-parked.json"
+  "$BIN_DIR/loom" --workspace "$WS" driver run epic-runner --epic "$EPIC2_ID" --run-id "$BLOCKED_RUN_ID" --json
+) >"$TMP_ROOT/driver-run-blocked.json"
 
-echo "==> waiting for parked-branch run to reach needs_review"
-parked_run_json="$(wait_driver_run_status "$PARKED_RUN_ID" needs_review)"
-if [[ "$(jq -r '.error_class // ""' <<<"$parked_run_json")" != "epic_tasks_parked" ]]; then
-  echo "parked-branch driver run error_class is not epic_tasks_parked" >&2
-  jq . <<<"$parked_run_json" >&2
+echo "==> waiting for blocked-branch run to reach needs_review"
+blocked_run_json="$(wait_driver_run_status "$BLOCKED_RUN_ID" needs_review)"
+if [[ "$(jq -r '.error_class // ""' <<<"$blocked_run_json")" != "epic_tasks_blocked" ]]; then
+  echo "blocked-branch driver run error_class is not epic_tasks_blocked" >&2
+  jq . <<<"$blocked_run_json" >&2
   exit 1
 fi
-if ! jq -e --arg task "$TASK2_C" '.summary | contains($task)' <<<"$parked_run_json" >/dev/null; then
-  echo "parked-branch driver run summary does not list parked task ${TASK2_C}" >&2
-  jq . <<<"$parked_run_json" >&2
+if ! jq -e --arg task "$TASK2_C" '.summary | contains($task)' <<<"$blocked_run_json" >/dev/null; then
+  echo "blocked-branch driver run summary does not list blocked task ${TASK2_C}" >&2
+  jq . <<<"$blocked_run_json" >&2
   exit 1
 fi
 
-echo "==> verifying sibling branch drained despite the parked task"
+echo "==> verifying sibling branch drained despite the blocked task"
 issues2_json="$(curl_json GET "/api/v1/${WS}/issues?parent_id=${EPIC2_ID}&limit=20")"
 for sibling in "$TASK2_A" "$TASK2_B" "$TASK2_D"; do
   sibling_status="$(jq -r --arg id "$sibling" '.issues[] | select(.id == $id) | .status' <<<"$issues2_json")"
@@ -484,59 +485,59 @@ for sibling in "$TASK2_A" "$TASK2_B" "$TASK2_D"; do
   fi
 done
 failed_task_status="$(jq -r --arg id "$TASK2_C" '.issues[] | select(.id == $id) | .status' <<<"$issues2_json")"
-if [[ "$failed_task_status" != "parked" ]]; then
-  echo "parked task ${TASK2_C} should have the explicit parked status, got ${failed_task_status:-missing}" >&2
+if [[ "$failed_task_status" != "blocked" ]]; then
+  echo "failed task ${TASK2_C} should be blocked, got ${failed_task_status:-missing}" >&2
   jq . <<<"$issues2_json" >&2
   exit 1
 fi
 
-parked_task_runs_json="$(curl_json GET "/api/v1/${WS}/task-runs?driver_run_id=${PARKED_RUN_ID}")"
-parked_completed="$(jq '[.task_runs[] | select(.status == "completed")] | length' <<<"$parked_task_runs_json")"
-if [[ "$parked_completed" != "3" ]]; then
-  echo "expected three completed child TaskRuns in the parked-branch run" >&2
-  jq . <<<"$parked_task_runs_json" >&2
+blocked_task_runs_json="$(curl_json GET "/api/v1/${WS}/task-runs?driver_run_id=${BLOCKED_RUN_ID}")"
+blocked_completed="$(jq '[.task_runs[] | select(.status == "completed")] | length' <<<"$blocked_task_runs_json")"
+if [[ "$blocked_completed" != "3" ]]; then
+  echo "expected three completed child TaskRuns in the blocked-branch run" >&2
+  jq . <<<"$blocked_task_runs_json" >&2
   exit 1
 fi
-parked_runs="$(jq '[.task_runs[] | select(.status == "failed" and ((.runtime_metadata.scheduler_state // "") == "parked"))] | length' <<<"$parked_task_runs_json")"
-if [[ "$parked_runs" != "1" ]]; then
-  echo "expected exactly one parked (failed) child TaskRun" >&2
-  jq . <<<"$parked_task_runs_json" >&2
+blocked_runs="$(jq '[.task_runs[] | select(.status == "failed" and ((.runtime_metadata.scheduler_state // "") == "blocked"))] | length' <<<"$blocked_task_runs_json")"
+if [[ "$blocked_runs" != "1" ]]; then
+  echo "expected exactly one blocked failed child TaskRun" >&2
+  jq . <<<"$blocked_task_runs_json" >&2
   exit 1
 fi
 fail_attempts="$(grep -cxF "$TASK2_C" "$TASK_RUNNER_LOG" || true)"
 if [[ "$fail_attempts" != "2" ]]; then
-  echo "expected the failing task to run exactly twice (retry then park), got ${fail_attempts}" >&2
+  echo "expected the failing task to run exactly twice (retry then block), got ${fail_attempts}" >&2
   exit 1
 fi
-# Epic 2 has no bound lead, so the parked/completed transitions there must
+# Epic 2 has no bound lead, so the blocked/completed transitions there must
 # not have produced additional outbox lead messages.
-lead_messages_after_parked="$(lead_task_message_count)"
-if [[ "$lead_messages_after_parked" != "4" ]]; then
-  echo "lead-less epic produced outbox lead messages: ${lead_messages_after_parked}, want 4" >&2
+lead_messages_after_blocked="$(lead_task_message_count)"
+if [[ "$lead_messages_after_blocked" != "4" ]]; then
+  echo "lead-less epic produced outbox lead messages: ${lead_messages_after_blocked}, want 4" >&2
   exit 1
 fi
 
-echo "==> verifying rerun does not duplicate task runs for the parked epic"
-PARKED_RETRY_RUN_ID="${PARKED_RUN_ID}-retry"
+echo "==> verifying rerun does not duplicate task runs for the blocked epic"
+BLOCKED_RETRY_RUN_ID="${BLOCKED_RUN_ID}-retry"
 (
   cd "$WORKDIR"
-  "$BIN_DIR/loom" --workspace "$WS" driver run epic-runner --epic "$EPIC2_ID" --run-id "$PARKED_RETRY_RUN_ID" --json
-) >"$TMP_ROOT/driver-run-parked-retry.json"
-parked_retry_json="$(wait_driver_run_status "$PARKED_RETRY_RUN_ID" needs_review)"
-if [[ "$(jq -r '.error_class // ""' <<<"$parked_retry_json")" != "epic_tasks_parked" ]]; then
-  echo "parked-branch rerun error_class is not epic_tasks_parked" >&2
-  jq . <<<"$parked_retry_json" >&2
+  "$BIN_DIR/loom" --workspace "$WS" driver run epic-runner --epic "$EPIC2_ID" --run-id "$BLOCKED_RETRY_RUN_ID" --json
+) >"$TMP_ROOT/driver-run-blocked-retry.json"
+blocked_retry_json="$(wait_driver_run_status "$BLOCKED_RETRY_RUN_ID" needs_review)"
+if [[ "$(jq -r '.error_class // ""' <<<"$blocked_retry_json")" != "epic_blocked" ]]; then
+  echo "blocked-branch rerun error_class is not epic_blocked" >&2
+  jq . <<<"$blocked_retry_json" >&2
   exit 1
 fi
-parked_retry_task_runs="$(curl_json GET "/api/v1/${WS}/task-runs?driver_run_id=${PARKED_RETRY_RUN_ID}" | jq '[.task_runs[]] | length')"
-if [[ "$parked_retry_task_runs" != "0" ]]; then
-  echo "parked-branch rerun created duplicate child TaskRuns" >&2
-  curl_json GET "/api/v1/${WS}/task-runs?driver_run_id=${PARKED_RETRY_RUN_ID}" | jq . >&2
+blocked_retry_task_runs="$(curl_json GET "/api/v1/${WS}/task-runs?driver_run_id=${BLOCKED_RETRY_RUN_ID}" | jq '[.task_runs[]] | length')"
+if [[ "$blocked_retry_task_runs" != "0" ]]; then
+  echo "blocked-branch rerun created duplicate child TaskRuns" >&2
+  curl_json GET "/api/v1/${WS}/task-runs?driver_run_id=${BLOCKED_RETRY_RUN_ID}" | jq . >&2
   exit 1
 fi
 fail_attempts_after_rerun="$(grep -cxF "$TASK2_C" "$TASK_RUNNER_LOG" || true)"
 if [[ "$fail_attempts_after_rerun" != "2" ]]; then
-  echo "rerun re-executed the parked task (attempts ${fail_attempts_after_rerun}, want 2)" >&2
+  echo "rerun re-executed the blocked task (attempts ${fail_attempts_after_rerun}, want 2)" >&2
   exit 1
 fi
 echo "real Flue epic runner E2E passed"
@@ -544,4 +545,4 @@ echo "  FleetDB: ${FLEET_URL}"
 echo "  Loom:    ${LOOM_URL}"
 echo "  DAG:     ${executed[*]} (drained in ${DAG_WALL_SECONDS}s, watch-driven)"
 echo "  Lead:    ${LEAD_NAME} received 4 outbox task messages (exactly-once on rerun)"
-echo "  Parked:  epic=${EPIC2_ID} task=${TASK2_C} (siblings drained, run needs_review epic_tasks_parked)"
+echo "  Blocked: epic=${EPIC2_ID} task=${TASK2_C} (siblings drained, run needs_review epic_tasks_blocked)"

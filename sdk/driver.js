@@ -1,5 +1,5 @@
 // NOTE: this module must stay self-contained (no local imports): callers such as
-// scripts/run-slack-codex-epic-runner-stack.sh vendor flue.js as a single file.
+// scripts/run-slack-codex-epic-runner-stack.sh vendor driver.js as a single file.
 //
 // Workflow driver operations use the loom serve driver-op HTTP API with
 // camelCase JSON and structured errors.
@@ -22,7 +22,7 @@ export class DriverApiError extends Error {
 }
 
 // WorkflowSuspended is the suspend sentinel thrown by loom.events.await and
-// loom.workflows.await when the server parked the run (await registered, no
+// loom.workflows.await when the server suspended the run (await registered, no
 // matching event yet). It is NOT a failure: the runner recognizes it (by
 // .type/.name, or by the "workflow_suspended:" message prefix when only the
 // message survives serialization) and exits cleanly with a suspended
@@ -32,7 +32,7 @@ export class DriverApiError extends Error {
 // isWorkflowSuspended(err) is true (or `return err.result`).
 export class WorkflowSuspended extends Error {
   constructor(awaitIndex) {
-    super(`workflow_suspended: await #${awaitIndex} parked the run; exiting until the event arrives`);
+    super(`workflow_suspended: await #${awaitIndex} suspended the run; exiting until the event arrives`);
     this.name = "WorkflowSuspended";
     this.type = "workflow_suspended";
     this.awaitIndex = awaitIndex;
@@ -49,9 +49,9 @@ export function isWorkflowSuspended(err) {
   return Boolean(err) && (err.type === "workflow_suspended" || err.name === "WorkflowSuspended");
 }
 
-export class FlueDriverClient {
+export class LoomDriverClient {
   static fromEnv(options = {}) {
-    return new FlueDriverClient({
+    return new LoomDriverClient({
       env: options.env || process.env,
       input: options.input,
       apiUrl: options.apiUrl,
@@ -280,24 +280,16 @@ export class FlueDriverClient {
     if (!taskId) {
       throw new Error("taskRuns.request requires taskId");
     }
-    const sandboxPlacement = input.sandboxPlacement || {};
     const params = {
       taskId: String(taskId),
-      providerProfile: input.providerProfile || "",
+      runner: input.runner || "",
       taskRunId: input.taskRunId || "",
       workerProfileId: input.workerProfileId || "",
       parentSessionId: input.parentSessionId || "",
       nodeId: input.nodeId || "",
       runnerId: input.runnerId || "",
       driverStepId: input.driverStepId || "",
-      supportedProviders: stringList(input.supportedProviders),
       capabilities: stringList(input.capabilities),
-      sandboxPlacement: {
-        provider: sandboxPlacement.provider || "",
-        sandboxId: sandboxPlacement.sandboxId || "",
-        cwd: sandboxPlacement.cwd || "",
-        repoRef: sandboxPlacement.repoRef || "",
-      },
       leaseToken: input.leaseToken || pickEnv(this.env, "LOOM_TASK_RUN_LEASE_TOKEN") || pickEnv(this.env, "LOOM_RUNNER_LEASE_TOKEN"),
       deferCompletion: true,
     };
@@ -444,7 +436,7 @@ export class FlueDriverClient {
   // EXACT rendered subject key (no glob) and either returns the recorded
   // event inline — {status:"satisfied"|"timed_out", instanceKey, pattern,
   // deadline, event:{id,payload,actor,occurredAt}} — or throws the
-  // WorkflowSuspended sentinel once the server parked the run. A timed-out
+  // WorkflowSuspended sentinel once the server suspended the run. A timed-out
   // await returns normally with the synthetic timeout event: branch on
   // status, do not expect a throw.
   //
@@ -676,9 +668,9 @@ export class FlueDriverClient {
 
 export function createLoomDriverClient(options = {}) {
   if (options && !("input" in options) && !("env" in options) && !("apiUrl" in options) && !("apiToken" in options)) {
-    return FlueDriverClient.fromEnv({ input: options });
+    return LoomDriverClient.fromEnv({ input: options });
   }
-  return FlueDriverClient.fromEnv(options);
+  return LoomDriverClient.fromEnv(options);
 }
 
 export const createLoomClient = createLoomDriverClient;

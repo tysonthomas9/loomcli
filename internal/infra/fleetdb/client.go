@@ -361,8 +361,8 @@ func classifyHTTPError(method, path string, status int, body []byte) error {
 		case "conflict":
 			return fmt.Errorf("%s: %w", prefix, domain.ErrConflict)
 		case "driver_run_already_resumed":
-			// Park->suspend window: the await resolved before the suspend
-			// landed — the run must continue inline, never park.
+			// Pending->suspend window: the await resolved before the suspend
+			// landed — the run must continue inline, never suspend.
 			return fmt.Errorf("%s: %w", prefix, domain.ErrDriverRunAlreadyResumed)
 		}
 		return fmt.Errorf("%s: %w", prefix, domain.ErrAlreadyExists)

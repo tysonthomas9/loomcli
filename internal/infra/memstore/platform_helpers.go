@@ -212,11 +212,24 @@ func taskRunMatchesClaimMem(run *domain.TaskRun, profile *domain.WorkerProfile, 
 			return false
 		}
 	}
+	if runHasNamedRunnerIdentityMem(run) {
+		return true
+	}
 	provider := run.SandboxPlacement.Provider
 	if provider == "" {
 		provider = run.ProviderProfile
 	}
 	return provider == "" || stringListEmptyOrContainsMem(claim.SupportedProviders, provider)
+}
+
+func runHasNamedRunnerIdentityMem(run *domain.TaskRun) bool {
+	if run == nil {
+		return false
+	}
+	return strings.TrimSpace(run.Runner) != "" ||
+		strings.TrimSpace(run.RunnerKind) != "" ||
+		strings.TrimSpace(run.RunnerEntrypoint) != "" ||
+		strings.TrimSpace(run.RunnerRef) != ""
 }
 
 func stringListEmptyOrContainsMem(values []string, want string) bool {

@@ -219,7 +219,7 @@ func (w *TaskWorker) ensureNode(ctx context.Context, ws, nodeID string) error {
 }
 
 func (w *TaskWorker) nodeCapabilities() []string {
-	values := []string{"driver-runner", "task-runner", "flue-local"}
+	values := []string{"driver-runner", "task-runner"}
 	values = append(values, w.SupportedProviders...)
 	values = append(values, w.Capabilities...)
 	values = append(values, w.SandboxPlacement.Provider)

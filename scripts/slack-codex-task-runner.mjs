@@ -28,8 +28,8 @@ function validateRequest(request) {
       fatal(3, `task runner request is missing ${field}`);
     }
   }
-  if (request.provider_profile !== "flue-local") {
-    fatal(4, `unexpected provider profile ${request.provider_profile}`);
+  if (request.runner !== "local-task-runner") {
+    fatal(4, `unexpected runner ${request.runner}`);
   }
   if (process.env.LOOM_TASK_RUN_LEASE_TOKEN !== request.lease_token) {
     fatal(5, "task-run lease token did not reach the task runner");
@@ -124,6 +124,10 @@ function resultPayload(request, status, exitCode, logsRef, artifactsRef, metadat
     cache_write_tokens: usage.cache_write_tokens || 0,
     runtime_metadata: {
       task_runner: "slack-codex-epic-runner",
+      runner: request.runner,
+      runner_ref: request.runner_ref,
+      runner_kind: request.runner_kind,
+      runner_entrypoint: request.runner_entrypoint,
       provider_profile: request.provider_profile,
       workspace_key: request.workspace_key,
       driver_run_id: request.driver_run_id,

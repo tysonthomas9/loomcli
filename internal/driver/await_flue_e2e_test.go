@@ -37,10 +37,10 @@ import (
 //   - "propagate": the workflow lets the sentinel propagate. The Flue
 //     runtime serializes unknown errors into a GENERIC internal_error (the
 //     "workflow_suspended:" message does NOT survive), so the launcher
-//     reports failed while the run is already parked server-side — the
+//     reports failed while the run is already suspended server-side — the
 //     executor's settleDisownedFinish acknowledges the authoritative
 //     suspension instead of erroring (the AW12 hardening this smoke pins).
-const awaitSmokeReturnResultSource = `import { createLoomDriverClient, isWorkflowSuspended } from '@loom/sdk/flue';
+const awaitSmokeReturnResultSource = `import { createLoomDriverClient, isWorkflowSuspended } from '@loom/sdk/driver';
 
 export async function run(ctx) {
   const loom = createLoomDriverClient({ input: ctx.payload || {} });
@@ -60,7 +60,7 @@ export async function run(ctx) {
 }
 `
 
-const awaitSmokePropagateSource = `import { createLoomDriverClient } from '@loom/sdk/flue';
+const awaitSmokePropagateSource = `import { createLoomDriverClient } from '@loom/sdk/driver';
 
 export async function run(ctx) {
   const loom = createLoomDriverClient({ input: ctx.payload || {} });
@@ -133,7 +133,7 @@ func runRealFlueAwaitSmoke(t *testing.T, flueCommand []string, workflow, source 
 		return result
 	}
 
-	// Pass 1: the real SDK awaits and the server parks the run; whichever
+	// Pass 1: the real SDK awaits and the server suspends the run; whichever
 	// shape the runtime reports, the executor settles on the authoritative
 	// server-side suspension.
 	res1 := runExecutor("node-flue-1")

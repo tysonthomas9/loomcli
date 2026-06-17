@@ -1,4 +1,4 @@
-// Internal helpers shared by flue.js and runner.js. Not part of the public API.
+// Internal helpers shared by driver.js and runner.js. Not part of the public API.
 
 export function trim(value) {
   if (value === undefined || value === null) {

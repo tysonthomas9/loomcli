@@ -4,7 +4,7 @@ import { local } from '@flue/runtime/node';
 
 type TaskRunRequest = {
   lease_token?: string;
-  provider_profile?: string;
+  runner?: string;
   task_id?: string;
   task_run_id?: string;
   sandbox_placement?: {
@@ -31,8 +31,8 @@ if (process.env.LOOM_TASK_RUN_LEASE_TOKEN !== request.lease_token) {
   process.exit(3);
 }
 
-if (request.provider_profile !== 'flue-local') {
-  console.error('unexpected provider profile ' + request.provider_profile);
+if (request.runner !== 'local-task-runner') {
+  console.error('unexpected runner ' + request.runner);
   process.exit(4);
 }
 

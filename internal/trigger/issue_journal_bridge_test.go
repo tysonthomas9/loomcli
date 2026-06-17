@@ -325,7 +325,7 @@ func TestIssueJournalBridgeCustomAllowlist(t *testing.T) {
 }
 
 // TestIssueJournalBridgeBootstrapFastForward proves the first observation of a
-// workspace emits NOTHING and parks the cursor at the journal tail.
+// workspace emits NOTHING and holds the cursor at the journal tail.
 func TestIssueJournalBridgeBootstrapFastForward(t *testing.T) {
 	reader := &fakeIssueJournalReader{pages: map[string]journalPage{
 		"": {events: []store.JournalEvent{
@@ -350,10 +350,10 @@ func TestIssueJournalBridgeBootstrapFastForward(t *testing.T) {
 		t.Fatalf("store = %d events %d runs, want 0/0 (no triage storm)", events, runs)
 	}
 	if got, _ := cursors.Load("WS"); got != "3" {
-		t.Fatalf("cursor = %q, want 3 (parked at journal tail)", got)
+		t.Fatalf("cursor = %q, want 3 (paused at journal tail)", got)
 	}
 
-	// The next pass starts from the parked tail and emits only NEW entries.
+	// The next pass starts from the paused tail and emits only NEW entries.
 	reader.mu.Lock()
 	reader.pages["3"] = journalPage{events: []store.JournalEvent{
 		issueEvent("4", "issue.create", "u", "4", `{"status":"open"}`),

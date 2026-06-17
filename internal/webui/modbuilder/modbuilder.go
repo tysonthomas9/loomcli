@@ -88,6 +88,6 @@ func NewApprovalsModule(st store.Store) interface{ Register(*http.ServeMux) } {
 // NewTaskRunAPIModule creates the task-runner HTTP API module
 // (POST /api/workspaces/{ws}/task-run/{op}, lease-token auth) so task runner
 // processes talk to serve instead of holding fleet-db credentials.
-func NewTaskRunAPIModule(st store.Store, fleetBaseURL string) interface{ Register(*http.ServeMux) } {
-	return taskrunapi.NewModule(taskrunapi.Config{Store: st, FleetBaseURL: fleetBaseURL})
+func NewTaskRunAPIModule(st store.Store, fleetBaseURL string, localSettingsDir string) interface{ Register(*http.ServeMux) } {
+	return taskrunapi.NewModule(taskrunapi.Config{Store: st, FleetBaseURL: fleetBaseURL, LocalSettingsDir: localSettingsDir})
 }

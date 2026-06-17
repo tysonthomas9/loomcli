@@ -363,7 +363,7 @@ verify_task_results() {
     find "$WORKDIR/.loom" -path '*/task-runner-sandboxes/*/task-request.json' -type f -print |
       while IFS= read -r file; do
         jq -e '
-          .provider_profile == "flue-local" and
+          .runner == "local-task-runner" and
           .sandbox_placement.provider == "flue-local" and
           .lease_token == "[redacted]" and
           .lease_token_received_by_host_runner == "true"

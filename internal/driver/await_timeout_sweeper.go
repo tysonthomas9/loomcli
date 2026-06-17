@@ -17,7 +17,7 @@ package driver
 // timeout arm with the timeout payload ({timeout:true, the
 // "{patternType}.timeout" event type, instanceKey, deadline}) plus the
 // replayed timed_out row, and the workflow's arm decides the terminal outcome
-// (needs_review/parked per RULE 5's parked arm; agent-flows A2 shape —
+// (needs_review/suspended per RULE 5's suspended arm; agent-flows A2 shape —
 // direct terminalization was considered and rejected). RULE 3 holds end to
 // end: the synthetic event targets exactly one instanceKey, and the matcher
 // skips every co-waiter sharing the pattern — a timeout never resolves a
@@ -73,7 +73,7 @@ type AwaitTimeoutSweeper struct {
 	// Now is a clock seam for tests; nil uses time.Now (UTC).
 	Now func() time.Time
 	// ResumeRetries / ResumeRetryDelay pass through to the matcher's
-	// park->suspend-window retry budget (tests).
+	// pending->suspend-window retry budget (tests).
 	ResumeRetries    int
 	ResumeRetryDelay time.Duration
 }
@@ -87,7 +87,7 @@ type AwaitTimeoutSweepResult struct {
 	// deadline scan and the timeout dispatch — the recorded no-op losers.
 	AlreadySatisfied int
 	// ResumeDeferred counts instances resolved timed_out whose run
-	// transition was owned elsewhere (resume race, park->suspend window,
+	// transition was owned elsewhere (resume race, pending->suspend window,
 	// terminal run).
 	ResumeDeferred int
 	// Failed counts instances whose sweep errored; they stay in the deadline
@@ -181,7 +181,7 @@ func (s *AwaitTimeoutSweeper) sweepInstance(ctx context.Context, matcher *trigge
 		out.AlreadySatisfied++
 	case record.Outcome == trigger.AwaitMatchResumeDeferred:
 		// The row is timed_out; the run transition is owned elsewhere
-		// (resume race, park->suspend window, terminal run).
+		// (resume race, pending->suspend window, terminal run).
 		out.ResumeDeferred++
 	default:
 		// actor_rejected here would mean the sweeper-lane carve-out broke.

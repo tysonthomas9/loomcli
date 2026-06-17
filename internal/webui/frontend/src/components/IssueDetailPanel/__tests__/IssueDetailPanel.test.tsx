@@ -18,7 +18,12 @@ import "@testing-library/jest-dom";
 
 import type { Issue, IssueDetails, IssueWithDependencyMetadata } from "@/types";
 import type { SessionRecord } from "@/types/agent";
-import { updateIssue, startWorkflowRun } from "@/api";
+import {
+  updateIssue,
+  startWorkflowRun,
+  createWorkspaceAgent,
+  deleteWorkspaceAgent,
+} from "@/api";
 import { createAgentStore } from "@/stores/agentStore";
 
 import { IssueDetailPanel } from "../IssueDetailPanel";
@@ -29,6 +34,7 @@ const {
   mockDeleteTabMetadata,
   mockScheduleSessionKill,
   mockUseIssueTabPersistence,
+  mockUseLocalSettings,
   mockUseWorkspaceContext,
   mockUseAgentStoreInstance,
   mockGetTaskSessions,
@@ -43,6 +49,29 @@ const {
     isLoading: true,
     saveTabs: vi.fn(),
     clearTabs: vi.fn(),
+  })),
+  mockUseLocalSettings: vi.fn(() => ({
+    settings: {
+      version: 1,
+      fleetdb_redis: {
+        enabled: false,
+        db: 0,
+        tls: false,
+        password_set: false,
+      },
+      agent_runtime: { default: "local" },
+      runtime_credentials: {
+        daytona: { configured: false },
+        github: { configured: false },
+      },
+    },
+    isLoading: false,
+    isSaving: false,
+    error: null,
+    updateRedis: vi.fn(),
+    updateAgentRuntime: vi.fn(),
+    updateRuntimeCredentials: vi.fn(),
+    refetch: vi.fn(),
   })),
   mockUseWorkspaceContext: vi.fn(() => ({
     workspace: null,
@@ -76,6 +105,8 @@ const {
 vi.mock("@/api", () => ({
   EPIC_RUNNER_WORKFLOW_NAME: "epic-runner",
   updateIssue: vi.fn(),
+  createWorkspaceAgent: vi.fn(),
+  deleteWorkspaceAgent: vi.fn().mockResolvedValue(undefined),
   startAgent: vi.fn().mockResolvedValue(undefined),
   startWorkflowRun: vi.fn().mockResolvedValue({
     workspace_key: "DESKTOP-QA",
@@ -119,7 +150,11 @@ vi.mock("@/hooks/workspace", async () => {
     await vi.importActual<typeof import("@/hooks/workspace")>(
       "@/hooks/workspace",
     );
-  return { ...actual, useWorkspaceContext: mockUseWorkspaceContext };
+  return {
+    ...actual,
+    useLocalSettings: mockUseLocalSettings,
+    useWorkspaceContext: mockUseWorkspaceContext,
+  };
 });
 
 vi.mock("@/hooks/common", async () => {
@@ -252,11 +287,44 @@ function createWorkspaceContext(overrides: Record<string, unknown> = {}) {
   };
 }
 
+function createLocalSettingsHookReturn(
+  overrides: Record<string, unknown> = {},
+) {
+  return {
+    settings: {
+      version: 1,
+      fleetdb_redis: {
+        enabled: false,
+        db: 0,
+        tls: false,
+        password_set: false,
+      },
+      agent_runtime: { default: "local" },
+      runtime_credentials: {
+        daytona: { configured: false },
+        github: { configured: false },
+      },
+    },
+    isLoading: false,
+    isSaving: false,
+    error: null,
+    updateRedis: vi.fn(),
+    updateAgentRuntime: vi.fn(),
+    updateRuntimeCredentials: vi.fn(),
+    refetch: vi.fn(),
+    ...overrides,
+  };
+}
+
 describe("IssueDetailPanel", () => {
   beforeEach(() => {
     const agentStore = createAgentStore();
     mockUseAgentStoreInstance.mockReset();
     mockUseAgentStoreInstance.mockReturnValue(agentStore);
+    mockUseLocalSettings.mockReset();
+    mockUseLocalSettings.mockImplementation(() =>
+      createLocalSettingsHookReturn(),
+    );
     mockUseWorkspaceContext.mockReset();
     mockUseWorkspaceContext.mockImplementation(() => createWorkspaceContext());
     mockGetTaskSessions.mockReset();
@@ -280,6 +348,33 @@ describe("IssueDetailPanel", () => {
       created_at: "2026-01-23T00:00:00Z",
       updated_at: "2026-01-23T00:00:00Z",
     });
+    const mockCreateWorkspaceAgent = createWorkspaceAgent as ReturnType<
+      typeof vi.fn
+    >;
+    mockCreateWorkspaceAgent.mockReset();
+    mockCreateWorkspaceAgent.mockImplementation(
+      async (
+        _workspaceId: string,
+        request: {
+          name: string;
+          role_name: string;
+          repos?: string[];
+          repo_groups?: string[];
+          cross_repo?: boolean;
+        },
+      ) => ({
+        name: request.name,
+        repos: request.repos ?? [],
+        repo_groups: request.repo_groups ?? [],
+        cross_repo: request.cross_repo ?? false,
+        role_name: request.role_name,
+      }),
+    );
+    const mockDeleteWorkspaceAgent = deleteWorkspaceAgent as ReturnType<
+      typeof vi.fn
+    >;
+    mockDeleteWorkspaceAgent.mockReset();
+    mockDeleteWorkspaceAgent.mockResolvedValue(undefined);
   });
 
   // Reset body overflow after each test
@@ -1223,8 +1318,15 @@ describe("IssueDetailPanel", () => {
 
     it("starts the epic runner workflow with the selected epic payload", async () => {
       const mockStartWorkflowRun = startWorkflowRun as ReturnType<typeof vi.fn>;
+      const mockCreateWorkspaceAgent = createWorkspaceAgent as ReturnType<
+        typeof vi.fn
+      >;
+      const mockUpsertAgent = vi.fn();
       mockUseWorkspaceContext.mockImplementation(() =>
-        createWorkspaceContext({ workspaceId: "DESKTOP-QA" }),
+        createWorkspaceContext({
+          workspaceId: "DESKTOP-QA",
+          upsertAgent: mockUpsertAgent,
+        }),
       );
       const epic = createTestIssueDetails({
         id: "DESKTOP-QA-EPIC",
@@ -1239,17 +1341,161 @@ describe("IssueDetailPanel", () => {
       fireEvent.click(screen.getByTestId("header-run-epic-button"));
 
       await waitFor(() => {
+        expect(mockCreateWorkspaceAgent).toHaveBeenCalledWith("DESKTOP-QA", {
+          name: "lead-desktop-qa-epic",
+          role_name: "lead",
+          auto: false,
+          cross_repo: true,
+          repos: [],
+        });
         expect(mockStartWorkflowRun).toHaveBeenCalledWith(
           "DESKTOP-QA",
           "epic-runner",
           {
             epicId: "DESKTOP-QA-EPIC",
+            leadName: "lead-desktop-qa-epic",
             requestedBy: "ui",
           },
         );
       });
-      expect(mockShowToast).toHaveBeenCalledWith("Epic runner queued: run-1", {
-        type: "success",
+      expect(mockUpsertAgent).toHaveBeenCalledWith({
+        name: "lead-desktop-qa-epic",
+        repos: [],
+        repo_groups: [],
+        cross_repo: true,
+        role_name: "lead",
+      });
+      expect(mockShowToast).toHaveBeenCalledWith(
+        "Epic runner queued for lead-desktop-qa-epic: run-1",
+        {
+          type: "success",
+        },
+      );
+    });
+
+    it("starts app-triggered epic runs on Daytona when selected in settings", async () => {
+      const mockStartWorkflowRun = startWorkflowRun as ReturnType<typeof vi.fn>;
+      const mockCreateWorkspaceAgent = createWorkspaceAgent as ReturnType<
+        typeof vi.fn
+      >;
+      mockUseLocalSettings.mockImplementation(() =>
+        createLocalSettingsHookReturn({
+          settings: {
+            version: 1,
+            fleetdb_redis: {
+              enabled: false,
+              db: 0,
+              tls: false,
+              password_set: false,
+            },
+            agent_runtime: { default: "daytona" },
+            runtime_credentials: {
+              daytona: { configured: true },
+              github: { configured: true },
+            },
+          },
+        }),
+      );
+      mockUseWorkspaceContext.mockImplementation(() =>
+        createWorkspaceContext({
+          workspaceId: "DESKTOP-QA",
+          repos: [
+            {
+              name: "slack-clone",
+              source_repo_id: "repo-slack",
+              remote: "origin",
+              remote_url: "git@github.com:tyson/slack-clone-e2e.git",
+              default_branch: "develop",
+            },
+          ],
+        }),
+      );
+      const epic = createTestIssueDetails({
+        id: "DESKTOP-QA-EPIC",
+        issue_type: "epic",
+        status: "open",
+        source_repo: "repo-slack",
+      });
+
+      render(
+        <IssueDetailPanel isOpen={true} issue={epic} onClose={() => {}} />,
+      );
+
+      fireEvent.click(screen.getByTestId("header-run-epic-button"));
+
+      await waitFor(() => {
+        expect(mockCreateWorkspaceAgent).toHaveBeenCalledWith("DESKTOP-QA", {
+          name: "lead-desktop-qa-epic",
+          role_name: "lead",
+          auto: false,
+          cross_repo: false,
+          repos: ["slack-clone"],
+        });
+        expect(mockStartWorkflowRun).toHaveBeenCalledWith(
+          "DESKTOP-QA",
+          "epic-runner",
+          {
+            epicId: "DESKTOP-QA-EPIC",
+            leadName: "lead-desktop-qa-epic",
+            requestedBy: "ui",
+            runner: "daytona-task-runner",
+            repoUrl: "https://github.com/tyson/slack-clone-e2e.git",
+            baseBranch: "develop",
+            openPullRequest: true,
+            stackedPullRequests: true,
+          },
+        );
+      });
+    });
+
+    it("creates a fresh lead when the default epic lead name already exists", async () => {
+      const mockStartWorkflowRun = startWorkflowRun as ReturnType<typeof vi.fn>;
+      const mockCreateWorkspaceAgent = createWorkspaceAgent as ReturnType<
+        typeof vi.fn
+      >;
+      mockUseWorkspaceContext.mockImplementation(() =>
+        createWorkspaceContext({
+          workspaceId: "DESKTOP-QA",
+          agents: [
+            {
+              name: "lead-desktop-qa-epic",
+              repos: [],
+              repo_groups: [],
+              cross_repo: true,
+              role_name: "lead",
+            },
+          ],
+        }),
+      );
+      const epic = createTestIssueDetails({
+        id: "DESKTOP-QA-EPIC",
+        issue_type: "epic",
+        status: "open",
+      });
+
+      render(
+        <IssueDetailPanel isOpen={true} issue={epic} onClose={() => {}} />,
+      );
+
+      fireEvent.click(screen.getByTestId("header-run-epic-button"));
+
+      await waitFor(() => {
+        expect(mockCreateWorkspaceAgent).toHaveBeenCalledWith("DESKTOP-QA", {
+          name: "lead-desktop-qa-epic-2",
+          role_name: "lead",
+          auto: false,
+          cross_repo: true,
+          repos: [],
+        });
+        expect(mockStartWorkflowRun).toHaveBeenCalledWith(
+          "DESKTOP-QA",
+          "epic-runner",
+          {
+            epicId: "DESKTOP-QA-EPIC",
+            leadName: "lead-desktop-qa-epic-2",
+            requestedBy: "ui",
+          },
+        );
       });
     });
 
@@ -1299,6 +1545,9 @@ describe("IssueDetailPanel", () => {
 
     it("reports workflow start errors", async () => {
       const mockStartWorkflowRun = startWorkflowRun as ReturnType<typeof vi.fn>;
+      const mockDeleteWorkspaceAgent = deleteWorkspaceAgent as ReturnType<
+        typeof vi.fn
+      >;
       mockStartWorkflowRun.mockRejectedValueOnce(new Error("workflow missing"));
       mockUseWorkspaceContext.mockImplementation(() =>
         createWorkspaceContext({ workspaceId: "DESKTOP-QA" }),
@@ -1319,6 +1568,12 @@ describe("IssueDetailPanel", () => {
         expect(mockShowToast).toHaveBeenCalledWith(
           "Epic runner failed: workflow missing",
           { type: "error" },
+        );
+      });
+      await waitFor(() => {
+        expect(mockDeleteWorkspaceAgent).toHaveBeenCalledWith(
+          "DESKTOP-QA",
+          "lead-desktop-qa-epic",
         );
       });
     });

@@ -12,6 +12,7 @@ export declare const RunnerEnv: Readonly<{
   leaseToken: "LOOM_TASK_RUN_LEASE_TOKEN";
   runnerLeaseToken: "LOOM_RUNNER_LEASE_TOKEN";
   fencingToken: "LOOM_TASK_RUN_FENCING_TOKEN";
+  requestJson: "LOOM_TASK_RUN_REQUEST_JSON";
 }>;
 
 /**
@@ -55,6 +56,7 @@ export interface TaskRunClientOptions {
   leaseId?: string;
   leaseToken?: string;
   fencingToken?: string | number;
+  requestJson?: string;
 }
 
 export interface TaskRun {
@@ -64,6 +66,11 @@ export interface TaskRun {
   driver_step_id?: string;
   task_id: string;
   worker_profile_id?: string;
+  runner?: string;
+  runner_ref?: string;
+  runner_kind?: string;
+  runner_entrypoint?: string;
+  runner_driver_version_id?: string;
   provider_profile?: string;
   status: string;
   node_id?: string;
@@ -220,6 +227,12 @@ export interface CompleteRunResponse {
   [key: string]: unknown;
 }
 
+export interface RuntimeCredentialResponse {
+  provider: "daytona" | "github" | string;
+  value: string;
+  [key: string]: unknown;
+}
+
 export declare class LoomAPIError extends Error {
   status: number;
   code: string;
@@ -239,7 +252,8 @@ export declare class TaskRunClient {
   readonly nodeId: string;
   readonly leaseId: string;
   readonly leaseToken: string;
-  readonly fencingToken: number;
+  readonly fencingToken: number | string;
+  readonly requestJson: string;
   readonly logs: {
     append(input: LogAppendInput, options?: { signal?: AbortSignal }): Promise<Record<string, unknown>>;
   };
@@ -248,8 +262,13 @@ export declare class TaskRunClient {
     get(artifactId: string, options?: { signal?: AbortSignal }): Promise<ArtifactHandle>;
     list(input?: { type?: string; durableStatus?: string; durable_status?: string; status?: string; limit?: number }, options?: { signal?: AbortSignal }): Promise<{ artifacts: ArtifactHandle[]; count?: number; [key: string]: unknown }>;
   };
+  readonly runtimeCredentials: {
+    get(input: { provider: "daytona" | "github" | string }, options?: { signal?: AbortSignal }): Promise<RuntimeCredentialResponse>;
+  };
 
   constructor(options: TaskRunClientOptions);
+  request<T = Record<string, unknown>>(): T;
+  input<T = unknown>(): T | undefined;
   getTaskRun(options?: { signal?: AbortSignal }): Promise<TaskRun>;
   getTask(options?: { signal?: AbortSignal }): Promise<Issue | { taskRun: TaskRun }>;
   heartbeat(input?: { runtimeMetadata?: Record<string, string | number | boolean>; runtime_metadata?: Record<string, string | number | boolean>; logsRef?: string; logs_ref?: string; artifactsRef?: string; artifacts_ref?: string }, options?: { signal?: AbortSignal }): Promise<TaskRun>;
@@ -259,6 +278,7 @@ export declare class TaskRunClient {
   listArtifacts(input?: { type?: string; durableStatus?: string; durable_status?: string; status?: string; limit?: number }, options?: { signal?: AbortSignal }): Promise<{ artifacts: ArtifactHandle[]; count?: number; [key: string]: unknown }>;
   uploadArtifactContent(artifactId: string, content: RunnerBodyInit, options?: ArtifactUploadOptions): Promise<Artifact>;
   finalizeArtifact(artifactId: string, input?: ArtifactFinalizeInput, options?: { signal?: AbortSignal }): Promise<Artifact>;
+  getRuntimeCredential(input: { provider: "daytona" | "github" | string }, options?: { signal?: AbortSignal }): Promise<RuntimeCredentialResponse>;
   completeRun(input?: CompleteRunInput, options?: { signal?: AbortSignal }): Promise<CompleteRunResponse>;
 }
 

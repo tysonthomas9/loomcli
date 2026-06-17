@@ -125,9 +125,9 @@ func handleAutoTaskError(ctx *autoLoopCtx, ae *agenterr.AgentError, rawErr error
 		return skipStuckTask(ctx, failedTaskID, rawErr)
 	}
 
-	// Park-decision outcomes (backend binary missing): fixed-interval wait
+	// Block-decision outcomes (backend binary missing): fixed-interval wait
 	// for the binary to return, 3-error exit.
-	if d.Decision == agentpolicy.Park {
+	if d.Decision == agentpolicy.Block {
 		return handleDefaultError(ctx, shutdown)
 	}
 

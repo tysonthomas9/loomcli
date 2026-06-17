@@ -627,7 +627,7 @@ func (r *recordingRunner) Run(_ context.Context, req RunRequest) (RunResult, err
 	return r.result, r.err
 }
 
-// suspendingRunner simulates a workflow whose await op parked the run: it
+// suspendingRunner simulates a workflow whose await op suspended the run: it
 // suspends the run through the store (as the events/await driver op does)
 // and reports the suspended runner result the launcher emits.
 type suspendingRunner struct {
@@ -643,7 +643,7 @@ func (r *suspendingRunner) Run(ctx context.Context, req RunRequest) (RunResult, 
 }
 
 // A suspended runner result is acknowledged without a Finish: the run stays
-// parked in suspended_awaiting_event with its slot released, and no
+// suspended in suspended_awaiting_event with its slot released, and no
 // run.finished lifecycle event is published (the run is not terminal).
 func TestExecutorRunOnceAcknowledgesSuspendedRun(t *testing.T) {
 	ctx := context.Background()
@@ -693,9 +693,9 @@ func TestExecutorRunOnceAcknowledgesSuspendedRun(t *testing.T) {
 }
 
 // A runner that reports suspended while the run is still running under the
-// executor's lease lied (no await parked it): the run is finished failed so
+// executor's lease lied (no await suspended it): the run is finished failed so
 // the slot is not leaked to the stale sweeper.
-func TestExecutorRunOnceFailsSuspendedReportWithoutParkedRun(t *testing.T) {
+func TestExecutorRunOnceFailsSuspendedReportWithoutSuspendedRun(t *testing.T) {
 	ctx := context.Background()
 	root := t.TempDir()
 	st := memstore.New()
@@ -726,7 +726,7 @@ func TestExecutorRunOnceFailsSuspendedReportWithoutParkedRun(t *testing.T) {
 	if result.Final == nil || result.Final.Status != domain.DriverRunFailed || result.Final.ErrorClass != "invalid_driver_result" {
 		t.Fatalf("final = %+v, want failed invalid_driver_result", result.Final)
 	}
-	if result.Final.Summary != "driver reported suspended but no await parked the run" {
+	if result.Final.Summary != "driver reported suspended but no await suspended the run" {
 		t.Fatalf("summary = %q, want lying-suspend detail", result.Final.Summary)
 	}
 }
@@ -745,11 +745,11 @@ func TestNodeRunnerMapsWorkflowSuspensionToSuspendedResult(t *testing.T) {
 	}{
 		{
 			name: "sentinel error path",
-			send: `process.send({ version: 1, type: 'error', requestId: message.requestId, error: { type: 'workflow_suspended', message: 'workflow_suspended: await #1 parked the run; exiting until the event arrives' } }, () => process.exit(0));`,
+			send: `process.send({ version: 1, type: 'error', requestId: message.requestId, error: { type: 'workflow_suspended', message: 'workflow_suspended: await #1 suspended the run; exiting until the event arrives' } }, () => process.exit(0));`,
 		},
 		{
 			name: "message prefix only",
-			send: `process.send({ version: 1, type: 'error', requestId: message.requestId, error: { type: 'Error', message: 'workflow_suspended: await #2 parked the run; exiting until the event arrives' } }, () => process.exit(0));`,
+			send: `process.send({ version: 1, type: 'error', requestId: message.requestId, error: { type: 'Error', message: 'workflow_suspended: await #2 suspended the run; exiting until the event arrives' } }, () => process.exit(0));`,
 		},
 		{
 			name: "returned suspended result",

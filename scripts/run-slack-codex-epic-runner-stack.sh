@@ -3,13 +3,16 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 FIXTURE_DIR="${FIXTURE_DIR:-${ROOT_DIR}/scripts/fixtures/slack-src}"
-TASK_RUNNER="${TASK_RUNNER:-${ROOT_DIR}/scripts/flue-task-agent-runner.mjs}"
-TASK_RUNNER_HELPER="${TASK_RUNNER_HELPER:-${ROOT_DIR}/scripts/flue-event-transcript.mjs}"
+TASK_RUNNER="${TASK_RUNNER:-${ROOT_DIR}/scripts/loom-task-runner-invoker.mjs}"
 EPIC_RUNNER_SOURCE="${EPIC_RUNNER_SOURCE:-${ROOT_DIR}/internal/workflows/builtin/epic-runner.ts}"
+LOCAL_TASK_RUNNER_SOURCE="${LOCAL_TASK_RUNNER_SOURCE:-${ROOT_DIR}/internal/workflows/builtin/local-task-runner.ts}"
+DAYTONA_TASK_RUNNER_SOURCE="${DAYTONA_TASK_RUNNER_SOURCE:-${ROOT_DIR}/internal/workflows/builtin/daytona-task-runner.ts}"
+OPENSHELL_TASK_RUNNER_SOURCE="${OPENSHELL_TASK_RUNNER_SOURCE:-${ROOT_DIR}/internal/workflows/builtin/openshell-task-runner.ts}"
 LOOM_SDK_DIR="${LOOM_SDK_DIR:-${ROOT_DIR}/sdk}"
 FLUE_REPO="${FLUE_REPO:-${ROOT_DIR}/../flue}"
 FLUE_NODE_MODULES_DIR="${FLUE_NODE_MODULES_DIR:-${FLUE_REPO}/node_modules}"
 FLUE_RUNTIME_DIR="${FLUE_RUNTIME_DIR:-${FLUE_REPO}/packages/runtime}"
+CONTAINER_FLUE_REPO="${CONTAINER_FLUE_REPO:-/opt/flue-workspace}"
 
 CONTAINER="${CONTAINER:-loom-slack-epic}"
 IMAGE="${IMAGE:-loomcli-dev-slack-epic}"
@@ -35,6 +38,35 @@ CONTAINER_CODEX_HOME="${CONTAINER_CODEX_HOME:-/root/.codex-rw}"
 CONTAINER_LOOM_URL="${CONTAINER_LOOM_URL:-http://127.0.0.1:8080}"
 REGISTER_EPIC_RUNNER="${REGISTER_EPIC_RUNNER:-1}"
 LOOM_FLUE_AGENT_MODEL="${LOOM_FLUE_AGENT_MODEL:-openai-codex/gpt-5.3-codex-spark}"
+RUN_DAYTONA="${RUN_DAYTONA:-0}"
+DAYTONA_REPO_URL="${DAYTONA_REPO_URL:-https://github.com/tysonthomas9/webhook-e2e-sandbox.git}"
+DAYTONA_TASK_MODE="${DAYTONA_TASK_MODE:-e2e-smoke}"
+DAYTONA_CREDENTIAL_FILE_HOST="${DAYTONA_CREDENTIAL_FILE_HOST:-}"
+CONTAINER_DAYTONA_SECRET_DIR="${CONTAINER_DAYTONA_SECRET_DIR:-/run/loom-secrets}"
+CONTAINER_DAYTONA_CREDENTIAL_FILE="${CONTAINER_DAYTONA_CREDENTIAL_FILE:-${CONTAINER_DAYTONA_SECRET_DIR}/daytona_api_key}"
+GITHUB_CREDENTIAL_FILE_HOST="${GITHUB_CREDENTIAL_FILE_HOST:-}"
+CONTAINER_GITHUB_CREDENTIAL_FILE="${CONTAINER_GITHUB_CREDENTIAL_FILE:-${CONTAINER_DAYTONA_SECRET_DIR}/github_token}"
+DAYTONA_BASE_BRANCH="${DAYTONA_BASE_BRANCH:-}"
+DAYTONA_PR_BRANCH_PREFIX="${DAYTONA_PR_BRANCH_PREFIX:-}"
+DAYTONA_PR_STACKED="${DAYTONA_PR_STACKED:-1}"
+DAYTONA_PR_DRAFT="${DAYTONA_PR_DRAFT:-1}"
+DAYTONA_GIT_AUTHOR_NAME="${DAYTONA_GIT_AUTHOR_NAME:-Loom Daytona Runner}"
+DAYTONA_GIT_AUTHOR_EMAIL="${DAYTONA_GIT_AUTHOR_EMAIL:-loom-daytona@example.test}"
+FLUE_RUNTIME_IMPORT="${FLUE_RUNTIME_IMPORT:-file://${CONTAINER_FLUE_REPO}/packages/runtime/dist/index.mjs}"
+FLUE_RUNTIME_INTERNAL_IMPORT="${FLUE_RUNTIME_INTERNAL_IMPORT:-file://${CONTAINER_FLUE_REPO}/packages/runtime/dist/internal.mjs}"
+DAYTONA_SDK_IMPORT="${DAYTONA_SDK_IMPORT:-file://${CONTAINER_FLUE_REPO}/node_modules/.pnpm/node_modules/@daytona/sdk/esm/index.js}"
+DAYTONA_SECRET_TMP=""
+GITHUB_SECRET_TMP=""
+
+cleanup_host_secret() {
+  if [[ -n "$DAYTONA_SECRET_TMP" ]]; then
+    rm -f "$DAYTONA_SECRET_TMP"
+  fi
+  if [[ -n "$GITHUB_SECRET_TMP" ]]; then
+    rm -f "$GITHUB_SECRET_TMP"
+  fi
+}
+trap cleanup_host_secret EXIT
 
 log() {
   printf '[slack-codex-stack] %s\n' "$*"
@@ -65,6 +97,90 @@ truthy() {
 
 json_array() {
   node -e 'console.log(JSON.stringify(process.argv.slice(1)))' "$@"
+}
+
+resolve_daytona_secret() {
+  if [[ -n "$DAYTONA_CREDENTIAL_FILE_HOST" ]]; then
+    require_path "$DAYTONA_CREDENTIAL_FILE_HOST"
+    return 0
+  fi
+  if [[ -n "${DAYTONA_API_KEY:-}" ]]; then
+    DAYTONA_SECRET_TMP="$(mktemp "${TMPDIR:-/tmp}/loom-daytona-api-key.XXXXXX")"
+    chmod 600 "$DAYTONA_SECRET_TMP"
+    printf '%s' "$DAYTONA_API_KEY" >"$DAYTONA_SECRET_TMP"
+    DAYTONA_CREDENTIAL_FILE_HOST="$DAYTONA_SECRET_TMP"
+    return 0
+  fi
+  if truthy "$RUN_DAYTONA"; then
+    printf 'RUN_DAYTONA=1 requires DAYTONA_API_KEY or DAYTONA_CREDENTIAL_FILE_HOST\n' >&2
+    exit 1
+  fi
+}
+
+requires_github_pr_runtime() {
+  [[ "$DAYTONA_TASK_MODE" == "slack-pr-chain" ]] || truthy "${DAYTONA_OPEN_PR:-0}"
+}
+
+resolve_github_secret() {
+  if [[ -n "$GITHUB_CREDENTIAL_FILE_HOST" ]]; then
+    require_path "$GITHUB_CREDENTIAL_FILE_HOST"
+    return 0
+  fi
+
+  local token=""
+  if [[ -n "${GH_TOKEN:-}" ]]; then
+    token="$GH_TOKEN"
+  elif [[ -n "${GITHUB_TOKEN:-}" ]]; then
+    token="$GITHUB_TOKEN"
+  elif command -v gh >/dev/null 2>&1; then
+    log "reading GitHub credential from 'gh auth token'"
+    token="$(gh auth token 2>/dev/null || true)"
+  fi
+
+  if [[ -n "$token" ]]; then
+    GITHUB_SECRET_TMP="$(mktemp "${TMPDIR:-/tmp}/loom-github-token.XXXXXX")"
+    chmod 600 "$GITHUB_SECRET_TMP"
+    printf '%s' "$token" >"$GITHUB_SECRET_TMP"
+    GITHUB_CREDENTIAL_FILE_HOST="$GITHUB_SECRET_TMP"
+    return 0
+  fi
+
+  if requires_github_pr_runtime; then
+    printf 'DAYTONA_TASK_MODE=slack-pr-chain requires GH_TOKEN, GITHUB_TOKEN, GITHUB_CREDENTIAL_FILE_HOST, or a working `gh auth token`\n' >&2
+    exit 1
+  fi
+}
+
+install_daytona_secret() {
+  if [[ -z "$DAYTONA_CREDENTIAL_FILE_HOST" ]]; then
+    return 0
+  fi
+  log "installing Daytona credential file inside ${CONTAINER} (path only; value is not logged)"
+  podman exec "$CONTAINER" mkdir -p "$CONTAINER_DAYTONA_SECRET_DIR"
+  podman cp "$DAYTONA_CREDENTIAL_FILE_HOST" "${CONTAINER}:${CONTAINER_DAYTONA_CREDENTIAL_FILE}"
+  podman exec "$CONTAINER" chmod 0400 "$CONTAINER_DAYTONA_CREDENTIAL_FILE"
+}
+
+install_github_secret() {
+  if [[ -z "$GITHUB_CREDENTIAL_FILE_HOST" ]]; then
+    return 0
+  fi
+  log "installing GitHub credential file inside ${CONTAINER} (path only; value is not logged)"
+  podman exec "$CONTAINER" mkdir -p "$CONTAINER_DAYTONA_SECRET_DIR"
+  podman cp "$GITHUB_CREDENTIAL_FILE_HOST" "${CONTAINER}:${CONTAINER_GITHUB_CREDENTIAL_FILE}"
+  podman exec "$CONTAINER" chmod 0400 "$CONTAINER_GITHUB_CREDENTIAL_FILE"
+}
+
+require_daytona_runtime() {
+  if ! truthy "$RUN_DAYTONA"; then
+    return 0
+  fi
+  require_path "${CODEX_HOME}/auth.json"
+  require_path "${FLUE_REPO}/packages/runtime/dist/index.mjs"
+  require_path "${FLUE_REPO}/packages/runtime/dist/internal.mjs"
+  require_path "${FLUE_REPO}/node_modules/.pnpm/node_modules/@daytona/sdk/esm/index.js"
+  resolve_daytona_secret
+  resolve_github_secret
 }
 
 workspace_payload() {
@@ -186,7 +302,7 @@ seed_repo() {
     commit -m "seed slack app shell" >/dev/null
 }
 
-seed_loom() {
+seed_loom_default() {
   log "registering workspace ${WORKSPACE_ID}"
   post_json "/api/workspaces" "$(workspace_payload)"
 
@@ -207,34 +323,86 @@ seed_loom() {
   post_json "/api/workspaces/${WORKSPACE_ID}/issues" "$(issue_payload "Team workspace switcher" "task" 2 "SLACK-UI-2" "Extend the existing Slack app shell with a usable team workspace switcher.")"
 }
 
+dependency_payload() {
+  local depends_on="$1"
+  node -e 'console.log(JSON.stringify({depends_on_id: process.argv[1], dep_type: "blocks"}))' "$depends_on"
+}
+
+add_dependency() {
+  local issue="$1"
+  local depends_on="$2"
+  post_json "/api/workspaces/${WORKSPACE_ID}/issues/${issue}/dependencies" "$(dependency_payload "$depends_on")"
+}
+
+seed_loom_pr_chain() {
+  log "registering workspace ${WORKSPACE_ID}"
+  post_json "/api/workspaces" "$(workspace_payload)"
+
+  log "creating lead agents"
+  post_json "/api/workspaces/${WORKSPACE_ID}/agents" "$(agent_payload atlas)"
+  post_json "/api/workspaces/${WORKSPACE_ID}/agents" "$(agent_payload nova)"
+
+  log "creating realistic Slack clone epic with a serial dependency chain"
+  post_json "/api/workspaces/${WORKSPACE_ID}/issues" "$(issue_payload "Tiny Slack clone PR chain" "epic" 1 "" "Build a tiny Slack-style collaboration app through three dependent task PRs. Each task should produce one visible GitHub pull request.")"
+  post_json "/api/workspaces/${WORKSPACE_ID}/issues" "$(issue_payload "Scaffold Slack clone app" "task" 1 "${WORKSPACE_ID}-1" "Create a tiny static Slack-style app under a clear project directory. Include package.json, an HTML entrypoint, CSS, JavaScript state/rendering code, sample channel/message data, and a Node built-in test that validates the rendered data model. Keep dependencies minimal and make npm test pass.")"
+  post_json "/api/workspaces/${WORKSPACE_ID}/issues" "$(issue_payload "Add channel navigation and unread state" "task" 1 "${WORKSPACE_ID}-1" "Extend the Slack clone from the prior PR with multiple channels, active-channel switching affordances, unread badges, timestamps, and stronger sidebar styling. Update or add tests so npm test proves the channel data/render helpers still work.")"
+  post_json "/api/workspaces/${WORKSPACE_ID}/issues" "$(issue_payload "Add composer search and polish" "task" 1 "${WORKSPACE_ID}-1" "Extend the stacked Slack clone with a message composer, search or command palette behavior, responsive layout polish, and final seed data. Update tests and keep npm test passing.")"
+
+  add_dependency "${WORKSPACE_ID}-3" "${WORKSPACE_ID}-2"
+  add_dependency "${WORKSPACE_ID}-4" "${WORKSPACE_ID}-3"
+}
+
+seed_loom() {
+  case "$DAYTONA_TASK_MODE" in
+    slack-pr-chain)
+      seed_loom_pr_chain
+      ;;
+    *)
+      seed_loom_default
+      ;;
+  esac
+}
+
 source_digest() {
   node -e '
 const crypto = require("node:crypto");
 const fs = require("node:fs");
-const file = process.argv[1];
 const hash = crypto.createHash("sha256");
-hash.update("workflows/epic-runner.ts");
-hash.update(Buffer.from([0]));
-hash.update(fs.readFileSync(file));
-hash.update(Buffer.from([0]));
+for (const pair of process.argv.slice(1)) {
+  const [name, file] = pair.split("=", 2);
+  hash.update(name);
+  hash.update(Buffer.from([0]));
+  hash.update(fs.readFileSync(file));
+  hash.update(Buffer.from([0]));
+}
 console.log("sha256:" + hash.digest("hex"));
-' "$EPIC_RUNNER_SOURCE"
+' \
+    "workflows/epic-runner.ts=${EPIC_RUNNER_SOURCE}" \
+    "workflows/local-task-runner.ts=${LOCAL_TASK_RUNNER_SOURCE}" \
+    "workflows/daytona-task-runner.ts=${DAYTONA_TASK_RUNNER_SOURCE}" \
+    "workflows/openshell-task-runner.ts=${OPENSHELL_TASK_RUNNER_SOURCE}" \
+    "sdk/runtime-adapters.js=${LOOM_SDK_DIR}/runtime-adapters.js"
 }
 
 write_epic_runner_dist() {
   local dist="$1"
-  mkdir -p "${dist}/node_modules/@loom/sdk"
+  mkdir -p "${dist}/node_modules/@loom/sdk" "${dist}/workflows"
   cp "${LOOM_SDK_DIR}/package.json" "${dist}/node_modules/@loom/sdk/package.json"
-  cp "${LOOM_SDK_DIR}/flue.js" "${dist}/node_modules/@loom/sdk/flue.js"
-  node -e '
-const fs = require("node:fs");
-const [sourcePath, outPath] = process.argv.slice(1);
-const source = fs.readFileSync(sourcePath, "utf8")
-  .replace(/from ["'\'']@loom\/sdk\/flue["'\''];/, "from \"./node_modules/@loom/sdk/flue.js\";");
-fs.writeFileSync(outPath, source);
-' "$EPIC_RUNNER_SOURCE" "${dist}/workflow.mjs"
+  cp "${LOOM_SDK_DIR}/driver.js" "${dist}/node_modules/@loom/sdk/driver.js"
+  cp "${LOOM_SDK_DIR}/runner.js" "${dist}/node_modules/@loom/sdk/runner.js"
+  cp "${LOOM_SDK_DIR}/runtime-adapters.js" "${dist}/node_modules/@loom/sdk/runtime-adapters.js"
+  cp "${LOOM_SDK_DIR}/internal.js" "${dist}/node_modules/@loom/sdk/internal.js"
+  cp "$EPIC_RUNNER_SOURCE" "${dist}/workflows/epic-runner.mjs"
+  cp "$LOCAL_TASK_RUNNER_SOURCE" "${dist}/workflows/local-task-runner.mjs"
+  cp "$DAYTONA_TASK_RUNNER_SOURCE" "${dist}/workflows/daytona-task-runner.mjs"
+  cp "$OPENSHELL_TASK_RUNNER_SOURCE" "${dist}/workflows/openshell-task-runner.mjs"
   cat > "${dist}/server.mjs" <<'EOF'
-import { run } from "./workflow.mjs";
+const workflowLoaders = {
+  "epic-runner": () => import("./workflows/epic-runner.mjs"),
+  "local-task-runner": () => import("./workflows/local-task-runner.mjs"),
+  "daytona-task-runner": () => import("./workflows/daytona-task-runner.mjs"),
+  "openshell-task-runner": () => import("./workflows/openshell-task-runner.mjs"),
+};
 
 let completed = false;
 
@@ -257,7 +425,20 @@ async function invoke(message) {
   if (completed) return;
   completed = true;
   try {
-    const result = await run({ payload: message.payload || {}, requestId: message.requestId });
+    const workflowName = process.env.FLUE_CLI_NAME || "epic-runner";
+    const loader = workflowLoaders[workflowName];
+    if (!loader) {
+      throw new Error("unknown workflow " + JSON.stringify(workflowName));
+    }
+    const mod = await loader();
+    if (!mod || typeof mod.run !== "function") {
+      throw new Error("workflow " + JSON.stringify(workflowName) + " does not export run()");
+    }
+    const result = await mod.run({
+      payload: message.payload || {},
+      requestId: message.requestId,
+      env: process.env,
+    });
     send({ type: "result", requestId: message.requestId, result: normalizeResult(result) });
   } catch (error) {
     send({
@@ -287,7 +468,7 @@ register_epic_runner_workflow() {
   fi
   require_path "$EPIC_RUNNER_SOURCE"
   require_path "${LOOM_SDK_DIR}/package.json"
-  require_path "${LOOM_SDK_DIR}/flue.js"
+  require_path "${LOOM_SDK_DIR}/driver.js"
 
   local build_dir digest
   build_dir="$(mktemp -d "${TMPDIR:-/tmp}/loom-epic-runner-dist.XXXXXX")"
@@ -322,17 +503,39 @@ main() {
   require_cmd podman
   require_path "$FIXTURE_DIR"
   require_path "$TASK_RUNNER"
-  require_path "$TASK_RUNNER_HELPER"
-  require_path "$CODEX_HOME"
-  require_path "${CODEX_HOME}/auth.json"
-  require_path "$FLUE_NODE_MODULES_DIR"
-  require_path "${FLUE_RUNTIME_DIR}/dist/index.mjs"
+  require_path "$EPIC_RUNNER_SOURCE"
+  require_path "$LOCAL_TASK_RUNNER_SOURCE"
+  require_path "$DAYTONA_TASK_RUNNER_SOURCE"
+  require_path "$OPENSHELL_TASK_RUNNER_SOURCE"
+  require_daytona_runtime
 
   ensure_fleet_db
   ensure_image
 
   local runner_cmd_json
-  runner_cmd_json="$(json_array node /usr/local/bin/flue-task-agent-runner.mjs "$CONTAINER_REPO_PATH" "$CONTAINER_CODEX_HOME" "$CONTAINER_LOOM_URL")"
+  runner_cmd_json="$(
+    json_array \
+      env \
+      "CODEX_HOME=${CONTAINER_CODEX_HOME}" \
+      "LOOM_CODEX_AUTH_FILE=${CONTAINER_CODEX_HOME}/auth.json" \
+      "DAYTONA_CREDENTIAL_FILE=${CONTAINER_DAYTONA_CREDENTIAL_FILE}" \
+      "GITHUB_TOKEN_FILE=${CONTAINER_GITHUB_CREDENTIAL_FILE}" \
+      "DAYTONA_REPO_URL=${DAYTONA_REPO_URL}" \
+      "DAYTONA_TASK_MODE=${DAYTONA_TASK_MODE}" \
+      "DAYTONA_BASE_BRANCH=${DAYTONA_BASE_BRANCH}" \
+      "DAYTONA_PR_BRANCH_PREFIX=${DAYTONA_PR_BRANCH_PREFIX}" \
+      "DAYTONA_PR_STACKED=${DAYTONA_PR_STACKED}" \
+      "DAYTONA_PR_DRAFT=${DAYTONA_PR_DRAFT}" \
+      "DAYTONA_GIT_AUTHOR_NAME=${DAYTONA_GIT_AUTHOR_NAME}" \
+      "DAYTONA_GIT_AUTHOR_EMAIL=${DAYTONA_GIT_AUTHOR_EMAIL}" \
+      "DAYTONA_API_URL=${DAYTONA_API_URL:-}" \
+      "DAYTONA_TARGET=${DAYTONA_TARGET:-}" \
+      "KEEP_DAYTONA_SANDBOX=${KEEP_DAYTONA_SANDBOX:-}" \
+      "FLUE_RUNTIME_IMPORT=${FLUE_RUNTIME_IMPORT}" \
+      "FLUE_RUNTIME_INTERNAL_IMPORT=${FLUE_RUNTIME_INTERNAL_IMPORT}" \
+      "DAYTONA_SDK_IMPORT=${DAYTONA_SDK_IMPORT}" \
+      node /usr/local/bin/loom-task-runner-invoker.mjs
+  )"
 
   log "recreating container ${CONTAINER} from ${IMAGE}"
   podman rm -f "$CONTAINER" >/dev/null 2>&1 || true
@@ -349,12 +552,16 @@ main() {
     -e "LOOM_CODEX_AUTH_FILE=${CONTAINER_CODEX_AUTH_FILE}"
     -e "LOOM_FLUE_AGENT_MODEL=${LOOM_FLUE_AGENT_MODEL}"
     -v "${FLEET_DB_BIN}:/usr/local/bin/fleet-db:ro"
-    -v "${TASK_RUNNER}:/usr/local/bin/flue-task-agent-runner.mjs:ro"
-    -v "${TASK_RUNNER_HELPER}:/usr/local/bin/flue-event-transcript.mjs:ro"
-    -v "${FLUE_NODE_MODULES_DIR}:/usr/local/bin/node_modules:ro"
-    -v "${FLUE_RUNTIME_DIR}:/usr/local/bin/packages/runtime:ro"
-    -v "${CODEX_HOME}:/root/.codex:ro"
+    -v "${TASK_RUNNER}:/usr/local/bin/loom-task-runner-invoker.mjs:ro"
   )
+
+  if [[ -d "$FLUE_REPO" ]]; then
+    podman_args+=(-v "${FLUE_REPO}:${CONTAINER_FLUE_REPO}:ro")
+  fi
+
+  if [[ -d "$CODEX_HOME" ]]; then
+    podman_args+=(-v "${CODEX_HOME}:/root/.codex:ro")
+  fi
 
   if [[ -d "$CLAUDE_HOME" ]]; then
     podman_args+=(-v "${CLAUDE_HOME}:/root/.claude:ro")
@@ -364,6 +571,8 @@ main() {
   podman "${podman_args[@]}" >/dev/null
 
   wait_for_health
+  install_daytona_secret
+  install_github_secret
   seed_repo
   seed_loom
   register_epic_runner_workflow
@@ -372,6 +581,9 @@ main() {
   printf '%s\n' "UI:     ${BASE_URL}/ws/${WORKSPACE_ID}/agents/atlas"
   printf '%s\n' "UI:     ${BASE_URL}/ws/${WORKSPACE_ID}/agents/nova"
   printf '%s\n' "API:    ${BASE_URL}/api/workspaces/${WORKSPACE_ID}/issues"
+  if [[ "$DAYTONA_TASK_MODE" == "slack-pr-chain" ]]; then
+    printf '%s\n' "Run:    podman exec -w ${CONTAINER_DRIVER_WORKDIR} -e LOOM_CONFIG_DIR=/root/.loom-config -e LOOM_WORKSPACE=${WORKSPACE_ID} -e LOOM_FLEET_DB_ACTOR=loom-e2e ${CONTAINER} loom epic run --parent ${WORKSPACE_ID}-1 --runner daytona-task-runner --max-concurrency 2 --detach"
+  fi
   printf '%s\n' "Logs:   podman logs -f ${CONTAINER}"
   printf '%s\n' "Stop:   podman rm -f ${CONTAINER}"
 }

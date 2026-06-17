@@ -14,7 +14,7 @@ import (
 
 // ErrBackendUnavailable is the sentinel returned by spawnAgent when the
 // agent's effective backend CLI is not on PATH. The supervisor's
-// lifecycle treats this as a clean park — restart budget is preserved
+// lifecycle treats this as a clean block — restart budget is preserved
 // and no backoff is set — because the supervise loop re-checks PATH
 // each iteration and auto-recovers the agent once the binary appears.
 var ErrBackendUnavailable = errors.New("supervisor: backend binary not on PATH")
@@ -44,7 +44,7 @@ func (s *Supervisor) gateBackendAvailable(ap *AgentProcess) error {
 	}
 
 	if info.Installed {
-		// Recovery branch: if the agent was previously parked for
+		// Recovery branch: if the agent was previously blocked for
 		// backend-unavailable and the binary is now back, clear the
 		// state so UIs reflect the recovery before the spawn proceeds.
 		ap.Mu.Lock()

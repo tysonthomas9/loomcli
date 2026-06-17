@@ -25,7 +25,7 @@ type emitEventParams struct {
 	// the idempotency anchor, so SDK retries of the same emission dedup.
 	EventID string `json:"eventId"`
 	// EventType is the journal-style action or normalized event type
-	// (issue.create, issue.created, task.parked, ...). Required.
+	// (issue.create, issue.created, task.blocked, ...). Required.
 	EventType    string            `json:"eventType"`
 	SubjectRef   string            `json:"subjectRef,omitempty"`
 	ActorRef     string            `json:"actorRef,omitempty"`

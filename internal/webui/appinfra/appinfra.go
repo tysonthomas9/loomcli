@@ -6,6 +6,7 @@ package appinfra
 import (
 	"context"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/circuitbreaker"
@@ -171,6 +172,11 @@ func ReconcileStoreWorkspaces(
 		if initialRegistered && wsID == initialID {
 			continue
 		}
+		if strings.TrimSpace(wsPath) == "" {
+			logger.Warn("workspace missing local path during startup reconciliation; terminal disabled",
+				"workspace", wsID)
+			continue
+		}
 		// Stagger pool creation to avoid thundering-herd on daemon sockets.
 		if !first {
 			time.Sleep(200 * time.Millisecond)
@@ -244,6 +250,11 @@ func reconcileNewWorkspaces(
 	}
 	for wsID, wsPath := range workspaces {
 		if _, ok := known[wsID]; ok {
+			continue
+		}
+		if strings.TrimSpace(wsPath) == "" {
+			logger.Debug("periodic workspace reconcile: local path missing; terminal disabled",
+				"workspace", wsID)
 			continue
 		}
 		if err := registry.Register(wsID, wsPath); err != nil {

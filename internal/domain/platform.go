@@ -320,7 +320,7 @@ const (
 	TriggerDeliveryReplayed   TriggerDeliveryStatus = "replayed"
 	// TriggerDeliverySuperseded marks a delivery replaced by a newer event for
 	// the same subject key (replace concurrency policy). TriggerDeliveryHeld
-	// parks a delivery behind an active run for its subject key (queue
+	// holds a delivery behind an active run for its subject key (queue
 	// concurrency policy); the retry sweeper promotes it. Both are additive
 	// enum values on the fleet-db v1 wire.
 	TriggerDeliverySuperseded TriggerDeliveryStatus = "superseded"
@@ -375,7 +375,7 @@ const (
 	DriverRunFailed      DriverRunStatus = "failed"
 	DriverRunNeedsReview DriverRunStatus = "needs_review"
 	DriverRunCancelled   DriverRunStatus = "cancelled"
-	// DriverRunSuspendedAwaitingEvent parks a run that registered an
+	// DriverRunSuspendedAwaitingEvent suspends a run that registered an
 	// await-event and is waiting for a matching event (or its deadline).
 	// Explicitly NOT terminal: the run resumes when its await resolves.
 	DriverRunSuspendedAwaitingEvent DriverRunStatus = "suspended_awaiting_event"
@@ -423,7 +423,7 @@ type DriverRun struct {
 	// Empty means detached/root (no cancel cascade). Orthogonal to EpicID:
 	// a run can belong to an epic, a parent run, both, or neither.
 	ParentRunID string `json:"parent_run_id,omitempty"`
-	// SuspendedAt is set when the run parks in suspended_awaiting_event.
+	// SuspendedAt is set when the run suspends in suspended_awaiting_event.
 	SuspendedAt *time.Time `json:"suspended_at,omitempty"`
 	// CancelRequestedAt records a cooperative cancel request against a
 	// RUNNING run (composition cascade: parent terminal -> running children
@@ -502,6 +502,11 @@ type TaskRun struct {
 	DriverStepID     string           `json:"driver_step_id,omitempty"`
 	TaskID           string           `json:"task_id"`
 	WorkerProfileID  string           `json:"worker_profile_id,omitempty"`
+	Runner           string           `json:"runner,omitempty"`
+	RunnerRef        string           `json:"runner_ref,omitempty"`
+	RunnerKind       string           `json:"runner_kind,omitempty"`
+	RunnerEntrypoint string           `json:"runner_entrypoint,omitempty"`
+	RunnerVersionID  string           `json:"runner_driver_version_id,omitempty"`
 	ProviderProfile  string           `json:"provider_profile,omitempty"`
 	Status           TaskRunStatus    `json:"status"`
 	NodeID           string           `json:"node_id,omitempty"`

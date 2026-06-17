@@ -44,6 +44,28 @@ func TestReconcileStoreWorkspacesSkipsInitialWorkspace(t *testing.T) {
 	}
 }
 
+func TestReconcileStoreWorkspacesSkipsMissingLocalPath(t *testing.T) {
+	registry := NewWorkspaceRegistry(slog.Default())
+	ReconcileStoreWorkspaces(
+		func() (map[string]string, error) {
+			return map[string]string{
+				"pathless": "",
+				"spaced":   "   ",
+				"valid":    t.TempDir(),
+			}, nil
+		},
+		"",
+		false,
+		registry,
+		nil,
+	)
+
+	ids := registry.WorkspaceIDs()
+	if len(ids) != 1 || ids[0] != "valid" {
+		t.Fatalf("WorkspaceIDs() = %#v, want [valid]", ids)
+	}
+}
+
 func TestReconcileStoreWorkspacesIgnoresNilAndFailedList(t *testing.T) {
 	registry := NewWorkspaceRegistry(slog.Default())
 	ReconcileStoreWorkspaces(nil, "", false, registry, nil)

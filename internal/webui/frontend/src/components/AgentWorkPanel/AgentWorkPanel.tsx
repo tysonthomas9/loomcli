@@ -470,8 +470,12 @@ export function AgentWorkPanel({
               const runnerActive =
                 epicRunnerRun != null &&
                 !isTerminalWorkflowRunStatus(epicRunnerRun.status);
+              const leadCanRunFocusedEpic =
+                mode === "epic" &&
+                selectedAgentIsLead &&
+                group.epicId === activeEpicId;
               const canRunEpic =
-                mode === "lead-open" &&
+                (mode === "lead-open" || leadCanRunFocusedEpic) &&
                 selectedAgentIsLead &&
                 group.epicId !== ORPHAN_EPIC_KEY &&
                 onRunEpic != null &&

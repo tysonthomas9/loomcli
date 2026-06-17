@@ -8,7 +8,7 @@ package trigger
 // fields only (C7/C15: the matcher never re-parses raw payloads):
 //
 //	RULE 1 — the event's matching key is domain.AwaitEventKey(eventType,
-//	         subjectRef), compared by exact string equality against parked
+//	         subjectRef), compared by exact string equality against pending
 //	         await patterns (no glob; the same rendering every backend's
 //	         registration scan uses), so cross-repo/cross-entity confusion
 //	         is structurally impossible.
@@ -28,8 +28,8 @@ package trigger
 // pending instances whose pattern equals the rendered key, in RegisteredAt
 // order (store contract).
 //
-// Park->suspend window (locked decision): an event can arrive after
-// RegisterAwaitAndCheck parked the await but before the executor's Suspend
+// Pending->suspend window (locked decision): an event can arrive after
+// RegisterAwaitAndCheck pending the await but before the executor's Suspend
 // landed. The fleet-db backend records a pending-resume marker and surfaces
 // domain.ErrDriverRunAlreadyResumed to the suspend leg; memstore instead has
 // the matcher retry the resume briefly until the suspend lands (the
@@ -51,7 +51,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
-// Default park->suspend-window retry budget: how often and how long Dispatch
+// Default pending->suspend-window retry budget: how often and how long Dispatch
 // re-attempts a resume blocked by a still-running run before recording
 // resume_deferred. Bounded so an ingress hook never stalls long.
 const (
@@ -59,7 +59,7 @@ const (
 	defaultAwaitResumeRetryDelay = 100 * time.Millisecond
 )
 
-// AwaitMatcher resolves parked awaits against admitted router events. The
+// AwaitMatcher resolves pending awaits against admitted router events. The
 // zero value plus Store is ready to use; safe for concurrent use (it holds no
 // state of its own).
 type AwaitMatcher struct {
@@ -67,7 +67,7 @@ type AwaitMatcher struct {
 	// Logger receives audit records (actor rejections, deferred resumes);
 	// slog.Default when nil.
 	Logger *slog.Logger
-	// ResumeRetries / ResumeRetryDelay tune the park->suspend-window retry
+	// ResumeRetries / ResumeRetryDelay tune the pending->suspend-window retry
 	// budget; zero values select the package defaults.
 	ResumeRetries    int
 	ResumeRetryDelay time.Duration
@@ -109,7 +109,7 @@ const (
 	// this dispatch is the recorded no-op loser.
 	AwaitMatchAlreadyResolved AwaitMatchOutcome = "already_resolved"
 	// AwaitMatchResumeDeferred — the resolution stands but the run could not
-	// be transitioned here (park->suspend window outlived the retry budget,
+	// be transitioned here (pending->suspend window outlived the retry budget,
 	// run already re-queued by the backend's pending-resume marker, or run
 	// terminal).
 	AwaitMatchResumeDeferred AwaitMatchOutcome = "resume_deferred"
@@ -121,10 +121,10 @@ const (
 // Stable Reason values recorded on AwaitMatchRecord (free-form error text is
 // used for the failed outcome).
 const (
-	AwaitReasonActorRejected     = "actor_rejected"
-	AwaitReasonParkWindowPending = "park_window_pending"
-	AwaitReasonRunAlreadyResumed = "run_already_resumed"
-	AwaitReasonRunTerminal       = "run_terminal"
+	AwaitReasonActorRejected        = "actor_rejected"
+	AwaitReasonPendingSuspendWindow = "pending_suspend_window"
+	AwaitReasonRunAlreadyResumed    = "run_already_resumed"
+	AwaitReasonRunTerminal          = "run_terminal"
 )
 
 // AwaitMatchRecord is the per-instance audit record of one Dispatch.
@@ -228,7 +228,7 @@ func (m *AwaitMatcher) dispatchOne(ctx context.Context, ws string, ev AwaitDispa
 	return record, nil
 }
 
-// resumeRun re-queues the suspended run, tolerating the park->suspend window:
+// resumeRun re-queues the suspended run, tolerating the pending->suspend window:
 // a still-running run is retried within the budget (memstore shape), a
 // pending-resume marker (fleet-db shape) and a lost resume race are recorded
 // deferred no-ops. The resolution stands in every non-failed branch.
@@ -255,7 +255,7 @@ func (m *AwaitMatcher) resumeRun(ctx context.Context, ws string, inst *domain.Aw
 // classifyResumeBlock inspects a run whose resume hit ErrInvalidTransition
 // (every blocked shape is a deferred resolution): queued means a racing
 // resume already won, terminal means the run finished before the event
-// landed, running means the accepted park->suspend window — the only
+// landed, running means the accepted pending->suspend window — the only
 // retryable shape.
 func (m *AwaitMatcher) classifyResumeBlock(ctx context.Context, ws, runID string) (reason string, retry bool) {
 	run, err := m.Store.DriverRuns().Get(ctx, ws, runID)
@@ -268,8 +268,8 @@ func (m *AwaitMatcher) classifyResumeBlock(ctx context.Context, ws, runID string
 	case run.Status.IsTerminal():
 		return AwaitReasonRunTerminal, false
 	default:
-		// running (park->suspend window) or transiently re-suspended: retry.
-		return AwaitReasonParkWindowPending, true
+		// running (pending->suspend window) or transiently re-suspended: retry.
+		return AwaitReasonPendingSuspendWindow, true
 	}
 }
 

@@ -1,4 +1,4 @@
-import { createLoomDriverClient } from '@loom/sdk/flue';
+import { createLoomDriverClient } from '@loom/sdk/driver';
 
 // epic-runner: watch-driven epic drain loop.
 //
@@ -43,15 +43,16 @@ export async function run(ctx) {
 async function runEpicWatchLoop(loom, input, epicId, started) {
   const maxConcurrency = Math.max(1, numberValue(input.maxConcurrency, 2));
   const requestDefaults = {
-    providerProfile: stringValue(input.providerProfile || "flue-local"),
+    runner: stringValue(input.runner || "local-task-runner"),
     workerPrefix: stringValue(input.workerPrefix),
     workerProfileId: stringValue(input.workerProfileId),
     targetNodeId: stringValue(input.targetNodeId),
     parentSessionId: started.orchestratorSessionId || stringValue(input.parentSessionId),
+    childInput: childTaskInputDefaults(input),
   };
   const inFlight = new Map(); // taskId -> taskRunId
   const completed = [];
-  const parked = [];
+  const blockedFailures = [];
 
   // topUp claims ready tasks and enqueues a TaskRun for each until the
   // in-flight set reaches maxConcurrency or the ready queue is empty.
@@ -65,7 +66,8 @@ async function runEpicWatchLoop(loom, input, epicId, started) {
       if (enqueued.ok) {
         inFlight.set(task.id, enqueued.taskRunId);
       } else {
-        parked.push(enqueued.parked);
+        blockedFailures.push(enqueued.blocked);
+        return;
       }
     }
   }
@@ -79,7 +81,7 @@ async function runEpicWatchLoop(loom, input, epicId, started) {
     }
     const snapshot = await loom.epics.snapshot({ epicId });
     const active = await loom.taskRuns.active({ epicId });
-    return endStateResult(loom, epicId, snapshot, numberValue(active && active.activeCount, 0), completed, parked);
+    return endStateResult(loom, epicId, snapshot, numberValue(active && active.activeCount, 0), completed, blockedFailures);
   }
 
   // Seed the pipeline before connecting; the handshake snapshot reconciles
@@ -96,7 +98,7 @@ async function runEpicWatchLoop(loom, input, epicId, started) {
     if (event.type === "snapshot") {
       const data = event.data || {};
       reconcileInFlight(inFlight, data.active);
-      const fromSnapshot = endStateResult(loom, epicId, data.epic, activeCountOf(data.active, inFlight), completed, parked);
+      const fromSnapshot = endStateResult(loom, epicId, data.epic, activeCountOf(data.active, inFlight), completed, blockedFailures);
       if (fromSnapshot) {
         return fromSnapshot;
       }
@@ -123,16 +125,16 @@ async function runEpicWatchLoop(loom, input, epicId, started) {
         if (completion.ok) {
           completed.push(taskId);
         } else {
-          parked.push(completion.parked);
+          blockedFailures.push(completion.blocked);
         }
         break;
       }
-      case "taskRunParked":
       case "taskRunFailed":
       case "taskRunCancelled":
-        // The server scheduler already retried and parked the run (and
-        // released the claim); record it and keep draining the DAG.
-        parked.push({
+        // The server scheduler already retried the run and, on retry
+        // exhaustion, blocked the underlying issue; record it and keep
+        // draining any independent DAG branches.
+        blockedFailures.push({
           taskId,
           taskRunId: stringValue(data.taskRunID),
           errorClass: stringValue(data.errorClass) || "child_task_failed",
@@ -163,32 +165,27 @@ async function runEpicWatchLoop(loom, input, epicId, started) {
 }
 
 // endStateResult ports the I1 terminal conditions onto snapshot data:
-// drained -> completed; parked-only remainder -> needsReview (locally parked
-// children or snapshot children with the explicit parked status); blocked
-// with nothing runnable -> needsReview; open-but-unsatisfiable -> needsReview.
-function endStateResult(loom, epicId, snapshot, activeCount, completed, parked) {
+// drained -> completed; retry-exhausted child failures -> needsReview;
+// blocked with nothing runnable -> needsReview; open-but-unsatisfiable -> needsReview.
+function endStateResult(loom, epicId, snapshot, activeCount, completed, blockedFailures) {
   if (!snapshot || activeCount > 0) {
     return null;
   }
   const ready = numberValue(snapshot.readyCount, 0);
   const blocked = numberValue(snapshot.blockedCount, 0);
   const open = numberValue(snapshot.openChildrenCount, 0);
-  const parkedChildren = (Array.isArray(snapshot.openChildren) ? snapshot.openChildren : [])
-    .filter((child) => stringValue(child && child.status).toLowerCase() === "parked");
-  if (open === 0 && parked.length === 0) {
+  if (open === 0 && blockedFailures.length === 0) {
     const suffix = completed.length > 0 ? ": " + completed.join(",") : "";
     return loom.completed({ summary: "Epic drained " + epicId + suffix });
   }
   if (ready > 0) {
     return null;
   }
-  if (parked.length > 0 || parkedChildren.length > 0) {
-    const entries = parked.length > 0
-      ? parked
-      : parkedChildren.map((child) => ({ taskId: child.id, errorClass: child.status }));
+  if (blockedFailures.length > 0) {
+    const entries = blockedFailures;
     return loom.needsReview({
-      summary: entries.length + " parked task(s): " + summarizeParkedTasks(entries),
-      errorClass: "epic_tasks_parked",
+      summary: entries.length + " blocked task(s): " + summarizeBlockedTasks(entries),
+      errorClass: "epic_tasks_blocked",
     });
   }
   if (blocked > 0) {
@@ -242,12 +239,14 @@ async function enqueueChildTask(loom, task, defaults) {
   const request = {
     taskId: task.id,
     taskRunId,
-    providerProfile: defaults.providerProfile,
+    runner: defaults.runner,
     parentSessionId: defaults.parentSessionId || "",
     nodeId: defaults.targetNodeId || "",
-    supportedProviders: [defaults.providerProfile],
-    sandboxPlacement: { provider: defaults.providerProfile },
   };
+  const childInput = childTaskInput(defaults.childInput, loom, task);
+  if (Object.keys(childInput).length > 0) {
+    request.input = childInput;
+  }
   const workerProfileId = defaults.workerProfileId || (defaults.workerPrefix ? defaults.workerPrefix + "-" + slug(task.id) : "");
   if (workerProfileId) {
     request.workerProfileId = workerProfileId;
@@ -264,7 +263,7 @@ async function enqueueChildTask(loom, task, defaults) {
     await safeRelease(loom, task.id);
     return {
       ok: false,
-      parked: {
+      blocked: {
         taskId: task.id,
         taskRunId,
         errorClass: "child_task_request_failed",
@@ -272,6 +271,49 @@ async function enqueueChildTask(loom, task, defaults) {
       },
     };
   }
+}
+
+function childTaskInputDefaults(input) {
+  const out = {};
+  const nested = input && input.childInput && typeof input.childInput === "object" && !Array.isArray(input.childInput)
+    ? input.childInput
+    : {};
+  for (const [key, value] of Object.entries(nested)) {
+    if (value !== undefined && value !== null && value !== "") {
+      out[key] = value;
+    }
+  }
+  for (const key of [
+    "mode",
+    "repoUrl",
+    "githubRepo",
+    "repositoryUrl",
+    "baseBranch",
+    "targetBranch",
+    "openPullRequest",
+    "stackedPullRequests",
+  ]) {
+    if (input && input[key] !== undefined && input[key] !== null && input[key] !== "") {
+      out[key] = input[key];
+    }
+  }
+  return out;
+}
+
+function childTaskInput(defaults, loom, task) {
+  const out = {};
+  for (const [key, value] of Object.entries(defaults || {})) {
+    if (value !== undefined && value !== null && value !== "") {
+      out[key] = value;
+    }
+  }
+  if (loom && loom.driverRunId) {
+    out.driverRunId = loom.driverRunId;
+  }
+  if (task && task.id && !out.taskId) {
+    out.taskId = task.id;
+  }
+  return out;
 }
 
 // completeChildTask finalizes a completed run observed on the watch stream.
@@ -298,7 +340,7 @@ async function completeChildTask(loom, data) {
     }
     return {
       ok: false,
-      parked: {
+      blocked: {
         taskId,
         taskRunId,
         errorClass: "child_task_completion_failed",
@@ -507,9 +549,12 @@ function summarizeTasks(tasks) {
   return parts.join(", ");
 }
 
-function summarizeParkedTasks(parked) {
-  const list = Array.isArray(parked) ? parked : [];
-  return summarizeTasks(list.map((entry) => ({ id: entry.taskId, title: entry.errorClass })));
+function summarizeBlockedTasks(blocked) {
+  const list = Array.isArray(blocked) ? blocked : [];
+  return summarizeTasks(list.map((entry) => ({
+    id: entry.taskId,
+    title: entry.summary || entry.errorMessage || entry.errorClass,
+  })));
 }
 
 function slug(value) {

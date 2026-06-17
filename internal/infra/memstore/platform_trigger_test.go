@@ -191,7 +191,7 @@ func TestDispatchTriggerRouteConcurrencyForbidRejects(t *testing.T) {
 }
 
 // TestDispatchTriggerRouteConcurrencyQueueHoldsWithNextRetryAt pins the queue
-// admission gate and its sweeper-driven promotion: a busy subject parks the
+// admission gate and its sweeper-driven promotion: a busy subject suspends the
 // delivery held with next_retry_at = now + binding backoff and NO run; once
 // the subject frees, redelivery (the retry sweeper's re-dispatch) admits the
 // run and promotes the held delivery to dispatched.

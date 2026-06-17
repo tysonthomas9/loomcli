@@ -17,9 +17,9 @@ package domain
 //	RULE 4 — ActorAllow is the persisted eligible-actor predicate;
 //	         enforcement happens at resolve time (chunk AW7).
 //
-// RULE 2 (atomic check-then-park) is the shape of
+// RULE 2 (atomic register-and-check) is the shape of
 // store.AwaitStore.RegisterAwaitAndCheck itself: a single transactional
-// entry point, no separate check/park methods.
+// entry point, no separate check/register methods.
 
 import (
 	"encoding/json"
@@ -53,7 +53,7 @@ var (
 
 	// ErrAwaitTimeoutRequired (RULE 5): the await deadline is zero or not
 	// in the future. Every await must carry a real timeout; expiry resumes
-	// the run with a timeout event rather than parking it forever.
+	// the run with a timeout event rather than suspending it forever.
 	ErrAwaitTimeoutRequired = fmt.Errorf(
 		"domain: %s: await deadline is mandatory and must be in the future: %w",
 		AwaitErrCodeTimeoutRequired, ErrInvalid)
@@ -81,8 +81,8 @@ var (
 	ErrAwaitActorForbidden = errors.New("domain: await actor not eligible to resolve")
 
 	// ErrDriverRunAlreadyResumed signals the suspend leg lost the accepted
-	// park->suspend window: the await resolved first and recorded a
-	// pending-resume marker on the run, so the caller must NOT park it —
+	// pending->suspend window: the await resolved first and recorded a
+	// pending-resume marker on the run, so the caller must NOT suspend it —
 	// the run continues inline (no lost wakeup).
 	ErrDriverRunAlreadyResumed = errors.New("domain: driver run already resumed for await")
 )
@@ -97,7 +97,7 @@ const DefaultAwaitResumePayloadCap = 64 << 10 // 64 KiB
 type AwaitStatus string
 
 const (
-	// AwaitPending — registered, parked, waiting for a matching event.
+	// AwaitPending — registered, pending, waiting for a matching event.
 	AwaitPending AwaitStatus = "pending"
 	// AwaitSatisfied — a matching event resolved the await; the resume
 	// payload is persisted on the row.

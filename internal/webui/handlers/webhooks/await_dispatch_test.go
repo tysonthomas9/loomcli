@@ -1,6 +1,6 @@
 // Integration tests for the dispatch-time await matcher hook (chunk AW7):
 // a signed webhook driven through the real httptest mux + memstore wiring
-// resumes a parked run whose await matches the event's rendered subject key.
+// resumes a pending run whose await matches the event's rendered subject key.
 package webhooks
 
 import (
@@ -14,7 +14,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
-// awaitE2ESuspendedRun creates, claims and suspends a run parked on the given
+// awaitE2ESuspendedRun creates, claims and suspends a run pending on the given
 // await pattern, returning the await instance key.
 func awaitE2ESuspendedRun(t *testing.T, st *memstore.Store, runID, pattern string, actorAllow []string) string {
 	t.Helper()
@@ -34,7 +34,7 @@ func awaitE2ESuspendedRun(t *testing.T, st *memstore.Store, runID, pattern strin
 		Deadline: time.Now().Add(time.Hour),
 	})
 	if err != nil || res.Satisfied {
-		t.Fatalf("RegisterAwaitAndCheck = %+v, %v; want parked", res, err)
+		t.Fatalf("RegisterAwaitAndCheck = %+v, %v; want pending", res, err)
 	}
 	if _, err := st.DriverRuns().Suspend(ctx, routerE2EWS, runID,
 		run.NodeID, run.LeaseID, run.FencingToken, key); err != nil {
@@ -87,7 +87,7 @@ func TestWebhookDispatchResumesAwaitingRun(t *testing.T) {
 
 // TestWebhookDispatchActorRejectedNeverResumes: vet A3 — an event whose
 // actor fails the await's allow-list is accepted (202, fan-out intact) but
-// never resolves or resumes the parked run.
+// never resolves or resumes the pending run.
 func TestWebhookDispatchActorRejectedNeverResumes(t *testing.T) {
 	st := routerE2EStore(t)
 	routerE2EBinding(t, st, store.TriggerBindingCreate{
@@ -116,6 +116,6 @@ func TestWebhookDispatchActorRejectedNeverResumes(t *testing.T) {
 	}
 	pending, err := st.Awaits().ListAwaitsByPattern(ctx, routerE2EWS, pattern)
 	if err != nil || len(pending) != 1 {
-		t.Fatalf("pending awaits = %+v, %v; want the guarded await still parked", pending, err)
+		t.Fatalf("pending awaits = %+v, %v; want the guarded await still pending", pending, err)
 	}
 }

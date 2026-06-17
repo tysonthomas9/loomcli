@@ -2,7 +2,7 @@
 
 Workflow SDK for Loom. Two clients, one package:
 
-- **`@loom/sdk/flue`** — the driver client used *inside* a workflow run. A
+- **`@loom/sdk/driver`** — the driver client used *inside* a workflow run. A
   workflow is an ES module executed under a registered driver bundle; it talks
   to the Loom serve driver-op HTTP API with a run-scoped token.
 - **`@loom/sdk/runner`** — the task-run client used by runner harnesses
@@ -24,7 +24,7 @@ contract tests on both sides of the wire.
 npm install @loom/sdk
 ```
 
-Until the package is published, vendor it: `flue.js` is a **single file with
+Until the package is published, vendor it: `driver.js` is a **single file with
 zero local imports** and can be embedded as-is (this is the path the driver
 bundle scripts use). `runner.js` imports exactly one local file,
 `internal.js`. A test (`package.test.mjs`) pins both facts.
@@ -37,14 +37,18 @@ the environment the driver injects.
 
 ```js
 // my-workflow.mjs
-import { createLoomClient, isWorkflowSuspended } from "@loom/sdk/flue";
+import { createLoomClient, isWorkflowSuspended } from "@loom/sdk/driver";
 
 export default async function run() {
   const loom = createLoomClient();
+  // `local-task-runner` is the real local runner (see "Runners" below): it
+  // executes the user-selected backend CLI over the prepared worktree and
+  // requires that CLI + its auth locally. Fail-closed if either is missing.
+  const runner = loom.input.runner || "local-task-runner";
 
   // Fan out task runs, then push-follow the epic until they settle.
-  await loom.taskRuns.request({ taskId: "task-1" });
-  await loom.taskRuns.request({ taskId: "task-2" });
+  await loom.taskRuns.request({ taskId: "task-1", runner });
+  await loom.taskRuns.request({ taskId: "task-2", runner });
 
   for await (const ev of loom.epics.watch({ epicId: loom.input.epicId })) {
     if (ev.type === "closed") break;
@@ -55,7 +59,41 @@ export default async function run() {
 }
 ```
 
-Durable waits park the run instead of blocking it — let `WorkflowSuspended`
+## Runners
+
+`loom.taskRuns.request({ taskId, runner })` dispatches a child `TaskRun` to a
+named runner. The built-in runners are:
+
+| Runner | What it does |
+| --- | --- |
+| `local-task-runner` | **The real local runner.** Executes the user-selected backend CLI (`claude` / `codex` / `opencode` / `gemini` / `cursor`) over the prepared worktree, parses its output into a transcript + patch, and reports the CLI's real exit status. It requires the selected backend's CLI **and** its auth (e.g. `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`/`CODEX_API_KEY`, `GEMINI_API_KEY`, `CURSOR_API_KEY`) to be available on the host. If the worktree is missing, the backend is unsupported, the CLI is not on `PATH`, auth is missing, or the CLI exits non-zero, it **fails closed** (`local_worktree_missing`, `local_backend_unsupported`, `local_backend_unavailable`, `local_backend_auth_missing`, `local_agent_failed`) — it never fabricates a "completed" result. |
+| `daytona-task-runner` | Runs the task on the **Flue runtime** inside a Daytona sandbox. |
+| `openshell-task-runner` | **Unimplemented.** Fails closed with `openshell_runner_unimplemented`; it is excluded from generated manifests and is not selectable. |
+
+The backend that `local-task-runner` runs comes from the Settings "Project
+Default Backend" (`codex` by default), with an optional per-agent override; the
+host resolves it and injects `LOOM_TASK_RUNNER_BACKEND` into the runner.
+
+A workflow that defaults `loom.input.runner || "local-task-runner"` is therefore
+opting into **real local backend-CLI execution with local auth**. To run
+elsewhere, pass `runner` explicitly (e.g. `"daytona-task-runner"`).
+
+> **No fake/no-op default.** `local-task-runner` is no longer a stub. A task run
+> only reports `completed` when its runner produced real execution evidence; an
+> empty/missing runner result is rejected as `invalid_task_result` rather than
+> normalized to success.
+
+### Test/demo gates (disabled by default)
+
+Two behaviors exist only for tests/demos and are **off** unless explicitly
+enabled by an operator environment variable:
+
+| Env var | Effect when `=1` |
+| --- | --- |
+| `LOOM_DRIVER_ENABLE_TEST_NOOP_PROVIDER` | Enables the `noop` test provider that auto-completes a task run. Disabled (default) and `noop` requested → fail closed with `provider_unsupported`. |
+| `LOOM_DAYTONA_TASK_RUNNER_ENABLE_DEMO_MODES` | Enables the Daytona `e2e-smoke` / `slack-pr-chain` demo modes. Disabled (default) and one of those modes requested → `daytona_demo_mode_disabled`. |
+
+Durable waits suspend the run instead of blocking it — let `WorkflowSuspended`
 propagate (or rethrow it) and the platform resumes the run when the event
 arrives:
 
@@ -68,7 +106,7 @@ try {
   });
   if (res.status === "timed_out") return loom.needsReview({ summary: "PR never merged" });
 } catch (err) {
-  if (isWorkflowSuspended(err)) throw err; // park; the run resumes here
+  if (isWorkflowSuspended(err)) throw err; // suspend; the run resumes here
   throw err;
 }
 ```
@@ -109,8 +147,8 @@ Client env (injected by the driver — you normally set none of these):
 
 ## Operation reference
 
-Full signatures and JSDoc live in [`flue.d.ts`](./flue.d.ts) — the published
-types are the reference. Namespaced surface of `FlueDriverClient`
+Full signatures and JSDoc live in [`driver.d.ts`](./driver.d.ts) — the published
+types are the reference. Namespaced surface of `LoomDriverClient`
 (`createLoomClient()` / `createLoomDriverClient()`):
 
 | Namespace | Operations |
@@ -120,7 +158,7 @@ types are the reference. Namespaced surface of `FlueDriverClient`
 | `tasks` | `claimReady`, `complete`, `release` |
 | `taskRuns` | `request`, `get`, `await` (client-side polling; prefer `epics.watch`), `active`, `recoverStale` |
 | `connectors` | `github.merge` / `github.postReview` (require `expectedHeadSha`), `github.readPullRequest`, `github.listPulls`, `github.compare`, `github.postIssueComment`, `slack.post`, `slack.readConversations`, `datadog.readMonitors`, `datadog.readAlert`, `datadog.declareIncident`, `dispatch` |
-| `events` | `await` (durable; throws `WorkflowSuspended` on park), `list` |
+| `events` | `await` (durable; throws `WorkflowSuspended` on suspension), `list` |
 | `workflows` | `start`, `await` (shares the awaitIndex counter with `events.await`) |
 | results | `completed`, `failed`, `needsReview` — terminal statuses `completed` / `failed` / `needs_review` / `cancelled` |
 
@@ -138,7 +176,7 @@ published as `DriverApiErrorCode`.
 honor it with your own loop:
 
 ```js
-import { DriverApiError } from "@loom/sdk/flue";
+import { DriverApiError } from "@loom/sdk/driver";
 
 async function withRetry(fn, attempts = 3) {
   for (let i = 0; ; i++) {

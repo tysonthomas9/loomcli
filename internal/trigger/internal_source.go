@@ -87,7 +87,7 @@ var internalEventVerbNormalization = map[string]string{
 	"delete":   "deleted",
 	"open":     "opened",
 	"close":    "closed",
-	"park":     "parked",
+	"block":    "blocked",
 	"start":    "started",
 	"complete": "completed",
 	"finish":   "finished",
@@ -100,7 +100,7 @@ var internalEventVerbNormalization = map[string]string{
 
 // NormalizeInternalEventType lowercases the type and maps its final
 // dot-segment through the action-verb table (issue.create -> issue.created,
-// task.park -> task.parked); types whose final segment is not a known verb —
+// task.block -> task.blocked); types whose final segment is not a known verb —
 // including already-normalized ones — pass through unchanged.
 func NormalizeInternalEventType(raw string) (string, error) {
 	eventType := strings.ToLower(strings.TrimSpace(raw))
@@ -132,7 +132,7 @@ type InternalEvent struct {
 	// idempotency anchor. Required.
 	EventID string
 	// EventType is the journal-style action or already-normalized event type
-	// (issue.create, issue.created, task.parked, ...). Required.
+	// (issue.create, issue.created, task.blocked, ...). Required.
 	EventType string
 	// Origin must be workflow (default when empty) or system. External
 	// origin is reserved for the webhook ingest path and rejected here so

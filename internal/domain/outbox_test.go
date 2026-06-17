@@ -25,13 +25,6 @@ func TestTaskRunEventID(t *testing.T) {
 			want:      "tr-abc#3#taskRunCompleted",
 		},
 		{
-			name:      "parked",
-			taskRunID: "tr-9",
-			attempt:   1,
-			eventType: TaskRunEventParked,
-			want:      "tr-9#1#taskRunParked",
-		},
-		{
 			name:      "negative attempt is rendered verbatim",
 			taskRunID: "tr-x",
 			attempt:   -1,

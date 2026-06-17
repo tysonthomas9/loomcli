@@ -5,7 +5,7 @@
 //
 // See README "Quickstart: a workflow" for the push-based variant
 // (epics.watch); taskRuns.await below is the simple polling form.
-import { createLoomClient } from "@loom/sdk/flue";
+import { createLoomClient } from "@loom/sdk/driver";
 
 export default async function run() {
   const loom = createLoomClient();
@@ -15,9 +15,14 @@ export default async function run() {
   }
 
   // Fan out: one task run per task id.
+  // `local-task-runner` is the real local runner: it runs the user-selected
+  // backend CLI (claude/codex/opencode/gemini/cursor) over the worktree and
+  // requires that CLI + its auth locally, failing closed otherwise. Pass
+  // `loom.input.runner` (e.g. "daytona-task-runner") to run elsewhere.
   const runs = [];
+  const runner = loom.input.runner || "local-task-runner";
   for (const taskId of taskIds) {
-    runs.push(await loom.taskRuns.request({ taskId }));
+    runs.push(await loom.taskRuns.request({ taskId, runner }));
   }
 
   // Fan in: wait for each run to settle (client-side polling).

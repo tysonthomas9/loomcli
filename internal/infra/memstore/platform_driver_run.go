@@ -267,14 +267,14 @@ func (s *driverRunStore) Finish(_ context.Context, ws, runID string, finish stor
 	return cloneDriverRun(run), nil
 }
 
-// Suspend parks a running run in suspended_awaiting_event after its await
-// parked (chunk AW4, mirroring fleet-db's suspend_driver_run.lua, AW3). Only
+// Suspend suspends a running run in suspended_awaiting_event after its await
+// suspended (chunk AW4, mirroring fleet-db's suspend_driver_run.lua, AW3). Only
 // the owning executor — matching node + lease + fencing token, the same
 // owner guard as Finish — may suspend, and the transition releases the
 // execution slot by clearing node and lease. Suspending an already-suspended
 // run is an idempotent no-op (current row returned) so the driver-op layer
-// can retry the park->suspend leg safely. awaitInstanceKey names the await
-// cycle the run parks on; memstore requires it (interface parity with the
+// can retry the pending->suspend leg safely. awaitInstanceKey names the await
+// cycle the run suspends on; memstore requires it (interface parity with the
 // fleet-db wire) but does not persist it — the key is derivable as
 // runID#await-{n} and the payload ref lives on the satisfied await row.
 func (s *driverRunStore) Suspend(_ context.Context, ws, runID, nodeID, leaseID string, fencingToken int64, awaitInstanceKey string) (*domain.DriverRun, error) {
@@ -310,7 +310,7 @@ func (s *driverRunStore) Suspend(_ context.Context, ws, runID, nodeID, leaseID s
 // suspended_awaiting_event, recording the resolving event id so the resumed
 // execution fetches its replay payload via GetSatisfiedAwait. Of two racing
 // resume attempts (matched event vs timeout) exactly one wins; the loser —
-// and a resume hitting a run still inside the accepted park->suspend window —
+// and a resume hitting a run still inside the accepted pending->suspend window —
 // gets ErrInvalidTransition, which the resume path (AW7) tolerates and
 // retries once the suspend lands. The re-queued run is claimable again with
 // a fresh lease and fencing token.

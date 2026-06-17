@@ -28,7 +28,7 @@ type Module struct {
 	store    store.Store
 	adapters registry
 	// awaits is the dispatch-time await matcher (AW7): admitted events are
-	// matched against parked await instances right after durable dispatch.
+	// matched against pending await instances right after durable dispatch.
 	awaits *trigger.AwaitMatcher
 }
 
@@ -160,7 +160,7 @@ func (m *Module) dispatchWebhook(w http.ResponseWriter, r *http.Request, ws, nam
 }
 
 // notifyAwaits hands the admitted event to the dispatch-time await matcher
-// (AW7): exact rendered-subject-key lookup against parked awaits, RULE 4
+// (AW7): exact rendered-subject-key lookup against pending awaits, RULE 4
 // actor enforcement, atomic resolve + resume of suspended runs. Best-effort
 // after durable dispatch — a matcher error must not turn an accepted
 // delivery into a webhook failure (redelivery and the deadline machinery

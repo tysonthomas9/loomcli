@@ -16,6 +16,7 @@ describe("TaskRunClient.fromEnv", () => {
       LOOM_TASK_RUN_LEASE_ID: "lease-1",
       LOOM_TASK_RUN_LEASE_TOKEN: "lease-token",
       LOOM_TASK_RUN_FENCING_TOKEN: "42",
+      LOOM_TASK_RUN_REQUEST_JSON: JSON.stringify({ task_id: "TEST-1", runner: "local-task-runner", input: { command: "true" } }),
     }, { fetch: async () => new Response("{}") });
 
     assert.equal(client.baseUrl, "http://fleet-db:8080");
@@ -26,6 +27,24 @@ describe("TaskRunClient.fromEnv", () => {
     assert.equal(client.leaseId, "lease-1");
     assert.equal(client.leaseToken, "lease-token");
     assert.equal(client.fencingToken, 42);
+    assert.deepEqual(client.request(), { task_id: "TEST-1", runner: "local-task-runner", input: { command: "true" } });
+    assert.deepEqual(client.input(), { command: "true" });
+  });
+
+  it("rejects malformed task-run request JSON", () => {
+    assert.throws(
+      () => TaskRunClient.fromEnv({
+        LOOM_FLEET_DB_URL: "http://fleet-db:8080/",
+        LOOM_WORKSPACE: "TEST",
+        LOOM_TASK_RUN_ID: "task-run-1",
+        LOOM_TASK_RUN_NODE_ID: "node-1",
+        LOOM_TASK_RUN_LEASE_ID: "lease-1",
+        LOOM_TASK_RUN_LEASE_TOKEN: "lease-token",
+        LOOM_TASK_RUN_FENCING_TOKEN: "42",
+        LOOM_TASK_RUN_REQUEST_JSON: "{",
+      }, { fetch: async () => new Response("{}") }),
+      /LOOM_TASK_RUN_REQUEST_JSON is invalid JSON/,
+    );
   });
 
   it("requires scoped task-run credentials", () => {
@@ -257,6 +276,24 @@ describe("TaskRunClient serve transport", () => {
     assert.equal(client.apiKey, "");
   });
 
+  it("preserves int64 fencing tokens exactly in serve transport", async () => {
+    const fencingToken = "1781415319333983288";
+    let headerValue = "";
+    const client = TaskRunClient.fromEnv({
+      ...serveEnv,
+      LOOM_TASK_RUN_FENCING_TOKEN: fencingToken,
+    }, {
+      fetch: async (_url, init = {}) => {
+        headerValue = init.headers["X-Loom-Task-Run-Fencing-Token"];
+        return json({ taskRunId: "task-run-1", status: "running" });
+      },
+    });
+
+    assert.equal(client.fencingToken, fencingToken);
+    await client.heartbeat();
+    assert.equal(headerValue, fencingToken);
+  });
+
   it("targets serve task-run ops with lease-token auth and no fleet-db credentials", async () => {
     const calls = [];
     const fetch = async (url, init = {}) => {
@@ -274,6 +311,9 @@ describe("TaskRunClient serve transport", () => {
           task: { id: "TEST-1", title: "Do the work" },
           taskRun: { taskRunId: "task-run-1", taskId: "TEST-1", status: "running" },
         });
+      }
+      if (path.endsWith("/task-run/runtime-credential")) {
+        return json({ provider: call.json.provider, value: `${call.json.provider}-secret` });
       }
       if (path.endsWith("/task-run/heartbeat")) {
         return json({ taskRunId: "task-run-1", status: "running" });
@@ -305,6 +345,7 @@ describe("TaskRunClient serve transport", () => {
     const client = TaskRunClient.fromEnv(serveEnv, { fetch });
 
     const task = await client.getTask();
+    const credential = await client.runtimeCredentials.get({ provider: "daytona" });
     await client.heartbeat({ runtimeMetadata: { phase: "starting" } });
     await client.logs.append({ stream: "stdout", text: "starting\n" });
     const artifact = await client.artifacts.declare({
@@ -325,6 +366,7 @@ describe("TaskRunClient serve transport", () => {
 
     assert.equal(task.id, "TEST-1");
     assert.equal(task.taskRun.taskRunId, "task-run-1");
+    assert.equal(credential.value, "daytona-secret");
     assert.equal(artifact.id, "artifact-1");
     assert.equal(artifact.artifact.durableStatus, "finalized");
     assert.equal(listed.artifacts[0].id, "artifact-1");
@@ -332,6 +374,7 @@ describe("TaskRunClient serve transport", () => {
 
     assert.deepEqual(calls.map((call) => `${call.method} ${new URL(call.url).pathname}`), [
       "POST /api/workspaces/TEST/task-run/task-get",
+      "POST /api/workspaces/TEST/task-run/runtime-credential",
       "POST /api/workspaces/TEST/task-run/heartbeat",
       "POST /api/workspaces/TEST/task-run/log-append",
       "POST /api/workspaces/TEST/task-run/artifact-declare",
@@ -355,15 +398,15 @@ describe("TaskRunClient serve transport", () => {
       assert.equal("X-Actor" in call.headers, false);
     }
     // Fenced identity travels in headers, not bodies, on the serve wire.
-    assert.equal(calls[1].json.node_id, undefined);
-    assert.equal(calls[1].json.lease_id, undefined);
-    assert.equal(calls[1].json.fencing_token, undefined);
-    assert.equal(calls[3].json.metadata.idempotency_key, "artifact-key");
-    assert.equal(calls[4].headers["Content-Type"], "text/x-diff");
-    assert.deepEqual(calls[7].json.requiredArtifactIds, ["artifact-1"]);
-    assert.equal(calls[7].json.requireArtifacts, true);
-    assert.equal(calls[7].json.closeTask, true);
-    assert.equal(calls[7].json.closeReason, "done");
+    assert.equal(calls[2].json.node_id, undefined);
+    assert.equal(calls[2].json.lease_id, undefined);
+    assert.equal(calls[2].json.fencing_token, undefined);
+    assert.equal(calls[4].json.metadata.idempotency_key, "artifact-key");
+    assert.equal(calls[5].headers["Content-Type"], "text/x-diff");
+    assert.deepEqual(calls[8].json.requiredArtifactIds, ["artifact-1"]);
+    assert.equal(calls[8].json.requireArtifacts, true);
+    assert.equal(calls[8].json.closeTask, true);
+    assert.equal(calls[8].json.closeReason, "done");
   });
 
   it("surfaces serve structured error envelopes", async () => {
