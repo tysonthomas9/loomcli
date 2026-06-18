@@ -314,6 +314,7 @@ func (s *terminalSessionStore) Update(ctx context.Context, ws, terminalID string
 type artifactStore struct{ client *Client }
 
 var _ store.ArtifactStore = (*artifactStore)(nil)
+var _ store.ArtifactContentReader = (*artifactStore)(nil)
 
 func (s *artifactStore) Create(ctx context.Context, in store.ArtifactCreate) (*domain.Artifact, error) {
 	body := map[string]any{
@@ -399,6 +400,10 @@ func (s *artifactStore) UploadContent(ctx context.Context, ws, artifactID string
 		return nil, err
 	}
 	return &out, nil
+}
+
+func (s *artifactStore) ReadContent(ctx context.Context, ws, artifactID string) ([]byte, error) {
+	return s.client.doBytes(ctx, "GET", "/api/v1/"+pathEscape(ws)+"/artifacts/"+pathEscape(artifactID)+"/content")
 }
 
 func (s *artifactStore) Finalize(ctx context.Context, ws, artifactID string, finalize store.ArtifactFinalize) (*domain.Artifact, error) {

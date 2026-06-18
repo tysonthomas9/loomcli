@@ -96,6 +96,13 @@ export interface LoomTaskRunRequest {
   runnerId?: string;
   capabilities?: string[];
   leaseToken?: string;
+  repoRef?: string;
+  repo_ref?: string;
+  sandboxPlacement?: {
+    repoRef?: string;
+    repo_ref?: string;
+    [key: string]: unknown;
+  };
   /**
    * Optional task-run payload (e.g. a review diff+rubric), persisted on the
    * run and delivered verbatim to the runner via LOOM_TASK_RUN_REQUEST_JSON.

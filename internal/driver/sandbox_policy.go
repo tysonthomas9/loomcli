@@ -66,10 +66,11 @@ func launcherPlacementProvider(launcher SandboxLauncher) string {
 	}
 }
 
-// driverTrustLevel resolves the trust level for a run's driver row. A missing
-// driver is unknown = untrusted (fail closed); any other store failure is a
-// load error so a transient outage does not misclassify a trusted driver.
-func driverTrustLevel(ctx context.Context, s store.Store, run *domain.DriverRun) (domain.DriverTrustLevel, error) {
+// driverTrustLevel resolves trust for the exact driver version pinned on the
+// run. New manifests are authoritative: trusted built-ins/operator bundles
+// stamp trusted, untrusted custom submissions stamp untrusted, and explicit
+// operator approval is scoped to one version id in driver metadata.
+func driverTrustLevel(ctx context.Context, s store.Store, run *domain.DriverRun, version *domain.DriverVersion) (domain.DriverTrustLevel, error) {
 	driver, err := s.Drivers().Get(ctx, run.WorkspaceKey, run.DriverID)
 	if errors.Is(err, domain.ErrNotFound) {
 		return domain.DriverTrustUntrusted, nil
@@ -77,10 +78,7 @@ func driverTrustLevel(ctx context.Context, s store.Store, run *domain.DriverRun)
 	if err != nil {
 		return "", fmt.Errorf("load driver for trust placement policy: %w", err)
 	}
-	if !driver.TrustLevel.Trusted() {
-		return domain.DriverTrustUntrusted, nil
-	}
-	return domain.DriverTrustTrusted, nil
+	return DriverVersionEffectiveTrust(driver, version), nil
 }
 
 // refuseUntrustedPlacement is the pre-launch gate: it returns a terminal

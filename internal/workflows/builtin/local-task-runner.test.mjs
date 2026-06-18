@@ -32,6 +32,10 @@ if (process.env.FAKE_WRITE_FILE) {
     : path.join(process.cwd(), process.env.FAKE_WRITE_FILE);
   fs.writeFileSync(target, "hello from fake backend\\n");
 }
+if (process.env.FAKE_STREAM_ERROR) {
+  process.stdout.write(JSON.stringify({ type: "error", error: { message: process.env.FAKE_STREAM_ERROR } }) + "\\n");
+  process.exit(exit);
+}
 // Claude-shaped event (matched by the claude parser):
 process.stdout.write(JSON.stringify({ type: "assistant", message: { content: [{ type: "text", text: "did the work" }] } }) + "\\n");
 // Real codex exec --json shape: agent output nested under item.completed.
@@ -83,6 +87,7 @@ const ENV_KEYS = [
   "LOOM_TASK_RUN_REQUEST_JSON",
   "FAKE_EXIT_CODE",
   "FAKE_WRITE_FILE",
+  "FAKE_STREAM_ERROR",
   "FAKE_STDIN_FILE",
   "FLEET_DB_URL",
   "LOOM_FLEET_DB_URL",
@@ -159,6 +164,7 @@ describe("local-task-runner pure helpers", () => {
   });
 
   it("backendArgs mirror the Go backend builders", () => {
+    delete process.env.LOOM_OPENCODE_MODEL; // assert the no-model opencode form
     // codex no longer takes the prompt positionally: trailing "-" reads it from
     // stdin (headless / no-PTY path).
     assert.deepEqual(backendArgs("codex", "/w", "P"), [
@@ -171,11 +177,25 @@ describe("local-task-runner pure helpers", () => {
       "--approval-mode=yolo", "-p", "P", "-o", "stream-json",
     ]);
     assert.deepEqual(backendArgs("opencode", "/w", "P"), [
-      "run", "--format", "json", "--dir", "/w", "--dangerously-skip-permissions",
+      "run", "--format", "json", "--dir", "/w",
     ]);
     assert.deepEqual(backendArgs("cursor", "/w", "P"), [
       "-p", "--output-format", "stream-json", "--force", "P",
     ]);
+  });
+
+  it("backendArgs pins the opencode model from LOOM_OPENCODE_MODEL (Go parity)", () => {
+    const prev = process.env.LOOM_OPENCODE_MODEL;
+    process.env.LOOM_OPENCODE_MODEL = "openai/gpt-5.4-fast";
+    try {
+      assert.deepEqual(backendArgs("opencode", "/w", "P"), [
+        "run", "--format", "json", "--dir", "/w",
+        "--model", "openai/gpt-5.4-fast",
+      ]);
+    } finally {
+      if (prev === undefined) delete process.env.LOOM_OPENCODE_MODEL;
+      else process.env.LOOM_OPENCODE_MODEL = prev;
+    }
   });
 
   it("resolveBinary honors LOOM_<BACKEND>_BIN absolute override", () => {
@@ -193,6 +213,13 @@ describe("local-task-runner pure helpers", () => {
     fs.copyFileSync(fakeBin, aliased);
     fs.chmodSync(aliased, 0o755);
     assert.equal(resolveBinary("codex", { PATH: binDir }), aliased);
+  });
+
+  it("resolveBinary defaults cursor to cursor-agent, not the `cursor` IDE launcher", () => {
+    const aliased = path.join(binDir, "cursor-agent");
+    fs.copyFileSync(fakeBin, aliased);
+    fs.chmodSync(aliased, 0o755);
+    assert.equal(resolveBinary("cursor", { PATH: binDir }), aliased);
   });
 
   it("parseNumstat sums files and lines", () => {
@@ -248,7 +275,7 @@ describe("local-task-runner pure helpers", () => {
     assert.equal(toolUse.role, "assistant");
     assert.equal(toolUse.tool_name, "shell");
     assert.equal(toolUse.tool_input.command, "ls");
-    assert.equal(toolUse.tool_output, "x");
+    assert.equal(toolUse.output, "x");
   });
 
   it("parseStreamJSONTranscript surfaces codex reasoning items", () => {
@@ -261,6 +288,153 @@ describe("local-task-runner pure helpers", () => {
     const line = JSON.stringify({ type: "agent_message", text: "flat output" });
     const entries = parseStreamJSONTranscript("codex", line + "\n");
     assert.ok(entries.some((e) => e.role === "assistant" && e.type === "text" && e.text === "flat output"));
+  });
+
+  it("parseStreamJSONTranscript parses cursor assistant text + tool_call events", () => {
+    const lines = [
+      JSON.stringify({ type: "assistant", message: { role: "assistant", content: [{ type: "text", text: "creating it" }] } }),
+      JSON.stringify({
+        type: "tool_call",
+        subtype: "completed",
+        call_id: "tc1",
+        tool_call: { editToolCall: { args: { path: "hello.md" }, result: { success: { message: "wrote hello.md" } } }, toolCallId: "tc1" },
+      }),
+    ].join("\n");
+    const entries = parseStreamJSONTranscript("cursor", lines + "\n");
+    assert.equal(entries[0].type, "session_meta");
+    assert.ok(entries.some((e) => e.role === "assistant" && e.type === "text" && e.text === "creating it"));
+    const tool = entries.find((e) => e.type === "tool_use");
+    assert.ok(tool, "expected a tool_use entry from the cursor tool_call event");
+    assert.equal(tool.tool_name, "edit");
+    assert.equal(tool.tool_input.path, "hello.md");
+    assert.ok(String(tool.output).includes("wrote hello.md"));
+  });
+
+  it("parseStreamJSONTranscript parses opencode text + tool_use events", () => {
+    const lines = [
+      JSON.stringify({ type: "text", part: { type: "text", text: "done" } }),
+      JSON.stringify({
+        type: "tool_use",
+        part: { type: "tool", tool: "apply_patch", callID: "c1", state: { status: "completed", input: { patchText: "X" }, output: "Success" } },
+      }),
+    ].join("\n");
+    const entries = parseStreamJSONTranscript("opencode", lines + "\n");
+    assert.equal(entries[0].type, "session_meta");
+    assert.ok(entries.some((e) => e.role === "assistant" && e.type === "text" && e.text === "done"));
+    const tool = entries.find((e) => e.type === "tool_use");
+    assert.ok(tool, "expected a tool_use entry from the opencode tool_use event");
+    assert.equal(tool.tool_name, "apply_patch");
+    assert.equal(tool.tool_input.patchText, "X");
+    assert.equal(tool.output, "Success");
+  });
+
+  it("parseStreamJSONTranscript records codex file_change, dedupes item.started, and emits usage", () => {
+    const lines = [
+      JSON.stringify({ type: "item.started", item: { type: "command_execution", command: "cat hello.md" } }),
+      JSON.stringify({ type: "item.completed", item: { type: "file_change", changes: [{ path: "hello.md", kind: "add" }], status: "completed" } }),
+      JSON.stringify({ type: "item.completed", item: { type: "command_execution", command: "cat hello.md", aggregated_output: "hi\n", exit_code: 0, status: "completed" } }),
+      JSON.stringify({ type: "turn.completed", usage: { input_tokens: 100, output_tokens: 20, reasoning_output_tokens: 5 } }),
+    ].join("\n");
+    const entries = parseStreamJSONTranscript("codex", lines + "\n");
+    // file_change is recorded as an apply_patch tool_use
+    const fc = entries.find((e) => e.type === "tool_use" && e.tool_name === "apply_patch");
+    assert.ok(fc, "expected file_change to produce an apply_patch tool_use");
+    assert.equal(fc.tool_input.changes[0].path, "hello.md");
+    assert.equal(fc.tool_input.changes[0].kind, "add");
+    // the cat command appears exactly once (item.started deduped), output preserved incl. newline
+    const shells = entries.filter((e) => e.type === "tool_use" && e.tool_name === "shell");
+    assert.equal(shells.length, 1, "item.started must not duplicate the shell call");
+    assert.equal(shells[0].output, "hi\n");
+    // terminal usage entry
+    const result = entries.find((e) => e.type === "result");
+    assert.ok(result && /in=100/.test(result.text) && /out=20/.test(result.text), "expected a usage result entry");
+  });
+
+  it("parseStreamJSONTranscript captures claude tool_result outputs + thinking", () => {
+    const lines = [
+      JSON.stringify({ type: "assistant", message: { content: [{ type: "thinking", thinking: "let me plan" }, { type: "tool_use", id: "t1", name: "Read", input: { file_path: "hello.md" } }] } }),
+      JSON.stringify({ type: "user", message: { content: [{ type: "tool_result", tool_use_id: "t1", content: "1\thi from claude\n" }] } }),
+      JSON.stringify({ type: "result", subtype: "success", is_error: false, num_turns: 3, total_cost_usd: 0.18, usage: { input_tokens: 8000, output_tokens: 300 } }),
+    ].join("\n");
+    const entries = parseStreamJSONTranscript("claude", lines + "\n");
+    // thinking -> reasoning
+    assert.ok(entries.some((e) => e.type === "reasoning" && e.text === "let me plan"));
+    // tool_result (the read-back content) is captured as a tool/output entry
+    const tr = entries.find((e) => e.type === "tool_result");
+    assert.ok(tr, "expected a tool_result entry");
+    assert.equal(tr.role, "tool");
+    assert.equal(tr.tool_use_id, "t1");
+    assert.ok(tr.output.includes("hi from claude"), "the read-back content must survive");
+    // result entry with usage + cost
+    const result = entries.find((e) => e.type === "result");
+    assert.ok(result && /cost=0.18/.test(result.text) && /turns=3/.test(result.text));
+  });
+
+  it("parseStreamJSONTranscript merges cursor started+completed (keeps read input + invocation order)", () => {
+    const lines = [
+      JSON.stringify({ type: "tool_call", subtype: "started", call_id: "e1", tool_call: { editToolCall: { args: { path: "hello.md", streamContent: "hi\n" } }, toolCallId: "e1" } }),
+      JSON.stringify({ type: "tool_call", subtype: "started", call_id: "r1", tool_call: { readToolCall: { args: { path: "hello.md" } }, toolCallId: "r1" } }),
+      JSON.stringify({ type: "tool_call", subtype: "completed", call_id: "r1", tool_call: { readToolCall: { result: { error: { errorMessage: "File not found" } } }, toolCallId: "r1" } }),
+      JSON.stringify({ type: "tool_call", subtype: "completed", call_id: "e1", tool_call: { editToolCall: { result: { success: { message: "wrote" } } }, toolCallId: "e1" } }),
+    ].join("\n");
+    const entries = parseStreamJSONTranscript("cursor", lines + "\n");
+    const tools = entries.filter((e) => e.type === "tool_use");
+    // exactly two tool entries (merged, not duplicated by started/completed)
+    assert.equal(tools.length, 2);
+    // invocation order: edit issued first, then read (even though read completed first)
+    assert.equal(tools[0].tool_name, "edit");
+    assert.equal(tools[1].tool_name, "read");
+    // the read's input path (only on the started event) is preserved
+    assert.equal(tools[1].tool_input.path, "hello.md");
+    // results merged onto the right calls; the failed read is marked, the edit is not
+    assert.ok(String(tools[0].output).includes("wrote"));
+    assert.ok(!tools[0].output.startsWith("[error] "), "successful edit must not be marked");
+    assert.ok(String(tools[1].output).includes("File not found"));
+    assert.ok(tools[1].output.startsWith("[error] "), "failed read must be marked [error]");
+  });
+
+  it("parseStreamJSONTranscript keeps opencode error tool states (marked, not dropped) + accumulates usage", () => {
+    const lines = [
+      JSON.stringify({ type: "tool_use", part: { type: "tool", tool: "bash", callID: "b1", state: { status: "error", input: { command: "false" }, error: "exit 1" } } }),
+      JSON.stringify({ type: "step_finish", part: { reason: "tool-calls", tokens: { input: 100, output: 10, reasoning: 7, cache: { read: 50 } }, cost: 0.01 } }),
+      JSON.stringify({ type: "step_finish", part: { reason: "stop", tokens: { input: 20, output: 5, reasoning: 0, cache: { read: 50 } }, cost: 0.02 } }),
+    ].join("\n");
+    const entries = parseStreamJSONTranscript("opencode", lines + "\n");
+    // failed tool is present, not dropped, and marked
+    const tool = entries.find((e) => e.type === "tool_use");
+    assert.ok(tool, "error tool state must not be dropped");
+    assert.ok(tool.output.startsWith("[error] "), "error tool must be marked");
+    // usage: input/output/reasoning/cost summed, cache_read taken latest (not doubled)
+    const result = entries.find((e) => e.type === "result");
+    const usage = JSON.parse(result.output);
+    assert.equal(usage.input_tokens, 120);
+    assert.equal(usage.output_tokens, 15);
+    assert.equal(usage.reasoning_tokens, 7);
+    assert.equal(usage.cache_read_tokens, 50, "cache_read must be latest, not summed");
+  });
+
+  it("parseStreamJSONTranscript surfaces an opencode fatal stream error", () => {
+    const entries = parseStreamJSONTranscript("opencode", JSON.stringify({ type: "error", error: { message: "model overloaded" } }) + "\n");
+    const result = entries.find((e) => e.type === "result");
+    assert.ok(result && result.text.startsWith("failed: model overloaded"), "error event must mark the run failed");
+  });
+
+  it("parseStreamJSONTranscript accepts cursor usage in snake_case too", () => {
+    const entries = parseStreamJSONTranscript("cursor", JSON.stringify({ type: "result", is_error: false, usage: { input_tokens: 11, output_tokens: 2 } }) + "\n");
+    const result = entries.find((e) => e.type === "result");
+    assert.ok(result && /in=11/.test(result.text) && /out=2/.test(result.text), "snake_case usage must not be silently dropped");
+  });
+
+  it("parseStreamJSONTranscript never emits a non-RFC3339 timestamp (bad stamp cannot poison the decode)", () => {
+    const entries = parseStreamJSONTranscript("claude", JSON.stringify({ type: "user", timestamp: "not-a-date", message: { content: [{ type: "tool_result", tool_use_id: "t", content: "x" }] } }) + "\n");
+    for (const e of entries) {
+      assert.ok(!Number.isNaN(new Date(e.timestamp).getTime()), `entry timestamp must be valid RFC3339, got ${e.timestamp}`);
+    }
+  });
+
+  it("scrubToken masks multiple secrets", () => {
+    assert.equal(scrubToken("a S1 b S2 c", "S1", "S2"), "a *** b *** c");
+    assert.equal(scrubToken("https://x-access-token:abc123@github.com/o/r"), "https://x-access-token:***@github.com/o/r");
   });
 
   it("parseRepoSlug parses ssh, https, token-embedded, and owner/repo forms", () => {
@@ -348,6 +522,21 @@ describe("local-task-runner fail-closed classes", () => {
     assert.equal(out.errorClass, "local_agent_failed");
     assert.equal(out.exitCode, 3);
     assert.equal(out.runtimeMetadata.cli_exit_code, "3");
+  });
+
+  it("fails closed when opencode emits a fatal stream error despite exit 0", async () => {
+    process.env.LOOM_TASK_RUNNER_BACKEND = "opencode";
+    process.env.LOOM_WORKTREE_PATH = worktree;
+    process.env.LOOM_OPENCODE_BIN = fakeBin;
+    process.env.FAKE_EXIT_CODE = "0";
+    process.env.FAKE_STREAM_ERROR = "model rejected request";
+    const out = await run();
+    assert.equal(out.status, "failed");
+    assert.equal(out.errorClass, "local_agent_failed");
+    assert.equal(out.exitCode, 1);
+    assert.equal(out.runtimeMetadata.cli_exit_code, "0");
+    assert.equal(out.runtimeMetadata.stream_error, "model rejected request");
+    assert.match(out.errorMessage, /model rejected request/);
   });
 });
 
@@ -442,6 +631,11 @@ describe("local-task-runner isolated worktree", () => {
     assert.equal(out.base_ref, head, "top-level base_ref should equal host HEAD");
     assert.equal(out.patch_base_ref, head);
     assert.equal(out.runtimeMetadata.base_ref, head);
+    assert.ok(
+      out.runtimeMetadata.exec_worktree_path.startsWith(path.dirname(worktree) + path.sep),
+      "isolated worktree should be created as a sibling of the host repo",
+    );
+    assert.notEqual(out.runtimeMetadata.exec_worktree_path, worktree);
 
     // The host worktree must be CLEAN — the file was created in the isolated
     // worktree, not the host. (git add -N runs in the isolated worktree only.)

@@ -303,6 +303,36 @@ func TestControlPlaneClientArtifactUploadContent(t *testing.T) {
 	}
 }
 
+func TestControlPlaneClientArtifactReadContent(t *testing.T) {
+	body := []byte("transcript bytes")
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/api/v1/WS/artifacts/transcript-1/content" {
+			t.Fatalf("unexpected request %s %s", r.Method, r.URL.String())
+		}
+		if got := r.Header.Get("Accept"); got != "*/*" {
+			t.Fatalf("accept = %q, want */*", got)
+		}
+		if got := r.Header.Get("X-Actor"); got != "tester" {
+			t.Fatalf("actor = %q, want tester", got)
+		}
+		w.Header().Set("Content-Type", "application/jsonl")
+		_, _ = w.Write(body)
+	}))
+	defer ts.Close()
+
+	client, err := New(Config{BaseURL: ts.URL, Actor: "tester"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := client.Artifacts().(store.ArtifactContentReader).ReadContent(t.Context(), "WS", "transcript-1")
+	if err != nil {
+		t.Fatalf("read content: %v", err)
+	}
+	if !bytes.Equal(got, body) {
+		t.Fatalf("body = %q, want %q", got, body)
+	}
+}
+
 func TestControlPlaneClientArtifactFinalize(t *testing.T) {
 	size := int64(14)
 	contentHash := "sha256:test"

@@ -256,6 +256,7 @@ build_and_register_driver() {
       --name epic-runner \
       --workflow epic-runner \
       --source-ref workflows/epic-runner.ts \
+      --trusted \
       --activate \
       --json
   ) >"$TMP_ROOT/register.json"

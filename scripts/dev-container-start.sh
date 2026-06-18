@@ -73,6 +73,7 @@ mirror_codex_rw() {
     local file
     for file in \
         auth.json \
+        .credentials.json \
         AGENTS.md \
         installation_id \
         internal_storage.json \

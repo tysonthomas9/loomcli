@@ -309,6 +309,41 @@ func (c *Client) doRaw(ctx context.Context, method, path string, body io.Reader,
 	return c.doRequest(req, method, path, out)
 }
 
+func (c *Client) doBytes(ctx context.Context, method, path string) ([]byte, error) {
+	c.mu.RLock()
+	auth := fleethttp.Auth{BearerToken: c.authToken, APIKey: c.apiKey, Actor: c.actor}
+	c.mu.RUnlock()
+
+	req, err := http.NewRequestWithContext(ctx, method, c.baseURL+path, nil)
+	if err != nil {
+		return nil, fmt.Errorf("fleetdb: build request: %w", err)
+	}
+	req.Header.Set("Accept", "*/*")
+	auth.Apply(req)
+
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("fleetdb: %s %s: %w", method, path, err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		respBody, readErr := io.ReadAll(io.LimitReader(resp.Body, maxResponseBody))
+		if readErr != nil {
+			return nil, fmt.Errorf("fleetdb: %s %s: HTTP %d (read body: %w)", method, path, resp.StatusCode, readErr)
+		}
+		return nil, classifyHTTPError(method, path, resp.StatusCode, respBody)
+	}
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBody+1))
+	if err != nil {
+		return nil, fmt.Errorf("fleetdb: read response (%s %s): %w", method, path, err)
+	}
+	if len(body) > maxResponseBody {
+		return nil, fmt.Errorf("fleetdb: %s %s: response body exceeds %d bytes", method, path, maxResponseBody)
+	}
+	return body, nil
+}
+
 func (c *Client) doRequest(req *http.Request, method, path string, out any) error {
 	resp, err := c.http.Do(req)
 	if err != nil {

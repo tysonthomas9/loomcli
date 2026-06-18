@@ -8,7 +8,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/tysonthomas9/loomcli/internal/cli/backends"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	"github.com/tysonthomas9/loomcli/internal/runtimepreflight"
 	"github.com/tysonthomas9/loomcli/internal/store"
@@ -23,8 +22,8 @@ func TestCreateWorkflowRunPreflightFailsClosedForLocalRunner(t *testing.T) {
 	installFakeFlueBuild(t)
 	t.Chdir(t.TempDir())
 
-	restore := runtimepreflight.SetHealthCheckerForTest(func(string) (backends.HealthStatus, bool) {
-		return backends.HealthStatus{Installed: false, APIKeySet: false, Message: "codex binary not found on PATH"}, true
+	restore := runtimepreflight.SetHealthCheckerForTest(func(string) (runtimepreflight.HealthStatus, bool) {
+		return runtimepreflight.HealthStatus{Installed: false, APIKeySet: false, Message: "codex binary not found on PATH"}, true
 	})
 	defer restore()
 
@@ -59,8 +58,8 @@ func TestCreateWorkflowRunPreflightPassesWhenHealthy(t *testing.T) {
 	installFakeFlueBuild(t)
 	t.Chdir(t.TempDir())
 
-	restore := runtimepreflight.SetHealthCheckerForTest(func(string) (backends.HealthStatus, bool) {
-		return backends.HealthStatus{Healthy: true, Installed: true, APIKeySet: true, Message: "ready"}, true
+	restore := runtimepreflight.SetHealthCheckerForTest(func(string) (runtimepreflight.HealthStatus, bool) {
+		return runtimepreflight.HealthStatus{Healthy: true, Installed: true, APIKeySet: true, Message: "ready"}, true
 	})
 	defer restore()
 
@@ -84,9 +83,9 @@ func TestCreateWorkflowRunPreflightSkipsExplicitNonLocalRunner(t *testing.T) {
 	t.Chdir(t.TempDir())
 
 	called := false
-	restore := runtimepreflight.SetHealthCheckerForTest(func(string) (backends.HealthStatus, bool) {
+	restore := runtimepreflight.SetHealthCheckerForTest(func(string) (runtimepreflight.HealthStatus, bool) {
 		called = true
-		return backends.HealthStatus{Installed: false}, true
+		return runtimepreflight.HealthStatus{Installed: false}, true
 	})
 	defer restore()
 

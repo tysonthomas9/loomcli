@@ -94,6 +94,15 @@ describe("daytona-task-runner demo-mode gate (design §4.5)", () => {
       const out = await mod.run({ payload: request(mode) });
       assert.equal(out.errorClass, "daytona_demo_mode_disabled");
     });
+
+    it(`fails closed for ${mode} when request input tries to enable demo modes`, async () => {
+      delete process.env.LOOM_DAYTONA_TASK_RUNNER_ENABLE_DEMO_MODES;
+      const payload = request(mode);
+      payload.input.enableDemoModes = true;
+      payload.input.enableDaytonaDemoModes = true;
+      const out = await mod.run({ payload });
+      assert.equal(out.errorClass, "daytona_demo_mode_disabled");
+    });
   }
 
   it("does NOT fire the demo gate when the flag is '1' (proceeds past the gate)", async () => {

@@ -75,7 +75,7 @@ var setupCommandSpecs = map[string]setupCommandSpec{
 				"'Set CURSOR_API_KEY in the environment that launches Loom, then restart and click Recheck.'",
 				"'For this terminal only, you can run: export CURSOR_API_KEY=...'",
 			}, " "),
-			"test": "cursor --version",
+			"test": "cursor-agent --version",
 		},
 		messages: map[string]string{
 			"login":     "The setup terminal shows how Loom detects Cursor credentials. You can take control there to configure this shell.",

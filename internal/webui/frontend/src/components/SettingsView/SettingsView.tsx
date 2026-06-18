@@ -84,17 +84,20 @@ export function SettingsView({
     isSaving: isSavingLocalSettings,
     error: localSettingsError,
     updateAgentRuntime,
+    updateLocalTaskRunner,
     updateRedis,
     updateRuntimeCredentials,
   } = useLocalSettings();
   const redisSettings = localSettings?.fleetdb_redis;
   const runtimeSettings = localSettings?.agent_runtime;
+  const localTaskRunnerSettings = localSettings?.local_task_runner;
   const runtimeCredentials = localSettings?.runtime_credentials;
   const [redisForm, setRedisForm] = useState<RedisFormState>(EMPTY_REDIS_FORM);
   const [agentRuntime, setAgentRuntime] =
     useState<AgentRuntimeDefault>("local");
   const [daytonaApiKey, setDaytonaApiKey] = useState("");
   const [githubToken, setGithubToken] = useState("");
+  const [opencodeModel, setOpencodeModel] = useState("");
 
   const { fontFamily, fontSize, setFontFamily, setFontSize } =
     useTerminalFont();
@@ -126,6 +129,10 @@ export function SettingsView({
     if (!runtimeSettings?.default) return;
     setAgentRuntime(runtimeSettings.default);
   }, [runtimeSettings?.default]);
+
+  useEffect(() => {
+    setOpencodeModel(localTaskRunnerSettings?.opencode_model ?? "");
+  }, [localTaskRunnerSettings?.opencode_model]);
 
   const rootClassName = [styles.settingsView, className]
     .filter(Boolean)
@@ -263,6 +270,21 @@ export function SettingsView({
     const ok = await updateAgentRuntime({ default: agentRuntime });
     showToast(
       ok ? "Agent runtime settings saved" : "Failed to save agent runtime",
+      {
+        type: ok ? "success" : "error",
+      },
+    );
+  };
+
+  const handleLocalTaskRunnerSave = async () => {
+    if (isSavingLocalSettings) return;
+    const ok = await updateLocalTaskRunner({
+      opencode_model: opencodeModel.trim(),
+    });
+    showToast(
+      ok
+        ? "Local task runner settings saved"
+        : "Failed to save local task runner settings",
       {
         type: ok ? "success" : "error",
       },
@@ -479,6 +501,41 @@ export function SettingsView({
               data-testid="agent-runtime-save-button"
             >
               {isSavingLocalSettings ? "Saving..." : "Save Agent Runtime"}
+            </button>
+          </div>
+          <div className={styles.formGroup}>
+            <label className={styles.label} htmlFor="opencode-model-input">
+              Opencode Model
+            </label>
+            <p className={styles.description}>
+              Used by app-triggered local epic runs when the project backend is
+              opencode.
+            </p>
+            <input
+              id="opencode-model-input"
+              type="text"
+              className={styles.input}
+              value={opencodeModel}
+              onChange={(e) => setOpencodeModel(e.target.value)}
+              placeholder="provider/model"
+              data-testid="opencode-model-input"
+            />
+          </div>
+          <div className={styles.formGroup}>
+            <button
+              type="button"
+              className={styles.saveButton}
+              disabled={
+                isSavingLocalSettings ||
+                opencodeModel.trim() ===
+                  (localTaskRunnerSettings?.opencode_model ?? "")
+              }
+              onClick={handleLocalTaskRunnerSave}
+              data-testid="local-task-runner-save-button"
+            >
+              {isSavingLocalSettings
+                ? "Saving..."
+                : "Save Local Task Runner Settings"}
             </button>
           </div>
           <div className={styles.fieldGrid}>

@@ -12,6 +12,7 @@ export interface LocalSettingsData {
   version: number;
   fleetdb_redis: LocalRedisSettings;
   agent_runtime: LocalAgentRuntimeSettings;
+  local_task_runner: LocalTaskRunnerSettings;
   runtime_credentials: RuntimeCredentialsStatus;
 }
 
@@ -19,6 +20,10 @@ export type AgentRuntimeDefault = "local" | "daytona";
 
 export interface LocalAgentRuntimeSettings {
   default: AgentRuntimeDefault;
+}
+
+export interface LocalTaskRunnerSettings {
+  opencode_model?: string;
 }
 
 export interface RuntimeCredentialStatus {
@@ -43,6 +48,10 @@ export interface UpdateLocalRedisSettings {
 
 export interface UpdateAgentRuntimeSettings {
   default?: AgentRuntimeDefault;
+}
+
+export interface UpdateLocalTaskRunnerSettings {
+  opencode_model?: string;
 }
 
 export interface UpdateRuntimeCredential {
@@ -93,6 +102,21 @@ export async function updateAgentRuntimeSettings(
     throw new ApiError(
       0,
       response.error ?? "Failed to save agent runtime settings",
+    );
+  }
+  return response.data;
+}
+
+export async function updateLocalTaskRunnerSettings(
+  localTaskRunner: UpdateLocalTaskRunnerSettings,
+): Promise<LocalSettingsData> {
+  const response = await patch<LocalSettingsEnvelope>("/api/local/settings", {
+    local_task_runner: localTaskRunner,
+  });
+  if (!response.success || !response.data) {
+    throw new ApiError(
+      0,
+      response.error ?? "Failed to save local task runner settings",
     );
   }
   return response.data;

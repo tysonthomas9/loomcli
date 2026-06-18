@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # run-github-review-codex-stack.sh — bring up the A1 github-review-agent stack
 # in one Podman container, end to end, using the SAME proven container
-# machinery as scripts/run-slack-codex-epic-runner-stack.sh (Dockerfile.dev
+# machinery as smoke-test/smoke-test-slack-epic-runner-stack.sh (Dockerfile.dev
 # image, embedded fleet-db sidecar, host ~/.codex mounted read-only with a
 # writable CODEX_HOME, LOOM_DRIVER_EXECUTOR, health wait, builtin-workflow
 # flue-dist registration).
@@ -336,6 +336,7 @@ register_review_workflow() {
       --workflow "$A1_WORKFLOW_NAME" \
       --source-ref "builtin://workflows/${A1_WORKFLOW_NAME}/versions/${digest}" \
       --source-digest "$digest" \
+      --trusted \
       --activate \
       --json >/dev/null
   # build_dir is left for the OS temp reaper — this script never runs shell rm.

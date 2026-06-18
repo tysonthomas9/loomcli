@@ -23,11 +23,11 @@ const SUPPORTED = {
   codex: "codex",
   opencode: "opencode",
   gemini: "gemini",
-  cursor: "cursor",
+  cursor: "cursor-agent", // the headless agent CLI; `cursor` is the IDE launcher
 };
 
 // STREAM_JSON_BACKENDS get first-class stream-json -> canonical transcript_entries.
-const STREAM_JSON_BACKENDS = new Set(["codex", "claude"]);
+const STREAM_JSON_BACKENDS = new Set(["codex", "claude", "cursor", "opencode"]);
 
 export async function run(ctx = {}) {
   const request = await requestPayload(ctx);
@@ -159,9 +159,18 @@ export async function run(ctx = {}) {
     return failed(prFailure.class, prFailure.message, { taskRunId, taskId, backend, request, logs, headBefore });
   }
 
-  const transcriptEntries = STREAM_JSON_BACKENDS.has(backend)
+  let transcriptEntries = STREAM_JSON_BACKENDS.has(backend)
     ? parseStreamJSONTranscript(backend, stdout)
     : minimalTranscript(backend, taskId || taskRunId, prompt, stdout);
+  // Fall back to the prompt + stdout tail if a stream-json backend yielded no
+  // parseable content (non-JSON output / early exit), so evidence isn't lost.
+  if (STREAM_JSON_BACKENDS.has(backend) && !transcriptEntries.some((e) => e.role !== "system")) {
+    transcriptEntries = minimalTranscript(backend, taskId || taskRunId, prompt, stdout);
+  }
+  // Tool outputs now persist (the `output` field) and the agent inherits host
+  // secrets — scrub known secret values that may have been echoed into output.
+  transcriptEntries = redactTranscriptSecrets(transcriptEntries);
+  const streamFailure = streamFailureMessage(backend, stdout);
 
   const metadata = stringMetadata({
     task_runner: "local-task-runner",
@@ -182,6 +191,9 @@ export async function run(ctx = {}) {
     lines_removed: String(patchInfo.linesRemoved),
     cli_exit_code: String(exitCode),
   });
+  if (streamFailure) {
+    metadata.stream_error = streamFailure;
+  }
 
   if (prInfo) {
     metadata.delivery = "pull_request";
@@ -194,12 +206,16 @@ export async function run(ctx = {}) {
     metadata.delivery = "patch_back";
   }
 
-  if (exitCode !== 0) {
+  if (exitCode !== 0 || streamFailure) {
+    const failureExitCode = exitCode !== 0 ? exitCode : 1;
+    const failureMessage = streamFailure
+      ? `${backend} CLI reported stream error: ${streamFailure}`
+      : `${backend} CLI exited with code ${exitCode}`;
     return {
       status: "failed",
-      exitCode,
+      exitCode: failureExitCode,
       errorClass: "local_agent_failed",
-      errorMessage: `${backend} CLI exited with code ${exitCode}`,
+      errorMessage: failureMessage,
       logs: logs.join("\n") + "\n",
       logsRef: "logs://" + taskRunId,
       transcript_entries: transcriptEntries,
@@ -311,9 +327,16 @@ export function backendArgs(backend, worktree, prompt) {
     case "gemini":
       // defaultGeminiNonInteractiveInvoker: --approval-mode=yolo -p <prompt> -o stream-json.
       return ["--approval-mode=yolo", "-p", prompt, "-o", "stream-json"];
-    case "opencode":
-      // defaultOpenCodeNonInteractiveInvoker: run --format json --dir <worktree> --dangerously-skip-permissions; prompt via stdin.
-      return ["run", "--format", "json", "--dir", worktree, "--dangerously-skip-permissions"];
+    case "opencode": {
+      // defaultOpenCodeNonInteractiveInvoker: run --format json --dir <worktree>; prompt via stdin.
+      // Mirror backend_opencode.go openCodeModelArgs(): pin the model from LOOM_OPENCODE_MODEL when set.
+      const opencodeArgs = ["run", "--format", "json", "--dir", worktree];
+      const opencodeModel = stringValue(process.env.LOOM_OPENCODE_MODEL);
+      if (opencodeModel) {
+        opencodeArgs.push("--model", opencodeModel);
+      }
+      return opencodeArgs;
+    }
     case "cursor":
       // defaultCursorNonInteractiveInvoker: -p --output-format stream-json --force <prompt>.
       return ["-p", "--output-format", "stream-json", "--force", prompt];
@@ -385,7 +408,10 @@ async function setupIsolatedWorktree(hostWorktree, taskRunId, logs) {
     return null;
   }
   const safe = String(taskRunId || "task").replace(/[^A-Za-z0-9_.-]/g, "_");
-  const isolatedPath = path.join(os.tmpdir(), "loom-local-runner-" + safe + "-" + Date.now());
+  // Keep the isolated worktree near the host repo instead of under os.tmpdir().
+  // Some local CLIs, notably OpenCode, enforce project-directory permissions and
+  // auto-reject writes to temp/external directories even when --dir points there.
+  const isolatedPath = path.join(path.dirname(hostWorktree), ".loom-local-runner-" + safe + "-" + Date.now());
   const add = await execBackend("git", ["-C", hostWorktree, "worktree", "add", "--detach", isolatedPath, "HEAD"], {
     cwd: hostWorktree,
   });
@@ -511,12 +537,45 @@ async function githubFetch(token, method, apiPath, body) {
 // scrubToken removes a credential from text before it is surfaced in an error
 // message or log, covering both the bare token and any `x-access-token:...@`
 // URL form.
-export function scrubToken(text, token) {
+export function scrubToken(text, ...tokens) {
   let out = String(text || "");
-  if (token) {
-    out = out.split(token).join("***");
+  for (const token of tokens) {
+    if (token) {
+      out = out.split(token).join("***");
+    }
   }
   return out.replace(/x-access-token:[^@\s]+@/g, "x-access-token:***@");
+}
+
+// redactTranscriptSecrets masks known secret env values that the agent could
+// have echoed into tool output/text — now persisted via the `output` field —
+// before the transcript is written.
+function redactTranscriptSecrets(entries, env = process.env) {
+  const names = [
+    "GITHUB_TOKEN", "GH_TOKEN", "LOOM_PR_GIT_PASSWORD",
+    "ANTHROPIC_API_KEY", "OPENAI_API_KEY", "CODEX_API_KEY",
+    "GEMINI_API_KEY", "GOOGLE_API_KEY", "CURSOR_API_KEY",
+    "LOOM_FLEET_DB_API_KEY", "LOOM_TASK_RUN_LEASE_TOKEN",
+  ];
+  const secrets = [];
+  for (const name of names) {
+    const value = env[name];
+    if (value && String(value).length >= 8) {
+      secrets.push(String(value));
+    }
+  }
+  if (!secrets.length) {
+    return entries;
+  }
+  for (const entry of entries) {
+    if (entry.text) {
+      entry.text = scrubToken(entry.text, ...secrets);
+    }
+    if (entry.output) {
+      entry.output = scrubToken(entry.output, ...secrets);
+    }
+  }
+  return entries;
 }
 
 // deliverPullRequest commits the isolated worktree's changes onto a branch,
@@ -642,15 +701,62 @@ export function parseNumstat(numstat) {
 }
 
 // parseStreamJSONTranscript turns a backend's stream-json stdout into canonical
-// Loom transcript entries. codex and claude emit JSON-per-line event streams;
-// this extracts assistant text and tool calls. Lines that do not parse as JSON
-// are ignored (the raw stdout is still preserved in logs).
+// Loom transcript entries. codex, claude, cursor, and opencode emit JSON-per-line
+// event streams. It parses every line into an event array, then a per-backend
+// transform builds faithful entries: assistant/user text, reasoning, tool CALLS
+// AND tool RESULTS, plus a terminal `result` entry carrying status + token usage.
+// Entry fields match sessions/transcript.Event exactly (note: tool output is the
+// `output` field, not `tool_output`); lines that do not parse as JSON are ignored
+// (the raw stdout is still preserved in logs).
 export function parseStreamJSONTranscript(backend, stdout) {
-  const entries = [];
-  const now = new Date().toISOString();
-  let seq = 1;
-  entries.push({ seq: seq++, timestamp: now, role: "system", type: "session_meta", text: `local-cli-${backend} session` });
+  const events = [];
+  for (const line of String(stdout || "").split("\n")) {
+    const trimmed = line.trim();
+    if (!trimmed) {
+      continue;
+    }
+    const start = trimmed.indexOf("{");
+    if (start < 0) {
+      continue;
+    }
+    try {
+      events.push(JSON.parse(trimmed.slice(start)));
+    } catch {
+      // non-JSON line; preserved in logs, ignored for the transcript
+    }
+  }
+  const build =
+    backend === "claude" ? claudeTranscript
+      : backend === "cursor" ? cursorTranscript
+        : backend === "opencode" ? opencodeTranscript
+          : codexTranscript;
+  const fallbackTs = new Date().toISOString();
+  // Backends stamp only some events (e.g. claude stamps user/tool_result events
+  // but not assistant ones). Resolve each entry's own timestamp, then forward-fill
+  // gaps with the last real timestamp (leading with the first real one) so the
+  // sequence stays monotonic — mixing real and parse-time stamps would scramble
+  // any timestamp-ordered view of the transcript.
+  const resolved = build(events).map((entry) => ({ entry, ts: toISO(entry.timestamp) }));
+  const firstReal = (resolved.find((item) => item.ts) || {}).ts || fallbackTs;
+  const entries = [{ seq: 1, timestamp: firstReal, role: "system", type: "session_meta", text: `local-cli-${backend} session` }];
+  let seq = 2;
+  let cursorTs = firstReal;
+  for (const { entry, ts } of resolved) {
+    // Advance only forward (ISO strings compare chronologically): gaps and any
+    // rare out-of-order stamp inherit the last value, keeping it non-decreasing.
+    if (ts && ts > cursorTs) {
+      cursorTs = ts;
+    }
+    const { timestamp, ...rest } = entry;
+    entries.push({ seq: seq++, timestamp: cursorTs, ...rest });
+  }
+  return entries;
+}
 
+function streamFailureMessage(backend, stdout) {
+  if (backend !== "opencode") {
+    return "";
+  }
   for (const line of String(stdout || "").split("\n")) {
     const trimmed = line.trim();
     if (!trimmed) {
@@ -666,86 +772,413 @@ export function parseStreamJSONTranscript(backend, stdout) {
     } catch {
       continue;
     }
-    const extracted = backend === "claude" ? claudeEventEntries(event) : codexEventEntries(event);
-    for (const entry of extracted) {
-      entries.push({ seq: seq++, timestamp: now, ...entry });
+    if (!event || typeof event !== "object" || event.type !== "error") {
+      continue;
     }
+    const msg = rawString(event.error && event.error.message)
+      || rawString(event.error && event.error.data && event.error.data.message)
+      || rawString(event.message);
+    return msg || "opencode reported an error";
   }
-  return entries;
+  return "";
 }
 
-function claudeEventEntries(event) {
+// rawString preserves the exact value (incl. newlines); use for text/output
+// content where fidelity matters. stringValue (trimmed) is for names/ids.
+function rawString(value) {
+  return value === undefined || value === null ? "" : String(value);
+}
+
+// toISO normalizes a per-event timestamp: epoch-ms number -> ISO, ISO string
+// passthrough, else "" (caller falls back to parse time).
+function toISO(ts) {
+  if (typeof ts === "number" && Number.isFinite(ts)) {
+    return new Date(ts).toISOString();
+  }
+  if (typeof ts === "string" && ts.trim()) {
+    // Normalize to strict RFC3339 — Go unmarshals transcript.Event.Timestamp as
+    // time.Time, so a single non-RFC3339 string would fail the whole result
+    // decode and turn a successful run into a task failure. Reject unparseable.
+    const parsed = new Date(ts);
+    return Number.isNaN(parsed.getTime()) ? "" : parsed.toISOString();
+  }
+  return "";
+}
+
+// normalizeUsage keeps only finite numeric token/cost fields; null if empty.
+function normalizeUsage(fields) {
+  const out = {};
+  for (const [key, value] of Object.entries(fields)) {
+    if (value == null) {
+      continue;
+    }
+    const num = Number(value);
+    if (Number.isFinite(num)) {
+      out[key] = num;
+    }
+  }
+  return Object.keys(out).length ? out : null;
+}
+
+// accumulateUsage sums per-call usage objects, for backends that report usage per
+// step (e.g. opencode step_finish) so the terminal entry is the session total.
+function accumulateUsage(prev, summed, latest) {
+  const out = { ...(prev || {}) };
+  for (const [key, value] of Object.entries(summed)) {
+    if (value == null) {
+      continue;
+    }
+    const num = Number(value);
+    if (Number.isFinite(num)) {
+      out[key] = (out[key] || 0) + num;
+    }
+  }
+  // `latest` fields (e.g. cache_read, the same cached prompt re-read each step) are
+  // taken from the most recent step rather than summed, to avoid double-counting.
+  for (const [key, value] of Object.entries(latest || {})) {
+    if (value == null) {
+      continue;
+    }
+    const num = Number(value);
+    if (Number.isFinite(num)) {
+      out[key] = num;
+    }
+  }
+  return Object.keys(out).length ? out : null;
+}
+
+// resultEntry is the terminal transcript entry: completion status + token usage.
+// transcript.Event has no structured usage field, so the readable summary goes in
+// `text` and the raw object in `output`.
+function resultEntry(status, usage, timestamp) {
+  const bits = [];
+  if (status) {
+    bits.push(status);
+  }
+  if (usage) {
+    const parts = [];
+    const labels = {
+      input_tokens: "in", output_tokens: "out", cache_read_tokens: "cache_read", cache_write_tokens: "cache_write",
+      reasoning_tokens: "reasoning", cost_usd: "cost", duration_ms: "duration_ms", num_turns: "turns",
+    };
+    for (const [key, label] of Object.entries(labels)) {
+      if (usage[key] != null) {
+        parts.push(`${label}=${usage[key]}`);
+      }
+    }
+    if (parts.length) {
+      bits.push(parts.join(" "));
+    }
+  }
+  const entry = { role: "system", type: "result", text: bits.join(" | ") || "completed" };
+  if (usage) {
+    entry.output = JSON.stringify(usage);
+  }
+  if (timestamp) {
+    entry.timestamp = timestamp;
+  }
+  return entry;
+}
+
+// toolResultText flattens a tool_result content payload (string or content[]).
+function toolResultText(content) {
+  if (typeof content === "string") {
+    return content;
+  }
+  if (Array.isArray(content)) {
+    return content
+      .map((block) => (typeof block === "string" ? block : rawString(block && block.text)))
+      .filter(Boolean)
+      .join("\n");
+  }
+  return rawString(content);
+}
+
+// claudeTranscript: assistant text/thinking/tool_use, user tool_result (the tool
+// OUTPUTS, which claude emits as separate type:"user" events), and the terminal
+// result event (status + usage + cost).
+function claudeTranscript(events) {
   const out = [];
-  if (event && event.type === "assistant" && event.message && Array.isArray(event.message.content)) {
-    for (const block of event.message.content) {
-      if (block && block.type === "text" && stringValue(block.text)) {
-        out.push({ role: "assistant", type: "text", text: String(block.text) });
-      } else if (block && block.type === "tool_use") {
+  let usage = null;
+  let status = null;
+  let lastTs;
+  for (const event of events) {
+    if (!event || typeof event !== "object") {
+      continue;
+    }
+    const ts = event.timestamp; // claude stamps user/tool_result events
+    if (ts) {
+      lastTs = ts;
+    }
+    if (event.type === "assistant" && event.message && Array.isArray(event.message.content)) {
+      for (const block of event.message.content) {
+        if (!block || typeof block !== "object") {
+          continue;
+        }
+        if (block.type === "text" && stringValue(block.text)) {
+          out.push({ role: "assistant", type: "text", text: rawString(block.text), timestamp: ts });
+        } else if (block.type === "thinking" && stringValue(block.thinking)) {
+          out.push({ role: "assistant", type: "reasoning", text: rawString(block.thinking), timestamp: ts });
+        } else if (block.type === "tool_use") {
+          out.push({ role: "assistant", type: "tool_use", tool_name: stringValue(block.name), tool_use_id: stringValue(block.id), tool_input: block.input, timestamp: ts });
+        }
+      }
+    } else if (event.type === "user" && event.message && Array.isArray(event.message.content)) {
+      for (const block of event.message.content) {
+        if (block && block.type === "tool_result") {
+          out.push({ role: "tool", type: "tool_result", tool_use_id: stringValue(block.tool_use_id), output: toolResultText(block.content), timestamp: ts });
+        }
+      }
+    } else if (event.type === "result") {
+      usage = normalizeUsage({
+        input_tokens: event.usage && event.usage.input_tokens,
+        output_tokens: event.usage && event.usage.output_tokens,
+        cache_read_tokens: event.usage && event.usage.cache_read_input_tokens,
+        cache_write_tokens: event.usage && event.usage.cache_creation_input_tokens,
+        cost_usd: event.total_cost_usd,
+        duration_ms: event.duration_ms,
+        num_turns: event.num_turns,
+      });
+      status = event.is_error ? "failed" : "completed";
+    }
+  }
+  if (status || usage) {
+    out.push(resultEntry(status, usage, lastTs));
+  }
+  return out;
+}
+
+// codexTranscript: codex `exec --json` nests output under item.completed
+// (agent_message / reasoning / command_execution / file_change). Only the
+// `item.completed` event is emitted (item.started is its in-progress duplicate),
+// file_change records the edit, command_execution preserves output + exit status,
+// and turn.completed yields the usage entry.
+function codexTranscript(events) {
+  const out = [];
+  let usage = null;
+  let status = null;
+  for (const event of events) {
+    if (!event || typeof event !== "object") {
+      continue;
+    }
+    if (event.type === "turn.completed") {
+      usage = normalizeUsage({
+        input_tokens: event.usage && event.usage.input_tokens,
+        output_tokens: event.usage && event.usage.output_tokens,
+        cache_read_tokens: event.usage && event.usage.cached_input_tokens,
+        reasoning_tokens: event.usage && event.usage.reasoning_output_tokens,
+      });
+      status = status || "completed";
+      continue;
+    }
+    if (event.type === "turn.failed" || event.type === "error") {
+      status = "failed";
+      continue;
+    }
+    if (event.type === "item.started") {
+      continue; // dedup: the in-progress half of an item.completed
+    }
+    if (event.type === "item.completed" && event.item && typeof event.item === "object") {
+      const item = event.item;
+      const itemType = stringValue(item.type);
+      if (itemType === "agent_message" || itemType.includes("message")) {
+        const text = rawString(item.text);
+        if (text) {
+          out.push({ role: "assistant", type: "text", text });
+        }
+      } else if (itemType === "reasoning") {
+        const text = rawString(item.text);
+        if (text) {
+          out.push({ role: "assistant", type: "reasoning", text });
+        }
+      } else if (itemType === "command_execution") {
+        const entry = { role: "assistant", type: "tool_use", tool_name: "shell", tool_input: { command: stringValue(item.command) } };
+        const failed = item.exit_code != null && String(item.exit_code) !== "0";
+        const output = (failed ? `[exit ${item.exit_code}]\n` : "") + rawString(item.aggregated_output);
+        if (output) {
+          entry.output = output;
+        }
+        out.push(entry);
+      } else if (itemType === "file_change") {
+        const changes = Array.isArray(item.changes) ? item.changes : [];
         out.push({
           role: "assistant",
           type: "tool_use",
-          tool_name: stringValue(block.name),
-          tool_use_id: stringValue(block.id),
-          tool_input: block.input,
+          tool_name: "apply_patch",
+          tool_input: { changes: changes.map((c) => ({ path: stringValue(c && c.path), kind: stringValue(c && c.kind) })) },
+          output: changes.map((c) => `${stringValue(c && c.kind)} ${stringValue(c && c.path)}`).join("\n"),
         });
       }
+      continue;
     }
+    // Flat fallback (e.g. {type:"agent_message", text}).
+    const type = stringValue(event.type);
+    const text = rawString(event.text) || rawString(event.message) || (event.msg && rawString(event.msg.text)) || "";
+    if (text && (type.includes("message") || type.includes("agent") || type.includes("assistant") || type.includes("output"))) {
+      out.push({ role: "assistant", type: "text", text });
+    }
+  }
+  if (status || usage) {
+    out.push(resultEntry(status, usage));
   }
   return out;
 }
 
-function codexEventEntries(event) {
+// cursorTranscript maps cursor-agent `--output-format stream-json` events.
+// assistant/user messages carry a claude-shaped content[] array. Tool calls split
+// across a `started` event (which holds the args) and a `completed` event (which
+// holds the result); they are merged by call_id so the entry keeps BOTH input and
+// output and stays in invocation order. The terminal result event yields usage.
+function cursorTranscript(events) {
   const out = [];
-  if (!event || typeof event !== "object") {
-    return out;
-  }
-  // Codex `exec --json` emits typed events. Real output is nested under
-  // `item.completed` (item.type === agent_message / command_execution /
-  // reasoning); handle those first, then fall back to the flat shape.
-  if (event.item && typeof event.item === "object") {
-    const item = event.item;
-    const itemType = stringValue(item.type);
-    if (itemType === "agent_message" || itemType.includes("message")) {
-      const text = stringValue(item.text);
-      if (text) {
-        out.push({ role: "assistant", type: "text", text: String(item.text) });
+  const byCall = new Map();
+  let usage = null;
+  let status = null;
+  let lastTs;
+  for (const event of events) {
+    if (!event || typeof event !== "object") {
+      continue;
+    }
+    const ts = event.timestamp_ms;
+    if (ts != null) {
+      lastTs = ts;
+    }
+    if ((event.type === "assistant" || event.type === "user") && event.message && Array.isArray(event.message.content)) {
+      const role = event.type === "user" ? "user" : "assistant";
+      for (const block of event.message.content) {
+        if (!block || typeof block !== "object") {
+          continue;
+        }
+        if (block.type === "text" && stringValue(block.text)) {
+          out.push({ role, type: "text", text: rawString(block.text), timestamp: ts });
+        } else if (block.type === "tool_use") {
+          out.push({ role: "assistant", type: "tool_use", tool_name: stringValue(block.name), tool_use_id: stringValue(block.id), tool_input: block.input, timestamp: ts });
+        }
       }
-    } else if (itemType === "command_execution") {
-      const entry = {
-        role: "assistant",
-        type: "tool_use",
-        tool_name: "shell",
-        tool_input: { command: stringValue(item.command) },
-      };
-      const output = stringValue(item.aggregated_output);
-      if (output) {
-        entry.tool_output = output;
+    } else if (event.type === "tool_call" && event.tool_call && typeof event.tool_call === "object") {
+      const tc = event.tool_call;
+      const callId = stringValue(event.call_id) || stringValue(tc.toolCallId);
+      let name;
+      let detail;
+      for (const key of Object.keys(tc)) {
+        const match = /^(.+)ToolCall$/.exec(key);
+        if (match && tc[key] && typeof tc[key] === "object") {
+          name = match[1];
+          detail = tc[key];
+          break;
+        }
+      }
+      if (!name) {
+        continue;
+      }
+      let entry = callId ? byCall.get(callId) : undefined;
+      if (!entry) {
+        // first sighting (started, or completed if no started) -> invocation order
+        entry = { role: "assistant", type: "tool_use", tool_name: name, tool_use_id: callId, timestamp: ts };
+        if (detail.args !== undefined) {
+          entry.tool_input = detail.args;
+        }
+        out.push(entry);
+        if (callId) {
+          byCall.set(callId, entry);
+        }
+      } else if (entry.tool_input === undefined && detail.args !== undefined) {
+        entry.tool_input = detail.args; // args live only on the started event
+      }
+      if (event.subtype === "completed" && detail.result !== undefined) {
+        const isError = detail.result && typeof detail.result === "object" && detail.result.error !== undefined;
+        const body = typeof detail.result === "string" ? detail.result : JSON.stringify(detail.result);
+        entry.output = (isError ? "[error] " : "") + body;
+      }
+    } else if (event.type === "result") {
+      // cursor-agent emits camelCase usage; accept snake_case too for resilience.
+      const u = event.usage || {};
+      usage = normalizeUsage({
+        input_tokens: u.inputTokens ?? u.input_tokens,
+        output_tokens: u.outputTokens ?? u.output_tokens,
+        cache_read_tokens: u.cacheReadTokens ?? u.cache_read_tokens,
+        cache_write_tokens: u.cacheWriteTokens ?? u.cache_write_tokens,
+        duration_ms: event.duration_ms,
+      });
+      status = event.is_error ? "failed" : "completed";
+    }
+  }
+  if (status || usage) {
+    out.push(resultEntry(status, usage, lastTs));
+  }
+  return out;
+}
+
+// opencodeTranscript maps opencode `run --format json` events (JSONL):
+// { type:"text", part:{text} } for assistant text and
+// { type:"tool_use", part:{tool, callID, state:{status, input, output}} } for
+// tools (output preserved). step_finish events carry token usage; the final one
+// (reason:"stop") marks completion.
+function opencodeTranscript(events) {
+  const out = [];
+  let usage = null;
+  let status = null;
+  let lastTs;
+  for (const event of events) {
+    if (!event || typeof event !== "object") {
+      continue;
+    }
+    const part = event.part && typeof event.part === "object" ? event.part : event;
+    const ts = (part.time && part.time.start) || event.timestamp;
+    if (ts != null) {
+      lastTs = ts;
+    }
+    if (event.type === "text") {
+      const text = rawString(part.text);
+      if (text) {
+        out.push({ role: "assistant", type: "text", text, timestamp: ts });
+      }
+    } else if (event.type === "tool_use" && part.type === "tool") {
+      const state = part.state && typeof part.state === "object" ? part.state : {};
+      // emit terminal tool states (completed AND error); skip in-progress only,
+      // so a failed tool call is never silently dropped.
+      if (state.status && state.status !== "completed" && state.status !== "error") {
+        continue;
+      }
+      const isError = state.status === "error";
+      const entry = { role: "assistant", type: "tool_use", tool_name: stringValue(part.tool), tool_use_id: stringValue(part.callID), tool_input: state.input, timestamp: ts };
+      const output = rawString(state.output) || rawString(state.error);
+      if (output || isError) {
+        entry.output = (isError ? "[error] " : "") + output;
       }
       out.push(entry);
-    } else if (itemType === "reasoning") {
-      const text = stringValue(item.text);
-      if (text) {
-        out.push({ role: "assistant", type: "reasoning", text: String(item.text) });
+    } else if (event.type === "step_finish") {
+      const tokens = part.tokens && typeof part.tokens === "object" ? part.tokens : {};
+      // opencode reports usage PER step; sum the additive fields for the session
+      // total. cache_read is the same cached prompt re-read each step -> take latest.
+      usage = accumulateUsage(usage, {
+        input_tokens: tokens.input,
+        output_tokens: tokens.output,
+        reasoning_tokens: tokens.reasoning,
+        cost_usd: part.cost,
+      }, {
+        cache_read_tokens: tokens.cache && tokens.cache.read,
+      });
+      if (part.reason === "stop" && !status) {
+        status = "completed";
       }
+    } else if (event.type === "error") {
+      // opencode can exit 0 while signalling a fatal stream error; surface it so
+      // the failure is visible in the transcript (parity with the Go backend's
+      // extractOpenCodeStreamError). An error supersedes a later stop.
+      const msg = rawString(event.error && (event.error.message || event.error)) || rawString(event.message);
+      status = msg ? "failed: " + msg : "failed";
     }
-    return out;
   }
-  // Fallback for the flat shape (e.g. {type:"agent_message", text}).
-  const type = stringValue(event.type);
-  const text =
-    stringValue(event.text) ||
-    stringValue(event.message) ||
-    (event.msg && stringValue(event.msg.text)) ||
-    (event.item && stringValue(event.item.text));
-  if (text && (type.includes("message") || type.includes("agent") || type.includes("assistant") || type.includes("output"))) {
-    out.push({ role: "assistant", type: "text", text });
+  if (status || usage) {
+    out.push(resultEntry(status, usage, lastTs));
   }
   return out;
 }
 
-// minimalTranscript covers gemini/opencode/cursor: a session_meta marker, the
-// user prompt, and a final assistant entry carrying the CLI stdout tail. This is
-// real evidence (the actual run output), just not a structured event stream.
+// minimalTranscript is the fallback for backends without a structured event
+// stream (e.g. gemini): a session_meta marker, the user prompt, and a final
+// assistant entry carrying the CLI stdout tail. Real evidence, just unstructured.
 function minimalTranscript(backend, label, prompt, stdout) {
   const now = new Date().toISOString();
   return [

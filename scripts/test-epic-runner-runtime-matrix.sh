@@ -688,6 +688,7 @@ register_driver() {
       --id epic-runner \
       --workflow epic-runner \
       --source-ref "runtime-matrix://epic-runner" \
+      --trusted \
       --activate \
       --json
   ) >"$TMP_ROOT/register.json"

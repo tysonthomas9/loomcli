@@ -42,7 +42,7 @@ func TestRunnerNeedsLocalPreflight(t *testing.T) {
 type daemonGetterStub struct{ backend string }
 
 func (s daemonGetterStub) Daemon() store.DaemonProfileStore {
-	return daemonProfileStoreStub{backend: s.backend}
+	return daemonProfileStoreStub(s)
 }
 
 type daemonProfileStoreStub struct{ backend string }

@@ -60,6 +60,7 @@ const {
         password_set: false,
       },
       agent_runtime: { default: "local" },
+      local_task_runner: {},
       runtime_credentials: {
         daytona: { configured: false },
         github: { configured: false },
@@ -70,6 +71,7 @@ const {
     error: null,
     updateRedis: vi.fn(),
     updateAgentRuntime: vi.fn(),
+    updateLocalTaskRunner: vi.fn(),
     updateRuntimeCredentials: vi.fn(),
     refetch: vi.fn(),
   })),
@@ -300,6 +302,7 @@ function createLocalSettingsHookReturn(
         password_set: false,
       },
       agent_runtime: { default: "local" },
+      local_task_runner: {},
       runtime_credentials: {
         daytona: { configured: false },
         github: { configured: false },
@@ -310,6 +313,7 @@ function createLocalSettingsHookReturn(
     error: null,
     updateRedis: vi.fn(),
     updateAgentRuntime: vi.fn(),
+    updateLocalTaskRunner: vi.fn(),
     updateRuntimeCredentials: vi.fn(),
     refetch: vi.fn(),
     ...overrides,
@@ -1355,6 +1359,7 @@ describe("IssueDetailPanel", () => {
             epicId: "DESKTOP-QA-EPIC",
             leadName: "lead-desktop-qa-epic",
             requestedBy: "ui",
+            runner: "local-task-runner",
           },
         );
       });
@@ -1389,6 +1394,7 @@ describe("IssueDetailPanel", () => {
               password_set: false,
             },
             agent_runtime: { default: "daytona" },
+            local_task_runner: {},
             runtime_credentials: {
               daytona: { configured: true },
               github: { configured: true },
@@ -1494,6 +1500,7 @@ describe("IssueDetailPanel", () => {
             epicId: "DESKTOP-QA-EPIC",
             leadName: "lead-desktop-qa-epic-2",
             requestedBy: "ui",
+            runner: "local-task-runner",
           },
         );
       });

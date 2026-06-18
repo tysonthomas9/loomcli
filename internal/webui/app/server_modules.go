@@ -118,12 +118,13 @@ func (app *Server) buildInfraModules() {
 		app.wsModules = append(app.wsModules, modbuilder.NewApprovalsModule(app.config.Store))
 		app.wsModules = append(app.wsModules, modbuilder.NewTaskRunAPIModule(app.config.Store, app.config.FleetDBBaseURL, app.config.LocalSettingsDir))
 		app.wsModules = append(app.wsModules, driverapi.NewModule(driverapi.Config{
-			Store:        app.config.Store,
-			FleetBaseURL: app.config.FleetDBBaseURL,
-			APIBaseURL:   app.config.DriverAPIBaseURL,
-			APIToken:     app.config.DriverAPIToken,
-			RunTokenKey:  app.config.DriverRunTokenKey,
-			Dispatcher:   app.buildConnectorDispatcher(),
+			Store:            app.config.Store,
+			FleetBaseURL:     app.config.FleetDBBaseURL,
+			APIBaseURL:       app.config.DriverAPIBaseURL,
+			APIToken:         app.config.DriverAPIToken,
+			RunTokenKey:      app.config.DriverRunTokenKey,
+			LocalSettingsDir: app.config.LocalSettingsDir,
+			Dispatcher:       app.buildConnectorDispatcher(),
 		}))
 	} else if app.config.AgentControlFn != nil {
 		app.wsModules = append(app.wsModules, webui.NewAgentControlModule(app.config.AgentControlFn))

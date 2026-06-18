@@ -293,6 +293,11 @@ export class LoomDriverClient {
       leaseToken: input.leaseToken || pickEnv(this.env, "LOOM_TASK_RUN_LEASE_TOKEN") || pickEnv(this.env, "LOOM_RUNNER_LEASE_TOKEN"),
       deferCompletion: true,
     };
+    const repoRef = input.repoRef || input.repo_ref || (input.sandboxPlacement && (input.sandboxPlacement.repoRef || input.sandboxPlacement.repo_ref));
+    if (repoRef) {
+      params.repoRef = String(repoRef);
+      params.sandboxPlacement = { repoRef: String(repoRef) };
+    }
     // input.input is the optional task-run payload (e.g. a review diff+rubric):
     // it is persisted on the run and delivered verbatim to the runner. Sent
     // only when present, and via rawKeys so compactParams never rewrites the

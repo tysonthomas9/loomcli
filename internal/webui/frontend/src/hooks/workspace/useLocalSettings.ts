@@ -3,10 +3,12 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   getLocalSettings,
   updateAgentRuntimeSettings,
+  updateLocalTaskRunnerSettings,
   updateLocalRedisSettings,
   updateRuntimeCredentialsSettings,
   type LocalSettingsData,
   type UpdateAgentRuntimeSettings,
+  type UpdateLocalTaskRunnerSettings,
   type UpdateLocalRedisSettings,
   type UpdateRuntimeCredentialsSettings,
 } from "@/api/common";
@@ -19,6 +21,9 @@ export interface UseLocalSettingsReturn {
   updateRedis: (settings: UpdateLocalRedisSettings) => Promise<boolean>;
   updateAgentRuntime: (
     settings: UpdateAgentRuntimeSettings,
+  ) => Promise<boolean>;
+  updateLocalTaskRunner: (
+    settings: UpdateLocalTaskRunnerSettings,
   ) => Promise<boolean>;
   updateRuntimeCredentials: (
     settings: UpdateRuntimeCredentialsSettings,
@@ -151,6 +156,36 @@ export function useLocalSettings(): UseLocalSettingsReturn {
     [],
   );
 
+  const updateLocalTaskRunner = useCallback(
+    async (
+      localTaskRunner: UpdateLocalTaskRunnerSettings,
+    ): Promise<boolean> => {
+      setIsSaving(true);
+      setError(null);
+      try {
+        const data = await updateLocalTaskRunnerSettings(localTaskRunner);
+        if (mountedRef.current) {
+          setSettings(data);
+        }
+        return true;
+      } catch (err) {
+        if (mountedRef.current) {
+          setError(
+            err instanceof Error
+              ? err.message
+              : "Failed to save local task runner settings",
+          );
+        }
+        return false;
+      } finally {
+        if (mountedRef.current) {
+          setIsSaving(false);
+        }
+      }
+    },
+    [],
+  );
+
   return {
     settings,
     isLoading,
@@ -158,6 +193,7 @@ export function useLocalSettings(): UseLocalSettingsReturn {
     error,
     updateRedis,
     updateAgentRuntime,
+    updateLocalTaskRunner,
     updateRuntimeCredentials,
     refetch: fetchSettings,
   };

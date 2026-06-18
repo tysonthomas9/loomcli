@@ -137,6 +137,7 @@ describe("AgentsPage", () => {
           epicId: "EPIC-1",
           leadName: "lead-1",
           requestedBy: "ui",
+          runner: "local-task-runner",
         },
       );
     });
@@ -148,6 +149,43 @@ describe("AgentsPage", () => {
     expect(screen.getByTestId("epic-runner-run-state").textContent).toBe(
       "run-1:queued",
     );
+  });
+
+  it("passes local PR runtime payload from the lead-panel Run button", async () => {
+    mocks.localSettings = {
+      settings: {
+        agent_runtime: { default: "local" },
+      },
+    };
+    mocks.workspaceContext = {
+      repos: [
+        {
+          name: "sandbox",
+          remote_url: "git@github.com:tyson/sandbox.git",
+          default_branch: "develop",
+        },
+      ],
+    };
+
+    render(<AgentsPage />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Run lead epic" }));
+
+    await waitFor(() => {
+      expect(startWorkflowRun).toHaveBeenCalledWith(
+        "DESKTOP-QA",
+        "epic-runner",
+        {
+          epicId: "EPIC-1",
+          leadName: "lead-1",
+          requestedBy: "ui",
+          runner: "local-task-runner",
+          repoUrl: "https://github.com/tyson/sandbox.git",
+          baseBranch: "develop",
+          openPullRequest: true,
+        },
+      );
+    });
   });
 
   it("passes Daytona runtime payload from the lead-panel Run button", async () => {

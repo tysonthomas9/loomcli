@@ -21,6 +21,7 @@ type response struct {
 type patchRequest struct {
 	FleetDBRedis       *redisPatch              `json:"fleetdb_redis"`
 	AgentRuntime       *agentRuntimePatch       `json:"agent_runtime"`
+	LocalTaskRunner    *localTaskRunnerPatch    `json:"local_task_runner"`
 	RuntimeCredentials *runtimeCredentialsPatch `json:"runtime_credentials"`
 }
 
@@ -36,6 +37,10 @@ type redisPatch struct {
 
 type agentRuntimePatch struct {
 	Default *string `json:"default,omitempty"`
+}
+
+type localTaskRunnerPatch struct {
+	OpenCodeModel *string `json:"opencode_model,omitempty"`
 }
 
 type runtimeCredentialsPatch struct {
@@ -94,6 +99,9 @@ func HandlePatch(dataDir string) http.HandlerFunc {
 				handler.WriteJSON(w, http.StatusBadRequest, response{Success: false, Error: err.Error()})
 				return
 			}
+		}
+		if req.LocalTaskRunner != nil {
+			applyLocalTaskRunnerPatch(&settings, *req.LocalTaskRunner)
 		}
 		if req.RuntimeCredentials != nil {
 			if err := applyRuntimeCredentialsPatch(dataDir, &settings, *req.RuntimeCredentials); err != nil {
@@ -165,6 +173,14 @@ func applyAgentRuntimePatch(settings *runtimesettings.Settings, patch agentRunti
 	}
 	settings.AgentRuntime = cfg
 	return nil
+}
+
+func applyLocalTaskRunnerPatch(settings *runtimesettings.Settings, patch localTaskRunnerPatch) {
+	cfg := settings.LocalTaskRunner
+	if patch.OpenCodeModel != nil {
+		cfg.OpenCodeModel = strings.TrimSpace(*patch.OpenCodeModel)
+	}
+	settings.LocalTaskRunner = cfg
 }
 
 func applyRuntimeCredentialsPatch(dataDir string, settings *runtimesettings.Settings, patch runtimeCredentialsPatch) error {

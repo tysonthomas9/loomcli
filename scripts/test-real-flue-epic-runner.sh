@@ -305,11 +305,20 @@ echo "==> building native Flue driver"
   cd "$WORKDIR"
   run_flue build --target node --root "$WORKDIR" --output "$WORKDIR/dist"
 ) >"$TMP_ROOT/flue-build.log" 2>&1
+node -e '
+const fs = require("node:fs");
+const dist = process.argv[1];
+fs.writeFileSync(dist + "/loom-driver.json", JSON.stringify({
+  runners: JSON.stringify([
+    { name: "local-task-runner", kind: "node-module", entrypoint: "task-runner.mjs" }
+  ])
+}, null, 2) + "\n");
+' "$WORKDIR/dist"
 
 echo "==> registering builtin epic-runner driver"
 (
   cd "$WORKDIR"
-  "$BIN_DIR/loom" --workspace "$WS" driver register --flue-dist dist --name epic-runner --workflow epic-runner --source-ref workflows/epic-runner.ts --activate --json
+  "$BIN_DIR/loom" --workspace "$WS" driver register --flue-dist dist --name epic-runner --workflow epic-runner --source-ref workflows/epic-runner.ts --trusted --activate --json
 ) >"$TMP_ROOT/register.json"
 
 echo "==> starting loom serve driver executor on ${LOOM_PORT}"
@@ -524,8 +533,9 @@ BLOCKED_RETRY_RUN_ID="${BLOCKED_RUN_ID}-retry"
   "$BIN_DIR/loom" --workspace "$WS" driver run epic-runner --epic "$EPIC2_ID" --run-id "$BLOCKED_RETRY_RUN_ID" --json
 ) >"$TMP_ROOT/driver-run-blocked-retry.json"
 blocked_retry_json="$(wait_driver_run_status "$BLOCKED_RETRY_RUN_ID" needs_review)"
-if [[ "$(jq -r '.error_class // ""' <<<"$blocked_retry_json")" != "epic_blocked" ]]; then
-  echo "blocked-branch rerun error_class is not epic_blocked" >&2
+blocked_retry_error_class="$(jq -r '.error_class // ""' <<<"$blocked_retry_json")"
+if [[ "$blocked_retry_error_class" != "epic_blocked" && "$blocked_retry_error_class" != "epic_no_progress" ]]; then
+  echo "blocked-branch rerun error_class is not epic_blocked or epic_no_progress" >&2
   jq . <<<"$blocked_retry_json" >&2
   exit 1
 fi

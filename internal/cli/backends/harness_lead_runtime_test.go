@@ -51,12 +51,15 @@ func TestRunControlledLeadRuntimeDispatchesClaude(t *testing.T) {
 }
 
 func TestRunControlledLeadRuntimeDispatchesGenericBackends(t *testing.T) {
-	cases := map[string][]string{
-		"gemini":   {"--approval-mode=yolo"},
-		"cursor":   {"--force"},
-		"opencode": {"run", "--dir", "/repo", "--dangerously-skip-permissions"},
+	cases := map[string]struct {
+		args   []string
+		binary string // backend name and exec binary differ for cursor (cursor-agent)
+	}{
+		"gemini":   {[]string{"--approval-mode=yolo"}, "gemini"},
+		"cursor":   {[]string{"--force"}, "cursor-agent"},
+		"opencode": {[]string{"run", "--dir", "/repo"}, "opencode"},
 	}
-	for backend, wantPrefix := range cases {
+	for backend, want := range cases {
 		captured := installFakeHarnessLead(t)
 		handled, err := RunControlledLeadRuntime(context.Background(), nil, "WS", "nova", "lead-session", "/repo", "prompt", backend)
 		if err != nil {
@@ -65,12 +68,12 @@ func TestRunControlledLeadRuntimeDispatchesGenericBackends(t *testing.T) {
 		if !handled {
 			t.Fatalf("%s lead should be handled by the controlled runtime", backend)
 		}
-		if captured.Backend != backend || captured.BinaryPath != backend {
+		if captured.Backend != backend || captured.BinaryPath != want.binary {
 			t.Fatalf("%s: captured config = %+v", backend, captured)
 		}
 		got := strings.Join(captured.Args, " ")
-		if !strings.HasPrefix(got, strings.Join(wantPrefix, " ")) {
-			t.Fatalf("%s: captured args = %q, want prefix %q", backend, got, strings.Join(wantPrefix, " "))
+		if !strings.HasPrefix(got, strings.Join(want.args, " ")) {
+			t.Fatalf("%s: captured args = %q, want prefix %q", backend, got, strings.Join(want.args, " "))
 		}
 	}
 }

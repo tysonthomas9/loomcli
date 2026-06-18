@@ -159,6 +159,11 @@ func (m *Module) createWorkflowRun(w http.ResponseWriter, r *http.Request) {
 }
 
 func (m *Module) resolveWorkflowDriverID(ctx context.Context, ws, name string) (string, error) {
+	if isBuiltinWorkflowName(name) {
+		if err := workflowdefs.EnsureBuiltinWorkflow(ctx, m.store, ws, name); err != nil {
+			return "", err
+		}
+	}
 	driverID, err := workflowdefs.ResolveDriverID(ctx, m.store, ws, name)
 	if err == nil {
 		return driverID, nil
@@ -170,6 +175,15 @@ func (m *Module) resolveWorkflowDriverID(ctx context.Context, ws, name string) (
 		return "", err
 	}
 	return workflowdefs.ResolveDriverID(ctx, m.store, ws, name)
+}
+
+func isBuiltinWorkflowName(name string) bool {
+	for _, builtin := range workflowdefs.BuiltinWorkflowNames() {
+		if builtin == name {
+			return true
+		}
+	}
+	return false
 }
 
 func (m *Module) getRun(w http.ResponseWriter, r *http.Request) {

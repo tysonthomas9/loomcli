@@ -382,7 +382,7 @@ func TestDefaultGeminiNonInteractiveInvoker_UsesWrapperWithGeminiHarness(t *test
 }
 
 func TestDefaultCursorNonInteractiveInvoker_UsesWrapperWithGenericClassifier(t *testing.T) {
-	requireBinaryOnPath(t, "cursor")
+	requireBinaryOnPath(t, "cursor-agent")
 	fake := &fakeWrapperRun{result: wrapper.Result{Status: wrapper.StatusIdle}}
 	installWrapperRunMock(t, fake.Run)
 

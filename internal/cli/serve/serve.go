@@ -312,13 +312,14 @@ func startDriverExecutorIfEnabled(ctx context.Context, st store.Store) {
 	taskWorkerConcurrency := driverTaskWorkerConcurrency()
 	taskRunMaxAttempts := driverTaskRunMaxAttempts()
 	taskWorker := &driverexecutor.TaskWorker{
-		Store:        st,
-		WorkspaceKey: executor.WorkspaceKey,
-		WorkDir:      workDir,
-		NodeID:       executor.NodeID,
-		RunnerID:     os.Getenv("LOOM_DRIVER_TASK_WORKER_RUNNER_ID"),
-		MaxAttempts:  taskRunMaxAttempts,
-		APIBaseURL:   driverAPIBaseURL(),
+		Store:            st,
+		WorkspaceKey:     executor.WorkspaceKey,
+		WorkDir:          workDir,
+		NodeID:           executor.NodeID,
+		RunnerID:         os.Getenv("LOOM_DRIVER_TASK_WORKER_RUNNER_ID"),
+		MaxAttempts:      taskRunMaxAttempts,
+		APIBaseURL:       driverAPIBaseURL(),
+		LocalSettingsDir: bootstrap.LoomDir(),
 	}
 	go func() {
 		ticker := time.NewTicker(2 * time.Second)

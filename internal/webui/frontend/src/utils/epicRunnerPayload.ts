@@ -37,13 +37,24 @@ export function epicRunnerRuntimePayload({
   >[];
   currentRepo: string | null;
 }): EpicRunnerRuntimePayload {
+  const repo = runnerRepoUrl(repos, currentRepo);
   if (localSettings?.agent_runtime.default !== "daytona") {
     // Local ("Locally") runtime: pin the runner explicitly so the request never
     // falls through to an unspecified server-side default. The local task runner
-    // execFile's the user-selected backend CLI over the prepared worktree.
-    return { runner: "local-task-runner" };
+    // execFile's the user-selected backend CLI over the prepared worktree. When
+    // a workspace repo is selected, opt in to PR delivery; the runner fails
+    // closed if the desktop GitHub credential is not configured.
+    return {
+      runner: "local-task-runner",
+      ...(repo.repoUrl
+        ? {
+            repoUrl: repo.repoUrl,
+            baseBranch: repo.baseBranch,
+            openPullRequest: true,
+          }
+        : {}),
+    };
   }
-  const repo = runnerRepoUrl(repos, currentRepo);
   if (!repo.repoUrl) {
     throw new Error(
       "Daytona runtime requires a GitHub repo URL or owner/repo repo selection",

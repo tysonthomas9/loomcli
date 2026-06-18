@@ -30,6 +30,10 @@ const LocalTaskRunnerEntrypoint = "local-task-runner"
 // Default Backend") used when no DaemonProfile.AgentBackend is set.
 const DefaultBackend = backendnames.Codex
 
+// HealthStatus describes backend readiness for local-runner preflight tests
+// without making webui packages import the CLI backend package directly.
+type HealthStatus = backends.HealthStatus
+
 // healthChecker reports a backend's installation/auth status by name. It is a
 // package var so tests can stub the backend registry without registering real
 // backends. Defaults to backends.CheckBackendHealth, which reads the global
@@ -105,13 +109,13 @@ func PreflightLocalTaskRunner(ctx context.Context, st daemonGetter, ws string) e
 // restore function. Intended for tests that must exercise preflight without a
 // real backend CLI/auth on the host (or that depend on local runs queuing
 // without gating on the host's backend state).
-func SetHealthCheckerForTest(fn func(name string) (backends.HealthStatus, bool)) (restore func()) {
+func SetHealthCheckerForTest(fn func(name string) (HealthStatus, bool)) (restore func()) {
 	prev := healthChecker
 	healthChecker = fn
 	return func() { healthChecker = prev }
 }
 
-func healthMessage(status backends.HealthStatus) string {
+func healthMessage(status HealthStatus) string {
 	if msg := strings.TrimSpace(status.Message); msg != "" {
 		return msg
 	}

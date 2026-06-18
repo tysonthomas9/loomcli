@@ -2,9 +2,11 @@ package workflows
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"testing/fstest"
@@ -258,6 +260,182 @@ func TestSubmissionTrustDefaultsUntrustedFailClosed(t *testing.T) {
 	}
 }
 
+func TestCloneBuiltinSourceWritesLocalSourceLayout(t *testing.T) {
+	root := filepath.Join(t.TempDir(), ".loom", "workflows", BuiltinEpicRunnerWorkflowName)
+	manifest, err := CloneBuiltinSource(BuiltinEpicRunnerWorkflowName, root)
+	if err != nil {
+		t.Fatalf("CloneBuiltinSource: %v", err)
+	}
+	if manifest.DriverID != BuiltinEpicRunnerWorkflowName || manifest.Entrypoint != "workflows/epic-runner.ts" {
+		t.Fatalf("manifest = %+v, want epic-runner entrypoint", manifest)
+	}
+	for _, rel := range []string{"workflow.json", "workflows/epic-runner.ts", "workflows/local-task-runner.ts", "workflows/daytona-task-runner.ts"} {
+		if _, err := os.Stat(filepath.Join(root, filepath.FromSlash(rel))); err != nil {
+			t.Fatalf("expected cloned source %s: %v", rel, err)
+		}
+	}
+	source, err := ReadLocalSource(BuiltinEpicRunnerWorkflowName, root)
+	if err != nil {
+		t.Fatalf("ReadLocalSource: %v", err)
+	}
+	if _, ok := source.Files[source.Manifest.Entrypoint]; !ok {
+		t.Fatalf("entrypoint %s missing from local source", source.Manifest.Entrypoint)
+	}
+	if len(source.Runners) == 0 {
+		t.Fatalf("expected cloned runner manifest to declare task runners")
+	}
+	for _, runner := range source.Runners {
+		if runner.Name == driverpkg.OpenShellRunnerName {
+			t.Fatalf("deprecated openshell runner should not be declared")
+		}
+	}
+}
+
+func TestReadLocalSourceValidatesExplicitRunnerManifest(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "workflows"), 0o755); err != nil {
+		t.Fatalf("create workflows dir: %v", err)
+	}
+	manifest := `{
+  "schema_version": "1",
+  "driver_id": "custom-runner",
+  "entrypoint": "workflows/custom-runner.ts",
+  "dependencies": {"@loom/sdk": "local"},
+  "runners": [{"name": "bad", "kind": "shell", "entrypoint": "../bad"}]
+}
+`
+	if err := os.WriteFile(filepath.Join(root, "workflow.json"), []byte(manifest), 0o644); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "workflows", "custom-runner.ts"), []byte("export async function run() {}\n"), 0o644); err != nil {
+		t.Fatalf("write workflow: %v", err)
+	}
+	if _, err := ReadLocalSource("custom-runner", root); err == nil || !strings.Contains(err.Error(), "unknown kind") {
+		t.Fatalf("ReadLocalSource err = %v, want explicit runner validation error", err)
+	}
+}
+
+func TestReadLocalSourceDoesNotInferUndeclaredSiblingRunners(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "workflows"), 0o755); err != nil {
+		t.Fatalf("create workflows dir: %v", err)
+	}
+	manifest := `{
+  "schema_version": "1",
+  "driver_id": "custom",
+  "entrypoint": "workflows/custom.ts",
+  "dependencies": {"@loom/sdk": "local"}
+}
+`
+	if err := os.WriteFile(filepath.Join(root, "workflow.json"), []byte(manifest), 0o644); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+	for rel, source := range map[string]string{
+		"custom.ts":              "export async function run() {}\n",
+		"local-task-runner.ts":   "export async function run() {}\n",
+		"daytona-task-runner.ts": "export async function run() {}\n",
+	} {
+		if err := os.WriteFile(filepath.Join(root, "workflows", rel), []byte(source), 0o644); err != nil {
+			t.Fatalf("write %s: %v", rel, err)
+		}
+	}
+	source, err := ReadLocalSource("custom", root)
+	if err != nil {
+		t.Fatalf("ReadLocalSource: %v", err)
+	}
+	if len(source.Runners) != 0 {
+		t.Fatalf("source runners = %+v, want no inferred runners without explicit manifest", source.Runners)
+	}
+}
+
+func TestBuildAndRegisterCustomSourceWithRealFlue(t *testing.T) {
+	repoRoot := workflowTestRepoRoot(t)
+	flueBin := filepath.Join(repoRoot, "..", "flue", "packages", "cli", "bin", "flue.mjs")
+	if _, err := os.Stat(flueBin); err != nil {
+		t.Skipf("Flue CLI bin unavailable: %v", err)
+	}
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skipf("node unavailable: %v", err)
+	}
+	flueCmd, err := json.Marshal([]string{node, flueBin})
+	if err != nil {
+		t.Fatalf("encode flue cmd: %v", err)
+	}
+	t.Setenv("LOOM_REAL_FLUE_CMD_JSON", string(flueCmd))
+	t.Setenv("LOOM_REAL_FLUE_CMD", "")
+	t.Setenv("LOOM_SDK_ROOT", filepath.Join(repoRoot, "sdk"))
+	t.Setenv("FLUE_RUNTIME_ROOT", filepath.Join(repoRoot, "..", "flue", "packages", "runtime"))
+	t.Setenv("DAYTONA_SDK_ROOT", filepath.Join(repoRoot, "..", "flue", "node_modules", ".pnpm", "node_modules", "@daytona", "sdk"))
+
+	ctx := context.Background()
+	st := memstore.New()
+	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "CUSTOM", Name: "custom"}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	files := map[string]string{
+		"workflows/custom-smoke.ts": "export async function run(ctx) { return { marker: ctx.payload?.marker || 'custom-marker' }; }\n",
+	}
+	workDir := t.TempDir()
+	result, diagnostics, err := BuildAndRegister(ctx, st, BuildAndRegisterOptions{
+		WorkspaceKey: "CUSTOM",
+		Name:         "custom-smoke",
+		Entrypoint:   "workflows/custom-smoke.ts",
+		Files:        files,
+		Activate:     false,
+		SourceRef:    "test://custom-smoke",
+		CreatedBy:    "test",
+		WorkDir:      workDir,
+		Manifest: map[string]string{
+			"workflow_dependencies": `{"@daytona/sdk":"optional-local","@flue/runtime":"local","@loom/sdk":"local"}`,
+		},
+	})
+	if err != nil {
+		t.Fatalf("BuildAndRegister diagnostics:\n%s\nerr: %v", diagnostics, err)
+	}
+	if result.Driver.ActiveVersionID != "" {
+		t.Fatalf("driver active version = %q, want non-active custom build", result.Driver.ActiveVersionID)
+	}
+	if result.Version.Manifest[driverpkg.ManifestTrustLevelKey] != string(domain.DriverTrustUntrusted) {
+		t.Fatalf("version trust = %q, want untrusted", result.Version.Manifest[driverpkg.ManifestTrustLevelKey])
+	}
+	if result.Version.BuildDiagnostics != diagnostics {
+		t.Fatalf("stored diagnostics = %q, returned %q", result.Version.BuildDiagnostics, diagnostics)
+	}
+	if result.Version.Manifest["workflow_dependencies"] != `{"@daytona/sdk":"optional-local","@flue/runtime":"local","@loom/sdk":"local"}` {
+		t.Fatalf("workflow dependency provenance = %q", result.Version.Manifest["workflow_dependencies"])
+	}
+	driverRecord, version, err := driverpkg.ApproveDriverVersion(ctx, st, "CUSTOM", result.Driver.DriverID, result.Version.VersionID)
+	if err != nil {
+		t.Fatalf("ApproveDriverVersion: %v", err)
+	}
+	if got := driverpkg.DriverVersionEffectiveTrust(driverRecord, version); got != domain.DriverTrustTrusted {
+		t.Fatalf("approved version trust = %q, want trusted", got)
+	}
+	run, err := driverpkg.CreateDriverRun(ctx, st, driverpkg.RunOptions{
+		WorkspaceKey:    "CUSTOM",
+		DriverID:        result.Driver.DriverID,
+		DriverVersionID: result.Version.VersionID,
+		RunID:           "run-custom-preview",
+		Payload:         json.RawMessage(`{"marker":"custom-marker"}`),
+	})
+	if err != nil {
+		t.Fatalf("CreateDriverRun preview: %v", err)
+	}
+	if run.DriverVersionID != result.Version.VersionID {
+		t.Fatalf("run pinned version = %q, want %q", run.DriverVersionID, result.Version.VersionID)
+	}
+}
+
+func workflowTestRepoRoot(t *testing.T) string {
+	t.Helper()
+	_, file, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("runtime.Caller failed")
+	}
+	return filepath.Clean(filepath.Join(filepath.Dir(file), "..", ".."))
+}
+
 func TestEmbeddedPrebuiltDigestMatchesRequiresCurrentMarker(t *testing.T) {
 	distPath := "builtin-dist/example/dist"
 	source := fstest.MapFS{
@@ -308,6 +486,9 @@ func TestEnsureBuiltinWorkflowUsesEmbeddedPrebuiltBundle(t *testing.T) {
 	}
 	if version.Runtime != driverpkg.RuntimeFlueNode {
 		t.Fatalf("runtime = %q, want %q", version.Runtime, driverpkg.RuntimeFlueNode)
+	}
+	if version.Manifest[driverpkg.ManifestTrustLevelKey] != string(domain.DriverTrustTrusted) {
+		t.Fatalf("version manifest trust = %q, want trusted", version.Manifest[driverpkg.ManifestTrustLevelKey])
 	}
 	if !strings.HasPrefix(version.SourceRef, "builtin://workflows/github-review-agent/versions/") {
 		t.Fatalf("source ref = %q, want builtin github-review-agent ref", version.SourceRef)

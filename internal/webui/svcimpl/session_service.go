@@ -407,6 +407,9 @@ func (s *sessionServiceImpl) GetSessionTranscript(ctx context.Context, wsID, tas
 	}
 	events, loadErr := store.LoadNativeEvents(sessionID)
 	if loadErr != nil {
+		if cpEvents, cpErr := s.controlPlaneSessionTranscript(ctx, wsID, taskID, sessionID); cpErr == nil {
+			return cpEvents, nil
+		}
 		logger.Error("failed to load native transcript", "session_id", sessionID, "err", loadErr)
 		return nil, service.ErrInternal("failed to load transcript", loadErr)
 	}
@@ -453,10 +456,6 @@ func (s *sessionServiceImpl) controlPlaneSessionTranscript(ctx context.Context, 
 
 const maxControlPlaneTranscriptBytes = 16 << 20
 
-type artifactContentReader interface {
-	ReadContent(ctx context.Context, workspaceKey, artifactID string) ([]byte, error)
-}
-
 func (s *sessionServiceImpl) readTranscriptRef(ctx context.Context, wsID, ref string) ([]byte, error) {
 	ref = strings.TrimSpace(ref)
 	if ref == "" {
@@ -470,8 +469,14 @@ func (s *sessionServiceImpl) readTranscriptRef(ctx context.Context, wsID, ref st
 		if s.store == nil {
 			return nil, errors.New("artifact store unavailable")
 		}
-		if reader, ok := s.store.Artifacts().(artifactContentReader); ok {
-			return reader.ReadContent(ctx, wsID, artifactID)
+		if reader, ok := s.store.Artifacts().(store.ArtifactContentReader); ok {
+			data, err := reader.ReadContent(ctx, wsID, artifactID)
+			if err == nil {
+				return data, nil
+			}
+			if !errors.Is(err, domain.ErrNotFound) {
+				return nil, err
+			}
 		}
 		artifact, err := s.store.Artifacts().Get(ctx, wsID, artifactID)
 		if err != nil {

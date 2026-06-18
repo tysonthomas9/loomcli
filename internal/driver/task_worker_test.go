@@ -3,6 +3,8 @@ package driver
 
 import (
 	"errors"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -100,7 +102,8 @@ func TestTaskWorkerRunOnceMapsFlueSessionUnderParent(t *testing.T) {
 		RunnerEntrypoint: "local-task-runner",
 		Status:           domain.TaskRunQueued,
 		RuntimeMetadata: map[string]string{
-			"parent_session_id": "lead-session-1",
+			"parent_session_id":  "lead-session-1",
+			"runner_trust_level": string(domain.DriverTrustTrusted),
 		},
 	}); err != nil {
 		t.Fatalf("Create queued task run: %v", err)
@@ -117,6 +120,7 @@ func TestTaskWorkerRunOnceMapsFlueSessionUnderParent(t *testing.T) {
 		NodeID:            "task-worker-node-1",
 		RunnerID:          "task-worker-runner-1",
 		HeartbeatInterval: -1,
+		MaxAttempts:       1,
 		Executor:          executor,
 	}).RunOnce(ctx)
 	if err != nil {
@@ -134,6 +138,55 @@ func TestTaskWorkerRunOnceMapsFlueSessionUnderParent(t *testing.T) {
 	}
 	if session.Metadata["runtime"] != "flue" || session.Metadata["task_run_id"] != "task-run-worker-flue" || session.Metadata["transcript_ref"] == "" {
 		t.Fatalf("session metadata = %+v, want flue transcript metadata", session.Metadata)
+	}
+}
+
+func TestTaskWorkerRunOnceRefusesUntrustedQueuedNamedRunner(t *testing.T) {
+	ctx, st, run := setupRunningDriverRun(t)
+	if _, err := st.TaskRuns().Create(ctx, store.TaskRunCreate{
+		WorkspaceKey:     "TEST",
+		TaskRunID:        "task-run-worker-untrusted",
+		DriverRunID:      run.RunID,
+		TaskID:           "TEST-14",
+		Runner:           "local-task-runner",
+		RunnerKind:       RunnerKindFlueWorkflow,
+		RunnerEntrypoint: "local-task-runner",
+		Status:           domain.TaskRunQueued,
+		RuntimeMetadata: map[string]string{
+			"runner_trust_level": string(domain.DriverTrustUntrusted),
+		},
+	}); err != nil {
+		t.Fatalf("Create queued task run: %v", err)
+	}
+	ranPath := filepath.Join(t.TempDir(), "ran")
+	executor := HostBridgeTaskExecutor{
+		Store:        st,
+		WorktreePath: t.TempDir(),
+		Command:      []string{"sh", "-c", "printf ran > \"$1\"; printf '%s\n' '{\"status\":\"completed\",\"exit_code\":0}'", "sh", ranPath},
+	}
+
+	outcome, err := (&TaskWorker{
+		Store:             st,
+		WorkspaceKey:      "TEST",
+		NodeID:            "task-worker-node-1",
+		RunnerID:          "task-worker-runner-1",
+		HeartbeatInterval: -1,
+		MaxAttempts:       1,
+		Executor:          executor,
+	}).RunOnce(ctx)
+	if err != nil {
+		t.Fatalf("RunOnce: %v", err)
+	}
+	if outcome.Run.Status != domain.TaskRunFailed || outcome.Run.ErrorClass != ErrorClassSandboxRequired {
+		t.Fatalf("outcome = %+v, want failed %s", outcome.Run, ErrorClassSandboxRequired)
+	}
+	if outcome.Run.RuntimeMetadata[ErrorCodeOutputKey] != ErrorClassSandboxRequired ||
+		outcome.Run.RuntimeMetadata[SandboxLauncherOutputKey] != SandboxProviderProcess ||
+		outcome.Run.RuntimeMetadata["runner_trust_level"] != string(domain.DriverTrustUntrusted) {
+		t.Fatalf("runtime metadata = %+v, want sandbox refusal persisted", outcome.Run.RuntimeMetadata)
+	}
+	if _, err := os.Stat(ranPath); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("host bridge command ran despite untrusted queued runner refusal; stat err=%v", err)
 	}
 }
 

@@ -4,7 +4,6 @@ import (
 	"os"
 	"testing"
 
-	"github.com/tysonthomas9/loomcli/internal/cli/backends"
 	"github.com/tysonthomas9/loomcli/internal/runtimepreflight"
 )
 
@@ -14,8 +13,8 @@ import (
 // specifically exercise the fail-closed preflight override this per-test via
 // runtimepreflight.SetHealthCheckerForTest.
 func TestMain(m *testing.M) {
-	restore := runtimepreflight.SetHealthCheckerForTest(func(string) (backends.HealthStatus, bool) {
-		return backends.HealthStatus{Healthy: true, Installed: true, APIKeySet: true, Message: "ready"}, true
+	restore := runtimepreflight.SetHealthCheckerForTest(func(string) (runtimepreflight.HealthStatus, bool) {
+		return runtimepreflight.HealthStatus{Healthy: true, Installed: true, APIKeySet: true, Message: "ready"}, true
 	})
 	code := m.Run()
 	restore()

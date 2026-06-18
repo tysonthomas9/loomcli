@@ -65,6 +65,12 @@ type BuildAndRegisterOptions struct {
 	CreatedBy    string
 	WorkDir      string
 	Runners      []driver.DriverRunnerSpec
+	Manifest     map[string]string
+	// DeriveRunners is reserved for trusted built-in template registration.
+	// Custom/API/CLI builds must provide explicit runner specs; otherwise
+	// sibling workflow files remain bundle-private and are not selectable
+	// task runners.
+	DeriveRunners bool
 	// Trust is stamped server-side (§7 step 9 sandbox placement policy) and
 	// is never plumbed from request input. BuildAndRegister is the external
 	// submission path (workflows HTTP API), so empty defaults to UNTRUSTED —
@@ -163,16 +169,17 @@ func EnsureBuiltinWorkflow(ctx context.Context, st store.Store, ws, name string)
 		return nil
 	}
 	if _, _, err := BuildAndRegister(ctx, st, BuildAndRegisterOptions{
-		WorkspaceKey: ws,
-		Name:         name,
-		Entrypoint:   spec.Entrypoint,
-		Files:        spec.Files,
-		Activate:     true,
-		SourceRef:    sourceRef,
-		SourceDigest: digest,
-		CreatedBy:    "system",
-		WorkDir:      builtinWorkflowWorkDir(),
-		Trust:        domain.DriverTrustTrusted,
+		WorkspaceKey:  ws,
+		Name:          name,
+		Entrypoint:    spec.Entrypoint,
+		Files:         spec.Files,
+		Activate:      true,
+		SourceRef:     sourceRef,
+		SourceDigest:  digest,
+		CreatedBy:     "system",
+		WorkDir:       builtinWorkflowWorkDir(),
+		DeriveRunners: true,
+		Trust:         domain.DriverTrustTrusted,
 	}); err != nil {
 		return fmt.Errorf("register built-in workflow %q: %w", name, err)
 	}
@@ -266,7 +273,7 @@ func registerPrebuiltBuiltinWorkflow(ctx context.Context, st store.Store, ws, na
 		SourceDigest: digest,
 		CreatedBy:    "system",
 		Activate:     true,
-		RunnerSpecs:  workflowRunnerSpecs(BuildAndRegisterOptions{Entrypoint: spec.Entrypoint, Files: spec.Files}),
+		RunnerSpecs:  deriveWorkflowRunnerSpecs(spec.Entrypoint, spec.Files),
 		Trust:        domain.DriverTrustTrusted,
 	})
 	if err != nil {
@@ -332,6 +339,7 @@ func submissionTrust(trust domain.DriverTrustLevel) domain.DriverTrustLevel {
 	return trust
 }
 
+//nolint:funlen // Ordered build staging, diagnostics redaction, and registration share error context.
 func BuildAndRegister(ctx context.Context, st store.Store, opts BuildAndRegisterOptions) (*driver.RegisterFlueResult, string, error) {
 	if opts.SourceDigest == "" {
 		opts.SourceDigest = SourceDigest(opts.Files)
@@ -365,20 +373,27 @@ func BuildAndRegister(ctx context.Context, st store.Store, opts BuildAndRegister
 	outputDir := filepath.Join(buildRoot, "dist")
 	output, err := runFlueBuild(ctx, buildRoot, outputDir)
 	if err != nil {
-		return nil, output, err
+		redacted := RedactBuildDiagnostics(output)
+		if redacted != "" {
+			return nil, redacted, fmt.Errorf("flue build failed: %s", redacted)
+		}
+		return nil, "", err
 	}
+	output = RedactBuildDiagnostics(output)
 	result, err := driver.RegisterFlueDriver(ctx, st, driver.RegisterFlueOptions{
-		WorkspaceKey: opts.WorkspaceKey,
-		WorkDir:      workDir,
-		DistPath:     outputDir,
-		DriverName:   opts.Name,
-		WorkflowName: strings.TrimSuffix(filepath.Base(opts.Entrypoint), filepath.Ext(opts.Entrypoint)),
-		SourceRef:    opts.SourceRef,
-		SourceDigest: opts.SourceDigest,
-		CreatedBy:    opts.CreatedBy,
-		Activate:     opts.Activate,
-		RunnerSpecs:  workflowRunnerSpecs(opts),
-		Trust:        submissionTrust(opts.Trust),
+		WorkspaceKey:     opts.WorkspaceKey,
+		WorkDir:          workDir,
+		DistPath:         outputDir,
+		DriverName:       opts.Name,
+		WorkflowName:     strings.TrimSuffix(filepath.Base(opts.Entrypoint), filepath.Ext(opts.Entrypoint)),
+		SourceRef:        opts.SourceRef,
+		SourceDigest:     opts.SourceDigest,
+		CreatedBy:        opts.CreatedBy,
+		Activate:         opts.Activate,
+		RunnerSpecs:      workflowRunnerSpecs(opts),
+		Manifest:         opts.Manifest,
+		BuildDiagnostics: output,
+		Trust:            submissionTrust(opts.Trust),
 	})
 	if err != nil {
 		return nil, output, err
@@ -398,9 +413,16 @@ func workflowRunnerSpecs(opts BuildAndRegisterOptions) []driver.DriverRunnerSpec
 	if len(opts.Runners) > 0 {
 		return opts.Runners
 	}
-	entrypoint := filepath.ToSlash(opts.Entrypoint)
+	if !opts.DeriveRunners {
+		return nil
+	}
+	return deriveWorkflowRunnerSpecs(opts.Entrypoint, opts.Files)
+}
+
+func deriveWorkflowRunnerSpecs(entrypoint string, files map[string]string) []driver.DriverRunnerSpec {
+	entrypoint = filepath.ToSlash(entrypoint)
 	runners := []driver.DriverRunnerSpec{}
-	for rel := range opts.Files {
+	for rel := range files {
 		rel = filepath.ToSlash(strings.TrimSpace(rel))
 		if rel == "" || rel == entrypoint || !strings.HasPrefix(rel, "workflows/") || filepath.Ext(rel) != ".ts" {
 			continue
@@ -427,7 +449,7 @@ func workflowRunnerSpecs(opts BuildAndRegisterOptions) []driver.DriverRunnerSpec
 // workflowRunnerNameSet returns the set of runner names the freshly-derived
 // spec declares for a builtin workflow.
 func workflowRunnerNameSet(spec Spec) map[string]struct{} {
-	runners := workflowRunnerSpecs(BuildAndRegisterOptions{Entrypoint: spec.Entrypoint, Files: spec.Files})
+	runners := deriveWorkflowRunnerSpecs(spec.Entrypoint, spec.Files)
 	out := make(map[string]struct{}, len(runners))
 	for _, runner := range runners {
 		out[runner.Name] = struct{}{}
@@ -443,7 +465,7 @@ func workflowRunnerNameSet(spec Spec) map[string]struct{} {
 func activeManifestRunnersAreStale(manifest map[string]string, fresh map[string]struct{}) bool {
 	raw := strings.TrimSpace(manifest["runners"])
 	if raw == "" {
-		return false
+		return len(fresh) > 0
 	}
 	var runners []driver.DriverRunnerSpec
 	if err := json.Unmarshal([]byte(raw), &runners); err != nil {
@@ -523,6 +545,32 @@ func SourceDigest(files map[string]string) string {
 		hash.Write([]byte{0})
 	}
 	return "sha256:" + hex.EncodeToString(hash.Sum(nil))
+}
+
+func RedactBuildDiagnostics(input string) string {
+	output := input
+	for _, pair := range os.Environ() {
+		key, value, ok := strings.Cut(pair, "=")
+		if !ok || len(value) < 4 || !sensitiveEnvKey(key) {
+			continue
+		}
+		output = strings.ReplaceAll(output, value, "[redacted]")
+	}
+	const maxDiagnosticsBytes = 32768
+	if len(output) > maxDiagnosticsBytes {
+		output = output[len(output)-maxDiagnosticsBytes:]
+	}
+	return output
+}
+
+func sensitiveEnvKey(key string) bool {
+	key = strings.ToUpper(strings.TrimSpace(key))
+	for _, marker := range []string{"TOKEN", "SECRET", "PASSWORD", "CREDENTIAL", "API_KEY", "ACCESS_KEY", "PRIVATE_KEY"} {
+		if strings.Contains(key, marker) {
+			return true
+		}
+	}
+	return false
 }
 
 func validateWorkflowFilePath(raw string) (string, error) {

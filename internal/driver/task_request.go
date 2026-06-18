@@ -36,6 +36,7 @@ type TaskRunRequestOptions struct {
 	RunnerKind         string
 	RunnerEntrypoint   string
 	RunnerVersionID    string
+	RunnerTrustLevel   domain.DriverTrustLevel
 	ProviderProfile    string
 	ParentSessionID    string
 	ParentNodeID       string
@@ -89,6 +90,7 @@ type TaskExecRequest struct {
 	RunnerKind       string                  `json:"runner_kind,omitempty"`
 	RunnerEntrypoint string                  `json:"runner_entrypoint,omitempty"`
 	RunnerVersionID  string                  `json:"runner_driver_version_id,omitempty"`
+	RunnerTrustLevel domain.DriverTrustLevel `json:"runner_trust_level,omitempty"`
 	ProviderProfile  string                  `json:"provider_profile,omitempty"`
 	ParentSessionID  string                  `json:"parent_session_id,omitempty"`
 	NodeID           string                  `json:"node_id,omitempty"`
@@ -378,6 +380,7 @@ func executeClaimedTaskRunRequest(ctx context.Context, s store.Store, opts TaskR
 		DriverStepID:      opts.DriverStepID,
 		TaskID:            opts.TaskID,
 		ProviderProfile:   opts.ProviderProfile,
+		RunnerTrustLevel:  opts.RunnerTrustLevel,
 		ParentSessionID:   opts.ParentSessionID,
 		LeaseToken:        refs.LeaseToken,
 		HeartbeatInterval: opts.HeartbeatInterval,
@@ -409,6 +412,7 @@ func normalizeTaskRunRequestOptions(opts TaskRunRequestOptions) TaskRunRequestOp
 	opts.RunnerKind = strings.TrimSpace(opts.RunnerKind)
 	opts.RunnerEntrypoint = strings.TrimSpace(opts.RunnerEntrypoint)
 	opts.RunnerVersionID = strings.TrimSpace(opts.RunnerVersionID)
+	opts.RunnerTrustLevel = domain.DriverTrustLevel(strings.TrimSpace(string(opts.RunnerTrustLevel)))
 	opts.ProviderProfile = strings.TrimSpace(opts.ProviderProfile)
 	opts.ParentSessionID = strings.TrimSpace(opts.ParentSessionID)
 	opts.ParentNodeID = strings.TrimSpace(opts.ParentNodeID)
@@ -453,7 +457,16 @@ func resolveTaskRunRequestRunner(ctx context.Context, s store.Store, opts TaskRu
 	if version.DriverID != parent.DriverID {
 		return opts, fmt.Errorf("runner manifest version %q belongs to driver %q, run wants %q: %w", version.VersionID, version.DriverID, parent.DriverID, domain.ErrInvalid)
 	}
-	return applyResolvedRunner(opts, parent, version)
+	resolved, err := applyResolvedRunner(opts, parent, version)
+	if err != nil {
+		return opts, err
+	}
+	driver, err := s.Drivers().Get(ctx, opts.WorkspaceKey, parent.DriverID)
+	if err != nil {
+		return opts, fmt.Errorf("load driver %q for runner trust policy: %w", parent.DriverID, err)
+	}
+	resolved.RunnerTrustLevel = DriverVersionEffectiveTrust(driver, version)
+	return resolved, nil
 }
 
 func verifyTaskRunRequestParent(ctx context.Context, s store.Store, opts TaskRunRequestOptions) (*domain.DriverRun, error) {
@@ -515,6 +528,9 @@ func createQueuedTaskRun(ctx context.Context, s store.Store, opts TaskRunRequest
 	}
 	if opts.RunnerVersionID != "" {
 		runtimeMetadata["runner_driver_version_id"] = opts.RunnerVersionID
+	}
+	if opts.RunnerTrustLevel != "" {
+		runtimeMetadata["runner_trust_level"] = string(opts.RunnerTrustLevel)
 	}
 	if opts.ParentSessionID != "" {
 		runtimeMetadata["parent_session_id"] = opts.ParentSessionID
@@ -605,6 +621,7 @@ type executeClaimedTaskRunOptions struct {
 	DriverStepID       string
 	TaskID             string
 	ProviderProfile    string
+	RunnerTrustLevel   domain.DriverTrustLevel
 	ParentSessionID    string
 	LeaseToken         string
 	HeartbeatInterval  time.Duration
@@ -679,6 +696,7 @@ type claimedTaskRunRefs struct {
 	RunnerKind       string
 	RunnerEntrypoint string
 	RunnerVersionID  string
+	RunnerTrustLevel domain.DriverTrustLevel
 	ProviderProfile  string
 	ParentSessionID  string
 	HeartbeatSource  string
@@ -702,6 +720,7 @@ func claimedTaskRunRefsFromOptions(claimed *domain.TaskRun, opts executeClaimedT
 		RunnerKind:       claimed.RunnerKind,
 		RunnerEntrypoint: claimed.RunnerEntrypoint,
 		RunnerVersionID:  claimed.RunnerVersionID,
+		RunnerTrustLevel: domain.DriverTrustLevel(firstNonEmpty(string(opts.RunnerTrustLevel), claimed.RuntimeMetadata["runner_trust_level"])),
 		ProviderProfile:  firstNonEmpty(opts.ProviderProfile, claimed.ProviderProfile),
 		ParentSessionID:  firstNonEmpty(opts.ParentSessionID, claimed.RuntimeMetadata["parent_session_id"]),
 		HeartbeatSource:  firstNonEmpty(opts.HeartbeatSource, "task_run_executor"),
@@ -736,6 +755,7 @@ func taskExecRequest(claimed *domain.TaskRun, opts executeClaimedTaskRunOptions,
 		RunnerKind:       refs.RunnerKind,
 		RunnerEntrypoint: refs.RunnerEntrypoint,
 		RunnerVersionID:  refs.RunnerVersionID,
+		RunnerTrustLevel: refs.RunnerTrustLevel,
 		ProviderProfile:  refs.ProviderProfile,
 		ParentSessionID:  refs.ParentSessionID,
 		NodeID:           claimed.NodeID,
@@ -826,6 +846,9 @@ func taskExecRuntimeMetadata(execResult TaskExecResult, refs claimedTaskRunRefs)
 	}
 	if refs.RunnerVersionID != "" {
 		metadata["runner_driver_version_id"] = refs.RunnerVersionID
+	}
+	if refs.RunnerTrustLevel != "" {
+		metadata["runner_trust_level"] = string(refs.RunnerTrustLevel)
 	}
 	metadata["provider_profile"] = refs.ProviderProfile
 	metadata["task_run_executor"] = refs.HeartbeatSource
@@ -944,49 +967,4 @@ func finishClaimedTaskRun(ctx context.Context, s store.Store, claimed *domain.Ta
 		return nil, fmt.Errorf("finish task run: %w", err)
 	}
 	return final, nil
-}
-
-func TaskRunResultFromDomain(run *domain.TaskRun, artifactIDs ...[]string) TaskRunRequestResult {
-	if run == nil {
-		return TaskRunRequestResult{}
-	}
-	ids := []string(nil)
-	if len(artifactIDs) > 0 {
-		ids = normalizeArtifactIDs(artifactIDs[0])
-	}
-	return TaskRunRequestResult{
-		ID:               run.TaskRunID,
-		TaskRunID:        run.TaskRunID,
-		DriverStepID:     run.DriverStepID,
-		TaskID:           run.TaskID,
-		Status:           run.Status,
-		ExitCode:         run.ExitCode,
-		LogsRef:          run.LogsRef,
-		ArtifactsRef:     run.ArtifactsRef,
-		ArtifactIDs:      ids,
-		InputTokens:      run.InputTokens,
-		OutputTokens:     run.OutputTokens,
-		CacheReadTokens:  run.CacheReadTokens,
-		CacheWriteTokens: run.CacheWriteTokens,
-		EstimatedCostUSD: run.EstimatedCostUSD,
-		ErrorClass:       run.ErrorClass,
-		ErrorMessage:     run.ErrorMessage,
-		FinishedAt:       run.FinishedAt,
-		Runner:           run.Runner,
-		RunnerRef:        run.RunnerRef,
-		RunnerKind:       run.RunnerKind,
-		RunnerEntrypoint: run.RunnerEntrypoint,
-		RunnerVersionID:  run.RunnerVersionID,
-		ProviderProfile:  run.ProviderProfile,
-		RuntimeMetadata:  cloneStringMap(run.RuntimeMetadata),
-	}
-}
-
-func TaskRunResultFromOutcome(outcome *TaskRunRequestOutcome) TaskRunRequestResult {
-	if outcome == nil {
-		return TaskRunRequestResult{}
-	}
-	result := TaskRunResultFromDomain(outcome.Run, outcome.ArtifactIDs)
-	result.LeaseToken = outcome.LeaseToken
-	return result
 }

@@ -14,13 +14,12 @@ import type { RepoInfo } from "@/api/workspace";
 
 import { epicRunnerRuntimePayload } from "../epicRunnerPayload";
 
-function makeLocalSettings(
-  runtime: "local" | "daytona",
-): LocalSettingsData {
+function makeLocalSettings(runtime: "local" | "daytona"): LocalSettingsData {
   return {
     version: 1,
     fleetdb_redis: { enabled: false },
     agent_runtime: { default: runtime },
+    local_task_runner: {},
     runtime_credentials: {
       daytona: { configured: false },
       github: { configured: false },
@@ -28,7 +27,9 @@ function makeLocalSettings(
   } as unknown as LocalSettingsData;
 }
 
-function makeRepo(overrides: Partial<RepoInfo> = {}): Pick<
+function makeRepo(
+  overrides: Partial<RepoInfo> = {},
+): Pick<
   RepoInfo,
   "name" | "source_repo_id" | "remote" | "remote_url" | "default_branch"
 > {
@@ -43,13 +44,18 @@ function makeRepo(overrides: Partial<RepoInfo> = {}): Pick<
 }
 
 describe("epicRunnerRuntimePayload", () => {
-  it('maps "Locally" runtime to an explicit local-task-runner', () => {
+  it('maps "Locally" runtime to local-task-runner PR delivery with a selected repo', () => {
     const payload = epicRunnerRuntimePayload({
       localSettings: makeLocalSettings("local"),
       repos: [makeRepo()],
       currentRepo: "acme",
     });
-    expect(payload).toEqual({ runner: "local-task-runner" });
+    expect(payload).toEqual({
+      runner: "local-task-runner",
+      repoUrl: "https://github.com/acme/widgets.git",
+      baseBranch: "main",
+      openPullRequest: true,
+    });
   });
 
   it("maps a null/undefined runtime to the explicit local-task-runner", () => {
@@ -68,6 +74,7 @@ describe("epicRunnerRuntimePayload", () => {
       currentRepo: "acme",
     });
     expect(payload.runner).toBe("local-task-runner");
+    expect(payload.openPullRequest).toBe(true);
     expect(Object.keys(payload)).not.toHaveLength(0);
   });
 

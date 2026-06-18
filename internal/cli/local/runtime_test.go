@@ -286,7 +286,7 @@ func TestStopRuntimeProcessesStopsServiceAndServePIDs(t *testing.T) {
 
 func startSleepProcess(t *testing.T) *exec.Cmd {
 	t.Helper()
-	cmd := exec.Command("/bin/sleep", "30")
+	cmd := exec.Command("/bin/sleep", "30") //nolint:norawexec // intentional child process for cleanup assertions.
 	if err := cmd.Start(); err != nil {
 		t.Fatalf("start sleep process: %v", err)
 	}
@@ -295,8 +295,10 @@ func startSleepProcess(t *testing.T) *exec.Cmd {
 		done <- cmd.Wait()
 	}()
 	t.Cleanup(func() {
-		if cmd.ProcessState != nil && cmd.ProcessState.Exited() {
+		select {
+		case <-done:
 			return
+		default:
 		}
 		_ = cmd.Process.Kill()
 		select {

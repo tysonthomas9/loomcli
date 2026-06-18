@@ -243,6 +243,10 @@ async function enqueueChildTask(loom, task, defaults) {
     parentSessionId: defaults.parentSessionId || "",
     nodeId: defaults.targetNodeId || "",
   };
+  const sourceRepo = stringValue(task && (task.sourceRepo || task.source_repo));
+  if (sourceRepo) {
+    request.repoRef = sourceRepo;
+  }
   const childInput = childTaskInput(defaults.childInput, loom, task);
   if (Object.keys(childInput).length > 0) {
     request.input = childInput;
@@ -292,6 +296,7 @@ function childTaskInputDefaults(input) {
     "targetBranch",
     "openPullRequest",
     "stackedPullRequests",
+    "refreshCodexAuth",
   ]) {
     if (input && input[key] !== undefined && input[key] !== null && input[key] !== "") {
       out[key] = input[key];
@@ -312,6 +317,10 @@ function childTaskInput(defaults, loom, task) {
   }
   if (task && task.id && !out.taskId) {
     out.taskId = task.id;
+  }
+  const sourceRepo = stringValue(task && (task.sourceRepo || task.source_repo));
+  if (sourceRepo && !out.sourceRepo) {
+    out.sourceRepo = sourceRepo;
   }
   return out;
 }

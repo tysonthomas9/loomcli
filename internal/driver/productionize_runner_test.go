@@ -429,6 +429,7 @@ setInterval(() => {}, 1000);
 	req.RunnerKind = RunnerKindFlueWorkflow
 	req.RunnerEntrypoint = "local-task-runner"
 	req.RunnerVersionID = "driver-version-1"
+	req.RunnerTrustLevel = domain.DriverTrustTrusted
 	result, err := (HostBridgeTaskExecutor{Store: st, WorktreePath: worktree}).ExecuteTask(ctx, req)
 	if err != nil {
 		t.Fatalf("ExecuteTask: %v", err)
@@ -518,6 +519,7 @@ setInterval(() => {}, 1000);
 	req.RunnerKind = RunnerKindFlueWorkflow
 	req.RunnerEntrypoint = "local-task-runner"
 	req.RunnerVersionID = "driver-version-1"
+	req.RunnerTrustLevel = domain.DriverTrustTrusted
 	result, err := (HostBridgeTaskExecutor{Store: st, WorktreePath: worktree}).ExecuteTask(ctx, req)
 	if err != nil {
 		t.Fatalf("ExecuteTask: %v", err)

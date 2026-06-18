@@ -24,12 +24,19 @@ func TestActiveManifestRunnersAreStale(t *testing.T) {
 	cases := []struct {
 		name      string
 		manifest  map[string]string
+		fresh     map[string]struct{}
 		wantStale bool
 	}{
 		{
-			name:      "no runners is not stale",
+			name:      "missing runners is stale when builtin derives runners",
+			manifest:  map[string]string{},
+			wantStale: true,
+		},
+		{
+			name:      "missing runners is not stale when builtin has no runners",
 			manifest:  map[string]string{},
 			wantStale: false,
+			fresh:     map[string]struct{}{},
 		},
 		{
 			name:      "current runners are not stale",
@@ -54,7 +61,11 @@ func TestActiveManifestRunnersAreStale(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := activeManifestRunnersAreStale(tc.manifest, fresh); got != tc.wantStale {
+			freshSet := fresh
+			if tc.fresh != nil {
+				freshSet = tc.fresh
+			}
+			if got := activeManifestRunnersAreStale(tc.manifest, freshSet); got != tc.wantStale {
 				t.Fatalf("activeManifestRunnersAreStale = %v, want %v", got, tc.wantStale)
 			}
 		})

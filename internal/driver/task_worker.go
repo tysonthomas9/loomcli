@@ -34,6 +34,12 @@ type TaskWorker struct {
 	// APIBaseURL is the serve task-run API base URL exported to bridge task
 	// runners as LOOM_TASK_RUN_API_URL (see HostBridgeTaskExecutor).
 	APIBaseURL string
+	// LocalSettingsDir is passed through to HostBridgeTaskExecutor so bundled
+	// local-task-runner can read desktop-local credentials/settings.
+	LocalSettingsDir string
+	// WorktreeResolver resolves per-task-run local worktrees for bundled local
+	// task runners. Nil uses the machine-local workspace cache.
+	WorktreeResolver TaskWorktreeResolver
 	// Now is a clock seam for tests; nil uses time.Now.
 	Now func() time.Time
 }
@@ -79,9 +85,11 @@ func (w *TaskWorker) runOnceInWorkspace(ctx context.Context, ws, workDir string)
 	executor := w.Executor
 	if executor == nil {
 		executor = HostBridgeTaskExecutor{
-			Store:        w.Store,
-			WorktreePath: workDir,
-			APIBaseURL:   w.APIBaseURL,
+			Store:            w.Store,
+			WorktreePath:     workDir,
+			APIBaseURL:       w.APIBaseURL,
+			LocalSettingsDir: w.LocalSettingsDir,
+			WorktreeResolver: firstNonNilTaskWorktreeResolver(w.WorktreeResolver, LocalTaskWorktreeResolver{Store: w.Store}),
 		}
 	}
 	outcome, err := ClaimAndExecuteTaskRunWithResult(ctx, w.Store, TaskRunWorkerOptions{
@@ -111,6 +119,13 @@ func (w *TaskWorker) runOnceInWorkspace(ctx context.Context, ws, workDir string)
 		return outcome, err
 	}
 	return outcome, nil
+}
+
+func firstNonNilTaskWorktreeResolver(primary, fallback TaskWorktreeResolver) TaskWorktreeResolver {
+	if primary != nil {
+		return primary
+	}
+	return fallback
 }
 
 func (w *TaskWorker) updateLinkedDriverStep(ctx context.Context, run *domain.TaskRun) error {
@@ -253,4 +268,49 @@ func heartbeatTaskRun(ctx context.Context, s store.Store, run *domain.TaskRun, l
 			})
 		}
 	}
+}
+
+func TaskRunResultFromDomain(run *domain.TaskRun, artifactIDs ...[]string) TaskRunRequestResult {
+	if run == nil {
+		return TaskRunRequestResult{}
+	}
+	ids := []string(nil)
+	if len(artifactIDs) > 0 {
+		ids = normalizeArtifactIDs(artifactIDs[0])
+	}
+	return TaskRunRequestResult{
+		ID:               run.TaskRunID,
+		TaskRunID:        run.TaskRunID,
+		DriverStepID:     run.DriverStepID,
+		TaskID:           run.TaskID,
+		Status:           run.Status,
+		ExitCode:         run.ExitCode,
+		LogsRef:          run.LogsRef,
+		ArtifactsRef:     run.ArtifactsRef,
+		ArtifactIDs:      ids,
+		InputTokens:      run.InputTokens,
+		OutputTokens:     run.OutputTokens,
+		CacheReadTokens:  run.CacheReadTokens,
+		CacheWriteTokens: run.CacheWriteTokens,
+		EstimatedCostUSD: run.EstimatedCostUSD,
+		ErrorClass:       run.ErrorClass,
+		ErrorMessage:     run.ErrorMessage,
+		FinishedAt:       run.FinishedAt,
+		Runner:           run.Runner,
+		RunnerRef:        run.RunnerRef,
+		RunnerKind:       run.RunnerKind,
+		RunnerEntrypoint: run.RunnerEntrypoint,
+		RunnerVersionID:  run.RunnerVersionID,
+		ProviderProfile:  run.ProviderProfile,
+		RuntimeMetadata:  cloneStringMap(run.RuntimeMetadata),
+	}
+}
+
+func TaskRunResultFromOutcome(outcome *TaskRunRequestOutcome) TaskRunRequestResult {
+	if outcome == nil {
+		return TaskRunRequestResult{}
+	}
+	result := TaskRunResultFromDomain(outcome.Run, outcome.ArtifactIDs)
+	result.LeaseToken = outcome.LeaseToken
+	return result
 }

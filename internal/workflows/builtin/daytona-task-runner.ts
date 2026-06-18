@@ -15,8 +15,7 @@ const DEFAULT_MODEL = "openai-codex/gpt-5.3-codex-spark";
 const DEFAULT_REPO_DIR = "/tmp/loom-daytona-task-repo";
 // DEMO_MODES gates the e2e-only task modes that fabricate scaffolding instead of
 // implementing real task work. They stay reachable for the e2e harness only when
-// LOOM_DAYTONA_TASK_RUNNER_ENABLE_DEMO_MODES=1; otherwise they fail closed so a
-// production task input can never quietly route into a demo path.
+// explicitly enabled by environment; request input cannot open these paths.
 const DEMO_MODES = new Set(["e2e-smoke", "slack-pr-chain"]);
 
 export async function run(ctx = {}) {
@@ -26,7 +25,7 @@ export async function run(ctx = {}) {
   const logs = [];
 
   const mode = taskMode(request);
-  if (DEMO_MODES.has(mode) && stringValue(process.env.LOOM_DAYTONA_TASK_RUNNER_ENABLE_DEMO_MODES) !== "1") {
+  if (DEMO_MODES.has(mode) && !demoModesEnabled(request)) {
     return failed(
       "daytona_demo_mode_disabled",
       `daytona task mode ${mode} is a demo-only path; set LOOM_DAYTONA_TASK_RUNNER_ENABLE_DEMO_MODES=1 to enable it`,
@@ -44,7 +43,7 @@ export async function run(ctx = {}) {
   try {
     const imports = await loadRuntimeImports();
     const model = stringValue(process.env.LOOM_FLUE_AGENT_MODEL) || DEFAULT_MODEL;
-    const auth = await configureCodexAuth(imports, model);
+    const auth = await configureCodexAuth(imports, model, request);
     if (!auth.ok) {
       return failed("codex_auth_failed", auth.error, taskRunId, request, logs);
     }
@@ -402,7 +401,7 @@ class DaytonaSandboxApi {
   }
 }
 
-async function configureCodexAuth(imports, model) {
+async function configureCodexAuth(imports, model, request) {
   let resolved;
   try {
     resolved = imports.internal.resolveModel(model);
@@ -417,7 +416,7 @@ async function configureCodexAuth(imports, model) {
     return { ok: false, error: "openai-codex model selected but no Codex auth token was found" };
   }
   let apiKey = auth.accessToken;
-  if (tokenExpiresSoon(apiKey)) {
+  if (booleanValue(inputValue(request, "refreshCodexAuth")) || tokenExpiresSoon(apiKey)) {
     if (!auth.refreshToken) {
       return { ok: false, error: "Codex access token is expired and no refresh token was found" };
     }
@@ -591,6 +590,10 @@ function deliveryPlan(request, task, taskRunId) {
 
 function taskMode(request) {
   return stringValue(inputValue(request, "mode") || process.env.DAYTONA_TASK_MODE);
+}
+
+function demoModesEnabled(_request) {
+  return stringValue(process.env.LOOM_DAYTONA_TASK_RUNNER_ENABLE_DEMO_MODES) === "1";
 }
 
 function taskBranchName(driverRunId, taskId) {

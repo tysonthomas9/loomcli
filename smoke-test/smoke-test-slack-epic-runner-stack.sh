@@ -26,11 +26,34 @@ DRIVER_NODE_ID="${DRIVER_NODE_ID:-slack-codex-driver}"
 FLEET_DB_REPO="${FLEET_DB_REPO:-${ROOT_DIR}/../fleet-db}"
 FLEET_DB_BIN="${FLEET_DB_BIN:-${ROOT_DIR}/tmp/podman/fleet-db-linux}"
 BUILD_FLEET_DB="${BUILD_FLEET_DB:-auto}"
+# Standalone fleet-db (Phase 2.5): when STANDALONE_FLEET_DB=1, serve runs in CLOUD mode against an
+# EXTERNAL fleet-db (started separately by the test harness, e.g. aether-test-framework) instead of
+# auto-spawning the embedded one. The harness sets LOOM_FLEET_DB_URL and joins PODMAN_NETWORK so both
+# serve AND the in-container `loom` execs (which inherit run-time env) reach the external fleet-db.
+# Seeding/registration still flow through serve + the loom CLI, so the rest of this script is unchanged.
+STANDALONE_FLEET_DB="${STANDALONE_FLEET_DB:-0}"
+PODMAN_NETWORK="${PODMAN_NETWORK:-}"
+LOOM_FLEET_DB_URL="${LOOM_FLEET_DB_URL:-}"
+LOOM_FLEET_DB_API_KEY="${LOOM_FLEET_DB_API_KEY:-}"
 BUILD_IMAGE="${BUILD_IMAGE:-auto}"
 
 CODEX_HOME="${CODEX_HOME:-${HOME}/.codex}"
 CONTAINER_CODEX_AUTH_FILE="${CONTAINER_CODEX_AUTH_FILE:-/root/.codex/auth.json}"
 CLAUDE_HOME="${CLAUDE_HOME:-${HOME}/.claude}"
+# opencode keeps its own auth store (~/.local/share/opencode/auth.json), separate
+# from ~/.codex; without it the container CLI falls back to opencode's free hosted
+# model. Copy the host auth in and pin the model so local-task-runner opencode runs
+# use a real provider (e.g. OpenAI gpt-5.4-mini-fast) instead of the free default.
+OPENCODE_AUTH_FILE_HOST="${OPENCODE_AUTH_FILE_HOST:-${HOME}/.local/share/opencode/auth.json}"
+CONTAINER_OPENCODE_AUTH_FILE="${CONTAINER_OPENCODE_AUTH_FILE:-/root/.local/share/opencode/auth.json}"
+LOOM_OPENCODE_MODEL="${LOOM_OPENCODE_MODEL:-openai/gpt-5.4-mini-fast}"
+# cursor-agent: the host binary is platform-specific (a macOS wrapper over native
+# components) and its login lives in the OS keychain, so neither is mountable into
+# the Linux container. Instead install the Linux cursor-agent CLI on demand and
+# authenticate with CURSOR_API_KEY. Set CURSOR_API_KEY (a cursor.com key) to enable
+# the cursor backend; leave empty to skip cursor entirely.
+CURSOR_API_KEY="${CURSOR_API_KEY:-}"
+CURSOR_INSTALL_URL="${CURSOR_INSTALL_URL:-https://cursor.com/install}"
 CONTAINER_REPO_PATH="${CONTAINER_REPO_PATH:-/tmp/slack-src}"
 CONTAINER_EPIC_RUNNER_DIST="${CONTAINER_EPIC_RUNNER_DIST:-/tmp/epic-runner-dist}"
 CONTAINER_DRIVER_WORKDIR="${CONTAINER_DRIVER_WORKDIR:-/root/.loom/workspaces/alpha}"
@@ -41,6 +64,20 @@ LOOM_FLUE_AGENT_MODEL="${LOOM_FLUE_AGENT_MODEL:-openai-codex/gpt-5.3-codex-spark
 RUN_DAYTONA="${RUN_DAYTONA:-0}"
 DAYTONA_REPO_URL="${DAYTONA_REPO_URL:-https://github.com/tysonthomas9/webhook-e2e-sandbox.git}"
 DAYTONA_TASK_MODE="${DAYTONA_TASK_MODE:-e2e-smoke}"
+# e2e-smoke and slack-pr-chain are gated DEMO_MODES in daytona-task-runner.ts;
+# this stack exists to run them, so enable them by default (override with 0).
+LOOM_DAYTONA_TASK_RUNNER_ENABLE_DEMO_MODES="${LOOM_DAYTONA_TASK_RUNNER_ENABLE_DEMO_MODES:-1}"
+# Real mode (faithful E2E): an empty DAYTONA_TASK_MODE makes the daytona runner use a genuine
+# implementation prompt instead of a fabricated DEMO_MODE. The `:-e2e-smoke` default above treats
+# an empty string as unset, so the only way to request real mode is this explicit toggle. When set,
+# force the task mode empty and keep demo modes disabled (real mode must not ride the demo flag).
+DAYTONA_REAL_MODE="${DAYTONA_REAL_MODE:-0}"
+case "$DAYTONA_REAL_MODE" in
+  1 | true | TRUE | yes | YES | on | ON)
+    DAYTONA_TASK_MODE=""
+    LOOM_DAYTONA_TASK_RUNNER_ENABLE_DEMO_MODES=0
+    ;;
+esac
 DAYTONA_CREDENTIAL_FILE_HOST="${DAYTONA_CREDENTIAL_FILE_HOST:-}"
 CONTAINER_DAYTONA_SECRET_DIR="${CONTAINER_DAYTONA_SECRET_DIR:-/run/loom-secrets}"
 CONTAINER_DAYTONA_CREDENTIAL_FILE="${CONTAINER_DAYTONA_CREDENTIAL_FILE:-${CONTAINER_DAYTONA_SECRET_DIR}/daytona_api_key}"
@@ -171,6 +208,35 @@ install_github_secret() {
   podman exec "$CONTAINER" chmod 0400 "$CONTAINER_GITHUB_CREDENTIAL_FILE"
 }
 
+install_opencode_auth() {
+  if [[ ! -f "$OPENCODE_AUTH_FILE_HOST" ]]; then
+    log "no opencode auth at ${OPENCODE_AUTH_FILE_HOST}; container opencode will use its free hosted model"
+    return 0
+  fi
+  log "installing opencode auth into ${CONTAINER} (path only; value is not logged)"
+  podman exec "$CONTAINER" mkdir -p "$(dirname "$CONTAINER_OPENCODE_AUTH_FILE")"
+  # Copy (not RO-mount) so opencode can refresh/rewrite its own token in-container
+  # without touching the host file.
+  podman cp "$OPENCODE_AUTH_FILE_HOST" "${CONTAINER}:${CONTAINER_OPENCODE_AUTH_FILE}"
+  podman exec "$CONTAINER" chmod 0600 "$CONTAINER_OPENCODE_AUTH_FILE"
+}
+
+install_cursor_agent() {
+  if [[ -z "$CURSOR_API_KEY" ]]; then
+    return 0
+  fi
+  log "installing cursor-agent (Linux) into ${CONTAINER}"
+  podman exec "$CONTAINER" sh -lc '
+    set -e
+    if ! command -v cursor-agent >/dev/null 2>&1 && [ ! -x /root/.local/bin/cursor-agent ]; then
+      curl -fsS '"$CURSOR_INSTALL_URL"' | bash
+    fi
+    # Symlink onto the default PATH so the task-runner can exec it without a PATH override.
+    [ -x /root/.local/bin/cursor-agent ] && ln -sfn /root/.local/bin/cursor-agent /usr/local/bin/cursor-agent
+    cursor-agent --version 2>/dev/null | head -1 || true
+  '
+}
+
 require_daytona_runtime() {
   if ! truthy "$RUN_DAYTONA"; then
     return 0
@@ -184,8 +250,12 @@ require_daytona_runtime() {
 }
 
 workspace_payload() {
-  node -e 'console.log(JSON.stringify({name: process.argv[1], type: "empty", repos: [process.argv[2]]}))' \
-    "$WORKSPACE_NAME" "$CONTAINER_REPO_PATH"
+  # WORKSPACE_BRANCH sets the workspace repo's DefaultBranch. When empty, serve defaults it to the
+  # workspace NAME (workspace_store.go:72-74) — which then leaks into the webui daytona payload's
+  # baseBranch and makes the remote clone fail ("Remote branch <name> not found"). Set it to the
+  # GitHub repo's default branch (e.g. main) for the daytona-via-UI flow.
+  node -e 'const o={name: process.argv[1], type: "empty", repos: [process.argv[2]]}; if(process.argv[3]) o.branch=process.argv[3]; console.log(JSON.stringify(o))' \
+    "$WORKSPACE_NAME" "$CONTAINER_REPO_PATH" "${WORKSPACE_BRANCH:-}"
 }
 
 agent_payload() {
@@ -294,12 +364,27 @@ seed_repo() {
   podman exec "$CONTAINER" rm -rf "$CONTAINER_REPO_PATH"
   podman exec "$CONTAINER" mkdir -p "$CONTAINER_REPO_PATH"
   podman cp "${FIXTURE_DIR}/." "${CONTAINER}:${CONTAINER_REPO_PATH}/"
-  podman exec "$CONTAINER" git -C "$CONTAINER_REPO_PATH" init -b main >/dev/null
+  # The workspace create does `git worktree add -b <WORKSPACE_BRANCH>` from THIS repo, which fails if
+  # that branch already exists here. So when WORKSPACE_BRANCH is set (daytona-via-UI, to match the
+  # GitHub remote's default branch), seed on a NON-conflicting branch and let the workspace create the
+  # target branch fresh. Default unchanged (main) otherwise.
+  local seed_branch="main"
+  [[ -n "${WORKSPACE_BRANCH:-}" && "${WORKSPACE_BRANCH}" == "main" ]] && seed_branch="loom-seed-base"
+  podman exec "$CONTAINER" git -C "$CONTAINER_REPO_PATH" init -b "$seed_branch" >/dev/null
   podman exec "$CONTAINER" git -C "$CONTAINER_REPO_PATH" add .
   podman exec "$CONTAINER" git -C "$CONTAINER_REPO_PATH" \
     -c user.name=Loom \
     -c user.email=loom@example.test \
     commit -m "seed slack app shell" >/dev/null
+  # Optionally give the workspace repo a GitHub origin so serve reports a remote_url
+  # (gitRemoteURL → workspace_store.go). The webui's daytona epic-run payload derives its
+  # repoUrl from the issue's source_repo → this remote; without it, daytona-via-UI cannot
+  # resolve a repo and fails closed. Harmless for local backends (they use the worktree).
+  if [[ -n "${SEED_REPO_REMOTE_URL:-}" ]]; then
+    podman exec "$CONTAINER" git -C "$CONTAINER_REPO_PATH" remote add origin "$SEED_REPO_REMOTE_URL" >/dev/null 2>&1 \
+      || podman exec "$CONTAINER" git -C "$CONTAINER_REPO_PATH" remote set-url origin "$SEED_REPO_REMOTE_URL"
+    log "workspace repo origin set to ${SEED_REPO_REMOTE_URL}"
+  fi
 }
 
 seed_loom_default() {
@@ -396,6 +481,16 @@ write_epic_runner_dist() {
   cp "$LOCAL_TASK_RUNNER_SOURCE" "${dist}/workflows/local-task-runner.mjs"
   cp "$DAYTONA_TASK_RUNNER_SOURCE" "${dist}/workflows/daytona-task-runner.mjs"
   cp "$OPENSHELL_TASK_RUNNER_SOURCE" "${dist}/workflows/openshell-task-runner.mjs"
+  node -e '
+const fs = require("node:fs");
+const dist = process.argv[1];
+fs.writeFileSync(dist + "/loom-driver.json", JSON.stringify({
+  runners: JSON.stringify([
+    { name: "daytona-task-runner", kind: "flue-workflow", entrypoint: "daytona-task-runner" },
+    { name: "local-task-runner", kind: "flue-workflow", entrypoint: "local-task-runner" }
+  ])
+}, null, 2) + "\n");
+' "$dist"
   cat > "${dist}/server.mjs" <<'EOF'
 const workflowLoaders = {
   "epic-runner": () => import("./workflows/epic-runner.mjs"),
@@ -462,6 +557,61 @@ send({ type: "ready" });
 EOF
 }
 
+seed_local_worktree_base() {
+  # The local-task-runner derives each backend's isolated worktree from the driver
+  # workspace dir (serve's CWD), which loom initializes as an EMPTY git repo. Seed
+  # it with the Slack app so local backends (codex/claude/opencode/cursor) have real
+  # code to edit; without this they run against an empty tree and produce no diff.
+  # (The Daytona runner is unaffected — it clones DAYTONA_REPO_URL into its sandbox.)
+  #
+  # NOTE: this seeding papers over the per-workspace-worktree-provisioning gap
+  # (loomcli FINDINGS #3). Set SEED_LOCAL_WORKTREE_BASE=0 for a deployment-faithful
+  # bring-up that leaves the gap visible — aether-test-framework relies on this to
+  # observe the gap as an xfail rather than hiding it.
+  if ! truthy "${SEED_LOCAL_WORKTREE_BASE:-1}"; then
+    log "skipping local-runner worktree seeding (SEED_LOCAL_WORKTREE_BASE=0; faithful bring-up)"
+    return 0
+  fi
+  log "seeding local-task-runner worktree base (${CONTAINER_DRIVER_WORKDIR}) with the Slack app"
+  podman exec \
+    -e SRC="$CONTAINER_REPO_PATH" \
+    -e DST="$CONTAINER_DRIVER_WORKDIR" \
+    "$CONTAINER" sh -lc '
+      set -e
+      cd "$DST"
+      for p in README.md index.html package.json scripts src test; do
+        [ -e "$SRC/$p" ] && cp -r "$SRC/$p" ./
+      done
+      printf ".loom/\nsessions/\nnotify.token\n" > .gitignore
+      git add -A
+      if ! git diff --cached --quiet; then
+        git -c user.name=Loom -c user.email=loom@example.test \
+          commit -m "seed slack app into local-runner worktree base" >/dev/null
+      fi
+    '
+}
+
+stage_daytona_bundle_deps() {
+  # daytona-task-runner.ts has static top-level imports of @daytona/sdk and
+  # @flue/runtime (the bundled fallbacks). The canonical esbuild bundle inlines
+  # them (see scripts/rebuild-builtin-bundle.sh), but write_epic_runner_dist
+  # ships a raw .mjs copy whose node_modules only carries @loom/sdk, so the
+  # static imports fail to resolve at module load. Expose the mounted flue repo's
+  # packages on the runner's upward node_modules resolution path (/root) so the
+  # static imports resolve; the runtime still loads the real code via the
+  # DAYTONA_SDK_IMPORT / FLUE_RUNTIME_IMPORT dynamic imports.
+  if [[ ! -d "$FLUE_REPO" ]]; then
+    return 0
+  fi
+  log "staging bundle-only deps (@daytona/sdk, @flue/runtime) on the runner resolution path"
+  podman exec "$CONTAINER" sh -lc '
+    set -e
+    mkdir -p /root/node_modules/@daytona /root/node_modules/@flue
+    ln -sfn /opt/flue-workspace/node_modules/.pnpm/node_modules/@daytona/sdk /root/node_modules/@daytona/sdk
+    ln -sfn /opt/flue-workspace/packages/runtime /root/node_modules/@flue/runtime
+  '
+}
+
 register_epic_runner_workflow() {
   if ! truthy "$REGISTER_EPIC_RUNNER"; then
     return 0
@@ -492,6 +642,7 @@ register_epic_runner_workflow() {
       --workflow epic-runner \
       --source-ref "builtin://workflows/epic-runner/versions/${digest}" \
       --source-digest "$digest" \
+      --trusted \
       --activate \
       --json >/dev/null
   rm -rf "$build_dir"
@@ -512,30 +663,41 @@ main() {
   ensure_fleet_db
   ensure_image
 
+  local runner_env=(
+    env
+    "CODEX_HOME=${CONTAINER_CODEX_HOME}"
+    "LOOM_CODEX_AUTH_FILE=${CONTAINER_CODEX_HOME}/auth.json"
+    "DAYTONA_CREDENTIAL_FILE=${CONTAINER_DAYTONA_CREDENTIAL_FILE}"
+    "GITHUB_TOKEN_FILE=${CONTAINER_GITHUB_CREDENTIAL_FILE}"
+    "DAYTONA_REPO_URL=${DAYTONA_REPO_URL}"
+    "DAYTONA_TASK_MODE=${DAYTONA_TASK_MODE}"
+    "LOOM_DAYTONA_TASK_RUNNER_ENABLE_DEMO_MODES=${LOOM_DAYTONA_TASK_RUNNER_ENABLE_DEMO_MODES}"
+    "DAYTONA_BASE_BRANCH=${DAYTONA_BASE_BRANCH}"
+    "DAYTONA_PR_BRANCH_PREFIX=${DAYTONA_PR_BRANCH_PREFIX}"
+    "DAYTONA_PR_STACKED=${DAYTONA_PR_STACKED}"
+    "DAYTONA_PR_DRAFT=${DAYTONA_PR_DRAFT}"
+    "DAYTONA_GIT_AUTHOR_NAME=${DAYTONA_GIT_AUTHOR_NAME}"
+    "DAYTONA_GIT_AUTHOR_EMAIL=${DAYTONA_GIT_AUTHOR_EMAIL}"
+    "DAYTONA_API_URL=${DAYTONA_API_URL:-}"
+    "DAYTONA_TARGET=${DAYTONA_TARGET:-}"
+    "KEEP_DAYTONA_SANDBOX=${KEEP_DAYTONA_SANDBOX:-}"
+    "FLUE_RUNTIME_IMPORT=${FLUE_RUNTIME_IMPORT}"
+    "FLUE_RUNTIME_INTERNAL_IMPORT=${FLUE_RUNTIME_INTERNAL_IMPORT}"
+    "DAYTONA_SDK_IMPORT=${DAYTONA_SDK_IMPORT}"
+    # local-task-runner opencode model pin (forwarded to `opencode run --model`).
+    "LOOM_OPENCODE_MODEL=${LOOM_OPENCODE_MODEL}"
+  )
+  # cursor-agent reads CURSOR_API_KEY from its environment (no file/keychain path
+  # works in-container). Inject it only when provided. NOTE: this places the key in
+  # LOOM_DRIVER_TASK_RUNNER_CMD_JSON (visible via `podman inspect`) — acceptable for
+  # a local e2e stack; a production deploy should source it from a mounted secret.
+  if [[ -n "$CURSOR_API_KEY" ]]; then
+    runner_env+=("CURSOR_API_KEY=${CURSOR_API_KEY}")
+  fi
+  runner_env+=(node /usr/local/bin/loom-task-runner-invoker.mjs)
+
   local runner_cmd_json
-  runner_cmd_json="$(
-    json_array \
-      env \
-      "CODEX_HOME=${CONTAINER_CODEX_HOME}" \
-      "LOOM_CODEX_AUTH_FILE=${CONTAINER_CODEX_HOME}/auth.json" \
-      "DAYTONA_CREDENTIAL_FILE=${CONTAINER_DAYTONA_CREDENTIAL_FILE}" \
-      "GITHUB_TOKEN_FILE=${CONTAINER_GITHUB_CREDENTIAL_FILE}" \
-      "DAYTONA_REPO_URL=${DAYTONA_REPO_URL}" \
-      "DAYTONA_TASK_MODE=${DAYTONA_TASK_MODE}" \
-      "DAYTONA_BASE_BRANCH=${DAYTONA_BASE_BRANCH}" \
-      "DAYTONA_PR_BRANCH_PREFIX=${DAYTONA_PR_BRANCH_PREFIX}" \
-      "DAYTONA_PR_STACKED=${DAYTONA_PR_STACKED}" \
-      "DAYTONA_PR_DRAFT=${DAYTONA_PR_DRAFT}" \
-      "DAYTONA_GIT_AUTHOR_NAME=${DAYTONA_GIT_AUTHOR_NAME}" \
-      "DAYTONA_GIT_AUTHOR_EMAIL=${DAYTONA_GIT_AUTHOR_EMAIL}" \
-      "DAYTONA_API_URL=${DAYTONA_API_URL:-}" \
-      "DAYTONA_TARGET=${DAYTONA_TARGET:-}" \
-      "KEEP_DAYTONA_SANDBOX=${KEEP_DAYTONA_SANDBOX:-}" \
-      "FLUE_RUNTIME_IMPORT=${FLUE_RUNTIME_IMPORT}" \
-      "FLUE_RUNTIME_INTERNAL_IMPORT=${FLUE_RUNTIME_INTERNAL_IMPORT}" \
-      "DAYTONA_SDK_IMPORT=${DAYTONA_SDK_IMPORT}" \
-      node /usr/local/bin/loom-task-runner-invoker.mjs
-  )"
+  runner_cmd_json="$(json_array "${runner_env[@]}")"
 
   log "recreating container ${CONTAINER} from ${IMAGE}"
   podman rm -f "$CONTAINER" >/dev/null 2>&1 || true
@@ -555,6 +717,20 @@ main() {
     -v "${TASK_RUNNER}:/usr/local/bin/loom-task-runner-invoker.mjs:ro"
   )
 
+  # Standalone fleet-db: put serve (and the inherited `loom` execs) into CLOUD mode against the
+  # external fleet-db, and join the harness network so the in-container client can resolve it by name.
+  if truthy "$STANDALONE_FLEET_DB"; then
+    if [[ -z "$LOOM_FLEET_DB_URL" ]]; then
+      printf 'STANDALONE_FLEET_DB=1 requires LOOM_FLEET_DB_URL\n' >&2
+      exit 1
+    fi
+    [[ -n "$PODMAN_NETWORK" ]] && podman_args+=(--network "$PODMAN_NETWORK")
+    podman_args+=(-e "LOOM_FLEET_DB_URL=${LOOM_FLEET_DB_URL}")
+    podman_args+=(-e "LOOM_FLEET_DB_ACTOR=loom-dev")
+    [[ -n "$LOOM_FLEET_DB_API_KEY" ]] && podman_args+=(-e "LOOM_FLEET_DB_API_KEY=${LOOM_FLEET_DB_API_KEY}")
+    log "standalone fleet-db: serve in CLOUD mode against ${LOOM_FLEET_DB_URL} (network=${PODMAN_NETWORK:-default})"
+  fi
+
   if [[ -d "$FLUE_REPO" ]]; then
     podman_args+=(-v "${FLUE_REPO}:${CONTAINER_FLUE_REPO}:ro")
   fi
@@ -573,8 +749,12 @@ main() {
   wait_for_health
   install_daytona_secret
   install_github_secret
+  install_opencode_auth
+  install_cursor_agent
   seed_repo
   seed_loom
+  stage_daytona_bundle_deps
+  seed_local_worktree_base
   register_epic_runner_workflow
 
   log "ready"

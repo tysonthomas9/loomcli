@@ -41,6 +41,7 @@ type Settings struct {
 	Version            int                        `json:"version"`
 	FleetDBRedis       RedisConfig                `json:"fleetdb_redis"`
 	AgentRuntime       AgentRuntimeConfig         `json:"agent_runtime"`
+	LocalTaskRunner    LocalTaskRunnerConfig      `json:"local_task_runner,omitempty"`
 	RuntimeCredentials RuntimeCredentialSetConfig `json:"runtime_credentials,omitempty"`
 }
 
@@ -58,6 +59,11 @@ type AgentRuntimeConfig struct {
 	Default string `json:"default"`
 }
 
+// LocalTaskRunnerConfig stores non-secret app settings for local CLI runners.
+type LocalTaskRunnerConfig struct {
+	OpenCodeModel string `json:"opencode_model,omitempty"`
+}
+
 // RuntimeCredentialSetConfig stores sealed app-local runtime credentials.
 type RuntimeCredentialSetConfig struct {
 	Daytona RuntimeCredentialConfig `json:"daytona,omitempty"`
@@ -72,10 +78,11 @@ type RuntimeCredentialConfig struct {
 
 // SanitizedSettings is safe to return to the UI.
 type SanitizedSettings struct {
-	Version            int                           `json:"version"`
-	FleetDBRedis       SanitizedRedisConfig          `json:"fleetdb_redis"`
-	AgentRuntime       SanitizedAgentRuntimeConfig   `json:"agent_runtime"`
-	RuntimeCredentials SanitizedRuntimeCredentialSet `json:"runtime_credentials"`
+	Version            int                            `json:"version"`
+	FleetDBRedis       SanitizedRedisConfig           `json:"fleetdb_redis"`
+	AgentRuntime       SanitizedAgentRuntimeConfig    `json:"agent_runtime"`
+	LocalTaskRunner    SanitizedLocalTaskRunnerConfig `json:"local_task_runner"`
+	RuntimeCredentials SanitizedRuntimeCredentialSet  `json:"runtime_credentials"`
 }
 
 // SanitizedRedisConfig omits Redis credentials.
@@ -90,6 +97,11 @@ type SanitizedRedisConfig struct {
 // SanitizedAgentRuntimeConfig is the UI-safe default runtime selection.
 type SanitizedAgentRuntimeConfig struct {
 	Default string `json:"default"`
+}
+
+// SanitizedLocalTaskRunnerConfig exposes non-secret local runner settings.
+type SanitizedLocalTaskRunnerConfig struct {
+	OpenCodeModel string `json:"opencode_model,omitempty"`
 }
 
 // SanitizedRuntimeCredentialSet exposes status, never secret material.
@@ -137,6 +149,7 @@ func Load(dataDir string) (Settings, error) {
 		settings.Version = 1
 	}
 	settings.AgentRuntime.Default = normalizeAgentRuntime(settings.AgentRuntime.Default)
+	settings.LocalTaskRunner.OpenCodeModel = strings.TrimSpace(settings.LocalTaskRunner.OpenCodeModel)
 	return settings, nil
 }
 
@@ -147,6 +160,7 @@ func Save(dataDir string, settings Settings) error {
 	}
 	settings.Version = 1
 	settings.AgentRuntime.Default = normalizeAgentRuntime(settings.AgentRuntime.Default)
+	settings.LocalTaskRunner.OpenCodeModel = strings.TrimSpace(settings.LocalTaskRunner.OpenCodeModel)
 	if err := Validate(settings.FleetDBRedis); err != nil {
 		return err
 	}
@@ -211,6 +225,9 @@ func Sanitize(settings Settings) SanitizedSettings {
 		},
 		AgentRuntime: SanitizedAgentRuntimeConfig{
 			Default: runtime,
+		},
+		LocalTaskRunner: SanitizedLocalTaskRunnerConfig{
+			OpenCodeModel: strings.TrimSpace(settings.LocalTaskRunner.OpenCodeModel),
 		},
 		RuntimeCredentials: SanitizedRuntimeCredentialSet{
 			Daytona: sanitizeRuntimeCredential(settings.RuntimeCredentials.Daytona),

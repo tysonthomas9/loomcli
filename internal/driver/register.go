@@ -28,6 +28,7 @@ const (
 	RunnerKindNodeModule   = "node-module"
 
 	driverRunnersManifestKey = "runners"
+	ManifestTrustLevelKey    = "trust_level"
 )
 
 type RegisterFlueOptions struct {
@@ -43,6 +44,14 @@ type RegisterFlueOptions struct {
 	CreatedBy    string
 	Activate     bool
 	RunnerSpecs  []DriverRunnerSpec
+	// Manifest adds server-side provenance fields to the generated native
+	// manifest. Values are merged before generated runtime fields are stamped;
+	// generated fields and server-stamped trust still win.
+	Manifest map[string]string
+	// BuildDiagnostics carries redacted build output for successful generated
+	// workflow builds. It is persisted on DriverVersion; failed builds never
+	// reach registration.
+	BuildDiagnostics string
 	// Trust is the trust level the SERVER stamps on the driver row (§7 step 9
 	// sandbox placement policy) — it is never read from client input or the
 	// bundle manifest, so a submission cannot self-elevate. Empty defaults to
@@ -119,6 +128,10 @@ func normalizeDriverRunnerSpecs(in []DriverRunnerSpec) []DriverRunnerSpec {
 	return out
 }
 
+func NormalizeDriverRunnerSpecs(in []DriverRunnerSpec) []DriverRunnerSpec {
+	return normalizeDriverRunnerSpecs(in)
+}
+
 // validDriverRunnerKinds is the closed set of runner kinds a driver manifest may
 // declare (§4.6).
 var validDriverRunnerKinds = map[string]struct{}{
@@ -157,6 +170,10 @@ func validateDriverRunnerSpecs(runners []DriverRunnerSpec) error {
 		seen[name] = struct{}{}
 	}
 	return nil
+}
+
+func ValidateDriverRunnerSpecs(runners []DriverRunnerSpec) error {
+	return validateDriverRunnerSpecs(normalizeDriverRunnerSpecs(runners))
 }
 
 // validateRunnerEntrypoint rejects unsafe runner entrypoints: absolute paths and
@@ -303,6 +320,7 @@ type flueRegistrationInput struct {
 	sourceRef    string
 	sourceDigest string
 	runnerSpecs  []DriverRunnerSpec
+	trust        domain.DriverTrustLevel
 }
 
 func resolveFlueRegistrationInput(opts RegisterFlueOptions) (*flueRegistrationInput, error) {
@@ -313,6 +331,9 @@ func resolveFlueRegistrationInput(opts RegisterFlueOptions) (*flueRegistrationIn
 	externalManifest, err := readRegistrationManifest(absWorkDir, absDist, opts.ManifestPath)
 	if err != nil {
 		return nil, err
+	}
+	for key, value := range opts.Manifest {
+		externalManifest[key] = value
 	}
 	driverName := firstNonEmpty(opts.DriverName, externalManifest["driver_name"], externalManifest["name"])
 	if driverName == "" {
@@ -340,6 +361,7 @@ func resolveFlueRegistrationInput(opts RegisterFlueOptions) (*flueRegistrationIn
 		sourceRef:    firstNonEmpty(opts.SourceRef, externalManifest["source_ref"], relativeRef(absWorkDir, absDist)),
 		sourceDigest: firstNonEmpty(opts.SourceDigest, externalManifest["source_digest"]),
 		runnerSpecs:  runnerSpecs,
+		trust:        registrationTrust(opts.Trust),
 	}, nil
 }
 
@@ -408,6 +430,7 @@ func stageFlueBundle(reg *flueRegistrationInput) (*stagedFlueBundle, error) {
 		reg.sourceDigest = artifactDigest
 	}
 	staged.manifest = nativeFlueManifest(reg.driverID, reg.driverName, reg.workflowName, reg.sourceRef, reg.sourceDigest, artifactDigest, reg.manifest, reg.runnerSpecs)
+	staged.manifest[ManifestTrustLevelKey] = string(reg.trust)
 	manifestBytes, err := writeFlueBundleManifest(tmpRoot, staged.manifest)
 	if err != nil {
 		return staged, err
@@ -493,6 +516,7 @@ func persistRegisteredFlueVersion(ctx context.Context, s store.Store, opts Regis
 		BundleDigest:     staged.bundleDigest,
 		Runtime:          RuntimeFlueNode,
 		Manifest:         staged.manifest,
+		BuildDiagnostics: opts.BuildDiagnostics,
 		ValidationStatus: domain.DriverVersionValidationPassed,
 		CreatedBy:        opts.CreatedBy,
 	})
@@ -564,18 +588,15 @@ func demoteReregisteredDriver(ctx context.Context, s store.Store, driver *domain
 	return updated, false, nil
 }
 
-func activateRegisteredDriver(ctx context.Context, s store.Store, result *RegisterFlueResult, ws, driverID, versionID string, manifest map[string]string) error {
-	active := versionID
-	status := domain.DriverStatusActive
-	driver, err := s.Drivers().Update(ctx, ws, driverID, store.DriverUpdate{
-		ActiveVersionID: &active,
-		Status:          &status,
-		Metadata:        &manifest,
-	})
+func activateRegisteredDriver(ctx context.Context, s store.Store, result *RegisterFlueResult, ws, driverID, versionID string, _ map[string]string) error {
+	driver, version, err := ActivateDriverVersion(ctx, s, ws, driverID, versionID)
 	if err != nil {
 		return fmt.Errorf("activate native Flue driver version: %w", err)
 	}
 	result.Driver = driver
+	if result.Version == nil {
+		result.Version = version
+	}
 	result.Activated = true
 	return nil
 }

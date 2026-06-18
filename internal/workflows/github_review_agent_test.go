@@ -55,8 +55,9 @@ func TestBuiltinEpicRunnerDeclaresSiblingTaskRunners(t *testing.T) {
 		t.Fatal("epic-runner builtin missing")
 	}
 	runners := workflowRunnerSpecs(BuildAndRegisterOptions{
-		Entrypoint: spec.Entrypoint,
-		Files:      spec.Files,
+		Entrypoint:    spec.Entrypoint,
+		Files:         spec.Files,
+		DeriveRunners: true,
 	})
 	names := make([]string, 0, len(runners))
 	for _, runner := range runners {
@@ -84,8 +85,9 @@ func TestBuiltinGitHubReviewAgentDeclaresReviewTaskRunner(t *testing.T) {
 		t.Fatal("github-review-agent builtin missing")
 	}
 	runners := workflowRunnerSpecs(BuildAndRegisterOptions{
-		Entrypoint: spec.Entrypoint,
-		Files:      spec.Files,
+		Entrypoint:    spec.Entrypoint,
+		Files:         spec.Files,
+		DeriveRunners: true,
 	})
 	if len(runners) != 1 {
 		t.Fatalf("runner specs = %+v, want one review runner", runners)
@@ -149,7 +151,8 @@ func TestGitHubReviewAgentRegistersThroughTrustedBuiltinPath(t *testing.T) {
 
 func TestWorkflowRunnerSpecsDeriveSiblingWorkflowFiles(t *testing.T) {
 	runners := workflowRunnerSpecs(BuildAndRegisterOptions{
-		Entrypoint: "workflows/epic-runner.ts",
+		Entrypoint:    "workflows/epic-runner.ts",
+		DeriveRunners: true,
 		Files: map[string]string{
 			"workflows/epic-runner.ts":         "export async function run() {}",
 			"workflows/local-task-runner.ts":   "export async function run() {}",
@@ -165,6 +168,20 @@ func TestWorkflowRunnerSpecsDeriveSiblingWorkflowFiles(t *testing.T) {
 	}
 	if runners[1].Name != "local-task-runner" || runners[1].Entrypoint != "local-task-runner" {
 		t.Fatalf("second runner = %+v, want local-task-runner", runners[1])
+	}
+}
+
+func TestWorkflowRunnerSpecsDoNotInferCustomSiblingRunnerFiles(t *testing.T) {
+	runners := workflowRunnerSpecs(BuildAndRegisterOptions{
+		Entrypoint: "workflows/custom.ts",
+		Files: map[string]string{
+			"workflows/custom.ts":              "export async function run() {}",
+			"workflows/local-task-runner.ts":   "export async function run() {}",
+			"workflows/daytona-task-runner.ts": "export async function run() {}",
+		},
+	})
+	if len(runners) != 0 {
+		t.Fatalf("runner specs = %+v, want no inferred custom runners without explicit manifest", runners)
 	}
 }
 
