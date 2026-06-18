@@ -26,20 +26,6 @@ jobs:
         with:
           go-version-file: 'go.mod'
 
-      - name: Checkout fleet-db
-        uses: actions/checkout@v4
-        with:
-          repository: BrowserOperator/fleet-db
-          path: fleet-db
-          token: ${{ secrets.FLEET_DB_REPO_TOKEN }}
-
-      - name: Build fleet-db test binary
-        run: |
-          set -euo pipefail
-          mkdir -p "$HOME/bin"
-          (cd fleet-db && go build -o "$HOME/bin/fleet-db" ./cmd/fleet-db)
-          echo "$HOME/bin" >> "$GITHUB_PATH"
-
       - name: Install golangci-lint
         uses: golangci/golangci-lint-action@v9
         with:
@@ -90,20 +76,6 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version-file: 'go.mod'
-
-      - name: Checkout fleet-db
-        uses: actions/checkout@v4
-        with:
-          repository: BrowserOperator/fleet-db
-          path: fleet-db
-          token: ${{ secrets.FLEET_DB_REPO_TOKEN }}
-
-      - name: Build fleet-db test binary
-        run: |
-          set -euo pipefail
-          mkdir -p "$HOME/bin"
-          (cd fleet-db && go build -o "$HOME/bin/fleet-db" ./cmd/fleet-db)
-          echo "$HOME/bin" >> "$GITHUB_PATH"
 
       - name: Configure Git
         run: |
@@ -188,20 +160,6 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version-file: 'go.mod'
-
-      - name: Checkout fleet-db
-        uses: actions/checkout@v4
-        with:
-          repository: BrowserOperator/fleet-db
-          path: fleet-db
-          token: ${{ secrets.FLEET_DB_REPO_TOKEN }}
-
-      - name: Build fleet-db test binary
-        run: |
-          set -euo pipefail
-          mkdir -p "$HOME/bin"
-          (cd fleet-db && go build -o "$HOME/bin/fleet-db" ./cmd/fleet-db)
-          echo "$HOME/bin" >> "$GITHUB_PATH"
 
       - name: Configure Git
         run: |
