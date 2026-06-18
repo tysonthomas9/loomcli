@@ -1,0 +1,28 @@
+//#region ../flue/node_modules/.pnpm/@earendil-works+pi-ai@0.79.0_@modelcontextprotocol+sdk@1.29.0_@cfworker+json-schema@4.1.1_zod@4.4.3__ws@8.21.0_zod@4.4.3/node_modules/@earendil-works/pi-ai/dist/utils/sanitize-unicode.js
+/**
+* Removes unpaired Unicode surrogate characters from a string.
+*
+* Unpaired surrogates (high surrogates 0xD800-0xDBFF without matching low surrogates 0xDC00-0xDFFF,
+* or vice versa) cause JSON serialization errors in many API providers.
+*
+* Valid emoji and other characters outside the Basic Multilingual Plane use properly paired
+* surrogates and will NOT be affected by this function.
+*
+* @param text - The text to sanitize
+* @returns The sanitized text with unpaired surrogates removed
+*
+* @example
+* // Valid emoji (properly paired surrogates) are preserved
+* sanitizeSurrogates("Hello 🙈 World") // => "Hello 🙈 World"
+*
+* // Unpaired high surrogate is removed
+* const unpaired = String.fromCharCode(0xD83D); // high surrogate without low
+* sanitizeSurrogates(`Text ${unpaired} here`) // => "Text  here"
+*/
+function sanitizeSurrogates(text) {
+	return text.replace(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g, "");
+}
+//#endregion
+export { sanitizeSurrogates as t };
+
+//# sourceMappingURL=sanitize-unicode-C5xD7qd-.js.map
