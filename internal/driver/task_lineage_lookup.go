@@ -2,7 +2,6 @@ package driver
 
 import (
 	"context"
-	"strings"
 
 	"github.com/tysonthomas9/loomcli/internal/stacklineage"
 	"github.com/tysonthomas9/loomcli/internal/stackstore"
@@ -32,51 +31,17 @@ var _ TaskLineageLookup = StackLineageLookup{}
 // (only reachable via a hand-edited/legacy store; `loom stack init` requires
 // --repo) never matches, so it cannot hijack an unrelated repo's base ref.
 func (l StackLineageLookup) BaseRefForTask(ctx context.Context, workspaceKey, repoName, taskID string) (string, bool, error) {
-	taskID = strings.TrimSpace(taskID)
-	repoName = strings.TrimSpace(repoName)
-	if l.Store == nil || taskID == "" || repoName == "" {
-		return "", false, nil
-	}
-	stacks, err := l.Store.ListStacks(ctx, workspaceKey)
-	if err != nil {
+	st, node, byTask, ok, err := findTaskStack(ctx, l.Store, workspaceKey, repoName, taskID)
+	if err != nil || !ok {
 		return "", false, err
 	}
-	var (
-		found bool
-		base  string
-	)
-	for _, st := range stacks {
-		// Stacks are per-repo; only consult the stack for THIS repo (fail closed
-		// on an empty RepoName so a legacy/hand-edited stack cannot match).
-		if strings.TrimSpace(st.RepoName) == "" || st.RepoName != repoName {
-			continue
-		}
-		nodes, err := l.Store.ListNodes(ctx, workspaceKey, st.ID)
-		if err != nil {
-			return "", false, err
-		}
-		byTask := stacklineage.ByTask(nodes)
-		node, ok := byTask[taskID]
-		if !ok {
-			continue
-		}
-		if found {
-			// taskID is in more than one stack for this repo: ambiguous lineage,
-			// fall open rather than guess which stack owns the task.
-			return "", false, nil
-		}
-		// Stage 2: slide past empty/closed/branchless ancestors to the nearest
-		// real OutputBranch (or RootBase) instead of falling open to the repo
-		// default branch — decision (a). Still fails closed on graph-integrity
-		// corruption (missing predecessor / cycle) so it stays observable.
-		b, err := stacklineage.BaseBranchSliding(st, node, byTask)
-		if err != nil {
-			return "", false, err
-		}
-		found, base = true, b
-	}
-	if !found {
-		return "", false, nil
+	// Stage 2: slide past empty/closed/branchless ancestors to the nearest real
+	// OutputBranch (or RootBase) instead of falling open to the repo default
+	// branch — decision (a). Still fails closed on graph-integrity corruption
+	// (missing predecessor / cycle) so it stays observable.
+	base, err := stacklineage.BaseBranchSliding(st, node, byTask)
+	if err != nil {
+		return "", false, err
 	}
 	return base, true, nil
 }

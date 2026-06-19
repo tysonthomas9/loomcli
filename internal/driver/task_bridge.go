@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"os"
 	"os/exec"
 	"strings"
@@ -13,6 +14,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	runtimesettings "github.com/tysonthomas9/loomcli/internal/localsettings"
 	"github.com/tysonthomas9/loomcli/internal/sessions/transcript"
+	"github.com/tysonthomas9/loomcli/internal/stackstore"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
@@ -59,6 +61,12 @@ type HostBridgeTaskExecutor struct {
 	// WorktreeResolver maps bundled local task runs onto isolated per-run git
 	// worktrees. When nil, WorktreePath is used as supplied by the caller.
 	WorktreeResolver TaskWorktreeResolver
+	// StackStore is the finalize-barrier seam: after a stacked task completes
+	// (branch pushed, result reported) the executor records the task's stack node
+	// state/SHA here BEFORE returning — i.e. before the worker closes the task and
+	// unblocks successors — so a dependent's resolver reads a durable node. When
+	// nil (the pre-stacking sites and all tests), the barrier is inert.
+	StackStore stackstore.Store
 }
 
 type bridgeTaskRunnerResult struct {
@@ -191,6 +199,12 @@ func (e HostBridgeTaskExecutor) ExecuteTask(ctx context.Context, req TaskExecReq
 	if failed {
 		return worktreeFailure, nil
 	}
+	// Finalize barrier: when this is a stacked task, record its node state in the
+	// stack store as ExecuteTask returns — the worker closes the task (unblocking
+	// successors) only afterwards, so a dependent's resolver reads a durable node.
+	if e.StackStore != nil {
+		defer func() { e.finalizeStackNode(ctx, req, resolvedWorktree, result, err) }()
+	}
 	runBridge, err := e.bridgeRunner(ctx, req)
 	if err != nil {
 		return TaskExecResult{}, err
@@ -252,6 +266,30 @@ func (e HostBridgeTaskExecutor) ExecuteTask(ctx context.Context, req TaskExecReq
 		return result, nil
 	}
 	return e.finalizeAndApplyPatch(ctx, req, runnerResult, patch, result)
+}
+
+// finalizeStackNode is the stack finalize barrier (see the StackStore field). It
+// records the completed task's node state/SHA before ExecuteTask returns —
+// before the worker closes the task and unblocks successors. Best-effort: a task
+// not in any stack is a no-op, a non-completed/errored run is skipped, and a
+// record error is logged rather than propagated (it must never fail an
+// otherwise-good run — pre-stacking this path touched no store at all).
+func (e HostBridgeTaskExecutor) finalizeStackNode(ctx context.Context, req TaskExecRequest, wt TaskWorktree, result TaskExecResult, runErr error) {
+	if e.StackStore == nil || runErr != nil || result.Status != domain.TaskRunCompleted {
+		return
+	}
+	repoName := strings.TrimSpace(wt.RepoName)
+	taskID := strings.TrimSpace(req.TaskID)
+	if repoName == "" || taskID == "" {
+		return
+	}
+	state, sha, ok := stackOutcome(result.RuntimeMetadata)
+	if !ok {
+		return
+	}
+	if _, err := recordStackOutput(ctx, e.StackStore, req.WorkspaceKey, repoName, taskID, state, sha); err != nil {
+		slog.WarnContext(ctx, "stack finalize barrier: record node failed", "task", taskID, "repo", repoName, "err", err)
+	}
 }
 
 func (e HostBridgeTaskExecutor) bridgeRunner(ctx context.Context, req TaskExecRequest) (func() (bridgeTaskRunnerResult, error), error) {
