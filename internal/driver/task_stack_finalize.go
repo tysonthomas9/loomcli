@@ -69,6 +69,30 @@ func findTaskStack(ctx context.Context, store stackstore.Store, workspaceKey, re
 	return foundStack, foundNode, foundByTask, true, nil
 }
 
+// resolveStackRepoName resolves the workspace repo Name a non-local task targets
+// (daytona/named runners have no host worktree to read it from), so the finalize
+// barrier and lineage-carrier injection can scope by the same repo Name the stack
+// was projected under. It matches the task's repo selectors against the workspace
+// repos, falling back to the sole repo. Returns "" when it cannot decide.
+func (e HostBridgeTaskExecutor) resolveStackRepoName(ctx context.Context, req TaskExecRequest) string {
+	if e.Store == nil {
+		return ""
+	}
+	repos, err := e.Store.Repos().List(ctx, req.WorkspaceKey)
+	if err != nil || len(repos) == 0 {
+		return ""
+	}
+	for _, sel := range taskWorktreeRepoSelectors(req) {
+		if r := findRepoBySelector(repos, sel); r != nil {
+			return r.Name
+		}
+	}
+	if len(repos) == 1 {
+		return repos[0].Name
+	}
+	return ""
+}
+
 // stackBindingForTask returns the task's stack binding — the stack id, the
 // canonical OutputBranch the runner must push to, and the sliding base ref the
 // worktree is cut from — when the task belongs to a stack for repoName. ok=false

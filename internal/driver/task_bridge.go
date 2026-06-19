@@ -204,14 +204,26 @@ func (e HostBridgeTaskExecutor) ExecuteTask(ctx context.Context, req TaskExecReq
 	if failed {
 		return worktreeFailure, nil
 	}
-	// Stacked task? Compute the binding (canonical output branch + base ref) once,
-	// here where the resolved repo is known, so the runner env can tell the runner
-	// which branch to push. nil binding => not stacked => runner keeps its old path.
-	if e.StackStore != nil && strings.TrimSpace(resolvedWorktree.RepoName) != "" {
-		if binding, ok, berr := stackBindingForTask(ctx, e.StackStore, req.WorkspaceKey, resolvedWorktree.RepoName, req.TaskID); berr != nil {
-			slog.WarnContext(ctx, "stack binding lookup failed; runner keeps non-stacked behavior", "task", req.TaskID, "repo", resolvedWorktree.RepoName, "err", berr)
-		} else if ok {
-			e.stackBinding = &binding
+	// Stacked task? Compute the binding (canonical output branch + base ref) once.
+	// Local runs resolve the repo from the host worktree; daytona/named runs (no
+	// host worktree) resolve it from the task's repo selectors. When set, the
+	// binding is exported as runner env (local) AND injected into the request
+	// Input (so a daytona sandbox, which has no host stack store, still receives
+	// the canonical branch + base ref). nil => not stacked => runner's old path.
+	if e.StackStore != nil {
+		repoName := strings.TrimSpace(resolvedWorktree.RepoName)
+		if repoName == "" {
+			repoName = e.resolveStackRepoName(ctx, req)
+		}
+		if repoName != "" {
+			if binding, ok, berr := stackBindingForTask(ctx, e.StackStore, req.WorkspaceKey, repoName, req.TaskID); berr != nil {
+				slog.WarnContext(ctx, "stack binding lookup failed; runner keeps non-stacked behavior", "task", req.TaskID, "repo", repoName, "err", berr)
+			} else if ok {
+				e.stackBinding = &binding
+				if injected, ierr := WithLineage(req.Input, binding); ierr == nil {
+					req.Input = injected
+				}
+			}
 		}
 	}
 	// Finalize barrier: when this is a stacked task, record its node state in the
@@ -293,9 +305,15 @@ func (e HostBridgeTaskExecutor) finalizeStackNode(ctx context.Context, req TaskE
 	if e.StackStore == nil || runErr != nil || result.Status != domain.TaskRunCompleted {
 		return
 	}
-	repoName := strings.TrimSpace(wt.RepoName)
 	taskID := strings.TrimSpace(req.TaskID)
-	if repoName == "" || taskID == "" {
+	if taskID == "" {
+		return
+	}
+	repoName := strings.TrimSpace(wt.RepoName)
+	if repoName == "" {
+		repoName = e.resolveStackRepoName(ctx, req) // daytona/named runs: no host worktree
+	}
+	if repoName == "" {
 		return
 	}
 	state, sha, ok := stackOutcome(result.RuntimeMetadata)

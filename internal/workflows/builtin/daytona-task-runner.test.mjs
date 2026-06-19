@@ -156,3 +156,36 @@ describe("sandboxLeakProbeCommand covers the full widened provider-cred set", ()
     }
   });
 });
+
+describe("daytona-task-runner stack lineage parity (Stage 5)", () => {
+  it("uses the injected lineage carrier as the canonical branch + base", () => {
+    const req = {
+      task_run_id: "tr-1",
+      task_id: "T-B",
+      input: {
+        openPullRequest: true,
+        lineage: { stackId: "epic:E", baseRef: "loom/stack/epic-E/T-A", outputBranch: "loom/stack/epic-E/T-B" },
+      },
+    };
+    const plan = mod.deliveryPlan(req, { id: "T-B" }, "tr-1");
+    assert.equal(plan.stacked, true, "lineage carrier forces stacked mode");
+    assert.equal(plan.openPullRequest, true);
+    assert.equal(plan.branch, "loom/stack/epic-E/T-B", "branch must be the canonical output branch");
+    assert.equal(plan.baseBranch, "loom/stack/epic-E/T-A", "base must be the predecessor branch from the carrier");
+    assert.equal(plan.stackId, "epic:E");
+  });
+
+  it("ignores a malformed lineage carrier (no outputBranch) and keeps legacy naming", () => {
+    const req = { task_run_id: "tr-2", task_id: "T-C", input: { openPullRequest: true, lineage: { stackId: "epic:E" } } };
+    const plan = mod.deliveryPlan(req, { id: "T-C" }, "tr-2");
+    assert.notEqual(plan.branch, "", "still produces a branch");
+    assert.ok(!plan.branch.startsWith("loom/stack/"), "no carrier => legacy taskBranchName, not canonical");
+  });
+
+  it("cloneCommand does a full clone (no --depth 1) so base SHAs are real", () => {
+    const cmd = mod.cloneCommand("https://github.com/o/r.git", "/work/repo", "loom/stack/epic-E/T-A", "");
+    assert.ok(!cmd.includes("--depth"), "stacked clone must not be shallow: " + cmd);
+    assert.ok(cmd.includes("clone"), "still a clone");
+    assert.ok(cmd.includes("--branch"), "clones the predecessor base branch");
+  });
+});
