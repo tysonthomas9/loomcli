@@ -67,6 +67,11 @@ type HostBridgeTaskExecutor struct {
 	// unblocks successors — so a dependent's resolver reads a durable node. When
 	// nil (the pre-stacking sites and all tests), the barrier is inert.
 	StackStore stackstore.Store
+	// stackBinding is computed once per ExecuteTask after the worktree resolves:
+	// the task's stack id, canonical output branch, and base ref. When set, it is
+	// exported to a stacked runner so it pushes the canonical branch on the
+	// predecessor base. nil = the task is not stacked (runner keeps its old path).
+	stackBinding *TaskLineage
 }
 
 type bridgeTaskRunnerResult struct {
@@ -198,6 +203,16 @@ func (e HostBridgeTaskExecutor) ExecuteTask(ctx context.Context, req TaskExecReq
 	resolvedWorktree, worktreeFailure, failed := e.resolveLocalTaskWorktree(ctx, req)
 	if failed {
 		return worktreeFailure, nil
+	}
+	// Stacked task? Compute the binding (canonical output branch + base ref) once,
+	// here where the resolved repo is known, so the runner env can tell the runner
+	// which branch to push. nil binding => not stacked => runner keeps its old path.
+	if e.StackStore != nil && strings.TrimSpace(resolvedWorktree.RepoName) != "" {
+		if binding, ok, berr := stackBindingForTask(ctx, e.StackStore, req.WorkspaceKey, resolvedWorktree.RepoName, req.TaskID); berr != nil {
+			slog.WarnContext(ctx, "stack binding lookup failed; runner keeps non-stacked behavior", "task", req.TaskID, "repo", resolvedWorktree.RepoName, "err", berr)
+		} else if ok {
+			e.stackBinding = &binding
+		}
 	}
 	// Finalize barrier: when this is a stacked task, record its node state in the
 	// stack store as ExecuteTask returns — the worker closes the task (unblocking
@@ -671,6 +686,16 @@ func (e HostBridgeTaskExecutor) taskRunnerEnv(req TaskExecRequest, requestJSON s
 	}
 	if apiBaseURL := strings.TrimSpace(e.APIBaseURL); apiBaseURL != "" {
 		env = append(env, "LOOM_TASK_RUN_API_URL="+apiBaseURL)
+	}
+	// Stacked task: tell the runner to push the canonical branch on the
+	// predecessor base instead of opening an independent loom/<taskid> PR.
+	if e.stackBinding != nil {
+		env = append(env,
+			"LOOM_TASK_RUN_STACKED=1",
+			"LOOM_TASK_RUN_STACK_ID="+e.stackBinding.StackID,
+			"LOOM_TASK_RUN_OUTPUT_BRANCH="+e.stackBinding.OutputBranch,
+			"LOOM_TASK_RUN_BASE_REF="+e.stackBinding.BaseRef,
+		)
 	}
 	env = append(env, e.taskRunnerBundleEnv(req)...)
 	if isLocalTaskRunner(req) {

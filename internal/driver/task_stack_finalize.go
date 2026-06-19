@@ -69,6 +69,27 @@ func findTaskStack(ctx context.Context, store stackstore.Store, workspaceKey, re
 	return foundStack, foundNode, foundByTask, true, nil
 }
 
+// stackBindingForTask returns the task's stack binding — the stack id, the
+// canonical OutputBranch the runner must push to, and the sliding base ref the
+// worktree is cut from — when the task belongs to a stack for repoName. ok=false
+// means the task is not stacked (the runner keeps its non-stacked behavior). It
+// fails closed on graph-integrity corruption so a bad graph is observable.
+func stackBindingForTask(ctx context.Context, store stackstore.Store, workspaceKey, repoName, taskID string) (TaskLineage, bool, error) {
+	st, node, byTask, ok, err := findTaskStack(ctx, store, workspaceKey, repoName, taskID)
+	if err != nil || !ok {
+		return TaskLineage{}, false, err
+	}
+	base, err := stacklineage.BaseBranchSliding(st, node, byTask)
+	if err != nil {
+		return TaskLineage{}, false, err
+	}
+	return TaskLineage{
+		StackID:      string(st.ID),
+		BaseRef:      base,
+		OutputBranch: node.OutputBranch,
+	}, true, nil
+}
+
 // stackOutcome maps a finished task's runtime_metadata to the stack-node state
 // the finalize barrier should record. The second return is the output commit
 // SHA when the runner reported one (best-effort — the local runner does not emit
