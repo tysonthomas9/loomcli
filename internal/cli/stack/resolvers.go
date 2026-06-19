@@ -47,3 +47,9 @@ func newResolver(headless bool) stackpublish.ConflictResolver {
 	}
 	return interactiveResolver{deps: deps}
 }
+
+// HeadlessResolver is the unattended agent-backed conflict resolver used by
+// orchestrated publishes (the epic post-drain reconcile). Exposed so the epic
+// command can reuse the same resolver the `loom stack publish --auto-rebase`
+// path uses, instead of duplicating the prompt + agent wiring.
+func HeadlessResolver() stackpublish.ConflictResolver { return newResolver(true) }

@@ -129,6 +129,7 @@ func planEpicForest(tasks []epicTask) ([]projectedNode, projectionStats) {
 type EpicStackProjection struct {
 	StackID    sl.StackID
 	RepoName   string
+	RepoURL    string // origin remote of the repo the stack is scoped to (for the reconcile checkout)
 	RootBase   string
 	Stats      projectionStats
 	Created    []string // task ids newly added as nodes
@@ -264,10 +265,12 @@ func projectEpicStack(ctx context.Context, ib backend.IssueBackend, sstore stack
 // falls back to the repo default branch (pre-stacking behavior), never a broken
 // run. Callers should surface (log) a non-nil error rather than aborting.
 func projectEpicStackForRun(ctx context.Context, handle *bootstrap.StoreHandle, ws, epicID, runID, repoURL, baseBranch string) (*EpicStackProjection, error) {
-	repoName, rootBase, err := resolveEpicStackRepo(ctx, handle, ws, repoURL, baseBranch)
+	selected, rootBase, err := resolveEpicStackRepo(ctx, handle, ws, repoURL, baseBranch)
 	if err != nil {
 		return nil, err
 	}
+	repoName := selected.Name
+	originURL := strings.TrimSpace(selected.RemoteURL)
 	ib, err := fleet.New(fleet.Config{
 		BaseURL:     handle.URL(),
 		WorkspaceID: ws,
@@ -281,7 +284,12 @@ func projectEpicStackForRun(ctx context.Context, handle *bootstrap.StoreHandle, 
 	if err != nil {
 		return nil, fmt.Errorf("open stack store: %w", err)
 	}
-	return projectEpicStack(ctx, ib, sstore, ws, epicID, repoName, rootBase)
+	proj, err := projectEpicStack(ctx, ib, sstore, ws, epicID, repoName, rootBase)
+	if err != nil {
+		return nil, err
+	}
+	proj.RepoURL = originURL
+	return proj, nil
 }
 
 // resolveEpicStackRepo picks the single repo the epic's stack is scoped to and
@@ -289,15 +297,14 @@ func projectEpicStackForRun(ctx context.Context, handle *bootstrap.StoreHandle, 
 // repo Name, so this must return the same Name. It is deliberately strict: with
 // more than one workspace repo and no --repo-url to disambiguate, it errors
 // rather than guessing and scoping lineage to the wrong repo.
-func resolveEpicStackRepo(ctx context.Context, handle *bootstrap.StoreHandle, ws, repoURL, baseBranch string) (repoName, rootBase string, err error) {
+func resolveEpicStackRepo(ctx context.Context, handle *bootstrap.StoreHandle, ws, repoURL, baseBranch string) (selected *domain.Repo, rootBase string, err error) {
 	repos, err := handle.Store.Repos().List(ctx, ws)
 	if err != nil {
-		return "", "", fmt.Errorf("list workspace repos: %w", err)
+		return nil, "", fmt.Errorf("list workspace repos: %w", err)
 	}
 	if len(repos) == 0 {
-		return "", "", fmt.Errorf("workspace %q has no repos to scope a stack to", ws)
+		return nil, "", fmt.Errorf("workspace %q has no repos to scope a stack to", ws)
 	}
-	var selected *domain.Repo
 	if want := strings.TrimSpace(repoURL); want != "" {
 		wantTok := repoToken(want)
 		for _, r := range repos {
@@ -310,12 +317,12 @@ func resolveEpicStackRepo(ctx context.Context, handle *bootstrap.StoreHandle, ws
 			}
 		}
 		if selected == nil {
-			return "", "", fmt.Errorf("no workspace repo matches --repo-url %q", repoURL)
+			return nil, "", fmt.Errorf("no workspace repo matches --repo-url %q", repoURL)
 		}
 	} else if len(repos) == 1 {
 		selected = repos[0]
 	} else {
-		return "", "", fmt.Errorf("workspace has %d repos; pass --repo-url to scope the stack", len(repos))
+		return nil, "", fmt.Errorf("workspace has %d repos; pass --repo-url to scope the stack", len(repos))
 	}
 
 	rootBase = strings.TrimSpace(baseBranch)
@@ -325,7 +332,7 @@ func resolveEpicStackRepo(ctx context.Context, handle *bootstrap.StoreHandle, ws
 	if rootBase == "" {
 		rootBase = "main"
 	}
-	return selected.Name, rootBase, nil
+	return selected, rootBase, nil
 }
 
 func repoToken(v string) string {
