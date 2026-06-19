@@ -14,6 +14,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/olesho/harness-wrapper/pkg/chat"
@@ -314,13 +315,77 @@ func claudeTrustInputPolicy() *chat.InputPolicy {
 	}
 }
 
+// resolveClaudeTurnIdleTimeout is how long the RunTurn path tolerates no PTY
+// output before concluding the turn is over and Claude is idle at the prompt.
+// The interactive TUI animates a spinner during work, so a sustained gap means
+// the turn finished. Tunable via LOOM_CLAUDE_TURN_IDLE_SECONDS; 0 disables the
+// guard. Default 120s — far below the liveness watchdog (default 900s).
+func resolveClaudeTurnIdleTimeout() time.Duration {
+	if v := os.Getenv("LOOM_CLAUDE_TURN_IDLE_SECONDS"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			return time.Duration(n) * time.Second
+		}
+	}
+	return 120 * time.Second
+}
+
+// startClaudeIdleGuard wires an idle-output watchdog onto raw.onActivity (wrapping
+// the caller's onActivity, which it still invokes) and, when idle > 0, starts a
+// goroutine that cancels turnCtx once PTY output has stalled for longer than idle.
+// The interactive TUI animates a spinner during work, so a sustained output gap
+// means the turn finished and Claude is idle at the prompt. The returned flag
+// reports whether the guard fired, letting the caller distinguish an idle-ended
+// turn (finalize as complete) from a real parent-ctx cancellation (keep the error).
+func startClaudeIdleGuard(turnCtx context.Context, cancelTurn context.CancelFunc, raw *capturedOutput, onActivity func(wrapper.Snapshot), idle time.Duration) *atomic.Bool {
+	var lastAct atomic.Int64
+	var sawAct atomic.Bool
+	lastAct.Store(time.Now().UnixNano())
+	raw.onActivity = func(snap wrapper.Snapshot) {
+		lastAct.Store(time.Now().UnixNano())
+		sawAct.Store(true)
+		if onActivity != nil {
+			onActivity(snap)
+		}
+	}
+	var idleGuardFired atomic.Bool
+	if idle <= 0 {
+		return &idleGuardFired
+	}
+	go func() {
+		tk := time.NewTicker(5 * time.Second)
+		defer tk.Stop()
+		for {
+			select {
+			case <-turnCtx.Done():
+				return
+			case <-tk.C:
+				if sawAct.Load() && time.Since(time.Unix(0, lastAct.Load())) > idle {
+					idleGuardFired.Store(true)
+					fmt.Fprintf(os.Stderr, "[loom] claude turn produced no output for >%s — ending idle turn (RunTurn did not self-complete)\n", idle)
+					cancelTurn()
+					return
+				}
+			}
+		}
+	}()
+	return &idleGuardFired
+}
+
 func invokeClaudeRunTurn(ctx context.Context, workDir, prompt, agentName, resumeID string, onActivity func(wrapper.Snapshot), collector *usage.Collector) (claudeRunTurnResult, error) {
 	raw := &capturedOutput{}
 	output := io.Writer(raw)
-	if onActivity != nil {
-		raw.onActivity = onActivity
-	}
-	res, err := claudeRunTurn(ctx, claudeRunTurnConfig{
+
+	// Idle guard for the RunTurn (interactive TUI) path. harness-wrapper v0.6.1
+	// can fail to detect turn completion on long/complex Claude turns and then
+	// hang at the idle prompt until the liveness watchdog SIGKILLs the agent
+	// (~15m wasted, the successful session marked failed, no graceful finalize).
+	// startClaudeIdleGuard cancels turnCtx if PTY output stalls past the idle
+	// window; we treat that idle-driven cancellation as a normal completion below.
+	turnCtx, cancelTurn := context.WithCancel(ctx)
+	defer cancelTurn()
+	idleGuardFired := startClaudeIdleGuard(turnCtx, cancelTurn, raw, onActivity, resolveClaudeTurnIdleTimeout())
+
+	res, err := claudeRunTurn(turnCtx, claudeRunTurnConfig{
 		Harness:       "claude",
 		BinaryPath:    "claude",
 		Args:          buildClaudeRunTurnArgs(resumeID),
@@ -336,6 +401,16 @@ func invokeClaudeRunTurn(ctx context.Context, workDir, prompt, agentName, resume
 	// collector accepted for API compatibility; usage remains unavailable until
 	// Harness Wrapper surfaces transcript usage metadata.
 	_ = collector
+	// When our idle guard (not the caller's ctx) ended a completed-but-idle turn,
+	// treat it as a normal completion so the agent finalizes cleanly rather than
+	// recording a spurious failure. A real shutdown/timeout cancels the parent
+	// ctx, which keeps the error.
+	if err != nil && idleGuardFired.Load() && ctx.Err() == nil && errors.Is(err, context.Canceled) {
+		err = nil
+		if res.Turn.State != chat.TurnStateComplete {
+			res.Turn.State = chat.TurnStateComplete
+		}
+	}
 	if err != nil && claudeRunTurnEvidence(res, raw.String()) == "" {
 		res.Turn.Text = raw.String()
 	}
