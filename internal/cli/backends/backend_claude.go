@@ -2,8 +2,10 @@ package backends
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"html"
 	"io"
@@ -12,13 +14,13 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"syscall"
+	"time"
 
 	hwharness "github.com/olesho/harness-wrapper/pkg/harness"
 	_ "github.com/olesho/harness-wrapper/pkg/harness/claude" // register the "claude" profile
+	"github.com/olesho/harness-wrapper/pkg/wrapper"
 
 	"github.com/tysonthomas9/loomcli/internal/cli"
-	"github.com/tysonthomas9/loomcli/internal/harness"
 	"github.com/tysonthomas9/loomcli/internal/usage"
 )
 
@@ -118,69 +120,26 @@ func (c *ClaudeBackend) HealthCheck() HealthStatus {
 }
 
 // InvokeStreaming starts a Claude agent session and returns a streaming reader
-// of JSON events. The caller is responsible for closing the returned ReadCloser,
-// which also terminates the subprocess.
+// of the completed assistant text. Claude is driven through Harness Wrapper's
+// interactive turn API; this preserves the interface shape for
+// callers but no longer exposes Claude Code's stream-json event feed.
 func (c *ClaudeBackend) InvokeStreaming(ctx context.Context, workDir, prompt, agentName string) (io.ReadCloser, error) {
-	args := []string{"-p", "--verbose", "--output-format", "stream-json",
-		"--dangerously-skip-permissions"}
-	if budget := resolveMaxBudgetUSD(); budget != "" {
-		args = append(args, "--max-budget-usd", budget)
-	}
-	if effort := resolveAgentEffort(); effort != "" {
-		args = append(args, "--effort", effort)
-	}
-	cmd := exec.Command("claude", args...) //nolint:gosec // G204: intentional subprocess launch for claude CLI
-	cmd.Dir = workDir
-	cmd.Env = buildClaudeEnv(workDir, agentName)
-
-	r := pipePromptToCmd(cmd, prompt)
-	cmd.Stderr = os.Stderr
-
-	stdout, err := cmd.StdoutPipe()
+	res, err := invokeClaudeRunTurn(ctx, workDir, prompt, agentName, "", nil, nil)
 	if err != nil {
-		r.Close()
-		return nil, fmt.Errorf("failed to create stdout pipe: %w", err)
+		return nil, err
 	}
-
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-
-	if err := cmd.Start(); err != nil {
-		r.Close()
-		return nil, fmt.Errorf("failed to start claude: %w", err)
-	}
-
-	guard := newProcessGuard(cmd.Process)
-	go func() {
-		select {
-		case <-ctx.Done():
-			guard.Signal(syscall.SIGTERM)
-		case <-guard.Done():
-		}
-	}()
-
-	return &streamReadCloser{ReadCloser: stdout, cmd: cmd, stdinPipe: r, guard: guard}, nil
+	return io.NopCloser(strings.NewReader(claudeTurnText(res))), nil
 }
 
-// streamReadCloser wraps a stdout pipe and ensures the subprocess is cleaned up on Close.
-type streamReadCloser struct {
-	io.ReadCloser
-	cmd       *exec.Cmd
-	stdinPipe io.Closer
-	guard     *processGuard
-}
-
-func (s *streamReadCloser) Close() error {
-	readErr := s.ReadCloser.Close()
-	// Wait for the process to finish FIRST, then mark exited. This ordering
-	// ensures the context-cancellation goroutine can still send SIGTERM if the
-	// process hangs after stdout is closed.
-	waitErr := s.cmd.Wait()
-	s.guard.WaitAndMark()
-	s.stdinPipe.Close()
-	if readErr != nil {
-		return readErr
+// RunClaudeTurnText drives one normal interactive Claude Code turn through
+// Harness Wrapper and returns the assistant text. It is used by other loom
+// runtime paths that need one-shot text without invoking Claude print mode.
+func RunClaudeTurnText(ctx context.Context, workDir, prompt, agentName string) (string, error) {
+	res, err := invokeClaudeRunTurn(ctx, workDir, prompt, agentName, "", nil, nil)
+	if err != nil {
+		return claudeTurnText(res), err
 	}
-	return waitErr
+	return claudeTurnText(res), nil
 }
 
 // ContinueSession resumes an interactive Claude session by session ID.
@@ -258,30 +217,25 @@ func buildClaudeEnv(workDir, agentName string) []string {
 	return append(env, activeSessionEnvVars()...)
 }
 
-// buildClaudeNonInteractiveArgs returns the argument list for a
-// non-interactive Claude run. resumeSessionID prepends wrapper-owned resume args.
-// When prompt is non-empty, it is appended as the final positional argument:
-// under the harness wrapper's PTY, claude's stdin looks like a TTY and `-p`
-// then requires the prompt as an argument rather than over stdin. The legacy
-// exec path (buildClaudeNonInteractiveCmd) still passes "" and feeds the
-// prompt via a real pipe through cmd.StdinPipe.
-func buildClaudeNonInteractiveArgs(resumeSessionID, prompt string) []string {
+// buildClaudeRunTurnArgs returns the normal interactive Claude args used by
+// Harness Wrapper RunTurn. It intentionally does not include `-p`.
+func buildClaudeRunTurnArgs(resumeSessionID string) []string {
 	var args []string
 	// Resume prefix comes from the harness profile (pkg/harness/claude), not a
 	// hardcoded literal — so resume is owned in one place across harnesses.
 	if resumeSessionID != "" {
 		args = append(args, claudeResumeArgs(resumeSessionID)...)
 	}
-	args = append(args, "-p", "--verbose", "--output-format", "stream-json",
-		"--dangerously-skip-permissions")
+	args = append(args, "--dangerously-skip-permissions")
+	// Per-run USD guardrail. Claude Code's interactive mode accepts
+	// --max-budget-usd (same flag as print mode), so the LOOM_MAX_BUDGET_USD
+	// cap carries over to the RunTurn path. Omitted only when
+	// resolveMaxBudgetUSD opts out (returns "").
 	if budget := resolveMaxBudgetUSD(); budget != "" {
 		args = append(args, "--max-budget-usd", budget)
 	}
 	if effort := resolveAgentEffort(); effort != "" {
 		args = append(args, "--effort", effort)
-	}
-	if prompt != "" {
-		args = append(args, prompt)
 	}
 	return args
 }
@@ -293,24 +247,9 @@ func claudeResumeArgs(sessionID string) []string {
 	return []string{"--resume", sessionID}
 }
 
-// buildClaudeNonInteractiveCmd constructs the exec.Cmd for non-interactive Claude invocation.
-// When resumeSessionID is non-empty, the command includes wrapper-owned resume args.
-// Appends --max-budget-usd when resolveMaxBudgetUSD returns a non-empty value.
-// The prompt is delivered via stdin by the caller (cmd.StdinPipe), not argv,
-// since this path does not go through the wrapper's PTY.
-func buildClaudeNonInteractiveCmd(workDir, agentName, resumeSessionID string) *exec.Cmd {
-	cmd := exec.Command("claude", buildClaudeNonInteractiveArgs(resumeSessionID, "")...) //nolint:gosec // G204: intentional subprocess launch for claude CLI
-	cmd.Dir = workDir
-	cmd.Env = buildClaudeEnv(workDir, agentName)
-	return cmd
-}
-
 // defaultClaudeNonInteractiveInvoker is the real non-interactive Claude
-// invocation. It runs the Claude CLI under the in-tree harness-wrapper
-// supervisor (internal/harness): the wrapper classifies the harness's
-// terminal state, surfaces transient API errors with RetryAfter hints,
-// and harness.RunWithRetry transparently respawns on
-// StatusRetryLater / StatusAPIError before bubbling up.
+// invocation. It runs normal interactive Claude Code through Harness Wrapper's
+// turn lifecycle API so loom no longer depends on Claude print mode.
 func defaultClaudeNonInteractiveInvoker(workDir, prompt, agentName string, shutdown <-chan struct{}, collector *usage.Collector) error {
 	resumeID := consumeResumeSessionID()
 
@@ -323,26 +262,225 @@ func defaultClaudeNonInteractiveInvoker(workDir, prompt, agentName string, shutd
 
 	ClearLastCapturedSessionID()
 
-	err := runHarness(context.Background(), shutdown, harnessInvocation{
-		BinaryName: "claude",
-		// Prompt is delivered as the final positional arg, not via stdin: the
-		// wrapper's PTY makes stdin look like a TTY to claude, which then
-		// requires the prompt as an argument when `-p` is set.
-		Args:        buildClaudeNonInteractiveArgs(resumeID, prompt),
-		WorkDir:     workDir,
-		Env:         buildClaudeEnv(workDir, agentName),
-		Prompt:      "",
-		HarnessName: "claude",
-		Effort:      resolveAgentEffort(),
-		LineHandler: newStreamLineHandler(workDir, collector),
-		RetryPolicy: harness.DefaultRetryPolicy(),
+	ctx, cancel := contextFromShutdown(context.Background(), shutdown)
+	defer cancel()
+
+	res, err := runClaudeTurnWithRetry(ctx, func() (claudeRunTurnResult, error) {
+		return invokeClaudeRunTurn(ctx, workDir, prompt, agentName, resumeID, cli.DaemonActivityObserver(), collector)
 	})
+	outputTail := claudeRunTurnEvidence(res, "")
+	if err != nil {
+		if errors.Is(err, hwharness.ErrTurnErrored) {
+			reason := strings.TrimSpace(res.Turn.Reason)
+			if reason == "" {
+				reason = "claude turn errored"
+			}
+			return &InvocationError{Err: errors.New(reason), OutputTail: outputTail, ExitCode: 1}
+		}
+		return wrapInvocationError(err, outputTail)
+	}
+
+	displayClaudeTurn(res)
+	persistClaudeTurnSessionID(workDir, res)
 
 	// NOTE: the lock's Claude session ID is intentionally NOT cleared per-invoke.
 	// It must survive a failed/killed run so a daemon restart can carry it forward
 	// and --resume (P4). Clearing happens only on SUCCESS — in the daemon path
 	// (runTaskDaemon/runPlanDaemon) and the auto-loop's task-completion handler.
 	return err
+}
+
+type claudeRunTurnConfig = hwharness.TurnConfig
+type claudeRunTurnResult = hwharness.TurnResult
+
+type claudeRunTurnFn func(ctx context.Context, cfg claudeRunTurnConfig) (claudeRunTurnResult, error)
+
+var claudeRunTurn claudeRunTurnFn = hwharness.RunTurn
+
+func invokeClaudeRunTurn(ctx context.Context, workDir, prompt, agentName, resumeID string, onActivity func(wrapper.Snapshot), collector *usage.Collector) (claudeRunTurnResult, error) {
+	raw := &capturedOutput{}
+	output := io.Writer(raw)
+	if onActivity != nil {
+		raw.onActivity = onActivity
+	}
+	res, err := claudeRunTurn(ctx, claudeRunTurnConfig{
+		Harness:       "claude",
+		BinaryPath:    "claude",
+		Args:          buildClaudeRunTurnArgs(resumeID),
+		WorkingDir:    workDir,
+		Env:           buildClaudeEnv(workDir, agentName),
+		Prompt:        prompt,
+		ExitAfterTurn: true,
+		Output:        output,
+	})
+	// RunTurn drives Claude Code's interactive TUI, which does not expose the
+	// stream-json usage records consumed by collectClaudeStreamUsage. Keep the
+	// collector accepted for API compatibility; usage remains unavailable until
+	// Harness Wrapper surfaces transcript usage metadata.
+	_ = collector
+	if err != nil && claudeRunTurnEvidence(res, raw.String()) == "" {
+		res.Turn.Text = raw.String()
+	}
+	return res, err
+}
+
+// Retry tunables for the RunTurn path. The in-tree harness.RunWithRetry wraps
+// the older hwharness.Run API and can't be reused for RunTurn, so these are
+// kept in sync with harness.DefaultRetryPolicy (Max 3, 2s base, 60s cap).
+const (
+	claudeTurnMaxRetries  = 3
+	claudeTurnBaseBackoff = 2 * time.Second
+	claudeTurnMaxBackoff  = 60 * time.Second
+)
+
+// claudeTurnSleep is the backoff sleep, honoring context cancellation. It is a
+// package var so tests can stub it out to avoid real delays.
+var claudeTurnSleep = func(ctx context.Context, d time.Duration) error {
+	if d <= 0 {
+		return nil
+	}
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-t.C:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+// runClaudeTurnWithRetry transparently respawns a Claude turn on transient API
+// failures — restoring the retry behavior the pre-RunTurn path got from
+// harness.RunWithRetry, which every other backend still uses. invoke runs one
+// turn; the loop re-invokes (up to claudeTurnMaxRetries) while the failure is
+// transient, honoring any RetryAfter hint.
+func runClaudeTurnWithRetry(ctx context.Context, invoke func() (claudeRunTurnResult, error)) (claudeRunTurnResult, error) {
+	var (
+		res claudeRunTurnResult
+		err error
+	)
+	for attempt := 0; ; attempt++ {
+		res, err = invoke()
+		if err == nil {
+			return res, nil
+		}
+		retry, hint := claudeTurnShouldRetry(res, err)
+		if !retry || attempt >= claudeTurnMaxRetries {
+			return res, err
+		}
+		delay := claudeTurnBackoff(attempt, hint)
+		fmt.Fprintf(os.Stderr, "[loom] claude turn transient failure (HTTP %d); retry %d/%d in %s\n",
+			res.Turn.HTTPCode, attempt+1, claudeTurnMaxRetries, delay)
+		if serr := claudeTurnSleep(ctx, delay); serr != nil {
+			return res, serr
+		}
+	}
+}
+
+// claudeTurnShouldRetry reports whether an errored RunTurn result is a transient
+// condition worth retrying, plus the backoff floor the harness suggested. On the
+// errored path RunTurn leaves WrapperResult zero, so the only reliable signals
+// are on the turn itself: the upstream HTTP status the wrapper parsed from an
+// api_error banner, and any RetryAfter hint. Mirrors harness.shouldRetry intent:
+// retry rate-limit / overloaded / server-side 5xx (and anything carrying a
+// RetryAfter hint); never auth (401/403), billing (402), or other 4xx.
+// Non-turn errors (PTY setup, ctx cancel, transport with no code) fall through
+// to the caller / daemon-supervisor restart.
+func claudeTurnShouldRetry(res claudeRunTurnResult, err error) (bool, time.Duration) {
+	if !errors.Is(err, hwharness.ErrTurnErrored) {
+		return false, 0
+	}
+	switch res.Turn.HTTPCode {
+	case 408, 429, 500, 502, 503, 504, 529:
+		return true, res.Turn.RetryAfter
+	}
+	if res.Turn.RetryAfter > 0 {
+		return true, res.Turn.RetryAfter
+	}
+	return false, res.Turn.RetryAfter
+}
+
+// claudeTurnBackoff selects the wait before the next attempt. A non-zero
+// RetryAfter hint wins over the exponential schedule; both are capped at
+// claudeTurnMaxBackoff. Mirrors harness.backoffFor.
+func claudeTurnBackoff(attempt int, hint time.Duration) time.Duration {
+	if hint > 0 {
+		if hint > claudeTurnMaxBackoff {
+			return claudeTurnMaxBackoff
+		}
+		return hint
+	}
+	d := claudeTurnBaseBackoff << attempt
+	if d > claudeTurnMaxBackoff || d < claudeTurnBaseBackoff {
+		return claudeTurnMaxBackoff
+	}
+	return d
+}
+
+type capturedOutput struct {
+	mu         sync.Mutex
+	buf        bytes.Buffer
+	onActivity func(wrapper.Snapshot)
+}
+
+func (c *capturedOutput) Write(p []byte) (int, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.onActivity != nil {
+		c.onActivity(wrapper.Snapshot{LastOutputAt: time.Now()})
+	}
+	return c.buf.Write(p)
+}
+
+func (c *capturedOutput) String() string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.buf.String()
+}
+
+func persistClaudeTurnSessionID(workDir string, res claudeRunTurnResult) {
+	sid := strings.TrimSpace(res.Session.HarnessSessionID)
+	if sid == "" {
+		return
+	}
+	SetLastCapturedSessionID(sid)
+	if err := cli.UpdateLockClaudeSessionID(workDir, sid); err != nil {
+		fmt.Fprintf(os.Stderr, "[loom] failed to persist claude session ID: %v\n", err)
+	}
+}
+
+func displayClaudeTurn(res claudeRunTurnResult) {
+	text := claudeTurnText(res)
+	if strings.TrimSpace(text) == "" {
+		return
+	}
+	fmt.Print(text)
+	if !strings.HasSuffix(text, "\n") {
+		fmt.Println()
+	}
+}
+
+func claudeTurnText(res claudeRunTurnResult) string {
+	for i := len(res.History) - 1; i >= 0; i-- {
+		if res.History[i].Role == "assistant" && strings.TrimSpace(res.History[i].Text) != "" {
+			return res.History[i].Text
+		}
+	}
+	return res.Turn.Text
+}
+
+func claudeRunTurnEvidence(res claudeRunTurnResult, raw string) string {
+	var parts []string
+	if strings.TrimSpace(res.Turn.Reason) != "" {
+		parts = append(parts, res.Turn.Reason)
+	}
+	if text := strings.TrimSpace(claudeTurnText(res)); text != "" {
+		parts = append(parts, text)
+	}
+	if strings.TrimSpace(raw) != "" {
+		parts = append(parts, raw)
+	}
+	return strings.Join(parts, "\n")
 }
 
 // outputRingBuffer keeps the last N lines of stream output for error classification.
