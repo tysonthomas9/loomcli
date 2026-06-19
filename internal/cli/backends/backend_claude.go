@@ -16,6 +16,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/olesho/harness-wrapper/pkg/chat"
 	hwharness "github.com/olesho/harness-wrapper/pkg/harness"
 	_ "github.com/olesho/harness-wrapper/pkg/harness/claude" // register the "claude" profile
 	"github.com/olesho/harness-wrapper/pkg/wrapper"
@@ -297,6 +298,22 @@ type claudeRunTurnFn func(ctx context.Context, cfg claudeRunTurnConfig) (claudeR
 
 var claudeRunTurn claudeRunTurnFn = hwharness.RunTurn
 
+// claudeTrustInputPolicy auto-accepts Claude Code's blocking startup dialogs —
+// the workspace folder-trust prompt and the --dangerously-skip-permissions
+// "Bypass Permissions mode" screen — so daemon-spawned (non-interactive) runs
+// proceed unattended in fresh agent worktrees. Both surface from Harness
+// Wrapper as a "trust_prompt" InputRequest; the "proceed" alias selects the
+// affirmative option ("Yes, I trust this folder"). Without a policy, RunTurn
+// fails the run with chat.ErrInputPending (pre-v0.6.0 the harness hung to the
+// deadline) and the agent does no work — every run dies at 0 tokens.
+func claudeTrustInputPolicy() *chat.InputPolicy {
+	return &chat.InputPolicy{
+		ByKind: map[string]chat.Disposition{
+			"trust_prompt": {Kind: chat.DispositionAnswer, OptionID: "proceed"},
+		},
+	}
+}
+
 func invokeClaudeRunTurn(ctx context.Context, workDir, prompt, agentName, resumeID string, onActivity func(wrapper.Snapshot), collector *usage.Collector) (claudeRunTurnResult, error) {
 	raw := &capturedOutput{}
 	output := io.Writer(raw)
@@ -311,6 +328,7 @@ func invokeClaudeRunTurn(ctx context.Context, workDir, prompt, agentName, resume
 		Env:           buildClaudeEnv(workDir, agentName),
 		Prompt:        prompt,
 		ExitAfterTurn: true,
+		InputPolicy:   claudeTrustInputPolicy(),
 		Output:        output,
 	})
 	// RunTurn drives Claude Code's interactive TUI, which does not expose the
