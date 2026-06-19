@@ -197,3 +197,78 @@ func TestProjectEpicStack_BuildsForestAndIsIdempotent(t *testing.T) {
 		}
 	}
 }
+
+// TestProjectEpicStack_MidChainReparent (Stage-6 hardening): when the epic DAG
+// changes between runs, re-projection repoints the affected node's base via
+// SetBase WITHOUT reassigning its stable OutputBranch.
+func TestProjectEpicStack_MidChainReparent(t *testing.T) {
+	ctx := context.Background()
+	const ws, epicID, repo, root = "WS", "EPIC-9", "acme/widgets", "main"
+	sstore := stackstore.New(t.TempDir())
+
+	ib := clitest.NewMockIssueBackend()
+	ib.ListResult = []backend.IssueData{
+		{ID: "T-A", Status: "open", Parent: epicID},
+		{ID: "T-B", Status: "open", Parent: epicID, BlockedBy: []string{"T-A"}, BlockedByCount: 1},
+	}
+	if _, err := projectEpicStack(ctx, ib, sstore, ws, epicID, repo, root); err != nil {
+		t.Fatalf("initial projection: %v", err)
+	}
+	branchB := ""
+	for _, n := range mustNodes(t, ctx, sstore, ws, "epic:EPIC-9") {
+		if n.TaskID == "T-B" {
+			if n.BaseTaskID != "T-A" {
+				t.Fatalf("initial B base = %q, want T-A", n.BaseTaskID)
+			}
+			branchB = n.OutputBranch
+		}
+	}
+
+	// The DAG changes: T-B no longer depends on T-A (becomes an independent root).
+	ib.ListResult = []backend.IssueData{
+		{ID: "T-A", Status: "open", Parent: epicID},
+		{ID: "T-B", Status: "open", Parent: epicID},
+	}
+	proj, err := projectEpicStack(ctx, ib, sstore, ws, epicID, repo, root)
+	if err != nil {
+		t.Fatalf("re-projection: %v", err)
+	}
+	if len(proj.Reparented) != 1 || proj.Reparented[0] != "T-B" {
+		t.Fatalf("expected T-B reparented, got %v", proj.Reparented)
+	}
+	for _, n := range mustNodes(t, ctx, sstore, ws, "epic:EPIC-9") {
+		if n.TaskID == "T-B" {
+			if n.BaseTaskID != "" {
+				t.Fatalf("B base after reparent = %q, want root", n.BaseTaskID)
+			}
+			if n.OutputBranch != branchB {
+				t.Fatalf("reparent must not reassign OutputBranch: %q -> %q", branchB, n.OutputBranch)
+			}
+		}
+	}
+}
+
+func TestSanitizeLockSegment(t *testing.T) {
+	cases := map[string]string{
+		"epic:EPIC-1":     "epic-EPIC-1",
+		"epic:E":          "epic-E",
+		"auto:loom/flaky": "auto-loom-flaky",
+		"":                "stack",
+		":::":             "stack",
+		"a_b-c":           "a_b-c",
+	}
+	for in, want := range cases {
+		if got := sanitizeLockSegment(in); got != want {
+			t.Errorf("sanitizeLockSegment(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+func mustNodes(t *testing.T, ctx context.Context, s *stackstore.LocalStore, ws string, id sl.StackID) []sl.Node {
+	t.Helper()
+	nodes, err := s.ListNodes(ctx, ws, id)
+	if err != nil {
+		t.Fatalf("ListNodes: %v", err)
+	}
+	return nodes
+}
