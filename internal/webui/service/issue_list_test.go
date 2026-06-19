@@ -152,3 +152,23 @@ func findKanbanIssue(t *testing.T, issues []KanbanIssue, id string) KanbanIssue 
 func intPtr(v int) *int {
 	return &v
 }
+
+// TestBackendIssueDataToWithCounts_CarriesNotes guards the kanban/list read
+// path: notes must flow from the slim IssueData projection into the embedded
+// types.Issue, so the board's isBlockedWithNotes (status == blocked && notes)
+// surfaces a blocked issue's external-blocker reason without a detail fetch.
+func TestBackendIssueDataToWithCounts_CarriesNotes(t *testing.T) {
+	d := &backend.IssueData{
+		ID:     "WEB-63",
+		Title:  "P1-8 gate",
+		Status: "blocked",
+		Notes:  "BLOCKED: waiting on sibling P1 tasks",
+	}
+	wc := backendIssueDataToWithCounts(d)
+	if wc == nil || wc.Issue == nil {
+		t.Fatal("backendIssueDataToWithCounts returned nil issue")
+	}
+	if wc.Issue.Notes != "BLOCKED: waiting on sibling P1 tasks" {
+		t.Errorf("Notes = %q, want it carried into the embedded Issue", wc.Issue.Notes)
+	}
+}
