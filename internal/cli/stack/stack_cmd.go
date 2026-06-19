@@ -33,7 +33,7 @@ var stackCmd = &cobra.Command{
 func init() {
 	stackCmd.AddCommand(
 		initCmd(), listCmd(), showCmd(), statusCmd(), validateCmd(),
-		addCmd(), moveCmd(), setBaseCmd(), removeCmd(), publishCmd(),
+		addCmd(), moveCmd(), setBaseCmd(), removeCmd(), publishCmd(), restackCmd(),
 	)
 	cli.RegisterCommand(stackCmd)
 }
@@ -437,9 +437,51 @@ func removeCmd() *cobra.Command {
 	return c
 }
 
+func restackCmd() *cobra.Command {
+	var repoPath string
+	var headless, jsonOut bool
+	c := &cobra.Command{
+		Use:   "restack <stack-id>",
+		Short: "Rebase descendants of merged units onto the live base, resolving conflicts with an agent",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			ws, st, id, err := loadCtx(args[0])
+			if err != nil {
+				return err
+			}
+			stack, err := st.GetStack(cmd.Context(), ws, id)
+			if err != nil {
+				return err
+			}
+			path, err := resolveRepoPath(ws, stack.RepoName, repoPath)
+			if err != nil {
+				return err
+			}
+			token := resolveGitHubToken(cmd.Context())
+			if token == "" {
+				return errors.New("no GitHub token (set GITHUB_TOKEN/GH_TOKEN or run `gh auth login`)")
+			}
+			rec := &stackpublish.Reconciler{Store: st, Forge: stackpublish.NewGitHubForge(token, nil, "")}
+			report, err := rec.Restack(cmd.Context(), ws, id, path, newResolver(headless))
+			if err != nil {
+				return err
+			}
+			if jsonOut {
+				return cmdstore.WriteJSON(report)
+			}
+			fmt.Printf("restacked: rebased=%d resolved=%d\n", len(report.Rebased), len(report.Resolved))
+			return nil
+		},
+	}
+	c.Flags().StringVar(&repoPath, "repo-path", "", "local checkout to rebase in (default: from loom state)")
+	c.Flags().BoolVar(&headless, "headless", false, "resolve conflicts with a non-interactive (headless) agent")
+	c.Flags().BoolVar(&jsonOut, "json", false, "JSON output")
+	return c
+}
+
 func publishCmd() *cobra.Command {
 	var repoPath string
-	var dryRun, jsonOut bool
+	var dryRun, jsonOut, autoRebase, headless bool
 	c := &cobra.Command{
 		Use:   "publish <stack-id>",
 		Short: "Publish the stack as stacked pull requests",
@@ -465,7 +507,11 @@ func publishCmd() *cobra.Command {
 				Store: st,
 				Forge: stackpublish.NewGitHubForge(token, nil, ""),
 			}
-			report, err := rec.Publish(cmd.Context(), ws, id, path, stackpublish.Options{DryRun: dryRun})
+			opts := stackpublish.Options{DryRun: dryRun}
+			if autoRebase {
+				opts.Resolver = newResolver(headless)
+			}
+			report, err := rec.Publish(cmd.Context(), ws, id, path, opts)
 			if err != nil {
 				return err
 			}
@@ -487,6 +533,8 @@ func publishCmd() *cobra.Command {
 	}
 	c.Flags().StringVar(&repoPath, "repo-path", "", "local checkout to push from (default: from loom state)")
 	c.Flags().BoolVar(&dryRun, "dry-run", false, "compute the plan without mutating GitHub")
+	c.Flags().BoolVar(&autoRebase, "auto-rebase", false, "rebase descendants of merged units onto the live base (agent resolves conflicts) instead of failing closed")
+	c.Flags().BoolVar(&headless, "headless", false, "with --auto-rebase, resolve conflicts headlessly (non-interactive)")
 	c.Flags().BoolVar(&jsonOut, "json", false, "JSON output")
 	return c
 }

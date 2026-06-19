@@ -18,6 +18,9 @@ type Reconciler struct {
 // Options tunes a publish run.
 type Options struct {
 	DryRun bool
+	// Resolver, when set, auto-rebases descendants of merged predecessors onto the
+	// live base (resolving conflicts via the resolver) instead of failing closed.
+	Resolver ConflictResolver
 }
 
 // Report summarizes what a publish run did (or would do, for DryRun).
@@ -214,6 +217,13 @@ func (r *Reconciler) Publish(ctx context.Context, ws string, id sl.StackID, repo
 	// SHAs, so the descendant branch still carries the old ones and its PR would
 	// show duplicated changes — fail closed and ask for a re-materialize/rebase.
 	if !opts.DryRun {
+		// With a resolver, auto-rebase unsafe descendants first (resolving any
+		// conflicts via the agent); the guard below then passes.
+		if opts.Resolver != nil {
+			if _, err := r.Restack(ctx, ws, id, repoPath, opts.Resolver); err != nil {
+				return nil, fmt.Errorf("auto-rebase: %w", err)
+			}
+		}
 		var fetched bool
 		for _, n := range ordered {
 			if n.BaseTaskID == "" {
@@ -232,12 +242,12 @@ func (r *Reconciler) Publish(ctx context.Context, ws string, id sl.StackID, repo
 				}
 				fetched = true
 			}
-			safe, aerr := isAncestor(ctx, repoPath, pred.OutputBranch, "origin/"+stack.RootBase)
-			if aerr != nil {
-				return nil, fmt.Errorf("merged-slide preflight: cannot verify %s after predecessor %s merged: %w; re-materialize %s onto %s before publishing", n.TaskID, pred.TaskID, aerr, n.TaskID, stack.RootBase)
+			safe, serr := slideSafe(ctx, repoPath, stack.RootBase, pred.OutputBranch, n.OutputBranch)
+			if serr != nil {
+				return nil, fmt.Errorf("merged-slide preflight: cannot verify %s after predecessor %s merged: %w", n.TaskID, pred.TaskID, serr)
 			}
 			if !safe {
-				return nil, fmt.Errorf("predecessor %s was squash/rebase-merged; %s still carries its commits and must be rebased onto %s before publishing (re-materialize %s)", pred.TaskID, n.TaskID, stack.RootBase, n.TaskID)
+				return nil, fmt.Errorf("predecessor %s was squash/rebase-merged; %s still carries its commits and must be rebased onto %s before publishing (re-materialize %s, or run with --auto-rebase)", pred.TaskID, n.TaskID, stack.RootBase, n.TaskID)
 			}
 		}
 	}
