@@ -1,5 +1,7 @@
 package stacklineage
 
+import "sort"
+
 // ByTask indexes nodes by their TaskID.
 func ByTask(nodes []Node) map[string]Node {
 	m := make(map[string]Node, len(nodes))
@@ -9,13 +11,17 @@ func ByTask(nodes []Node) map[string]Node {
 	return m
 }
 
-// Ordered returns the stack's nodes from root to leaf for a strictly linear
-// stack, or an error describing why the lineage is invalid. It is the single
-// guard the reconciler and the `set-base`/`add` mutations call before acting,
-// so every cycle / missing-predecessor / non-linear case fails closed here.
+// Ordered returns the stack's nodes as a forest of linear chains: each root's
+// chain walked root→leaf, with roots in deterministic (task-ID) order. It is the
+// single guard the reconciler and the `set-base`/`add` mutations call before
+// acting, so every cycle / missing-predecessor / branching case fails closed here.
 //
-// Validations, in order: self-reference, missing base task, exactly one root,
-// no unit with multiple children (linear only), full reachability (cycle).
+// The stack may contain multiple independent chains rooted at the base (parallel
+// sub-stacks), but a unit may have at most one successor, so every chain stays
+// linear and every PR's base is unambiguous.
+//
+// Validations, in order: self-reference, missing base task, at least one root,
+// no unit with multiple successors (chains stay linear), full reachability (cycle).
 func Ordered(nodes []Node) ([]Node, error) {
 	if len(nodes) == 0 {
 		return nil, nil
@@ -39,31 +45,28 @@ func Ordered(nodes []Node) ([]Node, error) {
 		}
 		children[n.BaseTaskID] = append(children[n.BaseTaskID], n.TaskID)
 	}
-	switch len(roots) {
-	case 0:
-		return nil, ErrNoRoot
-	case 1:
-	default:
-		return nil, ErrMultipleRoots
+	if len(roots) == 0 {
+		return nil, ErrNoRoot // every node has a parent → a cycle exists
 	}
 	for _, kids := range children {
 		if len(kids) > 1 {
-			return nil, ErrBranching
+			return nil, ErrBranching // a unit may have at most one successor
 		}
 	}
+	sort.Strings(roots)
 	ordered := make([]Node, 0, len(nodes))
-	cur := roots[0]
-	for {
-		ordered = append(ordered, byTask[cur])
-		next := children[cur]
-		if len(next) == 0 {
-			break
+	for _, root := range roots {
+		for cur := root; ; {
+			ordered = append(ordered, byTask[cur])
+			next := children[cur]
+			if len(next) == 0 {
+				break
+			}
+			cur = next[0]
 		}
-		cur = next[0]
 	}
 	if len(ordered) != len(nodes) {
-		// Some nodes were unreachable from the single root → a cycle exists among them.
-		return nil, ErrCycle
+		return nil, ErrCycle // unreachable nodes → a cycle among them
 	}
 	return ordered, nil
 }
@@ -87,17 +90,22 @@ func BaseBranch(stack Stack, node Node, byTask map[string]Node) (string, error) 
 	return base.OutputBranch, nil
 }
 
-// NextToMerge returns the task ID of the bottom-most unit not yet merged — the
-// next candidate to land — and whether one exists. Merged/closed units are
-// skipped (merged ones have already landed; closed ones were dropped).
-func NextToMerge(ordered []Node) (string, bool) {
+// NextToMergeUnits returns the set of task IDs that are next to land — the
+// bottom-most not-yet-merged unit of each chain. A unit qualifies when it is not
+// merged/closed and is either a root or sits directly on a merged predecessor.
+// Returns one entry per parallel chain (a forest can have several next units).
+func NextToMergeUnits(ordered []Node) map[string]bool {
+	byTask := ByTask(ordered)
+	out := map[string]bool{}
 	for _, n := range ordered {
 		if n.State == NodeStateMerged || n.State == NodeStateClosed {
 			continue
 		}
-		return n.TaskID, true
+		if n.BaseTaskID == "" || byTask[n.BaseTaskID].State == NodeStateMerged {
+			out[n.TaskID] = true
+		}
 	}
-	return "", false
+	return out
 }
 
 // WouldCycle reports whether setting node.BaseTaskID = newBase would introduce a

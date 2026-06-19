@@ -83,7 +83,7 @@ func (r *Reconciler) StackStatus(ctx context.Context, ws string, id sl.StackID, 
 		return nil, fmt.Errorf("invalid lineage: %w", err)
 	}
 	report := &StatusReport{StackID: id}
-	next, _ := sl.NextToMerge(ordered)
+	nextSet := sl.NextToMergeUnits(ordered)
 
 	var statuses map[string]PRStatus
 	if strings.TrimSpace(repoPath) != "" {
@@ -101,7 +101,7 @@ func (r *Reconciler) StackStatus(ctx context.Context, ws string, id sl.StackID, 
 	for _, n := range ordered {
 		row := StatusRow{
 			TaskID: n.TaskID, State: n.State, OutputBranch: n.OutputBranch,
-			PRNumber: n.PRNumber, PRURL: n.PRURL, NextToMerge: n.TaskID == next,
+			PRNumber: n.PRNumber, PRURL: n.PRURL, NextToMerge: nextSet[n.TaskID],
 		}
 		if st, ok := statuses[n.OutputBranch]; ok {
 			row.Checks, row.Review, row.Mergeable = st.Checks, st.Review, st.Mergeable

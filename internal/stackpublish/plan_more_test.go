@@ -129,6 +129,20 @@ func TestComputePlan_MergedMiddleSlide(t *testing.T) {
 	assert.Equal(t, br("T1"), got["T3"].DesiredBase, "T3 slides past the merged T2 onto T1")
 }
 
+// A forest of parallel chains reconciles each chain independently against its own root.
+func TestComputePlan_Forest(t *testing.T) {
+	stack := sl.Stack{ID: sid, RootBase: "main"}
+	ordered := []sl.Node{node("A1", ""), node("A2", "A1"), node("B1", ""), node("B2", "B1")}
+	got := byKind(computePlan(stack, ordered, map[string]PR{}, nil))
+
+	assert.Equal(t, actCreate, got["A1"].Kind)
+	assert.Equal(t, "main", got["A1"].DesiredBase, "chain-A root bases on RootBase")
+	assert.Equal(t, br("A1"), got["A2"].DesiredBase)
+	assert.Equal(t, actCreate, got["B1"].Kind)
+	assert.Equal(t, "main", got["B1"].DesiredBase, "chain-B root bases on RootBase independently")
+	assert.Equal(t, br("B1"), got["B2"].DesiredBase)
+}
+
 // A closed-but-not-merged PR is replaced (create), not skipped.
 func TestComputePlan_ClosedNotMergedRecreates(t *testing.T) {
 	stack := sl.Stack{ID: sid, RootBase: "main"}

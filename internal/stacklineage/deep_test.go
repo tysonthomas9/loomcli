@@ -33,24 +33,29 @@ func TestOrdered_DeepChainAndBases(t *testing.T) {
 	}
 }
 
-func TestNextToMerge(t *testing.T) {
+func TestNextToMergeUnits(t *testing.T) {
 	ordered, err := Ordered(linear("T1", "T2", "T3"))
 	require.NoError(t, err)
-
-	id, ok := NextToMerge(ordered)
-	assert.True(t, ok)
-	assert.Equal(t, "T1", id, "the bottom unit is next to merge")
+	assert.Equal(t, map[string]bool{"T1": true}, NextToMergeUnits(ordered), "bottom unit is next")
 
 	ordered[0].State = NodeStateMerged
-	id, ok = NextToMerge(ordered)
-	assert.True(t, ok)
-	assert.Equal(t, "T2", id, "skips the merged bottom unit")
+	assert.Equal(t, map[string]bool{"T2": true}, NextToMergeUnits(ordered), "skips the merged bottom unit")
 
 	for i := range ordered {
 		ordered[i].State = NodeStateMerged
 	}
-	_, ok = NextToMerge(ordered)
-	assert.False(t, ok, "nothing left to merge")
+	assert.Empty(t, NextToMergeUnits(ordered), "nothing left to merge")
+}
+
+func TestNextToMergeUnits_Forest(t *testing.T) {
+	// Two parallel chains: A1->A2 and B1->B2. Both chain-bottoms are next.
+	nodes := []Node{
+		{TaskID: "A1"}, {TaskID: "A2", BaseTaskID: "A1"},
+		{TaskID: "B1"}, {TaskID: "B2", BaseTaskID: "B1"},
+	}
+	ordered, err := Ordered(nodes)
+	require.NoError(t, err)
+	assert.Equal(t, map[string]bool{"A1": true, "B1": true}, NextToMergeUnits(ordered))
 }
 
 func TestWouldCycle_DeepChain(t *testing.T) {

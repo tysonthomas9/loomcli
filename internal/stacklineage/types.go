@@ -85,9 +85,8 @@ type Node struct {
 // Domain sentinel errors. Callers compare with errors.Is.
 var (
 	ErrNoRoot             = errors.New("stacklineage: stack has no root unit")
-	ErrMultipleRoots      = errors.New("stacklineage: stack has multiple roots (linear stacks only)")
 	ErrCycle              = errors.New("stacklineage: lineage cycle detected")
 	ErrMissingPredecessor = errors.New("stacklineage: base task not found in stack")
-	ErrBranching          = errors.New("stacklineage: non-linear lineage (a unit has multiple children)")
+	ErrBranching          = errors.New("stacklineage: a unit has multiple successors (chains must stay linear)")
 	ErrNoOutputBranch     = errors.New("stacklineage: predecessor has no assigned output branch")
 )

@@ -76,6 +76,28 @@ func TestOrdered_EmptyAndSingle(t *testing.T) {
 	assert.Equal(t, "only", got[0].TaskID)
 }
 
+func TestOrdered_Forest(t *testing.T) {
+	// Two parallel linear chains off the same base: A1->A2 and B1->B2->B3.
+	nodes := []Node{
+		{TaskID: "B1"}, {TaskID: "B2", BaseTaskID: "B1"}, {TaskID: "B3", BaseTaskID: "B2"},
+		{TaskID: "A1"}, {TaskID: "A2", BaseTaskID: "A1"},
+	}
+	ordered, err := Ordered(nodes)
+	require.NoError(t, err)
+	require.Len(t, ordered, 5)
+	// Roots are walked in deterministic (task-ID) order; each chain stays contiguous.
+	got := make([]string, len(ordered))
+	for i, n := range ordered {
+		got[i] = n.TaskID
+	}
+	assert.Equal(t, []string{"A1", "A2", "B1", "B2", "B3"}, got)
+
+	// Branching within a chain is still rejected (a unit can't have two successors).
+	branched := []Node{{TaskID: "A1"}, {TaskID: "A2", BaseTaskID: "A1"}, {TaskID: "A3", BaseTaskID: "A1"}}
+	_, err = Ordered(branched)
+	assert.ErrorIs(t, err, ErrBranching)
+}
+
 func TestOrdered_Errors(t *testing.T) {
 	t.Run("self-parent", func(t *testing.T) {
 		_, err := Ordered([]Node{{TaskID: "A", BaseTaskID: "A"}})
@@ -90,11 +112,7 @@ func TestOrdered_Errors(t *testing.T) {
 		_, err := Ordered([]Node{{TaskID: "A", BaseTaskID: "B"}, {TaskID: "B", BaseTaskID: "A"}})
 		assert.ErrorIs(t, err, ErrNoRoot)
 	})
-	t.Run("multiple roots", func(t *testing.T) {
-		_, err := Ordered([]Node{{TaskID: "A"}, {TaskID: "B"}})
-		assert.ErrorIs(t, err, ErrMultipleRoots)
-	})
-	t.Run("branching (multiple children)", func(t *testing.T) {
+	t.Run("branching (multiple successors)", func(t *testing.T) {
 		// A is root; both B and C base on A.
 		_, err := Ordered([]Node{{TaskID: "A"}, {TaskID: "B", BaseTaskID: "A"}, {TaskID: "C", BaseTaskID: "A"}})
 		assert.ErrorIs(t, err, ErrBranching)

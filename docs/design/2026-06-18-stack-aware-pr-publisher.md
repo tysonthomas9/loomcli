@@ -128,9 +128,17 @@ func OutputBranchName(s StackID, taskID string) string  // loom/stack/<s>/<taskI
 func Ordered(stack Stack, nodes []Node) ([]Node, error)
 ```
 
-Base selection is explicit (per the locked "explicit/linear epic stacks only"
-decision): a node's base is `BaseTaskID`'s output branch, or `RootBase` for the
-root unit. Fail closed when a referenced predecessor has no published branch.
+Base selection is explicit: a node's base is `BaseTaskID`'s output branch, or
+`RootBase` for a root unit. Fail closed when a referenced predecessor has no
+published branch.
+
+Lineage is a **forest of linear chains**: a stack (epic) may hold multiple
+independent chains rooted at the same base (parallel sub-stacks), but every unit
+has at most one successor, so each chain stays linear and every PR's base is
+unambiguous. `Ordered` allows multiple roots and rejects only mid-chain branching
+(a unit with two successors) and cycles. `loom stack add --root` starts a new
+parallel chain; `--after` chains onto a predecessor. (True trees — a unit with
+multiple successors — remain out of scope.)
 
 ### 2. `internal/stackstore` — persistence (loomcli-side, swappable)
 

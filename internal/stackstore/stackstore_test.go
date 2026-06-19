@@ -67,9 +67,33 @@ func TestAddNodeErrors(t *testing.T) {
 	_, err = s.AddNode(ctx, ws, "epic:E1", "T1", "", "")
 	assert.ErrorIs(t, err, ErrNodeExists)
 
-	// A second root would make the stack non-linear → rejected at write time.
+	// A second root is allowed — it starts a parallel chain off the same base.
 	_, err = s.AddNode(ctx, ws, "epic:E1", "T2", "", "")
-	assert.ErrorIs(t, err, sl.ErrMultipleRoots)
+	require.NoError(t, err)
+}
+
+func TestForestParallelChains(t *testing.T) {
+	ctx := context.Background()
+	s := newStore(t)
+	seedStack(t, s)
+	// Chain A: A1 -> A2 ; parallel chain B: B1 -> B2, both rooted at the base.
+	for _, e := range []struct{ id, base string }{
+		{"A1", ""}, {"A2", "A1"}, {"B1", ""}, {"B2", "B1"},
+	} {
+		_, err := s.AddNode(ctx, ws, "epic:E1", e.id, e.base, "")
+		require.NoError(t, err)
+	}
+	nodes, err := s.ListNodes(ctx, ws, "epic:E1")
+	require.NoError(t, err)
+	require.Len(t, nodes, 4)
+	byTask := sl.ByTask(nodes)
+	assert.Equal(t, "", byTask["A1"].BaseTaskID)
+	assert.Equal(t, "A1", byTask["A2"].BaseTaskID)
+	assert.Equal(t, "", byTask["B1"].BaseTaskID)
+	assert.Equal(t, "B1", byTask["B2"].BaseTaskID)
+
+	// Distinct branches per unit.
+	assert.NotEqual(t, byTask["A2"].OutputBranch, byTask["B2"].OutputBranch)
 }
 
 func TestSetBaseRejectsCycle(t *testing.T) {

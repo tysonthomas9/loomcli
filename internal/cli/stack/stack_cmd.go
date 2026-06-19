@@ -292,7 +292,7 @@ func validateCmd() *cobra.Command {
 			if oerr != nil {
 				return fmt.Errorf("invalid: %w", oerr)
 			}
-			fmt.Printf("ok: %d unit(s), linear\n", len(nodes))
+			fmt.Printf("ok: %d unit(s), valid lineage\n", len(nodes))
 			return nil
 		},
 	}
@@ -302,18 +302,23 @@ func validateCmd() *cobra.Command {
 
 func addCmd() *cobra.Command {
 	var stackID, after, mode string
-	var jsonOut bool
+	var jsonOut, root bool
 	c := &cobra.Command{
 		Use:   "add <task-id> --stack <stack-id>",
-		Short: "Register a task in a stack (appends to the tip unless --after)",
+		Short: "Register a task in a stack (appends to the tip; --after to chain, --root for a parallel chain)",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ws, st, id, err := loadCtxFlag(stackID)
 			if err != nil {
 				return err
 			}
+			if root && after != "" {
+				return errors.New("--root and --after are mutually exclusive")
+			}
 			base := after
-			if base == "" {
+			// --root starts a new parallel chain off the stack base. Otherwise, with
+			// no --after, append to the current tip (the tail of the last chain).
+			if !root && base == "" {
 				nodes, lerr := st.ListNodes(cmd.Context(), ws, id)
 				if lerr != nil {
 					return lerr
@@ -335,6 +340,7 @@ func addCmd() *cobra.Command {
 	}
 	c.Flags().StringVar(&stackID, "stack", "", "stack id (required)")
 	c.Flags().StringVar(&after, "after", "", "predecessor task id (default: current tip)")
+	c.Flags().BoolVar(&root, "root", false, "start a new parallel chain off the stack base")
 	c.Flags().StringVar(&mode, "commit-mode", "", "commit mode override")
 	c.Flags().BoolVar(&jsonOut, "json", false, "JSON output")
 	_ = c.MarkFlagRequired("stack")

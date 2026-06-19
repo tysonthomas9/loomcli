@@ -263,4 +263,31 @@ func TestE2EStackPublisher(t *testing.T) {
 			assert.Equal(t, sl.NodeStateMerged, n.State, "M1 recorded as merged (terminal)")
 		}
 	}
+
+	// --- Scenario 6: forest — two parallel linear chains off the same base ----
+	id4 := sl.StackID(fmt.Sprintf("manual:e2e-forest-%d", time.Now().UnixNano()))
+	require.NoError(t, store.EnsureStack(ctx, sl.Stack{ID: id4, WorkspaceKey: e2eWS, RepoName: repo, RootBase: "main"}))
+	br4 := func(task string) string { return sl.OutputBranchName(id4, task) }
+	t.Cleanup(func() {
+		for head, pr := range prsByHead(t, forge, owner, repo, id4) {
+			if pr.State == "open" {
+				_ = forge.ClosePR(ctx, owner, repo, pr.Number, "e2e cleanup")
+			}
+			_ = exec.Command("git", "-C", repoPath, "push", "origin", "--delete", head).Run()
+		}
+	})
+	for _, e := range []struct{ id, base string }{{"A1", ""}, {"A2", "A1"}, {"B1", ""}, {"B2", "B1"}} {
+		_, ae := store.AddNode(ctx, e2eWS, id4, e.id, e.base, "")
+		require.NoError(t, ae)
+	}
+	materialize(t, repoPath, id4, []string{"A1", "A2"}, "main")
+	materialize(t, repoPath, id4, []string{"B1", "B2"}, "main")
+	_, err = rec.Publish(ctx, e2eWS, id4, repoPath, stackpublish.Options{})
+	require.NoError(t, err)
+	prs = prsByHead(t, forge, owner, repo, id4)
+	require.Len(t, prs, 4)
+	assert.Equal(t, "main", prs[br4("A1")].Base)
+	assert.Equal(t, br4("A1"), prs[br4("A2")].Base)
+	assert.Equal(t, "main", prs[br4("B1")].Base, "second chain roots on main independently")
+	assert.Equal(t, br4("B1"), prs[br4("B2")].Base)
 }
