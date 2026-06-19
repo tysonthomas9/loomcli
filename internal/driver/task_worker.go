@@ -89,7 +89,7 @@ func (w *TaskWorker) runOnceInWorkspace(ctx context.Context, ws, workDir string)
 			WorktreePath:     workDir,
 			APIBaseURL:       w.APIBaseURL,
 			LocalSettingsDir: w.LocalSettingsDir,
-			WorktreeResolver: firstNonNilTaskWorktreeResolver(w.WorktreeResolver, LocalTaskWorktreeResolver{Store: w.Store}),
+			WorktreeResolver: firstNonNilTaskWorktreeResolver(w.WorktreeResolver, LocalTaskWorktreeResolver{Store: w.Store, Lineage: DefaultStackLineageLookup()}),
 		}
 	}
 	outcome, err := ClaimAndExecuteTaskRunWithResult(ctx, w.Store, TaskRunWorkerOptions{

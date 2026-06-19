@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"sort"
@@ -27,8 +28,23 @@ type TaskWorktreeResolver interface {
 	ResolveTaskWorktree(ctx context.Context, req TaskExecRequest, fallbackPath string) (TaskWorktree, error)
 }
 
+// TaskLineageLookup resolves the lineage-derived git base ref a task's worktree
+// should be cut from: its predecessor's output branch, or the stack's root base
+// for the root unit. ok=false means "no lineage applies to this task" and the
+// caller falls back to the repo default branch (current pre-stacking behavior).
+// It deliberately returns a *branch ref*, never a commit SHA, so the existing
+// remote-first fetch in EnsureDetachedGitWorktreeFromBranch keeps working.
+type TaskLineageLookup interface {
+	BaseRefForTask(ctx context.Context, workspaceKey, repoName, taskID string) (baseRef string, ok bool, err error)
+}
+
 type LocalTaskWorktreeResolver struct {
 	Store store.Store
+	// Lineage is optional. When nil (the two pre-stacking construction sites and
+	// all tests), the worktree base stays the repo default branch. When set, the
+	// per-task worktree is cut from the task's lineage base so each stacked task
+	// diffs on top of its predecessor — making the worktree base equal the PR base.
+	Lineage TaskLineageLookup
 }
 
 func (r LocalTaskWorktreeResolver) ResolveTaskWorktree(ctx context.Context, req TaskExecRequest, _ string) (TaskWorktree, error) {
@@ -72,7 +88,11 @@ func (r LocalTaskWorktreeResolver) ResolveTaskWorktree(ctx context.Context, req 
 	if err != nil {
 		return TaskWorktree{}, err
 	}
-	if err := localworkspace.EnsureDetachedGitWorktreeFromBranch(repoPath, target, repoRemote(selected), repoDefaultBranch(selected)); err != nil {
+	baseBranch, err := r.baseBranchForTask(ctx, workspaceKey, selected, req)
+	if err != nil {
+		return TaskWorktree{}, err
+	}
+	if err := localworkspace.EnsureDetachedGitWorktreeFromBranch(repoPath, target, repoRemote(selected), baseBranch); err != nil {
 		return TaskWorktree{}, fmt.Errorf("ensure task run worktree for repo %q: %w", selected.Name, err)
 	}
 	return TaskWorktree{
@@ -253,6 +273,40 @@ func isGitCheckout(path string) bool {
 		return true
 	}
 	return false
+}
+
+// baseBranchForTask returns the git ref the task's worktree should be cut from.
+// With no lineage lookup wired (or no lineage for the task) it returns the repo
+// default branch — byte-identical to the pre-stacking behavior. With lineage, it
+// returns the predecessor's output branch (or the stack root base). A lookup that
+// cannot resolve a lineage base (e.g. the predecessor has not published its branch
+// yet) falls back to the default branch rather than failing the run; the Stage-2
+// finalize barrier is what guarantees the predecessor branch exists before a
+// dependent dispatches, and the Stage-2 sliding resolver handles empty ancestors.
+func (r LocalTaskWorktreeResolver) baseBranchForTask(ctx context.Context, workspaceKey string, selected *domain.Repo, req TaskExecRequest) (string, error) {
+	fallback := repoDefaultBranch(selected)
+	if r.Lineage == nil {
+		return fallback, nil
+	}
+	taskID := strings.TrimSpace(req.TaskID)
+	if taskID == "" {
+		return fallback, nil
+	}
+	ref, ok, err := r.Lineage.BaseRefForTask(ctx, workspaceKey, selected.Name, taskID)
+	if err != nil {
+		// Lineage resolution is best-effort on the task-dispatch hot path: a
+		// corrupt/unreadable stack store or a corrupt lineage graph must not fail
+		// an otherwise-valid task run (pre-stacking, this path read no store at
+		// all). Log so corruption stays observable, then fall back to the default
+		// branch — byte-identical to pre-stacking behavior.
+		slog.WarnContext(ctx, "lineage base lookup failed; using repo default branch",
+			"task", taskID, "repo", selected.Name, "err", err)
+		return fallback, nil
+	}
+	if ok && strings.TrimSpace(ref) != "" {
+		return strings.TrimSpace(ref), nil
+	}
+	return fallback, nil
 }
 
 func repoRemote(repo *domain.Repo) string {

@@ -90,6 +90,39 @@ func BaseBranch(stack Stack, node Node, byTask map[string]Node) (string, error) 
 	return base.OutputBranch, nil
 }
 
+// BaseBranchSliding is the resolver's dispatch-time base selector: like
+// BaseBranch, but it slides past ancestors that produced no usable branch
+// (state empty/closed, or no assigned OutputBranch yet) up to the nearest
+// ancestor with a real OutputBranch, falling back to RootBase at the chain
+// root. This is decision (a): an empty-diff or dropped predecessor must
+// re-parent its dependent onto the nearest real ancestor rather than
+// hard-failing the run — the opposite of BaseBranch, which stays strict
+// (fail-closed) for the publisher's PR-base validation.
+//
+// It still fails closed on graph-integrity corruption (a named predecessor
+// absent from the stack → ErrMissingPredecessor) and on a lineage cycle
+// (ErrCycle) so corruption is observable rather than silently masquerading as
+// "root on RootBase".
+func BaseBranchSliding(stack Stack, node Node, byTask map[string]Node) (string, error) {
+	cur := node
+	// Bound the walk by the node count: a well-formed chain terminates at a
+	// root, but a corrupt graph (cycle) must not spin forever.
+	for hops := 0; hops <= len(byTask); hops++ {
+		if cur.BaseTaskID == "" {
+			return stack.RootBase, nil
+		}
+		base, ok := byTask[cur.BaseTaskID]
+		if !ok {
+			return "", ErrMissingPredecessor
+		}
+		if base.OutputBranch != "" && base.State != NodeStateEmpty && base.State != NodeStateClosed {
+			return base.OutputBranch, nil
+		}
+		cur = base // slide past an empty/closed/branchless ancestor
+	}
+	return "", ErrCycle
+}
+
 // NextToMergeUnits returns the set of task IDs that are next to land — the
 // bottom-most not-yet-merged unit of each chain. A unit qualifies when it is not
 // merged/closed and is either a root or sits directly on a merged predecessor.

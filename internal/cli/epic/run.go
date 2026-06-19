@@ -149,6 +149,21 @@ func runEpicRun(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 	fmt.Printf("[epic-run] queued workflow %s run %s for epic %s\n", workflowName, run.RunID, runParent)
+
+	// Stacked mode: project the epic's blocks DAG into the per-user stackstore
+	// so the worktree resolver cuts each task's worktree from its predecessor's
+	// branch. Fail-open — the lineage path is inert until populated, so a
+	// projection error only degrades to pre-stacking (default-branch) behavior.
+	if runStackedPRs && !runDryRun {
+		if proj, perr := projectEpicStackForRun(ctx, handle, ws, runParent, run.RunID, runRepoURL, runBaseBranch); perr != nil {
+			fmt.Printf("[epic-run] WARN: stack projection skipped (tasks will base on the repo default branch): %v\n", perr)
+		} else {
+			fmt.Printf("[epic-run] projected stack %s on %s@%s: %d task(s) — %d chained, %d root(s) (%d fan-in, %d fan-out breaks); %d new\n",
+				proj.StackID, proj.RepoName, proj.RootBase, proj.Stats.Tasks, proj.Stats.LinearLinks, proj.Stats.Roots,
+				proj.Stats.FanInBreaks, proj.Stats.FanOutBreaks, len(proj.Created))
+		}
+	}
+
 	if runDetach && !runDryRun {
 		return nil
 	}

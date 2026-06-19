@@ -582,7 +582,7 @@ func (m *Module) execTask(ctx context.Context, ws string, id driverIdentity, bod
 		WorktreePath:     m.worktreePath,
 		APIBaseURL:       m.apiBaseURL,
 		LocalSettingsDir: m.localSettingsDir,
-		WorktreeResolver: driverpkg.LocalTaskWorktreeResolver{Store: m.store},
+		WorktreeResolver: driverpkg.LocalTaskWorktreeResolver{Store: m.store, Lineage: driverpkg.DefaultStackLineageLookup()},
 	}
 	if params.EnqueueOnly {
 		outcome, err := driverpkg.EnqueueTaskRunWithResult(ctx, m.store, opts, executor)
