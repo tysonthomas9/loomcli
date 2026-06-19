@@ -129,6 +129,25 @@ func TestComputePlan_MergedMiddleSlide(t *testing.T) {
 	assert.Equal(t, br("T1"), got["T3"].DesiredBase, "T3 slides past the merged T2 onto T1")
 }
 
+// An empty unit that still has an open PR carries it so the reconciler closes it
+// (no stale, no-diff PR left behind).
+func TestComputePlan_EmptyWithOpenPRCloses(t *testing.T) {
+	stack := sl.Stack{ID: sid, RootBase: "main"}
+	ordered := []sl.Node{node("T1", "")}
+	emptySet := map[string]bool{br("T1"): true}
+
+	got := byKind(computePlan(stack, ordered, map[string]PR{br("T1"): openPR(1, "T1", "main")}, emptySet))
+	assert.Equal(t, actEmpty, got["T1"].Kind)
+	if assert.NotNil(t, got["T1"].PR, "empty unit with an existing PR carries it for closing") {
+		assert.Equal(t, 1, got["T1"].PR.Number)
+	}
+
+	// Empty unit with no PR → nothing to close.
+	got = byKind(computePlan(stack, ordered, map[string]PR{}, emptySet))
+	assert.Equal(t, actEmpty, got["T1"].Kind)
+	assert.Nil(t, got["T1"].PR)
+}
+
 // A forest of parallel chains reconciles each chain independently against its own root.
 func TestComputePlan_Forest(t *testing.T) {
 	stack := sl.Stack{ID: sid, RootBase: "main"}

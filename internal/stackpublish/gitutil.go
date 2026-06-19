@@ -56,6 +56,28 @@ func commitsBetween(ctx context.Context, dir, base, head string) (int, error) {
 	return n, nil
 }
 
+// fetchRef updates a single remote ref (e.g. the live RootBase) so subsequent
+// ancestry checks reflect post-merge reality.
+func fetchRef(ctx context.Context, dir, remote, ref string) error {
+	_, err := runGit(ctx, dir, nil, "fetch", remote, ref)
+	return err
+}
+
+// isAncestor reports whether `ancestor` is an ancestor of `descendant`. A clean
+// exit-1 means "no" (not an error); any other failure (e.g. an unresolvable ref)
+// is returned so callers can fail closed.
+func isAncestor(ctx context.Context, dir, ancestor, descendant string) (bool, error) {
+	cmd := exec.CommandContext(ctx, "git", "-C", dir, "merge-base", "--is-ancestor", ancestor, descendant) //nolint:gosec // fixed executable; controlled args
+	err := cmd.Run()
+	if err == nil {
+		return true, nil
+	}
+	if ee, ok := err.(*exec.ExitError); ok && ee.ExitCode() == 1 {
+		return false, nil
+	}
+	return false, fmt.Errorf("git merge-base --is-ancestor %s %s: %w", ancestor, descendant, err)
+}
+
 // headSHA returns the commit SHA a local ref points at.
 func headSHA(ctx context.Context, dir, ref string) (string, error) {
 	out, err := runGit(ctx, dir, nil, "rev-parse", ref)

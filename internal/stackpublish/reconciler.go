@@ -86,7 +86,11 @@ func computePlan(stack sl.Stack, ordered []sl.Node, prsByHead map[string]PR, emp
 		case has && pr.Merged:
 			actions = append(actions, action{Kind: actMerged, TaskID: n.TaskID, Branch: n.OutputBranch, PR: prPtr(pr)})
 		case empty[n.OutputBranch]:
-			actions = append(actions, action{Kind: actEmpty, TaskID: n.TaskID, Branch: n.OutputBranch})
+			a := action{Kind: actEmpty, TaskID: n.TaskID, Branch: n.OutputBranch}
+			if has {
+				a.PR = prPtr(pr) // a unit that went empty but still has a PR → close it
+			}
+			actions = append(actions, a)
 		default:
 			base := effectiveBase(n)
 			switch {
@@ -204,6 +208,40 @@ func (r *Reconciler) Publish(ctx context.Context, ws string, id sl.StackID, repo
 		}
 	}
 
+	// Merged-slide safety pre-flight: a descendant sliding past a merged
+	// predecessor is only safe if the predecessor's commits are in the updated
+	// RootBase (a merge-commit merge). For a squash/rebase merge they get new
+	// SHAs, so the descendant branch still carries the old ones and its PR would
+	// show duplicated changes — fail closed and ask for a re-materialize/rebase.
+	if !opts.DryRun {
+		var fetched bool
+		for _, n := range ordered {
+			if n.BaseTaskID == "" {
+				continue
+			}
+			pred, ok := byTask[n.BaseTaskID]
+			if !ok {
+				continue
+			}
+			if predPR, has := prsByHead[pred.OutputBranch]; !has || !predPR.Merged {
+				continue
+			}
+			if !fetched {
+				if err := fetchRef(ctx, repoPath, "origin", stack.RootBase); err != nil {
+					return nil, fmt.Errorf("merged-slide preflight: fetch %s: %w", stack.RootBase, err)
+				}
+				fetched = true
+			}
+			safe, aerr := isAncestor(ctx, repoPath, pred.OutputBranch, "origin/"+stack.RootBase)
+			if aerr != nil {
+				return nil, fmt.Errorf("merged-slide preflight: cannot verify %s after predecessor %s merged: %w; re-materialize %s onto %s before publishing", n.TaskID, pred.TaskID, aerr, n.TaskID, stack.RootBase)
+			}
+			if !safe {
+				return nil, fmt.Errorf("predecessor %s was squash/rebase-merged; %s still carries its commits and must be rebased onto %s before publishing (re-materialize %s)", pred.TaskID, n.TaskID, stack.RootBase, n.TaskID)
+			}
+		}
+	}
+
 	report := &Report{DryRun: opts.DryRun, PRURLs: map[string]string{}}
 
 	if opts.DryRun {
@@ -222,11 +260,12 @@ func (r *Reconciler) Publish(ctx context.Context, ws string, id sl.StackID, repo
 		}
 	}
 
-	// Phase 2 — push all live (non-merged, non-empty) unit branches, atomically.
-	var toPush []string
+	// Phase 2 — push all live (non-merged, non-empty) unit branches, atomically,
+	// each leased against the SHA we last pushed for it (empty for new branches).
+	var toPush []BranchPush
 	for _, a := range plan {
 		if a.Kind == actCreate || a.Kind == actReparent || a.Kind == actSkip {
-			toPush = append(toPush, a.Branch)
+			toPush = append(toPush, BranchPush{Branch: a.Branch, ExpectedSHA: byTask[a.TaskID].OutputSHA})
 		}
 	}
 	if err := r.Forge.PushBranches(ctx, repoPath, toPush); err != nil {
@@ -276,6 +315,14 @@ func (r *Reconciler) Publish(ctx context.Context, ws string, id sl.StackID, repo
 			})
 			report.Merged = append(report.Merged, a.TaskID)
 		case actEmpty:
+			// A unit that produced no changes gets no PR; if it had one (content
+			// reverted), close it so no stale, empty PR lingers.
+			if a.PR != nil && a.PR.State == "open" && !a.PR.Merged {
+				if err := r.Forge.ClosePR(ctx, owner, repo, a.PR.Number, "Closing: this unit produced no changes."); err != nil {
+					return report, fmt.Errorf("phase4 close empty #%d: %w", a.PR.Number, err)
+				}
+				report.Closed = append(report.Closed, a.Branch)
+			}
 			_ = r.Store.UpdateNode(ctx, ws, id, a.TaskID, func(n *sl.Node) error {
 				n.State = sl.NodeStateEmpty
 				return nil

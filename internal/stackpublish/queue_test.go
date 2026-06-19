@@ -64,7 +64,7 @@ func (f *fakeForge) ClosePR(context.Context, string, string, int, string) error 
 	f.mutated = true
 	return nil
 }
-func (f *fakeForge) PushBranches(context.Context, string, []string) error {
+func (f *fakeForge) PushBranches(context.Context, string, []BranchPush) error {
 	f.mutated = true
 	return nil
 }

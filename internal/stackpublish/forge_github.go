@@ -344,17 +344,24 @@ func mergeableToStatus(m string) string {
 // credHelper supplies the token to git over stdin-free env, never argv.
 const credHelper = `!f() { echo username=x-access-token; echo "password=$LOOM_PR_GIT_PASSWORD"; }; f`
 
-func (g *GitHubForge) PushBranches(ctx context.Context, repoPath string, branches []string) error {
-	if len(branches) == 0 {
+func (g *GitHubForge) PushBranches(ctx context.Context, repoPath string, pushes []BranchPush) error {
+	if len(pushes) == 0 {
 		return nil
 	}
 	args := []string{
 		"-c", "credential.helper=",
 		"-c", "credential.helper=" + credHelper,
-		"push", "--force-with-lease", "--atomic", "origin",
+		"push", "--atomic", "origin",
 	}
-	for _, b := range branches {
-		args = append(args, "refs/heads/"+b+":refs/heads/"+b)
+	for _, p := range pushes {
+		args = append(args, "refs/heads/"+p.Branch+":refs/heads/"+p.Branch)
+	}
+	for _, p := range pushes {
+		if p.ExpectedSHA != "" {
+			// Explicit lease: assert the remote ref is exactly where we last left
+			// it, robust to stale remote-tracking state (unlike a bare lease).
+			args = append(args, "--force-with-lease=refs/heads/"+p.Branch+":"+p.ExpectedSHA)
+		}
 	}
 	env := append(envWith(), "LOOM_PR_GIT_PASSWORD="+g.token, "GIT_TERMINAL_PROMPT=0")
 	_, err := runGit(ctx, repoPath, env, args...)

@@ -275,7 +275,11 @@ Ships behind the existing feature branch; no fleet-db changes this iteration.
    reopened/retargeted), and its descendants **auto-slide** to `RootBase` on the
    same run. Consequence: a human's manual PR-base edit is overwritten on the next
    publish; this is accepted. (No `loom stack ship` gate — auto-slide is built into
-   the reconciler.)
+   the reconciler.) **Auto-slide is only safe under a merge-commit merge** (the
+   predecessor's commits stay reachable from `RootBase`). A pre-flight fetches
+   `RootBase` and checks `merge-base --is-ancestor`; for a **squash/rebase merge**
+   (new SHAs) it **fails closed** with an actionable message — the descendant must
+   be rebased/re-materialized onto `RootBase` first (auto-rebase is a follow-up).
 2. **Branch GC: keep branches; explicit `loom stack gc`.** Phase 4 closes PRs for
    removed units but never deletes their branches. Non-destructive; preserves
    cherry-pick and future PR-reopen. A separate `loom stack gc <stack>` does cleanup.
@@ -316,7 +320,8 @@ delta from forge truth (Phase 0), and all four phases are individually idempoten
 | PR in merge queue | **proactive GraphQL pre-flight** (`Forge.QueuedPRNumbers` via `mergeQueueEntry`): if any PR a reorder would reparent is queued, abort BEFORE any mutation with an actionable error (its base is immutable). Dry-run skips the check. |
 | Pre-existing PR for a branch | adopt by `headRefName` in Phase 0; never duplicate |
 | `GET /pulls` pagination | filter `head=owner:loom/stack/<id>/` + follow `Link` |
-| Empty diff / no-op task | tree-SHA == predecessor → skip PR, mark `empty` |
+| Empty diff / no-op task | no commits over base → mark `empty`, no PR; if one already existed (content reverted), close it so no stale no-diff PR lingers |
+| Force-push | explicit `--force-with-lease=<ref>:<sha>` from the node's last-pushed `OutputSHA` (robust to stale remote-tracking; new branches push without a lease) |
 | Patch conflict (assembly) | fail closed per-unit, mark `conflicted`; siblings unaffected |
 | Predecessor branch missing | Phase 0.5 `git ls-remote` check; fail closed before any mutation |
 | `force-with-lease` rejection | remote ahead of desired → skip; diverged → abort |

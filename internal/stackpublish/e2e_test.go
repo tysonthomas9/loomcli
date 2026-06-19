@@ -290,4 +290,57 @@ func TestE2EStackPublisher(t *testing.T) {
 	assert.Equal(t, br4("A1"), prs[br4("A2")].Base)
 	assert.Equal(t, "main", prs[br4("B1")].Base, "second chain roots on main independently")
 	assert.Equal(t, br4("B1"), prs[br4("B2")].Base)
+
+	// --- Scenario 7: a published unit that goes empty has its PR closed --------
+	id5 := sl.StackID(fmt.Sprintf("manual:e2e-empty-%d", time.Now().UnixNano()))
+	require.NoError(t, store.EnsureStack(ctx, sl.Stack{ID: id5, WorkspaceKey: e2eWS, RepoName: repo, RootBase: "main"}))
+	br5 := func(task string) string { return sl.OutputBranchName(id5, task) }
+	t.Cleanup(func() {
+		for head, pr := range prsByHead(t, forge, owner, repo, id5) {
+			if pr.State == "open" {
+				_ = forge.ClosePR(ctx, owner, repo, pr.Number, "e2e cleanup")
+			}
+			_ = exec.Command("git", "-C", repoPath, "push", "origin", "--delete", head).Run()
+		}
+	})
+	_, err = store.AddNode(ctx, e2eWS, id5, "E1", "", "")
+	require.NoError(t, err)
+	materialize(t, repoPath, id5, []string{"E1"}, "main")
+	_, err = rec.Publish(ctx, e2eWS, id5, repoPath, stackpublish.Options{})
+	require.NoError(t, err)
+	require.Equal(t, "open", prsByHead(t, forge, owner, repo, id5)[br5("E1")].State)
+	// Make E1 empty: reset its branch to the base with no commits ahead.
+	gitT(t, repoPath, "checkout", "-B", br5("E1"), "main")
+	gitT(t, repoPath, "checkout", "main")
+	_, err = rec.Publish(ctx, e2eWS, id5, repoPath, stackpublish.Options{})
+	require.NoError(t, err)
+	assert.Equal(t, "closed", prsByHead(t, forge, owner, repo, id5)[br5("E1")].State, "empty unit's PR is closed")
+
+	// --- Scenario 8: squash-merged predecessor → slide guard fails closed ------
+	id6 := sl.StackID(fmt.Sprintf("manual:e2e-squash-%d", time.Now().UnixNano()))
+	require.NoError(t, store.EnsureStack(ctx, sl.Stack{ID: id6, WorkspaceKey: e2eWS, RepoName: repo, RootBase: "main"}))
+	br6 := func(task string) string { return sl.OutputBranchName(id6, task) }
+	t.Cleanup(func() {
+		for head, pr := range prsByHead(t, forge, owner, repo, id6) {
+			if pr.State == "open" {
+				_ = forge.ClosePR(ctx, owner, repo, pr.Number, "e2e cleanup")
+			}
+			_ = exec.Command("git", "-C", repoPath, "push", "origin", "--delete", head).Run()
+		}
+	})
+	for _, e := range []struct{ id, base string }{{"S1", ""}, {"S2", "S1"}} {
+		_, ae := store.AddNode(ctx, e2eWS, id6, e.id, e.base, "")
+		require.NoError(t, ae)
+	}
+	materialize(t, repoPath, id6, []string{"S1", "S2"}, "main")
+	_, err = rec.Publish(ctx, e2eWS, id6, repoPath, stackpublish.Options{})
+	require.NoError(t, err)
+	s1num := prsByHead(t, forge, owner, repo, id6)[br6("S1")].Number
+	require.NotZero(t, s1num)
+	sqout, sqerr := exec.Command("gh", "pr", "merge", fmt.Sprintf("%d", s1num),
+		"--repo", slug, "--squash", "--delete-branch=false").CombinedOutput()
+	require.NoErrorf(t, sqerr, "gh pr merge --squash: %s", sqout)
+	_, err = rec.Publish(ctx, e2eWS, id6, repoPath, stackpublish.Options{})
+	require.Error(t, err, "publish must fail closed after a predecessor is squash-merged")
+	assert.Contains(t, err.Error(), "rebased onto", "error gives actionable rebase guidance")
 }

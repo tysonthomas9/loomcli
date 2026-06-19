@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"strings"
 
@@ -68,17 +69,32 @@ func resolveGitHubToken(ctx context.Context) string {
 	return ""
 }
 
+// resolveRepoPath resolves the local checkout for a stack's repo and fails closed
+// with a clear, actionable error rather than letting a stale path surface later
+// as a generic git failure (per the proposal's "validate the registered local
+// repo path" / fail-closed stale-path requirement).
 func resolveRepoPath(ws, repoName, override string) (string, error) {
-	if strings.TrimSpace(override) != "" {
-		return override, nil
+	p := strings.TrimSpace(override)
+	if p == "" {
+		sc, err := bootstrap.LoadStateCache()
+		if err != nil {
+			return "", err
+		}
+		local, ok := sc.Workspaces[ws]
+		if !ok {
+			return "", fmt.Errorf("workspace %q has no local state on this machine; run `loom workspace use %s` or pass --repo-path", ws, ws)
+		}
+		p = strings.TrimSpace(localworkspace.RepoPath(local, repoName))
+		if p == "" {
+			return "", fmt.Errorf("repo %q is not checked out in workspace %q; pass --repo-path", repoName, ws)
+		}
 	}
-	sc, err := bootstrap.LoadStateCache()
-	if err != nil {
-		return "", err
+	info, err := os.Stat(p)
+	if err != nil || !info.IsDir() {
+		return "", fmt.Errorf("repo path %q is missing or not a directory (stale local state?)", p)
 	}
-	p := localworkspace.RepoPath(sc.Workspaces[ws], repoName)
-	if strings.TrimSpace(p) == "" {
-		return "", fmt.Errorf("repo %q is not checked out on this machine; pass --repo-path", repoName)
+	if _, err := os.Stat(filepath.Join(p, ".git")); err != nil {
+		return "", fmt.Errorf("repo path %q is not a git checkout (stale local state?)", p)
 	}
 	return p, nil
 }
