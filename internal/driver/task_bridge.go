@@ -72,6 +72,12 @@ type HostBridgeTaskExecutor struct {
 	// exported to a stacked runner so it pushes the canonical branch on the
 	// predecessor base. nil = the task is not stacked (runner keeps its old path).
 	stackBinding *TaskLineage
+	// driverBundleBaseDir retains the workspace driver base (the WorktreePath as
+	// supplied before WorktreeResolver swaps it for a per-run target-repo worktree).
+	// Runner bundles are staged at registration under <base>/.loom/drivers/<version>,
+	// which the per-run git worktree does NOT contain — so taskRunnerBundleEnv must
+	// resolve the bundle against this base, not the reassigned worktree.
+	driverBundleBaseDir string
 }
 
 type bridgeTaskRunnerResult struct {
@@ -790,7 +796,7 @@ func (e HostBridgeTaskExecutor) resolveTaskRunnerBackend(req TaskExecRequest) st
 }
 
 func (e HostBridgeTaskExecutor) taskRunnerBundleEnv(req TaskExecRequest) []string {
-	if e.Store == nil || strings.TrimSpace(e.WorktreePath) == "" || strings.TrimSpace(req.RunnerVersionID) == "" {
+	if e.Store == nil || strings.TrimSpace(req.RunnerVersionID) == "" {
 		return nil
 	}
 	ctx := context.Background()
@@ -798,23 +804,35 @@ func (e HostBridgeTaskExecutor) taskRunnerBundleEnv(req TaskExecRequest) []strin
 	if err != nil || version.BundleRef == "" {
 		return nil
 	}
-	bundleRoot, err := safeBundleRoot(e.WorktreePath, version.BundleRef)
-	if err != nil {
-		return nil
+	// The bundle is staged at registration under <driver-base>/.loom/drivers/<version>. Try the
+	// current WorktreePath first (covers callers that stage the bundle into the worktree, incl. the
+	// productionize_runner tests), then fall back to the retained driver base — necessary once
+	// WorktreeResolver has swapped WorktreePath for a per-run target-repo worktree (which lacks the
+	// bundle). Without this fall-back every bundled local-task-runner fails with
+	// task_runner_invoker_failed: "flue-workflow runner requires LOOM_TASK_RUNNER_SERVER_PATH".
+	for _, base := range []string{strings.TrimSpace(e.WorktreePath), strings.TrimSpace(e.driverBundleBaseDir)} {
+		if base == "" {
+			continue
+		}
+		bundleRoot, err := safeBundleRoot(base, version.BundleRef)
+		if err != nil {
+			continue
+		}
+		manifest, serverPath, err := verifyBundleManifest(bundleRoot, version.BundleDigest)
+		if err != nil {
+			continue
+		}
+		encoded, err := json.Marshal(manifest)
+		if err != nil {
+			continue
+		}
+		return []string{
+			"LOOM_TASK_RUNNER_BUNDLE_ROOT=" + bundleRoot,
+			"LOOM_TASK_RUNNER_SERVER_PATH=" + serverPath,
+			"LOOM_TASK_RUNNER_MANIFEST_JSON=" + string(encoded),
+		}
 	}
-	manifest, serverPath, err := verifyBundleManifest(bundleRoot, version.BundleDigest)
-	if err != nil {
-		return nil
-	}
-	encoded, err := json.Marshal(manifest)
-	if err != nil {
-		return nil
-	}
-	return []string{
-		"LOOM_TASK_RUNNER_BUNDLE_ROOT=" + bundleRoot,
-		"LOOM_TASK_RUNNER_SERVER_PATH=" + serverPath,
-		"LOOM_TASK_RUNNER_MANIFEST_JSON=" + string(encoded),
-	}
+	return nil
 }
 
 func taskRunPlacementJSON(placement domain.TaskRunPlacement) string {

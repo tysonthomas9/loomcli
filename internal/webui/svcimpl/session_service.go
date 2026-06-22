@@ -369,13 +369,19 @@ func (s *sessionServiceImpl) GetSession(ctx context.Context, wsID, taskID, sessi
 	}
 	store, err := s.findStoreForSession(ctx, wsID, sessionID)
 	if err != nil {
+		// Control-plane (flue task-run) sessions live in the agent-session store, not a file
+		// store. ListTaskSessions and GetSessionTranscript already resolve them; GetSession must
+		// too, else the single-session GET 404s on a session the list endpoint returned.
+		if serviceErrorKind(err, service.KindNotFound) {
+			return s.controlPlaneSession(ctx, wsID, taskID, sessionID)
+		}
 		return nil, err
 	}
 
 	meta, err := store.LoadMetadata(sessionID)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return nil, service.ErrNotFound("session not found")
+			return s.controlPlaneSession(ctx, wsID, taskID, sessionID)
 		}
 		logger.Error("failed to load session", "session_id", sessionID, "err", err)
 		return nil, service.ErrInternal("failed to load session", err)
@@ -389,6 +395,30 @@ func (s *sessionServiceImpl) GetSession(ctx context.Context, wsID, taskID, sessi
 	return &service.SessionDetailData{
 		SessionMetadata: *meta,
 		IsActive:        meta.Status == sessions.StatusRunning,
+	}, nil
+}
+
+// controlPlaneSession resolves a session detail from the agent-session (control-plane) store,
+// the fallback for flue task-run sessions that have no file-store metadata. Mirrors
+// controlPlaneSessionTranscript's record lookup + task-ownership check, and reuses the same
+// AgentSession->SessionRecord mapping ListTaskSessions uses, so list/get/transcript agree.
+func (s *sessionServiceImpl) controlPlaneSession(ctx context.Context, wsID, taskID, sessionID string) (*service.SessionDetailData, error) {
+	if s.store == nil {
+		return nil, service.ErrNotFound("session not found")
+	}
+	rec, err := s.store.AgentSessions().Get(ctx, wsID, sessionID)
+	if err != nil {
+		if errors.Is(err, domain.ErrNotFound) {
+			return nil, service.ErrNotFound("session not found")
+		}
+		return nil, service.ErrInternal("failed to load session", err)
+	}
+	if rec.TaskID != taskID && (rec.Metadata == nil || rec.Metadata["task_id"] != taskID) {
+		return nil, service.ErrNotFound("session not found")
+	}
+	return &service.SessionDetailData{
+		SessionMetadata: sessions.SessionMetadata{SessionRecord: sessionRecordFromAgentSession(rec)},
+		IsActive:        isActiveAgentSession(rec.Status),
 	}, nil
 }
 

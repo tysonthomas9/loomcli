@@ -339790,6 +339790,8 @@ function stringValue$3(value) {
 //#endregion
 //#region workflows/daytona-task-runner.ts
 var daytona_task_runner_exports = /* @__PURE__ */ __exportAll({
+	cloneCommand: () => cloneCommand,
+	deliveryPlan: () => deliveryPlan,
 	run: () => run$3,
 	sandboxLeakProbeCommand: () => sandboxLeakProbeCommand
 });
@@ -340222,24 +340224,36 @@ function readRuntimeCredentialFile(provider) {
 }
 function deliveryPlan(request, task, taskRunId) {
 	const mode = taskMode(request);
-	const openPullRequest = mode === "slack-pr-chain" || booleanValue$2(inputValue$1(request, "openPullRequest"));
+	const lineage = lineageCarrier(request);
+	const openPullRequest = !!lineage || mode === "slack-pr-chain" || booleanValue$2(inputValue$1(request, "openPullRequest"));
 	const configuredBase = stringValue$2(inputValue$1(request, "baseBranch") || inputValue$1(request, "targetBranch"));
 	const rootBaseBranch = openPullRequest ? configuredBase || "main" : configuredBase;
 	const taskId = stringValue$2(request.task_id || request.taskId || task && task.id || "task");
 	const driverRunId = stringValue$2(request.driver_run_id || request.driverRunId || inputValue$1(request, "driverRunId") || taskRunId);
-	const branch = taskBranchName(driverRunId, taskId);
-	const stacked = openPullRequest && booleanValue$2(defaultValue(inputValue$1(request, "stackedPullRequests"), mode === "slack-pr-chain" ? "1" : "0"));
+	const stacked = lineage ? true : openPullRequest && booleanValue$2(defaultValue(inputValue$1(request, "stackedPullRequests"), mode === "slack-pr-chain" ? "1" : "0"));
 	const dependencyIds = blockingDependencyIds(task);
 	const baseTaskId = stringValue$2(inputValue$1(request, "prBaseTaskId") || inputValue$1(request, "baseTaskId")) || (dependencyIds.length === 1 ? dependencyIds[0] : "") || (mode === "slack-pr-chain" ? previousSequentialTaskId(taskId) : "");
 	return {
 		mode,
 		openPullRequest,
-		branch,
-		baseBranch: stacked && baseTaskId ? taskBranchName(driverRunId, baseTaskId) : rootBaseBranch,
+		branch: lineage && lineage.outputBranch ? lineage.outputBranch : taskBranchName(driverRunId, taskId),
+		baseBranch: lineage && lineage.baseRef ? lineage.baseRef : stacked && baseTaskId ? taskBranchName(driverRunId, baseTaskId) : rootBaseBranch,
 		rootBaseBranch,
 		stacked,
 		dependencyIds,
-		baseTaskId
+		baseTaskId,
+		stackId: lineage ? stringValue$2(lineage.stackId) : ""
+	};
+}
+function lineageCarrier(request) {
+	const raw = inputValue$1(request, "lineage");
+	if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+	const outputBranch = stringValue$2(raw.outputBranch);
+	if (!outputBranch) return null;
+	return {
+		stackId: stringValue$2(raw.stackId),
+		baseRef: stringValue$2(raw.baseRef),
+		outputBranch
 	};
 }
 function taskMode(request) {
@@ -340479,7 +340493,7 @@ function parseGitHubRepo(repoUrl) {
 	};
 }
 function cloneCommand(repoUrl, repoDir, branch, githubToken) {
-	return ["rm -rf " + shellQuote(repoDir), gitWithGitHubAuth(githubToken) + " clone --depth 1" + (branch ? " --branch " + shellQuote(branch) : "") + " " + shellQuote(repoUrl) + " " + shellQuote(repoDir)].join(" && ");
+	return ["rm -rf " + shellQuote(repoDir), gitWithGitHubAuth(githubToken) + " clone" + (branch ? " --branch " + shellQuote(branch) : "") + " " + shellQuote(repoUrl) + " " + shellQuote(repoDir)].join(" && ");
 }
 function gitWithGitHubAuth(token) {
 	if (!token) return "git";
@@ -341773,9 +341787,14 @@ async function run$1(ctx = {}) {
 		logs
 	});
 	const headBefore = await gitHead(worktree);
-	const isolated = await setupIsolatedWorktree(worktree, taskRunId, logs);
+	const stacked = booleanValue(process.env.LOOM_TASK_RUN_STACKED);
+	const stackBranch = stringValue(process.env.LOOM_TASK_RUN_OUTPUT_BRANCH);
+	const stackBaseRef = stringValue(process.env.LOOM_TASK_RUN_BASE_REF);
+	const stackId = stringValue(process.env.LOOM_TASK_RUN_STACK_ID);
+	const isolated = stacked ? null : await setupIsolatedWorktree(worktree, taskRunId, logs);
 	const execWorktree = isolated ? isolated.path : worktree;
-	const baseRef = isolated ? isolated.base : "";
+	const baseRef = stacked ? stackBaseRef : isolated ? isolated.base : "";
+	if (stacked) logs.push("stacked mode: running in place at " + worktree + " (base " + (stackBaseRef || "?") + "), pushing " + (stackBranch || "?"));
 	const task = await loadTask(request, logs);
 	const prompt = buildPrompt(request, task, execWorktree);
 	const args = backendArgs(backend, execWorktree, prompt);
@@ -341786,6 +341805,7 @@ async function run$1(ctx = {}) {
 	let stderr = "";
 	let patchInfo;
 	let prInfo = null;
+	let stackInfo = null;
 	let prFailure = null;
 	try {
 		let result;
@@ -341811,7 +341831,43 @@ async function run$1(ctx = {}) {
 		if (stdout.trim()) logs.push(textTail(stdout, 4e3));
 		if (stderr.trim()) logs.push("stderr:\n" + textTail(stderr, 2e3));
 		patchInfo = await capturePatch(execWorktree);
-		if (openPR && exitCode === 0) if (!isolated) prFailure = {
+		if (stacked && exitCode === 0) if (patchInfo.filesChanged === 0) logs.push("stacked: the agent produced no changes; no branch pushed (empty unit)");
+		else {
+			const token = await resolveGitHubToken();
+			const slug = token ? await resolveRepoSlug(worktree, request) : null;
+			if (!token) prFailure = {
+				class: "github_credentials_missing",
+				message: "stackedPullRequests requires a GitHub credential (GITHUB_TOKEN/GH_TOKEN, or a local `gh auth login`)"
+			};
+			else if (!slug) prFailure = {
+				class: "github_repo_unresolved",
+				message: "stackedPullRequests requires a GitHub repo (githubRepo/repoUrl input or an origin remote)"
+			};
+			else if (!stackBranch) prFailure = {
+				class: "stack_branch_missing",
+				message: "stacked mode requires LOOM_TASK_RUN_OUTPUT_BRANCH (the canonical branch to push)"
+			};
+			else {
+				const title = stringValue(task && (task.title || task.name) || "Loom task " + (taskId || taskRunId));
+				try {
+					stackInfo = await deliverStackBranch({
+						worktreePath: execWorktree,
+						token,
+						owner: slug.owner,
+						repo: slug.repo,
+						branch: stackBranch,
+						title
+					});
+					logs.push("pushed stack branch " + stackInfo.branch + " @ " + stackInfo.head.slice(0, 12));
+				} catch (error) {
+					prFailure = {
+						class: "stack_push_failed",
+						message: "failed to push stack branch: " + errorMessage(error)
+					};
+				}
+			}
+		}
+		else if (openPR && exitCode === 0) if (!isolated) prFailure = {
 			class: "github_repo_unresolved",
 			message: "openPullRequest requires a git worktree (no isolated worktree was created)"
 		};
@@ -341887,12 +341943,17 @@ async function run$1(ctx = {}) {
 		cli_exit_code: String(exitCode)
 	});
 	if (streamFailure) metadata.stream_error = streamFailure;
-	if (prInfo) {
+	if (stackInfo) {
+		metadata.delivery = "stack_branch";
+		metadata.github_branch = stackInfo.branch;
+		metadata.github_head_sha = stackInfo.head;
+		if (stackId) metadata.stack_id = stackId;
+	} else if (prInfo) {
 		metadata.delivery = "pull_request";
 		metadata.github_pr_url = prInfo.url;
 		metadata.github_pr_number = String(prInfo.number);
 		metadata.github_branch = prInfo.branch;
-	} else if (openPR) metadata.delivery = "pull_request_skipped_no_changes";
+	} else if (openPR || stacked) metadata.delivery = "pull_request_skipped_no_changes";
 	else metadata.delivery = "patch_back";
 	if (exitCode !== 0 || streamFailure) return {
 		status: "failed",
@@ -341918,7 +341979,7 @@ async function run$1(ctx = {}) {
 		transcript_entries: transcriptEntries,
 		runtimeMetadata: metadata
 	};
-	if (prInfo) return completed;
+	if (prInfo || stackInfo || stacked) return completed;
 	completed.patch = patchInfo.patch;
 	completed.base_ref = baseRef;
 	completed.patch_base_ref = baseRef;
@@ -342021,7 +342082,10 @@ async function execBackend(binary, args, options) {
 	return await new Promise((resolve, reject) => {
 		const child = execFile(binary, args, {
 			cwd: options.cwd,
-			env: options.env || process.env,
+			env: {
+				...options.env || process.env,
+				IS_SANDBOX: "1"
+			},
 			maxBuffer: 64 * 1024 * 1024,
 			timeout: numberValue(process.env.LOOM_LOCAL_TASK_TIMEOUT_MS, 1800 * 1e3)
 		}, (error, stdout, stderr) => {
@@ -342250,6 +342314,44 @@ async function deliverPullRequest({ isolatedPath, token, owner, repo, base, bran
 		};
 	}
 	throw new Error("PR create failed (" + created.status + "): " + textTail(created.text, 400));
+}
+async function deliverStackBranch({ worktreePath, token, owner, repo, branch, title }) {
+	const git = async (...args) => {
+		const r = await execBackend("git", [
+			"-C",
+			worktreePath,
+			...args
+		], { cwd: worktreePath });
+		if (r.code !== 0) throw new Error("git " + args[0] + " failed: " + textTail(r.stderr || r.stdout, 400));
+		return r;
+	};
+	await git("add", "-A");
+	await git("-c", "user.email=loom@example.test", "-c", "user.name=Loom", "commit", "-m", title);
+	const head = stringValue((await git("rev-parse", "HEAD")).stdout).trim();
+	const pushRes = await execBackend("git", [
+		"-C",
+		worktreePath,
+		"-c",
+		"credential.helper=",
+		"-c",
+		"credential.helper=!f() { echo username=x-access-token; echo \"password=$LOOM_PR_GIT_PASSWORD\"; }; f",
+		"push",
+		"--force",
+		"https://github.com/" + owner + "/" + repo + ".git",
+		"HEAD:refs/heads/" + branch
+	], {
+		cwd: worktreePath,
+		env: {
+			...process.env,
+			LOOM_PR_GIT_PASSWORD: token,
+			GIT_TERMINAL_PROMPT: "0"
+		}
+	});
+	if (pushRes.code !== 0) throw new Error("git push failed: " + scrubToken(textTail(pushRes.stderr || pushRes.stdout, 400), token));
+	return {
+		branch,
+		head
+	};
 }
 async function gitHead(worktree) {
 	try {

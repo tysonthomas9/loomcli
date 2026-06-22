@@ -414,7 +414,10 @@ async function execBackend(binary, args, options) {
       args,
       {
         cwd: options.cwd,
-        env: options.env || process.env,
+        // IS_SANDBOX=1: the local task runner always executes backend CLIs as root inside loom's
+        // isolated task-run container. claude-code refuses `--dangerously-skip-permissions` under
+        // root unless this sandbox signal is set; harmless for the other backends (codex/cursor/etc).
+        env: { ...(options.env || process.env), IS_SANDBOX: "1" },
         maxBuffer: 64 * 1024 * 1024,
         timeout: numberValue(process.env.LOOM_LOCAL_TASK_TIMEOUT_MS, 30 * 60 * 1000),
       },

@@ -691,8 +691,16 @@ main() {
   # works in-container). Inject it only when provided. NOTE: this places the key in
   # LOOM_DRIVER_TASK_RUNNER_CMD_JSON (visible via `podman inspect`) — acceptable for
   # a local e2e stack; a production deploy should source it from a mounted secret.
-  if [[ -n "$CURSOR_API_KEY" ]]; then
+  # Use the `:-` default so an unset key is empty (not an `unbound variable` error
+  # under `set -u`) — these credentials are optional and per-backend.
+  if [[ -n "${CURSOR_API_KEY:-}" ]]; then
     runner_env+=("CURSOR_API_KEY=${CURSOR_API_KEY}")
+  fi
+  # claude-code reads CLAUDE_CODE_OAUTH_TOKEN from its environment (a `claude setup-token`
+  # long-lived OAuth token). Inject it when provided so claude auth works without a
+  # refreshable ~/.claude/.credentials.json login token (mirrors CURSOR_API_KEY above).
+  if [[ -n "${CLAUDE_CODE_OAUTH_TOKEN:-}" ]]; then
+    runner_env+=("CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN}")
   fi
   runner_env+=(node /usr/local/bin/loom-task-runner-invoker.mjs)
 

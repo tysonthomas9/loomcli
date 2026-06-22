@@ -105,6 +105,12 @@ func (e *HostBridgeTaskExecutor) resolveLocalTaskWorktree(ctx context.Context, r
 		return TaskWorktree{}, localWorktreeResolutionFailure(err), true
 	}
 	if strings.TrimSpace(resolved.Path) != "" {
+		// Retain the driver base (the pre-swap WorktreePath) so taskRunnerBundleEnv can still find
+		// the runner bundle at <base>/.loom/drivers/<version>; the per-run worktree below is a git
+		// worktree of the target repo and does not carry the bundle.
+		if strings.TrimSpace(e.driverBundleBaseDir) == "" {
+			e.driverBundleBaseDir = e.WorktreePath
+		}
 		e.WorktreePath = resolved.Path
 	}
 	return resolved, TaskExecResult{}, false
