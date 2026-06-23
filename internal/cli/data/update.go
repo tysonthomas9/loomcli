@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -44,6 +45,9 @@ var updateCmd = &cobra.Command{
 		// validation error surfaces.
 		depsChanged := len(updateAddDeps) > 0 || len(updateRemoveDeps) > 0
 		if fieldsChanged || !depsChanged {
+			if err := enforceBlockReason(ctx, ib, args[0], params); err != nil {
+				return err
+			}
 			if err := ib.Update(ctx, args[0], params); err != nil {
 				return err
 			}
@@ -103,6 +107,36 @@ func updateParamsFromFlags(cmd *cobra.Command) (backend.UpdateParams, bool, erro
 		changed = true
 	}
 	return params, changed, nil
+}
+
+// enforceBlockReason refuses to move an issue to "blocked" without a reason, so
+// a blocked issue always carries a human-readable explanation — the board
+// surfaces that as the "blocked with notes" needs-attention state, whereas a
+// bare blocked chip gives a human no signal that (or why) it needs them.
+//
+// A reason counts if it is supplied in this call (--notes) OR already present on
+// the issue (the notes-then-status two-step flow). If the issue cannot be
+// fetched to check existing notes, the update proceeds: this is best-effort
+// guidance for the agent/human CLI path, not a hard gate that should break a
+// legitimate update on a transient read error.
+func enforceBlockReason(ctx context.Context, ib backend.IssueBackend, id string, params backend.UpdateParams) error {
+	if params.Status == nil || *params.Status != "blocked" {
+		return nil
+	}
+	if params.Notes != nil && strings.TrimSpace(*params.Notes) != "" {
+		return nil
+	}
+	cur, err := ib.Get(ctx, id)
+	if err != nil || cur == nil {
+		return nil // can't verify existing notes; don't block a legitimate update
+	}
+	if strings.TrimSpace(cur.Notes) != "" {
+		return nil
+	}
+	return fmt.Errorf(
+		"refusing to set %s to blocked without a reason: pass --notes \"BLOCKED: <why + what unblocks it>\" "+
+			"(or set notes first) so a human can see why it's blocked and what clears it — a bare blocked issue gives no signal on the board",
+		id)
 }
 
 // applyDependencyFlags adds/removes dependency edges for the update command.

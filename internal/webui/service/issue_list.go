@@ -418,6 +418,7 @@ func backendIssueDataToWithCounts(d *backend.IssueData) *types.IssueWithCounts {
 		Owner:       d.Owner,
 		Labels:      d.Labels,
 		Design:      d.Design,
+		Notes:       d.Notes,
 		CreatedAt:   d.CreatedAt,
 		UpdatedAt:   d.UpdatedAt,
 		DueAt:       d.DueAt,
@@ -435,6 +436,10 @@ func backendIssueDataToWithCounts(d *backend.IssueData) *types.IssueWithCounts {
 		DependentCount:  d.DependentCount,
 	}
 }
+
+// (note: backendIssueDataToWithCounts must carry Notes — see
+// TestBackendIssueDataToWithCounts_CarriesNotes — so the kanban board can
+// compute the "blocked with notes" needs-attention state.)
 
 // listArgsToBackendOpts converts the rpc.ListArgs the webui handler
 // composes for the daemon path into the backend.ListOpts shape. We map

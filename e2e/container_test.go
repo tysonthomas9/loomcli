@@ -180,7 +180,7 @@ func TestContainer_StubExitCode(t *testing.T) {
 
 	env := map[string]string{"STUB_CLAUDE_EXIT_CODE": "1"}
 	output, exitCode, err := dockerRun(ctx, env,
-		"claude", "-p", "--output-format", "stream-json", "--dangerously-skip-permissions")
+		"claude", "--dangerously-skip-permissions", "hello")
 	if err != nil {
 		t.Fatalf("docker run failed: %v", err)
 	}
@@ -193,7 +193,7 @@ func TestContainer_StubCustomResponse(t *testing.T) {
 
 	env := map[string]string{"STUB_CLAUDE_RESPONSE": "custom_test_response"}
 	output, exitCode, err := dockerRun(ctx, env,
-		"claude", "-p", "--output-format", "stream-json", "--dangerously-skip-permissions")
+		"claude", "--dangerously-skip-permissions", "hello")
 	if err != nil {
 		t.Fatalf("docker run failed: %v", err)
 	}

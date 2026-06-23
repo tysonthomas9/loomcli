@@ -126,6 +126,20 @@ func installWrapperRunMock(t *testing.T, fn wrapperRunFn) {
 	t.Cleanup(func() { wrapperRun = orig })
 }
 
+func installClaudeRunTurnMock(t *testing.T, fn claudeRunTurnFn) {
+	t.Helper()
+	orig := claudeRunTurn
+	claudeRunTurn = fn
+	t.Cleanup(func() { claudeRunTurn = orig })
+}
+
+func completedClaudeTurn(text string) claudeRunTurnResult {
+	res := claudeRunTurnResult{}
+	res.Turn.State = "complete"
+	res.Turn.Text = text
+	return res
+}
+
 // SetupMockClaudeInvoker installs a mock claude invoker for tests.
 type MockClaudeInvokerRecorder struct {
 	mu          sync.Mutex
