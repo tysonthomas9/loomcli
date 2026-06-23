@@ -725,6 +725,16 @@ main() {
     -v "${TASK_RUNNER}:/usr/local/bin/loom-task-runner-invoker.mjs:ro"
   )
 
+  # Lead/terminal capabilities launch `loom --backend <X> lead` INSIDE serve, which reads serve's
+  # process env (via cli.FilteredEnv's allowlist) — NOT the task-runner runner_env. Forward the
+  # harness backends' creds onto serve's env so a containerized lead can authenticate cursor and pin
+  # the opencode model. CURSOR_API_KEY is already lead-allowlisted; LOOM_OPENCODE_MODEL rides the
+  # LOOM_ prefix; CLAUDE_CODE_OAUTH_TOKEN is now lead-allowlisted and buildClaudeEnv sets IS_SANDBOX,
+  # so a containerized claude lead authenticates from the setup-token.
+  [[ -n "${CURSOR_API_KEY:-}" ]] && podman_args+=(-e "CURSOR_API_KEY=${CURSOR_API_KEY}")
+  [[ -n "${LOOM_OPENCODE_MODEL:-}" ]] && podman_args+=(-e "LOOM_OPENCODE_MODEL=${LOOM_OPENCODE_MODEL}")
+  [[ -n "${CLAUDE_CODE_OAUTH_TOKEN:-}" ]] && podman_args+=(-e "CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN}")
+
   # Standalone fleet-db: put serve (and the inherited `loom` execs) into CLOUD mode against the
   # external fleet-db, and join the harness network so the in-container client can resolve it by name.
   if truthy "$STANDALONE_FLEET_DB"; then

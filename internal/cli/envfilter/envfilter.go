@@ -29,6 +29,10 @@ var envAllowlistExact = map[string]bool{
 	"ANTHROPIC_API_KEY": true, "OPENAI_API_KEY": true,
 	"GEMINI_API_KEY": true, "GOOGLE_API_KEY": true, "CURSOR_API_KEY": true,
 	"CODEX_HOME": true,
+	// claude-code's long-lived OAuth token (`claude setup-token`); the headless
+	// equivalent of a ~/.claude login, so interactive/lead claude invocations must
+	// inherit it (mirrors trustedLocalProviderCredentials on the task-runner path).
+	"CLAUDE_CODE_OAUTH_TOKEN": true,
 	// Git hosting tokens (needed by container agents for git push)
 	"GITHUB_TOKEN": true,
 	// E2E test stubs. Exact matches keep arbitrary STUB_* values out.

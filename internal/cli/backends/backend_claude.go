@@ -281,6 +281,10 @@ func buildClaudeEnv(workDir, agentName string) []string {
 	if agentName != "" {
 		env = append(env, "LOOM_AGENT_NAME="+agentName)
 	}
+	// claude-code refuses `--dangerously-skip-permissions` when running as root unless
+	// IS_SANDBOX is set. loom runs claude as root inside its isolated lead/agent container,
+	// so set it explicitly (FilteredEnv strips it otherwise). Harmless outside a container.
+	env = append(env, "IS_SANDBOX=1")
 	return append(env, activeSessionEnvVars()...)
 }
 
