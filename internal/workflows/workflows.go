@@ -234,6 +234,27 @@ func builtinWorkflowWorkDir() string {
 	return workDir
 }
 
+// MaterializeBuiltinBundle extracts the prebuilt bundle for a builtin workflow from
+// the embedded FS into destDir and returns the path to its server.mjs. It lets a
+// host-side caller obtain a runnable copy of the bundle WITHOUT going through driver
+// registration — e.g. the daemon execution leaf running the bundled local-task-runner
+// (Phase U). destDir is created if missing; existing contents are overwritten (flue
+// emits content-hashed asset names, so a stale server.mjs only references its own
+// fresh assets). The local-task-runner ships inside the "epic-runner" bundle.
+func MaterializeBuiltinBundle(name, destDir string) (string, error) {
+	distPath := filepath.ToSlash(filepath.Join("builtin-dist", name, "dist"))
+	if _, err := fs.Stat(builtinDistFS, filepath.ToSlash(filepath.Join(distPath, "server.mjs"))); err != nil {
+		return "", fmt.Errorf("builtin bundle %q has no embedded server.mjs: %w", name, err)
+	}
+	if err := os.MkdirAll(destDir, 0o755); err != nil {
+		return "", fmt.Errorf("create bundle dest %q: %w", destDir, err)
+	}
+	if err := copyEmbeddedTree(builtinDistFS, distPath, destDir); err != nil {
+		return "", fmt.Errorf("materialize builtin bundle %q: %w", name, err)
+	}
+	return filepath.Join(destDir, "server.mjs"), nil
+}
+
 func registerPrebuiltBuiltinWorkflow(ctx context.Context, st store.Store, ws, name string, spec Spec, sourceRef, digest string) (bool, error) {
 	distPath := filepath.ToSlash(filepath.Join("builtin-dist", name, "dist"))
 	if _, err := fs.Stat(builtinDistFS, filepath.ToSlash(filepath.Join(distPath, "server.mjs"))); err != nil {
