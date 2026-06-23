@@ -89,8 +89,10 @@ const openWorkspaceBtn =
 const retryBtn = document.querySelector<HTMLButtonElement>("#retryBtn")!;
 
 let bootInFlight = false;
+let startupRelocationChecked = false;
 let lastRuntimeStatus: RuntimeStatus | null = null;
 let lastRuntimeUrl = "";
+let pendingRecoveryRoute = "";
 
 function setStage(mode: StageMode, title: string, detail: string) {
   document.body.dataset.mode = mode;
@@ -186,19 +188,34 @@ async function waitForHealthyRuntime() {
   throw new Error(lastError || "local runtime did not become healthy");
 }
 
-function workspaceEntryUrl(runtimeUrl: string) {
-  return `${runtimeUrl.replace(/\/+$/, "")}/`;
+function workspaceEntryUrl(runtimeUrl: string, route = "/") {
+  const base = runtimeUrl.replace(/\/+$/, "");
+  if (!route || route === "/") {
+    return `${base}/`;
+  }
+  return route.startsWith("/") ? `${base}${route}` : `${base}/${route}`;
 }
 
 async function openWorkspaceWindow(
   runtimeUrl: string,
-  options: { forceNew?: boolean } = {},
+  options: { forceNew?: boolean; route?: string } = {},
 ) {
   setStage("starting", "Opening Workspace", "Loading the workspace window.");
   await invoke("open_workspace_window", {
-    runtimeUrl: workspaceEntryUrl(runtimeUrl),
+    runtimeUrl: workspaceEntryUrl(runtimeUrl, options.route),
     forceNew: Boolean(options.forceNew),
   });
+}
+
+async function readPendingRecoveryRoute() {
+  if (pendingRecoveryRoute) {
+    return pendingRecoveryRoute;
+  }
+  const route = await invoke<string | null>("take_workspace_recovery_path");
+  if (route) {
+    pendingRecoveryRoute = route;
+  }
+  return pendingRecoveryRoute;
 }
 
 async function openAdditionalWorkspaceWindow() {
@@ -226,20 +243,56 @@ function showFailure(err: unknown) {
   renderRuntime(lastRuntimeStatus, message);
 }
 
+// macOS runs a quarantined app from a read-only, randomized location (App
+// Translocation) when it is opened from a disk image or a download instead of
+// from /Applications. The bundled loom sidecar cannot start from there, so show
+// actionable guidance rather than a confusing "Could Not Open Workspace" error.
+async function needsRelocation() {
+  if (Boolean((window as unknown as Record<string, unknown>).__LOOM_NEEDS_RELOCATION__)) {
+    return true;
+  }
+  return Boolean(await invoke<boolean>("needs_relocation"));
+}
+
+function showRelocationNotice() {
+  lastRuntimeUrl = "";
+  openWorkspaceBtn.disabled = true;
+  setStage(
+    "error",
+    "Move Loom to Applications",
+    "Loom can't run from a disk image or your Downloads folder. Drag \"Loom Agents\" into your Applications folder, then open it from there.",
+  );
+  actions.hidden = true;
+  details.open = false;
+}
+
 async function boot(options: { forceNew?: boolean } = {}) {
   if (bootInFlight) return;
   bootInFlight = true;
-  actions.hidden = true;
-  openWorkspaceBtn.disabled = !lastRuntimeUrl;
 
   try {
+    if (await needsRelocation()) {
+      showRelocationNotice();
+      return;
+    }
+
+    actions.hidden = true;
+    openWorkspaceBtn.disabled = !lastRuntimeUrl;
+    const recoveryRoute = options.forceNew ? "" : await readPendingRecoveryRoute();
+
     const status = await ensureRuntime();
     const runtimeUrl = status.runtime?.url;
     if (!runtimeUrl) {
       throw new Error("local runtime URL is missing");
     }
     setStage("ready", "Opening Workspace", "Loom is ready.");
-    await openWorkspaceWindow(runtimeUrl, options);
+    await openWorkspaceWindow(runtimeUrl, {
+      ...options,
+      route: recoveryRoute || "/",
+    });
+    if (!options.forceNew) {
+      pendingRecoveryRoute = "";
+    }
   } catch (err) {
     showFailure(err);
   } finally {
@@ -261,9 +314,19 @@ void listen(NEW_WORKSPACE_WINDOW_EVENT, () => {
 });
 
 void getCurrentWindow().onFocusChanged(({ payload }) => {
-  if (payload && !bootInFlight && document.body.dataset.mode !== "error") {
+  if (
+    payload &&
+    startupRelocationChecked &&
+    !bootInFlight &&
+    document.body.dataset.mode !== "error"
+  ) {
     void focusExistingWorkspaceWindow().catch(showFailure);
   }
 });
 
-void boot();
+async function startLauncher() {
+  startupRelocationChecked = true;
+  await boot();
+}
+
+void startLauncher().catch(showFailure);
