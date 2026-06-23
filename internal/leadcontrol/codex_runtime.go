@@ -268,7 +268,7 @@ func discoverCodexLeadThread(ctx context.Context, cfg CodexLeadRuntimeConfig, ru
 		case <-ctx.Done():
 			return
 		case <-deadline.C:
-			_ = MarkAssignmentDeliveryAttempt(context.Background(), cfg.Store, cfg.Workspace, cfg.SessionID, "codex thread discovery timed out")
+			_ = MarkAssignmentDeliveryAttempt(ctx, cfg.Store, cfg.Workspace, cfg.SessionID, "codex thread discovery timed out")
 			return
 		case <-probe.C:
 			thread, err := findNewestCodexThread(ctx, runtime.Endpoint, cfg.WorkDir, runtimeStartedAt)
@@ -282,7 +282,7 @@ func discoverCodexLeadThread(ctx context.Context, cfg CodexLeadRuntimeConfig, ru
 			}
 			runtime.ThreadID = thread.ID
 			runtime.Status = thread.Status.RuntimeStatus()
-			if err := UpdateCodexRuntimeMetadata(context.Background(), cfg.Store, cfg.Workspace, cfg.SessionID, runtime); err != nil {
+			if err := UpdateCodexRuntimeMetadata(ctx, cfg.Store, cfg.Workspace, cfg.SessionID, runtime); err != nil {
 				cfg.Logger.Debug("failed to persist codex thread metadata", "err", err)
 			}
 			return
