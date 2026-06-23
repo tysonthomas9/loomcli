@@ -188,6 +188,14 @@ local-mode-logs:
 local-mode-verify:
 	@test/local-mode/verify-local-mode.sh
 
+# Verify role-based task routing for UI-registered plan/task agents against a
+# running stack: seeds a no-design task (must go to the plan agent) and a
+# designed task (must go to the task agent), exercises the UI POST /agents
+# endpoint, and asserts the claims. Pairs with `LOOM_DAEMON_LEAF=ts make
+# local-mode-codex-up` to prove UI agent creation maps to the TS execution path.
+local-mode-routing-verify:
+	@python3 test/local-mode/verify-agent-routing.py
+
 # Real-stack E2E for the trigger-driven GitHub webhook path: signs a
 # pull_request.opened delivery, asserts the durable TriggerEvent/Delivery/
 # DriverRun records, and checks redelivery is idempotent. Requires a running
