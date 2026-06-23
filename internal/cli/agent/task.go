@@ -157,7 +157,7 @@ func runTaskDaemon(deps *cli.Deps, worktreePath, agentName string) {
 	// non-interactive path: PTY + stream-json → log mtime advances per turn.
 	shutdown := automode.SetupSignalHandler()
 	collector := usage.NewCollector(cli.GetBackendName(), agentName)
-	invokeErr := deps.Agent.InvokeNonInteractive(worktreePath, prompt, agentName, shutdown, collector)
+	invokeErr := maybeTSLeafInvoker(deps.Agent).InvokeNonInteractive(worktreePath, prompt, agentName, shutdown, collector)
 	if invokeErr == nil {
 		// Success: drop the carried session so the next restart starts the next
 		// task fresh. On failure we KEEP it (carry-forward → resume on respawn).

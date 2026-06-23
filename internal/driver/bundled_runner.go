@@ -30,6 +30,10 @@ type BundledRunnerOptions struct {
 	// RequestJSON is the task-runner request payload. Its `lease_token` must equal
 	// LeaseToken below (the launcher rejects a mismatch).
 	RequestJSON string
+	// Prompt, when set, is delivered to the runner via LOOM_TASK_RUN_PROMPT so the
+	// caller's exact prompt is used verbatim (e.g. the daemon leaf's role-specific
+	// planning/task prompt) instead of the runner's generic buildPrompt.
+	Prompt string
 	// LeaseToken is the task-run lease token; gated against the request's lease_token.
 	LeaseToken string
 	// StreamStderr tees the backend's live output to Stderr per turn (watchdog feed).
@@ -86,6 +90,9 @@ func RunBundledLocalTaskRunner(ctx context.Context, opts BundledRunnerOptions) (
 	}
 	if opts.StreamStderr {
 		env = append(env, "LOOM_TASK_RUNNER_STREAM_STDERR=1")
+	}
+	if strings.TrimSpace(opts.Prompt) != "" {
+		env = append(env, "LOOM_TASK_RUN_PROMPT="+opts.Prompt)
 	}
 	cmd.Env = env
 	cmd.Stdin = bytes.NewReader([]byte(requestJSON))
