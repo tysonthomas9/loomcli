@@ -340507,6 +340507,17 @@ function gitWithGitHubAuth(token) {
 }
 function buildPrompt$1(request, task, repoDir) {
 	const mode = taskMode(request);
+	const explicit = stringValue$2(inputValue$1(request, "taskPrompt"));
+	if (explicit) return [
+		"You are implementing a task in a Loom-managed git repository.",
+		"Repository cwd: " + repoDir,
+		"",
+		explicit,
+		"",
+		"Work directly in the repository; keep the change focused and minimal.",
+		"Do not print environment variables or credentials.",
+		"Return a concise summary of the files you changed."
+	].join("\n");
 	if (mode === "e2e-smoke") return [
 		"You are executing a Loom Daytona/Codex e2e smoke task.",
 		"Repository cwd: " + repoDir,

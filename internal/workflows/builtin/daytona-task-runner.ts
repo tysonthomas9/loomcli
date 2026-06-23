@@ -933,6 +933,22 @@ function gitWithGitHubAuth(token) {
 
 function buildPrompt(request, task, repoDir) {
   const mode = taskMode(request);
+  // Explicit task instruction for paths without a driver TaskRun to load the task
+  // from (single-shot invocations, the daemon leaf). Takes precedence over the mode
+  // templates so the sandbox agent knows exactly what to implement.
+  const explicit = stringValue(inputValue(request, "taskPrompt"));
+  if (explicit) {
+    return [
+      "You are implementing a task in a Loom-managed git repository.",
+      "Repository cwd: " + repoDir,
+      "",
+      explicit,
+      "",
+      "Work directly in the repository; keep the change focused and minimal.",
+      "Do not print environment variables or credentials.",
+      "Return a concise summary of the files you changed.",
+    ].join("\n");
+  }
   if (mode === "e2e-smoke") {
     return [
       "You are executing a Loom Daytona/Codex e2e smoke task.",
