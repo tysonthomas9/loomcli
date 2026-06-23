@@ -339940,7 +339940,8 @@ async function run$3(ctx = {}) {
 			logs: redact(logs.join("\n") + "\n", secrets),
 			transcript: transcriptJSONL,
 			transcript_entries: transcriptEntries,
-			artifactIds: [patchArtifact, prArtifact].filter(Boolean).map((artifact) => artifact.id),
+			...patchArtifact && patchArtifact.inline ? { patch: patchArtifact.diff } : {},
+			artifactIds: [patchArtifact, prArtifact].filter(Boolean).map((artifact) => artifact.id).filter(Boolean),
 			runtimeMetadata: stringMetadata$1({
 				task_runner: "daytona-task-runner",
 				runtime_strategy: "flue-daytona-codex",
@@ -340306,7 +340307,12 @@ async function loadTaskContext(logs) {
 async function uploadPatchArtifact(client, input, logs) {
 	const diff = input.diff === void 0 || input.diff === null ? "" : String(input.diff);
 	if (!diff.trim()) return null;
-	if (!client) throw new Error("remote repository changed but @loom/sdk/runner artifact upload is unavailable");
+	if (!client) return {
+		id: "",
+		inline: true,
+		diff: input.diff || "",
+		diffStat: input.diffStat || ""
+	};
 	const metadata = stringMetadata$1({
 		task_run_id: input.taskRunId,
 		task_id: input.taskId,

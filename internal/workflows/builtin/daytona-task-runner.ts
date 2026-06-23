@@ -228,7 +228,9 @@ export async function run(ctx = {}) {
       logs: redact(logs.join("\n") + "\n", secrets),
       transcript: transcriptJSONL,
       transcript_entries: transcriptEntries,
-      artifactIds: [patchArtifact, prArtifact].filter(Boolean).map((artifact) => artifact.id),
+      // Inline patch when there was no artifact client (daemon-leaf path).
+      ...(patchArtifact && patchArtifact.inline ? { patch: patchArtifact.diff } : {}),
+      artifactIds: [patchArtifact, prArtifact].filter(Boolean).map((artifact) => artifact.id).filter(Boolean),
       runtimeMetadata: stringMetadata({
         task_runner: "daytona-task-runner",
         runtime_strategy: "flue-daytona-codex",
@@ -677,7 +679,11 @@ async function uploadPatchArtifact(client, input, logs) {
     return null;
   }
   if (!client) {
-    throw new Error("remote repository changed but @loom/sdk/runner artifact upload is unavailable");
+    // No @loom/sdk/runner artifact client (e.g. the daemon-leaf path, which runs as
+    // a session rather than a driver TaskRun). Surface the patch INLINE on the result
+    // instead of failing — mirrors local-task-runner's top-level patch. The driver
+    // path always has a client and uploads as before.
+    return { id: "", inline: true, diff: input.diff || "", diffStat: input.diffStat || "" };
   }
   const metadata = stringMetadata({
     task_run_id: input.taskRunId,

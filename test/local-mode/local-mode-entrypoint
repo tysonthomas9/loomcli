@@ -238,6 +238,22 @@ prepare_claude_credentials() {
   claude --version || true
 }
 
+prepare_daytona_credentials() {
+  # When the daemon leaf is routed to the Daytona runner, the runner resolves its
+  # API key via loom's runtime-credential API (LOOM_FLEET_DB_URL) or a credential
+  # file. Write the host-provided DAYTONA_API_KEY to a file and point the runner at
+  # it; the daemon subprocess inherits DAYTONA_CREDENTIAL_FILE from this shell.
+  if [ -z "${DAYTONA_API_KEY:-}" ]; then
+    return 0
+  fi
+  key_file="${LOOM_CONFIG_DIR:-/root/.loom}/daytona-key"
+  mkdir -p "$(dirname "$key_file")"
+  printf '%s' "$DAYTONA_API_KEY" > "$key_file"
+  chmod 600 "$key_file"
+  export DAYTONA_CREDENTIAL_FILE="$key_file"
+  echo "[local-mode] daytona credential file staged at ${key_file}"
+}
+
 issues_api() {
   printf 'http://127.0.0.1:%s/api/workspaces/%s' "$LOOM_PORT" "$WORKSPACE"
 }
@@ -479,6 +495,7 @@ git config --global --add safe.directory "*" >/dev/null 2>&1 || true
 wait_for_url "${LOOM_FLEET_DB_URL:-http://fleet-db:8080}/healthz" "fleet-db"
 prepare_codex_credentials
 prepare_claude_credentials
+prepare_daytona_credentials
 create_source_repo
 create_workspace
 create_agent_worktree "$PLAN_AGENT"

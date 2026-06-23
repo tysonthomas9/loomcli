@@ -35,6 +35,14 @@ var envAllowlistExact = map[string]bool{
 	"CLAUDE_CODE_OAUTH_TOKEN": true,
 	// Git hosting tokens (needed by container agents for git push)
 	"GITHUB_TOKEN": true,
+	// Daytona daemon-leaf config (LOOM_DAEMON_LEAF_RUNNER=daytona-task-runner).
+	// The API key is intentionally NOT here — it flows via DAYTONA_CREDENTIAL_FILE
+	// (a path) or the runtime-credential API, never as a raw env secret.
+	"DAYTONA_CREDENTIAL_FILE": true, "GITHUB_TOKEN_FILE": true,
+	"DAYTONA_REPO_URL": true, "DAYTONA_TASK_MODE": true, "DAYTONA_REPO_DIR": true,
+	"DAYTONA_API_URL": true, "DAYTONA_TARGET": true, "DAYTONA_SDK_IMPORT": true,
+	"DAYTONA_AUTO_STOP_MINUTES": true, "DAYTONA_AUTO_DELETE_MINUTES": true,
+	"DAYTONA_CLONE_TIMEOUT_SECONDS": true, "DAYTONA_DIFF_TIMEOUT_SECONDS": true,
 	// E2E test stubs. Exact matches keep arbitrary STUB_* values out.
 	"STUB_CODEX_EPIC_RUNNER": true, "STUB_CODEX_INVOCATIONS": true,
 	// Editor
