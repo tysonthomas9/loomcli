@@ -341929,7 +341929,7 @@ async function run$1(ctx = {}) {
 	if (STREAM_JSON_BACKENDS.has(backend) && !transcriptEntries.some((e) => e.role !== "system")) transcriptEntries = minimalTranscript(backend, taskId || taskRunId, prompt, stdout);
 	transcriptEntries = redactTranscriptSecrets(transcriptEntries);
 	const taskUsage = taskUsageFromEntries(transcriptEntries);
-	if (taskUsage.estimated_cost_usd == null && (taskUsage.input_tokens || taskUsage.output_tokens || taskUsage.cache_read_tokens || taskUsage.cache_write_tokens)) {
+	if (!(taskUsage.estimated_cost_usd > 0) && (taskUsage.input_tokens || taskUsage.output_tokens || taskUsage.cache_read_tokens || taskUsage.cache_write_tokens)) {
 		const cost = estimateCostUSD(backend, taskUsage);
 		if (cost > 0) taskUsage.estimated_cost_usd = cost;
 	}

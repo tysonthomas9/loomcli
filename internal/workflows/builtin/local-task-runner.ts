@@ -218,10 +218,11 @@ export async function run(ctx = {}) {
   // entry) as top-level fields so the Go host-bridge ingests it into the fleet-db
   // TaskRun — without this, local-CLI runs report zero usage while daytona does not.
   const taskUsage = taskUsageFromEntries(transcriptEntries);
-  // Backends that do not self-report a cost (codex/cursor/gemini) get an estimated
-  // cost from the per-backend pricing tier (mirrors the Go usage.EstimateCost path);
-  // claude/opencode keep their self-reported cost.
-  if (taskUsage.estimated_cost_usd == null &&
+  // Backends that do not self-report a POSITIVE cost get an estimated cost from the
+  // per-backend pricing tier (mirrors the Go usage.EstimateCost path): codex/cursor/
+  // gemini report no cost (null), and opencode reports cost=0 for subscription /
+  // free-tier models. A backend's own positive cost (e.g. claude) is preserved.
+  if (!(taskUsage.estimated_cost_usd > 0) &&
       (taskUsage.input_tokens || taskUsage.output_tokens || taskUsage.cache_read_tokens || taskUsage.cache_write_tokens)) {
     const cost = estimateCostUSD(backend, taskUsage);
     if (cost > 0) {
