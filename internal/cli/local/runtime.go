@@ -21,11 +21,13 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/localsettings"
 	"github.com/tysonthomas9/loomcli/internal/lockfile"
+	"github.com/tysonthomas9/loomcli/internal/webui/frontendassets"
 )
 
 const (
-	runtimeFileName = "runtime.json"
-	logsDirName     = "logs"
+	runtimeFileName      = "runtime.json"
+	terminalHostFileName = "terminal-host.json"
+	logsDirName          = "logs"
 )
 
 type runtimeInfo struct {
@@ -39,6 +41,7 @@ type runtimeInfo struct {
 	Executable       string    `json:"executable,omitempty"`
 	BinaryHash       string    `json:"binary_hash,omitempty"`
 	Build            string    `json:"build,omitempty"`
+	FrontendHash     string    `json:"frontend_hash,omitempty"`
 	FleetDBRedisHash string    `json:"fleetdb_redis_hash,omitempty"`
 	ClaimsPaused     bool      `json:"claims_paused,omitempty"`
 	StartedAt        time.Time `json:"started_at"`
@@ -50,6 +53,20 @@ type runtimeStatus struct {
 	Runtime *runtimeInfo `json:"runtime,omitempty"`
 	Healthy bool         `json:"healthy"`
 	Error   string       `json:"error,omitempty"`
+}
+
+type terminalHostInfo struct {
+	Version         int       `json:"version"`
+	ProtocolVersion int       `json:"protocol_version"`
+	Status          string    `json:"status"`
+	PID             int       `json:"pid"`
+	DataDir         string    `json:"data_dir"`
+	SocketPath      string    `json:"socket_path"`
+	Build           string    `json:"build,omitempty"`
+	StartedAt       time.Time `json:"started_at"`
+	UpdatedAt       time.Time `json:"updated_at"`
+	Healthy         bool      `json:"healthy"`
+	Error           string    `json:"error,omitempty"`
 }
 
 // RuntimeSnapshot is the exported, JSON-stable view of the local runtime
@@ -65,6 +82,7 @@ type RuntimeSnapshot struct {
 	Executable       string    `json:"executable,omitempty"`
 	BinaryHash       string    `json:"binary_hash,omitempty"`
 	Build            string    `json:"build,omitempty"`
+	FrontendHash     string    `json:"frontend_hash,omitempty"`
 	FleetDBRedisHash string    `json:"fleetdb_redis_hash,omitempty"`
 	ClaimsPaused     bool      `json:"claims_paused,omitempty"`
 	StartedAt        time.Time `json:"started_at"`
@@ -95,6 +113,7 @@ func runtimeSnapshot(info *runtimeInfo) *RuntimeSnapshot {
 		Executable:       info.Executable,
 		BinaryHash:       info.BinaryHash,
 		Build:            info.Build,
+		FrontendHash:     info.FrontendHash,
 		FleetDBRedisHash: info.FleetDBRedisHash,
 		ClaimsPaused:     info.ClaimsPaused,
 		StartedAt:        info.StartedAt,
@@ -140,6 +159,14 @@ func ensureRuntimeDirs(dataDir string) error {
 
 func runtimePath(dataDir string) string {
 	return filepath.Join(dataDir, runtimeFileName)
+}
+
+func terminalHostPath(dataDir string) string {
+	return filepath.Join(dataDir, terminalHostFileName)
+}
+
+func terminalHostSocketPath(dataDir string) string {
+	return filepath.Join(dataDir, "terminal-host.sock")
 }
 
 func serveLogPath(dataDir string) string {
@@ -211,6 +238,10 @@ func daemonLogPath(dataDir string) string {
 	return filepath.Join(dataDir, logsDirName, "loom-daemon.log")
 }
 
+func terminalHostLogPath(dataDir string) string {
+	return filepath.Join(dataDir, logsDirName, "loom-terminal-host.log")
+}
+
 func readRuntime(dataDir string) (*runtimeInfo, error) {
 	data, err := os.ReadFile(runtimePath(dataDir)) //nolint:gosec // user-selected Loom data dir
 	if err != nil {
@@ -252,19 +283,66 @@ func writeRuntime(dataDir string, info *runtimeInfo) error {
 	return nil
 }
 
+func readTerminalHostInfo(dataDir string) (*terminalHostInfo, error) {
+	data, err := os.ReadFile(terminalHostPath(dataDir)) //nolint:gosec // user-selected Loom data dir
+	if err != nil {
+		return nil, err
+	}
+	var info terminalHostInfo
+	if err := json.Unmarshal(data, &info); err != nil {
+		return nil, fmt.Errorf("parse %s: %w", terminalHostPath(dataDir), err)
+	}
+	return &info, nil
+}
+
+func writeTerminalHostInfo(dataDir string, info *terminalHostInfo) error {
+	if info == nil {
+		return errors.New("terminal host info is nil")
+	}
+	if err := ensureRuntimeDirs(dataDir); err != nil {
+		return err
+	}
+	info.Version = 1
+	info.DataDir = dataDir
+	info.UpdatedAt = time.Now().UTC()
+	if info.StartedAt.IsZero() {
+		info.StartedAt = info.UpdatedAt
+	}
+	data, err := json.MarshalIndent(info, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshal terminal host runtime: %w", err)
+	}
+	path := terminalHostPath(dataDir)
+	tmpPath := path + ".tmp"
+	if err := os.WriteFile(tmpPath, data, 0600); err != nil { //nolint:gosec // user-private runtime metadata
+		return fmt.Errorf("write %s: %w", tmpPath, err)
+	}
+	if err := os.Rename(tmpPath, path); err != nil {
+		_ = os.Remove(tmpPath)
+		return fmt.Errorf("rename %s: %w", path, err)
+	}
+	return nil
+}
+
 type executableIdentity struct {
-	Path  string
-	Hash  string
-	Build string
+	Path         string
+	Hash         string
+	Build        string
+	FrontendHash string
 }
 
 func currentExecutableIdentity() executableIdentity {
 	exe, err := os.Executable()
 	if err != nil {
-		return executableIdentity{Build: cli.Build}
+		return executableIdentity{Build: cli.Build, FrontendHash: currentFrontendHash()}
 	}
 	hash := executableHash(exe)
-	return executableIdentity{Path: exe, Hash: hash, Build: cli.Build}
+	return executableIdentity{
+		Path:         exe,
+		Hash:         hash,
+		Build:        cli.Build,
+		FrontendHash: currentFrontendHash(),
+	}
 }
 
 func executableHash(path string) string {
@@ -287,6 +365,7 @@ func applyExecutableIdentity(info *runtimeInfo, identity executableIdentity) {
 	info.Executable = identity.Path
 	info.BinaryHash = identity.Hash
 	info.Build = identity.Build
+	info.FrontendHash = identity.FrontendHash
 }
 
 func runtimeMatchesExecutable(info *runtimeInfo, identity executableIdentity) bool {
@@ -298,7 +377,27 @@ func runtimeMatchesExecutable(info *runtimeInfo, identity executableIdentity) bo
 		// healthy runtime just because the host filesystem denied the hash read.
 		return true
 	}
-	return info.BinaryHash == identity.Hash
+	if info.BinaryHash != identity.Hash {
+		return false
+	}
+	if identity.FrontendHash == "" {
+		// Same conservative fallback as the binary hash: a transient read
+		// failure of the current bundle must not force-stop a healthy runtime.
+		return true
+	}
+	return info.FrontendHash == identity.FrontendHash
+}
+
+func currentFrontendHash() string {
+	dir := bundledFrontendDir()
+	if dir == "" {
+		return ""
+	}
+	hash, err := frontendassets.HashDir(dir)
+	if err != nil {
+		return ""
+	}
+	return hash
 }
 
 func currentFleetDBRedisHash(dataDir string) (string, error) {
@@ -444,6 +543,9 @@ func localEnv(dataDir string, port int) []string {
 		"LOOM_FLEET_DB_URL=",
 		"LOOM_FLEET_URL=",
 	)
+	if socket := terminalHostSocketPath(dataDir); socket != "" {
+		env = append(env, "LOOM_TERMINAL_HOST_SOCKET="+socket)
+	}
 	if exe, err := os.Executable(); err == nil {
 		exeDir := filepath.Dir(exe)
 		env = append(env, "PATH="+desktopRuntimePath(exeDir, os.Getenv("PATH")))
@@ -523,7 +625,7 @@ func isExecutableFile(path string) bool {
 }
 
 func bundledFrontendDir() string {
-	if dir := os.Getenv("LOOM_FRONTEND_DIR"); hasFrontendIndex(dir) {
+	if dir := os.Getenv("LOOM_FRONTEND_DIR"); frontendassets.HasIndex(dir) {
 		return dir
 	}
 	exe, err := os.Executable()
@@ -536,17 +638,9 @@ func bundledFrontendDir() string {
 		filepath.Join(exeDir, "..", "Resources", "webui"),
 		filepath.Join(exeDir, "..", "Resources", "resources", "webui"),
 	} {
-		if hasFrontendIndex(candidate) {
+		if frontendassets.HasIndex(candidate) {
 			return candidate
 		}
 	}
 	return ""
-}
-
-func hasFrontendIndex(dir string) bool {
-	if dir == "" {
-		return false
-	}
-	info, err := os.Stat(filepath.Join(dir, "index.html"))
-	return err == nil && !info.IsDir()
 }

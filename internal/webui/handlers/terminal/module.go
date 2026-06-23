@@ -70,7 +70,7 @@ func NewModule(
 func (m *Module) Register(mux *http.ServeMux) {
 	// Agent terminal (tmux-backed, for live view of auto-mode agent sessions).
 	if m.agentSvc != nil {
-		mux.HandleFunc("GET /api/workspaces/{ws}/agents/{name}/terminal/info", HandleGetAgentTerminalInfo(m.agentSvc))
+		mux.HandleFunc("GET /api/workspaces/{ws}/agents/{name}/terminal/info", HandleGetAgentTerminalInfo(m.agentSvc, m.termSvc, m.store))
 		if m.termAuth != nil {
 			mux.HandleFunc("GET /api/workspaces/{ws}/agents/{name}/terminal/token", HandleGetAgentTerminalToken(m.agentSvc))
 		}

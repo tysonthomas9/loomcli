@@ -54,6 +54,17 @@ const INITIAL_CONNECT_CONFIG: ReconnectConfig = {
  */
 const UNBOUNDED_RECONNECT_TIMEOUT_MS = 60 * 60 * 1000; // 1 h when server disables its own timeout
 const SCROLL_BOTTOM_THRESHOLD_PX = 24;
+const MIN_USABLE_TERMINAL_COLS = 2;
+const MIN_USABLE_TERMINAL_ROWS = 2;
+
+function isUsableTerminalSize(cols: number, rows: number): boolean {
+  return (
+    Number.isFinite(cols) &&
+    Number.isFinite(rows) &&
+    cols >= MIN_USABLE_TERMINAL_COLS &&
+    rows >= MIN_USABLE_TERMINAL_ROWS
+  );
+}
 
 function isSocketOpenOrConnecting(ws: WebSocket | null): boolean {
   return (
@@ -481,8 +492,11 @@ export const TerminalInstance = forwardRef<
 
       if (rect.width <= 0 || rect.height <= 0) return null;
 
-      const cols = Math.max(1, Math.floor(el.clientWidth / rect.width));
-      const rows = Math.max(1, Math.floor(el.clientHeight / rect.height));
+      if (el.clientWidth <= 0 || el.clientHeight <= 0) return null;
+
+      const cols = Math.floor(el.clientWidth / rect.width);
+      const rows = Math.floor(el.clientHeight / rect.height);
+      if (!isUsableTerminalSize(cols, rows)) return null;
       return { cols, rows };
     },
     [],
@@ -503,7 +517,7 @@ export const TerminalInstance = forwardRef<
         return;
       }
       const measured = measureTerminalSize(wt);
-      if (measured) {
+      if (measured && isUsableTerminalSize(measured.cols, measured.rows)) {
         terminalSizeRef.current = measured;
         if (wt.cols !== measured.cols || wt.rows !== measured.rows) {
           wt.resize(measured.cols, measured.rows);
@@ -565,12 +579,35 @@ export const TerminalInstance = forwardRef<
   );
 
   const handleResize = useCallback((cols: number, rows: number) => {
+    if (!isUsableTerminalSize(cols, rows)) return;
     terminalSizeRef.current = { cols, rows };
     const ws = wsRef.current;
     if (ws?.readyState === WebSocket.OPEN) {
       ws.send(encodeResize(cols, rows));
     }
   }, []);
+
+  const syncActiveLayout = useCallback(() => {
+    const wt = wtermInstanceRef.current;
+    if (!wt) return;
+    const measured = measureTerminalSize(wt);
+    if (measured) {
+      terminalSizeRef.current = measured;
+      if (wt.cols !== measured.cols || wt.rows !== measured.rows) {
+        wt.resize(measured.cols, measured.rows);
+      }
+      handleResize(measured.cols, measured.rows);
+    }
+    forceRendererPaint(wt);
+    focus();
+    syncViewportToBottom();
+  }, [
+    focus,
+    forceRendererPaint,
+    handleResize,
+    measureTerminalSize,
+    syncViewportToBottom,
+  ]);
 
   // Tauri can reveal an already-mounted terminal after it measured while
   // hidden. Resync once visible so the PTY has the real grid size and focus.
@@ -582,29 +619,17 @@ export const TerminalInstance = forwardRef<
     let secondFrame = 0;
     const focusTimers: Array<ReturnType<typeof setTimeout>> = [];
 
-    const syncActiveLayout = () => {
+    const sync = () => {
       if (cancelled) return;
-      const wt = wtermInstanceRef.current;
-      if (!wt) return;
-      const measured = measureTerminalSize(wt);
-      if (measured) {
-        terminalSizeRef.current = measured;
-        if (wt.cols !== measured.cols || wt.rows !== measured.rows) {
-          wt.resize(measured.cols, measured.rows);
-        }
-        handleResize(measured.cols, measured.rows);
-      }
-      forceRendererPaint(wt);
-      focus();
-      syncViewportToBottom();
+      syncActiveLayout();
     };
 
     firstFrame = requestAnimationFrame(() => {
-      syncActiveLayout();
-      secondFrame = requestAnimationFrame(syncActiveLayout);
+      sync();
+      secondFrame = requestAnimationFrame(sync);
     });
     for (const delay of [50, 150, 300, 600]) {
-      focusTimers.push(setTimeout(syncActiveLayout, delay));
+      focusTimers.push(setTimeout(sync, delay));
     }
 
     return () => {
@@ -615,15 +640,38 @@ export const TerminalInstance = forwardRef<
         clearTimeout(timer);
       }
     };
-  }, [
-    isActive,
-    readyVersion,
-    focus,
-    forceRendererPaint,
-    handleResize,
-    measureTerminalSize,
-    syncViewportToBottom,
-  ]);
+  }, [isActive, readyVersion, syncActiveLayout]);
+
+  useEffect(() => {
+    if (!isActive) return;
+    const wrapper = wrapperRef.current;
+    if (!wrapper || typeof ResizeObserver === "undefined") return;
+
+    let frame = 0;
+    const scheduleSync = () => {
+      if (frame) cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => {
+        frame = 0;
+        syncActiveLayout();
+      });
+    };
+
+    const observer = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        const { width, height } = entry.contentRect;
+        if (width > 0 && height > 0) {
+          scheduleSync();
+          break;
+        }
+      }
+    });
+    observer.observe(wrapper);
+
+    return () => {
+      observer.disconnect();
+      if (frame) cancelAnimationFrame(frame);
+    };
+  }, [isActive, readyVersion, syncActiveLayout]);
 
   useImperativeHandle(
     ref,

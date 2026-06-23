@@ -13,11 +13,30 @@ fi
 stop_sidecar() {
   local name="$1"
   local pattern="${APP_BUNDLE}/Contents/MacOS/${name}( |$)"
-  if pgrep -f "${pattern}" >/dev/null 2>&1; then
+  local pids=()
+  while IFS= read -r pid; do
+    local command
+    command="$(ps -p "${pid}" -o command= 2>/dev/null || true)"
+    if [[ "${name}" == "loom" && "${command}" == *" local "* && "${command}" == *" terminal-host"* ]]; then
+      echo "[desktop] preserving terminal-host pid ${pid}"
+      continue
+    fi
+    pids+=("${pid}")
+  done < <(pgrep -f "${pattern}" 2>/dev/null || true)
+
+  if (( ${#pids[@]} > 0 )); then
     echo "[desktop] stopping ${name} sidecar"
-    pkill -TERM -f "${pattern}" >/dev/null 2>&1 || true
+    kill -TERM "${pids[@]}" >/dev/null 2>&1 || true
     sleep 1
-    pkill -KILL -f "${pattern}" >/dev/null 2>&1 || true
+    local live=()
+    for pid in "${pids[@]}"; do
+      if kill -0 "${pid}" >/dev/null 2>&1; then
+        live+=("${pid}")
+      fi
+    done
+    if (( ${#live[@]} > 0 )); then
+      kill -KILL "${live[@]}" >/dev/null 2>&1 || true
+    fi
   fi
 }
 

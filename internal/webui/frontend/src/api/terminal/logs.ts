@@ -79,10 +79,10 @@ export async function getTaskLogContent(
 export async function getAgentTerminalInfo(
   workspaceId: string,
   agentName: string,
-): Promise<"tmux" | "archive"> {
+): Promise<"pty" | "tmux" | "archive"> {
   const response = await get<{
     success: boolean;
-    data?: { agent: string; mode: "tmux" | "archive" };
+    data?: { agent: string; mode: "pty" | "tmux" | "archive" };
     error?: string;
   }>(
     wsUrl(

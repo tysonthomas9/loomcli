@@ -183,13 +183,20 @@ func NewServer(ctx context.Context, config webui.ServerConfig) (_ *Server, retEr
 	app.getMutationsSince = appstores.GetMutationsSinceFn(app.multiSub)
 	cleanups = append(cleanups, func() { app.multiSub.Stop() })
 
-	// Main web terminal manager: one *PTYManager per workspace, dispatched by
-	// SessionKey.Workspace. Per-workspace managers are created lazily on first
-	// AttachSession and use workspace.Path as the shell's cwd. Workspaces are
-	// registered via PTYHook (see appinfra.RegisterHooks wiring).
-	app.ptyMgr = terminal.NewMultiPTYManager(config.TerminalCmd, config.MaxTerminalSessions)
-	cleanups = append(cleanups, func() { _ = app.ptyMgr.Close() })
-	logger.Info("multi pty manager initialized", "component", "terminal", "default_command", config.TerminalCmd)
+	// Main web terminal manager. In desktop local mode this is normally a
+	// client to the persistent terminal host so PTYs survive serve/app
+	// restarts. In development and tests, keep the in-process fallback.
+	if config.TerminalHostSocket != "" {
+		hostClient := terminal.NewTerminalHostClient(config.TerminalHostSocket, config.MaxTerminalSessions)
+		app.ptyMgr = hostClient
+		cleanups = append(cleanups, func() { _ = hostClient.Close() })
+		logger.Info("terminal host client initialized", "component", "terminal", "socket", config.TerminalHostSocket)
+	} else {
+		multi := terminal.NewMultiPTYManager(config.TerminalCmd, config.MaxTerminalSessions)
+		app.ptyMgr = multi
+		cleanups = append(cleanups, func() { _ = multi.Close() })
+		logger.Info("multi pty manager initialized", "component", "terminal", "default_command", config.TerminalCmd)
+	}
 
 	// Agent-view tmux manager: kept only so the web UI can attach to tmux
 	// sessions that the CLI auto-mode creates for agents. Missing tmux is a
@@ -268,19 +275,24 @@ func NewServer(ctx context.Context, config webui.ServerConfig) (_ *Server, retEr
 	app.registry = appinfra.NewWorkspaceRegistry(config.Logger)
 	cleanups = append(cleanups, func() { _ = app.registry.Close() })
 
+	var ptyRegistrar terminal.WorkspaceRegistrar
+	if registrar, ok := app.ptyMgr.(terminal.WorkspaceRegistrar); ok {
+		ptyRegistrar = registrar
+	}
+
 	appinfra.RegisterHooks(app.registry, appinfra.HookConfig{
-		MultiPool:   app.multiPool,
-		PoolSize:    config.PoolSize,
-		MultiSub:    app.multiSub,
-		TermMgr:     app.agentTmuxMgr,
-		PTYMultiMgr: app.ptyMgr,
-		FleetReg:    app.fleetRegistry,
-		FleetURL:    config.FleetClientURL,
-		FleetWS:     config.FleetClientWorkspace,
-		FleetKey:    config.FleetClientAPIKey,
-		FleetActor:  config.FleetClientActor,
-		FleetMode:   config.FleetMode,
-		Logger:      config.Logger,
+		MultiPool:  app.multiPool,
+		PoolSize:   config.PoolSize,
+		MultiSub:   app.multiSub,
+		TermMgr:    app.agentTmuxMgr,
+		PTYMgr:     ptyRegistrar,
+		FleetReg:   app.fleetRegistry,
+		FleetURL:   config.FleetClientURL,
+		FleetWS:    config.FleetClientWorkspace,
+		FleetKey:   config.FleetClientAPIKey,
+		FleetActor: config.FleetClientActor,
+		FleetMode:  config.FleetMode,
+		Logger:     config.Logger,
 	})
 
 	workspacePathsFn := storeWorkspacePathsFn(ctx, config)

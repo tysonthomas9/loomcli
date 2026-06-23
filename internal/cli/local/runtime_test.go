@@ -61,6 +61,14 @@ func TestLocalEnvMarksDesktopRuntimeMode(t *testing.T) {
 	}
 }
 
+func TestLocalEnvSetsTerminalHostSocket(t *testing.T) {
+	env := localEnv("/tmp/loom-data", 12345)
+
+	if !containsEnv(env, "LOOM_TERMINAL_HOST_SOCKET=/tmp/loom-data/terminal-host.sock") {
+		t.Fatalf("localEnv() missing terminal host socket")
+	}
+}
+
 func TestLocalEnvPrependsExecutableDirToPath(t *testing.T) {
 	env := localEnv("/tmp/loom-data", 12345)
 	exe, err := os.Executable()
@@ -132,9 +140,10 @@ func TestLocalEnvForcesLocalFleetDBBackend(t *testing.T) {
 
 func TestRuntimeMatchesExecutableRequiresStoredBinaryHash(t *testing.T) {
 	identity := executableIdentity{
-		Path:  "/Applications/Loom.app/Contents/MacOS/loom",
-		Hash:  "current-hash",
-		Build: "current-build",
+		Path:         "/Applications/Loom.app/Contents/MacOS/loom",
+		Hash:         "current-hash",
+		Build:        "current-build",
+		FrontendHash: "frontend-current",
 	}
 
 	tests := []struct {
@@ -143,18 +152,37 @@ func TestRuntimeMatchesExecutableRequiresStoredBinaryHash(t *testing.T) {
 		want bool
 	}{
 		{
-			name: "matching hash",
-			info: &runtimeInfo{BinaryHash: "current-hash"},
+			name: "matching hashes",
+			info: &runtimeInfo{
+				BinaryHash:   "current-hash",
+				FrontendHash: "frontend-current",
+			},
 			want: true,
 		},
 		{
-			name: "different hash",
-			info: &runtimeInfo{BinaryHash: "old-hash"},
+			name: "different binary hash",
+			info: &runtimeInfo{
+				BinaryHash:   "old-hash",
+				FrontendHash: "frontend-current",
+			},
 			want: false,
 		},
 		{
-			name: "missing hash from older runtime",
-			info: &runtimeInfo{},
+			name: "different frontend hash",
+			info: &runtimeInfo{
+				BinaryHash:   "current-hash",
+				FrontendHash: "frontend-old",
+			},
+			want: false,
+		},
+		{
+			name: "missing binary hash from older runtime",
+			info: &runtimeInfo{FrontendHash: "frontend-current"},
+			want: false,
+		},
+		{
+			name: "missing frontend hash from older runtime",
+			info: &runtimeInfo{BinaryHash: "current-hash"},
 			want: false,
 		},
 	}
@@ -173,12 +201,21 @@ func TestRuntimeMatchesExecutableAllowsUnknownCurrentHash(t *testing.T) {
 	}
 }
 
+func TestRuntimeMatchesExecutableAllowsUnknownCurrentFrontendHash(t *testing.T) {
+	info := &runtimeInfo{BinaryHash: "current-hash"}
+	identity := executableIdentity{Hash: "current-hash"}
+	if !runtimeMatchesExecutable(info, identity) {
+		t.Fatal("runtimeMatchesExecutable() should not force restart when current frontend hash cannot be computed")
+	}
+}
+
 func TestApplyExecutableIdentityPersistsBuildFingerprint(t *testing.T) {
 	info := &runtimeInfo{}
 	applyExecutableIdentity(info, executableIdentity{
-		Path:  "/Applications/Loom.app/Contents/MacOS/loom",
-		Hash:  "abc123",
-		Build: "git123",
+		Path:         "/Applications/Loom.app/Contents/MacOS/loom",
+		Hash:         "abc123",
+		Build:        "git123",
+		FrontendHash: "frontend123",
 	})
 
 	if info.Executable != "/Applications/Loom.app/Contents/MacOS/loom" {
@@ -189,6 +226,9 @@ func TestApplyExecutableIdentityPersistsBuildFingerprint(t *testing.T) {
 	}
 	if info.Build != "git123" {
 		t.Fatalf("Build = %q", info.Build)
+	}
+	if info.FrontendHash != "frontend123" {
+		t.Fatalf("FrontendHash = %q", info.FrontendHash)
 	}
 }
 
@@ -281,6 +321,17 @@ func TestStopRuntimeProcessesStopsServiceAndServePIDs(t *testing.T) {
 	}
 	if processRunning(serve.Process.Pid) {
 		t.Fatalf("serve pid %d still running", serve.Process.Pid)
+	}
+}
+
+func TestRuntimePIDsExcludeTerminalHost(t *testing.T) {
+	info := &runtimeInfo{
+		PID:      101,
+		ServePID: 202,
+	}
+	got := runtimePIDs(info)
+	if len(got) != 2 || got[0] != 101 || got[1] != 202 {
+		t.Fatalf("runtimePIDs() = %v, want only service and serve pids", got)
 	}
 }
 

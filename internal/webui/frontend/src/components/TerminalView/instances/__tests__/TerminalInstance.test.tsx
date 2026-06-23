@@ -38,11 +38,13 @@ const wtermState = vi.hoisted(() => {
   return {
     stub,
     onReadyFiredCount: 0,
+    resizeBeforeReady: null as { cols: number; rows: number } | null,
   };
 });
 
 const connectionState = vi.hoisted(() => ({
   writeCallbacks: [] as Array<(data: string | Uint8Array) => void>,
+  initialSizes: [] as Array<{ cols: number; rows: number } | undefined>,
   cleanupCount: 0,
 }));
 
@@ -72,6 +74,8 @@ vi.mock("@wterm/react", async () => {
 
   const Terminal = React.forwardRef<unknown, TerminalProps>(
     function Terminal(props, ref) {
+      const { onReady, onResize } = props;
+
       React.useImperativeHandle(
         ref,
         () => ({
@@ -85,9 +89,15 @@ vi.mock("@wterm/react", async () => {
       React.useEffect(() => {
         if (wtermState.onReadyFiredCount === 0) {
           wtermState.onReadyFiredCount += 1;
-          props.onReady?.(wtermState.stub);
+          if (wtermState.resizeBeforeReady) {
+            onResize?.(
+              wtermState.resizeBeforeReady.cols,
+              wtermState.resizeBeforeReady.rows,
+            );
+          }
+          onReady?.(wtermState.stub);
         }
-      }, []);
+      }, [onReady, onResize]);
 
       return React.createElement("div", { "data-testid": "mock-wterm" });
     },
@@ -111,8 +121,15 @@ vi.mock("../terminalConnection", () => ({
       write: (data: string | Uint8Array) => void,
       _wsRef: { current: WebSocket | null },
       setConnState: (s: string) => void,
+      _onConnected?: () => void,
+      _onDisconnected?: () => void,
+      _onOutput?: () => void,
+      _onBackendCrash?: (reason: string) => void,
+      _onSessionKilled?: () => void,
+      initialSize?: { cols: number; rows: number },
     ): (() => void) => {
       connectionState.writeCallbacks.push(write);
+      connectionState.initialSizes.push(initialSize);
       setConnState("connecting");
       const cleanup = () => {
         connectionState.cleanupCount += 1;
@@ -163,7 +180,9 @@ describe("TerminalInstance", () => {
     wtermState.stub.write = vi.fn();
     wtermState.stub.element = document.createElement("div");
     wtermState.onReadyFiredCount = 0;
+    wtermState.resizeBeforeReady = null;
     connectionState.writeCallbacks.length = 0;
+    connectionState.initialSizes.length = 0;
     connectionState.cleanupCount = 0;
   });
 
@@ -242,6 +261,39 @@ describe("TerminalInstance", () => {
         latestWriteCallback()("strict-mode-bytes");
       });
       expect(writeMock).toHaveBeenCalledWith("strict-mode-bytes");
+
+      unmount();
+    });
+  });
+
+  describe("terminal sizing", () => {
+    it("does not seed the WebSocket with a transient one-column resize", async () => {
+      wtermState.resizeBeforeReady = { cols: 1, rows: 24 };
+
+      const { unmount } = render(
+        <TerminalInstance sessionName="collapsed-first" isActive />,
+      );
+      await flushPendingWork();
+
+      expect(connectionState.initialSizes.length).toBeGreaterThanOrEqual(1);
+      expect(connectionState.initialSizes[0]).toEqual({ cols: 80, rows: 24 });
+
+      unmount();
+    });
+
+    it("uses a non-collapsed resize as the initial WebSocket size", async () => {
+      wtermState.resizeBeforeReady = { cols: 120, rows: 30 };
+
+      const { unmount } = render(
+        <TerminalInstance sessionName="measured-first" isActive />,
+      );
+      await flushPendingWork();
+
+      expect(connectionState.initialSizes.length).toBeGreaterThanOrEqual(1);
+      expect(connectionState.initialSizes[0]).toEqual({
+        cols: 120,
+        rows: 30,
+      });
 
       unmount();
     });

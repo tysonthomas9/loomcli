@@ -59,23 +59,24 @@ const (
 )
 
 var (
-	servePort              int
-	serveBindAddr          string
-	serveCorsOrigin        string
-	serveFrontendURLs      []string
-	serveFrontendDir       string
-	serveWebUISocket       string
-	serveNoDaemon          bool
-	serveRedisAddr         string
-	serveRedisPassword     string
-	serveFleetMode         bool
-	serveFleetAPIKey       string
-	serveHSTS              bool
-	serveAuthURL           string
-	serveAuthIssuer        string
-	serveAuthAudience      string
-	serveAuthAllowInsecure bool
-	serveSentryDSN         string
+	servePort               int
+	serveBindAddr           string
+	serveCorsOrigin         string
+	serveFrontendURLs       []string
+	serveFrontendDir        string
+	serveWebUISocket        string
+	serveTerminalHostSocket string
+	serveNoDaemon           bool
+	serveRedisAddr          string
+	serveRedisPassword      string
+	serveFleetMode          bool
+	serveFleetAPIKey        string
+	serveHSTS               bool
+	serveAuthURL            string
+	serveAuthIssuer         string
+	serveAuthAudience       string
+	serveAuthAllowInsecure  bool
+	serveSentryDSN          string
 
 	// usageHandler holds the initialized usage HTTP handler.
 	usageHandler http.HandlerFunc
@@ -161,6 +162,7 @@ func registerServeFlags() {
 	serveCmd.Flags().StringSliceVar(&serveFrontendURLs, "frontend-url", parseFrontendURLsEnv(), "Allowed frontend origin(s) for CORS. Repeatable or comma-separated. Env: LOOM_FRONTEND_URL")
 	serveCmd.Flags().StringVar(&serveFrontendDir, "frontend-dir", os.Getenv("LOOM_FRONTEND_DIR"), "Built web UI directory to serve for non-API routes. Env: LOOM_FRONTEND_DIR")
 	serveCmd.Flags().StringVar(&serveWebUISocket, "webui-socket", "", "Daemon socket path for webui (auto-detect if empty)")
+	serveCmd.Flags().StringVar(&serveTerminalHostSocket, "terminal-host-socket", os.Getenv("LOOM_TERMINAL_HOST_SOCKET"), "Terminal host Unix socket path. Env: LOOM_TERMINAL_HOST_SOCKET")
 	serveCmd.Flags().BoolVar(&serveNoDaemon, "no-daemon", false, "Skip issue backend startup")
 	serveCmd.Flags().StringVar(&serveRedisAddr, "redis-addr", os.Getenv("LOOM_REDIS_ADDR"), "Redis address for fleet coordination (enables stale detector)")
 	serveCmd.Flags().StringVar(&serveRedisPassword, "redis-password", os.Getenv("LOOM_REDIS_PASSWORD"), "Redis password (prefer LOOM_REDIS_PASSWORD env var to avoid leaking in process list)")
@@ -625,12 +627,14 @@ func buildCoreServerConfig(monitorHandlers webui.MonitorHandlers, gitOps *opsimp
 		BindAddress:          serveBindAddr,
 		SocketPath:           serveWebUISocket,
 		FrontendDir:          serveFrontendDir,
+		Build:                cli.Build,
 		MonitorHandlers:      monitorHandlers,
 		AgentControlFn:       daemonwire.BuildAgentControlFn(),
 		DaemonSupervisorFn:   daemonwire.BuildDaemonSupervisorFn(),
 		DaemonConfigFn:       daemonwire.BuildDaemonConfigFn(),
 		AgentQueueFn:         daemonwire.BuildAgentQueueFn(),
 		TerminalCmd:          fmt.Sprintf("loom lead --backend %s", backend),
+		TerminalHostSocket:   serveTerminalHostSocket,
 		HSTSEnabled:          serveHSTS,
 		ExtAuthURL:           serveAuthURL,
 		ExtAuthIssuer:        serveAuthIssuer,

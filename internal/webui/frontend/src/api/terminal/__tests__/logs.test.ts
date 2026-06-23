@@ -167,12 +167,12 @@ describe("logs API", () => {
     it("fetches agent terminal mode", async () => {
       mockGet.mockResolvedValueOnce({
         success: true,
-        data: { agent: "ember", mode: "tmux" },
+        data: { agent: "ember", mode: "pty" },
       });
 
       const mode = await getAgentTerminalInfo("test-ws-id", "ember");
 
-      expect(mode).toBe("tmux");
+      expect(mode).toBe("pty");
       expect(mockGet).toHaveBeenCalledWith(
         "/api/workspaces/test-ws-id/agents/ember/terminal/info",
       );

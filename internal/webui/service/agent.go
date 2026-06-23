@@ -114,7 +114,7 @@ type AgentLifecycleInput struct {
 // AgentTerminalInfoResult contains the terminal mode for an agent.
 type AgentTerminalInfoResult struct {
 	Agent string
-	Mode  string // "tmux" or "archive"
+	Mode  string // "pty", "tmux", or "archive"
 }
 
 // AgentLogResult contains log file content for an agent.
@@ -154,6 +154,7 @@ type GitPushAllWorktreeResult struct {
 
 // Terminal mode constants for AgentTerminalInfoResult.Mode.
 const (
+	AgentTerminalModePTY     = "pty"
 	AgentTerminalModeTmux    = "tmux"
 	AgentTerminalModeArchive = "archive"
 )
