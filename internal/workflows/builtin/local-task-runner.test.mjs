@@ -7,13 +7,16 @@ import { afterEach, beforeEach, describe, it } from "node:test";
 
 import {
   backendArgs,
+  estimateCostUSD,
   parseNumstat,
   parseRepoSlug,
   parseStreamJSONTranscript,
+  redactSecretsInText,
   resolveBackend,
   resolveBinary,
   run,
   scrubToken,
+  taskUsageFromEntries,
 } from "./local-task-runner.ts";
 
 // A fake backend CLI that (optionally) writes a file into its cwd, emits
@@ -42,6 +45,11 @@ process.stdout.write(JSON.stringify({ type: "assistant", message: { content: [{ 
 process.stdout.write(JSON.stringify({ type: "thread.started", thread_id: "t1" }) + "\\n");
 process.stdout.write(JSON.stringify({ type: "item.completed", item: { id: "i1", type: "command_execution", command: "ls", aggregated_output: "out\\n", exit_code: 0, status: "completed" } }) + "\\n");
 process.stdout.write(JSON.stringify({ type: "item.completed", item: { id: "i2", type: "agent_message", text: "did the work" } }) + "\\n");
+// Optional terminal usage event (codex turn.completed shape), gated so the
+// existing transcript-shape tests stay unaffected.
+if (process.env.FAKE_USAGE_TOKENS) {
+  process.stdout.write(JSON.stringify({ type: "turn.completed", usage: { input_tokens: 123, output_tokens: 45, cached_input_tokens: 6 } }) + "\\n");
+}
 process.exit(exit);
 `;
 
@@ -89,6 +97,7 @@ const ENV_KEYS = [
   "FAKE_WRITE_FILE",
   "FAKE_STREAM_ERROR",
   "FAKE_STDIN_FILE",
+  "FAKE_USAGE_TOKENS",
   "FLEET_DB_URL",
   "LOOM_FLEET_DB_URL",
   "GITHUB_TOKEN",
@@ -97,6 +106,12 @@ const ENV_KEYS = [
   "LOOM_TASK_RUN_STACK_ID",
   "LOOM_TASK_RUN_OUTPUT_BRANCH",
   "LOOM_TASK_RUN_BASE_REF",
+  "LOOM_MAX_BUDGET_USD",
+  "LOOM_AGENT_EFFORT",
+  "LOOM_CLAUDE_EFFORT",
+  "LOOM_OPENCODE_MODEL",
+  "LOOM_COST_PER_MTOK_INPUT",
+  "LOOM_COST_PER_MTOK_OUTPUT",
 ];
 
 // PATH is mutated by some tests; save/restore it separately so git stays callable.
@@ -169,13 +184,17 @@ describe("local-task-runner pure helpers", () => {
 
   it("backendArgs mirror the Go backend builders", () => {
     delete process.env.LOOM_OPENCODE_MODEL; // assert the no-model opencode form
+    delete process.env.LOOM_MAX_BUDGET_USD; // assert the default-budget claude form
+    delete process.env.LOOM_AGENT_EFFORT;
+    delete process.env.LOOM_CLAUDE_EFFORT;
     // codex no longer takes the prompt positionally: trailing "-" reads it from
     // stdin (headless / no-PTY path).
     assert.deepEqual(backendArgs("codex", "/w", "P"), [
       "exec", "--json", "--dangerously-bypass-approvals-and-sandbox", "-",
     ]);
+    // claude carries the default $50 budget cap (backend_claude.go parity).
     assert.deepEqual(backendArgs("claude", "/w", "P"), [
-      "-p", "--verbose", "--output-format", "stream-json", "--dangerously-skip-permissions", "P",
+      "-p", "--verbose", "--output-format", "stream-json", "--dangerously-skip-permissions", "--max-budget-usd", "50.00", "P",
     ]);
     assert.deepEqual(backendArgs("gemini", "/w", "P"), [
       "--approval-mode=yolo", "-p", "P", "-o", "stream-json",
@@ -186,6 +205,24 @@ describe("local-task-runner pure helpers", () => {
     assert.deepEqual(backendArgs("cursor", "/w", "P"), [
       "-p", "--output-format", "stream-json", "--force", "P",
     ]);
+  });
+
+  it("claude argv carries budget+effort: default $50, override, 0 opts out, invalid falls back", () => {
+    delete process.env.LOOM_AGENT_EFFORT;
+    delete process.env.LOOM_CLAUDE_EFFORT;
+    // explicit override formats to 2 decimals
+    process.env.LOOM_MAX_BUDGET_USD = "10.5";
+    assert.deepEqual(backendArgs("claude", "/w", "P").slice(-3), ["--max-budget-usd", "10.50", "P"]);
+    // 0 opts out of the budget cap entirely
+    process.env.LOOM_MAX_BUDGET_USD = "0";
+    assert.ok(!backendArgs("claude", "/w", "P").includes("--max-budget-usd"), "0 must opt out of the budget cap");
+    // invalid -> default
+    process.env.LOOM_MAX_BUDGET_USD = "abc";
+    assert.deepEqual(backendArgs("claude", "/w", "P").slice(-3), ["--max-budget-usd", "50.00", "P"]);
+    // effort from LOOM_AGENT_EFFORT (falls back to LOOM_CLAUDE_EFFORT)
+    delete process.env.LOOM_MAX_BUDGET_USD;
+    process.env.LOOM_AGENT_EFFORT = "high";
+    assert.deepEqual(backendArgs("claude", "/w", "P").slice(-3), ["--effort", "high", "P"]);
   });
 
   it("backendArgs pins the opencode model from LOOM_OPENCODE_MODEL (Go parity)", () => {
@@ -429,6 +466,27 @@ describe("local-task-runner pure helpers", () => {
     assert.ok(result && /in=11/.test(result.text) && /out=2/.test(result.text), "snake_case usage must not be silently dropped");
   });
 
+  it("parseStreamJSONTranscript parses gemini candidates text + usageMetadata usage", () => {
+    const lines = [
+      JSON.stringify({ candidates: [{ content: { parts: [{ text: "gemini says hi" }] } }] }),
+      JSON.stringify({ candidates: [{ content: { parts: [{ text: " and more" }] } }], usageMetadata: { promptTokenCount: 200, candidatesTokenCount: 40 } }),
+    ].join("\n");
+    const entries = parseStreamJSONTranscript("gemini", lines + "\n");
+    const texts = entries.filter((e) => e.type === "text").map((e) => e.text);
+    assert.deepEqual(texts, ["gemini says hi", " and more"]);
+    // Google-native usageMetadata maps to top-level token fields (was zero before).
+    const usage = taskUsageFromEntries(entries);
+    assert.equal(usage.input_tokens, 200);
+    assert.equal(usage.output_tokens, 40);
+  });
+
+  it("parseStreamJSONTranscript accepts gemini OpenAI-compatible usage too", () => {
+    const entries = parseStreamJSONTranscript("gemini", JSON.stringify({ type: "result", usage: { input_tokens: 12, output_tokens: 3 } }) + "\n");
+    const usage = taskUsageFromEntries(entries);
+    assert.equal(usage.input_tokens, 12);
+    assert.equal(usage.output_tokens, 3);
+  });
+
   it("parseStreamJSONTranscript never emits a non-RFC3339 timestamp (bad stamp cannot poison the decode)", () => {
     const entries = parseStreamJSONTranscript("claude", JSON.stringify({ type: "user", timestamp: "not-a-date", message: { content: [{ type: "tool_result", tool_use_id: "t", content: "x" }] } }) + "\n");
     for (const e of entries) {
@@ -436,9 +494,71 @@ describe("local-task-runner pure helpers", () => {
     }
   });
 
+  it("taskUsageFromEntries surfaces codex usage as top-level token fields", () => {
+    const entries = parseStreamJSONTranscript("codex", JSON.stringify({ type: "turn.completed", usage: { input_tokens: 100, output_tokens: 20, cached_input_tokens: 30, reasoning_output_tokens: 5 } }) + "\n");
+    const usage = taskUsageFromEntries(entries);
+    assert.equal(usage.input_tokens, 100);
+    assert.equal(usage.output_tokens, 20);
+    assert.equal(usage.cache_read_tokens, 30);
+    // reasoning/duration/turns have no fleet-db TaskRun column -> not surfaced top-level
+    assert.equal(usage.reasoning_tokens, undefined);
+  });
+
+  it("taskUsageFromEntries maps claude cost_usd to estimated_cost_usd", () => {
+    const entries = parseStreamJSONTranscript("claude", JSON.stringify({ type: "result", is_error: false, total_cost_usd: 0.18, usage: { input_tokens: 8000, output_tokens: 300, cache_read_input_tokens: 12, cache_creation_input_tokens: 7 } }) + "\n");
+    const usage = taskUsageFromEntries(entries);
+    assert.equal(usage.input_tokens, 8000);
+    assert.equal(usage.output_tokens, 300);
+    assert.equal(usage.cache_read_tokens, 12);
+    assert.equal(usage.cache_write_tokens, 7);
+    assert.equal(usage.estimated_cost_usd, 0.18);
+  });
+
+  it("taskUsageFromEntries returns {} when no usage was reported", () => {
+    // minimal/gemini fallback (and early failures) have no terminal result entry,
+    // so there is nothing to surface — the runner must spread an empty object.
+    assert.deepEqual(taskUsageFromEntries([{ seq: 1, role: "system", type: "session_meta", text: "x" }]), {});
+    assert.deepEqual(taskUsageFromEntries([]), {});
+    assert.deepEqual(taskUsageFromEntries(null), {});
+  });
+
+  it("estimateCostUSD mirrors the Go pricing tiers (codex rates, claude cache, fallback)", () => {
+    delete process.env.LOOM_COST_PER_MTOK_INPUT;
+    delete process.env.LOOM_COST_PER_MTOK_OUTPUT;
+    // codex: 1M input @ $2.50 + 1M output @ $10 = $12.50
+    assert.equal(estimateCostUSD("codex", { input_tokens: 1_000_000, output_tokens: 1_000_000 }), 12.5);
+    // claude includes cache tiers: 1M cache_read @ $0.30
+    assert.equal(estimateCostUSD("claude", { cache_read_tokens: 1_000_000 }), 0.30);
+    // unknown backend (cursor/gemini) falls back to claude rates: 1M input @ $3
+    assert.equal(estimateCostUSD("cursor", { input_tokens: 1_000_000 }), 3.0);
+  });
+
+  it("estimateCostUSD honors LOOM_COST_PER_MTOK_* overrides (empty string ignored)", () => {
+    process.env.LOOM_COST_PER_MTOK_INPUT = "1";
+    process.env.LOOM_COST_PER_MTOK_OUTPUT = "2";
+    assert.equal(estimateCostUSD("codex", { input_tokens: 1_000_000, output_tokens: 1_000_000 }), 3.0);
+    // empty string is ignored (Go parity: v != "")
+    process.env.LOOM_COST_PER_MTOK_INPUT = "";
+    delete process.env.LOOM_COST_PER_MTOK_OUTPUT;
+    assert.equal(estimateCostUSD("codex", { input_tokens: 1_000_000 }), 2.5);
+  });
+
   it("scrubToken masks multiple secrets", () => {
     assert.equal(scrubToken("a S1 b S2 c", "S1", "S2"), "a *** b *** c");
     assert.equal(scrubToken("https://x-access-token:abc123@github.com/o/r"), "https://x-access-token:***@github.com/o/r");
+  });
+
+  it("redactSecretsInText redacts high-entropy tokens and known secret shapes, keeps prose/hex", () => {
+    // high-entropy random token (no known prefix) -> entropy layer
+    assert.ok(redactSecretsInText("key Zq7Xr9Tn2Kp5Wm8Lv3Bc6Df1Hg4Js0Ku5Pl8Qa2Mn6").includes("REDACTED"));
+    // known shapes -> pattern layer (low entropy but unambiguous)
+    assert.ok(redactSecretsInText("AKIAIOSFODNN7EXAMPLE").includes("REDACTED"), "AWS key");
+    assert.ok(redactSecretsInText("ghp_" + "a".repeat(36)).includes("REDACTED"), "GitHub token");
+    // ordinary prose is untouched (no >=10-char high-entropy segment)
+    assert.equal(redactSecretsInText("the quick brown fox jumps over the lazy dog"), "the quick brown fox jumps over the lazy dog");
+    // a git SHA is hex (<=16 symbols => entropy <= 4.0) and must NOT be redacted
+    const sha = "a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0";
+    assert.equal(redactSecretsInText("commit " + sha), "commit " + sha);
   });
 
   it("parseRepoSlug parses ssh, https, token-embedded, and owner/repo forms", () => {
@@ -566,7 +686,29 @@ describe("local-task-runner success", () => {
     assert.ok(out.transcript_entries.some((e) => e.role === "assistant" && e.text === "did the work"));
   });
 
-  it("produces a minimal transcript for non-stream-json backends (gemini)", async () => {
+  it("surfaces top-level token usage on the completed result (Go bridge ingests these)", async () => {
+    process.env.LOOM_TASK_RUNNER_BACKEND = "codex";
+    process.env.LOOM_WORKTREE_PATH = worktree;
+    process.env.LOOM_CODEX_BIN = fakeBin;
+    process.env.FAKE_EXIT_CODE = "0";
+    process.env.FAKE_USAGE_TOKENS = "1";
+
+    const out = await run();
+    assert.equal(out.status, "completed");
+    // The token counts the parser computed must now ride at the TOP LEVEL (not just
+    // embedded in the transcript), where internal/driver/task_bridge.go reads them
+    // into the fleet-db TaskRun. Before this fix local-CLI runs reported zero usage.
+    assert.equal(out.input_tokens, 123);
+    assert.equal(out.output_tokens, 45);
+    assert.equal(out.cache_read_tokens, 6);
+    // codex does not self-report cost -> estimated from the pricing tier (> 0).
+    assert.ok(out.estimated_cost_usd > 0, "codex usage must get an estimated cost");
+  });
+
+  it("falls back to a minimal transcript when stream-json yields no recognized entries (gemini)", async () => {
+    // gemini is a stream-json backend now, but this fake CLI emits codex-shaped
+    // events the gemini parser does not recognize -> graceful minimal fallback
+    // (session_meta + user prompt + assistant stdout tail), so evidence is preserved.
     process.env.LOOM_TASK_RUNNER_BACKEND = "gemini";
     process.env.LOOM_WORKTREE_PATH = worktree;
     process.env.LOOM_GEMINI_BIN = fakeBin;
@@ -574,7 +716,6 @@ describe("local-task-runner success", () => {
     const out = await run();
     assert.equal(out.status, "completed");
     assert.equal(out.runtimeMetadata.runtime_strategy, "local-cli-gemini");
-    // minimalTranscript: session_meta + user prompt + assistant stdout tail.
     assert.equal(out.transcript_entries.length, 3);
     assert.equal(out.transcript_entries[1].role, "user");
   });

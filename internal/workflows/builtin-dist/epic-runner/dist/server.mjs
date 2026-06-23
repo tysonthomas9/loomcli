@@ -341735,13 +341735,16 @@ function errorMessage$1(err) {
 //#region workflows/local-task-runner.ts
 var local_task_runner_exports = /* @__PURE__ */ __exportAll({
 	backendArgs: () => backendArgs,
+	estimateCostUSD: () => estimateCostUSD,
 	parseNumstat: () => parseNumstat,
 	parseRepoSlug: () => parseRepoSlug,
 	parseStreamJSONTranscript: () => parseStreamJSONTranscript,
+	redactSecretsInText: () => redactSecretsInText,
 	resolveBackend: () => resolveBackend,
 	resolveBinary: () => resolveBinary,
 	run: () => run$1,
-	scrubToken: () => scrubToken
+	scrubToken: () => scrubToken,
+	taskUsageFromEntries: () => taskUsageFromEntries
 });
 var DEFAULT_BACKEND = "codex";
 var SUPPORTED = {
@@ -341755,7 +341758,8 @@ var STREAM_JSON_BACKENDS = new Set([
 	"codex",
 	"claude",
 	"cursor",
-	"opencode"
+	"opencode",
+	"gemini"
 ]);
 async function run$1(ctx = {}) {
 	const request = await requestPayload(ctx);
@@ -341922,6 +341926,11 @@ async function run$1(ctx = {}) {
 	let transcriptEntries = STREAM_JSON_BACKENDS.has(backend) ? parseStreamJSONTranscript(backend, stdout) : minimalTranscript(backend, taskId || taskRunId, prompt, stdout);
 	if (STREAM_JSON_BACKENDS.has(backend) && !transcriptEntries.some((e) => e.role !== "system")) transcriptEntries = minimalTranscript(backend, taskId || taskRunId, prompt, stdout);
 	transcriptEntries = redactTranscriptSecrets(transcriptEntries);
+	const taskUsage = taskUsageFromEntries(transcriptEntries);
+	if (taskUsage.estimated_cost_usd == null && (taskUsage.input_tokens || taskUsage.output_tokens || taskUsage.cache_read_tokens || taskUsage.cache_write_tokens)) {
+		const cost = estimateCostUSD(backend, taskUsage);
+		if (cost > 0) taskUsage.estimated_cost_usd = cost;
+	}
 	const streamFailure = streamFailureMessage(backend, stdout);
 	const metadata = stringMetadata({
 		task_runner: "local-task-runner",
@@ -341962,6 +341971,7 @@ async function run$1(ctx = {}) {
 		errorMessage: streamFailure ? `${backend} CLI reported stream error: ${streamFailure}` : `${backend} CLI exited with code ${exitCode}`,
 		logs: logs.join("\n") + "\n",
 		logsRef: "logs://" + taskRunId,
+		...taskUsage,
 		transcript_entries: transcriptEntries,
 		patch: patchInfo.patch,
 		base_ref: baseRef,
@@ -341976,6 +341986,7 @@ async function run$1(ctx = {}) {
 		exitCode: 0,
 		logs: logs.join("\n") + "\n",
 		logsRef: "logs://" + taskRunId,
+		...taskUsage,
 		transcript_entries: transcriptEntries,
 		runtimeMetadata: metadata
 	};
@@ -342024,6 +342035,18 @@ function dirExists(filePath) {
 		return false;
 	}
 }
+var DEFAULT_MAX_BUDGET_USD = 50;
+function resolveMaxBudgetUSD() {
+	const raw = stringValue(process.env.LOOM_MAX_BUDGET_USD);
+	if (!raw) return DEFAULT_MAX_BUDGET_USD.toFixed(2);
+	const value = Number(raw);
+	if (!Number.isFinite(value) || value < 0) return DEFAULT_MAX_BUDGET_USD.toFixed(2);
+	if (value === 0) return "";
+	return value.toFixed(2);
+}
+function resolveAgentEffort() {
+	return stringValue(process.env.LOOM_AGENT_EFFORT) || stringValue(process.env.LOOM_CLAUDE_EFFORT);
+}
 function backendArgs(backend, worktree, prompt) {
 	switch (backend) {
 		case "codex": return [
@@ -342032,14 +342055,21 @@ function backendArgs(backend, worktree, prompt) {
 			"--dangerously-bypass-approvals-and-sandbox",
 			"-"
 		];
-		case "claude": return [
-			"-p",
-			"--verbose",
-			"--output-format",
-			"stream-json",
-			"--dangerously-skip-permissions",
-			prompt
-		];
+		case "claude": {
+			const claudeArgs = [
+				"-p",
+				"--verbose",
+				"--output-format",
+				"stream-json",
+				"--dangerously-skip-permissions"
+			];
+			const budget = resolveMaxBudgetUSD();
+			if (budget) claudeArgs.push("--max-budget-usd", budget);
+			const effort = resolveAgentEffort();
+			if (effort) claudeArgs.push("--effort", effort);
+			claudeArgs.push(prompt);
+			return claudeArgs;
+		}
 		case "gemini": return [
 			"--approval-mode=yolo",
 			"-p",
@@ -342229,6 +342259,69 @@ function scrubToken(text, ...tokens) {
 	for (const token of tokens) if (token) out = out.split(token).join("***");
 	return out.replace(/x-access-token:[^@\s]+@/g, "x-access-token:***@");
 }
+function shannonEntropy(s) {
+	if (!s) return 0;
+	const freq = /* @__PURE__ */ new Map();
+	for (let i = 0; i < s.length; i++) {
+		const ch = s[i];
+		freq.set(ch, (freq.get(ch) || 0) + 1);
+	}
+	let entropy = 0;
+	for (const count of freq.values()) {
+		const p = count / s.length;
+		entropy -= p * Math.log2(p);
+	}
+	return entropy;
+}
+var SECRET_PATTERNS = [
+	/-----BEGIN[A-Z ]*PRIVATE KEY-----[\s\S]*?-----END[A-Z ]*PRIVATE KEY-----/g,
+	/AKIA[0-9A-Z]{16}/g,
+	/gh[pousr]_[A-Za-z0-9]{30,}/g,
+	/github_pat_[A-Za-z0-9_]{60,}/g,
+	/sk-(?:ant-)?[A-Za-z0-9_-]{20,}/g,
+	/AIza[0-9A-Za-z_-]{35}/g,
+	/xox[baprs]-[A-Za-z0-9-]{10,}/g,
+	/eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}/g
+];
+function redactSecretsInText(text) {
+	const s = text == null ? "" : String(text);
+	if (!s) return s;
+	const regions = [];
+	const segment = /[A-Za-z0-9+_=-]{10,}/g;
+	let m;
+	while ((m = segment.exec(s)) !== null) {
+		let start = m.index;
+		const end = start + m[0].length;
+		if (start > 0 && s[start - 1] === "\\" && "ntrbfu\"\\/".includes(s[start])) {
+			start += 1;
+			if (end - start < 10) continue;
+		}
+		if (shannonEntropy(s.slice(start, end)) > 4.5) regions.push([start, end]);
+	}
+	for (const pattern of SECRET_PATTERNS) {
+		pattern.lastIndex = 0;
+		let pm;
+		while ((pm = pattern.exec(s)) !== null) {
+			regions.push([pm.index, pm.index + pm[0].length]);
+			if (pm[0].length === 0) pattern.lastIndex += 1;
+		}
+	}
+	if (!regions.length) return s;
+	regions.sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+	const merged = [];
+	for (const [start, end] of regions) {
+		const last = merged[merged.length - 1];
+		if (last && start <= last[1]) last[1] = Math.max(last[1], end);
+		else merged.push([start, end]);
+	}
+	let out = "";
+	let cursor = 0;
+	for (const [start, end] of merged) {
+		out += s.slice(cursor, start) + "REDACTED";
+		cursor = end;
+	}
+	return out + s.slice(cursor);
+}
 function redactTranscriptSecrets(entries, env = process.env) {
 	const names = [
 		"GITHUB_TOKEN",
@@ -342248,10 +342341,10 @@ function redactTranscriptSecrets(entries, env = process.env) {
 		const value = env[name];
 		if (value && String(value).length >= 8) secrets.push(String(value));
 	}
-	if (!secrets.length) return entries;
+	const redact = (value) => redactSecretsInText(secrets.length ? scrubToken(value, ...secrets) : value);
 	for (const entry of entries) {
-		if (entry.text) entry.text = scrubToken(entry.text, ...secrets);
-		if (entry.output) entry.output = scrubToken(entry.output, ...secrets);
+		if (entry.text) entry.text = redact(entry.text);
+		if (entry.output) entry.output = redact(entry.output);
 	}
 	return entries;
 }
@@ -342445,7 +342538,7 @@ function parseStreamJSONTranscript(backend, stdout) {
 			events.push(JSON.parse(trimmed.slice(start)));
 		} catch {}
 	}
-	const build = backend === "claude" ? claudeTranscript : backend === "cursor" ? cursorTranscript : backend === "opencode" ? opencodeTranscript : codexTranscript;
+	const build = backend === "claude" ? claudeTranscript : backend === "cursor" ? cursorTranscript : backend === "opencode" ? opencodeTranscript : backend === "gemini" ? geminiTranscript : codexTranscript;
 	const fallbackTs = (/* @__PURE__ */ new Date()).toISOString();
 	const resolved = build(events).map((entry) => ({
 		entry,
@@ -342471,6 +342564,74 @@ function parseStreamJSONTranscript(backend, stdout) {
 		});
 	}
 	return entries;
+}
+function taskUsageFromEntries(entries) {
+	if (!Array.isArray(entries)) return {};
+	let usage = null;
+	for (let i = entries.length - 1; i >= 0; i--) {
+		const entry = entries[i];
+		if (entry && entry.type === "result" && entry.output) {
+			try {
+				usage = JSON.parse(entry.output);
+			} catch {
+				usage = null;
+			}
+			break;
+		}
+	}
+	if (!usage || typeof usage !== "object") return {};
+	const out = {};
+	const set = (key, value) => {
+		const num = Number(value);
+		if (Number.isFinite(num)) out[key] = num;
+	};
+	set("input_tokens", usage.input_tokens);
+	set("output_tokens", usage.output_tokens);
+	set("cache_read_tokens", usage.cache_read_tokens);
+	set("cache_write_tokens", usage.cache_write_tokens);
+	set("estimated_cost_usd", usage.cost_usd != null ? usage.cost_usd : usage.estimated_cost_usd);
+	return out;
+}
+var DEFAULT_PRICING = {
+	claude: {
+		inputPerMTok: 3,
+		outputPerMTok: 15,
+		cacheReadPerMTok: .3,
+		cacheWritePerMTok: 3.75
+	},
+	codex: {
+		inputPerMTok: 2.5,
+		outputPerMTok: 10,
+		cacheReadPerMTok: 0,
+		cacheWritePerMTok: 0
+	},
+	opencode: {
+		inputPerMTok: 3,
+		outputPerMTok: 15,
+		cacheReadPerMTok: 0,
+		cacheWritePerMTok: 0
+	}
+};
+function resolvePricing(backend) {
+	const tier = { ...DEFAULT_PRICING[backend] || DEFAULT_PRICING.claude };
+	const inputRaw = stringValue(process.env.LOOM_COST_PER_MTOK_INPUT);
+	if (inputRaw) {
+		const value = Number(inputRaw);
+		if (Number.isFinite(value)) tier.inputPerMTok = value;
+	}
+	const outputRaw = stringValue(process.env.LOOM_COST_PER_MTOK_OUTPUT);
+	if (outputRaw) {
+		const value = Number(outputRaw);
+		if (Number.isFinite(value)) tier.outputPerMTok = value;
+	}
+	return tier;
+}
+function estimateCostUSD(backend, usage) {
+	const tier = resolvePricing(backend);
+	const u = usage || {};
+	const mtok = 1e6;
+	const n = (value) => Number.isFinite(Number(value)) ? Number(value) : 0;
+	return n(u.input_tokens) / mtok * tier.inputPerMTok + n(u.output_tokens) / mtok * tier.outputPerMTok + n(u.cache_read_tokens) / mtok * tier.cacheReadPerMTok + n(u.cache_write_tokens) / mtok * tier.cacheWritePerMTok;
 }
 function streamFailureMessage(backend, stdout) {
 	if (backend !== "opencode") return "";
@@ -342811,6 +342972,44 @@ function opencodeTranscript(events) {
 	if (status || usage) out.push(resultEntry(status, usage, lastTs));
 	return out;
 }
+function geminiTranscript(events) {
+	const out = [];
+	let usage = null;
+	for (const event of events) {
+		if (!event || typeof event !== "object") continue;
+		const candidates = Array.isArray(event.candidates) ? event.candidates : [];
+		for (const candidate of candidates) {
+			const parts = candidate && candidate.content && Array.isArray(candidate.content.parts) ? candidate.content.parts : [];
+			for (const part of parts) {
+				const text = rawString(part && part.text);
+				if (text) out.push({
+					role: "assistant",
+					type: "text",
+					text
+				});
+			}
+		}
+		if (!candidates.length) {
+			const flat = rawString(event.text) || rawString(event.content) || rawString(event.response) || event.message && rawString(event.message.text) || "";
+			const type = stringValue(event.type);
+			if (flat && (!type || type.includes("content") || type.includes("text") || type.includes("assistant") || type.includes("message") || type.includes("response"))) out.push({
+				role: "assistant",
+				type: "text",
+				text: flat
+			});
+		}
+		if (event.usage && typeof event.usage === "object") usage = normalizeUsage({
+			input_tokens: event.usage.input_tokens != null ? event.usage.input_tokens : event.usage.inputTokens,
+			output_tokens: event.usage.output_tokens != null ? event.usage.output_tokens : event.usage.outputTokens
+		});
+		else if (event.usageMetadata && typeof event.usageMetadata === "object") usage = normalizeUsage({
+			input_tokens: event.usageMetadata.promptTokenCount,
+			output_tokens: event.usageMetadata.candidatesTokenCount
+		});
+	}
+	if (usage) out.push(resultEntry(null, usage));
+	return out;
+}
 function minimalTranscript(backend, label, prompt, stdout) {
 	const now = (/* @__PURE__ */ new Date()).toISOString();
 	return [
@@ -343078,7 +343277,7 @@ var websocketTransport = isLocalCliMode ? void 0 : createNodeWebSocketTransport(
 configureFlueRuntime({
 	target: "node",
 	devMode: isLocalMode,
-	runtimeVersion: "0.10.1",
+	runtimeVersion: "1.0.0-beta.2",
 	manifest,
 	createAdmission,
 	dispatchQueue,

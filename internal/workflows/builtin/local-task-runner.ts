@@ -27,7 +27,7 @@ const SUPPORTED = {
 };
 
 // STREAM_JSON_BACKENDS get first-class stream-json -> canonical transcript_entries.
-const STREAM_JSON_BACKENDS = new Set(["codex", "claude", "cursor", "opencode"]);
+const STREAM_JSON_BACKENDS = new Set(["codex", "claude", "cursor", "opencode", "gemini"]);
 
 export async function run(ctx = {}) {
   const request = await requestPayload(ctx);
@@ -206,6 +206,20 @@ export async function run(ctx = {}) {
   // Tool outputs now persist (the `output` field) and the agent inherits host
   // secrets — scrub known secret values that may have been echoed into output.
   transcriptEntries = redactTranscriptSecrets(transcriptEntries);
+  // Surface the token usage the parser computed (embedded in the terminal result
+  // entry) as top-level fields so the Go host-bridge ingests it into the fleet-db
+  // TaskRun — without this, local-CLI runs report zero usage while daytona does not.
+  const taskUsage = taskUsageFromEntries(transcriptEntries);
+  // Backends that do not self-report a cost (codex/cursor/gemini) get an estimated
+  // cost from the per-backend pricing tier (mirrors the Go usage.EstimateCost path);
+  // claude/opencode keep their self-reported cost.
+  if (taskUsage.estimated_cost_usd == null &&
+      (taskUsage.input_tokens || taskUsage.output_tokens || taskUsage.cache_read_tokens || taskUsage.cache_write_tokens)) {
+    const cost = estimateCostUSD(backend, taskUsage);
+    if (cost > 0) {
+      taskUsage.estimated_cost_usd = cost;
+    }
+  }
   const streamFailure = streamFailureMessage(backend, stdout);
 
   const metadata = stringMetadata({
@@ -263,6 +277,7 @@ export async function run(ctx = {}) {
       errorMessage: failureMessage,
       logs: logs.join("\n") + "\n",
       logsRef: "logs://" + taskRunId,
+      ...taskUsage,
       transcript_entries: transcriptEntries,
       patch: patchInfo.patch,
       // base_ref lets the driver host-bridge patch-back apply this patch to the
@@ -278,6 +293,7 @@ export async function run(ctx = {}) {
     exitCode: 0,
     logs: logs.join("\n") + "\n",
     logsRef: "logs://" + taskRunId,
+    ...taskUsage,
     transcript_entries: transcriptEntries,
     runtimeMetadata: metadata,
   };
@@ -356,6 +372,33 @@ function dirExists(filePath) {
   }
 }
 
+// DefaultMaxBudgetUSD mirrors internal/cli/backends/backend_claude.go.
+const DEFAULT_MAX_BUDGET_USD = 50.0;
+
+// resolveMaxBudgetUSD mirrors backend_claude.go resolveMaxBudgetUSD: read
+// LOOM_MAX_BUDGET_USD (default $50.00); "0" opts out (returns ""); invalid or
+// negative values fall back to the default. Returns a "%.2f"-formatted string.
+function resolveMaxBudgetUSD() {
+  const raw = stringValue(process.env.LOOM_MAX_BUDGET_USD);
+  if (!raw) {
+    return DEFAULT_MAX_BUDGET_USD.toFixed(2);
+  }
+  const value = Number(raw);
+  if (!Number.isFinite(value) || value < 0) {
+    return DEFAULT_MAX_BUDGET_USD.toFixed(2);
+  }
+  if (value === 0) {
+    return ""; // explicit opt-out
+  }
+  return value.toFixed(2);
+}
+
+// resolveAgentEffort mirrors backend_claude.go resolveAgentEffort:
+// LOOM_AGENT_EFFORT, then LOOM_CLAUDE_EFFORT.
+function resolveAgentEffort() {
+  return stringValue(process.env.LOOM_AGENT_EFFORT) || stringValue(process.env.LOOM_CLAUDE_EFFORT);
+}
+
 // backendArgs mirrors the non-interactive argument lists built in
 // internal/cli/backends/backend_<backend>.go. Keep these in sync with those
 // builders so the local runner invokes each CLI exactly as loom's agent path does.
@@ -367,9 +410,23 @@ export function backendArgs(backend, worktree, prompt) {
       // positionally because it runs under a PTY; without a PTY codex blocks on
       // an open stdin pipe, so we deliver the prompt over stdin instead.
       return ["exec", "--json", "--dangerously-bypass-approvals-and-sandbox", "-"];
-    case "claude":
-      // buildClaudeNonInteractiveArgs: -p --verbose --output-format stream-json --dangerously-skip-permissions; prompt last.
-      return ["-p", "--verbose", "--output-format", "stream-json", "--dangerously-skip-permissions", prompt];
+    case "claude": {
+      // buildClaudeNonInteractiveArgs: -p --verbose --output-format stream-json
+      // --dangerously-skip-permissions [--max-budget-usd N] [--effort E]; prompt last.
+      // (--resume is owned by the durability/resume path and is added there once
+      // session carry-forward exists — it is not part of a cold local run.)
+      const claudeArgs = ["-p", "--verbose", "--output-format", "stream-json", "--dangerously-skip-permissions"];
+      const budget = resolveMaxBudgetUSD();
+      if (budget) {
+        claudeArgs.push("--max-budget-usd", budget);
+      }
+      const effort = resolveAgentEffort();
+      if (effort) {
+        claudeArgs.push("--effort", effort);
+      }
+      claudeArgs.push(prompt);
+      return claudeArgs;
+    }
     case "gemini":
       // defaultGeminiNonInteractiveInvoker: --approval-mode=yolo -p <prompt> -o stream-json.
       return ["--approval-mode=yolo", "-p", prompt, "-o", "stream-json"];
@@ -596,9 +653,108 @@ export function scrubToken(text, ...tokens) {
   return out.replace(/x-access-token:[^@\s]+@/g, "x-access-token:***@");
 }
 
-// redactTranscriptSecrets masks known secret env values that the agent could
-// have echoed into tool output/text — now persisted via the `output` field —
-// before the transcript is written.
+// shannonEntropy is the byte-frequency Shannon entropy of s (bits/symbol), ported
+// verbatim from internal/sessions/redact/redact.go. The secret segments it scores
+// are ASCII by construction, so per-char iteration matches Go's per-byte.
+function shannonEntropy(s) {
+  if (!s) {
+    return 0;
+  }
+  const freq = new Map();
+  for (let i = 0; i < s.length; i++) {
+    const ch = s[i];
+    freq.set(ch, (freq.get(ch) || 0) + 1);
+  }
+  let entropy = 0;
+  for (const count of freq.values()) {
+    const p = count / s.length;
+    entropy -= p * Math.log2(p);
+  }
+  return entropy;
+}
+
+// SECRET_PATTERNS is a curated, high-precision subset of the gitleaks default
+// ruleset the Go redactor applies. These prefixed shapes have near-zero false
+// positives and catch structured secrets whose entropy is below threshold (a PEM
+// block, or a JWT broken into low-entropy dot-separated segments). The full
+// 180-rule gitleaks set is a follow-up; the canonical Go redactor (gitleaks +
+// entropy) still runs on the native-transcript path.
+const SECRET_PATTERNS = [
+  /-----BEGIN[A-Z ]*PRIVATE KEY-----[\s\S]*?-----END[A-Z ]*PRIVATE KEY-----/g, // PEM private keys
+  /AKIA[0-9A-Z]{16}/g, // AWS access key id
+  /gh[pousr]_[A-Za-z0-9]{30,}/g, // GitHub tokens (ghp_/gho_/ghu_/ghs_/ghr_)
+  /github_pat_[A-Za-z0-9_]{60,}/g, // GitHub fine-grained PAT
+  /sk-(?:ant-)?[A-Za-z0-9_-]{20,}/g, // OpenAI / Anthropic API keys
+  /AIza[0-9A-Za-z_-]{35}/g, // Google API key
+  /xox[baprs]-[A-Za-z0-9-]{10,}/g, // Slack token
+  /eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}/g, // JWT
+];
+
+// redactSecretsInText replaces secrets in text with "REDACTED", flagging a
+// substring if EITHER its Shannon entropy exceeds 4.5 OR it matches a known secret
+// shape — the layered approach of internal/sessions/redact/redact.go.
+export function redactSecretsInText(text) {
+  const s = text == null ? "" : String(text);
+  if (!s) {
+    return s;
+  }
+  const regions = [];
+  // Entropy layer: high-entropy [A-Za-z0-9+_=-]{10,} segments (/ excluded so file
+  // paths are not matched as one token).
+  const segment = /[A-Za-z0-9+_=-]{10,}/g;
+  let m;
+  while ((m = segment.exec(s)) !== null) {
+    let start = m.index;
+    const end = start + m[0].length;
+    // Don't consume a character that is part of a JSON escape sequence (e.g. the
+    // 'n' in "\n"), which would leave a dangling backslash before "REDACTED".
+    if (start > 0 && s[start - 1] === "\\" && "ntrbfu\"\\/".includes(s[start])) {
+      start += 1;
+      if (end - start < 10) {
+        continue;
+      }
+    }
+    if (shannonEntropy(s.slice(start, end)) > 4.5) {
+      regions.push([start, end]);
+    }
+  }
+  // Pattern layer: known high-precision secret shapes.
+  for (const pattern of SECRET_PATTERNS) {
+    pattern.lastIndex = 0;
+    let pm;
+    while ((pm = pattern.exec(s)) !== null) {
+      regions.push([pm.index, pm.index + pm[0].length]);
+      if (pm[0].length === 0) {
+        pattern.lastIndex += 1;
+      }
+    }
+  }
+  if (!regions.length) {
+    return s;
+  }
+  regions.sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+  const merged = [];
+  for (const [start, end] of regions) {
+    const last = merged[merged.length - 1];
+    if (last && start <= last[1]) {
+      last[1] = Math.max(last[1], end);
+    } else {
+      merged.push([start, end]);
+    }
+  }
+  let out = "";
+  let cursor = 0;
+  for (const [start, end] of merged) {
+    out += s.slice(cursor, start) + "REDACTED";
+    cursor = end;
+  }
+  return out + s.slice(cursor);
+}
+
+// redactTranscriptSecrets scrubs secrets the agent could have echoed into tool
+// output/text — now persisted via the `output` field — before the transcript is
+// written: first the exact values of known secret env vars, then entropy/pattern
+// detection for secrets that are NOT in that env allowlist.
 function redactTranscriptSecrets(entries, env = process.env) {
   const names = [
     "GITHUB_TOKEN", "GH_TOKEN", "LOOM_PR_GIT_PASSWORD",
@@ -613,15 +769,13 @@ function redactTranscriptSecrets(entries, env = process.env) {
       secrets.push(String(value));
     }
   }
-  if (!secrets.length) {
-    return entries;
-  }
+  const redact = (value) => redactSecretsInText(secrets.length ? scrubToken(value, ...secrets) : value);
   for (const entry of entries) {
     if (entry.text) {
-      entry.text = scrubToken(entry.text, ...secrets);
+      entry.text = redact(entry.text);
     }
     if (entry.output) {
-      entry.output = scrubToken(entry.output, ...secrets);
+      entry.output = redact(entry.output);
     }
   }
   return entries;
@@ -816,7 +970,8 @@ export function parseStreamJSONTranscript(backend, stdout) {
     backend === "claude" ? claudeTranscript
       : backend === "cursor" ? cursorTranscript
         : backend === "opencode" ? opencodeTranscript
-          : codexTranscript;
+          : backend === "gemini" ? geminiTranscript
+            : codexTranscript;
   const fallbackTs = new Date().toISOString();
   // Backends stamp only some events (e.g. claude stamps user/tool_result events
   // but not assistant ones). Resolve each entry's own timestamp, then forward-fill
@@ -838,6 +993,94 @@ export function parseStreamJSONTranscript(backend, stdout) {
     entries.push({ seq: seq++, timestamp: cursorTs, ...rest });
   }
   return entries;
+}
+
+// taskUsageFromEntries recovers the token usage the terminal `result` entry
+// carries (resultEntry serializes the parsed usage object into its `output`
+// field) and maps it onto the snake_case top-level token/cost fields the Go
+// host-bridge reads from the runner result (internal/driver/task_bridge.go) and
+// persists to the fleet-db TaskRun. The daytona runner surfaces the same shape
+// via @loom/sdk/runtime-adapters' flueUsageToTaskUsage; the local runner is kept
+// loadable without the SDK (see loadTask), so it maps here instead. Returns {}
+// when no usage was reported (minimal/gemini fallback, or an early failure).
+export function taskUsageFromEntries(entries) {
+  if (!Array.isArray(entries)) {
+    return {};
+  }
+  let usage = null;
+  for (let i = entries.length - 1; i >= 0; i--) {
+    const entry = entries[i];
+    if (entry && entry.type === "result" && entry.output) {
+      try {
+        usage = JSON.parse(entry.output);
+      } catch {
+        usage = null;
+      }
+      break;
+    }
+  }
+  if (!usage || typeof usage !== "object") {
+    return {};
+  }
+  const out = {};
+  const set = (key, value) => {
+    const num = Number(value);
+    if (Number.isFinite(num)) {
+      out[key] = num;
+    }
+  };
+  set("input_tokens", usage.input_tokens);
+  set("output_tokens", usage.output_tokens);
+  set("cache_read_tokens", usage.cache_read_tokens);
+  set("cache_write_tokens", usage.cache_write_tokens);
+  set("estimated_cost_usd", usage.cost_usd != null ? usage.cost_usd : usage.estimated_cost_usd);
+  return out;
+}
+
+// DEFAULT_PRICING mirrors internal/usage/usage.go DefaultPricing — per-MTok USD
+// rates. Backends absent here (cursor, gemini) fall back to claude rates.
+const DEFAULT_PRICING = {
+  claude: { inputPerMTok: 3.0, outputPerMTok: 15.0, cacheReadPerMTok: 0.30, cacheWritePerMTok: 3.75 },
+  codex: { inputPerMTok: 2.50, outputPerMTok: 10.0, cacheReadPerMTok: 0, cacheWritePerMTok: 0 },
+  opencode: { inputPerMTok: 3.0, outputPerMTok: 15.0, cacheReadPerMTok: 0, cacheWritePerMTok: 0 },
+};
+
+// resolvePricing mirrors usage.go ResolvePricing: the backend's tier or a claude
+// fallback, with LOOM_COST_PER_MTOK_INPUT / LOOM_COST_PER_MTOK_OUTPUT overrides
+// (non-empty + parseable, matching the Go `v != ""` guard).
+function resolvePricing(backend) {
+  const tier = { ...(DEFAULT_PRICING[backend] || DEFAULT_PRICING.claude) };
+  const inputRaw = stringValue(process.env.LOOM_COST_PER_MTOK_INPUT);
+  if (inputRaw) {
+    const value = Number(inputRaw);
+    if (Number.isFinite(value)) {
+      tier.inputPerMTok = value;
+    }
+  }
+  const outputRaw = stringValue(process.env.LOOM_COST_PER_MTOK_OUTPUT);
+  if (outputRaw) {
+    const value = Number(outputRaw);
+    if (Number.isFinite(value)) {
+      tier.outputPerMTok = value;
+    }
+  }
+  return tier;
+}
+
+// estimateCostUSD mirrors usage.go EstimateCost: tokens/1e6 * per-MTok rate, summed
+// across input/output/cache. Used to fill estimated_cost_usd for backends that do
+// not self-report a cost (codex/cursor/gemini).
+export function estimateCostUSD(backend, usage) {
+  const tier = resolvePricing(backend);
+  const u = usage || {};
+  const mtok = 1000000;
+  const n = (value) => (Number.isFinite(Number(value)) ? Number(value) : 0);
+  return (
+    (n(u.input_tokens) / mtok) * tier.inputPerMTok +
+    (n(u.output_tokens) / mtok) * tier.outputPerMTok +
+    (n(u.cache_read_tokens) / mtok) * tier.cacheReadPerMTok +
+    (n(u.cache_write_tokens) / mtok) * tier.cacheWritePerMTok
+  );
 }
 
 function streamFailureMessage(backend, stdout) {
@@ -1263,9 +1506,59 @@ function opencodeTranscript(events) {
   return out;
 }
 
-// minimalTranscript is the fallback for backends without a structured event
-// stream (e.g. gemini): a session_meta marker, the user prompt, and a final
-// assistant entry carrying the CLI stdout tail. Real evidence, just unstructured.
+// geminiTranscript maps gemini `-o stream-json` events. Assistant text arrives as
+// Google-native candidates[].content.parts[].text (GenerateContent streaming) or
+// as a flat text/content/response field. Token usage rides on `usage`
+// (OpenAI-compatible {input_tokens,output_tokens}) or `usageMetadata`
+// ({promptTokenCount,candidatesTokenCount}) — mirrors backend_gemini.go's
+// collectGeminiStreamUsage. usageMetadata is cumulative across chunks, so the last
+// value wins (summing would double-count). Before this, gemini got no usage at all.
+function geminiTranscript(events) {
+  const out = [];
+  let usage = null;
+  for (const event of events) {
+    if (!event || typeof event !== "object") {
+      continue;
+    }
+    const candidates = Array.isArray(event.candidates) ? event.candidates : [];
+    for (const candidate of candidates) {
+      const parts = candidate && candidate.content && Array.isArray(candidate.content.parts) ? candidate.content.parts : [];
+      for (const part of parts) {
+        const text = rawString(part && part.text);
+        if (text) {
+          out.push({ role: "assistant", type: "text", text });
+        }
+      }
+    }
+    if (!candidates.length) {
+      const flat = rawString(event.text) || rawString(event.content) || rawString(event.response) || (event.message && rawString(event.message.text)) || "";
+      const type = stringValue(event.type);
+      if (flat && (!type || type.includes("content") || type.includes("text") || type.includes("assistant") || type.includes("message") || type.includes("response"))) {
+        out.push({ role: "assistant", type: "text", text: flat });
+      }
+    }
+    if (event.usage && typeof event.usage === "object") {
+      usage = normalizeUsage({
+        input_tokens: event.usage.input_tokens != null ? event.usage.input_tokens : event.usage.inputTokens,
+        output_tokens: event.usage.output_tokens != null ? event.usage.output_tokens : event.usage.outputTokens,
+      });
+    } else if (event.usageMetadata && typeof event.usageMetadata === "object") {
+      usage = normalizeUsage({
+        input_tokens: event.usageMetadata.promptTokenCount,
+        output_tokens: event.usageMetadata.candidatesTokenCount,
+      });
+    }
+  }
+  if (usage) {
+    out.push(resultEntry(null, usage));
+  }
+  return out;
+}
+
+// minimalTranscript is the fallback when a backend has no structured event stream,
+// or when a stream-json backend emits output the parser does not recognize: a
+// session_meta marker, the user prompt, and a final assistant entry carrying the
+// CLI stdout tail. Real evidence, just unstructured.
 function minimalTranscript(backend, label, prompt, stdout) {
   const now = new Date().toISOString();
   return [
