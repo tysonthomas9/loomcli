@@ -1,6 +1,8 @@
 package terminal
 
 import (
+	"time"
+
 	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
 	"github.com/tysonthomas9/loomcli/internal/webui/tabmeta"
 )
@@ -74,12 +76,20 @@ type PTYCommandRunner interface {
 	WriteToSession(key SessionKey, p []byte) error
 }
 
+// PTYLifetime is implemented by PTY sources that expose their detached-session
+// grace and idle windows. The app surfaces these to the UI as the terminal
+// reconnect/idle timeouts. Sources without configurable lifetimes (and the
+// remote terminal host, which reports 0) still satisfy it.
+type PTYLifetime interface {
+	GracePeriod() time.Duration
+	IdleTimeout() time.Duration
+}
+
 // WorkspaceRegistrar is implemented by PTY sources that need workspace ID →
 // filesystem path registration before sessions can be created. The web app
 // lifecycle hook uses EnsureRegistered so a restarted serve process does not
 // tear down already-running sessions owned by an external terminal host.
 type WorkspaceRegistrar interface {
-	Register(wsID, path string) error
 	EnsureRegistered(wsID, path string) error
 	Deregister(wsID string)
 }
@@ -121,6 +131,8 @@ type Attachment interface {
 var (
 	_ PTYSource          = (*PTYManager)(nil)
 	_ PTYSource          = (*MultiPTYManager)(nil)
+	_ PTYLifetime        = (*PTYManager)(nil)
+	_ PTYLifetime        = (*MultiPTYManager)(nil)
 	_ PTYCommandRunner   = (*PTYManager)(nil)
 	_ PTYCommandRunner   = (*MultiPTYManager)(nil)
 	_ WorkspaceRegistrar = (*MultiPTYManager)(nil)

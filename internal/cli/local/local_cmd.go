@@ -262,11 +262,7 @@ func startServeProcess(ctx context.Context, cfg *localServiceConfig, logFile *os
 		_ = writeRuntime(cfg.dataDir, info)
 		return nil, fmt.Errorf("start loom serve: %w", err)
 	}
-	serveCmd.Env = localEnv(cfg.dataDir, cfg.port)
-	serveCmd.Dir = cfg.dataDir
-	serveCmd.Stdout = logFile
-	serveCmd.Stderr = logFile
-	serveCmd.SysProcAttr = newDetachedSysProcAttr()
+	configureDetachedCmd(serveCmd, cfg, logFile)
 	if err := serveCmd.Start(); err != nil {
 		info.Status = "failed"
 		info.Error = err.Error()
@@ -279,6 +275,17 @@ func startServeProcess(ctx context.Context, cfg *localServiceConfig, logFile *os
 		return nil, err
 	}
 	return serveCmd, nil
+}
+
+// configureDetachedCmd wires a re-exec'd child to run detached: inheriting the
+// local service environment and data dir, logging to logFile, and surviving the
+// parent via newDetachedSysProcAttr.
+func configureDetachedCmd(cmd *exec.Cmd, cfg *localServiceConfig, logFile *os.File) {
+	cmd.Env = localEnv(cfg.dataDir, cfg.port)
+	cmd.Dir = cfg.dataDir
+	cmd.Stdout = logFile
+	cmd.Stderr = logFile
+	cmd.SysProcAttr = newDetachedSysProcAttr()
 }
 
 // serveStartupLogTailBytes caps how much of loom-serve.log we splice into
@@ -595,18 +602,12 @@ func runStop(cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		return fmt.Errorf("read runtime: %w", err)
 	}
+	msg := "Loom local runtime stopped."
 	if !runtimeProcessRunning(info) {
 		info.Status = "stopped"
 		_ = writeRuntime(dataDir, info)
-		if includeTerminalsFlag {
-			if err := stopTerminalHost(dataDir, 15*time.Second); err != nil {
-				return err
-			}
-		}
-		_, _ = fmt.Fprintln(cmd.OutOrStdout(), "Loom local runtime is not running.")
-		return nil
-	}
-	if err := stopRuntimeProcesses(info, 15*time.Second); err != nil {
+		msg = "Loom local runtime is not running."
+	} else if err := stopRuntimeProcesses(info, 15*time.Second); err != nil {
 		return err
 	}
 	if includeTerminalsFlag {
@@ -614,7 +615,7 @@ func runStop(cmd *cobra.Command, _ []string) error {
 			return err
 		}
 	}
-	_, _ = fmt.Fprintln(cmd.OutOrStdout(), "Loom local runtime stopped.")
+	_, _ = fmt.Fprintln(cmd.OutOrStdout(), msg)
 	return nil
 }
 

@@ -517,7 +517,7 @@ export const TerminalInstance = forwardRef<
         return;
       }
       const measured = measureTerminalSize(wt);
-      if (measured && isUsableTerminalSize(measured.cols, measured.rows)) {
+      if (measured) {
         terminalSizeRef.current = measured;
         if (wt.cols !== measured.cols || wt.rows !== measured.rows) {
           wt.resize(measured.cols, measured.rows);

@@ -1352,6 +1352,20 @@ describe("issueStore", () => {
       expect(store.getState().showStaleBanner).toBe(false);
     });
 
+    it("clears stale banner when reconnect passes through connecting", () => {
+      store.getState().setConnectionState("reconnecting");
+      vi.advanceTimersByTime(5000);
+      expect(store.getState().showStaleBanner).toBe(true);
+      expect(store.getState().disconnectedSince).not.toBeNull();
+
+      store.getState().setConnectionState("connecting");
+      store.getState().setConnectionState("connected");
+
+      expect(store.getState().showStaleBanner).toBe(false);
+      expect(store.getState().connectionLost).toBe(false);
+      expect(store.getState().disconnectedSince).toBeNull();
+    });
+
     it("sets connectionLost when reconnectAttempts >= 10", () => {
       store.getState().setReconnectAttempts(10);
       expect(store.getState().connectionLost).toBe(true);

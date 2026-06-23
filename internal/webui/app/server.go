@@ -5,6 +5,7 @@ package app
 import (
 	"context"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"net/http"
@@ -143,10 +144,7 @@ func (app *Server) buildHandlers() {
 	var maxSess int
 	if app.ptyMgr != nil {
 		maxSess = app.ptyMgr.MaxSessions()
-		if lifetime, ok := app.ptyMgr.(interface {
-			GracePeriod() time.Duration
-			IdleTimeout() time.Duration
-		}); ok {
+		if lifetime, ok := app.ptyMgr.(terminal.PTYLifetime); ok {
 			graceMS = lifetime.GracePeriod().Milliseconds()
 			idleMS = lifetime.IdleTimeout().Milliseconds()
 		}
@@ -339,7 +337,7 @@ func (app *Server) run(ctx context.Context) error { //nolint:funlen // server li
 
 	// Stop terminal managers (close PTYs; detach agent-view tmux attaches)
 	if app.ptyMgr != nil {
-		if closer, ok := app.ptyMgr.(interface{ Close() error }); ok {
+		if closer, ok := app.ptyMgr.(io.Closer); ok {
 			if err := closer.Close(); err != nil {
 				logger.Warn("error closing pty manager", "component", "terminal", "err", err)
 			} else {

@@ -186,7 +186,7 @@ func (s *TerminalHostServer) handleAttach(conn net.Conn, dec *json.Decoder, req 
 		select {
 		case chunk, ok := <-att.Output():
 			if !ok {
-				_ = enc.Encode(&terminalHostStreamMessage{Op: "closed", ExitReason: att.ExitReason()})
+				_ = enc.Encode(&terminalHostStreamMessage{Op: terminalHostOpClosed, ExitReason: att.ExitReason()})
 				_ = conn.Close()
 				<-controlDone
 				return

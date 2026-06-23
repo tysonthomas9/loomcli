@@ -9,7 +9,6 @@ const TerminalHostProtocolVersion = 1
 
 const (
 	terminalHostOpAttach          = "attach"
-	terminalHostOpAttached        = "attached"
 	terminalHostOpOutput          = "output"
 	terminalHostOpInput           = "input"
 	terminalHostOpResize          = "resize"
@@ -25,6 +24,7 @@ const (
 	terminalHostOpEnsureSession   = "ensure_session"
 	terminalHostOpWriteToSession  = "write_to_session"
 	terminalHostOpPing            = "ping"
+	terminalHostOpClosed          = "closed"
 )
 
 const (

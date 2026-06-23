@@ -82,8 +82,8 @@ func readAttachmentUntil(t *testing.T, att Attachment, want []byte) []byte {
 func TestTerminalHostClient_AttachWriteDetachReattachKill(t *testing.T) {
 	client, _ := startTestTerminalHost(t, 4)
 	workspace := "ws1"
-	if err := client.Register(workspace, t.TempDir()); err != nil {
-		t.Fatalf("Register: %v", err)
+	if err := client.EnsureRegistered(workspace, t.TempDir()); err != nil {
+		t.Fatalf("EnsureRegistered: %v", err)
 	}
 	key := SessionKey{Workspace: workspace, Name: "s1"}
 

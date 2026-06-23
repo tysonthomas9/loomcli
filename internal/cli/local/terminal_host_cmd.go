@@ -2,12 +2,10 @@ package local
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log/slog"
 	"os"
 	"os/signal"
-	"strconv"
 	"syscall"
 	"time"
 
@@ -122,11 +120,7 @@ func spawnDetachedTerminalHost(cfg *localServiceConfig, socketPath string) error
 	if err != nil {
 		return err
 	}
-	hostCmd.Env = localEnv(cfg.dataDir, cfg.port)
-	hostCmd.Dir = cfg.dataDir
-	hostCmd.Stdout = logFile
-	hostCmd.Stderr = logFile
-	hostCmd.SysProcAttr = newDetachedSysProcAttr()
+	configureDetachedCmd(hostCmd, cfg, logFile)
 	if err := hostCmd.Start(); err != nil {
 		return fmt.Errorf("start terminal host: %w", err)
 	}
@@ -139,25 +133,13 @@ func spawnDetachedTerminalHost(cfg *localServiceConfig, socketPath string) error
 func waitForTerminalHost(ctx context.Context, socketPath string, timeout time.Duration) error {
 	waitCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	ticker := time.NewTicker(100 * time.Millisecond)
-	defer ticker.Stop()
 	client := terminal.NewTerminalHostClient(socketPath, 0)
-	var lastErr error
-	for {
-		if err := client.Ping(); err == nil {
-			return nil
-		} else {
-			lastErr = err
-		}
-		select {
-		case <-waitCtx.Done():
-			if lastErr != nil {
-				return fmt.Errorf("terminal host did not become healthy: %w", lastErr)
-			}
-			return waitCtx.Err()
-		case <-ticker.C:
-		}
+	if err := waitUntilHealthy(waitCtx, 100*time.Millisecond, func(context.Context) error {
+		return client.Ping()
+	}); err != nil {
+		return fmt.Errorf("terminal host did not become healthy: %w", err)
 	}
+	return nil
 }
 
 func stopTerminalHost(dataDir string, timeout time.Duration) error {
@@ -172,20 +154,9 @@ func stopTerminalHostWithInfo(info *terminalHostInfo, timeout time.Duration) err
 	if info == nil || info.PID <= 0 || !processRunning(info.PID) {
 		return nil
 	}
-	proc, err := os.FindProcess(info.PID)
-	if err != nil {
-		return fmt.Errorf("find terminal host process %d: %w", info.PID, err)
+	if err := stopRuntimePIDs([]int{info.PID}, timeout); err != nil {
+		return err
 	}
-	if err := proc.Signal(syscall.SIGTERM); err != nil && !errors.Is(err, syscall.ESRCH) {
-		return fmt.Errorf("stop terminal host process %d: %w", info.PID, err)
-	}
-	deadline := time.Now().Add(timeout)
-	for time.Now().Before(deadline) {
-		if !processRunning(info.PID) {
-			_ = os.Remove(info.SocketPath)
-			return nil
-		}
-		time.Sleep(250 * time.Millisecond)
-	}
-	return fmt.Errorf("terminal host process %s did not stop within %s", strconv.Itoa(info.PID), timeout)
+	_ = os.Remove(info.SocketPath)
+	return nil
 }

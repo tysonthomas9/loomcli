@@ -271,9 +271,14 @@ func writeRuntime(dataDir string, info *runtimeInfo) error {
 	if err != nil {
 		return fmt.Errorf("marshal runtime: %w", err)
 	}
-	path := runtimePath(dataDir)
+	return writeFileAtomic(runtimePath(dataDir), data, 0600)
+}
+
+// writeFileAtomic writes data to a sibling temp file and renames it into place
+// so readers never observe a partially written file.
+func writeFileAtomic(path string, data []byte, perm os.FileMode) error {
 	tmpPath := path + ".tmp"
-	if err := os.WriteFile(tmpPath, data, 0600); err != nil { //nolint:gosec // user-private runtime metadata
+	if err := os.WriteFile(tmpPath, data, perm); err != nil { //nolint:gosec // user-private runtime metadata
 		return fmt.Errorf("write %s: %w", tmpPath, err)
 	}
 	if err := os.Rename(tmpPath, path); err != nil {
@@ -312,16 +317,7 @@ func writeTerminalHostInfo(dataDir string, info *terminalHostInfo) error {
 	if err != nil {
 		return fmt.Errorf("marshal terminal host runtime: %w", err)
 	}
-	path := terminalHostPath(dataDir)
-	tmpPath := path + ".tmp"
-	if err := os.WriteFile(tmpPath, data, 0600); err != nil { //nolint:gosec // user-private runtime metadata
-		return fmt.Errorf("write %s: %w", tmpPath, err)
-	}
-	if err := os.Rename(tmpPath, path); err != nil {
-		_ = os.Remove(tmpPath)
-		return fmt.Errorf("rename %s: %w", path, err)
-	}
-	return nil
+	return writeFileAtomic(terminalHostPath(dataDir), data, 0600)
 }
 
 type executableIdentity struct {
@@ -436,11 +432,20 @@ func checkRuntimeHealth(ctx context.Context, url string) error {
 }
 
 func waitForRuntime(ctx context.Context, url string) error {
-	ticker := time.NewTicker(200 * time.Millisecond)
+	return waitUntilHealthy(ctx, 200*time.Millisecond, func(ctx context.Context) error {
+		return checkRuntimeHealth(ctx, url)
+	})
+}
+
+// waitUntilHealthy polls probe at interval until it succeeds or ctx is done.
+// On context cancellation it returns the most recent probe error (so callers
+// see the real failure, not a bare deadline), falling back to ctx.Err().
+func waitUntilHealthy(ctx context.Context, interval time.Duration, probe func(context.Context) error) error {
+	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 	var lastErr error
 	for {
-		if err := checkRuntimeHealth(ctx, url); err == nil {
+		if err := probe(ctx); err == nil {
 			return nil
 		} else {
 			lastErr = err

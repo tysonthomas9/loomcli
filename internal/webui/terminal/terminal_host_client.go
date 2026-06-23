@@ -150,11 +150,6 @@ func (c *TerminalHostClient) MaxSessions() int {
 	return resp.MaxSessions
 }
 
-func (c *TerminalHostClient) Register(wsID, path string) error {
-	_, err := c.call(terminalHostRequest{Op: terminalHostOpRegister, WorkspaceID: wsID, Path: path})
-	return err
-}
-
 func (c *TerminalHostClient) EnsureRegistered(wsID, path string) error {
 	_, err := c.call(terminalHostRequest{Op: terminalHostOpRegister, WorkspaceID: wsID, Path: path})
 	return err
@@ -331,7 +326,7 @@ func (a *hostAttachment) readLoop(remove func(string)) {
 			case a.output <- msg.Data:
 			default:
 			}
-		case "closed":
+		case terminalHostOpClosed:
 			if msg.ExitReason != "" {
 				a.exitReason.Store(msg.ExitReason)
 			}
@@ -342,6 +337,7 @@ func (a *hostAttachment) readLoop(remove func(string)) {
 
 var (
 	_ PTYSource          = (*TerminalHostClient)(nil)
+	_ PTYLifetime        = (*TerminalHostClient)(nil)
 	_ PTYCommandRunner   = (*TerminalHostClient)(nil)
 	_ WorkspaceRegistrar = (*TerminalHostClient)(nil)
 	_ Attachment         = (*hostAttachment)(nil)
