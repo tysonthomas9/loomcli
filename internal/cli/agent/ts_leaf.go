@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -39,6 +40,36 @@ func maybeTSLeafInvoker(fallback cli.AgentInvoker) cli.AgentInvoker {
 	return fallback
 }
 
+// leafRunnerEntrypoint selects which bundled runner the daemon leaf delegates to.
+// Default is the local-task-runner (local execution). Set
+// LOOM_DAEMON_LEAF_RUNNER=daytona-task-runner to run the task inside a Daytona
+// sandbox (requires DAYTONA_API_KEY + a reachable repo URL); the same bundle ships
+// both runners, so this is just an entrypoint switch.
+func leafRunnerEntrypoint() string {
+	if v := strings.TrimSpace(os.Getenv("LOOM_DAEMON_LEAF_RUNNER")); v != "" {
+		return v
+	}
+	return driver.LocalTaskRunnerEntrypoint
+}
+
+// daytonaRepoURL returns an explicit DAYTONA_REPO_URL, or the worktree's origin
+// remote URL, for the Daytona runner to clone. Local filesystem paths are skipped:
+// a cloud sandbox can only clone a network-reachable URL.
+func daytonaRepoURL(workDir string) string {
+	if v := strings.TrimSpace(os.Getenv("DAYTONA_REPO_URL")); v != "" {
+		return v
+	}
+	out, err := exec.Command("git", "-C", workDir, "remote", "get-url", "origin").Output()
+	if err != nil {
+		return ""
+	}
+	url := strings.TrimSpace(string(out))
+	if url == "" || strings.HasPrefix(url, "/") || strings.HasPrefix(url, "file:") {
+		return ""
+	}
+	return url
+}
+
 type tsRunnerAgentInvoker struct{ fallback cli.AgentInvoker }
 
 func (i tsRunnerAgentInvoker) InvokeInteractive(workDir, prompt, agentName string) error {
@@ -53,14 +84,24 @@ func (i tsRunnerAgentInvoker) InvokeNonInteractive(workDir, prompt, agentName st
 	}
 	backend := cli.GetBackendName()
 	leaseToken := os.Getenv("LOOM_TASK_RUN_LEASE_TOKEN")
+	entrypoint := leafRunnerEntrypoint()
+	input := map[string]any{}
+	if entrypoint == driver.DaytonaTaskRunnerEntrypoint {
+		// The Daytona runner clones a network-reachable git URL into the sandbox.
+		// Prefer an explicit DAYTONA_REPO_URL; otherwise fall back to the worktree's
+		// origin remote so a workspace with a reachable remote works out of the box.
+		if repoURL := daytonaRepoURL(workDir); repoURL != "" {
+			input["repoUrl"] = repoURL
+		}
+	}
 	req := map[string]any{
 		"task_run_id":       firstNonEmptyEnv("LOOM_TASK_RUN_ID", "tr-"+agentName),
 		"task_id":           os.Getenv("LOOM_ASSIGNED_TASK_ID"),
 		"backend":           backend,
 		"workspace_key":     os.Getenv("LOOM_WORKSPACE"),
 		"lease_token":       leaseToken,
-		"runner_entrypoint": driver.LocalTaskRunnerEntrypoint,
-		"input":             map[string]any{},
+		"runner_entrypoint": entrypoint,
+		"input":             input,
 	}
 	reqJSON, _ := json.Marshal(req)
 
@@ -69,6 +110,7 @@ func (i tsRunnerAgentInvoker) InvokeNonInteractive(workDir, prompt, agentName st
 
 	raw, err := driver.RunBundledLocalTaskRunner(ctx, driver.BundledRunnerOptions{
 		ServerPath:   serverPath,
+		Entrypoint:   entrypoint,
 		Worktree:     workDir,
 		Backend:      backend,
 		Prompt:       prompt,
