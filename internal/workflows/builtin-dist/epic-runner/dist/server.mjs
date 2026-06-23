@@ -341816,7 +341816,8 @@ async function run$1(ctx = {}) {
 		try {
 			result = await execBackend(binary, args, {
 				cwd: execWorktree,
-				input: usesStdinPrompt ? prompt : void 0
+				input: usesStdinPrompt ? prompt : void 0,
+				live: true
 			});
 		} catch (error) {
 			return failed("local_agent_failed", `failed to spawn ${backend} CLI: ${errorMessage(error)}`, {
@@ -342129,6 +342130,10 @@ async function execBackend(binary, args, options) {
 				stderr: String(stderr || "")
 			});
 		});
+		if (options.live === true && booleanValue(process.env.LOOM_TASK_RUNNER_STREAM_STDERR)) {
+			if (child.stdout) child.stdout.on("data", (chunk) => process.stderr.write(chunk));
+			if (child.stderr) child.stderr.on("data", (chunk) => process.stderr.write(chunk));
+		}
 		if (child.stdin) if (options.input !== void 0) child.stdin.end(options.input);
 		else child.stdin.end();
 	});

@@ -112,6 +112,7 @@ const ENV_KEYS = [
   "LOOM_OPENCODE_MODEL",
   "LOOM_COST_PER_MTOK_INPUT",
   "LOOM_COST_PER_MTOK_OUTPUT",
+  "LOOM_TASK_RUNNER_STREAM_STDERR",
 ];
 
 // PATH is mutated by some tests; save/restore it separately so git stays callable.
@@ -703,6 +704,46 @@ describe("local-task-runner success", () => {
     assert.equal(out.cache_read_tokens, 6);
     // codex does not self-report cost -> estimated from the pricing tier (> 0).
     assert.ok(out.estimated_cost_usd > 0, "codex usage must get an estimated cost");
+  });
+
+  it("live-streams backend output to stderr under LOOM_TASK_RUNNER_STREAM_STDERR (daemon-leaf watchdog feed)", async () => {
+    process.env.LOOM_TASK_RUNNER_BACKEND = "codex";
+    process.env.LOOM_WORKTREE_PATH = worktree;
+    process.env.LOOM_CODEX_BIN = fakeBin;
+    process.env.FAKE_EXIT_CODE = "0";
+    process.env.LOOM_TASK_RUNNER_STREAM_STDERR = "1";
+    const chunks = [];
+    const orig = process.stderr.write.bind(process.stderr);
+    process.stderr.write = (c) => { chunks.push(typeof c === "string" ? c : c.toString()); return true; };
+    let out;
+    try {
+      out = await run();
+    } finally {
+      process.stderr.write = orig;
+    }
+    assert.equal(out.status, "completed");
+    // The fake backend's stream-json (which contains "did the work") must be teed to
+    // stderr live so the supervisor output-timeout watchdog sees per-turn activity.
+    assert.ok(chunks.join("").includes("did the work"), "backend output must be teed to stderr when streaming is enabled");
+  });
+
+  it("does NOT tee backend output to stderr without the stream flag (driver path unaffected)", async () => {
+    delete process.env.LOOM_TASK_RUNNER_STREAM_STDERR;
+    process.env.LOOM_TASK_RUNNER_BACKEND = "codex";
+    process.env.LOOM_WORKTREE_PATH = worktree;
+    process.env.LOOM_CODEX_BIN = fakeBin;
+    process.env.FAKE_EXIT_CODE = "0";
+    const chunks = [];
+    const orig = process.stderr.write.bind(process.stderr);
+    process.stderr.write = (c) => { chunks.push(typeof c === "string" ? c : c.toString()); return true; };
+    let out;
+    try {
+      out = await run();
+    } finally {
+      process.stderr.write = orig;
+    }
+    assert.equal(out.status, "completed");
+    assert.ok(!chunks.join("").includes("did the work"), "backend output must NOT be teed to stderr without the flag");
   });
 
   it("falls back to a minimal transcript when stream-json yields no recognized entries (gemini)", async () => {

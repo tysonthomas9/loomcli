@@ -109,6 +109,7 @@ export async function run(ctx = {}) {
       result = await execBackend(binary, args, {
         cwd: execWorktree,
         input: usesStdinPrompt ? prompt : undefined,
+        live: true,
       });
     } catch (error) {
       return failed("local_agent_failed", `failed to spawn ${backend} CLI: ${errorMessage(error)}`, {
@@ -488,6 +489,14 @@ async function execBackend(binary, args, options) {
         resolve({ code, stdout: String(stdout || ""), stderr: String(stderr || "") });
       },
     );
+    if (options.live === true && booleanValue(process.env.LOOM_TASK_RUNNER_STREAM_STDERR)) {
+      // Tee the backend's live output to OUR stderr so, when the daemon leaf runs this
+      // runner (Phase U), the supervisor's output-timeout watchdog — which stats the
+      // agent log mtime — sees per-turn activity, exactly as the Go leaf's wrapper PTY
+      // path did (internal/cli/agent/plan.go). stdout stays clean for the result line.
+      if (child.stdout) child.stdout.on("data", (chunk) => process.stderr.write(chunk));
+      if (child.stderr) child.stderr.on("data", (chunk) => process.stderr.write(chunk));
+    }
     // Always close the child's stdin. Backends that take the prompt over stdin
     // (opencode, headless codex) receive it here; positional-prompt backends
     // (claude, gemini, cursor) get an immediate EOF so they never block reading
