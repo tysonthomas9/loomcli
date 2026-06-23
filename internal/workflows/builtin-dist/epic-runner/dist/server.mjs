@@ -341800,7 +341800,8 @@ async function run$1(ctx = {}) {
 	const baseRef = stacked ? stackBaseRef : isolated ? isolated.base : "";
 	if (stacked) logs.push("stacked mode: running in place at " + worktree + " (base " + (stackBaseRef || "?") + "), pushing " + (stackBranch || "?"));
 	const task = await loadTask(request, logs);
-	const prompt = buildPrompt(request, task, execWorktree);
+	const promptOverride = process.env.LOOM_TASK_RUN_PROMPT;
+	const prompt = typeof promptOverride === "string" && promptOverride.trim() !== "" ? promptOverride : buildPrompt(request, task, execWorktree);
 	const args = backendArgs(backend, execWorktree, prompt);
 	const usesStdinPrompt = backendUsesStdinPrompt(backend);
 	const openPR = booleanValue(inputValue(request, "openPullRequest"));

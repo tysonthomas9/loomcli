@@ -113,6 +113,7 @@ const ENV_KEYS = [
   "LOOM_COST_PER_MTOK_INPUT",
   "LOOM_COST_PER_MTOK_OUTPUT",
   "LOOM_TASK_RUNNER_STREAM_STDERR",
+  "LOOM_TASK_RUN_PROMPT",
 ];
 
 // PATH is mutated by some tests; save/restore it separately so git stays callable.
@@ -786,6 +787,22 @@ describe("local-task-runner success", () => {
     );
     // And the codex item.completed transcript still flows through.
     assert.ok(out.transcript_entries.some((e) => e.role === "assistant" && e.text === "read the stdin"));
+  });
+
+  it("uses LOOM_TASK_RUN_PROMPT verbatim over buildPrompt (daemon-leaf prompt fidelity)", async () => {
+    const stdinFile = path.join(tmpRoot, "stdin-override.txt");
+    process.env.LOOM_TASK_RUNNER_BACKEND = "codex";
+    process.env.LOOM_WORKTREE_PATH = worktree;
+    process.env.LOOM_CODEX_BIN = fakeStdinBin;
+    process.env.FAKE_EXIT_CODE = "0";
+    process.env.FAKE_STDIN_FILE = stdinFile;
+    process.env.LOOM_TASK_RUN_PROMPT = "OVERRIDE-PROMPT-XYZ from the daemon leaf";
+
+    const out = await run();
+    assert.equal(out.status, "completed");
+    const captured = fs.readFileSync(stdinFile, "utf8");
+    assert.ok(captured.includes("OVERRIDE-PROMPT-XYZ"), "stdin should carry the override prompt verbatim");
+    assert.ok(!captured.includes("implementing one child task"), "buildPrompt must be bypassed when the override is set");
   });
 
   it("never emits a synthetic 'Completed by the built-in local task runner.' transcript", async () => {

@@ -91,7 +91,14 @@ export async function run(ctx = {}) {
   }
 
   const task = await loadTask(request, logs);
-  const prompt = buildPrompt(request, task, execWorktree);
+  // LOOM_TASK_RUN_PROMPT lets a host that already composed the agent prompt (the
+  // daemon execution leaf, which builds role-specific planning/task prompts) deliver
+  // it verbatim, instead of this runner's generic buildPrompt — so routing the daemon
+  // leaf through this runner (Phase U) preserves the leaf's exact prompt.
+  const promptOverride = process.env.LOOM_TASK_RUN_PROMPT;
+  const prompt = typeof promptOverride === "string" && promptOverride.trim() !== ""
+    ? promptOverride
+    : buildPrompt(request, task, execWorktree);
   const args = backendArgs(backend, execWorktree, prompt);
   const usesStdinPrompt = backendUsesStdinPrompt(backend);
 
