@@ -341735,7 +341735,6 @@ function errorMessage$1(err) {
 //#region workflows/local-task-runner.ts
 var local_task_runner_exports = /* @__PURE__ */ __exportAll({
 	backendArgs: () => backendArgs,
-	estimateCostUSD: () => estimateCostUSD,
 	parseNumstat: () => parseNumstat,
 	parseRepoSlug: () => parseRepoSlug,
 	parseStreamJSONTranscript: () => parseStreamJSONTranscript,
@@ -341929,10 +341928,6 @@ async function run$1(ctx = {}) {
 	if (STREAM_JSON_BACKENDS.has(backend) && !transcriptEntries.some((e) => e.role !== "system")) transcriptEntries = minimalTranscript(backend, taskId || taskRunId, prompt, stdout);
 	transcriptEntries = redactTranscriptSecrets(transcriptEntries);
 	const taskUsage = taskUsageFromEntries(transcriptEntries);
-	if (!(taskUsage.estimated_cost_usd > 0) && (taskUsage.input_tokens || taskUsage.output_tokens || taskUsage.cache_read_tokens || taskUsage.cache_write_tokens)) {
-		const cost = estimateCostUSD(backend, taskUsage);
-		if (cost > 0) taskUsage.estimated_cost_usd = cost;
-	}
 	const streamFailure = streamFailureMessage(backend, stdout);
 	const metadata = stringMetadata({
 		task_runner: "local-task-runner",
@@ -342597,47 +342592,6 @@ function taskUsageFromEntries(entries) {
 	set("cache_write_tokens", usage.cache_write_tokens);
 	set("estimated_cost_usd", usage.cost_usd != null ? usage.cost_usd : usage.estimated_cost_usd);
 	return out;
-}
-var DEFAULT_PRICING = {
-	claude: {
-		inputPerMTok: 3,
-		outputPerMTok: 15,
-		cacheReadPerMTok: .3,
-		cacheWritePerMTok: 3.75
-	},
-	codex: {
-		inputPerMTok: 2.5,
-		outputPerMTok: 10,
-		cacheReadPerMTok: 0,
-		cacheWritePerMTok: 0
-	},
-	opencode: {
-		inputPerMTok: 3,
-		outputPerMTok: 15,
-		cacheReadPerMTok: 0,
-		cacheWritePerMTok: 0
-	}
-};
-function resolvePricing(backend) {
-	const tier = { ...DEFAULT_PRICING[backend] || DEFAULT_PRICING.claude };
-	const inputRaw = stringValue(process.env.LOOM_COST_PER_MTOK_INPUT);
-	if (inputRaw) {
-		const value = Number(inputRaw);
-		if (Number.isFinite(value)) tier.inputPerMTok = value;
-	}
-	const outputRaw = stringValue(process.env.LOOM_COST_PER_MTOK_OUTPUT);
-	if (outputRaw) {
-		const value = Number(outputRaw);
-		if (Number.isFinite(value)) tier.outputPerMTok = value;
-	}
-	return tier;
-}
-function estimateCostUSD(backend, usage) {
-	const tier = resolvePricing(backend);
-	const u = usage || {};
-	const mtok = 1e6;
-	const n = (value) => Number.isFinite(Number(value)) ? Number(value) : 0;
-	return n(u.input_tokens) / mtok * tier.inputPerMTok + n(u.output_tokens) / mtok * tier.outputPerMTok + n(u.cache_read_tokens) / mtok * tier.cacheReadPerMTok + n(u.cache_write_tokens) / mtok * tier.cacheWritePerMTok;
 }
 function streamFailureMessage(backend, stdout) {
 	if (backend !== "opencode") return "";

@@ -218,17 +218,15 @@ export async function run(ctx = {}) {
   // entry) as top-level fields so the Go host-bridge ingests it into the fleet-db
   // TaskRun — without this, local-CLI runs report zero usage while daytona does not.
   const taskUsage = taskUsageFromEntries(transcriptEntries);
-  // Backends that do not self-report a POSITIVE cost get an estimated cost from the
-  // per-backend pricing tier (mirrors the Go usage.EstimateCost path): codex/cursor/
-  // gemini report no cost (null), and opencode reports cost=0 for subscription /
-  // free-tier models. A backend's own positive cost (e.g. claude) is preserved.
-  if (!(taskUsage.estimated_cost_usd > 0) &&
-      (taskUsage.input_tokens || taskUsage.output_tokens || taskUsage.cache_read_tokens || taskUsage.cache_write_tokens)) {
-    const cost = estimateCostUSD(backend, taskUsage);
-    if (cost > 0) {
-      taskUsage.estimated_cost_usd = cost;
-    }
-  }
+  // Cost is taken ONLY from what the backend CLI itself reports — never estimated
+  // from a price table. Verified per backend (real-CLI capture, 2026-06-23):
+  //   claude   -> total_cost_usd (model-accurate: Opus vs Sonnet, cache tiers, web)
+  //   opencode -> per-step `cost` (real when metered; a legitimate 0 on subscription)
+  //   codex    -> NO cost, NOT even a model in `exec --json` output
+  //   cursor   -> NO cost; model is proprietary ("Composer"), no public rate
+  //   gemini   -> NO cost (usageMetadata tokens only)
+  // For the backends that expose no cost we leave estimated_cost_usd unset (unknown)
+  // rather than fabricate a token x rate guess for an unknown/unpriceable model.
   const streamFailure = streamFailureMessage(backend, stdout);
 
   const metadata = stringMetadata({
@@ -1054,51 +1052,12 @@ export function taskUsageFromEntries(entries) {
   return out;
 }
 
-// DEFAULT_PRICING mirrors internal/usage/usage.go DefaultPricing — per-MTok USD
-// rates. Backends absent here (cursor, gemini) fall back to claude rates.
-const DEFAULT_PRICING = {
-  claude: { inputPerMTok: 3.0, outputPerMTok: 15.0, cacheReadPerMTok: 0.30, cacheWritePerMTok: 3.75 },
-  codex: { inputPerMTok: 2.50, outputPerMTok: 10.0, cacheReadPerMTok: 0, cacheWritePerMTok: 0 },
-  opencode: { inputPerMTok: 3.0, outputPerMTok: 15.0, cacheReadPerMTok: 0, cacheWritePerMTok: 0 },
-};
-
-// resolvePricing mirrors usage.go ResolvePricing: the backend's tier or a claude
-// fallback, with LOOM_COST_PER_MTOK_INPUT / LOOM_COST_PER_MTOK_OUTPUT overrides
-// (non-empty + parseable, matching the Go `v != ""` guard).
-function resolvePricing(backend) {
-  const tier = { ...(DEFAULT_PRICING[backend] || DEFAULT_PRICING.claude) };
-  const inputRaw = stringValue(process.env.LOOM_COST_PER_MTOK_INPUT);
-  if (inputRaw) {
-    const value = Number(inputRaw);
-    if (Number.isFinite(value)) {
-      tier.inputPerMTok = value;
-    }
-  }
-  const outputRaw = stringValue(process.env.LOOM_COST_PER_MTOK_OUTPUT);
-  if (outputRaw) {
-    const value = Number(outputRaw);
-    if (Number.isFinite(value)) {
-      tier.outputPerMTok = value;
-    }
-  }
-  return tier;
-}
-
-// estimateCostUSD mirrors usage.go EstimateCost: tokens/1e6 * per-MTok rate, summed
-// across input/output/cache. Used to fill estimated_cost_usd for backends that do
-// not self-report a cost (codex/cursor/gemini).
-export function estimateCostUSD(backend, usage) {
-  const tier = resolvePricing(backend);
-  const u = usage || {};
-  const mtok = 1000000;
-  const n = (value) => (Number.isFinite(Number(value)) ? Number(value) : 0);
-  return (
-    (n(u.input_tokens) / mtok) * tier.inputPerMTok +
-    (n(u.output_tokens) / mtok) * tier.outputPerMTok +
-    (n(u.cache_read_tokens) / mtok) * tier.cacheReadPerMTok +
-    (n(u.cache_write_tokens) / mtok) * tier.cacheWritePerMTok
-  );
-}
+// NOTE: per-backend price-table estimation (DEFAULT_PRICING / resolvePricing /
+// estimateCostUSD) was removed 2026-06-23. Cost is now sourced ONLY from the
+// backend CLI's own reporting (see taskUsageFromEntries + the run() cost note):
+// estimating tokens x a per-backend rate was inaccurate (a single backend runs
+// many models at different prices — e.g. claude ran Opus, not the Sonnet rate the
+// table assumed) and codex/cursor/gemini expose no cost to anchor it.
 
 function streamFailureMessage(backend, stdout) {
   if (backend !== "opencode") {

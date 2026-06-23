@@ -7,7 +7,6 @@ import { afterEach, beforeEach, describe, it } from "node:test";
 
 import {
   backendArgs,
-  estimateCostUSD,
   parseNumstat,
   parseRepoSlug,
   parseStreamJSONTranscript,
@@ -524,25 +523,19 @@ describe("local-task-runner pure helpers", () => {
     assert.deepEqual(taskUsageFromEntries(null), {});
   });
 
-  it("estimateCostUSD mirrors the Go pricing tiers (codex rates, claude cache, fallback)", () => {
-    delete process.env.LOOM_COST_PER_MTOK_INPUT;
-    delete process.env.LOOM_COST_PER_MTOK_OUTPUT;
-    // codex: 1M input @ $2.50 + 1M output @ $10 = $12.50
-    assert.equal(estimateCostUSD("codex", { input_tokens: 1_000_000, output_tokens: 1_000_000 }), 12.5);
-    // claude includes cache tiers: 1M cache_read @ $0.30
-    assert.equal(estimateCostUSD("claude", { cache_read_tokens: 1_000_000 }), 0.30);
-    // unknown backend (cursor/gemini) falls back to claude rates: 1M input @ $3
-    assert.equal(estimateCostUSD("cursor", { input_tokens: 1_000_000 }), 3.0);
-  });
-
-  it("estimateCostUSD honors LOOM_COST_PER_MTOK_* overrides (empty string ignored)", () => {
-    process.env.LOOM_COST_PER_MTOK_INPUT = "1";
-    process.env.LOOM_COST_PER_MTOK_OUTPUT = "2";
-    assert.equal(estimateCostUSD("codex", { input_tokens: 1_000_000, output_tokens: 1_000_000 }), 3.0);
-    // empty string is ignored (Go parity: v != "")
-    process.env.LOOM_COST_PER_MTOK_INPUT = "";
-    delete process.env.LOOM_COST_PER_MTOK_OUTPUT;
-    assert.equal(estimateCostUSD("codex", { input_tokens: 1_000_000 }), 2.5);
+  it("cost is sourced only from the backend CLI — passthrough incl. 0, never estimated", () => {
+    // claude/opencode report a cost the CLI computed -> surfaced verbatim.
+    const withCost = [{ seq: 1, role: "system", type: "result", output: JSON.stringify({ input_tokens: 10, output_tokens: 2, cost_usd: 0.0723 }) }];
+    assert.equal(taskUsageFromEntries(withCost).estimated_cost_usd, 0.0723);
+    // opencode on a subscription reports a LEGITIMATE 0 -> kept as 0, not fabricated up.
+    const zeroCost = [{ seq: 1, role: "system", type: "result", output: JSON.stringify({ input_tokens: 10, output_tokens: 2, cost_usd: 0 }) }];
+    assert.equal(taskUsageFromEntries(zeroCost).estimated_cost_usd, 0);
+    // codex/cursor/gemini report tokens but NO cost -> estimated_cost_usd left unset
+    // (unknown). We never invent a token x rate number for an unpriceable model.
+    const noCost = [{ seq: 1, role: "system", type: "result", output: JSON.stringify({ input_tokens: 17603, output_tokens: 37 }) }];
+    const u = taskUsageFromEntries(noCost);
+    assert.equal(u.input_tokens, 17603);
+    assert.equal("estimated_cost_usd" in u, false);
   });
 
   it("scrubToken masks multiple secrets", () => {
@@ -703,8 +696,10 @@ describe("local-task-runner success", () => {
     assert.equal(out.input_tokens, 123);
     assert.equal(out.output_tokens, 45);
     assert.equal(out.cache_read_tokens, 6);
-    // codex does not self-report cost -> estimated from the pricing tier (> 0).
-    assert.ok(out.estimated_cost_usd > 0, "codex usage must get an estimated cost");
+    // codex reports NO cost in its CLI output, so we never fabricate one: tokens
+    // ride at the top level but estimated_cost_usd is left unset (cost is sourced
+    // only from the backend CLI, never a price-table estimate).
+    assert.ok(out.estimated_cost_usd == null, "codex must not get a fabricated cost");
   });
 
   it("live-streams backend output to stderr under LOOM_TASK_RUNNER_STREAM_STDERR (daemon-leaf watchdog feed)", async () => {
