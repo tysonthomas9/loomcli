@@ -24,9 +24,10 @@ FROM debian:bookworm-slim
 ARG INSTALL_CODEX=false
 ARG CODEX_CLI_VERSION=0.128.0
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        bash ca-certificates git jq lsof make ripgrep tmux wget \
+        bash ca-certificates curl git jq lsof make ripgrep tmux wget \
     && if [ "$INSTALL_CODEX" = "true" ]; then \
-        apt-get install -y --no-install-recommends nodejs npm \
+        curl -fsSL https://deb.nodesource.com/setup_24.x | bash - \
+        && apt-get install -y --no-install-recommends nodejs \
         && npm install -g "@openai/codex@${CODEX_CLI_VERSION}"; \
     fi \
     && rm -rf /var/lib/apt/lists/*

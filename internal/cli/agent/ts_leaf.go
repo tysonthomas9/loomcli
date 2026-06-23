@@ -94,8 +94,17 @@ func (i tsRunnerAgentInvoker) InvokeNonInteractive(workDir, prompt, agentName st
 		return fmt.Errorf("ts-leaf: decode runner result: %w", jerr)
 	}
 
-	// Feed usage into the daemon's collector so finalizeAgentSession persists it to
-	// usage.jsonl + session metadata exactly as the Go path does.
+	// Feed the leaf's usage into the daemon collector so the worker's own
+	// finalize path records it exactly as the Go leaf does — keeping the TS leaf
+	// at telemetry parity with the Go leaf.
+	//
+	// KNOWN PARITY GAP (pre-existing, affects the Go leaf identically): in daemon
+	// mode the worker is reaped right after the agent signals `loom complete`, so
+	// the worker's collector-aware finalizeAgentSession does not run; the
+	// supervisor's collector-less session finalize (supervisor/session_finalize.go)
+	// is what lands, leaving session-metadata tokens at 0 on BOTH leaves. The TS
+	// leaf additionally returns usage on its result JSON, which positions a
+	// follow-up to carry usage into the supervisor finalize.
 	if collector != nil {
 		collector.Accumulate("", result.InputTokens, result.OutputTokens, result.CacheReadTokens, result.CacheWriteTokens)
 	}
