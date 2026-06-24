@@ -138,13 +138,28 @@ func (i agentInvoker) InvokeNonInteractive(workDir, prompt, agentName string, sh
 	if err != nil {
 		return err
 	}
-	return applyTaskRunnerResult(raw, collector)
+	patch, baseRef, err := applyTaskRunnerResult(raw, collector)
+	if err != nil {
+		return err
+	}
+	// Phase-U fix: the default local TS leaf runs the agent in an ISOLATED worktree and returns the
+	// change as a patch+base_ref, leaving the daemon's HOST worktree clean. The Go leaf commits in
+	// place, so the worker's session finalize (`git diff beforeRef..HEAD`) captures its change; the TS
+	// leaf must apply that patch back onto the host worktree and commit, or finalize records
+	// files_changed=0 and serve surfaces no diff. (Daytona delivers via its own PR/sandbox path —
+	// it returns no top-level patch, so this is a no-op for the Daytona entrypoint.)
+	if entrypoint == driver.LocalTaskRunnerEntrypoint {
+		applyLeafPatchBack(ctx, workDir, baseRef, patch, taskRunID)
+	}
+	return nil
 }
 
 // applyTaskRunnerResult decodes the bundled task-runner's result, feeds usage into
 // the daemon collector, mirrors the transcript onto the session, and maps a
-// non-completed run to an error.
-func applyTaskRunnerResult(raw json.RawMessage, collector *usage.Collector) error {
+// non-completed run to an error. It also returns the runner's produced patch +
+// base_ref (empty for PR/stacked delivery) so the caller can patch it back onto the
+// host worktree (see applyLeafPatchBack).
+func applyTaskRunnerResult(raw json.RawMessage, collector *usage.Collector) (patch string, baseRef string, err error) {
 	var result struct {
 		Status            string            `json:"status"`
 		ErrorMessage      string            `json:"errorMessage"`
@@ -153,9 +168,12 @@ func applyTaskRunnerResult(raw json.RawMessage, collector *usage.Collector) erro
 		CacheReadTokens   int64             `json:"cache_read_tokens"`
 		CacheWriteTokens  int64             `json:"cache_write_tokens"`
 		TranscriptEntries []json.RawMessage `json:"transcript_entries"`
+		Patch             string            `json:"patch"`
+		BaseRef           string            `json:"base_ref"`
+		PatchBaseRef      string            `json:"patch_base_ref"`
 	}
 	if jerr := json.Unmarshal(raw, &result); jerr != nil {
-		return fmt.Errorf("ts-runtime: decode runner result: %w", jerr)
+		return "", "", fmt.Errorf("ts-runtime: decode runner result: %w", jerr)
 	}
 
 	// Feed the runner's usage into the daemon collector so the worker's own
@@ -181,9 +199,52 @@ func applyTaskRunnerResult(raw json.RawMessage, collector *usage.Collector) erro
 		if msg == "" {
 			msg = result.Status
 		}
-		return fmt.Errorf("ts-runtime run did not complete: %s", msg)
+		return "", "", fmt.Errorf("ts-runtime run did not complete: %s", msg)
 	}
-	return nil
+	br := result.BaseRef
+	if strings.TrimSpace(br) == "" {
+		br = result.PatchBaseRef
+	}
+	return result.Patch, br, nil
+}
+
+// applyLeafPatchBack lands the local TS runner's produced patch onto the daemon's host
+// worktree and commits it, so the worker's session finalize (`git diff beforeRef..HEAD`)
+// records the change exactly as the Go leaf does (the agent committed in place there).
+// Best-effort + loud: the run already "completed", so a patch-back failure is a delivery
+// gap to surface on stderr, not a reason to fail the agent — and the resulting empty diff
+// will fail any downstream parity check rather than passing silently.
+func applyLeafPatchBack(ctx context.Context, workDir, baseRef, patch, taskID string) {
+	if strings.TrimSpace(patch) == "" {
+		return // no change produced (or PR/stacked delivery) — nothing to patch back
+	}
+	if strings.TrimSpace(baseRef) == "" {
+		fmt.Fprintln(os.Stderr, "[ts-leaf] runner returned a patch but no base_ref; host worktree change not recorded")
+		return
+	}
+	res, err := driver.ApplyPatchBack(ctx, driver.PatchBackOptions{
+		WorktreePath: workDir,
+		BaseRef:      baseRef,
+		Patch:        []byte(patch),
+		// Stage only the patch's files (so the commit is the agent's change, not the monitor's
+		// .agent.lock churn) and drop the monitor bookkeeping that the runner captured and that
+		// exists in the host worktree too (it would otherwise conflict on apply).
+		Index:   true,
+		Exclude: []string{".agent.lock", ".agent.lock.flock"},
+	})
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "[ts-leaf] patch-back error: %v\n", err)
+		return
+	}
+	if !res.Applied {
+		fmt.Fprintf(os.Stderr, "[ts-leaf] patch-back not applied (status=%s): %s\n", res.Status, res.ErrorMessage)
+		return
+	}
+	if err := driver.CommitWorktree(ctx, workDir, "loom: ts-leaf "+taskID); err != nil {
+		fmt.Fprintf(os.Stderr, "[ts-leaf] commit after patch-back failed: %v\n", err)
+		return
+	}
+	fmt.Fprintf(os.Stderr, "[ts-leaf] applied runner patch to host worktree and committed (base %s)\n", strings.TrimSpace(baseRef))
 }
 
 var (
