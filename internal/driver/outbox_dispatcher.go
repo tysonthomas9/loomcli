@@ -295,21 +295,7 @@ func outboxRetryDelay(attempt int) time.Duration {
 // workspaceKeys resolves the dispatch targets: the configured workspace, or
 // every known workspace when unscoped (mirrors StaleTaskSweeper).
 func (d *OutboxDispatcher) workspaceKeys(ctx context.Context) ([]string, error) {
-	if d.WorkspaceKey != "" {
-		return []string{d.WorkspaceKey}, nil
-	}
-	workspaces, err := d.Store.Workspaces().List(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("list workspaces for outbox dispatch: %w", err)
-	}
-	keys := make([]string, 0, len(workspaces))
-	for _, ws := range workspaces {
-		if ws == nil {
-			continue
-		}
-		keys = append(keys, ws.Key)
-	}
-	return keys, nil
+	return resolveSweepWorkspaces(ctx, d.Store, d.WorkspaceKey, "outbox dispatch")
 }
 
 func (d *OutboxDispatcher) assignmentDeliverer() func(ctx context.Context, st store.Store, workspace, leadName string) (*leadcontrol.DeliveryResult, error) {

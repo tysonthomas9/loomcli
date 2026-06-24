@@ -95,12 +95,21 @@ func (s *StaleTaskSweeper) sweepWorkspace(ctx context.Context, ws string, staleB
 // workspaceKeys resolves the sweep targets: the configured workspace, or
 // every known workspace when unscoped (mirrors Executor.RecoverStaleOnce).
 func (s *StaleTaskSweeper) workspaceKeys(ctx context.Context) ([]string, error) {
-	if s.WorkspaceKey != "" {
-		return []string{s.WorkspaceKey}, nil
+	return resolveSweepWorkspaces(ctx, s.Store, s.WorkspaceKey, "stale task sweep")
+}
+
+// resolveSweepWorkspaces returns the workspace targets for a background sweep
+// loop: the single configured workspace, or every workspace when unconfigured.
+// label names the loop in the list-error (e.g. "stale task sweep"). Shared by
+// the stale-task / await-timeout / outbox background loops, which otherwise
+// re-derived this identical configured-or-list-all logic.
+func resolveSweepWorkspaces(ctx context.Context, s store.Store, configured, label string) ([]string, error) {
+	if configured != "" {
+		return []string{configured}, nil
 	}
-	workspaces, err := s.Store.Workspaces().List(ctx)
+	workspaces, err := s.Workspaces().List(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("list workspaces for stale task sweep: %w", err)
+		return nil, fmt.Errorf("list workspaces for %s: %w", label, err)
 	}
 	keys := make([]string, 0, len(workspaces))
 	for _, ws := range workspaces {

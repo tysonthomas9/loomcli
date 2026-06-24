@@ -263,21 +263,7 @@ func (s *AwaitTimeoutSweeper) matcher() *trigger.AwaitMatcher {
 // workspaceKeys resolves the sweep targets: the configured workspace, or
 // every known workspace when unscoped (mirrors StaleTaskSweeper).
 func (s *AwaitTimeoutSweeper) workspaceKeys(ctx context.Context) ([]string, error) {
-	if s.WorkspaceKey != "" {
-		return []string{s.WorkspaceKey}, nil
-	}
-	workspaces, err := s.Store.Workspaces().List(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("list workspaces for await timeout sweep: %w", err)
-	}
-	keys := make([]string, 0, len(workspaces))
-	for _, ws := range workspaces {
-		if ws == nil {
-			continue
-		}
-		keys = append(keys, ws.Key)
-	}
-	return keys, nil
+	return resolveSweepWorkspaces(ctx, s.Store, s.WorkspaceKey, "await timeout sweep")
 }
 
 func (s *AwaitTimeoutSweeper) batchLimit() int {
