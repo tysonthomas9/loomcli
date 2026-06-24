@@ -1,4 +1,4 @@
-package driver
+package sandbox
 
 // SandboxLauncher is the executor-level sandbox seam (§7 step 9, SB1):
 // NodeRunner launches workflow bundles through this interface, with today's
@@ -37,6 +37,7 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/driver/runtypes"
 )
 
 // SandboxFrameType discriminates host-bound frames on the sandbox stdout
@@ -117,10 +118,10 @@ type SandboxExit struct {
 	Stderr string
 }
 
-// recordSandboxPlacement stamps the launcher's placement descriptor onto the
+// RecordSandboxPlacement stamps the launcher's placement descriptor onto the
 // run result output: Finish persists Output onto the DriverRun row, so the
 // row records where the workflow executed (§9.6 audit).
-func recordSandboxPlacement(result *RunResult, placement domain.TaskRunPlacement) {
+func RecordSandboxPlacement(result *runtypes.RunResult, placement domain.TaskRunPlacement) {
 	if placement.Empty() {
 		return
 	}
@@ -134,15 +135,15 @@ func recordSandboxPlacement(result *RunResult, placement domain.TaskRunPlacement
 	result.Output[SandboxPlacementOutputKey] = string(encoded)
 }
 
-// processLauncher is the default SandboxLauncher: it forks the bundle's
+// ProcessLauncher is the default SandboxLauncher: it forks the bundle's
 // built Flue server under local node via the embedded runtime launcher —
 // the pre-seam runBuiltFlueServer behavior, unchanged.
-type processLauncher struct {
+type ProcessLauncher struct {
 	// NodePath overrides the node executable (default "node").
 	NodePath string
 }
 
-func (l processLauncher) Launch(ctx context.Context, spec LaunchSpec) (SandboxProcess, error) {
+func (l ProcessLauncher) Launch(ctx context.Context, spec LaunchSpec) (SandboxProcess, error) {
 	node := strings.TrimSpace(l.NodePath)
 	if node == "" {
 		node = "node"

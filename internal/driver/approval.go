@@ -2,6 +2,7 @@ package driver
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -92,6 +93,24 @@ func DriverVersionEffectiveTrust(driver *domain.Driver, version *domain.DriverVe
 		return domain.DriverTrustTrusted
 	}
 	return domain.DriverTrustUntrusted
+}
+
+// driverTrustLevel resolves trust for the exact driver version pinned on the
+// run. New manifests are authoritative: trusted built-ins/operator bundles
+// stamp trusted, untrusted custom submissions stamp untrusted, and explicit
+// operator approval is scoped to one version id in driver metadata. It lives
+// here (not in internal/driver/sandbox) because it depends on
+// DriverVersionEffectiveTrust; the sandbox package owns only the admission
+// decision once a trust level is known.
+func driverTrustLevel(ctx context.Context, s store.Store, run *domain.DriverRun, version *domain.DriverVersion) (domain.DriverTrustLevel, error) {
+	driver, err := s.Drivers().Get(ctx, run.WorkspaceKey, run.DriverID)
+	if errors.Is(err, domain.ErrNotFound) {
+		return domain.DriverTrustUntrusted, nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("load driver for trust placement policy: %w", err)
+	}
+	return DriverVersionEffectiveTrust(driver, version), nil
 }
 
 func loadDriverVersionForOperatorAction(ctx context.Context, s store.Store, ws, driverID, versionID string) (*domain.Driver, *domain.DriverVersion, error) {

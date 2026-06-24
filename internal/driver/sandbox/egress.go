@@ -1,4 +1,4 @@
-package driver
+package sandbox
 
 // Sandbox egress modes (§7 step 9, SB4): bound what sandboxed workflow code
 // can reach over the network. The container launcher resolves one declared

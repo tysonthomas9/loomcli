@@ -1,4 +1,4 @@
-package driver
+package sandbox
 
 // Container sandbox launcher (§7 step 9, SB2): runs workflow bundles in a
 // rootless container (podman first, docker fallback) behind the SB1

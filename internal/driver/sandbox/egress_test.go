@@ -1,5 +1,4 @@
-//nolint:revive // Tests use the established driver package name to exercise unexported helpers.
-package driver
+package sandbox
 
 // SB4 egress-mode tests. Unit tests cover mode resolution per trust level,
 // arg/relay construction goldens, and the LOOM_DRIVER_API_URL rewrite. The

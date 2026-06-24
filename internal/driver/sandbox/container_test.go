@@ -1,5 +1,4 @@
-//nolint:revive // Tests use the established driver package name to exercise unexported helpers.
-package driver
+package sandbox
 
 // SB2 container-launcher tests. The unit tests need no container engine:
 // argv construction is golden-tested and Launch runs against a fake engine

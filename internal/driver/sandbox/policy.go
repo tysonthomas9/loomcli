@@ -1,4 +1,4 @@
-package driver
+package sandbox
 
 // Trust placement policy (§7 step 9, SB3): isolation is a platform-enforced
 // rule, not topology hygiene. Every Driver carries a trust level; the runner
@@ -7,14 +7,16 @@ package driver
 // sandbox_required error instead of silently degrading to a host process.
 // Unknown/missing trust reads as untrusted — fail closed (locked decision:
 // the one-time fleet-db backfill stamped pre-existing rows trusted).
+//
+// driverTrustLevel (resolving a driver version's effective trust) lives in the
+// parent driver package next to DriverVersionEffectiveTrust; this package owns
+// only the sandbox admission decision once a trust level is known.
 
 import (
-	"context"
-	"errors"
 	"fmt"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
-	"github.com/tysonthomas9/loomcli/internal/store"
+	"github.com/tysonthomas9/loomcli/internal/driver/runtypes"
 )
 
 // ErrorClassSandboxRequired is the structured error class stamped on a run
@@ -49,12 +51,12 @@ func launcherIsolates(launcher SandboxLauncher) bool {
 	return ok && isolating.Isolates()
 }
 
-// launcherPlacementProvider names the launcher for the audit record. It
+// LauncherPlacementProvider names the launcher for the audit record. It
 // mirrors the placement Provider the launcher would report; custom injected
 // launchers without a known provider are labeled by isolation outcome.
-func launcherPlacementProvider(launcher SandboxLauncher) string {
+func LauncherPlacementProvider(launcher SandboxLauncher) string {
 	switch launcher.(type) {
-	case processLauncher:
+	case ProcessLauncher:
 		return SandboxProviderProcess
 	case *containerLauncher:
 		return SandboxProviderContainer
@@ -66,31 +68,16 @@ func launcherPlacementProvider(launcher SandboxLauncher) string {
 	}
 }
 
-// driverTrustLevel resolves trust for the exact driver version pinned on the
-// run. New manifests are authoritative: trusted built-ins/operator bundles
-// stamp trusted, untrusted custom submissions stamp untrusted, and explicit
-// operator approval is scoped to one version id in driver metadata.
-func driverTrustLevel(ctx context.Context, s store.Store, run *domain.DriverRun, version *domain.DriverVersion) (domain.DriverTrustLevel, error) {
-	driver, err := s.Drivers().Get(ctx, run.WorkspaceKey, run.DriverID)
-	if errors.Is(err, domain.ErrNotFound) {
-		return domain.DriverTrustUntrusted, nil
-	}
-	if err != nil {
-		return "", fmt.Errorf("load driver for trust placement policy: %w", err)
-	}
-	return DriverVersionEffectiveTrust(driver, version), nil
-}
-
-// refuseUntrustedPlacement is the pre-launch gate: it returns a terminal
+// RefuseUntrustedPlacement is the pre-launch gate: it returns a terminal
 // failed result (and true) when the run's driver is untrusted and the
 // resolved launcher does not isolate. The launcher is never invoked — no
 // process is spawned. Trusted drivers and isolating launchers pass through.
-func refuseUntrustedPlacement(req RunRequest, launcher SandboxLauncher) (RunResult, bool) {
+func RefuseUntrustedPlacement(req runtypes.RunRequest, launcher SandboxLauncher) (runtypes.RunResult, bool) {
 	if req.TrustLevel.Trusted() || launcherIsolates(launcher) {
-		return RunResult{}, false
+		return runtypes.RunResult{}, false
 	}
-	provider := launcherPlacementProvider(launcher)
-	result := RunResult{
+	provider := LauncherPlacementProvider(launcher)
+	result := runtypes.RunResult{
 		Status: domain.DriverRunFailed,
 		Summary: fmt.Sprintf(
 			"driver %q is untrusted and the resolved %q launcher does not isolate: refusing to launch outside a sandbox (set LOOM_DRIVER_SANDBOX=container or have an operator mark the driver trusted)",
@@ -101,14 +88,14 @@ func refuseUntrustedPlacement(req RunRequest, launcher SandboxLauncher) (RunResu
 			RetryableOutputKey: "false",
 		},
 	}
-	recordTrustPlacementDecision(&result, req.TrustLevel, provider)
+	RecordTrustPlacementDecision(&result, req.TrustLevel, provider)
 	return result, true
 }
 
-// recordTrustPlacementDecision stamps the policy inputs onto the run output
+// RecordTrustPlacementDecision stamps the policy inputs onto the run output
 // (§9.6 audit): every run records the trust level it executed (or was
 // refused) under and the launcher the runner resolved.
-func recordTrustPlacementDecision(result *RunResult, trust domain.DriverTrustLevel, launcherProvider string) {
+func RecordTrustPlacementDecision(result *runtypes.RunResult, trust domain.DriverTrustLevel, launcherProvider string) {
 	if result.Output == nil {
 		result.Output = map[string]string{}
 	}
