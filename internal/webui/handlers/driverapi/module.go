@@ -71,7 +71,7 @@ type Config struct {
 	// "Authorization: Bearer <token>". Requests authenticated by a valid
 	// run-scoped token (RunTokenKey) are exempt: workflow calls are
 	// token-only.
-	APIToken string
+	APIToken string //nolint:gosec // G117: driver API bearer token intentionally carried by handler config.
 	// RunTokenKey is the HS256 signing key for run-scoped driver tokens
 	// (internal/driver ParseRunToken). Nil disables the run-token auth path;
 	// the legacy header-quad transport is unaffected.

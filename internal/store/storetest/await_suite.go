@@ -225,9 +225,10 @@ func testActorFilterAtScan(t *testing.T, h *AwaitHarness) {
 		{"allowed actor satisfies", []string{"alice", "bob"}, "alice", true},
 		{"mismatched actor parks", []string{"alice"}, "mallory", false},
 	}
+	subjects := []string{"repo-a", "repo-b", "repo-c"}
 	for i, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			subject := "repo-" + string(rune('a'+i))
+			subject := subjects[i]
 			pattern := domain.AwaitEventKey("approval.recorded", subject)
 			h.AppendEvent(t, "approval.recorded", subject, tc.actor)
 			in := awaitReg("run-a", i+1, pattern)

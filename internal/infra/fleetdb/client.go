@@ -44,7 +44,7 @@ type Config struct {
 	BaseURL string
 
 	// APIKey is sent as X-API-Key and X-Fleet-API-Key. Optional in dev mode.
-	APIKey string
+	APIKey string //nolint:gosec // G117: fleet-db API key intentionally carried by client config.
 
 	// Actor is sent as X-Actor on every request. Identifies the caller
 	// for audit + (in dev-mode) authorization.
@@ -53,7 +53,7 @@ type Config struct {
 	// AuthToken is a JWT bearer token for production auth. When set,
 	// sent as `Authorization: Bearer <token>`. Mutate post-construction
 	// via SetAuthToken — safe for concurrent use.
-	AuthToken string
+	AuthToken string //nolint:gosec // G117: bearer token intentionally carried by client config.
 
 	// HTTPClient is an optional override. When nil, a new http.Client
 	// with default settings is used. Production callers should inject a

@@ -34,7 +34,7 @@ type Settings struct {
 type RedisConfig struct {
 	Enabled  bool   `json:"enabled"`
 	Addr     string `json:"addr,omitempty"`
-	Password string `json:"password,omitempty"`
+	Password string `json:"password,omitempty"` //nolint:gosec // G117: persisted local Redis password setting.
 	DB       int    `json:"db,omitempty"`
 	TLS      bool   `json:"tls,omitempty"`
 }
