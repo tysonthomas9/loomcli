@@ -10,6 +10,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
+	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/usage"
 )
@@ -126,6 +127,20 @@ func installWrapperRunMock(t *testing.T, fn wrapperRunFn) {
 	t.Cleanup(func() { wrapperRun = orig })
 }
 
+func installClaudeRunTurnMock(t *testing.T, fn claudeRunTurnFn) {
+	t.Helper()
+	orig := claudeRunTurn
+	claudeRunTurn = fn
+	t.Cleanup(func() { claudeRunTurn = orig })
+}
+
+func completedClaudeTurn(text string) claudeRunTurnResult {
+	res := claudeRunTurnResult{}
+	res.Turn.State = "complete"
+	res.Turn.Text = text
+	return res
+}
+
 // SetupMockClaudeInvoker installs a mock claude invoker for tests.
 type MockClaudeInvokerRecorder struct {
 	mu          sync.Mutex
@@ -181,12 +196,9 @@ func setupWorkspaceConfig(t *testing.T, cfg *config.LoomConfig) {
 	oldResolver := cli.TestingResetDefaultResolver()
 
 	ctx := context.Background()
-	handle, err := bootstrap.OpenStore(ctx, configDir, nil)
-	if err != nil {
-		t.Fatalf("open fleet-db store: %v", err)
-	}
+	st := memstore.New()
 	t.Cleanup(func() {
-		_ = handle.Close()
+		_ = st.Close()
 		cli.TestingSetDefaultResolver(oldResolver)
 		config.InvalidateConfigCache()
 		cli.ResetWorkspaceRuntimeDirCache()
@@ -205,7 +217,7 @@ func setupWorkspaceConfig(t *testing.T, cfg *config.LoomConfig) {
 	for _, name := range names {
 		ws := cfg.Workspaces[name]
 		key := strings.ToUpper(name)
-		if _, err := handle.Store.Workspaces().Create(ctx, store.WorkspaceCreate{
+		if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{
 			Key:           key,
 			Name:          name,
 			DefaultBranch: firstRepoDefaultBranch(ws.Repos),
@@ -218,7 +230,7 @@ func setupWorkspaceConfig(t *testing.T, cfg *config.LoomConfig) {
 			if sourceRepoID == "" {
 				sourceRepoID = repo.Name
 			}
-			if _, err := handle.Store.Repos().Create(ctx, store.RepoCreate{
+			if _, err := st.Repos().Create(ctx, store.RepoCreate{
 				WorkspaceKey:  key,
 				Name:          repo.Name,
 				Remote:        repo.Remote,
@@ -238,7 +250,7 @@ func setupWorkspaceConfig(t *testing.T, cfg *config.LoomConfig) {
 	if cfg.DefaultWorkspace != "" {
 		t.Setenv("LOOM_WORKSPACE", strings.ToUpper(cfg.DefaultWorkspace))
 	}
-	if _, err := config.TestingPrimeConfigCacheFromStore(ctx, handle.Store); err != nil {
+	if _, err := config.TestingPrimeConfigCacheFromStore(ctx, st); err != nil {
 		t.Fatalf("prime config cache: %v", err)
 	}
 	cli.ResetWorkspaceRuntimeDirCache()
