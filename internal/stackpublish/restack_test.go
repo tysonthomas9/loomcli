@@ -123,7 +123,9 @@ func TestRebaseOnto_CleanNoConflict(t *testing.T) {
 		require.NoErrorf(t, err, "git %v: %s", args, out)
 		return strings.TrimSpace(string(out))
 	}
-	w := func(name, content string) { require.NoError(t, os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644)) }
+	w := func(name, content string) {
+		require.NoError(t, os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644))
+	}
 	g("init", "-q")
 	g("config", "user.email", "t@t")
 	g("config", "user.name", "t")

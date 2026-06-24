@@ -39,13 +39,13 @@ func NewGitHubForge(token string, client *http.Client, baseURL string) *GitHubFo
 }
 
 type ghPull struct {
-	Number  int     `json:"number"`
-	State   string  `json:"state"`
-	Title   string  `json:"title"`
-	Body    string  `json:"body"`
-	HTMLURL string  `json:"html_url"`
+	Number   int     `json:"number"`
+	State    string  `json:"state"`
+	Title    string  `json:"title"`
+	Body     string  `json:"body"`
+	HTMLURL  string  `json:"html_url"`
 	MergedAt *string `json:"merged_at"`
-	Head    struct {
+	Head     struct {
 		Ref string `json:"ref"`
 	} `json:"head"`
 	Base struct {
