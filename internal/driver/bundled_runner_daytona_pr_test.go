@@ -39,10 +39,7 @@ func TestRunBundledRunner_DaytonaLivePR(t *testing.T) {
 			t.Skipf("%s not available", bin)
 		}
 	}
-	serverPath, err := filepath.Abs(filepath.Join("..", "workflows", "builtin-dist", "epic-runner", "dist", "server.mjs"))
-	if err != nil {
-		t.Fatal(err)
-	}
+	serverPath := committedBundleServerPath(t)
 
 	tmp := t.TempDir()
 	// Stage the Daytona key + a gh token as files (the runner reads files, not raw env).
@@ -52,7 +49,7 @@ func TestRunBundledRunner_DaytonaLivePR(t *testing.T) {
 	}
 	t.Setenv("DAYTONA_CREDENTIAL_FILE", keyFile)
 
-	ghTokOut, err := exec.Command("gh", "auth", "token").Output()
+	ghTokOut, err := exec.Command("gh", "auth", "token").Output() //nolint:norawexec
 	if err != nil || len(bytes.TrimSpace(ghTokOut)) == 0 {
 		t.Skipf("could not get a gh token: %v", err)
 	}
@@ -97,7 +94,7 @@ func TestRunBundledRunner_DaytonaLivePR(t *testing.T) {
 	defer cancel()
 
 	var serr bytes.Buffer
-	raw, err := RunBundledLocalTaskRunner(ctx, BundledRunnerOptions{
+	raw, err := RunBundledTaskRunner(ctx, BundledRunnerOptions{
 		ServerPath:   serverPath,
 		Entrypoint:   DaytonaTaskRunnerEntrypoint,
 		Worktree:     tmp,
@@ -107,7 +104,7 @@ func TestRunBundledRunner_DaytonaLivePR(t *testing.T) {
 		Stderr:       &serr,
 	})
 	if err != nil {
-		t.Fatalf("RunBundledLocalTaskRunner(daytona PR): %v\n--- stderr tail ---\n%s", err, tailStr(serr.String(), 5000))
+		t.Fatalf("RunBundledTaskRunner(daytona PR): %v\n--- stderr tail ---\n%s", err, tailStr(serr.String(), 5000))
 	}
 
 	var result bundledResult

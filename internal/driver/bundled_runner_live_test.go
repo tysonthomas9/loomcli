@@ -11,7 +11,7 @@ import (
 	"time"
 )
 
-// TestRunBundledLocalTaskRunner_LiveBackend exercises the bundled TS leaf against a
+// TestRunBundledTaskRunner_LiveBackend exercises the bundled TS leaf against a
 // REAL backend CLI on PATH (claude / codex / cursor / opencode / gemini), proving the
 // Phase-U execution path — backend argv + stream-json -> canonical transcript_entries +
 // top-level usage — works per backend, not just for codex.
@@ -20,9 +20,9 @@ import (
 //
 //	LOOM_LIVE_BACKEND=claude go test ./internal/driver/ -run LiveBackend -v -count=1 -timeout 600s
 //
-// The daemon->leaf wiring (maybeTSLeafInvoker) is backend-agnostic and already verified
+// The daemon->leaf wiring (tsRuntimeInvoker) is backend-agnostic and already verified
 // on the codex podman stack; this isolates the remaining per-backend risk in the runner.
-func TestRunBundledLocalTaskRunner_LiveBackend(t *testing.T) {
+func TestRunBundledTaskRunner_LiveBackend(t *testing.T) {
 	backend := os.Getenv("LOOM_LIVE_BACKEND")
 	if backend == "" {
 		t.Skip("set LOOM_LIVE_BACKEND={claude|codex|cursor|opencode|gemini} to run this live test")
@@ -45,13 +45,7 @@ func TestRunBundledLocalTaskRunner_LiveBackend(t *testing.T) {
 		t.Skip("git not available")
 	}
 
-	serverPath, err := filepath.Abs(filepath.Join("..", "workflows", "builtin-dist", "epic-runner", "dist", "server.mjs"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := os.Stat(serverPath); err != nil {
-		t.Skipf("committed bundle not present (%v); run scripts/rebuild-builtin-bundle.sh", err)
-	}
+	serverPath := committedBundleServerPath(t)
 
 	tmp := t.TempDir()
 	worktree := filepath.Join(tmp, "wt")
@@ -75,7 +69,7 @@ func TestRunBundledLocalTaskRunner_LiveBackend(t *testing.T) {
 	defer cancel()
 
 	var serr bytes.Buffer
-	raw, err := RunBundledLocalTaskRunner(ctx, BundledRunnerOptions{
+	raw, err := RunBundledTaskRunner(ctx, BundledRunnerOptions{
 		ServerPath:   serverPath,
 		Worktree:     worktree,
 		Backend:      backend,
@@ -86,7 +80,7 @@ func TestRunBundledLocalTaskRunner_LiveBackend(t *testing.T) {
 		Stderr:       &serr,
 	})
 	if err != nil {
-		t.Fatalf("RunBundledLocalTaskRunner(%s): %v\n--- stderr (tail) ---\n%s", backend, err, tailStr(serr.String(), 4000))
+		t.Fatalf("RunBundledTaskRunner(%s): %v\n--- stderr (tail) ---\n%s", backend, err, tailStr(serr.String(), 4000))
 	}
 
 	var result bundledResult

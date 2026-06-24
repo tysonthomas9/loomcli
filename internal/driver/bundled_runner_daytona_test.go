@@ -4,9 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -22,13 +20,7 @@ func TestRunBundledRunner_DaytonaEntrypointSwitch(t *testing.T) {
 	if _, err := exec.LookPath("node"); err != nil {
 		t.Skip("node not available")
 	}
-	serverPath, err := filepath.Abs(filepath.Join("..", "workflows", "builtin-dist", "epic-runner", "dist", "server.mjs"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := os.Stat(serverPath); err != nil {
-		t.Skipf("committed bundle not present (%v); run scripts/rebuild-builtin-bundle.sh", err)
-	}
+	serverPath := committedBundleServerPath(t)
 	// Force the daytona runner down its no-repo path deterministically.
 	t.Setenv("DAYTONA_REPO_URL", "")
 	t.Setenv("DAYTONA_API_KEY", "")
@@ -44,7 +36,7 @@ func TestRunBundledRunner_DaytonaEntrypointSwitch(t *testing.T) {
 	})
 
 	var serr bytes.Buffer
-	raw, err := RunBundledLocalTaskRunner(context.Background(), BundledRunnerOptions{
+	raw, err := RunBundledTaskRunner(context.Background(), BundledRunnerOptions{
 		ServerPath:  serverPath,
 		Entrypoint:  DaytonaTaskRunnerEntrypoint,
 		Worktree:    tmp,
@@ -53,7 +45,7 @@ func TestRunBundledRunner_DaytonaEntrypointSwitch(t *testing.T) {
 		Stderr:      &serr,
 	})
 	if err != nil {
-		t.Fatalf("RunBundledLocalTaskRunner(daytona): %v\n--- stderr ---\n%s", err, serr.String())
+		t.Fatalf("RunBundledTaskRunner(daytona): %v\n--- stderr ---\n%s", err, serr.String())
 	}
 
 	var result bundledResult

@@ -48,11 +48,12 @@ type BundledRunnerOptions struct {
 	Stderr io.Writer
 }
 
-// RunBundledLocalTaskRunner runs the bundled local-task-runner against an existing
-// worktree and returns its raw result JSON (transcript_entries + top-level usage +
-// patch, etc.). It reuses the same Node launcher the driver host-bridge uses, so the
-// daemon leaf and the driver share ONE execution path.
-func RunBundledLocalTaskRunner(ctx context.Context, opts BundledRunnerOptions) (json.RawMessage, error) {
+// RunBundledTaskRunner runs a bundled task runner (local-task-runner by default, or the
+// daytona-task-runner via opts.Entrypoint) against an existing worktree and returns its raw
+// result JSON (transcript_entries + top-level usage + patch, etc.). It reuses the same Node
+// launcher the driver host-bridge uses, so the daemon leaf and the driver share ONE
+// execution path.
+func RunBundledTaskRunner(ctx context.Context, opts BundledRunnerOptions) (json.RawMessage, error) {
 	if strings.TrimSpace(opts.ServerPath) == "" {
 		return nil, fmt.Errorf("bundled runner: ServerPath is required")
 	}
@@ -80,7 +81,7 @@ func RunBundledLocalTaskRunner(ctx context.Context, opts BundledRunnerOptions) (
 		cmd.Dir = wt
 	}
 	cmd.Env = buildLeafRunnerEnv(opts, entrypoint, requestJSON)
-	cmd.Stdin = bytes.NewReader([]byte(requestJSON))
+	cmd.Stdin = strings.NewReader(requestJSON)
 	var stdout bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = stderr // live runner/backend output -> caller's stderr (watchdog feed)
@@ -101,8 +102,11 @@ func RunBundledLocalTaskRunner(ctx context.Context, opts BundledRunnerOptions) (
 	return json.RawMessage(append([]byte{}, payload...)), nil
 }
 
-// buildLeafRunnerEnv assembles the environment for the bundled Node launcher:
-// the host environment plus the LOOM_TASK_RUNNER_* wiring the runner reads.
+// buildLeafRunnerEnv assembles the environment for the bundled Node launcher: the host
+// environment plus the LOOM_TASK_RUNNER_* wiring the runner reads. The host env is passed
+// through as-is — the daemon supervisor already scrubs it via cli.FilteredEnv
+// (allowlist/blocklist) before spawning this leaf, so this deliberately does NOT re-run the
+// host-bridge's scopedSubprocessBaseEnv filtering.
 func buildLeafRunnerEnv(opts BundledRunnerOptions, entrypoint, requestJSON string) []string {
 	env := append([]string{}, os.Environ()...)
 	env = append(env,

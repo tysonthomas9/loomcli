@@ -1,4 +1,4 @@
-package agent
+package tsruntime
 
 import (
 	"bytes"
@@ -19,34 +19,37 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/workflows"
 )
 
-// Phase U — execution-leaf unification. When LOOM_DAEMON_LEAF=ts, the daemon leaf
-// delegates its backend run to the bundled TypeScript local-task-runner (the same
-// runner the driver host-bridge uses) instead of the Go local-agent path, so both
-// planes share ONE execution + telemetry path. The Go daemon SUPERVISOR is untouched:
-// it still spawns `loom <role> --daemon-mode`; only the leaf's internal execution
-// changes. Default-off — the Go path remains the default.
+// Phase U — execution-leaf unification. When LOOM_DAEMON_LEAF=ts, the daemon's
+// execution leaf runs the agent on the TS runtime: it delegates the backend run
+// to the bundled TypeScript task-runner (the same runner the driver host-bridge
+// uses) instead of the Go local-agent path, so both planes share ONE execution +
+// telemetry path. The Go daemon SUPERVISOR is untouched — it still spawns
+// `loom <role> --daemon-mode`; only the leaf's internal execution changes.
+// Default-off: the Go path remains the default.
 
-// tsLeafEnabled reports whether the daemon leaf should run via the TS runner.
-func tsLeafEnabled() bool {
+// enabled reports whether the daemon's execution leaf should run on the
+// TS runtime (the bundled TypeScript task-runner) rather than the Go path.
+func enabled() bool {
 	return strings.EqualFold(strings.TrimSpace(os.Getenv("LOOM_DAEMON_LEAF")), "ts")
 }
 
-// maybeTSLeafInvoker returns a TS-runner-delegating invoker when LOOM_DAEMON_LEAF=ts,
-// wrapping the supplied fallback (the Go invoker) for the interactive path and as a
-// safety net; otherwise it returns the fallback unchanged.
-func maybeTSLeafInvoker(fallback cli.AgentInvoker) cli.AgentInvoker {
-	if tsLeafEnabled() {
-		return tsRunnerAgentInvoker{fallback: fallback}
+// Invoker returns a TS-runtime-delegating AgentInvoker when
+// LOOM_DAEMON_LEAF=ts, wrapping the supplied fallback (the Go invoker) for the
+// interactive path and as a safety net; otherwise it returns the fallback
+// unchanged. Decorator style mirrors wrapAgentInvokerWithTracing.
+func Invoker(fallback cli.AgentInvoker) cli.AgentInvoker {
+	if enabled() {
+		return agentInvoker{fallback: fallback}
 	}
 	return fallback
 }
 
-// leafRunnerEntrypoint selects which bundled runner the daemon leaf delegates to.
-// Default is the local-task-runner (local execution). Set
+// taskRunnerEntrypoint selects which bundled task-runner the TS runtime delegates
+// to. Default is the local-task-runner (local execution). Set
 // LOOM_DAEMON_LEAF_RUNNER=daytona-task-runner to run the task inside a Daytona
 // sandbox (requires DAYTONA_API_KEY + a reachable repo URL); the same bundle ships
 // both runners, so this is just an entrypoint switch.
-func leafRunnerEntrypoint() string {
+func taskRunnerEntrypoint() string {
 	if v := strings.TrimSpace(os.Getenv("LOOM_DAEMON_LEAF_RUNNER")); v != "" {
 		return v
 	}
@@ -71,21 +74,29 @@ func daytonaRepoURL(workDir string) string {
 	return url
 }
 
-type tsRunnerAgentInvoker struct{ fallback cli.AgentInvoker }
+// agentInvoker is the cli.AgentInvoker that runs a non-interactive
+// daemon-leaf agent on the TS runtime (the bundled task-runner), deferring
+// interactive runs to the Go fallback.
+//
+// Tracing note: Deps.Agent is already the tracing-wrapped registry invoker, and
+// this type wraps THAT as its fallback — so the TS-runtime path itself runs
+// OUTSIDE the per-invoke tracing span (only the Go fallback is traced). If the TS
+// path needs its own span, wrap here or trace inside InvokeNonInteractive.
+type agentInvoker struct{ fallback cli.AgentInvoker }
 
-func (i tsRunnerAgentInvoker) InvokeInteractive(workDir, prompt, agentName string) error {
+func (i agentInvoker) InvokeInteractive(workDir, prompt, agentName string) error {
 	// Interactive runs are not part of the daemon leaf; defer to the Go path.
 	return i.fallback.InvokeInteractive(workDir, prompt, agentName)
 }
 
-func (i tsRunnerAgentInvoker) InvokeNonInteractive(workDir, prompt, agentName string, shutdown <-chan struct{}, collector *usage.Collector) error {
-	serverPath, err := leafBundleServerPath()
+func (i agentInvoker) InvokeNonInteractive(workDir, prompt, agentName string, shutdown <-chan struct{}, collector *usage.Collector) error {
+	serverPath, err := taskRunnerBundleServerPath()
 	if err != nil {
-		return fmt.Errorf("ts-leaf: materialize bundle: %w", err)
+		return fmt.Errorf("ts-runtime: materialize bundle: %w", err)
 	}
 	backend := cli.GetBackendName()
 	leaseToken := os.Getenv("LOOM_TASK_RUN_LEASE_TOKEN")
-	entrypoint := leafRunnerEntrypoint()
+	entrypoint := taskRunnerEntrypoint()
 	taskRunID := strings.TrimSpace(os.Getenv("LOOM_TASK_RUN_ID"))
 	if taskRunID == "" {
 		taskRunID = "tr-" + agentName
@@ -113,7 +124,7 @@ func (i tsRunnerAgentInvoker) InvokeNonInteractive(workDir, prompt, agentName st
 	ctx, cancel := contextFromShutdown(shutdown)
 	defer cancel()
 
-	raw, err := driver.RunBundledLocalTaskRunner(ctx, driver.BundledRunnerOptions{
+	raw, err := driver.RunBundledTaskRunner(ctx, driver.BundledRunnerOptions{
 		ServerPath:   serverPath,
 		Entrypoint:   entrypoint,
 		Worktree:     workDir,
@@ -127,13 +138,13 @@ func (i tsRunnerAgentInvoker) InvokeNonInteractive(workDir, prompt, agentName st
 	if err != nil {
 		return err
 	}
-	return applyLeafResult(raw, collector)
+	return applyTaskRunnerResult(raw, collector)
 }
 
-// applyLeafResult decodes the bundled runner's result, feeds usage into the
-// daemon collector, mirrors the transcript onto the session, and maps a
+// applyTaskRunnerResult decodes the bundled task-runner's result, feeds usage into
+// the daemon collector, mirrors the transcript onto the session, and maps a
 // non-completed run to an error.
-func applyLeafResult(raw json.RawMessage, collector *usage.Collector) error {
+func applyTaskRunnerResult(raw json.RawMessage, collector *usage.Collector) error {
 	var result struct {
 		Status            string            `json:"status"`
 		ErrorMessage      string            `json:"errorMessage"`
@@ -144,10 +155,10 @@ func applyLeafResult(raw json.RawMessage, collector *usage.Collector) error {
 		TranscriptEntries []json.RawMessage `json:"transcript_entries"`
 	}
 	if jerr := json.Unmarshal(raw, &result); jerr != nil {
-		return fmt.Errorf("ts-leaf: decode runner result: %w", jerr)
+		return fmt.Errorf("ts-runtime: decode runner result: %w", jerr)
 	}
 
-	// Feed the leaf's usage into the daemon collector so the worker's own
+	// Feed the runner's usage into the daemon collector so the worker's own
 	// finalize path records it exactly as the Go leaf does — keeping the TS leaf
 	// at telemetry parity with the Go leaf.
 	//
@@ -163,32 +174,32 @@ func applyLeafResult(raw json.RawMessage, collector *usage.Collector) error {
 	}
 	// Surface the transcript on the session (best-effort; the entries are canonical
 	// transcript.Event, pinned by the Phase-U/U0 conformance test).
-	writeLeafNativeTranscript(result.TranscriptEntries)
+	writeTaskRunnerNativeTranscript(result.TranscriptEntries)
 
 	if result.Status != "completed" {
 		msg := result.ErrorMessage
 		if msg == "" {
 			msg = result.Status
 		}
-		return fmt.Errorf("ts-leaf run did not complete: %s", msg)
+		return fmt.Errorf("ts-runtime run did not complete: %s", msg)
 	}
 	return nil
 }
 
 var (
-	leafBundleOnce sync.Once
-	leafServerPath string
-	leafBundleErr  error
+	taskRunnerBundleOnce sync.Once
+	taskRunnerServerPath string
+	taskRunnerBundleErr  error
 )
 
-// leafBundleServerPath materializes the bundled runner once per process to a stable
-// per-workspace path and returns its server.mjs.
-func leafBundleServerPath() (string, error) {
-	leafBundleOnce.Do(func() {
-		dest := filepath.Join(cli.GetWorkspaceRuntimeDir(), "ts-leaf-bundle", "dist")
-		leafServerPath, leafBundleErr = workflows.MaterializeBuiltinBundle("epic-runner", dest)
+// taskRunnerBundleServerPath materializes the bundled task-runner once per process
+// to a stable per-workspace path and returns its server.mjs.
+func taskRunnerBundleServerPath() (string, error) {
+	taskRunnerBundleOnce.Do(func() {
+		dest := filepath.Join(cli.GetWorkspaceRuntimeDir(), "ts-runtime-bundle", "dist")
+		taskRunnerServerPath, taskRunnerBundleErr = workflows.MaterializeBuiltinBundle("epic-runner", dest)
 	})
-	return leafServerPath, leafBundleErr
+	return taskRunnerServerPath, taskRunnerBundleErr
 }
 
 // contextFromShutdown bridges the daemon leaf's shutdown channel to a context the
@@ -207,7 +218,7 @@ func contextFromShutdown(shutdown <-chan struct{}) (context.Context, context.Can
 	return ctx, cancel
 }
 
-func writeLeafNativeTranscript(entries []json.RawMessage) {
+func writeTaskRunnerNativeTranscript(entries []json.RawMessage) {
 	if len(entries) == 0 {
 		return
 	}

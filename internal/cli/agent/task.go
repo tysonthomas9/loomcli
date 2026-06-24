@@ -8,6 +8,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/tysonthomas9/loomcli/internal/cli"
+	"github.com/tysonthomas9/loomcli/internal/cli/agent/tsruntime"
 	"github.com/tysonthomas9/loomcli/internal/cli/automode"
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
 	"github.com/tysonthomas9/loomcli/internal/cli/workspace"
@@ -157,7 +158,7 @@ func runTaskDaemon(deps *cli.Deps, worktreePath, agentName string) {
 	// non-interactive path: PTY + stream-json → log mtime advances per turn.
 	shutdown := automode.SetupSignalHandler()
 	collector := usage.NewCollector(cli.GetBackendName(), agentName)
-	invokeErr := maybeTSLeafInvoker(deps.Agent).InvokeNonInteractive(worktreePath, prompt, agentName, shutdown, collector)
+	invokeErr := tsruntime.Invoker(deps.Agent).InvokeNonInteractive(worktreePath, prompt, agentName, shutdown, collector)
 	if invokeErr == nil {
 		// Success: drop the carried session so the next restart starts the next
 		// task fresh. On failure we KEEP it (carry-forward → resume on respawn).

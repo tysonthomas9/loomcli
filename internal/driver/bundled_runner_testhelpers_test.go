@@ -3,12 +3,11 @@ package driver
 import (
 	"encoding/json"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"testing"
 )
 
-// bundledResult is the shape RunBundledLocalTaskRunner returns. The tags match what
+// bundledResult is the shape RunBundledTaskRunner returns. The tags match what
 // the flue runners actually emit: errorClass/errorMessage are camelCase (the
 // runner's failed() output), while usage, transcript_entries, and runtime_metadata
 // are snake_case. Shared by the bundled-runner tests so the tags stay consistent.
@@ -32,23 +31,28 @@ func newGitWorktree(t *testing.T, dir string) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	runGit(t, dir, "init", "-q")
-	runGit(t, dir, "config", "user.email", "t@example.test")
-	runGit(t, dir, "config", "user.name", "Test")
+	gitCmd(t, dir, "init", "-q")
+	gitCmd(t, dir, "config", "user.email", "t@example.test")
+	gitCmd(t, dir, "config", "user.name", "Test")
 	if err := os.WriteFile(filepath.Join(dir, "README.md"), []byte("base\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	runGit(t, dir, "add", ".")
-	runGit(t, dir, "commit", "-q", "-m", "init")
+	gitCmd(t, dir, "add", ".")
+	gitCmd(t, dir, "commit", "-q", "-m", "init")
 }
 
-func runGit(t *testing.T, dir string, args ...string) {
+// committedBundleServerPath resolves the committed builtin bundle's server.mjs and skips
+// the test if it's absent (run scripts/rebuild-builtin-bundle.sh to produce it).
+func committedBundleServerPath(t *testing.T) string {
 	t.Helper()
-	c := exec.Command("git", args...)
-	c.Dir = dir
-	if out, err := c.CombinedOutput(); err != nil {
-		t.Fatalf("git %v: %v\n%s", args, err, out)
+	serverPath, err := filepath.Abs(filepath.Join("..", "workflows", "builtin-dist", "epic-runner", "dist", "server.mjs"))
+	if err != nil {
+		t.Fatal(err)
 	}
+	if _, err := os.Stat(serverPath); err != nil {
+		t.Skipf("committed bundle not present (%v); run scripts/rebuild-builtin-bundle.sh", err)
+	}
+	return serverPath
 }
 
 // tailStr returns the last n bytes of s, prefixed with "..." when truncated.

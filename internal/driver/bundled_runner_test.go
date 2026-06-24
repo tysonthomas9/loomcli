@@ -23,25 +23,19 @@ process.stdin.on("end", () => {
 });
 `
 
-// TestRunBundledLocalTaskRunner_RealBundle (Phase U / U1, increment 2) proves the
+// TestRunBundledTaskRunner_RealBundle (Phase U / U1, increment 2) proves the
 // core delegation mechanism end-to-end LOCALLY: it runs the actual committed bundle's
 // local-task-runner against a real git worktree + a fake codex backend, and asserts
 // the runner returns a transcript + top-level usage and tees the backend's live output
 // to the caller's stderr (the supervisor watchdog feed). No podman required.
-func TestRunBundledLocalTaskRunner_RealBundle(t *testing.T) {
+func TestRunBundledTaskRunner_RealBundle(t *testing.T) {
 	if _, err := exec.LookPath("node"); err != nil {
 		t.Skip("node not available")
 	}
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git not available")
 	}
-	serverPath, err := filepath.Abs(filepath.Join("..", "workflows", "builtin-dist", "epic-runner", "dist", "server.mjs"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := os.Stat(serverPath); err != nil {
-		t.Skipf("committed bundle not present (%v); run scripts/rebuild-builtin-bundle.sh", err)
-	}
+	serverPath := committedBundleServerPath(t)
 
 	tmp := t.TempDir()
 	worktree := filepath.Join(tmp, "wt")
@@ -63,7 +57,7 @@ func TestRunBundledLocalTaskRunner_RealBundle(t *testing.T) {
 	})
 
 	var serr bytes.Buffer
-	raw, err := RunBundledLocalTaskRunner(context.Background(), BundledRunnerOptions{
+	raw, err := RunBundledTaskRunner(context.Background(), BundledRunnerOptions{
 		ServerPath:   serverPath,
 		Worktree:     worktree,
 		Backend:      "codex",
@@ -73,7 +67,7 @@ func TestRunBundledLocalTaskRunner_RealBundle(t *testing.T) {
 		Stderr:       &serr,
 	})
 	if err != nil {
-		t.Fatalf("RunBundledLocalTaskRunner: %v\n--- stderr ---\n%s", err, serr.String())
+		t.Fatalf("RunBundledTaskRunner: %v\n--- stderr ---\n%s", err, serr.String())
 	}
 
 	var result bundledResult

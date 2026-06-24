@@ -32,13 +32,7 @@ func TestRunBundledRunner_DaytonaLive(t *testing.T) {
 	if _, err := exec.LookPath("node"); err != nil {
 		t.Skip("node not available")
 	}
-	serverPath, err := filepath.Abs(filepath.Join("..", "workflows", "builtin-dist", "epic-runner", "dist", "server.mjs"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := os.Stat(serverPath); err != nil {
-		t.Skipf("committed bundle not present (%v)", err)
-	}
+	serverPath := committedBundleServerPath(t)
 	if os.Getenv("DAYTONA_REPO_URL") == "" {
 		t.Setenv("DAYTONA_REPO_URL", "https://github.com/octocat/Hello-World.git")
 	}
@@ -68,7 +62,7 @@ func TestRunBundledRunner_DaytonaLive(t *testing.T) {
 	defer cancel()
 
 	var serr bytes.Buffer
-	raw, err := RunBundledLocalTaskRunner(ctx, BundledRunnerOptions{
+	raw, err := RunBundledTaskRunner(ctx, BundledRunnerOptions{
 		ServerPath:   serverPath,
 		Entrypoint:   DaytonaTaskRunnerEntrypoint,
 		Worktree:     tmp,
@@ -79,7 +73,7 @@ func TestRunBundledRunner_DaytonaLive(t *testing.T) {
 		Stderr:       &serr,
 	})
 	if err != nil {
-		t.Fatalf("RunBundledLocalTaskRunner(daytona live): %v\n--- stderr (tail) ---\n%s", err, tailStr(serr.String(), 4000))
+		t.Fatalf("RunBundledTaskRunner(daytona live): %v\n--- stderr (tail) ---\n%s", err, tailStr(serr.String(), 4000))
 	}
 
 	var result bundledResult
