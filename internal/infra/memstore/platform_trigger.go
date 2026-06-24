@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -180,9 +182,11 @@ func (s *triggerRouteStore) DispatchTriggerRoute(ctx context.Context, ws, routeK
 	now := time.Now().UTC()
 	event, _ := s.events.create(dispatchTriggerEvent(ws, binding, in, now))
 
+	// runID() is monotonic when in.RunID is empty, so resolve it exactly once.
+	requestedRunID := s.runID(in.RunID)
 	run, err := s.runs.Create(ctx, store.DriverRunCreate{
 		WorkspaceKey:    ws,
-		RunID:           s.runID(in.RunID),
+		RunID:           requestedRunID,
 		DriverID:        binding.DriverID,
 		DriverVersionID: binding.DriverVersionID,
 		Entrypoint:      binding.TargetEntrypoint,
@@ -210,7 +214,80 @@ func (s *triggerRouteStore) DispatchTriggerRoute(ctx context.Context, ws, routeK
 	if deliveryErr != nil && !errors.Is(deliveryErr, domain.ErrAlreadyExists) {
 		return nil, deliveryErr
 	}
+	// Subject-level supersede (mirrors fleet-db's dispatch path): for `replace`
+	// bindings, keep the newest queued run for the subject and collapse only
+	// older queued siblings. This remains safe for redelivery and concurrent
+	// dispatches because the winner is derived from persisted TriggerEvent order,
+	// not from the caller currently executing this loop.
+	if binding.ConcurrencyPolicy == domain.TriggerBindingConcurrencyReplace {
+		if subject := strings.TrimSpace(in.SubjectRef); subject != "" {
+			s.supersedeQueuedRunsForSubject(ctx, ws, binding, subject)
+		}
+	}
 	return run, nil
+}
+
+// supersedeQueuedRunsForSubject cancels still-queued runs older than the newest
+// queued run for the same (binding, subject), matching each candidate by its
+// source TriggerEvent. Best-effort: a run already claimed is left running.
+func (s *triggerRouteStore) supersedeQueuedRunsForSubject(ctx context.Context, ws string, binding *domain.TriggerBinding, subject string) {
+	queued, err := s.runs.List(ctx, ws, store.DriverRunFilter{DriverID: binding.DriverID, Status: domain.DriverRunQueued})
+	if err != nil {
+		return
+	}
+	type queuedSubjectRun struct {
+		run   *domain.DriverRun
+		event *domain.TriggerEvent
+	}
+	matches := make([]queuedSubjectRun, 0, len(queued))
+	for _, run := range queued {
+		if run == nil {
+			continue
+		}
+		event, err := s.events.Get(ctx, ws, run.SourceRef)
+		if err != nil || event.TriggerBindingID != binding.BindingID || strings.TrimSpace(event.SubjectRef) != subject {
+			continue
+		}
+		matches = append(matches, queuedSubjectRun{run: run, event: event})
+	}
+	if len(matches) < 2 {
+		return
+	}
+	newest := matches[0]
+	for _, candidate := range matches[1:] {
+		if triggerEventBefore(newest.event, candidate.event) {
+			newest = candidate
+		}
+	}
+	for _, candidate := range matches {
+		if candidate.run.RunID == newest.run.RunID || !triggerEventBefore(candidate.event, newest.event) {
+			continue
+		}
+		s.runs.cancelQueuedForSupersede(ws, candidate.run.RunID, "superseded by "+newest.run.RunID+" for "+subject)
+	}
+}
+
+func triggerEventBefore(a, b *domain.TriggerEvent) bool {
+	if a == nil || b == nil {
+		return false
+	}
+	if a.ReceivedAt.Before(b.ReceivedAt) {
+		return true
+	}
+	if b.ReceivedAt.Before(a.ReceivedAt) {
+		return false
+	}
+	aSeq, aOK := triggerEventSequence(a.EventID)
+	bSeq, bOK := triggerEventSequence(b.EventID)
+	if aOK && bOK && aSeq != bSeq {
+		return aSeq < bSeq
+	}
+	return a.EventID < b.EventID
+}
+
+func triggerEventSequence(id string) (int64, bool) {
+	seq, err := strconv.ParseInt(strings.TrimPrefix(id, "event-"), 10, 64)
+	return seq, err == nil
 }
 
 // runID returns the caller-supplied id, or a generated monotonic one. fleet-db

@@ -149,6 +149,178 @@ func TestPlatformRegisteredEpicRunViaTriggerBinding(t *testing.T) {
 	}
 }
 
+func TestDispatchTriggerRouteSupersedesQueuedRunsForSubject(t *testing.T) {
+	ctx := t.Context()
+	s := New()
+
+	if _, err := s.Drivers().Create(ctx, store.DriverCreate{
+		WorkspaceKey: "WS", DriverID: "pr-review", Name: "pr-review",
+		OwnerType: domain.DriverOwnerSystem, Status: domain.DriverStatusActive,
+	}); err != nil {
+		t.Fatalf("Create driver: %v", err)
+	}
+	if _, err := s.DriverVersions().Create(ctx, store.DriverVersionCreate{
+		WorkspaceKey: "WS", VersionID: "v1", DriverID: "pr-review", Version: 1,
+		SourceDigest: "sha256:s", BundleDigest: "sha256:b", ValidationStatus: domain.DriverVersionValidationPassed,
+	}); err != nil {
+		t.Fatalf("Create driver version: %v", err)
+	}
+	if _, err := s.TriggerBindings().Create(ctx, store.TriggerBindingCreate{
+		WorkspaceKey: "WS", BindingID: "binding-pr", Name: "pr", SourceKind: "github",
+		RouteKey: "github.pull_request.synchronize", DriverID: "pr-review", DriverVersionID: "v1",
+		TargetEntrypoint: "run", ConcurrencyPolicy: domain.TriggerBindingConcurrencyReplace, Enabled: true,
+	}); err != nil {
+		t.Fatalf("Create trigger binding: %v", err)
+	}
+
+	dispatch := func(runID, idem, subject string) *domain.DriverRun {
+		run, err := s.TriggerRoutes().DispatchTriggerRoute(ctx, "WS", "github.pull_request.synchronize", store.TriggerRouteDispatch{
+			RunID: runID, IdempotencyKey: idem, EventType: "pull_request", SubjectRef: subject,
+		})
+		if err != nil {
+			t.Fatalf("DispatchTriggerRoute %s: %v", runID, err)
+		}
+		return run
+	}
+
+	const subject = "acme/widgets#7"
+	dispatch("run-1", "del-1", subject)
+	dispatch("run-2", "del-2", subject)
+	dispatch("run-3", "del-3", subject)
+
+	statusOf := func(id string) domain.DriverRunStatus {
+		r, err := s.DriverRuns().Get(ctx, "WS", id)
+		if err != nil {
+			t.Fatalf("Get %s: %v", id, err)
+		}
+		return r.Status
+	}
+	if statusOf("run-1") != domain.DriverRunCancelled || statusOf("run-2") != domain.DriverRunCancelled {
+		t.Fatalf("older runs not superseded: run-1=%s run-2=%s", statusOf("run-1"), statusOf("run-2"))
+	}
+	if statusOf("run-3") != domain.DriverRunQueued {
+		t.Fatalf("newest run-3 = %s, want queued", statusOf("run-3"))
+	}
+
+	// Different subject is untouched.
+	dispatch("run-other", "del-9", "acme/widgets#99")
+	if statusOf("run-3") != domain.DriverRunQueued || statusOf("run-other") != domain.DriverRunQueued {
+		t.Fatalf("cross-subject supersede leaked: run-3=%s other=%s", statusOf("run-3"), statusOf("run-other"))
+	}
+}
+
+func TestDispatchTriggerRouteRedeliveryDoesNotSupersedeNewerRun(t *testing.T) {
+	ctx := t.Context()
+	s := New()
+
+	if _, err := s.Drivers().Create(ctx, store.DriverCreate{
+		WorkspaceKey: "WS", DriverID: "pr-review", Name: "pr-review",
+		OwnerType: domain.DriverOwnerSystem, Status: domain.DriverStatusActive,
+	}); err != nil {
+		t.Fatalf("Create driver: %v", err)
+	}
+	if _, err := s.DriverVersions().Create(ctx, store.DriverVersionCreate{
+		WorkspaceKey: "WS", VersionID: "v1", DriverID: "pr-review", Version: 1,
+		SourceDigest: "sha256:s", BundleDigest: "sha256:b", ValidationStatus: domain.DriverVersionValidationPassed,
+	}); err != nil {
+		t.Fatalf("Create driver version: %v", err)
+	}
+	if _, err := s.TriggerBindings().Create(ctx, store.TriggerBindingCreate{
+		WorkspaceKey: "WS", BindingID: "binding-pr", Name: "pr", SourceKind: "github",
+		RouteKey: "github.pull_request.synchronize", DriverID: "pr-review", DriverVersionID: "v1",
+		TargetEntrypoint: "run", ConcurrencyPolicy: domain.TriggerBindingConcurrencyReplace, Enabled: true,
+	}); err != nil {
+		t.Fatalf("Create trigger binding: %v", err)
+	}
+
+	dispatch := func(runID, idem string) {
+		if _, err := s.TriggerRoutes().DispatchTriggerRoute(ctx, "WS", "github.pull_request.synchronize", store.TriggerRouteDispatch{
+			RunID: runID, IdempotencyKey: idem, EventType: "pull_request", SubjectRef: "acme/widgets#7",
+		}); err != nil {
+			t.Fatalf("DispatchTriggerRoute %s: %v", runID, err)
+		}
+	}
+	dispatch("run-1", "del-1")
+	dispatch("run-2", "del-2")
+	dispatch("run-1", "del-1")
+
+	run1, err := s.DriverRuns().Get(ctx, "WS", "run-1")
+	if err != nil {
+		t.Fatalf("Get run-1: %v", err)
+	}
+	run2, err := s.DriverRuns().Get(ctx, "WS", "run-2")
+	if err != nil {
+		t.Fatalf("Get run-2: %v", err)
+	}
+	if run1.Status != domain.DriverRunCancelled {
+		t.Fatalf("redelivered run-1 = %s, want cancelled", run1.Status)
+	}
+	if run2.Status != domain.DriverRunQueued {
+		t.Fatalf("redelivery cancelled newer run-2: status=%s, want queued", run2.Status)
+	}
+}
+
+func TestDispatchTriggerRouteSupersedeCancelsOlderRunThatArrivesLate(t *testing.T) {
+	ctx := t.Context()
+	s := New()
+
+	if _, err := s.Drivers().Create(ctx, store.DriverCreate{
+		WorkspaceKey: "WS", DriverID: "pr-review", Name: "pr-review",
+		OwnerType: domain.DriverOwnerSystem, Status: domain.DriverStatusActive,
+	}); err != nil {
+		t.Fatalf("Create driver: %v", err)
+	}
+	if _, err := s.DriverVersions().Create(ctx, store.DriverVersionCreate{
+		WorkspaceKey: "WS", VersionID: "v1", DriverID: "pr-review", Version: 1,
+		SourceDigest: "sha256:s", BundleDigest: "sha256:b", ValidationStatus: domain.DriverVersionValidationPassed,
+	}); err != nil {
+		t.Fatalf("Create driver version: %v", err)
+	}
+	binding, err := s.TriggerBindings().Create(ctx, store.TriggerBindingCreate{
+		WorkspaceKey: "WS", BindingID: "binding-pr", Name: "pr", SourceKind: "github",
+		RouteKey: "github.pull_request.synchronize", DriverID: "pr-review", DriverVersionID: "v1",
+		TargetEntrypoint: "run", ConcurrencyPolicy: domain.TriggerBindingConcurrencyReplace, Enabled: true,
+	})
+	if err != nil {
+		t.Fatalf("Create trigger binding: %v", err)
+	}
+
+	const subject = "acme/widgets#7"
+	olderEvent, replay := s.events.create(dispatchTriggerEvent("WS", binding, store.TriggerRouteDispatch{
+		RunID: "run-old", IdempotencyKey: "del-old", EventType: "pull_request", SubjectRef: subject,
+	}, time.Now().Add(-time.Second)))
+	if replay {
+		t.Fatal("older event unexpectedly replayed")
+	}
+	if _, err := s.TriggerRoutes().DispatchTriggerRoute(ctx, "WS", "github.pull_request.synchronize", store.TriggerRouteDispatch{
+		RunID: "run-new", IdempotencyKey: "del-new", EventType: "pull_request", SubjectRef: subject,
+	}); err != nil {
+		t.Fatalf("DispatchTriggerRoute run-new: %v", err)
+	}
+	if _, err := s.DriverRuns().Create(ctx, store.DriverRunCreate{
+		WorkspaceKey: "WS", RunID: "run-old", DriverID: "pr-review", DriverVersionID: "v1",
+		Entrypoint: "run", SourceKind: "github", SourceRef: olderEvent.EventID, IdempotencyKey: "del-old",
+	}); err != nil {
+		t.Fatalf("Create late older driver run: %v", err)
+	}
+	s.routes.supersedeQueuedRunsForSubject(ctx, "WS", binding, subject)
+
+	oldRun, err := s.DriverRuns().Get(ctx, "WS", "run-old")
+	if err != nil {
+		t.Fatalf("Get run-old: %v", err)
+	}
+	newRun, err := s.DriverRuns().Get(ctx, "WS", "run-new")
+	if err != nil {
+		t.Fatalf("Get run-new: %v", err)
+	}
+	if oldRun.Status != domain.DriverRunCancelled {
+		t.Fatalf("late older run = %s, want cancelled", oldRun.Status)
+	}
+	if newRun.Status != domain.DriverRunQueued {
+		t.Fatalf("newer run = %s, want queued", newRun.Status)
+	}
+}
+
 func TestTaskRunClaimQueuedAssignsPlacementAndHonorsProfileCapacity(t *testing.T) {
 	ctx := t.Context()
 	s := New()
