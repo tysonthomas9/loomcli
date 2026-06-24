@@ -13,6 +13,12 @@ import (
 	"time"
 )
 
+// DaytonaTaskRunnerEntrypoint is the bundled Daytona task runner entrypoint. It
+// provisions a Daytona sandbox, clones the repo, and runs the agent inside it
+// (host-side harness driving the sandbox). Selected for the daemon leaf via
+// LOOM_DAEMON_LEAF_RUNNER=daytona-task-runner.
+const DaytonaTaskRunnerEntrypoint = "daytona-task-runner"
+
 // BundledRunnerOptions configures a one-shot, in-place invocation of a bundled
 // builtin task runner (Phase U). Unlike the full HostBridgeTaskExecutor path, it does
 // NO worktree provisioning or patch-back finalize — it runs the runner against an
@@ -73,6 +79,31 @@ func RunBundledLocalTaskRunner(ctx context.Context, opts BundledRunnerOptions) (
 	if wt := strings.TrimSpace(opts.Worktree); wt != "" {
 		cmd.Dir = wt
 	}
+	cmd.Env = buildLeafRunnerEnv(opts, entrypoint, requestJSON)
+	cmd.Stdin = bytes.NewReader([]byte(requestJSON))
+	var stdout bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = stderr // live runner/backend output -> caller's stderr (watchdog feed)
+	cmd.Cancel = func() error {
+		if cmd.Process == nil {
+			return nil
+		}
+		return cmd.Process.Signal(os.Interrupt)
+	}
+	cmd.WaitDelay = 5 * time.Second
+	if err := cmd.Run(); err != nil {
+		return nil, fmt.Errorf("bundled local task runner failed: %w", err)
+	}
+	payload, err := lastJSONLine(stdout.Bytes())
+	if err != nil {
+		return nil, err
+	}
+	return json.RawMessage(append([]byte{}, payload...)), nil
+}
+
+// buildLeafRunnerEnv assembles the environment for the bundled Node launcher:
+// the host environment plus the LOOM_TASK_RUNNER_* wiring the runner reads.
+func buildLeafRunnerEnv(opts BundledRunnerOptions, entrypoint, requestJSON string) []string {
 	env := append([]string{}, os.Environ()...)
 	env = append(env,
 		"LOOM_TASK_RUNNER_SERVER_PATH="+opts.ServerPath,
@@ -94,24 +125,5 @@ func RunBundledLocalTaskRunner(ctx context.Context, opts BundledRunnerOptions) (
 	if strings.TrimSpace(opts.Prompt) != "" {
 		env = append(env, "LOOM_TASK_RUN_PROMPT="+opts.Prompt)
 	}
-	cmd.Env = env
-	cmd.Stdin = bytes.NewReader([]byte(requestJSON))
-	var stdout bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = stderr // live runner/backend output -> caller's stderr (watchdog feed)
-	cmd.Cancel = func() error {
-		if cmd.Process == nil {
-			return nil
-		}
-		return cmd.Process.Signal(os.Interrupt)
-	}
-	cmd.WaitDelay = 5 * time.Second
-	if err := cmd.Run(); err != nil {
-		return nil, fmt.Errorf("bundled local task runner failed: %w", err)
-	}
-	payload, err := lastJSONLine(stdout.Bytes())
-	if err != nil {
-		return nil, err
-	}
-	return json.RawMessage(append([]byte{}, payload...)), nil
+	return env
 }

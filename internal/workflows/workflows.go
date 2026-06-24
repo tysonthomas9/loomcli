@@ -271,7 +271,7 @@ func bundleAlreadyMaterialized(distPath, destDir, serverPath string) bool {
 	if err != nil {
 		return false
 	}
-	onDisk, err := os.ReadFile(filepath.Join(destDir, "source-digest.txt"))
+	onDisk, err := os.ReadFile(filepath.Join(destDir, "source-digest.txt")) //nolint:gosec // G304: destDir is a loom-controlled runtime path, not user input
 	if err != nil || !bytes.Equal(bytes.TrimSpace(onDisk), bytes.TrimSpace(embedded)) {
 		return false
 	}

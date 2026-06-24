@@ -111,7 +111,6 @@ func TestRunBundledRunner_DaytonaLivePR(t *testing.T) {
 	}
 
 	var result bundledResult
-	_ = os.WriteFile("/tmp/daytona-pr-result.json", raw, 0o644)
 	if jerr := json.Unmarshal(raw, &result); jerr != nil {
 		t.Fatalf("decode result: %v\nraw tail: %s", jerr, tailStr(string(raw), 3000))
 	}

@@ -127,7 +127,13 @@ func (i tsRunnerAgentInvoker) InvokeNonInteractive(workDir, prompt, agentName st
 	if err != nil {
 		return err
 	}
+	return applyLeafResult(raw, collector)
+}
 
+// applyLeafResult decodes the bundled runner's result, feeds usage into the
+// daemon collector, mirrors the transcript onto the session, and maps a
+// non-completed run to an error.
+func applyLeafResult(raw json.RawMessage, collector *usage.Collector) error {
 	var result struct {
 		Status            string            `json:"status"`
 		ErrorMessage      string            `json:"errorMessage"`

@@ -28,12 +28,6 @@ const (
 	// strict driver filter.
 	LocalTaskRunnerEntrypoint = "local-task-runner"
 
-	// DaytonaTaskRunnerEntrypoint is the bundled Daytona task runner entrypoint.
-	// It provisions a Daytona sandbox, clones the repo, and runs the agent inside
-	// it (host-side harness driving the sandbox). Selected for the daemon leaf via
-	// LOOM_DAEMON_LEAF_RUNNER=daytona-task-runner.
-	DaytonaTaskRunnerEntrypoint = "daytona-task-runner"
-
 	// TaskRunnerBackendEnv carries the resolved backend CLI to the local task
 	// runner (§4.5).
 	TaskRunnerBackendEnv = "LOOM_TASK_RUNNER_BACKEND"
