@@ -375,7 +375,9 @@ func TestDaytonaTaskRunnerSourceContract(t *testing.T) {
 		`readRuntimeCredential(taskContext.client, "daytona")`,
 		`DAYTONA_REPO_URL`,
 		`client.create({`,
-		`clone --depth 1`,
+		// Full clone (NOT shallow): stacked-PR base SHAs + the merge-base reconcile
+		// need real history, so the runner clones via cloneCommand without --depth.
+		`function cloneCommand(`,
 		`configureProvider("openai-codex"`,
 		`createFlueTranscriptCollector()`,
 		`transcript_entries: transcriptEntries`,
