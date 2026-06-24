@@ -52,7 +52,7 @@ func conflictRepo(t *testing.T) (string, string) {
 	t.Helper()
 	dir := t.TempDir()
 	g := func(args ...string) string {
-		out, err := exec.Command("git", append([]string{"-C", dir}, args...)...).CombinedOutput()
+		out, err := exec.Command("git", append([]string{"-C", dir}, args...)...).CombinedOutput() //nolint:norawexec
 		require.NoErrorf(t, err, "git %v: %s", args, out)
 		return strings.TrimSpace(string(out))
 	}
@@ -111,7 +111,7 @@ func TestRebaseOnto_NoResolverFailsClosed(t *testing.T) {
 	assert.Contains(t, err.Error(), "no resolver")
 
 	// The failed rebase was aborted — the repo is not left mid-rebase.
-	st, _ := exec.Command("git", "-C", dir, "status", "--porcelain").CombinedOutput()
+	st, _ := exec.Command("git", "-C", dir, "status", "--porcelain").CombinedOutput() //nolint:norawexec
 	assert.NotContains(t, string(st), "UU ", "rebase aborted, no unmerged paths")
 }
 
@@ -119,7 +119,7 @@ func TestRebaseOnto_CleanNoConflict(t *testing.T) {
 	ctx := context.Background()
 	dir := t.TempDir()
 	g := func(args ...string) string {
-		out, err := exec.Command("git", append([]string{"-C", dir}, args...)...).CombinedOutput()
+		out, err := exec.Command("git", append([]string{"-C", dir}, args...)...).CombinedOutput() //nolint:norawexec
 		require.NoErrorf(t, err, "git %v: %s", args, out)
 		return strings.TrimSpace(string(out))
 	}

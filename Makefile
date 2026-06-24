@@ -365,6 +365,14 @@ test-e2e-github-webhook-live:
 	@echo "Running live GitHub webhook e2e against $$LOOM_E2E_GITHUB_REPO..."
 	@GOCACHE=$${GOCACHE:-/tmp/go-build-cache} go test -count=1 -tags e2e -run TestE2E_GitHubWebhookRunsDriverAgainstLiveGitHubPR ./internal/webui/handlers/webhooks -timeout 5m
 
+# Compile + run the real GitHub stacked-PR publisher e2e (initial publish / re-run /
+# drop-a-unit / reorder). The test is //go:build e2e tagged, so this target is also the
+# compile guard against bit-rot. Skips unless gated:
+#   LOOM_STACK_E2E=1 LOOM_STACK_E2E_REPO=owner/name (+ gh auth) make test-e2e-stackpublish
+test-e2e-stackpublish:
+	@echo "Running stacked-PR publisher e2e (skips unless LOOM_STACK_E2E is set)..."
+	@GOCACHE=$${GOCACHE:-/tmp/go-build-cache} go test -count=1 -tags e2e -run TestE2EStackPublisher ./internal/stackpublish -timeout 10m
+
 # Run the real Playwright smoke suite: browser + API contracts against FleetDB-backed loom serve.
 test-e2e-real-smoke:
 	@echo "Running real Playwright smoke tests (self-contained)..."

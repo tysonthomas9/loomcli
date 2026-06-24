@@ -77,7 +77,7 @@ func gitRepoWithBranches(t *testing.T, id sl.StackID, tasks ...string) string {
 	t.Helper()
 	dir := t.TempDir()
 	rg := func(args ...string) {
-		out, err := exec.Command("git", append([]string{"-C", dir}, args...)...).CombinedOutput()
+		out, err := exec.Command("git", append([]string{"-C", dir}, args...)...).CombinedOutput() //nolint:norawexec
 		require.NoErrorf(t, err, "git %v: %s", args, out)
 	}
 	rg("init", "-q")
