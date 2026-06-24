@@ -6,13 +6,7 @@
  * wires input directly (e.g. wterm's `onData` → ws.send).
  */
 
-import {
-  get,
-  wsUrl,
-  getWsBaseUrl,
-  getAgentTerminalToken,
-  getAgentTerminalWsUrl,
-} from "@/hooks/api";
+import { get, wsUrl, getWsBaseUrl } from "@/hooks/api";
 
 import type { ConnectionState } from "./TerminalInstance";
 
@@ -78,6 +72,11 @@ export function encodeResize(cols: number, rows: number): string {
 const WS_CLOSE_BACKEND_EXITED = 4001;
 /** WebSocket close code sent by the backend when user kills the session. */
 const WS_CLOSE_SESSION_KILLED = 4002;
+/** Standard WebSocket close code used for a clean server-side close. */
+const WS_CLOSE_NORMAL = 1000;
+/** Standard WebSocket close code used when the workspace runtime is unavailable. */
+const WS_CLOSE_GOING_AWAY = 1001;
+const WORKSPACE_UNAVAILABLE_REASON = "workspace unavailable";
 
 /**
  * Connect a WebSocket, wiring received bytes into `write` and announcing
@@ -97,7 +96,6 @@ export function connectWebSocket(
   onDisconnected?: () => void,
   onOutput?: () => void,
   onBackendCrash?: (reason: string) => void,
-  agentName?: string,
   onSessionKilled?: () => void,
   initialSize?: { cols: number; rows: number },
 ): () => void {
@@ -172,18 +170,13 @@ export function connectWebSocket(
     flushTimer = setTimeout(flushPendingWrites, 16);
   };
 
-  const tokenPromise = agentName
-    ? getAgentTerminalToken(workspaceId, agentName).catch(() => null)
-    : fetchTerminalToken(workspaceId, sessionName);
+  const tokenPromise = fetchTerminalToken(workspaceId, sessionName);
 
   tokenPromise
     .then((token) => {
       if (cancelled) return;
 
-      const url =
-        agentName && token
-          ? getAgentTerminalWsUrl(workspaceId, agentName, token)
-          : buildWsUrl(workspaceId, sessionName, token, initialSize);
+      const url = buildWsUrl(workspaceId, sessionName, token, initialSize);
       const ws = new WebSocket(url);
       wsRef.current = ws;
       ws.binaryType = "arraybuffer";
@@ -227,7 +220,20 @@ export function connectWebSocket(
           return;
         }
         if (event.code === WS_CLOSE_SESSION_KILLED) {
-          setConnectionState("disconnected");
+          setConnectionState("session_ended");
+          onSessionKilled?.();
+          return;
+        }
+        if (event.code === WS_CLOSE_NORMAL) {
+          setConnectionState("session_ended");
+          onSessionKilled?.();
+          return;
+        }
+        if (
+          event.code === WS_CLOSE_GOING_AWAY &&
+          event.reason === WORKSPACE_UNAVAILABLE_REASON
+        ) {
+          setConnectionState("error");
           onSessionKilled?.();
           return;
         }

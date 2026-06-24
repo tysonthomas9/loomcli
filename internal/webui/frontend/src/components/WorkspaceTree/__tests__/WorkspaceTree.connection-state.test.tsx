@@ -123,6 +123,13 @@ vi.mock("@/hooks", () => ({
     error: null,
     refetch: vi.fn(),
   }),
+  useWorkspaceTreeWidth: () => ({
+    width: 210,
+    applyDelta: vi.fn(),
+    resetWidth: vi.fn(),
+  }),
+  WORKSPACE_TREE_MIN_WIDTH: 160,
+  WORKSPACE_TREE_MAX_WIDTH: 420,
   useToast: () => ({ showToast: vi.fn() }),
   useIssueDiffStat: () => ({
     data: null,

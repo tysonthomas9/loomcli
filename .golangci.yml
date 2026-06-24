@@ -298,6 +298,14 @@ linters:
         linters:
           - gosec
         text: "G602"
+      # var-naming: both driver packages (internal/driver epic-runner drivers,
+      # internal/cli/driver CLI surface) intentionally share the name "driver";
+      # the stdlib conflict (database/sql/driver) is nested and never imported
+      # alongside these. Renaming would churn every importer for no clarity win.
+      - path: '(internal/driver|internal/cli/driver)/.*\.go'
+        linters:
+          - revive
+        text: "var-naming: avoid package names that conflict with Go standard library"
       # funlen/cyclop/gocognit: Large files with dedicated cleanup tasks
       # Remove exclusions as cleanup tasks complete
       # handlers split files — tracked by loomcli-6yk.5

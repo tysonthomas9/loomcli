@@ -231,7 +231,6 @@ export interface ReadyParams {
   mol_type?: 'swarm' | 'patrol' | 'work'
   sort?: 'hybrid' | 'priority' | 'oldest'
   unassigned?: boolean
-  include_deferred?: boolean
   priority?: Priority
   limit?: number
   labels?: string

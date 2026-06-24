@@ -325,9 +325,13 @@ func initDaemonServices(config *cfgpkg.DaemonConfig, projectDir string, paths da
 
 	daemon, err := NewDaemon(config, projectDir, eventBus, cli.DefaultIssueBackend(), st)
 	if err != nil {
+		if storeHandle != nil {
+			_ = storeHandle.Close()
+		}
 		fmt.Fprintf(os.Stderr, "Error: creating daemon: %v\n", err)
 		os.Exit(1)
 	}
+	daemon.storeHandle = storeHandle
 
 	return shutdown, daemon
 }

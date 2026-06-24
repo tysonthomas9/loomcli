@@ -43,12 +43,9 @@ test.describe("Keyboard: Focus management", () => {
     // Type something so the submit button becomes enabled (and thus focusable)
     await page.keyboard.type("Test Issue");
 
-    // Tab through the form: title → type → priority → description → cancel → submit
+    // Tab through the form: title → type → description → cancel → submit
     await page.keyboard.press("Tab");
     await expectFocused(page, "create-issue-type");
-
-    await page.keyboard.press("Tab");
-    await expectFocused(page, "create-issue-priority");
 
     await page.keyboard.press("Tab");
     await expectFocused(page, "create-issue-description");

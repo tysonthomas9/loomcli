@@ -18,7 +18,7 @@ import "@testing-library/jest-dom";
 
 import type { Issue, IssueDetails, IssueWithDependencyMetadata } from "@/types";
 import type { SessionRecord } from "@/types/agent";
-import { updateIssue, startAgent } from "@/api";
+import { updateIssue, startWorkflowRun } from "@/api";
 import { createAgentStore } from "@/stores/agentStore";
 
 import { IssueDetailPanel } from "../IssueDetailPanel";
@@ -32,6 +32,8 @@ const {
   mockUseWorkspaceContext,
   mockUseAgentStoreInstance,
   mockGetTaskSessions,
+  mockShowToast,
+  mockUseToast,
 } = vi.hoisted(() => ({
   mockUseRegisterEscapeLayer: vi.fn(),
   mockDeleteTabMetadata: vi.fn(() => Promise.resolve()),
@@ -61,17 +63,40 @@ const {
   })),
   mockUseAgentStoreInstance: vi.fn(),
   mockGetTaskSessions: vi.fn(() => Promise.resolve([])),
+  mockShowToast: vi.fn(),
+  mockUseToast: vi.fn(() => ({
+    toasts: [],
+    showToast: vi.fn(),
+    dismissToast: vi.fn(),
+    dismissAll: vi.fn(),
+  })),
 }));
 
 // Mock the API module
 vi.mock("@/api", () => ({
+  EPIC_RUNNER_WORKFLOW_NAME: "epic-runner",
   updateIssue: vi.fn(),
   startAgent: vi.fn().mockResolvedValue(undefined),
+  startWorkflowRun: vi.fn().mockResolvedValue({
+    workspace_key: "DESKTOP-QA",
+    run_id: "run-1",
+    driver_id: "driver-1",
+    driver_version_id: "version-1",
+    status: "queued",
+    created_at: "2026-01-23T00:00:00Z",
+    updated_at: "2026-01-23T00:00:00Z",
+  }),
   addDependency: vi.fn(),
   removeDependency: vi.fn(),
   getIssueEvents: vi.fn().mockImplementation(() => new Promise(() => {})),
   getTaskLogPhases: vi.fn().mockResolvedValue([]),
 }));
+
+vi.mock("@/hooks/ui", async () => {
+  const actual =
+    await vi.importActual<typeof import("@/hooks/ui")>("@/hooks/ui");
+  return { ...actual, useToast: mockUseToast };
+});
 
 // Mock terminal API for cleanup verification
 vi.mock("@/api/terminal", () => ({
@@ -236,6 +261,25 @@ describe("IssueDetailPanel", () => {
     mockUseWorkspaceContext.mockImplementation(() => createWorkspaceContext());
     mockGetTaskSessions.mockReset();
     mockGetTaskSessions.mockResolvedValue([]);
+    mockShowToast.mockReset();
+    mockUseToast.mockReset();
+    mockUseToast.mockImplementation(() => ({
+      toasts: [],
+      showToast: mockShowToast,
+      dismissToast: vi.fn(),
+      dismissAll: vi.fn(),
+    }));
+    const mockStartWorkflowRun = startWorkflowRun as ReturnType<typeof vi.fn>;
+    mockStartWorkflowRun.mockReset();
+    mockStartWorkflowRun.mockResolvedValue({
+      workspace_key: "DESKTOP-QA",
+      run_id: "run-1",
+      driver_id: "driver-1",
+      driver_version_id: "version-1",
+      status: "queued",
+      created_at: "2026-01-23T00:00:00Z",
+      updated_at: "2026-01-23T00:00:00Z",
+    });
   });
 
   // Reset body overflow after each test
@@ -732,26 +776,16 @@ describe("IssueDetailPanel", () => {
       expect(typeItem).toHaveTextContent("Task");
     });
 
-    it("renders owner dropdown with owner name when provided", () => {
+    it("does not render owner dropdown in metadata bar", () => {
       const mockIssue = createTestIssueDetails({
         owner: "john-doe",
       });
       render(
         <IssueDetailPanel isOpen={true} issue={mockIssue} onClose={() => {}} />,
       );
-      const ownerTrigger = screen.getAllByTestId("owner-dropdown-trigger")[0];
-      expect(ownerTrigger).toHaveTextContent("john-doe");
-    });
-
-    it("renders owner dropdown with 'No owner' when not provided", () => {
-      const mockIssue = createTestIssueDetails({
-        owner: undefined,
-      });
-      render(
-        <IssueDetailPanel isOpen={true} issue={mockIssue} onClose={() => {}} />,
-      );
-      const ownerTrigger = screen.getAllByTestId("owner-dropdown-trigger")[0];
-      expect(ownerTrigger).toHaveTextContent("No owner");
+      expect(
+        screen.queryByTestId("owner-dropdown-trigger"),
+      ).not.toBeInTheDocument();
     });
 
     it("renders assignee dropdown with assignee name when provided", () => {
@@ -778,6 +812,23 @@ describe("IssueDetailPanel", () => {
         "assignee-dropdown-trigger",
       )[0];
       expect(assigneeTrigger).toHaveTextContent("Unassigned");
+    });
+
+    it("renders repo dropdown in metadata bar when repo is set", () => {
+      mockUseWorkspaceContext.mockImplementation(() =>
+        createWorkspaceContext({
+          repos: [{ name: "source-repo", path: "/repos/source-repo" }],
+        }),
+      );
+      const mockIssue = createTestIssueDetails({
+        labels: ["repo:source-repo"],
+      });
+      render(
+        <IssueDetailPanel isOpen={true} issue={mockIssue} onClose={() => {}} />,
+      );
+      expect(screen.getByTestId("repo-dropdown-trigger")).toHaveTextContent(
+        "source-repo",
+      );
     });
 
     it("renders created date formatted correctly", () => {
@@ -1093,208 +1144,183 @@ describe("IssueDetailPanel", () => {
       );
       expect(screen.queryByTestId("close-tab-details")).not.toBeInTheDocument();
     });
-  });
 
-  describe("Start Work", () => {
-    it("shows plan agents for issues that need planning", () => {
+    it("does not show Files changed tab even when issue has an assignee agent", () => {
       const agentStore = createAgentStore();
       agentStore.setState({
         agents: [
           {
-            name: "planner",
-            branch: "main",
-            status: "idle",
-            ahead: 0,
+            name: "agent-1",
+            status: "ready",
+            branch: "feature/test",
+            ahead: 2,
             behind: 0,
-            role: "plan",
-            workspace: "Desktop QA",
-          },
-          {
-            name: "desktopqa",
-            branch: "main",
-            status: "idle",
-            ahead: 0,
-            behind: 0,
-            role: "task",
-            workspace: "Desktop QA",
+            worktree_path: "/tmp/agent-1",
           },
         ],
-        isConnected: true,
-        wasEverConnected: true,
-        connectionState: "connected",
       });
       mockUseAgentStoreInstance.mockReturnValue(agentStore);
-      mockUseWorkspaceContext.mockImplementation(() =>
-        createWorkspaceContext({ workspaceId: "DESKTOP-QA" }),
+
+      const mockIssue = createTestIssueDetails({
+        assignee: "agent-1",
+        description: "Test issue description",
+      });
+      render(
+        <IssueDetailPanel isOpen={true} issue={mockIssue} onClose={() => {}} />,
       );
 
-      const issue = createTestIssueDetails({
-        id: "DESKTOP-QA-3",
+      expect(
+        screen.queryByRole("tab", { name: "Files changed" }),
+      ).not.toBeInTheDocument();
+      expect(
+        screen.queryByTestId("issue-panel-tab-diff"),
+      ).not.toBeInTheDocument();
+    });
+  });
+
+  describe("Epic runner", () => {
+    it("shows the epic runner action for open epics only", () => {
+      const epic = createTestIssueDetails({
+        id: "DESKTOP-QA-EPIC",
+        issue_type: "epic",
         status: "open",
+      });
+      const task = createTestIssueDetails({
+        id: "DESKTOP-QA-3",
         issue_type: "task",
-        assignee: "",
-        design: "",
+        status: "open",
+      });
+      const closedEpic = createTestIssueDetails({
+        id: "DESKTOP-QA-CLOSED",
+        issue_type: "epic",
+        status: "closed",
       });
 
-      render(
-        <IssueDetailPanel isOpen={true} issue={issue} onClose={() => {}} />,
+      const { rerender } = render(
+        <IssueDetailPanel isOpen={true} issue={epic} onClose={() => {}} />,
       );
 
-      fireEvent.click(screen.getByTestId("start-work-button"));
+      expect(screen.getByTestId("header-run-epic-button")).toBeInTheDocument();
 
-      expect(screen.getByTestId("agent-option-planner")).toBeInTheDocument();
+      rerender(
+        <IssueDetailPanel isOpen={true} issue={task} onClose={() => {}} />,
+      );
       expect(
-        screen.queryByTestId("agent-option-desktopqa"),
+        screen.queryByTestId("header-run-epic-button"),
+      ).not.toBeInTheDocument();
+
+      rerender(
+        <IssueDetailPanel
+          isOpen={true}
+          issue={closedEpic}
+          onClose={() => {}}
+        />,
+      );
+      expect(
+        screen.queryByTestId("header-run-epic-button"),
       ).not.toBeInTheDocument();
     });
 
-    it("assigns the issue and asks the daemon to claim the requested task", async () => {
-      const mockUpdateIssue = updateIssue as ReturnType<typeof vi.fn>;
-      const mockStartAgent = startAgent as ReturnType<typeof vi.fn>;
-      mockUpdateIssue.mockReset();
-      mockStartAgent.mockReset();
-      mockStartAgent.mockResolvedValue(undefined);
-      const refetchAgents = vi.fn().mockResolvedValue(undefined);
-      const agentStore = createAgentStore();
-      agentStore.setState({
-        agents: [
-          {
-            name: "desktopqa",
-            branch: "main",
-            status: "idle",
-            ahead: 0,
-            behind: 0,
-            role: "task",
-            workspace: "Desktop QA",
-          },
-        ],
-        isConnected: true,
-        wasEverConnected: true,
-        connectionState: "connected",
-        fetchData: refetchAgents,
-      });
-      mockUseAgentStoreInstance.mockReturnValue(agentStore);
+    it("starts the epic runner workflow with the selected epic payload", async () => {
+      const mockStartWorkflowRun = startWorkflowRun as ReturnType<typeof vi.fn>;
       mockUseWorkspaceContext.mockImplementation(() =>
         createWorkspaceContext({ workspaceId: "DESKTOP-QA" }),
       );
-
-      const issue = createTestIssueDetails({
-        id: "DESKTOP-QA-3",
+      const epic = createTestIssueDetails({
+        id: "DESKTOP-QA-EPIC",
+        issue_type: "epic",
         status: "open",
-        issue_type: "task",
-        assignee: "",
-        design: "Implementation plan is ready.",
       });
-      const updatedIssue = { ...issue, assignee: "desktopqa" };
-      mockUpdateIssue.mockResolvedValueOnce(updatedIssue);
-      const onIssueUpdate = vi.fn();
 
       render(
-        <IssueDetailPanel
-          isOpen={true}
-          issue={issue}
-          onClose={() => {}}
-          onIssueUpdate={onIssueUpdate}
-        />,
+        <IssueDetailPanel isOpen={true} issue={epic} onClose={() => {}} />,
       );
 
-      fireEvent.click(screen.getByTestId("start-work-button"));
-      fireEvent.click(screen.getByTestId("agent-option-desktopqa"));
+      fireEvent.click(screen.getByTestId("header-run-epic-button"));
 
       await waitFor(() => {
-        expect(mockUpdateIssue).toHaveBeenCalledWith(
+        expect(mockStartWorkflowRun).toHaveBeenCalledWith(
           "DESKTOP-QA",
-          "DESKTOP-QA-3",
-          { assignee: "desktopqa", status: "in_progress" },
+          "epic-runner",
+          {
+            epicId: "DESKTOP-QA-EPIC",
+            requestedBy: "ui",
+          },
         );
       });
-      await waitFor(() => {
-        expect(mockStartAgent).toHaveBeenCalledWith("DESKTOP-QA", "desktopqa", {
-          taskId: "DESKTOP-QA-3",
-        });
+      expect(mockShowToast).toHaveBeenCalledWith("Epic runner queued: run-1", {
+        type: "success",
       });
-      expect(onIssueUpdate).toHaveBeenCalledWith(updatedIssue);
-      expect(refetchAgents).toHaveBeenCalled();
     });
 
-    it("rolls back the assignee when daemon start fails", async () => {
-      const mockUpdateIssue = updateIssue as ReturnType<typeof vi.fn>;
-      const mockStartAgent = startAgent as ReturnType<typeof vi.fn>;
-      mockUpdateIssue.mockReset();
-      mockStartAgent.mockReset();
-      mockStartAgent.mockRejectedValueOnce(new Error("daemon unavailable"));
-      const agentStore = createAgentStore();
-      agentStore.setState({
-        agents: [
-          {
-            name: "desktopqa",
-            branch: "main",
-            status: "idle",
-            ahead: 0,
-            behind: 0,
-            role: "task",
-            workspace: "Desktop QA",
-          },
-        ],
-        isConnected: true,
-        wasEverConnected: true,
-        connectionState: "connected",
-      });
-      mockUseAgentStoreInstance.mockReturnValue(agentStore);
+    it("disables the epic runner action while the workflow request is in flight", async () => {
+      const mockStartWorkflowRun = startWorkflowRun as ReturnType<typeof vi.fn>;
+      let resolveRun: (value: unknown) => void = () => {};
+      mockStartWorkflowRun.mockReturnValueOnce(
+        new Promise((resolve) => {
+          resolveRun = resolve;
+        }),
+      );
       mockUseWorkspaceContext.mockImplementation(() =>
         createWorkspaceContext({ workspaceId: "DESKTOP-QA" }),
       );
-
-      const issue = createTestIssueDetails({
-        id: "DESKTOP-QA-3",
+      const epic = createTestIssueDetails({
+        id: "DESKTOP-QA-EPIC",
+        issue_type: "epic",
         status: "open",
-        issue_type: "task",
-        assignee: "",
-        design: "Implementation plan is ready.",
       });
-      const assignedIssue = {
-        ...issue,
-        assignee: "desktopqa",
-        status: "in_progress" as const,
-      };
-      const rolledBackIssue = {
-        ...issue,
-        assignee: "",
-        status: "open" as const,
-      };
-      mockUpdateIssue
-        .mockResolvedValueOnce(assignedIssue)
-        .mockResolvedValueOnce(rolledBackIssue);
-      const onIssueUpdate = vi.fn();
 
       render(
-        <IssueDetailPanel
-          isOpen={true}
-          issue={issue}
-          onClose={() => {}}
-          onIssueUpdate={onIssueUpdate}
-        />,
+        <IssueDetailPanel isOpen={true} issue={epic} onClose={() => {}} />,
       );
 
-      fireEvent.click(screen.getByTestId("start-work-button"));
-      fireEvent.click(screen.getByTestId("agent-option-desktopqa"));
+      const button = screen.getByTestId("header-run-epic-button");
+      fireEvent.click(button);
 
       await waitFor(() => {
-        expect(mockStartAgent).toHaveBeenCalledWith("DESKTOP-QA", "desktopqa", {
-          taskId: "DESKTOP-QA-3",
-        });
+        expect(button).toBeDisabled();
       });
+      expect(button).toHaveTextContent("Starting");
+
+      resolveRun({
+        workspace_key: "DESKTOP-QA",
+        run_id: "run-1",
+        driver_id: "driver-1",
+        driver_version_id: "version-1",
+        status: "queued",
+        created_at: "2026-01-23T00:00:00Z",
+        updated_at: "2026-01-23T00:00:00Z",
+      });
+
       await waitFor(() => {
-        expect(mockUpdateIssue).toHaveBeenLastCalledWith(
-          "DESKTOP-QA",
-          "DESKTOP-QA-3",
-          { assignee: "", status: "open" },
+        expect(button).not.toBeDisabled();
+      });
+    });
+
+    it("reports workflow start errors", async () => {
+      const mockStartWorkflowRun = startWorkflowRun as ReturnType<typeof vi.fn>;
+      mockStartWorkflowRun.mockRejectedValueOnce(new Error("workflow missing"));
+      mockUseWorkspaceContext.mockImplementation(() =>
+        createWorkspaceContext({ workspaceId: "DESKTOP-QA" }),
+      );
+      const epic = createTestIssueDetails({
+        id: "DESKTOP-QA-EPIC",
+        issue_type: "epic",
+        status: "open",
+      });
+
+      render(
+        <IssueDetailPanel isOpen={true} issue={epic} onClose={() => {}} />,
+      );
+
+      fireEvent.click(screen.getByTestId("header-run-epic-button"));
+
+      await waitFor(() => {
+        expect(mockShowToast).toHaveBeenCalledWith(
+          "Epic runner failed: workflow missing",
+          { type: "error" },
         );
       });
-      expect(onIssueUpdate).toHaveBeenCalledWith(rolledBackIssue);
-      expect(await screen.findByTestId("start-work-error")).toHaveTextContent(
-        "daemon unavailable",
-      );
     });
   });
 
@@ -1500,17 +1526,11 @@ describe("IssueDetailPanel", () => {
             sort_order: 0,
           },
           {
-            id: "sessions",
-            type: "sessions" as const,
-            label: "Runs",
-            sort_order: 1,
-          },
-          {
             id: "terminal-sess-1",
             type: "terminal" as const,
             label: "Terminal (shell)",
             session_name: "sess-1",
-            sort_order: 2,
+            sort_order: 1,
           },
         ],
         active_tab_id: "terminal-sess-1",
@@ -1663,24 +1683,18 @@ describe("IssueDetailPanel", () => {
               sort_order: 0,
             },
             {
-              id: "sessions",
-              type: "sessions" as const,
-              label: "Runs",
-              sort_order: 1,
-            },
-            {
               id: "terminal-sess-1",
               type: "terminal" as const,
               label: "Terminal (shell)",
               session_name: "sess-1",
-              sort_order: 2,
+              sort_order: 1,
             },
             {
               id: "terminal-sess-2",
               type: "terminal" as const,
               label: "Terminal (shell)",
               session_name: "sess-2",
-              sort_order: 3,
+              sort_order: 2,
             },
           ],
           active_tab_id: "terminal-sess-1",
@@ -1743,17 +1757,10 @@ describe("IssueDetailPanel", () => {
         <IssueDetailPanel isOpen={true} issue={issueA} onClose={() => {}} />,
       );
 
-      // Click Runs tab
-      const runsTab = screen.getByRole("tab", { name: "Runs" });
-      fireEvent.click(runsTab);
-      expect(runsTab).toHaveAttribute("aria-selected", "true");
-
-      // Rerender with different issue
       rerender(
         <IssueDetailPanel isOpen={true} issue={issueB} onClose={() => {}} />,
       );
 
-      // Details tab should be active again, Runs tab still present
       expect(screen.getByRole("tab", { name: "Runs" })).toBeInTheDocument();
       expect(screen.getByRole("tab", { name: "Details" })).toHaveAttribute(
         "aria-selected",
@@ -1771,12 +1778,6 @@ describe("IssueDetailPanel", () => {
               type: "details" as const,
               label: "Details",
               sort_order: 0,
-            },
-            {
-              id: "sessions",
-              type: "sessions" as const,
-              label: "Runs",
-              sort_order: 1,
             },
             {
               id: "terminal-sess-unknown",
@@ -1810,7 +1811,45 @@ describe("IssueDetailPanel", () => {
       expect(screen.getByText("Visible details content")).toBeInTheDocument();
     });
 
-    it("preserves both tabs across multiple issue changes", () => {
+    it("falls back to Details when restored active tab is legacy diff", async () => {
+      mockUseIssueTabPersistence.mockReturnValue({
+        savedState: {
+          issue_id: "test-123",
+          tabs: [
+            {
+              id: "details",
+              type: "details" as const,
+              label: "Details",
+              sort_order: 0,
+            },
+          ],
+          active_tab_id: "diff",
+          updated_at: "2026-01-23T00:00:00Z",
+        },
+        isLoading: false,
+        saveTabs: vi.fn(),
+        clearTabs: vi.fn(),
+      });
+
+      const mockIssue = createTestIssueDetails({
+        description: "Visible details content",
+      });
+      render(
+        <IssueDetailPanel isOpen={true} issue={mockIssue} onClose={() => {}} />,
+      );
+
+      await waitFor(() => {
+        expect(screen.getByRole("tab", { name: "Details" })).toHaveAttribute(
+          "aria-selected",
+          "true",
+        );
+      });
+      expect(
+        screen.queryByRole("tab", { name: "Files changed" }),
+      ).not.toBeInTheDocument();
+    });
+
+    it("preserves Details tab across multiple issue changes", () => {
       const issueA = createTestIssue({ id: "issue-a" });
       const issueB = createTestIssue({ id: "issue-b" });
       const issueC = createTestIssue({ id: "issue-c" });

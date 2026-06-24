@@ -123,34 +123,36 @@ describe("DesignPanel", () => {
     });
 
     it("clicking fullscreen button adds fullscreen class", () => {
-      render(<DesignPanel content="Some content" />);
-      const panel = screen.getByTestId("design-panel");
+      const { container } = render(<DesignPanel content="Some content" />);
 
-      // Not fullscreen initially
-      expect(panel.className).not.toMatch(/fullscreen/);
+      expect(screen.getByTestId("design-panel").className).not.toMatch(
+        /fullscreen/,
+      );
 
-      // Click fullscreen button
       fireEvent.click(screen.getByLabelText("Enter fullscreen"));
 
-      // Should now have fullscreen class
+      const panel = screen.getByTestId("design-panel");
       expect(panel.className).toMatch(/fullscreen/);
-      // Button label should change
+      expect(panel.parentElement).toBe(document.body);
+      expect(
+        container.querySelector('[data-testid="design-panel"]'),
+      ).toBeNull();
       expect(screen.getByLabelText("Exit fullscreen")).toBeInTheDocument();
     });
 
     it("escape key exits fullscreen without propagating", () => {
-      render(<DesignPanel content="Some content" />);
+      const { container } = render(<DesignPanel content="Some content" />);
 
-      // Enter fullscreen
       fireEvent.click(screen.getByLabelText("Enter fullscreen"));
-      const panel = screen.getByTestId("design-panel");
-      expect(panel.className).toMatch(/fullscreen/);
+      expect(screen.getByTestId("design-panel").className).toMatch(
+        /fullscreen/,
+      );
 
-      // Press Escape
       fireEvent.keyDown(document, { key: "Escape" });
 
-      // Should exit fullscreen
+      const panel = screen.getByTestId("design-panel");
       expect(panel.className).not.toMatch(/fullscreen/);
+      expect(container.contains(panel)).toBe(true);
       expect(screen.getByLabelText("Enter fullscreen")).toBeInTheDocument();
     });
 

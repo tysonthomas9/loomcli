@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"io"
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
@@ -61,7 +62,21 @@ type AgentSessionFilter struct {
 	NodeID  string
 	TaskID  string
 	Status  domain.AgentSessionStatus
-	Limit   int
+	// Kind narrows the query to one session kind (orchestration, task,
+	// terminal, maintenance, ad_hoc). The data model has always carried
+	// AgentSession.Kind, but the filter interface didn't expose it, so
+	// callers couldn't ask "which orchestration session spawned this
+	// worker?" without listing every session and filtering client-side.
+	// Required by the migration off Agent.OrchestratorSessionID - readers
+	// look up the parent lead via {Kind=orchestration, TerminalID=<id>} or
+	// {Kind=task, ParentSessionID=<id>} joins.
+	Kind domain.AgentSessionKind
+	// ParentSessionID restricts results to sessions whose ParentSessionID
+	// field equals this value (typically the lead's orchestration session).
+	// Companion to Kind for the same migration: "list task sessions that
+	// were spawned by orchestration session X".
+	ParentSessionID string
+	Limit           int
 }
 
 type AgentSessionUpdate struct {
@@ -136,19 +151,25 @@ type TerminalSessionStore interface {
 }
 
 type ArtifactCreate struct {
-	WorkspaceKey string
-	ArtifactID   string
-	AgentID      string
-	SessionID    string
-	TerminalID   string
-	TaskID       string
-	Type         string
-	URI          string
-	Summary      string
-	MIMEType     string
-	SizeBytes    int64
-	Checksum     string
-	Metadata     map[string]string
+	WorkspaceKey    string
+	ArtifactID      string
+	AgentID         string
+	SessionID       string
+	TerminalID      string
+	TaskID          string
+	OwnerType       string
+	OwnerID         string
+	Type            string
+	URI             string
+	Summary         string
+	MIMEType        string
+	SizeBytes       int64
+	Checksum        string
+	ContentHash     string
+	Visibility      string
+	RedactionStatus string
+	DurableStatus   string
+	Metadata        map[string]string
 }
 
 type ArtifactFilter struct {
@@ -156,28 +177,57 @@ type ArtifactFilter struct {
 	SessionID  string
 	TerminalID string
 	TaskID     string
+	OwnerType  string
+	OwnerID    string
 	Type       string
+	Status     string
 	Limit      int
 }
 
 type ArtifactUpdate struct {
-	AgentID    *string
-	SessionID  *string
-	TerminalID *string
-	TaskID     *string
-	Type       *string
-	URI        *string
-	Summary    *string
-	MIMEType   *string
-	SizeBytes  *int64
-	Checksum   *string
-	Metadata   *map[string]string
+	AgentID         *string
+	SessionID       *string
+	TerminalID      *string
+	TaskID          *string
+	OwnerType       *string
+	OwnerID         *string
+	Type            *string
+	URI             *string
+	Summary         *string
+	MIMEType        *string
+	SizeBytes       *int64
+	Checksum        *string
+	ContentHash     *string
+	Visibility      *string
+	RedactionStatus *string
+	DurableStatus   *string
+	Metadata        *map[string]string
+	FinalizedAt     *time.Time
+}
+
+type ArtifactFinalize struct {
+	URI             *string
+	Summary         *string
+	MIMEType        *string
+	SizeBytes       *int64
+	Checksum        *string
+	ContentHash     *string
+	Visibility      *string
+	RedactionStatus *string
+	Metadata        *map[string]string
+}
+
+type ArtifactContentUpload struct {
+	Body     io.Reader
+	MIMEType string
 }
 
 type ArtifactStore interface {
 	Create(ctx context.Context, in ArtifactCreate) (*domain.Artifact, error)
 	Get(ctx context.Context, workspaceKey, artifactID string) (*domain.Artifact, error)
 	List(ctx context.Context, workspaceKey string, filter ArtifactFilter) ([]*domain.Artifact, error)
+	UploadContent(ctx context.Context, workspaceKey, artifactID string, upload ArtifactContentUpload) (*domain.Artifact, error)
+	Finalize(ctx context.Context, workspaceKey, artifactID string, finalize ArtifactFinalize) (*domain.Artifact, error)
 	Update(ctx context.Context, workspaceKey, artifactID string, patch ArtifactUpdate) (*domain.Artifact, error)
 }
 
@@ -262,6 +312,56 @@ type AgentCommandStore interface {
 	List(ctx context.Context, workspaceKey string, filter AgentCommandFilter) ([]*domain.AgentCommand, error)
 	Ack(ctx context.Context, workspaceKey, commandID string) (*domain.AgentCommand, error)
 	Complete(ctx context.Context, workspaceKey, commandID string, update AgentCommandComplete) (*domain.AgentCommand, error)
+}
+
+type AgentInboxMessageCreate struct {
+	WorkspaceKey      string
+	InboxMessageID    string
+	TargetAgentID     string
+	SessionID         string
+	Body              string
+	SourceKind        string
+	SourceRef         string
+	DriverRunID       string
+	TaskRunID         string
+	TriggerEventID    string
+	TriggerDeliveryID string
+	DedupeKey         string
+}
+
+type AgentInboxMessageFilter struct {
+	TargetAgentID string
+	SessionID     string
+	Status        domain.AgentInboxMessageStatus
+	SourceKind    string
+	SourceRef     string
+	DriverRunID   string
+	TaskRunID     string
+	AfterCursor   int64
+	Limit         int
+}
+
+type AgentInboxMessageClaim struct {
+	WorkspaceKey  string
+	TargetAgentID string
+	SessionID     string
+	ClaimedBy     string
+	LeaseTTL      time.Duration
+}
+
+type AgentInboxMessageComplete struct {
+	Outcome           string `json:"outcome"`
+	DeliveredThreadID string `json:"delivered_thread_id,omitempty"`
+	ErrorClass        string `json:"error_class,omitempty"`
+	Error             string `json:"error,omitempty"`
+}
+
+type AgentInboxMessageStore interface {
+	Create(ctx context.Context, in AgentInboxMessageCreate) (*domain.AgentInboxMessage, error)
+	Get(ctx context.Context, workspaceKey, inboxMessageID string) (*domain.AgentInboxMessage, error)
+	List(ctx context.Context, workspaceKey string, filter AgentInboxMessageFilter) ([]*domain.AgentInboxMessage, error)
+	ClaimNext(ctx context.Context, in AgentInboxMessageClaim) (*domain.AgentInboxMessage, error)
+	Complete(ctx context.Context, workspaceKey, inboxMessageID string, update AgentInboxMessageComplete) (*domain.AgentInboxMessage, error)
 }
 
 // WorkerStore renews and removes fleet-db worker registrations. A worker's

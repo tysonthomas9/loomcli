@@ -16,7 +16,7 @@ type AgentService interface {
 	GetTerminalInfo(ctx context.Context, wsID, agentName string) (*AgentTerminalInfoResult, error)
 
 	// GenerateTerminalToken generates a one-time token scoped to an agent logs stream.
-	GenerateTerminalToken(ctx context.Context, agentName, userID string) (string, error)
+	GenerateTerminalToken(ctx context.Context, wsID, agentName, userID string) (string, error)
 
 	// GetLog returns log file content for an agent.
 	GetLog(ctx context.Context, wsID, agentName string, lines int, beforeLine int64) (*AgentLogResult, error)
@@ -38,6 +38,10 @@ type AgentService interface {
 
 	// CreatePR creates a GitHub PR from the agent's worktree branch.
 	CreatePR(ctx context.Context, wsID, agentName, target string) (*ops.GitPRResult, error)
+
+	// ListPullRequests returns GitHub PRs for all repos in the workspace,
+	// with per-repo failures reported as warnings rather than errors.
+	ListPullRequests(ctx context.Context, wsID, state string) (*ops.GitPullRequestList, error)
 
 	// GitReset hard-resets the agent's worktree to a branch.
 	GitReset(ctx context.Context, wsID, agentName, branch string, force, push bool) (*ops.GitResetResult, error)

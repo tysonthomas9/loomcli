@@ -45,7 +45,7 @@
   --term-cursor: var(--terminal-cursor);
   --term-selection-bg: var(--terminal-selection);
   --term-font-family: var(--font-family-mono);
-  --term-font-size: 14px;
+  --term-font-size: 12px;
   --term-line-height: 1.2;
 }
 

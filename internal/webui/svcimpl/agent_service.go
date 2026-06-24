@@ -2,7 +2,9 @@ package svcimpl
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/localworkspace"
@@ -78,7 +80,7 @@ func (s *agentServiceImpl) GetTerminalInfo(_ context.Context, wsID, agentName st
 	return &service.AgentTerminalInfoResult{Agent: agentName, Mode: mode}, nil
 }
 
-func (s *agentServiceImpl) GenerateTerminalToken(_ context.Context, agentName, userID string) (string, error) {
+func (s *agentServiceImpl) GenerateTerminalToken(_ context.Context, wsID, agentName, userID string) (string, error) {
 	if err := validateAgentName(agentName); err != nil {
 		return "", err
 	}
@@ -86,9 +88,9 @@ func (s *agentServiceImpl) GenerateTerminalToken(_ context.Context, agentName, u
 		return "", service.ErrUnavailable("terminal authentication not initialized")
 	}
 
-	token, err := s.termAuth.GenerateToken(agentLogTokenScope(agentName), userID)
+	token, err := s.termAuth.GenerateToken(agentLogTokenScope(agentName), wsID, userID)
 	if err != nil {
-		logger.Error("failed to generate agent terminal token", "agent", agentName, "err", err)
+		logger.Error("failed to generate agent terminal token", "agent", agentName, "workspace", wsID, "err", err)
 		return "", service.ErrInternal("failed to generate token", err)
 	}
 	return token, nil
@@ -260,6 +262,21 @@ func (s *agentServiceImpl) GitSync(_ context.Context, wsID, agentName string) (*
 	}, nil
 }
 
+func (s *agentServiceImpl) ListPullRequests(_ context.Context, wsID, state string) (*ops.GitPullRequestList, error) {
+	if err := s.gitOps.CheckGhInstalled(); err != nil {
+		// GitHub metadata is an enrichment, not a hard dependency — report
+		// the missing CLI as a warning so loom-backed views keep working.
+		return &ops.GitPullRequestList{
+			PullRequests: []ops.GitPullRequest{},
+			Warnings:     []string{"gh CLI not installed: install from https://cli.github.com/ and run 'gh auth login'"},
+		}, nil
+	}
+	if state == "" {
+		state = "all"
+	}
+	return s.gitOps.ListWorkspacePullRequests(wsID, state, 100)
+}
+
 func (s *agentServiceImpl) CreatePR(_ context.Context, wsID, agentName, target string) (*ops.GitPRResult, error) {
 	if err := s.gitOps.CheckGhInstalled(); err != nil {
 		return nil, service.ErrUnavailable("gh CLI not installed: install from https://cli.github.com/ and run 'gh auth login'")
@@ -335,7 +352,11 @@ func (s *agentServiceImpl) CreateAgent(ctx context.Context, in service.AgentCrea
 	if s.store == nil {
 		return nil, service.ErrUnavailable("fleet-db store not configured")
 	}
+	in.RoleName = normalizeFirstClassAgentRole(in.RoleName)
 	if err := validateAgentCreateInput(in); err != nil {
+		return nil, err
+	}
+	if err := s.ensureFirstClassAgentRole(ctx, in.WorkspaceKey, in.RoleName); err != nil {
 		return nil, err
 	}
 	created, err := s.store.Agents().Create(ctx, store.AgentCreate{
@@ -362,6 +383,9 @@ func (s *agentServiceImpl) CreateAgent(ctx context.Context, in service.AgentCrea
 }
 
 func (s *agentServiceImpl) ensureLocalAgentWorktrees(ctx context.Context, agent domain.Agent) error {
+	if isLeadAgentRole(agent.RoleName) {
+		return nil
+	}
 	ws, err := storeadapter.BuildWorkspaceDataForKey(ctx, s.store, agent.WorkspaceKey)
 	if err != nil {
 		return service.ErrInternal("load workspace for agent worktree", err)
@@ -403,6 +427,44 @@ func (s *agentServiceImpl) ensureLocalAgentWorktrees(ctx context.Context, agent 
 		return service.ErrInternal("update local agent state", err)
 	}
 	return nil
+}
+
+func (s *agentServiceImpl) ensureFirstClassAgentRole(ctx context.Context, workspaceKey, roleName string) error {
+	if !isLeadAgentRole(roleName) {
+		return nil
+	}
+	if _, err := s.store.Roles().Get(ctx, workspaceKey, roleName); err == nil {
+		return nil
+	} else if !errors.Is(err, domain.ErrNotFound) {
+		return service.ErrInternal("load lead role", err)
+	}
+	if _, err := s.store.Roles().Create(ctx, store.RoleCreate{
+		WorkspaceKey: workspaceKey,
+		Name:         roleName,
+		Description:  "Lead/orchestrator terminal",
+	}); err != nil && !errors.Is(err, domain.ErrAlreadyExists) {
+		return classifyStoreError("create lead role", err)
+	}
+	return nil
+}
+
+func normalizeFirstClassAgentRole(roleName string) string {
+	normalized := strings.ToLower(strings.TrimSpace(roleName))
+	switch normalized {
+	case "lead", "orchestrator":
+		return normalized
+	default:
+		return roleName
+	}
+}
+
+func isLeadAgentRole(roleName string) bool {
+	switch strings.ToLower(strings.TrimSpace(roleName)) {
+	case "lead", "orchestrator":
+		return true
+	default:
+		return false
+	}
 }
 
 // UpdateAgent applies a partial update to an existing agent.

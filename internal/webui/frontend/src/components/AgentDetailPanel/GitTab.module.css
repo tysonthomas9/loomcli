@@ -1,53 +1,25 @@
 /**
  * GitTab component styles.
- * Reuses patterns from AgentDetailPanel.module.css.
  */
 
-/* ============= Branch Header ============= */
-
-.branchHeader {
+.gitTab {
   display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-
-.branchName {
-  font-family: var(--font-mono);
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--color-text);
-}
-
-.branchArrow {
-  color: var(--color-text-muted);
-  font-size: 13px;
-  flex-shrink: 0;
-}
-
-.targetBranch {
-  font-family: var(--font-mono);
-  font-size: 14px;
-  color: var(--color-text-secondary);
-}
-
-/* ============= Commit Badge Row ============= */
-
-.badgeRow {
-  display: flex;
-  gap: 10px;
-  align-items: center;
-  margin-top: 10px;
+  flex-direction: column;
+  min-height: 0;
 }
 
 /* ============= Conflict Banner ============= */
+
+.conflictSection {
+  padding: 0 16px;
+}
 
 .conflictBanner {
   background-color: rgba(239, 68, 68, 0.08);
   border: 1px solid rgba(239, 68, 68, 0.25);
   border-radius: 8px;
   padding: 10px 14px;
-  margin-bottom: 12px;
+  margin-top: 12px;
 }
 
 .conflictTitle {
@@ -64,39 +36,195 @@
   padding: 1px 0;
 }
 
+/* ============= Git History Card ============= */
+
+.historyCard {
+  margin: 16px;
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  background: var(--color-bg-card, var(--color-bg));
+  overflow: hidden;
+}
+
+.historyHeader {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--color-border-light);
+  background: var(--color-bg-subtle);
+}
+
+.historyHeaderAction {
+  flex-shrink: 0;
+  margin-left: auto;
+  align-self: flex-start;
+}
+
+.historyIcon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #ea580c;
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+
+.historyHeaderMain {
+  min-width: 0;
+  flex: 1;
+}
+
+.historyTitle {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+.branchLine {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.branchName {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+.branchArrow {
+  color: var(--color-text-muted);
+  font-size: 12px;
+  flex-shrink: 0;
+}
+
+.badgeRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin-top: 8px;
+}
+
+.fallbackNote {
+  font-size: 11px;
+  color: var(--color-text-muted);
+  font-style: italic;
+  margin: 6px 0 0;
+}
+
 /* ============= Commit List ============= */
 
-.commitTime {
-  font-size: 12px;
-  color: var(--color-text-muted);
+.historyBody {
+  min-width: 0;
+}
+
+.historyList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.historyRow {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: flex-start;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--color-border-light);
+}
+
+.historyRow:last-child {
+  border-bottom: none;
+}
+
+.commitDot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  margin-top: 5px;
   flex-shrink: 0;
+}
+
+.commitBody {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.commitSubject {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.commitMeta {
+  font-size: 11px;
+  color: var(--color-text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.metaSep {
+  opacity: 0.7;
+}
+
+.hashPill {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 8px;
+  border-radius: 6px;
+  background: var(--color-bg-subtle);
+  border: 1px solid var(--color-border-light);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--color-text-secondary);
+  flex-shrink: 0;
+}
+
+.hashPill a {
+  color: var(--color-primary);
+  text-decoration: none;
+}
+
+.hashPill a:hover {
+  text-decoration: underline;
+}
+
+.emptyState {
+  margin: 0;
+  padding: 16px 14px;
+  font-size: 13px;
+  color: var(--color-text-muted);
 }
 
 .commitExpandBtn {
   display: block;
+  width: calc(100% - 28px);
+  margin: 10px 14px 14px;
   background: none;
   border: 1px solid var(--color-border-light);
   border-radius: 6px;
-  padding: 6px 12px;
+  padding: 8px 12px;
   font-size: 12px;
   font-weight: 600;
   color: var(--color-text-secondary);
   cursor: pointer;
-  margin-top: 8px;
+  text-align: center;
   transition: background-color var(--transition-fast);
 }
 
 .commitExpandBtn:hover {
   background: var(--color-bg-hover);
   color: var(--color-text);
-}
-
-/* ============= Fallback Note ============= */
-
-.fallbackNote {
-  font-size: 11px;
-  color: var(--color-text-muted);
-  font-style: italic;
-  margin-top: 6px;
 }

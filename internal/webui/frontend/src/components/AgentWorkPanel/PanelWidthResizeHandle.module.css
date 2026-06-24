@@ -1,0 +1,18 @@
+.handle {
+  width: 4px;
+  flex-shrink: 0;
+  cursor: col-resize;
+  touch-action: none;
+  user-select: none;
+  background: transparent;
+  transition: background-color 0.15s ease;
+}
+
+.handle:hover,
+.handle:focus-visible {
+  background: var(--color-primary);
+}
+
+.handle:focus-visible {
+  outline: none;
+}

@@ -1,0 +1,219 @@
+/**
+ * ListPage styles — design's list-inner / list-epic / list-row.
+ */
+
+.page {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  background: var(--color-bg-secondary);
+}
+
+.inner {
+  width: 100%;
+  padding: 18px 22px 48px;
+}
+
+.empty {
+  margin: 48px 0;
+  text-align: center;
+  font-style: italic;
+  color: var(--color-text-muted);
+}
+
+.epicSection {
+  margin-bottom: 16px;
+}
+
+.epicHead {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border-bottom: 1px solid var(--color-border-strong, var(--color-border));
+}
+
+.epicToggle {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  flex: 1;
+  min-width: 0;
+  padding: 10px 4px;
+  border: none;
+  background: transparent;
+  color: var(--color-text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.chevron {
+  flex-shrink: 0;
+  font-size: 11px;
+  color: var(--color-text-secondary);
+  transform: rotate(90deg);
+  transition: transform var(--transition-fast);
+}
+
+.chevron[data-collapsed] {
+  transform: rotate(0deg);
+}
+
+.epicTitle {
+  margin: 0;
+  font-size: var(--font-size-sm);
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.count {
+  flex-shrink: 0;
+  min-width: 22px;
+  padding: 1px 8px;
+  font-size: 11px;
+  color: var(--color-text-secondary);
+  background: var(--color-bg-card);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-full);
+  text-align: center;
+}
+
+.epicOpen {
+  flex-shrink: 0;
+  width: 28px;
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-card);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+}
+
+.epicOpen:hover {
+  border-color: var(--color-primary);
+  color: var(--color-primary);
+}
+
+.rows {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.emptyRow {
+  padding: 11px 6px;
+  font-size: 12px;
+  font-style: italic;
+  color: var(--color-text-muted);
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  width: 100%;
+  padding: 11px 6px;
+  border: none;
+  border-bottom: 1px solid var(--color-border);
+  background: transparent;
+  color: var(--color-text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.row:hover {
+  background: var(--color-bg-card);
+}
+
+.dot {
+  flex-shrink: 0;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--color-text-muted);
+}
+
+.dot[data-status="in_progress"] {
+  background: var(--color-success);
+}
+
+.dot[data-status="review"] {
+  background: var(--color-primary);
+}
+
+.dot[data-status="blocked"] {
+  background: var(--color-danger);
+}
+
+.dot[data-status="closed"] {
+  background: var(--color-border);
+}
+
+.rowId {
+  flex-shrink: 0;
+  width: 120px;
+  font-size: 11px;
+  letter-spacing: 0.6px;
+  color: var(--color-text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rowTitle {
+  min-width: 0;
+  font-size: 13px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.spacer {
+  flex: 1;
+}
+
+.statusChip {
+  flex-shrink: 0;
+  width: 92px;
+  padding: 2px 0;
+  font-size: 11px;
+  font-weight: 600;
+  text-align: center;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-full);
+  color: var(--color-text-secondary);
+  background: var(--color-bg-card);
+}
+
+.statusChip[data-status="in_progress"] {
+  color: var(--color-success);
+  border-color: var(--color-success);
+}
+
+.statusChip[data-status="review"] {
+  color: var(--color-primary);
+  border-color: var(--color-primary);
+}
+
+.statusChip[data-status="blocked"] {
+  color: var(--color-danger);
+  border-color: var(--color-danger);
+}
+
+.avatar {
+  flex-shrink: 0;
+  width: 22px;
+  height: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  font-size: 10px;
+  font-weight: 700;
+}

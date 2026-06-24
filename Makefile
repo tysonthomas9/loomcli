@@ -1,6 +1,6 @@
 # Makefile for loomcli project
 
-.PHONY: all build build-frontend build-all test test-integration test-all test-playground test-fleetdb-embedded test-fleetdb-supervisor test-fleetdb-ui test-fleetdb-empty-cli fleetdb-empty-up fleetdb-empty-down local-mode-frontend-dist local-mode-up local-mode-codex-up local-mode-down local-mode-logs local-mode-verify local-mode-codex-verify test-local-mode-harness test-distributed-smoke lint lint-frontend test-frontend e2e test-e2e test-e2e-api test-e2e-api-local test-e2e-real-smoke test-e2e-real-smoke-local test-e2e-real-regression test-e2e-real-regression-local test-e2e-integration test-e2e-integration-local test-e2e-integration-full clean install help frontend check check-go check-frontend gate gate-e2e gate-e2e-full hooks ensure-hooks dev dev-check dev-loom dev-vite check-loc check-loc-stale check-no-raw-exec check-no-beads-prod test-coverage test-frontend-coverage test-race-cover test-integration-race-cover gen-go-api check-go-api-staleness
+.PHONY: all build build-frontend build-all test test-integration test-all test-playground test-fleetdb-embedded test-fleetdb-supervisor test-fleetdb-ui test-fleetdb-empty-cli fleetdb-empty-up fleetdb-empty-down local-mode-frontend-dist local-mode-up local-mode-codex-up local-mode-down local-mode-logs local-mode-verify local-mode-codex-verify test-local-mode-harness test-distributed-smoke lint lint-frontend test-frontend e2e test-e2e test-e2e-api test-e2e-api-local test-e2e-real-smoke test-e2e-real-smoke-local test-e2e-real-regression test-e2e-real-regression-local test-e2e-integration test-e2e-integration-local test-e2e-integration-full clean install help frontend check check-go check-frontend gate gate-e2e gate-e2e-full hooks ensure-hooks dev dev-check dev-loom dev-vite check-loc check-loc-stale check-control-plane-paths check-no-raw-exec check-no-beads-prod test-coverage test-forkwatch test-frontend-coverage test-race-cover test-integration-race-cover gen-go-api check-go-api-staleness local-mode-webhook-verify test-e2e-github-webhook test-e2e-github-webhook-live
 
 # Default target
 all: build
@@ -179,6 +179,13 @@ local-mode-logs:
 local-mode-verify:
 	@test/local-mode/verify-local-mode.sh
 
+# Real-stack E2E for the trigger-driven GitHub webhook path: signs a
+# pull_request.opened delivery, asserts the durable TriggerEvent/Delivery/
+# DriverRun records, and checks redelivery is idempotent. Requires a running
+# `make local-mode-up` stack plus curl, openssl, and python3.
+local-mode-webhook-verify:
+	@test/local-mode/verify-webhook.sh
+
 local-mode-codex-verify:
 	@LOOM_LOCAL_MODE_PLAN_TASK_ID="$${LOOM_LOCAL_MODE_PLAN_TASK_ID:-LOCALMODE-1}" \
 	  LOOM_LOCAL_MODE_CODE_TASK_ID="$${LOOM_LOCAL_MODE_CODE_TASK_ID:-LOCALMODE-2}" \
@@ -233,6 +240,7 @@ test-integration-race-cover:
 lint:
 	@echo "Running Go linter..."
 	golangci-lint run --timeout=5m --allow-parallel-runners
+	@./scripts/check-control-plane-paths.sh
 
 # Run Go tests with coverage threshold enforcement
 test-coverage: test
@@ -247,9 +255,21 @@ test-frontend-coverage:
 check-loc:
 	@./scripts/check-loc.sh 1000 2500
 
+check-control-plane-paths:
+	@./scripts/check-control-plane-paths.sh
+
 # Check for stale LOC allowlist entries
 check-loc-stale:
 	@./scripts/check-loc-stale.sh --check-stale 1000
+
+# Run tests under a fork-bomb watchdog: kills the run and fails fast if test
+# binaries start multiplying (a test spawning os.Executable() re-runs the whole
+# suite recursively) instead of taking down the machine. Also fails on test
+# processes leaked past the end of the run.
+#   make test-forkwatch                                   # whole repo
+#   make test-forkwatch PKG=./internal/cli/daemon/...     # one subtree
+test-forkwatch:
+	@./scripts/test-forkwatch.sh $(or $(PKG),./...)
 
 # Check for raw exec.Command in unit tests (enforces DI)
 check-no-raw-exec:
@@ -304,6 +324,18 @@ test-e2e-api:
 test-e2e-api-local:
 	@echo "Running Playwright API e2e tests (local server)..."
 	@cd $(FRONTEND_DIR) && RUN_INTEGRATION_TESTS=1 LOOM_LOCAL_SERVER=1 npx playwright test --project=api
+
+# Run the real ephemeral fleet-db + loom serve GitHub webhook dispatch e2e.
+test-e2e-github-webhook:
+	@echo "Running GitHub webhook e2e (ephemeral fleet-db + loom serve)..."
+	@GOCACHE=$${GOCACHE:-/tmp/go-build-cache} go test -count=1 -tags e2e -run TestE2E_GitHubWebhookDispatchesDriverRunWithEphemeralStack ./internal/webui/handlers/webhooks
+
+# Run the live GitHub webhook e2e against a real private/public repo. Creates
+# and closes a temporary PR. Usage: LOOM_E2E_GITHUB_REPO=owner/repo make test-e2e-github-webhook-live
+test-e2e-github-webhook-live:
+	@: "$${LOOM_E2E_GITHUB_REPO:?set LOOM_E2E_GITHUB_REPO=owner/repo}"
+	@echo "Running live GitHub webhook e2e against $$LOOM_E2E_GITHUB_REPO..."
+	@GOCACHE=$${GOCACHE:-/tmp/go-build-cache} go test -count=1 -tags e2e -run TestE2E_GitHubWebhookRunsDriverAgainstLiveGitHubPR ./internal/webui/handlers/webhooks -timeout 5m
 
 # Run the real Playwright smoke suite: browser + API contracts against FleetDB-backed loom serve.
 test-e2e-real-smoke:
@@ -399,8 +431,9 @@ check-go:
 	@go vet ./...
 	@echo "=== [3/13] Go: build ==="
 	@go build -buildvcs=false ./...
-	@echo "=== [4/13] Go: lint (golangci-lint + depguard) ==="
+	@echo "=== [4/13] Go: lint (golangci-lint + depguard + control-plane path guard) ==="
 	@golangci-lint run --timeout=5m --allow-parallel-runners
+	@./scripts/check-control-plane-paths.sh
 	@echo "=== [5/13] Go: LOC check ==="
 	@./scripts/check-loc.sh 1000 2500
 	@echo "=== [6/13] Go: package size check ==="
@@ -527,7 +560,9 @@ help:
 	@echo "  make test-integration-race-cover - Run integration tests with race + coverage"
 	@echo "  make test-coverage     - Run Go tests with coverage threshold"
 	@echo "  make test-frontend-coverage - Run frontend tests with coverage threshold"
+	@echo "  make test-forkwatch    - Run tests under a fork-bomb/process-leak watchdog (PKG=./path/...)"
 	@echo "  make check-no-raw-exec - Check for raw exec.Command in unit tests"
+	@echo "  make check-control-plane-paths - Check local/cloud fleet-db runtime path invariants"
 	@echo "  make check-loc-stale   - Check for stale LOC allowlist entries"
 	@echo "  make lint              - Run Go linter (golangci-lint)"
 	@echo "  make lint-frontend     - Run frontend typecheck + ESLint"

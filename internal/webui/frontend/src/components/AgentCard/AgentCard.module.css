@@ -164,3 +164,40 @@
   font-family: var(--font-mono, ui-monospace, monospace);
   flex-shrink: 0;
 }
+
+/* Sidebar / workspace tree list */
+.compact {
+  gap: 0.5rem;
+  padding: 0.35rem 0.75rem;
+}
+
+.compact .avatarContainer,
+.compact .avatar {
+  width: 26px;
+  height: 26px;
+}
+
+.compact .avatar {
+  font-size: 0.65rem;
+}
+
+.compact .statusDot {
+  width: 6px;
+  height: 6px;
+  border-width: 1.5px;
+}
+
+.compact .name {
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.compact .role,
+.compact .statusLine {
+  font-size: 0.65rem;
+}
+
+.compact .repoLine,
+.compact .crossRepoIndicator {
+  font-size: 0.625rem;
+}

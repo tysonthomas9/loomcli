@@ -155,9 +155,34 @@ You are running in a parallel multi-agent environment. Follow these rules strict
 `
 }
 
-// buildTestStep returns the backend-aware test step content.
-func buildTestStep(backendName string) string {
+// backendCapabilities describes which prompt features a backend supports.
+// Builders branch on these capability fields rather than comparing backend
+// names, so adding a backend or capability only requires updating
+// capabilitiesFor.
+type backendCapabilities struct {
+	// supportsSubagentSpawn indicates the backend can spawn subagents via the
+	// Task tool (used for test-writing and code-review steps).
+	supportsSubagentSpawn bool
+	// supportsInspectReview indicates the backend supports the dedicated
+	// inspect-reviewer subagent step.
+	supportsInspectReview bool
+}
+
+// capabilitiesFor resolves a backend name to its prompt capabilities.
+// This is the single place backend names are mapped to capabilities.
+func capabilitiesFor(backendName string) backendCapabilities {
 	if backendName == "claude" {
+		return backendCapabilities{
+			supportsSubagentSpawn: true,
+			supportsInspectReview: true,
+		}
+	}
+	return backendCapabilities{}
+}
+
+// buildTestStep returns the capability-aware test step content.
+func buildTestStep(caps backendCapabilities) string {
+	if caps.supportsSubagentSpawn {
 		return `### Step 5: Write Tests (spawn agent)
 - Use the Task tool to spawn an agent to write tests
 - Prompt: 'Write unit tests for the changes made in [files]. Follow existing test patterns in the codebase.'
@@ -170,9 +195,9 @@ func buildTestStep(backendName string) string {
 - If tests fail, fix the code or tests until they pass`
 }
 
-// buildReviewStep returns the backend-aware review step content.
-func buildReviewStep(backendName string) string {
-	if backendName == "claude" {
+// buildReviewStep returns the capability-aware review step content.
+func buildReviewStep(caps backendCapabilities) string {
+	if caps.supportsSubagentSpawn {
 		return `### Step 6: Code Review (spawn agent)
 - Use the Task tool with subagent_type='feature-dev:code-reviewer'
 - Prompt: 'Review the changes for this task. Check for bugs, security issues, code quality, and adherence to project conventions.'
@@ -184,9 +209,10 @@ func buildReviewStep(backendName string) string {
 - Document and fix all issues found`
 }
 
-// buildInspectReviewStep returns the inspect-reviewer step for Claude backends.
-func buildInspectReviewStep(backendName string) string {
-	if backendName == "claude" {
+// buildInspectReviewStep returns the inspect-reviewer step for backends that
+// support it.
+func buildInspectReviewStep(caps backendCapabilities) string {
+	if caps.supportsInspectReview {
 		return `### Step 6b: Inspect Review (spawn agent)
 - Use the Agent tool with subagent_type='inspect-reviewer'
 - Prompt: 'Review the latest commit on the current branch. Check for bugs, logic errors, security vulnerabilities, and code quality issues.'
@@ -242,6 +268,7 @@ func GenerateTaskPrompt(agentName string, workspace *config.WorkspaceConfig, par
 		epicScope = fmt.Sprintf("\n**Epic scope: %s** — You MUST only select tasks from this epic. Do not work on tasks from other epics.\n", parentID)
 	}
 
+	caps := capabilitiesFor(backendName)
 	prompt := renderPrompt("task", promptTemplateData{
 		AgentName:         agentName,
 		WorkspaceBlock:    buildWorkspaceContextBlock(workspace),
@@ -249,9 +276,9 @@ func GenerateTaskPrompt(agentName string, workspace *config.WorkspaceConfig, par
 		SafetyBlock:       buildSafetyGuardrailsBlock(),
 		ReadyJSON:         readyJSON,
 		ReadyFallback:     readyFallback,
-		TestStep:          buildTestStep(backendName),
-		ReviewStep:        buildReviewStep(backendName),
-		InspectReviewStep: buildInspectReviewStep(backendName),
+		TestStep:          buildTestStep(caps),
+		ReviewStep:        buildReviewStep(caps),
+		InspectReviewStep: buildInspectReviewStep(caps),
 	})
 
 	// Inject the prior-attempt checkpoint as a FALLBACK — skipped when a session
@@ -275,14 +302,15 @@ func GenerateFleetPlanningPrompt(agentName, taskID string, workspace *config.Wor
 // GenerateFleetTaskPrompt creates the prompt for a fleet implementation agent with a pre-assigned task.
 // Fleet workers receive their task from the Fleet API and skip task selection/claiming.
 func GenerateFleetTaskPrompt(agentName, taskID string, workspace *config.WorkspaceConfig, backendName string) string {
+	caps := capabilitiesFor(backendName)
 	prompt := renderPrompt("fleet_task", promptTemplateData{
 		AgentName:         agentName,
 		WorkspaceBlock:    buildWorkspaceContextBlock(workspace),
 		SafetyBlock:       buildSafetyGuardrailsBlock(),
 		TaskID:            taskID,
-		TestStep:          buildTestStep(backendName),
-		ReviewStep:        buildReviewStep(backendName),
-		InspectReviewStep: buildInspectReviewStep(backendName),
+		TestStep:          buildTestStep(caps),
+		ReviewStep:        buildReviewStep(caps),
+		InspectReviewStep: buildInspectReviewStep(caps),
 	})
 	return injectCheckpointIfNotResuming(prompt)
 }

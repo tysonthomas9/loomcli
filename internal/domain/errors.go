@@ -27,6 +27,18 @@ var (
 	// (e.g., concurrent update, dependency violation).
 	ErrConflict = errors.New("domain: conflict")
 
+	// ErrAlreadyClaimed indicates a queued unit of work has already been
+	// admitted by another owner.
+	ErrAlreadyClaimed = errors.New("domain: already claimed")
+
+	// ErrNotOwner indicates an owner-scoped operation was attempted by a
+	// different node or worker.
+	ErrNotOwner = errors.New("domain: not owner")
+
+	// ErrInvalidTransition indicates a status transition is not allowed from
+	// the current lifecycle state.
+	ErrInvalidTransition = errors.New("domain: invalid status transition")
+
 	// ErrGone indicates the entity exists but is no longer available —
 	// e.g. a lease that has expired or been released (fleet-db 410
 	// lease_expired). Distinct from ErrNotFound (never existed here) and

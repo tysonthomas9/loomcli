@@ -214,7 +214,12 @@ func (s *Supervisor) startAgentSupervisor(ap *AgentProcess) {
 const (
 	defaultNodeTTL      = 2 * time.Minute
 	defaultNodeInterval = 30 * time.Second
-	defaultLeaseTTL     = 2 * time.Minute
+	// defaultLeaseTTL must outlive a typical real-codex turn (often 5+
+	// minutes) so the lease is still Active when the worker calls
+	// loom data close. There is no periodic heartbeat loop on the agent
+	// lease today (only IPC mutations renew it), so a short TTL silently
+	// fails task completion after a long codex session.
+	defaultLeaseTTL = 30 * time.Minute
 )
 
 var controlPlaneOperationTimeout = 2 * time.Second
@@ -246,6 +251,8 @@ func (s *Supervisor) Stop() {
 //nolint:funlen // The restart loop keeps lifecycle ordering visible.
 func (s *Supervisor) superviseAgent(ap *AgentProcess) {
 	slog.Info("starting agent supervisor", "worktree", ap.Entry.Worktree, "role", ap.Entry.Role)
+	s.markAgentActive(ap)
+	defer s.markAgentStoppedOnExit(ap)
 	tickName := agentTickName(ap)
 
 	for {
@@ -509,16 +516,17 @@ func (s *Supervisor) createControlPlaneAgentSession(ap *AgentProcess, sessionID,
 	metadata := s.agentSessionMetadata(ap, epicID)
 	createCtx, createCancel := context.WithTimeout(context.Background(), controlPlaneOperationTimeout)
 	if _, err := s.ControlStore.AgentSessions().Create(createCtx, store.AgentSessionCreate{
-		WorkspaceKey: s.WorkspaceID,
-		SessionID:    sessionID,
-		AgentID:      ap.Entry.Worktree,
-		NodeID:       s.NodeID,
-		Kind:         domain.AgentSessionKindTask,
-		TaskID:       taskID,
-		Status:       domain.AgentSessionStarting,
-		Phase:        phase,
-		Attempt:      attempt,
-		Metadata:     metadata,
+		WorkspaceKey:    s.WorkspaceID,
+		SessionID:       sessionID,
+		AgentID:         ap.Entry.Worktree,
+		NodeID:          s.NodeID,
+		Kind:            domain.AgentSessionKindTask,
+		TaskID:          taskID,
+		ParentSessionID: ap.ParentSessionID,
+		Status:          domain.AgentSessionStarting,
+		Phase:           phase,
+		Attempt:         attempt,
+		Metadata:        metadata,
 	}); err != nil {
 		createCancel()
 		slog.Warn("control-plane agent session creation failed", "worktree", ap.Entry.Worktree, "session_id", sessionID, "err", err)
@@ -614,6 +622,10 @@ func (s *Supervisor) agentSessionMetadataLocked(ap *AgentProcess, backend string
 	}
 	if ap.AssignedTaskID != "" {
 		metadata["task_id"] = ap.AssignedTaskID
+	}
+	if ap.Entry.Mode == domain.AgentModeEphemeral {
+		metadata["attempt_kind"] = "ephemeral_task_attempt"
+		metadata["cleanup_state"] = "retained"
 	}
 	if ap.Entry.Repo != "" {
 		metadata["repo"] = ap.Entry.Repo

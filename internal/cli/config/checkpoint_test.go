@@ -140,13 +140,13 @@ func TestSaveCheckpointAtomicity(t *testing.T) {
 func TestTruncateDiff(t *testing.T) {
 	// Short diff — no truncation
 	short := "abc"
-	if got := truncateDiff(short, 100); got != short {
+	if got := TruncateDiff(short, 100); got != short {
 		t.Errorf("Short diff truncated: got %q, want %q", got, short)
 	}
 
 	// Large diff — should be truncated
 	large := strings.Repeat("x", 8000)
-	result := truncateDiff(large, 4096)
+	result := TruncateDiff(large, 4096)
 	if len(result) > 4096 {
 		t.Errorf("Truncated diff too long: %d bytes", len(result))
 	}

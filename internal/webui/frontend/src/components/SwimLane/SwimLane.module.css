@@ -6,11 +6,25 @@
 .swimLane {
   display: flex;
   flex-direction: column;
+  width: 100%;
   background-color: transparent;
   border-radius: var(--radius-lg);
-  overflow: visible;
+  overflow: hidden;
   border: 1px solid var(--color-border);
-  flex: 0 0 auto; /* Size to content, don't grow or shrink */
+  min-height: 0;
+}
+
+/* Each expanded epic lane is sized to its visible cards (no fixed floor) but
+   capped at the board viewport height; flex-shrink:0 keeps lanes from being
+   compressed so the board scrolls vertically between epics. Columns scroll
+   internally when their cards exceed the cap (see the role="list" override). */
+.swimLane:not([data-collapsed="true"]) {
+  flex: 0 0 auto;
+  max-height: 100%;
+}
+
+.swimLane[data-collapsed="true"] {
+  flex: 0 0 auto;
 }
 
 .swimLane + .swimLane {
@@ -66,8 +80,10 @@
   flex: 1;
   min-width: 0;
   margin: 0;
-  font-size: var(--font-size-sm);
-  font-weight: var(--font-weight-semibold);
+  font-size: var(
+    --font-size-sm
+  ); /* 14px — Aether epic header (text-sm font-black) */
+  font-weight: 900;
   color: var(--color-text);
   line-height: var(--line-height-tight);
   overflow: hidden;
@@ -116,33 +132,127 @@
   text-align: center;
 }
 
+/* Epic runner badge (Aether design, pin 10): which lead runs this epic. */
+.runnerBadge {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 1px var(--space-2);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-medium);
+  color: var(--color-text-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-full);
+}
+
+.runnerDot {
+  width: 6px;
+  height: 6px;
+  border-radius: var(--radius-full);
+  background: var(--color-status-working);
+  flex-shrink: 0;
+}
+
+.unclaimedBadge {
+  flex-shrink: 0;
+  padding: 1px var(--space-2);
+  font-size: var(--font-size-xs);
+  font-style: italic;
+  color: var(--color-text-muted);
+  border: 1px dashed var(--color-border);
+  border-radius: var(--radius-full);
+}
+
+/* Epic-header PR rollup pill ("N PRs"), shown on epic lanes that have PRs. */
+.lanePrCount {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: var(--space-1) var(--space-2);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-primary);
+  background-color: var(--color-primary-bg);
+  border-radius: var(--radius-full);
+}
+
+.lanePrCount svg {
+  width: 12px;
+  height: 12px;
+}
+
+/* Aether kanban: one grid for header + body so column tracks stay aligned;
+   the whole block scrolls horizontally when columns hit their min width. */
 .laneContent {
-  display: flex;
-  flex-direction: row;
-  gap: 0;
-  padding: var(--space-3);
+  display: grid;
+  grid-template-rows: auto 1fr;
+  flex: 1 1 auto;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  min-height: 0;
   overflow-x: auto;
-  overflow-y: visible;
-  flex: 0 0 auto; /* Size to content instead of filling space */
+  overflow-y: hidden;
   opacity: 1;
-  transition:
-    opacity 0.15s ease-out,
-    padding 0.2s ease-out;
+  transition: opacity 0.15s ease-out;
+  -webkit-overflow-scrolling: touch;
 }
 
-/* Inside swim lanes, columns should size to content (not clip) */
-.laneContent > section {
-  overflow: visible;
+.columnHeaderCell {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  min-height: 56px;
+  padding: 14px 16px;
+  background-color: var(--color-chrome);
+  border-bottom: 1px solid var(--color-border);
+  border-right: 1px solid var(--color-border);
 }
 
-/* Column content in swim lanes should not scroll — show all cards */
-.laneContent > section > div[role="list"] {
-  overflow: visible;
-  flex: 0 0 auto;
-}
-
-.laneContent > :last-child {
+.lastColumn {
   border-right: none;
+}
+
+.columnTitle {
+  margin: 0;
+  font-size: var(--font-size-sm); /* 14px */
+  font-weight: 900;
+  letter-spacing: -0.01em;
+  color: var(--color-text);
+}
+
+.columnTitle[data-empty] {
+  color: var(--color-text-secondary);
+}
+
+/* Each body column reuses StatusColumn (header hidden) as the droppable.
+   Override its intrinsic min-width/flex so the grid (not the column) controls
+   width — keeping body columns aligned with the header cells. Pin --column-bg
+   to #111 so every body cell — including the backlog column (normally muted
+   #131313) and the inner .content scroll-shadow gradient — shares one surface. */
+.laneContent > section,
+.laneContent > section[data-column-type="backlog"] {
+  overflow: hidden;
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+  align-self: stretch;
+  border-right: 1px solid var(--color-border);
+  --column-bg: var(--color-bg-secondary);
+  background-color: var(--color-bg-secondary);
+}
+
+.laneContent > section > div[role="list"] {
+  overflow-y: auto;
+  overflow-x: hidden;
+  flex: 1 1 auto;
+  min-height: 0;
 }
 
 .laneContent[data-collapsed="true"] {
@@ -159,7 +269,7 @@
   background-color: var(--color-surface-subtle);
 }
 
-/* Highlighted column style (Review - needs human attention) */
+/* Highlighted column style (Review) — inset accent avoids shifting grid tracks */
 .highlightedColumn {
-  border-left: 3px solid var(--color-status-review);
+  box-shadow: inset 3px 0 0 var(--color-status-review);
 }

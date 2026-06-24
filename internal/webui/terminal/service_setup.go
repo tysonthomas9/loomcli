@@ -259,6 +259,9 @@ func (s *terminalServiceImpl) upsertSetupTab(ctx context.Context, wsID, session,
 	if s.hub != nil {
 		s.hub.Broadcast(&realtime.MutationPayload{
 			Type:        "terminal_metadata",
+			EntityType:  "terminal",
+			EntityID:    session,
+			Action:      "terminal.metadata",
 			Timestamp:   time.Now().UTC().Format(time.RFC3339),
 			WorkspaceID: wsID,
 		})

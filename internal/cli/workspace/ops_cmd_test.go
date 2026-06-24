@@ -17,6 +17,14 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
+func clearRuntimeRoutingEnv(t *testing.T) {
+	t.Helper()
+	t.Setenv("LOOM_ISSUE_BACKEND", "")
+	t.Setenv("LOOM_SERVER_URL", "")
+	t.Setenv("LOOM_FLEET_DB_URL", "")
+	t.Setenv(envLocalRuntimeMode, "")
+}
+
 func TestWaitForWorkspaceOpsDaemonUsesCallerContext(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
@@ -195,6 +203,7 @@ func TestWorkspaceOpsGlobalProblemsDetectsDuplicateDaemonOwnership(t *testing.T)
 }
 
 func TestBuildLocalRuntimeFleetModeNotApplicable(t *testing.T) {
+	clearRuntimeRoutingEnv(t)
 	t.Setenv("LOOM_ISSUE_BACKEND", "fleet")
 
 	enoent := &os.PathError{Op: "open", Path: "runtime.json", Err: os.ErrNotExist}
@@ -221,6 +230,7 @@ func TestBuildLocalRuntimeFleetModeIgnoresEvenAStartedRuntime(t *testing.T) {
 	// Even if runtime.json happens to exist (someone manually ran
 	// `loom local start`), in fleet mode the desktop runtime is still
 	// "not applicable" — agents talk to fleet-db directly.
+	clearRuntimeRoutingEnv(t)
 	t.Setenv("LOOM_ISSUE_BACKEND", "fleet")
 
 	snap := &local.RuntimeStatusSnapshot{
@@ -237,8 +247,109 @@ func TestBuildLocalRuntimeFleetModeIgnoresEvenAStartedRuntime(t *testing.T) {
 	}
 }
 
-func TestBuildLocalRuntimeDesktopModeHealthy(t *testing.T) {
+func TestBuildLocalRuntimeDisabledModeNotApplicableForFleetDB(t *testing.T) {
+	clearRuntimeRoutingEnv(t)
+	t.Setenv("LOOM_ISSUE_BACKEND", "fleetdb")
+	t.Setenv(envLocalRuntimeMode, "disabled")
+
+	enoent := &os.PathError{Op: "open", Path: "runtime.json", Err: os.ErrNotExist}
+	out := buildLocalRuntime(nil, enoent)
+
+	if out.Applicable {
+		t.Error("Applicable = true, want false when local runtime is disabled")
+	}
+	if !strings.Contains(out.Reason, envLocalRuntimeMode) {
+		t.Errorf("Reason = %q, want it to mention %s", out.Reason, envLocalRuntimeMode)
+	}
+	if out.Error != "" {
+		t.Errorf("Error = %q, want empty in not-applicable case", out.Error)
+	}
+	if out.Runtime != nil {
+		t.Errorf("Runtime = %+v, want nil in not-applicable case", out.Runtime)
+	}
+}
+
+func TestBuildLocalRuntimeExternalFleetDBNotApplicable(t *testing.T) {
+	clearRuntimeRoutingEnv(t)
+	t.Setenv("LOOM_ISSUE_BACKEND", "fleetdb")
+	t.Setenv("LOOM_FLEET_DB_URL", "http://127.0.0.1:4567")
+
+	enoent := &os.PathError{Op: "open", Path: "runtime.json", Err: os.ErrNotExist}
+	out := buildLocalRuntime(nil, enoent)
+
+	if out.Applicable {
+		t.Error("Applicable = true, want false when external FleetDB is configured")
+	}
+	if !strings.Contains(out.Reason, "external FleetDB") {
+		t.Errorf("Reason = %q, want external FleetDB explanation", out.Reason)
+	}
+	if out.Error != "" {
+		t.Errorf("Error = %q, want empty in not-applicable case", out.Error)
+	}
+}
+
+func TestBuildLocalRuntimeAPIModeNotApplicable(t *testing.T) {
+	clearRuntimeRoutingEnv(t)
 	t.Setenv("LOOM_ISSUE_BACKEND", "")
+	t.Setenv("LOOM_SERVER_URL", "https://loom.example.test")
+
+	enoent := &os.PathError{Op: "open", Path: "runtime.json", Err: os.ErrNotExist}
+	out := buildLocalRuntime(nil, enoent)
+
+	if out.Applicable {
+		t.Error("Applicable = true, want false in API-backed mode")
+	}
+	if out.Error != "" {
+		t.Errorf("Error = %q, want empty in not-applicable case", out.Error)
+	}
+}
+
+func TestBuildLocalRuntimeExplicitDesktopOverridesServerSignals(t *testing.T) {
+	clearRuntimeRoutingEnv(t)
+	t.Setenv("LOOM_ISSUE_BACKEND", "fleetdb")
+	t.Setenv("LOOM_FLEET_DB_URL", "http://127.0.0.1:4567")
+	t.Setenv(envLocalRuntimeMode, "desktop")
+
+	snap := &local.RuntimeStatusSnapshot{
+		Healthy: true,
+		Runtime: &local.RuntimeSnapshot{PID: 123, URL: "http://127.0.0.1:8081"},
+	}
+	out := buildLocalRuntime(snap, nil)
+
+	if !out.Applicable {
+		t.Fatal("Applicable = false, want explicit desktop mode to keep runtime applicable")
+	}
+	if !out.Healthy || out.Runtime == nil {
+		t.Fatalf("runtime snapshot was not mirrored: %+v", out)
+	}
+}
+
+func TestShouldEnsureLocalRuntimeSkipsDisabledDeployment(t *testing.T) {
+	status := &WorkspaceOpsStatus{
+		LocalRuntime: &WorkspaceOpsLocalRuntime{
+			Applicable: false,
+			Reason:     "headless/server deployment",
+		},
+	}
+
+	if shouldEnsureLocalRuntime(status) {
+		t.Fatal("shouldEnsureLocalRuntime = true, want false when local runtime is not applicable")
+	}
+}
+
+func TestDaemonNotRunningFixRespectsNotApplicableRuntime(t *testing.T) {
+	status := &WorkspaceOpsStatus{
+		LocalRuntime: &WorkspaceOpsLocalRuntime{Applicable: false},
+	}
+
+	got := daemonNotRunningFix(status)
+	if strings.Contains(got, "ensure-runtime") {
+		t.Fatalf("daemonNotRunningFix = %q, should not suggest ensure-runtime when local runtime is not applicable", got)
+	}
+}
+
+func TestBuildLocalRuntimeDesktopModeHealthy(t *testing.T) {
+	clearRuntimeRoutingEnv(t)
 
 	snap := &local.RuntimeStatusSnapshot{
 		Healthy: true,
@@ -261,7 +372,7 @@ func TestBuildLocalRuntimeDesktopModeHealthy(t *testing.T) {
 }
 
 func TestBuildLocalRuntimeDesktopModeUnhealthyMirrorsError(t *testing.T) {
-	t.Setenv("LOOM_ISSUE_BACKEND", "")
+	clearRuntimeRoutingEnv(t)
 
 	snap := &local.RuntimeStatusSnapshot{
 		Healthy: false,
@@ -282,7 +393,7 @@ func TestBuildLocalRuntimeDesktopModeUnhealthyMirrorsError(t *testing.T) {
 }
 
 func TestBuildLocalRuntimeDesktopModeReadErrorSurfacesAsError(t *testing.T) {
-	t.Setenv("LOOM_ISSUE_BACKEND", "")
+	clearRuntimeRoutingEnv(t)
 
 	readErr := &os.PathError{Op: "open", Path: "runtime.json", Err: os.ErrNotExist}
 	out := buildLocalRuntime(nil, readErr)

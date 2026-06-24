@@ -167,11 +167,7 @@ function toQueryString(state: FilterState): string {
   if (state.search !== undefined && state.search !== "")
     params.set("search", state.search);
   if (state.showBlocked === true) params.set("showBlocked", "true");
-  if (
-    state.groupBy !== undefined &&
-    state.groupBy !== "none" &&
-    state.groupBy !== DEFAULT_GROUP_BY
-  )
+  if (state.groupBy !== undefined && state.groupBy !== DEFAULT_GROUP_BY)
     params.set("groupBy", state.groupBy);
   return params.toString();
 }
@@ -292,12 +288,12 @@ export function useFilterState(
 
   const setGroupBy = useCallback(
     (groupBy: GroupByOption | undefined) => {
-      const value =
-        groupBy !== undefined &&
-        groupBy !== "none" &&
-        groupBy !== DEFAULT_GROUP_BY
-          ? groupBy
-          : undefined;
+      let value: string | undefined;
+      if (groupBy === undefined || groupBy === DEFAULT_GROUP_BY) {
+        value = undefined;
+      } else {
+        value = groupBy;
+      }
       updateParam("groupBy", value);
     },
     [updateParam],

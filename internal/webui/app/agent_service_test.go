@@ -119,7 +119,7 @@ func TestAgentService_GenerateTerminalToken(t *testing.T) {
 
 	t.Run("nil termAuth returns ErrUnavailable", func(t *testing.T) {
 		svc := svcimpl.NewAgentService(&mockGitOps{}, nil, nil, nil)
-		_, err := svc.GenerateTerminalToken(ctx, "agent1", "user1")
+		_, err := svc.GenerateTerminalToken(ctx, "test-ws", "agent1", "user1")
 		requireServiceError(t, err, service.KindUnavailable)
 	})
 
@@ -131,7 +131,7 @@ func TestAgentService_GenerateTerminalToken(t *testing.T) {
 		defer ta.Stop()
 
 		svc := svcimpl.NewAgentService(&mockGitOps{}, nil, ta, nil)
-		token, err := svc.GenerateTerminalToken(ctx, "agent1", "user1")
+		token, err := svc.GenerateTerminalToken(ctx, "test-ws", "agent1", "user1")
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}

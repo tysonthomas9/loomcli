@@ -49,6 +49,40 @@ func TestCreateAgentAllowsDistributedWorkspaceWithoutLocalPath(t *testing.T) {
 	}
 }
 
+func TestCreateAgentLeadEnsuresRoleAndDoesNotRequireRepo(t *testing.T) {
+	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
+
+	ctx := context.Background()
+	st := memstore.New()
+	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{
+		Key:           "TEST2",
+		Name:          "Test 2",
+		DefaultBranch: "main",
+	}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+
+	svc := NewAgentService(nil, nil, nil, st)
+	created, err := svc.CreateAgent(ctx, service.AgentCreateInput{
+		WorkspaceKey: "TEST2",
+		Name:         "lead-nova",
+		RoleName:     "Lead",
+		Backend:      "codex",
+	})
+	if err != nil {
+		t.Fatalf("CreateAgent returned error: %v", err)
+	}
+	if created.RoleName != "lead" {
+		t.Fatalf("created.RoleName = %q, want lead", created.RoleName)
+	}
+	if len(created.Repos) != 0 || created.CrossRepo {
+		t.Fatalf("lead repo scope = repos %v cross_repo %v, want no repo scope", created.Repos, created.CrossRepo)
+	}
+	if _, err := st.Roles().Get(ctx, "TEST2", "lead"); err != nil {
+		t.Fatalf("lead role was not created: %v", err)
+	}
+}
+
 func TestRequestAgentLifecycleUpdatesStateAndQueuesCommand(t *testing.T) {
 	ctx := context.Background()
 	st := memstore.New()

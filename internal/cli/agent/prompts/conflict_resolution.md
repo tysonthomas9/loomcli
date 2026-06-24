@@ -27,6 +27,7 @@ For each conflicted file:
 
 ### Step 4: Complete the Merge
 Once all conflicts are resolved:
+{{ if .PushRef }}
 ```bash
 git add -A
 git commit -m "Resolve merge conflicts: {{ .SourceBranch }} -> {{ .TargetBranch }}
@@ -37,10 +38,28 @@ Conflicts resolved in:
 Co-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>"
 git push origin {{ .PushRef }}
 ```
+{{ else }}
+No remote is configured for this repo. Keep the resolution local:
+```bash
+git add -A
+git commit -m "Resolve merge conflicts: {{ .SourceBranch }} -> {{ .TargetBranch }}
+
+Conflicts resolved in:
+{{ .ConflictList }}
+
+Co-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>"
+```
+
+Do not run git push origin. The local commit on {{ .TargetBranch }} is the completed integration.
+{{ end }}
 
 ### Step 5: Verify
 - Run 'git status' to confirm clean working tree
+{{ if .PushRef }}
 - Confirm push succeeded
+{{ else }}
+- Confirm the merge commit exists locally on {{ .TargetBranch }}
+{{ end }}
 
 ### CRITICAL: Do Not Leave Conflicts
 - Every conflict marker must be removed

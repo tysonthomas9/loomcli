@@ -6,14 +6,28 @@
  * Unit tests for IssueCard component.
  */
 
-import { render, screen, fireEvent } from "@testing-library/react";
+import {
+  render,
+  screen,
+  fireEvent,
+  type RenderOptions,
+} from "@testing-library/react";
+import type { ReactElement } from "react";
 import { describe, it, expect, vi } from "vitest";
 import "@testing-library/jest-dom";
 
+import { ToastProvider } from "@/hooks/ui";
 import type { BlockerRef, Issue } from "@/types";
 
 import { IssueCard } from "../IssueCard";
 import styles from "../IssueCard.module.css";
+
+function renderIssueCard(
+  ui: ReactElement,
+  options?: Omit<RenderOptions, "wrapper">,
+) {
+  return render(<ToastProvider>{ui}</ToastProvider>, options);
+}
 
 /**
  * Create a minimal test issue with required fields.
@@ -29,11 +43,17 @@ function createTestIssue(overrides: Partial<Issue> = {}): Issue {
   };
 }
 
+function getIssueCard(issue: Issue): HTMLElement {
+  return screen.getByLabelText(
+    `Issue: ${issue.title || "Untitled"}`,
+  ) as HTMLElement;
+}
+
 describe("IssueCard", () => {
   describe("rendering", () => {
     it("renders issue title", () => {
       const issue = createTestIssue({ title: "My Issue Title" });
-      render(<IssueCard issue={issue} />);
+      renderIssueCard(<IssueCard issue={issue} />);
 
       expect(
         screen.getByRole("heading", { name: "My Issue Title" }),
@@ -42,7 +62,7 @@ describe("IssueCard", () => {
 
     it("renders issue ID (shortened with prefix preserved)", () => {
       const issue = createTestIssue({ id: "issue-abc123def456" });
-      render(<IssueCard issue={issue} />);
+      renderIssueCard(<IssueCard issue={issue} />);
 
       // Should preserve prefix and truncate: "issue-abc12..."
       expect(screen.getByText("issue-abc12...")).toBeInTheDocument();
@@ -50,143 +70,76 @@ describe("IssueCard", () => {
 
     it("renders short ID as-is", () => {
       const issue = createTestIssue({ id: "loom-xyz" });
-      render(<IssueCard issue={issue} />);
+      renderIssueCard(<IssueCard issue={issue} />);
 
       expect(screen.getByText("loom-xyz")).toBeInTheDocument();
     });
 
-    it("renders priority badge with correct text", () => {
+    it("does not render a visible priority badge (Aether V3 tickets)", () => {
       const issue = createTestIssue({ priority: 1 });
-      render(<IssueCard issue={issue} />);
+      renderIssueCard(<IssueCard issue={issue} />);
 
-      expect(screen.getByText("P1")).toBeInTheDocument();
+      expect(screen.queryByText("P1")).not.toBeInTheDocument();
     });
 
     it("renders with article element", () => {
       const issue = createTestIssue();
-      const { container } = render(<IssueCard issue={issue} />);
+      const { container } = renderIssueCard(<IssueCard issue={issue} />);
 
       expect(container.querySelector("article")).toBeInTheDocument();
     });
   });
 
-  describe("priority display", () => {
-    it.each([0, 1, 2, 3, 4] as const)("renders P%i correctly", (priority) => {
-      const issue = createTestIssue({ priority });
-      const { container } = render(<IssueCard issue={issue} />);
-
-      expect(screen.getByText(`P${priority}`)).toBeInTheDocument();
-      expect(container.querySelector("[data-priority]")).toHaveAttribute(
-        "data-priority",
-        String(priority),
-      );
-    });
-
-    /**
-     * P2 priority badge contrast fix verification.
-     * The CSS uses data-priority="2" to apply dark text color for WCAG AA contrast
-     * on the yellow background. This test ensures the attribute is correctly set.
-     */
-    it('P2 priority badge has data-priority="2" for CSS contrast styling', () => {
-      const issue = createTestIssue({ priority: 2 });
-      render(<IssueCard issue={issue} />);
-
-      const priorityBadge = screen.getByText("P2");
-      expect(priorityBadge).toHaveAttribute("data-priority", "2");
-    });
-
-    it("defaults to P4 when priority is undefined", () => {
-      const issue = createTestIssue();
-      // @ts-expect-error Testing undefined priority
-      delete issue.priority;
-      render(<IssueCard issue={issue} />);
-
-      expect(screen.getByText("P4")).toBeInTheDocument();
-    });
-
-    it("defaults to P4 for out of range priority (negative)", () => {
-      // @ts-expect-error Testing invalid priority
-      const issue = createTestIssue({ priority: -1 });
-      render(<IssueCard issue={issue} />);
-
-      expect(screen.getByText("P4")).toBeInTheDocument();
-    });
-
-    it("defaults to P4 for out of range priority (> 4)", () => {
-      // @ts-expect-error Testing invalid priority
-      const issue = createTestIssue({ priority: 5 });
-      render(<IssueCard issue={issue} />);
-
-      expect(screen.getByText("P4")).toBeInTheDocument();
-    });
-  });
-
-  describe("priority badge styling", () => {
+  // The visible priority badge was removed for the Aether V3 design (tickets
+  // carry no priority chip); priority survives only as the card's
+  // data-priority attribute for CSS hooks.
+  describe("priority data attribute", () => {
     it.each([0, 1, 2, 3, 4] as const)(
-      "applies priority%i class to priority badge for priority %i",
+      'card has data-priority="%i" and no P%i badge',
       (priority) => {
         const issue = createTestIssue({ priority });
-        render(<IssueCard issue={issue} />);
+        const { container } = renderIssueCard(<IssueCard issue={issue} />);
 
-        const priorityBadge = screen.getByText(`P${priority}`);
-        // CSS Modules hashes class names, so we check for the pattern
-        expect(priorityBadge.className).toMatch(
-          new RegExp(`priority${priority}`),
-        );
-      },
-    );
-
-    it("applies both priorityBadge base class and priority-specific class", () => {
-      const issue = createTestIssue({ priority: 2 });
-      render(<IssueCard issue={issue} />);
-
-      const priorityBadge = screen.getByText("P2");
-      // Should have both the base priorityBadge class and priority2 class
-      expect(priorityBadge.className).toMatch(/priorityBadge/);
-      expect(priorityBadge.className).toMatch(/priority2/);
-    });
-
-    it("priority badge has data-priority attribute for existing behavior", () => {
-      const issue = createTestIssue({ priority: 1 });
-      render(<IssueCard issue={issue} />);
-
-      const priorityBadge = screen.getByText("P1");
-      expect(priorityBadge).toHaveAttribute("data-priority", "1");
-    });
-
-    it.each([0, 1, 2, 3, 4] as const)(
-      'priority badge has data-priority="%i" attribute',
-      (priority) => {
-        const issue = createTestIssue({ priority });
-        render(<IssueCard issue={issue} />);
-
-        const priorityBadge = screen.getByText(`P${priority}`);
-        expect(priorityBadge).toHaveAttribute(
+        expect(screen.queryByText(`P${priority}`)).not.toBeInTheDocument();
+        expect(container.querySelector("article")).toHaveAttribute(
           "data-priority",
           String(priority),
         );
       },
     );
 
-    it("applies priority4 class when priority is undefined (default)", () => {
+    it("defaults to data-priority 4 when priority is undefined", () => {
       const issue = createTestIssue();
       // @ts-expect-error Testing undefined priority
       delete issue.priority;
-      render(<IssueCard issue={issue} />);
+      const { container } = renderIssueCard(<IssueCard issue={issue} />);
 
-      const priorityBadge = screen.getByText("P4");
-      expect(priorityBadge.className).toMatch(/priority4/);
-      expect(priorityBadge).toHaveAttribute("data-priority", "4");
+      expect(container.querySelector("article")).toHaveAttribute(
+        "data-priority",
+        "4",
+      );
     });
 
-    it("applies priority4 class for out of range priority", () => {
+    it("defaults to data-priority 4 for out of range priority (negative)", () => {
+      // @ts-expect-error Testing invalid priority
+      const issue = createTestIssue({ priority: -1 });
+      const { container } = renderIssueCard(<IssueCard issue={issue} />);
+
+      expect(container.querySelector("article")).toHaveAttribute(
+        "data-priority",
+        "4",
+      );
+    });
+
+    it("defaults to data-priority 4 for out of range priority (> 4)", () => {
       // @ts-expect-error Testing invalid priority
       const issue = createTestIssue({ priority: 99 });
-      render(<IssueCard issue={issue} />);
+      const { container } = renderIssueCard(<IssueCard issue={issue} />);
 
-      const priorityBadge = screen.getByText("P4");
-      expect(priorityBadge.className).toMatch(/priority4/);
-      expect(priorityBadge).toHaveAttribute("data-priority", "4");
+      expect(container.querySelector("article")).toHaveAttribute(
+        "data-priority",
+        "4",
+      );
     });
   });
 
@@ -194,16 +147,16 @@ describe("IssueCard", () => {
     it("calls onClick when card is clicked", () => {
       const issue = createTestIssue();
       const handleClick = vi.fn();
-      render(<IssueCard issue={issue} onClick={handleClick} />);
+      renderIssueCard(<IssueCard issue={issue} onClick={handleClick} />);
 
-      fireEvent.click(screen.getByRole("button"));
+      fireEvent.click(getIssueCard(issue));
       expect(handleClick).toHaveBeenCalledWith(issue);
       expect(handleClick).toHaveBeenCalledTimes(1);
     });
 
     it("does not crash when onClick is not provided", () => {
       const issue = createTestIssue();
-      render(<IssueCard issue={issue} />);
+      renderIssueCard(<IssueCard issue={issue} />);
 
       // Should not throw when clicked
       const article = document.querySelector("article");
@@ -213,28 +166,28 @@ describe("IssueCard", () => {
     it("calls onClick on Enter key", () => {
       const issue = createTestIssue();
       const handleClick = vi.fn();
-      render(<IssueCard issue={issue} onClick={handleClick} />);
+      renderIssueCard(<IssueCard issue={issue} onClick={handleClick} />);
 
-      fireEvent.keyDown(screen.getByRole("button"), { key: "Enter" });
+      fireEvent.keyDown(getIssueCard(issue), { key: "Enter" });
       expect(handleClick).toHaveBeenCalledWith(issue);
     });
 
     it("calls onClick on Space key", () => {
       const issue = createTestIssue();
       const handleClick = vi.fn();
-      render(<IssueCard issue={issue} onClick={handleClick} />);
+      renderIssueCard(<IssueCard issue={issue} onClick={handleClick} />);
 
-      fireEvent.keyDown(screen.getByRole("button"), { key: " " });
+      fireEvent.keyDown(getIssueCard(issue), { key: " " });
       expect(handleClick).toHaveBeenCalledWith(issue);
     });
 
     it("does not call onClick on other keys", () => {
       const issue = createTestIssue();
       const handleClick = vi.fn();
-      render(<IssueCard issue={issue} onClick={handleClick} />);
+      renderIssueCard(<IssueCard issue={issue} onClick={handleClick} />);
 
-      fireEvent.keyDown(screen.getByRole("button"), { key: "Tab" });
-      fireEvent.keyDown(screen.getByRole("button"), { key: "Escape" });
+      fireEvent.keyDown(getIssueCard(issue), { key: "Tab" });
+      fireEvent.keyDown(getIssueCard(issue), { key: "Escape" });
       expect(handleClick).not.toHaveBeenCalled();
     });
   });
@@ -242,25 +195,23 @@ describe("IssueCard", () => {
   describe("accessibility", () => {
     it("has aria-label with issue title", () => {
       const issue = createTestIssue({ title: "Test Accessibility" });
-      render(<IssueCard issue={issue} />);
+      renderIssueCard(<IssueCard issue={issue} />);
 
       expect(
         screen.getByLabelText("Issue: Test Accessibility"),
       ).toBeInTheDocument();
     });
 
-    it("has button role when onClick is provided", () => {
-      const issue = createTestIssue();
-      render(<IssueCard issue={issue} onClick={() => {}} />);
+    it("exposes a copy-id button without nesting it inside a button role", () => {
+      const issue = createTestIssue({ id: "loom-xyz" });
+      renderIssueCard(
+        <IssueCard issue={issue} onClick={() => {}} columnId="review" />,
+      );
 
-      expect(screen.getByRole("button")).toBeInTheDocument();
-    });
-
-    it("does not have button role when onClick is not provided", () => {
-      const issue = createTestIssue();
-      render(<IssueCard issue={issue} />);
-
-      expect(screen.queryByRole("button")).not.toBeInTheDocument();
+      expect(getIssueCard(issue)).not.toHaveAttribute("role", "button");
+      expect(
+        screen.getByRole("button", { name: "Copy issue ID loom-xyz" }),
+      ).toBeInTheDocument();
     });
 
     it("is keyboard focusable when onClick is provided", () => {
@@ -275,19 +226,19 @@ describe("IssueCard", () => {
 
     it("is not keyboard focusable when onClick is not provided", () => {
       const issue = createTestIssue();
-      const { container } = render(<IssueCard issue={issue} />);
+      const { container } = renderIssueCard(<IssueCard issue={issue} />);
 
       const article = container.querySelector("article");
       expect(article).not.toHaveAttribute("tabIndex");
     });
 
-    it("priority badge has aria-label", () => {
+    it("has no priority badge aria-label (badge removed in Aether V3)", () => {
       const issue = createTestIssue({ priority: 0 });
-      render(<IssueCard issue={issue} />);
+      renderIssueCard(<IssueCard issue={issue} />);
 
       expect(
-        screen.getByLabelText("Priority: P0 - Critical"),
-      ).toBeInTheDocument();
+        screen.queryByLabelText("Priority: P0 - Critical"),
+      ).not.toBeInTheDocument();
     });
   });
 
@@ -304,7 +255,7 @@ describe("IssueCard", () => {
 
     it("data-priority attribute matches issue priority", () => {
       const issue = createTestIssue({ priority: 3 });
-      const { container } = render(<IssueCard issue={issue} />);
+      const { container } = renderIssueCard(<IssueCard issue={issue} />);
 
       const article = container.querySelector("article");
       expect(article).toHaveAttribute("data-priority", "3");
@@ -332,7 +283,9 @@ describe("IssueCard", () => {
 
     it('renders data-column attribute with "done" columnId', () => {
       const issue = createTestIssue();
-      const { container } = render(<IssueCard issue={issue} columnId="done" />);
+      const { container } = renderIssueCard(
+        <IssueCard issue={issue} columnId="done" />,
+      );
 
       const article = container.querySelector("article");
       expect(article).toHaveAttribute("data-column", "done");
@@ -340,7 +293,7 @@ describe("IssueCard", () => {
 
     it("data-column attribute is undefined when no columnId is provided", () => {
       const issue = createTestIssue();
-      const { container } = render(<IssueCard issue={issue} />);
+      const { container } = renderIssueCard(<IssueCard issue={issue} />);
 
       const article = container.querySelector("article");
       expect(article).not.toHaveAttribute("data-column");
@@ -350,7 +303,7 @@ describe("IssueCard", () => {
   describe("edge cases", () => {
     it('renders "Untitled" for missing title', () => {
       const issue = createTestIssue({ title: "" });
-      render(<IssueCard issue={issue} />);
+      renderIssueCard(<IssueCard issue={issue} />);
 
       expect(
         screen.getByRole("heading", { name: "Untitled" }),
@@ -359,7 +312,7 @@ describe("IssueCard", () => {
 
     it('renders "unknown" for missing ID', () => {
       const issue = createTestIssue({ id: "" });
-      render(<IssueCard issue={issue} />);
+      renderIssueCard(<IssueCard issue={issue} />);
 
       expect(screen.getByText("unknown")).toBeInTheDocument();
     });
@@ -367,7 +320,7 @@ describe("IssueCard", () => {
     it("handles very long title", () => {
       const longTitle = "A".repeat(200);
       const issue = createTestIssue({ title: longTitle });
-      render(<IssueCard issue={issue} />);
+      renderIssueCard(<IssueCard issue={issue} />);
 
       // Should still render, truncation is handled by CSS
       expect(
@@ -384,13 +337,13 @@ describe("IssueCard", () => {
         created_at: "2024-01-01T00:00:00Z",
         updated_at: "2024-01-01T00:00:00Z",
       };
-      render(<IssueCard issue={issue} />);
+      renderIssueCard(<IssueCard issue={issue} />);
 
       expect(
         screen.getByRole("heading", { name: "Minimal" }),
       ).toBeInTheDocument();
       expect(screen.getByText("min-id")).toBeInTheDocument();
-      expect(screen.getByText("P2")).toBeInTheDocument();
+      expect(screen.queryByText("P2")).not.toBeInTheDocument();
     });
 
     it("renders with full issue props", () => {
@@ -403,33 +356,33 @@ describe("IssueCard", () => {
         assignee: "user",
         labels: ["bug", "urgent"],
       });
-      render(<IssueCard issue={issue} />);
+      renderIssueCard(<IssueCard issue={issue} />);
 
       expect(
         screen.getByRole("heading", { name: "Full Issue" }),
       ).toBeInTheDocument();
-      expect(screen.getByText("P0")).toBeInTheDocument();
+      expect(screen.queryByText("P0")).not.toBeInTheDocument();
     });
   });
 
   describe("blocked badge display", () => {
     it("renders BlockedBadge when blockedByCount > 0", () => {
       const issue = createTestIssue();
-      render(<IssueCard issue={issue} blockedByCount={3} />);
+      renderIssueCard(<IssueCard issue={issue} blockedByCount={3} />);
 
       expect(screen.getByLabelText("Blocked by 3 issues")).toBeInTheDocument();
     });
 
     it("does not render BlockedBadge when blockedByCount is 0", () => {
       const issue = createTestIssue();
-      render(<IssueCard issue={issue} blockedByCount={0} />);
+      renderIssueCard(<IssueCard issue={issue} blockedByCount={0} />);
 
       expect(screen.queryByLabelText(/Blocked by/)).not.toBeInTheDocument();
     });
 
     it("does not render BlockedBadge when blockedByCount is undefined", () => {
       const issue = createTestIssue();
-      render(<IssueCard issue={issue} />);
+      renderIssueCard(<IssueCard issue={issue} />);
 
       expect(screen.queryByLabelText(/Blocked by/)).not.toBeInTheDocument();
     });
@@ -461,7 +414,7 @@ describe("IssueCard", () => {
 
     it("does not set data-blocked attribute when not blocked", () => {
       const issue = createTestIssue();
-      const { container } = render(<IssueCard issue={issue} />);
+      const { container } = renderIssueCard(<IssueCard issue={issue} />);
 
       const article = container.querySelector("article");
       expect(article).not.toHaveAttribute("data-blocked");
@@ -479,7 +432,7 @@ describe("IssueCard", () => {
 
     it("aria-label includes (blocked) when issue is blocked", () => {
       const issue = createTestIssue({ title: "Blocked Issue" });
-      render(<IssueCard issue={issue} blockedByCount={1} />);
+      renderIssueCard(<IssueCard issue={issue} blockedByCount={1} />);
 
       expect(
         screen.getByLabelText("Issue: Blocked Issue (blocked)"),
@@ -488,7 +441,7 @@ describe("IssueCard", () => {
 
     it("aria-label does not include (blocked) when not blocked", () => {
       const issue = createTestIssue({ title: "Normal Issue" });
-      render(<IssueCard issue={issue} />);
+      renderIssueCard(<IssueCard issue={issue} />);
 
       expect(screen.getByLabelText("Issue: Normal Issue")).toBeInTheDocument();
       expect(screen.queryByLabelText(/blocked/)).not.toBeInTheDocument();
@@ -496,7 +449,7 @@ describe("IssueCard", () => {
 
     it("renders BlockedBadge with blockedByCount of 1", () => {
       const issue = createTestIssue();
-      render(<IssueCard issue={issue} blockedByCount={1} />);
+      renderIssueCard(<IssueCard issue={issue} blockedByCount={1} />);
 
       expect(screen.getByLabelText("Blocked by 1 issue")).toBeInTheDocument();
       expect(screen.getByText("1")).toBeInTheDocument();
@@ -504,7 +457,7 @@ describe("IssueCard", () => {
 
     it("renders BlockedBadge with large blockedByCount", () => {
       const issue = createTestIssue();
-      render(<IssueCard issue={issue} blockedByCount={99} />);
+      renderIssueCard(<IssueCard issue={issue} blockedByCount={99} />);
 
       expect(screen.getByLabelText("Blocked by 99 issues")).toBeInTheDocument();
       expect(screen.getByText("99")).toBeInTheDocument();
@@ -512,7 +465,7 @@ describe("IssueCard", () => {
 
     it("renders BlockedBadge without blockedBy array", () => {
       const issue = createTestIssue();
-      render(<IssueCard issue={issue} blockedByCount={5} />);
+      renderIssueCard(<IssueCard issue={issue} blockedByCount={5} />);
 
       // Badge should still render
       expect(screen.getByLabelText("Blocked by 5 issues")).toBeInTheDocument();
@@ -574,7 +527,7 @@ describe("IssueCard", () => {
 
     it("does not render data-in-backlog attribute when isBacklog is undefined", () => {
       const issue = createTestIssue();
-      const { container } = render(<IssueCard issue={issue} />);
+      const { container } = renderIssueCard(<IssueCard issue={issue} />);
 
       const article = container.querySelector("article");
       expect(article).not.toHaveAttribute("data-in-backlog");
@@ -582,7 +535,7 @@ describe("IssueCard", () => {
 
     it("includes (backlog) in aria-label when isBacklog is true", () => {
       const issue = createTestIssue({ title: "Backlog Issue" });
-      render(<IssueCard issue={issue} isBacklog={true} />);
+      renderIssueCard(<IssueCard issue={issue} isBacklog={true} />);
 
       expect(
         screen.getByLabelText("Issue: Backlog Issue (backlog)"),
@@ -591,14 +544,16 @@ describe("IssueCard", () => {
 
     it("aria-label does not include (backlog) when isBacklog is false", () => {
       const issue = createTestIssue({ title: "Normal Issue" });
-      render(<IssueCard issue={issue} isBacklog={false} />);
+      renderIssueCard(<IssueCard issue={issue} isBacklog={false} />);
 
       expect(screen.getByLabelText("Issue: Normal Issue")).toBeInTheDocument();
     });
 
     it("aria-label includes both (blocked) and (backlog) when both are true", () => {
       const issue = createTestIssue({ title: "Complex Issue" });
-      render(<IssueCard issue={issue} blockedByCount={1} isBacklog={true} />);
+      renderIssueCard(
+        <IssueCard issue={issue} blockedByCount={1} isBacklog={true} />,
+      );
 
       expect(
         screen.getByLabelText("Issue: Complex Issue (blocked) (backlog)"),
@@ -609,48 +564,41 @@ describe("IssueCard", () => {
   describe("deferred badge", () => {
     it('renders deferred badge when issue status is "deferred"', () => {
       const issue = createTestIssue({ status: "deferred" });
-      render(<IssueCard issue={issue} />);
+      renderIssueCard(<IssueCard issue={issue} />);
 
       const badge = screen.getByLabelText("Deferred");
       expect(badge).toBeInTheDocument();
       expect(badge).toHaveTextContent("Deferred");
-      expect(screen.getByText("⏸")).toBeInTheDocument();
+      // Text-only badge — the ⏸ emoji was dropped for the Aether V3 design.
+      expect(screen.queryByText("⏸")).not.toBeInTheDocument();
     });
 
     it("does not render deferred badge for non-deferred status", () => {
       const issue = createTestIssue({ status: "open" });
-      render(<IssueCard issue={issue} />);
+      renderIssueCard(<IssueCard issue={issue} />);
 
       expect(screen.queryByLabelText("Deferred")).not.toBeInTheDocument();
     });
 
     it('deferred badge has aria-label="Deferred"', () => {
       const issue = createTestIssue({ status: "deferred" });
-      render(<IssueCard issue={issue} />);
+      renderIssueCard(<IssueCard issue={issue} />);
 
       expect(screen.getByLabelText("Deferred")).toBeInTheDocument();
-    });
-
-    it("deferred badge icon has aria-hidden", () => {
-      const issue = createTestIssue({ status: "deferred" });
-      render(<IssueCard issue={issue} />);
-
-      const icon = screen.getByText("⏸");
-      expect(icon).toHaveAttribute("aria-hidden", "true");
     });
   });
 
   describe("review type badge", () => {
     describe("getReviewType logic", () => {
-      it("returns plan when status is review with no PR external_ref", () => {
+      it("does not show Plan badge when status is review with no PR external_ref", () => {
         const issue = createTestIssue({
           title: "Design auth flow",
           status: "review",
         });
-        render(<IssueCard issue={issue} />);
+        renderIssueCard(<IssueCard issue={issue} />);
 
-        expect(screen.getByText("Plan")).toBeInTheDocument();
-        expect(screen.getByLabelText("Plan review")).toBeInTheDocument();
+        expect(screen.queryByText("Plan")).not.toBeInTheDocument();
+        expect(screen.queryByLabelText("Plan review")).not.toBeInTheDocument();
       });
 
       it("returns code when status is review with PR external_ref", () => {
@@ -659,7 +607,7 @@ describe("IssueCard", () => {
           status: "review",
           external_ref: "https://github.com/owner/repo/pull/42",
         });
-        render(<IssueCard issue={issue} />);
+        renderIssueCard(<IssueCard issue={issue} />);
 
         expect(screen.getByText("Code")).toBeInTheDocument();
         expect(screen.getByLabelText("Code review")).toBeInTheDocument();
@@ -671,7 +619,7 @@ describe("IssueCard", () => {
           status: "blocked",
           notes: "Stuck on database migration issue",
         });
-        render(<IssueCard issue={issue} />);
+        renderIssueCard(<IssueCard issue={issue} />);
 
         expect(screen.getByText("Help")).toBeInTheDocument();
         expect(screen.getByLabelText("Help review")).toBeInTheDocument();
@@ -682,7 +630,7 @@ describe("IssueCard", () => {
           title: "Regular task",
           status: "in_progress",
         });
-        render(<IssueCard issue={issue} />);
+        renderIssueCard(<IssueCard issue={issue} />);
 
         expect(screen.queryByText("Plan")).not.toBeInTheDocument();
         expect(screen.queryByText("Code")).not.toBeInTheDocument();
@@ -694,64 +642,52 @@ describe("IssueCard", () => {
           title: "Blocked task without notes",
           status: "blocked",
         });
-        render(<IssueCard issue={issue} />);
+        renderIssueCard(<IssueCard issue={issue} />);
 
         expect(screen.queryByText("Help")).not.toBeInTheDocument();
       });
 
-      it("returns plan when status is review with non-PR external_ref", () => {
+      it("does not show Plan badge when status is review with non-PR external_ref", () => {
         const issue = createTestIssue({
           title: "Task",
           status: "review",
           external_ref: "JIRA-123",
         });
-        render(<IssueCard issue={issue} />);
+        renderIssueCard(<IssueCard issue={issue} />);
 
-        expect(screen.getByText("Plan")).toBeInTheDocument();
+        expect(screen.queryByText("Plan")).not.toBeInTheDocument();
         expect(screen.queryByText("Code")).not.toBeInTheDocument();
       });
     });
 
     describe("badge rendering", () => {
-      it("shows Plan badge with icon for plan review", () => {
-        const issue = createTestIssue({
-          title: "Design proposal",
-          status: "review",
-        });
-        render(<IssueCard issue={issue} />);
-
-        const badge = screen.getByLabelText("Plan review");
-        expect(badge).toBeInTheDocument();
-        expect(badge).toHaveTextContent("Plan");
-        expect(screen.getByText("📝")).toBeInTheDocument();
-      });
-
-      it("shows Code badge with icon for code review", () => {
+      // Badges are text-only (no emoji) per the Aether V3 design plan-badge.
+      it("shows text-only Code badge for code review", () => {
         const issue = createTestIssue({
           title: "Feature implementation",
           status: "review",
           external_ref: "https://github.com/owner/repo/pull/10",
         });
-        render(<IssueCard issue={issue} />);
+        renderIssueCard(<IssueCard issue={issue} />);
 
         const badge = screen.getByLabelText("Code review");
         expect(badge).toBeInTheDocument();
         expect(badge).toHaveTextContent("Code");
-        expect(screen.getByText("🔍")).toBeInTheDocument();
+        expect(screen.queryByText("🔍")).not.toBeInTheDocument();
       });
 
-      it("shows Help badge with icon for blocked issues with notes", () => {
+      it("shows text-only Help badge for blocked issues with notes", () => {
         const issue = createTestIssue({
           title: "Needs assistance",
           status: "blocked",
           notes: "Need help with API integration",
         });
-        render(<IssueCard issue={issue} />);
+        renderIssueCard(<IssueCard issue={issue} />);
 
         const badge = screen.getByLabelText("Help review");
         expect(badge).toBeInTheDocument();
         expect(badge).toHaveTextContent("Help");
-        expect(screen.getByText("❓")).toBeInTheDocument();
+        expect(screen.queryByText("❓")).not.toBeInTheDocument();
       });
 
       it("does not show badge for regular issues", () => {
@@ -759,27 +695,21 @@ describe("IssueCard", () => {
           title: "Normal task",
           status: "open",
         });
-        render(<IssueCard issue={issue} />);
+        renderIssueCard(<IssueCard issue={issue} />);
 
         expect(screen.queryByLabelText("Plan review")).not.toBeInTheDocument();
         expect(screen.queryByLabelText("Code review")).not.toBeInTheDocument();
         expect(screen.queryByLabelText("Help review")).not.toBeInTheDocument();
       });
 
-      it("badge icon has aria-hidden attribute", () => {
-        const issue = createTestIssue({ title: "Feature", status: "review" });
-        render(<IssueCard issue={issue} />);
+      it("hides review badge in the Review column (column header is enough)", () => {
+        const issue = createTestIssue({
+          title: "Design proposal",
+          status: "review",
+        });
+        renderIssueCard(<IssueCard issue={issue} columnId="review" />);
 
-        const icon = screen.getByText("📝");
-        expect(icon).toHaveAttribute("aria-hidden", "true");
-      });
-
-      it("applies reviewPlan class to Plan badge", () => {
-        const issue = createTestIssue({ title: "Plan item", status: "review" });
-        render(<IssueCard issue={issue} />);
-
-        const badge = screen.getByLabelText("Plan review");
-        expect(badge.className).toMatch(/reviewPlan/);
+        expect(screen.queryByLabelText("Plan review")).not.toBeInTheDocument();
       });
 
       it("applies reviewCode class to Code badge", () => {
@@ -788,7 +718,7 @@ describe("IssueCard", () => {
           status: "review",
           external_ref: "https://github.com/owner/repo/pull/5",
         });
-        render(<IssueCard issue={issue} />);
+        renderIssueCard(<IssueCard issue={issue} />);
 
         const badge = screen.getByLabelText("Code review");
         expect(badge.className).toMatch(/reviewCode/);
@@ -800,7 +730,7 @@ describe("IssueCard", () => {
           status: "blocked",
           notes: "Need assistance",
         });
-        render(<IssueCard issue={issue} />);
+        renderIssueCard(<IssueCard issue={issue} />);
 
         const badge = screen.getByLabelText("Help review");
         expect(badge.className).toMatch(/reviewHelp/);
@@ -813,7 +743,7 @@ describe("IssueCard", () => {
           status: "review",
           external_ref: "https://github.com/owner/repo/pull/42",
         });
-        render(<IssueCard issue={issue} />);
+        renderIssueCard(<IssueCard issue={issue} />);
 
         const link = screen.getByLabelText("View pull request");
         expect(link).toHaveAttribute(
@@ -825,7 +755,7 @@ describe("IssueCard", () => {
 
       it("does not show PR link for plan reviews", () => {
         const issue = createTestIssue({ status: "review" });
-        render(<IssueCard issue={issue} />);
+        renderIssueCard(<IssueCard issue={issue} />);
 
         expect(
           screen.queryByLabelText("View pull request"),
@@ -838,7 +768,7 @@ describe("IssueCard", () => {
           external_ref: "https://github.com/owner/repo/pull/42",
         });
         const onClick = vi.fn();
-        render(<IssueCard issue={issue} onClick={onClick} />);
+        renderIssueCard(<IssueCard issue={issue} onClick={onClick} />);
 
         const link = screen.getByLabelText("View pull request");
         fireEvent.click(link);
@@ -851,7 +781,7 @@ describe("IssueCard", () => {
       it("handles undefined title gracefully", () => {
         // @ts-expect-error Testing undefined title
         const issue = createTestIssue({ title: undefined });
-        render(<IssueCard issue={issue} />);
+        renderIssueCard(<IssueCard issue={issue} />);
 
         // Should not show any review badge
         expect(screen.queryByLabelText(/review/)).not.toBeInTheDocument();
@@ -863,7 +793,7 @@ describe("IssueCard", () => {
           status: "blocked",
           notes: "",
         });
-        render(<IssueCard issue={issue} />);
+        renderIssueCard(<IssueCard issue={issue} />);
 
         // Empty string notes should not trigger Help badge
         expect(screen.queryByText("Help")).not.toBeInTheDocument();
@@ -871,84 +801,40 @@ describe("IssueCard", () => {
     });
   });
 
-  describe("open status badge", () => {
-    it('shows "Ready" badge when card is in Open column with design', () => {
+  // The "Ready"/"Needs Plan" open-status badge was removed for the Aether V3
+  // design — open-column tickets render plain (id / icon / title / footer).
+  describe("open status badge removal (Aether V3)", () => {
+    it("does not show a badge in the Open column even with a design", () => {
       const issue = createTestIssue({
         design: "Implementation plan for feature X",
       });
-      render(<IssueCard issue={issue} columnId="ready" />);
+      renderIssueCard(<IssueCard issue={issue} columnId="ready" />);
 
-      expect(screen.getByText("Ready")).toBeInTheDocument();
-      expect(screen.getByText("✅")).toBeInTheDocument();
+      expect(screen.queryByText("Ready")).not.toBeInTheDocument();
+      expect(screen.queryByText("✅")).not.toBeInTheDocument();
     });
 
-    it('shows "Needs Plan" badge when card is in Open column without design', () => {
+    it("does not show a badge in the Open column without a design", () => {
       const issue = createTestIssue();
-      render(<IssueCard issue={issue} columnId="ready" />);
+      renderIssueCard(<IssueCard issue={issue} columnId="ready" />);
 
-      expect(screen.getByText("Needs Plan")).toBeInTheDocument();
-      expect(screen.getByText("📋")).toBeInTheDocument();
+      expect(screen.queryByText("Needs Plan")).not.toBeInTheDocument();
+      expect(screen.queryByText("📋")).not.toBeInTheDocument();
     });
 
     it("does not show open status badge in other columns", () => {
       const issue = createTestIssue({ design: "Some design content" });
-      render(<IssueCard issue={issue} columnId="in_progress" />);
+      renderIssueCard(<IssueCard issue={issue} columnId="in_progress" />);
 
       expect(screen.queryByText("Ready")).not.toBeInTheDocument();
       expect(screen.queryByText("Needs Plan")).not.toBeInTheDocument();
-    });
-
-    it("does not show open status badge when no columnId is provided", () => {
-      const issue = createTestIssue({ design: "Some design content" });
-      render(<IssueCard issue={issue} />);
-
-      expect(screen.queryByText("Ready")).not.toBeInTheDocument();
-      expect(screen.queryByText("Needs Plan")).not.toBeInTheDocument();
-    });
-
-    it("Ready badge has correct aria-label", () => {
-      const issue = createTestIssue({ design: "Design document" });
-      render(<IssueCard issue={issue} columnId="ready" />);
-
-      expect(screen.getByLabelText("Ready")).toBeInTheDocument();
-    });
-
-    it("Needs Plan badge has correct aria-label", () => {
-      const issue = createTestIssue();
-      render(<IssueCard issue={issue} columnId="ready" />);
-
-      expect(screen.getByLabelText("Needs Plan")).toBeInTheDocument();
-    });
-
-    it("badge icon has aria-hidden attribute", () => {
-      const issue = createTestIssue({ design: "Design doc" });
-      render(<IssueCard issue={issue} columnId="ready" />);
-
-      const icon = screen.getByText("✅");
-      expect(icon).toHaveAttribute("aria-hidden", "true");
-    });
-
-    it("applies openReady class to Ready badge", () => {
-      const issue = createTestIssue({ design: "Design doc" });
-      render(<IssueCard issue={issue} columnId="ready" />);
-
-      const badge = screen.getByLabelText("Ready");
-      expect(badge.className).toMatch(/openReady/);
-    });
-
-    it("applies openNeedsPlan class to Needs Plan badge", () => {
-      const issue = createTestIssue();
-      render(<IssueCard issue={issue} columnId="ready" />);
-
-      const badge = screen.getByLabelText("Needs Plan");
-      expect(badge.className).toMatch(/openNeedsPlan/);
     });
   });
 
   describe("issue ID tooltip", () => {
     it("ID span has title attribute with full issue ID for hover tooltip", () => {
       const issue = createTestIssue({ id: "loomcli-af78e9a2.1.2" });
-      const { container } = render(<IssueCard issue={issue} />);
+      const { container } = renderIssueCard(<IssueCard issue={issue} />);
 
       const idSpan = container.querySelector(`.${styles.id}`);
       expect(idSpan).toHaveAttribute("title", "loomcli-af78e9a2.1.2");
@@ -957,7 +843,7 @@ describe("IssueCard", () => {
     it("title attribute shows full ID even when display text is truncated", () => {
       const longId = "some-very-long-issue-id-12345";
       const issue = createTestIssue({ id: longId });
-      const { container } = render(<IssueCard issue={issue} />);
+      const { container } = renderIssueCard(<IssueCard issue={issue} />);
 
       const idSpan = container.querySelector(`.${styles.id}`);
       // Display text is truncated
@@ -968,7 +854,7 @@ describe("IssueCard", () => {
 
     it("title attribute matches display text for short IDs", () => {
       const issue = createTestIssue({ id: "loomcli-pso6j" });
-      const { container } = render(<IssueCard issue={issue} />);
+      const { container } = renderIssueCard(<IssueCard issue={issue} />);
 
       const idSpan = container.querySelector(`.${styles.id}`);
       expect(idSpan).toHaveTextContent("loomcli-pso6j");
@@ -979,7 +865,7 @@ describe("IssueCard", () => {
   describe("CSS module classes", () => {
     it("renders card with issueCard class from CSS module", () => {
       const issue = createTestIssue();
-      const { container } = render(<IssueCard issue={issue} />);
+      const { container } = renderIssueCard(<IssueCard issue={issue} />);
 
       const article = container.querySelector("article");
       // CSS Modules hashes class names, so we check for the pattern
@@ -997,7 +883,9 @@ describe("IssueCard", () => {
   describe("review column interactions", () => {
     it("does not render inline approve/reject buttons in review column", () => {
       const issue = createTestIssue();
-      render(<IssueCard issue={issue} columnId="review" onClick={vi.fn()} />);
+      renderIssueCard(
+        <IssueCard issue={issue} columnId="review" onClick={vi.fn()} />,
+      );
 
       expect(screen.queryByTestId("approve-button")).not.toBeInTheDocument();
       expect(screen.queryByTestId("reject-button")).not.toBeInTheDocument();
@@ -1008,48 +896,68 @@ describe("IssueCard", () => {
     it("still opens detail flow by clicking the review card", () => {
       const issue = createTestIssue({ id: "review-card-click-123" });
       const onClick = vi.fn();
-      render(<IssueCard issue={issue} columnId="review" onClick={onClick} />);
+      renderIssueCard(
+        <IssueCard issue={issue} columnId="review" onClick={onClick} />,
+      );
 
-      fireEvent.click(screen.getByRole("button"));
+      fireEvent.click(getIssueCard(issue));
 
       expect(onClick).toHaveBeenCalledWith(issue);
       expect(onClick).toHaveBeenCalledTimes(1);
     });
   });
 
-  describe("TypeIcon integration", () => {
-    it('renders TypeIcon with data-type="bug" for issue_type="bug"', () => {
+  describe("ticket variant icon (Aether kanban)", () => {
+    it("renders clipboard copy button for non-done columns", () => {
+      const issue = createTestIssue({ id: "LOCALMODE-5", issue_type: "task" });
+      renderIssueCard(<IssueCard issue={issue} columnId="review" />);
+
+      expect(
+        screen.getByRole("button", { name: "Copy issue ID LOCALMODE-5" }),
+      ).toBeInTheDocument();
+    });
+
+    it("copies the issue id without opening the card", async () => {
+      const writeText = vi.fn().mockResolvedValue(undefined);
+      Object.assign(navigator, {
+        clipboard: { writeText },
+      });
+
+      const issue = createTestIssue({ id: "LOCALMODE-5" });
+      const onClick = vi.fn();
+      renderIssueCard(
+        <IssueCard issue={issue} columnId="review" onClick={onClick} />,
+      );
+
+      fireEvent.click(
+        screen.getByRole("button", { name: "Copy issue ID LOCALMODE-5" }),
+      );
+
+      await vi.waitFor(() => {
+        expect(writeText).toHaveBeenCalledWith("LOCALMODE-5");
+      });
+      expect(onClick).not.toHaveBeenCalled();
+    });
+
+    it("does not render a done-column check or copy icon", () => {
+      const issue = createTestIssue({ issue_type: "task" });
+      const { container } = renderIssueCard(
+        <IssueCard issue={issue} columnId="done" />,
+      );
+
+      expect(
+        container.querySelector('svg[data-variant="done"]'),
+      ).not.toBeInTheDocument();
+      expect(
+        screen.queryByTestId("issue-card-copy-id"),
+      ).not.toBeInTheDocument();
+    });
+
+    it("does not render issue-type checkbox glyphs on kanban cards", () => {
       const issue = createTestIssue({ issue_type: "bug" });
-      const { container } = render(<IssueCard issue={issue} />);
+      const { container } = renderIssueCard(<IssueCard issue={issue} />);
 
-      const icon = container.querySelector("svg[data-type]");
-      expect(icon).toBeInTheDocument();
-      expect(icon).toHaveAttribute("data-type", "bug");
-    });
-
-    it('renders TypeIcon with data-type="feature" for issue_type="feature"', () => {
-      const issue = createTestIssue({ issue_type: "feature" });
-      const { container } = render(<IssueCard issue={issue} />);
-
-      const icon = container.querySelector("svg[data-type]");
-      expect(icon).toBeInTheDocument();
-      expect(icon).toHaveAttribute("data-type", "feature");
-    });
-
-    it("renders no TypeIcon when issue_type is undefined", () => {
-      const issue = createTestIssue();
-      const { container } = render(<IssueCard issue={issue} />);
-
-      const icon = container.querySelector("svg[data-type]");
-      expect(icon).not.toBeInTheDocument();
-    });
-
-    it("renders no TypeIcon for unknown issue_type", () => {
-      const issue = createTestIssue({ issue_type: "custom" });
-      const { container } = render(<IssueCard issue={issue} />);
-
-      const icon = container.querySelector("svg[data-type]");
-      expect(icon).not.toBeInTheDocument();
+      expect(container.querySelector("svg[data-type]")).not.toBeInTheDocument();
     });
   });
 });

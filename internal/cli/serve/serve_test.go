@@ -86,6 +86,58 @@ func TestBuildMonitorCollectDataFnIsLazy(t *testing.T) {
 	}
 }
 
+func TestConfigureServeLocalRuntimeModeDefaultsHeadless(t *testing.T) {
+	t.Setenv(envLocalRuntimeMode, "")
+	t.Setenv(envDesktopDataDir, "")
+
+	configureServeLocalRuntimeMode()
+
+	if got := os.Getenv(envLocalRuntimeMode); got != localRuntimeModeHeadless {
+		t.Fatalf("%s = %q, want %q", envLocalRuntimeMode, got, localRuntimeModeHeadless)
+	}
+}
+
+func TestConfigureServeLocalRuntimeModePreservesExplicitMode(t *testing.T) {
+	t.Setenv(envLocalRuntimeMode, "disabled")
+	t.Setenv(envDesktopDataDir, "/tmp/desktop")
+
+	configureServeLocalRuntimeMode()
+
+	if got := os.Getenv(envLocalRuntimeMode); got != "disabled" {
+		t.Fatalf("%s = %q, want explicit value preserved", envLocalRuntimeMode, got)
+	}
+}
+
+func TestConfigureServeLocalRuntimeModeMarksDesktopService(t *testing.T) {
+	t.Setenv(envLocalRuntimeMode, "")
+	t.Setenv(envDesktopDataDir, "/tmp/desktop")
+
+	configureServeLocalRuntimeMode()
+
+	if got := os.Getenv(envLocalRuntimeMode); got != localRuntimeModeDesktop {
+		t.Fatalf("%s = %q, want %q", envLocalRuntimeMode, got, localRuntimeModeDesktop)
+	}
+}
+
+func TestDriverExecutorEnabled(t *testing.T) {
+	for _, value := range []string{"", "1", "true", "TRUE", "yes", "on", "unexpected"} {
+		t.Run(value, func(t *testing.T) {
+			t.Setenv(envLoomDriverExecutor, value)
+			if !driverExecutorEnabled() {
+				t.Fatalf("driverExecutorEnabled() = false for %q", value)
+			}
+		})
+	}
+	for _, value := range []string{"0", "false", "FALSE", "off", "no"} {
+		t.Run("disabled_"+value, func(t *testing.T) {
+			t.Setenv(envLoomDriverExecutor, value)
+			if driverExecutorEnabled() {
+				t.Fatalf("driverExecutorEnabled() = true for %q", value)
+			}
+		})
+	}
+}
+
 // withMockData runs a test with mocked collectDataFunc
 func withMockData(t *testing.T, data *MonitorData, fn func()) {
 	t.Helper()

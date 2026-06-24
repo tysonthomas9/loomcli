@@ -18,15 +18,23 @@ type Module struct {
 	hub               *realtime.Hub
 	getMutationsSince func(wsID string, since string) []rpc.MutationEvent
 	workspaceFromCtx  func(context.Context) string
+	activateWorkspace func(context.Context, string)
 	sseTokens         *realtime.TokenStore // may be nil in open auth mode
 }
 
 // NewModule returns a Module. sseTokens may be nil in open auth mode.
-func NewModule(hub *realtime.Hub, getMutationsSince func(string, string) []rpc.MutationEvent, workspaceFromCtx func(context.Context) string, sseTokens *realtime.TokenStore) *Module {
+func NewModule(
+	hub *realtime.Hub,
+	getMutationsSince func(string, string) []rpc.MutationEvent,
+	workspaceFromCtx func(context.Context) string,
+	activateWorkspace func(context.Context, string),
+	sseTokens *realtime.TokenStore,
+) *Module {
 	return &Module{
 		hub:               hub,
 		getMutationsSince: getMutationsSince,
 		workspaceFromCtx:  workspaceFromCtx,
+		activateWorkspace: activateWorkspace,
 		sseTokens:         sseTokens,
 	}
 }
@@ -39,8 +47,12 @@ func (m *Module) Register(mux *http.ServeMux) {
 		GetMutationsSince: m.getMutationsSince,
 		WorkspaceFromCtx:  m.workspaceFromCtx,
 		TokenStore:        m.sseTokens,
+		OnAuthenticated:   m.activateWorkspace,
 	})
 	mux.Handle("GET /api/workspaces/{ws}/events", sseHandler)
 
-	mux.HandleFunc("GET /api/workspaces/{ws}/events/token", HandleSSEToken(m.sseTokens))
+	mux.HandleFunc(
+		"GET /api/workspaces/{ws}/events/token",
+		HandleSSETokenWithActivation(m.sseTokens, m.workspaceFromCtx, m.activateWorkspace),
+	)
 }

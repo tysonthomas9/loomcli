@@ -120,6 +120,32 @@ func TestBuildBackendEnv_IncludesActiveSessionEnv(t *testing.T) {
 	}
 }
 
+func TestBuildBackendEnvPrependsLoomExecutableDirToPath(t *testing.T) {
+	t.Cleanup(ClearActiveSessionEnv)
+
+	oldPath := os.Getenv("PATH")
+	t.Setenv("PATH", "/usr/bin:/bin")
+	t.Cleanup(func() {
+		_ = os.Setenv("PATH", oldPath)
+	})
+
+	env := buildBackendEnv("/worktree", "local-planner")
+	got, ok := envValue(env, "PATH")
+	if !ok {
+		t.Fatalf("buildBackendEnv missing PATH in %v", env)
+	}
+
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatalf("os.Executable: %v", err)
+	}
+	wantPrefix := filepath.Dir(exe)
+	parts := filepath.SplitList(got)
+	if len(parts) == 0 || parts[0] != wantPrefix {
+		t.Fatalf("PATH = %q, want first entry %q", got, wantPrefix)
+	}
+}
+
 func envHas(env []string, want string) bool {
 	for _, got := range env {
 		if got == want {

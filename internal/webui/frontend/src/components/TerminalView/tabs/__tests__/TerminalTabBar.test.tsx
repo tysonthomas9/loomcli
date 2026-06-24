@@ -45,8 +45,6 @@ const defaultProps = {
   onTabChange: vi.fn(),
   onTabClose: vi.fn(),
   onNewTab: vi.fn(),
-  onToggleFullHeight: vi.fn(),
-  isFullHeight: false,
 };
 
 describe("TerminalTabBar", () => {
@@ -150,32 +148,6 @@ describe("TerminalTabBar", () => {
       expect(button).toBeInTheDocument();
       expect(button).toHaveAttribute("aria-label", "New terminal tab");
     });
-
-    it("renders full-height toggle button", () => {
-      render(<TerminalTabBar {...defaultProps} />);
-
-      const toggle = screen.getByTestId("terminal-fullheight-toggle");
-      expect(toggle).toBeInTheDocument();
-      expect(toggle).toHaveAttribute("aria-label", "Toggle full height");
-    });
-
-    it("full-height toggle shows aria-pressed based on isFullHeight", () => {
-      const { rerender } = render(
-        <TerminalTabBar {...defaultProps} isFullHeight={false} />,
-      );
-
-      expect(screen.getByTestId("terminal-fullheight-toggle")).toHaveAttribute(
-        "aria-pressed",
-        "false",
-      );
-
-      rerender(<TerminalTabBar {...defaultProps} isFullHeight={true} />);
-
-      expect(screen.getByTestId("terminal-fullheight-toggle")).toHaveAttribute(
-        "aria-pressed",
-        "true",
-      );
-    });
   });
 
   describe("interactions", () => {
@@ -227,20 +199,6 @@ describe("TerminalTabBar", () => {
       fireEvent.click(screen.getByTestId("terminal-new-tab-button"));
 
       expect(onNewTab).toHaveBeenCalledTimes(1);
-    });
-
-    it("clicking full-height toggle calls onToggleFullHeight", () => {
-      const onToggleFullHeight = vi.fn();
-      render(
-        <TerminalTabBar
-          {...defaultProps}
-          onToggleFullHeight={onToggleFullHeight}
-        />,
-      );
-
-      fireEvent.click(screen.getByTestId("terminal-fullheight-toggle"));
-
-      expect(onToggleFullHeight).toHaveBeenCalledTimes(1);
     });
   });
 
@@ -356,15 +314,6 @@ describe("TerminalTabBar", () => {
 
       const tabs = screen.getAllByRole("tab");
       expect(tabs).toHaveLength(3);
-    });
-
-    it("aria-pressed on full-height toggle matches isFullHeight", () => {
-      render(<TerminalTabBar {...defaultProps} isFullHeight={true} />);
-
-      expect(screen.getByTestId("terminal-fullheight-toggle")).toHaveAttribute(
-        "aria-pressed",
-        "true",
-      );
     });
 
     it("close buttons have aria-label including tab name", () => {

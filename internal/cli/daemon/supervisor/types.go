@@ -29,6 +29,7 @@ type AgentProcess struct {
 	TranscriptPath         string            // path to session transcript.jsonl for watchdog liveness (set by superviseAgent)
 	Session                *sessions.Session // daemon-created session handle (nil when no session active)
 	AgentSessionID         string            // fleet-db control-plane session id (empty when no session active)
+	ParentSessionID        string            // lead/orchestration session that requested this run (empty when unattached)
 	AgentLeaseID           string            // fleet-db control-plane lease id (empty when no lease active)
 	AgentLeaseToken        string            // fleet-db control-plane lease token (empty when no lease active)
 	OwnershipLeaseID       string            // fleet-db logical-agent ownership lease id (empty when not owner)
@@ -65,7 +66,7 @@ type AgentProcess struct {
 
 	StopReason StopReason // why the agent was stopped (set at decision site, empty while running)
 
-	Mu sync.Mutex // protects Cmd, Pid, LogFile, restart tracking, AssignedEpicID, AssignedTaskID, RequestedTaskID, ResumeTaskID, ResumeFailures, RecoveryMode, LastError, CurrentBackendIdx, Session, AgentSessionID, AgentLeaseID, AgentLeaseToken, ownership fields, TranscriptPath, BeforeRef, StopReason, LastActivity
+	Mu sync.Mutex // protects Cmd, Pid, LogFile, restart tracking, AssignedEpicID, AssignedTaskID, RequestedTaskID, ResumeTaskID, ResumeFailures, RecoveryMode, LastError, CurrentBackendIdx, Session, AgentSessionID, ParentSessionID, AgentLeaseID, AgentLeaseToken, ownership fields, TranscriptPath, BeforeRef, StopReason, LastActivity
 }
 
 // StopReason identifies why an agent was stopped.
@@ -82,6 +83,7 @@ const (
 	StopReasonYielded            StopReason = "yielded"
 	StopReasonWatchdog           StopReason = "watchdog"
 	StopReasonBackendUnavailable StopReason = "backend_unavailable"
+	StopReasonEphemeralDone      StopReason = "ephemeral_done" // ephemeral-mode agent exited cleanly after one successful task
 	// StopReasonMaxRetriesParked marks an agent that exhausted its restart
 	// budget and is now park-and-retrying on a fixed interval (policy
 	// Decision Retry with OnExhaustion Park) instead of being abandoned.

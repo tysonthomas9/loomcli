@@ -234,9 +234,7 @@ describe("KanbanBoard", () => {
       render(<KanbanBoard issues={[issue]} onIssueClick={handleIssueClick} />);
 
       // When onClick is provided, IssueCard should have button role
-      const card = screen.getByRole("button", {
-        name: /Issue: Clickable Issue/i,
-      });
+      const card = screen.getByLabelText(/Issue: Clickable Issue/i);
       expect(card).toBeInTheDocument();
     });
 
@@ -249,9 +247,7 @@ describe("KanbanBoard", () => {
 
       render(<KanbanBoard issues={[issue]} onIssueClick={handleIssueClick} />);
 
-      const card = screen.getByRole("button", {
-        name: /Issue: Clickable Issue/i,
-      });
+      const card = screen.getByLabelText(/Issue: Clickable Issue/i);
       fireEvent.click(card);
 
       expect(handleIssueClick).toHaveBeenCalledTimes(1);
@@ -614,8 +610,12 @@ describe("KanbanBoard", () => {
       // Title should be displayed
       expect(screen.getByText("Complete Test Issue")).toBeInTheDocument();
 
-      // Priority badge should show P1
-      expect(screen.getByText("P1")).toBeInTheDocument();
+      // Priority surfaces only as a data attribute (no visible badge —
+      // Aether design tickets carry no priority chip).
+      expect(screen.queryByText("P1")).not.toBeInTheDocument();
+      expect(
+        screen.getByText("Complete Test Issue").closest("article"),
+      ).toHaveAttribute("data-priority", "1");
     });
 
     it("multiple issues in same column preserve order", () => {
@@ -683,7 +683,7 @@ describe("KanbanBoard", () => {
 
       // When onIssueClick is provided, IssueCard has role="button" with aria-label
       // We need to click the IssueCard button, not the draggable wrapper
-      const cardButton = screen.getByRole("button", { name: /Issue: First/i });
+      const cardButton = screen.getByLabelText(/Issue: First/i);
       fireEvent.click(cardButton);
 
       expect(handleIssueClick).toHaveBeenCalledWith(
@@ -704,8 +704,8 @@ describe("KanbanBoard", () => {
 
       render(<KanbanBoard issues={issues} onIssueClick={handleIssueClick} />);
 
-      const cardA = screen.getByRole("button", { name: /Issue: Issue A/i });
-      const cardB = screen.getByRole("button", { name: /Issue: Issue B/i });
+      const cardA = screen.getByLabelText(/Issue: Issue A/i);
+      const cardB = screen.getByLabelText(/Issue: Issue B/i);
 
       fireEvent.click(cardB);
       expect(handleIssueClick).toHaveBeenLastCalledWith(

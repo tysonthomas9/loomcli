@@ -1,6 +1,6 @@
 use tauri::{
     menu::{Menu, MenuItem, MenuItemKind, PredefinedMenuItem, Submenu, WINDOW_SUBMENU_ID},
-    AppHandle, Emitter, Manager, RunEvent, Runtime, Url, WebviewUrl, WebviewWindow,
+    AppHandle, Emitter, LogicalSize, Manager, RunEvent, Runtime, Url, WebviewUrl, WebviewWindow,
     WebviewWindowBuilder,
 };
 
@@ -8,14 +8,15 @@ const MENU_NEW_WORKSPACE_WINDOW: &str = "new-workspace-window";
 const MENU_NEW_WORKSPACE_WINDOW_ALT: &str = "new-workspace-window-window-menu";
 const EVENT_NEW_WORKSPACE_WINDOW: &str = "loom:new-workspace-window";
 const PRIMARY_WORKSPACE_WINDOW_LABEL: &str = "main";
+const WORKSPACE_WINDOW_WIDTH: f64 = 1280.0;
+const WORKSPACE_WINDOW_HEIGHT: f64 = 800.0;
+const WORKSPACE_MIN_WIDTH: f64 = 720.0;
+const WORKSPACE_MIN_HEIGHT: f64 = 520.0;
 
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
-        .invoke_handler(tauri::generate_handler![
-            open_workspace_window,
-            pick_folder
-        ])
+        .invoke_handler(tauri::generate_handler![open_workspace_window, pick_folder])
         .menu(build_menu)
         .on_menu_event(|app, event| match event.id().as_ref() {
             MENU_NEW_WORKSPACE_WINDOW | MENU_NEW_WORKSPACE_WINDOW_ALT => {
@@ -267,6 +268,7 @@ fn open_workspace_window_native<R: Runtime>(
 
     if !force_new {
         if let Some(window) = app.get_webview_window(PRIMARY_WORKSPACE_WINDOW_LABEL) {
+            configure_workspace_window(&window)?;
             window.navigate(url)?;
             reveal_window(app, &window);
             return Ok(());
@@ -285,8 +287,8 @@ fn open_workspace_window_native<R: Runtime>(
 
     let window = WebviewWindowBuilder::new(app, label, WebviewUrl::External(url))
         .title("Loom")
-        .inner_size(1280.0, 800.0)
-        .min_inner_size(720.0, 520.0)
+        .inner_size(WORKSPACE_WINDOW_WIDTH, WORKSPACE_WINDOW_HEIGHT)
+        .min_inner_size(WORKSPACE_MIN_WIDTH, WORKSPACE_MIN_HEIGHT)
         .content_protected(false)
         .focused(true)
         .build()?;
@@ -307,13 +309,24 @@ fn open_additional_workspace_window<R: Runtime>(app: &AppHandle<R>) -> tauri::Re
     );
     let window = WebviewWindowBuilder::new(app, label, WebviewUrl::External(url))
         .title("Loom")
-        .inner_size(1280.0, 800.0)
-        .min_inner_size(720.0, 520.0)
+        .inner_size(WORKSPACE_WINDOW_WIDTH, WORKSPACE_WINDOW_HEIGHT)
+        .min_inner_size(WORKSPACE_MIN_WIDTH, WORKSPACE_MIN_HEIGHT)
         .content_protected(false)
         .focused(true)
         .build()?;
     reveal_window(app, &window);
     Ok(())
+}
+
+fn configure_workspace_window<R: Runtime>(window: &WebviewWindow<R>) -> tauri::Result<()> {
+    window.set_min_size(Some(LogicalSize::new(
+        WORKSPACE_MIN_WIDTH,
+        WORKSPACE_MIN_HEIGHT,
+    )))?;
+    window.set_size(LogicalSize::new(
+        WORKSPACE_WINDOW_WIDTH,
+        WORKSPACE_WINDOW_HEIGHT,
+    ))
 }
 
 fn workspace_entry_url(runtime_url: &str) -> tauri::Result<Url> {

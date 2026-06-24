@@ -39,9 +39,12 @@ func NextEventID() int64 {
 
 // MutationPayload represents mutation data sent to clients.
 type MutationPayload struct {
-	Cursor      string `json:"cursor,omitempty"` // Durable stream cursor for SSE Last-Event-ID when available
-	Type        string `json:"type"`             // create, update, delete, comment, status, bonded, squashed, burned, refresh, terminal_session_change
-	IssueID     string `json:"issue_id"`
+	Cursor      string `json:"cursor,omitempty"`      // Durable stream cursor for SSE Last-Event-ID when available
+	Type        string `json:"type"`                  // create, update, delete, comment, status, bonded, squashed, burned, refresh, terminal_metadata, terminal_session_change
+	EntityType  string `json:"entity_type,omitempty"` // Generic changed entity type (issue, dependency, terminal, ...)
+	EntityID    string `json:"entity_id,omitempty"`   // Generic changed entity identifier
+	Action      string `json:"action,omitempty"`      // Source action, usually fleet-db action (issue.update, dep.add, ...)
+	IssueID     string `json:"issue_id,omitempty"`    // Legacy issue identifier for issue-scoped consumers
 	Title       string `json:"title,omitempty"`
 	Assignee    string `json:"assignee,omitempty"`
 	Actor       string `json:"actor,omitempty"`
@@ -425,6 +428,9 @@ func BroadcastSessionIssueEvent(tabMetaStore *tabmeta.Store, hub *Hub, workspace
 	}
 	hub.Broadcast(&MutationPayload{
 		Type:        "terminal_session_change",
+		EntityType:  "terminal",
+		EntityID:    session,
+		Action:      "terminal.session_change",
 		IssueID:     meta.IssueID,
 		Timestamp:   time.Now().UTC().Format(time.RFC3339Nano),
 		WorkspaceID: meta.Workspace,

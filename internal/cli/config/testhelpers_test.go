@@ -7,9 +7,6 @@ import (
 	"testing"
 )
 
-// truncateDiff is a backward-compatible alias for TruncateDiff.
-func truncateDiff(diff string, maxBytes int) string { return TruncateDiff(diff, maxBytes) }
-
 // gitEnvVars lists GIT_* environment variables that can redirect git commands.
 var gitEnvVars = []string{
 	"GIT_DIR",

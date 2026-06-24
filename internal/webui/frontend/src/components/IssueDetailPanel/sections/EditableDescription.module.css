@@ -13,7 +13,7 @@
 }
 
 .placeholder {
-  font-size: var(--font-size-sm);
+  font-size: var(--font-size-base);
   color: var(--color-text-muted);
   font-style: italic;
   margin: 0;
@@ -68,8 +68,8 @@
   min-height: 150px;
   padding: 12px;
   font-family: var(--font-family-mono);
-  font-size: var(--font-size-sm);
-  line-height: 1.5;
+  font-size: var(--font-size-base);
+  line-height: 1.55;
   color: var(--color-text);
   background-color: var(--color-bg);
   border: 2px solid var(--color-border);

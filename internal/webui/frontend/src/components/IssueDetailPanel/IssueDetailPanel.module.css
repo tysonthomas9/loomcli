@@ -54,12 +54,56 @@
   transform: translateX(0);
 }
 
+/* Full-page maximize: fill the content area to the right of the workspace tree.
+   The tree stays above the overlay (higher z-index), so inset the panel rather
+   than drawing under it. --workspace-tree-width is synced from WorkspaceTree. */
+.panelMaximized {
+  width: calc(100% - var(--workspace-tree-active-width, 210px));
+  max-width: calc(100% - var(--workspace-tree-active-width, 210px));
+  margin-left: var(--workspace-tree-active-width, 210px);
+}
+
+@media (width <= 768px) {
+  .panelMaximized {
+    width: 100%;
+    max-width: 100%;
+    margin-left: 0;
+  }
+}
+
 .content {
   flex: 1;
+  min-width: 0;
   overflow: hidden auto;
   display: flex;
   flex-direction: column;
   background: var(--color-panel-bg);
+}
+
+/* ============= Inline / compact density =============
+ * Applied when the panel is rendered inline as a layout column (e.g. inside
+ * the /agents view) instead of as a slide-out overlay. Trims padding and
+ * scales typography down so the panel fits in a narrower right rail without
+ * the user having to scroll for every metadata row. The slide-out variant
+ * (used on kanban/table) is unaffected.
+ */
+.panel[data-inline="true"] {
+  font-size: 0.88rem;
+  line-height: 1.4;
+}
+
+.panel[data-inline="true"] .content {
+  padding: 0;
+}
+
+.panel[data-inline="true"] .content > * {
+  --inline-density-pad: 12px;
+}
+
+.panel[data-inline="true"] h1,
+.panel[data-inline="true"] h2,
+.panel[data-inline="true"] h3 {
+  font-size: 0.95em;
 }
 
 /* ============= Sticky Header Wrapper ============= */
@@ -68,6 +112,7 @@
   position: sticky;
   top: 0;
   z-index: 10;
+  min-width: 0;
   background: var(--color-panel-bg);
   border-bottom: 1px solid var(--color-border-light);
 }
@@ -309,6 +354,9 @@
 .detailContent {
   padding: 12px var(--panel-padding-lg) var(--panel-padding-lg);
   flex: 1;
+  font-size: var(--font-size-base);
+  line-height: 1.55;
+  color: var(--color-text-secondary);
 }
 
 /* ============= Two-Column Layout ============= */
@@ -371,8 +419,8 @@
 
 .tabBar {
   display: flex;
-  gap: 24px;
-  padding: 0 calc(var(--panel-padding-md) + 4px);
+  gap: 16px;
+  padding: 0 var(--panel-padding-md);
   background: var(--color-panel-bg);
   flex: 1;
   min-width: 0;
@@ -382,12 +430,13 @@
   display: flex;
   align-items: center;
   gap: 4px;
-  padding: 14px 0 12px;
+  padding: 10px 0 8px;
   background: none;
   border: none;
-  border-bottom: 3px solid transparent;
+  border-bottom: 2px solid transparent;
   margin-bottom: -1px;
-  font-size: 18px;
+  font-size: var(--font-size-sm);
+  line-height: 1.25;
   font-weight: 600;
   color: var(--color-text-secondary);
   cursor: pointer;
@@ -461,7 +510,7 @@
 .tab.activeTab {
   color: var(--color-text-primary);
   font-weight: 700;
-  border-bottom-color: #111827;
+  border-bottom-color: var(--color-text-primary);
 }
 
 /* ============= Logs Container ============= */
@@ -546,7 +595,7 @@
 }
 
 .collapsibleTitle {
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 700;
   color: var(--color-text-muted);
   text-transform: uppercase;
@@ -586,17 +635,6 @@
   color: var(--color-text-secondary);
 }
 
-.priorityBadge[data-priority="0"],
-.priorityBadge[data-priority="1"] {
-  background-color: var(--color-danger-bg);
-  color: var(--color-danger);
-}
-
-.priorityBadge[data-priority="2"] {
-  background-color: var(--color-warning-bg);
-  color: var(--color-warning);
-}
-
 /* Sections */
 .section {
   margin-bottom: 28px;
@@ -607,18 +645,18 @@
 }
 
 .sectionTitle {
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 700;
   color: var(--color-text-muted);
-  margin: 0 0 16px;
+  margin: 0 0 12px;
   text-transform: uppercase;
   letter-spacing: 0.08em;
 }
 
 .description {
-  font-size: 14px;
-  color: var(--color-text-secondary);
-  line-height: 1.6;
+  font-size: inherit;
+  color: inherit;
+  line-height: inherit;
   margin: 0;
   white-space: pre-wrap;
 }
@@ -656,7 +694,7 @@
   gap: 6px;
   padding: 6px 10px;
   margin: 0 6px 6px 0;
-  font-size: 13px;
+  font-size: var(--font-size-base);
   background-color: var(--color-bg-subtle, #f6f8fa);
   border: 1px solid var(--color-border-light);
   border-radius: 16px;
@@ -713,7 +751,9 @@
 }
 
 .dependencyTitle {
-  color: var(--color-text);
+  font-size: var(--font-size-base);
+  font-weight: var(--font-weight-normal);
+  color: var(--color-text-primary);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -743,9 +783,9 @@
 /* Notes */
 
 .notes {
-  font-size: 14px;
-  color: var(--color-text-secondary);
-  line-height: 1.6;
+  font-size: inherit;
+  color: inherit;
+  line-height: inherit;
   margin: 0;
   white-space: pre-wrap;
 }
@@ -831,4 +871,10 @@
   .statusRow {
     flex-direction: column;
   }
+}
+
+.diffLoading {
+  padding: var(--space-4);
+  font-size: var(--font-size-sm);
+  color: var(--color-text-muted);
 }

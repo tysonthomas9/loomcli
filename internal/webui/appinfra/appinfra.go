@@ -4,6 +4,7 @@
 package appinfra
 
 import (
+	"context"
 	"log/slog"
 	"time"
 
@@ -183,6 +184,76 @@ func ReconcileStoreWorkspaces(
 	logger.Info("startup reconciliation complete",
 		"total_workspaces", len(workspaces),
 		"registered", len(registry.WorkspaceIDs()))
+}
+
+// StartPeriodicWorkspaceReconcile launches a goroutine that periodically
+// picks up workspaces created out-of-band (e.g. via the CLI `loom workspace
+// create` while serve is running, or by another loom-serve instance against
+// shared fleet-db) and registers them with the local WorkspaceRegistry.
+//
+// Without this, workspaces created after serve startup were invisible to the
+// PTY manager (the terminal subsystem rejected attach with "workspace not
+// registered: …" until a restart).
+//
+// The loop exits when ctx is cancelled. Failures are logged but never fatal —
+// transient store errors must not take down serve.
+func StartPeriodicWorkspaceReconcile(
+	ctx context.Context,
+	listFn func() (map[string]string, error),
+	registry *WorkspaceRegistry,
+	interval time.Duration,
+	loggerArg *slog.Logger,
+) {
+	logger := loggerArg
+	if logger == nil {
+		logger = slog.Default()
+	}
+	if listFn == nil || registry == nil {
+		return
+	}
+	if interval <= 0 {
+		interval = 30 * time.Second
+	}
+	go func() {
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				reconcileNewWorkspaces(listFn, registry, logger)
+			}
+		}
+	}()
+}
+
+func reconcileNewWorkspaces(
+	listFn func() (map[string]string, error),
+	registry *WorkspaceRegistry,
+	logger *slog.Logger,
+) {
+	workspaces, err := listFn()
+	if err != nil {
+		logger.Debug("periodic workspace reconcile: list failed (transient ok)", "err", err)
+		return
+	}
+	known := make(map[string]struct{})
+	for _, id := range registry.WorkspaceIDs() {
+		known[id] = struct{}{}
+	}
+	for wsID, wsPath := range workspaces {
+		if _, ok := known[wsID]; ok {
+			continue
+		}
+		if err := registry.Register(wsID, wsPath); err != nil {
+			logger.Warn("periodic workspace reconcile: register failed",
+				"workspace", wsID, "err", err)
+			continue
+		}
+		logger.Info("periodic workspace reconcile: registered new workspace",
+			"workspace", wsID, "path", wsPath)
+	}
 }
 
 // InitFleetRegistry creates the fleet store registry from Redis config.

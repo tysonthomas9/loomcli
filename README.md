@@ -20,7 +20,16 @@ export PATH="$HOME/.local/bin:$PATH"
 
 State lives in a fleet-db service. Local mode auto-spawns an embedded
 fleet-db on first command (zero install). Cloud mode points loom at a
-shared fleet-db via `LOOM_FLEET_DB_URL`.
+shared fleet-db via `LOOM_FLEET_DB_URL`. Runtime code has only two valid
+control-plane paths:
+
+```text
+local mode:
+loomcli -> HTTP client -> fleet-db subprocess -> RedisStorage -> miniredis or external Redis
+
+cloud mode:
+loomcli -> HTTP client -> fleet-db service -> Redis/Postgres
+```
 
 ```bash
 # 1. Create a workspace + a repo + a role + an agent
@@ -293,6 +302,9 @@ loom daemon profile unset --max-agents                   # Clear an int field
 |---|---|---|---|
 | **Local** (default) | `LOOM_FLEET_DB_URL` unset | Embedded subprocess auto-spawned per CLI invocation. Backed by an in-process miniredis with a JSON snapshot at `~/.loom/fleet-db/redis-snapshot.json`. | Zero-install. The miniredis snapshot is the source of truth for backups — copy that file. |
 | **Cloud** | `LOOM_FLEET_DB_URL=<https://...>` | External fleet-db (shared across loom installs). Requires `LOOM_FLEET_DB_API_KEY` for auth, or `LOOM_FLEET_DB_ACTOR=<name>` in dev mode. | Multi-user / multi-machine. State stays on the server. |
+
+`internal/infra/memstore` is test-only. It is not a local runtime, fallback,
+cache, or embedded Redis implementation.
 
 `~/.loom/state.json` is a per-user cache of local checkout paths and the last
 selected workspace hint. Runtime commands do not use it as an implicit default;

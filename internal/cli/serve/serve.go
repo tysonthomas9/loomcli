@@ -2,6 +2,7 @@ package serve
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"log/slog"
@@ -27,6 +28,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/cli/serve/serveadapter"
 	"github.com/tysonthomas9/loomcli/internal/cli/serve/usagecmd"
 	"github.com/tysonthomas9/loomcli/internal/cli/serve/workspacemgr"
+	driverexecutor "github.com/tysonthomas9/loomcli/internal/driver"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui"
 	webuiapp "github.com/tysonthomas9/loomcli/internal/webui/app"
@@ -37,8 +39,17 @@ import (
 // passed. Intentionally separate from LOOM_ISSUE_BACKEND=fleet, which gates
 // fleet-aware issue routing at a different layer.
 const envLoomFleetMode = "LOOM_FLEET_MODE"
+const envLoomDriverExecutor = "LOOM_DRIVER_EXECUTOR"
 
 const monitorCollectionCacheTTL = 10 * time.Second
+
+const (
+	envLocalRuntimeMode = "LOOM_LOCAL_RUNTIME"
+	envDesktopDataDir   = "LOOM_DESKTOP_DATA_DIR"
+
+	localRuntimeModeDesktop  = "desktop"
+	localRuntimeModeHeadless = "headless"
+)
 
 var (
 	servePort              int
@@ -100,6 +111,7 @@ ENVIRONMENT VARIABLES
   LOOM_AUTH_URL         External auth service base URL (enables JWT auth)
   LOOM_AUTH_ISSUER      Expected JWT issuer (defaults to LOOM_AUTH_URL)
   LOOM_AUTH_AUDIENCE    Expected JWT audience (defaults to "loom")
+  LOOM_DRIVER_EXECUTOR  DriverRun executor toggle (default: on; set 0/false/off/no to disable)
 
 EXAMPLES
   loom serve                                              # Default port 8080
@@ -154,6 +166,8 @@ func registerServeAuthFlags() {
 
 //nolint:funlen // Serve startup wires process-wide dependencies in a fixed order.
 func runServe(cmd *cobra.Command, args []string) {
+	configureServeLocalRuntimeMode()
+
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -197,6 +211,7 @@ func runServe(cmd *cobra.Command, args []string) {
 		log.Fatalf("failed to open fleet-db store: %v", storeErr)
 	}
 	defer func() { _ = storeHandle.Close() }()
+	startDriverExecutorIfEnabled(ctx, storeHandle.Store)
 
 	issueBackendFn := cli.WorkspaceAwareIssueBackendForURL(storeHandle.URL(), fleetState.clientCfg.Actor)
 	monitorDefaultWorkspace := resolveMonitorCollectorWorkspace(storeHandle.Store, fleetState.clientCfg.Workspace)
@@ -211,6 +226,17 @@ func runServe(cmd *cobra.Command, args []string) {
 
 	logServerStartup()
 	awaitShutdown(cmd, stop, webuiErr, cancel)
+}
+
+func configureServeLocalRuntimeMode() {
+	if strings.TrimSpace(os.Getenv(envLocalRuntimeMode)) != "" {
+		return
+	}
+	if strings.TrimSpace(os.Getenv(envDesktopDataDir)) != "" {
+		_ = os.Setenv(envLocalRuntimeMode, localRuntimeModeDesktop)
+		return
+	}
+	_ = os.Setenv(envLocalRuntimeMode, localRuntimeModeHeadless)
 }
 
 func buildMonitorCollectDataFn(workspaceHint string, issueBackendFn metricscmd.IssueBackendFn) metricscmd.CollectDataFn {
@@ -248,6 +274,53 @@ func openServeStore(ctx context.Context, fs fleetState) (*bootstrap.StoreHandle,
 		ensureFleetStoreEnv(fs.clientCfg)
 	}
 	return cmdstore.OpenStore(ctx)
+}
+
+func startDriverExecutorIfEnabled(ctx context.Context, st store.Store) {
+	if !driverExecutorEnabled() || st == nil {
+		return
+	}
+	workDir, err := os.Getwd()
+	if err != nil {
+		slog.Error("driver executor disabled: cannot resolve work dir", "err", err)
+		return
+	}
+	executor := &driverexecutor.Executor{
+		Store:        st,
+		WorkspaceKey: os.Getenv(bootstrap.EnvWorkspace),
+		WorkDir:      workDir,
+		NodeID:       os.Getenv("LOOM_DRIVER_EXECUTOR_NODE_ID"),
+	}
+	slog.Info("Driver executor enabled", "workspace", executor.WorkspaceKey, "work_dir", workDir)
+	go func() {
+		ticker := time.NewTicker(2 * time.Second)
+		defer ticker.Stop()
+		for {
+			if recovered, err := executor.RecoverStaleOnce(ctx); err != nil && !errors.Is(err, context.Canceled) {
+				slog.Error("driver executor stale recovery failed", "err", err)
+			} else if recovered != nil && recovered.Recovered > 0 {
+				slog.Info("driver executor recovered stale driver runs", "count", recovered.Recovered)
+			}
+			_, err := executor.RunOnce(ctx)
+			if err != nil && !errors.Is(err, driverexecutor.ErrNoQueuedRun) && !errors.Is(err, context.Canceled) {
+				slog.Error("driver executor run failed", "err", err)
+			}
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+			}
+		}
+	}()
+}
+
+func driverExecutorEnabled() bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv(envLoomDriverExecutor))) {
+	case "0", "false", "off", "no":
+		return false
+	default:
+		return true
+	}
 }
 
 func ensureFleetStoreEnv(cfg config.FleetClientConfig) {

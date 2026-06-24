@@ -12,9 +12,11 @@ import {
   fireEvent,
   waitFor,
   act,
+  cleanup,
 } from "@testing-library/react";
 import type { RenderOptions } from "@testing-library/react";
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { useState } from "react";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import "@testing-library/jest-dom";
 import { KeyboardShortcutProvider } from "@/hooks/ui";
 
@@ -40,6 +42,11 @@ const mockMetadataHook = vi.hoisted(() => ({
     attached_clients: number;
     created_at: string;
     updated_at: string;
+    kind?: string;
+    agent_id?: string;
+    role?: string;
+    backend?: string;
+    writable?: boolean;
   }>,
   isLoading: false,
   error: null as Error | null,
@@ -54,6 +61,7 @@ const mockMetadataHook = vi.hoisted(() => ({
 
 const mockTerminalApi = vi.hoisted(() => ({
   patchTerminalState: vi.fn().mockResolvedValue(undefined),
+  ensureAgentTerminalSession: vi.fn(),
   startTerminalSetup: vi.fn().mockResolvedValue({
     session_name: "lead-shell-setup-codex",
     label: "Codex setup",
@@ -74,6 +82,7 @@ vi.mock("@/hooks/api", async () => {
   return {
     ...actual,
     patchTerminalState: mockTerminalApi.patchTerminalState,
+    ensureAgentTerminalSession: mockTerminalApi.ensureAgentTerminalSession,
     startTerminalSetup: mockTerminalApi.startTerminalSetup,
   };
 });
@@ -157,23 +166,38 @@ vi.mock("../tabs/TerminalTabBar", () => ({
             {t.label}
           </button>
         ))}
-        <button data-testid="new-tab-button" onClick={props.onNewTab}>
-          +
-        </button>
+        {props.onBackendSelect ? (
+          <>
+            <button
+              data-testid="new-tab-button"
+              onClick={() => {
+                /* menu toggle handled in real UI */
+              }}
+            >
+              +
+            </button>
+            {(props.availableBackends ?? []).map((backend: string) => (
+              <button
+                key={backend}
+                data-testid={`new-tab-backend-${backend}`}
+                onClick={() => props.onBackendSelect(backend)}
+              >
+                {backend}
+              </button>
+            ))}
+          </>
+        ) : (
+          <button data-testid="new-tab-button" onClick={props.onNewTab}>
+            +
+          </button>
+        )}
         <button
           data-testid="close-tab-button"
           onClick={() => props.onTabClose(props.activeTabId)}
         >
           Close
         </button>
-        <button
-          data-testid="toggle-fullheight"
-          onClick={props.onToggleFullHeight}
-        >
-          Toggle
-        </button>
         <span data-testid="active-tab-id">{props.activeTabId}</span>
-        <span data-testid="is-full-height">{String(props.isFullHeight)}</span>
       </div>
     ),
   ),
@@ -203,6 +227,11 @@ function setMetadata(
     pinned?: boolean;
     pty_alive?: boolean;
     attached_clients?: number;
+    kind?: string;
+    agent_id?: string;
+    role?: string;
+    backend?: string;
+    writable?: boolean;
   }>,
   isLoading = false,
 ) {
@@ -215,6 +244,11 @@ function setMetadata(
     pinned: t.pinned ?? false,
     pty_alive: t.pty_alive ?? true,
     attached_clients: t.attached_clients ?? 0,
+    kind: t.kind,
+    agent_id: t.agent_id,
+    role: t.role,
+    backend: t.backend,
+    writable: t.writable,
     created_at: now,
     updated_at: now,
   }));
@@ -237,6 +271,25 @@ describe("TerminalView", () => {
     mockMetadataHook.isLoading = true;
     mockMetadataHook.error = null;
     mockMetadataHook.createTab = vi.fn().mockResolvedValue(undefined);
+    mockTerminalApi.patchTerminalState.mockResolvedValue(undefined);
+    mockTerminalApi.ensureAgentTerminalSession.mockImplementation(
+      async (_workspaceId: string, agentName: string) => ({
+        session_name: `term_${agentName.replace(/[^a-zA-Z0-9_-]/g, "_")}`,
+        label: `agent-${agentName}`,
+        notes: "",
+        sort_order: DEFAULT_METADATA.length,
+        pinned: false,
+        kind: "agent",
+        agent_id: agentName,
+        role: "lead",
+        backend: "codex",
+        writable: true,
+        pty_alive: true,
+        attached_clients: 0,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      }),
+    );
     mockTerminalApi.startTerminalSetup.mockResolvedValue({
       session_name: "lead-shell-setup-codex",
       label: "Codex setup",
@@ -258,6 +311,10 @@ describe("TerminalView", () => {
     };
     mockSessionRestoreHook.activeTabId = null;
     mockSessionRestoreHook.isRestoring = true;
+  });
+
+  afterEach(() => {
+    cleanup();
   });
 
   // ── Session initialization ───────────────────────────────────────────────
@@ -299,7 +356,7 @@ describe("TerminalView", () => {
       expect(screen.getByTestId("tab-session-2")).toBeInTheDocument();
     });
 
-    it("auto-starts stale lead tabs but not stale issue tabs", () => {
+    it("does not auto-start stale command tabs without an explicit user action", () => {
       setMetadata([
         {
           session_name: "DESKTOP-QA--lead-codex-1",
@@ -314,20 +371,59 @@ describe("TerminalView", () => {
       ]);
       render(<TerminalView />);
 
-      const calls = vi.mocked(TerminalInstance).mock.calls.map(([props]) => {
-        return props as {
-          sessionName: string;
-          autoStartStaleSession?: boolean;
-        };
-      });
+      const calls = vi
+        .mocked(TerminalInstance)
+        .mock.calls.map(([props]) => {
+          return props as {
+            sessionName: string;
+            autoStartStaleSession?: boolean;
+          };
+        })
+        .filter((props) => props?.sessionName != null);
       expect(
         calls.find((props) => props.sessionName === "DESKTOP-QA--lead-codex-1")
           ?.autoStartStaleSession,
-      ).toBe(true);
+      ).toBe(false);
       expect(
         calls.find((props) => props.sessionName === "issue-PROJ-42")
           ?.autoStartStaleSession,
       ).toBe(false);
+    });
+
+    it("does not mount agent-backed tabs in global Terminal view", () => {
+      setMetadata([
+        {
+          session_name: "term_agent",
+          label: "agent-lead-ui-e2e",
+          kind: "agent",
+          agent_id: "lead-ui-e2e",
+          pty_alive: true,
+        },
+        {
+          session_name: "session-1",
+          label: "Session 1",
+          pty_alive: true,
+        },
+      ]);
+      render(<TerminalView />);
+
+      const calls = vi
+        .mocked(TerminalInstance)
+        .mock.calls.flatMap(([props]) => {
+          if (!props) return [];
+          return [
+            props as {
+              sessionName: string;
+              autoReconnect?: boolean;
+            },
+          ];
+        });
+      expect(
+        calls.find((props) => props.sessionName === "term_agent"),
+      ).toBeUndefined();
+      expect(
+        calls.find((props) => props.sessionName === "session-1")?.autoReconnect,
+      ).toBe(true);
     });
 
     it("auto-creates only default backend tab on first open (empty metadata)", () => {
@@ -646,20 +742,21 @@ describe("TerminalView", () => {
 
   // ── New tab prompt ─────────────────────────────────────────────────────────
 
-  describe("new tab prompt", () => {
-    it("clicking + opens BackendPickerPrompt modal", () => {
+  describe("new tab menu", () => {
+    it("selecting a backend creates a new tab with auto-generated name", async () => {
       setMetadata(DEFAULT_METADATA);
       render(<TerminalView />);
 
-      const overlay = screen.getByTestId("backend-picker-prompt-overlay");
-      expect(overlay).toHaveAttribute("aria-hidden", "true");
+      fireEvent.click(screen.getByTestId("new-tab-backend-claude"));
 
-      fireEvent.click(screen.getByTestId("new-tab-button"));
-
-      expect(overlay).toHaveAttribute("aria-hidden", "false");
+      await waitFor(() => {
+        expect(
+          screen.getByTestId("terminal-instance-lead-claude-1"),
+        ).toBeInTheDocument();
+      });
     });
 
-    it("clicking + when max tabs exist does not open prompt", () => {
+    it("clicking + when max tabs exist reports tab limit", () => {
       const onTabLimitReached = vi.fn();
       const maxTabs = Array.from({ length: MAX_TABS }, (_, i) => ({
         session_name: `s${i}`,
@@ -668,41 +765,18 @@ describe("TerminalView", () => {
       setMetadata(maxTabs);
       render(<TerminalView onTabLimitReached={onTabLimitReached} />);
 
-      const overlay = screen.getByTestId("backend-picker-prompt-overlay");
-      fireEvent.click(screen.getByTestId("new-tab-button"));
+      fireEvent.click(screen.getByTestId("new-tab-backend-claude"));
 
-      expect(overlay).toHaveAttribute("aria-hidden", "true");
       expect(onTabLimitReached).toHaveBeenCalledWith(
         `Maximum terminal tabs reached (${MAX_TABS}). Close a tab before opening another.`,
       );
-    });
-
-    it("selecting a backend creates a new tab with auto-generated name", async () => {
-      setMetadata(DEFAULT_METADATA);
-      render(<TerminalView />);
-
-      fireEvent.click(screen.getByTestId("new-tab-button"));
-
-      const select = screen.getByTestId("backend-picker-select");
-      fireEvent.change(select, { target: { value: "claude" } });
-      fireEvent.submit(select.closest("form")!);
-
-      await waitFor(() => {
-        expect(
-          screen.getByTestId("terminal-instance-lead-claude-1"),
-        ).toBeInTheDocument();
-      });
     });
 
     it("new tab becomes active after creation", async () => {
       setMetadata(DEFAULT_METADATA);
       render(<TerminalView />);
 
-      fireEvent.click(screen.getByTestId("new-tab-button"));
-
-      const select = screen.getByTestId("backend-picker-select");
-      fireEvent.change(select, { target: { value: "claude" } });
-      fireEvent.submit(select.closest("form")!);
+      fireEvent.click(screen.getByTestId("new-tab-backend-claude"));
 
       await waitFor(() => {
         expect(screen.getByTestId("active-tab-id").textContent).toBe(
@@ -711,30 +785,11 @@ describe("TerminalView", () => {
       });
     });
 
-    it("cancelling the prompt does not create a tab", () => {
-      setMetadata(DEFAULT_METADATA);
-      render(<TerminalView />);
-
-      fireEvent.click(screen.getByTestId("new-tab-button"));
-      fireEvent.click(screen.getByTestId("backend-picker-cancel-button"));
-
-      expect(
-        screen.queryByTestId("terminal-instance-lead-claude-1"),
-      ).not.toBeInTheDocument();
-      expect(
-        screen.getByTestId("backend-picker-prompt-overlay"),
-      ).toHaveAttribute("aria-hidden", "true");
-    });
-
     it("creating two tabs with same backend produces sequential names", async () => {
       setMetadata(DEFAULT_METADATA);
       render(<TerminalView />);
 
-      // Create first claude tab
-      fireEvent.click(screen.getByTestId("new-tab-button"));
-      const select = screen.getByTestId("backend-picker-select");
-      fireEvent.change(select, { target: { value: "claude" } });
-      fireEvent.submit(select.closest("form")!);
+      fireEvent.click(screen.getByTestId("new-tab-backend-claude"));
 
       await waitFor(() => {
         expect(
@@ -742,11 +797,7 @@ describe("TerminalView", () => {
         ).toBeInTheDocument();
       });
 
-      // Create second claude tab
-      fireEvent.click(screen.getByTestId("new-tab-button"));
-      const select2 = screen.getByTestId("backend-picker-select");
-      fireEvent.change(select2, { target: { value: "claude" } });
-      fireEvent.submit(select2.closest("form")!);
+      fireEvent.click(screen.getByTestId("new-tab-backend-claude"));
 
       await waitFor(() => {
         expect(
@@ -759,14 +810,7 @@ describe("TerminalView", () => {
       setMetadata(DEFAULT_METADATA);
       render(<TerminalView />);
 
-      // Create claude tab
-      fireEvent.click(screen.getByTestId("new-tab-button"));
-      fireEvent.change(screen.getByTestId("backend-picker-select"), {
-        target: { value: "claude" },
-      });
-      fireEvent.submit(
-        screen.getByTestId("backend-picker-select").closest("form")!,
-      );
+      fireEvent.click(screen.getByTestId("new-tab-backend-claude"));
 
       await waitFor(() => {
         expect(
@@ -774,14 +818,7 @@ describe("TerminalView", () => {
         ).toBeInTheDocument();
       });
 
-      // Create codex tab
-      fireEvent.click(screen.getByTestId("new-tab-button"));
-      fireEvent.change(screen.getByTestId("backend-picker-select"), {
-        target: { value: "codex" },
-      });
-      fireEvent.submit(
-        screen.getByTestId("backend-picker-select").closest("form")!,
-      );
+      fireEvent.click(screen.getByTestId("new-tab-backend-codex"));
 
       await waitFor(() => {
         expect(
@@ -855,32 +892,6 @@ describe("TerminalView", () => {
 
   // Search overlay removed with the wterm migration — native browser
   // find-in-page (Cmd+F) operates on the DOM-rendered cells.
-
-  // ── Full-height ────────────────────────────────────────────────────────────
-
-  describe("full-height", () => {
-    it("container does not have fullHeight class by default", () => {
-      setMetadata(DEFAULT_METADATA);
-      render(<TerminalView />);
-
-      expect(screen.getByTestId("is-full-height").textContent).toBe("false");
-      expect(screen.getByTestId("terminal-view").className).not.toContain(
-        "fullHeight",
-      );
-    });
-
-    it("toggle adds fullHeight class", () => {
-      setMetadata(DEFAULT_METADATA);
-      render(<TerminalView />);
-
-      fireEvent.click(screen.getByTestId("toggle-fullheight"));
-
-      expect(screen.getByTestId("is-full-height").textContent).toBe("true");
-      expect(screen.getByTestId("terminal-view").className).toContain(
-        "fullHeight",
-      );
-    });
-  });
 
   // ── Issue context (sanitizeSessionName + pendingIssueContext) ─────────────
 
@@ -1019,29 +1030,45 @@ describe("TerminalView", () => {
   // ── pendingAgentName (V7 Terminal View) ───────────────────────────────────
 
   describe("pendingAgentName", () => {
-    it("creates agent tab with correct session name pattern", () => {
+    it("creates agent tab from resolved UUID terminal metadata", async () => {
       setMetadata(DEFAULT_METADATA);
       render(
-        <TerminalView pendingAgentName="fox" onAgentNameConsumed={vi.fn()} />,
+        <TerminalView
+          hideTabs
+          pendingAgentName="fox"
+          onAgentNameConsumed={vi.fn()}
+        />,
       );
 
-      // sanitizeSessionName("fox") => "fox"
-      // tab sessionName => "agent-fox"
-      expect(
-        screen.getByTestId("terminal-instance-agent-fox"),
-      ).toBeInTheDocument();
+      await waitFor(() =>
+        expect(
+          screen.getByTestId("terminal-instance-term_fox"),
+        ).toBeInTheDocument(),
+      );
+      expect(mockTerminalApi.ensureAgentTerminalSession).toHaveBeenCalledWith(
+        expect.any(String),
+        "fox",
+      );
     });
 
-    it("new agent tab becomes active", () => {
+    it("new agent tab becomes active", async () => {
       setMetadata(DEFAULT_METADATA);
       render(
-        <TerminalView pendingAgentName="fox" onAgentNameConsumed={vi.fn()} />,
+        <TerminalView
+          hideTabs
+          pendingAgentName="fox"
+          onAgentNameConsumed={vi.fn()}
+        />,
       );
 
-      expect(screen.getByTestId("active-tab-id").textContent).toBe("agent-fox");
+      await waitFor(() =>
+        expect(
+          screen.getByTestId("terminal-instance-term_fox"),
+        ).toBeInTheDocument(),
+      );
     });
 
-    it("calls onAgentNameConsumed after creating agent tab", () => {
+    it("calls onAgentNameConsumed after resolving agent tab", async () => {
       setMetadata(DEFAULT_METADATA);
       const onConsumed = vi.fn();
       render(
@@ -1051,53 +1078,183 @@ describe("TerminalView", () => {
         />,
       );
 
-      expect(onConsumed).toHaveBeenCalled();
+      await waitFor(() => expect(onConsumed).toHaveBeenCalled());
     });
 
-    it("switches to existing tab if agent tab already exists", () => {
+    it("does not re-resolve an unchanged pending agent after consumption", async () => {
+      setMetadata(DEFAULT_METADATA);
+      const onConsumed = vi.fn();
+      render(
+        <TerminalView
+          pendingAgentName="fox"
+          onAgentNameConsumed={onConsumed}
+        />,
+      );
+
+      await waitFor(() => expect(onConsumed).toHaveBeenCalledTimes(1));
+      await act(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+
+      expect(mockTerminalApi.ensureAgentTerminalSession).toHaveBeenCalledTimes(
+        1,
+      );
+      expect(onConsumed).toHaveBeenCalledTimes(1);
+    });
+
+    it("resolves backend terminal even if restored agent tab already exists", async () => {
       setMetadata([
         ...DEFAULT_METADATA,
-        { session_name: "agent-fox", label: "agent-fox" },
+        {
+          session_name: "term_existing",
+          label: "agent-fox",
+          kind: "agent",
+          agent_id: "fox",
+          backend: "codex",
+          writable: true,
+        },
       ]);
       const onConsumed = vi.fn();
       render(
         <TerminalView
+          hideTabs
           pendingAgentName="fox"
           onAgentNameConsumed={onConsumed}
         />,
       );
 
-      // Should switch to existing tab, not create a new one
-      expect(screen.getByTestId("active-tab-id").textContent).toBe("agent-fox");
+      await waitFor(() =>
+        expect(
+          screen.getByTestId("terminal-instance-term_fox"),
+        ).toBeInTheDocument(),
+      );
       expect(onConsumed).toHaveBeenCalled();
+      expect(mockTerminalApi.ensureAgentTerminalSession).toHaveBeenCalledWith(
+        expect.any(String),
+        "fox",
+      );
     });
 
-    it("persists tab metadata for new agent tab", () => {
+    it("does not persist agent tabs through generic tab creation", async () => {
       setMetadata(DEFAULT_METADATA);
       render(
         <TerminalView pendingAgentName="fox" onAgentNameConsumed={vi.fn()} />,
       );
 
-      expect(mockMetadataHook.createTab).toHaveBeenCalledWith(
-        "agent-fox",
+      await waitFor(() =>
+        expect(mockTerminalApi.ensureAgentTerminalSession).toHaveBeenCalled(),
+      );
+      expect(mockMetadataHook.createTab).not.toHaveBeenCalledWith(
+        "term_fox",
         "agent-fox",
         expect.any(Number),
       );
     });
 
-    it("sanitizes agent name with dots in session name", () => {
+    it("uses backend-resolved session for agent names with dots", async () => {
       setMetadata(DEFAULT_METADATA);
       render(
         <TerminalView
+          hideTabs
           pendingAgentName="agent.alpha"
           onAgentNameConsumed={vi.fn()}
         />,
       );
 
-      // sanitizeSessionName("agent.alpha") => "agent-alpha"
+      await waitFor(() =>
+        expect(
+          screen.getByTestId("terminal-instance-term_agent_alpha"),
+        ).toBeInTheDocument(),
+      );
+    });
+
+    it("hidden-tab agent view does not mount restored generic panes while resolving", async () => {
+      let resolveAgent!: (value: {
+        session_name: string;
+        label: string;
+        notes: string;
+        sort_order: number;
+        pinned: boolean;
+        kind: string;
+        agent_id: string;
+        role: string;
+        backend: string;
+        writable: boolean;
+        pty_alive: boolean;
+        attached_clients: number;
+        created_at: string;
+        updated_at: string;
+      }) => void;
+      mockTerminalApi.ensureAgentTerminalSession.mockReturnValueOnce(
+        new Promise((resolve) => {
+          resolveAgent = resolve;
+        }),
+      );
+      sessionStorage.setItem("terminal-active-tab", "session-1");
+      setMetadata(DEFAULT_METADATA);
+      const onConsumed = vi.fn();
+      const HiddenAgentHarness = () => {
+        const [pending, setPending] = useState<string | undefined>("fox");
+        return (
+          <TerminalView
+            pendingAgentName={pending}
+            onAgentNameConsumed={() => {
+              onConsumed();
+              setPending(undefined);
+            }}
+            hideTabs
+          />
+        );
+      };
+
+      render(<HiddenAgentHarness />);
+
+      await waitFor(() =>
+        expect(mockTerminalApi.ensureAgentTerminalSession).toHaveBeenCalledWith(
+          expect.any(String),
+          "fox",
+        ),
+      );
       expect(
-        screen.getByTestId("terminal-instance-agent-agent-alpha"),
+        screen.queryByTestId("terminal-instance-session-1"),
+      ).not.toBeInTheDocument();
+      expect(
+        screen.queryByTestId("terminal-instance-session-2"),
+      ).not.toBeInTheDocument();
+      expect(
+        screen.getByTestId("loading-skeleton-terminal"),
       ).toBeInTheDocument();
+
+      await act(async () => {
+        resolveAgent({
+          session_name: "term_fox",
+          label: "agent-fox",
+          notes: "",
+          sort_order: DEFAULT_METADATA.length,
+          pinned: false,
+          kind: "agent",
+          agent_id: "fox",
+          role: "lead",
+          backend: "codex",
+          writable: true,
+          pty_alive: true,
+          attached_clients: 0,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        });
+      });
+
+      await waitFor(() =>
+        expect(
+          screen.getByTestId("terminal-instance-term_fox"),
+        ).toBeInTheDocument(),
+      );
+      expect(
+        screen.queryByTestId("terminal-instance-session-1"),
+      ).not.toBeInTheDocument();
+      expect(screen.queryByTestId("terminal-tab-bar")).not.toBeInTheDocument();
+      expect(onConsumed).toHaveBeenCalled();
     });
 
     it("does not create agent tab when no pendingAgentName is provided", () => {
@@ -1108,6 +1265,21 @@ describe("TerminalView", () => {
       expect(
         screen.queryByTestId("terminal-instance-agent-fox"),
       ).not.toBeInTheDocument();
+    });
+
+    it("reports split controls to parent when hideTabs is true", async () => {
+      setMetadata(DEFAULT_METADATA);
+      const onSplitControlsChange = vi.fn();
+      render(
+        <TerminalView hideTabs onSplitControlsChange={onSplitControlsChange} />,
+      );
+
+      await waitFor(() => expect(onSplitControlsChange).toHaveBeenCalled());
+      const controls = onSplitControlsChange.mock.calls.at(-1)?.[0];
+      expect(controls).toMatchObject({
+        canSplit: true,
+      });
+      expect(typeof controls.onSplitRight).toBe("function");
     });
   });
 

@@ -169,13 +169,17 @@ func TestGet_HappyPath(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Second)
 	details := types.IssueDetails{
 		Issue: types.Issue{
-			ID:        "issue-1",
-			Title:     "Test Issue",
-			Status:    types.StatusOpen,
-			Priority:  2,
-			IssueType: types.TypeTask,
-			CreatedAt: now,
-			UpdatedAt: now,
+			ID:                 "issue-1",
+			Title:              "Test Issue",
+			Description:        "description",
+			Design:             "design",
+			AcceptanceCriteria: "acceptance",
+			Notes:              "BLOCKED: missing origin remote",
+			Status:             types.StatusOpen,
+			Priority:           2,
+			IssueType:          types.TypeTask,
+			CreatedAt:          now,
+			UpdatedAt:          now,
 		},
 		Labels:       []string{"label-1"},
 		Dependencies: []*types.IssueWithDependencyMetadata{},
@@ -212,6 +216,18 @@ func TestGet_HappyPath(t *testing.T) {
 	}
 	if result.Title != "Test Issue" {
 		t.Errorf("Title = %q, want %q", result.Title, "Test Issue")
+	}
+	if result.Description != "description" {
+		t.Errorf("Description = %q, want description", result.Description)
+	}
+	if result.Design != "design" {
+		t.Errorf("Design = %q, want design", result.Design)
+	}
+	if result.AcceptanceCriteria != "acceptance" {
+		t.Errorf("AcceptanceCriteria = %q, want acceptance", result.AcceptanceCriteria)
+	}
+	if result.Notes != "BLOCKED: missing origin remote" {
+		t.Errorf("Notes = %q, want blocker note", result.Notes)
 	}
 }
 
@@ -300,11 +316,39 @@ func TestList_QueryParams(t *testing.T) {
 
 	for _, want := range []string{
 		"status=open", "limit=5", "assignee=agent-1",
-		"labels=urgent", "updated_after=2026-01-01", "source_repos=repo-a",
+		"label=urgent", "updated_after=2026-01-01", "repo=repo-a",
 	} {
 		if !strings.Contains(gotQuery, want) {
 			t.Errorf("query %q missing %q", gotQuery, want)
 		}
+	}
+}
+
+func TestList_ClientFiltersMultipleReposWithoutServerLimit(t *testing.T) {
+	now := time.Now().UTC().Truncate(time.Second)
+	var gotQuery string
+	fb, ts := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		gotQuery = r.URL.RawQuery
+		respondOK(w, []*types.IssueWithCounts{
+			{Issue: &types.Issue{ID: "a", Title: "A", Status: types.StatusOpen, SourceRepo: "repo-a", CreatedAt: now, UpdatedAt: now}},
+			{Issue: &types.Issue{ID: "b", Title: "B", Status: types.StatusOpen, SourceRepo: "repo-b", CreatedAt: now, UpdatedAt: now}},
+			{Issue: &types.Issue{ID: "c", Title: "C", Status: types.StatusOpen, SourceRepo: "repo-c", CreatedAt: now, UpdatedAt: now}},
+		})
+	})
+	defer ts.Close()
+
+	result, err := fb.List(context.Background(), backend.ListOpts{
+		SourceRepos: []string{"repo-b", "repo-c"},
+		Limit:       1,
+	})
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if strings.Contains(gotQuery, "source_repos=") || strings.Contains(gotQuery, "repo=") || strings.Contains(gotQuery, "limit=") {
+		t.Fatalf("query = %q, want no unsupported repo filter or pre-filter limit", gotQuery)
+	}
+	if len(result) != 1 || result[0].ID != "b" {
+		t.Fatalf("result = %+v, want first locally filtered repo item", result)
 	}
 }
 
@@ -590,194 +634,6 @@ func TestCheckFleetUnsupportedFilters_SupportedFieldsOnly(t *testing.T) {
 	}
 	if err := checkFleetUnsupportedFilters(opts); err != nil {
 		t.Errorf("supported-only opts should not error, got %v", err)
-	}
-}
-
-// --- Stats tests ---
-
-func TestStats_HappyPath(t *testing.T) {
-	fb, ts := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/api/v1/test-ws/issues/count" {
-			t.Errorf("path = %q, want issues/count", r.URL.Path)
-		}
-		if r.URL.Query().Get("group_by") != "status" {
-			t.Errorf("group_by = %q, want status", r.URL.Query().Get("group_by"))
-		}
-		respondOK(w, countIssuesResponse{
-			Total: 10,
-			Groups: map[string]int64{
-				"open":        3,
-				"closed":      2,
-				"in_progress": 2,
-				"blocked":     1,
-				"deferred":    1,
-				"tombstone":   1,
-			},
-		})
-	})
-	defer ts.Close()
-
-	result, err := fb.Stats(context.Background())
-	if err != nil {
-		t.Fatalf("Stats: %v", err)
-	}
-	if result.TotalIssues != 10 {
-		t.Errorf("TotalIssues = %d, want 10", result.TotalIssues)
-	}
-	if result.OpenIssues != 3 {
-		t.Errorf("OpenIssues = %d, want 3", result.OpenIssues)
-	}
-	if result.ClosedIssues != 2 {
-		t.Errorf("ClosedIssues = %d, want 2", result.ClosedIssues)
-	}
-	if result.InProgressIssues != 2 {
-		t.Errorf("InProgressIssues = %d, want 2", result.InProgressIssues)
-	}
-	if result.BlockedIssues != 1 {
-		t.Errorf("BlockedIssues = %d, want 1", result.BlockedIssues)
-	}
-	if result.DeferredIssues != 1 {
-		t.Errorf("DeferredIssues = %d, want 1", result.DeferredIssues)
-	}
-	if result.TombstoneIssues != 1 {
-		t.Errorf("TombstoneIssues = %d, want 1", result.TombstoneIssues)
-	}
-	if result.PinnedIssues != 0 {
-		t.Errorf("PinnedIssues = %d, want 0 (not in groups)", result.PinnedIssues)
-	}
-	// ReadyIssues, EpicsEligibleForClosure, AverageLeadTime should be 0.
-	if result.ReadyIssues != 0 {
-		t.Errorf("ReadyIssues = %d, want 0 (fleet-08yg)", result.ReadyIssues)
-	}
-	if result.EpicsEligibleForClosure != 0 {
-		t.Errorf("EpicsEligibleForClosure = %d, want 0 (fleet-08yg)", result.EpicsEligibleForClosure)
-	}
-	if result.AverageLeadTime != 0 {
-		t.Errorf("AverageLeadTime = %f, want 0 (fleet-08yg)", result.AverageLeadTime)
-	}
-}
-
-func TestStats_AllStatuses(t *testing.T) {
-	fb, ts := newTestServer(t, func(w http.ResponseWriter, _ *http.Request) {
-		respondOK(w, countIssuesResponse{
-			Total: 20,
-			Groups: map[string]int64{
-				"open":        3,
-				"closed":      4,
-				"in_progress": 2,
-				"blocked":     1,
-				"deferred":    2,
-				"tombstone":   1,
-				"pinned":      3,
-				"review":      2,
-				"hooked":      2,
-			},
-		})
-	})
-	defer ts.Close()
-
-	result, err := fb.Stats(context.Background())
-	if err != nil {
-		t.Fatalf("Stats: %v", err)
-	}
-	// Total comes from resp.Total, not sum of mapped fields.
-	if result.TotalIssues != 20 {
-		t.Errorf("TotalIssues = %d, want 20", result.TotalIssues)
-	}
-	if result.PinnedIssues != 3 {
-		t.Errorf("PinnedIssues = %d, want 3", result.PinnedIssues)
-	}
-	// review and hooked have no extra stats field, so it is silently ignored.
-}
-
-func TestStats_EmptyWorkspace(t *testing.T) {
-	fb, ts := newTestServer(t, func(w http.ResponseWriter, _ *http.Request) {
-		respondOK(w, countIssuesResponse{Total: 0, Groups: map[string]int64{}})
-	})
-	defer ts.Close()
-
-	result, err := fb.Stats(context.Background())
-	if err != nil {
-		t.Fatalf("Stats: %v", err)
-	}
-	if result.TotalIssues != 0 {
-		t.Errorf("TotalIssues = %d, want 0", result.TotalIssues)
-	}
-	if result.OpenIssues != 0 {
-		t.Errorf("OpenIssues = %d, want 0", result.OpenIssues)
-	}
-}
-
-func TestStats_MissingStatusKeys(t *testing.T) {
-	fb, ts := newTestServer(t, func(w http.ResponseWriter, _ *http.Request) {
-		respondOK(w, countIssuesResponse{
-			Total:  5,
-			Groups: map[string]int64{"open": 3, "closed": 2},
-		})
-	})
-	defer ts.Close()
-
-	result, err := fb.Stats(context.Background())
-	if err != nil {
-		t.Fatalf("Stats: %v", err)
-	}
-	if result.TotalIssues != 5 {
-		t.Errorf("TotalIssues = %d, want 5", result.TotalIssues)
-	}
-	if result.InProgressIssues != 0 {
-		t.Errorf("InProgressIssues = %d, want 0", result.InProgressIssues)
-	}
-	if result.BlockedIssues != 0 {
-		t.Errorf("BlockedIssues = %d, want 0", result.BlockedIssues)
-	}
-}
-
-func TestStats_ClientError(t *testing.T) {
-	fb, ts := newTestServer(t, func(w http.ResponseWriter, _ *http.Request) {
-		respondErr(w, 500, "internal error")
-	})
-	defer ts.Close()
-
-	result, err := fb.Stats(context.Background())
-	if err == nil {
-		t.Fatal("expected error, got nil")
-	}
-	if result != nil {
-		t.Errorf("expected nil result, got %+v", result)
-	}
-}
-
-func TestStats_NilResponse(t *testing.T) {
-	fb, ts := newTestServer(t, func(w http.ResponseWriter, _ *http.Request) {
-		// Return success with nil Data field (never set).
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(apiResponse{Success: true, Data: nil}) //nolint:errcheck
-	})
-	defer ts.Close()
-
-	result, err := fb.Stats(context.Background())
-	if err == nil {
-		t.Fatal("expected error for nil response data, got nil")
-	}
-	if result != nil {
-		t.Errorf("expected nil result, got %+v", result)
-	}
-}
-
-func TestStats_JSONNullResponse(t *testing.T) {
-	fb, ts := newTestServer(t, func(w http.ResponseWriter, _ *http.Request) {
-		// Return success with JSON null data (distinct from Go nil).
-		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`{"success":true,"data":null}`)) //nolint:errcheck
-	})
-	defer ts.Close()
-
-	result, err := fb.Stats(context.Background())
-	if err == nil {
-		t.Fatal("expected error for JSON null data, got nil")
-	}
-	if result != nil {
-		t.Errorf("expected nil result, got %+v", result)
 	}
 }
 
@@ -1806,6 +1662,65 @@ func TestReady_HappyPath(t *testing.T) {
 	}
 }
 
+func TestReady_ClientFiltersSourceReposWithoutServerLimit(t *testing.T) {
+	now := time.Now().UTC().Truncate(time.Second)
+	var gotQuery string
+	repoA := "repo-a"
+	repoB := "repo-b"
+	fb, ts := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		gotQuery = r.URL.RawQuery
+		respondOK(w, []*readyIssueWithParent{
+			{fleetIssueWire: fleetIssueWire{ID: "repo-a", Title: "A", Status: string(types.StatusOpen), CreatedAt: now, UpdatedAt: now}, Repo: &repoA},
+			{fleetIssueWire: fleetIssueWire{ID: "repo-b", Title: "B", Status: string(types.StatusOpen), CreatedAt: now, UpdatedAt: now}, Repo: &repoB},
+		})
+	})
+	defer ts.Close()
+
+	result, err := fb.Ready(context.Background(), backend.ReadyOpts{
+		SourceRepos: []string{"repo-b"},
+		Limit:       1,
+	})
+	if err != nil {
+		t.Fatalf("Ready: %v", err)
+	}
+	if strings.Contains(gotQuery, "source_repos=") || strings.Contains(gotQuery, "limit=") {
+		t.Fatalf("query = %q, want no unsupported repo filter or pre-filter limit", gotQuery)
+	}
+	if len(result) != 1 || result[0].ID != "repo-b" {
+		t.Fatalf("result = %+v, want repo-b", result)
+	}
+}
+
+func TestDeferred_HappyPath(t *testing.T) {
+	now := time.Now().UTC().Truncate(time.Second)
+	parent := "epic-1"
+	fb, ts := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if got, want := r.URL.Path, "/api/v1/test-ws/issues/deferred"; got != want {
+			t.Errorf("path = %q, want %q", got, want)
+		}
+		respondOK(w, struct {
+			Issues []*readyIssueWithParent `json:"issues"`
+			Count  int                     `json:"count"`
+		}{Issues: []*readyIssueWithParent{
+			{
+				fleetIssueWire: fleetIssueWire{ID: "d-1", Title: "Deferred", Status: string(types.StatusOpen), Type: "task", ParentID: parent, CreatedAt: now, UpdatedAt: now},
+			},
+		}, Count: 1})
+	})
+	defer ts.Close()
+
+	result, err := fb.Deferred(context.Background(), backend.DeferredOpts{ParentID: parent, Type: "task"})
+	if err != nil {
+		t.Fatalf("Deferred: %v", err)
+	}
+	if len(result) != 1 {
+		t.Fatalf("len = %d, want 1", len(result))
+	}
+	if result[0].ID != "d-1" || result[0].Parent != parent || result[0].Status != string(types.StatusOpen) {
+		t.Fatalf("deferred result = %+v", result[0])
+	}
+}
+
 // --- Blocked tests ---
 
 func TestBlocked_HappyPath(t *testing.T) {
@@ -2182,6 +2097,9 @@ func TestGetMutations_HappyPath(t *testing.T) {
 	if got[0].Type != backend.MutationCreate {
 		t.Errorf("got[0].Type = %q, want %q", got[0].Type, backend.MutationCreate)
 	}
+	if got[0].EntityType != "issue" || got[0].EntityID != "loom-1" || got[0].Action != "issue.create" {
+		t.Errorf("got[0] generic envelope = %q/%q/%q, want issue/loom-1/issue.create", got[0].EntityType, got[0].EntityID, got[0].Action)
+	}
 	if got[0].IssueID != "loom-1" || got[0].Title != "New issue" || got[0].ParentID != "ep-1" || got[0].SourceRepo != "org/repo" {
 		t.Errorf("got[0] = %+v, after-snapshot fields not extracted", got[0])
 	}
@@ -2258,6 +2176,15 @@ func TestGetMutations_ActionFolding(t *testing.T) {
 		if got[i].Type != wantT {
 			t.Errorf("got[%d].Type = %q, want %q", i, got[i].Type, wantT)
 		}
+		if got[i].EntityType == "" || got[i].EntityID == "" || got[i].Action == "" {
+			t.Errorf("got[%d] missing generic envelope fields: %+v", i, got[i])
+		}
+	}
+	if got[2].IssueID != "" || got[3].IssueID != "" || got[4].IssueID != "" {
+		t.Errorf("non-issue fleet mutations should not populate legacy issue_id: comment=%q label=%q workspace=%q", got[2].IssueID, got[3].IssueID, got[4].IssueID)
+	}
+	if got[0].IssueID != "a" || got[5].IssueID != "e" {
+		t.Errorf("issue fleet mutations should preserve legacy issue_id: update=%q unknown=%q", got[0].IssueID, got[5].IssueID)
 	}
 }
 

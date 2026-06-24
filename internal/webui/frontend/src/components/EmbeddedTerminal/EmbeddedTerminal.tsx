@@ -79,7 +79,6 @@ export const EmbeddedTerminal = forwardRef<
           sessionName={sessionName}
           isActive={isActive}
           onConnectionStateChange={handleConnectionStateChange}
-          agentName={agentName ?? undefined}
         />
       </div>
     </div>

@@ -100,6 +100,14 @@ class MockEventSource {
     }
   }
 
+  simulateRawMutation(data: string, lastEventId = ""): void {
+    const listeners = this.eventListeners.get("mutation") ?? [];
+    const event = { data, lastEventId } as MessageEvent;
+    for (const listener of listeners) {
+      listener(event);
+    }
+  }
+
   static reset(): void {
     MockEventSource.instances = [];
   }
@@ -371,6 +379,118 @@ describe("useEventProvider", () => {
 
       expect(cb).toHaveBeenCalledTimes(2);
     });
+
+    it("subscriber with entity/action filters only receives matching mutations", async () => {
+      const cb = vi.fn();
+
+      function FilteredSub() {
+        useEventSubscription(cb, {
+          entityTypes: ["terminal"],
+          actions: ["terminal.metadata"],
+        });
+        return null;
+      }
+
+      render(
+        <EventProvider>
+          <FilteredSub />
+        </EventProvider>,
+      );
+      await flushConnect();
+
+      act(() => {
+        MockEventSource.lastInstance?.simulateOpen();
+      });
+
+      act(() => {
+        MockEventSource.lastInstance?.simulateMutation({
+          type: "terminal_metadata",
+          entity_type: "terminal",
+          entity_id: "session-1",
+          action: "terminal.metadata",
+          timestamp: "2025-01-23T12:00:00Z",
+        });
+      });
+
+      act(() => {
+        MockEventSource.lastInstance?.simulateMutation({
+          type: "terminal_session_change",
+          entity_type: "terminal",
+          entity_id: "session-1",
+          action: "terminal.session_change",
+          timestamp: "2025-01-23T12:00:01Z",
+        });
+      });
+
+      expect(cb).toHaveBeenCalledTimes(1);
+      expect(cb).toHaveBeenCalledWith(
+        expect.objectContaining({ action: "terminal.metadata" }),
+      );
+    });
+
+    it("subscriber with agent filters receives generic agent status events", async () => {
+      const cb = vi.fn();
+
+      function FilteredSub() {
+        useEventSubscription(cb, {
+          entityTypes: ["agent"],
+          actions: ["agent.status"],
+        });
+        return null;
+      }
+
+      render(
+        <EventProvider>
+          <FilteredSub />
+        </EventProvider>,
+      );
+      await flushConnect();
+
+      act(() => {
+        MockEventSource.lastInstance?.simulateOpen();
+      });
+
+      act(() => {
+        MockEventSource.lastInstance?.simulateMutation({
+          type: "status",
+          entity_type: "agent",
+          entity_id: "agent-alpha",
+          action: "agent.status",
+          title: "agent-alpha",
+          timestamp: "2025-01-23T12:00:00Z",
+        });
+      });
+
+      act(() => {
+        MockEventSource.lastInstance?.simulateMutation({
+          type: "terminal_metadata",
+          entity_type: "terminal",
+          entity_id: "session-1",
+          action: "terminal.metadata",
+          timestamp: "2025-01-23T12:00:01Z",
+        });
+      });
+
+      act(() => {
+        MockEventSource.lastInstance?.simulateMutation({
+          type: "update",
+          entity_type: "issue",
+          entity_id: "issue-1",
+          issue_id: "issue-1",
+          action: "issue.update",
+          timestamp: "2025-01-23T12:00:02Z",
+        });
+      });
+
+      expect(cb).toHaveBeenCalledTimes(1);
+      expect(cb).toHaveBeenCalledWith(
+        expect.objectContaining({
+          entity_type: "agent",
+          entity_id: "agent-alpha",
+          action: "agent.status",
+        }),
+      );
+    });
   });
 
   describe("Unsubscribe", () => {
@@ -467,6 +587,58 @@ describe("useEventProvider", () => {
   });
 
   describe("Error isolation", () => {
+    it("malformed mutation events are skipped without poisoning later generic events", async () => {
+      const cb = vi.fn();
+      const consoleWarnSpy = vi
+        .spyOn(console, "warn")
+        .mockImplementation(() => {});
+
+      function AgentSub() {
+        useEventSubscription(cb, { entityTypes: ["agent"] });
+        return null;
+      }
+
+      render(
+        <EventProvider>
+          <AgentSub />
+        </EventProvider>,
+      );
+      await flushConnect();
+
+      act(() => {
+        MockEventSource.lastInstance?.simulateOpen();
+      });
+
+      act(() => {
+        MockEventSource.lastInstance?.simulateRawMutation("{not-json");
+      });
+
+      expect(consoleWarnSpy).toHaveBeenCalledWith(
+        "[SSE] Received malformed mutation event",
+      );
+      expect(cb).not.toHaveBeenCalled();
+
+      act(() => {
+        MockEventSource.lastInstance?.simulateMutation({
+          type: "refresh",
+          entity_type: "agent",
+          entity_id: "agent-alpha",
+          action: "agent.refresh",
+          title: "agent-alpha",
+          timestamp: "2025-01-23T12:00:00Z",
+        });
+      });
+
+      expect(cb).toHaveBeenCalledTimes(1);
+      expect(cb).toHaveBeenCalledWith(
+        expect.objectContaining({
+          entity_type: "agent",
+          entity_id: "agent-alpha",
+          action: "agent.refresh",
+        }),
+      );
+    });
+
     it("a throwing subscriber does not prevent other subscribers from receiving events", async () => {
       const throwingCb = vi.fn(() => {
         throw new Error("subscriber error");

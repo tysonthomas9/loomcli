@@ -8,6 +8,7 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/agenterr"
 	"github.com/tysonthomas9/loomcli/internal/agentpolicy"
+	"github.com/tysonthomas9/loomcli/internal/domain"
 )
 
 const primaryBackendRetryCooldown = time.Minute
@@ -36,6 +37,10 @@ func (s *Supervisor) shouldRestart(ap *AgentProcess) bool {
 
 	ap.Mu.Lock()
 	defer ap.Mu.Unlock()
+
+	if stopAfterEphemeralTask(ap) {
+		return false
+	}
 
 	// Clean success (exit 0, no error): always restart, reset counters —
 	// including the park-escalation budget ("progress" ends a park spiral).
@@ -85,6 +90,21 @@ func (s *Supervisor) shouldRestart(ap *AgentProcess) bool {
 	default: // Retry
 		return s.applyCountedRestart(ap, d, maxRetries)
 	}
+}
+
+// stopAfterEphemeralTask stops the supervisor once an ephemeral agent has
+// completed its one assigned task cycle cleanly. A NoWork exit still falls
+// through so it can re-poll until a task arrives. Caller holds ap.Mu.
+func stopAfterEphemeralTask(ap *AgentProcess) bool {
+	if ap.Entry.Mode != domain.AgentModeEphemeral || ap.LastExitCode != 0 || ap.LastError != nil || ap.AssignedTaskID == "" {
+		return false
+	}
+	ap.RestartCount = 0
+	ap.RateRetryCount = 0
+	ap.NoWorkCount = 0
+	ap.StopReason = StopReasonEphemeralDone
+	log.Printf("[daemon] Agent %s: ephemeral task complete, exiting supervisor", ap.Entry.Worktree)
+	return true
 }
 
 // applyFatalStop stops for auth/billing errors that need human intervention.

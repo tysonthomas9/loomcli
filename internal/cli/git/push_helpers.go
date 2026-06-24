@@ -8,17 +8,16 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/cli"
 )
 
-func pushAllWorkspaces(deps *cli.Deps, targetBranch string) {
+func pushAllWorkspaces(deps *cli.Deps, targetBranch string) error {
 	resolver, err := cli.NewResolver()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error creating resolver: %v\n", err)
-		os.Exit(1)
+		return fmt.Errorf("creating resolver: %w", err)
 	}
 
 	wsNames := resolver.WorkspaceNames()
 	if len(wsNames) == 0 {
 		fmt.Println("No workspaces found.")
-		return
+		return nil
 	}
 
 	fmt.Println("=========================================")
@@ -26,16 +25,19 @@ func pushAllWorkspaces(deps *cli.Deps, targetBranch string) {
 	fmt.Println("=========================================")
 	fmt.Println("")
 
+	var failures int
 	for _, wsName := range wsNames {
 		fmt.Printf("--- Workspace: %s ---\n", wsName)
 		if err := resolver.SetWorkspace(wsName); err != nil {
 			fmt.Fprintf(os.Stderr, "Error setting workspace %s: %v\n", wsName, err)
+			failures++
 			continue
 		}
 
 		worktrees, err := resolver.DiscoverWorktrees()
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error discovering repos in workspace %s: %v\n", wsName, err)
+			failures++
 			continue
 		}
 
@@ -44,25 +46,30 @@ func pushAllWorkspaces(deps *cli.Deps, targetBranch string) {
 			continue
 		}
 
-		pushWorkspaceWorktrees(deps, worktrees, "", targetBranch)
+		if err := pushWorkspaceWorktrees(deps, worktrees, "", targetBranch); err != nil {
+			failures++
+		}
 		fmt.Println("")
 	}
 
 	fmt.Println("=========================================")
 	fmt.Printf("All workspaces pushed!\n")
 	fmt.Println("=========================================")
+	if failures > 0 {
+		return fmt.Errorf("%d workspace(s) failed to push", failures)
+	}
+	return nil
 }
 
-func pushWorkspaceRepos(deps *cli.Deps, resolver *cli.Resolver, sourceBranch, targetBranch string) {
+func pushWorkspaceRepos(deps *cli.Deps, resolver *cli.Resolver, sourceBranch, targetBranch string) error {
 	worktrees, err := resolver.DiscoverWorktrees()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error discovering repos: %v\n", err)
-		os.Exit(1)
+		return fmt.Errorf("discovering repos: %w", err)
 	}
 
 	if len(worktrees) == 0 {
 		fmt.Printf("No repos found in workspace %s\n", resolver.WorkspaceName())
-		return
+		return nil
 	}
 
 	fmt.Println("=========================================")
@@ -70,20 +77,22 @@ func pushWorkspaceRepos(deps *cli.Deps, resolver *cli.Resolver, sourceBranch, ta
 	fmt.Println("=========================================")
 	fmt.Println("")
 
-	pushWorkspaceWorktrees(deps, worktrees, sourceBranch, targetBranch)
+	pushErr := pushWorkspaceWorktrees(deps, worktrees, sourceBranch, targetBranch)
 
 	fmt.Println("=========================================")
 	fmt.Printf("Workspace %q push complete!\n", resolver.WorkspaceName())
 	fmt.Println("=========================================")
+	return pushErr
 }
 
-func pushWorkspaceWorktrees(deps *cli.Deps, worktrees []cli.WorktreeInfo, sourceBranch, targetBranch string) {
+func pushWorkspaceWorktrees(deps *cli.Deps, worktrees []cli.WorktreeInfo, sourceBranch, targetBranch string) error {
 	type result struct {
 		repo    string
 		success bool
 		err     string
 	}
 	var results []result
+	failures := 0
 
 	for _, wt := range worktrees {
 		if wt.Repo == nil {
@@ -108,6 +117,7 @@ func pushWorkspaceWorktrees(deps *cli.Deps, worktrees []cli.WorktreeInfo, source
 		err := pushBranchInRepo(deps, wt.Path, source, target, remote)
 		if err != nil {
 			results = append(results, result{repo: wt.Name, success: false, err: err.Error()})
+			failures++
 		} else {
 			results = append(results, result{repo: wt.Name, success: true})
 		}
@@ -123,17 +133,32 @@ func pushWorkspaceWorktrees(deps *cli.Deps, worktrees []cli.WorktreeInfo, source
 			fmt.Printf("  ✗ %s: %s\n", r.repo, r.err)
 		}
 	}
+	if failures > 0 {
+		return fmt.Errorf("%d repo(s) failed to push", failures)
+	}
+	return nil
 }
 
 func pushBranchInRepo(deps *cli.Deps, repoPath, sourceBranch, targetBranch, remote string) error {
+	return withRepoPushLock(repoPath, func() error {
+		return pushBranchInRepoLocked(deps, repoPath, sourceBranch, targetBranch, remote)
+	})
+}
+
+func pushBranchInRepoLocked(deps *cli.Deps, repoPath, sourceBranch, targetBranch, remote string) error {
 	r := resolveRemote(remote)
 
 	fmt.Println("=========================================")
 	fmt.Printf("Push: %s -> %s (repo: %s, remote: %s)\n", sourceBranch, targetBranch, repoPath, r)
 	fmt.Println("=========================================")
 
-	if err := gitFetchRemote(deps, repoPath, remote); err != nil {
-		return fmt.Errorf("fetching: %v", err)
+	hasRemote := remoteConfiguredDeps(deps, repoPath, remote)
+	if hasRemote {
+		if err := gitFetchRemote(deps, repoPath, remote); err != nil {
+			return fmt.Errorf("fetching: %v", err)
+		}
+	} else {
+		fmt.Printf("No %s remote configured; integrating into local %s only.\n", r, targetBranch)
 	}
 
 	stashCleanup, err := stashIfDirtyDeps(deps, repoPath)
@@ -148,6 +173,9 @@ func pushBranchInRepo(deps *cli.Deps, repoPath, sourceBranch, targetBranch, remo
 		return handlePushCheckoutErr(deps, err, repoPath, sourceBranch, targetBranch, remote)
 	}
 
+	if !hasRemote {
+		return pushAfterCheckoutLocalInRepo(deps, repoPath, sourceBranch, targetBranch)
+	}
 	return pushAfterCheckoutInRepo(deps, repoPath, sourceBranch, targetBranch, remote, r)
 }
 
@@ -189,6 +217,28 @@ func pushAfterCheckoutInRepo(deps *cli.Deps, repoPath, sourceBranch, targetBranc
 		return fmt.Errorf("pushing: %v", err)
 	}
 	fmt.Printf("✓ Pushed to %s/%s\n", r, targetBranch)
+	return nil
+}
+
+func pushAfterCheckoutLocalInRepo(deps *cli.Deps, repoPath, sourceBranch, targetBranch string) error {
+	hasCommits, err := hasCommitsBetweenDeps(deps, repoPath, targetBranch, sourceBranch)
+	if err == nil && !hasCommits {
+		fmt.Printf("✓ Already up to date (no new commits in %s)\n", sourceBranch)
+		return nil
+	}
+
+	conflicts, mergeErr := mergeSourceDeps(deps, repoPath, sourceBranch, targetBranch)
+	if mergeErr != nil {
+		if len(conflicts) > 0 {
+			if err := resolveLocalConflictsWithAgentDeps(deps, repoPath, sourceBranch, targetBranch, conflicts); err != nil {
+				return fmt.Errorf("resolving conflicts: %v", err)
+			}
+			return nil
+		}
+		return mergeErr
+	}
+
+	fmt.Printf("✓ Integrated %s into local %s (no remote configured)\n", sourceBranch, targetBranch)
 	return nil
 }
 

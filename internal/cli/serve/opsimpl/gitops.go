@@ -6,7 +6,11 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
+	"strings"
 	"time"
+
+	"golang.org/x/sync/errgroup"
 
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
@@ -210,6 +214,184 @@ func (g *GitOpsImpl) CreatePR(worktreePath, sourceBranch, targetBranch, remote s
 		AlreadyExists: result.AlreadyExists,
 		NoCommits:     result.NoCommits,
 	}, nil
+}
+
+// prRepoQuery pairs a workspace repo with its gh PR listing result.
+type prRepoQuery struct {
+	repo ops.WorkspaceRepo
+	prs  []ops.GitPullRequest
+	err  error
+}
+
+func (g *GitOpsImpl) ListWorkspacePullRequests(workspaceID, state string, limit int) (*ops.GitPullRequestList, error) {
+	repos, err := g.listWorkspaceRepos(workspaceID)
+	if err != nil {
+		return nil, err
+	}
+
+	ghState := state
+	if strings.EqualFold(state, "review") {
+		ghState = "open"
+	}
+
+	queries := dedupeRepoPRQueries(repos)
+
+	var eg errgroup.Group
+	eg.SetLimit(4)
+	for _, q := range queries {
+		eg.Go(func() error {
+			q.prs, q.err = git.ListPullRequests(q.repo.Path, ghState, limit)
+			return nil
+		})
+	}
+	_ = eg.Wait()
+
+	result := &ops.GitPullRequestList{PullRequests: []ops.GitPullRequest{}}
+	all := collectRepoQueryPRs(queries, result)
+	all = filterPullRequestsByState(all, state)
+
+	sort.Slice(all, func(i, j int) bool {
+		return all[i].UpdatedAt > all[j].UpdatedAt
+	})
+	result.PullRequests = all
+	return result, nil
+}
+
+// dedupeRepoPRQueries builds one gh query per repo identity — a repo with
+// several agent worktrees shares a single GitHub PR list.
+func dedupeRepoPRQueries(repos []ops.WorkspaceRepo) []*prRepoQuery {
+	seenRepo := make(map[string]struct{})
+	queries := make([]*prRepoQuery, 0, len(repos))
+	for _, repo := range repos {
+		if repo.Path == "" {
+			continue
+		}
+		key := repo.Remote
+		if key == "" {
+			key = repo.Name
+		}
+		if _, ok := seenRepo[key]; ok {
+			continue
+		}
+		seenRepo[key] = struct{}{}
+		queries = append(queries, &prRepoQuery{repo: repo})
+	}
+	return queries
+}
+
+// collectRepoQueryPRs merges per-repo results into one list, deduping by PR
+// URL and recording per-repo failures as warnings on result.
+func collectRepoQueryPRs(queries []*prRepoQuery, result *ops.GitPullRequestList) []ops.GitPullRequest {
+	seen := make(map[string]struct{})
+	all := result.PullRequests
+	for _, q := range queries {
+		if q.err != nil {
+			// A repo that gh can't list (non-GitHub remote, missing auth, …)
+			// must not take down the listing for the rest of the workspace.
+			result.Warnings = append(result.Warnings, fmt.Sprintf("%s: %v", q.repo.Name, q.err))
+			continue
+		}
+		for _, pr := range q.prs {
+			if pr.URL == "" {
+				continue
+			}
+			if _, ok := seen[pr.URL]; ok {
+				continue
+			}
+			seen[pr.URL] = struct{}{}
+			pr.RepoName = q.repo.Name
+			all = append(all, pr)
+		}
+	}
+	return all
+}
+
+func filterPullRequestsByState(all []ops.GitPullRequest, state string) []ops.GitPullRequest {
+	switch {
+	case strings.EqualFold(state, "review"):
+		return git.FilterPullRequestsForReview(all)
+	case strings.EqualFold(state, "open"):
+		filtered := make([]ops.GitPullRequest, 0, len(all))
+		for _, pr := range all {
+			if strings.EqualFold(pr.State, "OPEN") && !pr.IsDraft {
+				filtered = append(filtered, pr)
+			}
+		}
+		return filtered
+	case strings.EqualFold(state, "merged"):
+		filtered := make([]ops.GitPullRequest, 0, len(all))
+		for _, pr := range all {
+			if strings.EqualFold(pr.State, "MERGED") {
+				filtered = append(filtered, pr)
+			}
+		}
+		return filtered
+	default:
+		return all
+	}
+}
+
+func (g *GitOpsImpl) listWorkspaceRepos(workspaceID string) ([]ops.WorkspaceRepo, error) {
+	if g != nil && g.store != nil {
+		ws, err := storeadapter.BuildWorkspaceDataForKey(context.Background(), g.store, workspaceID)
+		if err != nil {
+			return nil, fmt.Errorf("load fleet-db workspace %q: %w", workspaceID, err)
+		}
+		return ws.Repos, nil
+	}
+
+	resolver, err := cli.NewResolver()
+	if err != nil {
+		return nil, fmt.Errorf("creating resolver: %v", err)
+	}
+	if err := scopeResolverToWorkspace(resolver, workspaceID); err != nil {
+		return nil, err
+	}
+
+	worktrees, err := resolver.DiscoverWorktrees()
+	if err != nil {
+		return nil, fmt.Errorf("discovering repos: %v", err)
+	}
+	return workspaceReposFromWorktrees(worktrees), nil
+}
+
+// workspaceReposFromWorktrees maps discovered worktrees to workspace repos,
+// deduping by path and sorting by name.
+func workspaceReposFromWorktrees(worktrees []cli.WorktreeInfo) []ops.WorkspaceRepo {
+	byPath := make(map[string]ops.WorkspaceRepo)
+	for _, wt := range worktrees {
+		if wt.Path == "" {
+			continue
+		}
+		if _, ok := byPath[wt.Path]; ok {
+			continue
+		}
+		repo := ops.WorkspaceRepo{
+			Name:          wt.Name,
+			Path:          wt.Path,
+			CurrentBranch: wt.Branch,
+			DefaultBranch: "main",
+		}
+		if wt.Repo != nil {
+			if wt.Repo.Name != "" {
+				repo.Name = wt.Repo.Name
+			}
+			if wt.Repo.DefaultBranch != "" {
+				repo.DefaultBranch = wt.Repo.DefaultBranch
+			}
+			repo.Remote = wt.Repo.Remote
+		}
+		byPath[wt.Path] = repo
+	}
+
+	repos := make([]ops.WorkspaceRepo, 0, len(byPath))
+	for _, repo := range byPath {
+		repos = append(repos, repo)
+	}
+	sort.Slice(repos, func(i, j int) bool {
+		return repos[i].Name < repos[j].Name
+	})
+	return repos
 }
 
 func (g *GitOpsImpl) Reset(worktreePath, worktreeName, targetBranch string, force, push bool) (*ops.GitResetResult, error) {

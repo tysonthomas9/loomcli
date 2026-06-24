@@ -100,6 +100,53 @@ func TestDiscoverAuthMode_OIDC(t *testing.T) {
 	}
 }
 
+func TestDiscoverAuthMode_OIDCEmptyAuthURLUsesServerProxy(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("LOOM_CONFIG_DIR", tmpDir)
+
+	stderr = io.Discard
+	defer func() { stderr = os.Stderr }()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/api/config":
+			json.NewEncoder(w).Encode(AuthMode{Mode: "oidc"})
+		case "/api/auth/device/code":
+			json.NewEncoder(w).Encode(DeviceCodeResponse{
+				DeviceCode:      "proxy-device-code",
+				UserCode:        "PROXY-1234",
+				VerificationURI: "https://auth.example.com/device",
+				ExpiresIn:       300,
+				Interval:        1,
+			})
+		case "/api/auth/device/token":
+			json.NewEncoder(w).Encode(deviceTokenResponse{ //nolint:gosec // G117: test value, not a real secret
+				AccessToken: "proxy-jwt-token",
+				TokenType:   "bearer",
+				ExpiresIn:   900,
+			})
+		default:
+			t.Errorf("unexpected path: %s", r.URL.Path)
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	c, err := New(Config{ServerURL: srv.URL})
+	if err != nil {
+		t.Fatalf("New() error: %v", err)
+	}
+	defer c.Close()
+
+	if c.authMode.AuthURL != srv.URL {
+		t.Errorf("expected same-origin auth_url %q, got %q", srv.URL, c.authMode.AuthURL)
+	}
+	if c.token != "proxy-jwt-token" {
+		t.Errorf("expected token 'proxy-jwt-token', got %q", c.token)
+	}
+}
+
 func TestDiscoverAuthMode_ServerDown(t *testing.T) {
 	stderr = io.Discard
 	defer func() { stderr = os.Stderr }()

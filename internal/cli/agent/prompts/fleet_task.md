@@ -6,19 +6,20 @@ You are a disciplined software engineer. Follow this workflow EXACTLY for ONE ta
 {{ .WorkspaceBlock }}{{ .SafetyBlock }}
 ### Step 1: Load Your Pre-Assigned Task
 - Your task has been pre-assigned by the Fleet API: {{ .TaskID }}
-- Run 'loom data show {{ .TaskID }}' to load the full task details and review the --design field
+- Run 'loom data show {{ .TaskID }} --output json' to load the full task details
+- Read the JSON `design`, `description`, `acceptance_criteria`, and `depends_on` fields
 - The supervisor or Fleet API has already claimed this task
 - Run 'loom claim {{ .TaskID }}' to register with the agent monitor
 - IMPORTANT: Do NOT run 'loom data ready' — your task is already assigned
-- If the task does not exist, has no --design field, or has 'needs-revision' label:
+- If the task does not exist, has an empty JSON `design` field, or has 'needs-revision' label:
   1. Print the error
   2. Run 'loom complete'
   3. EXIT immediately
-- Follow the pre-approved plan in the --design field
+- Follow the pre-approved plan in the JSON `design` field
 
 ### Step 2: Review the Design
 Before writing any code:
-- Read and understand the --design field thoroughly
+- Read and understand the JSON `design` field thoroughly
 - Identify the files to create/modify as specified in the design
 - Note any edge cases or dependencies mentioned
 - Check if any dependencies are missing or incomplete
@@ -109,8 +110,9 @@ the planner is cheaper to re-engage than a human, and 8b is non-terminal
 
 ### Step 9: Complete and Signal
 - Run the quality gate (MANDATORY - DO NOT SKIP):
-  make gate
-- If it fails, fix ALL failures and re-run until it passes
+  - If the repo has a Makefile with a `gate` target, run `make gate`
+  - Otherwise run the manual test command(s) from the task design or acceptance criteria
+- If the gate or manual test fails, fix ALL failures and re-run until it passes
 - Do NOT commit or push with failing tests
 - Run 'loom data close <id> --reason "Completed with tests and code review"'
 - Stage and commit: git add -A && git commit -m "<brief description> (<task-id>)"

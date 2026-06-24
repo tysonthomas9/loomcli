@@ -1,11 +1,19 @@
-// Package memstore provides an in-memory implementation of store.Store.
+// Package memstore provides a test-only in-memory implementation of store.Store.
 //
-// Used by tests and during early development before the fleet-db HTTP
-// client (internal/infra/fleetdb) is wired up. Not safe for production
-// — state is lost when the process exits.
+// Runtime code must use the fleet-db HTTP client. Local mode talks to an
+// embedded fleet-db subprocess backed by Redis/miniredis; cloud mode talks to a
+// fleet-db service backed by Redis/Postgres. This package exists only for unit
+// tests that need a lightweight store double.
 package memstore
 
-import "github.com/tysonthomas9/loomcli/internal/store"
+import (
+	"flag"
+	"os"
+	"path/filepath"
+	"strings"
+
+	"github.com/tysonthomas9/loomcli/internal/store"
+)
 
 // Store implements store.Store with all data held in memory. Safe for
 // concurrent use across goroutines. Each entity store carries its own
@@ -24,14 +32,50 @@ type Store struct {
 	leases     *agentLeaseStore
 	ownership  *agentOwnershipLeaseStore
 	commands   *agentCommandStore
+	inbox      *agentInboxMessageStore
+	drivers    *driverStore
+	versions   *driverVersionStore
+	profiles   *workerProfileStore
+	services   *agentServiceStore
+	bindings   *triggerBindingStore
+	events     *triggerEventStore
+	deliveries *triggerDeliveryStore
+	routes     *triggerRouteStore
+	runs       *driverRunStore
+	steps      *driverStepStore
+	taskRuns   *taskRunStore
 	workers    *workerStore
 	roles      *roleStore
 	daemon     *daemonStore
 }
 
-// New constructs an empty in-memory store. Tests call this directly;
-// production code uses internal/infra/fleetdb.New instead.
+// New constructs an empty in-memory store for tests.
+//
+// Production code uses internal/infra/fleetdb.New instead. Calling New outside
+// a Go test process panics so memstore cannot become a real runtime control
+// plane by accident.
 func New() *Store {
+	requireTestProcess()
+
+	drivers := newDriverStore()
+	versions := newDriverVersionStore(drivers)
+	profiles := newWorkerProfileStore()
+	roles := newRoleStore()
+	services := newAgentServiceStore(roles, profiles)
+	bindings := newTriggerBindingStore(versions, services)
+	services.bindings = bindings
+	roles.services = services
+	profiles.services = services
+	artifacts := newArtifactStore()
+	runs := newDriverRunStore(versions, bindings)
+	steps := newDriverStepStore(runs)
+	taskRuns := newTaskRunStore(runs, steps, artifacts, profiles)
+	runs.steps = steps
+	runs.taskRuns = taskRuns
+	steps.taskRuns = taskRuns
+	events := newTriggerEventStore()
+	deliveries := newTriggerDeliveryStore()
+	routes := &triggerRouteStore{bindings: bindings, events: events, deliveries: deliveries, runs: runs}
 	return &Store{
 		workspaces: newWorkspaceStore(),
 		repos:      newRepoStore(),
@@ -39,14 +83,40 @@ func New() *Store {
 		nodes:      newNodeStore(),
 		sessions:   newAgentSessionStore(),
 		terminals:  newTerminalSessionStore(),
-		artifacts:  newArtifactStore(),
+		artifacts:  artifacts,
 		leases:     newAgentLeaseStore(),
 		ownership:  newAgentOwnershipLeaseStore(),
 		commands:   newAgentCommandStore(),
+		inbox:      newAgentInboxMessageStore(),
+		drivers:    drivers,
+		versions:   versions,
+		profiles:   profiles,
+		services:   services,
+		bindings:   bindings,
+		events:     events,
+		deliveries: deliveries,
+		routes:     routes,
+		runs:       runs,
+		steps:      steps,
+		taskRuns:   taskRuns,
 		workers:    newWorkerStore(),
-		roles:      newRoleStore(),
+		roles:      roles,
 		daemon:     newDaemonStore(),
 	}
+}
+
+func requireTestProcess() {
+	if runningUnderGoTest() {
+		return
+	}
+	panic("memstore is test-only; runtime code must use fleet-db over HTTP")
+}
+
+func runningUnderGoTest() bool {
+	if strings.HasSuffix(filepath.Base(os.Args[0]), ".test") {
+		return true
+	}
+	return flag.Lookup("test.v") != nil
 }
 
 // clonePtr returns a copy of *p, or nil if p is nil. Used by the
@@ -83,6 +153,30 @@ func (s *Store) AgentLeases() store.AgentLeaseStore { return s.leases }
 func (s *Store) AgentOwnershipLeases() store.AgentOwnershipLeaseStore { return s.ownership }
 
 func (s *Store) AgentCommands() store.AgentCommandStore { return s.commands }
+
+func (s *Store) AgentInboxMessages() store.AgentInboxMessageStore { return s.inbox }
+
+func (s *Store) Drivers() store.DriverStore { return s.drivers }
+
+func (s *Store) DriverVersions() store.DriverVersionStore { return s.versions }
+
+func (s *Store) WorkerProfiles() store.WorkerProfileStore { return s.profiles }
+
+func (s *Store) AgentServices() store.AgentServiceStore { return s.services }
+
+func (s *Store) TriggerBindings() store.TriggerBindingStore { return s.bindings }
+
+func (s *Store) TriggerEvents() store.TriggerEventStore { return s.events }
+
+func (s *Store) TriggerDeliveries() store.TriggerDeliveryStore { return s.deliveries }
+
+func (s *Store) TriggerRoutes() store.TriggerRouteDispatcher { return s.routes }
+
+func (s *Store) DriverRuns() store.DriverRunStore { return s.runs }
+
+func (s *Store) DriverSteps() store.DriverStepStore { return s.steps }
+
+func (s *Store) TaskRuns() store.TaskRunStore { return s.taskRuns }
 
 // Workers returns the WorkerStore.
 func (s *Store) Workers() store.WorkerStore { return s.workers }

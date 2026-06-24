@@ -87,8 +87,8 @@ export interface TerminalInstanceProps {
   onOutput?: () => void;
   onBackendCrash?: (reason: string) => void;
   onTerminalFocus?: (() => void) | undefined;
-  /** When set, connects to the agent terminal WebSocket instead of the regular terminal. */
-  agentName?: string | undefined;
+  /** Whether user input should be forwarded to the backing PTY. */
+  writable?: boolean | undefined;
   /**
    * Liveness hint from the backend's tab metadata. When explicitly
    * `false`, the auto-connect on mount is skipped and the overlay goes
@@ -99,6 +99,8 @@ export interface TerminalInstanceProps {
   ptyAlive?: boolean | undefined;
   /** When true, stale PTYs are automatically replaced with a fresh shell. */
   autoStartStaleSession?: boolean | undefined;
+  /** When false, unexpected disconnects stop at the reconnect affordance. */
+  autoReconnect?: boolean | undefined;
 }
 
 export interface TerminalInstanceHandle {
@@ -124,9 +126,10 @@ export const TerminalInstance = forwardRef<
     onOutput,
     onBackendCrash,
     onTerminalFocus,
-    agentName,
+    writable = true,
     ptyAlive,
     autoStartStaleSession,
+    autoReconnect = true,
   },
   ref,
 ) {
@@ -225,6 +228,8 @@ export const TerminalInstance = forwardRef<
   const [connectionState, setConnectionState] =
     useState<ConnectionState>("disconnected");
   const [readyVersion, setReadyVersion] = useState(0);
+  const isActiveRef = useRef(isActive);
+  isActiveRef.current = isActive;
 
   // Stable refs for parent callbacks so the lifecycle effect's dep array
   // stays minimal.
@@ -260,7 +265,7 @@ export const TerminalInstance = forwardRef<
   // doConnect is defined below but `startReconnectLoop` needs a stable
   // reference to it. A ref avoids the circular-dep dance and keeps the
   // reconnect loop calling the latest doConnect even if its closure over
-  // workspaceId / sessionName / agentName re-memoises.
+  // workspaceId / sessionName re-memoises.
   const doConnectRef = useRef<
     ((opts?: { onOutcome?: (ok: boolean) => void }) => void) | null
   >(null);
@@ -330,16 +335,21 @@ export const TerminalInstance = forwardRef<
           // Only start a fresh reconnect loop if none is running. If one is
           // already running, startAutoReconnect's own backoff handles the
           // retry — we just wait for the next attempt.
-          if (!reconnectCancelRef.current) {
+          if (autoReconnect && !reconnectCancelRef.current) {
             const config = hasConnectedRef.current
               ? undefined
               : INITIAL_CONNECT_CONFIG;
             startReconnectLoop(config);
+          } else if (!autoReconnect) {
+            clearReconnectTimers();
+            onReconnectStateChangeRef.current?.(null);
+            if (hasConnectedRef.current) {
+              setConnectionState("session_ended");
+            }
           }
         },
         () => onOutputRef.current?.(),
         (reason) => onBackendCrashRef.current?.(reason),
-        agentName,
         // onSessionKilled — server told us the session is gone; do not reconnect.
         () => {
           beingKilledRef.current = true;
@@ -353,11 +363,11 @@ export const TerminalInstance = forwardRef<
     [
       workspaceId,
       sessionName,
-      agentName,
       write,
       clearReconnectTimers,
       syncViewportToBottom,
       startReconnectLoop,
+      autoReconnect,
     ],
   );
 
@@ -416,6 +426,7 @@ export const TerminalInstance = forwardRef<
     // fire to re-set it, so write() would silently drop every replayed
     // byte. Restore from the still-alive TerminalHandle.
     if (
+      isActiveRef.current &&
       wtermReadyRef.current &&
       (ptyAlive !== false || autoStartStaleSession)
     ) {
@@ -428,6 +439,7 @@ export const TerminalInstance = forwardRef<
       doConnectRef.current?.();
     }
     return () => {
+      beingKilledRef.current = true;
       wtermInstanceRef.current = null;
       pendingRendererWritesRef.current = [];
       clearReconnectTimers();
@@ -497,7 +509,11 @@ export const TerminalInstance = forwardRef<
           wt.resize(measured.cols, measured.rows);
         }
       }
-      if (!wsCleanupRef.current && !isSocketOpenOrConnecting(wsRef.current)) {
+      if (
+        isActiveRef.current &&
+        !wsCleanupRef.current &&
+        !isSocketOpenOrConnecting(wsRef.current)
+      ) {
         doConnectRef.current?.();
       }
     },
@@ -537,12 +553,16 @@ export const TerminalInstance = forwardRef<
     readyVersion,
   ]);
 
-  const handleData = useCallback((data: string) => {
-    const ws = wsRef.current;
-    if (ws?.readyState === WebSocket.OPEN) {
-      ws.send(data);
-    }
-  }, []);
+  const handleData = useCallback(
+    (data: string) => {
+      if (!writable) return;
+      const ws = wsRef.current;
+      if (ws?.readyState === WebSocket.OPEN) {
+        ws.send(data);
+      }
+    },
+    [writable],
+  );
 
   const handleResize = useCallback((cols: number, rows: number) => {
     terminalSizeRef.current = { cols, rows };
@@ -646,13 +666,14 @@ export const TerminalInstance = forwardRef<
         onTerminalFocusRef.current?.();
       },
       pasteText: (text: string) => {
+        if (!writable) return;
         const ws = wsRef.current;
         if (ws?.readyState === WebSocket.OPEN) {
           ws.send(text);
         }
       },
     }),
-    [focus, clearReconnectTimers],
+    [focus, clearReconnectTimers, writable],
   );
 
   return (

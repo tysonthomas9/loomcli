@@ -125,7 +125,8 @@ describe("SessionDetailView", () => {
     it("renders stat cards for outcome, exit, duration, tokens, cost", () => {
       render(<SessionDetailView taskId="task-1" session={defaultSession} />);
       expect(screen.getByText("Outcome")).toBeInTheDocument();
-      expect(screen.getByText("completed")).toBeInTheDocument();
+      // Status renders via the shared formatStatusLabel (title-cased).
+      expect(screen.getByText("Completed")).toBeInTheDocument();
       expect(screen.getByText("Exit")).toBeInTheDocument();
       expect(screen.getByText("0 (success)")).toBeInTheDocument();
       expect(screen.getByText("Duration")).toBeInTheDocument();

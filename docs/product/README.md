@@ -1,7 +1,7 @@
 # Agent Execution Product Docs
 
 **Status:** Draft
-**Date:** 2026-05-04
+**Date:** 2026-05-11
 
 This folder captures the product plan for making agent execution visible,
 controllable, and debuggable across local and cloud/containerized runs.
@@ -21,25 +21,34 @@ Read these in order:
    during development and early release packaging.
 5. `agent-run-ux-spec.md`
    What the UI should show for agents, sessions, task timelines, logs,
-   diffs, failures, empty states, and stale/offline states.
-6. `session-artifact-contract.md`
+   diffs, failures, empty states, stale/offline states, and ephemeral worker
+   history/cleanup.
+6. `lead-agent-epic-runner-spec.md`
+   How first-class lead agents run one epic at a time through the existing
+   terminal UI, with scoped workers, single-task ephemeral worker attempts,
+   epic/task panels, and worker history.
+7. `session-artifact-contract.md`
    The evidence every run must leave behind: transcript, logs, token usage,
-   diff, commit, test result, and error class.
-7. `daemon-agent-runtime-architecture.md`
+   diff, commit, test result, cleanup metadata, and error class.
+8. `daemon-agent-runtime-architecture.md`
    How the daemon, agent runner, local mode, cloud mode, ownership leases,
    and decentralized task claiming fit together.
-8. `agent-lifecycle-state-machine.md`
+9. `agent-lifecycle-state-machine.md`
    Canonical agent, run, and task states plus allowed transitions.
-9. `failure-modes-recovery-ux.md`
+10. `failure-modes-recovery-ux.md`
    User-visible failure states and recovery actions.
-10. `container-runner-mvp-spec.md`
+11. `container-runner-mvp-spec.md`
    Podman/container runner behavior after local mode is reliable.
-11. `dogfood-agent-execution-test-plan.md`
+12. `dogfood-agent-execution-test-plan.md`
    End-to-end dogfood scenarios used to validate the product.
 12. `web-onboarding-spec.md`
    Web UI redesign that turns the new-user journey from `loom serve` into a
    guided, dismissable checklist with backend-status visibility, scoped to
    the local-dev audience.
+13. `pr-review-spec.md`
+   Pull requests as a first-class object: the loom-first review queue, a
+   full-screen GitHub-style PR page with inline/split diff and review
+   decisions, and the persisted PR review agent.
 
 Related design docs:
 

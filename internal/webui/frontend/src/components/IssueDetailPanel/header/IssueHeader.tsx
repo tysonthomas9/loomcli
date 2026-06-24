@@ -3,24 +3,13 @@
  * Header area with ID, status badge, priority, close button, and title for IssueDetailPanel.
  */
 
-import type { Issue, IssueDetails, Priority } from "@/types";
+import type { Issue, IssueDetails } from "@/types";
 import type { Status } from "@/types/issue";
 
 import { EditableTitle } from "@/components/EditableTitle";
 import { formatStatusLabel } from "@/utils/issue";
 import { StatusDropdown } from "@/components/StatusDropdown";
 import styles from "./IssueHeader.module.css";
-
-/**
- * Priority display info.
- */
-const PRIORITY_LABELS: Record<number, { short: string; full: string }> = {
-  0: { short: "P0", full: "Critical" },
-  1: { short: "P1", full: "High" },
-  2: { short: "P2", full: "Medium" },
-  3: { short: "P3", full: "Normal" },
-  4: { short: "P4", full: "Backlog" },
-};
 
 /**
  * Props for the IssueHeader component.
@@ -38,18 +27,22 @@ export interface IssueHeaderProps {
   onStatusChange?: (status: Status) => Promise<void>;
   /** Whether status is being saved */
   isSavingStatus?: boolean;
-  /** Whether to show priority badge in header */
-  showPriority?: boolean;
-  /** Callback when priority badge is clicked */
-  onPriorityClick?: () => void;
   /** Callback when copy-link button is clicked */
   onCopyLink?: () => void;
   /** Callback when move button is clicked */
   onMove?: () => void;
+  /** Callback when epic runner button is clicked */
+  onRunEpic?: () => void;
+  /** Whether the epic runner request is in flight */
+  isRunningEpic?: boolean;
   /** Full PR URL (e.g., https://github.com/owner/repo/pull/42) */
   prUrl?: string;
   /** Extracted PR number (e.g., "42") */
   prNumber?: string;
+  /** Whether the panel is currently maximized to full-page */
+  isMaximized?: boolean;
+  /** Toggle the panel between slide-over and full-page (omit to hide control) */
+  onToggleMaximize?: () => void;
   /** Enable sticky mode styling */
   sticky?: boolean;
   /** Additional CSS class name */
@@ -69,7 +62,6 @@ function formatStatus(status?: string): string {
  * Contains:
  * - Issue ID
  * - Status badge with semantic colors
- * - Priority badge (optional)
  * - Close button
  * - Title (editable when onTitleSave provided)
 
@@ -81,22 +73,20 @@ export function IssueHeader({
   isSavingTitle,
   onStatusChange,
   isSavingStatus,
-  showPriority,
-  onPriorityClick,
   onCopyLink,
   onMove,
+  onRunEpic,
+  isRunningEpic,
   prUrl,
   prNumber,
+  isMaximized,
+  onToggleMaximize,
   sticky,
   className,
 }: IssueHeaderProps): JSX.Element {
   const rootClassName = [styles.issueHeader, sticky && styles.sticky, className]
     .filter(Boolean)
     .join(" ");
-
-  const priority = issue.priority as Priority;
-  const defaultPriorityInfo = { short: "P2", full: "Medium" };
-  const priorityInfo = PRIORITY_LABELS[priority] ?? defaultPriorityInfo;
 
   return (
     <header className={rootClassName} data-testid="issue-header">
@@ -119,18 +109,6 @@ export function IssueHeader({
           >
             {formatStatus(issue.status)}
           </span>
-        )}
-        {showPriority && (
-          <button
-            type="button"
-            className={styles.priorityBadge}
-            data-priority={priority}
-            onClick={onPriorityClick}
-            aria-label={`Priority: ${priorityInfo.short} - ${priorityInfo.full}`}
-            data-testid="header-priority-badge"
-          >
-            {priorityInfo.short}
-          </button>
         )}
         {prUrl && prNumber && (
           <>
@@ -157,6 +135,29 @@ export function IssueHeader({
               → merge #{prNumber}
             </a>
           </>
+        )}
+        {onRunEpic && (
+          <button
+            type="button"
+            className={styles.runEpicButton}
+            onClick={onRunEpic}
+            disabled={isRunningEpic}
+            aria-label={
+              isRunningEpic ? "Starting epic runner" : "Run epic workflow"
+            }
+            data-testid="header-run-epic-button"
+          >
+            <svg
+              width="14"
+              height="14"
+              viewBox="0 0 16 16"
+              fill="none"
+              aria-hidden="true"
+            >
+              <path d="M5 3.5v9l7-4.5-7-4.5z" fill="currentColor" />
+            </svg>
+            <span>{isRunningEpic ? "Starting" : "Run epic"}</span>
+          </button>
         )}
         {onCopyLink && (
           <button
@@ -206,6 +207,46 @@ export function IssueHeader({
                 strokeLinejoin="round"
               />
             </svg>
+          </button>
+        )}
+        {onToggleMaximize && (
+          <button
+            type="button"
+            className={styles.maximizeButton}
+            onClick={onToggleMaximize}
+            aria-label={
+              isMaximized ? "Exit full screen" : "Expand to full screen"
+            }
+            aria-pressed={isMaximized}
+            data-testid="header-maximize-button"
+          >
+            {isMaximized ? (
+              <svg
+                width="18"
+                height="18"
+                viewBox="0 0 16 16"
+                fill="none"
+                aria-hidden="true"
+              >
+                <path
+                  d="M4 10H2v4h4v-2H4v-2zM2 6h2V4h2V2H2v4zm10 6h-2v2h4v-4h-2v2zM10 2v2h2v2h2V2h-4z"
+                  fill="currentColor"
+                />
+              </svg>
+            ) : (
+              <svg
+                width="18"
+                height="18"
+                viewBox="0 0 16 16"
+                fill="none"
+                aria-hidden="true"
+              >
+                <path
+                  d="M2 10h2v2h2v2H2v-4zm2-4H2V2h4v2H4v2zm8 6h-2v2h4v-4h-2v2zM10 2v2h2v2h2V2h-4z"
+                  fill="currentColor"
+                />
+              </svg>
+            )}
           </button>
         )}
         <button

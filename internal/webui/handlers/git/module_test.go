@@ -25,6 +25,7 @@ func TestGitModule_RegisterRoutes(t *testing.T) {
 		{"POST", "/api/workspaces/test-ws/agents/agent1/git/pull"},
 		{"POST", "/api/workspaces/test-ws/agents/agent1/git/sync"},
 		{"POST", "/api/workspaces/test-ws/agents/agent1/git/pr"},
+		{"GET", "/api/workspaces/test-ws/pull-requests"},
 		{"POST", "/api/workspaces/test-ws/agents/agent1/git/reset"},
 		{"GET", "/api/workspaces/test-ws/agents/agent1/git/status"},
 		{"PATCH", "/api/workspaces/test-ws/agents/agent1/git/target"},

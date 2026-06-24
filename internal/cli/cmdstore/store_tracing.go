@@ -12,7 +12,6 @@ import (
 	"context"
 	"errors"
 	"io"
-	"time"
 
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
@@ -49,6 +48,15 @@ func WrapStoreWithTracing(inner store.Store) store.Store {
 		agentLeases:          &tracedAgentLeaseStore{inner: inner.AgentLeases()},
 		agentOwnershipLeases: &tracedAgentOwnershipLeaseStore{inner: inner.AgentOwnershipLeases()},
 		agentCommands:        &tracedAgentCommandStore{inner: inner.AgentCommands()},
+		agentInboxMessages:   &tracedAgentInboxMessageStore{inner: inner.AgentInboxMessages()},
+		drivers:              &tracedDriverStore{inner: inner.Drivers()},
+		driverVersions:       &tracedDriverVersionStore{inner: inner.DriverVersions()},
+		workerProfiles:       &tracedWorkerProfileStore{inner: inner.WorkerProfiles()},
+		agentServices:        &tracedAgentServiceStore{inner: inner.AgentServices()},
+		triggerBindings:      &tracedTriggerBindingStore{inner: inner.TriggerBindings()},
+		driverRuns:           &tracedDriverRunStore{inner: inner.DriverRuns()},
+		driverSteps:          &tracedDriverStepStore{inner: inner.DriverSteps()},
+		taskRuns:             &tracedTaskRunStore{inner: inner.TaskRuns()},
 		workers:              &tracedWorkerStore{inner: inner.Workers()},
 		roles:                &tracedRoleStore{inner: inner.Roles()},
 		daemon:               &tracedDaemonStore{inner: inner.Daemon()},
@@ -67,6 +75,15 @@ type tracedStore struct {
 	agentLeases          *tracedAgentLeaseStore
 	agentOwnershipLeases *tracedAgentOwnershipLeaseStore
 	agentCommands        *tracedAgentCommandStore
+	agentInboxMessages   *tracedAgentInboxMessageStore
+	drivers              *tracedDriverStore
+	driverVersions       *tracedDriverVersionStore
+	workerProfiles       *tracedWorkerProfileStore
+	agentServices        *tracedAgentServiceStore
+	triggerBindings      *tracedTriggerBindingStore
+	driverRuns           *tracedDriverRunStore
+	driverSteps          *tracedDriverStepStore
+	taskRuns             *tracedTaskRunStore
 	workers              *tracedWorkerStore
 	roles                *tracedRoleStore
 	daemon               *tracedDaemonStore
@@ -90,6 +107,36 @@ func (t *tracedStore) AgentOwnershipLeases() store.AgentOwnershipLeaseStore {
 func (t *tracedStore) AgentCommands() store.AgentCommandStore {
 	return t.agentCommands
 }
+func (t *tracedStore) AgentInboxMessages() store.AgentInboxMessageStore {
+	return t.agentInboxMessages
+}
+func (t *tracedStore) Drivers() store.DriverStore { return t.drivers }
+func (t *tracedStore) DriverVersions() store.DriverVersionStore {
+	return t.driverVersions
+}
+func (t *tracedStore) WorkerProfiles() store.WorkerProfileStore {
+	return t.workerProfiles
+}
+func (t *tracedStore) AgentServices() store.AgentServiceStore {
+	return t.agentServices
+}
+func (t *tracedStore) TriggerBindings() store.TriggerBindingStore {
+	return t.triggerBindings
+}
+func (t *tracedStore) TriggerEvents() store.TriggerEventStore {
+	return t.inner.TriggerEvents()
+}
+func (t *tracedStore) TriggerDeliveries() store.TriggerDeliveryStore {
+	return t.inner.TriggerDeliveries()
+}
+func (t *tracedStore) TriggerRoutes() store.TriggerRouteDispatcher {
+	return t.inner.TriggerRoutes()
+}
+func (t *tracedStore) DriverRuns() store.DriverRunStore { return t.driverRuns }
+func (t *tracedStore) DriverSteps() store.DriverStepStore {
+	return t.driverSteps
+}
+func (t *tracedStore) TaskRuns() store.TaskRunStore     { return t.taskRuns }
 func (t *tracedStore) Workers() store.WorkerStore       { return t.workers }
 func (t *tracedStore) Roles() store.RoleStore           { return t.roles }
 func (t *tracedStore) Daemon() store.DaemonProfileStore { return t.daemon }
@@ -122,6 +169,37 @@ func finish(span trace.Span, err error) {
 	span.End()
 }
 
+// traced wraps fn in a `service.Store.<sub>.<method>` span. fn receives
+// the span context; its error (minus context.Canceled) is recorded on the
+// span. Every traced sub-store method below funnels through this (or one
+// of the variants), so the span lifecycle lives in exactly one place.
+func traced[T any](ctx context.Context, sub, method string, fn func(context.Context) (T, error), attrs ...attribute.KeyValue) (T, error) {
+	ctx, span := startStoreSpan(ctx, sub, method, attrs...)
+	out, err := fn(ctx)
+	finish(span, err)
+	return out, err
+}
+
+// tracedList is traced for slice-returning methods; on success it also
+// records the result length as `result.count`.
+func tracedList[T any](ctx context.Context, sub, method string, fn func(context.Context) ([]T, error), attrs ...attribute.KeyValue) ([]T, error) {
+	ctx, span := startStoreSpan(ctx, sub, method, attrs...)
+	out, err := fn(ctx)
+	if err == nil {
+		span.SetAttributes(attribute.Int("result.count", len(out)))
+	}
+	finish(span, err)
+	return out, err
+}
+
+// tracedErr is traced for error-only Delete methods.
+func tracedErr(ctx context.Context, sub string, fn func(context.Context) error, attrs ...attribute.KeyValue) error {
+	ctx, span := startStoreSpan(ctx, sub, "Delete", attrs...)
+	err := fn(ctx)
+	finish(span, err)
+	return err
+}
+
 // storeErrReason maps a domain sentinel to a fixed-set status reason so
 // span status stays low-cardinality. Returns "unknown" for opaque errors.
 func storeErrReason(err error) string {
@@ -136,624 +214,4 @@ func storeErrReason(err error) string {
 		return "conflict"
 	}
 	return "unknown"
-}
-
-// --- WorkspaceStore ---
-
-type tracedWorkspaceStore struct{ inner store.WorkspaceStore }
-
-func (t *tracedWorkspaceStore) Create(ctx context.Context, in store.WorkspaceCreate) (*domain.Workspace, error) {
-	ctx, span := startStoreSpan(ctx, "Workspaces", "Create",
-		attribute.String("loom.workspace", in.Key),
-	)
-	out, err := t.inner.Create(ctx, in)
-	finish(span, err)
-	return out, err
-}
-
-func (t *tracedWorkspaceStore) Get(ctx context.Context, key string) (*domain.Workspace, error) {
-	ctx, span := startStoreSpan(ctx, "Workspaces", "Get",
-		attribute.String("loom.workspace", key),
-	)
-	out, err := t.inner.Get(ctx, key)
-	finish(span, err)
-	return out, err
-}
-
-func (t *tracedWorkspaceStore) GetByName(ctx context.Context, name string) (*domain.Workspace, error) {
-	ctx, span := startStoreSpan(ctx, "Workspaces", "GetByName")
-	out, err := t.inner.GetByName(ctx, name)
-	finish(span, err)
-	return out, err
-}
-
-func (t *tracedWorkspaceStore) List(ctx context.Context) ([]*domain.Workspace, error) {
-	ctx, span := startStoreSpan(ctx, "Workspaces", "List")
-	out, err := t.inner.List(ctx)
-	if err == nil {
-		span.SetAttributes(attribute.Int("result.count", len(out)))
-	}
-	finish(span, err)
-	return out, err
-}
-
-func (t *tracedWorkspaceStore) Update(ctx context.Context, key string, patch store.WorkspaceUpdate) (*domain.Workspace, error) {
-	ctx, span := startStoreSpan(ctx, "Workspaces", "Update",
-		attribute.String("loom.workspace", key),
-	)
-	out, err := t.inner.Update(ctx, key, patch)
-	finish(span, err)
-	return out, err
-}
-
-func (t *tracedWorkspaceStore) Delete(ctx context.Context, key string) error {
-	ctx, span := startStoreSpan(ctx, "Workspaces", "Delete",
-		attribute.String("loom.workspace", key),
-	)
-	err := t.inner.Delete(ctx, key)
-	finish(span, err)
-	return err
-}
-
-// --- RepoStore ---
-
-type tracedRepoStore struct{ inner store.RepoStore }
-
-func (t *tracedRepoStore) Create(ctx context.Context, in store.RepoCreate) (*domain.Repo, error) {
-	ctx, span := startStoreSpan(ctx, "Repos", "Create",
-		attribute.String("loom.workspace", in.WorkspaceKey),
-	)
-	out, err := t.inner.Create(ctx, in)
-	finish(span, err)
-	return out, err
-}
-
-func (t *tracedRepoStore) Get(ctx context.Context, ws, name string) (*domain.Repo, error) {
-	ctx, span := startStoreSpan(ctx, "Repos", "Get",
-		attribute.String("loom.workspace", ws),
-	)
-	out, err := t.inner.Get(ctx, ws, name)
-	finish(span, err)
-	return out, err
-}
-
-func (t *tracedRepoStore) List(ctx context.Context, ws string) ([]*domain.Repo, error) {
-	ctx, span := startStoreSpan(ctx, "Repos", "List",
-		attribute.String("loom.workspace", ws),
-	)
-	out, err := t.inner.List(ctx, ws)
-	if err == nil {
-		span.SetAttributes(attribute.Int("result.count", len(out)))
-	}
-	finish(span, err)
-	return out, err
-}
-
-func (t *tracedRepoStore) Update(ctx context.Context, ws, name string, patch store.RepoUpdate) (*domain.Repo, error) {
-	ctx, span := startStoreSpan(ctx, "Repos", "Update",
-		attribute.String("loom.workspace", ws),
-	)
-	out, err := t.inner.Update(ctx, ws, name, patch)
-	finish(span, err)
-	return out, err
-}
-
-func (t *tracedRepoStore) Delete(ctx context.Context, ws, name string) error {
-	ctx, span := startStoreSpan(ctx, "Repos", "Delete",
-		attribute.String("loom.workspace", ws),
-	)
-	err := t.inner.Delete(ctx, ws, name)
-	finish(span, err)
-	return err
-}
-
-// --- AgentStore ---
-
-type tracedAgentStore struct{ inner store.AgentStore }
-
-func (t *tracedAgentStore) Create(ctx context.Context, in store.AgentCreate) (*domain.Agent, error) {
-	ctx, span := startStoreSpan(ctx, "Agents", "Create",
-		attribute.String("loom.workspace", in.WorkspaceKey),
-		attribute.String("loom.agent", in.Name),
-	)
-	out, err := t.inner.Create(ctx, in)
-	finish(span, err)
-	return out, err
-}
-
-func (t *tracedAgentStore) Get(ctx context.Context, ws, name string) (*domain.Agent, error) {
-	ctx, span := startStoreSpan(ctx, "Agents", "Get",
-		attribute.String("loom.workspace", ws),
-		attribute.String("loom.agent", name),
-	)
-	out, err := t.inner.Get(ctx, ws, name)
-	finish(span, err)
-	return out, err
-}
-
-func (t *tracedAgentStore) List(ctx context.Context, ws string) ([]*domain.Agent, error) {
-	ctx, span := startStoreSpan(ctx, "Agents", "List",
-		attribute.String("loom.workspace", ws),
-	)
-	out, err := t.inner.List(ctx, ws)
-	if err == nil {
-		span.SetAttributes(attribute.Int("result.count", len(out)))
-	}
-	finish(span, err)
-	return out, err
-}
-
-func (t *tracedAgentStore) Update(ctx context.Context, ws, name string, patch store.AgentUpdate) (*domain.Agent, error) {
-	ctx, span := startStoreSpan(ctx, "Agents", "Update",
-		attribute.String("loom.workspace", ws),
-		attribute.String("loom.agent", name),
-	)
-	out, err := t.inner.Update(ctx, ws, name, patch)
-	finish(span, err)
-	return out, err
-}
-
-func (t *tracedAgentStore) Delete(ctx context.Context, ws, name string) error {
-	ctx, span := startStoreSpan(ctx, "Agents", "Delete",
-		attribute.String("loom.workspace", ws),
-		attribute.String("loom.agent", name),
-	)
-	err := t.inner.Delete(ctx, ws, name)
-	finish(span, err)
-	return err
-}
-
-// --- RoleStore ---
-
-type tracedRoleStore struct{ inner store.RoleStore }
-
-func (t *tracedRoleStore) Create(ctx context.Context, in store.RoleCreate) (*domain.Role, error) {
-	ctx, span := startStoreSpan(ctx, "Roles", "Create",
-		attribute.String("loom.workspace", in.WorkspaceKey),
-		attribute.String("loom.role", in.Name),
-	)
-	out, err := t.inner.Create(ctx, in)
-	finish(span, err)
-	return out, err
-}
-
-func (t *tracedRoleStore) Get(ctx context.Context, ws, name string) (*domain.Role, error) {
-	ctx, span := startStoreSpan(ctx, "Roles", "Get",
-		attribute.String("loom.workspace", ws),
-		attribute.String("loom.role", name),
-	)
-	out, err := t.inner.Get(ctx, ws, name)
-	finish(span, err)
-	return out, err
-}
-
-func (t *tracedRoleStore) List(ctx context.Context, ws string) ([]*domain.Role, error) {
-	ctx, span := startStoreSpan(ctx, "Roles", "List",
-		attribute.String("loom.workspace", ws),
-	)
-	out, err := t.inner.List(ctx, ws)
-	if err == nil {
-		span.SetAttributes(attribute.Int("result.count", len(out)))
-	}
-	finish(span, err)
-	return out, err
-}
-
-func (t *tracedRoleStore) Update(ctx context.Context, ws, name string, patch store.RoleUpdate) (*domain.Role, error) {
-	ctx, span := startStoreSpan(ctx, "Roles", "Update",
-		attribute.String("loom.workspace", ws),
-		attribute.String("loom.role", name),
-	)
-	out, err := t.inner.Update(ctx, ws, name, patch)
-	finish(span, err)
-	return out, err
-}
-
-func (t *tracedRoleStore) Delete(ctx context.Context, ws, name string) error {
-	ctx, span := startStoreSpan(ctx, "Roles", "Delete",
-		attribute.String("loom.workspace", ws),
-		attribute.String("loom.role", name),
-	)
-	err := t.inner.Delete(ctx, ws, name)
-	finish(span, err)
-	return err
-}
-
-// --- NodeStore ---
-
-type tracedNodeStore struct{ inner store.NodeStore }
-
-func (t *tracedNodeStore) Create(ctx context.Context, in store.NodeCreate) (*domain.Node, error) {
-	ctx, span := startStoreSpan(ctx, "Nodes", "Create",
-		attribute.String("loom.workspace", in.WorkspaceKey),
-	)
-	out, err := t.inner.Create(ctx, in)
-	finish(span, err)
-	return out, err
-}
-
-func (t *tracedNodeStore) Get(ctx context.Context, ws, nodeID string) (*domain.Node, error) {
-	ctx, span := startStoreSpan(ctx, "Nodes", "Get",
-		attribute.String("loom.workspace", ws),
-	)
-	out, err := t.inner.Get(ctx, ws, nodeID)
-	finish(span, err)
-	return out, err
-}
-
-func (t *tracedNodeStore) List(ctx context.Context, ws string) ([]*domain.Node, error) {
-	ctx, span := startStoreSpan(ctx, "Nodes", "List",
-		attribute.String("loom.workspace", ws),
-	)
-	out, err := t.inner.List(ctx, ws)
-	if err == nil {
-		span.SetAttributes(attribute.Int("result.count", len(out)))
-	}
-	finish(span, err)
-	return out, err
-}
-
-func (t *tracedNodeStore) Heartbeat(ctx context.Context, ws, nodeID string, ttl time.Duration) (*domain.Node, error) {
-	ctx, span := startStoreSpan(ctx, "Nodes", "Heartbeat",
-		attribute.String("loom.workspace", ws),
-		attribute.Int64("ttl_ms", ttl.Milliseconds()),
-	)
-	out, err := t.inner.Heartbeat(ctx, ws, nodeID, ttl)
-	finish(span, err)
-	return out, err
-}
-
-func (t *tracedNodeStore) Update(ctx context.Context, ws, nodeID string, patch store.NodeUpdate) (*domain.Node, error) {
-	ctx, span := startStoreSpan(ctx, "Nodes", "Update",
-		attribute.String("loom.workspace", ws),
-	)
-	out, err := t.inner.Update(ctx, ws, nodeID, patch)
-	finish(span, err)
-	return out, err
-}
-
-// --- AgentSessionStore ---
-
-type tracedAgentSessionStore struct{ inner store.AgentSessionStore }
-
-func (t *tracedAgentSessionStore) Create(ctx context.Context, in store.AgentSessionCreate) (*domain.AgentSession, error) {
-	ctx, span := startStoreSpan(ctx, "AgentSessions", "Create",
-		attribute.String("loom.workspace", in.WorkspaceKey),
-	)
-	out, err := t.inner.Create(ctx, in)
-	finish(span, err)
-	return out, err
-}
-
-func (t *tracedAgentSessionStore) Get(ctx context.Context, ws, sessionID string) (*domain.AgentSession, error) {
-	ctx, span := startStoreSpan(ctx, "AgentSessions", "Get",
-		attribute.String("loom.workspace", ws),
-	)
-	out, err := t.inner.Get(ctx, ws, sessionID)
-	finish(span, err)
-	return out, err
-}
-
-func (t *tracedAgentSessionStore) List(ctx context.Context, ws string, filter store.AgentSessionFilter) ([]*domain.AgentSession, error) {
-	ctx, span := startStoreSpan(ctx, "AgentSessions", "List",
-		attribute.String("loom.workspace", ws),
-	)
-	out, err := t.inner.List(ctx, ws, filter)
-	if err == nil {
-		span.SetAttributes(attribute.Int("result.count", len(out)))
-	}
-	finish(span, err)
-	return out, err
-}
-
-func (t *tracedAgentSessionStore) Heartbeat(ctx context.Context, ws, sessionID string) (*domain.AgentSession, error) {
-	ctx, span := startStoreSpan(ctx, "AgentSessions", "Heartbeat",
-		attribute.String("loom.workspace", ws),
-	)
-	out, err := t.inner.Heartbeat(ctx, ws, sessionID)
-	finish(span, err)
-	return out, err
-}
-
-func (t *tracedAgentSessionStore) Update(ctx context.Context, ws, sessionID string, patch store.AgentSessionUpdate) (*domain.AgentSession, error) {
-	ctx, span := startStoreSpan(ctx, "AgentSessions", "Update",
-		attribute.String("loom.workspace", ws),
-	)
-	out, err := t.inner.Update(ctx, ws, sessionID, patch)
-	finish(span, err)
-	return out, err
-}
-
-// --- TerminalSessionStore ---
-
-type tracedTerminalSessionStore struct{ inner store.TerminalSessionStore }
-
-func (t *tracedTerminalSessionStore) Create(ctx context.Context, in store.TerminalSessionCreate) (*domain.TerminalSession, error) {
-	ctx, span := startStoreSpan(ctx, "TerminalSessions", "Create",
-		attribute.String("loom.workspace", in.WorkspaceKey),
-	)
-	out, err := t.inner.Create(ctx, in)
-	finish(span, err)
-	return out, err
-}
-
-func (t *tracedTerminalSessionStore) Get(ctx context.Context, ws, terminalID string) (*domain.TerminalSession, error) {
-	ctx, span := startStoreSpan(ctx, "TerminalSessions", "Get",
-		attribute.String("loom.workspace", ws),
-	)
-	out, err := t.inner.Get(ctx, ws, terminalID)
-	finish(span, err)
-	return out, err
-}
-
-func (t *tracedTerminalSessionStore) List(ctx context.Context, ws string, filter store.TerminalSessionFilter) ([]*domain.TerminalSession, error) {
-	ctx, span := startStoreSpan(ctx, "TerminalSessions", "List",
-		attribute.String("loom.workspace", ws),
-	)
-	out, err := t.inner.List(ctx, ws, filter)
-	if err == nil {
-		span.SetAttributes(attribute.Int("result.count", len(out)))
-	}
-	finish(span, err)
-	return out, err
-}
-
-func (t *tracedTerminalSessionStore) Update(ctx context.Context, ws, terminalID string, patch store.TerminalSessionUpdate) (*domain.TerminalSession, error) {
-	ctx, span := startStoreSpan(ctx, "TerminalSessions", "Update",
-		attribute.String("loom.workspace", ws),
-	)
-	out, err := t.inner.Update(ctx, ws, terminalID, patch)
-	finish(span, err)
-	return out, err
-}
-
-// --- ArtifactStore ---
-
-type tracedArtifactStore struct{ inner store.ArtifactStore }
-
-func (t *tracedArtifactStore) Create(ctx context.Context, in store.ArtifactCreate) (*domain.Artifact, error) {
-	ctx, span := startStoreSpan(ctx, "Artifacts", "Create",
-		attribute.String("loom.workspace", in.WorkspaceKey),
-	)
-	out, err := t.inner.Create(ctx, in)
-	finish(span, err)
-	return out, err
-}
-
-func (t *tracedArtifactStore) Get(ctx context.Context, ws, artifactID string) (*domain.Artifact, error) {
-	ctx, span := startStoreSpan(ctx, "Artifacts", "Get",
-		attribute.String("loom.workspace", ws),
-	)
-	out, err := t.inner.Get(ctx, ws, artifactID)
-	finish(span, err)
-	return out, err
-}
-
-func (t *tracedArtifactStore) List(ctx context.Context, ws string, filter store.ArtifactFilter) ([]*domain.Artifact, error) {
-	ctx, span := startStoreSpan(ctx, "Artifacts", "List",
-		attribute.String("loom.workspace", ws),
-	)
-	out, err := t.inner.List(ctx, ws, filter)
-	if err == nil {
-		span.SetAttributes(attribute.Int("result.count", len(out)))
-	}
-	finish(span, err)
-	return out, err
-}
-
-func (t *tracedArtifactStore) Update(ctx context.Context, ws, artifactID string, patch store.ArtifactUpdate) (*domain.Artifact, error) {
-	ctx, span := startStoreSpan(ctx, "Artifacts", "Update",
-		attribute.String("loom.workspace", ws),
-	)
-	out, err := t.inner.Update(ctx, ws, artifactID, patch)
-	finish(span, err)
-	return out, err
-}
-
-// --- AgentLeaseStore ---
-
-type tracedAgentLeaseStore struct{ inner store.AgentLeaseStore }
-
-func (t *tracedAgentLeaseStore) Create(ctx context.Context, in store.AgentLeaseCreate) (*domain.AgentLease, error) {
-	ctx, span := startStoreSpan(ctx, "AgentLeases", "Create",
-		attribute.String("loom.workspace", in.WorkspaceKey),
-	)
-	out, err := t.inner.Create(ctx, in)
-	finish(span, err)
-	return out, err
-}
-
-func (t *tracedAgentLeaseStore) Get(ctx context.Context, ws, leaseID string) (*domain.AgentLease, error) {
-	ctx, span := startStoreSpan(ctx, "AgentLeases", "Get",
-		attribute.String("loom.workspace", ws),
-	)
-	out, err := t.inner.Get(ctx, ws, leaseID)
-	finish(span, err)
-	return out, err
-}
-
-func (t *tracedAgentLeaseStore) List(ctx context.Context, ws string, filter store.AgentLeaseFilter) ([]*domain.AgentLease, error) {
-	ctx, span := startStoreSpan(ctx, "AgentLeases", "List",
-		attribute.String("loom.workspace", ws),
-	)
-	out, err := t.inner.List(ctx, ws, filter)
-	if err == nil {
-		span.SetAttributes(attribute.Int("result.count", len(out)))
-	}
-	finish(span, err)
-	return out, err
-}
-
-func (t *tracedAgentLeaseStore) Heartbeat(ctx context.Context, ws, leaseID, token string, ttl time.Duration) (*domain.AgentLease, error) {
-	ctx, span := startStoreSpan(ctx, "AgentLeases", "Heartbeat",
-		attribute.String("loom.workspace", ws),
-		attribute.Int64("ttl_ms", ttl.Milliseconds()),
-	)
-	out, err := t.inner.Heartbeat(ctx, ws, leaseID, token, ttl)
-	finish(span, err)
-	return out, err
-}
-
-func (t *tracedAgentLeaseStore) Release(ctx context.Context, ws, leaseID, token string) (*domain.AgentLease, error) {
-	ctx, span := startStoreSpan(ctx, "AgentLeases", "Release",
-		attribute.String("loom.workspace", ws),
-	)
-	out, err := t.inner.Release(ctx, ws, leaseID, token)
-	finish(span, err)
-	return out, err
-}
-
-// --- AgentOwnershipLeaseStore ---
-
-type tracedAgentOwnershipLeaseStore struct {
-	inner store.AgentOwnershipLeaseStore
-}
-
-func (t *tracedAgentOwnershipLeaseStore) Acquire(ctx context.Context, in store.AgentOwnershipLeaseAcquire) (*domain.AgentOwnershipLease, error) {
-	ctx, span := startStoreSpan(ctx, "AgentOwnershipLeases", "Acquire",
-		attribute.String("loom.workspace", in.WorkspaceKey),
-	)
-	out, err := t.inner.Acquire(ctx, in)
-	finish(span, err)
-	return out, err
-}
-
-func (t *tracedAgentOwnershipLeaseStore) Get(ctx context.Context, ws, agentID string) (*domain.AgentOwnershipLease, error) {
-	ctx, span := startStoreSpan(ctx, "AgentOwnershipLeases", "Get",
-		attribute.String("loom.workspace", ws),
-	)
-	out, err := t.inner.Get(ctx, ws, agentID)
-	finish(span, err)
-	return out, err
-}
-
-func (t *tracedAgentOwnershipLeaseStore) List(ctx context.Context, ws string, filter store.AgentOwnershipLeaseFilter) ([]*domain.AgentOwnershipLease, error) {
-	ctx, span := startStoreSpan(ctx, "AgentOwnershipLeases", "List",
-		attribute.String("loom.workspace", ws),
-	)
-	out, err := t.inner.List(ctx, ws, filter)
-	if err == nil {
-		span.SetAttributes(attribute.Int("result.count", len(out)))
-	}
-	finish(span, err)
-	return out, err
-}
-
-func (t *tracedAgentOwnershipLeaseStore) Heartbeat(ctx context.Context, ws, agentID, token string, ttl time.Duration) (*domain.AgentOwnershipLease, error) {
-	ctx, span := startStoreSpan(ctx, "AgentOwnershipLeases", "Heartbeat",
-		attribute.String("loom.workspace", ws),
-		attribute.Int64("ttl_ms", ttl.Milliseconds()),
-	)
-	out, err := t.inner.Heartbeat(ctx, ws, agentID, token, ttl)
-	finish(span, err)
-	return out, err
-}
-
-func (t *tracedAgentOwnershipLeaseStore) Release(ctx context.Context, ws, agentID, token string) (*domain.AgentOwnershipLease, error) {
-	ctx, span := startStoreSpan(ctx, "AgentOwnershipLeases", "Release",
-		attribute.String("loom.workspace", ws),
-	)
-	out, err := t.inner.Release(ctx, ws, agentID, token)
-	finish(span, err)
-	return out, err
-}
-
-// --- AgentCommandStore ---
-
-type tracedAgentCommandStore struct{ inner store.AgentCommandStore }
-
-func (t *tracedAgentCommandStore) Create(ctx context.Context, in store.AgentCommandCreate) (*domain.AgentCommand, error) {
-	ctx, span := startStoreSpan(ctx, "AgentCommands", "Create",
-		attribute.String("loom.workspace", in.WorkspaceKey),
-	)
-	out, err := t.inner.Create(ctx, in)
-	finish(span, err)
-	return out, err
-}
-
-func (t *tracedAgentCommandStore) Get(ctx context.Context, ws, commandID string) (*domain.AgentCommand, error) {
-	ctx, span := startStoreSpan(ctx, "AgentCommands", "Get",
-		attribute.String("loom.workspace", ws),
-	)
-	out, err := t.inner.Get(ctx, ws, commandID)
-	finish(span, err)
-	return out, err
-}
-
-func (t *tracedAgentCommandStore) List(ctx context.Context, ws string, filter store.AgentCommandFilter) ([]*domain.AgentCommand, error) {
-	ctx, span := startStoreSpan(ctx, "AgentCommands", "List",
-		attribute.String("loom.workspace", ws),
-	)
-	out, err := t.inner.List(ctx, ws, filter)
-	if err == nil {
-		span.SetAttributes(attribute.Int("result.count", len(out)))
-	}
-	finish(span, err)
-	return out, err
-}
-
-func (t *tracedAgentCommandStore) Ack(ctx context.Context, ws, commandID string) (*domain.AgentCommand, error) {
-	ctx, span := startStoreSpan(ctx, "AgentCommands", "Ack",
-		attribute.String("loom.workspace", ws),
-	)
-	out, err := t.inner.Ack(ctx, ws, commandID)
-	finish(span, err)
-	return out, err
-}
-
-func (t *tracedAgentCommandStore) Complete(ctx context.Context, ws, commandID string, update store.AgentCommandComplete) (*domain.AgentCommand, error) {
-	ctx, span := startStoreSpan(ctx, "AgentCommands", "Complete",
-		attribute.String("loom.workspace", ws),
-	)
-	out, err := t.inner.Complete(ctx, ws, commandID, update)
-	finish(span, err)
-	return out, err
-}
-
-// --- DaemonProfileStore ---
-
-type tracedDaemonStore struct{ inner store.DaemonProfileStore }
-
-func (t *tracedDaemonStore) Get(ctx context.Context, ws string) (*domain.DaemonProfile, error) {
-	ctx, span := startStoreSpan(ctx, "Daemon", "Get",
-		attribute.String("loom.workspace", ws),
-	)
-	out, err := t.inner.Get(ctx, ws)
-	finish(span, err)
-	return out, err
-}
-
-func (t *tracedDaemonStore) Upsert(ctx context.Context, profile *domain.DaemonProfile) (*domain.DaemonProfile, error) {
-	ws := ""
-	if profile != nil {
-		ws = profile.WorkspaceKey
-	}
-	ctx, span := startStoreSpan(ctx, "Daemon", "Upsert",
-		attribute.String("loom.workspace", ws),
-	)
-	out, err := t.inner.Upsert(ctx, profile)
-	finish(span, err)
-	return out, err
-}
-
-// --- WorkerStore ---
-
-type tracedWorkerStore struct{ inner store.WorkerStore }
-
-func (t *tracedWorkerStore) Heartbeat(ctx context.Context, ws, workerID string) error {
-	ctx, span := startStoreSpan(ctx, "Workers", "Heartbeat",
-		attribute.String("loom.workspace", ws),
-	)
-	err := t.inner.Heartbeat(ctx, ws, workerID)
-	finish(span, err)
-	return err
-}
-
-func (t *tracedWorkerStore) Deregister(ctx context.Context, ws, workerID string) error {
-	ctx, span := startStoreSpan(ctx, "Workers", "Deregister",
-		attribute.String("loom.workspace", ws),
-	)
-	err := t.inner.Deregister(ctx, ws, workerID)
-	finish(span, err)
-	return err
 }

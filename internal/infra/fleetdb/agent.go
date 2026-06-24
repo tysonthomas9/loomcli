@@ -13,6 +13,10 @@ type agentStore struct{ client *Client }
 var _ store.AgentStore = (*agentStore)(nil)
 
 // agentWire mirrors fleet-db's models.Agent JSON shape.
+//
+// orchestrator_session_id was on this struct historically as a cache of
+// the lead-to-orchestration AgentSession join. AgentSession is the
+// single source of truth; readers use store.OrchestrationSessionIDFor.
 type agentWire struct {
 	WorkspaceKey     string    `json:"workspace_key"`
 	Name             string    `json:"name"`
@@ -132,6 +136,9 @@ func (s *agentStore) List(ctx context.Context, ws string) ([]*domain.Agent, erro
 }
 
 func (s *agentStore) Update(ctx context.Context, ws, name string, patch store.AgentUpdate) (*domain.Agent, error) {
+	if !agentUpdateHasFleetDBFields(patch) {
+		return s.Get(ctx, ws, name)
+	}
 	body := struct {
 		RoleName         *string   `json:"role_name,omitempty"`
 		Auto             *bool     `json:"auto,omitempty"`
@@ -177,6 +184,28 @@ func (s *agentStore) Update(ctx context.Context, ws, name string, patch store.Ag
 		return nil, err
 	}
 	return resp.toDomain(), nil
+}
+
+// agentUpdateHasFleetDBFields filters store.AgentUpdate down to the fields
+// accepted by FleetDB's strict agent PATCH contract. Used to short-circuit
+// PATCH requests that would carry only loomcli-local fields (none today; the
+// last such field, OrchestratorSessionID, was removed when AgentSession
+// became the single source of truth).
+func agentUpdateHasFleetDBFields(patch store.AgentUpdate) bool {
+	return patch.RoleName != nil ||
+		patch.Auto != nil ||
+		patch.Backend != nil ||
+		patch.FallbackBackends != nil ||
+		patch.Repos != nil ||
+		patch.RepoGroups != nil ||
+		patch.CrossRepo != nil ||
+		patch.Parent != nil ||
+		patch.State != nil ||
+		patch.Mode != nil ||
+		patch.TaskFilter != nil ||
+		patch.MaxConcurrency != nil ||
+		patch.BudgetPolicy != nil ||
+		patch.DesiredState != nil
 }
 
 func (s *agentStore) Delete(ctx context.Context, ws, name string) error {

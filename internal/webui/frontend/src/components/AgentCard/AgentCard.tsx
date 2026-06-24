@@ -25,6 +25,8 @@ export interface AgentCardProps {
   onClick?: () => void;
   /** Whether to show the repo badge (default: true). Set false when already inside a repo group. */
   showRepoBadge?: boolean;
+  /** Smaller typography and avatar for sidebar lists. */
+  compact?: boolean;
 }
 
 /**
@@ -36,6 +38,7 @@ export function AgentCard({
   className,
   onClick,
   showRepoBadge = true,
+  compact = false,
 }: AgentCardProps): JSX.Element {
   const parsed = parseLoomStatus(effectiveAgentStatus(agent));
   const avatarColor = getAvatarColor(agent.name);
@@ -54,7 +57,9 @@ export function AgentCard({
     ? agent.role.charAt(0).toUpperCase() + agent.role.slice(1)
     : "Agent";
 
-  const rootClassName = [styles.card, className].filter(Boolean).join(" ");
+  const rootClassName = [styles.card, compact && styles.compact, className]
+    .filter(Boolean)
+    .join(" ");
 
   return (
     <div

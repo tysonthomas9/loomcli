@@ -247,6 +247,9 @@ func setupWorkspaceConfig(t *testing.T, cfg *config.LoomConfig) {
 	if err := bootstrap.SaveStateCache(state); err != nil {
 		t.Fatalf("save state cache: %v", err)
 	}
+	if cfg.DefaultWorkspace != "" {
+		t.Setenv("LOOM_WORKSPACE", strings.ToUpper(cfg.DefaultWorkspace))
+	}
 	if _, err := config.TestingPrimeConfigCacheFromStore(ctx, st); err != nil {
 		t.Fatalf("prime config cache: %v", err)
 	}

@@ -71,62 +71,69 @@ vi.mock("zustand", () => ({
     selector({ ...defaultAgentContext, ...agentOverride }),
 }));
 
-vi.mock("@/hooks", () => ({
-  useDebouncedCallback: (fn: (...args: unknown[]) => unknown) => fn,
-  useWorkspaceRepos: () => ({ ...defaultReposReturn, ...reposOverride }),
-  useAgentStoreInstance: () => ({}), // dummy — useStore mock ignores store arg
-  useWorkspaceContext: () => ({
-    workspaceId: TEST_WS_ID,
-    activeWorkspaceName: null,
-    defaultWorkspaceName: null,
-    setDefaultWorkspace: vi.fn(),
-    agents: [],
-    workspace: reposOverride.workspace ?? null,
-    repos: reposOverride.repos ?? [],
-    isLoading: reposOverride.isLoading ?? defaultReposReturn.isLoading,
-    error: reposOverride.error ?? defaultReposReturn.error,
-    refetch: reposOverride.refetch ?? defaultReposReturn.refetch,
-  }),
-  useWorkspaceTree: () => ({
-    epics: [],
-    orphanTasks: [],
-    closedEpicCount: 0,
-    isLoading: false,
-    error: null,
-    refetch: vi.fn(),
-  }),
-  useToast: () => ({ showToast: vi.fn() }),
-  useIssueDiffStat: () => ({
-    data: null,
-    isLoading: false,
-    error: null,
-    refetch: vi.fn(),
-  }),
-  useAgentDiffStat: () => ({
-    data: null,
-    isLoading: false,
-    error: null,
-    refetch: vi.fn(),
-  }),
-  useRegisterEscapeLayer: vi.fn(),
-  useKeyboardShortcuts: vi.fn(() => ({
-    isCheatsheetOpen: false,
-    toggleCheatsheet: vi.fn(),
-    closeCheatsheet: vi.fn(),
-  })),
-  KeyboardShortcutProvider: ({ children }: { children: React.ReactNode }) =>
-    children,
-  LAYER_CONFIRM_DIALOG: 60,
-  LAYER_TOAST: 50,
-  LAYER_CHEATSHEET: 45,
-  LAYER_MODAL: 40,
-  LAYER_TERMINAL_PANEL: 30,
-  LAYER_AGENT_PANEL: 20,
-  LAYER_ISSUE_PANEL: 10,
-  LAYER_WORKSPACE_SWITCHER: 42,
-  useFocusTrap: vi.fn(),
-  useFocusReturn: vi.fn(),
-}));
+vi.mock("@/hooks", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/hooks")>();
+  return {
+    ...actual,
+    useDebouncedCallback: (fn: (...args: unknown[]) => unknown) => fn,
+    useWorkspaceRepos: () => ({ ...defaultReposReturn, ...reposOverride }),
+    useAgentStoreInstance: () => ({}), // dummy — useStore mock ignores store arg
+    useWorkspaceContext: () => ({
+      workspaceId: TEST_WS_ID,
+      activeWorkspaceName: null,
+      defaultWorkspaceName: null,
+      setDefaultWorkspace: vi.fn(),
+      agents: [],
+      workspace: reposOverride.workspace ?? null,
+      repos: reposOverride.repos ?? [],
+      isLoading: reposOverride.isLoading ?? defaultReposReturn.isLoading,
+      error: reposOverride.error ?? defaultReposReturn.error,
+      refetch: reposOverride.refetch ?? defaultReposReturn.refetch,
+    }),
+    useWorkspaceTree: () => ({
+      epics: [],
+      orphanTasks: [],
+      closedEpicCount: 0,
+      isLoading: false,
+      error: null,
+      refetch: vi.fn(),
+    }),
+    useWorkspaceTreeWidth: actual.useWorkspaceTreeWidth,
+    WORKSPACE_TREE_MIN_WIDTH: actual.WORKSPACE_TREE_MIN_WIDTH,
+    WORKSPACE_TREE_MAX_WIDTH: actual.WORKSPACE_TREE_MAX_WIDTH,
+    useToast: () => ({ showToast: vi.fn() }),
+    useIssueDiffStat: () => ({
+      data: null,
+      isLoading: false,
+      error: null,
+      refetch: vi.fn(),
+    }),
+    useAgentDiffStat: () => ({
+      data: null,
+      isLoading: false,
+      error: null,
+      refetch: vi.fn(),
+    }),
+    useRegisterEscapeLayer: vi.fn(),
+    useKeyboardShortcuts: vi.fn(() => ({
+      isCheatsheetOpen: false,
+      toggleCheatsheet: vi.fn(),
+      closeCheatsheet: vi.fn(),
+    })),
+    KeyboardShortcutProvider: ({ children }: { children: React.ReactNode }) =>
+      children,
+    LAYER_CONFIRM_DIALOG: 60,
+    LAYER_TOAST: 50,
+    LAYER_CHEATSHEET: 45,
+    LAYER_MODAL: 40,
+    LAYER_TERMINAL_PANEL: 30,
+    LAYER_AGENT_PANEL: 20,
+    LAYER_ISSUE_PANEL: 10,
+    LAYER_WORKSPACE_SWITCHER: 42,
+    useFocusTrap: vi.fn(),
+    useFocusReturn: vi.fn(),
+  };
+});
 
 vi.mock("@/hooks/api", () => ({
   addWorkspaceRepos: (...args: unknown[]) => mockAddWorkspaceRepos(...args),
@@ -192,55 +199,51 @@ describe("WorkspaceTree", () => {
       expect(screen.getByText("beta")).toBeInTheDocument();
     });
 
-    it("adds a repository to an empty workspace", async () => {
+    it("adds a repository through the Add Repo dialog", async () => {
       const refetch = vi.fn();
       mockAddWorkspaceRepos.mockResolvedValue({});
       reposOverride = { repos: [], refetch };
 
       render(<WorkspaceTree defaultCollapsed={false} />);
 
-      fireEvent.change(screen.getByLabelText("Repository path or URL"), {
+      fireEvent.click(screen.getByRole("button", { name: "+ Add Repo" }));
+      fireEvent.change(screen.getByLabelText("Repository URL"), {
         target: { value: "/repos/api" },
       });
-      fireEvent.click(screen.getByRole("button", { name: "Add Repo" }));
+      fireEvent.click(screen.getByRole("button", { name: "Add Repository" }));
 
       await waitFor(() => {
         expect(mockAddWorkspaceRepos).toHaveBeenCalledWith(TEST_WS_ID, {
           repos: ["/repos/api"],
+          branch: "main",
         });
       });
       expect(refetch).toHaveBeenCalled();
     });
 
-    it("prefills the sample repo for one-click empty workspace setup", async () => {
+    it("prefills the sample repo in the dialog for one-click empty setup", async () => {
       const refetch = vi.fn();
       mockAddWorkspaceRepos.mockResolvedValue({});
       reposOverride = { repos: [], refetch };
 
       render(<WorkspaceTree defaultCollapsed={false} />);
 
-      expect(screen.getByLabelText("Repository path or URL")).toHaveValue(
+      fireEvent.click(screen.getByRole("button", { name: "+ Add Repo" }));
+      expect(screen.getByLabelText("Repository URL")).toHaveValue(
         "https://github.com/octocat/Hello-World",
       );
-      fireEvent.click(screen.getByRole("button", { name: "Add Repo" }));
+      fireEvent.click(screen.getByRole("button", { name: "Add Repository" }));
 
       await waitFor(() => {
         expect(mockAddWorkspaceRepos).toHaveBeenCalledWith(TEST_WS_ID, {
           clone_urls: ["https://github.com/octocat/Hello-World"],
+          branch: "main",
         });
       });
       expect(refetch).toHaveBeenCalled();
     });
 
-    it("clears the sample prefill when repo data arrives", async () => {
-      reposOverride = { repos: [], isLoading: false };
-
-      const { rerender } = render(<WorkspaceTree defaultCollapsed={false} />);
-
-      expect(screen.getByLabelText("Repository path or URL")).toHaveValue(
-        "https://github.com/octocat/Hello-World",
-      );
-
+    it("opens the dialog empty once repos exist (no sample prefill)", async () => {
       reposOverride = {
         repos: [
           {
@@ -252,29 +255,31 @@ describe("WorkspaceTree", () => {
         ],
         isLoading: false,
       };
-      rerender(<WorkspaceTree defaultCollapsed={false} />);
 
-      await waitFor(() => {
-        expect(screen.getByLabelText("Repository path or URL")).toHaveValue("");
-      });
+      render(<WorkspaceTree defaultCollapsed={false} />);
+
       expect(screen.getByText("hello-world")).toBeInTheDocument();
+      fireEvent.click(screen.getByRole("button", { name: "+ Add Repo" }));
+      expect(screen.getByLabelText("Repository URL")).toHaveValue("");
     });
 
-    it("clones a remote repository URL into an empty workspace", async () => {
+    it("clones a remote repository URL via the dialog", async () => {
       const refetch = vi.fn();
       mockAddWorkspaceRepos.mockResolvedValue({});
       reposOverride = { repos: [], refetch };
 
       render(<WorkspaceTree defaultCollapsed={false} />);
 
-      fireEvent.change(screen.getByLabelText("Repository path or URL"), {
+      fireEvent.click(screen.getByRole("button", { name: "+ Add Repo" }));
+      fireEvent.change(screen.getByLabelText("Repository URL"), {
         target: { value: "https://github.com/octocat/Hello-World" },
       });
-      fireEvent.click(screen.getByRole("button", { name: "Add Repo" }));
+      fireEvent.click(screen.getByRole("button", { name: "Add Repository" }));
 
       await waitFor(() => {
         expect(mockAddWorkspaceRepos).toHaveBeenCalledWith(TEST_WS_ID, {
           clone_urls: ["https://github.com/octocat/Hello-World"],
+          branch: "main",
         });
       });
       expect(refetch).toHaveBeenCalled();
@@ -402,12 +407,16 @@ describe("WorkspaceTree", () => {
   });
 
   describe("empty state", () => {
-    it("shows empty message when no repos", () => {
+    it("offers the Add Repo dialog in the repos section when no repos", () => {
       reposOverride = { repos: [], isLoading: false, error: null };
 
       render(<WorkspaceTree defaultCollapsed={false} />);
 
-      expect(screen.getByText("No repos in workspace")).toBeInTheDocument();
+      expect(
+        screen.getByRole("heading", { name: "Repos" }),
+      ).toBeInTheDocument();
+      fireEvent.click(screen.getByRole("button", { name: "+ Add Repo" }));
+      expect(screen.getByLabelText("Repository URL")).toBeInTheDocument();
     });
   });
 
@@ -456,13 +465,36 @@ describe("WorkspaceTree", () => {
         />,
       );
 
-      const badge = container.querySelector('[class*="collapsedBadge"]');
+      const badge = container.querySelector(
+        '[class*="collapsedConnectionBadge"]',
+      );
       expect(badge).toBeInTheDocument();
       expect(badge!.textContent).toBe("!");
       expect(badge!.getAttribute("data-disconnected")).toBe("true");
     });
 
-    it("does not show collapsed badge when connected and no disconnected state", () => {
+    it("shows collapsed agent rail when connected", () => {
+      reposOverride = {
+        repos: [
+          {
+            name: "alpha",
+            path: "/repos/alpha",
+            default_branch: "main",
+            remote: "origin",
+          },
+        ],
+      };
+
+      render(
+        <WorkspaceTree defaultCollapsed={true} connectionState="connected" />,
+      );
+
+      expect(screen.getByTestId("collapsed-agent-rail")).toBeInTheDocument();
+    });
+  });
+
+  describe("sidebar layout", () => {
+    it("renders sections in linear scroll order with repos after agents", () => {
       reposOverride = {
         repos: [
           {
@@ -475,11 +507,60 @@ describe("WorkspaceTree", () => {
       };
 
       const { container } = render(
-        <WorkspaceTree defaultCollapsed={true} connectionState="connected" />,
+        <WorkspaceTree defaultCollapsed={false} onAddClick={() => {}} />,
       );
 
-      const badge = container.querySelector('[class*="collapsedBadge"]');
-      expect(badge).not.toBeInTheDocument();
+      const content = container.querySelector('[class*="content"]');
+      const addAgentButton = screen.getByRole("button", {
+        name: "+ Add agent",
+      });
+      const reposHeading = screen.getByRole("heading", { name: "Repos" });
+
+      expect(content).toBeInTheDocument();
+      expect(
+        container.querySelector('[class*="mainScroll"]'),
+      ).not.toBeInTheDocument();
+      expect(
+        container.querySelector('[class*="reposDock"]'),
+      ).not.toBeInTheDocument();
+      expect(content!.contains(addAgentButton)).toBe(true);
+      expect(content!.contains(reposHeading)).toBe(true);
+      expect(
+        addAgentButton.compareDocumentPosition(reposHeading) &
+          Node.DOCUMENT_POSITION_FOLLOWING,
+      ).toBeTruthy();
+    });
+  });
+
+  describe("sidebar resize", () => {
+    it("shows resize handle when expanded", () => {
+      render(<WorkspaceTree defaultCollapsed={false} />);
+      expect(
+        screen.getByTestId("workspace-tree-resize-handle"),
+      ).toBeInTheDocument();
+    });
+
+    it("hides resize handle when collapsed", () => {
+      render(<WorkspaceTree defaultCollapsed={true} />);
+      expect(
+        screen.queryByTestId("workspace-tree-resize-handle"),
+      ).not.toBeInTheDocument();
+    });
+
+    it("widens sidebar via keyboard resize and persists width", async () => {
+      render(<WorkspaceTree defaultCollapsed={false} />);
+      const handle = screen.getByTestId("workspace-tree-resize-handle");
+      const aside = handle.closest("aside");
+
+      fireEvent.keyDown(handle, { key: "ArrowRight" });
+
+      expect(aside).toHaveStyle({ "--workspace-tree-sidebar-width": "226px" });
+      // Persistence is debounced (~200ms) to avoid per-pointermove writes.
+      await waitFor(() => {
+        expect(
+          localStorage.getItem(`loom:${TEST_WS_ID}:workspace-tree-width`),
+        ).toBe("226");
+      });
     });
   });
 

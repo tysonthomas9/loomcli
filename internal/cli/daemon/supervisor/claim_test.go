@@ -10,6 +10,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/clitest"
 	cfgpkg "github.com/tysonthomas9/loomcli/internal/cli/config"
+	"github.com/tysonthomas9/loomcli/internal/domain"
 )
 
 func TestClaimTask_SelectsEligibleTaskAndClaims(t *testing.T) {
@@ -72,8 +73,8 @@ func TestClaimTask_ClaimsRequestedTaskIgnoringRoleFilter(t *testing.T) {
 		t.Fatalf("calls = %#v, want Ready and ClaimIssue", mock.Calls)
 	}
 	opts := mock.Calls[0].Args[0].(backend.ReadyOpts)
-	if opts.Assignee != "falcon" {
-		t.Fatalf("ReadyOpts.Assignee = %q, want falcon", opts.Assignee)
+	if opts.Assignee != "" {
+		t.Fatalf("ReadyOpts.Assignee = %q, want empty for requested task lookup", opts.Assignee)
 	}
 	if mock.Calls[1].Method != "ClaimIssue" || mock.Calls[1].Args[0] != "task-1" {
 		t.Fatalf("claim call = %#v", mock.Calls[1])
@@ -100,6 +101,31 @@ func TestClaimTask_RequestedTaskNotReadyDoesNotClaimFallback(t *testing.T) {
 	}
 	if len(mock.Calls) != 1 {
 		t.Fatalf("calls = %#v, want only requested-task Ready", mock.Calls)
+	}
+	if ap.LastError == nil || ap.LastError.Class != agenterr.OutcomeFromDomain(agenterr.NoWorkOutcome) {
+		t.Fatalf("LastError = %#v, want NoWork", ap.LastError)
+	}
+}
+
+func TestClaimTask_EphemeralRequiresRequestedTask(t *testing.T) {
+	mock := clitest.NewMockIssueBackend()
+	mock.ReadyResult = []backend.IssueData{
+		{ID: "task-1", IssueType: "task", Status: "open", Priority: 1, Title: "Ready", Design: "plan"},
+	}
+	s := &Supervisor{IssueBackend: mock}
+	ap := &AgentProcess{
+		Entry:      cfgpkg.AgentEntry{Worktree: "worker", Role: "task", Mode: domain.AgentModeEphemeral},
+		RoleConfig: cfgpkg.RoleConfig{TaskFilter: "has_design"},
+	}
+
+	if s.claimTask(ap, "EPIC-1") {
+		t.Fatal("claimTask returned true, want false for ephemeral worker without requested task")
+	}
+	if ap.AssignedTaskID != "" {
+		t.Fatalf("AssignedTaskID = %q, want empty", ap.AssignedTaskID)
+	}
+	if len(mock.Calls) != 0 {
+		t.Fatalf("calls = %#v, want no ready/claim calls", mock.Calls)
 	}
 	if ap.LastError == nil || ap.LastError.Class != agenterr.OutcomeFromDomain(agenterr.NoWorkOutcome) {
 		t.Fatalf("LastError = %#v, want NoWork", ap.LastError)

@@ -2,7 +2,10 @@ package terminal
 
 import (
 	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
+	"github.com/tysonthomas9/loomcli/internal/webui/tabmeta"
 )
+
+type LaunchSpec = tabmeta.LaunchSpec
 
 // PTYSource is the backend-agnostic contract the web terminal handler uses
 // to talk to a terminal backend. Two implementations exist / will exist:
@@ -17,7 +20,7 @@ import (
 type PTYSource interface {
 	// AttachSession opens or re-opens a session. reattached is true when an
 	// existing session was joined (scrollback replay expected).
-	AttachSession(key SessionKey, cols, rows uint16, argv []string) (att Attachment, reattached bool, err error)
+	AttachSession(key SessionKey, cols, rows uint16, launch *tabmeta.LaunchSpec) (att Attachment, reattached bool, err error)
 
 	// Detach releases the attachment identified by connID for the given
 	// session. Does not kill the session — a grace period begins.
@@ -31,6 +34,12 @@ type PTYSource interface {
 	// from a prior server process" from "session is still running and the
 	// client is reconnecting".
 	HasSession(key SessionKey) bool
+
+	// SessionClosed reports whether a session with this key existed in the
+	// current process and has since exited or been killed. This lets callers
+	// distinguish "fresh metadata that may spawn on first attach" from
+	// "metadata for a completed command tab that must not auto-respawn".
+	SessionClosed(key SessionKey) bool
 
 	// AttachmentCount reports the number of concurrent clients currently
 	// attached to the session identified by key. Returns 0 for unknown

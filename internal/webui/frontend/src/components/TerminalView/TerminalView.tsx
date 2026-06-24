@@ -14,12 +14,8 @@ import {
   type CliSetupRequest,
 } from "@/utils/cliSetup";
 
-import {
-  BackendPickerPrompt,
-  NoBackendsEmptyState,
-  useSplitView,
-} from "./layout";
-import { HelpPopover } from "./controls";
+import { NoBackendsEmptyState, useTabEditorGroups } from "./layout";
+import groupStyles from "./layout/TerminalGroupLayout.module.css";
 import {
   TerminalPane,
   TerminalPaneArea,
@@ -33,6 +29,7 @@ import {
   BACKEND_BRAND_COLORS,
   type TabState,
   generateTabName,
+  isAgentTab,
   sanitizeSessionName,
   useTabOrdering,
   useTabActions,
@@ -42,10 +39,24 @@ import {
 } from "./tabs";
 import styles from "./TerminalView.module.css";
 
+export interface TerminalInputRequest {
+  id: string;
+  text: string;
+  targetAgentName?: string | undefined;
+}
+
+/** Split controls surfaced to parent chrome when hideTabs is true. */
+export interface TerminalSplitControls {
+  canSplit: boolean;
+  onSplitRight: () => void;
+}
+
 interface TerminalViewProps {
   isActive?: boolean;
   pendingIssueContext?: IssueContext | undefined;
   onIssueContextConsumed?: (() => void) | undefined;
+  pendingTerminalInput?: TerminalInputRequest | undefined;
+  onTerminalInputConsumed?: (() => void) | undefined;
   onActiveSessionCountChange?: (count: number) => void;
   onUnreadChange?: (hasAnyUnread: boolean) => void;
   onTabLimitReached?: (message: string) => void;
@@ -54,6 +65,14 @@ interface TerminalViewProps {
   pendingAgentName?: string | undefined;
   /** Called after pendingAgentName has been processed. */
   onAgentNameConsumed?: (() => void) | undefined;
+  /**
+   * When true, hide the tab bar above the terminal pane. Used by embedded
+   * surfaces (e.g. the /agents view) where the parent already provides agent
+   * selection — tabs would just be a redundant second picker.
+   */
+  hideTabs?: boolean;
+  /** Called when hideTabs is true so the parent can render split controls. */
+  onSplitControlsChange?: (controls: TerminalSplitControls | null) => void;
 }
 
 interface CliSetupGuide extends CliSetupRequest {
@@ -62,10 +81,6 @@ interface CliSetupGuide extends CliSetupRequest {
   hasRun: boolean;
   status: "starting" | "running" | "manual" | "failed";
   error?: string | undefined;
-}
-
-function isLeadSessionName(sessionName: string): boolean {
-  return /(?:^|--)lead-[^-]+-\d+$/.test(sessionName);
 }
 
 function buildCliSetupSessionName(
@@ -106,12 +121,16 @@ export function TerminalView({
   isActive = true,
   pendingIssueContext,
   onIssueContextConsumed,
+  pendingTerminalInput,
+  onTerminalInputConsumed,
   onActiveSessionCountChange,
   onUnreadChange,
   onTabLimitReached,
   onNavigateToSettings,
   pendingAgentName,
   onAgentNameConsumed,
+  hideTabs = false,
+  onSplitControlsChange,
 }: TerminalViewProps): JSX.Element {
   const [tabs, setTabs] = useState<TabState[]>([]);
   const [activeTabId, setActiveTabId] = useState<string>("");
@@ -127,7 +146,6 @@ export function TerminalView({
     tabs: tabMetadata,
     createTab,
     updateLabel,
-    updateNotes,
     updatePinned,
     deleteTab,
     reorderTabs: reorderTabMeta,
@@ -141,21 +159,32 @@ export function TerminalView({
     enabled: isActive,
   });
 
-  const [isFullHeight, setIsFullHeight] = useState(false);
+  const [, setFocusedPane] = useState<"left" | "right">("left");
+  /** Global Terminal hides agent PTYs; Agents embed keeps them. */
+  const visibleTabs = useMemo(
+    () => (hideTabs ? tabs : tabs.filter((tab) => !isAgentTab(tab))),
+    [hideTabs, tabs],
+  );
+  const tabIds = useMemo(() => visibleTabs.map((tab) => tab.id), [visibleTabs]);
   const {
-    isSplitView,
-    splitRatio,
-    rightPaneTabId,
-    focusedPane: _focusedPane,
-    setFocusedPane,
-    canSplit,
-    handleToggleSplit,
-    handleSplitRatioChange,
-    handleRightPaneTabChange,
-  } = useSplitView({ tabs, activeTabId });
-  const splitContainerRef = useRef<HTMLDivElement>(null);
-  const [isSessionPromptOpen, setIsSessionPromptOpen] = useState(false);
-  const [isHelpOpen, setIsHelpOpen] = useState(false);
+    groups,
+    isSplit,
+    splitActiveTab,
+    activateInGroup,
+    handleGroupDragStart,
+    handleGroupDragEnd,
+    handleGroupDragOver,
+    moveTabToGroup,
+  } = useTabEditorGroups(tabIds, activeTabId, workspaceId);
+
+  useEffect(() => {
+    if (!hideTabs || !onSplitControlsChange) return;
+    onSplitControlsChange({
+      canSplit: tabs.length >= 2,
+      onSplitRight: splitActiveTab,
+    });
+    return () => onSplitControlsChange(null);
+  }, [hideTabs, onSplitControlsChange, tabs.length, splitActiveTab]);
   const [cliSetupGuide, setCliSetupGuide] = useState<CliSetupGuide | null>(
     null,
   );
@@ -249,7 +278,8 @@ export function TerminalView({
     isActive,
     onUnreadChange,
   });
-  const hasPendingCliSetupRequest = readPendingCliSetupRequest() != null;
+  const hasPendingCliSetupRequest =
+    !hideTabs && readPendingCliSetupRequest() != null;
 
   useTabInit({
     tabMetadata,
@@ -263,6 +293,7 @@ export function TerminalView({
     workspace: workspaceId,
     isViewActive: isActive ?? false,
     skipDefaultTabInit: hasPendingCliSetupRequest,
+    excludeAgentTabs: !hideTabs,
   });
 
   // Apply server-restored active tab after initialization.
@@ -294,9 +325,20 @@ export function TerminalView({
 
   // Report active (connected) session count to parent
   useEffect(() => {
-    const count = tabs.filter((t) => t.connectionState === "connected").length;
+    const count = visibleTabs.filter(
+      (t) => t.connectionState === "connected",
+    ).length;
     onActiveSessionCountChange?.(count);
-  }, [tabs, onActiveSessionCountChange]);
+  }, [visibleTabs, onActiveSessionCountChange]);
+
+  // Drop agent tabs from the active selection in global Terminal view.
+  useEffect(() => {
+    if (hideTabs) return;
+    const active = tabs.find((tab) => tab.id === activeTabId);
+    if (!active || !isAgentTab(active)) return;
+    const fallback = visibleTabs[0];
+    if (fallback) setActiveTabId(fallback.id);
+  }, [hideTabs, activeTabId, tabs, visibleTabs, setActiveTabId]);
 
   useEffect(() => {
     return () => {
@@ -304,20 +346,52 @@ export function TerminalView({
     };
   }, [onActiveSessionCountChange]);
 
-  // Body scroll lock for full-height mode
-  useEffect(() => {
-    if (isFullHeight) document.body.style.overflow = "hidden";
-    return () => {
-      document.body.style.overflow = "";
-    };
-  }, [isFullHeight]);
-
   const handleTabChange = useCallback(
     (tabId: string) => {
       setActiveTabId(tabId);
       clearTabUnread(tabId);
     },
     [clearTabUnread],
+  );
+
+  const handleGroupTabChange = useCallback(
+    (groupIndex: number, tabId: string) => {
+      activateInGroup(groupIndex, tabId);
+      handleTabChange(tabId);
+    },
+    [activateInGroup, handleTabChange],
+  );
+
+  const handleGroupDrop = useCallback(
+    (groupIndex: number) => {
+      const movedTabId = moveTabToGroup(groupIndex);
+      if (movedTabId) {
+        handleGroupTabChange(groupIndex, movedTabId);
+      }
+    },
+    [moveTabToGroup, handleGroupTabChange],
+  );
+
+  const toTerminalTabs = useCallback(
+    (subset: TabState[]) =>
+      subset.map((tab) => {
+        const color = BACKEND_BRAND_COLORS[tab.backendName];
+        return {
+          id: tab.id,
+          label: tab.label,
+          connectionState: tab.connectionState,
+          ...(color != null && { brandColor: color }),
+          ...(tabUnread.get(tab.id) && { hasUnread: true }),
+          ...(tab.pinned && { isPinned: true }),
+        };
+      }),
+    [tabUnread],
+  );
+
+  const tabsForGroup = useCallback(
+    (groupTabIds: string[]) =>
+      visibleTabs.filter((tab) => groupTabIds.includes(tab.id)),
+    [visibleTabs],
   );
 
   const { handleTabClose, handleDuplicateTab, handleTabRename } = useTabActions(
@@ -491,17 +565,17 @@ export function TerminalView({
   );
 
   useEffect(() => {
-    if (!isActive || !initializedRef.current) return;
+    if (hideTabs || !isActive || !initializedRef.current) return;
     const request = readPendingCliSetupRequest();
     if (request) processCliSetupRequest(request);
-  }, [isActive, tabs, processCliSetupRequest]);
+  }, [hideTabs, isActive, tabs, processCliSetupRequest]);
 
   useEffect(() => {
     const handleCliSetupRequest = (event: Event) => {
       const request =
         (event as CustomEvent<CliSetupRequest>).detail ??
         readPendingCliSetupRequest();
-      if (!request || !isActive || !initializedRef.current) return;
+      if (!request || hideTabs || !isActive || !initializedRef.current) return;
       processCliSetupRequest(request);
     };
     window.addEventListener(CLI_SETUP_REQUEST_EVENT, handleCliSetupRequest);
@@ -511,7 +585,7 @@ export function TerminalView({
         handleCliSetupRequest,
       );
     };
-  }, [isActive, processCliSetupRequest]);
+  }, [hideTabs, isActive, processCliSetupRequest]);
 
   const runCliSetupCommand = useCallback(
     (guide: CliSetupGuide) => {
@@ -523,17 +597,23 @@ export function TerminalView({
     [announce, startCliSetup],
   );
 
-  const handleNewTabClick = useCallback(() => {
-    if (tabs.length >= MAX_TABS) {
+  const handleNewTabLimit = useCallback(() => {
+    if (visibleTabs.length >= MAX_TABS) {
       handleTabLimitReached();
-      return;
     }
-    setIsSessionPromptOpen(true);
-  }, [handleTabLimitReached, tabs.length]);
+  }, [handleTabLimitReached, visibleTabs.length]);
+
+  const selectableBackends = useMemo(() => {
+    const aiBackends = (config?.available ?? []).filter((b) => b !== "shell");
+    return ["shell", ...aiBackends];
+  }, [config?.available]);
 
   const handleBackendSelect = useCallback(
     (backend: string) => {
-      setIsSessionPromptOpen(false);
+      if (visibleTabs.length >= MAX_TABS) {
+        handleTabLimitReached();
+        return;
+      }
       const { sessionName, label } = generateTabName(
         backend,
         tabs,
@@ -558,20 +638,15 @@ export function TerminalView({
       setActiveTabId(sessionName);
       announce(`New tab ${label} created`);
     },
-    [createTab, tabs, workspaceId, announce],
+    [
+      createTab,
+      handleTabLimitReached,
+      tabs,
+      visibleTabs.length,
+      workspaceId,
+      announce,
+    ],
   );
-
-  const handleSessionPromptCancel = useCallback(() => {
-    setIsSessionPromptOpen(false);
-  }, []);
-
-  const handleToggleHelp = useCallback(() => {
-    setIsHelpOpen((prev) => !prev);
-  }, []);
-
-  const handleToggleFullHeight = useCallback(() => {
-    setIsFullHeight((prev) => !prev);
-  }, []);
 
   const setInstanceRef = useCallback(
     (tabId: string) => (handle: TerminalInstanceHandle | null) => {
@@ -583,6 +658,38 @@ export function TerminalView({
     },
     [],
   );
+
+  useEffect(() => {
+    if (!pendingTerminalInput) return;
+    if (tabs.length === 0) return;
+
+    const targetTab = pendingTerminalInput.targetAgentName
+      ? tabs.find(
+          (tab) => tab.agentName === pendingTerminalInput.targetAgentName,
+        )
+      : tabs.find((tab) => tab.id === activeTabId);
+
+    if (!targetTab) return;
+    if (targetTab.id !== activeTabId) {
+      setActiveTabId(targetTab.id);
+      return;
+    }
+    if (targetTab.connectionState !== "connected") return;
+    if (targetTab.writable === false) return;
+
+    const handle = instanceRefs.current.get(targetTab.id);
+    if (!handle) return;
+
+    handle.pasteText(pendingTerminalInput.text);
+    handle.focus();
+    onTerminalInputConsumed?.();
+  }, [
+    pendingTerminalInput,
+    tabs,
+    activeTabId,
+    setActiveTabId,
+    onTerminalInputConsumed,
+  ]);
 
   const setFocusedLeft = useCallback(
     () => setFocusedPane("left"),
@@ -597,10 +704,32 @@ export function TerminalView({
     () => new Map(tabMetadata.map((m) => [m.session_name, m])),
     [tabMetadata],
   );
+  const paneTabs = useMemo(() => {
+    if (!hideTabs) return visibleTabs;
+
+    const activeTab = tabs.find((tab) => tab.id === activeTabId);
+    const targetAgentName = pendingAgentName ?? activeTab?.agentName;
+    if (targetAgentName) {
+      const agentTab = tabs.find((tab) => tab.agentName === targetAgentName);
+      return agentTab ? [agentTab] : [];
+    }
+
+    return activeTab ? [activeTab] : [];
+  }, [activeTabId, hideTabs, pendingAgentName, tabs, visibleTabs]);
+
+  const paneActiveTabId = paneTabs.some((tab) => tab.id === activeTabId)
+    ? activeTabId
+    : (paneTabs[0]?.id ?? activeTabId);
+  const showEditorSplit = !hideTabs && isSplit;
+  const canSplitRight = visibleTabs.length >= 2 && !isSplit;
+  const splitContainerRef = useRef<HTMLDivElement>(null);
   const renderTerminalPane = useCallback(
-    (tab: TabState, pane: "left" | "right" | null) => {
-      const paneIsActive =
-        pane === "right" ? tab.id === rightPaneTabId : tab.id === activeTabId;
+    (
+      tab: TabState,
+      pane: "left" | "right" | null,
+      isActiveOverride?: boolean,
+    ) => {
+      const paneIsActive = isActiveOverride ?? tab.id === paneActiveTabId;
       const meta = metaBySession.get(tab.sessionName);
       // Undefined while metadata is still loading — preserves connect-on-
       // mount. Only concrete `false` gates auto-attach.
@@ -611,7 +740,8 @@ export function TerminalView({
           isActive={paneIsActive}
           instanceRef={setInstanceRef(tab.id)}
           ptyAlive={ptyAlive}
-          autoStartStaleSession={isLeadSessionName(tab.sessionName)}
+          autoStartStaleSession={false}
+          autoReconnect
           onConnectionStateChange={(state, hasConnected) =>
             handleConnectionStateChange(tab.id, state, hasConnected)
           }
@@ -632,15 +762,10 @@ export function TerminalView({
           }
           hasConnected={tabHasConnected.get(tab.id) ?? false}
           reconnectState={tabReconnectState.get(tab.id) ?? null}
-          notes={meta?.notes ?? ""}
-          onSaveNotes={(text) => updateNotes(tab.sessionName, text)}
-          isMetaLoading={metaLoading}
         />
       );
     },
     [
-      activeTabId,
-      rightPaneTabId,
       setInstanceRef,
       handleConnectionStateChange,
       handleReconnectStateChange,
@@ -652,149 +777,222 @@ export function TerminalView({
       tabHasConnected,
       tabReconnectState,
       metaBySession,
-      updateNotes,
-      metaLoading,
       setFocusedLeft,
       setFocusedRight,
+      paneActiveTabId,
     ],
   );
 
-  const containerClassName = [
-    styles.container,
-    isFullHeight && styles.fullHeight,
-  ]
-    .filter(Boolean)
-    .join(" ");
+  const containerClassName = styles.container;
   return (
     <div className={containerClassName} data-testid="terminal-view">
-      {(metaLoading || configLoading) && tabs.length === 0 ? (
+      {(metaLoading || configLoading) && visibleTabs.length === 0 ? (
         <LoadingSkeleton.Terminal />
-      ) : tabs.length === 0 ? (
+      ) : visibleTabs.length === 0 ? (
         <NoBackendsEmptyState
           {...(onNavigateToSettings != null && {
             onGoToSettings: onNavigateToSettings,
           })}
         />
+      ) : hideTabs && paneTabs.length === 0 ? (
+        <LoadingSkeleton.Terminal />
       ) : (
         <>
-          <TerminalTabBar
-            tabs={tabs.map((t) => {
-              const color = BACKEND_BRAND_COLORS[t.backendName];
-              return {
-                id: t.id,
-                label: t.label,
-                connectionState: t.connectionState,
-                ...(color != null && { brandColor: color }),
-                ...(tabUnread.get(t.id) && { hasUnread: true }),
-                ...(t.pinned && { isPinned: true }),
-              };
-            })}
-            activeTabId={activeTabId}
-            onTabChange={handleTabChange}
-            onTabClose={handleTabClose}
-            onNewTab={handleNewTabClick}
-            onToggleFullHeight={handleToggleFullHeight}
-            isFullHeight={isFullHeight}
-            onTabRename={handleTabRename}
-            onDuplicateTab={handleDuplicateTab}
-            maxTabsReached={tabs.length >= MAX_TABS}
-            onTabPin={handleTabPin}
-            onCloseOthers={handleCloseOthers}
-            onReorderTabs={handleReorderTabs}
-            isSplitView={isSplitView}
-            canSplit={canSplit}
-            onToggleSplit={handleToggleSplit}
-            onHelpClick={handleToggleHelp}
-          />
-          {cliSetupGuide && (
-            <div
-              className={styles.cliSetupBanner}
-              data-testid="cli-setup-banner"
-            >
-              <span
-                className={styles.cliSetupDot}
-                style={{ backgroundColor: cliSetupGuide.brandColor }}
-                aria-hidden="true"
+          {!hideTabs && !showEditorSplit && (
+            <>
+              <TerminalTabBar
+                tabs={toTerminalTabs(visibleTabs)}
+                activeTabId={activeTabId}
+                onTabChange={handleTabChange}
+                onTabClose={handleTabClose}
+                onNewTab={handleNewTabLimit}
+                availableBackends={selectableBackends}
+                backendsLoading={configLoading}
+                onBackendSelect={handleBackendSelect}
+                onTabRename={handleTabRename}
+                onDuplicateTab={handleDuplicateTab}
+                maxTabsReached={visibleTabs.length >= MAX_TABS}
+                onTabPin={handleTabPin}
+                onCloseOthers={handleCloseOthers}
+                onReorderTabs={handleReorderTabs}
+                canSplitRight={canSplitRight}
+                onSplitRight={splitActiveTab}
+                totalTabCount={visibleTabs.length}
               />
-              <div className={styles.cliSetupBody}>
-                <div className={styles.cliSetupHeader}>
-                  <strong>{cliSetupGuide.instructions.title}</strong>
-                  <span>{cliSetupGuide.provider}</span>
+              {cliSetupGuide && (
+                <div
+                  className={styles.cliSetupBanner}
+                  data-testid="cli-setup-banner"
+                >
+                  <span
+                    className={styles.cliSetupDot}
+                    style={{ backgroundColor: cliSetupGuide.brandColor }}
+                    aria-hidden="true"
+                  />
+                  <div className={styles.cliSetupBody}>
+                    <div className={styles.cliSetupHeader}>
+                      <strong>{cliSetupGuide.instructions.title}</strong>
+                      <span>{cliSetupGuide.provider}</span>
+                    </div>
+                    <p>{cliSetupGuide.instructions.description}</p>
+                    {cliSetupGuide.instructions.command && (
+                      <code>{cliSetupGuide.instructions.command}</code>
+                    )}
+                    <span
+                      className={`${styles.cliSetupStatus} ${
+                        styles[cliSetupGuide.status]
+                      }`}
+                    >
+                      {cliSetupGuide.status === "starting"
+                        ? "Starting in terminal..."
+                        : cliSetupGuide.status === "failed"
+                          ? `Failed: ${cliSetupGuide.error ?? "setup did not start"}`
+                          : cliSetupGuide.status === "manual"
+                            ? "Manual steps shown in terminal"
+                            : "Running in terminal"}
+                    </span>
+                  </div>
+                  <div className={styles.cliSetupActions}>
+                    <button
+                      type="button"
+                      className={styles.cliSetupButton}
+                      onClick={() => runCliSetupCommand(cliSetupGuide)}
+                      disabled={cliSetupGuide.status === "starting"}
+                    >
+                      {cliSetupGuide.status === "manual"
+                        ? cliSetupGuide.instructions.buttonLabel
+                        : cliSetupGuide.hasRun
+                          ? "Run again"
+                          : cliSetupGuide.instructions.buttonLabel}
+                    </button>
+                    <button
+                      type="button"
+                      className={styles.cliSetupDismiss}
+                      onClick={refreshCliStatus}
+                    >
+                      Recheck
+                    </button>
+                    <button
+                      type="button"
+                      className={styles.cliSetupDismiss}
+                      onClick={() => setCliSetupGuide(null)}
+                      aria-label="Dismiss CLI setup"
+                    >
+                      Dismiss
+                    </button>
+                  </div>
                 </div>
-                <p>{cliSetupGuide.instructions.description}</p>
-                {cliSetupGuide.instructions.command && (
-                  <code>{cliSetupGuide.instructions.command}</code>
-                )}
-                <span
-                  className={`${styles.cliSetupStatus} ${
-                    styles[cliSetupGuide.status]
-                  }`}
-                >
-                  {cliSetupGuide.status === "starting"
-                    ? "Starting in terminal..."
-                    : cliSetupGuide.status === "failed"
-                      ? `Failed: ${cliSetupGuide.error ?? "setup did not start"}`
-                      : cliSetupGuide.status === "manual"
-                        ? "Manual steps shown in terminal"
-                        : "Running in terminal"}
-                </span>
-              </div>
-              <div className={styles.cliSetupActions}>
-                <button
-                  type="button"
-                  className={styles.cliSetupButton}
-                  onClick={() => runCliSetupCommand(cliSetupGuide)}
-                  disabled={cliSetupGuide.status === "starting"}
-                >
-                  {cliSetupGuide.status === "manual"
-                    ? cliSetupGuide.instructions.buttonLabel
-                    : cliSetupGuide.hasRun
-                      ? "Run again"
-                      : cliSetupGuide.instructions.buttonLabel}
-                </button>
-                <button
-                  type="button"
-                  className={styles.cliSetupDismiss}
-                  onClick={refreshCliStatus}
-                >
-                  Recheck
-                </button>
-                <button
-                  type="button"
-                  className={styles.cliSetupDismiss}
-                  onClick={() => setCliSetupGuide(null)}
-                  aria-label="Dismiss CLI setup"
-                >
-                  Dismiss
-                </button>
-              </div>
+              )}
+            </>
+          )}
+          {!hideTabs && showEditorSplit && (
+            <div
+              className={`${groupStyles.panes} ${groupStyles.split}`}
+              data-testid="terminal-editor-groups"
+              data-split="true"
+            >
+              {groups.map((group, groupIndex) => {
+                const groupTabs = tabsForGroup(group.tabIds);
+                const paneSide: "left" | "right" =
+                  groupIndex === 0 ? "left" : "right";
+                return (
+                  <div
+                    key={groupIndex}
+                    className={groupStyles.paneCol}
+                    onDragOver={handleGroupDragOver}
+                    onDrop={() => handleGroupDrop(groupIndex)}
+                  >
+                    <TerminalTabBar
+                      tabs={toTerminalTabs(groupTabs)}
+                      activeTabId={group.activeTabId}
+                      onTabChange={(tabId) =>
+                        handleGroupTabChange(groupIndex, tabId)
+                      }
+                      onTabClose={handleTabClose}
+                      onNewTab={handleNewTabLimit}
+                      availableBackends={selectableBackends}
+                      backendsLoading={configLoading}
+                      onBackendSelect={handleBackendSelect}
+                      onTabRename={handleTabRename}
+                      onDuplicateTab={handleDuplicateTab}
+                      maxTabsReached={visibleTabs.length >= MAX_TABS}
+                      onTabPin={handleTabPin}
+                      onCloseOthers={handleCloseOthers}
+                      showToolbarActions={groupIndex === 0}
+                      groupDrag={{
+                        onDragStart: (tabId) =>
+                          handleGroupDragStart(groupIndex, tabId),
+                        onDragEnd: handleGroupDragEnd,
+                      }}
+                      dropTarget={{
+                        onDragOver: handleGroupDragOver,
+                        onDrop: () => handleGroupDrop(groupIndex),
+                      }}
+                      totalTabCount={visibleTabs.length}
+                    />
+                    {groupIndex === 0 && cliSetupGuide && (
+                      <div
+                        className={styles.cliSetupBanner}
+                        data-testid="cli-setup-banner"
+                      >
+                        <span
+                          className={styles.cliSetupDot}
+                          style={{
+                            backgroundColor: cliSetupGuide.brandColor,
+                          }}
+                          aria-hidden="true"
+                        />
+                        <div className={styles.cliSetupBody}>
+                          <div className={styles.cliSetupHeader}>
+                            <strong>{cliSetupGuide.instructions.title}</strong>
+                            <span>{cliSetupGuide.provider}</span>
+                          </div>
+                          <p>{cliSetupGuide.instructions.description}</p>
+                          {cliSetupGuide.instructions.command && (
+                            <code>{cliSetupGuide.instructions.command}</code>
+                          )}
+                        </div>
+                      </div>
+                    )}
+                    <div className={groupStyles.paneBody}>
+                      {groupTabs.map((tab) => (
+                        <div
+                          key={tab.id}
+                          className={groupStyles.paneSlot}
+                          data-hidden={
+                            group.activeTabId !== tab.id ? "true" : undefined
+                          }
+                          role="tabpanel"
+                          aria-hidden={group.activeTabId !== tab.id}
+                        >
+                          {renderTerminalPane(
+                            tab,
+                            paneSide,
+                            group.activeTabId === tab.id,
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           )}
-          <HelpPopover
-            isOpen={isHelpOpen}
-            onClose={() => setIsHelpOpen(false)}
-          />
-          <TerminalPaneArea
-            tabs={tabs}
-            activeTabId={activeTabId}
-            isSplitView={isSplitView}
-            rightPaneTabId={rightPaneTabId}
-            splitRatio={splitRatio}
-            splitContainerRef={splitContainerRef}
-            onSplitRatioChange={handleSplitRatioChange}
-            onRightPaneTabChange={handleRightPaneTabChange}
-            renderPane={renderTerminalPane}
-          />
+          {!showEditorSplit && (
+            <TerminalPaneArea
+              tabs={paneTabs}
+              activeTabId={paneActiveTabId}
+              isSplitView={false}
+              rightPaneTabId=""
+              splitRatio={0.5}
+              splitContainerRef={splitContainerRef}
+              onSplitRatioChange={() => {}}
+              onRightPaneTabChange={() => {}}
+              renderPane={renderTerminalPane}
+            />
+          )}
         </>
       )}
-      <BackendPickerPrompt
-        isOpen={isSessionPromptOpen}
-        availableBackends={config?.available ?? []}
-        preferredBackend={config?.backend}
-        isLoading={configLoading}
-        onSelect={handleBackendSelect}
-        onCancel={handleSessionPromptCancel}
-      />
       <div
         ref={liveRegionRef}
         className={styles.visuallyHidden}

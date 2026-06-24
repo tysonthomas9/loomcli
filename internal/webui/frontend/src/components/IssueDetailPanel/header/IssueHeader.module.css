@@ -4,6 +4,8 @@
  */
 
 .issueHeader {
+  min-width: 0;
+  max-width: 100%;
   padding: 0 var(--panel-padding-md) var(--panel-padding-md);
 }
 
@@ -15,54 +17,14 @@
 .topRow {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 10px;
+  row-gap: 8px;
+  min-width: 0;
   min-height: 64px;
   margin: 0 calc(var(--panel-padding-md) * -1) 20px;
   padding: 0 var(--panel-padding-md);
   border-bottom: 1px solid var(--color-border-light);
-}
-
-/* Priority badge in header */
-.priorityBadge {
-  display: inline-flex;
-  align-items: center;
-  padding: 2px 6px;
-  font-size: 10px;
-  font-weight: 700;
-  line-height: 1.1;
-  border-radius: 4px;
-  background-color: var(--color-bg-tertiary);
-  color: var(--color-text-secondary);
-  cursor: pointer;
-  border: 1px solid var(--color-border-light);
-  transition:
-    background-color var(--transition-fast),
-    border-color var(--transition-fast);
-}
-
-.priorityBadge:hover {
-  background-color: var(--color-bg-active);
-}
-
-.priorityBadge[data-priority="0"],
-.priorityBadge[data-priority="1"] {
-  background-color: var(--color-priority-0);
-  color: #fff;
-  border-color: transparent;
-}
-
-.priorityBadge[data-priority="0"]:hover,
-.priorityBadge[data-priority="1"]:hover {
-  background-color: color-mix(in srgb, var(--color-priority-0) 88%, black);
-}
-
-.priorityBadge[data-priority="2"] {
-  background-color: var(--color-warning-bg);
-  color: var(--color-text);
-}
-
-.priorityBadge[data-priority="2"]:hover {
-  background-color: color-mix(in srgb, var(--color-warning-bg) 88%, black);
 }
 
 .issueId {
@@ -152,6 +114,44 @@
   outline-offset: 2px;
 }
 
+.runEpicButton {
+  margin-left: auto;
+  min-width: 86px;
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 0 10px;
+  background: var(--color-primary);
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1;
+  cursor: pointer;
+  white-space: nowrap;
+  transition:
+    background-color var(--transition-fast),
+    border-color var(--transition-fast),
+    color var(--transition-fast);
+}
+
+.runEpicButton:hover:not(:disabled) {
+  background-color: color-mix(in srgb, var(--color-primary) 88%, black);
+}
+
+.runEpicButton:disabled {
+  cursor: wait;
+  opacity: 0.68;
+}
+
+.runEpicButton:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
 .copyLinkButton {
   margin-left: auto;
   width: 28px;
@@ -205,15 +205,79 @@
   outline-offset: 2px;
 }
 
+.maximizeButton {
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-sm);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  transition:
+    background-color var(--transition-fast),
+    color var(--transition-fast);
+}
+
+.maximizeButton:hover {
+  background-color: var(--color-bg-hover);
+  color: var(--color-text);
+}
+
+.maximizeButton:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
 /* When copyLinkButton is present, it takes the margin-left: auto.
-   closeButton only needs it when copyLinkButton is absent. */
+   closeButton only needs it when copyLinkButton is absent. The action group
+   (copy → move → maximize → close) stays right-aligned via that single auto;
+   every following button resets its own margin so close ends flush. */
+.runEpicButton + .copyLinkButton,
+.runEpicButton + .moveButton,
+.runEpicButton + .maximizeButton,
+.runEpicButton + .closeButton,
 .copyLinkButton + .moveButton,
-.copyLinkButton + .closeButton {
+.copyLinkButton + .closeButton,
+.copyLinkButton + .maximizeButton,
+.moveButton + .maximizeButton,
+.maximizeButton + .closeButton {
   margin-left: 0;
 }
 
-.moveButton + .closeButton {
+.moveButton + .closeButton,
+.moveButton + .maximizeButton,
+.maximizeButton + .closeButton {
   margin-left: 0;
+}
+
+.maximizeButton {
+  margin-left: auto;
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-sm);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  transition:
+    background-color var(--transition-fast),
+    color var(--transition-fast);
+}
+
+.maximizeButton:hover {
+  background-color: var(--color-bg-hover);
+  color: var(--color-text);
+}
+
+.maximizeButton:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
 }
 
 .closeButton {
@@ -250,4 +314,6 @@
   margin: 0;
   line-height: 1.25;
   word-break: break-word;
+  overflow-wrap: anywhere;
+  min-width: 0;
 }

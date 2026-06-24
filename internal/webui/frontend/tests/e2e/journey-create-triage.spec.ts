@@ -549,7 +549,6 @@ test.describe("Journey: Create issue, drag to column, assign agent", () => {
 
     await page.getByTestId("create-issue-title").fill("Journey Test Bug");
     await page.getByTestId("create-issue-type").selectOption("bug");
-    await page.getByTestId("create-issue-priority").selectOption("1");
 
     // Submit and wait for POST response
     const postPromise = page.waitForResponse(
@@ -573,7 +572,7 @@ test.describe("Journey: Create issue, drag to column, assign agent", () => {
     const postBody = state.postCalls[0].body as Record<string, unknown>;
     expect(postBody.title).toBe("Journey Test Bug");
     expect(postBody.issue_type).toBe("bug");
-    expect(postBody.priority).toBe(1);
+    expect(postBody.priority).toBe(2);
   });
 
   test("3. Open detail panel and edit description", async ({ page }) => {

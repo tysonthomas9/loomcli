@@ -128,8 +128,8 @@ func TestBlocked_NativeFleetDBWrapper(t *testing.T) {
 	if got.ID != "b-1" {
 		t.Errorf("ID = %q, want b-1", got.ID)
 	}
-	if got.Status != "blocked" {
-		t.Errorf("Status = %q, want blocked", got.Status)
+	if got.Status != "open" {
+		t.Errorf("Status = %q, want raw open status", got.Status)
 	}
 	if got.Parent != parentID {
 		t.Errorf("Parent = %q, want %q", got.Parent, parentID)

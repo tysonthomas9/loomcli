@@ -7,6 +7,8 @@ import (
 	"os"
 	"sync"
 	"time"
+
+	"github.com/tysonthomas9/loomcli/internal/webui/tabmeta"
 )
 
 // ErrInvalidWorkspacePath is returned when a workspace's directory path fails
@@ -279,12 +281,12 @@ func (mm *MultiPTYManager) existingManagerForWS(wsID string) *PTYManager {
 // AttachSession routes to the per-workspace PTYManager, creating it lazily
 // if necessary. Returns ErrWorkspaceNotRegistered if key.Workspace is empty
 // or unknown.
-func (mm *MultiPTYManager) AttachSession(key SessionKey, cols, rows uint16, argv []string) (Attachment, bool, error) {
+func (mm *MultiPTYManager) AttachSession(key SessionKey, cols, rows uint16, launch *tabmeta.LaunchSpec) (Attachment, bool, error) {
 	m, err := mm.managerForWS(key.Workspace)
 	if err != nil {
 		return nil, false, err
 	}
-	return m.AttachSession(key, cols, rows, argv)
+	return m.AttachSession(key, cols, rows, launch)
 }
 
 // EnsureSession routes backend-owned session startup to the per-workspace
@@ -333,6 +335,16 @@ func (mm *MultiPTYManager) HasSession(key SessionKey) bool {
 		return false
 	}
 	return m.HasSession(key)
+}
+
+// SessionClosed reports whether a session existed in the current per-workspace
+// manager and has since exited or been killed.
+func (mm *MultiPTYManager) SessionClosed(key SessionKey) bool {
+	m := mm.existingManagerForWS(key.Workspace)
+	if m == nil {
+		return false
+	}
+	return m.SessionClosed(key)
 }
 
 // AttachmentCount returns the number of concurrent attachments for key.

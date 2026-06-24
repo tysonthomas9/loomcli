@@ -126,6 +126,56 @@ describe("SwimLane", () => {
       );
     });
 
+    it("renders a runner badge when a lead has claimed the epic lane", () => {
+      renderWithDndContext(
+        <SwimLane
+          id="test-lane"
+          title="Epic: User Authentication"
+          issues={[]}
+          columns={defaultColumns}
+          epicRunner="atlas"
+        />,
+      );
+
+      const badge = screen.getByTestId("lane-runner-badge");
+      expect(badge).toHaveTextContent("atlas");
+      expect(
+        screen.queryByTestId("lane-unclaimed-badge"),
+      ).not.toBeInTheDocument();
+    });
+
+    it("renders an Unclaimed badge when no lead runs the epic lane", () => {
+      renderWithDndContext(
+        <SwimLane
+          id="test-lane"
+          title="Epic: User Authentication"
+          issues={[]}
+          columns={defaultColumns}
+          epicRunner={null}
+        />,
+      );
+
+      expect(screen.getByTestId("lane-unclaimed-badge")).toHaveTextContent(
+        "Unclaimed",
+      );
+    });
+
+    it("hides the runner badge entirely for non-epic groupings", () => {
+      renderWithDndContext(
+        <SwimLane
+          id="test-lane"
+          title="P1 (High)"
+          issues={[]}
+          columns={defaultColumns}
+        />,
+      );
+
+      expect(screen.queryByTestId("lane-runner-badge")).not.toBeInTheDocument();
+      expect(
+        screen.queryByTestId("lane-unclaimed-badge"),
+      ).not.toBeInTheDocument();
+    });
+
     it("shows correct issue count", () => {
       const issues = createMockIssues([
         "open",
@@ -342,9 +392,7 @@ describe("SwimLane", () => {
       );
 
       // When onIssueClick is provided, IssueCard has role="button"
-      const card = screen.getByRole("button", {
-        name: /Issue: Clickable Issue/i,
-      });
+      const card = screen.getByLabelText(/Issue: Clickable Issue/i);
       fireEvent.click(card);
 
       expect(handleIssueClick).toHaveBeenCalledTimes(1);
@@ -374,8 +422,8 @@ describe("SwimLane", () => {
         />,
       );
 
-      const cardA = screen.getByRole("button", { name: /Issue: Issue A/i });
-      const cardB = screen.getByRole("button", { name: /Issue: Issue B/i });
+      const cardA = screen.getByLabelText(/Issue: Issue A/i);
+      const cardB = screen.getByLabelText(/Issue: Issue B/i);
 
       fireEvent.click(cardB);
       expect(handleIssueClick).toHaveBeenLastCalledWith(
@@ -521,6 +569,74 @@ describe("SwimLane", () => {
 
       expect(screen.getByText("Issue 1")).toBeInTheDocument();
       expect(screen.getByText("Issue 2")).toBeInTheDocument();
+    });
+  });
+
+  describe("column layout", () => {
+    it("uses a single shared grid for header cells and body columns", () => {
+      const columns = columnsFromStatuses([
+        "open",
+        "in_progress",
+        "review",
+        "closed",
+      ]);
+
+      const { container } = renderWithDndContext(
+        <SwimLane
+          id="test-lane"
+          title="Test Lane"
+          issues={[]}
+          columns={columns}
+        />,
+      );
+
+      const laneContent = screen.getByTestId("lane-content");
+      expect(laneContent).toHaveStyle({
+        gridTemplateColumns: "repeat(4, minmax(260px, 1fr))",
+      });
+
+      const columnTitles = laneContent!.querySelectorAll("h3");
+      expect(columnTitles).toHaveLength(4);
+
+      const bodyColumns = laneContent!.querySelectorAll("section[data-status]");
+      expect(bodyColumns).toHaveLength(4);
+
+      columnTitles.forEach((header, index) => {
+        const headerCell = header.parentElement;
+        const bodyColumn = bodyColumns[index];
+        expect(headerCell).toHaveStyle({ gridColumn: String(index + 1) });
+        expect(bodyColumn).toHaveStyle({ gridColumn: String(index + 1) });
+      });
+
+      expect(container.querySelector('[class*="columnHeaderRow"]')).toBeNull();
+      expect(container.querySelector('[class*="columnBodyRow"]')).toBeNull();
+    });
+
+    it("keeps lane content constrained for horizontal scrolling when columns exceed viewport", () => {
+      const columns = columnsFromStatuses([
+        "open",
+        "ready",
+        "in_progress",
+        "review",
+        "closed",
+      ]);
+
+      renderWithDndContext(
+        <div style={{ width: "800px" }}>
+          <SwimLane
+            id="test-lane"
+            title="Test Lane"
+            issues={[]}
+            columns={columns}
+          />
+        </div>,
+      );
+
+      const laneContent = screen.getByTestId("lane-content");
+      expect(laneContent).toHaveStyle({
+        gridTemplateColumns: "repeat(5, minmax(260px, 1fr))",
+      });
+      expect(laneContent.style.minWidth).toBe("");
     });
   });
 

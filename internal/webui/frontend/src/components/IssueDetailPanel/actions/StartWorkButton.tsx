@@ -9,6 +9,7 @@ import { useState, useCallback, useRef, useEffect } from "react";
 import type { LoomAgentStatus, LoomTaskInfo } from "@/types";
 import { parseLoomStatus } from "@/types/agent";
 import type { Status } from "@/types/issue";
+import { formatStatusLabel } from "@/utils/issue";
 
 import styles from "./StartWorkButton.module.css";
 
@@ -63,8 +64,13 @@ export function StartWorkButton({
   const containerRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
 
-  // Only show for open issues without an existing agent assignee
-  const isActionable = issueStatus === "open" && !currentAssignee;
+  // Show for unassigned open issues ("Start Work") and unassigned review
+  // issues ("Review with Agent" — the design's PR-review-agent entry point;
+  // both use the same real issue-assignee flow).
+  const isReviewStage = issueStatus === "review";
+  const isActionable =
+    (issueStatus === "open" || isReviewStage) && !currentAssignee;
+  const actionLabel = isReviewStage ? "Review with Agent" : "Start Work";
 
   // Handle click outside to close
   useEffect(() => {
@@ -117,14 +123,20 @@ export function StartWorkButton({
     [onAssign],
   );
 
-  // Categorize agents
+  // Categorize agents. Prefer agents matching the stage's role, but fall
+  // back to the full roster when none match — an empty picker on a workspace
+  // that has agents is a dead end (e.g. a plan-stage issue in a task-only
+  // workspace).
+  const roleMatched = agents.filter(
+    (agent) => !agent.role || agent.role === preferredRole,
+  );
+  const candidateAgents = roleMatched.length > 0 ? roleMatched : agents;
+
   const availableAgents: LoomAgentStatus[] = [];
   const busyAgents: LoomAgentStatus[] = [];
   const warningAgents: LoomAgentStatus[] = [];
 
-  for (const agent of agents) {
-    if (agent.role && agent.role !== preferredRole) continue;
-
+  for (const agent of candidateAgents) {
     const parsed = parseLoomStatus(agent.status);
     if (AVAILABLE_TYPES.has(parsed.type)) {
       availableAgents.push(agent);
@@ -153,7 +165,7 @@ export function StartWorkButton({
         disabled={isDisabled}
         aria-expanded={isOpen}
         aria-haspopup="listbox"
-        aria-label="Start work - assign an agent"
+        aria-label={`${actionLabel} - assign an agent`}
         data-testid="start-work-button"
       >
         <svg
@@ -164,7 +176,7 @@ export function StartWorkButton({
         >
           <path d="M4 2.5v11l9-5.5-9-5.5z" fill="currentColor" />
         </svg>
-        <span>{isAssigning ? "Assigning..." : "Start Work"}</span>
+        <span>{isAssigning ? "Assigning..." : actionLabel}</span>
       </button>
 
       {isOpen && (
@@ -256,7 +268,9 @@ export function StartWorkButton({
                 >
                   <span className={styles.statusDot} data-status="warning" />
                   <span className={styles.agentName}>{agent.name}</span>
-                  <span className={styles.agentStatus}>{parsed.type}</span>
+                  <span className={styles.agentStatus}>
+                    {formatStatusLabel(parsed.type)}
+                  </span>
                 </div>
               );
             })}
@@ -271,7 +285,7 @@ export function StartWorkButton({
                   title={
                     task
                       ? `Working on: ${task.title}`
-                      : `Status: ${parsed.type}`
+                      : `Status: ${formatStatusLabel(parsed.type)}`
                   }
                   data-testid={`agent-option-${agent.name}`}
                 >

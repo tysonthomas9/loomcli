@@ -51,9 +51,9 @@ func (h *FleetSubscriberHook) Name() string { return "fleet-subscriber" }
 // endpoints continue to work; the SPA falls back to polling).
 func (h *FleetSubscriberHook) Critical() bool { return false }
 
-// OnRegister is a no-op. Subscriber start is deferred to Activate so that
-// workspace-scoped traffic can warm it lazily instead of opening one long-poll
-// per workspace at startup. Connected SSE clients retain the subscriber; the
+// OnRegister is a no-op. Subscriber start is deferred to Activate so the SSE
+// token/stream routes can start it lazily instead of opening one long-poll per
+// workspace at startup. Connected SSE clients retain the subscriber; the
 // MultiWorkspaceSubscriber idle loop tears it down after the grace period.
 func (h *FleetSubscriberHook) OnRegister(ctx *coordinator.RegistrationContext) error {
 	h.logger.Debug("fleet subscriber hook registered for workspace (deferred)", "workspace", ctx.WorkspaceID)
@@ -61,9 +61,9 @@ func (h *FleetSubscriberHook) OnRegister(ctx *coordinator.RegistrationContext) e
 }
 
 // Activate is the subscriberActivator interface method called by
-// WorkspaceRegistry.ActivateSubscriber when workspace-scoped HTTP traffic
-// warms the workspace. It looks up the FleetBackend that FleetBackendHook
-// previously stored on the workspace handle and hands it to the
+// WorkspaceRegistry.ActivateSubscriber when an SSE route opens for a workspace.
+// It looks up the FleetBackend that FleetBackendHook previously stored on the
+// workspace handle and hands it to the
 // MultiWorkspaceSubscriber to spin up a long-poll loop.
 //
 // Idempotent: if a subscriber already exists for wsID, returns nil

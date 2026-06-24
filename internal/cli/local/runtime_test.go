@@ -51,6 +51,14 @@ func TestLocalEnvSetsWorkspaceRuntimeDir(t *testing.T) {
 	}
 }
 
+func TestLocalEnvMarksDesktopRuntimeMode(t *testing.T) {
+	env := localEnv("/tmp/loom-data", 12345)
+
+	if !containsEnv(env, "LOOM_LOCAL_RUNTIME=desktop") {
+		t.Fatalf("localEnv() missing desktop runtime mode")
+	}
+}
+
 func TestLocalEnvPrependsExecutableDirToPath(t *testing.T) {
 	env := localEnv("/tmp/loom-data", 12345)
 	exe, err := os.Executable()

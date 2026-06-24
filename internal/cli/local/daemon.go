@@ -17,6 +17,11 @@ const (
 	localDaemonMaxBackoff   = 30 * time.Second
 )
 
+var (
+	localDaemonLoadConfig        = loadLocalDaemonConfigForWorkspace
+	localDaemonWorkspaceHasRepos = workspaceHasReposForLocalDaemon
+)
+
 func startLocalDaemonSupervisor(ctx context.Context, dataDir, exe string, port int) {
 	go superviseLocalDaemon(ctx, dataDir, exe, port)
 }
@@ -60,7 +65,14 @@ func localDaemonRunnableWorkspace(dataDir string) (string, bool, error) {
 	if err != nil || workspaceKey == "" {
 		return workspaceKey, false, err
 	}
-	config, err := loadLocalDaemonConfigForWorkspace(dataDir, workspaceKey)
+	hasRepos, err := localDaemonWorkspaceHasRepos(dataDir, workspaceKey)
+	if err != nil {
+		return workspaceKey, false, err
+	}
+	if hasRepos {
+		return workspaceKey, true, nil
+	}
+	config, err := localDaemonLoadConfig(dataDir, workspaceKey)
 	if err != nil {
 		return workspaceKey, false, err
 	}
@@ -86,6 +98,21 @@ func loadLocalDaemonConfigForWorkspace(dataDir, workspaceKey string) (*cfgpkg.Da
 	}()
 
 	return cfgpkg.LoadDaemonConfig(dataDir)
+}
+
+func workspaceHasReposForLocalDaemon(dataDir, workspaceKey string) (bool, error) {
+	ctx := context.Background()
+	handle, err := bootstrap.OpenStore(ctx, dataDir, nil)
+	if err != nil {
+		return false, err
+	}
+	defer func() { _ = handle.Close() }()
+
+	repos, err := handle.Store.Repos().List(ctx, workspaceKey)
+	if err != nil {
+		return false, err
+	}
+	return len(repos) > 0, nil
 }
 
 func localDaemonWorkspaceKey() (string, error) {

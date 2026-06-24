@@ -244,9 +244,9 @@ func (r *WorkspaceRegistry) ActivateSubscriber(id string) error {
 		r.mu.RUnlock()
 		return ErrRegistryClosed
 	}
-	// Skip silently if the workspace was deregistered before the caller
-	// (e.g., DaemonStartupFn's onReady callback) fired. Otherwise we'd
-	// resurrect a torn-down workspace by starting a subscriber with no pool.
+	// Skip silently if the workspace was deregistered before an asynchronous
+	// activation callback fired. Otherwise we'd resurrect a torn-down workspace
+	// by starting a subscriber with no pool.
 	if _, ok := r.active[id]; !ok {
 		r.mu.RUnlock()
 		return nil

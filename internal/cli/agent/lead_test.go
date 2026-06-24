@@ -2,14 +2,25 @@ package agent
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/epicrunner"
+	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
+	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
 func TestRunLead_InvokesClaude(t *testing.T) {
+	// Disable the controlled (harness-wrapper) lead runtime so runLead falls
+	// back to the backend registry and hits the mock instead of launching a
+	// real claude process under PTY supervision.
+	t.Setenv("LOOM_LEAD_CONTROLLED", "0")
+
 	// Setup temp directory as working directory
 	tmpDir := t.TempDir()
 	tmpDir, _ = filepath.EvalSymlinks(tmpDir) // macOS /var -> /private/var
@@ -107,5 +118,67 @@ func TestGenerateLeadPrompt_NotEmpty(t *testing.T) {
 		!strings.Contains(strings.ToLower(prompt), "project") &&
 		!strings.Contains(strings.ToLower(prompt), "review") {
 		t.Errorf("lead prompt should contain relevant keywords, got %q", prompt)
+	}
+}
+
+func TestResolveLeadOrchestratorSessionIDPrefersExistingEnv(t *testing.T) {
+	t.Setenv(envOrchestratorSessionID, " lead-session-1 ")
+
+	if got := resolveLeadOrchestratorSessionID(); got != "lead-session-1" {
+		t.Fatalf("resolveLeadOrchestratorSessionID() = %q, want lead-session-1", got)
+	}
+}
+
+func TestResolveLeadAgentIDUsesTerminalAgentName(t *testing.T) {
+	t.Setenv(envAgentName, " lead-ui-e2e ")
+
+	if got := resolveLeadAgentID(); got != "lead-ui-e2e" {
+		t.Fatalf("resolveLeadAgentID() = %q, want lead-ui-e2e", got)
+	}
+}
+
+func TestResolveLeadAgentIDDefaultsToLead(t *testing.T) {
+	t.Setenv(envAgentName, " ")
+
+	if got := resolveLeadAgentID(); got != "lead" {
+		t.Fatalf("resolveLeadAgentID() = %q, want lead", got)
+	}
+}
+
+func TestMarkLeadAssignmentDelivered(t *testing.T) {
+	ctx := context.Background()
+	st := memstore.New()
+	if _, err := st.AgentSessions().Create(ctx, store.AgentSessionCreate{
+		WorkspaceKey: "WS",
+		SessionID:    "lead-session",
+		AgentID:      "nova",
+		Kind:         domain.AgentSessionKindOrchestration,
+		Status:       domain.AgentSessionRunning,
+		Metadata:     map[string]string{"actor": "test"},
+	}); err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+
+	err := markLeadAssignmentDelivered(ctx, st, "WS", &epicrunner.LeadAssignmentContext{
+		EpicID:                "EPIC-1",
+		AssignmentVersion:     "2026-05-17T05:00:00Z",
+		OrchestratorSessionID: "lead-session",
+	})
+	if err != nil {
+		t.Fatalf("markLeadAssignmentDelivered() error = %v", err)
+	}
+
+	session, err := st.AgentSessions().Get(ctx, "WS", "lead-session")
+	if err != nil {
+		t.Fatalf("get session: %v", err)
+	}
+	if session.Metadata["actor"] != "test" {
+		t.Fatalf("existing metadata was not preserved: %#v", session.Metadata)
+	}
+	if got := session.Metadata["lead_assignment_delivered_version"]; got != "2026-05-17T05:00:00Z" {
+		t.Fatalf("delivered version = %q", got)
+	}
+	if got := session.Metadata["lead_assignment_delivered_epic"]; got != "EPIC-1" {
+		t.Fatalf("delivered epic = %q", got)
 	}
 }

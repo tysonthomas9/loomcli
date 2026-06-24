@@ -845,6 +845,14 @@
   min-height: 0;
 }
 
+.diffMeta {
+  flex-shrink: 0;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--color-border-light);
+  font-size: 12px;
+  color: var(--color-text-secondary);
+}
+
 .diffCodeMirror {
   flex: 1;
   min-height: 0;

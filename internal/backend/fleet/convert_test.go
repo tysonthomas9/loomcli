@@ -34,7 +34,7 @@ func TestFleetIssueWire_FieldDriftGuard(t *testing.T) {
 			wireKeys["kind"] = true
 			continue
 		}
-		if key == "repo" {
+		if key == "repo" || key == "source_repo" {
 			wireKeys["repo_canonical"] = true
 			continue
 		}
@@ -47,7 +47,8 @@ func TestFleetIssueWire_FieldDriftGuard(t *testing.T) {
 	canonical := map[string]bool{
 		"id": true, "title": true, "status": true, "priority": true,
 		"kind": true, "assignee": true, "owner": true, "labels": true,
-		"repo_canonical": true, "parent": true, "design": true, "notes": true, "description": true,
+		"repo_canonical": true, "parent": true, "design": true, "description": true,
+		"acceptance_criteria": true, "notes": true,
 		"created_at": true, "created_by": true, "updated_at": true,
 		"due_at": true, "defer_until": true, "closed_at": true,
 		"close_reason": true,

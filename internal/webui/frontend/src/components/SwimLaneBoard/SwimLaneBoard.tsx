@@ -17,8 +17,11 @@ import {
   type DragEndEvent,
 } from "@dnd-kit/core";
 import { useState, useMemo, useCallback, useEffect } from "react";
+import { useStore } from "zustand";
 
+import { useAgentStoreInstance } from "@/hooks/common";
 import { useWorkspaceContext } from "@/hooks/workspace";
+import { buildEpicLeadClaims } from "@/utils/agentRole";
 import { wsGet, wsSet } from "@/utils/scopedStorage";
 import { DraggableIssueCard } from "@/components/DraggableIssueCard";
 import { EmptyWorkspaceBoard } from "@/components/EmptyWorkspaceBoard";
@@ -167,6 +170,14 @@ function SwimLaneBoardContent({
   columns: KanbanColumnConfig[];
 }): JSX.Element {
   const { workspaceId } = useWorkspaceContext();
+  // Lead claims for epic lane headers (Aether design, pin 10): show which
+  // lead is running each epic, or "Unclaimed" when nobody has bound to it.
+  const agentStore = useAgentStoreInstance();
+  const agents = useStore(agentStore, (s) => s.agents);
+  const epicLeadClaims = useMemo(
+    () => (groupBy === "epic" ? buildEpicLeadClaims(agents) : undefined),
+    [groupBy, agents],
+  );
   const [activeIssue, setActiveIssue] = useState<Issue | null>(null);
   const [sourceColumnId, setSourceColumnId] = useState<string | null>(null);
   const [showCompletedLanes, setShowCompletedLanes] = useState(() => {
@@ -224,9 +235,13 @@ function SwimLaneBoardContent({
     const active: LaneGroup[] = [];
     let completed = 0;
     for (const lane of allLanes) {
+      // A lane is "completed" when every card is closed — or when it's an
+      // empty lane whose epic itself is closed (a zero-child closed epic
+      // would otherwise render a full empty lane forever).
       const allClosed =
-        lane.issues.length > 0 &&
-        lane.issues.every((i) => i.status === "closed");
+        lane.issues.length > 0
+          ? lane.issues.every((i) => i.status === "closed")
+          : lane.groupIssue?.status === "closed";
       if (allClosed) {
         completed++;
         if (showCompletedLanes) active.push(lane);
@@ -428,6 +443,14 @@ function SwimLaneBoardContent({
           </div>
         )}
         {lanes.map((lane) => {
+          // Epic lanes get a runner badge; the synthetic Ungrouped lane and
+          // non-epic groupings do not.
+          const epicKey =
+            lane.groupIssue?.id ?? lane.id.replace(/^lane-epic-/, "");
+          const epicRunner =
+            epicLeadClaims !== undefined && epicKey !== "__ungrouped__"
+              ? (epicLeadClaims.get(epicKey) ?? null)
+              : undefined;
           // Build props conditionally to satisfy exactOptionalPropertyTypes
           const laneProps = {
             id: lane.id,
@@ -436,6 +459,7 @@ function SwimLaneBoardContent({
             columns,
             isCollapsed: isLaneCollapsed(lane.id),
             onToggleCollapse: () => toggleLaneCollapse(lane.id),
+            ...(epicRunner !== undefined && { epicRunner }),
             ...(onIssueClick !== undefined && { onIssueClick }),
             ...(lane.groupIssue !== undefined &&
               onIssueClick !== undefined && {

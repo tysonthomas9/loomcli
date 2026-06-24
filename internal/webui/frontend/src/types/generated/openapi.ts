@@ -484,7 +484,13 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** List ready (unblocked) issues */
+    /**
+     * List ready (unblocked) issues
+     * @description Returns the canonical ready availability view from the issue backend:
+     *     open, non-epic work that is not canonically blocked and not currently
+     *     deferred. Filters may narrow this view, but they must not make
+     *     non-open statuses or epics ready.
+     */
     get: operations["listReady"];
     put?: never;
     post?: never;
@@ -501,7 +507,15 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** List blocked issues with blocker details */
+    /**
+     * List blocked issues with blocker details
+     * @description Returns canonical blocked work from the issue backend. For FleetDB-backed
+     *     workspaces this includes explicit status=blocked issues, issues blocked
+     *     by non-terminal dependencies, and descendants of blocked parents.
+     *     Dependency blocker IDs/details are returned when known; explicit
+     *     status-only and parent-only blocked issues may have no dependency
+     *     blocker IDs.
+     */
     get: operations["listBlocked"];
     put?: never;
     post?: never;
@@ -545,6 +559,9 @@ export interface paths {
      *     ```json
      *     {
      *       "type": "update",
+     *       "entity_type": "issue",
+     *       "entity_id": "proj-abc.5",
+     *       "action": "issue.update",
      *       "issue_id": "proj-abc.5",
      *       "title": "Fix login bug",
      *       "assignee": "agent-1",
@@ -561,7 +578,8 @@ export interface paths {
      *     ```
      *
      *     **Mutation types**: `create`, `update`, `delete`, `comment`, `status`,
-     *     `bonded`, `squashed`, `burned`, `refresh`, `terminal_session_change`
+     *     `bonded`, `squashed`, `burned`, `refresh`, `terminal_metadata`,
+     *     `terminal_session_change`, `issue_tabs`, `session_change`
      *
      *     **Authentication**: Accepts Bearer token via `Authorization` header or
      *     one-time token via `token` query parameter (for EventSource which
@@ -2091,9 +2109,10 @@ export interface components {
       /** Format: date-time */
       edited_at?: string | null;
     };
-    /** @description Issue with blocking information */
+    /** @description Canonically blocked issue with blocking information when available. */
     BlockedIssue: components["schemas"]["Issue"] & {
       blocked_by_count: number;
+      /** @description Dependency blocker IDs when known. May be empty for explicit status-only or parent-propagated blocking. */
       blocked_by: string[];
       blocked_by_details?: components["schemas"]["BlockerRef"][];
     };
@@ -2499,9 +2518,12 @@ export interface components {
       task_title?: string;
     };
     /**
-     * @description SSE mutation event payload. All fields except type, issue_id, and
-     *     timestamp are context-dependent. For status events: old_status and
-     *     new_status are present. For bonded events: parent_id and step_count
+     * @description SSE mutation event payload. `type` is the legacy coarse mutation kind.
+     *     New consumers should prefer the generic `entity_type`, `entity_id`, and
+     *     `action` envelope fields when deciding which local state to invalidate.
+     *     `issue_id` is retained for backward-compatible issue-scoped consumers
+     *     and may be omitted for non-issue entities. For status events: old_status
+     *     and new_status are present. For bonded events: parent_id and step_count
      *     are present. This is documented as a flat schema (no discriminator)
      *     because the SSE stream is not validated by generated clients.
      */
@@ -2517,8 +2539,18 @@ export interface components {
         | "squashed"
         | "burned"
         | "refresh"
-        | "terminal_session_change";
-      issue_id: string;
+        | "terminal_metadata"
+        | "terminal_session_change"
+        | "issue_tabs"
+        | "session_change";
+      /** @description Generic changed entity type, for example issue, dependency, comment, label, agent, terminal, session, or workspace. */
+      entity_type?: string;
+      /** @description Generic changed entity identifier. */
+      entity_id?: string;
+      /** @description Source action for the mutation, usually the fleet-db action such as issue.update or dep.add. */
+      action?: string;
+      /** @description Legacy issue identifier for issue-scoped consumers; omitted for non-issue entities. */
+      issue_id?: string;
       title?: string;
       assignee?: string;
       actor?: string;
@@ -2614,6 +2646,18 @@ export interface components {
       repo?: string;
       workspace: string;
       daemon_managed?: boolean;
+      /** @description Active epic assignment for lead/workers. */
+      parent?: string;
+      /** @description Lead/orchestrator session that spawned or owns the agent. */
+      orchestrator_session_id?: string;
+      /** @description Latest task session associated with this agent. */
+      task_id?: string;
+      /** @description Latest control-plane session associated with this agent. */
+      session_id?: string;
+      /** @description Assignment mode, such as persistent or ephemeral. */
+      mode?: string;
+      /** @description Requested daemon state for the agent. */
+      desired_state?: string;
       commits?: components["schemas"]["MonitorCommitDetail"][];
       changes?: components["schemas"]["MonitorFileChange"][];
       /** @description Task this daemon-managed agent has currently claimed. Empty between tasks (just spawned, polling, finished). UI joins this against issue.id to render which agent is working each card. */
@@ -3982,12 +4026,12 @@ export interface operations {
     parameters: {
       query?: {
         assignee?: string;
+        /** @description Filter by issue type. Epics are always excluded from the ready view. */
         type?: "bug" | "feature" | "task" | "epic" | "chore";
         parent_id?: string;
         mol_type?: "swarm" | "patrol" | "work";
         sort?: "hybrid" | "priority" | "oldest";
         unassigned?: boolean;
-        include_deferred?: boolean;
         priority?: number;
         limit?: number;
         /** @description Comma-separated labels (all must match) */

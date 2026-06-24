@@ -215,6 +215,9 @@ func HandleNotifySessionChange(hub *realtime.Hub, notifyToken string) http.Handl
 		}
 		hub.Broadcast(&realtime.MutationPayload{
 			Type:        rpc.MutationSessionChange,
+			EntityType:  "session",
+			EntityID:    req.SessionID,
+			Action:      "session.change",
 			IssueID:     req.TaskID,
 			NewStatus:   req.Status,
 			Timestamp:   time.Now().UTC().Format(time.RFC3339),

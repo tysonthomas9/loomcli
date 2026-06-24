@@ -3,7 +3,6 @@
  */
 
 .draggable {
-  cursor: grab;
   touch-action: none;
   user-select: none;
   display: block;
@@ -16,10 +15,13 @@
   left: var(--space-1);
   top: 50%;
   transform: translateY(-50%);
+  display: inline-flex;
+  align-items: center;
   color: var(--color-text-muted);
   opacity: 0;
   transition: opacity var(--transition-fast);
-  pointer-events: none;
+  pointer-events: auto;
+  cursor: grab;
   z-index: 1;
 }
 
@@ -36,11 +38,8 @@
   opacity: 1;
 }
 
-.draggable:active {
-  cursor: grabbing;
-}
-
-.draggable[data-dragging="true"] {
+.dragHandle:active,
+.draggable[data-dragging="true"] .dragHandle {
   cursor: grabbing;
 }
 

@@ -7,7 +7,7 @@
 import { useState, useCallback } from "react";
 
 export const DEFAULT_FONT_FAMILY = 'Menlo, Monaco, "Courier New", monospace';
-export const DEFAULT_FONT_SIZE = 14;
+export const DEFAULT_FONT_SIZE = 12;
 
 const STORAGE_KEY_FONT_FAMILY = "cortex:terminal-font-family";
 const STORAGE_KEY_FONT_SIZE = "cortex:terminal-font-size";
@@ -27,7 +27,7 @@ export const FONT_FAMILY_OPTIONS: { label: string; value: string }[] = [
 ];
 
 export const FONT_SIZE_OPTIONS: number[] = [
-  10, 11, 12, 13, 14, 15, 16, 18, 20, 22, 24,
+  8, 9, 10, 11, 12, 13, 14, 16, 18, 20, 22,
 ];
 
 function getStoredFontFamily(): string | null {

@@ -36,6 +36,21 @@ func TestPollAgentCommands_UsesFreshContextPerCommand(t *testing.T) {
 	}
 }
 
+func TestPollableAgentCommandStatus(t *testing.T) {
+	if !pollableAgentCommandStatus("") {
+		t.Fatal("empty agent command status should be pollable for legacy fleet-db rows")
+	}
+	if !pollableAgentCommandStatus(domain.AgentCommandQueued) {
+		t.Fatal("queued agent command status should be pollable")
+	}
+	if pollableAgentCommandStatus(domain.AgentCommandRunning) {
+		t.Fatal("running agent command status should not be re-polled")
+	}
+	if pollableAgentCommandStatus(domain.AgentCommandSucceeded) {
+		t.Fatal("succeeded agent command status should not be re-polled")
+	}
+}
+
 type blockingAgentCommandStore struct {
 	mu               sync.Mutex
 	ackCalls         int
@@ -102,6 +117,36 @@ func (s commandPollerTestStore) AgentOwnershipLeases() store.AgentOwnershipLease
 func (s commandPollerTestStore) AgentCommands() store.AgentCommandStore {
 	return s.commands
 }
+func (s commandPollerTestStore) AgentInboxMessages() store.AgentInboxMessageStore {
+	return nil
+}
+func (s commandPollerTestStore) Drivers() store.DriverStore { return nil }
+func (s commandPollerTestStore) DriverVersions() store.DriverVersionStore {
+	return nil
+}
+func (s commandPollerTestStore) WorkerProfiles() store.WorkerProfileStore {
+	return nil
+}
+func (s commandPollerTestStore) AgentServices() store.AgentServiceStore {
+	return nil
+}
+func (s commandPollerTestStore) TriggerBindings() store.TriggerBindingStore {
+	return nil
+}
+func (s commandPollerTestStore) TriggerEvents() store.TriggerEventStore {
+	return nil
+}
+func (s commandPollerTestStore) TriggerDeliveries() store.TriggerDeliveryStore {
+	return nil
+}
+func (s commandPollerTestStore) TriggerRoutes() store.TriggerRouteDispatcher {
+	return nil
+}
+func (s commandPollerTestStore) DriverRuns() store.DriverRunStore { return nil }
+func (s commandPollerTestStore) DriverSteps() store.DriverStepStore {
+	return nil
+}
+func (s commandPollerTestStore) TaskRuns() store.TaskRunStore     { return nil }
 func (s commandPollerTestStore) Workers() store.WorkerStore       { return nil }
 func (s commandPollerTestStore) Roles() store.RoleStore           { return nil }
 func (s commandPollerTestStore) Daemon() store.DaemonProfileStore { return nil }

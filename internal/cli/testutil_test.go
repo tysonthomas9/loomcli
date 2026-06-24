@@ -379,14 +379,6 @@ func SetupMockAgentInvokerOn(t *testing.T, deps *Deps, returnErr error) *MockAge
 	return recorder
 }
 
-// MockClaudeInvokerRecorder is a backwards-compatible alias.
-type MockClaudeInvokerRecorder = MockAgentInvokerRecorder
-
-// SetupMockClaudeInvoker is a backwards-compatible alias for SetupMockAgentInvoker.
-func SetupMockClaudeInvoker(t *testing.T, returnErr error) *MockAgentInvokerRecorder {
-	return SetupMockAgentInvoker(t, returnErr)
-}
-
 // installExecMock installs a MockExecRunner as defaultDeps.Exec and
 // registers cleanup. Bridge pattern: sets the Deps field for production code
 // that calls defaultDeps.Exec.Run() directly.
@@ -464,26 +456,6 @@ func installClaudeNonInteractiveMock(t *testing.T, fn func(workDir, prompt, agen
 	orig := defaultDeps.Agent
 	defaultDeps.Agent = &MockAgentInvoker{NonInteractiveFunc: fn}
 	t.Cleanup(func() { defaultDeps.Agent = orig })
-}
-
-// installCodexInvokerMock is a compat shim (invoker vars moved to backends).
-func installCodexInvokerMock(t *testing.T, fn func(workDir, prompt, agentName string) error) {
-	t.Helper()
-}
-
-// installCodexNonInteractiveMock is a compat shim.
-func installCodexNonInteractiveMock(t *testing.T, fn func(workDir, prompt, agentName string, shutdown <-chan struct{}, collector *usage.Collector) error) {
-	t.Helper()
-}
-
-// installOpenCodeInvokerMock is a compat shim.
-func installOpenCodeInvokerMock(t *testing.T, fn func(workDir, prompt, agentName string) error) {
-	t.Helper()
-}
-
-// installOpenCodeNonInteractiveMock is a compat shim.
-func installOpenCodeNonInteractiveMock(t *testing.T, fn func(workDir, prompt, agentName string, shutdown <-chan struct{}, collector *usage.Collector) error) {
-	t.Helper()
 }
 
 // OutputCommandStub represents an expected output command call and its response
