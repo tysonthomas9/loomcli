@@ -55,30 +55,7 @@ func TestRunBundledLocalTaskRunner_LiveBackend(t *testing.T) {
 
 	tmp := t.TempDir()
 	worktree := filepath.Join(tmp, "wt")
-	if err := os.MkdirAll(worktree, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	for _, args := range [][]string{
-		{"init", "-q"},
-		{"config", "user.email", "t@example.test"},
-		{"config", "user.name", "Test"},
-	} {
-		c := exec.Command("git", args...)
-		c.Dir = worktree
-		if out, err := c.CombinedOutput(); err != nil {
-			t.Fatalf("git %v: %v\n%s", args, err, out)
-		}
-	}
-	if err := os.WriteFile(filepath.Join(worktree, "README.md"), []byte("base\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	for _, args := range [][]string{{"add", "."}, {"commit", "-q", "-m", "init"}} {
-		c := exec.Command("git", args...)
-		c.Dir = worktree
-		if out, err := c.CombinedOutput(); err != nil {
-			t.Fatalf("git %v: %v\n%s", args, err, out)
-		}
-	}
+	newGitWorktree(t, worktree)
 
 	// Trivial, cheap, file-touching-free prompt so the run completes fast and the
 	// assertion focuses on transcript + usage capture, not delivery.
@@ -109,19 +86,10 @@ func TestRunBundledLocalTaskRunner_LiveBackend(t *testing.T) {
 		Stderr:       &serr,
 	})
 	if err != nil {
-		t.Fatalf("RunBundledLocalTaskRunner(%s): %v\n--- stderr (tail) ---\n%s", backend, err, tail(serr.String(), 4000))
+		t.Fatalf("RunBundledLocalTaskRunner(%s): %v\n--- stderr (tail) ---\n%s", backend, err, tailStr(serr.String(), 4000))
 	}
 
-	var result struct {
-		Status            string            `json:"status"`
-		ErrorMessage      string            `json:"errorMessage"`
-		TranscriptEntries []json.RawMessage `json:"transcript_entries"`
-		InputTokens       int64             `json:"input_tokens"`
-		OutputTokens      int64             `json:"output_tokens"`
-		CacheReadTokens   int64             `json:"cache_read_tokens"`
-		CacheWriteTokens  int64             `json:"cache_write_tokens"`
-		EstimatedCostUSD  float64           `json:"estimated_cost_usd"`
-	}
+	var result bundledResult
 	if err := json.Unmarshal(raw, &result); err != nil {
 		t.Fatalf("decode result: %v\nraw: %s", err, raw)
 	}
@@ -131,21 +99,14 @@ func TestRunBundledLocalTaskRunner_LiveBackend(t *testing.T) {
 		result.CacheReadTokens, result.CacheWriteTokens, result.EstimatedCostUSD)
 
 	if result.Status != "completed" {
-		t.Fatalf("status = %q (err=%q); raw: %s", result.Status, result.ErrorMessage, tail(string(raw), 2000))
+		t.Fatalf("status = %q (err=%q); raw: %s", result.Status, result.ErrorMessage, tailStr(string(raw), 2000))
 	}
 	if len(result.TranscriptEntries) == 0 {
-		t.Errorf("no transcript_entries captured for %s: %s", backend, tail(string(raw), 2000))
+		t.Errorf("no transcript_entries captured for %s: %s", backend, tailStr(string(raw), 2000))
 	}
 	// Usage is the whole point of Phase 0/U telemetry parity — a real model turn must
 	// report non-zero input + output tokens.
 	if result.InputTokens <= 0 || result.OutputTokens <= 0 {
-		t.Errorf("%s usage not captured: in=%d out=%d (raw tail: %s)", backend, result.InputTokens, result.OutputTokens, tail(string(raw), 1500))
+		t.Errorf("%s usage not captured: in=%d out=%d (raw tail: %s)", backend, result.InputTokens, result.OutputTokens, tailStr(string(raw), 1500))
 	}
-}
-
-func tail(s string, n int) string {
-	if len(s) <= n {
-		return s
-	}
-	return "..." + s[len(s)-n:]
 }

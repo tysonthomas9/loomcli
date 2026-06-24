@@ -110,12 +110,7 @@ func TestRunBundledRunner_DaytonaLivePR(t *testing.T) {
 		t.Fatalf("RunBundledLocalTaskRunner(daytona PR): %v\n--- stderr tail ---\n%s", err, tailStr(serr.String(), 5000))
 	}
 
-	var result struct {
-		Status          string         `json:"status"`
-		ErrorClass      string         `json:"error_class"`
-		ErrorMessage    string         `json:"error_message"`
-		RuntimeMetadata map[string]any `json:"runtime_metadata"`
-	}
+	var result bundledResult
 	_ = os.WriteFile("/tmp/daytona-pr-result.json", raw, 0o644)
 	if jerr := json.Unmarshal(raw, &result); jerr != nil {
 		t.Fatalf("decode result: %v\nraw tail: %s", jerr, tailStr(string(raw), 3000))

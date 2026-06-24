@@ -1,6 +1,7 @@
 package workflows
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"embed"
@@ -246,13 +247,36 @@ func MaterializeBuiltinBundle(name, destDir string) (string, error) {
 	if _, err := fs.Stat(builtinDistFS, filepath.ToSlash(filepath.Join(distPath, "server.mjs"))); err != nil {
 		return "", fmt.Errorf("builtin bundle %q has no embedded server.mjs: %w", name, err)
 	}
+	serverPath := filepath.Join(destDir, "server.mjs")
+	// Skip re-extraction when destDir already holds this exact bundle. The daemon
+	// leaf materializes once per task-run *process*, so without this guard every
+	// claimed task re-walks + rewrites the whole content-hashed dist tree. Gate on
+	// the embedded source-digest so a loom upgrade still re-materializes.
+	if bundleAlreadyMaterialized(distPath, destDir, serverPath) {
+		return serverPath, nil
+	}
 	if err := os.MkdirAll(destDir, 0o755); err != nil {
 		return "", fmt.Errorf("create bundle dest %q: %w", destDir, err)
 	}
 	if err := copyEmbeddedTree(builtinDistFS, distPath, destDir); err != nil {
 		return "", fmt.Errorf("materialize builtin bundle %q: %w", name, err)
 	}
-	return filepath.Join(destDir, "server.mjs"), nil
+	return serverPath, nil
+}
+
+// bundleAlreadyMaterialized reports whether destDir already holds the embedded
+// bundle, by comparing the on-disk source-digest.txt to the embedded one.
+func bundleAlreadyMaterialized(distPath, destDir, serverPath string) bool {
+	embedded, err := fs.ReadFile(builtinDistFS, filepath.ToSlash(filepath.Join(distPath, "source-digest.txt")))
+	if err != nil {
+		return false
+	}
+	onDisk, err := os.ReadFile(filepath.Join(destDir, "source-digest.txt"))
+	if err != nil || !bytes.Equal(bytes.TrimSpace(onDisk), bytes.TrimSpace(embedded)) {
+		return false
+	}
+	_, err = os.Stat(serverPath)
+	return err == nil
 }
 
 func registerPrebuiltBuiltinWorkflow(ctx context.Context, st store.Store, ws, name string, spec Spec, sourceRef, digest string) (bool, error) {

@@ -82,15 +82,7 @@ func TestRunBundledRunner_DaytonaLive(t *testing.T) {
 		t.Fatalf("RunBundledLocalTaskRunner(daytona live): %v\n--- stderr (tail) ---\n%s", err, tailStr(serr.String(), 4000))
 	}
 
-	var result struct {
-		Status            string            `json:"status"`
-		ErrorClass        string            `json:"error_class"`
-		ErrorMessage      string            `json:"error_message"`
-		InputTokens       int64             `json:"input_tokens"`
-		OutputTokens      int64             `json:"output_tokens"`
-		TranscriptEntries []json.RawMessage `json:"transcript_entries"`
-		RuntimeMetadata   map[string]any    `json:"runtime_metadata"`
-	}
+	var result bundledResult
 	if jerr := json.Unmarshal(raw, &result); jerr != nil {
 		t.Fatalf("decode result: %v\nraw: %s", jerr, tailStr(string(raw), 2000))
 	}
@@ -110,11 +102,4 @@ func TestRunBundledRunner_DaytonaLive(t *testing.T) {
 	if len(result.TranscriptEntries) == 0 {
 		t.Errorf("no transcript_entries from the sandbox run")
 	}
-}
-
-func tailStr(s string, n int) string {
-	if len(s) <= n {
-		return s
-	}
-	return "..." + s[len(s)-n:]
 }

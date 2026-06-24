@@ -39,7 +39,7 @@ func TestRunBundledRunner_DaytonaEntrypointSwitch(t *testing.T) {
 		"task_id":       "T-DAY",
 		"backend":       "codex",
 		"workspace_key": "ws",
-		"lease_token":   "", // must match the empty LeaseToken so the launcher gate passes
+		"lease_token":   "",               // must match the empty LeaseToken so the launcher gate passes
 		"input":         map[string]any{}, // no repoUrl -> daytona runner must reject
 	})
 
@@ -56,12 +56,7 @@ func TestRunBundledRunner_DaytonaEntrypointSwitch(t *testing.T) {
 		t.Fatalf("RunBundledLocalTaskRunner(daytona): %v\n--- stderr ---\n%s", err, serr.String())
 	}
 
-	var result struct {
-		Status       string `json:"status"`
-		ErrorClass   string `json:"errorClass"`
-		ErrorMessage string `json:"errorMessage"`
-		Message      string `json:"message"`
-	}
+	var result bundledResult
 	if jerr := json.Unmarshal(raw, &result); jerr != nil {
 		t.Fatalf("decode result: %v\nraw: %s", jerr, raw)
 	}

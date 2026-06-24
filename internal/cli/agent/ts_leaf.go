@@ -11,6 +11,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/tysonthomas9/loomcli/internal/atomicfile"
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/driver"
 	"github.com/tysonthomas9/loomcli/internal/sessions"
@@ -85,6 +86,10 @@ func (i tsRunnerAgentInvoker) InvokeNonInteractive(workDir, prompt, agentName st
 	backend := cli.GetBackendName()
 	leaseToken := os.Getenv("LOOM_TASK_RUN_LEASE_TOKEN")
 	entrypoint := leafRunnerEntrypoint()
+	taskRunID := strings.TrimSpace(os.Getenv("LOOM_TASK_RUN_ID"))
+	if taskRunID == "" {
+		taskRunID = "tr-" + agentName
+	}
 	input := map[string]any{}
 	if entrypoint == driver.DaytonaTaskRunnerEntrypoint {
 		// The Daytona runner clones a network-reachable git URL into the sandbox.
@@ -95,7 +100,7 @@ func (i tsRunnerAgentInvoker) InvokeNonInteractive(workDir, prompt, agentName st
 		}
 	}
 	req := map[string]any{
-		"task_run_id":       firstNonEmptyEnv("LOOM_TASK_RUN_ID", "tr-"+agentName),
+		"task_run_id":       taskRunID,
 		"task_id":           os.Getenv("LOOM_ASSIGNED_TASK_ID"),
 		"backend":           backend,
 		"workspace_key":     os.Getenv("LOOM_WORKSPACE"),
@@ -220,12 +225,7 @@ func writeLeafNativeTranscript(entries []json.RawMessage) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return
 	}
-	_ = os.WriteFile(path, buf.Bytes(), 0o644)
-}
-
-func firstNonEmptyEnv(key, fallback string) string {
-	if v := strings.TrimSpace(os.Getenv(key)); v != "" {
-		return v
-	}
-	return fallback
+	// Atomic write so a crash mid-write can't leave a truncated transcript (the
+	// canonical SyncNativeTranscript path uses atomicfile too).
+	_ = atomicfile.WriteFile(path, buf.Bytes(), 0o644)
 }

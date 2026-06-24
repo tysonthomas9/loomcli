@@ -45,30 +45,7 @@ func TestRunBundledLocalTaskRunner_RealBundle(t *testing.T) {
 
 	tmp := t.TempDir()
 	worktree := filepath.Join(tmp, "wt")
-	if err := os.MkdirAll(worktree, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	for _, args := range [][]string{
-		{"init", "-q"},
-		{"config", "user.email", "t@example.test"},
-		{"config", "user.name", "Test"},
-	} {
-		c := exec.Command("git", args...)
-		c.Dir = worktree
-		if out, err := c.CombinedOutput(); err != nil {
-			t.Fatalf("git %v: %v\n%s", args, err, out)
-		}
-	}
-	if err := os.WriteFile(filepath.Join(worktree, "README.md"), []byte("base\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	for _, args := range [][]string{{"add", "."}, {"commit", "-q", "-m", "init"}} {
-		c := exec.Command("git", args...)
-		c.Dir = worktree
-		if out, err := c.CombinedOutput(); err != nil {
-			t.Fatalf("git %v: %v\n%s", args, err, out)
-		}
-	}
+	newGitWorktree(t, worktree)
 
 	fakeBin := filepath.Join(tmp, "fake-codex.mjs")
 	if err := os.WriteFile(fakeBin, []byte(fakeCodexBackend), 0o755); err != nil {
@@ -99,13 +76,7 @@ func TestRunBundledLocalTaskRunner_RealBundle(t *testing.T) {
 		t.Fatalf("RunBundledLocalTaskRunner: %v\n--- stderr ---\n%s", err, serr.String())
 	}
 
-	var result struct {
-		Status            string            `json:"status"`
-		TranscriptEntries []json.RawMessage `json:"transcript_entries"`
-		InputTokens       int64             `json:"input_tokens"`
-		OutputTokens      int64             `json:"output_tokens"`
-		CacheReadTokens   int64             `json:"cache_read_tokens"`
-	}
+	var result bundledResult
 	if err := json.Unmarshal(raw, &result); err != nil {
 		t.Fatalf("decode result: %v\nraw: %s", err, raw)
 	}
