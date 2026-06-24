@@ -140,7 +140,7 @@ export async function run(ctx = {}) {
       logs.push("stderr:\n" + textTail(stderr, 2000));
     }
 
-    patchInfo = await capturePatch(execWorktree);
+    patchInfo = await capturePatch(execWorktree, baseRef);
 
     // Stacked delivery: commit in place and push the canonical branch on the
     // predecessor base. No PR is opened here — the post-drain reconcile does it.
@@ -898,17 +898,23 @@ async function gitHead(worktree) {
 }
 
 // capturePatch records untracked files (git add -N) and returns a binary diff
-// plus diffstat-derived counts, mirroring the Daytona runner's patch capture.
-async function capturePatch(worktree) {
+// plus diffstat-derived counts, mirroring the Daytona runner's patch capture. It
+// diffs against `base` (when known) rather than HEAD/the index, so a change the
+// agent COMMITTED in this worktree is captured too — not just uncommitted working-
+// tree edits. Without a base it falls back to the working-tree diff. This keeps the
+// captured patch complete whether the agent committed (the daemon TS leaf's prompt
+// asks it to) or left the change in the working tree.
+async function capturePatch(worktree, base) {
   const head = await gitHead(worktree);
   try {
     await execBackend("git", ["-C", worktree, "add", "-N", "--", "."], { cwd: worktree });
   } catch {
     // best-effort: an empty or non-git worktree just yields an empty patch.
   }
+  const range = base ? [base] : [];
   let patch = "";
   try {
-    const diff = await execBackend("git", ["-C", worktree, "diff", "--binary", "--", "."], { cwd: worktree });
+    const diff = await execBackend("git", ["-C", worktree, "diff", "--binary", ...range, "--", "."], { cwd: worktree });
     if (diff.code === 0) {
       patch = diff.stdout;
     }
@@ -917,7 +923,7 @@ async function capturePatch(worktree) {
   }
   let stat = "";
   try {
-    const diffStat = await execBackend("git", ["-C", worktree, "diff", "--numstat", "--", "."], { cwd: worktree });
+    const diffStat = await execBackend("git", ["-C", worktree, "diff", "--numstat", ...range, "--", "."], { cwd: worktree });
     if (diffStat.code === 0) {
       stat = diffStat.stdout;
     }

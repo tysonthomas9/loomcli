@@ -341852,7 +341852,7 @@ async function run$1(ctx = {}) {
 		logs.push(`${backend} CLI exit=${exitCode}`);
 		if (stdout.trim()) logs.push(textTail(stdout, 4e3));
 		if (stderr.trim()) logs.push("stderr:\n" + textTail(stderr, 2e3));
-		patchInfo = await capturePatch(execWorktree);
+		patchInfo = await capturePatch(execWorktree, baseRef);
 		if (stacked && exitCode === 0) if (patchInfo.filesChanged === 0) logs.push("stacked: the agent produced no changes; no branch pushed (empty unit)");
 		else {
 			const token = await resolveGitHubToken();
@@ -342477,7 +342477,7 @@ async function gitHead(worktree) {
 		return "";
 	}
 }
-async function capturePatch(worktree) {
+async function capturePatch(worktree, base) {
 	const head = await gitHead(worktree);
 	try {
 		await execBackend("git", [
@@ -342489,6 +342489,7 @@ async function capturePatch(worktree) {
 			"."
 		], { cwd: worktree });
 	} catch {}
+	const range = base ? [base] : [];
 	let patch = "";
 	try {
 		const diff = await execBackend("git", [
@@ -342496,6 +342497,7 @@ async function capturePatch(worktree) {
 			worktree,
 			"diff",
 			"--binary",
+			...range,
 			"--",
 			"."
 		], { cwd: worktree });
@@ -342510,6 +342512,7 @@ async function capturePatch(worktree) {
 			worktree,
 			"diff",
 			"--numstat",
+			...range,
 			"--",
 			"."
 		], { cwd: worktree });
