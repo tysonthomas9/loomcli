@@ -507,6 +507,8 @@ type execTaskParams struct {
 	WorkerProfileID    string   `json:"workerProfileId"`
 	ProviderProfile    string   `json:"providerProfile"`
 	ParentSessionID    string   `json:"parentSessionId"`
+	NodeID             string   `json:"nodeId"`
+	TargetNodeID       string   `json:"targetNodeId"`
 	RunnerID           string   `json:"runnerId"`
 	LeaseToken         string   `json:"leaseToken"`
 	SupportedProviders []string `json:"supportedProviders"`
@@ -537,7 +539,7 @@ func (p execTaskParams) requestOptions(ws string, id driverIdentity, fencingToke
 		ParentNodeID:       id.NodeID,
 		ParentLeaseID:      id.LeaseID,
 		ParentFence:        fencingToken,
-		NodeID:             id.NodeID,
+		NodeID:             firstNonEmpty(p.NodeID, p.TargetNodeID),
 		RunnerID:           p.RunnerID,
 		LeaseToken:         p.LeaseToken,
 		SupportedProviders: p.SupportedProviders,

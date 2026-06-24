@@ -30,7 +30,11 @@ func verifyTaskRunRequestSchedulable(ctx context.Context, s store.Store, opts Ta
 		return fmt.Errorf("list nodes for task run scheduling: %w", err)
 	}
 	now := time.Now().UTC()
+	targetNodeID := strings.TrimSpace(opts.NodeID)
 	for _, node := range nodes {
+		if targetNodeID != "" && (node == nil || node.NodeID != targetNodeID) {
+			continue
+		}
 		if taskRunNodeSatisfiesScheduling(node, requirements, now) {
 			return nil
 		}
