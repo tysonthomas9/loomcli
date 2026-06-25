@@ -1,4 +1,41 @@
 import { createLoomDriverClient } from '@loom/sdk/driver';
+import { defineAgent, defineWorkflow } from '@flue/runtime';
+
+// Flue HEAD (durable-streams) requires every workflow module to default-export
+// a defineWorkflow() definition; a bare `export function run` no longer
+// normalizes. These builtin runners are not LLM agents — epic-runner
+// orchestrates via the loom driver SDK — so the bound agent is a credential-free
+// stub (model: false, no harness usage) and the invocation payload arrives via
+// env, not flue's input channel: the driver launcher sets LOOM_FLUE_INVOKE_PAYLOAD
+// (sandbox/launcher.go) and the task-runner host-bridge sets
+// LOOM_TASK_RUN_REQUEST_JSON (driver/task_bridge.go). The launchers keep sending
+// the legacy `payload` IPC field (flue HEAD ignores it and passes input=undefined,
+// which validates with no input schema), so the workflow body needs no input
+// schema. The one required Go-side change is the launcher fork env: flue HEAD
+// gates one-shot IPC mode behind FLUE_INTERNAL_CLI_IPC=1 (else the generated
+// entry serves HTTP on :3000 instead of doing the invoke/result handshake).
+export default defineWorkflow({
+  agent: defineAgent(() => ({ model: false })),
+  run: async () => toJsonResult(await run({ payload: builtinInvokePayload() })),
+});
+
+function builtinInvokePayload() {
+  const raw = process.env.LOOM_FLUE_INVOKE_PAYLOAD || process.env.LOOM_TASK_RUN_REQUEST_JSON || '{}';
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return {};
+  }
+}
+
+// Flue HEAD validates the workflow return value with a strict JSON check that
+// rejects undefined/function/symbol/bigint (json-snapshot.cloneJsonSerializable);
+// the old runtime instead JSON-encoded the result for IPC transport, silently
+// dropping undefined. Round-trip through JSON to restore that behavior so optional
+// result fields left undefined (e.g. needsReview's taskRunId/logsRef) never throw.
+function toJsonResult(value) {
+  return value === undefined ? null : JSON.parse(JSON.stringify(value));
+}
 
 // epic-runner: watch-driven epic drain loop.
 //

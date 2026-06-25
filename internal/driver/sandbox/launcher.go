@@ -269,6 +269,12 @@ const child = fork(serverPath, [], {
     FLUE_MODE: 'local',
     FLUE_CLI_TARGET: 'workflow',
     FLUE_CLI_NAME: workflowName,
+    // Flue HEAD gates one-shot IPC mode behind this explicit internal flag (in
+    // addition to FLUE_CLI_TARGET + an inherited IPC channel) so user-supplied
+    // FLUE_CLI_* can never flip a production HTTP server into IPC mode. Without
+    // it the generated entry serves HTTP on :3000 instead of performing the
+    // invoke/result handshake the driver workflow executor depends on.
+    FLUE_INTERNAL_CLI_IPC: '1',
   },
   stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
 });

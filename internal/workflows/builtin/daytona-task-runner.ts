@@ -11,6 +11,36 @@ import {
   serializeTranscriptJSONL,
 } from "@loom/sdk/runtime-adapters";
 
+// Flue HEAD (durable-streams) requires every workflow module to default-export a
+// defineWorkflow() definition; a bare `export function run` no longer normalizes.
+// The *workflow* agent here is a credential-free stub (model: false) — the real
+// in-sandbox Flue agent this runner drives is created separately at runtime via
+// bundledFlueRuntimeInternal.createFlueContext. The request arrives via env: the
+// task-runner host-bridge sets LOOM_TASK_RUN_REQUEST_JSON (driver/task_bridge.go),
+// which requestPayload() already reads, so the inner run() body is unchanged.
+export default bundledFlueRuntime.defineWorkflow({
+  agent: bundledFlueRuntime.defineAgent(() => ({ model: false })),
+  run: async () => toJsonResult(await run({ payload: builtinInvokePayload() })),
+});
+
+function builtinInvokePayload() {
+  const raw = process.env.LOOM_FLUE_INVOKE_PAYLOAD || process.env.LOOM_TASK_RUN_REQUEST_JSON || "{}";
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return {};
+  }
+}
+
+// Flue HEAD validates the workflow return value with a strict JSON check that
+// rejects undefined/function/symbol/bigint (json-snapshot.cloneJsonSerializable);
+// the old runtime instead JSON-encoded the result for IPC transport, silently
+// dropping undefined. Round-trip through JSON to restore that behavior so optional
+// result fields left undefined never throw.
+function toJsonResult(value) {
+  return value === undefined ? null : JSON.parse(JSON.stringify(value));
+}
+
 const DEFAULT_MODEL = "openai-codex/gpt-5.3-codex-spark";
 const DEFAULT_REPO_DIR = "/tmp/loom-daytona-task-repo";
 // DEMO_MODES gates the e2e-only task modes that fabricate scaffolding instead of

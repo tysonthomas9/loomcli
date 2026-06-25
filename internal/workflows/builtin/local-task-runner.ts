@@ -2,6 +2,37 @@ import { execFile } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { defineAgent, defineWorkflow } from "@flue/runtime";
+
+// Flue HEAD (durable-streams) requires every workflow module to default-export a
+// defineWorkflow() definition; a bare `export function run` no longer normalizes.
+// This runner is not an LLM agent (it execFiles a backend CLI), so the bound
+// agent is a credential-free stub (model: false, no harness usage). The request
+// arrives via env — the task-runner host-bridge sets LOOM_TASK_RUN_REQUEST_JSON
+// (driver/task_bridge.go) — which requestPayload() already reads, so the inner
+// run() body is unchanged.
+export default defineWorkflow({
+  agent: defineAgent(() => ({ model: false })),
+  run: async () => toJsonResult(await run({ payload: builtinInvokePayload() })),
+});
+
+function builtinInvokePayload() {
+  const raw = process.env.LOOM_FLUE_INVOKE_PAYLOAD || process.env.LOOM_TASK_RUN_REQUEST_JSON || "{}";
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return {};
+  }
+}
+
+// Flue HEAD validates the workflow return value with a strict JSON check that
+// rejects undefined/function/symbol/bigint (json-snapshot.cloneJsonSerializable);
+// the old runtime instead JSON-encoded the result for IPC transport, silently
+// dropping undefined. Round-trip through JSON to restore that behavior so optional
+// result fields left undefined never throw.
+function toJsonResult(value) {
+  return value === undefined ? null : JSON.parse(JSON.stringify(value));
+}
 
 // Local task runner: runs the user-selected backend CLI over a prepared worktree.
 //

@@ -11,9 +11,9 @@
 #   usage: scripts/rebuild-builtin-bundle.sh        (requires ../flue built)
 #   env:   FLUE_REPO=/path/to/flue  (default: ../flue)
 #
-# Note: assets are copied over the existing dist (no rm); flue emits content-hashed
-# asset names, so the new server.mjs only references its own fresh assets. Stale
-# orphaned assets/* may accrete harmlessly — prune manually if desired.
+# Note: DEST is replaced wholesale (rm -rf + copy) so content-hashed assets from
+# prior builds never accrete — the committed dist holds only the assets the
+# current server.mjs references (it is go:embed'd into the loom binary).
 set -Eeuo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -58,6 +58,11 @@ printf '%s\n' "$DIGEST" > "$STAGE/dist/source-digest.txt"
 echo "==> source-digest.txt = $DIGEST"
 
 echo "==> copying dist -> $DEST"
+# Replace DEST wholesale: flue emits content-hashed asset names per build, so
+# copying over an existing dist would let stale assets/* from prior builds
+# accrete indefinitely (dead weight in the go:embed binary). The fresh
+# STAGE/dist holds exactly the assets the new server.mjs references.
+rm -rf "$DEST"
 mkdir -p "$DEST"
 cp -R "$STAGE/dist/." "$DEST/"
 echo "==> done. staging kept at $STAGE (remove manually if desired)"
