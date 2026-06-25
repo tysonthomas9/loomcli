@@ -294247,12 +294247,12 @@ function flueEventToTranscriptEntries(event, state = createTranscriptState(), op
 		case "text_delta": return textEntry(event, state, "assistant", stringValue$3(event.text), { uuid: event.turnId });
 		case "tool_start": return toolUseEntry(event, state);
 		case "tool_call": return toolResultEntry(event, state);
-		case "task_start": return sessionMetaEntry(event, state, taskStartText(event));
-		case "task": return sessionMetaEntry(event, state, taskEndText(event));
-		case "operation_start": return sessionMetaEntry(event, state, operationStartText(event));
-		case "operation": return sessionMetaEntry(event, state, operationEndText(event));
-		case "compaction_start": return sessionMetaEntry(event, state, compactionStartText(event));
-		case "compaction": return sessionMetaEntry(event, state, compactionText(event));
+		case "task_start": return sessionMetaEntry$1(event, state, taskStartText(event));
+		case "task": return sessionMetaEntry$1(event, state, taskEndText(event));
+		case "operation_start": return sessionMetaEntry$1(event, state, operationStartText(event));
+		case "operation": return sessionMetaEntry$1(event, state, operationEndText(event));
+		case "compaction_start": return sessionMetaEntry$1(event, state, compactionStartText(event));
+		case "compaction": return sessionMetaEntry$1(event, state, compactionText(event));
 		case "log": return textEntry(event, state, "system", logText(event));
 		default: return [];
 	}
@@ -294345,7 +294345,7 @@ function toolResultEntry(event, state) {
 		output: formatToolResult(event.result, event)
 	})];
 }
-function sessionMetaEntry(event, state, text) {
+function sessionMetaEntry$1(event, state, text) {
 	if (!text) return [];
 	return [baseEntry(event, state, "system", "session_meta", { text })];
 }
@@ -296688,6 +296688,7 @@ async function run$1(ctx = {}) {
 	let transcriptEntries = STREAM_JSON_BACKENDS.has(backend) ? parseStreamJSONTranscript(backend, stdout) : minimalTranscript(backend, taskId || taskRunId, prompt, stdout);
 	if (STREAM_JSON_BACKENDS.has(backend) && !transcriptEntries.some((e) => e.role !== "system")) transcriptEntries = minimalTranscript(backend, taskId || taskRunId, prompt, stdout);
 	transcriptEntries = redactTranscriptSecrets(transcriptEntries);
+	transcriptEntries = ensureSessionMetaLead(transcriptEntries, backend, taskId || taskRunId);
 	const taskUsage = taskUsageFromEntries(transcriptEntries);
 	const streamFailure = streamFailureMessage(backend, stdout);
 	const metadata = stringMetadata({
@@ -297313,9 +297314,7 @@ function parseStreamJSONTranscript(backend, stdout) {
 	const entries = [{
 		seq: 1,
 		timestamp: firstReal,
-		role: "system",
-		type: "session_meta",
-		text: `local-cli-${backend} session`
+		...sessionMetaEntry(backend)
 	}];
 	let seq = 2;
 	let cursorTs = firstReal;
@@ -297408,6 +297407,20 @@ function accumulateUsage(prev, summed, latest) {
 		if (Number.isFinite(num)) out[key] = num;
 	}
 	return Object.keys(out).length ? out : null;
+}
+function sessionMetaEntry(backend, label) {
+	return {
+		role: "system",
+		type: "session_meta",
+		text: `local-cli-${backend} session` + (label ? ` for ${label}` : "")
+	};
+}
+function ensureSessionMetaLead(entries, backend, label) {
+	if (entries[0]?.type === "session_meta") return entries;
+	const meta = sessionMetaEntry(backend, label);
+	const firstTs = entries.find((e) => e && e.timestamp)?.timestamp;
+	if (firstTs) meta.timestamp = firstTs;
+	return [meta, ...entries];
 }
 function resultEntry(status, usage, timestamp) {
 	const bits = [];
@@ -297740,9 +297753,7 @@ function minimalTranscript(backend, label, prompt, stdout) {
 		{
 			seq: 1,
 			timestamp: now,
-			role: "system",
-			type: "session_meta",
-			text: `local-cli-${backend} session for ${label}`
+			...sessionMetaEntry(backend, label)
 		},
 		{
 			seq: 2,

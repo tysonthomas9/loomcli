@@ -11,8 +11,8 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/tysonthomas9/loomcli/internal/atomicfile"
 	"github.com/tysonthomas9/loomcli/internal/cli"
+	"github.com/tysonthomas9/loomcli/internal/cli/backends"
 	"github.com/tysonthomas9/loomcli/internal/driver"
 	"github.com/tysonthomas9/loomcli/internal/sessions"
 	"github.com/tysonthomas9/loomcli/internal/usage"
@@ -283,16 +283,24 @@ func writeTaskRunnerNativeTranscript(entries []json.RawMessage) {
 	if len(entries) == 0 {
 		return
 	}
-	sid := os.Getenv("LOOM_SESSION_ID")
+	// Resolve the session via the active-session runtime env (set at worker startup
+	// from the supervisor-assigned LOOM_SESSION_ID, backend_session_env.go) — the
+	// same handle the Go leaf's hook dispatch uses — falling back to the env + the
+	// workspace runtime dir. Route the entries through the canonical
+	// SyncNativeTranscript (gitleaks/entropy redaction + owned-session-dir placement)
+	// rather than a raw write, so the TS leaf captures its transcript at redaction
+	// parity with the Go leaf. serve reads it back through the canonical fallback in
+	// sessions.LoadNativeEvents, since these entries are already in transcript.Event
+	// form (the daemon TS-leaf surfacing fix lives on the read side, not here).
+	runtimeDir, sid := backends.GetActiveSessionRuntimeEnv()
 	if sid == "" {
+		runtimeDir, sid = cli.GetWorkspaceRuntimeDir(), os.Getenv("LOOM_SESSION_ID")
+	}
+	if sid == "" || runtimeDir == "" {
 		return
 	}
-	store, err := sessions.NewStore(cli.GetWorkspaceRuntimeDir())
+	store, err := sessions.NewStore(runtimeDir)
 	if err != nil {
-		return
-	}
-	path := store.NativeTranscriptPath(sid)
-	if path == "" {
 		return
 	}
 	var buf bytes.Buffer
@@ -300,10 +308,21 @@ func writeTaskRunnerNativeTranscript(entries []json.RawMessage) {
 		buf.Write(e)
 		buf.WriteByte('\n')
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	// Stage to a temp file and route through the canonical SyncNativeTranscript
+	// (redaction + owned-session-dir placement) instead of a raw NativeTranscriptPath
+	// write, so serve resolves it via session ownership (LoadMetadata →
+	// LoadNativeEvents) — identical to the Go leaf's hook-dispatched capture.
+	tmp, err := os.CreateTemp("", "loom-ts-leaf-transcript-*.jsonl")
+	if err != nil {
 		return
 	}
-	// Atomic write so a crash mid-write can't leave a truncated transcript (the
-	// canonical SyncNativeTranscript path uses atomicfile too).
-	_ = atomicfile.WriteFile(path, buf.Bytes(), 0o644)
+	defer func() { _ = os.Remove(tmp.Name()) }()
+	if _, werr := tmp.Write(buf.Bytes()); werr != nil {
+		_ = tmp.Close()
+		return
+	}
+	if cerr := tmp.Close(); cerr != nil {
+		return
+	}
+	_ = store.SyncNativeTranscript(sid, tmp.Name())
 }

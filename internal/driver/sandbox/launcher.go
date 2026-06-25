@@ -303,6 +303,11 @@ function isSuspendedResult(result) {
 }
 
 function isSuspendedError(error) {
+  // Flue HEAD's IPC error envelope rewrites every error to {type:'internal_error', message,
+  // details} (build-plugin-node.ts ipcErrorMessage), so the type/name branch below is dead for
+  // HEAD bundles — the 'workflow_suspended:' message prefix is the de-facto contract that must be
+  // preserved by the SDK (sdk/driver.js WorkflowSuspended) for suspend/resume to work. The
+  // type/name check is kept for older bundles + defense in depth.
   const type = String((error && (error.type || error.name)) || '');
   if (type === 'workflow_suspended' || type === 'WorkflowSuspended') return true;
   return String((error && error.message) || '').startsWith('workflow_suspended:');

@@ -245,6 +245,12 @@ export async function run(ctx = {}) {
   // Tool outputs now persist (the `output` field) and the agent inherits host
   // secrets — scrub known secret values that may have been echoed into output.
   transcriptEntries = redactTranscriptSecrets(transcriptEntries);
+  // Lead with a canonical session_meta entry. The stream-json parse paths emit
+  // text/tool_use/tool_result + a terminal result, but not session_meta (only the
+  // minimal fallback did) — and the canonical transcript vocabulary (aether #5d)
+  // requires a session_meta head. The daemon TS leaf surfaces this transcript
+  // verbatim, so adding it here fixes both the leaf and driver transcripts.
+  transcriptEntries = ensureSessionMetaLead(transcriptEntries, backend, taskId || taskRunId);
   // Surface the token usage the parser computed (embedded in the terminal result
   // entry) as top-level fields so the Go host-bridge ingests it into the fleet-db
   // TaskRun — without this, local-CLI runs report zero usage while daytona does not.
@@ -1032,7 +1038,7 @@ export function parseStreamJSONTranscript(backend, stdout) {
   // any timestamp-ordered view of the transcript.
   const resolved = build(events).map((entry) => ({ entry, ts: toISO(entry.timestamp) }));
   const firstReal = (resolved.find((item) => item.ts) || {}).ts || fallbackTs;
-  const entries = [{ seq: 1, timestamp: firstReal, role: "system", type: "session_meta", text: `local-cli-${backend} session` }];
+  const entries = [{ seq: 1, timestamp: firstReal, ...sessionMetaEntry(backend) }];
   let seq = 2;
   let cursorTs = firstReal;
   for (const { entry, ts } of resolved) {
@@ -1188,6 +1194,26 @@ function accumulateUsage(prev, summed, latest) {
     }
   }
   return Object.keys(out).length ? out : null;
+}
+
+// sessionMetaEntry builds the canonical session_meta head — the one definition of
+// the #5d transcript-vocabulary contract shared by every producer path here.
+function sessionMetaEntry(backend, label) {
+  return {
+    role: "system",
+    type: "session_meta",
+    text: `local-cli-${backend} session` + (label ? ` for ${label}` : ""),
+  };
+}
+
+// ensureSessionMetaLead prepends a session_meta entry unless the transcript already
+// leads with one. Its timestamp mirrors the first real entry so it sorts to the head.
+function ensureSessionMetaLead(entries, backend, label) {
+  if (entries[0]?.type === "session_meta") return entries;
+  const meta = sessionMetaEntry(backend, label);
+  const firstTs = entries.find((e) => e && e.timestamp)?.timestamp;
+  if (firstTs) meta.timestamp = firstTs;
+  return [meta, ...entries];
 }
 
 // resultEntry is the terminal transcript entry: completion status + token usage.
@@ -1575,7 +1601,7 @@ function geminiTranscript(events) {
 function minimalTranscript(backend, label, prompt, stdout) {
   const now = new Date().toISOString();
   return [
-    { seq: 1, timestamp: now, role: "system", type: "session_meta", text: `local-cli-${backend} session for ${label}` },
+    { seq: 1, timestamp: now, ...sessionMetaEntry(backend, label) },
     { seq: 2, timestamp: now, role: "user", type: "text", text: textTail(prompt, 4000) },
     { seq: 3, timestamp: now, role: "assistant", type: "text", text: textTail(stdout, 4000) },
   ];
