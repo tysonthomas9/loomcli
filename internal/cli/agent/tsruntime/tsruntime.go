@@ -286,12 +286,12 @@ func writeTaskRunnerNativeTranscript(entries []json.RawMessage) {
 	// Resolve the session via the active-session runtime env (set at worker startup
 	// from the supervisor-assigned LOOM_SESSION_ID, backend_session_env.go) — the
 	// same handle the Go leaf's hook dispatch uses — falling back to the env + the
-	// workspace runtime dir. Route the entries through the canonical
-	// SyncNativeTranscript (gitleaks/entropy redaction + owned-session-dir placement)
-	// rather than a raw write, so the TS leaf captures its transcript at redaction
-	// parity with the Go leaf. serve reads it back through the canonical fallback in
-	// sessions.LoadNativeEvents, since these entries are already in transcript.Event
-	// form (the daemon TS-leaf surfacing fix lives on the read side, not here).
+	// workspace runtime dir. Route the entries through SyncNativeTranscript for
+	// owned-session-dir placement + the canonical format marker; pass
+	// TranscriptFormatCanonical so it does NOT re-redact (the leaf already redacted
+	// these entries — local-task-runner redactTranscriptSecrets — the same redaction
+	// the driver's transcript artifact ships). serve reads them back via the
+	// canonical dispatch in sessions.LoadNativeEvents (these are transcript.Event form).
 	runtimeDir, sid := backends.GetActiveSessionRuntimeEnv()
 	if sid == "" {
 		runtimeDir, sid = cli.GetWorkspaceRuntimeDir(), os.Getenv("LOOM_SESSION_ID")
@@ -324,5 +324,5 @@ func writeTaskRunnerNativeTranscript(entries []json.RawMessage) {
 	if cerr := tmp.Close(); cerr != nil {
 		return
 	}
-	_ = store.SyncNativeTranscript(sid, tmp.Name())
+	_ = store.SyncNativeTranscript(sid, tmp.Name(), sessions.TranscriptFormatCanonical)
 }

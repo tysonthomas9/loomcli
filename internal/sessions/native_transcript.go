@@ -30,11 +30,18 @@ const NativeTranscriptFile = "agent_transcript.jsonl"
 // event that carries a transcript_path — the capture is idempotent because
 // the file is append-only and each call writes a larger snapshot.
 //
+// format records the encoding (TranscriptFormatRaw | TranscriptFormatCanonical)
+// onto the session metadata so LoadNativeEvents dispatches deterministically.
+// It also selects the redaction policy: a "raw" backend stream is redacted here
+// (this is its only redaction), while a "canonical" stream from the TS leaf is
+// already redacted at the source (local-task-runner redactTranscriptSecrets — the
+// same redaction the driver's transcript artifact ships) and is NOT re-redacted.
+//
 // Returns nil if srcPath is empty or does not exist (the hook subprocess
 // must never exit nonzero; errors are informational only).
 //
 // Always re-reads and re-writes atomically via atomicfile.WriteFile.
-func (s *Store) SyncNativeTranscript(sessionID, srcPath string) error {
+func (s *Store) SyncNativeTranscript(sessionID, srcPath, format string) error {
 	if srcPath == "" {
 		return nil
 	}
@@ -62,7 +69,9 @@ func (s *Store) SyncNativeTranscript(sessionID, srcPath string) error {
 		recordErr(span, err)
 		return fmt.Errorf("read source transcript: %w", err)
 	}
-	if redactionEnabled() {
+	// Redact raw backend streams here (their only redaction). Canonical input is
+	// pre-redacted by the TS leaf, so re-redacting would be a duplicate pass.
+	if format != TranscriptFormatCanonical && redactionEnabled() {
 		redacted, rerr := redact.JSONLBytes(data)
 		if rerr != nil {
 			recordErr(span, rerr)
@@ -76,7 +85,30 @@ func (s *Store) SyncNativeTranscript(sessionID, srcPath string) error {
 		recordErr(span, err)
 		return fmt.Errorf("write native transcript: %w", err)
 	}
+	// Record the format alongside the file so the read path never has to guess.
+	// Best-effort: the transcript is already written; a metadata hiccup must not
+	// fail the hook. Idempotent, so this writes once per session, not per event.
+	if format != "" {
+		if ferr := s.recordTranscriptFormat(sessionID, format); ferr != nil {
+			recordErr(span, ferr)
+		}
+	}
 	return nil
+}
+
+// recordTranscriptFormat stamps SessionRecord.TranscriptFormat when it isn't
+// already set to format. The compare-then-write keeps it a no-op after the first
+// call for a given session (so the hot hook path writes metadata at most once).
+func (s *Store) recordTranscriptFormat(sessionID, format string) error {
+	meta, err := s.LoadMetadata(sessionID)
+	if err != nil {
+		return err
+	}
+	if meta.TranscriptFormat == format {
+		return nil
+	}
+	meta.TranscriptFormat = format
+	return s.SaveMetadata(sessionID, meta)
 }
 
 // NativeTranscriptPath returns the on-disk path to a session's

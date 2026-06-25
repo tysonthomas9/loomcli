@@ -43,22 +43,19 @@ func (s *Store) LoadNativeEvents(sessionID string) ([]transcript.Event, error) {
 		return nil, fmt.Errorf("read native transcript: %w", err)
 	}
 
+	// Dispatch on the recorded format (SyncNativeTranscript stamps it). The TS leaf
+	// writes a canonical transcript.Event stream; the Go-leaf hooks write the raw
+	// backend stream. A legacy session has no marker — it predates canonical writes,
+	// so it is raw by definition. No parse-then-guess: the marker is authoritative.
+	if meta.TranscriptFormat == TranscriptFormatCanonical {
+		events := decodeCanonicalEvents(data)
+		span.SetAttributes(attrResultCount(len(events)))
+		return events, nil
+	}
 	events, err := backends.ParseEvents(meta.Backend, data)
 	if err != nil {
 		recordErr(span, err)
 		return events, err
-	}
-	// The daemon TS leaf writes its transcript ALREADY in the canonical Event
-	// format (it returns parsed transcript_entries; SyncNativeTranscript copies them
-	// verbatim), not the raw backend stream the Go-leaf hooks capture. The
-	// backend-specific parser (keyed on meta.Backend) only understands the raw
-	// stream, so it yields zero events for a canonical file. Decode the same bytes
-	// directly in that case. The Go-leaf raw-stream path is unaffected: it parses to
-	// >0 events and never reaches this fallback.
-	if len(events) == 0 {
-		if canonical := decodeCanonicalEvents(data); len(canonical) > 0 {
-			events = canonical
-		}
 	}
 	span.SetAttributes(attrResultCount(len(events)))
 	return events, nil

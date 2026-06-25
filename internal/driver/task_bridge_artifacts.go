@@ -222,14 +222,7 @@ func (e HostBridgeTaskExecutor) createContentArtifact(ctx context.Context, req T
 	if e.Store == nil {
 		return nil, fmt.Errorf("store required for %s artifact finalization: %w", artifactType, domain.ErrInvalid)
 	}
-	if existing, err := e.createArtifactRecord(ctx, req, sessionID, artifactID, artifactType, summary, mimeType); err != nil || existing != nil {
-		return existing, err
-	}
-	return e.uploadAndFinalizeContentArtifact(ctx, req, artifactID, artifactType, mimeType, content)
-}
-
-func (e HostBridgeTaskExecutor) createArtifactRecord(ctx context.Context, req TaskExecRequest, sessionID, artifactID, artifactType, summary, mimeType string) (*domain.Artifact, error) {
-	if _, err := e.Store.Artifacts().Create(ctx, store.ArtifactCreate{
+	return store.UploadContentArtifact(ctx, e.Store.Artifacts(), store.ArtifactCreate{
 		WorkspaceKey:  req.WorkspaceKey,
 		ArtifactID:    artifactID,
 		SessionID:     sessionID,
@@ -241,39 +234,7 @@ func (e HostBridgeTaskExecutor) createArtifactRecord(ctx context.Context, req Ta
 		MIMEType:      mimeType,
 		DurableStatus: "declared",
 		Metadata:      runnerArtifactMetadata(req),
-	}); err != nil {
-		if !errors.Is(err, domain.ErrAlreadyExists) {
-			return nil, fmt.Errorf("create %s artifact: %w", artifactType, err)
-		}
-		existing, getErr := e.Store.Artifacts().Get(ctx, req.WorkspaceKey, artifactID)
-		if getErr != nil {
-			return nil, fmt.Errorf("get existing %s artifact: %w", artifactType, getErr)
-		}
-		if !reusableContentArtifact(existing, req, sessionID, artifactType) {
-			return nil, fmt.Errorf("create %s artifact: %w", artifactType, err)
-		}
-		if existing.DurableStatus == "finalized" {
-			return existing, nil
-		}
-	}
-	return nil, nil
-}
-
-func (e HostBridgeTaskExecutor) uploadAndFinalizeContentArtifact(ctx context.Context, req TaskExecRequest, artifactID, artifactType, mimeType string, content []byte) (*domain.Artifact, error) {
-	uploaded, err := e.Store.Artifacts().UploadContent(ctx, req.WorkspaceKey, artifactID, store.ArtifactContentUpload{
-		Body:     bytes.NewReader(content),
-		MIMEType: mimeType,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("upload %s artifact: %w", artifactType, err)
-	}
-	finalized, err := e.Store.Artifacts().Finalize(ctx, req.WorkspaceKey, artifactID, store.ArtifactFinalize{
-		ContentHash: &uploaded.ContentHash,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("finalize %s artifact: %w", artifactType, err)
-	}
-	return finalized, nil
+	}, content)
 }
 
 func runnerArtifactMetadata(req TaskExecRequest) map[string]string {
@@ -288,16 +249,6 @@ func runnerArtifactMetadata(req TaskExecRequest) map[string]string {
 		"runtime":                  "flue",
 		"task_run_id":              req.TaskRunID,
 	}
-}
-
-func reusableContentArtifact(artifact *domain.Artifact, req TaskExecRequest, sessionID, artifactType string) bool {
-	if artifact == nil {
-		return false
-	}
-	if artifact.WorkspaceKey != req.WorkspaceKey || artifact.OwnerType != "task_run" || artifact.OwnerID != req.TaskRunID || artifact.TaskID != req.TaskID || artifact.Type != artifactType {
-		return false
-	}
-	return sessionID == "" || artifact.SessionID == "" || artifact.SessionID == sessionID
 }
 
 func sessionIDFromFlueTaskSession(session *flueTaskSession) string {

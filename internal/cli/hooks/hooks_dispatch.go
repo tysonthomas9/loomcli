@@ -36,7 +36,7 @@ func dispatchHookEvent(event *HookEvent, runtimeDir, sessionID string) error { /
 	// calling on every hook event is safe and keeps the UI's view close to
 	// the agent's live progress.
 	if event.SessionRef != "" {
-		if err := store.SyncNativeTranscript(sessionID, event.SessionRef); err != nil {
+		if err := store.SyncNativeTranscript(sessionID, event.SessionRef, sessions.TranscriptFormatRaw); err != nil {
 			fmt.Fprintf(os.Stderr, "loom hook: failed to sync native transcript: %v\n", err)
 		}
 	}

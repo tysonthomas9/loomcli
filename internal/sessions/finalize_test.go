@@ -34,6 +34,39 @@ func createTestSession(t *testing.T, store *Store, agent, backend string) *Sessi
 	return sess
 }
 
+// TestFinalize_PreservesTranscriptFormat pins the regression fix: the TS leaf
+// stamps TranscriptFormat="canonical" on disk from a separate (worker) process, so
+// the daemon supervisor's Finalize — whose in-memory Meta predates that stamp —
+// must NOT clobber it back to "". Otherwise LoadNativeEvents misreads the canonical
+// transcript as raw and the daemon-leaf #5d/#M2 checks go red.
+func TestFinalize_PreservesTranscriptFormat(t *testing.T) {
+	store := createTestStore(t)
+	sess := createTestSession(t, store, "codex-coder", "codex")
+
+	// Simulate the worker stamping the marker on disk, out of band from `sess`.
+	disk, err := store.LoadMetadata(sess.SessionID())
+	if err != nil {
+		t.Fatalf("LoadMetadata: %v", err)
+	}
+	disk.TranscriptFormat = TranscriptFormatCanonical
+	if err := store.SaveMetadata(sess.SessionID(), disk); err != nil {
+		t.Fatalf("SaveMetadata: %v", err)
+	}
+
+	// sess.Meta.TranscriptFormat is still "" here — Finalize must preserve the disk value.
+	if err := sess.Finalize(FinalizeOptions{TaskID: "task-tf", ExitCode: 0}); err != nil {
+		t.Fatalf("Finalize: %v", err)
+	}
+
+	got, err := store.LoadMetadata(sess.SessionID())
+	if err != nil {
+		t.Fatalf("LoadMetadata after finalize: %v", err)
+	}
+	if got.TranscriptFormat != TranscriptFormatCanonical {
+		t.Errorf("TranscriptFormat clobbered by Finalize: got %q, want %q", got.TranscriptFormat, TranscriptFormatCanonical)
+	}
+}
+
 func TestFinalize_Success(t *testing.T) {
 	store := createTestStore(t)
 	sess := createTestSession(t, store, "nova", "claude")

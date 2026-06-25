@@ -49,7 +49,7 @@ func TestLoadNativeEvents_ParsesClaude(t *testing.T) {
 	if err := os.WriteFile(src, payload, 0o600); err != nil {
 		t.Fatalf("write src: %v", err)
 	}
-	if err := store.SyncNativeTranscript(sess.SessionID(), src); err != nil {
+	if err := store.SyncNativeTranscript(sess.SessionID(), src, TranscriptFormatRaw); err != nil {
 		t.Fatalf("SyncNativeTranscript: %v", err)
 	}
 
@@ -70,10 +70,12 @@ func TestLoadNativeEvents_ParsesClaude(t *testing.T) {
 
 // TestLoadNativeEvents_ParsesCanonicalTSLeafTranscript covers the daemon TS leaf,
 // which writes its transcript ALREADY in the canonical transcript.Event format
-// rather than the raw backend stream the Go-leaf hooks capture. The backend-keyed
-// parser yields zero events for it; LoadNativeEvents must fall back to a direct
-// canonical decode so serve's GET /transcript surfaces the entries (and the
-// session_meta head + terminal result entry survive — aether #5d/#M2).
+// rather than the raw backend stream the Go-leaf hooks capture. The canonical
+// marker (recorded by SyncNativeTranscript) routes LoadNativeEvents straight to a
+// canonical decode — NOT the backend-keyed parser — so serve's GET /transcript
+// surfaces the entries (and the session_meta head + terminal result entry survive
+// — aether #5d/#M2). The backend is codex precisely to prove the marker, not a
+// parser heuristic, decides: the codex parser would yield 0 events for this input.
 func TestLoadNativeEvents_ParsesCanonicalTSLeafTranscript(t *testing.T) {
 	t.Setenv("LOOM_REDACT_TRANSCRIPTS", "off")
 
@@ -98,7 +100,7 @@ func TestLoadNativeEvents_ParsesCanonicalTSLeafTranscript(t *testing.T) {
 	if err := os.WriteFile(src, payload, 0o600); err != nil {
 		t.Fatalf("write src: %v", err)
 	}
-	if err := store.SyncNativeTranscript(sess.SessionID(), src); err != nil {
+	if err := store.SyncNativeTranscript(sess.SessionID(), src, TranscriptFormatCanonical); err != nil {
 		t.Fatalf("SyncNativeTranscript: %v", err)
 	}
 
@@ -114,5 +116,41 @@ func TestLoadNativeEvents_ParsesCanonicalTSLeafTranscript(t *testing.T) {
 	}
 	if last := events[len(events)-1]; last.Type != "result" {
 		t.Errorf("terminal entry must be type=result, got %+v", last)
+	}
+}
+
+// TestLoadNativeEvents_MarkerIsAuthoritative proves the format marker — not a
+// parse-then-guess heuristic — decides the decode. Canonical-shaped bytes recorded
+// with the RAW marker must route to the (codex) backend parser, which yields 0
+// events; the deleted heuristic would instead have canonical-decoded them to 5.
+func TestLoadNativeEvents_MarkerIsAuthoritative(t *testing.T) {
+	t.Setenv("LOOM_REDACT_TRANSCRIPTS", "off")
+
+	store, err := NewStore(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+	sess, err := store.CreateSession(CreateOptions{AgentName: "codex-coder", Backend: "codex"})
+	if err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+
+	src := filepath.Join(t.TempDir(), "canonical.jsonl")
+	payload := []byte(`{"role":"system","type":"session_meta","text":"local-cli-codex session"}` + "\n" +
+		`{"role":"assistant","type":"text","text":"hi"}` + "\n")
+	if err := os.WriteFile(src, payload, 0o600); err != nil {
+		t.Fatalf("write src: %v", err)
+	}
+	// RAW marker on canonical bytes → backend parser, not canonical decode.
+	if err := store.SyncNativeTranscript(sess.SessionID(), src, TranscriptFormatRaw); err != nil {
+		t.Fatalf("SyncNativeTranscript: %v", err)
+	}
+
+	events, err := store.LoadNativeEvents(sess.SessionID())
+	if err != nil {
+		t.Fatalf("LoadNativeEvents: %v", err)
+	}
+	if len(events) != 0 {
+		t.Fatalf("raw marker must route to the codex parser (0 events for canonical bytes), got %d: %+v", len(events), events)
 	}
 }

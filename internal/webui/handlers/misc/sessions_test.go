@@ -193,7 +193,7 @@ func TestGetSessionTranscript(t *testing.T) {
 	if err := os.WriteFile(native, payload, 0o600); err != nil {
 		t.Fatalf("write native: %v", err)
 	}
-	if err := store.SyncNativeTranscript(sess.SessionID(), native); err != nil {
+	if err := store.SyncNativeTranscript(sess.SessionID(), native, sessions.TranscriptFormatRaw); err != nil {
 		t.Fatalf("SyncNativeTranscript: %v", err)
 	}
 
