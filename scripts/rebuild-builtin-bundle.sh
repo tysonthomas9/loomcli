@@ -21,21 +21,35 @@ FLUE_REPO="${FLUE_REPO:-$(cd "$ROOT/../flue" 2>/dev/null && pwd || true)}"
 [ -n "$FLUE_REPO" ] && [ -f "$FLUE_REPO/packages/cli/bin/flue.mjs" ] || { echo "ERROR: flue CLI not found; build ../flue or set FLUE_REPO" >&2; exit 1; }
 [ -d "$FLUE_REPO/packages/runtime" ] || { echo "ERROR: $FLUE_REPO/packages/runtime missing (build flue first)" >&2; exit 1; }
 
+# Pin: the committed bundle must be reproducible from a known flue commit. Refuse
+# to rebuild against a drifted ../flue — an unpinned flue HEAD is exactly what
+# silently broke 3 runtime contracts (defineWorkflow default export,
+# FLUE_INTERNAL_CLI_IPC gating, strict cloneJsonSerializable). To intentionally
+# advance the pin, set ALLOW_FLUE_PIN_DRIFT=1 and bump FLUE_COMMIT in the same commit.
+PIN_FILE="$ROOT/internal/workflows/builtin-dist/FLUE_COMMIT"
+if [ -f "$PIN_FILE" ] && [ "${ALLOW_FLUE_PIN_DRIFT:-}" != "1" ]; then
+  PINNED="$(tr -d '[:space:]' < "$PIN_FILE")"
+  HEAD="$(git -C "$FLUE_REPO" rev-parse HEAD 2>/dev/null || true)"
+  [ "$HEAD" = "$PINNED" ] || {
+    echo "ERROR: FLUE_REPO HEAD ($HEAD) != pinned $PINNED (internal/workflows/builtin-dist/FLUE_COMMIT)." >&2
+    echo "       Check out flue at the pin, or set ALLOW_FLUE_PIN_DRIFT=1 and bump FLUE_COMMIT in the same commit." >&2
+    exit 1
+  }
+fi
+
 SRC="$ROOT/internal/workflows/builtin"
-DEST="$ROOT/internal/workflows/builtin-dist/epic-runner/dist"
+# BUILTIN_DIST_DEST lets CI build into a scratch dir for a non-destructive
+# digest/reproducibility diff against the committed dist.
+DEST="${BUILTIN_DIST_DEST:-$ROOT/internal/workflows/builtin-dist/epic-runner/dist}"
 # The 4 files that make up the epic-runner spec (builtinEpicRunnerSpec in workflows.go).
 SPEC_FILES=(epic-runner.ts local-task-runner.ts daytona-task-runner.ts openshell-task-runner.ts)
 
 STAGE="$(mktemp -d -t loom-bundle-regen.XXXXXX)"
 echo "==> staging epic-runner workflow repo at $STAGE"
-mkdir -p "$STAGE/workflows" "$STAGE/node_modules/@loom" "$STAGE/node_modules/@flue" "$STAGE/node_modules/@daytona"
-ln -s "$ROOT/sdk" "$STAGE/node_modules/@loom/sdk"
-ln -s "$FLUE_REPO/packages/runtime" "$STAGE/node_modules/@flue/runtime"
-# daytona-task-runner.ts statically imports @daytona/sdk (bundled into server.mjs);
-# resolve it from the flue repo's installed deps.
-DAYTONA_SDK="$FLUE_REPO/node_modules/.pnpm/node_modules/@daytona/sdk"
-[ -d "$DAYTONA_SDK" ] && ln -s "$DAYTONA_SDK" "$STAGE/node_modules/@daytona/sdk" \
-  || echo "WARN: @daytona/sdk not found at $DAYTONA_SDK; the build will fail to resolve it" >&2
+mkdir -p "$STAGE/workflows"
+# shellcheck source=scripts/stage-builtin-modules.sh
+source "$ROOT/scripts/stage-builtin-modules.sh"
+stage_builtin_node_modules "$STAGE"
 printf '%s\n' '{"type":"module","dependencies":{"@loom/sdk":"file:./node_modules/@loom/sdk","@flue/runtime":"file:./node_modules/@flue/runtime"}}' > "$STAGE/package.json"
 for f in "${SPEC_FILES[@]}"; do cp "$SRC/$f" "$STAGE/workflows/$f"; done
 

@@ -168,3 +168,75 @@ jobs:
 
       - name: Test
         run: go test -v -race -timeout 15m ./...
+
+  # Catches FLUE DRIFT: rebuilds the embedded epic-runner bundle from the pinned
+  # flue commit and fails if the committed dist drifts. The Go SourceDigest gate
+  # only hashes the spec .ts (source drift), NOT the flue runtime — an unpinned
+  # ../flue is exactly what silently broke 3 runtime contracts (defineWorkflow
+  # default export, FLUE_INTERNAL_CLI_IPC gating, strict cloneJsonSerializable).
+  builtin-bundle-pin:
+    name: Builtin Bundle (flue pin)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Read pinned flue commit
+        id: pin
+        run: |
+          set -euo pipefail
+          sha="$(tr -d '[:space:]' < internal/workflows/builtin-dist/FLUE_COMMIT)"
+          # Validate before it flows into actions/checkout `ref:` — must be a 40-char hex SHA.
+          if ! printf '%s' "$sha" | grep -Eq '^[0-9a-f]{40}$'; then
+            echo "ERROR: FLUE_COMMIT is not a 40-char hex SHA: '$sha'" >&2
+            exit 1
+          fi
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+
+      - name: Check out flue at the pin
+        uses: actions/checkout@v4
+        with:
+          # Override via the FLUE_REPOSITORY repo variable if the source moves.
+          repository: ${{ vars.FLUE_REPOSITORY || 'withastro/flue' }}
+          ref: ${{ steps.pin.outputs.sha }}
+          path: flue
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24' # the bundle imports node:sqlite
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: '11.1.1'
+
+      - name: Build flue at the pin
+        run: cd flue && pnpm install --frozen-lockfile && pnpm build
+
+      - name: Rebuild bundle and check for drift
+        env:
+          FLUE_REPO: ${{ github.workspace }}/flue
+          BUILTIN_DIST_DEST: ${{ runner.temp }}/bundle-dist
+        run: |
+          set -euo pipefail
+          scripts/rebuild-builtin-bundle.sh
+          committed=internal/workflows/builtin-dist/epic-runner/dist
+          # Strict: the spec source digest must match byte-for-byte.
+          diff "$committed/source-digest.txt" "$BUILTIN_DIST_DEST/source-digest.txt"
+          # Reproducible build: server.mjs must match after stripping the trailing
+          # sourcemap comment (the only line that can carry machine-specific paths).
+          strip() { grep -v '^//# sourceMappingURL=' "$1" | shasum -a 256 | awk '{print $1}'; }
+          a="$(strip "$committed/server.mjs")"; b="$(strip "$BUILTIN_DIST_DEST/server.mjs")"
+          if [ "$a" != "$b" ]; then
+            echo "ERROR: rebuilt server.mjs differs from the committed bundle." >&2
+            echo "       Either ../flue drifted from the pin, or the committed bundle is stale." >&2
+            echo "       committed=$a rebuilt=$b" >&2
+            exit 1
+          fi
+          echo "OK: bundle reproduces from pinned flue ${{ steps.pin.outputs.sha }}"
+
+      - name: Builtin workflow node tests
+        env:
+          FLUE_REPO: ${{ github.workspace }}/flue
+        run: make test-builtin-workflows
