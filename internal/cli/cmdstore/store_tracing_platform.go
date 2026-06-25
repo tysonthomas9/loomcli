@@ -239,6 +239,11 @@ func (t *tracedTriggerBindingStore) ResolveWebhookSecret(ctx context.Context, ws
 
 type tracedDriverRunStore struct{ inner store.DriverRunStore }
 
+// Lock in the optional events-reader forwarding (Events): same silent-drift class as
+// ArtifactContentReader on tracedArtifactStore — without this guard the wrapper could
+// drop it and the consumer's comma-ok type assertion would fail silently.
+var _ store.DriverRunEventsReader = (*tracedDriverRunStore)(nil)
+
 func (t *tracedDriverRunStore) Create(ctx context.Context, in store.DriverRunCreate) (*domain.DriverRun, error) {
 	return traced(ctx, "DriverRuns", "Create", func(ctx context.Context) (*domain.DriverRun, error) {
 		return t.inner.Create(ctx, in)
