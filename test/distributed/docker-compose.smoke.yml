@@ -220,5 +220,15 @@ services:
       LOOM_B_URL: http://loom-b:8080
       UI_A_URL: http://ui-a:8080
       UI_B_URL: http://ui-b:8080
+      # Fleet env so `loom daemon seed-transcript` (cross-node transcript assertion)
+      # builds a fleet-backed control-plane store, exactly like loom-a/b.
+      LOOM_ISSUE_BACKEND: fleet
+      LOOM_FLEET_URL: http://fleet-db:8080
+      LOOM_WORKSPACE: DIST
+      LOOM_AGENT_NAME: distributed-smoke
+      LOOM_FLEET_ACTOR: distributed-smoke
+      LOOM_FLEET_REQUIRED: "1"
+    volumes:
+      - ../../tmp/distributed-smoke/bin/loom:/usr/local/bin/loom:ro
     networks: [distributed]
     restart: "no"

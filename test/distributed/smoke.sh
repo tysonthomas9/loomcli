@@ -112,8 +112,34 @@ printf '%s\n' "$sse_body" | grep -q "$gap_issue_id" ||
   fail "SSE reconnect catch-up from loom-b did not include $gap_issue_id; body: $sse_body; err: $(cat /tmp/sse.err)"
 pass "SSE reconnect catch-up works across loom instances"
 
+# Cross-node transcript_ref resolution: seed an agent session + transcript artifact + transcript_ref via
+# the control plane (loom seed-transcript -> fleet-db), then assert the NON-owning node (loom-b), which
+# owns no local copy of the session, resolves it from fleet-db and reports has_transcript=true (derived
+# from the metadata transcript_ref). That validates the distributed half of the daemon-leaf transcript_ref
+# path (WS1b): a node that never ran the agent still surfaces that a transcript exists.
+#
+# NOTE (deliberately NOT asserted): the transcript BYTE read (GET .../sessions/<id>/transcript) further
+# needs fleet-db to serve artifact content back across nodes. The current fleet-db content store is
+# write-only (Put/Verify, no read-back + no GET /artifacts/{id}/content route) and stores content at a
+# node-local file:// URI, so a non-owning node gets a 500 on the byte read. Closing that is a fleet-db
+# follow-up (add a content read-back endpoint, or use a shared/object content store), tracked separately.
+tx_session="dist-smoke-tx-$stamp"
+tx_task="dist-smoke-task-$stamp"
+printf '%s\n%s\n%s\n' \
+  '{"role":"system","type":"session_meta","text":"distributed-smoke seeded transcript"}' \
+  '{"role":"assistant","type":"text","text":"cross-node transcript probe"}' \
+  '{"role":"system","type":"result","text":"completed","output":"{\"input_tokens\":1,\"output_tokens\":1}"}' \
+  > /tmp/tx.jsonl
+loom daemon seed-transcript --workspace "$WORKSPACE" --session "$tx_session" --task "$tx_task" --content /tmp/tx.jsonl \
+  || fail "seed-transcript failed"
+sess_body="$(curl -fsS "$LOOM_B_URL/api/workspaces/$WORKSPACE/tasks/$tx_task/sessions" 2>/tmp/tx.err || true)"
+printf '%s\n' "$sess_body" | jq -e --arg s "$tx_session" '.data.sessions[]? | select(.session_id == $s) | .has_transcript == true' >/dev/null \
+  || fail "loom-b did not resolve the seeded session's transcript_ref cross-node; body: $sess_body; err: $(cat /tmp/tx.err)"
+pass "cross-node transcript_ref resolved from the non-owning node (has_transcript=true)"
+printf '[distributed-smoke] NOTE transcript byte-read across nodes pends fleet-db artifact content read-back (no GET /content endpoint)\n'
+
 curl -fsS "$UI_A_URL/api/health" >/dev/null || fail "ui-a /api/health failed"
 curl -fsS "$UI_B_URL/api/health" >/dev/null || fail "ui-b /api/health failed"
 pass "WebUI health checks passed on both instances"
 
-printf '[distributed-smoke] SUMMARY auth=pass claims=pass heartbeat=pass sse_reconnect=pass webui=pass\n'
+printf '[distributed-smoke] SUMMARY auth=pass claims=pass heartbeat=pass sse_reconnect=pass transcript_ref=pass webui=pass\n'
