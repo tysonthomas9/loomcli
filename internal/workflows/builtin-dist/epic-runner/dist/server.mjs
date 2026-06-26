@@ -294745,7 +294745,7 @@ async function createHarness(imports, options) {
 		sandbox: daytonaSandbox(imports.runtime, options.sandbox, options.cwd),
 		instructions: "You are a focused coding agent running for a Loom child TaskRun inside an isolated Daytona sandbox."
 	}));
-	return ctx.init(agent, { name: options.name });
+	return ctx.initializeRootHarness(agent);
 }
 function daytonaSandbox(runtime, sandbox, cwd) {
 	return { async createSessionEnv() {
@@ -294842,7 +294842,7 @@ async function configureCodexAuth(imports, model, request) {
 			};
 		}
 	}
-	imports.runtime.configureProvider("openai-codex", { apiKey });
+	imports.runtime.registerProvider("openai-codex", { apiKey });
 	return {
 		ok: true,
 		provider: resolved.provider,
