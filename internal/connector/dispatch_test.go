@@ -215,6 +215,44 @@ func TestDispatchAllowPathWritesGrantedAudit(t *testing.T) {
 	}
 }
 
+func TestDispatchEnvRecordingProviderWritesGrantedAudit(t *testing.T) {
+	t.Setenv(FakeProviderEnvVar, "1")
+	ResetRecordingProviderCalls()
+	t.Cleanup(ResetRecordingProviderCalls)
+
+	h := newDispatchHarness(t)
+	h.d.Providers = DefaultProviderRegistry(nil)
+	h.grant(t, "g-1", providers.ActionGitHubPullRequestRead, "repo:octocat/*")
+	req := baseRequest(0)
+	req.Action = providers.ActionGitHubPullRequestRead
+	req.Args = map[string]any{"owner": "octocat", "repo": "hello", "number": 7}
+
+	res, err := h.d.Dispatch(context.Background(), req)
+	if err != nil {
+		t.Fatalf("Dispatch: %v", err)
+	}
+	if res.Decision != domain.ConnectorCallGranted || res.Status != 200 || res.Body["fakeProvider"] != true {
+		t.Fatalf("result = %+v, want fake-provider granted/200", res)
+	}
+	calls := RecordingProviderCalls()
+	if len(calls) != 1 {
+		t.Fatalf("recording provider calls = %d, want 1", len(calls))
+	}
+	if calls[0].Action != providers.ActionGitHubPullRequestRead || !calls[0].CredentialPresented {
+		t.Fatalf("recording provider call = %+v, want pull_request.read with credential", calls[0])
+	}
+
+	recs := h.auditRecords(t)
+	if len(recs) != 1 {
+		t.Fatalf("audit records = %d, want 1", len(recs))
+	}
+	rec := recs[0]
+	if rec.Decision != domain.ConnectorCallGranted || rec.UpstreamStatus != 200 ||
+		rec.Action != providers.ActionGitHubPullRequestRead {
+		t.Fatalf("audit record = %+v, want granted pull_request.read status 200", rec)
+	}
+}
+
 func TestDispatchDenyPaths(t *testing.T) {
 	cases := []struct {
 		name    string
