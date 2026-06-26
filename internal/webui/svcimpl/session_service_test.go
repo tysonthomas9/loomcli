@@ -524,6 +524,7 @@ func TestSessionServiceListTaskSessionsSearchesRuntimeDir(t *testing.T) {
 	// real ~/.loom/state.json (wiping local workspace path entries).
 	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
 	ctx := t.Context()
+	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
 	workspacePath := t.TempDir()
 	runtimeDir := t.TempDir()
 
