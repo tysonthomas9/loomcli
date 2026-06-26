@@ -1,20 +1,11 @@
-package webui
+// Package pathsec owns shared service-layer file path security validators for
+// webui file and diff access.
+package pathsec
 
 import (
 	"path/filepath"
-	"regexp"
 	"strings"
 )
-
-// validGitRef matches safe git ref names: alphanumeric, hyphens, underscores, dots, slashes.
-var validGitRef = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_./-]*$`)
-
-// validTaskID matches task IDs (e.g., "loomcli-5y1sd.1").
-var validTaskID = regexp.MustCompile(`^[a-zA-Z0-9._-]+$`)
-
-// validSessionID matches session IDs produced by GenerateSessionID:
-// alphanumeric, dots, underscores, hyphens.
-var validSessionID = regexp.MustCompile(`^[a-zA-Z0-9._-]+$`)
 
 // deniedExtensions lists file extensions that must not be read or written.
 var deniedExtensions = map[string]bool{
@@ -28,8 +19,9 @@ var deniedFilenames = map[string]bool{
 	".env": true, ".env.local": true, ".env.production": true, ".netrc": true,
 }
 
-// isDeniedPath checks if a path refers to a sensitive file by extension or filename.
-func isDeniedPath(path string) bool {
+// IsDeniedPath reports whether path refers to a sensitive file by extension or
+// base filename (case-insensitive).
+func IsDeniedPath(path string) bool {
 	ext := strings.ToLower(filepath.Ext(path))
 	if deniedExtensions[ext] {
 		return true
@@ -38,8 +30,9 @@ func isDeniedPath(path string) bool {
 	return deniedFilenames[base]
 }
 
-// validateDiffPath checks that a file path is safe (no traversal, not absolute, not empty).
-func validateDiffPath(p string) bool {
+// ValidateDiffPath reports whether p is a safe relative path: non-empty, not
+// absolute, and with no "." / ".." traversal after cleaning.
+func ValidateDiffPath(p string) bool {
 	if p == "" {
 		return false
 	}

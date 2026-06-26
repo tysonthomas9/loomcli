@@ -1035,46 +1035,6 @@ func TestFileHandlers_ContentType(t *testing.T) {
 	}
 }
 
-// --- isDeniedPath tests ---
-
-func TestIsDeniedPath(t *testing.T) {
-	tests := []struct {
-		path   string
-		denied bool
-	}{
-		{"file.txt", false},
-		{"main.go", false},
-		{"secret.key", true},
-		{"cert.pem", true},
-		{"store.p12", true},
-		{"keystore.pfx", true},
-		{"config.env", true},
-		{"message.gpg", true},
-		{"signature.asc", true},
-		{"id_rsa", true},
-		{"id_ed25519", true},
-		{"id_ecdsa", true},
-		{"id_dsa", true},
-		{".env", true},
-		{".env.local", true},
-		{".env.production", true},
-		{".netrc", true},
-		{"subdir/id_rsa", true},
-		{"subdir/file.txt", false},
-		{"ID_RSA", true},     // case-insensitive filename check
-		{".ENV", true},       // case-insensitive filename check
-		{"SECRET.KEY", true}, // case-insensitive extension check
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.path, func(t *testing.T) {
-			if got := isDeniedPath(tt.path); got != tt.denied {
-				t.Errorf("isDeniedPath(%q) = %v, want %v", tt.path, got, tt.denied)
-			}
-		})
-	}
-}
-
 // --- isBinaryContent tests ---
 
 func TestIsBinaryContent(t *testing.T) {
