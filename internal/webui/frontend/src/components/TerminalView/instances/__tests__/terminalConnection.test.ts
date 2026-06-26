@@ -87,6 +87,11 @@ class MockWebSocket {
     this.readyState = MockWebSocket.CLOSED;
     this.onclose?.(new CloseEvent("close", { code, reason }));
   }
+
+  /** Simulate a browser-level socket error without a server close frame. */
+  simulateError(): void {
+    this.onerror?.(new Event("error"));
+  }
 }
 
 // ── Test helpers ─────────────────────────────────────────────────────────────
@@ -407,6 +412,41 @@ describe("connectWebSocket", () => {
 
     expect(m.setConnectionState).toHaveBeenCalledWith("error");
     expect(m.onSessionKilled).toHaveBeenCalledTimes(1);
+    expect(m.onDisconnected).not.toHaveBeenCalled();
+  });
+
+  it("closes and clears stale sockets on websocket error", async () => {
+    const m = makeMocks();
+    connectWebSocket(
+      "ws1",
+      "session1",
+      m.write,
+      m.wsRef,
+      m.setConnectionState,
+      undefined,
+      m.onDisconnected,
+    );
+
+    shared.resolveToken!({ token: "tok" });
+    await vi.waitFor(() => {
+      expect(MockWebSocket.instances).toHaveLength(1);
+    });
+
+    const ws = MockWebSocket.instances[0];
+    ws.simulateOpen();
+    expect(m.wsRef.current).toBe(ws);
+
+    ws.simulateError();
+
+    expect(ws.close).toHaveBeenCalledTimes(1);
+    expect(m.wsRef.current).toBeNull();
+    expect(m.setConnectionState).toHaveBeenCalledWith("disconnected");
+    expect(m.onDisconnected).toHaveBeenCalledTimes(1);
+
+    m.setConnectionState.mockClear();
+    m.onDisconnected.mockClear();
+    ws.simulateClose(1000, "");
+    expect(m.setConnectionState).not.toHaveBeenCalled();
     expect(m.onDisconnected).not.toHaveBeenCalled();
   });
 
