@@ -50,6 +50,10 @@ type Forge interface {
 	PRStatuses(ctx context.Context, owner, repo, headPrefix string) (map[string]PRStatus, error)
 	// UpdatePRBody sets a PR's description (used to write the stack listing).
 	UpdatePRBody(ctx context.Context, owner, repo string, number int, body string) error
+	// MergePR merges, auto-merges, or disables auto-merge for a PR using the
+	// repo-scoped GitHub merge surface. repoPath is supplied so gh-compatible
+	// branch cleanup can operate from the caller's checkout.
+	MergePR(ctx context.Context, repoPath, owner, repo string, number int, opts MergeOptions) error
 }
 
 // BranchPush is one branch to push, with the SHA the remote ref is expected to
@@ -65,4 +69,29 @@ type PRStatus struct {
 	Checks    string `json:"checks"`    // passing | failing | pending | none
 	Review    string `json:"review"`    // approved | changes_requested | review_required | none
 	Mergeable string `json:"mergeable"` // mergeable | conflicting | unknown
+}
+
+// MergeMethod mirrors gh pr merge's merge strategy flags.
+type MergeMethod string
+
+const (
+	MergeMethodMerge  MergeMethod = "merge"
+	MergeMethodSquash MergeMethod = "squash"
+	MergeMethodRebase MergeMethod = "rebase"
+)
+
+// MergeOptions mirrors the gh pr merge flags Loom can safely pass through after
+// it has resolved and authorized the stack's next-to-merge PR.
+type MergeOptions struct {
+	Method          MergeMethod `json:"method,omitempty"`
+	Auto            bool        `json:"auto,omitempty"`
+	DisableAuto     bool        `json:"disableAuto,omitempty"`
+	Admin           bool        `json:"admin,omitempty"`
+	MatchHeadCommit string      `json:"matchHeadCommit,omitempty"`
+	AuthorEmail     string      `json:"authorEmail,omitempty"`
+	Subject         string      `json:"subject,omitempty"`
+	SubjectSet      bool        `json:"-"`
+	Body            string      `json:"body,omitempty"`
+	BodySet         bool        `json:"-"`
+	DeleteBranch    bool        `json:"deleteBranch,omitempty"`
 }
