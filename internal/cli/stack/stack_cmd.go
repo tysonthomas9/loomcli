@@ -19,24 +19,29 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
+	cligit "github.com/tysonthomas9/loomcli/internal/cli/git"
 	"github.com/tysonthomas9/loomcli/internal/localworkspace"
 	sl "github.com/tysonthomas9/loomcli/internal/stacklineage"
 	"github.com/tysonthomas9/loomcli/internal/stackpublish"
 	"github.com/tysonthomas9/loomcli/internal/stackstore"
 )
 
-var stackCmd = &cobra.Command{
-	Use:     "stack",
-	Short:   "Manage stack lineage and publish stacked pull requests",
-	GroupID: "workspace",
+func init() {
+	cli.RegisterCommand(newStackCommand("workspace"))
+	cligit.RegisterSubcommand(newStackCommand(""))
 }
 
-func init() {
-	stackCmd.AddCommand(
+func newStackCommand(groupID string) *cobra.Command {
+	c := &cobra.Command{
+		Use:     "stack",
+		Short:   "Manage stack lineage and publish stacked pull requests",
+		GroupID: groupID,
+	}
+	c.AddCommand(
 		initCmd(), listCmd(), showCmd(), statusCmd(), validateCmd(),
 		addCmd(), moveCmd(), setBaseCmd(), removeCmd(), publishCmd(), mergeCmd(), restackCmd(),
 	)
-	cli.RegisterCommand(stackCmd)
+	return c
 }
 
 // helpers --------------------------------------------------------------------
