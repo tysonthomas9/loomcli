@@ -13,6 +13,7 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	runtimesettings "github.com/tysonthomas9/loomcli/internal/localsettings"
+	"github.com/tysonthomas9/loomcli/internal/sessions/redact"
 	"github.com/tysonthomas9/loomcli/internal/sessions/transcript"
 	"github.com/tysonthomas9/loomcli/internal/stackstore"
 	"github.com/tysonthomas9/loomcli/internal/store"
@@ -858,6 +859,9 @@ func (e HostBridgeTaskExecutor) createPatchArtifact(ctx context.Context, req Tas
 		artifactID = "patch-" + req.TaskRunID
 	}
 	summary := firstNonEmpty(runner.PatchSummary, runner.PatchSummaryCamel, "task patch")
+	if redact.Enabled() {
+		summary = redact.String(summary)
+	}
 	mimeType := firstNonEmpty(runner.PatchMIMEType, runner.PatchMIMETypeCamel, "text/x-diff")
 	baseRef := firstNonEmpty(runner.PatchBaseRef, runner.PatchBaseRefCamel, runner.BaseRef, runner.BaseRefCamel)
 	metadata := map[string]string{

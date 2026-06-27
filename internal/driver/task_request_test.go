@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -591,6 +592,65 @@ func TestRequestTaskRunExecutorErrorRecordsFailedChild(t *testing.T) {
 	}
 	if final.ErrorMessage != "agent command failed" {
 		t.Fatalf("error message = %q, want executor error", final.ErrorMessage)
+	}
+}
+
+func TestTaskExecCompletionAndRuntimeMetadataRedactTextFields(t *testing.T) {
+	t.Setenv("LOOM_REDACT_TRANSCRIPTS", "")
+	const secret = "sk-ant-api03-xK9mZ2vL8nQ5rT1wY4bC7dF0gH3jE6pA"
+	sandboxID := "sandbox-" + secret
+	contentHash := "sha256:" + strings.Repeat("a", 64)
+	execResult := TaskExecResult{
+		Status:       domain.TaskRunFailed,
+		ExitCode:     1,
+		ErrorMessage: "failed with " + secret,
+		RuntimeMetadata: map[string]string{
+			"response_text":      "model response " + secret,
+			"daytona_sandbox_id": sandboxID,
+			"patch_content_hash": contentHash,
+		},
+	}
+
+	completion := normalizeTaskExecCompletion(execResult, nil)
+	metadata := taskExecRuntimeMetadata(execResult, claimedTaskRunRefs{ProviderProfile: "daytona"})
+
+	if strings.Contains(completion.ErrorMessage, secret) {
+		t.Fatalf("completion error message leaked secret: %q", completion.ErrorMessage)
+	}
+	if strings.Contains(metadata["response_text"], secret) {
+		t.Fatalf("response_text leaked secret: %q", metadata["response_text"])
+	}
+	if metadata["daytona_sandbox_id"] != sandboxID {
+		t.Fatalf("daytona_sandbox_id was modified: %q", metadata["daytona_sandbox_id"])
+	}
+	if metadata["patch_content_hash"] != contentHash {
+		t.Fatalf("patch_content_hash was modified: %q", metadata["patch_content_hash"])
+	}
+	if execResult.RuntimeMetadata["response_text"] != "model response "+secret {
+		t.Fatalf("execResult runtime metadata was mutated: %+v", execResult.RuntimeMetadata)
+	}
+}
+
+func TestTaskExecCompletionAndRuntimeMetadataRedactionDisabled(t *testing.T) {
+	t.Setenv("LOOM_REDACT_TRANSCRIPTS", "off")
+	const secret = "sk-ant-api03-xK9mZ2vL8nQ5rT1wY4bC7dF0gH3jE6pA"
+	execResult := TaskExecResult{
+		Status:       domain.TaskRunFailed,
+		ExitCode:     1,
+		ErrorMessage: "failed with " + secret,
+		RuntimeMetadata: map[string]string{
+			"response_text": "model response " + secret,
+		},
+	}
+
+	completion := normalizeTaskExecCompletion(execResult, nil)
+	metadata := taskExecRuntimeMetadata(execResult, claimedTaskRunRefs{})
+
+	if !strings.Contains(completion.ErrorMessage, secret) {
+		t.Fatalf("disabled redaction modified error message: %q", completion.ErrorMessage)
+	}
+	if !strings.Contains(metadata["response_text"], secret) {
+		t.Fatalf("disabled redaction modified response_text: %q", metadata["response_text"])
 	}
 }
 
