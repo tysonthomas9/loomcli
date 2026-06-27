@@ -697,6 +697,40 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/workspaces/{ws}/tasks/{taskId}/sessions/{sessionId}/subagents": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** List captured subagents for a session */
+    get: operations["listSessionSubagents"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/workspaces/{ws}/tasks/{taskId}/sessions/{sessionId}/subagents/{subagentId}/transcript": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Get captured subagent transcript entries */
+    get: operations["getSessionSubagentTranscript"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/workspaces/{ws}/tasks/{taskId}/sessions/{sessionId}/diff": {
     parameters: {
       query?: never;
@@ -4343,6 +4377,83 @@ export interface operations {
         };
       };
       /** @description Session not found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+    };
+  };
+  listSessionSubagents: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+        taskId: string;
+        sessionId: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Subagent list */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": {
+            success: boolean;
+            data?: {
+              session_id?: string;
+              subagent_ids?: string[];
+            };
+          };
+        };
+      };
+      /** @description Session not found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+    };
+  };
+  getSessionSubagentTranscript: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+        taskId: string;
+        sessionId: string;
+        subagentId: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Subagent transcript */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": {
+            success: boolean;
+            data?: {
+              session_id?: string;
+              entries?: components["schemas"]["TranscriptEntry"][];
+            };
+          };
+        };
+      };
+      /** @description Subagent transcript not found */
       404: {
         headers: {
           [name: string]: unknown;

@@ -6,46 +6,52 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
 )
 
-// SessionModule registers the 6 workspace-scoped session history and audit
+// SessionModule registers the 8 workspace-scoped session history and audit
 // trail routes on a [*http.ServeMux].
 //
 // All routes are unconditional — the SessionService handles nil internal
 // stores gracefully. The module is always constructed when multiPool is
 // available.
 //
-// The 4 task-scoped session handlers (list, get, transcript, diff) are
-// provided as pre-built HandlerFuncs because they live in a sibling package.
+// The task-scoped session handlers are provided as pre-built HandlerFuncs
+// because they live in a sibling package.
 type SessionModule struct {
 	sessSvc service.SessionService
 
 	// Task-scoped session handlers injected from the sibling package.
-	listTaskSessionsHandler     http.HandlerFunc
-	getSessionHandler           http.HandlerFunc
-	getSessionTranscriptHandler http.HandlerFunc
-	getSessionDiffHandler       http.HandlerFunc
+	listTaskSessionsHandler      http.HandlerFunc
+	getSessionHandler            http.HandlerFunc
+	getSessionTranscriptHandler  http.HandlerFunc
+	getSessionDiffHandler        http.HandlerFunc
+	listSubagentsHandler         http.HandlerFunc
+	getSubagentTranscriptHandler http.HandlerFunc
 }
 
 // SessionModuleOpts holds the injected task-scoped session handlers.
 type SessionModuleOpts struct {
-	ListTaskSessions     http.HandlerFunc
-	GetSession           http.HandlerFunc
-	GetSessionTranscript http.HandlerFunc
-	GetSessionDiff       http.HandlerFunc
+	ListTaskSessions             http.HandlerFunc
+	GetSession                   http.HandlerFunc
+	GetSessionTranscript         http.HandlerFunc
+	GetSessionDiff               http.HandlerFunc
+	ListSessionSubagents         http.HandlerFunc
+	GetSessionSubagentTranscript http.HandlerFunc
 }
 
 // NewSessionModule returns a SessionModule that will register routes using
 // the given session service. Task-scoped session handlers are injected via opts.
 func NewSessionModule(sessSvc service.SessionService, opts SessionModuleOpts) *SessionModule {
 	return &SessionModule{
-		sessSvc:                     sessSvc,
-		listTaskSessionsHandler:     opts.ListTaskSessions,
-		getSessionHandler:           opts.GetSession,
-		getSessionTranscriptHandler: opts.GetSessionTranscript,
-		getSessionDiffHandler:       opts.GetSessionDiff,
+		sessSvc:                      sessSvc,
+		listTaskSessionsHandler:      opts.ListTaskSessions,
+		getSessionHandler:            opts.GetSession,
+		getSessionTranscriptHandler:  opts.GetSessionTranscript,
+		getSessionDiffHandler:        opts.GetSessionDiff,
+		listSubagentsHandler:         opts.ListSessionSubagents,
+		getSubagentTranscriptHandler: opts.GetSessionSubagentTranscript,
 	}
 }
 
-// Register implements [Module] by registering 6 session routes.
+// Register implements [Module] by registering 8 session routes.
 func (m *SessionModule) Register(mux *http.ServeMux) {
 	// Session history (issue-scoped)
 	mux.HandleFunc("GET /api/workspaces/{ws}/issues/{issueId}/sessions", handleListSessionHistory(m.sessSvc))
@@ -63,5 +69,11 @@ func (m *SessionModule) Register(mux *http.ServeMux) {
 	}
 	if m.getSessionDiffHandler != nil {
 		mux.HandleFunc("GET /api/workspaces/{ws}/tasks/{taskId}/sessions/{sessionId}/diff", m.getSessionDiffHandler)
+	}
+	if m.listSubagentsHandler != nil {
+		mux.HandleFunc("GET /api/workspaces/{ws}/tasks/{taskId}/sessions/{sessionId}/subagents", m.listSubagentsHandler)
+	}
+	if m.getSubagentTranscriptHandler != nil {
+		mux.HandleFunc("GET /api/workspaces/{ws}/tasks/{taskId}/sessions/{sessionId}/subagents/{subagentId}/transcript", m.getSubagentTranscriptHandler)
 	}
 }
