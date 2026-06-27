@@ -17,10 +17,12 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
 )
 
-// Watch stream cadence. The poll interval drives journal reads, the
-// heartbeat keeps intermediaries from idling the connection out, and the
-// reconciliation interval re-sends a full snapshot AND re-verifies parent
-// run liveness so a long stream never outlives its driver run.
+// Watch stream cadence. The poll interval drives journal reads, the heartbeat
+// keeps intermediaries from idling the connection out, and the reconciliation
+// interval re-sends a full snapshot AND re-verifies parent run liveness so a
+// long stream never outlives its driver run. The 15s watch heartbeat is
+// intentionally shorter than realtime.HeartbeatInterval because watch streams
+// are short-lived and latency-sensitive.
 const (
 	defaultWatchPollInterval      = time.Second
 	defaultWatchHeartbeatInterval = 15 * time.Second
@@ -70,6 +72,9 @@ func (m *Module) handleWatchEpic(w http.ResponseWriter, r *http.Request) {
 	// Long-lived stream: the server-wide write deadline must not apply.
 	_ = http.NewResponseController(w).SetWriteDeadline(time.Time{})
 
+	if sw.WriteRetry(realtime.RetryMs) != nil {
+		return
+	}
 	if writeWatchSnapshot(sw, session.cursor, snapshot) != nil {
 		return
 	}
