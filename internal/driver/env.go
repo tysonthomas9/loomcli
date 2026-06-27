@@ -1,6 +1,10 @@
 package driver
 
-import "strings"
+import (
+	"strings"
+
+	"github.com/tysonthomas9/loomcli/internal/secrets/names"
+)
 
 var subprocessEnvAllowExact = map[string]struct{}{
 	"PATH":    {},
@@ -74,30 +78,12 @@ var subprocessEnvSensitiveFragments = []string{
 }
 
 // trustedLocalProviderCredentials are the provider-credential env vars the
-// local task runner is allowed to inherit so the backend CLI authenticates
-// exactly as local tooling does (§4.3). This widening is STRICTLY scoped to the
-// local-task-runner entrypoint — Daytona/remote runners keep the strict filter
-// in scopedSubprocessBaseEnv (which treats every one of these as sensitive) so
-// a credential never leaks into a remote sandbox.
-var trustedLocalProviderCredentials = map[string]struct{}{
-	"ANTHROPIC_API_KEY": {},
-	// claude-code's long-lived OAuth token (`claude setup-token`); the headless
-	// equivalent of a ~/.claude login, so the local runner must inherit it too.
-	"CLAUDE_CODE_OAUTH_TOKEN":        {},
-	"OPENAI_API_KEY":                 {},
-	"CODEX_API_KEY":                  {},
-	"CODEX_HOME":                     {},
-	"GEMINI_API_KEY":                 {},
-	"GOOGLE_API_KEY":                 {},
-	"GOOGLE_APPLICATION_CREDENTIALS": {},
-	"CURSOR_API_KEY":                 {},
-	// GitHub tokens enable the local runner's opt-in pull-request delivery.
-	// They remain in subprocessEnvSensitiveExact so the strict filter still
-	// denies them to Daytona/remote runners; localTaskRunnerBaseEnv adds them
-	// back ONLY for the local-task-runner entrypoint.
-	"GITHUB_TOKEN": {},
-	"GH_TOKEN":     {},
-}
+// local task runner may inherit so the backend CLI authenticates exactly as
+// local tooling does (§4.3). Derived from internal/secrets/names, the single
+// source of truth shared with internal/cli/envfilter. This widening is scoped
+// to the local-task-runner entrypoint; Daytona/remote runners keep the strict
+// filter in scopedSubprocessBaseEnv so a credential never leaks remotely.
+var trustedLocalProviderCredentials = names.ProviderCredentialSet()
 
 func driverRuntimeBaseEnv(env []string) []string {
 	return scopedSubprocessBaseEnv(env)
