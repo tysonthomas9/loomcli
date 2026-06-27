@@ -13,13 +13,36 @@ import "context"
 // PR is the repo-scoped view of a GitHub pull request the reconciler needs.
 type PR struct {
 	Number int
+	NodeID string
 	Head   string // head ref (branch) name
 	Base   string // base ref (branch) name
 	State  string // "open" | "closed"
 	Merged bool
+	Draft  bool
 	Title  string
 	Body   string
 	URL    string
+}
+
+// PullRequestOptions carries the gh-pr-create/edit-compatible PR metadata that
+// Loom can safely apply without overriding stack lineage.
+type PullRequestOptions struct {
+	Title                  string `json:"title,omitempty"`
+	TitleSet               bool   `json:"-"`
+	Body                   string `json:"body,omitempty"`
+	BodySet                bool   `json:"-"`
+	Draft                  bool   `json:"draft,omitempty"`
+	DraftSet               bool   `json:"-"`
+	MaintainerCanModify    bool   `json:"maintainerCanModify,omitempty"`
+	MaintainerCanModifySet bool   `json:"-"`
+}
+
+func (o PullRequestOptions) HasMetadataUpdate() bool {
+	return o.TitleSet || o.BodySet || o.MaintainerCanModifySet
+}
+
+func (o PullRequestOptions) HasAnyUpdate() bool {
+	return o.HasMetadataUpdate() || o.DraftSet
 }
 
 // Forge is the repo-scoped Git/GitHub surface the reconciler depends on. Every
@@ -30,8 +53,12 @@ type Forge interface {
 	// headPrefix, e.g. "loom/stack/epic-E1/". Used for Phase-0 discovery,
 	// adoption by head, merged detection, and orphan detection.
 	ListStackPRs(ctx context.Context, owner, repo, headPrefix string) ([]PR, error)
-	// CreatePR opens a PR (ready for review — no draft, decision 4).
-	CreatePR(ctx context.Context, owner, repo, head, base, title, body string) (PR, error)
+	// CreatePR opens a PR using Loom-owned head/base lineage plus safe PR metadata.
+	CreatePR(ctx context.Context, owner, repo, head, base string, opts PullRequestOptions) (PR, error)
+	// UpdatePRMetadata updates safe PR metadata (title/body/maintainer edit).
+	UpdatePRMetadata(ctx context.Context, owner, repo string, number int, opts PullRequestOptions) (PR, error)
+	// SetPRDraft converts a PR between draft and ready-for-review states.
+	SetPRDraft(ctx context.Context, owner, repo string, pr PR, draft bool) error
 	// UpdatePRBase retargets an open PR's base branch.
 	UpdatePRBase(ctx context.Context, owner, repo string, number int, base string) error
 	// ClosePR closes a PR (optionally posting a comment first). Branches are kept (decision 2).
