@@ -1,7 +1,6 @@
 package middleware
 
 import (
-	"context"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -15,12 +14,6 @@ const (
 	WorkspacePermissionWrite WorkspacePermission = "workspace.write"
 	WorkspacePermissionAdmin WorkspacePermission = "workspace.admin"
 )
-
-// WorkspaceRoleResolver resolves a request identity to its workspace role.
-// It is called after authentication and workspace resolution, so identity.UserID
-// and workspaceID are both available. Returning an empty role uses the same
-// read-only behavior as an empty JWT role claim.
-type WorkspaceRoleResolver func(ctx context.Context, workspaceID string, identity UserIdentity) (string, error)
 
 // WorkspaceRBACConfig configures workspace role/permission enforcement.
 type WorkspaceRBACConfig struct {
