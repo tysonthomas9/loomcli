@@ -25,6 +25,7 @@ type sseFrame struct {
 	event   string
 	data    string
 	comment string
+	retry   string
 }
 
 // sseStream wraps an open watch response for frame-at-a-time reading.
@@ -70,14 +71,16 @@ func (s *sseStream) nextFrame(t *testing.T) (sseFrame, bool) {
 			frame.event = strings.TrimPrefix(line, "event: ")
 		case strings.HasPrefix(line, "data: "):
 			frame.data = strings.TrimPrefix(line, "data: ")
+		case strings.HasPrefix(line, "retry: "):
+			frame.retry = strings.TrimPrefix(line, "retry: ")
 		default:
 			t.Fatalf("unexpected SSE line %q", line)
 		}
 	}
 }
 
-// nextEvent skips comment frames (heartbeats) and returns the next named
-// event frame.
+// nextEvent skips non-event frames (heartbeats/retry hints) and returns the
+// next named event frame.
 func (s *sseStream) nextEvent(t *testing.T) (sseFrame, bool) {
 	t.Helper()
 	for {
@@ -213,6 +216,11 @@ func TestWatchEpicSnapshotFirstThenEvents(t *testing.T) {
 	}
 	if ct := stream.resp.Header.Get("Content-Type"); ct != "text/event-stream" {
 		t.Fatalf("Content-Type = %q, want text/event-stream", ct)
+	}
+
+	retry, ok := stream.nextFrame(t)
+	if !ok || retry.retry != "5000" {
+		t.Fatalf("first frame = %+v, want retry 5000", retry)
 	}
 
 	// Handshake must be the snapshot, id = the connect cursor (0).

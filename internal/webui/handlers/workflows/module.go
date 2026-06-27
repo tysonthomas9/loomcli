@@ -17,6 +17,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/driver"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
+	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
 	workflowdefs "github.com/tysonthomas9/loomcli/internal/workflows"
 )
 
@@ -227,8 +228,8 @@ func (m *Module) streamRunEvents(w http.ResponseWriter, r *http.Request) {
 		writeDomainError(w, err, "run not found")
 		return
 	}
-	flusher, ok := w.(http.Flusher)
-	if !ok {
+	sw, err := realtime.NewWriter(w)
+	if err != nil {
 		writeError(w, http.StatusInternalServerError, "streaming is unavailable")
 		return
 	}
@@ -244,17 +245,15 @@ func (m *Module) streamRunEvents(w http.ResponseWriter, r *http.Request) {
 	for {
 		page, err := reader.Events(r.Context(), ws, runID, after, 100)
 		if err != nil {
-			writeSSE(w, "error", map[string]string{"error": err.Error()})
-			flusher.Flush()
+			writeSSE(sw, "error", map[string]string{"error": err.Error()})
 			return
 		}
 		for _, event := range page.Events {
-			writeSSE(w, "event", event)
+			writeSSE(sw, "event", event)
 		}
 		if page.Cursor != "" {
 			after = page.Cursor
 		}
-		flusher.Flush()
 		select {
 		case <-r.Context().Done():
 			return
@@ -301,9 +300,9 @@ func readRawJSONBody(w http.ResponseWriter, r *http.Request) (json.RawMessage, e
 	return out, nil
 }
 
-func writeSSE(w io.Writer, event string, value any) {
+func writeSSE(sw *realtime.Writer, event string, value any) {
 	data, _ := json.Marshal(value)
-	_, _ = fmt.Fprintf(w, "event: %s\ndata: %s\n\n", event, data)
+	_ = sw.WriteEventNoID(event, string(data))
 }
 
 func writeError(w http.ResponseWriter, status int, message string) {

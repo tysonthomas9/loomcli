@@ -20,6 +20,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	"github.com/tysonthomas9/loomcli/internal/store"
+	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
 )
 
 func TestRealFlueBuildAndBuiltServerSmoke(t *testing.T) {
@@ -590,8 +591,8 @@ func (f *fakeEpicAPI) snapshotLocked() map[string]any {
 }
 
 func (f *fakeEpicAPI) handleWatch(w http.ResponseWriter, r *http.Request) {
-	flusher, ok := w.(http.Flusher)
-	if !ok {
+	sw, err := realtime.NewWriter(w)
+	if err != nil {
 		writeFakeError(w, http.StatusInternalServerError, "internal", "streaming unsupported")
 		return
 	}
@@ -601,7 +602,7 @@ func (f *fakeEpicAPI) handleWatch(w http.ResponseWriter, r *http.Request) {
 	f.mu.Lock()
 	snapshot := map[string]any{"epic": f.snapshotLocked(), "active": map[string]any{"activeCount": 0}}
 	f.mu.Unlock()
-	if writeFakeSSE(w, flusher, cursor, "snapshot", snapshot) != nil {
+	if writeFakeSSE(sw, cursor, "snapshot", snapshot) != nil {
 		return
 	}
 	for {
@@ -614,7 +615,7 @@ func (f *fakeEpicAPI) handleWatch(w http.ResponseWriter, r *http.Request) {
 		}
 		f.mu.Unlock()
 		for _, event := range pending {
-			if writeFakeSSE(w, flusher, event.seq, "taskRun", event.data) != nil {
+			if writeFakeSSE(sw, event.seq, "taskRun", event.data) != nil {
 				return
 			}
 			cursor = event.seq
@@ -627,16 +628,12 @@ func (f *fakeEpicAPI) handleWatch(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func writeFakeSSE(w http.ResponseWriter, flusher http.Flusher, id int64, event string, data any) error {
+func writeFakeSSE(sw *realtime.Writer, id int64, event string, data any) error {
 	encoded, err := json.Marshal(data)
 	if err != nil {
 		return err
 	}
-	if _, err := fmt.Fprintf(w, "id: %d\nevent: %s\ndata: %s\n\n", id, event, encoded); err != nil {
-		return err
-	}
-	flusher.Flush()
-	return nil
+	return sw.WriteEvent(id, event, string(encoded))
 }
 
 func writeFakeJSON(w http.ResponseWriter, value any) {
