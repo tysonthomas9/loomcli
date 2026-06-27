@@ -3,6 +3,7 @@ package stack
 import (
 	"bytes"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/spf13/cobra"
@@ -51,6 +52,82 @@ func TestGitStackCoreCommandsRouteLikeTopLevelStack(t *testing.T) {
 	}
 }
 
+func TestStackGHParityFlagsAreExposed(t *testing.T) {
+	rootStack := newStackCommand("workspace")
+
+	publish := requireChildCommand(t, rootStack, "publish")
+	for _, name := range []string{
+		"title", "body", "body-file", "template", "draft", "ready", "no-maintainer-edit", "web",
+		"base", "head", "label", "reviewer", "assignee", "milestone", "project",
+	} {
+		requireFlag(t, publish, name)
+	}
+
+	status := requireChildCommand(t, rootStack, "status")
+	for _, name := range []string{"required", "watch", "interval", "fail-fast", "json", "jq", "template", "web"} {
+		requireFlag(t, status, name)
+	}
+
+	restack := requireChildCommand(t, rootStack, "restack")
+	requireFlag(t, restack, "rebase")
+}
+
+func TestPublishRejectsLineageOwnedAndUnsupportedGHFlagsBeforeStore(t *testing.T) {
+	root := testRootCommand()
+	root.AddCommand(newStackCommand("workspace"))
+
+	err := executeCommand(root, "stack", "publish", "stack-id", "--base", "main", "--label", "bug")
+	if err == nil {
+		t.Fatal("expected publish to reject unsupported gh parity flags")
+	}
+	for _, want := range []string{"--base", "stack lineage", "--label"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("error %q missing %q", err.Error(), want)
+		}
+	}
+}
+
+func TestStatusRejectsUnsupportedChecksFlagsBeforeStore(t *testing.T) {
+	root := testRootCommand()
+	root.AddCommand(newStackCommand("workspace"))
+
+	err := executeCommand(root, "stack", "status", "stack-id", "--required")
+	if err == nil {
+		t.Fatal("expected status to reject --required")
+	}
+	if !strings.Contains(err.Error(), "--required") {
+		t.Fatalf("error %q missing --required", err.Error())
+	}
+}
+
+func TestPublishPROptionsFromFlags(t *testing.T) {
+	cmd := publishCmd()
+	cmd.SetIn(strings.NewReader("body from stdin"))
+	if err := cmd.Flags().Set("title", "custom title"); err != nil {
+		t.Fatal(err)
+	}
+	if err := cmd.Flags().Set("body-file", "-"); err != nil {
+		t.Fatal(err)
+	}
+
+	opts, err := publishPROptionsFromFlags(cmd, "custom title", "", "-", "", true, false, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !opts.TitleSet || opts.Title != "custom title" {
+		t.Fatalf("title opts = %+v", opts)
+	}
+	if !opts.BodySet || opts.Body != "body from stdin" {
+		t.Fatalf("body opts = %+v", opts)
+	}
+	if !opts.DraftSet || !opts.Draft {
+		t.Fatalf("draft opts = %+v", opts)
+	}
+	if !opts.MaintainerCanModifySet || opts.MaintainerCanModify {
+		t.Fatalf("maintainer opts = %+v", opts)
+	}
+}
+
 func testRootCommand() *cobra.Command {
 	c := &cobra.Command{
 		Use:           "loom",
@@ -68,6 +145,13 @@ func executeCommand(cmd *cobra.Command, args ...string) error {
 	cmd.SetErr(&out)
 	cmd.SetArgs(args)
 	return cmd.Execute()
+}
+
+func requireFlag(t *testing.T, cmd *cobra.Command, name string) {
+	t.Helper()
+	if cmd.Flags().Lookup(name) == nil {
+		t.Fatalf("%s missing flag --%s", cmd.CommandPath(), name)
+	}
 }
 
 func requireChildCommand(t *testing.T, parent *cobra.Command, name string) *cobra.Command {
