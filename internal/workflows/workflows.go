@@ -3,19 +3,18 @@ package workflows
 import (
 	"context"
 	"crypto/sha256"
-	"embed"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
-	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
+
+	_ "embed"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/driver"
@@ -45,9 +44,6 @@ var builtinGitHubReviewAgentWorkflowSource string
 
 //go:embed builtin/github-review-task-runner.ts
 var builtinGitHubReviewTaskRunnerWorkflowSource string
-
-//go:embed builtin-dist/*/dist/*
-var builtinDistFS embed.FS
 
 type Spec struct {
 	Entrypoint string
@@ -162,12 +158,6 @@ func EnsureBuiltinWorkflow(ctx context.Context, st store.Store, ws, name string)
 	} else if !errors.Is(err, domain.ErrNotFound) {
 		return err
 	}
-	if ok, err := registerPrebuiltBuiltinWorkflow(ctx, st, ws, name, spec, sourceRef, digest); ok || err != nil {
-		if err != nil {
-			return fmt.Errorf("register built-in workflow %q: %w", name, err)
-		}
-		return nil
-	}
 	if _, _, err := BuildAndRegister(ctx, st, BuildAndRegisterOptions{
 		WorkspaceKey:  ws,
 		Name:          name,
@@ -234,98 +224,42 @@ func builtinWorkflowWorkDir() string {
 	return workDir
 }
 
-func registerPrebuiltBuiltinWorkflow(ctx context.Context, st store.Store, ws, name string, spec Spec, sourceRef, digest string) (bool, error) {
-	distPath := filepath.ToSlash(filepath.Join("builtin-dist", name, "dist"))
-	if _, err := fs.Stat(builtinDistFS, filepath.ToSlash(filepath.Join(distPath, "server.mjs"))); err != nil {
-		if errors.Is(err, fs.ErrNotExist) {
-			return false, nil
-		}
-		return true, fmt.Errorf("stat prebuilt workflow bundle: %w", err)
+// BuildBuiltinBundle builds a builtin workflow source tree into destDir and
+// returns the generated server.mjs path plus redacted Flue diagnostics. It lets
+// host-side callers obtain a runnable builtin task runner without committing
+// generated bundle artifacts.
+func BuildBuiltinBundle(ctx context.Context, name, destDir string) (string, string, error) {
+	spec, ok := BuiltinWorkflow(name)
+	if !ok {
+		return "", "", domain.ErrNotFound
 	}
-	matches, err := embeddedPrebuiltDigestMatches(builtinDistFS, distPath, digest)
+	if err := os.MkdirAll(filepath.Dir(destDir), 0o755); err != nil {
+		return "", "", fmt.Errorf("create builtin bundle parent: %w", err)
+	}
+	if err := os.RemoveAll(destDir); err != nil {
+		return "", "", fmt.Errorf("clean builtin bundle dest %q: %w", destDir, err)
+	}
+	buildRoot, err := os.MkdirTemp(filepath.Dir(destDir), name+"-source-build-*")
 	if err != nil {
-		return true, err
-	}
-	if !matches {
-		return false, nil
-	}
-	workDir := builtinWorkflowWorkDir()
-	buildParent := filepath.Join(workDir, ".loom", "workflow-builds")
-	if err := os.MkdirAll(buildParent, 0o755); err != nil {
-		return true, fmt.Errorf("create workflow build root: %w", err)
-	}
-	buildRoot, err := os.MkdirTemp(buildParent, name+"-prebuilt-*")
-	if err != nil {
-		return true, fmt.Errorf("create prebuilt workflow staging root: %w", err)
+		return "", "", fmt.Errorf("create builtin source build root: %w", err)
 	}
 	defer os.RemoveAll(buildRoot) //nolint:errcheck
-	outputDir := filepath.Join(buildRoot, "dist")
-	if err := copyEmbeddedTree(builtinDistFS, distPath, outputDir); err != nil {
-		return true, err
+	if err := writeWorkflowBuildProject(buildRoot, spec.Files); err != nil {
+		return "", "", err
 	}
-	_, err = driver.RegisterFlueDriver(ctx, st, driver.RegisterFlueOptions{
-		WorkspaceKey: ws,
-		WorkDir:      workDir,
-		DistPath:     outputDir,
-		DriverName:   name,
-		WorkflowName: strings.TrimSuffix(filepath.Base(spec.Entrypoint), filepath.Ext(spec.Entrypoint)),
-		SourceRef:    sourceRef,
-		SourceDigest: digest,
-		CreatedBy:    "system",
-		Activate:     true,
-		RunnerSpecs:  deriveWorkflowRunnerSpecs(spec.Entrypoint, spec.Files),
-		Trust:        domain.DriverTrustTrusted,
-	})
+	output, err := runFlueBuild(ctx, buildRoot, destDir)
+	output = RedactBuildDiagnostics(output)
 	if err != nil {
-		return true, err
+		if output != "" {
+			return "", output, fmt.Errorf("flue build failed: %s", output)
+		}
+		return "", "", err
 	}
-	return true, nil
-}
-
-func embeddedPrebuiltDigestMatches(source fs.FS, distPath, digest string) (bool, error) {
-	markerPath := filepath.ToSlash(filepath.Join(distPath, "source-digest.txt"))
-	content, err := fs.ReadFile(source, markerPath)
-	if err != nil {
-		if errors.Is(err, fs.ErrNotExist) {
-			return false, nil
-		}
-		return false, fmt.Errorf("read prebuilt workflow source digest marker: %w", err)
+	serverPath := filepath.Join(destDir, "server.mjs")
+	if _, err := os.Stat(serverPath); err != nil {
+		return "", output, fmt.Errorf("flue build missing dist/server.mjs: %w", err)
 	}
-	return strings.TrimSpace(string(content)) == strings.TrimSpace(digest), nil
-}
-
-func copyEmbeddedTree(source fs.FS, srcRoot, dstRoot string) error {
-	return fs.WalkDir(source, srcRoot, func(path string, entry fs.DirEntry, walkErr error) error {
-		if walkErr != nil {
-			return walkErr
-		}
-		rel, err := filepath.Rel(srcRoot, path)
-		if err != nil {
-			return err
-		}
-		target := filepath.Join(dstRoot, rel)
-		if entry.IsDir() {
-			return os.MkdirAll(target, 0o755)
-		}
-		in, err := source.Open(path)
-		if err != nil {
-			return err
-		}
-		defer func() { _ = in.Close() }()
-		info, err := entry.Info()
-		if err != nil {
-			return err
-		}
-		out, err := os.OpenFile(target, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, info.Mode().Perm()) //nolint:gosec // target is derived from an embedded FS relative path under dstRoot
-		if err != nil {
-			return err
-		}
-		if _, err := io.Copy(out, in); err != nil {
-			_ = out.Close()
-			return err
-		}
-		return out.Close()
-	})
+	return serverPath, output, nil
 }
 
 // submissionTrust resolves the trust level a BuildAndRegister submission
@@ -677,6 +611,9 @@ func loomSDKRoot() (string, error) {
 
 func flueRuntimeRoot() (string, error) {
 	candidates := []string{}
+	if root := strings.TrimSpace(os.Getenv("LOOM_FLUE_RUNTIME_ROOT")); root != "" {
+		candidates = append(candidates, root)
+	}
 	if root := strings.TrimSpace(os.Getenv("FLUE_RUNTIME_ROOT")); root != "" {
 		candidates = append(candidates, root)
 	}
@@ -692,7 +629,7 @@ func flueRuntimeRoot() (string, error) {
 			return candidate, nil
 		}
 	}
-	return "", fmt.Errorf("local @flue/runtime package not found; set FLUE_RUNTIME_ROOT or FLUE_REPO")
+	return "", fmt.Errorf("local @flue/runtime package not found; set LOOM_FLUE_RUNTIME_ROOT, FLUE_RUNTIME_ROOT, or FLUE_REPO")
 }
 
 func daytonaSDKRoot() (string, error) {

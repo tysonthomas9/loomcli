@@ -381,6 +381,20 @@ linters:
         linters: [funlen, cyclop, gocognit]
       - path: "internal/webui/sse\\.go"
         linters: [gocognit]
+      # stack-aware PR publisher + epic-stack feature — pre-existing complexity,
+      # cleanup tracked with the feature (introduced before the TS-leaf work).
+      - path: "internal/stackpublish/reconciler\\.go"
+        linters: [funlen, cyclop, gocognit]
+      - path: "internal/cli/epic/epic_stack\\.go"
+        linters: [funlen, cyclop, gocognit]
+      - path: "internal/cli/epic/run\\.go"
+        linters: [funlen, cyclop, gocognit]
+      - path: "internal/cli/stack/stack_cmd\\.go"
+        linters: [funlen, cyclop, gocognit]
+      - path: "internal/driver/task_worktree_resolver\\.go"
+        linters: [funlen, cyclop, gocognit, unparam]
+      - path: "internal/driver/task_bridge\\.go"
+        linters: [funlen, cyclop, gocognit]
       # funlen: Existing functions exceeding 50-line limit — cleanup tracked separately
       - path: "internal/cli/backend_.*\\.go"
         linters: [funlen]

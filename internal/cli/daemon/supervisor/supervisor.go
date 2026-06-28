@@ -64,6 +64,18 @@ type Supervisor struct {
 	// for the liveness watchdog. Zero means use built-in defaults.
 	LivenessTimeout time.Duration
 
+	// livenessStreak counts how many consecutive scans each goroutine's tick
+	// has been observed stale. The watchdog only signals fatal once a tick has
+	// been stale for livenessStaleScansBeforeFatal scans in a row, so a single
+	// transient stall (a slow control-plane cycle, brief mutex contention) does
+	// not crash the daemon. lastLivenessScan records when scanTicks last ran so
+	// it can detect a process-wide suspension (sleep/swap/SIGSTOP) — after which
+	// every tick looks ancient — and skip the fatal for that scan. Both fields
+	// are owned exclusively by the single livenessWatchdog goroutine (tests call
+	// scanTicks serially), so they need no synchronization.
+	livenessStreak   map[string]int
+	lastLivenessScan time.Time
+
 	Concurrency *ConcurrencyTracker
 	EventBus    EventEmitter
 	EmitEvent   func(events.Event)
@@ -635,8 +647,14 @@ type agentSessionCompletionInput struct {
 	errClass   string
 	taskID     string
 	diffResult sessionfinalize.WithWorktreeResult
+	// transcriptData is the leaf's on-disk transcript (read once in
+	// finalizeAgentSession). When present it is uploaded as a control-plane artifact
+	// and referenced via metadata["transcript_ref"], so a non-owning serve node can
+	// surface it (controlPlaneSessionTranscript). Empty on the backend-unavailable path.
+	transcriptData []byte
 }
 
+//nolint:funlen // Completion writes status, metadata, transcript artifact, and retry-safe control-plane updates together.
 func (s *Supervisor) completeControlPlaneAgentSession(ap *AgentProcess, input agentSessionCompletionInput) {
 	if s.ControlStore == nil || s.WorkspaceID == "" || input.sessionID == "" {
 		return
@@ -662,6 +680,19 @@ func (s *Supervisor) completeControlPlaneAgentSession(ap *AgentProcess, input ag
 	ap.Mu.Unlock()
 	sessions.EncodeDiffStatsMetadata(metadata, input.diffResult.DiffStats, input.diffResult.FilesTouched, input.diffResult.HasDiffPatch)
 
+	// Upload the leaf transcript as a control-plane artifact and reference it via
+	// metadata["transcript_ref"] (the same convention the driver host-bridge uses),
+	// so a serve node that does NOT own this session locally can still surface it via
+	// controlPlaneSessionTranscript. Best-effort: a failed upload must not block the
+	// session completion. Own context so it can't eat the Update's timeout budget.
+	if len(input.transcriptData) > 0 {
+		upCtx, upCancel := context.WithTimeout(context.Background(), controlPlaneOperationTimeout)
+		if ref := s.uploadTranscriptArtifact(upCtx, input.sessionID, input.taskID, backend, input.transcriptData); ref != "" {
+			metadata["transcript_ref"] = ref
+		}
+		upCancel()
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), controlPlaneOperationTimeout)
 	defer cancel()
 	if _, err := s.ControlStore.AgentSessions().Update(ctx, s.WorkspaceID, input.sessionID, store.AgentSessionUpdate{
@@ -681,6 +712,35 @@ func (s *Supervisor) completeControlPlaneAgentSession(ap *AgentProcess, input ag
 	}
 	s.releaseAssignedTaskClaim(ap, input.taskID)
 	s.deregisterWorker(ap)
+}
+
+// uploadTranscriptArtifact uploads the daemon leaf's transcript as a content
+// artifact and returns its artifact:// ref (or "" on failure). The artifact id is
+// stable per session so a retried finalize reuses it (UploadContentArtifact is
+// idempotent). Owner is the agent session — the daemon leaf has no task_run, which
+// is the driver's owner type.
+func (s *Supervisor) uploadTranscriptArtifact(ctx context.Context, sessionID, taskID, backend string, data []byte) string {
+	if s.ControlStore == nil {
+		return ""
+	}
+	finalized, err := store.UploadContentArtifact(ctx, s.ControlStore.Artifacts(), store.ArtifactCreate{
+		WorkspaceKey:  s.WorkspaceID,
+		ArtifactID:    "transcript-" + sessionID,
+		SessionID:     sessionID,
+		TaskID:        taskID,
+		OwnerType:     "session", // fleet-db's valid owner type for a session-owned artifact (OwnerID=sessionID)
+		OwnerID:       sessionID,
+		Type:          "transcript",
+		Summary:       "agent session transcript",
+		MIMEType:      "application/x-ndjson",
+		DurableStatus: "declared",
+		Metadata:      map[string]string{"runtime": "daemon-leaf", "backend": backend},
+	}, data)
+	if err != nil {
+		slog.Warn("daemon transcript artifact upload failed", "session_id", sessionID, "err", err)
+		return ""
+	}
+	return "artifact://" + finalized.ArtifactID
 }
 
 // deregisterWorker removes the agent's fleet-db worker registration on exit,

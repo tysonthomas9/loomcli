@@ -159,7 +159,7 @@ func TestSessionServiceListTaskSessionsEnrichesControlPlaneWithLocalUsage(t *tes
 	if err := os.WriteFile(srcTranscript, []byte("{\"type\":\"assistant\"}\n"), 0o600); err != nil {
 		t.Fatalf("write source transcript: %v", err)
 	}
-	if err := sessStore.SyncNativeTranscript(sess.SessionID(), srcTranscript); err != nil {
+	if err := sessStore.SyncNativeTranscript(sess.SessionID(), srcTranscript, sessions.TranscriptFormatRaw); err != nil {
 		t.Fatalf("sync native transcript: %v", err)
 	}
 	if err := sess.Finalize(sessions.FinalizeOptions{
@@ -276,7 +276,7 @@ func TestSessionServiceListTaskSessionsFallsBackToFileStores(t *testing.T) {
 	if err := os.WriteFile(srcTranscript, []byte("{\"type\":\"session_meta\"}\n"), 0o600); err != nil {
 		t.Fatalf("write source transcript: %v", err)
 	}
-	if err := sessStore.SyncNativeTranscript(sess.SessionID(), srcTranscript); err != nil {
+	if err := sessStore.SyncNativeTranscript(sess.SessionID(), srcTranscript, sessions.TranscriptFormatRaw); err != nil {
 		t.Fatalf("sync native transcript: %v", err)
 	}
 	if err := sess.Finalize(sessions.FinalizeOptions{

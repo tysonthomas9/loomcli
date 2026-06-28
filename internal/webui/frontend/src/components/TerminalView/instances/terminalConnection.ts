@@ -180,6 +180,20 @@ export function connectWebSocket(
       const ws = new WebSocket(url);
       wsRef.current = ws;
       ws.binaryType = "arraybuffer";
+      let disconnectedNotified = false;
+
+      const clearCurrentSocket = () => {
+        if (wsRef.current === ws) {
+          wsRef.current = null;
+        }
+      };
+
+      const notifyDisconnected = () => {
+        if (cancelled || disconnectedNotified) return;
+        disconnectedNotified = true;
+        setConnectionState("disconnected");
+        onDisconnected?.();
+      };
 
       // Defense-in-depth: if a future refactor adds an async step between
       // the check above and here, don't leak the fresh WebSocket.
@@ -213,7 +227,9 @@ export function connectWebSocket(
       };
 
       ws.onclose = (event: CloseEvent) => {
+        clearCurrentSocket();
         if (cancelled) return;
+        if (disconnectedNotified) return;
         if (event.code === WS_CLOSE_BACKEND_EXITED) {
           setConnectionState("crashed");
           onBackendCrash?.(event.reason || "backend process exited");
@@ -237,13 +253,19 @@ export function connectWebSocket(
           onSessionKilled?.();
           return;
         }
-        setConnectionState("disconnected");
-        onDisconnected?.();
+        notifyDisconnected();
       };
 
       ws.onerror = () => {
         if (cancelled) return;
-        setConnectionState("disconnected");
+        if (
+          ws.readyState === WebSocket.OPEN ||
+          ws.readyState === WebSocket.CONNECTING
+        ) {
+          ws.close();
+        }
+        clearCurrentSocket();
+        notifyDisconnected();
       };
 
       wsCleanupInner = () => {
@@ -255,7 +277,7 @@ export function connectWebSocket(
         ) {
           ws.close(1000);
         }
-        wsRef.current = null;
+        clearCurrentSocket();
       };
     })
     .catch(() => {

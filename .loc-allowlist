@@ -7,3 +7,4 @@
 
 # Test files above 2500 LOC ceiling
 2965 internal/cli/monitor/monitor_test.go
+1018 internal/driver/task_bridge.go

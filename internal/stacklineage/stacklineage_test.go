@@ -16,7 +16,7 @@ func TestOutputBranchName_Sanitization(t *testing.T) {
 		{"epic:EPIC-1", "TASK-1", "loom/stack/epic-EPIC-1/TASK-1"},
 		{"manual:parser-followups", "BUG-2", "loom/stack/manual-parser-followups/BUG-2"},
 		{"epic:E1", "feature/web ui", "loom/stack/epic-E1/feature-web-ui"},
-		{"epic:E1", "a..b", "loom/stack/epic-E1/a-b"},        // no ".."
+		{"epic:E1", "a..b", "loom/stack/epic-E1/a-b"},         // no ".."
 		{"epic:E1", "-leading", "loom/stack/epic-E1/leading"}, // no leading '-'
 		{"epic:E1", "trail.lock", "loom/stack/epic-E1/trail"}, // no trailing ".lock"
 		{"epic:E1", "@{weird}", "loom/stack/epic-E1/weird"},

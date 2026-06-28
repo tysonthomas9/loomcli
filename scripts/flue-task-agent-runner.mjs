@@ -2,7 +2,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
-import { configureProvider, createAgent } from "@flue/runtime";
+import { registerProvider, createAgent } from "@flue/runtime";
 import { local } from "@flue/runtime/node";
 import { createFlueContext, InMemorySessionStore, resolveModel } from "@flue/runtime/internal";
 
@@ -192,7 +192,7 @@ async function configureCodexAuth(model, codexHome) {
       return { ok: false, error: error.message || String(error) };
     }
   }
-  configureProvider("openai-codex", { apiKey });
+  registerProvider("openai-codex", { apiKey });
   return { ok: true, provider: resolved.provider, configured: true, authFile: auth.file };
 }
 
@@ -355,7 +355,7 @@ async function main() {
 
   let response;
   try {
-    const harness = await ctx.init(agent, { name: harnessName });
+    const harness = await ctx.initializeRootHarness(agent);
     const session = await harness.session(sessionID);
     response = await session.prompt(prompt);
   } catch (error) {

@@ -60,6 +60,21 @@ export function useSessionSeeding({
   } | null>(null);
   const consumedAgentKeyRef = useRef<string | null>(null);
 
+  const mergeExistingAgentTab = useCallback(
+    (existing: TabState, metadataTab: TabState): TabState => {
+      const merged: TabState = {
+        ...existing,
+        ...metadataTab,
+        connectionState: existing.connectionState,
+      };
+      if (existing.crashReason !== undefined) {
+        merged.crashReason = existing.crashReason;
+      }
+      return merged;
+    },
+    [],
+  );
+
   useEffect(() => {
     if (!pendingAgentName) {
       consumedAgentKeyRef.current = null;
@@ -150,7 +165,7 @@ export function useSessionSeeding({
         setTabs((prev) => {
           if (prev.some((tab) => tab.id === newTab.id)) {
             return prev.map((tab) =>
-              tab.id === newTab.id ? { ...tab, ...newTab } : tab,
+              tab.id === newTab.id ? mergeExistingAgentTab(tab, newTab) : tab,
             );
           }
           if (existingTab) {
@@ -195,6 +210,7 @@ export function useSessionSeeding({
     setTabs,
     setActiveTabId,
     workspaceIdRef,
+    mergeExistingAgentTab,
   ]);
 
   const trySeedOnConnect = useCallback((_tabId: string) => {

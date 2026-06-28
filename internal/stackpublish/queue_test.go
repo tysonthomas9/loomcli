@@ -2,6 +2,7 @@ package stackpublish
 
 import (
 	"context"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -33,6 +34,7 @@ func TestReparentPRNumbersAndConflicts(t *testing.T) {
 // fakeForge records whether any mutating call happened.
 type fakeForge struct {
 	prs          []PR
+	createPR     PR
 	queued       map[int]bool
 	statuses     map[string]PRStatus
 	mutated      bool
@@ -54,6 +56,9 @@ func (f *fakeForge) ListStackPRs(context.Context, string, string, string) ([]PR,
 }
 func (f *fakeForge) CreatePR(context.Context, string, string, string, string, string, string) (PR, error) {
 	f.mutated = true
+	if f.createPR.Number != 0 || f.createPR.URL != "" {
+		return f.createPR, nil
+	}
 	return PR{}, nil
 }
 func (f *fakeForge) UpdatePRBase(context.Context, string, string, int, string) error {
@@ -73,11 +78,20 @@ func (f *fakeForge) QueuedPRNumbers(context.Context, string, string) (map[int]bo
 	return f.queued, nil
 }
 
+type updateFailStore struct {
+	stackstore.Store
+	err error
+}
+
+func (s updateFailStore) UpdateNode(context.Context, string, sl.StackID, string, func(*sl.Node) error) error {
+	return s.err
+}
+
 func gitRepoWithBranches(t *testing.T, id sl.StackID, tasks ...string) string {
 	t.Helper()
 	dir := t.TempDir()
 	rg := func(args ...string) {
-		out, err := exec.Command("git", append([]string{"-C", dir}, args...)...).CombinedOutput()
+		out, err := exec.Command("git", append([]string{"-C", dir}, args...)...).CombinedOutput() //nolint:norawexec
 		require.NoErrorf(t, err, "git %v: %s", args, out)
 	}
 	rg("init", "-q")
@@ -100,6 +114,25 @@ func gitRepoWithBranches(t *testing.T, id sl.StackID, tasks ...string) string {
 	}
 	rg("checkout", "-q", "main")
 	return dir
+}
+
+func TestPublishReturnsErrorWhenMarkPublishedFails(t *testing.T) {
+	ctx := context.Background()
+	id := sl.StackID("epic:E")
+	repoPath := gitRepoWithBranches(t, id, "A")
+	store := stackstore.New(t.TempDir())
+	require.NoError(t, store.EnsureStack(ctx, sl.Stack{ID: id, WorkspaceKey: "WS", RepoName: "r", RootBase: "main"}))
+	_, err := store.AddNode(ctx, "WS", id, "A", "", sl.CommitModeLoom)
+	require.NoError(t, err)
+
+	persistErr := errors.New("persist published state")
+	forge := &fakeForge{createPR: PR{Number: 42, URL: "https://github.com/o/r/pull/42", Head: sl.OutputBranchName(id, "A"), Base: "main", State: "open"}}
+	rec := &Reconciler{Store: updateFailStore{Store: store, err: persistErr}, Forge: forge}
+
+	_, err = rec.Publish(ctx, "WS", id, repoPath, Options{})
+	require.ErrorIs(t, err, persistErr)
+	assert.Contains(t, err.Error(), "phase4 mark published A")
+	assert.True(t, forge.mutated, "GitHub mutation should have happened before the local persistence failure")
 }
 
 // The pre-flight must abort a reorder BEFORE any GitHub mutation when a

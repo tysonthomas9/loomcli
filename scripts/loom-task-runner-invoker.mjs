@@ -154,6 +154,11 @@ async function runFlueWorkflow(request, entrypoint) {
         FLUE_MODE: "local",
         FLUE_CLI_TARGET: "workflow",
         FLUE_CLI_NAME: entrypoint,
+        // Flue HEAD gates one-shot IPC mode behind this explicit internal flag
+        // (in addition to FLUE_CLI_TARGET + an inherited IPC channel). Without
+        // it the generated entry serves HTTP on :3000 instead of performing the
+        // invoke/result handshake this invoker depends on.
+        FLUE_INTERNAL_CLI_IPC: "1",
       },
       stdio: ["ignore", "pipe", "pipe", "ipc"],
     });

@@ -39,13 +39,13 @@ func NewGitHubForge(token string, client *http.Client, baseURL string) *GitHubFo
 }
 
 type ghPull struct {
-	Number  int     `json:"number"`
-	State   string  `json:"state"`
-	Title   string  `json:"title"`
-	Body    string  `json:"body"`
-	HTMLURL string  `json:"html_url"`
+	Number   int     `json:"number"`
+	State    string  `json:"state"`
+	Title    string  `json:"title"`
+	Body     string  `json:"body"`
+	HTMLURL  string  `json:"html_url"`
 	MergedAt *string `json:"merged_at"`
-	Head    struct {
+	Head     struct {
 		Ref string `json:"ref"`
 	} `json:"head"`
 	Base struct {
@@ -342,6 +342,8 @@ func mergeableToStatus(m string) string {
 }
 
 // credHelper supplies the token to git over stdin-free env, never argv.
+//
+//nolint:gosec // G101: a git credential-helper script template that reads an env var, not a hardcoded credential.
 const credHelper = `!f() { echo username=x-access-token; echo "password=$LOOM_PR_GIT_PASSWORD"; }; f`
 
 func (g *GitHubForge) PushBranches(ctx context.Context, repoPath string, pushes []BranchPush) error {

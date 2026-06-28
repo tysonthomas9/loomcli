@@ -1,6 +1,6 @@
 # Makefile for loomcli project
 
-.PHONY: all build build-frontend build-all test test-integration test-all test-playground test-fleetdb-embedded test-fleetdb-supervisor test-fleetdb-ui test-fleetdb-empty-cli fleetdb-empty-up fleetdb-empty-down local-mode-frontend-dist local-mode-up local-mode-codex-up local-mode-down local-mode-logs local-mode-verify local-mode-codex-verify test-local-mode-harness test-distributed-smoke lint lint-frontend test-frontend e2e test-e2e test-e2e-api test-e2e-api-local test-e2e-real-smoke test-e2e-real-smoke-local test-e2e-real-regression test-e2e-real-regression-local test-e2e-integration test-e2e-integration-local test-e2e-integration-full clean install help frontend check check-go check-frontend gate gate-e2e gate-e2e-full hooks ensure-hooks dev dev-check dev-loom dev-vite check-loc check-loc-stale check-control-plane-paths check-no-raw-exec check-no-beads-prod test-coverage test-forkwatch test-frontend-coverage test-race-cover test-integration-race-cover gen-go-api check-go-api-staleness local-mode-webhook-verify test-e2e-github-webhook test-e2e-github-webhook-live
+.PHONY: all build build-frontend build-all test test-builtin-workflows test-integration test-all test-playground test-fleetdb-embedded test-fleetdb-supervisor test-fleetdb-ui test-fleetdb-empty-cli fleetdb-empty-up fleetdb-empty-down local-mode-frontend-dist local-mode-up local-mode-codex-up local-mode-claude-up local-mode-daytona-up local-mode-down local-mode-logs local-mode-verify local-mode-codex-verify test-local-mode-harness test-distributed-smoke lint lint-frontend test-frontend e2e test-e2e test-e2e-api test-e2e-api-local test-e2e-real-smoke test-e2e-real-smoke-local test-e2e-real-regression test-e2e-real-regression-local test-e2e-integration test-e2e-integration-local test-e2e-integration-full clean install help frontend check check-go check-frontend gate gate-e2e gate-e2e-full hooks ensure-hooks dev dev-check dev-loom dev-vite check-loc check-loc-stale check-control-plane-paths check-no-raw-exec check-no-beads-prod test-coverage test-forkwatch test-frontend-coverage test-race-cover test-integration-race-cover gen-go-api check-go-api-staleness local-mode-webhook-verify test-e2e-github-webhook test-e2e-github-webhook-live
 
 # Default target
 all: build
@@ -12,12 +12,16 @@ LOCAL_MODE_COMPOSE_UP_FLAGS ?= --build
 LOCAL_MODE_FLEETDB_IMAGE ?= $(LOCAL_MODE_COMPOSE_PROJECT)-fleet-db:latest
 LOCAL_MODE_LOOM_IMAGE ?= $(LOCAL_MODE_COMPOSE_PROJECT)-loom:latest
 LOCAL_MODE_LOOM_CODEX_IMAGE ?= $(LOCAL_MODE_COMPOSE_PROJECT)-loom-codex:latest
+LOCAL_MODE_LOOM_CLAUDE_IMAGE ?= $(LOCAL_MODE_COMPOSE_PROJECT)-loom-claude:latest
 LOCAL_MODE_COMPOSE_EXTRA := $(foreach file,$(LOCAL_MODE_COMPOSE_FILES),-f $(file))
 LOCAL_MODE_COMPOSE_ARGS = -p $(LOCAL_MODE_COMPOSE_PROJECT) -f test/local-mode/docker-compose.yml $(LOCAL_MODE_COMPOSE_EXTRA)
 LOCAL_MODE_CODEX_COMPOSE_ARGS = -p $(LOCAL_MODE_COMPOSE_PROJECT) -f test/local-mode/docker-compose.yml -f test/local-mode/docker-compose.codex.yml $(LOCAL_MODE_COMPOSE_EXTRA)
+LOCAL_MODE_CLAUDE_COMPOSE_ARGS = -p $(LOCAL_MODE_COMPOSE_PROJECT) -f test/local-mode/docker-compose.yml -f test/local-mode/docker-compose.claude.yml $(LOCAL_MODE_COMPOSE_EXTRA)
+LOCAL_MODE_DAYTONA_COMPOSE_ARGS = -p $(LOCAL_MODE_COMPOSE_PROJECT) -f test/local-mode/docker-compose.yml -f test/local-mode/docker-compose.daytona.yml $(LOCAL_MODE_COMPOSE_EXTRA)
 export LOCAL_MODE_FLEETDB_IMAGE
 export LOCAL_MODE_LOOM_IMAGE
 export LOCAL_MODE_LOOM_CODEX_IMAGE
+export LOCAL_MODE_LOOM_CLAUDE_IMAGE
 LOCAL_MODE_COMPOSE_SELECT = \
 	if [ "$(strip $(LOCAL_MODE_COMPOSE))" != "" ]; then \
 	  compose="$(LOCAL_MODE_COMPOSE)"; \
@@ -51,6 +55,13 @@ test-integration:
 test-all:
 	@echo "Running all tests..."
 	@TEST_TAGS=integration,e2e TEST_COVER=1 ./scripts/test.sh
+
+# Run the builtin workflow node unit tests (internal/workflows/builtin/*.test.mjs).
+# Deliberately NOT folded into check-go (that gate is Go-only + decoupling-smoke
+# tested); run it standalone here and in the builtin-bundle-pin CI job. Needs ../flue.
+test-builtin-workflows:
+	@echo "Running builtin workflow node tests..."
+	@./scripts/test-builtin-workflows.sh
 
 # Daemon-lifecycle failure-mode harness (crash/hang/slow backends + a
 # happy-path scaffold). Requires `loom serve` running on
@@ -166,6 +177,22 @@ local-mode-codex-up: local-mode-frontend-dist
 	$(LOCAL_MODE_COMPOSE_SELECT); \
 	$$compose $(LOCAL_MODE_CODEX_COMPOSE_ARGS) up $(LOCAL_MODE_COMPOSE_UP_FLAGS)
 
+local-mode-claude-up: local-mode-frontend-dist
+	@echo "Starting local-mode Claude dogfood stack ($(LOCAL_MODE_COMPOSE_PROJECT)) on http://localhost:$${LOCAL_MODE_UI_PORT:-8283}/ws/LOCALMODE/kanban..."
+	@set -e; \
+	$(LOCAL_MODE_COMPOSE_SELECT); \
+	$$compose $(LOCAL_MODE_CLAUDE_COMPOSE_ARGS) up $(LOCAL_MODE_COMPOSE_UP_FLAGS)
+
+# Daemon TS leaf routed to Daytona: a claimed task runs inside a real Daytona
+# sandbox. Requires DAYTONA_API_KEY on the host; DAYTONA_REPO_URL must be a
+# network-reachable git URL. e.g.:
+#   DAYTONA_API_KEY=... LOOM_DAEMON_LEAF=ts make local-mode-daytona-up
+local-mode-daytona-up: local-mode-frontend-dist
+	@echo "Starting local-mode Daytona dogfood stack ($(LOCAL_MODE_COMPOSE_PROJECT)) on http://localhost:$${LOCAL_MODE_UI_PORT:-8283}/ws/LOCALMODE/kanban..."
+	@set -e; \
+	$(LOCAL_MODE_COMPOSE_SELECT); \
+	$$compose $(LOCAL_MODE_DAYTONA_COMPOSE_ARGS) up $(LOCAL_MODE_COMPOSE_UP_FLAGS)
+
 local-mode-down:
 	@set -e; \
 	$(LOCAL_MODE_COMPOSE_SELECT); \
@@ -178,6 +205,14 @@ local-mode-logs:
 
 local-mode-verify:
 	@test/local-mode/verify-local-mode.sh
+
+# Verify role-based task routing for UI-registered plan/task agents against a
+# running stack: seeds a no-design task (must go to the plan agent) and a
+# designed task (must go to the task agent), exercises the UI POST /agents
+# endpoint, and asserts the claims. Pairs with `LOOM_DAEMON_LEAF=ts make
+# local-mode-codex-up` to prove UI agent creation maps to the TS execution path.
+local-mode-routing-verify:
+	@python3 test/local-mode/verify-agent-routing.py
 
 # Real-stack E2E for the trigger-driven GitHub webhook path: signs a
 # pull_request.opened delivery, asserts the durable TriggerEvent/Delivery/
@@ -337,6 +372,14 @@ test-e2e-github-webhook-live:
 	@echo "Running live GitHub webhook e2e against $$LOOM_E2E_GITHUB_REPO..."
 	@GOCACHE=$${GOCACHE:-/tmp/go-build-cache} go test -count=1 -tags e2e -run TestE2E_GitHubWebhookRunsDriverAgainstLiveGitHubPR ./internal/webui/handlers/webhooks -timeout 5m
 
+# Compile + run the real GitHub stacked-PR publisher e2e (initial publish / re-run /
+# drop-a-unit / reorder). The test is //go:build e2e tagged, so this target is also the
+# compile guard against bit-rot. Skips unless gated:
+#   LOOM_STACK_E2E=1 LOOM_STACK_E2E_REPO=owner/name (+ gh auth) make test-e2e-stackpublish
+test-e2e-stackpublish:
+	@echo "Running stacked-PR publisher e2e (skips unless LOOM_STACK_E2E is set)..."
+	@GOCACHE=$${GOCACHE:-/tmp/go-build-cache} go test -count=1 -tags e2e -run TestE2EStackPublisher ./internal/stackpublish -timeout 10m
+
 # Run the real Playwright smoke suite: browser + API contracts against FleetDB-backed loom serve.
 test-e2e-real-smoke:
 	@echo "Running real Playwright smoke tests (self-contained)..."
@@ -449,7 +492,7 @@ check-go:
 	@echo "=== [11/13] Go: generated API staleness ==="
 	@./scripts/check-go-api-staleness.sh
 	@echo "=== [12/13] Go: test with race detector ==="
-	@go test -p 1 -race -covermode=atomic -coverprofile=/tmp/loom.coverage.out -timeout 15m ./...
+	@./scripts/with-clean-loom-env.sh go test -p 1 -race -covermode=atomic -coverprofile=/tmp/loom.coverage.out -timeout 15m ./...
 	@echo "=== [13/13] Go: coverage threshold ==="
 	@COVERAGE_THRESHOLD=60 ./scripts/check-coverage.sh
 	@echo "=== Go quality gates PASSED ==="

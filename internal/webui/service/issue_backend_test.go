@@ -829,9 +829,9 @@ func TestCreateIssue_Backend_Success_ReturnsIssueShape(t *testing.T) {
 			IssueData: backend.IssueData{
 				ID: "loom-x1", Title: "New", Status: "open", Priority: 2,
 				IssueType: "task", SourceRepo: "repo-a", CreatedAt: now, UpdatedAt: now,
+				Notes: "note",
 			},
 			Description: "body",
-			Notes:       "note",
 		},
 	}
 	svc := newServiceWithFake(fb)

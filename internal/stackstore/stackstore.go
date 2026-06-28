@@ -51,7 +51,7 @@ var (
 // on-disk shape ------------------------------------------------------------
 
 type stacksFile struct {
-	Version    int                        `json:"version"`
+	Version    int                         `json:"version"`
 	Workspaces map[string]*workspaceStacks `json:"workspaces,omitempty"`
 }
 

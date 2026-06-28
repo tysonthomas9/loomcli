@@ -6,6 +6,8 @@ import (
 	"sort"
 	"sync"
 	"testing"
+
+	"github.com/tysonthomas9/loomcli/internal/testutil"
 )
 
 func TestSetActiveSessionRuntimeEnv(t *testing.T) {
@@ -313,6 +315,8 @@ func TestResolveNotifyToken_EnvVar(t *testing.T) {
 }
 
 func TestResolveNotifyToken_FileOnDisk(t *testing.T) {
+	testutil.ClearLoomEnv(t)
+
 	// Ensure LOOM_NOTIFY_TOKEN env var is not set.
 	t.Setenv("LOOM_NOTIFY_TOKEN", "")
 
@@ -345,6 +349,8 @@ func TestResolveNotifyToken_FileOnDisk(t *testing.T) {
 }
 
 func TestResolveNotifyToken_BothFail(t *testing.T) {
+	testutil.ClearLoomEnv(t)
+
 	// No env var.
 	t.Setenv("LOOM_NOTIFY_TOKEN", "")
 	t.Setenv("LOOM_WORKSPACE", "TEST")

@@ -41,8 +41,14 @@ import (
 //     executor's settleDisownedFinish acknowledges the authoritative
 //     suspension instead of erroring (the AW12 hardening this smoke pins).
 const awaitSmokeReturnResultSource = `import { createLoomDriverClient, isWorkflowSuspended } from '@loom/sdk/driver';
+import { defineAgent, defineWorkflow } from '@flue/runtime';
 
-export async function run(ctx) {
+export default defineWorkflow({
+  agent: defineAgent(() => ({ model: false })),
+  run: () => run({ payload: JSON.parse(process.env.LOOM_FLUE_INVOKE_PAYLOAD || '{}') }),
+});
+
+async function run(ctx) {
   const loom = createLoomDriverClient({ input: ctx.payload || {} });
   let res;
   try {
@@ -61,8 +67,14 @@ export async function run(ctx) {
 `
 
 const awaitSmokePropagateSource = `import { createLoomDriverClient } from '@loom/sdk/driver';
+import { defineAgent, defineWorkflow } from '@flue/runtime';
 
-export async function run(ctx) {
+export default defineWorkflow({
+  agent: defineAgent(() => ({ model: false })),
+  run: () => run({ payload: JSON.parse(process.env.LOOM_FLUE_INVOKE_PAYLOAD || '{}') }),
+});
+
+async function run(ctx) {
   const loom = createLoomDriverClient({ input: ctx.payload || {} });
   const res = await loom.events.await({
     pattern: 'approval:acme/widgets#1@shaA',

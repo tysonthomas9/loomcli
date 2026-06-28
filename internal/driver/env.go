@@ -80,7 +80,7 @@ var subprocessEnvSensitiveFragments = []string{
 // in scopedSubprocessBaseEnv (which treats every one of these as sensitive) so
 // a credential never leaks into a remote sandbox.
 var trustedLocalProviderCredentials = map[string]struct{}{
-	"ANTHROPIC_API_KEY":              {},
+	"ANTHROPIC_API_KEY": {},
 	// claude-code's long-lived OAuth token (`claude setup-token`); the headless
 	// equivalent of a ~/.claude login, so the local runner must inherit it too.
 	"CLAUDE_CODE_OAUTH_TOKEN":        {},

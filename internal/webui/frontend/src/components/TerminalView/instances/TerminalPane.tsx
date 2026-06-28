@@ -90,6 +90,7 @@ export function TerminalPane({
             hasConnected={hasConnected}
             onReconnect={onReconnect}
             autoReconnect={autoReconnect}
+            isAutoReconnecting={reconnectState === "reconnecting"}
           />
           <ReconnectingOverlay
             state={reconnectState}

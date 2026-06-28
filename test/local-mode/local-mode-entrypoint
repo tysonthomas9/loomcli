@@ -14,6 +14,10 @@ case "$AGENT_BACKEND" in
     DEFAULT_PLAN_AGENT="codex-planner"
     DEFAULT_CODE_AGENT="codex-coder"
     ;;
+  claude)
+    DEFAULT_PLAN_AGENT="claude-planner"
+    DEFAULT_CODE_AGENT="claude-coder"
+    ;;
   *)
     DEFAULT_PLAN_AGENT="local-planner"
     DEFAULT_CODE_AGENT="local-coder"
@@ -173,7 +177,7 @@ register_agents() {
   loom daemon profile set max_agents 2
   loom daemon profile set startup_timeout 30
 
-  if [ "$AGENT_BACKEND" = "codex" ]; then
+  if [ "$AGENT_BACKEND" != "localdogfood" ]; then
     [ "$PLAN_AGENT" = "local-planner" ] || loom agentdef remove local-planner >/dev/null 2>&1 || true
     [ "$CODE_AGENT" = "local-coder" ] || loom agentdef remove local-coder >/dev/null 2>&1 || true
   fi
@@ -206,6 +210,48 @@ prepare_codex_credentials() {
     return 1
   fi
   codex --version || true
+}
+
+prepare_claude_credentials() {
+  if [ "$AGENT_BACKEND" != "claude" ]; then
+    return 0
+  fi
+  if ! command -v claude >/dev/null 2>&1; then
+    echo "[local-mode] FATAL: claude binary is not installed in the image" >&2
+    return 1
+  fi
+  mkdir -p /root/.claude
+  # Claude Code stores its OAuth token in ~/.claude/.credentials.json. Copy it into
+  # the container's writable HOME so token refresh writes don't hit the RO mount.
+  if [ -f /claude-host/.credentials.json ]; then
+    cp /claude-host/.credentials.json /root/.claude/.credentials.json
+    chmod 600 /root/.claude/.credentials.json
+  fi
+  # Carry over model/permission settings if the host has them.
+  if [ -f /claude-host/settings.json ]; then
+    cp /claude-host/settings.json /root/.claude/settings.json
+  fi
+  if [ ! -s /root/.claude/.credentials.json ]; then
+    echo "[local-mode] FATAL: claude auth missing. Mount local CLAUDE_HOME at /claude-host or set LOCAL_MODE_CLAUDE_HOME (needs ~/.claude/.credentials.json)." >&2
+    return 1
+  fi
+  claude --version || true
+}
+
+prepare_daytona_credentials() {
+  # When the daemon leaf is routed to the Daytona runner, the runner resolves its
+  # API key via loom's runtime-credential API (LOOM_FLEET_DB_URL) or a credential
+  # file. Write the host-provided DAYTONA_API_KEY to a file and point the runner at
+  # it; the daemon subprocess inherits DAYTONA_CREDENTIAL_FILE from this shell.
+  if [ -z "${DAYTONA_API_KEY:-}" ]; then
+    return 0
+  fi
+  key_file="${LOOM_CONFIG_DIR:-/root/.loom}/daytona-key"
+  mkdir -p "$(dirname "$key_file")"
+  printf '%s' "$DAYTONA_API_KEY" > "$key_file"
+  chmod 600 "$key_file"
+  export DAYTONA_CREDENTIAL_FILE="$key_file"
+  echo "[local-mode] daytona credential file staged at ${key_file}"
 }
 
 issues_api() {
@@ -448,6 +494,8 @@ git config --global --add safe.directory "*" >/dev/null 2>&1 || true
 
 wait_for_url "${LOOM_FLEET_DB_URL:-http://fleet-db:8080}/healthz" "fleet-db"
 prepare_codex_credentials
+prepare_claude_credentials
+prepare_daytona_credentials
 create_source_repo
 create_workspace
 create_agent_worktree "$PLAN_AGENT"

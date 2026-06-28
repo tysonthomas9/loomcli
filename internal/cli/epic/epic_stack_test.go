@@ -168,6 +168,12 @@ func TestProjectEpicStack_BuildsForestAndIsIdempotent(t *testing.T) {
 	if byTask["T-A"].BaseTaskID != "" || byTask["T-B"].BaseTaskID != "T-A" || byTask["T-C"].BaseTaskID != "T-B" {
 		t.Fatalf("lineage wrong: A=%q B=%q C=%q", byTask["T-A"].BaseTaskID, byTask["T-B"].BaseTaskID, byTask["T-C"].BaseTaskID)
 	}
+	if proj.Lineage["T-A"].BaseRef != root || proj.Lineage["T-A"].OutputBranch != byTask["T-A"].OutputBranch {
+		t.Fatalf("root lineage = %+v, want base %q output %q", proj.Lineage["T-A"], root, byTask["T-A"].OutputBranch)
+	}
+	if proj.Lineage["T-B"].BaseRef != byTask["T-A"].OutputBranch || proj.Lineage["T-B"].OutputBranch != byTask["T-B"].OutputBranch {
+		t.Fatalf("dependent lineage = %+v, want base %q output %q", proj.Lineage["T-B"], byTask["T-A"].OutputBranch, byTask["T-B"].OutputBranch)
+	}
 	for _, n := range nodes {
 		if n.OutputBranch == "" {
 			t.Fatalf("node %s has no output branch", n.TaskID)

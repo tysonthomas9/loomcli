@@ -1366,6 +1366,32 @@ describe("App", () => {
     );
   });
 
+  describe("StaleDataBanner", () => {
+    it("renders on issue-based views when workspace data is stale", () => {
+      mockStoreState = createMockUseIssuesReturn({
+        showStaleBanner: true,
+        disconnectedSince: Date.now() - 10_000,
+      });
+
+      render(<App />);
+
+      expect(screen.getByText(/data may be stale/)).toBeInTheDocument();
+    });
+
+    it("does not render on terminal view when workspace data is stale", async () => {
+      mockUseRouteView.mockReturnValue(createViewStateReturn("terminal"));
+      mockStoreState = createMockUseIssuesReturn({
+        showStaleBanner: true,
+        disconnectedSince: Date.now() - 10_000,
+      });
+
+      render(<App />);
+
+      expect(await screen.findByTestId("terminal-view")).toBeInTheDocument();
+      expect(screen.queryByText(/data may be stale/)).not.toBeInTheDocument();
+    });
+  });
+
   describe("AppLayout integration", () => {
     it("renders with Aether title in header", () => {
       const mockReturn = createMockUseIssuesReturn({});

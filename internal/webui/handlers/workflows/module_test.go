@@ -392,7 +392,23 @@ EOF
 	if err := os.WriteFile(filepath.Join(sdkRoot, "package.json"), []byte(`{"name":"@loom/sdk"}`+"\n"), 0o644); err != nil {
 		t.Fatalf("write fake sdk package: %v", err)
 	}
+	runtimeRoot := filepath.Join(dir, "runtime")
+	for _, dep := range []string{
+		runtimeRoot,
+		filepath.Join(runtimeRoot, "node_modules", "@hono", "node-server"),
+		filepath.Join(runtimeRoot, "node_modules", "hono"),
+	} {
+		if err := os.MkdirAll(dep, 0o755); err != nil {
+			t.Fatalf("create fake runtime dependency %s: %v", dep, err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(runtimeRoot, "package.json"), []byte(`{"name":"@flue/runtime"}`+"\n"), 0o644); err != nil {
+		t.Fatalf("write fake runtime package: %v", err)
+	}
 	t.Setenv("LOOM_REAL_FLUE_CMD", script)
 	t.Setenv("LOOM_REAL_FLUE_CMD_JSON", "")
 	t.Setenv("LOOM_SDK_ROOT", sdkRoot)
+	t.Setenv("LOOM_FLUE_RUNTIME_ROOT", runtimeRoot)
+	t.Setenv("FLUE_RUNTIME_ROOT", "")
+	t.Setenv("FLUE_REPO", "")
 }

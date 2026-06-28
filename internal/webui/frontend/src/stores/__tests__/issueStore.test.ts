@@ -1352,18 +1352,30 @@ describe("issueStore", () => {
       expect(store.getState().showStaleBanner).toBe(false);
     });
 
-    it("clears stale banner when reconnect passes through connecting", () => {
+    it("clears stale banner when reconnecting passes through connecting", () => {
+      const refetchSpy = vi
+        .spyOn(store.getState(), "refetch")
+        .mockResolvedValue();
+      const toastFn = vi.fn();
+      store.getState().configure({ onToast: toastFn });
+
       store.getState().setConnectionState("reconnecting");
       vi.advanceTimersByTime(5000);
       expect(store.getState().showStaleBanner).toBe(true);
       expect(store.getState().disconnectedSince).not.toBeNull();
 
       store.getState().setConnectionState("connecting");
-      store.getState().setConnectionState("connected");
+      expect(store.getState().showStaleBanner).toBe(true);
 
+      store.getState().setConnectionState("connected");
       expect(store.getState().showStaleBanner).toBe(false);
       expect(store.getState().connectionLost).toBe(false);
       expect(store.getState().disconnectedSince).toBeNull();
+      expect(refetchSpy).toHaveBeenCalled();
+      expect(toastFn).toHaveBeenCalledWith("Connection restored.", {
+        type: "info",
+        duration: 3000,
+      });
     });
 
     it("sets connectionLost when reconnectAttempts >= 10", () => {

@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/tysonthomas9/loomcli/internal/testutil"
 )
 
 func TestGeneratePlanningPrompt(t *testing.T) {
@@ -1161,6 +1163,8 @@ func TestReadOnlyPreamble(t *testing.T) {
 }
 
 func TestResolveActiveWorkspace_NoConfig(t *testing.T) {
+	testutil.ClearLoomEnv(t)
+
 	// Create a temp empty directory and point LOOM_CONFIG_DIR to it
 	tmpDir := t.TempDir()
 	configDir := filepath.Join(tmpDir, "loomcfg")

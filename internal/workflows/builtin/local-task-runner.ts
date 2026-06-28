@@ -2,6 +2,37 @@ import { execFile } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { defineAgent, defineWorkflow } from "@flue/runtime";
+
+// Flue HEAD (durable-streams) requires every workflow module to default-export a
+// defineWorkflow() definition; a bare `export function run` no longer normalizes.
+// This runner is not an LLM agent (it execFiles a backend CLI), so the bound
+// agent is a credential-free stub (model: false, no harness usage). The request
+// arrives via env — the task-runner host-bridge sets LOOM_TASK_RUN_REQUEST_JSON
+// (driver/task_bridge.go) — which requestPayload() already reads, so the inner
+// run() body is unchanged.
+export default defineWorkflow({
+  agent: defineAgent(() => ({ model: false })),
+  run: async () => toJsonResult(await run({ payload: builtinInvokePayload() })),
+});
+
+function builtinInvokePayload() {
+  const raw = process.env.LOOM_FLUE_INVOKE_PAYLOAD || process.env.LOOM_TASK_RUN_REQUEST_JSON || "{}";
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return {};
+  }
+}
+
+// Flue HEAD validates the workflow return value with a strict JSON check that
+// rejects undefined/function/symbol/bigint (json-snapshot.cloneJsonSerializable);
+// the old runtime instead JSON-encoded the result for IPC transport, silently
+// dropping undefined. Round-trip through JSON to restore that behavior so optional
+// result fields left undefined never throw.
+function toJsonResult(value) {
+  return value === undefined ? null : JSON.parse(JSON.stringify(value));
+}
 
 // Local task runner: runs the user-selected backend CLI over a prepared worktree.
 //
@@ -27,7 +58,7 @@ const SUPPORTED = {
 };
 
 // STREAM_JSON_BACKENDS get first-class stream-json -> canonical transcript_entries.
-const STREAM_JSON_BACKENDS = new Set(["codex", "claude", "cursor", "opencode"]);
+const STREAM_JSON_BACKENDS = new Set(["codex", "claude", "cursor", "opencode", "gemini"]);
 
 export async function run(ctx = {}) {
   const request = await requestPayload(ctx);
@@ -91,7 +122,14 @@ export async function run(ctx = {}) {
   }
 
   const task = await loadTask(request, logs);
-  const prompt = buildPrompt(request, task, execWorktree);
+  // LOOM_TASK_RUN_PROMPT lets a host that already composed the agent prompt (the
+  // daemon execution leaf, which builds role-specific planning/task prompts) deliver
+  // it verbatim, instead of this runner's generic buildPrompt — so routing the daemon
+  // leaf through this runner (Phase U) preserves the leaf's exact prompt.
+  const promptOverride = process.env.LOOM_TASK_RUN_PROMPT;
+  const prompt = typeof promptOverride === "string" && promptOverride.trim() !== ""
+    ? promptOverride
+    : buildPrompt(request, task, execWorktree);
   const args = backendArgs(backend, execWorktree, prompt);
   const usesStdinPrompt = backendUsesStdinPrompt(backend);
 
@@ -109,6 +147,7 @@ export async function run(ctx = {}) {
       result = await execBackend(binary, args, {
         cwd: execWorktree,
         input: usesStdinPrompt ? prompt : undefined,
+        live: true,
       });
     } catch (error) {
       return failed("local_agent_failed", `failed to spawn ${backend} CLI: ${errorMessage(error)}`, {
@@ -132,7 +171,7 @@ export async function run(ctx = {}) {
       logs.push("stderr:\n" + textTail(stderr, 2000));
     }
 
-    patchInfo = await capturePatch(execWorktree);
+    patchInfo = await capturePatch(execWorktree, baseRef);
 
     // Stacked delivery: commit in place and push the canonical branch on the
     // predecessor base. No PR is opened here — the post-drain reconcile does it.
@@ -206,6 +245,25 @@ export async function run(ctx = {}) {
   // Tool outputs now persist (the `output` field) and the agent inherits host
   // secrets — scrub known secret values that may have been echoed into output.
   transcriptEntries = redactTranscriptSecrets(transcriptEntries);
+  // Lead with a canonical session_meta entry. The stream-json parse paths emit
+  // text/tool_use/tool_result + a terminal result, but not session_meta (only the
+  // minimal fallback did) — and the canonical transcript vocabulary (aether #5d)
+  // requires a session_meta head. The daemon TS leaf surfaces this transcript
+  // verbatim, so adding it here fixes both the leaf and driver transcripts.
+  transcriptEntries = ensureSessionMetaLead(transcriptEntries, backend, taskId || taskRunId);
+  // Surface the token usage the parser computed (embedded in the terminal result
+  // entry) as top-level fields so the Go host-bridge ingests it into the fleet-db
+  // TaskRun — without this, local-CLI runs report zero usage while daytona does not.
+  const taskUsage = taskUsageFromEntries(transcriptEntries);
+  // Cost is taken ONLY from what the backend CLI itself reports — never estimated
+  // from a price table. Verified per backend (real-CLI capture, 2026-06-23):
+  //   claude   -> total_cost_usd (model-accurate: Opus vs Sonnet, cache tiers, web)
+  //   opencode -> per-step `cost` (real when metered; a legitimate 0 on subscription)
+  //   codex    -> NO cost, NOT even a model in `exec --json` output
+  //   cursor   -> NO cost; model is proprietary ("Composer"), no public rate
+  //   gemini   -> NO cost (usageMetadata tokens only)
+  // For the backends that expose no cost we leave estimated_cost_usd unset (unknown)
+  // rather than fabricate a token x rate guess for an unknown/unpriceable model.
   const streamFailure = streamFailureMessage(backend, stdout);
 
   const metadata = stringMetadata({
@@ -263,6 +321,7 @@ export async function run(ctx = {}) {
       errorMessage: failureMessage,
       logs: logs.join("\n") + "\n",
       logsRef: "logs://" + taskRunId,
+      ...taskUsage,
       transcript_entries: transcriptEntries,
       patch: patchInfo.patch,
       // base_ref lets the driver host-bridge patch-back apply this patch to the
@@ -278,6 +337,7 @@ export async function run(ctx = {}) {
     exitCode: 0,
     logs: logs.join("\n") + "\n",
     logsRef: "logs://" + taskRunId,
+    ...taskUsage,
     transcript_entries: transcriptEntries,
     runtimeMetadata: metadata,
   };
@@ -356,6 +416,33 @@ function dirExists(filePath) {
   }
 }
 
+// DefaultMaxBudgetUSD mirrors internal/cli/backends/backend_claude.go.
+const DEFAULT_MAX_BUDGET_USD = 50.0;
+
+// resolveMaxBudgetUSD mirrors backend_claude.go resolveMaxBudgetUSD: read
+// LOOM_MAX_BUDGET_USD (default $50.00); "0" opts out (returns ""); invalid or
+// negative values fall back to the default. Returns a "%.2f"-formatted string.
+function resolveMaxBudgetUSD() {
+  const raw = stringValue(process.env.LOOM_MAX_BUDGET_USD);
+  if (!raw) {
+    return DEFAULT_MAX_BUDGET_USD.toFixed(2);
+  }
+  const value = Number(raw);
+  if (!Number.isFinite(value) || value < 0) {
+    return DEFAULT_MAX_BUDGET_USD.toFixed(2);
+  }
+  if (value === 0) {
+    return ""; // explicit opt-out
+  }
+  return value.toFixed(2);
+}
+
+// resolveAgentEffort mirrors backend_claude.go resolveAgentEffort:
+// LOOM_AGENT_EFFORT, then LOOM_CLAUDE_EFFORT.
+function resolveAgentEffort() {
+  return stringValue(process.env.LOOM_AGENT_EFFORT) || stringValue(process.env.LOOM_CLAUDE_EFFORT);
+}
+
 // backendArgs mirrors the non-interactive argument lists built in
 // internal/cli/backends/backend_<backend>.go. Keep these in sync with those
 // builders so the local runner invokes each CLI exactly as loom's agent path does.
@@ -367,9 +454,23 @@ export function backendArgs(backend, worktree, prompt) {
       // positionally because it runs under a PTY; without a PTY codex blocks on
       // an open stdin pipe, so we deliver the prompt over stdin instead.
       return ["exec", "--json", "--dangerously-bypass-approvals-and-sandbox", "-"];
-    case "claude":
-      // buildClaudeNonInteractiveArgs: -p --verbose --output-format stream-json --dangerously-skip-permissions; prompt last.
-      return ["-p", "--verbose", "--output-format", "stream-json", "--dangerously-skip-permissions", prompt];
+    case "claude": {
+      // buildClaudeNonInteractiveArgs: -p --verbose --output-format stream-json
+      // --dangerously-skip-permissions [--max-budget-usd N] [--effort E]; prompt last.
+      // (--resume is owned by the durability/resume path and is added there once
+      // session carry-forward exists — it is not part of a cold local run.)
+      const claudeArgs = ["-p", "--verbose", "--output-format", "stream-json", "--dangerously-skip-permissions"];
+      const budget = resolveMaxBudgetUSD();
+      if (budget) {
+        claudeArgs.push("--max-budget-usd", budget);
+      }
+      const effort = resolveAgentEffort();
+      if (effort) {
+        claudeArgs.push("--effort", effort);
+      }
+      claudeArgs.push(prompt);
+      return claudeArgs;
+    }
     case "gemini":
       // defaultGeminiNonInteractiveInvoker: --approval-mode=yolo -p <prompt> -o stream-json.
       return ["--approval-mode=yolo", "-p", prompt, "-o", "stream-json"];
@@ -431,6 +532,14 @@ async function execBackend(binary, args, options) {
         resolve({ code, stdout: String(stdout || ""), stderr: String(stderr || "") });
       },
     );
+    if (options.live === true && booleanValue(process.env.LOOM_TASK_RUNNER_STREAM_STDERR)) {
+      // Tee the backend's live output to OUR stderr so, when the daemon leaf runs this
+      // runner (Phase U), the supervisor's output-timeout watchdog — which stats the
+      // agent log mtime — sees per-turn activity, exactly as the Go leaf's wrapper PTY
+      // path did (internal/cli/agent/plan.go). stdout stays clean for the result line.
+      if (child.stdout) child.stdout.on("data", (chunk) => process.stderr.write(chunk));
+      if (child.stderr) child.stderr.on("data", (chunk) => process.stderr.write(chunk));
+    }
     // Always close the child's stdin. Backends that take the prompt over stdin
     // (opencode, headless codex) receive it here; positional-prompt backends
     // (claude, gemini, cursor) get an immediate EOF so they never block reading
@@ -596,9 +705,108 @@ export function scrubToken(text, ...tokens) {
   return out.replace(/x-access-token:[^@\s]+@/g, "x-access-token:***@");
 }
 
-// redactTranscriptSecrets masks known secret env values that the agent could
-// have echoed into tool output/text — now persisted via the `output` field —
-// before the transcript is written.
+// shannonEntropy is the byte-frequency Shannon entropy of s (bits/symbol), ported
+// verbatim from internal/sessions/redact/redact.go. The secret segments it scores
+// are ASCII by construction, so per-char iteration matches Go's per-byte.
+function shannonEntropy(s) {
+  if (!s) {
+    return 0;
+  }
+  const freq = new Map();
+  for (let i = 0; i < s.length; i++) {
+    const ch = s[i];
+    freq.set(ch, (freq.get(ch) || 0) + 1);
+  }
+  let entropy = 0;
+  for (const count of freq.values()) {
+    const p = count / s.length;
+    entropy -= p * Math.log2(p);
+  }
+  return entropy;
+}
+
+// SECRET_PATTERNS is a curated, high-precision subset of the gitleaks default
+// ruleset the Go redactor applies. These prefixed shapes have near-zero false
+// positives and catch structured secrets whose entropy is below threshold (a PEM
+// block, or a JWT broken into low-entropy dot-separated segments). The full
+// 180-rule gitleaks set is a follow-up; the canonical Go redactor (gitleaks +
+// entropy) still runs on the native-transcript path.
+const SECRET_PATTERNS = [
+  /-----BEGIN[A-Z ]*PRIVATE KEY-----[\s\S]*?-----END[A-Z ]*PRIVATE KEY-----/g, // PEM private keys
+  /AKIA[0-9A-Z]{16}/g, // AWS access key id
+  /gh[pousr]_[A-Za-z0-9]{30,}/g, // GitHub tokens (ghp_/gho_/ghu_/ghs_/ghr_)
+  /github_pat_[A-Za-z0-9_]{60,}/g, // GitHub fine-grained PAT
+  /sk-(?:ant-)?[A-Za-z0-9_-]{20,}/g, // OpenAI / Anthropic API keys
+  /AIza[0-9A-Za-z_-]{35}/g, // Google API key
+  /xox[baprs]-[A-Za-z0-9-]{10,}/g, // Slack token
+  /eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}/g, // JWT
+];
+
+// redactSecretsInText replaces secrets in text with "REDACTED", flagging a
+// substring if EITHER its Shannon entropy exceeds 4.5 OR it matches a known secret
+// shape — the layered approach of internal/sessions/redact/redact.go.
+export function redactSecretsInText(text) {
+  const s = text == null ? "" : String(text);
+  if (!s) {
+    return s;
+  }
+  const regions = [];
+  // Entropy layer: high-entropy [A-Za-z0-9+_=-]{10,} segments (/ excluded so file
+  // paths are not matched as one token).
+  const segment = /[A-Za-z0-9+_=-]{10,}/g;
+  let m;
+  while ((m = segment.exec(s)) !== null) {
+    let start = m.index;
+    const end = start + m[0].length;
+    // Don't consume a character that is part of a JSON escape sequence (e.g. the
+    // 'n' in "\n"), which would leave a dangling backslash before "REDACTED".
+    if (start > 0 && s[start - 1] === "\\" && "ntrbfu\"\\/".includes(s[start])) {
+      start += 1;
+      if (end - start < 10) {
+        continue;
+      }
+    }
+    if (shannonEntropy(s.slice(start, end)) > 4.5) {
+      regions.push([start, end]);
+    }
+  }
+  // Pattern layer: known high-precision secret shapes.
+  for (const pattern of SECRET_PATTERNS) {
+    pattern.lastIndex = 0;
+    let pm;
+    while ((pm = pattern.exec(s)) !== null) {
+      regions.push([pm.index, pm.index + pm[0].length]);
+      if (pm[0].length === 0) {
+        pattern.lastIndex += 1;
+      }
+    }
+  }
+  if (!regions.length) {
+    return s;
+  }
+  regions.sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+  const merged = [];
+  for (const [start, end] of regions) {
+    const last = merged[merged.length - 1];
+    if (last && start <= last[1]) {
+      last[1] = Math.max(last[1], end);
+    } else {
+      merged.push([start, end]);
+    }
+  }
+  let out = "";
+  let cursor = 0;
+  for (const [start, end] of merged) {
+    out += s.slice(cursor, start) + "REDACTED";
+    cursor = end;
+  }
+  return out + s.slice(cursor);
+}
+
+// redactTranscriptSecrets scrubs secrets the agent could have echoed into tool
+// output/text — now persisted via the `output` field — before the transcript is
+// written: first the exact values of known secret env vars, then entropy/pattern
+// detection for secrets that are NOT in that env allowlist.
 function redactTranscriptSecrets(entries, env = process.env) {
   const names = [
     "GITHUB_TOKEN", "GH_TOKEN", "LOOM_PR_GIT_PASSWORD",
@@ -613,15 +821,13 @@ function redactTranscriptSecrets(entries, env = process.env) {
       secrets.push(String(value));
     }
   }
-  if (!secrets.length) {
-    return entries;
-  }
+  const redact = (value) => redactSecretsInText(secrets.length ? scrubToken(value, ...secrets) : value);
   for (const entry of entries) {
     if (entry.text) {
-      entry.text = scrubToken(entry.text, ...secrets);
+      entry.text = redact(entry.text);
     }
     if (entry.output) {
-      entry.output = scrubToken(entry.output, ...secrets);
+      entry.output = redact(entry.output);
     }
   }
   return entries;
@@ -729,17 +935,23 @@ async function gitHead(worktree) {
 }
 
 // capturePatch records untracked files (git add -N) and returns a binary diff
-// plus diffstat-derived counts, mirroring the Daytona runner's patch capture.
-async function capturePatch(worktree) {
+// plus diffstat-derived counts, mirroring the Daytona runner's patch capture. It
+// diffs against `base` (when known) rather than HEAD/the index, so a change the
+// agent COMMITTED in this worktree is captured too — not just uncommitted working-
+// tree edits. Without a base it falls back to the working-tree diff. This keeps the
+// captured patch complete whether the agent committed (the daemon TS leaf's prompt
+// asks it to) or left the change in the working tree.
+async function capturePatch(worktree, base) {
   const head = await gitHead(worktree);
   try {
     await execBackend("git", ["-C", worktree, "add", "-N", "--", "."], { cwd: worktree });
   } catch {
     // best-effort: an empty or non-git worktree just yields an empty patch.
   }
+  const range = base ? [base] : [];
   let patch = "";
   try {
-    const diff = await execBackend("git", ["-C", worktree, "diff", "--binary", "--", "."], { cwd: worktree });
+    const diff = await execBackend("git", ["-C", worktree, "diff", "--binary", ...range, "--", "."], { cwd: worktree });
     if (diff.code === 0) {
       patch = diff.stdout;
     }
@@ -748,7 +960,7 @@ async function capturePatch(worktree) {
   }
   let stat = "";
   try {
-    const diffStat = await execBackend("git", ["-C", worktree, "diff", "--numstat", "--", "."], { cwd: worktree });
+    const diffStat = await execBackend("git", ["-C", worktree, "diff", "--numstat", ...range, "--", "."], { cwd: worktree });
     if (diffStat.code === 0) {
       stat = diffStat.stdout;
     }
@@ -816,7 +1028,8 @@ export function parseStreamJSONTranscript(backend, stdout) {
     backend === "claude" ? claudeTranscript
       : backend === "cursor" ? cursorTranscript
         : backend === "opencode" ? opencodeTranscript
-          : codexTranscript;
+          : backend === "gemini" ? geminiTranscript
+            : codexTranscript;
   const fallbackTs = new Date().toISOString();
   // Backends stamp only some events (e.g. claude stamps user/tool_result events
   // but not assistant ones). Resolve each entry's own timestamp, then forward-fill
@@ -825,7 +1038,7 @@ export function parseStreamJSONTranscript(backend, stdout) {
   // any timestamp-ordered view of the transcript.
   const resolved = build(events).map((entry) => ({ entry, ts: toISO(entry.timestamp) }));
   const firstReal = (resolved.find((item) => item.ts) || {}).ts || fallbackTs;
-  const entries = [{ seq: 1, timestamp: firstReal, role: "system", type: "session_meta", text: `local-cli-${backend} session` }];
+  const entries = [{ seq: 1, timestamp: firstReal, ...sessionMetaEntry(backend) }];
   let seq = 2;
   let cursorTs = firstReal;
   for (const { entry, ts } of resolved) {
@@ -839,6 +1052,55 @@ export function parseStreamJSONTranscript(backend, stdout) {
   }
   return entries;
 }
+
+// taskUsageFromEntries recovers the token usage the terminal `result` entry
+// carries (resultEntry serializes the parsed usage object into its `output`
+// field) and maps it onto the snake_case top-level token/cost fields the Go
+// host-bridge reads from the runner result (internal/driver/task_bridge.go) and
+// persists to the fleet-db TaskRun. The daytona runner surfaces the same shape
+// via @loom/sdk/runtime-adapters' flueUsageToTaskUsage; the local runner is kept
+// loadable without the SDK (see loadTask), so it maps here instead. Returns {}
+// when no usage was reported (minimal/gemini fallback, or an early failure).
+export function taskUsageFromEntries(entries) {
+  if (!Array.isArray(entries)) {
+    return {};
+  }
+  let usage = null;
+  for (let i = entries.length - 1; i >= 0; i--) {
+    const entry = entries[i];
+    if (entry && entry.type === "result" && entry.output) {
+      try {
+        usage = JSON.parse(entry.output);
+      } catch {
+        usage = null;
+      }
+      break;
+    }
+  }
+  if (!usage || typeof usage !== "object") {
+    return {};
+  }
+  const out = {};
+  const set = (key, value) => {
+    const num = Number(value);
+    if (Number.isFinite(num)) {
+      out[key] = num;
+    }
+  };
+  set("input_tokens", usage.input_tokens);
+  set("output_tokens", usage.output_tokens);
+  set("cache_read_tokens", usage.cache_read_tokens);
+  set("cache_write_tokens", usage.cache_write_tokens);
+  set("estimated_cost_usd", usage.cost_usd != null ? usage.cost_usd : usage.estimated_cost_usd);
+  return out;
+}
+
+// NOTE: per-backend price-table estimation (DEFAULT_PRICING / resolvePricing /
+// estimateCostUSD) was removed 2026-06-23. Cost is now sourced ONLY from the
+// backend CLI's own reporting (see taskUsageFromEntries + the run() cost note):
+// estimating tokens x a per-backend rate was inaccurate (a single backend runs
+// many models at different prices — e.g. claude ran Opus, not the Sonnet rate the
+// table assumed) and codex/cursor/gemini expose no cost to anchor it.
 
 function streamFailureMessage(backend, stdout) {
   if (backend !== "opencode") {
@@ -932,6 +1194,26 @@ function accumulateUsage(prev, summed, latest) {
     }
   }
   return Object.keys(out).length ? out : null;
+}
+
+// sessionMetaEntry builds the canonical session_meta head — the one definition of
+// the #5d transcript-vocabulary contract shared by every producer path here.
+function sessionMetaEntry(backend, label) {
+  return {
+    role: "system",
+    type: "session_meta",
+    text: `local-cli-${backend} session` + (label ? ` for ${label}` : ""),
+  };
+}
+
+// ensureSessionMetaLead prepends a session_meta entry unless the transcript already
+// leads with one. Its timestamp mirrors the first real entry so it sorts to the head.
+function ensureSessionMetaLead(entries, backend, label) {
+  if (entries[0]?.type === "session_meta") return entries;
+  const meta = sessionMetaEntry(backend, label);
+  const firstTs = entries.find((e) => e && e.timestamp)?.timestamp;
+  if (firstTs) meta.timestamp = firstTs;
+  return [meta, ...entries];
 }
 
 // resultEntry is the terminal transcript entry: completion status + token usage.
@@ -1263,13 +1545,63 @@ function opencodeTranscript(events) {
   return out;
 }
 
-// minimalTranscript is the fallback for backends without a structured event
-// stream (e.g. gemini): a session_meta marker, the user prompt, and a final
-// assistant entry carrying the CLI stdout tail. Real evidence, just unstructured.
+// geminiTranscript maps gemini `-o stream-json` events. Assistant text arrives as
+// Google-native candidates[].content.parts[].text (GenerateContent streaming) or
+// as a flat text/content/response field. Token usage rides on `usage`
+// (OpenAI-compatible {input_tokens,output_tokens}) or `usageMetadata`
+// ({promptTokenCount,candidatesTokenCount}) — mirrors backend_gemini.go's
+// collectGeminiStreamUsage. usageMetadata is cumulative across chunks, so the last
+// value wins (summing would double-count). Before this, gemini got no usage at all.
+function geminiTranscript(events) {
+  const out = [];
+  let usage = null;
+  for (const event of events) {
+    if (!event || typeof event !== "object") {
+      continue;
+    }
+    const candidates = Array.isArray(event.candidates) ? event.candidates : [];
+    for (const candidate of candidates) {
+      const parts = candidate && candidate.content && Array.isArray(candidate.content.parts) ? candidate.content.parts : [];
+      for (const part of parts) {
+        const text = rawString(part && part.text);
+        if (text) {
+          out.push({ role: "assistant", type: "text", text });
+        }
+      }
+    }
+    if (!candidates.length) {
+      const flat = rawString(event.text) || rawString(event.content) || rawString(event.response) || (event.message && rawString(event.message.text)) || "";
+      const type = stringValue(event.type);
+      if (flat && (!type || type.includes("content") || type.includes("text") || type.includes("assistant") || type.includes("message") || type.includes("response"))) {
+        out.push({ role: "assistant", type: "text", text: flat });
+      }
+    }
+    if (event.usage && typeof event.usage === "object") {
+      usage = normalizeUsage({
+        input_tokens: event.usage.input_tokens != null ? event.usage.input_tokens : event.usage.inputTokens,
+        output_tokens: event.usage.output_tokens != null ? event.usage.output_tokens : event.usage.outputTokens,
+      });
+    } else if (event.usageMetadata && typeof event.usageMetadata === "object") {
+      usage = normalizeUsage({
+        input_tokens: event.usageMetadata.promptTokenCount,
+        output_tokens: event.usageMetadata.candidatesTokenCount,
+      });
+    }
+  }
+  if (usage) {
+    out.push(resultEntry(null, usage));
+  }
+  return out;
+}
+
+// minimalTranscript is the fallback when a backend has no structured event stream,
+// or when a stream-json backend emits output the parser does not recognize: a
+// session_meta marker, the user prompt, and a final assistant entry carrying the
+// CLI stdout tail. Real evidence, just unstructured.
 function minimalTranscript(backend, label, prompt, stdout) {
   const now = new Date().toISOString();
   return [
-    { seq: 1, timestamp: now, role: "system", type: "session_meta", text: `local-cli-${backend} session for ${label}` },
+    { seq: 1, timestamp: now, ...sessionMetaEntry(backend, label) },
     { seq: 2, timestamp: now, role: "user", type: "text", text: textTail(prompt, 4000) },
     { seq: 3, timestamp: now, role: "assistant", type: "text", text: textTail(stdout, 4000) },
   ];

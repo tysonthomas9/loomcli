@@ -39,7 +39,7 @@ func (s *Store) SyncLatestClaudeTranscript(sessionID, workDir, claudeUUID string
 	if srcPath == "" {
 		return "", nil
 	}
-	if err := s.SyncNativeTranscript(sessionID, srcPath); err != nil {
+	if err := s.SyncNativeTranscript(sessionID, srcPath, TranscriptFormatRaw); err != nil {
 		recordErr(span, err)
 		return "", err
 	}

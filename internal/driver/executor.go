@@ -13,6 +13,8 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/driver/runtypes"
+	"github.com/tysonthomas9/loomcli/internal/driver/sandbox"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/trigger"
 )
@@ -23,30 +25,42 @@ type Runner interface {
 	Run(ctx context.Context, req RunRequest) (RunResult, error)
 }
 
-type RunRequest struct {
-	Run          *domain.DriverRun
-	Version      *domain.DriverVersion
-	BundleRoot   string
-	WorkflowPath string
-	ServerPath   string
-	Manifest     map[string]string
-	// RunToken is the run-scoped bearer token minted at claim time, bound to
-	// this run's lease + fencing token, and exported to the workflow runtime
-	// as LOOM_RUN_TOKEN. Empty when minting is disabled (no RunTokenKey).
-	// Carried on the request — not the runner — so every launcher behind the
-	// SB1 sandbox seam injects it the same way.
-	RunToken string
-	// TrustLevel is the run's driver trust level, loaded server-side by
-	// loadRunRequest (SB3 placement policy). Anything but trusted — including
-	// empty/unknown — refuses non-isolating launchers (sandbox_required).
-	TrustLevel domain.DriverTrustLevel
-}
+// The driver's core run types and the SB1 sandbox seam live in the
+// internal/driver/sandbox subpackage (extracted so the run/orchestration types
+// and the sandbox launchers stop forming an import cycle). These aliases keep
+// driver.RunRequest / driver.SandboxLauncher / the §9.6 audit consts available
+// to in-package code, cross-package callers, and tests unchanged.
+type (
+	RunRequest        = runtypes.RunRequest
+	RunResult         = runtypes.RunResult
+	SandboxLauncher   = sandbox.SandboxLauncher
+	IsolatingLauncher = sandbox.IsolatingLauncher
+	LaunchSpec        = sandbox.LaunchSpec
+	SandboxProcess    = sandbox.SandboxProcess
+	SandboxExit       = sandbox.SandboxExit
+	processLauncher   = sandbox.ProcessLauncher
+)
 
-type RunResult struct {
-	Status     domain.DriverRunStatus
-	Summary    string
-	ErrorClass string
-	Output     map[string]string
+const (
+	ErrorClassSandboxRequired = sandbox.ErrorClassSandboxRequired
+	ErrorCodeOutputKey        = sandbox.ErrorCodeOutputKey
+	SandboxLauncherOutputKey  = sandbox.SandboxLauncherOutputKey
+	TrustLevelOutputKey       = sandbox.TrustLevelOutputKey
+	RetryableOutputKey        = sandbox.RetryableOutputKey
+	SandboxProviderProcess    = sandbox.SandboxProviderProcess
+	SandboxProviderContainer  = sandbox.SandboxProviderContainer
+	SandboxPlacementOutputKey = sandbox.SandboxPlacementOutputKey
+	SandboxModeEnvVar         = sandbox.SandboxModeEnvVar
+	SandboxModeProcess        = sandbox.SandboxModeProcess
+	SandboxModeContainer      = sandbox.SandboxModeContainer
+	SandboxEgressEnvVar       = sandbox.SandboxEgressEnvVar
+)
+
+// ResolveSandboxLauncher re-exports the sandbox subpackage's launcher resolver
+// so serve and CLI callers keep using driver.ResolveSandboxLauncher unchanged
+// (Go has no function aliases, hence the thin wrapper).
+func ResolveSandboxLauncher() (SandboxLauncher, error) {
+	return sandbox.ResolveSandboxLauncher()
 }
 
 type Executor struct {
@@ -61,7 +75,7 @@ type Executor struct {
 	// APIBaseURL/APIToken configure the driver-op HTTP API exported to driver
 	// runtimes via the default NodeRunner (LOOM_DRIVER_API_URL/_TOKEN).
 	APIBaseURL string
-	APIToken   string
+	APIToken   string //nolint:gosec // G117: driver API bearer token intentionally stored in runtime config.
 	// RunTokenKey, when set, is the HS256 signing key used to mint the
 	// run-scoped bearer token injected into the workflow runtime as
 	// LOOM_RUN_TOKEN at claim time. Nil disables minting and keeps the
@@ -701,7 +715,7 @@ type NodeRunner struct {
 	// legacy auth surface (no run token, or the deprecated
 	// LegacyDriverAuthEnvVar fallback still on). Token-carrying runs are
 	// token-only: the static bearer never reaches their workflow env.
-	APIToken string
+	APIToken string //nolint:gosec // G117: driver API bearer token intentionally forwarded to legacy runtimes.
 	// Launcher launches the workflow-bundle runtime (SB1 sandbox seam).
 	// Nil means the default local node-process launcher — today's
 	// flue-local behavior, unchanged.
@@ -738,7 +752,7 @@ func (r NodeRunner) runBuiltFlueServer(ctx context.Context, req RunRequest, node
 	// SB3 trust placement policy: an untrusted bundle never launches outside
 	// an isolating sandbox — the run fails sandbox_required with no process
 	// spawned, never a silent fallback.
-	if refusal, refused := refuseUntrustedPlacement(req, launcher); refused {
+	if refusal, refused := sandbox.RefuseUntrustedPlacement(req, launcher); refused {
 		return refusal, nil
 	}
 	process, err := launcher.Launch(ctx, LaunchSpec{
@@ -754,8 +768,8 @@ func (r NodeRunner) runBuiltFlueServer(ctx context.Context, req RunRequest, node
 	}
 	exit, waitErr := process.Wait()
 	result := flueRuntimeResult(ctx, req, exit.Stdout, exit.Stderr, waitErr)
-	recordSandboxPlacement(&result, process.Placement())
-	recordTrustPlacementDecision(&result, req.TrustLevel, launcherPlacementProvider(launcher))
+	sandbox.RecordSandboxPlacement(&result, process.Placement())
+	sandbox.RecordTrustPlacementDecision(&result, req.TrustLevel, sandbox.LauncherPlacementProvider(launcher))
 	return result, nil
 }
 

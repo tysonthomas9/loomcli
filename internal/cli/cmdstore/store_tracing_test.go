@@ -11,6 +11,44 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
+// TestTracedArtifactStore_ForwardsReadContent guards the cross-node transcript path:
+// the tracing wrapper must expose ArtifactContentReader and forward to the inner store.
+// Without this the type assertion in session_service.readTranscriptRef fails and a
+// non-owning serve node silently falls back to the node-local artifact URI (which it
+// can't read) — exactly the 500 the distributed smoke caught.
+func TestTracedArtifactStore_ForwardsReadContent(t *testing.T) {
+	inner := memstore.New()
+	wrapped := WrapStoreWithTracing(inner)
+
+	reader, ok := wrapped.Artifacts().(store.ArtifactContentReader)
+	if !ok {
+		t.Fatal("traced Artifacts() does not implement ArtifactContentReader")
+	}
+
+	ctx := context.Background()
+	const ws, id = "WS", "transcript-1"
+	body := []byte(`{"role":"system","type":"session_meta"}` + "\n")
+	if _, err := store.UploadContentArtifact(ctx, inner.Artifacts(), store.ArtifactCreate{
+		WorkspaceKey:  ws,
+		ArtifactID:    id,
+		OwnerType:     "session",
+		OwnerID:       "s1",
+		Type:          "transcript",
+		MIMEType:      "application/x-ndjson",
+		DurableStatus: "declared",
+	}, body); err != nil {
+		t.Fatalf("seed inner artifact: %v", err)
+	}
+
+	got, err := reader.ReadContent(ctx, ws, id)
+	if err != nil {
+		t.Fatalf("ReadContent through tracing wrapper: %v", err)
+	}
+	if !bytes.Equal(got, body) {
+		t.Fatalf("ReadContent = %q, want %q", got, body)
+	}
+}
+
 // TestWrapStoreWithTracing_Smoke exercises every traced substore method so
 // the span-decorator paths are reached. We don't assert behavior — the
 // underlying memstore already has its own coverage; this is a guard

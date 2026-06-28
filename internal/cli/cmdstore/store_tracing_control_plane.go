@@ -192,6 +192,27 @@ func (t *tracedArtifactStore) Update(ctx context.Context, ws, artifactID string,
 	)
 }
 
+// ReadContent forwards to the inner store when it can read artifact bytes back, so a
+// serve node can surface a transcript artifact another node uploaded (the cross-node
+// transcript_ref path). Without this, the wrapper would hide ArtifactContentReader and
+// the read would fall back to the (node-local) artifact URI. Returns ErrNotFound when
+// the inner store cannot read content, so callers fall back to the URI as before.
+func (t *tracedArtifactStore) ReadContent(ctx context.Context, ws, artifactID string) ([]byte, error) {
+	return traced(ctx, "Artifacts", "ReadContent", func(ctx context.Context) ([]byte, error) {
+		reader, ok := t.inner.(store.ArtifactContentReader)
+		if !ok {
+			return nil, domain.ErrNotFound
+		}
+		return reader.ReadContent(ctx, ws, artifactID)
+	},
+		attribute.String("loom.workspace", ws),
+	)
+}
+
+// The tracing wrapper must keep satisfying ArtifactContentReader, else cross-node
+// transcript reads silently regress to the node-local URI fallback.
+var _ store.ArtifactContentReader = (*tracedArtifactStore)(nil)
+
 // --- AgentLeaseStore ---
 
 type tracedAgentLeaseStore struct{ inner store.AgentLeaseStore }

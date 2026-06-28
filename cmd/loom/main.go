@@ -11,6 +11,7 @@ import (
 
 	// Sub-package registrations — each package's init() calls cli.RegisterCommand().
 	_ "github.com/tysonthomas9/loomcli/internal/cli/agent"
+	_ "github.com/tysonthomas9/loomcli/internal/cli/agent/lead"
 	_ "github.com/tysonthomas9/loomcli/internal/cli/agentdef"
 	_ "github.com/tysonthomas9/loomcli/internal/cli/automode"
 	_ "github.com/tysonthomas9/loomcli/internal/cli/backends"
