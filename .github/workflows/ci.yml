@@ -210,7 +210,7 @@ jobs:
           version: '11.1.1'
 
       - name: Build flue
-        run: cd flue && pnpm install --frozen-lockfile && pnpm build
+        run: cd flue && pnpm install --frozen-lockfile && pnpm --filter @flue/runtime --filter @flue/cli build
 
       - name: Build builtin workflow bundle from source
         env:
