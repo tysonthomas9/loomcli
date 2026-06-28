@@ -1,19 +1,18 @@
 #!/usr/bin/env bash
-# Rebuild the prebuilt epic-runner workflow bundle
-# (internal/workflows/builtin-dist/epic-runner/dist) from the embedded TS sources
-# via the sibling Flue CLI, and refresh source-digest.txt so the Go digest gate
-# (registerPrebuiltBuiltinWorkflow / embeddedPrebuiltDigestMatches) matches
-# SourceDigest(spec.Files).
+# Build the epic-runner workflow bundle from the embedded TS sources via the
+# sibling Flue CLI, and refresh source-digest.txt so it matches
+# SourceDigest(spec.Files). Generated bundle output is not committed; set
+# BUILTIN_DIST_DEST to choose a specific output directory.
 #
 # Run this whenever any of internal/workflows/builtin/{epic-runner,local-task-runner,
 # daytona-task-runner,openshell-task-runner}.ts changes.
 #
 #   usage: scripts/rebuild-builtin-bundle.sh        (requires ../flue built)
 #   env:   FLUE_REPO=/path/to/flue  (default: ../flue)
+#          BUILTIN_DIST_DEST=/path/to/output
 #
 # Note: DEST is replaced wholesale (rm -rf + copy) so content-hashed assets from
-# prior builds never accrete — the committed dist holds only the assets the
-# current server.mjs references (it is go:embed'd into the loom binary).
+# prior builds never accrete.
 set -Eeuo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -26,21 +25,21 @@ FLUE_REPO="${FLUE_REPO:-$(cd "$ROOT/../flue" 2>/dev/null && pwd || true)}"
 # silently broke 3 runtime contracts (defineWorkflow default export,
 # FLUE_INTERNAL_CLI_IPC gating, strict cloneJsonSerializable). To intentionally
 # advance the pin, set ALLOW_FLUE_PIN_DRIFT=1 and bump FLUE_COMMIT in the same commit.
-PIN_FILE="$ROOT/internal/workflows/builtin-dist/FLUE_COMMIT"
+PIN_FILE="$ROOT/internal/workflows/FLUE_COMMIT"
 if [ -f "$PIN_FILE" ] && [ "${ALLOW_FLUE_PIN_DRIFT:-}" != "1" ]; then
   PINNED="$(tr -d '[:space:]' < "$PIN_FILE")"
   HEAD="$(git -C "$FLUE_REPO" rev-parse HEAD 2>/dev/null || true)"
   [ "$HEAD" = "$PINNED" ] || {
-    echo "ERROR: FLUE_REPO HEAD ($HEAD) != pinned $PINNED (internal/workflows/builtin-dist/FLUE_COMMIT)." >&2
+    echo "ERROR: FLUE_REPO HEAD ($HEAD) != pinned $PINNED (internal/workflows/FLUE_COMMIT)." >&2
     echo "       Check out flue at the pin, or set ALLOW_FLUE_PIN_DRIFT=1 and bump FLUE_COMMIT in the same commit." >&2
     exit 1
   }
 fi
 
 SRC="$ROOT/internal/workflows/builtin"
-# BUILTIN_DIST_DEST lets CI build into a scratch dir for a non-destructive
-# digest/reproducibility diff against the committed dist.
-DEST="${BUILTIN_DIST_DEST:-$ROOT/internal/workflows/builtin-dist/epic-runner/dist}"
+# BUILTIN_DIST_DEST lets CI and local callers choose a scratch dir without
+# recreating deleted generated bundle files in the repo.
+DEST="${BUILTIN_DIST_DEST:-$(mktemp -d -t loom-builtin-dist.XXXXXX)}"
 # The 4 files that make up the epic-runner spec (builtinEpicRunnerSpec in workflows.go).
 SPEC_FILES=(epic-runner.ts local-task-runner.ts daytona-task-runner.ts openshell-task-runner.ts)
 

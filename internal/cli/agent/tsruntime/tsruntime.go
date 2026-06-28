@@ -63,7 +63,7 @@ func daytonaRepoURL(workDir string) string {
 	if v := strings.TrimSpace(os.Getenv("DAYTONA_REPO_URL")); v != "" {
 		return v
 	}
-	out, err := exec.Command("git", "-C", workDir, "remote", "get-url", "origin").Output()
+	out, err := exec.Command("git", "-C", workDir, "remote", "get-url", "origin").Output() //nolint:gosec // G204: fixed git argv; workDir is the active worktree path, not shell input.
 	if err != nil {
 		return ""
 	}

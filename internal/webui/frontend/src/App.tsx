@@ -1238,12 +1238,7 @@ function App() {
     activeView !== "terminal" &&
     (showStaleBanner || isConnectionLost) &&
     staleBannerDisconnectedSince !== null &&
-    !(
-      issues.length === 0 &&
-      !isLoading &&
-      !error &&
-      isIssueBasedView
-    );
+    !(issues.length === 0 && !isLoading && !error && isIssueBasedView);
 
   // Issue controls (search · filters · New Issue) now live in the board toolbar
   // (next to the Kanban/List tabs), not the top bar — matching the Aether design's
