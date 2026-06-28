@@ -10,6 +10,32 @@ import (
 	"testing"
 )
 
+var loomDesktopEnvKeys = []string{
+	"LOOM_WORKSPACE",
+	"LOOM_WORKSPACE_RUNTIME_DIR",
+	"LOOM_CONFIG_DIR",
+	"LOOM_DESKTOP_DATA_DIR",
+	"LOOM_FRONTEND_DIR",
+	"LOOM_WEBUI_URL",
+	"LOOM_LOCAL_RUNTIME",
+	"LOOM_NOTIFY_TOKEN",
+	"LOOM_AGENT_NAME",
+	"LOOM_AGENT_ROLE",
+	"LOOM_AGENT_TERMINAL_ID",
+	"LOOM_SESSION_ID",
+	"LOOM_ORCHESTRATOR_SESSION_ID",
+}
+
+// ClearLoomEnv removes Loom desktop/runtime environment variables that can
+// make local tests resolve the real desktop workspace, frontend bundle, runtime
+// directory, or notify token instead of test fixtures.
+func ClearLoomEnv(t *testing.T) {
+	t.Helper()
+	for _, key := range loomDesktopEnvKeys {
+		t.Setenv(key, "")
+	}
+}
+
 // SetupTestEnv sets environment variables and registers cleanup with t.Cleanup().
 func SetupTestEnv(t *testing.T, vars map[string]string) {
 	t.Helper()

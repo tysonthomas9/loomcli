@@ -16,6 +16,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
+	"github.com/tysonthomas9/loomcli/internal/testutil"
 	"github.com/tysonthomas9/loomcli/internal/webui"
 	"github.com/tysonthomas9/loomcli/internal/webui/fleet"
 )
@@ -863,6 +864,8 @@ func TestResponseTypes(t *testing.T) {
 }
 
 func TestServeFlags_Defaults(t *testing.T) {
+	testutil.ClearLoomEnv(t)
+
 	f := serveCmd.Flags()
 
 	port, err := f.GetInt("port")
