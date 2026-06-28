@@ -1,7 +1,7 @@
 {
   "name": "@loom/sdk",
   "version": "1.0.0",
-  "description": "Loom workflow SDK: run-scoped driver client (flue) and task-run runner client with published TypeScript types",
+  "description": "Loom workflow SDK: run-scoped driver client and task-run runner client with published TypeScript types",
   "type": "module",
   "exports": {
     ".": {
@@ -12,9 +12,13 @@
       "types": "./runner.d.ts",
       "import": "./runner.js"
     },
-    "./flue": {
-      "types": "./flue.d.ts",
-      "import": "./flue.js"
+    "./driver": {
+      "types": "./driver.d.ts",
+      "import": "./driver.js"
+    },
+    "./runtime-adapters": {
+      "types": "./runtime-adapters.d.ts",
+      "import": "./runtime-adapters.js"
     },
     "./api-surface.v1.json": "./api-surface.v1.json",
     "./package.json": "./package.json"
@@ -33,10 +37,12 @@
     "index.js",
     "index.d.ts",
     "internal.js",
-    "flue.js",
-    "flue.d.ts",
+    "driver.js",
+    "driver.d.ts",
     "runner.js",
     "runner.d.ts",
+    "runtime-adapters.js",
+    "runtime-adapters.d.ts",
     "api-surface.v1.json",
     "CHANGELOG.md"
   ],

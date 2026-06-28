@@ -2004,6 +2004,7 @@ type WorkspaceRepo struct {
 	Name          string   `json:"name"`
 	Path          string   `json:"path"`
 	Remote        string   `json:"remote"`
+	RemoteUrl     *string  `json:"remote_url,omitempty"`
 	SourceRepoId  *string  `json:"source_repo_id,omitempty"`
 }
 

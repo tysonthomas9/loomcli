@@ -20,6 +20,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
+	"github.com/tysonthomas9/loomcli/internal/webui/storeadapter"
 	"github.com/tysonthomas9/loomcli/internal/webui/tabmeta"
 	webuterminal "github.com/tysonthomas9/loomcli/internal/webui/terminal"
 )
@@ -78,6 +79,10 @@ type terminalWSParams struct {
 	// triggers a 4410 close; the latter proceeds to AttachSession as
 	// normal.
 	serverStartedAt time.Time
+}
+
+type workspacePTYEnsurer interface {
+	EnsureRegistered(wsID, path string) error
 }
 
 // HandleTerminalWS returns a WebSocket handler for terminal relay. It upgrades
@@ -285,6 +290,7 @@ func classifyAttachErr(err error, session, workspace string) (websocket.StatusCo
 // is detached (grace period armed); the PTY and child process stay alive.
 func runTerminalRelay(reqCtx context.Context, conn *websocket.Conn, p *terminalWSParams, session, workspace string, initialCols, initialRows uint16) (websocket.StatusCode, string) { //nolint:staticcheck // SA1019: websocket migration tracked separately
 	key := webuterminal.SessionKey{Workspace: workspace, Name: session}
+	ensureWorkspacePTYRegistered(p, workspace)
 
 	launch, err := launchSpecForTerminalSession(reqCtx, p, workspace, session)
 	if err != nil {
@@ -338,6 +344,24 @@ func runTerminalRelay(reqCtx context.Context, conn *websocket.Conn, p *terminalW
 	p.manager.Detach(key, connID)
 
 	return (<-crashCh).WSClose()
+}
+
+func ensureWorkspacePTYRegistered(p *terminalWSParams, workspace string) {
+	if p == nil || workspace == "" {
+		return
+	}
+	ensurer, ok := p.manager.(workspacePTYEnsurer)
+	if !ok {
+		return
+	}
+	path := storeadapter.ResolveWorkspacePath(workspace)
+	if strings.TrimSpace(path) == "" {
+		return
+	}
+	if err := ensurer.EnsureRegistered(workspace, path); err != nil {
+		slog.Warn("terminal workspace pty self-heal failed",
+			"workspace", workspace, "path", path, "err", err)
+	}
 }
 
 func launchSpecForTerminalSession(ctx context.Context, p *terminalWSParams, workspace, session string) (*tabmeta.LaunchSpec, error) {

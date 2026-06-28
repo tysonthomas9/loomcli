@@ -155,6 +155,9 @@ func LoadDaemonConfig(projectDir string) (*DaemonConfig, error) {
 		}
 		return nil, fmt.Errorf("resolve active workspace: %w", err)
 	}
+	if cached, cacheErr, ok := lookupPrimedDaemonConfig(key, projectDir); ok {
+		return cached, cacheErr
+	}
 	dataDir := bootstrap.LoomDir()
 	if dataDir == "" {
 		return nil, errors.New("cannot determine loom data directory")

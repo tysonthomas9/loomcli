@@ -79,7 +79,8 @@ func harnessLeadInvocation(backend, workDir string) (string, []string, []string,
 		args := append([]string{"run", "--dir", workDir, "--dangerously-skip-permissions"}, openCodeModelArgs()...)
 		return "opencode", args, buildBackendEnv(workDir, ""), true
 	case "cursor":
-		return "cursor", []string{"--force"}, buildBackendEnv(workDir, ""), true
+		// the headless agent CLI is `cursor-agent`; `cursor` is the IDE launcher.
+		return "cursor-agent", []string{"--force"}, buildBackendEnv(workDir, ""), true
 	default:
 		return "", nil, nil, false
 	}

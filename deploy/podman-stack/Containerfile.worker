@@ -14,7 +14,7 @@
 FROM docker.io/library/node:22-slim
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends git curl ca-certificates \
+    && apt-get install -y --no-install-recommends git curl ca-certificates lsof \
     && rm -rf /var/lib/apt/lists/*
 
 COPY bin/loom /usr/local/bin/loom

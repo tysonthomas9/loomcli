@@ -414,7 +414,7 @@ func TestRouterE2EReplaceSupersedeStorm(t *testing.T) {
 
 // TestRouterE2EForbidRejectsAndQueuePromotesViaSweeper: with the subject busy,
 // a second webhook is rejected on the forbid leg (no run, audit
-// concurrency_forbid) and parked held on the queue leg; once the blocking run
+// concurrency_forbid) and held held on the queue leg; once the blocking run
 // completes, one sweeper pass promotes the held delivery onto a fresh run
 // while the forbid rejection stays final.
 func TestRouterE2EForbidRejectsAndQueuePromotesViaSweeper(t *testing.T) {
@@ -440,7 +440,7 @@ func TestRouterE2EForbidRejectsAndQueuePromotesViaSweeper(t *testing.T) {
 	}
 	queueRunID := first.Deliveries[1].RunID
 
-	// Second webhook for the same PR: forbid rejects, queue parks held —
+	// Second webhook for the same PR: forbid rejects, queue queues held —
 	// both gated BEFORE any run exists.
 	second := routerE2EPost(t, mux, "fq-2", routerE2EPRBody("opened", "sha-2"))
 	if len(second.Deliveries) != 2 {

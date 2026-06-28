@@ -446,21 +446,33 @@ export function PRsPage(): JSX.Element {
               </p>
             </div>
           ) : groups ? (
-            <div className={styles.groups}>
-              {groups.map(([key, groupRows]) => (
-                <section key={key} className={styles.group}>
-                  <header className={styles.groupHeader}>
-                    <span className={styles.groupName}>{key}</span>
-                    <span className={styles.groupCount}>
-                      {groupRows.length}
-                    </span>
-                  </header>
-                  <ul className={styles.list}>{groupRows.map(renderRow)}</ul>
-                </section>
-              ))}
+            <div
+              className={styles.scrollRegion}
+              role="region"
+              aria-label="Pull request list"
+            >
+              <div className={styles.groups}>
+                {groups.map(([key, groupRows]) => (
+                  <section key={key} className={styles.group}>
+                    <header className={styles.groupHeader}>
+                      <span className={styles.groupName}>{key}</span>
+                      <span className={styles.groupCount}>
+                        {groupRows.length}
+                      </span>
+                    </header>
+                    <ul className={styles.list}>{groupRows.map(renderRow)}</ul>
+                  </section>
+                ))}
+              </div>
             </div>
           ) : (
-            <ul className={styles.list}>{filtered.map(renderRow)}</ul>
+            <div
+              className={styles.scrollRegion}
+              role="region"
+              aria-label="Pull request list"
+            >
+              <ul className={styles.list}>{filtered.map(renderRow)}</ul>
+            </div>
           )}
         </>
       ) : null}

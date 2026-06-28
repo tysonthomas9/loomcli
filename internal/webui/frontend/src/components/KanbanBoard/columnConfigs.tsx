@@ -46,16 +46,8 @@ function isBlockedIssue(issue: Issue, blockedInfo?: BlockedInfo): boolean {
   );
 }
 
-function isReadyIssue(issue: Issue, blockedInfo?: BlockedInfo): boolean {
+function isOpenColumnIssue(issue: Issue, blockedInfo?: BlockedInfo): boolean {
   const hasOpenStatus = issue.status === "open" || issue.status === undefined;
-  if (issue.is_ready !== undefined) {
-    return (
-      issue.is_ready === true &&
-      hasOpenStatus &&
-      !isDeferredIssue(issue) &&
-      !isBlockedIssue(issue, blockedInfo)
-    );
-  }
   return (
     hasOpenStatus &&
     !isDeferredIssue(issue) &&
@@ -87,7 +79,7 @@ export function createColumns(options?: {
       headerIcon: ClockIcon,
       filter: (issue, blockedInfo) =>
         (includeEpics || issue.issue_type !== "epic") &&
-        isReadyIssue(issue, blockedInfo),
+        isOpenColumnIssue(issue, blockedInfo),
       targetStatus: "open",
       allowedDropTargets: ["ready", "in_progress", "review", "done"],
       style: "normal",

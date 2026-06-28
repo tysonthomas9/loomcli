@@ -15,6 +15,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/workflows"
 	"github.com/tysonthomas9/loomcli/internal/webui/modbuilder"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
+	"github.com/tysonthomas9/loomcli/internal/webui/storeadapter"
 	"github.com/tysonthomas9/loomcli/internal/webui/svcimpl"
 )
 
@@ -40,6 +41,9 @@ func (app *Server) buildModules() {
 		WithDaemonExpected(!poollessIssueBackend)
 	if app.config.IssueBackendFn != nil {
 		opsModule = opsModule.WithIssueBackendFn(app.config.IssueBackendFn)
+	}
+	if storeBacked {
+		opsModule = opsModule.WithLocalWorkspacePathFn(storeadapter.ResolveWorkspacePath)
 	}
 	app.wsModules = append(app.wsModules, opsModule)
 
@@ -112,14 +116,15 @@ func (app *Server) buildInfraModules() {
 		app.wsModules = append(app.wsModules, workflows.NewModule(app.config.Store))
 		app.wsModules = append(app.wsModules, webhooks.NewModule(app.config.Store))
 		app.wsModules = append(app.wsModules, modbuilder.NewApprovalsModule(app.config.Store))
-		app.wsModules = append(app.wsModules, modbuilder.NewTaskRunAPIModule(app.config.Store, app.config.FleetDBBaseURL))
+		app.wsModules = append(app.wsModules, modbuilder.NewTaskRunAPIModule(app.config.Store, app.config.FleetDBBaseURL, app.config.LocalSettingsDir))
 		app.wsModules = append(app.wsModules, driverapi.NewModule(driverapi.Config{
-			Store:        app.config.Store,
-			FleetBaseURL: app.config.FleetDBBaseURL,
-			APIBaseURL:   app.config.DriverAPIBaseURL,
-			APIToken:     app.config.DriverAPIToken,
-			RunTokenKey:  app.config.DriverRunTokenKey,
-			Dispatcher:   app.buildConnectorDispatcher(),
+			Store:            app.config.Store,
+			FleetBaseURL:     app.config.FleetDBBaseURL,
+			APIBaseURL:       app.config.DriverAPIBaseURL,
+			APIToken:         app.config.DriverAPIToken,
+			RunTokenKey:      app.config.DriverRunTokenKey,
+			LocalSettingsDir: app.config.LocalSettingsDir,
+			Dispatcher:       app.buildConnectorDispatcher(),
 		}))
 	} else if app.config.AgentControlFn != nil {
 		app.wsModules = append(app.wsModules, webui.NewAgentControlModule(app.config.AgentControlFn))

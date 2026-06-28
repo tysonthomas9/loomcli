@@ -198,9 +198,9 @@ describe("columnConfigs", () => {
       expect(open.filter(issue, notBlocked)).toBe(true);
     });
 
-    it("rejects open issues flagged not ready", () => {
+    it("matches open issues flagged not ready when unblocked", () => {
       const issue = createMockIssue({ status: "open", is_ready: false });
-      expect(open.filter(issue, notBlocked)).toBe(false);
+      expect(open.filter(issue, notBlocked)).toBe(true);
     });
 
     it("matches issues with undefined status (treated as open)", () => {

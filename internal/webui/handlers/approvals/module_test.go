@@ -67,7 +67,7 @@ func newApprovalsHarness(t *testing.T) *approvalsHarness {
 	return &approvalsHarness{store: st, server: server}
 }
 
-// suspendedRun creates, claims and suspends a run parked on pattern with the
+// suspendedRun creates, claims and suspends a run pending on pattern with the
 // given allow-list, returning the await instance key.
 func (h *approvalsHarness) suspendedRun(t *testing.T, runID, pattern string, actorAllow []string) string {
 	t.Helper()
@@ -87,7 +87,7 @@ func (h *approvalsHarness) suspendedRun(t *testing.T, runID, pattern string, act
 		Deadline: time.Now().Add(time.Hour),
 	})
 	if err != nil || res.Satisfied {
-		t.Fatalf("RegisterAwaitAndCheck = %+v, %v; want parked", res, err)
+		t.Fatalf("RegisterAwaitAndCheck = %+v, %v; want pending", res, err)
 	}
 	if _, err := h.store.DriverRuns().Suspend(ctx, approvalsTestWS, runID,
 		run.NodeID, run.LeaseID, run.FencingToken, key); err != nil {
@@ -176,7 +176,7 @@ func TestApprovalValidation(t *testing.T) {
 	}
 }
 
-// The happy path: an eligible session approver resolves the parked await,
+// The happy path: an eligible session approver resolves the pending await,
 // the suspended run re-queues, and the decision payload (with the verified
 // actor) is persisted on the satisfied row.
 func TestApprovalResolvesAndResumesEligibleAwait(t *testing.T) {
@@ -249,7 +249,7 @@ func TestApprovalIneligibleActorRefusedAndNothingEmitted(t *testing.T) {
 	}
 	pending, err := h.store.Awaits().ListAwaitsByPattern(ctx, approvalsTestWS, pattern)
 	if err != nil || len(pending) != 1 {
-		t.Fatalf("pending = %+v, %v; want the guarded await still parked", pending, err)
+		t.Fatalf("pending = %+v, %v; want the guarded await still pending", pending, err)
 	}
 }
 
@@ -286,7 +286,7 @@ func TestApprovalBeforeRegistrationSatisfiesLaterAwaitInline(t *testing.T) {
 		Deadline:   time.Now().Add(time.Hour),
 	})
 	if err != nil || guarded.Satisfied {
-		t.Fatalf("guarded registration = %+v, %v; want parked", guarded, err)
+		t.Fatalf("guarded registration = %+v, %v; want pending", guarded, err)
 	}
 }
 

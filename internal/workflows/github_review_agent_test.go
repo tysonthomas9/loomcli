@@ -37,9 +37,63 @@ func TestBuiltinWorkflowRegistryListsBothBuiltins(t *testing.T) {
 		if _, ok := spec.Files[entrypoint]; !ok {
 			t.Fatalf("%s spec missing entrypoint file %q", name, entrypoint)
 		}
-		if len(spec.Files) != 1 {
-			t.Fatalf("%s spec has %d files, want 1 (single-entrypoint builtin)", name, len(spec.Files))
+		wantFiles := 1
+		if name == BuiltinEpicRunnerWorkflowName {
+			wantFiles = 4
+		} else if name == BuiltinGitHubReviewAgentWorkflowName {
+			wantFiles = 2
 		}
+		if len(spec.Files) != wantFiles {
+			t.Fatalf("%s spec has %d files, want %d", name, len(spec.Files), wantFiles)
+		}
+	}
+}
+
+func TestBuiltinEpicRunnerDeclaresSiblingTaskRunners(t *testing.T) {
+	spec, ok := BuiltinWorkflow(BuiltinEpicRunnerWorkflowName)
+	if !ok {
+		t.Fatal("epic-runner builtin missing")
+	}
+	runners := workflowRunnerSpecs(BuildAndRegisterOptions{
+		Entrypoint:    spec.Entrypoint,
+		Files:         spec.Files,
+		DeriveRunners: true,
+	})
+	names := make([]string, 0, len(runners))
+	for _, runner := range runners {
+		if runner.Kind != "flue-workflow" || runner.Entrypoint == "" {
+			t.Fatalf("runner spec = %+v, want flue-workflow with entrypoint", runner)
+		}
+		names = append(names, runner.Name)
+	}
+	// openshell-task-runner is deny-listed (§4.6): its source still ships in the
+	// bundle but it is never registered as a selectable runner.
+	want := strings.Join([]string{"daytona-task-runner", "local-task-runner"}, ",")
+	if strings.Join(names, ",") != want {
+		t.Fatalf("runner names = %v, want %s", names, want)
+	}
+	for _, name := range names {
+		if name == "openshell-task-runner" {
+			t.Fatalf("openshell-task-runner must be deny-listed from derived runners, got %v", names)
+		}
+	}
+}
+
+func TestBuiltinGitHubReviewAgentDeclaresReviewTaskRunner(t *testing.T) {
+	spec, ok := BuiltinWorkflow(BuiltinGitHubReviewAgentWorkflowName)
+	if !ok {
+		t.Fatal("github-review-agent builtin missing")
+	}
+	runners := workflowRunnerSpecs(BuildAndRegisterOptions{
+		Entrypoint:    spec.Entrypoint,
+		Files:         spec.Files,
+		DeriveRunners: true,
+	})
+	if len(runners) != 1 {
+		t.Fatalf("runner specs = %+v, want one review runner", runners)
+	}
+	if runners[0].Name != BuiltinGitHubReviewTaskRunnerName || runners[0].Kind != "flue-workflow" || runners[0].Entrypoint != BuiltinGitHubReviewTaskRunnerName {
+		t.Fatalf("runner spec = %+v, want github-review-task-runner flue workflow", runners[0])
 	}
 }
 
@@ -95,6 +149,42 @@ func TestGitHubReviewAgentRegistersThroughTrustedBuiltinPath(t *testing.T) {
 	}
 }
 
+func TestWorkflowRunnerSpecsDeriveSiblingWorkflowFiles(t *testing.T) {
+	runners := workflowRunnerSpecs(BuildAndRegisterOptions{
+		Entrypoint:    "workflows/epic-runner.ts",
+		DeriveRunners: true,
+		Files: map[string]string{
+			"workflows/epic-runner.ts":         "export async function run() {}",
+			"workflows/local-task-runner.ts":   "export async function run() {}",
+			"workflows/daytona-task-runner.ts": "export async function run() {}",
+			"helpers/shared.ts":                "export const x = 1",
+		},
+	})
+	if len(runners) != 2 {
+		t.Fatalf("runner specs = %+v, want two sibling workflow runners", runners)
+	}
+	if runners[0].Name != "daytona-task-runner" || runners[0].Entrypoint != "daytona-task-runner" {
+		t.Fatalf("first runner = %+v, want daytona-task-runner", runners[0])
+	}
+	if runners[1].Name != "local-task-runner" || runners[1].Entrypoint != "local-task-runner" {
+		t.Fatalf("second runner = %+v, want local-task-runner", runners[1])
+	}
+}
+
+func TestWorkflowRunnerSpecsDoNotInferCustomSiblingRunnerFiles(t *testing.T) {
+	runners := workflowRunnerSpecs(BuildAndRegisterOptions{
+		Entrypoint: "workflows/custom.ts",
+		Files: map[string]string{
+			"workflows/custom.ts":              "export async function run() {}",
+			"workflows/local-task-runner.ts":   "export async function run() {}",
+			"workflows/daytona-task-runner.ts": "export async function run() {}",
+		},
+	})
+	if len(runners) != 0 {
+		t.Fatalf("runner specs = %+v, want no inferred custom runners without explicit manifest", runners)
+	}
+}
+
 // The github-review-agent is a single linear pass: it parses the trigger
 // subject, gates on draft + liveness, fetches the diff, runs a review TaskRun,
 // validates the findings, and posts a COMMENT review with the expectedHeadSha
@@ -106,7 +196,7 @@ func TestGitHubReviewAgentWorkflowSourceContract(t *testing.T) {
 		name string
 		want string
 	}{
-		{name: "camelCase sdk import", want: "import { createLoomDriverClient } from '@loom/sdk/flue';"},
+		{name: "camelCase sdk import", want: "import { createLoomDriverClient } from '@loom/sdk/driver';"},
 		{name: "parses trigger subject", want: "parseReviewSubject(input)"},
 		{name: "subject key is repo#pr", want: `subjectRef: repo + "#" + prNumber,`},
 		{name: "draft skip encoded in output", want: `skipped(loom, "draft"`},
@@ -115,6 +205,7 @@ func TestGitHubReviewAgentWorkflowSourceContract(t *testing.T) {
 		{name: "stale subject skip", want: `skipped(loom, "stale_subject"`},
 		{name: "diff via compare connector", want: "loom.connectors.github.compare({"},
 		{name: "review task enqueued", want: "loom.taskRuns.request(request)"},
+		{name: "default review runner", want: `"github-review-task-runner"`},
 		{name: "review task awaited", want: "loom.taskRuns.await({ taskRunId })"},
 		{name: "deterministic review run id", want: `deterministicTaskRunId(loom.driverRunId, "review")`},
 		{name: "findings validated", want: "validateFindings(review.findings)"},
@@ -223,6 +314,84 @@ func TestGitHubReviewAgentWorkflowSourceParsesAsJavaScript(t *testing.T) {
 	}
 }
 
+func TestGitHubReviewTaskRunnerSourceParsesAsJavaScript(t *testing.T) {
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skipf("node not available: %v", err)
+	}
+	spec, ok := BuiltinWorkflow(BuiltinGitHubReviewAgentWorkflowName)
+	if !ok {
+		t.Fatal("built-in github-review-agent workflow missing")
+	}
+	source := spec.Files["workflows/"+BuiltinGitHubReviewTaskRunnerName+".ts"]
+	if source == "" {
+		t.Fatalf("built-in github review task runner source missing")
+	}
+	path := filepath.Join(t.TempDir(), BuiltinGitHubReviewTaskRunnerName+".mjs")
+	if err := os.WriteFile(path, []byte(source), 0o644); err != nil {
+		t.Fatalf("write task runner source: %v", err)
+	}
+	if out, err := exec.Command(node, "--check", path).CombinedOutput(); err != nil { //nolint:norawexec // syntax-check via the node binary located by the test itself
+		t.Fatalf("node --check failed: %v\n%s", err, out)
+	}
+}
+
+func TestGitHubReviewTaskRunnerSourceContract(t *testing.T) {
+	source := githubReviewTaskRunnerSource(t)
+	for _, want := range []string{
+		`task_runner: "github-review-task-runner"`,
+		`runtime_strategy: "codex-review"`,
+		`review_findings: JSON.stringify(findings)`,
+		`"--output-schema"`,
+		`"--output-last-message"`,
+		`execFileSync(CODEX`,
+	} {
+		if !strings.Contains(source, want) {
+			t.Fatalf("github-review-task-runner source missing %q", want)
+		}
+	}
+}
+
+func TestDaytonaTaskRunnerSourceParsesAsJavaScript(t *testing.T) {
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skipf("node not available: %v", err)
+	}
+	source := daytonaTaskRunnerSource(t)
+	path := filepath.Join(t.TempDir(), "daytona-task-runner.mjs")
+	if err := os.WriteFile(path, []byte(source), 0o644); err != nil {
+		t.Fatalf("write daytona task runner source: %v", err)
+	}
+	if out, err := exec.Command(node, "--check", path).CombinedOutput(); err != nil { //nolint:norawexec // syntax-check via the node binary located by the test itself
+		t.Fatalf("node --check failed: %v\n%s", err, out)
+	}
+}
+
+func TestDaytonaTaskRunnerSourceContract(t *testing.T) {
+	source := daytonaTaskRunnerSource(t)
+	for _, want := range []string{
+		`TaskRunClient.fromEnv()`,
+		`@loom/sdk/runtime-adapters`,
+		`readRuntimeCredential(taskContext.client, "daytona")`,
+		`DAYTONA_REPO_URL`,
+		`client.create({`,
+		`clone --depth 1`,
+		`configureProvider("openai-codex"`,
+		`createFlueTranscriptCollector()`,
+		`transcript_entries: transcriptEntries`,
+		`uploadPatchArtifact(taskContext.client`,
+		`patch_artifact_id`,
+		`loom_task_session_id`,
+		`runtime_strategy: "flue-daytona-codex"`,
+		`task_runner: "daytona-task-runner"`,
+		`daytona_sandbox_env_leak`,
+	} {
+		if !strings.Contains(source, want) {
+			t.Fatalf("daytona-task-runner source missing %q", want)
+		}
+	}
+}
+
 func githubReviewAgentSource(t *testing.T) string {
 	t.Helper()
 	spec, ok := BuiltinWorkflow(BuiltinGitHubReviewAgentWorkflowName)
@@ -230,4 +399,30 @@ func githubReviewAgentSource(t *testing.T) string {
 		t.Fatal("built-in github-review-agent workflow missing")
 	}
 	return spec.Files[spec.Entrypoint]
+}
+
+func githubReviewTaskRunnerSource(t *testing.T) string {
+	t.Helper()
+	spec, ok := BuiltinWorkflow(BuiltinGitHubReviewAgentWorkflowName)
+	if !ok {
+		t.Fatal("built-in github-review-agent workflow missing")
+	}
+	source := spec.Files["workflows/"+BuiltinGitHubReviewTaskRunnerName+".ts"]
+	if source == "" {
+		t.Fatal("built-in github-review-task-runner source missing")
+	}
+	return source
+}
+
+func daytonaTaskRunnerSource(t *testing.T) string {
+	t.Helper()
+	spec, ok := BuiltinWorkflow(BuiltinEpicRunnerWorkflowName)
+	if !ok {
+		t.Fatal("built-in epic-runner workflow missing")
+	}
+	source := spec.Files["workflows/daytona-task-runner.ts"]
+	if source == "" {
+		t.Fatal("built-in daytona-task-runner source missing")
+	}
+	return source
 }

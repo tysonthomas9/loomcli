@@ -79,6 +79,9 @@ type Config struct {
 	// WorktreePath is the working directory handed to the host-bridge task
 	// executor for exec-task. Defaults to the server's working directory.
 	WorktreePath string
+	// LocalSettingsDir is the desktop-local settings directory exposed only to
+	// bundled local-task-runner executions.
+	LocalSettingsDir string
 	// IssueBackends overrides the default fleet-db issue backend factory.
 	IssueBackends IssueBackendFactory
 	// Dispatcher is the connector egress choke point for connector-dispatch.
@@ -89,14 +92,15 @@ type Config struct {
 
 // Module serves the workspace-scoped driver-op routes.
 type Module struct {
-	store         store.Store
-	apiToken      string
-	runTokenKey   []byte
-	apiBaseURL    string
-	worktreePath  string
-	issueBackends IssueBackendFactory
-	dispatcher    *connector.Dispatcher
-	ops           map[string]opHandler
+	store            store.Store
+	apiToken         string
+	runTokenKey      []byte
+	apiBaseURL       string
+	worktreePath     string
+	localSettingsDir string
+	issueBackends    IssueBackendFactory
+	dispatcher       *connector.Dispatcher
+	ops              map[string]opHandler
 
 	// internalEvents is the C14 internal-event loopback ingress backing the
 	// emit-event op (see internal/trigger/internal_source.go).
@@ -117,13 +121,14 @@ type Module struct {
 // a nil store, Register registers nothing.
 func NewModule(cfg Config) *Module {
 	m := &Module{
-		store:         cfg.Store,
-		apiToken:      strings.TrimSpace(cfg.APIToken),
-		runTokenKey:   cfg.RunTokenKey,
-		apiBaseURL:    strings.TrimSpace(cfg.APIBaseURL),
-		worktreePath:  cfg.WorktreePath,
-		issueBackends: cfg.IssueBackends,
-		dispatcher:    cfg.Dispatcher,
+		store:            cfg.Store,
+		apiToken:         strings.TrimSpace(cfg.APIToken),
+		runTokenKey:      cfg.RunTokenKey,
+		apiBaseURL:       strings.TrimSpace(cfg.APIBaseURL),
+		worktreePath:     cfg.WorktreePath,
+		localSettingsDir: strings.TrimSpace(cfg.LocalSettingsDir),
+		issueBackends:    cfg.IssueBackends,
+		dispatcher:       cfg.Dispatcher,
 
 		watchPollInterval:      defaultWatchPollInterval,
 		watchHeartbeatInterval: defaultWatchHeartbeatInterval,
@@ -505,6 +510,7 @@ type execTaskParams struct {
 	TaskRunID          string   `json:"taskRunId"`
 	DriverStepID       string   `json:"driverStepId"`
 	WorkerProfileID    string   `json:"workerProfileId"`
+	Runner             string   `json:"runner"`
 	ProviderProfile    string   `json:"providerProfile"`
 	ParentSessionID    string   `json:"parentSessionId"`
 	NodeID             string   `json:"nodeId"`
@@ -513,6 +519,7 @@ type execTaskParams struct {
 	LeaseToken         string   `json:"leaseToken"`
 	SupportedProviders []string `json:"supportedProviders"`
 	Capabilities       []string `json:"capabilities"`
+	RepoRef            string   `json:"repoRef"`
 	SandboxPlacement   struct {
 		Provider  string `json:"provider"`
 		SandboxID string `json:"sandboxId"`
@@ -527,13 +534,14 @@ type execTaskParams struct {
 }
 
 func (p execTaskParams) requestOptions(ws string, id driverIdentity, fencingToken int64) driverpkg.TaskRunRequestOptions {
-	return driverpkg.TaskRunRequestOptions{
+	opts := driverpkg.TaskRunRequestOptions{
 		WorkspaceKey:       ws,
 		DriverRunID:        id.RunID,
 		DriverStepID:       p.DriverStepID,
 		TaskRunID:          p.TaskRunID,
 		TaskID:             p.TaskID,
 		WorkerProfileID:    p.WorkerProfileID,
+		Runner:             p.Runner,
 		ProviderProfile:    p.ProviderProfile,
 		ParentSessionID:    p.ParentSessionID,
 		ParentNodeID:       id.NodeID,
@@ -544,15 +552,20 @@ func (p execTaskParams) requestOptions(ws string, id driverIdentity, fencingToke
 		LeaseToken:         p.LeaseToken,
 		SupportedProviders: p.SupportedProviders,
 		Capabilities:       p.Capabilities,
+		DeferCompletion:    p.DeferCompletion,
+		Input:              p.Input,
 		SandboxPlacement: domain.TaskRunPlacement{
 			Provider:  p.SandboxPlacement.Provider,
 			SandboxID: p.SandboxPlacement.SandboxID,
 			CWD:       p.SandboxPlacement.CWD,
-			RepoRef:   p.SandboxPlacement.RepoRef,
+			RepoRef:   firstNonEmpty(p.SandboxPlacement.RepoRef, p.RepoRef),
 		},
-		DeferCompletion: p.DeferCompletion,
-		Input:           p.Input,
 	}
+	if strings.TrimSpace(p.Runner) == "" {
+		opts.ProviderProfile = p.ProviderProfile
+		opts.SupportedProviders = p.SupportedProviders
+	}
+	return opts
 }
 
 func (m *Module) execTask(ctx context.Context, ws string, id driverIdentity, body []byte) (any, error) {
@@ -569,9 +582,11 @@ func (m *Module) execTask(ctx context.Context, ws string, id driverIdentity, bod
 	}
 	opts := params.requestOptions(ws, id, fencingToken)
 	executor := driverpkg.HostBridgeTaskExecutor{
-		Store:        m.store,
-		WorktreePath: m.worktreePath,
-		APIBaseURL:   m.apiBaseURL,
+		Store:            m.store,
+		WorktreePath:     m.worktreePath,
+		APIBaseURL:       m.apiBaseURL,
+		LocalSettingsDir: m.localSettingsDir,
+		WorktreeResolver: driverpkg.LocalTaskWorktreeResolver{Store: m.store},
 	}
 	if params.EnqueueOnly {
 		outcome, err := driverpkg.EnqueueTaskRunWithResult(ctx, m.store, opts, executor)

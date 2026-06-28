@@ -71,7 +71,7 @@ func TestNormalizeInternalEventType(t *testing.T) {
 		{raw: "issue.create", want: "issue.created"},
 		{raw: "issue.update", want: "issue.updated"},
 		{raw: "issue.close", want: "issue.closed"},
-		{raw: "task.park", want: "task.parked"},
+		{raw: "task.block", want: "task.blocked"},
 		{raw: "run.complete", want: "run.completed"},
 		{raw: "run.fail", want: "run.failed"},
 		{raw: "run.cancel", want: "run.cancelled"},

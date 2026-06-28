@@ -73,8 +73,50 @@ var subprocessEnvSensitiveFragments = []string{
 	"API_KEY",
 }
 
+// trustedLocalProviderCredentials are the provider-credential env vars the
+// local task runner is allowed to inherit so the backend CLI authenticates
+// exactly as local tooling does (§4.3). This widening is STRICTLY scoped to the
+// local-task-runner entrypoint — Daytona/remote runners keep the strict filter
+// in scopedSubprocessBaseEnv (which treats every one of these as sensitive) so
+// a credential never leaks into a remote sandbox.
+var trustedLocalProviderCredentials = map[string]struct{}{
+	"ANTHROPIC_API_KEY":              {},
+	"OPENAI_API_KEY":                 {},
+	"CODEX_API_KEY":                  {},
+	"CODEX_HOME":                     {},
+	"GEMINI_API_KEY":                 {},
+	"GOOGLE_API_KEY":                 {},
+	"GOOGLE_APPLICATION_CREDENTIALS": {},
+	"CURSOR_API_KEY":                 {},
+	// GitHub tokens enable the local runner's opt-in pull-request delivery.
+	// They remain in subprocessEnvSensitiveExact so the strict filter still
+	// denies them to Daytona/remote runners; localTaskRunnerBaseEnv adds them
+	// back ONLY for the local-task-runner entrypoint.
+	"GITHUB_TOKEN": {},
+	"GH_TOKEN":     {},
+}
+
 func driverRuntimeBaseEnv(env []string) []string {
 	return scopedSubprocessBaseEnv(env)
+}
+
+// localTaskRunnerBaseEnv is the trusted-local superset of the strict driver
+// allowlist: it keeps everything scopedSubprocessBaseEnv admits (PATH/HOME/…)
+// and additionally admits the provider-credential allowlist so the local
+// backend CLI can authenticate. It is used ONLY for the local-task-runner
+// entrypoint.
+func localTaskRunnerBaseEnv(env []string) []string {
+	out := scopedSubprocessBaseEnv(env)
+	for _, entry := range env {
+		name, _, ok := strings.Cut(entry, "=")
+		if !ok {
+			continue
+		}
+		if _, allowed := trustedLocalProviderCredentials[strings.TrimSpace(name)]; allowed {
+			out = append(out, entry)
+		}
+	}
+	return out
 }
 
 func scopedSubprocessBaseEnv(env []string) []string {

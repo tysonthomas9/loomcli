@@ -1,16 +1,15 @@
 #!/usr/bin/env bash
 # run-github-review-codex-stack.sh — bring up the A1 github-review-agent stack
 # in one Podman container, end to end, using the SAME proven container
-# machinery as scripts/run-slack-codex-epic-runner-stack.sh (Dockerfile.dev
+# machinery as smoke-test/smoke-test-slack-epic-runner-stack.sh (Dockerfile.dev
 # image, embedded fleet-db sidecar, host ~/.codex mounted read-only with a
 # writable CODEX_HOME, LOOM_DRIVER_EXECUTOR, health wait, builtin-workflow
 # flue-dist registration).
 #
 # What differs from the slack stack:
-#   * the injected task runner is deploy/agents/a1-github-review/codex-review-runner.mjs
-#     (mounted into the container; LOOM_DRIVER_TASK_RUNNER_CMD_JSON points at
-#     it, wrapped in `env CODEX_HOME=…` because the task bridge strips CODEX_*
-#     from the runner's inherited env — see internal/driver/env.go);
+#   * task execution goes through scripts/loom-task-runner-invoker.mjs, which
+#     resolves the named github-review-task-runner workflow from the same
+#     registered driver bundle;
 #   * after health it seals the connector vault key + the gh-token credential
 #     (from `gh auth token`) + a freshly generated inbound webhook secret, then
 #     runs deploy/agents/a1-github-review/setup.sh to create the connector,
@@ -29,13 +28,11 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 # ── Reused mount sources (verbatim shapes from the slack stack) ────────────
-REVIEW_RUNNER="${REVIEW_RUNNER:-${ROOT_DIR}/deploy/agents/a1-github-review/codex-review-runner.mjs}"
+TASK_RUNNER="${TASK_RUNNER:-${ROOT_DIR}/scripts/loom-task-runner-invoker.mjs}"
 SETUP_SCRIPT="${SETUP_SCRIPT:-${ROOT_DIR}/deploy/agents/a1-github-review/setup.sh}"
 REVIEW_WORKFLOW_SOURCE="${REVIEW_WORKFLOW_SOURCE:-${ROOT_DIR}/internal/workflows/builtin/github-review-agent.ts}"
+REVIEW_TASK_RUNNER_SOURCE="${REVIEW_TASK_RUNNER_SOURCE:-${ROOT_DIR}/internal/workflows/builtin/github-review-task-runner.ts}"
 LOOM_SDK_DIR="${LOOM_SDK_DIR:-${ROOT_DIR}/sdk}"
-FLUE_REPO="${FLUE_REPO:-${ROOT_DIR}/../flue}"
-FLUE_NODE_MODULES_DIR="${FLUE_NODE_MODULES_DIR:-${FLUE_REPO}/node_modules}"
-FLUE_RUNTIME_DIR="${FLUE_RUNTIME_DIR:-${FLUE_REPO}/packages/runtime}"
 
 CONTAINER="${CONTAINER:-loom-github-review}"
 IMAGE="${IMAGE:-loomcli-dev-github-review}"
@@ -59,7 +56,7 @@ BUILD_IMAGE="${BUILD_IMAGE:-auto}"
 
 CODEX_HOME="${CODEX_HOME:-${HOME}/.codex}"
 CONTAINER_CODEX_AUTH_FILE="${CONTAINER_CODEX_AUTH_FILE:-/root/.codex/auth.json}"
-CONTAINER_REVIEW_RUNNER="${CONTAINER_REVIEW_RUNNER:-/usr/local/bin/codex-review-runner.mjs}"
+CONTAINER_TASK_RUNNER="${CONTAINER_TASK_RUNNER:-/usr/local/bin/loom-task-runner-invoker.mjs}"
 CONTAINER_SETUP_SCRIPT="${CONTAINER_SETUP_SCRIPT:-/usr/local/bin/a1-setup.sh}"
 CONTAINER_REVIEW_DIST="${CONTAINER_REVIEW_DIST:-/tmp/github-review-agent-dist}"
 CONTAINER_DRIVER_WORKDIR="${CONTAINER_DRIVER_WORKDIR:-/root/.loom/workspaces/alpha}"
@@ -201,42 +198,52 @@ ensure_image() {
 }
 
 # source_digest — same digest scheme the slack stack uses (path NUL source
-# NUL), but for the github-review-agent builtin source path.
+# NUL), across the github-review-agent and sibling review task runner sources.
 source_digest() {
   node -e '
 const crypto = require("node:crypto");
 const fs = require("node:fs");
-const file = process.argv[1];
 const hash = crypto.createHash("sha256");
-hash.update("workflows/github-review-agent.ts");
-hash.update(Buffer.from([0]));
-hash.update(fs.readFileSync(file));
-hash.update(Buffer.from([0]));
+for (const pair of process.argv.slice(1)) {
+  const [name, file] = pair.split("=", 2);
+  hash.update(name);
+  hash.update(Buffer.from([0]));
+  hash.update(fs.readFileSync(file));
+  hash.update(Buffer.from([0]));
+}
 console.log("sha256:" + hash.digest("hex"));
-' "$REVIEW_WORKFLOW_SOURCE"
+' \
+    "workflows/github-review-agent.ts=${REVIEW_WORKFLOW_SOURCE}" \
+    "workflows/github-review-task-runner.ts=${REVIEW_TASK_RUNNER_SOURCE}"
 }
 
-# write_review_dist — clones the slack stack's write_epic_runner_dist: vendor
-# @loom/sdk (package.json + flue.js), rewrite the workflow's
-# `from "@loom/sdk/flue"` import to the vendored path, and emit the same
-# process.send / process.on("message") server.mjs IPC shim the driver executor
-# speaks. The github-review-agent's run(ctx) uses createLoomDriverClient({input}),
-# which reads the executor-provided LOOM_DRIVER_* env, so the shim's
-# run({payload, requestId}) call is sufficient.
+# write_review_dist packages the workflow and its sibling runner into one
+# native Flue-style dist. The server dispatches by FLUE_CLI_NAME, so the same
+# bundle can run the driver workflow or the named task runner via the generic
+# invoker.
 write_review_dist() {
   local dist="$1"
-  mkdir -p "${dist}/node_modules/@loom/sdk"
+  mkdir -p "${dist}/node_modules/@loom/sdk" "${dist}/workflows"
   cp "${LOOM_SDK_DIR}/package.json" "${dist}/node_modules/@loom/sdk/package.json"
-  cp "${LOOM_SDK_DIR}/flue.js" "${dist}/node_modules/@loom/sdk/flue.js"
+  cp "${LOOM_SDK_DIR}/driver.js" "${dist}/node_modules/@loom/sdk/driver.js"
+  cp "${LOOM_SDK_DIR}/runner.js" "${dist}/node_modules/@loom/sdk/runner.js"
+  cp "${LOOM_SDK_DIR}/internal.js" "${dist}/node_modules/@loom/sdk/internal.js"
+  cp "$REVIEW_WORKFLOW_SOURCE" "${dist}/workflows/github-review-agent.mjs"
+  cp "$REVIEW_TASK_RUNNER_SOURCE" "${dist}/workflows/github-review-task-runner.mjs"
   node -e '
 const fs = require("node:fs");
-const [sourcePath, outPath] = process.argv.slice(1);
-const source = fs.readFileSync(sourcePath, "utf8")
-  .replace(/from ["'\'']@loom\/sdk\/flue["'\''];/, "from \"./node_modules/@loom/sdk/flue.js\";");
-fs.writeFileSync(outPath, source);
-' "$REVIEW_WORKFLOW_SOURCE" "${dist}/workflow.mjs"
+const dist = process.argv[1];
+fs.writeFileSync(dist + "/loom-driver.json", JSON.stringify({
+  runners: JSON.stringify([
+    { name: "github-review-task-runner", kind: "flue-workflow", entrypoint: "github-review-task-runner" }
+  ])
+}, null, 2) + "\n");
+' "$dist"
   cat > "${dist}/server.mjs" <<'EOF'
-import { run } from "./workflow.mjs";
+const workflowLoaders = {
+  "github-review-agent": () => import("./workflows/github-review-agent.mjs"),
+  "github-review-task-runner": () => import("./workflows/github-review-task-runner.mjs"),
+};
 
 let completed = false;
 
@@ -259,7 +266,20 @@ async function invoke(message) {
   if (completed) return;
   completed = true;
   try {
-    const result = await run({ payload: message.payload || {}, requestId: message.requestId });
+    const workflowName = process.env.FLUE_CLI_NAME || "github-review-agent";
+    const loader = workflowLoaders[workflowName];
+    if (!loader) {
+      throw new Error("unknown workflow " + JSON.stringify(workflowName));
+    }
+    const mod = await loader();
+    if (!mod || typeof mod.run !== "function") {
+      throw new Error("workflow " + JSON.stringify(workflowName) + " does not export run()");
+    }
+    const result = await mod.run({
+      payload: message.payload || {},
+      requestId: message.requestId,
+      env: process.env,
+    });
     send({ type: "result", requestId: message.requestId, result: normalizeResult(result) });
   } catch (error) {
     send({
@@ -291,7 +311,7 @@ EOF
 register_review_workflow() {
   require_path "$REVIEW_WORKFLOW_SOURCE"
   require_path "${LOOM_SDK_DIR}/package.json"
-  require_path "${LOOM_SDK_DIR}/flue.js"
+  require_path "${LOOM_SDK_DIR}/driver.js"
 
   local build_dir digest
   build_dir="$(mktemp -d "${TMPDIR:-/tmp}/loom-github-review-dist.XXXXXX")"
@@ -316,6 +336,7 @@ register_review_workflow() {
       --workflow "$A1_WORKFLOW_NAME" \
       --source-ref "builtin://workflows/${A1_WORKFLOW_NAME}/versions/${digest}" \
       --source-digest "$digest" \
+      --trusted \
       --activate \
       --json >/dev/null
   # build_dir is left for the OS temp reaper — this script never runs shell rm.
@@ -372,25 +393,22 @@ main() {
   require_cmd podman
   require_cmd gh
   require_cmd openssl
-  require_path "$REVIEW_RUNNER"
+  require_path "$TASK_RUNNER"
   require_path "$SETUP_SCRIPT"
   require_path "$REVIEW_WORKFLOW_SOURCE"
+  require_path "$REVIEW_TASK_RUNNER_SOURCE"
   require_path "$CODEX_HOME"
   require_path "${CODEX_HOME}/auth.json"
-  require_path "$FLUE_NODE_MODULES_DIR"
-  require_path "${FLUE_RUNTIME_DIR}/dist/index.mjs"
 
   resolve_secrets
   ensure_fleet_db
   ensure_image
 
-  # The codex-review-runner reads everything off LOOM_TASK_RUN_REQUEST_JSON and
-  # process.env.CODEX_HOME. The task bridge strips CODEX_* from the runner's
-  # inherited env (internal/driver/env.go), so the command JSON wraps node in
-  # `env CODEX_HOME=…` to re-inject the writable CODEX_HOME for the runner (and
-  # the codex child it spawns). The runner itself takes no positional args.
+  # The task bridge strips CODEX_* from the inherited runner env
+  # (internal/driver/env.go), so wrap the generic invoker with `env CODEX_HOME`
+  # for the review task runner and the codex child it spawns.
   local runner_cmd_json
-  runner_cmd_json="$(json_array env "CODEX_HOME=${CONTAINER_CODEX_HOME}" node "$CONTAINER_REVIEW_RUNNER")"
+  runner_cmd_json="$(json_array env "CODEX_HOME=${CONTAINER_CODEX_HOME}" node "$CONTAINER_TASK_RUNNER")"
 
   log "recreating container ${CONTAINER} from ${IMAGE}"
   podman rm -f "$CONTAINER" >/dev/null 2>&1 || true
@@ -407,10 +425,8 @@ main() {
     -e "LOOM_FLUE_AGENT_MODEL=${LOOM_FLUE_AGENT_MODEL}"
     -e "LOOM_CONNECTOR_VAULT_KEY=${LOOM_CONNECTOR_VAULT_KEY}"
     -v "${FLEET_DB_BIN}:/usr/local/bin/fleet-db:ro"
-    -v "${REVIEW_RUNNER}:${CONTAINER_REVIEW_RUNNER}:ro"
+    -v "${TASK_RUNNER}:${CONTAINER_TASK_RUNNER}:ro"
     -v "${SETUP_SCRIPT}:${CONTAINER_SETUP_SCRIPT}:ro"
-    -v "${FLUE_NODE_MODULES_DIR}:/usr/local/bin/node_modules:ro"
-    -v "${FLUE_RUNTIME_DIR}:/usr/local/bin/packages/runtime:ro"
     -v "${CODEX_HOME}:/root/.codex:ro"
   )
 

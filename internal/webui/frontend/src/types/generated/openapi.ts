@@ -2268,6 +2268,7 @@ export interface components {
       path: string;
       default_branch: string;
       remote: string;
+      remote_url?: string;
       source_repo_id?: string;
       /** @default [] */
       groups: string[];

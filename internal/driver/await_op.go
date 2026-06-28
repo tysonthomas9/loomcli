@@ -5,9 +5,9 @@ package driver
 // AwaitEvent is the server-side flow behind POST
 // /api/workspaces/{ws}/driver/events/await: validate (RULES 1/3/5), then ONE
 // store.AwaitStore.RegisterAwaitAndCheck call (RULE 2 — never a separate
-// read-then-park), and either return the recorded event inline (satisfied,
+// read-then-register), and either return the recorded event inline (satisfied,
 // including idempotent replay of a finished await) or suspend the run with
-// the caller's fenced owner credentials so only the live executor can park
+// the caller's fenced owner credentials so only the live executor can suspend
 // its run.
 //
 // The instance key is derived server-side from the AUTHENTICATED run identity
@@ -53,7 +53,7 @@ const AwaitTotalSuspendCapEnvVar = "LOOM_AWAIT_TOTAL_SUSPEND_CAP_MS"
 // no override is configured.
 const DefaultAwaitTotalSuspendCap = 30 * 24 * time.Hour
 
-// AwaitOutcomeSuspended is the AwaitEventOutcome.Status for a parked await:
+// AwaitOutcomeSuspended is the AwaitEventOutcome.Status for a pending await:
 // the run is suspended and the runner must exit; resume re-runs from the top.
 // Terminal outcomes carry the await row's own status (satisfied, timed_out).
 const AwaitOutcomeSuspended = "suspended"
@@ -103,9 +103,9 @@ type AwaitEventOutcome struct {
 	Run      *domain.DriverRun
 }
 
-// AwaitEvent runs the check-then-park flow for one await of the verified run.
-// On a parked registration it suspends the run; a resolution that wins the
-// accepted park->suspend window (domain.ErrDriverRunAlreadyResumed, or a
+// AwaitEvent runs the register-and-check flow for one await of the verified run.
+// On a pending registration it suspends the run; a resolution that wins the
+// accepted pending->suspend window (domain.ErrDriverRunAlreadyResumed, or a
 // terminal row observed by the post-suspend recheck) is never lost.
 func AwaitEvent(ctx context.Context, st store.Store, opts AwaitEventOptions) (*AwaitEventOutcome, error) {
 	if opts.AwaitIndex < 1 {
@@ -122,7 +122,7 @@ func AwaitEvent(ctx context.Context, st store.Store, opts AwaitEventOptions) (*A
 		return nil, err
 	}
 	instanceKey := domain.AwaitInstanceKey(opts.RunID, opts.AwaitIndex)
-	// RULE 2: one atomic registration scan + park. Idempotent on the
+	// RULE 2: one atomic registration scan + pending row. Idempotent on the
 	// instance key: a finished await replays its recorded event (RULE 3).
 	res, err := st.Awaits().RegisterAwaitAndCheck(ctx, opts.WorkspaceKey, store.AwaitRegistration{
 		InstanceKey: instanceKey,
@@ -140,38 +140,38 @@ func AwaitEvent(ctx context.Context, st store.Store, opts AwaitEventOptions) (*A
 	return suspendForAwait(ctx, st, opts, instanceKey, res.Instance)
 }
 
-// suspendForAwait is the parked leg: fenced suspend, tolerating a resolution
-// that won the accepted park->suspend window.
+// suspendForAwait is the pending leg: fenced suspend, tolerating a resolution
+// that won the accepted pending->suspend window.
 func suspendForAwait(ctx context.Context, st store.Store, opts AwaitEventOptions, instanceKey string, pending *domain.AwaitInstance) (*AwaitEventOutcome, error) {
 	run, err := st.DriverRuns().Suspend(ctx, opts.WorkspaceKey, opts.RunID,
 		opts.NodeID, opts.LeaseID, opts.FencingToken, instanceKey)
 	if errors.Is(err, domain.ErrDriverRunAlreadyResumed) {
-		// The await resolved between park and suspend and the backend
-		// recorded a pending-resume marker (fleet-db, AW3): do not park —
+		// The await resolved between registration and suspend and the backend
+		// recorded a pending-resume marker (fleet-db, AW3): do not suspend —
 		// continue inline with the recorded event.
 		inst, replayErr := st.Awaits().GetSatisfiedAwait(ctx, opts.WorkspaceKey, instanceKey)
 		if replayErr != nil {
-			return nil, fmt.Errorf("replay await %s resolved in park->suspend window: %w", instanceKey, replayErr)
+			return nil, fmt.Errorf("replay await %s resolved in pending->suspend window: %w", instanceKey, replayErr)
 		}
 		return &AwaitEventOutcome{Status: string(inst.Status), Instance: inst}, nil
 	}
 	if err != nil {
 		return nil, fmt.Errorf("suspend driver run %s for await %s: %w", opts.RunID, instanceKey, err)
 	}
-	closeParkSuspendWindow(ctx, st, opts.WorkspaceKey, opts.RunID, instanceKey)
+	closePendingSuspendWindow(ctx, st, opts.WorkspaceKey, opts.RunID, instanceKey)
 	return &AwaitEventOutcome{Status: AwaitOutcomeSuspended, Instance: pending, Run: run}, nil
 }
 
-// closeParkSuspendWindow re-checks the await after the suspend committed. On
+// closePendingSuspendWindow re-checks the await after the suspend committed. On
 // backends without a pending-resume marker (memstore) a resolver that ran
-// inside the park->suspend window saw a still-running run, tolerated
+// inside the pending->suspend window saw a still-running run, tolerated
 // ErrInvalidTransition and moved on — so the now-suspended run would sleep
 // until its deadline. Any resolution committed before our suspend is visible
 // here (the suspend already landed), so a tolerant resume closes the hole.
 // Best-effort: failures leave the deadline sweeper as the backstop, and the
 // op still reports suspended — the runner exits and the re-queued run is
 // claimed normally.
-func closeParkSuspendWindow(ctx context.Context, st store.Store, ws, runID, instanceKey string) {
+func closePendingSuspendWindow(ctx context.Context, st store.Store, ws, runID, instanceKey string) {
 	inst, err := st.Awaits().GetSatisfiedAwait(ctx, ws, instanceKey)
 	if err != nil {
 		return // still pending (ErrNotFound) or transient read failure
@@ -182,7 +182,7 @@ func closeParkSuspendWindow(ctx context.Context, st store.Store, ws, runID, inst
 }
 
 // enforceAwaitBudget applies the locked per-run limits (AW8) BEFORE
-// registration so a run can never park beyond its budget: the await-count
+// registration so a run can never suspend beyond its budget: the await-count
 // budget (awaitIndex bounded) and the total-suspend cap (time actually spent
 // suspended on prior awaits plus the requested timeout). Replays re-pass
 // deterministically under the same configuration: awaits 1..n-1 are terminal

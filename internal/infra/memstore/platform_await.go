@@ -17,10 +17,10 @@ import (
 // It deliberately carries no mutex of its own: every method synchronizes on
 // the trigger-event journal's lock, so RegisterAwaitAndCheck's journal scan
 // and index insert form one critical section with respect to event appends —
-// the Go-mutex equivalent of fleet-db's single await_check_then_park Lua
+// the Go-mutex equivalent of fleet-db's single await_register_and_check Lua
 // invocation (RULE 2). An event appended concurrently either lands before the
-// scan, satisfying the await immediately, or after the park, where the
-// dispatch matcher finds the parked instance via ListAwaitsByPattern. There
+// scan, satisfying the await immediately, or after registration, where the
+// dispatch matcher finds the pending instance via ListAwaitsByPattern. There
 // is no interleave window for a lost wakeup.
 //
 // The registration scan covers the trigger-event journal; run.finished
@@ -70,11 +70,11 @@ func (s *awaitStore) resumeEligible(ws, instanceKey string) bool {
 	return row.Status == domain.AwaitSatisfied || row.Status == domain.AwaitTimedOut
 }
 
-// RegisterAwaitAndCheck atomically checks the journal and otherwise parks the
+// RegisterAwaitAndCheck atomically checks the journal and otherwise suspends the
 // await (RULE 2: one call, one critical section). Idempotent on InstanceKey:
 // a pending row is returned unchanged (crash-before-suspend replay) and a
 // terminal row replays its recorded outcome with Satisfied=true so the caller
-// never re-parks a finished await (RULE 3).
+// never re-holds a finished await (RULE 3).
 func (s *awaitStore) RegisterAwaitAndCheck(_ context.Context, workspaceKey string, in store.AwaitRegistration) (*store.AwaitResult, error) {
 	now := time.Now().UTC()
 	inst, err := in.Instance(workspaceKey, now)

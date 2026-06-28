@@ -17,6 +17,8 @@ import {
   getTaskLogPhases,
   startAgent,
   EPIC_RUNNER_WORKFLOW_NAME,
+  createWorkspaceAgent,
+  deleteWorkspaceAgent,
   startWorkflowRun,
 } from "@/hooks/api";
 import type { IssueTab } from "@/api/issues";
@@ -29,7 +31,7 @@ import {
 import { useStore } from "zustand";
 
 import { useAgentStoreInstance, useIssueStoreInstance } from "@/hooks/common";
-import { useWorkspaceContext } from "@/hooks/workspace";
+import { useLocalSettings, useWorkspaceContext } from "@/hooks/workspace";
 import { useIssueTabPersistence } from "@/hooks/issues";
 import type {
   Issue,
@@ -41,6 +43,11 @@ import type {
 } from "@/types";
 import type { Status } from "@/types/issue";
 import { formatStatusLabel, getReviewType, isPRUrl } from "@/utils/issue";
+import {
+  epicRunnerRuntimePayload,
+  issueRepoName,
+  leadAgentRepoNames,
+} from "@/utils/epicRunnerPayload";
 
 import {
   getBackendFromSessionName,
@@ -288,6 +295,45 @@ function formatUnknownError(error: unknown, fallback: string): string {
   return error instanceof Error && error.message ? error.message : fallback;
 }
 
+const MAX_EPIC_LEAD_NAME_SLUG_LENGTH = 48;
+
+function epicLeadNameSlug(epicId: string): string {
+  const slug = epicId
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, MAX_EPIC_LEAD_NAME_SLUG_LENGTH)
+    .replace(/-+$/g, "");
+
+  return slug || "epic";
+}
+
+function nextEpicLeadName(
+  epicId: string,
+  existingNames: Iterable<string>,
+): string {
+  const existing = new Set(
+    Array.from(existingNames, (name) => name.toLowerCase()),
+  );
+  const base = `lead-${epicLeadNameSlug(epicId)}`;
+  if (!existing.has(base.toLowerCase())) return base;
+
+  for (let i = 2; ; i += 1) {
+    const candidate = `${base}-${i}`;
+    if (!existing.has(candidate.toLowerCase())) return candidate;
+  }
+}
+
+function isAgentNameConflict(error: unknown): boolean {
+  const message = formatUnknownError(error, "").toLowerCase();
+  return (
+    message.includes("already") ||
+    message.includes("conflict") ||
+    message.includes("exists")
+  );
+}
+
 function LatestRunFailureBanner({
   run,
   onViewRuns,
@@ -394,7 +440,14 @@ function DefaultContent({
   isMaximized: isPanelMaximized,
   onToggleMaximize,
 }: DefaultContentProps): JSX.Element {
-  const { workspaceId, workspace, repos } = useWorkspaceContext();
+  const {
+    workspaceId,
+    workspace,
+    repos,
+    agents: workspaceAgents,
+    upsertAgent,
+  } = useWorkspaceContext();
+  const { settings: localSettings } = useLocalSettings();
   const [isSavingTitle, setIsSavingTitle] = useState(false);
   const [isSavingStatus, setIsSavingStatus] = useState(false);
   const [isSavingAssignee, setIsSavingAssignee] = useState(false);
@@ -423,12 +476,7 @@ function DefaultContent({
   const { sessions: taskRuns } = useTaskSessions(taskRunId);
   const failedRun = useMemo(() => latestFailedRun(taskRuns), [taskRuns]);
 
-  const currentRepo = useMemo(() => {
-    if (issue?.repo) return issue.repo;
-    if (issue?.source_repo) return issue.source_repo;
-    const repoLabel = issue?.labels?.find((l) => l.startsWith("repo:"));
-    return repoLabel ? repoLabel.slice(5) : null;
-  }, [issue?.labels, issue?.repo, issue?.source_repo]);
+  const currentRepo = useMemo(() => issueRepoName(issue), [issue]);
 
   const [taskLogPhases, setTaskLogPhases] = useState<
     ("planning" | "implementation")[]
@@ -883,15 +931,72 @@ function DefaultContent({
 
     setIsStartingEpicRun(true);
     try {
-      const run = await startWorkflowRun(
-        workspaceId,
-        EPIC_RUNNER_WORKFLOW_NAME,
-        {
+      const runtimePayload = epicRunnerRuntimePayload({
+        localSettings,
+        repos,
+        currentRepo,
+      });
+      const repoNames = leadAgentRepoNames(repos, currentRepo);
+      const leadNames = new Set<string>([
+        ...workspaceAgents.map((agent) => agent.name),
+        ...agents.map((agent) => agent.name),
+      ]);
+      let leadAgentName = "";
+      let createdLeadAgentName = "";
+      let lastCreateError: unknown = null;
+
+      for (let attempt = 0; attempt < 5; attempt += 1) {
+        const candidate = nextEpicLeadName(issue.id, leadNames);
+        leadNames.add(candidate);
+
+        try {
+          const leadAgent = await createWorkspaceAgent(workspaceId, {
+            name: candidate,
+            role_name: "lead",
+            auto: false,
+            cross_repo: repoNames.length === 0,
+            repos: repoNames,
+          });
+          upsertAgent?.(leadAgent);
+          leadAgentName = leadAgent.name;
+          createdLeadAgentName = leadAgent.name;
+          break;
+        } catch (err) {
+          lastCreateError = err;
+          if (!isAgentNameConflict(err)) throw err;
+        }
+      }
+
+      if (!leadAgentName) {
+        throw lastCreateError instanceof Error
+          ? lastCreateError
+          : new Error("Unable to create lead agent");
+      }
+
+      let run;
+      try {
+        run = await startWorkflowRun(workspaceId, EPIC_RUNNER_WORKFLOW_NAME, {
           epicId: issue.id,
+          leadName: leadAgentName,
           requestedBy: "ui",
-        },
-      );
-      showToast(`Epic runner queued: ${run.run_id}`, { type: "success" });
+          ...runtimePayload,
+        });
+      } catch (err) {
+        if (createdLeadAgentName) {
+          deleteWorkspaceAgent(workspaceId, createdLeadAgentName).catch(
+            (cleanupErr: unknown) => {
+              console.warn(
+                "failed to delete epic-runner lead after workflow start failed",
+                cleanupErr,
+              );
+            },
+          );
+        }
+        throw err;
+      }
+      showToast(`Epic runner queued for ${leadAgentName}: ${run.run_id}`, {
+        type: "success",
+      });
     } catch (err) {
       showToast(
         `Epic runner failed: ${formatUnknownError(err, "Unable to start workflow")}`,
@@ -900,7 +1005,18 @@ function DefaultContent({
     } finally {
       setIsStartingEpicRun(false);
     }
-  }, [issue, isStartingEpicRun, showToast, workspaceId]);
+  }, [
+    agents,
+    currentRepo,
+    issue,
+    isStartingEpicRun,
+    localSettings?.agent_runtime.default,
+    repos,
+    showToast,
+    upsertAgent,
+    workspaceAgents,
+    workspaceId,
+  ]);
 
   const handleAddDependency = useCallback(
     async (dependsOnId: string, type: DependencyType) => {

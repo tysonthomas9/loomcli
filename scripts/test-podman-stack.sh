@@ -583,7 +583,7 @@ write_workflow_fixtures() {
   # one granted connector read and one ungranted merge so the grant + audit
   # legs have real egress decisions to assert.
   cat >"$TMP_ROOT/webhook-echo.ts" <<'EOF'
-import { createLoomDriverClient } from '@loom/sdk/flue';
+import { createLoomDriverClient } from '@loom/sdk/driver';
 
 const FORBIDDEN_ENV = /(FLEET_DB|FLEETDB|VAULT|SIGNING|API_TOKEN|API_KEY|LEASE|FENCING|SECRET|PASSWORD|WORKER_TOKEN)/i;
 
@@ -633,7 +633,7 @@ EOF
   # the resume decision. Suspends (WorkflowSuspended) until the
   # session-authenticated approval endpoint resolves the await.
   cat >"$TMP_ROOT/approval-gate.ts" <<'EOF'
-import { createLoomDriverClient } from '@loom/sdk/flue';
+import { createLoomDriverClient } from '@loom/sdk/driver';
 
 export async function run(ctx) {
   const input = ctx.payload || {};
@@ -697,7 +697,7 @@ trigger_workflow() {
 # DOES accept epic_id (fleet-db internal/api/platform.go createDriverRun ->
 # createDriverRunRequest.EpicID), keeping the simple {epicId,leadName} payload
 # so no worker-spawn placement is requested (the `loom epic run` CLI path sets
-# provider/worker request defaults that park tasks on this embedded-executor
+# provider/worker request defaults that block tasks on this embedded-executor
 # stack). The embedded executor then claims and drains the queued run exactly
 # as the HTTP-triggered path does — including the same untrusted trust-gate
 # refusal, since placement is evaluated at claim time regardless of origin.
@@ -1093,10 +1093,10 @@ stage4_await_approval() {
   run_id="$(trigger_workflow approval-gate "$(jq -nc --arg p "$pattern" '{pattern:$p,timeoutMs:120000}')")"
 
   wait_until 90 "run ${run_id} suspended_awaiting_event" run_status_is "$run_id" suspended_awaiting_event ||
-    die "approval-gate run never parked on its await (status: $(run_status "$run_id"))"
+    die "approval-gate run never suspended on its await (status: $(run_status "$run_id"))"
   log_pass "S4a run ${run_id} suspended on ${pattern}"
 
-  # Cross-process durability: bounce serve while the run is parked.
+  # Cross-process durability: bounce serve while the run is suspended.
   restart_serve await || die "failed to restart loom-serve"
   wait_http "$SERVE_URL/api/health" "loom serve after the await restart" 120
   run_status_is "$run_id" suspended_awaiting_event ||

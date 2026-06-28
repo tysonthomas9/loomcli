@@ -2,16 +2,27 @@ package driver
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
+
+// NoopTaskProviderEnvVar gates the test-only noop/local-noop provider profile
+// (§4.5). When it is not set to "1" a noop provider fails closed with
+// provider_unsupported in both preflight and execute — production must never
+// auto-complete a task run without real execution evidence.
+const NoopTaskProviderEnvVar = "LOOM_DRIVER_ENABLE_TEST_NOOP_PROVIDER"
+
+// testNoopProviderEnabled reports whether the test-only noop provider gate is
+// explicitly enabled. Default (unset) is fail-closed.
+func testNoopProviderEnabled() bool {
+	return strings.TrimSpace(os.Getenv(NoopTaskProviderEnvVar)) == "1"
+}
 
 type TaskRunRequestOptions struct {
 	WorkspaceKey       string
@@ -20,6 +31,12 @@ type TaskRunRequestOptions struct {
 	TaskRunID          string
 	TaskID             string
 	WorkerProfileID    string
+	Runner             string
+	RunnerRef          string
+	RunnerKind         string
+	RunnerEntrypoint   string
+	RunnerVersionID    string
+	RunnerTrustLevel   domain.DriverTrustLevel
 	ProviderProfile    string
 	ParentSessionID    string
 	ParentNodeID       string
@@ -68,6 +85,12 @@ type TaskExecRequest struct {
 	TaskRunID        string                  `json:"task_run_id"`
 	TaskID           string                  `json:"task_id"`
 	WorkerProfileID  string                  `json:"worker_profile_id,omitempty"`
+	Runner           string                  `json:"runner,omitempty"`
+	RunnerRef        string                  `json:"runner_ref,omitempty"`
+	RunnerKind       string                  `json:"runner_kind,omitempty"`
+	RunnerEntrypoint string                  `json:"runner_entrypoint,omitempty"`
+	RunnerVersionID  string                  `json:"runner_driver_version_id,omitempty"`
+	RunnerTrustLevel domain.DriverTrustLevel `json:"runner_trust_level,omitempty"`
 	ProviderProfile  string                  `json:"provider_profile,omitempty"`
 	ParentSessionID  string                  `json:"parent_session_id,omitempty"`
 	NodeID           string                  `json:"node_id,omitempty"`
@@ -108,6 +131,12 @@ type TaskProviderPreflighter interface {
 type LocalTaskExecutor struct{}
 
 func (LocalTaskExecutor) PreflightTaskProvider(_ context.Context, opts TaskRunRequestOptions) (TaskRunRequestOptions, error) {
+	if taskRunHasNamedRunner(opts) {
+		return opts, fmt.Errorf("runner %q requires a configured task runner command: %w", opts.Runner, domain.ErrInvalid)
+	}
+	if taskProviderIsNoop(opts.ProviderProfile) && !testNoopProviderEnabled() {
+		return opts, fmt.Errorf("noop provider profile %q requires %s=1 (provider_unsupported): %w", opts.ProviderProfile, NoopTaskProviderEnvVar, domain.ErrInvalid)
+	}
 	return resolveTaskProviderProfile(opts, false)
 }
 
@@ -118,6 +147,16 @@ func (LocalTaskExecutor) ExecuteTask(_ context.Context, req TaskExecRequest) (Ta
 	}
 	switch strings.TrimSpace(req.ProviderProfile) {
 	case "local-noop", "noop":
+		if !testNoopProviderEnabled() {
+			return TaskExecResult{
+				Status:          domain.TaskRunFailed,
+				ExitCode:        2,
+				LogsRef:         "task-run://" + req.TaskRunID + "/logs",
+				RuntimeMetadata: metadata,
+				ErrorClass:      "provider_unsupported",
+				ErrorMessage:    fmt.Sprintf("noop provider profile %q requires %s=1", req.ProviderProfile, NoopTaskProviderEnvVar),
+			}, nil
+		}
 		return TaskExecResult{
 			Status:          domain.TaskRunCompleted,
 			ExitCode:        0,
@@ -159,6 +198,11 @@ type TaskRunRequestResult struct {
 	ErrorClass       string               `json:"errorClass,omitempty"`
 	ErrorMessage     string               `json:"errorMessage,omitempty"`
 	FinishedAt       *time.Time           `json:"finishedAt,omitempty"`
+	Runner           string               `json:"runner,omitempty"`
+	RunnerRef        string               `json:"runnerRef,omitempty"`
+	RunnerKind       string               `json:"runnerKind,omitempty"`
+	RunnerEntrypoint string               `json:"runnerEntrypoint,omitempty"`
+	RunnerVersionID  string               `json:"runnerDriverVersionId,omitempty"`
 	ProviderProfile  string               `json:"providerProfile,omitempty"`
 	// RuntimeMetadata surfaces the runner's runtimeMetadata to the awaiting
 	// workflow (e.g. the github-review-agent reads review_findings off it).
@@ -200,15 +244,20 @@ func EnqueueTaskRunWithResult(ctx context.Context, s store.Store, opts TaskRunRe
 	if preflighter == nil {
 		preflighter = LocalTaskExecutor{}
 	}
-	resolved, err := preflightTaskRunRequest(ctx, opts, preflighter)
-	if err != nil {
-		return nil, err
-	}
-	opts = resolved
 	parent, err := verifyTaskRunRequestParent(ctx, s, opts)
 	if err != nil {
 		return nil, err
 	}
+	resolved, err := resolveTaskRunRequestRunner(ctx, s, opts, parent)
+	if err != nil {
+		return nil, err
+	}
+	opts = resolved
+	resolved, err = preflightTaskRunRequest(ctx, opts, preflighter)
+	if err != nil {
+		return nil, err
+	}
+	opts = resolved
 	if err := verifyTaskRunRequestSchedulable(ctx, s, opts); err != nil {
 		return nil, err
 	}
@@ -295,15 +344,20 @@ func RequestTaskRunWithResult(ctx context.Context, s store.Store, opts TaskRunRe
 	if executor == nil {
 		executor = LocalTaskExecutor{}
 	}
-	resolved, err := preflightTaskRunRequest(ctx, opts, executor)
-	if err != nil {
-		return nil, err
-	}
-	opts = resolved
 	parent, err := verifyTaskRunRequestParent(ctx, s, opts)
 	if err != nil {
 		return nil, err
 	}
+	resolved, err := resolveTaskRunRequestRunner(ctx, s, opts, parent)
+	if err != nil {
+		return nil, err
+	}
+	opts = resolved
+	resolved, err = preflightTaskRunRequest(ctx, opts, executor)
+	if err != nil {
+		return nil, err
+	}
+	opts = resolved
 	refs := newTaskRunRequestRefs(opts, parent)
 	queued, err := createQueuedTaskRun(ctx, s, opts, refs)
 	if err != nil {
@@ -316,12 +370,17 @@ func RequestTaskRunWithResult(ctx context.Context, s store.Store, opts TaskRunRe
 	if err := linkTaskRunRequestDriverStep(ctx, s, opts, claimed); err != nil {
 		return nil, err
 	}
+	return executeClaimedTaskRunRequest(ctx, s, opts, refs, claimed, executor)
+}
+
+func executeClaimedTaskRunRequest(ctx context.Context, s store.Store, opts TaskRunRequestOptions, refs taskRunRequestRefs, claimed *domain.TaskRun, executor TaskExecutor) (*TaskRunRequestOutcome, error) {
 	return executeClaimedTaskRunWithResult(ctx, s, claimed, executeClaimedTaskRunOptions{
 		WorkspaceKey:      opts.WorkspaceKey,
 		DriverRunID:       opts.DriverRunID,
 		DriverStepID:      opts.DriverStepID,
 		TaskID:            opts.TaskID,
 		ProviderProfile:   opts.ProviderProfile,
+		RunnerTrustLevel:  opts.RunnerTrustLevel,
 		ParentSessionID:   opts.ParentSessionID,
 		LeaseToken:        refs.LeaseToken,
 		HeartbeatInterval: opts.HeartbeatInterval,
@@ -348,6 +407,12 @@ func normalizeTaskRunRequestOptions(opts TaskRunRequestOptions) TaskRunRequestOp
 	opts.TaskRunID = strings.TrimSpace(opts.TaskRunID)
 	opts.TaskID = strings.TrimSpace(opts.TaskID)
 	opts.WorkerProfileID = strings.TrimSpace(opts.WorkerProfileID)
+	opts.Runner = strings.TrimSpace(opts.Runner)
+	opts.RunnerRef = strings.TrimSpace(opts.RunnerRef)
+	opts.RunnerKind = strings.TrimSpace(opts.RunnerKind)
+	opts.RunnerEntrypoint = strings.TrimSpace(opts.RunnerEntrypoint)
+	opts.RunnerVersionID = strings.TrimSpace(opts.RunnerVersionID)
+	opts.RunnerTrustLevel = domain.DriverTrustLevel(strings.TrimSpace(string(opts.RunnerTrustLevel)))
 	opts.ProviderProfile = strings.TrimSpace(opts.ProviderProfile)
 	opts.ParentSessionID = strings.TrimSpace(opts.ParentSessionID)
 	opts.ParentNodeID = strings.TrimSpace(opts.ParentNodeID)
@@ -375,6 +440,32 @@ func preflightTaskRunRequest(ctx context.Context, opts TaskRunRequestOptions, ca
 	if err != nil {
 		return opts, fmt.Errorf("provider profile preflight: %w", err)
 	}
+	return resolved, nil
+}
+
+func resolveTaskRunRequestRunner(ctx context.Context, s store.Store, opts TaskRunRequestOptions, parent *domain.DriverRun) (TaskRunRequestOptions, error) {
+	if strings.TrimSpace(opts.Runner) == "" {
+		return opts, nil
+	}
+	if parent == nil || strings.TrimSpace(parent.DriverVersionID) == "" {
+		return opts, fmt.Errorf("parent driver run version required to resolve runner %q: %w", opts.Runner, domain.ErrInvalid)
+	}
+	version, err := s.DriverVersions().Get(ctx, opts.WorkspaceKey, parent.DriverVersionID)
+	if err != nil {
+		return opts, fmt.Errorf("load runner manifest from driver version %q: %w", parent.DriverVersionID, err)
+	}
+	if version.DriverID != parent.DriverID {
+		return opts, fmt.Errorf("runner manifest version %q belongs to driver %q, run wants %q: %w", version.VersionID, version.DriverID, parent.DriverID, domain.ErrInvalid)
+	}
+	resolved, err := applyResolvedRunner(opts, parent, version)
+	if err != nil {
+		return opts, err
+	}
+	driver, err := s.Drivers().Get(ctx, opts.WorkspaceKey, parent.DriverID)
+	if err != nil {
+		return opts, fmt.Errorf("load driver %q for runner trust policy: %w", parent.DriverID, err)
+	}
+	resolved.RunnerTrustLevel = DriverVersionEffectiveTrust(driver, version)
 	return resolved, nil
 }
 
@@ -423,6 +514,24 @@ func createQueuedTaskRun(ctx context.Context, s store.Store, opts TaskRunRequest
 		"driver_run_id": opts.DriverRunID,
 		"requested_by":  "driver",
 	}
+	if opts.Runner != "" {
+		runtimeMetadata["runner"] = opts.Runner
+	}
+	if opts.RunnerRef != "" {
+		runtimeMetadata["runner_ref"] = opts.RunnerRef
+	}
+	if opts.RunnerKind != "" {
+		runtimeMetadata["runner_kind"] = opts.RunnerKind
+	}
+	if opts.RunnerEntrypoint != "" {
+		runtimeMetadata["runner_entrypoint"] = opts.RunnerEntrypoint
+	}
+	if opts.RunnerVersionID != "" {
+		runtimeMetadata["runner_driver_version_id"] = opts.RunnerVersionID
+	}
+	if opts.RunnerTrustLevel != "" {
+		runtimeMetadata["runner_trust_level"] = string(opts.RunnerTrustLevel)
+	}
 	if opts.ParentSessionID != "" {
 		runtimeMetadata["parent_session_id"] = opts.ParentSessionID
 	}
@@ -433,6 +542,11 @@ func createQueuedTaskRun(ctx context.Context, s store.Store, opts TaskRunRequest
 		DriverStepID:     opts.DriverStepID,
 		TaskID:           opts.TaskID,
 		WorkerProfileID:  opts.WorkerProfileID,
+		Runner:           opts.Runner,
+		RunnerRef:        opts.RunnerRef,
+		RunnerKind:       opts.RunnerKind,
+		RunnerEntrypoint: opts.RunnerEntrypoint,
+		RunnerVersionID:  opts.RunnerVersionID,
 		ProviderProfile:  opts.ProviderProfile,
 		Status:           domain.TaskRunQueued,
 		NodeID:           opts.NodeID,
@@ -508,6 +622,7 @@ type executeClaimedTaskRunOptions struct {
 	DriverStepID       string
 	TaskID             string
 	ProviderProfile    string
+	RunnerTrustLevel   domain.DriverTrustLevel
 	ParentSessionID    string
 	LeaseToken         string
 	HeartbeatInterval  time.Duration
@@ -555,13 +670,13 @@ func executeClaimedTaskRunWithResult(ctx context.Context, s store.Store, claimed
 		}
 		return &TaskRunRequestOutcome{Run: requeued, LeaseToken: opts.LeaseToken, ArtifactIDs: normalizeArtifactIDs(execResult.ArtifactIDs)}, nil
 	}
-	// Terminal failure past the retry budget: park the run and mark the
-	// underlying task issue parked in the same fenced finish call.
-	parkTask := completion.Status == domain.TaskRunFailed
-	if parkTask {
-		metadata = taskRunParkedMetadata(claimed, opts, completion, metadata)
+	// Terminal failure past the retry budget: finish the run and mark the
+	// underlying task issue blocked in the same fenced finish call.
+	blockTask := completion.Status == domain.TaskRunFailed
+	if blockTask {
+		metadata = taskRunBlockedMetadata(claimed, opts, completion, metadata)
 	}
-	final, err := finishClaimedTaskRun(ctx, s, claimed, opts, refs, execResult, completion, metadata, parkTask)
+	final, err := finishClaimedTaskRun(ctx, s, claimed, opts, refs, execResult, completion, metadata, blockTask)
 	if err != nil {
 		return nil, err
 	}
@@ -573,13 +688,19 @@ func executeClaimedTaskRunWithResult(ctx context.Context, s store.Store, claimed
 }
 
 type claimedTaskRunRefs struct {
-	WorkspaceKey    string
-	DriverRunID     string
-	DriverStepID    string
-	TaskID          string
-	ProviderProfile string
-	ParentSessionID string
-	HeartbeatSource string
+	WorkspaceKey     string
+	DriverRunID      string
+	DriverStepID     string
+	TaskID           string
+	Runner           string
+	RunnerRef        string
+	RunnerKind       string
+	RunnerEntrypoint string
+	RunnerVersionID  string
+	RunnerTrustLevel domain.DriverTrustLevel
+	ProviderProfile  string
+	ParentSessionID  string
+	HeartbeatSource  string
 }
 
 type taskExecCompletion struct {
@@ -591,13 +712,19 @@ type taskExecCompletion struct {
 
 func claimedTaskRunRefsFromOptions(claimed *domain.TaskRun, opts executeClaimedTaskRunOptions) claimedTaskRunRefs {
 	return claimedTaskRunRefs{
-		WorkspaceKey:    firstNonEmpty(opts.WorkspaceKey, claimed.WorkspaceKey),
-		DriverRunID:     firstNonEmpty(opts.DriverRunID, claimed.DriverRunID),
-		DriverStepID:    firstNonEmpty(opts.DriverStepID, claimed.DriverStepID),
-		TaskID:          firstNonEmpty(opts.TaskID, claimed.TaskID),
-		ProviderProfile: firstNonEmpty(opts.ProviderProfile, claimed.ProviderProfile),
-		ParentSessionID: firstNonEmpty(opts.ParentSessionID, claimed.RuntimeMetadata["parent_session_id"]),
-		HeartbeatSource: firstNonEmpty(opts.HeartbeatSource, "task_run_executor"),
+		WorkspaceKey:     firstNonEmpty(opts.WorkspaceKey, claimed.WorkspaceKey),
+		DriverRunID:      firstNonEmpty(opts.DriverRunID, claimed.DriverRunID),
+		DriverStepID:     firstNonEmpty(opts.DriverStepID, claimed.DriverStepID),
+		TaskID:           firstNonEmpty(opts.TaskID, claimed.TaskID),
+		Runner:           claimed.Runner,
+		RunnerRef:        claimed.RunnerRef,
+		RunnerKind:       claimed.RunnerKind,
+		RunnerEntrypoint: claimed.RunnerEntrypoint,
+		RunnerVersionID:  claimed.RunnerVersionID,
+		RunnerTrustLevel: domain.DriverTrustLevel(firstNonEmpty(string(opts.RunnerTrustLevel), claimed.RuntimeMetadata["runner_trust_level"])),
+		ProviderProfile:  firstNonEmpty(opts.ProviderProfile, claimed.ProviderProfile),
+		ParentSessionID:  firstNonEmpty(opts.ParentSessionID, claimed.RuntimeMetadata["parent_session_id"]),
+		HeartbeatSource:  firstNonEmpty(opts.HeartbeatSource, "task_run_executor"),
 	}
 }
 
@@ -606,6 +733,9 @@ func startClaimedTaskRunHeartbeat(ctx context.Context, s store.Store, claimed *d
 	if interval := taskRunHeartbeatInterval(opts.HeartbeatInterval); interval > 0 {
 		go heartbeatTaskRun(hbCtx, s, claimed, opts.LeaseToken, interval, map[string]string{
 			"driver_run_id":    refs.DriverRunID,
+			"runner":           refs.Runner,
+			"runner_ref":       refs.RunnerRef,
+			"runner_kind":      refs.RunnerKind,
 			"provider_profile": refs.ProviderProfile,
 			"heartbeat_source": refs.HeartbeatSource,
 		})
@@ -621,6 +751,12 @@ func taskExecRequest(claimed *domain.TaskRun, opts executeClaimedTaskRunOptions,
 		TaskRunID:        claimed.TaskRunID,
 		TaskID:           refs.TaskID,
 		WorkerProfileID:  claimed.WorkerProfileID,
+		Runner:           refs.Runner,
+		RunnerRef:        refs.RunnerRef,
+		RunnerKind:       refs.RunnerKind,
+		RunnerEntrypoint: refs.RunnerEntrypoint,
+		RunnerVersionID:  refs.RunnerVersionID,
+		RunnerTrustLevel: refs.RunnerTrustLevel,
 		ProviderProfile:  refs.ProviderProfile,
 		ParentSessionID:  refs.ParentSessionID,
 		NodeID:           claimed.NodeID,
@@ -665,6 +801,8 @@ func (c *taskExecCompletion) requireTerminalStatus() {
 		c.markInvalidResult("task executor result missing terminal status")
 	case !c.Status.IsTerminal():
 		c.markInvalidResult(fmt.Sprintf("task executor result status %q is not terminal", c.Status))
+	case c.Status == domain.TaskRunCompleted && c.ExitCode != 0:
+		c.markInvalidResult(fmt.Sprintf("task executor reported completed with non-zero exit code %d", c.ExitCode))
 	}
 }
 
@@ -694,6 +832,24 @@ func taskExecRuntimeMetadata(execResult TaskExecResult, refs claimedTaskRunRefs)
 	}
 	if refs.ParentSessionID != "" {
 		metadata["parent_session_id"] = refs.ParentSessionID
+	}
+	if refs.Runner != "" {
+		metadata["runner"] = refs.Runner
+	}
+	if refs.RunnerRef != "" {
+		metadata["runner_ref"] = refs.RunnerRef
+	}
+	if refs.RunnerKind != "" {
+		metadata["runner_kind"] = refs.RunnerKind
+	}
+	if refs.RunnerEntrypoint != "" {
+		metadata["runner_entrypoint"] = refs.RunnerEntrypoint
+	}
+	if refs.RunnerVersionID != "" {
+		metadata["runner_driver_version_id"] = refs.RunnerVersionID
+	}
+	if refs.RunnerTrustLevel != "" {
+		metadata["runner_trust_level"] = string(refs.RunnerTrustLevel)
 	}
 	metadata["provider_profile"] = refs.ProviderProfile
 	metadata["task_run_executor"] = refs.HeartbeatSource
@@ -783,19 +939,19 @@ func completeClaimedTaskRun(ctx context.Context, s store.Store, claimed *domain.
 	return final, nil
 }
 
-// finishClaimedTaskRun records the terminal state of a claimed run. parkTask
-// additionally marks the underlying task issue parked server-side (fenced by
+// finishClaimedTaskRun records the terminal state of a claimed run. blockTask
+// additionally marks the underlying task issue blocked server-side (fenced by
 // the same lease/fencing checks, idempotent, best-effort like the other
 // policy hooks); pass it only for failed runs whose retry budget is
 // exhausted.
-func finishClaimedTaskRun(ctx context.Context, s store.Store, claimed *domain.TaskRun, opts executeClaimedTaskRunOptions, refs claimedTaskRunRefs, execResult TaskExecResult, completion taskExecCompletion, metadata map[string]string, parkTask bool) (*domain.TaskRun, error) {
+func finishClaimedTaskRun(ctx context.Context, s store.Store, claimed *domain.TaskRun, opts executeClaimedTaskRunOptions, refs claimedTaskRunRefs, execResult TaskExecResult, completion taskExecCompletion, metadata map[string]string, blockTask bool) (*domain.TaskRun, error) {
 	final, err := s.TaskRuns().Finish(ctx, refs.WorkspaceKey, claimed.TaskRunID, store.TaskRunFinish{
 		NodeID:           claimed.NodeID,
 		LeaseID:          claimed.LeaseID,
 		LeaseToken:       opts.LeaseToken,
 		FencingToken:     claimed.FencingToken,
 		Status:           completion.Status,
-		ParkTask:         parkTask,
+		BlockTask:        blockTask,
 		ExitCode:         &completion.ExitCode,
 		LogsRef:          execResult.LogsRef,
 		ArtifactsRef:     execResult.ArtifactsRef,
@@ -812,174 +968,4 @@ func finishClaimedTaskRun(ctx context.Context, s store.Store, claimed *domain.Ta
 		return nil, fmt.Errorf("finish task run: %w", err)
 	}
 	return final, nil
-}
-
-func TaskRunResultFromDomain(run *domain.TaskRun, artifactIDs ...[]string) TaskRunRequestResult {
-	if run == nil {
-		return TaskRunRequestResult{}
-	}
-	ids := []string(nil)
-	if len(artifactIDs) > 0 {
-		ids = normalizeArtifactIDs(artifactIDs[0])
-	}
-	return TaskRunRequestResult{
-		ID:               run.TaskRunID,
-		TaskRunID:        run.TaskRunID,
-		DriverStepID:     run.DriverStepID,
-		TaskID:           run.TaskID,
-		Status:           run.Status,
-		ExitCode:         run.ExitCode,
-		LogsRef:          run.LogsRef,
-		ArtifactsRef:     run.ArtifactsRef,
-		ArtifactIDs:      ids,
-		InputTokens:      run.InputTokens,
-		OutputTokens:     run.OutputTokens,
-		CacheReadTokens:  run.CacheReadTokens,
-		CacheWriteTokens: run.CacheWriteTokens,
-		EstimatedCostUSD: run.EstimatedCostUSD,
-		ErrorClass:       run.ErrorClass,
-		ErrorMessage:     run.ErrorMessage,
-		FinishedAt:       run.FinishedAt,
-		ProviderProfile:  run.ProviderProfile,
-		RuntimeMetadata:  cloneStringMap(run.RuntimeMetadata),
-	}
-}
-
-func TaskRunResultFromOutcome(outcome *TaskRunRequestOutcome) TaskRunRequestResult {
-	if outcome == nil {
-		return TaskRunRequestResult{}
-	}
-	result := TaskRunResultFromDomain(outcome.Run, outcome.ArtifactIDs)
-	result.LeaseToken = outcome.LeaseToken
-	return result
-}
-
-func normalizeArtifactIDs(ids []string) []string {
-	if len(ids) == 0 {
-		return nil
-	}
-	out := make([]string, 0, len(ids))
-	seen := map[string]struct{}{}
-	for _, id := range ids {
-		id = strings.TrimSpace(id)
-		if id == "" {
-			continue
-		}
-		if _, ok := seen[id]; ok {
-			continue
-		}
-		seen[id] = struct{}{}
-		out = append(out, id)
-	}
-	if len(out) == 0 {
-		return nil
-	}
-	return out
-}
-
-func taskRunSupportedProviders(opts TaskRunRequestOptions) []string {
-	values := append([]string(nil), opts.SupportedProviders...)
-	values = append(values, opts.SandboxPlacement.Provider)
-	return normalizeStringList(values)
-}
-
-func taskRunWorkerSupportedProviders(opts TaskRunWorkerOptions) []string {
-	values := append([]string(nil), opts.SupportedProviders...)
-	values = append(values, opts.SandboxPlacement.Provider)
-	return normalizeStringList(values)
-}
-
-func resolveTaskProviderProfile(opts TaskRunRequestOptions, hostBridgeAvailable bool) (TaskRunRequestOptions, error) {
-	profile := strings.TrimSpace(opts.ProviderProfile)
-	opts.ProviderProfile = profile
-	switch profile {
-	case "local-noop", "noop":
-		opts.ProviderProfile = "local-noop"
-		if opts.SandboxPlacement.Provider == "" {
-			opts.SandboxPlacement.Provider = "local-noop"
-		}
-		opts.SupportedProviders = append(opts.SupportedProviders, "local-noop", "noop")
-		return opts, nil
-	case "flue-daytona":
-		if !hostBridgeAvailable {
-			return opts, fmt.Errorf("provider profile %q requires a configured task runner command: %w", profile, domain.ErrInvalid)
-		}
-		if opts.RunnerPlacement.Provider == "" {
-			opts.RunnerPlacement.Provider = "flue"
-		}
-		if opts.SandboxPlacement.Provider == "" {
-			opts.SandboxPlacement.Provider = "daytona"
-		}
-		opts.SupportedProviders = append(opts.SupportedProviders, "daytona")
-		return opts, nil
-	case "":
-		return opts, fmt.Errorf("provider profile required: %w", domain.ErrInvalid)
-	default:
-		if !hostBridgeAvailable {
-			return opts, fmt.Errorf("provider profile %q is not supported by local exec-task: %w", profile, domain.ErrInvalid)
-		}
-		providers := normalizeStringList(opts.SupportedProviders)
-		if opts.SandboxPlacement.Provider == "" {
-			switch len(providers) {
-			case 0:
-				return opts, fmt.Errorf("provider profile %q requires --sandbox-provider or --supported-provider: %w", profile, domain.ErrInvalid)
-			case 1:
-				opts.SandboxPlacement.Provider = providers[0]
-			default:
-				return opts, fmt.Errorf("provider profile %q has multiple supported providers; --sandbox-provider is required: %w", profile, domain.ErrInvalid)
-			}
-		}
-		return opts, nil
-	}
-}
-
-func normalizeStringList(values []string) []string {
-	if len(values) == 0 {
-		return nil
-	}
-	out := make([]string, 0, len(values))
-	seen := map[string]struct{}{}
-	for _, value := range values {
-		value = strings.TrimSpace(value)
-		if value == "" {
-			continue
-		}
-		if _, ok := seen[value]; ok {
-			continue
-		}
-		seen[value] = struct{}{}
-		out = append(out, value)
-	}
-	if len(out) == 0 {
-		return nil
-	}
-	return out
-}
-
-func generatedTaskRunID(driverRunID, taskID string) string {
-	runPart := slug(driverRunID)
-	if runPart == "" {
-		runPart = "run"
-	}
-	taskPart := slug(taskID)
-	if taskPart == "" {
-		taskPart = "task"
-	}
-	return fmt.Sprintf("task-run-%s-%s-%d", runPart, taskPart, time.Now().UTC().UnixNano())
-}
-
-func generatedTaskRunLeaseToken() string {
-	var b [24]byte
-	if _, err := rand.Read(b[:]); err == nil {
-		return hex.EncodeToString(b[:])
-	}
-	return fmt.Sprintf("task-run-token-%d", time.Now().UTC().UnixNano())
-}
-
-func generatedTaskRunLeaseID(nodeID string) string {
-	nodePart := slug(nodeID)
-	if nodePart == "" {
-		nodePart = "worker"
-	}
-	return fmt.Sprintf("task-run-lease-%s-%d", nodePart, time.Now().UTC().UnixNano())
 }

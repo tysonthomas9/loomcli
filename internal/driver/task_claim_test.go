@@ -43,7 +43,7 @@ func TestClaimReadyTaskClaimsFirstAvailableAsActor(t *testing.T) {
 	}
 }
 
-func TestClaimReadyTaskSkipsParkedIssues(t *testing.T) {
+func TestClaimReadyTaskSkipsBlockedIssues(t *testing.T) {
 	cases := []struct {
 		name       string
 		ready      []backend.IssueData
@@ -51,18 +51,18 @@ func TestClaimReadyTaskSkipsParkedIssues(t *testing.T) {
 		wantClaims int
 	}{
 		{
-			name: "parked issue is skipped in favor of open issue",
+			name: "blocked issue is skipped in favor of open issue",
 			ready: []backend.IssueData{
-				{ID: "TEST-PARKED", Status: "parked", Parent: "EPIC-1"},
+				{ID: "TEST-BLOCKED", Status: "blocked", Parent: "EPIC-1"},
 				{ID: "TEST-OPEN", Status: "open", Parent: "EPIC-1"},
 			},
 			wantClaim:  "TEST-OPEN",
 			wantClaims: 1,
 		},
 		{
-			name: "only parked issues yields no claim",
+			name: "only blocked issues yields no claim",
 			ready: []backend.IssueData{
-				{ID: "TEST-PARKED", Status: "parked", Parent: "EPIC-1"},
+				{ID: "TEST-BLOCKED", Status: "blocked", Parent: "EPIC-1"},
 			},
 		},
 	}
@@ -78,13 +78,13 @@ func TestClaimReadyTaskSkipsParkedIssues(t *testing.T) {
 			}
 			if tc.wantClaim == "" {
 				if claimed != nil {
-					t.Fatalf("claimed = %+v, want nil (parked issues are not claimable)", claimed)
+					t.Fatalf("claimed = %+v, want nil (blocked issues are not ready-claimable)", claimed)
 				}
 			} else if claimed == nil || claimed.ID != tc.wantClaim {
 				t.Fatalf("claimed = %+v, want %q", claimed, tc.wantClaim)
 			}
 			if len(fake.actorClaims) != tc.wantClaims {
-				t.Fatalf("actor claims = %+v, want %d claim attempts (never on parked issues)", fake.actorClaims, tc.wantClaims)
+				t.Fatalf("actor claims = %+v, want %d claim attempts (never on blocked issues)", fake.actorClaims, tc.wantClaims)
 			}
 		})
 	}

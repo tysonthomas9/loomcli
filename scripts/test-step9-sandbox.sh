@@ -329,7 +329,7 @@ submit_untrusted_workflow() {
 
 write_step9_workflow() {
   cat >"$TMP_ROOT/step9-workflow.ts" <<'EOF'
-import { createLoomDriverClient } from '@loom/sdk/flue';
+import { createLoomDriverClient } from '@loom/sdk/driver';
 
 // Step-9 acceptance workflow: prove the positive path works token-only and
 // observe every forbidden path as a denial, reporting machine-readable
@@ -379,9 +379,7 @@ async function completeOneTask(loom, input) {
   if (!task || !task.id) return 'task-failed:no-ready-task';
   const enqueued = await loom.taskRuns.request({
     taskId: task.id,
-    providerProfile: 'flue-local',
-    supportedProviders: ['flue-local'],
-    sandboxPlacement: { provider: 'flue-local' },
+    runner: 'local-task-runner',
   });
   const taskRunId = enqueued.taskRunId || enqueued.id;
   if (!taskRunId) return 'task-failed:no-task-run-id';

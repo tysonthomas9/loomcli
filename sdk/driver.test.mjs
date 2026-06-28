@@ -2,9 +2,9 @@ import { createServer } from "node:http";
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { DriverApiError, WorkflowSuspended, createLoomDriverClient, isWorkflowSuspended } from "./flue.js";
+import { DriverApiError, WorkflowSuspended, createLoomDriverClient, isWorkflowSuspended } from "./driver.js";
 
-test("FlueDriverClient sends camelCase task run requests and remembers child task lease over HTTP", async () => {
+test("LoomDriverClient sends camelCase task run requests and remembers child task lease over HTTP", async () => {
   await withDriverServer(async (call) => {
     if (call.url === "/api/workspaces/WS/driver/exec-task") {
       return {
@@ -38,17 +38,10 @@ test("FlueDriverClient sends camelCase task run requests and remembers child tas
 
     const result = await client.taskRuns.request({
       taskId: "TASK-1",
-      providerProfile: "flue-local",
+      runner: "local-task-runner",
       parentSessionId: "lead-session-1",
       nodeId: "target-node",
-      supportedProviders: ["flue"],
       capabilities: ["repo"],
-      sandboxPlacement: {
-        provider: "local",
-        sandboxId: "sandbox-1",
-        cwd: "/repo",
-        repoRef: "main",
-      },
     });
     assert.equal(result.status, "completed");
     await client.tasks.complete("TASK-1");
@@ -62,17 +55,10 @@ test("FlueDriverClient sends camelCase task run requests and remembers child tas
     assert.equal(calls[0].headers.authorization, "Bearer api-token");
     assert.deepEqual(calls[0].body, {
       taskId: "TASK-1",
-      providerProfile: "flue-local",
+      runner: "local-task-runner",
       parentSessionId: "lead-session-1",
       nodeId: "target-node",
-      supportedProviders: ["flue"],
       capabilities: ["repo"],
-      sandboxPlacement: {
-        provider: "local",
-        sandboxId: "sandbox-1",
-        cwd: "/repo",
-        repoRef: "main",
-      },
       deferCompletion: true,
       enqueueOnly: true,
     });
@@ -91,7 +77,7 @@ test("FlueDriverClient sends camelCase task run requests and remembers child tas
   });
 });
 
-test("FlueDriverClient.taskRuns.request puts the optional input payload (diff+rubric) on the exec-task wire verbatim", async () => {
+test("LoomDriverClient.taskRuns.request puts the optional input payload (diff+rubric) on the exec-task wire verbatim", async () => {
   // Closes the dropped-payload gap: input.input must reach exec-task body.input
   // unmodified (the review TaskRun runner reads the diff+rubric from there).
   const reviewInput = {
@@ -116,7 +102,7 @@ test("FlueDriverClient.taskRuns.request puts the optional input payload (diff+ru
 
     await client.taskRuns.request({
       taskId: "TASK-1",
-      providerProfile: "flue-local",
+      runner: "local-task-runner",
       input: reviewInput,
     });
 
@@ -133,7 +119,7 @@ test("FlueDriverClient.taskRuns.request puts the optional input payload (diff+ru
   });
 });
 
-test("FlueDriverClient.taskRuns.request omits input from the wire when none is given (back-compat)", async () => {
+test("LoomDriverClient.taskRuns.request omits input from the wire when none is given", async () => {
   await withDriverServer(async (call) => {
     if (call.url === "/api/workspaces/WS/driver/exec-task") {
       return { id: "task-run-1", taskRunId: "task-run-1", taskId: "TASK-1", status: "queued" };
@@ -145,14 +131,43 @@ test("FlueDriverClient.taskRuns.request omits input from the wire when none is g
       env: { LOOM_DRIVER_WORKSPACE: "WS", LOOM_DRIVER_RUN_ID: "run-1", LOOM_DRIVER_API_URL: apiUrl },
     });
 
-    await client.taskRuns.request({ taskId: "TASK-1", providerProfile: "flue-local" });
+    await client.taskRuns.request({ taskId: "TASK-1", runner: "local-task-runner" });
 
     assert.equal(calls.length, 1);
     assert.equal(Object.hasOwn(calls[0].body, "input"), false, "no input key when caller omits it");
   });
 });
 
-test("FlueDriverClient exposes epic, agent, active run, and stale recovery helpers over HTTP", async () => {
+test("LoomDriverClient.taskRuns.request ignores legacy provider routing inputs", async () => {
+  await withDriverServer(async (call) => {
+    if (call.url === "/api/workspaces/WS/driver/exec-task") {
+      return { id: "task-run-1", taskRunId: "task-run-1", taskId: "TASK-1", status: "queued" };
+    }
+    return notFound();
+  }, async ({ apiUrl, calls }) => {
+    const client = createLoomDriverClient({
+      input: { epicId: "EPIC-1" },
+      env: { LOOM_DRIVER_WORKSPACE: "WS", LOOM_DRIVER_RUN_ID: "run-1", LOOM_DRIVER_API_URL: apiUrl },
+    });
+
+    await client.taskRuns.request({
+      taskId: "TASK-1",
+      runner: "local-task-runner",
+      providerProfile: "flue-local",
+      supportedProviders: ["flue-local"],
+      sandboxPlacement: { provider: "flue-local" },
+    });
+
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].body.runner, "local-task-runner");
+    assert.equal(Object.hasOwn(calls[0].body, "providerProfile"), false);
+    assert.equal(Object.hasOwn(calls[0].body, "supportedProviders"), false);
+    assert.equal(Object.hasOwn(calls[0].body, "sandboxPlacement"), false);
+    assertNoSnakeCaseKeys(calls[0].body);
+  });
+});
+
+test("LoomDriverClient exposes epic, agent, active run, and stale recovery helpers over HTTP", async () => {
   await withDriverServer(async (call) => {
     switch (call.url) {
       case "/api/workspaces/WS/driver/epic-get":
@@ -227,7 +242,7 @@ test("FlueDriverClient exposes epic, agent, active run, and stale recovery helpe
   });
 });
 
-test("FlueDriverClient task request enqueues and await polls terminal result", async () => {
+test("LoomDriverClient task request enqueues and await polls terminal result", async () => {
   let getCount = 0;
   await withDriverServer(async (call) => {
     if (call.url === "/api/workspaces/WS/driver/exec-task") {
@@ -255,7 +270,7 @@ test("FlueDriverClient task request enqueues and await polls terminal result", a
       },
     });
 
-    const queued = await client.taskRuns.request({ taskId: "TASK-1", taskRunId: "task-run-1", providerProfile: "flue-local" });
+    const queued = await client.taskRuns.request({ taskId: "TASK-1", taskRunId: "task-run-1", runner: "local-task-runner" });
     assert.equal(queued.status, "queued");
     const completed = await client.taskRuns.await({ taskRunId: queued.taskRunId, pollMs: 10, timeoutMs: 1000 });
     assert.equal(completed.status, "completed");
@@ -272,7 +287,7 @@ test("FlueDriverClient task request enqueues and await polls terminal result", a
   });
 });
 
-test("FlueDriverClient can complete one child while another child is still polling", async () => {
+test("LoomDriverClient can complete one child while another child is still polling", async () => {
   const events = [];
   await withDriverServer(async (call) => {
     if (call.url === "/api/workspaces/WS/driver/exec-task") {
@@ -313,7 +328,7 @@ test("FlueDriverClient can complete one child while another child is still polli
     });
 
     async function requestAwaitAndComplete(taskId) {
-      const queued = await client.taskRuns.request({ taskId, providerProfile: "flue-local" });
+      const queued = await client.taskRuns.request({ taskId, runner: "local-task-runner" });
       const result = await client.taskRuns.await({ taskRunId: queued.taskRunId, pollMs: 10, timeoutMs: 1000 });
       await client.tasks.complete({
         taskId,
@@ -338,7 +353,7 @@ test("FlueDriverClient can complete one child while another child is still polli
   });
 });
 
-test("FlueDriverClient requires the driver HTTP API URL", async () => {
+test("LoomDriverClient requires the driver HTTP API URL", async () => {
   const client = createLoomDriverClient({
     input: { epicId: "EPIC-1" },
     env: {
@@ -353,7 +368,7 @@ test("FlueDriverClient requires the driver HTTP API URL", async () => {
   );
 });
 
-test("FlueDriverClient returns needs_review results", () => {
+test("LoomDriverClient returns needs_review results", () => {
   const client = createLoomDriverClient({
     input: {},
     env: {
@@ -373,7 +388,7 @@ test("FlueDriverClient returns needs_review results", () => {
   });
 });
 
-test("FlueDriverClient maps structured driver API errors", async () => {
+test("LoomDriverClient maps structured driver API errors", async () => {
   await withDriverServer(async () => ({
     statusCode: 409,
     body: {
@@ -406,7 +421,7 @@ test("FlueDriverClient maps structured driver API errors", async () => {
   });
 });
 
-test("FlueDriverClient epics.watch yields snapshot then taskRun frames and stops on closed", async () => {
+test("LoomDriverClient epics.watch yields snapshot then taskRun frames and stops on closed", async () => {
   const snapshotData = {
     epic: { epicId: "EPIC-1", readyCount: 1, blockedCount: 0 },
     active: { driverRunId: "run-1", activeCount: 0 },
@@ -443,7 +458,7 @@ test("FlueDriverClient epics.watch yields snapshot then taskRun frames and stops
   });
 });
 
-test("FlueDriverClient epics.watch reconnects with Last-Event-ID after disconnect", async () => {
+test("LoomDriverClient epics.watch reconnects with Last-Event-ID after disconnect", async () => {
   await withSSEServer((call, res, calls) => {
     res.writeHead(200, { "Content-Type": "text/event-stream" });
     if (calls.length === 1) {
@@ -471,7 +486,7 @@ test("FlueDriverClient epics.watch reconnects with Last-Event-ID after disconnec
   });
 });
 
-test("FlueDriverClient epics.watch ends iteration when the AbortSignal fires", async () => {
+test("LoomDriverClient epics.watch ends iteration when the AbortSignal fires", async () => {
   await withSSEServer((call, res) => {
     res.writeHead(200, { "Content-Type": "text/event-stream" });
     writeSSEFrame(res, "1", "snapshot", { epic: { epicId: "EPIC-1" }, active: null });
@@ -489,7 +504,7 @@ test("FlueDriverClient epics.watch ends iteration when the AbortSignal fires", a
   });
 });
 
-test("FlueDriverClient epics.watch surfaces HTTP 401 as DriverApiError", async () => {
+test("LoomDriverClient epics.watch surfaces HTTP 401 as DriverApiError", async () => {
   await withSSEServer((call, res) => {
     res.writeHead(401, { "Content-Type": "application/json" });
     res.end(JSON.stringify({
@@ -511,7 +526,7 @@ test("FlueDriverClient epics.watch surfaces HTTP 401 as DriverApiError", async (
   });
 });
 
-test("FlueDriverClient connectors send camelCase connector-dispatch wire with run headers", async () => {
+test("LoomDriverClient connectors send camelCase connector-dispatch wire with run headers", async () => {
   await withDriverServer(async (call) => {
     if (call.url === "/api/workspaces/WS/driver/connector-dispatch") {
       // withDriverServer treats a top-level "body" key as the response
@@ -558,7 +573,7 @@ test("FlueDriverClient connectors send camelCase connector-dispatch wire with ru
   });
 });
 
-test("FlueDriverClient connectors map every surface method onto its dispatch action", async () => {
+test("LoomDriverClient connectors map every surface method onto its dispatch action", async () => {
   const table = [
     { source: "github", method: "merge", action: "github.merge", input: { expectedHeadSha: "sha-1" } },
     { source: "github", method: "postReview", action: "github.review.post", input: { expectedHeadSha: "sha-1", event: "APPROVE" } },
@@ -592,7 +607,7 @@ test("FlueDriverClient connectors map every surface method onto its dispatch act
   });
 });
 
-test("FlueDriverClient connectors refuse precondition-gated ops synchronously before any network call", async () => {
+test("LoomDriverClient connectors refuse precondition-gated ops synchronously before any network call", async () => {
   const table = [
     { name: "github.merge flat", call: (c) => c.connectors.github.merge({ owner: "o", repo: "r", number: 1 }), want: /expectedHeadSha/ },
     { name: "github.merge empty sha", call: (c) => c.connectors.github.merge({ owner: "o", repo: "r", number: 1, expectedHeadSha: "  " }), want: /expectedHeadSha/ },
@@ -620,7 +635,7 @@ test("FlueDriverClient connectors refuse precondition-gated ops synchronously be
   });
 });
 
-test("FlueDriverClient connectors accept preconditions via the nested object", async () => {
+test("LoomDriverClient connectors accept preconditions via the nested object", async () => {
   await withDriverServer(async () => ({ callId: "cc", decision: "granted" }), async ({ apiUrl, calls }) => {
     const client = watchTestClient(apiUrl);
     await client.connectors.github.merge({
@@ -634,7 +649,7 @@ test("FlueDriverClient connectors accept preconditions via the nested object", a
   });
 });
 
-test("FlueDriverClient connectors surface structured connector refusals as DriverApiError", async () => {
+test("LoomDriverClient connectors surface structured connector refusals as DriverApiError", async () => {
   const table = [
     { name: "grant denied", statusCode: 403, code: "grant_denied", retryable: false },
     { name: "precondition required (server)", statusCode: 400, code: "precondition_required", retryable: false },
@@ -665,7 +680,7 @@ test("FlueDriverClient connectors surface structured connector refusals as Drive
   }
 });
 
-test("FlueDriverClient connectors auto-increment callSeq per action and replay deterministically", async () => {
+test("LoomDriverClient connectors auto-increment callSeq per action and replay deterministically", async () => {
   const handler = async () => ({ callId: "cc", decision: "granted" });
   const sequence = async (client) => {
     await client.connectors.github.merge({ owner: "o", repo: "r", number: 1, expectedHeadSha: "s1" });
@@ -702,7 +717,7 @@ test("FlueDriverClient connectors auto-increment callSeq per action and replay d
   });
 });
 
-test("FlueDriverClient events.await sends camelCase wire and derives awaitIndex from call order", async () => {
+test("LoomDriverClient events.await sends camelCase wire and derives awaitIndex from call order", async () => {
   await withDriverServer(async (call) => {
     if (call.url === "/api/workspaces/WS/driver/events/await") {
       return {
@@ -759,9 +774,9 @@ test("FlueDriverClient events.await sends camelCase wire and derives awaitIndex 
   });
 });
 
-test("FlueDriverClient events.await replays satisfied awaits then throws the suspend sentinel", async () => {
+test("LoomDriverClient events.await replays satisfied awaits then throws the suspend sentinel", async () => {
   // Re-entry fast-forward: awaits 1 and 2 were satisfied before the resume,
-  // await 3 parks the run again.
+  // await 3 suspends the run again.
   await withDriverServer(async (call) => {
     if (call.url !== "/api/workspaces/WS/driver/events/await") {
       return notFound();
@@ -803,7 +818,7 @@ test("FlueDriverClient events.await replays satisfied awaits then throws the sus
   });
 });
 
-test("FlueDriverClient awaits refuse missing pattern/timeout synchronously without consuming an index", async () => {
+test("LoomDriverClient awaits refuse missing pattern/timeout synchronously without consuming an index", async () => {
   await withDriverServer(async () => ({
     status: "satisfied",
     instanceKey: "run-1#await-1",
@@ -836,7 +851,7 @@ test("FlueDriverClient awaits refuse missing pattern/timeout synchronously witho
   });
 });
 
-test("FlueDriverClient workflows.start derives startIndex from call order and is re-entry deterministic", async () => {
+test("LoomDriverClient workflows.start derives startIndex from call order and is re-entry deterministic", async () => {
   const handler = async (call) => {
     if (call.url !== "/api/workspaces/WS/driver/workflows/start") {
       return notFound();
@@ -886,7 +901,7 @@ test("FlueDriverClient workflows.start derives startIndex from call order and is
   });
 });
 
-test("FlueDriverClient workflows.await shares the await counter and returns the child outcome", async () => {
+test("LoomDriverClient workflows.await shares the await counter and returns the child outcome", async () => {
   await withDriverServer(async (call) => {
     if (call.url === "/api/workspaces/WS/driver/events/await") {
       return {
@@ -924,7 +939,7 @@ test("FlueDriverClient workflows.await shares the await counter and returns the 
   });
 });
 
-test("FlueDriverClient workflows.await throws the suspend sentinel on suspended", async () => {
+test("LoomDriverClient workflows.await throws the suspend sentinel on suspended", async () => {
   await withDriverServer(async (call) => {
     if (call.url === "/api/workspaces/WS/driver/workflows/await") {
       return { status: "suspended" };
@@ -944,7 +959,7 @@ test("FlueDriverClient workflows.await throws the suspend sentinel on suspended"
   });
 });
 
-test("FlueDriverClient events.await surfaces structured await errors as DriverApiError", async () => {
+test("LoomDriverClient events.await surfaces structured await errors as DriverApiError", async () => {
   const table = [
     { name: "unscoped pattern", statusCode: 400, code: "await_pattern_unscoped" },
     { name: "timeout above cap", statusCode: 400, code: "await_timeout_required" },
@@ -972,7 +987,7 @@ test("FlueDriverClient events.await surfaces structured await errors as DriverAp
   }
 });
 
-test("FlueDriverClient events.list fetches the run's awaits without consuming a slot", async () => {
+test("LoomDriverClient events.list fetches the run's awaits without consuming a slot", async () => {
   await withDriverServer(async (call) => {
     if (call.url === "/api/workspaces/WS/driver/events/awaits") {
       return {
@@ -1008,7 +1023,7 @@ test("FlueDriverClient events.list fetches the run's awaits without consuming a 
   });
 });
 
-test("FlueDriverClient sends token-only auth when LOOM_RUN_TOKEN is set", async () => {
+test("LoomDriverClient sends token-only auth when LOOM_RUN_TOKEN is set", async () => {
   await withDriverServer(async (call) => {
     if (call.url === "/api/workspaces/WS/driver/epic-get") {
       return { id: "EPIC-1", issueType: "epic" };
@@ -1043,7 +1058,7 @@ test("FlueDriverClient sends token-only auth when LOOM_RUN_TOKEN is set", async 
   });
 });
 
-test("FlueDriverClient token-only auth needs no LOOM_DRIVER_RUN_ID (identity rides the claims)", async () => {
+test("LoomDriverClient token-only auth needs no LOOM_DRIVER_RUN_ID (identity rides the claims)", async () => {
   await withDriverServer(async (call) => {
     if (call.url === "/api/workspaces/WS/driver/epic-get") {
       return { id: "EPIC-1", issueType: "epic" };
@@ -1071,7 +1086,7 @@ test("FlueDriverClient token-only auth needs no LOOM_DRIVER_RUN_ID (identity rid
   });
 });
 
-test("FlueDriverClient maps 401 token_expired to a non-retryable DriverApiError", async () => {
+test("LoomDriverClient maps 401 token_expired to a non-retryable DriverApiError", async () => {
   // retryable:true row guards the normalization: an expired run token can
   // never be retried (the TTL is the max-run-duration cap), whatever a future
   // server envelope claims.
@@ -1099,7 +1114,7 @@ test("FlueDriverClient maps 401 token_expired to a non-retryable DriverApiError"
   }
 });
 
-test("FlueDriverClient epics.watch is token-only with LOOM_RUN_TOKEN and treats token_expired as fatal", async () => {
+test("LoomDriverClient epics.watch is token-only with LOOM_RUN_TOKEN and treats token_expired as fatal", async () => {
   await withSSEServer((call, res) => {
     res.writeHead(200, { "Content-Type": "text/event-stream" });
     writeSSEFrame(res, "1", "snapshot", { epic: { epicId: "EPIC-1" }, active: null });

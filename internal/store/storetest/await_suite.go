@@ -42,14 +42,14 @@ type AwaitRunHarness struct {
 	// NewRun creates a queued run, with parentRunID linking composition
 	// children ("" = detached), and returns it.
 	NewRun func(t testing.TB, runID, parentRunID string) *domain.DriverRun
-	// Suspend parks a running run (owner-fenced running -> suspended).
+	// Suspend suspends a running run (owner-fenced running -> suspended).
 	Suspend func(ctx context.Context, runID, nodeID, leaseID string, fencingToken int64) (*domain.DriverRun, error)
 	// Resume re-queues a suspended run with its resume-source event.
 	Resume func(ctx context.Context, runID, resumeSourceEventID string) (*domain.DriverRun, error)
 }
 
 // RunAwaitConformance runs the await semantics every backend must satisfy
-// identically: atomic check-then-park (RULE 2, the lost-wakeup fix), exact
+// identically: atomic register-and-check (RULE 2, the lost-wakeup fix), exact
 // pattern equality (RULE 1), replay determinism (RULE 3), actor filtering at
 // scan (RULE 4), mandatory deadlines (RULE 5), resolve-ALL multi-waiter, and
 // the suspended-run lifecycle guards.
@@ -59,9 +59,9 @@ func RunAwaitConformance(t *testing.T, newHarness func(t testing.TB) *AwaitHarne
 		name string
 		run  func(t *testing.T, h *AwaitHarness)
 	}{
-		{"RegisterParksWithoutMatch", testRegisterParksWithoutMatch},
+		{"RegisterLeavesPendingWithoutMatch", testRegisterLeavesPendingWithoutMatch},
 		{"EventBeforeRegistrationSatisfiesImmediately", testEventBeforeRegistrationSatisfies},
-		{"EventAfterParkStaysPendingForDispatch", testEventAfterParkStaysPending},
+		{"EventAfterPendingRegistrationStaysPendingForDispatch", testEventAfterPendingRegistrationStaysPending},
 		{"SatisfiedRegistrationReplaysSameEvent", testSatisfiedRegistrationReplays},
 		{"PendingRegistrationIdempotent", testPendingRegistrationIdempotent},
 		{"ActorFilterAtScan", testActorFilterAtScan},
@@ -122,24 +122,24 @@ func assertNoSatisfiedRow(t *testing.T, ctx context.Context, h *AwaitHarness, in
 	}
 }
 
-func testRegisterParksWithoutMatch(t *testing.T, h *AwaitHarness) {
+func testRegisterLeavesPendingWithoutMatch(t *testing.T, h *AwaitHarness) {
 	ctx := t.Context()
 	res := mustRegister(t, ctx, h, awaitReg("run-a", 1, "pr.approved:repo-1"))
 	if res.Satisfied {
-		t.Fatalf("register with empty journal: Satisfied=true, want parked")
+		t.Fatalf("register with empty journal: Satisfied=true, want pending")
 	}
 	if res.Instance.Status != domain.AwaitPending {
-		t.Fatalf("parked status = %q, want pending", res.Instance.Status)
+		t.Fatalf("pending status = %q, want pending", res.Instance.Status)
 	}
 	pending := mustListPattern(t, ctx, h, "pr.approved:repo-1")
 	if len(pending) != 1 || pending[0].InstanceKey != res.Instance.InstanceKey {
-		t.Fatalf("pattern index after park = %+v, want the parked instance", pending)
+		t.Fatalf("pattern index after registration = %+v, want the pending instance", pending)
 	}
 	assertNoSatisfiedRow(t, ctx, h, res.Instance.InstanceKey)
 }
 
 // The lost-wakeup case (vet A2): the event landed before the await was
-// registered; check-then-park must resolve immediately, never park forever.
+// registered; register-and-check must resolve immediately, never suspend forever.
 func testEventBeforeRegistrationSatisfies(t *testing.T, h *AwaitHarness) {
 	ctx := t.Context()
 	eventID := h.AppendEvent(t, "pr.approved", "repo-1", "alice")
@@ -163,16 +163,16 @@ func testEventBeforeRegistrationSatisfies(t *testing.T, h *AwaitHarness) {
 	}
 }
 
-func testEventAfterParkStaysPending(t *testing.T, h *AwaitHarness) {
+func testEventAfterPendingRegistrationStaysPending(t *testing.T, h *AwaitHarness) {
 	ctx := t.Context()
 	res := mustRegister(t, ctx, h, awaitReg("run-a", 1, "pr.approved:repo-1"))
 	h.AppendEvent(t, "pr.approved", "repo-1", "alice")
 	// The store never auto-resolves on append — the dispatch matcher (AW7)
-	// finds the parked instance via ListAwaitsByPattern and resolves it.
+	// finds the pending instance via ListAwaitsByPattern and resolves it.
 	assertNoSatisfiedRow(t, ctx, h, res.Instance.InstanceKey)
 	pending := mustListPattern(t, ctx, h, "pr.approved:repo-1")
 	if len(pending) != 1 {
-		t.Fatalf("parked await missing from dispatch index after append: %+v", pending)
+		t.Fatalf("pending await missing from dispatch index after append: %+v", pending)
 	}
 }
 
@@ -188,14 +188,14 @@ func testSatisfiedRegistrationReplays(t *testing.T, h *AwaitHarness) {
 	}
 	replay := mustRegister(t, ctx, h, awaitReg("run-a", 1, "pr.approved:repo-1"))
 	if !replay.Satisfied {
-		t.Fatalf("re-registration of satisfied key parked instead of replaying")
+		t.Fatalf("re-registration of satisfied key pending instead of replaying")
 	}
 	if replay.Instance.SatisfiedByEventID != first.Instance.SatisfiedByEventID {
 		t.Fatalf("replay event %q != first event %q",
 			replay.Instance.SatisfiedByEventID, first.Instance.SatisfiedByEventID)
 	}
 	if pending := mustListPattern(t, ctx, h, "pr.approved:repo-1"); len(pending) != 0 {
-		t.Fatalf("replayed registration parked a duplicate: %+v", pending)
+		t.Fatalf("replayed registration pending a duplicate: %+v", pending)
 	}
 }
 
@@ -207,7 +207,7 @@ func testPendingRegistrationIdempotent(t *testing.T, h *AwaitHarness) {
 		t.Fatalf("pending re-registration = %+v, want pending row back", again)
 	}
 	if pending := mustListPattern(t, ctx, h, "pr.approved:repo-1"); len(pending) != 1 {
-		t.Fatalf("re-registration duplicated the parked await: %+v", pending)
+		t.Fatalf("re-registration duplicated the pending await: %+v", pending)
 	}
 }
 
@@ -223,7 +223,7 @@ func testActorFilterAtScan(t *testing.T, h *AwaitHarness) {
 	}{
 		{"empty allow admits any actor", nil, "mallory", true},
 		{"allowed actor satisfies", []string{"alice", "bob"}, "alice", true},
-		{"mismatched actor parks", []string{"alice"}, "mallory", false},
+		{"mismatched actor suspends", []string{"alice"}, "mallory", false},
 	}
 	subjects := []string{"repo-a", "repo-b", "repo-c"}
 	for i, tc := range cases {
@@ -247,8 +247,8 @@ func testPatternExactEqualityNoGlob(t *testing.T, h *AwaitHarness) {
 	ctx := t.Context()
 	const pattern = "pr.approved:repo-*"
 	h.AppendEvent(t, "pr.approved", "repo-123", "alice")
-	parked := mustRegister(t, ctx, h, awaitReg("run-a", 1, pattern))
-	if parked.Satisfied {
+	pending := mustRegister(t, ctx, h, awaitReg("run-a", 1, pattern))
+	if pending.Satisfied {
 		t.Fatalf("pattern %q glob-matched subject repo-123; want literal comparison", pattern)
 	}
 	if pending := mustListPattern(t, ctx, h, pattern); len(pending) != 1 {
@@ -477,7 +477,7 @@ func testSuspendReleasesSlotIdempotently(t *testing.T, h *AwaitHarness) {
 	if suspended.NodeID != "" || suspended.LeaseID != "" {
 		t.Fatalf("suspend kept the slot: node=%q lease=%q, want both cleared", suspended.NodeID, suspended.LeaseID)
 	}
-	// The park->suspend leg may be retried by the driver-op layer after the
+	// The pending->suspend leg may be retried by the driver-op layer after the
 	// owner fields were already cleared: idempotent no-op.
 	again, err := runs.Suspend(ctx, "run-a", claimed.NodeID, claimed.LeaseID, claimed.FencingToken)
 	if err != nil || again.Status != domain.DriverRunSuspendedAwaitingEvent {
@@ -548,7 +548,7 @@ func testResumeOnlyFromSuspendedFirstWinner(t *testing.T, h *AwaitHarness) {
 		t.Fatalf("resume of queued run: err = %v, want ErrInvalidTransition", err)
 	}
 	claimed := claimRun(t, ctx, h, "run-a")
-	// Park->suspend window: a resolve racing the suspend sees the run still
+	// Pending->suspend window: a resolve racing the suspend sees the run still
 	// running; the store stays strict and the resume path retries (AW7).
 	if _, err := runs.Resume(ctx, "run-a", "event-1"); !errors.Is(err, domain.ErrInvalidTransition) {
 		t.Fatalf("resume of running run: err = %v, want ErrInvalidTransition", err)

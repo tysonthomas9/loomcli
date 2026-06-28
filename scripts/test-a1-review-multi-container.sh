@@ -42,7 +42,9 @@
 # Reuse: deploy/agents/a1-github-review/setup.sh (baked into the loom-serve
 # image as /usr/local/bin/a1-setup.sh) and the webhook-replay / review-poll
 # logic copied from scripts/test-a1-live-review.sh (build_event / sign_body /
-# wait_for_review). The setup.sh and codex-review-runner.mjs are NOT rewritten.
+# wait_for_review). Task execution goes through the generic
+# loom-task-runner-invoker.mjs and the sibling github-review-task-runner
+# workflow submitted with github-review-agent.
 set -Eeuo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -75,6 +77,7 @@ A1_BINDING_ID="${A1_BINDING_ID:-a1-github-review-multi}"
 A1_WEBHOOK_ENDPOINT_PATH="${A1_WEBHOOK_ENDPOINT_PATH:-/webhooks/github}"
 WEBHOOK_URL="${SERVE_URL}/api/workspaces/${WS}${A1_WEBHOOK_ENDPOINT_PATH}"
 WORKFLOW_SOURCE="${WORKFLOW_SOURCE:-${ROOT_DIR}/internal/workflows/builtin/github-review-agent.ts}"
+REVIEW_TASK_RUNNER_SOURCE="${REVIEW_TASK_RUNNER_SOURCE:-${ROOT_DIR}/internal/workflows/builtin/github-review-task-runner.ts}"
 
 # Codex auth dir on the host (mounted read-only into loom-serve; the entrypoint
 # mirrors it into the writable CODEX_HOME). Never mutated.
@@ -349,7 +352,7 @@ gen_env() {
     printf 'LOOM_STACK_CODEX_RW_DIR=%s\n' "/home/node/.codex-rw"
     printf 'LOOM_STACK_FLUE_AGENT_MODEL=%s\n' "$LOOM_STACK_FLUE_AGENT_MODEL"
     printf 'LOOM_STACK_TASK_RUNNER_CMD_JSON=%s\n' \
-      '["env","CODEX_HOME=/home/node/.codex-rw","node","/usr/local/bin/codex-review-runner.mjs"]'
+      '["env","CODEX_HOME=/home/node/.codex-rw","node","/usr/local/bin/loom-task-runner-invoker.mjs"]'
   } >"$ENV_FILE"
   chmod 600 "$ENV_FILE"
 }
@@ -369,9 +372,9 @@ stage_up() {
   # then shadows the env-file during `podman compose up` (compose interpolation
   # prefers the process environment over --env-file), so the loom-serve process
   # would receive invalid JSON for LOOM_DRIVER_TASK_RUNNER_CMD_JSON, json.Unmarshal
-  # would fail in HostBridgeTaskExecutor.command(), and the `flue-local` provider
-  # preflight would 500 every review TaskRun (exec-task) — the distributed codex
-  # runner would never execute. Reading the keys without sourcing keeps the
+  # would fail in HostBridgeTaskExecutor.command(), and every named review
+  # TaskRun would fail before the generic invoker reached the bundle runner.
+  # Reading the keys without sourcing keeps the
   # quoted JSON intact for compose.
   local fleet_db_api_key fleet_actor
   fleet_db_api_key="$(sed -n 's/^LOOM_FLEET_DB_API_KEY=//p' "$ENV_FILE" | head -1)"
@@ -412,14 +415,19 @@ stage_seed_workspace() {
 stage_register_workflow() {
   stage S3 "submit + trust the github-review-agent workflow"
   require_path "$WORKFLOW_SOURCE"
+  require_path "$REVIEW_TASK_RUNNER_SOURCE"
 
   # HTTP submission: serve builds the bundle in-container (flue). The driver is
   # stamped untrusted server-side; the process-launcher placement gate refuses
   # an untrusted driver, so we promote it to trusted via fleet-db (the same
   # path scripts/test-podman-stack.sh uses).
   local files_json submission driver_id trust
-  files_json="$(jq -nc --arg path "workflows/${A1_WORKFLOW_NAME}.ts" --rawfile src "$WORKFLOW_SOURCE" \
-    '{files: {($path): $src}, activate: true}')"
+  files_json="$(jq -nc \
+    --arg workflow_path "workflows/${A1_WORKFLOW_NAME}.ts" \
+    --arg runner_path "workflows/github-review-task-runner.ts" \
+    --rawfile workflow_src "$WORKFLOW_SOURCE" \
+    --rawfile runner_src "$REVIEW_TASK_RUNNER_SOURCE" \
+    '{files: {($workflow_path): $workflow_src, ($runner_path): $runner_src}, activate: true}')"
   submission="$(curl -fsS --max-time 240 -X POST \
     -H 'Content-Type: application/json' --data "$files_json" \
     "$SERVE_URL/api/workspaces/${WS}/workflows/${A1_WORKFLOW_NAME}/versions")" ||

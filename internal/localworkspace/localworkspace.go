@@ -39,6 +39,33 @@ func AgentWorktreePath(workspacePath, repoName, agentName string) string {
 	return filepath.Join(workspacePath, "worktrees", repoName, agentName)
 }
 
+// TaskRunWorktreePath returns the canonical isolated worktree path for a task
+// run. The path is deliberately separate from agent worktrees so concurrent
+// local-task-runner executions never share a mutable checkout.
+func TaskRunWorktreePath(workspacePath, repoName, taskRunID string) (string, error) {
+	if strings.TrimSpace(workspacePath) == "" {
+		return "", fmt.Errorf("workspace path is empty")
+	}
+	if strings.TrimSpace(repoName) == "" {
+		return "", fmt.Errorf("repo name is empty")
+	}
+	if strings.TrimSpace(taskRunID) == "" {
+		return "", fmt.Errorf("task run id is empty")
+	}
+	root, err := filepath.Abs(workspacePath)
+	if err != nil {
+		return "", err
+	}
+	target, err := filepath.Abs(filepath.Join(root, ".loom", "task-worktrees", safePathSegment(repoName), safePathSegment(taskRunID)))
+	if err != nil {
+		return "", err
+	}
+	if !PathContains(root, target) || root == target {
+		return "", fmt.Errorf("task worktree path escapes workspace: %s", target)
+	}
+	return target, nil
+}
+
 // RepoCheckoutPath returns a safe direct child path under workspacePath.
 func RepoCheckoutPath(workspacePath, name string) (string, error) {
 	if strings.TrimSpace(workspacePath) == "" {
@@ -89,6 +116,29 @@ func CloneRepoTo(ctx context.Context, cloneURL, targetPath string) error {
 // EnsureGitWorktree creates a git worktree at targetPath from repoPath.
 func EnsureGitWorktree(repoPath, targetPath, branchName string) error {
 	return EnsureGitWorktreeFromBranch(repoPath, targetPath, branchName, "", "")
+}
+
+// EnsureDetachedGitWorktreeFromBranch creates a detached git worktree at
+// targetPath from the latest available remote/defaultBranch ref. Existing
+// worktrees are left untouched.
+func EnsureDetachedGitWorktreeFromBranch(repoPath, targetPath, remoteName, defaultBranch string) error {
+	if _, err := os.Stat(filepath.Join(targetPath, ".git")); err == nil {
+		return nil
+	}
+	if err := os.MkdirAll(filepath.Dir(targetPath), 0o755); err != nil {
+		return fmt.Errorf("creating worktree parent: %w", err)
+	}
+
+	baseRef, err := resolveFreshBaseRef(repoPath, remoteName, defaultBranch)
+	if err != nil {
+		return err
+	}
+	args := []string{"worktree", "add", "--detach", targetPath}
+	if baseRef != "" {
+		args = append(args, baseRef)
+	}
+	_, err = runGit(repoPath, args...)
+	return err
 }
 
 // EnsureGitWorktreeFromBranch creates a git worktree at targetPath. When
@@ -170,6 +220,30 @@ func branchAlreadyExists(out string, err error) bool {
 	return strings.Contains(msg, "already exists") ||
 		strings.Contains(msg, "already a worktree") ||
 		strings.Contains(msg, "already checked out")
+}
+
+func safePathSegment(value string) string {
+	value = strings.TrimSpace(value)
+	var b strings.Builder
+	for _, r := range value {
+		switch {
+		case r >= 'a' && r <= 'z':
+			b.WriteRune(r)
+		case r >= 'A' && r <= 'Z':
+			b.WriteRune(r)
+		case r >= '0' && r <= '9':
+			b.WriteRune(r)
+		case r == '.', r == '_', r == '-':
+			b.WriteRune(r)
+		default:
+			b.WriteByte('-')
+		}
+	}
+	out := strings.Trim(b.String(), ".-")
+	if out == "" {
+		return "unnamed"
+	}
+	return out
 }
 
 // SelectAgentRepos applies an agent's repo affinity to local repos.

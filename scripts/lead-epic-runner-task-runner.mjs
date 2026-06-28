@@ -13,8 +13,8 @@ if (!request.task_id || !request.task_run_id) {
   console.error("task runner request is missing task_id or task_run_id");
   process.exit(3);
 }
-if (request.provider_profile !== "flue-local") {
-  console.error(`unexpected provider profile ${request.provider_profile}`);
+if (request.runner !== "local-task-runner") {
+  console.error(`unexpected runner ${request.runner}`);
   process.exit(4);
 }
 if (process.env.LOOM_TASK_RUN_LEASE_TOKEN !== request.lease_token) {
@@ -32,6 +32,10 @@ console.log(
     logs_ref: `task-run://${request.task_run_id}/logs`,
     runtime_metadata: {
       task_runner: "lead-epic-runner-playwright",
+      runner: request.runner,
+      runner_ref: request.runner_ref,
+      runner_kind: request.runner_kind,
+      runner_entrypoint: request.runner_entrypoint,
       provider_profile: request.provider_profile,
     },
   }),

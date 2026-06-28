@@ -26,16 +26,28 @@ RUN --mount=type=cache,target=/go/pkg/mod \
 # node_modules lives in the layer (not a cache mount) so stage 3 can COPY it
 # and use vite preview without reinstalling. --mount=type=cache on /root/.npm
 # still accelerates the install.
-FROM node:24-alpine AS frontend
+FROM node:24-bookworm-slim AS frontend
 WORKDIR /app/internal/webui/frontend
 COPY internal/webui/frontend/ .
 RUN --mount=type=cache,target=/root/.npm \
     npm ci && npm run build
 
-# ── Stage 3: Runtime (alpine) ──
-FROM node:24-alpine AS runtime
+# ── Stage 3: Runtime (debian/glibc) ──
+# Debian (glibc) rather than Alpine (musl): cursor-agent ships glibc-only Linux
+# binaries (a glibc node + *.linux-*-gnu.node addons) that cannot run on musl.
+# glibc also runs the codex/claude/opencode CLIs, so every local backend works here.
+FROM node:24-bookworm-slim AS runtime
 
-RUN apk add --no-cache tmux git jq curl ca-certificates bash github-cli
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        tmux git jq curl ca-certificates bash lsof \
+    && curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
+        -o /usr/share/keyrings/githubcli-archive-keyring.gpg \
+    && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" \
+        > /etc/apt/sources.list.d/github-cli.list \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends gh \
+    && rm -rf /var/lib/apt/lists/*
 
 # Real AI backend CLIs. Users can override any of these at runtime:
 #   -v $(which claude):/usr/local/bin/claude:ro

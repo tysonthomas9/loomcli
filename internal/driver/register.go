@@ -21,8 +21,14 @@ import (
 const (
 	NativeFlueSchemaVersion = "3"
 	NativeFlueArtifactKind  = "flue-node-artifact"
-	LoomFlueSDKPackage      = "@loom/sdk/flue"
-	LoomFlueSDKVersion      = "0.1.0"
+	LoomDriverSDKPackage    = "@loom/sdk/driver"
+	LoomDriverSDKVersion    = "0.1.0"
+
+	RunnerKindFlueWorkflow = "flue-workflow"
+	RunnerKindNodeModule   = "node-module"
+
+	driverRunnersManifestKey = "runners"
+	ManifestTrustLevelKey    = "trust_level"
 )
 
 type RegisterFlueOptions struct {
@@ -37,6 +43,15 @@ type RegisterFlueOptions struct {
 	SourceDigest string
 	CreatedBy    string
 	Activate     bool
+	RunnerSpecs  []DriverRunnerSpec
+	// Manifest adds server-side provenance fields to the generated native
+	// manifest. Values are merged before generated runtime fields are stamped;
+	// generated fields and server-stamped trust still win.
+	Manifest map[string]string
+	// BuildDiagnostics carries redacted build output for successful generated
+	// workflow builds. It is persisted on DriverVersion; failed builds never
+	// reach registration.
+	BuildDiagnostics string
 	// Trust is the trust level the SERVER stamps on the driver row (§7 step 9
 	// sandbox placement policy) — it is never read from client input or the
 	// bundle manifest, so a submission cannot self-elevate. Empty defaults to
@@ -55,6 +70,193 @@ type RegisterFlueResult struct {
 	CreatedVersion bool                  `json:"created_version"`
 	ReusedVersion  bool                  `json:"reused_version"`
 	Activated      bool                  `json:"activated"`
+}
+
+type DriverRunnerSpec struct {
+	Name       string `json:"name"`
+	Kind       string `json:"kind"`
+	Entrypoint string `json:"entrypoint"`
+}
+
+func encodeDriverRunnerManifest(runners []DriverRunnerSpec) string {
+	normalized := normalizeDriverRunnerSpecs(runners)
+	if len(normalized) == 0 {
+		return ""
+	}
+	data, err := json.Marshal(normalized)
+	if err != nil {
+		return ""
+	}
+	return string(data)
+}
+
+func decodeDriverRunnerManifest(manifest map[string]string) ([]DriverRunnerSpec, error) {
+	raw := strings.TrimSpace(manifest[driverRunnersManifestKey])
+	if raw == "" {
+		return nil, nil
+	}
+	var runners []DriverRunnerSpec
+	if err := json.Unmarshal([]byte(raw), &runners); err != nil {
+		return nil, fmt.Errorf("decode driver runners manifest: %w", err)
+	}
+	runners = normalizeDriverRunnerSpecs(runners)
+	if len(runners) == 0 {
+		return nil, fmt.Errorf("driver runners manifest has no usable runner entries: %w", domain.ErrInvalid)
+	}
+	if err := validateDriverRunnerSpecs(runners); err != nil {
+		return nil, fmt.Errorf("invalid driver runners manifest: %w", err)
+	}
+	return runners, nil
+}
+
+func normalizeDriverRunnerSpecs(in []DriverRunnerSpec) []DriverRunnerSpec {
+	out := make([]DriverRunnerSpec, 0, len(in))
+	seen := map[string]struct{}{}
+	for _, runner := range in {
+		runner.Name = strings.TrimSpace(runner.Name)
+		runner.Kind = strings.TrimSpace(runner.Kind)
+		runner.Entrypoint = strings.TrimSpace(runner.Entrypoint)
+		if runner.Name == "" || runner.Kind == "" || runner.Entrypoint == "" {
+			continue
+		}
+		if _, ok := seen[runner.Name]; ok {
+			continue
+		}
+		seen[runner.Name] = struct{}{}
+		out = append(out, runner)
+	}
+	return out
+}
+
+func NormalizeDriverRunnerSpecs(in []DriverRunnerSpec) []DriverRunnerSpec {
+	return normalizeDriverRunnerSpecs(in)
+}
+
+// validDriverRunnerKinds is the closed set of runner kinds a driver manifest may
+// declare (§4.6).
+var validDriverRunnerKinds = map[string]struct{}{
+	RunnerKindFlueWorkflow: {},
+	RunnerKindNodeModule:   {},
+}
+
+// validateDriverRunnerSpecs rejects malformed runner specs (§4.6): empty
+// name/kind/entrypoint, duplicate names, unknown kinds, and unsafe entrypoints
+// (absolute paths or path traversal). It runs on the normalized list so the
+// caller sees the same view the runtime will resolve against.
+func validateDriverRunnerSpecs(runners []DriverRunnerSpec) error {
+	seen := map[string]struct{}{}
+	for _, runner := range runners {
+		name := strings.TrimSpace(runner.Name)
+		kind := strings.TrimSpace(runner.Kind)
+		entrypoint := strings.TrimSpace(runner.Entrypoint)
+		if name == "" {
+			return fmt.Errorf("driver runner spec has empty name: %w", domain.ErrInvalid)
+		}
+		if kind == "" {
+			return fmt.Errorf("driver runner %q has empty kind: %w", name, domain.ErrInvalid)
+		}
+		if entrypoint == "" {
+			return fmt.Errorf("driver runner %q has empty entrypoint: %w", name, domain.ErrInvalid)
+		}
+		if _, ok := validDriverRunnerKinds[kind]; !ok {
+			return fmt.Errorf("driver runner %q has unknown kind %q: %w", name, kind, domain.ErrInvalid)
+		}
+		if err := validateRunnerEntrypoint(name, entrypoint); err != nil {
+			return err
+		}
+		if _, ok := seen[name]; ok {
+			return fmt.Errorf("driver runner name %q is declared more than once: %w", name, domain.ErrInvalid)
+		}
+		seen[name] = struct{}{}
+	}
+	return nil
+}
+
+func ValidateDriverRunnerSpecs(runners []DriverRunnerSpec) error {
+	return validateDriverRunnerSpecs(normalizeDriverRunnerSpecs(runners))
+}
+
+// validateRunnerEntrypoint rejects unsafe runner entrypoints: absolute paths and
+// path traversal escape the bundle root and are never legitimate.
+func validateRunnerEntrypoint(name, entrypoint string) error {
+	if filepath.IsAbs(entrypoint) || strings.HasPrefix(entrypoint, "/") {
+		return fmt.Errorf("driver runner %q entrypoint %q must be relative: %w", name, entrypoint, domain.ErrInvalid)
+	}
+	clean := filepath.ToSlash(filepath.Clean(filepath.FromSlash(entrypoint)))
+	for _, part := range strings.Split(clean, "/") {
+		if part == ".." {
+			return fmt.Errorf("driver runner %q entrypoint %q must not contain path traversal: %w", name, entrypoint, domain.ErrInvalid)
+		}
+	}
+	return nil
+}
+
+// OpenShellRunnerName is the fail-closed OpenShell task runner. No real
+// OpenShell integration exists; the runner is excluded from manifests and
+// guarded at resolve time so it can never select a fake completed path (§4.6).
+const OpenShellRunnerName = "openshell-task-runner"
+
+// ErrOpenShellRunnerUnimplemented carries the openshell_runner_unimplemented
+// error class (§4.5) for the resolve-time guard.
+var ErrOpenShellRunnerUnimplemented = errors.New("openshell_runner_unimplemented: openshell-task-runner is not implemented")
+
+func resolveDriverRunner(version *domain.DriverVersion, runnerName string) (DriverRunnerSpec, error) {
+	runnerName = strings.TrimSpace(runnerName)
+	if runnerName == "" {
+		return DriverRunnerSpec{}, nil
+	}
+	if runnerName == OpenShellRunnerName {
+		return DriverRunnerSpec{}, fmt.Errorf("runner %q: %w: %w", runnerName, ErrOpenShellRunnerUnimplemented, domain.ErrInvalid)
+	}
+	if version == nil {
+		return DriverRunnerSpec{}, fmt.Errorf("driver version required to resolve runner %q: %w", runnerName, domain.ErrInvalid)
+	}
+	runners, err := decodeDriverRunnerManifest(version.Manifest)
+	if err != nil {
+		return DriverRunnerSpec{}, err
+	}
+	for _, runner := range runners {
+		if runner.Name == runnerName {
+			return runner, nil
+		}
+	}
+	return DriverRunnerSpec{}, fmt.Errorf("runner %q is not declared by driver version %q: %w", runnerName, version.VersionID, domain.ErrInvalid)
+}
+
+func applyResolvedRunner(opts TaskRunRequestOptions, parent *domain.DriverRun, version *domain.DriverVersion) (TaskRunRequestOptions, error) {
+	opts.Runner = strings.TrimSpace(opts.Runner)
+	if opts.Runner == "" {
+		return opts, nil
+	}
+	spec, err := resolveDriverRunner(version, opts.Runner)
+	if err != nil {
+		return opts, err
+	}
+	opts.RunnerKind = spec.Kind
+	opts.RunnerEntrypoint = spec.Entrypoint
+	opts.RunnerVersionID = version.VersionID
+	opts.RunnerRef = resolvedRunnerRef(parent, version, spec)
+	return opts, nil
+}
+
+func resolvedRunnerRef(parent *domain.DriverRun, version *domain.DriverVersion, spec DriverRunnerSpec) string {
+	driverID := ""
+	if version != nil {
+		driverID = version.DriverID
+	}
+	if driverID == "" && parent != nil {
+		driverID = parent.DriverID
+	}
+	versionID := ""
+	if version != nil {
+		versionID = version.VersionID
+	}
+	return strings.Join([]string{driverID, versionID, spec.Kind, spec.Entrypoint}, "#")
+}
+
+func inferNodeModuleRunnerName(path string) string {
+	name := strings.TrimSuffix(filepath.Base(strings.TrimSpace(path)), filepath.Ext(path))
+	return strings.TrimSpace(name)
 }
 
 func RegisterFlueDriver(ctx context.Context, s store.Store, opts RegisterFlueOptions) (*RegisterFlueResult, error) {
@@ -117,6 +319,8 @@ type flueRegistrationInput struct {
 	workflowName string
 	sourceRef    string
 	sourceDigest string
+	runnerSpecs  []DriverRunnerSpec
+	trust        domain.DriverTrustLevel
 }
 
 func resolveFlueRegistrationInput(opts RegisterFlueOptions) (*flueRegistrationInput, error) {
@@ -127,6 +331,9 @@ func resolveFlueRegistrationInput(opts RegisterFlueOptions) (*flueRegistrationIn
 	externalManifest, err := readRegistrationManifest(absWorkDir, absDist, opts.ManifestPath)
 	if err != nil {
 		return nil, err
+	}
+	for key, value := range opts.Manifest {
+		externalManifest[key] = value
 	}
 	driverName := firstNonEmpty(opts.DriverName, externalManifest["driver_name"], externalManifest["name"])
 	if driverName == "" {
@@ -140,6 +347,10 @@ func resolveFlueRegistrationInput(opts RegisterFlueOptions) (*flueRegistrationIn
 	if workflowName == "" {
 		return nil, fmt.Errorf("workflow name required: %w", domain.ErrInvalid)
 	}
+	runnerSpecs := normalizeDriverRunnerSpecs(opts.RunnerSpecs)
+	if err := validateDriverRunnerSpecs(runnerSpecs); err != nil {
+		return nil, err
+	}
 	return &flueRegistrationInput{
 		absWorkDir:   absWorkDir,
 		absDist:      absDist,
@@ -149,6 +360,8 @@ func resolveFlueRegistrationInput(opts RegisterFlueOptions) (*flueRegistrationIn
 		workflowName: workflowName,
 		sourceRef:    firstNonEmpty(opts.SourceRef, externalManifest["source_ref"], relativeRef(absWorkDir, absDist)),
 		sourceDigest: firstNonEmpty(opts.SourceDigest, externalManifest["source_digest"]),
+		runnerSpecs:  runnerSpecs,
+		trust:        registrationTrust(opts.Trust),
 	}, nil
 }
 
@@ -216,7 +429,8 @@ func stageFlueBundle(reg *flueRegistrationInput) (*stagedFlueBundle, error) {
 	if reg.sourceDigest == "" {
 		reg.sourceDigest = artifactDigest
 	}
-	staged.manifest = nativeFlueManifest(reg.driverID, reg.driverName, reg.workflowName, reg.sourceRef, reg.sourceDigest, artifactDigest, reg.manifest)
+	staged.manifest = nativeFlueManifest(reg.driverID, reg.driverName, reg.workflowName, reg.sourceRef, reg.sourceDigest, artifactDigest, reg.manifest, reg.runnerSpecs)
+	staged.manifest[ManifestTrustLevelKey] = string(reg.trust)
 	manifestBytes, err := writeFlueBundleManifest(tmpRoot, staged.manifest)
 	if err != nil {
 		return staged, err
@@ -249,6 +463,12 @@ func reuseRegisteredFlueVersion(ctx context.Context, s store.Store, opts Registe
 	if existing.DriverID != driverID || existing.BundleDigest != staged.bundleDigest {
 		return fmt.Errorf("driver version %q already exists with different content: %w", staged.versionID, domain.ErrAlreadyExists)
 	}
+	if registeredBundleMissing(staged.finalRoot) {
+		if err := promoteFlueBundle(staged.tmpRoot, staged.finalRoot); err != nil {
+			return err
+		}
+		staged.tmpRoot = ""
+	}
 	if opts.Activate && result.Driver.ActiveVersionID != existing.VersionID {
 		if err := activateRegisteredDriver(ctx, s, result, opts.WorkspaceKey, driverID, existing.VersionID, staged.manifest); err != nil {
 			return err
@@ -258,7 +478,20 @@ func reuseRegisteredFlueVersion(ctx context.Context, s store.Store, opts Registe
 	return nil
 }
 
+func registeredBundleMissing(root string) bool {
+	for _, rel := range []string{"manifest.json", filepath.Join("dist", "server.mjs")} {
+		info, err := os.Stat(filepath.Join(root, rel))
+		if err != nil || info.IsDir() {
+			return true
+		}
+	}
+	return false
+}
+
 func promoteFlueBundle(tmpRoot, finalRoot string) error {
+	if tmpRoot == "" {
+		return nil
+	}
 	if err := os.RemoveAll(finalRoot); err != nil {
 		return fmt.Errorf("reset native Flue bundle root: %w", err)
 	}
@@ -283,6 +516,7 @@ func persistRegisteredFlueVersion(ctx context.Context, s store.Store, opts Regis
 		BundleDigest:     staged.bundleDigest,
 		Runtime:          RuntimeFlueNode,
 		Manifest:         staged.manifest,
+		BuildDiagnostics: opts.BuildDiagnostics,
 		ValidationStatus: domain.DriverVersionValidationPassed,
 		CreatedBy:        opts.CreatedBy,
 	})
@@ -354,18 +588,15 @@ func demoteReregisteredDriver(ctx context.Context, s store.Store, driver *domain
 	return updated, false, nil
 }
 
-func activateRegisteredDriver(ctx context.Context, s store.Store, result *RegisterFlueResult, ws, driverID, versionID string, manifest map[string]string) error {
-	active := versionID
-	status := domain.DriverStatusActive
-	driver, err := s.Drivers().Update(ctx, ws, driverID, store.DriverUpdate{
-		ActiveVersionID: &active,
-		Status:          &status,
-		Metadata:        &manifest,
-	})
+func activateRegisteredDriver(ctx context.Context, s store.Store, result *RegisterFlueResult, ws, driverID, versionID string, _ map[string]string) error {
+	driver, version, err := ActivateDriverVersion(ctx, s, ws, driverID, versionID)
 	if err != nil {
 		return fmt.Errorf("activate native Flue driver version: %w", err)
 	}
 	result.Driver = driver
+	if result.Version == nil {
+		result.Version = version
+	}
 	result.Activated = true
 	return nil
 }
@@ -384,7 +615,7 @@ func nextDriverVersion(ctx context.Context, s store.Store, ws, driverID string) 
 	return maxVersion + 1, nil
 }
 
-func nativeFlueManifest(driverID, driverName, workflowName, sourceRef, sourceDigest, artifactDigest string, external map[string]string) map[string]string {
+func nativeFlueManifest(driverID, driverName, workflowName, sourceRef, sourceDigest, artifactDigest string, external map[string]string, runnerSpecs []DriverRunnerSpec) map[string]string {
 	manifest := map[string]string{}
 	for k, v := range external {
 		manifest[k] = v
@@ -401,14 +632,23 @@ func nativeFlueManifest(driverID, driverName, workflowName, sourceRef, sourceDig
 	manifest["source_ref"] = sourceRef
 	manifest["source_digest"] = sourceDigest
 	manifest["artifact_digest"] = artifactDigest
+	if strings.TrimSpace(manifest[driverRunnersManifestKey]) == "" {
+		// No fabrication (§4.6): when the caller supplies no runner specs and the
+		// external manifest declares none, leave the runner list empty rather
+		// than stamping local/daytona/openshell defaults that may not exist in
+		// the bundle.
+		if encoded := encodeDriverRunnerManifest(normalizeDriverRunnerSpecs(runnerSpecs)); encoded != "" {
+			manifest[driverRunnersManifestKey] = encoded
+		}
+	}
 	if strings.TrimSpace(manifest["flue_runtime_version"]) == "" {
 		manifest["flue_runtime_version"] = "unknown"
 	}
 	if strings.TrimSpace(manifest["loom_sdk_package"]) == "" {
-		manifest["loom_sdk_package"] = LoomFlueSDKPackage
+		manifest["loom_sdk_package"] = LoomDriverSDKPackage
 	}
 	if strings.TrimSpace(manifest["loom_sdk_version"]) == "" {
-		manifest["loom_sdk_version"] = LoomFlueSDKVersion
+		manifest["loom_sdk_version"] = LoomDriverSDKVersion
 	}
 	if strings.TrimSpace(manifest["capabilities"]) == "" {
 		manifest["capabilities"] = "task.claim_ready,task_run.request,task.complete,task.release"

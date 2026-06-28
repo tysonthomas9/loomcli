@@ -5,6 +5,8 @@
   "type": "module",
   "scripts": {
     "prepare-sidecar": "bash scripts/prepare-sidecar.sh",
+    "refresh:app": "bash scripts/refresh-app.sh",
+    "refresh:webui": "bash scripts/refresh-webui.sh",
     "dev": "tauri dev",
     "build": "tauri build --bundles app",
     "build:dmg": "tauri build --bundles app,dmg",

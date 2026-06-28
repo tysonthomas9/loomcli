@@ -203,10 +203,10 @@ func (s *Store) DriverSteps() store.DriverStepStore { return s.steps }
 
 func (s *Store) TaskRuns() store.TaskRunStore { return s.taskRuns }
 
-// TaskParked reports whether a TaskRunFinish with ParkTask marked the given
-// task ID parked. memstore has no issue model (issues live in fleet-db), so
-// this is the test-side observable for the parked-issue transition.
-func (s *Store) TaskParked(ws, taskID string) bool { return s.taskRuns.TaskParked(ws, taskID) }
+// TaskBlocked reports whether a TaskRunFinish with BlockTask marked the given
+// task ID blocked. memstore has no issue model (issues live in fleet-db), so
+// this is the test-side observable for the blocked-issue transition.
+func (s *Store) TaskBlocked(ws, taskID string) bool { return s.taskRuns.TaskBlocked(ws, taskID) }
 
 // TaskRunEvents returns the TaskRunEventStore.
 func (s *Store) TaskRunEvents() store.TaskRunEventStore { return s.taskEvents }
@@ -215,7 +215,7 @@ func (s *Store) TaskRunEvents() store.TaskRunEventStore { return s.taskEvents }
 func (s *Store) Outbox() store.OutboxStore { return s.outbox }
 
 // Awaits returns the AwaitStore (chunk AW4). The await index shares the
-// trigger-event journal's lock so check-then-park is atomic with event
+// trigger-event journal's lock so register-and-check is atomic with event
 // appends; see awaitStore.
 func (s *Store) Awaits() store.AwaitStore { return s.awaits }
 

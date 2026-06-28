@@ -15,6 +15,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/driver"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	"github.com/tysonthomas9/loomcli/internal/store"
+	workflowdefs "github.com/tysonthomas9/loomcli/internal/workflows"
 )
 
 func TestCreateWorkflowRunPassesRawPayload(t *testing.T) {
@@ -77,6 +78,69 @@ func TestCreateWorkflowRunRegistersBuiltinEpicRunner(t *testing.T) {
 	}
 	if !strings.HasPrefix(version.SourceRef, "builtin://workflows/"+BuiltinEpicRunnerWorkflowName+"/versions/") || version.CreatedBy != "system" {
 		t.Fatalf("version = %+v, want system built-in source", version)
+	}
+}
+
+func TestCreateWorkflowRunRefreshesStaleBuiltinRunnerManifest(t *testing.T) {
+	ctx := context.Background()
+	st := memstore.New()
+	installFakeFlueBuild(t)
+	t.Chdir(t.TempDir())
+
+	spec, ok := workflowdefs.BuiltinWorkflow(BuiltinEpicRunnerWorkflowName)
+	if !ok {
+		t.Fatal("epic-runner builtin missing")
+	}
+	digest := workflowdefs.SourceDigest(spec.Files)
+	if _, err := st.Drivers().Create(ctx, store.DriverCreate{
+		WorkspaceKey:    "TEST",
+		DriverID:        BuiltinEpicRunnerWorkflowName,
+		Name:            BuiltinEpicRunnerWorkflowName,
+		OwnerType:       domain.DriverOwnerUser,
+		ActiveVersionID: "stale-version",
+		Status:          domain.DriverStatusActive,
+		TrustLevel:      domain.DriverTrustTrusted,
+	}); err != nil {
+		t.Fatalf("create stale built-in driver: %v", err)
+	}
+	if _, err := st.DriverVersions().Create(ctx, store.DriverVersionCreate{
+		WorkspaceKey:     "TEST",
+		VersionID:        "stale-version",
+		DriverID:         BuiltinEpicRunnerWorkflowName,
+		Version:          1,
+		SourceRef:        "builtin://workflows/" + BuiltinEpicRunnerWorkflowName + "/versions/" + digest,
+		SourceDigest:     digest,
+		BundleDigest:     "sha256:stale",
+		Runtime:          driver.RuntimeFlueNode,
+		Manifest:         map[string]string{"workflow_name": BuiltinEpicRunnerWorkflowName},
+		ValidationStatus: domain.DriverVersionValidationPassed,
+		CreatedBy:        "system",
+	}); err != nil {
+		t.Fatalf("create stale built-in version: %v", err)
+	}
+
+	mux := http.NewServeMux()
+	NewModule(st).Register(mux)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/workspaces/TEST/workflows/"+BuiltinEpicRunnerWorkflowName, stringsReader(`{"epicId":"EPIC-1","requestedBy":"ui"}`))
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("status = %d body=%s, want 202", rec.Code, rec.Body.String())
+	}
+	driverRecord, err := st.Drivers().Get(ctx, "TEST", BuiltinEpicRunnerWorkflowName)
+	if err != nil {
+		t.Fatalf("get refreshed built-in driver: %v", err)
+	}
+	if driverRecord.ActiveVersionID == "stale-version" {
+		t.Fatalf("active version was not refreshed")
+	}
+	version, err := st.DriverVersions().Get(ctx, "TEST", driverRecord.ActiveVersionID)
+	if err != nil {
+		t.Fatalf("get refreshed built-in version: %v", err)
+	}
+	if !strings.Contains(version.Manifest["runners"], "local-task-runner") {
+		t.Fatalf("refreshed manifest runners = %q, want local-task-runner", version.Manifest["runners"])
 	}
 }
 
@@ -328,7 +392,23 @@ EOF
 	if err := os.WriteFile(filepath.Join(sdkRoot, "package.json"), []byte(`{"name":"@loom/sdk"}`+"\n"), 0o644); err != nil {
 		t.Fatalf("write fake sdk package: %v", err)
 	}
+	runtimeRoot := filepath.Join(dir, "runtime")
+	for _, dep := range []string{
+		runtimeRoot,
+		filepath.Join(runtimeRoot, "node_modules", "@hono", "node-server"),
+		filepath.Join(runtimeRoot, "node_modules", "hono"),
+	} {
+		if err := os.MkdirAll(dep, 0o755); err != nil {
+			t.Fatalf("create fake runtime dependency %s: %v", dep, err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(runtimeRoot, "package.json"), []byte(`{"name":"@flue/runtime"}`+"\n"), 0o644); err != nil {
+		t.Fatalf("write fake runtime package: %v", err)
+	}
 	t.Setenv("LOOM_REAL_FLUE_CMD", script)
 	t.Setenv("LOOM_REAL_FLUE_CMD_JSON", "")
 	t.Setenv("LOOM_SDK_ROOT", sdkRoot)
+	t.Setenv("LOOM_FLUE_RUNTIME_ROOT", runtimeRoot)
+	t.Setenv("FLUE_RUNTIME_ROOT", "")
+	t.Setenv("FLUE_REPO", "")
 }

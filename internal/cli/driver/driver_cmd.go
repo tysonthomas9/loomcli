@@ -12,6 +12,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
+	"github.com/tysonthomas9/loomcli/internal/domain"
 	driverpkg "github.com/tysonthomas9/loomcli/internal/driver"
 )
 
@@ -24,6 +25,8 @@ var (
 	driverRegisterSourceRef    string
 	driverRegisterSourceDigest string
 	driverRegisterActivate     bool
+	driverRegisterTrusted      bool
+	driverRegisterUntrusted    bool
 	driverRegisterJSON         bool
 
 	driverRunEpic           string
@@ -99,6 +102,8 @@ func bindDriverRegisterFlags(cmd *cobra.Command) {
 	cmd.Flags().StringVar(&driverRegisterSourceRef, "source-ref", "", "Optional source/provenance ref recorded on the DriverVersion")
 	cmd.Flags().StringVar(&driverRegisterSourceDigest, "source-digest", "", "Optional source digest recorded on the DriverVersion")
 	cmd.Flags().BoolVar(&driverRegisterActivate, "activate", false, "Activate the registered version after validation")
+	cmd.Flags().BoolVar(&driverRegisterTrusted, "trusted", false, "Register as operator-trusted for local process execution")
+	cmd.Flags().BoolVar(&driverRegisterUntrusted, "untrusted", false, "Register as untrusted (default); requires an isolating launcher unless later approved")
 	cmd.Flags().BoolVar(&driverRegisterJSON, "json", false, "JSON output")
 	_ = cmd.MarkFlagRequired("flue-dist")
 }
@@ -119,6 +124,10 @@ func runDriverRegister(_ *cobra.Command, _ []string) error {
 		if err != nil {
 			return fmt.Errorf("resolve work dir: %w", err)
 		}
+		trust, err := driverRegisterTrust()
+		if err != nil {
+			return err
+		}
 		result, err := driverpkg.RegisterFlueDriver(ctx, h.Store, driverpkg.RegisterFlueOptions{
 			WorkspaceKey: ws,
 			WorkDir:      workDir,
@@ -131,6 +140,7 @@ func runDriverRegister(_ *cobra.Command, _ []string) error {
 			SourceDigest: driverRegisterSourceDigest,
 			CreatedBy:    publishActor(),
 			Activate:     driverRegisterActivate,
+			Trust:        trust,
 		})
 		if driverRegisterJSON && result != nil {
 			if writeErr := cmdstore.WriteJSON(result); writeErr != nil && err == nil {
@@ -149,6 +159,16 @@ func runDriverRegister(_ *cobra.Command, _ []string) error {
 		}
 		return nil
 	})
+}
+
+func driverRegisterTrust() (domain.DriverTrustLevel, error) {
+	if driverRegisterTrusted && driverRegisterUntrusted {
+		return "", fmt.Errorf("only one of --trusted or --untrusted may be set: %w", domain.ErrInvalid)
+	}
+	if driverRegisterTrusted {
+		return domain.DriverTrustTrusted, nil
+	}
+	return domain.DriverTrustUntrusted, nil
 }
 
 func runDriverRun(_ *cobra.Command, args []string) error {

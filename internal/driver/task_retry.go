@@ -11,9 +11,9 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
-// Retry-then-park policy support for claimed TaskRun execution: decide
+// Retry-then-block policy support for claimed TaskRun execution: decide
 // whether a failed attempt is retried, requeue it with scheduler metadata,
-// or park it (terminal failure) once attempts are exhausted. The linked
+// or block its underlying task (terminal failure) once attempts are exhausted. The linked
 // DriverStep follows the requeued TaskRun back to queued.
 type taskRunRetryDecisionResult struct {
 	Retry       bool
@@ -107,15 +107,15 @@ func taskRunRetryMetadata(_ *domain.TaskRun, retry taskRunRetryDecisionResult, c
 	return schedulerMetadata(metadata, "retrying", retry.Attempt, retry.MaxAttempts, completion)
 }
 
-func taskRunParkedMetadata(claimed *domain.TaskRun, opts executeClaimedTaskRunOptions, completion taskExecCompletion, metadata map[string]string) map[string]string {
+func taskRunBlockedMetadata(claimed *domain.TaskRun, opts executeClaimedTaskRunOptions, completion taskExecCompletion, metadata map[string]string) map[string]string {
 	maxAttempts := opts.MaxAttempts
 	if maxAttempts < 1 {
 		maxAttempts = 1
 	}
-	return schedulerMetadata(metadata, "parked", taskRunAttempt(claimed)+1, maxAttempts, completion)
+	return schedulerMetadata(metadata, "blocked", taskRunAttempt(claimed)+1, maxAttempts, completion)
 }
 
-// schedulerMetadata stamps the retry-then-park scheduler state onto a copy of
+// schedulerMetadata stamps the retry-then-block scheduler state onto a copy of
 // the run's runtime metadata.
 func schedulerMetadata(metadata map[string]string, state string, attempt, maxAttempts int, completion taskExecCompletion) map[string]string {
 	out := cloneStringMap(metadata)

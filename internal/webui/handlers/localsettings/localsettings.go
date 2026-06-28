@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"strings"
+	"time"
 
 	runtimesettings "github.com/tysonthomas9/loomcli/internal/localsettings"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
@@ -18,7 +19,10 @@ type response struct {
 }
 
 type patchRequest struct {
-	FleetDBRedis *redisPatch `json:"fleetdb_redis"`
+	FleetDBRedis       *redisPatch              `json:"fleetdb_redis"`
+	AgentRuntime       *agentRuntimePatch       `json:"agent_runtime"`
+	LocalTaskRunner    *localTaskRunnerPatch    `json:"local_task_runner"`
+	RuntimeCredentials *runtimeCredentialsPatch `json:"runtime_credentials"`
 }
 
 type redisPatch struct {
@@ -29,6 +33,25 @@ type redisPatch struct {
 	ClearPassword bool    `json:"clear_password,omitempty"`
 	DB            *int    `json:"db,omitempty"`
 	TLS           *bool   `json:"tls,omitempty"`
+}
+
+type agentRuntimePatch struct {
+	Default *string `json:"default,omitempty"`
+}
+
+type localTaskRunnerPatch struct {
+	OpenCodeModel *string `json:"opencode_model,omitempty"`
+}
+
+type runtimeCredentialsPatch struct {
+	Daytona *runtimeCredentialPatch `json:"daytona,omitempty"`
+	GitHub  *runtimeCredentialPatch `json:"github,omitempty"`
+}
+
+type runtimeCredentialPatch struct {
+	APIKey *string `json:"api_key,omitempty"`
+	Token  *string `json:"token,omitempty"`
+	Clear  bool    `json:"clear,omitempty"`
 }
 
 // HandleGet returns sanitized desktop-local runtime settings.
@@ -71,6 +94,21 @@ func HandlePatch(dataDir string) http.HandlerFunc {
 				return
 			}
 		}
+		if req.AgentRuntime != nil {
+			if err := applyAgentRuntimePatch(&settings, *req.AgentRuntime); err != nil {
+				handler.WriteJSON(w, http.StatusBadRequest, response{Success: false, Error: err.Error()})
+				return
+			}
+		}
+		if req.LocalTaskRunner != nil {
+			applyLocalTaskRunnerPatch(&settings, *req.LocalTaskRunner)
+		}
+		if req.RuntimeCredentials != nil {
+			if err := applyRuntimeCredentialsPatch(dataDir, &settings, *req.RuntimeCredentials); err != nil {
+				handler.WriteJSON(w, http.StatusBadRequest, response{Success: false, Error: err.Error()})
+				return
+			}
+		}
 		if err := runtimesettings.Save(dataDir, settings); err != nil {
 			handler.WriteJSON(w, http.StatusBadRequest, response{Success: false, Error: err.Error()})
 			return
@@ -79,7 +117,7 @@ func HandlePatch(dataDir string) http.HandlerFunc {
 		handler.WriteJSON(w, http.StatusOK, response{
 			Success: true,
 			Data:    &sanitized,
-			Message: "Redis settings saved. Restart the local runtime to apply changes.",
+			Message: "Local settings saved.",
 		})
 	}
 }
@@ -123,4 +161,78 @@ func applyRedisPatch(settings *runtimesettings.Settings, patch redisPatch) error
 	}
 	settings.FleetDBRedis = cfg
 	return nil
+}
+
+func applyAgentRuntimePatch(settings *runtimesettings.Settings, patch agentRuntimePatch) error {
+	cfg := settings.AgentRuntime
+	if patch.Default != nil {
+		cfg.Default = runtimesettings.NormalizeAgentRuntime(*patch.Default)
+	}
+	if err := runtimesettings.ValidateAgentRuntime(cfg); err != nil {
+		return err
+	}
+	settings.AgentRuntime = cfg
+	return nil
+}
+
+func applyLocalTaskRunnerPatch(settings *runtimesettings.Settings, patch localTaskRunnerPatch) {
+	cfg := settings.LocalTaskRunner
+	if patch.OpenCodeModel != nil {
+		cfg.OpenCodeModel = strings.TrimSpace(*patch.OpenCodeModel)
+	}
+	settings.LocalTaskRunner = cfg
+}
+
+func applyRuntimeCredentialsPatch(dataDir string, settings *runtimesettings.Settings, patch runtimeCredentialsPatch) error {
+	now := time.Now().UTC()
+	if patch.Daytona != nil {
+		credential, clear, err := runtimeCredentialFromPatch(dataDir, runtimesettings.RuntimeCredentialProviderDaytona, *patch.Daytona, now)
+		if err != nil {
+			return err
+		}
+		if clear {
+			settings.RuntimeCredentials.Daytona = runtimesettings.RuntimeCredentialConfig{}
+		} else if credential.Sealed != "" {
+			settings.RuntimeCredentials.Daytona = credential
+		}
+	}
+	if patch.GitHub != nil {
+		credential, clear, err := runtimeCredentialFromPatch(dataDir, runtimesettings.RuntimeCredentialProviderGitHub, *patch.GitHub, now)
+		if err != nil {
+			return err
+		}
+		if clear {
+			settings.RuntimeCredentials.GitHub = runtimesettings.RuntimeCredentialConfig{}
+		} else if credential.Sealed != "" {
+			settings.RuntimeCredentials.GitHub = credential
+		}
+	}
+	return nil
+}
+
+func runtimeCredentialFromPatch(dataDir, provider string, patch runtimeCredentialPatch, now time.Time) (runtimesettings.RuntimeCredentialConfig, bool, error) {
+	if patch.Clear {
+		return runtimesettings.RuntimeCredentialConfig{}, true, nil
+	}
+	value := ""
+	switch provider {
+	case runtimesettings.RuntimeCredentialProviderDaytona:
+		value = firstNonEmptyStringPtr(patch.APIKey, patch.Token)
+	case runtimesettings.RuntimeCredentialProviderGitHub:
+		value = firstNonEmptyStringPtr(patch.Token, patch.APIKey)
+	}
+	if strings.TrimSpace(value) == "" {
+		return runtimesettings.RuntimeCredentialConfig{}, false, nil
+	}
+	credential, err := runtimesettings.SealRuntimeCredential(dataDir, provider, value, now)
+	return credential, false, err
+}
+
+func firstNonEmptyStringPtr(values ...*string) string {
+	for _, value := range values {
+		if value != nil && strings.TrimSpace(*value) != "" {
+			return strings.TrimSpace(*value)
+		}
+	}
+	return ""
 }

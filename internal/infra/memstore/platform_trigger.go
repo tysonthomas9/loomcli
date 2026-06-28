@@ -79,7 +79,7 @@ func (s *triggerEventStore) List(_ context.Context, ws string, filter store.Trig
 // dispatch lane, so a later loopback dispatch of the same emission dedups
 // against the journaled record instead of double-writing. Appends take the
 // journal mutex, so an await registration scan (platform_await.go) either
-// sees this event or parks strictly before it (RULE 2 — no lost wakeup).
+// sees this event or registers pending strictly before it (RULE 2 — no lost wakeup).
 func (s *triggerEventStore) AppendTriggerEvent(_ context.Context, event *domain.TriggerEvent) (*domain.TriggerEvent, error) {
 	if event == nil || event.WorkspaceKey == "" || event.EventID == "" || event.EventType == "" {
 		return nil, fmt.Errorf("trigger event append requires workspace, event id and event type: %w", domain.ErrInvalid)
@@ -595,7 +595,7 @@ func (s *triggerRouteStore) dispatchTriggerRouteLeg(ctx context.Context, ws stri
 // caller's route mutex stands in for the atomic Redis subject gate).
 // handled=true means the leg was fully resolved here without a run: forbid
 // writes a rejected delivery (rejection_reason concurrency_forbid), queue
-// parks a held delivery with next_retry_at = now + retry_backoff_seconds so
+// holds a delivery with next_retry_at = now + retry_backoff_seconds so
 // the retry sweeper re-attempts admission once the subject frees. An
 // idempotency-key hit on an existing run bypasses the gate entirely — the leg
 // was already admitted and the run/delivery creates heal it. Legs with no
@@ -634,7 +634,7 @@ func (s *triggerRouteStore) gateTriggerLegConcurrency(ctx context.Context, ws st
 	}
 	if err := s.deliveries.create(delivery); err != nil {
 		if errors.Is(err, domain.ErrAlreadyExists) {
-			// Redelivery of a leg already parked/rejected (or dispatched
+			// Redelivery of a leg already held/rejected (or dispatched
 			// before the subject got busy again): report the recorded state.
 			if existing, gerr := s.deliveries.Get(ctx, ws, leg.DeliveryID); gerr == nil {
 				return &triggerRouteLegOutcome{delivery: triggerRouteLegResult(leg, binding.BindingID, existing.DriverRunID, existing.Status, existing.RejectionReason)}, true, nil

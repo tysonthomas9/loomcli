@@ -282,7 +282,7 @@ function finish(result) {
   try { child.disconnect(); } catch {}
 }
 
-// Suspension (AW11): an await op parked the run server-side; the workflow
+// Suspension (AW11): an await op suspended the run server-side; the workflow
 // signals it by letting the SDK's WorkflowSuspended sentinel propagate
 // (recognized by type/name or the 'workflow_suspended:' message prefix) or
 // by returning a suspended-status result. Either way the launcher exits

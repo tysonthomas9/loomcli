@@ -20,6 +20,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	driverpkg "github.com/tysonthomas9/loomcli/internal/driver"
+	"github.com/tysonthomas9/loomcli/internal/runtimepreflight"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	workflowdefs "github.com/tysonthomas9/loomcli/internal/workflows"
 )
@@ -39,7 +40,11 @@ var (
 	runLead            string
 	runWorkflow        string
 	runDetach          bool
-	runProviderProfile string
+	runRunner          string
+	runRepoURL         string
+	runBaseBranch      string
+	runOpenPR          bool
+	runStackedPRs      bool
 )
 
 var epicCmd = &cobra.Command{
@@ -68,17 +73,31 @@ func init() {
 	epicRunCmd.Flags().StringVar(&runParent, "parent", "", "Epic ID to drain (required)")
 	_ = epicRunCmd.MarkFlagRequired("parent")
 	epicRunCmd.Flags().IntVar(&runMaxConcurrency, "max-concurrency", 2, "Maximum simultaneous workers spawned by this run")
-	epicRunCmd.Flags().StringVar(&runWorkerPrefix, "worker-prefix", "", "Prefix for spawned worker names (default derived from --parent)")
+	epicRunCmd.Flags().StringVar(&runWorkerPrefix, "worker-prefix", "", "Optional worker profile prefix for spawned workers")
 	epicRunCmd.Flags().IntVar(&runIntervalSeconds, "interval-seconds", 5, "Seconds between reconcile passes")
 	epicRunCmd.Flags().StringVar(&runNodeID, "node-id", "", "Daemon node ID to run spawned workers on (default: the single active local node)")
 	epicRunCmd.Flags().StringVar(&runLead, "lead", "", "Lead agent running this epic (default: $LOOM_AGENT_NAME when set)")
 	epicRunCmd.Flags().StringVar(&runWorkflow, "workflow", workflowdefs.BuiltinEpicRunnerWorkflowName, "Workflow name to run")
-	epicRunCmd.Flags().StringVar(&runProviderProfile, "provider-profile", "flue-local", "Provider profile requested for child task runs")
+	epicRunCmd.Flags().StringVar(&runRunner, "runner", "local-task-runner", "Runner requested for child task runs")
+	epicRunCmd.Flags().StringVar(&runRepoURL, "repo-url", "", "Repository URL passed to compatible task runners")
+	epicRunCmd.Flags().StringVar(&runBaseBranch, "base-branch", "", "Base branch passed to compatible task runners")
+	epicRunCmd.Flags().BoolVar(&runOpenPR, "open-pull-request", false, "Ask compatible task runners to open pull requests")
+	epicRunCmd.Flags().BoolVar(&runStackedPRs, "stacked-pull-requests", false, "Ask compatible task runners to stack child pull requests")
 	epicRunCmd.Flags().BoolVar(&runDetach, "detach", false, "Queue the workflow run and return without executing it in this process")
 	epicRunCmd.Flags().BoolVar(&runDryRun, "dry-run", false, "Print what would be spawned but don't actually create agents")
 
 	epicCmd.AddCommand(epicRunCmd)
 	cli.RegisterCommand(epicCmd)
+}
+
+// runnerNeedsLocalPreflight reports whether the requested runner resolves to
+// the local task runner and therefore must be fail-closed preflighted before
+// queuing. An empty/whitespace runner resolves to local-task-runner downstream
+// (epic-runner.ts defaults it, matching the webui's runnerIsLocal), so it is
+// gated identically; daytona/other explicit runners are not.
+func runnerNeedsLocalPreflight(runner string) bool {
+	r := strings.TrimSpace(runner)
+	return r == "" || r == runtimepreflight.LocalTaskRunnerEntrypoint
 }
 
 func runEpicRun(cmd *cobra.Command, _ []string) error {
@@ -98,6 +117,19 @@ func runEpicRun(cmd *cobra.Command, _ []string) error {
 	ws, err := bootstrap.ResolveActiveWorkspaceKey(ctx, handle.Store.Workspaces())
 	if err != nil {
 		return fmt.Errorf("resolve workspace: %w", err)
+	}
+
+	// Fail-closed BEFORE queuing: the local task runner shells out to the
+	// resolved backend CLI, so if its binary/auth is missing the run would
+	// fail deep in the worker (or worse, fake-complete). Only gate the local
+	// runner; daytona/other explicit runners run their own runtime. An empty
+	// runner resolves to the local-task-runner downstream (epic-runner.ts
+	// defaults it, matching the webui's runnerIsLocal), so it must be
+	// preflighted identically.
+	if runnerNeedsLocalPreflight(runRunner) {
+		if err := runtimepreflight.PreflightLocalTaskRunner(ctx, handle.Store, ws); err != nil {
+			return err
+		}
 	}
 
 	payload, err := workflowPayload()
@@ -159,10 +191,7 @@ func validateEpicRunFlags() error {
 }
 
 func epicRunWorkerPrefix() string {
-	if runWorkerPrefix != "" {
-		return runWorkerPrefix
-	}
-	return sanitizePrefix(runParent)
+	return strings.TrimSpace(runWorkerPrefix)
 }
 
 func workflowPayload() (json.RawMessage, error) {
@@ -173,7 +202,7 @@ func workflowPayload() (json.RawMessage, error) {
 		"maxConcurrency":        runMaxConcurrency,
 		"workerPrefix":          epicRunWorkerPrefix(),
 		"intervalSeconds":       runIntervalSeconds,
-		"providerProfile":       runProviderProfile,
+		"runner":                runRunner,
 		"requestedBy":           "cli",
 		"dryRun":                runDryRun,
 	}
@@ -184,6 +213,18 @@ func workflowPayload() (json.RawMessage, error) {
 	}
 	if runNodeID != "" {
 		payload["targetNodeId"] = runNodeID
+	}
+	if strings.TrimSpace(runRepoURL) != "" {
+		payload["repoUrl"] = strings.TrimSpace(runRepoURL)
+	}
+	if strings.TrimSpace(runBaseBranch) != "" {
+		payload["baseBranch"] = strings.TrimSpace(runBaseBranch)
+	}
+	if runOpenPR {
+		payload["openPullRequest"] = true
+	}
+	if runStackedPRs {
+		payload["stackedPullRequests"] = true
 	}
 	body, err := json.Marshal(payload)
 	if err != nil {

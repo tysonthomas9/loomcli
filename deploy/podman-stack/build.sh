@@ -106,22 +106,22 @@ cp "$STACK_DIR/serve-entrypoint.sh" "$CTX/serve-entrypoint.sh"
 mkdir -p "$CTX/stub-upstream"
 cp "$STACK_DIR/stub-upstream/server.mjs" "$CTX/stub-upstream/server.mjs"
 
-# A1 github-review-agent runner + provisioner (baked into the loom-serve image
-# where the embedded driver executor runs the codex-backed review TaskRun).
-# Reused verbatim from deploy/agents/a1-github-review/ — never rewritten here.
+# A1 github-review-agent provisioner plus the generic task-runner invoker
+# baked into the loom-serve image where the embedded driver executor runs
+# codex-backed review TaskRuns.
 A1_DIR="${A1_REVIEW_DIR:-$LOOMCLI_REPO/deploy/agents/a1-github-review}"
-[[ -f "$A1_DIR/codex-review-runner.mjs" ]] || die "A1 review runner not found at $A1_DIR/codex-review-runner.mjs"
 [[ -f "$A1_DIR/setup.sh" ]] || die "A1 setup script not found at $A1_DIR/setup.sh"
+[[ -f "$LOOMCLI_REPO/scripts/loom-task-runner-invoker.mjs" ]] || die "task runner invoker not found at $LOOMCLI_REPO/scripts/loom-task-runner-invoker.mjs"
 mkdir -p "$CTX/a1-github-review"
-cp "$A1_DIR/codex-review-runner.mjs" "$CTX/a1-github-review/codex-review-runner.mjs"
 cp "$A1_DIR/setup.sh" "$CTX/a1-github-review/setup.sh"
+cp "$LOOMCLI_REPO/scripts/loom-task-runner-invoker.mjs" "$CTX/loom-task-runner-invoker.mjs"
 
 # Normalize staged permissions. The caller may run under a restrictive umask
 # (the acceptance driver sets umask 077 for its secrets), which would bake
 # root-owned, world-unreadable files into the images — the non-root container
 # users (fleet, node) then fail with EACCES / "Permission denied" at exec.
 chmod -R u+rwX,go+rX "$CTX"
-chmod 0755 "$CTX/bin/"* "$CTX/worker-entrypoint.sh" "$CTX/serve-entrypoint.sh"
+chmod 0755 "$CTX/bin/"* "$CTX/worker-entrypoint.sh" "$CTX/serve-entrypoint.sh" "$CTX/loom-task-runner-invoker.mjs"
 
 build_image() {
   local name="$1" containerfile="$2"

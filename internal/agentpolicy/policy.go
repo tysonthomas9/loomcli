@@ -19,7 +19,7 @@ type Decision int
 const (
 	Retry          Decision = iota // restart; counts toward the layer's retry budget
 	RetryUncounted                 // restart; does NOT erode the budget (rate-limit, no-work)
-	Park                           // budget exhausted: fixed-interval re-attempt instead of giving up
+	Block                          // budget exhausted: fixed-interval re-attempt instead of giving up
 	Failover                       // try the next configured backend
 	FastFail                       // deterministic failure: stop now, surface as failed
 	StopFatal                      // auth/billing: stop; needs human intervention
@@ -31,8 +31,8 @@ func (d Decision) String() string {
 		return "Retry"
 	case RetryUncounted:
 		return "RetryUncounted"
-	case Park:
-		return "Park"
+	case Block:
+		return "Block"
 	case Failover:
 		return "Failover"
 	case FastFail:
@@ -55,7 +55,7 @@ const (
 	BPRateLimit                                // fixed + hint: getRateLimitBackoff/getRateLimitMaxWait
 	BPNoWork                                   // fixed: getNoWorkBackoff
 	BPBackendUnavailable                       // fixed recheck: backendRecheckBackoff
-	BPPark                                     // fixed: maxRetriesParkBackoff
+	BPBlock                                    // fixed: maxRetriesBlockBackoff
 )
 
 // Disposition is the policy verdict for an Outcome.
@@ -67,18 +67,18 @@ type Disposition struct {
 	// OnExhaustion: what a counted Retry (or a budgeted Failover) becomes
 	// once its budget is spent.
 	OnExhaustion Decision
-	// ParkBudget: for OnExhaustion==Park, the number of park cycles WITHOUT
-	// progress before escalating to FastFail. 0 = park indefinitely.
-	ParkBudget int
+	// BlockBudget: for OnExhaustion==Block, the number of block cycles WITHOUT
+	// progress before escalating to FastFail. 0 = block indefinitely.
+	BlockBudget int
 	// FailoverAfter: for RetryUncounted, fail over once the uncounted-retry
 	// counter EXCEEDS this (e.g. 3 ⇒ failover on the 4th observation). 0 = never.
 	FailoverAfter int
 }
 
-// defaultParkBudget caps how long an ambiguous/deterministic-leaning class
-// (Unknown, spawn/lock failures) parks without making progress before it
-// escalates to FastFail — so a deterministic crash does not park forever.
-const defaultParkBudget = 3
+// defaultBlockBudget caps how long an ambiguous/deterministic-leaning class
+// (Unknown, spawn/lock failures) blocks without making progress before it
+// escalates to FastFail — so a deterministic crash does not block forever.
+const defaultBlockBudget = 3
 
 // Decide returns the Disposition for an Outcome. Domain outcomes win when
 // set; otherwise the harness class governs. The zero Outcome (clean success)
@@ -97,22 +97,22 @@ func decideHarness(c wrapper.ErrorClass) Disposition {
 		return Disposition{Decision: StopFatal}
 	case wrapper.ErrModelNotFound:
 		// A wrong model never self-heals: fail over to a fallback backend,
-		// and once those are exhausted, fast-fail — never park.
+		// and once those are exhausted, fast-fail — never block.
 		return Disposition{Decision: Failover, Backoff: BPDefault, OnExhaustion: FastFail}
 	case wrapper.ErrContextOverflow:
 		return Disposition{Decision: FastFail}
 	case wrapper.ErrRateLimited:
 		return Disposition{Decision: RetryUncounted, Backoff: BPRateLimit, HonorHint: true, FailoverAfter: 3, OnExhaustion: RetryUncounted}
 	case wrapper.ErrTimeout:
-		return Disposition{Decision: Retry, Backoff: BPTimeout, HonorHint: true, OnExhaustion: Park, ParkBudget: 0}
+		return Disposition{Decision: Retry, Backoff: BPTimeout, HonorHint: true, OnExhaustion: Block, BlockBudget: 0}
 	case wrapper.ErrTransient:
-		return Disposition{Decision: Retry, Backoff: BPDefault, HonorHint: true, OnExhaustion: Park, ParkBudget: 0}
+		return Disposition{Decision: Retry, Backoff: BPDefault, HonorHint: true, OnExhaustion: Block, BlockBudget: 0}
 	case wrapper.ErrUnknown:
-		// Ambiguous (transient blip OR deterministic crash): park capped, so a
+		// Ambiguous (transient blip OR deterministic crash): block capped, so a
 		// crash that never makes progress escalates to FastFail.
-		return Disposition{Decision: Retry, Backoff: BPDefault, OnExhaustion: Park, ParkBudget: defaultParkBudget}
+		return Disposition{Decision: Retry, Backoff: BPDefault, OnExhaustion: Block, BlockBudget: defaultBlockBudget}
 	default: // ErrNone / unrecognized: conservative bounded restart
-		return Disposition{Decision: Retry, Backoff: BPDefault, OnExhaustion: Park, ParkBudget: defaultParkBudget}
+		return Disposition{Decision: Retry, Backoff: BPDefault, OnExhaustion: Block, BlockBudget: defaultBlockBudget}
 	}
 }
 
@@ -121,12 +121,12 @@ func decideDomain(d agenterr.DomainOutcome) Disposition {
 	case agenterr.NoWorkOutcome:
 		return Disposition{Decision: RetryUncounted, Backoff: BPNoWork}
 	case agenterr.BackendUnavailableOutcome:
-		return Disposition{Decision: Park, Backoff: BPBackendUnavailable}
+		return Disposition{Decision: Block, Backoff: BPBackendUnavailable}
 	case agenterr.LockConflictOutcome:
-		return Disposition{Decision: Retry, Backoff: BPDefault, OnExhaustion: Park, ParkBudget: defaultParkBudget}
+		return Disposition{Decision: Retry, Backoff: BPDefault, OnExhaustion: Block, BlockBudget: defaultBlockBudget}
 	case agenterr.SpawnFailureOutcome:
-		return Disposition{Decision: Retry, Backoff: BPDefault, OnExhaustion: Park, ParkBudget: defaultParkBudget}
+		return Disposition{Decision: Retry, Backoff: BPDefault, OnExhaustion: Block, BlockBudget: defaultBlockBudget}
 	default:
-		return Disposition{Decision: Retry, Backoff: BPDefault, OnExhaustion: Park, ParkBudget: defaultParkBudget}
+		return Disposition{Decision: Retry, Backoff: BPDefault, OnExhaustion: Block, BlockBudget: defaultBlockBudget}
 	}
 }

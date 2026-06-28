@@ -1,5 +1,5 @@
 // Packaging invariants for @loom/sdk (SP2):
-//  - vendorability: flue.js stays single-file (zero local imports) so the
+//  - vendorability: driver.js stays single-file (zero local imports) so the
 //    driver bundle scripts can embed it verbatim; runner.js's local imports
 //    stay exactly the documented set (./internal.js).
 //  - npm pack golden: the published tarball contains exactly the pinned file
@@ -31,8 +31,8 @@ function localImports(file) {
   return [...new Set(specs.filter((s) => s.startsWith(".") || s.startsWith("/")))].sort();
 }
 
-test("vendorability: flue.js is single-file with zero local imports", () => {
-  assert.deepEqual(localImports("flue.js"), []);
+test("vendorability: driver.js is single-file with zero local imports", () => {
+  assert.deepEqual(localImports("driver.js"), []);
 });
 
 test("vendorability: runner.js local imports are exactly ./internal.js", () => {
@@ -54,6 +54,11 @@ test("exports map: every entry resolves and code entries publish types", () => {
   for (const f of pkg.files) readFileSync(path.join(sdkDir, f));
 });
 
+test("exports map: no legacy flue driver compatibility entrypoint", () => {
+  assert.equal(Object.hasOwn(pkg.exports, "./flue"), false);
+  assert.equal(pkg.files.some((f) => f === "flue.js" || f === "flue.d.ts"), false);
+});
+
 test("npm pack golden: tarball contains exactly the pinned files", () => {
   const out = execFileSync("npm", ["pack", "--dry-run", "--json"], {
     cwd: sdkDir,
@@ -66,14 +71,16 @@ test("npm pack golden: tarball contains exactly the pinned files", () => {
     "CHANGELOG.md",
     "README.md",
     "api-surface.v1.json",
-    "flue.d.ts",
-    "flue.js",
+    "driver.d.ts",
+    "driver.js",
     "index.d.ts",
     "index.js",
     "internal.js",
     "package.json",
     "runner.d.ts",
     "runner.js",
+    "runtime-adapters.d.ts",
+    "runtime-adapters.js",
   ];
   assert.deepEqual(got, want);
   assert.equal(report.name, pkg.name);

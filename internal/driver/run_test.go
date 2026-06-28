@@ -95,6 +95,113 @@ func TestCreateDriverRunUsesActivePassedVersion(t *testing.T) {
 	}
 }
 
+func TestCreateDriverRunCanPinNonActivePreviewVersion(t *testing.T) {
+	ctx := context.Background()
+	st := memstore.New()
+	if _, err := st.Drivers().Create(ctx, store.DriverCreate{
+		WorkspaceKey: "TEST",
+		DriverID:     "epic-runner",
+		Name:         "epic-runner",
+		Status:       domain.DriverStatusActive,
+	}); err != nil {
+		t.Fatalf("Create driver: %v", err)
+	}
+	for _, in := range []store.DriverVersionCreate{
+		{WorkspaceKey: "TEST", VersionID: "version-active", DriverID: "epic-runner", Version: 1, SourceDigest: "sha256:active", BundleDigest: "sha256:bundle-active", ValidationStatus: domain.DriverVersionValidationPassed},
+		{WorkspaceKey: "TEST", VersionID: "version-preview", DriverID: "epic-runner", Version: 2, SourceDigest: "sha256:preview", BundleDigest: "sha256:bundle-preview", ValidationStatus: domain.DriverVersionValidationPassed},
+	} {
+		if _, err := st.DriverVersions().Create(ctx, in); err != nil {
+			t.Fatalf("Create version %s: %v", in.VersionID, err)
+		}
+	}
+	activeVersion := "version-active"
+	if _, err := st.Drivers().Update(ctx, "TEST", "epic-runner", store.DriverUpdate{ActiveVersionID: &activeVersion}); err != nil {
+		t.Fatalf("Activate driver: %v", err)
+	}
+
+	run, err := CreateDriverRun(ctx, st, RunOptions{
+		WorkspaceKey:    "TEST",
+		DriverID:        "epic-runner",
+		DriverVersionID: "version-preview",
+		RunID:           "run-preview",
+		Payload:         json.RawMessage(`{"preview":true}`),
+	})
+	if err != nil {
+		t.Fatalf("CreateDriverRun: %v", err)
+	}
+	if run.DriverVersionID != "version-preview" {
+		t.Fatalf("run driver_version_id = %q, want preview version", run.DriverVersionID)
+	}
+}
+
+func TestVersionScopedApprovalDoesNotTrustSiblingVersions(t *testing.T) {
+	ctx := context.Background()
+	st := memstore.New()
+	if _, err := st.Drivers().Create(ctx, store.DriverCreate{
+		WorkspaceKey: "TEST",
+		DriverID:     "epic-runner",
+		Name:         "epic-runner",
+		Status:       domain.DriverStatusActive,
+		TrustLevel:   domain.DriverTrustTrusted,
+		Metadata:     map[string]string{"active": "metadata"},
+	}); err != nil {
+		t.Fatalf("Create driver: %v", err)
+	}
+	trustedManifest := map[string]string{ManifestTrustLevelKey: string(domain.DriverTrustTrusted)}
+	untrustedManifest := map[string]string{ManifestTrustLevelKey: string(domain.DriverTrustUntrusted)}
+	for _, in := range []store.DriverVersionCreate{
+		{WorkspaceKey: "TEST", VersionID: "version-trusted", DriverID: "epic-runner", Version: 1, SourceDigest: "sha256:trusted", BundleDigest: "sha256:bundle-trusted", Manifest: trustedManifest, ValidationStatus: domain.DriverVersionValidationPassed},
+		{WorkspaceKey: "TEST", VersionID: "version-custom-1", DriverID: "epic-runner", Version: 2, SourceDigest: "sha256:custom-1", BundleDigest: "sha256:bundle-custom-1", Manifest: untrustedManifest, ValidationStatus: domain.DriverVersionValidationPassed},
+		{WorkspaceKey: "TEST", VersionID: "version-custom-2", DriverID: "epic-runner", Version: 3, SourceDigest: "sha256:custom-2", BundleDigest: "sha256:bundle-custom-2", Manifest: untrustedManifest, ValidationStatus: domain.DriverVersionValidationPassed},
+	} {
+		if _, err := st.DriverVersions().Create(ctx, in); err != nil {
+			t.Fatalf("Create version %s: %v", in.VersionID, err)
+		}
+	}
+	driver, err := st.Drivers().Get(ctx, "TEST", "epic-runner")
+	if err != nil {
+		t.Fatalf("get driver: %v", err)
+	}
+	custom1, err := st.DriverVersions().Get(ctx, "TEST", "version-custom-1")
+	if err != nil {
+		t.Fatalf("get custom1: %v", err)
+	}
+	custom2, err := st.DriverVersions().Get(ctx, "TEST", "version-custom-2")
+	if err != nil {
+		t.Fatalf("get custom2: %v", err)
+	}
+	if got := DriverVersionEffectiveTrust(driver, custom1); got != domain.DriverTrustUntrusted {
+		t.Fatalf("custom1 trust before approval = %q, want untrusted", got)
+	}
+	driver, _, err = ApproveDriverVersion(ctx, st, "TEST", "epic-runner", "version-custom-1")
+	if err != nil {
+		t.Fatalf("ApproveDriverVersion: %v", err)
+	}
+	if got := DriverVersionEffectiveTrust(driver, custom1); got != domain.DriverTrustTrusted {
+		t.Fatalf("custom1 trust after approval = %q, want trusted", got)
+	}
+	if got := DriverVersionEffectiveTrust(driver, custom2); got != domain.DriverTrustUntrusted {
+		t.Fatalf("custom2 trust inherited from custom1 approval = %q, want untrusted", got)
+	}
+	driver, _, err = ActivateDriverVersion(ctx, st, "TEST", "epic-runner", "version-custom-2")
+	if err != nil {
+		t.Fatalf("ActivateDriverVersion: %v", err)
+	}
+	if !DriverVersionApproved(driver, custom1) {
+		t.Fatalf("activation dropped version-custom-1 approval metadata")
+	}
+	if DriverVersionApproved(driver, custom2) {
+		t.Fatalf("activation implicitly approved version-custom-2")
+	}
+	driver, _, err = UnapproveDriverVersion(ctx, st, "TEST", "epic-runner", "version-custom-1")
+	if err != nil {
+		t.Fatalf("UnapproveDriverVersion: %v", err)
+	}
+	if DriverVersionApproved(driver, custom1) {
+		t.Fatalf("custom1 still approved after unapprove")
+	}
+}
+
 func TestCreateDriverRunRejectsDriverWithoutActiveVersion(t *testing.T) {
 	ctx := context.Background()
 	st := memstore.New()

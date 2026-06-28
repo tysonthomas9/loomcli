@@ -231,6 +231,13 @@ type ArtifactStore interface {
 	Update(ctx context.Context, workspaceKey, artifactID string, patch ArtifactUpdate) (*domain.Artifact, error)
 }
 
+// ArtifactContentReader is implemented by artifact stores that can read back
+// uploaded content bytes. It is optional so older/control-plane stores can
+// still expose metadata-only artifact APIs while callers retain URI fallbacks.
+type ArtifactContentReader interface {
+	ReadContent(ctx context.Context, workspaceKey, artifactID string) ([]byte, error)
+}
+
 type AgentLeaseCreate struct {
 	WorkspaceKey string
 	SessionID    string

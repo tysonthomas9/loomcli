@@ -28,7 +28,7 @@ type DaemonAgentStatus struct {
 	Role                   string    `json:"role"`
 	Repo                   string    `json:"repo,omitempty"`
 	PID                    int       `json:"pid"`
-	Status                 string    `json:"status"` // "running", "starting", "stopped", "failed", "parked"
+	Status                 string    `json:"status"` // "running", "starting", "stopped", "failed", "blocked"
 	TaskID                 string    `json:"task_id,omitempty"`
 	EpicID                 string    `json:"epic_id,omitempty"`
 	CurrentBackend         string    `json:"current_backend,omitempty"`
@@ -41,7 +41,7 @@ type DaemonAgentStatus struct {
 	WorktreePath           string    `json:"worktree_path,omitempty"`
 	LastErrorClass         string    `json:"last_error_class,omitempty"`
 	NoWorkCount            int       `json:"no_work_count,omitempty"`
-	ParkCount              int       `json:"park_count,omitempty"` // display-only: never hydrated back into supervision across daemon restarts
+	BlockCount             int       `json:"block_count,omitempty"` // display-only: never hydrated back into supervision across daemon restarts
 	BackoffUntil           time.Time `json:"backoff_until,omitempty"`
 	RemoteBranch           string    `json:"remote_branch,omitempty"`
 	OwnershipLeaseID       string    `json:"ownership_lease_id,omitempty"`

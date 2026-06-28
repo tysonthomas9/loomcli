@@ -1,7 +1,7 @@
 use tauri::{
     menu::{Menu, MenuItem, MenuItemKind, PredefinedMenuItem, Submenu, WINDOW_SUBMENU_ID},
-    AppHandle, Emitter, LogicalSize, Manager, RunEvent, Runtime, Url, WebviewUrl, WebviewWindow,
-    WebviewWindowBuilder,
+    AppHandle, Emitter, LogicalPosition, LogicalSize, Manager, RunEvent, Runtime, Url, WebviewUrl,
+    WebviewWindow, WebviewWindowBuilder,
 };
 
 const MENU_NEW_WORKSPACE_WINDOW: &str = "new-workspace-window";
@@ -167,7 +167,7 @@ fn show_launcher_window<R: Runtime>(app: &AppHandle<R>) {
         return;
     }
 
-    if let Ok(window) = WebviewWindowBuilder::new(app, "main", WebviewUrl::default())
+    match WebviewWindowBuilder::new(app, "main", WebviewUrl::default())
         .title("Loom")
         .inner_size(520.0, 300.0)
         .min_inner_size(420.0, 260.0)
@@ -175,7 +175,10 @@ fn show_launcher_window<R: Runtime>(app: &AppHandle<R>) {
         .focused(true)
         .build()
     {
-        reveal_window(app, &window);
+        Ok(window) => {
+            reveal_window(app, &window);
+        }
+        Err(_) => {}
     }
 }
 
@@ -198,12 +201,10 @@ fn reveal_window<R: Runtime>(app: &AppHandle<R>, window: &WebviewWindow<R>) {
 fn perform_window_reveal<R: Runtime>(app: &AppHandle<R>, window: &WebviewWindow<R>) {
     show_app(app);
     let _ = window.set_content_protected(false);
+    let _ = window.set_position(LogicalPosition::new(80.0, 80.0));
     let _ = window.unminimize();
     let _ = window.show();
     let _ = window.set_focus();
-
-    #[cfg(target_os = "macos")]
-    raise_macos_window(window);
 }
 
 fn schedule_window_reveal<R: Runtime>(
@@ -238,25 +239,6 @@ fn activate_app_ignoring_other_apps() {
         );
     }
     ns_app.arrangeInFront(None);
-}
-
-#[cfg(target_os = "macos")]
-fn raise_macos_window<R: Runtime>(window: &WebviewWindow<R>) {
-    let dispatch_window = window.clone();
-    let target_window = window.clone();
-    let _ = dispatch_window.run_on_main_thread(move || {
-        activate_app_ignoring_other_apps();
-        if let Ok(ns_window) = target_window.ns_window() {
-            if !ns_window.is_null() {
-                // SAFETY: ns_window is the AppKit NSWindow pointer returned by Tauri
-                // for this webview window, and this block runs on the main thread.
-                let ns_window = unsafe { &*(ns_window.cast::<objc2_app_kit::NSWindow>()) };
-                ns_window.makeKeyAndOrderFront(None);
-                ns_window.orderFrontRegardless();
-            }
-        }
-        activate_app_ignoring_other_apps();
-    });
 }
 
 fn open_workspace_window_native<R: Runtime>(

@@ -57,7 +57,7 @@ func TestClaimAndExecuteTaskRunEmitsLifecycleEvents(t *testing.T) {
 		wantLastAttempt int
 		wantOutboxRows  int
 		wantDedupeKey   string
-		wantParkedTask  bool
+		wantBlockedTask bool
 	}{
 		{
 			name: "complete with lead creates outbox row",
@@ -93,7 +93,7 @@ func TestClaimAndExecuteTaskRunEmitsLifecycleEvents(t *testing.T) {
 			wantLastAttempt: 1,
 		},
 		{
-			name: "exhaust attempts parks and creates outbox row",
+			name: "exhaust attempts blocks task and creates outbox row",
 			execResult: TaskExecResult{
 				Status:     domain.TaskRunFailed,
 				ExitCode:   3,
@@ -101,11 +101,11 @@ func TestClaimAndExecuteTaskRunEmitsLifecycleEvents(t *testing.T) {
 			},
 			maxAttempts:     1,
 			bindLead:        true,
-			wantTypes:       []domain.TaskRunEventType{domain.TaskRunEventClaimed, domain.TaskRunEventParked},
+			wantTypes:       []domain.TaskRunEventType{domain.TaskRunEventClaimed, domain.TaskRunEventFailed},
 			wantLastAttempt: 1,
 			wantOutboxRows:  1,
 			wantDedupeKey:   ":failed",
-			wantParkedTask:  true,
+			wantBlockedTask: true,
 		},
 	}
 	for _, tc := range cases {
@@ -161,12 +161,12 @@ func TestClaimAndExecuteTaskRunEmitsLifecycleEvents(t *testing.T) {
 				t.Fatalf("event next eligible at = %v, want nil on non-requeued events", last.NextEligibleAt)
 			}
 
-			parker, ok := st.(interface{ TaskParked(ws, taskID string) bool })
+			blocker, ok := st.(interface{ TaskBlocked(ws, taskID string) bool })
 			if !ok {
-				t.Fatalf("store %T does not expose TaskParked test observable", st)
+				t.Fatalf("store %T does not expose TaskBlocked test observable", st)
 			}
-			if got := parker.TaskParked("TEST", "TEST-EVT-2"); got != tc.wantParkedTask {
-				t.Fatalf("task parked = %v, want %v", got, tc.wantParkedTask)
+			if got := blocker.TaskBlocked("TEST", "TEST-EVT-2"); got != tc.wantBlockedTask {
+				t.Fatalf("task blocked = %v, want %v", got, tc.wantBlockedTask)
 			}
 
 			rows := listOutboxRows(t, ctx, st)
@@ -255,10 +255,10 @@ func TestBuildLeadTaskMessage(t *testing.T) {
 			},
 		},
 		{
-			name:   "parked without refs",
+			name:   "blocked without refs",
 			status: domain.TaskRunFailed,
 			wantContains: []string{
-				"Loom parked a child task",
+				"Loom blocked a child task",
 				"task: TASK-1",
 				"Do not start another epic runner.",
 			},

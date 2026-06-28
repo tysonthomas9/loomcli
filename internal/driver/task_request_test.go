@@ -4,6 +4,7 @@ package driver
 import (
 	"context"
 	"errors"
+	"os"
 	"testing"
 	"time"
 
@@ -11,6 +12,15 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
+
+// TestMain enables the test-only noop provider gate (§4.5) for the driver test
+// binary so the many legacy fixtures that drive the local-noop/noop provider
+// keep exercising the executor. Tests that assert the fail-closed behavior with
+// the gate OFF override it with t.Setenv(NoopTaskProviderEnvVar, "").
+func TestMain(m *testing.M) {
+	_ = os.Setenv(NoopTaskProviderEnvVar, "1")
+	os.Exit(m.Run())
+}
 
 func TestRequestTaskRunCreatesExecutesAndFinishesChild(t *testing.T) {
 	ctx, st, run := setupRunningDriverRun(t)
@@ -137,6 +147,60 @@ func TestRequestTaskRunCreatesExecutesAndFinishesChild(t *testing.T) {
 	}
 	if parent.Status != domain.DriverRunRunning {
 		t.Fatalf("parent status = %s, want still running", parent.Status)
+	}
+}
+
+func TestEnqueueTaskRunResolvesRunnerFromDriverVersionManifest(t *testing.T) {
+	ctx, st, run := setupRunningDriverRun(t)
+	outcome, err := EnqueueTaskRunWithResult(ctx, st, TaskRunRequestOptions{
+		WorkspaceKey:  "TEST",
+		DriverRunID:   run.RunID,
+		TaskRunID:     "task-run-runner-1",
+		TaskID:        "TEST-1",
+		Runner:        "local-task-runner",
+		ParentNodeID:  run.NodeID,
+		ParentLeaseID: run.LeaseID,
+		ParentFence:   run.FencingToken,
+	}, HostBridgeTaskExecutor{Command: []string{"task-runner-stub"}})
+	if err != nil {
+		t.Fatalf("EnqueueTaskRunWithResult: %v", err)
+	}
+	queued := outcome.Run
+	if queued.Runner != "local-task-runner" || queued.RunnerKind != RunnerKindFlueWorkflow || queued.RunnerEntrypoint != "local-task-runner" {
+		t.Fatalf("runner identity = %q/%q/%q, want local flue workflow", queued.Runner, queued.RunnerKind, queued.RunnerEntrypoint)
+	}
+	if queued.RunnerRef == "" || queued.RunnerVersionID == "" {
+		t.Fatalf("runner ref/version = %q/%q, want pinned values", queued.RunnerRef, queued.RunnerVersionID)
+	}
+	if queued.ProviderProfile != "" || queued.SandboxPlacement.Provider != "" || queued.RunnerPlacement.Provider != "" {
+		t.Fatalf("provider routing fields = provider:%q sandbox:%q runner:%q, want empty for named runner", queued.ProviderProfile, queued.SandboxPlacement.Provider, queued.RunnerPlacement.Provider)
+	}
+	if queued.RuntimeMetadata["runner"] != "local-task-runner" || queued.RuntimeMetadata["runner_ref"] != queued.RunnerRef {
+		t.Fatalf("runtime metadata = %+v, want runner identity", queued.RuntimeMetadata)
+	}
+}
+
+func TestEnqueueTaskRunRejectsUnknownRunner(t *testing.T) {
+	ctx, st, run := setupRunningDriverRun(t)
+	_, err := EnqueueTaskRunWithResult(ctx, st, TaskRunRequestOptions{
+		WorkspaceKey:  "TEST",
+		DriverRunID:   run.RunID,
+		TaskRunID:     "task-run-runner-missing",
+		TaskID:        "TEST-1",
+		Runner:        "missing-runner",
+		ParentNodeID:  run.NodeID,
+		ParentLeaseID: run.LeaseID,
+		ParentFence:   run.FencingToken,
+	}, HostBridgeTaskExecutor{Command: []string{"task-runner-stub"}})
+	if !errors.Is(err, domain.ErrInvalid) {
+		t.Fatalf("EnqueueTaskRunWithResult unknown runner err = %v, want ErrInvalid", err)
+	}
+	children, listErr := st.TaskRuns().List(ctx, "TEST", store.TaskRunFilter{DriverRunID: run.RunID})
+	if listErr != nil {
+		t.Fatalf("List children: %v", listErr)
+	}
+	if len(children) != 0 {
+		t.Fatalf("children = %+v, want none after unknown runner", children)
 	}
 }
 
@@ -623,7 +687,21 @@ func setupQueuedDriverRun(t *testing.T) (context.Context, store.Store, *domain.D
 		t.Fatalf("Create workspace: %v", err)
 	}
 	writeFlueDist(t, root, "epic-runner", "done")
-	registered, err := RegisterFlueDriver(ctx, st, RegisterFlueOptions{WorkspaceKey: "TEST", WorkDir: root, DistPath: "dist", DriverName: "epic-runner", CreatedBy: "tester", Activate: true})
+	registered, err := RegisterFlueDriver(ctx, st, RegisterFlueOptions{
+		WorkspaceKey: "TEST",
+		WorkDir:      root,
+		DistPath:     "dist",
+		DriverName:   "epic-runner",
+		CreatedBy:    "tester",
+		Activate:     true,
+		// Runner specs are no longer fabricated (§4.6); the workflow registration
+		// path supplies them. Declare the bundled sibling runners the task-run
+		// tests resolve against.
+		RunnerSpecs: []DriverRunnerSpec{
+			{Name: "local-task-runner", Kind: RunnerKindFlueWorkflow, Entrypoint: "local-task-runner"},
+			{Name: "daytona-task-runner", Kind: RunnerKindFlueWorkflow, Entrypoint: "daytona-task-runner"},
+		},
+	})
 	if err != nil {
 		t.Fatalf("RegisterFlueDriver: %v", err)
 	}

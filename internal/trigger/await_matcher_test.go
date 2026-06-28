@@ -42,7 +42,7 @@ func seedAwaitMatcherCatalog(t *testing.T, s *memstore.Store) {
 }
 
 // createClaimedRun creates and claims one run so it can be suspended (or left
-// running for the park->suspend-window cases).
+// running for the pending->suspend-window cases).
 func createClaimedRun(t *testing.T, s *memstore.Store, runID string) *domain.DriverRun {
 	t.Helper()
 	ctx := t.Context()
@@ -58,8 +58,8 @@ func createClaimedRun(t *testing.T, s *memstore.Store, runID string) *domain.Dri
 	return run
 }
 
-// registerParkedAwait registers run's first await and asserts it parked.
-func registerParkedAwait(t *testing.T, s *memstore.Store, runID, pattern string, actorAllow []string) string {
+// registerPendingAwait registers run's first await and asserts it pending.
+func registerPendingAwait(t *testing.T, s *memstore.Store, runID, pattern string, actorAllow []string) string {
 	t.Helper()
 	key := domain.AwaitInstanceKey(runID, 1)
 	res, err := s.Awaits().RegisterAwaitAndCheck(t.Context(), matcherWS, store.AwaitRegistration{
@@ -70,7 +70,7 @@ func registerParkedAwait(t *testing.T, s *memstore.Store, runID, pattern string,
 		t.Fatalf("RegisterAwaitAndCheck(%s): %v", key, err)
 	}
 	if res.Satisfied {
-		t.Fatalf("await %s satisfied at registration, want parked", key)
+		t.Fatalf("await %s satisfied at registration, want pending", key)
 	}
 	return key
 }
@@ -83,12 +83,12 @@ func suspendRun(t *testing.T, s *memstore.Store, run *domain.DriverRun, instance
 	}
 }
 
-// newSuspendedAwaitRun is the standard fixture: a claimed run, parked await,
+// newSuspendedAwaitRun is the standard fixture: a claimed run, pending await,
 // suspended run. Returns the await instance key.
 func newSuspendedAwaitRun(t *testing.T, s *memstore.Store, runID, pattern string, actorAllow []string) string {
 	t.Helper()
 	run := createClaimedRun(t, s, runID)
-	key := registerParkedAwait(t, s, runID, pattern, actorAllow)
+	key := registerPendingAwait(t, s, runID, pattern, actorAllow)
 	suspendRun(t, s, run, key)
 	return key
 }
@@ -351,14 +351,14 @@ func TestAwaitMatcherTimeoutWinnerStands(t *testing.T) {
 	}
 }
 
-// TestAwaitMatcherParkWindowRetry: an event landing between park and suspend
+// TestAwaitMatcherPendingSuspendWindowRetry: an event landing between suspend and suspend
 // retries the resume until the suspend lands (memstore window shape).
-func TestAwaitMatcherParkWindowRetry(t *testing.T) {
+func TestAwaitMatcherPendingSuspendWindowRetry(t *testing.T) {
 	s := memstore.New()
 	seedAwaitMatcherCatalog(t, s)
 	pattern := domain.AwaitEventKey("build.finished", "build-7")
 	run := createClaimedRun(t, s, "run-window")
-	key := registerParkedAwait(t, s, "run-window", pattern, nil) // run still RUNNING
+	key := registerPendingAwait(t, s, "run-window", pattern, nil) // run still RUNNING
 
 	matcher := &trigger.AwaitMatcher{Store: s, ResumeRetries: 100, ResumeRetryDelay: 5 * time.Millisecond}
 	done := make(chan *trigger.AwaitDispatchResult, 1)
@@ -392,7 +392,7 @@ func TestAwaitMatcherResumeInvalidKeepsResolution(t *testing.T) {
 	seedAwaitMatcherCatalog(t, s)
 	pattern := domain.AwaitEventKey("external.signal", "sig-1")
 	run := createClaimedRun(t, s, "run-term")
-	key := registerParkedAwait(t, s, "run-term", pattern, nil)
+	key := registerPendingAwait(t, s, "run-term", pattern, nil)
 	if _, err := s.DriverRuns().Finish(t.Context(), matcherWS, "run-term", store.DriverRunFinish{
 		NodeID: run.NodeID, LeaseID: run.LeaseID, FencingToken: run.FencingToken,
 		Status: domain.DriverRunCompleted, Summary: "done before signal",
@@ -488,7 +488,7 @@ func TestInternalSourceEmitResolvesAwait(t *testing.T) {
 	}
 }
 
-// TestCronTickResolvesAwait: the cron hook — an await parked on
+// TestCronTickResolvesAwait: the cron hook — an await pending on
 // "cron.tick:{bindingID}" resumes on the binding's next due tick.
 func TestCronTickResolvesAwait(t *testing.T) {
 	s := memstore.New()

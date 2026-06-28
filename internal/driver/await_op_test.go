@@ -57,7 +57,7 @@ func awaitOpOptions(run *domain.DriverRun) AwaitEventOptions {
 }
 
 // windowStore wraps the memstore so its DriverRuns().Suspend runs a hook
-// first — the deterministic park->suspend window: a resolver lands between
+// first — the deterministic pending->suspend window: a resolver lands between
 // RegisterAwaitAndCheck and Suspend.
 type windowStore struct {
 	store.Store
@@ -82,12 +82,12 @@ func (r *windowDriverRuns) Suspend(ctx context.Context, ws, runID, nodeID, lease
 	return r.DriverRunStore.Suspend(ctx, ws, runID, nodeID, leaseID, fencingToken, awaitInstanceKey)
 }
 
-// TestAwaitEventParkSuspendWindowRecheck drives the memstore-shaped window:
-// the resolver resolves the parked await while the run is still running (its
+// TestAwaitEventPendingSuspendWindowRecheck drives the memstore-shaped window:
+// the resolver resolves the pending await while the run is still running (its
 // ResumeAwaiting loses with ErrInvalidTransition), then the suspend lands.
 // The op's post-suspend recheck must resume the run — suspended outcome, run
 // re-queued, no lost wakeup.
-func TestAwaitEventParkSuspendWindowRecheck(t *testing.T) {
+func TestAwaitEventPendingSuspendWindowRecheck(t *testing.T) {
 	ctx := context.Background()
 	st, run := newAwaitOpRun(t)
 	instanceKey := domain.AwaitInstanceKey(run.RunID, 1)
@@ -123,7 +123,7 @@ func TestAwaitEventParkSuspendWindowRecheck(t *testing.T) {
 // TestAwaitEventSuspendAlreadyResumed covers the fleet-db-shaped window: the
 // backend recorded a pending-resume marker and Suspend refuses with
 // ErrDriverRunAlreadyResumed. The op must continue inline with the recorded
-// event instead of parking.
+// event instead of suspending.
 func TestAwaitEventSuspendAlreadyResumed(t *testing.T) {
 	ctx := context.Background()
 	st, run := newAwaitOpRun(t)
@@ -184,7 +184,7 @@ func TestAwaitTimeoutBounds(t *testing.T) {
 
 // TestAwaitEventPerRunBudget pins the locked per-run await budget (AW8): the
 // dense awaitIndex is the count, so an index past the budget is rejected
-// before anything registers, while the last in-budget index still parks.
+// before anything registers, while the last in-budget index still suspends.
 func TestAwaitEventPerRunBudget(t *testing.T) {
 	ctx := context.Background()
 	st, run := newAwaitOpRun(t)
@@ -209,7 +209,7 @@ func TestAwaitEventPerRunBudget(t *testing.T) {
 // TestAwaitEventTotalSuspendCap pins the locked total-suspend cap (AW8): time
 // actually spent suspended on prior awaits plus the new timeout is bounded.
 // Await 1 is seeded with a backdated RegisteredAt and resolved now, recording
-// ~2h of suspension; await 2 then fails under a 1h cap and parks under a 3h
+// ~2h of suspension; await 2 then fails under a 1h cap and suspends under a 3h
 // one.
 func TestAwaitEventTotalSuspendCap(t *testing.T) {
 	ctx := context.Background()

@@ -124,13 +124,9 @@ func setupTrustPolicyExecutorRun(t *testing.T, trust domain.DriverTrustLevel) (c
 		t.Fatalf("Create workspace: %v", err)
 	}
 	writeFlueDist(t, root, "epic-runner", "done")
-	registered, err := RegisterFlueDriver(ctx, st, RegisterFlueOptions{WorkspaceKey: "TEST", WorkDir: root, DistPath: "dist", DriverName: "epic-runner", CreatedBy: "tester", Activate: true})
+	registered, err := RegisterFlueDriver(ctx, st, RegisterFlueOptions{WorkspaceKey: "TEST", WorkDir: root, DistPath: "dist", DriverName: "epic-runner", CreatedBy: "tester", Activate: true, Trust: trust})
 	if err != nil {
 		t.Fatalf("RegisterFlueDriver: %v", err)
-	}
-	level := trust
-	if _, err := st.Drivers().Update(ctx, "TEST", registered.Driver.DriverID, store.DriverUpdate{TrustLevel: &level}); err != nil {
-		t.Fatalf("set driver trust: %v", err)
 	}
 	if _, err := CreateDriverRun(ctx, st, RunOptions{
 		WorkspaceKey:   "TEST",
@@ -219,6 +215,9 @@ func TestRegistrationStampsTrustServerSide(t *testing.T) {
 	if registered.Driver.TrustLevel != domain.DriverTrustTrusted {
 		t.Fatalf("operator-registered trust = %q, want trusted", registered.Driver.TrustLevel)
 	}
+	if registered.Version.Manifest[ManifestTrustLevelKey] != string(domain.DriverTrustTrusted) {
+		t.Fatalf("operator version trust = %q, want trusted", registered.Version.Manifest[ManifestTrustLevelKey])
+	}
 
 	// External submission path: server stamps untrusted, and a client manifest
 	// claiming trusted is ignored (no self-elevation).
@@ -238,8 +237,8 @@ func TestRegistrationStampsTrustServerSide(t *testing.T) {
 	if submitted.Driver.TrustLevel != domain.DriverTrustUntrusted {
 		t.Fatalf("submitted trust = %q, want untrusted (client manifest ignored)", submitted.Driver.TrustLevel)
 	}
-	if _, ok := submitted.Version.Manifest["trust_level"]; ok {
-		t.Fatalf("version manifest = %+v, want client trust_level stripped", submitted.Version.Manifest)
+	if submitted.Version.Manifest[ManifestTrustLevelKey] != string(domain.DriverTrustUntrusted) {
+		t.Fatalf("version manifest trust = %q, want server-stamped untrusted", submitted.Version.Manifest[ManifestTrustLevelKey])
 	}
 }
 

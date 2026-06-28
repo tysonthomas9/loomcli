@@ -11,6 +11,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -104,10 +105,10 @@ func (c *ClaudeBackend) HealthCheck() HealthStatus {
 		issues = append(issues, "claude binary not found on PATH")
 	}
 
-	if os.Getenv("ANTHROPIC_API_KEY") != "" {
+	if os.Getenv("ANTHROPIC_API_KEY") != "" || hasClaudeAuthFile() {
 		hs.APIKeySet = true
 	} else {
-		issues = append(issues, "ANTHROPIC_API_KEY not set")
+		issues = append(issues, "ANTHROPIC_API_KEY not set and claude OAuth credentials not found")
 	}
 
 	hs.Healthy = hs.Installed && hs.APIKeySet
@@ -117,6 +118,33 @@ func (c *ClaudeBackend) HealthCheck() HealthStatus {
 		hs.Message = "ready"
 	}
 	return hs
+}
+
+// hasClaudeAuthFile reports whether claude-code's OAuth credentials file exists
+// on disk and is non-empty. claude-code authenticates via this file (under the
+// CLAUDE_CONFIG_DIR config dir, default ~/.claude) when ANTHROPIC_API_KEY is
+// unset — mirrors hasCodexAuthFile for the codex backend.
+func hasClaudeAuthFile() bool {
+	path := claudeAuthFilePath()
+	if path == "" {
+		return false
+	}
+	info, err := os.Stat(path)
+	return err == nil && info.Mode().IsRegular() && info.Size() > 0
+}
+
+// claudeAuthFilePath returns the path to claude-code's OAuth credentials file,
+// honoring the CLAUDE_CONFIG_DIR override (the container/smoke-test sets this),
+// else defaulting to ~/.claude/.credentials.json. Mirrors codexAuthFilePath.
+func claudeAuthFilePath() string {
+	if dir := strings.TrimSpace(os.Getenv("CLAUDE_CONFIG_DIR")); dir != "" {
+		return filepath.Join(dir, ".credentials.json")
+	}
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		return ""
+	}
+	return filepath.Join(home, ".claude", ".credentials.json")
 }
 
 // InvokeStreaming starts a Claude agent session and returns a streaming reader

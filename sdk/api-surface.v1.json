@@ -83,22 +83,19 @@
       "method": "POST",
       "fields": [
         "taskId",
-        "providerProfile",
+        "runner",
         "taskRunId",
         "workerProfileId",
         "parentSessionId",
         "nodeId",
         "runnerId",
         "driverStepId",
-        "supportedProviders",
         "capabilities",
-        "sandboxPlacement",
         "leaseToken",
         "deferCompletion",
         "enqueueOnly",
         "input"
-      ],
-      "nested": { "sandboxPlacement": ["provider", "sandboxId", "cwd", "repoRef"] }
+      ]
     },
     "task-run-get": { "method": "POST", "fields": ["taskRunId"] },
     "active-task-runs": { "method": "POST", "fields": ["epicId", "limit"] },

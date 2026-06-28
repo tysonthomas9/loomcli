@@ -13,7 +13,7 @@ import (
 
 // TestDriverAPIExecTaskPersistsInputPayload is the HTTP-level proof of the
 // closed gap: the exec-task driver op reads the optional `input` body field
-// (camelCase driver wire — what flue.js requestTaskRun now sends) and persists
+// (camelCase driver wire — what driver.js requestTaskRun now sends) and persists
 // it verbatim onto the created TaskRun.Input, so the runner that later claims
 // the run receives the review diff+rubric.
 func TestDriverAPIExecTaskPersistsInputPayload(t *testing.T) {

@@ -13,15 +13,15 @@ import assert from "node:assert/strict";
 
 import {
   DriverApiError,
-  FlueDriverClient,
+  LoomDriverClient,
   WorkflowSuspended,
   isWorkflowSuspended,
-} from "./flue.js";
+} from "./driver.js";
 
 const manifest = JSON.parse(readFileSync(new URL("./api-surface.v1.json", import.meta.url), "utf8"));
 
 function newClient(apiUrl, input = { epicId: "EPIC-1" }) {
-  return FlueDriverClient.fromEnv({
+  return LoomDriverClient.fromEnv({
     apiUrl,
     input,
     env: {
@@ -81,16 +81,14 @@ test("contract: every op sends only frozen camelCase wire fields to its frozen p
     await client.agents.message({ agent: "lead", message: "hello" });
     await client.taskRuns.request({
       taskId: "TASK-1",
-      providerProfile: "local",
+      runner: "local-task-runner",
       taskRunId: "task-run-1",
       workerProfileId: "wp-1",
       parentSessionId: "sess-1",
       nodeId: "node-1",
       runnerId: "runner-1",
       driverStepId: "step-1",
-      supportedProviders: ["local"],
       capabilities: ["git"],
-      sandboxPlacement: { provider: "local", sandboxId: "sb-1", cwd: "/work", repoRef: "main" },
       leaseToken: "lt-1",
     });
     await client.taskRuns.get({ taskRunId: "task-run-1" });

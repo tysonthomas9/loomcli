@@ -91,7 +91,7 @@ func TestRealFlueBuildAndBuiltServerSmoke(t *testing.T) {
 // epic-runner workflow source with the real Flue CLI and drives it against a
 // fake driver-op HTTP API (including the epic watch SSE stream). The fake
 // mirrors the serve worker contract: exec-task executes immediately,
-// completes-and-closes (or parks) the task server-side, and appends the
+// completes-and-closes (or blocks) the task server-side, and appends the
 // terminal journal event the watch stream delivers; the workflow's follow-up
 // complete-task gets the worker-conflict the real server would return.
 //
@@ -139,6 +139,7 @@ func TestRealFlueBuiltinEpicRunnerWatchLoopSmoke(t *testing.T) {
 	cases := []struct {
 		name          string
 		epicID        string
+		runner        string
 		failTask      string
 		wantStatus    domain.DriverRunStatus
 		wantSummary   string
@@ -149,18 +150,20 @@ func TestRealFlueBuiltinEpicRunnerWatchLoopSmoke(t *testing.T) {
 		{
 			name:          "watch-driven DAG drain completes",
 			epicID:        "TEST-1",
+			runner:        "local-task-runner",
 			wantStatus:    domain.DriverRunCompleted,
 			wantSummary:   "Epic drained TEST-1: TEST-A,TEST-B,TEST-C,TEST-D",
 			wantExecuted:  "TEST-A,TEST-B,TEST-C,TEST-D",
 			wantCompleted: []string{"TEST-A", "TEST-B", "TEST-C", "TEST-D"},
 		},
 		{
-			name:          "parked branch drains siblings into needs_review",
+			name:          "blocked branch drains siblings into needs_review",
 			epicID:        "TEST-2",
+			runner:        "daytona-task-runner",
 			failTask:      "TEST-C",
 			wantStatus:    domain.DriverRunNeedsReview,
 			wantSummary:   "TEST-C",
-			wantError:     "epic_tasks_parked",
+			wantError:     "epic_tasks_blocked",
 			wantExecuted:  "TEST-A,TEST-B,TEST-C,TEST-D",
 			wantCompleted: []string{"TEST-A", "TEST-B", "TEST-D"},
 		},
@@ -168,7 +171,7 @@ func TestRealFlueBuiltinEpicRunnerWatchLoopSmoke(t *testing.T) {
 	for i, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			fake := newFakeEpicAPI(tc.epicID, tc.failTask)
-			// Happy path: A -> (B, C) -> D. Parked path: C has no dependents so
+			// Happy path: A -> (B, C) -> D. Blocked path: C has no dependents so
 			// the sibling branch B -> D drains around the injected failure.
 			fake.addTask("TEST-A")
 			fake.addTask("TEST-B", "TEST-A")
@@ -182,12 +185,13 @@ func TestRealFlueBuiltinEpicRunnerWatchLoopSmoke(t *testing.T) {
 			defer server.Close()
 
 			runID := fmt.Sprintf("run-epic-watch-%d", i+1)
+			payload := json.RawMessage(`{"epicId":"` + tc.epicID + `","runner":"` + tc.runner + `"}`)
 			run, err := CreateDriverRun(ctx, st, RunOptions{
 				WorkspaceKey: "TEST",
 				DriverID:     registered.Driver.DriverID,
 				EpicID:       tc.epicID,
 				RunID:        runID,
-				Payload:      json.RawMessage(`{"epicId":"` + tc.epicID + `"}`),
+				Payload:      payload,
 			})
 			if err != nil {
 				t.Fatalf("CreateDriverRun: %v", err)
@@ -234,6 +238,15 @@ func TestRealFlueBuiltinEpicRunnerWatchLoopSmoke(t *testing.T) {
 			if strings.Join(executed, ",") != tc.wantExecuted {
 				t.Fatalf("executed order = %v, want %s", executed, tc.wantExecuted)
 			}
+			if runners := fake.observedRunners(); len(runners) != len(executed) {
+				t.Fatalf("runner requests = %v, want one per executed task %v", runners, executed)
+			} else {
+				for taskID, runner := range runners {
+					if runner != tc.runner {
+						t.Fatalf("task %s requested runner %q, want %q", taskID, runner, tc.runner)
+					}
+				}
+			}
 			if len(completes) != len(tc.wantCompleted) {
 				t.Fatalf("complete-task calls = %+v, want one per completed task %v", completes, tc.wantCompleted)
 			}
@@ -249,8 +262,8 @@ func TestRealFlueBuiltinEpicRunnerWatchLoopSmoke(t *testing.T) {
 					t.Fatalf("complete[%d].CompletionID = %q, want deterministic completion id for %q", j, call.CompletionID, call.TaskRunID)
 				}
 			}
-			if tc.failTask != "" && fake.taskStatus(tc.failTask) != "parked" {
-				t.Fatalf("task %s status = %q, want parked", tc.failTask, fake.taskStatus(tc.failTask))
+			if tc.failTask != "" && fake.taskStatus(tc.failTask) != "blocked" {
+				t.Fatalf("task %s status = %q, want blocked", tc.failTask, fake.taskStatus(tc.failTask))
 			}
 			if violations := fake.authViolations(); len(violations) != 0 {
 				t.Fatalf("token-only auth violations: %v", violations)
@@ -276,7 +289,7 @@ func builtinEpicRunnerSource(t *testing.T) string {
 
 // fakeEpicAPI is an in-test driver-op HTTP API with the watch SSE stream. It
 // keeps one epic's DAG state and mimics the serve task-worker contract:
-// exec-task runs the task inline, closes (or parks) it, and appends the
+// exec-task runs the task inline, closes (or blocks) it, and appends the
 // terminal TaskRun journal event; complete-task answers with the
 // already-completed conflict the real worker-closed path produces.
 type fakeEpicAPI struct {
@@ -287,6 +300,7 @@ type fakeEpicAPI struct {
 	tasks     map[string]*fakeEpicTask
 	events    []fakeEpicEvent
 	executed  []string
+	runners   map[string]string
 	completes []fakeCompleteCall
 	// tokenKey, when set, makes the fake enforce the TK5 token-only
 	// transport: every request must carry a parseable run-scoped bearer for
@@ -298,7 +312,7 @@ type fakeEpicAPI struct {
 
 type fakeEpicTask struct {
 	deps   []string
-	status string // open | claimed | closed | parked
+	status string // open | claimed | closed | blocked
 }
 
 type fakeEpicEvent struct {
@@ -314,7 +328,7 @@ type fakeCompleteCall struct {
 }
 
 func newFakeEpicAPI(epicID, failTask string) *fakeEpicAPI {
-	return &fakeEpicAPI{epicID: epicID, failTask: failTask, tasks: map[string]*fakeEpicTask{}}
+	return &fakeEpicAPI{epicID: epicID, failTask: failTask, tasks: map[string]*fakeEpicTask{}, runners: map[string]string{}}
 }
 
 func (f *fakeEpicAPI) addTask(id string, deps ...string) {
@@ -326,6 +340,16 @@ func (f *fakeEpicAPI) observed() ([]string, []fakeCompleteCall) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return append([]string(nil), f.executed...), append([]fakeCompleteCall(nil), f.completes...)
+}
+
+func (f *fakeEpicAPI) observedRunners() map[string]string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := make(map[string]string, len(f.runners))
+	for taskID, runner := range f.runners {
+		out[taskID] = runner
+	}
+	return out
 }
 
 func (f *fakeEpicAPI) taskStatus(id string) string {
@@ -469,7 +493,7 @@ func (f *fakeEpicAPI) depsClosedLocked(task *fakeEpicTask) bool {
 }
 
 // execTask mimics enqueue + instant worker execution: the task transitions to
-// closed (or parked for the configured failure) and the terminal journal
+// closed (or blocked for the configured failure) and the terminal journal
 // event is appended for the watch stream before the queued response returns.
 func (f *fakeEpicAPI) execTask(r *http.Request, params map[string]any) any {
 	taskID := stringParam(params, "taskId")
@@ -478,6 +502,7 @@ func (f *fakeEpicAPI) execTask(r *http.Request, params map[string]any) any {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.executed = append(f.executed, taskID)
+	f.runners[taskID] = stringParam(params, "runner")
 	event := map[string]any{
 		"driverRunID": driverRunID,
 		"epicID":      f.epicID,
@@ -489,10 +514,10 @@ func (f *fakeEpicAPI) execTask(r *http.Request, params map[string]any) any {
 	}
 	if task := f.tasks[taskID]; task != nil {
 		if taskID == f.failTask {
-			task.status = "parked"
-			event["type"] = "taskRunParked"
+			task.status = "blocked"
+			event["type"] = "taskRunFailed"
 			event["status"] = "failed"
-			event["schedulerState"] = "parked"
+			event["schedulerState"] = "blocked"
 			event["errorClass"] = "injected_task_failure"
 			event["errorMessage"] = "deliberate failure injected by fake epic API"
 		} else {

@@ -70,6 +70,39 @@ func TestDriverCommandContainsSubcommands(t *testing.T) {
 	}
 }
 
+func TestDriverRegisterTrustDefaultsUntrusted(t *testing.T) {
+	origTrusted := driverRegisterTrusted
+	origUntrusted := driverRegisterUntrusted
+	t.Cleanup(func() {
+		driverRegisterTrusted = origTrusted
+		driverRegisterUntrusted = origUntrusted
+	})
+
+	driverRegisterTrusted = false
+	driverRegisterUntrusted = false
+	if trust, err := driverRegisterTrust(); err != nil || trust != domain.DriverTrustUntrusted {
+		t.Fatalf("driverRegisterTrust without flag = %q err=%v, want untrusted", trust, err)
+	}
+
+	driverRegisterTrusted = true
+	driverRegisterUntrusted = true
+	if _, err := driverRegisterTrust(); !errors.Is(err, domain.ErrInvalid) {
+		t.Fatalf("driverRegisterTrust with both flags err = %v, want ErrInvalid", err)
+	}
+
+	driverRegisterTrusted = true
+	driverRegisterUntrusted = false
+	if trust, err := driverRegisterTrust(); err != nil || trust != domain.DriverTrustTrusted {
+		t.Fatalf("driverRegisterTrust trusted = %q err=%v", trust, err)
+	}
+
+	driverRegisterTrusted = false
+	driverRegisterUntrusted = true
+	if trust, err := driverRegisterTrust(); err != nil || trust != domain.DriverTrustUntrusted {
+		t.Fatalf("driverRegisterTrust untrusted = %q err=%v", trust, err)
+	}
+}
+
 func TestDeliverAgentMessageForDriverQueuesGenericMessage(t *testing.T) {
 	ctx := context.Background()
 	st := memstore.New()

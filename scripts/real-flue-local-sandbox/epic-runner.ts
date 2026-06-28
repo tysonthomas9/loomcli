@@ -1,4 +1,4 @@
-import { createLoomDriverClient } from '@loom/sdk/flue';
+import { createLoomDriverClient } from '@loom/sdk/driver';
 
 type WorkflowContext = {
   payload?: {
@@ -37,10 +37,8 @@ export async function run(ctx: WorkflowContext) {
 
     const result = (await loom.taskRuns.request({
       taskId: task.id,
-      providerProfile: 'flue-local',
+      runner: 'local-task-runner',
       parentSessionId: input.parentSessionId ?? '',
-      supportedProviders: ['flue-local'],
-      sandboxPlacement: { provider: 'flue-local' },
     })) as RequestedTaskRun;
     if (result.status === 'queued' || result.status === 'running') {
       const awaited = (await loom.taskRuns.await({

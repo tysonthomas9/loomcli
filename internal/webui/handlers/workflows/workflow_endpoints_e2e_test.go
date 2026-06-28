@@ -29,6 +29,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/infra/fleetdb"
+	runtimesettings "github.com/tysonthomas9/loomcli/internal/localsettings"
 	"github.com/tysonthomas9/loomcli/internal/netutil"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
@@ -53,6 +54,136 @@ func TestE2E_WorkflowEndpointsRunRealFlueEpicRunner(t *testing.T) {
 	e2e.expectDAGCompleted(dag, runID)
 }
 
+func TestE2E_WorkflowEndpointsRunCustomizedEpicRunnerFromCLI(t *testing.T) {
+	e2e := newWorkflowEndpointE2E(t)
+
+	e2e.startFleetDB()
+	e2e.seedWorkspace()
+	dag := e2e.seedEpicDAG()
+	marker := "loom-custom-epic-runner-marker"
+	customVersionID := e2e.customizeEpicRunnerViaCLI(marker)
+	e2e.startLoomServe()
+
+	runID := e2e.startWorkflowRun(BuiltinEpicRunnerWorkflowName, map[string]any{
+		"epicId":      dag.epicID,
+		"requestedBy": "workflow-endpoint-e2e",
+	})
+
+	run := e2e.waitForRunCompleted(runID)
+	if run.DriverVersionID != customVersionID {
+		t.Fatalf("run driver_version_id = %q, want customized version %q", run.DriverVersionID, customVersionID)
+	}
+	if !strings.Contains(run.Output["flue_stderr_tail"], marker+" "+dag.epicID) {
+		t.Fatalf("run output missing custom marker %q: %+v", marker, run.Output)
+	}
+	e2e.expectRunPayloadFields(run, dag.epicID, "workflow-endpoint-e2e")
+	e2e.expectDAGDrained(dag, runID)
+}
+
+func TestE2E_WorkflowEndpointsRunCustomizedEpicRunnerWithDaytonaSandbox(t *testing.T) {
+	if strings.TrimSpace(os.Getenv("LOOM_RUN_DAYTONA_E2E")) != "1" {
+		t.Skip("set LOOM_RUN_DAYTONA_E2E=1 to run the gated Daytona sandbox e2e")
+	}
+	daytonaKey := strings.TrimSpace(os.Getenv("DAYTONA_API_KEY"))
+	if daytonaKey == "" {
+		t.Skip("DAYTONA_API_KEY is required for the gated Daytona sandbox e2e")
+	}
+	githubToken := workflowEndpointGitHubToken(t)
+	repoURL := daytonaWorkflowE2ERepoURL()
+
+	e2e := newWorkflowEndpointE2E(t)
+	e2e.runTimeout = 15 * time.Minute
+	e2e.useBundledTaskRunners = true
+	e2e.requireDaytonaSDKRoot()
+	e2e.requireHostCodexAuthHome()
+	e2e.saveRuntimeCredentials(daytonaKey, githubToken)
+	t.Setenv("LOOM_DAYTONA_TASK_RUNNER_ENABLE_DEMO_MODES", "1")
+	if model := strings.TrimSpace(os.Getenv("LOOM_DAYTONA_E2E_MODEL")); model != "" {
+		t.Setenv("LOOM_FLUE_AGENT_MODEL", model)
+	}
+
+	e2e.startFleetDB()
+	e2e.seedWorkspace()
+	dag := e2e.seedSingleTaskEpic()
+	marker := "loom-custom-epic-runner-marker"
+	customVersionID := e2e.customizeEpicRunnerViaCLI(marker)
+	e2e.startLoomServe()
+
+	runID := e2e.startWorkflowRun(BuiltinEpicRunnerWorkflowName, map[string]any{
+		"epicId":           dag.epicID,
+		"requestedBy":      "workflow-endpoint-e2e-daytona",
+		"runner":           "daytona-task-runner",
+		"mode":             "e2e-smoke",
+		"enableDemoModes":  true,
+		"refreshCodexAuth": true,
+		"repoUrl":          repoURL,
+		"maxConcurrency":   1,
+	})
+
+	run := e2e.waitForRunCompleted(runID)
+	if run.DriverVersionID != customVersionID {
+		t.Fatalf("run driver_version_id = %q, want customized version %q", run.DriverVersionID, customVersionID)
+	}
+	if !strings.Contains(run.Output["flue_stderr_tail"], marker+" "+dag.epicID) {
+		t.Fatalf("run output missing custom marker %q: %+v", marker, run.Output)
+	}
+	e2e.expectRunPayloadFields(run, dag.epicID, "workflow-endpoint-e2e-daytona")
+	e2e.expectSingleDaytonaTaskDrained(dag, runID)
+}
+
+func TestE2E_WorkflowEndpointsRunCustomizedEpicRunnerWithDaytonaPRChain(t *testing.T) {
+	if strings.TrimSpace(os.Getenv("LOOM_RUN_DAYTONA_PR_E2E")) != "1" {
+		t.Skip("set LOOM_RUN_DAYTONA_PR_E2E=1 to run the gated Daytona PR-chain e2e")
+	}
+	daytonaKey := strings.TrimSpace(os.Getenv("DAYTONA_API_KEY"))
+	if daytonaKey == "" {
+		t.Skip("DAYTONA_API_KEY is required for the gated Daytona PR-chain e2e")
+	}
+	githubToken := workflowEndpointGitHubToken(t)
+	repoURL := daytonaWorkflowE2ERepoURL()
+
+	e2e := newWorkflowEndpointE2E(t)
+	e2e.runTimeout = 30 * time.Minute
+	e2e.useBundledTaskRunners = true
+	e2e.requireDaytonaSDKRoot()
+	e2e.requireHostCodexAuthHome()
+	e2e.saveRuntimeCredentials(daytonaKey, githubToken)
+	t.Setenv("LOOM_DAYTONA_TASK_RUNNER_ENABLE_DEMO_MODES", "1")
+	if model := strings.TrimSpace(os.Getenv("LOOM_DAYTONA_E2E_MODEL")); model != "" {
+		t.Setenv("LOOM_FLUE_AGENT_MODEL", model)
+	}
+
+	e2e.startFleetDB()
+	e2e.seedWorkspace()
+	e2e.seedWorkspaceRepo(repoURL)
+	dag := e2e.seedSlackPRChainEpic(repoURL)
+	marker := "loom-custom-epic-runner-marker"
+	customVersionID := e2e.customizeEpicRunnerViaCLI(marker)
+	e2e.startLoomServe()
+
+	runID := e2e.startWorkflowRun(BuiltinEpicRunnerWorkflowName, map[string]any{
+		"epicId":              dag.epicID,
+		"requestedBy":         "workflow-endpoint-e2e-daytona-pr",
+		"runner":              "daytona-task-runner",
+		"mode":                "slack-pr-chain",
+		"enableDemoModes":     true,
+		"refreshCodexAuth":    true,
+		"repoUrl":             repoURL,
+		"stackedPullRequests": true,
+		"maxConcurrency":      2,
+	})
+
+	run := e2e.waitForRunCompleted(runID)
+	if run.DriverVersionID != customVersionID {
+		t.Fatalf("run driver_version_id = %q, want customized version %q", run.DriverVersionID, customVersionID)
+	}
+	if !strings.Contains(run.Output["flue_stderr_tail"], marker+" "+dag.epicID) {
+		t.Fatalf("run output missing custom marker %q: %+v", marker, run.Output)
+	}
+	e2e.expectRunPayloadFields(run, dag.epicID, "workflow-endpoint-e2e-daytona-pr")
+	e2e.expectDaytonaPRChainDrained(dag, runID, repoURL)
+}
+
 type workflowEndpointE2E struct {
 	t *testing.T
 
@@ -68,9 +199,12 @@ type workflowEndpointE2E struct {
 	fleetDBBin  string
 	flueCommand []string
 
-	workDir       string
-	configDir     string
-	taskRunnerLog string
+	workDir               string
+	configDir             string
+	taskRunnerLog         string
+	runTimeout            time.Duration
+	useBundledTaskRunners bool
+	serveHome             string
 
 	fleetURL string
 	loomURL  string
@@ -189,6 +323,17 @@ func (e *workflowEndpointE2E) seedWorkspace() {
 	}
 }
 
+func (e *workflowEndpointE2E) seedWorkspaceRepo(repoURL string) {
+	e.t.Helper()
+	repo := workflowEndpointRepoSlug(repoURL)
+	if repo == "" {
+		e.t.Fatalf("repo URL %q did not produce a workspace repo slug", repoURL)
+	}
+	e.patchFleetJSON("/api/v1/admin/workspaces/"+e.workspace, map[string]any{
+		"add_repos": []string{repo},
+	}, http.StatusOK, nil)
+}
+
 func (e *workflowEndpointE2E) seedEpicDAG() workflowEndpointDAG {
 	e.t.Helper()
 	epic := e.createIssue(backend.CreateParams{
@@ -237,6 +382,72 @@ func (e *workflowEndpointE2E) seedEpicDAG() workflowEndpointDAG {
 	}
 }
 
+func (e *workflowEndpointE2E) seedSingleTaskEpic() workflowEndpointDAG {
+	e.t.Helper()
+	epic := e.createIssue(backend.CreateParams{
+		Title:     "Workflow endpoint Daytona E2E Epic",
+		IssueType: "epic",
+		Priority:  1,
+		CreatedBy: e.actor,
+	})
+	task := e.createIssue(backend.CreateParams{
+		Title:     "Daytona smoke task",
+		IssueType: "task",
+		Parent:    epic.ID,
+		Priority:  1,
+		CreatedBy: e.actor,
+	})
+	return workflowEndpointDAG{epicID: epic.ID, taskA: task.ID}
+}
+
+func (e *workflowEndpointE2E) seedSlackPRChainEpic(repoURL string) workflowEndpointDAG {
+	e.t.Helper()
+	repo := workflowEndpointRepoSlug(repoURL)
+	epic := e.createIssue(backend.CreateParams{
+		Title:       "Tiny Slack clone PR chain",
+		Description: "Build a tiny Slack-style collaboration app through three dependent task PRs. Each task should produce one visible GitHub pull request.",
+		IssueType:   "epic",
+		Priority:    1,
+		CreatedBy:   e.actor,
+		SourceRepo:  repo,
+	})
+	taskA := e.createIssue(backend.CreateParams{
+		Title:       "Scaffold Slack clone app",
+		Description: "Create a tiny static Slack-style app under a clear project directory. Include package.json, an HTML entrypoint, CSS, JavaScript state/rendering code, sample channel/message data, and a Node built-in test that validates the rendered data model. Keep dependencies minimal and make npm test pass.",
+		IssueType:   "task",
+		Parent:      epic.ID,
+		Priority:    1,
+		CreatedBy:   e.actor,
+		SourceRepo:  repo,
+	})
+	taskB := e.createIssue(backend.CreateParams{
+		Title:        "Add channel navigation and unread state",
+		Description:  "Extend the Slack clone from the prior PR with multiple channels, active-channel switching affordances, unread badges, timestamps, and stronger sidebar styling. Update or add tests so npm test proves the channel data/render helpers still work.",
+		IssueType:    "task",
+		Parent:       epic.ID,
+		Priority:     1,
+		CreatedBy:    e.actor,
+		SourceRepo:   repo,
+		Dependencies: []string{taskA.ID},
+	})
+	taskC := e.createIssue(backend.CreateParams{
+		Title:        "Add composer search and polish",
+		Description:  "Extend the stacked Slack clone with a message composer, search or command palette behavior, responsive layout polish, and final seed data. Update tests and keep npm test passing.",
+		IssueType:    "task",
+		Parent:       epic.ID,
+		Priority:     1,
+		CreatedBy:    e.actor,
+		SourceRepo:   repo,
+		Dependencies: []string{taskB.ID},
+	})
+	return workflowEndpointDAG{
+		epicID: epic.ID,
+		taskA:  taskA.ID,
+		taskB:  taskB.ID,
+		taskC:  taskC.ID,
+	}
+}
+
 func (e *workflowEndpointE2E) createIssue(params backend.CreateParams) *backend.IssueData {
 	e.t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
@@ -256,7 +467,10 @@ func (e *workflowEndpointE2E) startLoomServe() {
 	}
 	e.loomURL = "http://127.0.0.1:" + strconv.Itoa(port)
 
-	taskRunnerCommand := e.writeTaskRunner()
+	taskRunnerCommand := ""
+	if !e.useBundledTaskRunners {
+		taskRunnerCommand = e.writeTaskRunner()
+	}
 	flueCommandJSON, err := json.Marshal(e.flueCommand)
 	if err != nil {
 		e.t.Fatalf("encode Flue command: %v", err)
@@ -270,7 +484,7 @@ func (e *workflowEndpointE2E) startLoomServe() {
 	)
 	cmd.Dir = e.workDir
 	cmd.Env = workflowEndpointEnv(map[string]string{
-		"HOME":                             filepath.Join(e.configDir, "home"),
+		"HOME":                             e.serveHomeDir(),
 		"LOOM_CONFIG_DIR":                  e.configDir,
 		"LOOM_WORKSPACE":                   e.workspace,
 		"LOOM_FLEET_DB_URL":                e.fleetURL,
@@ -282,6 +496,10 @@ func (e *workflowEndpointE2E) startLoomServe() {
 		"LOOM_DRIVER_TASK_RUNNER_CMD_JSON": taskRunnerCommand,
 		"LOOM_REAL_FLUE_CMD_JSON":          string(flueCommandJSON),
 		"LOOM_SDK_ROOT":                    filepath.Join(e.repoRoot, "sdk"),
+		"LOOM_FLUE_RUNTIME_ROOT":           filepath.Join(e.flueRepo, "packages", "runtime"),
+		"FLUE_REPO":                        e.flueRepo,
+		"DAYTONA_SDK_ROOT":                 e.daytonaSDKRoot(),
+		"OPENAI_API_KEY":                   firstNonEmpty(strings.TrimSpace(os.Getenv("OPENAI_API_KEY")), "workflow-endpoint-e2e-test-key"),
 		"LOOM_ISSUE_BACKEND":               "",
 		bootstrap.EnvFleetDBBin:            e.fleetDBBin,
 		bootstrap.EnvFleetDBAPIKey:         "",
@@ -306,6 +524,30 @@ func (e *workflowEndpointE2E) startLoomServe() {
 	e.waitForLoomHealth(&stderr)
 }
 
+func (e *workflowEndpointE2E) loomEnv() []string {
+	e.t.Helper()
+	flueCommandJSON, err := json.Marshal(e.flueCommand)
+	if err != nil {
+		e.t.Fatalf("encode Flue command: %v", err)
+	}
+	return workflowEndpointEnv(map[string]string{
+		"HOME":                     filepath.Join(e.configDir, "home"),
+		"LOOM_CONFIG_DIR":          e.configDir,
+		"LOOM_WORKSPACE":           e.workspace,
+		"LOOM_FLEET_DB_URL":        e.fleetURL,
+		"LOOM_FLEET_URL":           "",
+		"LOOM_SERVER_URL":          "",
+		"LOOM_REAL_FLUE_CMD_JSON":  string(flueCommandJSON),
+		"LOOM_SDK_ROOT":            filepath.Join(e.repoRoot, "sdk"),
+		"LOOM_FLUE_RUNTIME_ROOT":   filepath.Join(e.flueRepo, "packages", "runtime"),
+		"FLUE_REPO":                e.flueRepo,
+		"DAYTONA_SDK_ROOT":         e.daytonaSDKRoot(),
+		bootstrap.EnvFleetDBBin:    e.fleetDBBin,
+		bootstrap.EnvFleetDBAPIKey: "",
+		bootstrap.EnvFleetDBActor:  e.actor,
+	})
+}
+
 func (e *workflowEndpointE2E) startWorkflowRun(name string, payload map[string]any) string {
 	e.t.Helper()
 	var run domain.DriverRun
@@ -322,9 +564,72 @@ func (e *workflowEndpointE2E) startWorkflowRun(name string, payload map[string]a
 	return run.RunID
 }
 
+func (e *workflowEndpointE2E) customizeEpicRunnerViaCLI(marker string) string {
+	e.t.Helper()
+	sourceDir := filepath.Join(e.workDir, ".loom", "workflows", BuiltinEpicRunnerWorkflowName)
+	e.runLoom("workflow", "clone", BuiltinEpicRunnerWorkflowName, "--out", sourceDir, "--json")
+
+	sourcePath := filepath.Join(sourceDir, "workflows", "epic-runner.ts")
+	data, err := os.ReadFile(sourcePath)
+	if err != nil {
+		e.t.Fatalf("read cloned epic-runner source: %v", err)
+	}
+	needle := "  if (!epicId) {\n"
+	replacement := "  console.error(" + jsonString(marker+" ") + " + epicId);\n" + needle
+	patched := strings.Replace(string(data), needle, replacement, 1)
+	if patched == string(data) {
+		e.t.Fatalf("failed to patch custom marker into epic-runner source")
+	}
+	if err := os.WriteFile(sourcePath, []byte(patched), 0o644); err != nil {
+		e.t.Fatalf("write patched epic-runner source: %v", err)
+	}
+
+	var built struct {
+		Version *domain.DriverVersion `json:"version"`
+	}
+	e.runLoomJSON(&built, "workflow", "build", BuiltinEpicRunnerWorkflowName, "--source", sourceDir, "--json")
+	if built.Version == nil || built.Version.VersionID == "" {
+		e.t.Fatalf("workflow build response missing version: %+v", built)
+	}
+	if built.Version.Manifest["trust_level"] != string(domain.DriverTrustUntrusted) {
+		e.t.Fatalf("custom version trust = %q, want untrusted", built.Version.Manifest["trust_level"])
+	}
+	e.runLoom("workflow", "approve", BuiltinEpicRunnerWorkflowName, "--version", built.Version.VersionID, "--json")
+	e.runLoom("workflow", "activate", BuiltinEpicRunnerWorkflowName, "--version", built.Version.VersionID, "--json")
+	return built.Version.VersionID
+}
+
+func (e *workflowEndpointE2E) runLoom(args ...string) string {
+	e.t.Helper()
+	cmd := exec.Command(e.loomBin, args...)
+	cmd.Dir = e.workDir
+	cmd.Env = e.loomEnv()
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		e.t.Fatalf("loom %s failed: %v\n%s", strings.Join(args, " "), err, strings.TrimSpace(string(output)))
+	}
+	return string(output)
+}
+
+func (e *workflowEndpointE2E) runLoomJSON(out any, args ...string) {
+	e.t.Helper()
+	output := e.runLoom(args...)
+	start := strings.Index(output, "{")
+	if start < 0 {
+		e.t.Fatalf("loom %s output did not contain JSON object:\n%s", strings.Join(args, " "), output)
+	}
+	if err := json.Unmarshal([]byte(output[start:]), out); err != nil {
+		e.t.Fatalf("decode loom %s JSON: %v\n%s", strings.Join(args, " "), err, output)
+	}
+}
+
 func (e *workflowEndpointE2E) waitForRunCompleted(runID string) domain.DriverRun {
 	e.t.Helper()
-	deadline := time.Now().Add(90 * time.Second)
+	timeout := e.runTimeout
+	if timeout <= 0 {
+		timeout = 90 * time.Second
+	}
+	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
 		var run domain.DriverRun
 		e.getJSON("/api/workspaces/"+e.workspace+"/runs/"+runID, http.StatusOK, &run)
@@ -342,7 +647,115 @@ func (e *workflowEndpointE2E) waitForRunCompleted(runID string) domain.DriverRun
 	return run
 }
 
+func (e *workflowEndpointE2E) requireDaytonaSDKRoot() {
+	e.t.Helper()
+	if _, err := os.Stat(filepath.Join(e.daytonaSDKRoot(), "package.json")); err == nil {
+		return
+	}
+	e.t.Skip("local @daytona/sdk package root is required for the gated Daytona sandbox e2e; set DAYTONA_SDK_ROOT")
+}
+
+func (e *workflowEndpointE2E) requireHostCodexAuthHome() {
+	e.t.Helper()
+	home := strings.TrimSpace(os.Getenv("HOME"))
+	if home == "" {
+		e.t.Skip("host HOME is required for gated Daytona e2e Codex auth")
+	}
+	if _, err := os.Stat(filepath.Join(home, ".codex", "auth.json")); err != nil {
+		e.t.Skip("host Codex auth is required for gated Daytona e2e; run codex auth login")
+	}
+	e.serveHome = home
+}
+
+func (e *workflowEndpointE2E) serveHomeDir() string {
+	if strings.TrimSpace(e.serveHome) != "" {
+		return e.serveHome
+	}
+	return filepath.Join(e.configDir, "home")
+}
+
+func (e *workflowEndpointE2E) daytonaSDKRoot() string {
+	if root := strings.TrimSpace(os.Getenv("DAYTONA_SDK_ROOT")); root != "" {
+		return root
+	}
+	return filepath.Join(e.flueRepo, "node_modules", ".pnpm", "node_modules", "@daytona", "sdk")
+}
+
+func (e *workflowEndpointE2E) saveDaytonaCredential(daytonaKey string) {
+	e.t.Helper()
+	e.saveRuntimeCredentials(daytonaKey, "")
+}
+
+func (e *workflowEndpointE2E) saveRuntimeCredentials(daytonaKey, githubToken string) {
+	e.t.Helper()
+	settings, err := runtimesettings.Load(e.configDir)
+	if err != nil {
+		e.t.Fatalf("load runtime settings: %v", err)
+	}
+	now := time.Now()
+	if strings.TrimSpace(daytonaKey) != "" {
+		credential, err := runtimesettings.SealRuntimeCredential(e.configDir, runtimesettings.RuntimeCredentialProviderDaytona, daytonaKey, now)
+		if err != nil {
+			e.t.Fatalf("seal Daytona runtime credential: %v", err)
+		}
+		settings.RuntimeCredentials.Daytona = credential
+	}
+	if strings.TrimSpace(githubToken) != "" {
+		credential, err := runtimesettings.SealRuntimeCredential(e.configDir, runtimesettings.RuntimeCredentialProviderGitHub, githubToken, now)
+		if err != nil {
+			e.t.Fatalf("seal GitHub runtime credential: %v", err)
+		}
+		settings.RuntimeCredentials.GitHub = credential
+	}
+	if err := runtimesettings.Save(e.configDir, settings); err != nil {
+		e.t.Fatalf("save runtime credentials: %v", err)
+	}
+}
+
+func workflowEndpointGitHubToken(t *testing.T) string {
+	t.Helper()
+	if token := firstNonEmpty(os.Getenv("GITHUB_TOKEN"), os.Getenv("GH_TOKEN")); token != "" {
+		return token
+	}
+	gh, err := exec.LookPath("gh")
+	if err != nil {
+		t.Skip("GITHUB_TOKEN, GH_TOKEN, or gh auth token is required for the gated Daytona PR-chain e2e")
+	}
+	output, err := exec.Command(gh, "auth", "token").Output()
+	if err != nil {
+		t.Skip("GITHUB_TOKEN, GH_TOKEN, or gh auth token is required for the gated Daytona PR-chain e2e")
+	}
+	if token := strings.TrimSpace(string(output)); token != "" {
+		return token
+	}
+	t.Skip("GITHUB_TOKEN, GH_TOKEN, or gh auth token is required for the gated Daytona PR-chain e2e")
+	return ""
+}
+
+func daytonaWorkflowE2ERepoURL() string {
+	return firstNonEmpty(os.Getenv("DAYTONA_REPO_URL"), "https://github.com/tysonthomas9/webhook-e2e-sandbox.git")
+}
+
+func workflowEndpointRepoSlug(repoURL string) string {
+	repo := strings.TrimSpace(repoURL)
+	repo = strings.TrimSuffix(repo, ".git")
+	repo = strings.TrimSuffix(repo, "/")
+	if idx := strings.Index(repo, "github.com/"); idx >= 0 {
+		repo = repo[idx+len("github.com/"):]
+	}
+	repo = strings.TrimPrefix(repo, "git@github.com:")
+	return repo
+}
+
 func (e *workflowEndpointE2E) expectRunPayload(run domain.DriverRun, epicID string) {
+	e.t.Helper()
+	e.expectRunPayloadFields(run, epicID, "workflow-endpoint-e2e")
+	if !strings.Contains(run.Output["flue_stderr_tail"], "epic-runner-start "+epicID) {
+		e.t.Fatalf("run output missing workflow log marker: %+v", run.Output)
+	}
+}
+
+func (e *workflowEndpointE2E) expectRunPayloadFields(run domain.DriverRun, epicID, requestedBy string) {
 	e.t.Helper()
 	var payload struct {
 		EpicID      string `json:"epicId"`
@@ -351,17 +764,14 @@ func (e *workflowEndpointE2E) expectRunPayload(run domain.DriverRun, epicID stri
 	if err := json.Unmarshal(run.Payload, &payload); err != nil {
 		e.t.Fatalf("decode run payload %s: %v", run.Payload, err)
 	}
-	if payload.EpicID != epicID || payload.RequestedBy != "workflow-endpoint-e2e" {
-		e.t.Fatalf("run payload = %+v, want epicId=%s requestedBy=workflow-endpoint-e2e", payload, epicID)
+	if payload.EpicID != epicID || payload.RequestedBy != requestedBy {
+		e.t.Fatalf("run payload = %+v, want epicId=%s requestedBy=%s", payload, epicID, requestedBy)
 	}
 	if run.DriverID != BuiltinEpicRunnerWorkflowName {
 		e.t.Fatalf("run driver = %s, want %s", run.DriverID, BuiltinEpicRunnerWorkflowName)
 	}
 	if run.Output["logs_ref"] != "driver-run://"+run.RunID+"/flue-local" {
 		e.t.Fatalf("run output logs_ref = %q", run.Output["logs_ref"])
-	}
-	if !strings.Contains(run.Output["flue_stderr_tail"], "epic-runner-start "+epicID) {
-		e.t.Fatalf("run output missing workflow log marker: %+v", run.Output)
 	}
 }
 
@@ -414,6 +824,12 @@ func (e *workflowEndpointE2E) expectRunStream(runID, requiredAction string) {
 
 func (e *workflowEndpointE2E) expectDAGCompleted(dag workflowEndpointDAG, runID string) {
 	e.t.Helper()
+	taskRunByTaskID := e.expectDAGDrained(dag, runID)
+	e.expectCloseTaskLedger(taskRunByTaskID)
+}
+
+func (e *workflowEndpointE2E) expectDAGDrained(dag workflowEndpointDAG, runID string) map[string]*domain.TaskRun {
+	e.t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 
@@ -445,7 +861,6 @@ func (e *workflowEndpointE2E) expectDAGCompleted(dag workflowEndpointDAG, runID 
 		}
 		taskRunByTaskID[taskRun.TaskID] = taskRun
 	}
-	e.expectCloseTaskLedger(taskRunByTaskID)
 
 	executed := workflowEndpointReadLines(e.t, e.taskRunnerLog)
 	if len(executed) != 4 {
@@ -460,6 +875,112 @@ func (e *workflowEndpointE2E) expectDAGCompleted(dag workflowEndpointDAG, runID 
 	sort.Strings(wantMiddle)
 	if strings.Join(middle, ",") != strings.Join(wantMiddle, ",") {
 		e.t.Fatalf("middle tasks = %v, want %v", middle, wantMiddle)
+	}
+	return taskRunByTaskID
+}
+
+func (e *workflowEndpointE2E) expectSingleDaytonaTaskDrained(dag workflowEndpointDAG, runID string) {
+	e.t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+
+	children, err := e.issueBackend.GetChildren(ctx, dag.epicID)
+	if err != nil {
+		e.t.Fatalf("list epic children: %v", err)
+	}
+	if len(children) != 1 || children[0].ID != dag.taskA || children[0].Status != "closed" {
+		e.t.Fatalf("children = %+v, want single closed Daytona smoke task %s", children, dag.taskA)
+	}
+
+	taskRuns, err := e.fleetClient.TaskRuns().List(ctx, e.workspace, store.TaskRunFilter{DriverRunID: runID})
+	if err != nil {
+		e.t.Fatalf("list child task runs: %v", err)
+	}
+	if len(taskRuns) != 1 {
+		e.t.Fatalf("task run count = %d, want 1; taskRuns=%+v", len(taskRuns), taskRuns)
+	}
+	taskRun := taskRuns[0]
+	if taskRun.TaskID != dag.taskA || taskRun.Status != domain.TaskRunCompleted || taskRun.Runner != "daytona-task-runner" {
+		e.t.Fatalf("task run = %+v, want completed Daytona runner for %s", taskRun, dag.taskA)
+	}
+	if taskRun.RuntimeMetadata["sandbox_provider"] != "daytona" {
+		e.t.Fatalf("task run metadata = %+v, want Daytona sandbox provider", taskRun.RuntimeMetadata)
+	}
+	if firstNonEmpty(taskRun.RuntimeMetadata["sandbox_id"], taskRun.RuntimeMetadata["daytona_sandbox_id"]) == "" {
+		e.t.Fatalf("task run metadata = %+v, want Daytona sandbox id", taskRun.RuntimeMetadata)
+	}
+	if taskRun.RuntimeMetadata["github_pr_url"] != "" {
+		e.t.Fatalf("task run metadata = %+v, smoke mode should not create a GitHub PR", taskRun.RuntimeMetadata)
+	}
+}
+
+func (e *workflowEndpointE2E) expectDaytonaPRChainDrained(dag workflowEndpointDAG, runID, repoURL string) {
+	e.t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+
+	children, err := e.issueBackend.GetChildren(ctx, dag.epicID)
+	if err != nil {
+		e.t.Fatalf("list epic children: %v", err)
+	}
+	if len(children) != 3 {
+		e.t.Fatalf("child task count = %d, want 3; children=%+v", len(children), children)
+	}
+	closedByID := make(map[string]bool, len(children))
+	for _, child := range children {
+		if child.Status == "closed" {
+			closedByID[child.ID] = true
+		}
+	}
+	for _, taskID := range []string{dag.taskA, dag.taskB, dag.taskC} {
+		if !closedByID[taskID] {
+			e.t.Fatalf("task %s was not closed; children=%+v", taskID, children)
+		}
+	}
+
+	taskRuns, err := e.fleetClient.TaskRuns().List(ctx, e.workspace, store.TaskRunFilter{DriverRunID: runID})
+	if err != nil {
+		e.t.Fatalf("list child task runs: %v", err)
+	}
+	if len(taskRuns) != 3 {
+		e.t.Fatalf("task run count = %d, want 3; taskRuns=%+v", len(taskRuns), taskRuns)
+	}
+	taskRunByTaskID := make(map[string]*domain.TaskRun, len(taskRuns))
+	prURLs := make(map[string]bool, len(taskRuns))
+	for _, taskRun := range taskRuns {
+		if taskRun.Status != domain.TaskRunCompleted || taskRun.Runner != "daytona-task-runner" {
+			e.t.Fatalf("task run = %+v, want completed Daytona runner", taskRun)
+		}
+		metadata := taskRun.RuntimeMetadata
+		if metadata["sandbox_provider"] != "daytona" {
+			e.t.Fatalf("task run metadata = %+v, want Daytona sandbox provider", metadata)
+		}
+		if firstNonEmpty(metadata["sandbox_id"], metadata["daytona_sandbox_id"]) == "" {
+			e.t.Fatalf("task run metadata = %+v, want Daytona sandbox id", metadata)
+		}
+		prURL := strings.TrimSpace(metadata["github_pr_url"])
+		if prURL == "" {
+			e.t.Fatalf("task run metadata = %+v, want GitHub PR URL", metadata)
+		}
+		if !strings.Contains(prURL, strings.TrimPrefix(workflowEndpointRepoSlug(repoURL), "github.com/")) {
+			e.t.Fatalf("github_pr_url = %q, want repo %s", prURL, repoURL)
+		}
+		if strings.TrimSpace(metadata["github_pr_number"]) == "" {
+			e.t.Fatalf("task run metadata = %+v, want GitHub PR number", metadata)
+		}
+		if strings.TrimSpace(metadata["github_pr_artifact_id"]) == "" {
+			e.t.Fatalf("task run metadata = %+v, want GitHub PR artifact", metadata)
+		}
+		taskRunByTaskID[taskRun.TaskID] = taskRun
+		prURLs[prURL] = true
+	}
+	for _, taskID := range []string{dag.taskA, dag.taskB, dag.taskC} {
+		if taskRunByTaskID[taskID] == nil {
+			e.t.Fatalf("missing task run for %s; taskRuns=%+v", taskID, taskRuns)
+		}
+	}
+	if len(prURLs) != 3 {
+		e.t.Fatalf("distinct PR URL count = %d, want 3; urls=%v", len(prURLs), sortedKeys(prURLs))
 	}
 }
 
@@ -593,19 +1114,29 @@ func (e *workflowEndpointE2E) getFleetJSON(path string, wantStatus int, out any)
 
 func (e *workflowEndpointE2E) postFleetJSON(path string, body any, wantStatus int, out any) {
 	e.t.Helper()
+	e.doFleetJSON(http.MethodPost, path, body, wantStatus, out)
+}
+
+func (e *workflowEndpointE2E) patchFleetJSON(path string, body any, wantStatus int, out any) {
+	e.t.Helper()
+	e.doFleetJSON(http.MethodPatch, path, body, wantStatus, out)
+}
+
+func (e *workflowEndpointE2E) doFleetJSON(method, path string, body any, wantStatus int, out any) {
+	e.t.Helper()
 	data, err := json.Marshal(body)
 	if err != nil {
-		e.t.Fatalf("encode fleet POST %s: %v", path, err)
+		e.t.Fatalf("encode fleet %s %s: %v", method, path, err)
 	}
-	req, err := http.NewRequest(http.MethodPost, e.fleetURL+path, bytes.NewReader(data))
+	req, err := http.NewRequest(method, e.fleetURL+path, bytes.NewReader(data))
 	if err != nil {
-		e.t.Fatalf("create fleet POST %s: %v", path, err)
+		e.t.Fatalf("create fleet %s %s: %v", method, path, err)
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-Actor", e.actor)
 	resp, err := e.httpClient.Do(req)
 	if err != nil {
-		e.t.Fatalf("fleet POST %s: %v", path, err)
+		e.t.Fatalf("fleet %s %s: %v", method, path, err)
 	}
 	defer resp.Body.Close()
 	workflowEndpointDecodeResponse(e.t, resp, wantStatus, out)
@@ -669,8 +1200,8 @@ if (process.env.LOOM_TASK_RUN_LEASE_TOKEN !== request.lease_token) {
   console.error('task-run lease token did not reach task runner');
   process.exit(3);
 }
-if (request.provider_profile !== 'flue-local') {
-  console.error('unexpected provider profile ' + request.provider_profile);
+if (request.runner !== 'local-task-runner') {
+  console.error('unexpected runner ' + request.runner);
   process.exit(4);
 }
 
@@ -681,6 +1212,7 @@ console.log(JSON.stringify({
   logsRef: 'logs://' + request.task_run_id,
   runtimeMetadata: {
     task_runner: 'workflow-endpoint-e2e',
+    runner: request.runner || '',
     sandbox_provider: request.sandbox_placement?.provider || '',
   },
 }));
@@ -838,6 +1370,15 @@ func workflowEndpointEnv(overrides map[string]string) []string {
 		out = append(out, name+"="+value)
 	}
 	return out
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return strings.TrimSpace(value)
+		}
+	}
+	return ""
 }
 
 func workflowEndpointReadLines(t *testing.T, path string) []string {

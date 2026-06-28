@@ -120,7 +120,7 @@ ENVIRONMENT VARIABLES
   LOOM_AUTH_AUDIENCE    Expected JWT audience (defaults to "loom")
   LOOM_DRIVER_EXECUTOR  DriverRun executor toggle (default: on; set 0/false/off/no to disable)
   LOOM_DRIVER_TASK_WORKER_CONCURRENCY  Local TaskRun worker loops (default: 2)
-  LOOM_DRIVER_TASK_RUN_MAX_ATTEMPTS     TaskRun attempts before parking failed (default: 2)
+  LOOM_DRIVER_TASK_RUN_MAX_ATTEMPTS     TaskRun attempts before blocking failed (default: 2)
   LOOM_TRIGGER_CRON_INTERVAL            Cron trigger sweep interval in seconds (default: 30)
   LOOM_ISSUE_BRIDGE_INTERVAL            Issue-journal bridge poll interval in seconds (default: 2)
   LOOM_ISSUE_BRIDGE_DISABLED            Disable the issue-journal bridge loop (set 1/true)
@@ -312,13 +312,14 @@ func startDriverExecutorIfEnabled(ctx context.Context, st store.Store) {
 	taskWorkerConcurrency := driverTaskWorkerConcurrency()
 	taskRunMaxAttempts := driverTaskRunMaxAttempts()
 	taskWorker := &driverexecutor.TaskWorker{
-		Store:        st,
-		WorkspaceKey: executor.WorkspaceKey,
-		WorkDir:      workDir,
-		NodeID:       executor.NodeID,
-		RunnerID:     os.Getenv("LOOM_DRIVER_TASK_WORKER_RUNNER_ID"),
-		MaxAttempts:  taskRunMaxAttempts,
-		APIBaseURL:   driverAPIBaseURL(),
+		Store:            st,
+		WorkspaceKey:     executor.WorkspaceKey,
+		WorkDir:          workDir,
+		NodeID:           executor.NodeID,
+		RunnerID:         os.Getenv("LOOM_DRIVER_TASK_WORKER_RUNNER_ID"),
+		MaxAttempts:      taskRunMaxAttempts,
+		APIBaseURL:       driverAPIBaseURL(),
+		LocalSettingsDir: bootstrap.LoomDir(),
 	}
 	go func() {
 		ticker := time.NewTicker(2 * time.Second)

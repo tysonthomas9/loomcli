@@ -13,6 +13,7 @@ import {
 } from "./flue-event-transcript.mjs";
 
 const [, , worktreeArg, codexHomeArg, serverURLArg] = process.argv;
+let activeRequest = null;
 
 function fatal(code, message) {
   console.error(message);
@@ -37,8 +38,9 @@ function validateRequest(request) {
       fatal(3, `task runner request is missing ${field}`);
     }
   }
-  if (!String(request.provider_profile || "").startsWith("flue")) {
-    fatal(4, `unexpected provider profile ${request.provider_profile}`);
+  const runnerKind = String(request.runner_kind || process.env.LOOM_TASK_RUNNER_KIND || "");
+  if (runnerKind && runnerKind !== "flue-workflow") {
+    fatal(4, `unexpected runner kind ${runnerKind}`);
   }
   if (process.env.LOOM_TASK_RUN_LEASE_TOKEN !== request.lease_token) {
     fatal(5, "task-run lease token did not reach the task runner");
@@ -254,6 +256,10 @@ function resultPayload(request, status, exitCode, fields = {}) {
     exit_code: exitCode,
     runtime_metadata: stringMetadata({
       task_runner: "flue-task-agent-runner",
+      runner: request.runner || process.env.LOOM_TASK_RUNNER || "",
+      runner_ref: request.runner_ref || process.env.LOOM_TASK_RUNNER_REF || "",
+      runner_kind: request.runner_kind || process.env.LOOM_TASK_RUNNER_KIND || "",
+      runner_entrypoint: request.runner_entrypoint || process.env.LOOM_TASK_RUNNER_ENTRYPOINT || "",
       provider_profile: request.provider_profile,
       workspace_key: request.workspace_key,
       driver_run_id: request.driver_run_id,
@@ -268,6 +274,7 @@ function resultPayload(request, status, exitCode, fields = {}) {
 
 async function main() {
   const request = parseRequest();
+  activeRequest = request;
   validateRequest(request);
 
   const worktreePath = path.resolve(worktreeArg || process.env.LOOM_WORKTREE_PATH || process.cwd());
@@ -372,7 +379,7 @@ async function main() {
     return;
   }
 
-  const usage = flueUsageToTaskUsage(response && response.usage);
+  const usage = flueUsageToTaskUsage(response && response.usage, { costUnit: "usd" });
   console.log(JSON.stringify(resultPayload(request, "completed", 0, {
     ...usage,
     logs: runnerLogs(flueEvents),
@@ -412,6 +419,7 @@ function runnerLogs(events, error) {
 }
 
 main().catch((error) => {
+  const request = activeRequest || {};
   console.log(JSON.stringify({
     status: "failed",
     exit_code: 1,
@@ -419,6 +427,10 @@ main().catch((error) => {
     error_message: textTail(error && error.message ? error.message : String(error)),
     runtime_metadata: {
       task_runner: "flue-task-agent-runner",
+      runner: request.runner || process.env.LOOM_TASK_RUNNER || "",
+      runner_ref: request.runner_ref || process.env.LOOM_TASK_RUNNER_REF || "",
+      runner_kind: request.runner_kind || process.env.LOOM_TASK_RUNNER_KIND || "",
+      runner_entrypoint: request.runner_entrypoint || process.env.LOOM_TASK_RUNNER_ENTRYPOINT || "",
       runtime: "flue",
       backend: "flue",
     },

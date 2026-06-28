@@ -252,7 +252,7 @@ func TestAwaitChildWorkflowAlreadyTerminalChild(t *testing.T) {
 }
 
 // TestAwaitChildWorkflowSuspendResumeReplay drives the full composition
-// cycle: parent parks on the child, the child's terminal transition resumes
+// cycle: parent suspends on the child, the child's terminal transition resumes
 // it with the lifecycle payload, and re-entry replays the satisfied await
 // without re-starting the child.
 func TestAwaitChildWorkflowSuspendResumeReplay(t *testing.T) {
@@ -272,7 +272,7 @@ func TestAwaitChildWorkflowSuspendResumeReplay(t *testing.T) {
 		t.Fatalf("parent = %+v, %v; want suspended_awaiting_event", suspended, err)
 	}
 
-	// Child finishes while the parent is parked: the dispatch-time matcher
+	// Child finishes while the parent is suspended: the dispatch-time matcher
 	// resolves the await and re-queues the parent.
 	finishRunAs(t, st, child.RunID, domain.DriverRunFailed)
 	eventID := RunFinishedEventID(child.RunID, domain.DriverRunFailed)
@@ -377,7 +377,7 @@ func assertRunState(t *testing.T, st *memstore.Store, runID string, status domai
 	}
 }
 
-// blockingRunner parks until its context is cancelled — the cooperative
+// blockingRunner suspends until its context is cancelled — the cooperative
 // cancel-request observation target.
 type blockingRunner struct {
 	started chan struct{}

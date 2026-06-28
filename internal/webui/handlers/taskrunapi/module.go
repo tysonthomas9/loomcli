@@ -77,36 +77,42 @@ type Config struct {
 	// FleetBaseURL is the fleet-db HTTP base URL used to build issue
 	// backends for the read-only task-get op.
 	FleetBaseURL string
+	// LocalSettingsDir is the app-local data directory containing sealed
+	// runtime credentials configured from Settings.
+	LocalSettingsDir string
 	// IssueBackends overrides the default fleet-db issue backend factory.
 	IssueBackends IssueBackendFactory
 }
 
 // Module serves the workspace-scoped task-run routes.
 type Module struct {
-	store         store.Store
-	issueBackends IssueBackendFactory
-	ops           map[string]opHandler
-	now           func() time.Time
+	store            store.Store
+	issueBackends    IssueBackendFactory
+	localSettingsDir string
+	ops              map[string]opHandler
+	now              func() time.Time
 }
 
 // NewModule constructs the task-run API module. Nil-safe: with a nil store,
 // Register registers nothing.
 func NewModule(cfg Config) *Module {
 	m := &Module{
-		store:         cfg.Store,
-		issueBackends: cfg.IssueBackends,
-		now:           func() time.Time { return time.Now().UTC() },
+		store:            cfg.Store,
+		issueBackends:    cfg.IssueBackends,
+		localSettingsDir: strings.TrimSpace(cfg.LocalSettingsDir),
+		now:              func() time.Time { return time.Now().UTC() },
 	}
 	m.ops = map[string]opHandler{
-		"get":               m.get,
-		"task-get":          m.taskGet,
-		"heartbeat":         m.heartbeat,
-		"log-append":        m.logAppend,
-		"complete":          m.complete,
-		"artifact-declare":  m.artifactDeclare,
-		"artifact-get":      m.artifactGet,
-		"artifact-list":     m.artifactList,
-		"artifact-finalize": m.artifactFinalize,
+		"get":                m.get,
+		"task-get":           m.taskGet,
+		"heartbeat":          m.heartbeat,
+		"log-append":         m.logAppend,
+		"complete":           m.complete,
+		"runtime-credential": m.runtimeCredential,
+		"artifact-declare":   m.artifactDeclare,
+		"artifact-get":       m.artifactGet,
+		"artifact-list":      m.artifactList,
+		"artifact-finalize":  m.artifactFinalize,
 	}
 	if m.issueBackends == nil {
 		m.issueBackends = defaultIssueBackends(cfg.FleetBaseURL)

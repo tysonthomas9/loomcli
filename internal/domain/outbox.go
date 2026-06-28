@@ -15,7 +15,6 @@ import (
 //	taskRunClaimed   — a worker claimed the queued run and started executing
 //	taskRunRequeued  — run released back to the queue (lease lost, retryable error)
 //	taskRunCompleted — run finished successfully
-//	taskRunParked    — run exhausted retries / needs operator review; epic continues
 //	taskRunFailed    — run finished with a terminal failure
 //	taskRunCancelled — run was cancelled before reaching a terminal status
 type TaskRunEventType string
@@ -25,7 +24,6 @@ const (
 	TaskRunEventClaimed   TaskRunEventType = "taskRunClaimed"
 	TaskRunEventRequeued  TaskRunEventType = "taskRunRequeued"
 	TaskRunEventCompleted TaskRunEventType = "taskRunCompleted"
-	TaskRunEventParked    TaskRunEventType = "taskRunParked"
 	TaskRunEventFailed    TaskRunEventType = "taskRunFailed"
 	TaskRunEventCancelled TaskRunEventType = "taskRunCancelled"
 )

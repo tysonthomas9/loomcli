@@ -1,6 +1,6 @@
 // SDK v1 typecheck gate (SP1 contract freeze): compiled by `tsc -p
 // tsconfig.typecheck.json` (npm run typecheck, part of npm test) and NEVER
-// executed. It exercises every exported op signature so flue.d.ts /
+// executed. It exercises every exported op signature so driver.d.ts /
 // runner.d.ts / index.d.ts drift fails CI, and uses @ts-expect-error to
 // prove the frozen enums (result statuses, watch event types, error codes)
 // actually reject out-of-contract values.
@@ -10,39 +10,48 @@ import {
   CompleteRunResponse,
   DriverApiError,
   DriverApiErrorCode,
-  FlueAwaitEventResult,
-  FlueAwaitListResult,
-  FlueAwaitStatus,
-  FlueConnectorCallResult,
-  FlueDriverClient,
-  FlueDriverResult,
-  FlueDriverResultStatus,
-  FlueEpicWatchEventType,
-  FlueWorkflowAwaitResult,
-  FlueWorkflowStartResult,
+  LoomAwaitEventResult,
+  LoomAwaitListResult,
+  LoomAwaitStatus,
+  LoomConnectorCallResult,
+  LoomDriverClient,
+  LoomDriverResult,
+  LoomDriverResultStatus,
+  LoomEpicWatchEventType,
+  LoomWorkflowAwaitResult,
+  LoomWorkflowStartResult,
   RunnerEnv,
   TaskRun,
   TaskRunClient,
   WorkflowSuspended,
   createLoomClient,
+  createFlueTranscriptCollector,
   createLoomDriverClient,
+  flueEventsToTaskUsage,
+  flueUsageToTaskUsage,
   isWorkflowSuspended,
+  serializeTranscriptJSONL,
+} from "./index.js";
+import type {
+  FlueTranscriptCollector,
+  LoomTaskUsage,
+  LoomTranscriptEntry,
 } from "./index.js";
 
 export function expectType<T>(_value: T): void {
   void _value;
 }
 
-export async function exerciseFlueClientSurface(): Promise<void> {
-  const client: FlueDriverClient = createLoomDriverClient({
+export async function exerciseLoomDriverClientSurface(): Promise<void> {
+  const client: LoomDriverClient = createLoomDriverClient({
     apiUrl: "http://localhost:8080",
     apiToken: "static-token",
     runToken: "run-token",
     env: { LOOM_DRIVER_WORKSPACE: "WS" },
     input: { epicId: "EPIC-1" },
   });
-  expectType<FlueDriverClient>(FlueDriverClient.fromEnv({ runToken: "tok" }));
-  expectType<FlueDriverClient>(createLoomClient({ epicId: "EPIC-1" }));
+  expectType<LoomDriverClient>(LoomDriverClient.fromEnv({ runToken: "tok" }));
+  expectType<LoomDriverClient>(createLoomClient({ epicId: "EPIC-1" }));
   expectType<string>(client.runToken);
   expectType<string>(client.workspace);
   expectType<string>(client.driverRunId);
@@ -51,7 +60,7 @@ export async function exerciseFlueClientSurface(): Promise<void> {
   expectType<Record<string, unknown> | null>(await client.epics.get({ epicId: "EPIC-1" }));
   expectType<Record<string, unknown> | null>(await client.epics.snapshot({}));
   for await (const event of client.epics.watch({ epicId: "EPIC-1", afterSeq: 7, reconnectMs: 250 })) {
-    expectType<FlueEpicWatchEventType>(event.type);
+    expectType<LoomEpicWatchEventType>(event.type);
     expectType<string>(event.id);
     expectType<unknown>(event.data);
   }
@@ -69,10 +78,8 @@ export async function exerciseFlueClientSurface(): Promise<void> {
   await client.tasks.release({ taskId: "TASK-1" });
   expectType<Record<string, unknown>>(await client.taskRuns.request({
     taskId: "TASK-1",
-    providerProfile: "local",
-    supportedProviders: ["local"],
+    runner: "local-task-runner",
     capabilities: ["git"],
-    sandboxPlacement: { provider: "local", sandboxId: "sb", cwd: "/w", repoRef: "main" },
     // Optional task-run payload (diff+rubric) delivered verbatim to the runner.
     input: { kind: "github-review", diff: "patch", rubric: { mustPass: ["builds"] } },
   }));
@@ -82,7 +89,7 @@ export async function exerciseFlueClientSurface(): Promise<void> {
   await client.taskRuns.recoverStale({ maxAgeSeconds: 300, errorClass: "stale" });
 
   // connectors
-  const granted: FlueConnectorCallResult = await client.connectors.github.merge({ expectedHeadSha: "sha-1" });
+  const granted: LoomConnectorCallResult = await client.connectors.github.merge({ expectedHeadSha: "sha-1" });
   expectType<"granted">(granted.decision);
   expectType<string>(granted.callId);
   await client.connectors.github.postReview({ expectedHeadSha: "sha-1" });
@@ -98,40 +105,40 @@ export async function exerciseFlueClientSurface(): Promise<void> {
   await client.connectors.dispatch({ action: "github.pull_request.read", callSeq: 3, args: { owner: "octo" } });
 
   // events + workflows
-  const resolved: FlueAwaitEventResult = await client.events.await({
+  const resolved: LoomAwaitEventResult = await client.events.await({
     pattern: "approval:octo/hello#1@sha",
     actor: ["reviewer"],
     timeoutMs: 60_000,
   });
-  expectType<FlueAwaitStatus>(resolved.status);
+  expectType<LoomAwaitStatus>(resolved.status);
   expectType<string>(resolved.event.id);
-  const listed: FlueAwaitListResult = await client.events.list();
+  const listed: LoomAwaitListResult = await client.events.list();
   expectType<string>(listed.runId);
-  const started: FlueWorkflowStartResult = await client.workflows.start({
+  const started: LoomWorkflowStartResult = await client.workflows.start({
     workflow: "child-flow",
     input: { anything: true },
     idempotencyKey: "key-1",
   });
   expectType<string>(started.childRunId);
-  const childResult: FlueWorkflowAwaitResult = await client.workflows.await({
+  const childResult: LoomWorkflowAwaitResult = await client.workflows.await({
     childRunId: started.childRunId,
     timeoutMs: 60_000,
   });
   expectType<string | undefined>(childResult.child?.status);
 
   // result helpers
-  const completed: FlueDriverResult = client.completed({ summary: "ok" });
-  expectType<FlueDriverResultStatus>(completed.status);
+  const completed: LoomDriverResult = client.completed({ summary: "ok" });
+  expectType<LoomDriverResultStatus>(completed.status);
   client.failed({ summary: "boom", errorClass: "driver_failed" });
   client.needsReview({ summary: "look", taskRunId: "task-run-1" });
 }
 
-export function exerciseFrozenEnums(client: FlueDriverClient): void {
+export function exerciseFrozenEnums(client: LoomDriverClient): void {
   // @ts-expect-error "running" is not a frozen terminal result status
-  const badStatus: FlueDriverResultStatus = "running";
+  const badStatus: LoomDriverResultStatus = "running";
   void badStatus;
   // @ts-expect-error watch event types are frozen to snapshot|taskRun|closed
-  const badWatchType: FlueEpicWatchEventType = "message";
+  const badWatchType: LoomEpicWatchEventType = "message";
   void badWatchType;
   // @ts-expect-error error codes are frozen; unknown codes need a contract bump
   const badCode: DriverApiErrorCode = "not_a_code";
@@ -166,9 +173,12 @@ export function exerciseErrorAndSuspendTypes(): void {
 export async function exerciseRunnerSurface(): Promise<void> {
   const runner: TaskRunClient = TaskRunClient.fromEnv({ LOOM_FLEET_DB_URL: "http://localhost:8080" });
   expectType<string>(runner.taskRunId);
-  expectType<number>(runner.fencingToken);
+  expectType<number | string>(runner.fencingToken);
+  expectType<Record<string, unknown>>(runner.request());
+  expectType<unknown>(runner.input());
   const run: TaskRun = await runner.getTaskRun();
   expectType<string>(run.task_run_id);
+  expectType<string | undefined>(run.runner);
   await runner.heartbeat({ runtimeMetadata: { step: "build" } });
   await runner.appendLog({ text: "line", stream: "stdout" });
   await runner.logs.append({ text: "line" });
@@ -180,9 +190,29 @@ export async function exerciseRunnerSurface(): Promise<void> {
   expectType<TaskRun | undefined>(completion.task_run);
   expectType<"LOOM_FLEET_DB_URL">(RunnerEnv.baseUrl);
   expectType<"LOOM_TASK_RUN_API_URL">(RunnerEnv.apiUrl);
+  expectType<"LOOM_TASK_RUN_REQUEST_JSON">(RunnerEnv.requestJson);
 
   // Serve transport: apiUrl alone is a sufficient endpoint config.
   const serveRunner: TaskRunClient = TaskRunClient.fromEnv({}, { apiUrl: "http://127.0.0.1:8080" });
   expectType<boolean>(serveRunner.serveMode);
   expectType<string>(serveRunner.apiUrl);
+}
+
+export function exerciseRuntimeAdapterSurface(): void {
+  const collector: FlueTranscriptCollector = createFlueTranscriptCollector();
+  const pushed: LoomTranscriptEntry[] = collector.push({
+    type: "turn_request",
+    purpose: "agent",
+    input: { messages: [{ role: "user", content: "hello" }] },
+  });
+  expectType<LoomTranscriptEntry[]>(pushed);
+  expectType<LoomTranscriptEntry[]>(collector.entries);
+  expectType<string>(serializeTranscriptJSONL(collector.entries));
+  const directUsage: LoomTaskUsage = flueUsageToTaskUsage({
+    input: 1,
+    output: 2,
+    cost: { total: 0.01 },
+  }, { costUnit: "usd" });
+  expectType<number | undefined>(directUsage.estimated_cost_usd);
+  expectType<LoomTaskUsage>(flueEventsToTaskUsage([{ type: "turn", turnId: "t1", usage: { input: 1, output: 2 } }]));
 }

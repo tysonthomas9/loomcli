@@ -306,12 +306,12 @@ func nextQueuedRunInWorkspace(ctx context.Context, s store.Store, ws string) (*d
 }
 
 // settleClaimed finishes a terminal runner result, or acknowledges a
-// suspended one (AW11): an await op already parked the run server-side and
+// suspended one (AW11): an await op already suspended the run server-side and
 // released the slot, so the executor must NOT Finish — it re-reads the run,
-// which may legitimately already be queued or running again (park->suspend
+// which may legitimately already be queued or running again (pending->suspend
 // window tolerance: the resolver can resume before the runner exits). A
 // runner that reports suspended while the run is still running under OUR
-// lease lied (no await actually parked it); it is finished failed so the
+// lease lied (no await actually suspended it); it is finished failed so the
 // slot does not leak to the stale sweeper.
 func (e *Executor) settleClaimed(ctx context.Context, claimed *domain.DriverRun, result RunResult) (*domain.DriverRun, error) {
 	if result.Status != domain.DriverRunSuspendedAwaitingEvent {
@@ -324,7 +324,7 @@ func (e *Executor) settleClaimed(ctx context.Context, claimed *domain.DriverRun,
 	if run.Status == domain.DriverRunRunning && run.NodeID == claimed.NodeID && run.LeaseID == claimed.LeaseID {
 		return e.finish(ctx, claimed, RunResult{
 			Status:     domain.DriverRunFailed,
-			Summary:    "driver reported suspended but no await parked the run",
+			Summary:    "driver reported suspended but no await suspended the run",
 			ErrorClass: "invalid_driver_result",
 			Output:     result.Output,
 		})
@@ -362,7 +362,7 @@ func (e *Executor) finish(ctx context.Context, claimed *domain.DriverRun, result
 }
 
 // settleDisownedFinish tolerates the one legitimate way a finish can lose
-// ownership mid-run: an events/await op parked the run server-side
+// ownership mid-run: an events/await op suspended the run server-side
 // (releasing the slot and clearing the owner triple) but the workflow
 // runtime distorted the suspension signal into a terminal-looking result —
 // e.g. a framework that serializes the SDK's WorkflowSuspended sentinel into
@@ -370,7 +370,7 @@ func (e *Executor) finish(ctx context.Context, claimed *domain.DriverRun, result
 // suspended (observed with the real Flue runtime, AW12). The server-side
 // suspension is authoritative: acknowledge it like settleClaimed does for a
 // clean suspended report. A run already resolved and re-queued is the same
-// accepted park->suspend window. Anything else (zombie lease, stale
+// accepted register->suspend window. Anything else (zombie lease, stale
 // recovery) stays an error.
 func (e *Executor) settleDisownedFinish(ctx context.Context, claimed *domain.DriverRun, finishErr error) (*domain.DriverRun, bool) {
 	if !errors.Is(finishErr, domain.ErrNotOwner) {
@@ -385,7 +385,7 @@ func (e *Executor) settleDisownedFinish(ctx context.Context, claimed *domain.Dri
 	if !suspended && !requeued {
 		return nil, false
 	}
-	slog.WarnContext(ctx, "driver run finish superseded by server-side await suspension; acknowledging parked run",
+	slog.WarnContext(ctx, "driver run finish superseded by server-side await suspension; acknowledging suspended run",
 		"runID", claimed.RunID, "status", string(run.Status))
 	return run, true
 }
@@ -570,7 +570,7 @@ func loadRunRequest(ctx context.Context, workDir string, run *domain.DriverRun, 
 	if err != nil {
 		return RunRequest{}, err
 	}
-	trust, err := driverTrustLevel(ctx, s, run)
+	trust, err := driverTrustLevel(ctx, s, run, version)
 	if err != nil {
 		return RunRequest{}, err
 	}
@@ -880,7 +880,7 @@ func requireExplicitTerminalRunResult(result RunResult) RunResult {
 	}
 	if result.Status == domain.DriverRunSuspendedAwaitingEvent {
 		// A suspended report is the runner's clean exit after an await op
-		// parked the run server-side (AW9/AW11): not a terminal result and
+		// suspended the run server-side (AW9/AW11): not a terminal result and
 		// not an error — settleClaimed acknowledges it without a Finish.
 		return result
 	}

@@ -41,8 +41,6 @@ func taskRunEventTypeToWire(t domain.TaskRunEventType) string {
 		return "task_run_requeued"
 	case domain.TaskRunEventCompleted:
 		return "task_run_completed"
-	case domain.TaskRunEventParked:
-		return "task_run_parked"
 	case domain.TaskRunEventFailed:
 		return "task_run_failed"
 	case domain.TaskRunEventCancelled:
@@ -63,8 +61,6 @@ func taskRunEventTypeFromWire(s string) domain.TaskRunEventType {
 		return domain.TaskRunEventRequeued
 	case "task_run_completed":
 		return domain.TaskRunEventCompleted
-	case "task_run_parked":
-		return domain.TaskRunEventParked
 	case "task_run_failed":
 		return domain.TaskRunEventFailed
 	case "task_run_cancelled":

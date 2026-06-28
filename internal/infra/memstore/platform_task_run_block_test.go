@@ -9,7 +9,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
-func setupParkTestStore(t *testing.T) (context.Context, *Store) {
+func setupBlockTestStore(t *testing.T) (context.Context, *Store) {
 	t.Helper()
 	ctx := t.Context()
 	s := New()
@@ -45,7 +45,7 @@ func setupParkTestStore(t *testing.T) (context.Context, *Store) {
 	return ctx, s
 }
 
-func createParkTestTaskRun(t *testing.T, ctx context.Context, s *Store, taskRunID string) *domain.TaskRun {
+func createBlockTestTaskRun(t *testing.T, ctx context.Context, s *Store, taskRunID string) *domain.TaskRun {
 	t.Helper()
 	run, err := s.TaskRuns().Create(ctx, store.TaskRunCreate{
 		WorkspaceKey:    "WS",
@@ -63,27 +63,27 @@ func createParkTestTaskRun(t *testing.T, ctx context.Context, s *Store, taskRunI
 	return run
 }
 
-func TestTaskRunFinishParkTaskMarksTaskParked(t *testing.T) {
-	ctx, s := setupParkTestStore(t)
-	run := createParkTestTaskRun(t, ctx, s, "task-run-park-1")
+func TestTaskRunFinishBlockTaskMarksTaskBlocked(t *testing.T) {
+	ctx, s := setupBlockTestStore(t)
+	run := createBlockTestTaskRun(t, ctx, s, "task-run-block-1")
 
 	exitCode := 1
-	// ParkTask is only valid on failed finishes.
-	if _, err := s.TaskRuns().Finish(ctx, "WS", "task-run-park-1", store.TaskRunFinish{
+	// BlockTask is only valid on failed finishes.
+	if _, err := s.TaskRuns().Finish(ctx, "WS", "task-run-block-1", store.TaskRunFinish{
 		NodeID:       "node-1",
 		LeaseID:      "lease-1",
 		FencingToken: run.FencingToken,
 		Status:       domain.TaskRunCompleted,
 		ExitCode:     &exitCode,
-		ParkTask:     true,
+		BlockTask:    true,
 	}); !errors.Is(err, domain.ErrInvalidTransition) {
-		t.Fatalf("Finish park+completed err = %v, want ErrInvalidTransition", err)
+		t.Fatalf("Finish block+completed err = %v, want ErrInvalidTransition", err)
 	}
-	if s.TaskParked("WS", "WS-2") {
-		t.Fatalf("task parked after rejected finish, want not parked")
+	if s.TaskBlocked("WS", "WS-2") {
+		t.Fatalf("task blocked after rejected finish, want not blocked")
 	}
 
-	finished, err := s.TaskRuns().Finish(ctx, "WS", "task-run-park-1", store.TaskRunFinish{
+	finished, err := s.TaskRuns().Finish(ctx, "WS", "task-run-block-1", store.TaskRunFinish{
 		NodeID:       "node-1",
 		LeaseID:      "lease-1",
 		FencingToken: run.FencingToken,
@@ -91,53 +91,53 @@ func TestTaskRunFinishParkTaskMarksTaskParked(t *testing.T) {
 		ExitCode:     &exitCode,
 		ErrorClass:   "task_failed",
 		ErrorMessage: "attempts exhausted",
-		ParkTask:     true,
+		BlockTask:    true,
 	})
 	if err != nil {
-		t.Fatalf("Finish park: %v", err)
+		t.Fatalf("Finish block: %v", err)
 	}
 	if finished.Status != domain.TaskRunFailed || finished.FinishedAt == nil {
 		t.Fatalf("finished = %+v, want failed with finished_at", finished)
 	}
-	if !s.TaskParked("WS", "WS-2") {
-		t.Fatalf("task not marked parked after ParkTask finish")
+	if !s.TaskBlocked("WS", "WS-2") {
+		t.Fatalf("task not marked blocked after BlockTask finish")
 	}
-	if s.TaskParked("WS", "WS-OTHER") || s.TaskParked("OTHER", "WS-2") {
-		t.Fatalf("unrelated task/workspace marked parked")
+	if s.TaskBlocked("WS", "WS-OTHER") || s.TaskBlocked("OTHER", "WS-2") {
+		t.Fatalf("unrelated task/workspace marked blocked")
 	}
 
-	// Parking again via another run on the same task is an idempotent no-op.
-	second := createParkTestTaskRun(t, ctx, s, "task-run-park-2")
-	if _, err := s.TaskRuns().Finish(ctx, "WS", "task-run-park-2", store.TaskRunFinish{
+	// Blocking again via another run on the same task is an idempotent no-op.
+	second := createBlockTestTaskRun(t, ctx, s, "task-run-block-2")
+	if _, err := s.TaskRuns().Finish(ctx, "WS", "task-run-block-2", store.TaskRunFinish{
 		NodeID:       "node-1",
 		LeaseID:      "lease-1",
 		FencingToken: second.FencingToken,
 		Status:       domain.TaskRunFailed,
 		ExitCode:     &exitCode,
-		ParkTask:     true,
+		BlockTask:    true,
 	}); err != nil {
-		t.Fatalf("Finish park already-parked task: %v", err)
+		t.Fatalf("Finish block already-blocked task: %v", err)
 	}
-	if !s.TaskParked("WS", "WS-2") {
-		t.Fatalf("task no longer parked after second park")
+	if !s.TaskBlocked("WS", "WS-2") {
+		t.Fatalf("task no longer blocked after second block")
 	}
 }
 
-func TestTaskRunFinishWithoutParkTaskLeavesTaskUnparked(t *testing.T) {
-	ctx, s := setupParkTestStore(t)
-	run := createParkTestTaskRun(t, ctx, s, "task-run-no-park")
+func TestTaskRunFinishWithoutBlockTaskLeavesTaskUnblocked(t *testing.T) {
+	ctx, s := setupBlockTestStore(t)
+	run := createBlockTestTaskRun(t, ctx, s, "task-run-no-block")
 
 	exitCode := 1
-	if _, err := s.TaskRuns().Finish(ctx, "WS", "task-run-no-park", store.TaskRunFinish{
+	if _, err := s.TaskRuns().Finish(ctx, "WS", "task-run-no-block", store.TaskRunFinish{
 		NodeID:       "node-1",
 		LeaseID:      "lease-1",
 		FencingToken: run.FencingToken,
 		Status:       domain.TaskRunFailed,
 		ExitCode:     &exitCode,
 	}); err != nil {
-		t.Fatalf("Finish without park: %v", err)
+		t.Fatalf("Finish without block: %v", err)
 	}
-	if s.TaskParked("WS", "WS-2") {
-		t.Fatalf("task parked without ParkTask, want not parked")
+	if s.TaskBlocked("WS", "WS-2") {
+		t.Fatalf("task blocked without BlockTask, want not blocked")
 	}
 }

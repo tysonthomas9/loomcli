@@ -105,8 +105,8 @@ func createAwaitRunCatalog(t testing.TB, ctx context.Context, s *Store, ws strin
 // concurrent event append followed by the dispatch matcher's
 // list-and-resolve pass (what AW7 does after every journal append). The
 // lost-wakeup invariant: whatever the interleaving, the await ends satisfied
-// — either the registration scan saw the event (append before park) or the
-// matcher's list saw the parked instance (park before append). Run with
+// — either the registration scan saw the event (append before registration) or the
+// matcher's list saw the pending instance (registration before append). Run with
 // -race.
 func TestMemstoreAwaitRegisterAppendRace(t *testing.T) {
 	s := New()
@@ -151,10 +151,10 @@ func TestMemstoreAwaitRegisterAppendRace(t *testing.T) {
 			t.Fatalf("iteration %d: RegisterAwaitAndCheck: %v", i, registerErr)
 		}
 		if !result.Satisfied {
-			// Parked: the matcher pass MUST have resolved it — a still-pending
+			// Pending: the matcher pass MUST have resolved it — a still-pending
 			// await here is exactly the lost wakeup the shared lock forbids.
 			if _, err := s.Awaits().GetSatisfiedAwait(ctx, ws, instanceKey); err != nil {
-				t.Fatalf("iteration %d: lost wakeup — parked await never resolved: %v", i, err)
+				t.Fatalf("iteration %d: lost wakeup — pending await never resolved: %v", i, err)
 			}
 		}
 	}

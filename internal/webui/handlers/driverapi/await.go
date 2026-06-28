@@ -109,7 +109,7 @@ type awaitEventResponse struct {
 }
 
 // awaitEvent is the events/await handler: verify the parent run owns its
-// lease, then run the check-then-park op flow (internal/driver/await_op.go).
+// lease, then run the register-and-check op flow (internal/driver/await_op.go).
 func (m *Module) awaitEvent(ctx context.Context, ws string, id driverIdentity, body []byte) (any, error) {
 	params, err := decodeParams[awaitEventParams](body)
 	if err != nil {

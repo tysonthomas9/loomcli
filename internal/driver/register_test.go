@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
@@ -48,11 +49,16 @@ func TestRegisterFlueDriverStagesNativeArtifactAndActivates(t *testing.T) {
 		result.Version.Manifest["artifact_ref"] != "dist" ||
 		result.Version.Manifest["server_ref"] != "dist/server.mjs" ||
 		result.Version.Manifest["workflow_name"] != "epic-runner" ||
-		result.Version.Manifest["loom_sdk_package"] != LoomFlueSDKPackage {
+		result.Version.Manifest["loom_sdk_package"] != LoomDriverSDKPackage {
 		t.Fatalf("manifest = %+v, want native Flue manifest", result.Version.Manifest)
 	}
 	if result.Version.Manifest["workflow_ref"] != "" || result.Version.Manifest["source_bundle_ref"] != "" {
 		t.Fatalf("manifest = %+v, generated-project refs must not be present", result.Version.Manifest)
+	}
+	// No fabrication (§4.6): without explicit RunnerSpecs the manifest declares
+	// no runners — the prior local/daytona/openshell defaults are gone.
+	if strings.TrimSpace(result.Version.Manifest["runners"]) != "" {
+		t.Fatalf("runners manifest = %q, want empty (no fabricated runners)", result.Version.Manifest["runners"])
 	}
 	if result.Version.SourceDigest == "" || result.Version.SourceDigest != result.Version.Manifest["artifact_digest"] {
 		t.Fatalf("source/artifact digest = %q/%q, want default source digest to artifact digest", result.Version.SourceDigest, result.Version.Manifest["artifact_digest"])

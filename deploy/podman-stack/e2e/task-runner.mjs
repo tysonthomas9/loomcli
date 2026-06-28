@@ -9,7 +9,7 @@
 //   - appends the executed task_id to LOOM_E2E_TASK_LOG (on the loom-work
 //     volume) so the driver script can assert execution count + DAG order,
 //   - optionally fails one task on every attempt when its task_id is written
-//     to LOOM_E2E_FAIL_TASK_FILE (retry-then-park scenarios),
+//     to LOOM_E2E_FAIL_TASK_FILE (retry-then-block scenarios),
 //   - reports a terminal completed/failed result on stdout.
 //
 // No secrets are read or printed here.

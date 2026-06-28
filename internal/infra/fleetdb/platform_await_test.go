@@ -298,7 +298,7 @@ func TestAwaitErrorClassification(t *testing.T) {
 			wantErr: domain.ErrNotFound,
 		},
 		{
-			name: "suspend already resumed (park->suspend window)", status: http.StatusConflict, code: "driver_run_already_resumed",
+			name: "suspend already resumed (pending->suspend window)", status: http.StatusConflict, code: "driver_run_already_resumed",
 			call: func(c *Client, ctx context.Context) error {
 				_, err := c.DriverRuns().Suspend(ctx, "WS", "run-1", "node-1", "lease-1", 3, "run-1#await-1")
 				return err

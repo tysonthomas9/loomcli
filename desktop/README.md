@@ -31,6 +31,15 @@ Build the macOS app bundle with:
 npm run build
 ```
 
+After changing bundled Go sidecar code, rebuild and relaunch the packaged app
+with:
+
+```sh
+npm run refresh:app
+```
+
+For web UI-only changes, use the faster `npm run refresh:webui`.
+
 `npm run build:dmg` asks Tauri to create both the `.app` and `.dmg` bundles.
 The DMG path is intentionally separate until signing, notarization, and CI
 packaging behavior are finalized.

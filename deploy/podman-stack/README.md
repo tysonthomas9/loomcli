@@ -99,7 +99,7 @@ All secrets live in `.env` (gitignored, 0600), generated **per run** by
 | `FLEET_SEED_ACTOR` | `loom-serve@podman-stack.local` | actor bound to the seeded API key |
 | `FLEET_SEED_ROLE` | `admin` | global role for the actor (admin/maintainer needed by the await sweeper) |
 | `LOOM_DRIVER_TASK_WORKER_CONCURRENCY` | `2` | TaskRun worker loops embedded in serve |
-| `LOOM_DRIVER_TASK_RUN_MAX_ATTEMPTS` | `2` | attempts before a TaskRun parks failed |
+| `LOOM_DRIVER_TASK_RUN_MAX_ATTEMPTS` | `2` | attempts before a TaskRun is blocked after failure |
 | `LOOM_STACK_DRIVER_SANDBOX` | *(empty)* | `LOOM_DRIVER_SANDBOX` on serve; see sandbox posture |
 | `LOOM_STACK_WORKER_BACKEND` | *(empty)* | AI backend for `loom worker` replicas |
 | `LOOM_STACK_FRONTEND_URL` | `http://127.0.0.1:18282` | CORS origin(s), comma-separated |
