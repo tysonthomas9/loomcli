@@ -343,7 +343,7 @@ func mergeableToStatus(m string) string {
 
 // credHelper supplies the token to git over stdin-free env, never argv.
 //
-//nolint:gosec // G101: a git credential-helper script template that reads an env var, not a hardcoded credential
+//nolint:gosec // G101: a git credential-helper script template that reads an env var, not a hardcoded credential.
 const credHelper = `!f() { echo username=x-access-token; echo "password=$LOOM_PR_GIT_PASSWORD"; }; f`
 
 func (g *GitHubForge) PushBranches(ctx context.Context, repoPath string, pushes []BranchPush) error {

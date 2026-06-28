@@ -16,6 +16,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
+	"github.com/tysonthomas9/loomcli/internal/testutil"
 	"github.com/tysonthomas9/loomcli/internal/webui"
 	"github.com/tysonthomas9/loomcli/internal/webui/fleet"
 )
@@ -863,7 +864,22 @@ func TestResponseTypes(t *testing.T) {
 }
 
 func TestServeFlags_Defaults(t *testing.T) {
+	testutil.ClearLoomEnv(t)
+
 	f := serveCmd.Flags()
+	frontendDirFlag := f.Lookup("frontend-dir")
+	if frontendDirFlag == nil {
+		t.Fatal("frontend-dir flag not registered on serveCmd")
+	}
+	origFrontendDir := frontendDirFlag.Value.String()
+	t.Cleanup(func() {
+		if err := f.Set("frontend-dir", origFrontendDir); err != nil {
+			t.Fatalf("restore frontend-dir flag: %v", err)
+		}
+	})
+	if err := f.Set("frontend-dir", ""); err != nil {
+		t.Fatalf("reset frontend-dir flag: %v", err)
+	}
 
 	port, err := f.GetInt("port")
 	if err != nil {

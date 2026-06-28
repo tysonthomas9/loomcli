@@ -101,6 +101,7 @@ func runnerNeedsLocalPreflight(runner string) bool {
 	return r == "" || r == runtimepreflight.LocalTaskRunnerEntrypoint
 }
 
+//nolint:funlen // The command wires validation, queueing, optional projection, execution, and post-drain publish.
 func runEpicRun(cmd *cobra.Command, _ []string) error {
 	if err := validateEpicRunFlags(); err != nil {
 		return err

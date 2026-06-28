@@ -604,6 +604,7 @@ type PatchBackResult struct {
 	PreservedPatch []byte `json:"-"`
 }
 
+//nolint:funlen // Patch-back must keep validation, merge-base checks, apply, and preservation metadata in one transaction.
 func ApplyPatchBack(ctx context.Context, opts PatchBackOptions) (*PatchBackResult, error) {
 	opts.WorktreePath = strings.TrimSpace(opts.WorktreePath)
 	opts.BaseRef = strings.TrimSpace(opts.BaseRef)

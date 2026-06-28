@@ -46,6 +46,7 @@ func init() {
 	daemonCmd.AddCommand(daemonSeedTranscriptCmd)
 }
 
+//nolint:funlen // CLI command wires validation, transcript parsing, store lookup, and session update in one path.
 func runDaemonSeedTranscript(_ *cobra.Command, _ []string) error {
 	if seedTranscriptSession == "" || seedTranscriptTask == "" {
 		return fmt.Errorf("--session and --task are required")

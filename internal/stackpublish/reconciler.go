@@ -57,6 +57,8 @@ type action struct {
 // computePlan is the pure core: given the desired ordered lineage, the current
 // PRs (indexed by head branch), and the set of branches that add nothing over
 // their base, it produces the reconcile actions. No I/O — unit-tested directly.
+//
+//nolint:cyclop,funlen // The switch mirrors the reconcile state matrix and is covered by table tests.
 func computePlan(stack sl.Stack, ordered []sl.Node, prsByHead map[string]PR, empty map[string]bool) []action {
 	byTask := sl.ByTask(ordered)
 	desired := make(map[string]bool, len(ordered))
@@ -143,6 +145,8 @@ func queuedConflicts(targets []int, queued map[int]bool) []int {
 // Loom-owned local checkout where each unit's output branch already exists at its
 // desired commit; the reconciler pushes them in the safe order. Cursor-less and
 // idempotent: it re-derives everything from forge truth each run.
+//
+//nolint:cyclop,funlen,gocognit // Publish coordinates preflight, restack safety, forge mutation, and reporting in one transaction.
 func (r *Reconciler) Publish(ctx context.Context, ws string, id sl.StackID, repoPath string, opts Options) (*Report, error) {
 	stack, err := r.Store.GetStack(ctx, ws, id)
 	if err != nil {
@@ -302,17 +306,23 @@ func (r *Reconciler) Publish(ctx context.Context, ws string, id sl.StackID, repo
 			if cerr != nil {
 				return report, fmt.Errorf("phase4 create %s: %w", a.Branch, cerr)
 			}
-			r.markPublished(ctx, ws, id, a, repoPath, pr)
+			if err := r.markPublished(ctx, ws, id, a, repoPath, pr); err != nil {
+				return report, fmt.Errorf("phase4 mark published %s: %w", a.TaskID, err)
+			}
 			liveByTask[a.TaskID] = pr
 			report.Created = append(report.Created, a.TaskID)
 			report.PRURLs[a.TaskID] = pr.URL
 		case actReparent:
-			r.markPublished(ctx, ws, id, a, repoPath, *a.PR)
+			if err := r.markPublished(ctx, ws, id, a, repoPath, *a.PR); err != nil {
+				return report, fmt.Errorf("phase4 mark published %s: %w", a.TaskID, err)
+			}
 			liveByTask[a.TaskID] = *a.PR
 			report.Reparented = append(report.Reparented, a.TaskID)
 			report.PRURLs[a.TaskID] = a.PR.URL
 		case actSkip:
-			r.markPublished(ctx, ws, id, a, repoPath, *a.PR)
+			if err := r.markPublished(ctx, ws, id, a, repoPath, *a.PR); err != nil {
+				return report, fmt.Errorf("phase4 mark published %s: %w", a.TaskID, err)
+			}
 			liveByTask[a.TaskID] = *a.PR
 			report.Skipped = append(report.Skipped, a.TaskID)
 			if a.PR != nil {
@@ -363,10 +373,10 @@ func (r *Reconciler) Publish(ctx context.Context, ws string, id sl.StackID, repo
 	return report, nil
 }
 
-func (r *Reconciler) markPublished(ctx context.Context, ws string, id sl.StackID, a action, repoPath string, pr PR) {
+func (r *Reconciler) markPublished(ctx context.Context, ws string, id sl.StackID, a action, repoPath string, pr PR) error {
 	sha, _ := headSHA(ctx, repoPath, a.Branch)
 	now := time.Now().UTC()
-	_ = r.Store.UpdateNode(ctx, ws, id, a.TaskID, func(n *sl.Node) error {
+	return r.Store.UpdateNode(ctx, ws, id, a.TaskID, func(n *sl.Node) error {
 		n.State = sl.NodeStatePublished
 		n.PRNumber = pr.Number
 		n.PRURL = pr.URL

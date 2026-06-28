@@ -94,6 +94,7 @@ func TestFleetIssueWire_RoundTrip(t *testing.T) {
 		Repo:        "repo",
 		ParentID:    "EPIC-1",
 		Design:      "design notes",
+		Notes:       "BLOCKED: dep missing",
 		Description: "desc",
 		CreatedAt:   now,
 		CreatedBy:   "creator",
@@ -109,6 +110,7 @@ func TestFleetIssueWire_RoundTrip(t *testing.T) {
 		"Priority": 1, "IssueType": "bug",
 		"Assignee": "agent-a", "Owner": "owner@example.com",
 		"SourceRepo": "repo", "Parent": "EPIC-1", "Design": "design notes",
+		"Notes":     "BLOCKED: dep missing",
 		"CreatedBy": "creator", "CloseReason": "fixed",
 	}
 	got := map[string]any{
@@ -116,6 +118,7 @@ func TestFleetIssueWire_RoundTrip(t *testing.T) {
 		"Priority": d.Priority, "IssueType": d.IssueType,
 		"Assignee": d.Assignee, "Owner": d.Owner,
 		"SourceRepo": d.SourceRepo, "Parent": d.Parent, "Design": d.Design,
+		"Notes":     d.Notes,
 		"CreatedBy": d.CreatedBy, "CloseReason": d.CloseReason,
 	}
 	for k, v := range want {
@@ -147,6 +150,7 @@ func TestIssueToData(t *testing.T) {
 		Labels:     []string{"bug", "urgent"},
 		SourceRepo: "repo-1",
 		Design:     "some design",
+		Notes:      "BLOCKED: waiting on upstream",
 		CreatedAt:  now,
 		UpdatedAt:  now,
 	}
@@ -170,6 +174,11 @@ func TestIssueToData(t *testing.T) {
 	}
 	if d.Design != "some design" {
 		t.Errorf("Design = %q, want %q", d.Design, "some design")
+	}
+	// Notes is in the slim list projection so the kanban "blocked with notes"
+	// needs-attention state works without a detail fetch (regression guard).
+	if d.Notes != "BLOCKED: waiting on upstream" {
+		t.Errorf("Notes = %q, want %q", d.Notes, "BLOCKED: waiting on upstream")
 	}
 }
 

@@ -324,6 +324,7 @@ func setupWorkspaceConfigInDir(t *testing.T, configDir string, cfg *config.LoomC
 	ctx := context.Background()
 	st := memstore.New()
 	t.Cleanup(func() {
+		_ = st.Close()
 		cli.TestingSetDefaultResolver(oldResolver)
 		config.InvalidateConfigCache()
 		cli.ResetWorkspaceRuntimeDirCache()

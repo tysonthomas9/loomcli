@@ -29,7 +29,7 @@ type redisPatch struct {
 	Enabled       *bool   `json:"enabled,omitempty"`
 	RedisURL      *string `json:"redis_url,omitempty"`
 	Addr          *string `json:"addr,omitempty"`
-	Password      *string `json:"password,omitempty"`
+	Password      *string `json:"password,omitempty"` //nolint:gosec // G117: password update payload for local Redis settings.
 	ClearPassword bool    `json:"clear_password,omitempty"`
 	DB            *int    `json:"db,omitempty"`
 	TLS           *bool   `json:"tls,omitempty"`

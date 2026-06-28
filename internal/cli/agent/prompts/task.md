@@ -140,12 +140,11 @@ Use this ONLY when nothing in this codebase can move the task forward:
 - A bug in code outside the design's scope blocks this work
 
 Procedure:
-1. Document the blocker:
-   loom data update <id> --notes "BLOCKED: <detailed external reason>"
-2. If blocked by another task, mention its ID in the notes.
-3. Change status to blocked:
-   loom data update <id> --status blocked
-4. Commit any partial work (if meaningful):
+1. Set the blocked status AND the reason in ONE call. The reason is REQUIRED —
+   `--status blocked` is rejected without notes — so the board shows a human why
+   it's blocked and what unblocks it (include any blocking task ID):
+   loom data update <id> --status blocked --notes "BLOCKED: <detailed external reason + any blocking task ID>"
+2. Commit any partial work (if meaningful):
    git add <files> && git commit -m "WIP: <task-id> - blocked on <reason>"
    git push origin HEAD
 5. Signal completion: loom complete

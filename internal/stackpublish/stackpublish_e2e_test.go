@@ -41,7 +41,7 @@ func e2eToken(t *testing.T) string {
 			return v
 		}
 	}
-	out, err := exec.Command("gh", "auth", "token").Output()
+	out, err := exec.Command("gh", "auth", "token").Output() //nolint:norawexec
 	if err == nil {
 		return strings.TrimSpace(string(out))
 	}
@@ -51,7 +51,7 @@ func e2eToken(t *testing.T) string {
 
 func gitT(t *testing.T, dir string, args ...string) string {
 	t.Helper()
-	cmd := exec.Command("git", args...)
+	cmd := exec.Command("git", args...) //nolint:norawexec
 	cmd.Dir = dir
 	out, err := cmd.CombinedOutput()
 	require.NoErrorf(t, err, "git %s: %s", strings.Join(args, " "), out)
@@ -114,7 +114,7 @@ func TestE2EStackPublisher(t *testing.T) {
 	require.NoError(t, store.EnsureStack(ctx, sl.Stack{ID: id, WorkspaceKey: e2eWS, RepoName: repo, RootBase: "main"}))
 
 	repoPath := t.TempDir()
-	out, err := exec.Command("gh", "repo", "clone", slug, repoPath).CombinedOutput()
+	out, err := exec.Command("gh", "repo", "clone", slug, repoPath).CombinedOutput() //nolint:norawexec
 	require.NoErrorf(t, err, "gh repo clone: %s", out)
 
 	rec := &stackpublish.Reconciler{Store: store, Forge: forge}
@@ -125,7 +125,7 @@ func TestE2EStackPublisher(t *testing.T) {
 			if pr.State == "open" {
 				_ = forge.ClosePR(ctx, owner, repo, pr.Number, "e2e cleanup")
 			}
-			_ = exec.Command("git", "-C", repoPath, "push", "origin", "--delete", head).Run()
+			_ = exec.Command("git", "-C", repoPath, "push", "origin", "--delete", head).Run() //nolint:norawexec
 		}
 	})
 
@@ -195,7 +195,7 @@ func TestE2EStackPublisher(t *testing.T) {
 			if pr.State == "open" {
 				_ = forge.ClosePR(ctx, owner, repo, pr.Number, "e2e cleanup")
 			}
-			_ = exec.Command("git", "-C", repoPath, "push", "origin", "--delete", head).Run()
+			_ = exec.Command("git", "-C", repoPath, "push", "origin", "--delete", head).Run() //nolint:norawexec
 		}
 	})
 	for _, task := range []string{"U1", "U2", "U3"} {
@@ -236,7 +236,7 @@ func TestE2EStackPublisher(t *testing.T) {
 			if pr.State == "open" {
 				_ = forge.ClosePR(ctx, owner, repo, pr.Number, "e2e cleanup")
 			}
-			_ = exec.Command("git", "-C", repoPath, "push", "origin", "--delete", head).Run()
+			_ = exec.Command("git", "-C", repoPath, "push", "origin", "--delete", head).Run() //nolint:norawexec
 		}
 	})
 	for _, task := range []string{"M1", "M2"} {
@@ -251,7 +251,7 @@ func TestE2EStackPublisher(t *testing.T) {
 	require.NotZero(t, m1num)
 
 	// Merge M1 externally, as a human would.
-	mout, merr := exec.Command("gh", "pr", "merge", fmt.Sprintf("%d", m1num),
+	mout, merr := exec.Command("gh", "pr", "merge", fmt.Sprintf("%d", m1num), //nolint:norawexec
 		"--repo", slug, "--merge", "--delete-branch=false").CombinedOutput()
 	require.NoErrorf(t, merr, "gh pr merge: %s", mout)
 
@@ -276,7 +276,7 @@ func TestE2EStackPublisher(t *testing.T) {
 			if pr.State == "open" {
 				_ = forge.ClosePR(ctx, owner, repo, pr.Number, "e2e cleanup")
 			}
-			_ = exec.Command("git", "-C", repoPath, "push", "origin", "--delete", head).Run()
+			_ = exec.Command("git", "-C", repoPath, "push", "origin", "--delete", head).Run() //nolint:norawexec
 		}
 	})
 	for _, e := range []struct{ id, base string }{{"A1", ""}, {"A2", "A1"}, {"B1", ""}, {"B2", "B1"}} {
@@ -303,7 +303,7 @@ func TestE2EStackPublisher(t *testing.T) {
 			if pr.State == "open" {
 				_ = forge.ClosePR(ctx, owner, repo, pr.Number, "e2e cleanup")
 			}
-			_ = exec.Command("git", "-C", repoPath, "push", "origin", "--delete", head).Run()
+			_ = exec.Command("git", "-C", repoPath, "push", "origin", "--delete", head).Run() //nolint:norawexec
 		}
 	})
 	_, err = store.AddNode(ctx, e2eWS, id5, "E1", "", "")
@@ -328,7 +328,7 @@ func TestE2EStackPublisher(t *testing.T) {
 			if pr.State == "open" {
 				_ = forge.ClosePR(ctx, owner, repo, pr.Number, "e2e cleanup")
 			}
-			_ = exec.Command("git", "-C", repoPath, "push", "origin", "--delete", head).Run()
+			_ = exec.Command("git", "-C", repoPath, "push", "origin", "--delete", head).Run() //nolint:norawexec
 		}
 	})
 	for _, e := range []struct{ id, base string }{{"S1", ""}, {"S2", "S1"}} {
@@ -340,7 +340,7 @@ func TestE2EStackPublisher(t *testing.T) {
 	require.NoError(t, err)
 	s1num := prsByHead(t, forge, owner, repo, id6)[br6("S1")].Number
 	require.NotZero(t, s1num)
-	sqout, sqerr := exec.Command("gh", "pr", "merge", fmt.Sprintf("%d", s1num),
+	sqout, sqerr := exec.Command("gh", "pr", "merge", fmt.Sprintf("%d", s1num), //nolint:norawexec
 		"--repo", slug, "--squash", "--delete-branch=false").CombinedOutput()
 	require.NoErrorf(t, sqerr, "gh pr merge --squash: %s", sqout)
 	_, err = rec.Publish(ctx, e2eWS, id6, repoPath, stackpublish.Options{})

@@ -9,7 +9,6 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/sessionfinalize"
 	"github.com/tysonthomas9/loomcli/internal/sessions"
-	"github.com/tysonthomas9/loomcli/internal/sessions/transcript"
 )
 
 // leafUsage is the token/cost usage a canonical transcript's terminal `result`
@@ -61,11 +60,14 @@ func extractLeafUsage(data []byte) leafUsage {
 		if len(line) == 0 {
 			continue
 		}
-		var ev transcript.Event
+		var ev struct {
+			Type   string `json:"type"`
+			Output string `json:"output"`
+		}
 		if json.Unmarshal(line, &ev) != nil {
 			continue
 		}
-		if ev.Type != transcript.EventResult || ev.Output == "" {
+		if ev.Type != "result" || ev.Output == "" {
 			continue
 		}
 		var u leafUsage

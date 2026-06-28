@@ -549,6 +549,7 @@ func createQueuedTaskRun(ctx context.Context, s store.Store, opts TaskRunRequest
 		RunnerVersionID:  opts.RunnerVersionID,
 		ProviderProfile:  opts.ProviderProfile,
 		Status:           domain.TaskRunQueued,
+		NodeID:           opts.NodeID,
 		RunnerPlacement:  opts.RunnerPlacement,
 		SandboxPlacement: opts.SandboxPlacement,
 		RuntimeMetadata:  runtimeMetadata,

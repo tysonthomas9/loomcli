@@ -198,7 +198,7 @@ func (e HostBridgeTaskExecutor) PreflightTaskProvider(ctx context.Context, opts 
 	return resolveTaskProviderProfile(opts, true)
 }
 
-//nolint:funlen // ExecuteTask owns the bridge lifecycle so deferred session finalization keeps one error/result scope.
+//nolint:cyclop,funlen,gocognit // ExecuteTask owns the bridge lifecycle so deferred session finalization keeps one error/result scope.
 func (e HostBridgeTaskExecutor) ExecuteTask(ctx context.Context, req TaskExecRequest) (result TaskExecResult, err error) {
 	if taskProviderIsNoop(req.ProviderProfile) {
 		return LocalTaskExecutor{}.ExecuteTask(ctx, req)
@@ -299,36 +299,6 @@ func (e HostBridgeTaskExecutor) ExecuteTask(ctx context.Context, req TaskExecReq
 		return result, nil
 	}
 	return e.finalizeAndApplyPatch(ctx, req, runnerResult, patch, result)
-}
-
-// finalizeStackNode is the stack finalize barrier (see the StackStore field). It
-// records the completed task's node state/SHA before ExecuteTask returns —
-// before the worker closes the task and unblocks successors. Best-effort: a task
-// not in any stack is a no-op, a non-completed/errored run is skipped, and a
-// record error is logged rather than propagated (it must never fail an
-// otherwise-good run — pre-stacking this path touched no store at all).
-func (e HostBridgeTaskExecutor) finalizeStackNode(ctx context.Context, req TaskExecRequest, wt TaskWorktree, result TaskExecResult, runErr error) {
-	if e.StackStore == nil || runErr != nil || result.Status != domain.TaskRunCompleted {
-		return
-	}
-	taskID := strings.TrimSpace(req.TaskID)
-	if taskID == "" {
-		return
-	}
-	repoName := strings.TrimSpace(wt.RepoName)
-	if repoName == "" {
-		repoName = e.resolveStackRepoName(ctx, req) // daytona/named runs: no host worktree
-	}
-	if repoName == "" {
-		return
-	}
-	state, sha, ok := stackOutcome(result.RuntimeMetadata)
-	if !ok {
-		return
-	}
-	if _, err := recordStackOutput(ctx, e.StackStore, req.WorkspaceKey, repoName, taskID, state, sha); err != nil {
-		slog.WarnContext(ctx, "stack finalize barrier: record node failed", "task", taskID, "repo", repoName, "err", err)
-	}
 }
 
 func (e HostBridgeTaskExecutor) bridgeRunner(ctx context.Context, req TaskExecRequest) (func() (bridgeTaskRunnerResult, error), error) {

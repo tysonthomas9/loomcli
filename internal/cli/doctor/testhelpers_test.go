@@ -46,6 +46,7 @@ func setupWorkspaceConfig(t *testing.T, cfg *config.LoomConfig) {
 func setupWorkspaceConfigInDir(t *testing.T, configDir string, cfg *config.LoomConfig) {
 	t.Helper()
 	t.Setenv("LOOM_CONFIG_DIR", configDir)
+	t.Setenv("LOOM_WORKSPACE_RUNTIME_DIR", "")
 	t.Setenv("LOOM_FLEET_DB_ACTOR", "test")
 	config.InvalidateConfigCache()
 	cli.ResetWorkspaceRuntimeDirCache()
@@ -54,6 +55,7 @@ func setupWorkspaceConfigInDir(t *testing.T, configDir string, cfg *config.LoomC
 	ctx := context.Background()
 	st := memstore.New()
 	t.Cleanup(func() {
+		_ = st.Close()
 		cli.TestingSetDefaultResolver(oldResolver)
 		config.InvalidateConfigCache()
 		cli.ResetWorkspaceRuntimeDirCache()

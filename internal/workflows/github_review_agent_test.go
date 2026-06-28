@@ -377,8 +377,9 @@ func TestDaytonaTaskRunnerSourceContract(t *testing.T) {
 		`client.create({`,
 		// Full clone (NOT shallow): stacked-PR base SHAs + the merge-base reconcile
 		// need real history, so the runner clones via cloneCommand without --depth.
+		`Full clone (NOT --depth 1)`,
 		`function cloneCommand(`,
-		`configureProvider("openai-codex"`,
+		`imports.runtime.registerProvider("openai-codex"`,
 		`createFlueTranscriptCollector()`,
 		`transcript_entries: transcriptEntries`,
 		`uploadPatchArtifact(taskContext.client`,

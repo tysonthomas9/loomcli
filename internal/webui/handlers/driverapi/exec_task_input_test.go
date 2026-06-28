@@ -113,6 +113,82 @@ func TestDriverAPIExecTaskOmitsInputWhenAbsent(t *testing.T) {
 	}
 }
 
+func TestDriverAPIExecTaskPreservesRequestedNodeID(t *testing.T) {
+	h := newTestHarness(t, "")
+	registerExecTaskWorkerNode(t, h, "task-node-target", "local-noop")
+	registerExecTaskWorkerNode(t, h, "task-node-other", "local-noop")
+
+	resp, decoded := h.do(t, opRequest{
+		op: "exec-task",
+		body: map[string]any{
+			"taskId":          "REVIEW-3",
+			"taskRunId":       "task-run-target-node",
+			"providerProfile": "local-noop",
+			"nodeId":          "task-node-target",
+			"enqueueOnly":     true,
+		},
+		headers: h.ownerHeaders(),
+	})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (body=%v)", resp.StatusCode, decoded)
+	}
+
+	stored, err := h.store.TaskRuns().Get(context.Background(), "WS", "task-run-target-node")
+	if err != nil {
+		t.Fatalf("Get stored task run: %v", err)
+	}
+	if stored.NodeID != "task-node-target" {
+		t.Fatalf("stored node id = %q, want requested target node", stored.NodeID)
+	}
+	if _, err := h.store.TaskRuns().ClaimQueued(context.Background(), "WS", store.TaskRunClaim{
+		TaskRunID:          "task-run-target-node",
+		NodeID:             "task-node-other",
+		LeaseID:            "lease-other",
+		SupportedProviders: []string{"local-noop"},
+	}); err == nil {
+		t.Fatal("wrong node claimed node-pinned queued task run")
+	}
+	claimed, err := h.store.TaskRuns().ClaimQueued(context.Background(), "WS", store.TaskRunClaim{
+		TaskRunID:          "task-run-target-node",
+		NodeID:             "task-node-target",
+		LeaseID:            "lease-target",
+		SupportedProviders: []string{"local-noop"},
+	})
+	if err != nil {
+		t.Fatalf("target node ClaimQueued: %v", err)
+	}
+	if claimed.NodeID != "task-node-target" || claimed.Status != domain.TaskRunRunning {
+		t.Fatalf("claimed = %+v, want target node running", claimed)
+	}
+}
+
+func TestDriverAPIExecTaskPinnedUnschedulableNode(t *testing.T) {
+	h := newTestHarness(t, "")
+	registerExecTaskWorkerNode(t, h, "task-node-target", "other-provider")
+	registerExecTaskWorkerNode(t, h, "task-node-eligible", "local-noop")
+
+	resp, decoded := h.do(t, opRequest{
+		op: "exec-task",
+		body: map[string]any{
+			"taskId":          "REVIEW-4",
+			"taskRunId":       "task-run-pinned-unschedulable",
+			"providerProfile": "local-noop",
+			"nodeId":          "task-node-target",
+			"enqueueOnly":     true,
+		},
+		headers: h.ownerHeaders(),
+	})
+	if resp.StatusCode != http.StatusConflict {
+		t.Fatalf("status = %d, want 409 (body=%v)", resp.StatusCode, decoded)
+	}
+	if code := errorCode(t, decoded); code != "unschedulable" {
+		t.Fatalf("error code = %q, want unschedulable", code)
+	}
+	if _, err := h.store.TaskRuns().Get(context.Background(), "WS", "task-run-pinned-unschedulable"); err == nil {
+		t.Fatal("created task run for unschedulable pinned node")
+	}
+}
+
 // registerExecTaskWorkerNode registers a task-runner node so an enqueue-only
 // exec-task is schedulable for the given provider.
 func registerExecTaskWorkerNode(t *testing.T, h *testHarness, nodeID, provider string) {

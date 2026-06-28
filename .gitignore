@@ -9,7 +9,7 @@
 tmp/
 
 # Prebuilt workflow bundles are embedded into the Go binary for CI/runtime use.
-internal/workflows/builtin-dist/**/*.map
+internal/workflows/builtin-dist/
 
 # Frontend dependencies
 internal/webui/frontend/node_modules/
@@ -58,3 +58,4 @@ services/auth/dist/
 worktrees/
 .agent.yield
 node_modules/
+*.agent.lock.flock

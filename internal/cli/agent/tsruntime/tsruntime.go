@@ -89,6 +89,7 @@ func (i agentInvoker) InvokeInteractive(workDir, prompt, agentName string) error
 	return i.fallback.InvokeInteractive(workDir, prompt, agentName)
 }
 
+//nolint:funlen // TS leaf invocation has to assemble one driver request with env, input, transcript, and patch-back handling.
 func (i agentInvoker) InvokeNonInteractive(workDir, prompt, agentName string, shutdown <-chan struct{}, collector *usage.Collector) error {
 	serverPath, err := taskRunnerBundleServerPath()
 	if err != nil {
@@ -253,12 +254,12 @@ var (
 	taskRunnerBundleErr  error
 )
 
-// taskRunnerBundleServerPath materializes the bundled task-runner once per process
+// taskRunnerBundleServerPath builds the bundled task-runner once per process
 // to a stable per-workspace path and returns its server.mjs.
 func taskRunnerBundleServerPath() (string, error) {
 	taskRunnerBundleOnce.Do(func() {
 		dest := filepath.Join(cli.GetWorkspaceRuntimeDir(), "ts-runtime-bundle", "dist")
-		taskRunnerServerPath, taskRunnerBundleErr = workflows.MaterializeBuiltinBundle("epic-runner", dest)
+		taskRunnerServerPath, _, taskRunnerBundleErr = workflows.BuildBuiltinBundle(context.Background(), "epic-runner", dest)
 	})
 	return taskRunnerServerPath, taskRunnerBundleErr
 }
