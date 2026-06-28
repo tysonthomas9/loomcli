@@ -80,12 +80,12 @@ done
 
 # ── Test 2: Backend stub output ──────────────────────────────────────────
 
-# Claude stub: stream-json mode
-output=$(printf 'test prompt' | claude -p --output-format stream-json 2>&1)
-if printf '%s' "$output" | grep -q '"type":"assistant"'; then
-    pass "Claude stub stream-json output"
+# Claude stub: interactive mode
+output=$(claude --dangerously-skip-permissions "test prompt" 2>&1)
+if printf '%s' "$output" | grep -q 'Claude Code'; then
+    pass "Claude stub interactive output"
 else
-    fail "Claude stub stream-json output" "Expected '\"type\":\"assistant\"' in output"
+    fail "Claude stub interactive output" "Expected 'Claude Code' in output"
 fi
 
 # Codex stub: exec --json mode

@@ -6,6 +6,7 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -213,11 +214,29 @@ func harnessLeadArgs(cfg HarnessLeadRuntimeConfig) []string {
 // only the PTY would desync the emulator.
 func harnessTerminalSize(stdout io.Writer) (int, int) {
 	if f, ok := stdout.(*os.File); ok {
-		if cols, rows, err := term.GetSize(int(f.Fd())); err == nil && cols > 0 && rows > 0 {
-			return cols, rows
+		if fd, ok := harnessFileDescriptor(f); ok {
+			if cols, rows, err := term.GetSize(fd); err == nil && cols > 0 && rows > 0 {
+				return cols, rows
+			}
 		}
 	}
 	return harnessDefaultCols, harnessDefaultRows
+}
+
+func harnessFileDescriptor(f *os.File) (int, bool) {
+	fd := f.Fd()
+	if strconv.IntSize == 32 && fd > uintptr(1<<31-1) {
+		return 0, false
+	}
+	return int(fd), true //nolint:gosec // G115: fd is range-checked for 32-bit int platforms above.
+}
+
+func harnessTerminalFileDescriptor(f *os.File) (int, bool) {
+	fd, ok := harnessFileDescriptor(f)
+	if !ok || !term.IsTerminal(fd) {
+		return 0, false
+	}
+	return fd, true
 }
 
 // forwardHarnessStdin puts the human terminal into raw mode (when stdin is a
@@ -226,19 +245,21 @@ func harnessTerminalSize(stdout io.Writer) (int, int) {
 // Returns a restore function that is safe to call multiple times.
 func forwardHarnessStdin(ctx context.Context, cfg HarnessLeadRuntimeConfig, conv harnessConversation) func() {
 	restore := func() {}
-	if f, ok := cfg.Stdin.(*os.File); ok && term.IsTerminal(int(f.Fd())) {
-		oldState, err := term.MakeRaw(int(f.Fd()))
-		if err == nil {
-			fd := int(f.Fd())
-			restored := false
-			restore = func() {
-				if !restored {
-					restored = true
-					_ = term.Restore(fd, oldState)
+	if f, ok := cfg.Stdin.(*os.File); ok {
+		fd, isTerminal := harnessTerminalFileDescriptor(f)
+		if isTerminal {
+			oldState, err := term.MakeRaw(fd)
+			if err == nil {
+				restored := false
+				restore = func() {
+					if !restored {
+						restored = true
+						_ = term.Restore(fd, oldState)
+					}
 				}
+			} else {
+				cfg.Logger.Debug("failed to enter raw mode; continuing cooked", "err", err)
 			}
-		} else {
-			cfg.Logger.Debug("failed to enter raw mode; continuing cooked", "err", err)
 		}
 	}
 	go func() {

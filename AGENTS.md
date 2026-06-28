@@ -15,6 +15,13 @@ When testing Loom runtime behavior, follow the runbook above. Do not manually
 create lock files, FleetDB state, sessions, transcripts, diffs, or other fake
 state as test evidence.
 
+## Generated Workflow Bundles
+
+Do not commit `internal/workflows/builtin-dist/` or other generated Flue bundle
+output. Build bundles locally when needed for verification, but keep generated
+artifacts out of git and change the workflow source under
+`internal/workflows/builtin/` instead.
+
 ## Driver Runtime Auth (loom-dev deploy notes)
 
 Workflow runtimes authenticate to the driver-op HTTP API with a run-scoped

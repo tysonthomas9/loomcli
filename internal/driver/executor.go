@@ -61,7 +61,7 @@ type Executor struct {
 	// APIBaseURL/APIToken configure the driver-op HTTP API exported to driver
 	// runtimes via the default NodeRunner (LOOM_DRIVER_API_URL/_TOKEN).
 	APIBaseURL string
-	APIToken   string
+	APIToken   string //nolint:gosec // G117: driver API bearer token intentionally stored in runtime config.
 	// RunTokenKey, when set, is the HS256 signing key used to mint the
 	// run-scoped bearer token injected into the workflow runtime as
 	// LOOM_RUN_TOKEN at claim time. Nil disables minting and keeps the
@@ -701,7 +701,7 @@ type NodeRunner struct {
 	// legacy auth surface (no run token, or the deprecated
 	// LegacyDriverAuthEnvVar fallback still on). Token-carrying runs are
 	// token-only: the static bearer never reaches their workflow env.
-	APIToken string
+	APIToken string //nolint:gosec // G117: driver API bearer token intentionally forwarded to legacy runtimes.
 	// Launcher launches the workflow-bundle runtime (SB1 sandbox seam).
 	// Nil means the default local node-process launcher — today's
 	// flue-local behavior, unchanged.

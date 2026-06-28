@@ -122,9 +122,9 @@ func RunWithRetry(ctx context.Context, cfg hwharness.Config, p RetryPolicy) (hwh
 // shouldRetry reports whether the run should be retried. A retry fires when
 // the terminal status is a known transient condition (StatusRetryLater,
 // StatusAPIError) OR when the harness exited with a failure status but the
-// carried error class is one the policy retries — e.g. a non-terminal API
-// error inherited onto a Failed exit by the wrapper (common for `claude -p`
-// and similar print-mode harnesses that don't recover internally).
+// carried error class is one the policy retries, for example a non-terminal
+// API error inherited onto a Failed exit by the wrapper for harnesses that do
+// not recover internally.
 //
 // The class check replaces the out-of-band SawAPIError signal and is finer:
 // a Failed exit carrying a fatal class (auth, billing) or a deterministic one

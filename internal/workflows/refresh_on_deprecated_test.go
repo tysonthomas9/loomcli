@@ -108,8 +108,7 @@ func TestEnsureBuiltinWorkflowRefreshesDeprecatedRunnerManifest(t *testing.T) {
 
 	workDir := t.TempDir()
 	t.Chdir(workDir)
-	t.Setenv("LOOM_REAL_FLUE_CMD", filepath.Join(t.TempDir(), "missing-flue"))
-	t.Setenv("LOOM_REAL_FLUE_CMD_JSON", "")
+	installFakeWorkflowBuildDeps(t)
 
 	// Register an active version at the CURRENT source digest but with a
 	// manifest that still declares the deprecated openshell runner.
@@ -167,4 +166,63 @@ func TestEnsureBuiltinWorkflowRefreshesDeprecatedRunnerManifest(t *testing.T) {
 			t.Fatalf("refreshed manifest still declares openshell-task-runner: %+v", runners)
 		}
 	}
+}
+
+func installFakeWorkflowBuildDeps(t *testing.T) {
+	t.Helper()
+
+	root := t.TempDir()
+	sdkRoot := filepath.Join(root, "sdk")
+	if err := os.MkdirAll(sdkRoot, 0o755); err != nil {
+		t.Fatalf("create fake sdk root: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(sdkRoot, "package.json"), []byte(`{"name":"@loom/sdk"}`+"\n"), 0o644); err != nil {
+		t.Fatalf("write fake sdk package: %v", err)
+	}
+
+	runtimeRoot := filepath.Join(root, "runtime")
+	for _, dir := range []string{
+		runtimeRoot,
+		filepath.Join(runtimeRoot, "node_modules", "@hono", "node-server"),
+		filepath.Join(runtimeRoot, "node_modules", "hono"),
+	} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatalf("create fake runtime dependency %s: %v", dir, err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(runtimeRoot, "package.json"), []byte(`{"name":"@flue/runtime"}`+"\n"), 0o644); err != nil {
+		t.Fatalf("write fake runtime package: %v", err)
+	}
+
+	flue := filepath.Join(root, "fake-flue.sh")
+	script := `#!/bin/sh
+set -eu
+out=""
+prev=""
+for arg in "$@"; do
+	if [ "$prev" = "--output" ]; then
+		out="$arg"
+		break
+	fi
+	prev="$arg"
+done
+if [ -z "$out" ]; then
+	echo "missing --output" >&2
+	exit 1
+fi
+mkdir -p "$out"
+printf 'export {};\n' > "$out/server.mjs"
+echo "fake flue build"
+`
+	if err := os.WriteFile(flue, []byte(script), 0o755); err != nil {
+		t.Fatalf("write fake flue: %v", err)
+	}
+	cmd, err := json.Marshal([]string{flue})
+	if err != nil {
+		t.Fatalf("encode fake flue command: %v", err)
+	}
+	t.Setenv("LOOM_REAL_FLUE_CMD_JSON", string(cmd))
+	t.Setenv("LOOM_REAL_FLUE_CMD", "")
+	t.Setenv("LOOM_SDK_ROOT", sdkRoot)
+	t.Setenv("FLUE_RUNTIME_ROOT", runtimeRoot)
 }

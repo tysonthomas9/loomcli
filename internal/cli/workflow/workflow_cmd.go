@@ -411,13 +411,19 @@ func workflowReadinessStatus() map[string]any {
 		"node":                         commandAvailable("node"),
 		"flue":                         commandAvailable("flue") || os.Getenv("LOOM_REAL_FLUE_CMD") != "" || os.Getenv("LOOM_REAL_FLUE_CMD_JSON") != "",
 		"loom_sdk":                     packageRootAvailable(os.Getenv("LOOM_SDK_ROOT"), "sdk"),
-		"flue_runtime":                 packageRootAvailable(os.Getenv("FLUE_RUNTIME_ROOT"), filepath.Join("..", "flue", "packages", "runtime")) || os.Getenv("FLUE_REPO") != "",
+		"flue_runtime":                 flueRuntimeAvailable(),
 		"daytona_sdk":                  packageRootAvailable(os.Getenv("DAYTONA_SDK_ROOT"), filepath.Join("..", "flue", "node_modules", ".pnpm", "node_modules", "@daytona", "sdk")),
 		"sandbox_mode":                 sandboxMode,
 		"untrusted_execution_possible": sandboxMode == driverpkg.SandboxModeContainer,
 	}
 	status["ok"] = status["node"].(bool) && status["flue"].(bool) && status["loom_sdk"].(bool) && status["flue_runtime"].(bool)
 	return status
+}
+
+func flueRuntimeAvailable() bool {
+	return packageRootAvailable(os.Getenv("LOOM_FLUE_RUNTIME_ROOT"), "") ||
+		packageRootAvailable(os.Getenv("FLUE_RUNTIME_ROOT"), filepath.Join("..", "flue", "packages", "runtime")) ||
+		os.Getenv("FLUE_REPO") != ""
 }
 
 func workflowSandboxMode() string {

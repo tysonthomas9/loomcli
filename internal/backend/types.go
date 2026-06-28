@@ -33,7 +33,11 @@ type IssueData struct {
 	SourceRepo string   `json:"source_repo,omitempty"`
 	Parent     string   `json:"parent,omitempty"`
 	// Populated by backends that include design in list queries.
-	Design     string     `json:"design,omitempty"`
+	Design string `json:"design,omitempty"`
+	// Notes is in the slim list projection (not detail-only) so kanban/filter
+	// UIs can categorize a blocked issue that carries an external-blocker note
+	// (the "blocked with notes" needs-attention state) without a detail fetch.
+	Notes      string     `json:"notes,omitempty"`
 	CreatedAt  time.Time  `json:"created_at"`
 	UpdatedAt  time.Time  `json:"updated_at"`
 	DueAt      *time.Time `json:"due_at,omitempty"`
@@ -59,10 +63,10 @@ type IssueData struct {
 type IssueDetailData struct {
 	IssueData
 
-	// Content fields.
+	// Content fields. Notes is promoted from the embedded IssueData (it is in
+	// the slim list projection so the kanban "blocked with notes" state works).
 	Description        string `json:"description,omitempty"`
 	AcceptanceCriteria string `json:"acceptance_criteria,omitempty"`
-	Notes              string `json:"notes,omitempty"`
 
 	// Lifecycle (detail-only — IssueData carries the others).
 	ClosedBySession string `json:"closed_by_session,omitempty"`

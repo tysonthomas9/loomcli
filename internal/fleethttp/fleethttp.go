@@ -26,8 +26,8 @@ import (
 // Auth holds the optional auth headers fleet-db accepts. Fields default
 // to empty (omitted from the request when zero).
 type Auth struct {
-	BearerToken string // → Authorization: Bearer <token>
-	APIKey      string // → X-API-Key and X-Fleet-API-Key
+	BearerToken string //nolint:gosec // G117: auth header value intentionally carried by request config.
+	APIKey      string //nolint:gosec // G117: fleet-db API key intentionally carried by request config.
 	Actor       string // → X-Actor (used by --auth-dev-mode)
 }
 
