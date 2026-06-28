@@ -52,15 +52,15 @@ func withStackSection(body, listing string) string {
 // StatusRow is one unit's row in a status report, enriched with live PR health
 // when available. Consumed by `loom stack status` and (via --json) any UI.
 type StatusRow struct {
-	TaskID      string       `json:"taskId"`
-	State       sl.NodeState `json:"state"`
-	OutputBranch string      `json:"outputBranch"`
-	PRNumber    int          `json:"prNumber,omitempty"`
-	PRURL       string       `json:"prUrl,omitempty"`
-	Checks      string       `json:"checks,omitempty"`
-	Review      string       `json:"review,omitempty"`
-	Mergeable   string       `json:"mergeable,omitempty"`
-	NextToMerge bool         `json:"nextToMerge,omitempty"`
+	TaskID       string       `json:"taskId"`
+	State        sl.NodeState `json:"state"`
+	OutputBranch string       `json:"outputBranch"`
+	PRNumber     int          `json:"prNumber,omitempty"`
+	PRURL        string       `json:"prUrl,omitempty"`
+	Checks       string       `json:"checks,omitempty"`
+	Review       string       `json:"review,omitempty"`
+	Mergeable    string       `json:"mergeable,omitempty"`
+	NextToMerge  bool         `json:"nextToMerge,omitempty"`
 }
 
 // StatusReport is the enriched status of a stack.

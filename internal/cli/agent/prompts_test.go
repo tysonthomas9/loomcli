@@ -1161,6 +1161,8 @@ func TestReadOnlyPreamble(t *testing.T) {
 }
 
 func TestResolveActiveWorkspace_NoConfig(t *testing.T) {
+	t.Setenv("LOOM_WORKSPACE", "")
+
 	// Create a temp empty directory and point LOOM_CONFIG_DIR to it
 	tmpDir := t.TempDir()
 	configDir := filepath.Join(tmpDir, "loomcfg")

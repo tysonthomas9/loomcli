@@ -59,6 +59,8 @@ type projectionStats struct {
 // becomes a chain root (BaseTaskID ""), rooted on the stack's RootBase. This
 // guarantees no node gets two bases (fan-in) and no base gets two children
 // (fan-out), so the result always validates as linear chains.
+//
+//nolint:funlen // The projection is deliberately kept as one pure pass for deterministic tests.
 func planEpicForest(tasks []epicTask) ([]projectedNode, projectionStats) {
 	inEpic := make(map[string]struct{}, len(tasks))
 	for _, t := range tasks {
@@ -144,6 +146,8 @@ type EpicStackProjection struct {
 //
 // repoName must match the workspace repo the worktree resolver selects (it
 // scopes lineage lookups per repo); rootBase is the branch chain roots build on.
+//
+//nolint:cyclop,funlen,gocognit // Projection combines backend snapshot normalization with stackstore upsert ordering.
 func projectEpicStack(ctx context.Context, ib backend.IssueBackend, sstore stackstore.Store, ws, epicID, repoName, rootBase string) (*EpicStackProjection, error) {
 	ws = strings.TrimSpace(ws)
 	epicID = strings.TrimSpace(epicID)

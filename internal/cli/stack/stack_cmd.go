@@ -217,6 +217,7 @@ func showCmd() *cobra.Command {
 	return c
 }
 
+//nolint:funlen // Cobra command construction includes live status enrichment and output formatting together.
 func statusCmd() *cobra.Command {
 	var jsonOut bool
 	var repoPath string
@@ -479,6 +480,7 @@ func restackCmd() *cobra.Command {
 	return c
 }
 
+//nolint:funlen // Cobra command construction includes option wiring, publish execution, and output formatting.
 func publishCmd() *cobra.Command {
 	var repoPath string
 	var dryRun, jsonOut, autoRebase, headless bool

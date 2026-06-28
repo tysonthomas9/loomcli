@@ -85,11 +85,11 @@ func sanitizeRefSegment(s string) string {
 		}
 	}
 	out := b.String()
-	out = strings.ReplaceAll(out, "..", "-")        // no ".."
-	out = strings.ReplaceAll(out, "@{", "-")        // no "@{"
-	out = strings.Trim(out, "-.")                   // no leading/trailing '-' or '.'
-	out = strings.TrimSuffix(out, ".lock")          // no trailing ".lock"
-	out = strings.Trim(out, "-.")                   // re-trim in case .lock removal exposed one
+	out = strings.ReplaceAll(out, "..", "-") // no ".."
+	out = strings.ReplaceAll(out, "@{", "-") // no "@{"
+	out = strings.Trim(out, "-.")            // no leading/trailing '-' or '.'
+	out = strings.TrimSuffix(out, ".lock")   // no trailing ".lock"
+	out = strings.Trim(out, "-.")            // re-trim in case .lock removal exposed one
 	if out == "" {
 		return "unit"
 	}

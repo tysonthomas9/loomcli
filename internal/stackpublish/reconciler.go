@@ -57,6 +57,8 @@ type action struct {
 // computePlan is the pure core: given the desired ordered lineage, the current
 // PRs (indexed by head branch), and the set of branches that add nothing over
 // their base, it produces the reconcile actions. No I/O — unit-tested directly.
+//
+//nolint:cyclop,funlen // The switch mirrors the reconcile state matrix and is covered by table tests.
 func computePlan(stack sl.Stack, ordered []sl.Node, prsByHead map[string]PR, empty map[string]bool) []action {
 	byTask := sl.ByTask(ordered)
 	desired := make(map[string]bool, len(ordered))
@@ -143,6 +145,8 @@ func queuedConflicts(targets []int, queued map[int]bool) []int {
 // Loom-owned local checkout where each unit's output branch already exists at its
 // desired commit; the reconciler pushes them in the safe order. Cursor-less and
 // idempotent: it re-derives everything from forge truth each run.
+//
+//nolint:cyclop,funlen,gocognit // Publish coordinates preflight, restack safety, forge mutation, and reporting in one transaction.
 func (r *Reconciler) Publish(ctx context.Context, ws string, id sl.StackID, repoPath string, opts Options) (*Report, error) {
 	stack, err := r.Store.GetStack(ctx, ws, id)
 	if err != nil {
