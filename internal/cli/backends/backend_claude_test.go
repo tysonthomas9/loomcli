@@ -1,12 +1,14 @@
 package backends
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"os"
 	"os/exec"
+	"os/signal"
 	"strings"
 	"syscall"
 	"testing"
@@ -342,19 +344,9 @@ func TestBuildClaudeContinueSessionArgsArePositional(t *testing.T) {
 }
 
 func TestRunClaudeTurn_FakeClaudeTUI(t *testing.T) {
-	dir := t.TempDir()
-	bin := dir + "/fake-claude"
-	script := `#!/bin/sh
-echo "Fake Claude Code"
-echo "❯"
-while IFS= read -r line; do
-  echo "assistant reply: $line"
-  echo "claude --resume 123e4567-e89b-12d3-a456-426614174000"
-  echo "✻ Baked for 1s"
-done
-`
-	if err := os.WriteFile(bin, []byte(script), 0o755); err != nil {
-		t.Fatalf("write fake claude: %v", err)
+	bin, err := os.Executable()
+	if err != nil {
+		t.Fatalf("test executable: %v", err)
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -363,6 +355,8 @@ done
 	res, err := claudeRunTurn(ctx, claudeRunTurnConfig{
 		Harness:       "claude",
 		BinaryPath:    bin,
+		Args:          []string{"-test.run=TestFakeClaudeTUIProcess", "--"},
+		Env:           append(os.Environ(), "LOOM_FAKE_CLAUDE_TUI=1"),
 		Prompt:        "hello",
 		ExitAfterTurn: true,
 		Output:        &out,
@@ -379,6 +373,32 @@ done
 	if res.Session.HarnessSessionID != "123e4567-e89b-12d3-a456-426614174000" {
 		t.Fatalf("HarnessSessionID = %q", res.Session.HarnessSessionID)
 	}
+}
+
+func TestFakeClaudeTUIProcess(t *testing.T) {
+	if os.Getenv("LOOM_FAKE_CLAUDE_TUI") != "1" {
+		t.Skip("helper process only")
+	}
+
+	sig := make(chan os.Signal, 1)
+	signal.Notify(sig, os.Interrupt)
+	go func() {
+		<-sig
+		os.Exit(0)
+	}()
+
+	fmt.Println("Fake Claude Code")
+	fmt.Println("❯")
+
+	scanner := bufio.NewScanner(os.Stdin)
+	if scanner.Scan() {
+		fmt.Printf("assistant reply: %s\n", scanner.Text())
+		fmt.Println("claude --resume 123e4567-e89b-12d3-a456-426614174000")
+		fmt.Println("✻ Baked for 1s")
+		fmt.Println("❯")
+	}
+
+	select {}
 }
 
 // TestShutdownRace_NoSignalAfterExit verifies that no SIGTERM is sent when
