@@ -12,6 +12,7 @@ import (
 	"os/signal"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -132,31 +133,16 @@ func runEpicRun(cmd *cobra.Command, _ []string) error {
 		}
 	}
 
-	payload, err := workflowPayload()
-	if err != nil {
-		return err
-	}
 	workflowName := epicRunWorkflow()
-	if runDryRun {
-		printDryRunPayload(payload)
-		if workflowName != workflowdefs.BuiltinEpicRunnerWorkflowName {
-			return nil
-		}
-	}
 
-	run, err := queueEpicWorkflowRun(ctx, handle.Store, ws, workflowName, payload)
-	if err != nil {
-		return err
-	}
-	fmt.Printf("[epic-run] queued workflow %s run %s for epic %s\n", workflowName, run.RunID, runParent)
+	runID := fmt.Sprintf("run-%d", time.Now().UTC().UnixNano())
 
 	// Stacked mode: project the epic's blocks DAG into the per-user stackstore
-	// so the worktree resolver cuts each task's worktree from its predecessor's
-	// branch. Fail-open — the lineage path is inert until populated, so a
-	// projection error only degrades to pre-stacking (default-branch) behavior.
+	// before queueing so the workflow payload can carry the same lineage to
+	// sandboxed runners that cannot read the host stack store.
 	var stackProj *EpicStackProjection
 	if runStackedPRs && !runDryRun {
-		if proj, perr := projectEpicStackForRun(ctx, handle, ws, runParent, run.RunID, runRepoURL, runBaseBranch); perr != nil {
+		if proj, perr := projectEpicStackForRun(ctx, handle, ws, runParent, runID, runRepoURL, runBaseBranch); perr != nil {
 			fmt.Printf("[epic-run] WARN: stack projection skipped (tasks will base on the repo default branch): %v\n", perr)
 		} else {
 			stackProj = proj
@@ -165,6 +151,23 @@ func runEpicRun(cmd *cobra.Command, _ []string) error {
 				proj.Stats.FanInBreaks, proj.Stats.FanOutBreaks, len(proj.Created))
 		}
 	}
+
+	payload, err := workflowPayload(stackProj)
+	if err != nil {
+		return err
+	}
+	if runDryRun {
+		printDryRunPayload(payload)
+		if workflowName != workflowdefs.BuiltinEpicRunnerWorkflowName {
+			return nil
+		}
+	}
+
+	run, err := queueEpicWorkflowRun(ctx, handle.Store, ws, workflowName, runID, payload)
+	if err != nil {
+		return err
+	}
+	fmt.Printf("[epic-run] queued workflow %s run %s for epic %s\n", workflowName, run.RunID, runParent)
 
 	if runDetach && !runDryRun {
 		return nil
@@ -185,7 +188,7 @@ func runEpicRun(cmd *cobra.Command, _ []string) error {
 	return nil
 }
 
-func queueEpicWorkflowRun(ctx context.Context, st store.Store, ws, workflowName string, payload json.RawMessage) (*domain.DriverRun, error) {
+func queueEpicWorkflowRun(ctx context.Context, st store.Store, ws, workflowName, runID string, payload json.RawMessage) (*domain.DriverRun, error) {
 	if err := ensureWorkflow(ctx, st, ws, workflowName); err != nil {
 		return nil, err
 	}
@@ -197,6 +200,7 @@ func queueEpicWorkflowRun(ctx context.Context, st store.Store, ws, workflowName 
 		WorkspaceKey: ws,
 		DriverID:     driverID,
 		EpicID:       runParent,
+		RunID:        runID,
 		SourceKind:   "cli",
 		SourceRef:    "loom epic run",
 		Payload:      payload,
@@ -224,7 +228,7 @@ func epicRunWorkerPrefix() string {
 	return strings.TrimSpace(runWorkerPrefix)
 }
 
-func workflowPayload() (json.RawMessage, error) {
+func workflowPayload(stackProj *EpicStackProjection) (json.RawMessage, error) {
 	payload := map[string]any{
 		"epicId":                runParent,
 		"leadName":              resolveLeadName(runLead),
@@ -255,6 +259,9 @@ func workflowPayload() (json.RawMessage, error) {
 	}
 	if runStackedPRs {
 		payload["stackedPullRequests"] = true
+	}
+	if stackProj != nil && len(stackProj.Lineage) > 0 {
+		payload["stackLineage"] = stackProj.Lineage
 	}
 	body, err := json.Marshal(payload)
 	if err != nil {

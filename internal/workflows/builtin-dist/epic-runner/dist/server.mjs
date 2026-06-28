@@ -296057,6 +296057,7 @@ function taskPayloadID(input) {
 //#endregion
 //#region workflows/epic-runner.ts
 var epic_runner_exports = /* @__PURE__ */ __exportAll({
+	childTaskInput: () => childTaskInput,
 	default: () => epic_runner_default,
 	run: () => run$2
 });
@@ -296099,7 +296100,8 @@ async function runEpicWatchLoop(loom, input, epicId, started) {
 		workerProfileId: stringValue$1(input.workerProfileId),
 		targetNodeId: stringValue$1(input.targetNodeId),
 		parentSessionId: started.orchestratorSessionId || stringValue$1(input.parentSessionId),
-		childInput: childTaskInputDefaults(input)
+		childInput: childTaskInputDefaults(input),
+		stackLineage: stackLineageDefaults(input)
 	};
 	const inFlight = /* @__PURE__ */ new Map();
 	const completed = [];
@@ -296224,7 +296226,7 @@ async function enqueueChildTask(loom, task, defaults) {
 	};
 	const sourceRepo = stringValue$1(task && (task.sourceRepo || task.source_repo));
 	if (sourceRepo) request.repoRef = sourceRepo;
-	const childInput = childTaskInput(defaults.childInput, loom, task);
+	const childInput = childTaskInput(defaults.childInput, loom, task, defaults.stackLineage);
 	if (Object.keys(childInput).length > 0) request.input = childInput;
 	const workerProfileId = defaults.workerProfileId || (defaults.workerPrefix ? defaults.workerPrefix + "-" + slug(task.id) : "");
 	if (workerProfileId) request.workerProfileId = workerProfileId;
@@ -296268,14 +296270,39 @@ function childTaskInputDefaults(input) {
 	]) if (input && input[key] !== void 0 && input[key] !== null && input[key] !== "") out[key] = input[key];
 	return out;
 }
-function childTaskInput(defaults, loom, task) {
+function childTaskInput(defaults, loom, task, stackLineage) {
 	const out = {};
 	for (const [key, value] of Object.entries(defaults || {})) if (value !== void 0 && value !== null && value !== "") out[key] = value;
 	if (loom && loom.driverRunId) out.driverRunId = loom.driverRunId;
 	if (task && task.id && !out.taskId) out.taskId = task.id;
+	const lineage = lineageForTask(stackLineage, stringValue$1(task && task.id));
+	if (lineage && !out.lineage) out.lineage = lineage;
 	const sourceRepo = stringValue$1(task && (task.sourceRepo || task.source_repo));
 	if (sourceRepo && !out.sourceRepo) out.sourceRepo = sourceRepo;
 	return out;
+}
+function stackLineageDefaults(input) {
+	const raw = input && input.stackLineage && typeof input.stackLineage === "object" && !Array.isArray(input.stackLineage) ? input.stackLineage : {};
+	const out = {};
+	for (const [taskId, value] of Object.entries(raw)) {
+		const lineage = normalizeLineage(value);
+		if (taskId && lineage) out[taskId] = lineage;
+	}
+	return out;
+}
+function lineageForTask(stackLineage, taskId) {
+	if (!taskId || !stackLineage || typeof stackLineage !== "object") return null;
+	return normalizeLineage(stackLineage[taskId]);
+}
+function normalizeLineage(value) {
+	if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+	const outputBranch = stringValue$1(value.outputBranch);
+	if (!outputBranch) return null;
+	return {
+		stackId: stringValue$1(value.stackId),
+		baseRef: stringValue$1(value.baseRef),
+		outputBranch
+	};
 }
 async function completeChildTask(loom, data) {
 	const taskId = stringValue$1(data.taskID);
