@@ -135,6 +135,40 @@ func TestExecutorRunOnceTargetsSpecificQueuedRunID(t *testing.T) {
 	}
 }
 
+func TestExecutorEnsureNodeRefreshesExistingNodeCapabilities(t *testing.T) {
+	ctx := context.Background()
+	st := memstore.New()
+	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "TEST", Name: "test"}); err != nil {
+		t.Fatalf("Create workspace: %v", err)
+	}
+	if _, err := st.Nodes().Create(ctx, store.NodeCreate{
+		WorkspaceKey:    "TEST",
+		NodeID:          "node-1",
+		RuntimeProvider: domain.RuntimeProviderOther,
+		Capabilities:    []string{"stale"},
+		DrainState:      domain.NodeDrainDrained,
+		TTL:             time.Minute,
+	}); err != nil {
+		t.Fatalf("Create stale node: %v", err)
+	}
+
+	if err := (&Executor{Store: st, HeartbeatInterval: -1}).ensureNode(ctx, "TEST", "node-1"); err != nil {
+		t.Fatalf("ensureNode: %v", err)
+	}
+	node, err := st.Nodes().Get(ctx, "TEST", "node-1")
+	if err != nil {
+		t.Fatalf("Get node: %v", err)
+	}
+	if node.RuntimeProvider != domain.RuntimeProviderLocal || node.DrainState != domain.NodeDrainActive {
+		t.Fatalf("node runtime/drain = %s/%s, want local/active", node.RuntimeProvider, node.DrainState)
+	}
+	for _, capability := range []string{"driver-runner", "task-runner", "flue-local"} {
+		if !nodeHasCapability(node, capability) {
+			t.Fatalf("node capabilities = %v, want %q", node.Capabilities, capability)
+		}
+	}
+}
+
 func TestExecutorRunOnceFailsNonTerminalRunnerResult(t *testing.T) {
 	ctx := context.Background()
 	root := t.TempDir()
@@ -322,6 +356,7 @@ func TestNodeRunnerFailsWhenRuntimeReturnsNoResult(t *testing.T) {
 		BundleRoot: root,
 		ServerPath: filepath.Join(root, "dist", "server.mjs"),
 		Manifest:   map[string]string{"workflow_name": "epic-runner"},
+		TrustLevel: domain.DriverTrustTrusted,
 	})
 	if err != nil {
 		t.Fatalf("NodeRunner.Run: %v", err)
@@ -345,6 +380,7 @@ func TestNodeRunnerFailsWhenWorkflowResultIsMissingTerminalStatus(t *testing.T) 
 		BundleRoot: root,
 		ServerPath: filepath.Join(root, "dist", "server.mjs"),
 		Manifest:   map[string]string{"workflow_name": "epic-runner"},
+		TrustLevel: domain.DriverTrustTrusted,
 	})
 	if err != nil {
 		t.Fatalf("NodeRunner.Run: %v", err)
@@ -413,6 +449,7 @@ if (process.send) {
 			BundleRoot: root,
 			ServerPath: filepath.Join(dist, "server.mjs"),
 			Manifest:   map[string]string{"workflow_name": "epic-runner"},
+			TrustLevel: domain.DriverTrustTrusted,
 		})
 		done <- struct {
 			result RunResult
@@ -435,13 +472,14 @@ if (process.send) {
 	waitForFile(t, cancelledPath)
 }
 
-func TestNodeRunnerBuiltFlueServerReceivesOnlyScopedFleetDBHandoff(t *testing.T) {
+func TestNodeRunnerBuiltFlueServerReceivesNoFleetDBHandoff(t *testing.T) {
 	if _, err := exec.LookPath("node"); err != nil {
 		t.Skipf("node not available: %v", err)
 	}
 	t.Setenv("LOOM_FLEET_DB_URL", "https://fleet.invalid")
 	t.Setenv("LOOM_FLEET_DB_API_KEY", "broad-secret")
 	t.Setenv("LOOM_FLEET_DB_ACTOR", "broad-actor")
+	t.Setenv("LOOM_DRIVER_FLEET_DB_URL", "https://driver-fleet.invalid")
 	t.Setenv("LOOM_DRIVER_FLEET_DB_API_KEY", "scoped-secret")
 	t.Setenv("LOOM_DRIVER_FLEET_DB_ACTOR", "driver-run:run-1")
 	t.Setenv("LOOM_CONFIG_DIR", "/tmp/loom-config")
@@ -458,21 +496,22 @@ func TestNodeRunnerBuiltFlueServerReceivesOnlyScopedFleetDBHandoff(t *testing.T)
 const leaked = [
   'LOOM_FLEET_DB_URL',
   'LOOM_FLEET_DB_API_KEY',
+  'LOOM_FLEET_DB_ACTOR',
+  'LOOM_DRIVER_FLEET_DB_URL',
+  'LOOM_DRIVER_FLEET_DB_API_KEY',
+  'LOOM_DRIVER_FLEET_DB_ACTOR',
   'LOOM_TASK_RUN_LEASE_TOKEN',
   'OPENAI_API_KEY',
   'AWS_SECRET_ACCESS_KEY',
   'GITHUB_TOKEN',
 ].filter((key) => process.env[key]);
-const handoffOk = process.env.LOOM_DRIVER_FLEET_DB_URL === 'https://fleet.invalid'
-  && process.env.LOOM_DRIVER_FLEET_DB_API_KEY === 'scoped-secret'
-  && process.env.LOOM_DRIVER_FLEET_DB_ACTOR === 'driver-run:run-1'
-  && process.env.LOOM_CONFIG_DIR === '/tmp/loom-config';
+const baseEnvOk = process.env.LOOM_CONFIG_DIR === '/tmp/loom-config';
 if (process.send) {
   process.send({ version: 1, type: 'ready', target: 'workflow', name: process.env.FLUE_CLI_NAME || 'epic-runner' });
   process.on('message', (message) => {
-    const result = leaked.length || !handoffOk
-      ? { status: 'failed', summary: 'bad handoff leaked=' + leaked.join(',') + ' handoffOk=' + handoffOk, errorClass: 'env_leak' }
-      : { status: 'completed', summary: 'handoff ok' };
+    const result = leaked.length || !baseEnvOk
+      ? { status: 'failed', summary: 'bad env leaked=' + leaked.join(',') + ' baseEnvOk=' + baseEnvOk, errorClass: 'env_leak' }
+      : { status: 'completed', summary: 'handoff dropped' };
     process.send({ version: 1, type: 'result', requestId: message.requestId, result }, () => process.exit(0));
   });
 }
@@ -495,12 +534,13 @@ if (process.send) {
 		BundleRoot: root,
 		ServerPath: filepath.Join(dist, "server.mjs"),
 		Manifest:   map[string]string{"workflow_name": "epic-runner"},
+		TrustLevel: domain.DriverTrustTrusted,
 	})
 	if err != nil {
 		t.Fatalf("NodeRunner.Run: %v", err)
 	}
-	if result.Status != domain.DriverRunCompleted || result.Summary != "handoff ok" {
-		t.Fatalf("result = %+v, want completed handoff ok", result)
+	if result.Status != domain.DriverRunCompleted || result.Summary != "handoff dropped" {
+		t.Fatalf("result = %+v, want completed handoff dropped", result)
 	}
 }
 
@@ -569,8 +609,215 @@ type recordingRunner struct {
 	err    error
 }
 
+func nodeHasCapability(node *domain.Node, want string) bool {
+	if node == nil {
+		return false
+	}
+	for _, capability := range node.Capabilities {
+		if capability == want {
+			return true
+		}
+	}
+	return false
+}
+
 func (r *recordingRunner) Run(_ context.Context, req RunRequest) (RunResult, error) {
 	r.calls++
 	r.req = req
 	return r.result, r.err
+}
+
+// suspendingRunner simulates a workflow whose await op parked the run: it
+// suspends the run through the store (as the events/await driver op does)
+// and reports the suspended runner result the launcher emits.
+type suspendingRunner struct {
+	store store.Store
+}
+
+func (r *suspendingRunner) Run(ctx context.Context, req RunRequest) (RunResult, error) {
+	run := req.Run
+	if _, err := r.store.DriverRuns().Suspend(ctx, run.WorkspaceKey, run.RunID, run.NodeID, run.LeaseID, run.FencingToken, domain.AwaitInstanceKey(run.RunID, 1)); err != nil {
+		return RunResult{}, err
+	}
+	return RunResult{Status: domain.DriverRunSuspendedAwaitingEvent, Summary: "workflow suspended awaiting event"}, nil
+}
+
+// A suspended runner result is acknowledged without a Finish: the run stays
+// parked in suspended_awaiting_event with its slot released, and no
+// run.finished lifecycle event is published (the run is not terminal).
+func TestExecutorRunOnceAcknowledgesSuspendedRun(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	st := memstore.New()
+	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "TEST", Name: "test"}); err != nil {
+		t.Fatalf("Create workspace: %v", err)
+	}
+	writeFlueDist(t, root, "epic-runner", "done")
+	registered, err := RegisterFlueDriver(ctx, st, RegisterFlueOptions{WorkspaceKey: "TEST", WorkDir: root, DistPath: "dist", DriverName: "epic-runner", CreatedBy: "tester", Activate: true})
+	if err != nil {
+		t.Fatalf("RegisterFlueDriver: %v", err)
+	}
+	if _, err := CreateDriverRun(ctx, st, RunOptions{WorkspaceKey: "TEST", DriverID: registered.Driver.DriverID, RunID: "run-1"}); err != nil {
+		t.Fatalf("CreateDriverRun: %v", err)
+	}
+
+	result, err := (&Executor{
+		Store:             st,
+		WorkspaceKey:      "TEST",
+		WorkDir:           root,
+		NodeID:            "node-1",
+		LeaseID:           "lease-1",
+		Runner:            &suspendingRunner{store: st},
+		HeartbeatInterval: -1,
+	}).RunOnce(ctx)
+	if err != nil {
+		t.Fatalf("RunOnce: %v", err)
+	}
+	if result.Final == nil || result.Final.Status != domain.DriverRunSuspendedAwaitingEvent {
+		t.Fatalf("final = %+v, want suspended_awaiting_event", result.Final)
+	}
+	stored, err := st.DriverRuns().Get(ctx, "TEST", "run-1")
+	if err != nil {
+		t.Fatalf("Get stored run: %v", err)
+	}
+	if stored.Status != domain.DriverRunSuspendedAwaitingEvent || stored.NodeID != "" || stored.LeaseID != "" {
+		t.Fatalf("stored run = %+v, want suspended with released slot", stored)
+	}
+	events, err := st.TriggerEvents().List(ctx, "TEST", store.TriggerEventFilter{})
+	if err != nil {
+		t.Fatalf("List trigger events: %v", err)
+	}
+	if len(events) != 0 {
+		t.Fatalf("trigger events = %d, want none (suspension is not terminal)", len(events))
+	}
+}
+
+// A runner that reports suspended while the run is still running under the
+// executor's lease lied (no await parked it): the run is finished failed so
+// the slot is not leaked to the stale sweeper.
+func TestExecutorRunOnceFailsSuspendedReportWithoutParkedRun(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	st := memstore.New()
+	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "TEST", Name: "test"}); err != nil {
+		t.Fatalf("Create workspace: %v", err)
+	}
+	writeFlueDist(t, root, "epic-runner", "done")
+	registered, err := RegisterFlueDriver(ctx, st, RegisterFlueOptions{WorkspaceKey: "TEST", WorkDir: root, DistPath: "dist", DriverName: "epic-runner", CreatedBy: "tester", Activate: true})
+	if err != nil {
+		t.Fatalf("RegisterFlueDriver: %v", err)
+	}
+	if _, err := CreateDriverRun(ctx, st, RunOptions{WorkspaceKey: "TEST", DriverID: registered.Driver.DriverID, RunID: "run-1"}); err != nil {
+		t.Fatalf("CreateDriverRun: %v", err)
+	}
+
+	result, err := (&Executor{
+		Store:             st,
+		WorkspaceKey:      "TEST",
+		WorkDir:           root,
+		NodeID:            "node-1",
+		LeaseID:           "lease-1",
+		Runner:            &recordingRunner{result: RunResult{Status: domain.DriverRunSuspendedAwaitingEvent, Summary: "workflow suspended awaiting event"}},
+		HeartbeatInterval: -1,
+	}).RunOnce(ctx)
+	if err != nil {
+		t.Fatalf("RunOnce: %v", err)
+	}
+	if result.Final == nil || result.Final.Status != domain.DriverRunFailed || result.Final.ErrorClass != "invalid_driver_result" {
+		t.Fatalf("final = %+v, want failed invalid_driver_result", result.Final)
+	}
+	if result.Final.Summary != "driver reported suspended but no await parked the run" {
+		t.Fatalf("summary = %q, want lying-suspend detail", result.Final.Summary)
+	}
+}
+
+// The launcher converts both workflow-side suspension shapes — the
+// propagated WorkflowSuspended sentinel (error path, recognized by type or
+// by the "workflow_suspended:" message prefix) and a returned
+// suspended-status result — into the clean suspended completion shape.
+func TestNodeRunnerMapsWorkflowSuspensionToSuspendedResult(t *testing.T) {
+	if _, err := exec.LookPath("node"); err != nil {
+		t.Skipf("node not available: %v", err)
+	}
+	cases := []struct {
+		name string
+		send string
+	}{
+		{
+			name: "sentinel error path",
+			send: `process.send({ version: 1, type: 'error', requestId: message.requestId, error: { type: 'workflow_suspended', message: 'workflow_suspended: await #1 parked the run; exiting until the event arrives' } }, () => process.exit(0));`,
+		},
+		{
+			name: "message prefix only",
+			send: `process.send({ version: 1, type: 'error', requestId: message.requestId, error: { type: 'Error', message: 'workflow_suspended: await #2 parked the run; exiting until the event arrives' } }, () => process.exit(0));`,
+		},
+		{
+			name: "returned suspended result",
+			send: `process.send({ version: 1, type: 'result', requestId: message.requestId, result: { status: 'suspended_awaiting_event', summary: 'workflow suspended awaiting event' } }, () => process.exit(0));`,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.Background()
+			root := t.TempDir()
+			st := memstore.New()
+			if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "TEST", Name: "test"}); err != nil {
+				t.Fatalf("Create workspace: %v", err)
+			}
+			writeFlueDistWithHandler(t, root, "suspender", tc.send)
+			registered, err := RegisterFlueDriver(ctx, st, RegisterFlueOptions{WorkspaceKey: "TEST", WorkDir: root, DistPath: "dist", DriverName: "suspender", CreatedBy: "tester", Activate: true})
+			if err != nil {
+				t.Fatalf("RegisterFlueDriver: %v", err)
+			}
+			run, err := CreateDriverRun(ctx, st, RunOptions{WorkspaceKey: "TEST", DriverID: registered.Driver.DriverID, RunID: "run-1"})
+			if err != nil {
+				t.Fatalf("CreateDriverRun: %v", err)
+			}
+			claimed, err := st.DriverRuns().Claim(ctx, "TEST", run.RunID, "node-1", "lease-1")
+			if err != nil {
+				t.Fatalf("Claim: %v", err)
+			}
+			req, err := loadRunRequest(ctx, root, claimed, st)
+			if err != nil {
+				t.Fatalf("loadRunRequest: %v", err)
+			}
+			result, err := (NodeRunner{}).Run(ctx, req)
+			if err != nil {
+				t.Fatalf("NodeRunner.Run: %v", err)
+			}
+			if result.Status != domain.DriverRunSuspendedAwaitingEvent {
+				t.Fatalf("result = %+v, want suspended_awaiting_event", result)
+			}
+			if result.Summary != "workflow suspended awaiting event" {
+				t.Fatalf("summary = %q, want suspended shape summary", result.Summary)
+			}
+		})
+	}
+}
+
+// writeFlueDistWithHandler writes a fake built Flue server whose invoke
+// handler body is supplied by the test (writeFlueDist's completed-result
+// handler, parametrized).
+func writeFlueDistWithHandler(t *testing.T, root, workflowName, handler string) {
+	t.Helper()
+	dist := filepath.Join(root, "dist")
+	if err := os.RemoveAll(dist); err != nil {
+		t.Fatalf("remove dist: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(dist, "assets"), 0o755); err != nil {
+		t.Fatalf("mkdir dist: %v", err)
+	}
+	server := `if (process.send) {
+  process.send({ version: 1, type: 'ready', target: 'workflow', name: process.env.FLUE_CLI_NAME || '` + workflowName + `' });
+  process.on('message', (message) => {
+    ` + handler + `
+  });
+}
+`
+	if err := os.WriteFile(filepath.Join(dist, "server.mjs"), []byte(server), 0o644); err != nil {
+		t.Fatalf("write server: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dist, "assets", "workflow.mjs"), []byte("export const marker = \"suspend\";\n"), 0o644); err != nil {
+		t.Fatalf("write asset: %v", err)
+	}
 }

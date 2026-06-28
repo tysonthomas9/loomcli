@@ -26,6 +26,12 @@ type HostBridgeTaskExecutor struct {
 	Store        store.Store
 	WorktreePath string
 	Command      []string
+	// APIBaseURL, when set, is exported to the spawned task runner as
+	// LOOM_TASK_RUN_API_URL: the serve-hosted task-run API the runner SDK
+	// targets with its per-task-run lease token instead of dialing fleet-db
+	// with deployment credentials (the bridge env already blocks
+	// LOOM_FLEET_DB_* inheritance; this gives runners the sanctioned path).
+	APIBaseURL string
 }
 
 type bridgeTaskRunnerResult struct {
@@ -393,7 +399,7 @@ func (e HostBridgeTaskExecutor) runCommand(ctx context.Context, req TaskExecRequ
 	if worktree := strings.TrimSpace(e.WorktreePath); worktree != "" {
 		cmd.Dir = worktree
 	}
-	cmd.Env = append(taskRunnerBaseEnv(os.Environ()), taskRunnerEnv(req, e.WorktreePath, string(input))...)
+	cmd.Env = append(taskRunnerBaseEnv(os.Environ()), e.taskRunnerEnv(req, string(input))...)
 	cmd.Stdin = bytes.NewReader(input)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
@@ -416,10 +422,10 @@ func (e HostBridgeTaskExecutor) runCommand(ctx context.Context, req TaskExecRequ
 	return result, nil
 }
 
-func taskRunnerEnv(req TaskExecRequest, worktreePath, requestJSON string) []string {
-	return []string{
+func (e HostBridgeTaskExecutor) taskRunnerEnv(req TaskExecRequest, requestJSON string) []string {
+	env := []string{
 		"LOOM_TASK_RUN_REQUEST_JSON=" + requestJSON,
-		"LOOM_WORKTREE_PATH=" + strings.TrimSpace(worktreePath),
+		"LOOM_WORKTREE_PATH=" + strings.TrimSpace(e.WorktreePath),
 		"LOOM_DRIVER_WORKSPACE=" + req.WorkspaceKey,
 		"LOOM_DRIVER_RUN_ID=" + req.DriverRunID,
 		"LOOM_DRIVER_STEP_ID=" + req.DriverStepID,
@@ -436,6 +442,10 @@ func taskRunnerEnv(req TaskExecRequest, worktreePath, requestJSON string) []stri
 		"LOOM_TASK_RUN_RUNNER_PLACEMENT_JSON=" + taskRunPlacementJSON(req.RunnerPlacement),
 		"LOOM_TASK_RUN_SANDBOX_PLACEMENT_JSON=" + taskRunPlacementJSON(req.SandboxPlacement),
 	}
+	if apiBaseURL := strings.TrimSpace(e.APIBaseURL); apiBaseURL != "" {
+		env = append(env, "LOOM_TASK_RUN_API_URL="+apiBaseURL)
+	}
+	return env
 }
 
 func taskRunPlacementJSON(placement domain.TaskRunPlacement) string {

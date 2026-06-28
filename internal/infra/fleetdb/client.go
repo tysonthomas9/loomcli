@@ -44,7 +44,7 @@ type Config struct {
 	BaseURL string
 
 	// APIKey is sent as X-API-Key and X-Fleet-API-Key. Optional in dev mode.
-	APIKey string
+	APIKey string //nolint:gosec // G117: fleet-db API key intentionally carried by client config.
 
 	// Actor is sent as X-Actor on every request. Identifies the caller
 	// for audit + (in dev-mode) authorization.
@@ -53,7 +53,7 @@ type Config struct {
 	// AuthToken is a JWT bearer token for production auth. When set,
 	// sent as `Authorization: Bearer <token>`. Mutate post-construction
 	// via SetAuthToken — safe for concurrent use.
-	AuthToken string
+	AuthToken string //nolint:gosec // G117: bearer token intentionally carried by client config.
 
 	// HTTPClient is an optional override. When nil, a new http.Client
 	// with default settings is used. Production callers should inject a
@@ -93,9 +93,16 @@ type Client struct {
 	runs       *driverRunStore
 	steps      *driverStepStore
 	taskRuns   *taskRunStore
+	taskEvents *taskRunEventStore
+	outbox     *outboxStore
+	awaits     *awaitStore
 	workers    *workerStore
 	roles      *roleStore
 	daemon     *daemonStore
+
+	connectors      *connectorStore
+	connectorGrants *connectorGrantStore
+	connectorCalls  *connectorAuditStore
 }
 
 // New constructs a fleet-db client. Returns an error if BaseURL is empty.
@@ -138,9 +145,15 @@ func New(cfg Config) (*Client, error) {
 	c.runs = &driverRunStore{client: c}
 	c.steps = &driverStepStore{client: c}
 	c.taskRuns = &taskRunStore{client: c}
+	c.taskEvents = &taskRunEventStore{client: c}
+	c.outbox = &outboxStore{client: c}
+	c.awaits = &awaitStore{client: c}
 	c.workers = &workerStore{client: c}
 	c.roles = &roleStore{client: c}
 	c.daemon = &daemonStore{client: c}
+	c.connectors = &connectorStore{client: c}
+	c.connectorGrants = &connectorGrantStore{client: c}
+	c.connectorCalls = &connectorAuditStore{client: c}
 	return c, nil
 }
 
@@ -205,6 +218,15 @@ func (c *Client) DriverSteps() store.DriverStepStore { return c.steps }
 
 // TaskRuns returns the TaskRunStore.
 func (c *Client) TaskRuns() store.TaskRunStore { return c.taskRuns }
+
+// TaskRunEvents returns the TaskRunEventStore.
+func (c *Client) TaskRunEvents() store.TaskRunEventStore { return c.taskEvents }
+
+// Outbox returns the OutboxStore.
+func (c *Client) Outbox() store.OutboxStore { return c.outbox }
+
+// Awaits returns the AwaitStore (fleet-db await routes, chunk AW5).
+func (c *Client) Awaits() store.AwaitStore { return c.awaits }
 
 // Workers returns the WorkerStore.
 func (c *Client) Workers() store.WorkerStore { return c.workers }
@@ -338,14 +360,26 @@ func classifyHTTPError(method, path string, status int, body []byte) error {
 			return fmt.Errorf("%s: %w", prefix, domain.ErrInvalidTransition)
 		case "conflict":
 			return fmt.Errorf("%s: %w", prefix, domain.ErrConflict)
+		case "driver_run_already_resumed":
+			// Park->suspend window: the await resolved before the suspend
+			// landed — the run must continue inline, never park.
+			return fmt.Errorf("%s: %w", prefix, domain.ErrDriverRunAlreadyResumed)
 		}
 		return fmt.Errorf("%s: %w", prefix, domain.ErrAlreadyExists)
 	case http.StatusForbidden:
+		if code == "await_actor_forbidden" {
+			return fmt.Errorf("%s: %w", prefix, domain.ErrAwaitActorForbidden)
+		}
 		if strings.Contains(path, "/driver-runs/") {
 			return fmt.Errorf("%s: %w", prefix, domain.ErrNotOwner)
 		}
 		return fmt.Errorf("%s: %w", prefix, domain.ErrConflict)
 	case http.StatusBadRequest, http.StatusUnprocessableEntity:
+		// Structured await validation codes map back onto their domain
+		// sentinels (each wraps domain.ErrInvalid).
+		if sentinel := awaitErrSentinel(code); sentinel != nil {
+			return fmt.Errorf("%s: %w", prefix, sentinel)
+		}
 		return fmt.Errorf("%s: %w", prefix, domain.ErrInvalid)
 	case http.StatusGone:
 		// fleet-db heartbeat: lease exists, token is ours, but it is no

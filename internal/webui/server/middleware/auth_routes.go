@@ -15,26 +15,8 @@ func isPublicRoute(method, path string) bool {
 	// e.g. /api/workspaces/my-ws/fleet/... → /api/fleet/...
 	normalizedPath := stripWorkspacePrefix(path)
 
-	// Fleet endpoints use their own authentication (API key for register, JWT for claim/done/heartbeat)
-	if strings.HasPrefix(normalizedPath, "/api/fleet/") {
-		return true
-	}
-
-	// Worker API routes use their own LOOM_WORKER_TOKEN auth
-	if strings.HasPrefix(normalizedPath, "/api/internal/workers/") {
-		return true
-	}
-
-	// Inbound webhooks authenticate via a per-binding signature (e.g. GitHub's
-	// X-Hub-Signature-256 HMAC), verified inside the handler — not via user JWT.
-	// e.g. /api/workspaces/{ws}/webhooks/github → /api/webhooks/github
-	if strings.HasPrefix(normalizedPath, "/api/webhooks/") {
-		return true
-	}
-
-	// All auth routes are public — the BetterAuth service handles its own auth.
-	// Must be above the GET-only gate because sign-in/sign-up use POST.
-	if strings.HasPrefix(normalizedPath, "/api/auth/") {
+	// Routes whose handlers enforce their own authentication scheme.
+	if hasOwnAuthPrefix(normalizedPath) {
 		return true
 	}
 
@@ -78,6 +60,34 @@ func isPublicRoute(method, path string) bool {
 		return true
 	}
 
+	return false
+}
+
+// hasOwnAuthPrefix reports whether the (workspace-normalized) path belongs to
+// a route family that authenticates inside its own handler instead of the
+// user-JWT middleware:
+//   - /api/fleet/: API key for register, fleet JWT for claim/done/heartbeat
+//   - /api/internal/workers/: LOOM_WORKER_TOKEN bearer auth
+//   - /api/webhooks/: per-binding signature (e.g. GitHub X-Hub-Signature-256)
+//   - /api/driver/: run-scoped DriverRun credentials (X-Loom-Driver-* headers,
+//     fenced heartbeat) plus an optional shared bearer token
+//   - /api/task-run/: per-task-run lease-token bearer auth verified through
+//     the store's fenced task-run checks (taskrunapi)
+//   - /api/auth/: proxied to the BetterAuth service, which handles its own
+//     auth; must bypass the GET-only gate because sign-in/sign-up use POST
+func hasOwnAuthPrefix(normalizedPath string) bool {
+	for _, prefix := range []string{
+		"/api/fleet/",
+		"/api/internal/workers/",
+		"/api/webhooks/",
+		"/api/driver/",
+		"/api/task-run/",
+		"/api/auth/",
+	} {
+		if strings.HasPrefix(normalizedPath, prefix) {
+			return true
+		}
+	}
 	return false
 }
 

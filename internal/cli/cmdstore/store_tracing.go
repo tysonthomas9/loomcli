@@ -57,9 +57,15 @@ func WrapStoreWithTracing(inner store.Store) store.Store {
 		driverRuns:           &tracedDriverRunStore{inner: inner.DriverRuns()},
 		driverSteps:          &tracedDriverStepStore{inner: inner.DriverSteps()},
 		taskRuns:             &tracedTaskRunStore{inner: inner.TaskRuns()},
+		taskRunEvents:        &tracedTaskRunEventStore{inner: inner.TaskRunEvents()},
+		outbox:               &tracedOutboxStore{inner: inner.Outbox()},
+		awaits:               &tracedAwaitStore{inner: inner.Awaits()},
 		workers:              &tracedWorkerStore{inner: inner.Workers()},
 		roles:                &tracedRoleStore{inner: inner.Roles()},
 		daemon:               &tracedDaemonStore{inner: inner.Daemon()},
+		connectors:           &tracedConnectorStore{inner: inner.Connectors()},
+		connectorGrants:      &tracedConnectorGrantStore{inner: inner.ConnectorGrants()},
+		connectorCalls:       &tracedConnectorAuditStore{inner: inner.ConnectorCalls()},
 	}
 }
 
@@ -84,9 +90,15 @@ type tracedStore struct {
 	driverRuns           *tracedDriverRunStore
 	driverSteps          *tracedDriverStepStore
 	taskRuns             *tracedTaskRunStore
+	taskRunEvents        *tracedTaskRunEventStore
+	outbox               *tracedOutboxStore
+	awaits               *tracedAwaitStore
 	workers              *tracedWorkerStore
 	roles                *tracedRoleStore
 	daemon               *tracedDaemonStore
+	connectors           *tracedConnectorStore
+	connectorGrants      *tracedConnectorGrantStore
+	connectorCalls       *tracedConnectorAuditStore
 }
 
 func (t *tracedStore) Workspaces() store.WorkspaceStore       { return t.workspaces }
@@ -136,10 +148,20 @@ func (t *tracedStore) DriverRuns() store.DriverRunStore { return t.driverRuns }
 func (t *tracedStore) DriverSteps() store.DriverStepStore {
 	return t.driverSteps
 }
-func (t *tracedStore) TaskRuns() store.TaskRunStore     { return t.taskRuns }
+func (t *tracedStore) TaskRuns() store.TaskRunStore { return t.taskRuns }
+func (t *tracedStore) TaskRunEvents() store.TaskRunEventStore {
+	return t.taskRunEvents
+}
+func (t *tracedStore) Outbox() store.OutboxStore {
+	return t.outbox
+}
 func (t *tracedStore) Workers() store.WorkerStore       { return t.workers }
 func (t *tracedStore) Roles() store.RoleStore           { return t.roles }
 func (t *tracedStore) Daemon() store.DaemonProfileStore { return t.daemon }
+
+// Awaits returns the traced await wrapper (chunk AW5): spans per call with
+// workspace / instance / run / pattern attributes.
+func (t *tracedStore) Awaits() store.AwaitStore { return t.awaits }
 
 func (t *tracedStore) Close() error {
 	if c, ok := t.inner.(io.Closer); ok {

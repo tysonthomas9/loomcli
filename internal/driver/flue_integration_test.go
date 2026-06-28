@@ -2,13 +2,20 @@
 package driver
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
@@ -80,7 +87,19 @@ func TestRealFlueBuildAndBuiltServerSmoke(t *testing.T) {
 	}
 }
 
-func TestRealFlueEpicLoopDrainsDAGSmoke(t *testing.T) {
+// TestRealFlueBuiltinEpicRunnerWatchLoopSmoke builds the actual builtin
+// epic-runner workflow source with the real Flue CLI and drives it against a
+// fake driver-op HTTP API (including the epic watch SSE stream). The fake
+// mirrors the serve worker contract: exec-task executes immediately,
+// completes-and-closes (or parks) the task server-side, and appends the
+// terminal journal event the watch stream delivers; the workflow's follow-up
+// complete-task gets the worker-conflict the real server would return.
+//
+// The smoke runs under the §9.5 locked-down token-only env (TK5): the legacy
+// auth fallback is switched off, a run-scoped token is minted for the claimed
+// lease, and the fake rejects any request that presents legacy
+// X-Loom-Driver-* identity headers or a bad bearer token.
+func TestRealFlueBuiltinEpicRunnerWatchLoopSmoke(t *testing.T) {
 	if os.Getenv("LOOM_REAL_FLUE_TEST") != "1" {
 		t.Skip("set LOOM_REAL_FLUE_TEST=1 to run the real Flue CLI smoke")
 	}
@@ -88,6 +107,9 @@ func TestRealFlueEpicLoopDrainsDAGSmoke(t *testing.T) {
 		t.Skipf("node not available: %v", err)
 	}
 	flueCommand := realFlueCommandForTest(t)
+	nodePath := nodePathForTest(t)
+	t.Setenv(LegacyDriverAuthEnvVar, "0")
+	runTokenKey := bytes.Repeat([]byte{0x42}, 32)
 
 	ctx := context.Background()
 	root := t.TempDir()
@@ -95,208 +117,515 @@ func TestRealFlueEpicLoopDrainsDAGSmoke(t *testing.T) {
 	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "TEST", Name: "test"}); err != nil {
 		t.Fatalf("Create workspace: %v", err)
 	}
-	writeRealFlueProject(t, root, "real-flue-epic-loop", `import { createLoomDriverClient } from "@loom/sdk/flue";
-
-export async function run(ctx) {
-  const input = ctx.payload || {};
-  const loom = createLoomDriverClient({ input });
-  const completed = [];
-  while (true) {
-    const task = await loom.tasks.claimReady({ epicId: input.epicId });
-    if (!task) {
-      return loom.completed({ summary: "drained:" + completed.join(",") });
-    }
-    const result = await loom.taskRuns.request({
-      taskId: task.id,
-      providerProfile: "local-noop",
-    });
-    if (result.status !== "completed") {
-      await loom.tasks.release(task.id);
-      return loom.needsReview({ summary: "failed:" + task.id, taskRunId: result.id });
-    }
-    await loom.tasks.complete(task.id);
-    completed.push(task.id);
-  }
-}
-`)
+	writeRealFlueProject(t, root, "epic-runner", builtinEpicRunnerSource(t))
 	buildRealFlueProject(t, root, flueCommand)
-
 	registered, err := RegisterFlueDriver(ctx, st, RegisterFlueOptions{
 		WorkspaceKey: "TEST",
 		WorkDir:      root,
 		DistPath:     "dist",
-		DriverName:   "real-flue-epic-loop",
-		WorkflowName: "real-flue-epic-loop",
-		SourceRef:    "workflows/real-flue-epic-loop.ts",
+		DriverName:   "epic-runner",
+		WorkflowName: "epic-runner",
+		SourceRef:    "workflows/epic-runner.ts",
 		CreatedBy:    "tester",
 		Activate:     true,
 	})
 	if err != nil {
 		t.Fatalf("RegisterFlueDriver after real Flue build %q: %v", strings.Join(flueCommand, " "), err)
 	}
-	run, err := CreateDriverRun(ctx, st, RunOptions{
-		WorkspaceKey: "TEST",
-		DriverID:     registered.Driver.DriverID,
-		EpicID:       "TEST-1",
-		RunID:        "run-epic-loop-1",
-		Payload:      json.RawMessage(`{"epicId":"TEST-1"}`),
-	})
-	if err != nil {
-		t.Fatalf("CreateDriverRun: %v", err)
-	}
-	claimed, err := st.DriverRuns().Claim(ctx, "TEST", run.RunID, "node-1", "lease-1")
-	if err != nil {
-		t.Fatalf("Claim: %v", err)
-	}
-	req, err := loadRunRequest(ctx, root, claimed, st)
-	if err != nil {
-		t.Fatalf("loadRunRequest: %v", err)
-	}
 
-	statePath := filepath.Join(root, "fake-loom-state.json")
-	fakeLoom := writeRealFlueEpicLoopFakeLoom(t, root)
-	result, err := (NodeRunner{ExecTaskCommand: []string{nodePathForTest(t), fakeLoom, statePath}}).Run(ctx, req)
-	if err != nil {
-		t.Fatalf("NodeRunner.Run: %v", err)
+	// Each case gets its own epic: a finished NodeRunner invocation leaves the
+	// DriverRun row running in the store (the executor normally finishes it),
+	// and CreateDriverRun reuses active runs per epic.
+	cases := []struct {
+		name          string
+		epicID        string
+		failTask      string
+		wantStatus    domain.DriverRunStatus
+		wantSummary   string
+		wantError     string
+		wantExecuted  string
+		wantCompleted []string
+	}{
+		{
+			name:          "watch-driven DAG drain completes",
+			epicID:        "TEST-1",
+			wantStatus:    domain.DriverRunCompleted,
+			wantSummary:   "Epic drained TEST-1: TEST-A,TEST-B,TEST-C,TEST-D",
+			wantExecuted:  "TEST-A,TEST-B,TEST-C,TEST-D",
+			wantCompleted: []string{"TEST-A", "TEST-B", "TEST-C", "TEST-D"},
+		},
+		{
+			name:          "parked branch drains siblings into needs_review",
+			epicID:        "TEST-2",
+			failTask:      "TEST-C",
+			wantStatus:    domain.DriverRunNeedsReview,
+			wantSummary:   "TEST-C",
+			wantError:     "epic_tasks_parked",
+			wantExecuted:  "TEST-A,TEST-B,TEST-C,TEST-D",
+			wantCompleted: []string{"TEST-A", "TEST-B", "TEST-D"},
+		},
 	}
-	wantSummary := "drained:TEST-A,TEST-B,TEST-C,TEST-D"
-	if result.Status != domain.DriverRunCompleted || result.Summary != wantSummary {
-		if data, readErr := os.ReadFile(statePath); readErr == nil {
-			t.Logf("fake loom state: %s", strings.TrimSpace(string(data)))
-		} else {
-			t.Logf("fake loom state unavailable: %v", readErr)
-		}
-		t.Fatalf("result = %+v, want completed %q", result, wantSummary)
-	}
-	state := readRealFlueEpicLoopState(t, statePath)
-	if strings.Join(state.Completed, ",") != "TEST-A,TEST-B,TEST-C,TEST-D" {
-		t.Fatalf("completed order = %+v, want TEST-A,TEST-B,TEST-C,TEST-D", state.Completed)
-	}
-	if strings.Join(state.Executed, ",") != "TEST-A,TEST-B,TEST-C,TEST-D" {
-		t.Fatalf("executed order = %+v, want TEST-A,TEST-B,TEST-C,TEST-D", state.Executed)
+	for i, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			fake := newFakeEpicAPI(tc.epicID, tc.failTask)
+			// Happy path: A -> (B, C) -> D. Parked path: C has no dependents so
+			// the sibling branch B -> D drains around the injected failure.
+			fake.addTask("TEST-A")
+			fake.addTask("TEST-B", "TEST-A")
+			fake.addTask("TEST-C", "TEST-A")
+			if tc.failTask == "" {
+				fake.addTask("TEST-D", "TEST-B", "TEST-C")
+			} else {
+				fake.addTask("TEST-D", "TEST-B")
+			}
+			server := httptest.NewServer(fake)
+			defer server.Close()
+
+			runID := fmt.Sprintf("run-epic-watch-%d", i+1)
+			run, err := CreateDriverRun(ctx, st, RunOptions{
+				WorkspaceKey: "TEST",
+				DriverID:     registered.Driver.DriverID,
+				EpicID:       tc.epicID,
+				RunID:        runID,
+				Payload:      json.RawMessage(`{"epicId":"` + tc.epicID + `"}`),
+			})
+			if err != nil {
+				t.Fatalf("CreateDriverRun: %v", err)
+			}
+			claimed, err := st.DriverRuns().Claim(ctx, "TEST", run.RunID, "node-1", "lease-"+runID)
+			if err != nil {
+				t.Fatalf("Claim: %v", err)
+			}
+			req, err := loadRunRequest(ctx, root, claimed, st)
+			if err != nil {
+				t.Fatalf("loadRunRequest: %v", err)
+			}
+			req.RunToken, err = MintRunToken(RunTokenClaims{
+				WorkspaceKey: claimed.WorkspaceKey,
+				RunID:        claimed.RunID,
+				NodeID:       claimed.NodeID,
+				LeaseID:      claimed.LeaseID,
+				FencingToken: claimed.FencingToken,
+			}, runTokenKey, time.Hour)
+			if err != nil {
+				t.Fatalf("MintRunToken: %v", err)
+			}
+			fake.requireRunToken(runTokenKey, claimed.RunID)
+
+			runCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+			defer cancel()
+			result, err := (NodeRunner{
+				APIBaseURL: server.URL,
+				// Inert: the SDK is HTTP-only; this only keeps the runner from
+				// exporting the test binary as a CLI fallback.
+				ExecTaskCommand: []string{nodePath},
+			}).Run(runCtx, req)
+			if err != nil {
+				t.Fatalf("NodeRunner.Run: %v", err)
+			}
+			if result.Status != tc.wantStatus || !strings.Contains(result.Summary, tc.wantSummary) {
+				t.Fatalf("result = %+v, want status %q with summary containing %q\nfake state: %s",
+					result, tc.wantStatus, tc.wantSummary, fake.debugState())
+			}
+			if tc.wantError != "" && result.ErrorClass != tc.wantError {
+				t.Fatalf("error class = %q, want %q", result.ErrorClass, tc.wantError)
+			}
+			executed, completes := fake.observed()
+			if strings.Join(executed, ",") != tc.wantExecuted {
+				t.Fatalf("executed order = %v, want %s", executed, tc.wantExecuted)
+			}
+			if len(completes) != len(tc.wantCompleted) {
+				t.Fatalf("complete-task calls = %+v, want one per completed task %v", completes, tc.wantCompleted)
+			}
+			for j, want := range tc.wantCompleted {
+				call := completes[j]
+				if call.TaskID != want {
+					t.Fatalf("complete[%d].TaskID = %q, want %q", j, call.TaskID, want)
+				}
+				if call.LeaseToken != "token-"+want {
+					t.Fatalf("complete[%d].LeaseToken = %q, want watch event lease token", j, call.LeaseToken)
+				}
+				if call.CompletionID != "complete-"+call.TaskRunID {
+					t.Fatalf("complete[%d].CompletionID = %q, want deterministic completion id for %q", j, call.CompletionID, call.TaskRunID)
+				}
+			}
+			if tc.failTask != "" && fake.taskStatus(tc.failTask) != "parked" {
+				t.Fatalf("task %s status = %q, want parked", tc.failTask, fake.taskStatus(tc.failTask))
+			}
+			if violations := fake.authViolations(); len(violations) != 0 {
+				t.Fatalf("token-only auth violations: %v", violations)
+			}
+		})
 	}
 }
 
-type realFlueEpicLoopState struct {
-	Completed []string `json:"completed"`
-	Executed  []string `json:"executed"`
-}
-
-func writeRealFlueEpicLoopFakeLoom(t *testing.T, root string) string {
+// builtinEpicRunnerSource loads the real builtin epic-runner workflow source
+// so the smoke covers the exact code loom serve bundles.
+func builtinEpicRunnerSource(t *testing.T) string {
 	t.Helper()
-	path := filepath.Join(root, "fake-loom.mjs")
-	script := `#!/usr/bin/env node
-import fs from 'node:fs';
-
-const statePath = process.argv[2];
-if (!statePath) {
-  console.error('missing fake loom state path argument');
-  process.exit(2);
-}
-
-function loadState() {
-  try {
-    return JSON.parse(fs.readFileSync(statePath, 'utf8'));
-  } catch {
-    return { completed: [], executed: [] };
-  }
-}
-
-function saveState(state) {
-  fs.writeFileSync(statePath, JSON.stringify(state));
-}
-
-function argValue(args, flag) {
-  const idx = args.indexOf(flag);
-  return idx >= 0 && idx + 1 < args.length ? args[idx + 1] : '';
-}
-
-function nextReady(completed) {
-  const done = new Set(completed);
-  if (!done.has('TEST-A')) return 'TEST-A';
-  if (!done.has('TEST-B')) return 'TEST-B';
-  if (!done.has('TEST-C')) return 'TEST-C';
-  if (done.has('TEST-B') && done.has('TEST-C') && !done.has('TEST-D')) return 'TEST-D';
-  return '';
-}
-
-const args = process.argv.slice(3);
-if (args[0] !== 'driver') {
-  console.error('expected driver subcommand');
-  process.exit(3);
-}
-
-const state = loadState();
-switch (args[1]) {
-  case 'claim-ready': {
-    const task = nextReady(state.completed || []);
-    if (task) {
-      console.log(JSON.stringify({ id: task, title: task }));
-    }
-    break;
-  }
-  case 'exec-task': {
-    const task = argValue(args, '--task-id');
-    if (!task) {
-      console.error('exec-task missing --task-id');
-      process.exit(4);
-    }
-    state.executed = state.executed || [];
-    state.executed.push(task);
-    saveState(state);
-    const taskRunId = 'task-run-' + task.toLowerCase();
-    console.log(JSON.stringify({
-      id: taskRunId,
-      taskRunId,
-      taskId: task,
-      leaseToken: 'token-' + task,
-      status: 'completed',
-      exitCode: 0,
-      logsRef: 'logs://' + taskRunId,
-      summary: 'ran ' + task
-    }));
-    break;
-  }
-  case 'complete-task': {
-    const task = argValue(args, '--task-id');
-    const taskRunId = argValue(args, '--task-run-id');
-    const token = argValue(args, '--lease-token');
-    if (!task || taskRunId !== 'task-run-' + task.toLowerCase() || token !== 'token-' + task) {
-      console.error('complete-task missing remembered task-run id or lease token');
-      process.exit(5);
-    }
-    state.completed = state.completed || [];
-    if (!state.completed.includes(task)) state.completed.push(task);
-    saveState(state);
-    console.log(JSON.stringify({ id: task, status: 'completed' }));
-    break;
-  }
-  case 'release-task':
-    console.error('unexpected release-task for happy path');
-    process.exit(6);
-    break;
-  default:
-    console.error('unexpected driver command: ' + args[1]);
-    process.exit(7);
-}
-`
-	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
-		t.Fatalf("write fake loom command: %v", err)
+	path, err := filepath.Abs(filepath.Join("..", "workflows", "builtin", "epic-runner.ts"))
+	if err != nil {
+		t.Fatalf("resolve builtin epic-runner source: %v", err)
 	}
-	return path
-}
-
-func readRealFlueEpicLoopState(t *testing.T, path string) realFlueEpicLoopState {
-	t.Helper()
 	data, err := os.ReadFile(path)
 	if err != nil {
-		t.Fatalf("read fake loom state: %v", err)
+		t.Fatalf("read builtin epic-runner source: %v", err)
 	}
-	var state realFlueEpicLoopState
-	if err := json.Unmarshal(data, &state); err != nil {
-		t.Fatalf("decode fake loom state: %v", err)
+	return string(data)
+}
+
+// fakeEpicAPI is an in-test driver-op HTTP API with the watch SSE stream. It
+// keeps one epic's DAG state and mimics the serve task-worker contract:
+// exec-task runs the task inline, closes (or parks) it, and appends the
+// terminal TaskRun journal event; complete-task answers with the
+// already-completed conflict the real worker-closed path produces.
+type fakeEpicAPI struct {
+	mu        sync.Mutex
+	epicID    string
+	failTask  string
+	order     []string
+	tasks     map[string]*fakeEpicTask
+	events    []fakeEpicEvent
+	executed  []string
+	completes []fakeCompleteCall
+	// tokenKey, when set, makes the fake enforce the TK5 token-only
+	// transport: every request must carry a parseable run-scoped bearer for
+	// wantRunID and no legacy X-Loom-Driver-* identity headers.
+	tokenKey   []byte
+	wantRunID  string
+	violations []string
+}
+
+type fakeEpicTask struct {
+	deps   []string
+	status string // open | claimed | closed | parked
+}
+
+type fakeEpicEvent struct {
+	seq  int64
+	data map[string]any
+}
+
+type fakeCompleteCall struct {
+	TaskID       string `json:"taskId"`
+	TaskRunID    string `json:"taskRunId"`
+	CompletionID string `json:"completionId"`
+	LeaseToken   string `json:"leaseToken"`
+}
+
+func newFakeEpicAPI(epicID, failTask string) *fakeEpicAPI {
+	return &fakeEpicAPI{epicID: epicID, failTask: failTask, tasks: map[string]*fakeEpicTask{}}
+}
+
+func (f *fakeEpicAPI) addTask(id string, deps ...string) {
+	f.order = append(f.order, id)
+	f.tasks[id] = &fakeEpicTask{deps: deps, status: "open"}
+}
+
+func (f *fakeEpicAPI) observed() ([]string, []fakeCompleteCall) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string(nil), f.executed...), append([]fakeCompleteCall(nil), f.completes...)
+}
+
+func (f *fakeEpicAPI) taskStatus(id string) string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if task, ok := f.tasks[id]; ok {
+		return task.status
 	}
-	return state
+	return ""
+}
+
+func (f *fakeEpicAPI) debugState() string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	state := map[string]any{"executed": f.executed, "completes": f.completes, "events": len(f.events)}
+	statuses := map[string]string{}
+	for id, task := range f.tasks {
+		statuses[id] = task.status
+	}
+	state["tasks"] = statuses
+	encoded, _ := json.Marshal(state)
+	return string(encoded)
+}
+
+// requireRunToken switches the fake into token-only enforcement for one run.
+func (f *fakeEpicAPI) requireRunToken(key []byte, runID string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.tokenKey = append([]byte(nil), key...)
+	f.wantRunID = runID
+	f.violations = nil
+}
+
+func (f *fakeEpicAPI) authViolations() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string(nil), f.violations...)
+}
+
+func (f *fakeEpicAPI) recordViolation(r *http.Request, detail string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.violations = append(f.violations, r.Method+" "+r.URL.Path+": "+detail)
+}
+
+// verifyTokenOnlyAuth mirrors the serve-side TK2 contract: a token-only call
+// presents Authorization: Bearer <run token> and nothing else — any legacy
+// X-Loom-Driver-* identity header alongside it is an identity violation.
+func (f *fakeEpicAPI) verifyTokenOnlyAuth(r *http.Request) {
+	for name := range r.Header {
+		if strings.HasPrefix(strings.ToLower(name), "x-loom-driver-") {
+			f.recordViolation(r, "legacy identity header "+name+" present under token-only transport")
+		}
+	}
+	claims, err := f.bearerRunClaims(r)
+	if err != nil {
+		f.recordViolation(r, err.Error())
+		return
+	}
+	if claims.RunID != f.wantRunID {
+		f.recordViolation(r, "token run id "+claims.RunID+", want "+f.wantRunID)
+	}
+}
+
+func (f *fakeEpicAPI) bearerRunClaims(r *http.Request) (*RunTokenClaims, error) {
+	auth := strings.TrimSpace(r.Header.Get("Authorization"))
+	token, ok := strings.CutPrefix(auth, "Bearer ")
+	if !ok || strings.TrimSpace(token) == "" {
+		return nil, fmt.Errorf("missing run token bearer (Authorization=%q)", auth)
+	}
+	return ParseRunToken(strings.TrimSpace(token), f.tokenKey)
+}
+
+// driverRunID resolves the calling run's identity: from the run token claims
+// under token-only enforcement, from the legacy identity header otherwise.
+func (f *fakeEpicAPI) driverRunID(r *http.Request) string {
+	if len(f.tokenKey) == 0 {
+		return r.Header.Get("X-Loom-Driver-Run-Id")
+	}
+	claims, err := f.bearerRunClaims(r)
+	if err != nil {
+		return ""
+	}
+	return claims.RunID
+}
+
+func (f *fakeEpicAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if len(f.tokenKey) > 0 {
+		f.verifyTokenOnlyAuth(r)
+	}
+	if r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/driver/watch/epic") {
+		f.handleWatch(w, r)
+		return
+	}
+	op := r.URL.Path[strings.LastIndex(r.URL.Path, "/")+1:]
+	var params map[string]any
+	_ = json.NewDecoder(r.Body).Decode(&params)
+	switch op {
+	case "epic-get":
+		writeFakeJSON(w, map[string]any{"id": f.epicID, "issue_type": "epic"})
+	case "claim-ready":
+		writeFakeJSON(w, f.claimReady())
+	case "exec-task":
+		writeFakeJSON(w, f.execTask(r, params))
+	case "complete-task":
+		f.recordComplete(params)
+		writeFakeError(w, http.StatusConflict, "invalid_transition", "task run already completed by worker")
+	case "release-task":
+		f.releaseTask(params)
+		writeFakeJSON(w, map[string]any{"id": stringParam(params, "taskId"), "released": true})
+	case "epic-snapshot":
+		writeFakeJSON(w, f.snapshot())
+	case "active-task-runs":
+		writeFakeJSON(w, map[string]any{"driverRunId": f.driverRunID(r), "activeCount": 0})
+	default:
+		writeFakeError(w, http.StatusNotFound, "unknown_op", "unknown driver op "+op)
+	}
+}
+
+func (f *fakeEpicAPI) claimReady() any {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for _, id := range f.order {
+		task := f.tasks[id]
+		if task.status != "open" || !f.depsClosedLocked(task) {
+			continue
+		}
+		task.status = "claimed"
+		return map[string]any{"id": id, "title": id}
+	}
+	return nil
+}
+
+func (f *fakeEpicAPI) depsClosedLocked(task *fakeEpicTask) bool {
+	for _, dep := range task.deps {
+		if f.tasks[dep] == nil || f.tasks[dep].status != "closed" {
+			return false
+		}
+	}
+	return true
+}
+
+// execTask mimics enqueue + instant worker execution: the task transitions to
+// closed (or parked for the configured failure) and the terminal journal
+// event is appended for the watch stream before the queued response returns.
+func (f *fakeEpicAPI) execTask(r *http.Request, params map[string]any) any {
+	taskID := stringParam(params, "taskId")
+	taskRunID := stringParam(params, "taskRunId")
+	driverRunID := f.driverRunID(r)
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.executed = append(f.executed, taskID)
+	event := map[string]any{
+		"driverRunID": driverRunID,
+		"epicID":      f.epicID,
+		"taskID":      taskID,
+		"taskRunID":   taskRunID,
+		"attempt":     0,
+		"leaseToken":  "token-" + taskID,
+		"logsRef":     "logs://" + taskRunID,
+	}
+	if task := f.tasks[taskID]; task != nil {
+		if taskID == f.failTask {
+			task.status = "parked"
+			event["type"] = "taskRunParked"
+			event["status"] = "failed"
+			event["schedulerState"] = "parked"
+			event["errorClass"] = "injected_task_failure"
+			event["errorMessage"] = "deliberate failure injected by fake epic API"
+		} else {
+			task.status = "closed"
+			event["type"] = "taskRunCompleted"
+			event["status"] = "completed"
+		}
+	}
+	f.events = append(f.events, fakeEpicEvent{seq: int64(len(f.events) + 1), data: event})
+	return map[string]any{"id": taskRunID, "taskRunId": taskRunID, "taskId": taskID, "status": "queued"}
+}
+
+func (f *fakeEpicAPI) recordComplete(params map[string]any) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.completes = append(f.completes, fakeCompleteCall{
+		TaskID:       stringParam(params, "taskId"),
+		TaskRunID:    stringParam(params, "taskRunId"),
+		CompletionID: stringParam(params, "completionId"),
+		LeaseToken:   stringParam(params, "leaseToken"),
+	})
+}
+
+func (f *fakeEpicAPI) releaseTask(params map[string]any) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if task := f.tasks[stringParam(params, "taskId")]; task != nil && task.status == "claimed" {
+		task.status = "open"
+	}
+}
+
+func (f *fakeEpicAPI) snapshot() map[string]any {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.snapshotLocked()
+}
+
+func (f *fakeEpicAPI) snapshotLocked() map[string]any {
+	ready := []map[string]any{}
+	blocked := []map[string]any{}
+	open := []map[string]any{}
+	for _, id := range f.order {
+		task := f.tasks[id]
+		if task.status == "closed" {
+			continue
+		}
+		summary := map[string]any{"id": id, "title": id, "status": task.status}
+		open = append(open, summary)
+		if task.status == "open" {
+			if f.depsClosedLocked(task) {
+				ready = append(ready, summary)
+			} else {
+				blocked = append(blocked, summary)
+			}
+		}
+	}
+	return map[string]any{
+		"epicId":            f.epicID,
+		"readyCount":        len(ready),
+		"blockedCount":      len(blocked),
+		"openChildrenCount": len(open),
+		"ready":             ready,
+		"blocked":           blocked,
+		"openChildren":      open,
+	}
+}
+
+func (f *fakeEpicAPI) handleWatch(w http.ResponseWriter, r *http.Request) {
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		writeFakeError(w, http.StatusInternalServerError, "internal", "streaming unsupported")
+		return
+	}
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.WriteHeader(http.StatusOK)
+	cursor, _ := strconv.ParseInt(strings.TrimSpace(r.Header.Get("Last-Event-ID")), 10, 64)
+	f.mu.Lock()
+	snapshot := map[string]any{"epic": f.snapshotLocked(), "active": map[string]any{"activeCount": 0}}
+	f.mu.Unlock()
+	if writeFakeSSE(w, flusher, cursor, "snapshot", snapshot) != nil {
+		return
+	}
+	for {
+		f.mu.Lock()
+		pending := []fakeEpicEvent{}
+		for _, event := range f.events {
+			if event.seq > cursor {
+				pending = append(pending, event)
+			}
+		}
+		f.mu.Unlock()
+		for _, event := range pending {
+			if writeFakeSSE(w, flusher, event.seq, "taskRun", event.data) != nil {
+				return
+			}
+			cursor = event.seq
+		}
+		select {
+		case <-r.Context().Done():
+			return
+		case <-time.After(25 * time.Millisecond):
+		}
+	}
+}
+
+func writeFakeSSE(w http.ResponseWriter, flusher http.Flusher, id int64, event string, data any) error {
+	encoded, err := json.Marshal(data)
+	if err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintf(w, "id: %d\nevent: %s\ndata: %s\n\n", id, event, encoded); err != nil {
+		return err
+	}
+	flusher.Flush()
+	return nil
+}
+
+func writeFakeJSON(w http.ResponseWriter, value any) {
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(value)
+}
+
+func writeFakeError(w http.ResponseWriter, status int, code, message string) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"error": map[string]any{"code": code, "message": message, "retryable": false},
+	})
+}
+
+func stringParam(params map[string]any, key string) string {
+	value, _ := params[key].(string)
+	return value
 }
 
 func writeRealFlueProject(t *testing.T, root, workflowName, source string) {
@@ -304,7 +633,7 @@ func writeRealFlueProject(t *testing.T, root, workflowName, source string) {
 	if err := os.MkdirAll(filepath.Join(root, "workflows"), 0o755); err != nil {
 		t.Fatalf("mkdir workflows: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(root, "package.json"), []byte(`{"type":"module","dependencies":{"@loom/sdk":"file:./node_modules/@loom/sdk"}}`+"\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(root, "package.json"), []byte(`{"type":"module","dependencies":{"@loom/sdk":"file:./node_modules/@loom/sdk","@flue/runtime":"file:./node_modules/@flue/runtime"}}`+"\n"), 0o644); err != nil {
 		t.Fatalf("write package.json: %v", err)
 	}
 	sdkRoot, err := filepath.Abs("../../sdk")
@@ -321,9 +650,38 @@ func writeRealFlueProject(t *testing.T, root, workflowName, source string) {
 	if err := os.Symlink(sdkRoot, filepath.Join(loomScope, "sdk")); err != nil {
 		t.Fatalf("link @loom/sdk: %v", err)
 	}
+	// The Flue server entrypoint resolves runtime deps (e.g. @hono/node-server)
+	// through the runtime package, so link it like the e2e harness does.
+	flueScope := filepath.Join(root, "node_modules", "@flue")
+	if err := os.MkdirAll(flueScope, 0o755); err != nil {
+		t.Fatalf("mkdir node_modules/@flue: %v", err)
+	}
+	if err := os.Symlink(flueRuntimeRootForTest(t), filepath.Join(flueScope, "runtime")); err != nil {
+		t.Fatalf("link @flue/runtime: %v", err)
+	}
 	if err := os.WriteFile(filepath.Join(root, "workflows", workflowName+".ts"), []byte(source), 0o644); err != nil {
 		t.Fatalf("write workflow: %v", err)
 	}
+}
+
+// flueRuntimeRootForTest resolves the @flue/runtime package: FLUE_REPO env
+// first, then the sibling flue checkout next to this repo.
+func flueRuntimeRootForTest(t *testing.T) string {
+	t.Helper()
+	candidates := []string{}
+	if repo := strings.TrimSpace(os.Getenv("FLUE_REPO")); repo != "" {
+		candidates = append(candidates, filepath.Join(repo, "packages", "runtime"))
+	}
+	if sibling, err := filepath.Abs(filepath.Join("..", "..", "..", "flue", "packages", "runtime")); err == nil {
+		candidates = append(candidates, sibling)
+	}
+	for _, candidate := range candidates {
+		if _, err := os.Stat(filepath.Join(candidate, "package.json")); err == nil {
+			return candidate
+		}
+	}
+	t.Skipf("@flue/runtime package not found (set FLUE_REPO); tried %v", candidates)
+	return ""
 }
 
 func buildRealFlueProject(t *testing.T, root string, flueCommand []string) {

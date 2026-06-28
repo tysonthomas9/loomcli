@@ -43,6 +43,53 @@ func TestClaimReadyTaskClaimsFirstAvailableAsActor(t *testing.T) {
 	}
 }
 
+func TestClaimReadyTaskSkipsParkedIssues(t *testing.T) {
+	cases := []struct {
+		name       string
+		ready      []backend.IssueData
+		wantClaim  string
+		wantClaims int
+	}{
+		{
+			name: "parked issue is skipped in favor of open issue",
+			ready: []backend.IssueData{
+				{ID: "TEST-PARKED", Status: "parked", Parent: "EPIC-1"},
+				{ID: "TEST-OPEN", Status: "open", Parent: "EPIC-1"},
+			},
+			wantClaim:  "TEST-OPEN",
+			wantClaims: 1,
+		},
+		{
+			name: "only parked issues yields no claim",
+			ready: []backend.IssueData{
+				{ID: "TEST-PARKED", Status: "parked", Parent: "EPIC-1"},
+			},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			fake := &fakeReadyIssueBackend{ready: tc.ready}
+			claimed, err := ClaimReadyTask(context.Background(), fake, TaskClaimOptions{
+				EpicID: "EPIC-1",
+				Actor:  "driver-run:run-1",
+			})
+			if err != nil {
+				t.Fatalf("ClaimReadyTask: %v", err)
+			}
+			if tc.wantClaim == "" {
+				if claimed != nil {
+					t.Fatalf("claimed = %+v, want nil (parked issues are not claimable)", claimed)
+				}
+			} else if claimed == nil || claimed.ID != tc.wantClaim {
+				t.Fatalf("claimed = %+v, want %q", claimed, tc.wantClaim)
+			}
+			if len(fake.actorClaims) != tc.wantClaims {
+				t.Fatalf("actor claims = %+v, want %d claim attempts (never on parked issues)", fake.actorClaims, tc.wantClaims)
+			}
+		})
+	}
+}
+
 func TestClaimReadyTaskReturnsNilWhenNoReadyTasks(t *testing.T) {
 	claimed, err := ClaimReadyTask(context.Background(), &fakeReadyIssueBackend{}, TaskClaimOptions{EpicID: "EPIC-1"})
 	if err != nil {

@@ -18,21 +18,28 @@ type taskRunStore struct {
 	items       map[string]map[string]*domain.TaskRun
 	logs        map[string]map[string][]*domain.TaskRunLogEntry
 	completions map[string]map[string]string
+	// parkedTasks records task IDs parked via TaskRunFinish.ParkTask.
+	// memstore has no issue model (issues live in fleet-db), so this is
+	// the in-memory stand-in tests use to observe the park signal.
+	parkedTasks map[string]map[string]bool
 	parent      *driverRunStore
 	steps       *driverStepStore
 	artifacts   *artifactStore
 	profiles    *workerProfileStore
+	nodes       *nodeStore
 }
 
-func newTaskRunStore(parent *driverRunStore, steps *driverStepStore, artifacts *artifactStore, profiles *workerProfileStore) *taskRunStore {
+func newTaskRunStore(parent *driverRunStore, steps *driverStepStore, artifacts *artifactStore, profiles *workerProfileStore, nodes *nodeStore) *taskRunStore {
 	return &taskRunStore{
 		items:       make(map[string]map[string]*domain.TaskRun),
 		logs:        make(map[string]map[string][]*domain.TaskRunLogEntry),
 		completions: make(map[string]map[string]string),
+		parkedTasks: make(map[string]map[string]bool),
 		parent:      parent,
 		steps:       steps,
 		artifacts:   artifacts,
 		profiles:    profiles,
+		nodes:       nodes,
 	}
 }
 
@@ -103,6 +110,7 @@ func newTaskRunMem(in store.TaskRunCreate, now time.Time) *domain.TaskRun {
 		RunnerPlacement:  in.RunnerPlacement,
 		SandboxPlacement: in.SandboxPlacement,
 		RuntimeMetadata:  cloneMap(in.RuntimeMetadata),
+		Input:            cloneRawMessage(in.Input),
 		CreatedAt:        now,
 		UpdatedAt:        now,
 	}
@@ -127,8 +135,12 @@ func taskRunCreateFencingTokenMem(in store.TaskRunCreate, now time.Time) int64 {
 	return in.FencingToken
 }
 
-func (s *taskRunStore) ClaimQueued(_ context.Context, ws string, claim store.TaskRunClaim) (*domain.TaskRun, error) {
+func (s *taskRunStore) ClaimQueued(ctx context.Context, ws string, claim store.TaskRunClaim) (*domain.TaskRun, error) {
 	normalized, now, err := normalizeTaskRunClaimMem(ws, claim)
+	if err != nil {
+		return nil, err
+	}
+	node, normalized, err := s.bindTaskRunClaimToNodeMem(ctx, ws, normalized, now)
 	if err != nil {
 		return nil, err
 	}
@@ -136,9 +148,12 @@ func (s *taskRunStore) ClaimQueued(_ context.Context, ws string, claim store.Tas
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	runningOnNode := s.runningTaskRunsOnNodeLocked(ws, normalized.NodeID)
+	if node != nil && node.Capacity > 0 && runningOnNode >= node.Capacity {
+		return nil, fmt.Errorf("node %q capacity for task runs in workspace %q: %w", normalized.NodeID, ws, domain.ErrInvalidTransition)
+	}
 	for _, run := range claimCandidatesMem(s.items[ws], normalized.TaskRunID) {
 		profile := s.profileLocked(ws, run.WorkerProfileID)
-		if !taskRunMatchesClaimMem(run, profile, normalized) {
+		if !taskRunMatchesClaimMem(run, profile, normalized, now) {
 			continue
 		}
 		if profile != nil && profile.MaxParallel > 0 && runningOnNode >= profile.MaxParallel {
@@ -167,6 +182,34 @@ func normalizeTaskRunClaimMem(ws string, claim store.TaskRunClaim) (store.TaskRu
 	}
 	claim.RunnerPlacement = defaultTaskRunRunnerPlacementMem(claim.RunnerPlacement, claim, now)
 	return claim, now, nil
+}
+
+func (s *taskRunStore) bindTaskRunClaimToNodeMem(ctx context.Context, ws string, claim store.TaskRunClaim, now time.Time) (*domain.Node, store.TaskRunClaim, error) {
+	if s.nodes == nil {
+		return nil, claim, nil
+	}
+	node, err := s.nodes.Get(ctx, ws, claim.NodeID)
+	if err != nil {
+		return nil, store.TaskRunClaim{}, err
+	}
+	if node.DrainState != domain.NodeDrainActive {
+		return nil, store.TaskRunClaim{}, fmt.Errorf("node %q is %s: %w", claim.NodeID, node.DrainState, domain.ErrInvalidTransition)
+	}
+	if !node.ExpiresAt.IsZero() && !node.ExpiresAt.After(now) {
+		return nil, store.TaskRunClaim{}, fmt.Errorf("node %q lease expired: %w", claim.NodeID, domain.ErrInvalidTransition)
+	}
+	providers := nodeAdvertisedProvidersMem(node)
+	if len(claim.SupportedProviders) == 0 {
+		claim.SupportedProviders = providers
+	} else if !stringListContainsAllStrictMem(providers, claim.SupportedProviders) {
+		return nil, store.TaskRunClaim{}, fmt.Errorf("node %q does not advertise requested task providers: %w", claim.NodeID, domain.ErrInvalidTransition)
+	}
+	if len(claim.Capabilities) == 0 {
+		claim.Capabilities = normalizeStringListMem(node.Capabilities)
+	} else if !stringListContainsAllStrictMem(node.Capabilities, claim.Capabilities) {
+		return nil, store.TaskRunClaim{}, fmt.Errorf("node %q does not advertise requested task capabilities: %w", claim.NodeID, domain.ErrInvalidTransition)
+	}
+	return node, claim, nil
 }
 
 func defaultTaskRunRunnerPlacementMem(placement domain.TaskRunPlacement, claim store.TaskRunClaim, now time.Time) domain.TaskRunPlacement {
@@ -250,6 +293,9 @@ func (s *taskRunStore) Finish(_ context.Context, ws, taskRunID string, finish st
 	if !finish.Status.IsTerminal() {
 		return nil, fmt.Errorf("task run %q in workspace %q: %w", taskRunID, ws, domain.ErrInvalidTransition)
 	}
+	if finish.ParkTask && finish.Status != domain.TaskRunFailed {
+		return nil, fmt.Errorf("task run %q in workspace %q: %w", taskRunID, ws, domain.ErrInvalidTransition)
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	run, ok := s.items[ws][taskRunID]
@@ -285,7 +331,22 @@ func (s *taskRunStore) Finish(_ context.Context, ws, taskRunID string, finish st
 	run.ErrorMessage = finish.ErrorMessage
 	run.FinishedAt = &now
 	run.UpdatedAt = now
+	if finish.ParkTask && strings.TrimSpace(run.TaskID) != "" {
+		if s.parkedTasks[ws] == nil {
+			s.parkedTasks[ws] = make(map[string]bool)
+		}
+		s.parkedTasks[ws][run.TaskID] = true
+	}
 	return cloneTaskRun(run), nil
+}
+
+// TaskParked reports whether a ParkTask finish marked the given task ID
+// parked. memstore has no issue model, so this is the test-side observable
+// for the fleet-db issue transition.
+func (s *taskRunStore) TaskParked(ws, taskID string) bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.parkedTasks[ws][taskID]
 }
 
 func (s *taskRunStore) Heartbeat(_ context.Context, ws, taskRunID string, heartbeat store.TaskRunHeartbeat) (*domain.TaskRun, error) {
@@ -316,6 +377,46 @@ func (s *taskRunStore) Heartbeat(_ context.Context, ws, taskRunID string, heartb
 		run.ArtifactsRef = heartbeat.ArtifactsRef
 	}
 	run.RuntimeMetadata = mergeStringMapMem(run.RuntimeMetadata, heartbeat.RuntimeMetadata)
+	return cloneTaskRun(run), nil
+}
+
+func (s *taskRunStore) Requeue(_ context.Context, ws, taskRunID string, requeue store.TaskRunRequeue) (*domain.TaskRun, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	run, ok := s.items[ws][taskRunID]
+	if !ok {
+		return nil, fmt.Errorf("task run %q in workspace %q: %w", taskRunID, ws, domain.ErrNotFound)
+	}
+	if run.Status != domain.TaskRunRunning {
+		return nil, fmt.Errorf("task run %q in workspace %q: %w", taskRunID, ws, domain.ErrInvalidTransition)
+	}
+	if run.LeaseID != "" || run.FencingToken != 0 {
+		if requeue.NodeID != run.NodeID || requeue.LeaseID != run.LeaseID || requeue.FencingToken != run.FencingToken {
+			return nil, fmt.Errorf("task run %q in workspace %q: %w", taskRunID, ws, domain.ErrNotOwner)
+		}
+	}
+	now := requeue.RequeuedAt
+	if now.IsZero() {
+		now = time.Now().UTC()
+	}
+	run.Status = domain.TaskRunQueued
+	run.NodeID = ""
+	run.LeaseID = ""
+	run.FencingToken = 0
+	run.RunnerPlacement = domain.TaskRunPlacement{}
+	run.ExitCode = nil
+	run.FinishedAt = nil
+	run.ErrorClass = requeue.ErrorClass
+	run.ErrorMessage = requeue.ErrorMessage
+	if requeue.LogsRef != "" {
+		run.LogsRef = requeue.LogsRef
+	}
+	if requeue.ArtifactsRef != "" {
+		run.ArtifactsRef = requeue.ArtifactsRef
+	}
+	run.RuntimeMetadata = mergeStringMapMem(run.RuntimeMetadata, requeue.RuntimeMetadata)
+	run.NextEligibleAt = requeue.NextEligibleAt
+	run.UpdatedAt = now
 	return cloneTaskRun(run), nil
 }
 

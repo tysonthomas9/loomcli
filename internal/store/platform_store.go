@@ -18,7 +18,11 @@ type DriverCreate struct {
 	Description     string
 	ActiveVersionID string
 	Status          domain.DriverStatus
-	Metadata        map[string]string
+	// TrustLevel gates sandbox placement (§7 step 9). Stamped by the
+	// registration path server-side, never from client input; empty means
+	// untrusted (fail closed).
+	TrustLevel domain.DriverTrustLevel
+	Metadata   map[string]string
 }
 
 type DriverFilter struct {
@@ -34,7 +38,10 @@ type DriverUpdate struct {
 	Description     *string
 	ActiveVersionID *string
 	Status          *domain.DriverStatus
-	Metadata        *map[string]string
+	// TrustLevel is the explicit ops elevation/demotion path; workflow
+	// runtimes never reach a surface that sets it.
+	TrustLevel *domain.DriverTrustLevel
+	Metadata   *map[string]string
 }
 
 type DriverStore interface {
@@ -197,6 +204,12 @@ type TriggerBindingCreate struct {
 	IdempotencyPolicy    string
 	AuthPolicy           string
 	WebhookSecret        string
+	SubjectKeyTemplate   string
+	ActorFilter          *domain.TriggerActorFilter
+	RetryMaxAttempts     int
+	RetryBackoffSeconds  int
+	Schedule             string
+	ScheduleTimezone     string
 	Permissions          []string
 	Enabled              bool
 }
@@ -229,8 +242,16 @@ type TriggerBindingUpdate struct {
 	IdempotencyPolicy    *string
 	AuthPolicy           *string
 	WebhookSecret        *string
-	Permissions          *[]string
-	Enabled              *bool
+	SubjectKeyTemplate   *string
+	// ActorFilter replaces the whole filter when set; a zero-valued filter
+	// (no constraints) clears it, mirroring fleet-db's patch semantics.
+	ActorFilter         *domain.TriggerActorFilter
+	RetryMaxAttempts    *int
+	RetryBackoffSeconds *int
+	Schedule            *string
+	ScheduleTimezone    *string
+	Permissions         *[]string
+	Enabled             *bool
 }
 
 type TriggerBindingStore interface {
@@ -258,6 +279,24 @@ type TriggerEventStore interface {
 	List(ctx context.Context, workspaceKey string, filter TriggerEventFilter) ([]*domain.TriggerEvent, error)
 }
 
+// TriggerEventAppender is an OPTIONAL TriggerEventStore capability (detected
+// by type assertion, like DriverRunEventsReader): append one server-stamped
+// event directly to the trigger-event journal without route dispatch. This is
+// the run.finished lifecycle lane (AW6): journal-first so the await
+// registration scan (AwaitStore.RegisterAwaitAndCheck) sees terminal runs
+// even when no binding listens on the internal route — composition awaits can
+// never be suppressed by binding configuration or the loop guard.
+//
+// Implementations preserve the caller's EventID (lifecycle event IDs are
+// deterministic for idempotent re-emission) and dedup on both EventID and
+// IdempotencyKey, returning the existing record unchanged on a replay. The
+// fleet-db backend does not implement this client-side capability: there the
+// journal append happens server-side in fleet-db's dispatch wiring
+// (IndexAwaitEvent, AW2/AW7).
+type TriggerEventAppender interface {
+	AppendTriggerEvent(ctx context.Context, event *domain.TriggerEvent) (*domain.TriggerEvent, error)
+}
+
 // TriggerDeliveryFilter narrows TriggerDelivery listings.
 type TriggerDeliveryFilter struct {
 	TriggerEventID   string
@@ -266,10 +305,49 @@ type TriggerDeliveryFilter struct {
 	Limit            int
 }
 
-// TriggerDeliveryStore is a read-only view of persisted trigger deliveries.
+// TriggerDeliveryDueFilter narrows TriggerDeliveryStore.ListDue. A delivery
+// is due when it is retry-sweeper work — held (queue-policy promotion rides
+// the sweeper) or failed without error class retries_exhausted — and its
+// NextRetryAt is nil (immediately due) or not after Now. A zero Now means
+// the implementation's current time.
+type TriggerDeliveryDueFilter struct {
+	Now   time.Time
+	Limit int
+}
+
+// TriggerDeliveryResultUpdate is the input to
+// TriggerDeliveryStore.UpdateResult after one retry-sweeper (or dispatch)
+// attempt. Status failed with a NextRetryAt reschedules the delivery; held
+// keeps it parked for queue promotion; dispatched/rejected/superseded (and
+// failed once the binding's RetryMaxAttempts is reached) make it final.
+// A zero Attempt keeps the stored attempt count.
+type TriggerDeliveryResultUpdate struct {
+	Status      domain.TriggerDeliveryStatus
+	Attempt     int
+	NextRetryAt *time.Time
+	ErrorClass  string
+	// DriverRunID stamps the admitted run when a retry finally dispatches.
+	DriverRunID string
+}
+
+// TriggerDeliveryStore reads persisted trigger deliveries and records
+// retry-sweeper attempt outcomes. Deliveries themselves are created by the
+// dispatch path (TriggerRouteDispatcher), never directly through this store.
 type TriggerDeliveryStore interface {
 	Get(ctx context.Context, workspaceKey, deliveryID string) (*domain.TriggerDelivery, error)
 	List(ctx context.Context, workspaceKey string, filter TriggerDeliveryFilter) ([]*domain.TriggerDelivery, error)
+	// ListDue returns deliveries awaiting the retry sweeper whose due time
+	// is <= filter.Now, in due order (earliest first).
+	ListDue(ctx context.Context, workspaceKey string, filter TriggerDeliveryDueFilter) ([]*domain.TriggerDelivery, error)
+	// UpdateResult records one attempt outcome. A failed result whose
+	// Attempt reaches the binding's RetryMaxAttempts is forced terminal:
+	// status stays failed, ErrorClass becomes
+	// domain.TriggerDeliveryErrorRetriesExhausted and NextRetryAt clears.
+	// Final deliveries (dispatched, rejected, duplicate, superseded,
+	// replayed, terminal failed) reject transitions to a different status
+	// with domain.ErrInvalidTransition; re-applying the same status is
+	// idempotent.
+	UpdateResult(ctx context.Context, workspaceKey, deliveryID string, update TriggerDeliveryResultUpdate) (*domain.TriggerDelivery, error)
 }
 
 // TriggerRouteDispatch carries the normalized fields an adapter resolves from
@@ -287,20 +365,59 @@ type TriggerRouteDispatch struct {
 	SignatureStatus  string
 	ReplayOfEventID  string
 	Payload          json.RawMessage
+	// SubjectAttrs carries adapter-enriched subject attributes consumed by
+	// subject-key templating ({{attrs.X}}). Webhook adapters populate it
+	// (C15); templates never read the raw payload. Not yet sent on the
+	// fleet-db wire — the server-side templating lane lands separately.
+	SubjectAttrs map[string]string
 }
 
-// TriggerRouteDispatcher resolves an enabled binding by route key, persists a
-// TriggerEvent, enqueues a queued DriverRun, then records a TriggerDelivery —
+// TriggerRouteDelivery is one fan-out leg of a trigger-route dispatch. The
+// JSON tags pin fleet-db's BREAKING router-v2 webhook wire: the response
+// carries deliveries[] only, with no top-level driver_run_id.
+type TriggerRouteDelivery struct {
+	DeliveryID      string                       `json:"delivery_id"`
+	BindingID       string                       `json:"trigger_binding_id"`
+	RunID           string                       `json:"driver_run_id"`
+	Status          domain.TriggerDeliveryStatus `json:"status"`
+	RejectionReason string                       `json:"rejection_reason,omitempty"`
+}
+
+// TriggerRouteDispatchResult collects the fan-out legs of one dispatch in
+// dispatch order: the exact RouteKey owner first (when present and enabled),
+// then pattern matches in binding-id order.
+type TriggerRouteDispatchResult struct {
+	// PrimaryRun is the admitted run for the first matched binding. In-process
+	// backends populate it directly; HTTP backends may leave it nil because the
+	// router-v2 wire no longer returns run bodies (callers needing the run
+	// fetch it by Deliveries[0].RunID).
+	PrimaryRun *domain.DriverRun
+	Deliveries []TriggerRouteDelivery
+}
+
+// TriggerRouteDispatcher resolves the matched binding set for a route key —
+// the exact-RouteKey binding unioned with enabled bindings whose
+// event_type_patterns match the key — persists ONE TriggerEvent, then per
+// matched binding enqueues a queued DriverRun and records a TriggerDelivery,
 // in that order. It fronts fleet-db's trigger-routes endpoint.
 //
-// Each write is individually idempotent (keyed off the dispatch idempotency
-// key / derived delivery id), but the three are NOT a single transaction: a
-// failure after the run is created surfaces as an error, leaving a queued run
-// whose delivery audit record is written on the caller's redelivery (which
-// dedups the event and run). Callers should treat dispatch as durable and
-// eventually-consistent, not transactional, and retry on error.
+// Each write is individually idempotent: the event dedups on the dispatch
+// idempotency key, each leg's run dedups on a per-binding composite
+// {idempotencyKey}#{bindingID} key (the legacy single-binding exact path keeps
+// the bare key), and each leg's delivery id is deterministic. The sequence is
+// NOT a single transaction: a failure after earlier legs are durable surfaces
+// as an error, and the caller's redelivery re-runs the sequence, deduping the
+// event and every already-admitted run while writing only the missing
+// deliveries — redelivery heals each leg independently. Callers should treat
+// dispatch as durable and eventually-consistent, not transactional, and retry
+// on error.
 type TriggerRouteDispatcher interface {
+	// DispatchTriggerRoute is the legacy single-run lane: it runs the same
+	// fan-out dispatch and returns only the primary run. Kept so existing
+	// webhook callers compile until they move to DispatchTriggerRouteV2.
 	DispatchTriggerRoute(ctx context.Context, workspaceKey, routeKey string, in TriggerRouteDispatch) (*domain.DriverRun, error)
+	// DispatchTriggerRouteV2 surfaces every fan-out leg of the dispatch.
+	DispatchTriggerRouteV2(ctx context.Context, workspaceKey, routeKey string, in TriggerRouteDispatch) (*TriggerRouteDispatchResult, error)
 }
 
 type EpicRunCreate struct {
@@ -318,8 +435,13 @@ type DriverRunCreate struct {
 	SourceKind      string
 	SourceRef       string
 	EpicID          string
-	IdempotencyKey  string
-	Payload         json.RawMessage
+	// ParentRunID links a child run to the workflow run that spawned it
+	// (Phase D composition). Empty means detached/root — no cancel cascade.
+	// Orthogonal to EpicID: a run may carry an epic, a parent, both, or
+	// neither.
+	ParentRunID    string
+	IdempotencyKey string
+	Payload        json.RawMessage
 }
 
 type DriverRunFilter struct {
@@ -392,6 +514,48 @@ type DriverRunStore interface {
 	Finish(ctx context.Context, workspaceKey, runID string, finish DriverRunFinish) (*domain.DriverRun, error)
 	RecoverStale(ctx context.Context, workspaceKey string, recover StaleDriverRunRecovery) (*StaleDriverRunRecoveryResult, error)
 	RecoverStaleTaskRuns(ctx context.Context, workspaceKey, runID string, recover StaleTaskRunRecovery) (*StaleTaskRunRecoveryResult, error)
+
+	// Suspend parks a running run on its await instance
+	// (running -> suspended_awaiting_event), owner-fenced with the same
+	// node+lease+token guard as Finish, releasing the executor slot
+	// (node/lease cleared). awaitInstanceKey names the await cycle the run
+	// parks on (runID#await-{n}) and is required. Idempotent on re-suspend.
+	// A backend that recorded a pending resume for this await cycle (the
+	// accepted park->suspend window) returns
+	// domain.ErrDriverRunAlreadyResumed: do not park, continue inline.
+	Suspend(ctx context.Context, workspaceKey, runID, nodeID, leaseID string, fencingToken int64, awaitInstanceKey string) (*domain.DriverRun, error)
+
+	// ResumeAwaiting re-queues a suspended run
+	// (suspended_awaiting_event -> queued) after the await cycle named by
+	// awaitInstanceKey resolved, recording resumeSourceEventID (a trigger
+	// event or the sweeper's synthetic timeout event) for the resumed
+	// execution's replay fetch. Of two racing resumes exactly one wins; the
+	// loser gets domain.ErrInvalidTransition, which resume callers (AW7)
+	// tolerate.
+	ResumeAwaiting(ctx context.Context, workspaceKey, runID, awaitInstanceKey, resumeSourceEventID string) (*domain.DriverRun, error)
+}
+
+// DriverRunCancelSupport is an OPTIONAL DriverRunStore capability (detected
+// via type assertion, like TriggerEventAppender) backing the composition
+// cancel cascade (AW10): when a parent run reaches a terminal status its
+// queued children are cancelled and its running children get a cooperative
+// cancel request. Backends without the capability (the fleet-db client until
+// its server-side cascade wiring lands; the CLI tracing wrapper) skip the
+// cascade — children there are bounded by their own await deadlines and the
+// stale sweeps.
+type DriverRunCancelSupport interface {
+	// CancelQueuedRun terminalizes a still-QUEUED run as cancelled with no
+	// owner check (mirroring the supersede lane's CancelQueuedDriverRun).
+	// Idempotent on an already-cancelled run; any other status returns
+	// domain.ErrInvalidTransition so a run claimed in the race window is
+	// never terminalized under its executor.
+	CancelQueuedRun(ctx context.Context, workspaceKey, runID, summary, errorClass string) (*domain.DriverRun, error)
+	// RequestCancel stamps CancelRequestedAt on a RUNNING run. The owning
+	// executor observes the marker on its next heartbeat and cancels the
+	// runner, which then reports cancelled through the normal fenced Finish.
+	// Idempotent once requested; non-running runs return
+	// domain.ErrInvalidTransition.
+	RequestCancel(ctx context.Context, workspaceKey, runID, reason string) (*domain.DriverRun, error)
 }
 
 var ErrDriverRunEventsUnavailable = errors.New("driver run event reader unsupported")
@@ -467,6 +631,9 @@ type TaskRunCreate struct {
 	RunnerPlacement  domain.TaskRunPlacement
 	SandboxPlacement domain.TaskRunPlacement
 	RuntimeMetadata  map[string]string
+	// Input is the optional task-run payload persisted on the run and
+	// delivered to the runner (omitempty / back-compat).
+	Input json.RawMessage
 }
 
 type TaskRunFilter struct {
@@ -510,6 +677,31 @@ type TaskRunFinish struct {
 	ErrorClass       string
 	ErrorMessage     string
 	FinishedAt       time.Time
+	// ParkTask marks the run's underlying task issue as parked when the
+	// run finishes failed with its retry budget exhausted. Only valid with
+	// Status == TaskRunFailed. Server-side the issue update is fenced by
+	// the same lease/fencing checks as the finish itself, idempotent, and
+	// best-effort: a missing, already-parked, or terminal issue is skipped
+	// without failing the finish. Parking releases the issue claim; the
+	// parked status prevents re-claim until a human moves the issue back
+	// to open.
+	ParkTask bool
+}
+
+type TaskRunRequeue struct {
+	NodeID          string
+	LeaseID         string
+	LeaseToken      string
+	FencingToken    int64
+	RuntimeMetadata map[string]string
+	LogsRef         string
+	ArtifactsRef    string
+	ErrorClass      string
+	ErrorMessage    string
+	RequeuedAt      time.Time
+	// NextEligibleAt delays the requeued run from being claimed again until
+	// the given time. The zero value keeps the run immediately claimable.
+	NextEligibleAt time.Time
 }
 
 type TaskRunHeartbeat struct {
@@ -569,6 +761,7 @@ type TaskRunStore interface {
 	Get(ctx context.Context, workspaceKey, taskRunID string) (*domain.TaskRun, error)
 	List(ctx context.Context, workspaceKey string, filter TaskRunFilter) ([]*domain.TaskRun, error)
 	Heartbeat(ctx context.Context, workspaceKey, taskRunID string, heartbeat TaskRunHeartbeat) (*domain.TaskRun, error)
+	Requeue(ctx context.Context, workspaceKey, taskRunID string, requeue TaskRunRequeue) (*domain.TaskRun, error)
 	Finish(ctx context.Context, workspaceKey, taskRunID string, finish TaskRunFinish) (*domain.TaskRun, error)
 	Complete(ctx context.Context, workspaceKey, taskRunID string, complete TaskRunComplete) (*domain.TaskRun, error)
 	AppendLog(ctx context.Context, workspaceKey, taskRunID string, appendLog TaskRunLogAppend) (*domain.TaskRunLogEntry, error)

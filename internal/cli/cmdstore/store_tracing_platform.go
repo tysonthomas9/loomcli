@@ -2,11 +2,14 @@ package cmdstore
 
 // Traced wrappers for the platform stores (drivers, driver versions, worker
 // profiles, agent services, trigger bindings, driver runs, driver steps,
-// task runs), mirroring internal/store/platform_store.go. Shared span
-// helpers live in store_tracing.go.
+// task runs, task run events, outbox), mirroring
+// internal/store/platform_store.go and internal/store/outbox_store.go.
+// Shared span helpers live in store_tracing.go.
 
 import (
 	"context"
+	"encoding/json"
+	"time"
 
 	"go.opentelemetry.io/otel/attribute"
 
@@ -342,6 +345,86 @@ func (t *tracedDriverRunStore) RecoverStaleTaskRuns(ctx context.Context, ws, run
 	return out, err
 }
 
+func (t *tracedDriverRunStore) Suspend(ctx context.Context, ws, runID, nodeID, leaseID string, fencingToken int64, awaitInstanceKey string) (*domain.DriverRun, error) {
+	return traced(ctx, "DriverRuns", "Suspend", func(ctx context.Context) (*domain.DriverRun, error) {
+		return t.inner.Suspend(ctx, ws, runID, nodeID, leaseID, fencingToken, awaitInstanceKey)
+	},
+		attribute.String("loom.workspace", ws),
+		attribute.String("loom.driver_run", runID),
+		attribute.String("loom.await_instance", awaitInstanceKey),
+	)
+}
+
+func (t *tracedDriverRunStore) ResumeAwaiting(ctx context.Context, ws, runID, awaitInstanceKey, resumeSourceEventID string) (*domain.DriverRun, error) {
+	return traced(ctx, "DriverRuns", "ResumeAwaiting", func(ctx context.Context) (*domain.DriverRun, error) {
+		return t.inner.ResumeAwaiting(ctx, ws, runID, awaitInstanceKey, resumeSourceEventID)
+	},
+		attribute.String("loom.workspace", ws),
+		attribute.String("loom.driver_run", runID),
+		attribute.String("loom.await_instance", awaitInstanceKey),
+		attribute.String("loom.event", resumeSourceEventID),
+	)
+}
+
+// --- AwaitStore ---
+
+type tracedAwaitStore struct{ inner store.AwaitStore }
+
+func (t *tracedAwaitStore) RegisterAwaitAndCheck(ctx context.Context, ws string, in store.AwaitRegistration) (*store.AwaitResult, error) {
+	ctx, span := startStoreSpan(ctx, "Awaits", "RegisterAwaitAndCheck",
+		attribute.String("loom.workspace", ws),
+		attribute.String("loom.await_instance", in.InstanceKey),
+		attribute.String("loom.driver_run", in.RunID),
+		attribute.String("loom.await_pattern", in.Pattern),
+	)
+	out, err := t.inner.RegisterAwaitAndCheck(ctx, ws, in)
+	if err == nil && out != nil {
+		span.SetAttributes(attribute.Bool("loom.await_satisfied", out.Satisfied))
+	}
+	finish(span, err)
+	return out, err
+}
+
+func (t *tracedAwaitStore) ResolveAwait(ctx context.Context, ws, instanceKey, eventID string, payload json.RawMessage, actor string) (*store.AwaitResolution, error) {
+	ctx, span := startStoreSpan(ctx, "Awaits", "ResolveAwait",
+		attribute.String("loom.workspace", ws),
+		attribute.String("loom.await_instance", instanceKey),
+		attribute.String("loom.event", eventID),
+	)
+	out, err := t.inner.ResolveAwait(ctx, ws, instanceKey, eventID, payload, actor)
+	if err == nil && out != nil {
+		span.SetAttributes(attribute.Bool("loom.await_resume", out.Resume))
+	}
+	finish(span, err)
+	return out, err
+}
+
+func (t *tracedAwaitStore) ListAwaitsByPattern(ctx context.Context, ws, pattern string) ([]*domain.AwaitInstance, error) {
+	return tracedList(ctx, "Awaits", "ListAwaitsByPattern", func(ctx context.Context) ([]*domain.AwaitInstance, error) {
+		return t.inner.ListAwaitsByPattern(ctx, ws, pattern)
+	},
+		attribute.String("loom.workspace", ws),
+		attribute.String("loom.await_pattern", pattern),
+	)
+}
+
+func (t *tracedAwaitStore) ListDueAwaitDeadlines(ctx context.Context, ws string, before time.Time, limit int) ([]*domain.AwaitInstance, error) {
+	return tracedList(ctx, "Awaits", "ListDueAwaitDeadlines", func(ctx context.Context) ([]*domain.AwaitInstance, error) {
+		return t.inner.ListDueAwaitDeadlines(ctx, ws, before, limit)
+	},
+		attribute.String("loom.workspace", ws),
+	)
+}
+
+func (t *tracedAwaitStore) GetSatisfiedAwait(ctx context.Context, ws, instanceKey string) (*domain.AwaitInstance, error) {
+	return traced(ctx, "Awaits", "GetSatisfiedAwait", func(ctx context.Context) (*domain.AwaitInstance, error) {
+		return t.inner.GetSatisfiedAwait(ctx, ws, instanceKey)
+	},
+		attribute.String("loom.workspace", ws),
+		attribute.String("loom.await_instance", instanceKey),
+	)
+}
+
 // --- DriverStepStore ---
 
 type tracedDriverStepStore struct{ inner store.DriverStepStore }
@@ -441,6 +524,14 @@ func (t *tracedTaskRunStore) Heartbeat(ctx context.Context, ws, taskRunID string
 	)
 }
 
+func (t *tracedTaskRunStore) Requeue(ctx context.Context, ws, taskRunID string, requeue store.TaskRunRequeue) (*domain.TaskRun, error) {
+	return traced(ctx, "TaskRuns", "Requeue", func(ctx context.Context) (*domain.TaskRun, error) {
+		return t.inner.Requeue(ctx, ws, taskRunID, requeue)
+	},
+		attribute.String("loom.workspace", ws),
+	)
+}
+
 func (t *tracedTaskRunStore) Finish(ctx context.Context, ws, taskRunID string, taskFinish store.TaskRunFinish) (*domain.TaskRun, error) {
 	return traced(ctx, "TaskRuns", "Finish", func(ctx context.Context) (*domain.TaskRun, error) {
 		return t.inner.Finish(ctx, ws, taskRunID, taskFinish)
@@ -468,6 +559,62 @@ func (t *tracedTaskRunStore) AppendLog(ctx context.Context, ws, taskRunID string
 func (t *tracedTaskRunStore) ListLogs(ctx context.Context, ws, taskRunID string, filter store.TaskRunLogFilter) ([]*domain.TaskRunLogEntry, error) {
 	return tracedList(ctx, "TaskRuns", "ListLogs", func(ctx context.Context) ([]*domain.TaskRunLogEntry, error) {
 		return t.inner.ListLogs(ctx, ws, taskRunID, filter)
+	},
+		attribute.String("loom.workspace", ws),
+	)
+}
+
+// --- TaskRunEventStore ---
+
+type tracedTaskRunEventStore struct{ inner store.TaskRunEventStore }
+
+func (t *tracedTaskRunEventStore) Append(ctx context.Context, in store.TaskRunEventAppend) (*domain.TaskRunEvent, error) {
+	return traced(ctx, "TaskRunEvents", "Append", func(ctx context.Context) (*domain.TaskRunEvent, error) {
+		return t.inner.Append(ctx, in)
+	},
+		attribute.String("loom.workspace", in.WorkspaceKey),
+	)
+}
+
+func (t *tracedTaskRunEventStore) ListSince(ctx context.Context, ws string, filter store.TaskRunEventFilter) ([]*domain.TaskRunEvent, error) {
+	return tracedList(ctx, "TaskRunEvents", "ListSince", func(ctx context.Context) ([]*domain.TaskRunEvent, error) {
+		return t.inner.ListSince(ctx, ws, filter)
+	},
+		attribute.String("loom.workspace", ws),
+	)
+}
+
+// --- OutboxStore ---
+
+type tracedOutboxStore struct{ inner store.OutboxStore }
+
+func (t *tracedOutboxStore) Create(ctx context.Context, in store.OutboxCreate) (*domain.OutboxRecord, error) {
+	return traced(ctx, "Outbox", "Create", func(ctx context.Context) (*domain.OutboxRecord, error) {
+		return t.inner.Create(ctx, in)
+	},
+		attribute.String("loom.workspace", in.WorkspaceKey),
+	)
+}
+
+func (t *tracedOutboxStore) ListDue(ctx context.Context, ws string, filter store.OutboxDueFilter) ([]*domain.OutboxRecord, error) {
+	return tracedList(ctx, "Outbox", "ListDue", func(ctx context.Context) ([]*domain.OutboxRecord, error) {
+		return t.inner.ListDue(ctx, ws, filter)
+	},
+		attribute.String("loom.workspace", ws),
+	)
+}
+
+func (t *tracedOutboxStore) MarkResult(ctx context.Context, ws, outboxID string, update store.OutboxDeliveryUpdate) (*domain.OutboxRecord, error) {
+	return traced(ctx, "Outbox", "MarkResult", func(ctx context.Context) (*domain.OutboxRecord, error) {
+		return t.inner.MarkResult(ctx, ws, outboxID, update)
+	},
+		attribute.String("loom.workspace", ws),
+	)
+}
+
+func (t *tracedOutboxStore) Get(ctx context.Context, ws, outboxID string) (*domain.OutboxRecord, error) {
+	return traced(ctx, "Outbox", "Get", func(ctx context.Context) (*domain.OutboxRecord, error) {
+		return t.inner.Get(ctx, ws, outboxID)
 	},
 		attribute.String("loom.workspace", ws),
 	)

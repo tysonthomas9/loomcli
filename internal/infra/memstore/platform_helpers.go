@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/store"
@@ -24,8 +25,27 @@ func cloneDriverVersion(v *domain.DriverVersion) *domain.DriverVersion {
 func cloneTriggerBinding(b *domain.TriggerBinding) *domain.TriggerBinding {
 	out := *b
 	out.EventTypePatterns = append([]string(nil), b.EventTypePatterns...)
+	out.ActorFilter = b.ActorFilter.Clone()
 	out.Permissions = append([]string(nil), b.Permissions...)
 	return &out
+}
+
+// normalizedActorFilterMem deep-copies an actor filter, normalizing a filter
+// with no constraints to nil the way fleet-db's write path does.
+func normalizedActorFilterMem(f *domain.TriggerActorFilter) *domain.TriggerActorFilter {
+	if f.IsZero() {
+		return nil
+	}
+	return f.Clone()
+}
+
+// defaultRetryFieldMem mirrors fleet-db's write-time retry defaulting: zero
+// means "unset, use the default" (negatives are rejected upstream).
+func defaultRetryFieldMem(value, fallback int) int {
+	if value == 0 {
+		return fallback
+	}
+	return value
 }
 
 // redactedTriggerBinding clones b with the webhook signing secret cleared,
@@ -42,12 +62,25 @@ func cloneDriverRun(r *domain.DriverRun) *domain.DriverRun {
 	out.Payload = cloneJSON(r.Payload)
 	out.Output = cloneMap(r.Output)
 	out.FinishedAt = clonePtr(r.FinishedAt)
+	out.SuspendedAt = clonePtr(r.SuspendedAt)
+	out.CancelRequestedAt = clonePtr(r.CancelRequestedAt)
 	return &out
 }
 
 func cloneJSON(payload json.RawMessage) json.RawMessage {
 	if len(payload) == 0 {
 		return json.RawMessage(`{}`)
+	}
+	out := make(json.RawMessage, len(payload))
+	copy(out, payload)
+	return out
+}
+
+// cloneRawMessage deep-copies an optional raw payload, preserving nil so that
+// omitempty fields round-trip unchanged for runs created without one.
+func cloneRawMessage(payload json.RawMessage) json.RawMessage {
+	if len(payload) == 0 {
+		return nil
 	}
 	out := make(json.RawMessage, len(payload))
 	copy(out, payload)
@@ -69,6 +102,7 @@ func cloneTaskRun(r *domain.TaskRun) *domain.TaskRun {
 	out.RunnerPlacement = cloneTaskRunPlacement(r.RunnerPlacement)
 	out.SandboxPlacement = cloneTaskRunPlacement(r.SandboxPlacement)
 	out.RuntimeMetadata = cloneMap(r.RuntimeMetadata)
+	out.Input = cloneRawMessage(r.Input)
 	out.FinishedAt = clonePtr(r.FinishedAt)
 	return &out
 }
@@ -153,11 +187,18 @@ func claimCandidatesMem(runs map[string]*domain.TaskRun, taskRunID string) []*do
 	return out
 }
 
-func taskRunMatchesClaimMem(run *domain.TaskRun, profile *domain.WorkerProfile, claim store.TaskRunClaim) bool {
+func taskRunMatchesClaimMem(run *domain.TaskRun, profile *domain.WorkerProfile, claim store.TaskRunClaim, now time.Time) bool {
 	if run == nil || run.Status != domain.TaskRunQueued {
 		return false
 	}
+	// Retry backoff: a zero NextEligibleAt keeps the run immediately claimable.
+	if !run.NextEligibleAt.IsZero() && run.NextEligibleAt.After(now) {
+		return false
+	}
 	if claim.TaskRunID != "" && run.TaskRunID != claim.TaskRunID {
+		return false
+	}
+	if run.NodeID != "" && run.NodeID != claim.NodeID {
 		return false
 	}
 	if run.WorkerProfileID != "" {
@@ -203,10 +244,61 @@ func stringListContainsAllMem(have, required []string) bool {
 	return true
 }
 
+func nodeAdvertisedProvidersMem(node *domain.Node) []string {
+	if node == nil {
+		return nil
+	}
+	values := []string{string(node.RuntimeProvider)}
+	values = append(values, node.Capabilities...)
+	return normalizeStringListMem(values)
+}
+
+func normalizeStringListMem(values []string) []string {
+	if len(values) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(values))
+	seen := map[string]struct{}{}
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		out = append(out, value)
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+func stringListContainsAllStrictMem(have, required []string) bool {
+	have = normalizeStringListMem(have)
+	required = normalizeStringListMem(required)
+	if len(required) == 0 {
+		return true
+	}
+	values := map[string]struct{}{}
+	for _, value := range have {
+		values[value] = struct{}{}
+	}
+	for _, want := range required {
+		if _, ok := values[want]; !ok {
+			return false
+		}
+	}
+	return true
+}
+
 func applyTriggerBindingUpdateMem(b *domain.TriggerBinding, patch store.TriggerBindingUpdate) {
 	applyTriggerBindingSourceUpdateMem(b, patch)
 	applyTriggerBindingTargetUpdateMem(b, patch)
 	applyTriggerBindingPolicyUpdateMem(b, patch)
+	applyTriggerBindingRouterUpdateMem(b, patch)
 }
 
 func applyTriggerBindingSourceUpdateMem(b *domain.TriggerBinding, patch store.TriggerBindingUpdate) {
@@ -275,5 +367,29 @@ func applyTriggerBindingPolicyUpdateMem(b *domain.TriggerBinding, patch store.Tr
 	}
 	if patch.Enabled != nil {
 		b.Enabled = *patch.Enabled
+	}
+}
+
+// applyTriggerBindingRouterUpdateMem applies the Router v2 binding fields.
+// ActorFilter is replace-whole: a zero-valued filter clears it (normalized to
+// nil), mirroring fleet-db's patch semantics.
+func applyTriggerBindingRouterUpdateMem(b *domain.TriggerBinding, patch store.TriggerBindingUpdate) {
+	if patch.SubjectKeyTemplate != nil {
+		b.SubjectKeyTemplate = *patch.SubjectKeyTemplate
+	}
+	if patch.ActorFilter != nil {
+		b.ActorFilter = normalizedActorFilterMem(patch.ActorFilter)
+	}
+	if patch.RetryMaxAttempts != nil {
+		b.RetryMaxAttempts = *patch.RetryMaxAttempts
+	}
+	if patch.RetryBackoffSeconds != nil {
+		b.RetryBackoffSeconds = *patch.RetryBackoffSeconds
+	}
+	if patch.Schedule != nil {
+		b.Schedule = *patch.Schedule
+	}
+	if patch.ScheduleTimezone != nil {
+		b.ScheduleTimezone = *patch.ScheduleTimezone
 	}
 }

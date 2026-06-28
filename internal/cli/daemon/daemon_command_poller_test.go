@@ -146,8 +146,16 @@ func (s commandPollerTestStore) DriverRuns() store.DriverRunStore { return nil }
 func (s commandPollerTestStore) DriverSteps() store.DriverStepStore {
 	return nil
 }
-func (s commandPollerTestStore) TaskRuns() store.TaskRunStore     { return nil }
-func (s commandPollerTestStore) Workers() store.WorkerStore       { return nil }
-func (s commandPollerTestStore) Roles() store.RoleStore           { return nil }
-func (s commandPollerTestStore) Daemon() store.DaemonProfileStore { return nil }
-func (s commandPollerTestStore) Close() error                     { return nil }
+func (s commandPollerTestStore) TaskRuns() store.TaskRunStore { return nil }
+func (s commandPollerTestStore) TaskRunEvents() store.TaskRunEventStore {
+	return nil
+}
+func (s commandPollerTestStore) Outbox() store.OutboxStore                  { return nil }
+func (s commandPollerTestStore) Awaits() store.AwaitStore                   { return nil }
+func (s commandPollerTestStore) Connectors() store.ConnectorStore           { return nil }
+func (s commandPollerTestStore) ConnectorGrants() store.ConnectorGrantStore { return nil }
+func (s commandPollerTestStore) ConnectorCalls() store.ConnectorAuditStore  { return nil }
+func (s commandPollerTestStore) Workers() store.WorkerStore                 { return nil }
+func (s commandPollerTestStore) Roles() store.RoleStore                     { return nil }
+func (s commandPollerTestStore) Daemon() store.DaemonProfileStore           { return nil }
+func (s commandPollerTestStore) Close() error                               { return nil }

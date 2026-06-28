@@ -1,13 +1,12 @@
 package driver
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -15,6 +14,7 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/store"
+	"github.com/tysonthomas9/loomcli/internal/trigger"
 )
 
 var ErrNoQueuedRun = errors.New("driver executor: no queued run")
@@ -30,6 +30,16 @@ type RunRequest struct {
 	WorkflowPath string
 	ServerPath   string
 	Manifest     map[string]string
+	// RunToken is the run-scoped bearer token minted at claim time, bound to
+	// this run's lease + fencing token, and exported to the workflow runtime
+	// as LOOM_RUN_TOKEN. Empty when minting is disabled (no RunTokenKey).
+	// Carried on the request — not the runner — so every launcher behind the
+	// SB1 sandbox seam injects it the same way.
+	RunToken string
+	// TrustLevel is the run's driver trust level, loaded server-side by
+	// loadRunRequest (SB3 placement policy). Anything but trusted — including
+	// empty/unknown — refuses non-isolating launchers (sandbox_required).
+	TrustLevel domain.DriverTrustLevel
 }
 
 type RunResult struct {
@@ -48,6 +58,30 @@ type Executor struct {
 	LeaseID           string
 	Runner            Runner
 	HeartbeatInterval time.Duration
+	// APIBaseURL/APIToken configure the driver-op HTTP API exported to driver
+	// runtimes via the default NodeRunner (LOOM_DRIVER_API_URL/_TOKEN).
+	APIBaseURL string
+	APIToken   string //nolint:gosec // G117: driver API bearer token intentionally stored in runtime config.
+	// RunTokenKey, when set, is the HS256 signing key used to mint the
+	// run-scoped bearer token injected into the workflow runtime as
+	// LOOM_RUN_TOKEN at claim time. Nil disables minting and keeps the
+	// legacy LOOM_DRIVER_API_TOKEN + identity-quad env authenticating (no
+	// flag-day). Token-carrying runs drop that legacy env once the
+	// deprecated LegacyDriverAuthEnvVar fallback is switched off. Must be
+	// the same key the serve driver-op API verifies with
+	// (ResolveRunTokenSigningKey: one key per process).
+	RunTokenKey []byte
+	// SandboxLauncher, when set, launches workflow runtimes through the SB1
+	// sandbox seam — e.g. the rootless container launcher selected by
+	// LOOM_DRIVER_SANDBOX=container in serve (ResolveSandboxLauncher). Nil
+	// keeps the default local node-process launcher. Ignored when Runner is
+	// set explicitly.
+	SandboxLauncher SandboxLauncher
+	// InternalEvents, when set, is the shared C14 loopback the run.finished
+	// lifecycle emission rides (AW6) — sharing keeps the hop-depth ledger
+	// warm across emissions. Nil is fine: emission falls back to a
+	// zero-config loopback over Store.
+	InternalEvents *trigger.InternalSource
 }
 
 type ExecutionResult struct {
@@ -84,11 +118,16 @@ func (e *Executor) RunOnce(ctx context.Context) (*ExecutionResult, error) {
 	result := &ExecutionResult{Run: run, Claimed: claimed}
 	hbCtx, stopHeartbeat := context.WithCancel(ctx)
 	defer stopHeartbeat()
+	// runCtx is the runner's context: the heartbeat cancels it when it
+	// observes a cooperative cancel request (composition cascade, AW10),
+	// and the runner then reports cancelled through the normal finish.
+	runCtx, cancelRun := context.WithCancel(ctx)
+	defer cancelRun()
 	if interval := e.heartbeatInterval(); interval > 0 {
-		go heartbeatDriverRun(hbCtx, e.Store, claimed, interval)
+		go heartbeatDriverRun(hbCtx, e.Store, claimed, interval, cancelRun)
 		go heartbeatExecutorNode(hbCtx, e.Store, claimed.WorkspaceKey, nodeID, e.nodeTTL())
 	}
-	result.Final, err = e.finish(ctx, claimed, e.runClaimed(ctx, workDir, claimed))
+	result.Final, err = e.settleClaimed(ctx, claimed, e.runClaimed(runCtx, workDir, claimed))
 	if err != nil {
 		return result, err
 	}
@@ -98,19 +137,59 @@ func (e *Executor) RunOnce(ctx context.Context) (*ExecutionResult, error) {
 func (e *Executor) runClaimed(ctx context.Context, workDir string, claimed *domain.DriverRun) RunResult {
 	runner := e.Runner
 	if runner == nil {
-		runner = NodeRunner{}
+		runner = NodeRunner{APIBaseURL: e.APIBaseURL, APIToken: e.APIToken, Launcher: e.SandboxLauncher}
 	}
 	req, err := loadRunRequest(ctx, workDir, claimed, e.Store)
 	if err != nil {
 		return RunResult{Status: domain.DriverRunFailed, Summary: err.Error(), ErrorClass: "bundle_verification"}
 	}
+	req.RunToken = e.mintRunToken(ctx, claimed)
 	runResult, runErr := runner.Run(ctx, req)
-	if runErr != nil {
+	if runErr != nil && ctx.Err() != nil {
+		// The runner context was cancelled under it (cooperative cancel
+		// request or executor shutdown): the run is cancelled, not failed —
+		// mirroring NodeRunner's own ctx-cancelled mapping.
+		runResult = RunResult{Status: domain.DriverRunCancelled, Summary: "driver run cancelled: " + runErr.Error(), ErrorClass: "driver_cancelled"}
+	} else if runErr != nil {
 		runResult = RunResult{Status: domain.DriverRunFailed, Summary: runErr.Error(), ErrorClass: "driver_runtime"}
 	} else {
 		runResult = requireExplicitTerminalRunResult(runResult)
 	}
 	return runResult
+}
+
+// mintRunToken mints the run-scoped bearer token for a freshly claimed run
+// (§4: minted at claim time), binding the claim's lease + fencing token into
+// the claims so fenced run verification doubles as revocation: a superseded
+// lease rejects the token regardless of expiry. TTL = maximum run duration
+// (LOOM_RUN_TOKEN_TTL, default 24h) per the locked step-9 decision — expiry
+// is the hard run-duration cap, not the lease window. Failures degrade to ""
+// with a warning rather than failing the claimed run: a token-less run keeps
+// the legacy LOOM_DRIVER_API_TOKEN + identity-quad env, which still
+// authenticates.
+func (e *Executor) mintRunToken(ctx context.Context, claimed *domain.DriverRun) string {
+	if len(e.RunTokenKey) == 0 || claimed == nil {
+		return ""
+	}
+	ttl, err := RunTokenTTL()
+	if err != nil {
+		slog.WarnContext(ctx, "driver run token TTL env invalid; using default",
+			"default", DefaultRunTokenTTL, "err", err)
+		ttl = DefaultRunTokenTTL
+	}
+	token, err := MintRunToken(RunTokenClaims{
+		WorkspaceKey: claimed.WorkspaceKey,
+		RunID:        claimed.RunID,
+		NodeID:       claimed.NodeID,
+		LeaseID:      claimed.LeaseID,
+		FencingToken: claimed.FencingToken,
+	}, e.RunTokenKey, ttl)
+	if err != nil {
+		slog.WarnContext(ctx, "mint driver run token failed; runtime falls back to legacy driver API auth",
+			"runID", claimed.RunID, "err", err)
+		return ""
+	}
+	return token
 }
 
 func (e *Executor) RecoverStaleOnce(ctx context.Context) (*store.StaleDriverRunRecoveryResult, error) {
@@ -123,7 +202,7 @@ func (e *Executor) RecoverStaleOnce(ctx context.Context) (*store.StaleDriverRunR
 		Summary:       "driver executor heartbeat expired",
 	}
 	if e.WorkspaceKey != "" {
-		return e.Store.DriverRuns().RecoverStale(ctx, e.WorkspaceKey, recover)
+		return e.recoverStaleWorkspace(ctx, e.WorkspaceKey, recover)
 	}
 	workspaces, err := e.Store.Workspaces().List(ctx)
 	if err != nil {
@@ -134,7 +213,7 @@ func (e *Executor) RecoverStaleOnce(ctx context.Context) (*store.StaleDriverRunR
 		if ws == nil {
 			continue
 		}
-		result, err := e.Store.DriverRuns().RecoverStale(ctx, ws.Key, recover)
+		result, err := e.recoverStaleWorkspace(ctx, ws.Key, recover)
 		if err != nil {
 			return nil, err
 		}
@@ -151,6 +230,28 @@ func (e *Executor) RecoverStaleOnce(ctx context.Context) (*store.StaleDriverRunR
 		out.SkippedFreshRunIDs = append(out.SkippedFreshRunIDs, result.SkippedFreshRunIDs...)
 	}
 	return out, nil
+}
+
+// recoverStaleWorkspace runs one workspace's stale-run sweep and publishes
+// run.finished for every recovered run (AW6): a stale-failed run is a
+// terminal transition like any other, so a parent awaiting the child must
+// learn about it. The store stamps error class stale_driver_run by default.
+func (e *Executor) recoverStaleWorkspace(ctx context.Context, ws string, recover store.StaleDriverRunRecovery) (*store.StaleDriverRunRecoveryResult, error) {
+	result, err := e.Store.DriverRuns().RecoverStale(ctx, ws, recover)
+	if err != nil {
+		return nil, err
+	}
+	for _, runID := range result.RecoveredRunIDs {
+		run, getErr := e.Store.DriverRuns().Get(ctx, ws, runID)
+		if getErr != nil {
+			slog.WarnContext(ctx, "load recovered driver run for run.finished emission failed",
+				"workspace", ws, "runID", runID, "error", getErr)
+			continue
+		}
+		emitRunFinishedEvent(ctx, e.Store, e.InternalEvents, run)
+		cascadeCancelChildren(ctx, e.Store, e.InternalEvents, run, 0)
+	}
+	return result, nil
 }
 
 func (e *Executor) nextQueuedRun(ctx context.Context) (*domain.DriverRun, error) {
@@ -204,6 +305,33 @@ func nextQueuedRunInWorkspace(ctx context.Context, s store.Store, ws string) (*d
 	return runs[0], nil
 }
 
+// settleClaimed finishes a terminal runner result, or acknowledges a
+// suspended one (AW11): an await op already parked the run server-side and
+// released the slot, so the executor must NOT Finish — it re-reads the run,
+// which may legitimately already be queued or running again (park->suspend
+// window tolerance: the resolver can resume before the runner exits). A
+// runner that reports suspended while the run is still running under OUR
+// lease lied (no await actually parked it); it is finished failed so the
+// slot does not leak to the stale sweeper.
+func (e *Executor) settleClaimed(ctx context.Context, claimed *domain.DriverRun, result RunResult) (*domain.DriverRun, error) {
+	if result.Status != domain.DriverRunSuspendedAwaitingEvent {
+		return e.finish(ctx, claimed, result)
+	}
+	run, err := e.Store.DriverRuns().Get(ctx, claimed.WorkspaceKey, claimed.RunID)
+	if err != nil {
+		return nil, fmt.Errorf("read suspended driver run: %w", err)
+	}
+	if run.Status == domain.DriverRunRunning && run.NodeID == claimed.NodeID && run.LeaseID == claimed.LeaseID {
+		return e.finish(ctx, claimed, RunResult{
+			Status:     domain.DriverRunFailed,
+			Summary:    "driver reported suspended but no await parked the run",
+			ErrorClass: "invalid_driver_result",
+			Output:     result.Output,
+		})
+	}
+	return run, nil
+}
+
 func (e *Executor) finish(ctx context.Context, claimed *domain.DriverRun, result RunResult) (*domain.DriverRun, error) {
 	if strings.TrimSpace(result.Summary) == "" {
 		result.Summary = string(result.Status)
@@ -218,9 +346,48 @@ func (e *Executor) finish(ctx context.Context, claimed *domain.DriverRun, result
 		Output:       result.Output,
 	})
 	if err != nil {
+		if settled, ok := e.settleDisownedFinish(ctx, claimed, err); ok {
+			return settled, nil
+		}
 		return nil, fmt.Errorf("finish driver run: %w", err)
 	}
+	// Every server-side terminal transition publishes run.finished (AW6):
+	// completed, failed, needs_review and cancelled all land here (a
+	// cancelled runner reports DriverRunCancelled through the same finish).
+	emitRunFinishedEvent(ctx, e.Store, e.InternalEvents, final)
+	// Composition cascade (AW10): a terminal parent cancels its queued
+	// children and cancel-requests its running ones.
+	cascadeCancelChildren(ctx, e.Store, e.InternalEvents, final, 0)
 	return final, nil
+}
+
+// settleDisownedFinish tolerates the one legitimate way a finish can lose
+// ownership mid-run: an events/await op parked the run server-side
+// (releasing the slot and clearing the owner triple) but the workflow
+// runtime distorted the suspension signal into a terminal-looking result —
+// e.g. a framework that serializes the SDK's WorkflowSuspended sentinel into
+// a generic internal error, so the launcher reports failed instead of
+// suspended (observed with the real Flue runtime, AW12). The server-side
+// suspension is authoritative: acknowledge it like settleClaimed does for a
+// clean suspended report. A run already resolved and re-queued is the same
+// accepted park->suspend window. Anything else (zombie lease, stale
+// recovery) stays an error.
+func (e *Executor) settleDisownedFinish(ctx context.Context, claimed *domain.DriverRun, finishErr error) (*domain.DriverRun, bool) {
+	if !errors.Is(finishErr, domain.ErrNotOwner) {
+		return nil, false
+	}
+	run, err := e.Store.DriverRuns().Get(ctx, claimed.WorkspaceKey, claimed.RunID)
+	if err != nil {
+		return nil, false
+	}
+	suspended := run.Status == domain.DriverRunSuspendedAwaitingEvent
+	requeued := run.Status == domain.DriverRunQueued && run.ResumeSourceEventID != ""
+	if !suspended && !requeued {
+		return nil, false
+	}
+	slog.WarnContext(ctx, "driver run finish superseded by server-side await suspension; acknowledging parked run",
+		"runID", claimed.RunID, "status", string(run.Status))
+	return run, true
 }
 
 func (e *Executor) resolveWorkDir() (string, error) {
@@ -255,15 +422,21 @@ func (e *Executor) leaseID(runID string) string {
 
 func (e *Executor) ensureNode(ctx context.Context, ws, nodeID string) error {
 	ttl := e.nodeTTL()
+	ownerActor := executorOwnerActor()
+	runtimeProvider := domain.RuntimeProviderLocal
+	labels := []string{"loom-driver-executor"}
+	capabilities := []string{"driver-runner", "task-runner", "flue-local"}
+	toolInventory := []string{"loom-driver"}
+	drainState := domain.NodeDrainActive
 	_, err := e.Store.Nodes().Create(ctx, store.NodeCreate{
 		WorkspaceKey:    ws,
 		NodeID:          nodeID,
-		OwnerActor:      executorOwnerActor(),
-		RuntimeProvider: domain.RuntimeProviderLocal,
-		Labels:          []string{"loom-driver-executor"},
-		Capabilities:    []string{"driver-runner", "task-runner", "flue-local"},
-		ToolInventory:   []string{"loom-driver"},
-		DrainState:      domain.NodeDrainActive,
+		OwnerActor:      ownerActor,
+		RuntimeProvider: runtimeProvider,
+		Labels:          labels,
+		Capabilities:    capabilities,
+		ToolInventory:   toolInventory,
+		DrainState:      drainState,
 		TTL:             ttl,
 	})
 	if err == nil {
@@ -273,9 +446,46 @@ func (e *Executor) ensureNode(ctx context.Context, ws, nodeID string) error {
 		if _, hbErr := e.Store.Nodes().Heartbeat(ctx, ws, nodeID, ttl); hbErr != nil {
 			return fmt.Errorf("heartbeat executor node: %w", hbErr)
 		}
+		if existing, getErr := e.Store.Nodes().Get(ctx, ws, nodeID); getErr == nil {
+			labels = mergeNodeStringSet(existing.Labels, labels)
+			capabilities = mergeNodeStringSet(existing.Capabilities, capabilities)
+			toolInventory = mergeNodeStringSet(existing.ToolInventory, toolInventory)
+		}
+		if _, updateErr := e.Store.Nodes().Update(ctx, ws, nodeID, store.NodeUpdate{
+			OwnerActor:      &ownerActor,
+			RuntimeProvider: &runtimeProvider,
+			Labels:          &labels,
+			Capabilities:    &capabilities,
+			ToolInventory:   &toolInventory,
+			DrainState:      &drainState,
+		}); updateErr != nil {
+			return fmt.Errorf("refresh executor node: %w", updateErr)
+		}
 		return nil
 	}
 	return fmt.Errorf("register executor node: %w", err)
+}
+
+func mergeNodeStringSet(existing, desired []string) []string {
+	if len(existing) == 0 {
+		return append([]string(nil), desired...)
+	}
+	out := make([]string, 0, len(existing)+len(desired))
+	seen := map[string]struct{}{}
+	for _, values := range [][]string{existing, desired} {
+		for _, value := range values {
+			value = strings.TrimSpace(value)
+			if value == "" {
+				continue
+			}
+			if _, ok := seen[value]; ok {
+				continue
+			}
+			seen[value] = struct{}{}
+			out = append(out, value)
+		}
+	}
+	return out
 }
 
 func executorOwnerActor() string {
@@ -305,7 +515,11 @@ func (e *Executor) nodeTTL() time.Duration {
 	return ttl
 }
 
-func heartbeatDriverRun(ctx context.Context, s store.Store, claimed *domain.DriverRun, interval time.Duration) {
+// heartbeatDriverRun renews the run lease and observes cooperative cancel
+// requests (composition cascade, AW10): a heartbeat that comes back with
+// CancelRequestedAt set fires onCancelRequested, canceling the runner's
+// context so the run terminalizes as cancelled through the normal finish.
+func heartbeatDriverRun(ctx context.Context, s store.Store, claimed *domain.DriverRun, interval time.Duration, onCancelRequested func()) {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 	for {
@@ -313,7 +527,10 @@ func heartbeatDriverRun(ctx context.Context, s store.Store, claimed *domain.Driv
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			_, _ = s.DriverRuns().Heartbeat(ctx, claimed.WorkspaceKey, claimed.RunID, claimed.NodeID, claimed.LeaseID, claimed.FencingToken)
+			run, err := s.DriverRuns().Heartbeat(ctx, claimed.WorkspaceKey, claimed.RunID, claimed.NodeID, claimed.LeaseID, claimed.FencingToken)
+			if err == nil && run != nil && run.CancelRequestedAt != nil && onCancelRequested != nil {
+				onCancelRequested()
+			}
 		}
 	}
 }
@@ -349,32 +566,13 @@ func loadRunRequest(ctx context.Context, workDir string, run *domain.DriverRun, 
 	if err != nil {
 		return RunRequest{}, err
 	}
-	manifestPath := filepath.Join(bundleRoot, "manifest.json")
-	manifestBytes, err := os.ReadFile(manifestPath) //nolint:gosec // path is constrained under workDir by safeBundleRoot.
-	if err != nil {
-		return RunRequest{}, fmt.Errorf("read bundle manifest: %w", err)
-	}
-	manifest := map[string]string{}
-	if err := json.Unmarshal(manifestBytes, &manifest); err != nil {
-		return RunRequest{}, fmt.Errorf("decode bundle manifest: %w", err)
-	}
-	serverRef := manifest["server_ref"]
-	if serverRef == "" {
-		return RunRequest{}, fmt.Errorf("native Flue bundle manifest missing server_ref: %w", domain.ErrInvalid)
-	}
-	serverPath, err := safeBundleFile(bundleRoot, serverRef)
+	manifest, serverPath, err := verifyBundleManifest(bundleRoot, version.BundleDigest)
 	if err != nil {
 		return RunRequest{}, err
 	}
-	if info, err := os.Stat(serverPath); err != nil {
-		return RunRequest{}, fmt.Errorf("stat built Flue server: %w", err)
-	} else if info.IsDir() {
-		return RunRequest{}, fmt.Errorf("built Flue server %q is a directory: %w", serverRef, domain.ErrInvalid)
-	}
-	if got, err := digestBundleTree(bundleRoot, manifestBytes); err != nil {
+	trust, err := driverTrustLevel(ctx, s, run)
+	if err != nil {
 		return RunRequest{}, err
-	} else if got != version.BundleDigest {
-		return RunRequest{}, fmt.Errorf("bundle digest mismatch: got %s want %s: %w", got, version.BundleDigest, domain.ErrInvalid)
 	}
 	return RunRequest{
 		Run:        run,
@@ -382,7 +580,42 @@ func loadRunRequest(ctx context.Context, workDir string, run *domain.DriverRun, 
 		BundleRoot: bundleRoot,
 		ServerPath: serverPath,
 		Manifest:   manifest,
+		TrustLevel: trust,
 	}, nil
+}
+
+// verifyBundleManifest reads the staged bundle's manifest, resolves the built
+// Flue server path inside the bundle, and checks the bundle tree digest
+// against the pinned version digest.
+func verifyBundleManifest(bundleRoot, wantDigest string) (map[string]string, string, error) {
+	manifestPath := filepath.Join(bundleRoot, "manifest.json")
+	manifestBytes, err := os.ReadFile(manifestPath) //nolint:gosec // path is constrained under workDir by safeBundleRoot.
+	if err != nil {
+		return nil, "", fmt.Errorf("read bundle manifest: %w", err)
+	}
+	manifest := map[string]string{}
+	if err := json.Unmarshal(manifestBytes, &manifest); err != nil {
+		return nil, "", fmt.Errorf("decode bundle manifest: %w", err)
+	}
+	serverRef := manifest["server_ref"]
+	if serverRef == "" {
+		return nil, "", fmt.Errorf("native Flue bundle manifest missing server_ref: %w", domain.ErrInvalid)
+	}
+	serverPath, err := safeBundleFile(bundleRoot, serverRef)
+	if err != nil {
+		return nil, "", err
+	}
+	if info, err := os.Stat(serverPath); err != nil {
+		return nil, "", fmt.Errorf("stat built Flue server: %w", err)
+	} else if info.IsDir() {
+		return nil, "", fmt.Errorf("built Flue server %q is a directory: %w", serverRef, domain.ErrInvalid)
+	}
+	if got, err := digestBundleTree(bundleRoot, manifestBytes); err != nil {
+		return nil, "", err
+	} else if got != wantDigest {
+		return nil, "", fmt.Errorf("bundle digest mismatch: got %s want %s: %w", got, wantDigest, domain.ErrInvalid)
+	}
+	return manifest, serverPath, nil
 }
 
 func safeBundleRoot(workDir, bundleRef string) (string, error) {
@@ -415,9 +648,64 @@ func safeBundleFile(bundleRoot, ref string) (string, error) {
 	return path, nil
 }
 
+// LegacyDriverAuthEnvVar names the env switch that keeps the deprecated
+// static-bearer auth surface flowing to workflow runtimes that already
+// receive a run-scoped token: LOOM_DRIVER_API_TOKEN (node-wide shared bearer,
+// cross-run authority) plus the LOOM_DRIVER_LEASE_ID/LOOM_DRIVER_FENCING_TOKEN
+// identity vars used by header-quad auth. While enabled, workflow bundles
+// built against the pre-token SDK keep authenticating; bundles on the
+// token-aware SDK ignore the legacy vars and go token-only.
+//
+// Deprecated — removal path (§9.5 workflow env lockdown):
+//  1. This release: default ON, so loom-dev keeps working at deploy. Rebuild
+//     workflow bundles against the token-aware SDK, then set
+//     LOOM_DRIVER_LEGACY_AUTH_ENV=0 on serve to lock the env down.
+//  2. Next release: the default flips OFF (=1 stays as break-glass).
+//  3. The release after: the switch and the legacy export are removed.
+//
+// Runs without a minted token (no RunTokenKey, e.g. CLI/ops executors) always
+// get the legacy env regardless of this switch — no flag-day.
+const LegacyDriverAuthEnvVar = "LOOM_DRIVER_LEGACY_AUTH_ENV"
+
+// legacyDriverAuthEnv reports whether this run's workflow env carries the
+// legacy static-bearer auth surface. Token-less runs always do (it is their
+// only auth); token-carrying runs only while the deprecated
+// LegacyDriverAuthEnvVar fallback stays enabled.
+func legacyDriverAuthEnv(req RunRequest) bool {
+	if strings.TrimSpace(req.RunToken) == "" {
+		return true
+	}
+	return legacyDriverAuthEnvEnabled(os.Getenv(LegacyDriverAuthEnvVar))
+}
+
+// legacyDriverAuthEnvEnabled parses the switch value: default ON for one
+// release; only an explicit false-y value locks the env down.
+func legacyDriverAuthEnvEnabled(raw string) bool {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "0", "false", "off", "no":
+		return false
+	default:
+		return true
+	}
+}
+
 type NodeRunner struct {
 	NodePath        string
 	ExecTaskCommand []string
+	// APIBaseURL, when set, is exported to the driver runtime as
+	// LOOM_DRIVER_API_URL so the workflow SDK uses the driver-op HTTP API on
+	// loom serve instead of spawning CLI subprocesses.
+	APIBaseURL string
+	// APIToken is the shared driver API bearer token forwarded as
+	// LOOM_DRIVER_API_TOKEN when APIBaseURL is set — but only to runs on the
+	// legacy auth surface (no run token, or the deprecated
+	// LegacyDriverAuthEnvVar fallback still on). Token-carrying runs are
+	// token-only: the static bearer never reaches their workflow env.
+	APIToken string //nolint:gosec // G117: driver API bearer token intentionally forwarded to legacy runtimes.
+	// Launcher launches the workflow-bundle runtime (SB1 sandbox seam).
+	// Nil means the default local node-process launcher — today's
+	// flue-local behavior, unchanged.
+	Launcher SandboxLauncher
 }
 
 func (r NodeRunner) Run(ctx context.Context, req RunRequest) (RunResult, error) {
@@ -439,56 +727,92 @@ func (r NodeRunner) Run(ctx context.Context, req RunRequest) (RunResult, error) 
 }
 
 func (r NodeRunner) runBuiltFlueServer(ctx context.Context, req RunRequest, node string, input []byte) (RunResult, error) {
-	launcherPath, cleanupLauncher, err := writeFlueRuntimeLauncher()
+	env, err := r.runtimeEnv(req, input)
 	if err != nil {
 		return RunResult{}, err
 	}
-	defer cleanupLauncher()
-	execTaskCommand, err := r.execTaskCommand()
+	launcher := r.Launcher
+	if launcher == nil {
+		launcher = processLauncher{NodePath: node}
+	}
+	// SB3 trust placement policy: an untrusted bundle never launches outside
+	// an isolating sandbox — the run fails sandbox_required with no process
+	// spawned, never a silent fallback.
+	if refusal, refused := refuseUntrustedPlacement(req, launcher); refused {
+		return refusal, nil
+	}
+	process, err := launcher.Launch(ctx, LaunchSpec{
+		BundleRoot: req.BundleRoot,
+		ServerPath: req.ServerPath,
+		WorkDir:    req.BundleRoot,
+		Env:        env,
+		Manifest:   req.Manifest,
+		TrustLevel: req.TrustLevel,
+	})
 	if err != nil {
 		return RunResult{}, err
+	}
+	exit, waitErr := process.Wait()
+	result := flueRuntimeResult(ctx, req, exit.Stdout, exit.Stderr, waitErr)
+	recordSandboxPlacement(&result, process.Placement())
+	recordTrustPlacementDecision(&result, req.TrustLevel, launcherPlacementProvider(launcher))
+	return result, nil
+}
+
+// runtimeEnv assembles the complete workflow runtime environment: the
+// identity/auth env from flueRuntimeEnv plus the driver-op API endpoint. The
+// node-wide static bearer is cross-run authority, so token-carrying runs drop
+// it (workflow calls are token-only per the step-9 locked decision) unless
+// the deprecated LegacyDriverAuthEnvVar fallback is still on.
+func (r NodeRunner) runtimeEnv(req RunRequest, input []byte) ([]string, error) {
+	execTaskCommand, err := r.execTaskCommand()
+	if err != nil {
+		return nil, err
 	}
 	env, err := flueRuntimeEnv(req, input, execTaskCommand)
 	if err != nil {
-		return RunResult{}, err
+		return nil, err
 	}
-	cmd := flueRuntimeCommand(ctx, node, launcherPath, req.BundleRoot, env)
-	stdout, stderr, err := runFlueRuntimeCommand(cmd)
-	return flueRuntimeResult(ctx, req, stdout, stderr, err), nil
-}
-
-func writeFlueRuntimeLauncher() (string, func(), error) {
-	launcher, err := os.CreateTemp("", "loom-flue-runtime-*.mjs")
-	if err != nil {
-		return "", nil, fmt.Errorf("create Flue runtime launcher: %w", err)
+	apiBaseURL := strings.TrimSpace(r.APIBaseURL)
+	if apiBaseURL == "" {
+		return env, nil
 	}
-	cleanup := func() { _ = os.Remove(launcher.Name()) }
-	if _, err := launcher.WriteString(flueLocalLauncher); err != nil {
-		_ = launcher.Close()
-		cleanup()
-		return "", nil, fmt.Errorf("write Flue runtime launcher: %w", err)
+	env = append(env, "LOOM_DRIVER_API_URL="+apiBaseURL)
+	if apiToken := strings.TrimSpace(r.APIToken); apiToken != "" && legacyDriverAuthEnv(req) {
+		env = append(env, "LOOM_DRIVER_API_TOKEN="+apiToken)
 	}
-	if err := launcher.Close(); err != nil {
-		cleanup()
-		return "", nil, fmt.Errorf("close Flue runtime launcher: %w", err)
-	}
-	return launcher.Name(), cleanup, nil
+	return env, nil
 }
 
 func flueRuntimeEnv(req RunRequest, input []byte, execTaskCommand []string) ([]string, error) {
-	parentEnv := os.Environ()
-	env := append(driverRuntimeBaseEnv(parentEnv), driverRuntimeFleetDBHandoffEnv(parentEnv)...)
+	env := driverRuntimeBaseEnv(os.Environ())
 	env = append(env,
 		"LOOM_DRIVER_WORKSPACE="+req.Run.WorkspaceKey,
 		"LOOM_DRIVER_RUN_ID="+req.Run.RunID,
 		"LOOM_DRIVER_NODE_ID="+req.Run.NodeID,
-		"LOOM_DRIVER_LEASE_ID="+req.Run.LeaseID,
-		fmt.Sprintf("LOOM_DRIVER_FENCING_TOKEN=%d", req.Run.FencingToken),
+	)
+	// Lease identity doubles as auth material under header-quad auth, so a
+	// token-carrying run keeps it out of the workflow env (§9.5 lockdown:
+	// blast radius = one run x one lease TTL) unless the deprecated
+	// LegacyDriverAuthEnvVar fallback is still on.
+	if legacyDriverAuthEnv(req) {
+		env = append(env,
+			"LOOM_DRIVER_LEASE_ID="+req.Run.LeaseID,
+			fmt.Sprintf("LOOM_DRIVER_FENCING_TOKEN=%d", req.Run.FencingToken),
+		)
+	}
+	env = append(env,
 		"LOOM_FLUE_SERVER_PATH="+req.ServerPath,
 		"LOOM_FLUE_BUNDLE_ROOT="+req.BundleRoot,
 		"LOOM_FLUE_WORKFLOW_NAME="+workflowName(req),
 		"LOOM_FLUE_INVOKE_PAYLOAD="+string(input),
 	)
+	// Run-scoped bearer token (LOOM_RUN_TOKEN), minted at claim time. The
+	// parent-env filter strips any inherited *TOKEN* variable, so the only
+	// token a workflow process ever sees is the one minted for its own run.
+	if token := strings.TrimSpace(req.RunToken); token != "" {
+		env = append(env, "LOOM_RUN_TOKEN="+token)
+	}
 	if len(execTaskCommand) > 0 {
 		encoded, err := json.Marshal(execTaskCommand)
 		if err != nil {
@@ -497,28 +821,6 @@ func flueRuntimeEnv(req RunRequest, input []byte, execTaskCommand []string) ([]s
 		env = append(env, "LOOM_DRIVER_EXEC_TASK_CMD_JSON="+string(encoded))
 	}
 	return env, nil
-}
-
-func flueRuntimeCommand(ctx context.Context, node, launcherPath, bundleRoot string, env []string) *exec.Cmd {
-	cmd := exec.CommandContext(ctx, node, launcherPath) //nolint:gosec // node is operator-configured; launcherPath is a temp file created by this process.
-	cmd.Dir = bundleRoot
-	cmd.Env = env
-	cmd.Cancel = func() error {
-		if cmd.Process == nil {
-			return nil
-		}
-		return cmd.Process.Signal(os.Interrupt)
-	}
-	cmd.WaitDelay = 5 * time.Second
-	return cmd
-}
-
-func runFlueRuntimeCommand(cmd *exec.Cmd) (string, string, error) {
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-	err := cmd.Run()
-	return stdout.String(), stderr.String(), err
 }
 
 func flueRuntimeResult(ctx context.Context, req RunRequest, stdout, stderr string, runErr error) RunResult {
@@ -574,6 +876,12 @@ func flueFailedSummary(summary, stderr string) string {
 
 func requireExplicitTerminalRunResult(result RunResult) RunResult {
 	if result.Status.IsTerminal() {
+		return result
+	}
+	if result.Status == domain.DriverRunSuspendedAwaitingEvent {
+		// A suspended report is the runner's clean exit after an await op
+		// parked the run server-side (AW9/AW11): not a terminal result and
+		// not an error — settleClaimed acknowledges it without a Finish.
 		return result
 	}
 	detail := "driver result missing terminal status"
@@ -669,93 +977,3 @@ func workflowName(req RunRequest) string {
 	}
 	return EntrypointRun
 }
-
-const flueLocalLauncher = `
-import { fork } from 'node:child_process';
-
-const serverPath = process.env.LOOM_FLUE_SERVER_PATH;
-const bundleRoot = process.env.LOOM_FLUE_BUNDLE_ROOT || process.cwd();
-const workflowName = process.env.LOOM_FLUE_WORKFLOW_NAME;
-const payload = JSON.parse(process.env.LOOM_FLUE_INVOKE_PAYLOAD || '{}');
-const requestId = process.env.LOOM_DRIVER_RUN_ID || 'loom-driver-run';
-
-if (!serverPath || !workflowName) {
-  console.log(JSON.stringify({ status: 'failed', summary: 'missing Flue server path or workflow name', errorClass: 'driver_runtime' }));
-  process.exit(0);
-}
-
-let completed = false;
-let invoked = false;
-const child = fork(serverPath, [], {
-  cwd: bundleRoot,
-  env: {
-    ...process.env,
-    FLUE_MODE: 'local',
-    FLUE_CLI_TARGET: 'workflow',
-    FLUE_CLI_NAME: workflowName,
-  },
-  stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
-});
-
-child.stdout?.on('data', (data) => process.stderr.write(data));
-child.stderr?.on('data', (data) => process.stderr.write(data));
-
-function finish(result) {
-  if (completed) return;
-  completed = true;
-  console.log(JSON.stringify(result || {}));
-  try { child.disconnect(); } catch {}
-}
-
-child.on('message', (message) => {
-  if (!message || typeof message !== 'object') return;
-  if (message.type === 'ready' && !invoked) {
-    invoked = true;
-    child.send({ version: 1, type: 'invoke', requestId, payload });
-    return;
-  }
-  if (message.type === 'result') {
-    finish(message.result || {});
-    return;
-  }
-  if (message.type === 'error') {
-    const error = message.error || {};
-    finish({
-      status: 'failed',
-      summary: error.message || error.details || 'Flue workflow failed',
-      errorClass: error.type || 'driver_runtime',
-    });
-  }
-});
-
-child.on('error', (error) => {
-  finish({ status: 'failed', summary: error?.message || String(error), errorClass: 'driver_runtime' });
-});
-
-function shutdown(signal) {
-  if (completed) return;
-  completed = true;
-  try { child.kill(signal); } catch {}
-  setTimeout(() => {
-    try { child.kill('SIGKILL'); } catch {}
-  }, 1000).unref?.();
-  console.log(JSON.stringify({
-    status: 'cancelled',
-    summary: 'Flue local runner cancelled',
-    errorClass: 'driver_cancelled',
-  }));
-  process.exit(signal === 'SIGINT' ? 130 : 143);
-}
-
-process.once('SIGINT', () => shutdown('SIGINT'));
-process.once('SIGTERM', () => shutdown('SIGTERM'));
-
-child.on('exit', (code, signal) => {
-  if (completed) return;
-  finish({
-    status: 'failed',
-    summary: 'Flue local runner exited before result' + (signal ? ' signal=' + signal : ' code=' + code),
-    errorClass: 'driver_runtime',
-  });
-});
-`

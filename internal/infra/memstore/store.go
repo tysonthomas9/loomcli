@@ -44,9 +44,15 @@ type Store struct {
 	runs       *driverRunStore
 	steps      *driverStepStore
 	taskRuns   *taskRunStore
+	taskEvents *taskRunEventStore
+	outbox     *outboxStore
+	awaits     *awaitStore
 	workers    *workerStore
 	roles      *roleStore
 	daemon     *daemonStore
+	conns      *connectorStore
+	grants     *connectorGrantStore
+	audits     *connectorAuditStore
 }
 
 // New constructs an empty in-memory store for tests.
@@ -57,30 +63,27 @@ type Store struct {
 func New() *Store {
 	requireTestProcess()
 
-	drivers := newDriverStore()
-	versions := newDriverVersionStore(drivers)
-	profiles := newWorkerProfileStore()
-	roles := newRoleStore()
-	services := newAgentServiceStore(roles, profiles)
-	bindings := newTriggerBindingStore(versions, services)
-	services.bindings = bindings
-	roles.services = services
-	profiles.services = services
+	drivers, versions, profiles, roles, services, bindings := newCatalogGraph()
+	nodes := newNodeStore()
 	artifacts := newArtifactStore()
 	runs := newDriverRunStore(versions, bindings)
 	steps := newDriverStepStore(runs)
-	taskRuns := newTaskRunStore(runs, steps, artifacts, profiles)
+	taskRuns := newTaskRunStore(runs, steps, artifacts, profiles, nodes)
 	runs.steps = steps
 	runs.taskRuns = taskRuns
 	steps.taskRuns = taskRuns
 	events := newTriggerEventStore()
-	deliveries := newTriggerDeliveryStore()
+	deliveries := newTriggerDeliveryStore(bindings)
 	routes := &triggerRouteStore{bindings: bindings, events: events, deliveries: deliveries, runs: runs}
+	awaits := newAwaitStore(events)
+	// ResumeAwaiting's security gate: only a resolved (satisfied/timed_out)
+	// await releases its suspended run.
+	runs.setAwaitResumeEligible(awaits.resumeEligible)
 	return &Store{
 		workspaces: newWorkspaceStore(),
 		repos:      newRepoStore(),
 		agents:     newAgentStore(),
-		nodes:      newNodeStore(),
+		nodes:      nodes,
 		sessions:   newAgentSessionStore(),
 		terminals:  newTerminalSessionStore(),
 		artifacts:  artifacts,
@@ -99,10 +102,32 @@ func New() *Store {
 		runs:       runs,
 		steps:      steps,
 		taskRuns:   taskRuns,
+		taskEvents: newTaskRunEventStore(),
+		outbox:     newOutboxStore(),
+		awaits:     awaits,
 		workers:    newWorkerStore(),
 		roles:      roles,
 		daemon:     newDaemonStore(),
+		conns:      newConnectorStore(),
+		grants:     newConnectorGrantStore(),
+		audits:     newConnectorAuditStore(),
 	}
+}
+
+// newCatalogGraph wires the mutually-referencing catalog stores (drivers,
+// versions, profiles, roles, services, bindings) and returns the handles New
+// needs for the rest of the dependency graph.
+func newCatalogGraph() (*driverStore, *driverVersionStore, *workerProfileStore, *roleStore, *agentServiceStore, *triggerBindingStore) {
+	drivers := newDriverStore()
+	versions := newDriverVersionStore(drivers)
+	profiles := newWorkerProfileStore()
+	roles := newRoleStore()
+	services := newAgentServiceStore(roles, profiles)
+	bindings := newTriggerBindingStore(versions, services)
+	services.bindings = bindings
+	roles.services = services
+	profiles.services = services
+	return drivers, versions, profiles, roles, services, bindings
 }
 
 func requireTestProcess() {
@@ -177,6 +202,22 @@ func (s *Store) DriverRuns() store.DriverRunStore { return s.runs }
 func (s *Store) DriverSteps() store.DriverStepStore { return s.steps }
 
 func (s *Store) TaskRuns() store.TaskRunStore { return s.taskRuns }
+
+// TaskParked reports whether a TaskRunFinish with ParkTask marked the given
+// task ID parked. memstore has no issue model (issues live in fleet-db), so
+// this is the test-side observable for the parked-issue transition.
+func (s *Store) TaskParked(ws, taskID string) bool { return s.taskRuns.TaskParked(ws, taskID) }
+
+// TaskRunEvents returns the TaskRunEventStore.
+func (s *Store) TaskRunEvents() store.TaskRunEventStore { return s.taskEvents }
+
+// Outbox returns the OutboxStore.
+func (s *Store) Outbox() store.OutboxStore { return s.outbox }
+
+// Awaits returns the AwaitStore (chunk AW4). The await index shares the
+// trigger-event journal's lock so check-then-park is atomic with event
+// appends; see awaitStore.
+func (s *Store) Awaits() store.AwaitStore { return s.awaits }
 
 // Workers returns the WorkerStore.
 func (s *Store) Workers() store.WorkerStore { return s.workers }

@@ -41,6 +41,12 @@ type Store interface {
 	DriverRuns() DriverRunStore
 	DriverSteps() DriverStepStore
 	TaskRuns() TaskRunStore
+	TaskRunEvents() TaskRunEventStore
+	Outbox() OutboxStore
+	Awaits() AwaitStore
+	Connectors() ConnectorStore
+	ConnectorGrants() ConnectorGrantStore
+	ConnectorCalls() ConnectorAuditStore
 	Workers() WorkerStore
 	Roles() RoleStore
 	Daemon() DaemonProfileStore

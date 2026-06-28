@@ -1,0 +1,41 @@
+# A1 github-review-agent overlay for the podman stack, applied by
+# scripts/test-a1-review-multi-container.sh on top of compose.yaml:
+#
+#   podman compose -f compose.yaml -f compose.codex.yaml up -d
+#
+# It adds exactly what the codex-backed review TaskRun needs and nothing else,
+# keeping the DISTRIBUTED topology (redis, fleet-db, loom-serve, worker,
+# stub-upstream as separate capped containers) intact.
+#
+# Topology note (why codex runs in loom-serve, not the worker container):
+# `loom worker` runs automode.RunAutoModeLoop — an agent/task-development loop
+# over HTTP-backed lock/event bridges (internal/cli/serve/worker/worker_cmd.go),
+# NOT a driver TaskWorker that claims driver TaskRuns. Driver TaskRuns (the A1
+# review) are claimed and executed by serve's EMBEDDED task workers
+# (LOOM_DRIVER_EXECUTOR=1 in compose.yaml), which invoke the runner command in
+# the loom-serve process (internal/driver/task_bridge.go HostBridgeTaskExecutor).
+# So the codex CLI + auth + runner command belong in the loom-serve container.
+# This is the SAME proven recipe as the single-container loomcli-dev path
+# (Dockerfile.dev + scripts/run-github-review-codex-stack.sh), applied to the
+# distributed stack.
+#
+# Resource caps are NOT touched here — compose merge preserves loom-serve's
+# mem_limit/cpus/pids_limit from compose.yaml; this overlay only adds the codex
+# read-only auth bind and the runner env.
+
+services:
+  loom-serve:
+    environment:
+      # The codex review runner command, wrapped in `env CODEX_HOME=…` so the
+      # writable CODEX_HOME survives the task bridge's CODEX_* env strip
+      # (internal/driver/env.go). The runner reads its request off
+      # LOOM_TASK_RUN_REQUEST_JSON and takes no positional args.
+      LOOM_DRIVER_TASK_RUNNER_CMD_JSON: ${LOOM_STACK_TASK_RUNNER_CMD_JSON:-["env","CODEX_HOME=/home/node/.codex-rw","node","/usr/local/bin/codex-review-runner.mjs"]}
+      LOOM_STACK_CODEX_RW_DIR: ${LOOM_STACK_CODEX_RW_DIR:-/home/node/.codex-rw}
+      LOOM_FLUE_AGENT_MODEL: ${LOOM_STACK_FLUE_AGENT_MODEL:-openai-codex/gpt-5.3-codex-spark}
+    volumes:
+      # Host ~/.codex mounted READ-ONLY. The serve entrypoint mirrors it into
+      # the writable CODEX_HOME (/home/node/.codex-rw) — the host copy is never
+      # mutated. The A1 driver script sets LOOM_STACK_CODEX_HOST_DIR to the
+      # operator's resolved ~/.codex; it must contain a valid auth.json.
+      - ${LOOM_STACK_CODEX_HOST_DIR:?set LOOM_STACK_CODEX_HOST_DIR to the host ~/.codex dir (run scripts/test-a1-review-multi-container.sh)}:/home/node/.codex:ro

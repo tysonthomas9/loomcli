@@ -1,18 +1,21 @@
 package webhooks
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/store"
+	"github.com/tysonthomas9/loomcli/internal/trigger"
 )
 
 // maxWebhookPayloadBytes caps the inbound webhook body. GitHub deliveries are
@@ -24,12 +27,15 @@ const maxWebhookPayloadBytes = 8 << 20
 type Module struct {
 	store    store.Store
 	adapters registry
+	// awaits is the dispatch-time await matcher (AW7): admitted events are
+	// matched against parked await instances right after durable dispatch.
+	awaits *trigger.AwaitMatcher
 }
 
 // NewModule constructs the webhooks module backed by the given store. Returns
 // nil-safe behavior: with a nil store, Register registers nothing.
 func NewModule(st store.Store) *Module {
-	return &Module{store: st, adapters: defaultRegistry()}
+	return &Module{store: st, adapters: defaultRegistry(), awaits: &trigger.AwaitMatcher{Store: st}}
 }
 
 func (m *Module) Register(mux *http.ServeMux) {
@@ -84,8 +90,16 @@ func (m *Module) receiveWebhook(w http.ResponseWriter, r *http.Request) {
 }
 
 // authorizeWebhook resolves the enabled binding for the event's route key,
-// fetches its signing secret via the privileged path, and verifies the request
-// signature. It writes the appropriate error and returns false on any failure.
+// resolves the inbound signing secret(s), and verifies the request signature.
+// It writes the appropriate error and returns false on any failure.
+//
+// Signature model (step-7 connectors): verification resolves the per-source
+// connector's inbound secret — one rotation point per source — accepting the
+// previous secret inside the dual-secret rotation window (stale matches emit
+// an audit signal). Bindings whose source kind has no connector yet keep
+// verifying against the exact-RouteKey binding's secret (back-compat, no flag
+// day). Pattern-matched fan-out bindings need no secrets of their own —
+// verification happens here at ingress, before dispatch.
 func (m *Module) authorizeWebhook(w http.ResponseWriter, r *http.Request, adapter Adapter, ws string, event NormalizedEvent, body []byte) bool {
 	binding, err := m.store.TriggerBindings().GetByRouteKey(r.Context(), ws, event.RouteKey)
 	if err != nil {
@@ -96,12 +110,7 @@ func (m *Module) authorizeWebhook(w http.ResponseWriter, r *http.Request, adapte
 		writeError(w, http.StatusNotFound, fmt.Sprintf("trigger binding for route %q is disabled", event.RouteKey))
 		return false
 	}
-	secret, err := m.store.TriggerBindings().ResolveWebhookSecret(r.Context(), ws, binding.BindingID)
-	if err != nil {
-		writeDomainError(w, err, "resolve webhook secret failed")
-		return false
-	}
-	if err := adapter.Verify(r, body, secret); err != nil {
+	if err := m.verifyInboundSignature(r, adapter, ws, binding, body); err != nil {
 		writeAdapterError(w, err)
 		return false
 	}
@@ -109,7 +118,9 @@ func (m *Module) authorizeWebhook(w http.ResponseWriter, r *http.Request, adapte
 }
 
 // dispatchWebhook normalizes the payload to valid JSON, hands off to the durable
-// idempotent dispatch path (redelivery is a no-op), and writes the 202 response.
+// idempotent fan-out dispatch path (redelivery heals each leg independently),
+// and writes the 202 response. The handler still only persists + enqueues —
+// it never executes work inline.
 func (m *Module) dispatchWebhook(w http.ResponseWriter, r *http.Request, ws, name string, event NormalizedEvent, body []byte) {
 	if len(strings.TrimSpace(string(body))) == 0 {
 		body = []byte("{}")
@@ -118,7 +129,7 @@ func (m *Module) dispatchWebhook(w http.ResponseWriter, r *http.Request, ws, nam
 		return
 	}
 	idempotencyKey := name + ":" + event.DeliveryID
-	run, err := m.store.TriggerRoutes().DispatchTriggerRoute(r.Context(), ws, event.RouteKey, store.TriggerRouteDispatch{
+	result, err := m.store.TriggerRoutes().DispatchTriggerRouteV2(r.Context(), ws, event.RouteKey, store.TriggerRouteDispatch{
 		IdempotencyKey:   idempotencyKey,
 		SourceEventID:    event.DeliveryID,
 		EventType:        event.EventType,
@@ -127,18 +138,48 @@ func (m *Module) dispatchWebhook(w http.ResponseWriter, r *http.Request, ws, nam
 		SignatureStatus:  "verified",
 		RawPayloadDigest: payloadDigest(body),
 		Payload:          json.RawMessage(body),
+		SubjectAttrs:     event.SubjectAttrs,
 	})
 	if err != nil {
 		writeDomainError(w, err, "dispatch webhook failed")
 		return
 	}
+	// Dispatch-time await matching (AW7) runs after the durable fan-out so a
+	// matcher failure can never lose an admitted delivery.
+	m.notifyAwaits(r.Context(), ws, event, body)
+	// BREAKING router-v2 wire (locked decision): the 202 body carries
+	// deliveries[] only — no top-level driver_run_id / driver_run. loom-dev
+	// consumers update at redeploy; callers that need the run body fetch it
+	// by deliveries[i].driver_run_id.
 	writeJSON(w, http.StatusAccepted, map[string]any{
 		"status":          "accepted",
 		"route_key":       event.RouteKey,
 		"idempotency_key": idempotencyKey,
-		"driver_run_id":   run.RunID,
-		"driver_run":      run,
+		"deliveries":      result.Deliveries,
 	})
+}
+
+// notifyAwaits hands the admitted event to the dispatch-time await matcher
+// (AW7): exact rendered-subject-key lookup against parked awaits, RULE 4
+// actor enforcement, atomic resolve + resume of suspended runs. Best-effort
+// after durable dispatch — a matcher error must not turn an accepted
+// delivery into a webhook failure (redelivery and the deadline machinery
+// converge); it is logged with the event identity instead.
+func (m *Module) notifyAwaits(ctx context.Context, ws string, event NormalizedEvent, body []byte) {
+	if m.awaits == nil {
+		return
+	}
+	if _, err := m.awaits.Dispatch(ctx, ws, trigger.AwaitDispatchEvent{
+		EventID:    event.DeliveryID,
+		EventType:  event.EventType,
+		SubjectRef: event.SubjectRef,
+		ActorRef:   event.ActorRef,
+		Payload:    json.RawMessage(body),
+	}); err != nil {
+		slog.WarnContext(ctx, "webhook await dispatch failed",
+			"workspace", ws, "source_event_id", event.DeliveryID,
+			"event_type", event.EventType, "error", err)
+	}
 }
 
 func (m *Module) listTriggerEvents(w http.ResponseWriter, r *http.Request) {

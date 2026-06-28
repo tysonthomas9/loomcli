@@ -40,6 +40,13 @@ import (
 // fleet-aware issue routing at a different layer.
 const envLoomFleetMode = "LOOM_FLEET_MODE"
 const envLoomDriverExecutor = "LOOM_DRIVER_EXECUTOR"
+const envLoomDriverTaskWorkerConcurrency = "LOOM_DRIVER_TASK_WORKER_CONCURRENCY"
+const envLoomDriverTaskRunMaxAttempts = "LOOM_DRIVER_TASK_RUN_MAX_ATTEMPTS"
+const envLoomDriverStaleTaskMaxAge = "LOOM_DRIVER_STALE_TASK_MAX_AGE"
+const envLoomTriggerCronInterval = "LOOM_TRIGGER_CRON_INTERVAL"
+const envLoomIssueBridgeInterval = "LOOM_ISSUE_BRIDGE_INTERVAL"
+const envLoomIssueBridgeDisabled = "LOOM_ISSUE_BRIDGE_DISABLED"
+const envLoomIssueBridgeStatePath = "LOOM_ISSUE_BRIDGE_STATE_PATH"
 
 const monitorCollectionCacheTTL = 10 * time.Second
 
@@ -112,6 +119,13 @@ ENVIRONMENT VARIABLES
   LOOM_AUTH_ISSUER      Expected JWT issuer (defaults to LOOM_AUTH_URL)
   LOOM_AUTH_AUDIENCE    Expected JWT audience (defaults to "loom")
   LOOM_DRIVER_EXECUTOR  DriverRun executor toggle (default: on; set 0/false/off/no to disable)
+  LOOM_DRIVER_TASK_WORKER_CONCURRENCY  Local TaskRun worker loops (default: 2)
+  LOOM_DRIVER_TASK_RUN_MAX_ATTEMPTS     TaskRun attempts before parking failed (default: 2)
+  LOOM_TRIGGER_CRON_INTERVAL            Cron trigger sweep interval in seconds (default: 30)
+  LOOM_ISSUE_BRIDGE_INTERVAL            Issue-journal bridge poll interval in seconds (default: 2)
+  LOOM_ISSUE_BRIDGE_DISABLED            Disable the issue-journal bridge loop (set 1/true)
+  LOOM_ISSUE_BRIDGE_STATE_PATH          Bridge cursor state file (default: <state dir>/issue-bridge-cursor.json)
+  LOOM_ISSUE_BRIDGE_REPLAY              Replay journal from zero on first observation (set 1/true)
 
 EXAMPLES
   loom serve                                              # Default port 8080
@@ -212,6 +226,12 @@ func runServe(cmd *cobra.Command, args []string) {
 	}
 	defer func() { _ = storeHandle.Close() }()
 	startDriverExecutorIfEnabled(ctx, storeHandle.Store)
+	startStaleTaskSweeper(ctx, storeHandle.Store)
+	startOutboxDispatcher(ctx, storeHandle.Store)
+	startTriggerCronScheduler(ctx, storeHandle.Store)
+	startTriggerDeliverySweeper(ctx, storeHandle.Store)
+	startAwaitTimeoutSweeper(ctx, storeHandle.Store)
+	startIssueJournalBridge(ctx, storeHandle.Store)
 
 	issueBackendFn := cli.WorkspaceAwareIssueBackendForURL(storeHandle.URL(), fleetState.clientCfg.Actor)
 	monitorDefaultWorkspace := resolveMonitorCollectorWorkspace(storeHandle.Store, fleetState.clientCfg.Workspace)
@@ -285,13 +305,21 @@ func startDriverExecutorIfEnabled(ctx context.Context, st store.Store) {
 		slog.Error("driver executor disabled: cannot resolve work dir", "err", err)
 		return
 	}
-	executor := &driverexecutor.Executor{
-		Store:        st,
-		WorkspaceKey: os.Getenv(bootstrap.EnvWorkspace),
-		WorkDir:      workDir,
-		NodeID:       os.Getenv("LOOM_DRIVER_EXECUTOR_NODE_ID"),
+	executor, ok := buildDriverExecutor(st, workDir)
+	if !ok {
+		return
 	}
-	slog.Info("Driver executor enabled", "workspace", executor.WorkspaceKey, "work_dir", workDir)
+	taskWorkerConcurrency := driverTaskWorkerConcurrency()
+	taskRunMaxAttempts := driverTaskRunMaxAttempts()
+	taskWorker := &driverexecutor.TaskWorker{
+		Store:        st,
+		WorkspaceKey: executor.WorkspaceKey,
+		WorkDir:      workDir,
+		NodeID:       executor.NodeID,
+		RunnerID:     os.Getenv("LOOM_DRIVER_TASK_WORKER_RUNNER_ID"),
+		MaxAttempts:  taskRunMaxAttempts,
+		APIBaseURL:   driverAPIBaseURL(),
+	}
 	go func() {
 		ticker := time.NewTicker(2 * time.Second)
 		defer ticker.Stop()
@@ -312,6 +340,108 @@ func startDriverExecutorIfEnabled(ctx context.Context, st store.Store) {
 			}
 		}
 	}()
+	startDriverTaskWorkers(ctx, taskWorker, taskWorkerConcurrency)
+}
+
+// buildDriverExecutor assembles serve's DriverRun executor, resolving the
+// workflow sandbox launcher (SB2): LOOM_DRIVER_SANDBOX=container runs
+// workflow bundles in rootless containers; the default stays the local
+// node-process launcher. An invalid sandbox configuration disables the
+// executor (fail closed) rather than silently degrading isolation.
+func buildDriverExecutor(st store.Store, workDir string) (*driverexecutor.Executor, bool) {
+	sandboxLauncher, err := driverexecutor.ResolveSandboxLauncher()
+	if err != nil {
+		slog.Error("driver executor disabled: invalid sandbox configuration", "err", err)
+		return nil, false
+	}
+	sandboxMode := driverexecutor.SandboxModeProcess
+	sandboxEgress := "host"
+	if sandboxLauncher != nil {
+		sandboxMode = driverexecutor.SandboxModeContainer
+		// SB4: empty resolves per run trust level (trusted all, else serve-only).
+		if sandboxEgress = os.Getenv(driverexecutor.SandboxEgressEnvVar); sandboxEgress == "" {
+			sandboxEgress = "per-trust-default"
+		}
+	}
+	executor := &driverexecutor.Executor{
+		Store:           st,
+		WorkspaceKey:    os.Getenv(bootstrap.EnvWorkspace),
+		WorkDir:         workDir,
+		NodeID:          os.Getenv("LOOM_DRIVER_EXECUTOR_NODE_ID"),
+		APIBaseURL:      driverAPIBaseURL(),
+		APIToken:        driverAPIToken(),
+		RunTokenKey:     driverRunTokenKey(),
+		SandboxLauncher: sandboxLauncher,
+	}
+	slog.Info("Driver executor enabled", "workspace", executor.WorkspaceKey, "work_dir", workDir, "sandbox", sandboxMode,
+		"sandbox_egress", sandboxEgress,
+		"task_worker_concurrency", driverTaskWorkerConcurrency(), "task_run_max_attempts", driverTaskRunMaxAttempts())
+	return executor, true
+}
+
+// startDriverTaskWorkers launches the local TaskRun worker claim loops, one
+// goroutine per concurrency slot, each with a distinct runner identity.
+func startDriverTaskWorkers(ctx context.Context, template *driverexecutor.TaskWorker, concurrency int) {
+	for i := 0; i < concurrency; i++ {
+		worker := *template
+		if worker.RunnerID == "" {
+			worker.RunnerID = fmt.Sprintf("loom-serve-task-worker-%d", i+1)
+		}
+		go func() {
+			ticker := time.NewTicker(1 * time.Second)
+			defer ticker.Stop()
+			for {
+				_, err := worker.RunOnce(ctx)
+				if err != nil && !errors.Is(err, driverexecutor.ErrNoQueuedTaskRun) && !errors.Is(err, context.Canceled) {
+					slog.Error("driver task worker run failed", "err", err)
+				}
+				select {
+				case <-ctx.Done():
+					return
+				case <-ticker.C:
+				}
+			}
+		}()
+	}
+}
+
+// driverAPIBaseURL is the loopback URL of this serve process's driver-op
+// HTTP API, exported to driver runtimes as LOOM_DRIVER_API_URL. Driver
+// runtimes are local children of the executor, so loopback is always
+// reachable regardless of the public bind address. Set
+// LOOM_DRIVER_API_URL on the serve process to override (e.g. TLS front).
+func driverAPIBaseURL() string {
+	if override := strings.TrimSpace(os.Getenv("LOOM_DRIVER_API_URL")); override != "" {
+		return override
+	}
+	host := serveBindAddr
+	switch host {
+	case "", "0.0.0.0", "::":
+		host = "127.0.0.1"
+	case "::1":
+		host = "[::1]"
+	}
+	return fmt.Sprintf("http://%s:%d", host, servePort)
+}
+
+// driverAPIToken is the shared bearer token required by the driver-op HTTP
+// API; the executor forwards it to driver runtimes. Empty disables the gate.
+func driverAPIToken() string {
+	return os.Getenv("LOOM_DRIVER_API_TOKEN")
+}
+
+// driverRunTokenKey resolves the HS256 signing key for run-scoped driver-op
+// tokens (LOOM_RUN_TOKEN_SIGNING_KEY, with an ephemeral per-process fallback
+// for single-instance deployments). A malformed env key logs and disables the
+// run-token auth path — legacy header-quad auth keeps working — rather than
+// aborting serve.
+func driverRunTokenKey() []byte {
+	key, err := driverexecutor.ResolveRunTokenSigningKey()
+	if err != nil {
+		slog.Error("driver run-token auth disabled: resolve signing key", "err", err)
+		return nil
+	}
+	return key
 }
 
 func driverExecutorEnabled() bool {
@@ -321,6 +451,34 @@ func driverExecutorEnabled() bool {
 	default:
 		return true
 	}
+}
+
+func driverTaskWorkerConcurrency() int {
+	return boundedIntEnv(envLoomDriverTaskWorkerConcurrency, 2, 32)
+}
+
+func driverTaskRunMaxAttempts() int {
+	return boundedIntEnv(envLoomDriverTaskRunMaxAttempts, 2, 10)
+}
+
+// boundedIntEnv reads an integer env var, falling back to def when unset or
+// unparseable and clamping the result to [1, max].
+func boundedIntEnv(name string, def, max int) int {
+	raw := strings.TrimSpace(os.Getenv(name))
+	if raw == "" {
+		return def
+	}
+	n, err := strconv.Atoi(raw)
+	if err != nil {
+		return def
+	}
+	if n < 1 {
+		return 1
+	}
+	if n > max {
+		return max
+	}
+	return n
 }
 
 func ensureFleetStoreEnv(cfg config.FleetClientConfig) {
@@ -447,8 +605,12 @@ func buildServerConfig(monitorHandlers webui.MonitorHandlers, fs fleetState, sto
 		gitOps.WithStore(storeHandle.Store)
 		if url := storeHandle.URL(); url != "" {
 			cfg.IssueBackendFn = cli.WorkspaceAwareIssueBackendForURL(url, fs.clientCfg.Actor)
+			cfg.FleetDBBaseURL = url
 			fs = withStoreFleetURL(fs, url)
 		}
+		cfg.DriverAPIToken = driverAPIToken()
+		cfg.DriverAPIBaseURL = driverAPIBaseURL()
+		cfg.DriverRunTokenKey = driverRunTokenKey()
 	}
 	applyFleetConfig(&cfg, fs)
 	applyWorkspaceConfig(&cfg)

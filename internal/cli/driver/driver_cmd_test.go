@@ -259,6 +259,10 @@ func (s *fakeDriverTaskRunStore) Finish(context.Context, string, string, store.T
 	panic("unexpected Finish")
 }
 
+func (s *fakeDriverTaskRunStore) Requeue(context.Context, string, string, store.TaskRunRequeue) (*domain.TaskRun, error) {
+	panic("unexpected Requeue")
+}
+
 func (s *fakeDriverTaskRunStore) Complete(_ context.Context, workspaceKey, taskRunID string, complete store.TaskRunComplete) (*domain.TaskRun, error) {
 	s.completeCalls++
 	s.completedWorkspace = workspaceKey

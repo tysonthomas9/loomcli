@@ -14,6 +14,7 @@ import (
 
 func TestRequestTaskRunCreatesExecutesAndFinishesChild(t *testing.T) {
 	ctx, st, run := setupRunningDriverRun(t)
+	registerTaskWorkerNode(t, ctx, st, "node-2", []string{"codex-default"}, nil)
 	if _, err := st.DriverSteps().Create(ctx, store.DriverStepCreate{
 		WorkspaceKey: "TEST",
 		StepID:       "step-1",
@@ -139,8 +140,132 @@ func TestRequestTaskRunCreatesExecutesAndFinishesChild(t *testing.T) {
 	}
 }
 
+func TestEnqueueTaskRunWithResultCreatesQueuedChildWithoutExecuting(t *testing.T) {
+	ctx, st, run := setupRunningDriverRun(t)
+	if _, err := st.DriverSteps().Create(ctx, store.DriverStepCreate{
+		WorkspaceKey: "TEST",
+		StepID:       "step-enqueue",
+		DriverRunID:  run.RunID,
+		StepKind:     "task_run",
+		Status:       domain.DriverStepQueued,
+		NodeID:       run.NodeID,
+		LeaseID:      run.LeaseID,
+		FencingToken: run.FencingToken,
+	}); err != nil {
+		t.Fatalf("Create driver step: %v", err)
+	}
+	if _, err := st.WorkerProfiles().Create(ctx, store.WorkerProfileCreate{
+		WorkspaceKey:  "TEST",
+		ProfileID:     "worker-profile-1",
+		Role:          "task",
+		Backend:       "remote-sandbox",
+		Capabilities:  []string{"git"},
+		RuntimePolicy: map[string]string{"network": "restricted"},
+	}); err != nil {
+		t.Fatalf("Create worker profile: %v", err)
+	}
+	if _, err := st.Nodes().Create(ctx, store.NodeCreate{
+		WorkspaceKey:    "TEST",
+		NodeID:          "task-worker-node-1",
+		RuntimeProvider: domain.RuntimeProviderLocal,
+		Capabilities:    []string{"remote-sandbox", "git"},
+		DrainState:      domain.NodeDrainActive,
+		TTL:             time.Minute,
+	}); err != nil {
+		t.Fatalf("Create task worker node: %v", err)
+	}
+
+	outcome, err := EnqueueTaskRunWithResult(ctx, st, TaskRunRequestOptions{
+		WorkspaceKey:       "TEST",
+		DriverRunID:        run.RunID,
+		DriverStepID:       "step-enqueue",
+		TaskRunID:          "task-run-enqueue",
+		TaskID:             "TEST-9",
+		ProviderProfile:    "custom-cloud",
+		SupportedProviders: []string{"remote-sandbox"},
+		ParentSessionID:    "lead-session-1",
+		ParentNodeID:       run.NodeID,
+		ParentLeaseID:      run.LeaseID,
+		ParentFence:        run.FencingToken,
+		WorkerProfileID:    "worker-profile-1",
+		RunnerPlacement:    domain.TaskRunPlacement{Provider: "custom-runner"},
+		SandboxPlacement:   domain.TaskRunPlacement{CWD: "/workspace"},
+	}, HostBridgeTaskExecutor{Command: []string{"unused"}})
+	if err != nil {
+		t.Fatalf("EnqueueTaskRunWithResult: %v", err)
+	}
+	if outcome.LeaseToken != "" {
+		t.Fatalf("outcome lease token = %q, want empty until a worker claims the task run", outcome.LeaseToken)
+	}
+	queued := outcome.Run
+	if queued.TaskRunID != "task-run-enqueue" || queued.Status != domain.TaskRunQueued || queued.NodeID != "" || queued.LeaseID != "" || queued.FencingToken != 0 {
+		t.Fatalf("queued = %+v, want unclaimed queued task run", queued)
+	}
+	if queued.ProviderProfile != "custom-cloud" || queued.SandboxPlacement.Provider != "remote-sandbox" || queued.WorkerProfileID != "worker-profile-1" {
+		t.Fatalf("queued provider/profile/placement = %+v, want resolved queued placement", queued)
+	}
+	if queued.RuntimeMetadata["parent_session_id"] != "lead-session-1" || queued.RuntimeMetadata["requested_by"] != "driver" {
+		t.Fatalf("queued metadata = %+v, want driver request metadata", queued.RuntimeMetadata)
+	}
+	step, err := st.DriverSteps().Get(ctx, "TEST", "step-enqueue")
+	if err != nil {
+		t.Fatalf("Get driver step: %v", err)
+	}
+	if step.Status != domain.DriverStepQueued || step.TaskRunID != "task-run-enqueue" || !step.StartedAt.IsZero() || step.EndedAt != nil {
+		t.Fatalf("step = %+v, want queued step linked to queued task run", step)
+	}
+}
+
+func TestEnqueueTaskRunWithResultFailsUnschedulableBeforeChildCreation(t *testing.T) {
+	ctx, st, run := setupRunningDriverRun(t)
+	if _, err := st.DriverSteps().Create(ctx, store.DriverStepCreate{
+		WorkspaceKey: "TEST",
+		StepID:       "step-unschedulable",
+		DriverRunID:  run.RunID,
+		StepKind:     "task_run",
+		Status:       domain.DriverStepQueued,
+		NodeID:       run.NodeID,
+		LeaseID:      run.LeaseID,
+		FencingToken: run.FencingToken,
+	}); err != nil {
+		t.Fatalf("Create driver step: %v", err)
+	}
+
+	_, err := EnqueueTaskRunWithResult(ctx, st, TaskRunRequestOptions{
+		WorkspaceKey:       "TEST",
+		DriverRunID:        run.RunID,
+		DriverStepID:       "step-unschedulable",
+		TaskRunID:          "task-run-unschedulable",
+		TaskID:             "TEST-10",
+		ProviderProfile:    "browser-sandbox",
+		SupportedProviders: []string{"browser-sandbox"},
+		ParentNodeID:       run.NodeID,
+		ParentLeaseID:      run.LeaseID,
+		ParentFence:        run.FencingToken,
+		SandboxPlacement:   domain.TaskRunPlacement{Provider: "browser-sandbox"},
+	}, HostBridgeTaskExecutor{Command: []string{"unused"}})
+	if !errors.Is(err, domain.ErrUnschedulable) {
+		t.Fatalf("EnqueueTaskRunWithResult err = %v, want ErrUnschedulable", err)
+	}
+	children, err := st.TaskRuns().List(ctx, "TEST", store.TaskRunFilter{DriverRunID: run.RunID})
+	if err != nil {
+		t.Fatalf("List children: %v", err)
+	}
+	if len(children) != 0 {
+		t.Fatalf("children = %+v, want none for unschedulable request", children)
+	}
+	step, err := st.DriverSteps().Get(ctx, "TEST", "step-unschedulable")
+	if err != nil {
+		t.Fatalf("Get driver step: %v", err)
+	}
+	if step.TaskRunID != "" || step.Status != domain.DriverStepQueued {
+		t.Fatalf("step = %+v, want original queued step without child linkage", step)
+	}
+}
+
 func TestClaimAndExecuteTaskRunWithResultClaimsQueuedChild(t *testing.T) {
 	ctx, st, run := setupRunningDriverRun(t)
+	registerTaskWorkerNode(t, ctx, st, "worker-node-1", []string{"codex-default"}, nil)
 	if _, err := st.TaskRuns().Create(ctx, store.TaskRunCreate{
 		WorkspaceKey:    "TEST",
 		TaskRunID:       "task-run-worker-1",
@@ -201,6 +326,7 @@ func TestClaimAndExecuteTaskRunWithResultClaimsQueuedChild(t *testing.T) {
 
 func TestClaimAndExecuteTaskRunWithResultCanDeferCompletion(t *testing.T) {
 	ctx, st, run := setupRunningDriverRun(t)
+	registerTaskWorkerNode(t, ctx, st, "worker-node-2", []string{"local-noop"}, nil)
 	if _, err := st.TaskRuns().Create(ctx, store.TaskRunCreate{
 		WorkspaceKey:    "TEST",
 		TaskRunID:       "task-run-worker-defer",
@@ -406,6 +532,7 @@ func TestRequestTaskRunExecutorErrorRecordsFailedChild(t *testing.T) {
 
 func TestRequestTaskRunHeartbeatsChildDuringExecution(t *testing.T) {
 	ctx, st, run := setupRunningDriverRun(t)
+	registerTaskWorkerNode(t, ctx, st, "node-2", []string{"codex-default"}, nil)
 	executor := &waitingTaskHeartbeatExecutor{store: st}
 
 	final, err := RequestTaskRun(ctx, st, TaskRunRequestOptions{
@@ -479,6 +606,7 @@ func TestRequestTaskRunRejectsStaleParentOwner(t *testing.T) {
 func setupRunningDriverRun(t *testing.T) (context.Context, store.Store, *domain.DriverRun) {
 	t.Helper()
 	ctx, st, run := setupQueuedDriverRun(t)
+	registerTaskWorkerNode(t, ctx, st, "node-1", []string{"codex-default", "local-noop", "noop", "remote-sandbox", "daytona", "flue-local"}, []string{"git", "shell"})
 	claimed, err := st.DriverRuns().Claim(ctx, "TEST", run.RunID, "node-1", "lease-1")
 	if err != nil {
 		t.Fatalf("Claim driver run: %v", err)
@@ -509,6 +637,22 @@ func setupQueuedDriverRun(t *testing.T) (context.Context, store.Store, *domain.D
 		t.Fatalf("CreateDriverRun: %v", err)
 	}
 	return ctx, st, run
+}
+
+func registerTaskWorkerNode(t *testing.T, ctx context.Context, st store.Store, nodeID string, providers, capabilities []string) {
+	t.Helper()
+	nodeCapabilities := append([]string{"driver-runner", "task-runner", "flue-local"}, providers...)
+	nodeCapabilities = append(nodeCapabilities, capabilities...)
+	if _, err := st.Nodes().Create(ctx, store.NodeCreate{
+		WorkspaceKey:    "TEST",
+		NodeID:          nodeID,
+		RuntimeProvider: domain.RuntimeProviderLocal,
+		Capabilities:    normalizeStringList(nodeCapabilities),
+		DrainState:      domain.NodeDrainActive,
+		TTL:             time.Minute,
+	}); err != nil && !errors.Is(err, domain.ErrAlreadyExists) {
+		t.Fatalf("Create task worker node %s: %v", nodeID, err)
+	}
 }
 
 type recordingTaskExecutor struct {

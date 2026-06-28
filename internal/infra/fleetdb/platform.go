@@ -24,6 +24,7 @@ func (s *driverStore) Create(ctx context.Context, in store.DriverCreate) (*domai
 		"description":       in.Description,
 		"active_version_id": in.ActiveVersionID,
 		"status":            in.Status,
+		"trust_level":       in.TrustLevel,
 		"metadata":          in.Metadata,
 	}
 	var out domain.Driver
@@ -158,8 +159,16 @@ func (s *triggerBindingStore) Create(ctx context.Context, in store.TriggerBindin
 		"idempotency_policy":      in.IdempotencyPolicy,
 		"auth_policy":             in.AuthPolicy,
 		"webhook_secret":          in.WebhookSecret,
+		"subject_key_template":    in.SubjectKeyTemplate,
+		"retry_max_attempts":      in.RetryMaxAttempts,
+		"retry_backoff_seconds":   in.RetryBackoffSeconds,
+		"schedule":                in.Schedule,
+		"schedule_timezone":       in.ScheduleTimezone,
 		"permissions":             in.Permissions,
 		"enabled":                 in.Enabled,
+	}
+	if !in.ActorFilter.IsZero() {
+		body["actor_filter"] = in.ActorFilter
 	}
 	var out domain.TriggerBinding
 	path := "/api/v1/" + pathEscape(in.WorkspaceKey) + "/trigger-bindings"
@@ -171,8 +180,7 @@ func (s *triggerBindingStore) Create(ctx context.Context, in store.TriggerBindin
 
 func (s *triggerBindingStore) Get(ctx context.Context, ws, bindingID string) (*domain.TriggerBinding, error) {
 	var out domain.TriggerBinding
-	path := "/api/v1/" + pathEscape(ws) + "/trigger-bindings/" + pathEscape(bindingID)
-	if err := s.client.do(ctx, "GET", path, nil, &out); err != nil {
+	if err := s.client.do(ctx, "GET", "/api/v1/"+pathEscape(ws)+"/trigger-bindings/"+pathEscape(bindingID), nil, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -224,8 +232,7 @@ func (s *triggerBindingStore) List(ctx context.Context, ws string, filter store.
 
 func (s *triggerBindingStore) Update(ctx context.Context, ws, bindingID string, patch store.TriggerBindingUpdate) (*domain.TriggerBinding, error) {
 	var out domain.TriggerBinding
-	path := "/api/v1/" + pathEscape(ws) + "/trigger-bindings/" + pathEscape(bindingID)
-	if err := s.client.do(ctx, "PATCH", path, triggerBindingUpdateBody(patch), &out); err != nil {
+	if err := s.client.do(ctx, "PATCH", "/api/v1/"+pathEscape(ws)+"/trigger-bindings/"+pathEscape(bindingID), triggerBindingUpdateBody(patch), &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -242,10 +249,6 @@ func (s *triggerBindingStore) ResolveWebhookSecret(ctx context.Context, ws, bind
 	return out.WebhookSecret, nil
 }
 
-type driverRunStore struct{ client *Client }
-
-var _ store.DriverRunStore = (*driverRunStore)(nil)
-
 func (s *driverRunStore) Create(ctx context.Context, in store.DriverRunCreate) (*domain.DriverRun, error) {
 	body := map[string]any{
 		"run_id":            in.RunID,
@@ -255,6 +258,7 @@ func (s *driverRunStore) Create(ctx context.Context, in store.DriverRunCreate) (
 		"source_kind":       in.SourceKind,
 		"source_ref":        in.SourceRef,
 		"epic_id":           in.EpicID,
+		"parent_run_id":     in.ParentRunID,
 		"idempotency_key":   in.IdempotencyKey,
 		"payload":           in.Payload,
 	}
@@ -571,6 +575,9 @@ func (s *taskRunStore) Create(ctx context.Context, in store.TaskRunCreate) (*dom
 		"sandbox_placement": in.SandboxPlacement,
 		"runtime_metadata":  in.RuntimeMetadata,
 	}
+	if len(in.Input) > 0 {
+		body["input"] = in.Input
+	}
 	var out domain.TaskRun
 	if err := s.client.do(ctx, "POST", "/api/v1/"+pathEscape(in.WorkspaceKey)+"/task-runs", body, &out); err != nil {
 		return nil, err
@@ -656,6 +663,7 @@ func (s *taskRunStore) Finish(ctx context.Context, ws, taskRunID string, finish 
 		"runtime_metadata":   finish.RuntimeMetadata,
 		"error_class":        finish.ErrorClass,
 		"error_message":      finish.ErrorMessage,
+		"park_task":          finish.ParkTask,
 	}
 	var out domain.TaskRun
 	path := "/api/v1/" + pathEscape(ws) + "/task-runs/" + pathEscape(taskRunID) + "/finish"
@@ -678,6 +686,29 @@ func (s *taskRunStore) Heartbeat(ctx context.Context, ws, taskRunID string, hear
 	var out domain.TaskRun
 	path := "/api/v1/" + pathEscape(ws) + "/task-runs/" + pathEscape(taskRunID) + "/heartbeat"
 	headers := leaseTokenHeaders(heartbeat.LeaseToken)
+	if err := s.client.doWithHeaders(ctx, "POST", path, body, &out, headers); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+func (s *taskRunStore) Requeue(ctx context.Context, ws, taskRunID string, requeue store.TaskRunRequeue) (*domain.TaskRun, error) {
+	body := map[string]any{
+		"node_id":          requeue.NodeID,
+		"lease_id":         requeue.LeaseID,
+		"fencing_token":    requeue.FencingToken,
+		"runtime_metadata": requeue.RuntimeMetadata,
+		"logs_ref":         requeue.LogsRef,
+		"artifacts_ref":    requeue.ArtifactsRef,
+		"error_class":      requeue.ErrorClass,
+		"error_message":    requeue.ErrorMessage,
+	}
+	if !requeue.NextEligibleAt.IsZero() {
+		body["next_eligible_at"] = requeue.NextEligibleAt
+	}
+	var out domain.TaskRun
+	path := "/api/v1/" + pathEscape(ws) + "/task-runs/" + pathEscape(taskRunID) + "/requeue"
+	headers := leaseTokenHeaders(requeue.LeaseToken)
 	if err := s.client.doWithHeaders(ctx, "POST", path, body, &out, headers); err != nil {
 		return nil, err
 	}
@@ -782,6 +813,9 @@ func driverUpdateBody(patch store.DriverUpdate) map[string]any {
 	if patch.Status != nil {
 		body["status"] = *patch.Status
 	}
+	if patch.TrustLevel != nil {
+		body["trust_level"] = *patch.TrustLevel
+	}
 	if patch.Metadata != nil {
 		body["metadata"] = *patch.Metadata
 	}
@@ -808,6 +842,15 @@ func triggerBindingUpdateBody(patch store.TriggerBindingUpdate) map[string]any {
 	bodyPtr(body, "idempotency_policy", patch.IdempotencyPolicy)
 	bodyPtr(body, "auth_policy", patch.AuthPolicy)
 	bodyPtr(body, "webhook_secret", patch.WebhookSecret)
+	bodyPtr(body, "subject_key_template", patch.SubjectKeyTemplate)
+	if patch.ActorFilter != nil {
+		// Replace-whole semantics: an empty object clears the filter.
+		body["actor_filter"] = patch.ActorFilter
+	}
+	bodyPtr(body, "retry_max_attempts", patch.RetryMaxAttempts)
+	bodyPtr(body, "retry_backoff_seconds", patch.RetryBackoffSeconds)
+	bodyPtr(body, "schedule", patch.Schedule)
+	bodyPtr(body, "schedule_timezone", patch.ScheduleTimezone)
 	bodyPtr(body, "permissions", patch.Permissions)
 	bodyPtr(body, "enabled", patch.Enabled)
 	return body
@@ -823,6 +866,7 @@ func (s *triggerEventStore) Get(ctx context.Context, ws, eventID string) (*domai
 	if err := s.client.do(ctx, "GET", path, nil, &out); err != nil {
 		return nil, err
 	}
+	out.NormalizeProvenance()
 	return &out, nil
 }
 
@@ -849,6 +893,9 @@ func (s *triggerEventStore) List(ctx context.Context, ws string, filter store.Tr
 	}
 	if resp.TriggerEvents == nil {
 		resp.TriggerEvents = []*domain.TriggerEvent{}
+	}
+	for _, event := range resp.TriggerEvents {
+		event.NormalizeProvenance()
 	}
 	return resp.TriggerEvents, nil
 }
@@ -894,35 +941,4 @@ func (s *triggerDeliveryStore) List(ctx context.Context, ws string, filter store
 		resp.TriggerDeliveries = []*domain.TriggerDelivery{}
 	}
 	return resp.TriggerDeliveries, nil
-}
-
-type triggerRouteStore struct{ client *Client }
-
-var _ store.TriggerRouteDispatcher = (*triggerRouteStore)(nil)
-
-func (s *triggerRouteStore) DispatchTriggerRoute(ctx context.Context, ws, routeKey string, in store.TriggerRouteDispatch) (*domain.DriverRun, error) {
-	body := map[string]any{
-		"run_id":             in.RunID,
-		"idempotency_key":    in.IdempotencyKey,
-		"source_event_id":    in.SourceEventID,
-		"event_type":         in.EventType,
-		"subject_ref":        in.SubjectRef,
-		"actor_ref":          in.ActorRef,
-		"epic_id":            in.EpicID,
-		"raw_payload_ref":    in.RawPayloadRef,
-		"raw_payload_digest": in.RawPayloadDigest,
-		"signature_status":   in.SignatureStatus,
-		"replay_of_event_id": in.ReplayOfEventID,
-		"payload":            in.Payload,
-	}
-	headers := map[string]string{}
-	if in.IdempotencyKey != "" {
-		headers["Idempotency-Key"] = in.IdempotencyKey
-	}
-	var out domain.DriverRun
-	path := "/api/v1/" + pathEscape(ws) + "/trigger-routes/" + pathEscape(routeKey)
-	if err := s.client.doWithHeaders(ctx, "POST", path, body, &out, headers); err != nil {
-		return nil, err
-	}
-	return &out, nil
 }

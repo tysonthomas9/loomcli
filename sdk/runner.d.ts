@@ -1,4 +1,5 @@
 export declare const RunnerEnv: Readonly<{
+  apiUrl: "LOOM_TASK_RUN_API_URL";
   baseUrl: "LOOM_FLEET_DB_URL";
   apiKey: "LOOM_FLEET_DB_API_KEY";
   actor: "LOOM_FLEET_DB_ACTOR";
@@ -13,14 +14,35 @@ export declare const RunnerEnv: Readonly<{
   fencingToken: "LOOM_TASK_RUN_FENCING_TOKEN";
 }>;
 
+/**
+ * Request/upload body accepted by fetch on Node >= 18. Local alias because
+ * DOM's BodyInit is NOT declared under node-only TypeScript configs (the
+ * typecheck gate compiles with `types: ["node"]`, matching how workflow
+ * consumers build).
+ */
+export type RunnerBodyInit =
+  | string
+  | Uint8Array
+  | ArrayBuffer
+  | Blob
+  | FormData
+  | URLSearchParams
+  | ReadableStream;
+
 export type FetchLike = (input: string, init?: {
   method?: string;
   headers?: Record<string, string>;
-  body?: BodyInit | string;
+  body?: RunnerBodyInit;
   signal?: AbortSignal;
 }) => Promise<Response>;
 
 export interface TaskRunClientOptions {
+  /**
+   * loom serve task-run API base URL (LOOM_TASK_RUN_API_URL). When set, all
+   * operations use the serve transport authenticated by the per-task-run
+   * lease token alone; baseUrl/apiKey (direct fleet-db) are not required.
+   */
+  apiUrl?: string;
   baseUrl?: string;
   apiKey?: string;
   actor?: string;
@@ -208,6 +230,8 @@ export declare class LoomAPIError extends Error {
 export declare class TaskRunClient {
   static fromEnv(env?: NodeJS.ProcessEnv | Record<string, string | undefined>, options?: TaskRunClientOptions): TaskRunClient;
 
+  readonly apiUrl: string;
+  readonly serveMode: boolean;
   readonly baseUrl: string;
   readonly workspace: string;
   readonly taskRunId: string;
@@ -233,7 +257,7 @@ export declare class TaskRunClient {
   declareArtifact(input: ArtifactDeclareInput, options?: { signal?: AbortSignal }): Promise<ArtifactHandle>;
   getArtifact(artifactId: string, options?: { signal?: AbortSignal }): Promise<ArtifactHandle>;
   listArtifacts(input?: { type?: string; durableStatus?: string; durable_status?: string; status?: string; limit?: number }, options?: { signal?: AbortSignal }): Promise<{ artifacts: ArtifactHandle[]; count?: number; [key: string]: unknown }>;
-  uploadArtifactContent(artifactId: string, content: BodyInit | string, options?: ArtifactUploadOptions): Promise<Artifact>;
+  uploadArtifactContent(artifactId: string, content: RunnerBodyInit, options?: ArtifactUploadOptions): Promise<Artifact>;
   finalizeArtifact(artifactId: string, input?: ArtifactFinalizeInput, options?: { signal?: AbortSignal }): Promise<Artifact>;
   completeRun(input?: CompleteRunInput, options?: { signal?: AbortSignal }): Promise<CompleteRunResponse>;
 }
@@ -244,7 +268,7 @@ export declare class ArtifactHandle {
   id: string;
 
   constructor(client: TaskRunClient, artifact: Artifact);
-  upload(content: BodyInit | string, options?: ArtifactUploadOptions): Promise<this>;
+  upload(content: RunnerBodyInit, options?: ArtifactUploadOptions): Promise<this>;
   finalize(input?: ArtifactFinalizeInput, options?: { signal?: AbortSignal }): Promise<this>;
   toJSON(): Artifact;
 }

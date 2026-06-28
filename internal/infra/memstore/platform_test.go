@@ -207,6 +207,26 @@ func TestDispatchTriggerRouteSupersedesQueuedRunsForSubject(t *testing.T) {
 	if statusOf("run-3") != domain.DriverRunQueued || statusOf("run-other") != domain.DriverRunQueued {
 		t.Fatalf("cross-subject supersede leaked: run-3=%s other=%s", statusOf("run-3"), statusOf("run-other"))
 	}
+
+	// Loser deliveries transition to superseded via their rendered subject
+	// key (binding_id|subject_ref), keeping the audit trail consistent with
+	// the cancelled runs; the winner's delivery stays dispatched.
+	superseded, err := s.TriggerDeliveries().List(ctx, "WS", store.TriggerDeliveryFilter{Status: domain.TriggerDeliverySuperseded})
+	if err != nil || len(superseded) != 2 {
+		t.Fatalf("superseded deliveries = %d err=%v, want 2", len(superseded), err)
+	}
+	for _, delivery := range superseded {
+		if delivery.SubjectKey != "binding-pr|"+subject || delivery.ErrorClass != "superseded" {
+			t.Fatalf("superseded delivery = %+v, want subject key binding-pr|%s and error class superseded", delivery, subject)
+		}
+		if got := statusOf(delivery.DriverRunID); got != domain.DriverRunCancelled {
+			t.Fatalf("superseded delivery run %s = %s, want cancelled", delivery.DriverRunID, got)
+		}
+	}
+	dispatched, err := s.TriggerDeliveries().List(ctx, "WS", store.TriggerDeliveryFilter{Status: domain.TriggerDeliveryDispatched})
+	if err != nil || len(dispatched) != 2 {
+		t.Fatalf("dispatched deliveries = %d err=%v, want run-3 + run-other", len(dispatched), err)
+	}
 }
 
 func TestDispatchTriggerRouteRedeliveryDoesNotSupersedeNewerRun(t *testing.T) {
@@ -297,15 +317,33 @@ func TestDispatchTriggerRouteSupersedeCancelsOlderRunThatArrivesLate(t *testing.
 	}); err != nil {
 		t.Fatalf("DispatchTriggerRoute run-new: %v", err)
 	}
-	if _, err := s.DriverRuns().Create(ctx, store.DriverRunCreate{
+	oldRun, err := s.DriverRuns().Create(ctx, store.DriverRunCreate{
 		WorkspaceKey: "WS", RunID: "run-old", DriverID: "pr-review", DriverVersionID: "v1",
 		Entrypoint: "run", SourceKind: "github", SourceRef: olderEvent.EventID, IdempotencyKey: "del-old",
-	}); err != nil {
+	})
+	if err != nil {
 		t.Fatalf("Create late older driver run: %v", err)
 	}
-	s.routes.supersedeQueuedRunsForSubject(ctx, "WS", binding, subject)
+	subjectKey := renderTriggerSubjectKey(binding, olderEvent, nil)
+	if err := s.deliveries.create(&domain.TriggerDelivery{
+		WorkspaceKey:     "WS",
+		DeliveryID:       "delivery-" + olderEvent.EventID,
+		TriggerEventID:   olderEvent.EventID,
+		TriggerBindingID: binding.BindingID,
+		SubjectKey:       subjectKey,
+		Status:           domain.TriggerDeliveryDispatched,
+		DriverRunID:      oldRun.RunID,
+		Attempt:          1,
+		CreatedAt:        time.Now(),
+		UpdatedAt:        time.Now(),
+	}); err != nil {
+		t.Fatalf("Create old delivery: %v", err)
+	}
+	if status := s.routes.applyTriggerReplacePolicy(ctx, "WS", binding, oldRun, subjectKey); status != domain.TriggerDeliverySuperseded {
+		t.Fatalf("late older delivery status = %s, want superseded", status)
+	}
 
-	oldRun, err := s.DriverRuns().Get(ctx, "WS", "run-old")
+	oldRun, err = s.DriverRuns().Get(ctx, "WS", "run-old")
 	if err != nil {
 		t.Fatalf("Get run-old: %v", err)
 	}
@@ -324,6 +362,16 @@ func TestDispatchTriggerRouteSupersedeCancelsOlderRunThatArrivesLate(t *testing.
 func TestTaskRunClaimQueuedAssignsPlacementAndHonorsProfileCapacity(t *testing.T) {
 	ctx := t.Context()
 	s := New()
+	if _, err := s.Nodes().Create(ctx, store.NodeCreate{
+		WorkspaceKey:    "WS",
+		NodeID:          "node-1",
+		RuntimeProvider: domain.RuntimeProviderLocal,
+		Capabilities:    []string{"daytona", "git", "shell"},
+		DrainState:      domain.NodeDrainActive,
+		TTL:             time.Minute,
+	}); err != nil {
+		t.Fatalf("Create node: %v", err)
+	}
 	if _, err := s.WorkerProfiles().Create(ctx, store.WorkerProfileCreate{
 		WorkspaceKey:  "WS",
 		ProfileID:     "falcon",
@@ -388,6 +436,37 @@ func TestTaskRunClaimQueuedAssignsPlacementAndHonorsProfileCapacity(t *testing.T
 		WorkerProfileIDs:   []string{"falcon"},
 	}); !errors.Is(err, domain.ErrInvalidTransition) {
 		t.Fatalf("capacity ClaimQueued err = %v, want ErrInvalidTransition", err)
+	}
+	if _, err := s.WorkerProfiles().Create(ctx, store.WorkerProfileCreate{
+		WorkspaceKey:  "WS",
+		ProfileID:     "browser",
+		Role:          "task",
+		Backend:       "flue-local",
+		Capabilities:  []string{"browser"},
+		RuntimePolicy: map[string]string{"network": "restricted"},
+	}); err != nil {
+		t.Fatalf("Create browser worker profile: %v", err)
+	}
+	if _, err := s.TaskRuns().Create(ctx, store.TaskRunCreate{
+		WorkspaceKey:     "WS",
+		TaskRunID:        "task-run-browser",
+		TaskID:           "WS-2",
+		WorkerProfileID:  "browser",
+		Status:           domain.TaskRunQueued,
+		SandboxPlacement: domain.TaskRunPlacement{Provider: "flue-local"},
+	}); err != nil {
+		t.Fatalf("Create browser task run: %v", err)
+	}
+	if _, err := s.TaskRuns().ClaimQueued(ctx, "WS", store.TaskRunClaim{
+		TaskRunID:          "task-run-browser",
+		NodeID:             "node-1",
+		RunnerID:           "runner-browser",
+		LeaseID:            "lease-browser",
+		SupportedProviders: []string{"flue-local"},
+		Capabilities:       []string{"browser"},
+		WorkerProfileIDs:   []string{"browser"},
+	}); !errors.Is(err, domain.ErrInvalidTransition) {
+		t.Fatalf("lying capability ClaimQueued err = %v, want ErrInvalidTransition", err)
 	}
 }
 

@@ -7,12 +7,35 @@ import (
 	"encoding/json"
 	"io"
 	"os"
+	"slices"
+	"strings"
 	"testing"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
+
+// TestTaskRunnerEnvAPIBaseURL pins the serve-transport seam: when the
+// executor carries an API base URL, runners get LOOM_TASK_RUN_API_URL (and
+// the SDK drops its fleet-db requirement); without one, the env is exactly
+// the legacy set so unflipped deployments are byte-identical.
+func TestTaskRunnerEnvAPIBaseURL(t *testing.T) {
+	req := hostBridgeTaskExecRequest()
+	legacy := HostBridgeTaskExecutor{WorktreePath: "/wt"}.taskRunnerEnv(req, "{}")
+	for _, entry := range legacy {
+		if strings.HasPrefix(entry, "LOOM_TASK_RUN_API_URL=") {
+			t.Fatalf("legacy env unexpectedly exports the serve API URL: %q", entry)
+		}
+	}
+	withURL := HostBridgeTaskExecutor{WorktreePath: "/wt", APIBaseURL: " http://127.0.0.1:8080 "}.taskRunnerEnv(req, "{}")
+	if len(withURL) != len(legacy)+1 || withURL[len(withURL)-1] != "LOOM_TASK_RUN_API_URL=http://127.0.0.1:8080" {
+		t.Fatalf("env with APIBaseURL = %v, want legacy env plus trimmed LOOM_TASK_RUN_API_URL appended", withURL)
+	}
+	if !slices.Equal(withURL[:len(legacy)], legacy) {
+		t.Fatalf("APIBaseURL changed the legacy env prefix:\n%v\n%v", withURL[:len(legacy)], legacy)
+	}
+}
 
 func TestHostBridgeTaskExecutorAppliesPatchUploadsAndFinalizesArtifact(t *testing.T) {
 	ctx := context.Background()

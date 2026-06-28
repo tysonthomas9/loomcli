@@ -47,6 +47,13 @@ type NormalizedEvent struct {
 	// both the idempotency key and the TriggerEvent's source_event_id, so
 	// redelivering the same event does not create duplicate effects.
 	DeliveryID string
+	// SubjectAttrs carries adapter-extracted payload attributes (e.g.
+	// "head_sha", "repo", "pr_number", "base_ref") consumed by server-side
+	// subject_key_template rendering ("{{attrs.head_sha}}"). The adapter is
+	// the single source of truth for these values: the router and template
+	// renderer never re-parse the raw payload. Keys are only present when the
+	// payload actually carries the value; the map is nil when none apply.
+	SubjectAttrs map[string]string
 }
 
 // Adapter is the only source-specific code in the webhook path. Implementations

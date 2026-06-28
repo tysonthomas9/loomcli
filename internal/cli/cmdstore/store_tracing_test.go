@@ -48,6 +48,8 @@ func TestWrapStoreWithTracing_Smoke(t *testing.T) {
 	_ = wrapped.DriverRuns()
 	_ = wrapped.DriverSteps()
 	_ = wrapped.TaskRuns()
+	_ = wrapped.TaskRunEvents()
+	_ = wrapped.Outbox()
 	_ = wrapped.Roles()
 	_ = wrapped.Daemon()
 
@@ -242,6 +244,18 @@ func TestWrapStoreWithTracing_Smoke(t *testing.T) {
 	_, _ = taskRuns.List(ctx, "TEST", store.TaskRunFilter{})
 	exitCode := 0
 	_, _ = taskRuns.Finish(ctx, "TEST", "task-run-1", store.TaskRunFinish{Status: domain.TaskRunCompleted, ExitCode: &exitCode, LogsRef: "logs://task-run-1"})
+
+	taskRunEvents := wrapped.TaskRunEvents()
+	_, _ = taskRunEvents.Append(ctx, store.TaskRunEventAppend{WorkspaceKey: "TEST", TaskRunID: "task-run-1", Type: domain.TaskRunEventQueued, Status: domain.TaskRunQueued, Attempt: 1, OccurredAt: time.Now().UTC()})
+	_, _ = taskRunEvents.ListSince(ctx, "TEST", store.TaskRunEventFilter{})
+
+	outbox := wrapped.Outbox()
+	_, _ = outbox.Create(ctx, store.OutboxCreate{WorkspaceKey: "TEST", OutboxID: "outbox-1", Kind: domain.OutboxKindLeadAssignment, EpicID: "TEST-1", TargetAgent: "lead", DedupeKey: "dk-1"})
+	_, _ = outbox.ListDue(ctx, "TEST", store.OutboxDueFilter{Now: time.Now().UTC()})
+	_, _ = outbox.MarkResult(ctx, "TEST", "outbox-1", store.OutboxDeliveryUpdate{Status: domain.OutboxStatusDelivered, Attempt: 1})
+	_, _ = outbox.Get(ctx, "TEST", "outbox-1")
+	// Error path on a missing key.
+	_, _ = outbox.Get(ctx, "TEST", "missing")
 
 	daemon := wrapped.Daemon()
 	_, _ = daemon.Get(ctx, "TEST")

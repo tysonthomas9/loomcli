@@ -43,6 +43,12 @@ func (s *driverStore) Create(_ context.Context, in store.DriverCreate) (*domain.
 	if status == "" {
 		status = domain.DriverStatusDraft
 	}
+	trust := in.TrustLevel
+	if trust == "" {
+		// Unknown/missing = untrusted (fail closed) — mirrors fleet-db's
+		// Driver.Validate stamp; registration paths set an explicit level.
+		trust = domain.DriverTrustUntrusted
+	}
 	driver := &domain.Driver{
 		WorkspaceKey:    in.WorkspaceKey,
 		DriverID:        in.DriverID,
@@ -52,6 +58,7 @@ func (s *driverStore) Create(_ context.Context, in store.DriverCreate) (*domain.
 		Description:     in.Description,
 		ActiveVersionID: in.ActiveVersionID,
 		Status:          status,
+		TrustLevel:      trust,
 		Metadata:        cloneMap(in.Metadata),
 		CreatedAt:       now,
 		UpdatedAt:       now,
@@ -110,6 +117,9 @@ func (s *driverStore) Update(_ context.Context, ws, driverID string, patch store
 	}
 	if patch.Status != nil {
 		driver.Status = *patch.Status
+	}
+	if patch.TrustLevel != nil {
+		driver.TrustLevel = *patch.TrustLevel
 	}
 	if patch.Metadata != nil {
 		driver.Metadata = cloneMap(*patch.Metadata)
@@ -252,6 +262,9 @@ func (s *triggerBindingStore) validateTriggerBindingCreate(in store.TriggerBindi
 	if in.TargetAgentServiceID != "" && s.services != nil && !s.services.exists(in.WorkspaceKey, in.TargetAgentServiceID) {
 		return fmt.Errorf("target agent service %q in workspace %q: %w", in.TargetAgentServiceID, in.WorkspaceKey, domain.ErrNotFound)
 	}
+	if in.RetryMaxAttempts < 0 || in.RetryBackoffSeconds < 0 {
+		return fmt.Errorf("retry_max_attempts and retry_backoff_seconds must be non-negative: %w", domain.ErrInvalid)
+	}
 	return nil
 }
 
@@ -290,6 +303,12 @@ func newTriggerBindingMem(in store.TriggerBindingCreate) *domain.TriggerBinding 
 		IdempotencyPolicy:    firstNonEmptyMem(in.IdempotencyPolicy, "header:Idempotency-Key"),
 		AuthPolicy:           firstNonEmptyMem(in.AuthPolicy, "workspace_user"),
 		WebhookSecret:        in.WebhookSecret,
+		SubjectKeyTemplate:   in.SubjectKeyTemplate,
+		ActorFilter:          normalizedActorFilterMem(in.ActorFilter),
+		RetryMaxAttempts:     defaultRetryFieldMem(in.RetryMaxAttempts, domain.DefaultTriggerRetryMaxAttempts),
+		RetryBackoffSeconds:  defaultRetryFieldMem(in.RetryBackoffSeconds, domain.DefaultTriggerRetryBackoffSeconds),
+		Schedule:             in.Schedule,
+		ScheduleTimezone:     in.ScheduleTimezone,
 		Permissions:          append([]string(nil), in.Permissions...),
 		Enabled:              in.Enabled,
 		CreatedAt:            now,

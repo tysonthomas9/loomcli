@@ -12,6 +12,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
 	"github.com/tysonthomas9/loomcli/internal/domain"
+	driverpkg "github.com/tysonthomas9/loomcli/internal/driver"
 )
 
 // driverRunContext is the resolved identity preamble shared by driver runtime
@@ -79,28 +80,9 @@ func resolveRunningDriverRun(ctx context.Context, h *bootstrap.StoreHandle, work
 	if err != nil {
 		return "", nil, err
 	}
-	if rc.DriverRunID == "" {
-		return "", nil, fmt.Errorf("driver-run-id required: %w", domain.ErrInvalid)
-	}
-	parent, err := h.Store.DriverRuns().Get(ctx, rc.WorkspaceKey, rc.DriverRunID)
+	parent, err := driverpkg.VerifyRunningDriverRun(ctx, h.Store, rc.WorkspaceKey, rc.DriverRunID, rc.NodeID, rc.LeaseID, rc.FencingToken)
 	if err != nil {
-		return "", nil, fmt.Errorf("get parent driver run: %w", err)
-	}
-	if parent.Status != domain.DriverRunRunning {
-		return "", nil, fmt.Errorf("driver run %q is %s, want running: %w", rc.DriverRunID, parent.Status, domain.ErrInvalidTransition)
-	}
-	if parent.LeaseID != "" || parent.FencingToken != 0 {
-		ownerFence, err := rc.FencingToken()
-		if err != nil {
-			return "", nil, err
-		}
-		if rc.NodeID == "" || rc.LeaseID == "" || ownerFence == 0 {
-			return "", nil, fmt.Errorf("driver run %q owner credentials required: %w", rc.DriverRunID, domain.ErrNotOwner)
-		}
-		parent, err = h.Store.DriverRuns().Heartbeat(ctx, rc.WorkspaceKey, rc.DriverRunID, rc.NodeID, rc.LeaseID, ownerFence)
-		if err != nil {
-			return "", nil, fmt.Errorf("verify driver run owner: %w", err)
-		}
+		return "", nil, err
 	}
 	return rc.WorkspaceKey, parent, nil
 }
@@ -137,22 +119,11 @@ func newDriverIssueBackend(h *bootstrap.StoreHandle, ws, actor string) (*fleet.F
 }
 
 func driverRunActor(runID string) string {
-	return "driver-run:" + runID
+	return driverpkg.DriverRunActor(runID)
 }
 
 func driverRunPayloadEpicID(payload json.RawMessage) string {
-	if len(payload) == 0 {
-		return ""
-	}
-	var object map[string]any
-	if err := json.Unmarshal(payload, &object); err != nil {
-		return ""
-	}
-	value, ok := object["epicId"].(string)
-	if !ok {
-		return ""
-	}
-	return value
+	return driverpkg.DriverRunPayloadEpicID(payload)
 }
 
 func firstNonEmpty(values ...string) string {

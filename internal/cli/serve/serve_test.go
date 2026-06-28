@@ -138,6 +138,50 @@ func TestDriverExecutorEnabled(t *testing.T) {
 	}
 }
 
+func TestDriverTaskWorkerConcurrency(t *testing.T) {
+	tests := []struct {
+		value string
+		want  int
+	}{
+		{"", 2},
+		{"4", 4},
+		{"0", 1},
+		{"-3", 1},
+		{"invalid", 2},
+		{"100", 32},
+	}
+	for _, tt := range tests {
+		t.Run(tt.value, func(t *testing.T) {
+			t.Setenv(envLoomDriverTaskWorkerConcurrency, tt.value)
+			if got := driverTaskWorkerConcurrency(); got != tt.want {
+				t.Fatalf("driverTaskWorkerConcurrency() = %d, want %d", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestDriverTaskRunMaxAttempts(t *testing.T) {
+	tests := []struct {
+		value string
+		want  int
+	}{
+		{"", 2},
+		{"4", 4},
+		{"0", 1},
+		{"-3", 1},
+		{"invalid", 2},
+		{"100", 10},
+	}
+	for _, tt := range tests {
+		t.Run(tt.value, func(t *testing.T) {
+			t.Setenv(envLoomDriverTaskRunMaxAttempts, tt.value)
+			if got := driverTaskRunMaxAttempts(); got != tt.want {
+				t.Fatalf("driverTaskRunMaxAttempts() = %d, want %d", got, tt.want)
+			}
+		})
+	}
+}
+
 // withMockData runs a test with mocked collectDataFunc
 func withMockData(t *testing.T, data *MonitorData, fn func()) {
 	t.Helper()

@@ -1,0 +1,32 @@
+# Remote agent worker for the local podman e2e stack.
+#
+# Same loom binary as serve, different command route: `loom worker` registers
+# with the control plane over HTTP and runs the auto-mode loop with
+# HTTP-backed lock/event/log bridges (internal/cli/serve/worker/worker_cmd.go)
+# — there is no separate worker binary. Each worker container is its own
+# capped isolation boundary.
+#
+# Node + git are present because auto-mode task runners are node scripts and
+# agents operate on git worktrees.
+#
+# Build context: the staging dir assembled by build.sh (bin/).
+
+FROM docker.io/library/node:22-slim
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends git curl ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY bin/loom /usr/local/bin/loom
+COPY worker-entrypoint.sh /usr/local/bin/worker-entrypoint.sh
+RUN chmod 0755 /usr/local/bin/worker-entrypoint.sh \
+    && install -d -m 0755 -o node -g node /work /home/node/.loom
+
+ENV HOME=/home/node
+
+USER node:node
+WORKDIR /work
+
+# Entrypoint derives a unique LOOM_WORKER_AGENT per replica from the container
+# hostname unless one is provided, then execs `loom worker`.
+ENTRYPOINT ["/usr/local/bin/worker-entrypoint.sh"]

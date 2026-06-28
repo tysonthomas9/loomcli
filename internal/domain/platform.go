@@ -41,6 +41,26 @@ const (
 	DriverStatusArchived DriverStatus = "archived"
 )
 
+// DriverTrustLevel classifies who vouches for a driver's bundle content and
+// gates where its workflow runtimes may execute (§7 step 9 sandbox placement
+// policy): trusted drivers (builtin/operator-registered) may run in a host
+// process; untrusted drivers (externally submitted bundles) require an
+// isolating sandbox launcher and the executor refuses anything else.
+type DriverTrustLevel string
+
+const (
+	DriverTrustTrusted   DriverTrustLevel = "trusted"
+	DriverTrustUntrusted DriverTrustLevel = "untrusted"
+)
+
+// Trusted reports whether the level grants host-process execution. Unknown or
+// missing levels are untrusted — fail closed (step-9 locked decision: the
+// one-time fleet-db backfill stamps pre-existing rows trusted; thereafter
+// unknown/missing means sandbox).
+func (t DriverTrustLevel) Trusted() bool {
+	return t == DriverTrustTrusted
+}
+
 type Driver struct {
 	WorkspaceKey    string            `json:"workspace_key"`
 	DriverID        string            `json:"driver_id"`
@@ -50,6 +70,7 @@ type Driver struct {
 	Description     string            `json:"description,omitempty"`
 	ActiveVersionID string            `json:"active_version_id,omitempty"`
 	Status          DriverStatus      `json:"status"`
+	TrustLevel      DriverTrustLevel  `json:"trust_level,omitempty"`
 	Metadata        map[string]string `json:"metadata,omitempty"`
 	CreatedAt       time.Time         `json:"created_at"`
 	UpdatedAt       time.Time         `json:"updated_at"`
@@ -146,6 +167,40 @@ type AgentService struct {
 	UpdatedAt       time.Time                `json:"updated_at"`
 }
 
+// Retry defaults mirror fleet-db's write-time defaults for trigger binding
+// retry fields: 5 attempts with 30s exponential backoff (the sweeper caps
+// backoff at 1h).
+const (
+	DefaultTriggerRetryMaxAttempts    = 5
+	DefaultTriggerRetryBackoffSeconds = 30
+)
+
+// TriggerActorFilter scopes which event actors a binding reacts to. It is most
+// relevant for source_kind=internal bindings where workflow-emitted events
+// could otherwise feed back into workflows. Loopback protection itself is
+// structural (event origin + hop_depth), so the filter is advisory and a
+// missing filter on an internal binding is accepted.
+type TriggerActorFilter struct {
+	ExcludeActorKinds []string `json:"exclude_actor_kinds,omitempty"`
+	AllowActors       []string `json:"allow_actors,omitempty"`
+}
+
+// IsZero reports whether the filter is nil or carries no constraints.
+func (f *TriggerActorFilter) IsZero() bool {
+	return f == nil || (len(f.ExcludeActorKinds) == 0 && len(f.AllowActors) == 0)
+}
+
+// Clone returns a deep copy of the filter (nil-safe).
+func (f *TriggerActorFilter) Clone() *TriggerActorFilter {
+	if f == nil {
+		return nil
+	}
+	return &TriggerActorFilter{
+		ExcludeActorKinds: append([]string(nil), f.ExcludeActorKinds...),
+		AllowActors:       append([]string(nil), f.AllowActors...),
+	}
+}
+
 type TriggerBindingConcurrencyPolicy string
 
 const (
@@ -178,25 +233,63 @@ type TriggerBinding struct {
 	AuthPolicy           string                          `json:"auth_policy,omitempty"`
 	// WebhookSecret is the shared secret used to verify inbound webhook
 	// signatures (e.g. GitHub's X-Hub-Signature-256 HMAC) for this route.
-	WebhookSecret string    `json:"webhook_secret,omitempty"`
-	Permissions   []string  `json:"permissions,omitempty"`
-	Enabled       bool      `json:"enabled"`
-	CreatedAt     time.Time `json:"created_at"`
-	UpdatedAt     time.Time `json:"updated_at"`
+	WebhookSecret string `json:"webhook_secret,omitempty"`
+	// SubjectKeyTemplate renders the concurrency subject key for deliveries
+	// using {{subject_ref}}, {{event_type}} and {{attrs.X}} tokens (templates
+	// never read the raw payload). Empty means the default key
+	// binding_id|subject_ref.
+	SubjectKeyTemplate string `json:"subject_key_template,omitempty"`
+	// ActorFilter scopes which actors this binding reacts to; advisory for
+	// source_kind=internal bindings (see TriggerActorFilter).
+	ActorFilter *TriggerActorFilter `json:"actor_filter,omitempty"`
+	// RetryMaxAttempts and RetryBackoffSeconds drive the delivery retry
+	// sweeper; zero values are defaulted at write time (see
+	// DefaultTriggerRetryMaxAttempts / DefaultTriggerRetryBackoffSeconds).
+	RetryMaxAttempts    int `json:"retry_max_attempts,omitempty"`
+	RetryBackoffSeconds int `json:"retry_backoff_seconds,omitempty"`
+	// Schedule is a standard 5-field cron expression (or @descriptor);
+	// required when SourceKind is "cron". ScheduleTimezone is an IANA zone
+	// name evaluated against Schedule (UTC when empty).
+	Schedule         string    `json:"schedule,omitempty"`
+	ScheduleTimezone string    `json:"schedule_timezone,omitempty"`
+	Permissions      []string  `json:"permissions,omitempty"`
+	Enabled          bool      `json:"enabled"`
+	CreatedAt        time.Time `json:"created_at"`
+	UpdatedAt        time.Time `json:"updated_at"`
 }
+
+// TriggerEventOrigin mirrors fleet-db's structural event provenance: every
+// trigger event carries a server-stamped origin so workflow-originated events
+// are distinguishable from genuine external ones. Webhook ingest stamps
+// external (hop depth 0), the workflow events API stamps workflow (hop depth
+// parent+1, capped), and system schedulers stamp system.
+type TriggerEventOrigin string
+
+const (
+	TriggerEventOriginExternal TriggerEventOrigin = "external"
+	TriggerEventOriginWorkflow TriggerEventOrigin = "workflow"
+	TriggerEventOriginSystem   TriggerEventOrigin = "system"
+)
 
 // TriggerEvent is a durable record of an external event ingested by the
 // trigger layer (e.g. a verified GitHub webhook delivery), persisted before
 // any dispatch happens.
 type TriggerEvent struct {
-	WorkspaceKey     string    `json:"workspace_key"`
-	EventID          string    `json:"event_id"`
-	TriggerBindingID string    `json:"trigger_binding_id,omitempty"`
-	SourceKind       string    `json:"source_kind"`
-	SourceEventID    string    `json:"source_event_id,omitempty"`
-	EventType        string    `json:"event_type"`
-	SubjectRef       string    `json:"subject_ref,omitempty"`
-	ActorRef         string    `json:"actor_ref,omitempty"`
+	WorkspaceKey     string `json:"workspace_key"`
+	EventID          string `json:"event_id"`
+	TriggerBindingID string `json:"trigger_binding_id,omitempty"`
+	SourceKind       string `json:"source_kind"`
+	SourceEventID    string `json:"source_event_id,omitempty"`
+	EventType        string `json:"event_type"`
+	SubjectRef       string `json:"subject_ref,omitempty"`
+	ActorRef         string `json:"actor_ref,omitempty"`
+	// Origin is the server-stamped provenance (external|workflow|system).
+	// Records persisted before provenance existed round-trip with an empty
+	// origin and normalize to external on read (zero-value back-compat).
+	Origin TriggerEventOrigin `json:"origin,omitempty"`
+	// HopDepth counts workflow re-trigger hops from the originating
+	// external or system event (which sit at depth 0).
+	HopDepth         int       `json:"hop_depth,omitempty"`
 	OccurredAt       time.Time `json:"occurred_at"`
 	ReceivedAt       time.Time `json:"received_at"`
 	IdempotencyKey   string    `json:"idempotency_key,omitempty"`
@@ -204,6 +297,14 @@ type TriggerEvent struct {
 	RawPayloadDigest string    `json:"raw_payload_digest,omitempty"`
 	SignatureStatus  string    `json:"signature_status,omitempty"`
 	ReplayOfEventID  string    `json:"replay_of_event_id,omitempty"`
+}
+
+// NormalizeProvenance applies zero-value back-compat on read: events written
+// before structural provenance existed were all externally ingested.
+func (e *TriggerEvent) NormalizeProvenance() {
+	if e.Origin == "" {
+		e.Origin = TriggerEventOriginExternal
+	}
 }
 
 // TriggerDeliveryStatus enumerates the lifecycle of a TriggerDelivery.
@@ -217,7 +318,32 @@ const (
 	TriggerDeliveryDispatched TriggerDeliveryStatus = "dispatched"
 	TriggerDeliveryFailed     TriggerDeliveryStatus = "failed"
 	TriggerDeliveryReplayed   TriggerDeliveryStatus = "replayed"
+	// TriggerDeliverySuperseded marks a delivery replaced by a newer event for
+	// the same subject key (replace concurrency policy). TriggerDeliveryHeld
+	// parks a delivery behind an active run for its subject key (queue
+	// concurrency policy); the retry sweeper promotes it. Both are additive
+	// enum values on the fleet-db v1 wire.
+	TriggerDeliverySuperseded TriggerDeliveryStatus = "superseded"
+	TriggerDeliveryHeld       TriggerDeliveryStatus = "held"
 )
+
+// TriggerDeliveryErrorRetriesExhausted is the terminal error class stamped on
+// a failed delivery once its binding's RetryMaxAttempts budget is spent
+// (mirrors fleet-db's write-time rule). A failed delivery carrying it is
+// final and leaves the retry due-index.
+const TriggerDeliveryErrorRetriesExhausted = "retries_exhausted"
+
+// IsValid reports whether the status is a known TriggerDeliveryStatus
+// (mirrors fleet-db's models.TriggerDeliveryStatus.IsValid).
+func (s TriggerDeliveryStatus) IsValid() bool {
+	switch s {
+	case TriggerDeliveryAccepted, TriggerDeliveryRejected, TriggerDeliveryDuplicate,
+		TriggerDeliveryQueued, TriggerDeliveryDispatched, TriggerDeliveryFailed,
+		TriggerDeliveryReplayed, TriggerDeliverySuperseded, TriggerDeliveryHeld:
+		return true
+	}
+	return false
+}
 
 // TriggerDelivery links a TriggerEvent to the binding that matched it and the
 // DriverRun it enqueued.
@@ -227,13 +353,17 @@ type TriggerDelivery struct {
 	TriggerEventID   string                `json:"trigger_event_id"`
 	TriggerBindingID string                `json:"trigger_binding_id"`
 	Status           TriggerDeliveryStatus `json:"status"`
-	RejectionReason  string                `json:"rejection_reason,omitempty"`
-	DriverRunID      string                `json:"driver_run_id,omitempty"`
-	Attempt          int                   `json:"attempt"`
-	NextRetryAt      *time.Time            `json:"next_retry_at,omitempty"`
-	ErrorClass       string                `json:"error_class,omitempty"`
-	CreatedAt        time.Time             `json:"created_at"`
-	UpdatedAt        time.Time             `json:"updated_at"`
+	// SubjectKey is the rendered concurrency subject key for this delivery:
+	// the binding's SubjectKeyTemplate output, or the default
+	// binding_id|subject_ref when the binding has no template.
+	SubjectKey      string     `json:"subject_key,omitempty"`
+	RejectionReason string     `json:"rejection_reason,omitempty"`
+	DriverRunID     string     `json:"driver_run_id,omitempty"`
+	Attempt         int        `json:"attempt"`
+	NextRetryAt     *time.Time `json:"next_retry_at,omitempty"`
+	ErrorClass      string     `json:"error_class,omitempty"`
+	CreatedAt       time.Time  `json:"created_at"`
+	UpdatedAt       time.Time  `json:"updated_at"`
 }
 
 type DriverRunStatus string
@@ -245,12 +375,19 @@ const (
 	DriverRunFailed      DriverRunStatus = "failed"
 	DriverRunNeedsReview DriverRunStatus = "needs_review"
 	DriverRunCancelled   DriverRunStatus = "cancelled"
+	// DriverRunSuspendedAwaitingEvent parks a run that registered an
+	// await-event and is waiting for a matching event (or its deadline).
+	// Explicitly NOT terminal: the run resumes when its await resolves.
+	DriverRunSuspendedAwaitingEvent DriverRunStatus = "suspended_awaiting_event"
 )
 
 func (s DriverRunStatus) IsTerminal() bool {
 	switch s {
 	case DriverRunCompleted, DriverRunFailed, DriverRunNeedsReview, DriverRunCancelled:
 		return true
+	case DriverRunSuspendedAwaitingEvent:
+		// Suspended runs are alive — they resume on event/timeout.
+		return false
 	default:
 		return false
 	}
@@ -277,8 +414,29 @@ type DriverRun struct {
 	StartedAt       time.Time         `json:"started_at,omitempty"`
 	LastHeartbeat   time.Time         `json:"last_heartbeat,omitempty"`
 	FinishedAt      *time.Time        `json:"finished_at,omitempty"`
-	CreatedAt       time.Time         `json:"created_at"`
-	UpdatedAt       time.Time         `json:"updated_at"`
+	// Composition + await fields (Phase D). snake_case tags like the rest
+	// of this struct: the fleet-db client decodes v1 responses directly
+	// into DriverRun (tag-identical round-trip, AW5); the driver/watch wire
+	// carries runs through its own DTOs (internal/driver/run_events.go).
+	//
+	// ParentRunID links a child run spawned by a parent workflow run.
+	// Empty means detached/root (no cancel cascade). Orthogonal to EpicID:
+	// a run can belong to an epic, a parent run, both, or neither.
+	ParentRunID string `json:"parent_run_id,omitempty"`
+	// SuspendedAt is set when the run parks in suspended_awaiting_event.
+	SuspendedAt *time.Time `json:"suspended_at,omitempty"`
+	// CancelRequestedAt records a cooperative cancel request against a
+	// RUNNING run (composition cascade: parent terminal -> running children
+	// cancel-requested). The owning executor observes it on heartbeat and
+	// cancels its runner; the run still terminalizes through the normal
+	// fenced Finish.
+	CancelRequestedAt     *time.Time `json:"cancel_requested_at,omitempty"`
+	CancelRequestedReason string     `json:"cancel_requested_reason,omitempty"`
+	// ResumeSourceEventID records the trigger event that resolved the
+	// await and resumed the run (or the synthetic timeout event).
+	ResumeSourceEventID string    `json:"resume_source_event_id,omitempty"`
+	CreatedAt           time.Time `json:"created_at"`
+	UpdatedAt           time.Time `json:"updated_at"`
 }
 
 type DriverStepStatus string
@@ -338,19 +496,24 @@ func (s TaskRunStatus) IsTerminal() bool {
 }
 
 type TaskRun struct {
-	WorkspaceKey     string            `json:"workspace_key"`
-	TaskRunID        string            `json:"task_run_id"`
-	DriverRunID      string            `json:"driver_run_id,omitempty"`
-	DriverStepID     string            `json:"driver_step_id,omitempty"`
-	TaskID           string            `json:"task_id"`
-	WorkerProfileID  string            `json:"worker_profile_id,omitempty"`
-	ProviderProfile  string            `json:"provider_profile,omitempty"`
-	Status           TaskRunStatus     `json:"status"`
-	NodeID           string            `json:"node_id,omitempty"`
-	LeaseID          string            `json:"lease_id,omitempty"`
-	FencingToken     int64             `json:"fencing_token,omitempty"`
-	RunnerPlacement  TaskRunPlacement  `json:"runner_placement,omitempty"`
-	SandboxPlacement TaskRunPlacement  `json:"sandbox_placement,omitempty"`
+	WorkspaceKey     string           `json:"workspace_key"`
+	TaskRunID        string           `json:"task_run_id"`
+	DriverRunID      string           `json:"driver_run_id,omitempty"`
+	DriverStepID     string           `json:"driver_step_id,omitempty"`
+	TaskID           string           `json:"task_id"`
+	WorkerProfileID  string           `json:"worker_profile_id,omitempty"`
+	ProviderProfile  string           `json:"provider_profile,omitempty"`
+	Status           TaskRunStatus    `json:"status"`
+	NodeID           string           `json:"node_id,omitempty"`
+	LeaseID          string           `json:"lease_id,omitempty"`
+	FencingToken     int64            `json:"fencing_token,omitempty"`
+	RunnerPlacement  TaskRunPlacement `json:"runner_placement,omitempty"`
+	SandboxPlacement TaskRunPlacement `json:"sandbox_placement,omitempty"`
+	// Input is the optional task-run payload supplied by the requester
+	// (e.g. a github-review-agent's diff+rubric). It is persisted verbatim
+	// and delivered to the runner so the task harness can act on it.
+	// Optional / back-compat: runs created without it behave as before.
+	Input            json.RawMessage   `json:"input,omitempty"`
 	ExitCode         *int              `json:"exit_code,omitempty"`
 	LogsRef          string            `json:"logs_ref,omitempty"`
 	ArtifactsRef     string            `json:"artifacts_ref,omitempty"`
@@ -360,6 +523,7 @@ type TaskRun struct {
 	CacheWriteTokens int64             `json:"cache_write_tokens,omitempty"`
 	EstimatedCostUSD float64           `json:"estimated_cost_usd,omitempty"`
 	RuntimeMetadata  map[string]string `json:"runtime_metadata,omitempty"`
+	NextEligibleAt   time.Time         `json:"next_eligible_at,omitempty"`
 	StartedAt        time.Time         `json:"started_at,omitempty"`
 	LastHeartbeat    time.Time         `json:"last_heartbeat,omitempty"`
 	FinishedAt       *time.Time        `json:"finished_at,omitempty"`
@@ -379,6 +543,8 @@ type TaskRunPlacement struct {
 	CWD             string     `json:"cwd,omitempty"`
 	RepoRef         string     `json:"repo_ref,omitempty"`
 	CleanupPolicy   string     `json:"cleanup_policy,omitempty"`
+	EgressMode      string     `json:"egress_mode,omitempty"`
+	EgressMechanism string     `json:"egress_mechanism,omitempty"`
 	StartedAt       time.Time  `json:"started_at,omitempty"`
 	HeartbeatAt     time.Time  `json:"heartbeat_at,omitempty"`
 	RetainedUntil   *time.Time `json:"retained_until,omitempty"`
@@ -394,6 +560,8 @@ func (p TaskRunPlacement) Empty() bool {
 		p.CWD == "" &&
 		p.RepoRef == "" &&
 		p.CleanupPolicy == "" &&
+		p.EgressMode == "" &&
+		p.EgressMechanism == "" &&
 		p.StartedAt.IsZero() &&
 		p.HeartbeatAt.IsZero() &&
 		p.RetainedUntil == nil

@@ -39,6 +39,10 @@ var (
 	// the current lifecycle state.
 	ErrInvalidTransition = errors.New("domain: invalid status transition")
 
+	// ErrUnschedulable indicates a valid unit of work cannot currently be
+	// placed on any live node with the required provider/capabilities.
+	ErrUnschedulable = errors.New("domain: unschedulable")
+
 	// ErrGone indicates the entity exists but is no longer available —
 	// e.g. a lease that has expired or been released (fleet-db 410
 	// lease_expired). Distinct from ErrNotFound (never existed here) and

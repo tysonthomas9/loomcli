@@ -1,0 +1,169 @@
+//nolint:revive // Tests use the established driver package name to exercise unexported helpers.
+package driver
+
+import (
+	"context"
+	"testing"
+	"time"
+
+	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
+	"github.com/tysonthomas9/loomcli/internal/store"
+)
+
+// seedSweeperFixture creates a driver, version, driver run (optionally
+// claimed into running), and one running TaskRun whose LastHeartbeat is
+// backdated by heartbeatAge.
+func seedSweeperFixture(t *testing.T, st *memstore.Store, ws string, driverRunStatus domain.DriverRunStatus, heartbeatAge time.Duration) {
+	t.Helper()
+	ctx := context.Background()
+	if _, err := st.Drivers().Create(ctx, store.DriverCreate{
+		WorkspaceKey: ws,
+		DriverID:     "driver-1",
+		Name:         "epic-runner",
+		OwnerType:    domain.DriverOwnerSystem,
+		Status:       domain.DriverStatusActive,
+	}); err != nil {
+		t.Fatalf("Create driver: %v", err)
+	}
+	if _, err := st.DriverVersions().Create(ctx, store.DriverVersionCreate{
+		WorkspaceKey:     ws,
+		VersionID:        "version-1",
+		DriverID:         "driver-1",
+		Version:          1,
+		SourceDigest:     "sha256:source",
+		BundleDigest:     "sha256:bundle",
+		ValidationStatus: domain.DriverVersionValidationPassed,
+	}); err != nil {
+		t.Fatalf("Create driver version: %v", err)
+	}
+	if _, err := st.DriverRuns().Create(ctx, store.DriverRunCreate{
+		WorkspaceKey:    ws,
+		RunID:           "run-1",
+		DriverID:        "driver-1",
+		DriverVersionID: "version-1",
+	}); err != nil {
+		t.Fatalf("Create driver run: %v", err)
+	}
+	if driverRunStatus == domain.DriverRunRunning {
+		if _, err := st.DriverRuns().Claim(ctx, ws, "run-1", "node-1", "lease-1"); err != nil {
+			t.Fatalf("Claim driver run: %v", err)
+		}
+	}
+	if _, err := st.TaskRuns().Create(ctx, store.TaskRunCreate{
+		WorkspaceKey: ws,
+		TaskRunID:    "task-run-1",
+		DriverRunID:  "run-1",
+		TaskID:       ws + "-1",
+		Status:       domain.TaskRunRunning,
+	}); err != nil {
+		t.Fatalf("Create task run: %v", err)
+	}
+	if _, err := st.TaskRuns().Heartbeat(ctx, ws, "task-run-1", store.TaskRunHeartbeat{
+		HeartbeatAt: time.Now().UTC().Add(-heartbeatAge),
+	}); err != nil {
+		t.Fatalf("Heartbeat task run: %v", err)
+	}
+}
+
+func TestStaleTaskSweeperRunOnce(t *testing.T) {
+	tests := []struct {
+		name             string
+		driverRunStatus  domain.DriverRunStatus
+		heartbeatAge     time.Duration
+		maxAge           time.Duration
+		sweepWorkspace   string
+		wantRecovered    int
+		wantSkippedFresh int
+		wantTaskStatus   domain.TaskRunStatus
+	}{
+		{
+			name:            "stale running task run fails with stale_task_run",
+			driverRunStatus: domain.DriverRunRunning,
+			heartbeatAge:    10 * time.Minute,
+			maxAge:          5 * time.Minute,
+			sweepWorkspace:  "WS",
+			wantRecovered:   1,
+			wantTaskStatus:  domain.TaskRunFailed,
+		},
+		{
+			name:             "fresh heartbeat untouched",
+			driverRunStatus:  domain.DriverRunRunning,
+			heartbeatAge:     time.Minute,
+			maxAge:           5 * time.Minute,
+			sweepWorkspace:   "WS",
+			wantSkippedFresh: 1,
+			wantTaskStatus:   domain.TaskRunRunning,
+		},
+		{
+			name:            "non-running driver run skipped",
+			driverRunStatus: domain.DriverRunQueued,
+			heartbeatAge:    10 * time.Minute,
+			maxAge:          5 * time.Minute,
+			sweepWorkspace:  "WS",
+			wantTaskStatus:  domain.TaskRunRunning,
+		},
+		{
+			name:            "zero max age defaults to five minutes",
+			driverRunStatus: domain.DriverRunRunning,
+			heartbeatAge:    10 * time.Minute,
+			maxAge:          0,
+			sweepWorkspace:  "WS",
+			wantRecovered:   1,
+			wantTaskStatus:  domain.TaskRunFailed,
+		},
+		{
+			name:            "empty workspace key sweeps all workspaces",
+			driverRunStatus: domain.DriverRunRunning,
+			heartbeatAge:    10 * time.Minute,
+			maxAge:          5 * time.Minute,
+			sweepWorkspace:  "",
+			wantRecovered:   1,
+			wantTaskStatus:  domain.TaskRunFailed,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := context.Background()
+			st := memstore.New()
+			if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "WS", Name: "ws"}); err != nil {
+				t.Fatalf("Create workspace: %v", err)
+			}
+			seedSweeperFixture(t, st, "WS", tt.driverRunStatus, tt.heartbeatAge)
+
+			sweeper := &StaleTaskSweeper{Store: st, WorkspaceKey: tt.sweepWorkspace, MaxAge: tt.maxAge}
+			result, err := sweeper.RunOnce(ctx)
+			if err != nil {
+				t.Fatalf("RunOnce: %v", err)
+			}
+			if result.Recovered != tt.wantRecovered || result.SkippedFresh != tt.wantSkippedFresh {
+				t.Fatalf("result = %+v, want recovered=%d skippedFresh=%d", result, tt.wantRecovered, tt.wantSkippedFresh)
+			}
+			if tt.wantRecovered > 0 && (len(result.RecoveredTaskRunIDs) != tt.wantRecovered || result.RecoveredTaskRunIDs[0] != "task-run-1") {
+				t.Fatalf("recovered task run ids = %v, want [task-run-1]", result.RecoveredTaskRunIDs)
+			}
+
+			taskRun, err := st.TaskRuns().Get(ctx, "WS", "task-run-1")
+			if err != nil {
+				t.Fatalf("Get task run: %v", err)
+			}
+			if taskRun.Status != tt.wantTaskStatus {
+				t.Fatalf("task run status = %s, want %s", taskRun.Status, tt.wantTaskStatus)
+			}
+			if tt.wantTaskStatus == domain.TaskRunFailed {
+				if taskRun.ErrorClass != "stale_task_run" || taskRun.ErrorMessage != "task run heartbeat is stale" {
+					t.Fatalf("task run error = %q/%q, want stale_task_run/heartbeat message", taskRun.ErrorClass, taskRun.ErrorMessage)
+				}
+				if taskRun.FinishedAt == nil {
+					t.Fatal("task run FinishedAt = nil, want set")
+				}
+			}
+		})
+	}
+}
+
+func TestStaleTaskSweeperRequiresStore(t *testing.T) {
+	if _, err := (&StaleTaskSweeper{}).RunOnce(context.Background()); err == nil {
+		t.Fatal("RunOnce with nil store: expected error, got nil")
+	}
+}

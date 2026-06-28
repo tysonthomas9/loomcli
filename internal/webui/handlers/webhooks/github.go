@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 )
 
@@ -29,11 +30,20 @@ const (
 // derivation. Unknown fields are ignored, so malformed or partial payloads
 // degrade gracefully to "github.{event}".
 type githubPayload struct {
-	Action      string `json:"action"`
-	Ref         string `json:"ref"`
+	Action string `json:"action"`
+	Ref    string `json:"ref"`
+	// After is the post-push head commit SHA on push events.
+	After       string `json:"after"`
 	Number      int    `json:"number"`
 	PullRequest *struct {
-		Number int `json:"number"`
+		Number int  `json:"number"`
+		Draft  bool `json:"draft"`
+		Head   *struct {
+			SHA string `json:"sha"`
+		} `json:"head"`
+		Base *struct {
+			Ref string `json:"ref"`
+		} `json:"base"`
 	} `json:"pull_request"`
 	Issue *struct {
 		Number int `json:"number"`
@@ -61,11 +71,12 @@ func (githubAdapter) Normalize(r *http.Request, body []byte) (NormalizedEvent, e
 	_ = json.Unmarshal(body, &payload)
 
 	return NormalizedEvent{
-		RouteKey:   githubRouteKey(event, payload.Action),
-		EventType:  event,
-		SubjectRef: githubSubjectRef(event, payload),
-		ActorRef:   githubActorRef(payload),
-		DeliveryID: delivery,
+		RouteKey:     githubRouteKey(event, payload.Action),
+		EventType:    event,
+		SubjectRef:   githubSubjectRef(event, payload),
+		ActorRef:     githubActorRef(payload),
+		DeliveryID:   delivery,
+		SubjectAttrs: githubSubjectAttrs(event, payload),
 	}, nil
 }
 
@@ -107,6 +118,47 @@ func joinSubject(repo, suffix string) string {
 		return strings.TrimPrefix(suffix, "@")
 	}
 	return repo + suffix
+}
+
+// githubSubjectAttrs extracts the payload attributes consumed by server-side
+// subject_key_template rendering ("{{attrs.head_sha}}" pins repo#PR@sha
+// subject keys). SubjectRef itself stays owner/repo#N for backcompat; the @sha
+// pinning happens only via templates. Keys are set only when the payload
+// carries the value, so templates fall back deterministically on partial
+// payloads; nil is returned when nothing applies (e.g. malformed body).
+func githubSubjectAttrs(event string, p githubPayload) map[string]string {
+	attrs := map[string]string{}
+	if p.Repository != nil && p.Repository.FullName != "" {
+		attrs["repo"] = p.Repository.FullName
+	}
+	if pr := p.PullRequest; pr != nil {
+		if pr.Number > 0 {
+			attrs["pr_number"] = strconv.Itoa(pr.Number)
+		} else if p.Number > 0 {
+			attrs["pr_number"] = strconv.Itoa(p.Number)
+		}
+		if pr.Head != nil && pr.Head.SHA != "" {
+			attrs["head_sha"] = pr.Head.SHA
+		}
+		if pr.Base != nil && pr.Base.Ref != "" {
+			attrs["base_ref"] = pr.Base.Ref
+		}
+		// draft is a non-optional bool on every pull_request payload, so it is
+		// set whenever a PR subject is present (unlike head_sha/base_ref, which
+		// are sub-objects that may be absent). This lets ready_for_review
+		// bindings and workflows branch on the PR's draft state.
+		attrs["draft"] = strconv.FormatBool(pr.Draft)
+	}
+	if p.Issue != nil && p.Issue.Number > 0 {
+		attrs["issue_number"] = strconv.Itoa(p.Issue.Number)
+	}
+	if event == "push" && p.After != "" {
+		attrs["head_sha"] = p.After
+	}
+	if len(attrs) == 0 {
+		return nil
+	}
+	return attrs
 }
 
 func githubActorRef(p githubPayload) string {

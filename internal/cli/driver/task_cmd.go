@@ -257,50 +257,10 @@ func runDriverCompleteTask(_ *cobra.Command, _ []string) error {
 	})
 }
 
-type driverTaskRunCompletionOptions struct {
-	TaskID       string
-	CompletionID string
-	LeaseToken   string
-	ArtifactIDs  []string
-	LogsRef      string
-	ArtifactsRef string
-	Reason       string
-}
+type driverTaskRunCompletionOptions = driverpkg.DriverTaskRunCompletionOptions
 
 func completeDriverTaskRun(ctx context.Context, taskRuns store.TaskRunStore, ws, taskRunID string, opts driverTaskRunCompletionOptions) (*driverpkg.TaskMutationResult, error) {
-	taskRun, err := taskRuns.Get(ctx, ws, taskRunID)
-	if err != nil {
-		return nil, fmt.Errorf("get task run: %w", err)
-	}
-	if opts.TaskID != "" && taskRun.TaskID != opts.TaskID {
-		return nil, fmt.Errorf("task run %q belongs to task %q, not %q: %w", taskRunID, taskRun.TaskID, opts.TaskID, domain.ErrInvalid)
-	}
-	completionID := strings.TrimSpace(opts.CompletionID)
-	if completionID == "" {
-		completionID = "complete-" + taskRunID
-	}
-	reason := strings.TrimSpace(opts.Reason)
-	if reason == "" {
-		reason = "completed by driver"
-	}
-	completed, err := taskRuns.Complete(ctx, ws, taskRunID, store.TaskRunComplete{
-		CompletionID:        completionID,
-		NodeID:              taskRun.NodeID,
-		LeaseID:             taskRun.LeaseID,
-		LeaseToken:          opts.LeaseToken,
-		FencingToken:        taskRun.FencingToken,
-		Status:              domain.TaskRunCompleted,
-		LogsRef:             opts.LogsRef,
-		ArtifactsRef:        opts.ArtifactsRef,
-		RequiredArtifactIDs: opts.ArtifactIDs,
-		RequireArtifacts:    len(opts.ArtifactIDs) > 0,
-		CloseTask:           true,
-		CloseReason:         reason,
-	})
-	if err != nil {
-		return nil, err
-	}
-	return &driverpkg.TaskMutationResult{ID: completed.TaskID, Status: string(completed.Status), Reason: reason}, nil
+	return driverpkg.CompleteDriverTaskRun(ctx, taskRuns, ws, taskRunID, opts)
 }
 
 func resolveDriverCompleteTaskLeaseToken() string {
