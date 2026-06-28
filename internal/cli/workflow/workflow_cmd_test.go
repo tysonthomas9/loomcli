@@ -76,7 +76,9 @@ func TestWorkflowReadyzJSONReportsLocalRoots(t *testing.T) {
 	t.Setenv("LOOM_REAL_FLUE_CMD", "/bin/echo")
 	t.Setenv("LOOM_REAL_FLUE_CMD_JSON", "")
 	t.Setenv("LOOM_SDK_ROOT", sdkRoot)
-	t.Setenv("FLUE_RUNTIME_ROOT", flueRuntimeRoot)
+	t.Setenv("LOOM_FLUE_RUNTIME_ROOT", flueRuntimeRoot)
+	t.Setenv("FLUE_RUNTIME_ROOT", "")
+	t.Setenv("FLUE_REPO", "")
 	workflowReadyzJSON = true
 	t.Cleanup(func() { workflowReadyzJSON = false })
 

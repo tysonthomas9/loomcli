@@ -426,6 +426,24 @@ func TestBuildAndRegisterCustomSourceWithRealFlue(t *testing.T) {
 	}
 }
 
+func TestFlueRuntimeRootHonorsLoomPrefixedEnv(t *testing.T) {
+	runtimeRoot := t.TempDir()
+	if err := os.WriteFile(filepath.Join(runtimeRoot, "package.json"), []byte(`{"name":"@flue/runtime"}`+"\n"), 0o644); err != nil {
+		t.Fatalf("write runtime package: %v", err)
+	}
+	t.Setenv("LOOM_FLUE_RUNTIME_ROOT", runtimeRoot)
+	t.Setenv("FLUE_RUNTIME_ROOT", "")
+	t.Setenv("FLUE_REPO", "")
+
+	got, err := flueRuntimeRoot()
+	if err != nil {
+		t.Fatalf("flueRuntimeRoot returned error: %v", err)
+	}
+	if got != runtimeRoot {
+		t.Fatalf("flueRuntimeRoot = %q, want %q", got, runtimeRoot)
+	}
+}
+
 func workflowTestRepoRoot(t *testing.T) string {
 	t.Helper()
 	_, file, _, ok := runtime.Caller(0)

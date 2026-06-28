@@ -573,6 +573,9 @@ func loomSDKRoot() (string, error) {
 
 func flueRuntimeRoot() (string, error) {
 	candidates := []string{}
+	if root := strings.TrimSpace(os.Getenv("LOOM_FLUE_RUNTIME_ROOT")); root != "" {
+		candidates = append(candidates, root)
+	}
 	if root := strings.TrimSpace(os.Getenv("FLUE_RUNTIME_ROOT")); root != "" {
 		candidates = append(candidates, root)
 	}
@@ -588,7 +591,7 @@ func flueRuntimeRoot() (string, error) {
 			return candidate, nil
 		}
 	}
-	return "", fmt.Errorf("local @flue/runtime package not found; set FLUE_RUNTIME_ROOT or FLUE_REPO")
+	return "", fmt.Errorf("local @flue/runtime package not found; set LOOM_FLUE_RUNTIME_ROOT, FLUE_RUNTIME_ROOT, or FLUE_REPO")
 }
 
 func daytonaSDKRoot() (string, error) {
