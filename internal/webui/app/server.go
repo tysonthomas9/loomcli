@@ -153,6 +153,8 @@ func (app *Server) buildHandlers() {
 		Pool:               app.pool,
 		Hub:                app.hub,
 		ExtAuthURL:         app.config.ExtAuthURL,
+		FrontendDir:        app.config.FrontendDir,
+		Build:              app.config.Build,
 		BackendsHealthH:    backendsHealthH,
 		NotifyToken:        app.notifyToken,
 		DaemonSupervisor:   daemonSupervisorH,

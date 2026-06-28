@@ -19,42 +19,15 @@ func runTerminalHost(cmd *cobra.Command, _ []string) error {
 	ctx, stopSignals := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
 	defer stopSignals()
 
-	dataDir, err := resolveDataDir(dataDirFlag)
+	dataDir, socketPath, err := terminalHostRuntimePaths()
 	if err != nil {
 		return err
 	}
-	if err := ensureRuntimeDirs(dataDir); err != nil {
-		return err
-	}
-	socketPath := socketFlag
-	if socketPath == "" {
-		socketPath = terminalHostSocketPath(dataDir)
-	}
-	_ = os.Setenv("LOOM_CONFIG_DIR", dataDir)
-	_ = os.Setenv("LOOM_DESKTOP_DATA_DIR", dataDir)
-	_ = os.Setenv("LOOM_WORKSPACE_RUNTIME_DIR", dataDir)
-
-	info := &terminalHostInfo{
-		ProtocolVersion: terminal.TerminalHostProtocolVersion,
-		Status:          "running",
-		PID:             os.Getpid(),
-		DataDir:         dataDir,
-		SocketPath:      socketPath,
-		Build:           cli.Build,
-		StartedAt:       time.Now().UTC(),
-		Healthy:         true,
-	}
+	info := newTerminalHostInfo(dataDir, socketPath)
 	if err := writeTerminalHostInfo(dataDir, info); err != nil {
 		return err
 	}
-	defer func() {
-		if info.Status != "failed" {
-			info.Status = "stopped"
-			info.Error = ""
-		}
-		info.Healthy = false
-		_ = writeTerminalHostInfo(dataDir, info)
-	}()
+	defer markTerminalHostStopped(dataDir, info)
 
 	command := fmt.Sprintf("loom lead --backend %s", cli.ResolveBackendName())
 	server := terminal.NewTerminalHostServer(socketPath, command, 0, slog.Default())
@@ -67,6 +40,46 @@ func runTerminalHost(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 	return nil
+}
+
+func terminalHostRuntimePaths() (string, string, error) {
+	dataDir, err := resolveDataDir(dataDirFlag)
+	if err != nil {
+		return "", "", err
+	}
+	if err := ensureRuntimeDirs(dataDir); err != nil {
+		return "", "", err
+	}
+	socketPath := socketFlag
+	if socketPath == "" {
+		socketPath = terminalHostSocketPath(dataDir)
+	}
+	_ = os.Setenv("LOOM_CONFIG_DIR", dataDir)
+	_ = os.Setenv("LOOM_DESKTOP_DATA_DIR", dataDir)
+	_ = os.Setenv("LOOM_WORKSPACE_RUNTIME_DIR", dataDir)
+	return dataDir, socketPath, nil
+}
+
+func newTerminalHostInfo(dataDir, socketPath string) *terminalHostInfo {
+	return &terminalHostInfo{
+		ProtocolVersion: terminal.TerminalHostProtocolVersion,
+		Status:          "running",
+		PID:             os.Getpid(),
+		DataDir:         dataDir,
+		SocketPath:      socketPath,
+		Build:           cli.Build,
+		StartedAt:       time.Now().UTC(),
+		Healthy:         true,
+	}
+}
+
+func markTerminalHostStopped(dataDir string, info *terminalHostInfo) {
+	if info.Status != "failed" {
+		info.Status = "stopped"
+		info.Error = ""
+	}
+	info.Healthy = false
+	_ = writeTerminalHostInfo(dataDir, info)
 }
 
 func ensureTerminalHostRunning(cfg *localServiceConfig) (*terminalHostInfo, error) {

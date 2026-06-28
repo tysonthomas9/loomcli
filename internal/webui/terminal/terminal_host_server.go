@@ -68,7 +68,7 @@ func (s *TerminalHostServer) Serve(ctx context.Context) error {
 				return nil
 			}
 			var ne net.Error
-			if errors.As(err, &ne) && ne.Temporary() {
+			if errors.As(err, &ne) && ne.Timeout() {
 				time.Sleep(50 * time.Millisecond)
 				continue
 			}
@@ -159,29 +159,34 @@ func (s *TerminalHostServer) handleAttach(conn net.Conn, dec *json.Decoder, req 
 	}
 
 	controlDone := make(chan struct{})
-	go func() {
-		defer close(controlDone)
-		defer s.Manager.Detach(req.Key, connID)
-		for {
-			var msg terminalHostStreamMessage
-			if err := dec.Decode(&msg); err != nil {
-				return
-			}
-			switch msg.Op {
-			case terminalHostOpInput:
-				_, _ = att.WriteInput(msg.Data)
-			case terminalHostOpResize:
-				if len(msg.Data) == 4 {
-					cols := uint16(msg.Data[0])<<8 | uint16(msg.Data[1])
-					rows := uint16(msg.Data[2])<<8 | uint16(msg.Data[3])
-					_ = att.Resize(connID, cols, rows)
-				}
-			case terminalHostOpDetach:
-				return
-			}
-		}
-	}()
+	go s.readAttachControl(dec, req.Key, connID, att, controlDone)
+	s.writeAttachOutput(conn, enc, att, controlDone)
+}
 
+func (s *TerminalHostServer) readAttachControl(dec *json.Decoder, key SessionKey, connID string, att Attachment, controlDone chan<- struct{}) {
+	defer close(controlDone)
+	defer s.Manager.Detach(key, connID)
+	for {
+		var msg terminalHostStreamMessage
+		if err := dec.Decode(&msg); err != nil {
+			return
+		}
+		switch msg.Op {
+		case terminalHostOpInput:
+			_, _ = att.WriteInput(msg.Data)
+		case terminalHostOpResize:
+			if len(msg.Data) == 4 {
+				cols := uint16(msg.Data[0])<<8 | uint16(msg.Data[1])
+				rows := uint16(msg.Data[2])<<8 | uint16(msg.Data[3])
+				_ = att.Resize(connID, cols, rows)
+			}
+		case terminalHostOpDetach:
+			return
+		}
+	}
+}
+
+func (s *TerminalHostServer) writeAttachOutput(conn net.Conn, enc *json.Encoder, att Attachment, controlDone <-chan struct{}) {
 	for {
 		select {
 		case chunk, ok := <-att.Output():

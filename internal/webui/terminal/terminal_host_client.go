@@ -39,6 +39,29 @@ func NewTerminalHostClient(socketPath string, maxSessions int) *TerminalHostClie
 }
 
 func (c *TerminalHostClient) AttachSession(key SessionKey, cols, rows uint16, launch *tabmeta.LaunchSpec) (Attachment, bool, error) {
+	att, reattached, err := c.requestAttachment(key, cols, rows, launch)
+	if err != nil {
+		return nil, false, err
+	}
+
+	c.mu.Lock()
+	if c.closed {
+		c.mu.Unlock()
+		_ = att.close()
+		return nil, false, ErrPTYManagerClosed
+	}
+	c.attachments[att.connID] = att
+	c.mu.Unlock()
+
+	go att.readLoop(func(connID string) {
+		c.mu.Lock()
+		delete(c.attachments, connID)
+		c.mu.Unlock()
+	})
+	return att, reattached, nil
+}
+
+func (c *TerminalHostClient) requestAttachment(key SessionKey, cols, rows uint16, launch *tabmeta.LaunchSpec) (*hostAttachment, bool, error) {
 	conn, err := c.dial()
 	if err != nil {
 		return nil, false, err
@@ -75,21 +98,6 @@ func (c *TerminalHostClient) AttachSession(key SessionKey, cols, rows uint16, la
 		output:     make(chan []byte, attachBufferSize),
 		scrollback: resp.Scrollback,
 	}
-
-	c.mu.Lock()
-	if c.closed {
-		c.mu.Unlock()
-		_ = att.close()
-		return nil, false, ErrPTYManagerClosed
-	}
-	c.attachments[att.connID] = att
-	c.mu.Unlock()
-
-	go att.readLoop(func(connID string) {
-		c.mu.Lock()
-		delete(c.attachments, connID)
-		c.mu.Unlock()
-	})
 	return att, resp.Reattached, nil
 }
 

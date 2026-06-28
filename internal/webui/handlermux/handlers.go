@@ -22,6 +22,7 @@ type Handlers struct {
 	APIHealth           http.HandlerFunc
 	ClientErrors        http.HandlerFunc
 	AuthConfig          http.HandlerFunc
+	BuildInfo           http.HandlerFunc
 	Metrics             http.HandlerFunc // pre-built by caller (requires fleet types)
 	GetTerminalConfig   http.HandlerFunc
 	GetBackendsHealth   http.HandlerFunc // pre-built by caller (requires ops types), may be nil
@@ -46,6 +47,8 @@ type HandlerDeps struct {
 	Pool               daemon.Pool
 	Hub                *realtime.Hub // may be nil
 	ExtAuthURL         string
+	FrontendDir        string
+	Build              string
 	BackendsHealthH    http.HandlerFunc // pre-built; nil disables endpoint
 	NotifyToken        string
 	DaemonSupervisor   http.HandlerFunc    // pre-built; nil = disabled
@@ -88,6 +91,7 @@ func BuildHandlers(deps HandlerDeps) *Handlers {
 		APIHealth:    apiHealth,
 		ClientErrors: misc.HandleClientErrors(clientErrLimiter),
 		AuthConfig:   misc.HandleAuthConfig(deps.ExtAuthURL, authCfgLimiter, deps.IssueBackendFn),
+		BuildInfo:    misc.HandleBuildInfo(deps.FrontendDir, deps.Build),
 		Metrics:      healthhandlers.HandleMetrics(deps.Hub, deps.FleetTimeoutsFn, deps.ClaimMetrics),
 		GetTerminalConfig: hterminal.HandleGetTerminalConfig(hterminal.TerminalLifecycleConfig{
 			GracePeriodMS: deps.TerminalGraceMS,
