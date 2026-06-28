@@ -198,6 +198,9 @@ func taskRunMatchesClaimMem(run *domain.TaskRun, profile *domain.WorkerProfile, 
 	if claim.TaskRunID != "" && run.TaskRunID != claim.TaskRunID {
 		return false
 	}
+	if run.NodeID != "" && run.NodeID != claim.NodeID {
+		return false
+	}
 	if run.WorkerProfileID != "" {
 		if !stringListEmptyOrContainsMem(claim.WorkerProfileIDs, run.WorkerProfileID) {
 			return false

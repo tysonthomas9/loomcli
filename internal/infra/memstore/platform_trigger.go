@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log/slog"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -718,20 +719,22 @@ func (s *triggerRouteStore) applyTriggerReplacePolicy(ctx context.Context, ws st
 	if len(queued) == 0 {
 		return domain.TriggerDeliveryDispatched
 	}
-	// Winner = newest queued run for the subject: created-at order, run-id
-	// tie-break (mirrors fleet-db's supersede pass).
+	// Winner = newest queued run for the subject by persisted trigger-event
+	// order. Dispatches can interleave around event creation, so run CreatedAt is
+	// not a reliable freshness signal.
 	winner := queued[0]
-	for _, run := range queued[1:] {
-		if run.CreatedAt.After(winner.CreatedAt) || (run.CreatedAt.Equal(winner.CreatedAt) && run.RunID > winner.RunID) {
-			winner = run
+	for _, candidate := range queued[1:] {
+		if triggerEventBefore(winner.event, candidate.event) {
+			winner = candidate
 		}
 	}
 	status := domain.TriggerDeliveryDispatched
-	for _, run := range queued {
-		if run.RunID == winner.RunID {
+	for _, candidate := range queued {
+		run := candidate.run
+		if run.RunID == winner.run.RunID {
 			continue
 		}
-		if !s.runs.cancelQueuedForSupersede(ws, run.RunID, "superseded by "+winner.RunID+" for "+subjectKey) {
+		if !s.runs.cancelQueuedForSupersede(ws, run.RunID, "superseded by "+winner.run.RunID+" for "+subjectKey) {
 			continue // claimed or removed between list and cancel — fine
 		}
 		s.markTriggerRunDeliveriesSuperseded(ctx, ws, run)
@@ -744,7 +747,12 @@ func (s *triggerRouteStore) applyTriggerReplacePolicy(ctx context.Context, ws st
 
 // queuedSubjectRuns resolves the still-queued runs dispatched for one
 // (binding, rendered subject key), via the deliveries that carry the key.
-func (s *triggerRouteStore) queuedSubjectRuns(ctx context.Context, ws, bindingID, subjectKey string) []*domain.DriverRun {
+type queuedSubjectRun struct {
+	run   *domain.DriverRun
+	event *domain.TriggerEvent
+}
+
+func (s *triggerRouteStore) queuedSubjectRuns(ctx context.Context, ws, bindingID, subjectKey string) []queuedSubjectRun {
 	dispatched, err := s.deliveries.List(ctx, ws, store.TriggerDeliveryFilter{
 		TriggerBindingID: bindingID,
 		Status:           domain.TriggerDeliveryDispatched,
@@ -753,7 +761,7 @@ func (s *triggerRouteStore) queuedSubjectRuns(ctx context.Context, ws, bindingID
 		return nil
 	}
 	seen := make(map[string]bool, len(dispatched))
-	queued := make([]*domain.DriverRun, 0, len(dispatched))
+	queued := make([]queuedSubjectRun, 0, len(dispatched))
 	for _, delivery := range dispatched {
 		if delivery.SubjectKey != subjectKey || delivery.DriverRunID == "" || seen[delivery.DriverRunID] {
 			continue
@@ -763,7 +771,11 @@ func (s *triggerRouteStore) queuedSubjectRuns(ctx context.Context, ws, bindingID
 		if err != nil || run.Status != domain.DriverRunQueued {
 			continue
 		}
-		queued = append(queued, run)
+		event, err := s.events.Get(ctx, ws, delivery.TriggerEventID)
+		if err != nil {
+			continue
+		}
+		queued = append(queued, queuedSubjectRun{run: run, event: event})
 	}
 	return queued
 }
@@ -790,6 +802,29 @@ func (s *triggerRouteStore) markTriggerRunDeliveriesSuperseded(ctx context.Conte
 			slog.Warn("supersede: delivery transition failed", "err", err, "delivery", delivery.DeliveryID, "run", lost.RunID)
 		}
 	}
+}
+
+func triggerEventBefore(a, b *domain.TriggerEvent) bool {
+	if a == nil || b == nil {
+		return false
+	}
+	if a.ReceivedAt.Before(b.ReceivedAt) {
+		return true
+	}
+	if b.ReceivedAt.Before(a.ReceivedAt) {
+		return false
+	}
+	aSeq, aOK := triggerEventSequence(a.EventID)
+	bSeq, bOK := triggerEventSequence(b.EventID)
+	if aOK && bOK && aSeq != bSeq {
+		return aSeq < bSeq
+	}
+	return a.EventID < b.EventID
+}
+
+func triggerEventSequence(id string) (int64, bool) {
+	seq, err := strconv.ParseInt(strings.TrimPrefix(id, "event-"), 10, 64)
+	return seq, err == nil
 }
 
 // triggerBindingRetryBackoff resolves the binding's retry backoff used for

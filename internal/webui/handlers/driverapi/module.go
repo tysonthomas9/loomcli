@@ -71,7 +71,7 @@ type Config struct {
 	// "Authorization: Bearer <token>". Requests authenticated by a valid
 	// run-scoped token (RunTokenKey) are exempt: workflow calls are
 	// token-only.
-	APIToken string
+	APIToken string //nolint:gosec // G117: driver API bearer token intentionally carried by handler config.
 	// RunTokenKey is the HS256 signing key for run-scoped driver tokens
 	// (internal/driver ParseRunToken). Nil disables the run-token auth path;
 	// the legacy header-quad transport is unaffected.
@@ -513,6 +513,8 @@ type execTaskParams struct {
 	Runner             string   `json:"runner"`
 	ProviderProfile    string   `json:"providerProfile"`
 	ParentSessionID    string   `json:"parentSessionId"`
+	NodeID             string   `json:"nodeId"`
+	TargetNodeID       string   `json:"targetNodeId"`
 	RunnerID           string   `json:"runnerId"`
 	LeaseToken         string   `json:"leaseToken"`
 	SupportedProviders []string `json:"supportedProviders"`
@@ -533,23 +535,25 @@ type execTaskParams struct {
 
 func (p execTaskParams) requestOptions(ws string, id driverIdentity, fencingToken int64) driverpkg.TaskRunRequestOptions {
 	opts := driverpkg.TaskRunRequestOptions{
-		WorkspaceKey:    ws,
-		DriverRunID:     id.RunID,
-		DriverStepID:    p.DriverStepID,
-		TaskRunID:       p.TaskRunID,
-		TaskID:          p.TaskID,
-		WorkerProfileID: p.WorkerProfileID,
-		Runner:          p.Runner,
-		ParentSessionID: p.ParentSessionID,
-		ParentNodeID:    id.NodeID,
-		ParentLeaseID:   id.LeaseID,
-		ParentFence:     fencingToken,
-		NodeID:          id.NodeID,
-		RunnerID:        p.RunnerID,
-		LeaseToken:      p.LeaseToken,
-		Capabilities:    p.Capabilities,
-		DeferCompletion: p.DeferCompletion,
-		Input:           p.Input,
+		WorkspaceKey:       ws,
+		DriverRunID:        id.RunID,
+		DriverStepID:       p.DriverStepID,
+		TaskRunID:          p.TaskRunID,
+		TaskID:             p.TaskID,
+		WorkerProfileID:    p.WorkerProfileID,
+		Runner:             p.Runner,
+		ProviderProfile:    p.ProviderProfile,
+		ParentSessionID:    p.ParentSessionID,
+		ParentNodeID:       id.NodeID,
+		ParentLeaseID:      id.LeaseID,
+		ParentFence:        fencingToken,
+		NodeID:             firstNonEmpty(p.NodeID, p.TargetNodeID),
+		RunnerID:           p.RunnerID,
+		LeaseToken:         p.LeaseToken,
+		SupportedProviders: p.SupportedProviders,
+		Capabilities:       p.Capabilities,
+		DeferCompletion:    p.DeferCompletion,
+		Input:              p.Input,
 		SandboxPlacement: domain.TaskRunPlacement{
 			Provider:  p.SandboxPlacement.Provider,
 			SandboxID: p.SandboxPlacement.SandboxID,

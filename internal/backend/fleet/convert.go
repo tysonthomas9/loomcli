@@ -27,9 +27,9 @@ type fleetIssueWire struct {
 	ParentID    string     `json:"parent_id,omitempty"`
 	Parent      string     `json:"parent,omitempty"`
 	Design      string     `json:"design,omitempty"`
+	Notes       string     `json:"notes,omitempty"`
 	Description string     `json:"description,omitempty"`
 	Acceptance  string     `json:"acceptance_criteria,omitempty"`
-	Notes       string     `json:"notes,omitempty"`
 	CreatedAt   time.Time  `json:"created_at,omitempty"`
 	CreatedBy   string     `json:"created_by,omitempty"`
 	UpdatedAt   time.Time  `json:"updated_at,omitempty"`
@@ -172,6 +172,7 @@ func issueToData(issue *types.Issue) backend.IssueData {
 		Labels:      labels,
 		SourceRepo:  issue.SourceRepo,
 		Design:      issue.Design,
+		Notes:       issue.Notes,
 		CreatedAt:   issue.CreatedAt,
 		UpdatedAt:   issue.UpdatedAt,
 		DueAt:       issue.DueAt,
