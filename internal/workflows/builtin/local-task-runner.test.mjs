@@ -972,7 +972,7 @@ describe("local-task-runner pull-request delivery gating", () => {
     process.env.LOOM_TASK_RUN_STACKED = "1";
     process.env.LOOM_TASK_RUN_STACK_ID = "epic:E";
     process.env.LOOM_TASK_RUN_OUTPUT_BRANCH = "loom/stack/epic:E/T-S";
-    process.env.LOOM_TASK_RUN_BASE_REF = "main";
+    process.env.LOOM_TASK_RUN_BASE_REF = execFileSync("git", ["-C", worktree, "rev-parse", "HEAD"]).toString().trim();
     process.env.LOOM_TASK_RUN_REQUEST_JSON = JSON.stringify({
       task_run_id: "tr-stack",
       task_id: "T-S",
@@ -999,7 +999,7 @@ describe("local-task-runner pull-request delivery gating", () => {
     delete process.env.GH_TOKEN;
     process.env.LOOM_TASK_RUN_STACKED = "1";
     process.env.LOOM_TASK_RUN_OUTPUT_BRANCH = "loom/stack/epic:E/T-S2";
-    process.env.LOOM_TASK_RUN_BASE_REF = "main";
+    process.env.LOOM_TASK_RUN_BASE_REF = execFileSync("git", ["-C", worktree, "rev-parse", "HEAD"]).toString().trim();
     process.env.LOOM_TASK_RUN_REQUEST_JSON = JSON.stringify({
       task_run_id: "tr-stack2",
       task_id: "T-S2",
