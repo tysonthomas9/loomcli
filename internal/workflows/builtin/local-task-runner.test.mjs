@@ -93,6 +93,10 @@ const ENV_KEYS = [
   "LOOM_FLEET_DB_URL",
   "GITHUB_TOKEN",
   "GH_TOKEN",
+  "LOOM_TASK_RUN_STACKED",
+  "LOOM_TASK_RUN_STACK_ID",
+  "LOOM_TASK_RUN_OUTPUT_BRANCH",
+  "LOOM_TASK_RUN_BASE_REF",
 ];
 
 // PATH is mutated by some tests; save/restore it separately so git stays callable.
@@ -759,4 +763,66 @@ describe("local-task-runner pull-request delivery gating", () => {
     // No changes => no top-level patch content, no PR url.
     assert.equal(out.runtimeMetadata.github_pr_url, undefined);
   });
+
+  it("stacked mode with no credential and changes fails closed (github_credentials_missing)", async () => {
+    const binDirNoGh = sanitizedBinDir();
+    process.env.LOOM_TASK_RUNNER_BACKEND = "codex";
+    process.env.LOOM_WORKTREE_PATH = worktree;
+    process.env.LOOM_CODEX_BIN = fakeBin;
+    process.env.FAKE_EXIT_CODE = "0";
+    process.env.FAKE_WRITE_FILE = "stack-change.txt";
+    delete process.env.GITHUB_TOKEN;
+    delete process.env.GH_TOKEN;
+    process.env.PATH = binDirNoGh;
+    // Stacked signal set by the host bridge.
+    process.env.LOOM_TASK_RUN_STACKED = "1";
+    process.env.LOOM_TASK_RUN_STACK_ID = "epic:E";
+    process.env.LOOM_TASK_RUN_OUTPUT_BRANCH = "loom/stack/epic:E/T-S";
+    process.env.LOOM_TASK_RUN_BASE_REF = "main";
+    process.env.LOOM_TASK_RUN_REQUEST_JSON = JSON.stringify({
+      task_run_id: "tr-stack",
+      task_id: "T-S",
+      runner: "local-task-runner",
+      workspace_key: "ws",
+      input: { title: "Stacked thing", stackedPullRequests: true, githubRepo: "owner/repo" },
+    });
+
+    const out = await run();
+    assert.equal(out.status, "failed");
+    assert.equal(out.errorClass, "github_credentials_missing");
+    assert.equal(out.exitCode, 1);
+  });
+
+  it("stacked mode with no changes records an empty unit (no branch pushed)", async () => {
+    // No FAKE_WRITE_FILE => filesChanged === 0 => the empty unit is recorded and
+    // no push/credential work happens. The host finalize barrier maps this to
+    // NodeState=empty (decision (a): the dependent slides past it).
+    process.env.LOOM_TASK_RUNNER_BACKEND = "codex";
+    process.env.LOOM_WORKTREE_PATH = worktree;
+    process.env.LOOM_CODEX_BIN = fakeBin;
+    process.env.FAKE_EXIT_CODE = "0";
+    delete process.env.GITHUB_TOKEN;
+    delete process.env.GH_TOKEN;
+    process.env.LOOM_TASK_RUN_STACKED = "1";
+    process.env.LOOM_TASK_RUN_OUTPUT_BRANCH = "loom/stack/epic:E/T-S2";
+    process.env.LOOM_TASK_RUN_BASE_REF = "main";
+    process.env.LOOM_TASK_RUN_REQUEST_JSON = JSON.stringify({
+      task_run_id: "tr-stack2",
+      task_id: "T-S2",
+      runner: "local-task-runner",
+      workspace_key: "ws",
+      input: { title: "Stacked empty", stackedPullRequests: true, githubRepo: "owner/repo" },
+    });
+
+    const out = await run();
+    assert.equal(out.status, "completed");
+    assert.equal(out.runtimeMetadata.delivery, "pull_request_skipped_no_changes");
+    // Stacked mode runs in place => no top-level patch (patch-back skipped).
+    assert.equal(out.patch, undefined);
+    assert.equal(out.runtimeMetadata.github_branch, undefined);
+  });
+  // The actual canonical-branch push (commit in place → push loom/stack/<stack>/<task>,
+  // no PR) is Stage 3's LIVE verify bar (2-task local epic → 2 branches on origin,
+  // B based on A) — it needs a real GitHub origin, so it is exercised via the
+  // aether-test-framework local-mode run, not a unit test.
 });

@@ -10,8 +10,12 @@ import (
 )
 
 // defaultStaleTaskRunMaxAge is how old a running TaskRun's heartbeat may be
-// before the sweeper fails it, when no MaxAge is configured.
-const defaultStaleTaskRunMaxAge = 5 * time.Minute
+// before the sweeper fails it, when no MaxAge is configured. Sized for the
+// longest legitimate task runs — a daytona sandbox provision + git clone +
+// agent run is routinely 10-15 minutes, and the old 5-minute default swept
+// live runs (observed: a real daytona run killed at 11.3m). Deployments that
+// only run fast local tasks can tighten this via LOOM_DRIVER_STALE_TASK_MAX_AGE.
+const defaultStaleTaskRunMaxAge = 20 * time.Minute
 
 const (
 	staleTaskRunErrorClass   = "stale_task_run"
@@ -29,7 +33,7 @@ type StaleTaskSweeper struct {
 	// workspace returned by Store.Workspaces().List.
 	WorkspaceKey string
 	// MaxAge is the heartbeat staleness threshold. Zero or negative falls
-	// back to defaultStaleTaskRunMaxAge (300s); override via the
+	// back to defaultStaleTaskRunMaxAge (1200s); override via the
 	// LOOM_DRIVER_STALE_TASK_MAX_AGE env knob wired in loom serve.
 	MaxAge time.Duration
 	// Now is a clock seam for tests; nil uses time.Now.

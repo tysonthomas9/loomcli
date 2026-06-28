@@ -15,6 +15,32 @@ When testing Loom runtime behavior, follow the runbook above. Do not manually
 create lock files, FleetDB state, sessions, transcripts, diffs, or other fake
 state as test evidence.
 
+## Generated Workflow Bundles
+
+Do not commit `internal/workflows/builtin-dist/` or other generated Flue bundle
+output. Build bundles locally when needed for verification, but keep generated
+artifacts out of git and change the workflow source under
+`internal/workflows/builtin/` instead.
+
+## Local Gate Environment
+
+When running `make gate` from a Loom desktop-launched shell, clear inherited
+desktop/runtime env before trusting local failures. Variables such as
+`LOOM_WORKSPACE`, `LOOM_WORKSPACE_RUNTIME_DIR`, `LOOM_CONFIG_DIR`,
+`LOOM_DESKTOP_DATA_DIR`, `LOOM_FRONTEND_DIR`, `LOOM_WEBUI_URL`,
+`LOOM_LOCAL_RUNTIME`, `LOOM_NOTIFY_TOKEN`, and agent/session vars can make tests
+resolve the real desktop workspace, frontend bundle, or notify token instead of
+their isolated fixtures. Re-run suspect failures with a clean env, for example:
+
+```sh
+tmphome=$(mktemp -d)
+env -u LOOM_WORKSPACE -u LOOM_WORKSPACE_RUNTIME_DIR \
+  -u LOOM_AGENT_NAME -u LOOM_AGENT_ROLE -u LOOM_AGENT_TERMINAL_ID \
+  -u LOOM_SESSION_ID -u LOOM_NOTIFY_TOKEN -u LOOM_CONFIG_DIR \
+  -u LOOM_DESKTOP_DATA_DIR -u LOOM_FRONTEND_DIR -u LOOM_WEBUI_URL \
+  -u LOOM_LOCAL_RUNTIME HOME="$tmphome" make gate
+```
+
 ## Driver Runtime Auth (loom-dev deploy notes)
 
 Workflow runtimes authenticate to the driver-op HTTP API with a run-scoped

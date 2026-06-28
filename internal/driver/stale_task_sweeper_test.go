@@ -104,13 +104,25 @@ func TestStaleTaskSweeperRunOnce(t *testing.T) {
 			wantTaskStatus:  domain.TaskRunRunning,
 		},
 		{
-			name:            "zero max age defaults to five minutes",
+			name:            "zero max age defaults to twenty minutes",
 			driverRunStatus: domain.DriverRunRunning,
-			heartbeatAge:    10 * time.Minute,
+			heartbeatAge:    25 * time.Minute,
 			maxAge:          0,
 			sweepWorkspace:  "WS",
 			wantRecovered:   1,
 			wantTaskStatus:  domain.TaskRunFailed,
+		},
+		{
+			// Regression: a long-but-live run (e.g. a daytona sandbox + agent run,
+			// observed at ~11-12m) must NOT be swept under the default threshold.
+			// The old 5-minute default killed exactly this; 20m spares it.
+			name:             "long live run within default threshold not swept",
+			driverRunStatus:  domain.DriverRunRunning,
+			heartbeatAge:     12 * time.Minute,
+			maxAge:           0,
+			sweepWorkspace:   "WS",
+			wantSkippedFresh: 1,
+			wantTaskStatus:   domain.TaskRunRunning,
 		},
 		{
 			name:            "empty workspace key sweeps all workspaces",

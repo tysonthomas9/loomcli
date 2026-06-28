@@ -375,7 +375,7 @@ func TestDaytonaTaskRunnerSourceContract(t *testing.T) {
 		`readRuntimeCredential(taskContext.client, "daytona")`,
 		`DAYTONA_REPO_URL`,
 		`client.create({`,
-		`clone --depth 1`,
+		`Full clone (NOT --depth 1)`,
 		`configureProvider("openai-codex"`,
 		`createFlueTranscriptCollector()`,
 		`transcript_entries: transcriptEntries`,

@@ -100,6 +100,7 @@ func runnerNeedsLocalPreflight(runner string) bool {
 	return r == "" || r == runtimepreflight.LocalTaskRunnerEntrypoint
 }
 
+//nolint:funlen // The command wires validation, queueing, optional projection, execution, and post-drain publish.
 func runEpicRun(cmd *cobra.Command, _ []string) error {
 	if err := validateEpicRunFlags(); err != nil {
 		return err
@@ -149,10 +150,40 @@ func runEpicRun(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 	fmt.Printf("[epic-run] queued workflow %s run %s for epic %s\n", workflowName, run.RunID, runParent)
+
+	// Stacked mode: project the epic's blocks DAG into the per-user stackstore
+	// so the worktree resolver cuts each task's worktree from its predecessor's
+	// branch. Fail-open — the lineage path is inert until populated, so a
+	// projection error only degrades to pre-stacking (default-branch) behavior.
+	var stackProj *EpicStackProjection
+	if runStackedPRs && !runDryRun {
+		if proj, perr := projectEpicStackForRun(ctx, handle, ws, runParent, run.RunID, runRepoURL, runBaseBranch); perr != nil {
+			fmt.Printf("[epic-run] WARN: stack projection skipped (tasks will base on the repo default branch): %v\n", perr)
+		} else {
+			stackProj = proj
+			fmt.Printf("[epic-run] projected stack %s on %s@%s: %d task(s) — %d chained, %d root(s) (%d fan-in, %d fan-out breaks); %d new\n",
+				proj.StackID, proj.RepoName, proj.RootBase, proj.Stats.Tasks, proj.Stats.LinearLinks, proj.Stats.Roots,
+				proj.Stats.FanInBreaks, proj.Stats.FanOutBreaks, len(proj.Created))
+		}
+	}
+
 	if runDetach && !runDryRun {
 		return nil
 	}
-	return executeWorkflowRun(ctx, handle.Store, ws, run.RunID)
+	if err := executeWorkflowRun(ctx, handle.Store, ws, run.RunID); err != nil {
+		return err
+	}
+
+	// Stage 4 post-drain reconcile: the epic drained successfully, so every task
+	// pushed its canonical branch. Publish the stack as stacked PRs (each PR's
+	// base = its predecessor's branch). Fail-open: the branches are on origin, so
+	// a reconcile error is a warning — re-runnable via `loom stack publish`.
+	if stackProj != nil {
+		if rerr := reconcileEpicStack(ctx, ws, stackProj); rerr != nil {
+			fmt.Printf("[epic-run] WARN: stack reconcile skipped (branches are pushed; run `loom stack publish %s`): %v\n", stackProj.StackID, rerr)
+		}
+	}
+	return nil
 }
 
 func queueEpicWorkflowRun(ctx context.Context, st store.Store, ws, workflowName string, payload json.RawMessage) (*domain.DriverRun, error) {

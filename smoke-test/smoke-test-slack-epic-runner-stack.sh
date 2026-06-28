@@ -691,8 +691,16 @@ main() {
   # works in-container). Inject it only when provided. NOTE: this places the key in
   # LOOM_DRIVER_TASK_RUNNER_CMD_JSON (visible via `podman inspect`) — acceptable for
   # a local e2e stack; a production deploy should source it from a mounted secret.
-  if [[ -n "$CURSOR_API_KEY" ]]; then
+  # Use the `:-` default so an unset key is empty (not an `unbound variable` error
+  # under `set -u`) — these credentials are optional and per-backend.
+  if [[ -n "${CURSOR_API_KEY:-}" ]]; then
     runner_env+=("CURSOR_API_KEY=${CURSOR_API_KEY}")
+  fi
+  # claude-code reads CLAUDE_CODE_OAUTH_TOKEN from its environment (a `claude setup-token`
+  # long-lived OAuth token). Inject it when provided so claude auth works without a
+  # refreshable ~/.claude/.credentials.json login token (mirrors CURSOR_API_KEY above).
+  if [[ -n "${CLAUDE_CODE_OAUTH_TOKEN:-}" ]]; then
+    runner_env+=("CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN}")
   fi
   runner_env+=(node /usr/local/bin/loom-task-runner-invoker.mjs)
 
@@ -716,6 +724,16 @@ main() {
     -v "${FLEET_DB_BIN}:/usr/local/bin/fleet-db:ro"
     -v "${TASK_RUNNER}:/usr/local/bin/loom-task-runner-invoker.mjs:ro"
   )
+
+  # Lead/terminal capabilities launch `loom --backend <X> lead` INSIDE serve, which reads serve's
+  # process env (via cli.FilteredEnv's allowlist) — NOT the task-runner runner_env. Forward the
+  # harness backends' creds onto serve's env so a containerized lead can authenticate cursor and pin
+  # the opencode model. CURSOR_API_KEY is already lead-allowlisted; LOOM_OPENCODE_MODEL rides the
+  # LOOM_ prefix; CLAUDE_CODE_OAUTH_TOKEN is now lead-allowlisted and buildClaudeEnv sets IS_SANDBOX,
+  # so a containerized claude lead authenticates from the setup-token.
+  [[ -n "${CURSOR_API_KEY:-}" ]] && podman_args+=(-e "CURSOR_API_KEY=${CURSOR_API_KEY}")
+  [[ -n "${LOOM_OPENCODE_MODEL:-}" ]] && podman_args+=(-e "LOOM_OPENCODE_MODEL=${LOOM_OPENCODE_MODEL}")
+  [[ -n "${CLAUDE_CODE_OAUTH_TOKEN:-}" ]] && podman_args+=(-e "CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN}")
 
   # Standalone fleet-db: put serve (and the inherited `loom` execs) into CLOUD mode against the
   # external fleet-db, and join the harness network so the in-container client can resolve it by name.

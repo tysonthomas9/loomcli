@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"path/filepath"
 	"strconv"
@@ -132,6 +133,9 @@ func (m *Module) createWorkflowRun(w http.ResponseWriter, r *http.Request) {
 	name := strings.TrimSpace(r.PathValue("name"))
 	driverID, err := m.resolveWorkflowDriverID(r.Context(), ws, name)
 	if err != nil {
+		// Surface the real cause: writeDomainError collapses any non-ErrNotFound error into a
+		// generic 500 "workflow not found", which hides builtin self-heal failures (EnsureBuiltinWorkflow).
+		slog.Error("createWorkflowRun: resolveWorkflowDriverID failed", "ws", ws, "workflow", name, "err", err.Error())
 		writeDomainError(w, err, "workflow not found")
 		return
 	}

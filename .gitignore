@@ -19,6 +19,7 @@ internal/webui/frontend/test-results/
 internal/webui/frontend/coverage/
 desktop/node_modules/
 desktop/dist/
+desktop/dist-release/
 desktop/src-tauri/target/
 desktop/src-tauri/binaries/
 desktop/src-tauri/resources/webui/

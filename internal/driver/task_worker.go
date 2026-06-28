@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"strings"
 	"time"
@@ -89,7 +90,8 @@ func (w *TaskWorker) runOnceInWorkspace(ctx context.Context, ws, workDir string)
 			WorktreePath:     workDir,
 			APIBaseURL:       w.APIBaseURL,
 			LocalSettingsDir: w.LocalSettingsDir,
-			WorktreeResolver: firstNonNilTaskWorktreeResolver(w.WorktreeResolver, LocalTaskWorktreeResolver{Store: w.Store}),
+			WorktreeResolver: firstNonNilTaskWorktreeResolver(w.WorktreeResolver, LocalTaskWorktreeResolver{Store: w.Store, Lineage: DefaultStackLineageLookup()}),
+			StackStore:       DefaultStackStore(),
 		}
 	}
 	outcome, err := ClaimAndExecuteTaskRunWithResult(ctx, w.Store, TaskRunWorkerOptions{
@@ -259,13 +261,22 @@ func heartbeatTaskRun(ctx context.Context, s store.Store, run *domain.TaskRun, l
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			_, _ = s.TaskRuns().Heartbeat(ctx, run.WorkspaceKey, run.TaskRunID, store.TaskRunHeartbeat{
+			// Log (don't swallow) heartbeat failures: a silently-dropped heartbeat
+			// stops LastHeartbeat from advancing, so the stale-task sweeper can kill
+			// a live run with no trace of why. A failed heartbeat does NOT cancel the
+			// run — execution continues; the staleness threshold
+			// (LOOM_DRIVER_STALE_TASK_MAX_AGE) must be large enough to tolerate a
+			// transient store gap.
+			if _, err := s.TaskRuns().Heartbeat(ctx, run.WorkspaceKey, run.TaskRunID, store.TaskRunHeartbeat{
 				NodeID:          run.NodeID,
 				LeaseID:         run.LeaseID,
 				LeaseToken:      leaseToken,
 				FencingToken:    run.FencingToken,
 				RuntimeMetadata: cloneStringMap(metadata),
-			})
+			}); err != nil && ctx.Err() == nil {
+				slog.WarnContext(ctx, "task run heartbeat failed; run may be swept as stale",
+					"task_run_id", run.TaskRunID, "workspace", run.WorkspaceKey, "err", err)
+			}
 		}
 	}
 }

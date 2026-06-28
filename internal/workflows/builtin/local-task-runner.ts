@@ -72,9 +72,23 @@ export async function run(ctx = {}) {
   // host worktree in place would make patch-back re-apply changes that already
   // exist (conflict). When the host worktree is not a git repo / has no HEAD,
   // fall back to in-place execution with no base_ref (patch-back not possible).
-  const isolated = await setupIsolatedWorktree(worktree, taskRunId, logs);
+  // Stacked mode (the host bridge sets LOOM_TASK_RUN_STACKED when the task
+  // belongs to a stack): the host worktree is ALREADY a per-task checkout cut
+  // from the predecessor's branch, so the agent runs IN PLACE (no isolated
+  // double-wrap), commits there, and pushes the canonical output branch. The
+  // post-drain reconcile opens/links the PR with the right base — the runner
+  // does not open an independent loom/<taskid> PR.
+  const stacked = booleanValue(process.env.LOOM_TASK_RUN_STACKED);
+  const stackBranch = stringValue(process.env.LOOM_TASK_RUN_OUTPUT_BRANCH);
+  const stackBaseRef = stringValue(process.env.LOOM_TASK_RUN_BASE_REF);
+  const stackId = stringValue(process.env.LOOM_TASK_RUN_STACK_ID);
+
+  const isolated = stacked ? null : await setupIsolatedWorktree(worktree, taskRunId, logs);
   const execWorktree = isolated ? isolated.path : worktree;
-  const baseRef = isolated ? isolated.base : "";
+  const baseRef = stacked ? stackBaseRef : (isolated ? isolated.base : "");
+  if (stacked) {
+    logs.push("stacked mode: running in place at " + worktree + " (base " + (stackBaseRef || "?") + "), pushing " + (stackBranch || "?"));
+  }
 
   const task = await loadTask(request, logs);
   const prompt = buildPrompt(request, task, execWorktree);
@@ -87,6 +101,7 @@ export async function run(ctx = {}) {
   let stderr = "";
   let patchInfo;
   let prInfo = null;
+  let stackInfo = null;
   let prFailure = null;
   try {
     let result;
@@ -119,10 +134,31 @@ export async function run(ctx = {}) {
 
     patchInfo = await capturePatch(execWorktree);
 
-    // Opt-in PR delivery: push the isolated worktree's changes as a PR instead
-    // of returning a patch for host-bridge patch-back. Runs before cleanup so
-    // it can commit/push from the isolated worktree.
-    if (openPR && exitCode === 0) {
+    // Stacked delivery: commit in place and push the canonical branch on the
+    // predecessor base. No PR is opened here — the post-drain reconcile does it.
+    if (stacked && exitCode === 0) {
+      if (patchInfo.filesChanged === 0) {
+        logs.push("stacked: the agent produced no changes; no branch pushed (empty unit)");
+      } else {
+        const token = await resolveGitHubToken();
+        const slug = token ? await resolveRepoSlug(worktree, request) : null;
+        if (!token) {
+          prFailure = { class: "github_credentials_missing", message: "stackedPullRequests requires a GitHub credential (GITHUB_TOKEN/GH_TOKEN, or a local `gh auth login`)" };
+        } else if (!slug) {
+          prFailure = { class: "github_repo_unresolved", message: "stackedPullRequests requires a GitHub repo (githubRepo/repoUrl input or an origin remote)" };
+        } else if (!stackBranch) {
+          prFailure = { class: "stack_branch_missing", message: "stacked mode requires LOOM_TASK_RUN_OUTPUT_BRANCH (the canonical branch to push)" };
+        } else {
+          const title = stringValue((task && (task.title || task.name)) || ("Loom task " + (taskId || taskRunId)));
+          try {
+            stackInfo = await deliverStackBranch({ worktreePath: execWorktree, token, owner: slug.owner, repo: slug.repo, branch: stackBranch, title });
+            logs.push("pushed stack branch " + stackInfo.branch + " @ " + stackInfo.head.slice(0, 12));
+          } catch (error) {
+            prFailure = { class: "stack_push_failed", message: "failed to push stack branch: " + errorMessage(error) };
+          }
+        }
+      }
+    } else if (openPR && exitCode === 0) {
       if (!isolated) {
         prFailure = { class: "github_repo_unresolved", message: "openPullRequest requires a git worktree (no isolated worktree was created)" };
       } else if (patchInfo.filesChanged === 0) {
@@ -195,12 +231,21 @@ export async function run(ctx = {}) {
     metadata.stream_error = streamFailure;
   }
 
-  if (prInfo) {
+  if (stackInfo) {
+    // Stacked: the pushed canonical branch IS the delivery; the reconcile opens
+    // the PR. github_branch + sha drive the host finalize barrier (published).
+    metadata.delivery = "stack_branch";
+    metadata.github_branch = stackInfo.branch;
+    metadata.github_head_sha = stackInfo.head;
+    if (stackId) {
+      metadata.stack_id = stackId;
+    }
+  } else if (prInfo) {
     metadata.delivery = "pull_request";
     metadata.github_pr_url = prInfo.url;
     metadata.github_pr_number = String(prInfo.number);
     metadata.github_branch = prInfo.branch;
-  } else if (openPR) {
+  } else if (openPR || stacked) {
     metadata.delivery = "pull_request_skipped_no_changes";
   } else {
     metadata.delivery = "patch_back";
@@ -236,9 +281,10 @@ export async function run(ctx = {}) {
     transcript_entries: transcriptEntries,
     runtimeMetadata: metadata,
   };
-  if (prInfo) {
-    // PR mode: the pull request IS the delivery — return no top-level patch so
-    // the driver host-bridge skips patch-back.
+  if (prInfo || stackInfo || stacked) {
+    // PR / stacked mode: the pull request or pushed branch IS the delivery (and
+    // stacked mode runs in place, so there is nothing to patch-back) — return no
+    // top-level patch so the driver host-bridge skips patch-back.
     return completed;
   }
   completed.patch = patchInfo.patch;
@@ -368,7 +414,10 @@ async function execBackend(binary, args, options) {
       args,
       {
         cwd: options.cwd,
-        env: options.env || process.env,
+        // IS_SANDBOX=1: the local task runner always executes backend CLIs as root inside loom's
+        // isolated task-run container. claude-code refuses `--dangerously-skip-permissions` under
+        // root unless this sandbox signal is set; harmless for the other backends (codex/cursor/etc).
+        env: { ...(options.env || process.env), IS_SANDBOX: "1" },
         maxBuffer: 64 * 1024 * 1024,
         timeout: numberValue(process.env.LOOM_LOCAL_TASK_TIMEOUT_MS, 30 * 60 * 1000),
       },
@@ -630,6 +679,44 @@ async function deliverPullRequest({ isolatedPath, token, owner, repo, base, bran
     }
   }
   throw new Error("PR create failed (" + created.status + "): " + textTail(created.text, 400));
+}
+
+// deliverStackBranch commits the in-place (per-task) worktree's changes and
+// pushes them to the canonical stack branch — WITHOUT opening a PR. The worktree
+// is already a detached checkout on the predecessor's branch (the host resolver
+// cut it there), so the commit lands directly on top of the predecessor and the
+// pushed branch's base == the predecessor branch by construction. The post-drain
+// reconcile opens/links the PR and sets bases. Returns { branch, head }.
+async function deliverStackBranch({ worktreePath, token, owner, repo, branch, title }) {
+  const git = async (...args) => {
+    const r = await execBackend("git", ["-C", worktreePath, ...args], { cwd: worktreePath });
+    if (r.code !== 0) {
+      throw new Error("git " + args[0] + " failed: " + textTail(r.stderr || r.stdout, 400));
+    }
+    return r;
+  };
+  await git("add", "-A");
+  await git("-c", "user.email=loom@example.test", "-c", "user.name=Loom", "commit", "-m", title);
+  const head = stringValue((await git("rev-parse", "HEAD")).stdout).trim();
+  // Push token via an env-backed credential helper (never in argv), token-free
+  // remote URL — same hardening as deliverPullRequest. Each task owns its
+  // canonical branch, so --force is safe (only this task pushes loom/stack/.../<task>).
+  const pushRes = await execBackend(
+    "git",
+    [
+      "-C", worktreePath,
+      "-c", "credential.helper=",
+      "-c", 'credential.helper=!f() { echo username=x-access-token; echo "password=$LOOM_PR_GIT_PASSWORD"; }; f',
+      "push", "--force",
+      "https://github.com/" + owner + "/" + repo + ".git",
+      "HEAD:refs/heads/" + branch,
+    ],
+    { cwd: worktreePath, env: { ...process.env, LOOM_PR_GIT_PASSWORD: token, GIT_TERMINAL_PROMPT: "0" } },
+  );
+  if (pushRes.code !== 0) {
+    throw new Error("git push failed: " + scrubToken(textTail(pushRes.stderr || pushRes.stdout, 400), token));
+  }
+  return { branch, head };
 }
 
 async function gitHead(worktree) {

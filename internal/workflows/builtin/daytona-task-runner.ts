@@ -557,9 +557,15 @@ function readRuntimeCredentialFile(provider) {
   return fs.readFileSync(filePath, "utf8").trim();
 }
 
-function deliveryPlan(request, task, taskRunId) {
+export function deliveryPlan(request, task, taskRunId) {
   const mode = taskMode(request);
-  const openPullRequest = mode === "slack-pr-chain" || booleanValue(inputValue(request, "openPullRequest"));
+  // Lineage carrier injected by the host bridge for a stacked epic task: the
+  // canonical output branch + the predecessor base ref, computed from the host
+  // stack store (which the sandbox cannot read). When present it is authoritative
+  // — the daytona runner pushes the exact same canonical branch the local runner
+  // and the publisher use, so the topology matches across runtimes.
+  const lineage = lineageCarrier(request);
+  const openPullRequest = !!lineage || mode === "slack-pr-chain" || booleanValue(inputValue(request, "openPullRequest"));
   const configuredBase = stringValue(
     inputValue(request, "baseBranch") ||
       inputValue(request, "targetBranch"),
@@ -567,15 +573,19 @@ function deliveryPlan(request, task, taskRunId) {
   const rootBaseBranch = openPullRequest ? (configuredBase || "main") : configuredBase;
   const taskId = stringValue(request.task_id || request.taskId || task && task.id || "task");
   const driverRunId = stringValue(request.driver_run_id || request.driverRunId || inputValue(request, "driverRunId") || taskRunId);
-  const branch = taskBranchName(driverRunId, taskId);
-  const stacked = openPullRequest && booleanValue(defaultValue(inputValue(request, "stackedPullRequests"), mode === "slack-pr-chain" ? "1" : "0"));
+  const stacked = lineage
+    ? true
+    : openPullRequest && booleanValue(defaultValue(inputValue(request, "stackedPullRequests"), mode === "slack-pr-chain" ? "1" : "0"));
   const dependencyIds = blockingDependencyIds(task);
   const baseTaskId = stringValue(inputValue(request, "prBaseTaskId") || inputValue(request, "baseTaskId")) ||
     (dependencyIds.length === 1 ? dependencyIds[0] : "") ||
     (mode === "slack-pr-chain" ? previousSequentialTaskId(taskId) : "");
-  const baseBranch = stacked && baseTaskId
-    ? taskBranchName(driverRunId, baseTaskId)
-    : rootBaseBranch;
+  const branch = lineage && lineage.outputBranch
+    ? lineage.outputBranch
+    : taskBranchName(driverRunId, taskId);
+  const baseBranch = lineage && lineage.baseRef
+    ? lineage.baseRef
+    : (stacked && baseTaskId ? taskBranchName(driverRunId, baseTaskId) : rootBaseBranch);
   return {
     mode,
     openPullRequest,
@@ -585,7 +595,23 @@ function deliveryPlan(request, task, taskRunId) {
     stacked,
     dependencyIds,
     baseTaskId,
+    stackId: lineage ? stringValue(lineage.stackId) : "",
   };
+}
+
+// lineageCarrier returns the host-injected stack lineage for this task, or null
+// when the task is not stacked. Shaped by internal/driver TaskLineage:
+// { stackId, baseRef, outputBranch }.
+function lineageCarrier(request) {
+  const raw = inputValue(request, "lineage");
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    return null;
+  }
+  const outputBranch = stringValue(raw.outputBranch);
+  if (!outputBranch) {
+    return null;
+  }
+  return { stackId: stringValue(raw.stackId), baseRef: stringValue(raw.baseRef), outputBranch };
 }
 
 function taskMode(request) {
@@ -878,10 +904,13 @@ function parseGitHubRepo(repoUrl) {
   return { owner: match[1], repo: match[2] };
 }
 
-function cloneCommand(repoUrl, repoDir, branch, githubToken) {
+export function cloneCommand(repoUrl, repoDir, branch, githubToken) {
+  // Full clone (NOT --depth 1): a stacked task bases on its predecessor's branch,
+  // and the PR diff + the post-drain reconcile's merge-base checks need the real
+  // base SHA and history, which a shallow tip does not provide.
   const parts = [
     "rm -rf " + shellQuote(repoDir),
-    gitWithGitHubAuth(githubToken) + " clone --depth 1" +
+    gitWithGitHubAuth(githubToken) + " clone" +
       (branch ? " --branch " + shellQuote(branch) : "") +
       " " + shellQuote(repoUrl) + " " + shellQuote(repoDir),
   ];

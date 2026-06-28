@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"os"
 	"os/exec"
 	"strings"
@@ -13,6 +14,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	runtimesettings "github.com/tysonthomas9/loomcli/internal/localsettings"
 	"github.com/tysonthomas9/loomcli/internal/sessions/transcript"
+	"github.com/tysonthomas9/loomcli/internal/stackstore"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
@@ -59,6 +61,23 @@ type HostBridgeTaskExecutor struct {
 	// WorktreeResolver maps bundled local task runs onto isolated per-run git
 	// worktrees. When nil, WorktreePath is used as supplied by the caller.
 	WorktreeResolver TaskWorktreeResolver
+	// StackStore is the finalize-barrier seam: after a stacked task completes
+	// (branch pushed, result reported) the executor records the task's stack node
+	// state/SHA here BEFORE returning — i.e. before the worker closes the task and
+	// unblocks successors — so a dependent's resolver reads a durable node. When
+	// nil (the pre-stacking sites and all tests), the barrier is inert.
+	StackStore stackstore.Store
+	// stackBinding is computed once per ExecuteTask after the worktree resolves:
+	// the task's stack id, canonical output branch, and base ref. When set, it is
+	// exported to a stacked runner so it pushes the canonical branch on the
+	// predecessor base. nil = the task is not stacked (runner keeps its old path).
+	stackBinding *TaskLineage
+	// driverBundleBaseDir retains the workspace driver base (the WorktreePath as
+	// supplied before WorktreeResolver swaps it for a per-run target-repo worktree).
+	// Runner bundles are staged at registration under <base>/.loom/drivers/<version>,
+	// which the per-run git worktree does NOT contain — so taskRunnerBundleEnv must
+	// resolve the bundle against this base, not the reassigned worktree.
+	driverBundleBaseDir string
 }
 
 type bridgeTaskRunnerResult struct {
@@ -179,7 +198,7 @@ func (e HostBridgeTaskExecutor) PreflightTaskProvider(ctx context.Context, opts 
 	return resolveTaskProviderProfile(opts, true)
 }
 
-//nolint:funlen // ExecuteTask owns the bridge lifecycle so deferred session finalization keeps one error/result scope.
+//nolint:cyclop,funlen,gocognit // ExecuteTask owns the bridge lifecycle so deferred session finalization keeps one error/result scope.
 func (e HostBridgeTaskExecutor) ExecuteTask(ctx context.Context, req TaskExecRequest) (result TaskExecResult, err error) {
 	if taskProviderIsNoop(req.ProviderProfile) {
 		return LocalTaskExecutor{}.ExecuteTask(ctx, req)
@@ -190,6 +209,34 @@ func (e HostBridgeTaskExecutor) ExecuteTask(ctx context.Context, req TaskExecReq
 	resolvedWorktree, worktreeFailure, failed := e.resolveLocalTaskWorktree(ctx, req)
 	if failed {
 		return worktreeFailure, nil
+	}
+	// Stacked task? Compute the binding (canonical output branch + base ref) once.
+	// Local runs resolve the repo from the host worktree; daytona/named runs (no
+	// host worktree) resolve it from the task's repo selectors. When set, the
+	// binding is exported as runner env (local) AND injected into the request
+	// Input (so a daytona sandbox, which has no host stack store, still receives
+	// the canonical branch + base ref). nil => not stacked => runner's old path.
+	if e.StackStore != nil {
+		repoName := strings.TrimSpace(resolvedWorktree.RepoName)
+		if repoName == "" {
+			repoName = e.resolveStackRepoName(ctx, req)
+		}
+		if repoName != "" {
+			if binding, ok, berr := stackBindingForTask(ctx, e.StackStore, req.WorkspaceKey, repoName, req.TaskID); berr != nil {
+				slog.WarnContext(ctx, "stack binding lookup failed; runner keeps non-stacked behavior", "task", req.TaskID, "repo", repoName, "err", berr)
+			} else if ok {
+				e.stackBinding = &binding
+				if injected, ierr := WithLineage(req.Input, binding); ierr == nil {
+					req.Input = injected
+				}
+			}
+		}
+	}
+	// Finalize barrier: when this is a stacked task, record its node state in the
+	// stack store as ExecuteTask returns — the worker closes the task (unblocking
+	// successors) only afterwards, so a dependent's resolver reads a durable node.
+	if e.StackStore != nil {
+		defer func() { e.finalizeStackNode(ctx, req, resolvedWorktree, result, err) }()
 	}
 	runBridge, err := e.bridgeRunner(ctx, req)
 	if err != nil {
@@ -634,6 +681,16 @@ func (e HostBridgeTaskExecutor) taskRunnerEnv(req TaskExecRequest, requestJSON s
 	if apiBaseURL := strings.TrimSpace(e.APIBaseURL); apiBaseURL != "" {
 		env = append(env, "LOOM_TASK_RUN_API_URL="+apiBaseURL)
 	}
+	// Stacked task: tell the runner to push the canonical branch on the
+	// predecessor base instead of opening an independent loom/<taskid> PR.
+	if e.stackBinding != nil {
+		env = append(env,
+			"LOOM_TASK_RUN_STACKED=1",
+			"LOOM_TASK_RUN_STACK_ID="+e.stackBinding.StackID,
+			"LOOM_TASK_RUN_OUTPUT_BRANCH="+e.stackBinding.OutputBranch,
+			"LOOM_TASK_RUN_BASE_REF="+e.stackBinding.BaseRef,
+		)
+	}
 	env = append(env, e.taskRunnerBundleEnv(req)...)
 	if isLocalTaskRunner(req) {
 		env = append(env, TaskRunnerBackendEnv+"="+e.resolveTaskRunnerBackend(req))
@@ -709,7 +766,7 @@ func (e HostBridgeTaskExecutor) resolveTaskRunnerBackend(req TaskExecRequest) st
 }
 
 func (e HostBridgeTaskExecutor) taskRunnerBundleEnv(req TaskExecRequest) []string {
-	if e.Store == nil || strings.TrimSpace(e.WorktreePath) == "" || strings.TrimSpace(req.RunnerVersionID) == "" {
+	if e.Store == nil || strings.TrimSpace(req.RunnerVersionID) == "" {
 		return nil
 	}
 	ctx := context.Background()
@@ -717,23 +774,35 @@ func (e HostBridgeTaskExecutor) taskRunnerBundleEnv(req TaskExecRequest) []strin
 	if err != nil || version.BundleRef == "" {
 		return nil
 	}
-	bundleRoot, err := safeBundleRoot(e.WorktreePath, version.BundleRef)
-	if err != nil {
-		return nil
+	// The bundle is staged at registration under <driver-base>/.loom/drivers/<version>. Try the
+	// current WorktreePath first (covers callers that stage the bundle into the worktree, incl. the
+	// productionize_runner tests), then fall back to the retained driver base — necessary once
+	// WorktreeResolver has swapped WorktreePath for a per-run target-repo worktree (which lacks the
+	// bundle). Without this fall-back every bundled local-task-runner fails with
+	// task_runner_invoker_failed: "flue-workflow runner requires LOOM_TASK_RUNNER_SERVER_PATH".
+	for _, base := range []string{strings.TrimSpace(e.WorktreePath), strings.TrimSpace(e.driverBundleBaseDir)} {
+		if base == "" {
+			continue
+		}
+		bundleRoot, err := safeBundleRoot(base, version.BundleRef)
+		if err != nil {
+			continue
+		}
+		manifest, serverPath, err := verifyBundleManifest(bundleRoot, version.BundleDigest)
+		if err != nil {
+			continue
+		}
+		encoded, err := json.Marshal(manifest)
+		if err != nil {
+			continue
+		}
+		return []string{
+			"LOOM_TASK_RUNNER_BUNDLE_ROOT=" + bundleRoot,
+			"LOOM_TASK_RUNNER_SERVER_PATH=" + serverPath,
+			"LOOM_TASK_RUNNER_MANIFEST_JSON=" + string(encoded),
+		}
 	}
-	manifest, serverPath, err := verifyBundleManifest(bundleRoot, version.BundleDigest)
-	if err != nil {
-		return nil
-	}
-	encoded, err := json.Marshal(manifest)
-	if err != nil {
-		return nil
-	}
-	return []string{
-		"LOOM_TASK_RUNNER_BUNDLE_ROOT=" + bundleRoot,
-		"LOOM_TASK_RUNNER_SERVER_PATH=" + serverPath,
-		"LOOM_TASK_RUNNER_MANIFEST_JSON=" + string(encoded),
-	}
+	return nil
 }
 
 func taskRunPlacementJSON(placement domain.TaskRunPlacement) string {
