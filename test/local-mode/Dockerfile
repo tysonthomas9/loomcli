@@ -8,6 +8,8 @@
 ARG GO_VERSION=1.25.6
 ARG INSTALL_CODEX=false
 ARG CODEX_CLI_VERSION=0.128.0
+ARG INSTALL_CLAUDE=false
+ARG CLAUDE_CLI_VERSION=latest
 
 FROM golang:${GO_VERSION}-bookworm AS builder
 WORKDIR /src
@@ -23,11 +25,22 @@ RUN --mount=type=cache,target=/go/pkg/mod \
 FROM debian:bookworm-slim
 ARG INSTALL_CODEX=false
 ARG CODEX_CLI_VERSION=0.128.0
+ARG INSTALL_CLAUDE=false
+ARG CLAUDE_CLI_VERSION=latest
+# Node 24 (via NodeSource) is installed when any Node-based backend CLI is
+# requested. The bundled TS leaf imports node:sqlite (flue durability), so the
+# image needs Node >=22 regardless of which backend runs.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        bash ca-certificates git jq lsof make ripgrep tmux wget \
+        bash ca-certificates curl git jq lsof make ripgrep tmux wget \
+    && if [ "$INSTALL_CODEX" = "true" ] || [ "$INSTALL_CLAUDE" = "true" ]; then \
+        curl -fsSL https://deb.nodesource.com/setup_24.x | bash - \
+        && apt-get install -y --no-install-recommends nodejs; \
+    fi \
     && if [ "$INSTALL_CODEX" = "true" ]; then \
-        apt-get install -y --no-install-recommends nodejs npm \
-        && npm install -g "@openai/codex@${CODEX_CLI_VERSION}"; \
+        npm install -g "@openai/codex@${CODEX_CLI_VERSION}"; \
+    fi \
+    && if [ "$INSTALL_CLAUDE" = "true" ]; then \
+        npm install -g "@anthropic-ai/claude-code@${CLAUDE_CLI_VERSION}"; \
     fi \
     && rm -rf /var/lib/apt/lists/*
 ENV SHELL=/bin/bash

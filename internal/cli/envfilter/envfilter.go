@@ -34,7 +34,7 @@ var envAllowlistExact = map[string]bool{
 	// inherit it (mirrors trustedLocalProviderCredentials on the task-runner path).
 	"CLAUDE_CODE_OAUTH_TOKEN": true,
 	// Git hosting tokens (needed by container agents for git push)
-	"GITHUB_TOKEN": true,
+	"GITHUB_TOKEN": true, "GITHUB_TOKEN_FILE": true,
 	// E2E test stubs. Exact matches keep arbitrary STUB_* values out.
 	"STUB_CODEX_EPIC_RUNNER": true, "STUB_CODEX_INVOCATIONS": true,
 	// Editor
@@ -64,6 +64,12 @@ var envBlocklistExact = map[string]bool{
 	"GIT_CONFIG_GLOBAL": true,
 	"GIT_CONFIG_SYSTEM": true,
 	"GIT_CONFIG_COUNT":  true, // env-based config injection (Git 2.31+)
+	// Daytona: the DAYTONA_ prefix is allowlisted (daemon-leaf config), but the
+	// API key must never flow as a raw env secret (it travels via
+	// DAYTONA_CREDENTIAL_FILE / the runtime-credential API), and the SDK import
+	// path is a dynamic import() target — a code-execution vector.
+	"DAYTONA_API_KEY":    true,
+	"DAYTONA_SDK_IMPORT": true,
 }
 
 // envBlocklistPrefixes contains prefixes that are NEVER passed to
@@ -78,6 +84,9 @@ var envBlocklistPrefixes = []string{
 // that are allowed to be passed to spawned agent subprocesses.
 var envAllowlistPrefixes = []string{
 	"LOOM_",
+	// Daytona daemon-leaf config (LOOM_DAEMON_LEAF_RUNNER=daytona-task-runner).
+	// DAYTONA_API_KEY + DAYTONA_SDK_IMPORT are blocklisted above (precedence).
+	"DAYTONA_",
 }
 
 // FilteredEnv returns os.Environ() filtered through the allowlist.

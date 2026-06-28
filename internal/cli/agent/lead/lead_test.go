@@ -1,4 +1,4 @@
-package agent
+package lead
 
 import (
 	"bytes"
@@ -9,11 +9,49 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/tysonthomas9/loomcli/internal/cli"
+	"github.com/tysonthomas9/loomcli/internal/cli/agent"
+	"github.com/tysonthomas9/loomcli/internal/cli/clitest"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/epicrunner"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	"github.com/tysonthomas9/loomcli/internal/store"
+	"github.com/tysonthomas9/loomcli/internal/usage"
 )
+
+// mockBackend is a minimal cli.Backend for the registry path that runLead falls
+// back to when LOOM_LEAD_CONTROLLED=0. Self-contained here because the agent
+// package's equivalent test helper is test-only and not importable.
+type mockBackend struct {
+	name             string
+	interactiveCalls []struct {
+		workDir, prompt, agentName string
+	}
+	interactiveErr error
+}
+
+func (m *mockBackend) Name() string { return m.name }
+func (m *mockBackend) InvokeInteractive(workDir, prompt, agentName string) error {
+	m.interactiveCalls = append(m.interactiveCalls, struct {
+		workDir, prompt, agentName string
+	}{workDir, prompt, agentName})
+	return m.interactiveErr
+}
+func (m *mockBackend) InvokeNonInteractive(_, _, _ string, _ <-chan struct{}, _ *usage.Collector) error {
+	return nil
+}
+
+// setupMockClaudeInvoker swaps the default deps' AgentInvoker for a clitest
+// recorder (mirrors the agent package's test helper for the controlled path).
+func setupMockClaudeInvoker(t *testing.T, returnErr error) *clitest.MockAgentInvoker {
+	t.Helper()
+	recorder := &clitest.MockAgentInvoker{InteractiveErr: returnErr}
+	dd := cli.TestingGetDefaultDeps()
+	orig := dd.Agent
+	dd.Agent = recorder
+	t.Cleanup(func() { dd.Agent = orig })
+	return recorder
+}
 
 func TestRunLead_InvokesClaude(t *testing.T) {
 	// Disable the controlled (harness-wrapper) lead runtime so runLead falls
@@ -29,10 +67,10 @@ func TestRunLead_InvokesClaude(t *testing.T) {
 	t.Cleanup(func() { os.Chdir(origDir) })
 
 	// Reset backend registry and install a mock backend that records calls.
-	resetBackendState(t)
+	cli.TestingResetBackendState(t)
 	mock := &mockBackend{name: "claude"}
-	RegisterBackend(mock)
-	_ = SetBackend("claude")
+	cli.RegisterBackend(mock)
+	_ = cli.SetBackend("claude")
 
 	// Capture stdout to suppress banner output
 	oldStdout := os.Stdout
@@ -63,7 +101,7 @@ func TestRunLead_InvokesClaude(t *testing.T) {
 		t.Errorf("expected workDir %q, got %q", tmpDir, inv.workDir)
 	}
 	// Prompt should be the lead prompt
-	leadPrompt := GenerateLeadPrompt()
+	leadPrompt := agent.GenerateLeadPrompt()
 	if inv.prompt != leadPrompt {
 		t.Errorf("expected lead prompt, got %q", inv.prompt)
 	}
@@ -84,24 +122,21 @@ func TestRunLead_ClaudeError(t *testing.T) {
 	t.Cleanup(func() { os.Chdir(origDir) })
 
 	expectedErr := errors.New("claude failed")
-	recorder := SetupMockClaudeInvoker(t, expectedErr)
+	recorder := setupMockClaudeInvoker(t, expectedErr)
 
 	// Capture stdout
 	oldStdout := os.Stdout
 	_, w, _ := os.Pipe()
 	os.Stdout = w
 
-	// Note: This will cause the test to fail if we don't handle the os.Exit
-	// In production code, runLead calls os.Exit(1) on error
-	// For now, we just verify the mock was invoked correctly
+	// Note: This will cause the test to fail if we don't handle the os.Exit.
+	// In production code, runLead calls os.Exit(1) on error; we can't capture
+	// that in a unit test without subprocess, so we verify the setup is correct.
 	defer func() {
 		w.Close()
 		os.Stdout = oldStdout
 	}()
 
-	// The mock will return an error, but runLead calls os.Exit(1)
-	// which we can't capture in a unit test without subprocess
-	// So we verify the setup is correct
 	if recorder.InteractiveErr != expectedErr {
 		t.Errorf("mock not configured correctly")
 	}
@@ -109,7 +144,7 @@ func TestRunLead_ClaudeError(t *testing.T) {
 
 func TestGenerateLeadPrompt_NotEmpty(t *testing.T) {
 	// Verify that GenerateLeadPrompt returns a non-empty prompt
-	prompt := GenerateLeadPrompt()
+	prompt := agent.GenerateLeadPrompt()
 	if prompt == "" {
 		t.Error("expected non-empty lead prompt")
 	}

@@ -1234,6 +1234,11 @@ function App() {
     activeView === "table" ||
     activeView === "graph" ||
     activeView === "issue-detail";
+  const shouldRenderStaleDataBanner =
+    activeView !== "terminal" &&
+    (showStaleBanner || isConnectionLost) &&
+    staleBannerDisconnectedSince !== null &&
+    !(issues.length === 0 && !isLoading && !error && isIssueBasedView);
 
   // Issue controls (search · filters · New Issue) now live in the board toolbar
   // (next to the Kanban/List tabs), not the top bar — matching the Aether design's
@@ -1378,20 +1383,13 @@ function App() {
           >
             <div className={styles.workspaceMainContent}>
               {showBoardToolbar && boardToolbar}
-              {(showStaleBanner || isConnectionLost) &&
-                staleBannerDisconnectedSince !== null &&
-                !(
-                  issues.length === 0 &&
-                  !isLoading &&
-                  !error &&
-                  isIssueBasedView
-                ) && (
-                  <StaleDataBanner
-                    disconnectedSince={staleBannerDisconnectedSince}
-                    onRetry={staleBannerRetry}
-                    connectionLost={isConnectionLost}
-                  />
-                )}
+              {shouldRenderStaleDataBanner && (
+                <StaleDataBanner
+                  disconnectedSince={staleBannerDisconnectedSince}
+                  onRetry={staleBannerRetry}
+                  connectionLost={isConnectionLost}
+                />
+              )}
               <WorkspaceViewProvider
                 data={workspaceViewData}
                 actions={workspaceViewActions}

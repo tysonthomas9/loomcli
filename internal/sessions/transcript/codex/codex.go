@@ -23,18 +23,7 @@ func Events(data []byte) ([]transcript.Event, error) {
 	}
 	out := make([]transcript.Event, len(wevs))
 	for i, w := range wevs {
-		out[i] = transcript.Event{
-			Seq:       w.Seq,
-			Timestamp: w.Timestamp,
-			Role:      w.Role,
-			Type:      w.Type,
-			Text:      w.Text,
-			ToolName:  w.ToolName,
-			ToolUseID: w.ToolUseID,
-			ToolInput: w.ToolInput,
-			Output:    w.Output,
-			UUID:      w.UUID,
-		}
+		out[i] = transcript.FromWrapper(w)
 	}
 	return out, nil
 }

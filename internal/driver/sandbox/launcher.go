@@ -1,4 +1,4 @@
-package driver
+package sandbox
 
 // SandboxLauncher is the executor-level sandbox seam (§7 step 9, SB1):
 // NodeRunner launches workflow bundles through this interface, with today's
@@ -37,6 +37,7 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/driver/runtypes"
 )
 
 // SandboxFrameType discriminates host-bound frames on the sandbox stdout
@@ -117,10 +118,10 @@ type SandboxExit struct {
 	Stderr string
 }
 
-// recordSandboxPlacement stamps the launcher's placement descriptor onto the
+// RecordSandboxPlacement stamps the launcher's placement descriptor onto the
 // run result output: Finish persists Output onto the DriverRun row, so the
 // row records where the workflow executed (§9.6 audit).
-func recordSandboxPlacement(result *RunResult, placement domain.TaskRunPlacement) {
+func RecordSandboxPlacement(result *runtypes.RunResult, placement domain.TaskRunPlacement) {
 	if placement.Empty() {
 		return
 	}
@@ -134,15 +135,15 @@ func recordSandboxPlacement(result *RunResult, placement domain.TaskRunPlacement
 	result.Output[SandboxPlacementOutputKey] = string(encoded)
 }
 
-// processLauncher is the default SandboxLauncher: it forks the bundle's
+// ProcessLauncher is the default SandboxLauncher: it forks the bundle's
 // built Flue server under local node via the embedded runtime launcher —
 // the pre-seam runBuiltFlueServer behavior, unchanged.
-type processLauncher struct {
+type ProcessLauncher struct {
 	// NodePath overrides the node executable (default "node").
 	NodePath string
 }
 
-func (l processLauncher) Launch(ctx context.Context, spec LaunchSpec) (SandboxProcess, error) {
+func (l ProcessLauncher) Launch(ctx context.Context, spec LaunchSpec) (SandboxProcess, error) {
 	node := strings.TrimSpace(l.NodePath)
 	if node == "" {
 		node = "node"
@@ -268,6 +269,12 @@ const child = fork(serverPath, [], {
     FLUE_MODE: 'local',
     FLUE_CLI_TARGET: 'workflow',
     FLUE_CLI_NAME: workflowName,
+    // Flue HEAD gates one-shot IPC mode behind this explicit internal flag (in
+    // addition to FLUE_CLI_TARGET + an inherited IPC channel) so user-supplied
+    // FLUE_CLI_* can never flip a production HTTP server into IPC mode. Without
+    // it the generated entry serves HTTP on :3000 instead of performing the
+    // invoke/result handshake the driver workflow executor depends on.
+    FLUE_INTERNAL_CLI_IPC: '1',
   },
   stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
 });
@@ -296,6 +303,11 @@ function isSuspendedResult(result) {
 }
 
 function isSuspendedError(error) {
+  // Flue HEAD's IPC error envelope rewrites every error to {type:'internal_error', message,
+  // details} (build-plugin-node.ts ipcErrorMessage), so the type/name branch below is dead for
+  // HEAD bundles — the 'workflow_suspended:' message prefix is the de-facto contract that must be
+  // preserved by the SDK (sdk/driver.js WorkflowSuspended) for suspend/resume to work. The
+  // type/name check is kept for older bundles + defense in depth.
   const type = String((error && (error.type || error.name)) || '');
   if (type === 'workflow_suspended' || type === 'WorkflowSuspended') return true;
   return String((error && error.message) || '').startsWith('workflow_suspended:');

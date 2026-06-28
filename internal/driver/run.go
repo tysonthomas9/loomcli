@@ -580,6 +580,16 @@ type PatchBackOptions struct {
 	WorktreePath string
 	BaseRef      string
 	Patch        []byte
+	// Exclude lists path patterns passed to `git apply --exclude` — used by the daemon leaf to drop
+	// monitor bookkeeping (e.g. .agent.lock.flock) that exists in both the runner's isolated worktree
+	// and the daemon's host worktree and would otherwise conflict on apply. The driver host-bridge
+	// patches a freshly-provisioned worktree, so it passes none.
+	Exclude []string
+	// Index applies the patch with `git apply --index`, staging exactly the patch's (non-excluded)
+	// files. The daemon leaf sets this so a follow-up `git commit` records only the agent's change,
+	// not unrelated working-tree noise (the monitor's .agent.lock). The driver host-bridge leaves it
+	// false (apply to the working tree only, as before).
+	Index bool
 }
 
 type PatchBackResult struct {
@@ -594,6 +604,7 @@ type PatchBackResult struct {
 	PreservedPatch []byte `json:"-"`
 }
 
+//nolint:funlen // Patch-back must keep validation, merge-base checks, apply, and preservation metadata in one transaction.
 func ApplyPatchBack(ctx context.Context, opts PatchBackOptions) (*PatchBackResult, error) {
 	opts.WorktreePath = strings.TrimSpace(opts.WorktreePath)
 	opts.BaseRef = strings.TrimSpace(opts.BaseRef)
@@ -624,7 +635,18 @@ func ApplyPatchBack(ctx context.Context, opts PatchBackOptions) (*PatchBackResul
 		result.PreservedPatch = append([]byte(nil), opts.Patch...)
 		return result, nil
 	}
-	if _, err := gitOutput(ctx, opts.WorktreePath, opts.Patch, "apply", "--check"); err != nil {
+	var excludeArgs []string
+	for _, ex := range opts.Exclude {
+		if strings.TrimSpace(ex) != "" {
+			excludeArgs = append(excludeArgs, "--exclude="+ex)
+		}
+	}
+	checkArgs := append([]string{"apply", "--check"}, excludeArgs...)
+	applyArgs := append([]string{"apply"}, excludeArgs...)
+	if opts.Index {
+		applyArgs = append(applyArgs, "--index")
+	}
+	if _, err := gitOutput(ctx, opts.WorktreePath, opts.Patch, checkArgs...); err != nil {
 		result.Status = PatchBackConflict
 		result.PreservePatch = true
 		result.ErrorClass = PatchBackConflict
@@ -632,7 +654,7 @@ func ApplyPatchBack(ctx context.Context, opts PatchBackOptions) (*PatchBackResul
 		result.PreservedPatch = append([]byte(nil), opts.Patch...)
 		return result, nil
 	}
-	if _, err := gitOutput(ctx, opts.WorktreePath, opts.Patch, "apply"); err != nil {
+	if _, err := gitOutput(ctx, opts.WorktreePath, opts.Patch, applyArgs...); err != nil {
 		result.Status = PatchBackApplyFailed
 		result.PreservePatch = true
 		result.ErrorClass = PatchBackApplyFailed
@@ -643,6 +665,22 @@ func ApplyPatchBack(ctx context.Context, opts PatchBackOptions) (*PatchBackResul
 	result.Status = PatchBackApplied
 	result.Applied = true
 	return result, nil
+}
+
+// CommitWorktree commits the ALREADY-STAGED changes in worktreePath with a fixed loom
+// identity. The daemon TS leaf calls this after ApplyPatchBack{Index:true} (which staged
+// exactly the agent's patched files) so the change lands on the worktree HEAD and the
+// session finalize's `git diff beforeRef..HEAD` captures it — the Go leaf gets the same
+// effect from the agent committing in place. It intentionally does NOT `git add -A`, so
+// unrelated working-tree noise (the monitor's .agent.lock) is not folded into the commit.
+func CommitWorktree(ctx context.Context, worktreePath, message string) error {
+	if strings.TrimSpace(worktreePath) == "" {
+		return fmt.Errorf("worktree path required: %w", domain.ErrInvalid)
+	}
+	if _, err := gitOutput(ctx, worktreePath, nil, "-c", "user.name=loom", "-c", "user.email=loom@local", "commit", "-m", message); err != nil {
+		return fmt.Errorf("git commit: %w", err)
+	}
+	return nil
 }
 
 func gitOutput(ctx context.Context, dir string, stdin []byte, args ...string) (string, error) {

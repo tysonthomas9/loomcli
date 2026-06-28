@@ -1,3 +1,6 @@
+//go:build e2e
+// +build e2e
+
 package stackpublish_test
 
 // Real GitHub smoke tests for the stack publisher's critical flows — the exact

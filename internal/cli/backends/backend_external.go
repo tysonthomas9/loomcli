@@ -64,27 +64,36 @@ func (e *ExternalBackend) InvokeNonInteractive(workDir, prompt, agentName string
 	})
 }
 
+// probeSubcommandJSON runs `<binPath> <sub> --json` with a 1s WaitDelay,
+// tolerating a WaitDelay-killed process that still produced output (so a
+// well-behaved plugin that prints then lingers is not treated as a failure). It
+// returns the captured stdout; a non-nil error means the subcommand failed
+// without usable output. Callers unmarshal and build their own fallback — this
+// owns only the fiddly exec + ErrWaitDelay tolerance the probes shared.
+func probeSubcommandJSON(binPath, sub string) ([]byte, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), externalCmdTimeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, binPath, sub, "--json")
+	cmd.WaitDelay = time.Second
+	out, err := cmd.Output()
+	if err != nil && !(errors.Is(err, exec.ErrWaitDelay) && len(out) > 0) {
+		return nil, err
+	}
+	return out, nil
+}
+
 // Meta returns descriptive metadata about the external backend by invoking
 // the "meta --json" subcommand. Returns a zero-value BackendMeta if the
 // subcommand fails or is not implemented.
 func (e *ExternalBackend) Meta() BackendMeta {
-	ctx, cancel := context.WithTimeout(context.Background(), externalCmdTimeout)
-	defer cancel()
-	cmd := exec.CommandContext(ctx, e.binPath, "meta", "--json")
-	cmd.WaitDelay = time.Second
-	out, err := cmd.Output()
-	if err != nil && !(errors.Is(err, exec.ErrWaitDelay) && len(out) > 0) {
-		return BackendMeta{
-			DisplayName: e.name,
-			BinaryName:  filepath.Base(e.binPath),
-		}
+	fallback := BackendMeta{DisplayName: e.name, BinaryName: filepath.Base(e.binPath)}
+	out, err := probeSubcommandJSON(e.binPath, "meta")
+	if err != nil {
+		return fallback
 	}
 	var meta BackendMeta
 	if err := json.Unmarshal(out, &meta); err != nil {
-		return BackendMeta{
-			DisplayName: e.name,
-			BinaryName:  filepath.Base(e.binPath),
-		}
+		return fallback
 	}
 	return meta
 }
@@ -100,12 +109,8 @@ func (e *ExternalBackend) HealthCheck() HealthStatus {
 			Message:   fmt.Sprintf("binary no longer found at %s", e.binPath),
 		}
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), externalCmdTimeout)
-	defer cancel()
-	cmd := exec.CommandContext(ctx, e.binPath, "health", "--json")
-	cmd.WaitDelay = time.Second
-	out, err := cmd.Output()
-	if err != nil && !(errors.Is(err, exec.ErrWaitDelay) && len(out) > 0) {
+	out, err := probeSubcommandJSON(e.binPath, "health")
+	if err != nil {
 		return HealthStatus{
 			Installed: true, // the binary was found on PATH during discovery
 			Healthy:   false,

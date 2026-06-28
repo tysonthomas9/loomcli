@@ -81,6 +81,7 @@ export function createIssueStore(
   let activeGraphFilter: GraphFilter | undefined;
   let mutationCountAtDisconnect = 0;
   let prevConnectionState: ConnectionState = "disconnected";
+  let reconnectRecoveryPending = false;
   let maxReconnectAttemptsTracked = 0;
   let eventUnsubscribe: (() => void) | null = null;
 
@@ -513,6 +514,7 @@ export function createIssueStore(
 
       if (newState === "reconnecting" && prev !== "reconnecting") {
         const now = Date.now();
+        reconnectRecoveryPending = true;
         set({ disconnectedSince: now });
         mutationCountAtDisconnect = get().mutationCount;
 
@@ -522,7 +524,7 @@ export function createIssueStore(
         }, STALE_BANNER_DELAY_MS);
       }
 
-      if (prev === "reconnecting" && newState === "connected") {
+      if (newState === "connected" && reconnectRecoveryPending) {
         if (staleBannerTimeout) {
           clearTimeout(staleBannerTimeout);
           staleBannerTimeout = null;
@@ -552,13 +554,15 @@ export function createIssueStore(
           }
         }
         maxReconnectAttemptsTracked = 0;
+        reconnectRecoveryPending = false;
       }
 
-      if (newState === "disconnected" && prev === "reconnecting") {
+      if (newState === "disconnected" && reconnectRecoveryPending) {
         if (staleBannerTimeout) {
           clearTimeout(staleBannerTimeout);
           staleBannerTimeout = null;
         }
+        reconnectRecoveryPending = false;
       }
     },
 
@@ -620,6 +624,7 @@ export function createIssueStore(
       activeGraphFilter = undefined;
       mutationCountAtDisconnect = 0;
       prevConnectionState = "disconnected";
+      reconnectRecoveryPending = false;
       maxReconnectAttemptsTracked = 0;
 
       set({ ...INITIAL_STATE, pendingIds: new Set(), issuesMap: new Map() });

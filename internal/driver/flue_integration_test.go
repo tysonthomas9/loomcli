@@ -37,10 +37,14 @@ func TestRealFlueBuildAndBuiltServerSmoke(t *testing.T) {
 	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "TEST", Name: "test"}); err != nil {
 		t.Fatalf("Create workspace: %v", err)
 	}
-	writeRealFlueProject(t, root, "real-flue-smoke", `export async function run(ctx) {
-  const input = ctx.payload || {};
-  return { status: "completed", summary: input.message || "real flue smoke" };
-}
+	writeRealFlueProject(t, root, "real-flue-smoke", `import { defineAgent, defineWorkflow } from "@flue/runtime";
+export default defineWorkflow({
+  agent: defineAgent(() => ({ model: false })),
+  run: () => {
+    const input = JSON.parse(process.env.LOOM_FLUE_INVOKE_PAYLOAD || "{}");
+    return { status: "completed", summary: input.message || "real flue smoke" };
+  },
+});
 `)
 	buildRealFlueProject(t, root, flueCommand)
 

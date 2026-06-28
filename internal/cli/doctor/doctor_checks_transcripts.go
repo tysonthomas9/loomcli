@@ -141,7 +141,7 @@ func fixOrphanedTranscripts(store *sessions.Store, orphans []orphanSession) Chec
 // backfillSession mirrors the transcript into the session and records token
 // usage, mirroring the hook-based captureTokenUsage path.
 func backfillSession(store *sessions.Store, o orphanSession, srcPath string) error {
-	if err := store.SyncNativeTranscript(o.sessionID, srcPath); err != nil {
+	if err := store.SyncNativeTranscript(o.sessionID, srcPath, sessions.TranscriptFormatRaw); err != nil {
 		return err
 	}
 	tok, err := sessions.SumTranscriptUsage(srcPath)

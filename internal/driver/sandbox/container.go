@@ -1,4 +1,4 @@
-package driver
+package sandbox
 
 // Container sandbox launcher (§7 step 9, SB2): runs workflow bundles in a
 // rootless container (podman first, docker fallback) behind the SB1
@@ -46,6 +46,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -516,11 +517,17 @@ func (c *containerSandbox) Placement() domain.TaskRunPlacement {
 	return c.placement
 }
 
-// removeContainer best-effort force-removes the named container. --ignore
-// keeps the common already-gone (--rm finished first) case quiet on podman;
-// docker lacks the flag and the error is ignored either way.
+// removeContainer best-effort force-removes the named container.
 func (c *containerSandbox) removeContainer() {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	_ = exec.CommandContext(ctx, c.binary, "rm", "--force", "--ignore", c.name).Run() //nolint:gosec // binary is operator-configured (podman/docker).
+	_ = exec.CommandContext(ctx, c.binary, removeContainerArgs(c.binary, c.name)...).Run() //nolint:gosec // binary is operator-configured (podman/docker).
+}
+
+func removeContainerArgs(binary, name string) []string {
+	args := []string{"rm", "--force"}
+	if filepath.Base(binary) != "docker" {
+		args = append(args, "--ignore")
+	}
+	return append(args, name)
 }

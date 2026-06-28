@@ -1,5 +1,4 @@
-//nolint:revive // Tests use the established driver package name to exercise unexported helpers.
-package driver
+package sandbox
 
 // SB2 container-launcher tests. The unit tests need no container engine:
 // argv construction is golden-tested and Launch runs against a fake engine
@@ -165,6 +164,37 @@ func TestContainerLauncherRunArgsRejectsCommaMountSource(t *testing.T) {
 	_, err := launcher.runArgs("sbx-1", LaunchSpec{BundleRoot: "/work/a,b"}, "/tmp/launcher.mjs", "/tmp/run.env", nil, nil)
 	if !errors.Is(err, domain.ErrInvalid) {
 		t.Fatalf("err = %v, want domain.ErrInvalid for comma in mount source", err)
+	}
+}
+
+func TestRemoveContainerArgsAreEngineCompatible(t *testing.T) {
+	cases := []struct {
+		name   string
+		binary string
+		want   []string
+	}{
+		{
+			name:   "podman supports ignore",
+			binary: "podman",
+			want:   []string{"rm", "--force", "--ignore", "sbx-1"},
+		},
+		{
+			name:   "docker lacks ignore",
+			binary: "docker",
+			want:   []string{"rm", "--force", "sbx-1"},
+		},
+		{
+			name:   "absolute docker path",
+			binary: "/usr/local/bin/docker",
+			want:   []string{"rm", "--force", "sbx-1"},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := removeContainerArgs(tc.binary, "sbx-1"); !reflect.DeepEqual(got, tc.want) {
+				t.Fatalf("removeContainerArgs = %q, want %q", got, tc.want)
+			}
+		})
 	}
 }
 

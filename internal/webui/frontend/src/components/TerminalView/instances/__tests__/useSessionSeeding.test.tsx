@@ -2,7 +2,7 @@
  * @vitest-environment jsdom
  */
 import { renderHook, waitFor } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { StrictMode, type ReactNode } from "react";
 import type React from "react";
 
@@ -39,12 +39,16 @@ function makeArgs(overrides: Partial<Parameters<typeof useSessionSeeding>[0]>) {
 }
 
 describe("useSessionSeeding", () => {
+  beforeEach(() => {
+    mockHooksApi.ensureAgentTerminalSession.mockReset();
+  });
+
   it("resolves pending agent names even when a stale restored tab exists", async () => {
     const existingTab: TabState = {
       id: "term_123",
       label: "agent-lead-ui-e2e",
       sessionName: "term_123",
-      connectionState: "disconnected",
+      connectionState: "connected",
       backendName: "codex",
       kind: "agent",
       agentName: "lead-ui-e2e",
@@ -112,6 +116,78 @@ describe("useSessionSeeding", () => {
     ) => TabState[];
     const nextTabs = applyTabs([existingTab, duplicateExistingTab, shellTab]);
     expect(nextTabs.map((tab) => tab.id)).toEqual(["term_456", "shell-1"]);
+    expect(nextTabs[0]?.connectionState).toBe("disconnected");
+    expect(onAgentNameConsumed).toHaveBeenCalledTimes(1);
+  });
+
+  it("preserves runtime connection state when metadata refreshes an existing agent tab", async () => {
+    const existingTab: TabState = {
+      id: "term_456",
+      label: "agent-lead-ui-e2e-old",
+      sessionName: "term_456",
+      connectionState: "connected",
+      backendName: "claude",
+      kind: "agent",
+      agentName: "lead-ui-e2e",
+      writable: true,
+      pinned: false,
+      crashReason: null,
+    };
+    const setTabs = vi.fn();
+    const setActiveTabId = vi.fn();
+    const onAgentNameConsumed = vi.fn();
+    mockHooksApi.ensureAgentTerminalSession.mockResolvedValueOnce({
+      session_name: "term_456",
+      label: "agent-lead-ui-e2e",
+      notes: "",
+      sort_order: 1,
+      pinned: true,
+      kind: "agent",
+      agent_id: "lead-ui-e2e",
+      role: "lead",
+      backend: "codex",
+      writable: false,
+      pty_alive: true,
+      attached_clients: 1,
+      created_at: "2026-05-11T00:00:00Z",
+      updated_at: "2026-05-11T00:00:00Z",
+    });
+
+    const args = makeArgs({
+      pendingAgentName: "lead-ui-e2e",
+      tabs: [existingTab],
+      setTabs: setTabs as unknown as React.Dispatch<
+        React.SetStateAction<TabState[]>
+      >,
+      setActiveTabId: setActiveTabId as unknown as React.Dispatch<
+        React.SetStateAction<string>
+      >,
+      onAgentNameConsumed,
+    });
+
+    renderHook(() => useSessionSeeding(args));
+
+    await waitFor(() => {
+      expect(setActiveTabId).toHaveBeenCalledWith("term_456");
+    });
+    const applyTabs = setTabs.mock.calls[0]?.[0] as (
+      tabs: TabState[],
+    ) => TabState[];
+    const nextTabs = applyTabs([existingTab]);
+    expect(nextTabs).toHaveLength(1);
+    expect(nextTabs[0]).toMatchObject({
+      id: "term_456",
+      label: "agent-lead-ui-e2e",
+      sessionName: "term_456",
+      connectionState: "connected",
+      backendName: "codex",
+      kind: "agent",
+      agentName: "lead-ui-e2e",
+      writable: false,
+      pinned: true,
+      role: "lead",
+      crashReason: null,
+    });
     expect(onAgentNameConsumed).toHaveBeenCalledTimes(1);
   });
 });

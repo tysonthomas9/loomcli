@@ -54,6 +54,14 @@ func (s *Session) Finalize(opts FinalizeOptions) error {
 		diskCacheRead = diskMeta.CacheReadTokens
 		diskCacheWrite = diskMeta.CacheWriteTokens
 		diskCost = diskMeta.EstimatedCostUSD
+		// Preserve the transcript-format marker stamped by SyncNativeTranscript. The
+		// daemon's in-memory Meta predates it — the TS leaf stamps "canonical" from a
+		// separate (worker) process, so writing the stale in-memory value here would
+		// clobber it back to "" and LoadNativeEvents would misread the canonical
+		// transcript as raw.
+		if s.Meta.TranscriptFormat == "" {
+			s.Meta.TranscriptFormat = diskMeta.TranscriptFormat
+		}
 	}
 	s.Meta.InputTokens = mergeTokenVal(opts.InputTokens, diskInputTokens)
 	s.Meta.OutputTokens = mergeTokenVal(opts.OutputTokens, diskOutputTokens)

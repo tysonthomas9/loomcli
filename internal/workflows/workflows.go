@@ -224,6 +224,44 @@ func builtinWorkflowWorkDir() string {
 	return workDir
 }
 
+// BuildBuiltinBundle builds a builtin workflow source tree into destDir and
+// returns the generated server.mjs path plus redacted Flue diagnostics. It lets
+// host-side callers obtain a runnable builtin task runner without committing
+// generated bundle artifacts.
+func BuildBuiltinBundle(ctx context.Context, name, destDir string) (string, string, error) {
+	spec, ok := BuiltinWorkflow(name)
+	if !ok {
+		return "", "", domain.ErrNotFound
+	}
+	if err := os.MkdirAll(filepath.Dir(destDir), 0o755); err != nil {
+		return "", "", fmt.Errorf("create builtin bundle parent: %w", err)
+	}
+	if err := os.RemoveAll(destDir); err != nil {
+		return "", "", fmt.Errorf("clean builtin bundle dest %q: %w", destDir, err)
+	}
+	buildRoot, err := os.MkdirTemp(filepath.Dir(destDir), name+"-source-build-*")
+	if err != nil {
+		return "", "", fmt.Errorf("create builtin source build root: %w", err)
+	}
+	defer os.RemoveAll(buildRoot) //nolint:errcheck
+	if err := writeWorkflowBuildProject(buildRoot, spec.Files); err != nil {
+		return "", "", err
+	}
+	output, err := runFlueBuild(ctx, buildRoot, destDir)
+	output = RedactBuildDiagnostics(output)
+	if err != nil {
+		if output != "" {
+			return "", output, fmt.Errorf("flue build failed: %s", output)
+		}
+		return "", "", err
+	}
+	serverPath := filepath.Join(destDir, "server.mjs")
+	if _, err := os.Stat(serverPath); err != nil {
+		return "", output, fmt.Errorf("flue build missing dist/server.mjs: %w", err)
+	}
+	return serverPath, output, nil
+}
+
 // submissionTrust resolves the trust level a BuildAndRegister submission
 // stamps: empty defaults to UNTRUSTED (fail closed) because this is the
 // external user path — only server-side callers like EnsureBuiltinWorkflow

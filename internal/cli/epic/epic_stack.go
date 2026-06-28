@@ -136,6 +136,7 @@ type EpicStackProjection struct {
 	Stats      projectionStats
 	Created    []string // task ids newly added as nodes
 	Reparented []string // existing nodes whose base changed
+	Lineage    map[string]driverpkg.TaskLineage
 }
 
 // projectEpicStack reads an epic's child-task DAG from the issue backend and
@@ -255,7 +256,37 @@ func projectEpicStack(ctx context.Context, ib backend.IssueBackend, sstore stack
 	}
 	sort.Strings(res.Created)
 	sort.Strings(res.Reparented)
+	lineage, err := projectedLineage(ctx, sstore, ws, stackID)
+	if err != nil {
+		return nil, err
+	}
+	res.Lineage = lineage
 	return res, nil
+}
+
+func projectedLineage(ctx context.Context, sstore stackstore.Store, ws string, stackID sl.StackID) (map[string]driverpkg.TaskLineage, error) {
+	st, err := sstore.GetStack(ctx, ws, stackID)
+	if err != nil {
+		return nil, fmt.Errorf("load projected stack %s: %w", stackID, err)
+	}
+	nodes, err := sstore.ListNodes(ctx, ws, stackID)
+	if err != nil {
+		return nil, fmt.Errorf("list projected nodes for %s: %w", stackID, err)
+	}
+	byTask := sl.ByTask(nodes)
+	lineage := make(map[string]driverpkg.TaskLineage, len(nodes))
+	for _, n := range nodes {
+		base, err := sl.BaseBranch(*st, n, byTask)
+		if err != nil {
+			return nil, fmt.Errorf("resolve projected base for %s: %w", n.TaskID, err)
+		}
+		lineage[n.TaskID] = driverpkg.TaskLineage{
+			StackID:      string(st.ID),
+			BaseRef:      base,
+			OutputBranch: n.OutputBranch,
+		}
+	}
+	return lineage, nil
 }
 
 // projectEpicStackForRun is the `loom epic run` wiring for stacked mode: it

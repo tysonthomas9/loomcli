@@ -7,9 +7,11 @@ import { after, before, describe, it } from "node:test";
 
 // The daytona runner statically imports bundle-only packages (@daytona/sdk,
 // @flue/runtime, @loom/sdk). To exercise the demo-mode gate (which returns
-// before any of those are used) we stage empty stubs for those bare specifiers
-// next to a copy of the runner, then import the copy. The gate fires before
-// loadRuntimeImports(), so empty stubs are sufficient.
+// before any of those are used at *runtime*) we stage stubs for those bare
+// specifiers next to a copy of the runner, then import the copy. The module's
+// default export calls defineWorkflow()/defineAgent() at eval time (flue HEAD
+// requires every workflow to default-export a definition), so the @flue/runtime
+// stub must provide those two as callables — the rest stay empty.
 const here = path.dirname(fileURLToPath(import.meta.url));
 const SOURCE = path.join(here, "daytona-task-runner.ts");
 
@@ -35,7 +37,9 @@ before(async () => {
   const loom = path.join(nm, "@loom", "sdk");
   stub(daytona, "index.js", "export const Daytona = function () {};\nexport default { Daytona };\n");
   fs.writeFileSync(path.join(daytona, "package.json"), JSON.stringify({ name: "@daytona/sdk", type: "module", main: "index.js" }));
-  stub(flue, "index.js");
+  // defineAgent/defineWorkflow are invoked at module-eval time by the default
+  // export; the test exercises the named exports, so trivial pass-throughs suffice.
+  stub(flue, "index.js", "export const defineAgent = (fn) => ({ __agent: fn });\nexport const defineWorkflow = (def) => def;\n");
   stub(flue, "internal.js");
   fs.writeFileSync(path.join(flue, "package.json"), JSON.stringify({
     name: "@flue/runtime",

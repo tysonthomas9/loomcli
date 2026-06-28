@@ -30,10 +30,35 @@ const (
 	RoleSystem    = "system"
 )
 
-// Canonical event type constants.
+// Canonical event type constants. text/tool_use/tool_result/session_meta are the
+// original core set; reasoning (assistant chain-of-thought) and result (terminal
+// status + token-usage summary) are emitted by the TS local-task-runner leaf and
+// are blessed here so both execution planes share ONE event vocabulary (Phase U/U0).
 const (
 	EventText        = "text"
+	EventReasoning   = "reasoning"
 	EventToolUse     = "tool_use"
 	EventToolResult  = "tool_result"
+	EventResult      = "result"
 	EventSessionMeta = "session_meta"
 )
+
+// KnownEventTypes / KnownRoles are the canonical vocabularies every producer — the
+// Go backend adapters AND the TS local-task-runner leaf — must stay within. The
+// Phase-U conformance test pins TS-leaf output to these sets so the two execution
+// planes cannot silently drift apart on transcript schema.
+var KnownEventTypes = map[string]bool{
+	EventText:        true,
+	EventReasoning:   true,
+	EventToolUse:     true,
+	EventToolResult:  true,
+	EventResult:      true,
+	EventSessionMeta: true,
+}
+
+var KnownRoles = map[string]bool{
+	RoleUser:      true,
+	RoleAssistant: true,
+	RoleTool:      true,
+	RoleSystem:    true,
+}

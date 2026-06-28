@@ -1,4 +1,4 @@
-package agent
+package lead
 
 import (
 	"context"
@@ -17,6 +17,7 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/cli"
+	"github.com/tysonthomas9/loomcli/internal/cli/agent"
 	"github.com/tysonthomas9/loomcli/internal/cli/backends"
 	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
 	"github.com/tysonthomas9/loomcli/internal/domain"
@@ -97,7 +98,7 @@ func runLead(cmd *cobra.Command, args []string) {
 	defer registration.Finalize()
 
 	// Generate the lead prompt and append the user's initial request if provided.
-	prompt := GenerateLeadPrompt()
+	prompt := agent.GenerateLeadPrompt()
 	if assignment := currentLeadAssignmentPrompt(context.Background()); assignment != "" {
 		prompt += "\n\n## Loom Backend Assignment\n\n" + assignment
 	}

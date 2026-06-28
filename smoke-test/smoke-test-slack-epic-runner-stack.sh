@@ -86,6 +86,7 @@ CONTAINER_GITHUB_CREDENTIAL_FILE="${CONTAINER_GITHUB_CREDENTIAL_FILE:-${CONTAINE
 DAYTONA_BASE_BRANCH="${DAYTONA_BASE_BRANCH:-}"
 DAYTONA_PR_BRANCH_PREFIX="${DAYTONA_PR_BRANCH_PREFIX:-}"
 DAYTONA_PR_STACKED="${DAYTONA_PR_STACKED:-1}"
+DAYTONA_SEED_PR_CHAIN="${DAYTONA_SEED_PR_CHAIN:-${RUN_STACKED_PR:-0}}"
 DAYTONA_PR_DRAFT="${DAYTONA_PR_DRAFT:-1}"
 DAYTONA_GIT_AUTHOR_NAME="${DAYTONA_GIT_AUTHOR_NAME:-Loom Daytona Runner}"
 DAYTONA_GIT_AUTHOR_EMAIL="${DAYTONA_GIT_AUTHOR_EMAIL:-loom-daytona@example.test}"
@@ -438,14 +439,11 @@ seed_loom_pr_chain() {
 }
 
 seed_loom() {
-  case "$DAYTONA_TASK_MODE" in
-    slack-pr-chain)
-      seed_loom_pr_chain
-      ;;
-    *)
-      seed_loom_default
-      ;;
-  esac
+  if truthy "$DAYTONA_SEED_PR_CHAIN" || [[ "$DAYTONA_TASK_MODE" == "slack-pr-chain" ]]; then
+    seed_loom_pr_chain
+    return
+  fi
+  seed_loom_default
 }
 
 source_digest() {
