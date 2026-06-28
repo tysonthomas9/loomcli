@@ -167,6 +167,37 @@ func TestContainerLauncherRunArgsRejectsCommaMountSource(t *testing.T) {
 	}
 }
 
+func TestRemoveContainerArgsAreEngineCompatible(t *testing.T) {
+	cases := []struct {
+		name   string
+		binary string
+		want   []string
+	}{
+		{
+			name:   "podman supports ignore",
+			binary: "podman",
+			want:   []string{"rm", "--force", "--ignore", "sbx-1"},
+		},
+		{
+			name:   "docker lacks ignore",
+			binary: "docker",
+			want:   []string{"rm", "--force", "sbx-1"},
+		},
+		{
+			name:   "absolute docker path",
+			binary: "/usr/local/bin/docker",
+			want:   []string{"rm", "--force", "sbx-1"},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := removeContainerArgs(tc.binary, "sbx-1"); !reflect.DeepEqual(got, tc.want) {
+				t.Fatalf("removeContainerArgs = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestSplitContainerEnv(t *testing.T) {
 	cases := []struct {
 		name     string
