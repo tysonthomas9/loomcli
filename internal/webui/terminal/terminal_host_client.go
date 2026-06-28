@@ -1,6 +1,7 @@
 package terminal
 
 import (
+	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -278,9 +279,12 @@ func (a *hostAttachment) WriteInput(p []byte) (int, error) {
 }
 
 func (a *hostAttachment) Resize(_ string, cols, rows uint16) error {
+	data := make([]byte, 4)
+	binary.BigEndian.PutUint16(data[0:2], cols)
+	binary.BigEndian.PutUint16(data[2:4], rows)
 	return a.send(terminalHostStreamMessage{
 		Op:   terminalHostOpResize,
-		Data: []byte{byte(cols >> 8), byte(cols), byte(rows >> 8), byte(rows)},
+		Data: data,
 	})
 }
 
