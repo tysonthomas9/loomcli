@@ -69,14 +69,20 @@ vi.mock("./DiffTab", () => ({
 vi.mock("@/components/FileEditorPanel/FileEditorPanel", () => ({
   FileEditorPanel: ({
     agentName,
+    agentRole,
+    agentRepo,
     isActive,
   }: {
     agentName: string;
+    agentRole?: string;
+    agentRepo?: string;
     isActive: boolean;
   }) => (
     <div
       data-testid="file-editor-panel-mock"
       data-agent={agentName}
+      data-role={agentRole}
+      data-repo={agentRepo}
       data-active={String(isActive)}
     />
   ),

@@ -34,6 +34,7 @@ import { ErrorBoundary, LoadingSkeleton } from "@/components";
 import { AgentDetailMain } from "@/components/AgentDetailMain/AgentDetailMain";
 import { GitTab } from "@/components/AgentDetailPanel";
 import { AgentWorkPanel } from "@/components/AgentWorkPanel/AgentWorkPanel";
+import { PanelWidthResizeHandle } from "@/components/AgentWorkPanel/PanelWidthResizeHandle";
 import {
   isLiveAgentRailVisible,
   orderAgentsForEpicRunner,
@@ -45,10 +46,17 @@ import {
   startWorkflowRun,
   type WorkflowRun,
 } from "@/api";
-import { useWorkspaceViewData } from "@/contexts/WorkspaceViewContext";
+import {
+  useWorkspaceViewActions,
+  useWorkspaceViewData,
+} from "@/contexts/WorkspaceViewContext";
 import { useAgentStoreInstance } from "@/hooks";
 import { useLocalSettings, useWorkspaceContext } from "@/hooks/workspace";
-import { useOpenQueuePanelWidth } from "@/hooks/ui/useOpenQueuePanelWidth";
+import {
+  OPEN_QUEUE_PANEL_MAX_WIDTH,
+  OPEN_QUEUE_PANEL_MIN_WIDTH,
+  useOpenQueuePanelWidth,
+} from "@/hooks/ui/useOpenQueuePanelWidth";
 import { useToast } from "@/hooks/ui/useToast";
 import { useWorkflowRunStreams } from "@/hooks/workflows/useWorkflowRunStreams";
 import { parseLoomStatus } from "@/types";
@@ -93,7 +101,16 @@ function AgentsPageInner(): JSX.Element {
   const [searchParams] = useSearchParams();
   const agentStore = useAgentStoreInstance();
   const agents = useStore(agentStore, (s) => s.agents);
-  const { issues } = useWorkspaceViewData();
+  const { issues, issueDetails, isLoadingDetails, detailError } =
+    useWorkspaceViewData();
+  const {
+    fetchIssue,
+    clearIssue,
+    updateIssueDetails,
+    handleApprove,
+    handleReject,
+    handleCopyLink,
+  } = useWorkspaceViewActions();
   const { repos } = useWorkspaceContext();
   const { settings: localSettings } = useLocalSettings();
   const { showToast } = useToast();
@@ -136,7 +153,12 @@ function AgentsPageInner(): JSX.Element {
   >({});
   useEffect(() => {
     setSelectedTask(null);
-  }, [agentName]);
+    clearIssue();
+  }, [agentName, clearIssue]);
+  useEffect(() => {
+    if (!selectedTask) return;
+    void fetchIssue(selectedTask.id);
+  }, [selectedTask, fetchIssue]);
   useEffect(() => {
     setEpicRunnerRuns({});
   }, [workspaceId]);
@@ -249,6 +271,21 @@ function AgentsPageInner(): JSX.Element {
     },
     [navigate, workspaceId],
   );
+
+  const handleCloseInlineDetail = useCallback(() => {
+    setSelectedTask(null);
+    clearIssue();
+  }, [clearIssue]);
+
+  const handleInlineTaskNavigate = useCallback((issue: Issue) => {
+    setSelectedTask(issue);
+  }, []);
+
+  const inlinePanelIssue = useMemo(() => {
+    if (!selectedTask) return null;
+    if (issueDetails?.id === selectedTask.id) return issueDetails;
+    return selectedTask;
+  }, [selectedTask, issueDetails]);
 
   // Workspace-wide counts for the Info tab stat cards.
   const counts = useMemo(() => {
@@ -431,6 +468,8 @@ function AgentsPageInner(): JSX.Element {
               >
                 <FileEditorPanel
                   agentName={selected.name}
+                  agentRole={selected.role}
+                  agentRepo={selected.repo}
                   isActive={isActive}
                 />
               </Suspense>
@@ -462,12 +501,28 @@ function AgentsPageInner(): JSX.Element {
       {/* Right column: epic-runner Open Queue or inline task detail */}
       {selectedTask ? (
         <div className={styles.inlineDetail} style={{ width: openQueueWidth }}>
-          <IssueDetailPanel
-            inline
-            isOpen={true}
-            issue={selectedTask}
-            onClose={() => setSelectedTask(null)}
+          <PanelWidthResizeHandle
+            width={openQueueWidth}
+            onDelta={applyOpenQueueWidthDelta}
+            onReset={resetOpenQueueWidth}
+            minWidth={OPEN_QUEUE_PANEL_MIN_WIDTH}
+            maxWidth={OPEN_QUEUE_PANEL_MAX_WIDTH}
           />
+          <div className={styles.inlineDetailContent}>
+            <IssueDetailPanel
+              inline
+              isOpen={true}
+              issue={inlinePanelIssue}
+              isLoading={isLoadingDetails}
+              error={detailError}
+              onClose={handleCloseInlineDetail}
+              onApprove={handleApprove}
+              onReject={handleReject}
+              onIssueUpdate={updateIssueDetails}
+              onCopyLink={handleCopyLink}
+              onNavigateToIssue={handleInlineTaskNavigate}
+            />
+          </div>
         </div>
       ) : (
         <AgentWorkPanel

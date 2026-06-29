@@ -84,9 +84,9 @@ describe("AgentDetailMain", () => {
     );
 
     expect(screen.getByText("nova")).toBeInTheDocument();
-    expect(screen.getByText("idle")).toBeInTheDocument();
-    expect(screen.getByText("lead")).toBeInTheDocument();
-    expect(screen.getByText("assigned epic")).toBeInTheDocument();
+    expect(screen.queryByText("idle")).not.toBeInTheDocument();
+    expect(screen.getByText("Lead")).toBeInTheDocument();
+    expect(screen.getByText("Assigned epic")).toBeInTheDocument();
     expect(screen.getByText("E2E-1")).toBeInTheDocument();
     expect(screen.queryByText("unknown")).not.toBeInTheDocument();
   });
@@ -110,7 +110,7 @@ describe("AgentDetailMain", () => {
       "nova",
     );
 
-    expect(screen.getByText("assigned epic")).toBeInTheDocument();
+    expect(screen.getByText("Assigned epic")).toBeInTheDocument();
     expect(screen.getByText("E2E-1")).toBeInTheDocument();
     expect(screen.getByText("context pending")).toBeInTheDocument();
   });
@@ -161,6 +161,28 @@ describe("AgentDetailMain", () => {
     expect(screen.queryByText("Agent is stopped")).not.toBeInTheDocument();
   });
 
+  it("capitalizes the agent name in the detail header", () => {
+    renderWithAgents(
+      [
+        {
+          name: "lead-b",
+          branch: "unknown",
+          status: "idle",
+          ahead: 0,
+          behind: 0,
+          workspace: "E2E",
+          role: "lead",
+          state: "idle",
+        } as LoomAgentStatus,
+      ],
+      "lead-b",
+    );
+
+    expect(screen.getByText("lead-b")).toHaveStyle({
+      textTransform: "capitalize",
+    });
+  });
+
   it("makes an unassigned lead explicit instead of showing unknown", () => {
     renderWithAgents(
       [
@@ -178,7 +200,7 @@ describe("AgentDetailMain", () => {
       "atlas",
     );
 
-    expect(screen.getByText("no epic assigned")).toBeInTheDocument();
+    expect(screen.getByText("No epic assigned")).toBeInTheDocument();
     expect(screen.queryByText("unknown")).not.toBeInTheDocument();
   });
 

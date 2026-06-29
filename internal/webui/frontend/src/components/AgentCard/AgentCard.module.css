@@ -30,6 +30,23 @@
   outline-offset: -2px;
 }
 
+.card[data-selected="true"] {
+  background: color-mix(
+    in srgb,
+    var(--color-accent, #c96442) 12%,
+    var(--color-bg-primary, #fff)
+  );
+  box-shadow: inset 3px 0 0 var(--color-accent, #c96442);
+}
+
+.card[data-selected="true"][role="button"]:hover {
+  background: color-mix(
+    in srgb,
+    var(--color-accent, #c96442) 18%,
+    var(--color-bg-primary, #fff)
+  );
+}
+
 /* Avatar container with status dot */
 .avatarContainer {
   position: relative;

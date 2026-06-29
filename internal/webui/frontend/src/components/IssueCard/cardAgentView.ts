@@ -22,6 +22,70 @@ import {
 
 const H_PREFIX = /^\[H\]\s*/;
 
+function stripHumanPrefix(name: string): string {
+  return name.replace(H_PREFIX, "");
+}
+
+function isHumanAssignee(assignee: string): boolean {
+  return H_PREFIX.test(assignee);
+}
+
+function isAgentAssignee(assignee: string): boolean {
+  if (!assignee || isHumanAssignee(assignee)) return false;
+  // Synthetic workflow assignee — not a loom agent display name.
+  if (assignee.startsWith("driver-run:")) return false;
+  return true;
+}
+
+/** Footer avatar on Kanban cards: working agent vs human owner fallback. */
+export type CardFooterBadge =
+  | { kind: "agent"; name: string }
+  | { kind: "owner"; name: string };
+
+/**
+ * Resolve the footer badge for an IssueCard.
+ *
+ * Precedence:
+ * 1. Agent claiming this task (active_task_id / current_task_id join) — ONLY in
+ *    the in_progress column. current_task_id is lock-derived and may be a stale
+ *    lock, so done/review/blocked/backlog cards must not surface a live
+ *    "Working" badge from it. Mirrors resolveCardAgent's column gating.
+ * 2. Non-human assignee (agent name on the issue)
+ * 3. Human owner, then human assignee
+ */
+export function resolveCardFooterBadge(
+  agents: readonly LoomAgentStatus[],
+  issue: {
+    id: string;
+    assignee?: string | null | undefined;
+    owner?: string | null | undefined;
+  },
+  columnId?: string,
+): CardFooterBadge | null {
+  if (columnId === "in_progress") {
+    const claimant = resolveAgentForTask(agents, issue.id);
+    if (claimant?.name) {
+      return { kind: "agent", name: claimant.name };
+    }
+  }
+
+  const assignee = issue.assignee?.trim();
+  if (assignee && isAgentAssignee(assignee)) {
+    return { kind: "agent", name: assignee };
+  }
+
+  const owner = issue.owner?.trim();
+  if (owner) {
+    return { kind: "owner", name: stripHumanPrefix(owner) };
+  }
+
+  if (assignee) {
+    return { kind: "owner", name: stripHumanPrefix(assignee) };
+  }
+
+  return null;
+}
+
 /**
  * The fully-resolved agent state for one Kanban card. Discriminated on `kind`;
  * `displayName` is always the assignee (the product invariant: the card shows

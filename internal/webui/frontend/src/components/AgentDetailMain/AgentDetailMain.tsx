@@ -14,6 +14,7 @@
  */
 
 import {
+  Fragment,
   lazy,
   Suspense,
   useCallback,
@@ -21,6 +22,7 @@ import {
   useMemo,
   useState,
   type CSSProperties,
+  type ReactNode,
 } from "react";
 import { useStore } from "zustand";
 
@@ -268,7 +270,15 @@ function EphemeralWorkerSummary({
         >
           Ephemeral worker attempt
         </div>
-        <div style={{ fontSize: 18, fontWeight: 700 }}>{agent.name}</div>
+        <div
+          style={{
+            fontSize: 18,
+            fontWeight: 700,
+            textTransform: "capitalize",
+          }}
+        >
+          {agent.name}
+        </div>
         <div
           style={{
             display: "grid",
@@ -372,6 +382,12 @@ function EphemeralWorkerSummary({
   );
 }
 
+function formatHeaderRoleLabel(role: string): string {
+  const trimmed = role.trim();
+  if (!trimmed) return "";
+  return trimmed.charAt(0).toUpperCase() + trimmed.slice(1).toLowerCase();
+}
+
 function Header({
   agent,
   agentName,
@@ -403,6 +419,108 @@ function Header({
       : failedInbox > 0
         ? `${failedInbox} failed message${failedInbox === 1 ? "" : "s"}`
         : "";
+  const hideIdleLeadStatus = isLead && parsed.type === "idle";
+  const roleLabel = formatHeaderRoleLabel(role);
+  const metaSegments: Array<{ key: string; node: ReactNode }> = [];
+
+  if (!hideIdleLeadStatus) {
+    metaSegments.push({
+      key: "status",
+      node: (
+        <>
+          <span
+            aria-hidden="true"
+            style={{
+              width: 7,
+              height: 7,
+              borderRadius: "50%",
+              background: dotColor,
+              display: "inline-block",
+            }}
+          />
+          <span>{parsed.type || "unknown"}</span>
+        </>
+      ),
+    });
+  }
+
+  if (branch) {
+    metaSegments.push({
+      key: "branch",
+      node: (
+        <code
+          style={{
+            fontFamily: "var(--font-mono, ui-monospace, monospace)",
+          }}
+        >
+          {branch}
+        </code>
+      ),
+    });
+  }
+
+  if (roleLabel) {
+    metaSegments.push({
+      key: "role",
+      node: <span>{roleLabel}</span>,
+    });
+  }
+
+  if (assignedEpic) {
+    metaSegments.push({
+      key: "epic-label",
+      node: <span>{isLead ? "Assigned epic" : "assigned epic"}</span>,
+    });
+    metaSegments.push({
+      key: "epic-id",
+      node: (
+        <code
+          style={{
+            fontFamily: "var(--font-mono, ui-monospace, monospace)",
+          }}
+        >
+          {assignedEpic}
+        </code>
+      ),
+    });
+    if (deliveryLabel) {
+      metaSegments.push({
+        key: "delivery",
+        node: <span>{deliveryLabel}</span>,
+      });
+    }
+  } else if (isLead) {
+    metaSegments.push({
+      key: "no-epic",
+      node: <span>No epic assigned</span>,
+    });
+  }
+
+  if (parsed.taskId) {
+    metaSegments.push({
+      key: "task",
+      node: (
+        <code
+          style={{
+            fontFamily: "var(--font-mono, ui-monospace, monospace)",
+          }}
+        >
+          {parsed.taskId}
+        </code>
+      ),
+    });
+  }
+
+  if (inboxLabel) {
+    metaSegments.push({
+      key: "inbox",
+      node: (
+        <span title={agent?.inbox_latest_message || inboxLabel}>
+          {inboxLabel}
+        </span>
+      ),
+    });
+  }
 
   return (
     <div
@@ -442,7 +560,15 @@ function Header({
           minWidth: 0,
         }}
       >
-        <div style={{ fontSize: 14, fontWeight: 700 }}>{agentName}</div>
+        <div
+          style={{
+            fontSize: 14,
+            fontWeight: 700,
+            textTransform: "capitalize",
+          }}
+        >
+          {agentName}
+        </div>
         <div
           style={{
             fontSize: 11,
@@ -452,79 +578,12 @@ function Header({
             gap: 6,
           }}
         >
-          <span
-            aria-hidden="true"
-            style={{
-              width: 7,
-              height: 7,
-              borderRadius: "50%",
-              background: dotColor,
-              display: "inline-block",
-            }}
-          />
-          <span>{parsed.type || "unknown"}</span>
-          {branch ? (
-            <>
-              <span>·</span>
-              <code
-                style={{
-                  fontFamily: "var(--font-mono, ui-monospace, monospace)",
-                }}
-              >
-                {branch}
-              </code>
-            </>
-          ) : null}
-          {role ? (
-            <>
-              <span>·</span>
-              <span>{role}</span>
-            </>
-          ) : null}
-          {assignedEpic ? (
-            <>
-              <span>·</span>
-              <span>assigned epic</span>
-              <code
-                style={{
-                  fontFamily: "var(--font-mono, ui-monospace, monospace)",
-                }}
-              >
-                {assignedEpic}
-              </code>
-              {deliveryLabel ? (
-                <>
-                  <span>·</span>
-                  <span>{deliveryLabel}</span>
-                </>
-              ) : null}
-            </>
-          ) : isLead ? (
-            <>
-              <span>·</span>
-              <span>no epic assigned</span>
-            </>
-          ) : null}
-          {parsed.taskId ? (
-            <>
-              <span>·</span>
-              <code
-                style={{
-                  fontFamily: "var(--font-mono, ui-monospace, monospace)",
-                }}
-              >
-                {parsed.taskId}
-              </code>
-            </>
-          ) : null}
-          {inboxLabel ? (
-            <>
-              <span>·</span>
-              <span title={agent?.inbox_latest_message || inboxLabel}>
-                {inboxLabel}
-              </span>
-            </>
-          ) : null}
+          {metaSegments.map((segment, index) => (
+            <Fragment key={segment.key}>
+              {index > 0 ? <span>·</span> : null}
+              {segment.node}
+            </Fragment>
+          ))}
         </div>
       </div>
     </div>

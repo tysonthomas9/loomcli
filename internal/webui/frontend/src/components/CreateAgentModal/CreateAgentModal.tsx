@@ -9,9 +9,9 @@ import { ApiError } from "@/types/common";
 import styles from "./CreateAgentModal.module.css";
 
 const ROLE_OPTIONS: { value: string; label: string }[] = [
-  { value: "task", label: "Task" },
-  { value: "plan", label: "Plan" },
   { value: "lead", label: "Lead" },
+  { value: "plan", label: "Plan" },
+  { value: "task", label: "Task" },
 ];
 
 export interface CreateAgentModalProps {

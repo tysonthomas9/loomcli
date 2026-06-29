@@ -74,6 +74,10 @@ function renderWithDndContext(ui: React.ReactNode) {
   return render(<DndContext>{ui}</DndContext>);
 }
 
+function getCardElement(container: HTMLElement): HTMLElement {
+  return container.querySelector("article") as HTMLElement;
+}
+
 describe("DraggableIssueCard", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -81,15 +85,15 @@ describe("DraggableIssueCard", () => {
   });
 
   describe("rendering", () => {
-    it("renders IssueCard inside wrapper", () => {
+    it("renders IssueCard as the root article", () => {
       const mockIssue = createMockIssue();
 
-      render(<DraggableIssueCard issue={mockIssue} />);
+      const { container } = render(<DraggableIssueCard issue={mockIssue} />);
 
       // IssueCard should render with the issue title
       expect(screen.getByText("Test Issue Title")).toBeInTheDocument();
-      // IssueCard renders as an article
-      expect(screen.getByRole("article")).toBeInTheDocument();
+      // IssueCard renders as an article (dnd-kit adds role="button" for dragging)
+      expect(container.querySelector("article")).toBeInTheDocument();
     });
 
     it("passes issue prop through to IssueCard", () => {
@@ -127,8 +131,8 @@ describe("DraggableIssueCard", () => {
 
       const { container } = render(<DraggableIssueCard issue={mockIssue} />);
 
-      const wrapper = container.firstChild as HTMLElement;
-      expect(wrapper).toHaveAttribute("data-dragging", "true");
+      const card = getCardElement(container);
+      expect(card).toHaveAttribute("data-dragging", "true");
     });
 
     it("does not apply data-dragging when not dragging", () => {
@@ -139,8 +143,8 @@ describe("DraggableIssueCard", () => {
 
       const { container } = render(<DraggableIssueCard issue={mockIssue} />);
 
-      const wrapper = container.firstChild as HTMLElement;
-      expect(wrapper).not.toHaveAttribute("data-dragging");
+      const card = getCardElement(container);
+      expect(card).not.toHaveAttribute("data-dragging");
     });
   });
 
@@ -172,7 +176,7 @@ describe("DraggableIssueCard", () => {
       );
     });
 
-    it("listeners are applied to the drag handle only", () => {
+    it("listeners are applied to the full card", () => {
       const mockListeners = {
         onKeyDown: vi.fn(),
         onPointerDown: vi.fn(),
@@ -184,14 +188,12 @@ describe("DraggableIssueCard", () => {
 
       const { container } = render(<DraggableIssueCard issue={mockIssue} />);
 
-      const dragHandle = container.querySelector(
-        'span[class*="dragHandle"]',
-      ) as HTMLElement;
-      expect(dragHandle).toHaveProperty("onkeydown");
-      expect(dragHandle).toHaveProperty("onpointerdown");
+      const card = getCardElement(container);
+      expect(card).toHaveProperty("onkeydown");
+      expect(card).toHaveProperty("onpointerdown");
     });
 
-    it("attributes are applied to the drag handle", () => {
+    it("attributes are applied to the full card", () => {
       const mockAttributes = {
         role: "button",
         tabIndex: 0,
@@ -205,19 +207,14 @@ describe("DraggableIssueCard", () => {
 
       const { container } = render(<DraggableIssueCard issue={mockIssue} />);
 
-      const dragHandle = container.querySelector(
-        'span[class*="dragHandle"]',
-      ) as HTMLElement;
-      expect(dragHandle).toHaveAttribute("role", "button");
-      expect(dragHandle).toHaveAttribute("tabIndex", "0");
-      expect(dragHandle).toHaveAttribute("aria-roledescription", "draggable");
-      expect(dragHandle).toHaveAttribute(
-        "aria-describedby",
-        "dnd-describedby-test",
-      );
+      const card = getCardElement(container);
+      expect(card).toHaveAttribute("role", "button");
+      expect(card).toHaveAttribute("tabIndex", "0");
+      expect(card).toHaveAttribute("aria-roledescription", "draggable");
+      expect(card).toHaveAttribute("aria-describedby", "dnd-describedby-test");
     });
 
-    it("setNodeRef is applied to wrapper element", () => {
+    it("setNodeRef is applied to the card element", () => {
       const setNodeRef = vi.fn();
       mockedUseDraggable.mockReturnValue(
         createMockDraggableReturn({ setNodeRef }),
@@ -226,7 +223,7 @@ describe("DraggableIssueCard", () => {
 
       render(<DraggableIssueCard issue={mockIssue} />);
 
-      // setNodeRef should be called with the wrapper DOM element
+      // setNodeRef should be called with the card DOM element
       expect(setNodeRef).toHaveBeenCalled();
     });
   });
@@ -240,8 +237,8 @@ describe("DraggableIssueCard", () => {
 
       const { container } = render(<DraggableIssueCard issue={mockIssue} />);
 
-      const wrapper = container.firstChild as HTMLElement;
-      expect(wrapper).toHaveStyle({ opacity: "0.5" });
+      const card = getCardElement(container);
+      expect(card).toHaveStyle({ opacity: "0.5" });
     });
 
     it("has opacity: 1 when not dragging", () => {
@@ -252,8 +249,8 @@ describe("DraggableIssueCard", () => {
 
       const { container } = render(<DraggableIssueCard issue={mockIssue} />);
 
-      const wrapper = container.firstChild as HTMLElement;
-      expect(wrapper).toHaveStyle({ opacity: "1" });
+      const card = getCardElement(container);
+      expect(card).toHaveStyle({ opacity: "1" });
     });
 
     it("applies transform when transform is present", () => {
@@ -266,8 +263,8 @@ describe("DraggableIssueCard", () => {
 
       const { container } = render(<DraggableIssueCard issue={mockIssue} />);
 
-      const wrapper = container.firstChild as HTMLElement;
-      expect(wrapper).toHaveStyle({
+      const card = getCardElement(container);
+      expect(card).toHaveStyle({
         transform: "translate3d(100px, 50px, 0)",
       });
     });
@@ -280,19 +277,18 @@ describe("DraggableIssueCard", () => {
 
       const { container } = render(<DraggableIssueCard issue={mockIssue} />);
 
-      const wrapper = container.firstChild as HTMLElement;
+      const card = getCardElement(container);
       // transform should be undefined (not applied)
-      expect(wrapper.style.transform).toBe("");
+      expect(card.style.transform).toBe("");
     });
 
-    it("applies draggable CSS class", () => {
+    it("applies data-draggable attribute", () => {
       const mockIssue = createMockIssue();
 
       const { container } = render(<DraggableIssueCard issue={mockIssue} />);
 
-      const wrapper = container.firstChild as HTMLElement;
-      // The class name will be transformed by CSS modules, but should contain 'draggable'
-      expect(wrapper.className).toContain("draggable");
+      const card = getCardElement(container);
+      expect(card).toHaveAttribute("data-draggable", "true");
     });
   });
 
@@ -370,14 +366,13 @@ describe("DraggableIssueCard", () => {
 
       const { container } = render(<DraggableIssueCard issue={mockIssue} />);
 
-      const wrapper = container.firstChild as HTMLElement;
-      // Should have draggable class when not overlay
-      expect(wrapper.className).toContain("draggable");
+      const card = getCardElement(container);
+      expect(card).toHaveAttribute("data-draggable", "true");
     });
   });
 
   describe("accessibility", () => {
-    it("ARIA attributes from useDraggable are present on the drag handle", () => {
+    it("ARIA attributes from useDraggable are present on the card", () => {
       const mockAttributes = {
         role: "button",
         tabIndex: 0,
@@ -391,17 +386,12 @@ describe("DraggableIssueCard", () => {
 
       const { container } = render(<DraggableIssueCard issue={mockIssue} />);
 
-      const dragHandle = container.querySelector(
-        'span[class*="dragHandle"]',
-      ) as HTMLElement;
-      expect(dragHandle).toHaveAttribute("aria-roledescription", "draggable");
-      expect(dragHandle).toHaveAttribute(
-        "aria-describedby",
-        "dnd-describedby-test",
-      );
+      const card = getCardElement(container);
+      expect(card).toHaveAttribute("aria-roledescription", "draggable");
+      expect(card).toHaveAttribute("aria-describedby", "dnd-describedby-test");
     });
 
-    it("drag handle is focusable via tabIndex", () => {
+    it("card is focusable via tabIndex", () => {
       const mockAttributes = {
         tabIndex: 0,
       };
@@ -412,10 +402,8 @@ describe("DraggableIssueCard", () => {
 
       const { container } = render(<DraggableIssueCard issue={mockIssue} />);
 
-      const dragHandle = container.querySelector(
-        'span[class*="dragHandle"]',
-      ) as HTMLElement;
-      expect(dragHandle).toHaveAttribute("tabIndex", "0");
+      const card = getCardElement(container);
+      expect(card).toHaveAttribute("tabIndex", "0");
     });
   });
 
@@ -433,7 +421,7 @@ describe("DraggableIssueCard", () => {
       expect(screen.getByText("Test Issue Title")).toBeInTheDocument();
     });
 
-    it("component renders within DndContext with proper wrapper", () => {
+    it("component renders within DndContext with draggable card", () => {
       mockedUseDraggable.mockReturnValue(createMockDraggableReturn());
       const mockIssue = createMockIssue();
 
@@ -441,9 +429,8 @@ describe("DraggableIssueCard", () => {
         <DraggableIssueCard issue={mockIssue} />,
       );
 
-      // Should have the draggable wrapper
-      const wrapper = container.firstChild as HTMLElement;
-      expect(wrapper.className).toContain("draggable");
+      const card = getCardElement(container);
+      expect(card).toHaveAttribute("data-draggable", "true");
     });
 
     it("multiple DraggableIssueCards work in same DndContext", () => {
@@ -491,9 +478,11 @@ describe("DraggableIssueCard", () => {
     it("className prop is passed through to IssueCard", () => {
       const mockIssue = createMockIssue();
 
-      render(<DraggableIssueCard issue={mockIssue} className="custom-class" />);
+      const { container } = render(
+        <DraggableIssueCard issue={mockIssue} className="custom-class" />,
+      );
 
-      const article = screen.getByRole("article");
+      const article = container.querySelector("article");
       expect(article).toHaveClass("custom-class");
     });
 
@@ -522,49 +511,53 @@ describe("DraggableIssueCard", () => {
 
       expect(screen.getByText("Test Issue Title")).toBeInTheDocument();
     });
+
+    it("renders working agent footer badge via IssueCard", () => {
+      const issue = createMockIssue({
+        owner: "tyson",
+        assignee: "lead-a",
+      });
+
+      render(<DraggableIssueCard issue={issue} columnId="in_progress" />);
+
+      expect(screen.getByTestId("issue-card-agent")).toHaveAttribute(
+        "title",
+        "Working: lead-a",
+      );
+    });
   });
 
-  describe("drag handle", () => {
-    it("renders grip SVG with 6 circle elements", () => {
+  describe("full-card drag", () => {
+    it("does not render a separate drag handle", () => {
       const mockIssue = createMockIssue();
 
       const { container } = render(<DraggableIssueCard issue={mockIssue} />);
 
-      const svg = container.querySelector('span[class*="dragHandle"] svg');
-      expect(svg).toBeInTheDocument();
-
-      const circles = svg?.querySelectorAll("circle");
-      expect(circles).toHaveLength(6);
+      expect(
+        container.querySelector('span[class*="dragHandle"]'),
+      ).not.toBeInTheDocument();
     });
 
-    it("has correct CSS class (dragHandle)", () => {
+    it("marks the card as draggable outside overlay mode", () => {
       const mockIssue = createMockIssue();
 
       const { container } = render(<DraggableIssueCard issue={mockIssue} />);
 
-      const dragHandle = container.querySelector('span[class*="dragHandle"]');
-      expect(dragHandle).toBeInTheDocument();
+      expect(getCardElement(container)).toHaveAttribute(
+        "data-draggable",
+        "true",
+      );
     });
 
-    it('grip icon has aria-hidden="true" for accessibility', () => {
-      const mockIssue = createMockIssue();
-
-      const { container } = render(<DraggableIssueCard issue={mockIssue} />);
-
-      const gripSvg = container.querySelector('span[class*="dragHandle"] svg');
-      expect(gripSvg).toBeInTheDocument();
-      expect(gripSvg).toHaveAttribute("aria-hidden", "true");
-    });
-
-    it("is not rendered in overlay mode", () => {
+    it("does not mark overlay cards as draggable", () => {
       const mockIssue = createMockIssue();
 
       const { container } = render(
         <DraggableIssueCard issue={mockIssue} isOverlay={true} />,
       );
 
-      const dragHandle = container.querySelector('span[class*="dragHandle"]');
-      expect(dragHandle).not.toBeInTheDocument();
+      const article = container.querySelector("article");
+      expect(article).not.toHaveAttribute("data-draggable");
     });
   });
 
@@ -625,55 +618,6 @@ describe("DraggableIssueCard", () => {
     });
   });
 
-  describe("drag handle", () => {
-    it("renders drag handle element in the DOM", () => {
-      const mockIssue = createMockIssue();
-
-      const { container } = render(<DraggableIssueCard issue={mockIssue} />);
-
-      const dragHandle = container.querySelector('span[class*="dragHandle"]');
-      expect(dragHandle).toBeInTheDocument();
-    });
-
-    it('has correct aria-hidden="true" on the grip icon', () => {
-      const mockIssue = createMockIssue();
-
-      const { container } = render(<DraggableIssueCard issue={mockIssue} />);
-
-      const gripSvg = container.querySelector('span[class*="dragHandle"] svg');
-      expect(gripSvg).toHaveAttribute("aria-hidden", "true");
-    });
-
-    it("has the correct CSS class on the handle wrapper", () => {
-      const mockIssue = createMockIssue();
-
-      const { container } = render(<DraggableIssueCard issue={mockIssue} />);
-
-      const dragHandle = container.querySelector('span[class*="dragHandle"]');
-      expect(dragHandle?.className).toContain("dragHandle");
-    });
-
-    it("does NOT render in overlay mode", () => {
-      const mockIssue = createMockIssue();
-
-      const { container } = render(
-        <DraggableIssueCard issue={mockIssue} isOverlay={true} />,
-      );
-
-      const dragHandle = container.querySelector('span[class*="dragHandle"]');
-      expect(dragHandle).not.toBeInTheDocument();
-    });
-
-    it("renders with 6 circle elements (grip dots)", () => {
-      const mockIssue = createMockIssue();
-
-      const { container } = render(<DraggableIssueCard issue={mockIssue} />);
-
-      const circles = container.querySelectorAll("svg circle");
-      expect(circles).toHaveLength(6);
-    });
-  });
-
   describe("pending optimistic state", () => {
     it("applies data-optimistic='pending' when isPending is true", () => {
       const mockIssue = createMockIssue();
@@ -682,8 +626,8 @@ describe("DraggableIssueCard", () => {
         <DraggableIssueCard issue={mockIssue} isPending={true} />,
       );
 
-      const wrapper = container.firstChild as HTMLElement;
-      expect(wrapper).toHaveAttribute("data-optimistic", "pending");
+      const card = getCardElement(container);
+      expect(card).toHaveAttribute("data-optimistic", "pending");
     });
 
     it("does not apply data-optimistic when isPending is false", () => {
@@ -693,8 +637,8 @@ describe("DraggableIssueCard", () => {
         <DraggableIssueCard issue={mockIssue} isPending={false} />,
       );
 
-      const wrapper = container.firstChild as HTMLElement;
-      expect(wrapper).not.toHaveAttribute("data-optimistic");
+      const card = getCardElement(container);
+      expect(card).not.toHaveAttribute("data-optimistic");
     });
 
     it("does not apply data-optimistic when isPending is undefined", () => {
@@ -702,8 +646,8 @@ describe("DraggableIssueCard", () => {
 
       const { container } = render(<DraggableIssueCard issue={mockIssue} />);
 
-      const wrapper = container.firstChild as HTMLElement;
-      expect(wrapper).not.toHaveAttribute("data-optimistic");
+      const card = getCardElement(container);
+      expect(card).not.toHaveAttribute("data-optimistic");
     });
 
     it("data-optimistic is not set in overlay mode even with isPending", () => {

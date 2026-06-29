@@ -370,4 +370,18 @@ describe("CreateAgentModal: close affordances", () => {
     fireEvent.click(screen.getByRole("button", { name: /^close$/i }));
     expect(onClose).toHaveBeenCalledTimes(1);
   });
+
+  it("does not invoke onClose when clicking near the dialog in the dismiss buffer", () => {
+    const { onClose } = renderModal();
+    const dialog = screen.getByRole("dialog");
+    fireEvent.click(dialog.parentElement!);
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it("invokes onClose when clicking the backdrop outside the dismiss buffer", () => {
+    const { onClose } = renderModal();
+    const overlay = screen.getByTestId("create-agent-overlay");
+    fireEvent.click(overlay, { target: overlay, currentTarget: overlay });
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
 });

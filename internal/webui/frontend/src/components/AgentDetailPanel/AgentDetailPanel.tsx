@@ -471,6 +471,8 @@ export function AgentDetailPanel({
                 >
                   <FileEditorPanel
                     agentName={agent.name}
+                    agentRole={agent.role}
+                    agentRepo={agent.repo}
                     isActive={activeTab === "files"}
                   />
                 </Suspense>

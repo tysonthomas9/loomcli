@@ -497,7 +497,10 @@ func storeWorkspacePathsFn(ctx context.Context, config webui.ServerConfig) func(
 		return nil
 	}
 	return func() (map[string]string, error) {
-		return storeadapter.ListWorkspacePaths(ctx, config.Store)
+		// Healing variant: re-bind a workspace whose local path is missing from
+		// state.json to an existing on-disk checkout, so reconciliation recovers
+		// the terminal/readyz instead of leaving the workspace degraded.
+		return storeadapter.ListWorkspacePathsOrHeal(ctx, config.Store)
 	}
 }
 

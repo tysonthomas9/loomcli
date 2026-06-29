@@ -306,6 +306,10 @@ func TestSessionServiceListTaskSessionsFallsBackToFileStores(t *testing.T) {
 }
 
 func TestSessionServiceListTaskSessionsSearchesRuntimeDir(t *testing.T) {
+	// Isolate the state cache to a temp config dir — bootstrap.SaveStateCache
+	// REPLACES the whole state.json, so without this it clobbers the developer's
+	// real ~/.loom/state.json (wiping local workspace path entries).
+	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
 	ctx := t.Context()
 	workspacePath := t.TempDir()
 	runtimeDir := t.TempDir()

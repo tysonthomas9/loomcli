@@ -61,6 +61,22 @@ export function TerminalPane({
   autoStartStaleSession,
   autoReconnect,
 }: TerminalPaneProps) {
+  // TerminalConnectionOverlay renders its own overlay for the initial
+  // connecting spinner and for every actionable state (disconnected /
+  // error / session_ended). ReconnectingOverlay is the slim background
+  // indicator shown only while the terminal itself stays visible
+  // (connecting after a prior successful connect). Rendering both at once
+  // — e.g. "Disconnected" + "Auto-reconnecting..." subtext on top of a
+  // faint "Reconnecting..." pulse — produced overlapping text and two
+  // Reconnect buttons. Suppress ReconnectingOverlay whenever the
+  // connection overlay owns the pane; it carries the expired message as
+  // subtext so no call-to-action is lost.
+  const connectionOverlayVisible =
+    tab.connectionState === "connecting"
+      ? !hasConnected
+      : tab.connectionState === "disconnected" ||
+        tab.connectionState === "error" ||
+        tab.connectionState === "session_ended";
   return (
     <>
       <TerminalInstance
@@ -91,11 +107,14 @@ export function TerminalPane({
             onReconnect={onReconnect}
             autoReconnect={autoReconnect}
             isAutoReconnecting={reconnectState === "reconnecting"}
+            reconnectExpired={reconnectState === "expired"}
           />
-          <ReconnectingOverlay
-            state={reconnectState}
-            onReconnect={onReconnect}
-          />
+          {!connectionOverlayVisible && (
+            <ReconnectingOverlay
+              state={reconnectState}
+              onReconnect={onReconnect}
+            />
+          )}
         </>
       )}
     </>

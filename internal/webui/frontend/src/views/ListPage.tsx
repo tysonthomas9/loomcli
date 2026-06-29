@@ -1,23 +1,27 @@
 /**
  * ListPage — the Aether design's List layout: issues grouped by epic into
  * collapsible sections of flat rows (status dot · id · title · status chip ·
- * assignee), each section headed by the epic title + count + open-epic
- * button. The sortable data table remains available at /table.
+ * assignee), each section headed like the kanban swim-lane epic header.
+ * The sortable data table remains available at /table.
  */
 
 import { useMemo, useState } from "react";
+import { useStore } from "zustand";
 
 import {
   groupIssuesByField,
   sortLanes,
   type LaneGroup,
 } from "@/components/SwimLaneBoard/groupingUtils";
+import laneStyles from "@/components/SwimLane/SwimLane.module.css";
 import {
   useWorkspaceViewData,
   useWorkspaceViewActions,
 } from "@/contexts/WorkspaceViewContext";
+import { useAgentStoreInstance } from "@/hooks/common";
 import type { Issue, Status } from "@/types";
-import { formatIssueId, formatStatusLabel } from "@/utils/issue";
+import { buildEpicLeadClaims } from "@/utils/agentRole";
+import { formatIssueId, formatStatusLabel, isPRUrl } from "@/utils/issue";
 import { getAvatarColor, shouldUseWhiteText } from "@/utils/colorUtils";
 
 import styles from "./ListPage.module.css";
@@ -60,16 +64,33 @@ export function ListPage(): JSX.Element {
   const { filteredIssues } = useWorkspaceViewData();
   const { handleIssueClick } = useWorkspaceViewActions();
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+  const agentStore = useAgentStoreInstance();
+  const agents = useStore(agentStore, (s) => s.agents);
+  const epicLeadClaims = useMemo(() => buildEpicLeadClaims(agents), [agents]);
 
   const lanes = useMemo<LaneGroup[]>(() => {
     const grouped = groupIssuesByField(filteredIssues, "epic");
-    // Hide empty sections (design returns null for empty epic groups) unless
-    // the epic itself is still open.
     const visible = grouped.filter(
       (lane) => lane.issues.length > 0 || lane.groupIssue?.status !== "closed",
     );
     return sortLanes(visible, "title");
   }, [filteredIssues]);
+
+  // Precompute per-lane row ordering and PR counts so collapse toggles (which
+  // re-render ListPage) don't re-sort/-filter every lane's issues each render.
+  const laneViews = useMemo(
+    () =>
+      lanes.map((lane) => ({
+        lane,
+        rows: [...lane.issues].sort(
+          (a, b) =>
+            (STATUS_RANK[statusKey(a)] ?? 9) - (STATUS_RANK[statusKey(b)] ?? 9),
+        ),
+        prCount: lane.issues.filter((issue) => isPRUrl(issue.external_ref))
+          .length,
+      })),
+    [lanes],
+  );
 
   const toggle = (id: string): void => {
     setCollapsed((prev) => {
@@ -86,44 +107,153 @@ export function ListPage(): JSX.Element {
         {lanes.length === 0 && (
           <p className={styles.empty}>No issues yet — create one to start.</p>
         )}
-        {lanes.map((lane) => {
+        {laneViews.map(({ lane, rows, prCount }) => {
           const isCollapsed = collapsed.has(lane.id);
-          const rows = [...lane.issues].sort(
-            (a, b) =>
-              (STATUS_RANK[statusKey(a)] ?? 9) -
-              (STATUS_RANK[statusKey(b)] ?? 9),
+          const headerId = `list-lane-header-${lane.id}`;
+          const epicKey =
+            lane.groupIssue?.id ?? lane.id.replace(/^lane-epic-/, "");
+          const epicRunner =
+            epicKey !== "__ungrouped__"
+              ? (epicLeadClaims.get(epicKey) ?? null)
+              : undefined;
+          const epicDisplayId = lane.groupIssue
+            ? formatIssueId(lane.groupIssue.id)
+            : undefined;
+          const openEpicAriaLabel = epicDisplayId
+            ? `Open epic ${epicDisplayId}: ${lane.title}`
+            : `Open epic: ${lane.title}`;
+          const laneTitleContent = (
+            <span className={laneStyles.laneTitleContent}>
+              <span className={laneStyles.laneTitleText}>{lane.title}</span>
+              {epicDisplayId !== undefined && (
+                <span
+                  className={laneStyles.laneTitleId}
+                  title={lane.groupIssue?.id}
+                >
+                  {epicDisplayId}
+                </span>
+              )}
+            </span>
           );
+
           return (
-            <section key={lane.id} className={styles.epicSection}>
-              <div className={styles.epicHead}>
+            <section
+              key={lane.id}
+              className={laneStyles.swimLane}
+              data-collapsed={isCollapsed}
+              aria-labelledby={headerId}
+            >
+              <header className={laneStyles.laneHeader} id={headerId}>
                 <button
                   type="button"
-                  className={styles.epicToggle}
+                  className={laneStyles.collapseToggle}
                   onClick={() => toggle(lane.id)}
                   aria-expanded={!isCollapsed}
+                  aria-label={
+                    isCollapsed
+                      ? `Expand ${lane.title}`
+                      : `Collapse ${lane.title}`
+                  }
+                  data-testid="collapse-toggle"
                 >
-                  <span
-                    className={styles.chevron}
-                    data-collapsed={isCollapsed || undefined}
+                  <svg
+                    className={laneStyles.chevronIcon}
+                    width="16"
+                    height="16"
+                    viewBox="0 0 16 16"
+                    fill="none"
                     aria-hidden="true"
                   >
-                    ▸
-                  </span>
-                  <h2 className={styles.epicTitle}>{lane.title}</h2>
-                  <span className={styles.count}>{lane.issues.length}</span>
+                    <path
+                      d="M6 4l4 4-4 4"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
+                  </svg>
                 </button>
-                {lane.groupIssue && (
-                  <button
-                    type="button"
-                    className={styles.epicOpen}
-                    onClick={() => handleIssueClick(lane.groupIssue as Issue)}
-                    aria-label={`Open epic: ${lane.title}`}
-                    title="View epic details"
+                <h2 className={laneStyles.laneTitle}>
+                  {lane.groupIssue ? (
+                    <button
+                      type="button"
+                      className={laneStyles.laneTitleButton}
+                      onClick={() => handleIssueClick(lane.groupIssue as Issue)}
+                      aria-label={openEpicAriaLabel}
+                      data-testid="lane-title-button"
+                    >
+                      {laneTitleContent}
+                    </button>
+                  ) : (
+                    laneTitleContent
+                  )}
+                </h2>
+                {lane.groupIssue && prCount > 0 && (
+                  <span
+                    className={laneStyles.lanePrCount}
+                    aria-label={`${prCount} open pull request${prCount === 1 ? "" : "s"}`}
+                    title={`${prCount} open pull request${prCount === 1 ? "" : "s"}`}
                   >
-                    ⤢
-                  </button>
+                    <svg viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                      <circle
+                        cx="4"
+                        cy="4"
+                        r="1.6"
+                        stroke="currentColor"
+                        strokeWidth="1.4"
+                      />
+                      <circle
+                        cx="4"
+                        cy="12"
+                        r="1.6"
+                        stroke="currentColor"
+                        strokeWidth="1.4"
+                      />
+                      <circle
+                        cx="12"
+                        cy="12"
+                        r="1.6"
+                        stroke="currentColor"
+                        strokeWidth="1.4"
+                      />
+                      <path
+                        d="M4 5.6v4.8M12 10.4V8a2 2 0 0 0-2-2H7.5"
+                        stroke="currentColor"
+                        strokeWidth="1.4"
+                        strokeLinecap="round"
+                      />
+                    </svg>
+                    {prCount} {prCount === 1 ? "PR" : "PRs"}
+                  </span>
                 )}
-              </div>
+                <span
+                  className={laneStyles.laneCount}
+                  aria-label={`${lane.issues.length} issues`}
+                >
+                  {lane.issues.length}
+                </span>
+                {epicRunner !== undefined &&
+                  (epicRunner !== null ? (
+                    <span
+                      className={laneStyles.runnerBadge}
+                      title={`Epic run by ${epicRunner}`}
+                      data-testid="lane-runner-badge"
+                    >
+                      <span
+                        className={laneStyles.runnerDot}
+                        aria-hidden="true"
+                      />
+                      {epicRunner}
+                    </span>
+                  ) : (
+                    <span
+                      className={laneStyles.unclaimedBadge}
+                      data-testid="lane-unclaimed-badge"
+                    >
+                      Unclaimed
+                    </span>
+                  ))}
+              </header>
               {!isCollapsed && (
                 <ul className={styles.rows}>
                   {rows.length === 0 && (

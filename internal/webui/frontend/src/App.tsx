@@ -96,6 +96,7 @@ import { useIssueDetail } from "@/hooks/issues/useIssueDetail";
 import { useSearchScope } from "@/hooks/issues/useSearchScope";
 import { useToast } from "@/hooks/ui/useToast";
 import { useTheme } from "@/hooks/ui/useTheme";
+import { useTerminalFont } from "@/hooks/terminal/useTerminalFont";
 import { usePanelManager } from "@/hooks/ui/usePanelManager";
 import { KeyboardShortcutProvider } from "@/hooks/ui/useKeyboardShortcuts";
 import { useWorkspaceContext } from "@/hooks/workspace/useWorkspaceContext";
@@ -148,15 +149,17 @@ function getSingleRepoSourceRepo(
 }
 
 function App() {
-  // Route params: issueId present on /ws/:id/issues/:issueId
-  const { issueId: routeIssueId } = useParams<{
+  // Route params: issueId on /ws/:id/issues/:issueId; agentName on /agents/:agentName
+  const { issueId: routeIssueId, agentName: routeAgentName } = useParams<{
     workspaceId: string;
-    issueId: string;
+    issueId?: string;
+    agentName?: string;
   }>();
   const navigate = useNavigate();
 
   // Theme state
   const { theme, toggleTheme } = useTheme();
+  useTerminalFont();
 
   // Workspace context for breadcrumb, single-repo guard, and workspace selection
   const {
@@ -433,6 +436,11 @@ function App() {
       : pendingPanel?.type === "agent"
         ? pendingPanel.name
         : null;
+
+  const sidebarSelectedAgentName =
+    activeView === "agents" && routeAgentName
+      ? routeAgentName
+      : selectedAgentName;
 
   // Ref to main scrollable container for workspace state snapshot.
   // NOTE: Must be declared BEFORE useWorkspaceState below — React runs effects
@@ -810,9 +818,15 @@ function App() {
   );
 
   const hasWorkspaceRepo = workspaceRepos.length > 0;
-  const hasWorkspaceAgent = Boolean(
-    getOnboardingPlannerName(workspace?.agents),
-  );
+  const onboardingPlannerName = getOnboardingPlannerName(workspace?.agents);
+  // The "create agent" step is satisfied by ANY agent, but running the first
+  // task needs the planner specifically (handleRunFirstOnboardingTask assigns
+  // it). Track them separately so a workspace with only a non-planner agent
+  // (e.g. a Lead) marks create-agent complete yet keeps "Create & Run" disabled
+  // — instead of offering it and then dead-ending with "Planner agent is not
+  // available yet."
+  const hasWorkspaceAgent = (workspace?.agents?.length ?? 0) > 0;
+  const hasOnboardingPlanner = Boolean(onboardingPlannerName);
   const hasWorkspaceIssue = issues.length > 0 || (agentStats?.total ?? 0) > 0;
   const defaultBackend = onboardingBackendConfig?.backend;
   const defaultBackendStatus = aiBackends.find(
@@ -861,7 +875,7 @@ function App() {
     setOnboardingAction("running-first-task");
     setOnboardingActionError(null);
     try {
-      let onboardingAgent = getOnboardingPlannerName(workspace?.agents);
+      let onboardingAgent = onboardingPlannerName;
       try {
         const latestWorkspace = await fetchWorkspaceApi(workspaceId);
         onboardingAgent = getOnboardingPlannerName(latestWorkspace.agents);
@@ -907,6 +921,7 @@ function App() {
     refetchWorkspace,
     showToast,
     workspace?.agents,
+    onboardingPlannerName,
     workspaceId,
     workspaceRepos,
   ]);
@@ -922,6 +937,24 @@ function App() {
   const workspaceOnboardingSteps: OnboardingStep[] = useMemo(
     () => [
       {
+        id: "setup-backend",
+        title: "Set up AI CLIs",
+        description: isDefaultBackendReady
+          ? `${defaultBackendStatus?.displayName ?? "The default CLI"} is ready.`
+          : "Install, login, or choose a ready CLI.",
+        status: isDefaultBackendReady ? "complete" : "actionable",
+        detail: (
+          <AIBackendSetupList
+            backends={aiBackends}
+            defaultBackend={defaultBackend}
+            isLoading={aiBackendsLoading || onboardingBackendConfigLoading}
+            error={aiBackendsError}
+            isSavingDefault={isSavingOnboardingBackend}
+            onAction={handleBackendSetupAction}
+          />
+        ),
+      },
+      {
         id: "workspace-repo",
         title: "Create workspace with repo",
         description: hasWorkspaceRepo
@@ -936,28 +969,6 @@ function App() {
           ? "The repo is visible to Loom and ready for the next setup step."
           : "Repository checks run after a repo has been attached.",
         status: hasWorkspaceRepo ? "complete" : "blocked",
-      },
-      {
-        id: "setup-backend",
-        title: "Set up AI CLIs",
-        description: isDefaultBackendReady
-          ? `${defaultBackendStatus?.displayName ?? "The default CLI"} is ready.`
-          : "Install, login, or choose a ready CLI.",
-        status: !hasWorkspaceRepo
-          ? "blocked"
-          : isDefaultBackendReady
-            ? "complete"
-            : "actionable",
-        detail: hasWorkspaceRepo ? (
-          <AIBackendSetupList
-            backends={aiBackends}
-            defaultBackend={defaultBackend}
-            isLoading={aiBackendsLoading || onboardingBackendConfigLoading}
-            error={aiBackendsError}
-            isSavingDefault={isSavingOnboardingBackend}
-            onAction={handleBackendSetupAction}
-          />
-        ) : undefined,
       },
       {
         id: "create-agent",
@@ -1000,7 +1011,7 @@ function App() {
             ? "pending"
             : hasWorkspaceIssue
               ? "complete"
-              : hasWorkspaceAgent && isDefaultBackendReady
+              : hasOnboardingPlanner && isDefaultBackendReady
                 ? "current"
                 : "blocked",
         actionLabel:
@@ -1016,6 +1027,7 @@ function App() {
     ],
     [
       hasWorkspaceAgent,
+      hasOnboardingPlanner,
       hasWorkspaceIssue,
       hasWorkspaceRepo,
       isDefaultBackendReady,
@@ -1286,11 +1298,11 @@ function App() {
     activeView === "graph";
   const boardToolbar = (
     <div className={styles.boardToolbar} data-testid="board-toolbar">
-      <ViewSubSwitcher activeView={activeView} onChange={navigateToView} />
-      <div className={styles.boardToolbarControls}>
-        {searchControl}
-        {newIssueButton}
+      <div className={styles.boardToolbarTabs}>
+        <ViewSubSwitcher activeView={activeView} onChange={navigateToView} />
       </div>
+      <div className={styles.boardToolbarSearch}>{searchControl}</div>
+      <div className={styles.boardToolbarActions}>{newIssueButton}</div>
     </div>
   );
 
@@ -1299,12 +1311,12 @@ function App() {
       type="button"
       className={styles.brandButton}
       onClick={() => navigateToView("kanban")}
-      aria-label="Aether home — return to Kanban board"
+      aria-label="Loom home — return to Kanban board"
     >
       <span className={styles.brandMark} aria-hidden="true">
         ◇
       </span>
-      <span className={styles.brandName}>Aether</span>
+      <span className={styles.brandName}>Loom</span>
     </button>
   ) : (
     <WorkspaceBreadcrumb
@@ -1324,6 +1336,7 @@ function App() {
     <WorkspaceTree
       onWorkspaceSwitch={handleWorkspaceSwitch}
       onAgentClick={handleAgentClick}
+      selectedAgentName={sidebarSelectedAgentName}
       agentTasks={agentTasks}
       onAddClick={() => setShowCreateAgent(true)}
       onAddWorkspaceClick={() => setShowCreateWorkspace(true)}
@@ -1332,6 +1345,7 @@ function App() {
       disconnectedSince={staleBannerDisconnectedSince}
       onRetryConnection={staleBannerRetry}
       onTreeSelect={handleTreeIssueSelect}
+      activeView={activeView}
     />
   );
 

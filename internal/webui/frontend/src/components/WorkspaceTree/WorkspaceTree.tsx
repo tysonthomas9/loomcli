@@ -15,6 +15,7 @@ import {
   useWorkspaceTreeWidth,
 } from "@/hooks";
 import { type ConnectionState } from "@/hooks/common";
+import type { ViewMode } from "@/types";
 import { wsGet, wsSet } from "@/utils/scopedStorage";
 import { ONBOARDING_REPO_URL } from "@/utils/onboardingDefaults";
 import { ErrorDisplay } from "@/components/ErrorDisplay";
@@ -22,6 +23,7 @@ import { AddRepoModal } from "@/components/AddRepoModal";
 
 import { WorkspaceSelectorBar } from "./WorkspaceSelectorBar";
 import { AgentSection } from "./AgentSection";
+import { TerminalSection } from "./TerminalSection";
 import { RunningSection } from "./RunningSection";
 import { ReposSection } from "./ReposSection";
 import { CollapsedAgentRail } from "./CollapsedAgentRail";
@@ -40,6 +42,8 @@ export interface WorkspaceTreeProps {
   onWorkspaceSwitch?: (workspaceName: string) => void;
   /** Callback when an agent card is clicked */
   onAgentClick?: (agentName: string) => void;
+  /** Agent name highlighted in the sidebar (from route or agent panel). */
+  selectedAgentName?: string | null;
   /** Map of agent name to task info for display in AgentCards */
   agentTasks?: Record<string, { title: string }>;
   /** Callback when the "+ Add agent" button is clicked */
@@ -56,6 +60,8 @@ export interface WorkspaceTreeProps {
   onRetryConnection?: () => void;
   /** Callback when a task is selected in the tree */
   onTreeSelect?: (issueId: string) => void;
+  /** Current main view — terminal view swaps the agent list for terminals. */
+  activeView?: ViewMode;
 }
 
 // Scoped key suffix for workspace-specific collapse state
@@ -108,6 +114,7 @@ export function WorkspaceTree({
   defaultCollapsed = false,
   onWorkspaceSwitch,
   onAgentClick,
+  selectedAgentName = null,
   agentTasks,
   onAddClick,
   onAddWorkspaceClick,
@@ -116,6 +123,7 @@ export function WorkspaceTree({
   disconnectedSince,
   onRetryConnection,
   onTreeSelect,
+  activeView = "kanban",
 }: WorkspaceTreeProps): JSX.Element {
   const workspaceContext = useWorkspaceContext();
   const {
@@ -201,6 +209,7 @@ export function WorkspaceTree({
   }, []);
 
   const workspaces = workspace?.workspaces ?? [];
+  const showTerminalSidebar = activeView === "terminal";
 
   const isDisconnected =
     connectionState !== undefined &&
@@ -280,6 +289,7 @@ export function WorkspaceTree({
       {isCollapsed ? (
         <CollapsedAgentRail
           onAgentClick={onAgentClick}
+          selectedAgentName={selectedAgentName}
           onAddClick={onAddClick}
         />
       ) : null}
@@ -338,12 +348,17 @@ export function WorkspaceTree({
             }}
           />
 
-          {/* Flat agent list */}
-          <AgentSection
-            onAgentClick={onAgentClick}
-            agentTasks={agentTasks}
-            onAddClick={onAddClick}
-          />
+          {/* Agents in board views; terminal sessions in Terminal view */}
+          {showTerminalSidebar ? (
+            <TerminalSection />
+          ) : (
+            <AgentSection
+              onAgentClick={onAgentClick}
+              selectedAgentName={selectedAgentName}
+              agentTasks={agentTasks}
+              onAddClick={onAddClick}
+            />
+          )}
 
           {/* Running tasks grouped by epic — only shows when agents active */}
           <RunningSection onSelect={onTreeSelect} />

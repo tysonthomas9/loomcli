@@ -17,6 +17,7 @@ import { useStore } from "zustand";
 
 import { useAgentStoreInstance } from "@/hooks";
 import { type LoomAgentStatus, parseLoomStatus } from "@/types";
+import { orderAgentsForEpicRunner } from "@/utils/agentRole";
 import { getAvatarColor, shouldUseWhiteText } from "@/utils/colorUtils";
 
 import styles from "./AgentIconRail.module.css";
@@ -101,30 +102,7 @@ export function isLiveAgentRailVisible(agent: LoomAgentStatus): boolean {
   return state !== "stopped" && state !== "dead" && desiredState !== "stopped";
 }
 
-export function orderAgentsForEpicRunner(
-  agents: LoomAgentStatus[],
-): LoomAgentStatus[] {
-  return [...agents].sort((a, b) => {
-    const aRank = agentRailRank(a);
-    const bRank = agentRailRank(b);
-    if (aRank !== bRank) return aRank - bRank;
-    const aParent = a.parent ?? "";
-    const bParent = b.parent ?? "";
-    if (aParent !== bParent) return aParent.localeCompare(bParent);
-    return a.name.localeCompare(b.name);
-  });
-}
-
-function agentRailRank(agent: LoomAgentStatus): number {
-  if (isLeadRole(agent.role)) return 0;
-  if (agent.orchestrator_session_id || agent.parent) return 1;
-  return 2;
-}
-
-function isLeadRole(role: string | undefined): boolean {
-  const normalized = (role ?? "").trim().toLowerCase();
-  return normalized === "lead" || normalized === "orchestrator";
-}
+export { orderAgentsForEpicRunner } from "@/utils/agentRole";
 
 export function agentAvatarTooltip(agent: LoomAgentStatus): string {
   const parsed = parseLoomStatus(agent.status ?? "");

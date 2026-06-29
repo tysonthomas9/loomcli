@@ -12,7 +12,8 @@ import type { BlockedInfo } from "@/types/issue";
 import type { KanbanColumnConfig } from "@/components/KanbanBoard/types";
 import { StatusColumn } from "@/components/StatusColumn";
 import type { Issue } from "@/types";
-import { isPRUrl } from "@/utils/issue";
+import { visibleKanbanColumns } from "@/components/KanbanBoard/columnVisibility";
+import { formatIssueId, isPRUrl } from "@/utils/issue";
 
 import styles from "./SwimLane.module.css";
 
@@ -63,6 +64,8 @@ export interface SwimLaneProps {
   cardLimit?: number;
   /** Set of issue IDs with pending optimistic updates */
   pendingIds?: Set<string>;
+  /** Hide columns with no issues in this lane */
+  compactColumns?: boolean;
 }
 
 /**
@@ -86,6 +89,7 @@ export function SwimLane({
   className,
   cardLimit = DEFAULT_CARD_LIMIT,
   pendingIds,
+  compactColumns = false,
 }: SwimLaneProps): JSX.Element {
   // Track which columns are expanded to show all cards
   const [expandedColumns, setExpandedColumns] = useState<Set<string>>(
@@ -136,10 +140,15 @@ export function SwimLane({
     return grouped;
   }, [filteredIssues, columns, blockedIssues]);
 
+  const displayColumns = useMemo(
+    () => visibleKanbanColumns(columns, issuesByColumn, compactColumns),
+    [columns, issuesByColumn, compactColumns],
+  );
+
   const headerId = `lane-header-${id}`;
   const rootClassName = [styles.swimLane, className].filter(Boolean).join(" ");
   const laneGridStyle = {
-    gridTemplateColumns: `repeat(${columns.length}, minmax(${SWIM_LANE_COLUMN_MIN_PX}px, 1fr))`,
+    gridTemplateColumns: `repeat(${displayColumns.length}, minmax(${SWIM_LANE_COLUMN_MIN_PX}px, 1fr))`,
   } as const;
   const isHeaderClickable =
     headerIssue !== undefined && onHeaderIssueClick !== undefined;
@@ -148,6 +157,21 @@ export function SwimLane({
       onHeaderIssueClick(headerIssue);
     }
   };
+  const epicDisplayId = headerIssue ? formatIssueId(headerIssue.id) : undefined;
+  const openEpicAriaLabel = epicDisplayId
+    ? `Open epic ${epicDisplayId}: ${title}`
+    : `Open epic: ${title}`;
+
+  const laneTitleContent = (
+    <span className={styles.laneTitleContent}>
+      <span className={styles.laneTitleText}>{title}</span>
+      {epicDisplayId !== undefined && (
+        <span className={styles.laneTitleId} title={headerIssue?.id}>
+          {epicDisplayId}
+        </span>
+      )}
+    </span>
+  );
 
   const columnHeaderClassName = (
     col: KanbanColumnConfig,
@@ -155,7 +179,7 @@ export function SwimLane({
   ): string =>
     [
       styles.columnHeaderCell,
-      columnIndex === columns.length - 1 ? styles.lastColumn : undefined,
+      columnIndex === displayColumns.length - 1 ? styles.lastColumn : undefined,
       col.style === "highlighted" ? styles.highlightedColumn : undefined,
     ]
       .filter(Boolean)
@@ -199,13 +223,13 @@ export function SwimLane({
               type="button"
               className={styles.laneTitleButton}
               onClick={handleHeaderIssueClick}
-              aria-label={`Open epic: ${title}`}
+              aria-label={openEpicAriaLabel}
               data-testid="lane-title-button"
             >
-              {title}
+              {laneTitleContent}
             </button>
           ) : (
-            title
+            laneTitleContent
           )}
         </h3>
         {headerIssue && prCount > 0 && (
@@ -280,7 +304,7 @@ export function SwimLane({
       >
         {/* Single shared grid: header cells (row 1) and body columns (row 2)
             share column tracks so dividers stay aligned under their labels. */}
-        {columns.map((col, columnIndex) => {
+        {displayColumns.map((col, columnIndex) => {
           const colCount = issuesByColumn.get(col.id)?.length ?? 0;
           return (
             <div
@@ -298,7 +322,7 @@ export function SwimLane({
           );
         })}
 
-        {columns.map((col, columnIndex) => {
+        {displayColumns.map((col, columnIndex) => {
           const colIssues = issuesByColumn.get(col.id) ?? [];
           const columnClassName =
             [
@@ -307,7 +331,7 @@ export function SwimLane({
                 : col.style === "highlighted"
                   ? styles.highlightedColumn
                   : undefined,
-              columnIndex === columns.length - 1
+              columnIndex === displayColumns.length - 1
                 ? styles.lastColumn
                 : undefined,
             ]

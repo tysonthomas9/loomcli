@@ -2,6 +2,13 @@
 
 This project uses fleet-db-backed `loom data` commands for issue tracking.
 
+**Read `docs/loom-glossary.md` first.** This codebase reuses ordinary words and collides
+with general knowledge — "loom" is an AI-agent orchestration platform (not the video app
+or Java Project Loom), and `flue`, `fleet`, `aether`, `codex`, `daytona`, `atlas`, and even
+`claude` all mean something specific here. The glossary is the shared dictionary + concept
+map (request lifecycle, object model, the four planes); consult it before reasoning about
+any of these terms, and confirm the loom meaning before acting on an overloaded one.
+
 ## Shared Agent Runbooks
 
 Agent-specific skill loaders are optional. All agent CLIs can use the repo
@@ -10,10 +17,22 @@ runbooks directly:
 - `.agent-skills/loom-pr-test/SKILL.md` - real Loom PR runtime testing with
   local-mode stacks, browser validation, FleetDB compatibility checks, and
   real Codex local-mode checks.
+- `docs/testing-terminology.md` - the canonical map of this repo's testing
+  vocabulary along four axes (depth / realness / provisioning / polarity) plus
+  the matrix shape, the trap words (`local`, `live`, `real`, `verify`, `gate`),
+  and the terminology-handshake protocol.
 
 When testing Loom runtime behavior, follow the runbook above. Do not manually
 create lock files, FleetDB state, sessions, transcripts, diffs, or other fake
 state as test evidence.
+
+**Terminology handshake.** Before running anything slow or irreversible, echo the
+request back as coordinates *(depth, realness, provisioning, polarity, target)*,
+disambiguate any trap word instead of guessing, and state the evidence class of
+what you ran (deterministic = orchestration only; real = real local backend; live =
+reaches a real external/paid service, costs money / may mutate external state). If a
+real/live path is blocked, report blocked/unverified — never fabricate state. See
+`docs/testing-terminology.md`.
 
 ## Generated Workflow Bundles
 

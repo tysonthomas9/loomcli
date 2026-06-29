@@ -18,11 +18,13 @@ import styles from "./CollapsedAgentRail.module.css";
 
 export interface CollapsedAgentRailProps {
   onAgentClick?: ((agentName: string) => void) | undefined;
+  selectedAgentName?: string | null | undefined;
   onAddClick?: (() => void) | undefined;
 }
 
 export function CollapsedAgentRail({
   onAgentClick,
+  selectedAgentName = null,
   onAddClick,
 }: CollapsedAgentRailProps): JSX.Element {
   const agentStore = useAgentStoreInstance();
@@ -68,7 +70,10 @@ export function CollapsedAgentRail({
           <AgentAvatarButton
             key={agent.name}
             agent={agent}
-            selected={false}
+            selected={
+              selectedAgentName != null &&
+              agent.name.toLowerCase() === selectedAgentName.toLowerCase()
+            }
             size={32}
             onClick={() => onAgentClick?.(agent.name)}
           />

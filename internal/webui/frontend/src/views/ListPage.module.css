@@ -11,7 +11,7 @@
 
 .inner {
   width: 100%;
-  padding: 18px 22px 48px;
+  padding: var(--space-3) var(--space-4) var(--space-8);
 }
 
 .empty {
@@ -21,88 +21,10 @@
   color: var(--color-text-muted);
 }
 
-.epicSection {
-  margin-bottom: 16px;
-}
-
-.epicHead {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  border-bottom: 1px solid var(--color-border-strong, var(--color-border));
-}
-
-.epicToggle {
-  display: flex;
-  align-items: center;
-  gap: 11px;
-  flex: 1;
-  min-width: 0;
-  padding: 10px 4px;
-  border: none;
-  background: transparent;
-  color: var(--color-text);
-  font: inherit;
-  text-align: left;
-  cursor: pointer;
-}
-
-.chevron {
-  flex-shrink: 0;
-  font-size: 11px;
-  color: var(--color-text-secondary);
-  transform: rotate(90deg);
-  transition: transform var(--transition-fast);
-}
-
-.chevron[data-collapsed] {
-  transform: rotate(0deg);
-}
-
-.epicTitle {
-  margin: 0;
-  font-size: var(--font-size-sm);
-  font-weight: 700;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.count {
-  flex-shrink: 0;
-  min-width: 22px;
-  padding: 1px 8px;
-  font-size: 11px;
-  color: var(--color-text-secondary);
-  background: var(--color-bg-card);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-full);
-  text-align: center;
-}
-
-.epicOpen {
-  flex-shrink: 0;
-  width: 28px;
-  height: 28px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-sm);
-  background: var(--color-bg-card);
-  color: var(--color-text-secondary);
-  cursor: pointer;
-}
-
-.epicOpen:hover {
-  border-color: var(--color-primary);
-  color: var(--color-primary);
-}
-
 .rows {
   list-style: none;
   margin: 0;
-  padding: 0;
+  padding: 0 var(--space-3) var(--space-2);
 }
 
 .emptyRow {

@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 
@@ -43,7 +44,12 @@ func (app *Server) buildModules() {
 		opsModule = opsModule.WithIssueBackendFn(app.config.IssueBackendFn)
 	}
 	if storeBacked {
-		opsModule = opsModule.WithLocalWorkspacePathFn(storeadapter.ResolveWorkspacePath)
+		// Healing variant: when readyz finds no local path, attempt a one-shot
+		// re-bind to an existing on-disk checkout before reporting "not ready".
+		store := app.config.Store
+		opsModule = opsModule.WithLocalWorkspacePathFn(func(wsKey string) string {
+			return storeadapter.ResolveOrHealWorkspacePath(context.Background(), store, wsKey)
+		})
 	}
 	app.wsModules = append(app.wsModules, opsModule)
 

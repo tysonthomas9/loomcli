@@ -33,10 +33,10 @@ describe("NavRail", () => {
       expect(screen.getByLabelText("Terminal")).toBeInTheDocument();
     });
 
-    it("renders an Agents button", () => {
+    it("does not render an Agents button", () => {
       render(<NavRail activeView="kanban" onChange={() => {}} />);
 
-      expect(screen.getByLabelText("Agents")).toBeInTheDocument();
+      expect(screen.queryByLabelText("Agents")).not.toBeInTheDocument();
     });
 
     it("renders a Pull Requests button", () => {
@@ -65,11 +65,11 @@ describe("NavRail", () => {
       expect(screen.queryByLabelText("Workspace")).not.toBeInTheDocument();
     });
 
-    it("renders exactly five navigation buttons", () => {
+    it("renders exactly four navigation buttons", () => {
       render(<NavRail activeView="kanban" onChange={() => {}} />);
 
       const buttons = screen.getAllByRole("button");
-      expect(buttons).toHaveLength(5);
+      expect(buttons).toHaveLength(4);
     });
 
     it("renders tooltips for each button", () => {
@@ -82,7 +82,7 @@ describe("NavRail", () => {
       );
       const tooltipTexts = Array.from(tooltips).map((t) => t.textContent);
       expect(tooltipTexts).toContain("Workspaces");
-      expect(tooltipTexts).toContain("Agents");
+      expect(tooltipTexts).not.toContain("Agents");
       expect(tooltipTexts).toContain("Pull Requests");
       expect(tooltipTexts).toContain("Terminal");
       expect(tooltipTexts).toContain("Settings");
@@ -102,15 +102,14 @@ describe("NavRail", () => {
       ).toBeInTheDocument();
     });
 
-    it("renders buttons in correct order: Workspaces, Agents, Pull Requests, Terminal, Settings", () => {
+    it("renders buttons in correct order: Workspaces, Pull Requests, Terminal, Settings", () => {
       render(<NavRail activeView="kanban" onChange={() => {}} />);
 
       const buttons = screen.getAllByRole("button");
       expect(buttons[0]).toHaveAccessibleName("Workspaces");
-      expect(buttons[1]).toHaveAccessibleName("Agents");
-      expect(buttons[2]).toHaveAccessibleName("Pull Requests");
-      expect(buttons[3]).toHaveAccessibleName("Terminal");
-      expect(buttons[4]).toHaveAccessibleName("Settings");
+      expect(buttons[1]).toHaveAccessibleName("Pull Requests");
+      expect(buttons[2]).toHaveAccessibleName("Terminal");
+      expect(buttons[3]).toHaveAccessibleName("Settings");
     });
 
     it("has navigation landmark with aria-label", () => {
@@ -157,12 +156,6 @@ describe("NavRail", () => {
       expect(terminalButton).toHaveAttribute("data-active");
     });
 
-    it("marks Agents as active when activeView is agents", () => {
-      render(<NavRail activeView="agents" onChange={() => {}} />);
-
-      expect(screen.getByLabelText("Agents")).toHaveAttribute("data-active");
-    });
-
     it("applies custom className", () => {
       render(
         <NavRail
@@ -195,16 +188,6 @@ describe("NavRail", () => {
 
       expect(onChange).toHaveBeenCalledTimes(1);
       expect(onChange).toHaveBeenCalledWith("terminal");
-    });
-
-    it('calls onChange with "agents" when Agents button is clicked', () => {
-      const onChange = vi.fn();
-      render(<NavRail activeView="kanban" onChange={onChange} />);
-
-      fireEvent.click(screen.getByLabelText("Agents"));
-
-      expect(onChange).toHaveBeenCalledTimes(1);
-      expect(onChange).toHaveBeenCalledWith("agents");
     });
 
     it('calls onChange with "settings" when Settings button is clicked', () => {

@@ -6,23 +6,41 @@
 .swimLaneBoard {
   display: flex;
   flex-direction: column;
-  gap: var(--space-3);
+  gap: 0;
   padding: 0;
-  overflow-y: auto; /* Allow scrolling between swim lanes */
-  overflow-x: auto;
-  flex: 1 1 0; /* Fill available space to constrain column height */
-  min-height: 0; /* Allow flex item to shrink below content height */
+  overflow: visible;
+  flex: 0 0 auto;
+  min-height: auto;
+  --swim-lane-sticky-offset: 0px;
+  /* Epic lane header block — column headers stick beneath toolbar + this row */
+  --swim-lane-header-height: calc(var(--space-2) * 2 + 1.625rem);
+  --swim-lane-column-sticky-offset: calc(
+    var(--swim-lane-sticky-offset) + var(--swim-lane-header-height)
+  );
+}
+
+.swimLaneBoard:has(> .toolbar) {
+  /* Match toolbar block size so lane headers stick flush beneath it */
+  --swim-lane-sticky-offset: calc(var(--space-2) * 2 + 1.625rem);
 }
 
 /**
- * Toolbar for Expand All / Collapse All controls.
+ * Toolbar for board controls (compact mode, expand/collapse, completed epics).
  */
 .toolbar {
+  position: sticky;
+  top: 0;
+  z-index: 4;
   display: flex;
   flex-shrink: 0;
+  align-items: center;
+  justify-content: flex-end;
   gap: var(--space-2);
-  padding: var(--space-2) var(--space-4) 0;
+  padding: var(--space-2) var(--space-4);
   margin-bottom: 0;
+  background-color: var(--color-bg);
+  border-bottom: 1px solid var(--color-border);
+  box-shadow: 0 1px 3px rgb(0 0 0 / 8%);
 }
 
 .toolbarButton {
@@ -47,6 +65,70 @@
 .toolbarButton:focus-visible {
   outline: 2px solid var(--color-primary);
   outline-offset: 2px;
+}
+
+.compactToggle {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.compactToggleLabel {
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-bold);
+  color: var(--color-text-primary);
+  user-select: none;
+}
+
+.compactSwitch {
+  position: relative;
+  width: 2.125rem;
+  height: 1.125rem;
+  padding: 0;
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  background-color: var(--color-bg-card);
+  cursor: pointer;
+  transition:
+    background-color var(--transition-fast),
+    border-color var(--transition-fast);
+}
+
+.compactSwitch:hover {
+  border-color: var(--color-warning);
+}
+
+.compactSwitch[aria-checked="true"] {
+  background-color: var(--color-warning);
+  border-color: var(--color-warning);
+}
+
+.compactSwitch:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
+.compactSwitchThumb {
+  position: absolute;
+  top: 1px;
+  left: 1px;
+  width: 0.875rem;
+  height: 0.875rem;
+  border-radius: 50%;
+  background-color: var(--color-bg);
+  box-shadow: 0 1px 2px rgb(0 0 0 / 12%);
+  transition: transform var(--transition-fast);
+}
+
+.compactSwitch[aria-checked="true"] .compactSwitchThumb {
+  transform: translateX(0.95rem);
+}
+
+.toolbarDivider {
+  width: 1px;
+  height: 1.625rem;
+  margin: 0 var(--space-1);
+  background-color: var(--color-border);
 }
 
 /**

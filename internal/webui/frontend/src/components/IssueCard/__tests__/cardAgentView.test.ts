@@ -10,7 +10,7 @@ import { describe, it, expect } from "vitest";
 import type { LoomAgentStatus } from "@/types";
 import { resolveAgentForTask } from "@/types";
 
-import { resolveCardAgent } from "../cardAgentView";
+import { resolveCardAgent, resolveCardFooterBadge } from "../cardAgentView";
 
 function agent(overrides: Partial<LoomAgentStatus> = {}): LoomAgentStatus {
   return {
@@ -185,5 +185,68 @@ describe("resolveCardAgent", () => {
       displayName: "[H] Alice",
       errorClass: "AuthFailure",
     });
+  });
+});
+
+describe("resolveCardFooterBadge", () => {
+  it("prefers a task claimant over human owner and assignee in the in_progress column", () => {
+    const claimant = agent({ name: "lead-a", active_task_id: TASK });
+    expect(
+      resolveCardFooterBadge(
+        [claimant],
+        { id: TASK, owner: "tyson", assignee: "[H] tyson" },
+        "in_progress",
+      ),
+    ).toEqual({ kind: "agent", name: "lead-a" });
+  });
+
+  it("suppresses a (possibly stale) task claimant outside the in_progress column", () => {
+    const claimant = agent({ name: "lead-a", active_task_id: TASK });
+    // A done/review/blocked card must fall through to owner/assignee rather than
+    // surfacing lock-derived liveness as a "Working" badge.
+    expect(
+      resolveCardFooterBadge(
+        [claimant],
+        { id: TASK, owner: "tyson", assignee: "[H] tyson" },
+        "done",
+      ),
+    ).toEqual({ kind: "owner", name: "tyson" });
+  });
+
+  it("uses non-human assignee when no claimant is resolved", () => {
+    expect(
+      resolveCardFooterBadge([], {
+        id: TASK,
+        owner: "tyson",
+        assignee: "nova",
+      }),
+    ).toEqual({ kind: "agent", name: "nova" });
+  });
+
+  it("falls back to owner when no agent is working or assigned", () => {
+    expect(resolveCardFooterBadge([], { id: TASK, owner: "tyson" })).toEqual({
+      kind: "owner",
+      name: "tyson",
+    });
+  });
+
+  it("falls back to human assignee when owner is absent", () => {
+    expect(
+      resolveCardFooterBadge([], { id: TASK, assignee: "[H] Alice" }),
+    ).toEqual({ kind: "owner", name: "Alice" });
+  });
+
+  it("returns null when no owner, assignee, or claimant exist", () => {
+    expect(resolveCardFooterBadge([], { id: TASK })).toBeNull();
+  });
+
+  it("ignores driver-run synthetic assignees for the agent badge", () => {
+    expect(
+      resolveCardFooterBadge([], {
+        id: TASK,
+        owner: "tyson",
+        assignee: "driver-run:abc123",
+      }),
+    ).toEqual({ kind: "owner", name: "tyson" });
   });
 });

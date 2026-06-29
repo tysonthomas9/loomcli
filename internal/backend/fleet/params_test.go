@@ -64,6 +64,14 @@ func TestUpdateParamsToPatchRequest_KeepsSupportedFields(t *testing.T) {
 	}
 }
 
+func TestUpdateParamsToPatchRequest_KeepsExternalRef(t *testing.T) {
+	ref := "https://github.com/owner/repo/pull/42"
+	req := updateParamsToPatchRequest(backend.UpdateParams{ExternalRef: &ref})
+	if got, ok := req["external_ref"]; !ok || got != ref {
+		t.Errorf("external_ref = %v, want %q", got, ref)
+	}
+}
+
 // --- createParamsToBody tests ---
 
 func TestCreateParamsToBody_RenamesFields(t *testing.T) {
@@ -118,17 +126,28 @@ func TestCreateParamsToBody_DropsLoomOnlyFields(t *testing.T) {
 		ID:                 "explicit-id",
 		AcceptanceCriteria: "AC",
 		CreatedBy:          "bob",
-		ExternalRef:        "JIRA-1",
 		EstimatedMinutes:   &estim,
 		Dependencies:       []string{"loom-2"},
 	})
 	for _, k := range []string{
 		"id", "acceptance_criteria", "created_by",
-		"external_ref", "estimated_minutes", "dependencies",
+		"estimated_minutes", "dependencies",
 	} {
 		if _, ok := req[k]; ok {
 			t.Errorf("field %q must be dropped — not on fleet-db CreateIssueRequest", k)
 		}
+	}
+}
+
+func TestCreateParamsToBody_KeepsExternalRef(t *testing.T) {
+	ref := "https://github.com/owner/repo/pull/42"
+	req := createParamsToBody(backend.CreateParams{
+		Title:       "T",
+		IssueType:   "task",
+		ExternalRef: ref,
+	})
+	if got, ok := req["external_ref"]; !ok || got != ref {
+		t.Errorf("external_ref = %v, want %q", got, ref)
 	}
 }
 

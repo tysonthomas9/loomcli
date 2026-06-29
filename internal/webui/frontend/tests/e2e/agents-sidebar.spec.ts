@@ -532,18 +532,12 @@ test.describe("Agents Sidebar", () => {
   // ------- agent rendering -------
 
   test.describe("agent rendering", () => {
-    test("agent section shows with Agents header and count", async ({
-      page,
-    }) => {
+    test("agent section shows with Agents header", async ({ page }) => {
       await setupMocks(page);
       await navigateAndWait(page);
 
       const sb = sidebar(page);
       await expect(sb.getByText("Agents")).toBeVisible({ timeout: 10000 });
-      // Section count badge nearest to "Agents" header
-      const agentHeader = sb.locator('[class*="agentSectionHeader"]');
-      const sectionCount = agentHeader.locator('[class*="sectionCount"]');
-      await expect(sectionCount).toContainText("2");
     });
 
     test("agent cards render for each agent", async ({ page }) => {

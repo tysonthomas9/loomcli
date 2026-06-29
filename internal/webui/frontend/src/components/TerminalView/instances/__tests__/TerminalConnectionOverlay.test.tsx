@@ -125,6 +125,22 @@ describe("TerminalConnectionOverlay", () => {
       expect(screen.getByText("Auto-reconnecting...")).toBeInTheDocument();
     });
 
+    it("renders Session expired subtext when reconnectExpired is true", () => {
+      render(
+        <TerminalConnectionOverlay
+          {...defaultProps}
+          connectionState="disconnected"
+          isAutoReconnecting
+          reconnectExpired
+        />,
+      );
+
+      expect(screen.getByText("Session expired")).toBeInTheDocument();
+      expect(
+        screen.queryByText("Auto-reconnecting..."),
+      ).not.toBeInTheDocument();
+    });
+
     it("does not render Auto-reconnecting... subtext after reconnect loop stops", () => {
       render(
         <TerminalConnectionOverlay

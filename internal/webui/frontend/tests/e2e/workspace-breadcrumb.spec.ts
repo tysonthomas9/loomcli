@@ -1,7 +1,7 @@
 /**
  * E2E: workspace identity in the current app shell.
  *
- * The header is global application chrome ("Aether"). Workspace identity is
+ * The header is global application chrome ("Loom"). Workspace identity is
  * local to the workspace tree/sidebar and view state is represented by the
  * Workspaces view tabs.
  */
@@ -217,7 +217,7 @@ async function setupMocks(
 
 async function expectGlobalHeader(page: Page) {
   await expect(page.getByRole("banner").getByRole("heading", {
-    name: "Aether",
+    name: "Loom",
   })).toBeVisible();
 }
 

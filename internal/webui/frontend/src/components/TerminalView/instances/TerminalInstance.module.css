@@ -44,9 +44,10 @@
   --term-fg: var(--terminal-fg);
   --term-cursor: var(--terminal-cursor);
   --term-selection-bg: var(--terminal-selection);
-  --term-font-family: var(--font-family-mono);
-  --term-font-size: 12px;
+  --term-font-family: var(--terminal-font-family, var(--font-family-mono));
+  --term-font-size: var(--terminal-font-size, 12px);
   --term-line-height: 1.2;
+  --term-row-height: calc(var(--term-font-size) * var(--term-line-height));
 }
 
 .container:global(.wterm) ::selection {

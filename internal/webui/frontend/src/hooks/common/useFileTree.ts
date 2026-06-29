@@ -10,7 +10,18 @@ import type { FileEntry } from "@/api/workspace";
 import { useDebounce } from "./useDebounce";
 import { useWorkspaceContext } from "@/hooks/workspace";
 
+export interface UseFileTreeOptions {
+  /**
+   * Browse the workspace primary repository instead of an agent worktree.
+   * Used for lead agents, which have no local worktree; the API resolves
+   * against the primary repo when the agent is a lead.
+   */
+  useWorkspaceTree?: boolean;
+}
+
 export interface UseFileTreeReturn {
+  /** True when browsing the workspace primary repo (lead fallback). */
+  isWorkspaceTree: boolean;
   /** Set of expanded directory paths */
   expanded: Set<string>;
   /** Cached directory entries keyed by path */
@@ -35,7 +46,11 @@ export interface UseFileTreeReturn {
   setFilterText: (text: string) => void;
 }
 
-export function useFileTree(agentName: string): UseFileTreeReturn {
+export function useFileTree(
+  agentName: string,
+  options?: UseFileTreeOptions,
+): UseFileTreeReturn {
+  const useWorkspaceTree = options?.useWorkspaceTree ?? false;
   const { workspaceId } = useWorkspaceContext();
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [treeData, setTreeData] = useState<Map<string, FileEntry[]>>(new Map());
@@ -137,9 +152,10 @@ export function useFileTree(agentName: string): UseFileTreeReturn {
           setIsLoading(false);
         }
       });
-  }, [agentName]);
+  }, [workspaceId, agentName]);
 
   return {
+    isWorkspaceTree: useWorkspaceTree,
     expanded,
     treeData,
     selectedPath,

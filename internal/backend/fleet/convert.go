@@ -30,6 +30,7 @@ type fleetIssueWire struct {
 	Notes       string     `json:"notes,omitempty"`
 	Description string     `json:"description,omitempty"`
 	Acceptance  string     `json:"acceptance_criteria,omitempty"`
+	ExternalRef string     `json:"external_ref,omitempty"`
 	CreatedAt   time.Time  `json:"created_at,omitempty"`
 	CreatedBy   string     `json:"created_by,omitempty"`
 	UpdatedAt   time.Time  `json:"updated_at,omitempty"`
@@ -41,7 +42,7 @@ type fleetIssueWire struct {
 
 // toIssue projects the wire shape to the canonical types.Issue.
 func (w fleetIssueWire) toIssue() types.Issue {
-	return types.Issue{
+	issue := types.Issue{
 		ID:                 w.ID,
 		Title:              w.Title,
 		Description:        w.Description,
@@ -63,6 +64,11 @@ func (w fleetIssueWire) toIssue() types.Issue {
 		ClosedAt:           w.ClosedAt,
 		CloseReason:        w.CloseReason,
 	}
+	if w.ExternalRef != "" {
+		ref := w.ExternalRef
+		issue.ExternalRef = &ref
+	}
+	return issue
 }
 
 func (w fleetIssueWire) parent() string {
@@ -161,6 +167,10 @@ func issueToData(issue *types.Issue) backend.IssueData {
 	if len(issue.Labels) > 0 {
 		labels = issue.Labels
 	}
+	externalRef := ""
+	if issue.ExternalRef != nil {
+		externalRef = *issue.ExternalRef
+	}
 	return backend.IssueData{
 		ID:          issue.ID,
 		Title:       issue.Title,
@@ -173,6 +183,7 @@ func issueToData(issue *types.Issue) backend.IssueData {
 		SourceRepo:  issue.SourceRepo,
 		Design:      issue.Design,
 		Notes:       issue.Notes,
+		ExternalRef: externalRef,
 		CreatedAt:   issue.CreatedAt,
 		UpdatedAt:   issue.UpdatedAt,
 		DueAt:       issue.DueAt,

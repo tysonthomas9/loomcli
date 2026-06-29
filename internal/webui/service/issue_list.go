@@ -430,6 +430,10 @@ func backendIssueDataToWithCounts(d *backend.IssueData) *types.IssueWithCounts {
 	if d.SourceRepo != "" {
 		issue.SourceRepo = d.SourceRepo
 	}
+	if d.ExternalRef != "" {
+		ref := d.ExternalRef
+		issue.ExternalRef = &ref
+	}
 	return &types.IssueWithCounts{
 		Issue:           issue,
 		DependencyCount: d.DependencyCount,

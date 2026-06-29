@@ -46,6 +46,9 @@ type IssueData struct {
 	CreatedBy   string     `json:"created_by,omitempty"`
 	ClosedAt    *time.Time `json:"closed_at,omitempty"`
 	CloseReason string     `json:"close_reason,omitempty"`
+	// ExternalRef is in the slim projection so kanban/list views can surface
+	// a linked PR (the card renders a "PR ↗" link from it).
+	ExternalRef string `json:"external_ref,omitempty"`
 	// Counts for list display (populated by backends that support them).
 	DependencyCount int `json:"dependency_count,omitempty"`
 	DependentCount  int `json:"dependent_count,omitempty"`
@@ -71,9 +74,9 @@ type IssueDetailData struct {
 	// Lifecycle (detail-only — IssueData carries the others).
 	ClosedBySession string `json:"closed_by_session,omitempty"`
 
-	// External integration.
-	ExternalRef      string `json:"external_ref,omitempty"`
-	EstimatedMinutes *int   `json:"estimated_minutes,omitempty"`
+	// External integration. ExternalRef is promoted from the embedded IssueData
+	// (it is in the slim list projection so kanban/list can render a PR link).
+	EstimatedMinutes *int `json:"estimated_minutes,omitempty"`
 
 	// Relational data.
 	Dependencies []DependencyData `json:"dependencies,omitempty"`
@@ -366,7 +369,7 @@ type CreateParams struct {
 //   - "source_repo" → "repo"
 //
 // Dropped (no equivalent on fleet-db's CreateIssueRequest):
-//   - id, acceptance_criteria, created_by, external_ref,
+//   - id, acceptance_criteria, created_by,
 //     estimated_minutes, dependencies
 //
 // If any of those need round-tripping, file a fleet-db ticket to extend
@@ -396,6 +399,7 @@ func (p CreateParams) FleetCreateBody() map[string]interface{} {
 	setNonEmptyMapStr(req, "repo", p.SourceRepo)
 	setNonEmptyMapStr(req, "design", p.Design)
 	setNonEmptyMapStr(req, "notes", p.Notes)
+	setNonEmptyMapStr(req, "external_ref", p.ExternalRef)
 	setNonEmptyMapStr(req, "defer_until", p.DeferUntil)
 	setNonEmptyMapStr(req, "due_at", p.DueAt)
 	return req

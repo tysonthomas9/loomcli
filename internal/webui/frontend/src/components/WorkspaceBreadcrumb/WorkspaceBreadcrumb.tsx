@@ -1,7 +1,7 @@
 /**
  * WorkspaceBreadcrumb - Displays the active view label in the AppLayout header.
  * Workspace identity (name + color dot) lives in the sidebar WorkspaceSelectorBar.
- * Falls back to "Aether" when no workspace is available.
+ * Falls back to "Loom" when no workspace is available.
  */
 
 import type { ViewMode } from "@/types";
@@ -9,7 +9,7 @@ import type { ViewMode } from "@/types";
 import styles from "./WorkspaceBreadcrumb.module.css";
 
 const VIEW_LABELS: Record<ViewMode, string> = {
-  kanban: "Aether Project",
+  kanban: "Loom Project",
   table: "List",
   graph: "Graph",
   monitor: "Monitor",
@@ -40,10 +40,10 @@ export function WorkspaceBreadcrumb({
     : styles.breadcrumb;
 
   if (!workspaceName) {
-    return <span className={rootClassName}>Aether</span>;
+    return <span className={rootClassName}>Loom</span>;
   }
 
-  const viewLabel = VIEW_LABELS[activeView] ?? "Aether Project";
+  const viewLabel = VIEW_LABELS[activeView] ?? "Loom Project";
 
   return (
     <span className={rootClassName}>
