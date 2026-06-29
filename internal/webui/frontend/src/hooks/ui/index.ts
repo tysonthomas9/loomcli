@@ -73,6 +73,9 @@ export {
 } from "./useOpenQueuePanelWidth";
 export type { UseOpenQueuePanelWidthReturn } from "./useOpenQueuePanelWidth";
 
+export { useAgentWorkPanelViewState } from "./useAgentWorkPanelViewState";
+export type { UseAgentWorkPanelViewStateReturn } from "./useAgentWorkPanelViewState";
+
 export {
   useWorkspaceTreeWidth,
   WORKSPACE_TREE_DEFAULT_WIDTH,

@@ -16,7 +16,8 @@
  *   agent. A legacy ?agent=<name> query param is honored as a redirect.
  * - Task: local state (selectedTask). When set, the right column hides the
  *   work panel and renders the IssueDetailPanel inline. Closing the panel
- *   restores the work panel. Switching agent clears the task selection.
+ *   restores the work panel. Per-agent task selection is restored from
+ *   scoped localStorage when switching back to an agent.
  */
 
 import {
@@ -68,6 +69,11 @@ import {
 } from "@/utils/epicRunnerPayload";
 import { formatStatusLabel } from "@/utils/issue";
 import type { TerminalInputRequest } from "@/components/TerminalView/TerminalView";
+
+import {
+  loadAgentWorkPanelView,
+  saveAgentWorkPanelView,
+} from "@/utils/agentWorkPanelStorage";
 
 import { AgentEditorGroups, type AgentEditorTab } from "./AgentEditorGroups";
 import styles from "./AgentsPage.module.css";
@@ -142,8 +148,7 @@ function AgentsPageInner(): JSX.Element {
     [agents, agentName],
   );
 
-  // Inline task-detail selection. Cleared when the user switches agents so
-  // the right column starts fresh on every agent change.
+  // Inline task-detail selection, restored per agent from scoped storage.
   const [selectedTask, setSelectedTask] = useState<Issue | null>(null);
   const [pendingTerminalInput, setPendingTerminalInput] = useState<
     TerminalInputRequest | undefined
@@ -151,10 +156,31 @@ function AgentsPageInner(): JSX.Element {
   const [epicRunnerRuns, setEpicRunnerRuns] = useState<
     Record<string, WorkflowRun>
   >({});
+
+  const persistSelectedTaskId = useCallback(
+    (taskId: string | null) => {
+      if (!agentName) return;
+      saveAgentWorkPanelView(workspaceId, agentName, {
+        selectedTaskId: taskId,
+      });
+    },
+    [agentName, workspaceId],
+  );
+
   useEffect(() => {
-    setSelectedTask(null);
     clearIssue();
-  }, [agentName, clearIssue]);
+    if (!agentName) {
+      setSelectedTask(null);
+      return;
+    }
+    const { selectedTaskId } = loadAgentWorkPanelView(workspaceId, agentName);
+    if (!selectedTaskId) {
+      setSelectedTask(null);
+      return;
+    }
+    const match = issues.find((issue) => issue.id === selectedTaskId);
+    setSelectedTask(match ?? null);
+  }, [agentName, workspaceId, issues, clearIssue]);
   useEffect(() => {
     if (!selectedTask) return;
     void fetchIssue(selectedTask.id);
@@ -275,11 +301,24 @@ function AgentsPageInner(): JSX.Element {
   const handleCloseInlineDetail = useCallback(() => {
     setSelectedTask(null);
     clearIssue();
-  }, [clearIssue]);
+    persistSelectedTaskId(null);
+  }, [clearIssue, persistSelectedTaskId]);
 
-  const handleInlineTaskNavigate = useCallback((issue: Issue) => {
-    setSelectedTask(issue);
-  }, []);
+  const handleInlineTaskNavigate = useCallback(
+    (issue: Issue) => {
+      setSelectedTask(issue);
+      persistSelectedTaskId(issue.id);
+    },
+    [persistSelectedTaskId],
+  );
+
+  const handleTaskClick = useCallback(
+    (task: Issue) => {
+      setSelectedTask(task);
+      persistSelectedTaskId(task.id);
+    },
+    [persistSelectedTaskId],
+  );
 
   const inlinePanelIssue = useMemo(() => {
     if (!selectedTask) return null;
@@ -531,7 +570,7 @@ function AgentsPageInner(): JSX.Element {
           onPanelWidthDelta={applyOpenQueueWidthDelta}
           onPanelWidthReset={resetOpenQueueWidth}
           epicRunnerRuns={epicRunnerRuns}
-          onTaskClick={(task) => setSelectedTask(task)}
+          onTaskClick={handleTaskClick}
           onRunEpic={handleRunEpic}
           onAgentClick={handleAgentClick}
         />

@@ -42,7 +42,7 @@ type fleetIssueWire struct {
 
 // toIssue projects the wire shape to the canonical types.Issue.
 func (w fleetIssueWire) toIssue() types.Issue {
-	issue := types.Issue{
+	return types.Issue{
 		ID:                 w.ID,
 		Title:              w.Title,
 		Description:        w.Description,
@@ -56,6 +56,7 @@ func (w fleetIssueWire) toIssue() types.Issue {
 		Labels:             w.Labels,
 		SourceRepo:         w.sourceRepo(),
 		Design:             w.Design,
+		ExternalRef:        strOrNil(w.ExternalRef),
 		CreatedAt:          w.CreatedAt,
 		CreatedBy:          w.CreatedBy,
 		UpdatedAt:          w.UpdatedAt,
@@ -64,11 +65,23 @@ func (w fleetIssueWire) toIssue() types.Issue {
 		ClosedAt:           w.ClosedAt,
 		CloseReason:        w.CloseReason,
 	}
-	if w.ExternalRef != "" {
-		ref := w.ExternalRef
-		issue.ExternalRef = &ref
+}
+
+// strOrNil maps a fleet-db wire string to the optional *string the canonical
+// types.Issue uses (empty -> nil). derefStr is its inverse for the slim
+// backend.IssueData projection (nil -> "").
+func strOrNil(s string) *string {
+	if s == "" {
+		return nil
 	}
-	return issue
+	return &s
+}
+
+func derefStr(p *string) string {
+	if p == nil {
+		return ""
+	}
+	return *p
 }
 
 func (w fleetIssueWire) parent() string {
@@ -167,10 +180,6 @@ func issueToData(issue *types.Issue) backend.IssueData {
 	if len(issue.Labels) > 0 {
 		labels = issue.Labels
 	}
-	externalRef := ""
-	if issue.ExternalRef != nil {
-		externalRef = *issue.ExternalRef
-	}
 	return backend.IssueData{
 		ID:          issue.ID,
 		Title:       issue.Title,
@@ -183,7 +192,7 @@ func issueToData(issue *types.Issue) backend.IssueData {
 		SourceRepo:  issue.SourceRepo,
 		Design:      issue.Design,
 		Notes:       issue.Notes,
-		ExternalRef: externalRef,
+		ExternalRef: derefStr(issue.ExternalRef),
 		CreatedAt:   issue.CreatedAt,
 		UpdatedAt:   issue.UpdatedAt,
 		DueAt:       issue.DueAt,
@@ -236,9 +245,7 @@ func detailsToDetailData(details *types.IssueDetails) backend.IssueDetailData {
 	d.ClosedBySession = details.ClosedBySession
 
 	// External integration.
-	if details.ExternalRef != nil {
-		d.ExternalRef = *details.ExternalRef
-	}
+	d.ExternalRef = derefStr(details.ExternalRef)
 	d.EstimatedMinutes = details.EstimatedMinutes
 
 	// Parent.

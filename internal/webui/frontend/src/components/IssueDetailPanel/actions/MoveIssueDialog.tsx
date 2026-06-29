@@ -42,7 +42,7 @@ export function MoveIssueDialog({
 
   // Filter out current workspace (memoized for stable reference)
   const availableWorkspaces = useMemo(
-    () => workspaces.filter((ws) => ws.name !== currentWorkspace),
+    () => workspaces.filter((ws) => ws.id !== currentWorkspace),
     [workspaces, currentWorkspace],
   );
 
@@ -51,7 +51,7 @@ export function MoveIssueDialog({
     if (isOpen) {
       const first = availableWorkspaces[0];
       if (availableWorkspaces.length === 1 && first) {
-        setSelectedWorkspace(first.name);
+        setSelectedWorkspace(first.id);
       } else {
         setSelectedWorkspace("");
       }
@@ -148,7 +148,7 @@ export function MoveIssueDialog({
           >
             <option value="">Select a workspace...</option>
             {availableWorkspaces.map((ws) => (
-              <option key={ws.name} value={ws.name}>
+              <option key={ws.id} value={ws.id}>
                 {ws.name}
               </option>
             ))}

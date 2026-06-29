@@ -2,13 +2,26 @@
 
 import { fireEvent, render, screen } from "@testing-library/react";
 import type { ReactNode } from "react";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { StoreContext } from "@/hooks/common";
 import { createAgentStore, createIssueStore } from "@/stores";
 import type { Issue, LoomAgentStatus } from "@/types";
 
 import { AgentWorkPanel } from "../AgentWorkPanel";
+
+const TEST_WS_ID = "test-ws-agent-work-panel";
+
+vi.mock("@/hooks/workspace", async () => {
+  const actual =
+    await vi.importActual<typeof import("@/hooks/workspace")>(
+      "@/hooks/workspace",
+    );
+  return {
+    ...actual,
+    useWorkspaceContext: () => ({ workspaceId: TEST_WS_ID }),
+  };
+});
 
 function issue(overrides: Partial<Issue> & Pick<Issue, "id">): Issue {
   return {
@@ -60,6 +73,15 @@ function renderWithStores(
 }
 
 describe("AgentWorkPanel", () => {
+  beforeEach(() => {
+    localStorage.clear();
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it("lets an assigned lead run its focused epic", () => {
     const onRunEpic = vi.fn();
     renderWithStores(
@@ -200,7 +222,7 @@ describe("AgentWorkPanel", () => {
     expect(screen.getByText("No tasks match your search.")).toBeTruthy();
   });
 
-  it("clears task search when the selected agent changes", () => {
+  it("restores per-agent search when switching back", () => {
     const issueStore = createIssueStore();
     const agentStore = createAgentStore();
     issueStore.setState({
@@ -241,6 +263,8 @@ describe("AgentWorkPanel", () => {
     expect(searchbox.value).toBe("First");
     expect(screen.queryByText("TASK-2")).toBeNull();
 
+    vi.runAllTimers();
+
     rerender(
       <StoreContext.Provider value={{ issueStore, agentStore }}>
         <AgentWorkPanel agentName="worker-2" />
@@ -249,5 +273,14 @@ describe("AgentWorkPanel", () => {
 
     expect(searchbox.value).toBe("");
     expect(screen.getByText("TASK-2")).toBeTruthy();
+
+    rerender(
+      <StoreContext.Provider value={{ issueStore, agentStore }}>
+        <AgentWorkPanel agentName="worker-1" />
+      </StoreContext.Provider>,
+    );
+
+    expect(searchbox.value).toBe("First");
+    expect(screen.queryByText("TASK-2")).toBeNull();
   });
 });

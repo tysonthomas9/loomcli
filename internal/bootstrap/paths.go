@@ -39,3 +39,15 @@ func StateFilePath() string {
 	}
 	return filepath.Join(dir, "state.json")
 }
+
+// WorkspaceDir returns the default on-disk checkout root for a workspace of the
+// given name: <LoomDir>/workspaces/<name>. It is the single source of truth for
+// this layout — config.GetWorkspaceDir delegates here, and path self-heal
+// re-derives it. Returns "" when the loom dir cannot be resolved.
+func WorkspaceDir(name string) string {
+	dir := LoomDir()
+	if dir == "" {
+		return ""
+	}
+	return filepath.Join(dir, "workspaces", name)
+}

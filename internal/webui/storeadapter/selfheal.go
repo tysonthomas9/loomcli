@@ -53,12 +53,18 @@ func ListWorkspacePathsOrHeal(ctx context.Context, s store.Store) (map[string]st
 	if len(all) == 0 {
 		return nil, nil
 	}
+	// Read the per-machine state cache once — every recorded path lives in this
+	// single file, so there is no need to re-read it per workspace.
+	sc, err := bootstrap.LoadStateCache()
+	if err != nil {
+		return nil, fmt.Errorf("storeadapter: load state cache: %w", err)
+	}
 	out := make(map[string]string, len(all))
 	for _, ws := range all {
 		if ws == nil {
 			continue
 		}
-		p := resolveWorkspacePath(ws.Key)
+		p := sc.Workspaces[ws.Key].Path
 		if p == "" {
 			p = healWorkspacePath(ctx, s, ws)
 		}
@@ -77,12 +83,12 @@ func healWorkspacePath(ctx context.Context, s store.Store, ws *domain.Workspace)
 	if ws == nil || ws.Key == "" || ws.Name == "" {
 		return ""
 	}
-	// Mirror config.GetWorkspaceDir(name) without importing cli/config (which
-	// would create an import cycle: cli imports webui). The default workspace
-	// dir is keyed by the lowercase workspace Name, and LoomDir() honors
-	// LOOM_CONFIG_DIR so this resolves correctly for both the desktop app and
-	// the dev serve stack.
-	wsDir := filepath.Join(bootstrap.LoomDir(), "workspaces", ws.Name)
+	// bootstrap.WorkspaceDir is the single source of truth for this layout
+	// (config.GetWorkspaceDir delegates to it too). storeadapter resolves it via
+	// bootstrap rather than cli/config to honor the webui→cli layering boundary;
+	// LoomDir honors LOOM_CONFIG_DIR so this resolves correctly for both the
+	// desktop app and the dev serve stack.
+	wsDir := bootstrap.WorkspaceDir(ws.Name)
 	if info, err := os.Stat(wsDir); err != nil || !info.IsDir() {
 		slog.Info("workspace self-heal: no checkout at expected location; leaving unbound (re-clone required)",
 			"workspace", ws.Key, "expected_dir", wsDir)
@@ -136,11 +142,7 @@ func verifyCheckout(repoPath string, r *domain.Repo) bool {
 		// git checkout there is good enough to re-bind.
 		return isGitWorkTree(repoPath)
 	}
-	remoteName := r.Remote
-	if remoteName == "" {
-		remoteName = "origin"
-	}
-	got, err := localworkspace.GitRemoteURL(repoPath, remoteName)
+	got, err := localworkspace.GitRemoteURL(repoPath, r.Remote) // GitRemoteURL defaults "" -> origin
 	if err != nil {
 		return false // not a git work tree / remote unset
 	}

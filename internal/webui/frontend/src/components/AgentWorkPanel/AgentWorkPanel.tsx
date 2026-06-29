@@ -12,11 +12,13 @@
  * workspace).
  */
 
-import { useEffect, useMemo, useState, type KeyboardEvent } from "react";
+import { useMemo, type KeyboardEvent } from "react";
 import { useStore } from "zustand";
 
 import { useWorkspaceViewActions } from "@/contexts/WorkspaceViewContext";
 import { useAgentStoreInstance, useIssueStoreInstance } from "@/hooks";
+import { useAgentWorkPanelViewState } from "@/hooks/ui/useAgentWorkPanelViewState";
+import { useWorkspaceContext } from "@/hooks/workspace";
 import {
   isTerminalWorkflowRunStatus,
   type WorkflowRun,
@@ -118,6 +120,7 @@ export function AgentWorkPanel({
   epicRunnerRuns,
 }: AgentWorkPanelProps): JSX.Element {
   const { handleIssueClick } = useWorkspaceViewActions();
+  const { workspaceId } = useWorkspaceContext();
   const dispatchClick = onTaskClick ?? handleIssueClick;
   const issueStore = useIssueStoreInstance();
   const issuesMap = useStore(issueStore, (s) => s.issuesMap);
@@ -199,21 +202,19 @@ export function AgentWorkPanel({
 
   // Open Queue interactions (Aether design, pin 20): status filter pills in
   // task modes, Running/Not running pills + collapsed epic cards in lead
-  // mode. All reset when the selected agent changes so a stale filter never
-  // hides another agent's queue.
-  const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
-  const [leadFilter, setLeadFilter] = useState<LeadFilter>("all");
-  const [taskSearch, setTaskSearch] = useState("");
-  const [expandedEpics, setExpandedEpics] = useState<Record<string, boolean>>(
-    {},
-  );
+  // mode. Per-agent view state is restored from scoped localStorage when the
+  // selected agent changes.
+  const {
+    statusFilter,
+    setStatusFilter,
+    leadFilter,
+    setLeadFilter,
+    taskSearch,
+    setTaskSearch,
+    expandedEpics,
+    setExpandedEpics,
+  } = useAgentWorkPanelViewState(workspaceId, agentName);
   const normalizedTaskSearch = taskSearch.trim();
-  useEffect(() => {
-    setStatusFilter("all");
-    setLeadFilter("all");
-    setTaskSearch("");
-    setExpandedEpics({});
-  }, [agentName]);
 
   // An epic is "running" when a lead has claimed it or an epic-runner
   // workflow run is still active — agent presence, not completion progress

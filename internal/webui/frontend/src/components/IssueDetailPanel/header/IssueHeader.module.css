@@ -17,17 +17,34 @@
 .topRow {
   display: flex;
   align-items: center;
-  flex-wrap: wrap;
-  gap: 10px;
-  row-gap: 8px;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: nowrap;
   min-width: 0;
-  min-height: 64px;
+  min-height: 40px;
   margin: 0 calc(var(--panel-padding-md) * -1) 20px;
   padding: 0 var(--panel-padding-md);
   border-bottom: 1px solid var(--color-border-light);
 }
 
+.topRowMain {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+}
+
+.topRowActions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex: 0 0 auto;
+}
+
 .issueId {
+  flex-shrink: 0;
   font-size: 11px;
   color: var(--color-text-tertiary);
   font-family: var(--font-family-mono);
@@ -115,7 +132,6 @@
 }
 
 .runEpicButton {
-  margin-left: auto;
   min-width: 86px;
   height: 28px;
   display: inline-flex;
@@ -153,7 +169,6 @@
 }
 
 .copyLinkButton {
-  margin-left: auto;
   width: 28px;
   height: 28px;
   display: flex;
@@ -231,57 +246,7 @@
   outline-offset: 2px;
 }
 
-/* When copyLinkButton is present, it takes the margin-left: auto.
-   closeButton only needs it when copyLinkButton is absent. The action group
-   (copy → move → maximize → close) stays right-aligned via that single auto;
-   every following button resets its own margin so close ends flush. */
-.runEpicButton + .copyLinkButton,
-.runEpicButton + .moveButton,
-.runEpicButton + .maximizeButton,
-.runEpicButton + .closeButton,
-.copyLinkButton + .moveButton,
-.copyLinkButton + .closeButton,
-.copyLinkButton + .maximizeButton,
-.moveButton + .maximizeButton,
-.maximizeButton + .closeButton {
-  margin-left: 0;
-}
-
-.moveButton + .closeButton,
-.moveButton + .maximizeButton,
-.maximizeButton + .closeButton {
-  margin-left: 0;
-}
-
-.maximizeButton {
-  margin-left: auto;
-  width: 28px;
-  height: 28px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: transparent;
-  border: none;
-  border-radius: var(--radius-sm);
-  color: var(--color-text-secondary);
-  cursor: pointer;
-  transition:
-    background-color var(--transition-fast),
-    color var(--transition-fast);
-}
-
-.maximizeButton:hover {
-  background-color: var(--color-bg-hover);
-  color: var(--color-text);
-}
-
-.maximizeButton:focus-visible {
-  outline: 2px solid var(--color-primary);
-  outline-offset: 2px;
-}
-
 .closeButton {
-  margin-left: auto;
   width: 28px;
   height: 28px;
   display: flex;
