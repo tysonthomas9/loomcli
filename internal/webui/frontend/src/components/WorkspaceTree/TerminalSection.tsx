@@ -5,7 +5,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 
-import { BACKEND_BRAND_COLORS } from "@/components/TerminalView/tabs";
+import { BACKEND_BRAND_COLORS } from "@/utils/workspace";
 import {
   requestTerminalNewTab,
   requestTerminalTabSelect,
