@@ -40,6 +40,8 @@ type fakeForge struct {
 	mutated      bool
 	queueChecked bool
 	bodyUpdated  bool
+	createdTitle string // title passed to the most recent CreatePR
+	createdBody  string // body passed to the most recent CreatePR
 }
 
 func (f *fakeForge) PRStatuses(context.Context, string, string, string) (map[string]PRStatus, error) {
@@ -54,8 +56,10 @@ func (f *fakeForge) UpdatePRBody(context.Context, string, string, int, string) e
 func (f *fakeForge) ListStackPRs(context.Context, string, string, string) ([]PR, error) {
 	return f.prs, nil
 }
-func (f *fakeForge) CreatePR(context.Context, string, string, string, string, string, string) (PR, error) {
+func (f *fakeForge) CreatePR(_ context.Context, _, _, _, _, title, body string) (PR, error) {
 	f.mutated = true
+	f.createdTitle = title
+	f.createdBody = body
 	if f.createPR.Number != 0 || f.createPR.URL != "" {
 		return f.createPR, nil
 	}

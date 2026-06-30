@@ -21,6 +21,11 @@ type Options struct {
 	// Resolver, when set, auto-rebases descendants of merged predecessors onto the
 	// live base (resolving conflicts via the resolver) instead of failing closed.
 	Resolver ConflictResolver
+	// PRMetaFor, when set, supplies issue-derived title/summary/acceptance for a
+	// unit at PR-create time. It is injected from the cli layer so stackpublish
+	// needn't depend on the issue backend; returning ok=false (or an empty meta)
+	// falls back to the owned commit's subject/body.
+	PRMetaFor func(ctx context.Context, taskID string) (PRMeta, bool)
 }
 
 // Report summarizes what a publish run did (or would do, for DryRun).
@@ -300,8 +305,21 @@ func (r *Reconciler) Publish(ctx context.Context, ws string, id sl.StackID, repo
 	for _, a := range plan {
 		switch a.Kind {
 		case actCreate:
-			title := fmt.Sprintf("%s: %s", id, a.TaskID)
-			body := fmt.Sprintf("Stacked PR for task %s in stack %s (managed by Loom).", a.TaskID, id)
+			node := byTask[a.TaskID]
+			ref := node.OutputSHA
+			if ref == "" {
+				ref = a.Branch
+			}
+			// Owned commit text is the fallback source; issue metadata (when
+			// injected) takes precedence. Lookups degrade silently — a thin
+			// title/body must never block a publish.
+			commit, _ := ownedCommitText(ctx, repoPath, ref)
+			var meta PRMeta
+			if opts.PRMetaFor != nil {
+				meta, _ = opts.PRMetaFor(ctx, a.TaskID)
+			}
+			title := buildPRTitle(id, a.TaskID, meta, commit)
+			body := buildPRBody(a.TaskID, meta, commit, shortSHA(node.OutputSHA), node.BaseTaskID != "")
 			pr, cerr := r.Forge.CreatePR(ctx, owner, repo, a.Branch, a.DesiredBase, title, body)
 			if cerr != nil {
 				return report, fmt.Errorf("phase4 create %s: %w", a.Branch, cerr)
