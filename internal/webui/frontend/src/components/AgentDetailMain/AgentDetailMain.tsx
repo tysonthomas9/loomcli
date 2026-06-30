@@ -34,6 +34,7 @@ import type {
 import { useAgentStoreInstance } from "@/hooks";
 import { wsUrl } from "@/hooks/api";
 import { type LoomAgentStatus, parseLoomStatus } from "@/types";
+import { getCompactAvatarInitials } from "@/utils/compactAvatarInitials";
 import { getAvatarColor, shouldUseWhiteText } from "@/utils/colorUtils";
 
 const TerminalView = lazy(() =>
@@ -401,7 +402,7 @@ function Header({
   );
   const dotColor =
     STATUS_DOT_COLOR[parsed.type] ?? "var(--color-status-idle, #888)";
-  const initial = (agentName[0] ?? "?").toUpperCase();
+  const initial = getCompactAvatarInitials(agentName);
   const avatarBg = getAvatarColor(agentName);
   const avatarFg = shouldUseWhiteText(avatarBg) ? "#fff" : "#1a1a1a";
   const branch = displayBranch(agent?.branch);
@@ -545,7 +546,8 @@ function Header({
           alignItems: "center",
           justifyContent: "center",
           fontWeight: 700,
-          fontSize: 14,
+          fontSize: initial.length > 1 ? 10 : 14,
+          letterSpacing: initial.length > 1 ? "-0.02em" : undefined,
           flexShrink: 0,
           border: "1px solid rgba(0,0,0,0.18)",
         }}

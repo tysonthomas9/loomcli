@@ -106,6 +106,21 @@ describe("agentAvatarTooltip", () => {
 });
 
 describe("AgentAvatarButton", () => {
+  it("renders two-letter initials for segmented agent names", () => {
+    render(
+      createElement(AgentAvatarButton, {
+        agent: agent({ name: "local-coder", status: "idle" }),
+        selected: false,
+        onClick: vi.fn(),
+        size: 32,
+      }),
+    );
+
+    expect(
+      screen.getByRole("button", { name: /local-coder/ }),
+    ).toHaveTextContent("LC");
+  });
+
   it("renders a hover tooltip with agent details", () => {
     render(
       createElement(AgentAvatarButton, {
@@ -116,6 +131,10 @@ describe("AgentAvatarButton", () => {
       }),
     );
 
+    const button = screen.getByRole("button", {
+      name: "local-coder — changes",
+    });
+    fireEvent.mouseEnter(button);
     expect(
       screen.getByRole("tooltip", { name: "local-coder — changes" }),
     ).toBeInTheDocument();
@@ -135,6 +154,8 @@ describe("AgentIconRail", () => {
   it("renders an add-agent hover tooltip", () => {
     render(createElement(AgentIconRail, { onAddClick: vi.fn() }));
 
+    const addButton = screen.getByRole("button", { name: "Add agent" });
+    fireEvent.mouseEnter(addButton);
     expect(
       screen.getByRole("tooltip", { name: "Add agent" }),
     ).toBeInTheDocument();

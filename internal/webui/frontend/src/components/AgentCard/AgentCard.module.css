@@ -64,6 +64,7 @@
   justify-content: center;
   font-size: 0.84rem;
   font-weight: var(--font-weight-semibold, 600);
+  letter-spacing: -0.02em;
   text-transform: uppercase;
   color: #fff;
   user-select: none;
@@ -195,7 +196,8 @@
 }
 
 .compact .avatar {
-  font-size: 0.65rem;
+  font-size: 0.58rem;
+  letter-spacing: -0.03em;
 }
 
 .compact .statusDot {

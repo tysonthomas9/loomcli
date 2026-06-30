@@ -79,3 +79,6 @@ export type {
 
 export { useWorkspaceTree } from "./useWorkspaceTree";
 export type { EpicWithTasks, UseWorkspaceTreeReturn } from "./useWorkspaceTree";
+
+export { useRunEpicWorkflow } from "./useRunEpicWorkflow";
+export type { UseRunEpicWorkflowOptions } from "./useRunEpicWorkflow";

@@ -62,6 +62,7 @@ import { useToast } from "@/hooks/ui/useToast";
 import { useWorkflowRunStreams } from "@/hooks/workflows/useWorkflowRunStreams";
 import { parseLoomStatus } from "@/types";
 import type { Issue } from "@/types";
+import { getCompactAvatarInitials } from "@/utils/compactAvatarInitials";
 import { getAvatarColor, shouldUseWhiteText } from "@/utils/colorUtils";
 import {
   epicRunnerRuntimePayload,
@@ -397,7 +398,7 @@ function AgentsPageInner(): JSX.Element {
                     className={styles.infoAvatar}
                     style={{ backgroundColor: selColor, color: selText }}
                   >
-                    {selected.name.charAt(0).toUpperCase()}
+                    {getCompactAvatarInitials(selected.name)}
                   </span>
                   <div>
                     <h1 className={styles.agentName}>{selected.name}</h1>

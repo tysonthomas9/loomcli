@@ -6,6 +6,7 @@
 import type { LoomAgentStatus } from "@/types";
 import { effectiveAgentStatus, parseLoomStatus } from "@/types";
 import { RepoBadge } from "@/components/RepoBadge";
+import { getCompactAvatarInitials } from "@/utils/compactAvatarInitials";
 import { getAvatarColor, shouldUseWhiteText } from "@/utils/colorUtils";
 import { getStatusDotColor, getStatusLabel } from "@/utils/agent";
 import { isLeadRole } from "@/utils/agentRole";
@@ -55,7 +56,7 @@ export function AgentCard({
       ? [agent.active_task_id, agent.active_phase].filter(Boolean).join(" · ")
       : "";
   const isError = parsed.type === "error";
-  const initial = agent.name.charAt(0) || "?";
+  const initial = getCompactAvatarInitials(agent.name);
   const textColor = shouldUseWhiteText(avatarColor) ? "#fff" : "#1f2937";
   const roleLabel = agent.role
     ? agent.role.charAt(0).toUpperCase() + agent.role.slice(1)

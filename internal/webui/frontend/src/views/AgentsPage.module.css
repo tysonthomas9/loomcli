@@ -368,8 +368,9 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  font-size: 1.125rem;
+  font-size: 0.875rem;
   font-weight: 900;
+  letter-spacing: -0.02em;
 }
 
 .infoSub {

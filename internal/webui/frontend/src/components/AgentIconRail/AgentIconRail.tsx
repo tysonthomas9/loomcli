@@ -18,7 +18,10 @@ import { useStore } from "zustand";
 import { useAgentStoreInstance } from "@/hooks";
 import { type LoomAgentStatus, parseLoomStatus } from "@/types";
 import { orderAgentsForEpicRunner } from "@/utils/agentRole";
+import { getCompactAvatarInitials } from "@/utils/compactAvatarInitials";
 import { getAvatarColor, shouldUseWhiteText } from "@/utils/colorUtils";
+
+import { CompactRailHost } from "@/components/CompactRail";
 
 import styles from "./AgentIconRail.module.css";
 
@@ -75,17 +78,15 @@ export function AgentIconRail({ onAddClick }: AgentIconRailProps): JSX.Element {
         ))
       )}
       {onAddClick ? (
-        <button
+        <CompactRailHost
+          as="button"
           type="button"
-          className={`${styles.addButton} ${styles.hasTooltip}`}
+          label="Add agent"
+          className={styles.addButton}
           onClick={onAddClick}
-          aria-label="Add agent"
         >
           +
-          <span className={styles.tooltip} role="tooltip">
-            Add agent
-          </span>
-        </button>
+        </CompactRailHost>
       ) : null}
     </nav>
   );
@@ -131,24 +132,26 @@ export function AgentAvatarButton({
     [agent.status],
   );
   const dotColor = STATUS_DOT_COLOR[parsed.type] ?? STATUS_DOT_COLOR["idle"];
-  const initial = (agent.name?.[0] ?? "?").toUpperCase();
+  const initial = getCompactAvatarInitials(agent.name ?? "");
   const avatarBg = getAvatarColor(agent.name ?? "");
   const avatarFg = shouldUseWhiteText(avatarBg) ? "#fff" : "#1a1a1a";
   const tooltip = agentAvatarTooltip(agent);
 
   return (
-    <button
+    <CompactRailHost
+      as="button"
       type="button"
+      label={tooltip}
       onClick={onClick}
-      aria-label={tooltip}
       aria-current={selected ? "page" : undefined}
       data-agent-name={agent.name}
       data-selected={selected || undefined}
-      className={`${styles.avatarButton} ${styles.hasTooltip}`}
+      className={styles.avatarButton}
       style={{
         width: size,
         height: size,
-        fontSize: size <= 32 ? 12 : 14,
+        fontSize:
+          initial.length > 1 ? (size <= 32 ? 10 : 11) : size <= 32 ? 12 : 14,
         background: avatarBg,
         color: avatarFg,
         border: selected
@@ -163,9 +166,6 @@ export function AgentAvatarButton({
         className={styles.statusDot}
         style={{ background: dotColor }}
       />
-      <span className={styles.tooltip} role="tooltip">
-        {tooltip}
-      </span>
-    </button>
+    </CompactRailHost>
   );
 }

@@ -10,6 +10,8 @@
   padding: 0;
   overflow: visible;
   flex: 0 0 auto;
+  width: fit-content;
+  min-width: 100%;
   min-height: auto;
   --swim-lane-sticky-offset: 0px;
   /* Epic lane header block — column headers stick beneath toolbar + this row */
@@ -34,8 +36,10 @@
   display: flex;
   flex-shrink: 0;
   align-items: center;
-  justify-content: flex-end;
+  justify-content: flex-start;
   gap: var(--space-2);
+  width: 100%;
+  min-width: 100%;
   padding: var(--space-2) var(--space-4);
   margin-bottom: 0;
   background-color: var(--color-bg);

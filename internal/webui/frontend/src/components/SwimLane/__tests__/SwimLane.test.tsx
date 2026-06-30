@@ -179,6 +179,64 @@ describe("SwimLane", () => {
       );
     });
 
+    it("renders a run button for unclaimed epic lanes when onRunEpic is provided", () => {
+      const onRunEpic = vi.fn();
+      const epic = {
+        id: "HELLO-WORLD-2",
+        title: "Build the Hello World web app",
+        issue_type: "epic" as const,
+        status: "open" as const,
+        priority: 2,
+        created_at: "",
+        updated_at: "",
+      };
+
+      renderWithDndContext(
+        <SwimLane
+          id="lane-epic-HELLO-WORLD-2"
+          title={epic.title}
+          issues={[]}
+          columns={defaultColumns}
+          headerIssue={epic}
+          epicRunner={null}
+          onRunEpic={onRunEpic}
+        />,
+      );
+
+      const runButton = screen.getByTestId("lane-run-epic-button");
+      expect(runButton).toHaveTextContent("Run");
+      runButton.click();
+      expect(onRunEpic).toHaveBeenCalledTimes(1);
+    });
+
+    it("hides the run button when the epic lane is already claimed", () => {
+      const epic = {
+        id: "HELLO-WORLD-2",
+        title: "Build the Hello World web app",
+        issue_type: "epic" as const,
+        status: "open" as const,
+        priority: 2,
+        created_at: "",
+        updated_at: "",
+      };
+
+      renderWithDndContext(
+        <SwimLane
+          id="lane-epic-HELLO-WORLD-2"
+          title={epic.title}
+          issues={[]}
+          columns={defaultColumns}
+          headerIssue={epic}
+          epicRunner="lead-a"
+          onRunEpic={vi.fn()}
+        />,
+      );
+
+      expect(
+        screen.queryByTestId("lane-run-epic-button"),
+      ).not.toBeInTheDocument();
+    });
+
     it("hides the runner badge entirely for non-epic groupings", () => {
       renderWithDndContext(
         <SwimLane

@@ -73,6 +73,25 @@ func validateAgentName(name string) error {
 	return nil
 }
 
+// storedAgentNamePattern matches fleet-db Agent.Name validation.
+var storedAgentNamePattern = regexp.MustCompile(`^[a-z0-9]([a-z0-9._-]{0,98}[a-z0-9])?$`)
+
+// normalizeStoredAgentName lowercases and trims agent names before persistence.
+func normalizeStoredAgentName(name string) string {
+	return strings.ToLower(strings.TrimSpace(name))
+}
+
+// validateStoredAgentName checks a normalized agent name against fleet-db rules.
+func validateStoredAgentName(name string) error {
+	if name == "" {
+		return service.ErrValidation("missing agent name")
+	}
+	if !storedAgentNamePattern.MatchString(name) {
+		return service.ErrValidation("invalid agent name: use 1-100 lowercase letters, numbers, hyphens, dots, or underscores (cannot start or end with punctuation)")
+	}
+	return nil
+}
+
 // classifyStoreError translates a domain.Err* sentinel into the
 // equivalent *service.ServiceError so HTTP handlers can map it to the
 // right status code. op is a short verb describing the operation

@@ -5,14 +5,70 @@ import type { RepoInfo, WorkspaceAgentInfo } from "@/api/workspace";
 import { useCreateWorkspaceAgent } from "@/hooks/agents";
 import { useBackends } from "@/hooks/workspace";
 import { ApiError } from "@/types/common";
+import {
+  normalizeStoredAgentName,
+  validateStoredAgentName,
+} from "@/utils/agentName";
 
+import { AgentTemplateCard } from "./AgentTemplateCard";
 import styles from "./CreateAgentModal.module.css";
 
-const ROLE_OPTIONS: { value: string; label: string }[] = [
-  { value: "lead", label: "Lead" },
-  { value: "plan", label: "Plan" },
-  { value: "task", label: "Task" },
+type AgentKind = "background" | "lead";
+type BackgroundRole = "plan" | "task";
+
+const TEMPLATE_ACCENTS = {
+  plan: "#0d9488",
+  task: "#ea580c",
+  lead: "#db2777",
+} as const;
+
+const BACKGROUND_TEMPLATES: {
+  role: BackgroundRole;
+  title: string;
+  description: string;
+  glyph: string;
+  placeholder: string;
+  testId: string;
+  accentColor: string;
+}[] = [
+  {
+    role: "plan",
+    title: "Planner",
+    description: "Breaks epics into tasks under daemon supervision.",
+    glyph: "P",
+    placeholder: "planner",
+    testId: "create-agent-template-planner",
+    accentColor: TEMPLATE_ACCENTS.plan,
+  },
+  {
+    role: "task",
+    title: "Task Runner",
+    description: "Claims and runs ready tasks under daemon supervision.",
+    glyph: "T",
+    placeholder: "worker",
+    testId: "create-agent-template-task",
+    accentColor: TEMPLATE_ACCENTS.task,
+  },
 ];
+
+const LEAD_TEMPLATE = {
+  title: "Lead",
+  description: "Orchestrates an epic interactively in a terminal.",
+  glyph: "L",
+  placeholder: "lead",
+  testId: "create-agent-template-lead",
+  accentColor: TEMPLATE_ACCENTS.lead,
+};
+
+function resolveInitialSelection(
+  defaultKind: AgentKind | undefined,
+  defaultRoleName: BackgroundRole,
+): { kind: AgentKind; backgroundRole: BackgroundRole } {
+  if (defaultKind === "lead") {
+    return { kind: "lead", backgroundRole: defaultRoleName };
+  }
+  return { kind: "background", backgroundRole: defaultRoleName };
+}
 
 export interface CreateAgentModalProps {
   isOpen: boolean;
@@ -20,7 +76,8 @@ export interface CreateAgentModalProps {
   repos: RepoInfo[];
   defaultBackend?: string;
   defaultName?: string;
-  defaultRoleName?: "task" | "plan";
+  defaultRoleName?: BackgroundRole;
+  defaultKind?: AgentKind;
   onClose: () => void;
   onSuccess: (agent: WorkspaceAgentInfo) => void;
 }
@@ -32,14 +89,25 @@ export function CreateAgentModal({
   defaultBackend,
   defaultName,
   defaultRoleName,
+  defaultKind,
   onClose,
   onSuccess,
 }: CreateAgentModalProps): JSX.Element | null {
   const resolvedDefaultBackend = defaultBackend?.trim() || "codex";
   const resolvedDefaultName = defaultName?.trim() ?? "";
   const resolvedDefaultRoleName = defaultRoleName ?? "task";
+  const initialSelection = resolveInitialSelection(
+    defaultKind,
+    resolvedDefaultRoleName,
+  );
+
   const [name, setName] = useState(resolvedDefaultName);
-  const [roleName, setRoleName] = useState<string>(resolvedDefaultRoleName);
+  const [selectedKind, setSelectedKind] = useState<AgentKind>(
+    initialSelection.kind,
+  );
+  const [backgroundRole, setBackgroundRole] = useState<BackgroundRole>(
+    initialSelection.backgroundRole,
+  );
   const [backend, setBackend] = useState(resolvedDefaultBackend);
   const [selectedRepos, setSelectedRepos] = useState<string[]>([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -48,6 +116,16 @@ export function CreateAgentModal({
   const nameRef = useRef<HTMLInputElement>(null);
   const createAgent = useCreateWorkspaceAgent(workspaceId);
   const { backends } = useBackends();
+
+  const roleName = selectedKind === "lead" ? "lead" : backgroundRole;
+
+  const namePlaceholder = useMemo(() => {
+    if (selectedKind === "lead") return LEAD_TEMPLATE.placeholder;
+    const template = BACKGROUND_TEMPLATES.find(
+      (t) => t.role === backgroundRole,
+    );
+    return template?.placeholder ?? "agent";
+  }, [selectedKind, backgroundRole]);
 
   const repoOptions = useMemo(
     () =>
@@ -81,8 +159,13 @@ export function CreateAgentModal({
 
     if (wasOpenRef.current) return;
     wasOpenRef.current = true;
+    const selection = resolveInitialSelection(
+      defaultKind,
+      resolvedDefaultRoleName,
+    );
     setName(resolvedDefaultName);
-    setRoleName(resolvedDefaultRoleName);
+    setSelectedKind(selection.kind);
+    setBackgroundRole(selection.backgroundRole);
     setBackend(resolvedDefaultBackend);
     setSelectedRepos(defaultRepos);
     setIsSubmitting(false);
@@ -93,6 +176,7 @@ export function CreateAgentModal({
     resolvedDefaultRoleName,
     resolvedDefaultBackend,
     defaultRepos,
+    defaultKind,
   ]);
 
   useEffect(() => {
@@ -101,20 +185,25 @@ export function CreateAgentModal({
     }
   }, [isOpen]);
 
-  const canSubmit = name.trim() !== "" && !isSubmitting;
+  const canSubmit = validateStoredAgentName(name) === null && !isSubmitting;
+
+  const selectBackground = (role: BackgroundRole): void => {
+    setSelectedKind("background");
+    setBackgroundRole(role);
+  };
+
+  const selectLead = (): void => {
+    setSelectedKind("lead");
+  };
 
   const handleSubmit = async (event: FormEvent) => {
     event.preventDefault();
     setError(null);
-    const trimmedName = name.trim();
-    const trimmedRole = roleName.trim();
+    const trimmedName = normalizeStoredAgentName(name);
     const trimmedBackend = backend.trim();
-    if (!trimmedName) {
-      setError("Agent name is required");
-      return;
-    }
-    if (!trimmedRole) {
-      setError("Role is required");
+    const nameError = validateStoredAgentName(name);
+    if (nameError) {
+      setError(nameError);
       return;
     }
 
@@ -122,7 +211,8 @@ export function CreateAgentModal({
     try {
       const request = {
         name: trimmedName,
-        role_name: trimmedRole,
+        // roleName is a non-empty union ("lead" | "plan" | "task").
+        role_name: roleName,
         auto: false,
         cross_repo: crossRepo,
         repos: crossRepo ? [] : selectedRepos,
@@ -132,8 +222,13 @@ export function CreateAgentModal({
         ...(trimmedBackend ? { backend: trimmedBackend } : {}),
       });
       onSuccess(agent);
+      const selection = resolveInitialSelection(
+        defaultKind,
+        resolvedDefaultRoleName,
+      );
       setName(resolvedDefaultName);
-      setRoleName(resolvedDefaultRoleName);
+      setSelectedKind(selection.kind);
+      setBackgroundRole(selection.backgroundRole);
       setBackend(resolvedDefaultBackend);
       setSelectedRepos(defaultRepos);
     } catch (err) {
@@ -161,6 +256,7 @@ export function CreateAgentModal({
       onClose={onClose}
       overlayTestId="create-agent-overlay"
       closeTestId="create-agent-close"
+      dialogClassName={aetherModalStyles.dialogWide}
       footer={
         <>
           <button
@@ -183,107 +279,159 @@ export function CreateAgentModal({
         </>
       }
     >
-      <form id="create-agent-form" onSubmit={handleSubmit}>
-        <div className={styles.fieldGroup}>
-          <label className={styles.label} htmlFor="agent-name">
-            Name
-          </label>
-          <input
-            id="agent-name"
-            ref={nameRef}
-            className={styles.input}
-            value={name}
-            onChange={(event) => setName(event.target.value)}
-            placeholder="planner"
-            disabled={isSubmitting}
-            data-testid="create-agent-name"
-          />
-        </div>
+      <form
+        id="create-agent-form"
+        className={styles.form}
+        onSubmit={handleSubmit}
+      >
+        <div className={styles.panel}>
+          <h3 className={styles.panelHeader}>Agent type</h3>
 
-        <div className={styles.row}>
-          <div className={styles.fieldGroup}>
-            <span className={styles.label} id="agent-role-label">
-              Role
+          <div
+            className={styles.group}
+            role="group"
+            aria-labelledby="create-agent-background-label"
+          >
+            <span
+              className={styles.groupLabel}
+              id="create-agent-background-label"
+            >
+              Background agents
             </span>
-            <div
-              className={styles.segControl}
-              role="group"
-              aria-labelledby="agent-role-label"
-            >
-              {ROLE_OPTIONS.map((option) => (
-                <button
-                  key={option.value}
-                  type="button"
-                  className={styles.segOption}
-                  data-active={roleName === option.value || undefined}
-                  aria-pressed={roleName === option.value}
-                  onClick={() => setRoleName(option.value)}
+            <p className={styles.groupHint}>
+              Supervised workers that run automatically
+            </p>
+            <div className={styles.templateList}>
+              {BACKGROUND_TEMPLATES.map((template) => (
+                <AgentTemplateCard
+                  key={template.role}
+                  title={template.title}
+                  description={template.description}
+                  glyph={template.glyph}
+                  accentColor={template.accentColor}
+                  selected={
+                    selectedKind === "background" &&
+                    backgroundRole === template.role
+                  }
                   disabled={isSubmitting}
-                >
-                  {option.label}
-                </button>
+                  ariaLabel={`${template.title}, background agent`}
+                  testId={template.testId}
+                  onSelect={() => selectBackground(template.role)}
+                />
               ))}
             </div>
           </div>
-          <div className={styles.fieldGroup}>
-            <label className={styles.label} htmlFor="agent-backend">
-              AI Backend
-            </label>
-            <select
-              id="agent-backend"
-              className={styles.select}
-              value={backend}
-              onChange={(event) => setBackend(event.target.value)}
-              disabled={isSubmitting}
-              data-testid="create-agent-backend"
-            >
-              {backendOptions.map((option) => (
-                <option key={option.value} value={option.value}>
-                  {option.label}
-                </option>
-              ))}
-            </select>
+
+          <div
+            className={styles.group}
+            role="group"
+            aria-labelledby="create-agent-lead-label"
+          >
+            <span className={styles.groupLabel} id="create-agent-lead-label">
+              Lead agent
+            </span>
+            <p className={styles.groupHint}>
+              Interactive orchestrator in a terminal
+            </p>
+            <div className={styles.templateList}>
+              <AgentTemplateCard
+                title={LEAD_TEMPLATE.title}
+                description={LEAD_TEMPLATE.description}
+                glyph={LEAD_TEMPLATE.glyph}
+                accentColor={LEAD_TEMPLATE.accentColor}
+                selected={selectedKind === "lead"}
+                disabled={isSubmitting}
+                ariaLabel={`${LEAD_TEMPLATE.title}, lead agent`}
+                testId={LEAD_TEMPLATE.testId}
+                onSelect={selectLead}
+              />
+            </div>
           </div>
         </div>
 
-        <div className={styles.fieldGroup}>
-          <span className={styles.label} id="agent-repos-label">
-            Repos / Worktrees
-          </span>
-          {repoOptions.length === 0 ? (
-            <p className={styles.emptyHint} data-testid="create-agent-no-repos">
-              No repos yet — add one from the sidebar first. This agent will run
-              with workspace scope.
-            </p>
-          ) : (
-            <div
-              className={styles.repoChips}
-              role="group"
-              aria-labelledby="agent-repos-label"
-              data-testid="create-agent-repo-chips"
-            >
-              {repoOptions.map((repo) => {
-                const on = selectedRepos.includes(repo);
-                return (
-                  <button
-                    key={repo}
-                    type="button"
-                    className={styles.repoChip}
-                    data-active={on || undefined}
-                    aria-pressed={on}
-                    onClick={() => toggleRepo(repo)}
-                    disabled={isSubmitting}
-                  >
-                    <span className={styles.repoChipBox} aria-hidden="true">
-                      {on ? "✓" : ""}
-                    </span>
-                    {repo}
-                  </button>
-                );
-              })}
+        <div className={styles.panel}>
+          <h3 className={styles.panelHeader}>Configuration</h3>
+
+          <div className={styles.configRow}>
+            <div className={styles.fieldGroup}>
+              <label className={styles.label} htmlFor="agent-name">
+                Name
+              </label>
+              <input
+                id="agent-name"
+                ref={nameRef}
+                className={styles.input}
+                value={name}
+                onChange={(event) => setName(event.target.value)}
+                placeholder={namePlaceholder}
+                disabled={isSubmitting}
+                data-testid="create-agent-name"
+              />
             </div>
-          )}
-          <p className={styles.hint}>{repoHint}</p>
+
+            <div className={styles.fieldGroup}>
+              <label className={styles.label} htmlFor="agent-backend">
+                AI Backend
+              </label>
+              <select
+                id="agent-backend"
+                className={styles.select}
+                value={backend}
+                onChange={(event) => setBackend(event.target.value)}
+                disabled={isSubmitting}
+                data-testid="create-agent-backend"
+              >
+                {backendOptions.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          <div className={`${styles.fieldGroup} ${styles.fieldGroupSpaced}`}>
+            <span className={styles.label} id="agent-repos-label">
+              Repos
+            </span>
+            {repoOptions.length === 0 ? (
+              <p
+                className={styles.emptyHint}
+                data-testid="create-agent-no-repos"
+              >
+                No repos yet — add one from the sidebar first. This agent will
+                run with workspace scope.
+              </p>
+            ) : (
+              <div
+                className={styles.repoChips}
+                role="group"
+                aria-labelledby="agent-repos-label"
+                data-testid="create-agent-repo-chips"
+              >
+                {repoOptions.map((repo) => {
+                  const on = selectedRepos.includes(repo);
+                  return (
+                    <button
+                      key={repo}
+                      type="button"
+                      className={styles.repoChip}
+                      data-active={on || undefined}
+                      aria-pressed={on}
+                      onClick={() => toggleRepo(repo)}
+                      disabled={isSubmitting}
+                    >
+                      <span className={styles.repoChipBox} aria-hidden="true">
+                        {on ? "✓" : ""}
+                      </span>
+                      {repo}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+            <p className={styles.hint}>{repoHint}</p>
+          </div>
         </div>
 
         {error && (

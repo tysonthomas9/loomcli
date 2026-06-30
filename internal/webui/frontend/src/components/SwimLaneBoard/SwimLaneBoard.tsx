@@ -80,6 +80,10 @@ export interface SwimLaneBoardProps {
   isMultiRepo?: boolean;
   /** Whether caller-applied filters/search are active */
   hasFiltersActive?: boolean;
+  /** Start the epic-runner workflow for an unclaimed epic lane */
+  onRunEpic?: (issue: Issue) => void;
+  /** Returns true while an epic-runner start is in flight for the lane */
+  isRunningEpic?: (epicId: string) => boolean;
 }
 
 /**
@@ -103,6 +107,8 @@ export function SwimLaneBoard({
   pendingIds,
   isMultiRepo,
   hasFiltersActive,
+  onRunEpic,
+  isRunningEpic,
 }: SwimLaneBoardProps): JSX.Element {
   const { workspaceId } = useWorkspaceContext();
   const [compactColumns, setCompactColumns] = useState(() =>
@@ -202,6 +208,8 @@ export function SwimLaneBoard({
     ...(pendingIds !== undefined && { pendingIds }),
     ...(isMultiRepo !== undefined && { isMultiRepo }),
     ...(hasFiltersActive !== undefined && { hasFiltersActive }),
+    ...(onRunEpic !== undefined && { onRunEpic }),
+    ...(isRunningEpic !== undefined && { isRunningEpic }),
   };
 
   return <SwimLaneBoardContent {...contentProps} />;
@@ -228,6 +236,8 @@ function SwimLaneBoardContent({
   hasFiltersActive,
   compactColumns,
   compactToggle,
+  onRunEpic,
+  isRunningEpic,
 }: Omit<SwimLaneBoardProps, "filters" | "groupBy"> & {
   groupBy: Exclude<GroupByField, "none">;
   columns: KanbanColumnConfig[];
@@ -542,6 +552,11 @@ function SwimLaneBoardContent({
             ...(cardLimit !== undefined && { cardLimit }),
             ...(pendingIds !== undefined && { pendingIds }),
             compactColumns,
+            ...(onRunEpic !== undefined &&
+              lane.groupIssue?.issue_type === "epic" && {
+                onRunEpic: () => onRunEpic(lane.groupIssue!),
+                isRunningEpic: isRunningEpic?.(lane.groupIssue.id) ?? false,
+              }),
           };
           return <SwimLane key={lane.id} {...laneProps} />;
         })}

@@ -28,16 +28,22 @@ function makeAgent(overrides: Partial<LoomAgentStatus> = {}): LoomAgentStatus {
 
 describe("AgentCard", () => {
   describe("avatar", () => {
-    it("renders the first letter of the agent name", () => {
-      render(<AgentCard agent={makeAgent({ name: "nova" })} />);
+    it("renders two-letter initials for segmented agent names", () => {
+      render(<AgentCard agent={makeAgent({ name: "lead-b" })} />);
 
-      expect(screen.getByLabelText("nova avatar")).toHaveTextContent("n");
+      expect(screen.getByLabelText("lead-b avatar")).toHaveTextContent("LB");
     });
 
-    it("renders uppercase initial for uppercase name", () => {
+    it("renders two-letter initials for single-segment names", () => {
+      render(<AgentCard agent={makeAgent({ name: "nova" })} />);
+
+      expect(screen.getByLabelText("nova avatar")).toHaveTextContent("NO");
+    });
+
+    it("renders two-letter initials for uppercase names", () => {
       render(<AgentCard agent={makeAgent({ name: "Falcon" })} />);
 
-      expect(screen.getByLabelText("Falcon avatar")).toHaveTextContent("F");
+      expect(screen.getByLabelText("Falcon avatar")).toHaveTextContent("FA");
     });
 
     it("applies a background color style", () => {

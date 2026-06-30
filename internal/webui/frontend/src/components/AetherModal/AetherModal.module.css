@@ -32,6 +32,11 @@
   border-radius: 8px;
 }
 
+.dialogWide {
+  width: min(600px, 92vw);
+  max-width: 600px;
+}
+
 .head {
   display: flex;
   align-items: center;

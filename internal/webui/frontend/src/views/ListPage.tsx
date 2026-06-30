@@ -19,6 +19,7 @@ import {
   useWorkspaceViewActions,
 } from "@/contexts/WorkspaceViewContext";
 import { useAgentStoreInstance } from "@/hooks/common";
+import { useRunEpicWorkflow } from "@/hooks/workspace";
 import type { Issue, Status } from "@/types";
 import { buildEpicLeadClaims } from "@/utils/agentRole";
 import { formatIssueId, formatStatusLabel, isPRUrl } from "@/utils/issue";
@@ -62,7 +63,8 @@ function Avatar({ name }: { name: string }): JSX.Element {
 
 export function ListPage(): JSX.Element {
   const { filteredIssues } = useWorkspaceViewData();
-  const { handleIssueClick } = useWorkspaceViewActions();
+  const { handleIssueClick, showToast } = useWorkspaceViewActions();
+  const { runEpic, isRunningEpic } = useRunEpicWorkflow({ showToast });
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const agentStore = useAgentStoreInstance();
   const agents = useStore(agentStore, (s) => s.agents);
@@ -122,6 +124,16 @@ export function ListPage(): JSX.Element {
           const openEpicAriaLabel = epicDisplayId
             ? `Open epic ${epicDisplayId}: ${lane.title}`
             : `Open epic: ${lane.title}`;
+          const runEpicLabel = epicDisplayId
+            ? `Run epic ${epicDisplayId}`
+            : "Run epic";
+          const showRunEpic =
+            lane.groupIssue?.issue_type === "epic" &&
+            lane.groupIssue.status !== "closed" &&
+            epicRunner === null;
+          const runningEpic = lane.groupIssue
+            ? isRunningEpic(lane.groupIssue.id)
+            : false;
           const laneTitleContent = (
             <span className={laneStyles.laneTitleContent}>
               <span className={laneStyles.laneTitleText}>{lane.title}</span>
@@ -232,6 +244,23 @@ export function ListPage(): JSX.Element {
                 >
                   {lane.issues.length}
                 </span>
+                {showRunEpic && lane.groupIssue ? (
+                  <button
+                    type="button"
+                    className={laneStyles.runEpicButton}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      void runEpic(lane.groupIssue as Issue);
+                    }}
+                    disabled={runningEpic}
+                    aria-label={
+                      runningEpic ? `Starting ${runEpicLabel}` : runEpicLabel
+                    }
+                    data-testid="lane-run-epic-button"
+                  >
+                    {runningEpic ? "Starting" : "Run"}
+                  </button>
+                ) : null}
                 {epicRunner !== undefined &&
                   (epicRunner !== null ? (
                     <span

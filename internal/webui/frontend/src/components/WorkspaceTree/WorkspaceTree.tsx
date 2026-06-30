@@ -20,6 +20,7 @@ import { wsGet, wsSet } from "@/utils/scopedStorage";
 import { ONBOARDING_REPO_URL } from "@/utils/onboardingDefaults";
 import { ErrorDisplay } from "@/components/ErrorDisplay";
 import { AddRepoModal } from "@/components/AddRepoModal";
+import { CompactRailHost } from "@/components/CompactRail";
 
 import { WorkspaceSelectorBar } from "./WorkspaceSelectorBar";
 import { AgentSection } from "./AgentSection";
@@ -27,6 +28,7 @@ import { TerminalSection } from "./TerminalSection";
 import { RunningSection } from "./RunningSection";
 import { ReposSection } from "./ReposSection";
 import { CollapsedAgentRail } from "./CollapsedAgentRail";
+import { CollapsedRepoRail } from "./CollapsedRepoRail";
 import { SidebarResizeHandle } from "./SidebarResizeHandle";
 import styles from "./WorkspaceTree.module.css";
 
@@ -250,16 +252,17 @@ export function WorkspaceTree({
               onAddWorkspace={onAddWorkspaceClick}
             />
           ) : null}
-          <button
+          <CompactRailHost
+            as="button"
             type="button"
+            label="Expand sidebar"
             className={styles.expandButton}
             onClick={handleToggle}
             aria-expanded={false}
-            title="Expand sidebar"
             aria-label="Expand workspace tree"
           >
             <ChevronRightIcon />
-          </button>
+          </CompactRailHost>
           <div className={styles.railDivider} aria-hidden="true" />
         </div>
       ) : (
@@ -287,12 +290,36 @@ export function WorkspaceTree({
       )}
 
       {isCollapsed ? (
-        <CollapsedAgentRail
-          onAgentClick={onAgentClick}
-          selectedAgentName={selectedAgentName}
-          onAddClick={onAddClick}
-        />
+        <div className={styles.collapsedBody}>
+          <CollapsedAgentRail
+            onAgentClick={onAgentClick}
+            selectedAgentName={selectedAgentName}
+            onAddClick={onAddClick}
+          />
+          {workspaceId ? (
+            <>
+              <div
+                className={styles.collapsedSectionDivider}
+                aria-hidden="true"
+              />
+              <CollapsedRepoRail
+                repos={workspaceRepos}
+                onAddRepo={() => setAddRepoOpen(true)}
+              />
+            </>
+          ) : null}
+        </div>
       ) : null}
+
+      <AddRepoModal
+        isOpen={addRepoOpen}
+        workspaceId={workspaceId ?? ""}
+        initialUrl={onboardingRepoUrl}
+        onClose={() => setAddRepoOpen(false)}
+        onSuccess={() => {
+          void refetch();
+        }}
+      />
 
       {!isCollapsed && (
         <div className={styles.content}>
@@ -337,16 +364,6 @@ export function WorkspaceTree({
           {!isLoading && !error && workspaceRepos.length === 0 && (
             <div className={styles.emptyState}>No repos in workspace</div>
           )}
-
-          <AddRepoModal
-            isOpen={addRepoOpen}
-            workspaceId={workspaceId ?? ""}
-            initialUrl={onboardingRepoUrl}
-            onClose={() => setAddRepoOpen(false)}
-            onSuccess={() => {
-              void refetch();
-            }}
-          />
 
           {/* Agents in board views; terminal sessions in Terminal view */}
           {showTerminalSidebar ? (
@@ -393,28 +410,31 @@ export function WorkspaceTree({
       )}
 
       {isCollapsed && isDisconnected ? (
-        <div
-          className={styles.collapsedConnectionBadge}
-          data-disconnected="true"
-          title={
+        <CompactRailHost
+          label={
             connectionLost
               ? "Connection lost"
               : connectionState === "reconnecting"
                 ? "Reconnecting..."
                 : "Disconnected"
           }
+          className={styles.collapsedConnectionBadge}
+          data-disconnected="true"
           aria-label="Connection issue"
         >
           !
-        </div>
+        </CompactRailHost>
       ) : null}
 
       {isCollapsed &&
         (wsConnectionState === "error_never_connected" ||
           wsConnectionState === "error_lost_connection") && (
-          <div className={styles.errorBadge} title="Workspace connection error">
+          <CompactRailHost
+            label="Workspace connection error"
+            className={styles.errorBadge}
+          >
             !
-          </div>
+          </CompactRailHost>
         )}
 
       {!isCollapsed && (

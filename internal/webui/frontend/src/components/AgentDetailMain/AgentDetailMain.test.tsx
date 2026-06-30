@@ -65,6 +65,28 @@ function renderWithAgents(agents: LoomAgentStatus[], agentName: string) {
 }
 
 describe("AgentDetailMain", () => {
+  it("shows two-letter initials in the agent header avatar", () => {
+    renderWithAgents(
+      [
+        {
+          name: "lead-b",
+          branch: "main",
+          status: "idle",
+          ahead: 0,
+          behind: 0,
+          workspace: "E2E",
+          role: "lead",
+          state: "idle",
+        } as LoomAgentStatus,
+      ],
+      "lead-b",
+    );
+
+    expect(
+      screen.getByText("LB", { selector: "[aria-hidden='true']" }),
+    ).toBeInTheDocument();
+  });
+
   it("shows assigned lead epic and hides placeholder branch values", () => {
     renderWithAgents(
       [

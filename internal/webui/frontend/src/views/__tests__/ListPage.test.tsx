@@ -14,7 +14,23 @@ import type { Issue } from "@/types";
 
 const mockData = { ...NO_WORKSPACE_VIEW_DATA, activeView: "list" as const };
 const handleIssueClick = vi.fn();
-const mockActions = { ...NO_WORKSPACE_VIEW_ACTIONS, handleIssueClick };
+const runEpic = vi.fn();
+const mockActions = {
+  ...NO_WORKSPACE_VIEW_ACTIONS,
+  handleIssueClick,
+  showToast: vi.fn(),
+};
+
+vi.mock("@/hooks/workspace", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/hooks/workspace")>();
+  return {
+    ...actual,
+    useRunEpicWorkflow: () => ({
+      runEpic,
+      isRunningEpic: () => false,
+    }),
+  };
+});
 
 vi.mock("@/contexts/WorkspaceViewContext", async (importOriginal) => {
   const actual =
@@ -117,6 +133,34 @@ describe("ListPage", () => {
     );
 
     expect(handleIssueClick).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "HELLO-WORLD-2" }),
+    );
+  });
+
+  it("shows a run button for unclaimed epic lanes", () => {
+    mockData.filteredIssues = [
+      createMockIssue({
+        id: "HELLO-WORLD-2",
+        title: "Build the Hello World web app",
+        issue_type: "epic",
+        status: "open",
+      }),
+      createMockIssue({
+        id: "task-1",
+        title: "Child Task",
+        issue_type: "task",
+        parent: "HELLO-WORLD-2",
+        parent_title: "Build the Hello World web app",
+        status: "open",
+      }),
+    ];
+
+    render(<ListPage />);
+
+    const runButton = screen.getByTestId("lane-run-epic-button");
+    expect(runButton).toHaveTextContent("Run");
+    fireEvent.click(runButton);
+    expect(runEpic).toHaveBeenCalledWith(
       expect.objectContaining({ id: "HELLO-WORLD-2" }),
     );
   });

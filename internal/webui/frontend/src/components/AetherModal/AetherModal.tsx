@@ -26,6 +26,8 @@ export interface AetherModalProps {
   overlayTestId?: string;
   closeTestId?: string;
   showCloseButton?: boolean;
+  /** Extra class names merged onto the dialog element (e.g. wide variant). */
+  dialogClassName?: string | undefined;
 }
 
 export function AetherModal({
@@ -42,6 +44,7 @@ export function AetherModal({
   overlayTestId,
   closeTestId,
   showCloseButton = true,
+  dialogClassName,
 }: AetherModalProps): JSX.Element | null {
   if (!isOpen) return null;
 
@@ -66,7 +69,7 @@ export function AetherModal({
       >
         <div
           ref={dialogRef}
-          className={styles.dialog}
+          className={[styles.dialog, dialogClassName].filter(Boolean).join(" ")}
           role="dialog"
           aria-modal="true"
           aria-label={ariaLabel ?? title}

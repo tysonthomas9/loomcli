@@ -490,6 +490,11 @@ describe("WorkspaceTree", () => {
       );
 
       expect(screen.getByTestId("collapsed-agent-rail")).toBeInTheDocument();
+      expect(screen.getByTestId("collapsed-repo-rail")).toBeInTheDocument();
+      expect(screen.getByLabelText("alpha")).toBeInTheDocument();
+      expect(
+        screen.getByRole("button", { name: "Add repo" }),
+      ).toBeInTheDocument();
     });
   });
 

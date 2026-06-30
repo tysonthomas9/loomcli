@@ -82,6 +82,7 @@ export function AddRepoModal({
       title="Add Repo"
       onClose={onClose}
       overlayTestId="add-repo-overlay"
+      dialogClassName={aetherModalStyles.dialogWide}
       footer={
         <>
           <button

@@ -103,17 +103,17 @@ describe("CreateAgentModal: default prop seeding", () => {
     expect(screen.getByTestId("create-agent-name")).toHaveValue("pad");
   });
 
-  it("seeds the role segmented control from defaultRoleName", () => {
+  it("seeds the Planner template from defaultRoleName plan", () => {
     renderModal({ defaultRoleName: "plan" });
-    expect(screen.getByRole("button", { name: "Plan" })).toHaveAttribute(
+    expect(screen.getByTestId("create-agent-template-planner")).toHaveAttribute(
       "aria-pressed",
       "true",
     );
   });
 
-  it("defaults role to 'task' when defaultRoleName is omitted", () => {
+  it("defaults to Task Runner template when defaultRoleName is omitted", () => {
     renderModal();
-    expect(screen.getByRole("button", { name: "Task" })).toHaveAttribute(
+    expect(screen.getByTestId("create-agent-template-task")).toHaveAttribute(
       "aria-pressed",
       "true",
     );
@@ -252,6 +252,19 @@ describe("CreateAgentModal: client-side validation", () => {
 // ---------- happy-path submission ----------
 
 describe("CreateAgentModal: submission", () => {
+  it("submits mixed-case names as lowercase", async () => {
+    mockCreateAgent.mockResolvedValueOnce(sampleAgent);
+    renderModal();
+    fireEvent.change(screen.getByTestId("create-agent-name"), {
+      target: { value: "Test-lead" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /create agent/i }));
+    await waitFor(() => expect(mockCreateAgent).toHaveBeenCalled());
+    expect(mockCreateAgent.mock.calls[0][0]).toMatchObject({
+      name: "test-lead",
+    });
+  });
+
   it("submits repo-scoped agent with trimmed values + invokes onSuccess", async () => {
     mockCreateAgent.mockResolvedValueOnce(sampleAgent);
     const { onSuccess } = renderModal({
@@ -302,6 +315,39 @@ describe("CreateAgentModal: submission", () => {
     });
   });
 
+  it("submits lead agent when Lead template is selected", async () => {
+    mockCreateAgent.mockResolvedValueOnce(sampleAgent);
+    renderModal({ defaultName: "lead-nova" });
+    fireEvent.click(screen.getByTestId("create-agent-template-lead"));
+    fireEvent.click(screen.getByRole("button", { name: /create agent/i }));
+    await waitFor(() => expect(mockCreateAgent).toHaveBeenCalled());
+    expect(mockCreateAgent.mock.calls[0][0]).toMatchObject({
+      name: "lead-nova",
+      role_name: "lead",
+    });
+  });
+
+  it("switches background template selection when Planner is clicked", () => {
+    renderModal();
+    expect(screen.getByTestId("create-agent-template-task")).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    fireEvent.click(screen.getByTestId("create-agent-template-planner"));
+    expect(screen.getByTestId("create-agent-template-planner")).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    expect(screen.getByTestId("create-agent-template-task")).toHaveAttribute(
+      "aria-pressed",
+      "false",
+    );
+    expect(screen.getByTestId("create-agent-template-lead")).toHaveAttribute(
+      "aria-pressed",
+      "false",
+    );
+  });
+
   it("resets the form to the configured defaults after a successful submit", async () => {
     mockCreateAgent.mockResolvedValueOnce(sampleAgent);
     renderModal({ defaultName: "seed-name", defaultRoleName: "plan" });
@@ -318,7 +364,7 @@ describe("CreateAgentModal: submission", () => {
     await waitFor(() => {
       expect(screen.getByTestId("create-agent-name")).toHaveValue("seed-name");
     });
-    expect(screen.getByRole("button", { name: "Plan" })).toHaveAttribute(
+    expect(screen.getByTestId("create-agent-template-planner")).toHaveAttribute(
       "aria-pressed",
       "true",
     );

@@ -68,7 +68,8 @@
   width: 30px;
   height: 30px;
   border-radius: 50%;
-  font-size: 0.8125rem;
+  font-size: 10px;
   font-weight: 800;
+  letter-spacing: -0.02em;
   line-height: 1;
 }

@@ -325,6 +325,25 @@ describe("NavRail", () => {
       ).toBeInTheDocument();
       expect(screen.getByLabelText("Add workspace")).toBeInTheDocument();
     });
+
+    it("shows workspace name in a hover tooltip", () => {
+      render(
+        <NavRail
+          activeView="kanban"
+          onChange={() => {}}
+          workspaces={[{ id: "hello", name: "Hello-World" }]}
+          activeWorkspaceId="hello"
+          onWorkspaceSwitch={() => {}}
+        />,
+      );
+
+      const workspaceButton = screen.getByLabelText("Switch to Hello-World");
+      expect(workspaceButton).toHaveTextContent("HW");
+      fireEvent.mouseEnter(workspaceButton);
+      expect(
+        screen.getByRole("tooltip", { name: "Hello-World" }),
+      ).toBeInTheDocument();
+    });
   });
 
   describe("unread indicator", () => {

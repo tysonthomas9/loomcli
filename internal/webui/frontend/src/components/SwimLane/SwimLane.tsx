@@ -54,6 +54,10 @@ export interface SwimLaneProps {
    * (non-epic groupings).
    */
   epicRunner?: string | null;
+  /** Start the epic-runner workflow for this lane's epic */
+  onRunEpic?: () => void;
+  /** True while an epic-runner start is in flight */
+  isRunningEpic?: boolean;
   /** Map of issue ID to blocked info */
   blockedIssues?: Map<string, BlockedInfo>;
   /** Whether to show blocked issues */
@@ -84,6 +88,8 @@ export function SwimLane({
   headerIssue,
   onHeaderIssueClick,
   epicRunner,
+  onRunEpic,
+  isRunningEpic = false,
   blockedIssues,
   showBlocked = true,
   className,
@@ -161,6 +167,12 @@ export function SwimLane({
   const openEpicAriaLabel = epicDisplayId
     ? `Open epic ${epicDisplayId}: ${title}`
     : `Open epic: ${title}`;
+  const showRunEpic =
+    headerIssue?.issue_type === "epic" &&
+    headerIssue.status !== "closed" &&
+    onRunEpic !== undefined &&
+    epicRunner === null;
+  const runEpicLabel = epicDisplayId ? `Run epic ${epicDisplayId}` : "Run epic";
 
   const laneTitleContent = (
     <span className={styles.laneTitleContent}>
@@ -276,6 +288,23 @@ export function SwimLane({
         >
           {filteredIssues.length}
         </span>
+        {showRunEpic ? (
+          <button
+            type="button"
+            className={styles.runEpicButton}
+            onClick={(event) => {
+              event.stopPropagation();
+              onRunEpic();
+            }}
+            disabled={isRunningEpic}
+            aria-label={
+              isRunningEpic ? `Starting ${runEpicLabel}` : runEpicLabel
+            }
+            data-testid="lane-run-epic-button"
+          >
+            {isRunningEpic ? "Starting" : "Run"}
+          </button>
+        ) : null}
         {epicRunner !== undefined &&
           (epicRunner !== null ? (
             <span

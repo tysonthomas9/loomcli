@@ -1,18 +1,18 @@
 /**
- * Vertical agent pill rail shown when WorkspaceTree is collapsed.
+ * Vertical repo pill rail shown when WorkspaceTree is collapsed.
  */
 
 .rail {
-  flex: 1;
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 11px;
-  padding: 2px 1px;
+  gap: 9px;
+  padding: 2px 1px 4px;
   overflow-y: auto;
   overflow-x: visible;
-  min-height: 0;
+  flex-shrink: 0;
   width: 100%;
+  max-height: min(220px, 38vh);
   position: relative;
   z-index: calc(var(--z-overlay) + 2);
 }
@@ -20,22 +20,37 @@
 .emptyHint {
   font-size: var(--font-size-xs);
   color: var(--color-text-muted);
-  padding: var(--space-2) 0;
+  padding: var(--space-1) 0;
+}
+
+.repoPill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  line-height: 1;
+  flex-shrink: 0;
+  border: 1px solid color-mix(in srgb, currentColor 12%, transparent);
 }
 
 .addButton {
   position: relative;
-  width: 32px;
-  height: 32px;
+  width: 28px;
+  height: 28px;
   padding: 0;
-  border-radius: var(--radius-full);
+  border-radius: 8px;
   background: var(--color-bg);
   color: var(--color-text-primary);
   border: 1px dashed var(--color-border);
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 1.125rem;
+  font-size: 1rem;
   line-height: 1;
   font-weight: var(--font-weight-semibold);
   cursor: pointer;
