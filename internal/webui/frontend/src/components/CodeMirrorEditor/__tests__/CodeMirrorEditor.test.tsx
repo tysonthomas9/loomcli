@@ -49,6 +49,7 @@ vi.mock("@codemirror/view", () => ({
     }
     static theme = vi.fn(() => []);
     static updateListener = { of: vi.fn(() => []) };
+    static editable = { of: vi.fn(() => []) };
   },
   keymap: { of: vi.fn(() => []) },
   placeholder: vi.fn(() => []),

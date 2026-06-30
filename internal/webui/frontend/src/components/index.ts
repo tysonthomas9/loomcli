@@ -43,7 +43,7 @@ export * from "./GraphLegend";
 // SettingsView is NOT exported here - it's lazy loaded in App.tsx
 // CodeMirrorEditor is NOT exported here - it's lazy loaded by consumers
 // Import directly from '@/components/CodeMirrorEditor' for code splitting
-// FileExplorer is NOT exported here - it's lazy loaded in App.tsx
+// WorkspaceFileBrowser is NOT exported here - it's lazy loaded by FilesPage
 // FileEditorPanel is NOT exported here - it's lazy loaded by AgentDetailPanel
 // Import directly from '@/components/FileEditorPanel' for code splitting
 export * from "./NodeTooltip";

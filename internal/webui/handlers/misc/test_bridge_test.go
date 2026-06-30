@@ -283,6 +283,152 @@ func (s *testFileServiceImpl) WriteFile(_ context.Context, wsID, agentName, path
 	return nil
 }
 
+// hiddenScopeSegment reports whether a cleaned path contains a hidden segment
+// (.git). Mirrors svcimpl's hidden-segment policy for scoped browsing.
+func hiddenScopeSegment(path string) bool {
+	for _, seg := range strings.Split(filepath.ToSlash(filepath.Clean("/"+path)), "/") {
+		if seg == ".git" {
+			return true
+		}
+	}
+	return false
+}
+
+// resolveScopeRootTest mirrors svcimpl.fileServiceImpl.resolveScopeRoot.
+func (s *testFileServiceImpl) resolveScopeRootTest(wsID string, scope service.FileScope, target string) (string, error) {
+	switch scope {
+	case service.ScopeWorkspace:
+		if target != "" {
+			return "", service.ErrValidation("workspace scope does not take a target")
+		}
+		root, err := s.fileOps.ResolveWorkspaceRoot(wsID)
+		if err != nil {
+			return "", service.ErrNotFound(err.Error())
+		}
+		return root, nil
+	default:
+		return "", service.ErrValidation(fmt.Sprintf("unsupported scope %q", scope))
+	}
+}
+
+func (s *testFileServiceImpl) ListDirectoryScoped(_ context.Context, wsID string, scope service.FileScope, target, path string) (*service.FileTreeResult, error) {
+	root, err := s.resolveScopeRootTest(wsID, scope, target)
+	if err != nil {
+		return nil, err
+	}
+	if path == "" {
+		path = "."
+	}
+	if hiddenScopeSegment(path) {
+		return nil, service.ErrForbidden("access to this path is denied")
+	}
+	fullPath := filepath.Join(root, filepath.Clean("/"+path))
+	if err := validatePathWithinDir(fullPath, root); err != nil {
+		return nil, service.ErrForbidden("path outside root")
+	}
+	fi, err := os.Lstat(fullPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, service.ErrNotFound("directory not found")
+		}
+		return nil, service.ErrInternal("failed to stat path", err)
+	}
+	if fi.Mode()&os.ModeSymlink != 0 {
+		return nil, service.ErrForbidden("refusing to follow symlink")
+	}
+	if !fi.IsDir() {
+		return nil, service.ErrValidation("path is not a directory")
+	}
+	dirEntries, err := os.ReadDir(fullPath)
+	if err != nil {
+		return nil, service.ErrInternal("failed to read directory", err)
+	}
+	sort.Slice(dirEntries, func(i, j int) bool {
+		iDir := dirEntries[i].IsDir()
+		jDir := dirEntries[j].IsDir()
+		if iDir != jDir {
+			return iDir
+		}
+		return dirEntries[i].Name() < dirEntries[j].Name()
+	})
+	entries := make([]service.FileTreeEntry, 0, len(dirEntries))
+	for _, de := range dirEntries {
+		if de.Type()&os.ModeSymlink != 0 || de.Name() == ".git" {
+			continue
+		}
+		info, infoErr := de.Info()
+		if infoErr != nil {
+			continue
+		}
+		entries = append(entries, service.FileTreeEntry{
+			Name:    de.Name(),
+			IsDir:   de.IsDir(),
+			Size:    info.Size(),
+			ModTime: info.ModTime().UTC().Format(time.RFC3339),
+		})
+	}
+	relPath, _ := filepath.Rel(root, fullPath)
+	if relPath == "" {
+		relPath = "."
+	}
+	return &service.FileTreeResult{Path: relPath, Entries: entries}, nil
+}
+
+func (s *testFileServiceImpl) ReadFileScoped(_ context.Context, wsID string, scope service.FileScope, target, path string) (*service.FileReadResult, error) {
+	root, err := s.resolveScopeRootTest(wsID, scope, target)
+	if err != nil {
+		return nil, err
+	}
+	if path == "" {
+		return nil, service.ErrValidation("path parameter is required")
+	}
+	if isDeniedPath(path) {
+		return nil, service.ErrForbidden("access to this file type is denied")
+	}
+	if hiddenScopeSegment(path) {
+		return nil, service.ErrForbidden("access to this path is denied")
+	}
+	fullPath := filepath.Join(root, filepath.Clean("/"+path))
+	if err := validatePathWithinDir(fullPath, root); err != nil {
+		return nil, service.ErrForbidden("path outside root")
+	}
+	if isDeniedPath(fullPath) {
+		return nil, service.ErrForbidden("access to this file type is denied")
+	}
+	fi, err := os.Lstat(fullPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, service.ErrNotFound("file not found")
+		}
+		return nil, service.ErrInternal("failed to stat file", err)
+	}
+	if fi.Mode()&os.ModeSymlink != 0 {
+		return nil, service.ErrForbidden("refusing to follow symlink")
+	}
+	if fi.IsDir() {
+		return nil, service.ErrValidation("path is a directory, not a file")
+	}
+	if fi.Size() > maxRequestBody {
+		return nil, service.ErrPayloadTooLarge(fmt.Sprintf("file too large: %d bytes (max %d)", fi.Size(), maxRequestBody))
+	}
+	f, err := OpenLogFileSecure(fullPath, root)
+	if err != nil {
+		if strings.Contains(err.Error(), "symlink") {
+			return nil, service.ErrForbidden("refusing to follow symlink")
+		}
+		return nil, service.ErrInternal("failed to open file", err)
+	}
+	defer f.Close()
+	data, err := io.ReadAll(io.LimitReader(f, maxRequestBody+1))
+	if err != nil {
+		return nil, service.ErrInternal("failed to read file", err)
+	}
+	if IsBinaryContent(data) {
+		return &service.FileReadResult{Path: path, Size: fi.Size(), Binary: true}, nil
+	}
+	return &service.FileReadResult{Path: path, Content: string(data), Size: fi.Size()}, nil
+}
+
 // ReadLastNLines wraps the package-internal readLastNLinesFromFile without
 // secure-directory restrictions — suitable for unit tests only.
 func ReadLastNLines(filepath string, n int) ([]string, int64, error) {
@@ -383,6 +529,12 @@ func (s *stubFileService) ReadFile(_ context.Context, _, _, _ string) (*service.
 	return &service.FileReadResult{}, nil
 }
 func (s *stubFileService) WriteFile(_ context.Context, _, _, _, _ string) error { return nil }
+func (s *stubFileService) ListDirectoryScoped(_ context.Context, _ string, _ service.FileScope, _, _ string) (*service.FileTreeResult, error) {
+	return &service.FileTreeResult{}, nil
+}
+func (s *stubFileService) ReadFileScoped(_ context.Context, _ string, _ service.FileScope, _, _ string) (*service.FileReadResult, error) {
+	return &service.FileReadResult{}, nil
+}
 
 // ---------------------------------------------------------------------------
 // Test-local SessionService implementation

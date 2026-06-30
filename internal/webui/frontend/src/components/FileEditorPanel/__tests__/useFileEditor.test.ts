@@ -201,6 +201,10 @@ describe("useFileEditor", () => {
       ["docker-compose.yml", "yaml"],
       ["README.md", "markdown"],
       ["docs/guide.markdown", "markdown"],
+      ["app.tsx", "tsx"],
+      ["index.ts", "typescript"],
+      ["script.py", "python"],
+      ["lib.rs", "rust"],
     ])("derives language from %s as %s", (path, expectedLang) => {
       mockTree = createMockTree({ selectedPath: path });
       mockUseFileTree.mockReturnValue(mockTree);
@@ -210,7 +214,7 @@ describe("useFileEditor", () => {
       expect(result.current.language).toBe(expectedLang);
     });
 
-    it.each(["file.txt", "script.py", "lib.rs", "Makefile"])(
+    it.each(["file.txt", "data.unknownext", "Makefile"])(
       "returns undefined for unknown extension %s",
       (path) => {
         mockTree = createMockTree({ selectedPath: path });

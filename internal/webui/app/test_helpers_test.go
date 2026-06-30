@@ -168,6 +168,7 @@ func testWorktree() *ops.AgentWorktree {
 type mockFileOps struct {
 	resolveFunc          func(name string) (*ops.AgentWorktree, error)
 	resolveOrPrimaryFunc func(name string) (*ops.AgentWorktree, error)
+	resolveWsRootFunc    func() (string, error)
 }
 
 func (m *mockFileOps) ResolveAgentWorktree(_, name string) (*ops.AgentWorktree, error) {
@@ -185,6 +186,13 @@ func (m *mockFileOps) ResolveAgentWorktreeOrPrimary(_, name string) (*ops.AgentW
 		return m.resolveFunc(name)
 	}
 	return nil, errors.New("not found")
+}
+
+func (m *mockFileOps) ResolveWorkspaceRoot(_ string) (string, error) {
+	if m.resolveWsRootFunc != nil {
+		return m.resolveWsRootFunc()
+	}
+	return "", errors.New("not found")
 }
 
 // mockGitOps implements ops.GitOps for testing in the root package.

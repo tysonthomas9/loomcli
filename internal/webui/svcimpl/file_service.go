@@ -63,15 +63,24 @@ func (s *fileServiceImpl) ListDirectory(_ context.Context, wsID, agentName, path
 	if err != nil {
 		return nil, err
 	}
+	return listDirectoryAt(wt.Path, path, nil)
+}
 
+// listDirectoryAt lists one level under rootDir. hidden names path segments to
+// omit from the listing and refuse to descend into (e.g. ".git"); pass nil to
+// list everything. Shared by the agent-scoped and workspace-scoped listers.
+func listDirectoryAt(rootDir, path string, hidden map[string]bool) (*service.FileTreeResult, error) {
 	if path == "" {
 		path = "."
 	}
+	if pathHasHiddenSegment(path, hidden) {
+		return nil, service.ErrForbidden("access to this path is denied")
+	}
 
-	fullPath := filepath.Join(wt.Path, filepath.Clean("/"+path))
+	fullPath := filepath.Join(rootDir, filepath.Clean("/"+path))
 
-	if err := webuilog.ValidatePathWithinDir(fullPath, wt.Path); err != nil {
-		return nil, service.ErrForbidden("path outside worktree")
+	if err := webuilog.ValidatePathWithinDir(fullPath, rootDir); err != nil {
+		return nil, service.ErrForbidden("path outside root")
 	}
 
 	if err := validateDirPath(fullPath); err != nil {
@@ -92,9 +101,9 @@ func (s *fileServiceImpl) ListDirectory(_ context.Context, wsID, agentName, path
 		return dirEntries[i].Name() < dirEntries[j].Name()
 	})
 
-	entries := convertDirEntries(dirEntries)
+	entries := convertDirEntries(dirEntries, hidden)
 
-	relPath, _ := filepath.Rel(wt.Path, fullPath)
+	relPath, _ := filepath.Rel(rootDir, fullPath)
 	if relPath == "" {
 		relPath = "."
 	}
@@ -120,11 +129,15 @@ func validateDirPath(fullPath string) error {
 	return nil
 }
 
-// convertDirEntries converts os.DirEntry items to service.FileTreeEntry, skipping symlinks.
-func convertDirEntries(dirEntries []os.DirEntry) []service.FileTreeEntry {
+// convertDirEntries converts os.DirEntry items to service.FileTreeEntry,
+// skipping symlinks and any entry whose name is in hidden (pass nil to keep all).
+func convertDirEntries(dirEntries []os.DirEntry, hidden map[string]bool) []service.FileTreeEntry {
 	entries := make([]service.FileTreeEntry, 0, len(dirEntries))
 	for _, de := range dirEntries {
 		if de.Type()&os.ModeSymlink != 0 {
+			continue
+		}
+		if hidden[de.Name()] {
 			continue
 		}
 		info, err := de.Info()
@@ -146,18 +159,27 @@ func (s *fileServiceImpl) ReadFile(_ context.Context, wsID, agentName, path stri
 	if err != nil {
 		return nil, err
 	}
+	return readFileAt(wt.Path, path, nil)
+}
 
+// readFileAt reads a single file under rootDir. hidden names path segments that
+// are refused (e.g. ".git"); pass nil to allow all. Shared by the agent-scoped
+// and workspace-scoped readers.
+func readFileAt(rootDir, path string, hidden map[string]bool) (*service.FileReadResult, error) {
 	if path == "" {
 		return nil, service.ErrValidation("path parameter is required")
 	}
 	if isDeniedPath(path) {
 		return nil, service.ErrForbidden("access to this file type is denied")
 	}
+	if pathHasHiddenSegment(path, hidden) {
+		return nil, service.ErrForbidden("access to this path is denied")
+	}
 
-	fullPath := filepath.Join(wt.Path, filepath.Clean("/"+path))
+	fullPath := filepath.Join(rootDir, filepath.Clean("/"+path))
 
-	if err := webuilog.ValidatePathWithinDir(fullPath, wt.Path); err != nil {
-		return nil, service.ErrForbidden("path outside worktree")
+	if err := webuilog.ValidatePathWithinDir(fullPath, rootDir); err != nil {
+		return nil, service.ErrForbidden("path outside root")
 	}
 	if isDeniedPath(fullPath) {
 		return nil, service.ErrForbidden("access to this file type is denied")
@@ -168,7 +190,7 @@ func (s *fileServiceImpl) ReadFile(_ context.Context, wsID, agentName, path stri
 		return nil, err
 	}
 
-	data, err := readFileContent(fullPath, wt.Path)
+	data, err := readFileContent(fullPath, rootDir)
 	if err != nil {
 		return nil, err
 	}
@@ -177,6 +199,60 @@ func (s *fileServiceImpl) ReadFile(_ context.Context, wsID, agentName, path stri
 		return &service.FileReadResult{Path: path, Size: fi.Size(), Binary: true}, nil
 	}
 	return &service.FileReadResult{Path: path, Content: string(data), Size: fi.Size()}, nil
+}
+
+// hiddenScopeSegments names path segments the workspace browser omits from
+// listings and refuses to read. The workspace root spans every repo, so this
+// keeps each repo's .git out of the cross-repo view (its config can also carry
+// tokenized remote URLs). This is the workspace-scope policy, not a global
+// guarantee — the per-agent file panel passes nil and applies none. A set so
+// more segments (e.g. node_modules) can be added without touching call sites.
+var hiddenScopeSegments = map[string]bool{".git": true}
+
+// pathHasHiddenSegment reports whether any cleaned segment of path is hidden.
+func pathHasHiddenSegment(path string, hidden map[string]bool) bool {
+	for _, seg := range strings.Split(filepath.ToSlash(filepath.Clean("/"+path)), "/") {
+		if seg != "" && hidden[seg] {
+			return true
+		}
+	}
+	return false
+}
+
+// resolveScopeRoot resolves a scope+target to the absolute root directory that
+// scoped file operations are confined to. Phase 1 supports only the read-only
+// workspace scope; repo/agent scopes (and a per-scope writable decision for
+// future write operations) slot into this switch without changing call sites.
+func (s *fileServiceImpl) resolveScopeRoot(wsID string, scope service.FileScope, target string) (string, error) {
+	switch scope {
+	case service.ScopeWorkspace:
+		if target != "" {
+			return "", service.ErrValidation("workspace scope does not take a target")
+		}
+		root, err := s.fileOps.ResolveWorkspaceRoot(wsID)
+		if err != nil {
+			return "", service.ErrNotFound(err.Error())
+		}
+		return root, nil
+	default:
+		return "", service.ErrValidation(fmt.Sprintf("unsupported scope %q", scope))
+	}
+}
+
+func (s *fileServiceImpl) ListDirectoryScoped(_ context.Context, wsID string, scope service.FileScope, target, path string) (*service.FileTreeResult, error) {
+	root, err := s.resolveScopeRoot(wsID, scope, target)
+	if err != nil {
+		return nil, err
+	}
+	return listDirectoryAt(root, path, hiddenScopeSegments)
+}
+
+func (s *fileServiceImpl) ReadFileScoped(_ context.Context, wsID string, scope service.FileScope, target, path string) (*service.FileReadResult, error) {
+	root, err := s.resolveScopeRoot(wsID, scope, target)
+	if err != nil {
+		return nil, err
+	}
+	return readFileAt(root, path, hiddenScopeSegments)
 }
 
 // validateFilePath checks that fullPath is a regular file within size limits.
@@ -193,6 +269,11 @@ func validateFilePath(fullPath string) (os.FileInfo, error) {
 	}
 	if fi.IsDir() {
 		return nil, service.ErrValidation("path is a directory, not a file")
+	}
+	if !fi.Mode().IsRegular() {
+		// Sockets, fifos, devices, etc. — reject as a 4xx instead of failing
+		// the open with a 500.
+		return nil, service.ErrValidation("path is not a regular file")
 	}
 	if fi.Size() > maxRequestBody {
 		return nil, service.ErrPayloadTooLarge(fmt.Sprintf("file too large: %d bytes (max %d)", fi.Size(), maxRequestBody))

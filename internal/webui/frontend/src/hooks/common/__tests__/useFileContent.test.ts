@@ -183,7 +183,7 @@ describe("useFileContent", () => {
       expect(result.current.error).toBe("string error");
     });
 
-    it("does not clear existing fileData on error (stale data preserved)", async () => {
+    it("clears existing fileData on error so stale content is not shown", async () => {
       const testFile = createFileData({ path: "src/app.ts" });
       mockReadFile.mockResolvedValueOnce(testFile);
 
@@ -201,7 +201,8 @@ describe("useFileContent", () => {
         await result.current.fetchFile("src/other.ts");
       });
 
-      expect(result.current.fileData).toEqual(testFile);
+      // The previously-open file's content must not linger behind the error.
+      expect(result.current.fileData).toBeNull();
       expect(result.current.error).toBe("Network error");
     });
   });

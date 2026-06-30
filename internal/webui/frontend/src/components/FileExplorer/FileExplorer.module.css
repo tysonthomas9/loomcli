@@ -7,7 +7,7 @@
 }
 
 .treePanel {
-  width: 320px;
+  width: var(--tree-width, 320px);
   min-width: 240px;
   max-width: 400px;
   display: flex;
@@ -69,7 +69,19 @@
 }
 
 .tree {
-  /* role="tree" container */
+  /* role="tree" container — single tab stop; arrow keys move the active row */
+}
+
+.tree:focus,
+.tree:focus-visible {
+  outline: none;
+}
+
+/* Keyboard-focused row indicator, shown only while the tree has focus. */
+.tree:focus .treeNode[data-focused],
+.tree:focus-visible .treeNode[data-focused] {
+  outline: 2px solid var(--color-primary);
+  outline-offset: -2px;
 }
 
 .treeNode {
@@ -145,6 +157,175 @@
   padding: 0 1px;
 }
 
+/* === Docked viewer column (workspace file browser split layout) === */
+.viewerColumn {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--color-bg);
+  overflow: hidden;
+}
+
+/* === Resizable split (tree | editor) === */
+.resizeHandle {
+  flex: 0 0 5px;
+  width: 5px;
+  cursor: col-resize;
+  background: transparent;
+  border-right: 1px solid var(--color-border);
+  transition: background-color var(--transition-fast);
+}
+
+.resizeHandle:hover,
+.resizeHandle:focus-visible {
+  background: color-mix(in srgb, var(--color-primary) 35%, transparent);
+  outline: none;
+}
+
+/* Main column = tab bar + docked viewer */
+.mainColumn {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* === Tab bar (open files) === */
+.tabBar {
+  display: flex;
+  align-items: stretch;
+  overflow-x: auto;
+  border-bottom: 1px solid var(--color-border);
+  background: var(--color-bg);
+  scrollbar-width: thin;
+  min-height: 36px;
+}
+
+.tab {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: 0 var(--space-2);
+  max-width: 220px;
+  border: none;
+  border-right: 1px solid var(--color-border-light);
+  background: none;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+  font-family: var(--font-family-mono);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background-color var(--transition-fast);
+}
+
+.tab:hover {
+  background: var(--color-bg-hover);
+}
+
+.tab[data-active="true"] {
+  background: var(--color-bg-active);
+  color: var(--color-text-primary);
+  box-shadow: inset 0 -2px 0 var(--color-primary);
+}
+
+.tabSelect {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  padding: 8px 0;
+  border: none;
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.tabSelect:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: -2px;
+}
+
+.tabName {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Parent-folder hint shown when two open tabs share a filename. */
+.tabHint {
+  flex-shrink: 0;
+  margin-left: 5px;
+  color: var(--color-text-muted);
+  font-size: var(--font-size-xs, 11px);
+}
+
+.tabClose {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: inherit;
+  cursor: pointer;
+  opacity: 0.6;
+}
+
+.tabClose:hover {
+  background: var(--color-bg-hover);
+  opacity: 1;
+}
+
+.tabDirty {
+  width: 7px;
+  height: 7px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+/* === Per-extension icon tint (VSCode-ish file-type color) === */
+.icon[data-ext="go"] {
+  color: #00add8;
+}
+.icon[data-ext="ts"],
+.icon[data-ext="tsx"] {
+  color: #3178c6;
+}
+.icon[data-ext="js"],
+.icon[data-ext="jsx"] {
+  color: #f1e05a;
+}
+.icon[data-ext="json"] {
+  color: #cbcb41;
+}
+.icon[data-ext="md"] {
+  color: #6a9fb5;
+}
+.icon[data-ext="css"] {
+  color: #563d7c;
+}
+.icon[data-ext="html"] {
+  color: #e34c26;
+}
+.icon[data-ext="py"] {
+  color: #3572a5;
+}
+.icon[data-ext="rs"] {
+  color: #dea584;
+}
+.icon[data-ext="yaml"],
+.icon[data-ext="yml"] {
+  color: #cb171e;
+}
+.icon[data-ext="sh"] {
+  color: #89e051;
+}
+
 /* === FileViewer overlay (matches IssueDetailPanel pattern) === */
 .overlay {
   position: fixed;
@@ -210,6 +391,47 @@
   min-width: 0;
 }
 
+/* === Path breadcrumb (clickable folder segments) === */
+.breadcrumb {
+  display: flex;
+  align-items: center;
+  flex: 1;
+  min-width: 0;
+  overflow-x: auto;
+  white-space: nowrap;
+  font-family: var(--font-family-mono);
+  font-size: var(--font-size-sm);
+  scrollbar-width: thin;
+}
+
+.crumb {
+  display: inline-flex;
+  align-items: center;
+}
+
+.crumbSep {
+  color: var(--color-text-muted);
+  padding: 0 4px;
+}
+
+.crumbLink {
+  border: none;
+  background: none;
+  padding: 0;
+  color: var(--color-text-secondary);
+  font: inherit;
+  cursor: pointer;
+}
+
+.crumbLink:hover {
+  color: var(--color-primary);
+  text-decoration: underline;
+}
+
+.crumbCurrent {
+  color: var(--color-text-primary);
+}
+
 .closeButton {
   width: 28px;
   height: 28px;
@@ -253,7 +475,7 @@
 
 .error {
   padding: var(--space-4);
-  color: var(--color-status-closed);
+  color: var(--color-danger);
   font-size: var(--font-size-sm);
 }
 
@@ -274,9 +496,23 @@
 
 /* === Responsive === */
 @media (width <= 640px) {
+  /* Stack tree over editor at narrow widths so the editor isn't squeezed to a
+     sliver. The inline --tree-width is overridden here. */
+  .container {
+    flex-direction: column;
+  }
   .treePanel {
     width: 100%;
+    min-width: 0;
     max-width: none;
+    max-height: 45%;
     border-right: none;
+    border-bottom: 1px solid var(--color-border);
+  }
+  .resizeHandle {
+    display: none;
+  }
+  .mainColumn {
+    min-height: 0;
   }
 }

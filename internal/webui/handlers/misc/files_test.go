@@ -21,6 +21,7 @@ import (
 type mockFileOps struct {
 	resolveFunc          func(name string) (*ops.AgentWorktree, error)
 	resolveOrPrimaryFunc func(name string) (*ops.AgentWorktree, error)
+	resolveWsRootFunc    func() (string, error)
 }
 
 func (m *mockFileOps) ResolveAgentWorktree(workspaceID, name string) (*ops.AgentWorktree, error) {
@@ -40,6 +41,13 @@ func (m *mockFileOps) ResolveAgentWorktreeOrPrimary(workspaceID, name string) (*
 		return m.resolveFunc(name)
 	}
 	return nil, errors.New("not found")
+}
+
+func (m *mockFileOps) ResolveWorkspaceRoot(workspaceID string) (string, error) {
+	if m.resolveWsRootFunc != nil {
+		return m.resolveWsRootFunc()
+	}
+	return "", errors.New("not found")
 }
 
 // setupTestWorktree creates a temporary directory with test files.
@@ -100,6 +108,9 @@ func resolveToDir(dir string) *mockFileOps {
 				Branch:        "test-branch",
 				DefaultBranch: "main",
 			}, nil
+		},
+		resolveWsRootFunc: func() (string, error) {
+			return resolved, nil
 		},
 	}
 }

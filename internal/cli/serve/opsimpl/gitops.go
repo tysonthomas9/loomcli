@@ -202,6 +202,53 @@ func (g *GitOpsImpl) ResolveAgentWorktreeOrPrimary(workspaceID, name string) (*o
 	return g.ResolveAgentWorktree(workspaceID, name)
 }
 
+// ResolveWorkspaceRoot resolves the workspace root folder (ws.Path) as a browse
+// root for the read-only workspace file viewer. See ops.FileOps for the
+// contract. Store-backed deployments read the per-machine path from the local
+// state cache (with a one-shot self-heal); the non-store path falls back to the
+// local config. It deliberately avoids loading the full workspace topology —
+// only the folder path is needed, and this runs on every browser list/read.
+func (g *GitOpsImpl) ResolveWorkspaceRoot(workspaceID string) (string, error) {
+	if workspaceID == "" {
+		return "", fmt.Errorf("workspace id is required")
+	}
+
+	if g != nil && g.store != nil {
+		path := storeadapter.ResolveOrHealWorkspacePath(context.Background(), g.store, workspaceID)
+		return validateWorkspaceRoot(workspaceID, path)
+	}
+
+	// Non-store (config) path: resolve the workspace folder from local config.
+	resolver, err := cli.NewResolver()
+	if err != nil {
+		return "", fmt.Errorf("creating resolver: %v", err)
+	}
+	wsName := resolveWorkspaceConfigName(resolver.Config, workspaceID)
+	if wsName == "" {
+		return "", fmt.Errorf("workspace %q not found in config", workspaceID)
+	}
+	return validateWorkspaceRoot(workspaceID, resolver.Config.Workspaces[wsName].Path)
+}
+
+// validateWorkspaceRoot checks that path is a real directory on this machine so
+// the viewer surfaces a clear "not checked out" error instead of a read failure.
+func validateWorkspaceRoot(workspaceID, path string) (string, error) {
+	if path == "" {
+		return "", fmt.Errorf("workspace %q has no local path on this machine", workspaceID)
+	}
+	fi, err := os.Stat(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return "", fmt.Errorf("workspace %q is not checked out on this machine at %s", workspaceID, path)
+		}
+		return "", fmt.Errorf("inspect workspace %q root: %w", workspaceID, err)
+	}
+	if !fi.IsDir() {
+		return "", fmt.Errorf("workspace %q root is not a directory: %s", workspaceID, path)
+	}
+	return path, nil
+}
+
 // resolveLeadPrimaryFromWS returns the primary (main) worktree of a lead agent's
 // primary repo from an already-loaded workspace, so the file viewer can browse
 // it when the lead has no agent worktree. Returns an error for non-leads or when

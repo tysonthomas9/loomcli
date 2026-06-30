@@ -12,11 +12,12 @@ vi.mock("@/hooks", () => ({
     setView: vi.fn(),
     navigateToView: vi.fn(),
   }),
+  useWorkspaceContext: () => ({ workspaceId: "test-ws" }),
 }));
 
 // Mock the lazy-loaded component module
 vi.mock("@/components/FileExplorer", () => ({
-  FileExplorer: () => <div data-testid="file-explorer" />,
+  WorkspaceFileBrowser: () => <div data-testid="workspace-file-browser" />,
 }));
 
 // Mock ErrorBoundary and LoadingSkeleton
@@ -37,11 +38,11 @@ describe("FilesPage", () => {
     expect(container).toBeTruthy();
   });
 
-  it("renders FileExplorer inside ErrorBoundary after lazy load", async () => {
+  it("renders WorkspaceFileBrowser inside ErrorBoundary after lazy load", async () => {
     render(<FilesPage />);
     expect(screen.getByTestId("error-boundary")).toBeInTheDocument();
     await waitFor(() => {
-      expect(screen.getByTestId("file-explorer")).toBeInTheDocument();
+      expect(screen.getByTestId("workspace-file-browser")).toBeInTheDocument();
     });
   });
 });

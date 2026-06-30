@@ -1,19 +1,19 @@
 /// <reference types="vitest" />
-import { defineConfig } from "vite"
-import react from "@vitejs/plugin-react"
-import path from "path"
+import { defineConfig } from "vite";
+import react from "@vitejs/plugin-react";
+import path from "path";
 
 // Dev proxy target: forward /api and /health requests to this URL.
 // Defaults to the local Go server when VITE_API_BASE_URL is unset.
 const apiProxyTarget = process.env.VITE_API_BASE_URL || "http://localhost:8080";
 
 function includesAny(id: string, needles: string[]): boolean {
-  return needles.some((needle) => id.includes(needle))
+  return needles.some((needle) => id.includes(needle));
 }
 
 function manualChunks(id: string): string | undefined {
-  const normalizedId = id.split(path.sep).join("/")
-  if (!normalizedId.includes("/node_modules/")) return undefined
+  const normalizedId = id.split(path.sep).join("/");
+  if (!normalizedId.includes("/node_modules/")) return undefined;
 
   if (
     includesAny(normalizedId, [
@@ -22,35 +22,35 @@ function manualChunks(id: string): string | undefined {
       "/node_modules/scheduler/",
     ])
   ) {
-    return "react"
+    return "react";
   }
 
   if (normalizedId.includes("/node_modules/react-router")) {
-    return "react-router"
+    return "react-router";
   }
 
   if (normalizedId.includes("/node_modules/@xyflow/")) {
-    return "react-flow"
+    return "react-flow";
   }
 
   if (normalizedId.includes("/node_modules/better-auth/")) {
-    return "better-auth"
+    return "better-auth";
   }
 
   if (normalizedId.includes("/node_modules/@wterm/")) {
-    return "terminal-vendor"
+    return "terminal-vendor";
   }
 
   if (normalizedId.includes("/node_modules/@dnd-kit/")) {
-    return "dnd-kit"
+    return "dnd-kit";
   }
 
   if (normalizedId.includes("/node_modules/@tanstack/")) {
-    return "virtual-list"
+    return "virtual-list";
   }
 
   if (normalizedId.includes("/node_modules/@dagrejs/")) {
-    return "graph-layout"
+    return "graph-layout";
   }
 
   if (
@@ -63,7 +63,30 @@ function manualChunks(id: string): string | undefined {
       "/node_modules/@marijn/",
     ])
   ) {
-    return "codemirror-view"
+    return "codemirror-view";
+  }
+
+  // On-demand language packs (dynamically imported by CodeMirrorEditor) and
+  // their unique grammars are kept OUT of the eager codemirror-language chunk so
+  // they load only when a file of that type is opened. Shared lezer core
+  // (@lezer/common, @lezer/lr, @lezer/highlight) stays eager below.
+  if (
+    includesAny(normalizedId, [
+      "/node_modules/@codemirror/lang-python/",
+      "/node_modules/@codemirror/lang-rust/",
+      "/node_modules/@codemirror/lang-sql/",
+      "/node_modules/@codemirror/lang-xml/",
+      "/node_modules/@codemirror/lang-cpp/",
+      "/node_modules/@codemirror/lang-php/",
+      "/node_modules/@codemirror/legacy-modes/",
+      "/node_modules/@lezer/python/",
+      "/node_modules/@lezer/rust/",
+      "/node_modules/@lezer/cpp/",
+      "/node_modules/@lezer/php/",
+      "/node_modules/@lezer/xml/",
+    ])
+  ) {
+    return undefined;
   }
 
   if (
@@ -77,7 +100,7 @@ function manualChunks(id: string): string | undefined {
       "/node_modules/codemirror-lang-diff/",
     ])
   ) {
-    return "codemirror-language"
+    return "codemirror-language";
   }
 
   if (
@@ -103,15 +126,15 @@ function manualChunks(id: string): string | undefined {
       "/node_modules/zwitch/",
     ])
   ) {
-    return "markdown"
+    return "markdown";
   }
 
   if (normalizedId.includes("/node_modules/dompurify/")) {
-    return "sanitize"
+    return "sanitize";
   }
 
   if (normalizedId.includes("/node_modules/openapi-fetch/")) {
-    return "openapi"
+    return "openapi";
   }
 
   if (
@@ -120,10 +143,10 @@ function manualChunks(id: string): string | undefined {
       "/node_modules/immer/",
     ])
   ) {
-    return "state"
+    return "state";
   }
 
-  return "vendor"
+  return "vendor";
 }
 
 export default defineConfig(({ mode }) => ({
@@ -218,4 +241,4 @@ export default defineConfig(({ mode }) => ({
       },
     },
   },
-}))
+}));

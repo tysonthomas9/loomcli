@@ -2,10 +2,14 @@
  * useFileTree - React hook for managing file tree navigation state.
  * Handles directory expansion/collapse, entry caching, file selection,
  * and filter text with debounce.
+ *
+ * The stateful core (useFileTreeCore) is shared by two sources: an agent
+ * worktree (useFileTree) and the workspace folder (useWorkspaceFileTree). The
+ * only difference is the directory loader, so behavior stays identical.
  */
 
 import { useState, useCallback, useRef, useEffect } from "react";
-import { listWorktreeDir } from "@/api/workspace";
+import { listWorktreeDir, listWorkspaceDir } from "@/api/workspace";
 import type { FileEntry } from "@/api/workspace";
 import { useDebounce } from "./useDebounce";
 import { useWorkspaceContext } from "@/hooks/workspace";
@@ -40,18 +44,25 @@ export interface UseFileTreeReturn {
   toggle: (dirPath: string) => Promise<void>;
   /** Load a directory's contents explicitly (e.g., refresh) */
   loadDir: (dirPath: string) => Promise<void>;
+  /** Load + expand every directory along a path so the UI can jump to it. */
+  revealPath: (path: string) => Promise<void>;
   /** Select a file by path */
   selectFile: (filePath: string | null) => void;
   /** Set the filter text */
   setFilterText: (text: string) => void;
 }
 
-export function useFileTree(
-  agentName: string,
-  options?: UseFileTreeOptions,
+/** DirLoader fetches one directory level's entries ("" = root). */
+type DirLoader = (path: string) => Promise<FileEntry[]>;
+
+/** Segments never worth requesting on a reveal (the API hides/denies them). */
+const HIDDEN_SEGMENTS = new Set([".git", "node_modules"]);
+
+function useFileTreeCore(
+  loadEntries: DirLoader,
+  enabled: boolean,
+  isWorkspaceTree: boolean,
 ): UseFileTreeReturn {
-  const useWorkspaceTree = options?.useWorkspaceTree ?? false;
-  const { workspaceId } = useWorkspaceContext();
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [treeData, setTreeData] = useState<Map<string, FileEntry[]>>(new Map());
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
@@ -78,17 +89,13 @@ export function useFileTree(
 
   const loadDir = useCallback(
     async (dirPath: string): Promise<void> => {
-      if (!agentName) return;
+      if (!enabled) return;
       try {
-        const result = await listWorktreeDir(
-          workspaceId,
-          agentName,
-          dirPath || undefined,
-        );
+        const entries = await loadEntries(dirPath);
         if (mountedRef.current) {
           setTreeData((prev) => {
             const next = new Map(prev);
-            next.set(dirPath, result.entries);
+            next.set(dirPath, entries);
             return next;
           });
           setError(null);
@@ -99,7 +106,7 @@ export function useFileTree(
         }
       }
     },
-    [workspaceId, agentName],
+    [loadEntries, enabled],
   );
 
   const toggle = useCallback(
@@ -124,13 +131,55 @@ export function useFileTree(
     [loadDir],
   );
 
+  // revealPath loads and expands the root plus every directory along path so the
+  // browser can jump straight to a nested folder. Descent stops at the first
+  // segment that is not a directory; whatever loaded so far is still expanded.
+  const revealPath = useCallback(
+    async (rawPath: string): Promise<void> => {
+      if (!enabled) return;
+      const clean = rawPath.replace(/^\/+|\/+$/g, "").trim();
+      const segments = clean ? clean.split("/").filter(Boolean) : [];
+      const loaded: Array<[string, FileEntry[]]> = [];
+      const expand: string[] = [""];
+      try {
+        let entries = await loadEntries("");
+        loaded.push(["", entries]);
+        let acc = "";
+        for (const seg of segments) {
+          if (HIDDEN_SEGMENTS.has(seg)) break;
+          const entry = entries.find((e) => e.name === seg);
+          // Stop at a missing segment or a file: the parent is already loaded
+          // and the target is visible, so we avoid firing a predictable 4xx.
+          if (!entry || !entry.is_dir) break;
+          acc = acc ? `${acc}/${seg}` : seg;
+          entries = await loadEntries(acc);
+          loaded.push([acc, entries]);
+          expand.push(acc);
+        }
+        if (mountedRef.current) setError(null);
+      } catch {
+        // Network error — land as deep as we got rather than failing the jump.
+      }
+      if (mountedRef.current && loaded.length > 0) {
+        setTreeData((prev) => {
+          const next = new Map(prev);
+          for (const [p, entries] of loaded) next.set(p, entries);
+          return next;
+        });
+        setExpanded((prev) => new Set([...prev, ...expand]));
+      }
+    },
+    [loadEntries, enabled],
+  );
+
   const selectFile = useCallback((filePath: string | null) => {
     setSelectedPath(filePath);
   }, []);
 
-  // Auto-load root on mount / agent change
+  // Auto-load root on mount / source change. loadEntries identity encodes the
+  // source (agent or workspace), so a source change resets and reloads.
   useEffect(() => {
-    if (!agentName) return;
+    if (!enabled) return;
     const requestId = ++rootRequestIdRef.current;
     setIsLoading(true);
     setExpanded(new Set());
@@ -138,10 +187,10 @@ export function useFileTree(
     setSelectedPath(null);
     setError(null);
 
-    listWorktreeDir(workspaceId, agentName)
-      .then((result) => {
+    loadEntries("")
+      .then((entries) => {
         if (requestId === rootRequestIdRef.current && mountedRef.current) {
-          setTreeData(new Map([["", result.entries]]));
+          setTreeData(new Map([["", entries]]));
           setExpanded(new Set([""]));
           setIsLoading(false);
         }
@@ -152,10 +201,10 @@ export function useFileTree(
           setIsLoading(false);
         }
       });
-  }, [workspaceId, agentName]);
+  }, [loadEntries, enabled]);
 
   return {
-    isWorkspaceTree: useWorkspaceTree,
+    isWorkspaceTree,
     expanded,
     treeData,
     selectedPath,
@@ -165,7 +214,46 @@ export function useFileTree(
     debouncedFilterText,
     toggle,
     loadDir,
+    revealPath,
     selectFile,
     setFilterText,
   };
+}
+
+export function useFileTree(
+  agentName: string,
+  options?: UseFileTreeOptions,
+): UseFileTreeReturn {
+  const { workspaceId } = useWorkspaceContext();
+  const loadEntries = useCallback<DirLoader>(
+    (path) =>
+      (path
+        ? listWorktreeDir(workspaceId, agentName, path)
+        : listWorktreeDir(workspaceId, agentName)
+      ).then((r) => r.entries),
+    [workspaceId, agentName],
+  );
+  return useFileTreeCore(
+    loadEntries,
+    !!agentName,
+    options?.useWorkspaceTree ?? false,
+  );
+}
+
+/**
+ * useWorkspaceFileTree browses the workspace folder root (read-only), which
+ * spans every repo checkout and agent worktree. Same navigation behavior as
+ * useFileTree, sourced from the scope=workspace file endpoint.
+ */
+export function useWorkspaceFileTree(): UseFileTreeReturn {
+  const { workspaceId } = useWorkspaceContext();
+  const loadEntries = useCallback<DirLoader>(
+    (path) =>
+      (path
+        ? listWorkspaceDir(workspaceId, path)
+        : listWorkspaceDir(workspaceId)
+      ).then((r) => r.entries),
+    [workspaceId],
+  );
+  return useFileTreeCore(loadEntries, true, false);
 }

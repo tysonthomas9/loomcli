@@ -159,6 +159,50 @@ func HandleFileRead(svc service.FileService) http.HandlerFunc {
 	}
 }
 
+// scopeFromQuery parses the scope/target query params for the scoped file
+// browser, defaulting to the workspace scope when scope is omitted.
+func scopeFromQuery(r *http.Request) (service.FileScope, string) {
+	scope := service.FileScope(r.URL.Query().Get("scope"))
+	if scope == "" {
+		scope = service.ScopeWorkspace
+	}
+	return scope, r.URL.Query().Get("target")
+}
+
+// HandleScopedFileTree handles GET /api/workspaces/{ws}/files/tree?scope=&target=&path=
+// — one directory level of the read-only scope-rooted file browser.
+func HandleScopedFileTree(svc service.FileService) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		wsID := middleware.WorkspaceFromContext(r.Context())
+		scope, target := scopeFromQuery(r)
+		reqPath := r.URL.Query().Get("path")
+
+		result, err := svc.ListDirectoryScoped(r.Context(), wsID, scope, target, reqPath)
+		if err != nil {
+			handler.HandleServiceError(w, err)
+			return
+		}
+		handler.WriteJSON(w, http.StatusOK, result)
+	}
+}
+
+// HandleScopedFileRead handles GET /api/workspaces/{ws}/files?scope=&target=&path=
+// — reads a single file from the read-only scope-rooted file browser.
+func HandleScopedFileRead(svc service.FileService) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		wsID := middleware.WorkspaceFromContext(r.Context())
+		scope, target := scopeFromQuery(r)
+		reqPath := r.URL.Query().Get("path")
+
+		result, err := svc.ReadFileScoped(r.Context(), wsID, scope, target, reqPath)
+		if err != nil {
+			handler.HandleServiceError(w, err)
+			return
+		}
+		handler.WriteJSON(w, http.StatusOK, result)
+	}
+}
+
 // fileWriteRequest is the JSON body for PUT /api/agents/{name}/files?path=
 type fileWriteRequest struct {
 	Content string `json:"content"`

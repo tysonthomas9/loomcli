@@ -25,10 +25,10 @@ export type {
   SubscriptionOptions,
 } from "./useEventProvider";
 
-export { useFileContent } from "./useFileContent";
+export { useFileContent, useWorkspaceFileContent } from "./useFileContent";
 export type { UseFileContentReturn } from "./useFileContent";
 
-export { useFileTree } from "./useFileTree";
+export { useFileTree, useWorkspaceFileTree } from "./useFileTree";
 export type { UseFileTreeReturn, UseFileTreeOptions } from "./useFileTree";
 
 export { useFolderPicker } from "./useFolderPicker";

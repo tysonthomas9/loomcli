@@ -104,3 +104,9 @@ func (s *stubFileService) ReadFile(_ context.Context, _, _, _ string) (*service.
 	return &service.FileReadResult{}, nil
 }
 func (s *stubFileService) WriteFile(_ context.Context, _, _, _, _ string) error { return nil }
+func (s *stubFileService) ListDirectoryScoped(_ context.Context, _ string, _ service.FileScope, _, _ string) (*service.FileTreeResult, error) {
+	return &service.FileTreeResult{}, nil
+}
+func (s *stubFileService) ReadFileScoped(_ context.Context, _ string, _ service.FileScope, _, _ string) (*service.FileReadResult, error) {
+	return &service.FileReadResult{}, nil
+}

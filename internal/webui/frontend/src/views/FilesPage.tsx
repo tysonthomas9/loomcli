@@ -1,20 +1,22 @@
 import { lazy, Suspense } from "react";
 import { ErrorBoundary, LoadingSkeleton } from "@/components";
-import { useRouteView } from "@/hooks";
+import { useRouteView, useWorkspaceContext } from "@/hooks";
 
-const FileExplorer = lazy(() =>
+const WorkspaceFileBrowser = lazy(() =>
   import("@/components/FileExplorer").then((m) => ({
-    default: m.FileExplorer,
+    default: m.WorkspaceFileBrowser,
   })),
 );
 
 export function FilesPage() {
   const { view: activeView } = useRouteView();
+  const { workspaceId } = useWorkspaceContext();
 
   return (
     <ErrorBoundary resetOnChange={[activeView]}>
       <Suspense fallback={<LoadingSkeleton.FileExplorer />}>
-        <FileExplorer />
+        {/* Key by workspace so switching remounts with that workspace's tabs. */}
+        <WorkspaceFileBrowser key={workspaceId} />
       </Suspense>
     </ErrorBoundary>
   );

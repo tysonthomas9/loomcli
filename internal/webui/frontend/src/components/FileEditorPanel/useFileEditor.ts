@@ -14,28 +14,11 @@ import {
   type UseFileContentReturn,
 } from "@/hooks";
 import { writeWorktreeFile } from "@/hooks/api";
+import { detectLanguage } from "@/utils/detectLanguage";
 
 interface PendingAction {
   type: "switch";
   path: string;
-}
-
-function getLanguageFromPath(path: string): string | undefined {
-  const ext = path.split(".").pop()?.toLowerCase();
-  switch (ext) {
-    case "go":
-      return "go";
-    case "json":
-      return "json";
-    case "yaml":
-    case "yml":
-      return "yaml";
-    case "md":
-    case "markdown":
-      return "markdown";
-    default:
-      return undefined;
-  }
 }
 
 export interface UseFileEditorOptions {
@@ -99,7 +82,7 @@ export function useFileEditor(
 
   const isDirty = content !== savedContentRef.current;
   const language = tree.selectedPath
-    ? getLanguageFromPath(tree.selectedPath)
+    ? detectLanguage(tree.selectedPath)
     : undefined;
 
   useEffect(() => {

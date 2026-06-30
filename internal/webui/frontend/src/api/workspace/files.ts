@@ -65,6 +65,37 @@ export async function readWorktreeFile(
 }
 
 /**
+ * List files in the workspace folder (one level), the read-only file browser
+ * root that spans every repo checkout and agent worktree.
+ * GET /api/workspaces/{ws}/files/tree?scope=workspace&path=
+ */
+export async function listWorkspaceDir(
+  workspaceId: string,
+  path?: string,
+): Promise<DirListData> {
+  let url = wsUrl(workspaceId, `/files/tree?scope=workspace`);
+  if (path !== undefined && path !== "") {
+    url += `&path=${encodeURIComponent(path)}`;
+  }
+  return get<DirListData>(url);
+}
+
+/**
+ * Read a file from the workspace folder (read-only).
+ * GET /api/workspaces/{ws}/files?scope=workspace&path=
+ */
+export async function readWorkspaceFile(
+  workspaceId: string,
+  path: string,
+): Promise<FileReadData> {
+  const url = wsUrl(
+    workspaceId,
+    `/files?scope=workspace&path=${encodeURIComponent(path)}`,
+  );
+  return get<FileReadData>(url);
+}
+
+/**
  * Write a file to an agent worktree (atomic write).
  * PUT /api/workspaces/{ws}/agents/{name}/files?path=
  */
