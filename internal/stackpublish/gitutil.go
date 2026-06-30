@@ -86,3 +86,20 @@ func headSHA(ctx context.Context, dir, ref string) (string, error) {
 	}
 	return strings.TrimSpace(out), nil
 }
+
+// ownedCommitText returns the owned commit at ref as a subject/body pair — the
+// fallback source for a stacked PR's title/body when no issue metadata is
+// available. The format is NUL-delimited so a multi-line body can't be confused
+// with the subject.
+func ownedCommitText(ctx context.Context, dir, ref string) (commitText, error) {
+	out, err := runGit(ctx, dir, nil, "show", "-s", "--format=%s%x00%b", ref)
+	if err != nil {
+		return commitText{}, err
+	}
+	parts := strings.SplitN(out, "\x00", 2)
+	ct := commitText{Subject: strings.TrimSpace(parts[0])}
+	if len(parts) == 2 {
+		ct.Body = strings.TrimSpace(parts[1])
+	}
+	return ct, nil
+}
