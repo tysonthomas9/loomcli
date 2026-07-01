@@ -906,6 +906,31 @@ function mockHelloWorldWorkspaceContext({
   } as ReturnType<typeof useWorkspaceContext>);
 }
 
+// AgentSection's module import triggers a vitest-4 mock-allocation blowup on
+// import; stub it to a lightweight shim that still renders the store-provided
+// agents as clickable buttons (agent-navigation tests depend on this).
+vi.mock("@/components/WorkspaceTree/AgentSection", () => ({
+  AgentSection: ({
+    onAgentClick,
+  }: {
+    onAgentClick?: (name: string) => void;
+  }) => (
+    <>
+      {(
+        (mockStoreState as { agents?: Array<{ name: string }> })?.agents ?? []
+      ).map((agent) => (
+        <button
+          key={agent.name}
+          type="button"
+          onClick={() => onAgentClick?.(agent.name)}
+        >
+          {agent.name}
+        </button>
+      ))}
+    </>
+  ),
+}));
+
 describe("App", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -1275,10 +1300,11 @@ describe("App", () => {
 
       render(<App />);
 
-      // Verify KanbanBoard is rendered (we can't easily test the drag event
-      // but we verify the component structure is correct)
+      // Verify the board is rendered (we can't easily test the drag event
+      // but we verify the component structure is correct). The standalone
+      // issue appears in both its lane header and its card, so match all.
       expect(screen.getByRole("heading", { name: "Open" })).toBeInTheDocument();
-      expect(screen.getByText("Test")).toBeInTheDocument();
+      expect(screen.getAllByText("Test").length).toBeGreaterThan(0);
     });
   });
 
