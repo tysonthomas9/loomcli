@@ -32,8 +32,8 @@ func (s *diffServiceImpl) resolveAgent(wsID, agentName string) (*ops.AgentWorktr
 	if agentName == "" {
 		return nil, service.ErrValidation("missing agent name")
 	}
-	if !service.ValidAgentName.MatchString(agentName) {
-		return nil, service.ErrValidation("invalid agent name: must match [a-zA-Z0-9_-]+")
+	if !service.IsValidAgentName(agentName) {
+		return nil, service.ErrValidation("invalid agent name")
 	}
 	wt, err := s.gitOps.ResolveAgentWorktree(wsID, agentName)
 	if err != nil {

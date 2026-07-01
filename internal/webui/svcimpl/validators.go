@@ -67,14 +67,11 @@ func validateAgentName(name string) error {
 	if name == "" {
 		return service.ErrValidation("missing agent name")
 	}
-	if !service.ValidAgentName.MatchString(name) {
-		return service.ErrValidation("invalid agent name: must match [a-zA-Z0-9_-]+")
+	if !service.IsValidAgentName(name) {
+		return service.ErrValidation("invalid agent name")
 	}
 	return nil
 }
-
-// storedAgentNamePattern matches fleet-db Agent.Name validation.
-var storedAgentNamePattern = regexp.MustCompile(`^[a-z0-9]([a-z0-9._-]{0,98}[a-z0-9])?$`)
 
 // normalizeStoredAgentName lowercases and trims agent names before persistence.
 func normalizeStoredAgentName(name string) string {
@@ -86,7 +83,7 @@ func validateStoredAgentName(name string) error {
 	if name == "" {
 		return service.ErrValidation("missing agent name")
 	}
-	if !storedAgentNamePattern.MatchString(name) {
+	if !service.ValidStoredAgentName.MatchString(name) {
 		return service.ErrValidation("invalid agent name: use 1-100 lowercase letters, numbers, hyphens, dots, or underscores (cannot start or end with punctuation)")
 	}
 	return nil
