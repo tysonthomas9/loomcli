@@ -51,11 +51,19 @@ func TestCreateCommand_DefaultIdempotencyKey(t *testing.T) {
 		t.Error("different description must produce a different key")
 	}
 
-	// …but fields fleet-db drops from the create body must NOT (they
-	// persist identically, so they must dedup identically).
-	p4 := runCreate(t, &localBackendStub{createItem: &backend.IssueData{ID: "x-4"}},
-		append(args, "--external-ref", "gh-42", "--estimated-minutes", "45")...)
-	if p4.IdempotencyKey != p1.IdempotencyKey {
+	// external_ref is persisted in the fleet create body, so it MUST change
+	// the key — it distinguishes the created issue.
+	pExtRef := runCreate(t, &localBackendStub{createItem: &backend.IssueData{ID: "x-4"}},
+		append(args, "--external-ref", "gh-42")...)
+	if pExtRef.IdempotencyKey == p1.IdempotencyKey {
+		t.Error("persisted external_ref must differentiate the idempotency key")
+	}
+
+	// …but fields fleet-db drops from the create body (e.g. estimated-minutes)
+	// must NOT — they persist identically, so they must dedup identically.
+	pDropped := runCreate(t, &localBackendStub{createItem: &backend.IssueData{ID: "x-5"}},
+		append(args, "--estimated-minutes", "45")...)
+	if pDropped.IdempotencyKey != p1.IdempotencyKey {
 		t.Error("fleet-db-dropped fields must not differentiate the idempotency key")
 	}
 }

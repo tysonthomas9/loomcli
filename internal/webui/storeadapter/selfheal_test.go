@@ -20,7 +20,7 @@ func gitCheckout(t *testing.T, dir, originURL string) {
 		t.Fatalf("mkdir %s: %v", dir, err)
 	}
 	run := func(args ...string) {
-		cmd := exec.Command("git", args...) //nolint:gosec // fixed test helper command.
+		cmd := exec.Command("git", args...) //nolint:norawexec // fixed test helper command (git in a temp dir).
 		cmd.Dir = dir
 		if out, err := cmd.CombinedOutput(); err != nil {
 			t.Fatalf("git %v: %v\n%s", args, err, out)
