@@ -57,7 +57,7 @@ func HandleEnsureAgentTerminalSession(svc service.TerminalService, st store.Stor
 
 		workspace := middleware.WorkspaceFromContext(r.Context())
 		agentName := r.PathValue("name")
-		if !service.ValidAgentName.MatchString(agentName) {
+		if !service.IsValidAgentName(agentName) {
 			handler.WriteJSON(w, http.StatusBadRequest, tabMetadataResponse{
 				Success: false,
 				Error:   "invalid agent name",

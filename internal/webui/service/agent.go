@@ -158,5 +158,23 @@ const (
 	AgentTerminalModeArchive = "archive"
 )
 
-// ValidAgentName matches alphanumeric characters, hyphens, and underscores.
+// ValidAgentName matches the legacy agent-name charset: alphanumeric (any
+// case), hyphens, and underscores. Retained so existing names keep resolving;
+// fleet-db names (lowercase with dots) are covered by ValidStoredAgentName.
 var ValidAgentName = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
+
+// ValidStoredAgentName matches the fleet-db Agent.Name charset: 1-100 chars of
+// lowercase letters, digits, dots, hyphens, or underscores, not starting or
+// ending with punctuation. The create/store path enforces exactly this.
+var ValidStoredAgentName = regexp.MustCompile(`^[a-z0-9]([a-z0-9._-]{0,98}[a-z0-9])?$`)
+
+// IsValidAgentName reports whether name is acceptable for an agent-scoped read
+// endpoint (files, diffs, terminal): the legacy charset OR the fleet-db stored
+// charset. Reads stay permissive so any storable name (including dotted
+// fleet-db names) resolves everywhere, without regressing legacy names; the
+// create/store path validates against ValidStoredAgentName alone. Both charsets
+// are path-safe — no separators, and no leading/trailing punctuation or bare
+// ".."/"." in the fleet-db form.
+func IsValidAgentName(name string) bool {
+	return ValidAgentName.MatchString(name) || ValidStoredAgentName.MatchString(name)
+}
