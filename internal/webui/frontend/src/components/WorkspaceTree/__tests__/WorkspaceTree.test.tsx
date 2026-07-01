@@ -165,6 +165,17 @@ vi.mock("@/hooks/workspace", async () => {
   };
 });
 
+// AgentSection's module import triggers a vitest-4 mock-allocation blowup;
+// stub it to a lightweight shim that still renders the add-agent entrypoint.
+vi.mock("../AgentSection", () => ({
+  AgentSection: ({ onAddClick }: { onAddClick?: () => void }) =>
+    onAddClick ? (
+      <button type="button" onClick={onAddClick}>
+        + Add agent
+      </button>
+    ) : null,
+}));
+
 describe("WorkspaceTree", () => {
   beforeEach(() => {
     localStorage.clear();
