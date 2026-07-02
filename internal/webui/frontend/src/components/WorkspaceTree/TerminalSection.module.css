@@ -39,6 +39,96 @@
   );
 }
 
+.groupList {
+  gap: 0;
+}
+
+.group {
+  display: flex;
+  flex-direction: column;
+}
+
+.group[data-active="true"] {
+  background: color-mix(in srgb, var(--color-accent, #c96442) 7%, transparent);
+}
+
+.groupHeader {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
+  padding: 0.45rem 0.75rem;
+  border: none;
+  background: transparent;
+  color: var(--color-text-primary);
+  cursor: pointer;
+  text-align: left;
+  transition: background-color 0.15s ease;
+}
+
+.groupHeader:hover {
+  background: var(--color-bg-hover);
+}
+
+.groupHeader:focus-visible {
+  outline: 2px solid var(--color-focus);
+  outline-offset: -2px;
+}
+
+.groupHeader[data-active="true"] {
+  box-shadow: inset 3px 0 0 var(--color-accent, #c96442);
+}
+
+.collapseChevron {
+  width: 16px;
+  text-align: center;
+  font-family: monospace;
+  font-size: 0.875rem;
+  line-height: 1;
+  color: var(--color-text-tertiary);
+  transition: transform 0.15s ease;
+  cursor: pointer;
+  flex-shrink: 0;
+  user-select: none;
+  background: none;
+  border: none;
+  padding: 0;
+}
+
+.collapseChevron[data-expanded="true"] {
+  transform: rotate(90deg);
+}
+
+.groupText {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.groupLabel {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+
+.memberSummary {
+  overflow: hidden;
+  color: var(--color-text-tertiary);
+  font-size: 0.6875rem;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.groupBody {
+  display: flex;
+  flex-direction: column;
+  padding-left: 0.75rem;
+}
+
 .statusDot {
   width: 8px;
   height: 8px;
@@ -61,4 +151,27 @@
   padding: 0.35rem 0.75rem;
   font-size: 0.6875rem;
   color: var(--color-text-tertiary);
+}
+
+.newTerminalButton {
+  width: 100%;
+  padding: 0.35rem 0.75rem;
+  border: none;
+  background: transparent;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  text-align: left;
+  font-family: var(--font-family-base);
+  font-size: 0.75rem;
+  transition: background-color 0.15s ease;
+}
+
+.newTerminalButton:hover {
+  background: var(--color-bg-hover);
+  color: var(--color-text-primary);
+}
+
+.newTerminalButton:focus-visible {
+  outline: 2px solid var(--color-focus);
+  outline-offset: -2px;
 }
