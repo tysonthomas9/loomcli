@@ -156,6 +156,7 @@ func driverRunMatchesMem(r *domain.DriverRun, f store.DriverRunFilter) bool {
 		(f.DriverVersionID == "" || r.DriverVersionID == f.DriverVersionID) &&
 		(f.EpicID == "" || r.EpicID == f.EpicID) &&
 		(f.NodeID == "" || r.NodeID == f.NodeID) &&
+		(f.BindingID == "" || r.TriggerBindingID == f.BindingID) &&
 		(f.Status == "" || r.Status == f.Status)
 }
 

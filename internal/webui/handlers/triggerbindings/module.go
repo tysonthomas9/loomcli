@@ -134,25 +134,30 @@ func (m *Module) listBindings(w http.ResponseWriter, r *http.Request) {
 	handler.WriteJSON(w, http.StatusOK, map[string]any{"bindings": out})
 }
 
-// bindingRunHealth computes a binding's failure health from its driver's runs.
+// bindingRunHealth computes a binding's failure health from ITS OWN runs.
 //
-// It lists the driver's runs, orders them newest-first (the shared run order),
-// and scans only the newest bindingRunScanLimit. last_run_status is the newest
-// run's status (queued/running included, for display); consecutive_failures
-// counts failed runs from newest until the first non-failed TERMINAL run,
-// skipping still-in-flight (queued/running/suspended) runs — a pending run is
-// not yet an outcome and must not reset or extend the failure streak.
+// It lists the runs a trigger-dispatch leg stamped with this binding id
+// (BindingID filter, not driver id — bindings that share a driver no longer
+// bleed each other's failures), newest-first by the shared run order, scanning
+// only the newest bindingRunScanLimit. last_run_status is the newest run's
+// status (queued/running included, for display); consecutive_failures counts
+// failed runs from newest until the first non-failed TERMINAL run, skipping
+// still-in-flight (queued/running/suspended) runs — a pending run is not yet an
+// outcome and must not reset or extend the failure streak.
 //
-// Tradeoff (documented per the phase brief): one List per binding (N+1) and an
-// unbounded fetch bounded only by the post-sort cap is fine at local-mode
-// scale; a production surface would push a "newest N runs" query into the store
-// rather than fetch-then-truncate here.
+// The scan cap is pushed into the store as a Limit: both backends order
+// newest-first by StartedAt before limiting, so this fetches only the newest
+// bindingRunScanLimit runs rather than the whole history. The client-side sort
+// below stays as defense in depth against an unordered backend.
 func (m *Module) bindingRunHealth(ctx context.Context, ws string, b *domain.TriggerBinding) (lastStatus string, consecutiveFailures int) {
-	// Cheap guard: only bindings with a resolvable driver have runs to scan.
-	if b == nil || strings.TrimSpace(b.DriverID) == "" {
+	// Cheap guard: an unsaved/identifier-less binding has no runs to scan.
+	if b == nil || strings.TrimSpace(b.BindingID) == "" {
 		return "", 0
 	}
-	runs, err := m.store.DriverRuns().List(ctx, ws, store.DriverRunFilter{DriverID: b.DriverID})
+	runs, err := m.store.DriverRuns().List(ctx, ws, store.DriverRunFilter{
+		BindingID: b.BindingID,
+		Limit:     bindingRunScanLimit,
+	})
 	if err != nil || len(runs) == 0 {
 		return "", 0
 	}

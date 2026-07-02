@@ -402,7 +402,13 @@ type DriverRun struct {
 	SourceKind      string            `json:"source_kind,omitempty"`
 	SourceRef       string            `json:"source_ref,omitempty"`
 	EpicID          string            `json:"epic_id,omitempty"`
-	Status          DriverRunStatus   `json:"status"`
+	// TriggerBindingID is the binding whose trigger-dispatch leg admitted this
+	// run (empty for non-trigger runs). The server (fleet-db) stamps and sends
+	// it; decoded here for a tag-identical round-trip (AW5). It scopes a
+	// binding's run history and failure health to that binding, so bindings
+	// sharing a driver do not bleed metrics into each other.
+	TriggerBindingID string            `json:"trigger_binding_id,omitempty"`
+	Status           DriverRunStatus   `json:"status"`
 	NodeID          string            `json:"node_id,omitempty"`
 	LeaseID         string            `json:"lease_id,omitempty"`
 	FencingToken    int64             `json:"fencing_token,omitempty"`

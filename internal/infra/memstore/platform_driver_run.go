@@ -76,13 +76,14 @@ func (s *driverRunStore) Create(_ context.Context, in store.DriverRunCreate) (*d
 		RunID:           in.RunID,
 		DriverID:        in.DriverID,
 		DriverVersionID: in.DriverVersionID,
-		Entrypoint:      in.Entrypoint,
-		SourceKind:      in.SourceKind,
-		SourceRef:       in.SourceRef,
-		EpicID:          in.EpicID,
-		ParentRunID:     in.ParentRunID,
-		Status:          domain.DriverRunQueued,
-		IdempotencyKey:  in.IdempotencyKey,
+		Entrypoint:       in.Entrypoint,
+		SourceKind:       in.SourceKind,
+		SourceRef:        in.SourceRef,
+		EpicID:           in.EpicID,
+		TriggerBindingID: in.TriggerBindingID,
+		ParentRunID:      in.ParentRunID,
+		Status:           domain.DriverRunQueued,
+		IdempotencyKey:   in.IdempotencyKey,
 		Payload:         cloneJSON(in.Payload),
 		CreatedAt:       now,
 		UpdatedAt:       now,
@@ -178,7 +179,11 @@ func (s *driverRunStore) List(_ context.Context, ws string, filter store.DriverR
 			out = append(out, cloneDriverRun(run))
 		}
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].CreatedAt.After(out[j].CreatedAt) })
+	// Newest-first by StartedAt (unstarted last), CreatedAt tiebreak — the same
+	// order fleet-db applies server-side. Ordering BEFORE the limit is what lets
+	// callers push a limit down safely: the newest-by-StartedAt window survives
+	// truncation instead of being dropped by a CreatedAt-only order.
+	store.SortDriverRunsNewestFirst(out)
 	if filter.Limit > 0 && len(out) > filter.Limit {
 		out = out[:filter.Limit]
 	}

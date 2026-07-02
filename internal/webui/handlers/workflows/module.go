@@ -148,14 +148,15 @@ func (m *Module) listWorkflowRuns(w http.ResponseWriter, r *http.Request) {
 		writeDomainError(w, err, "resolve workflow driver failed")
 		return
 	}
-	// Limit is deliberately NOT passed to the store: memstore orders by
-	// CreatedAt and the fleet-db backend applies its limit server-side before
-	// any StartedAt order, so a store-side limit could drop runs that belong in
-	// the newest-by-StartedAt window. Fetch the filtered set, order it here,
-	// then truncate.
+	// Both backends now order newest-first by StartedAt BEFORE applying the
+	// limit (fleet-db server-side; memstore in store.DriverRuns().List), so the
+	// limit can be pushed down — it returns the newest-by-StartedAt window
+	// rather than dropping runs that belong in it. The client-side sort/truncate
+	// below stays as defense in depth against an unordered backend.
 	runs, err := m.store.DriverRuns().List(r.Context(), ws, store.DriverRunFilter{
 		DriverID: drv.DriverID,
 		Status:   status,
+		Limit:    limit,
 	})
 	if err != nil {
 		writeDomainError(w, err, "list workflow runs failed")

@@ -471,9 +471,13 @@ type DriverRunCreate struct {
 	// (Phase D composition). Empty means detached/root — no cancel cascade.
 	// Orthogonal to EpicID: a run may carry an epic, a parent, both, or
 	// neither.
-	ParentRunID    string
-	IdempotencyKey string
-	Payload        json.RawMessage
+	ParentRunID string
+	// TriggerBindingID stamps the run with the binding whose trigger-dispatch
+	// leg admitted it (mirrors fleet-db's dispatchTriggerRouteLeg). Empty for
+	// manually-created runs, which belong to no binding.
+	TriggerBindingID string
+	IdempotencyKey   string
+	Payload          json.RawMessage
 }
 
 type DriverRunFilter struct {
@@ -481,8 +485,12 @@ type DriverRunFilter struct {
 	DriverVersionID string
 	EpicID          string
 	NodeID          string
-	Status          domain.DriverRunStatus
-	Limit           int
+	// BindingID filters to runs a trigger-dispatch leg stamped with this
+	// binding id (domain.DriverRun.TriggerBindingID), sent to fleet-db as the
+	// trigger_binding_id query param. Empty means no binding constraint.
+	BindingID string
+	Status    domain.DriverRunStatus
+	Limit     int
 }
 
 type DriverRunFinish struct {

@@ -240,13 +240,10 @@ func (s *triggerBindingStore) Update(ctx context.Context, ws, bindingID string, 
 }
 
 // Delete issues DELETE /api/v1/{ws}/trigger-bindings/{id} to fleet-db.
-//
-// SERVER DEPENDENCY (honest note): as of this writing the fleet-db server does
-// not register a DELETE handler on this route (it returns 405 Method Not
-// Allowed), so binding deletion is unavailable against a cloud/local-mode
-// fleet-db until the server adds the route. The client wiring, the memstore
-// implementation, and the webui grant-revocation are complete; only the remote
-// server verb is missing. The error is surfaced (never faked into a success).
+// The server registers this route (204 on success, 404 for a missing
+// binding), and the contract guard (contract_guard_test.go) pins the
+// operation's presence in fleet-db's OpenAPI spec so a client-vs-server verb
+// gap like the pre-route 405 era cannot recur silently.
 func (s *triggerBindingStore) Delete(ctx context.Context, ws, bindingID string) error {
 	return s.client.do(ctx, "DELETE", "/api/v1/"+pathEscape(ws)+"/trigger-bindings/"+pathEscape(bindingID), nil, nil)
 }
@@ -340,6 +337,9 @@ func (s *driverRunStore) List(ctx context.Context, ws string, filter store.Drive
 	}
 	if filter.NodeID != "" {
 		q.Set("node_id", filter.NodeID)
+	}
+	if filter.BindingID != "" {
+		q.Set("trigger_binding_id", filter.BindingID)
 	}
 	if filter.Status != "" {
 		q.Set("status", string(filter.Status))

@@ -380,18 +380,23 @@ func TestDeleteBinding_NotFound404(t *testing.T) {
 
 // TestListBindings_FailureHealth pins Decision 7 inputs: consecutive_failures
 // counts failed runs from newest until a clean run, skipping in-flight runs,
-// and last_run_status is the newest run's status.
+// and last_run_status is the newest run's status. Health is computed from the
+// runs stamped with the binding's id (trigger-dispatch provenance), NOT from
+// every run of the binding's driver — a second binding sharing driver-1 must
+// not absorb s1's failures.
 func TestListBindings_FailureHealth(t *testing.T) {
 	mux, st := seededMux(t)
 	ctx := context.Background()
 	createCronBinding(t, mux, "s1", "*/10 * * * *")
+	createCronBinding(t, mux, "s2-shares-driver", "*/20 * * * *")
 
 	// Claim order stamps strictly increasing StartedAt, so newest-first is
 	// D(running) > C(failed) > B(failed) > A(completed).
-	seed := func(runID string, status domain.DriverRunStatus, finish bool) {
+	seed := func(runID, bindingID string, status domain.DriverRunStatus, finish bool) {
 		t.Helper()
 		if _, err := st.DriverRuns().Create(ctx, store.DriverRunCreate{
 			WorkspaceKey: "WS", RunID: runID, DriverID: "driver-1", DriverVersionID: "version-1",
+			TriggerBindingID: bindingID,
 		}); err != nil {
 			t.Fatalf("create run %s: %v", runID, err)
 		}
@@ -408,10 +413,10 @@ func TestListBindings_FailureHealth(t *testing.T) {
 			t.Fatalf("finish run %s: %v", runID, err)
 		}
 	}
-	seed("A", domain.DriverRunCompleted, true)
-	seed("B", domain.DriverRunFailed, true)
-	seed("C", domain.DriverRunFailed, true)
-	seed("D", domain.DriverRunRunning, false) // in-flight, must be skipped
+	seed("A", "s1", domain.DriverRunCompleted, true)
+	seed("B", "s1", domain.DriverRunFailed, true)
+	seed("C", "s1", domain.DriverRunFailed, true)
+	seed("D", "s1", domain.DriverRunRunning, false) // in-flight, must be skipped
 
 	rec := do(t, mux, http.MethodGet, "/api/workspaces/WS/trigger-bindings", "")
 	if rec.Code != http.StatusOK {
@@ -427,20 +432,27 @@ func TestListBindings_FailureHealth(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	var found bool
+	var foundS1, foundS2 bool
 	for _, b := range resp.Bindings {
-		if b.BindingID != "s1" {
-			continue
-		}
-		found = true
-		if b.ConsecutiveFailures != 2 {
-			t.Fatalf("consecutive_failures = %d, want 2 (D running skipped, C+B failed, A completed breaks)", b.ConsecutiveFailures)
-		}
-		if b.LastRunStatus != string(domain.DriverRunRunning) {
-			t.Fatalf("last_run_status = %q, want running", b.LastRunStatus)
+		switch b.BindingID {
+		case "s1":
+			foundS1 = true
+			if b.ConsecutiveFailures != 2 {
+				t.Fatalf("consecutive_failures = %d, want 2 (D running skipped, C+B failed, A completed breaks)", b.ConsecutiveFailures)
+			}
+			if b.LastRunStatus != string(domain.DriverRunRunning) {
+				t.Fatalf("last_run_status = %q, want running", b.LastRunStatus)
+			}
+		case "s2-shares-driver":
+			foundS2 = true
+			// Shares driver-1 but owns none of the seeded runs: health must not
+			// bleed across bindings that share a driver.
+			if b.LastRunStatus != "" || b.ConsecutiveFailures != 0 {
+				t.Fatalf("s2-shares-driver health = (%q, %d), want empty — driver-mates must not bleed metrics", b.LastRunStatus, b.ConsecutiveFailures)
+			}
 		}
 	}
-	if !found {
-		t.Fatalf("binding s1 not in list response")
+	if !foundS1 || !foundS2 {
+		t.Fatalf("bindings missing from list response: s1=%v s2-shares-driver=%v", foundS1, foundS2)
 	}
 }
