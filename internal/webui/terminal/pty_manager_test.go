@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -39,6 +40,30 @@ func TestNewPTYManager_CwdIsRespected(t *testing.T) {
 	t.Cleanup(func() { _ = m.Shutdown() })
 	if m.cwd != dir {
 		t.Errorf("m.cwd = %q, want %q", m.cwd, dir)
+	}
+}
+
+func TestSpawnSessionMissingLaunchCwdFallsBackToManagerCwd(t *testing.T) {
+	dir := t.TempDir()
+	want, err := filepath.EvalSymlinks(dir)
+	if err != nil {
+		t.Fatalf("EvalSymlinks: %v", err)
+	}
+	m := NewPTYManager("pwd -P; sleep 0.1", 0, dir)
+	t.Cleanup(func() { _ = m.Shutdown() })
+
+	missing := filepath.Join(dir, "missing")
+	att, _, err := m.AttachSession(
+		SessionKey{Workspace: "ws1", Name: "cwd-fallback"},
+		80,
+		24,
+		&LaunchSpec{Cwd: missing},
+	)
+	if err != nil {
+		t.Fatalf("AttachSession: %v", err)
+	}
+	if !readChunkContains(t, att, []byte(want), time.Second) {
+		t.Fatalf("session did not report fallback cwd %q", want)
 	}
 }
 

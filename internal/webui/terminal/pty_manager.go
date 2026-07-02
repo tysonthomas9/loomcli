@@ -24,6 +24,7 @@ package terminal
 import (
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"os/exec"
 	"sort"
@@ -362,7 +363,18 @@ func (m *PTYManager) spawnSession(key SessionKey, cols, rows uint16, launch *tab
 	cmd.Env = env
 	cmd.Dir = m.cwd
 	if launch != nil && strings.TrimSpace(launch.Cwd) != "" {
-		cmd.Dir = launch.Cwd
+		cwd := strings.TrimSpace(launch.Cwd)
+		if info, err := os.Stat(cwd); err == nil && info.IsDir() {
+			cmd.Dir = cwd
+		} else {
+			slog.Warn("terminal launch cwd unavailable; falling back to workspace cwd",
+				"workspace", key.Workspace,
+				"session", key.Name,
+				"cwd", cwd,
+				"fallback_cwd", m.cwd,
+				"err", err,
+			)
+		}
 	}
 
 	ptmx, err := pty.StartWithSize(cmd, &pty.Winsize{Cols: cols, Rows: rows})
