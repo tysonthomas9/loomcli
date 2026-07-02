@@ -469,3 +469,40 @@ acceptance is explicitly NOT met until #36: every green run in evidence is
 cron/run-now; the chosen event lane is the red one. The by-design reds must
 be separated from the aether suite's gate verdict or the gate reads as a
 permanent false REGRESSION.
+
+## Config-by-reference (2026-07-02, Tyson) — supersedes both vets' run_input fix plans
+
+Both fix plans above (loomcli per-leg merge; fleet-db per-leg merge) optimize
+the wrong transport: config BY VALUE, copied into run payloads by every
+dispatcher — which is why merge sites multiply, and why landing the merge in
+fleet-db would entrench the `source_config_ref` wedge as server semantics.
+
+Long-term shape: **config BY REFERENCE, resolved at runtime from run
+provenance.**
+
+- Trigger-dispatched runs already carry `trigger_binding_id` (fleet-db stamps
+  it; the loomcli client must stop dropping it).
+- New driver op `binding.config`: the server resolves the binding from the
+  VERIFIED run's provenance (connectors.go pattern — same server-side
+  derivation principle as the actor-lock security fix), returns the binding's
+  config. The op is the wedge's ONE reader.
+- `prompt-agent` reads config at start: binding config → roleName →
+  `roles.get` → prompt. Event payloads carry only EVENT data (taskId, tick) —
+  which internal dispatch already delivers, so R11.B flips with NO fleet-db
+  dispatch change.
+- Frontend Run-now merge dies via the binding-scoped run-now endpoint (stamps
+  binding provenance on manual runs — needed regardless). Cron's merge becomes
+  legacy-compat, deleted after migration. `loom workflow run` without a
+  binding keeps explicit-input semantics.
+- End-state alignment: binding/service REFERENCES a Role; behavior config
+  lives on the Role record (`AgentService.RoleName` already models this).
+  Long-term the binding config shrinks toward the role pointer and the
+  `source_config_ref` wedge becomes a real field or disappears.
+- Trade-off, accepted: config resolves at RUN time (late binding) — which is
+  what Decision 2 wants; the task-run still records the resolved prompt for
+  audit.
+
+The fleet-db batch therefore SHRINKS to: DELETE route (+ openapi.yaml),
+server newest-N run ordering + `trigger_binding_id` list filter, and
+spec-verifying the loomcli client (which also picks up `trigger_binding_id`
+decode). The run_input merge item drops out of fleet-db entirely.
