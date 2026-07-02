@@ -31,6 +31,7 @@ export interface WorkflowRun {
   started_at?: string;
   last_heartbeat?: string;
   finished_at?: string | null;
+  parent_run_id?: string;
   created_at: string;
   updated_at: string;
 }
@@ -66,6 +67,31 @@ export function isTerminalWorkflowRunStatus(
   );
 }
 
+/** GET /workflows/{name}/runs response. */
+export interface WorkflowRunsResponse {
+  driver_id: string;
+  active_version_id: string;
+  runs: WorkflowRun[];
+}
+
+/** List a workflow's runs, newest-first, optionally filtered by `status` and capped by `limit`. */
+export async function listWorkflowRuns(
+  workspaceId: string,
+  workflowName: string,
+  opts?: { status?: string; limit?: number },
+): Promise<WorkflowRunsResponse> {
+  const params = new URLSearchParams();
+  if (opts?.status) params.set("status", opts.status);
+  if (opts?.limit !== undefined) params.set("limit", String(opts.limit));
+  const query = params.toString();
+  return get<WorkflowRunsResponse>(
+    wsUrl(
+      workspaceId,
+      `/workflows/${encodeURIComponent(workflowName)}/runs${query ? `?${query}` : ""}`,
+    ),
+  );
+}
+
 // ============= Automations: workflow catalog + trigger bindings =============
 
 export interface WorkflowSummary {
@@ -93,6 +119,12 @@ export interface TriggerBinding {
   driver_version_id: string;
   event_type_patterns?: string[];
   enabled: boolean;
+  /** 5-field cron expression — present when source_kind is "cron". */
+  schedule?: string;
+  /** IANA timezone for the schedule (UTC when omitted). */
+  schedule_timezone?: string;
+  /** Computed next fire time (ISO 8601) for an enabled cron binding. */
+  next_fire_at?: string;
   created_at?: string;
   updated_at?: string;
 }
