@@ -159,6 +159,10 @@ agent *has* (worktree, PTY, runs), never branches on what it *is*. Precedent:
 
 ## Phased delivery
 
+**Agreed execution order (Tyson, 2026-07-01):** Phase 1 → a minimal Phase-4
+**spike** (prompt-agent proof, defined below) → Phases 2–3 (the detail UI then
+renders both agent kinds from day one) → remainder of Phase 4 → Phase 5.
+
 ### Phase 1 — plumbing
 
 Runs list endpoint (`GET /api/workspaces/{ws}/workflows/{name}/runs?status=&limit=`,
@@ -172,9 +176,10 @@ binding JSON shows `schedule` + `next_fire_at`.
 
 ### Phase 2 — the unified detail
 
-Clickable sidebar rows for **all** bindings (not just cron); route resolution
-(agent store first, binding id second); capability-based tabs; run history +
-live SSE stream; Run now / Enable / Disable; Edit via `WorkflowSourceModal`.
+Clickable sidebar rows for **all** bindings (not just cron); sidebar regroups
+to *Interactive / Autonomous* (decision 5); route resolution (agent store
+first, binding id second); capability-based tabs; run history + live SSE
+stream; Run now / Enable / Disable; Edit via `WorkflowSourceModal`.
 
 *Acceptance (live click-through, not just build):* clicking the S2 row opens
 the detail; history shows past runs; Run now appears and streams live; Edit
@@ -186,16 +191,27 @@ Binding PATCH/DELETE + UI (edit cadence, rename, remove); failing status dot;
 retire `AutomationsModal`.
 
 *Acceptance:* change S1's cadence from the detail and observe the next fire
-honor it; delete a binding and watch it leave the sidebar; a failed run turns
-the dot red.
+honor it; delete a binding and watch it leave the sidebar (grants revoked);
+one failed run turns the dot amber, a second consecutive failure turns it
+red.
 
 ### Phase 4 — prompt-agent packaging (convergence begins)
 
-The generic **prompt agent**: a Create-Agent path that produces a binding
-whose config carries prompt/model/backend/task-filter, dispatching the
-existing local-task-runner with `input.taskPrompt`. Task-ready internal event
-emission + binding match, behind a flag. Detail-page Edit for prompt agents is
-a prompt textarea (config PATCH), not TS.
+**Spike (runs right after Phase 1, before the detail UI):** flag-gated, no UI
+— one binding whose config references a `Role` (decision: Role is the shared
+behavior-config object), fired manually (Run-now / `loom workflow run`),
+dispatching local-task-runner with the role's prompt as `input.taskPrompt`;
+the run claims a real task with the existing task lease and completes it with
+**no supervisor involvement**. Proves prompt-as-config + claim + transcript
+before any UI is built on top.
+
+Full phase: a Create-Agent path that produces a binding whose config carries
+the role reference (prompt/model/backend/task-filter), dispatching the
+existing local-task-runner with `input.taskPrompt`. **Task-ready internal
+events** (issue-journal bridge extension, `source_kind=internal`) + binding
+match replace the manual fire — decision: events, not cron polling; claim
+races are settled by the existing task lease. Detail-page Edit for prompt
+agents is a prompt textarea (config PATCH on the Role), not TS.
 
 *Acceptance:* a prompt agent created from the UI claims and completes a real
 task end-to-end with **no daemon supervisor involvement**, and its run +
@@ -219,22 +235,36 @@ supervisor disabled; all three are managed identically in the UI.
   ready; they stay supervised until Phase 5.
 - Webhook/event binding *creation* UX (visibility only, Phase 2).
 
+## Decisions (Tyson, 2026-07-01)
+
+1. **Build order:** interleaved — Phase 1 → Phase-4 spike → Phases 2–3 →
+   remainder of Phase 4 → Phase 5.
+2. **Role record:** `Role` stays as the shared behavior-config object
+   referenced by bindings/services (aligns with `AgentService.RoleName`); one
+   prompt edit updates every agent wearing the role. Role becomes a template,
+   not an execution plane.
+3. **Steering:** background prompt agents are watch-only — live transcript
+   stream + cancel, no stdin into a run. Interactive agents remain a separate
+   long-running kind (AgentService, Phase 5); PTY support stays out of the
+   run executor.
+4. **Task pickup:** task-ready internal events via the issue-journal→trigger
+   bridge (`source_kind=internal`), not cron polling; the run claims the task
+   with the existing task lease.
+5. **Sidebar grouping:** by interaction mode, not plane — *Interactive*
+   (agents you talk to, e.g. lead) on top, *Autonomous* (background roles,
+   scheduled, event-driven) below. Replaces the current regular / Background /
+   Scheduled-workflows three-way split.
+6. **Delete semantics:** deleting a binding revokes its connector grants;
+   recreating from a template re-provisions them. No orphaned credentials.
+7. **Failure surfacing:** one failed run turns the status dot amber (tooltip
+   shows the error); two consecutive failures turn it red with a "failing"
+   label.
+
 ## Open questions
 
-1. **Task-ready event shape:** which journal/outbox event(s) exactly, and does
-   the run claim the task with the existing task lease (proposed) or a new
-   reservation on the binding?
-2. **Steering story for prompt agents:** is transcript streaming + cancel
-   enough, or do users need live stdin (yield/redirect) on a run? If the
-   latter, does that pull PTY support into the run executor or push those
-   agents to AgentService?
-3. **Role record fate:** keep `Role` as the shared behavior-config object
-   referenced by bindings/services (aligns with `AgentService.RoleName`), or
-   inline config per binding? Proposal: keep `Role` as config; one prompt
-   edit updates every agent that wears it.
-4. **"Failing" threshold:** one failed run or N consecutive?
-5. **DELETE semantics:** revoke the binding's connector grants or leave them?
-6. **`GET /agents` contract:** when bindings/services appear in the unified
+1. **Task-ready event shape:** which journal/outbox event(s) exactly map to
+   "task became ready"?
+2. **`GET /agents` contract:** when bindings/services appear in the unified
    list with a `kind` discriminator, what must daemon/CLI consumers tolerate?
-7. **Per-binding run attribution:** `DriverRunFilter` filters by driver;
+3. **Per-binding run attribution:** `DriverRunFilter` filters by driver;
    extend with `BindingID` or join through `TriggerDeliveries`?
