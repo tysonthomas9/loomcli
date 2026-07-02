@@ -64,7 +64,6 @@ import { WorkspaceSwitcher } from "@/components/WorkspaceSwitcher/WorkspaceSwitc
 import { CreateIssueModal } from "@/components/CreateIssueModal/CreateIssueModal";
 import { CreateWorkspaceModal } from "@/components/CreateWorkspaceModal/CreateWorkspaceModal";
 import { CreateAgentModal } from "@/components/CreateAgentModal/CreateAgentModal";
-import { AutomationsModal } from "@/components/AutomationsModal";
 import {
   OnboardingFlow,
   type OnboardingStep,
@@ -520,7 +519,6 @@ function App() {
   const [showCreateIssue, setShowCreateIssue] = useState(false);
   const [showCreateWorkspace, setShowCreateWorkspace] = useState(false);
   const [showCreateAgent, setShowCreateAgent] = useState(false);
-  const [showAutomations, setShowAutomations] = useState(false);
   const [onboardingDismissed, setOnboardingDismissed] = useState(false);
   const [onboardingAction, setOnboardingAction] =
     useState<OnboardingAction | null>(null);
@@ -1555,10 +1553,6 @@ function App() {
             refetchWorkspaceAfterAgentCreate();
           }
         }}
-        onOpenAutomations={() => {
-          setShowCreateAgent(false);
-          setShowAutomations(true);
-        }}
         onOpenSettings={() => {
           setShowCreateAgent(false);
           navigateToView("settings");
@@ -1569,11 +1563,6 @@ function App() {
             type: "success",
           });
         }}
-      />
-      <AutomationsModal
-        isOpen={showAutomations}
-        workspaceId={workspaceId}
-        onClose={() => setShowAutomations(false)}
       />
     </KeyboardShortcutProvider>
   );

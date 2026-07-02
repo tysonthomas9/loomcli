@@ -10,10 +10,14 @@
  *   custom-role  → ensure Role + prompt file (role API), then POST /agents
  *   workflow     → create a cron trigger binding (which self-heals + activates
  *                  the builtin workflow); the review loop also provisions a
- *                  github connector + grants. No agent row is created.
+ *                  github connector + grants. No agent row is created, but the
+ *                  binding surfaces as an autonomous agent in the sidebar +
+ *                  WorkflowAgentDetail (which owns run history, toggle, edit,
+ *                  and delete — the retired AutomationsModal's job).
  *
- * The event-driven workflow lane (code review on PRs) is a separate surface —
- * see AutomationsModal — because it creates a trigger binding, not an agent row.
+ * Event-driven (webhook) binding creation stays CLI-only for now
+ * (`loom trigger bindings create`), per the proposal's visibility-only scope
+ * for webhook UX; such bindings are still listed + managed once they exist.
  */
 
 export type AgentTemplateKind =

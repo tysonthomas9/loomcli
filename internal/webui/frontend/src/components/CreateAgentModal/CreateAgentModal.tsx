@@ -69,9 +69,10 @@ function githubRepoSlug(repo: RepoInfo | undefined): string {
 }
 
 // The agent-creation gallery renders the agent-producing kinds (lead +
-// supervised workers, builtin or custom-role). The event-driven workflow lane
-// (code review on PRs) lives in the separate Automations surface, since it
-// creates a trigger binding rather than an agent row.
+// supervised workers, builtin or custom-role) plus the scheduled-workflow
+// templates (bug-fix / review-loop) that create a cron trigger binding. Once a
+// binding exists it is a first-class agent in the sidebar + detail page, so the
+// retired Automations modal is no longer the home for scheduled workflows.
 //
 // Sections + their cards are resolved once at module load.
 const SECTIONS = TEMPLATE_SECTIONS.map((meta) => ({
@@ -91,8 +92,6 @@ export interface CreateAgentModalProps {
    * Lead card, "plan"/"task" select the matching background worker.
    */
   defaultRole?: DefaultRole;
-  /** When provided, the gallery shows a cross-link to the Automations surface. */
-  onOpenAutomations?: () => void;
   /**
    * Deep-link to Settings, used by the review-loop template when the GitHub
    * runtime credential it reuses is not configured yet.
@@ -115,7 +114,6 @@ export function CreateAgentModal({
   defaultBackend,
   defaultName,
   defaultRole,
-  onOpenAutomations,
   onOpenSettings,
   onClose,
   onSuccess,
@@ -423,17 +421,6 @@ export function CreateAgentModal({
               </div>
             </div>
           ))}
-          {onOpenAutomations && (
-            <button
-              type="button"
-              className={styles.automationsLink}
-              onClick={onOpenAutomations}
-              data-testid="create-agent-open-automations"
-            >
-              Need event-driven automation like code review on PRs? Open
-              Automations →
-            </button>
-          )}
         </div>
 
         <div className={styles.panel}>
