@@ -72,9 +72,13 @@ export async function run(ctx) {
   const actor = stringValue(input.actor) || "prompt-agent";
   const backend = stringValue(input.backend); // optional; informational only (backend is host-resolved)
 
-  // 2. Claim a real ready task with the existing task lease. Targets input.taskId
+  // 2. Claim a real ready task with the existing task lease. Targets a task id
   //    when supplied (claim-by-id), else claims any ready task (queue order).
-  const targetId = stringValue(input.taskId);
+  //    The id may arrive flat (input.taskId — cron/manual dispatch) or nested in
+  //    the InternalSource provenance envelope for a task-ready event
+  //    (input.event.taskId — the loopback wraps the emitter payload under
+  //    "event"; see internal/trigger issue_journal_bridge_task_ready.go).
+  const targetId = resolveTargetTaskId(input);
   const claimed = await claimTargetTask(loom, actor, targetId);
   const issueId = claimed && stringValue(claimed.id || claimed.ID);
   if (!issueId) {
@@ -183,6 +187,20 @@ function isConflictError(e) {
   if (stringValue(e.code) === "conflict") return true;
   const message = stringValue(e.message);
   return message.indexOf("not ready or already claimed") >= 0 || message.indexOf("already claimed") >= 0;
+}
+
+// resolveTargetTaskId reads the claim target from the flat input (input.taskId,
+// cron/manual) or the InternalSource envelope of a task-ready event
+// (input.event.taskId, then input.event.id as a fallback for a raw issue
+// snapshot). Returns "" when none is present (filterless pickup).
+function resolveTargetTaskId(input) {
+  const flat = stringValue(input.taskId);
+  if (flat) return flat;
+  const event = input && typeof input.event === "object" && input.event ? input.event : null;
+  if (event) {
+    return stringValue(event.taskId) || stringValue(event.id) || stringValue(event.ID);
+  }
+  return "";
 }
 
 function stringValue(v) {

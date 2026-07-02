@@ -250,11 +250,12 @@ func startIssueJournalBridge(ctx context.Context, st store.Store) {
 		return
 	}
 	bridge := &trigger.IssueJournalBridge{
-		Store:        st,
-		Source:       &trigger.InternalSource{Store: st},
-		Reader:       reader,
-		WorkspaceKey: os.Getenv(bootstrap.EnvWorkspace),
-		Cursors:      cursors,
+		Store:         st,
+		Source:        &trigger.InternalSource{Store: st},
+		Reader:        reader,
+		WorkspaceKey:  os.Getenv(bootstrap.EnvWorkspace),
+		Cursors:       cursors,
+		EmitTaskReady: taskReadyEventsEnabled(),
 	}
 	interval := issueBridgeInterval()
 	slog.Info("Issue journal bridge enabled", "workspace", bridge.WorkspaceKey, "interval", interval, "state_path", issueBridgeStatePath())
@@ -300,6 +301,18 @@ func issueBridgeInterval() time.Duration {
 // out (1/true/yes/on).
 func issueBridgeDisabled() bool {
 	switch strings.ToLower(strings.TrimSpace(os.Getenv(envLoomIssueBridgeDisabled))) {
+	case "1", "true", "yes", "on":
+		return true
+	default:
+		return false
+	}
+}
+
+// taskReadyEventsEnabled reports whether LOOM_TASK_READY_EVENTS opts the
+// issue-journal bridge into the flag-gated task.ready lane (1/true/yes/on).
+// Default off so the bridge's default behavior is unchanged.
+func taskReadyEventsEnabled() bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv(envLoomTaskReadyEvents))) {
 	case "1", "true", "yes", "on":
 		return true
 	default:

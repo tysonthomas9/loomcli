@@ -84,6 +84,10 @@ services:
       LOOM_LOCAL_MODE_PLAN_TASK_ID: LOCALMODE-1
       LOOM_LOCAL_MODE_CODE_TASK_ID: LOCALMODE-2
       LOOM_LOCAL_MODE_STEP_DELAY: "2"
+      # Emit task.ready internal events when a task becomes ready, so a
+      # prompt-agent binding on internal.task.ready fires on task creation
+      # (Phase 4 prompt-agent packaging, ITEM E). Default-off elsewhere.
+      LOOM_TASK_READY_EVENTS: "1"
     networks: [local-mode]
     ports:
       - "${LOCAL_MODE_API_PORT:-8282}:8080"
