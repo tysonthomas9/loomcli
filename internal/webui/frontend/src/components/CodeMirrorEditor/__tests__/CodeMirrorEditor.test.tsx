@@ -65,6 +65,7 @@ vi.mock("@codemirror/commands", () => ({
 vi.mock("@codemirror/search", () => ({
   search: vi.fn(() => []),
   searchKeymap: [],
+  gotoLine: vi.fn(() => true),
   openSearchPanel: mocks.openSearchPanel,
   closeSearchPanel: mocks.closeSearchPanel,
 }));

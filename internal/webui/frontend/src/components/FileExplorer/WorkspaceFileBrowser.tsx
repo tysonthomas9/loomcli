@@ -1,65 +1,55 @@
 import {
-  useState,
   useCallback,
   useEffect,
   useRef,
+  useState,
   type CSSProperties,
   type FormEvent,
+  type MouseEvent,
 } from "react";
+import { useStore } from "zustand";
+
 import { ErrorDisplay, LoadingSkeleton } from "@/components";
+import { useFileEditorBuffer } from "@/components/FileEditorPanel";
 import { ResizeHandle } from "@/components/ResizeHandle";
-import { useWorkspaceContext } from "@/hooks";
-import { useWorkspaceFileTree, useWorkspaceFileContent } from "@/hooks/common";
+import type { FileEntry, FileScopeRef } from "@/api/workspace";
+import {
+  deleteScopedPath,
+  mkdirScoped,
+  moveScopedPath,
+  readScopedFile,
+  writeScopedFile,
+} from "@/hooks/api";
+import {
+  useScopedFileContent,
+  useScopedFileTree,
+  useToast,
+  useWorkspaceContext,
+  FileBrowserStoreProvider,
+  fileBrowserTabsStorageKey,
+  useFileBrowserStoreInstance,
+  type FileBrowserGroup,
+} from "@/hooks";
 import { wsGet, wsSet } from "@/utils/scopedStorage";
-import { FileTree } from "./FileTree";
+
+import {
+  FileTree,
+  type FileTreeInlineEdit,
+  type FileTreeNodeInfo,
+} from "./FileTree";
 import { FileTabBar } from "./FileTabBar";
 import { WorkspaceFilePane } from "./WorkspaceFilePane";
 import styles from "./FileExplorer.module.css";
 
-const TABS_STORAGE_KEY = "file-browser-tabs";
-
-/** Load persisted open tabs for a workspace, dropping anything malformed. */
-function loadTabs(wsId: string): {
-  openTabs: string[];
-  activePath: string | null;
-} {
-  try {
-    const raw = wsGet(wsId, TABS_STORAGE_KEY);
-    if (raw) {
-      const parsed = JSON.parse(raw) as {
-        openTabs?: unknown;
-        activePath?: unknown;
-      };
-      if (Array.isArray(parsed.openTabs)) {
-        const openTabs = parsed.openTabs.filter(
-          (p): p is string => typeof p === "string",
-        );
-        const activePath =
-          typeof parsed.activePath === "string" &&
-          openTabs.includes(parsed.activePath)
-            ? parsed.activePath
-            : (openTabs[0] ?? null);
-        return { openTabs, activePath };
-      }
-    }
-  } catch {
-    // malformed or unavailable storage — start fresh
-  }
-  return { openTabs: [], activePath: null };
-}
-
-function saveTabs(
-  wsId: string,
-  openTabs: string[],
-  activePath: string | null,
-): void {
-  wsSet(wsId, TABS_STORAGE_KEY, JSON.stringify({ openTabs, activePath }));
-}
-
 const TREE_WIDTH_KEY = "loom:file-browser:tree-width";
+const DELETE_FILE_SKIP_KEY = "file-browser-delete-files-without-confirm";
 const DEFAULT_TREE_WIDTH = 320;
 const MIN_TREE_WIDTH = 240;
 const MAX_TREE_WIDTH = 400;
+
+const DEFAULT_GROUP_WIDTH = 560;
+const MIN_GROUP_WIDTH = 320;
+const MAX_GROUP_WIDTH = 1100;
 
 function clampTreeWidth(w: number): number {
   return Math.min(MAX_TREE_WIDTH, Math.max(MIN_TREE_WIDTH, w));
@@ -86,13 +76,357 @@ function storeTreeWidth(w: number): void {
   }
 }
 
-/**
- * WorkspaceFileBrowser is the read-only file browser rooted at the workspace
- * folder. Layout: a resizable tree on the left and a tabbed, docked viewer on
- * the right. Opening a file from the tree adds (or activates) a tab; the active
- * tab drives the viewer.
- */
-export function WorkspaceFileBrowser() {
+function basename(path: string): string {
+  return path.split("/").pop() || path;
+}
+
+function dirname(path: string): string {
+  const i = path.lastIndexOf("/");
+  return i > 0 ? path.slice(0, i) : "";
+}
+
+function joinPath(parent: string, child: string): string {
+  const cleanChild = child.replace(/^\/+|\/+$/g, "");
+  return parent ? `${parent}/${cleanChild}` : cleanChild;
+}
+
+function pathMatchesPrefix(path: string, prefix: string): boolean {
+  return path === prefix || path.startsWith(`${prefix}/`);
+}
+
+function sortedEntries(entries: FileEntry[]): FileEntry[] {
+  return [...entries].sort((a, b) => a.name.localeCompare(b.name));
+}
+
+function duplicateName(name: string, siblings: FileEntry[]): string {
+  const taken = new Set(siblings.map((entry) => entry.name));
+  const dot = name.lastIndexOf(".");
+  const hasExt = dot > 0;
+  const stem = hasExt ? name.slice(0, dot) : name;
+  const ext = hasExt ? name.slice(dot) : "";
+  let candidate = `${stem} copy${ext}`;
+  let n = 2;
+  while (taken.has(candidate)) {
+    candidate = `${stem} copy ${n}${ext}`;
+    n += 1;
+  }
+  return candidate;
+}
+
+interface FileBrowserProps {
+  scopeRef: FileScopeRef;
+}
+
+interface ContextMenuState {
+  node: FileTreeNodeInfo;
+  x: number;
+  y: number;
+}
+
+interface DeleteConfirmState {
+  node: FileTreeNodeInfo;
+}
+
+function OpenEditors({
+  groups,
+  dirty,
+  collapsed,
+  onToggle,
+  onActivate,
+}: {
+  groups: FileBrowserGroup[];
+  dirty: Record<string, boolean>;
+  collapsed: boolean;
+  onToggle: () => void;
+  onActivate: (groupIndex: number, path: string) => void;
+}) {
+  const openCount = groups.reduce((sum, group) => sum + group.tabs.length, 0);
+  return (
+    <section className={styles.openEditors}>
+      <button
+        type="button"
+        className={styles.openEditorsHeader}
+        aria-expanded={!collapsed}
+        onClick={onToggle}
+      >
+        <span
+          className={`${styles.chevron} ${!collapsed ? styles.chevronExpanded : ""}`}
+          aria-hidden="true"
+        >
+          <svg viewBox="0 0 16 16">
+            <path
+              d="M6 4l4 4-4 4"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.5"
+            />
+          </svg>
+        </span>
+        <span>Open Editors</span>
+        <span className={styles.openEditorsCount}>{openCount}</span>
+      </button>
+      {!collapsed && (
+        <div className={styles.openEditorsList}>
+          {openCount === 0 ? (
+            <div className={styles.openEditorsEmpty}>No open files</div>
+          ) : (
+            groups.map((group, groupIndex) => (
+              <div key={groupIndex} className={styles.openEditorsGroup}>
+                {groups.length > 1 && (
+                  <div className={styles.openEditorsGroupLabel}>
+                    Group {groupIndex + 1}
+                  </div>
+                )}
+                {group.tabs.map((tab) => (
+                  <button
+                    type="button"
+                    key={`${groupIndex}:${tab.path}`}
+                    className={styles.openEditorItem}
+                    data-active={group.active === tab.path || undefined}
+                    title={tab.path}
+                    onClick={() => onActivate(groupIndex, tab.path)}
+                  >
+                    {dirty[tab.path] && (
+                      <span className={styles.tabDirty} aria-hidden="true" />
+                    )}
+                    <span className={styles.openEditorName}>
+                      {basename(tab.path)}
+                    </span>
+                    <span className={styles.openEditorPath}>
+                      {dirname(tab.path)}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            ))
+          )}
+        </div>
+      )}
+    </section>
+  );
+}
+
+function DeleteConfirmDialog({
+  node,
+  onCancel,
+  onConfirm,
+}: {
+  node: FileTreeNodeInfo;
+  onCancel: () => void;
+  onConfirm: (skipFutureFileConfirms: boolean) => void;
+}) {
+  const [skipFiles, setSkipFiles] = useState(false);
+  return (
+    <div className={styles.dialogOverlay}>
+      <div className={styles.dialog} role="dialog" aria-modal="true">
+        <p className={styles.dialogMessage}>
+          Delete {node.isDir ? "folder" : "file"} {node.path}?
+        </p>
+        {!node.isDir && (
+          <label className={styles.checkboxRow}>
+            <input
+              type="checkbox"
+              checked={skipFiles}
+              onChange={(event) => setSkipFiles(event.target.checked)}
+            />
+            <span>Do not ask again for files</span>
+          </label>
+        )}
+        <div className={styles.dialogActions}>
+          <button
+            type="button"
+            className={styles.secondaryButton}
+            onClick={onCancel}
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            className={styles.dangerButton}
+            onClick={() => onConfirm(skipFiles)}
+          >
+            Delete
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ContextMenu({
+  state,
+  onNewFile,
+  onNewFolder,
+  onRename,
+  onDelete,
+  onDuplicate,
+  onCopyPath,
+}: {
+  state: ContextMenuState;
+  onNewFile: (node: FileTreeNodeInfo) => void;
+  onNewFolder: (node: FileTreeNodeInfo) => void;
+  onRename: (node: FileTreeNodeInfo) => void;
+  onDelete: (node: FileTreeNodeInfo) => void;
+  onDuplicate: (node: FileTreeNodeInfo) => void;
+  onCopyPath: (node: FileTreeNodeInfo) => void;
+}) {
+  return (
+    <div
+      className={styles.contextMenu}
+      style={{ left: state.x, top: state.y }}
+      role="menu"
+    >
+      <button
+        type="button"
+        role="menuitem"
+        onClick={() => onNewFile(state.node)}
+      >
+        New File
+      </button>
+      <button
+        type="button"
+        role="menuitem"
+        onClick={() => onNewFolder(state.node)}
+      >
+        New Folder
+      </button>
+      <button
+        type="button"
+        role="menuitem"
+        onClick={() => onRename(state.node)}
+      >
+        Rename
+      </button>
+      <button
+        type="button"
+        role="menuitem"
+        onClick={() => onDelete(state.node)}
+      >
+        Delete
+      </button>
+      <button
+        type="button"
+        role="menuitem"
+        onClick={() => onDuplicate(state.node)}
+        disabled={state.node.isDir}
+        title={
+          state.node.isDir ? "Duplicate is available for files" : undefined
+        }
+      >
+        Duplicate
+      </button>
+      <button
+        type="button"
+        role="menuitem"
+        onClick={() => onCopyPath(state.node)}
+      >
+        Copy Path
+      </button>
+    </div>
+  );
+}
+
+function EditorGroup({
+  groupIndex,
+  group,
+  scopeRef,
+  isActiveGroup,
+  dirty,
+  onSelectTab,
+  onCloseTab,
+  onSplitRight,
+  onNavigate,
+  onSaved,
+}: {
+  groupIndex: number;
+  group: FileBrowserGroup;
+  scopeRef: FileScopeRef;
+  isActiveGroup: boolean;
+  dirty: Record<string, boolean>;
+  onSelectTab: (groupIndex: number, path: string) => void;
+  onCloseTab: (groupIndex: number, path: string) => void;
+  onSplitRight: (groupIndex: number) => void;
+  onNavigate: (dirPath: string) => void;
+  onSaved: (path: string) => void;
+}) {
+  const { workspaceId } = useWorkspaceContext();
+  const store = useFileBrowserStoreInstance();
+  const { fileData, isLoading, error, fetchFile, clearFile } =
+    useScopedFileContent(scopeRef);
+  const activePath = group.active;
+  const pathDirty = activePath ? !!dirty[activePath] : false;
+  const [searchOpen, setSearchOpen] = useState(false);
+
+  useEffect(() => {
+    setSearchOpen(false);
+    if (activePath) {
+      if (!pathDirty) {
+        void fetchFile(activePath);
+      }
+    } else {
+      clearFile();
+    }
+  }, [activePath, pathDirty, fetchFile, clearFile]);
+
+  const writeFile = useCallback(
+    (path: string, content: string) =>
+      writeScopedFile(workspaceId, scopeRef, path, content),
+    [workspaceId, scopeRef],
+  );
+  const setDirty = useCallback(
+    (path: string, isDirty: boolean) =>
+      store.getState().setDirty(path, isDirty),
+    [store],
+  );
+
+  const canSave =
+    !!activePath && !!fileData && !fileData.binary && !fileData.truncated;
+
+  const editor = useFileEditorBuffer({
+    path: activePath,
+    fileData,
+    isActive: isActiveGroup,
+    canSave,
+    writeFile,
+    onDirtyChange: setDirty,
+    onSaved: () => {
+      if (activePath) onSaved(activePath);
+    },
+  });
+
+  return (
+    <section
+      className={styles.editorGroup}
+      data-active={isActiveGroup || undefined}
+    >
+      <FileTabBar
+        tabs={group.tabs.map((tab) => tab.path)}
+        activePath={activePath}
+        dirtyPaths={dirty}
+        groupLabel={`group ${groupIndex + 1}`}
+        onSelect={(path) => onSelectTab(groupIndex, path)}
+        onClose={(path) => onCloseTab(groupIndex, path)}
+      />
+      <WorkspaceFilePane
+        path={activePath}
+        fileData={fileData}
+        isLoading={isLoading}
+        error={error}
+        content={editor.content}
+        isDirty={editor.isDirty}
+        isSaving={editor.isSaving}
+        searchOpen={searchOpen}
+        onContentChange={editor.handleContentChange}
+        onSave={() => void editor.save()}
+        onToggleSearch={() => setSearchOpen((open) => !open)}
+        onSplitRight={() => onSplitRight(groupIndex)}
+        onNavigate={onNavigate}
+      />
+    </section>
+  );
+}
+
+function FileBrowserInner({ scopeRef }: FileBrowserProps) {
   const {
     expanded,
     treeData,
@@ -101,76 +435,122 @@ export function WorkspaceFileBrowser() {
     filterText,
     debouncedFilterText,
     toggle,
+    loadDir,
     revealPath,
     setFilterText,
-  } = useWorkspaceFileTree();
+  } = useScopedFileTree(scopeRef);
 
-  const {
-    fileData,
-    isLoading: isFileLoading,
-    error: fileError,
-    fetchFile,
-    clearFile,
-  } = useWorkspaceFileContent();
-
-  // Workspace-scoped tab persistence. FilesPage keys this component by
-  // workspaceId, so workspaceId is stable for the component's lifetime and the
-  // lazy initializers restore the right workspace's tabs on mount/reload.
   const { workspaceId } = useWorkspaceContext();
-  const [openTabs, setOpenTabs] = useState<string[]>(
-    () => loadTabs(workspaceId).openTabs,
-  );
-  const [activePath, setActivePath] = useState<string | null>(
-    () => loadTabs(workspaceId).activePath,
-  );
-  const activePathRef = useRef<string | null>(null);
-  activePathRef.current = activePath;
+  const { showToast } = useToast();
+  const store = useFileBrowserStoreInstance();
+  const groups = useStore(store, (s) => s.groups);
+  const activeGroup = useStore(store, (s) => s.activeGroup);
+  const dirty = useStore(store, (s) => s.dirty);
 
   const [treeWidth, setTreeWidth] = useState<number>(getStoredTreeWidth);
+  const [splitLeftWidth, setSplitLeftWidth] = useState(DEFAULT_GROUP_WIDTH);
   const [jumpText, setJumpText] = useState<string>("");
   const [scrollTarget, setScrollTarget] = useState<string | null>(null);
+  const [openEditorsCollapsed, setOpenEditorsCollapsed] = useState(false);
+  const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
+  const [inlineEdit, setInlineEdit] = useState<FileTreeInlineEdit | null>(null);
+  const [deleteConfirm, setDeleteConfirm] = useState<DeleteConfirmState | null>(
+    null,
+  );
+  const inlineCommitKeyRef = useRef<string | null>(null);
 
-  // Fetch the active tab's content (latest-wins is handled inside the hook).
+  const activePath = groups[activeGroup]?.active ?? groups[0]?.active ?? null;
+
+  useEffect(() => {
+    if (!contextMenu) return;
+    const close = () => setContextMenu(null);
+    window.addEventListener("click", close);
+    window.addEventListener("keydown", close);
+    return () => {
+      window.removeEventListener("click", close);
+      window.removeEventListener("keydown", close);
+    };
+  }, [contextMenu]);
+
   useEffect(() => {
     if (activePath) {
-      fetchFile(activePath);
-    } else {
-      clearFile();
+      void revealPath(activePath).then(() => setScrollTarget(activePath));
     }
-  }, [activePath, fetchFile, clearFile]);
+  }, [activePath, revealPath]);
 
-  // Persist open tabs per workspace so they survive a reload.
-  useEffect(() => {
-    saveTabs(workspaceId, openTabs, activePath);
-  }, [workspaceId, openTabs, activePath]);
+  const refreshParents = useCallback(
+    async (...paths: string[]) => {
+      const parents = new Set(paths.map(dirname));
+      await Promise.all([...parents].map((parent) => loadDir(parent)));
+    },
+    [loadDir],
+  );
 
-  // On mount, reveal the restored active file in the tree (expand its ancestors
-  // and scroll to it). Runs once — tab switches don't auto-reveal.
-  useEffect(() => {
-    const initial = activePathRef.current;
-    if (initial) {
-      void revealPath(initial).then(() => setScrollTarget(initial));
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  const discardActiveIfNeeded = useCallback(
+    (groupIndex: number, nextPath?: string): boolean => {
+      const state = store.getState();
+      const current = state.groups[groupIndex]?.active;
+      if (!current || current === nextPath || !state.dirty[current])
+        return true;
+      const ok = window.confirm(`Discard unsaved changes in ${current}?`);
+      if (!ok) return false;
+      state.setDirty(current, false);
+      return true;
+    },
+    [store],
+  );
 
-  const openFile = useCallback((path: string) => {
-    setOpenTabs((prev) => (prev.includes(path) ? prev : [...prev, path]));
-    setActivePath(path);
-  }, []);
+  const openFile = useCallback(
+    (path: string, groupIndex = store.getState().activeGroup) => {
+      if (!discardActiveIfNeeded(groupIndex, path)) return;
+      store.getState().openTab(path, groupIndex);
+    },
+    [discardActiveIfNeeded, store],
+  );
 
-  const closeTab = useCallback((path: string) => {
-    setOpenTabs((prev) => {
-      const idx = prev.indexOf(path);
-      if (idx === -1) return prev;
-      const next = prev.filter((p) => p !== path);
-      // If we closed the active tab, activate a neighbor (next, else previous).
-      if (path === activePathRef.current) {
-        setActivePath(next[idx] ?? next[idx - 1] ?? null);
+  const selectTab = useCallback(
+    (groupIndex: number, path: string) => {
+      if (!discardActiveIfNeeded(groupIndex, path)) return;
+      store.getState().activateTab(groupIndex, path);
+    },
+    [discardActiveIfNeeded, store],
+  );
+
+  const closeTab = useCallback(
+    (groupIndex: number, path: string) => {
+      if (store.getState().dirty[path]) {
+        const ok = window.confirm(`Discard unsaved changes in ${path}?`);
+        if (!ok) return;
+        store.getState().setDirty(path, false);
       }
-      return next;
-    });
-  }, []);
+      store.getState().closeTab(groupIndex, path);
+    },
+    [store],
+  );
+
+  const splitRight = useCallback(
+    (groupIndex: number) => {
+      const path = store.getState().groups[groupIndex]?.active;
+      if (!path) return;
+      if (store.getState().dirty[path]) {
+        const ok = window.confirm(
+          `Discard unsaved changes in ${path} before splitting?`,
+        );
+        if (!ok) return;
+        store.getState().setDirty(path, false);
+      }
+      store.getState().splitRight(path);
+    },
+    [store],
+  );
+
+  const handleSaved = useCallback(
+    (path: string) => {
+      showToast("File saved", { type: "success" });
+      void refreshParents(path);
+    },
+    [refreshParents, showToast],
+  );
 
   const handleResizeDelta = useCallback((deltaPx: number) => {
     setTreeWidth((w) => {
@@ -185,17 +565,214 @@ export function WorkspaceFileBrowser() {
     storeTreeWidth(DEFAULT_TREE_WIDTH);
   }, []);
 
+  const handleSplitResizeDelta = useCallback((deltaPx: number) => {
+    setSplitLeftWidth((w) =>
+      Math.min(MAX_GROUP_WIDTH, Math.max(MIN_GROUP_WIDTH, w + deltaPx)),
+    );
+  }, []);
+
   const handleJump = useCallback(
     (e: FormEvent) => {
       e.preventDefault();
       const target = jumpText.trim();
       if (!target) return;
-      // Reveal, then scroll/highlight the target once it's loaded into the tree.
       void revealPath(target).then(() => setScrollTarget(target));
       setJumpText("");
     },
     [jumpText, revealPath],
   );
+
+  const navigateToDir = useCallback(
+    (dirPath: string) => {
+      void revealPath(dirPath).then(() => setScrollTarget(dirPath));
+    },
+    [revealPath],
+  );
+
+  const beginCreate = useCallback(
+    (kind: "create-file" | "create-folder", node: FileTreeNodeInfo) => {
+      setContextMenu(null);
+      const parentPath = node.isDir ? node.path : dirname(node.path);
+      setInlineEdit({
+        kind,
+        parentPath,
+        value: kind === "create-file" ? "untitled.txt" : "new-folder",
+        isDir: kind === "create-folder",
+      });
+    },
+    [],
+  );
+
+  const beginRename = useCallback((node: FileTreeNodeInfo) => {
+    setContextMenu(null);
+    setInlineEdit({
+      kind: "rename",
+      parentPath: dirname(node.path),
+      path: node.path,
+      value: node.name,
+      isDir: node.isDir,
+    });
+  }, []);
+
+  const commitInlineEdit = useCallback(async () => {
+    if (!inlineEdit) return;
+    const value = inlineEdit.value.trim();
+    if (!value) {
+      setInlineEdit(null);
+      return;
+    }
+    const commitKey = `${inlineEdit.kind}:${inlineEdit.path ?? inlineEdit.parentPath}:${value}`;
+    if (inlineCommitKeyRef.current === commitKey) return;
+    inlineCommitKeyRef.current = commitKey;
+    setInlineEdit(null);
+    try {
+      if (inlineEdit.kind === "create-file") {
+        const path = joinPath(inlineEdit.parentPath, value);
+        await writeScopedFile(workspaceId, scopeRef, path, "");
+        await refreshParents(path);
+        openFile(path);
+        void revealPath(path).then(() => setScrollTarget(path));
+      } else if (inlineEdit.kind === "create-folder") {
+        const path = joinPath(inlineEdit.parentPath, value);
+        await mkdirScoped(workspaceId, scopeRef, path);
+        await refreshParents(path);
+        void revealPath(path).then(() => setScrollTarget(path));
+      } else if (inlineEdit.path) {
+        const nextPath = joinPath(inlineEdit.parentPath, value);
+        if (nextPath !== inlineEdit.path) {
+          await moveScopedPath(
+            workspaceId,
+            scopeRef,
+            inlineEdit.path,
+            nextPath,
+          );
+          store.getState().retargetPathPrefix(inlineEdit.path, nextPath);
+          await refreshParents(inlineEdit.path, nextPath);
+          void revealPath(nextPath).then(() => setScrollTarget(nextPath));
+        }
+      }
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : String(err), {
+        type: "error",
+      });
+    } finally {
+      inlineCommitKeyRef.current = null;
+    }
+  }, [
+    inlineEdit,
+    workspaceId,
+    scopeRef,
+    refreshParents,
+    openFile,
+    revealPath,
+    store,
+    showToast,
+  ]);
+
+  const dirtyTabsForPath = useCallback(
+    (path: string): string[] =>
+      Object.keys(store.getState().dirty).filter((tabPath) =>
+        pathMatchesPrefix(tabPath, path),
+      ),
+    [store],
+  );
+
+  const performDelete = useCallback(
+    async (node: FileTreeNodeInfo, skipFutureFileConfirms = false) => {
+      const dirtyTabs = dirtyTabsForPath(node.path);
+      if (dirtyTabs.length > 0) {
+        const ok = window.confirm(
+          `Discard unsaved changes in ${dirtyTabs.length} open file${dirtyTabs.length === 1 ? "" : "s"}?`,
+        );
+        if (!ok) return;
+        for (const path of dirtyTabs) {
+          store.getState().setDirty(path, false);
+        }
+      }
+      try {
+        await deleteScopedPath(workspaceId, scopeRef, node.path, node.isDir);
+        if (!node.isDir && skipFutureFileConfirms) {
+          wsSet(workspaceId, DELETE_FILE_SKIP_KEY, "1");
+        }
+        store.getState().closePathPrefix(node.path);
+        await refreshParents(node.path);
+        showToast("Deleted", { type: "success" });
+      } catch (err) {
+        showToast(err instanceof Error ? err.message : String(err), {
+          type: "error",
+        });
+      } finally {
+        setDeleteConfirm(null);
+      }
+    },
+    [dirtyTabsForPath, workspaceId, scopeRef, store, refreshParents, showToast],
+  );
+
+  const requestDelete = useCallback(
+    (node: FileTreeNodeInfo) => {
+      setContextMenu(null);
+      const skipFileConfirm =
+        !node.isDir && wsGet(workspaceId, DELETE_FILE_SKIP_KEY) === "1";
+      if (skipFileConfirm) {
+        void performDelete(node);
+      } else {
+        setDeleteConfirm({ node });
+      }
+    },
+    [performDelete, workspaceId],
+  );
+
+  const duplicateFile = useCallback(
+    async (node: FileTreeNodeInfo) => {
+      setContextMenu(null);
+      if (node.isDir) return;
+      try {
+        const data = await readScopedFile(workspaceId, scopeRef, node.path);
+        if (data.binary || data.truncated) {
+          showToast("Only complete text files can be duplicated", {
+            type: "error",
+          });
+          return;
+        }
+        const parent = dirname(node.path);
+        const entries = sortedEntries(treeData.get(parent) ?? []);
+        const nextName = duplicateName(basename(node.path), entries);
+        const nextPath = joinPath(parent, nextName);
+        await writeScopedFile(
+          workspaceId,
+          scopeRef,
+          nextPath,
+          data.content ?? "",
+        );
+        await refreshParents(nextPath);
+        openFile(nextPath);
+      } catch (err) {
+        showToast(err instanceof Error ? err.message : String(err), {
+          type: "error",
+        });
+      }
+    },
+    [workspaceId, scopeRef, treeData, refreshParents, openFile, showToast],
+  );
+
+  const copyPath = useCallback(
+    (node: FileTreeNodeInfo) => {
+      setContextMenu(null);
+      void navigator.clipboard?.writeText(node.path).catch(() => {
+        showToast("Failed to copy path", { type: "error" });
+      });
+    },
+    [showToast],
+  );
+
+  const handleContextMenu = useCallback(
+    (node: FileTreeNodeInfo, event: MouseEvent<HTMLDivElement>) => {
+      setContextMenu({ node, x: event.clientX, y: event.clientY });
+    },
+    [],
+  );
+
+  const selectedPath = activePath;
 
   return (
     <div className={styles.container}>
@@ -203,6 +780,13 @@ export function WorkspaceFileBrowser() {
         className={styles.treePanel}
         style={{ ["--tree-width"]: `${treeWidth}px` } as CSSProperties}
       >
+        <OpenEditors
+          groups={groups}
+          dirty={dirty}
+          collapsed={openEditorsCollapsed}
+          onToggle={() => setOpenEditorsCollapsed((collapsed) => !collapsed)}
+          onActivate={selectTab}
+        />
         <div className={styles.toolbar}>
           <form onSubmit={handleJump} style={{ display: "contents" }}>
             <input
@@ -210,7 +794,7 @@ export function WorkspaceFileBrowser() {
               type="text"
               value={jumpText}
               onChange={(e) => setJumpText(e.target.value)}
-              placeholder="Jump to folder… (e.g. src/api)"
+              placeholder="Jump to folder... (e.g. src/api)"
               aria-label="Jump to folder"
             />
           </form>
@@ -255,12 +839,21 @@ export function WorkspaceFileBrowser() {
             <FileTree
               treeData={treeData}
               expanded={expanded}
-              selectedPath={activePath}
+              selectedPath={selectedPath}
               filterText={debouncedFilterText}
               onToggle={toggle}
               onSelectFile={(p) => {
                 if (p) openFile(p);
               }}
+              onContextMenuNode={handleContextMenu}
+              onRequestRename={beginRename}
+              onRequestDelete={requestDelete}
+              inlineEdit={inlineEdit}
+              onInlineEditChange={(value) =>
+                setInlineEdit((prev) => (prev ? { ...prev, value } : prev))
+              }
+              onInlineEditCommit={() => void commitInlineEdit()}
+              onInlineEditCancel={() => setInlineEdit(null)}
               scrollToPath={scrollTarget}
             />
           </div>
@@ -278,20 +871,104 @@ export function WorkspaceFileBrowser() {
         className={styles.resizeHandle}
       />
       <div className={styles.mainColumn}>
-        <FileTabBar
-          tabs={openTabs}
-          activePath={activePath}
-          onSelect={setActivePath}
-          onClose={closeTab}
-        />
-        <WorkspaceFilePane
-          path={activePath}
-          fileData={fileData}
-          isLoading={isFileLoading}
-          error={fileError}
-          onNavigate={(dir) => void revealPath(dir)}
-        />
+        <div
+          className={styles.editorGroups}
+          data-split={groups.length > 1 || undefined}
+        >
+          <div
+            className={styles.editorGroupSlot}
+            style={
+              groups.length > 1
+                ? ({ "--group-width": `${splitLeftWidth}px` } as CSSProperties)
+                : undefined
+            }
+          >
+            <EditorGroup
+              groupIndex={0}
+              group={groups[0] ?? { tabs: [], active: null }}
+              scopeRef={scopeRef}
+              isActiveGroup={activeGroup === 0}
+              dirty={dirty}
+              onSelectTab={selectTab}
+              onCloseTab={closeTab}
+              onSplitRight={splitRight}
+              onNavigate={navigateToDir}
+              onSaved={handleSaved}
+            />
+          </div>
+          {groups[1] && (
+            <>
+              <ResizeHandle
+                width={splitLeftWidth}
+                minWidth={MIN_GROUP_WIDTH}
+                maxWidth={MAX_GROUP_WIDTH}
+                edge="right"
+                onDelta={handleSplitResizeDelta}
+                onReset={() => setSplitLeftWidth(DEFAULT_GROUP_WIDTH)}
+                ariaLabel="Resize editor groups"
+                testId="file-editor-group-resize-handle"
+                className={styles.resizeHandle}
+              />
+              <div className={styles.editorGroupSlot}>
+                <EditorGroup
+                  groupIndex={1}
+                  group={groups[1]}
+                  scopeRef={scopeRef}
+                  isActiveGroup={activeGroup === 1}
+                  dirty={dirty}
+                  onSelectTab={selectTab}
+                  onCloseTab={closeTab}
+                  onSplitRight={splitRight}
+                  onNavigate={navigateToDir}
+                  onSaved={handleSaved}
+                />
+              </div>
+            </>
+          )}
+        </div>
       </div>
+      {contextMenu && (
+        <ContextMenu
+          state={contextMenu}
+          onNewFile={(node) => beginCreate("create-file", node)}
+          onNewFolder={(node) => beginCreate("create-folder", node)}
+          onRename={beginRename}
+          onDelete={requestDelete}
+          onDuplicate={duplicateFile}
+          onCopyPath={copyPath}
+        />
+      )}
+      {deleteConfirm && (
+        <DeleteConfirmDialog
+          node={deleteConfirm.node}
+          onCancel={() => setDeleteConfirm(null)}
+          onConfirm={(skip) => void performDelete(deleteConfirm.node, skip)}
+        />
+      )}
     </div>
   );
+}
+
+export function FileBrowser({ scopeRef }: FileBrowserProps) {
+  const { workspaceId } = useWorkspaceContext();
+  const key = `${workspaceId}:${fileBrowserTabsStorageKey(scopeRef)}`;
+  return (
+    <FileBrowserStoreProvider
+      key={key}
+      workspaceId={workspaceId}
+      scopeRef={scopeRef}
+    >
+      <FileBrowserInner scopeRef={scopeRef} />
+    </FileBrowserStoreProvider>
+  );
+}
+
+/**
+ * WorkspaceFileBrowser remains the exported compatibility wrapper for the
+ * Files page lazy import. Passing scopeRef enables the v2 scoped browser.
+ */
+export function WorkspaceFileBrowser({
+  scopeRef = { scope: "workspace" },
+}: Partial<FileBrowserProps>) {
+  return <FileBrowser scopeRef={scopeRef} />;
 }

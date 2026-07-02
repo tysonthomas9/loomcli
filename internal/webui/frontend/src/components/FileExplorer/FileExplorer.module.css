@@ -25,6 +25,98 @@
   border-bottom: 1px solid var(--color-border-light);
 }
 
+.openEditors {
+  border-bottom: 1px solid var(--color-border-light);
+  background: var(--color-bg);
+}
+
+.openEditorsHeader {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  width: 100%;
+  padding: 7px var(--space-2);
+  border: none;
+  background: none;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-xs, 11px);
+  font-weight: 600;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.openEditorsHeader:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: -2px;
+}
+
+.openEditorsCount {
+  margin-left: auto;
+  color: var(--color-text-muted);
+  font-weight: 500;
+}
+
+.openEditorsList {
+  max-height: 180px;
+  overflow: auto;
+  padding: 0 0 var(--space-1);
+}
+
+.openEditorsGroup {
+  display: flex;
+  flex-direction: column;
+}
+
+.openEditorsGroupLabel {
+  padding: 5px var(--space-3) 3px;
+  color: var(--color-text-muted);
+  font-size: var(--font-size-xs, 11px);
+  font-weight: 600;
+}
+
+.openEditorItem {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  width: 100%;
+  padding: 4px var(--space-3);
+  border: none;
+  background: none;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+  font-family: var(--font-family-mono);
+  text-align: left;
+  cursor: pointer;
+}
+
+.openEditorItem:hover,
+.openEditorItem[data-active] {
+  background: var(--color-bg-hover);
+  color: var(--color-text-primary);
+}
+
+.openEditorName {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.openEditorPath {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--color-text-muted);
+  font-size: var(--font-size-xs, 11px);
+}
+
+.openEditorsEmpty {
+  padding: var(--space-2) var(--space-3);
+  color: var(--color-text-muted);
+  font-size: var(--font-size-sm);
+}
+
 .agentSelect {
   width: 100%;
   padding: 6px var(--space-2);
@@ -116,6 +208,31 @@
   outline-offset: -2px;
 }
 
+.inlineEditRow {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  width: 100%;
+  padding: 3px var(--space-2);
+  padding-right: var(--space-3);
+}
+
+.inlineEditInput {
+  flex: 1;
+  min-width: 0;
+  height: 22px;
+  padding: 1px 4px;
+  border: 1px solid var(--color-primary);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg);
+  color: var(--color-text-primary);
+  font: inherit;
+}
+
+.inlineEditInput:focus {
+  outline: none;
+}
+
 .chevron {
   width: 14px;
   height: 14px;
@@ -190,6 +307,36 @@
   display: flex;
   flex-direction: column;
   overflow: hidden;
+}
+
+.editorGroups {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  overflow: hidden;
+}
+
+.editorGroupSlot {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+}
+
+.editorGroups[data-split] .editorGroupSlot:first-child {
+  flex: 0 0 var(--group-width, 560px);
+}
+
+.editorGroup {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--color-bg);
+}
+
+.editorGroup[data-active] {
+  box-shadow: inset 0 1px 0 var(--color-primary);
 }
 
 /* === Tab bar (open files) === */
@@ -378,6 +525,69 @@
   padding: var(--space-3) var(--space-4);
   border-bottom: 1px solid var(--color-border);
   min-height: 48px;
+  gap: var(--space-2);
+}
+
+.viewerActions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  flex-shrink: 0;
+}
+
+.dirtyLabel {
+  color: var(--color-text-muted);
+  font-size: var(--font-size-xs, 11px);
+}
+
+.iconButton {
+  width: 28px;
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+}
+
+.iconButton svg {
+  width: 15px;
+  height: 15px;
+}
+
+.iconButton:hover:not(:disabled),
+.iconButton:focus-visible {
+  background: var(--color-bg-hover);
+  color: var(--color-text-primary);
+}
+
+.iconButton:disabled {
+  cursor: default;
+  opacity: 0.45;
+}
+
+.saveButton {
+  height: 28px;
+  padding: 0 var(--space-2);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg);
+  color: var(--color-text-primary);
+  font-size: var(--font-size-sm);
+  cursor: pointer;
+}
+
+.saveButton:hover:not(:disabled),
+.saveButton:focus-visible {
+  background: var(--color-bg-hover);
+}
+
+.saveButton:disabled {
+  color: var(--color-text-muted);
+  cursor: default;
 }
 
 .viewerPath {
@@ -492,6 +702,110 @@
   color: var(--color-text-muted);
   font-size: var(--font-size-sm);
   font-style: italic;
+}
+
+.truncatedBanner {
+  padding: var(--space-2) var(--space-4);
+  border-bottom: 1px solid var(--color-border-light);
+  background: var(--color-warning-bg, var(--color-bg-hover));
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+}
+
+.contextMenu {
+  position: fixed;
+  z-index: var(--z-dropdown, 1000);
+  min-width: 170px;
+  padding: 4px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-panel-bg, var(--color-bg));
+  box-shadow: var(--shadow-lg, 0 8px 24px rgb(0 0 0 / 18%));
+}
+
+.contextMenu button {
+  display: block;
+  width: 100%;
+  padding: 6px var(--space-2);
+  border: none;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--color-text-primary);
+  font-size: var(--font-size-sm);
+  text-align: left;
+  cursor: pointer;
+}
+
+.contextMenu button:hover:not(:disabled),
+.contextMenu button:focus-visible {
+  background: var(--color-bg-hover);
+}
+
+.contextMenu button:disabled {
+  color: var(--color-text-muted);
+  cursor: default;
+}
+
+.dialogOverlay {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-modal, 1200);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgb(0 0 0 / 28%);
+}
+
+.dialog {
+  width: min(420px, calc(100vw - 32px));
+  padding: var(--space-4);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-panel-bg, var(--color-bg));
+  box-shadow: var(--shadow-lg, 0 8px 24px rgb(0 0 0 / 18%));
+}
+
+.dialogMessage {
+  margin: 0 0 var(--space-3);
+  color: var(--color-text-primary);
+  font-size: var(--font-size-sm);
+  overflow-wrap: anywhere;
+}
+
+.checkboxRow {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-bottom: var(--space-3);
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+}
+
+.dialogActions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-2);
+}
+
+.secondaryButton,
+.dangerButton {
+  height: 30px;
+  padding: 0 var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-sm);
+  cursor: pointer;
+}
+
+.secondaryButton {
+  background: var(--color-bg);
+  color: var(--color-text-primary);
+}
+
+.dangerButton {
+  border-color: var(--color-danger);
+  background: var(--color-danger);
+  color: var(--color-danger-contrast, white);
 }
 
 /* === Responsive === */

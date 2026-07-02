@@ -15,6 +15,14 @@ interface WorkspaceFilePaneProps {
   fileData: FileReadData | null;
   isLoading: boolean;
   error: string | null;
+  content: string;
+  isDirty: boolean;
+  isSaving: boolean;
+  searchOpen: boolean;
+  onContentChange: (value: string) => void;
+  onSave: () => void;
+  onToggleSearch: () => void;
+  onSplitRight: () => void;
   /** Reveal a folder in the tree when its breadcrumb segment is clicked. */
   onNavigate?: ((dirPath: string) => void) | undefined;
 }
@@ -69,18 +77,91 @@ export function WorkspaceFilePane({
   fileData,
   isLoading,
   error,
+  content,
+  isDirty,
+  isSaving,
+  searchOpen,
+  onContentChange,
+  onSave,
+  onToggleSearch,
+  onSplitRight,
   onNavigate,
 }: WorkspaceFilePaneProps) {
   const language = useMemo(
     () => (path ? detectLanguage(path) : undefined),
     [path],
   );
+  const isReadOnly = isSaving || !!fileData?.truncated || !!fileData?.binary;
 
   return (
     <div className={styles.viewerColumn}>
       {path && (
         <div className={styles.viewerHeader}>
           <Breadcrumb path={path} onNavigate={onNavigate} />
+          <div className={styles.viewerActions}>
+            {isDirty && <span className={styles.dirtyLabel}>Modified</span>}
+            <button
+              type="button"
+              className={styles.iconButton}
+              aria-label="Find in file"
+              title="Find in file"
+              onClick={onToggleSearch}
+              disabled={!fileData || fileData.binary}
+            >
+              <svg viewBox="0 0 16 16" aria-hidden="true">
+                <circle
+                  cx="7"
+                  cy="7"
+                  r="4"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.4"
+                />
+                <path
+                  d="M10.2 10.2L14 14"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.4"
+                  strokeLinecap="round"
+                />
+              </svg>
+            </button>
+            <button
+              type="button"
+              className={styles.iconButton}
+              aria-label="Split right"
+              title="Split right"
+              onClick={onSplitRight}
+              disabled={!path}
+            >
+              <svg viewBox="0 0 16 16" aria-hidden="true">
+                <rect
+                  x="2"
+                  y="3"
+                  width="12"
+                  height="10"
+                  rx="1"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.2"
+                />
+                <path
+                  d="M8 3v10"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.2"
+                />
+              </svg>
+            </button>
+            <button
+              type="button"
+              className={styles.saveButton}
+              onClick={onSave}
+              disabled={!isDirty || isReadOnly}
+            >
+              {isSaving ? "Saving..." : "Save"}
+            </button>
+          </div>
         </div>
       )}
       <div className={styles.viewerContent}>
@@ -98,14 +179,21 @@ export function WorkspaceFilePane({
             Binary file — cannot display
           </div>
         )}
+        {path && fileData && !fileData.binary && fileData.truncated && (
+          <div className={styles.truncatedBanner} role="status">
+            File is larger than the editable limit. Showing a read-only preview.
+          </div>
+        )}
         {path && fileData && !fileData.binary && (
           <Suspense
             fallback={<div className={styles.loading}>Loading editor...</div>}
           >
             <CodeMirrorEditor
-              value={fileData.content ?? ""}
+              value={content}
+              onChange={onContentChange}
               language={language}
-              readOnly={true}
+              readOnly={isReadOnly}
+              searchOpen={searchOpen}
             />
           </Suspense>
         )}

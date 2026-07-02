@@ -12,6 +12,7 @@ import {
   searchKeymap,
   openSearchPanel,
   closeSearchPanel,
+  gotoLine,
 } from "@codemirror/search";
 import {
   StreamLanguage,
@@ -189,7 +190,13 @@ export function CodeMirrorEditor({
         lineNumbersCompartment.of(hideLineNumbers ? [] : lineNumbers()),
         history(),
         search(),
-        keymap.of([...defaultKeymap, ...historyKeymap, ...searchKeymap]),
+        keymap.of([
+          ...defaultKeymap,
+          ...historyKeymap,
+          ...searchKeymap,
+          { key: "Mod-g", run: gotoLine },
+          { key: "Ctrl-g", run: gotoLine },
+        ]),
         langCompartment.of(getLanguageExtension(language)),
         syntaxHighlighting(highlightStyle),
         readOnlyCompartment.of([

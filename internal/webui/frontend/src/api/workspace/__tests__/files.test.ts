@@ -1,18 +1,34 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-import { listWorktreeDir, readWorktreeFile, writeWorktreeFile } from "../files";
-import { ApiError, get, put } from "@/api/common";
+import {
+  deleteScopedPath,
+  listScopedDir,
+  listWorktreeDir,
+  mkdirScoped,
+  moveScopedPath,
+  readScopedFile,
+  readWorktreeFile,
+  writeScopedFile,
+  writeWorktreeFile,
+} from "../files";
+import { ApiError, del, get, patch, post, put } from "@/api/common";
 
 vi.mock("@/api/common", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/api/common")>();
   return {
     ...actual,
+    del: vi.fn(),
     get: vi.fn(),
+    patch: vi.fn(),
+    post: vi.fn(),
     put: vi.fn(),
   };
 });
 
+const mockDel = del as ReturnType<typeof vi.fn>;
 const mockGet = get as ReturnType<typeof vi.fn>;
+const mockPatch = patch as ReturnType<typeof vi.fn>;
+const mockPost = post as ReturnType<typeof vi.fn>;
 const mockPut = put as ReturnType<typeof vi.fn>;
 
 describe("files API", () => {
@@ -234,6 +250,110 @@ describe("files API", () => {
       expect(mockPut).toHaveBeenCalledWith(
         "/api/workspaces/test-ws-id/agents/agent%2Fspecial/files?path=src%2Fmy%20file.ts",
         { content: "content" },
+      );
+    });
+  });
+
+  describe("scoped file API", () => {
+    it("lists workspace scope without a target", async () => {
+      mockGet.mockResolvedValue({ path: ".", entries: [] });
+
+      await listScopedDir("test-ws-id", { scope: "workspace" });
+
+      expect(mockGet).toHaveBeenCalledWith(
+        "/api/workspaces/test-ws-id/files/tree?scope=workspace",
+      );
+    });
+
+    it("lists repo scope with target and path", async () => {
+      mockGet.mockResolvedValue({ path: "src", entries: [] });
+
+      await listScopedDir(
+        "test-ws-id",
+        { scope: "repo", target: "loom/cli" },
+        "src/my dir",
+      );
+
+      expect(mockGet).toHaveBeenCalledWith(
+        "/api/workspaces/test-ws-id/files/tree?scope=repo&target=loom%2Fcli&path=src%2Fmy%20dir",
+      );
+    });
+
+    it("reads agent scope with target", async () => {
+      mockGet.mockResolvedValue({
+        path: "main.go",
+        content: "package main\n",
+        size: 13,
+        binary: false,
+      });
+
+      await readScopedFile(
+        "test-ws-id",
+        { scope: "agent", target: "atlas" },
+        "main.go",
+      );
+
+      expect(mockGet).toHaveBeenCalledWith(
+        "/api/workspaces/test-ws-id/files?scope=agent&target=atlas&path=main.go",
+      );
+    });
+
+    it("writes scoped file content", async () => {
+      mockPut.mockResolvedValue({ success: true });
+
+      await writeScopedFile(
+        "test-ws-id",
+        { scope: "repo", target: "loomcli" },
+        ".env",
+        "A=1",
+      );
+
+      expect(mockPut).toHaveBeenCalledWith(
+        "/api/workspaces/test-ws-id/files?scope=repo&target=loomcli&path=.env",
+        { content: "A=1" },
+      );
+    });
+
+    it("deletes recursively when requested", async () => {
+      mockDel.mockResolvedValue({ success: true });
+
+      await deleteScopedPath(
+        "test-ws-id",
+        { scope: "agent", target: "nova" },
+        "dir",
+        true,
+      );
+
+      expect(mockDel).toHaveBeenCalledWith(
+        "/api/workspaces/test-ws-id/files?scope=agent&target=nova&path=dir&recursive=1",
+      );
+    });
+
+    it("creates directories with scoped mkdir", async () => {
+      mockPost.mockResolvedValue({ success: true });
+
+      await mkdirScoped("test-ws-id", { scope: "workspace" }, "new/folder");
+
+      expect(mockPost).toHaveBeenCalledWith(
+        "/api/workspaces/test-ws-id/files/mkdir?scope=workspace&path=new%2Ffolder",
+        undefined,
+      );
+    });
+
+    it("moves paths with scoped move body", async () => {
+      mockPatch.mockResolvedValue({ success: true });
+
+      await moveScopedPath(
+        "test-ws-id",
+        { scope: "repo", target: "loomcli" },
+        "old.txt",
+        "new.txt",
+        true,
+      );
+
+      expect(mockPatch).toHaveBeenCalledWith(
+        "/api/workspaces/test-ws-id/files/move?scope=repo&target=loomcli",
+        { from: "old.txt", to: "new.txt", overwrite: true },
       );
     });
   });
