@@ -237,6 +237,21 @@ close for the full phase:
   every agent") needs `roles.get` from workflows or dispatch-time
   materialization of the role prompt into the run payload.
 
+**All three gaps CLOSED (2026-07-01, same day).** (a) Workspace-global runner
+resolution: fail-closed injected resolver — a runner is globally resolvable
+iff declared by the ACTIVE version of a TRUSTED builtin; the runner executes
+under its owner's trust and bundle, never the caller's
+(`internal/driver/global_runner.go`, `internal/workflows/global_runner.go`).
+(b) `loom.tasks.claim({taskId})` — targeted claim over the same ready view and
+actor-scoped lease as claim-ready; not-ready/raced → 409. (c) `loom.roles.get`
+— run-token-authenticated read returning the Role + prompt body via the roles
+module's shared loader; prompt-agent now materializes `input.roleName` at
+dispatch. Proven live full-circle: UNTRUSTED HTTP-registered
+`prompt-agent-custom` resolved the `docs-assistant` role prompt, claimed
+SANDBOX-4 by id, dispatched local-task-runner via global resolution
+(`runner_ref` pinned to bug-fix-agent's trusted version), completed, task
+closed; re-fire at the closed task surfaced the honest conflict.
+
 *Acceptance:* a prompt agent created from the UI claims and completes a real
 task end-to-end with **no daemon supervisor involvement**, and its run +
 transcript appear in the same detail view as any workflow run.

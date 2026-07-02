@@ -90,4 +90,17 @@ export const generatedNamespaces = [
       },
     ],
   },
+  {
+    namespace: "roles",
+    doc: "Read-only Role (behavior-config) records + prompt body for prompt agents.",
+    ops: [
+      {
+        method: "get",
+        op: "role-get",
+        httpMethod: "POST",
+        result: "{ role: Record<string, unknown> | null; prompt: string } | null",
+        fields: [{ name: "name", type: "string", required: true }],
+      },
+    ],
+  },
 ];

@@ -91,6 +91,7 @@ export class LoomDriverClient {
     });
     this.tasks = Object.freeze({
       claimReady: (input = {}) => this.claimReady(input),
+      claim: (input = {}) => this.claimTask(input),
       complete: (input = {}) => this.completeTask(input),
       release: (input = {}) => this.releaseTask(input),
     });
@@ -123,6 +124,9 @@ export class LoomDriverClient {
       addLabel: (input = {}) => this.#httpCall("issue-add-label", { issueId: input.issueId, label: input.label }),
       removeLabel: (input = {}) => this.#httpCall("issue-remove-label", { issueId: input.issueId, label: input.label }),
     });
+    this.roles = Object.freeze({
+      get: (input = {}) => this.#httpCall("role-get", { name: input.name }),
+    });
     // </gen:namespaces>
   }
 
@@ -153,6 +157,24 @@ export class LoomDriverClient {
     return this.#httpCall("claim-ready", {
       epicId: this.#epicID(input),
       actor: input.actor || "",
+      limit: input.limit || "",
+    });
+  }
+
+  // claimTask claims one SPECIFIC ready task by id (the event-driven counterpart
+  // to claimReady's queue-order pull). taskId is required; actor defaults to the
+  // run actor server-side; epicId is an OPTIONAL ready-view narrowing hint (it is
+  // NOT defaulted from the run's epic, so any task can be targeted). A not-ready /
+  // already-claimed target rejects with a DriverApiError code "conflict".
+  async claimTask(input = {}) {
+    const taskId = taskPayloadID(input);
+    if (!taskId) {
+      throw new Error("tasks.claim requires taskId");
+    }
+    return this.#httpCall("claim-task", {
+      taskId: String(taskId),
+      actor: input.actor || "",
+      epicId: input.epicId || "",
       limit: input.limit || "",
     });
   }

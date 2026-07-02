@@ -80,6 +80,17 @@ export interface LoomTaskSelector {
   artifactIds?: string[];
 }
 
+export interface LoomTaskClaimInput {
+  /** The specific task (issue/card) id to claim. Required. */
+  taskId: string;
+  /** Claim actor; defaults to the run actor server-side. */
+  actor?: string;
+  /** Optional ready-view narrowing hint; NOT defaulted from the run's epic. */
+  epicId?: string;
+  /** Ready-view scan bound (defaults to the server's claim-ready limit). */
+  limit?: number;
+}
+
 export interface LoomTaskRunRequest {
   taskId?: string;
   taskRunId?: string;
@@ -411,6 +422,8 @@ export declare class LoomDriverClient {
   };
   readonly tasks: {
     claimReady(input?: LoomEpicInput): Promise<Record<string, unknown> | null>;
+    /** Claim one SPECIFIC ready task by id; rejects DriverApiError code "conflict" when not ready or already claimed. */
+    claim(input: LoomTaskClaimInput | string): Promise<Record<string, unknown> | null>;
     complete(input?: LoomTaskSelector | string): Promise<Record<string, unknown> | null>;
     release(input?: LoomTaskSelector | string): Promise<Record<string, unknown> | null>;
   };
@@ -449,6 +462,10 @@ export declare class LoomDriverClient {
     addLabel(input: { issueId: string; label: string }): Promise<Record<string, unknown> | null>;
     removeLabel(input: { issueId: string; label: string }): Promise<Record<string, unknown> | null>;
   };
+  /** Read-only Role (behavior-config) records + prompt body for prompt agents. */
+  readonly roles: {
+    get(input: { name: string }): Promise<{ role: Record<string, unknown> | null; prompt: string } | null>;
+  };
   // </gen:namespaces>
 
   completed(input?: { summary?: string }): LoomDriverResult;
@@ -461,6 +478,7 @@ export declare class LoomDriverClient {
     artifactsRef?: string;
   }): LoomDriverResult;
   claimReady(input?: LoomEpicInput): Promise<Record<string, unknown> | null>;
+  claimTask(input?: LoomTaskClaimInput | string): Promise<Record<string, unknown> | null>;
   getEpic(input?: LoomEpicInput): Promise<Record<string, unknown> | null>;
   epicSnapshot(input?: LoomEpicInput): Promise<Record<string, unknown> | null>;
   watchEpic(input?: LoomEpicWatchInput): AsyncGenerator<LoomEpicWatchEvent, void, undefined>;

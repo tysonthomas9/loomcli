@@ -25,46 +25,46 @@ function toJsonResult(value) {
   return value === undefined ? null : JSON.parse(JSON.stringify(value));
 }
 
-// prompt-agent: the PROMPT-AGENT spike (Phase 4, unified-agent-ux-proposal).
+// prompt-agent: the PROMPT-AGENT realization (Phase 4, unified-agent-ux-proposal).
 //
 // This is the workflow-plane realization of a "role agent": a generic task-runner
-// driver CONFIGURED WITH A PROMPT. The role's brain (its prompt) travels as DATA
-// on the workflow input (input.prompt / input.taskPrompt), never as code. The
-// workflow itself is a thin orchestrator:
-//   1. claim a REAL ready loom task with the existing task lease (claim-ready);
-//   2. dispatch the bundled local-task-runner for it, delivering the role prompt
+// driver CONFIGURED WITH A PROMPT. The role's brain (its prompt) travels as DATA,
+// never as code. The workflow itself is a thin orchestrator:
+//   1. resolve the role prompt — a named role resolves through the driver SDK's
+//      read-only roles surface (loom.roles.get), so "one prompt edit updates
+//      every agent"; input.prompt still overrides for one-off dispatch;
+//   2. claim a REAL ready loom task with the existing task lease. A specific
+//      target claims by id (loom.tasks.claim — no claim-and-release race);
+//      otherwise pickup is filterless (loom.tasks.claimReady, queue order);
+//   3. dispatch the bundled local-task-runner for it, delivering the role prompt
 //      verbatim as the task-run Input field `taskPrompt` (the runner's
 //      LOOM_TASK_RUN_PROMPT > input.taskPrompt > generic precedence — see
 //      local-task-runner.ts "prompt = data, brain stays custom"). The runner
 //      execFiles the real backend CLI (codex by default) over a prepared git
 //      worktree and fails closed — there is no synthetic completion;
-//   3. await the task-run and report its outcome.
+//   4. await the task-run and report its outcome.
 //
 // There is NO daemon supervisor involved: this is a DriverRun executed by the
 // driver-run executor, dispatching a TaskRun executed by the serve task worker.
-// The role poll-loop / Go execution leaf are never touched.
-//
-// GAP (reported by the spike): the driver SDK has no role-read surface, so the
-// prompt cannot be resolved from a Role record here — it must be passed as input
-// (which is exactly "prompt = config on the binding"). And claim-ready has no
-// claim-by-task-id, so targeting a specific task is emulated by claiming ready
-// tasks and releasing non-matches (see claimTargetTask).
+// The role poll-loop / Go execution leaf are never touched. This same source is
+// registerable as a CUSTOM (untrusted) workflow driver: it dispatches the
+// trusted builtin local-task-runner through workspace-global runner resolution,
+// which the driver plane pins to the runner's OWNING builtin version.
 export async function run(ctx) {
   const input = ctx.payload || {};
   const loom = createLoomDriverClient({ input });
 
-  // The role prompt as DATA. input.prompt is the canonical field; taskPrompt /
-  // rolePrompt are accepted aliases. input.roleName is NOT resolvable (no role
-  // SDK surface) — surfaced as a gap rather than silently ignored.
-  const prompt = stringValue(input.prompt || input.taskPrompt || input.rolePrompt);
-  const promptSource = input.prompt ? "input.prompt"
-    : input.taskPrompt ? "input.taskPrompt"
-      : input.rolePrompt ? "input.rolePrompt" : "";
+  // 1. Resolve the role prompt as DATA. Precedence (documented):
+  //    input.prompt (explicit one-off override) > the named role's prompt body
+  //    (roles.get(input.roleName)) > input.taskPrompt / input.rolePrompt aliases.
+  const resolved = await resolvePromptSource(loom, input);
+  const prompt = resolved.prompt;
+  const promptSource = resolved.source;
   if (!prompt) {
     return loom.failed({
-      summary: stringValue(input.roleName)
-        ? "prompt-agent: input.roleName=" + stringValue(input.roleName) + " but no prompt was supplied; the driver SDK cannot read a Role record — pass the role prompt as input.prompt"
-        : "prompt-agent requires a prompt (input.prompt); the role's prompt is carried as workflow data",
+      summary: resolved.roleResolved
+        ? "prompt-agent: role " + resolved.roleName + " has no prompt body (roles.get returned an empty prompt); set the role's prompt or pass input.prompt"
+        : "prompt-agent requires a prompt: set input.prompt, or input.roleName referencing a role with a prompt body",
       errorClass: "prompt_agent_missing_prompt",
     });
   }
@@ -72,10 +72,10 @@ export async function run(ctx) {
   const actor = stringValue(input.actor) || "prompt-agent";
   const backend = stringValue(input.backend); // optional; informational only (backend is host-resolved)
 
-  // 1. Claim a real ready task with the existing task lease. Targets input.taskId
-  //    when supplied (release-non-matches emulation), else claims any ready task.
+  // 2. Claim a real ready task with the existing task lease. Targets input.taskId
+  //    when supplied (claim-by-id), else claims any ready task (queue order).
   const targetId = stringValue(input.taskId);
-  const claimed = await claimTargetTask(loom, actor, targetId, 10);
+  const claimed = await claimTargetTask(loom, actor, targetId);
   const issueId = claimed && stringValue(claimed.id || claimed.ID);
   if (!issueId) {
     return loom.completed({
@@ -87,7 +87,7 @@ export async function run(ctx) {
   }
   const card = (await loom.issues.get({ issueId })) || {};
 
-  // 2. Dispatch the local-task-runner, delivering the ROLE PROMPT AS DATA.
+  // 3. Dispatch the local-task-runner, delivering the ROLE PROMPT AS DATA.
   //    Deterministic taskRunId keeps a resumed run from double-enqueuing.
   //    openPullRequest=false => patch-back delivery (no GitHub needed).
   const taskRunId = "promptagent-" + issueId;
@@ -111,7 +111,7 @@ export async function run(ctx) {
   const patchBack = stringValue(meta.patch_back_status);
   const runBackend = stringValue(meta.backend);
 
-  // 3. Report the outcome. The serve task worker auto-closes the card on task
+  // 4. Report the outcome. The serve task worker auto-closes the card on task
   //    success (task_worker.go CloseTaskOnSuccess), so a completed task-run
   //    transitions the card claimed -> done with no supervisor involvement.
   if (status === "completed") {
@@ -133,29 +133,56 @@ export async function run(ctx) {
   });
 }
 
-// claimTargetTask claims a ready task via the existing task lease. When targetId
-// is set it emulates claim-by-id (which the SDK lacks): it claims ready tasks one
-// at a time, keeps the match, and releases every non-match at the end (a claimed
-// task is no longer ready, so this cannot re-grab the same non-match and loop).
-// Bounded by maxAttempts. Returns the matched ClaimedTask or null.
-async function claimTargetTask(loom, actor, targetId, maxAttempts) {
-  const mistaken = [];
-  let match = null;
-  for (let i = 0; i < Math.max(1, maxAttempts); i++) {
-    const claimed = await loom.tasks.claimReady({ actor, limit: 1 });
-    if (!claimed) break;
-    const id = stringValue(claimed.id || claimed.ID);
-    if (!id) break;
-    if (!targetId || id === targetId) {
-      match = claimed;
-      break;
+// resolvePromptSource materializes the role prompt with documented precedence:
+//   input.prompt > roles.get(input.roleName).prompt > input.taskPrompt > input.rolePrompt.
+// A named role that carries no prompt body is flagged (roleResolved) so the
+// caller fails with a precise message instead of silently falling through.
+async function resolvePromptSource(loom, input) {
+  if (stringValue(input.prompt)) {
+    return { prompt: stringValue(input.prompt), source: "input.prompt" };
+  }
+  const roleName = stringValue(input.roleName);
+  if (roleName) {
+    const record = (await loom.roles.get({ name: roleName })) || {};
+    const rolePrompt = stringValue(record.prompt);
+    if (rolePrompt) {
+      return { prompt: rolePrompt, source: "role:" + roleName };
     }
-    mistaken.push(id);
+    return { prompt: "", source: "", roleName, roleResolved: true };
   }
-  for (const id of mistaken) {
-    try { await loom.tasks.release(id); } catch (_e) { /* best-effort release */ }
+  if (stringValue(input.taskPrompt)) {
+    return { prompt: stringValue(input.taskPrompt), source: "input.taskPrompt" };
   }
-  return match;
+  if (stringValue(input.rolePrompt)) {
+    return { prompt: stringValue(input.rolePrompt), source: "input.rolePrompt" };
+  }
+  return { prompt: "", source: "" };
+}
+
+// claimTargetTask claims a ready task via the existing task lease. A specific
+// targetId claims by id (loom.tasks.claim) — no claim-and-release race; a
+// not-ready / already-claimed target rejects conflict, treated as unclaimable
+// (null). Without a targetId it does filterless pickup (loom.tasks.claimReady,
+// queue order). Returns the ClaimedTask or null.
+async function claimTargetTask(loom, actor, targetId) {
+  if (targetId) {
+    try {
+      return await loom.tasks.claim({ taskId: targetId, actor });
+    } catch (e) {
+      if (isConflictError(e)) return null;
+      throw e;
+    }
+  }
+  return await loom.tasks.claimReady({ actor, limit: 1 });
+}
+
+// isConflictError reports whether a rejected driver op is the conflict class the
+// claim-by-id endpoint returns when the task is not ready or already claimed.
+function isConflictError(e) {
+  if (!e) return false;
+  if (stringValue(e.code) === "conflict") return true;
+  const message = stringValue(e.message);
+  return message.indexOf("not ready or already claimed") >= 0 || message.indexOf("already claimed") >= 0;
 }
 
 function stringValue(v) {

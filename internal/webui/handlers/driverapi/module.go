@@ -38,6 +38,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/leadcontrol"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/trigger"
+	"github.com/tysonthomas9/loomcli/internal/webui/handlers/roles"
 )
 
 // maxDriverOpBodyBytes caps inbound driver-op payloads.
@@ -140,6 +141,8 @@ func NewModule(cfg Config) *Module {
 	}
 	m.ops = map[string]opHandler{
 		"claim-ready":                 m.claimReady,
+		"claim-task":                  m.claimTask,
+		"role-get":                    m.roleGet,
 		"epic-get":                    m.epicGet,
 		"epic-snapshot":               m.epicSnapshot,
 		"list-agents":                 m.listAgents,
@@ -325,6 +328,77 @@ func (m *Module) claimReady(ctx context.Context, ws string, id driverIdentity, b
 		return nil, fmt.Errorf("claim ready task: %w", err)
 	}
 	return claimed, nil
+}
+
+// claimTask claims one SPECIFIC ready task by id (GAP B): the event-driven
+// counterpart to claim-ready, which pulls in queue order. taskId is the caller's
+// legitimate target; every other input follows the claim-ready auth/provenance
+// model — the parent run is proven via the run token (verifyParent) and the
+// claim actor defaults server-side from that run; a body actor is accepted only
+// as a lease-identity label, exactly as claim-ready already allows (access is
+// gated by the run token, never the actor). epicId is an OPTIONAL narrowing hint the caller may
+// pass; it is NOT defaulted from the parent run so a task under any epic can be
+// targeted. Not-ready / already-claimed surfaces as a conflict (409).
+func (m *Module) claimTask(ctx context.Context, ws string, id driverIdentity, body []byte) (any, error) {
+	params, err := decodeParams[struct {
+		TaskID string `json:"taskId"`
+		Actor  string `json:"actor"`
+		EpicID string `json:"epicId"`
+		Limit  int    `json:"limit"`
+	}](body)
+	if err != nil {
+		return nil, err
+	}
+	parent, err := m.verifyParent(ctx, ws, id)
+	if err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(params.TaskID) == "" {
+		return nil, fmt.Errorf("taskId required: %w", domain.ErrInvalid)
+	}
+	actor := firstNonEmpty(params.Actor, driverpkg.DriverRunActor(parent.RunID))
+	issueBackend, err := m.issueBackends(ws, actor)
+	if err != nil {
+		return nil, err
+	}
+	claimed, err := driverpkg.ClaimTask(ctx, issueBackend, driverpkg.TaskClaimByIDOptions{
+		TaskID: params.TaskID,
+		Actor:  actor,
+		EpicID: strings.TrimSpace(params.EpicID),
+		Limit:  params.Limit,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("claim task: %w", err)
+	}
+	return claimed, nil
+}
+
+// roleGet returns a Role (behavior-config) record plus its prompt body (GAP C):
+// the read-only surface a prompt agent uses to materialize its role's prompt at
+// dispatch time, so "one prompt edit updates every agent" without passing the
+// prompt as raw input. Workspace-scoped, run-token authenticated like the other
+// driverapi reads (verifyParent). The prompt body is loaded through the roles
+// module's shared loader (roles.ReadPromptBody) — the one place role prompts are
+// read from <workspace>/.loom/prompts.
+func (m *Module) roleGet(ctx context.Context, ws string, id driverIdentity, body []byte) (any, error) {
+	params, err := decodeParams[struct {
+		Name string `json:"name"`
+	}](body)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := m.verifyParent(ctx, ws, id); err != nil {
+		return nil, err
+	}
+	name := strings.TrimSpace(params.Name)
+	if name == "" {
+		return nil, fmt.Errorf("name required: %w", domain.ErrInvalid)
+	}
+	role, err := m.store.Roles().Get(ctx, ws, name)
+	if err != nil {
+		return nil, fmt.Errorf("get role: %w", err)
+	}
+	return map[string]any{"role": role, "prompt": roles.ReadPromptBody(role)}, nil
 }
 
 func (m *Module) epicGet(ctx context.Context, ws string, id driverIdentity, body []byte) (any, error) {

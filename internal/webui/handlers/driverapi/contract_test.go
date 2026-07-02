@@ -20,6 +20,7 @@ var frozenDriverOps = []string{
 	"active-task-runs",
 	"agent-orchestration-session",
 	"claim-ready",
+	"claim-task",
 	"complete-task",
 	"connector-dispatch",
 	"deliver-agent-message",
@@ -38,6 +39,7 @@ var frozenDriverOps = []string{
 	"list-agents",
 	"recover-stale-tasks",
 	"release-task",
+	"role-get",
 	"task-run-get",
 	"update-agent-parent",
 }

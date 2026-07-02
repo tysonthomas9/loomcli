@@ -198,6 +198,70 @@ func ClaimReadyTask(ctx context.Context, issueBackend backend.IssueBackend, opts
 	return nil, nil
 }
 
+// TaskClaimByIDOptions parameterizes a targeted claim of one specific ready
+// task (claim-by-id). EpicID optionally narrows the ready view (empty = the
+// whole workspace ready queue); Limit bounds it (defaults to
+// defaultClaimReadyLimit).
+type TaskClaimByIDOptions struct {
+	TaskID  string
+	Actor   string
+	EpicID  string
+	Limit   int
+	LockTTL time.Duration
+}
+
+// ClaimTask claims a SPECIFIC ready task by id, taking the SAME task lease as
+// ClaimReadyTask (the issue claim lock via claimIssue). Unlike claim-ready — a
+// queue-order pull — this targets one task, so event-driven pickup no longer
+// needs the racy claim-and-release loop.
+//
+// It gates on the canonical ready view exactly as ClaimReadyTask does: the
+// target must appear in Ready() (and not be blocked). A task that is not ready
+// (blocked, closed, dependency-blocked, deferred) or already claimed — hence
+// absent from the ready view — fails with a conflict-class error
+// (domain.ErrConflict), as does a claim that races another owner
+// (backend.KindConflict). A non-existent task also surfaces as a conflict: it
+// is simply never in the ready view.
+func ClaimTask(ctx context.Context, issueBackend backend.IssueBackend, opts TaskClaimByIDOptions) (*ClaimedTask, error) {
+	if issueBackend == nil {
+		return nil, fmt.Errorf("issue backend required: %w", domain.ErrInvalid)
+	}
+	taskID := strings.TrimSpace(opts.TaskID)
+	if taskID == "" {
+		return nil, fmt.Errorf("task id required: %w", domain.ErrInvalid)
+	}
+	limit := opts.Limit
+	if limit <= 0 {
+		limit = defaultClaimReadyLimit
+	}
+	ready, err := issueBackend.Ready(ctx, backend.ReadyOpts{ParentID: strings.TrimSpace(opts.EpicID), Limit: limit})
+	if err != nil {
+		return nil, fmt.Errorf("list ready tasks: %w", err)
+	}
+	var target *backend.IssueData
+	for i := range ready {
+		if strings.TrimSpace(ready[i].ID) == taskID {
+			target = &ready[i]
+			break
+		}
+	}
+	// Not in the ready view — or explicitly blocked (some backends still list
+	// blocked issues) — means not claimable right now: not ready or already
+	// claimed. Fail conflict-class so the caller can distinguish it from a
+	// transport error.
+	if target == nil || strings.EqualFold(strings.TrimSpace(target.Status), blockedIssueStatus) {
+		return nil, fmt.Errorf("task %q is not ready or already claimed: %w", taskID, domain.ErrConflict)
+	}
+	actor := strings.TrimSpace(opts.Actor)
+	if err := claimIssue(ctx, issueBackend, target.ID, opts.LockTTL, actor); err != nil {
+		if backend.IsKind(err, backend.KindConflict) {
+			return nil, fmt.Errorf("task %q is already claimed: %w", taskID, domain.ErrConflict)
+		}
+		return nil, fmt.Errorf("claim task %q: %w", taskID, err)
+	}
+	return claimedTaskFromIssue(*target, actor), nil
+}
+
 func claimIssue(ctx context.Context, issueBackend backend.IssueBackend, issueID string, lockTTL time.Duration, actor string) error {
 	if actor != "" {
 		if actorBackend, ok := issueBackend.(actorClaimer); ok {

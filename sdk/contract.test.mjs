@@ -110,6 +110,7 @@ test("contract: every op sends only frozen camelCase wire fields to its frozen p
       artifactIds: ["art-1"],
     });
     await client.tasks.release({ taskId: "TASK-1", actor: "lead" });
+    await client.tasks.claim({ taskId: "TASK-1", actor: "lead", epicId: "EPIC-1", limit: 5 });
     await client.connectors.dispatch({
       action: "github.pull_request.read",
       connectorId: "conn-1",
@@ -127,6 +128,7 @@ test("contract: every op sends only frozen camelCase wire fields to its frozen p
     await client.issues.update({ issueId: "ISSUE-1", status: "open", priority: 1, labels: ["review-cycle:1"], assignee: "agent", externalRef: "octo/hello#1" });
     await client.issues.addLabel({ issueId: "ISSUE-1", label: "review-cycle:1" });
     await client.issues.removeLabel({ issueId: "ISSUE-1", label: "review-cycle:1" });
+    await client.roles.get({ name: "docs-assistant" });
 
     const exercised = new Set();
     for (const call of calls) {

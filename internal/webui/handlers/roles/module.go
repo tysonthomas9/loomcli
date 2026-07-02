@@ -338,6 +338,16 @@ func (m *Module) deleteRole(w http.ResponseWriter, r *http.Request) {
 // when the role has no prompt file (builtin) or the file is unreadable — the
 // editor simply shows an empty prompt rather than failing the request.
 func (m *Module) readRolePrompt(role *domain.Role) string {
+	return ReadPromptBody(role)
+}
+
+// ReadPromptBody reads a role's prompt body from its PromptFile, returning ""
+// when the role has no prompt file (builtin) or the file is unreadable. It is
+// the single loader for role prompt bodies, shared by this module's read/clone
+// paths and the driver-op roles.get surface (internal/webui/handlers/driverapi)
+// so the on-disk prompt is read one way. PromptFile is an absolute path (the
+// roles API persists it that way via writeRolePrompt).
+func ReadPromptBody(role *domain.Role) string {
 	if role == nil || strings.TrimSpace(role.PromptFile) == "" {
 		return ""
 	}

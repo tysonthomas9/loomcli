@@ -110,6 +110,15 @@
         "limit"
       ]
     },
+    "claim-task": {
+      "method": "POST",
+      "fields": [
+        "taskId",
+        "actor",
+        "epicId",
+        "limit"
+      ]
+    },
     "epic-get": {
       "method": "POST",
       "fields": [
@@ -306,6 +315,12 @@
         "issueId",
         "label"
       ]
+    },
+    "role-get": {
+      "method": "POST",
+      "fields": [
+        "name"
+      ]
     }
   },
   "client": {
@@ -324,6 +339,7 @@
       ],
       "tasks": [
         "claimReady",
+        "claim",
         "complete",
         "release"
       ],
@@ -356,6 +372,9 @@
         "update",
         "addLabel",
         "removeLabel"
+      ],
+      "roles": [
+        "get"
       ]
     },
     "connectorMethods": {
