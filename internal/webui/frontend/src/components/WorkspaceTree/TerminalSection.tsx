@@ -7,6 +7,7 @@ import { useCallback, useEffect, useState } from "react";
 
 import { BACKEND_BRAND_COLORS } from "@/utils/workspace";
 import {
+  DEFAULT_TERMINAL_WORKTREE_GROUP_ID,
   requestTerminalNewTab,
   requestTerminalTabSelect,
   TERMINAL_SIDEBAR_SYNC_EVENT,
@@ -17,7 +18,12 @@ import {
 import styles from "./AgentSection.module.css";
 import terminalStyles from "./TerminalSection.module.css";
 
-const EMPTY_STATE: TerminalSidebarState = { tabs: [], activeTabId: "" };
+const EMPTY_STATE: TerminalSidebarState = {
+  groups: [],
+  tabs: [],
+  activeTabId: "",
+  activeGroupId: DEFAULT_TERMINAL_WORKTREE_GROUP_ID,
+};
 
 function TerminalRow({
   tab,
@@ -88,7 +94,7 @@ export function TerminalSection(): JSX.Element {
       <button
         type="button"
         className={styles.addButton}
-        onClick={() => requestTerminalNewTab()}
+        onClick={() => requestTerminalNewTab(state.activeGroupId)}
         data-testid="sidebar-new-terminal"
       >
         + New terminal

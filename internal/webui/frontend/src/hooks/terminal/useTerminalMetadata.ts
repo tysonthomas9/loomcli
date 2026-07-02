@@ -17,6 +17,7 @@ export interface UseTerminalMetadataReturn {
     session: string,
     label: string,
     sortOrder: number,
+    worktreeGroupId?: string,
   ) => Promise<void>;
   updateLabel: (session: string, label: string) => Promise<void>;
   updateNotes: (session: string, notes: string) => Promise<void>;
@@ -103,7 +104,12 @@ export function useTerminalMetadata(
   }, [enabled, fetchTabs]);
 
   const createTab = useCallback(
-    async (session: string, label: string, sortOrder: number) => {
+    async (
+      session: string,
+      label: string,
+      sortOrder: number,
+      worktreeGroupId?: string,
+    ) => {
       const now = new Date().toISOString();
       const optimistic: TabMetadata = {
         session_name: session,
@@ -111,6 +117,7 @@ export function useTerminalMetadata(
         notes: "",
         sort_order: sortOrder,
         pinned: false,
+        ...(worktreeGroupId ? { worktree_group_id: worktreeGroupId } : {}),
         created_at: now,
         updated_at: now,
         // Optimistic; next ListTabs refresh returns the server's truth.
@@ -129,6 +136,7 @@ export function useTerminalMetadata(
           sort_order: sortOrder,
           notes: "",
           pinned: false,
+          ...(worktreeGroupId ? { worktree_group_id: worktreeGroupId } : {}),
         });
       } catch (err) {
         if (mountedRef.current) {

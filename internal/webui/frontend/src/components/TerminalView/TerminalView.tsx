@@ -14,6 +14,7 @@ import {
   type CliSetupRequest,
 } from "@/utils/cliSetup";
 import {
+  DEFAULT_TERMINAL_WORKTREE_GROUP_ID,
   publishTerminalSidebarState,
   TERMINAL_SIDEBAR_NEW_TAB_EVENT,
   TERMINAL_SIDEBAR_SELECT_EVENT,
@@ -656,20 +657,40 @@ export function TerminalView({
   useEffect(() => {
     if (hideTabs) return;
     if (!isActive) {
-      publishTerminalSidebarState({ tabs: [], activeTabId: "" });
+      publishTerminalSidebarState({
+        groups: [],
+        tabs: [],
+        activeTabId: "",
+        activeGroupId: DEFAULT_TERMINAL_WORKTREE_GROUP_ID,
+      });
       return;
     }
+    const metadataBySession = new Map(
+      tabMetadata.map((meta) => [meta.session_name, meta]),
+    );
     publishTerminalSidebarState({
+      groups: [
+        {
+          id: DEFAULT_TERMINAL_WORKTREE_GROUP_ID,
+          label: "Workspace",
+          isDefault: true,
+          members: [],
+        },
+      ],
       tabs: visibleTabs.map((tab) => ({
         id: tab.id,
         label: tab.label,
         backendName: tab.backendName,
         connectionState: tab.connectionState,
+        groupId:
+          metadataBySession.get(tab.sessionName)?.worktree_group_id ??
+          DEFAULT_TERMINAL_WORKTREE_GROUP_ID,
         ...(tab.pinned !== undefined ? { pinned: tab.pinned } : {}),
       })),
       activeTabId,
+      activeGroupId: DEFAULT_TERMINAL_WORKTREE_GROUP_ID,
     });
-  }, [hideTabs, isActive, visibleTabs, activeTabId]);
+  }, [hideTabs, isActive, visibleTabs, activeTabId, tabMetadata]);
 
   useEffect(() => {
     if (hideTabs || !isActive) return;

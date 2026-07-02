@@ -1012,6 +1012,24 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/workspaces/{ws}/terminal/worktrees": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** List terminal worktree groups */
+    get: operations["listTerminalWorktreeGroups"];
+    put?: never;
+    /** Create a terminal worktree group */
+    post: operations["createTerminalWorktreeGroup"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/workspaces/{ws}/terminal/tabs/{session}": {
     parameters: {
       query?: never;
@@ -2476,6 +2494,56 @@ export interface components {
       sort_order?: number | null;
       pinned?: boolean | null;
       issue_id?: string | null;
+    };
+    TerminalWorktreeGroup: {
+      id: string;
+      name: string;
+      root: string;
+      members: components["schemas"]["TerminalWorktreeMember"][];
+      /** Format: date-time */
+      created_at: string;
+    };
+    TerminalWorktreeMember: {
+      repo_name: string;
+      path: string;
+      base_branch: string;
+      base_detached: boolean;
+      reused_branch: boolean;
+    };
+    TerminalWorktreeResult: {
+      repo: string;
+      /** @enum {string} */
+      status:
+        | "created"
+        | "exists"
+        | "reused"
+        | "conflict"
+        | "error"
+        | "rolled_back";
+      message?: string;
+    };
+    TerminalWorktreeListResponse: {
+      groups: components["schemas"]["TerminalWorktreeGroup"][];
+    };
+    TerminalWorktreeCreateRequest: {
+      name: string;
+      repos?: string[];
+      base?: string;
+    };
+    TerminalWorktreeCreateResponse: {
+      group: components["schemas"]["TerminalWorktreeGroup"];
+      results: components["schemas"]["TerminalWorktreeResult"][];
+    };
+    TerminalWorktreeErrorResponse: {
+      error: string;
+      /** @enum {string} */
+      kind:
+        | "validation"
+        | "conflict"
+        | "not_found"
+        | "internal"
+        | "unavailable";
+      results?: components["schemas"]["TerminalWorktreeResult"][];
     };
     IssueTab: {
       /** @description "details", "sessions", "logs", or "terminal-{session}" */
@@ -4855,6 +4923,92 @@ export interface operations {
             success: boolean;
             data?: components["schemas"]["TabMetadata"][];
           };
+        };
+      };
+    };
+  };
+  listTerminalWorktreeGroups: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Terminal worktree groups */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["TerminalWorktreeListResponse"];
+        };
+      };
+    };
+  };
+  createTerminalWorktreeGroup: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["TerminalWorktreeCreateRequest"];
+      };
+    };
+    responses: {
+      /** @description Terminal worktree group created */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["TerminalWorktreeCreateResponse"];
+        };
+      };
+      /** @description Validation failure with per-repo results */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["TerminalWorktreeErrorResponse"];
+        };
+      };
+      /** @description Workspace not found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["TerminalWorktreeErrorResponse"];
+        };
+      };
+      /** @description Duplicate group name or per-repo conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["TerminalWorktreeErrorResponse"];
+        };
+      };
+      /** @description Internal error after rollback */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["TerminalWorktreeErrorResponse"];
         };
       };
     };

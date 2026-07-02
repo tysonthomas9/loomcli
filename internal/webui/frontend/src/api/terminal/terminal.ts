@@ -73,9 +73,11 @@ export interface TabMetadata {
   role?: string;
   backend?: string;
   writable?: boolean;
+  worktree_group_id?: string;
   launch?: {
     argv?: string[];
     env?: Record<string, string>;
+    cwd?: string;
   };
   created_at: string;
   updated_at: string;

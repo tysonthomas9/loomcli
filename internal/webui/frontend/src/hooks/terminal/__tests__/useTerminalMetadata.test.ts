@@ -157,6 +157,33 @@ describe("useTerminalMetadata", () => {
       expect(result.current.tabs[0].session_name).toBe("new-sess");
     });
 
+    it("passes worktree group id when creating a tab", async () => {
+      mockList.mockResolvedValueOnce([]);
+      mockPut.mockResolvedValueOnce(
+        createMockTab({
+          session_name: "new-sess",
+          worktree_group_id: "group-1",
+        }),
+      );
+
+      const { result } = renderHook(() => useTerminalMetadata("test-ws"));
+      await flushPromises();
+
+      await act(async () => {
+        await result.current.createTab("new-sess", "New Tab", 0, "group-1");
+      });
+
+      expect(mockPut).toHaveBeenCalledWith("test-ws", "new-sess", {
+        session_name: "new-sess",
+        label: "New Tab",
+        sort_order: 0,
+        notes: "",
+        pinned: false,
+        worktree_group_id: "group-1",
+      });
+      expect(result.current.tabs[0].worktree_group_id).toBe("group-1");
+    });
+
     it("rolls back on API failure", async () => {
       mockList.mockResolvedValueOnce([]);
       mockPut.mockRejectedValueOnce(new Error("Create failed"));
