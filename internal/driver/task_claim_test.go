@@ -4,6 +4,7 @@ package driver
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -139,6 +140,34 @@ func TestClaimTaskClaimsSpecificReadyTaskByID(t *testing.T) {
 	}
 }
 
+// TestClaimTaskScansPastClaimReadyDefaultLimit is the ITEM 2 regression: a
+// crowded ready view where the target sits well past the small claim-ready
+// cutoff (defaultClaimReadyLimit=100) must still resolve to a successful
+// targeted claim. Before the fix ClaimTask scanned only the first 100 entries,
+// turning a genuinely-ready task into a false 409 indistinguishable from a race.
+func TestClaimTaskScansPastClaimReadyDefaultLimit(t *testing.T) {
+	ready := make([]backend.IssueData, 0, 200)
+	for i := 0; i < 200; i++ {
+		ready = append(ready, backend.IssueData{ID: fmt.Sprintf("TASK-%03d", i)})
+	}
+	target := ready[150].ID // position 150: past the 100-entry claim-ready cutoff
+	fake := &fakeReadyIssueBackend{ready: ready}
+
+	claimed, err := ClaimTask(context.Background(), fake, TaskClaimByIDOptions{
+		TaskID: target,
+		Actor:  "driver-run:run-1",
+	})
+	if err != nil {
+		t.Fatalf("ClaimTask past default cutoff: %v", err)
+	}
+	if claimed == nil || claimed.ID != target {
+		t.Fatalf("claimed = %+v, want %q found past the 100-entry cutoff", claimed, target)
+	}
+	if len(fake.readyCalls) != 1 || fake.readyCalls[0].Limit <= defaultClaimReadyLimit {
+		t.Fatalf("ready scan limit = %+v, want a router-scale depth above the claim-ready default", fake.readyCalls)
+	}
+}
+
 func TestClaimTaskNotReadyIsConflict(t *testing.T) {
 	// The target is not in the ready view (not ready / already claimed elsewhere).
 	fake := &fakeReadyIssueBackend{ready: []backend.IssueData{{ID: "TEST-1"}}}
@@ -264,7 +293,13 @@ type releaseCall struct {
 
 func (f *fakeReadyIssueBackend) Ready(_ context.Context, opts backend.ReadyOpts) ([]backend.IssueData, error) {
 	f.readyCalls = append(f.readyCalls, opts)
-	return append([]backend.IssueData(nil), f.ready...), nil
+	out := append([]backend.IssueData(nil), f.ready...)
+	// Honor the scan bound like a real backend so tests can prove the effective
+	// scan depth (e.g. the claim-by-id crowding fix).
+	if opts.Limit > 0 && len(out) > opts.Limit {
+		out = out[:opts.Limit]
+	}
+	return out, nil
 }
 
 func (f *fakeReadyIssueBackend) ClaimIssue(_ context.Context, id string, ttl time.Duration) error {

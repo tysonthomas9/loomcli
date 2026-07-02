@@ -55,7 +55,12 @@ export async function run(ctx) {
   //    returns a flat ClaimedTask (camelCase, no description); issues.get returns
   //    the full IssueData (snake_case). Read field values against that ONE
   //    guaranteed shape rather than guessing casings across two contracts.
-  const claimed = await loom.tasks.claimReady({ actor, limit: 1 });
+  //
+  //    type: "bug" narrows the ready queue server-side so we only ever claim a
+  //    bug (the BELT). The post-claim issue_type guard below stays as the
+  //    SUSPENDERS — and now RELEASES the lease on a non-bug instead of parking
+  //    an arbitrary task under this agent's claim until TTL.
+  const claimed = await loom.tasks.claimReady({ actor, limit: 1, type: "bug" });
   const issueId = claimed && (claimed.id || claimed.ID);
   if (!issueId) {
     return loom.completed({ summary: "bug-fix: no ready bug to claim", claimed: false });
@@ -64,10 +69,20 @@ export async function run(ctx) {
 
   const issueType = stringValue(card.issue_type);
   if (issueType && issueType !== "bug") {
+    // Release the claim we took on a task that is not ours to work — parking it
+    // under our lease would starve its real owner until the lock TTL expires.
+    // Best-effort: a release failure falls back to TTL recovery and must not
+    // mask the skip outcome.
+    try {
+      await loom.tasks.release({ taskId: issueId });
+    } catch (_releaseErr) {
+      // fall back to TTL expiry
+    }
     return loom.completed({
       summary: "bug-fix: claimed " + issueId + " is type '" + issueType + "', not a bug",
       issueId,
       skipped: true,
+      released: true,
     });
   }
 

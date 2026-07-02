@@ -71,7 +71,10 @@ test("contract: every op sends only frozen camelCase wire fields to its frozen p
     return {};
   }, async ({ apiUrl, calls }) => {
     const client = newClient(apiUrl);
-    await client.tasks.claimReady({ actor: "lead", limit: 5 });
+    // `type` narrows the ready queue server-side; `actor` is accepted for
+    // wire-compat but ignored server-side (the lock is keyed by the run's
+    // derived actor — see the driverapi actor-lock security fix).
+    await client.tasks.claimReady({ actor: "lead", limit: 5, type: "bug" });
     await client.epics.get({});
     await client.epics.snapshot({});
     await client.agents.list();

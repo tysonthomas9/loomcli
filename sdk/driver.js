@@ -156,16 +156,22 @@ export class LoomDriverClient {
   async claimReady(input = {}) {
     return this.#httpCall("claim-ready", {
       epicId: this.#epicID(input),
+      // actor is accepted for wire-compat but IGNORED server-side: the lock is
+      // keyed by the run's derived actor, never caller input (prevents
+      // cross-agent lock takeover). Pass `type` to narrow the ready queue.
       actor: input.actor || "",
+      type: input.type || "",
       limit: input.limit || "",
     });
   }
 
   // claimTask claims one SPECIFIC ready task by id (the event-driven counterpart
-  // to claimReady's queue-order pull). taskId is required; actor defaults to the
-  // run actor server-side; epicId is an OPTIONAL ready-view narrowing hint (it is
-  // NOT defaulted from the run's epic, so any task can be targeted). A not-ready /
-  // already-claimed target rejects with a DriverApiError code "conflict".
+  // to claimReady's queue-order pull). taskId is required; the lock actor is
+  // ALWAYS the run's derived actor server-side (a body actor is ignored — it
+  // cannot key another run's lock); epicId is an OPTIONAL ready-view narrowing
+  // hint (it is NOT defaulted from the run's epic, so any task can be targeted).
+  // A not-ready / already-claimed target rejects with a DriverApiError code
+  // "conflict".
   async claimTask(input = {}) {
     const taskId = taskPayloadID(input);
     if (!taskId) {

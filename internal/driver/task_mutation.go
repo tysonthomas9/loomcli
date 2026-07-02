@@ -137,11 +137,26 @@ func ReleaseTask(ctx context.Context, issueBackend backend.IssueBackend, opts Ta
 
 const defaultClaimReadyLimit = 100
 
+// claimByIDReadyScanDepth is the default ready-view scan depth for the
+// targeted claim-by-id path (ClaimTask). It matches the router's own depth
+// (see cli.FetchReadyIssues, which scans 10000 for the same crowding reason):
+// ready queues fold in open + review + in_progress items, so review work can
+// crowd the few truly-workable tasks past a small cutoff. Scanning only the
+// first defaultClaimReadyLimit (100) entries makes a targeted claim of a task
+// at position >100 silently return a conflict (false 409) that is
+// indistinguishable from an honest race. There is no cheaper per-id readiness
+// probe on IssueBackend — Ready() is the canonical gate and is not keyed
+// finer than its narrowing filters — so we scan router-scale by default.
+const claimByIDReadyScanDepth = 10000
+
 const blockedIssueStatus = "blocked"
 
 type TaskClaimOptions struct {
-	EpicID  string
-	Actor   string
+	EpicID string
+	Actor  string
+	// Type optionally narrows the ready view to a single issue type (e.g.
+	// "bug"), filtered server-side via ReadyOpts.Type. Empty means no filter.
+	Type    string
 	Limit   int
 	LockTTL time.Duration
 }
@@ -172,7 +187,11 @@ func ClaimReadyTask(ctx context.Context, issueBackend backend.IssueBackend, opts
 	if limit <= 0 {
 		limit = defaultClaimReadyLimit
 	}
-	ready, err := issueBackend.Ready(ctx, backend.ReadyOpts{ParentID: strings.TrimSpace(opts.EpicID), Limit: limit})
+	ready, err := issueBackend.Ready(ctx, backend.ReadyOpts{
+		ParentID: strings.TrimSpace(opts.EpicID),
+		Type:     strings.TrimSpace(opts.Type),
+		Limit:    limit,
+	})
 	if err != nil {
 		return nil, fmt.Errorf("list ready tasks: %w", err)
 	}
@@ -230,9 +249,12 @@ func ClaimTask(ctx context.Context, issueBackend backend.IssueBackend, opts Task
 	if taskID == "" {
 		return nil, fmt.Errorf("task id required: %w", domain.ErrInvalid)
 	}
+	// Default to a router-scale scan so a crowded ready view cannot hide a
+	// genuinely-ready target past the small claim-ready cutoff (false 409). An
+	// explicit caller limit still narrows the scan.
 	limit := opts.Limit
 	if limit <= 0 {
-		limit = defaultClaimReadyLimit
+		limit = claimByIDReadyScanDepth
 	}
 	ready, err := issueBackend.Ready(ctx, backend.ReadyOpts{ParentID: strings.TrimSpace(opts.EpicID), Limit: limit})
 	if err != nil {

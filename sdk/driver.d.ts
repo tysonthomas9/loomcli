@@ -83,10 +83,29 @@ export interface LoomTaskSelector {
 export interface LoomTaskClaimInput {
   /** The specific task (issue/card) id to claim. Required. */
   taskId: string;
-  /** Claim actor; defaults to the run actor server-side. */
+  /**
+   * Non-authoritative label. IGNORED server-side: the task lock is always keyed
+   * by the run's derived actor (run-token provenance), never caller input, so a
+   * run cannot claim under another run's actor. Retained for wire-compat only.
+   */
   actor?: string;
   /** Optional ready-view narrowing hint; NOT defaulted from the run's epic. */
   epicId?: string;
+  /** Ready-view scan bound (defaults to a router-scale depth for claim-by-id). */
+  limit?: number;
+}
+
+export interface LoomTaskClaimReadyInput extends LoomEpicInput {
+  /**
+   * Ready-queue type filter (e.g. "bug"): narrows the claimable view to one
+   * issue type server-side. Empty/omitted means no type filter.
+   */
+  type?: string;
+  /**
+   * Non-authoritative label. IGNORED server-side: the task lock is always keyed
+   * by the run's derived actor, never caller input. Retained for wire-compat.
+   */
+  actor?: string;
   /** Ready-view scan bound (defaults to the server's claim-ready limit). */
   limit?: number;
 }
@@ -421,7 +440,7 @@ export declare class LoomDriverClient {
     message(input?: LoomAgentMessageInput): Promise<Record<string, unknown> | null>;
   };
   readonly tasks: {
-    claimReady(input?: LoomEpicInput): Promise<Record<string, unknown> | null>;
+    claimReady(input?: LoomTaskClaimReadyInput): Promise<Record<string, unknown> | null>;
     /** Claim one SPECIFIC ready task by id; rejects DriverApiError code "conflict" when not ready or already claimed. */
     claim(input: LoomTaskClaimInput | string): Promise<Record<string, unknown> | null>;
     complete(input?: LoomTaskSelector | string): Promise<Record<string, unknown> | null>;
@@ -477,7 +496,7 @@ export declare class LoomDriverClient {
     logsRef?: string;
     artifactsRef?: string;
   }): LoomDriverResult;
-  claimReady(input?: LoomEpicInput): Promise<Record<string, unknown> | null>;
+  claimReady(input?: LoomTaskClaimReadyInput): Promise<Record<string, unknown> | null>;
   claimTask(input?: LoomTaskClaimInput | string): Promise<Record<string, unknown> | null>;
   getEpic(input?: LoomEpicInput): Promise<Record<string, unknown> | null>;
   epicSnapshot(input?: LoomEpicInput): Promise<Record<string, unknown> | null>;

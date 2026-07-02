@@ -302,8 +302,17 @@ func decodeParams[T any](body []byte) (T, error) {
 func (m *Module) claimReady(ctx context.Context, ws string, id driverIdentity, body []byte) (any, error) {
 	params, err := decodeParams[struct {
 		EpicID string `json:"epicId"`
-		Actor  string `json:"actor"`
-		Limit  int    `json:"limit"`
+		// Actor is accepted for wire-compat but IGNORED (non-authoritative).
+		// SECURITY: the task lock is keyed by the server-derived run actor
+		// below, never by caller input — otherwise a run could present a
+		// victim's actor label and claim/release under its lease (cross-agent
+		// lock takeover in one op call). See releaseTask/claimTask for the
+		// symmetric derivation that keeps failure-recovery ownership matched.
+		Actor string `json:"actor"`
+		// Type optionally narrows the ready queue to one issue type (e.g.
+		// "bug"), applied server-side by the ready view.
+		Type  string `json:"type"`
+		Limit int    `json:"limit"`
 	}](body)
 	if err != nil {
 		return nil, err
@@ -313,7 +322,7 @@ func (m *Module) claimReady(ctx context.Context, ws string, id driverIdentity, b
 		return nil, err
 	}
 	epicID := firstNonEmpty(params.EpicID, parent.EpicID, driverpkg.DriverRunPayloadEpicID(parent.Payload))
-	actor := firstNonEmpty(params.Actor, driverpkg.DriverRunActor(parent.RunID))
+	actor := driverpkg.DriverRunActor(parent.RunID)
 	issueBackend, err := m.issueBackends(ws, actor)
 	if err != nil {
 		return nil, err
@@ -322,6 +331,7 @@ func (m *Module) claimReady(ctx context.Context, ws string, id driverIdentity, b
 	claimed, err := driverpkg.ClaimReadyTask(ctx, issueBackend, driverpkg.TaskClaimOptions{
 		EpicID: epicID,
 		Actor:  actor,
+		Type:   strings.TrimSpace(params.Type),
 		Limit:  params.Limit,
 	})
 	if err != nil {
@@ -334,14 +344,17 @@ func (m *Module) claimReady(ctx context.Context, ws string, id driverIdentity, b
 // counterpart to claim-ready, which pulls in queue order. taskId is the caller's
 // legitimate target; every other input follows the claim-ready auth/provenance
 // model — the parent run is proven via the run token (verifyParent) and the
-// claim actor defaults server-side from that run; a body actor is accepted only
-// as a lease-identity label, exactly as claim-ready already allows (access is
-// gated by the run token, never the actor). epicId is an OPTIONAL narrowing hint the caller may
-// pass; it is NOT defaulted from the parent run so a task under any epic can be
-// targeted. Not-ready / already-claimed surfaces as a conflict (409).
+// claim actor is ALWAYS derived server-side from that run. SECURITY: a body
+// actor is NOT honored for the lock (it is decoded for wire-compat but ignored)
+// — the lock is keyed by DriverRunActor(parent.RunID) so a run can only ever
+// claim under its own lease, never a victim's actor label. epicId is an OPTIONAL
+// narrowing hint the caller may pass; it is NOT defaulted from the parent run so
+// a task under any epic can be targeted. Not-ready / already-claimed surfaces as
+// a conflict (409).
 func (m *Module) claimTask(ctx context.Context, ws string, id driverIdentity, body []byte) (any, error) {
 	params, err := decodeParams[struct {
 		TaskID string `json:"taskId"`
+		// Actor: accepted for wire-compat, IGNORED. See the security note above.
 		Actor  string `json:"actor"`
 		EpicID string `json:"epicId"`
 		Limit  int    `json:"limit"`
@@ -356,7 +369,7 @@ func (m *Module) claimTask(ctx context.Context, ws string, id driverIdentity, bo
 	if strings.TrimSpace(params.TaskID) == "" {
 		return nil, fmt.Errorf("taskId required: %w", domain.ErrInvalid)
 	}
-	actor := firstNonEmpty(params.Actor, driverpkg.DriverRunActor(parent.RunID))
+	actor := driverpkg.DriverRunActor(parent.RunID)
 	issueBackend, err := m.issueBackends(ws, actor)
 	if err != nil {
 		return nil, err
@@ -817,7 +830,14 @@ func (m *Module) completeTask(ctx context.Context, ws string, id driverIdentity,
 func (m *Module) releaseTask(ctx context.Context, ws string, id driverIdentity, body []byte) (any, error) {
 	params, err := decodeParams[struct {
 		TaskID string `json:"taskId"`
-		Actor  string `json:"actor"`
+		// Actor: accepted for wire-compat, IGNORED. SECURITY: the release
+		// ownership check is keyed by the server-derived run actor below, never
+		// by caller input — otherwise a run could present a victim's actor and
+		// release a lock it never held (cross-agent task theft). The claim path
+		// derives the SAME actor from the SAME run, so a run releases exactly
+		// the leases it took; cross-run recovery relies on lock TTL, not on a
+		// caller-supplied actor.
+		Actor string `json:"actor"`
 	}](body)
 	if err != nil {
 		return nil, err
@@ -829,7 +849,7 @@ func (m *Module) releaseTask(ctx context.Context, ws string, id driverIdentity, 
 	if strings.TrimSpace(params.TaskID) == "" {
 		return nil, fmt.Errorf("taskId required: %w", domain.ErrInvalid)
 	}
-	actor := firstNonEmpty(params.Actor, driverpkg.DriverRunActor(parent.RunID))
+	actor := driverpkg.DriverRunActor(parent.RunID)
 	issueBackend, err := m.issueBackends(ws, actor)
 	if err != nil {
 		return nil, err

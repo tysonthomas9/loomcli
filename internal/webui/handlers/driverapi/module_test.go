@@ -21,16 +21,29 @@ import (
 // touch need real implementations; anything else panics loudly.
 type fakeIssueBackend struct {
 	backend.IssueBackend
-	ready    []backend.IssueData
-	blocked  []backend.IssueData
-	children []backend.IssueData
-	epic     *backend.IssueDetailData
-	actor    string
-	claimed  []string
+	ready     []backend.IssueData
+	readyOpts []backend.ReadyOpts
+	blocked   []backend.IssueData
+	children  []backend.IssueData
+	epic      *backend.IssueDetailData
+	actor     string
+	claimed   []string
+	releases  []fakeRelease
 }
 
-func (f *fakeIssueBackend) Ready(_ context.Context, _ backend.ReadyOpts) ([]backend.IssueData, error) {
+type fakeRelease struct {
+	id    string
+	actor string
+}
+
+func (f *fakeIssueBackend) Ready(_ context.Context, opts backend.ReadyOpts) ([]backend.IssueData, error) {
+	f.readyOpts = append(f.readyOpts, opts)
 	return f.ready, nil
+}
+
+func (f *fakeIssueBackend) ReleaseIssueAsActor(_ context.Context, id, actor string) error {
+	f.releases = append(f.releases, fakeRelease{id: id, actor: actor})
+	return nil
 }
 
 func (f *fakeIssueBackend) Blocked(_ context.Context, _ backend.BlockedOpts) ([]backend.IssueData, error) {
@@ -295,6 +308,74 @@ func TestDriverAPIClaimReady(t *testing.T) {
 	}
 	if len(h.backend.claimed) != 1 || h.backend.claimed[0] != "TASK-7" {
 		t.Fatalf("backend claims = %v, want [TASK-7]", h.backend.claimed)
+	}
+}
+
+// TestDriverAPIClaimReadyThreadsTypeFilter proves the claim-ready `type` param
+// reaches the ready view server-side (ITEM 3): the op decodes it and threads it
+// into ReadyOpts.Type so a caller can claim only, e.g., bugs.
+func TestDriverAPIClaimReadyThreadsTypeFilter(t *testing.T) {
+	h := newTestHarness(t, "")
+	h.backend.ready = []backend.IssueData{{ID: "BUG-1", IssueType: "bug"}}
+
+	resp, decoded := h.do(t, opRequest{
+		op:      "claim-ready",
+		body:    map[string]any{"type": "bug"},
+		headers: h.ownerHeaders(),
+	})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	if decoded["id"] != "BUG-1" {
+		t.Fatalf("claimed id = %v, want BUG-1", decoded["id"])
+	}
+	if len(h.backend.readyOpts) != 1 || h.backend.readyOpts[0].Type != "bug" {
+		t.Fatalf("ready opts = %+v, want the type=bug filter threaded to the ready view", h.backend.readyOpts)
+	}
+}
+
+// TestDriverAPIClaimTaskIgnoresBodyActor is the ITEM 1 security regression:
+// presenting a victim's actor label in the claim body must NOT key the lock by
+// that label. The lock actor is always derived from the verified run, so a run
+// can only ever claim under its own lease — no cross-agent lock takeover.
+func TestDriverAPIClaimTaskIgnoresBodyActor(t *testing.T) {
+	h := newTestHarness(t, "")
+	h.backend.ready = []backend.IssueData{{ID: "TASK-7"}}
+
+	resp, decoded := h.do(t, opRequest{
+		op:      "claim-task",
+		body:    map[string]any{"taskId": "TASK-7", "actor": "driver-run:victim"},
+		headers: h.ownerHeaders(),
+	})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	if decoded["claimedBy"] != "driver-run:run-1" {
+		t.Fatalf("claimedBy = %v, want the derived run actor (body actor must be ignored)", decoded["claimedBy"])
+	}
+	if h.backend.actor != "driver-run:run-1" {
+		t.Fatalf("lock actor = %q, want driver-run:run-1 (body actor driver-run:victim must not key the lock)", h.backend.actor)
+	}
+}
+
+// TestDriverAPIReleaseTaskIgnoresBodyActor is the release half of ITEM 1: a run
+// cannot present a victim's actor and release a lock it never held. The release
+// ownership actor is always the run's derived actor, so failure-recovery stays
+// symmetric with the claim path (same run -> same actor) while cross-agent
+// theft is impossible.
+func TestDriverAPIReleaseTaskIgnoresBodyActor(t *testing.T) {
+	h := newTestHarness(t, "")
+
+	resp, _ := h.do(t, opRequest{
+		op:      "release-task",
+		body:    map[string]any{"taskId": "TASK-7", "actor": "driver-run:victim"},
+		headers: h.ownerHeaders(),
+	})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	if len(h.backend.releases) != 1 || h.backend.releases[0].actor != "driver-run:run-1" {
+		t.Fatalf("release calls = %+v, want one release keyed by the derived run actor (body actor ignored)", h.backend.releases)
 	}
 }
 

@@ -107,6 +107,7 @@
       "fields": [
         "epicId",
         "actor",
+        "type",
         "limit"
       ]
     },
