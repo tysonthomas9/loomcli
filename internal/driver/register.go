@@ -200,6 +200,13 @@ const OpenShellRunnerName = "openshell-task-runner"
 // error class (§4.5) for the resolve-time guard.
 var ErrOpenShellRunnerUnimplemented = errors.New("openshell_runner_unimplemented: openshell-task-runner is not implemented")
 
+// ErrRunnerNotDeclared marks the specific "this driver version's manifest does
+// not declare the runner" failure, distinct from malformed manifests or the
+// OpenShell guard. It is the ONLY resolveDriverRunner failure that is allowed to
+// trigger the workspace-global builtin fallback (GAP A, global_runner.go): every
+// other failure fails closed with no fallback.
+var ErrRunnerNotDeclared = errors.New("driver runner not declared by version")
+
 func resolveDriverRunner(version *domain.DriverVersion, runnerName string) (DriverRunnerSpec, error) {
 	runnerName = strings.TrimSpace(runnerName)
 	if runnerName == "" {
@@ -220,7 +227,9 @@ func resolveDriverRunner(version *domain.DriverVersion, runnerName string) (Driv
 			return runner, nil
 		}
 	}
-	return DriverRunnerSpec{}, fmt.Errorf("runner %q is not declared by driver version %q: %w", runnerName, version.VersionID, domain.ErrInvalid)
+	// ErrRunnerNotDeclared distinguishes this case for the global fallback;
+	// domain.ErrInvalid preserves the existing error class/HTTP mapping.
+	return DriverRunnerSpec{}, fmt.Errorf("runner %q is not declared by driver version %q: %w: %w", runnerName, version.VersionID, ErrRunnerNotDeclared, domain.ErrInvalid)
 }
 
 func applyResolvedRunner(opts TaskRunRequestOptions, parent *domain.DriverRun, version *domain.DriverVersion) (TaskRunRequestOptions, error) {

@@ -3,6 +3,7 @@ package driver
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -458,14 +459,46 @@ func resolveTaskRunRequestRunner(ctx context.Context, s store.Store, opts TaskRu
 		return opts, fmt.Errorf("runner manifest version %q belongs to driver %q, run wants %q: %w", version.VersionID, version.DriverID, parent.DriverID, domain.ErrInvalid)
 	}
 	resolved, err := applyResolvedRunner(opts, parent, version)
+	if err == nil {
+		driver, derr := s.Drivers().Get(ctx, opts.WorkspaceKey, parent.DriverID)
+		if derr != nil {
+			return opts, fmt.Errorf("load driver %q for runner trust policy: %w", parent.DriverID, derr)
+		}
+		resolved.RunnerTrustLevel = DriverVersionEffectiveTrust(driver, version)
+		return resolved, nil
+	}
+	// The caller's own version does not declare this runner. Fall back to the
+	// workspace-global BUILTIN task-runner registry (GAP A). This is what lets a
+	// custom/untrusted workflow driver dispatch a blessed builtin runner (e.g.
+	// local-task-runner) it never bundled. Any OTHER resolve failure (malformed
+	// manifest, OpenShell guard) fails closed with no fallback.
+	if !errors.Is(err, ErrRunnerNotDeclared) {
+		return opts, err
+	}
+	if globalResolved, gErr := resolveGlobalRunnerRequest(ctx, s, opts, parent); gErr == nil {
+		return globalResolved, nil
+	}
+	// Global resolution also failed: return the ORIGINAL not-declared error so an
+	// unknown runner name fails exactly as it did before this fallback existed.
+	return opts, err
+}
+
+// resolveGlobalRunnerRequest resolves opts.Runner against the trusted builtin
+// registry and pins the request onto the runner's OWNING (builtin) version: its
+// version id, ref, kind and entrypoint — so the host loads the builtin's bundle
+// — and its trust level — so the runner executes under its own trust, never the
+// (possibly untrusted) caller's. See global_runner.go for the security
+// reasoning.
+func resolveGlobalRunnerRequest(ctx context.Context, s store.Store, opts TaskRunRequestOptions, parent *domain.DriverRun) (TaskRunRequestOptions, error) {
+	res, err := resolveGlobalRunner(ctx, s, opts.WorkspaceKey, opts.Runner)
 	if err != nil {
 		return opts, err
 	}
-	driver, err := s.Drivers().Get(ctx, opts.WorkspaceKey, parent.DriverID)
+	resolved, err := applyResolvedRunner(opts, parent, res.Version)
 	if err != nil {
-		return opts, fmt.Errorf("load driver %q for runner trust policy: %w", parent.DriverID, err)
+		return opts, err
 	}
-	resolved.RunnerTrustLevel = DriverVersionEffectiveTrust(driver, version)
+	resolved.RunnerTrustLevel = DriverVersionEffectiveTrust(res.Driver, res.Version)
 	return resolved, nil
 }
 
