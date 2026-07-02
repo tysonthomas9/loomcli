@@ -307,3 +307,73 @@ supervisor disabled; all three are managed identically in the UI.
    list with a `kind` discriminator, what must daemon/CLI consumers tolerate?
 3. **Per-binding run attribution:** `DriverRunFilter` filters by driver;
    extend with `BindingID` or join through `TriggerDeliveries`?
+
+## Architecture vet (2026-07-02) — what the real-run suite's reds revealed
+
+The aether real-run suite (R1–R12, `aether-test-framework/docs/UNIFIED-AGENTS-REAL-RUN-SUITE.md`,
+evidence cells committed at aether `1f868eb`) validated the unified-agent
+architecture end-to-end with real codex runs: prompt-as-data, global runner
+resolution under the OWNER's trust, claim-by-id, role-as-shared-config, and
+the unified UI all held under adversarial cases (untrusted caller, claim
+conflicts, genuine failures). The four reds, examined together, are NOT four
+independent bugs — they cluster into two structural issues, one piece of
+deliberately-priced debt, and one recurring toil class.
+
+### Miss 1 — dispatch payload assembly is per-source, not a pipeline stage
+
+Binding run-input merging exists in three call sites: the CronScheduler
+(`internal/trigger/cron.go` dispatchTick), the frontend Run-now
+(`WorkflowAgentDetail.handleRunNow`), and internal dispatch (MISSING — the
+R11.B red, `internal/trigger/internal_source.go` Emit). Every future trigger
+source must remember to merge, in whatever language it is written. Correction:
+ONE merge point in the dispatch path, applied per delivery leg (fan-out
+correct: each leg gets its own binding's run-input); the frontend copy is then
+deleted. The truly correct home is fleet-db's leg builder (which owns run
+creation) — blocked by Miss 2, so the loomcli-side consolidation carries an
+explicit "eventual home: fleet-db dispatchTriggerRouteLeg" marker. Task #36
+must be fixed at THIS altitude, not by adding a fourth call site.
+
+### Miss 2 — the loomcli↔fleet-db boundary has no contract enforcement
+
+One pattern, five sightings this week: the server lacks the trigger-binding
+DELETE route the client fully implements (R10, found by E2E not by any
+contract check); run_input smuggled through `source_config_ref` because
+fleet-db strict-decodes unknown fields and schema growth is a cross-repo
+change; the ready-queue RPC lacks the `Type` param storage already supports
+(part of S1-G1); `external_ref` was write-dead and read-dead until P0-3.
+Intra-repo contracts are frozen and tested (driverapi op list, @loom/sdk
+surface); the CROSS-repo seam has nothing. Correction: a fleet-db↔loomcli
+contract suite (or generate both sides from the shared spec), landed together
+with task #34's DELETE route so the next verb gap cannot appear silently. The
+`source_config_ref` transport is tagged migration-pending: when the binding
+schema next evolves, run_input becomes a real field and the wedge is removed.
+
+### Priced-in debt made visible — two planes, one queue, no arbitration (R8)
+
+The plan lane claiming designless bugs before the bug-fix workflow is the
+interim state the locked build order accepted: until Phase 5, both planes
+compete for one ready queue, first-claim-wins, with hardcoded role
+preferences. Consequence for sequencing: S1-G1 (route bugs away from the plan
+lane) is a PHASE 5 DESIGN INPUT — task-type arbitration between planes should
+be designed once, not patched as a one-off router rule now and redesigned at
+supervisor retirement.
+
+### Miss 3 (minor, recurring) — stack capability is implicit
+
+S2.A's fast-fails, the bare 500 when binding-create's builtin self-heal lacks
+the build toolchain (task #38), toolchain staging, vault key, backend auth:
+"what can this environment run" is scattered across compose overrides and
+scripts, and every gap surfaces as a runtime failure. Correction: a capability
+manifest per agent kind (needs: build toolchain / connector X / backend auth)
+checked at binding-create and surfaced by `loom doctor`.
+
+### Re-sequenced fix plan
+
+1. Task #36 at pipeline altitude: consolidate the three merge sites into one
+   per-leg merge (+ unscope the issue-journal bridge). Flips R11.B.
+2. Task #34 (fleet-db DELETE) lands WITH the first cross-repo contract guard.
+   Flips R10.
+3. S1-G1 folds into the Phase 5 arbitration design (which plane owns which
+   task types) rather than shipping twice.
+4. Task #38 grows into the capability-manifest/doctor item rather than a
+   one-off error-message fix.
