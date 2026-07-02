@@ -8,6 +8,7 @@ package triggerbindings
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -19,6 +20,11 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
 	workflowdefs "github.com/tysonthomas9/loomcli/internal/workflows"
 )
+
+// bindingRunScanLimit bounds the per-binding run scan used to compute failure
+// health for the list view. N+1 over bindings is acceptable at local-mode
+// scale; the tradeoff is documented on bindingRunHealth.
+const bindingRunScanLimit = 20
 
 const maxBindingBodyBytes = 1 << 20
 
@@ -36,6 +42,10 @@ func (m *Module) Register(mux *http.ServeMux) {
 	}
 	mux.HandleFunc("GET /api/workspaces/{ws}/trigger-bindings", m.listBindings)
 	mux.HandleFunc("POST /api/workspaces/{ws}/trigger-bindings", m.createBinding)
+	// PATCH edits name/schedule/timezone; DELETE removes the binding and revokes
+	// its connector grants (Decision 6).
+	mux.HandleFunc("PATCH /api/workspaces/{ws}/trigger-bindings/{id}", m.patchBinding)
+	mux.HandleFunc("DELETE /api/workspaces/{ws}/trigger-bindings/{id}", m.deleteBinding)
 	// Enable/disable are modeled as action sub-resources (POST .../enable),
 	// which carry no request body.
 	mux.HandleFunc("POST /api/workspaces/{ws}/trigger-bindings/{id}/enable", m.setEnabled(true))
@@ -62,12 +72,18 @@ type createBindingRequest struct {
 }
 
 // bindingWithNextFire decorates a binding with its computed next cron fire
-// instant for the list view. The embedded binding's fields marshal at the top
-// level; next_fire_at is added alongside and populated only for enabled
-// schedule-driven bindings.
+// instant plus run-failure health for the list view. The embedded binding's
+// fields marshal at the top level; next_fire_at is populated only for enabled
+// schedule-driven bindings, and last_run_status / consecutive_failures drive
+// the sidebar failure dot (Decision 7).
 type bindingWithNextFire struct {
 	*domain.TriggerBinding
 	NextFireAt *time.Time `json:"next_fire_at,omitempty"`
+	// LastRunStatus is the newest run's status (incl. queued/running) for
+	// display; ConsecutiveFailures counts failed runs from newest until the
+	// first non-failed terminal run (Decision 7: 1 → amber, 2+ → red "failing").
+	LastRunStatus       string `json:"last_run_status,omitempty"`
+	ConsecutiveFailures int    `json:"consecutive_failures,omitempty"`
 }
 
 func (m *Module) listBindings(w http.ResponseWriter, r *http.Request) {
@@ -80,9 +96,56 @@ func (m *Module) listBindings(w http.ResponseWriter, r *http.Request) {
 	now := time.Now()
 	out := make([]bindingWithNextFire, 0, len(bindings))
 	for _, b := range bindings {
-		out = append(out, bindingWithNextFire{TriggerBinding: b, NextFireAt: nextFireFor(b, now)})
+		lastStatus, consecutiveFailures := m.bindingRunHealth(r.Context(), ws, b)
+		out = append(out, bindingWithNextFire{
+			TriggerBinding:      b,
+			NextFireAt:          nextFireFor(b, now),
+			LastRunStatus:       lastStatus,
+			ConsecutiveFailures: consecutiveFailures,
+		})
 	}
 	handler.WriteJSON(w, http.StatusOK, map[string]any{"bindings": out})
+}
+
+// bindingRunHealth computes a binding's failure health from its driver's runs.
+//
+// It lists the driver's runs, orders them newest-first (the shared run order),
+// and scans only the newest bindingRunScanLimit. last_run_status is the newest
+// run's status (queued/running included, for display); consecutive_failures
+// counts failed runs from newest until the first non-failed TERMINAL run,
+// skipping still-in-flight (queued/running/suspended) runs — a pending run is
+// not yet an outcome and must not reset or extend the failure streak.
+//
+// Tradeoff (documented per the phase brief): one List per binding (N+1) and an
+// unbounded fetch bounded only by the post-sort cap is fine at local-mode
+// scale; a production surface would push a "newest N runs" query into the store
+// rather than fetch-then-truncate here.
+func (m *Module) bindingRunHealth(ctx context.Context, ws string, b *domain.TriggerBinding) (lastStatus string, consecutiveFailures int) {
+	// Cheap guard: only bindings with a resolvable driver have runs to scan.
+	if b == nil || strings.TrimSpace(b.DriverID) == "" {
+		return "", 0
+	}
+	runs, err := m.store.DriverRuns().List(ctx, ws, store.DriverRunFilter{DriverID: b.DriverID})
+	if err != nil || len(runs) == 0 {
+		return "", 0
+	}
+	store.SortDriverRunsNewestFirst(runs)
+	if len(runs) > bindingRunScanLimit {
+		runs = runs[:bindingRunScanLimit]
+	}
+	lastStatus = string(runs[0].Status)
+	for _, run := range runs {
+		switch run.Status {
+		case domain.DriverRunFailed:
+			consecutiveFailures++
+		case domain.DriverRunQueued, domain.DriverRunRunning, domain.DriverRunSuspendedAwaitingEvent:
+			continue // in-flight: not yet an outcome, neither breaks nor extends the streak
+		default:
+			// completed / needs_review / cancelled — a clean run breaks the streak.
+			return lastStatus, consecutiveFailures
+		}
+	}
+	return lastStatus, consecutiveFailures
 }
 
 // nextFireFor computes a binding's next cron tick, or nil when it is not an
@@ -241,6 +304,159 @@ func (m *Module) setEnabled(enabled bool) http.HandlerFunc {
 		// Plain binding, no computed next_fire_at (list-only for now).
 		handler.WriteJSON(w, http.StatusOK, binding)
 	}
+}
+
+// updateBindingRequest is the PATCH body: only the operator-editable fields are
+// accepted (rename + reschedule). Pointer fields distinguish "absent" (leave
+// unchanged) from an explicit value.
+type updateBindingRequest struct {
+	Name             *string `json:"name,omitempty"`
+	Schedule         *string `json:"schedule,omitempty"`
+	ScheduleTimezone *string `json:"schedule_timezone,omitempty"`
+}
+
+// patchBinding edits a binding's name and/or cron schedule. Schedule and
+// timezone changes are rejected on non-cron bindings (400) and validated with
+// the same cron/timezone grammar the scheduler enforces.
+//
+// CronScheduler cache note: the scheduler caches only a per-binding WINDOW start
+// (lastTick, keyed ws|bindingID), never a parsed schedule — each sweep re-reads
+// binding.Schedule fresh (cron.go sweepBinding → parseCronSchedule). So a
+// schedule change self-corrects on the next sweep with no cache invalidation:
+// the new schedule's next fire is computed from the existing window start.
+func (m *Module) patchBinding(w http.ResponseWriter, r *http.Request) {
+	ws := strings.TrimSpace(r.PathValue("ws"))
+	id := strings.TrimSpace(r.PathValue("id"))
+	if id == "" {
+		handler.RespondError(w, http.StatusBadRequest, "binding id is required")
+		return
+	}
+	var req updateBindingRequest
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxBindingBodyBytes)).Decode(&req); err != nil {
+		handler.RespondError(w, http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+	// Load the binding first: source-kind rules (schedule only on cron) need the
+	// stored kind, and a missing binding must 404 before any mutation.
+	existing, err := m.store.TriggerBindings().Get(r.Context(), ws, id)
+	if err != nil {
+		handler.WriteDomainError(w, err, "get trigger binding failed")
+		return
+	}
+	patch, ok := m.buildBindingPatch(w, existing, req)
+	if !ok {
+		return
+	}
+	updated, err := m.store.TriggerBindings().Update(r.Context(), ws, id, patch)
+	if err != nil {
+		handler.WriteDomainError(w, err, "update trigger binding failed")
+		return
+	}
+	handler.WriteJSON(w, http.StatusOK, bindingWithNextFire{TriggerBinding: updated, NextFireAt: nextFireFor(updated, time.Now())})
+}
+
+// buildBindingPatch validates the PATCH request against the stored binding and
+// assembles the store patch. On a validation failure it writes the error and
+// returns ok=false.
+func (m *Module) buildBindingPatch(w http.ResponseWriter, existing *domain.TriggerBinding, req updateBindingRequest) (store.TriggerBindingUpdate, bool) {
+	patch := store.TriggerBindingUpdate{}
+	if req.Name != nil {
+		name := strings.TrimSpace(*req.Name)
+		if name == "" {
+			handler.RespondError(w, http.StatusBadRequest, "name cannot be empty")
+			return patch, false
+		}
+		patch.Name = &name
+	}
+	if req.Schedule != nil {
+		if existing.SourceKind != store.CronSourceKind {
+			handler.RespondError(w, http.StatusBadRequest, "schedule can only be changed on a cron trigger binding")
+			return patch, false
+		}
+		schedule := strings.TrimSpace(*req.Schedule)
+		if err := trigger.ValidateSchedule(schedule); err != nil {
+			handler.RespondError(w, http.StatusBadRequest, err.Error())
+			return patch, false
+		}
+		patch.Schedule = &schedule
+	}
+	if req.ScheduleTimezone != nil {
+		if existing.SourceKind != store.CronSourceKind {
+			handler.RespondError(w, http.StatusBadRequest, "schedule_timezone can only be changed on a cron trigger binding")
+			return patch, false
+		}
+		tz := strings.TrimSpace(*req.ScheduleTimezone)
+		if err := trigger.ValidateScheduleTimezone(tz); err != nil {
+			handler.RespondError(w, http.StatusBadRequest, err.Error())
+			return patch, false
+		}
+		patch.ScheduleTimezone = &tz
+	}
+	if patch.Name == nil && patch.Schedule == nil && patch.ScheduleTimezone == nil {
+		handler.RespondError(w, http.StatusBadRequest, "no fields to update: pass name, schedule, or schedule_timezone")
+		return patch, false
+	}
+	return patch, true
+}
+
+// deleteBinding removes a binding and revokes its connector grants (Decision 6:
+// no orphaned credentials). Ordering is deliberate: delete FIRST, revoke after.
+// Delete is the gating action, so a backend that cannot delete (the fleet-db
+// server currently returns 405 — see fleetdb.triggerBindingStore.Delete) fails
+// with NO side effects — grants stay intact and the binding keeps working —
+// rather than leaving a neutered binding with revoked grants. Only once the
+// binding is truly gone are its grants revoked, so the SUCCESS path still leaves
+// zero live grants. A revoke failure after a successful delete is surfaced (500)
+// rather than reported as a clean delete.
+func (m *Module) deleteBinding(w http.ResponseWriter, r *http.Request) {
+	ws := strings.TrimSpace(r.PathValue("ws"))
+	id := strings.TrimSpace(r.PathValue("id"))
+	if id == "" {
+		handler.RespondError(w, http.StatusBadRequest, "binding id is required")
+		return
+	}
+	if err := m.store.TriggerBindings().Delete(r.Context(), ws, id); err != nil {
+		handler.WriteDomainError(w, err, "delete trigger binding failed")
+		return
+	}
+	revoked, err := m.revokeBindingGrants(r.Context(), ws, id)
+	if err != nil {
+		handler.RespondError(w, http.StatusInternalServerError,
+			fmt.Sprintf("binding deleted but grant revocation failed: %v", err))
+		return
+	}
+	handler.WriteJSON(w, http.StatusOK, map[string]any{
+		"binding_id":     id,
+		"deleted":        true,
+		"grants_revoked": revoked,
+	})
+}
+
+// revokeBindingGrants revokes every active connector grant scoped to the
+// binding and returns the count revoked. ListByBinding already excludes
+// already-revoked grants; a grant revoked concurrently (ErrGrantRevoked) is
+// treated as success. Other revoke errors are joined and returned.
+func (m *Module) revokeBindingGrants(ctx context.Context, ws, bindingID string) (int, error) {
+	grants, err := m.store.ConnectorGrants().ListByBinding(ctx, ws, bindingID)
+	if err != nil {
+		return 0, fmt.Errorf("list connector grants: %w", err)
+	}
+	revoked := 0
+	var errs []error
+	for _, g := range grants {
+		if g == nil {
+			continue
+		}
+		if err := m.store.ConnectorGrants().Revoke(ctx, ws, g.GrantID); err != nil {
+			if errors.Is(err, domain.ErrGrantRevoked) {
+				continue
+			}
+			errs = append(errs, fmt.Errorf("revoke grant %q: %w", g.GrantID, err))
+			continue
+		}
+		revoked++
+	}
+	return revoked, errors.Join(errs...)
 }
 
 func firstNonEmpty(values ...string) string {

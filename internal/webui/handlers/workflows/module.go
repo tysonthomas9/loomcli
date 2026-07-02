@@ -9,7 +9,6 @@ import (
 	"log/slog"
 	"net/http"
 	"path/filepath"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -219,20 +218,11 @@ func parseRunLimit(w http.ResponseWriter, r *http.Request) (int, bool) {
 	return limit, true
 }
 
-// sortDriverRunsNewestFirst orders runs by StartedAt descending, with
-// not-yet-started (zero StartedAt) runs last, breaking ties by CreatedAt
-// descending so the order is a deterministic total order.
+// sortDriverRunsNewestFirst orders runs newest-first (StartedAt desc, unstarted
+// last, CreatedAt tiebreak). Thin wrapper over store.SortDriverRunsNewestFirst
+// so run history and the trigger-bindings failure decorator share one order.
 func sortDriverRunsNewestFirst(runs []*domain.DriverRun) {
-	sort.Slice(runs, func(i, j int) bool {
-		a, b := runs[i], runs[j]
-		if a.StartedAt.IsZero() != b.StartedAt.IsZero() {
-			return !a.StartedAt.IsZero() // a started run precedes an unstarted one
-		}
-		if !a.StartedAt.Equal(b.StartedAt) {
-			return a.StartedAt.After(b.StartedAt)
-		}
-		return a.CreatedAt.After(b.CreatedAt)
-	})
+	store.SortDriverRunsNewestFirst(runs)
 }
 
 // approveWorkflowVersion / activateWorkflowVersion expose the operator actions

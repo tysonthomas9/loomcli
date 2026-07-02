@@ -85,6 +85,16 @@ var bindingsShowCmd = &cobra.Command{
 	RunE:    runBindingsShow,
 }
 
+var bindDeleteJSON bool
+
+var bindingsDeleteCmd = &cobra.Command{
+	Use:     "delete <binding-id>",
+	Aliases: []string{"rm"},
+	Short:   "Delete a trigger binding and revoke its connector grants",
+	Args:    cobra.ExactArgs(1),
+	RunE:    runBindingsDelete,
+}
+
 // routerBindingFlags groups the Router v2 binding flags shared by the create
 // and update commands. Each command binds its own instance so create/update
 // flag state never aliases.
@@ -382,6 +392,38 @@ func runBindingsUpdate(cmd *cobra.Command, args []string) error {
 	})
 }
 
+// runBindingsDelete deletes a binding and revokes its connector grants
+// (Decision 6: no orphaned credentials), mirroring the HTTP DELETE semantics.
+// Delete is the gating action — a store that cannot delete fails with no side
+// effects; grants are revoked only once the binding is gone.
+func runBindingsDelete(cmd *cobra.Command, args []string) error {
+	bindingID := strings.TrimSpace(args[0])
+	return cmdstore.WithActiveWorkspace(func(ctx context.Context, h *bootstrap.StoreHandle, ws string) error {
+		if err := h.Store.TriggerBindings().Delete(ctx, ws, bindingID); err != nil {
+			return fmt.Errorf("delete trigger binding: %w", err)
+		}
+		revoked := 0
+		grants, err := h.Store.ConnectorGrants().ListByBinding(ctx, ws, bindingID)
+		if err != nil {
+			return fmt.Errorf("binding deleted but listing connector grants failed: %w", err)
+		}
+		for _, g := range grants {
+			if g == nil {
+				continue
+			}
+			if err := h.Store.ConnectorGrants().Revoke(ctx, ws, g.GrantID); err != nil {
+				return fmt.Errorf("binding deleted but revoking grant %q failed: %w", g.GrantID, err)
+			}
+			revoked++
+		}
+		if bindDeleteJSON {
+			return cmdstore.WriteJSON(map[string]any{"binding_id": bindingID, "deleted": true, "grants_revoked": revoked})
+		}
+		_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Deleted trigger binding %s (grants revoked=%d)\n", bindingID, revoked)
+		return nil
+	})
+}
+
 func runBindingsList(cmd *cobra.Command, _ []string) error {
 	return cmdstore.WithActiveWorkspace(func(ctx context.Context, h *bootstrap.StoreHandle, ws string) error {
 		filter := store.TriggerBindingFilter{SourceKind: strings.TrimSpace(bindListSource)}
@@ -613,7 +655,9 @@ func init() {
 	bindingsListCmd.Flags().BoolVar(&bindListEnabled, "enabled", false, "filter by enabled state (only applied when set)")
 	bindingsListCmd.Flags().BoolVar(&bindListJSON, "json", false, "JSON output")
 
-	bindingsCmd.AddCommand(bindingsCreateCmd, bindingsUpdateCmd, bindingsListCmd, bindingsShowCmd)
+	bindingsDeleteCmd.Flags().BoolVar(&bindDeleteJSON, "json", false, "JSON output")
+
+	bindingsCmd.AddCommand(bindingsCreateCmd, bindingsUpdateCmd, bindingsListCmd, bindingsShowCmd, bindingsDeleteCmd)
 
 	eventsListCmd.Flags().StringVar(&eventsListSource, "source-kind", "", "filter by source kind")
 	eventsListCmd.Flags().IntVar(&eventsListLimit, "limit", 0, "max results")

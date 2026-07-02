@@ -239,6 +239,18 @@ func (s *triggerBindingStore) Update(ctx context.Context, ws, bindingID string, 
 	return &out, nil
 }
 
+// Delete issues DELETE /api/v1/{ws}/trigger-bindings/{id} to fleet-db.
+//
+// SERVER DEPENDENCY (honest note): as of this writing the fleet-db server does
+// not register a DELETE handler on this route (it returns 405 Method Not
+// Allowed), so binding deletion is unavailable against a cloud/local-mode
+// fleet-db until the server adds the route. The client wiring, the memstore
+// implementation, and the webui grant-revocation are complete; only the remote
+// server verb is missing. The error is surfaced (never faked into a success).
+func (s *triggerBindingStore) Delete(ctx context.Context, ws, bindingID string) error {
+	return s.client.do(ctx, "DELETE", "/api/v1/"+pathEscape(ws)+"/trigger-bindings/"+pathEscape(bindingID), nil, nil)
+}
+
 func (s *triggerBindingStore) ResolveWebhookSecret(ctx context.Context, ws, bindingID string) (string, error) {
 	var out struct {
 		WebhookSecret string `json:"webhook_secret"`

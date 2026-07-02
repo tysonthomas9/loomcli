@@ -218,3 +218,205 @@ func TestCreateBinding_GithubRequiresSecret(t *testing.T) {
 		t.Fatalf("expected secret-required error, got %s", rec.Body.String())
 	}
 }
+
+// --- Phase 3: PATCH / DELETE / failure health ---
+
+// createCronBinding is a test helper that creates an enabled cron binding under
+// driver-1 and returns its id.
+func createCronBinding(t *testing.T, mux *http.ServeMux, bindingID, schedule string) {
+	t.Helper()
+	body := `{"driver_id":"driver-1","driver_version_id":"version-1","source_kind":"cron","schedule":"` +
+		schedule + `","binding_id":"` + bindingID + `","name":"` + bindingID + `","enabled":true}`
+	if rec := do(t, mux, http.MethodPost, "/api/workspaces/WS/trigger-bindings", body); rec.Code != http.StatusCreated {
+		t.Fatalf("create cron binding %s: status = %d; body=%s", bindingID, rec.Code, rec.Body.String())
+	}
+}
+
+// TestPatchBinding_RenameAndReschedule pins the PATCH happy path: name +
+// schedule change apply, and next_fire_at is recomputed from the new schedule.
+func TestPatchBinding_RenameAndReschedule(t *testing.T) {
+	mux, _ := seededMux(t)
+	createCronBinding(t, mux, "s1", "*/10 * * * *")
+
+	rec := do(t, mux, http.MethodPatch, "/api/workspaces/WS/trigger-bindings/s1",
+		`{"name":"renamed","schedule":"0 9 * * *","schedule_timezone":"UTC"}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("patch status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	var out struct {
+		Name       string     `json:"name"`
+		Schedule   string     `json:"schedule"`
+		NextFireAt *time.Time `json:"next_fire_at"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if out.Name != "renamed" || out.Schedule != "0 9 * * *" {
+		t.Fatalf("patch did not apply: %+v", out)
+	}
+	if out.NextFireAt == nil || !out.NextFireAt.After(time.Now()) {
+		t.Fatalf("next_fire_at not recomputed to a future instant: %v", out.NextFireAt)
+	}
+}
+
+// TestPatchBinding_ScheduleOnNonCron400 rejects a schedule change on a non-cron
+// binding: an http binding fires by route, not schedule.
+func TestPatchBinding_ScheduleOnNonCron400(t *testing.T) {
+	mux, _ := seededMux(t)
+	if rec := do(t, mux, http.MethodPost, "/api/workspaces/WS/trigger-bindings",
+		`{"driver_id":"driver-1","driver_version_id":"version-1","route_key":"github.pr.opened","source_kind":"http","binding_id":"h1","enabled":true}`); rec.Code != http.StatusCreated {
+		t.Fatalf("create http binding: %d; body=%s", rec.Code, rec.Body.String())
+	}
+	rec := do(t, mux, http.MethodPatch, "/api/workspaces/WS/trigger-bindings/h1", `{"schedule":"*/5 * * * *"}`)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("patch schedule on http binding status = %d, want 400; body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+// TestPatchBinding_InvalidSchedule400 rejects a malformed cron expression.
+func TestPatchBinding_InvalidSchedule400(t *testing.T) {
+	mux, _ := seededMux(t)
+	createCronBinding(t, mux, "s1", "*/10 * * * *")
+	rec := do(t, mux, http.MethodPatch, "/api/workspaces/WS/trigger-bindings/s1", `{"schedule":"not a cron"}`)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("patch invalid schedule status = %d, want 400; body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+// TestPatchBinding_Errors covers the not-found and empty-patch guards.
+func TestPatchBinding_Errors(t *testing.T) {
+	mux, _ := seededMux(t)
+	createCronBinding(t, mux, "s1", "*/10 * * * *")
+
+	if rec := do(t, mux, http.MethodPatch, "/api/workspaces/WS/trigger-bindings/missing", `{"name":"x"}`); rec.Code != http.StatusNotFound {
+		t.Fatalf("patch missing binding status = %d, want 404; body=%s", rec.Code, rec.Body.String())
+	}
+	if rec := do(t, mux, http.MethodPatch, "/api/workspaces/WS/trigger-bindings/s1", `{}`); rec.Code != http.StatusBadRequest {
+		t.Fatalf("empty patch status = %d, want 400; body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+// TestDeleteBinding_GoneAndGrantsRevoked pins Decision 6: deleting a binding
+// removes it AND revokes its connector grants (no orphaned credentials).
+func TestDeleteBinding_GoneAndGrantsRevoked(t *testing.T) {
+	mux, st := seededMux(t)
+	ctx := context.Background()
+	createCronBinding(t, mux, "s2", "*/10 * * * *")
+
+	// Seed two active grants for the binding (memstore grants need no connector FK).
+	for i, action := range []string{"github.pull_request.read", "github.compare.read"} {
+		if _, err := st.ConnectorGrants().Create(ctx, store.ConnectorGrantCreate{
+			WorkspaceKey:    "WS",
+			GrantID:         "grant-" + string(rune('a'+i)),
+			ConnectorID:     "github",
+			BindingID:       "s2",
+			Action:          action,
+			ResourcePattern: "repo:o/r",
+		}); err != nil {
+			t.Fatalf("seed grant %d: %v", i, err)
+		}
+	}
+
+	rec := do(t, mux, http.MethodDelete, "/api/workspaces/WS/trigger-bindings/s2", "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("delete status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	var out struct {
+		Deleted       bool `json:"deleted"`
+		GrantsRevoked int  `json:"grants_revoked"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+		t.Fatalf("decode delete: %v", err)
+	}
+	if !out.Deleted || out.GrantsRevoked != 2 {
+		t.Fatalf("unexpected delete result: %+v", out)
+	}
+	// Binding is gone.
+	if _, err := st.TriggerBindings().Get(ctx, "WS", "s2"); err == nil {
+		t.Fatalf("binding s2 still present after delete")
+	}
+	// Grants are revoked (ListByBinding excludes revoked grants).
+	grants, err := st.ConnectorGrants().ListByBinding(ctx, "WS", "s2")
+	if err != nil {
+		t.Fatalf("list grants: %v", err)
+	}
+	if len(grants) != 0 {
+		t.Fatalf("expected 0 active grants after delete, got %d", len(grants))
+	}
+}
+
+// TestDeleteBinding_NotFound404 returns 404 for a missing binding.
+func TestDeleteBinding_NotFound404(t *testing.T) {
+	mux, _ := seededMux(t)
+	rec := do(t, mux, http.MethodDelete, "/api/workspaces/WS/trigger-bindings/missing", "")
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("delete missing status = %d, want 404; body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+// TestListBindings_FailureHealth pins Decision 7 inputs: consecutive_failures
+// counts failed runs from newest until a clean run, skipping in-flight runs,
+// and last_run_status is the newest run's status.
+func TestListBindings_FailureHealth(t *testing.T) {
+	mux, st := seededMux(t)
+	ctx := context.Background()
+	createCronBinding(t, mux, "s1", "*/10 * * * *")
+
+	// Claim order stamps strictly increasing StartedAt, so newest-first is
+	// D(running) > C(failed) > B(failed) > A(completed).
+	seed := func(runID string, status domain.DriverRunStatus, finish bool) {
+		t.Helper()
+		if _, err := st.DriverRuns().Create(ctx, store.DriverRunCreate{
+			WorkspaceKey: "WS", RunID: runID, DriverID: "driver-1", DriverVersionID: "version-1",
+		}); err != nil {
+			t.Fatalf("create run %s: %v", runID, err)
+		}
+		run, err := st.DriverRuns().Claim(ctx, "WS", runID, "node-1", "lease-"+runID)
+		if err != nil {
+			t.Fatalf("claim run %s: %v", runID, err)
+		}
+		if !finish {
+			return
+		}
+		if _, err := st.DriverRuns().Finish(ctx, "WS", runID, store.DriverRunFinish{
+			NodeID: run.NodeID, LeaseID: run.LeaseID, FencingToken: run.FencingToken, Status: status,
+		}); err != nil {
+			t.Fatalf("finish run %s: %v", runID, err)
+		}
+	}
+	seed("A", domain.DriverRunCompleted, true)
+	seed("B", domain.DriverRunFailed, true)
+	seed("C", domain.DriverRunFailed, true)
+	seed("D", domain.DriverRunRunning, false) // in-flight, must be skipped
+
+	rec := do(t, mux, http.MethodGet, "/api/workspaces/WS/trigger-bindings", "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("list status = %d; body=%s", rec.Code, rec.Body.String())
+	}
+	var resp struct {
+		Bindings []struct {
+			BindingID           string `json:"binding_id"`
+			LastRunStatus       string `json:"last_run_status"`
+			ConsecutiveFailures int    `json:"consecutive_failures"`
+		} `json:"bindings"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	var found bool
+	for _, b := range resp.Bindings {
+		if b.BindingID != "s1" {
+			continue
+		}
+		found = true
+		if b.ConsecutiveFailures != 2 {
+			t.Fatalf("consecutive_failures = %d, want 2 (D running skipped, C+B failed, A completed breaks)", b.ConsecutiveFailures)
+		}
+		if b.LastRunStatus != string(domain.DriverRunRunning) {
+			t.Fatalf("last_run_status = %q, want running", b.LastRunStatus)
+		}
+	}
+	if !found {
+		t.Fatalf("binding s1 not in list response")
+	}
+}
