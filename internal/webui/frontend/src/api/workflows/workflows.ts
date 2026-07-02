@@ -221,6 +221,26 @@ export async function createTriggerBinding(
   return post<TriggerBinding>(wsUrl(workspaceId, `/trigger-bindings`), req);
 }
 
+/**
+ * Run a binding on demand ("Run now"). Config-by-reference: the server creates a
+ * DriverRun for the binding's driver STAMPED with the binding, carrying NO
+ * client-supplied run-input — the run resolves its own config (e.g. a prompt
+ * agent's role) via the binding-config driver op. This is why Run-now no longer
+ * merges the binding's run-input into the payload on the client.
+ */
+export async function runTriggerBinding(
+  workspaceId: string,
+  bindingId: string,
+): Promise<WorkflowRun> {
+  return post<WorkflowRun>(
+    wsUrl(
+      workspaceId,
+      `/trigger-bindings/${encodeURIComponent(bindingId)}/run`,
+    ),
+    {},
+  );
+}
+
 export async function setTriggerBindingEnabled(
   workspaceId: string,
   bindingId: string,

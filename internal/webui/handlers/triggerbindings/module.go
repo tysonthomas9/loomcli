@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/driver"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/trigger"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
@@ -50,6 +51,10 @@ func (m *Module) Register(mux *http.ServeMux) {
 	// which carry no request body.
 	mux.HandleFunc("POST /api/workspaces/{ws}/trigger-bindings/{id}/enable", m.setEnabled(true))
 	mux.HandleFunc("POST /api/workspaces/{ws}/trigger-bindings/{id}/disable", m.setEnabled(false))
+	// Binding-scoped manual run (config-by-reference): creates a DriverRun for the
+	// binding's driver, STAMPED with the binding, carrying NO client-supplied
+	// run-input. The run reads its own config via loom.binding.config().
+	mux.HandleFunc("POST /api/workspaces/{ws}/trigger-bindings/{id}/run", m.runBinding)
 }
 
 type createBindingRequest struct {
@@ -337,6 +342,47 @@ func (m *Module) setEnabled(enabled bool) http.HandlerFunc {
 		// Plain binding, no computed next_fire_at (list-only for now).
 		handler.WriteJSON(w, http.StatusOK, binding)
 	}
+}
+
+// runBinding creates a DriverRun for a binding's driver on demand ("Run now"),
+// stamping the binding on the run so config resolves BY REFERENCE at run start
+// (the binding-config driver op). This is the manual counterpart to a scheduled
+// fire, and the reason the frontend Run-now no longer merges the binding's
+// run-input into the payload: the run reads its own config from provenance.
+//
+// The run is stamped two ways so the binding resolves regardless of whether the
+// backing store's run-create persists trigger_binding_id yet: (1) TriggerBindingID
+// directly (the canonical field), and (2) the binding's route key as SourceRef,
+// which the driver-op provenance lookup (lookupParentBindingID) also resolves. It
+// runs the binding's PINNED driver version (binding.DriverVersionID — the same
+// version a scheduled fire dispatches) so run-now faithfully reproduces a fire.
+// It deliberately carries NO run-input: config travels by reference now.
+func (m *Module) runBinding(w http.ResponseWriter, r *http.Request) {
+	ws := strings.TrimSpace(r.PathValue("ws"))
+	id := strings.TrimSpace(r.PathValue("id"))
+	if id == "" {
+		handler.RespondError(w, http.StatusBadRequest, "binding id is required")
+		return
+	}
+	binding, err := m.store.TriggerBindings().Get(r.Context(), ws, id)
+	if err != nil {
+		handler.WriteDomainError(w, err, "get trigger binding failed")
+		return
+	}
+	run, err := driver.CreateDriverRun(r.Context(), m.store, driver.RunOptions{
+		WorkspaceKey:     ws,
+		DriverID:         binding.DriverID,
+		DriverVersionID:  binding.DriverVersionID,
+		TriggerBindingID: binding.BindingID,
+		SourceKind:       "binding-run",
+		SourceRef:        firstNonEmpty(binding.RouteKey, binding.BindingID),
+		IdempotencyKey:   strings.TrimSpace(r.Header.Get("Idempotency-Key")),
+	})
+	if err != nil {
+		handler.WriteDomainError(w, err, "run trigger binding failed")
+		return
+	}
+	handler.WriteJSON(w, http.StatusAccepted, run)
 }
 
 // updateBindingRequest is the PATCH body: only the operator-editable fields are

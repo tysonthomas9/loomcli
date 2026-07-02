@@ -132,6 +132,9 @@ test("contract: every op sends only frozen camelCase wire fields to its frozen p
     await client.issues.addLabel({ issueId: "ISSUE-1", label: "review-cycle:1" });
     await client.issues.removeLabel({ issueId: "ISSUE-1", label: "review-cycle:1" });
     await client.roles.get({ name: "docs-assistant" });
+    // binding.config takes NO input: the binding is resolved server-side from
+    // the calling run's provenance (a body binding id would be ignored).
+    await client.binding.config();
 
     const exercised = new Set();
     for (const call of calls) {

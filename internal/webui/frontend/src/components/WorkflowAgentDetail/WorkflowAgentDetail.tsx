@@ -19,7 +19,6 @@ import { useToast } from "@/hooks/ui/useToast";
 import {
   getWorkspaceRole,
   isTerminalWorkflowRunStatus,
-  parseBindingRunInput,
   promptAgentRoleName,
   updateWorkspaceRole,
   type TriggerBinding,
@@ -63,7 +62,12 @@ export interface WorkflowAgentDetailProps {
   workspaceId: string;
   binding: TriggerBinding;
   onSetEnabled: (bindingId: string, enabled: boolean) => Promise<void>;
-  onRunWorkflow: (name: string, payload: unknown) => Promise<WorkflowRun>;
+  /**
+   * Run the binding on demand (config-by-reference). The run wears the binding's
+   * role via server-side provenance — this component no longer merges the
+   * binding's run-input into a payload.
+   */
+  onRunBinding: (bindingId: string) => Promise<WorkflowRun>;
   /** Rename / reschedule the binding (PATCH). Resolves with the updated binding. */
   onUpdate: (
     bindingId: string,
@@ -102,7 +106,7 @@ export function WorkflowAgentDetail({
   workspaceId,
   binding,
   onSetEnabled,
-  onRunWorkflow,
+  onRunBinding,
   onUpdate,
   onDelete,
   onDeleted,
@@ -138,11 +142,11 @@ export function WorkflowAgentDetail({
   const handleRunNow = useCallback(async () => {
     setBusy(true);
     try {
-      // Run now reproduces what a scheduled fire would deliver: for a prompt
-      // agent that means the binding's run-input (roleName/backend), which a
-      // cron tick merges into the payload but a bare manual run would omit.
-      const runPayload = promptRoleName ? parseBindingRunInput(binding) : {};
-      const run = await onRunWorkflow(binding.driver_id, runPayload);
+      // Config-by-reference: the binding-scoped run-now endpoint stamps the
+      // binding on the run and the run resolves its own config (roleName/backend)
+      // server-side from provenance. No client-side run-input merge — that whole
+      // by-value transport is gone.
+      const run = await onRunBinding(binding.binding_id);
       showToast(`Run queued for ${binding.binding_id}: ${run.run_id}`, {
         type: "success",
       });
@@ -153,7 +157,7 @@ export function WorkflowAgentDetail({
     } finally {
       setBusy(false);
     }
-  }, [binding, promptRoleName, onRunWorkflow, refresh, showToast]);
+  }, [binding.binding_id, onRunBinding, refresh, showToast]);
 
   const handleToggleEnabled = useCallback(async () => {
     setBusy(true);

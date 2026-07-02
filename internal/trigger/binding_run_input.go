@@ -9,13 +9,22 @@ import (
 
 // Binding run-input (Phase 4 prompt-agent packaging).
 //
-// PROBLEM. A dispatched DriverRun receives the trigger source's payload verbatim
-// as its input (fleet-db copies dispatch.Payload onto the run, and the workflow
-// runtime hands it to the workflow as ctx.payload — see
-// internal/driver/executor.go flueRuntimeEnv → LOOM_FLUE_INVOKE_PAYLOAD). A cron
-// tick therefore delivers only {"tick": ...}. There is no per-binding config on
-// the run: a prompt agent (the prompt-agent builtin CONFIGURED WITH A ROLE) has
-// no way to learn which role to wear.
+// LEGACY-COMPAT. Dispatch-time run-input merging (this file + cron.go dispatchTick)
+// is now LEGACY: config-by-reference — the binding-config driver op, resolved from
+// the calling run's provenance — is the CANONICAL way a run learns its binding's
+// config. Copying config into the payload BY VALUE is what made the merge sites
+// multiply (cron, frontend run-now, the missing internal-dispatch site); by
+// reference there is ONE reader (binding.config) and the event payload carries
+// only event data. This merging is retained for older stamped runs and for
+// explicit-input compatibility, and is deleted after migration.
+//
+// PROBLEM (the by-value era this solved). A dispatched DriverRun receives the
+// trigger source's payload verbatim as its input (fleet-db copies dispatch.Payload
+// onto the run, and the workflow runtime hands it to the workflow as ctx.payload —
+// see internal/driver/executor.go flueRuntimeEnv → LOOM_FLUE_INVOKE_PAYLOAD). A
+// cron tick therefore delivers only {"tick": ...}. There is no per-binding config
+// on the run: a prompt agent (the prompt-agent builtin CONFIGURED WITH A ROLE) had
+// no way to learn which role to wear — until config-by-reference.
 //
 // WHY NOT A NEW BINDING FIELD. The platform store is always the fleet-db HTTP
 // client (embedded subprocess in local mode, remote in cloud —

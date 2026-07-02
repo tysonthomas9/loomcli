@@ -19,6 +19,7 @@ import (
 var frozenDriverOps = []string{
 	"active-task-runs",
 	"agent-orchestration-session",
+	"binding-config",
 	"claim-ready",
 	"claim-task",
 	"complete-task",

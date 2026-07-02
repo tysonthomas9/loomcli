@@ -228,12 +228,17 @@ func (s *CronScheduler) sweepBinding(ctx context.Context, ws string, binding *do
 // dedup rides the trigger-event idempotency key, so re-dispatch of the same
 // fire instant (overlapping schedulers, retried sweeps) is a no-op replay.
 //
-// The dispatched run's payload is the binding's run-input (parsed from
-// source_config_ref — see binding_run_input.go) with the cron tick merged on
-// top, so a prompt agent's configured roleName/backend reach the fired run's
-// input alongside {"tick": ...}. Cron is 1:1 (a unique route key per binding),
-// so this per-binding merge is always correct. A binding with no run-input
-// dispatches the exact tick-only payload as before.
+// LEGACY-COMPAT (config-by-reference is canonical). The dispatched run's payload
+// is the binding's run-input (parsed from source_config_ref — see
+// binding_run_input.go) with the cron tick merged on top. This dispatch-time
+// merge is now LEGACY: config-by-reference (the binding-config driver op) is the
+// canonical way a run learns its binding's config — the run reads it from its own
+// provenance at start rather than receiving it copied into the payload. The merge
+// is retained for older stamped runs and for explicit-input compatibility (a
+// binding whose source_config_ref carries non-role run-input still delivers it),
+// and is deleted after migration. Cron is 1:1 (a unique route key per binding),
+// so the per-binding merge stays correct meanwhile. A binding with no run-input
+// dispatches the exact tick-only payload.
 func (s *CronScheduler) dispatchTick(ctx context.Context, ws string, binding *domain.TriggerBinding, fire time.Time) error {
 	payload, err := MergeRunInputPayload(
 		BindingRunInput(binding),

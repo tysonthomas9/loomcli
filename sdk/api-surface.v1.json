@@ -322,6 +322,10 @@
       "fields": [
         "name"
       ]
+    },
+    "binding-config": {
+      "method": "POST",
+      "fields": []
     }
   },
   "client": {
@@ -376,6 +380,9 @@
       ],
       "roles": [
         "get"
+      ],
+      "binding": [
+        "config"
       ]
     },
     "connectorMethods": {

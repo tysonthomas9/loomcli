@@ -165,7 +165,7 @@ function AgentsPageInner(): JSX.Element {
     setEnabled: setBindingEnabled,
     updateBinding,
     deleteBinding,
-    runWorkflow,
+    runBinding,
   } = useAutomations(workspaceId, !!workspaceId);
   const selectedBinding = useMemo(
     () =>
@@ -593,7 +593,7 @@ function AgentsPageInner(): JSX.Element {
             workspaceId={workspaceId}
             binding={selectedBinding}
             onSetEnabled={setBindingEnabled}
-            onRunWorkflow={runWorkflow}
+            onRunBinding={runBinding}
             onUpdate={updateBinding}
             onDelete={deleteBinding}
             onDeleted={() => navigate(`/ws/${workspaceId}/kanban`)}

@@ -30,9 +30,14 @@ function toJsonResult(value) {
 // This is the workflow-plane realization of a "role agent": a generic task-runner
 // driver CONFIGURED WITH A PROMPT. The role's brain (its prompt) travels as DATA,
 // never as code. The workflow itself is a thin orchestrator:
-//   1. resolve the role prompt — a named role resolves through the driver SDK's
-//      read-only roles surface (loom.roles.get), so "one prompt edit updates
-//      every agent"; input.prompt still overrides for one-off dispatch;
+//   1. resolve the role prompt — CONFIG BY REFERENCE. The "config travels as
+//      input" era is over: a dispatched run's payload carries only EVENT data
+//      (taskId, tick), not the binding's config. When the payload names no role,
+//      the agent reads its OWN binding's config from the calling run's verified
+//      provenance (loom.binding.config → roleName), then resolves the prompt body
+//      through the read-only roles surface (loom.roles.get), so "one prompt edit
+//      updates every agent". Precedence: input.prompt (explicit one-off override)
+//      > input.roleName > binding.config().roleName;
 //   2. claim a REAL ready loom task with the existing task lease. A specific
 //      target claims by id (loom.tasks.claim — no claim-and-release race);
 //      otherwise pickup is filterless (loom.tasks.claimReady, queue order);
@@ -55,8 +60,10 @@ export async function run(ctx) {
   const loom = createLoomDriverClient({ input });
 
   // 1. Resolve the role prompt as DATA. Precedence (documented):
-  //    input.prompt (explicit one-off override) > the named role's prompt body
-  //    (roles.get(input.roleName)) > input.taskPrompt / input.rolePrompt aliases.
+  //    input.prompt (explicit one-off override) > input.roleName >
+  //    binding.config().roleName (config by reference) > input.taskPrompt /
+  //    input.rolePrompt aliases. The named role's prompt body is materialized
+  //    via roles.get.
   const resolved = await resolvePromptSource(loom, input);
   const prompt = resolved.prompt;
   const promptSource = resolved.source;
@@ -138,14 +145,17 @@ export async function run(ctx) {
 }
 
 // resolvePromptSource materializes the role prompt with documented precedence:
-//   input.prompt > roles.get(input.roleName).prompt > input.taskPrompt > input.rolePrompt.
-// A named role that carries no prompt body is flagged (roleResolved) so the
-// caller fails with a precise message instead of silently falling through.
+//   input.prompt > roles.get(effectiveRoleName).prompt > input.taskPrompt > input.rolePrompt,
+// where effectiveRoleName = input.roleName > binding.config().roleName (config by
+// reference). A named role that carries no prompt body is flagged (roleResolved)
+// so the caller fails with a precise message instead of silently falling through.
 async function resolvePromptSource(loom, input) {
   if (stringValue(input.prompt)) {
     return { prompt: stringValue(input.prompt), source: "input.prompt" };
   }
-  const roleName = stringValue(input.roleName);
+  // CONFIG BY REFERENCE: input.roleName wins, else fall back to the roleName
+  // configured on THIS run's binding (resolved server-side from provenance).
+  const roleName = stringValue(input.roleName) || (await bindingConfigRoleName(loom));
   if (roleName) {
     const record = (await loom.roles.get({ name: roleName })) || {};
     const rolePrompt = stringValue(record.prompt);
@@ -161,6 +171,22 @@ async function resolvePromptSource(loom, input) {
     return { prompt: stringValue(input.rolePrompt), source: "input.rolePrompt" };
   }
   return { prompt: "", source: "" };
+}
+
+// bindingConfigRoleName reads the roleName configured on the CALLING run's
+// trigger binding via config-by-reference (loom.binding.config). The server
+// resolves the binding from the run's verified provenance — never from input —
+// so the event payload can carry only event data (taskId/tick). Returns "" when
+// the run has no binding (a bare `loom workflow run` — the op 404s) or the
+// binding configures no role; either way the caller falls through to the
+// explicit-input aliases.
+async function bindingConfigRoleName(loom) {
+  try {
+    const cfg = (await loom.binding.config()) || {};
+    return stringValue(cfg.roleName);
+  } catch {
+    return "";
+  }
 }
 
 // claimTargetTask claims a ready task via the existing task lease. A specific

@@ -250,10 +250,16 @@ func startIssueJournalBridge(ctx context.Context, st store.Store) {
 		return
 	}
 	bridge := &trigger.IssueJournalBridge{
-		Store:         st,
-		Source:        &trigger.InternalSource{Store: st},
-		Reader:        reader,
-		WorkspaceKey:  os.Getenv(bootstrap.EnvWorkspace),
+		Store:  st,
+		Source: &trigger.InternalSource{Store: st},
+		Reader: reader,
+		// Resolve via the SHARED driver-automation scope, like the cron scheduler
+		// and the run executor. The bridge feeds task.ready events that fire prompt-
+		// agent bindings whose runs the executor must then claim; if the bridge
+		// ingested in a workspace the executor won't run in, those runs queue
+		// forever (the SANDBOX-vs-LOCALMODE bug). Keeps the env-override pattern:
+		// LOOM_DRIVER_EXECUTOR_WORKSPACE overrides, "*" unscopes to all workspaces.
+		WorkspaceKey:  driverAutomationWorkspaceScope(),
 		Cursors:       cursors,
 		EmitTaskReady: taskReadyEventsEnabled(),
 	}

@@ -142,6 +142,7 @@ func NewModule(cfg Config) *Module {
 	m.ops = map[string]opHandler{
 		"claim-ready":                 m.claimReady,
 		"claim-task":                  m.claimTask,
+		"binding-config":              m.bindingConfig,
 		"role-get":                    m.roleGet,
 		"epic-get":                    m.epicGet,
 		"epic-snapshot":               m.epicSnapshot,

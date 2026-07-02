@@ -103,4 +103,17 @@ export const generatedNamespaces = [
       },
     ],
   },
+  {
+    namespace: "binding",
+    doc: "Config-by-reference: the CALLING run's trigger-binding config (run-input fields like roleName, plus bindingId/sourceKind/schedule), resolved server-side from run provenance. Takes no input — a body binding id is ignored.",
+    ops: [
+      {
+        method: "config",
+        op: "binding-config",
+        httpMethod: "POST",
+        result: "Record<string, unknown> | null",
+        fields: [],
+      },
+    ],
+  },
 ];

@@ -8101,6 +8101,7 @@ components:
         source_ref: { type: string }
         epic_id: { type: string }
         parent_run_id: { type: string }
+        trigger_binding_id: { type: string }
         idempotency_key: { type: string }
         input:
           $ref: "#/components/schemas/StringMap"

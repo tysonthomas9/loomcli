@@ -5,6 +5,7 @@ import {
   deleteTriggerBinding,
   listTriggerBindings,
   listWorkflows,
+  runTriggerBinding,
   setTriggerBindingEnabled,
   startWorkflowRun,
   updateTriggerBinding,
@@ -49,6 +50,12 @@ export interface UseAutomationsReturn {
   ) => Promise<TriggerBinding>;
   deleteBinding: (bindingId: string) => Promise<void>;
   runWorkflow: (name: string, payload: unknown) => Promise<WorkflowRun>;
+  /**
+   * Run a binding on demand — config-by-reference (the run wears the binding's
+   * role via provenance, no client-side run-input merge). Prefer this over
+   * runWorkflow whenever a binding is in scope.
+   */
+  runBinding: (bindingId: string) => Promise<WorkflowRun>;
 }
 
 /**
@@ -167,6 +174,12 @@ export function useAutomations(
     [workspaceId],
   );
 
+  const runBinding = useCallback(
+    (bindingId: string): Promise<WorkflowRun> =>
+      runTriggerBinding(workspaceId, bindingId),
+    [workspaceId],
+  );
+
   return {
     workflows,
     bindings,
@@ -179,5 +192,6 @@ export function useAutomations(
     updateBinding,
     deleteBinding,
     runWorkflow,
+    runBinding,
   };
 }

@@ -129,24 +129,46 @@ func (m *Module) connectorDispatch(ctx context.Context, ws string, id driverIden
 }
 
 // resolveParentBindingID derives the grant-lookup BindingID from the verified
-// parent run's server-side provenance, never from anything the caller sent:
-//
-//  1. trigger-dispatched runs carry their TriggerEvent id in SourceRef, and
-//     the run's TriggerDelivery names the binding that admitted it;
-//  2. route-key-sourced runs (e.g. epic runs created through the
-//     epics.runs.create binding) carry the binding's route key in SourceRef.
-//
-// A run with neither lineage has no binding, hence no grants — deny-by-default
-// refuses it before any store or provider work happens. This refusal cannot
-// be journaled: without a binding there is no valid ConnectorCallRecord.
+// parent run's server-side provenance (via lookupParentBindingID), applying the
+// connector-egress deny-by-default policy: a run with no binding lineage has no
+// grants, so it is refused before any store or provider work happens. This
+// refusal cannot be journaled: without a binding there is no valid
+// ConnectorCallRecord.
 func (m *Module) resolveParentBindingID(ctx context.Context, ws string, parent *domain.DriverRun) (string, error) {
-	denied := func() error {
-		return fmt.Errorf("driver run %q has no trigger binding; connector egress is deny-by-default: %w",
+	bindingID, err := m.lookupParentBindingID(ctx, ws, parent)
+	if errors.Is(err, domain.ErrNotFound) {
+		return "", fmt.Errorf("driver run %q has no trigger binding; connector egress is deny-by-default: %w",
 			parent.RunID, domain.ErrGrantDenied)
+	}
+	if err != nil {
+		return "", err
+	}
+	return bindingID, nil
+}
+
+// lookupParentBindingID resolves the trigger binding a VERIFIED parent run was
+// dispatched by, from server-side provenance ONLY — never from request input
+// (the same confused-deputy class the actor-lock fix closed). Precedence:
+//
+//  0. the run's own TriggerBindingID, stamped by fleet-db's trigger-dispatch leg
+//     (and by the binding-scoped run-now endpoint) — the direct, canonical source
+//     for runs the fleet-db decode now carries;
+//  1. else its TriggerEvent id in SourceRef → the TriggerDelivery that admitted
+//     the run names the binding;
+//  2. else a route-key-sourced run (epic runs through epics.runs.create, or a
+//     binding-scoped run-now that stamps the binding's route key) carries the
+//     binding's route key in SourceRef.
+//
+// Returns domain.ErrNotFound (wrapped) when the run has no binding lineage;
+// callers map that onto their own policy — connector egress denies-by-default,
+// binding.config surfaces a clean not_found.
+func (m *Module) lookupParentBindingID(ctx context.Context, ws string, parent *domain.DriverRun) (string, error) {
+	if id := strings.TrimSpace(parent.TriggerBindingID); id != "" {
+		return id, nil
 	}
 	sourceRef := strings.TrimSpace(parent.SourceRef)
 	if sourceRef == "" {
-		return "", denied()
+		return "", fmt.Errorf("driver run %q has no binding provenance: %w", parent.RunID, domain.ErrNotFound)
 	}
 	deliveries, err := m.store.TriggerDeliveries().List(ctx, ws, store.TriggerDeliveryFilter{TriggerEventID: sourceRef})
 	if err != nil && !errors.Is(err, domain.ErrNotFound) {
@@ -160,7 +182,7 @@ func (m *Module) resolveParentBindingID(ctx context.Context, ws string, parent *
 	binding, err := m.store.TriggerBindings().GetByRouteKey(ctx, ws, sourceRef)
 	if err != nil {
 		if errors.Is(err, domain.ErrNotFound) {
-			return "", denied()
+			return "", fmt.Errorf("driver run %q source ref %q resolves to no binding: %w", parent.RunID, sourceRef, domain.ErrNotFound)
 		}
 		return "", fmt.Errorf("resolve trigger binding for driver run %q: %w", parent.RunID, err)
 	}

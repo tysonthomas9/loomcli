@@ -127,6 +127,9 @@ export class LoomDriverClient {
     this.roles = Object.freeze({
       get: (input = {}) => this.#httpCall("role-get", { name: input.name }),
     });
+    this.binding = Object.freeze({
+      config: (input = {}) => this.#httpCall("binding-config", {}),
+    });
     // </gen:namespaces>
   }
 

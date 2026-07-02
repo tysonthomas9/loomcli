@@ -21,12 +21,14 @@ func promptAgentSource(t *testing.T) string {
 	return source
 }
 
-// The prompt-agent orchestrator, post-GAP: it resolves the role prompt through
-// the driver SDK roles surface (GAP C), claims the exact target task by id
-// (GAP B) while keeping filterless claim-ready for untargeted pickup, and
-// dispatches the bundled local-task-runner (which a custom registration reaches
-// via workspace-global runner resolution, GAP A). These anchors lock that
-// authoring contract; the live full-circle exercises the runtime path.
+// The prompt-agent orchestrator, post-GAP: it resolves the role prompt CONFIG BY
+// REFERENCE — input.roleName else the binding's configured roleName read from the
+// calling run's provenance (loom.binding.config) — then through the driver SDK
+// roles surface (GAP C), claims the exact target task by id (GAP B) while keeping
+// filterless claim-ready for untargeted pickup, and dispatches the bundled
+// local-task-runner (which a custom registration reaches via workspace-global
+// runner resolution, GAP A). These anchors lock that authoring contract; the
+// live full-circle exercises the runtime path.
 func TestPromptAgentWorkflowSourceContract(t *testing.T) {
 	source := promptAgentSource(t)
 	for _, want := range []string{
@@ -36,6 +38,10 @@ func TestPromptAgentWorkflowSourceContract(t *testing.T) {
 		"resolvePromptSource(loom, input)",
 		// input.prompt still overrides a resolved role prompt (precedence).
 		`return { prompt: stringValue(input.prompt), source: "input.prompt" };`,
+		// Config by reference: roleName falls back to the binding's config when
+		// the event payload names none (the internal task.ready / run-now lane).
+		"loom.binding.config()",
+		"bindingConfigRoleName(loom)",
 		// GAP B: targeted claim-by-id, plus filterless pickup retained.
 		"loom.tasks.claim({ taskId: targetId, actor })",
 		"loom.tasks.claimReady({ actor, limit: 1 })",

@@ -491,12 +491,14 @@ func resolveDriverExecutorWorkspace(override, inherited string) string {
 // driverAutomationWorkspaceScope is the single resolved workspace scope shared
 // by serve's driver-run automation loops: the cron scheduler (fires ticks →
 // runs), the outbox + trigger-delivery sweepers (move ticks → runs and retry),
-// the stale-task + await-timeout sweepers (recover those runs), and the run
-// executor + task worker (claim + execute). They MUST agree: a scheduler that
-// fires runs in a workspace the executor won't claim leaves them queued forever
-// (the original SANDBOX-vs-LOCALMODE bug). The issue-journal bridge is
-// deliberately NOT included — it is issue-plane ingestion, not driver-run
-// automation, and stays on LOOM_WORKSPACE.
+// the stale-task + await-timeout sweepers (recover those runs), the run
+// executor + task worker (claim + execute), and the issue-journal bridge (feeds
+// task.ready events that fire prompt-agent bindings). They MUST agree: a
+// scheduler or bridge that produces runs in a workspace the executor won't claim
+// leaves them queued forever (the original SANDBOX-vs-LOCALMODE bug). The bridge
+// was previously left on LOOM_WORKSPACE as issue-plane ingestion; now that its
+// task.ready lane drives the same driver-run automation loop, it joins the shared
+// scope for parity.
 func driverAutomationWorkspaceScope() string {
 	return resolveDriverExecutorWorkspace(os.Getenv(envLoomDriverExecutorWorkspace), os.Getenv(bootstrap.EnvWorkspace))
 }

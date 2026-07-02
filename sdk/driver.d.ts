@@ -485,6 +485,10 @@ export declare class LoomDriverClient {
   readonly roles: {
     get(input: { name: string }): Promise<{ role: Record<string, unknown> | null; prompt: string } | null>;
   };
+  /** Config-by-reference: the CALLING run's trigger-binding config (run-input fields like roleName, plus bindingId/sourceKind/schedule), resolved server-side from run provenance. Takes no input — a body binding id is ignored. */
+  readonly binding: {
+    config(input?: Record<string, unknown>): Promise<Record<string, unknown> | null>;
+  };
   // </gen:namespaces>
 
   completed(input?: { summary?: string }): LoomDriverResult;
