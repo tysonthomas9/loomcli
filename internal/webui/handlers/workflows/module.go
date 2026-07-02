@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net/http"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -39,6 +40,10 @@ func (m *Module) Register(mux *http.ServeMux) {
 	// close the version-lifecycle gaps that were CLI-only.
 	mux.HandleFunc("GET /api/workspaces/{ws}/workflows/{name}/source", m.getWorkflowSource)
 	mux.HandleFunc("GET /api/workspaces/{ws}/workflows/{name}/versions", m.listWorkflowVersions)
+	// Run history for a workflow: a thin, read-only view over DriverRunStore.List
+	// so the UI can show past/active runs (Phase 1). Unlike the run/version
+	// mutation paths it must not self-heal a driver, so it uses ResolveDriver.
+	mux.HandleFunc("GET /api/workspaces/{ws}/workflows/{name}/runs", m.listWorkflowRuns)
 	mux.HandleFunc("POST /api/workspaces/{ws}/workflows/{name}/versions/{versionId}/approve", m.approveWorkflowVersion)
 	mux.HandleFunc("POST /api/workspaces/{ws}/workflows/{name}/versions/{versionId}/activate", m.activateWorkflowVersion)
 	mux.HandleFunc("POST /api/workspaces/{ws}/workflows/{name}", m.createWorkflowRun)
@@ -112,6 +117,121 @@ func (m *Module) listWorkflowVersions(w http.ResponseWriter, r *http.Request) {
 		"driver_id":         drv.DriverID,
 		"active_version_id": drv.ActiveVersionID,
 		"versions":          versions,
+	})
+}
+
+const (
+	defaultRunsLimit = 50
+	maxRunsLimit     = 200
+)
+
+// listWorkflowRuns returns a workflow's run history, newest first, over
+// DriverRunStore.List. It resolves the workflow with ResolveDriver (never
+// EnsureAndResolveDriver): listing runs is a read and must not self-heal or
+// register a driver as a side effect, so an unregistered workflow is a 404.
+func (m *Module) listWorkflowRuns(w http.ResponseWriter, r *http.Request) {
+	ws := strings.TrimSpace(r.PathValue("ws"))
+	name := strings.TrimSpace(r.PathValue("name"))
+	if ws == "" || name == "" {
+		writeError(w, http.StatusBadRequest, "workspace and workflow name are required")
+		return
+	}
+	status, ok := parseRunStatusFilter(w, r)
+	if !ok {
+		return
+	}
+	limit, ok := parseRunLimit(w, r)
+	if !ok {
+		return
+	}
+	drv, err := workflowdefs.ResolveDriver(r.Context(), m.store, ws, name)
+	if err != nil {
+		writeDomainError(w, err, "resolve workflow driver failed")
+		return
+	}
+	// Limit is deliberately NOT passed to the store: memstore orders by
+	// CreatedAt and the fleet-db backend applies its limit server-side before
+	// any StartedAt order, so a store-side limit could drop runs that belong in
+	// the newest-by-StartedAt window. Fetch the filtered set, order it here,
+	// then truncate.
+	runs, err := m.store.DriverRuns().List(r.Context(), ws, store.DriverRunFilter{
+		DriverID: drv.DriverID,
+		Status:   status,
+	})
+	if err != nil {
+		writeDomainError(w, err, "list workflow runs failed")
+		return
+	}
+	sortDriverRunsNewestFirst(runs)
+	if len(runs) > limit {
+		runs = runs[:limit]
+	}
+	handler.WriteJSON(w, http.StatusOK, map[string]any{
+		"driver_id":         drv.DriverID,
+		"active_version_id": drv.ActiveVersionID,
+		"runs":              runs,
+	})
+}
+
+// parseRunStatusFilter reads the optional ?status= filter and validates it
+// against the known DriverRunStatus values. On an unknown status it writes a
+// 400 and returns ok=false; an empty filter is allowed (no status constraint).
+func parseRunStatusFilter(w http.ResponseWriter, r *http.Request) (domain.DriverRunStatus, bool) {
+	raw := strings.TrimSpace(r.URL.Query().Get("status"))
+	if raw == "" {
+		return "", true
+	}
+	status := domain.DriverRunStatus(raw)
+	if !isKnownRunStatus(status) {
+		writeError(w, http.StatusBadRequest, "invalid status: "+raw)
+		return "", false
+	}
+	return status, true
+}
+
+func isKnownRunStatus(s domain.DriverRunStatus) bool {
+	switch s {
+	case domain.DriverRunQueued, domain.DriverRunRunning, domain.DriverRunCompleted,
+		domain.DriverRunFailed, domain.DriverRunNeedsReview, domain.DriverRunCancelled,
+		domain.DriverRunSuspendedAwaitingEvent:
+		return true
+	default:
+		return false
+	}
+}
+
+// parseRunLimit reads the optional ?limit= (default 50, capped at 200). A
+// non-numeric or < 1 value is a 400; a value above the cap is clamped, not
+// rejected. On error it writes the response and returns ok=false.
+func parseRunLimit(w http.ResponseWriter, r *http.Request) (int, bool) {
+	raw := strings.TrimSpace(r.URL.Query().Get("limit"))
+	if raw == "" {
+		return defaultRunsLimit, true
+	}
+	limit, err := strconv.Atoi(raw)
+	if err != nil || limit < 1 {
+		writeError(w, http.StatusBadRequest, "invalid limit: "+raw)
+		return 0, false
+	}
+	if limit > maxRunsLimit {
+		limit = maxRunsLimit
+	}
+	return limit, true
+}
+
+// sortDriverRunsNewestFirst orders runs by StartedAt descending, with
+// not-yet-started (zero StartedAt) runs last, breaking ties by CreatedAt
+// descending so the order is a deterministic total order.
+func sortDriverRunsNewestFirst(runs []*domain.DriverRun) {
+	sort.Slice(runs, func(i, j int) bool {
+		a, b := runs[i], runs[j]
+		if a.StartedAt.IsZero() != b.StartedAt.IsZero() {
+			return !a.StartedAt.IsZero() // a started run precedes an unstarted one
+		}
+		if !a.StartedAt.Equal(b.StartedAt) {
+			return a.StartedAt.After(b.StartedAt)
+		}
+		return a.CreatedAt.After(b.CreatedAt)
 	})
 }
 

@@ -75,6 +75,70 @@ func TestValidateScheduleTimezone(t *testing.T) {
 	}
 }
 
+func TestNextFire(t *testing.T) {
+	tests := []struct {
+		name     string
+		schedule string
+		timezone string
+		after    time.Time
+		want     time.Time
+		wantErr  bool
+	}{
+		{
+			name:     "every five minutes rounds up in UTC",
+			schedule: "*/5 * * * *",
+			after:    time.Date(2026, 6, 11, 10, 2, 30, 0, time.UTC),
+			want:     time.Date(2026, 6, 11, 10, 5, 0, 0, time.UTC),
+		},
+		{
+			name:     "strictly after a boundary instant",
+			schedule: "*/5 * * * *",
+			after:    time.Date(2026, 6, 11, 10, 5, 0, 0, time.UTC),
+			want:     time.Date(2026, 6, 11, 10, 10, 0, 0, time.UTC),
+		},
+		{
+			name:     "daily nine am evaluated in America/New_York",
+			schedule: "0 9 * * *",
+			timezone: "America/New_York",
+			after:    time.Date(2026, 6, 11, 12, 0, 0, 0, time.UTC), // 08:00 EDT
+			want:     time.Date(2026, 6, 11, 13, 0, 0, 0, time.UTC), // 09:00 EDT
+		},
+		{
+			name:     "invalid schedule",
+			schedule: "not-a-cron",
+			after:    time.Date(2026, 6, 11, 10, 0, 0, 0, time.UTC),
+			wantErr:  true,
+		},
+		{
+			name:     "invalid timezone",
+			schedule: "* * * * *",
+			timezone: "Mars/Olympus_Mons",
+			after:    time.Date(2026, 6, 11, 10, 0, 0, 0, time.UTC),
+			wantErr:  true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := trigger.NextFire(tt.schedule, tt.timezone, tt.after)
+			if tt.wantErr {
+				if !errors.Is(err, trigger.ErrInvalidSchedule) {
+					t.Fatalf("NextFire(%q, %q) err = %v, want ErrInvalidSchedule", tt.schedule, tt.timezone, err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("NextFire(%q, %q) err = %v, want nil", tt.schedule, tt.timezone, err)
+			}
+			if !got.Equal(tt.want) {
+				t.Fatalf("NextFire(%q, %q, %s) = %s, want %s", tt.schedule, tt.timezone, tt.after.UTC(), got.UTC(), tt.want.UTC())
+			}
+			if !got.After(tt.after) {
+				t.Fatalf("NextFire returned %s, want an instant strictly after %s", got.UTC(), tt.after.UTC())
+			}
+		})
+	}
+}
+
 // cronBinding is one binding fixture row for the scheduler tests.
 type cronBinding struct {
 	bindingID  string

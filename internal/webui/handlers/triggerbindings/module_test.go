@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
@@ -146,6 +147,53 @@ func TestCreateBinding_CronDerivesRouteKey(t *testing.T) {
 	rec3 := do(t, mux, http.MethodPost, "/api/workspaces/WS/trigger-bindings", `{`+base+`}`)
 	if rec3.Code != http.StatusBadRequest {
 		t.Fatalf("cron without binding_id status = %d, want 400; body=%s", rec3.Code, rec3.Body.String())
+	}
+}
+
+// TestListBindings_NextFireAt pins the Phase-1 computed field: an enabled cron
+// binding carries a future next_fire_at, while disabled cron and non-cron
+// bindings omit it.
+func TestListBindings_NextFireAt(t *testing.T) {
+	mux, _ := seededMux(t)
+
+	create := func(body string) {
+		t.Helper()
+		if rec := do(t, mux, http.MethodPost, "/api/workspaces/WS/trigger-bindings", body); rec.Code != http.StatusCreated {
+			t.Fatalf("create status = %d; body=%s", rec.Code, rec.Body.String())
+		}
+	}
+	create(`{"driver_id":"driver-1","driver_version_id":"version-1","source_kind":"cron","schedule":"*/5 * * * *","binding_id":"cron-enabled","enabled":true}`)
+	create(`{"driver_id":"driver-1","driver_version_id":"version-1","source_kind":"cron","schedule":"*/5 * * * *","binding_id":"cron-disabled","enabled":false}`)
+	create(`{"driver_id":"driver-1","driver_version_id":"version-1","route_key":"github.pr.opened","source_kind":"http","binding_id":"http-enabled","enabled":true}`)
+
+	rec := do(t, mux, http.MethodGet, "/api/workspaces/WS/trigger-bindings", "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("list status = %d; body=%s", rec.Code, rec.Body.String())
+	}
+	var resp struct {
+		Bindings []struct {
+			BindingID  string     `json:"binding_id"`
+			NextFireAt *time.Time `json:"next_fire_at"`
+		} `json:"bindings"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode list: %v", err)
+	}
+	byID := map[string]*time.Time{}
+	for _, b := range resp.Bindings {
+		byID[b.BindingID] = b.NextFireAt
+	}
+	if len(byID) != 3 {
+		t.Fatalf("listed bindings = %d, want 3 (%+v)", len(byID), resp.Bindings)
+	}
+	if next := byID["cron-enabled"]; next == nil || !next.After(time.Now()) {
+		t.Fatalf("cron-enabled next_fire_at = %v, want a future instant", next)
+	}
+	if next := byID["cron-disabled"]; next != nil {
+		t.Fatalf("cron-disabled next_fire_at = %v, want absent", next)
+	}
+	if next := byID["http-enabled"]; next != nil {
+		t.Fatalf("http-enabled next_fire_at = %v, want absent", next)
 	}
 }
 

@@ -11,9 +11,11 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/store"
+	"github.com/tysonthomas9/loomcli/internal/trigger"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
 	workflowdefs "github.com/tysonthomas9/loomcli/internal/workflows"
 )
@@ -59,6 +61,15 @@ type createBindingRequest struct {
 	ScheduleTimezone string `json:"schedule_timezone,omitempty"`
 }
 
+// bindingWithNextFire decorates a binding with its computed next cron fire
+// instant for the list view. The embedded binding's fields marshal at the top
+// level; next_fire_at is added alongside and populated only for enabled
+// schedule-driven bindings.
+type bindingWithNextFire struct {
+	*domain.TriggerBinding
+	NextFireAt *time.Time `json:"next_fire_at,omitempty"`
+}
+
 func (m *Module) listBindings(w http.ResponseWriter, r *http.Request) {
 	ws := strings.TrimSpace(r.PathValue("ws"))
 	bindings, err := m.store.TriggerBindings().List(r.Context(), ws, store.TriggerBindingFilter{})
@@ -66,7 +77,26 @@ func (m *Module) listBindings(w http.ResponseWriter, r *http.Request) {
 		handler.WriteDomainError(w, err, "list trigger bindings failed")
 		return
 	}
-	handler.WriteJSON(w, http.StatusOK, map[string]any{"bindings": bindings})
+	now := time.Now()
+	out := make([]bindingWithNextFire, 0, len(bindings))
+	for _, b := range bindings {
+		out = append(out, bindingWithNextFire{TriggerBinding: b, NextFireAt: nextFireFor(b, now)})
+	}
+	handler.WriteJSON(w, http.StatusOK, map[string]any{"bindings": out})
+}
+
+// nextFireFor computes a binding's next cron tick, or nil when it is not an
+// enabled schedule-driven binding. A malformed schedule/timezone yields nil
+// rather than an error: one bad binding must not fail the whole list.
+func nextFireFor(b *domain.TriggerBinding, now time.Time) *time.Time {
+	if b == nil || !b.Enabled || b.SourceKind != store.CronSourceKind || strings.TrimSpace(b.Schedule) == "" {
+		return nil
+	}
+	next, err := trigger.NextFire(b.Schedule, b.ScheduleTimezone, now)
+	if err != nil {
+		return nil
+	}
+	return &next
 }
 
 func (m *Module) createBinding(w http.ResponseWriter, r *http.Request) {
@@ -158,6 +188,7 @@ func (m *Module) createBinding(w http.ResponseWriter, r *http.Request) {
 		Schedule:          schedule,
 		ScheduleTimezone:  strings.TrimSpace(req.ScheduleTimezone),
 	})
+	// Plain binding, no computed next_fire_at (list-only for now).
 	handler.WriteCreatedOrExisting(w, binding, err, fetch, "create trigger binding failed")
 }
 
@@ -207,6 +238,7 @@ func (m *Module) setEnabled(enabled bool) http.HandlerFunc {
 			handler.WriteDomainError(w, err, "update trigger binding failed")
 			return
 		}
+		// Plain binding, no computed next_fire_at (list-only for now).
 		handler.WriteJSON(w, http.StatusOK, binding)
 	}
 }
