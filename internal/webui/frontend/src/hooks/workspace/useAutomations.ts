@@ -12,10 +12,30 @@ import {
   type WorkflowSummary,
 } from "@/api/workflows";
 
+/**
+ * Cross-instance sync: the sidebar (AgentSection), the agent detail page, and
+ * the modals each own a useAutomations instance. A binding mutation in one
+ * must not leave the others stale (e.g. disabling an agent from its detail
+ * page must flip the sidebar dot), so mutations broadcast this window event
+ * and every active instance re-pulls its bindings.
+ */
+const BINDINGS_CHANGED_EVENT = "loom:trigger-bindings-changed";
+
+function dispatchBindingsChanged(workspaceId: string): void {
+  window.dispatchEvent(
+    new CustomEvent<{ workspaceId: string }>(BINDINGS_CHANGED_EVENT, {
+      detail: { workspaceId },
+    }),
+  );
+}
+
 export interface UseAutomationsReturn {
   workflows: WorkflowSummary[];
   bindings: TriggerBinding[];
   loading: boolean;
+  /** True once the first fetch has settled (success or error) — lets callers
+   * distinguish "not fetched yet" from "fetched, empty". */
+  initialized: boolean;
   error: string | null;
   refresh: () => Promise<void>;
   createBinding: (req: CreateTriggerBindingRequest) => Promise<TriggerBinding>;
@@ -35,6 +55,7 @@ export function useAutomations(
   const [workflows, setWorkflows] = useState<WorkflowSummary[]>([]);
   const [bindings, setBindings] = useState<TriggerBinding[]>([]);
   const [loading, setLoading] = useState(false);
+  const [initialized, setInitialized] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
@@ -54,6 +75,7 @@ export function useAutomations(
       );
     } finally {
       setLoading(false);
+      setInitialized(true);
     }
   }, [workspaceId]);
 
@@ -76,10 +98,25 @@ export function useAutomations(
     if (active) void refresh();
   }, [active, refresh]);
 
+  // Re-pull bindings when another instance mutates them (sidebar ↔ detail ↔
+  // modals). The mutating instance receives its own broadcast too, costing it
+  // one redundant (cheap, idempotent) list fetch per mutation.
+  useEffect(() => {
+    if (!workspaceId || !active) return;
+    const onChanged = (event: Event): void => {
+      const detail = (event as CustomEvent<{ workspaceId?: string }>).detail;
+      if (detail?.workspaceId && detail.workspaceId !== workspaceId) return;
+      void refreshBindings();
+    };
+    window.addEventListener(BINDINGS_CHANGED_EVENT, onChanged);
+    return () => window.removeEventListener(BINDINGS_CHANGED_EVENT, onChanged);
+  }, [workspaceId, active, refreshBindings]);
+
   const createBinding = useCallback(
     async (req: CreateTriggerBindingRequest): Promise<TriggerBinding> => {
       const binding = await createTriggerBinding(workspaceId, req);
       await refreshBindings();
+      dispatchBindingsChanged(workspaceId);
       return binding;
     },
     [workspaceId, refreshBindings],
@@ -89,6 +126,7 @@ export function useAutomations(
     async (bindingId: string, on: boolean): Promise<void> => {
       await setTriggerBindingEnabled(workspaceId, bindingId, on);
       await refreshBindings();
+      dispatchBindingsChanged(workspaceId);
     },
     [workspaceId, refreshBindings],
   );
@@ -103,6 +141,7 @@ export function useAutomations(
     workflows,
     bindings,
     loading,
+    initialized,
     error,
     refresh,
     createBinding,

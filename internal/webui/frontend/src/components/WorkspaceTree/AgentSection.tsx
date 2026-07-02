@@ -1,6 +1,9 @@
 /**
- * AgentSection displays agents in the sidebar, split into regular (interactive
- * lead) agents and background (daemon-supervised plan/task) workers.
+ * AgentSection displays every agent in the sidebar grouped by interaction mode
+ * (Decision 5): Interactive (lead-style agents you talk to) on top, Autonomous
+ * (background workers + all trigger bindings — scheduled and event-driven)
+ * below. Role-agent rows stay drag-sortable; binding rows are clickable links
+ * to the same detail route and are non-sortable for now.
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -19,6 +22,11 @@ import {
   orderAgentsForEpicRunner,
   splitAgentsByRuntime,
 } from "@/utils/agentRole";
+import {
+  bindingCadenceLabel,
+  bindingDotState,
+  bindingDotTooltip,
+} from "@/utils/bindingDisplay";
 import { wsGet, wsSet } from "@/utils/scopedStorage";
 
 import styles from "./AgentSection.module.css";
@@ -46,17 +54,12 @@ export function AgentSection({
   } = useWorkspaceContext();
   const [agentOrder, setAgentOrder] = useState<string[]>([]);
 
-  // Scheduled workflow "agents" (Bug-fix, Review loop) are cron trigger bindings,
-  // not supervised agent processes, so they never enter the agent store. Surface
-  // them here so activating a workflow template actually shows up in the sidebar.
-  const { bindings, setEnabled: setBindingEnabled } = useAutomations(
-    workspaceId,
-    !!workspaceId,
-  );
-  const workflowAgents = useMemo(
-    () => bindings.filter((b) => b.source_kind === "cron"),
-    [bindings],
-  );
+  // Trigger-binding "agents" (scheduled and event-driven) never enter the agent
+  // store — they are workflow-plane agents. Surface ALL of them here (every
+  // source_kind) so activating any workflow template shows up in the sidebar as
+  // a first-class, clickable agent.
+  const { bindings } = useAutomations(workspaceId, !!workspaceId);
+  const workflowAgents = bindings;
 
   // Merge fleet agents with workspace config agents.
   // Config agents that aren't yet running appear as "configured" placeholders.
@@ -114,14 +117,34 @@ export function AgentSection({
     [agents, agentOrder],
   );
 
-  const { regular, background } = useMemo(
+  const { regular: interactive, background } = useMemo(
     () => splitAgentsByRuntime(orderedAgents),
     [orderedAgents],
   );
-  const showBackgroundGroup = regular.length > 0 && background.length > 0;
+
+  const hasInteractive = interactive.length > 0;
+  const hasAutonomous = background.length > 0 || workflowAgents.length > 0;
+  // Label the primary Interactive list only when an Autonomous group also
+  // exists (a lone interactive list under "Agents" needs no sublabel). Always
+  // label the Autonomous group — it mixes background workers + bindings and
+  // reads clearer named, even when it is the only group.
+  const showInteractiveHeader = hasInteractive && hasAutonomous;
+  const showAutonomousHeader = hasAutonomous;
 
   if (agents.length === 0 && workflowAgents.length === 0 && !onAddClick)
     return <></>;
+
+  const interactiveList = (
+    <SortableAgentList
+      agents={interactive}
+      fullOrder={agentOrder}
+      onReorder={persistAgentOrder}
+      onAgentClick={onAgentClick}
+      selectedAgentName={selectedAgentName}
+      agentTasks={agentTasks}
+      listClassName={styles.sortableList}
+    />
+  );
 
   return (
     <div className={`${styles.section} agentSection`}>
@@ -129,78 +152,64 @@ export function AgentSection({
         <span>Agents</span>
       </div>
       <div className={styles.list}>
-        <SortableAgentList
-          agents={regular}
-          fullOrder={agentOrder}
-          onReorder={persistAgentOrder}
-          onAgentClick={onAgentClick}
-          selectedAgentName={selectedAgentName}
-          agentTasks={agentTasks}
-          listClassName={styles.sortableList}
-        />
-        {showBackgroundGroup ? (
-          <div
-            className={styles.subgroup}
-            data-testid="agent-section-background"
-          >
-            <div className={styles.subgroupHeader}>
-              <span>Background</span>
+        {hasInteractive &&
+          (showInteractiveHeader ? (
+            <div data-testid="agent-section-interactive">
+              <div className={styles.groupHeader}>
+                <span>Interactive</span>
+              </div>
+              {interactiveList}
             </div>
-            <SortableAgentList
-              agents={background}
-              fullOrder={agentOrder}
-              onReorder={persistAgentOrder}
-              onAgentClick={onAgentClick}
-              selectedAgentName={selectedAgentName}
-              agentTasks={agentTasks}
-              listClassName={styles.subgroupList}
-            />
-          </div>
-        ) : (
-          <SortableAgentList
-            agents={background}
-            fullOrder={agentOrder}
-            onReorder={persistAgentOrder}
-            onAgentClick={onAgentClick}
-            selectedAgentName={selectedAgentName}
-            agentTasks={agentTasks}
-            listClassName={styles.sortableList}
-          />
-        )}
-        {workflowAgents.length > 0 && (
-          <div className={styles.subgroup} data-testid="scheduled-workflows">
-            <div className={styles.subgroupHeader}>
-              <span>Scheduled workflows</span>
-            </div>
-            {workflowAgents.map((b) => (
-              <div
-                key={b.binding_id}
-                className={styles.workflowRow}
-                data-testid={`scheduled-workflow-${b.binding_id}`}
-              >
-                <span
-                  className={styles.workflowDot}
-                  data-enabled={b.enabled}
-                  aria-hidden="true"
-                />
-                <div className={styles.workflowText}>
-                  <span className={styles.workflowName}>{b.driver_id}</span>
-                  <span className={styles.workflowMeta}>
-                    {b.name && b.name !== b.driver_id ? b.name : b.binding_id}
-                  </span>
-                </div>
+          ) : (
+            interactiveList
+          ))}
+
+        {hasAutonomous && (
+          <div data-testid="agent-section-autonomous">
+            {showAutonomousHeader && (
+              <div className={styles.groupHeader}>
+                <span>Autonomous</span>
+              </div>
+            )}
+            {background.length > 0 && (
+              <SortableAgentList
+                agents={background}
+                fullOrder={agentOrder}
+                onReorder={persistAgentOrder}
+                onAgentClick={onAgentClick}
+                selectedAgentName={selectedAgentName}
+                agentTasks={agentTasks}
+                listClassName={styles.sortableList}
+              />
+            )}
+            {workflowAgents.map((b) => {
+              const selected =
+                selectedAgentName != null &&
+                b.binding_id.toLowerCase() === selectedAgentName.toLowerCase();
+              return (
                 <button
                   type="button"
-                  className={styles.workflowToggle}
-                  onClick={() => void setBindingEnabled(b.binding_id, !b.enabled)}
-                  title={
-                    b.enabled ? "Disable this workflow" : "Enable this workflow"
-                  }
+                  key={b.binding_id}
+                  className={styles.workflowRow}
+                  data-testid={`autonomous-binding-${b.binding_id}`}
+                  data-selected={selected || undefined}
+                  onClick={() => onAgentClick?.(b.binding_id)}
+                  title={bindingDotTooltip(b)}
                 >
-                  {b.enabled ? "On" : "Off"}
+                  <span
+                    className={styles.workflowDot}
+                    data-state={bindingDotState(b)}
+                    aria-hidden="true"
+                  />
+                  <span className={styles.workflowText}>
+                    <span className={styles.workflowName}>{b.binding_id}</span>
+                    <span className={styles.workflowMeta}>
+                      {bindingCadenceLabel(b)}
+                    </span>
+                  </span>
                 </button>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </div>

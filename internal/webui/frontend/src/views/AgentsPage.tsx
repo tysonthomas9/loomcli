@@ -34,6 +34,7 @@ import { useStore } from "zustand";
 import { ErrorBoundary, LoadingSkeleton } from "@/components";
 import { AgentDetailMain } from "@/components/AgentDetailMain/AgentDetailMain";
 import { AgentConfigModal } from "@/components/AgentConfigModal";
+import { WorkflowAgentDetail } from "@/components/WorkflowAgentDetail";
 import { GitTab } from "@/components/AgentDetailPanel";
 import { AgentWorkPanel } from "@/components/AgentWorkPanel/AgentWorkPanel";
 import { PanelWidthResizeHandle } from "@/components/AgentWorkPanel/PanelWidthResizeHandle";
@@ -53,7 +54,11 @@ import {
   useWorkspaceViewData,
 } from "@/contexts/WorkspaceViewContext";
 import { useAgentStoreInstance } from "@/hooks";
-import { useLocalSettings, useWorkspaceContext } from "@/hooks/workspace";
+import {
+  useAutomations,
+  useLocalSettings,
+  useWorkspaceContext,
+} from "@/hooks/workspace";
 import {
   OPEN_QUEUE_PANEL_MAX_WIDTH,
   OPEN_QUEUE_PANEL_MIN_WIDTH,
@@ -150,6 +155,27 @@ function AgentsPageInner(): JSX.Element {
     () => (agentName ? agents.find((a) => a.name === agentName) : undefined),
     [agents, agentName],
   );
+
+  // Route resolution (Decision: agent-store name first, then binding id). When
+  // the URL segment is not a role agent, it may be a trigger-binding "agent";
+  // resolve it from the automations list and render the workflow-agent detail.
+  const {
+    bindings,
+    initialized: bindingsInitialized,
+    setEnabled: setBindingEnabled,
+    runWorkflow,
+  } = useAutomations(workspaceId, !!workspaceId);
+  const selectedBinding = useMemo(
+    () =>
+      agentName && !selected
+        ? bindings.find((b) => b.binding_id === agentName)
+        : undefined,
+    [agentName, selected, bindings],
+  );
+  // While the URL points at an unknown name and bindings have not yet loaded,
+  // hold the shell (don't flash the role terminal for a name that is a binding).
+  const resolvingBinding =
+    !!agentName && !selected && !selectedBinding && !bindingsInitialized;
 
   // Inline task-detail selection, restored per agent from scoped storage.
   const [selectedTask, setSelectedTask] = useState<Issue | null>(null);
@@ -552,6 +578,35 @@ function AgentsPageInner(): JSX.Element {
       canEditConfig,
     ],
   );
+
+  // Workflow-plane agent (trigger binding): same page shell, capability-based
+  // content (runs + config, no worktree). Role-agent rendering below is
+  // unchanged. Resolution order already preferred a role agent when the name
+  // matched one, so this branch only fires for a genuine binding id.
+  if (selectedBinding) {
+    return (
+      <div className={styles.page} data-testid="agents-page">
+        <section className={styles.main} aria-label="Agent details">
+          <WorkflowAgentDetail
+            workspaceId={workspaceId}
+            binding={selectedBinding}
+            onSetEnabled={setBindingEnabled}
+            onRunWorkflow={runWorkflow}
+          />
+        </section>
+      </div>
+    );
+  }
+
+  if (resolvingBinding) {
+    return (
+      <div className={styles.page} data-testid="agents-page">
+        <section className={styles.main} aria-label="Agent details">
+          <div className={styles.tabFallback}>Loading agent…</div>
+        </section>
+      </div>
+    );
+  }
 
   return (
     <div className={styles.page} data-testid="agents-page">
