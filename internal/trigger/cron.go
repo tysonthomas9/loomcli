@@ -22,7 +22,7 @@ import (
 // external webhook event.
 const (
 	// CronSourceKind is the TriggerBinding source kind the scheduler sweeps.
-	CronSourceKind = "cron"
+	CronSourceKind = store.CronSourceKind
 	// CronEventType is the event type stamped on scheduler-fired events.
 	CronEventType = "cron.tick"
 	// CronActorRef identifies the scheduler as the acting principal.

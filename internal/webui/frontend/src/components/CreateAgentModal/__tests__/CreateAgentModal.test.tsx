@@ -6,7 +6,7 @@
  * Unit tests for CreateAgentModal.
  *
  * Covers the v5-era validation surface plus the newer defaults behavior
- * introduced with onboarding (defaultName / defaultRoleName props +
+ * introduced with onboarding (defaultName / defaultRole props +
  * wasOpenRef gating so the form doesn't reset state on every parent
  * re-render while the modal is open).
  */
@@ -24,8 +24,10 @@ import type { RepoInfo, WorkspaceAgentInfo } from "@/api/workspace";
 // useCreateWorkspaceAgent returns a function (request) => Promise<agent>.
 // Tests swap the function per case via mockCreateAgent.mockImplementation.
 const mockCreateAgent = vi.fn();
+const mockEnsureRole = vi.fn();
 vi.mock("@/hooks/agents", () => ({
   useCreateWorkspaceAgent: () => mockCreateAgent,
+  useEnsureWorkspaceRole: () => mockEnsureRole,
 }));
 
 // ---------- Helpers ----------
@@ -62,6 +64,11 @@ function renderModal(
 
 beforeEach(() => {
   mockCreateAgent.mockReset();
+  mockEnsureRole.mockReset();
+  mockEnsureRole.mockResolvedValue({
+    name: "bug-triage",
+    workspace_key: "ws-1",
+  });
 });
 
 // ---------- isOpen gate ----------
@@ -103,15 +110,15 @@ describe("CreateAgentModal: default prop seeding", () => {
     expect(screen.getByTestId("create-agent-name")).toHaveValue("pad");
   });
 
-  it("seeds the Planner template from defaultRoleName plan", () => {
-    renderModal({ defaultRoleName: "plan" });
+  it("seeds the Planner template from defaultRole plan", () => {
+    renderModal({ defaultRole: "plan" });
     expect(screen.getByTestId("create-agent-template-planner")).toHaveAttribute(
       "aria-pressed",
       "true",
     );
   });
 
-  it("defaults to Task Runner template when defaultRoleName is omitted", () => {
+  it("defaults to Task Runner template when defaultRole is omitted", () => {
     renderModal();
     expect(screen.getByTestId("create-agent-template-task")).toHaveAttribute(
       "aria-pressed",
@@ -327,6 +334,27 @@ describe("CreateAgentModal: submission", () => {
     });
   });
 
+  it("ensures the custom role before creating a custom-role agent", async () => {
+    mockCreateAgent.mockResolvedValueOnce(sampleAgent);
+    renderModal({ defaultName: "triage-1" });
+    fireEvent.click(screen.getByTestId("create-agent-template-bug-triage"));
+    fireEvent.click(screen.getByRole("button", { name: /create agent/i }));
+
+    // The role (+ its prompt) is provisioned first...
+    await waitFor(() => expect(mockEnsureRole).toHaveBeenCalledTimes(1));
+    expect(mockEnsureRole.mock.calls[0][0]).toMatchObject({
+      name: "bug-triage",
+      task_filter: "any",
+      read_only: true,
+    });
+    // ...then the agent is created referencing that role.
+    await waitFor(() => expect(mockCreateAgent).toHaveBeenCalled());
+    expect(mockCreateAgent.mock.calls[0][0]).toMatchObject({
+      name: "triage-1",
+      role_name: "bug-triage",
+    });
+  });
+
   it("switches background template selection when Planner is clicked", () => {
     renderModal();
     expect(screen.getByTestId("create-agent-template-task")).toHaveAttribute(
@@ -350,7 +378,7 @@ describe("CreateAgentModal: submission", () => {
 
   it("resets the form to the configured defaults after a successful submit", async () => {
     mockCreateAgent.mockResolvedValueOnce(sampleAgent);
-    renderModal({ defaultName: "seed-name", defaultRoleName: "plan" });
+    renderModal({ defaultName: "seed-name", defaultRole: "plan" });
 
     // User overrides the name.
     fireEvent.change(screen.getByTestId("create-agent-name"), {

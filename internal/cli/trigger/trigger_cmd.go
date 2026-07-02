@@ -283,15 +283,22 @@ func intPtrIfChanged(flags *pflag.FlagSet, name string, val int) *int {
 }
 
 func runBindingsCreate(cmd *cobra.Command, _ []string) error {
+	source := firstNonEmpty(strings.TrimSpace(bindCreateSource), "github")
 	routeKey := strings.TrimSpace(bindCreateRouteKey)
-	if routeKey == "" {
+	// A cron binding fires by schedule and has no external route — the store
+	// derives its route_key from the (unique) binding_id — so it needs a
+	// --binding-id but not a --route-key. Event sources need an explicit route.
+	if source == store.CronSourceKind {
+		if routeKey == "" && strings.TrimSpace(bindCreateBindingID) == "" {
+			return fmt.Errorf("--binding-id is required for a cron trigger binding")
+		}
+	} else if routeKey == "" {
 		return fmt.Errorf("--route-key is required")
 	}
 	driverRef := strings.TrimSpace(firstNonEmpty(bindCreateDriver, bindCreateWorkflow))
 	if driverRef == "" {
 		return fmt.Errorf("one of --driver or --workflow is required")
 	}
-	source := firstNonEmpty(strings.TrimSpace(bindCreateSource), "github")
 	// An enabled github binding with no secret rejects every signed webhook
 	// (HMAC verification fails on an empty secret), so refuse to create one.
 	if source == "github" && !bindCreateDisabled && strings.TrimSpace(bindCreateSecret) == "" {
@@ -331,10 +338,13 @@ func createBindingInWorkspace(ctx context.Context, cmd *cobra.Command, h *bootst
 }
 
 func newBindingCreateInput(ws, routeKey, source, driverID, versionID string) store.TriggerBindingCreate {
+	bindingID := firstNonEmpty(strings.TrimSpace(bindCreateBindingID), store.DefaultBindingID(routeKey))
 	return store.TriggerBindingCreate{
-		WorkspaceKey:        ws,
-		BindingID:           firstNonEmpty(strings.TrimSpace(bindCreateBindingID), defaultBindingID(routeKey)),
-		Name:                firstNonEmpty(strings.TrimSpace(bindCreateName), routeKey),
+		WorkspaceKey: ws,
+		BindingID:    bindingID,
+		// Name falls back to binding_id (cron leaves route_key empty for the store
+		// to derive, so it can't seed the name).
+		Name:                firstNonEmpty(strings.TrimSpace(bindCreateName), routeKey, bindingID),
 		SourceKind:          source,
 		RouteKey:            routeKey,
 		EventTypePatterns:   bindCreateRouter.patterns,
@@ -571,10 +581,6 @@ func resolveDriver(ctx context.Context, st store.Store, ws, ref string) (*domain
 		return nil, fmt.Errorf("driver or workflow %q not found in workspace %q", ref, ws)
 	}
 	return drivers[0], nil
-}
-
-func defaultBindingID(routeKey string) string {
-	return "binding-" + strings.ReplaceAll(routeKey, ".", "-")
 }
 
 func firstNonEmpty(values ...string) string {

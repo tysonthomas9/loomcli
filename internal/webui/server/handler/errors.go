@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"net/http"
 
+	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
 )
 
@@ -67,4 +68,22 @@ func HandleServiceError(w http.ResponseWriter, err error) {
 	}
 	slog.Error("unexpected error", "err", err)
 	WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal server error"})
+}
+
+// WriteDomainError maps a domain.Err* sentinel to an HTTP status and writes a
+// JSON {"error": ...} body. Store-direct handlers (roles, triggerbindings,
+// webhooks, workflows) receive domain errors rather than service.ServiceError,
+// so they share this mapper instead of each re-deriving the table. fallback is
+// the client message for ErrNotFound and unmapped errors.
+func WriteDomainError(w http.ResponseWriter, err error, fallback string) {
+	switch {
+	case errors.Is(err, domain.ErrNotFound):
+		RespondError(w, http.StatusNotFound, fallback)
+	case errors.Is(err, domain.ErrInvalid):
+		RespondError(w, http.StatusBadRequest, err.Error())
+	case errors.Is(err, domain.ErrConflict), errors.Is(err, domain.ErrAlreadyExists):
+		RespondError(w, http.StatusConflict, err.Error())
+	default:
+		RespondError(w, http.StatusInternalServerError, fallback)
+	}
 }

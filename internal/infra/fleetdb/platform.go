@@ -139,6 +139,7 @@ type triggerBindingStore struct{ client *Client }
 var _ store.TriggerBindingStore = (*triggerBindingStore)(nil)
 
 func (s *triggerBindingStore) Create(ctx context.Context, in store.TriggerBindingCreate) (*domain.TriggerBinding, error) {
+	in = in.WithDerivedRoute()
 	body := map[string]any{
 		"binding_id":              in.BindingID,
 		"name":                    in.Name,

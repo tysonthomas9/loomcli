@@ -31,7 +31,11 @@ export interface UseLocalSettingsReturn {
   refetch: () => void;
 }
 
-export function useLocalSettings(): UseLocalSettingsReturn {
+/**
+ * `enabled` gates the initial fetch — pass false while the consuming surface
+ * is hidden (e.g. an unopened modal) so mounting it costs no request.
+ */
+export function useLocalSettings(enabled = true): UseLocalSettingsReturn {
   const [settings, setSettings] = useState<LocalSettingsData | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
@@ -67,8 +71,8 @@ export function useLocalSettings(): UseLocalSettingsReturn {
   }, []);
 
   useEffect(() => {
-    fetchSettings();
-  }, [fetchSettings]);
+    if (enabled) void fetchSettings();
+  }, [enabled, fetchSettings]);
 
   const updateRedis = useCallback(
     async (redis: UpdateLocalRedisSettings): Promise<boolean> => {

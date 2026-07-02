@@ -25,6 +25,8 @@ const (
 	BuiltinEpicRunnerWorkflowName        = "epic-runner"
 	BuiltinGitHubReviewAgentWorkflowName = "github-review-agent"
 	BuiltinGitHubReviewTaskRunnerName    = "github-review-task-runner"
+	BuiltinBugFixAgentWorkflowName       = "bug-fix-agent"
+	BuiltinReviewLoopAgentWorkflowName   = "review-loop-agent"
 )
 
 //go:embed builtin/epic-runner.ts
@@ -44,6 +46,12 @@ var builtinGitHubReviewAgentWorkflowSource string
 
 //go:embed builtin/github-review-task-runner.ts
 var builtinGitHubReviewTaskRunnerWorkflowSource string
+
+//go:embed builtin/bug-fix-agent.ts
+var builtinBugFixAgentWorkflowSource string
+
+//go:embed builtin/review-loop-agent.ts
+var builtinReviewLoopAgentWorkflowSource string
 
 type Spec struct {
 	Entrypoint string
@@ -80,6 +88,8 @@ var builtinMu sync.Mutex
 var builtinWorkflows = map[string]Spec{
 	BuiltinEpicRunnerWorkflowName:        builtinEpicRunnerSpec(),
 	BuiltinGitHubReviewAgentWorkflowName: builtinGitHubReviewAgentSpec(),
+	BuiltinBugFixAgentWorkflowName:       builtinBugFixAgentSpec(),
+	BuiltinReviewLoopAgentWorkflowName:   builtinReviewLoopAgentSpec(),
 }
 
 // builtinSpec builds the single-entrypoint Spec for an embedded source-tree
@@ -107,6 +117,27 @@ func builtinGitHubReviewAgentSpec() Spec {
 	return spec
 }
 
+// builtinBugFixAgentSpec bundles the bug-fix workflow with the local + daytona
+// task runners it dispatches codex through (P1, golden scenario S1).
+func builtinBugFixAgentSpec() Spec {
+	spec := builtinSpec(BuiltinBugFixAgentWorkflowName, builtinBugFixAgentWorkflowSource)
+	spec.Files["workflows/local-task-runner.ts"] = builtinLocalTaskRunnerWorkflowSource
+	spec.Files["workflows/daytona-task-runner.ts"] = builtinDaytonaTaskRunnerWorkflowSource
+	return spec
+}
+
+// builtinReviewLoopAgentSpec is the code-review loop (P2, golden scenario S2). It
+// performs the review INLINE (no child workflow) — a child run inherits no trigger
+// binding, so its connector actions would be unauthorizable — dispatching a
+// github-review-task-runner task-run for the codex review. It bundles that runner
+// as a sibling (mirroring how bug-fix bundles local-task-runner) so the driver
+// version manifest declares it and resolveDriverRunner can find it.
+func builtinReviewLoopAgentSpec() Spec {
+	spec := builtinSpec(BuiltinReviewLoopAgentWorkflowName, builtinReviewLoopAgentWorkflowSource)
+	spec.Files["workflows/"+BuiltinGitHubReviewTaskRunnerName+".ts"] = builtinGitHubReviewTaskRunnerWorkflowSource
+	return spec
+}
+
 // BuiltinWorkflowNames returns the registered built-in workflow names sorted,
 // so callers (EnsureBuiltinWorkflow loops, registration round-trip tests) get
 // a stable list independent of map iteration order.
@@ -130,6 +161,13 @@ func BuiltinWorkflow(name string) (Spec, bool) {
 	}
 	spec.Files = files
 	return spec, true
+}
+
+// IsBuiltinWorkflow reports whether name is a registered built-in workflow. It
+// is a direct map lookup, unlike scanning the sorted BuiltinWorkflowNames slice.
+func IsBuiltinWorkflow(name string) bool {
+	_, ok := BuiltinWorkflow(name)
+	return ok
 }
 
 func EnsureBuiltinWorkflow(ctx context.Context, st store.Store, ws, name string) error {
@@ -421,25 +459,51 @@ func activeManifestRunnersAreStale(manifest map[string]string, fresh map[string]
 	return false
 }
 
-func ResolveDriverID(ctx context.Context, st store.Store, ws, name string) (string, error) {
+// EnsureAndResolveDriver self-heals a builtin workflow (registering or
+// refreshing its driver on demand) and then resolves the workflow name to its
+// driver record. It is the shared resolve path for every HTTP surface that
+// accepts a workflow name (workflow runs, trigger bindings); non-builtin names
+// skip the heal and resolve directly.
+func EnsureAndResolveDriver(ctx context.Context, st store.Store, ws, name string) (*domain.Driver, error) {
+	if IsBuiltinWorkflow(name) {
+		if err := EnsureBuiltinWorkflow(ctx, st, ws, name); err != nil {
+			return nil, err
+		}
+	}
+	return ResolveDriver(ctx, st, ws, name)
+}
+
+// ResolveDriver resolves a workflow name (or driver id) to its full driver
+// record. It does not self-heal builtins — use EnsureAndResolveDriver for
+// that. Callers that need more than the id (e.g. ActiveVersionID) should use
+// this instead of ResolveDriverID followed by a second Drivers().Get.
+func ResolveDriver(ctx context.Context, st store.Store, ws, name string) (*domain.Driver, error) {
 	if name == "" {
-		return "", fmt.Errorf("workflow name is required: %w", domain.ErrInvalid)
+		return nil, fmt.Errorf("workflow name is required: %w", domain.ErrInvalid)
 	}
 	driverRecord, err := st.Drivers().Get(ctx, ws, name)
 	if err == nil {
-		return driverRecord.DriverID, nil
+		return driverRecord, nil
 	}
 	if !errors.Is(err, domain.ErrNotFound) {
-		return "", err
+		return nil, err
 	}
 	drivers, err := st.Drivers().List(ctx, ws, store.DriverFilter{Name: name, Limit: 1})
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	if len(drivers) == 0 {
-		return "", domain.ErrNotFound
+		return nil, domain.ErrNotFound
 	}
-	return drivers[0].DriverID, nil
+	return drivers[0], nil
+}
+
+func ResolveDriverID(ctx context.Context, st store.Store, ws, name string) (string, error) {
+	driver, err := ResolveDriver(ctx, st, ws, name)
+	if err != nil {
+		return "", err
+	}
+	return driver.DriverID, nil
 }
 
 func ValidateWorkflowEntrypoint(name, entrypoint string) error {

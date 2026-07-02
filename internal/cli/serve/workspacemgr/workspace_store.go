@@ -476,6 +476,8 @@ func updateStoreWorkspaceState(ctx context.Context, s storepkg.Store, key string
 	return err
 }
 
+// seedBuiltInRoles creates the domain.BuiltinRoleNames set — the two lists
+// must stay in step, since delete guards consult the domain list.
 func seedBuiltInRoles(ctx context.Context, s storepkg.Store, key string) error {
 	roles := []storepkg.RoleCreate{
 		{

@@ -1,9 +1,25 @@
-import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type FormEvent,
+} from "react";
 
 import { AetherModal, aetherModalStyles } from "@/components/AetherModal";
 import type { RepoInfo, WorkspaceAgentInfo } from "@/api/workspace";
-import { useCreateWorkspaceAgent } from "@/hooks/agents";
-import { useBackends } from "@/hooks/workspace";
+import {
+  useCreateWorkspaceAgent,
+  useEnsureWorkspaceRole,
+} from "@/hooks/agents";
+import {
+  GITHUB_CONNECTOR_ID,
+  useAutomations,
+  useBackends,
+  useConnectorProvisioning,
+  useLocalSettings,
+} from "@/hooks/workspace";
 import { ApiError } from "@/types/common";
 import {
   normalizeStoredAgentName,
@@ -11,64 +27,57 @@ import {
 } from "@/utils/agentName";
 
 import { AgentTemplateCard } from "./AgentTemplateCard";
+import {
+  AGENT_TEMPLATES,
+  grantsForRepo,
+  templateForRole,
+  templatesForSection,
+  TEMPLATE_SECTIONS,
+  type AgentTemplate,
+  type DefaultRole,
+} from "./agentTemplates";
 import styles from "./CreateAgentModal.module.css";
 
-type AgentKind = "background" | "lead";
-type BackgroundRole = "plan" | "task";
+/** Cadence choices for a scheduled workflow, each mapping to a cron expression. */
+const CADENCE_OPTIONS = [
+  { value: "10m", label: "Every 10 minutes", cron: "*/10 * * * *" },
+  { value: "hourly", label: "Hourly", cron: "0 * * * *" },
+  { value: "daily", label: "Daily (09:00)", cron: "0 9 * * *" },
+] as const;
 
-const TEMPLATE_ACCENTS = {
-  plan: "#0d9488",
-  task: "#ea580c",
-  lead: "#db2777",
-} as const;
+const DEFAULT_CADENCE = CADENCE_OPTIONS[0].value;
 
-const BACKGROUND_TEMPLATES: {
-  role: BackgroundRole;
-  title: string;
-  description: string;
-  glyph: string;
-  placeholder: string;
-  testId: string;
-  accentColor: string;
-}[] = [
-  {
-    role: "plan",
-    title: "Planner",
-    description: "Breaks epics into tasks under daemon supervision.",
-    glyph: "P",
-    placeholder: "planner",
-    testId: "create-agent-template-planner",
-    accentColor: TEMPLATE_ACCENTS.plan,
-  },
-  {
-    role: "task",
-    title: "Task Runner",
-    description: "Claims and runs ready tasks under daemon supervision.",
-    glyph: "T",
-    placeholder: "worker",
-    testId: "create-agent-template-task",
-    accentColor: TEMPLATE_ACCENTS.task,
-  },
-];
-
-const LEAD_TEMPLATE = {
-  title: "Lead",
-  description: "Orchestrates an epic interactively in a terminal.",
-  glyph: "L",
-  placeholder: "lead",
-  testId: "create-agent-template-lead",
-  accentColor: TEMPLATE_ACCENTS.lead,
-};
-
-function resolveInitialSelection(
-  defaultKind: AgentKind | undefined,
-  defaultRoleName: BackgroundRole,
-): { kind: AgentKind; backgroundRole: BackgroundRole } {
-  if (defaultKind === "lead") {
-    return { kind: "lead", backgroundRole: defaultRoleName };
-  }
-  return { kind: "background", backgroundRole: defaultRoleName };
+/** Details of a workflow activation, surfaced to the caller on success. */
+export interface WorkflowActivationResult {
+  /** The display name the user gave the trigger binding. */
+  name: string;
+  /** Builtin workflow that was activated (e.g. "review-loop-agent"). */
+  workflow: string;
+  /** Stable binding id created for the schedule. */
+  bindingId: string;
 }
+
+/** Parse an "owner/name" GitHub slug from a repo's remote, or "" if unknown. */
+function githubRepoSlug(repo: RepoInfo | undefined): string {
+  if (!repo) return "";
+  const src = (repo.remote_url || repo.remote || "").trim();
+  const match = src.match(/github\.com[/:]([^/]+)\/(.+?)(?:\.git)?$/i);
+  if (match && match[1] && match[2]) {
+    return `${match[1]}/${match[2]}`;
+  }
+  return "";
+}
+
+// The agent-creation gallery renders the agent-producing kinds (lead +
+// supervised workers, builtin or custom-role). The event-driven workflow lane
+// (code review on PRs) lives in the separate Automations surface, since it
+// creates a trigger binding rather than an agent row.
+//
+// Sections + their cards are resolved once at module load.
+const SECTIONS = TEMPLATE_SECTIONS.map((meta) => ({
+  meta,
+  templates: templatesForSection(meta.id),
+}));
 
 export interface CreateAgentModalProps {
   isOpen: boolean;
@@ -76,10 +85,27 @@ export interface CreateAgentModalProps {
   repos: RepoInfo[];
   defaultBackend?: string;
   defaultName?: string;
-  defaultRoleName?: BackgroundRole;
-  defaultKind?: AgentKind;
+  /**
+   * Pre-selected template, keyed by role. Collapses the legacy
+   * `defaultRoleName` + `defaultKind` pair into one prop: "lead" selects the
+   * Lead card, "plan"/"task" select the matching background worker.
+   */
+  defaultRole?: DefaultRole;
+  /** When provided, the gallery shows a cross-link to the Automations surface. */
+  onOpenAutomations?: () => void;
+  /**
+   * Deep-link to Settings, used by the review-loop template when the GitHub
+   * runtime credential it reuses is not configured yet.
+   */
+  onOpenSettings?: () => void;
   onClose: () => void;
   onSuccess: (agent: WorkspaceAgentInfo) => void;
+  /**
+   * Called after a `workflow` template activates (cron binding created, plus
+   * connector + grants for review). No agent row exists, so this is distinct
+   * from `onSuccess`. Owns closing the modal, mirroring `onSuccess`.
+   */
+  onWorkflowActivated?: (result: WorkflowActivationResult) => void;
 }
 
 export function CreateAgentModal({
@@ -88,44 +114,47 @@ export function CreateAgentModal({
   repos,
   defaultBackend,
   defaultName,
-  defaultRoleName,
-  defaultKind,
+  defaultRole,
+  onOpenAutomations,
+  onOpenSettings,
   onClose,
   onSuccess,
+  onWorkflowActivated,
 }: CreateAgentModalProps): JSX.Element | null {
   const resolvedDefaultBackend = defaultBackend?.trim() || "codex";
   const resolvedDefaultName = defaultName?.trim() ?? "";
-  const resolvedDefaultRoleName = defaultRoleName ?? "task";
-  const initialSelection = resolveInitialSelection(
-    defaultKind,
-    resolvedDefaultRoleName,
-  );
+  const initialTemplate = templateForRole(defaultRole);
 
   const [name, setName] = useState(resolvedDefaultName);
-  const [selectedKind, setSelectedKind] = useState<AgentKind>(
-    initialSelection.kind,
-  );
-  const [backgroundRole, setBackgroundRole] = useState<BackgroundRole>(
-    initialSelection.backgroundRole,
+  const [selectedTemplateId, setSelectedTemplateId] = useState<string>(
+    initialTemplate.id,
   );
   const [backend, setBackend] = useState(resolvedDefaultBackend);
   const [selectedRepos, setSelectedRepos] = useState<string[]>([]);
+  const [cadence, setCadence] = useState<string>(DEFAULT_CADENCE);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const wasOpenRef = useRef(false);
   const nameRef = useRef<HTMLInputElement>(null);
   const createAgent = useCreateWorkspaceAgent(workspaceId);
+  const ensureRole = useEnsureWorkspaceRole(workspaceId);
   const { backends } = useBackends();
+  // active=false: we only need createBinding here, not the automations catalog.
+  const { createBinding } = useAutomations(workspaceId, false);
+  const { ensureConnector, addGrant } = useConnectorProvisioning(workspaceId);
+  // Fetch only while open: this modal is mounted (closed) on every page load.
+  const { settings: localSettings } = useLocalSettings(isOpen);
+  const githubConfigured =
+    localSettings?.runtime_credentials?.github?.configured ?? false;
 
-  const roleName = selectedKind === "lead" ? "lead" : backgroundRole;
+  const selectedTemplate: AgentTemplate =
+    AGENT_TEMPLATES.find((t) => t.id === selectedTemplateId) ?? initialTemplate;
 
-  const namePlaceholder = useMemo(() => {
-    if (selectedKind === "lead") return LEAD_TEMPLATE.placeholder;
-    const template = BACKGROUND_TEMPLATES.find(
-      (t) => t.role === backgroundRole,
-    );
-    return template?.placeholder ?? "agent";
-  }, [selectedKind, backgroundRole]);
+  const isWorkflow = selectedTemplate.kind === "workflow";
+  const workflowSpec = selectedTemplate.workflow;
+  const needsConnector = (workflowSpec?.grants?.length ?? 0) > 0;
+
+  const namePlaceholder = selectedTemplate.defaultName;
 
   const repoOptions = useMemo(
     () =>
@@ -135,6 +164,12 @@ export function CreateAgentModal({
   const defaultRepos = useMemo(
     () => (repoOptions[0] ? [repoOptions[0]] : []),
     [repoOptions],
+  );
+
+  // A workflow runs against a single target repo — the first selected chip.
+  const targetRepo = useMemo(
+    () => repos.find((repo) => repo.name === selectedRepos[0]),
+    [repos, selectedRepos],
   );
 
   const crossRepo = selectedRepos.length === 0;
@@ -151,33 +186,26 @@ export function CreateAgentModal({
     return opts.length > 0 ? opts : [{ value: backend, label: backend }];
   }, [backend, backends]);
 
+  const resetToDefaults = useCallback((): void => {
+    setName(resolvedDefaultName);
+    setSelectedTemplateId(templateForRole(defaultRole).id);
+    setBackend(resolvedDefaultBackend);
+    setSelectedRepos(defaultRepos);
+    setCadence(DEFAULT_CADENCE);
+  }, [resolvedDefaultName, resolvedDefaultBackend, defaultRepos, defaultRole]);
+
   useEffect(() => {
     if (!isOpen) {
       wasOpenRef.current = false;
       return;
     }
-
+    // Seed defaults only on the open transition, not on every re-render.
     if (wasOpenRef.current) return;
     wasOpenRef.current = true;
-    const selection = resolveInitialSelection(
-      defaultKind,
-      resolvedDefaultRoleName,
-    );
-    setName(resolvedDefaultName);
-    setSelectedKind(selection.kind);
-    setBackgroundRole(selection.backgroundRole);
-    setBackend(resolvedDefaultBackend);
-    setSelectedRepos(defaultRepos);
+    resetToDefaults();
     setIsSubmitting(false);
     setError(null);
-  }, [
-    isOpen,
-    resolvedDefaultName,
-    resolvedDefaultRoleName,
-    resolvedDefaultBackend,
-    defaultRepos,
-    defaultKind,
-  ]);
+  }, [isOpen, resetToDefaults]);
 
   useEffect(() => {
     if (isOpen) {
@@ -186,15 +214,6 @@ export function CreateAgentModal({
   }, [isOpen]);
 
   const canSubmit = validateStoredAgentName(name) === null && !isSubmitting;
-
-  const selectBackground = (role: BackgroundRole): void => {
-    setSelectedKind("background");
-    setBackgroundRole(role);
-  };
-
-  const selectLead = (): void => {
-    setSelectedKind("lead");
-  };
 
   const handleSubmit = async (event: FormEvent) => {
     event.preventDefault();
@@ -209,10 +228,98 @@ export function CreateAgentModal({
 
     setIsSubmitting(true);
     try {
+      // Workflow templates create a cron trigger binding — which self-heals and
+      // activates the builtin workflow — instead of an agent row. The review
+      // loop additionally reaches GitHub through a connector that reuses the
+      // Settings runtime credential.
+      if (isWorkflow && workflowSpec) {
+        const wf = workflowSpec;
+        const cron =
+          CADENCE_OPTIONS.find((c) => c.value === cadence)?.cron ??
+          CADENCE_OPTIONS[0].cron;
+
+        // The connector path needs both a Settings token and a concrete target
+        // repo to scope its grants — fail fast rather than half-provision.
+        let targetSlug = "";
+        if (needsConnector) {
+          if (!githubConfigured) {
+            setError(
+              "Connect a GitHub token in Settings before activating the review loop.",
+            );
+            return;
+          }
+          targetSlug = githubRepoSlug(targetRepo);
+          if (!targetSlug) {
+            setError(
+              "Select a target repo with a GitHub remote for the review loop.",
+            );
+            return;
+          }
+        }
+
+        // No route_key: for a cron binding the backend derives it from the
+        // (unique) binding_id, so activating both S1 and S2 in one workspace no
+        // longer collides on a shared route.
+        await createBinding({
+          workflow: wf.workflow,
+          source_kind: "cron",
+          schedule: cron,
+          binding_id: wf.bindingId,
+          name: trimmedName,
+          enabled: true,
+        });
+
+        if (needsConnector) {
+          await ensureConnector({
+            source: "github",
+            connector_id: GITHUB_CONNECTOR_ID,
+            reuse_runtime_credential: true,
+          });
+          await Promise.all(
+            grantsForRepo(wf, targetSlug).map((grant) =>
+              addGrant(GITHUB_CONNECTOR_ID, {
+                binding_id: wf.bindingId,
+                action: grant.action,
+                resource_pattern: grant.resource,
+              }),
+            ),
+          );
+        }
+
+        if (onWorkflowActivated) {
+          onWorkflowActivated({
+            name: trimmedName,
+            workflow: wf.workflow,
+            bindingId: wf.bindingId,
+          });
+        } else {
+          onClose();
+        }
+        resetToDefaults();
+        return;
+      }
+
+      // Custom-role templates provision their Role (and seed its prompt file)
+      // on first use, before the agent that references the role is created.
+      // The endpoint is idempotent, so re-creating the same template is safe.
+      if (selectedTemplate.kind === "custom-role" && selectedTemplate.customRole) {
+        const cr = selectedTemplate.customRole;
+        await ensureRole({
+          name: cr.roleName,
+          prompt: cr.promptContent,
+          prompt_filename: cr.promptFilename,
+          ...(cr.description ? { description: cr.description } : {}),
+          ...(cr.taskFilter ? { task_filter: cr.taskFilter } : {}),
+          ...(cr.readOnly !== undefined ? { read_only: cr.readOnly } : {}),
+          ...(cr.allowedTools ? { allowed_tools: cr.allowedTools } : {}),
+          ...(cr.deniedTools ? { denied_tools: cr.deniedTools } : {}),
+        });
+      }
       const request = {
         name: trimmedName,
-        // roleName is a non-empty union ("lead" | "plan" | "task").
-        role_name: roleName,
+        // roleName is the canonical role ("lead" | "plan" | "task" | a custom
+        // role name) — never a display alias.
+        role_name: selectedTemplate.roleName,
         auto: false,
         cross_repo: crossRepo,
         repos: crossRepo ? [] : selectedRepos,
@@ -222,15 +329,7 @@ export function CreateAgentModal({
         ...(trimmedBackend ? { backend: trimmedBackend } : {}),
       });
       onSuccess(agent);
-      const selection = resolveInitialSelection(
-        defaultKind,
-        resolvedDefaultRoleName,
-      );
-      setName(resolvedDefaultName);
-      setSelectedKind(selection.kind);
-      setBackgroundRole(selection.backgroundRole);
-      setBackend(resolvedDefaultBackend);
-      setSelectedRepos(defaultRepos);
+      resetToDefaults();
     } catch (err) {
       if (err instanceof ApiError) {
         setError(err.message);
@@ -244,9 +343,11 @@ export function CreateAgentModal({
     }
   };
 
-  const repoHint = crossRepo
-    ? "No repo selected — the agent gets workspace-wide scope."
-    : "Pick every repo this agent works in. Leave all unselected for workspace scope.";
+  const repoHint = isWorkflow
+    ? "Pick the target repo this workflow runs against."
+    : crossRepo
+      ? "No repo selected — the agent gets workspace-wide scope."
+      : "Pick every repo this agent works in. Leave all unselected for workspace scope.";
 
   return (
     <AetherModal
@@ -274,7 +375,13 @@ export function CreateAgentModal({
             disabled={!canSubmit}
             data-testid="create-agent-submit"
           >
-            {isSubmitting ? "Creating..." : "Create Agent"}
+            {isSubmitting
+              ? isWorkflow
+                ? "Activating..."
+                : "Creating..."
+              : isWorkflow
+                ? "Activate"
+                : "Create Agent"}
           </button>
         </>
       }
@@ -287,66 +394,46 @@ export function CreateAgentModal({
         <div className={styles.panel}>
           <h3 className={styles.panelHeader}>Agent type</h3>
 
-          <div
-            className={styles.group}
-            role="group"
-            aria-labelledby="create-agent-background-label"
-          >
-            <span
-              className={styles.groupLabel}
-              id="create-agent-background-label"
+          {SECTIONS.map(({ meta, templates }) => (
+            <div
+              key={meta.id}
+              className={styles.group}
+              role="group"
+              aria-labelledby={meta.labelId}
             >
-              Background agents
-            </span>
-            <p className={styles.groupHint}>
-              Supervised workers that run automatically
-            </p>
-            <div className={styles.templateList}>
-              {BACKGROUND_TEMPLATES.map((template) => (
-                <AgentTemplateCard
-                  key={template.role}
-                  title={template.title}
-                  description={template.description}
-                  glyph={template.glyph}
-                  accentColor={template.accentColor}
-                  selected={
-                    selectedKind === "background" &&
-                    backgroundRole === template.role
-                  }
-                  disabled={isSubmitting}
-                  ariaLabel={`${template.title}, background agent`}
-                  testId={template.testId}
-                  onSelect={() => selectBackground(template.role)}
-                />
-              ))}
+              <span className={styles.groupLabel} id={meta.labelId}>
+                {meta.label}
+              </span>
+              <p className={styles.groupHint}>{meta.hint}</p>
+              <div className={styles.templateList}>
+                {templates.map((template) => (
+                  <AgentTemplateCard
+                    key={template.id}
+                    title={template.title}
+                    description={template.description}
+                    glyph={template.glyph}
+                    accentColor={template.accentColor}
+                    selected={selectedTemplateId === template.id}
+                    disabled={isSubmitting}
+                    ariaLabel={`${template.title}, ${meta.label}`}
+                    testId={template.testId}
+                    onSelect={() => setSelectedTemplateId(template.id)}
+                  />
+                ))}
+              </div>
             </div>
-          </div>
-
-          <div
-            className={styles.group}
-            role="group"
-            aria-labelledby="create-agent-lead-label"
-          >
-            <span className={styles.groupLabel} id="create-agent-lead-label">
-              Lead agent
-            </span>
-            <p className={styles.groupHint}>
-              Interactive orchestrator in a terminal
-            </p>
-            <div className={styles.templateList}>
-              <AgentTemplateCard
-                title={LEAD_TEMPLATE.title}
-                description={LEAD_TEMPLATE.description}
-                glyph={LEAD_TEMPLATE.glyph}
-                accentColor={LEAD_TEMPLATE.accentColor}
-                selected={selectedKind === "lead"}
-                disabled={isSubmitting}
-                ariaLabel={`${LEAD_TEMPLATE.title}, lead agent`}
-                testId={LEAD_TEMPLATE.testId}
-                onSelect={selectLead}
-              />
-            </div>
-          </div>
+          ))}
+          {onOpenAutomations && (
+            <button
+              type="button"
+              className={styles.automationsLink}
+              onClick={onOpenAutomations}
+              data-testid="create-agent-open-automations"
+            >
+              Need event-driven automation like code review on PRs? Open
+              Automations →
+            </button>
+          )}
         </div>
 
         <div className={styles.panel}>
@@ -369,25 +456,47 @@ export function CreateAgentModal({
               />
             </div>
 
-            <div className={styles.fieldGroup}>
-              <label className={styles.label} htmlFor="agent-backend">
-                AI Backend
-              </label>
-              <select
-                id="agent-backend"
-                className={styles.select}
-                value={backend}
-                onChange={(event) => setBackend(event.target.value)}
-                disabled={isSubmitting}
-                data-testid="create-agent-backend"
-              >
-                {backendOptions.map((option) => (
-                  <option key={option.value} value={option.value}>
-                    {option.label}
-                  </option>
-                ))}
-              </select>
-            </div>
+            {isWorkflow ? (
+              <div className={styles.fieldGroup}>
+                <label className={styles.label} htmlFor="agent-cadence">
+                  Cadence
+                </label>
+                <select
+                  id="agent-cadence"
+                  className={styles.select}
+                  value={cadence}
+                  onChange={(event) => setCadence(event.target.value)}
+                  disabled={isSubmitting}
+                  data-testid="create-agent-cadence"
+                >
+                  {CADENCE_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            ) : (
+              <div className={styles.fieldGroup}>
+                <label className={styles.label} htmlFor="agent-backend">
+                  AI Backend
+                </label>
+                <select
+                  id="agent-backend"
+                  className={styles.select}
+                  value={backend}
+                  onChange={(event) => setBackend(event.target.value)}
+                  disabled={isSubmitting}
+                  data-testid="create-agent-backend"
+                >
+                  {backendOptions.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
           </div>
 
           <div className={`${styles.fieldGroup} ${styles.fieldGroupSpaced}`}>
@@ -432,6 +541,26 @@ export function CreateAgentModal({
             )}
             <p className={styles.hint}>{repoHint}</p>
           </div>
+
+          {isWorkflow && needsConnector && !githubConfigured && (
+            <p
+              className={styles.hint}
+              data-testid="create-agent-review-needs-github"
+            >
+              The review loop reuses your Settings GitHub token, which is not
+              configured yet.{" "}
+              {onOpenSettings && (
+                <button
+                  type="button"
+                  className={styles.settingsLink}
+                  onClick={onOpenSettings}
+                  data-testid="create-agent-open-settings"
+                >
+                  Open Settings
+                </button>
+              )}
+            </p>
+          )}
         </div>
 
         {error && (

@@ -2517,6 +2517,72 @@ describe("App", () => {
     });
   });
 
+  describe("lead agent creation opens the terminal", () => {
+    it("navigates to the lead's terminal after creating a Lead", async () => {
+      localStorage.clear();
+      mockCreateWorkspaceAgent.mockResolvedValue({
+        name: "lead-nova",
+        role_name: "lead",
+        repos: [],
+        repo_groups: [],
+        cross_repo: false,
+      });
+      // Non-empty issues so onboarding-issue prefill stays out of the way.
+      mockStoreState = createMockUseIssuesReturn({
+        issues: [createMockIssue({ id: "T-1" })],
+      });
+      mockHelloWorldWorkspaceContext({ agents: [] });
+
+      render(<App />);
+
+      fireEvent.click(screen.getByRole("button", { name: "Create Agent" }));
+      const dialog = await screen.findByRole("dialog", { name: "New Agent" });
+      fireEvent.click(within(dialog).getByTestId("create-agent-template-lead"));
+      // Isolate the post-create navigation from any render-time routing.
+      mockNavigate.mockClear();
+      fireEvent.click(
+        within(dialog).getByRole("button", { name: "Create Agent" }),
+      );
+
+      await waitFor(() => {
+        expect(mockCreateWorkspaceAgent).toHaveBeenCalledWith(
+          "test-ws-id",
+          expect.objectContaining({ role_name: "lead" }),
+        );
+      });
+      await waitFor(() => {
+        expect(mockNavigate).toHaveBeenCalledWith(
+          expect.stringContaining("/agents/lead-nova"),
+        );
+      });
+    });
+
+    it("does not navigate to a terminal after creating a background worker", async () => {
+      localStorage.clear();
+      // Default mock resolves a plan worker (role_name: "plan").
+      mockStoreState = createMockUseIssuesReturn({
+        issues: [createMockIssue({ id: "T-1" })],
+      });
+      mockHelloWorldWorkspaceContext({ agents: [] });
+
+      render(<App />);
+
+      fireEvent.click(screen.getByRole("button", { name: "Create Agent" }));
+      const dialog = await screen.findByRole("dialog", { name: "New Agent" });
+      mockNavigate.mockClear();
+      fireEvent.click(
+        within(dialog).getByRole("button", { name: "Create Agent" }),
+      );
+
+      await waitFor(() => {
+        expect(mockCreateWorkspaceAgent).toHaveBeenCalled();
+      });
+      expect(mockNavigate).not.toHaveBeenCalledWith(
+        expect.stringContaining("/agents/"),
+      );
+    });
+  });
+
   describe("onboarding issue creation", () => {
     it("does not open the issue modal as a side effect of onboarding agent creation", async () => {
       localStorage.clear();

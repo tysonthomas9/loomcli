@@ -377,7 +377,7 @@ export function PRReviewWorkspace({
         workspaceId={workspaceId}
         repos={repos}
         defaultName={`review-${issue.id.toLowerCase()}`}
-        defaultRoleName="task"
+        defaultRole="task"
         onClose={() => setCreateOpen(false)}
         onSuccess={(agent) => {
           setCreateOpen(false);

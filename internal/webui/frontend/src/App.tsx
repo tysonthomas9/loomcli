@@ -28,6 +28,7 @@ import {
 import type { IssueContext } from "@/api/terminal";
 import { buildShareUrl } from "@/utils/buildShareUrl";
 import { getReviewType } from "@/utils/issue";
+import { isLeadRole } from "@/utils/agentRole";
 import { ViewSubSwitcher } from "@/components/ViewSubSwitcher/ViewSubSwitcher";
 import {
   isOnboardingRepo,
@@ -63,6 +64,7 @@ import { WorkspaceSwitcher } from "@/components/WorkspaceSwitcher/WorkspaceSwitc
 import { CreateIssueModal } from "@/components/CreateIssueModal/CreateIssueModal";
 import { CreateWorkspaceModal } from "@/components/CreateWorkspaceModal/CreateWorkspaceModal";
 import { CreateAgentModal } from "@/components/CreateAgentModal/CreateAgentModal";
+import { AutomationsModal } from "@/components/AutomationsModal";
 import {
   OnboardingFlow,
   type OnboardingStep,
@@ -518,6 +520,7 @@ function App() {
   const [showCreateIssue, setShowCreateIssue] = useState(false);
   const [showCreateWorkspace, setShowCreateWorkspace] = useState(false);
   const [showCreateAgent, setShowCreateAgent] = useState(false);
+  const [showAutomations, setShowAutomations] = useState(false);
   const [onboardingDismissed, setOnboardingDismissed] = useState(false);
   const [onboardingAction, setOnboardingAction] =
     useState<OnboardingAction | null>(null);
@@ -1518,7 +1521,7 @@ function App() {
         {...(shouldPrefillOnboardingAgent
           ? {
               defaultName: ONBOARDING_AGENT_NAME,
-              defaultRoleName: ONBOARDING_AGENT_ROLE,
+              defaultRole: ONBOARDING_AGENT_ROLE,
             }
           : {})}
         onClose={() => setShowCreateAgent(false)}
@@ -1526,6 +1529,12 @@ function App() {
           setShowCreateAgent(false);
           upsertWorkspaceAgent?.(agent);
           showToast(`Agent "${agent.name}" created`, { type: "success" });
+          // A lead is an interactive terminal agent — drop the user straight
+          // into its terminal rather than leaving them on the board. plan/task
+          // workers run under daemon supervision and need no terminal.
+          if (isLeadRole(agent.role_name)) {
+            handleAgentClick(agent.name);
+          }
           if (shouldPrefillOnboardingIssue) {
             setOnboardingAction("confirming-agent");
             setOnboardingActionError(null);
@@ -1546,6 +1555,25 @@ function App() {
             refetchWorkspaceAfterAgentCreate();
           }
         }}
+        onOpenAutomations={() => {
+          setShowCreateAgent(false);
+          setShowAutomations(true);
+        }}
+        onOpenSettings={() => {
+          setShowCreateAgent(false);
+          navigateToView("settings");
+        }}
+        onWorkflowActivated={(result) => {
+          setShowCreateAgent(false);
+          showToast(`Activated ${result.workflow} on a schedule`, {
+            type: "success",
+          });
+        }}
+      />
+      <AutomationsModal
+        isOpen={showAutomations}
+        workspaceId={workspaceId}
+        onClose={() => setShowAutomations(false)}
       />
     </KeyboardShortcutProvider>
   );

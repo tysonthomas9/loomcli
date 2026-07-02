@@ -33,6 +33,7 @@ import { useStore } from "zustand";
 
 import { ErrorBoundary, LoadingSkeleton } from "@/components";
 import { AgentDetailMain } from "@/components/AgentDetailMain/AgentDetailMain";
+import { AgentConfigModal } from "@/components/AgentConfigModal";
 import { GitTab } from "@/components/AgentDetailPanel";
 import { AgentWorkPanel } from "@/components/AgentWorkPanel/AgentWorkPanel";
 import { PanelWidthResizeHandle } from "@/components/AgentWorkPanel/PanelWidthResizeHandle";
@@ -68,6 +69,7 @@ import {
   epicRunnerRuntimePayload,
   issueRepoName,
 } from "@/utils/epicRunnerPayload";
+import { isCustomRole } from "@/utils/agentRole";
 import { formatStatusLabel } from "@/utils/issue";
 import type { TerminalInputRequest } from "@/components/TerminalView/TerminalView";
 
@@ -151,6 +153,7 @@ function AgentsPageInner(): JSX.Element {
 
   // Inline task-detail selection, restored per agent from scoped storage.
   const [selectedTask, setSelectedTask] = useState<Issue | null>(null);
+  const [showAgentConfig, setShowAgentConfig] = useState(false);
   const [pendingTerminalInput, setPendingTerminalInput] = useState<
     TerminalInputRequest | undefined
   >(undefined);
@@ -345,25 +348,31 @@ function AgentsPageInner(): JSX.Element {
     return { done, inProgress, review, blocked, queued };
   }, [issues]);
 
-  const infoStats = [
-    {
-      id: "completed",
-      label: "Tasks Completed",
-      value: counts.done,
-      tone: "success",
-    },
-    {
-      id: "progress",
-      label: "In Progress",
-      value: counts.inProgress,
-      tone: "warning",
-    },
-    { id: "blocked", label: "Blocked", value: counts.blocked, tone: "danger" },
-    { id: "queued", label: "Queued", value: counts.queued, tone: "info" },
-  ];
+  const infoStats = useMemo(
+    () => [
+      {
+        id: "completed",
+        label: "Tasks Completed",
+        value: counts.done,
+        tone: "success",
+      },
+      {
+        id: "progress",
+        label: "In Progress",
+        value: counts.inProgress,
+        tone: "warning",
+      },
+      { id: "blocked", label: "Blocked", value: counts.blocked, tone: "danger" },
+      { id: "queued", label: "Queued", value: counts.queued, tone: "info" },
+    ],
+    [counts],
+  );
 
   const statusType = parseLoomStatus(selected?.status ?? "").type;
   const roleName = selected?.role ?? statusType;
+  // The agent's actual role (no status fallback) — gates the Phase B edit surface.
+  const selectedRole = (selected?.role ?? "").trim();
+  const canEditConfig = isCustomRole(selectedRole);
   const selColor = getAvatarColor(selected?.name ?? "agent");
   const selText = shouldUseWhiteText(selColor) ? "#fff" : "#171717";
 
@@ -455,6 +464,18 @@ function AgentsPageInner(): JSX.Element {
                   ) : null}
                 </dl>
               </section>
+              {canEditConfig && (
+                <section className={styles.card}>
+                  <button
+                    type="button"
+                    className={styles.configButton}
+                    data-testid="agents-page-edit-config"
+                    onClick={() => setShowAgentConfig(true)}
+                  >
+                    Edit configuration
+                  </button>
+                </section>
+              )}
             </div>
           );
         case "git":
@@ -528,6 +549,7 @@ function AgentsPageInner(): JSX.Element {
       roleName,
       infoStats,
       statusType,
+      canEditConfig,
     ],
   );
 
@@ -574,6 +596,19 @@ function AgentsPageInner(): JSX.Element {
           onTaskClick={handleTaskClick}
           onRunEpic={handleRunEpic}
           onAgentClick={handleAgentClick}
+        />
+      )}
+      {selected && canEditConfig && (
+        <AgentConfigModal
+          isOpen={showAgentConfig}
+          workspaceId={workspaceId}
+          agentName={selected.name}
+          roleName={selectedRole}
+          onClose={() => setShowAgentConfig(false)}
+          onDeleted={() => {
+            setShowAgentConfig(false);
+            navigate(`/ws/${workspaceId}/agents`);
+          }}
         />
       )}
     </div>

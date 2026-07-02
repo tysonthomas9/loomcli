@@ -233,6 +233,7 @@ func newTriggerBindingStore(versions *driverVersionStore, services *agentService
 var _ store.TriggerBindingStore = (*triggerBindingStore)(nil)
 
 func (s *triggerBindingStore) Create(_ context.Context, in store.TriggerBindingCreate) (*domain.TriggerBinding, error) {
+	in = in.WithDerivedRoute()
 	if err := s.validateTriggerBindingCreate(in); err != nil {
 		return nil, err
 	}

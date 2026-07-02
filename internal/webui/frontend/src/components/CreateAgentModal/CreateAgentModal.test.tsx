@@ -9,9 +9,11 @@ import "@testing-library/jest-dom";
 import { CreateAgentModal } from "./CreateAgentModal";
 
 const mockCreateAgent = vi.fn();
+const mockEnsureRole = vi.fn().mockResolvedValue({ name: "bug-triage" });
 
 vi.mock("@/hooks/agents", () => ({
   useCreateWorkspaceAgent: () => mockCreateAgent,
+  useEnsureWorkspaceRole: () => mockEnsureRole,
 }));
 
 describe("CreateAgentModal", () => {

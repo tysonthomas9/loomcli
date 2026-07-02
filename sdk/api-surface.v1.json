@@ -5,7 +5,9 @@
   "auth": {
     "tokenOnly": {
       "trigger": "runToken option or LOOM_RUN_TOKEN env",
-      "headers": ["Authorization"],
+      "headers": [
+        "Authorization"
+      ],
       "forbiddenHeaderPrefix": "x-loom-driver-"
     },
     "legacy": {
@@ -19,8 +21,14 @@
     }
   },
   "errorEnvelope": {
-    "fields": ["code", "message", "retryable"],
-    "optionalFields": ["details"],
+    "fields": [
+      "code",
+      "message",
+      "retryable"
+    ],
+    "optionalFields": [
+      "details"
+    ],
     "codes": [
       "internal",
       "invalid",
@@ -48,37 +56,103 @@
       "driver_run_already_resumed",
       "composition_depth_exceeded"
     ],
-    "neverRetryable": ["token_expired"]
+    "neverRetryable": [
+      "token_expired"
+    ]
   },
-  "resultStatuses": ["completed", "failed", "needs_review", "cancelled"],
+  "resultStatuses": [
+    "completed",
+    "failed",
+    "needs_review",
+    "cancelled"
+  ],
   "suspendedResultStatus": "suspended_awaiting_event",
   "watch": {
     "path": "watch/epic",
     "method": "GET",
     "transport": "sse",
-    "query": ["epicId"],
-    "eventTypes": ["snapshot", "taskRun", "closed"],
+    "query": [
+      "epicId"
+    ],
+    "eventTypes": [
+      "snapshot",
+      "taskRun",
+      "closed"
+    ],
     "terminalEventType": "closed",
     "resumeHeader": "Last-Event-ID"
   },
   "await": {
-    "wireStatuses": ["satisfied", "timed_out", "suspended"],
-    "returnedStatuses": ["satisfied", "timed_out"],
+    "wireStatuses": [
+      "satisfied",
+      "timed_out",
+      "suspended"
+    ],
+    "returnedStatuses": [
+      "satisfied",
+      "timed_out"
+    ],
     "suspendSignal": "WorkflowSuspended",
     "timeoutRequired": true,
     "timeoutRefusalCode": "await_timeout_required",
     "indexing": "call-order",
-    "sharedCounterOps": ["events/await", "workflows/await"]
+    "sharedCounterOps": [
+      "events/await",
+      "workflows/await"
+    ]
   },
   "ops": {
-    "claim-ready": { "method": "POST", "fields": ["epicId", "actor", "limit"] },
-    "epic-get": { "method": "POST", "fields": ["epicId"] },
-    "epic-snapshot": { "method": "POST", "fields": ["epicId"] },
-    "list-agents": { "method": "POST", "fields": [] },
-    "agent-orchestration-session": { "method": "POST", "fields": ["agent"] },
-    "update-agent-parent": { "method": "POST", "fields": ["agent", "parent", "expectParent"] },
-    "deliver-lead-assignment": { "method": "POST", "fields": ["agent"] },
-    "deliver-agent-message": { "method": "POST", "fields": ["agent", "message"] },
+    "claim-ready": {
+      "method": "POST",
+      "fields": [
+        "epicId",
+        "actor",
+        "limit"
+      ]
+    },
+    "epic-get": {
+      "method": "POST",
+      "fields": [
+        "epicId"
+      ]
+    },
+    "epic-snapshot": {
+      "method": "POST",
+      "fields": [
+        "epicId"
+      ]
+    },
+    "list-agents": {
+      "method": "POST",
+      "fields": []
+    },
+    "agent-orchestration-session": {
+      "method": "POST",
+      "fields": [
+        "agent"
+      ]
+    },
+    "update-agent-parent": {
+      "method": "POST",
+      "fields": [
+        "agent",
+        "parent",
+        "expectParent"
+      ]
+    },
+    "deliver-lead-assignment": {
+      "method": "POST",
+      "fields": [
+        "agent"
+      ]
+    },
+    "deliver-agent-message": {
+      "method": "POST",
+      "fields": [
+        "agent",
+        "message"
+      ]
+    },
     "exec-task": {
       "method": "POST",
       "fields": [
@@ -97,32 +171,192 @@
         "input"
       ]
     },
-    "task-run-get": { "method": "POST", "fields": ["taskRunId"] },
-    "active-task-runs": { "method": "POST", "fields": ["epicId", "limit"] },
-    "recover-stale-tasks": { "method": "POST", "fields": ["staleBefore", "maxAgeSeconds", "errorClass", "errorMessage"] },
+    "task-run-get": {
+      "method": "POST",
+      "fields": [
+        "taskRunId"
+      ]
+    },
+    "active-task-runs": {
+      "method": "POST",
+      "fields": [
+        "epicId",
+        "limit"
+      ]
+    },
+    "recover-stale-tasks": {
+      "method": "POST",
+      "fields": [
+        "staleBefore",
+        "maxAgeSeconds",
+        "errorClass",
+        "errorMessage"
+      ]
+    },
     "complete-task": {
       "method": "POST",
-      "fields": ["taskId", "taskRunId", "reason", "completionId", "leaseToken", "logsRef", "artifactsRef", "artifactIds"]
+      "fields": [
+        "taskId",
+        "taskRunId",
+        "reason",
+        "completionId",
+        "leaseToken",
+        "logsRef",
+        "artifactsRef",
+        "artifactIds"
+      ]
     },
-    "release-task": { "method": "POST", "fields": ["taskId", "actor"] },
+    "release-task": {
+      "method": "POST",
+      "fields": [
+        "taskId",
+        "actor"
+      ]
+    },
     "connector-dispatch": {
       "method": "POST",
-      "fields": ["connectorId", "action", "resource", "args", "preconditions", "callSeq"]
+      "fields": [
+        "connectorId",
+        "action",
+        "resource",
+        "args",
+        "preconditions",
+        "callSeq"
+      ]
     },
-    "events/await": { "method": "POST", "fields": ["pattern", "actor", "timeoutMs", "awaitIndex"] },
-    "events/awaits": { "method": "GET", "fields": [] },
-    "workflows/start": { "method": "POST", "fields": ["workflowName", "idempotencyKey", "startIndex", "input"] },
-    "workflows/await": { "method": "POST", "fields": ["childRunId", "timeoutMs", "awaitIndex"] }
+    "events/await": {
+      "method": "POST",
+      "fields": [
+        "pattern",
+        "actor",
+        "timeoutMs",
+        "awaitIndex"
+      ]
+    },
+    "events/awaits": {
+      "method": "GET",
+      "fields": []
+    },
+    "workflows/start": {
+      "method": "POST",
+      "fields": [
+        "workflowName",
+        "idempotencyKey",
+        "startIndex",
+        "input"
+      ]
+    },
+    "workflows/await": {
+      "method": "POST",
+      "fields": [
+        "childRunId",
+        "timeoutMs",
+        "awaitIndex"
+      ]
+    },
+    "issue-get": {
+      "method": "POST",
+      "fields": [
+        "issueId"
+      ]
+    },
+    "issue-list": {
+      "method": "POST",
+      "fields": [
+        "externalRef",
+        "type",
+        "status",
+        "limit"
+      ]
+    },
+    "issue-list-comments": {
+      "method": "POST",
+      "fields": [
+        "issueId"
+      ]
+    },
+    "issue-comment": {
+      "method": "POST",
+      "fields": [
+        "issueId",
+        "body"
+      ]
+    },
+    "issue-update": {
+      "method": "POST",
+      "fields": [
+        "issueId",
+        "status",
+        "priority",
+        "labels",
+        "assignee",
+        "externalRef"
+      ]
+    },
+    "issue-add-label": {
+      "method": "POST",
+      "fields": [
+        "issueId",
+        "label"
+      ]
+    },
+    "issue-remove-label": {
+      "method": "POST",
+      "fields": [
+        "issueId",
+        "label"
+      ]
+    }
   },
   "client": {
     "namespaces": {
-      "epics": ["get", "snapshot", "watch"],
-      "agents": ["list", "orchestrationSession", "updateParent", "deliverAssignment", "message"],
-      "tasks": ["claimReady", "complete", "release"],
-      "taskRuns": ["request", "get", "await", "active", "recoverStale"],
-      "connectors": ["dispatch", "github", "slack", "datadog"],
-      "events": ["await", "list"],
-      "workflows": ["start", "await"]
+      "epics": [
+        "get",
+        "snapshot",
+        "watch"
+      ],
+      "agents": [
+        "list",
+        "orchestrationSession",
+        "updateParent",
+        "deliverAssignment",
+        "message"
+      ],
+      "tasks": [
+        "claimReady",
+        "complete",
+        "release"
+      ],
+      "taskRuns": [
+        "request",
+        "get",
+        "await",
+        "active",
+        "recoverStale"
+      ],
+      "connectors": [
+        "dispatch",
+        "github",
+        "slack",
+        "datadog"
+      ],
+      "events": [
+        "await",
+        "list"
+      ],
+      "workflows": [
+        "start",
+        "await"
+      ],
+      "issues": [
+        "get",
+        "list",
+        "listComments",
+        "comment",
+        "update",
+        "addLabel",
+        "removeLabel"
+      ]
     },
     "connectorMethods": {
       "github": {
@@ -143,6 +377,10 @@
         "declareIncident": "datadog.incidents.write"
       }
     },
-    "resultHelpers": ["completed", "failed", "needsReview"]
+    "resultHelpers": [
+      "completed",
+      "failed",
+      "needsReview"
+    ]
   }
 }

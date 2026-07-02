@@ -10,6 +10,11 @@ export type {
 
 export { useCreateWorkspaceAgent } from "./useCreateWorkspaceAgent";
 
+export { useEnsureWorkspaceRole } from "./useEnsureWorkspaceRole";
+
+export { useRoleConfig } from "./useRoleConfig";
+export type { UseRoleConfigReturn } from "./useRoleConfig";
+
 export { useIssueSessionMap } from "./useIssueSessionMap";
 export type { UseIssueSessionMapReturn } from "./useIssueSessionMap";
 

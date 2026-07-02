@@ -120,6 +120,13 @@ test("contract: every op sends only frozen camelCase wire fields to its frozen p
     await client.events.list();
     await client.workflows.start({ workflow: "child-flow", idempotencyKey: "key-1", input: { a: 1 } });
     await client.workflows.await({ childRunId: "child-1", timeoutMs: 1000 });
+    await client.issues.get({ issueId: "ISSUE-1" });
+    await client.issues.list({ externalRef: "octo/hello#1", type: "bug", status: "open", limit: 10 });
+    await client.issues.listComments({ issueId: "ISSUE-1" });
+    await client.issues.comment({ issueId: "ISSUE-1", body: "looks good" });
+    await client.issues.update({ issueId: "ISSUE-1", status: "open", priority: 1, labels: ["review-cycle:1"], assignee: "agent", externalRef: "octo/hello#1" });
+    await client.issues.addLabel({ issueId: "ISSUE-1", label: "review-cycle:1" });
+    await client.issues.removeLabel({ issueId: "ISSUE-1", label: "review-cycle:1" });
 
     const exercised = new Set();
     for (const call of calls) {

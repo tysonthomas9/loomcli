@@ -11,6 +11,15 @@ export type { UseLocalSettingsReturn } from "./useLocalSettings";
 export { useBackends } from "./useBackends";
 export type { UseBackendsReturn } from "./useBackends";
 
+export { useAutomations } from "./useAutomations";
+export type { UseAutomationsReturn } from "./useAutomations";
+
+export {
+  GITHUB_CONNECTOR_ID,
+  useConnectorProvisioning,
+} from "./useConnectorProvisioning";
+export type { UseConnectorProvisioningReturn } from "./useConnectorProvisioning";
+
 export { useWorkspaceHealth } from "./useWorkspaceHealth";
 export type {
   WorkspaceConnectionMode,

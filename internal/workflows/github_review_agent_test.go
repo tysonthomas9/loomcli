@@ -10,13 +10,26 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/domain"
 )
 
-// Both built-ins are registered and discoverable through the generalized
+// Every built-in is registered and discoverable through the generalized
 // registry: BuiltinWorkflowNames returns them sorted, and each resolves to a
-// single-entrypoint spec at workflows/{name}.ts. BuiltinWorkflow returns a
-// defensive copy of the files map (mutating it must not corrupt the registry).
-func TestBuiltinWorkflowRegistryListsBothBuiltins(t *testing.T) {
+// single-entrypoint spec at workflows/{name}.ts (with its bundled sibling
+// runners). BuiltinWorkflow returns a defensive copy of the files map (mutating
+// it must not corrupt the registry).
+func TestBuiltinWorkflowRegistryListsAllBuiltins(t *testing.T) {
 	names := BuiltinWorkflowNames()
-	want := []string{BuiltinEpicRunnerWorkflowName, BuiltinGitHubReviewAgentWorkflowName}
+	// Sorted; wantFiles is the entrypoint plus any bundled sibling task runners.
+	wantFiles := map[string]int{
+		BuiltinBugFixAgentWorkflowName:       3, // + local- + daytona-task-runner
+		BuiltinEpicRunnerWorkflowName:        4,
+		BuiltinGitHubReviewAgentWorkflowName: 2,
+		BuiltinReviewLoopAgentWorkflowName:   2, // + github-review-task-runner
+	}
+	want := []string{
+		BuiltinBugFixAgentWorkflowName,
+		BuiltinEpicRunnerWorkflowName,
+		BuiltinGitHubReviewAgentWorkflowName,
+		BuiltinReviewLoopAgentWorkflowName,
+	}
 	if len(names) != len(want) {
 		t.Fatalf("BuiltinWorkflowNames() = %v, want %v", names, want)
 	}
@@ -37,14 +50,8 @@ func TestBuiltinWorkflowRegistryListsBothBuiltins(t *testing.T) {
 		if _, ok := spec.Files[entrypoint]; !ok {
 			t.Fatalf("%s spec missing entrypoint file %q", name, entrypoint)
 		}
-		wantFiles := 1
-		if name == BuiltinEpicRunnerWorkflowName {
-			wantFiles = 4
-		} else if name == BuiltinGitHubReviewAgentWorkflowName {
-			wantFiles = 2
-		}
-		if len(spec.Files) != wantFiles {
-			t.Fatalf("%s spec has %d files, want %d", name, len(spec.Files), wantFiles)
+		if len(spec.Files) != wantFiles[name] {
+			t.Fatalf("%s spec has %d files, want %d", name, len(spec.Files), wantFiles[name])
 		}
 	}
 }

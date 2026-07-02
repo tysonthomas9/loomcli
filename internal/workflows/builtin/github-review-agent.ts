@@ -1,4 +1,27 @@
 import { createLoomDriverClient } from '@loom/sdk/driver';
+import { defineAgent, defineWorkflow } from '@flue/runtime';
+
+// Flue HEAD requires every workflow module to default-export defineWorkflow();
+// a bare `export function run` no longer normalizes. Keep the named run export
+// (the hand-rolled write_review_dist shim path calls it directly) AND add the
+// flue-native default export so the loom driver executor can invoke it too.
+export default defineWorkflow({
+  agent: defineAgent(() => ({ model: false })),
+  run: async () => toJsonResult(await run({ payload: builtinInvokePayload() })),
+});
+
+function builtinInvokePayload() {
+  const raw = process.env.LOOM_FLUE_INVOKE_PAYLOAD || process.env.LOOM_TASK_RUN_REQUEST_JSON || "{}";
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return {};
+  }
+}
+
+function toJsonResult(value) {
+  return value === undefined ? null : JSON.parse(JSON.stringify(value));
+}
 
 // github-review-agent: trigger-driven COMMENT-only PR review.
 //

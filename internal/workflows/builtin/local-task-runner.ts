@@ -127,9 +127,17 @@ export async function run(ctx = {}) {
   // it verbatim, instead of this runner's generic buildPrompt — so routing the daemon
   // leaf through this runner (Phase U) preserves the leaf's exact prompt.
   const promptOverride = process.env.LOOM_TASK_RUN_PROMPT;
+  // A workflow can also supply the codex prompt as DATA via the task-run Input
+  // (input.taskPrompt), mirroring daytona-task-runner — this is what makes
+  // "prompt = data, brain stays custom" true on the default process deployment.
+  // Precedence: the daemon-leaf env override (its exact composed prompt) wins,
+  // then input.taskPrompt (custom workflows), else this runner's generic prompt.
+  const inputPrompt = stringValue(inputValue(request, "taskPrompt"));
   const prompt = typeof promptOverride === "string" && promptOverride.trim() !== ""
     ? promptOverride
-    : buildPrompt(request, task, execWorktree);
+    : inputPrompt.trim() !== ""
+      ? inputPrompt
+      : buildPrompt(request, task, execWorktree);
   const args = backendArgs(backend, execWorktree, prompt);
   const usesStdinPrompt = backendUsesStdinPrompt(backend);
 
@@ -188,7 +196,7 @@ export async function run(ctx = {}) {
         } else if (!stackBranch) {
           prFailure = { class: "stack_branch_missing", message: "stacked mode requires LOOM_TASK_RUN_OUTPUT_BRANCH (the canonical branch to push)" };
         } else {
-          const title = stringValue((task && (task.title || task.name)) || ("Loom task " + (taskId || taskRunId)));
+          const title = stringValue(inputValue(request, "prTitle")) || stringValue((task && (task.title || task.name)) || ("Loom task " + (taskId || taskRunId)));
           try {
             stackInfo = await deliverStackBranch({ worktreePath: execWorktree, token, owner: slug.owner, repo: slug.repo, branch: stackBranch, title });
             logs.push("pushed stack branch " + stackInfo.branch + " @ " + stackInfo.head.slice(0, 12));
@@ -212,8 +220,8 @@ export async function run(ctx = {}) {
         } else {
           const base = stringValue(inputValue(request, "baseBranch")) || "main";
           const branch = "loom/" + String(taskId || taskRunId).replace(/[^A-Za-z0-9_.-]/g, "-").toLowerCase();
-          const title = stringValue((task && (task.title || task.name)) || ("Loom task " + (taskId || taskRunId)));
-          const prBody = "Automated change by the Loom local-task-runner (" + backend + "). Task " + (taskId || taskRunId) + ".";
+          const title = stringValue(inputValue(request, "prTitle")) || stringValue((task && (task.title || task.name)) || ("Loom task " + (taskId || taskRunId)));
+          const prBody = stringValue(inputValue(request, "prBody")) || ("Automated change by the Loom local-task-runner (" + backend + "). Task " + (taskId || taskRunId) + ".");
           try {
             prInfo = await deliverPullRequest({ isolatedPath: isolated.path, token, owner: slug.owner, repo: slug.repo, base, branch, title, body: prBody });
             logs.push("opened pull request " + prInfo.url);

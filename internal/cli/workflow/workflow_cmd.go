@@ -287,6 +287,22 @@ func workflowActionTitle(action string) string {
 	return strings.ToUpper(action[:1]) + action[1:]
 }
 
+// manualRunSourceRef picks the SourceRef for a manual `loom workflow run` so its
+// connector actions resolve grants via the workflow's own trigger binding.
+// Connector authz resolves a run's binding by matching SourceRef to a binding's
+// route_key (GetByRouteKey), so it stamps the route_key of the (first) binding
+// registered for this driver rather than a magic shared string. With no binding
+// the run keeps a plain label and its connector actions are (correctly)
+// ungranted. This replaces the old reliance on a binding hard-coded to route_key
+// "loom workflow run", which no longer exists now that cron routes are derived.
+func manualRunSourceRef(ctx context.Context, s store.Store, ws, driverID string) string {
+	bindings, err := s.TriggerBindings().List(ctx, ws, store.TriggerBindingFilter{DriverID: driverID, Limit: 1})
+	if err == nil && len(bindings) > 0 && bindings[0] != nil && bindings[0].RouteKey != "" {
+		return bindings[0].RouteKey
+	}
+	return "loom workflow run"
+}
+
 func runWorkflowRun(_ *cobra.Command, args []string) error {
 	return workflowWithActiveWorkspace(func(ctx context.Context, h *bootstrap.StoreHandle, ws string) error {
 		driverID, err := workflows.ResolveDriverID(ctx, h.Store, ws, args[0])
@@ -309,7 +325,7 @@ func runWorkflowRun(_ *cobra.Command, args []string) error {
 			EpicID:          workflowRunEpic,
 			Entrypoint:      driverpkg.EntrypointRun,
 			SourceKind:      "cli",
-			SourceRef:       "loom workflow run",
+			SourceRef:       manualRunSourceRef(ctx, h.Store, ws, driverID),
 			Payload:         payload,
 		})
 		if err != nil {

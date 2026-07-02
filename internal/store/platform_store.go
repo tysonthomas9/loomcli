@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
@@ -212,6 +213,33 @@ type TriggerBindingCreate struct {
 	ScheduleTimezone     string
 	Permissions          []string
 	Enabled              bool
+}
+
+// CronSourceKind is the trigger-binding source kind swept by the cron scheduler
+// (trigger.CronSourceKind aliases it). Its bindings fire by schedule, not by an
+// external event route.
+const CronSourceKind = "cron"
+
+// DefaultBindingID derives a binding's id from its route key when the caller
+// did not pick one. The id is wire-visible (a cron binding's derived route is
+// "cron:<binding_id>"), so every create surface (CLI, webui) must share this
+// derivation.
+func DefaultBindingID(routeKey string) string {
+	return "binding-" + strings.ReplaceAll(routeKey, ".", "-")
+}
+
+// WithDerivedRoute fills a cron binding's route_key from its (unique) binding_id
+// when the caller left it empty. route_key is a binding's internal 1:1 routing
+// address — the scheduler stamps it on each cron.tick and the router resolves it
+// via GetByRouteKey — but a scheduled binding has no external route, so deriving
+// it from binding_id keeps every scheduled binding's address unique without
+// callers hand-picking a shared, collision-prone route string. Applied by every
+// store Create so all callers (webui, CLI) get it uniformly.
+func (in TriggerBindingCreate) WithDerivedRoute() TriggerBindingCreate {
+	if in.SourceKind == CronSourceKind && in.RouteKey == "" && in.BindingID != "" {
+		in.RouteKey = "cron:" + in.BindingID
+	}
+	return in
 }
 
 type TriggerBindingFilter struct {

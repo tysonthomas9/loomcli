@@ -43,6 +43,42 @@ func TestCreateWorkflowRunPassesRawPayload(t *testing.T) {
 	}
 }
 
+func TestGetWorkflowSourceReturnsBuiltinFiles(t *testing.T) {
+	mux := http.NewServeMux()
+	NewModule(memstore.New()).Register(mux)
+
+	req := httptest.NewRequest(http.MethodGet,
+		"/api/workspaces/WS/workflows/"+workflowdefs.BuiltinBugFixAgentWorkflowName+"/source", nil)
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("source status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	var got struct {
+		Name       string            `json:"name"`
+		Builtin    bool              `json:"builtin"`
+		Entrypoint string            `json:"entrypoint"`
+		Files      map[string]string `json:"files"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode source: %v", err)
+	}
+	if !got.Builtin || got.Entrypoint == "" || len(got.Files) == 0 {
+		t.Fatalf("unexpected source response: %+v", got)
+	}
+}
+
+func TestGetWorkflowSourceUnknownIs404(t *testing.T) {
+	mux := http.NewServeMux()
+	NewModule(memstore.New()).Register(mux)
+	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/WS/workflows/not-a-workflow/source", nil)
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("unknown source status = %d, want 404; body=%s", rec.Code, rec.Body.String())
+	}
+}
+
 func TestCreateWorkflowRunRegistersBuiltinEpicRunner(t *testing.T) {
 	ctx := context.Background()
 	st := memstore.New()
