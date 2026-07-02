@@ -22,12 +22,14 @@ func TestBuiltinWorkflowRegistryListsAllBuiltins(t *testing.T) {
 		BuiltinBugFixAgentWorkflowName:       3, // + local- + daytona-task-runner
 		BuiltinEpicRunnerWorkflowName:        4,
 		BuiltinGitHubReviewAgentWorkflowName: 2,
+		BuiltinPromptAgentWorkflowName:       2, // + local-task-runner
 		BuiltinReviewLoopAgentWorkflowName:   2, // + github-review-task-runner
 	}
 	want := []string{
 		BuiltinBugFixAgentWorkflowName,
 		BuiltinEpicRunnerWorkflowName,
 		BuiltinGitHubReviewAgentWorkflowName,
+		BuiltinPromptAgentWorkflowName,
 		BuiltinReviewLoopAgentWorkflowName,
 	}
 	if len(names) != len(want) {

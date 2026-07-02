@@ -27,6 +27,7 @@ const (
 	BuiltinGitHubReviewTaskRunnerName    = "github-review-task-runner"
 	BuiltinBugFixAgentWorkflowName       = "bug-fix-agent"
 	BuiltinReviewLoopAgentWorkflowName   = "review-loop-agent"
+	BuiltinPromptAgentWorkflowName       = "prompt-agent"
 )
 
 //go:embed builtin/epic-runner.ts
@@ -52,6 +53,9 @@ var builtinBugFixAgentWorkflowSource string
 
 //go:embed builtin/review-loop-agent.ts
 var builtinReviewLoopAgentWorkflowSource string
+
+//go:embed builtin/prompt-agent.ts
+var builtinPromptAgentWorkflowSource string
 
 type Spec struct {
 	Entrypoint string
@@ -90,6 +94,7 @@ var builtinWorkflows = map[string]Spec{
 	BuiltinGitHubReviewAgentWorkflowName: builtinGitHubReviewAgentSpec(),
 	BuiltinBugFixAgentWorkflowName:       builtinBugFixAgentSpec(),
 	BuiltinReviewLoopAgentWorkflowName:   builtinReviewLoopAgentSpec(),
+	BuiltinPromptAgentWorkflowName:       builtinPromptAgentSpec(),
 }
 
 // builtinSpec builds the single-entrypoint Spec for an embedded source-tree
@@ -135,6 +140,18 @@ func builtinBugFixAgentSpec() Spec {
 func builtinReviewLoopAgentSpec() Spec {
 	spec := builtinSpec(BuiltinReviewLoopAgentWorkflowName, builtinReviewLoopAgentWorkflowSource)
 	spec.Files["workflows/"+BuiltinGitHubReviewTaskRunnerName+".ts"] = builtinGitHubReviewTaskRunnerWorkflowSource
+	return spec
+}
+
+// builtinPromptAgentSpec bundles the prompt-agent workflow with the local
+// task runner it dispatches the backend CLI through (Phase 4 prompt-agent
+// spike). Bundling local-task-runner as a sibling (mirroring bug-fix-agent) is
+// what lets DeriveRunners declare it in the version manifest so
+// resolveDriverRunner can find it when the workflow calls
+// taskRuns.request({ runner: "local-task-runner" }).
+func builtinPromptAgentSpec() Spec {
+	spec := builtinSpec(BuiltinPromptAgentWorkflowName, builtinPromptAgentWorkflowSource)
+	spec.Files["workflows/local-task-runner.ts"] = builtinLocalTaskRunnerWorkflowSource
 	return spec
 }
 

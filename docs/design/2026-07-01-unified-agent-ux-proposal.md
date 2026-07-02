@@ -213,6 +213,30 @@ match replace the manual fire — decision: events, not cron polling; claim
 races are settled by the existing task lease. Detail-page Edit for prompt
 agents is a prompt textarea (config PATCH on the Role), not TS.
 
+**Spike result (2026-07-01): PASSED.** `prompt-agent` builtin
+(`internal/workflows/builtin/prompt-agent.ts`) ran live: claimed a real ready
+task via the task lease, dispatched `local-task-runner` with the role prompt
+verbatim as `input.taskPrompt`, real codex execution (61k input tokens),
+1 file changed + patch-back applied, task auto-closed, run visible through
+the Phase-1 runs API — zero supervisor involvement (driver-run executor +
+task worker only, lease/fence/heartbeat). One Go change was needed:
+registering the workflow as a builtin, because of gap (a) below. Gaps to
+close for the full phase:
+
+- (a) **Sibling-runner resolution is builtin-only**: `resolveDriverRunner`
+  matches only the calling driver version's manifest, and the HTTP
+  `createWorkflowVersion` path passes no runners and no `DeriveRunners`, so a
+  custom driver can never dispatch `local-task-runner`. Fix: resolve builtin
+  task-runners workspace-globally by name (or let the HTTP path declare
+  runner specs blessed at approve time).
+- (b) **No claim-by-task-id**: `tasks.claimReady` pulls queue order only;
+  targeting a specific task means claim-and-release loops that race. Needed
+  for event-driven pickup.
+- (c) **No role-read surface in the driver SDK** (`loom.roles.*` missing):
+  the prompt must be passed as input. Decision 2 ("one prompt edit updates
+  every agent") needs `roles.get` from workflows or dispatch-time
+  materialization of the role prompt into the run payload.
+
 *Acceptance:* a prompt agent created from the UI claims and completes a real
 task end-to-end with **no daemon supervisor involvement**, and its run +
 transcript appear in the same detail view as any workflow run.
