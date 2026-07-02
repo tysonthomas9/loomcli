@@ -150,6 +150,30 @@ func TestCreateBinding_CronDerivesRouteKey(t *testing.T) {
 	}
 }
 
+// TestCreateBinding_RunInputStoredOnSourceConfigRef pins ITEM D's plumbing: a
+// prompt-agent binding created with a run_input object stores it on the binding's
+// source_config_ref, where the dispatch source (CronScheduler) merges it into the
+// fired run payload.
+func TestCreateBinding_RunInputStoredOnSourceConfigRef(t *testing.T) {
+	mux, _ := seededMux(t)
+	rec := do(t, mux, http.MethodPost, "/api/workspaces/WS/trigger-bindings",
+		`{"driver_id":"driver-1","driver_version_id":"version-1","source_kind":"cron","schedule":"*/10 * * * *","binding_id":"docs-agent","enabled":true,"run_input":{"roleName":"docs-assistant","backend":"codex"}}`)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("create status = %d, want 201; body=%s", rec.Code, rec.Body.String())
+	}
+	var b domain.TriggerBinding
+	if err := json.Unmarshal(rec.Body.Bytes(), &b); err != nil {
+		t.Fatalf("decode binding: %v", err)
+	}
+	var runInput map[string]string
+	if err := json.Unmarshal([]byte(b.SourceConfigRef), &runInput); err != nil {
+		t.Fatalf("source_config_ref %q is not the run-input JSON: %v", b.SourceConfigRef, err)
+	}
+	if runInput["roleName"] != "docs-assistant" || runInput["backend"] != "codex" {
+		t.Fatalf("run-input round-trip = %v, want roleName+backend", runInput)
+	}
+}
+
 // TestListBindings_NextFireAt pins the Phase-1 computed field: an enabled cron
 // binding carries a future next_fire_at, while disabled cron and non-cron
 // bindings omit it.

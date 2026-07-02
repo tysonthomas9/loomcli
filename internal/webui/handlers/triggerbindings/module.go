@@ -69,6 +69,33 @@ type createBindingRequest struct {
 	// (the store + CronScheduler support it; this HTTP surface previously dropped it).
 	Schedule         string `json:"schedule,omitempty"`
 	ScheduleTimezone string `json:"schedule_timezone,omitempty"`
+	// RunInput is per-binding static run-input the dispatch source merges under
+	// each fired run's payload (see trigger.BindingRunInput): e.g. a prompt
+	// agent's {"roleName":"docs-assistant","backend":"codex"}. It is stored on
+	// the binding's free-form source_config_ref (fleet-db round-trips it
+	// untouched — no schema change). SourceConfigRef, when set directly, takes
+	// precedence for callers (CLI) that already hold an encoded value.
+	RunInput        json.RawMessage `json:"run_input,omitempty"`
+	SourceConfigRef string          `json:"source_config_ref,omitempty"`
+}
+
+// resolveSourceConfigRef picks the binding's source_config_ref: an explicit
+// value wins; otherwise a run_input JSON OBJECT is serialized into it so the
+// dispatch source can merge it into fired runs. A run_input that is not a JSON
+// object is ignored (nothing to merge), leaving source_config_ref empty.
+func (req createBindingRequest) resolveSourceConfigRef() string {
+	if ref := strings.TrimSpace(req.SourceConfigRef); ref != "" {
+		return ref
+	}
+	raw := strings.TrimSpace(string(req.RunInput))
+	if raw == "" || raw[0] != '{' {
+		return ""
+	}
+	var obj map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(raw), &obj); err != nil || len(obj) == 0 {
+		return ""
+	}
+	return raw
 }
 
 // bindingWithNextFire decorates a binding with its computed next cron fire
@@ -250,6 +277,7 @@ func (m *Module) createBinding(w http.ResponseWriter, r *http.Request) {
 		Enabled:           enabled,
 		Schedule:          schedule,
 		ScheduleTimezone:  strings.TrimSpace(req.ScheduleTimezone),
+		SourceConfigRef:   req.resolveSourceConfigRef(),
 	})
 	// Plain binding, no computed next_fire_at (list-only for now).
 	handler.WriteCreatedOrExisting(w, binding, err, fetch, "create trigger binding failed")

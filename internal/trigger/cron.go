@@ -227,8 +227,18 @@ func (s *CronScheduler) sweepBinding(ctx context.Context, ws string, binding *do
 // dispatchTick feeds one cron tick into the normal router path. Tick-level
 // dedup rides the trigger-event idempotency key, so re-dispatch of the same
 // fire instant (overlapping schedulers, retried sweeps) is a no-op replay.
+//
+// The dispatched run's payload is the binding's run-input (parsed from
+// source_config_ref — see binding_run_input.go) with the cron tick merged on
+// top, so a prompt agent's configured roleName/backend reach the fired run's
+// input alongside {"tick": ...}. Cron is 1:1 (a unique route key per binding),
+// so this per-binding merge is always correct. A binding with no run-input
+// dispatches the exact tick-only payload as before.
 func (s *CronScheduler) dispatchTick(ctx context.Context, ws string, binding *domain.TriggerBinding, fire time.Time) error {
-	payload, err := json.Marshal(map[string]string{"tick": fire.UTC().Format(time.RFC3339)})
+	payload, err := MergeRunInputPayload(
+		BindingRunInput(binding),
+		map[string]any{"tick": fire.UTC().Format(time.RFC3339)},
+	)
 	if err != nil {
 		return fmt.Errorf("encode cron tick payload for binding %q: %w", binding.BindingID, err)
 	}

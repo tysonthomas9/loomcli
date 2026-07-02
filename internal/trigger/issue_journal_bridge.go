@@ -124,6 +124,14 @@ type IssueJournalBridge struct {
 	// BatchLimit bounds ListIssueEvents per workspace per pass; zero or
 	// negative falls back to DefaultIssueJournalBatchLimit.
 	BatchLimit int
+	// EmitTaskReady turns on the flag-gated task-ready lane: in addition to the
+	// normal allowlisted re-emission, an entry that marks a task becoming ready
+	// (issue.create / issue.update to an open status) also emits a task.ready
+	// internal event carrying the task id, so a prompt-agent binding on
+	// internal.task.ready can claim THAT task. Default false — wired from
+	// LOOM_TASK_READY_EVENTS in serve so default behavior is unchanged. See
+	// issue_journal_bridge_task_ready.go.
+	EmitTaskReady bool
 	// WorkspaceKey scopes the sweep to one workspace. Empty sweeps every known
 	// workspace (mirrors DeliverySweeper/CronScheduler).
 	WorkspaceKey string
@@ -153,6 +161,9 @@ type IssueJournalSweepResult struct {
 	Emitted int
 	// Skipped counts entries passed over by the action allowlist.
 	Skipped int
+	// TaskReadyEmitted counts task.ready events emitted by the flag-gated
+	// task-ready lane (EmitTaskReady); zero when the flag is off.
+	TaskReadyEmitted int
 	// FastForwarded counts workspaces bootstrapped to the journal tail without
 	// emitting (first observation, replay disabled).
 	FastForwarded int
@@ -273,22 +284,30 @@ func (b *IssueJournalBridge) drainFrom(ctx context.Context, ws, cursor string, o
 // emitBatch processes one page oldest-first. It returns the cursor to persist
 // (the stream id of the last durably-handled event, "" when none advanced) and
 // the first non-terminal Emit error, which stops the drain so the unhandled
-// entry is retried next pass.
+// entry is retried next pass. Each entry may emit up to two events: the normal
+// allowlisted re-emission and, when the flag-gated task-ready lane is on, an
+// additional task.ready event; the cursor advances only after BOTH are durably
+// handled, so a failure in either resumes exactly at this entry next pass.
 func (b *IssueJournalBridge) emitBatch(ctx context.Context, ws string, events []store.JournalEvent, out *IssueJournalSweepResult) (string, error) {
 	advanced := ""
 	for _, ev := range events {
 		if ctx.Err() != nil {
 			return advanced, ctx.Err()
 		}
-		if !b.actionAllowed(ev.Action) {
+		if b.actionAllowed(ev.Action) {
+			if err := b.emitOne(ctx, ws, ev); err != nil {
+				return advanced, err
+			}
+			out.Emitted++
+		} else {
 			out.Skipped++
-			advanced = ev.ID
-			continue
 		}
-		if err := b.emitOne(ctx, ws, ev); err != nil {
-			return advanced, err
+		if b.EmitTaskReady && isTaskReadyEntry(ev) {
+			if err := b.emitTaskReady(ctx, ws, ev); err != nil {
+				return advanced, err
+			}
+			out.TaskReadyEmitted++
 		}
-		out.Emitted++
 		advanced = ev.ID
 	}
 	return advanced, nil
