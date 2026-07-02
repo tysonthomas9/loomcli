@@ -123,6 +123,12 @@ export interface TriggerBinding {
   schedule?: string;
   /** IANA timezone for the schedule (UTC when omitted). */
   schedule_timezone?: string;
+  /**
+   * Free-form source config the dispatch source merges into each fired run's
+   * payload (the binding's run-input). For a prompt agent it holds the JSON
+   * {"roleName":..,"backend":..}; parse it with promptAgentRoleName().
+   */
+  source_config_ref?: string;
   /** Computed next fire time (ISO 8601) for an enabled cron binding. */
   next_fire_at?: string;
   /**
@@ -162,6 +168,41 @@ export interface CreateTriggerBindingRequest {
   schedule?: string;
   /** IANA timezone for the schedule (defaults to UTC when omitted). */
   schedule_timezone?: string;
+  /**
+   * Per-binding run-input the dispatch source merges into each fired run's
+   * payload (stored on the binding's source_config_ref). A prompt agent passes
+   * {"roleName":..,"backend":..} so the fired run wears the role.
+   */
+  run_input?: Record<string, unknown>;
+}
+
+/**
+ * Parse a binding's run-input object out of its source_config_ref. The dispatch
+ * source (CronScheduler) merges this into each fired run's payload; this is the
+ * single place the run-input JSON convention is decoded on the frontend. Returns
+ * {} when the binding carries no run-input (not a prompt agent, or a real
+ * webhook source-config ref).
+ */
+export function parseBindingRunInput(
+  binding: TriggerBinding,
+): Record<string, unknown> {
+  const raw = (binding.source_config_ref ?? "").trim();
+  if (!raw.startsWith("{")) return {};
+  try {
+    const cfg = JSON.parse(raw) as Record<string, unknown>;
+    return cfg && typeof cfg === "object" ? cfg : {};
+  } catch {
+    return {};
+  }
+}
+
+/**
+ * A prompt agent's roleName (from its run-input), or "" when the binding is not
+ * a prompt agent.
+ */
+export function promptAgentRoleName(binding: TriggerBinding): string {
+  const role = parseBindingRunInput(binding).roleName;
+  return typeof role === "string" ? role : "";
 }
 
 export async function listTriggerBindings(

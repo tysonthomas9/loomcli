@@ -17,7 +17,11 @@ import { WorkflowSourceModal } from "@/components/WorkflowSourceModal";
 import { useWorkflowAgentDetail } from "@/hooks/workflows/useWorkflowAgentDetail";
 import { useToast } from "@/hooks/ui/useToast";
 import {
+  getWorkspaceRole,
   isTerminalWorkflowRunStatus,
+  parseBindingRunInput,
+  promptAgentRoleName,
+  updateWorkspaceRole,
   type TriggerBinding,
   type UpdateTriggerBindingRequest,
   type WorkflowRun,
@@ -112,6 +116,11 @@ export function WorkflowAgentDetail({
   const [showSource, setShowSource] = useState(false);
   const [busy, setBusy] = useState(false);
 
+  // A prompt agent carries its roleName in the binding's run-input
+  // (source_config_ref). When present, the Info tab shows the ROLE prompt editor
+  // (the primary edit surface) alongside the source editor (advanced).
+  const promptRoleName = promptAgentRoleName(binding);
+
   const avatarBg = getAvatarColor(binding.binding_id);
   const avatarFg = shouldUseWhiteText(avatarBg) ? "#fff" : "#171717";
   const cadence = bindingCadenceLabel(binding);
@@ -129,7 +138,11 @@ export function WorkflowAgentDetail({
   const handleRunNow = useCallback(async () => {
     setBusy(true);
     try {
-      const run = await onRunWorkflow(binding.driver_id, {});
+      // Run now reproduces what a scheduled fire would deliver: for a prompt
+      // agent that means the binding's run-input (roleName/backend), which a
+      // cron tick merges into the payload but a bare manual run would omit.
+      const runPayload = promptRoleName ? parseBindingRunInput(binding) : {};
+      const run = await onRunWorkflow(binding.driver_id, runPayload);
       showToast(`Run queued for ${binding.binding_id}: ${run.run_id}`, {
         type: "success",
       });
@@ -140,7 +153,7 @@ export function WorkflowAgentDetail({
     } finally {
       setBusy(false);
     }
-  }, [binding.driver_id, binding.binding_id, onRunWorkflow, refresh, showToast]);
+  }, [binding, promptRoleName, onRunWorkflow, refresh, showToast]);
 
   const handleToggleEnabled = useCallback(async () => {
     setBusy(true);
@@ -256,7 +269,9 @@ export function WorkflowAgentDetail({
           />
         ) : (
           <InfoTab
+            workspaceId={workspaceId}
             binding={binding}
+            roleName={promptRoleName}
             driverId={driverId || binding.driver_id}
             activeVersionId={activeVersionId || binding.driver_version_id}
             nextFire={nextFire}
@@ -443,7 +458,9 @@ function RunDetailCard({ run }: { run: WorkflowRun }): JSX.Element {
 }
 
 function InfoTab({
+  workspaceId,
   binding,
+  roleName,
   driverId,
   activeVersionId,
   nextFire,
@@ -453,7 +470,9 @@ function InfoTab({
   onDelete,
   onDeleted,
 }: {
+  workspaceId: string;
   binding: TriggerBinding;
+  roleName: string;
   driverId: string;
   activeVersionId: string;
   nextFire: string;
@@ -469,6 +488,10 @@ function InfoTab({
   const isCron = binding.source_kind === "cron";
   return (
     <div className={styles.scroll}>
+      {roleName ? (
+        <RolePromptCard workspaceId={workspaceId} roleName={roleName} />
+      ) : null}
+
       <section className={styles.card}>
         <h2 className={styles.cardLabel}>Configuration</h2>
         <dl className={styles.configGrid}>
@@ -486,6 +509,14 @@ function InfoTab({
             <dt>Trigger</dt>
             <dd>{bindingKindLabel(binding)}</dd>
           </div>
+          {roleName ? (
+            <div>
+              <dt>Role</dt>
+              <dd>
+                <code>{roleName}</code>
+              </dd>
+            </div>
+          ) : null}
           {isCron ? (
             <>
               <div>
@@ -771,6 +802,110 @@ function ManageCard({
           </button>
         )}
       </div>
+    </section>
+  );
+}
+
+/**
+ * RolePromptCard is a prompt agent's PRIMARY edit surface: the ROLE's prompt in
+ * a textarea, loaded from GET /roles/{name} and saved via PATCH /roles/{name}.
+ * Because the prompt lives on the Role (behavior config), one edit here updates
+ * EVERY agent wearing the role — the point of the prompt-as-data model. The
+ * source editor (WorkflowSourceModal, "Edit source"/"Edit configuration") stays
+ * available as the secondary/advanced path for the driver's TS.
+ */
+function RolePromptCard({
+  workspaceId,
+  roleName,
+}: {
+  workspaceId: string;
+  roleName: string;
+}): JSX.Element {
+  const { showToast } = useToast();
+  const [prompt, setPrompt] = useState("");
+  // The last-loaded/saved body, to detect a dirty edit; null until first load.
+  const [baseline, setBaseline] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setError(null);
+    getWorkspaceRole(workspaceId, roleName)
+      .then((res) => {
+        if (cancelled) return;
+        setPrompt(res.prompt ?? "");
+        setBaseline(res.prompt ?? "");
+      })
+      .catch((err) => {
+        if (!cancelled) setError((err as Error).message || "Failed to load role");
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [workspaceId, roleName]);
+
+  const dirty = baseline !== null && prompt !== baseline;
+
+  const handleSave = useCallback(async () => {
+    setSaving(true);
+    setError(null);
+    try {
+      const res = await updateWorkspaceRole(workspaceId, roleName, { prompt });
+      setBaseline(res.prompt ?? prompt);
+      showToast(`Saved prompt for role ${roleName}`, { type: "success" });
+    } catch (err) {
+      setError((err as Error).message || "Failed to save prompt");
+    } finally {
+      setSaving(false);
+    }
+  }, [workspaceId, roleName, prompt, showToast]);
+
+  return (
+    <section className={styles.card} data-testid="workflow-agent-role-prompt">
+      <h2 className={styles.cardLabel}>
+        Role prompt — shared by every agent wearing “{roleName}”
+      </h2>
+      {loading ? (
+        <p className={styles.emptyText}>Loading role prompt…</p>
+      ) : (
+        <>
+          <textarea
+            className={styles.manageInput}
+            style={{ minHeight: "12rem", fontFamily: "var(--font-mono, monospace)" }}
+            value={prompt}
+            onChange={(e) => setPrompt(e.target.value)}
+            spellCheck={false}
+            disabled={saving}
+            data-testid="workflow-agent-role-prompt-textarea"
+          />
+          {error && (
+            <div
+              className={styles.errorText}
+              role="alert"
+              data-testid="workflow-agent-role-prompt-error"
+            >
+              {error}
+            </div>
+          )}
+          <div className={styles.manageActions}>
+            <button
+              type="button"
+              className={styles.btnPrimary}
+              onClick={handleSave}
+              disabled={!dirty || saving}
+              data-testid="workflow-agent-role-prompt-save"
+            >
+              {saving ? "Saving…" : "Save prompt"}
+            </button>
+          </div>
+        </>
+      )}
     </section>
   );
 }

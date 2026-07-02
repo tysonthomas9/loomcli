@@ -406,6 +406,17 @@ export async function createWorkspaceRole(
 }
 
 /**
+ * List every role in the workspace (builtins + custom). Used by the prompt-agent
+ * create path to offer a dropdown of existing roles to wear. Returns the raw
+ * role records (no prompt body — fetch that per-role with getWorkspaceRole).
+ */
+export async function listWorkspaceRoles(
+  workspaceId: string,
+): Promise<WorkspaceRole[]> {
+  return get<WorkspaceRole[]>(wsUrl(workspaceId, "/roles"));
+}
+
+/**
  * Read a single role plus its current prompt body so the UI can populate an
  * editor. 404 when the role does not exist.
  */

@@ -8,7 +8,8 @@ import {
 } from "react";
 
 import { AetherModal, aetherModalStyles } from "@/components/AetherModal";
-import type { RepoInfo, WorkspaceAgentInfo } from "@/api/workspace";
+import type { RepoInfo, WorkspaceAgentInfo, WorkspaceRole } from "@/api/workspace";
+import { listWorkspaceRoles } from "@/api/workspace";
 import {
   useCreateWorkspaceAgent,
   useEnsureWorkspaceRole,
@@ -30,6 +31,7 @@ import { AgentTemplateCard } from "./AgentTemplateCard";
 import {
   AGENT_TEMPLATES,
   grantsForRepo,
+  promptAgentBindingId,
   templateForRole,
   templatesForSection,
   TEMPLATE_SECTIONS,
@@ -130,6 +132,13 @@ export function CreateAgentModal({
   const [backend, setBackend] = useState(resolvedDefaultBackend);
   const [selectedRepos, setSelectedRepos] = useState<string[]>([]);
   const [cadence, setCadence] = useState<string>(DEFAULT_CADENCE);
+  // Prompt-agent role selection: pick an existing role, or the "__new__"
+  // sentinel to create one from the name + prompt fields below.
+  const NEW_ROLE = "__new__";
+  const [roleChoice, setRoleChoice] = useState<string>(NEW_ROLE);
+  const [newRoleName, setNewRoleName] = useState<string>("");
+  const [rolePrompt, setRolePrompt] = useState<string>("");
+  const [existingRoles, setExistingRoles] = useState<WorkspaceRole[]>([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const wasOpenRef = useRef(false);
@@ -149,8 +158,17 @@ export function CreateAgentModal({
     AGENT_TEMPLATES.find((t) => t.id === selectedTemplateId) ?? initialTemplate;
 
   const isWorkflow = selectedTemplate.kind === "workflow";
+  const isPromptAgent = selectedTemplate.kind === "prompt-agent";
+  const promptAgentSpec = selectedTemplate.promptAgent;
   const workflowSpec = selectedTemplate.workflow;
   const needsConnector = (workflowSpec?.grants?.length ?? 0) > 0;
+  // Prompt agents and scheduled workflows both fire on a cadence.
+  const showCadence = isWorkflow || isPromptAgent;
+  // The effective role name a prompt agent will wear: an existing pick, else the
+  // typed new-role name.
+  const promptRoleName = (
+    roleChoice === NEW_ROLE ? newRoleName : roleChoice
+  ).trim();
 
   const namePlaceholder = selectedTemplate.defaultName;
 
@@ -190,7 +208,37 @@ export function CreateAgentModal({
     setBackend(resolvedDefaultBackend);
     setSelectedRepos(defaultRepos);
     setCadence(DEFAULT_CADENCE);
+    setRoleChoice(NEW_ROLE);
+    setNewRoleName("");
+    setRolePrompt("");
   }, [resolvedDefaultName, resolvedDefaultBackend, defaultRepos, defaultRole]);
+
+  // Seed the new-role name + prompt from the prompt-agent template the first
+  // time it is selected, so the acceptance path (new role + docs prompt) starts
+  // pre-filled and editable.
+  useEffect(() => {
+    if (isPromptAgent && promptAgentSpec) {
+      setNewRoleName((prev) => prev || promptAgentSpec.roleName);
+      setRolePrompt((prev) => prev || promptAgentSpec.promptContent);
+    }
+  }, [isPromptAgent, promptAgentSpec]);
+
+  // Fetch existing roles for the prompt-agent role dropdown (best-effort: a
+  // fetch failure just leaves the "Create new role" path).
+  useEffect(() => {
+    if (!isOpen || !isPromptAgent) return;
+    let cancelled = false;
+    listWorkspaceRoles(workspaceId)
+      .then((roles) => {
+        if (!cancelled) setExistingRoles(roles);
+      })
+      .catch(() => {
+        if (!cancelled) setExistingRoles([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [isOpen, isPromptAgent, workspaceId]);
 
   useEffect(() => {
     if (!isOpen) {
@@ -211,7 +259,14 @@ export function CreateAgentModal({
     }
   }, [isOpen]);
 
-  const canSubmit = validateStoredAgentName(name) === null && !isSubmitting;
+  // A prompt agent also needs a role: an existing pick or a typed new-role name
+  // (and, for a new role, a prompt body).
+  const promptAgentReady =
+    !isPromptAgent ||
+    (promptRoleName !== "" &&
+      (roleChoice !== NEW_ROLE || rolePrompt.trim() !== ""));
+  const canSubmit =
+    validateStoredAgentName(name) === null && promptAgentReady && !isSubmitting;
 
   const handleSubmit = async (event: FormEvent) => {
     event.preventDefault();
@@ -297,6 +352,59 @@ export function CreateAgentModal({
         return;
       }
 
+      // Prompt-agent templates: ensure the Role (prompt as data), then create a
+      // cron trigger binding on the `prompt-agent` builtin whose run_input
+      // carries the roleName (+ backend). The dispatch source merges run_input
+      // into each fired run's payload, so the run resolves the role's prompt and
+      // claims a ready task — no daemon supervisor. One prompt edit (from the
+      // detail textarea, later) updates every agent wearing the role.
+      if (isPromptAgent && promptAgentSpec) {
+        const spec = promptAgentSpec;
+        const roleName = promptRoleName;
+        const cron =
+          CADENCE_OPTIONS.find((c) => c.value === cadence)?.cron ??
+          CADENCE_OPTIONS[0].cron;
+
+        // A new role is ensured (idempotent) with its prompt body; an existing
+        // pick is used as-is (its prompt is edited from the detail page).
+        if (roleChoice === NEW_ROLE) {
+          await ensureRole({
+            name: roleName,
+            prompt: rolePrompt,
+            prompt_filename: spec.promptFilename,
+            ...(spec.description ? { description: spec.description } : {}),
+            ...(spec.taskFilter ? { task_filter: spec.taskFilter } : {}),
+            ...(trimmedBackend ? { backend: trimmedBackend } : {}),
+          });
+        }
+
+        const bindingId = promptAgentBindingId(spec, roleName);
+        await createBinding({
+          workflow: "prompt-agent",
+          source_kind: "cron",
+          schedule: cron,
+          binding_id: bindingId,
+          name: trimmedName,
+          enabled: true,
+          run_input: {
+            roleName,
+            ...(trimmedBackend ? { backend: trimmedBackend } : {}),
+          },
+        });
+
+        if (onWorkflowActivated) {
+          onWorkflowActivated({
+            name: trimmedName,
+            workflow: "prompt-agent",
+            bindingId,
+          });
+        } else {
+          onClose();
+        }
+        resetToDefaults();
+        return;
+      }
+
       // Custom-role templates provision their Role (and seed its prompt file)
       // on first use, before the agent that references the role is created.
       // The endpoint is idempotent, so re-creating the same template is safe.
@@ -374,10 +482,10 @@ export function CreateAgentModal({
             data-testid="create-agent-submit"
           >
             {isSubmitting
-              ? isWorkflow
+              ? showCadence
                 ? "Activating..."
                 : "Creating..."
-              : isWorkflow
+              : showCadence
                 ? "Activate"
                 : "Create Agent"}
           </button>
@@ -443,7 +551,7 @@ export function CreateAgentModal({
               />
             </div>
 
-            {isWorkflow ? (
+            {showCadence ? (
               <div className={styles.fieldGroup}>
                 <label className={styles.label} htmlFor="agent-cadence">
                   Cadence
@@ -486,6 +594,112 @@ export function CreateAgentModal({
             )}
           </div>
 
+          {isPromptAgent && (
+            <div
+              className={`${styles.fieldGroup} ${styles.fieldGroupSpaced}`}
+              data-testid="create-agent-prompt-agent-config"
+            >
+              <div className={styles.configRow}>
+                <div className={styles.fieldGroup}>
+                  <label className={styles.label} htmlFor="prompt-agent-role">
+                    Role
+                  </label>
+                  <select
+                    id="prompt-agent-role"
+                    className={styles.select}
+                    value={roleChoice}
+                    onChange={(event) => setRoleChoice(event.target.value)}
+                    disabled={isSubmitting}
+                    data-testid="create-agent-role-select"
+                  >
+                    <option value={NEW_ROLE}>+ Create new role…</option>
+                    {existingRoles.map((role) => (
+                      <option key={role.name} value={role.name}>
+                        {role.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className={styles.fieldGroup}>
+                  <label
+                    className={styles.label}
+                    htmlFor="prompt-agent-backend"
+                  >
+                    AI Backend
+                  </label>
+                  <select
+                    id="prompt-agent-backend"
+                    className={styles.select}
+                    value={backend}
+                    onChange={(event) => setBackend(event.target.value)}
+                    disabled={isSubmitting}
+                    data-testid="create-agent-prompt-agent-backend"
+                  >
+                    {backendOptions.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              {roleChoice === NEW_ROLE ? (
+                <>
+                  <div className={styles.fieldGroup}>
+                    <label
+                      className={styles.label}
+                      htmlFor="prompt-agent-role-name"
+                    >
+                      New role name
+                    </label>
+                    <input
+                      id="prompt-agent-role-name"
+                      className={styles.input}
+                      value={newRoleName}
+                      onChange={(event) => setNewRoleName(event.target.value)}
+                      placeholder="docs-assistant"
+                      disabled={isSubmitting}
+                      data-testid="create-agent-role-name"
+                    />
+                  </div>
+                  <div className={styles.fieldGroup}>
+                    <label
+                      className={styles.label}
+                      htmlFor="prompt-agent-prompt"
+                    >
+                      Role prompt
+                    </label>
+                    <textarea
+                      id="prompt-agent-prompt"
+                      className={styles.input}
+                      rows={8}
+                      value={rolePrompt}
+                      onChange={(event) => setRolePrompt(event.target.value)}
+                      disabled={isSubmitting}
+                      spellCheck={false}
+                      data-testid="create-agent-role-prompt"
+                    />
+                    <p className={styles.hint}>
+                      The prompt is the role's brain (data, not code). Every agent
+                      wearing this role shares it; edit it later from the agent
+                      detail page.
+                    </p>
+                  </div>
+                </>
+              ) : (
+                <p className={styles.hint}>
+                  This agent wears the existing role{" "}
+                  <strong>{promptRoleName}</strong>. Edit its prompt from the
+                  agent detail page.
+                </p>
+              )}
+            </div>
+          )}
+
+          {/* A prompt agent claims ready tasks workspace-wide (no per-repo
+              scope on the binding), so the repo picker does not apply. */}
+          {!isPromptAgent && (
           <div className={`${styles.fieldGroup} ${styles.fieldGroupSpaced}`}>
             <span className={styles.label} id="agent-repos-label">
               Repos
@@ -528,6 +742,7 @@ export function CreateAgentModal({
             )}
             <p className={styles.hint}>{repoHint}</p>
           </div>
+          )}
 
           {isWorkflow && needsConnector && !githubConfigured && (
             <p

@@ -24,7 +24,14 @@ export type AgentTemplateKind =
   | "lead"
   | "builtin-role"
   | "custom-role"
-  | "workflow";
+  | "workflow"
+  // prompt-agent → ensure a Role (prompt as data), then create a cron trigger
+  // binding on the `prompt-agent` builtin whose run-input carries the roleName.
+  // The fired run claims a ready task and dispatches the local-task-runner with
+  // the role's prompt — no daemon supervisor. The binding surfaces as an
+  // autonomous agent (sidebar + WorkflowAgentDetail); the role prompt is edited
+  // from the detail textarea, so one edit updates every agent wearing the role.
+  | "prompt-agent";
 
 export type TemplateSection = "background" | "workflows" | "lead";
 
@@ -48,6 +55,22 @@ export interface CustomRoleSpec {
   /** Optional explicit tool allow/deny lists. */
   allowedTools?: string[];
   deniedTools?: string[];
+}
+
+/** Provisioning data for a `prompt-agent` template (defaults for the form). */
+export interface PromptAgentSpec {
+  /** Default role name pre-filled in the "new role" field. */
+  roleName: string;
+  /** Prompt filename seeded under the workspace prompt dir on first use. */
+  promptFilename: string;
+  /** Default prompt body pre-filled in the new-role textarea. */
+  promptContent: string;
+  /** Optional role description. */
+  description?: string;
+  /** Task-phase filter for the ensured role ("any" | "needs_plan" | ...). */
+  taskFilter?: string;
+  /** Stable trigger-binding id prefix; the concrete id folds in the role name. */
+  bindingIdPrefix: string;
 }
 
 /** A single deny-by-default connector grant provisioned for a `workflow`. */
@@ -121,6 +144,8 @@ export interface AgentTemplate {
   customRole?: CustomRoleSpec;
   /** Set when kind === "workflow". */
   workflow?: WorkflowSpec;
+  /** Set when kind === "prompt-agent". */
+  promptAgent?: PromptAgentSpec;
 }
 
 export interface TemplateSectionMeta {
@@ -159,7 +184,26 @@ const ACCENTS = {
   triage: "#9333ea",
   bugfix: "#2563eb",
   review: "#16a34a",
+  prompt: "#7c3aed",
 } as const;
+
+/**
+ * Default prompt seeded for a new prompt-agent role. Editable in the create
+ * form and, after creation, from the agent detail's role-prompt textarea.
+ */
+export const PROMPT_AGENT_DEFAULT_PROMPT = `# Docs assistant
+
+You are a documentation assistant. You claim a ready task and improve the
+project's documentation for it.
+
+For the task you claim:
+1. Read the task and the code or feature it refers to.
+2. Make the smallest doc change that resolves the task — fix inaccuracies,
+   fill gaps, clarify wording. Keep the project's existing tone and structure.
+3. Do not change product code; edit docs/comments only.
+
+Be concise and precise.
+`;
 
 /**
  * Prompt seeded for the bug-triage custom role on first use. Kept here so the
@@ -268,6 +312,28 @@ const REVIEW_LOOP_WORKFLOW_TEMPLATE: AgentTemplate = {
   },
 };
 
+const PROMPT_AGENT_TEMPLATE: AgentTemplate = {
+  id: "prompt-agent",
+  kind: "prompt-agent",
+  section: "workflows",
+  roleName: "",
+  title: "Prompt agent",
+  description:
+    "A role (prompt as data) that claims ready tasks on a schedule — no daemon.",
+  glyph: "◆",
+  accentColor: ACCENTS.prompt,
+  defaultName: "docs-agent",
+  testId: "create-agent-template-prompt-agent",
+  promptAgent: {
+    roleName: "docs-assistant",
+    promptFilename: "docs-assistant.md",
+    promptContent: PROMPT_AGENT_DEFAULT_PROMPT,
+    description: "Improves documentation for ready tasks.",
+    taskFilter: "any",
+    bindingIdPrefix: "prompt-agent",
+  },
+};
+
 const LEAD_TEMPLATE: AgentTemplate = {
   id: "lead",
   kind: "lead",
@@ -286,10 +352,24 @@ export const AGENT_TEMPLATES: AgentTemplate[] = [
   PLANNER_TEMPLATE,
   TASK_TEMPLATE,
   BUG_TRIAGE_TEMPLATE,
+  PROMPT_AGENT_TEMPLATE,
   BUG_FIX_WORKFLOW_TEMPLATE,
   REVIEW_LOOP_WORKFLOW_TEMPLATE,
   LEAD_TEMPLATE,
 ];
+
+/** A stable trigger-binding id for a prompt agent wearing `roleName`. */
+export function promptAgentBindingId(
+  spec: PromptAgentSpec,
+  roleName: string,
+): string {
+  const slug = roleName
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+  return `${spec.bindingIdPrefix}-${slug || "role"}`;
+}
 
 export type DefaultRole = "lead" | "plan" | "task";
 
