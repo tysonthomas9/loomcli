@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
+	"github.com/tysonthomas9/loomcli/internal/localworkspace"
 )
 
 // WorktreeInfo holds information about a discovered worktree
@@ -25,11 +26,7 @@ type WorktreeInfo struct {
 // IsGitLinkedWorktree reports whether the path is a git linked worktree
 // (has a .git file) rather than a source repo (has a .git directory).
 func IsGitLinkedWorktree(repoPath string) bool {
-	fi, err := os.Lstat(filepath.Join(repoPath, ".git"))
-	if err != nil {
-		return false
-	}
-	return !fi.IsDir()
+	return localworkspace.IsGitLinkedWorktree(repoPath)
 }
 
 // ResolverMode indicates how the Resolver discovers worktrees

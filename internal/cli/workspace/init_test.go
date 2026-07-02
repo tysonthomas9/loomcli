@@ -638,7 +638,6 @@ func TestValidateNewWorktreeName(t *testing.T) {
 		{"my-agent", false, ""},
 		{"agent_1", false, ""},
 		{"Agent2", false, ""},
-		{".hidden", false, ""},
 
 		// Invalid — empty
 		{"", true, "cannot be empty"},
@@ -661,6 +660,7 @@ func TestValidateNewWorktreeName(t *testing.T) {
 		{"foo/bar", true, "invalid characters"},
 
 		// Invalid — special characters
+		{".hidden", true, "must not start or end with '.'"},
 		{"a b", true, "invalid characters"},
 		{"a:b", true, "invalid characters"},
 		{"a*b", true, "invalid characters"},

@@ -14,6 +14,8 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/domain"
 )
 
+const maxWorktreeNameLength = 100
+
 // Repo is the local filesystem view of a workspace repository.
 type Repo struct {
 	Name          string
@@ -39,6 +41,45 @@ func AgentWorktreePath(workspacePath, repoName, agentName string) string {
 	return filepath.Join(workspacePath, "worktrees", repoName, agentName)
 }
 
+// ValidateWorktreeName checks that a worktree/group name is safe as both a git
+// branch name segment and a local path segment.
+func ValidateWorktreeName(name string) error {
+	if name == "" {
+		return fmt.Errorf("worktree name cannot be empty")
+	}
+	if strings.TrimSpace(name) == "" {
+		return fmt.Errorf("worktree name cannot be blank")
+	}
+	if len(name) > maxWorktreeNameLength {
+		return fmt.Errorf("invalid worktree name %q: must be %d characters or fewer", name, maxWorktreeNameLength)
+	}
+	if strings.EqualFold(name, "__workspace__") {
+		return fmt.Errorf("invalid worktree name %q: reserved name", name)
+	}
+	if strings.HasPrefix(name, "-") {
+		return fmt.Errorf("invalid worktree name %q: must not start with '-'", name)
+	}
+	if name == "." || name == ".." {
+		return fmt.Errorf("invalid worktree name %q: must not be '.' or '..'", name)
+	}
+	if strings.Contains(name, "..") {
+		return fmt.Errorf("invalid worktree name %q: must not contain '..'", name)
+	}
+	if strings.HasPrefix(name, ".") || strings.HasSuffix(name, ".") {
+		return fmt.Errorf("invalid worktree name %q: must not start or end with '.'", name)
+	}
+	if strings.HasSuffix(name, ".lock") {
+		return fmt.Errorf("invalid worktree name %q: must not end with '.lock'", name)
+	}
+	if strings.Contains(name, "@{") {
+		return fmt.Errorf("invalid worktree name %q: must not contain '@{'", name)
+	}
+	if strings.ContainsAny(name, "/ \\:*?\"<>|[~^") {
+		return fmt.Errorf("invalid worktree name %q: contains invalid characters", name)
+	}
+	return nil
+}
+
 // TaskRunWorktreePath returns the canonical isolated worktree path for a task
 // run. The path is deliberately separate from agent worktrees so concurrent
 // local-task-runner executions never share a mutable checkout.
@@ -62,6 +103,33 @@ func TaskRunWorktreePath(workspacePath, repoName, taskRunID string) (string, err
 	}
 	if !PathContains(root, target) || root == target {
 		return "", fmt.Errorf("task worktree path escapes workspace: %s", target)
+	}
+	return target, nil
+}
+
+// TerminalGroupRootPath returns the root directory for a terminal worktree
+// group under the workspace-local .loom namespace.
+func TerminalGroupRootPath(workspacePath, name string) (string, error) {
+	if strings.TrimSpace(workspacePath) == "" {
+		return "", fmt.Errorf("workspace path is empty")
+	}
+	if err := ValidateWorktreeName(name); err != nil {
+		return "", err
+	}
+	workspaceRoot, err := filepath.Abs(workspacePath)
+	if err != nil {
+		return "", err
+	}
+	groupRoot, err := filepath.Abs(filepath.Join(workspaceRoot, ".loom", "terminal-worktrees"))
+	if err != nil {
+		return "", err
+	}
+	target, err := filepath.Abs(filepath.Join(groupRoot, name))
+	if err != nil {
+		return "", err
+	}
+	if !PathContains(workspaceRoot, target) || !PathContains(groupRoot, target) || groupRoot == target {
+		return "", fmt.Errorf("terminal group path escapes workspace: %s", target)
 	}
 	return target, nil
 }
@@ -98,6 +166,16 @@ func PathContains(root, path string) bool {
 		return false
 	}
 	return rel == "." || (rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)))
+}
+
+// IsGitLinkedWorktree reports whether the path is a git linked worktree
+// (has a .git file) rather than a source repo (has a .git directory).
+func IsGitLinkedWorktree(repoPath string) bool {
+	fi, err := os.Lstat(filepath.Join(repoPath, ".git"))
+	if err != nil {
+		return false
+	}
+	return !fi.IsDir()
 }
 
 // CloneRepoTo clones cloneURL into targetPath.
@@ -146,6 +224,12 @@ func EnsureDetachedGitWorktreeFromBranch(repoPath, targetPath, remoteName, defau
 // remote/defaultBranch ref when available, falling back to the local branch.
 // Existing worktrees are left untouched.
 func EnsureGitWorktreeFromBranch(repoPath, targetPath, branchName, remoteName, defaultBranch string) error {
+	return EnsureGitWorktreeFromBranchCtx(context.Background(), repoPath, targetPath, branchName, remoteName, defaultBranch)
+}
+
+// EnsureGitWorktreeFromBranchCtx creates a git worktree at targetPath using
+// context-aware git invocations.
+func EnsureGitWorktreeFromBranchCtx(ctx context.Context, repoPath, targetPath, branchName, remoteName, defaultBranch string) error {
 	if _, err := os.Stat(filepath.Join(targetPath, ".git")); err == nil {
 		return nil
 	}
@@ -153,7 +237,7 @@ func EnsureGitWorktreeFromBranch(repoPath, targetPath, branchName, remoteName, d
 		return fmt.Errorf("creating worktree parent: %w", err)
 	}
 
-	baseRef, err := resolveFreshBaseRef(repoPath, remoteName, defaultBranch)
+	baseRef, err := resolveFreshBaseRefCtx(ctx, repoPath, remoteName, defaultBranch)
 	if err != nil {
 		return err
 	}
@@ -162,18 +246,22 @@ func EnsureGitWorktreeFromBranch(repoPath, targetPath, branchName, remoteName, d
 	if baseRef != "" {
 		args = append(args, baseRef)
 	}
-	if out, err := runGit(repoPath, args...); err == nil {
+	if out, err := runGitCtx(ctx, repoPath, args...); err == nil {
 		return nil
 	} else if !branchAlreadyExists(out, err) {
 		return err
 	}
-	if _, err := runGit(repoPath, "worktree", "add", targetPath, branchName); err != nil {
+	if _, err := runGitCtx(ctx, repoPath, "worktree", "add", targetPath, branchName); err != nil {
 		return err
 	}
 	return nil
 }
 
 func resolveFreshBaseRef(repoPath, remoteName, defaultBranch string) (string, error) {
+	return resolveFreshBaseRefCtx(context.Background(), repoPath, remoteName, defaultBranch)
+}
+
+func resolveFreshBaseRefCtx(ctx context.Context, repoPath, remoteName, defaultBranch string) (string, error) {
 	defaultBranch = strings.TrimSpace(defaultBranch)
 	if defaultBranch == "" {
 		return "", nil
@@ -183,30 +271,44 @@ func resolveFreshBaseRef(repoPath, remoteName, defaultBranch string) (string, er
 		remoteName = "origin"
 	}
 
-	if _, err := runGit(repoPath, "remote", "get-url", remoteName); err == nil {
-		if _, err := runGit(repoPath, "fetch", remoteName, defaultBranch); err != nil {
-			if _, localErr := runGit(repoPath, "rev-parse", "--verify", defaultBranch); localErr == nil {
+	if _, err := runGitCtx(ctx, repoPath, "remote", "get-url", remoteName); err == nil {
+		if _, err := runGitCtx(ctx, repoPath, "fetch", remoteName, defaultBranch); err != nil {
+			if ctx.Err() != nil {
+				return "", err
+			}
+			if _, localErr := runGitCtx(ctx, repoPath, "rev-parse", "--verify", defaultBranch); localErr == nil {
 				return defaultBranch, nil
 			}
 			return "", fmt.Errorf("fetch base branch %q from %q: %w", defaultBranch, remoteName, err)
 		}
 		return remoteName + "/" + defaultBranch, nil
+	} else if ctx.Err() != nil {
+		return "", err
 	}
 
-	if _, err := runGit(repoPath, "fetch", remoteName, defaultBranch); err == nil {
+	if _, err := runGitCtx(ctx, repoPath, "fetch", remoteName, defaultBranch); err == nil {
 		return remoteName + "/" + defaultBranch, nil
+	} else if ctx.Err() != nil {
+		return "", err
 	}
-	if _, err := runGit(repoPath, "rev-parse", "--verify", defaultBranch); err != nil {
+	if _, err := runGitCtx(ctx, repoPath, "rev-parse", "--verify", defaultBranch); err != nil {
 		return "", fmt.Errorf("resolve base branch %q: %w", defaultBranch, err)
 	}
 	return defaultBranch, nil
 }
 
 func runGit(dir string, args ...string) (string, error) {
-	cmd := exec.Command("git", args...) //nolint:gosec // G204: fixed git executable; args are controlled by internal worktree callers.
+	return runGitCtx(context.Background(), dir, args...)
+}
+
+func runGitCtx(ctx context.Context, dir string, args ...string) (string, error) {
+	cmd := exec.CommandContext(ctx, "git", args...) //nolint:gosec // G204: fixed git executable; args are controlled by internal worktree callers.
 	cmd.Dir = dir
 	out, err := cmd.CombinedOutput()
 	if err != nil {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return string(out), fmt.Errorf("git %s: %w: %s", strings.Join(args, " "), ctxErr, strings.TrimSpace(string(out)))
+		}
 		return string(out), fmt.Errorf("git %s: %w: %s", strings.Join(args, " "), err, strings.TrimSpace(string(out)))
 	}
 	return string(out), nil

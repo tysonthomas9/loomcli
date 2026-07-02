@@ -10,6 +10,7 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/hooks"
+	"github.com/tysonthomas9/loomcli/internal/localworkspace"
 )
 
 // checkPrerequisites verifies git is available and we're in a git repo.
@@ -159,26 +160,8 @@ func listExistingWorktrees(dir string) []string {
 	return names
 }
 
-// validateNewWorktreeName checks that a worktree name is safe for creation.
-// This is stricter than validateWorktreeName (which only blocks path traversal)
-// because new worktree names must also avoid git flag injection and invalid characters.
 func validateNewWorktreeName(name string) error {
-	if name == "" {
-		return fmt.Errorf("worktree name cannot be empty")
-	}
-	if strings.HasPrefix(name, "-") {
-		return fmt.Errorf("invalid worktree name %q: must not start with '-'", name)
-	}
-	if name == "." || name == ".." {
-		return fmt.Errorf("invalid worktree name %q: must not be '.' or '..'", name)
-	}
-	if strings.Contains(name, "..") {
-		return fmt.Errorf("invalid worktree name %q: must not contain '..'", name)
-	}
-	if strings.ContainsAny(name, "/ \\:*?\"<>|") {
-		return fmt.Errorf("invalid worktree name %q: contains invalid characters", name)
-	}
-	return nil
+	return localworkspace.ValidateWorktreeName(name)
 }
 
 // parseNames splits comma-separated names
