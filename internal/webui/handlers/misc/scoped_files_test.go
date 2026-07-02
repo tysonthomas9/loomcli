@@ -102,7 +102,7 @@ func TestHandleScopedFileRead_WorkspaceRootReadsFile(t *testing.T) {
 	}
 }
 
-func TestHandleScopedFileTree_GitDirHiddenFromListing(t *testing.T) {
+func TestHandleScopedFileTree_HiddenDirsHiddenFromListing(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "src.go"), []byte("package x"), 0644); err != nil {
 		t.Fatal(err)
@@ -111,6 +111,12 @@ func TestHandleScopedFileTree_GitDirHiddenFromListing(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(dir, ".git", "config"), []byte("[core]\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(dir, ".loom"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, ".loom", "state.json"), []byte("{}\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -126,13 +132,13 @@ func TestHandleScopedFileTree_GitDirHiddenFromListing(t *testing.T) {
 		t.Fatalf("decode: %v", err)
 	}
 	for _, e := range resp.Entries {
-		if e.Name == ".git" {
-			t.Fatalf(".git must be hidden from the listing; entries: %+v", resp.Entries)
+		if e.Name == ".git" || e.Name == ".loom" {
+			t.Fatalf("%s must be hidden from the listing; entries: %+v", e.Name, resp.Entries)
 		}
 	}
 }
 
-func TestHandleScopedFileRead_GitPathDenied(t *testing.T) {
+func TestHandleScopedFileRead_HiddenPathDenied(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(dir, ".git"), 0755); err != nil {
 		t.Fatal(err)
@@ -140,13 +146,20 @@ func TestHandleScopedFileRead_GitPathDenied(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, ".git", "config"), []byte("url = https://x:tok@host/r\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.MkdirAll(filepath.Join(dir, ".loom"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, ".loom", "state.json"), []byte("{}\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
 
 	h := HandleScopedFileRead(NewFileService(wsRootFor(dir)))
-	w := httptest.NewRecorder()
-	h.ServeHTTP(w, scopedReq("/api/workspaces/test-ws/files?scope=workspace&path=.git/config"))
-
-	if w.Code != http.StatusForbidden {
-		t.Fatalf("status = %d, want 403 for .git path; body: %s", w.Code, w.Body.String())
+	for _, path := range []string{".git/config", ".loom/state.json"} {
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, scopedReq("/api/workspaces/test-ws/files?scope=workspace&path="+path))
+		if w.Code != http.StatusForbidden {
+			t.Fatalf("path=%s: status = %d, want 403; body: %s", path, w.Code, w.Body.String())
+		}
 	}
 }
 

@@ -46,6 +46,8 @@ tags:
     description: Terminal session management, spawning, scrollback
   - name: terminal-tabs
     description: Terminal tab metadata (Redis-backed)
+  - name: terminal-worktrees
+    description: Terminal worktree groups
   - name: terminal-state
     description: Terminal UI state persistence
   - name: agent-terminal
@@ -1859,6 +1861,64 @@ paths:
                     type: array
                     items:
                       $ref: "#/components/schemas/TabMetadata"
+
+  /api/workspaces/{ws}/terminal/worktrees:
+    get:
+      operationId: listTerminalWorktreeGroups
+      tags: [terminal-worktrees]
+      summary: List terminal worktree groups
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+      responses:
+        "200":
+          description: Terminal worktree groups
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TerminalWorktreeListResponse"
+    post:
+      operationId: createTerminalWorktreeGroup
+      tags: [terminal-worktrees]
+      summary: Create a terminal worktree group
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TerminalWorktreeCreateRequest"
+      responses:
+        "201":
+          description: Terminal worktree group created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TerminalWorktreeCreateResponse"
+        "400":
+          description: Validation failure with per-repo results
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TerminalWorktreeErrorResponse"
+        "404":
+          description: Workspace not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TerminalWorktreeErrorResponse"
+        "409":
+          description: Duplicate group name or per-repo conflict
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TerminalWorktreeErrorResponse"
+        "500":
+          description: Internal error after rollback
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TerminalWorktreeErrorResponse"
 
   /api/workspaces/{ws}/terminal/tabs/{session}:
     get:
@@ -4310,6 +4370,98 @@ components:
           type: [boolean, "null"]
         issue_id:
           type: [string, "null"]
+
+    TerminalWorktreeGroup:
+      type: object
+      required: [id, name, root, members, created_at]
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        root:
+          type: string
+        members:
+          type: array
+          items:
+            $ref: "#/components/schemas/TerminalWorktreeMember"
+        created_at:
+          type: string
+          format: date-time
+
+    TerminalWorktreeMember:
+      type: object
+      required: [repo_name, path, base_branch, base_detached, reused_branch]
+      properties:
+        repo_name:
+          type: string
+        path:
+          type: string
+        base_branch:
+          type: string
+        base_detached:
+          type: boolean
+        reused_branch:
+          type: boolean
+
+    TerminalWorktreeResult:
+      type: object
+      required: [repo, status]
+      properties:
+        repo:
+          type: string
+        status:
+          type: string
+          enum: [created, exists, reused, conflict, error, rolled_back]
+        message:
+          type: string
+
+    TerminalWorktreeListResponse:
+      type: object
+      required: [groups]
+      properties:
+        groups:
+          type: array
+          items:
+            $ref: "#/components/schemas/TerminalWorktreeGroup"
+
+    TerminalWorktreeCreateRequest:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+        repos:
+          type: array
+          items:
+            type: string
+        base:
+          type: string
+
+    TerminalWorktreeCreateResponse:
+      type: object
+      required: [group, results]
+      properties:
+        group:
+          $ref: "#/components/schemas/TerminalWorktreeGroup"
+        results:
+          type: array
+          items:
+            $ref: "#/components/schemas/TerminalWorktreeResult"
+
+    TerminalWorktreeErrorResponse:
+      type: object
+      required: [error, kind]
+      properties:
+        error:
+          type: string
+        kind:
+          type: string
+          enum: [validation, conflict, not_found, internal, unavailable]
+        results:
+          type: array
+          items:
+            $ref: "#/components/schemas/TerminalWorktreeResult"
 
     # ── Issue Tab Schemas ───────────────────────────────────────────────
     IssueTab:

@@ -86,6 +86,7 @@ func (app *Server) buildTerminalModules() {
 				SelfURL:         fmt.Sprintf("http://localhost:%d", app.actualPort),
 				Store:           app.config.Store,
 				TabMetaStore:    app.tabMetaStore,
+				WorktreeGroups:  app.worktreeGroupStore,
 				Hub:             app.hub,
 				ServerStartedAt: app.startedAt,
 			})...)

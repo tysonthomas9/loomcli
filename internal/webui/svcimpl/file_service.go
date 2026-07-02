@@ -203,11 +203,11 @@ func readFileAt(rootDir, path string, hidden map[string]bool) (*service.FileRead
 
 // hiddenScopeSegments names path segments the workspace browser omits from
 // listings and refuses to read. The workspace root spans every repo, so this
-// keeps each repo's .git out of the cross-repo view (its config can also carry
-// tokenized remote URLs). This is the workspace-scope policy, not a global
+// keeps each repo's .git and Loom's workspace metadata out of the cross-repo
+// view. This is the workspace-scope policy, not a global
 // guarantee — the per-agent file panel passes nil and applies none. A set so
 // more segments (e.g. node_modules) can be added without touching call sites.
-var hiddenScopeSegments = map[string]bool{".git": true}
+var hiddenScopeSegments = map[string]bool{".git": true, ".loom": true}
 
 // pathHasHiddenSegment reports whether any cleaned segment of path is hidden.
 func pathHasHiddenSegment(path string, hidden map[string]bool) bool {

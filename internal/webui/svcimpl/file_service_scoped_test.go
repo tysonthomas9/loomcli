@@ -49,7 +49,7 @@ func wantKind(t *testing.T, err error, kind service.ErrorKind) {
 	}
 }
 
-func TestFileServiceImpl_ListDirectoryScoped_HidesGit(t *testing.T) {
+func TestFileServiceImpl_ListDirectoryScoped_HidesGitAndLoom(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "main.go"), []byte("package m"), 0644); err != nil {
 		t.Fatal(err)
@@ -57,21 +57,28 @@ func TestFileServiceImpl_ListDirectoryScoped_HidesGit(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(dir, ".git"), 0755); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.MkdirAll(filepath.Join(dir, ".loom"), 0755); err != nil {
+		t.Fatal(err)
+	}
 
 	res, err := scopedSvc(dir).ListDirectoryScoped(context.Background(), "ws", service.ScopeWorkspace, "", "")
 	if err != nil {
 		t.Fatalf("ListDirectoryScoped: %v", err)
 	}
-	var sawMain, sawGit bool
+	var sawMain, sawGit, sawLoom bool
 	for _, e := range res.Entries {
 		sawMain = sawMain || e.Name == "main.go"
 		sawGit = sawGit || e.Name == ".git"
+		sawLoom = sawLoom || e.Name == ".loom"
 	}
 	if !sawMain {
 		t.Errorf("main.go missing from listing: %+v", res.Entries)
 	}
 	if sawGit {
 		t.Errorf(".git must be hidden from listing: %+v", res.Entries)
+	}
+	if sawLoom {
+		t.Errorf(".loom must be hidden from listing: %+v", res.Entries)
 	}
 }
 
@@ -100,6 +107,19 @@ func TestFileServiceImpl_ReadFileScoped_GitDenied(t *testing.T) {
 	}
 
 	_, err := scopedSvc(dir).ReadFileScoped(context.Background(), "ws", service.ScopeWorkspace, "", ".git/config")
+	wantKind(t, err, service.KindForbidden)
+}
+
+func TestFileServiceImpl_ReadFileScoped_LoomDenied(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, ".loom"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, ".loom", "state.json"), []byte("x"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := scopedSvc(dir).ReadFileScoped(context.Background(), "ws", service.ScopeWorkspace, "", ".loom/state.json")
 	wantKind(t, err, service.KindForbidden)
 }
 

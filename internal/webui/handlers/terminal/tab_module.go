@@ -12,13 +12,14 @@ import (
 // The module is only constructed when termSvc is non-nil. All routes are
 // unconditional within this module.
 type TabModule struct {
-	termSvc service.TerminalService
+	termSvc     service.TerminalService
+	worktreeSvc *WorktreeGroupService
 }
 
 // NewTabModule returns a TabModule that will register routes
 // using the given terminal service.
-func NewTabModule(termSvc service.TerminalService) *TabModule {
-	return &TabModule{termSvc: termSvc}
+func NewTabModule(termSvc service.TerminalService, worktreeSvc *WorktreeGroupService) *TabModule {
+	return &TabModule{termSvc: termSvc, worktreeSvc: worktreeSvc}
 }
 
 // Register implements [Module] by registering terminal tab, state, and setup routes.
@@ -32,6 +33,11 @@ func (m *TabModule) Register(mux *http.ServeMux) {
 
 	// Cross-workspace session lookup by issue
 	mux.HandleFunc("GET /api/workspaces/{ws}/terminal/sessions/by-issue", HandleListSessionsByIssue(m.termSvc))
+
+	if m.worktreeSvc != nil {
+		mux.HandleFunc("GET /api/workspaces/{ws}/terminal/worktrees", HandleListWorktreeGroups(m.worktreeSvc))
+		mux.HandleFunc("POST /api/workspaces/{ws}/terminal/worktrees", HandleCreateWorktreeGroup(m.worktreeSvc))
+	}
 
 	// Terminal UI state (active tab persistence)
 	mux.HandleFunc("GET /api/workspaces/{ws}/terminal/state", HandleGetTerminalState(m.termSvc))

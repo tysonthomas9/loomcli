@@ -19,6 +19,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
 	"github.com/tysonthomas9/loomcli/internal/webui/tabmeta"
 	"github.com/tysonthomas9/loomcli/internal/webui/terminal"
+	"github.com/tysonthomas9/loomcli/internal/webui/worktreegroups"
 )
 
 // NewIssueModules creates the issue and session modules.
@@ -47,6 +48,7 @@ type TerminalModuleDeps struct {
 	SelfURL         string
 	Store           store.Store
 	TabMetaStore    *tabmeta.Store
+	WorktreeGroups  *worktreegroups.Store
 	Hub             *realtime.Hub
 	ServerStartedAt time.Time
 }
@@ -54,7 +56,7 @@ type TerminalModuleDeps struct {
 // NewTerminalModules creates the terminal tab and main terminal modules.
 func NewTerminalModules(deps TerminalModuleDeps) []interface{ Register(*http.ServeMux) } {
 	return []interface{ Register(*http.ServeMux) }{
-		hterminal.NewTabModule(deps.TermSvc),
+		hterminal.NewTabModule(deps.TermSvc, hterminal.NewWorktreeGroupService(deps.Store, deps.WorktreeGroups)),
 		hterminal.NewModule(
 			deps.TermSvc, deps.AgentSvc, deps.PTYMgr, deps.AgentTmuxMgr,
 			deps.TermAuth, deps.CORSOrigins,

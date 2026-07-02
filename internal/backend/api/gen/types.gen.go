@@ -644,6 +644,63 @@ func (e SessionHistoryRecordStatus) Valid() bool {
 	}
 }
 
+// Defines values for TerminalWorktreeErrorResponseKind.
+const (
+	TerminalWorktreeErrorResponseKindConflict    TerminalWorktreeErrorResponseKind = "conflict"
+	TerminalWorktreeErrorResponseKindInternal    TerminalWorktreeErrorResponseKind = "internal"
+	TerminalWorktreeErrorResponseKindNotFound    TerminalWorktreeErrorResponseKind = "not_found"
+	TerminalWorktreeErrorResponseKindUnavailable TerminalWorktreeErrorResponseKind = "unavailable"
+	TerminalWorktreeErrorResponseKindValidation  TerminalWorktreeErrorResponseKind = "validation"
+)
+
+// Valid indicates whether the value is a known member of the TerminalWorktreeErrorResponseKind enum.
+func (e TerminalWorktreeErrorResponseKind) Valid() bool {
+	switch e {
+	case TerminalWorktreeErrorResponseKindConflict:
+		return true
+	case TerminalWorktreeErrorResponseKindInternal:
+		return true
+	case TerminalWorktreeErrorResponseKindNotFound:
+		return true
+	case TerminalWorktreeErrorResponseKindUnavailable:
+		return true
+	case TerminalWorktreeErrorResponseKindValidation:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for TerminalWorktreeResultStatus.
+const (
+	TerminalWorktreeResultStatusConflict   TerminalWorktreeResultStatus = "conflict"
+	TerminalWorktreeResultStatusCreated    TerminalWorktreeResultStatus = "created"
+	TerminalWorktreeResultStatusError      TerminalWorktreeResultStatus = "error"
+	TerminalWorktreeResultStatusExists     TerminalWorktreeResultStatus = "exists"
+	TerminalWorktreeResultStatusReused     TerminalWorktreeResultStatus = "reused"
+	TerminalWorktreeResultStatusRolledBack TerminalWorktreeResultStatus = "rolled_back"
+)
+
+// Valid indicates whether the value is a known member of the TerminalWorktreeResultStatus enum.
+func (e TerminalWorktreeResultStatus) Valid() bool {
+	switch e {
+	case TerminalWorktreeResultStatusConflict:
+		return true
+	case TerminalWorktreeResultStatusCreated:
+		return true
+	case TerminalWorktreeResultStatusError:
+		return true
+	case TerminalWorktreeResultStatusExists:
+		return true
+	case TerminalWorktreeResultStatusReused:
+		return true
+	case TerminalWorktreeResultStatusRolledBack:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for TranscriptEntryRole.
 const (
 	TranscriptEntryRoleAssistant TranscriptEntryRole = "assistant"
@@ -1837,6 +1894,62 @@ type TerminalSpawnRequest struct {
 	SessionName string `json:"session_name"`
 }
 
+// TerminalWorktreeCreateRequest defines model for TerminalWorktreeCreateRequest.
+type TerminalWorktreeCreateRequest struct {
+	Base  *string   `json:"base,omitempty"`
+	Name  string    `json:"name"`
+	Repos *[]string `json:"repos,omitempty"`
+}
+
+// TerminalWorktreeCreateResponse defines model for TerminalWorktreeCreateResponse.
+type TerminalWorktreeCreateResponse struct {
+	Group   TerminalWorktreeGroup    `json:"group"`
+	Results []TerminalWorktreeResult `json:"results"`
+}
+
+// TerminalWorktreeErrorResponse defines model for TerminalWorktreeErrorResponse.
+type TerminalWorktreeErrorResponse struct {
+	Error   string                            `json:"error"`
+	Kind    TerminalWorktreeErrorResponseKind `json:"kind"`
+	Results *[]TerminalWorktreeResult         `json:"results,omitempty"`
+}
+
+// TerminalWorktreeErrorResponseKind defines model for TerminalWorktreeErrorResponse.Kind.
+type TerminalWorktreeErrorResponseKind string
+
+// TerminalWorktreeGroup defines model for TerminalWorktreeGroup.
+type TerminalWorktreeGroup struct {
+	CreatedAt time.Time                `json:"created_at"`
+	Id        string                   `json:"id"`
+	Members   []TerminalWorktreeMember `json:"members"`
+	Name      string                   `json:"name"`
+	Root      string                   `json:"root"`
+}
+
+// TerminalWorktreeListResponse defines model for TerminalWorktreeListResponse.
+type TerminalWorktreeListResponse struct {
+	Groups []TerminalWorktreeGroup `json:"groups"`
+}
+
+// TerminalWorktreeMember defines model for TerminalWorktreeMember.
+type TerminalWorktreeMember struct {
+	BaseBranch   string `json:"base_branch"`
+	BaseDetached bool   `json:"base_detached"`
+	Path         string `json:"path"`
+	RepoName     string `json:"repo_name"`
+	ReusedBranch bool   `json:"reused_branch"`
+}
+
+// TerminalWorktreeResult defines model for TerminalWorktreeResult.
+type TerminalWorktreeResult struct {
+	Message *string                      `json:"message,omitempty"`
+	Repo    string                       `json:"repo"`
+	Status  TerminalWorktreeResultStatus `json:"status"`
+}
+
+// TerminalWorktreeResultStatus defines model for TerminalWorktreeResult.Status.
+type TerminalWorktreeResultStatus string
+
 // TranscriptEntry Single transcript entry from a session
 type TranscriptEntry struct {
 	Content   *string             `json:"content,omitempty"`
@@ -2426,3 +2539,6 @@ type PatchTerminalTabJSONRequestBody = TabPatchRequest
 
 // PutTerminalTabJSONRequestBody defines body for PutTerminalTab for application/json ContentType.
 type PutTerminalTabJSONRequestBody = TabPutRequest
+
+// CreateTerminalWorktreeGroupJSONRequestBody defines body for CreateTerminalWorktreeGroup for application/json ContentType.
+type CreateTerminalWorktreeGroupJSONRequestBody = TerminalWorktreeCreateRequest

@@ -283,11 +283,11 @@ func (s *testFileServiceImpl) WriteFile(_ context.Context, wsID, agentName, path
 	return nil
 }
 
-// hiddenScopeSegment reports whether a cleaned path contains a hidden segment
-// (.git). Mirrors svcimpl's hidden-segment policy for scoped browsing.
+// hiddenScopeSegment reports whether a cleaned path contains a hidden segment.
+// Mirrors svcimpl's hidden-segment policy for scoped browsing.
 func hiddenScopeSegment(path string) bool {
 	for _, seg := range strings.Split(filepath.ToSlash(filepath.Clean("/"+path)), "/") {
-		if seg == ".git" {
+		if seg == ".git" || seg == ".loom" {
 			return true
 		}
 	}
@@ -353,7 +353,7 @@ func (s *testFileServiceImpl) ListDirectoryScoped(_ context.Context, wsID string
 	})
 	entries := make([]service.FileTreeEntry, 0, len(dirEntries))
 	for _, de := range dirEntries {
-		if de.Type()&os.ModeSymlink != 0 || de.Name() == ".git" {
+		if de.Type()&os.ModeSymlink != 0 || de.Name() == ".git" || de.Name() == ".loom" {
 			continue
 		}
 		info, infoErr := de.Info()
