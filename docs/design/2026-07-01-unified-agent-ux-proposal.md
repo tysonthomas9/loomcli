@@ -1,9 +1,10 @@
 # Unified Agent Platform: the Workflow Plane Supersedes the Role Plane
 
-**Status:** Proposal (v2 — reframes v1's "map workflow agents into role-agent
-views"; the v1 UI work survives unchanged as Phases 1–3, but as the primary
-agent surface rather than a bridge between two permanent planes)
-**Date:** 2026-07-01
+**Status:** Implemented through Phase 4 (Phases 1–3 + Phase-4 platform/packaging
+landed and real-run verified; Phase 4's EVENT lane is red pending task #36 —
+see "Adversarial vet"; Phase 5 not started). Doc is an append-only design
+record: later sections correct earlier ones.
+**Date:** 2026-07-01 (v2); addenda 2026-07-02
 **Related:** `docs/design/create-agent-redesign.md`,
 `docs/design/2026-06-07-trigger-workflow-proposal.md`,
 `docs/design/2026-06-07-agent-service-driver-version-proposal.md`,
@@ -377,3 +378,94 @@ checked at binding-create and surfaced by `loom doctor`.
    task types) rather than shipping twice.
 4. Task #38 grows into the capability-manifest/doctor item rather than a
    one-off error-message fix.
+
+## Adversarial vet (fable agent, 2026-07-02) — corrections to the architecture vet
+
+An independent adversarial review verified every claim above against the code
+and the suite evidence. The architecture held (prompt-as-data, owner-trust
+runner pinning, lease/fence claims, failure health all confirmed in code and
+live evidence). The ARCHITECTURE-VET SECTION ABOVE contains errors, corrected
+here; this section supersedes it where they conflict.
+
+### Corrections to Miss 1 (dispatch assembly)
+
+The finding stands (two merge sites exist, internal dispatch has none) but the
+proposed fix — a loomcli-side per-leg merge — CANNOT BE BUILT: fleet-db owns
+leg creation (`fleet-db/internal/api/platform.go dispatchTriggerRouteLeg`
+threads ONE shared payload across all legs; memstore's leg code is test-only
+and panics in production). The honest fixes: (a) PRIMARY — parse-and-merge
+`source_config_ref` per leg inside fleet-db's `dispatchTriggerRouteLeg` (the
+binding is in-hand there; NO schema change; batch with #34's DELETE route —
+"blocked by Miss 2" was an excuse, fleet-db must be touched anyway); or (b)
+interim loomcli-only — derive unique per-binding internal routes (the cron
+`WithDerivedRoute` model) so `Emit` dispatches once per binding with its
+merged payload. The frontend Run-now copy cannot simply be deleted either:
+Run-now is a direct by-driver run-create with no binding in scope; absorbing
+it needs a binding-scoped run-now endpoint.
+
+### Corrections to Miss 2 (contract gap)
+
+- The "ready RPC lacks Type" sighting was WRONG as a cross-repo gap: the seam
+  supports `type` end-to-end; the real gap is loomcli-internal (the claim-ready
+  driver op never exposes/sets `ReadyOpts.Type`).
+- SIXTH sighting found: fleet-db stamps `trigger_binding_id` on every
+  trigger-dispatched run; loomcli's `domain.DriverRun` silently drops it on
+  decode — which also answers Open Question 3 (per-binding run attribution:
+  the server already attributes; the client must stop discarding it).
+- Fix emphasis inverted: fleet-db maintains a 10k-line `api/openapi.yaml` that
+  ALSO lacks the DELETE (the handwritten client invented a verb the spec never
+  had). Primary fix = generate or spec-verify the loomcli fleetdb client from
+  that spec (loomcli already runs codegen elsewhere); a bespoke contract suite
+  would be a second spec to drift.
+
+### Correction to the arbitration deferral — the hazard is live BOTH ways
+
+Deferring the arbitration DESIGN to Phase 5 stands, but total deferral is
+wrong: (1) the plan lane steals designless bugs today (golden S1 red, standing
+`REGRESSION` gate noise); (2) sharper and unnamed above — `bug-fix-agent`
+claims BLIND via claimReady with no type filter and does NOT release the claim
+when it discovers a non-bug (parks arbitrary tasks under its lease until TTL).
+Ship two non-preemptive mitigations NOW, loomcli-only: release-on-skip in
+bug-fix-agent, and `type` exposure on the claim-ready op. The Phase-5 design
+question remains open; these just stop the bleeding.
+
+### New findings (ranked)
+
+1. **(security, should-fix) Untrusted caller → trusted host runner via
+   prompt.** An untrusted, container-sandboxed driver can dispatch the
+   globally-resolved `local-task-runner` with fully caller-controlled
+   `input.taskPrompt` — and that runner executes codex ON THE HOST with
+   patch-back and task-close (the suite's R4 proves the lane). "Prompt = data"
+   is wrong in effect here: the prompt is the program for the runner's brain;
+   instruction injection buys host-side file mutation. Options: restrict
+   untrusted callers' global-runner dispatch to operator-authored role prompts
+   (roles.get) rather than free-form taskPrompt; trust-gate exec-task; or
+   explicitly accept for single-operator deployments — but it must be priced.
+2. **(security, should-fix) Actor-keyed locks with caller-supplied actor.**
+   Task claim/release locks are keyed by the actor STRING, and every driver op
+   accepts a body actor — presenting a victim's label is lock takeover/release
+   (cross-agent task theft in one op call). Fix: derive actor server-side from
+   run/binding identity; body actor becomes display-only.
+3. **(should-fix) claim-by-id false-409 window:** `ClaimTask` scans only the
+   first `limit` (default 100) ready entries while the router uses 10,000 for
+   the same crowding reason; busy workspaces will get silent no-ops for
+   genuinely ready tasks, indistinguishable from honest conflicts.
+4. **(should-fix with growth) Unbounded run fetches ×2:** `listWorkflowRuns`
+   and `bindingRunHealth` both fetch a driver's FULL run history per call
+   (documented local-mode tradeoffs). Fix in the same fleet-db batch: server
+   newest-N ordering + a `trigger_binding_id` list filter.
+5. **(notes)** `source_config_ref` wedge needs a source-kind guard + size cap
+   while it lives; internal-event emission lets any run fire other agents'
+   bindings (spend amplification — budget-policy territory); `roles.get`
+   exposes every role prompt to every run — document "no secrets in prompts."
+
+### Coherence fixes (applied with this addendum)
+
+Status header corrected (was "Proposal" long after implementation). Open
+Question 1 (task-ready event shape) is CLOSED — decided + implemented in
+`issue_journal_bridge_task_ready.go`. Open Question 3 is CLOSED by finding
+#2 above (decode `trigger_binding_id` + add the list param). Phase-4-full
+acceptance is explicitly NOT met until #36: every green run in evidence is
+cron/run-now; the chosen event lane is the red one. The by-design reds must
+be separated from the aether suite's gate verdict or the gate reads as a
+permanent false REGRESSION.
