@@ -83,19 +83,52 @@ export function formatFireTime(iso: string | null | undefined): string {
 }
 
 /**
- * Sidebar status-dot state for a binding. Phase 2 bases this on the binding's
- * enabled + next-fire state only (no live run polling in the sidebar): an
- * enabled binding is "idle" (waiting for its next fire), a disabled one "off".
+ * Sidebar status-dot state for a binding (Decision 7). A disabled binding is
+ * "off"; an enabled one reflects recent run health from the list-computed
+ * consecutive_failures: 2+ consecutive failures → "failing" (red), exactly 1 →
+ * "warn" (amber), else "idle" (green, waiting for its next fire).
  */
-export type BindingDotState = "idle" | "off";
+export type BindingDotState = "idle" | "off" | "warn" | "failing";
 
 export function bindingDotState(b: TriggerBinding): BindingDotState {
-  return b.enabled ? "idle" : "off";
+  if (!b.enabled) return "off";
+  const failures = b.consecutive_failures ?? 0;
+  if (failures >= 2) return "failing";
+  if (failures === 1) return "warn";
+  return "idle";
 }
 
 /** Tooltip text for a binding's sidebar status dot. */
 export function bindingDotTooltip(b: TriggerBinding): string {
   if (!b.enabled) return "Disabled";
+  const failures = b.consecutive_failures ?? 0;
+  if (failures >= 2) return `Failing — ${failures} consecutive runs failed`;
+  if (failures === 1) return "Last run failed";
   const next = formatFireTime(b.next_fire_at);
   return next ? `Enabled · next fire ${next}` : "Enabled";
+}
+
+/**
+ * Health descriptor for the WorkflowAgentDetail header pill: `state` drives the
+ * pill color (shared with the sidebar dot), `label` the text, `tooltip` the
+ * hover detail. One source of truth so the sidebar and detail agree.
+ */
+export interface BindingHealth {
+  state: BindingDotState;
+  label: string;
+  tooltip: string;
+}
+
+export function bindingHealth(b: TriggerBinding): BindingHealth {
+  const state = bindingDotState(b);
+  const tooltip = bindingDotTooltip(b);
+  const label =
+    state === "off"
+      ? "Disabled"
+      : state === "failing"
+        ? "Failing"
+        : state === "warn"
+          ? "Last run failed"
+          : "Enabled";
+  return { state, label, tooltip };
 }

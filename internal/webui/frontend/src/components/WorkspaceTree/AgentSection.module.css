@@ -215,9 +215,18 @@
   background: var(--color-status-idle, #888);
 }
 
-/* idle = enabled (waiting for next fire); off = disabled. */
+/* idle = enabled/healthy; warn = 1 failed run (amber); failing = 2+ (red);
+   off = disabled. */
 .workflowDot[data-state="idle"] {
   background: var(--color-success, #22c55e);
+}
+
+.workflowDot[data-state="warn"] {
+  background: var(--color-warning, #d99700);
+}
+
+.workflowDot[data-state="failing"] {
+  background: var(--color-danger, #d14545);
 }
 
 .workflowDot[data-state="off"] {

@@ -2,12 +2,15 @@ import { useCallback, useEffect, useState } from "react";
 
 import {
   createTriggerBinding,
+  deleteTriggerBinding,
   listTriggerBindings,
   listWorkflows,
   setTriggerBindingEnabled,
   startWorkflowRun,
+  updateTriggerBinding,
   type CreateTriggerBindingRequest,
   type TriggerBinding,
+  type UpdateTriggerBindingRequest,
   type WorkflowRun,
   type WorkflowSummary,
 } from "@/api/workflows";
@@ -40,6 +43,11 @@ export interface UseAutomationsReturn {
   refresh: () => Promise<void>;
   createBinding: (req: CreateTriggerBindingRequest) => Promise<TriggerBinding>;
   setEnabled: (bindingId: string, enabled: boolean) => Promise<void>;
+  updateBinding: (
+    bindingId: string,
+    req: UpdateTriggerBindingRequest,
+  ) => Promise<TriggerBinding>;
+  deleteBinding: (bindingId: string) => Promise<void>;
   runWorkflow: (name: string, payload: unknown) => Promise<WorkflowRun>;
 }
 
@@ -131,6 +139,28 @@ export function useAutomations(
     [workspaceId, refreshBindings],
   );
 
+  const updateBinding = useCallback(
+    async (
+      bindingId: string,
+      req: UpdateTriggerBindingRequest,
+    ): Promise<TriggerBinding> => {
+      const binding = await updateTriggerBinding(workspaceId, bindingId, req);
+      await refreshBindings();
+      dispatchBindingsChanged(workspaceId);
+      return binding;
+    },
+    [workspaceId, refreshBindings],
+  );
+
+  const deleteBinding = useCallback(
+    async (bindingId: string): Promise<void> => {
+      await deleteTriggerBinding(workspaceId, bindingId);
+      await refreshBindings();
+      dispatchBindingsChanged(workspaceId);
+    },
+    [workspaceId, refreshBindings],
+  );
+
   const runWorkflow = useCallback(
     (name: string, payload: unknown): Promise<WorkflowRun> =>
       startWorkflowRun(workspaceId, name, payload),
@@ -146,6 +176,8 @@ export function useAutomations(
     refresh,
     createBinding,
     setEnabled,
+    updateBinding,
+    deleteBinding,
     runWorkflow,
   };
 }

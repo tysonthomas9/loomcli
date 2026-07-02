@@ -1,4 +1,4 @@
-import { get, post, wsUrl } from "@/api/common";
+import { del, get, patch, post, wsUrl } from "@/api/common";
 
 export const EPIC_RUNNER_WORKFLOW_NAME = "epic-runner";
 
@@ -125,6 +125,16 @@ export interface TriggerBinding {
   schedule_timezone?: string;
   /** Computed next fire time (ISO 8601) for an enabled cron binding. */
   next_fire_at?: string;
+  /**
+   * Newest run's status (incl. queued/running), for display. Present only in
+   * the list view, which computes run-failure health per binding.
+   */
+  last_run_status?: WorkflowRunStatus;
+  /**
+   * Count of failed runs from newest until the first non-failed terminal run
+   * (Decision 7: 1 → amber dot, 2+ → red "failing"). List view only.
+   */
+  consecutive_failures?: number;
   created_at?: string;
   updated_at?: string;
 }
@@ -183,6 +193,56 @@ export async function setTriggerBindingEnabled(
       }`,
     ),
     {},
+  );
+}
+
+/** PATCH body for editing a trigger binding: rename + reschedule only. */
+export interface UpdateTriggerBindingRequest {
+  name?: string;
+  /** 5-field cron expression — only valid on a cron binding. */
+  schedule?: string;
+  /** IANA timezone — only valid on a cron binding. */
+  schedule_timezone?: string;
+}
+
+/**
+ * Edit a binding's name and/or cron schedule. Schedule/timezone changes on a
+ * non-cron binding, or a malformed cron, are rejected server-side (400 —
+ * surfaced as an ApiError whose message the caller can show).
+ */
+export async function updateTriggerBinding(
+  workspaceId: string,
+  bindingId: string,
+  req: UpdateTriggerBindingRequest,
+): Promise<TriggerBinding> {
+  return patch<TriggerBinding>(
+    wsUrl(workspaceId, `/trigger-bindings/${encodeURIComponent(bindingId)}`),
+    req,
+  );
+}
+
+/** Result of deleting a binding (Decision 6 — grants revoked alongside). */
+export interface DeleteTriggerBindingResult {
+  binding_id: string;
+  deleted: boolean;
+  grants_revoked: number;
+}
+
+/**
+ * Delete a binding and revoke its connector grants (Decision 6: no orphaned
+ * credentials).
+ *
+ * NOTE (honesty): against a fleet-db-backed store the DELETE currently fails —
+ * the fleet-db server does not yet register a DELETE handler on this route
+ * (405). The client wiring + memstore + grant revocation are complete; the
+ * error is surfaced (never faked) until the server adds the route.
+ */
+export async function deleteTriggerBinding(
+  workspaceId: string,
+  bindingId: string,
+): Promise<DeleteTriggerBindingResult> {
+  return del<DeleteTriggerBindingResult>(
+    wsUrl(workspaceId, `/trigger-bindings/${encodeURIComponent(bindingId)}`),
   );
 }
 

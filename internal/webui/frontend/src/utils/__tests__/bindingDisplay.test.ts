@@ -6,6 +6,7 @@ import {
   bindingCadenceLabel,
   bindingDotState,
   bindingDotTooltip,
+  bindingHealth,
   bindingKindLabel,
   describeCronSchedule,
   formatFireTime,
@@ -83,12 +84,33 @@ describe("bindingKindLabel", () => {
 });
 
 describe("bindingDotState / tooltip", () => {
-  it("is idle when enabled and off when disabled", () => {
+  it("is idle when enabled+healthy and off when disabled", () => {
     expect(bindingDotState(binding({ enabled: true }))).toBe("idle");
     expect(bindingDotState(binding({ enabled: false }))).toBe("off");
   });
 
-  it("tooltip reflects enabled + next fire", () => {
+  it("reflects failure health (Decision 7): 1 → warn, 2+ → failing", () => {
+    expect(
+      bindingDotState(binding({ enabled: true, consecutive_failures: 0 })),
+    ).toBe("idle");
+    expect(
+      bindingDotState(binding({ enabled: true, consecutive_failures: 1 })),
+    ).toBe("warn");
+    expect(
+      bindingDotState(binding({ enabled: true, consecutive_failures: 2 })),
+    ).toBe("failing");
+    expect(
+      bindingDotState(binding({ enabled: true, consecutive_failures: 5 })),
+    ).toBe("failing");
+  });
+
+  it("a disabled binding is off regardless of failures", () => {
+    expect(
+      bindingDotState(binding({ enabled: false, consecutive_failures: 3 })),
+    ).toBe("off");
+  });
+
+  it("tooltip reflects enabled + next fire, and failure state", () => {
     expect(bindingDotTooltip(binding({ enabled: false }))).toBe("Disabled");
     expect(bindingDotTooltip(binding({ enabled: true, next_fire_at: undefined }))).toBe(
       "Enabled",
@@ -98,6 +120,28 @@ describe("bindingDotState / tooltip", () => {
         binding({ enabled: true, next_fire_at: "2026-07-02T02:10:00Z" }),
       ),
     ).toContain("Enabled · next fire ");
+    expect(
+      bindingDotTooltip(binding({ enabled: true, consecutive_failures: 1 })),
+    ).toBe("Last run failed");
+    expect(
+      bindingDotTooltip(binding({ enabled: true, consecutive_failures: 3 })),
+    ).toContain("Failing");
+  });
+});
+
+describe("bindingHealth", () => {
+  it("derives the detail-header pill state + label from failure health", () => {
+    expect(bindingHealth(binding({ enabled: true })).state).toBe("idle");
+    expect(bindingHealth(binding({ enabled: true })).label).toBe("Enabled");
+    expect(bindingHealth(binding({ enabled: false })).label).toBe("Disabled");
+    expect(
+      bindingHealth(binding({ enabled: true, consecutive_failures: 1 })).state,
+    ).toBe("warn");
+    const failing = bindingHealth(
+      binding({ enabled: true, consecutive_failures: 2 }),
+    );
+    expect(failing.state).toBe("failing");
+    expect(failing.label).toBe("Failing");
   });
 });
 

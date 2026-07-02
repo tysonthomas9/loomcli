@@ -11,7 +11,7 @@
  * Git / Diff / Files are intentionally absent — a binding has no worktree.
  */
 
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { WorkflowSourceModal } from "@/components/WorkflowSourceModal";
 import { useWorkflowAgentDetail } from "@/hooks/workflows/useWorkflowAgentDetail";
@@ -19,6 +19,7 @@ import { useToast } from "@/hooks/ui/useToast";
 import {
   isTerminalWorkflowRunStatus,
   type TriggerBinding,
+  type UpdateTriggerBindingRequest,
   type WorkflowRun,
   type WorkflowRunStatus,
 } from "@/api";
@@ -26,6 +27,7 @@ import { getCompactAvatarInitials } from "@/utils/compactAvatarInitials";
 import { getAvatarColor, shouldUseWhiteText } from "@/utils/colorUtils";
 import {
   bindingCadenceLabel,
+  bindingHealth,
   bindingKindLabel,
   describeCronSchedule,
   formatFireTime,
@@ -33,11 +35,40 @@ import {
 
 import styles from "./WorkflowAgentDetail.module.css";
 
+/**
+ * Cadence presets for the schedule editor, mirroring CreateAgentModal's
+ * CADENCE_OPTIONS. CUSTOM_CADENCE reveals a raw-cron input; the expression is
+ * validated by a PATCH round-trip (the server's cron parser), never a
+ * client-side reimplementation of cron grammar.
+ */
+const CADENCE_OPTIONS = [
+  { value: "10m", label: "Every 10 minutes", cron: "*/10 * * * *" },
+  { value: "hourly", label: "Hourly", cron: "0 * * * *" },
+  { value: "daily", label: "Daily (09:00)", cron: "0 9 * * *" },
+] as const;
+
+const CUSTOM_CADENCE = "custom";
+
+/** Preselect the cadence dropdown from a binding's stored cron, else "custom". */
+function cadenceValueForCron(cron: string | undefined): string {
+  const match = CADENCE_OPTIONS.find((c) => c.cron === (cron ?? "").trim());
+  return match ? match.value : CUSTOM_CADENCE;
+}
+
 export interface WorkflowAgentDetailProps {
   workspaceId: string;
   binding: TriggerBinding;
   onSetEnabled: (bindingId: string, enabled: boolean) => Promise<void>;
   onRunWorkflow: (name: string, payload: unknown) => Promise<WorkflowRun>;
+  /** Rename / reschedule the binding (PATCH). Resolves with the updated binding. */
+  onUpdate: (
+    bindingId: string,
+    req: UpdateTriggerBindingRequest,
+  ) => Promise<TriggerBinding>;
+  /** Delete the binding and revoke its connector grants (Decision 6). */
+  onDelete: (bindingId: string) => Promise<void>;
+  /** Called after a successful delete so the shell can navigate back. */
+  onDeleted: () => void;
 }
 
 type DetailTab = "runs" | "info";
@@ -68,6 +99,9 @@ export function WorkflowAgentDetail({
   binding,
   onSetEnabled,
   onRunWorkflow,
+  onUpdate,
+  onDelete,
+  onDeleted,
 }: WorkflowAgentDetailProps): JSX.Element {
   const { runs, loading, error, driverId, activeVersionId, stats, refresh } =
     useWorkflowAgentDetail(workspaceId, binding.driver_id);
@@ -82,6 +116,7 @@ export function WorkflowAgentDetail({
   const avatarFg = shouldUseWhiteText(avatarBg) ? "#fff" : "#171717";
   const cadence = bindingCadenceLabel(binding);
   const nextFire = formatFireTime(binding.next_fire_at);
+  const health = bindingHealth(binding);
 
   // Focus the selected run, else the newest (runs are newest-first).
   const focusRun = useMemo<WorkflowRun | null>(() => {
@@ -144,11 +179,11 @@ export function WorkflowAgentDetail({
         <span
           className={styles.statusPill}
           data-enabled={binding.enabled}
-          title={
-            binding.enabled && nextFire ? `Next fire ${nextFire}` : undefined
-          }
+          data-state={health.state}
+          title={health.tooltip}
+          data-testid="workflow-agent-status-pill"
         >
-          {binding.enabled ? "Enabled" : "Disabled"}
+          {health.label}
         </span>
       </div>
 
@@ -227,6 +262,9 @@ export function WorkflowAgentDetail({
             nextFire={nextFire}
             stats={stats}
             onEditConfig={() => setShowSource(true)}
+            onUpdate={onUpdate}
+            onDelete={onDelete}
+            onDeleted={onDeleted}
           />
         )}
       </div>
@@ -411,6 +449,9 @@ function InfoTab({
   nextFire,
   stats,
   onEditConfig,
+  onUpdate,
+  onDelete,
+  onDeleted,
 }: {
   binding: TriggerBinding;
   driverId: string;
@@ -418,6 +459,12 @@ function InfoTab({
   nextFire: string;
   stats: { total: number; completed: number; failed: number; running: number };
   onEditConfig: () => void;
+  onUpdate: (
+    bindingId: string,
+    req: UpdateTriggerBindingRequest,
+  ) => Promise<TriggerBinding>;
+  onDelete: (bindingId: string) => Promise<void>;
+  onDeleted: () => void;
 }): JSX.Element {
   const isCron = binding.source_kind === "cron";
   return (
@@ -502,16 +549,228 @@ function InfoTab({
         </dl>
       </section>
 
-      <section className={styles.card}>
+      <ManageCard
+        binding={binding}
+        isCron={isCron}
+        onEditConfig={onEditConfig}
+        onUpdate={onUpdate}
+        onDelete={onDelete}
+        onDeleted={onDeleted}
+      />
+    </div>
+  );
+}
+
+/**
+ * ManageCard is the Info-tab editor: rename, reschedule (cron cadence preset or
+ * a custom cron validated by the PATCH round-trip), open the source editor, and
+ * delete (with a confirm step that spells out the connector-grant revocation).
+ * It seeds its edit state from the binding and re-seeds when the binding's
+ * identity/name/schedule change (e.g. after a save re-pulls the list).
+ */
+function ManageCard({
+  binding,
+  isCron,
+  onEditConfig,
+  onUpdate,
+  onDelete,
+  onDeleted,
+}: {
+  binding: TriggerBinding;
+  isCron: boolean;
+  onEditConfig: () => void;
+  onUpdate: (
+    bindingId: string,
+    req: UpdateTriggerBindingRequest,
+  ) => Promise<TriggerBinding>;
+  onDelete: (bindingId: string) => Promise<void>;
+  onDeleted: () => void;
+}): JSX.Element {
+  const { showToast } = useToast();
+  const [name, setName] = useState(binding.name);
+  const [cadence, setCadence] = useState(cadenceValueForCron(binding.schedule));
+  const [customCron, setCustomCron] = useState(binding.schedule ?? "");
+  const [busy, setBusy] = useState(false);
+  const [editError, setEditError] = useState<string | null>(null);
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+
+  // Re-seed the editor when the underlying binding changes (post-save re-pull,
+  // or navigating between bindings without unmounting).
+  useEffect(() => {
+    setName(binding.name);
+    setCadence(cadenceValueForCron(binding.schedule));
+    setCustomCron(binding.schedule ?? "");
+    setEditError(null);
+    setConfirmingDelete(false);
+  }, [binding.binding_id, binding.name, binding.schedule]);
+
+  const resolvedCron =
+    cadence === CUSTOM_CADENCE
+      ? customCron.trim()
+      : (CADENCE_OPTIONS.find((c) => c.value === cadence)?.cron ?? "");
+
+  const nameChanged = name.trim() !== binding.name && name.trim() !== "";
+  const scheduleChanged =
+    isCron && resolvedCron !== "" && resolvedCron !== (binding.schedule ?? "");
+  const canSave = !busy && (nameChanged || scheduleChanged);
+
+  const handleSave = useCallback(async () => {
+    setEditError(null);
+    const req: UpdateTriggerBindingRequest = {};
+    if (nameChanged) req.name = name.trim();
+    if (scheduleChanged) req.schedule = resolvedCron;
+    if (req.name === undefined && req.schedule === undefined) return;
+    setBusy(true);
+    try {
+      await onUpdate(binding.binding_id, req);
+      showToast("Agent updated", { type: "success" });
+    } catch (err) {
+      // A bad custom cron surfaces here as the server's parse error (400) —
+      // we never re-implement cron validation client-side.
+      setEditError((err as Error).message || "Failed to update agent");
+    } finally {
+      setBusy(false);
+    }
+  }, [
+    binding.binding_id,
+    name,
+    nameChanged,
+    resolvedCron,
+    scheduleChanged,
+    onUpdate,
+    showToast,
+  ]);
+
+  const handleDelete = useCallback(async () => {
+    setBusy(true);
+    setEditError(null);
+    try {
+      await onDelete(binding.binding_id);
+      showToast(`Deleted ${binding.binding_id}`, { type: "success" });
+      onDeleted();
+    } catch (err) {
+      setEditError((err as Error).message || "Failed to delete agent");
+      setBusy(false);
+    }
+  }, [binding.binding_id, onDelete, onDeleted, showToast]);
+
+  return (
+    <section className={styles.card} data-testid="workflow-agent-manage">
+      <h2 className={styles.cardLabel}>Manage</h2>
+      <div className={styles.manageGrid}>
+        <label className={styles.manageField}>
+          <span className={styles.manageLabel}>Name</span>
+          <input
+            className={styles.manageInput}
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            disabled={busy}
+            data-testid="workflow-agent-edit-name"
+          />
+        </label>
+
+        {isCron && (
+          <label className={styles.manageField}>
+            <span className={styles.manageLabel}>Cadence</span>
+            <select
+              className={styles.manageInput}
+              value={cadence}
+              onChange={(e) => setCadence(e.target.value)}
+              disabled={busy}
+              data-testid="workflow-agent-edit-cadence"
+            >
+              {CADENCE_OPTIONS.map((o) => (
+                <option key={o.value} value={o.value}>
+                  {o.label}
+                </option>
+              ))}
+              <option value={CUSTOM_CADENCE}>Custom cron…</option>
+            </select>
+          </label>
+        )}
+
+        {isCron && cadence === CUSTOM_CADENCE && (
+          <label className={styles.manageField}>
+            <span className={styles.manageLabel}>Cron expression</span>
+            <input
+              className={styles.manageInput}
+              value={customCron}
+              onChange={(e) => setCustomCron(e.target.value)}
+              placeholder="*/15 * * * *"
+              spellCheck={false}
+              disabled={busy}
+              data-testid="workflow-agent-edit-cron"
+            />
+          </label>
+        )}
+      </div>
+
+      {editError && (
+        <div className={styles.errorText} role="alert" data-testid="workflow-agent-edit-error">
+          {editError}
+        </div>
+      )}
+
+      <div className={styles.manageActions}>
+        <button
+          type="button"
+          className={styles.btnPrimary}
+          onClick={handleSave}
+          disabled={!canSave}
+          data-testid="workflow-agent-save-edit"
+        >
+          Save changes
+        </button>
         <button
           type="button"
           className={styles.btn}
           onClick={onEditConfig}
           data-testid="workflow-agent-info-edit-config"
         >
-          Edit configuration
+          Edit source
         </button>
-      </section>
-    </div>
+      </div>
+
+      <div className={styles.dangerZone}>
+        {confirmingDelete ? (
+          <div className={styles.confirmRow} data-testid="workflow-agent-delete-confirm">
+            <span className={styles.confirmText}>
+              Delete this agent? This revokes its connector grants and cannot be
+              undone.
+            </span>
+            <div className={styles.confirmActions}>
+              <button
+                type="button"
+                className={styles.btnDanger}
+                onClick={handleDelete}
+                disabled={busy}
+                data-testid="workflow-agent-delete-confirm-yes"
+              >
+                Delete
+              </button>
+              <button
+                type="button"
+                className={styles.btn}
+                onClick={() => setConfirmingDelete(false)}
+                disabled={busy}
+                data-testid="workflow-agent-delete-cancel"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        ) : (
+          <button
+            type="button"
+            className={styles.btnDangerOutline}
+            onClick={() => setConfirmingDelete(true)}
+            disabled={busy}
+            data-testid="workflow-agent-delete"
+          >
+            Delete agent
+          </button>
+        )}
+      </div>
+    </section>
   );
 }
