@@ -33,7 +33,7 @@ func startStaleTaskSweeper(ctx context.Context, st store.Store) {
 	}
 	sweeper := &driverexecutor.StaleTaskSweeper{
 		Store:        st,
-		WorkspaceKey: os.Getenv(bootstrap.EnvWorkspace),
+		WorkspaceKey: driverAutomationWorkspaceScope(),
 		MaxAge:       driverStaleTaskMaxAge(),
 	}
 	slog.Info("Stale task sweeper enabled", "workspace", sweeper.WorkspaceKey, "max_age", sweeper.MaxAge)
@@ -66,7 +66,7 @@ func startOutboxDispatcher(ctx context.Context, st store.Store) {
 	}
 	dispatcher := &driverexecutor.OutboxDispatcher{
 		Store:        st,
-		WorkspaceKey: os.Getenv(bootstrap.EnvWorkspace),
+		WorkspaceKey: driverAutomationWorkspaceScope(),
 	}
 	slog.Info("Outbox dispatcher enabled", "workspace", dispatcher.WorkspaceKey)
 	go func() {
@@ -100,7 +100,7 @@ func startTriggerCronScheduler(ctx context.Context, st store.Store) {
 	}
 	scheduler := &trigger.CronScheduler{
 		Store:        st,
-		WorkspaceKey: os.Getenv(bootstrap.EnvWorkspace),
+		WorkspaceKey: driverAutomationWorkspaceScope(),
 	}
 	interval := triggerCronInterval()
 	slog.Info("Trigger cron scheduler enabled", "workspace", scheduler.WorkspaceKey, "interval", interval)
@@ -143,7 +143,7 @@ func startTriggerDeliverySweeper(ctx context.Context, st store.Store) {
 	)
 	sweeper := &trigger.DeliverySweeper{
 		Store:        st,
-		WorkspaceKey: os.Getenv(bootstrap.EnvWorkspace),
+		WorkspaceKey: driverAutomationWorkspaceScope(),
 		BatchLimit:   boundedIntEnv(envLoomTriggerSweepBatch, trigger.DefaultDeliverySweepBatch, 500),
 	}
 	interval := time.Duration(boundedIntEnv(envLoomTriggerSweepInterval, 15, 3600)) * time.Second
@@ -184,7 +184,7 @@ func startAwaitTimeoutSweeper(ctx context.Context, st store.Store) {
 	)
 	sweeper := &driverexecutor.AwaitTimeoutSweeper{
 		Store:        st,
-		WorkspaceKey: os.Getenv(bootstrap.EnvWorkspace),
+		WorkspaceKey: driverAutomationWorkspaceScope(),
 		BatchLimit:   boundedIntEnv(envLoomAwaitSweepBatch, driverexecutor.DefaultAwaitTimeoutSweepBatch, 500),
 	}
 	interval := time.Duration(boundedIntEnv(envLoomAwaitSweepInterval, 30, 3600)) * time.Second

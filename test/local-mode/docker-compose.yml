@@ -65,6 +65,11 @@ services:
       HOME: /root
       LOOM_CONFIG_DIR: /root/.loom
       LOOM_WORKSPACE: LOCALMODE
+      # Unscope the driver-run executor + task worker from LOOM_WORKSPACE so they
+      # claim queued runs in EVERY workspace (e.g. SANDBOX cron fires), matching
+      # the always-unscoped CronScheduler. "*" is the documented sentinel; unset
+      # would inherit LOOM_WORKSPACE and leave SANDBOX runs queued forever.
+      LOOM_DRIVER_EXECUTOR_WORKSPACE: "*"
       LOOM_ISSUE_BACKEND: fleetdb
       LOOM_FLEET_DB_URL: http://fleet-db:8080
       LOOM_FLEET_URL: http://fleet-db:8080

@@ -40,6 +40,13 @@ import (
 // fleet-aware issue routing at a different layer.
 const envLoomFleetMode = "LOOM_FLEET_MODE"
 const envLoomDriverExecutor = "LOOM_DRIVER_EXECUTOR"
+const envLoomDriverExecutorWorkspace = "LOOM_DRIVER_EXECUTOR_WORKSPACE"
+
+// driverExecutorAllWorkspaces is the LOOM_DRIVER_EXECUTOR_WORKSPACE sentinel
+// that unscopes the driver executor + task worker so they claim queued runs in
+// EVERY workspace (Executor/TaskWorker treat an empty WorkspaceKey as "all
+// workspaces", the same way the CronScheduler sweeps every workspace).
+const driverExecutorAllWorkspaces = "*"
 const envLoomDriverTaskWorkerConcurrency = "LOOM_DRIVER_TASK_WORKER_CONCURRENCY"
 const envLoomDriverTaskRunMaxAttempts = "LOOM_DRIVER_TASK_RUN_MAX_ATTEMPTS"
 const envLoomDriverStaleTaskMaxAge = "LOOM_DRIVER_STALE_TASK_MAX_AGE"
@@ -119,6 +126,7 @@ ENVIRONMENT VARIABLES
   LOOM_AUTH_ISSUER      Expected JWT issuer (defaults to LOOM_AUTH_URL)
   LOOM_AUTH_AUDIENCE    Expected JWT audience (defaults to "loom")
   LOOM_DRIVER_EXECUTOR  DriverRun executor toggle (default: on; set 0/false/off/no to disable)
+  LOOM_DRIVER_EXECUTOR_WORKSPACE  Scope for serve's driver-run automation loops (cron scheduler, outbox/delivery/stale/await sweepers, run executor + task worker): unset inherits LOOM_WORKSPACE; "*" spans every workspace; a name scopes to that workspace
   LOOM_DRIVER_TASK_WORKER_CONCURRENCY  Local TaskRun worker loops (default: 2)
   LOOM_DRIVER_TASK_RUN_MAX_ATTEMPTS     TaskRun attempts before blocking failed (default: 2)
   LOOM_TRIGGER_CRON_INTERVAL            Cron trigger sweep interval in seconds (default: 30)
@@ -312,7 +320,11 @@ func startDriverExecutorIfEnabled(ctx context.Context, st store.Store) {
 	taskWorkerConcurrency := driverTaskWorkerConcurrency()
 	taskRunMaxAttempts := driverTaskRunMaxAttempts()
 	taskWorker := &driverexecutor.TaskWorker{
-		Store:            st,
+		Store: st,
+		// Share the executor's resolved claim scope (LOOM_DRIVER_EXECUTOR_WORKSPACE
+		// or LOOM_WORKSPACE): a task worker scoped to one workspace while its
+		// driver runs span every workspace would leave TaskRuns queued the same
+		// way the run executor did.
 		WorkspaceKey:     executor.WorkspaceKey,
 		WorkDir:          workDir,
 		NodeID:           executor.NodeID,
@@ -366,7 +378,7 @@ func buildDriverExecutor(st store.Store, workDir string) (*driverexecutor.Execut
 	}
 	executor := &driverexecutor.Executor{
 		Store:           st,
-		WorkspaceKey:    os.Getenv(bootstrap.EnvWorkspace),
+		WorkspaceKey:    driverAutomationWorkspaceScope(),
 		WorkDir:         workDir,
 		NodeID:          os.Getenv("LOOM_DRIVER_EXECUTOR_NODE_ID"),
 		APIBaseURL:      driverAPIBaseURL(),
@@ -374,7 +386,11 @@ func buildDriverExecutor(st store.Store, workDir string) (*driverexecutor.Execut
 		RunTokenKey:     driverRunTokenKey(),
 		SandboxLauncher: sandboxLauncher,
 	}
-	slog.Info("Driver executor enabled", "workspace", executor.WorkspaceKey, "work_dir", workDir, "sandbox", sandboxMode,
+	workspaceScope := executor.WorkspaceKey
+	if workspaceScope == "" {
+		workspaceScope = "*all*"
+	}
+	slog.Info("Driver executor enabled", "workspace", workspaceScope, "work_dir", workDir, "sandbox", sandboxMode,
 		"sandbox_egress", sandboxEgress,
 		"task_worker_concurrency", driverTaskWorkerConcurrency(), "task_run_max_attempts", driverTaskRunMaxAttempts())
 	return executor, true
@@ -443,6 +459,44 @@ func driverRunTokenKey() []byte {
 		return nil
 	}
 	return key
+}
+
+// resolveDriverExecutorWorkspace resolves the workspace scope for the driver
+// run executor + local task-worker claim loops. By default the executor
+// inherits LOOM_WORKSPACE, which also drives issue routing and monitor
+// collection — fine for a single-workspace process, but wrong for a serve
+// process expected to service every workspace the CronScheduler sweeps. The
+// scheduler is always unscoped, so a LOOM_WORKSPACE-scoped executor leaves runs
+// it fired in every OTHER workspace queued forever. LOOM_DRIVER_EXECUTOR_WORKSPACE
+// decouples the executor's claim scope from LOOM_WORKSPACE:
+//
+//   - unset / empty  → inherit LOOM_WORKSPACE (back-compat, single-workspace)
+//   - "*" (sentinel) → unscoped: claim queued runs in EVERY workspace
+//     (Executor.nextQueuedRun / TaskWorker.RunOnce treat an empty WorkspaceKey
+//     as "all workspaces", mirroring recoverStale + the CronScheduler)
+//   - any other name → scope the executor to exactly that workspace
+func resolveDriverExecutorWorkspace(override, inherited string) string {
+	override = strings.TrimSpace(override)
+	if override == "" {
+		return strings.TrimSpace(inherited)
+	}
+	if override == driverExecutorAllWorkspaces {
+		return ""
+	}
+	return override
+}
+
+// driverAutomationWorkspaceScope is the single resolved workspace scope shared
+// by serve's driver-run automation loops: the cron scheduler (fires ticks →
+// runs), the outbox + trigger-delivery sweepers (move ticks → runs and retry),
+// the stale-task + await-timeout sweepers (recover those runs), and the run
+// executor + task worker (claim + execute). They MUST agree: a scheduler that
+// fires runs in a workspace the executor won't claim leaves them queued forever
+// (the original SANDBOX-vs-LOCALMODE bug). The issue-journal bridge is
+// deliberately NOT included — it is issue-plane ingestion, not driver-run
+// automation, and stays on LOOM_WORKSPACE.
+func driverAutomationWorkspaceScope() string {
+	return resolveDriverExecutorWorkspace(os.Getenv(envLoomDriverExecutorWorkspace), os.Getenv(bootstrap.EnvWorkspace))
 }
 
 func driverExecutorEnabled() bool {
