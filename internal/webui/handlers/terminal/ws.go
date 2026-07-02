@@ -393,7 +393,7 @@ func launchSpecForTerminalSession(ctx context.Context, p *terminalWSParams, work
 		}
 		return meta.Launch, nil
 	}
-	if meta.Launch != nil && (len(meta.Launch.Argv) > 0 || len(meta.Launch.Env) > 0) {
+	if meta.Launch != nil && (len(meta.Launch.Argv) > 0 || len(meta.Launch.Env) > 0 || strings.TrimSpace(meta.Launch.Cwd) != "") {
 		return meta.Launch, nil
 	}
 	return legacyLaunchSpecForSession(session), nil

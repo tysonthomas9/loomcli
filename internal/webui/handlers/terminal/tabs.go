@@ -1,16 +1,24 @@
 package terminal
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/localworkspace"
+	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
+	"github.com/tysonthomas9/loomcli/internal/webui/storeadapter"
 	"github.com/tysonthomas9/loomcli/internal/webui/tabmeta"
+	webuterminal "github.com/tysonthomas9/loomcli/internal/webui/terminal"
+	"github.com/tysonthomas9/loomcli/internal/webui/worktreegroups"
 )
 
 // tabMetadataResponse wraps tab metadata API responses.
@@ -127,14 +135,15 @@ func HandlePatchTerminalTab(svc service.TerminalService) http.HandlerFunc {
 
 // tabPutRequest represents the full create-or-replace body for PUT.
 type tabPutRequest struct {
-	Label     string `json:"label"`
-	SortOrder int    `json:"sort_order"`
-	Notes     string `json:"notes"`
-	Pinned    bool   `json:"pinned"`
+	Label           string `json:"label"`
+	SortOrder       int    `json:"sort_order"`
+	Notes           string `json:"notes"`
+	Pinned          bool   `json:"pinned"`
+	WorktreeGroupID string `json:"worktree_group_id"`
 }
 
 // HandlePutTerminalTab creates or replaces tab metadata and broadcasts an SSE event.
-func HandlePutTerminalTab(svc service.TerminalService) http.HandlerFunc {
+func HandlePutTerminalTab(svc service.TerminalService, workspaceStore store.Store, worktreeGroupStore *worktreegroups.Store) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		workspace := middleware.WorkspaceFromContext(r.Context())
 		session := r.PathValue("session")
@@ -157,17 +166,13 @@ func HandlePutTerminalTab(svc service.TerminalService) http.HandlerFunc {
 			return
 		}
 
-		now := time.Now().UTC()
-		meta := &tabmeta.TabMetadata{
-			SessionName: session,
-			Workspace:   workspace,
-			Label:       req.Label,
-			Notes:       req.Notes,
-			SortOrder:   req.SortOrder,
-			Pinned:      req.Pinned,
-			CreatedAt:   now,
-			UpdatedAt:   now,
+		worktreeGroupID, launch, err := resolveTabWorktreeLaunch(r.Context(), workspaceStore, worktreeGroupStore, workspace, session, req.WorktreeGroupID)
+		if err != nil {
+			handler.HandleServiceError(w, err)
+			return
 		}
+
+		meta := newTabPutMetadata(workspace, session, req, worktreeGroupID, launch)
 
 		if err := svc.PutTab(r.Context(), workspace, meta); err != nil {
 			handler.HandleServiceError(w, err)
@@ -179,6 +184,71 @@ func HandlePutTerminalTab(svc service.TerminalService) http.HandlerFunc {
 			Data:    meta,
 		})
 	}
+}
+
+func newTabPutMetadata(workspace, session string, req tabPutRequest, worktreeGroupID string, launch *tabmeta.LaunchSpec) *tabmeta.TabMetadata {
+	now := time.Now().UTC()
+	return &tabmeta.TabMetadata{
+		SessionName:     session,
+		Workspace:       workspace,
+		Label:           req.Label,
+		Notes:           req.Notes,
+		SortOrder:       req.SortOrder,
+		Pinned:          req.Pinned,
+		WorktreeGroupID: worktreeGroupID,
+		Launch:          launch,
+		CreatedAt:       now,
+		UpdatedAt:       now,
+	}
+}
+
+func resolveTabWorktreeLaunch(ctx context.Context, workspaceStore store.Store, worktreeGroupStore *worktreegroups.Store, workspace, session, requestedID string) (string, *tabmeta.LaunchSpec, error) {
+	groupID := strings.TrimSpace(requestedID)
+	if groupID == "" || groupID == tabmeta.DefaultWorktreeGroupID {
+		return tabmeta.DefaultWorktreeGroupID, nil, nil
+	}
+	if workspaceStore == nil || worktreeGroupStore == nil {
+		slog.Warn("terminal worktree group store unavailable; falling back to workspace group",
+			"workspace", workspace, "session", session, "worktree_group_id", groupID)
+		return tabmeta.DefaultWorktreeGroupID, nil, nil
+	}
+
+	group, err := findWorktreeGroupByID(ctx, worktreeGroupStore, workspace, groupID)
+	if err != nil {
+		return "", nil, service.ErrInternal("find terminal worktree group", err)
+	}
+	if group == nil {
+		slog.Warn("terminal worktree group not found; falling back to workspace group",
+			"workspace", workspace, "session", session, "worktree_group_id", groupID)
+		return tabmeta.DefaultWorktreeGroupID, nil, nil
+	}
+
+	wsData, err := storeadapter.BuildWorkspaceDataForKey(ctx, workspaceStore, workspace)
+	if err != nil {
+		return "", nil, service.ErrNotFound(fmt.Sprintf("workspace %q not found", workspace))
+	}
+	cwd, err := localworkspace.TerminalGroupRootPath(wsData.Path, group.Name)
+	if err != nil {
+		return "", nil, service.ErrValidation(err.Error())
+	}
+	return groupID, &tabmeta.LaunchSpec{
+		Cwd:  cwd,
+		Argv: webuterminal.ArgvForSession(session),
+	}, nil
+}
+
+func findWorktreeGroupByID(ctx context.Context, store *worktreegroups.Store, workspace, groupID string) (*worktreegroups.TerminalWorktreeGroup, error) {
+	groups, err := store.List(ctx, workspace)
+	if err != nil {
+		return nil, err
+	}
+	for _, group := range groups {
+		if group.ID == groupID {
+			found := group
+			return &found, nil
+		}
+	}
+	return nil, nil
 }
 
 // HandleDeleteTerminalTab removes tab metadata and broadcasts an SSE event.

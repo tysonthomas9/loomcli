@@ -23,6 +23,9 @@ import (
 
 const keyPrefix = "terminal:meta:"
 
+// DefaultWorktreeGroupID is the synthetic workspace-root terminal group.
+const DefaultWorktreeGroupID = "__workspace__"
+
 // validSessionName matches alphanumeric characters, hyphens, and underscores.
 var validSessionName = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
 
@@ -46,6 +49,7 @@ type TabMetadata struct {
 	Role            string      `json:"role,omitempty"`
 	Backend         string      `json:"backend,omitempty"`
 	Writable        bool        `json:"writable,omitempty"`
+	WorktreeGroupID string      `json:"worktree_group_id,omitempty"`
 	Launch          *LaunchSpec `json:"launch,omitempty"`
 	CreatedAt       time.Time   `json:"created_at"`
 	UpdatedAt       time.Time   `json:"updated_at"`
@@ -244,24 +248,26 @@ func (s *Store) Set(ctx context.Context, meta *TabMetadata) error {
 	if err := ValidateSessionName(meta.SessionName); err != nil {
 		return err
 	}
+	meta.WorktreeGroupID = normalizeWorktreeGroupID(meta.WorktreeGroupID)
 
 	pinnedStr := "false"
 	if meta.Pinned {
 		pinnedStr = "true"
 	}
 	fields := map[string]interface{}{
-		"label":      meta.Label,
-		"notes":      meta.Notes,
-		"sort_order": strconv.Itoa(meta.SortOrder),
-		"pinned":     pinnedStr,
-		"issue_id":   meta.IssueID,
-		"kind":       meta.Kind,
-		"agent_id":   meta.AgentID,
-		"role":       meta.Role,
-		"backend":    meta.Backend,
-		"writable":   strconv.FormatBool(meta.Writable),
-		"created_at": meta.CreatedAt.UTC().Format(time.RFC3339),
-		"updated_at": meta.UpdatedAt.UTC().Format(time.RFC3339),
+		"label":             meta.Label,
+		"notes":             meta.Notes,
+		"sort_order":        strconv.Itoa(meta.SortOrder),
+		"pinned":            pinnedStr,
+		"issue_id":          meta.IssueID,
+		"kind":              meta.Kind,
+		"agent_id":          meta.AgentID,
+		"role":              meta.Role,
+		"backend":           meta.Backend,
+		"writable":          strconv.FormatBool(meta.Writable),
+		"worktree_group_id": meta.WorktreeGroupID,
+		"created_at":        meta.CreatedAt.UTC().Format(time.RFC3339),
+		"updated_at":        meta.UpdatedAt.UTC().Format(time.RFC3339),
 	}
 	if meta.Launch != nil {
 		raw, err := json.Marshal(meta.Launch)
@@ -421,15 +427,16 @@ func (s *Store) ListIssueSessionMap(ctx context.Context) (map[string][]string, e
 // parseMetadata converts a Redis hash map to a TabMetadata struct.
 func parseMetadata(workspace, sessionName string, vals map[string]string) (*TabMetadata, error) {
 	meta := &TabMetadata{
-		SessionName: sessionName,
-		Workspace:   workspace,
-		Label:       vals["label"],
-		Notes:       vals["notes"],
-		IssueID:     vals["issue_id"],
-		Kind:        vals["kind"],
-		AgentID:     vals["agent_id"],
-		Role:        vals["role"],
-		Backend:     vals["backend"],
+		SessionName:     sessionName,
+		Workspace:       workspace,
+		Label:           vals["label"],
+		Notes:           vals["notes"],
+		IssueID:         vals["issue_id"],
+		Kind:            vals["kind"],
+		AgentID:         vals["agent_id"],
+		Role:            vals["role"],
+		Backend:         vals["backend"],
+		WorktreeGroupID: normalizeWorktreeGroupID(vals["worktree_group_id"]),
 	}
 
 	if so, ok := vals["sort_order"]; ok {
@@ -468,4 +475,12 @@ func parseMetadata(workspace, sessionName string, vals map[string]string) (*TabM
 	}
 
 	return meta, nil
+}
+
+func normalizeWorktreeGroupID(id string) string {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return DefaultWorktreeGroupID
+	}
+	return id
 }

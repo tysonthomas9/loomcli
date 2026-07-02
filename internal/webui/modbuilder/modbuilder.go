@@ -56,7 +56,7 @@ type TerminalModuleDeps struct {
 // NewTerminalModules creates the terminal tab and main terminal modules.
 func NewTerminalModules(deps TerminalModuleDeps) []interface{ Register(*http.ServeMux) } {
 	return []interface{ Register(*http.ServeMux) }{
-		hterminal.NewTabModule(deps.TermSvc, hterminal.NewWorktreeGroupService(deps.Store, deps.WorktreeGroups)),
+		hterminal.NewTabModule(deps.TermSvc, deps.Store, deps.WorktreeGroups, hterminal.NewWorktreeGroupService(deps.Store, deps.WorktreeGroups)),
 		hterminal.NewModule(
 			deps.TermSvc, deps.AgentSvc, deps.PTYMgr, deps.AgentTmuxMgr,
 			deps.TermAuth, deps.CORSOrigins,

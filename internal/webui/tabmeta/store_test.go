@@ -44,13 +44,14 @@ func TestSetAndGet(t *testing.T) {
 
 	now := time.Now().UTC().Truncate(time.Second)
 	meta := &TabMetadata{
-		SessionName: "test-session",
-		Workspace:   testWorkspace,
-		Label:       "My Session",
-		Notes:       "Some notes",
-		SortOrder:   5,
-		CreatedAt:   now,
-		UpdatedAt:   now,
+		SessionName:     "test-session",
+		Workspace:       testWorkspace,
+		Label:           "My Session",
+		Notes:           "Some notes",
+		SortOrder:       5,
+		WorktreeGroupID: "group-id",
+		CreatedAt:       now,
+		UpdatedAt:       now,
 	}
 
 	if err := store.Set(ctx, meta); err != nil {
@@ -78,6 +79,45 @@ func TestSetAndGet(t *testing.T) {
 	}
 	if got.SortOrder != 5 {
 		t.Errorf("SortOrder = %d, want %d", got.SortOrder, 5)
+	}
+	if got.WorktreeGroupID != "group-id" {
+		t.Errorf("WorktreeGroupID = %q, want group-id", got.WorktreeGroupID)
+	}
+}
+
+func TestGetAndList_MissingWorktreeGroupIDDefaultsToWorkspace(t *testing.T) {
+	store, _ := setupTest(t)
+	ctx := context.Background()
+	now := time.Now().UTC().Format(time.RFC3339)
+
+	if err := store.RedisClient().HSet(ctx, metaKey(testWorkspace, "legacy-session"), map[string]interface{}{
+		"label":      "Legacy",
+		"notes":      "",
+		"sort_order": "1",
+		"pinned":     "false",
+		"created_at": now,
+		"updated_at": now,
+	}).Err(); err != nil {
+		t.Fatalf("HSet legacy metadata: %v", err)
+	}
+
+	got, err := store.Get(ctx, testWorkspace, "legacy-session")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if got.WorktreeGroupID != DefaultWorktreeGroupID {
+		t.Fatalf("Get().WorktreeGroupID = %q, want %q", got.WorktreeGroupID, DefaultWorktreeGroupID)
+	}
+
+	tabs, err := store.List(ctx, testWorkspace)
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(tabs) != 1 {
+		t.Fatalf("List returned %d tabs, want 1", len(tabs))
+	}
+	if tabs[0].WorktreeGroupID != DefaultWorktreeGroupID {
+		t.Fatalf("List()[0].WorktreeGroupID = %q, want %q", tabs[0].WorktreeGroupID, DefaultWorktreeGroupID)
 	}
 }
 
