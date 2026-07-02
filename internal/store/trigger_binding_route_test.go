@@ -45,3 +45,45 @@ func TestTriggerBindingCreate_WithDerivedRoute(t *testing.T) {
 		})
 	}
 }
+
+// DefaultBindingID is the inverse default of WithDerivedRoute: when a caller
+// supplies a route_key but no binding_id, the id is derived from the route.
+// The derivation must stay deterministic — createBinding's idempotent fast
+// path Gets by the derived id, so the same route key has to map to the same
+// id on every call and across every create surface (CLI, webui).
+func TestDefaultBindingID(t *testing.T) {
+	cases := []struct {
+		name     string
+		routeKey string
+		want     string
+	}{
+		{
+			name:     "github event route dots become dashes",
+			routeKey: "github.pull_request.opened",
+			want:     "binding-github-pull_request-opened",
+		},
+		{
+			name:     "route without dots is prefixed unchanged",
+			routeKey: "custom-route",
+			want:     "binding-custom-route",
+		},
+		{
+			// Non-empty enforcement is the caller's job (route_key is
+			// validated required before derivation); pin the passthrough.
+			name:     "empty route yields bare prefix",
+			routeKey: "",
+			want:     "binding-",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := store.DefaultBindingID(tc.routeKey)
+			if got != tc.want {
+				t.Fatalf("DefaultBindingID(%q) = %q, want %q", tc.routeKey, got, tc.want)
+			}
+			if again := store.DefaultBindingID(tc.routeKey); again != got {
+				t.Fatalf("DefaultBindingID(%q) is not deterministic: %q then %q", tc.routeKey, got, again)
+			}
+		})
+	}
+}
