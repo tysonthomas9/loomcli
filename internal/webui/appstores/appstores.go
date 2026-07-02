@@ -14,6 +14,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/webui/sessionhistory"
 	"github.com/tysonthomas9/loomcli/internal/webui/subscription"
 	"github.com/tysonthomas9/loomcli/internal/webui/tabmeta"
+	"github.com/tysonthomas9/loomcli/internal/webui/worktreegroups"
 )
 
 // Type aliases so the app package can reference concrete types without
@@ -24,6 +25,9 @@ type TabMetaStore = tabmeta.Store
 
 // IssueTabStore is a type alias for issuetabs.Store.
 type IssueTabStore = issuetabs.Store
+
+// WorktreeGroupStore is a type alias for worktreegroups.Store.
+type WorktreeGroupStore = worktreegroups.Store
 
 // SessionHistoryStore is a type alias for sessionhistory.Store.
 type SessionHistoryStore = sessionhistory.Store
@@ -93,6 +97,15 @@ func InitIssueTabs(ctx context.Context, redisCfg *fleet.RedisConfig, initialWSID
 	store := issuetabs.NewStore(itClient, nil)
 	cleanup := func() { _ = store.Close() }
 	logger.Info("issue tab store initialized", "redis_address", redisCfg.Address)
+	return store, cleanup
+}
+
+// InitWorktreeGroups creates the terminal worktree group store from Redis config.
+func InitWorktreeGroups(ctx context.Context, redisCfg *fleet.RedisConfig, initialWSID string, logger *slog.Logger) (*WorktreeGroupStore, func()) {
+	wgClient := fleet.NewRedisClient(redisCfg.Address, redisCfg.Password, 0)
+	store := worktreegroups.NewStore(wgClient, nil)
+	cleanup := func() { _ = store.Close() }
+	logger.Info("worktree group store initialized", "redis_address", redisCfg.Address)
 	return store, cleanup
 }
 

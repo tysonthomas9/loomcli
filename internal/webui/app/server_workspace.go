@@ -58,14 +58,19 @@ func wrapWorkspaceCreateFn(
 	}
 }
 
+type worktreeGroupDeleter interface {
+	DeleteWorkspace(context.Context, string) error
+}
+
 // wrapWorkspaceDeleteFn wraps a workspace deletion function with post-deletion
-// cleanup. After the inner delete succeeds, it deregisters the workspace from
-// the WorkspaceRegistry (closing pools and stopping subscribers) and the
-// FleetStoreRegistry (stopping fleet Store and TimeoutEnforcer).
+// cleanup. After the inner delete succeeds, it removes terminal worktree group
+// metadata and deregisters the workspace from the WorkspaceRegistry (closing
+// pools and stopping subscribers).
 func wrapWorkspaceDeleteFn(
 	innerDelete func(name string) error,
 	registry *appinfra.WorkspaceRegistry,
 	resolveID webui.WorkspaceIDResolverFn,
+	worktreeGroups worktreeGroupDeleter,
 ) func(name string) error {
 	if innerDelete == nil {
 		return nil
@@ -90,6 +95,15 @@ func wrapWorkspaceDeleteFn(
 		// 2. Perform the config deletion (the critical path — always proceed).
 		if err := innerDelete(name); err != nil {
 			return err
+		}
+
+		// Best-effort: the workspace is already gone, and a returned error
+		// would only wedge retries against the now-missing workspace.
+		if wsID != "" && worktreeGroups != nil {
+			if err := worktreeGroups.DeleteWorkspace(context.Background(), wsID); err != nil {
+				logger.Warn("workspace deleted but terminal worktree group cleanup failed",
+					"workspace", name, "id", wsID, "err", err)
+			}
 		}
 
 		// 3. Clean up pool, subscriber, and fleet state atomically.

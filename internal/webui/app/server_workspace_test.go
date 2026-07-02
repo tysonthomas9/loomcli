@@ -44,6 +44,16 @@ func (h *testPoolHook) OnRollback(ctx coordinator.DeregistrationContext) {
 	h.OnDeregister(ctx)
 }
 
+type recordingWorktreeGroupDeleter struct {
+	calls []string
+	err   error
+}
+
+func (d *recordingWorktreeGroupDeleter) DeleteWorkspace(_ context.Context, workspaceID string) error {
+	d.calls = append(d.calls, workspaceID)
+	return d.err
+}
+
 type testRegisteredPool struct {
 	stubPool
 	id int64
@@ -337,7 +347,7 @@ func TestWrapWorkspaceCreateFn_RegisterFails_PlainContext_NoPanic(t *testing.T) 
 func TestWrapWorkspaceDeleteFn_NilInner(t *testing.T) {
 	registry, _ := newTestRegistry(t)
 
-	wrapped := wrapWorkspaceDeleteFn(nil, registry, nil)
+	wrapped := wrapWorkspaceDeleteFn(nil, registry, nil, nil)
 	if wrapped != nil {
 		t.Fatal("expected nil wrapper when innerDelete is nil")
 	}
@@ -375,7 +385,7 @@ func TestWrapWorkspaceDeleteFn_Success(t *testing.T) {
 		return "", fmt.Errorf("unknown workspace %q", name)
 	}
 
-	wrapped := wrapWorkspaceDeleteFn(innerDelete, registry, resolveID)
+	wrapped := wrapWorkspaceDeleteFn(innerDelete, registry, resolveID, nil)
 	if wrapped == nil {
 		t.Fatal("expected non-nil wrapper")
 	}
@@ -389,6 +399,43 @@ func TestWrapWorkspaceDeleteFn_Success(t *testing.T) {
 	}
 
 	// Verify registry.Deregister was called.
+	if multiPool.PoolForWorkspace(wsID) != nil {
+		t.Error("expected pool to be deregistered after delete")
+	}
+}
+
+func TestWrapWorkspaceDeleteFn_DeletesWorktreeGroups(t *testing.T) {
+	registry, multiPool := newTestRegistry(t)
+
+	wsID := "aaaaaaaa-1111-2222-3333-555555555555"
+	wsName := "workspace-with-groups"
+	wsPath := t.TempDir()
+	if err := registry.Register(wsID, wsPath); err != nil {
+		t.Fatalf("Register returned error: %v", err)
+	}
+
+	innerDelete := func(name string) error {
+		if name != wsName {
+			t.Errorf("expected innerDelete called with %q, got %q", wsName, name)
+		}
+		return nil
+	}
+	resolveID := func(name string) (string, error) {
+		if name == wsName {
+			return wsID, nil
+		}
+		return "", fmt.Errorf("unknown workspace %q", name)
+	}
+	deleter := &recordingWorktreeGroupDeleter{}
+
+	wrapped := wrapWorkspaceDeleteFn(innerDelete, registry, resolveID, deleter)
+	if err := wrapped(wsName); err != nil {
+		t.Fatalf("wrapped delete returned error: %v", err)
+	}
+
+	if len(deleter.calls) != 1 || deleter.calls[0] != wsID {
+		t.Fatalf("DeleteWorkspace calls = %#v, want [%q]", deleter.calls, wsID)
+	}
 	if multiPool.PoolForWorkspace(wsID) != nil {
 		t.Error("expected pool to be deregistered after delete")
 	}
@@ -413,7 +460,7 @@ func TestWrapWorkspaceDeleteFn_InnerFailSkipsCleanup(t *testing.T) {
 		return wsID, nil
 	}
 
-	wrapped := wrapWorkspaceDeleteFn(innerDelete, registry, resolveID)
+	wrapped := wrapWorkspaceDeleteFn(innerDelete, registry, resolveID, nil)
 	err := wrapped(wsName)
 	if err == nil {
 		t.Fatal("expected error from wrapped delete")
@@ -436,7 +483,7 @@ func TestWrapWorkspaceDeleteFn_NilRegistry(t *testing.T) {
 	}
 
 	// Both registry and fleetRegistry are nil. Should not panic.
-	wrapped := wrapWorkspaceDeleteFn(innerDelete, nil, nil)
+	wrapped := wrapWorkspaceDeleteFn(innerDelete, nil, nil, nil)
 	if wrapped == nil {
 		t.Fatal("expected non-nil wrapper")
 	}
@@ -469,7 +516,7 @@ func TestWrapWorkspaceDeleteFn_NilFleetRegistry(t *testing.T) {
 	}
 
 	// Valid registry, nil fleetRegistry. Should clean up pool but not panic on nil fleet.
-	wrapped := wrapWorkspaceDeleteFn(innerDelete, registry, resolveID)
+	wrapped := wrapWorkspaceDeleteFn(innerDelete, registry, resolveID, nil)
 	if err := wrapped(wsName); err != nil {
 		t.Fatalf("wrapped delete returned error: %v", err)
 	}
@@ -503,7 +550,7 @@ func TestWrapWorkspaceDeleteFn_UUIDResolutionFails(t *testing.T) {
 		return "", fmt.Errorf("config not found")
 	}
 
-	wrapped := wrapWorkspaceDeleteFn(innerDelete, registry, resolveID)
+	wrapped := wrapWorkspaceDeleteFn(innerDelete, registry, resolveID, nil)
 	if err := wrapped(wsName); err != nil {
 		t.Fatalf("wrapped delete returned error: %v", err)
 	}
@@ -537,7 +584,7 @@ func TestWrapWorkspaceDeleteFn_NilResolveID(t *testing.T) {
 	}
 
 	// Pass nil resolveID. Cleanup should be skipped entirely.
-	wrapped := wrapWorkspaceDeleteFn(innerDelete, registry, nil)
+	wrapped := wrapWorkspaceDeleteFn(innerDelete, registry, nil, nil)
 	if err := wrapped(wsName); err != nil {
 		t.Fatalf("wrapped delete returned error: %v", err)
 	}
@@ -567,7 +614,7 @@ func TestWrapWorkspaceDeleteFn_NilResolveIDCleansUpWhenDeleteArgumentIsKey(t *te
 		return nil
 	}
 
-	wrapped := wrapWorkspaceDeleteFn(innerDelete, registry, nil)
+	wrapped := wrapWorkspaceDeleteFn(innerDelete, registry, nil, nil)
 	if err := wrapped(wsID); err != nil {
 		t.Fatalf("wrapped delete returned error: %v", err)
 	}
@@ -601,7 +648,7 @@ func TestWrapWorkspaceDeleteFn_ResolveIDEmptyString(t *testing.T) {
 		return "", nil
 	}
 
-	wrapped := wrapWorkspaceDeleteFn(innerDelete, registry, resolveID)
+	wrapped := wrapWorkspaceDeleteFn(innerDelete, registry, resolveID, nil)
 	if err := wrapped(wsName); err != nil {
 		t.Fatalf("wrapped delete returned error: %v", err)
 	}
@@ -638,7 +685,7 @@ func TestWrapWorkspaceDeleteFn_SkipsCleanupOnResolutionFailure(t *testing.T) {
 		return "", fmt.Errorf("workspace config corrupted")
 	}
 
-	wrapped := wrapWorkspaceDeleteFn(innerDelete, registry, resolveID)
+	wrapped := wrapWorkspaceDeleteFn(innerDelete, registry, resolveID, nil)
 	err := wrapped(wsName)
 
 	// Function should return nil (delete succeeded, leak is logged not returned).
@@ -684,7 +731,7 @@ func TestWrapWorkspaceDeleteFn_UUIDResolvedBeforeDelete(t *testing.T) {
 		return nil
 	}
 
-	wrapped := wrapWorkspaceDeleteFn(innerDelete, registry, resolveID)
+	wrapped := wrapWorkspaceDeleteFn(innerDelete, registry, resolveID, nil)
 	if err := wrapped(wsName); err != nil {
 		t.Fatalf("wrapped delete returned error: %v", err)
 	}

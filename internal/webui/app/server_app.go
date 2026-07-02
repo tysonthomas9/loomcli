@@ -345,6 +345,12 @@ func NewServer(ctx context.Context, config webui.ServerConfig) (_ *Server, retEr
 	}
 
 	if config.FleetRedis != nil {
+		var wgCleanup func()
+		app.worktreeGroupStore, wgCleanup = appstores.InitWorktreeGroups(ctx, config.FleetRedis, app.initialWorkspaceID, config.Logger)
+		cleanups = append(cleanups, wgCleanup)
+	}
+
+	if config.FleetRedis != nil {
 		var shCleanup func()
 		app.sessionHistoryStore, shCleanup = appstores.InitSessionHistory(ctx, config.FleetRedis, app.initialWorkspaceID, config.Logger)
 		cleanups = append(cleanups, shCleanup)
@@ -357,7 +363,7 @@ func NewServer(ctx context.Context, config webui.ServerConfig) (_ *Server, retEr
 	}
 
 	app.wrappedCreateFn = wrapWorkspaceCreateFn(config.WorkspaceCreateFn, app.registry)
-	app.wrappedDeleteFn = wrapWorkspaceDeleteFn(config.WorkspaceDeleteFn, app.registry, config.WorkspaceIDResolverFn)
+	app.wrappedDeleteFn = wrapWorkspaceDeleteFn(config.WorkspaceDeleteFn, app.registry, config.WorkspaceIDResolverFn, app.worktreeGroupStore)
 
 	// Async job store for clone workspace creation (202 + polling).
 	app.jobStore = svcimpl.NewWorkspaceJobStore()

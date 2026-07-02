@@ -88,6 +88,7 @@ type Server struct {
 	// Redis-backed stores
 	tabMetaStore        *appstores.TabMetaStore        // nil if Redis unconfigured
 	issueTabStore       *appstores.IssueTabStore       // nil if Redis unconfigured
+	worktreeGroupStore  *appstores.WorktreeGroupStore  // nil if Redis unconfigured
 	sessionHistoryStore *appstores.SessionHistoryStore // nil if Redis unconfigured
 
 	// External auth
@@ -213,6 +214,9 @@ func (app *Server) Close() {
 	}
 	if app.sessionHistoryStore != nil {
 		_ = app.sessionHistoryStore.Close()
+	}
+	if app.worktreeGroupStore != nil {
+		_ = app.worktreeGroupStore.Close()
 	}
 	if app.issueTabStore != nil {
 		_ = app.issueTabStore.Close()
