@@ -1815,7 +1815,25 @@ func TestFlatAgentRoutesRemoved(t *testing.T) {
 	wsExistsFn := func(id string) bool { return multiPool.PoolForWorkspace(id) != nil }
 
 	gitOps := &mockGitOps{}
-	fileOps := &mockFileOps{}
+	worktreeDir := t.TempDir()
+	fileOps := &mockFileOps{
+		resolveFunc: func(name string) (*ops.AgentWorktree, error) {
+			if name != "alice" {
+				return nil, errors.New("not found")
+			}
+			return &ops.AgentWorktree{Path: worktreeDir}, nil
+		},
+		resolveWsDataFunc: func() (*ops.WorkspaceData, error) {
+			return &ops.WorkspaceData{
+				ID:   "test-ws",
+				Name: "test-ws",
+				Path: worktreeDir,
+				Agents: []ops.WorkspaceAgentInfo{
+					{Name: "alice"},
+				},
+			}, nil
+		},
+	}
 
 	app := &Server{multiPool: multiPool, config: webui.ServerConfig{GitOps: gitOps, FileOps: fileOps}, wsExistsFn: wsExistsFn, agentSvc: svcimpl.NewAgentService(gitOps, nil, nil, nil)}
 	app.diffSvc = svcimpl.NewDiffService(gitOps, nil)

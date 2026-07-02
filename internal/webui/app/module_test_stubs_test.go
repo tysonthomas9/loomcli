@@ -110,3 +110,15 @@ func (s *stubFileService) ListDirectoryScoped(_ context.Context, _ string, _ ser
 func (s *stubFileService) ReadFileScoped(_ context.Context, _ string, _ service.FileScope, _, _ string) (*service.FileReadResult, error) {
 	return &service.FileReadResult{}, nil
 }
+func (s *stubFileService) WriteFileScoped(_ context.Context, _ string, _ service.FileScope, _, _, _ string) error {
+	return nil
+}
+func (s *stubFileService) DeletePathScoped(_ context.Context, _ string, _ service.FileScope, _, _ string, _ bool) error {
+	return nil
+}
+func (s *stubFileService) MkdirScoped(_ context.Context, _ string, _ service.FileScope, _, _ string) error {
+	return nil
+}
+func (s *stubFileService) MovePathScoped(_ context.Context, _ string, _ service.FileScope, _, _, _ string, _ bool) error {
+	return nil
+}

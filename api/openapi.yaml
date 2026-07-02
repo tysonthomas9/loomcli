@@ -2550,10 +2550,211 @@ paths:
                 type: object
 
   # ── Files ───────────────────────────────────────────────────────────────
+  /api/workspaces/{ws}/files/tree:
+    get:
+      operationId: getScopedFileTree
+      tags: [files]
+      summary: Get file tree for a scoped file browser root
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: scope
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [workspace, repo, agent]
+            default: workspace
+        - name: target
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: path
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        "200":
+          description: File tree
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FileTreeResponse"
+
+  /api/workspaces/{ws}/files:
+    get:
+      operationId: readScopedFile
+      tags: [files]
+      summary: Read a file from a scoped file browser root
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: scope
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [workspace, repo, agent]
+            default: workspace
+        - name: target
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: path
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: File content
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FileReadResponse"
+    put:
+      operationId: writeScopedFile
+      tags: [files]
+      summary: Create or update a file in a scoped file browser root
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: scope
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [workspace, repo, agent]
+            default: workspace
+        - name: target
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: path
+          in: query
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/FileWriteRequest"
+      responses:
+        "200":
+          description: File written
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MessageResponse"
+    delete:
+      operationId: deleteScopedFile
+      tags: [files]
+      summary: Delete a file or directory in a scoped file browser root
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: scope
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [workspace, repo, agent]
+            default: workspace
+        - name: target
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: path
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: recursive
+          in: query
+          required: false
+          schema:
+            type: boolean
+      responses:
+        "200":
+          description: File or directory deleted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MessageResponse"
+
+  /api/workspaces/{ws}/files/mkdir:
+    post:
+      operationId: mkdirScopedFile
+      tags: [files]
+      summary: Create a directory in a scoped file browser root
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: scope
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [workspace, repo, agent]
+            default: workspace
+        - name: target
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: path
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Directory created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MessageResponse"
+
+  /api/workspaces/{ws}/files/move:
+    patch:
+      operationId: moveScopedFile
+      tags: [files]
+      summary: Move or rename a path in a scoped file browser root
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: scope
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [workspace, repo, agent]
+            default: workspace
+        - name: target
+          in: query
+          required: false
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/FileMoveRequest"
+      responses:
+        "200":
+          description: Path moved
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MessageResponse"
+
   /api/workspaces/{ws}/agents/{name}/files/tree:
     get:
       operationId: getFileTree
       tags: [files]
+      deprecated: true
       summary: Get file tree for an agent worktree
       parameters:
         - $ref: "#/components/parameters/WorkspaceId"
@@ -2564,12 +2765,13 @@ paths:
           content:
             application/json:
               schema:
-                type: object
+                $ref: "#/components/schemas/FileTreeResponse"
 
   /api/workspaces/{ws}/agents/{name}/files:
     get:
       operationId: readFile
       tags: [files]
+      deprecated: true
       summary: Read a file from an agent worktree
       parameters:
         - $ref: "#/components/parameters/WorkspaceId"
@@ -2585,15 +2787,13 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                properties:
-                  content:
-                    type: string
+                $ref: "#/components/schemas/FileReadResponse"
         "404":
           description: File not found
     put:
       operationId: writeFile
       tags: [files]
+      deprecated: true
       summary: Write a file to an agent worktree
       parameters:
         - $ref: "#/components/parameters/WorkspaceId"
@@ -2608,11 +2808,7 @@ paths:
         content:
           application/json:
             schema:
-              type: object
-              required: [content]
-              properties:
-                content:
-                  type: string
+              $ref: "#/components/schemas/FileWriteRequest"
       responses:
         "200":
           description: File written
@@ -3290,6 +3486,67 @@ components:
           const: true
         message:
           type: string
+
+    FileTreeEntry:
+      type: object
+      required: [name, is_dir, size, mod_time]
+      properties:
+        name:
+          type: string
+        is_dir:
+          type: boolean
+        size:
+          type: integer
+          format: int64
+        mod_time:
+          type: string
+          format: date-time
+
+    FileTreeResponse:
+      type: object
+      required: [path, entries]
+      properties:
+        path:
+          type: string
+        entries:
+          type: array
+          items:
+            $ref: "#/components/schemas/FileTreeEntry"
+
+    FileReadResponse:
+      type: object
+      required: [path, size, binary, truncated]
+      properties:
+        path:
+          type: string
+        content:
+          type: string
+        size:
+          type: integer
+          format: int64
+        binary:
+          type: boolean
+        truncated:
+          type: boolean
+
+    FileWriteRequest:
+      type: object
+      required: [content]
+      properties:
+        content:
+          type: string
+
+    FileMoveRequest:
+      type: object
+      required: [from, to]
+      properties:
+        from:
+          type: string
+        to:
+          type: string
+        overwrite:
+          type: boolean
+          default: false
 
     RuntimeReadyResponse:
       type: object

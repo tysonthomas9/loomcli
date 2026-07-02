@@ -4,10 +4,10 @@ package ops
 // run against. This interface breaks the import cycle between webui and cli
 // packages; the cli package provides the concrete implementation.
 //
-// FileOps only resolves roots — the actual file I/O (read/write/listdir)
-// happens in the service layer against the resolved path. Agent roots are an
-// agent worktree (or, for a lead, the primary repo); the workspace root is the
-// workspace folder that contains every repo checkout and agent worktree.
+// FileOps only resolves roots and workspace topology — the actual file I/O
+// (read/write/listdir) happens in the service layer against the resolved path.
+// Agent roots are an agent worktree; the workspace root is the workspace folder
+// that contains every repo checkout and agent worktree.
 type FileOps interface {
 	// ResolveAgentWorktree resolves an agent name to its worktree info.
 	// Reuses the same AgentWorktree type from gitops.go.
@@ -26,10 +26,13 @@ type FileOps interface {
 
 	// ResolveWorkspaceRoot resolves a workspace to its root folder — the
 	// directory that contains every repo checkout and agent worktree — so the
-	// read-only file browser can navigate the whole workspace from a single
-	// root. Returns the absolute folder path, or an error when the workspace
-	// has no local path on this machine (e.g. a distributed/cloud workspace
-	// that is not checked out locally). The browser is read-only; this root is
-	// not used for writes.
+	// file browser can navigate the whole workspace from a single root. Returns
+	// the absolute folder path, or an error when the workspace has no local path
+	// on this machine (e.g. a distributed/cloud workspace that is not checked
+	// out locally).
 	ResolveWorkspaceRoot(workspaceID string) (string, error)
+
+	// ResolveWorkspaceData returns the workspace topology used to validate
+	// repo/agent file-browser targets against workspace state.
+	ResolveWorkspaceData(workspaceID string) (*WorkspaceData, error)
 }

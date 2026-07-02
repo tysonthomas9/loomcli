@@ -10,8 +10,10 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
+	"github.com/tysonthomas9/loomcli/internal/ops"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 )
 
@@ -25,6 +27,9 @@ func wsRootFor(dir string) *mockFileOps {
 		resolveWsRootFunc: func() (string, error) {
 			return resolved, nil
 		},
+		resolveWsDataFunc: func() (*ops.WorkspaceData, error) {
+			return &ops.WorkspaceData{ID: "test-ws", Path: resolved}, nil
+		},
 	}
 }
 
@@ -33,6 +38,76 @@ func wsRootFor(dir string) *mockFileOps {
 func scopedReq(target string) *http.Request {
 	req := httptest.NewRequest(http.MethodGet, target, nil)
 	return req.WithContext(middleware.WithWorkspace(req.Context(), "test-ws"))
+}
+
+func scopedReqBody(method, target, body string) *http.Request {
+	req := httptest.NewRequest(method, target, strings.NewReader(body))
+	return req.WithContext(middleware.WithWorkspace(req.Context(), "test-ws"))
+}
+
+type handlerScopeCase struct {
+	name   string
+	scope  string
+	target string
+	root   string
+}
+
+func scopedHandlersFixture(t *testing.T) (*mockFileOps, []handlerScopeCase) {
+	t.Helper()
+	wsRoot := t.TempDir()
+	if resolved, err := filepath.EvalSymlinks(wsRoot); err == nil {
+		wsRoot = resolved
+	}
+	repoRoot := filepath.Join(wsRoot, "repo-a")
+	agentRoot := filepath.Join(wsRoot, "worktrees", "repo-a", "agent-a")
+	for _, dir := range []string{repoRoot, agentRoot} {
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	fileOps := &mockFileOps{
+		resolveFunc: func(name string) (*ops.AgentWorktree, error) {
+			if name != "agent-a" {
+				return nil, errors.New("not found")
+			}
+			return &ops.AgentWorktree{Name: name, Path: agentRoot, RepoName: "repo-a"}, nil
+		},
+		resolveWsRootFunc: func() (string, error) {
+			return wsRoot, nil
+		},
+		resolveWsDataFunc: func() (*ops.WorkspaceData, error) {
+			return &ops.WorkspaceData{
+				ID:     "test-ws",
+				Path:   wsRoot,
+				Repos:  []ops.WorkspaceRepo{{Name: "repo-a", Path: repoRoot}},
+				Agents: []ops.WorkspaceAgentInfo{{Name: "agent-a"}},
+			}, nil
+		},
+	}
+	return fileOps, []handlerScopeCase{
+		{name: "workspace", scope: "workspace", root: wsRoot},
+		{name: "repo", scope: "repo", target: "repo-a", root: repoRoot},
+		{name: "agent", scope: "agent", target: "agent-a", root: agentRoot},
+	}
+}
+
+func scopedPathURL(base string, sc handlerScopeCase, path string) string {
+	url := base + "?scope=" + sc.scope
+	if sc.target != "" {
+		url += "&target=" + sc.target
+	}
+	if path != "" {
+		url += "&path=" + path
+	}
+	return url
+}
+
+func scopedMoveURL(sc handlerScopeCase) string {
+	url := "/api/workspaces/test-ws/files/move?scope=" + sc.scope
+	if sc.target != "" {
+		url += "&target=" + sc.target
+	}
+	return url
 }
 
 func TestHandleScopedFileTree_WorkspaceRootListsEntries(t *testing.T) {
@@ -102,6 +177,113 @@ func TestHandleScopedFileRead_WorkspaceRootReadsFile(t *testing.T) {
 	}
 }
 
+func TestHandleScopedFileCRUD_AllScopes(t *testing.T) {
+	fileOps, scopes := scopedHandlersFixture(t)
+	svc := NewFileService(fileOps)
+	writeHandler := HandleScopedFileWrite(svc)
+	readHandler := HandleScopedFileRead(svc)
+	treeHandler := HandleScopedFileTree(svc)
+	deleteHandler := HandleScopedFileDelete(svc)
+	mkdirHandler := HandleScopedFileMkdir(svc)
+	moveHandler := HandleScopedFileMove(svc)
+
+	for _, sc := range scopes {
+		t.Run(sc.name, func(t *testing.T) {
+			w := httptest.NewRecorder()
+			writeHandler.ServeHTTP(w, scopedReqBody(http.MethodPut, scopedPathURL("/api/workspaces/test-ws/files", sc, ".env"), `{"content":"A=1"}`))
+			if w.Code != http.StatusOK {
+				t.Fatalf("write .env status = %d, want 200; body: %s", w.Code, w.Body.String())
+			}
+
+			w = httptest.NewRecorder()
+			readHandler.ServeHTTP(w, scopedReq(scopedPathURL("/api/workspaces/test-ws/files", sc, ".env")))
+			if w.Code != http.StatusOK {
+				t.Fatalf("read .env status = %d, want 200; body: %s", w.Code, w.Body.String())
+			}
+			var readResp FileReadResult
+			if err := json.NewDecoder(w.Body).Decode(&readResp); err != nil {
+				t.Fatalf("decode read: %v", err)
+			}
+			if readResp.Content != "A=1" || readResp.Truncated {
+				t.Fatalf("read .env = %+v, want content A=1 and truncated=false", readResp)
+			}
+
+			if err := os.MkdirAll(filepath.Join(sc.root, ".git"), 0755); err != nil {
+				t.Fatal(err)
+			}
+			w = httptest.NewRecorder()
+			writeHandler.ServeHTTP(w, scopedReqBody(http.MethodPut, scopedPathURL("/api/workspaces/test-ws/files", sc, ".git/config"), `{"content":"git-ok"}`))
+			if w.Code != http.StatusOK {
+				t.Fatalf("write .git/config status = %d, want 200; body: %s", w.Code, w.Body.String())
+			}
+			w = httptest.NewRecorder()
+			treeHandler.ServeHTTP(w, scopedReq(scopedPathURL("/api/workspaces/test-ws/files/tree", sc, "")))
+			if w.Code != http.StatusOK {
+				t.Fatalf("tree status = %d, want 200; body: %s", w.Code, w.Body.String())
+			}
+			var treeResp FileTreeResult
+			if err := json.NewDecoder(w.Body).Decode(&treeResp); err != nil {
+				t.Fatalf("decode tree: %v", err)
+			}
+			for _, entry := range treeResp.Entries {
+				if entry.Name == ".git" {
+					t.Fatalf(".git listed for %s scope: %+v", sc.name, treeResp.Entries)
+				}
+			}
+			w = httptest.NewRecorder()
+			readHandler.ServeHTTP(w, scopedReq(scopedPathURL("/api/workspaces/test-ws/files", sc, ".git/config")))
+			if w.Code != http.StatusOK {
+				t.Fatalf("read .git/config status = %d, want 200; body: %s", w.Code, w.Body.String())
+			}
+
+			w = httptest.NewRecorder()
+			mkdirHandler.ServeHTTP(w, scopedReqBody(http.MethodPost, scopedPathURL("/api/workspaces/test-ws/files/mkdir", sc, "dir/sub"), ""))
+			if w.Code != http.StatusOK {
+				t.Fatalf("mkdir status = %d, want 200; body: %s", w.Code, w.Body.String())
+			}
+			if err := os.WriteFile(filepath.Join(sc.root, "dir", "sub", "file.txt"), []byte("x"), 0644); err != nil {
+				t.Fatal(err)
+			}
+			w = httptest.NewRecorder()
+			deleteHandler.ServeHTTP(w, scopedReqBody(http.MethodDelete, scopedPathURL("/api/workspaces/test-ws/files", sc, "dir"), ""))
+			if w.Code != http.StatusConflict {
+				t.Fatalf("delete nonempty status = %d, want 409; body: %s", w.Code, w.Body.String())
+			}
+			w = httptest.NewRecorder()
+			deleteHandler.ServeHTTP(w, scopedReqBody(http.MethodDelete, scopedPathURL("/api/workspaces/test-ws/files", sc, "dir")+"&recursive=1", ""))
+			if w.Code != http.StatusOK {
+				t.Fatalf("recursive delete status = %d, want 200; body: %s", w.Code, w.Body.String())
+			}
+
+			if err := os.WriteFile(filepath.Join(sc.root, "file-path"), []byte("x"), 0644); err != nil {
+				t.Fatal(err)
+			}
+			w = httptest.NewRecorder()
+			mkdirHandler.ServeHTTP(w, scopedReqBody(http.MethodPost, scopedPathURL("/api/workspaces/test-ws/files/mkdir", sc, "file-path"), ""))
+			if w.Code != http.StatusConflict {
+				t.Fatalf("mkdir file status = %d, want 409; body: %s", w.Code, w.Body.String())
+			}
+
+			if err := os.WriteFile(filepath.Join(sc.root, "move-src"), []byte("src"), 0644); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(sc.root, "move-dst"), []byte("dst"), 0644); err != nil {
+				t.Fatal(err)
+			}
+			w = httptest.NewRecorder()
+			moveHandler.ServeHTTP(w, scopedReqBody(http.MethodPatch, scopedMoveURL(sc), `{"from":"move-src","to":"move-dst"}`))
+			if w.Code != http.StatusConflict {
+				t.Fatalf("move conflict status = %d, want 409; body: %s", w.Code, w.Body.String())
+			}
+			w = httptest.NewRecorder()
+			moveHandler.ServeHTTP(w, scopedReqBody(http.MethodPatch, scopedMoveURL(sc), `{"from":"move-src","to":"move-dst","overwrite":true}`))
+			if w.Code != http.StatusOK {
+				t.Fatalf("move overwrite status = %d, want 200; body: %s", w.Code, w.Body.String())
+			}
+		})
+	}
+}
+
 func TestHandleScopedFileTree_GitDirHiddenFromListing(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "src.go"), []byte("package x"), 0644); err != nil {
@@ -132,7 +314,7 @@ func TestHandleScopedFileTree_GitDirHiddenFromListing(t *testing.T) {
 	}
 }
 
-func TestHandleScopedFileRead_GitPathDenied(t *testing.T) {
+func TestHandleScopedFileRead_GitPathAllowed(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(dir, ".git"), 0755); err != nil {
 		t.Fatal(err)
@@ -145,8 +327,8 @@ func TestHandleScopedFileRead_GitPathDenied(t *testing.T) {
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, scopedReq("/api/workspaces/test-ws/files?scope=workspace&path=.git/config"))
 
-	if w.Code != http.StatusForbidden {
-		t.Fatalf("status = %d, want 403 for .git path; body: %s", w.Code, w.Body.String())
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 for explicit .git path; body: %s", w.Code, w.Body.String())
 	}
 }
 
@@ -202,5 +384,21 @@ func TestHandleScopedFile_WorkspaceNotCheckedOut(t *testing.T) {
 
 	if w.Code != http.StatusNotFound {
 		t.Fatalf("status = %d, want 404 when workspace not checked out; body: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestHandleScopedFile_InvalidTargets(t *testing.T) {
+	fileOps, _ := scopedHandlersFixture(t)
+	h := HandleScopedFileTree(NewFileService(fileOps))
+
+	for _, target := range []string{
+		"/api/workspaces/test-ws/files/tree?scope=repo&target=missing",
+		"/api/workspaces/test-ws/files/tree?scope=agent&target=missing",
+	} {
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, scopedReq(target))
+		if w.Code != http.StatusNotFound {
+			t.Fatalf("%s: status = %d, want 404; body: %s", target, w.Code, w.Body.String())
+		}
 	}
 }

@@ -25,6 +25,7 @@ export interface FileReadData {
   content?: string; // omitted when binary is true
   size: number;
   binary: boolean;
+  truncated?: boolean;
 }
 
 // ============= API Functions =============

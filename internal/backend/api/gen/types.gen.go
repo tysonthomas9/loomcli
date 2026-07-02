@@ -809,6 +809,132 @@ func (e ListBlockedParamsType) Valid() bool {
 	}
 }
 
+// Defines values for DeleteScopedFileParamsScope.
+const (
+	DeleteScopedFileParamsScopeAgent     DeleteScopedFileParamsScope = "agent"
+	DeleteScopedFileParamsScopeRepo      DeleteScopedFileParamsScope = "repo"
+	DeleteScopedFileParamsScopeWorkspace DeleteScopedFileParamsScope = "workspace"
+)
+
+// Valid indicates whether the value is a known member of the DeleteScopedFileParamsScope enum.
+func (e DeleteScopedFileParamsScope) Valid() bool {
+	switch e {
+	case DeleteScopedFileParamsScopeAgent:
+		return true
+	case DeleteScopedFileParamsScopeRepo:
+		return true
+	case DeleteScopedFileParamsScopeWorkspace:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ReadScopedFileParamsScope.
+const (
+	ReadScopedFileParamsScopeAgent     ReadScopedFileParamsScope = "agent"
+	ReadScopedFileParamsScopeRepo      ReadScopedFileParamsScope = "repo"
+	ReadScopedFileParamsScopeWorkspace ReadScopedFileParamsScope = "workspace"
+)
+
+// Valid indicates whether the value is a known member of the ReadScopedFileParamsScope enum.
+func (e ReadScopedFileParamsScope) Valid() bool {
+	switch e {
+	case ReadScopedFileParamsScopeAgent:
+		return true
+	case ReadScopedFileParamsScopeRepo:
+		return true
+	case ReadScopedFileParamsScopeWorkspace:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for WriteScopedFileParamsScope.
+const (
+	WriteScopedFileParamsScopeAgent     WriteScopedFileParamsScope = "agent"
+	WriteScopedFileParamsScopeRepo      WriteScopedFileParamsScope = "repo"
+	WriteScopedFileParamsScopeWorkspace WriteScopedFileParamsScope = "workspace"
+)
+
+// Valid indicates whether the value is a known member of the WriteScopedFileParamsScope enum.
+func (e WriteScopedFileParamsScope) Valid() bool {
+	switch e {
+	case WriteScopedFileParamsScopeAgent:
+		return true
+	case WriteScopedFileParamsScopeRepo:
+		return true
+	case WriteScopedFileParamsScopeWorkspace:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for MkdirScopedFileParamsScope.
+const (
+	MkdirScopedFileParamsScopeAgent     MkdirScopedFileParamsScope = "agent"
+	MkdirScopedFileParamsScopeRepo      MkdirScopedFileParamsScope = "repo"
+	MkdirScopedFileParamsScopeWorkspace MkdirScopedFileParamsScope = "workspace"
+)
+
+// Valid indicates whether the value is a known member of the MkdirScopedFileParamsScope enum.
+func (e MkdirScopedFileParamsScope) Valid() bool {
+	switch e {
+	case MkdirScopedFileParamsScopeAgent:
+		return true
+	case MkdirScopedFileParamsScopeRepo:
+		return true
+	case MkdirScopedFileParamsScopeWorkspace:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for MoveScopedFileParamsScope.
+const (
+	MoveScopedFileParamsScopeAgent     MoveScopedFileParamsScope = "agent"
+	MoveScopedFileParamsScopeRepo      MoveScopedFileParamsScope = "repo"
+	MoveScopedFileParamsScopeWorkspace MoveScopedFileParamsScope = "workspace"
+)
+
+// Valid indicates whether the value is a known member of the MoveScopedFileParamsScope enum.
+func (e MoveScopedFileParamsScope) Valid() bool {
+	switch e {
+	case MoveScopedFileParamsScopeAgent:
+		return true
+	case MoveScopedFileParamsScopeRepo:
+		return true
+	case MoveScopedFileParamsScopeWorkspace:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for GetScopedFileTreeParamsScope.
+const (
+	GetScopedFileTreeParamsScopeAgent     GetScopedFileTreeParamsScope = "agent"
+	GetScopedFileTreeParamsScopeRepo      GetScopedFileTreeParamsScope = "repo"
+	GetScopedFileTreeParamsScopeWorkspace GetScopedFileTreeParamsScope = "workspace"
+)
+
+// Valid indicates whether the value is a known member of the GetScopedFileTreeParamsScope enum.
+func (e GetScopedFileTreeParamsScope) Valid() bool {
+	switch e {
+	case GetScopedFileTreeParamsScopeAgent:
+		return true
+	case GetScopedFileTreeParamsScopeRepo:
+		return true
+	case GetScopedFileTreeParamsScopeWorkspace:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for ListIssuesParamsStatus.
 const (
 	ListIssuesParamsStatusBlocked    ListIssuesParamsStatus = "blocked"
@@ -1199,6 +1325,41 @@ type ErrorResponse struct {
 
 // ErrorResponseSuccess defines model for ErrorResponse.Success.
 type ErrorResponseSuccess bool
+
+// FileMoveRequest defines model for FileMoveRequest.
+type FileMoveRequest struct {
+	From      string `json:"from"`
+	Overwrite *bool  `json:"overwrite,omitempty"`
+	To        string `json:"to"`
+}
+
+// FileReadResponse defines model for FileReadResponse.
+type FileReadResponse struct {
+	Binary    bool    `json:"binary"`
+	Content   *string `json:"content,omitempty"`
+	Path      string  `json:"path"`
+	Size      int64   `json:"size"`
+	Truncated bool    `json:"truncated"`
+}
+
+// FileTreeEntry defines model for FileTreeEntry.
+type FileTreeEntry struct {
+	IsDir   bool      `json:"is_dir"`
+	ModTime time.Time `json:"mod_time"`
+	Name    string    `json:"name"`
+	Size    int64     `json:"size"`
+}
+
+// FileTreeResponse defines model for FileTreeResponse.
+type FileTreeResponse struct {
+	Entries []FileTreeEntry `json:"entries"`
+	Path    string          `json:"path"`
+}
+
+// FileWriteRequest defines model for FileWriteRequest.
+type FileWriteRequest struct {
+	Content string `json:"content"`
+}
 
 // HourlyBucket defines model for HourlyBucket.
 type HourlyBucket struct {
@@ -2112,11 +2273,6 @@ type ReadFileParams struct {
 	Path string `form:"path" json:"path"`
 }
 
-// WriteFileJSONBody defines parameters for WriteFile.
-type WriteFileJSONBody struct {
-	Content string `json:"content"`
-}
-
 // WriteFileParams defines parameters for WriteFile.
 type WriteFileParams struct {
 	Path string `form:"path" json:"path"`
@@ -2175,6 +2331,66 @@ type SubscribeEventsParams struct {
 	// Token One-time SSE auth token (for EventSource clients)
 	Token *string `form:"token,omitempty" json:"token,omitempty"`
 }
+
+// DeleteScopedFileParams defines parameters for DeleteScopedFile.
+type DeleteScopedFileParams struct {
+	Scope     *DeleteScopedFileParamsScope `form:"scope,omitempty" json:"scope,omitempty"`
+	Target    *string                      `form:"target,omitempty" json:"target,omitempty"`
+	Path      string                       `form:"path" json:"path"`
+	Recursive *bool                        `form:"recursive,omitempty" json:"recursive,omitempty"`
+}
+
+// DeleteScopedFileParamsScope defines parameters for DeleteScopedFile.
+type DeleteScopedFileParamsScope string
+
+// ReadScopedFileParams defines parameters for ReadScopedFile.
+type ReadScopedFileParams struct {
+	Scope  *ReadScopedFileParamsScope `form:"scope,omitempty" json:"scope,omitempty"`
+	Target *string                    `form:"target,omitempty" json:"target,omitempty"`
+	Path   string                     `form:"path" json:"path"`
+}
+
+// ReadScopedFileParamsScope defines parameters for ReadScopedFile.
+type ReadScopedFileParamsScope string
+
+// WriteScopedFileParams defines parameters for WriteScopedFile.
+type WriteScopedFileParams struct {
+	Scope  *WriteScopedFileParamsScope `form:"scope,omitempty" json:"scope,omitempty"`
+	Target *string                     `form:"target,omitempty" json:"target,omitempty"`
+	Path   string                      `form:"path" json:"path"`
+}
+
+// WriteScopedFileParamsScope defines parameters for WriteScopedFile.
+type WriteScopedFileParamsScope string
+
+// MkdirScopedFileParams defines parameters for MkdirScopedFile.
+type MkdirScopedFileParams struct {
+	Scope  *MkdirScopedFileParamsScope `form:"scope,omitempty" json:"scope,omitempty"`
+	Target *string                     `form:"target,omitempty" json:"target,omitempty"`
+	Path   string                      `form:"path" json:"path"`
+}
+
+// MkdirScopedFileParamsScope defines parameters for MkdirScopedFile.
+type MkdirScopedFileParamsScope string
+
+// MoveScopedFileParams defines parameters for MoveScopedFile.
+type MoveScopedFileParams struct {
+	Scope  *MoveScopedFileParamsScope `form:"scope,omitempty" json:"scope,omitempty"`
+	Target *string                    `form:"target,omitempty" json:"target,omitempty"`
+}
+
+// MoveScopedFileParamsScope defines parameters for MoveScopedFile.
+type MoveScopedFileParamsScope string
+
+// GetScopedFileTreeParams defines parameters for GetScopedFileTree.
+type GetScopedFileTreeParams struct {
+	Scope  *GetScopedFileTreeParamsScope `form:"scope,omitempty" json:"scope,omitempty"`
+	Target *string                       `form:"target,omitempty" json:"target,omitempty"`
+	Path   *string                       `form:"path,omitempty" json:"path,omitempty"`
+}
+
+// GetScopedFileTreeParamsScope defines parameters for GetScopedFileTree.
+type GetScopedFileTreeParamsScope string
 
 // FleetRegisterJSONBody defines parameters for FleetRegister.
 type FleetRegisterJSONBody = map[string]interface{}
@@ -2362,7 +2578,7 @@ type SetDefaultWorkspaceJSONRequestBody SetDefaultWorkspaceJSONBody
 type ReorderWorkspacesJSONRequestBody ReorderWorkspacesJSONBody
 
 // WriteFileJSONRequestBody defines body for WriteFile for application/json ContentType.
-type WriteFileJSONRequestBody WriteFileJSONBody
+type WriteFileJSONRequestBody = FileWriteRequest
 
 // GitPullJSONRequestBody defines body for GitPull for application/json ContentType.
 type GitPullJSONRequestBody GitPullJSONBody
@@ -2378,6 +2594,12 @@ type StopAgentJSONRequestBody StopAgentJSONBody
 
 // PatchWorkspaceBackendJSONRequestBody defines body for PatchWorkspaceBackend for application/json ContentType.
 type PatchWorkspaceBackendJSONRequestBody = WorkspaceBackendPatchRequest
+
+// WriteScopedFileJSONRequestBody defines body for WriteScopedFile for application/json ContentType.
+type WriteScopedFileJSONRequestBody = FileWriteRequest
+
+// MoveScopedFileJSONRequestBody defines body for MoveScopedFile for application/json ContentType.
+type MoveScopedFileJSONRequestBody = FileMoveRequest
 
 // FleetRegisterJSONRequestBody defines body for FleetRegister for application/json ContentType.
 type FleetRegisterJSONRequestBody = FleetRegisterJSONBody

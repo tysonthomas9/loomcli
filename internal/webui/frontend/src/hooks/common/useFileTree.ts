@@ -55,8 +55,8 @@ export interface UseFileTreeReturn {
 /** DirLoader fetches one directory level's entries ("" = root). */
 type DirLoader = (path: string) => Promise<FileEntry[]>;
 
-/** Segments never worth requesting on a reveal (the API hides/denies them). */
-const HIDDEN_SEGMENTS = new Set([".git", "node_modules"]);
+/** Segments never worth requesting on a reveal (the API hides them). */
+const HIDDEN_SEGMENTS = new Set([".git"]);
 
 function useFileTreeCore(
   loadEntries: DirLoader,
