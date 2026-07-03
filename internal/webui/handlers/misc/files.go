@@ -213,6 +213,21 @@ func HandleScopedFileSearch(svc service.FileService) http.HandlerFunc {
 	}
 }
 
+// HandleScopedGitStatus handles GET /api/workspaces/{ws}/files/git-status?scope=&target=.
+func HandleScopedGitStatus(svc service.FileService) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		wsID := middleware.WorkspaceFromContext(r.Context())
+		scope, target := scopeFromQuery(r)
+
+		result, err := svc.GitStatusScoped(r.Context(), wsID, scope, target)
+		if err != nil {
+			handler.HandleServiceError(w, err)
+			return
+		}
+		handler.WriteJSON(w, http.StatusOK, result)
+	}
+}
+
 // fileWriteRequest is the JSON body for PUT /api/agents/{name}/files?path=
 type fileWriteRequest struct {
 	Content string `json:"content"`

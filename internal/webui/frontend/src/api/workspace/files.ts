@@ -57,6 +57,8 @@ export interface FileSearchData {
   limitHit: boolean;
 }
 
+export type FileGitStatusData = Record<string, string>;
+
 export type FileScope = "workspace" | "repo" | "agent";
 
 export interface FileScopeRef {
@@ -231,6 +233,19 @@ export async function searchScopedFiles(
   return post<FileSearchData>(
     scopedUrl(workspaceId, "/files/search", scopeRef),
     request,
+  );
+}
+
+/**
+ * Fetch git status decoration data for any scoped file browser root.
+ * GET /api/workspaces/{ws}/files/git-status?scope=&target=
+ */
+export async function gitStatusScoped(
+  workspaceId: string,
+  scopeRef: FileScopeRef,
+): Promise<FileGitStatusData> {
+  return get<FileGitStatusData>(
+    scopedUrl(workspaceId, "/files/git-status", scopeRef),
   );
 }
 

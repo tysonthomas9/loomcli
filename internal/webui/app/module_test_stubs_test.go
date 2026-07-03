@@ -116,6 +116,9 @@ func (s *stubFileService) IndexFilesScoped(_ context.Context, _ string, _ servic
 func (s *stubFileService) SearchFilesScoped(_ context.Context, _ string, _ service.FileScope, _ string, _ service.FileSearchRequest) (*service.FileSearchResult, error) {
 	return &service.FileSearchResult{}, nil
 }
+func (s *stubFileService) GitStatusScoped(_ context.Context, _ string, _ service.FileScope, _ string) (service.FileGitStatusResult, error) {
+	return service.FileGitStatusResult{}, nil
+}
 func (s *stubFileService) WriteFileScoped(_ context.Context, _ string, _ service.FileScope, _, _, _ string) error {
 	return nil
 }

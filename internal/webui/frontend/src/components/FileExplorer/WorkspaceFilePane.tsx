@@ -1,6 +1,15 @@
-import { useCallback, useMemo, lazy, Suspense } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+  lazy,
+  Suspense,
+} from "react";
 import type { FileReadData } from "@/api/workspace";
 import { detectLanguage } from "@/utils/detectLanguage";
+import type { FileSymbol, FileSymbolState } from "@/utils/lezerSymbols";
+import { SymbolPalette } from "./SymbolPalette";
 import styles from "./FileExplorer.module.css";
 
 const CodeMirrorEditor = lazy(() =>
@@ -13,6 +22,7 @@ interface WorkspaceFilePaneProps {
   /** Selected file path, or null when nothing is selected. */
   path: string | null;
   fileData: FileReadData | null;
+  isActive: boolean;
   isLoading: boolean;
   error: string | null;
   content: string;
@@ -32,10 +42,14 @@ interface WorkspaceFilePaneProps {
 /** Clickable path breadcrumb; folder segments reveal that folder in the tree. */
 function Breadcrumb({
   path,
+  symbolTrail,
   onNavigate,
+  onSymbolNavigate,
 }: {
   path: string;
+  symbolTrail: FileSymbol[];
   onNavigate?: ((dirPath: string) => void) | undefined;
+  onSymbolNavigate?: ((symbol: FileSymbol) => void) | undefined;
 }) {
   const segments = path.split("/").filter(Boolean);
   return (
@@ -65,9 +79,29 @@ function Breadcrumb({
           </span>
         );
       })}
+      {symbolTrail.map((symbol) => (
+        <span
+          key={`${symbol.name}:${symbol.line}:${symbol.kind}`}
+          className={styles.crumb}
+        >
+          <span className={styles.crumbSep} aria-hidden="true">
+            &gt;
+          </span>
+          <button
+            type="button"
+            className={styles.crumbLink}
+            onClick={() => onSymbolNavigate?.(symbol)}
+            title={`Go to ${symbol.name}`}
+          >
+            {symbol.name}
+          </button>
+        </span>
+      ))}
     </nav>
   );
 }
+
+const emptySymbolState: FileSymbolState = { symbols: [], trail: [] };
 
 /**
  * WorkspaceFilePane is the docked, always-visible viewer column of the
@@ -77,6 +111,7 @@ function Breadcrumb({
 export function WorkspaceFilePane({
   path,
   fileData,
+  isActive,
   isLoading,
   error,
   content,
@@ -95,30 +130,99 @@ export function WorkspaceFilePane({
     () => (path ? detectLanguage(path) : undefined),
     [path],
   );
+  const [symbolState, setSymbolState] =
+    useState<FileSymbolState>(emptySymbolState);
+  const [symbolPaletteOpen, setSymbolPaletteOpen] = useState(false);
+  const [symbolLineTarget, setSymbolLineTarget] = useState<
+    { line: number; token: number } | undefined
+  >(undefined);
   const isReadOnly = isSaving || !!fileData?.truncated || !!fileData?.binary;
+  const requestedLineTarget = lineTarget ?? symbolLineTarget;
+  const usingLocalSymbolTarget = !lineTarget && !!symbolLineTarget;
   const editorLineTarget =
-    lineTarget &&
+    requestedLineTarget &&
     path &&
     !isLoading &&
     fileData &&
     fileData.path === path &&
     !fileData.binary &&
-    content === (fileData.content ?? "")
-      ? lineTarget
+    (usingLocalSymbolTarget || content === (fileData.content ?? ""))
+      ? requestedLineTarget
       : undefined;
   const handleLineTargetApplied = useCallback(() => {
     if (path && editorLineTarget) {
-      onLineTargetApplied?.(path, editorLineTarget.token);
+      if (usingLocalSymbolTarget) {
+        setSymbolLineTarget((current) =>
+          current?.token === editorLineTarget.token ? undefined : current,
+        );
+      } else {
+        onLineTargetApplied?.(path, editorLineTarget.token);
+      }
     }
-  }, [editorLineTarget, onLineTargetApplied, path]);
+  }, [editorLineTarget, onLineTargetApplied, path, usingLocalSymbolTarget]);
+  const jumpToSymbol = useCallback((symbol: FileSymbol) => {
+    setSymbolLineTarget((prev) => ({
+      line: symbol.line,
+      token: (prev?.token ?? 0) + 1,
+    }));
+  }, []);
+  const handleSymbolsChange = useCallback(
+    (nextSymbolState: FileSymbolState) => {
+      setSymbolState(nextSymbolState);
+    },
+    [],
+  );
+
+  useEffect(() => {
+    setSymbolState(emptySymbolState);
+    setSymbolLineTarget(undefined);
+    setSymbolPaletteOpen(false);
+  }, [path, language]);
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      const key = event.key.toLowerCase();
+      const mod = event.metaKey || event.ctrlKey;
+      if (!mod || !event.shiftKey || key !== "o") return;
+      if (!isActive) return;
+      if (!path || symbolState.symbols.length === 0 || fileData?.binary) return;
+      event.preventDefault();
+      setSymbolPaletteOpen(true);
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [fileData?.binary, isActive, path, symbolState.symbols.length]);
 
   return (
     <div className={styles.viewerColumn}>
       {path && (
         <div className={styles.viewerHeader}>
-          <Breadcrumb path={path} onNavigate={onNavigate} />
+          <Breadcrumb
+            path={path}
+            symbolTrail={symbolState.trail}
+            onNavigate={onNavigate}
+            onSymbolNavigate={jumpToSymbol}
+          />
           <div className={styles.viewerActions}>
             {isDirty && <span className={styles.dirtyLabel}>Modified</span>}
+            <button
+              type="button"
+              className={styles.iconButton}
+              aria-label="Go to symbol in file"
+              title="Go to symbol in file"
+              onClick={() => setSymbolPaletteOpen(true)}
+              disabled={symbolState.symbols.length === 0 || !!fileData?.binary}
+            >
+              <svg viewBox="0 0 16 16" aria-hidden="true">
+                <path
+                  d="M4 3h8M4 8h8M4 13h8"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.4"
+                  strokeLinecap="round"
+                />
+              </svg>
+            </button>
             <button
               type="button"
               className={styles.iconButton}
@@ -216,10 +320,17 @@ export function WorkspaceFilePane({
               scrollToLine={editorLineTarget?.line}
               scrollToLineKey={editorLineTarget?.token}
               onScrollToLineApplied={handleLineTargetApplied}
+              onSymbolsChange={handleSymbolsChange}
             />
           </Suspense>
         )}
       </div>
+      <SymbolPalette
+        isOpen={symbolPaletteOpen}
+        symbols={symbolState.symbols}
+        onClose={() => setSymbolPaletteOpen(false)}
+        onOpen={jumpToSymbol}
+      />
     </div>
   );
 }

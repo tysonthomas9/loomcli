@@ -35,4 +35,9 @@ type FileOps interface {
 	// ResolveWorkspaceData returns the workspace topology used to validate
 	// repo/agent file-browser targets against workspace state.
 	ResolveWorkspaceData(workspaceID string) (*WorkspaceData, error)
+
+	// GitStatusPorcelain returns git status --porcelain XY codes keyed by
+	// checkout-relative path. It is read-only decoration data for file-browser
+	// status and conflict badges.
+	GitStatusPorcelain(worktreePath string) (map[string]string, error)
 }

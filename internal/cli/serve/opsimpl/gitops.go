@@ -652,6 +652,14 @@ func (g *GitOpsImpl) Status(worktreePath, targetBranch string) (*ops.GitStatusRe
 	}, nil
 }
 
+func (g *GitOpsImpl) GitStatusPorcelain(worktreePath string) (map[string]string, error) {
+	status, err := git.GetPorcelainStatus(worktreePath)
+	if err != nil {
+		return nil, err
+	}
+	return map[string]string(status), nil
+}
+
 func (g *GitOpsImpl) GetCurrentBranch(worktreePath string) (string, error) {
 	return cli.GetCurrentBranch(worktreePath)
 }

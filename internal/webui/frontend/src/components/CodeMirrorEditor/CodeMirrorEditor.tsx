@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import { type Extension, EditorState, Compartment } from "@codemirror/state";
 import {
   EditorView,
@@ -73,6 +73,10 @@ import { javascript } from "@codemirror/lang-javascript";
 import { css } from "@codemirror/lang-css";
 import { html } from "@codemirror/lang-html";
 import { diff } from "codemirror-lang-diff";
+import {
+  symbolStateFromEditor,
+  type FileSymbolState,
+} from "@/utils/lezerSymbols";
 
 export interface CodeMirrorEditorProps {
   /** Current document content */
@@ -95,6 +99,8 @@ export interface CodeMirrorEditorProps {
   scrollToLineKey?: number | string | undefined;
   /** Called after a requested line has been revealed. */
   onScrollToLineApplied?: (() => void) | undefined;
+  /** Emits in-file lezer symbols and the cursor-position symbol trail. */
+  onSymbolsChange?: ((state: FileSymbolState) => void) | undefined;
   /** Additional CSS class for the container */
   className?: string | undefined;
 }
@@ -169,6 +175,7 @@ export function CodeMirrorEditor({
   scrollToLine,
   scrollToLineKey,
   onScrollToLineApplied,
+  onSymbolsChange,
   className,
 }: CodeMirrorEditorProps): JSX.Element {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -177,12 +184,27 @@ export function CodeMirrorEditor({
   const readOnlyCompartmentRef = useRef(new Compartment());
   const lineNumbersCompartmentRef = useRef(new Compartment());
   const langLoadTokenRef = useRef(0);
+  const languageRef = useRef(language);
 
   // Sync onChange to ref to avoid stale closures
   const onChangeRef = useRef(onChange);
   useEffect(() => {
     onChangeRef.current = onChange;
   }, [onChange]);
+  const onSymbolsChangeRef = useRef(onSymbolsChange);
+  const emitSymbolState = useCallback((view: EditorView) => {
+    onSymbolsChangeRef.current?.(
+      symbolStateFromEditor(view.state, languageRef.current),
+    );
+  }, []);
+  useEffect(() => {
+    onSymbolsChangeRef.current = onSymbolsChange;
+    const view = viewRef.current;
+    if (view) emitSymbolState(view);
+  }, [emitSymbolState, onSymbolsChange]);
+  useEffect(() => {
+    languageRef.current = language;
+  }, [language]);
 
   // Create EditorView on mount, destroy on unmount
   useEffect(() => {
@@ -219,6 +241,9 @@ export function CodeMirrorEditor({
           if (update.docChanged && onChangeRef.current) {
             onChangeRef.current(update.state.doc.toString());
           }
+          if (update.docChanged || update.selectionSet) {
+            emitSymbolState(update.view);
+          }
         }),
         EditorView.theme({
           "&": {
@@ -243,6 +268,7 @@ export function CodeMirrorEditor({
 
     const view = new EditorView({ state, parent: container });
     viewRef.current = view;
+    emitSymbolState(view);
 
     // ResizeObserver — debounced
     let resizeTimer: ReturnType<typeof setTimeout>;
@@ -283,12 +309,14 @@ export function CodeMirrorEditor({
   useEffect(() => {
     const view = viewRef.current;
     if (!view) return;
+    languageRef.current = language;
     const token = ++langLoadTokenRef.current;
     view.dispatch({
       effects: langCompartmentRef.current.reconfigure(
         getLanguageExtension(language),
       ),
     });
+    emitSymbolState(view);
     const loader = language ? lazyLanguages[language] : undefined;
     if (loader) {
       loader()
@@ -298,13 +326,14 @@ export function CodeMirrorEditor({
             v.dispatch({
               effects: langCompartmentRef.current.reconfigure(ext),
             });
+            emitSymbolState(v);
           }
         })
         .catch(() => {
           // Pack failed to load — leave as plain text.
         });
     }
-  }, [language]);
+  }, [emitSymbolState, language]);
 
   // Sync readOnly changes via compartment
   useEffect(() => {

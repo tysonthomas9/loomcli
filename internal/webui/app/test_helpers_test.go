@@ -203,6 +203,10 @@ func (m *mockFileOps) ResolveWorkspaceData(_ string) (*ops.WorkspaceData, error)
 	return nil, errors.New("not found")
 }
 
+func (m *mockFileOps) GitStatusPorcelain(worktreePath string) (map[string]string, error) {
+	return map[string]string{}, nil
+}
+
 // mockGitOps implements ops.GitOps for testing in the root package.
 type mockGitOps struct {
 	resolveFunc            func(name string) (*ops.AgentWorktree, error)

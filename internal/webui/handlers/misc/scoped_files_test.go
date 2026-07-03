@@ -63,6 +63,9 @@ type recordingNavigationFileService struct {
 	searchScope  service.FileScope
 	searchTarget string
 	searchReq    service.FileSearchRequest
+	statusWS     string
+	statusScope  service.FileScope
+	statusTarget string
 }
 
 func (s *recordingNavigationFileService) IndexFilesScoped(_ context.Context, wsID string, scope service.FileScope, target string) (*service.FileIndexResult, error) {
@@ -88,6 +91,13 @@ func (s *recordingNavigationFileService) SearchFilesScoped(_ context.Context, ws
 		}},
 		LimitHit: true,
 	}, nil
+}
+
+func (s *recordingNavigationFileService) GitStatusScoped(_ context.Context, wsID string, scope service.FileScope, target string) (service.FileGitStatusResult, error) {
+	s.statusWS = wsID
+	s.statusScope = scope
+	s.statusTarget = target
+	return service.FileGitStatusResult{"src/main.go": " M"}, nil
 }
 
 func scopedHandlersFixture(t *testing.T) (*mockFileOps, []handlerScopeCase) {
@@ -167,6 +177,29 @@ func TestHandleScopedFileIndex_UsesScopeTarget(t *testing.T) {
 		t.Fatalf("decode body: %v", err)
 	}
 	if !body.Truncated || len(body.Paths) != 1 || body.Paths[0] != "src/main.go" {
+		t.Fatalf("body = %+v", body)
+	}
+}
+
+func TestHandleScopedGitStatus_UsesScopeTarget(t *testing.T) {
+	svc := &recordingNavigationFileService{}
+	h := HandleScopedGitStatus(svc)
+	req := scopedReq("/api/workspaces/test-ws/files/git-status?scope=repo&target=repo-a")
+	rr := httptest.NewRecorder()
+
+	h.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, body %s", rr.Code, rr.Body.String())
+	}
+	if svc.statusWS != "test-ws" || svc.statusScope != service.ScopeRepo || svc.statusTarget != "repo-a" {
+		t.Fatalf("recorded call = ws %q scope %q target %q", svc.statusWS, svc.statusScope, svc.statusTarget)
+	}
+	var body service.FileGitStatusResult
+	if err := json.NewDecoder(rr.Body).Decode(&body); err != nil {
+		t.Fatalf("decode body: %v", err)
+	}
+	if got := body["src/main.go"]; got != " M" {
 		t.Fatalf("body = %+v", body)
 	}
 }

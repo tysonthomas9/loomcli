@@ -95,6 +95,24 @@
   color: var(--color-text-primary);
 }
 
+.openEditorItem[data-git-status-kind="modified"] .openEditorName {
+  color: #b7791f;
+}
+
+.openEditorItem[data-git-status-kind="added"] .openEditorName {
+  color: #2f855a;
+}
+
+.openEditorItem[data-git-status-kind="deleted"] .openEditorName {
+  color: var(--color-text-muted);
+  text-decoration: line-through;
+}
+
+.openEditorItem[data-git-status-kind="conflict"] .openEditorName {
+  color: var(--color-danger);
+  font-weight: 600;
+}
+
 .openEditorName {
   min-width: 0;
   overflow: hidden;
@@ -198,6 +216,11 @@
   background: var(--color-bg-hover);
 }
 
+.treeNode[data-drop-over] {
+  background: color-mix(in srgb, var(--color-primary) 12%, transparent);
+  box-shadow: inset 0 0 0 1px var(--color-primary);
+}
+
 .treeNode[data-selected] {
   background: var(--color-bg-active);
   color: var(--color-primary);
@@ -263,8 +286,50 @@
 }
 
 .fileName {
+  flex: 1;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.treeNode[data-git-status-kind="modified"] .fileName {
+  color: #b7791f;
+}
+
+.treeNode[data-git-status-kind="added"] .fileName {
+  color: #2f855a;
+}
+
+.treeNode[data-git-status-kind="deleted"] .fileName {
+  color: var(--color-text-muted);
+  text-decoration: line-through;
+}
+
+.treeNode[data-git-status-kind="conflict"] .fileName {
+  color: var(--color-danger);
+  font-weight: 600;
+}
+
+.gitStatusDot {
+  width: 6px;
+  height: 6px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: #b7791f;
+}
+
+.gitStatusDot[data-conflict] {
+  background: var(--color-danger);
+}
+
+.conflictBadge {
+  padding: 0 4px;
+  border-radius: var(--radius-sm);
+  background: var(--color-danger);
+  color: var(--color-danger-contrast, white);
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 14px;
 }
 
 .highlight {

@@ -15,6 +15,7 @@ import { ResizeHandle } from "@/components/ResizeHandle";
 import type { FileEntry, FileScopeRef } from "@/api/workspace";
 import {
   deleteScopedPath,
+  gitStatusScoped,
   indexScopedFiles,
   mkdirScoped,
   moveScopedPath,
@@ -26,6 +27,7 @@ import {
   useScopedFileTree,
   useToast,
   useWorkspaceContext,
+  useEventContext,
   FileBrowserStoreProvider,
   fileBrowserTabsStorageKey,
   useFileBrowserStoreInstance,
@@ -42,6 +44,7 @@ import { FileSearchPanel } from "./FileSearchPanel";
 import { FileTabBar } from "./FileTabBar";
 import { QuickOpenPalette } from "./QuickOpenPalette";
 import { WorkspaceFilePane } from "./WorkspaceFilePane";
+import { gitDecorationForStatus, resolveTreeDropMove } from "./gitDecorations";
 import styles from "./FileExplorer.module.css";
 
 const TREE_WIDTH_KEY = "loom:file-browser:tree-width";
@@ -98,6 +101,15 @@ function pathMatchesPrefix(path: string, prefix: string): boolean {
   return path === prefix || path.startsWith(`${prefix}/`);
 }
 
+function isConflictError(err: unknown): boolean {
+  return (
+    typeof err === "object" &&
+    err !== null &&
+    "status" in err &&
+    (err as { status?: unknown }).status === 409
+  );
+}
+
 function sortedEntries(entries: FileEntry[]): FileEntry[] {
   return [...entries].sort((a, b) => a.name.localeCompare(b.name));
 }
@@ -139,12 +151,14 @@ interface LineTarget {
 function OpenEditors({
   groups,
   dirty,
+  gitStatus,
   collapsed,
   onToggle,
   onActivate,
 }: {
   groups: FileBrowserGroup[];
   dirty: Record<string, boolean>;
+  gitStatus: Record<string, string>;
   collapsed: boolean;
   onToggle: () => void;
   onActivate: (groupIndex: number, path: string) => void;
@@ -187,24 +201,14 @@ function OpenEditors({
                   </div>
                 )}
                 {group.tabs.map((tab) => (
-                  <button
-                    type="button"
+                  <OpenEditorItem
                     key={`${groupIndex}:${tab.path}`}
-                    className={styles.openEditorItem}
-                    data-active={group.active === tab.path || undefined}
-                    title={tab.path}
+                    path={tab.path}
+                    active={group.active === tab.path}
+                    dirty={!!dirty[tab.path]}
+                    status={gitStatus[tab.path]}
                     onClick={() => onActivate(groupIndex, tab.path)}
-                  >
-                    {dirty[tab.path] && (
-                      <span className={styles.tabDirty} aria-hidden="true" />
-                    )}
-                    <span className={styles.openEditorName}>
-                      {basename(tab.path)}
-                    </span>
-                    <span className={styles.openEditorPath}>
-                      {dirname(tab.path)}
-                    </span>
-                  </button>
+                  />
                 ))}
               </div>
             ))
@@ -212,6 +216,36 @@ function OpenEditors({
         </div>
       )}
     </section>
+  );
+}
+
+function OpenEditorItem({
+  path,
+  active,
+  dirty,
+  status,
+  onClick,
+}: {
+  path: string;
+  active: boolean;
+  dirty: boolean;
+  status?: string | undefined;
+  onClick: () => void;
+}) {
+  const decoration = gitDecorationForStatus(status);
+  return (
+    <button
+      type="button"
+      className={styles.openEditorItem}
+      data-active={active || undefined}
+      data-git-status-kind={decoration?.kind}
+      title={path}
+      onClick={onClick}
+    >
+      {dirty && <span className={styles.tabDirty} aria-hidden="true" />}
+      <span className={styles.openEditorName}>{basename(path)}</span>
+      <span className={styles.openEditorPath}>{dirname(path)}</span>
+    </button>
   );
 }
 
@@ -423,6 +457,7 @@ function EditorGroup({
       <WorkspaceFilePane
         path={activePath}
         fileData={fileData}
+        isActive={isActiveGroup}
         isLoading={isLoading}
         error={error}
         content={editor.content}
@@ -456,6 +491,7 @@ function FileBrowserInner({ scopeRef }: FileBrowserProps) {
   } = useScopedFileTree(scopeRef);
 
   const { workspaceId } = useWorkspaceContext();
+  const eventContext = useEventContext();
   const { showToast } = useToast();
   const store = useFileBrowserStoreInstance();
   const groups = useStore(store, (s) => s.groups);
@@ -477,6 +513,7 @@ function FileBrowserInner({ scopeRef }: FileBrowserProps) {
   const [quickOpenFetchedAt, setQuickOpenFetchedAt] = useState(0);
   const [quickOpenLoading, setQuickOpenLoading] = useState(false);
   const [quickOpenError, setQuickOpenError] = useState<string | null>(null);
+  const [gitStatus, setGitStatus] = useState<Record<string, string>>({});
   const [searchPanelOpen, setSearchPanelOpen] = useState(false);
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
   const [inlineEdit, setInlineEdit] = useState<FileTreeInlineEdit | null>(null);
@@ -484,12 +521,22 @@ function FileBrowserInner({ scopeRef }: FileBrowserProps) {
     null,
   );
   const inlineCommitKeyRef = useRef<string | null>(null);
+  const reconnectAttemptsRef = useRef(eventContext.reconnectAttempts);
 
   const activePath = groups[activeGroup]?.active ?? groups[0]?.active ?? null;
 
   const markIndexStale = useCallback(() => {
     setQuickOpenFetchedAt(0);
   }, []);
+
+  const refreshGitStatus = useCallback(async () => {
+    try {
+      const status = await gitStatusScoped(workspaceId, scopeRef);
+      setGitStatus(status);
+    } catch {
+      setGitStatus({});
+    }
+  }, [scopeRef, workspaceId]);
 
   const fetchQuickOpenIndex = useCallback(
     async (force = false) => {
@@ -539,6 +586,31 @@ function FileBrowserInner({ scopeRef }: FileBrowserProps) {
       void fetchQuickOpenIndex();
     }
   }, [fetchQuickOpenIndex, quickOpenOpen]);
+
+  useEffect(() => {
+    if (!isLoading && !error) {
+      void refreshGitStatus();
+    }
+  }, [error, isLoading, refreshGitStatus]);
+
+  useEffect(() => {
+    const handleFocus = () => {
+      void refreshGitStatus();
+    };
+    window.addEventListener("focus", handleFocus);
+    return () => window.removeEventListener("focus", handleFocus);
+  }, [refreshGitStatus]);
+
+  useEffect(() => {
+    const previous = reconnectAttemptsRef.current;
+    reconnectAttemptsRef.current = eventContext.reconnectAttempts;
+    if (
+      eventContext.reconnectAttempts > 0 ||
+      (previous > 0 && eventContext.state === "connected")
+    ) {
+      void refreshGitStatus();
+    }
+  }, [eventContext.reconnectAttempts, eventContext.state, refreshGitStatus]);
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -644,10 +716,11 @@ function FileBrowserInner({ scopeRef }: FileBrowserProps) {
   const handleSaved = useCallback(
     (path: string) => {
       markIndexStale();
+      void refreshGitStatus();
       showToast("File saved", { type: "success" });
       void refreshParents(path);
     },
-    [markIndexStale, refreshParents, showToast],
+    [markIndexStale, refreshGitStatus, refreshParents, showToast],
   );
 
   const handleResizeDelta = useCallback((deltaPx: number) => {
@@ -728,6 +801,7 @@ function FileBrowserInner({ scopeRef }: FileBrowserProps) {
         const path = joinPath(inlineEdit.parentPath, value);
         await writeScopedFile(workspaceId, scopeRef, path, "");
         markIndexStale();
+        void refreshGitStatus();
         await refreshParents(path);
         openFile(path);
         void revealPath(path).then(() => setScrollTarget(path));
@@ -735,6 +809,7 @@ function FileBrowserInner({ scopeRef }: FileBrowserProps) {
         const path = joinPath(inlineEdit.parentPath, value);
         await mkdirScoped(workspaceId, scopeRef, path);
         markIndexStale();
+        void refreshGitStatus();
         await refreshParents(path);
         void revealPath(path).then(() => setScrollTarget(path));
       } else if (inlineEdit.path) {
@@ -748,6 +823,7 @@ function FileBrowserInner({ scopeRef }: FileBrowserProps) {
           );
           store.getState().retargetPathPrefix(inlineEdit.path, nextPath);
           markIndexStale();
+          void refreshGitStatus();
           await refreshParents(inlineEdit.path, nextPath);
           void revealPath(nextPath).then(() => setScrollTarget(nextPath));
         }
@@ -769,6 +845,7 @@ function FileBrowserInner({ scopeRef }: FileBrowserProps) {
     store,
     showToast,
     markIndexStale,
+    refreshGitStatus,
   ]);
 
   const dirtyTabsForPath = useCallback(
@@ -794,6 +871,7 @@ function FileBrowserInner({ scopeRef }: FileBrowserProps) {
       try {
         await deleteScopedPath(workspaceId, scopeRef, node.path, node.isDir);
         markIndexStale();
+        void refreshGitStatus();
         if (!node.isDir && skipFutureFileConfirms) {
           wsSet(workspaceId, DELETE_FILE_SKIP_KEY, "1");
         }
@@ -816,6 +894,7 @@ function FileBrowserInner({ scopeRef }: FileBrowserProps) {
       refreshParents,
       showToast,
       markIndexStale,
+      refreshGitStatus,
     ],
   );
 
@@ -856,6 +935,7 @@ function FileBrowserInner({ scopeRef }: FileBrowserProps) {
           data.content ?? "",
         );
         markIndexStale();
+        void refreshGitStatus();
         await refreshParents(nextPath);
         openFile(nextPath);
       } catch (err) {
@@ -872,6 +952,7 @@ function FileBrowserInner({ scopeRef }: FileBrowserProps) {
       openFile,
       showToast,
       markIndexStale,
+      refreshGitStatus,
     ],
   );
 
@@ -892,6 +973,62 @@ function FileBrowserInner({ scopeRef }: FileBrowserProps) {
     [],
   );
 
+  const handleMoveNode = useCallback(
+    async (fromPath: string, targetFolderPath: string) => {
+      const move = resolveTreeDropMove(fromPath, targetFolderPath);
+      if (!move) return;
+      const applyMove = async (overwrite: boolean) => {
+        await moveScopedPath(
+          workspaceId,
+          scopeRef,
+          move.from,
+          move.to,
+          overwrite,
+        );
+      };
+      try {
+        await applyMove(false);
+      } catch (err) {
+        if (!isConflictError(err)) {
+          showToast(err instanceof Error ? err.message : String(err), {
+            type: "error",
+          });
+          return;
+        }
+        const ok = window.confirm(`Overwrite ${move.to}?`);
+        if (!ok) return;
+        try {
+          await applyMove(true);
+        } catch (overwriteErr) {
+          showToast(
+            overwriteErr instanceof Error
+              ? overwriteErr.message
+              : String(overwriteErr),
+            { type: "error" },
+          );
+          return;
+        }
+      }
+
+      store.getState().retargetPathPrefix(move.from, move.to);
+      markIndexStale();
+      void refreshGitStatus();
+      await refreshParents(move.from, move.to);
+      void revealPath(move.to).then(() => setScrollTarget(move.to));
+      showToast("Moved", { type: "success" });
+    },
+    [
+      workspaceId,
+      scopeRef,
+      store,
+      markIndexStale,
+      refreshGitStatus,
+      refreshParents,
+      revealPath,
+      showToast,
+    ],
+  );
+
   const selectedPath = activePath;
 
   return (
@@ -907,6 +1044,7 @@ function FileBrowserInner({ scopeRef }: FileBrowserProps) {
             onOpenResult={(path, line) => openFile(path, undefined, line)}
             onFilesChanged={(paths) => {
               markIndexStale();
+              void refreshGitStatus();
               void refreshParents(...paths);
               showToast("Replace applied", { type: "success" });
             }}
@@ -917,6 +1055,7 @@ function FileBrowserInner({ scopeRef }: FileBrowserProps) {
             <OpenEditors
               groups={groups}
               dirty={dirty}
+              gitStatus={gitStatus}
               collapsed={openEditorsCollapsed}
               onToggle={() =>
                 setOpenEditorsCollapsed((collapsed) => !collapsed)
@@ -990,6 +1129,8 @@ function FileBrowserInner({ scopeRef }: FileBrowserProps) {
                   }
                   onInlineEditCommit={() => void commitInlineEdit()}
                   onInlineEditCancel={() => setInlineEdit(null)}
+                  gitStatus={gitStatus}
+                  onMoveNode={handleMoveNode}
                   scrollToPath={scrollTarget}
                 />
               </div>

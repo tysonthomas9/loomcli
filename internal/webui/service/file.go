@@ -53,6 +53,10 @@ type FileService interface {
 	// reports LimitHit when any search cap clips the scan or result set.
 	SearchFilesScoped(ctx context.Context, wsID string, scope FileScope, target string, req FileSearchRequest) (*FileSearchResult, error)
 
+	// GitStatusScoped returns root-relative paths mapped to raw two-character
+	// git status --porcelain XY codes for decoration-only file browser status.
+	GitStatusScoped(ctx context.Context, wsID string, scope FileScope, target string) (FileGitStatusResult, error)
+
 	// WriteFileScoped creates or updates a file under a scope root.
 	WriteFileScoped(ctx context.Context, wsID string, scope FileScope, target, path, content string) error
 
@@ -122,6 +126,10 @@ type FileSearchMatch struct {
 	Col     int    `json:"col"`
 	Preview string `json:"preview"`
 }
+
+// FileGitStatusResult maps root-relative file paths to raw two-character git
+// status --porcelain XY codes.
+type FileGitStatusResult map[string]string
 
 // FileMoveRequest is the JSON body for a scoped file move/rename operation.
 type FileMoveRequest struct {

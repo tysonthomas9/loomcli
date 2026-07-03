@@ -22,6 +22,7 @@ func TestFileModule_RegisterRoutes(t *testing.T) {
 		{"GET", "/api/workspaces/test-ws/agents/agent1/files/tree"},
 		{"GET", "/api/workspaces/test-ws/agents/agent1/files"},
 		{"PUT", "/api/workspaces/test-ws/agents/agent1/files"},
+		{"GET", "/api/workspaces/test-ws/files/git-status"},
 	}
 
 	for _, rt := range routes {

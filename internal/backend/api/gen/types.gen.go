@@ -872,6 +872,27 @@ func (e WriteScopedFileParamsScope) Valid() bool {
 	}
 }
 
+// Defines values for GetScopedFileGitStatusParamsScope.
+const (
+	GetScopedFileGitStatusParamsScopeAgent     GetScopedFileGitStatusParamsScope = "agent"
+	GetScopedFileGitStatusParamsScopeRepo      GetScopedFileGitStatusParamsScope = "repo"
+	GetScopedFileGitStatusParamsScopeWorkspace GetScopedFileGitStatusParamsScope = "workspace"
+)
+
+// Valid indicates whether the value is a known member of the GetScopedFileGitStatusParamsScope enum.
+func (e GetScopedFileGitStatusParamsScope) Valid() bool {
+	switch e {
+	case GetScopedFileGitStatusParamsScopeAgent:
+		return true
+	case GetScopedFileGitStatusParamsScopeRepo:
+		return true
+	case GetScopedFileGitStatusParamsScopeWorkspace:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for GetScopedFileIndexParamsScope.
 const (
 	GetScopedFileIndexParamsScopeAgent     GetScopedFileIndexParamsScope = "agent"
@@ -958,19 +979,19 @@ func (e SearchScopedFilesParamsScope) Valid() bool {
 
 // Defines values for GetScopedFileTreeParamsScope.
 const (
-	GetScopedFileTreeParamsScopeAgent     GetScopedFileTreeParamsScope = "agent"
-	GetScopedFileTreeParamsScopeRepo      GetScopedFileTreeParamsScope = "repo"
-	GetScopedFileTreeParamsScopeWorkspace GetScopedFileTreeParamsScope = "workspace"
+	Agent     GetScopedFileTreeParamsScope = "agent"
+	Repo      GetScopedFileTreeParamsScope = "repo"
+	Workspace GetScopedFileTreeParamsScope = "workspace"
 )
 
 // Valid indicates whether the value is a known member of the GetScopedFileTreeParamsScope enum.
 func (e GetScopedFileTreeParamsScope) Valid() bool {
 	switch e {
-	case GetScopedFileTreeParamsScopeAgent:
+	case Agent:
 		return true
-	case GetScopedFileTreeParamsScopeRepo:
+	case Repo:
 		return true
-	case GetScopedFileTreeParamsScopeWorkspace:
+	case Workspace:
 		return true
 	default:
 		return false
@@ -1367,6 +1388,9 @@ type ErrorResponse struct {
 
 // ErrorResponseSuccess defines model for ErrorResponse.Success.
 type ErrorResponseSuccess bool
+
+// FileGitStatusResponse defines model for FileGitStatusResponse.
+type FileGitStatusResponse map[string]string
 
 // FileIndexResponse defines model for FileIndexResponse.
 type FileIndexResponse struct {
@@ -2438,6 +2462,15 @@ type WriteScopedFileParams struct {
 
 // WriteScopedFileParamsScope defines parameters for WriteScopedFile.
 type WriteScopedFileParamsScope string
+
+// GetScopedFileGitStatusParams defines parameters for GetScopedFileGitStatus.
+type GetScopedFileGitStatusParams struct {
+	Scope  *GetScopedFileGitStatusParamsScope `form:"scope,omitempty" json:"scope,omitempty"`
+	Target *string                            `form:"target,omitempty" json:"target,omitempty"`
+}
+
+// GetScopedFileGitStatusParamsScope defines parameters for GetScopedFileGitStatus.
+type GetScopedFileGitStatusParamsScope string
 
 // GetScopedFileIndexParams defines parameters for GetScopedFileIndex.
 type GetScopedFileIndexParams struct {

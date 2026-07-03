@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -54,6 +55,41 @@ func (m scopedMockFileOps) ResolveWorkspaceData(_ string) (*ops.WorkspaceData, e
 	return ws, nil
 }
 
+func (m scopedMockFileOps) GitStatusPorcelain(worktreePath string) (map[string]string, error) {
+	cmd := exec.Command("git", "-C", worktreePath, "status", "--porcelain") //nolint:norawexec // Test mock intentionally exercises real git status output.
+	out, err := cmd.Output()
+	if err != nil {
+		return nil, err
+	}
+	return parseTestPorcelainStatus(string(out)), nil
+}
+
+func parseTestPorcelainStatus(output string) map[string]string {
+	trimmed := strings.Trim(output, "\r\n")
+	if trimmed == "" {
+		return map[string]string{}
+	}
+	lines := strings.Split(trimmed, "\n")
+	status := make(map[string]string, len(lines))
+	for _, line := range lines {
+		line = strings.TrimRight(line, "\r")
+		if len(line) < 3 {
+			continue
+		}
+		xy := line[:2]
+		path := strings.TrimSpace(line[3:])
+		if path == "" {
+			continue
+		}
+		if strings.Contains(path, " -> ") {
+			parts := strings.Split(path, " -> ")
+			path = parts[len(parts)-1]
+		}
+		status[path] = xy
+	}
+	return status
+}
+
 func scopedSvc(root string) service.FileService {
 	return NewFileService(scopedMockFileOps{wsRoot: root})
 }
@@ -95,6 +131,28 @@ func mustWrite(t *testing.T, path, content string) {
 	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
 		t.Fatal(err)
 	}
+}
+
+func mustGit(t *testing.T, dir string, args ...string) {
+	t.Helper()
+	cmd := exec.Command("git", args...) //nolint:norawexec // Test helper uses fixed git commands in temp repos.
+	cmd.Dir = dir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git %v failed: %v\n%s", args, err, out)
+	}
+}
+
+func initGitRepo(t *testing.T, dir string) {
+	t.Helper()
+	mustGit(t, dir, "init", "-b", "main")
+	mustGit(t, dir, "config", "user.email", "test@example.com")
+	mustGit(t, dir, "config", "user.name", "Test User")
+}
+
+func commitAll(t *testing.T, dir string) {
+	t.Helper()
+	mustGit(t, dir, "add", ".")
+	mustGit(t, dir, "commit", "-m", "init")
 }
 
 func wantKind(t *testing.T, err error, kind service.ErrorKind) {
@@ -623,4 +681,79 @@ func TestFileServiceImpl_IndexCacheInvalidatedAfterCRUD(t *testing.T) {
 	if containsPath(index.Paths, "one.txt") {
 		t.Fatalf("delete did not invalidate index cache: %+v", index.Paths)
 	}
+}
+
+func TestFileServiceImpl_GitStatusScoped_TargetScopes(t *testing.T) {
+	ctx := context.Background()
+	svc, scopes := setupScopedService(t)
+	for _, sc := range scopes {
+		if sc.scope == service.ScopeWorkspace {
+			continue
+		}
+		initGitRepo(t, sc.root)
+		mustWrite(t, filepath.Join(sc.root, "tracked.txt"), "one\n")
+		commitAll(t, sc.root)
+		mustWrite(t, filepath.Join(sc.root, "tracked.txt"), "two\n")
+
+		status, err := svc.GitStatusScoped(ctx, "ws", sc.scope, sc.target)
+		if err != nil {
+			t.Fatalf("%s GitStatusScoped: %v", sc.name, err)
+		}
+		if got := status["tracked.txt"]; got != " M" {
+			t.Fatalf("%s status[tracked.txt] = %q, want %q; full=%#v", sc.name, got, " M", status)
+		}
+		if _, ok := status[filepath.ToSlash(filepath.Join(filepath.Base(sc.root), "tracked.txt"))]; ok {
+			t.Fatalf("%s status should be scope-relative, got %#v", sc.name, status)
+		}
+	}
+}
+
+func TestFileServiceImpl_GitStatusScoped_WorkspaceFanoutPrefixes(t *testing.T) {
+	ctx := context.Background()
+	svc, scopes := setupScopedService(t)
+	var repoRoot, agentRoot string
+	for _, sc := range scopes {
+		switch sc.scope {
+		case service.ScopeRepo:
+			repoRoot = sc.root
+		case service.ScopeAgent:
+			agentRoot = sc.root
+		}
+	}
+
+	initGitRepo(t, repoRoot)
+	mustWrite(t, filepath.Join(repoRoot, "tracked.txt"), "one\n")
+	commitAll(t, repoRoot)
+	mustWrite(t, filepath.Join(repoRoot, "tracked.txt"), "two\n")
+
+	initGitRepo(t, agentRoot)
+	mustWrite(t, filepath.Join(agentRoot, "new.txt"), "new\n")
+
+	status, err := svc.GitStatusScoped(ctx, "ws", service.ScopeWorkspace, "")
+	if err != nil {
+		t.Fatalf("GitStatusScoped workspace: %v", err)
+	}
+	if got := status["repo-a/tracked.txt"]; got != " M" {
+		t.Fatalf("status[repo-a/tracked.txt] = %q, want %q; full=%#v", got, " M", status)
+	}
+	if got := status["worktrees/repo-a/agent-a/new.txt"]; got != "??" {
+		t.Fatalf("status[worktrees/repo-a/agent-a/new.txt] = %q, want %q; full=%#v", got, "??", status)
+	}
+	if _, ok := status["tracked.txt"]; ok {
+		t.Fatalf("workspace status should prefix checkout paths, got %#v", status)
+	}
+}
+
+func TestFileServiceImpl_GitStatusScoped_InvalidTargets(t *testing.T) {
+	ctx := context.Background()
+	svc, _ := setupScopedService(t)
+
+	_, err := svc.GitStatusScoped(ctx, "ws", service.ScopeRepo, "missing")
+	wantKind(t, err, service.KindNotFound)
+
+	_, err = svc.GitStatusScoped(ctx, "ws", service.ScopeAgent, "missing")
+	wantKind(t, err, service.KindNotFound)
+
+	_, err = svc.GitStatusScoped(ctx, "ws", service.ScopeWorkspace, "repo-a")
+	wantKind(t, err, service.KindValidation)
 }

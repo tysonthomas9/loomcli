@@ -326,6 +326,10 @@ func (s *testFileServiceImpl) SearchFilesScoped(_ context.Context, wsID string, 
 	return &service.FileSearchResult{Results: []service.FileSearchFileResult{}, LimitHit: false}, nil
 }
 
+func (s *testFileServiceImpl) GitStatusScoped(_ context.Context, _ string, _ service.FileScope, _ string) (service.FileGitStatusResult, error) {
+	return service.FileGitStatusResult{}, nil
+}
+
 func (s *testFileServiceImpl) WriteFileScoped(_ context.Context, wsID string, scope service.FileScope, target, path, content string) error {
 	root, err := s.resolveScopeRootTest(wsID, scope, target)
 	if err != nil {
@@ -687,6 +691,9 @@ func (s *stubFileService) IndexFilesScoped(_ context.Context, _ string, _ servic
 }
 func (s *stubFileService) SearchFilesScoped(_ context.Context, _ string, _ service.FileScope, _ string, _ service.FileSearchRequest) (*service.FileSearchResult, error) {
 	return &service.FileSearchResult{}, nil
+}
+func (s *stubFileService) GitStatusScoped(_ context.Context, _ string, _ service.FileScope, _ string) (service.FileGitStatusResult, error) {
+	return service.FileGitStatusResult{}, nil
 }
 func (s *stubFileService) WriteFileScoped(_ context.Context, _ string, _ service.FileScope, _, _, _ string) error {
 	return nil

@@ -2642,6 +2642,33 @@ paths:
               schema:
                 $ref: "#/components/schemas/FileSearchResponse"
 
+  /api/workspaces/{ws}/files/git-status:
+    get:
+      operationId: getScopedFileGitStatus
+      tags: [files]
+      summary: Get git status decorations for a scoped file browser root
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: scope
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [workspace, repo, agent]
+            default: workspace
+        - name: target
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Root-relative file paths mapped to raw git porcelain XY codes
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FileGitStatusResponse"
+
   /api/workspaces/{ws}/files:
     get:
       operationId: readScopedFile
@@ -3654,6 +3681,13 @@ components:
             $ref: "#/components/schemas/FileSearchFileResult"
         limitHit:
           type: boolean
+
+    FileGitStatusResponse:
+      type: object
+      additionalProperties:
+        type: string
+        minLength: 2
+        maxLength: 2
 
     FileWriteRequest:
       type: object

@@ -1823,6 +1823,9 @@ func TestFlatAgentRoutesRemoved(t *testing.T) {
 			}
 			return &ops.AgentWorktree{Path: worktreeDir}, nil
 		},
+		resolveWsRootFunc: func() (string, error) {
+			return worktreeDir, nil
+		},
 		resolveWsDataFunc: func() (*ops.WorkspaceData, error) {
 			return &ops.WorkspaceData{
 				ID:   "test-ws",
@@ -1906,6 +1909,7 @@ func TestFlatAgentRoutesRemoved(t *testing.T) {
 		{http.MethodGet, "/api/workspaces/test-ws/agents/alice/files/tree"},
 		{http.MethodGet, "/api/workspaces/test-ws/agents/alice/files"},
 		{http.MethodPut, "/api/workspaces/test-ws/agents/alice/files"},
+		{http.MethodGet, "/api/workspaces/test-ws/files/git-status"},
 	}
 
 	for _, tc := range scopedRoutes {

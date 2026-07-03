@@ -58,6 +58,10 @@ func (m *mockFileOps) ResolveWorkspaceData(workspaceID string) (*ops.WorkspaceDa
 	return nil, errors.New("not found")
 }
 
+func (m *mockFileOps) GitStatusPorcelain(worktreePath string) (map[string]string, error) {
+	return map[string]string{}, nil
+}
+
 // setupTestWorktree creates a temporary directory with test files.
 func setupTestWorktree(t *testing.T) string {
 	t.Helper()

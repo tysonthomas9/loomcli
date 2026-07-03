@@ -1515,6 +1515,23 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/workspaces/{ws}/files/git-status": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Get git status decorations for a scoped file browser root */
+    get: operations["getScopedFileGitStatus"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/workspaces/{ws}/files": {
     parameters: {
       query?: never;
@@ -2100,6 +2117,9 @@ export interface components {
     FileSearchResponse: {
       results: components["schemas"]["FileSearchFileResult"][];
       limitHit: boolean;
+    };
+    FileGitStatusResponse: {
+      [key: string]: string;
     };
     FileWriteRequest: {
       content: string;
@@ -6006,6 +6026,32 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["FileSearchResponse"];
+        };
+      };
+    };
+  };
+  getScopedFileGitStatus: {
+    parameters: {
+      query?: {
+        scope?: "workspace" | "repo" | "agent";
+        target?: string;
+      };
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Root-relative file paths mapped to raw git porcelain XY codes */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["FileGitStatusResponse"];
         };
       };
     };

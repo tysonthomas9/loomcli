@@ -3,7 +3,13 @@
  */
 
 import "@testing-library/jest-dom";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import {
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { FileEntry, FileReadData } from "@/api/workspace";
@@ -17,6 +23,7 @@ const mocks = vi.hoisted(() => ({
   moveScopedPath: vi.fn(() => Promise.resolve()),
   deleteScopedPath: vi.fn(() => Promise.resolve()),
   readScopedFile: vi.fn(() => Promise.resolve({})),
+  gitStatusScoped: vi.fn(() => Promise.resolve({})),
   indexScopedFiles: vi.fn(() =>
     Promise.resolve({ paths: [] as string[], truncated: false }),
   ),
@@ -24,9 +31,41 @@ const mocks = vi.hoisted(() => ({
     Promise.resolve({ results: [], limitHit: false }),
   ),
   scrollApplied: vi.fn(),
+  dndOnDragEnd: undefined as
+    | ((event: {
+        active: { data: { current?: unknown } };
+        over?: { data: { current?: unknown } } | null;
+      }) => void)
+    | undefined,
   fileMap: {} as Record<string, FileReadData>,
   rootEntries: [] as FileEntry[],
 }));
+
+vi.mock("@dnd-kit/core", async () => {
+  const React = await import("react");
+  return {
+    DndContext: ({
+      onDragEnd,
+      children,
+    }: {
+      onDragEnd: NonNullable<typeof mocks.dndOnDragEnd>;
+      children: React.ReactNode;
+    }) => {
+      mocks.dndOnDragEnd = onDragEnd;
+      return <>{children}</>;
+    },
+    useDraggable: () => ({
+      setNodeRef: vi.fn(),
+      listeners: {},
+      isDragging: false,
+      transform: null,
+    }),
+    useDroppable: () => ({
+      setNodeRef: vi.fn(),
+      isOver: false,
+    }),
+  };
+});
 
 vi.mock("@/components/CodeMirrorEditor", async () => {
   const React = await import("react");
@@ -38,6 +77,7 @@ vi.mock("@/components/CodeMirrorEditor", async () => {
       scrollToLine,
       scrollToLineKey,
       onScrollToLineApplied,
+      onSymbolsChange,
     }: {
       value: string;
       onChange?: (value: string) => void;
@@ -45,7 +85,33 @@ vi.mock("@/components/CodeMirrorEditor", async () => {
       scrollToLine?: number;
       scrollToLineKey?: number | string;
       onScrollToLineApplied?: () => void;
+      onSymbolsChange?: (state: {
+        symbols: Array<{ name: string; kind: string; line: number }>;
+        trail: Array<{ name: string; kind: string; line: number }>;
+      }) => void;
     }) => {
+      React.useEffect(() => {
+        if (value.includes("function jumpTarget")) {
+          onSymbolsChange?.({
+            symbols: [
+              {
+                name: "jumpTarget",
+                kind: "function",
+                line: 3,
+              },
+            ],
+            trail: [
+              {
+                name: "jumpTarget",
+                kind: "function",
+                line: 3,
+              },
+            ],
+          });
+        } else {
+          onSymbolsChange?.({ symbols: [], trail: [] });
+        }
+      }, [onSymbolsChange, value]);
       React.useEffect(() => {
         if (!scrollToLine) return;
         const lineCount = value.split("\n").length;
@@ -75,6 +141,7 @@ vi.mock("@/components/CodeMirrorEditor", async () => {
 
 vi.mock("@/hooks/api", () => ({
   deleteScopedPath: mocks.deleteScopedPath,
+  gitStatusScoped: mocks.gitStatusScoped,
   indexScopedFiles: mocks.indexScopedFiles,
   mkdirScoped: mocks.mkdirScoped,
   moveScopedPath: mocks.moveScopedPath,
@@ -92,6 +159,15 @@ vi.mock("@/hooks", async () => {
     useFileBrowserStore: stores.useFileBrowserStore,
     useFileBrowserStoreInstance: stores.useFileBrowserStoreInstance,
     useWorkspaceContext: () => ({ workspaceId: "ws-1" }),
+    useEventContext: () => ({
+      state: "connected",
+      reconnectAttempts: 0,
+      lastError: null,
+      isConnected: true,
+      subscribe: () => () => {},
+      retryNow: vi.fn(),
+      disconnect: vi.fn(),
+    }),
     useToast: () => ({ showToast: mocks.showToast }),
     useFileTree: vi.fn(),
     useFileContent: vi.fn(),
@@ -143,8 +219,10 @@ describe("WorkspaceFileBrowser", () => {
   beforeEach(() => {
     localStorage.clear();
     vi.clearAllMocks();
+    mocks.dndOnDragEnd = undefined;
     mocks.rootEntries = [
       entry("main.ts"),
+      entry("symbols.ts"),
       entry("large.txt"),
       entry("src", true),
     ];
@@ -159,6 +237,12 @@ describe("WorkspaceFileBrowser", () => {
         path: "src/other.ts",
         content: "export const other = true;\n",
         size: 27,
+        binary: false,
+      },
+      "symbols.ts": {
+        path: "symbols.ts",
+        content: "const before = true;\n\nfunction jumpTarget() {}\n",
+        size: 47,
         binary: false,
       },
       "large.txt": {
@@ -185,6 +269,7 @@ describe("WorkspaceFileBrowser", () => {
       ],
       limitHit: false,
     });
+    mocks.gitStatusScoped.mockResolvedValue({});
   });
 
   it("calls scoped CRUD APIs from tree context menu actions", async () => {
@@ -347,6 +432,56 @@ describe("WorkspaceFileBrowser", () => {
         { scope: "workspace" },
         "main.ts",
         "alert.log('hi')\n",
+      );
+    });
+  });
+
+  it("moves a dragged tree node onto a folder and guards self-drop", async () => {
+    render(<WorkspaceFileBrowser scopeRef={{ scope: "workspace" }} />);
+
+    await waitFor(() => expect(mocks.dndOnDragEnd).toBeDefined());
+    mocks.dndOnDragEnd?.({
+      active: {
+        data: { current: { type: "file-tree-node", path: "main.ts" } },
+      },
+      over: { data: { current: { type: "file-tree-folder", path: "src" } } },
+    });
+
+    await waitFor(() => {
+      expect(mocks.moveScopedPath).toHaveBeenCalledWith(
+        "ws-1",
+        { scope: "workspace" },
+        "main.ts",
+        "src/main.ts",
+        false,
+      );
+    });
+
+    mocks.moveScopedPath.mockClear();
+    mocks.dndOnDragEnd?.({
+      active: { data: { current: { type: "file-tree-node", path: "src" } } },
+      over: { data: { current: { type: "file-tree-folder", path: "src" } } },
+    });
+
+    expect(mocks.moveScopedPath).not.toHaveBeenCalled();
+  });
+
+  it("opens the in-file symbol palette with Cmd+Shift+O and jumps to the symbol line", async () => {
+    render(<WorkspaceFileBrowser scopeRef={{ scope: "workspace" }} />);
+
+    fireEvent.click(screen.getByLabelText("symbols.ts"));
+    await screen.findByDisplayValue(/function jumpTarget/);
+
+    fireEvent.keyDown(window, { key: "o", metaKey: true, shiftKey: true });
+    const dialog = await screen.findByRole("dialog", {
+      name: "Go to symbol in file",
+    });
+    expect(await within(dialog).findByText("jumpTarget")).toBeInTheDocument();
+    fireEvent.keyDown(dialog, { key: "Enter" });
+
+    await waitFor(() => {
+      expect(mocks.scrollApplied).toHaveBeenCalledWith(
+        expect.objectContaining({ requested: 3, applied: 3 }),
       );
     });
   });

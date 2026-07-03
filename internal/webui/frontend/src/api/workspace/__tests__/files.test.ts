@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 
 import {
   deleteScopedPath,
+  gitStatusScoped,
   indexScopedFiles,
   listScopedDir,
   listWorktreeDir,
@@ -369,6 +370,19 @@ describe("files API", () => {
 
       expect(mockGet).toHaveBeenCalledWith(
         "/api/workspaces/test-ws-id/files/index?scope=agent&target=atlas",
+      );
+    });
+
+    it("fetches scoped git status decorations", async () => {
+      mockGet.mockResolvedValue({ "src/main.go": " M" });
+
+      await gitStatusScoped("test-ws-id", {
+        scope: "repo",
+        target: "loomcli",
+      });
+
+      expect(mockGet).toHaveBeenCalledWith(
+        "/api/workspaces/test-ws-id/files/git-status?scope=repo&target=loomcli",
       );
     });
 

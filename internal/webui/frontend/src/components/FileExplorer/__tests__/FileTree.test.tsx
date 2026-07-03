@@ -220,6 +220,28 @@ describe("FileTree", () => {
     expect(screen.getByLabelText("file.txt")).not.toHaveAttribute("data-dir");
   });
 
+  it("renders conflict badges and bubbles folder git status", () => {
+    const treeData = new Map<string, FileEntry[]>([
+      ["", [makeFileEntry("src", true)]],
+      ["src", [makeFileEntry("conflict.go")]],
+    ]);
+    render(
+      <FileTree
+        {...defaultProps}
+        treeData={treeData}
+        expanded={new Set(["src"])}
+        gitStatus={{ "src/conflict.go": "UU" }}
+      />,
+    );
+
+    expect(screen.getByLabelText("conflict.go")).toHaveAttribute(
+      "data-git-status-kind",
+      "conflict",
+    );
+    expect(screen.getByLabelText("src")).toHaveAttribute("data-conflict");
+    expect(screen.getAllByTitle("Merge conflict").length).toBeGreaterThan(0);
+  });
+
   it("case-insensitive filter matching", () => {
     const treeData = new Map<string, FileEntry[]>([
       ["", [makeFileEntry("Handler.go")]],
