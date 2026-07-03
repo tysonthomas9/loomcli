@@ -203,6 +203,24 @@ func (e ErrorResponseSuccess) Valid() bool {
 	}
 }
 
+// Defines values for FileHistoryEntryKind.
+const (
+	Commit FileHistoryEntryKind = "commit"
+	Save   FileHistoryEntryKind = "save"
+)
+
+// Valid indicates whether the value is a known member of the FileHistoryEntryKind enum.
+func (e FileHistoryEntryKind) Valid() bool {
+	switch e {
+	case Commit:
+		return true
+	case Save:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for IssueAgentState.
 const (
 	IssueAgentStateDead     IssueAgentState = "dead"
@@ -872,6 +890,48 @@ func (e WriteScopedFileParamsScope) Valid() bool {
 	}
 }
 
+// Defines values for GetScopedFileBlameParamsScope.
+const (
+	GetScopedFileBlameParamsScopeAgent     GetScopedFileBlameParamsScope = "agent"
+	GetScopedFileBlameParamsScopeRepo      GetScopedFileBlameParamsScope = "repo"
+	GetScopedFileBlameParamsScopeWorkspace GetScopedFileBlameParamsScope = "workspace"
+)
+
+// Valid indicates whether the value is a known member of the GetScopedFileBlameParamsScope enum.
+func (e GetScopedFileBlameParamsScope) Valid() bool {
+	switch e {
+	case GetScopedFileBlameParamsScopeAgent:
+		return true
+	case GetScopedFileBlameParamsScopeRepo:
+		return true
+	case GetScopedFileBlameParamsScopeWorkspace:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for GetScopedFileDiffParamsScope.
+const (
+	GetScopedFileDiffParamsScopeAgent     GetScopedFileDiffParamsScope = "agent"
+	GetScopedFileDiffParamsScopeRepo      GetScopedFileDiffParamsScope = "repo"
+	GetScopedFileDiffParamsScopeWorkspace GetScopedFileDiffParamsScope = "workspace"
+)
+
+// Valid indicates whether the value is a known member of the GetScopedFileDiffParamsScope enum.
+func (e GetScopedFileDiffParamsScope) Valid() bool {
+	switch e {
+	case GetScopedFileDiffParamsScopeAgent:
+		return true
+	case GetScopedFileDiffParamsScopeRepo:
+		return true
+	case GetScopedFileDiffParamsScopeWorkspace:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for GetScopedFileGitStatusParamsScope.
 const (
 	GetScopedFileGitStatusParamsScopeAgent     GetScopedFileGitStatusParamsScope = "agent"
@@ -887,6 +947,27 @@ func (e GetScopedFileGitStatusParamsScope) Valid() bool {
 	case GetScopedFileGitStatusParamsScopeRepo:
 		return true
 	case GetScopedFileGitStatusParamsScopeWorkspace:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for GetScopedFileHistoryParamsScope.
+const (
+	GetScopedFileHistoryParamsScopeAgent     GetScopedFileHistoryParamsScope = "agent"
+	GetScopedFileHistoryParamsScopeRepo      GetScopedFileHistoryParamsScope = "repo"
+	GetScopedFileHistoryParamsScopeWorkspace GetScopedFileHistoryParamsScope = "workspace"
+)
+
+// Valid indicates whether the value is a known member of the GetScopedFileHistoryParamsScope enum.
+func (e GetScopedFileHistoryParamsScope) Valid() bool {
+	switch e {
+	case GetScopedFileHistoryParamsScopeAgent:
+		return true
+	case GetScopedFileHistoryParamsScopeRepo:
+		return true
+	case GetScopedFileHistoryParamsScopeWorkspace:
 		return true
 	default:
 		return false
@@ -979,19 +1060,19 @@ func (e SearchScopedFilesParamsScope) Valid() bool {
 
 // Defines values for GetScopedFileTreeParamsScope.
 const (
-	Agent     GetScopedFileTreeParamsScope = "agent"
-	Repo      GetScopedFileTreeParamsScope = "repo"
-	Workspace GetScopedFileTreeParamsScope = "workspace"
+	GetScopedFileTreeParamsScopeAgent     GetScopedFileTreeParamsScope = "agent"
+	GetScopedFileTreeParamsScopeRepo      GetScopedFileTreeParamsScope = "repo"
+	GetScopedFileTreeParamsScopeWorkspace GetScopedFileTreeParamsScope = "workspace"
 )
 
 // Valid indicates whether the value is a known member of the GetScopedFileTreeParamsScope enum.
 func (e GetScopedFileTreeParamsScope) Valid() bool {
 	switch e {
-	case Agent:
+	case GetScopedFileTreeParamsScopeAgent:
 		return true
-	case Repo:
+	case GetScopedFileTreeParamsScopeRepo:
 		return true
-	case Workspace:
+	case GetScopedFileTreeParamsScopeWorkspace:
 		return true
 	default:
 		return false
@@ -1389,8 +1470,56 @@ type ErrorResponse struct {
 // ErrorResponseSuccess defines model for ErrorResponse.Success.
 type ErrorResponseSuccess bool
 
+// FileBlameLine defines model for FileBlameLine.
+type FileBlameLine struct {
+	Author  string `json:"author"`
+	Line    int    `json:"line"`
+	Lines   int    `json:"lines"`
+	Sha     string `json:"sha"`
+	Summary string `json:"summary"`
+	Time    string `json:"time"`
+}
+
+// FileBlameResponse defines model for FileBlameResponse.
+type FileBlameResponse struct {
+	Lines   []FileBlameLine `json:"lines"`
+	Message *string         `json:"message,omitempty"`
+	Path    string          `json:"path"`
+	Reason  *string         `json:"reason,omitempty"`
+	Skipped bool            `json:"skipped"`
+}
+
+// FileDiffResponse defines model for FileDiffResponse.
+type FileDiffResponse struct {
+	Patch string `json:"patch"`
+	Path  string `json:"path"`
+}
+
 // FileGitStatusResponse defines model for FileGitStatusResponse.
 type FileGitStatusResponse map[string]string
+
+// FileHistoryEntry defines model for FileHistoryEntry.
+type FileHistoryEntry struct {
+	Author    *string              `json:"author,omitempty"`
+	Binary    *bool                `json:"binary,omitempty"`
+	Content   *string              `json:"content,omitempty"`
+	Id        *string              `json:"id,omitempty"`
+	Kind      FileHistoryEntryKind `json:"kind"`
+	Sha       *string              `json:"sha,omitempty"`
+	Size      *int64               `json:"size,omitempty"`
+	Summary   string               `json:"summary"`
+	Time      string               `json:"time"`
+	Truncated *bool                `json:"truncated,omitempty"`
+}
+
+// FileHistoryEntryKind defines model for FileHistoryEntry.Kind.
+type FileHistoryEntryKind string
+
+// FileHistoryResponse defines model for FileHistoryResponse.
+type FileHistoryResponse struct {
+	Entries []FileHistoryEntry `json:"entries"`
+	Path    string             `json:"path"`
+}
 
 // FileIndexResponse defines model for FileIndexResponse.
 type FileIndexResponse struct {
@@ -2448,6 +2577,7 @@ type ReadScopedFileParams struct {
 	Scope  *ReadScopedFileParamsScope `form:"scope,omitempty" json:"scope,omitempty"`
 	Target *string                    `form:"target,omitempty" json:"target,omitempty"`
 	Path   string                     `form:"path" json:"path"`
+	Rev    *string                    `form:"rev,omitempty" json:"rev,omitempty"`
 }
 
 // ReadScopedFileParamsScope defines parameters for ReadScopedFile.
@@ -2463,6 +2593,28 @@ type WriteScopedFileParams struct {
 // WriteScopedFileParamsScope defines parameters for WriteScopedFile.
 type WriteScopedFileParamsScope string
 
+// GetScopedFileBlameParams defines parameters for GetScopedFileBlame.
+type GetScopedFileBlameParams struct {
+	Scope  *GetScopedFileBlameParamsScope `form:"scope,omitempty" json:"scope,omitempty"`
+	Target *string                        `form:"target,omitempty" json:"target,omitempty"`
+	Path   string                         `form:"path" json:"path"`
+}
+
+// GetScopedFileBlameParamsScope defines parameters for GetScopedFileBlame.
+type GetScopedFileBlameParamsScope string
+
+// GetScopedFileDiffParams defines parameters for GetScopedFileDiff.
+type GetScopedFileDiffParams struct {
+	Scope  *GetScopedFileDiffParamsScope `form:"scope,omitempty" json:"scope,omitempty"`
+	Target *string                       `form:"target,omitempty" json:"target,omitempty"`
+	Path   string                        `form:"path" json:"path"`
+	From   *string                       `form:"from,omitempty" json:"from,omitempty"`
+	To     *string                       `form:"to,omitempty" json:"to,omitempty"`
+}
+
+// GetScopedFileDiffParamsScope defines parameters for GetScopedFileDiff.
+type GetScopedFileDiffParamsScope string
+
 // GetScopedFileGitStatusParams defines parameters for GetScopedFileGitStatus.
 type GetScopedFileGitStatusParams struct {
 	Scope  *GetScopedFileGitStatusParamsScope `form:"scope,omitempty" json:"scope,omitempty"`
@@ -2471,6 +2623,16 @@ type GetScopedFileGitStatusParams struct {
 
 // GetScopedFileGitStatusParamsScope defines parameters for GetScopedFileGitStatus.
 type GetScopedFileGitStatusParamsScope string
+
+// GetScopedFileHistoryParams defines parameters for GetScopedFileHistory.
+type GetScopedFileHistoryParams struct {
+	Scope  *GetScopedFileHistoryParamsScope `form:"scope,omitempty" json:"scope,omitempty"`
+	Target *string                          `form:"target,omitempty" json:"target,omitempty"`
+	Path   string                           `form:"path" json:"path"`
+}
+
+// GetScopedFileHistoryParamsScope defines parameters for GetScopedFileHistory.
+type GetScopedFileHistoryParamsScope string
 
 // GetScopedFileIndexParams defines parameters for GetScopedFileIndex.
 type GetScopedFileIndexParams struct {

@@ -59,6 +59,46 @@ export interface FileSearchData {
 
 export type FileGitStatusData = Record<string, string>;
 
+export interface FileDiffData {
+  path: string;
+  patch: string;
+}
+
+export interface FileBlameLine {
+  line: number;
+  lines: number;
+  sha: string;
+  author: string;
+  time: string;
+  summary: string;
+}
+
+export interface FileBlameData {
+  path: string;
+  skipped: boolean;
+  reason?: string;
+  message?: string;
+  lines: FileBlameLine[];
+}
+
+export interface FileHistoryEntry {
+  kind: "commit" | "save";
+  id?: string;
+  sha?: string;
+  author?: string;
+  time: string;
+  summary: string;
+  content?: string;
+  size?: number;
+  binary?: boolean;
+  truncated?: boolean;
+}
+
+export interface FileHistoryData {
+  path: string;
+  entries: FileHistoryEntry[];
+}
+
 export type FileScope = "workspace" | "repo" | "agent";
 
 export interface FileScopeRef {
@@ -206,8 +246,11 @@ export async function readScopedFile(
   workspaceId: string,
   scopeRef: FileScopeRef,
   path: string,
+  rev?: string,
 ): Promise<FileReadData> {
-  return get<FileReadData>(scopedUrl(workspaceId, "/files", scopeRef, path));
+  return get<FileReadData>(
+    scopedUrl(workspaceId, "/files", scopeRef, path, rev ? { rev } : undefined),
+  );
 }
 
 /**
@@ -246,6 +289,50 @@ export async function gitStatusScoped(
 ): Promise<FileGitStatusData> {
   return get<FileGitStatusData>(
     scopedUrl(workspaceId, "/files/git-status", scopeRef),
+  );
+}
+
+/**
+ * Fetch a unified diff for a file in any scoped file browser root.
+ * GET /api/workspaces/{ws}/files/diff?scope=&target=&path=&from=&to=
+ */
+export async function diffScopedFile(
+  workspaceId: string,
+  scopeRef: FileScopeRef,
+  path: string,
+  from?: string,
+  to?: string,
+): Promise<FileDiffData> {
+  return get<FileDiffData>(
+    scopedUrl(workspaceId, "/files/diff", scopeRef, path, { from, to }),
+  );
+}
+
+/**
+ * Fetch bounded git blame data for a file in any scoped file browser root.
+ * GET /api/workspaces/{ws}/files/blame?scope=&target=&path=
+ */
+export async function blameScopedFile(
+  workspaceId: string,
+  scopeRef: FileScopeRef,
+  path: string,
+): Promise<FileBlameData> {
+  return get<FileBlameData>(
+    scopedUrl(workspaceId, "/files/blame", scopeRef, path),
+  );
+}
+
+/**
+ * Fetch commit and browser-save history for a file in any scoped root.
+ * GET /api/workspaces/{ws}/files/history?scope=&target=&path=
+ */
+export async function historyScopedFile(
+  workspaceId: string,
+  scopeRef: FileScopeRef,
+  path: string,
+): Promise<FileHistoryData> {
+  return get<FileHistoryData>(
+    scopedUrl(workspaceId, "/files/history", scopeRef, path),
   );
 }
 

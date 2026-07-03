@@ -7,8 +7,10 @@ import {
   Suspense,
 } from "react";
 import type { FileReadData } from "@/api/workspace";
+import type { FileBlameLine } from "@/api/workspace";
 import { detectLanguage } from "@/utils/detectLanguage";
 import type { FileSymbol, FileSymbolState } from "@/utils/lezerSymbols";
+import type { GitGutterLineMark } from "./gitGutter";
 import { SymbolPalette } from "./SymbolPalette";
 import styles from "./FileExplorer.module.css";
 
@@ -37,6 +39,13 @@ interface WorkspaceFilePaneProps {
   onNavigate?: ((dirPath: string) => void) | undefined;
   lineTarget?: { line: number; token: number } | undefined;
   onLineTargetApplied?: ((path: string, token: number) => void) | undefined;
+  gitGutterMarks?: GitGutterLineMark[] | undefined;
+  blameEnabled?: boolean | undefined;
+  blameLines?: FileBlameLine[] | undefined;
+  blameLoading?: boolean | undefined;
+  blameSkippedMessage?: string | undefined;
+  onToggleBlame?: (() => void) | undefined;
+  onOpenBlameCommit?: ((sha: string) => void) | undefined;
 }
 
 /** Clickable path breadcrumb; folder segments reveal that folder in the tree. */
@@ -125,6 +134,13 @@ export function WorkspaceFilePane({
   onNavigate,
   lineTarget,
   onLineTargetApplied,
+  gitGutterMarks,
+  blameEnabled,
+  blameLines,
+  blameLoading,
+  blameSkippedMessage,
+  onToggleBlame,
+  onOpenBlameCommit,
 }: WorkspaceFilePaneProps) {
   const language = useMemo(
     () => (path ? detectLanguage(path) : undefined),
@@ -205,6 +221,26 @@ export function WorkspaceFilePane({
           />
           <div className={styles.viewerActions}>
             {isDirty && <span className={styles.dirtyLabel}>Modified</span>}
+            <button
+              type="button"
+              className={styles.iconButton}
+              aria-label="Toggle blame"
+              title="Toggle blame"
+              aria-pressed={!!blameEnabled}
+              onClick={onToggleBlame}
+              disabled={!fileData || fileData.binary || !!fileData.truncated}
+            >
+              <svg viewBox="0 0 16 16" aria-hidden="true">
+                <path
+                  d="M4 3h8M4 8h5M4 13h8"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.4"
+                  strokeLinecap="round"
+                />
+                <circle cx="12" cy="8" r="1.5" fill="currentColor" />
+              </svg>
+            </button>
             <button
               type="button"
               className={styles.iconButton}
@@ -307,6 +343,16 @@ export function WorkspaceFilePane({
             File is larger than the editable limit. Showing a read-only preview.
           </div>
         )}
+        {path && blameEnabled && blameLoading && (
+          <div className={styles.limitBanner} role="status">
+            Loading blame...
+          </div>
+        )}
+        {path && blameEnabled && blameSkippedMessage && (
+          <div className={styles.limitBanner} role="status">
+            {blameSkippedMessage}
+          </div>
+        )}
         {path && fileData && !fileData.binary && (
           <Suspense
             fallback={<div className={styles.loading}>Loading editor...</div>}
@@ -321,6 +367,10 @@ export function WorkspaceFilePane({
               scrollToLineKey={editorLineTarget?.token}
               onScrollToLineApplied={handleLineTargetApplied}
               onSymbolsChange={handleSymbolsChange}
+              gitGutterMarks={gitGutterMarks}
+              blameEnabled={blameEnabled}
+              blameLines={blameLines}
+              onBlameCommitClick={onOpenBlameCommit}
             />
           </Suspense>
         )}

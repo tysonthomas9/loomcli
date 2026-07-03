@@ -158,8 +158,65 @@ func HandleScopedFileRead(svc service.FileService) http.HandlerFunc {
 		wsID := middleware.WorkspaceFromContext(r.Context())
 		scope, target := scopeFromQuery(r)
 		reqPath := r.URL.Query().Get("path")
+		rev := r.URL.Query().Get("rev")
 
-		result, err := svc.ReadFileScoped(r.Context(), wsID, scope, target, reqPath)
+		var result *service.FileReadResult
+		var err error
+		if strings.TrimSpace(rev) != "" {
+			result, err = svc.ReadFileAtRevScoped(r.Context(), wsID, scope, target, reqPath, rev)
+		} else {
+			result, err = svc.ReadFileScoped(r.Context(), wsID, scope, target, reqPath)
+		}
+		if err != nil {
+			handler.HandleServiceError(w, err)
+			return
+		}
+		handler.WriteJSON(w, http.StatusOK, result)
+	}
+}
+
+// HandleScopedFileDiff handles GET /api/workspaces/{ws}/files/diff?scope=&target=&path=&from=&to=.
+func HandleScopedFileDiff(svc service.FileService) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		wsID := middleware.WorkspaceFromContext(r.Context())
+		scope, target := scopeFromQuery(r)
+		reqPath := r.URL.Query().Get("path")
+		from := r.URL.Query().Get("from")
+		to := r.URL.Query().Get("to")
+
+		result, err := svc.DiffFileScoped(r.Context(), wsID, scope, target, reqPath, from, to)
+		if err != nil {
+			handler.HandleServiceError(w, err)
+			return
+		}
+		handler.WriteJSON(w, http.StatusOK, result)
+	}
+}
+
+// HandleScopedFileHistory handles GET /api/workspaces/{ws}/files/history?scope=&target=&path=.
+func HandleScopedFileHistory(svc service.FileService) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		wsID := middleware.WorkspaceFromContext(r.Context())
+		scope, target := scopeFromQuery(r)
+		reqPath := r.URL.Query().Get("path")
+
+		result, err := svc.HistoryFileScoped(r.Context(), wsID, scope, target, reqPath)
+		if err != nil {
+			handler.HandleServiceError(w, err)
+			return
+		}
+		handler.WriteJSON(w, http.StatusOK, result)
+	}
+}
+
+// HandleScopedFileBlame handles GET /api/workspaces/{ws}/files/blame?scope=&target=&path=.
+func HandleScopedFileBlame(svc service.FileService) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		wsID := middleware.WorkspaceFromContext(r.Context())
+		scope, target := scopeFromQuery(r)
+		reqPath := r.URL.Query().Get("path")
+
+		result, err := svc.BlameFileScoped(r.Context(), wsID, scope, target, reqPath)
 		if err != nil {
 			handler.HandleServiceError(w, err)
 			return

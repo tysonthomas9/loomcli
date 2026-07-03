@@ -1910,6 +1910,9 @@ func TestFlatAgentRoutesRemoved(t *testing.T) {
 		{http.MethodGet, "/api/workspaces/test-ws/agents/alice/files"},
 		{http.MethodPut, "/api/workspaces/test-ws/agents/alice/files"},
 		{http.MethodGet, "/api/workspaces/test-ws/files/git-status"},
+		{http.MethodGet, "/api/workspaces/test-ws/files/diff"},
+		{http.MethodGet, "/api/workspaces/test-ws/files/history"},
+		{http.MethodGet, "/api/workspaces/test-ws/files/blame"},
 	}
 
 	for _, tc := range scopedRoutes {

@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -21,6 +22,7 @@ type scopedMockFileOps struct {
 	wsRoot    string
 	repoRoot  string
 	agentRoot string
+	dataDir   string
 	wsErr     error
 }
 
@@ -62,6 +64,59 @@ func (m scopedMockFileOps) GitStatusPorcelain(worktreePath string) (map[string]s
 		return nil, err
 	}
 	return parseTestPorcelainStatus(string(out)), nil
+}
+
+func (m scopedMockFileOps) GitShowFileAtRev(worktreePath, rev, path string, maxBytes int64) (*ops.GitFileContentAtRev, error) {
+	spec := rev + ":" + path
+	sizeOut, err := exec.Command("git", "-C", worktreePath, "cat-file", "-s", spec).Output() //nolint:norawexec // Test mock runs fixed git command.
+	if err != nil {
+		return nil, err
+	}
+	size, err := strconv.ParseInt(strings.TrimSpace(string(sizeOut)), 10, 64)
+	if err != nil {
+		return nil, err
+	}
+	out, err := exec.Command("git", "-C", worktreePath, "show", spec).Output() //nolint:norawexec // Test mock runs fixed git command.
+	if err != nil {
+		return nil, err
+	}
+	truncated := int64(len(out)) > maxBytes
+	if truncated {
+		out = out[:maxBytes]
+	}
+	return &ops.GitFileContentAtRev{Content: out, Size: size, Truncated: truncated}, nil
+}
+
+func (m scopedMockFileOps) GitDiffFile(worktreePath, path, from, to string) (string, error) {
+	if from == "" {
+		from = "HEAD"
+	}
+	args := []string{"-C", worktreePath, "diff"}
+	if to != "" {
+		args = append(args, from+".."+to)
+	} else {
+		args = append(args, from)
+	}
+	args = append(args, "--", path)
+	out, err := exec.Command("git", args...).CombinedOutput() //nolint:norawexec // Test mock runs fixed git command.
+	return string(out), err
+}
+
+func (m scopedMockFileOps) GitLogFile(worktreePath, path string, limit int) (string, error) {
+	out, err := exec.Command("git", "-C", worktreePath, "log", "--follow", "-n", strconv.Itoa(limit), "--format=%H%x1f%an%x1f%at%x1f%s%x1e", "--", path).CombinedOutput() //nolint:norawexec // Test mock runs fixed git command.
+	return string(out), err
+}
+
+func (m scopedMockFileOps) GitBlamePorcelain(worktreePath, path string) (string, error) {
+	out, err := exec.Command("git", "-C", worktreePath, "blame", "--porcelain", "--", path).CombinedOutput() //nolint:norawexec // Test mock runs fixed git command.
+	return string(out), err
+}
+
+func (m scopedMockFileOps) ResolveLoomDataDir() (string, error) {
+	if m.dataDir != "" {
+		return m.dataDir, nil
+	}
+	return os.TempDir(), nil
 }
 
 func parseTestPorcelainStatus(output string) map[string]string {
@@ -115,6 +170,7 @@ func setupScopedService(t *testing.T) (service.FileService, []scopedCase) {
 		wsRoot:    wsRoot,
 		repoRoot:  repoRoot,
 		agentRoot: agentRoot,
+		dataDir:   t.TempDir(),
 	})
 	return svc, []scopedCase{
 		{name: "workspace", scope: service.ScopeWorkspace, root: wsRoot},
@@ -140,6 +196,17 @@ func mustGit(t *testing.T, dir string, args ...string) {
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("git %v failed: %v\n%s", args, err, out)
 	}
+}
+
+func gitOutput(t *testing.T, dir string, args ...string) string {
+	t.Helper()
+	cmd := exec.Command("git", args...) //nolint:norawexec // Test helper uses fixed git commands in temp repos.
+	cmd.Dir = dir
+	out, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("git %v output failed: %v", args, err)
+	}
+	return string(out)
 }
 
 func initGitRepo(t *testing.T, dir string) {
@@ -442,6 +509,192 @@ func TestFileServiceImpl_PhaseA_InvalidTargetsRejected(t *testing.T) {
 	wantKind(t, err, service.KindNotFound)
 	_, err = svc.ListDirectoryScoped(ctx, "ws", service.ScopeAgent, "missing-agent", "")
 	wantKind(t, err, service.KindNotFound)
+}
+
+func TestResolveScopedContainingCheckout(t *testing.T) {
+	svc, scopes := setupScopedService(t)
+	impl := svc.(*fileServiceImpl)
+	for _, sc := range scopes {
+		initGitRepo(t, sc.root)
+		mustWrite(t, filepath.Join(sc.root, "src", "file.txt"), "body")
+		commitAll(t, sc.root)
+	}
+
+	ctx := context.Background()
+	_ = ctx
+	for _, sc := range scopes {
+		t.Run(sc.name, func(t *testing.T) {
+			_, cleanPath, checkout, err := impl.resolveScopedContainingCheckout("ws", sc.scope, sc.target, "src/file.txt")
+			if err != nil {
+				t.Fatalf("resolveScopedContainingCheckout: %v", err)
+			}
+			if cleanPath != "src/file.txt" {
+				t.Fatalf("cleanPath = %q", cleanPath)
+			}
+			if checkout.root != sc.root {
+				t.Fatalf("checkout root = %q, want %q", checkout.root, sc.root)
+			}
+			if checkout.relPath != "src/file.txt" {
+				t.Fatalf("checkout relPath = %q", checkout.relPath)
+			}
+		})
+	}
+
+	_, _, _, err := impl.resolveScopedContainingCheckout("ws", service.ScopeWorkspace, "", "../outside.txt")
+	wantKind(t, err, service.KindForbidden)
+}
+
+func TestFileServiceImpl_ReadFileAtRevScoped(t *testing.T) {
+	svc, scopes := setupScopedService(t)
+	repo := scopes[1]
+	initGitRepo(t, repo.root)
+	mustWrite(t, filepath.Join(repo.root, "file.txt"), "committed\n")
+	commitAll(t, repo.root)
+	mustWrite(t, filepath.Join(repo.root, "file.txt"), "working\n")
+
+	res, err := svc.ReadFileAtRevScoped(context.Background(), "ws", repo.scope, repo.target, "file.txt", "HEAD")
+	if err != nil {
+		t.Fatalf("ReadFileAtRevScoped: %v", err)
+	}
+	if res.Content != "committed\n" {
+		t.Fatalf("content = %q, want committed", res.Content)
+	}
+
+	large := strings.Repeat("A", maxRequestBody+25)
+	mustWrite(t, filepath.Join(repo.root, "large.txt"), large)
+	mustGit(t, repo.root, "add", "large.txt")
+	mustGit(t, repo.root, "commit", "-m", "large")
+	res, err = svc.ReadFileAtRevScoped(context.Background(), "ws", repo.scope, repo.target, "large.txt", "HEAD")
+	if err != nil {
+		t.Fatalf("ReadFileAtRevScoped large: %v", err)
+	}
+	if !res.Truncated {
+		t.Fatalf("large truncated = false")
+	}
+	if len(res.Content) != maxRequestBody {
+		t.Fatalf("large content len = %d, want %d", len(res.Content), maxRequestBody)
+	}
+}
+
+func TestFileServiceImpl_DiffFileScoped(t *testing.T) {
+	svc, scopes := setupScopedService(t)
+	repo := scopes[1]
+	initGitRepo(t, repo.root)
+	mustWrite(t, filepath.Join(repo.root, "file.txt"), "one\n")
+	commitAll(t, repo.root)
+	mustWrite(t, filepath.Join(repo.root, "file.txt"), "two\n")
+
+	res, err := svc.DiffFileScoped(context.Background(), "ws", repo.scope, repo.target, "file.txt", "HEAD", "")
+	if err != nil {
+		t.Fatalf("DiffFileScoped working: %v", err)
+	}
+	if !strings.Contains(res.Patch, "-one") || !strings.Contains(res.Patch, "+two") {
+		t.Fatalf("working diff missing expected lines:\n%s", res.Patch)
+	}
+
+	mustGit(t, repo.root, "add", "file.txt")
+	mustGit(t, repo.root, "commit", "-m", "second")
+	first := strings.TrimSpace(gitOutput(t, repo.root, "rev-parse", "HEAD^"))
+	second := strings.TrimSpace(gitOutput(t, repo.root, "rev-parse", "HEAD"))
+	res, err = svc.DiffFileScoped(context.Background(), "ws", repo.scope, repo.target, "file.txt", first, second)
+	if err != nil {
+		t.Fatalf("DiffFileScoped rev..rev: %v", err)
+	}
+	if !strings.Contains(res.Patch, "-one") || !strings.Contains(res.Patch, "+two") {
+		t.Fatalf("rev diff missing expected lines:\n%s", res.Patch)
+	}
+}
+
+func TestFileServiceImpl_BlameFileScoped(t *testing.T) {
+	svc, scopes := setupScopedService(t)
+	repo := scopes[1]
+	initGitRepo(t, repo.root)
+	mustWrite(t, filepath.Join(repo.root, "file.txt"), "one\ntwo\n")
+	commitAll(t, repo.root)
+
+	res, err := svc.BlameFileScoped(context.Background(), "ws", repo.scope, repo.target, "file.txt")
+	if err != nil {
+		t.Fatalf("BlameFileScoped: %v", err)
+	}
+	if res.Skipped || len(res.Lines) == 0 {
+		t.Fatalf("blame skipped=%v lines=%+v", res.Skipped, res.Lines)
+	}
+	if res.Lines[0].Author != "Test User" || res.Lines[0].Summary != "init" {
+		t.Fatalf("unexpected blame line: %+v", res.Lines[0])
+	}
+
+	mustWrite(t, filepath.Join(repo.root, "too-large.txt"), strings.Repeat("A", maxRequestBody+1))
+	res, err = svc.BlameFileScoped(context.Background(), "ws", repo.scope, repo.target, "too-large.txt")
+	if err != nil {
+		t.Fatalf("BlameFileScoped large: %v", err)
+	}
+	if !res.Skipped || res.Reason != "too_large" {
+		t.Fatalf("large blame = %+v, want too_large skip", res)
+	}
+}
+
+func TestFileServiceImpl_HistoryMergesCommitsAndBrowserSaves(t *testing.T) {
+	svc, scopes := setupScopedService(t)
+	repo := scopes[1]
+	initGitRepo(t, repo.root)
+	mustWrite(t, filepath.Join(repo.root, "file.txt"), "committed\n")
+	commitAll(t, repo.root)
+
+	if err := svc.WriteFileScoped(context.Background(), "ws", repo.scope, repo.target, "file.txt", "browser save\n"); err != nil {
+		t.Fatalf("WriteFileScoped overwrite: %v", err)
+	}
+	history, err := svc.HistoryFileScoped(context.Background(), "ws", repo.scope, repo.target, "file.txt")
+	if err != nil {
+		t.Fatalf("HistoryFileScoped: %v", err)
+	}
+	var sawCommit, sawSave bool
+	for _, entry := range history.Entries {
+		if entry.Kind == "commit" && entry.Summary == "init" {
+			sawCommit = true
+		}
+		if entry.Kind == "save" && entry.Content == "committed\n" {
+			sawSave = true
+		}
+	}
+	if !sawCommit || !sawSave {
+		t.Fatalf("history entries = %+v, want commit and browser save", history.Entries)
+	}
+}
+
+func TestFileServiceImpl_SaveHistorySnapshotRules(t *testing.T) {
+	svc, scopes := setupScopedService(t)
+	impl := svc.(*fileServiceImpl)
+	repo := scopes[1]
+
+	if err := svc.WriteFileScoped(context.Background(), "ws", repo.scope, repo.target, "file.txt", "0"); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	entries, err := impl.loadSaveHistory("ws", repo.scope, repo.target, "file.txt")
+	if err != nil {
+		t.Fatalf("loadSaveHistory after create: %v", err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("create recorded save history: %+v", entries)
+	}
+
+	for i := 1; i <= fileHistorySaveLimit+5; i++ {
+		if err := svc.WriteFileScoped(context.Background(), "ws", repo.scope, repo.target, "file.txt", strconv.Itoa(i)); err != nil {
+			t.Fatalf("overwrite %d: %v", i, err)
+		}
+	}
+	entries, err = impl.loadSaveHistory("ws", repo.scope, repo.target, "file.txt")
+	if err != nil {
+		t.Fatalf("loadSaveHistory: %v", err)
+	}
+	saves := entries
+	if len(saves) != fileHistorySaveLimit {
+		t.Fatalf("save count = %d, want %d: %+v", len(saves), fileHistorySaveLimit, saves)
+	}
+	for _, entry := range saves {
+		if entry.Content == "0" || entry.Content == "1" || entry.Content == "2" || entry.Content == "3" || entry.Content == "4" {
+			t.Fatalf("old snapshot was not evicted: %+v", saves)
+		}
+	}
 }
 
 func TestFileServiceImpl_IndexFilesScoped_DefaultExcludesSymlinksAndTruncates(t *testing.T) {

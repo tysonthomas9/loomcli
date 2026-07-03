@@ -135,6 +135,110 @@
   font-size: var(--font-size-sm);
 }
 
+.timelineList,
+.scmList {
+  max-height: 220px;
+  overflow: auto;
+  padding: 0 0 var(--space-1);
+}
+
+.timelineItem {
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr);
+  grid-template-areas:
+    "kind summary"
+    "kind meta";
+  gap: 1px var(--space-2);
+  width: 100%;
+  padding: 6px var(--space-3);
+  border: none;
+  background: none;
+  color: var(--color-text-secondary);
+  text-align: left;
+  cursor: pointer;
+}
+
+.timelineItem:hover,
+.timelineItem:focus-visible,
+.scmItem:hover,
+.scmItem:focus-visible {
+  background: var(--color-bg-hover);
+  color: var(--color-text-primary);
+}
+
+.timelineKind {
+  grid-area: kind;
+  align-self: center;
+  color: var(--color-text-muted);
+  font-size: var(--font-size-xs, 11px);
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.timelineSummary {
+  grid-area: summary;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--color-text-primary);
+  font-size: var(--font-size-sm);
+}
+
+.timelineMeta {
+  grid-area: meta;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--color-text-muted);
+  font-size: var(--font-size-xs, 11px);
+}
+
+.timelineError {
+  padding: var(--space-2) var(--space-3);
+  color: var(--color-danger);
+  font-size: var(--font-size-sm);
+}
+
+.scmGroup {
+  padding: 0 0 var(--space-1);
+}
+
+.scmSectionLabel {
+  padding: 4px var(--space-3) 2px;
+  color: var(--color-text-muted);
+  font-size: var(--font-size-xs, 11px);
+  font-weight: 600;
+}
+
+.scmItem {
+  display: grid;
+  grid-template-columns: 30px minmax(0, 1fr);
+  gap: var(--space-2);
+  width: 100%;
+  padding: 4px var(--space-3);
+  border: none;
+  background: none;
+  color: var(--color-text-secondary);
+  font-family: var(--font-family-mono);
+  font-size: var(--font-size-sm);
+  text-align: left;
+  cursor: pointer;
+}
+
+.scmStatus {
+  color: var(--color-text-muted);
+  font-size: var(--font-size-xs, 11px);
+}
+
+.scmPath {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .agentSelect {
   width: 100%;
   padding: 6px var(--space-2);
@@ -738,6 +842,38 @@
   overflow: hidden;
   display: flex;
   flex-direction: column;
+}
+
+.diffTitle {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.diffTitlePath,
+.diffTitleMeta {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.diffTitlePath {
+  color: var(--color-text-primary);
+  font-family: var(--font-family-mono);
+  font-size: var(--font-size-sm);
+}
+
+.diffTitleMeta {
+  color: var(--color-text-muted);
+  font-size: var(--font-size-xs, 11px);
+}
+
+.diffEditorBody {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
 }
 
 /* === Shared states === */

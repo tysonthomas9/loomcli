@@ -110,6 +110,9 @@ func (s *stubFileService) ListDirectoryScoped(_ context.Context, _ string, _ ser
 func (s *stubFileService) ReadFileScoped(_ context.Context, _ string, _ service.FileScope, _, _ string) (*service.FileReadResult, error) {
 	return &service.FileReadResult{}, nil
 }
+func (s *stubFileService) ReadFileAtRevScoped(_ context.Context, _ string, _ service.FileScope, _, _, _ string) (*service.FileReadResult, error) {
+	return &service.FileReadResult{}, nil
+}
 func (s *stubFileService) IndexFilesScoped(_ context.Context, _ string, _ service.FileScope, _ string) (*service.FileIndexResult, error) {
 	return &service.FileIndexResult{}, nil
 }
@@ -118,6 +121,15 @@ func (s *stubFileService) SearchFilesScoped(_ context.Context, _ string, _ servi
 }
 func (s *stubFileService) GitStatusScoped(_ context.Context, _ string, _ service.FileScope, _ string) (service.FileGitStatusResult, error) {
 	return service.FileGitStatusResult{}, nil
+}
+func (s *stubFileService) DiffFileScoped(_ context.Context, _ string, _ service.FileScope, _, _, _, _ string) (*service.FileDiffResult, error) {
+	return &service.FileDiffResult{}, nil
+}
+func (s *stubFileService) BlameFileScoped(_ context.Context, _ string, _ service.FileScope, _, _ string) (*service.FileBlameResult, error) {
+	return &service.FileBlameResult{}, nil
+}
+func (s *stubFileService) HistoryFileScoped(_ context.Context, _ string, _ service.FileScope, _, _ string) (*service.FileHistoryResult, error) {
+	return &service.FileHistoryResult{}, nil
 }
 func (s *stubFileService) WriteFileScoped(_ context.Context, _ string, _ service.FileScope, _, _, _ string) error {
 	return nil

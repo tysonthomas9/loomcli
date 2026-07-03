@@ -40,4 +40,29 @@ type FileOps interface {
 	// checkout-relative path. It is read-only decoration data for file-browser
 	// status and conflict badges.
 	GitStatusPorcelain(worktreePath string) (map[string]string, error)
+
+	// GitShowFileAtRev returns file content from a git revision, capped to
+	// maxBytes, keyed by checkout-relative path.
+	GitShowFileAtRev(worktreePath, rev, path string, maxBytes int64) (*GitFileContentAtRev, error)
+
+	// GitDiffFile returns a unified diff for one checkout-relative file path.
+	// When to is empty, the diff compares from against the working tree.
+	GitDiffFile(worktreePath, path, from, to string) (string, error)
+
+	// GitLogFile returns bounded git log output for one checkout-relative file path.
+	GitLogFile(worktreePath, path string, limit int) (string, error)
+
+	// GitBlamePorcelain returns git blame --porcelain output for one file path.
+	GitBlamePorcelain(worktreePath, path string) (string, error)
+
+	// ResolveLoomDataDir resolves the local loom data/config directory using
+	// the established CLI resolver instead of callers reading env directly.
+	ResolveLoomDataDir() (string, error)
+}
+
+// GitFileContentAtRev contains bounded content returned from a git revision.
+type GitFileContentAtRev struct {
+	Content   []byte
+	Size      int64
+	Truncated bool
 }

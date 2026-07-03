@@ -276,6 +276,9 @@ func (s *fileServiceImpl) WriteFileScoped(_ context.Context, wsID string, scope 
 	if err != nil {
 		return err
 	}
+	if err := s.snapshotBeforeOverwrite(wsID, scope, target, root, path); err != nil {
+		return err
+	}
 	if err := writeFileAt(root, path, content); err != nil {
 		return err
 	}

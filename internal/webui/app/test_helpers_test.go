@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"errors"
+	"os"
 	"testing"
 	"time"
 
@@ -205,6 +206,26 @@ func (m *mockFileOps) ResolveWorkspaceData(_ string) (*ops.WorkspaceData, error)
 
 func (m *mockFileOps) GitStatusPorcelain(worktreePath string) (map[string]string, error) {
 	return map[string]string{}, nil
+}
+
+func (m *mockFileOps) GitShowFileAtRev(worktreePath, rev, path string, maxBytes int64) (*ops.GitFileContentAtRev, error) {
+	return &ops.GitFileContentAtRev{Content: []byte(""), Size: 0}, nil
+}
+
+func (m *mockFileOps) GitDiffFile(worktreePath, path, from, to string) (string, error) {
+	return "", nil
+}
+
+func (m *mockFileOps) GitLogFile(worktreePath, path string, limit int) (string, error) {
+	return "", nil
+}
+
+func (m *mockFileOps) GitBlamePorcelain(worktreePath, path string) (string, error) {
+	return "", nil
+}
+
+func (m *mockFileOps) ResolveLoomDataDir() (string, error) {
+	return os.TempDir(), nil
 }
 
 // mockGitOps implements ops.GitOps for testing in the root package.

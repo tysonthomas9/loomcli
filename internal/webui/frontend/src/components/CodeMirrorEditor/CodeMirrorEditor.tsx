@@ -1,10 +1,22 @@
 import { useCallback, useEffect, useRef } from "react";
-import { type Extension, EditorState, Compartment } from "@codemirror/state";
+import {
+  type Extension,
+  EditorState,
+  Compartment,
+  RangeSetBuilder,
+} from "@codemirror/state";
 import {
   EditorView,
   keymap,
   placeholder as placeholderExt,
   lineNumbers,
+  gutter,
+  GutterMarker,
+  Decoration,
+  ViewPlugin,
+  WidgetType,
+  type DecorationSet,
+  type ViewUpdate,
 } from "@codemirror/view";
 import { defaultKeymap, history, historyKeymap } from "@codemirror/commands";
 import {
@@ -101,8 +113,208 @@ export interface CodeMirrorEditorProps {
   onScrollToLineApplied?: (() => void) | undefined;
   /** Emits in-file lezer symbols and the cursor-position symbol trail. */
   onSymbolsChange?: ((state: FileSymbolState) => void) | undefined;
+  /** Quick-diff gutter marks against the visible editor's base revision. */
+  gitGutterMarks?: GitGutterLineMark[] | undefined;
+  /** Parsed git blame blocks used for active-line inline annotation. */
+  blameLines?: CodeMirrorBlameLine[] | undefined;
+  /** Enables active-line blame annotation. */
+  blameEnabled?: boolean | undefined;
+  /** Called when a blame annotation is clicked. */
+  onBlameCommitClick?: ((sha: string) => void) | undefined;
   /** Additional CSS class for the container */
   className?: string | undefined;
+}
+
+export type GitGutterMarkKind = "added" | "changed" | "deleted";
+
+export interface GitGutterLineMark {
+  line: number;
+  kind: GitGutterMarkKind;
+}
+
+export interface CodeMirrorBlameLine {
+  line: number;
+  lines: number;
+  sha: string;
+  author: string;
+  time: string;
+  summary: string;
+}
+
+class GitDiffMarker extends GutterMarker {
+  elementClass: string;
+
+  constructor(readonly kind: GitGutterMarkKind) {
+    super();
+    this.elementClass = `cm-git-gutter-line cm-git-gutter-line-${kind}`;
+  }
+
+  eq(other: GutterMarker): boolean {
+    return other instanceof GitDiffMarker && other.kind === this.kind;
+  }
+
+  toDOM(): Node {
+    const el = document.createElement("span");
+    el.className = `cm-git-gutter-dot cm-git-gutter-dot-${this.kind}`;
+    el.title =
+      this.kind === "added"
+        ? "Added"
+        : this.kind === "deleted"
+          ? "Deleted"
+          : "Changed";
+    return el;
+  }
+}
+
+const gitDiffMarkers: Record<GitGutterMarkKind, GitDiffMarker> = {
+  added: new GitDiffMarker("added"),
+  changed: new GitDiffMarker("changed"),
+  deleted: new GitDiffMarker("deleted"),
+};
+
+function gitGutterExtension(marks: GitGutterLineMark[] | undefined): Extension {
+  if (!marks || marks.length === 0) return [];
+  const byLine = new Map<number, GitGutterMarkKind>();
+  for (const mark of marks) {
+    if (mark.line > 0) byLine.set(mark.line, mark.kind);
+  }
+  return [
+    gutter({
+      class: "cm-git-gutter",
+      renderEmptyElements: false,
+      lineMarker: (view, line) => {
+        const lineNo = view.state.doc.lineAt(line.from).number;
+        const kind = byLine.get(lineNo);
+        return kind ? gitDiffMarkers[kind] : null;
+      },
+      lineMarkerChange: () => true,
+    }),
+    EditorView.baseTheme({
+      ".cm-git-gutter": {
+        width: "6px",
+      },
+      ".cm-git-gutter-dot": {
+        display: "block",
+        width: "3px",
+        height: "14px",
+        margin: "0 auto",
+        borderRadius: "2px",
+      },
+      ".cm-git-gutter-dot-added": {
+        backgroundColor: "#2f855a",
+      },
+      ".cm-git-gutter-dot-changed": {
+        backgroundColor: "#b7791f",
+      },
+      ".cm-git-gutter-dot-deleted": {
+        backgroundColor: "var(--color-danger)",
+      },
+    }),
+  ];
+}
+
+function blameForLine(
+  blameLines: CodeMirrorBlameLine[],
+  line: number,
+): CodeMirrorBlameLine | null {
+  return (
+    blameLines.find((entry) => {
+      const end = entry.line + Math.max(1, entry.lines) - 1;
+      return line >= entry.line && line <= end;
+    }) ?? null
+  );
+}
+
+class BlameWidget extends WidgetType {
+  constructor(
+    readonly entry: CodeMirrorBlameLine,
+    readonly onClick?: ((sha: string) => void) | undefined,
+  ) {
+    super();
+  }
+
+  eq(other: WidgetType): boolean {
+    return other instanceof BlameWidget && other.entry.sha === this.entry.sha;
+  }
+
+  toDOM(): HTMLElement {
+    const el = document.createElement("button");
+    el.type = "button";
+    el.className = "cm-blame-inline";
+    el.textContent = `${this.entry.author || "Unknown"} · ${this.entry.summary || this.entry.sha.slice(0, 8)}`;
+    el.title = `${this.entry.sha}\n${this.entry.author}\n${this.entry.time}\n${this.entry.summary}`;
+    el.onclick = (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      this.onClick?.(this.entry.sha);
+    };
+    return el;
+  }
+}
+
+function blameExtension(
+  enabled: boolean | undefined,
+  blameLines: CodeMirrorBlameLine[] | undefined,
+  onClick: ((sha: string) => void) | undefined,
+): Extension {
+  if (!enabled || !blameLines || blameLines.length === 0) return [];
+  const plugin = ViewPlugin.fromClass(
+    class {
+      decorations: DecorationSet;
+
+      constructor(view: EditorView) {
+        this.decorations = this.build(view);
+      }
+
+      update(update: ViewUpdate): void {
+        if (
+          update.docChanged ||
+          update.selectionSet ||
+          update.viewportChanged
+        ) {
+          this.decorations = this.build(update.view);
+        }
+      }
+
+      build(view: EditorView): DecorationSet {
+        const line = view.state.doc.lineAt(view.state.selection.main.head);
+        const entry = blameForLine(blameLines, line.number);
+        if (!entry) return Decoration.none;
+        const builder = new RangeSetBuilder<Decoration>();
+        builder.add(
+          line.to,
+          line.to,
+          Decoration.widget({
+            widget: new BlameWidget(entry, onClick),
+            side: 1,
+          }),
+        );
+        return builder.finish();
+      }
+    },
+    {
+      decorations: (value) => value.decorations,
+    },
+  );
+  return [
+    plugin,
+    EditorView.baseTheme({
+      ".cm-blame-inline": {
+        marginLeft: "18px",
+        border: "none",
+        background: "transparent",
+        color: "var(--color-text-muted)",
+        font: "inherit",
+        fontSize: "var(--font-size-xs, 11px)",
+        cursor: "pointer",
+        opacity: "0.82",
+      },
+      ".cm-blame-inline:hover": {
+        color: "var(--color-text-primary)",
+        textDecoration: "underline",
+      },
+    }),
+  ];
 }
 
 function getLanguageExtension(lang?: string): Extension {
@@ -176,6 +388,10 @@ export function CodeMirrorEditor({
   scrollToLineKey,
   onScrollToLineApplied,
   onSymbolsChange,
+  gitGutterMarks,
+  blameLines,
+  blameEnabled,
+  onBlameCommitClick,
   className,
 }: CodeMirrorEditorProps): JSX.Element {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -183,6 +399,8 @@ export function CodeMirrorEditor({
   const langCompartmentRef = useRef(new Compartment());
   const readOnlyCompartmentRef = useRef(new Compartment());
   const lineNumbersCompartmentRef = useRef(new Compartment());
+  const gitGutterCompartmentRef = useRef(new Compartment());
+  const blameCompartmentRef = useRef(new Compartment());
   const langLoadTokenRef = useRef(0);
   const languageRef = useRef(language);
 
@@ -219,6 +437,10 @@ export function CodeMirrorEditor({
       doc: value,
       extensions: [
         lineNumbersCompartment.of(hideLineNumbers ? [] : lineNumbers()),
+        gitGutterCompartmentRef.current.of(gitGutterExtension(gitGutterMarks)),
+        blameCompartmentRef.current.of(
+          blameExtension(blameEnabled, blameLines, onBlameCommitClick),
+        ),
         history(),
         search(),
         keymap.of([
@@ -357,6 +579,26 @@ export function CodeMirrorEditor({
       ),
     });
   }, [hideLineNumbers]);
+
+  useEffect(() => {
+    const view = viewRef.current;
+    if (!view) return;
+    view.dispatch({
+      effects: gitGutterCompartmentRef.current.reconfigure(
+        gitGutterExtension(gitGutterMarks),
+      ),
+    });
+  }, [gitGutterMarks]);
+
+  useEffect(() => {
+    const view = viewRef.current;
+    if (!view) return;
+    view.dispatch({
+      effects: blameCompartmentRef.current.reconfigure(
+        blameExtension(blameEnabled, blameLines, onBlameCommitClick),
+      ),
+    });
+  }, [blameEnabled, blameLines, onBlameCommitClick]);
 
   // Open/close search panel from prop
   useEffect(() => {

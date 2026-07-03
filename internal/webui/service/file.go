@@ -45,6 +45,10 @@ type FileService interface {
 	// metadata only.
 	ReadFileScoped(ctx context.Context, wsID string, scope FileScope, target, path string) (*FileReadResult, error)
 
+	// ReadFileAtRevScoped reads a file from a git revision in the containing
+	// checkout. Binary files return metadata only.
+	ReadFileAtRevScoped(ctx context.Context, wsID string, scope FileScope, target, path, rev string) (*FileReadResult, error)
+
 	// IndexFilesScoped returns root-relative file paths under a scope root for
 	// quick-open navigation. Results are capped and report Truncated when clipped.
 	IndexFilesScoped(ctx context.Context, wsID string, scope FileScope, target string) (*FileIndexResult, error)
@@ -56,6 +60,15 @@ type FileService interface {
 	// GitStatusScoped returns root-relative paths mapped to raw two-character
 	// git status --porcelain XY codes for decoration-only file browser status.
 	GitStatusScoped(ctx context.Context, wsID string, scope FileScope, target string) (FileGitStatusResult, error)
+
+	// DiffFileScoped returns a unified diff for one file in the containing checkout.
+	DiffFileScoped(ctx context.Context, wsID string, scope FileScope, target, path, from, to string) (*FileDiffResult, error)
+
+	// BlameFileScoped returns parsed git blame line blocks or a bounded skip signal.
+	BlameFileScoped(ctx context.Context, wsID string, scope FileScope, target, path string) (*FileBlameResult, error)
+
+	// HistoryFileScoped returns commit and browser-save timeline entries for a file.
+	HistoryFileScoped(ctx context.Context, wsID string, scope FileScope, target, path string) (*FileHistoryResult, error)
 
 	// WriteFileScoped creates or updates a file under a scope root.
 	WriteFileScoped(ctx context.Context, wsID string, scope FileScope, target, path, content string) error
@@ -130,6 +143,51 @@ type FileSearchMatch struct {
 // FileGitStatusResult maps root-relative file paths to raw two-character git
 // status --porcelain XY codes.
 type FileGitStatusResult map[string]string
+
+// FileDiffResult contains a unified diff patch for one file.
+type FileDiffResult struct {
+	Path  string `json:"path"`
+	Patch string `json:"patch"`
+}
+
+// FileBlameLine describes a contiguous line block from git blame --porcelain.
+type FileBlameLine struct {
+	Line    int    `json:"line"`
+	Lines   int    `json:"lines"`
+	SHA     string `json:"sha"`
+	Author  string `json:"author"`
+	Time    string `json:"time"`
+	Summary string `json:"summary"`
+}
+
+// FileBlameResult contains parsed blame data or a bounded skip signal.
+type FileBlameResult struct {
+	Path    string          `json:"path"`
+	Skipped bool            `json:"skipped"`
+	Reason  string          `json:"reason,omitempty"`
+	Message string          `json:"message,omitempty"`
+	Lines   []FileBlameLine `json:"lines"`
+}
+
+// FileHistoryEntry is one Timeline item, kind-tagged as commit or save.
+type FileHistoryEntry struct {
+	Kind      string `json:"kind"`
+	ID        string `json:"id,omitempty"`
+	SHA       string `json:"sha,omitempty"`
+	Author    string `json:"author,omitempty"`
+	Time      string `json:"time"`
+	Summary   string `json:"summary"`
+	Content   string `json:"content,omitempty"`
+	Size      int64  `json:"size,omitempty"`
+	Binary    bool   `json:"binary,omitempty"`
+	Truncated bool   `json:"truncated,omitempty"`
+}
+
+// FileHistoryResult contains the merged file Timeline entries.
+type FileHistoryResult struct {
+	Path    string             `json:"path"`
+	Entries []FileHistoryEntry `json:"entries"`
+}
 
 // FileMoveRequest is the JSON body for a scoped file move/rename operation.
 type FileMoveRequest struct {

@@ -1,6 +1,7 @@
 import {
   useCallback,
   useEffect,
+  useMemo,
   useRef,
   useState,
   type CSSProperties,
@@ -10,12 +11,21 @@ import {
 import { useStore } from "zustand";
 
 import { ErrorDisplay, LoadingSkeleton } from "@/components";
+import { DiffFileViewer } from "@/components/AgentDetailPanel";
 import { useFileEditorBuffer } from "@/components/FileEditorPanel";
 import { ResizeHandle } from "@/components/ResizeHandle";
-import type { FileEntry, FileScopeRef } from "@/api/workspace";
+import type {
+  FileBlameData,
+  FileEntry,
+  FileHistoryEntry,
+  FileScopeRef,
+} from "@/api/workspace";
 import {
+  blameScopedFile,
   deleteScopedPath,
+  diffScopedFile,
   gitStatusScoped,
+  historyScopedFile,
   indexScopedFiles,
   mkdirScoped,
   moveScopedPath,
@@ -45,6 +55,11 @@ import { FileTabBar } from "./FileTabBar";
 import { QuickOpenPalette } from "./QuickOpenPalette";
 import { WorkspaceFilePane } from "./WorkspaceFilePane";
 import { gitDecorationForStatus, resolveTreeDropMove } from "./gitDecorations";
+import {
+  buildUnifiedPatchFromContents,
+  computeGitGutterLineMarks,
+  type GitGutterLineMark,
+} from "./gitGutter";
 import styles from "./FileExplorer.module.css";
 
 const TREE_WIDTH_KEY = "loom:file-browser:tree-width";
@@ -148,6 +163,19 @@ interface LineTarget {
   token: number;
 }
 
+interface DiffViewState {
+  path: string;
+  from?: string | undefined;
+  to?: string | undefined;
+  title: string;
+  patch?: string | undefined;
+  restoreContent?: string | undefined;
+}
+
+type OpenDiffRequest = Omit<DiffViewState, "title"> & {
+  title?: string | undefined;
+};
+
 function OpenEditors({
   groups,
   dirty,
@@ -246,6 +274,306 @@ function OpenEditorItem({
       <span className={styles.openEditorName}>{basename(path)}</span>
       <span className={styles.openEditorPath}>{dirname(path)}</span>
     </button>
+  );
+}
+
+function formatTimelineTime(value: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleString();
+}
+
+function TimelineSection({
+  path,
+  scopeRef,
+  collapsed,
+  refreshKey,
+  onToggle,
+  onOpenDiff,
+}: {
+  path: string | null;
+  scopeRef: FileScopeRef;
+  collapsed: boolean;
+  refreshKey: number;
+  onToggle: () => void;
+  onOpenDiff: (request: OpenDiffRequest) => void;
+}) {
+  const { workspaceId } = useWorkspaceContext();
+  const [entries, setEntries] = useState<FileHistoryEntry[]>([]);
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let canceled = false;
+    if (!path || collapsed) {
+      setEntries([]);
+      setError(null);
+      setIsLoading(false);
+      return () => {
+        canceled = true;
+      };
+    }
+    setIsLoading(true);
+    setError(null);
+    historyScopedFile(workspaceId, scopeRef, path)
+      .then((history) => {
+        if (!canceled) setEntries(history.entries);
+      })
+      .catch((err) => {
+        if (!canceled) {
+          setEntries([]);
+          setError(err instanceof Error ? err.message : String(err));
+        }
+      })
+      .finally(() => {
+        if (!canceled) setIsLoading(false);
+      });
+    return () => {
+      canceled = true;
+    };
+  }, [collapsed, path, refreshKey, scopeRef, workspaceId]);
+
+  return (
+    <section className={styles.openEditors}>
+      <button
+        type="button"
+        className={styles.openEditorsHeader}
+        aria-expanded={!collapsed}
+        onClick={onToggle}
+      >
+        <span
+          className={`${styles.chevron} ${!collapsed ? styles.chevronExpanded : ""}`}
+          aria-hidden="true"
+        >
+          <svg viewBox="0 0 16 16">
+            <path
+              d="M6 4l4 4-4 4"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.5"
+            />
+          </svg>
+        </span>
+        <span>Timeline</span>
+        <span className={styles.openEditorsCount}>{entries.length}</span>
+      </button>
+      {!collapsed && (
+        <div className={styles.timelineList}>
+          {!path ? (
+            <div className={styles.openEditorsEmpty}>No active file</div>
+          ) : isLoading ? (
+            <div className={styles.openEditorsEmpty}>Loading...</div>
+          ) : error ? (
+            <div className={styles.timelineError}>{error}</div>
+          ) : entries.length === 0 ? (
+            <div className={styles.openEditorsEmpty}>No history</div>
+          ) : (
+            entries.map((entry) => (
+              <button
+                type="button"
+                key={`${entry.kind}:${entry.id ?? entry.sha ?? entry.time}`}
+                className={styles.timelineItem}
+                onClick={async () => {
+                  if (!path) return;
+                  if (entry.kind === "commit" && entry.sha) {
+                    onOpenDiff({
+                      path,
+                      from: `${entry.sha}^`,
+                      to: entry.sha,
+                      title: entry.summary || entry.sha.slice(0, 8),
+                    });
+                  } else if (
+                    entry.kind === "save" &&
+                    entry.content !== undefined
+                  ) {
+                    const current = await readScopedFile(
+                      workspaceId,
+                      scopeRef,
+                      path,
+                    );
+                    if (current.binary || current.truncated) return;
+                    onOpenDiff({
+                      path,
+                      title: "Browser save",
+                      patch: buildUnifiedPatchFromContents(
+                        path,
+                        entry.content,
+                        current.content ?? "",
+                      ),
+                      restoreContent: entry.content,
+                    });
+                  }
+                }}
+              >
+                <span className={styles.timelineKind}>{entry.kind}</span>
+                <span className={styles.timelineSummary}>{entry.summary}</span>
+                <span className={styles.timelineMeta}>
+                  {entry.author ? `${entry.author} · ` : ""}
+                  {formatTimelineTime(entry.time)}
+                </span>
+              </button>
+            ))
+          )}
+        </div>
+      )}
+    </section>
+  );
+}
+
+interface ScmItem {
+  path: string;
+  relPath: string;
+  xy: string;
+}
+
+interface ScmGroup {
+  name: string;
+  sections: Record<string, ScmItem[]>;
+}
+
+function scmStateLabel(xy: string): string {
+  if (xy === "??") return "Untracked";
+  if (xy.includes("U") || xy === "AA" || xy === "DD") return "Merge conflicts";
+  if (xy[0] && xy[0] !== " " && xy[0] !== "?") return "Staged";
+  return "Changes";
+}
+
+function checkoutGroupForPath(
+  path: string,
+  scopeRef: FileScopeRef,
+): {
+  group: string;
+  relPath: string;
+} {
+  if (scopeRef.scope !== "workspace") {
+    return { group: scopeRef.target || "Changes", relPath: path };
+  }
+  const parts = path.split("/");
+  if (parts[0] === "worktrees" && parts.length >= 4) {
+    return {
+      group: parts.slice(0, 3).join("/"),
+      relPath: parts.slice(3).join("/"),
+    };
+  }
+  return {
+    group: parts[0] || "Workspace",
+    relPath: parts.slice(1).join("/") || path,
+  };
+}
+
+function groupScmStatus(
+  gitStatus: Record<string, string>,
+  scopeRef: FileScopeRef,
+): ScmGroup[] {
+  const groups = new Map<string, ScmGroup>();
+  for (const [path, xy] of Object.entries(gitStatus).sort(([a], [b]) =>
+    a.localeCompare(b),
+  )) {
+    const { group, relPath } = checkoutGroupForPath(path, scopeRef);
+    const section = scmStateLabel(xy);
+    const current =
+      groups.get(group) ??
+      ({
+        name: group,
+        sections: {
+          "Merge conflicts": [],
+          Staged: [],
+          Changes: [],
+          Untracked: [],
+        },
+      } satisfies ScmGroup);
+    const bucket = current.sections[section] ?? [];
+    bucket.push({ path, relPath, xy });
+    current.sections[section] = bucket;
+    groups.set(group, current);
+  }
+  return [...groups.values()];
+}
+
+function ScmPanel({
+  gitStatus,
+  scopeRef,
+  collapsed,
+  onToggle,
+  onOpenDiff,
+}: {
+  gitStatus: Record<string, string>;
+  scopeRef: FileScopeRef;
+  collapsed: boolean;
+  onToggle: () => void;
+  onOpenDiff: (request: OpenDiffRequest) => void;
+}) {
+  const groups = useMemo(
+    () => groupScmStatus(gitStatus, scopeRef),
+    [gitStatus, scopeRef],
+  );
+  const count = Object.keys(gitStatus).length;
+  return (
+    <section className={styles.openEditors}>
+      <button
+        type="button"
+        className={styles.openEditorsHeader}
+        aria-expanded={!collapsed}
+        onClick={onToggle}
+      >
+        <span
+          className={`${styles.chevron} ${!collapsed ? styles.chevronExpanded : ""}`}
+          aria-hidden="true"
+        >
+          <svg viewBox="0 0 16 16">
+            <path
+              d="M6 4l4 4-4 4"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.5"
+            />
+          </svg>
+        </span>
+        <span>Source Control</span>
+        <span className={styles.openEditorsCount}>{count}</span>
+      </button>
+      {!collapsed && (
+        <div className={styles.scmList}>
+          {count === 0 ? (
+            <div className={styles.openEditorsEmpty}>No changes</div>
+          ) : (
+            groups.map((group) => (
+              <div key={group.name} className={styles.scmGroup}>
+                <div className={styles.openEditorsGroupLabel}>
+                  {scopeRef.scope === "workspace" ? group.name : "Changes"}
+                </div>
+                {Object.entries(group.sections).map(([section, items]) =>
+                  items.length === 0 ? null : (
+                    <div key={section} className={styles.scmSection}>
+                      <div className={styles.scmSectionLabel}>{section}</div>
+                      {items.map((item) => (
+                        <button
+                          type="button"
+                          key={item.path}
+                          className={styles.scmItem}
+                          aria-label={`Open diff for ${item.path} (${item.xy.trim() || "changed"})`}
+                          title={`${item.xy} ${item.path}`}
+                          onClick={() =>
+                            onOpenDiff({
+                              path: item.path,
+                              from: "HEAD",
+                              title: item.relPath,
+                            })
+                          }
+                        >
+                          <span className={styles.scmStatus}>{item.xy}</span>
+                          <span className={styles.scmPath}>{item.relPath}</span>
+                        </button>
+                      ))}
+                    </div>
+                  ),
+                )}
+              </div>
+            ))
+          )}
+        </div>
+      )}
+    </section>
   );
 }
 
@@ -369,10 +697,119 @@ function ContextMenu({
   );
 }
 
+function DiffEditorPane({
+  scopeRef,
+  diffView,
+  onClose,
+  onRestore,
+}: {
+  scopeRef: FileScopeRef;
+  diffView: DiffViewState;
+  onClose: () => void;
+  onRestore: ((path: string, content: string) => Promise<void>) | undefined;
+}) {
+  const { workspaceId } = useWorkspaceContext();
+  const [patch, setPatch] = useState<string | null>(diffView.patch ?? null);
+  const [isLoading, setIsLoading] = useState(!diffView.patch);
+  const [error, setError] = useState<string | undefined>(undefined);
+
+  useEffect(() => {
+    let canceled = false;
+    setPatch(diffView.patch ?? null);
+    setError(undefined);
+    if (diffView.patch !== undefined) {
+      setIsLoading(false);
+      return () => {
+        canceled = true;
+      };
+    }
+    setIsLoading(true);
+    diffScopedFile(
+      workspaceId,
+      scopeRef,
+      diffView.path,
+      diffView.from,
+      diffView.to,
+    )
+      .then((res) => {
+        if (!canceled) setPatch(res.patch);
+      })
+      .catch((err) => {
+        if (!canceled)
+          setError(err instanceof Error ? err.message : String(err));
+      })
+      .finally(() => {
+        if (!canceled) setIsLoading(false);
+      });
+    return () => {
+      canceled = true;
+    };
+  }, [diffView, scopeRef, workspaceId]);
+
+  return (
+    <div className={styles.viewerColumn}>
+      <div className={styles.viewerHeader}>
+        <div className={styles.diffTitle}>
+          <span className={styles.diffTitlePath}>{diffView.path}</span>
+          <span className={styles.diffTitleMeta}>{diffView.title}</span>
+        </div>
+        <div className={styles.viewerActions}>
+          {diffView.restoreContent !== undefined && onRestore && (
+            <button
+              type="button"
+              className={styles.saveButton}
+              onClick={() =>
+                void onRestore(diffView.path, diffView.restoreContent ?? "")
+              }
+            >
+              Restore
+            </button>
+          )}
+          <button
+            type="button"
+            className={styles.iconButton}
+            aria-label="Close diff"
+            title="Close diff"
+            onClick={onClose}
+          >
+            <svg viewBox="0 0 16 16" aria-hidden="true">
+              <path
+                d="M4 4l8 8M12 4l-8 8"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.5"
+                strokeLinecap="round"
+              />
+            </svg>
+          </button>
+        </div>
+      </div>
+      <div className={styles.diffEditorBody}>
+        <DiffFileViewer
+          patch={
+            patch === null
+              ? null
+              : {
+                  patch,
+                  is_binary: false,
+                  is_too_large: false,
+                  additions: 0,
+                  deletions: 0,
+                }
+          }
+          isLoading={isLoading}
+          error={error}
+        />
+      </div>
+    </div>
+  );
+}
+
 function EditorGroup({
   groupIndex,
   group,
   scopeRef,
+  diffView,
   isActiveGroup,
   dirty,
   onSelectTab,
@@ -380,12 +817,16 @@ function EditorGroup({
   onSplitRight,
   onNavigate,
   onSaved,
+  onOpenDiff,
+  onCloseDiff,
+  onRestoreSnapshot,
   lineTarget,
   onLineTargetApplied,
 }: {
   groupIndex: number;
   group: FileBrowserGroup;
   scopeRef: FileScopeRef;
+  diffView: DiffViewState | null;
   isActiveGroup: boolean;
   dirty: Record<string, boolean>;
   onSelectTab: (groupIndex: number, path: string) => void;
@@ -393,6 +834,9 @@ function EditorGroup({
   onSplitRight: (groupIndex: number) => void;
   onNavigate: (dirPath: string) => void;
   onSaved: (path: string) => void;
+  onOpenDiff: (groupIndex: number, request: OpenDiffRequest) => void;
+  onCloseDiff: (groupIndex: number) => void;
+  onRestoreSnapshot: (path: string, content: string) => Promise<void>;
   lineTarget?: LineTarget | undefined;
   onLineTargetApplied: (path: string, token: number) => void;
 }) {
@@ -403,6 +847,13 @@ function EditorGroup({
   const activePath = group.active;
   const pathDirty = activePath ? !!dirty[activePath] : false;
   const [searchOpen, setSearchOpen] = useState(false);
+  const [basePath, setBasePath] = useState<string | null>(null);
+  const [baseContent, setBaseContent] = useState<string | null>(null);
+  const [gitGutterMarks, setGitGutterMarks] = useState<GitGutterLineMark[]>([]);
+  const [blameEnabled, setBlameEnabled] = useState(false);
+  const [blameData, setBlameData] = useState<FileBlameData | null>(null);
+  const [blameLoading, setBlameLoading] = useState(false);
+  const [blameError, setBlameError] = useState<string | null>(null);
 
   useEffect(() => {
     setSearchOpen(false);
@@ -429,6 +880,25 @@ function EditorGroup({
   const canSave =
     !!activePath && !!fileData && !fileData.binary && !fileData.truncated;
 
+  const loadBaseContent = useCallback(
+    async (path: string) => {
+      try {
+        const data = await readScopedFile(workspaceId, scopeRef, path, "HEAD");
+        if (!data.binary && !data.truncated) {
+          setBasePath(path);
+          setBaseContent(data.content ?? "");
+        } else {
+          setBasePath(null);
+          setBaseContent(null);
+        }
+      } catch {
+        setBasePath(null);
+        setBaseContent(null);
+      }
+    },
+    [scopeRef, workspaceId],
+  );
+
   const editor = useFileEditorBuffer({
     path: activePath,
     fileData,
@@ -437,9 +907,99 @@ function EditorGroup({
     writeFile,
     onDirtyChange: setDirty,
     onSaved: () => {
-      if (activePath) onSaved(activePath);
+      if (activePath) {
+        onSaved(activePath);
+        void loadBaseContent(activePath);
+      }
     },
   });
+
+  useEffect(() => {
+    setBasePath(null);
+    setBaseContent(null);
+    setGitGutterMarks([]);
+    setBlameEnabled(false);
+    setBlameData(null);
+    setBlameError(null);
+    if (activePath && canSave) {
+      void loadBaseContent(activePath);
+    }
+  }, [activePath, canSave, loadBaseContent]);
+
+  useEffect(() => {
+    const handleFocus = () => {
+      if (activePath && canSave) {
+        void loadBaseContent(activePath);
+      }
+    };
+    window.addEventListener("focus", handleFocus);
+    return () => window.removeEventListener("focus", handleFocus);
+  }, [activePath, canSave, loadBaseContent]);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      if (!activePath || basePath !== activePath || baseContent === null) {
+        setGitGutterMarks([]);
+        return;
+      }
+      setGitGutterMarks(computeGitGutterLineMarks(baseContent, editor.content));
+    }, 150);
+    return () => window.clearTimeout(timer);
+  }, [activePath, baseContent, basePath, editor.content]);
+
+  useEffect(() => {
+    let canceled = false;
+    if (!activePath || !blameEnabled || !canSave) {
+      setBlameData(null);
+      setBlameLoading(false);
+      setBlameError(null);
+      return () => {
+        canceled = true;
+      };
+    }
+    setBlameLoading(true);
+    setBlameError(null);
+    blameScopedFile(workspaceId, scopeRef, activePath)
+      .then((data) => {
+        if (!canceled) setBlameData(data);
+      })
+      .catch((err) => {
+        if (!canceled) {
+          setBlameData(null);
+          setBlameError(err instanceof Error ? err.message : String(err));
+        }
+      })
+      .finally(() => {
+        if (!canceled) setBlameLoading(false);
+      });
+    return () => {
+      canceled = true;
+    };
+  }, [activePath, blameEnabled, canSave, scopeRef, workspaceId]);
+
+  if (diffView) {
+    return (
+      <section
+        className={styles.editorGroup}
+        data-active={isActiveGroup || undefined}
+      >
+        <FileTabBar
+          tabs={group.tabs.map((tab) => tab.path)}
+          activePath={activePath}
+          dirtyPaths={dirty}
+          groupLabel={`group ${groupIndex + 1}`}
+          onSelect={(path) => onSelectTab(groupIndex, path)}
+          onClose={(path) => onCloseTab(groupIndex, path)}
+        />
+        <DiffEditorPane
+          scopeRef={scopeRef}
+          diffView={diffView}
+          onClose={() => onCloseDiff(groupIndex)}
+          onRestore={onRestoreSnapshot}
+        />
+      </section>
+    );
+  }
 
   return (
     <section
@@ -471,6 +1031,23 @@ function EditorGroup({
         onNavigate={onNavigate}
         lineTarget={lineTarget}
         onLineTargetApplied={onLineTargetApplied}
+        gitGutterMarks={gitGutterMarks}
+        blameEnabled={blameEnabled}
+        blameLines={blameData?.skipped ? [] : blameData?.lines}
+        blameLoading={blameLoading}
+        blameSkippedMessage={
+          blameError ?? (blameData?.skipped ? blameData.message : undefined)
+        }
+        onToggleBlame={() => setBlameEnabled((enabled) => !enabled)}
+        onOpenBlameCommit={(sha) => {
+          if (!activePath) return;
+          onOpenDiff(groupIndex, {
+            path: activePath,
+            from: `${sha}^`,
+            to: sha,
+            title: sha.slice(0, 8),
+          });
+        }}
       />
     </section>
   );
@@ -507,6 +1084,12 @@ function FileBrowserInner({ scopeRef }: FileBrowserProps) {
     {},
   );
   const [openEditorsCollapsed, setOpenEditorsCollapsed] = useState(false);
+  const [timelineCollapsed, setTimelineCollapsed] = useState(false);
+  const [scmCollapsed, setScmCollapsed] = useState(false);
+  const [historyRefreshKey, setHistoryRefreshKey] = useState(0);
+  const [diffViews, setDiffViews] = useState<
+    Record<number, DiffViewState | null>
+  >({});
   const [quickOpenOpen, setQuickOpenOpen] = useState(false);
   const [quickOpenPaths, setQuickOpenPaths] = useState<string[]>([]);
   const [quickOpenTruncated, setQuickOpenTruncated] = useState(false);
@@ -657,6 +1240,7 @@ function FileBrowserInner({ scopeRef }: FileBrowserProps) {
       lineNumber?: number,
     ) => {
       if (!discardActiveIfNeeded(groupIndex, path)) return;
+      setDiffViews((prev) => ({ ...prev, [groupIndex]: null }));
       store.getState().openTab(path, groupIndex);
       if (lineNumber && lineNumber > 0) {
         setLineTargets((prev) => ({
@@ -680,6 +1264,7 @@ function FileBrowserInner({ scopeRef }: FileBrowserProps) {
   const selectTab = useCallback(
     (groupIndex: number, path: string) => {
       if (!discardActiveIfNeeded(groupIndex, path)) return;
+      setDiffViews((prev) => ({ ...prev, [groupIndex]: null }));
       store.getState().activateTab(groupIndex, path);
     },
     [discardActiveIfNeeded, store],
@@ -692,6 +1277,7 @@ function FileBrowserInner({ scopeRef }: FileBrowserProps) {
         if (!ok) return;
         store.getState().setDirty(path, false);
       }
+      setDiffViews((prev) => ({ ...prev, [groupIndex]: null }));
       store.getState().closeTab(groupIndex, path);
     },
     [store],
@@ -717,10 +1303,54 @@ function FileBrowserInner({ scopeRef }: FileBrowserProps) {
     (path: string) => {
       markIndexStale();
       void refreshGitStatus();
+      setHistoryRefreshKey((key) => key + 1);
       showToast("File saved", { type: "success" });
       void refreshParents(path);
     },
     [markIndexStale, refreshGitStatus, refreshParents, showToast],
+  );
+
+  const openDiff = useCallback(
+    (groupIndex: number, request: OpenDiffRequest) => {
+      const title =
+        request.title ??
+        (request.to
+          ? `${request.from ?? "HEAD"}..${request.to}`
+          : `${request.from ?? "HEAD"} vs working tree`);
+      setDiffViews((prev) => ({
+        ...prev,
+        [groupIndex]: { ...request, title },
+      }));
+    },
+    [],
+  );
+
+  const closeDiff = useCallback((groupIndex: number) => {
+    setDiffViews((prev) => ({ ...prev, [groupIndex]: null }));
+  }, []);
+
+  const restoreSnapshot = useCallback(
+    async (path: string, content: string) => {
+      await writeScopedFile(workspaceId, scopeRef, path, content);
+      store.getState().setDirty(path, false);
+      setDiffViews({});
+      markIndexStale();
+      void refreshGitStatus();
+      setHistoryRefreshKey((key) => key + 1);
+      await refreshParents(path);
+      showToast("Restored", { type: "success" });
+      openFile(path);
+    },
+    [
+      workspaceId,
+      scopeRef,
+      store,
+      markIndexStale,
+      refreshGitStatus,
+      refreshParents,
+      showToast,
+      openFile,
+    ],
   );
 
   const handleResizeDelta = useCallback((deltaPx: number) => {
@@ -1062,6 +1692,25 @@ function FileBrowserInner({ scopeRef }: FileBrowserProps) {
               }
               onActivate={selectTab}
             />
+            <ScmPanel
+              gitStatus={gitStatus}
+              scopeRef={scopeRef}
+              collapsed={scmCollapsed}
+              onToggle={() => setScmCollapsed((collapsed) => !collapsed)}
+              onOpenDiff={(request) =>
+                openDiff(store.getState().activeGroup, request)
+              }
+            />
+            <TimelineSection
+              path={activePath}
+              scopeRef={scopeRef}
+              collapsed={timelineCollapsed}
+              refreshKey={historyRefreshKey}
+              onToggle={() => setTimelineCollapsed((collapsed) => !collapsed)}
+              onOpenDiff={(request) =>
+                openDiff(store.getState().activeGroup, request)
+              }
+            />
             <div className={styles.toolbar}>
               <form onSubmit={handleJump} style={{ display: "contents" }}>
                 <input
@@ -1166,6 +1815,7 @@ function FileBrowserInner({ scopeRef }: FileBrowserProps) {
               groupIndex={0}
               group={groups[0] ?? { tabs: [], active: null }}
               scopeRef={scopeRef}
+              diffView={diffViews[0] ?? null}
               isActiveGroup={activeGroup === 0}
               dirty={dirty}
               onSelectTab={selectTab}
@@ -1173,6 +1823,9 @@ function FileBrowserInner({ scopeRef }: FileBrowserProps) {
               onSplitRight={splitRight}
               onNavigate={navigateToDir}
               onSaved={handleSaved}
+              onOpenDiff={openDiff}
+              onCloseDiff={closeDiff}
+              onRestoreSnapshot={restoreSnapshot}
               onLineTargetApplied={handleLineTargetApplied}
               lineTarget={
                 groups[0]?.active ? lineTargets[groups[0].active] : undefined
@@ -1197,6 +1850,7 @@ function FileBrowserInner({ scopeRef }: FileBrowserProps) {
                   groupIndex={1}
                   group={groups[1]}
                   scopeRef={scopeRef}
+                  diffView={diffViews[1] ?? null}
                   isActiveGroup={activeGroup === 1}
                   dirty={dirty}
                   onSelectTab={selectTab}
@@ -1204,6 +1858,9 @@ function FileBrowserInner({ scopeRef }: FileBrowserProps) {
                   onSplitRight={splitRight}
                   onNavigate={navigateToDir}
                   onSaved={handleSaved}
+                  onOpenDiff={openDiff}
+                  onCloseDiff={closeDiff}
+                  onRestoreSnapshot={restoreSnapshot}
                   onLineTargetApplied={handleLineTargetApplied}
                   lineTarget={
                     groups[1]?.active

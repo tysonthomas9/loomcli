@@ -1532,6 +1532,57 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/workspaces/{ws}/files/diff": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Get unified diff for a file in a scoped file browser root */
+    get: operations["getScopedFileDiff"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/workspaces/{ws}/files/history": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Get commit and browser-save timeline for a file */
+    get: operations["getScopedFileHistory"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/workspaces/{ws}/files/blame": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Get bounded git blame data for a file */
+    get: operations["getScopedFileBlame"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/workspaces/{ws}/files": {
     parameters: {
       query?: never;
@@ -2120,6 +2171,43 @@ export interface components {
     };
     FileGitStatusResponse: {
       [key: string]: string;
+    };
+    FileDiffResponse: {
+      path: string;
+      patch: string;
+    };
+    FileBlameLine: {
+      line: number;
+      lines: number;
+      sha: string;
+      author: string;
+      time: string;
+      summary: string;
+    };
+    FileBlameResponse: {
+      path: string;
+      skipped: boolean;
+      reason?: string;
+      message?: string;
+      lines: components["schemas"]["FileBlameLine"][];
+    };
+    FileHistoryEntry: {
+      /** @enum {string} */
+      kind: "commit" | "save";
+      id?: string;
+      sha?: string;
+      author?: string;
+      time: string;
+      summary: string;
+      content?: string;
+      /** Format: int64 */
+      size?: number;
+      binary?: boolean;
+      truncated?: boolean;
+    };
+    FileHistoryResponse: {
+      path: string;
+      entries: components["schemas"]["FileHistoryEntry"][];
     };
     FileWriteRequest: {
       content: string;
@@ -6056,12 +6144,96 @@ export interface operations {
       };
     };
   };
+  getScopedFileDiff: {
+    parameters: {
+      query: {
+        scope?: "workspace" | "repo" | "agent";
+        target?: string;
+        path: string;
+        from?: string;
+        to?: string;
+      };
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Unified file diff */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["FileDiffResponse"];
+        };
+      };
+    };
+  };
+  getScopedFileHistory: {
+    parameters: {
+      query: {
+        scope?: "workspace" | "repo" | "agent";
+        target?: string;
+        path: string;
+      };
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description File timeline */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["FileHistoryResponse"];
+        };
+      };
+    };
+  };
+  getScopedFileBlame: {
+    parameters: {
+      query: {
+        scope?: "workspace" | "repo" | "agent";
+        target?: string;
+        path: string;
+      };
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description File blame data or skip signal */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["FileBlameResponse"];
+        };
+      };
+    };
+  };
   readScopedFile: {
     parameters: {
       query: {
         scope?: "workspace" | "repo" | "agent";
         target?: string;
         path: string;
+        rev?: string;
       };
       header?: never;
       path: {

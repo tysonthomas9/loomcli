@@ -23,6 +23,13 @@ const mocks = vi.hoisted(() => ({
   moveScopedPath: vi.fn(() => Promise.resolve()),
   deleteScopedPath: vi.fn(() => Promise.resolve()),
   readScopedFile: vi.fn(() => Promise.resolve({})),
+  diffScopedFile: vi.fn(() => Promise.resolve({ path: "main.ts", patch: "" })),
+  blameScopedFile: vi.fn(() =>
+    Promise.resolve({ path: "main.ts", skipped: false, lines: [] }),
+  ),
+  historyScopedFile: vi.fn(() =>
+    Promise.resolve({ path: "main.ts", entries: [] }),
+  ),
   gitStatusScoped: vi.fn(() => Promise.resolve({})),
   indexScopedFiles: vi.fn(() =>
     Promise.resolve({ paths: [] as string[], truncated: false }),
@@ -38,6 +45,7 @@ const mocks = vi.hoisted(() => ({
       }) => void)
     | undefined,
   fileMap: {} as Record<string, FileReadData>,
+  headFileMap: {} as Record<string, FileReadData>,
   rootEntries: [] as FileEntry[],
 }));
 
@@ -78,6 +86,10 @@ vi.mock("@/components/CodeMirrorEditor", async () => {
       scrollToLineKey,
       onScrollToLineApplied,
       onSymbolsChange,
+      gitGutterMarks,
+      blameEnabled,
+      blameLines,
+      onBlameCommitClick,
     }: {
       value: string;
       onChange?: (value: string) => void;
@@ -89,6 +101,10 @@ vi.mock("@/components/CodeMirrorEditor", async () => {
         symbols: Array<{ name: string; kind: string; line: number }>;
         trail: Array<{ name: string; kind: string; line: number }>;
       }) => void;
+      gitGutterMarks?: Array<{ line: number; kind: string }>;
+      blameEnabled?: boolean;
+      blameLines?: Array<{ sha: string }>;
+      onBlameCommitClick?: (sha: string) => void;
     }) => {
       React.useEffect(() => {
         if (value.includes("function jumpTarget")) {
@@ -126,14 +142,26 @@ vi.mock("@/components/CodeMirrorEditor", async () => {
         // eslint-disable-next-line react-hooks/exhaustive-deps
       }, [scrollToLine, scrollToLineKey]);
       return (
-        <textarea
-          data-testid="mock-codemirror"
-          data-readonly={readOnly ? "true" : "false"}
-          data-scroll-line={scrollToLine ?? ""}
-          value={value}
-          readOnly={readOnly}
-          onChange={(event) => onChange?.(event.target.value)}
-        />
+        <div>
+          <textarea
+            data-testid="mock-codemirror"
+            data-readonly={readOnly ? "true" : "false"}
+            data-scroll-line={scrollToLine ?? ""}
+            data-gutter-marks={JSON.stringify(gitGutterMarks ?? [])}
+            data-blame-enabled={blameEnabled ? "true" : "false"}
+            value={value}
+            readOnly={readOnly}
+            onChange={(event) => onChange?.(event.target.value)}
+          />
+          {blameEnabled && blameLines?.[0] && (
+            <button
+              type="button"
+              onClick={() => onBlameCommitClick?.(blameLines[0]?.sha ?? "")}
+            >
+              Blame {blameLines[0].sha}
+            </button>
+          )}
+        </div>
       );
     },
   };
@@ -141,7 +169,10 @@ vi.mock("@/components/CodeMirrorEditor", async () => {
 
 vi.mock("@/hooks/api", () => ({
   deleteScopedPath: mocks.deleteScopedPath,
+  blameScopedFile: mocks.blameScopedFile,
+  diffScopedFile: mocks.diffScopedFile,
   gitStatusScoped: mocks.gitStatusScoped,
+  historyScopedFile: mocks.historyScopedFile,
   indexScopedFiles: mocks.indexScopedFiles,
   mkdirScoped: mocks.mkdirScoped,
   moveScopedPath: mocks.moveScopedPath,
@@ -253,9 +284,45 @@ describe("WorkspaceFileBrowser", () => {
         truncated: true,
       },
     };
-    mocks.readScopedFile.mockImplementation((_, __, path: string) =>
-      Promise.resolve(mocks.fileMap[path]),
+    mocks.headFileMap = {
+      "main.ts": {
+        path: "main.ts",
+        content: "console.log('old')\n",
+        size: 19,
+        binary: false,
+      },
+      "symbols.ts": mocks.fileMap["symbols.ts"],
+    };
+    mocks.readScopedFile.mockImplementation(
+      (_, __, path: string, rev?: string) =>
+        Promise.resolve(
+          (rev === "HEAD" ? mocks.headFileMap[path] : mocks.fileMap[path]) ??
+            mocks.fileMap[path],
+        ),
     );
+    mocks.diffScopedFile.mockResolvedValue({
+      path: "main.ts",
+      patch:
+        "diff --git a/main.ts b/main.ts\n--- a/main.ts\n+++ b/main.ts\n@@ -1 +1 @@\n-old\n+new\n",
+    });
+    mocks.blameScopedFile.mockResolvedValue({
+      path: "main.ts",
+      skipped: false,
+      lines: [
+        {
+          line: 1,
+          lines: 1,
+          sha: "abc1234",
+          author: "Test User",
+          time: "2026-01-01T00:00:00Z",
+          summary: "initial",
+        },
+      ],
+    });
+    mocks.historyScopedFile.mockResolvedValue({
+      path: "main.ts",
+      entries: [],
+    });
     mocks.indexScopedFiles.mockResolvedValue({
       paths: ["src/recent.ts", "src/other.ts"],
       truncated: false,
@@ -483,6 +550,135 @@ describe("WorkspaceFileBrowser", () => {
       expect(mocks.scrollApplied).toHaveBeenCalledWith(
         expect.objectContaining({ requested: 3, applied: 3 }),
       );
+    });
+  });
+
+  it("opens a unified diff editor from the SCM panel", async () => {
+    mocks.gitStatusScoped.mockResolvedValue({ "main.ts": " M" });
+
+    render(<WorkspaceFileBrowser scopeRef={{ scope: "workspace" }} />);
+
+    fireEvent.click(
+      await screen.findByRole("button", {
+        name: "Open diff for main.ts (M)",
+      }),
+    );
+
+    await waitFor(() => {
+      expect(mocks.diffScopedFile).toHaveBeenCalledWith(
+        "ws-1",
+        { scope: "workspace" },
+        "main.ts",
+        "HEAD",
+        undefined,
+      );
+    });
+    expect(await screen.findByText("-old")).toBeInTheDocument();
+    expect(screen.getByText("+new")).toBeInTheDocument();
+  });
+
+  it("toggles blame and opens the clicked commit diff", async () => {
+    render(<WorkspaceFileBrowser scopeRef={{ scope: "workspace" }} />);
+
+    fireEvent.click(screen.getByLabelText("main.ts"));
+    await screen.findByDisplayValue(/console\.log/);
+    fireEvent.click(screen.getByRole("button", { name: "Toggle blame" }));
+
+    await waitFor(() => {
+      expect(mocks.blameScopedFile).toHaveBeenCalledWith(
+        "ws-1",
+        { scope: "workspace" },
+        "main.ts",
+      );
+    });
+    expect(
+      await screen.findByRole("button", { name: "Blame abc1234" }),
+    ).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Blame abc1234" }));
+
+    await waitFor(() => {
+      expect(mocks.diffScopedFile).toHaveBeenCalledWith(
+        "ws-1",
+        { scope: "workspace" },
+        "main.ts",
+        "abc1234^",
+        "abc1234",
+      );
+    });
+  });
+
+  it("shows Timeline commits and saves, and restores a browser save", async () => {
+    mocks.historyScopedFile.mockResolvedValue({
+      path: "main.ts",
+      entries: [
+        {
+          kind: "commit",
+          sha: "def5678",
+          author: "Test User",
+          time: "2026-01-02T00:00:00Z",
+          summary: "commit summary",
+        },
+        {
+          kind: "save",
+          id: "save-1",
+          author: "browser",
+          time: "2026-01-03T00:00:00Z",
+          summary: "Browser save",
+          content: "previous\n",
+        },
+      ],
+    });
+
+    render(<WorkspaceFileBrowser scopeRef={{ scope: "workspace" }} />);
+
+    fireEvent.click(screen.getByLabelText("main.ts"));
+    expect(await screen.findByText("commit summary")).toBeInTheDocument();
+    fireEvent.click(screen.getByText("Browser save"));
+
+    expect(
+      await screen.findByRole("button", { name: "Restore" }),
+    ).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Restore" }));
+
+    await waitFor(() => {
+      expect(mocks.writeScopedFile).toHaveBeenCalledWith(
+        "ws-1",
+        { scope: "workspace" },
+        "main.ts",
+        "previous\n",
+      );
+    });
+  });
+
+  it("groups SCM changes by checkout and status", async () => {
+    mocks.gitStatusScoped.mockResolvedValue({
+      "repo-a/src/a.ts": " M",
+      "repo-a/staged.ts": "A ",
+      "repo-a/conflict.txt": "UU",
+      "worktrees/repo-a/agent-a/b.ts": "??",
+    });
+
+    render(<WorkspaceFileBrowser scopeRef={{ scope: "workspace" }} />);
+
+    expect(await screen.findByText("repo-a")).toBeInTheDocument();
+    expect(screen.getByText("worktrees/repo-a/agent-a")).toBeInTheDocument();
+    expect(screen.getByText("Merge conflicts")).toBeInTheDocument();
+    expect(screen.getByText("Staged")).toBeInTheDocument();
+    expect(screen.getByText("Changes")).toBeInTheDocument();
+    expect(screen.getByText("Untracked")).toBeInTheDocument();
+  });
+
+  it("passes quick-diff gutter marks from HEAD to the visible editor", async () => {
+    render(<WorkspaceFileBrowser scopeRef={{ scope: "workspace" }} />);
+
+    fireEvent.click(screen.getByLabelText("main.ts"));
+    const editor = await screen.findByTestId("mock-codemirror");
+
+    await waitFor(() => {
+      const marks = JSON.parse(
+        editor.getAttribute("data-gutter-marks") ?? "[]",
+      ) as Array<{ kind: string }>;
+      expect(marks.some((mark) => mark.kind === "changed")).toBe(true);
     });
   });
 });

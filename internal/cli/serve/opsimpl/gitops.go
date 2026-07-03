@@ -660,6 +660,38 @@ func (g *GitOpsImpl) GitStatusPorcelain(worktreePath string) (map[string]string,
 	return map[string]string(status), nil
 }
 
+func (g *GitOpsImpl) GitShowFileAtRev(worktreePath, rev, path string, maxBytes int64) (*ops.GitFileContentAtRev, error) {
+	result, err := git.ShowFileAtRev(worktreePath, rev, path, maxBytes)
+	if err != nil {
+		return nil, err
+	}
+	return &ops.GitFileContentAtRev{
+		Content:   result.Content,
+		Size:      result.Size,
+		Truncated: result.Truncated,
+	}, nil
+}
+
+func (g *GitOpsImpl) GitDiffFile(worktreePath, path, from, to string) (string, error) {
+	return git.DiffFile(worktreePath, path, from, to)
+}
+
+func (g *GitOpsImpl) GitLogFile(worktreePath, path string, limit int) (string, error) {
+	return git.LogFile(worktreePath, path, limit)
+}
+
+func (g *GitOpsImpl) GitBlamePorcelain(worktreePath, path string) (string, error) {
+	return git.BlamePorcelain(worktreePath, path)
+}
+
+func (g *GitOpsImpl) ResolveLoomDataDir() (string, error) {
+	dir := config.GetConfigDir()
+	if strings.TrimSpace(dir) == "" {
+		return "", fmt.Errorf("cannot resolve loom data directory")
+	}
+	return filepath.Abs(dir)
+}
+
 func (g *GitOpsImpl) GetCurrentBranch(worktreePath string) (string, error) {
 	return cli.GetCurrentBranch(worktreePath)
 }

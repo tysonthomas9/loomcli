@@ -62,6 +62,26 @@ func (m *mockFileOps) GitStatusPorcelain(worktreePath string) (map[string]string
 	return map[string]string{}, nil
 }
 
+func (m *mockFileOps) GitShowFileAtRev(worktreePath, rev, path string, maxBytes int64) (*ops.GitFileContentAtRev, error) {
+	return &ops.GitFileContentAtRev{Content: []byte(""), Size: 0}, nil
+}
+
+func (m *mockFileOps) GitDiffFile(worktreePath, path, from, to string) (string, error) {
+	return "", nil
+}
+
+func (m *mockFileOps) GitLogFile(worktreePath, path string, limit int) (string, error) {
+	return "", nil
+}
+
+func (m *mockFileOps) GitBlamePorcelain(worktreePath, path string) (string, error) {
+	return "", nil
+}
+
+func (m *mockFileOps) ResolveLoomDataDir() (string, error) {
+	return os.TempDir(), nil
+}
+
 // setupTestWorktree creates a temporary directory with test files.
 func setupTestWorktree(t *testing.T) string {
 	t.Helper()
