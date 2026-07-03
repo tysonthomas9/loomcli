@@ -1,4 +1,4 @@
-import { useMemo, lazy, Suspense } from "react";
+import { useCallback, useMemo, lazy, Suspense } from "react";
 import type { FileReadData } from "@/api/workspace";
 import { detectLanguage } from "@/utils/detectLanguage";
 import styles from "./FileExplorer.module.css";
@@ -25,6 +25,8 @@ interface WorkspaceFilePaneProps {
   onSplitRight: () => void;
   /** Reveal a folder in the tree when its breadcrumb segment is clicked. */
   onNavigate?: ((dirPath: string) => void) | undefined;
+  lineTarget?: { line: number; token: number } | undefined;
+  onLineTargetApplied?: ((path: string, token: number) => void) | undefined;
 }
 
 /** Clickable path breadcrumb; folder segments reveal that folder in the tree. */
@@ -86,12 +88,29 @@ export function WorkspaceFilePane({
   onToggleSearch,
   onSplitRight,
   onNavigate,
+  lineTarget,
+  onLineTargetApplied,
 }: WorkspaceFilePaneProps) {
   const language = useMemo(
     () => (path ? detectLanguage(path) : undefined),
     [path],
   );
   const isReadOnly = isSaving || !!fileData?.truncated || !!fileData?.binary;
+  const editorLineTarget =
+    lineTarget &&
+    path &&
+    !isLoading &&
+    fileData &&
+    fileData.path === path &&
+    !fileData.binary &&
+    content === (fileData.content ?? "")
+      ? lineTarget
+      : undefined;
+  const handleLineTargetApplied = useCallback(() => {
+    if (path && editorLineTarget) {
+      onLineTargetApplied?.(path, editorLineTarget.token);
+    }
+  }, [editorLineTarget, onLineTargetApplied, path]);
 
   return (
     <div className={styles.viewerColumn}>
@@ -194,6 +213,9 @@ export function WorkspaceFilePane({
               language={language}
               readOnly={isReadOnly}
               searchOpen={searchOpen}
+              scrollToLine={editorLineTarget?.line}
+              scrollToLineKey={editorLineTarget?.token}
+              onScrollToLineApplied={handleLineTargetApplied}
             />
           </Suspense>
         )}

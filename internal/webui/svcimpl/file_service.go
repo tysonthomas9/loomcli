@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/ops"
@@ -21,12 +22,17 @@ var _ service.FileService = (*fileServiceImpl)(nil)
 
 // fileServiceImpl is the concrete implementation of FileService.
 type fileServiceImpl struct {
-	fileOps ops.FileOps
+	fileOps      ops.FileOps
+	indexCacheMu sync.Mutex
+	indexCache   map[string]fileIndexCacheEntry
 }
 
 // NewFileService creates a new FileService implementation.
 func NewFileService(fileOps ops.FileOps) service.FileService {
-	return &fileServiceImpl{fileOps: fileOps}
+	return &fileServiceImpl{
+		fileOps:    fileOps,
+		indexCache: make(map[string]fileIndexCacheEntry),
+	}
 }
 
 func (s *fileServiceImpl) ListDirectory(ctx context.Context, wsID, agentName, path string) (*service.FileTreeResult, error) {
@@ -270,7 +276,11 @@ func (s *fileServiceImpl) WriteFileScoped(_ context.Context, wsID string, scope 
 	if err != nil {
 		return err
 	}
-	return writeFileAt(root, path, content)
+	if err := writeFileAt(root, path, content); err != nil {
+		return err
+	}
+	s.invalidateIndex(root)
+	return nil
 }
 
 func (s *fileServiceImpl) DeletePathScoped(_ context.Context, wsID string, scope service.FileScope, target, path string, recursive bool) error {
@@ -278,7 +288,11 @@ func (s *fileServiceImpl) DeletePathScoped(_ context.Context, wsID string, scope
 	if err != nil {
 		return err
 	}
-	return deletePathAt(root, path, recursive)
+	if err := deletePathAt(root, path, recursive); err != nil {
+		return err
+	}
+	s.invalidateIndex(root)
+	return nil
 }
 
 func (s *fileServiceImpl) MkdirScoped(_ context.Context, wsID string, scope service.FileScope, target, path string) error {
@@ -286,7 +300,11 @@ func (s *fileServiceImpl) MkdirScoped(_ context.Context, wsID string, scope serv
 	if err != nil {
 		return err
 	}
-	return mkdirAt(root, path)
+	if err := mkdirAt(root, path); err != nil {
+		return err
+	}
+	s.invalidateIndex(root)
+	return nil
 }
 
 func (s *fileServiceImpl) MovePathScoped(_ context.Context, wsID string, scope service.FileScope, target, from, to string, overwrite bool) error {
@@ -294,7 +312,11 @@ func (s *fileServiceImpl) MovePathScoped(_ context.Context, wsID string, scope s
 	if err != nil {
 		return err
 	}
-	return movePathAt(root, from, to, overwrite)
+	if err := movePathAt(root, from, to, overwrite); err != nil {
+		return err
+	}
+	s.invalidateIndex(root)
+	return nil
 }
 
 func writeFileAt(rootDir, path, content string) error {

@@ -89,6 +89,12 @@ export interface CodeMirrorEditorProps {
   searchOpen?: boolean | undefined;
   /** Hide line numbers gutter */
   hideLineNumbers?: boolean | undefined;
+  /** One-based line number to reveal. */
+  scrollToLine?: number | undefined;
+  /** Change token used to repeat a scroll to the same line. */
+  scrollToLineKey?: number | string | undefined;
+  /** Called after a requested line has been revealed. */
+  onScrollToLineApplied?: (() => void) | undefined;
   /** Additional CSS class for the container */
   className?: string | undefined;
 }
@@ -160,6 +166,9 @@ export function CodeMirrorEditor({
   placeholder,
   searchOpen,
   hideLineNumbers,
+  scrollToLine,
+  scrollToLineKey,
+  onScrollToLineApplied,
   className,
 }: CodeMirrorEditorProps): JSX.Element {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -330,6 +339,22 @@ export function CodeMirrorEditor({
       closeSearchPanel(view);
     }
   }, [searchOpen]);
+
+  useEffect(() => {
+    const view = viewRef.current;
+    if (!view || !scrollToLine) return;
+    const lineNumber = Math.min(
+      Math.max(1, Math.floor(scrollToLine)),
+      view.state.doc.lines,
+    );
+    const line = view.state.doc.line(lineNumber);
+    view.dispatch({
+      selection: { anchor: line.from },
+      effects: EditorView.scrollIntoView(line.from, { y: "center" }),
+    });
+    view.focus();
+    onScrollToLineApplied?.();
+  }, [onScrollToLineApplied, scrollToLine, scrollToLineKey]);
 
   const rootClassName = [styles.container, className].filter(Boolean).join(" ");
 

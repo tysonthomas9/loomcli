@@ -808,6 +808,245 @@
   color: var(--color-danger-contrast, white);
 }
 
+.emptyState {
+  padding: var(--space-4);
+  color: var(--color-text-muted);
+  font-size: var(--font-size-sm);
+  text-align: center;
+}
+
+.limitBanner {
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--color-border-light);
+  background: var(--color-warning-bg, var(--color-bg-hover));
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+}
+
+/* === Quick Open === */
+.paletteOverlay {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-modal, 1200);
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 16vh;
+  background: rgb(0 0 0 / 38%);
+}
+
+.paletteDialog {
+  width: min(640px, calc(100vw - 32px));
+  max-height: min(560px, calc(100vh - 64px));
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-panel-bg, var(--color-bg));
+  box-shadow: var(--shadow-lg, 0 8px 24px rgb(0 0 0 / 18%));
+}
+
+.paletteSearch {
+  padding: var(--space-3);
+  border-bottom: 1px solid var(--color-border-light);
+}
+
+.paletteResults {
+  overflow-y: auto;
+  padding: var(--space-1) 0;
+}
+
+.paletteItem {
+  display: grid;
+  grid-template-columns: minmax(120px, 0.8fr) minmax(0, 1.2fr);
+  gap: var(--space-2);
+  width: 100%;
+  padding: 7px var(--space-3);
+  border: none;
+  background: none;
+  color: var(--color-text-primary);
+  font-family: var(--font-family-mono);
+  font-size: var(--font-size-sm);
+  text-align: left;
+  cursor: pointer;
+}
+
+.paletteItem:hover,
+.paletteItem[data-highlighted] {
+  background: var(--color-bg-hover);
+}
+
+.paletteName,
+.palettePath {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.palettePath {
+  color: var(--color-text-muted);
+  font-size: var(--font-size-xs, 11px);
+}
+
+/* === Global search === */
+.searchPanel {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--color-bg);
+}
+
+.searchPanelHeader {
+  min-height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 var(--space-2) 0 var(--space-3);
+  border-bottom: 1px solid var(--color-border-light);
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-xs, 11px);
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.searchForm {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border-bottom: 1px solid var(--color-border-light);
+}
+
+.searchOptions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-xs, 11px);
+}
+
+.searchOptions label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.searchActions {
+  display: flex;
+  gap: var(--space-2);
+}
+
+.searchError {
+  padding: var(--space-2) var(--space-3);
+  color: var(--color-danger);
+  font-size: var(--font-size-sm);
+}
+
+.searchResults {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: var(--space-1) 0 var(--space-2);
+}
+
+.searchResultGroup {
+  padding: var(--space-1) 0;
+}
+
+.searchResultPath {
+  padding: 5px var(--space-3);
+  color: var(--color-text-secondary);
+  font-family: var(--font-family-mono);
+  font-size: var(--font-size-xs, 11px);
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.searchMatch {
+  display: grid;
+  grid-template-columns: 36px minmax(0, 1fr);
+  gap: var(--space-2);
+  width: 100%;
+  padding: 4px var(--space-3);
+  border: none;
+  background: none;
+  color: var(--color-text-primary);
+  font-family: var(--font-family-mono);
+  font-size: var(--font-size-xs, 11px);
+  text-align: left;
+  cursor: pointer;
+}
+
+.searchMatch:hover,
+.searchMatch:focus-visible {
+  background: var(--color-bg-hover);
+}
+
+.searchMatchLine {
+  color: var(--color-text-muted);
+  text-align: right;
+}
+
+.searchMatchPreview {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.replacePreview {
+  max-height: 38%;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border-bottom: 1px solid var(--color-border-light);
+}
+
+.replacePreviewHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+}
+
+.replacePreviewList {
+  overflow-y: auto;
+  padding: 0 var(--space-3) var(--space-2);
+}
+
+.replacePreviewList details {
+  margin-bottom: var(--space-2);
+}
+
+.replacePreviewList summary {
+  color: var(--color-text-primary);
+  font-family: var(--font-family-mono);
+  font-size: var(--font-size-xs, 11px);
+  cursor: pointer;
+}
+
+.replacePreviewList pre {
+  margin: var(--space-1) 0 0;
+  padding: var(--space-2);
+  overflow-x: auto;
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-subtle, var(--color-bg-hover));
+  color: var(--color-text-secondary);
+  font-family: var(--font-family-mono);
+  font-size: var(--font-size-xs, 11px);
+  white-space: pre;
+}
+
 /* === Responsive === */
 @media (width <= 640px) {
   /* Stack tree over editor at narrow widths so the editor isn't squeezed to a

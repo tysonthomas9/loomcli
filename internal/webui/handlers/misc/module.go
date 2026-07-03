@@ -29,6 +29,8 @@ func (m *Module) Register(mux *http.ServeMux) {
 
 	// Scope-rooted file browser. scope defaults to the workspace folder.
 	mux.HandleFunc("GET /api/workspaces/{ws}/files/tree", HandleScopedFileTree(m.fileSvc))
+	mux.HandleFunc("GET /api/workspaces/{ws}/files/index", HandleScopedFileIndex(m.fileSvc))
+	mux.HandleFunc("POST /api/workspaces/{ws}/files/search", HandleScopedFileSearch(m.fileSvc))
 	mux.HandleFunc("GET /api/workspaces/{ws}/files", HandleScopedFileRead(m.fileSvc))
 	mux.HandleFunc("PUT /api/workspaces/{ws}/files", HandleScopedFileWrite(m.fileSvc))
 	mux.HandleFunc("DELETE /api/workspaces/{ws}/files", HandleScopedFileDelete(m.fileSvc))

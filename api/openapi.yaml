@@ -2582,6 +2582,66 @@ paths:
               schema:
                 $ref: "#/components/schemas/FileTreeResponse"
 
+  /api/workspaces/{ws}/files/index:
+    get:
+      operationId: getScopedFileIndex
+      tags: [files]
+      summary: Get quick-open file index for a scoped file browser root
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: scope
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [workspace, repo, agent]
+            default: workspace
+        - name: target
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Quick-open file index
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FileIndexResponse"
+
+  /api/workspaces/{ws}/files/search:
+    post:
+      operationId: searchScopedFiles
+      tags: [files]
+      summary: Search files in a scoped file browser root
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: scope
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [workspace, repo, agent]
+            default: workspace
+        - name: target
+          in: query
+          required: false
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/FileSearchRequest"
+      responses:
+        "200":
+          description: File search results
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FileSearchResponse"
+
   /api/workspaces/{ws}/files:
     get:
       operationId: readScopedFile
@@ -3527,6 +3587,72 @@ components:
         binary:
           type: boolean
         truncated:
+          type: boolean
+
+    FileIndexResponse:
+      type: object
+      required: [paths, truncated]
+      properties:
+        paths:
+          type: array
+          items:
+            type: string
+        truncated:
+          type: boolean
+
+    FileSearchRequest:
+      type: object
+      required: [query]
+      properties:
+        query:
+          type: string
+        regex:
+          type: boolean
+          default: false
+        include:
+          type: array
+          items:
+            type: string
+        exclude:
+          type: array
+          nullable: true
+          items:
+            type: string
+        caseSensitive:
+          type: boolean
+          default: false
+
+    FileSearchMatch:
+      type: object
+      required: [line, col, preview]
+      properties:
+        line:
+          type: integer
+        col:
+          type: integer
+        preview:
+          type: string
+
+    FileSearchFileResult:
+      type: object
+      required: [path, matches]
+      properties:
+        path:
+          type: string
+        matches:
+          type: array
+          items:
+            $ref: "#/components/schemas/FileSearchMatch"
+
+    FileSearchResponse:
+      type: object
+      required: [results, limitHit]
+      properties:
+        results:
+          type: array
+          items:
+            $ref: "#/components/schemas/FileSearchFileResult"
+        limitHit:
           type: boolean
 
     FileWriteRequest:

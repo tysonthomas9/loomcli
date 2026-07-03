@@ -4,6 +4,7 @@
 package misc
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -15,6 +16,7 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/ops"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
+	"github.com/tysonthomas9/loomcli/internal/webui/service"
 )
 
 // wsRootFor returns a mockFileOps whose workspace root resolves to dir.
@@ -50,6 +52,42 @@ type handlerScopeCase struct {
 	scope  string
 	target string
 	root   string
+}
+
+type recordingNavigationFileService struct {
+	stubFileService
+	indexWS      string
+	indexScope   service.FileScope
+	indexTarget  string
+	searchWS     string
+	searchScope  service.FileScope
+	searchTarget string
+	searchReq    service.FileSearchRequest
+}
+
+func (s *recordingNavigationFileService) IndexFilesScoped(_ context.Context, wsID string, scope service.FileScope, target string) (*service.FileIndexResult, error) {
+	s.indexWS = wsID
+	s.indexScope = scope
+	s.indexTarget = target
+	return &service.FileIndexResult{Paths: []string{"src/main.go"}, Truncated: true}, nil
+}
+
+func (s *recordingNavigationFileService) SearchFilesScoped(_ context.Context, wsID string, scope service.FileScope, target string, req service.FileSearchRequest) (*service.FileSearchResult, error) {
+	s.searchWS = wsID
+	s.searchScope = scope
+	s.searchTarget = target
+	s.searchReq = req
+	return &service.FileSearchResult{
+		Results: []service.FileSearchFileResult{{
+			Path: "src/main.go",
+			Matches: []service.FileSearchMatch{{
+				Line:    2,
+				Col:     4,
+				Preview: "const needle = true",
+			}},
+		}},
+		LimitHit: true,
+	}, nil
 }
 
 func scopedHandlersFixture(t *testing.T) (*mockFileOps, []handlerScopeCase) {
@@ -108,6 +146,65 @@ func scopedMoveURL(sc handlerScopeCase) string {
 		url += "&target=" + sc.target
 	}
 	return url
+}
+
+func TestHandleScopedFileIndex_UsesScopeTarget(t *testing.T) {
+	svc := &recordingNavigationFileService{}
+	h := HandleScopedFileIndex(svc)
+	req := scopedReq("/api/workspaces/test-ws/files/index?scope=repo&target=repo-a")
+	rr := httptest.NewRecorder()
+
+	h.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, body %s", rr.Code, rr.Body.String())
+	}
+	if svc.indexWS != "test-ws" || svc.indexScope != service.ScopeRepo || svc.indexTarget != "repo-a" {
+		t.Fatalf("recorded call = ws %q scope %q target %q", svc.indexWS, svc.indexScope, svc.indexTarget)
+	}
+	var body service.FileIndexResult
+	if err := json.NewDecoder(rr.Body).Decode(&body); err != nil {
+		t.Fatalf("decode body: %v", err)
+	}
+	if !body.Truncated || len(body.Paths) != 1 || body.Paths[0] != "src/main.go" {
+		t.Fatalf("body = %+v", body)
+	}
+}
+
+func TestHandleScopedFileSearch_DecodesRequest(t *testing.T) {
+	svc := &recordingNavigationFileService{}
+	h := HandleScopedFileSearch(svc)
+	req := scopedReqBody(
+		http.MethodPost,
+		"/api/workspaces/test-ws/files/search?scope=agent&target=agent-a",
+		`{"query":"needle","regex":true,"include":["src/*.go"],"exclude":["vendor/*"],"caseSensitive":true}`,
+	)
+	rr := httptest.NewRecorder()
+
+	h.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, body %s", rr.Code, rr.Body.String())
+	}
+	if svc.searchWS != "test-ws" || svc.searchScope != service.ScopeAgent || svc.searchTarget != "agent-a" {
+		t.Fatalf("recorded call = ws %q scope %q target %q", svc.searchWS, svc.searchScope, svc.searchTarget)
+	}
+	if svc.searchReq.Query != "needle" || !svc.searchReq.Regex || !svc.searchReq.CaseSensitive {
+		t.Fatalf("search request flags = %+v", svc.searchReq)
+	}
+	if strings.Join(svc.searchReq.Include, ",") != "src/*.go" {
+		t.Fatalf("include = %+v", svc.searchReq.Include)
+	}
+	if svc.searchReq.Exclude == nil || strings.Join(*svc.searchReq.Exclude, ",") != "vendor/*" {
+		t.Fatalf("exclude = %+v", svc.searchReq.Exclude)
+	}
+	var body service.FileSearchResult
+	if err := json.NewDecoder(rr.Body).Decode(&body); err != nil {
+		t.Fatalf("decode body: %v", err)
+	}
+	if !body.LimitHit || len(body.Results) != 1 || body.Results[0].Matches[0].Line != 2 {
+		t.Fatalf("body = %+v", body)
+	}
 }
 
 func TestHandleScopedFileTree_WorkspaceRootListsEntries(t *testing.T) {

@@ -168,6 +168,51 @@ func HandleScopedFileRead(svc service.FileService) http.HandlerFunc {
 	}
 }
 
+// HandleScopedFileIndex handles GET /api/workspaces/{ws}/files/index?scope=&target=.
+func HandleScopedFileIndex(svc service.FileService) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		wsID := middleware.WorkspaceFromContext(r.Context())
+		scope, target := scopeFromQuery(r)
+
+		result, err := svc.IndexFilesScoped(r.Context(), wsID, scope, target)
+		if err != nil {
+			handler.HandleServiceError(w, err)
+			return
+		}
+		handler.WriteJSON(w, http.StatusOK, result)
+	}
+}
+
+// HandleScopedFileSearch handles POST /api/workspaces/{ws}/files/search?scope=&target=.
+func HandleScopedFileSearch(svc service.FileService) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		wsID := middleware.WorkspaceFromContext(r.Context())
+		scope, target := scopeFromQuery(r)
+
+		var req service.FileSearchRequest
+		if r.Body == nil {
+			handler.RespondError(w, http.StatusBadRequest, "request body is required")
+			return
+		}
+		defer r.Body.Close()
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, handler.MaxRequestBody)).Decode(&req); err != nil {
+			if strings.Contains(err.Error(), "http: request body too large") {
+				handler.RespondError(w, http.StatusRequestEntityTooLarge, "request body too large")
+				return
+			}
+			handler.RespondError(w, http.StatusBadRequest, "invalid request body")
+			return
+		}
+
+		result, err := svc.SearchFilesScoped(r.Context(), wsID, scope, target, req)
+		if err != nil {
+			handler.HandleServiceError(w, err)
+			return
+		}
+		handler.WriteJSON(w, http.StatusOK, result)
+	}
+}
+
 // fileWriteRequest is the JSON body for PUT /api/agents/{name}/files?path=
 type fileWriteRequest struct {
 	Content string `json:"content"`

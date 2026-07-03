@@ -2,12 +2,14 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 
 import {
   deleteScopedPath,
+  indexScopedFiles,
   listScopedDir,
   listWorktreeDir,
   mkdirScoped,
   moveScopedPath,
   readScopedFile,
   readWorktreeFile,
+  searchScopedFiles,
   writeScopedFile,
   writeWorktreeFile,
 } from "../files";
@@ -354,6 +356,46 @@ describe("files API", () => {
       expect(mockPatch).toHaveBeenCalledWith(
         "/api/workspaces/test-ws-id/files/move?scope=repo&target=loomcli",
         { from: "old.txt", to: "new.txt", overwrite: true },
+      );
+    });
+
+    it("indexes scoped files", async () => {
+      mockGet.mockResolvedValue({ paths: ["src/main.go"], truncated: false });
+
+      await indexScopedFiles("test-ws-id", {
+        scope: "agent",
+        target: "atlas",
+      });
+
+      expect(mockGet).toHaveBeenCalledWith(
+        "/api/workspaces/test-ws-id/files/index?scope=agent&target=atlas",
+      );
+    });
+
+    it("searches scoped files with options", async () => {
+      mockPost.mockResolvedValue({ results: [], limitHit: true });
+
+      await searchScopedFiles(
+        "test-ws-id",
+        { scope: "repo", target: "loomcli" },
+        {
+          query: "needle",
+          regex: true,
+          include: ["src/*.go"],
+          exclude: [],
+          caseSensitive: true,
+        },
+      );
+
+      expect(mockPost).toHaveBeenCalledWith(
+        "/api/workspaces/test-ws-id/files/search?scope=repo&target=loomcli",
+        {
+          query: "needle",
+          regex: true,
+          include: ["src/*.go"],
+          exclude: [],
+          caseSensitive: true,
+        },
       );
     });
   });

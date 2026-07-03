@@ -110,6 +110,12 @@ func (s *stubFileService) ListDirectoryScoped(_ context.Context, _ string, _ ser
 func (s *stubFileService) ReadFileScoped(_ context.Context, _ string, _ service.FileScope, _, _ string) (*service.FileReadResult, error) {
 	return &service.FileReadResult{}, nil
 }
+func (s *stubFileService) IndexFilesScoped(_ context.Context, _ string, _ service.FileScope, _ string) (*service.FileIndexResult, error) {
+	return &service.FileIndexResult{}, nil
+}
+func (s *stubFileService) SearchFilesScoped(_ context.Context, _ string, _ service.FileScope, _ string, _ service.FileSearchRequest) (*service.FileSearchResult, error) {
+	return &service.FileSearchResult{}, nil
+}
 func (s *stubFileService) WriteFileScoped(_ context.Context, _ string, _ service.FileScope, _, _, _ string) error {
 	return nil
 }

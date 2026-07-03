@@ -45,6 +45,14 @@ type FileService interface {
 	// metadata only.
 	ReadFileScoped(ctx context.Context, wsID string, scope FileScope, target, path string) (*FileReadResult, error)
 
+	// IndexFilesScoped returns root-relative file paths under a scope root for
+	// quick-open navigation. Results are capped and report Truncated when clipped.
+	IndexFilesScoped(ctx context.Context, wsID string, scope FileScope, target string) (*FileIndexResult, error)
+
+	// SearchFilesScoped searches text files under a scope root. The bounded walk
+	// reports LimitHit when any search cap clips the scan or result set.
+	SearchFilesScoped(ctx context.Context, wsID string, scope FileScope, target string, req FileSearchRequest) (*FileSearchResult, error)
+
 	// WriteFileScoped creates or updates a file under a scope root.
 	WriteFileScoped(ctx context.Context, wsID string, scope FileScope, target, path, content string) error
 
@@ -79,6 +87,40 @@ type FileReadResult struct {
 	Size      int64  `json:"size"`
 	Binary    bool   `json:"binary"`
 	Truncated bool   `json:"truncated"`
+}
+
+// FileIndexResult is the response for scoped quick-open indexing.
+type FileIndexResult struct {
+	Paths     []string `json:"paths"`
+	Truncated bool     `json:"truncated"`
+}
+
+// FileSearchRequest is the JSON body for a scoped global file search.
+type FileSearchRequest struct {
+	Query         string    `json:"query"`
+	Regex         bool      `json:"regex,omitempty"`
+	Include       []string  `json:"include,omitempty"`
+	Exclude       *[]string `json:"exclude,omitempty"`
+	CaseSensitive bool      `json:"caseSensitive,omitempty"`
+}
+
+// FileSearchResult is the response for scoped global file search.
+type FileSearchResult struct {
+	Results  []FileSearchFileResult `json:"results"`
+	LimitHit bool                   `json:"limitHit"`
+}
+
+// FileSearchFileResult groups text matches by root-relative file path.
+type FileSearchFileResult struct {
+	Path    string            `json:"path"`
+	Matches []FileSearchMatch `json:"matches"`
+}
+
+// FileSearchMatch describes a single one-line text match.
+type FileSearchMatch struct {
+	Line    int    `json:"line"`
+	Col     int    `json:"col"`
+	Preview string `json:"preview"`
 }
 
 // FileMoveRequest is the JSON body for a scoped file move/rename operation.

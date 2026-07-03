@@ -28,6 +28,35 @@ export interface FileReadData {
   truncated?: boolean;
 }
 
+export interface FileIndexData {
+  paths: string[];
+  truncated: boolean;
+}
+
+export interface FileSearchRequest {
+  query: string;
+  regex?: boolean;
+  include?: string[];
+  exclude?: string[];
+  caseSensitive?: boolean;
+}
+
+export interface FileSearchMatch {
+  line: number;
+  col: number;
+  preview: string;
+}
+
+export interface FileSearchFileResult {
+  path: string;
+  matches: FileSearchMatch[];
+}
+
+export interface FileSearchData {
+  results: FileSearchFileResult[];
+  limitHit: boolean;
+}
+
 export type FileScope = "workspace" | "repo" | "agent";
 
 export interface FileScopeRef {
@@ -177,6 +206,32 @@ export async function readScopedFile(
   path: string,
 ): Promise<FileReadData> {
   return get<FileReadData>(scopedUrl(workspaceId, "/files", scopeRef, path));
+}
+
+/**
+ * Fetch the quick-open file index for any scoped file browser root.
+ * GET /api/workspaces/{ws}/files/index?scope=&target=
+ */
+export async function indexScopedFiles(
+  workspaceId: string,
+  scopeRef: FileScopeRef,
+): Promise<FileIndexData> {
+  return get<FileIndexData>(scopedUrl(workspaceId, "/files/index", scopeRef));
+}
+
+/**
+ * Search text files in any scoped file browser root.
+ * POST /api/workspaces/{ws}/files/search?scope=&target=
+ */
+export async function searchScopedFiles(
+  workspaceId: string,
+  scopeRef: FileScopeRef,
+  request: FileSearchRequest,
+): Promise<FileSearchData> {
+  return post<FileSearchData>(
+    scopedUrl(workspaceId, "/files/search", scopeRef),
+    request,
+  );
 }
 
 /**

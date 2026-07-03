@@ -312,6 +312,20 @@ func (s *testFileServiceImpl) ReadFileScoped(_ context.Context, wsID string, sco
 	return &service.FileReadResult{Path: cleanPath, Content: string(data), Size: fi.Size(), Truncated: truncated}, nil
 }
 
+func (s *testFileServiceImpl) IndexFilesScoped(_ context.Context, wsID string, scope service.FileScope, target string) (*service.FileIndexResult, error) {
+	if _, err := s.resolveScopeRootTest(wsID, scope, target); err != nil {
+		return nil, err
+	}
+	return &service.FileIndexResult{Paths: []string{}, Truncated: false}, nil
+}
+
+func (s *testFileServiceImpl) SearchFilesScoped(_ context.Context, wsID string, scope service.FileScope, target string, _ service.FileSearchRequest) (*service.FileSearchResult, error) {
+	if _, err := s.resolveScopeRootTest(wsID, scope, target); err != nil {
+		return nil, err
+	}
+	return &service.FileSearchResult{Results: []service.FileSearchFileResult{}, LimitHit: false}, nil
+}
+
 func (s *testFileServiceImpl) WriteFileScoped(_ context.Context, wsID string, scope service.FileScope, target, path, content string) error {
 	root, err := s.resolveScopeRootTest(wsID, scope, target)
 	if err != nil {
@@ -667,6 +681,12 @@ func (s *stubFileService) ListDirectoryScoped(_ context.Context, _ string, _ ser
 }
 func (s *stubFileService) ReadFileScoped(_ context.Context, _ string, _ service.FileScope, _, _ string) (*service.FileReadResult, error) {
 	return &service.FileReadResult{}, nil
+}
+func (s *stubFileService) IndexFilesScoped(_ context.Context, _ string, _ service.FileScope, _ string) (*service.FileIndexResult, error) {
+	return &service.FileIndexResult{}, nil
+}
+func (s *stubFileService) SearchFilesScoped(_ context.Context, _ string, _ service.FileScope, _ string, _ service.FileSearchRequest) (*service.FileSearchResult, error) {
+	return &service.FileSearchResult{}, nil
 }
 func (s *stubFileService) WriteFileScoped(_ context.Context, _ string, _ service.FileScope, _, _, _ string) error {
 	return nil

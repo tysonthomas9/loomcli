@@ -1481,6 +1481,40 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/workspaces/{ws}/files/index": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Get quick-open file index for a scoped file browser root */
+    get: operations["getScopedFileIndex"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/workspaces/{ws}/files/search": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Search files in a scoped file browser root */
+    post: operations["searchScopedFiles"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/workspaces/{ws}/files": {
     parameters: {
       query?: never;
@@ -2040,6 +2074,32 @@ export interface components {
       size: number;
       binary: boolean;
       truncated: boolean;
+    };
+    FileIndexResponse: {
+      paths: string[];
+      truncated: boolean;
+    };
+    FileSearchRequest: {
+      query: string;
+      /** @default false */
+      regex: boolean;
+      include?: string[];
+      exclude?: string[] | null;
+      /** @default false */
+      caseSensitive: boolean;
+    };
+    FileSearchMatch: {
+      line: number;
+      col: number;
+      preview: string;
+    };
+    FileSearchFileResult: {
+      path: string;
+      matches: components["schemas"]["FileSearchMatch"][];
+    };
+    FileSearchResponse: {
+      results: components["schemas"]["FileSearchFileResult"][];
+      limitHit: boolean;
     };
     FileWriteRequest: {
       content: string;
@@ -5890,6 +5950,62 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["FileTreeResponse"];
+        };
+      };
+    };
+  };
+  getScopedFileIndex: {
+    parameters: {
+      query?: {
+        scope?: "workspace" | "repo" | "agent";
+        target?: string;
+      };
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Quick-open file index */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["FileIndexResponse"];
+        };
+      };
+    };
+  };
+  searchScopedFiles: {
+    parameters: {
+      query?: {
+        scope?: "workspace" | "repo" | "agent";
+        target?: string;
+      };
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["FileSearchRequest"];
+      };
+    };
+    responses: {
+      /** @description File search results */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["FileSearchResponse"];
         };
       };
     };

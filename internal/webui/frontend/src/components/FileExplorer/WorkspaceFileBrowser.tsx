@@ -15,6 +15,7 @@ import { ResizeHandle } from "@/components/ResizeHandle";
 import type { FileEntry, FileScopeRef } from "@/api/workspace";
 import {
   deleteScopedPath,
+  indexScopedFiles,
   mkdirScoped,
   moveScopedPath,
   readScopedFile,
@@ -37,7 +38,9 @@ import {
   type FileTreeInlineEdit,
   type FileTreeNodeInfo,
 } from "./FileTree";
+import { FileSearchPanel } from "./FileSearchPanel";
 import { FileTabBar } from "./FileTabBar";
+import { QuickOpenPalette } from "./QuickOpenPalette";
 import { WorkspaceFilePane } from "./WorkspaceFilePane";
 import styles from "./FileExplorer.module.css";
 
@@ -50,6 +53,7 @@ const MAX_TREE_WIDTH = 400;
 const DEFAULT_GROUP_WIDTH = 560;
 const MIN_GROUP_WIDTH = 320;
 const MAX_GROUP_WIDTH = 1100;
+const QUICK_OPEN_STALE_MS = 10_000;
 
 function clampTreeWidth(w: number): number {
   return Math.min(MAX_TREE_WIDTH, Math.max(MIN_TREE_WIDTH, w));
@@ -125,6 +129,11 @@ interface ContextMenuState {
 
 interface DeleteConfirmState {
   node: FileTreeNodeInfo;
+}
+
+interface LineTarget {
+  line: number;
+  token: number;
 }
 
 function OpenEditors({
@@ -337,6 +346,8 @@ function EditorGroup({
   onSplitRight,
   onNavigate,
   onSaved,
+  lineTarget,
+  onLineTargetApplied,
 }: {
   groupIndex: number;
   group: FileBrowserGroup;
@@ -348,6 +359,8 @@ function EditorGroup({
   onSplitRight: (groupIndex: number) => void;
   onNavigate: (dirPath: string) => void;
   onSaved: (path: string) => void;
+  lineTarget?: LineTarget | undefined;
+  onLineTargetApplied: (path: string, token: number) => void;
 }) {
   const { workspaceId } = useWorkspaceContext();
   const store = useFileBrowserStoreInstance();
@@ -421,6 +434,8 @@ function EditorGroup({
         onToggleSearch={() => setSearchOpen((open) => !open)}
         onSplitRight={() => onSplitRight(groupIndex)}
         onNavigate={onNavigate}
+        lineTarget={lineTarget}
+        onLineTargetApplied={onLineTargetApplied}
       />
     </section>
   );
@@ -446,12 +461,23 @@ function FileBrowserInner({ scopeRef }: FileBrowserProps) {
   const groups = useStore(store, (s) => s.groups);
   const activeGroup = useStore(store, (s) => s.activeGroup);
   const dirty = useStore(store, (s) => s.dirty);
+  const mru = useStore(store, (s) => s.mru);
 
   const [treeWidth, setTreeWidth] = useState<number>(getStoredTreeWidth);
   const [splitLeftWidth, setSplitLeftWidth] = useState(DEFAULT_GROUP_WIDTH);
   const [jumpText, setJumpText] = useState<string>("");
   const [scrollTarget, setScrollTarget] = useState<string | null>(null);
+  const [lineTargets, setLineTargets] = useState<Record<string, LineTarget>>(
+    {},
+  );
   const [openEditorsCollapsed, setOpenEditorsCollapsed] = useState(false);
+  const [quickOpenOpen, setQuickOpenOpen] = useState(false);
+  const [quickOpenPaths, setQuickOpenPaths] = useState<string[]>([]);
+  const [quickOpenTruncated, setQuickOpenTruncated] = useState(false);
+  const [quickOpenFetchedAt, setQuickOpenFetchedAt] = useState(0);
+  const [quickOpenLoading, setQuickOpenLoading] = useState(false);
+  const [quickOpenError, setQuickOpenError] = useState<string | null>(null);
+  const [searchPanelOpen, setSearchPanelOpen] = useState(false);
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
   const [inlineEdit, setInlineEdit] = useState<FileTreeInlineEdit | null>(null);
   const [deleteConfirm, setDeleteConfirm] = useState<DeleteConfirmState | null>(
@@ -460,6 +486,36 @@ function FileBrowserInner({ scopeRef }: FileBrowserProps) {
   const inlineCommitKeyRef = useRef<string | null>(null);
 
   const activePath = groups[activeGroup]?.active ?? groups[0]?.active ?? null;
+
+  const markIndexStale = useCallback(() => {
+    setQuickOpenFetchedAt(0);
+  }, []);
+
+  const fetchQuickOpenIndex = useCallback(
+    async (force = false) => {
+      const now = Date.now();
+      if (
+        !force &&
+        quickOpenFetchedAt > 0 &&
+        now - quickOpenFetchedAt < QUICK_OPEN_STALE_MS
+      ) {
+        return;
+      }
+      setQuickOpenLoading(true);
+      setQuickOpenError(null);
+      try {
+        const index = await indexScopedFiles(workspaceId, scopeRef);
+        setQuickOpenPaths(index.paths);
+        setQuickOpenTruncated(index.truncated);
+        setQuickOpenFetchedAt(Date.now());
+      } catch (err) {
+        setQuickOpenError(err instanceof Error ? err.message : String(err));
+      } finally {
+        setQuickOpenLoading(false);
+      }
+    },
+    [quickOpenFetchedAt, scopeRef, workspaceId],
+  );
 
   useEffect(() => {
     if (!contextMenu) return;
@@ -477,6 +533,28 @@ function FileBrowserInner({ scopeRef }: FileBrowserProps) {
       void revealPath(activePath).then(() => setScrollTarget(activePath));
     }
   }, [activePath, revealPath]);
+
+  useEffect(() => {
+    if (quickOpenOpen) {
+      void fetchQuickOpenIndex();
+    }
+  }, [fetchQuickOpenIndex, quickOpenOpen]);
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      const key = event.key.toLowerCase();
+      const mod = event.metaKey || event.ctrlKey;
+      if (mod && !event.shiftKey && key === "p") {
+        event.preventDefault();
+        setQuickOpenOpen(true);
+      } else if (mod && event.shiftKey && key === "f") {
+        event.preventDefault();
+        setSearchPanelOpen(true);
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, []);
 
   const refreshParents = useCallback(
     async (...paths: string[]) => {
@@ -501,12 +579,31 @@ function FileBrowserInner({ scopeRef }: FileBrowserProps) {
   );
 
   const openFile = useCallback(
-    (path: string, groupIndex = store.getState().activeGroup) => {
+    (
+      path: string,
+      groupIndex = store.getState().activeGroup,
+      lineNumber?: number,
+    ) => {
       if (!discardActiveIfNeeded(groupIndex, path)) return;
       store.getState().openTab(path, groupIndex);
+      if (lineNumber && lineNumber > 0) {
+        setLineTargets((prev) => ({
+          ...prev,
+          [path]: { line: lineNumber, token: (prev[path]?.token ?? 0) + 1 },
+        }));
+      }
     },
     [discardActiveIfNeeded, store],
   );
+
+  const handleLineTargetApplied = useCallback((path: string, token: number) => {
+    setLineTargets((prev) => {
+      if (prev[path]?.token !== token) return prev;
+      const next = { ...prev };
+      delete next[path];
+      return next;
+    });
+  }, []);
 
   const selectTab = useCallback(
     (groupIndex: number, path: string) => {
@@ -546,10 +643,11 @@ function FileBrowserInner({ scopeRef }: FileBrowserProps) {
 
   const handleSaved = useCallback(
     (path: string) => {
+      markIndexStale();
       showToast("File saved", { type: "success" });
       void refreshParents(path);
     },
-    [refreshParents, showToast],
+    [markIndexStale, refreshParents, showToast],
   );
 
   const handleResizeDelta = useCallback((deltaPx: number) => {
@@ -629,12 +727,14 @@ function FileBrowserInner({ scopeRef }: FileBrowserProps) {
       if (inlineEdit.kind === "create-file") {
         const path = joinPath(inlineEdit.parentPath, value);
         await writeScopedFile(workspaceId, scopeRef, path, "");
+        markIndexStale();
         await refreshParents(path);
         openFile(path);
         void revealPath(path).then(() => setScrollTarget(path));
       } else if (inlineEdit.kind === "create-folder") {
         const path = joinPath(inlineEdit.parentPath, value);
         await mkdirScoped(workspaceId, scopeRef, path);
+        markIndexStale();
         await refreshParents(path);
         void revealPath(path).then(() => setScrollTarget(path));
       } else if (inlineEdit.path) {
@@ -647,6 +747,7 @@ function FileBrowserInner({ scopeRef }: FileBrowserProps) {
             nextPath,
           );
           store.getState().retargetPathPrefix(inlineEdit.path, nextPath);
+          markIndexStale();
           await refreshParents(inlineEdit.path, nextPath);
           void revealPath(nextPath).then(() => setScrollTarget(nextPath));
         }
@@ -667,6 +768,7 @@ function FileBrowserInner({ scopeRef }: FileBrowserProps) {
     revealPath,
     store,
     showToast,
+    markIndexStale,
   ]);
 
   const dirtyTabsForPath = useCallback(
@@ -691,6 +793,7 @@ function FileBrowserInner({ scopeRef }: FileBrowserProps) {
       }
       try {
         await deleteScopedPath(workspaceId, scopeRef, node.path, node.isDir);
+        markIndexStale();
         if (!node.isDir && skipFutureFileConfirms) {
           wsSet(workspaceId, DELETE_FILE_SKIP_KEY, "1");
         }
@@ -705,7 +808,15 @@ function FileBrowserInner({ scopeRef }: FileBrowserProps) {
         setDeleteConfirm(null);
       }
     },
-    [dirtyTabsForPath, workspaceId, scopeRef, store, refreshParents, showToast],
+    [
+      dirtyTabsForPath,
+      workspaceId,
+      scopeRef,
+      store,
+      refreshParents,
+      showToast,
+      markIndexStale,
+    ],
   );
 
   const requestDelete = useCallback(
@@ -744,6 +855,7 @@ function FileBrowserInner({ scopeRef }: FileBrowserProps) {
           nextPath,
           data.content ?? "",
         );
+        markIndexStale();
         await refreshParents(nextPath);
         openFile(nextPath);
       } catch (err) {
@@ -752,7 +864,15 @@ function FileBrowserInner({ scopeRef }: FileBrowserProps) {
         });
       }
     },
-    [workspaceId, scopeRef, treeData, refreshParents, openFile, showToast],
+    [
+      workspaceId,
+      scopeRef,
+      treeData,
+      refreshParents,
+      openFile,
+      showToast,
+      markIndexStale,
+    ],
   );
 
   const copyPath = useCallback(
@@ -780,83 +900,101 @@ function FileBrowserInner({ scopeRef }: FileBrowserProps) {
         className={styles.treePanel}
         style={{ ["--tree-width"]: `${treeWidth}px` } as CSSProperties}
       >
-        <OpenEditors
-          groups={groups}
-          dirty={dirty}
-          collapsed={openEditorsCollapsed}
-          onToggle={() => setOpenEditorsCollapsed((collapsed) => !collapsed)}
-          onActivate={selectTab}
-        />
-        <div className={styles.toolbar}>
-          <form onSubmit={handleJump} style={{ display: "contents" }}>
-            <input
-              className={styles.filterInput}
-              type="text"
-              value={jumpText}
-              onChange={(e) => setJumpText(e.target.value)}
-              placeholder="Jump to folder... (e.g. src/api)"
-              aria-label="Jump to folder"
-            />
-          </form>
-          <input
-            className={styles.filterInput}
-            type="text"
-            value={filterText}
-            onChange={(e) => setFilterText(e.target.value)}
-            placeholder="Filter files..."
-            aria-label="Filter files"
+        {searchPanelOpen ? (
+          <FileSearchPanel
+            workspaceId={workspaceId}
+            scopeRef={scopeRef}
+            onOpenResult={(path, line) => openFile(path, undefined, line)}
+            onFilesChanged={(paths) => {
+              markIndexStale();
+              void refreshParents(...paths);
+              showToast("Replace applied", { type: "success" });
+            }}
+            onClose={() => setSearchPanelOpen(false)}
           />
-        </div>
-        {isLoading ? (
-          <div className={styles.treeScroll}>
-            {Array.from({ length: 6 }, (_, i) => (
-              <div
-                key={i}
-                style={{
-                  padding: "4px 8px",
-                  paddingLeft: `${(i % 3) * 16 + 8}px`,
-                }}
-              >
-                <LoadingSkeleton
-                  shape="text"
-                  width={100 + (i % 4) * 20}
-                  height={12}
+        ) : (
+          <>
+            <OpenEditors
+              groups={groups}
+              dirty={dirty}
+              collapsed={openEditorsCollapsed}
+              onToggle={() =>
+                setOpenEditorsCollapsed((collapsed) => !collapsed)
+              }
+              onActivate={selectTab}
+            />
+            <div className={styles.toolbar}>
+              <form onSubmit={handleJump} style={{ display: "contents" }}>
+                <input
+                  className={styles.filterInput}
+                  type="text"
+                  value={jumpText}
+                  onChange={(e) => setJumpText(e.target.value)}
+                  placeholder="Jump to folder... (e.g. src/api)"
+                  aria-label="Jump to folder"
+                />
+              </form>
+              <input
+                className={styles.filterInput}
+                type="text"
+                value={filterText}
+                onChange={(e) => setFilterText(e.target.value)}
+                placeholder="Filter files..."
+                aria-label="Filter files"
+              />
+            </div>
+            {isLoading ? (
+              <div className={styles.treeScroll}>
+                {Array.from({ length: 6 }, (_, i) => (
+                  <div
+                    key={i}
+                    style={{
+                      padding: "4px 8px",
+                      paddingLeft: `${(i % 3) * 16 + 8}px`,
+                    }}
+                  >
+                    <LoadingSkeleton
+                      shape="text"
+                      width={100 + (i % 4) * 20}
+                      height={12}
+                    />
+                  </div>
+                ))}
+              </div>
+            ) : error ? (
+              <div className={styles.treeScroll}>
+                <ErrorDisplay
+                  variant="fetch-error"
+                  title="Failed to load files"
+                  error={new Error(error)}
+                  showDetails
                 />
               </div>
-            ))}
-          </div>
-        ) : error ? (
-          <div className={styles.treeScroll}>
-            <ErrorDisplay
-              variant="fetch-error"
-              title="Failed to load files"
-              error={new Error(error)}
-              showDetails
-            />
-          </div>
-        ) : (
-          <div className={styles.treeScroll}>
-            <FileTree
-              treeData={treeData}
-              expanded={expanded}
-              selectedPath={selectedPath}
-              filterText={debouncedFilterText}
-              onToggle={toggle}
-              onSelectFile={(p) => {
-                if (p) openFile(p);
-              }}
-              onContextMenuNode={handleContextMenu}
-              onRequestRename={beginRename}
-              onRequestDelete={requestDelete}
-              inlineEdit={inlineEdit}
-              onInlineEditChange={(value) =>
-                setInlineEdit((prev) => (prev ? { ...prev, value } : prev))
-              }
-              onInlineEditCommit={() => void commitInlineEdit()}
-              onInlineEditCancel={() => setInlineEdit(null)}
-              scrollToPath={scrollTarget}
-            />
-          </div>
+            ) : (
+              <div className={styles.treeScroll}>
+                <FileTree
+                  treeData={treeData}
+                  expanded={expanded}
+                  selectedPath={selectedPath}
+                  filterText={debouncedFilterText}
+                  onToggle={toggle}
+                  onSelectFile={(p) => {
+                    if (p) openFile(p);
+                  }}
+                  onContextMenuNode={handleContextMenu}
+                  onRequestRename={beginRename}
+                  onRequestDelete={requestDelete}
+                  inlineEdit={inlineEdit}
+                  onInlineEditChange={(value) =>
+                    setInlineEdit((prev) => (prev ? { ...prev, value } : prev))
+                  }
+                  onInlineEditCommit={() => void commitInlineEdit()}
+                  onInlineEditCancel={() => setInlineEdit(null)}
+                  scrollToPath={scrollTarget}
+                />
+              </div>
+            )}
+          </>
         )}
       </div>
       <ResizeHandle
@@ -894,6 +1032,10 @@ function FileBrowserInner({ scopeRef }: FileBrowserProps) {
               onSplitRight={splitRight}
               onNavigate={navigateToDir}
               onSaved={handleSaved}
+              onLineTargetApplied={handleLineTargetApplied}
+              lineTarget={
+                groups[0]?.active ? lineTargets[groups[0].active] : undefined
+              }
             />
           </div>
           {groups[1] && (
@@ -921,6 +1063,12 @@ function FileBrowserInner({ scopeRef }: FileBrowserProps) {
                   onSplitRight={splitRight}
                   onNavigate={navigateToDir}
                   onSaved={handleSaved}
+                  onLineTargetApplied={handleLineTargetApplied}
+                  lineTarget={
+                    groups[1]?.active
+                      ? lineTargets[groups[1].active]
+                      : undefined
+                  }
                 />
               </div>
             </>
@@ -945,6 +1093,16 @@ function FileBrowserInner({ scopeRef }: FileBrowserProps) {
           onConfirm={(skip) => void performDelete(deleteConfirm.node, skip)}
         />
       )}
+      <QuickOpenPalette
+        isOpen={quickOpenOpen}
+        paths={quickOpenPaths}
+        mru={mru}
+        isLoading={quickOpenLoading}
+        error={quickOpenError}
+        truncated={quickOpenTruncated}
+        onClose={() => setQuickOpenOpen(false)}
+        onOpen={(path) => openFile(path)}
+      />
     </div>
   );
 }
