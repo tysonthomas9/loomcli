@@ -1014,6 +1014,70 @@ describe("TerminalView", () => {
         "group-1",
       );
     });
+
+    it("awaits createTab before mounting a duplicated group tab", async () => {
+      const persist = deferred<void>();
+      mockMetadataHook.createTab.mockReturnValueOnce(persist.promise);
+      setMetadata([
+        {
+          session_name: "session-1",
+          label: "Session 1",
+          worktree_group_id: "group-1",
+        },
+      ]);
+      render(<TerminalView />);
+
+      fireEvent.click(screen.getByTestId("duplicate-tab-button"));
+
+      await waitFor(() => {
+        expect(mockMetadataHook.createTab).toHaveBeenCalledWith(
+          "Session-1-2",
+          "Session 1 (2)",
+          1,
+          "group-1",
+        );
+      });
+      expect(screen.queryByTestId("tab-Session-1-2")).not.toBeInTheDocument();
+
+      await act(async () => {
+        persist.resolve();
+        await persist.promise;
+      });
+
+      expect(screen.getByTestId("tab-Session-1-2")).toBeInTheDocument();
+    });
+
+    it("does not mount a duplicated group tab when createTab fails", async () => {
+      const errorSpy = vi
+        .spyOn(console, "error")
+        .mockImplementation(() => undefined);
+      mockMetadataHook.createTab.mockRejectedValueOnce(new Error("PUT failed"));
+      setMetadata([
+        {
+          session_name: "session-1",
+          label: "Session 1",
+          worktree_group_id: "group-1",
+        },
+      ]);
+      render(<TerminalView />);
+
+      fireEvent.click(screen.getByTestId("duplicate-tab-button"));
+
+      await waitFor(() => {
+        expect(mockMetadataHook.createTab).toHaveBeenCalledWith(
+          "Session-1-2",
+          "Session 1 (2)",
+          1,
+          "group-1",
+        );
+      });
+      await waitFor(() => {
+        expect(errorSpy).toHaveBeenCalled();
+      });
+      expect(screen.queryByTestId("tab-Session-1-2")).not.toBeInTheDocument();
+
+      errorSpy.mockRestore();
+    });
   });
 
   describe("tab sort order", () => {

@@ -382,4 +382,19 @@ describe("TerminalSection", () => {
 
     expect(screen.getByTestId("sidebar-new-worktree")).toBeDisabled();
   });
+
+  it("treats repos with missing or empty paths as non-local", () => {
+    const missingPathRepo = repo({ name: "missing-path" });
+    delete (missingPathRepo as Partial<RepoInfo>).path;
+    mockWorkspaceContext([
+      missingPathRepo,
+      repo({ name: "empty-path", path: "  " }),
+    ]);
+
+    render(<TerminalSection />);
+
+    expect(screen.getByTestId("sidebar-new-worktree")).toBeDisabled();
+    fireEvent.click(screen.getByTestId("sidebar-new-worktree"));
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
 });
