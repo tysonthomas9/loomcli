@@ -14,6 +14,8 @@ import type {
   ConnectionState,
   TerminalInstanceHandle,
 } from "@/components/TerminalView/instances";
+import { DEFAULT_TERMINAL_WORKTREE_GROUP_ID } from "@/utils/terminalSidebarBridge";
+
 import { type TabState, getNextDuplicateName } from "./terminalTabUtils";
 
 interface UseTabActionsOptions {
@@ -27,7 +29,9 @@ interface UseTabActionsOptions {
     session: string,
     label: string,
     sortOrder: number,
+    worktreeGroupId?: string,
   ) => Promise<void>;
+  tabMetadata?: Array<{ session_name: string; worktree_group_id?: string }>;
   updateLabel: (session: string, label: string) => Promise<void>;
   deleteTab: (session: string) => Promise<void>;
 }
@@ -50,6 +54,7 @@ export function useTabActions({
   activeTabIdRef,
   instanceRefs,
   createTab,
+  tabMetadata = [],
   updateLabel,
   deleteTab,
 }: UseTabActionsOptions): UseTabActionsReturn {
@@ -94,7 +99,7 @@ export function useTabActions({
   );
 
   const handleDuplicateTab = useCallback(
-    (tabId: string) => {
+    async (tabId: string) => {
       const sourceTab = tabs.find((t) => t.id === tabId);
       if (!sourceTab) return;
       const result = getNextDuplicateName(sourceTab.label, tabs);
@@ -106,16 +111,44 @@ export function useTabActions({
         connectionState: "disconnected" as ConnectionState,
         backendName: sourceTab.backendName,
       };
-      createTab(result.sessionName, result.label, tabs.length).catch((err) =>
-        console.error(
-          `Failed to persist duplicated tab ${result.sessionName}:`,
-          err,
-        ),
+      const sourceMeta = tabMetadata.find(
+        (meta) => meta.session_name === sourceTab.sessionName,
       );
+      const groupId = sourceMeta?.worktree_group_id;
+      const isGroupedTab = Boolean(
+        groupId && groupId !== DEFAULT_TERMINAL_WORKTREE_GROUP_ID,
+      );
+      if (isGroupedTab) {
+        // Same rule as new group tabs: the PUT must land before the tab
+        // mounts, or the first WS attach spawns the PTY at the workspace
+        // root instead of the group root.
+        try {
+          await createTab(
+            result.sessionName,
+            result.label,
+            tabs.length,
+            groupId,
+          );
+        } catch (err) {
+          console.error(
+            `Failed to persist duplicated tab ${result.sessionName}:`,
+            err,
+          );
+          return;
+        }
+      } else {
+        createTab(result.sessionName, result.label, tabs.length, groupId).catch(
+          (err) =>
+            console.error(
+              `Failed to persist duplicated tab ${result.sessionName}:`,
+              err,
+            ),
+        );
+      }
       setTabs((prev) => [...prev, newTab]);
       setActiveTabId(newTab.id);
     },
-    [createTab, tabs, setTabs, setActiveTabId],
+    [createTab, tabMetadata, tabs, setTabs, setActiveTabId],
   );
 
   const handleTabRename = useCallback(

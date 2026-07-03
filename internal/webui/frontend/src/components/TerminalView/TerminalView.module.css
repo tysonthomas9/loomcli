@@ -71,6 +71,19 @@
   font-size: var(--font-sm);
 }
 
+.terminalAlert {
+  padding: var(--space-2) var(--space-4);
+  border-bottom: 1px solid var(--terminal-border, #333);
+  background: color-mix(
+    in srgb,
+    var(--color-danger-bg, #3b0d16) 72%,
+    black 28%
+  );
+  color: var(--color-danger, #fb7185);
+  font-size: var(--font-xs);
+  font-weight: 600;
+}
+
 .cliSetupBanner {
   display: grid;
   grid-template-columns: 8px minmax(0, 1fr) auto;

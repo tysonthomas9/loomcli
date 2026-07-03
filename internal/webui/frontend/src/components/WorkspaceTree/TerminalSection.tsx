@@ -154,7 +154,10 @@ export function TerminalSection(): JSX.Element {
   const localRepos = useMemo(
     () =>
       repos.filter(
-        (repo) => repo.path.trim().length > 0 && !repo.is_linked_worktree,
+        // path is typed required but can be absent at runtime (see
+        // onboardingDefaults.ts) — a missing path means "not local".
+        (repo) =>
+          (repo.path ?? "").trim().length > 0 && !repo.is_linked_worktree,
       ),
     [repos],
   );
@@ -230,6 +233,7 @@ export function TerminalSection(): JSX.Element {
                     type="button"
                     className={terminalStyles.newTerminalButton}
                     onClick={() => requestTerminalNewTab(group.id)}
+                    disabled={group.newTerminalDisabled}
                     data-testid={`sidebar-new-terminal-${group.id}`}
                   >
                     + New terminal

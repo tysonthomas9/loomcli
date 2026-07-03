@@ -171,6 +171,16 @@
   color: var(--color-text-primary);
 }
 
+.newTerminalButton:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.newTerminalButton:disabled:hover {
+  background: transparent;
+  color: var(--color-text-muted);
+}
+
 .newTerminalButton:focus-visible {
   outline: 2px solid var(--color-focus);
   outline-offset: -2px;

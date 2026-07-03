@@ -26,6 +26,7 @@ export interface TerminalWorktreeGroup {
   id: string;
   label: string;
   isDefault?: boolean;
+  newTerminalDisabled?: boolean;
   members: TerminalWorktreeMember[];
 }
 

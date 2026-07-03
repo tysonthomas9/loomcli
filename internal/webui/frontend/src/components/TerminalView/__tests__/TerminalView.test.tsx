@@ -24,6 +24,15 @@ import { TerminalView } from "../TerminalView";
 import { TerminalInstance } from "../instances/TerminalInstance";
 import { MAX_TABS } from "@/components/TerminalView/tabs/terminalTabUtils";
 import { CLI_SETUP_REQUEST_KEY } from "@/utils/cliSetup";
+import { wsKey } from "@/utils/scopedStorage";
+import {
+  TERMINAL_SIDEBAR_ACTIVE_GROUP_EVENT,
+  TERMINAL_SIDEBAR_NEW_TAB_EVENT,
+  TERMINAL_SIDEBAR_SYNC_EVENT,
+  TERMINAL_SIDEBAR_WORKTREES_CHANGED_EVENT,
+  type TerminalSidebarState,
+  type TerminalWorktreeGroup,
+} from "@/utils/terminalSidebarBridge";
 import {
   BackendPickerPrompt,
   SessionNamePrompt,
@@ -47,6 +56,7 @@ const mockMetadataHook = vi.hoisted(() => ({
     role?: string;
     backend?: string;
     writable?: boolean;
+    worktree_group_id?: string;
   }>,
   isLoading: false,
   error: null as Error | null,
@@ -62,6 +72,7 @@ const mockMetadataHook = vi.hoisted(() => ({
 const mockTerminalApi = vi.hoisted(() => ({
   patchTerminalState: vi.fn().mockResolvedValue(undefined),
   ensureAgentTerminalSession: vi.fn(),
+  listTerminalWorktrees: vi.fn().mockResolvedValue({ groups: [] }),
   startTerminalSetup: vi.fn().mockResolvedValue({
     session_name: "lead-shell-setup-codex",
     label: "Codex setup",
@@ -83,7 +94,23 @@ vi.mock("@/hooks/api", async () => {
     ...actual,
     patchTerminalState: mockTerminalApi.patchTerminalState,
     ensureAgentTerminalSession: mockTerminalApi.ensureAgentTerminalSession,
+    listTerminalWorktrees: mockTerminalApi.listTerminalWorktrees,
     startTerminalSetup: mockTerminalApi.startTerminalSetup,
+  };
+});
+
+const mockWorkspaceContext = vi.hoisted(() => ({
+  value: {
+    activeWorkspaceName: "Workspace",
+    workspace: { id: "default", name: "Workspace" },
+  },
+}));
+
+vi.mock("@/hooks", async () => {
+  const actual = await vi.importActual<typeof import("@/hooks")>("@/hooks");
+  return {
+    ...actual,
+    useWorkspaceContext: () => mockWorkspaceContext.value,
   };
 });
 
@@ -197,6 +224,12 @@ vi.mock("../tabs/TerminalTabBar", () => ({
         >
           Close
         </button>
+        <button
+          data-testid="duplicate-tab-button"
+          onClick={() => props.onDuplicateTab?.(props.activeTabId)}
+        >
+          Duplicate
+        </button>
         <span data-testid="active-tab-id">{props.activeTabId}</span>
       </div>
     ),
@@ -232,6 +265,7 @@ function setMetadata(
     role?: string;
     backend?: string;
     writable?: boolean;
+    worktree_group_id?: string;
   }>,
   isLoading = false,
 ) {
@@ -249,6 +283,7 @@ function setMetadata(
     role: t.role,
     backend: t.backend,
     writable: t.writable,
+    worktree_group_id: t.worktree_group_id,
     created_at: now,
     updated_at: now,
   }));
@@ -261,17 +296,78 @@ const DEFAULT_METADATA = [
   { session_name: "session-2", label: "Session 2" },
 ];
 
+function deferred<T = void>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { promise, resolve, reject };
+}
+
+function apiWorktreeGroup(name = "feature-auth", id = "group-1") {
+  return {
+    id,
+    name,
+    root: `/workspace/.loom/terminal-worktrees/${name}`,
+    created_at: "2026-07-02T00:00:00Z",
+    members: [
+      {
+        repo_name: "api",
+        path: `/workspace/.loom/terminal-worktrees/${name}/api`,
+        base_branch: "main",
+        base_detached: false,
+        reused_branch: false,
+      },
+    ],
+  };
+}
+
+function sidebarGroup(id = "group-1"): TerminalWorktreeGroup {
+  return {
+    id,
+    label: "feature-auth",
+    members: [{ repoName: "api", baseBranch: "main" }],
+  };
+}
+
+function listenForSidebarState() {
+  const onSync = vi.fn();
+  window.addEventListener(TERMINAL_SIDEBAR_SYNC_EVENT, onSync);
+  return {
+    onSync,
+    latest(): TerminalSidebarState | undefined {
+      const calls = onSync.mock.calls;
+      return calls[calls.length - 1]?.[0].detail as
+        | TerminalSidebarState
+        | undefined;
+    },
+    cleanup() {
+      window.removeEventListener(TERMINAL_SIDEBAR_SYNC_EVENT, onSync);
+    },
+  };
+}
+
 // ── Tests: TerminalView ──────────────────────────────────────────────────────
 
 describe("TerminalView", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     sessionStorage.clear();
+    localStorage.clear();
+    mockWorkspaceContext.value = {
+      activeWorkspaceName: "Workspace",
+      workspace: { id: "default", name: "Workspace" },
+    };
     mockMetadataHook.tabs = [];
     mockMetadataHook.isLoading = true;
     mockMetadataHook.error = null;
     mockMetadataHook.createTab = vi.fn().mockResolvedValue(undefined);
     mockTerminalApi.patchTerminalState.mockResolvedValue(undefined);
+    mockTerminalApi.listTerminalWorktrees.mockReturnValue(
+      new Promise(() => {}),
+    );
     mockTerminalApi.ensureAgentTerminalSession.mockImplementation(
       async (_workspaceId: string, agentName: string) => ({
         session_name: `term_${agentName.replace(/[^a-zA-Z0-9_-]/g, "_")}`,
@@ -629,6 +725,296 @@ describe("TerminalView", () => {
   });
 
   // ── Tab sort order ─────────────────────────────────────────────────────────
+
+  describe("terminal worktree groups", () => {
+    it("fetches worktree groups and publishes them to the sidebar bridge", async () => {
+      const sidebar = listenForSidebarState();
+      mockTerminalApi.listTerminalWorktrees.mockResolvedValueOnce({
+        groups: [apiWorktreeGroup()],
+      });
+      setMetadata(DEFAULT_METADATA);
+
+      render(<TerminalView />);
+
+      await waitFor(() => {
+        expect(mockTerminalApi.listTerminalWorktrees).toHaveBeenCalledWith(
+          "default",
+        );
+      });
+      await waitFor(() => {
+        const latest = sidebar.latest();
+        expect(latest?.groups).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({
+              id: "__workspace__",
+              label: "Workspace",
+              isDefault: true,
+            }),
+            expect.objectContaining({
+              id: "group-1",
+              label: "feature-auth",
+              members: [
+                {
+                  repoName: "api",
+                  baseBranch: "main",
+                  baseDetached: false,
+                  reusedBranch: false,
+                },
+              ],
+            }),
+          ]),
+        );
+      });
+
+      sidebar.cleanup();
+    });
+
+    it("awaits grouped createTab before mounting a new terminal", async () => {
+      const sidebar = listenForSidebarState();
+      const persist = deferred<void>();
+      mockTerminalApi.listTerminalWorktrees.mockResolvedValueOnce({
+        groups: [apiWorktreeGroup()],
+      });
+      mockMetadataHook.createTab.mockReturnValueOnce(persist.promise);
+      setMetadata(DEFAULT_METADATA);
+      render(<TerminalView />);
+      await waitFor(() =>
+        expect(mockTerminalApi.listTerminalWorktrees).toHaveBeenCalled(),
+      );
+
+      act(() => {
+        window.dispatchEvent(
+          new CustomEvent(TERMINAL_SIDEBAR_NEW_TAB_EVENT, {
+            detail: { groupId: "group-1" },
+          }),
+        );
+      });
+
+      await waitFor(() => {
+        expect(mockMetadataHook.createTab).toHaveBeenCalledWith(
+          "lead-shell-1",
+          "lead-shell-1",
+          2,
+          "group-1",
+        );
+      });
+      expect(screen.queryByTestId("tab-lead-shell-1")).not.toBeInTheDocument();
+      await waitFor(() => {
+        const latest = sidebar.latest();
+        expect(
+          latest?.groups.find((group) => group.id === "group-1")
+            ?.newTerminalDisabled,
+        ).toBe(true);
+      });
+
+      await act(async () => {
+        persist.resolve();
+        await persist.promise;
+      });
+
+      await waitFor(() => {
+        expect(screen.getByTestId("tab-lead-shell-1")).toBeInTheDocument();
+      });
+      sidebar.cleanup();
+    });
+
+    it("keeps default group tab creation fire-and-forget", async () => {
+      const persist = deferred<void>();
+      mockMetadataHook.createTab.mockReturnValueOnce(persist.promise);
+      setMetadata(DEFAULT_METADATA);
+      render(<TerminalView />);
+
+      act(() => {
+        window.dispatchEvent(
+          new CustomEvent(TERMINAL_SIDEBAR_NEW_TAB_EVENT, {
+            detail: { groupId: "__workspace__" },
+          }),
+        );
+      });
+
+      await waitFor(() => {
+        expect(mockMetadataHook.createTab).toHaveBeenCalledWith(
+          "lead-shell-1",
+          "lead-shell-1",
+          2,
+        );
+      });
+      expect(screen.getByTestId("tab-lead-shell-1")).toBeInTheDocument();
+
+      await act(async () => {
+        persist.resolve();
+        await persist.promise;
+      });
+    });
+
+    it("does not mount grouped tab when createTab fails", async () => {
+      mockTerminalApi.listTerminalWorktrees.mockResolvedValueOnce({
+        groups: [apiWorktreeGroup()],
+      });
+      mockMetadataHook.createTab.mockRejectedValueOnce(new Error("PUT failed"));
+      setMetadata(DEFAULT_METADATA);
+      render(<TerminalView />);
+      await waitFor(() =>
+        expect(mockTerminalApi.listTerminalWorktrees).toHaveBeenCalled(),
+      );
+
+      act(() => {
+        window.dispatchEvent(
+          new CustomEvent(TERMINAL_SIDEBAR_NEW_TAB_EVENT, {
+            detail: { groupId: "group-1" },
+          }),
+        );
+      });
+
+      expect(await screen.findByText("PUT failed")).toBeInTheDocument();
+      expect(screen.queryByTestId("tab-lead-shell-1")).not.toBeInTheDocument();
+    });
+
+    it("persists activeGroupId and validates stale ids only after fetch settles", async () => {
+      const fetchGroups = deferred<{
+        groups: ReturnType<typeof apiWorktreeGroup>[];
+      }>();
+      mockTerminalApi.listTerminalWorktrees.mockReturnValueOnce(
+        fetchGroups.promise,
+      );
+      localStorage.setItem(
+        wsKey("default", "terminal-active-group"),
+        "group-1",
+      );
+      const sidebar = listenForSidebarState();
+      setMetadata(DEFAULT_METADATA);
+      render(<TerminalView />);
+
+      await waitFor(() => {
+        expect(sidebar.latest()?.activeGroupId).toBe("group-1");
+      });
+      expect(
+        localStorage.getItem(wsKey("default", "terminal-active-group")),
+      ).toBe("group-1");
+
+      await act(async () => {
+        fetchGroups.resolve({ groups: [apiWorktreeGroup()] });
+        await fetchGroups.promise;
+      });
+
+      await waitFor(() => {
+        expect(sidebar.latest()?.activeGroupId).toBe("group-1");
+        expect(
+          sidebar.latest()?.groups.some((group) => group.id === "group-1"),
+        ).toBe(true);
+      });
+
+      act(() => {
+        window.dispatchEvent(
+          new CustomEvent(TERMINAL_SIDEBAR_ACTIVE_GROUP_EVENT, {
+            detail: { groupId: "__workspace__" },
+          }),
+        );
+      });
+      expect(
+        localStorage.getItem(wsKey("default", "terminal-active-group")),
+      ).toBe("__workspace__");
+      sidebar.cleanup();
+    });
+
+    it("resets stale activeGroupId after fetch settles", async () => {
+      mockTerminalApi.listTerminalWorktrees.mockResolvedValueOnce({
+        groups: [],
+      });
+      localStorage.setItem(
+        wsKey("default", "terminal-active-group"),
+        "missing-group",
+      );
+      setMetadata(DEFAULT_METADATA);
+      render(<TerminalView />);
+
+      await waitFor(() => {
+        expect(
+          localStorage.getItem(wsKey("default", "terminal-active-group")),
+        ).toBe("__workspace__");
+      });
+    });
+
+    it("re-reads active group storage on workspace switch", async () => {
+      mockTerminalApi.listTerminalWorktrees
+        .mockResolvedValueOnce({ groups: [] })
+        .mockResolvedValueOnce({
+          groups: [apiWorktreeGroup("feature-two", "group-2")],
+        });
+      localStorage.setItem(wsKey("ws-2", "terminal-active-group"), "group-2");
+      const sidebar = listenForSidebarState();
+      setMetadata(DEFAULT_METADATA);
+      const view = render(<TerminalView />);
+      await waitFor(() => {
+        expect(mockTerminalApi.listTerminalWorktrees).toHaveBeenCalledWith(
+          "default",
+        );
+      });
+
+      mockWorkspaceContext.value = {
+        activeWorkspaceName: "Second Workspace",
+        workspace: { id: "ws-2", name: "Second Workspace" },
+      };
+      view.rerender(<TerminalView />);
+
+      await waitFor(() => {
+        expect(mockTerminalApi.listTerminalWorktrees).toHaveBeenCalledWith(
+          "ws-2",
+        );
+      });
+      await waitFor(() => {
+        expect(sidebar.latest()?.activeGroupId).toBe("group-2");
+      });
+      sidebar.cleanup();
+    });
+
+    it("inserts created groups from the worktrees-changed event without refetch", async () => {
+      const sidebar = listenForSidebarState();
+      setMetadata(DEFAULT_METADATA);
+      render(<TerminalView />);
+      await waitFor(() => {
+        expect(mockTerminalApi.listTerminalWorktrees).toHaveBeenCalledTimes(1);
+      });
+
+      act(() => {
+        window.dispatchEvent(
+          new CustomEvent(TERMINAL_SIDEBAR_WORKTREES_CHANGED_EVENT, {
+            detail: sidebarGroup("created-group"),
+          }),
+        );
+      });
+
+      await waitFor(() => {
+        expect(
+          sidebar
+            .latest()
+            ?.groups.some((group) => group.id === "created-group"),
+        ).toBe(true);
+      });
+      expect(mockTerminalApi.listTerminalWorktrees).toHaveBeenCalledTimes(1);
+      sidebar.cleanup();
+    });
+
+    it("duplicates tabs with the source worktree group id", async () => {
+      setMetadata([
+        {
+          session_name: "session-1",
+          label: "Session 1",
+          worktree_group_id: "group-1",
+        },
+      ]);
+      render(<TerminalView />);
+
+      fireEvent.click(screen.getByTestId("duplicate-tab-button"));
+
+      expect(mockMetadataHook.createTab).toHaveBeenCalledWith(
+        "Session-1-2",
+        "Session 1 (2)",
+        1,
+        "group-1",
+      );
+    });
+  });
 
   describe("tab sort order", () => {
     it("sorts restored tabs by sort_order from metadata", () => {

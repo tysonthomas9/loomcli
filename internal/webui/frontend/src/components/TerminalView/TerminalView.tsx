@@ -1,7 +1,15 @@
 import { useState, useRef, useCallback, useEffect, useMemo } from "react";
 
-import type { IssueContext, TerminalSetupResult } from "@/hooks/api";
-import { patchTerminalState, startTerminalSetup } from "@/hooks/api";
+import type {
+  IssueContext,
+  TerminalSetupResult,
+  TerminalWorktreeGroup as ApiTerminalWorktreeGroup,
+} from "@/hooks/api";
+import {
+  listTerminalWorktrees,
+  patchTerminalState,
+  startTerminalSetup,
+} from "@/hooks/api";
 import { LoadingSkeleton } from "@/components";
 import { useBackendConfig, useBackends } from "@/hooks/workspace";
 import { useSessionRestore, useTerminalMetadata } from "@/hooks/terminal";
@@ -16,9 +24,13 @@ import {
 import {
   DEFAULT_TERMINAL_WORKTREE_GROUP_ID,
   publishTerminalSidebarState,
+  TERMINAL_SIDEBAR_ACTIVE_GROUP_EVENT,
   TERMINAL_SIDEBAR_NEW_TAB_EVENT,
   TERMINAL_SIDEBAR_SELECT_EVENT,
+  TERMINAL_SIDEBAR_WORKTREES_CHANGED_EVENT,
+  type TerminalWorktreeGroup as SidebarTerminalWorktreeGroup,
 } from "@/utils/terminalSidebarBridge";
+import { wsGet, wsSet } from "@/utils/scopedStorage";
 
 import { NoBackendsEmptyState, useTabEditorGroups } from "./layout";
 import groupStyles from "./layout/TerminalGroupLayout.module.css";
@@ -44,6 +56,8 @@ import {
   useWorkspaceTabState,
 } from "./tabs";
 import styles from "./TerminalView.module.css";
+
+const SK_TERMINAL_ACTIVE_GROUP = "terminal-active-group";
 
 export interface TerminalInputRequest {
   id: string;
@@ -123,6 +137,32 @@ function setupInstructionsFromResult(
   return instructions;
 }
 
+function toSidebarWorktreeGroup(
+  group: ApiTerminalWorktreeGroup,
+): SidebarTerminalWorktreeGroup {
+  return {
+    id: group.id,
+    label: group.name,
+    members: group.members.map((member) => ({
+      repoName: member.repo_name,
+      ...(member.base_branch ? { baseBranch: member.base_branch } : {}),
+      baseDetached: member.base_detached,
+      reusedBranch: member.reused_branch,
+    })),
+  };
+}
+
+function groupFromStorage(workspaceId: string): string {
+  return (
+    wsGet(workspaceId, SK_TERMINAL_ACTIVE_GROUP) ??
+    DEFAULT_TERMINAL_WORKTREE_GROUP_ID
+  );
+}
+
+function errorMessage(error: unknown, fallback: string): string {
+  return error instanceof Error ? error.message : fallback;
+}
+
 export function TerminalView({
   isActive = true,
   pendingIssueContext,
@@ -141,7 +181,7 @@ export function TerminalView({
   const [tabs, setTabs] = useState<TabState[]>([]);
   const [activeTabId, setActiveTabId] = useState<string>("");
   const initializedRef = useRef(false);
-  const { id: workspaceId } = useWorkspaceTabState({
+  const { id: workspaceId, name: workspaceName } = useWorkspaceTabState({
     tabs,
     activeTabId,
     setTabs,
@@ -164,12 +204,45 @@ export function TerminalView({
   const { activeTabId: restoredTabId, isRestoring } = useSessionRestore({
     enabled: isActive,
   });
+  const [worktreeGroups, setWorktreeGroups] = useState<
+    SidebarTerminalWorktreeGroup[]
+  >([]);
+  const [groupsFetchSettled, setGroupsFetchSettled] = useState(false);
+  const [groupFetchError, setGroupFetchError] = useState<string | null>(null);
+  const [activeGroupId, setActiveGroupId] = useState(() =>
+    groupFromStorage(workspaceId),
+  );
+  const [pendingNewTabGroupIds, setPendingNewTabGroupIds] = useState<
+    Set<string>
+  >(() => new Set());
+  const [newTabError, setNewTabError] = useState<string | null>(null);
 
   const [, setFocusedPane] = useState<"left" | "right">("left");
   /** Global Terminal hides agent PTYs; Agents embed keeps them. */
   const visibleTabs = useMemo(
     () => (hideTabs ? tabs : tabs.filter((tab) => !isAgentTab(tab))),
     [hideTabs, tabs],
+  );
+  const sidebarGroups = useMemo<SidebarTerminalWorktreeGroup[]>(() => {
+    const groups: SidebarTerminalWorktreeGroup[] = [
+      {
+        id: DEFAULT_TERMINAL_WORKTREE_GROUP_ID,
+        label: workspaceName,
+        isDefault: true,
+        members: [],
+      },
+      ...worktreeGroups,
+    ];
+    return groups.map((group) => ({
+      ...group,
+      ...(pendingNewTabGroupIds.has(group.id)
+        ? { newTerminalDisabled: true }
+        : {}),
+    }));
+  }, [pendingNewTabGroupIds, workspaceName, worktreeGroups]);
+  const knownGroupIds = useMemo(
+    () => new Set(sidebarGroups.map((group) => group.id)),
+    [sidebarGroups],
   );
   const tabIds = useMemo(() => visibleTabs.map((tab) => tab.id), [visibleTabs]);
   const {
@@ -211,6 +284,95 @@ export function TerminalView({
   const announce = useCallback((msg: string) => {
     if (liveRegionRef.current) liveRegionRef.current.textContent = msg;
   }, []);
+
+  const setActiveGroupAndPersist = useCallback(
+    (groupId: string) => {
+      const nextGroupId = groupId || DEFAULT_TERMINAL_WORKTREE_GROUP_ID;
+      setActiveGroupId(nextGroupId);
+      if (workspaceId) {
+        wsSet(workspaceId, SK_TERMINAL_ACTIVE_GROUP, nextGroupId);
+      }
+    },
+    [workspaceId],
+  );
+
+  useEffect(() => {
+    if (hideTabs || !isActive || !workspaceId) {
+      setWorktreeGroups([]);
+      setGroupsFetchSettled(false);
+      setGroupFetchError(null);
+      setActiveGroupId(DEFAULT_TERMINAL_WORKTREE_GROUP_ID);
+      return;
+    }
+
+    let cancelled = false;
+    setActiveGroupId(groupFromStorage(workspaceId));
+    setWorktreeGroups([]);
+    setGroupsFetchSettled(false);
+    setGroupFetchError(null);
+
+    listTerminalWorktrees(workspaceId)
+      .then((response) => {
+        if (cancelled) return;
+        setWorktreeGroups(response.groups.map(toSidebarWorktreeGroup));
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        setWorktreeGroups([]);
+        setGroupFetchError(
+          errorMessage(err, "Failed to load terminal worktrees"),
+        );
+      })
+      .finally(() => {
+        if (!cancelled) setGroupsFetchSettled(true);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [hideTabs, isActive, workspaceId]);
+
+  useEffect(() => {
+    if (hideTabs || !isActive) return;
+
+    const onWorktreesChanged = (event: Event) => {
+      const group = (
+        event as CustomEvent<SidebarTerminalWorktreeGroup | undefined>
+      ).detail;
+      if (!group?.id) return;
+      setWorktreeGroups((current) => {
+        const index = current.findIndex((existing) => existing.id === group.id);
+        if (index === -1) return [...current, group];
+        const next = [...current];
+        next[index] = group;
+        return next;
+      });
+      setGroupFetchError(null);
+    };
+
+    window.addEventListener(
+      TERMINAL_SIDEBAR_WORKTREES_CHANGED_EVENT,
+      onWorktreesChanged,
+    );
+    return () => {
+      window.removeEventListener(
+        TERMINAL_SIDEBAR_WORKTREES_CHANGED_EVENT,
+        onWorktreesChanged,
+      );
+    };
+  }, [hideTabs, isActive]);
+
+  useEffect(() => {
+    if (!workspaceId || !groupsFetchSettled) return;
+    if (knownGroupIds.has(activeGroupId)) return;
+    setActiveGroupAndPersist(DEFAULT_TERMINAL_WORKTREE_GROUP_ID);
+  }, [
+    activeGroupId,
+    groupsFetchSettled,
+    knownGroupIds,
+    setActiveGroupAndPersist,
+    workspaceId,
+  ]);
 
   const stopBackendStatusPolling = useCallback(() => {
     if (backendStatusPollRef.current == null) return;
@@ -409,6 +571,7 @@ export function TerminalView({
       activeTabIdRef,
       instanceRefs,
       createTab,
+      tabMetadata,
       updateLabel,
       deleteTab,
     },
@@ -615,11 +778,15 @@ export function TerminalView({
   }, [config?.available]);
 
   const handleBackendSelect = useCallback(
-    (backend: string) => {
+    async (backend: string, groupId = DEFAULT_TERMINAL_WORKTREE_GROUP_ID) => {
       if (visibleTabs.length >= MAX_TABS) {
         handleTabLimitReached();
         return;
       }
+      const targetGroupId = groupId || DEFAULT_TERMINAL_WORKTREE_GROUP_ID;
+      const isGroupedTab = targetGroupId !== DEFAULT_TERMINAL_WORKTREE_GROUP_ID;
+      if (isGroupedTab && pendingNewTabGroupIds.has(targetGroupId)) return;
+
       const { sessionName, label } = generateTabName(
         backend,
         tabs,
@@ -628,9 +795,31 @@ export function TerminalView({
       // Persist the tab so it survives a refresh. The WS handler spawns
       // the PTY on connect; this PUT is just metadata so the server can
       // return the tab in ListTabs on reload.
-      createTab(sessionName, label, tabs.length).catch((err) =>
-        console.error(`Failed to persist new tab ${sessionName}:`, err),
-      );
+      if (isGroupedTab) {
+        setPendingNewTabGroupIds((current) =>
+          new Set(current).add(targetGroupId),
+        );
+        try {
+          await createTab(sessionName, label, tabs.length, targetGroupId);
+        } catch (err) {
+          const message = errorMessage(err, "Failed to create terminal tab");
+          setNewTabError(message);
+          announce(message);
+          console.error(`Failed to persist new tab ${sessionName}:`, err);
+          return;
+        } finally {
+          setPendingNewTabGroupIds((current) => {
+            const next = new Set(current);
+            next.delete(targetGroupId);
+            return next;
+          });
+        }
+      } else {
+        createTab(sessionName, label, tabs.length).catch((err) =>
+          console.error(`Failed to persist new tab ${sessionName}:`, err),
+        );
+      }
+      setNewTabError(null);
       setTabs((prev) => [
         ...prev,
         {
@@ -645,12 +834,13 @@ export function TerminalView({
       announce(`New tab ${label} created`);
     },
     [
+      announce,
       createTab,
       handleTabLimitReached,
+      pendingNewTabGroupIds,
       tabs,
       visibleTabs.length,
       workspaceId,
-      announce,
     ],
   );
 
@@ -669,14 +859,7 @@ export function TerminalView({
       tabMetadata.map((meta) => [meta.session_name, meta]),
     );
     publishTerminalSidebarState({
-      groups: [
-        {
-          id: DEFAULT_TERMINAL_WORKTREE_GROUP_ID,
-          label: "Workspace",
-          isDefault: true,
-          members: [],
-        },
-      ],
+      groups: sidebarGroups,
       tabs: visibleTabs.map((tab) => ({
         id: tab.id,
         label: tab.label,
@@ -688,9 +871,17 @@ export function TerminalView({
         ...(tab.pinned !== undefined ? { pinned: tab.pinned } : {}),
       })),
       activeTabId,
-      activeGroupId: DEFAULT_TERMINAL_WORKTREE_GROUP_ID,
+      activeGroupId,
     });
-  }, [hideTabs, isActive, visibleTabs, activeTabId, tabMetadata]);
+  }, [
+    activeGroupId,
+    activeTabId,
+    hideTabs,
+    isActive,
+    sidebarGroups,
+    tabMetadata,
+    visibleTabs,
+  ]);
 
   useEffect(() => {
     if (hideTabs || !isActive) return;
@@ -699,22 +890,39 @@ export function TerminalView({
       const tabId = (event as CustomEvent<{ tabId: string }>).detail?.tabId;
       if (tabId) handleTabChange(tabId);
     };
-    const onNewTab = () => {
-      handleBackendSelect(selectableBackends[0] ?? "shell");
+    const onNewTab = (event: Event) => {
+      const groupId =
+        (event as CustomEvent<{ groupId?: string }>).detail?.groupId ||
+        activeGroupId ||
+        DEFAULT_TERMINAL_WORKTREE_GROUP_ID;
+      void handleBackendSelect(selectableBackends[0] ?? "shell", groupId);
+    };
+    const onGroupSelect = (event: Event) => {
+      const groupId = (event as CustomEvent<{ groupId?: string }>).detail
+        ?.groupId;
+      setActiveGroupAndPersist(groupId || DEFAULT_TERMINAL_WORKTREE_GROUP_ID);
+      setNewTabError(null);
     };
 
     window.addEventListener(TERMINAL_SIDEBAR_SELECT_EVENT, onSelect);
     window.addEventListener(TERMINAL_SIDEBAR_NEW_TAB_EVENT, onNewTab);
+    window.addEventListener(TERMINAL_SIDEBAR_ACTIVE_GROUP_EVENT, onGroupSelect);
     return () => {
       window.removeEventListener(TERMINAL_SIDEBAR_SELECT_EVENT, onSelect);
       window.removeEventListener(TERMINAL_SIDEBAR_NEW_TAB_EVENT, onNewTab);
+      window.removeEventListener(
+        TERMINAL_SIDEBAR_ACTIVE_GROUP_EVENT,
+        onGroupSelect,
+      );
     };
   }, [
+    activeGroupId,
     hideTabs,
     isActive,
     handleTabChange,
     handleBackendSelect,
     selectableBackends,
+    setActiveGroupAndPersist,
   ]);
 
   const setInstanceRef = useCallback(
@@ -853,8 +1061,14 @@ export function TerminalView({
   );
 
   const containerClassName = styles.container;
+  const terminalAlert = newTabError ?? groupFetchError;
   return (
     <div className={containerClassName} data-testid="terminal-view">
+      {!hideTabs && terminalAlert ? (
+        <div className={styles.terminalAlert} role="alert">
+          {terminalAlert}
+        </div>
+      ) : null}
       {(metaLoading || configLoading) && visibleTabs.length === 0 ? (
         <LoadingSkeleton.Terminal />
       ) : visibleTabs.length === 0 ? (
