@@ -36,6 +36,30 @@ if [ -f "$PIN_FILE" ] && [ "${ALLOW_FLUE_PIN_DRIFT:-}" != "1" ]; then
   }
 fi
 
+# Pin: local-task-runner.ts imports meta-harness (esbuild inlines the dynamic
+# import), so the bundle build needs a BUILT meta-harness clone AND it must match
+# the committed pin for a reproducible bundle. To advance, set
+# ALLOW_META_HARNESS_PIN_DRIFT=1 and bump META_HARNESS_COMMIT in the same commit.
+MH_ROOT=""
+for cand in "${LOOM_META_HARNESS_ROOT:-}" "${META_HARNESS_ROOT:-}" "$ROOT/../meta-harness"; do
+  [ -n "$cand" ] && [ -f "$cand/package.json" ] && [ -d "$cand/dist" ] && { MH_ROOT="$(cd "$cand" && pwd)"; break; }
+done
+[ -n "$MH_ROOT" ] || {
+  echo "ERROR: built meta-harness clone not found (needs package.json + dist/)." >&2
+  echo "       Set LOOM_META_HARNESS_ROOT or place it at ../meta-harness and run 'npm run build'." >&2
+  exit 1
+}
+MH_PIN_FILE="$ROOT/internal/workflows/META_HARNESS_COMMIT"
+if [ -f "$MH_PIN_FILE" ] && [ "${ALLOW_META_HARNESS_PIN_DRIFT:-}" != "1" ]; then
+  MH_PINNED="$(tr -d '[:space:]' < "$MH_PIN_FILE")"
+  MH_HEAD="$(git -C "$MH_ROOT" rev-parse HEAD 2>/dev/null || true)"
+  [ "$MH_HEAD" = "$MH_PINNED" ] || {
+    echo "ERROR: meta-harness HEAD ($MH_HEAD) != pinned $MH_PINNED (internal/workflows/META_HARNESS_COMMIT)." >&2
+    echo "       Check out meta-harness at the pin, or set ALLOW_META_HARNESS_PIN_DRIFT=1 and bump META_HARNESS_COMMIT in the same commit." >&2
+    exit 1
+  }
+fi
+
 SRC="$ROOT/internal/workflows/builtin"
 # BUILTIN_DIST_DEST lets CI and local callers choose a scratch dir without
 # recreating deleted generated bundle files in the repo.
