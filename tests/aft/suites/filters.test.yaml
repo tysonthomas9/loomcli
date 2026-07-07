@@ -32,3 +32,33 @@ tests:
       - expect: { url: "**search=alpha**" }
       - expect: { count: { selector: "section[data-status=ready] article", equals: 1 } }
       - expect: { value: { testid: search-input-field, equals: alpha } }
+
+  # covers: LCLI-DV-004
+  - name: deep link applies search priority type and label filters on load
+    intent: URL filter params are parsed on first load and narrow the board before user interaction
+    steps:
+      - run: >-
+          curl -sf -X POST "$AFT_BASE_URL/api/workspaces/${AFT_WS:-E2E-WS}/issues" -H "Content-Type: application/json"
+          -d "{\"title\":\"filters-deeplink-${RUN_ID:-local}-match\",\"issue_type\":\"bug\",\"priority\":1,\"labels\":[\"aft-filter-${RUN_ID:-local}\"]}" >/dev/null
+      - run: >-
+          curl -sf -X POST "$AFT_BASE_URL/api/workspaces/${AFT_WS:-E2E-WS}/issues" -H "Content-Type: application/json"
+          -d "{\"title\":\"filters-deeplink-${RUN_ID:-local}-wrong-priority\",\"issue_type\":\"bug\",\"priority\":2,\"labels\":[\"aft-filter-${RUN_ID:-local}\"]}" >/dev/null
+      - run: >-
+          curl -sf -X POST "$AFT_BASE_URL/api/workspaces/${AFT_WS:-E2E-WS}/issues" -H "Content-Type: application/json"
+          -d "{\"title\":\"filters-deeplink-${RUN_ID:-local}-wrong-type\",\"issue_type\":\"task\",\"priority\":1,\"labels\":[\"aft-filter-${RUN_ID:-local}\"]}" >/dev/null
+      - run: >-
+          curl -sf -X POST "$AFT_BASE_URL/api/workspaces/${AFT_WS:-E2E-WS}/issues" -H "Content-Type: application/json"
+          -d "{\"title\":\"filters-deeplink-${RUN_ID:-local}-wrong-label\",\"issue_type\":\"bug\",\"priority\":1,\"labels\":[\"other-filter-${RUN_ID:-local}\"]}" >/dev/null
+      - open: /ws/E2E-WS/kanban?search=filters-deeplink-${RUN_ID:-local}&priority=1&type=bug&labels=aft-filter-${RUN_ID:-local}
+      - wait:
+          fn: >-
+            !!document.querySelector('[data-testid=board-toolbar]')
+      - wait:
+          fn: >-
+            document.querySelectorAll('section[data-status=ready] article').length === 1
+      - expect: { value: { testid: search-input-field, equals: "filters-deeplink-${RUN_ID:-local}" } }
+      - expect: { count: { selector: "section[data-status=ready] article", equals: 1 } }
+      - expect: { text: "filters-deeplink-${RUN_ID:-local}-match" }
+      - expect: { notText: "filters-deeplink-${RUN_ID:-local}-wrong-priority" }
+      - expect: { notText: "filters-deeplink-${RUN_ID:-local}-wrong-type" }
+      - expect: { notText: "filters-deeplink-${RUN_ID:-local}-wrong-label" }

@@ -1,0 +1,41 @@
+# Markdown safety for the v5 slide-out IssueDetailPanel. Kanban cards are
+# article elements with aria-label="Issue: <title>"; clicking one opens the
+# panel overlay, whose description uses EditableDescription/MarkdownRenderer.
+suite: markdown-safety
+baseUrl: "${AFT_BASE_URL:-http://127.0.0.1:3100}"
+teardown: '"$AFT_TESTS_DIR/scripts/close-open-issues.sh"'
+
+tests:
+  # covers: LCLI-SEC-013
+  - name: issue detail markdown sanitizes executable html
+    intent: A malicious issue description cannot execute script or image handlers, while safe markdown formatting still renders in the detail panel
+    steps:
+      - open: /ws/E2E-WS/kanban
+      - wait:
+          fn: >-
+            !!document.querySelector('[data-testid=board-toolbar]')
+      - expect: { count: { selector: "section[data-status=ready] article", equals: 0 } }
+      - run: >-
+          python3 -c 'import json,os; print(json.dumps({"title":"markdown safety "+os.environ.get("RUN_ID","local"),"issue_type":"task","priority":2,"description":"safe **bold** signal\n<img src=x onerror=\"window.__aftXss=1\">\n<script>window.__aftXss=1</script>"}))'
+          | curl -sf -X POST "$AFT_BASE_URL/api/workspaces/$AFT_WS/issues"
+          -H "Content-Type: application/json" -d @-
+          | python3 -c "import sys,json; print(json.load(sys.stdin)['data']['id'])"
+          > "$AFT_WORK_DIR/markdown-safety.id"
+      - wait: { text: markdown safety }
+      - click: { role: article, name: "Issue: markdown safety ${RUN_ID:-local}", exact: true }
+      - wait:
+          fn: >-
+            !!document.querySelector('[data-testid=issue-detail-panel][data-state=open]')
+      - expect: { visible: { testid: editable-description } }
+      - wait:
+          fn: >-
+            !!document.querySelector('[data-testid=editable-description] [data-testid=markdown-content]')
+      - wait:
+          fn: >-
+            document.querySelector('[data-testid=editable-description] strong')?.textContent === 'bold'
+      - wait: { ms: 250 }
+      - wait:
+          fn: >-
+            window.__aftXss === undefined &&
+            !document.querySelector('[data-testid=editable-description] script') &&
+            !document.querySelector('[data-testid=editable-description] img[onerror]')

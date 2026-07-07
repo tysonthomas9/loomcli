@@ -1,0 +1,52 @@
+# Workspace switching uses the sidebar WorkspaceSelectorBar plus the
+# WorkspaceSwitcher dialog. The server script's own e2e-ws-2 CLI create fails
+# silently on v5, so this suite creates the second workspace via the live API
+# (idempotent: an already-exists response is fine). Its server-assigned id is
+# E2E-WS-2 (uppercased name), which is what routes use.
+suite: workspaces
+baseUrl: "${AFT_BASE_URL:-http://127.0.0.1:3100}"
+setup: >-
+  curl -s -X POST "$AFT_BASE_URL/api/workspaces" -H "Content-Type: application/json"
+  -d '{"name":"e2e-ws-2","type":"empty"}' >/dev/null; echo "ensured e2e-ws-2"
+teardown: '"$AFT_TESTS_DIR/scripts/close-open-issues.sh"'
+
+tests:
+  # covers: LCLI-PS-002
+  - name: workspace selector switches route and board scope
+    intent: Switching from E2E-WS to e2e-ws-2 updates the workspace route and removes primary-workspace issues from the board
+    steps:
+      - open: /ws/E2E-WS/kanban
+      - wait:
+          fn: >-
+            !!document.querySelector('[data-testid=board-toolbar]')
+      - run: >-
+          curl -sf -X POST "$AFT_BASE_URL/api/workspaces/E2E-WS/issues" -H "Content-Type: application/json"
+          -d "{\"title\":\"workspace-primary-${RUN_ID:-local}\",\"issue_type\":\"task\",\"priority\":2}" >/dev/null
+      - wait: { text: "workspace-primary-${RUN_ID:-local}" }
+      - expect: { count: { selector: "section[data-status=ready] article[aria-label*='workspace-primary-${RUN_ID:-local}']", equals: 1 } }
+      - click: { selector: "button[aria-label*='Click to switch.']", first: true }
+      - wait:
+          fn: >-
+            !!document.querySelector('[role=dialog][aria-label="Switch workspace"]')
+      - fill: { placeholder: "Switch workspace...", value: e2e-ws-2 }
+      - wait:
+          fn: >-
+            document.querySelectorAll('[data-workspace-item]').length === 1
+      - click: { selector: "[data-workspace-item]", first: true }
+      - wait: { url: "**/ws/E2E-WS-2/kanban**" }
+      - wait:
+          fn: >-
+            !!document.querySelector('[data-testid=board-toolbar]')
+      - expect: { visible: { testid: empty-workspace-board } }
+      - expect: { notText: "workspace-primary-${RUN_ID:-local}" }
+
+  # covers: LCLI-PS-002
+  - name: second workspace deep link opens scoped empty board
+    intent: A direct route to the second workspace opens the correct board scope without first visiting the primary workspace
+    steps:
+      - open: /ws/E2E-WS-2/kanban
+      - wait:
+          fn: >-
+            !!document.querySelector('[data-testid=board-toolbar]')
+      - wait: { url: "**/ws/E2E-WS-2/kanban**" }
+      - expect: { visible: { testid: empty-workspace-board } }

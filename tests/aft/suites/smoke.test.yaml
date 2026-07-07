@@ -32,3 +32,14 @@ tests:
           -d "{\"title\":\"sse smoke $RUN_ID\",\"issue_type\":\"task\",\"priority\":2}"
       - wait: { text: sse smoke }
       - expect: { count: { selector: "section[data-status=ready] article", equals: 1 } }
+
+  # covers: LCLI-OPS-002
+  - name: health and config endpoints return expected payloads
+    intent: Operators can probe process health and frontend runtime config without loading the SPA
+    steps:
+      - run: >-
+          curl -sf "$AFT_BASE_URL/health" |
+          python3 -c 'import json,sys; data=json.load(sys.stdin); assert data.get("status") == "ok", data'
+      - run: >-
+          curl -sf "$AFT_BASE_URL/api/config" |
+          python3 -c 'import json,sys; data=json.load(sys.stdin); assert data.get("mode") == "open", data; assert data.get("issue_backend") == "fleet", data'

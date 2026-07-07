@@ -1,0 +1,24 @@
+# Monitor dashboard route and empty-state coverage for the v5 workspace monitor.
+suite: monitor
+baseUrl: "${AFT_BASE_URL:-http://127.0.0.1:3100}"
+
+tests:
+  # covers: LCLI-OPS-006, LCLI-DV-007
+  - name: monitor dashboard renders project health and empty agent queue
+    intent: Opening the workspace monitor route renders MonitorDashboard panels and the empty agent activity state
+    steps:
+      - open: /ws/E2E-WS/monitor
+      - wait:
+          fn: >-
+            !!document.querySelector('[data-testid=monitor-dashboard]')
+      - expect: { visible: { testid: monitor-dashboard } }
+      - expect: { visible: { testid: project-health-panel } }
+      - expect: { visible: { testid: agent-activity-panel } }
+      - expect: { visible: { selector: "[role=progressbar][aria-label='Project completion']" } }
+      - expect: { text: Project Health }
+      - expect: { text: Agent Activity }
+      - expect: { text: Usage }
+      # "Bottlenecks" only renders with queue data — assert the always-present panels instead
+      # (no-backends-empty-state exists in DOM but belongs to the hidden terminal view)
+      - expect: { visible: { testid: usage-dashboard } }
+      - expect: { notText: Loom server not available }

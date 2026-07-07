@@ -1,0 +1,42 @@
+# SSE resilience against the real v5 board. The board must have an existing
+# issue before disconnect because App suppresses StaleDataBanner on an empty
+# issue-based view.
+suite: sse-resilience
+baseUrl: "${AFT_BASE_URL:-http://127.0.0.1:3100}"
+teardown: '"$AFT_TESTS_DIR/scripts/close-open-issues.sh"'
+
+tests:
+  # covers: LCLI-DV-006, LCLI-IW-004, LCLI-RA-007, LCLI-OPS-012
+  - name: stale banner clears and missed issue appears after reconnect
+    intent: When the browser loses SSE connectivity, the board shows stale data, then reconnect catch-up renders an issue created while offline
+    steps:
+      - open: /ws/E2E-WS/kanban
+      - wait:
+          fn: >-
+            !!document.querySelector('[data-testid=board-toolbar]')
+      - expect: { count: { selector: "section[data-status=ready] article", equals: 0 } }
+      - run: >-
+          curl -sf -X POST "$AFT_BASE_URL/api/workspaces/$AFT_WS/issues"
+          -H "Content-Type: application/json"
+          -d "{\"title\":\"sse online seed ${RUN_ID:-local}\",\"issue_type\":\"task\",\"priority\":2}"
+          >/dev/null
+      - wait: { text: sse online seed }
+      - expect: { count: { selector: "section[data-status=ready] article", equals: 1 } }
+      - offline: on
+      - wait: { ms: 5500 }
+      - wait:
+          fn: >-
+            !!document.querySelector('[role=alert][aria-live=assertive]')
+      - expect: { visible: { selector: "[role=alert][aria-live=assertive]" } }
+      - expect: { text: Reconnecting }
+      - run: >-
+          curl -sf -X POST "$AFT_BASE_URL/api/workspaces/$AFT_WS/issues"
+          -H "Content-Type: application/json"
+          -d "{\"title\":\"sse missed catchup ${RUN_ID:-local}\",\"issue_type\":\"task\",\"priority\":2}"
+          >/dev/null
+      - offline: off
+      - wait:
+          fn: >-
+            !document.querySelector('[role=alert][aria-live=assertive]')
+      - wait: { text: sse missed catchup }
+      - expect: { count: { selector: "section[data-status=ready] article", equals: 2 } }

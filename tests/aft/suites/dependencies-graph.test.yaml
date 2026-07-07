@@ -1,0 +1,62 @@
+# Dependency graph coverage. A blocks B is represented by making B depend on A:
+# POST /api/workspaces/:ws/issues/:B/dependencies with depends_on_id=A.
+suite: dependencies-graph
+baseUrl: "${AFT_BASE_URL:-http://127.0.0.1:3100}"
+teardown: '"$AFT_TESTS_DIR/scripts/close-open-issues.sh"'
+
+tests:
+  # covers: LCLI-WP-004, LCLI-DV-005
+  - name: blocking dependency drives board column and graph edge
+    intent: A blocking dependency created through the workspace API moves the blocked issue to the Blocked column, renders nodes and edges in GraphView, and removal returns it to Open
+    steps:
+      - run: >-
+          blocker=$(curl -sf -X POST "$AFT_BASE_URL/api/workspaces/$AFT_WS/issues"
+          -H "Content-Type: application/json"
+          -d "{\"title\":\"graph blocker $RUN_ID\",\"issue_type\":\"task\",\"priority\":2}"
+          | python3 -c "import sys,json;print(json.load(sys.stdin)['data']['id'])");
+          blocked=$(curl -sf -X POST "$AFT_BASE_URL/api/workspaces/$AFT_WS/issues"
+          -H "Content-Type: application/json"
+          -d "{\"title\":\"graph blocked $RUN_ID\",\"issue_type\":\"task\",\"priority\":2}"
+          | python3 -c "import sys,json;print(json.load(sys.stdin)['data']['id'])");
+          printf "%s\n" "$blocker" > "$AFT_WORK_DIR/graph-blocker.id";
+          printf "%s\n" "$blocked" > "$AFT_WORK_DIR/graph-blocked.id";
+          curl -sf -X POST "$AFT_BASE_URL/api/workspaces/$AFT_WS/issues/$blocked/dependencies"
+          -H "Content-Type: application/json"
+          -d "{\"depends_on_id\":\"$blocker\",\"dep_type\":\"blocks\"}"
+          >/dev/null
+      - open: /ws/E2E-WS/kanban
+      - wait:
+          fn: >-
+            !!document.querySelector('[data-testid=board-toolbar]')
+      - wait: { text: graph blocked }
+      - wait:
+          fn: >-
+            document.querySelectorAll('section[data-status=blocked] article').length === 1
+      - expect: { count: { selector: "section[data-status=ready] article", equals: 1 } }
+      - expect: { count: { selector: "section[data-status=blocked] article", equals: 1 } }
+      - open: /ws/E2E-WS/graph
+      - wait:
+          fn: >-
+            !!document.querySelector('[data-testid=graph-view]')
+      - expect: { visible: { testid: graph-view } }
+      - expect: { visible: { testid: graph-legend } }
+      - wait:
+          fn: >-
+            document.querySelectorAll('[data-testid=graph-view] .react-flow__node').length >= 2
+      - expect: { count: { selector: "[data-testid=graph-view] .react-flow__node", atLeast: 2 } }
+      - expect: { count: { selector: "[data-testid=graph-view] .react-flow__edge", atLeast: 1 } }
+      - wait:
+          fn: >-
+            (() => { const text = document.querySelector('[data-testid=graph-view]')?.textContent || ''; return text.includes('graph blocker') && text.includes('graph blocked'); })()
+      - run: >-
+          curl -sf -X DELETE "$AFT_BASE_URL/api/workspaces/$AFT_WS/issues/$(cat "$AFT_WORK_DIR/graph-blocked.id")/dependencies/$(cat "$AFT_WORK_DIR/graph-blocker.id")"
+          >/dev/null
+      - open: /ws/E2E-WS/kanban
+      - wait:
+          fn: >-
+            !!document.querySelector('[data-testid=board-toolbar]')
+      - wait: { text: graph blocked }
+      - wait:
+          fn: >-
+            document.querySelectorAll('section[data-status=ready] article').length === 2
+      - expect: { count: { selector: "section[data-status=blocked] article", equals: 0 } }

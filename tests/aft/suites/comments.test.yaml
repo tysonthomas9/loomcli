@@ -1,0 +1,67 @@
+# Comments and issue activity timeline coverage. Comment endpoints are
+# workspace-scoped and accept {"text": "..."}; the panel renders comments and
+# events through ActivityLog.
+suite: comments
+baseUrl: "${AFT_BASE_URL:-http://127.0.0.1:3100}"
+teardown: '"$AFT_TESTS_DIR/scripts/close-open-issues.sh"'
+
+tests:
+  # covers: LCLI-IW-013, LCLI-RA-006
+  - name: api comments and lifecycle events render in panel activity
+    intent: Comments posted through the workspace API appear in the detail panel activity timeline with author, timestamp, and stable ordering alongside lifecycle events
+    steps:
+      - run: >-
+          curl -sf -X POST "$AFT_BASE_URL/api/workspaces/$AFT_WS/issues"
+          -H "Content-Type: application/json"
+          -d "{\"title\":\"comments timeline $RUN_ID\",\"issue_type\":\"task\",\"priority\":2}"
+          | python3 -c "import sys,json;print(json.load(sys.stdin)['data']['id'])"
+          > "$AFT_WORK_DIR/comments.id"
+      - run: >-
+          curl -sf -X POST "$AFT_BASE_URL/api/workspaces/$AFT_WS/issues/$(cat "$AFT_WORK_DIR/comments.id")/comments"
+          -H "Content-Type: application/json"
+          -d "{\"text\":\"first api comment $RUN_ID\"}"
+          >/dev/null
+      - run: >-
+          curl -sf -X POST "$AFT_BASE_URL/api/workspaces/$AFT_WS/issues/$(cat "$AFT_WORK_DIR/comments.id")/comments"
+          -H "Content-Type: application/json"
+          -d "{\"text\":\"second api comment $RUN_ID\"}"
+          >/dev/null
+      - run: >-
+          curl -sf -X POST "$AFT_BASE_URL/api/workspaces/$AFT_WS/issues/$(cat "$AFT_WORK_DIR/comments.id")/close"
+          -H "Content-Type: application/json"
+          -d '{"reason":"aft comments lifecycle"}'
+          >/dev/null
+      - run: >-
+          curl -sf -X POST "$AFT_BASE_URL/api/workspaces/$AFT_WS/issues/$(cat "$AFT_WORK_DIR/comments.id")/reopen"
+          -H "Content-Type: application/json"
+          -d '{"reason":"aft comments lifecycle reopen"}'
+          >/dev/null
+      - open: /ws/E2E-WS/kanban
+      - wait:
+          fn: >-
+            !!document.querySelector('[data-testid=board-toolbar]')
+      - wait: { text: comments timeline }
+      - expect: { count: { selector: "section[data-status=ready] article", equals: 1 } }
+      - click: { selector: "section[data-status=ready] article", first: true }
+      - wait:
+          fn: >-
+            document.querySelector('[data-testid=issue-detail-panel]')?.getAttribute('data-state') === 'open'
+      - expect: { visible: { testid: activity-log } }
+      # comments load async after the panel opens; close/reopen REASONS also
+      # render as activity-comment nodes, so assert at-least rather than exact
+      - wait:
+          fn: >-
+            document.querySelectorAll('[data-testid=activity-comment] time[datetime]').length >= 2
+      - expect: { count: { testid: activity-comment, atLeast: 2 } }
+      # comments posted via the API carry the fleet actor (loom-e2e), not web-ui
+      - expect: { text: loom-e2e }
+      - expect: { text: first api comment }
+      - expect: { text: second api comment }
+      - wait:
+          fn: >-
+            (() => { const text = document.querySelector('[data-testid=activity-log]')?.textContent || ''; return text.indexOf('first api comment') >= 0 && text.indexOf('second api comment') > text.indexOf('first api comment'); })()
+      # lifecycle events render as generic "performed an action" entries; the
+      # close/reopen REASONS are what surface as readable text
+      - expect: { text: aft comments lifecycle }
+      - expect: { text: aft comments lifecycle reopen }
+      - expect: { visible: { testid: comment-form } }

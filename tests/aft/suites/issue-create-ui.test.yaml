@@ -12,9 +12,78 @@ tests:
       - wait:
           fn: >-
             !!document.querySelector('[data-testid=board-toolbar]')
+      # first interaction of a fresh browser session: settle hydration before clicking
+      - wait: { load: networkidle }
       - click: { testid: new-issue-button }
+      - wait:
+          fn: >-
+            !!document.querySelector('[data-testid=create-issue-title]')
       - expect: { visible: { testid: create-issue-title } }
       - fill: { testid: create-issue-title, value: "ui created ${RUN_ID:-local}" }
       - click: { testid: create-issue-submit }
       - wait: { text: ui created }
       - expect: { count: { selector: "section[data-status=ready] article", equals: 1 } }
+
+  # covers: LCLI-WP-001
+  - name: empty title keeps submit disabled
+    intent: The New Issue modal prevents submitting a blank title
+    steps:
+      - open: /ws/E2E-WS/kanban
+      - wait:
+          fn: >-
+            !!document.querySelector('[data-testid=board-toolbar]')
+      - click: { testid: new-issue-button }
+      - expect: { visible: { testid: create-issue-title } }
+      - expect: { enabled: { testid: create-issue-submit, equals: false } }
+
+  # covers: LCLI-WP-001
+  - name: full-field create preserves type and description
+    intent: Creating an issue with type, status, and description renders the saved issue detail panel; current v5 create requests land in Open
+    steps:
+      - open: /ws/E2E-WS/kanban
+      - wait:
+          fn: >-
+            !!document.querySelector('[data-testid=board-toolbar]')
+      - click: { testid: new-issue-button }
+      - expect: { visible: { testid: create-issue-title } }
+      - fill: { testid: create-issue-title, value: "ui-full-field-${RUN_ID:-local}" }
+      - select: { testid: create-issue-type, value: bug }
+      - select: { testid: create-issue-status, value: deferred }
+      - fill: { testid: create-issue-description, value: "full-field description ${RUN_ID:-local}" }
+      - click: { testid: create-issue-submit }
+      - wait: { text: "ui-full-field-${RUN_ID:-local}" }
+      - expect: { visible: { testid: issue-detail-panel } }
+      - wait:
+          fn: >-
+            document.querySelector('[data-testid=metadata-type]')?.textContent?.includes('Bug')
+      - expect: { text: "full-field description ${RUN_ID:-local}" }
+      - expect: { count: { selector: "section[data-status=ready] article[aria-label*='ui-full-field-${RUN_ID:-local}']", equals: 1 } }
+      - expect: { count: { selector: "section[data-status=backlog] article[aria-label*='ui-full-field-${RUN_ID:-local}']", equals: 0 } }
+
+  # covers: LCLI-WP-001
+  - name: duplicate titles create separate cards
+    intent: The UI and API accept duplicate titles, so two submissions with the same title render as two issue cards
+    steps:
+      - open: /ws/E2E-WS/kanban
+      - wait:
+          fn: >-
+            !!document.querySelector('[data-testid=board-toolbar]')
+      - click: { testid: new-issue-button }
+      - expect: { visible: { testid: create-issue-title } }
+      - fill: { testid: create-issue-title, value: "ui-duplicate-${RUN_ID:-local}" }
+      - click: { testid: create-issue-submit }
+      - wait:
+          fn: >-
+            document.querySelectorAll("section[data-status=ready] article[aria-label*='ui-duplicate-${RUN_ID:-local}']").length === 1
+      - open: /ws/E2E-WS/kanban
+      - wait:
+          fn: >-
+            !!document.querySelector('[data-testid=board-toolbar]')
+      - click: { testid: new-issue-button }
+      - expect: { visible: { testid: create-issue-title } }
+      - fill: { testid: create-issue-title, value: "ui-duplicate-${RUN_ID:-local}" }
+      - click: { testid: create-issue-submit }
+      - wait:
+          fn: >-
+            document.querySelectorAll("section[data-status=ready] article[aria-label*='ui-duplicate-${RUN_ID:-local}']").length === 2
+      - expect: { count: { selector: "section[data-status=ready] article[aria-label*='ui-duplicate-${RUN_ID:-local}']", equals: 2 } }
