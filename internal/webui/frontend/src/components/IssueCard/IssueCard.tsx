@@ -3,7 +3,9 @@
  * Displays a single issue as a card with title, ID, priority badge, and optional blocked indicator.
  */
 
+import type { DraggableAttributes } from "@dnd-kit/core";
 import { memo } from "react";
+import { useStoreWithEqualityFn } from "zustand/traditional";
 
 import { BlockedBadge } from "@/components/BlockedBadge";
 import { HighlightText } from "@/components/HighlightText";
@@ -11,6 +13,7 @@ import { RepoBadge } from "@/components/RepoBadge";
 import { useHasActiveSession } from "@/contexts/IssueSessionContext";
 import { useSearchTerm } from "@/contexts/SearchTermContext";
 
+import { useAgentStoreInstance } from "@/hooks/common";
 import { useToast } from "@/hooks/ui";
 import { useWorkspaceContext } from "@/hooks/workspace";
 import type { BlockerRef, Issue } from "@/types";
@@ -21,6 +24,7 @@ import {
   type ReviewType,
 } from "@/utils/issue";
 
+import { resolveCardFooterBadge, type CardFooterBadge } from "./cardAgentView";
 import styles from "./IssueCard.module.css";
 
 /**
@@ -57,6 +61,17 @@ export interface IssueCardProps {
   columnId?: string;
   /** Whether this issue has an active terminal session */
   hasActiveSession?: boolean;
+  /** Drag-and-drop props from @dnd-kit (merged onto the root article) */
+  dragProps?: IssueCardDragProps;
+}
+
+export interface IssueCardDragProps {
+  ref?: (node: HTMLElement | null) => void;
+  style?: React.CSSProperties;
+  listeners?: Record<string, unknown> | undefined;
+  attributes?: DraggableAttributes | undefined;
+  isDragging?: boolean;
+  isPending?: boolean;
 }
 
 /**
@@ -78,6 +93,16 @@ function personInitials(name: string): string {
     .join("")
     .toUpperCase()
     .slice(0, 2);
+}
+
+/** Value-equality for the footer badge so store updates don't churn the card. */
+function footerBadgeEqual(
+  a: CardFooterBadge | null,
+  b: CardFooterBadge | null,
+): boolean {
+  if (a === b) return true;
+  if (a === null || b === null) return false;
+  return a.kind === b.kind && a.name === b.name;
 }
 
 /** Copies the full issue key to the clipboard (Aether ticket clipboard affordance). */
@@ -139,6 +164,7 @@ export const IssueCard = memo(function IssueCard({
   isBacklog = false,
   columnId,
   hasActiveSession,
+  dragProps,
 }: IssueCardProps): JSX.Element {
   const { isMultiRepo, isAllSelected } = useWorkspaceContext();
   const searchTerm = useSearchTerm();
@@ -154,9 +180,31 @@ export const IssueCard = memo(function IssueCard({
   const isBlocked = (blockedByCount ?? 0) > 0;
   const isDeferred = issue.is_deferred === true || issue.status === "deferred";
   const reviewType = getReviewType(issue);
-  const personLabel = issue.owner ?? issue.assignee;
+  const agentStore = useAgentStoreInstance();
+  // Subscribe with a value-equality selector so an agent poll only re-renders
+  // this card when ITS badge actually changes — not every card on every poll.
+  const footerBadge = useStoreWithEqualityFn(
+    agentStore,
+    (s) => resolveCardFooterBadge(s.agents, issue, columnId),
+    footerBadgeEqual,
+  );
   const showRepoBadge = isMultiRepo && isAllSelected && !!issue.repo;
-  const showFooter = showRepoBadge || !!personLabel;
+  const showFooter = showRepoBadge || !!footerBadge;
+
+  const {
+    ref: dragRef,
+    style: dragStyle,
+    listeners,
+    attributes,
+    isDragging = false,
+    isPending = false,
+  } = dragProps ?? {};
+
+  // dnd-kit's KeyboardSensor puts onKeyDown in `listeners`; spreading it raw
+  // would clobber the card's Enter/Space-to-open handler. Pull it out so
+  // handleKeyDown can open on Enter/Space and defer other keys to the sensor.
+  const { onKeyDown: dragOnKeyDown, ...dragListeners } = (listeners ??
+    {}) as Record<string, unknown>;
 
   const rootClassName = className
     ? `${styles.issueCard} ${className}`
@@ -172,20 +220,29 @@ export const IssueCard = memo(function IssueCard({
     if (onClick && (event.key === "Enter" || event.key === " ")) {
       event.preventDefault();
       onClick(issue);
+      return;
     }
+    (dragOnKeyDown as ((e: React.KeyboardEvent) => void) | undefined)?.(event);
   };
 
   return (
     <article
+      ref={dragRef}
+      style={dragStyle}
       className={rootClassName}
       data-priority={priority}
       data-column={columnId}
       data-blocked={isBlocked ? "true" : undefined}
       data-in-backlog={isBacklog ? "true" : undefined}
+      data-draggable={dragProps ? "true" : undefined}
+      data-dragging={isDragging ? "true" : undefined}
+      data-optimistic={isPending ? "pending" : undefined}
       onClick={handleClick}
       onKeyDown={handleKeyDown}
       tabIndex={onClick ? 0 : undefined}
       aria-label={`Issue: ${displayTitle}${isBlocked ? " (blocked)" : ""}${isBacklog ? " (backlog)" : ""}`}
+      {...attributes}
+      {...dragListeners}
     >
       <header className={styles.top}>
         <span className={styles.id} title={issue.id}>
@@ -224,20 +281,18 @@ export const IssueCard = memo(function IssueCard({
               </svg>
             </span>
           )}
-          {reviewType === "code" &&
-            issue.external_ref &&
-            isPRUrl(issue.external_ref) && (
-              <a
-                className={styles.prLink}
-                href={issue.external_ref}
-                target="_blank"
-                rel="noopener noreferrer"
-                onClick={(e) => e.stopPropagation()}
-                aria-label="View pull request"
-              >
-                PR ↗
-              </a>
-            )}
+          {issue.external_ref && isPRUrl(issue.external_ref) && (
+            <a
+              className={styles.prLink}
+              href={issue.external_ref}
+              target="_blank"
+              rel="noopener noreferrer"
+              onClick={(e) => e.stopPropagation()}
+              aria-label="View pull request"
+            >
+              PR ↗
+            </a>
+          )}
           {isBlocked && (
             <BlockedBadge
               count={blockedByCount ?? 0}
@@ -262,13 +317,21 @@ export const IssueCard = memo(function IssueCard({
           <div className={styles.footerLeft}>
             {showRepoBadge && issue.repo && <RepoBadge repoName={issue.repo} />}
           </div>
-          {personLabel && (
+          {footerBadge && (
             <span
               className={styles.ownerBadge}
-              title={`Owner: ${personLabel}`}
-              data-testid="issue-card-owner"
+              title={
+                footerBadge.kind === "agent"
+                  ? `Working: ${footerBadge.name}`
+                  : `Owner: ${footerBadge.name}`
+              }
+              data-testid={
+                footerBadge.kind === "agent"
+                  ? "issue-card-agent"
+                  : "issue-card-owner"
+              }
             >
-              {personInitials(personLabel)}
+              {personInitials(footerBadge.name)}
             </span>
           )}
         </footer>

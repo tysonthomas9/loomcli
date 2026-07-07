@@ -860,6 +860,20 @@ describe("CreateWorkspaceModal", () => {
       fireEvent.click(dialog);
       expect(onClose).not.toHaveBeenCalled();
     });
+
+    it("click near dialog in dismiss buffer does not call onClose", () => {
+      render(
+        <CreateWorkspaceModal
+          isOpen={true}
+          onClose={onClose}
+          onSuccess={onSuccess}
+        />,
+      );
+
+      const dialog = screen.getByRole("dialog");
+      fireEvent.click(dialog.parentElement!);
+      expect(onClose).not.toHaveBeenCalled();
+    });
   });
 
   describe("form reset", () => {

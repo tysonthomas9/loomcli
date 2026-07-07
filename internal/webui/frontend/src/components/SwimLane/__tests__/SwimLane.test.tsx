@@ -98,7 +98,7 @@ describe("SwimLane", () => {
     it("calls onHeaderIssueClick when clickable lane title is clicked", () => {
       const handleHeaderIssueClick = vi.fn();
       const epic = createMockIssue({
-        id: "epic-1",
+        id: "HELLO-WORLD-2",
         title: "Epic: User Authentication",
         issue_type: "epic",
       });
@@ -106,7 +106,7 @@ describe("SwimLane", () => {
       renderWithDndContext(
         <SwimLane
           id="test-lane"
-          title="Epic: User Authentication"
+          title="Build the Hello World web app"
           issues={[]}
           columns={defaultColumns}
           headerIssue={epic}
@@ -114,16 +114,35 @@ describe("SwimLane", () => {
         />,
       );
 
+      expect(screen.getByText("HELLO-WORLD-2")).toBeInTheDocument();
+      expect(
+        screen.getByText("Build the Hello World web app"),
+      ).toBeInTheDocument();
+
       fireEvent.click(
         screen.getByRole("button", {
-          name: "Open epic: Epic: User Authentication",
+          name: "Open epic HELLO-WORLD-2: Build the Hello World web app",
         }),
       );
 
       expect(handleHeaderIssueClick).toHaveBeenCalledTimes(1);
       expect(handleHeaderIssueClick).toHaveBeenCalledWith(
-        expect.objectContaining({ id: "epic-1" }),
+        expect.objectContaining({ id: "HELLO-WORLD-2" }),
       );
+    });
+
+    it("does not render epic id when headerIssue is absent", () => {
+      renderWithDndContext(
+        <SwimLane
+          id="test-lane"
+          title="alice"
+          issues={[]}
+          columns={defaultColumns}
+        />,
+      );
+
+      expect(screen.getByText("alice")).toBeInTheDocument();
+      expect(screen.queryByTestId("lane-title-button")).not.toBeInTheDocument();
     });
 
     it("renders a runner badge when a lead has claimed the epic lane", () => {
@@ -158,6 +177,64 @@ describe("SwimLane", () => {
       expect(screen.getByTestId("lane-unclaimed-badge")).toHaveTextContent(
         "Unclaimed",
       );
+    });
+
+    it("renders a run button for unclaimed epic lanes when onRunEpic is provided", () => {
+      const onRunEpic = vi.fn();
+      const epic = {
+        id: "HELLO-WORLD-2",
+        title: "Build the Hello World web app",
+        issue_type: "epic" as const,
+        status: "open" as const,
+        priority: 2,
+        created_at: "",
+        updated_at: "",
+      };
+
+      renderWithDndContext(
+        <SwimLane
+          id="lane-epic-HELLO-WORLD-2"
+          title={epic.title}
+          issues={[]}
+          columns={defaultColumns}
+          headerIssue={epic}
+          epicRunner={null}
+          onRunEpic={onRunEpic}
+        />,
+      );
+
+      const runButton = screen.getByTestId("lane-run-epic-button");
+      expect(runButton).toHaveTextContent("Run");
+      runButton.click();
+      expect(onRunEpic).toHaveBeenCalledTimes(1);
+    });
+
+    it("hides the run button when the epic lane is already claimed", () => {
+      const epic = {
+        id: "HELLO-WORLD-2",
+        title: "Build the Hello World web app",
+        issue_type: "epic" as const,
+        status: "open" as const,
+        priority: 2,
+        created_at: "",
+        updated_at: "",
+      };
+
+      renderWithDndContext(
+        <SwimLane
+          id="lane-epic-HELLO-WORLD-2"
+          title={epic.title}
+          issues={[]}
+          columns={defaultColumns}
+          headerIssue={epic}
+          epicRunner="lead-a"
+          onRunEpic={vi.fn()}
+        />,
+      );
+
+      expect(
+        screen.queryByTestId("lane-run-epic-button"),
+      ).not.toBeInTheDocument();
     });
 
     it("hides the runner badge entirely for non-epic groupings", () => {
@@ -654,6 +731,30 @@ describe("SwimLane", () => {
 
       const section = container.querySelector("section");
       expect(section).toHaveClass("custom-lane-class");
+    });
+
+    it("hides empty columns when compactColumns is enabled", () => {
+      const issues = [createMockIssue({ id: "issue-1", status: "open" })];
+
+      renderWithDndContext(
+        <SwimLane
+          id="test-lane"
+          title="Test Lane"
+          issues={issues}
+          columns={defaultColumns}
+          compactColumns
+        />,
+      );
+
+      const laneContent = screen.getByTestId("lane-content");
+      expect(laneContent).toHaveStyle({
+        gridTemplateColumns: "repeat(1, minmax(260px, 1fr))",
+      });
+      expect(within(laneContent).getByText("Open")).toBeInTheDocument();
+      expect(
+        within(laneContent).queryByText("In Progress"),
+      ).not.toBeInTheDocument();
+      expect(within(laneContent).queryByText("Closed")).not.toBeInTheDocument();
     });
 
     it("has correct data-testid based on id prop", () => {

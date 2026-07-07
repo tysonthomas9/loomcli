@@ -77,7 +77,7 @@ func TestEnsureWorkspacePTYRegisteredUsesLocalState(t *testing.T) {
 	t.Cleanup(func() { _ = mm.Close() })
 	p := &terminalWSParams{manager: mm}
 
-	ensureWorkspacePTYRegistered(p, "E2E")
+	ensureWorkspacePTYRegistered(context.Background(), p, "E2E")
 
 	_, _, err := mm.AttachSession(webuterminal.SessionKey{Workspace: "E2E", Name: "s"}, 80, 24, &webuterminal.LaunchSpec{Argv: []string{"-c", "cat"}})
 	if err != nil {

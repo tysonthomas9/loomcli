@@ -21,7 +21,7 @@ describe("WorkspaceBreadcrumb", () => {
         <WorkspaceBreadcrumb workspaceName="my-project" activeView="kanban" />,
       );
 
-      expect(screen.getByText("Aether Project")).toBeInTheDocument();
+      expect(screen.getByText("Loom Project")).toBeInTheDocument();
     });
 
     it("does not render the workspace name (that lives in the sidebar selector)", () => {
@@ -82,16 +82,16 @@ describe("WorkspaceBreadcrumb", () => {
   });
 
   describe("fallback without workspace name", () => {
-    it('renders "Aether" when workspaceName is null', () => {
+    it('renders "Loom" when workspaceName is null', () => {
       render(<WorkspaceBreadcrumb workspaceName={null} activeView="kanban" />);
 
-      expect(screen.getByText("Aether")).toBeInTheDocument();
+      expect(screen.getByText("Loom")).toBeInTheDocument();
     });
 
     it("does not render a view label when workspaceName is null", () => {
       render(<WorkspaceBreadcrumb workspaceName={null} activeView="kanban" />);
 
-      expect(screen.queryByText("Aether Project")).not.toBeInTheDocument();
+      expect(screen.queryByText("Loom Project")).not.toBeInTheDocument();
     });
 
     it("applies breadcrumb CSS class when workspaceName is null for layout consistency", () => {
@@ -119,7 +119,7 @@ describe("WorkspaceBreadcrumb", () => {
 
   describe("view labels", () => {
     const viewLabelMap: Record<ViewMode, string> = {
-      kanban: "Aether Project",
+      kanban: "Loom Project",
       table: "List",
       graph: "Graph",
       monitor: "Monitor",

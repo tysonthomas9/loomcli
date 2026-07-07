@@ -906,6 +906,31 @@ function mockHelloWorldWorkspaceContext({
   } as ReturnType<typeof useWorkspaceContext>);
 }
 
+// AgentSection's module import triggers a vitest-4 mock-allocation blowup on
+// import; stub it to a lightweight shim that still renders the store-provided
+// agents as clickable buttons (agent-navigation tests depend on this).
+vi.mock("@/components/WorkspaceTree/AgentSection", () => ({
+  AgentSection: ({
+    onAgentClick,
+  }: {
+    onAgentClick?: (name: string) => void;
+  }) => (
+    <>
+      {(
+        (mockStoreState as { agents?: Array<{ name: string }> })?.agents ?? []
+      ).map((agent) => (
+        <button
+          key={agent.name}
+          type="button"
+          onClick={() => onAgentClick?.(agent.name)}
+        >
+          {agent.name}
+        </button>
+      ))}
+    </>
+  ),
+}));
+
 describe("App", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -1275,10 +1300,11 @@ describe("App", () => {
 
       render(<App />);
 
-      // Verify KanbanBoard is rendered (we can't easily test the drag event
-      // but we verify the component structure is correct)
+      // Verify the board is rendered (we can't easily test the drag event
+      // but we verify the component structure is correct). The standalone
+      // issue appears in both its lane header and its card, so match all.
       expect(screen.getByRole("heading", { name: "Open" })).toBeInTheDocument();
-      expect(screen.getByText("Test")).toBeInTheDocument();
+      expect(screen.getAllByText("Test").length).toBeGreaterThan(0);
     });
   });
 
@@ -1393,14 +1419,14 @@ describe("App", () => {
   });
 
   describe("AppLayout integration", () => {
-    it("renders with Aether title in header", () => {
+    it("renders with Loom title in header", () => {
       const mockReturn = createMockUseIssuesReturn({});
       mockStoreState = mockReturn;
 
       render(<App />);
 
       expect(
-        screen.getByRole("heading", { name: "Aether", level: 1 }),
+        screen.getByRole("heading", { name: "Loom", level: 1 }),
       ).toBeInTheDocument();
     });
 
@@ -2868,7 +2894,28 @@ describe("App", () => {
         screen.getByRole("button", { name: "Create & Run" }),
       ).toBeDisabled();
       expect(
-        screen.getByRole("button", { name: "Create Agent" }),
+        screen.queryByRole("button", { name: "Create Agent" }),
+      ).not.toBeInTheDocument();
+    });
+
+    it("marks create-agent complete when any workspace agent exists", () => {
+      localStorage.clear();
+      mockStoreState = createMockUseIssuesReturn({ issues: [] });
+      mockBackendState({
+        defaultBackend: "opencode",
+        backends: [backendInfo("opencode", true)],
+      });
+      mockHelloWorldWorkspaceContext({
+        agents: [{ name: "Planner-A", role_name: "plan" }],
+      });
+
+      render(<App />);
+
+      expect(
+        screen.queryByRole("button", { name: "Create Agent" }),
+      ).not.toBeInTheDocument();
+      expect(
+        screen.getByRole("button", { name: "Create & Run" }),
       ).toBeInTheDocument();
     });
 
@@ -3768,7 +3815,7 @@ describe("App", () => {
   });
 
   describe("WorkspaceBreadcrumb isMultiRepo guard", () => {
-    it("renders Aether fallback in breadcrumb when isMultiRepo is false", () => {
+    it("renders Loom fallback in breadcrumb when isMultiRepo is false", () => {
       vi.mocked(useWorkspaceContext).mockReturnValue({
         workspace: { name: "my-workspace" },
         repos: [],
@@ -3799,11 +3846,11 @@ describe("App", () => {
       render(<App />);
 
       // Even though workspace has a name, isMultiRepo=false passes null to WorkspaceBreadcrumb
-      // which renders "Aether" fallback
+      // which renders "Loom" fallback
       expect(
-        screen.getByRole("heading", { name: "Aether", level: 1 }),
+        screen.getByRole("heading", { name: "Loom", level: 1 }),
       ).toBeInTheDocument();
-      // Breadcrumb should NOT show workspace name (Aether fallback instead).
+      // Breadcrumb should NOT show workspace name (Loom fallback instead).
       // Note: workspace name may still appear in the sidebar WorkspaceSelectorBar.
       expect(
         screen.queryByRole("heading", { name: "my-workspace", level: 1 }),
@@ -3840,7 +3887,7 @@ describe("App", () => {
 
       render(<App />);
 
-      // Board views show the Aether brand (home button) instead of a
+      // Board views show the Loom brand (home button) instead of a
       // breadcrumb heading — the Aether V3 minimal header. The workspace
       // name itself lives in the sidebar WorkspaceSelectorBar.
       expect(
@@ -3848,7 +3895,7 @@ describe("App", () => {
       ).not.toBeInTheDocument();
       expect(
         screen.getByRole("button", {
-          name: "Aether home — return to Kanban board",
+          name: "Loom home — return to Kanban board",
         }),
       ).toBeInTheDocument();
     });

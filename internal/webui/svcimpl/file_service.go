@@ -33,6 +33,24 @@ func (s *fileServiceImpl) resolveAgent(wsID, agentName string) (*ops.AgentWorktr
 	if err := validateAgentName(agentName); err != nil {
 		return nil, err
 	}
+	// List/Read use the lead-aware resolver so a lead agent (which has no
+	// local worktree) falls back to the workspace primary worktree and the
+	// file viewer works instead of 404ing.
+	wt, err := s.fileOps.ResolveAgentWorktreeOrPrimary(wsID, agentName)
+	if err != nil {
+		return nil, service.ErrNotFound(fmt.Sprintf("agent worktree %q not found", agentName))
+	}
+	return wt, nil
+}
+
+// resolveAgentForWrite resolves the agent's own worktree for write operations.
+// Unlike resolveAgent, this does NOT fall back to the workspace primary
+// worktree for leads — writes must target the agent worktree only, so a lead
+// can never mutate the primary repo from the read-only file viewer.
+func (s *fileServiceImpl) resolveAgentForWrite(wsID, agentName string) (*ops.AgentWorktree, error) {
+	if err := validateAgentName(agentName); err != nil {
+		return nil, err
+	}
 	wt, err := s.fileOps.ResolveAgentWorktree(wsID, agentName)
 	if err != nil {
 		return nil, service.ErrNotFound(fmt.Sprintf("agent worktree %q not found", agentName))
@@ -201,7 +219,7 @@ func readFileContent(fullPath, basePath string) ([]byte, error) {
 }
 
 func (s *fileServiceImpl) WriteFile(_ context.Context, wsID, agentName, path, content string) error {
-	wt, err := s.resolveAgent(wsID, agentName)
+	wt, err := s.resolveAgentForWrite(wsID, agentName)
 	if err != nil {
 		return err
 	}

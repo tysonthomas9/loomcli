@@ -133,6 +133,11 @@
     border-color 0.15s ease;
   border: 1px solid transparent;
   overflow-y: auto; /* Scroll when cards overflow column height */
+  /* Cards must keep intrinsic height; otherwise flex shrink squashes them
+     when swim-lane columns are viewport-capped. */
+  > * {
+    flex-shrink: 0;
+  }
   /* Smooth momentum scrolling on iOS */
   -webkit-overflow-scrolling: touch;
   /* Firefox scrollbar styling */

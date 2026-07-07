@@ -47,6 +47,7 @@ function createMockTree(
   overrides?: Partial<UseFileTreeReturn>,
 ): UseFileTreeReturn {
   return {
+    isWorkspaceTree: false,
     expanded: new Set<string>(),
     treeData: new Map(),
     selectedPath: null,
@@ -118,6 +119,20 @@ describe("useFileEditor", () => {
       expect(result.current.isSaving).toBe(false);
       expect(result.current.pendingAction).toBeNull();
       expect(result.current.language).toBeUndefined();
+      expect(result.current.isWorkspaceTree).toBe(false);
+    });
+
+    it("passes workspace tree mode through to useFileTree", () => {
+      renderHook(() =>
+        useFileEditor("lead-b", true, {
+          useWorkspaceTree: true,
+          workspaceRepoLabel: "loomcli",
+        }),
+      );
+
+      expect(mockUseFileTree).toHaveBeenCalledWith("lead-b", {
+        useWorkspaceTree: true,
+      });
     });
 
     it("passes through tree and fileContent from hooks", () => {
@@ -311,6 +326,29 @@ describe("useFileEditor", () => {
       // setIsSaving(true/false) pair, so isDirty may not be re-computed)
       rerender();
       expect(result.current.isDirty).toBe(false);
+    });
+
+    it("does not write when browsing workspace tree for a lead", async () => {
+      mockTree = createMockTree({ selectedPath: "README.md" });
+      mockUseFileTree.mockReturnValue(mockTree);
+
+      const { result } = renderHook(() =>
+        useFileEditor("lead-b", true, { useWorkspaceTree: true }),
+      );
+
+      act(() => {
+        result.current.handleContentChange("changed");
+      });
+
+      await act(async () => {
+        await result.current.save();
+      });
+
+      expect(mockWriteWorktreeFile).not.toHaveBeenCalled();
+      expect(mockToast.showToast).toHaveBeenCalledWith(
+        "Workspace repository files are read-only for lead agents",
+        { type: "info" },
+      );
     });
 
     it("shows error toast on save failure", async () => {

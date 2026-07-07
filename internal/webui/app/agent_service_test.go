@@ -46,7 +46,6 @@ func TestAgentService_ValidateAgentName(t *testing.T) {
 		badNames := []string{
 			"agent one",     // space
 			"agent/one",     // slash
-			"agent.one",     // dot
 			"../etc/passwd", // path traversal
 			"agent@foo!",    // special chars
 		}
@@ -67,7 +66,9 @@ func TestAgentService_ValidateAgentName(t *testing.T) {
 		}
 		svc := svcimpl.NewAgentService(gitOps, nil, nil, nil)
 
-		validNames := []string{"alpha", "test-agent", "agent_1", "ABC", "a-b_c-123"}
+		// "agent.one" is a fleet-db name — dots are now accepted by the read
+		// endpoints, aligned with the create/store charset.
+		validNames := []string{"alpha", "test-agent", "agent_1", "ABC", "a-b_c-123", "agent.one"}
 		for _, name := range validNames {
 			_, err := svc.GetDiffStat(ctx, "ws", name)
 			if err != nil {

@@ -6,8 +6,10 @@
 import type { LoomAgentStatus } from "@/types";
 import { effectiveAgentStatus, parseLoomStatus } from "@/types";
 import { RepoBadge } from "@/components/RepoBadge";
+import { getCompactAvatarInitials } from "@/utils/compactAvatarInitials";
 import { getAvatarColor, shouldUseWhiteText } from "@/utils/colorUtils";
 import { getStatusDotColor, getStatusLabel } from "@/utils/agent";
+import { isLeadRole } from "@/utils/agentRole";
 
 import styles from "./AgentCard.module.css";
 
@@ -20,13 +22,15 @@ export interface AgentCardProps {
   /** Optional task title to display (when working/planning) */
   taskTitle?: string | undefined;
   /** Additional CSS class name */
-  className?: string;
+  className?: string | undefined;
   /** Click handler */
-  onClick?: () => void;
+  onClick?: (() => void) | undefined;
   /** Whether to show the repo badge (default: true). Set false when already inside a repo group. */
   showRepoBadge?: boolean;
   /** Smaller typography and avatar for sidebar lists. */
   compact?: boolean;
+  /** Highlight as the currently selected agent in sidebar lists. */
+  selected?: boolean;
 }
 
 /**
@@ -39,6 +43,7 @@ export function AgentCard({
   onClick,
   showRepoBadge = true,
   compact = false,
+  selected = false,
 }: AgentCardProps): JSX.Element {
   const parsed = parseLoomStatus(effectiveAgentStatus(agent));
   const avatarColor = getAvatarColor(agent.name);
@@ -51,11 +56,12 @@ export function AgentCard({
       ? [agent.active_task_id, agent.active_phase].filter(Boolean).join(" · ")
       : "";
   const isError = parsed.type === "error";
-  const initial = agent.name.charAt(0) || "?";
+  const initial = getCompactAvatarInitials(agent.name);
   const textColor = shouldUseWhiteText(avatarColor) ? "#fff" : "#1f2937";
   const roleLabel = agent.role
     ? agent.role.charAt(0).toUpperCase() + agent.role.slice(1)
     : "Agent";
+  const showStatusLine = !(isLeadRole(agent.role) && parsed.type === "idle");
 
   const rootClassName = [styles.card, compact && styles.compact, className]
     .filter(Boolean)
@@ -65,10 +71,12 @@ export function AgentCard({
     <div
       className={rootClassName}
       data-status={parsed.type}
+      data-selected={selected || undefined}
       onClick={onClick}
       role={onClick ? "button" : undefined}
       tabIndex={onClick ? 0 : undefined}
       aria-label={onClick ? `Agent: ${agent.name}` : undefined}
+      aria-current={onClick && selected ? "page" : undefined}
       onKeyDown={
         onClick
           ? (e) => {
@@ -114,15 +122,17 @@ export function AgentCard({
         )}
       </div>
 
-      <div className={styles.meta}>
-        <span
-          className={styles.statusLine}
-          data-error={isError || undefined}
-          title={taskTitle || liveDetail || statusLabel}
-        >
-          {statusLabel}
-        </span>
-      </div>
+      {showStatusLine && (
+        <div className={styles.meta}>
+          <span
+            className={styles.statusLine}
+            data-error={isError || undefined}
+            title={taskTitle || liveDetail || statusLabel}
+          >
+            {statusLabel}
+          </span>
+        </div>
+      )}
     </div>
   );
 }

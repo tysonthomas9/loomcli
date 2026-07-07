@@ -332,6 +332,7 @@ func updateParamsToPatchRequest(params backend.UpdateParams) map[string]interfac
 	// UpdateIssueRequest names the same field "type".
 	setStrField(req, "type", params.IssueType)
 	setStrField(req, "due_at", params.DueAt)
+	setStrField(req, "external_ref", params.ExternalRef)
 	return req
 }
 

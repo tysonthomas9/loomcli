@@ -496,8 +496,15 @@ func storeWorkspacePathsFn(ctx context.Context, config webui.ServerConfig) func(
 	if config.Store == nil {
 		return nil
 	}
+	// Capture only the store handle, not the whole ServerConfig, so this
+	// long-lived closure (held by the reconcile/health goroutines) doesn't
+	// retain the full config struct for the process lifetime.
+	store := config.Store
 	return func() (map[string]string, error) {
-		return storeadapter.ListWorkspacePaths(ctx, config.Store)
+		// Healing variant: re-bind a workspace whose local path is missing from
+		// state.json to an existing on-disk checkout, so reconciliation recovers
+		// the terminal/readyz instead of leaving the workspace degraded.
+		return storeadapter.ListWorkspacePathsOrHeal(ctx, store)
 	}
 }
 

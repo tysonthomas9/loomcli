@@ -164,6 +164,72 @@ describe("useIssueFilter", () => {
       expect(result.current.filteredIssues).toHaveLength(1);
       expect(result.current.filteredIssues[0].id).toBe("issue-2");
     });
+
+    it("filters by task id", () => {
+      const issues = createTestIssues();
+      const { result } = renderHook(() =>
+        useIssueFilter(issues, { searchTerm: "issue-3" }),
+      );
+
+      expect(result.current.filteredIssues).toHaveLength(1);
+      expect(result.current.filteredIssues[0].id).toBe("issue-3");
+    });
+
+    it("filters by epic id and keeps child tasks visible", () => {
+      const issues = [
+        createIssue({
+          id: "HELLO-WORLD-2",
+          title: "Build the Hello World web app",
+          issue_type: "epic",
+          status: "open",
+        }),
+        createIssue({
+          id: "HELLO-WORLD-1",
+          title: "Implement API",
+          issue_type: "task",
+          parent: "HELLO-WORLD-2",
+          parent_title: "Build the Hello World web app",
+          status: "open",
+        }),
+        createIssue({
+          id: "OTHER-1",
+          title: "Unrelated",
+          issue_type: "task",
+          status: "open",
+        }),
+      ];
+      const { result } = renderHook(() =>
+        useIssueFilter(issues, { searchTerm: "HELLO-WORLD-2" }),
+      );
+
+      expect(
+        result.current.filteredIssues.map((issue) => issue.id).sort(),
+      ).toEqual(["HELLO-WORLD-1", "HELLO-WORLD-2"].sort());
+    });
+
+    it("filters by epic title and keeps child tasks visible", () => {
+      const issues = [
+        createIssue({
+          id: "HELLO-WORLD-2",
+          title: "Build the Hello World web app",
+          issue_type: "epic",
+          status: "open",
+        }),
+        createIssue({
+          id: "task-1",
+          title: "Child Task",
+          issue_type: "task",
+          parent: "HELLO-WORLD-2",
+          parent_title: "Build the Hello World web app",
+          status: "open",
+        }),
+      ];
+      const { result } = renderHook(() =>
+        useIssueFilter(issues, { searchTerm: "Hello World web" }),
+      );
+
+      expect(result.current.filteredIssues).toHaveLength(2);
+    });
   });
 
   describe("status filter tests", () => {

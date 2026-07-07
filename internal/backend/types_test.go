@@ -164,9 +164,9 @@ func TestIssueDetailData_JSONRoundTrip(t *testing.T) {
 			CreatedBy:   "frank",
 			ClosedAt:    &closedAt,
 			CloseReason: "completed",
+			ExternalRef: "GH-42",
 		},
 		Description:      "Full description",
-		ExternalRef:      "GH-42",
 		EstimatedMinutes: &estMins,
 		Dependencies: []DependencyData{
 			{IssueID: "rt-1", DependsOnID: "blocker-1", Type: "blocks", Title: "Blocker", Status: "open", CreatedAt: now},

@@ -353,6 +353,7 @@ func (s *agentServiceImpl) CreateAgent(ctx context.Context, in service.AgentCrea
 		return nil, service.ErrUnavailable("fleet-db store not configured")
 	}
 	in.RoleName = normalizeFirstClassAgentRole(in.RoleName)
+	in.Name = normalizeStoredAgentName(in.Name)
 	if err := validateAgentCreateInput(in); err != nil {
 		return nil, err
 	}
@@ -472,7 +473,8 @@ func (s *agentServiceImpl) UpdateAgent(ctx context.Context, wsKey, name string, 
 	if s.store == nil {
 		return nil, service.ErrUnavailable("fleet-db store not configured")
 	}
-	if err := validateAgentName(name); err != nil {
+	name = normalizeStoredAgentName(name)
+	if err := validateStoredAgentName(name); err != nil {
 		return nil, err
 	}
 	updated, err := s.store.Agents().Update(ctx, wsKey, name, store.AgentUpdate{
@@ -499,7 +501,8 @@ func (s *agentServiceImpl) RequestAgentLifecycle(ctx context.Context, wsKey, nam
 	if s.store == nil {
 		return nil, service.ErrUnavailable("fleet-db store not configured")
 	}
-	if err := validateAgentName(name); err != nil {
+	name = normalizeStoredAgentName(name)
+	if err := validateStoredAgentName(name); err != nil {
 		return nil, err
 	}
 	if err := validateAgentCommandType(in.CommandType); err != nil {
@@ -531,7 +534,8 @@ func (s *agentServiceImpl) DeleteAgent(ctx context.Context, wsKey, name string) 
 	if s.store == nil {
 		return service.ErrUnavailable("fleet-db store not configured")
 	}
-	if err := validateAgentName(name); err != nil {
+	name = normalizeStoredAgentName(name)
+	if err := validateStoredAgentName(name); err != nil {
 		return err
 	}
 	if err := s.store.Agents().Delete(ctx, wsKey, name); err != nil {
@@ -554,7 +558,7 @@ func validateAgentCreateInput(in service.AgentCreateInput) error {
 	if in.WorkspaceKey == "" {
 		return service.ErrValidation("workspace_key required")
 	}
-	if err := validateAgentName(in.Name); err != nil {
+	if err := validateStoredAgentName(in.Name); err != nil {
 		return err
 	}
 	if in.RoleName == "" {

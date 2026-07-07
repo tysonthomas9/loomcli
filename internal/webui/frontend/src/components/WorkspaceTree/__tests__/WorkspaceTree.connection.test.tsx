@@ -188,6 +188,10 @@ const oneRepo = [
   },
 ];
 
+// AgentSection's module import triggers a vitest-4 mock-allocation blowup;
+// stub it here (this suite tests connection status, not the agent list).
+vi.mock("../AgentSection", () => ({ AgentSection: () => null }));
+
 describe("WorkspaceTree connection status", () => {
   beforeEach(() => {
     localStorage.clear();

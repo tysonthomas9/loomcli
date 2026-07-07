@@ -7,6 +7,7 @@
   display: block;
   width: 100%;
   min-width: 220px;
+  flex-shrink: 0;
   box-sizing: border-box;
   padding: 11px;
   background-color: var(--color-bg-card);
@@ -30,6 +31,31 @@
 /* Interactive state when onClick is provided */
 .issueCard[role="button"] {
   cursor: pointer;
+}
+
+.issueCard[data-draggable="true"] {
+  touch-action: none;
+  user-select: none;
+  cursor: grab;
+}
+
+.issueCard[data-draggable="true"]:active,
+.issueCard[data-dragging="true"] {
+  cursor: grabbing;
+}
+
+.issueCard[data-optimistic="pending"] {
+  animation: issue-card-optimistic-pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes issue-card-optimistic-pulse {
+  0%,
+  100% {
+    opacity: 0.85;
+  }
+  50% {
+    opacity: 1;
+  }
 }
 
 .issueCard[role="button"]:hover {

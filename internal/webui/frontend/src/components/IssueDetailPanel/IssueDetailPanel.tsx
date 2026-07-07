@@ -468,9 +468,9 @@ function DefaultContent({
   const { ratio, applyDelta, resetRatio, isMaximized, toggleMaximize } =
     useSplitRatio();
 
-  // Workspace data for move dialog
+  // Workspace data for move dialog — use stable workspace ids, not display names.
   const workspaces = workspace?.workspaces ?? [];
-  const currentWorkspace = workspace?.name ?? "";
+  const currentWorkspace = workspaceId;
   const canMove = workspaces.length > 1 && issue?.status !== "closed";
   const taskRunId = issue?.issue_type === "task" ? issue.id : null;
   const { sessions: taskRuns } = useTaskSessions(taskRunId);
@@ -1093,7 +1093,7 @@ function DefaultContent({
         );
       }
     },
-    [issue, onClose],
+    [issue, onClose, workspaceId],
   );
 
   // Reset reject form state when issue changes
@@ -1190,7 +1190,12 @@ function DefaultContent({
             isRunningEpic: isStartingEpicRun,
           })}
           {...(onCopyLink !== undefined && { onCopyLink })}
-          {...(canMove && { onMove: () => setShowMoveDialog(true) })}
+          {...(canMove && {
+            onMove: () => {
+              setMoveError(null);
+              setShowMoveDialog(true);
+            },
+          })}
           {...prProps}
           {...(onToggleMaximize !== undefined && {
             onToggleMaximize,
@@ -1571,7 +1576,10 @@ function DefaultContent({
         dependencies={dependencies}
         error={moveError}
         onConfirm={handleMoveConfirm}
-        onCancel={() => setShowMoveDialog(false)}
+        onCancel={() => {
+          setMoveError(null);
+          setShowMoveDialog(false);
+        }}
       />
     </>
   );

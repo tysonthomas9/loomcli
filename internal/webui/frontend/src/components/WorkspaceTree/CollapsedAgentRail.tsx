@@ -11,6 +11,7 @@ import {
   isLiveAgentRailVisible,
   orderAgentsForEpicRunner,
 } from "@/components/AgentIconRail";
+import { CompactRailHost } from "@/components/CompactRail";
 import { useAgentStoreInstance, useWorkspaceContext } from "@/hooks";
 import type { LoomAgentStatus } from "@/types";
 
@@ -18,11 +19,13 @@ import styles from "./CollapsedAgentRail.module.css";
 
 export interface CollapsedAgentRailProps {
   onAgentClick?: ((agentName: string) => void) | undefined;
+  selectedAgentName?: string | null | undefined;
   onAddClick?: (() => void) | undefined;
 }
 
 export function CollapsedAgentRail({
   onAgentClick,
+  selectedAgentName = null,
   onAddClick,
 }: CollapsedAgentRailProps): JSX.Element {
   const agentStore = useAgentStoreInstance();
@@ -60,32 +63,33 @@ export function CollapsedAgentRail({
       data-testid="collapsed-agent-rail"
     >
       {agents.length === 0 ? (
-        <span className={styles.emptyHint} title="No agents">
+        <CompactRailHost label="No agents" className={styles.emptyHint}>
           —
-        </span>
+        </CompactRailHost>
       ) : (
         agents.map((agent) => (
           <AgentAvatarButton
             key={agent.name}
             agent={agent}
-            selected={false}
+            selected={
+              selectedAgentName != null &&
+              agent.name.toLowerCase() === selectedAgentName.toLowerCase()
+            }
             size={32}
             onClick={() => onAgentClick?.(agent.name)}
           />
         ))
       )}
       {onAddClick ? (
-        <button
+        <CompactRailHost
+          as="button"
           type="button"
+          label="Add agent"
           className={styles.addButton}
           onClick={onAddClick}
-          aria-label="Add agent"
         >
           +
-          <span className={styles.tooltip} role="tooltip">
-            Add agent
-          </span>
-        </button>
+        </CompactRailHost>
       ) : null}
     </nav>
   );

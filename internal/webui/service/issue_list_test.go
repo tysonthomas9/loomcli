@@ -281,3 +281,15 @@ func TestBackendIssueDataToWithCounts_CarriesNotes(t *testing.T) {
 		t.Errorf("Notes = %q, want it carried into the embedded Issue", wc.Issue.Notes)
 	}
 }
+
+func TestBackendIssueDataToWithCounts_CarriesExternalRef(t *testing.T) {
+	ref := "https://github.com/owner/repo/pull/42"
+	d := &backend.IssueData{ID: "WEB-64", Title: "PR-linked", Status: "review", ExternalRef: ref}
+	wc := backendIssueDataToWithCounts(d)
+	if wc == nil || wc.Issue == nil {
+		t.Fatal("backendIssueDataToWithCounts returned nil issue")
+	}
+	if wc.Issue.ExternalRef == nil || *wc.Issue.ExternalRef != ref {
+		t.Errorf("ExternalRef = %v, want %q carried into the embedded Issue", wc.Issue.ExternalRef, ref)
+	}
+}

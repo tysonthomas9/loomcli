@@ -127,7 +127,7 @@ func LoadConfig() (*LoomConfig, error) {
 
 // GetWorkspaceDir returns the directory path for a named workspace.
 func GetWorkspaceDir(name string) string {
-	return filepath.Join(GetConfigDir(), "workspaces", name)
+	return bootstrap.WorkspaceDir(name)
 }
 
 // ResolveActiveWorkspace returns the active FleetDB workspace projected into the

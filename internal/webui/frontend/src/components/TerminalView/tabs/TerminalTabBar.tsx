@@ -472,6 +472,33 @@ export const TerminalTabBar = forwardRef<HTMLDivElement, TerminalTabBarProps>(
         );
       });
 
+    const newTabControl =
+      showToolbarActions &&
+      (onBackendSelect ? (
+        <NewTerminalTabMenu
+          availableBackends={availableBackends ?? []}
+          isLoading={backendsLoading ?? false}
+          disabled={maxTabsReached ?? false}
+          onSelect={onBackendSelect}
+          onDisabledAttempt={onNewTab}
+        />
+      ) : (
+        <button
+          className={styles.actionButton}
+          onClick={onNewTab}
+          disabled={maxTabsReached}
+          aria-label="New terminal tab"
+          title={
+            maxTabsReached
+              ? "Maximum terminal tabs reached"
+              : "New terminal tab"
+          }
+          data-testid="terminal-new-tab-button"
+        >
+          +
+        </button>
+      ));
+
     const tabList = (
       <div
         ref={tabListRef}
@@ -487,6 +514,41 @@ export const TerminalTabBar = forwardRef<HTMLDivElement, TerminalTabBarProps>(
       </div>
     );
 
+    const tabListWithDnd = groupDrag ? (
+      tabList
+    ) : (
+      <DndContext
+        sensors={sensors}
+        collisionDetection={collisionDetection}
+        onDragStart={handleDragStart}
+        onDragEnd={handleDragEnd}
+      >
+        <SortableContext
+          items={tabIds}
+          strategy={horizontalListSortingStrategy}
+        >
+          {tabList}
+        </SortableContext>
+        <DragOverlay dropAnimation={null}>
+          {dragTab ? (
+            <div
+              className={`${styles.tab} ${styles.active} ${styles.dragOverlay}`}
+            >
+              <span
+                className={styles.statusDot}
+                data-status={dragTab.connectionState}
+              />
+              <span className={styles.tabLabel}>{dragTab.label}</span>
+            </div>
+          ) : null}
+        </DragOverlay>
+      </DndContext>
+    );
+
+    const hasToolbarActions =
+      showToolbarActions &&
+      ((onCloseAll && tabs.length > 0) || onSplitRight || onExport);
+
     return (
       <div
         ref={ref}
@@ -495,135 +557,88 @@ export const TerminalTabBar = forwardRef<HTMLDivElement, TerminalTabBarProps>(
         onDragOver={dropTarget?.onDragOver}
         onDrop={dropTarget ? handleDropTarget : undefined}
       >
-        {overflowState.canScrollLeft && (
-          <button
-            type="button"
-            className={`${styles.scrollButton} ${styles.scrollButtonLeft}`}
-            onClick={() =>
-              tabListRef.current?.scrollBy({ left: -150, behavior: "smooth" })
-            }
-            aria-label="Scroll tabs left"
-            tabIndex={-1}
-            data-testid="scroll-tabs-left"
-          >
-            &#x2039;
-          </button>
-        )}
-        {groupDrag ? (
-          tabList
-        ) : (
-          <DndContext
-            sensors={sensors}
-            collisionDetection={collisionDetection}
-            onDragStart={handleDragStart}
-            onDragEnd={handleDragEnd}
-          >
-            <SortableContext
-              items={tabIds}
-              strategy={horizontalListSortingStrategy}
-            >
-              {tabList}
-            </SortableContext>
-            <DragOverlay dropAnimation={null}>
-              {dragTab ? (
-                <div
-                  className={`${styles.tab} ${styles.active} ${styles.dragOverlay}`}
-                >
-                  <span
-                    className={styles.statusDot}
-                    data-status={dragTab.connectionState}
-                  />
-                  <span className={styles.tabLabel}>{dragTab.label}</span>
-                </div>
-              ) : null}
-            </DragOverlay>
-          </DndContext>
-        )}
-        {overflowState.canScrollRight && (
-          <button
-            type="button"
-            className={`${styles.scrollButton} ${styles.scrollButtonRight}`}
-            onClick={() =>
-              tabListRef.current?.scrollBy({ left: 150, behavior: "smooth" })
-            }
-            aria-label="Scroll tabs right"
-            tabIndex={-1}
-            data-testid="scroll-tabs-right"
-          >
-            &#x203a;
-          </button>
-        )}
-        {showToolbarActions &&
-          (onBackendSelect ? (
-            <NewTerminalTabMenu
-              availableBackends={availableBackends ?? []}
-              isLoading={backendsLoading ?? false}
-              disabled={maxTabsReached ?? false}
-              onSelect={onBackendSelect}
-              onDisabledAttempt={onNewTab}
-            />
-          ) : (
+        <div className={styles.tabStrip}>
+          {overflowState.canScrollLeft && (
             <button
-              className={styles.actionButton}
-              onClick={onNewTab}
-              disabled={maxTabsReached}
-              aria-label="New terminal tab"
-              title={
-                maxTabsReached
-                  ? "Maximum terminal tabs reached"
-                  : "New terminal tab"
+              type="button"
+              className={`${styles.scrollButton} ${styles.scrollButtonLeft}`}
+              onClick={() =>
+                tabListRef.current?.scrollBy({ left: -150, behavior: "smooth" })
               }
-              data-testid="terminal-new-tab-button"
+              aria-label="Scroll tabs left"
+              tabIndex={-1}
+              data-testid="scroll-tabs-left"
             >
-              +
+              &#x2039;
             </button>
-          ))}
-        {showToolbarActions && onCloseAll && tabs.length > 0 && (
-          <button
-            className={styles.actionButton}
-            onClick={onCloseAll}
-            aria-label="Close all sessions"
-            title="Close all sessions"
-          >
-            &#x2715;&#x2715;
-          </button>
-        )}
-        {showToolbarActions && onSplitRight && (
-          <button
-            type="button"
-            className={styles.actionButton}
-            onClick={onSplitRight}
-            disabled={canSplitRight === false}
-            aria-label="Split editor right"
-            title="Move active tab to the right pane"
-            data-testid="terminal-split-right"
-          >
-            <svg
-              className={styles.splitIcon}
-              width={15}
-              height={15}
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth={1.7}
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              aria-hidden="true"
+          )}
+          {tabListWithDnd}
+          {newTabControl}
+          {overflowState.canScrollRight && (
+            <button
+              type="button"
+              className={`${styles.scrollButton} ${styles.scrollButtonRight}`}
+              onClick={() =>
+                tabListRef.current?.scrollBy({ left: 150, behavior: "smooth" })
+              }
+              aria-label="Scroll tabs right"
+              tabIndex={-1}
+              data-testid="scroll-tabs-right"
             >
-              <path d="M4 4h16v16H4z" />
-              <path d="M12 4v16" />
-            </svg>
-          </button>
-        )}
-        {showToolbarActions && onExport && (
-          <button
-            className={styles.actionButton}
-            onClick={onExport}
-            aria-label="Export session"
-            title="Export session"
-          >
-            {"\u21E3"}
-          </button>
+              &#x203a;
+            </button>
+          )}
+        </div>
+        {hasToolbarActions && (
+          <div className={styles.toolbarActions}>
+            {showToolbarActions && onCloseAll && tabs.length > 0 && (
+              <button
+                className={styles.actionButton}
+                onClick={onCloseAll}
+                aria-label="Close all sessions"
+                title="Close all sessions"
+              >
+                &#x2715;&#x2715;
+              </button>
+            )}
+            {showToolbarActions && onSplitRight && (
+              <button
+                type="button"
+                className={styles.actionButton}
+                onClick={onSplitRight}
+                disabled={canSplitRight === false}
+                aria-label="Split editor right"
+                title="Move active tab to the right pane"
+                data-testid="terminal-split-right"
+              >
+                <svg
+                  className={styles.splitIcon}
+                  width={15}
+                  height={15}
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth={1.7}
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  aria-hidden="true"
+                >
+                  <path d="M4 4h16v16H4z" />
+                  <path d="M12 4v16" />
+                </svg>
+              </button>
+            )}
+            {showToolbarActions && onExport && (
+              <button
+                className={styles.actionButton}
+                onClick={onExport}
+                aria-label="Export session"
+                title="Export session"
+              >
+                {"\u21E3"}
+              </button>
+            )}
+          </div>
         )}
         {contextMenu && ctxTab && (
           <TabContextMenu

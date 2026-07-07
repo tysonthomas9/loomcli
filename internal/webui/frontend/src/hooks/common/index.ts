@@ -29,7 +29,7 @@ export { useFileContent } from "./useFileContent";
 export type { UseFileContentReturn } from "./useFileContent";
 
 export { useFileTree } from "./useFileTree";
-export type { UseFileTreeReturn } from "./useFileTree";
+export type { UseFileTreeReturn, UseFileTreeOptions } from "./useFileTree";
 
 export { useFolderPicker } from "./useFolderPicker";
 export type {

@@ -190,6 +190,41 @@ describe("IssueCard", () => {
       fireEvent.keyDown(getIssueCard(issue), { key: "Escape" });
       expect(handleClick).not.toHaveBeenCalled();
     });
+
+    it("opens on Enter even when drag listeners are present (drag onKeyDown must not win)", () => {
+      const issue = createTestIssue();
+      const handleClick = vi.fn();
+      const dragKeyDown = vi.fn();
+      renderIssueCard(
+        <IssueCard
+          issue={issue}
+          onClick={handleClick}
+          dragProps={{ listeners: { onKeyDown: dragKeyDown } }}
+        />,
+      );
+
+      fireEvent.keyDown(getIssueCard(issue), { key: "Enter" });
+      expect(handleClick).toHaveBeenCalledWith(issue);
+      // The card's open handler claims Enter; the drag sensor must not also fire.
+      expect(dragKeyDown).not.toHaveBeenCalled();
+    });
+
+    it("forwards non-open keys to the drag sensor's onKeyDown", () => {
+      const issue = createTestIssue();
+      const handleClick = vi.fn();
+      const dragKeyDown = vi.fn();
+      renderIssueCard(
+        <IssueCard
+          issue={issue}
+          onClick={handleClick}
+          dragProps={{ listeners: { onKeyDown: dragKeyDown } }}
+        />,
+      );
+
+      fireEvent.keyDown(getIssueCard(issue), { key: "ArrowDown" });
+      expect(handleClick).not.toHaveBeenCalled();
+      expect(dragKeyDown).toHaveBeenCalledTimes(1);
+    });
   });
 
   describe("accessibility", () => {
@@ -753,9 +788,35 @@ describe("IssueCard", () => {
         expect(link).toHaveAttribute("target", "_blank");
       });
 
+      it("shows PR link for PR-linked issues outside the Review column", () => {
+        const issue = createTestIssue({
+          status: "in_progress",
+          external_ref: "https://github.com/owner/repo/pull/77",
+        });
+        renderIssueCard(<IssueCard issue={issue} columnId="in_progress" />);
+
+        const link = screen.getByLabelText("View pull request");
+        expect(link).toHaveAttribute(
+          "href",
+          "https://github.com/owner/repo/pull/77",
+        );
+      });
+
       it("does not show PR link for plan reviews", () => {
         const issue = createTestIssue({ status: "review" });
         renderIssueCard(<IssueCard issue={issue} />);
+
+        expect(
+          screen.queryByLabelText("View pull request"),
+        ).not.toBeInTheDocument();
+      });
+
+      it("does not show PR link for non-PR external refs", () => {
+        const issue = createTestIssue({
+          status: "in_progress",
+          external_ref: "JIRA-123",
+        });
+        renderIssueCard(<IssueCard issue={issue} columnId="in_progress" />);
 
         expect(
           screen.queryByLabelText("View pull request"),

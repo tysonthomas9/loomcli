@@ -15,6 +15,13 @@ export interface TerminalConnectionOverlayProps {
   onReconnect: () => void;
   autoReconnect?: boolean | undefined;
   isAutoReconnecting?: boolean | undefined;
+  /**
+   * True when the auto-reconnect backoff has exhausted its attempts. Shown
+   * as a "Session expired" subtext under the Disconnected message so the
+   * user knows the client gave up and the Reconnect button is the only way
+   * forward. Only meaningful for the `disconnected` state.
+   */
+  reconnectExpired?: boolean | undefined;
 }
 
 // ActionableState variants share the same "message + button + optional
@@ -67,6 +74,7 @@ export function TerminalConnectionOverlay({
   onReconnect,
   autoReconnect = true,
   isAutoReconnecting = false,
+  reconnectExpired = false,
 }: TerminalConnectionOverlayProps): JSX.Element | null {
   const reconnectButtonRef = useRef<HTMLButtonElement>(null);
 
@@ -106,11 +114,18 @@ export function TerminalConnectionOverlay({
   }
 
   const cfg = actionableStates[connectionState];
+  // For the disconnected state the subtext reflects the auto-reconnect
+  // loop's progress: "Session expired" once the backoff gave up (the
+  // Reconnect button is now the only way forward), otherwise the existing
+  // "Auto-reconnecting..." while the loop is still retrying. Error and
+  // session_ended keep their own static subtext.
   const subtext =
     connectionState === "disconnected"
-      ? autoReconnect && isAutoReconnecting
-        ? cfg.subtext
-        : undefined
+      ? reconnectExpired
+        ? "Session expired"
+        : autoReconnect && isAutoReconnecting
+          ? cfg.subtext
+          : undefined
       : cfg.subtext;
   return (
     <div

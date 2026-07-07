@@ -11,34 +11,6 @@ import { IssueCard, type IssueCardProps } from "../IssueCard";
 import styles from "./DraggableIssueCard.module.css";
 
 /**
- * Drag handle icon (6 grip dots in 2x3 grid).
- * Provides visual affordance that cards are draggable.
- */
-function DragHandleIcon({
-  className,
-}: {
-  className?: string | undefined;
-}): JSX.Element {
-  return (
-    <svg
-      className={className}
-      width="12"
-      height="16"
-      viewBox="0 0 12 16"
-      fill="currentColor"
-      aria-hidden="true"
-    >
-      <circle cx="3" cy="3" r="1.5" />
-      <circle cx="9" cy="3" r="1.5" />
-      <circle cx="3" cy="8" r="1.5" />
-      <circle cx="9" cy="8" r="1.5" />
-      <circle cx="3" cy="13" r="1.5" />
-      <circle cx="9" cy="13" r="1.5" />
-    </svg>
-  );
-}
-
-/**
  * Props for the DraggableIssueCard component.
  */
 export interface DraggableIssueCardProps extends IssueCardProps {
@@ -109,22 +81,16 @@ export const DraggableIssueCard = memo(function DraggableIssueCard({
   };
 
   return (
-    <div
-      ref={setNodeRef}
-      style={style}
-      className={styles.draggable}
-      data-dragging={isDragging ? "true" : undefined}
-      data-optimistic={isPending ? "pending" : undefined}
-    >
-      <span
-        className={styles.dragHandle}
-        {...attributes}
-        {...listeners}
-        aria-label={`Drag issue ${issue.title || issue.id}`}
-      >
-        <DragHandleIcon />
-      </span>
-      <IssueCard {...cardProps} />
-    </div>
+    <IssueCard
+      {...cardProps}
+      dragProps={{
+        ref: setNodeRef,
+        style,
+        listeners,
+        attributes,
+        isDragging,
+        isPending,
+      }}
+    />
   );
 });

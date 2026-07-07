@@ -290,7 +290,7 @@ func classifyAttachErr(err error, session, workspace string) (websocket.StatusCo
 // is detached (grace period armed); the PTY and child process stay alive.
 func runTerminalRelay(reqCtx context.Context, conn *websocket.Conn, p *terminalWSParams, session, workspace string, initialCols, initialRows uint16) (websocket.StatusCode, string) { //nolint:staticcheck // SA1019: websocket migration tracked separately
 	key := webuterminal.SessionKey{Workspace: workspace, Name: session}
-	ensureWorkspacePTYRegistered(p, workspace)
+	ensureWorkspacePTYRegistered(reqCtx, p, workspace)
 
 	launch, err := launchSpecForTerminalSession(reqCtx, p, workspace, session)
 	if err != nil {
@@ -346,7 +346,7 @@ func runTerminalRelay(reqCtx context.Context, conn *websocket.Conn, p *terminalW
 	return (<-crashCh).WSClose()
 }
 
-func ensureWorkspacePTYRegistered(p *terminalWSParams, workspace string) {
+func ensureWorkspacePTYRegistered(ctx context.Context, p *terminalWSParams, workspace string) {
 	if p == nil || workspace == "" {
 		return
 	}
@@ -354,7 +354,10 @@ func ensureWorkspacePTYRegistered(p *terminalWSParams, workspace string) {
 	if !ok {
 		return
 	}
-	path := storeadapter.ResolveWorkspacePath(workspace)
+	// Healing resolve: if the local path is missing from state.json, re-bind it
+	// from an existing on-disk checkout so the PTY can register (otherwise the
+	// attach fails with "workspace unavailable" → the UI shows "Disconnected").
+	path := storeadapter.ResolveOrHealWorkspacePath(ctx, p.store, workspace)
 	if strings.TrimSpace(path) == "" {
 		return
 	}

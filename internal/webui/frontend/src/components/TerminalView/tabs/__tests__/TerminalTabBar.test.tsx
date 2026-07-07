@@ -200,6 +200,45 @@ describe("TerminalTabBar", () => {
 
       expect(onNewTab).toHaveBeenCalledTimes(1);
     });
+
+    it("opens backend menu when onBackendSelect is provided", () => {
+      render(
+        <TerminalTabBar
+          {...defaultProps}
+          availableBackends={["claude", "codex"]}
+          onBackendSelect={vi.fn()}
+        />,
+      );
+
+      expect(
+        screen.queryByTestId("new-terminal-tab-menu"),
+      ).not.toBeInTheDocument();
+
+      fireEvent.click(screen.getByTestId("terminal-new-tab-button"));
+
+      expect(screen.getByTestId("new-terminal-tab-menu")).toBeInTheDocument();
+      expect(screen.getByTestId("new-tab-backend-shell")).toBeInTheDocument();
+      expect(screen.getByTestId("new-tab-backend-claude")).toBeInTheDocument();
+    });
+
+    it("selecting a backend calls onBackendSelect", () => {
+      const onBackendSelect = vi.fn();
+      render(
+        <TerminalTabBar
+          {...defaultProps}
+          availableBackends={["claude", "codex"]}
+          onBackendSelect={onBackendSelect}
+        />,
+      );
+
+      fireEvent.click(screen.getByTestId("terminal-new-tab-button"));
+      fireEvent.click(screen.getByTestId("new-tab-backend-codex"));
+
+      expect(onBackendSelect).toHaveBeenCalledWith("codex");
+      expect(
+        screen.queryByTestId("new-terminal-tab-menu"),
+      ).not.toBeInTheDocument();
+    });
   });
 
   describe("keyboard navigation", () => {

@@ -12,11 +12,13 @@
  * workspace).
  */
 
-import { useEffect, useMemo, useState, type KeyboardEvent } from "react";
+import { useMemo, type KeyboardEvent } from "react";
 import { useStore } from "zustand";
 
 import { useWorkspaceViewActions } from "@/contexts/WorkspaceViewContext";
 import { useAgentStoreInstance, useIssueStoreInstance } from "@/hooks";
+import { useAgentWorkPanelViewState } from "@/hooks/ui/useAgentWorkPanelViewState";
+import { useWorkspaceContext } from "@/hooks/workspace";
 import {
   isTerminalWorkflowRunStatus,
   type WorkflowRun,
@@ -24,6 +26,7 @@ import {
 } from "@/hooks/api";
 import { type Issue, type LoomAgentStatus, parseLoomStatus } from "@/types";
 import { isLeadRole } from "@/utils/agentRole";
+import { issueMatchesSearch } from "@/utils/issueSearch";
 import { statusBucket, type StatusBucket } from "@/utils/statusBuckets";
 
 import {
@@ -31,6 +34,8 @@ import {
   OPEN_QUEUE_PANEL_MAX_WIDTH,
   OPEN_QUEUE_PANEL_MIN_WIDTH,
 } from "@/hooks/ui/useOpenQueuePanelWidth";
+
+import { SearchInput } from "@/components/search";
 
 import { PanelWidthResizeHandle } from "./PanelWidthResizeHandle";
 import styles from "./AgentWorkPanel.module.css";
@@ -58,6 +63,8 @@ interface AgentWorkPanelProps {
 export interface EpicGroup {
   epicId: string;
   epicTitle: string;
+  /** Epic issue record when present in the workspace issue map. */
+  epicIssue?: Issue;
   tasks: Issue[];
   doneCount: number;
   totalCount: number;
@@ -113,6 +120,7 @@ export function AgentWorkPanel({
   epicRunnerRuns,
 }: AgentWorkPanelProps): JSX.Element {
   const { handleIssueClick } = useWorkspaceViewActions();
+  const { workspaceId } = useWorkspaceContext();
   const dispatchClick = onTaskClick ?? handleIssueClick;
   const issueStore = useIssueStoreInstance();
   const issuesMap = useStore(issueStore, (s) => s.issuesMap);
@@ -194,18 +202,19 @@ export function AgentWorkPanel({
 
   // Open Queue interactions (Aether design, pin 20): status filter pills in
   // task modes, Running/Not running pills + collapsed epic cards in lead
-  // mode. All reset when the selected agent changes so a stale filter never
-  // hides another agent's queue.
-  const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
-  const [leadFilter, setLeadFilter] = useState<LeadFilter>("all");
-  const [expandedEpics, setExpandedEpics] = useState<Record<string, boolean>>(
-    {},
-  );
-  useEffect(() => {
-    setStatusFilter("all");
-    setLeadFilter("all");
-    setExpandedEpics({});
-  }, [agentName]);
+  // mode. Per-agent view state is restored from scoped localStorage when the
+  // selected agent changes.
+  const {
+    statusFilter,
+    setStatusFilter,
+    leadFilter,
+    setLeadFilter,
+    taskSearch,
+    setTaskSearch,
+    expandedEpics,
+    setExpandedEpics,
+  } = useAgentWorkPanelViewState(workspaceId, agentName);
+  const normalizedTaskSearch = taskSearch.trim();
 
   // An epic is "running" when a lead has claimed it or an epic-runner
   // workflow run is still active — agent presence, not completion progress
@@ -230,27 +239,50 @@ export function AgentWorkPanel({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mode, groups, epicClaims, epicRunnerRuns]);
 
-  const filterTasks = (tasks: Issue[]): Issue[] => {
-    if (statusFilter === "all") return tasks;
-    return tasks.filter(
-      (task) =>
-        statusBucket(effectiveTaskStatus(task, workerByTaskId.get(task.id))) ===
-        statusFilter,
-    );
+  const filterTasks = (tasks: Issue[], applyStatusFilter: boolean): Issue[] => {
+    let filtered = tasks;
+    if (applyStatusFilter && statusFilter !== "all") {
+      filtered = filtered.filter(
+        (task) =>
+          statusBucket(
+            effectiveTaskStatus(task, workerByTaskId.get(task.id)),
+          ) === statusFilter,
+      );
+    }
+    if (normalizedTaskSearch) {
+      filtered = filtered.filter((task) =>
+        taskMatchesSearch(
+          task,
+          normalizedTaskSearch,
+          workerByTaskId.get(task.id),
+        ),
+      );
+    }
+    return filtered;
   };
 
   const visibleGroups = useMemo(() => {
-    if (mode === "lead-open") {
-      if (leadFilter === "all") return groups;
-      return groups.filter((group) => {
+    let nextGroups = groups;
+    if (mode === "lead-open" && leadFilter !== "all") {
+      nextGroups = nextGroups.filter((group) => {
         if (isOrphanGroup(group)) return leadFilter === "idle";
         return isRunningEpic(group.epicId) === (leadFilter === "running");
       });
     }
-    // Focused mode keeps its single group visible so the header context
-    // stays put even when the filter empties the task list.
-    if (focused || statusFilter === "all") return groups;
-    return groups.filter((group) => filterTasks(group.tasks).length > 0);
+    const applyStatusFilter = mode !== "lead-open";
+    // Focused epic stays visible so header context remains even when filters
+    // empty the task list.
+    if (focused) return nextGroups;
+    if (normalizedTaskSearch) {
+      nextGroups = nextGroups.filter(
+        (group) => filterTasks(group.tasks, applyStatusFilter).length > 0,
+      );
+    } else if (applyStatusFilter && statusFilter !== "all") {
+      nextGroups = nextGroups.filter(
+        (group) => filterTasks(group.tasks, applyStatusFilter).length > 0,
+      );
+    }
+    return nextGroups;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     mode,
@@ -258,6 +290,7 @@ export function AgentWorkPanel({
     focused,
     leadFilter,
     statusFilter,
+    normalizedTaskSearch,
     workerByTaskId,
     epicClaims,
     epicRunnerRuns,
@@ -443,13 +476,25 @@ export function AgentWorkPanel({
               />
             </div>
           )}
+
+          <div className={styles.searchRow}>
+            <SearchInput
+              value={taskSearch}
+              onChange={setTaskSearch}
+              placeholder="Search tasks..."
+              size="sm"
+              aria-label="Search tasks in this panel"
+            />
+          </div>
         </div>
 
         <div className={styles.body}>
           {visibleGroups.length === 0 ? (
             <div className={styles.emptyState}>
               {groups.length > 0
-                ? "Nothing matches this filter."
+                ? normalizedTaskSearch
+                  ? "No tasks match your search."
+                  : "Nothing matches this filter."
                 : focused
                   ? "Active epic has no child tasks."
                   : mode === "lead-open"
@@ -482,12 +527,17 @@ export function AgentWorkPanel({
                 remainingOpen > 0 &&
                 !claimedBy &&
                 !runnerActive;
-              const visibleTasks =
-                mode === "lead-open" ? group.tasks : filterTasks(group.tasks);
+              const applyStatusFilter = mode !== "lead-open";
+              const visibleTasks = filterTasks(group.tasks, applyStatusFilter);
               // Lead-mode epic cards collapse to a single header row by
               // default (the design's "› N" pill); Unassigned stays open.
               const collapsible = mode === "lead-open" && !isOrphanGroup(group);
-              const collapsed = collapsible && !expandedEpics[group.epicId];
+              const searchForcesExpand =
+                normalizedTaskSearch !== "" && visibleTasks.length > 0;
+              const collapsed =
+                collapsible &&
+                !expandedEpics[group.epicId] &&
+                !searchForcesExpand;
               return (
                 <EpicGroupCard
                   key={group.epicId}
@@ -582,13 +632,39 @@ function EpicGroupCard({
         isTaskClaimedByWorkflowRun(task, epicRunnerRun.run_id),
       )
     : [];
+  const handleEpicTitleClick = (): void => {
+    if (isOrphan) return;
+    const epic =
+      group.epicIssue ??
+      ({
+        id: group.epicId,
+        title: group.epicTitle,
+        issue_type: "epic",
+        priority: 2,
+        created_at: "",
+        updated_at: "",
+      } as Issue);
+    onTaskClick(epic);
+  };
   return (
     <div className={styles.group}>
       <div className={styles.groupHeader}>
         <span className={isOrphan ? styles.orphanChip : styles.epicChip}>
           {isOrphan ? "UNASSIGNED" : "EPIC"}
         </span>
-        <span className={styles.epicTitle}>{group.epicTitle}</span>
+        {!isOrphan ? (
+          <button
+            type="button"
+            className={styles.epicTitleButton}
+            onClick={handleEpicTitleClick}
+            aria-label={`Open epic: ${group.epicTitle}`}
+            data-testid="epic-group-title-button"
+          >
+            {group.epicTitle}
+          </button>
+        ) : (
+          <span className={styles.epicTitle}>{group.epicTitle}</span>
+        )}
         {collapsible ? (
           <button
             type="button"
@@ -856,6 +932,35 @@ function WorkerHistory({
       </div>
     </section>
   );
+}
+
+/**
+ * Client-side task search for the Open Queue panel. Matches the global issue
+ * search fields (title, description, notes) plus task id, status, assignee,
+ * worker name, and labels.
+ */
+export function taskMatchesSearch(
+  task: Issue,
+  term: string,
+  workerAgent?: LoomAgentStatus,
+): boolean {
+  const normalizedTerm = term.trim().toLowerCase();
+  if (!normalizedTerm) return true;
+
+  // Share the board/list matcher (id, title, description, notes, assignee,
+  // status, labels, epic parent metadata) so the Open Queue panel never drifts
+  // from board/list search behavior.
+  if (issueMatchesSearch(task, term)) return true;
+
+  // Open Queue additionally matches the worker agent currently running the task.
+  if (
+    workerAgent?.name &&
+    workerAgent.name.toLowerCase().includes(normalizedTerm)
+  ) {
+    return true;
+  }
+
+  return false;
 }
 
 export function formatQueueLabel(
@@ -1164,6 +1269,7 @@ export function groupAgentTasksByEpic(
     groups.push({
       epicId: epicKey,
       epicTitle,
+      ...(epicIssue !== undefined && { epicIssue }),
       tasks,
       doneCount,
       totalCount: tasks.length,
@@ -1234,6 +1340,7 @@ export function groupAllByEpic(issuesMap: Map<string, Issue>): {
     groups.push({
       epicId: epicKey,
       epicTitle,
+      ...(epicIssue !== undefined && { epicIssue }),
       tasks,
       doneCount,
       totalCount: tasks.length,
@@ -1296,6 +1403,7 @@ export function groupOpenByEpic(issuesMap: Map<string, Issue>): {
     groups.push({
       epicId: epicKey,
       epicTitle,
+      ...(epicIssue !== undefined && { epicIssue }),
       tasks,
       doneCount: 0,
       totalCount: tasks.length,
@@ -1347,6 +1455,7 @@ export function scopeToEpic(
   const group: EpicGroup = {
     epicId,
     epicTitle: epicIssue?.title ?? epicId,
+    ...(epicIssue !== undefined && { epicIssue }),
     tasks,
     doneCount,
     totalCount: tasks.length,

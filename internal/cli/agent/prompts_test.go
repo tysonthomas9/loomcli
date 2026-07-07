@@ -65,7 +65,8 @@ func TestGenerateTaskPrompt(t *testing.T) {
 				"--assignee ember", // Reclaiming stale tasks still sets assignee.
 				"Implementation Task",
 				"--design",
-				"loom push \"ember\"",
+				"loom stack publish <stack-id>",
+				"git branch -f <output-branch> HEAD",
 				"loom plan",
 			},
 		},
@@ -707,7 +708,8 @@ func TestGenerateFleetTaskPrompt(t *testing.T) {
 				"loom data show loomcli-kv6.4 --output json",
 				"already claimed",
 				"JSON `design`",
-				"git push origin HEAD",
+				"loom stack publish <stack-id>",
+				"git branch -f <output-branch> HEAD",
 			},
 		},
 		{
@@ -733,6 +735,41 @@ func TestGenerateFleetTaskPrompt(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestTaskPromptsRequireStackedPRDelivery(t *testing.T) {
+	prompts := map[string]string{
+		"task":       GenerateTaskPrompt("test", nil, "", "claude"),
+		"fleet_task": GenerateFleetTaskPrompt("test", "loom-test.1", nil, "claude"),
+	}
+
+	wantParts := []string{
+		"Publish through Loom stacked PR delivery (MANDATORY)",
+		"loom stack init <stack-id>",
+		"loom stack add <task-id>",
+		"loom stack publish <stack-id>",
+		"git branch -f <output-branch> HEAD",
+		"Do not use direct integration or direct branch pushes as the completion path.",
+	}
+	notWantParts := []string{
+		"loom push \"test\"",
+		"git push origin HEAD",
+		"Stage and commit: git add -A",
+		"git add -A && git commit",
+	}
+
+	for name, prompt := range prompts {
+		for _, part := range wantParts {
+			if !strings.Contains(prompt, part) {
+				t.Errorf("%s prompt missing expected stacked PR instruction: %q", name, part)
+			}
+		}
+		for _, part := range notWantParts {
+			if strings.Contains(prompt, part) {
+				t.Errorf("%s prompt should not contain direct publish instruction: %q", name, part)
+			}
+		}
 	}
 }
 

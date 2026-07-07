@@ -48,7 +48,7 @@ func TestFleetIssueWire_FieldDriftGuard(t *testing.T) {
 		"id": true, "title": true, "status": true, "priority": true,
 		"kind": true, "assignee": true, "owner": true, "labels": true,
 		"repo_canonical": true, "parent": true, "design": true, "description": true,
-		"acceptance_criteria": true, "notes": true,
+		"acceptance_criteria": true, "notes": true, "external_ref": true,
 		"created_at": true, "created_by": true, "updated_at": true,
 		"due_at": true, "defer_until": true, "closed_at": true,
 		"close_reason": true,
@@ -435,5 +435,17 @@ func TestFleetIssueWire_RepoProjection(t *testing.T) {
 	w := fleetIssueWire{Repo: "org/repo"}
 	if got := w.toIssue().SourceRepo; got != "org/repo" {
 		t.Errorf("SourceRepo = %q, want %q", got, "org/repo")
+	}
+}
+
+func TestFleetIssueWire_ExternalRefProjection(t *testing.T) {
+	ref := "https://github.com/owner/repo/pull/42"
+	got := fleetIssueWire{ExternalRef: ref}.toIssue().ExternalRef
+	if got == nil || *got != ref {
+		t.Errorf("ExternalRef = %v, want %q", got, ref)
+	}
+	// Empty wire value projects to nil (omitted), not a pointer to "".
+	if got := (fleetIssueWire{}).toIssue().ExternalRef; got != nil {
+		t.Errorf("empty ExternalRef = %v, want nil", got)
 	}
 }

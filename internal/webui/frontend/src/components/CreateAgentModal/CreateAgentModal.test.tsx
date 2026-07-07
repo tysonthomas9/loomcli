@@ -52,7 +52,7 @@ describe("CreateAgentModal", () => {
     fireEvent.change(screen.getByTestId("create-agent-name"), {
       target: { value: "lead-nova" },
     });
-    fireEvent.click(screen.getByRole("button", { name: "Lead" }));
+    fireEvent.click(screen.getByTestId("create-agent-template-lead"));
     // The first repo chip is pre-selected; deselect it so the lead gets
     // workspace-wide scope (empty selection = cross_repo).
     fireEvent.click(screen.getByRole("button", { name: /hello-world/ }));

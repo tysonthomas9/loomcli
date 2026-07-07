@@ -83,6 +83,76 @@ func TestCreateAgentLeadEnsuresRoleAndDoesNotRequireRepo(t *testing.T) {
 	}
 }
 
+func TestCreateAgentNormalizesMixedCaseName(t *testing.T) {
+	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
+
+	ctx := context.Background()
+	st := memstore.New()
+	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{
+		Key:           "TEST2",
+		Name:          "Test 2",
+		DefaultBranch: "main",
+	}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+
+	svc := NewAgentService(nil, nil, nil, st)
+	created, err := svc.CreateAgent(ctx, service.AgentCreateInput{
+		WorkspaceKey: "TEST2",
+		Name:         "Test-lead",
+		RoleName:     "lead",
+		Backend:      "codex",
+	})
+	if err != nil {
+		t.Fatalf("CreateAgent returned error: %v", err)
+	}
+	if created.Name != "test-lead" {
+		t.Fatalf("created.Name = %q, want test-lead", created.Name)
+	}
+}
+
+// Regression: Update/Delete/Lifecycle must accept the same (dot-allowing,
+// case-normalized) charset as Create. Previously they used a dot-rejecting
+// validator, so an agent created with a dot in its name became permanently
+// unmanageable (could not be updated, started/stopped, or deleted).
+func TestUpdateAndDeleteAgentAcceptDottedStoredName(t *testing.T) {
+	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
+
+	ctx := context.Background()
+	st := memstore.New()
+	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{
+		Key:           "TEST2",
+		Name:          "Test 2",
+		DefaultBranch: "main",
+	}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+
+	svc := NewAgentService(nil, nil, nil, st)
+	if _, err := svc.CreateAgent(ctx, service.AgentCreateInput{
+		WorkspaceKey: "TEST2",
+		Name:         "foo.bar",
+		RoleName:     "lead",
+		Backend:      "codex",
+	}); err != nil {
+		t.Fatalf("CreateAgent(foo.bar): %v", err)
+	}
+
+	auto := true
+	if _, err := svc.UpdateAgent(ctx, "TEST2", "foo.bar", service.AgentUpdateInput{Auto: &auto}); err != nil {
+		t.Fatalf("UpdateAgent(foo.bar) should accept the dotted name: %v", err)
+	}
+
+	// Case-insensitive: the stored name is normalized, so a differently-cased
+	// reference resolves to the same agent.
+	if err := svc.DeleteAgent(ctx, "TEST2", "FOO.BAR"); err != nil {
+		t.Fatalf("DeleteAgent(FOO.BAR) should normalize + delete: %v", err)
+	}
+	if _, err := st.Agents().Get(ctx, "TEST2", "foo.bar"); err == nil {
+		t.Fatal("agent foo.bar should have been deleted")
+	}
+}
+
 func TestRequestAgentLifecycleUpdatesStateAndQueuesCommand(t *testing.T) {
 	ctx := context.Background()
 	st := memstore.New()
