@@ -1,0 +1,39 @@
+# Smoke suite: proves the aft pipeline against a real, isolated loom serve
+# (started by run-aft.sh via scripts/start-e2e-server.sh — fresh bd workspace,
+# auth off, SPA + API + SSE all on the webui port).
+suite: smoke
+baseUrl: "${AFT_BASE_URL:-http://localhost:8090}"
+teardown: '"$AFT_TESTS_DIR/scripts/close-open-issues.sh"'
+
+tests:
+  - name: app boots to the kanban board
+    intent: The SPA loads, shows the Cortex shell and the kanban status columns
+    steps:
+      - open: /
+      - expect: { text: Cortex }
+      - expect: { visible: { selector: "section[data-status=ready]" } }
+      - expect: { visible: { selector: "section[data-status=in_progress]" } }
+
+  - name: realtime channel connects
+    intent: The SSE connection indicator reaches the connected state
+    steps:
+      - open: /
+      - wait:
+          fn: >-
+            document.querySelector('[aria-label^="Connection status"]')?.dataset.state === 'connected'
+      - expect: { attr: { selector: "[aria-label^='Connection status']", name: data-state, equals: connected } }
+
+  - name: api-created issue appears via SSE without reload
+    intent: An issue created through the HTTP API while the board is open appears on the kanban via server push, with no reload
+    steps:
+      - open: /
+      - wait:
+          fn: >-
+            document.querySelector('[aria-label^="Connection status"]')?.dataset.state === 'connected'
+      - expect: { count: { selector: "section[data-status=ready] article", equals: 0 } }
+      - run: >-
+          curl -sf -X POST "$AFT_BASE_URL/api/issues"
+          -H "Content-Type: application/json"
+          -d "{\"title\":\"sse smoke $RUN_ID\",\"issue_type\":\"task\",\"priority\":2}"
+      - wait: { text: sse smoke }
+      - expect: { count: { selector: "section[data-status=ready] article", equals: 1 } }

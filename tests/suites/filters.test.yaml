@@ -1,0 +1,42 @@
+# Search and group-by: filters apply to the board, sync to the URL, and
+# survive a reload (the URL is the source of truth for filter state).
+suite: filters
+baseUrl: "${AFT_BASE_URL:-http://localhost:8090}"
+teardown: '"$AFT_TESTS_DIR/scripts/close-open-issues.sh"'
+
+tests:
+  - name: search filters the board and survives a reload
+    intent: Typing in the search box narrows the kanban to matching issues, is reflected in the URL, and persists across a reload
+    steps:
+      - open: /
+      - wait:
+          fn: >-
+            document.querySelector('[aria-label^="Connection status"]')?.dataset.state === 'connected'
+      - run: >-
+          curl -sf -X POST "$AFT_BASE_URL/api/issues" -H "Content-Type: application/json"
+          -d "{\"title\":\"alpha $RUN_ID\",\"issue_type\":\"task\",\"priority\":1}" >/dev/null
+      - run: >-
+          curl -sf -X POST "$AFT_BASE_URL/api/issues" -H "Content-Type: application/json"
+          -d "{\"title\":\"beta $RUN_ID\",\"issue_type\":\"task\",\"priority\":3}" >/dev/null
+      - wait:
+          fn: >-
+            document.querySelectorAll('section[data-status=ready] article').length === 2
+      - fill: { testid: search-input-field, value: alpha }
+      - wait: { url: "**search=alpha**" }
+      - expect: { count: { selector: "section[data-status=ready] article", equals: 1 } }
+      - expect: { notText: beta }
+      - reload: true
+      - expect: { url: "**search=alpha**" }
+      - expect: { count: { selector: "section[data-status=ready] article", equals: 1 } }
+      - expect: { value: { testid: search-input-field, equals: alpha } }
+
+  - name: group-by priority switches to swim lanes and syncs the URL
+    intent: Selecting a group-by option renders the swim-lane board and records the choice in the URL
+    steps:
+      - open: /
+      - wait:
+          fn: >-
+            document.querySelectorAll('section[data-status=ready] article').length === 2
+      - select: { selector: "#groupby-filter", value: priority }
+      - wait: { url: "**groupBy=priority**" }
+      - expect: { visible: { testid: swim-lane-board } }

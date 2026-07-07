@@ -76,4 +76,7 @@ export AFT_TESTS_DIR="$SCRIPT_DIR"
 export AFT_WORK_DIR="$REPORT_DIR/work/$RUN_ID"   # scratch space for run-step state (issue ids etc.)
 mkdir -p "$AFT_WORK_DIR"
 
-node "$AFT_DIR/dist/cli.js" run "${AFT_SUITES:-$SCRIPT_DIR/suites}" --report-dir "$REPORT_DIR" "$@"
+# Loom's six-column board is dense — the agent-browser default viewport (1280x577)
+# cuts it off; 1920x1080 shows the full board in screenshots and recordings.
+node "$AFT_DIR/dist/cli.js" run "${AFT_SUITES:-$SCRIPT_DIR/suites}" --report-dir "$REPORT_DIR" \
+    --viewport "${AFT_VIEWPORT:-1920x1080}" "$@"
