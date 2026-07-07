@@ -10,17 +10,17 @@ tests:
     intent: A blocking dependency created through the workspace API moves the blocked issue to the Blocked column, renders nodes and edges in GraphView, and removal returns it to Open
     steps:
       - run: >-
-          blocker=$(curl -sf -X POST "$AFT_BASE_URL/api/workspaces/$AFT_WS/issues"
+          blocker=$(curl -sf -X POST "$AFT_BASE_URL/api/workspaces/${AFT_WS:-E2E-WS}/issues"
           -H "Content-Type: application/json"
           -d "{\"title\":\"graph blocker $RUN_ID\",\"issue_type\":\"task\",\"priority\":2}"
           | python3 -c "import sys,json;print(json.load(sys.stdin)['data']['id'])");
-          blocked=$(curl -sf -X POST "$AFT_BASE_URL/api/workspaces/$AFT_WS/issues"
+          blocked=$(curl -sf -X POST "$AFT_BASE_URL/api/workspaces/${AFT_WS:-E2E-WS}/issues"
           -H "Content-Type: application/json"
           -d "{\"title\":\"graph blocked $RUN_ID\",\"issue_type\":\"task\",\"priority\":2}"
           | python3 -c "import sys,json;print(json.load(sys.stdin)['data']['id'])");
           printf "%s\n" "$blocker" > "$AFT_WORK_DIR/graph-blocker.id";
           printf "%s\n" "$blocked" > "$AFT_WORK_DIR/graph-blocked.id";
-          curl -sf -X POST "$AFT_BASE_URL/api/workspaces/$AFT_WS/issues/$blocked/dependencies"
+          curl -sf -X POST "$AFT_BASE_URL/api/workspaces/${AFT_WS:-E2E-WS}/issues/$blocked/dependencies"
           -H "Content-Type: application/json"
           -d "{\"depends_on_id\":\"$blocker\",\"dep_type\":\"blocks\"}"
           >/dev/null
@@ -49,7 +49,7 @@ tests:
           fn: >-
             (() => { const text = document.querySelector('[data-testid=graph-view]')?.textContent || ''; return text.includes('graph blocker') && text.includes('graph blocked'); })()
       - run: >-
-          curl -sf -X DELETE "$AFT_BASE_URL/api/workspaces/$AFT_WS/issues/$(cat "$AFT_WORK_DIR/graph-blocked.id")/dependencies/$(cat "$AFT_WORK_DIR/graph-blocker.id")"
+          curl -sf -X DELETE "$AFT_BASE_URL/api/workspaces/${AFT_WS:-E2E-WS}/issues/$(cat "$AFT_WORK_DIR/graph-blocked.id")/dependencies/$(cat "$AFT_WORK_DIR/graph-blocker.id")"
           >/dev/null
       - open: /ws/E2E-WS/kanban
       - wait:

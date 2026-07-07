@@ -11,30 +11,30 @@ tests:
     intent: Comments posted through the workspace API appear in the detail panel activity timeline with author, timestamp, and stable ordering alongside lifecycle events
     steps:
       - run: >-
-          curl -sf -X POST "$AFT_BASE_URL/api/workspaces/$AFT_WS/issues"
+          curl -sf -X POST "$AFT_BASE_URL/api/workspaces/${AFT_WS:-E2E-WS}/issues"
           -H "Content-Type: application/json"
           -d "{\"title\":\"comments timeline $RUN_ID\",\"issue_type\":\"task\",\"priority\":2}"
           | python3 -c "import sys,json;print(json.load(sys.stdin)['data']['id'])"
           > "$AFT_WORK_DIR/comments.id"
       - run: >-
-          curl -sf -X POST "$AFT_BASE_URL/api/workspaces/$AFT_WS/issues/$(cat "$AFT_WORK_DIR/comments.id")/comments"
+          curl -sf -X POST "$AFT_BASE_URL/api/workspaces/${AFT_WS:-E2E-WS}/issues/$(cat "$AFT_WORK_DIR/comments.id")/comments"
           -H "Content-Type: application/json"
           -d "{\"text\":\"first api comment $RUN_ID\"}"
           >/dev/null
       - run: >-
-          curl -sf -X POST "$AFT_BASE_URL/api/workspaces/$AFT_WS/issues/$(cat "$AFT_WORK_DIR/comments.id")/comments"
+          curl -sf -X POST "$AFT_BASE_URL/api/workspaces/${AFT_WS:-E2E-WS}/issues/$(cat "$AFT_WORK_DIR/comments.id")/comments"
           -H "Content-Type: application/json"
           -d "{\"text\":\"second api comment $RUN_ID\"}"
           >/dev/null
       - run: >-
-          curl -sf -X POST "$AFT_BASE_URL/api/workspaces/$AFT_WS/issues/$(cat "$AFT_WORK_DIR/comments.id")/close"
+          curl -sf -X POST "$AFT_BASE_URL/api/workspaces/${AFT_WS:-E2E-WS}/issues/$(cat "$AFT_WORK_DIR/comments.id")/close"
           -H "Content-Type: application/json"
-          -d '{"reason":"aft comments lifecycle"}'
+          -d '{"reason":"aft-close-evidence"}'
           >/dev/null
       - run: >-
-          curl -sf -X POST "$AFT_BASE_URL/api/workspaces/$AFT_WS/issues/$(cat "$AFT_WORK_DIR/comments.id")/reopen"
+          curl -sf -X POST "$AFT_BASE_URL/api/workspaces/${AFT_WS:-E2E-WS}/issues/$(cat "$AFT_WORK_DIR/comments.id")/reopen"
           -H "Content-Type: application/json"
-          -d '{"reason":"aft comments lifecycle reopen"}'
+          -d '{"reason":"aft-reopen-evidence"}'
           >/dev/null
       - open: /ws/E2E-WS/kanban
       - wait:
@@ -61,7 +61,8 @@ tests:
           fn: >-
             (() => { const text = document.querySelector('[data-testid=activity-log]')?.textContent || ''; return text.indexOf('first api comment') >= 0 && text.indexOf('second api comment') > text.indexOf('first api comment'); })()
       # lifecycle events render as generic "performed an action" entries; the
-      # close/reopen REASONS are what surface as readable text
-      - expect: { text: aft comments lifecycle }
-      - expect: { text: aft comments lifecycle reopen }
+      # close/reopen REASONS are what surface as readable text. Distinct,
+      # non-nested strings so each assertion can only match its own reason.
+      - expect: { text: aft-close-evidence }
+      - expect: { text: aft-reopen-evidence }
       - expect: { visible: { testid: comment-form } }

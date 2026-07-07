@@ -6,12 +6,14 @@ baseUrl: "${AFT_BASE_URL:-http://127.0.0.1:3100}"
 teardown: '"$AFT_TESTS_DIR/scripts/close-open-issues.sh"'
 
 tests:
-  # covers: LCLI-WP-002, LCLI-WP-003, LCLI-WP-006
+  # covers: LCLI-WP-002, LCLI-WP-006; LCLI-WP-003 partial (metadata/assignment
+  # persistence only — the AssigneePrompt is wired to kanban DRAG open->in_progress
+  # in v5, not to panel status changes, so it cannot fire on this path)
   - name: detail panel edits markdown status and persists metadata
     intent: A card opens the detail panel, description markdown saves and survives reload, priority and labels persist, and panel status changes close and reopen the issue
     steps:
       - run: >-
-          curl -sf -X POST "$AFT_BASE_URL/api/workspaces/$AFT_WS/issues"
+          curl -sf -X POST "$AFT_BASE_URL/api/workspaces/${AFT_WS:-E2E-WS}/issues"
           -H "Content-Type: application/json"
           -d "{\"title\":\"detail panel $RUN_ID\",\"issue_type\":\"task\",\"priority\":2,\"description\":\"Initial detail description $RUN_ID\"}"
           | python3 -c "import sys,json;print(json.load(sys.stdin)['data']['id'])"
@@ -65,7 +67,7 @@ tests:
             Array.from(document.querySelectorAll('[data-testid=markdown-content] strong')).some((node) => node.textContent === 'bold detail')
       - expect: { text: Panel markdown persists. }
       - run: >-
-          curl -sf -X PATCH "$AFT_BASE_URL/api/workspaces/$AFT_WS/issues/$(cat "$AFT_WORK_DIR/detail.id")"
+          curl -sf -X PATCH "$AFT_BASE_URL/api/workspaces/${AFT_WS:-E2E-WS}/issues/$(cat "$AFT_WORK_DIR/detail.id")"
           -H "Content-Type: application/json"
           -d "{\"priority\":1,\"add_labels\":[\"detail-label-$RUN_ID\"]}"
           >/dev/null
@@ -78,7 +80,7 @@ tests:
       - expect: { count: { selector: "section[data-status=ready] article", equals: 1 } }
       - expect: { attr: { selector: "section[data-status=ready] article", name: data-priority, equals: "1" } }
       - run: >-
-          curl -sf "$AFT_BASE_URL/api/workspaces/$AFT_WS/issues/$(cat "$AFT_WORK_DIR/detail.id")"
+          curl -sf "$AFT_BASE_URL/api/workspaces/${AFT_WS:-E2E-WS}/issues/$(cat "$AFT_WORK_DIR/detail.id")"
           | python3 -c "import os,sys,json; data=json.load(sys.stdin)['data']; assert data['priority'] == 1, data; assert ('detail-label-' + os.environ['RUN_ID']) in data.get('labels', []), data.get('labels')"
       - open: /ws/E2E-WS/kanban
       - wait:
@@ -105,6 +107,10 @@ tests:
       - wait:
           fn: >-
             document.querySelectorAll('section[data-status=ready] article').length === 1
+      # persistence proof beyond the dropdown's optimistic data-status
+      - run: >-
+          curl -sf "$AFT_BASE_URL/api/workspaces/${AFT_WS:-E2E-WS}/issues/$(cat "$AFT_WORK_DIR/detail.id")"
+          | python3 -c "import sys,json; data=json.load(sys.stdin)['data']; assert data['status'] == 'open', data['status']"
       - expect: { count: { selector: "section[data-status=in_progress] article", equals: 0 } }
       # scope to this issue: other suites' teardown-closed issues populate Done in a full run
       - expect: { count: { selector: "section[data-status=done] article[aria-label*='detail panel ${RUN_ID:-local}']", equals: 0 } }

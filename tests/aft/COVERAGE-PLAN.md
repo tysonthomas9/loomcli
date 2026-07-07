@@ -40,7 +40,14 @@ existing steps (`run:`, `offline:`, `wait.fn`, `expect.count/attr/visible/notTex
 
 Deliberate choice: WP-003's ready→in_progress **drag** is replaced by the detail-panel
 status change (dnd-kit PointerSensor with 5px activation is a poor fit for deterministic
-CLI drags). A drag experiment can come later as a non-gating test.
+CLI drags). Note (verified in source + review): the AssigneePrompt is wired ONLY to the
+drag path in v5, so panel-based tests cover WP-003's assignment/persistence semantics but
+cannot exercise the prompt — WP-003 stays partial until a drag test lands.
+
+Defect found while implementing Tier 1: the Create Issue modal sends create-time
+`status: "deferred"` but the server drops it and the issue lands in Open. The
+issue-create-ui suite deliberately does not assert status placement until fixed —
+candidate "Defect status" entry for LCLI-WP-001 in the TSV.
 
 ## Tier 2 — needs seeding scaffolding (still deterministic, no LLM)
 

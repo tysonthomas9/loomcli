@@ -36,9 +36,13 @@ tests:
       - expect: { visible: { testid: create-issue-title } }
       - expect: { enabled: { testid: create-issue-submit, equals: false } }
 
-  # covers: LCLI-WP-001
+  # covers: LCLI-WP-001 (type + description; NOT create-time status — see DEFECT below)
+  # DEFECT (found by this suite, confirmed via review): the modal sends
+  # status "deferred" but the server drops it and the issue lands in Open.
+  # Create-time status is deliberately NOT selected here so this test doesn't
+  # assert the bug as correct; cover it once the defect is fixed.
   - name: full-field create preserves type and description
-    intent: Creating an issue with type, status, and description renders the saved issue detail panel; current v5 create requests land in Open
+    intent: Creating an issue with type and description renders the saved values in the detail panel and on the board
     steps:
       - open: /ws/E2E-WS/kanban
       - wait:
@@ -48,7 +52,6 @@ tests:
       - expect: { visible: { testid: create-issue-title } }
       - fill: { testid: create-issue-title, value: "ui-full-field-${RUN_ID:-local}" }
       - select: { testid: create-issue-type, value: bug }
-      - select: { testid: create-issue-status, value: deferred }
       - fill: { testid: create-issue-description, value: "full-field description ${RUN_ID:-local}" }
       - click: { testid: create-issue-submit }
       - wait: { text: "ui-full-field-${RUN_ID:-local}" }
@@ -58,7 +61,6 @@ tests:
             document.querySelector('[data-testid=metadata-type]')?.textContent?.includes('Bug')
       - expect: { text: "full-field description ${RUN_ID:-local}" }
       - expect: { count: { selector: "section[data-status=ready] article[aria-label*='ui-full-field-${RUN_ID:-local}']", equals: 1 } }
-      - expect: { count: { selector: "section[data-status=backlog] article[aria-label*='ui-full-field-${RUN_ID:-local}']", equals: 0 } }
 
   # covers: LCLI-WP-001
   - name: duplicate titles create separate cards

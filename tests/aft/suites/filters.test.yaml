@@ -14,10 +14,10 @@ tests:
           fn: >-
             !!document.querySelector('[data-testid=board-toolbar]')
       - run: >-
-          curl -sf -X POST "$AFT_BASE_URL/api/workspaces/$AFT_WS/issues" -H "Content-Type: application/json"
+          curl -sf -X POST "$AFT_BASE_URL/api/workspaces/${AFT_WS:-E2E-WS}/issues" -H "Content-Type: application/json"
           -d "{\"title\":\"alpha $RUN_ID\",\"issue_type\":\"task\",\"priority\":1}" >/dev/null
       - run: >-
-          curl -sf -X POST "$AFT_BASE_URL/api/workspaces/$AFT_WS/issues" -H "Content-Type: application/json"
+          curl -sf -X POST "$AFT_BASE_URL/api/workspaces/${AFT_WS:-E2E-WS}/issues" -H "Content-Type: application/json"
           -d "{\"title\":\"beta $RUN_ID\",\"issue_type\":\"task\",\"priority\":3}" >/dev/null
       - wait:
           fn: >-
