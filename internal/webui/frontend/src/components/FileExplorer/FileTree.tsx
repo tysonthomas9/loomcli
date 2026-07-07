@@ -10,8 +10,11 @@ import {
 } from "react";
 import {
   DndContext,
+  PointerSensor,
   useDraggable,
   useDroppable,
+  useSensor,
+  useSensors,
   type DragEndEvent,
 } from "@dnd-kit/core";
 import type { FileEntry } from "@/api/workspace";
@@ -656,8 +659,15 @@ export function FileTree({
 
   const filtering = filterText.length > 0;
 
+  // Require the pointer to travel a few px before a drag begins, so a plain
+  // click (which may jitter 1–2px between press and release) still fires the
+  // row's onClick to open/expand instead of being swallowed as a drag-start.
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
+  );
+
   return (
-    <DndContext onDragEnd={handleDragEnd}>
+    <DndContext sensors={sensors} onDragEnd={handleDragEnd}>
       <div
         ref={treeRef}
         className={styles.tree}

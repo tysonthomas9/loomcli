@@ -72,6 +72,9 @@ vi.mock("@dnd-kit/core", async () => {
       setNodeRef: vi.fn(),
       isOver: false,
     }),
+    PointerSensor: function PointerSensor() {},
+    useSensor: (sensor: unknown) => sensor,
+    useSensors: (...sensors: unknown[]) => sensors,
   };
 });
 
