@@ -19,11 +19,14 @@ import (
 // scopedMockFileOps is a minimal ops.FileOps that only resolves the workspace
 // root, so these tests exercise the real fileServiceImpl scoped code paths.
 type scopedMockFileOps struct {
-	wsRoot    string
-	repoRoot  string
-	agentRoot string
-	dataDir   string
-	wsErr     error
+	wsRoot        string
+	repoRoot      string
+	agentRoot     string
+	agentRoots    map[string]string
+	agentRepoErrs map[string]error
+	wsData        *ops.WorkspaceData
+	dataDir       string
+	wsErr         error
 }
 
 func (m scopedMockFileOps) ResolveAgentWorktree(_, name string) (*ops.AgentWorktree, error) {
@@ -31,6 +34,27 @@ func (m scopedMockFileOps) ResolveAgentWorktree(_, name string) (*ops.AgentWorkt
 		return nil, errors.New("agent worktree not found")
 	}
 	return &ops.AgentWorktree{Name: name, Path: m.agentRoot, RepoName: "repo-a"}, nil
+}
+func (m scopedMockFileOps) ResolveAgentWorktreeForRepo(_, name, repo string) (*ops.AgentWorktree, error) {
+	if name != "agent-a" {
+		return nil, errors.New("agent worktree not found")
+	}
+	if m.agentRepoErrs != nil {
+		if err := m.agentRepoErrs[repo]; err != nil {
+			return nil, err
+		}
+	}
+	if m.agentRoots != nil {
+		root := m.agentRoots[repo]
+		if root == "" {
+			return nil, ops.ErrAgentWorktreeNotFound
+		}
+		return &ops.AgentWorktree{Name: name, Path: root, RepoName: repo}, nil
+	}
+	if repo == "repo-a" && m.agentRoot != "" {
+		return &ops.AgentWorktree{Name: name, Path: m.agentRoot, RepoName: repo}, nil
+	}
+	return nil, ops.ErrAgentWorktreeNotFound
 }
 func (m scopedMockFileOps) ResolveAgentWorktreeOrPrimary(_, _ string) (*ops.AgentWorktree, error) {
 	return nil, errors.New("not used")
@@ -44,6 +68,9 @@ func (m scopedMockFileOps) ResolveWorkspaceRoot(_ string) (string, error) {
 func (m scopedMockFileOps) ResolveWorkspaceData(_ string) (*ops.WorkspaceData, error) {
 	if m.wsErr != nil {
 		return nil, m.wsErr
+	}
+	if m.wsData != nil {
+		return m.wsData, nil
 	}
 	ws := &ops.WorkspaceData{
 		ID:   "ws",
@@ -117,6 +144,14 @@ func (m scopedMockFileOps) ResolveLoomDataDir() (string, error) {
 		return m.dataDir, nil
 	}
 	return os.TempDir(), nil
+}
+
+func (m scopedMockFileOps) GetCurrentBranch(worktreePath string) (string, error) {
+	out, err := exec.Command("git", "-C", worktreePath, "rev-parse", "--abbrev-ref", "HEAD").Output() //nolint:norawexec // Test mock runs fixed git command.
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(out)), nil
 }
 
 func parseTestPorcelainStatus(output string) map[string]string {
@@ -284,7 +319,7 @@ func TestFileServiceImpl_ListDirectoryScoped_HidesGit(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	res, err := scopedSvc(dir).ListDirectoryScoped(context.Background(), "ws", service.ScopeWorkspace, "", "")
+	res, err := scopedSvc(dir).ListDirectoryScoped(context.Background(), "ws", service.ScopeWorkspace, "", "", "")
 	if err != nil {
 		t.Fatalf("ListDirectoryScoped: %v", err)
 	}
@@ -307,7 +342,7 @@ func TestFileServiceImpl_ReadFileScoped_ReadsContent(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	res, err := scopedSvc(dir).ReadFileScoped(context.Background(), "ws", service.ScopeWorkspace, "", "f.txt")
+	res, err := scopedSvc(dir).ReadFileScoped(context.Background(), "ws", service.ScopeWorkspace, "", "", "f.txt")
 	if err != nil {
 		t.Fatalf("ReadFileScoped: %v", err)
 	}
@@ -325,7 +360,7 @@ func TestFileServiceImpl_ReadFileScoped_GitExplicitReadAllowed(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	res, err := scopedSvc(dir).ReadFileScoped(context.Background(), "ws", service.ScopeWorkspace, "", ".git/config")
+	res, err := scopedSvc(dir).ReadFileScoped(context.Background(), "ws", service.ScopeWorkspace, "", "", ".git/config")
 	if err != nil {
 		t.Fatalf("ReadFileScoped .git/config: %v", err)
 	}
@@ -335,18 +370,18 @@ func TestFileServiceImpl_ReadFileScoped_GitExplicitReadAllowed(t *testing.T) {
 }
 
 func TestFileServiceImpl_Scoped_UnsupportedScope(t *testing.T) {
-	_, err := scopedSvc(t.TempDir()).ListDirectoryScoped(context.Background(), "ws", service.FileScope("bogus"), "", "")
+	_, err := scopedSvc(t.TempDir()).ListDirectoryScoped(context.Background(), "ws", service.FileScope("bogus"), "", "", "")
 	wantKind(t, err, service.KindValidation)
 }
 
 func TestFileServiceImpl_Scoped_WorkspaceRejectsTarget(t *testing.T) {
-	_, err := scopedSvc(t.TempDir()).ListDirectoryScoped(context.Background(), "ws", service.ScopeWorkspace, "some-repo", "")
+	_, err := scopedSvc(t.TempDir()).ListDirectoryScoped(context.Background(), "ws", service.ScopeWorkspace, "some-repo", "", "")
 	wantKind(t, err, service.KindValidation)
 }
 
 func TestFileServiceImpl_Scoped_WorkspaceNotCheckedOut(t *testing.T) {
 	svc := NewFileService(scopedMockFileOps{wsErr: errors.New("workspace not checked out on this machine")})
-	_, err := svc.ListDirectoryScoped(context.Background(), "ws", service.ScopeWorkspace, "", "")
+	_, err := svc.ListDirectoryScoped(context.Background(), "ws", service.ScopeWorkspace, "", "", "")
 	wantKind(t, err, service.KindNotFound)
 }
 
@@ -362,7 +397,7 @@ func TestFileServiceImpl_PhaseA_CRUDAndVisibilityAllScopes(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			list, err := svc.ListDirectoryScoped(ctx, "ws", sc.scope, sc.target, "")
+			list, err := svc.ListDirectoryScoped(ctx, "ws", sc.scope, sc.target, "", "")
 			if err != nil {
 				t.Fatalf("ListDirectoryScoped: %v", err)
 			}
@@ -377,17 +412,17 @@ func TestFileServiceImpl_PhaseA_CRUDAndVisibilityAllScopes(t *testing.T) {
 				t.Fatalf("node_modules missing in %s scope: %+v", sc.name, list.Entries)
 			}
 
-			readEnv, err := svc.ReadFileScoped(ctx, "ws", sc.scope, sc.target, ".env")
+			readEnv, err := svc.ReadFileScoped(ctx, "ws", sc.scope, sc.target, "", ".env")
 			if err != nil {
 				t.Fatalf("read .env: %v", err)
 			}
 			if readEnv.Content != "OLD=1" {
 				t.Fatalf(".env content = %q", readEnv.Content)
 			}
-			if err := svc.WriteFileScoped(ctx, "ws", sc.scope, sc.target, ".env", "NEW=1"); err != nil {
+			if err := svc.WriteFileScoped(ctx, "ws", sc.scope, sc.target, "", ".env", "NEW=1"); err != nil {
 				t.Fatalf("write .env: %v", err)
 			}
-			readEnv, err = svc.ReadFileScoped(ctx, "ws", sc.scope, sc.target, ".env")
+			readEnv, err = svc.ReadFileScoped(ctx, "ws", sc.scope, sc.target, "", ".env")
 			if err != nil {
 				t.Fatalf("read written .env: %v", err)
 			}
@@ -395,30 +430,30 @@ func TestFileServiceImpl_PhaseA_CRUDAndVisibilityAllScopes(t *testing.T) {
 				t.Fatalf("written .env content = %q", readEnv.Content)
 			}
 
-			if err := svc.WriteFileScoped(ctx, "ws", sc.scope, sc.target, ".git/config", "mutated"); err != nil {
+			if err := svc.WriteFileScoped(ctx, "ws", sc.scope, sc.target, "", ".git/config", "mutated"); err != nil {
 				t.Fatalf("write .git/config: %v", err)
 			}
-			readGit, err := svc.ReadFileScoped(ctx, "ws", sc.scope, sc.target, ".git/config")
+			readGit, err := svc.ReadFileScoped(ctx, "ws", sc.scope, sc.target, "", ".git/config")
 			if err != nil {
 				t.Fatalf("read .git/config: %v", err)
 			}
 			if readGit.Content != "mutated" {
 				t.Fatalf(".git/config content = %q", readGit.Content)
 			}
-			if err := svc.MkdirScoped(ctx, "ws", sc.scope, sc.target, ".git/refs/heads"); err != nil {
+			if err := svc.MkdirScoped(ctx, "ws", sc.scope, sc.target, "", ".git/refs/heads"); err != nil {
 				t.Fatalf("mkdir .git path: %v", err)
 			}
-			if err := svc.MovePathScoped(ctx, "ws", sc.scope, sc.target, ".git/config", ".git/config.moved", false); err != nil {
+			if err := svc.MovePathScoped(ctx, "ws", sc.scope, sc.target, "", ".git/config", ".git/config.moved", false); err != nil {
 				t.Fatalf("move .git path: %v", err)
 			}
-			if err := svc.DeletePathScoped(ctx, "ws", sc.scope, sc.target, ".git/config.moved", false); err != nil {
+			if err := svc.DeletePathScoped(ctx, "ws", sc.scope, sc.target, "", ".git/config.moved", false); err != nil {
 				t.Fatalf("delete .git path: %v", err)
 			}
 
 			mustWrite(t, filepath.Join(sc.root, "nonempty", "file.txt"), "x")
-			err = svc.DeletePathScoped(ctx, "ws", sc.scope, sc.target, "nonempty", false)
+			err = svc.DeletePathScoped(ctx, "ws", sc.scope, sc.target, "", "nonempty", false)
 			wantKind(t, err, service.KindConflict)
-			if err := svc.DeletePathScoped(ctx, "ws", sc.scope, sc.target, "nonempty", true); err != nil {
+			if err := svc.DeletePathScoped(ctx, "ws", sc.scope, sc.target, "", "nonempty", true); err != nil {
 				t.Fatalf("recursive delete: %v", err)
 			}
 			if _, err := os.Stat(filepath.Join(sc.root, "nonempty")); !os.IsNotExist(err) {
@@ -426,17 +461,17 @@ func TestFileServiceImpl_PhaseA_CRUDAndVisibilityAllScopes(t *testing.T) {
 			}
 
 			mustWrite(t, filepath.Join(sc.root, "file-exists"), "x")
-			err = svc.MkdirScoped(ctx, "ws", sc.scope, sc.target, "file-exists")
+			err = svc.MkdirScoped(ctx, "ws", sc.scope, sc.target, "", "file-exists")
 			wantKind(t, err, service.KindConflict)
-			if err := svc.MkdirScoped(ctx, "ws", sc.scope, sc.target, "new/dir"); err != nil {
+			if err := svc.MkdirScoped(ctx, "ws", sc.scope, sc.target, "", "new/dir"); err != nil {
 				t.Fatalf("mkdir nested: %v", err)
 			}
 
 			mustWrite(t, filepath.Join(sc.root, "move-src.txt"), "src")
 			mustWrite(t, filepath.Join(sc.root, "move-dst.txt"), "dst")
-			err = svc.MovePathScoped(ctx, "ws", sc.scope, sc.target, "move-src.txt", "move-dst.txt", false)
+			err = svc.MovePathScoped(ctx, "ws", sc.scope, sc.target, "", "move-src.txt", "move-dst.txt", false)
 			wantKind(t, err, service.KindConflict)
-			if err := svc.MovePathScoped(ctx, "ws", sc.scope, sc.target, "move-src.txt", "move-dst.txt", true); err != nil {
+			if err := svc.MovePathScoped(ctx, "ws", sc.scope, sc.target, "", "move-src.txt", "move-dst.txt", true); err != nil {
 				t.Fatalf("move overwrite: %v", err)
 			}
 			got, err := os.ReadFile(filepath.Join(sc.root, "move-dst.txt"))
@@ -449,7 +484,7 @@ func TestFileServiceImpl_PhaseA_CRUDAndVisibilityAllScopes(t *testing.T) {
 
 			large := strings.Repeat("A", maxRequestBody+25)
 			mustWrite(t, filepath.Join(sc.root, "large.txt"), large)
-			readLarge, err := svc.ReadFileScoped(ctx, "ws", sc.scope, sc.target, "large.txt")
+			readLarge, err := svc.ReadFileScoped(ctx, "ws", sc.scope, sc.target, "", "large.txt")
 			if err != nil {
 				t.Fatalf("read large: %v", err)
 			}
@@ -476,26 +511,26 @@ func TestFileServiceImpl_PhaseA_StructuralGuardsAllScopes(t *testing.T) {
 				t.Skip("cannot create symlinks on this platform")
 			}
 
-			_, err := svc.ReadFileScoped(ctx, "ws", sc.scope, sc.target, "../outside.txt")
+			_, err := svc.ReadFileScoped(ctx, "ws", sc.scope, sc.target, "", "../outside.txt")
 			wantKind(t, err, service.KindForbidden)
-			err = svc.WriteFileScoped(ctx, "ws", sc.scope, sc.target, "../outside.txt", "bad")
+			err = svc.WriteFileScoped(ctx, "ws", sc.scope, sc.target, "", "../outside.txt", "bad")
 			wantKind(t, err, service.KindForbidden)
-			err = svc.DeletePathScoped(ctx, "ws", sc.scope, sc.target, "../outside.txt", false)
+			err = svc.DeletePathScoped(ctx, "ws", sc.scope, sc.target, "", "../outside.txt", false)
 			wantKind(t, err, service.KindForbidden)
-			err = svc.MkdirScoped(ctx, "ws", sc.scope, sc.target, "../outside-dir")
+			err = svc.MkdirScoped(ctx, "ws", sc.scope, sc.target, "", "../outside-dir")
 			wantKind(t, err, service.KindForbidden)
-			err = svc.MovePathScoped(ctx, "ws", sc.scope, sc.target, "existing.txt", "../outside-move.txt", false)
+			err = svc.MovePathScoped(ctx, "ws", sc.scope, sc.target, "", "existing.txt", "../outside-move.txt", false)
 			wantKind(t, err, service.KindForbidden)
 
-			_, err = svc.ReadFileScoped(ctx, "ws", sc.scope, sc.target, "link.txt")
+			_, err = svc.ReadFileScoped(ctx, "ws", sc.scope, sc.target, "", "link.txt")
 			wantKind(t, err, service.KindForbidden)
-			err = svc.WriteFileScoped(ctx, "ws", sc.scope, sc.target, "link.txt", "bad")
+			err = svc.WriteFileScoped(ctx, "ws", sc.scope, sc.target, "", "link.txt", "bad")
 			wantKind(t, err, service.KindForbidden)
-			err = svc.DeletePathScoped(ctx, "ws", sc.scope, sc.target, "link.txt", false)
+			err = svc.DeletePathScoped(ctx, "ws", sc.scope, sc.target, "", "link.txt", false)
 			wantKind(t, err, service.KindForbidden)
-			err = svc.MkdirScoped(ctx, "ws", sc.scope, sc.target, "link.txt")
+			err = svc.MkdirScoped(ctx, "ws", sc.scope, sc.target, "", "link.txt")
 			wantKind(t, err, service.KindForbidden)
-			err = svc.MovePathScoped(ctx, "ws", sc.scope, sc.target, "link.txt", "moved-link.txt", false)
+			err = svc.MovePathScoped(ctx, "ws", sc.scope, sc.target, "", "link.txt", "moved-link.txt", false)
 			wantKind(t, err, service.KindForbidden)
 		})
 	}
@@ -505,10 +540,79 @@ func TestFileServiceImpl_PhaseA_InvalidTargetsRejected(t *testing.T) {
 	svc, _ := setupScopedService(t)
 	ctx := context.Background()
 
-	_, err := svc.ListDirectoryScoped(ctx, "ws", service.ScopeRepo, "missing-repo", "")
+	_, err := svc.ListDirectoryScoped(ctx, "ws", service.ScopeRepo, "missing-repo", "", "")
 	wantKind(t, err, service.KindNotFound)
-	_, err = svc.ListDirectoryScoped(ctx, "ws", service.ScopeAgent, "missing-agent", "")
+	_, err = svc.ListDirectoryScoped(ctx, "ws", service.ScopeAgent, "missing-agent", "", "")
 	wantKind(t, err, service.KindNotFound)
+}
+
+func TestFileServiceImpl_RepoQualifiedAgentScopeResolution(t *testing.T) {
+	wsRoot := t.TempDir()
+	repoARoot := filepath.Join(wsRoot, "repo-a")
+	repoBRoot := filepath.Join(wsRoot, "repo-b")
+	agentARoot := filepath.Join(wsRoot, "worktrees", "repo-a", "agent-a")
+	agentBRoot := filepath.Join(wsRoot, "worktrees", "repo-b", "agent-a")
+	for _, dir := range []string{repoARoot, repoBRoot, agentARoot, agentBRoot} {
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	mustWrite(t, filepath.Join(agentARoot, "legacy.txt"), "legacy")
+	mustWrite(t, filepath.Join(agentBRoot, "qualified.txt"), "repo-b")
+
+	svc := NewFileService(scopedMockFileOps{
+		wsRoot:    wsRoot,
+		repoRoot:  repoARoot,
+		agentRoot: agentARoot,
+		agentRoots: map[string]string{
+			"repo-a": agentARoot,
+			"repo-b": agentBRoot,
+		},
+		agentRepoErrs: map[string]error{
+			"repo-c":       ops.ErrAgentRepoNotAllowed,
+			"repo-missing": ops.ErrAgentWorktreeNotFound,
+		},
+		wsData: &ops.WorkspaceData{
+			ID:   "ws",
+			Path: wsRoot,
+			Repos: []ops.WorkspaceRepo{
+				{Name: "repo-a", Path: repoARoot},
+				{Name: "repo-b", Path: repoBRoot},
+				{Name: "repo-c", Path: filepath.Join(wsRoot, "repo-c")},
+				{Name: "repo-missing", Path: filepath.Join(wsRoot, "repo-missing")},
+			},
+			Agents: []ops.WorkspaceAgentInfo{{Name: "agent-a", Repos: []string{"repo-a", "repo-b", "repo-missing"}}},
+		},
+	})
+	ctx := context.Background()
+
+	legacy, err := svc.ReadFileScoped(ctx, "ws", service.ScopeAgent, "agent-a", "", "legacy.txt")
+	if err != nil {
+		t.Fatalf("legacy agent read: %v", err)
+	}
+	if legacy.Content != "legacy" {
+		t.Fatalf("legacy content = %q", legacy.Content)
+	}
+
+	qualified, err := svc.ReadFileScoped(ctx, "ws", service.ScopeAgent, "agent-a", "repo-b", "qualified.txt")
+	if err != nil {
+		t.Fatalf("repo-qualified agent read: %v", err)
+	}
+	if qualified.Content != "repo-b" {
+		t.Fatalf("qualified content = %q", qualified.Content)
+	}
+
+	_, err = svc.ListDirectoryScoped(ctx, "ws", service.ScopeAgent, "agent-a", "repo-c", "")
+	wantKind(t, err, service.KindValidation)
+
+	_, err = svc.ListDirectoryScoped(ctx, "ws", service.ScopeAgent, "agent-a", "repo-missing", "")
+	wantKind(t, err, service.KindNotFound)
+
+	_, err = svc.ListDirectoryScoped(ctx, "ws", service.ScopeWorkspace, "", "repo-a", "")
+	wantKind(t, err, service.KindValidation)
+
+	_, err = svc.ListDirectoryScoped(ctx, "ws", service.ScopeRepo, "repo-a", "repo-b", "")
+	wantKind(t, err, service.KindValidation)
 }
 
 func TestResolveScopedContainingCheckout(t *testing.T) {
@@ -524,7 +628,7 @@ func TestResolveScopedContainingCheckout(t *testing.T) {
 	_ = ctx
 	for _, sc := range scopes {
 		t.Run(sc.name, func(t *testing.T) {
-			_, cleanPath, checkout, err := impl.resolveScopedContainingCheckout("ws", sc.scope, sc.target, "src/file.txt")
+			_, cleanPath, checkout, err := impl.resolveScopedContainingCheckout("ws", sc.scope, sc.target, "", "src/file.txt")
 			if err != nil {
 				t.Fatalf("resolveScopedContainingCheckout: %v", err)
 			}
@@ -540,7 +644,7 @@ func TestResolveScopedContainingCheckout(t *testing.T) {
 		})
 	}
 
-	_, _, _, err := impl.resolveScopedContainingCheckout("ws", service.ScopeWorkspace, "", "../outside.txt")
+	_, _, _, err := impl.resolveScopedContainingCheckout("ws", service.ScopeWorkspace, "", "", "../outside.txt")
 	wantKind(t, err, service.KindForbidden)
 }
 
@@ -552,7 +656,7 @@ func TestFileServiceImpl_ReadFileAtRevScoped(t *testing.T) {
 	commitAll(t, repo.root)
 	mustWrite(t, filepath.Join(repo.root, "file.txt"), "working\n")
 
-	res, err := svc.ReadFileAtRevScoped(context.Background(), "ws", repo.scope, repo.target, "file.txt", "HEAD")
+	res, err := svc.ReadFileAtRevScoped(context.Background(), "ws", repo.scope, repo.target, "", "file.txt", "HEAD")
 	if err != nil {
 		t.Fatalf("ReadFileAtRevScoped: %v", err)
 	}
@@ -564,7 +668,7 @@ func TestFileServiceImpl_ReadFileAtRevScoped(t *testing.T) {
 	mustWrite(t, filepath.Join(repo.root, "large.txt"), large)
 	mustGit(t, repo.root, "add", "large.txt")
 	mustGit(t, repo.root, "commit", "-m", "large")
-	res, err = svc.ReadFileAtRevScoped(context.Background(), "ws", repo.scope, repo.target, "large.txt", "HEAD")
+	res, err = svc.ReadFileAtRevScoped(context.Background(), "ws", repo.scope, repo.target, "", "large.txt", "HEAD")
 	if err != nil {
 		t.Fatalf("ReadFileAtRevScoped large: %v", err)
 	}
@@ -584,7 +688,7 @@ func TestFileServiceImpl_DiffFileScoped(t *testing.T) {
 	commitAll(t, repo.root)
 	mustWrite(t, filepath.Join(repo.root, "file.txt"), "two\n")
 
-	res, err := svc.DiffFileScoped(context.Background(), "ws", repo.scope, repo.target, "file.txt", "HEAD", "")
+	res, err := svc.DiffFileScoped(context.Background(), "ws", repo.scope, repo.target, "", "file.txt", "HEAD", "")
 	if err != nil {
 		t.Fatalf("DiffFileScoped working: %v", err)
 	}
@@ -596,7 +700,7 @@ func TestFileServiceImpl_DiffFileScoped(t *testing.T) {
 	mustGit(t, repo.root, "commit", "-m", "second")
 	first := strings.TrimSpace(gitOutput(t, repo.root, "rev-parse", "HEAD^"))
 	second := strings.TrimSpace(gitOutput(t, repo.root, "rev-parse", "HEAD"))
-	res, err = svc.DiffFileScoped(context.Background(), "ws", repo.scope, repo.target, "file.txt", first, second)
+	res, err = svc.DiffFileScoped(context.Background(), "ws", repo.scope, repo.target, "", "file.txt", first, second)
 	if err != nil {
 		t.Fatalf("DiffFileScoped rev..rev: %v", err)
 	}
@@ -612,7 +716,7 @@ func TestFileServiceImpl_BlameFileScoped(t *testing.T) {
 	mustWrite(t, filepath.Join(repo.root, "file.txt"), "one\ntwo\n")
 	commitAll(t, repo.root)
 
-	res, err := svc.BlameFileScoped(context.Background(), "ws", repo.scope, repo.target, "file.txt")
+	res, err := svc.BlameFileScoped(context.Background(), "ws", repo.scope, repo.target, "", "file.txt")
 	if err != nil {
 		t.Fatalf("BlameFileScoped: %v", err)
 	}
@@ -624,7 +728,7 @@ func TestFileServiceImpl_BlameFileScoped(t *testing.T) {
 	}
 
 	mustWrite(t, filepath.Join(repo.root, "too-large.txt"), strings.Repeat("A", maxRequestBody+1))
-	res, err = svc.BlameFileScoped(context.Background(), "ws", repo.scope, repo.target, "too-large.txt")
+	res, err = svc.BlameFileScoped(context.Background(), "ws", repo.scope, repo.target, "", "too-large.txt")
 	if err != nil {
 		t.Fatalf("BlameFileScoped large: %v", err)
 	}
@@ -640,10 +744,10 @@ func TestFileServiceImpl_HistoryMergesCommitsAndBrowserSaves(t *testing.T) {
 	mustWrite(t, filepath.Join(repo.root, "file.txt"), "committed\n")
 	commitAll(t, repo.root)
 
-	if err := svc.WriteFileScoped(context.Background(), "ws", repo.scope, repo.target, "file.txt", "browser save\n"); err != nil {
+	if err := svc.WriteFileScoped(context.Background(), "ws", repo.scope, repo.target, "", "file.txt", "browser save\n"); err != nil {
 		t.Fatalf("WriteFileScoped overwrite: %v", err)
 	}
-	history, err := svc.HistoryFileScoped(context.Background(), "ws", repo.scope, repo.target, "file.txt")
+	history, err := svc.HistoryFileScoped(context.Background(), "ws", repo.scope, repo.target, "", "file.txt")
 	if err != nil {
 		t.Fatalf("HistoryFileScoped: %v", err)
 	}
@@ -666,10 +770,10 @@ func TestFileServiceImpl_SaveHistorySnapshotRules(t *testing.T) {
 	impl := svc.(*fileServiceImpl)
 	repo := scopes[1]
 
-	if err := svc.WriteFileScoped(context.Background(), "ws", repo.scope, repo.target, "file.txt", "0"); err != nil {
+	if err := svc.WriteFileScoped(context.Background(), "ws", repo.scope, repo.target, "", "file.txt", "0"); err != nil {
 		t.Fatalf("create: %v", err)
 	}
-	entries, err := impl.loadSaveHistory("ws", repo.scope, repo.target, "file.txt")
+	entries, err := impl.loadSaveHistory("ws", repo.scope, repo.target, "", "file.txt")
 	if err != nil {
 		t.Fatalf("loadSaveHistory after create: %v", err)
 	}
@@ -678,11 +782,11 @@ func TestFileServiceImpl_SaveHistorySnapshotRules(t *testing.T) {
 	}
 
 	for i := 1; i <= fileHistorySaveLimit+5; i++ {
-		if err := svc.WriteFileScoped(context.Background(), "ws", repo.scope, repo.target, "file.txt", strconv.Itoa(i)); err != nil {
+		if err := svc.WriteFileScoped(context.Background(), "ws", repo.scope, repo.target, "", "file.txt", strconv.Itoa(i)); err != nil {
 			t.Fatalf("overwrite %d: %v", i, err)
 		}
 	}
-	entries, err = impl.loadSaveHistory("ws", repo.scope, repo.target, "file.txt")
+	entries, err = impl.loadSaveHistory("ws", repo.scope, repo.target, "", "file.txt")
 	if err != nil {
 		t.Fatalf("loadSaveHistory: %v", err)
 	}
@@ -694,6 +798,65 @@ func TestFileServiceImpl_SaveHistorySnapshotRules(t *testing.T) {
 		if entry.Content == "0" || entry.Content == "1" || entry.Content == "2" || entry.Content == "3" || entry.Content == "4" {
 			t.Fatalf("old snapshot was not evicted: %+v", saves)
 		}
+	}
+}
+
+func TestFileServiceImpl_SaveHistorySeparatesRepoQualifiedAgentCheckouts(t *testing.T) {
+	wsRoot := t.TempDir()
+	agentARoot := filepath.Join(wsRoot, "worktrees", "repo-a", "agent-a")
+	agentBRoot := filepath.Join(wsRoot, "worktrees", "repo-b", "agent-a")
+	mustWrite(t, filepath.Join(agentARoot, "file.txt"), "repo-a-old")
+	mustWrite(t, filepath.Join(agentBRoot, "file.txt"), "repo-b-old")
+	dataDir := t.TempDir()
+
+	svc := NewFileService(scopedMockFileOps{
+		wsRoot:    wsRoot,
+		agentRoot: agentARoot,
+		agentRoots: map[string]string{
+			"repo-a": agentARoot,
+			"repo-b": agentBRoot,
+		},
+		wsData: &ops.WorkspaceData{
+			ID:   "ws",
+			Path: wsRoot,
+			Repos: []ops.WorkspaceRepo{
+				{Name: "repo-a", Path: filepath.Join(wsRoot, "repo-a")},
+				{Name: "repo-b", Path: filepath.Join(wsRoot, "repo-b")},
+			},
+			Agents: []ops.WorkspaceAgentInfo{{Name: "agent-a", Repos: []string{"repo-a", "repo-b"}}},
+		},
+		dataDir: dataDir,
+	})
+	impl := svc.(*fileServiceImpl)
+	ctx := context.Background()
+
+	if err := svc.WriteFileScoped(ctx, "ws", service.ScopeAgent, "agent-a", "repo-a", "file.txt", "repo-a-new"); err != nil {
+		t.Fatalf("write repo-a: %v", err)
+	}
+	if err := svc.WriteFileScoped(ctx, "ws", service.ScopeAgent, "agent-a", "repo-b", "file.txt", "repo-b-new"); err != nil {
+		t.Fatalf("write repo-b: %v", err)
+	}
+
+	aHistory, err := impl.loadSaveHistory("ws", service.ScopeAgent, "agent-a", "repo-a", "file.txt")
+	if err != nil {
+		t.Fatalf("load repo-a history: %v", err)
+	}
+	bHistory, err := impl.loadSaveHistory("ws", service.ScopeAgent, "agent-a", "repo-b", "file.txt")
+	if err != nil {
+		t.Fatalf("load repo-b history: %v", err)
+	}
+	legacyHistory, err := impl.loadSaveHistory("ws", service.ScopeAgent, "agent-a", "", "file.txt")
+	if err != nil {
+		t.Fatalf("load legacy history: %v", err)
+	}
+	if len(aHistory) != 1 || aHistory[0].Content != "repo-a-old" {
+		t.Fatalf("repo-a history = %+v", aHistory)
+	}
+	if len(bHistory) != 1 || bHistory[0].Content != "repo-b-old" {
+		t.Fatalf("repo-b history = %+v", bHistory)
+	}
+	if len(legacyHistory) != 0 {
+		t.Fatalf("legacy history should not collide with repo-qualified saves: %+v", legacyHistory)
 	}
 }
 
@@ -711,7 +874,7 @@ func TestFileServiceImpl_IndexFilesScoped_DefaultExcludesSymlinksAndTruncates(t 
 			t.Logf("symlink unavailable: %v", err)
 		}
 
-		res, err := scopedSvc(dir).IndexFilesScoped(context.Background(), "ws", service.ScopeWorkspace, "")
+		res, err := scopedSvc(dir).IndexFilesScoped(context.Background(), "ws", service.ScopeWorkspace, "", "")
 		if err != nil {
 			t.Fatalf("IndexFilesScoped: %v", err)
 		}
@@ -738,7 +901,7 @@ func TestFileServiceImpl_SearchFilesScoped_DefaultExcludesAndOverride(t *testing
 
 	svc := scopedSvc(dir)
 	ctx := context.Background()
-	res, err := svc.SearchFilesScoped(ctx, "ws", service.ScopeWorkspace, "", service.FileSearchRequest{Query: "needle"})
+	res, err := svc.SearchFilesScoped(ctx, "ws", service.ScopeWorkspace, "", "", service.FileSearchRequest{Query: "needle"})
 	if err != nil {
 		t.Fatalf("SearchFilesScoped default: %v", err)
 	}
@@ -747,7 +910,7 @@ func TestFileServiceImpl_SearchFilesScoped_DefaultExcludesAndOverride(t *testing
 	}
 
 	emptyExclude := []string{}
-	res, err = svc.SearchFilesScoped(ctx, "ws", service.ScopeWorkspace, "", service.FileSearchRequest{
+	res, err = svc.SearchFilesScoped(ctx, "ws", service.ScopeWorkspace, "", "", service.FileSearchRequest{
 		Query:   "needle",
 		Exclude: &emptyExclude,
 	})
@@ -762,7 +925,7 @@ func TestFileServiceImpl_SearchFilesScoped_DefaultExcludesAndOverride(t *testing
 	}
 
 	excludeGenerated := []string{"src/generated.go"}
-	res, err = svc.SearchFilesScoped(ctx, "ws", service.ScopeWorkspace, "", service.FileSearchRequest{
+	res, err = svc.SearchFilesScoped(ctx, "ws", service.ScopeWorkspace, "", "", service.FileSearchRequest{
 		Query:   "needle",
 		Include: []string{"src/*.go"},
 		Exclude: &excludeGenerated,
@@ -783,7 +946,7 @@ func TestFileServiceImpl_SearchFilesScoped_SkipsSymlinksAndBinaries(t *testing.T
 		t.Logf("symlink unavailable: %v", err)
 	}
 
-	res, err := scopedSvc(dir).SearchFilesScoped(context.Background(), "ws", service.ScopeWorkspace, "", service.FileSearchRequest{Query: "needle"})
+	res, err := scopedSvc(dir).SearchFilesScoped(context.Background(), "ws", service.ScopeWorkspace, "", "", service.FileSearchRequest{Query: "needle"})
 	if err != nil {
 		t.Fatalf("SearchFilesScoped: %v", err)
 	}
@@ -802,7 +965,7 @@ func TestFileServiceImpl_SearchFilesScoped_LimitHitCaps(t *testing.T) {
 			dir := t.TempDir()
 			mustWrite(t, filepath.Join(dir, "a.txt"), "needle\n")
 			mustWrite(t, filepath.Join(dir, "b.txt"), "needle\n")
-			res, err := scopedSvc(dir).SearchFilesScoped(context.Background(), "ws", service.ScopeWorkspace, "", service.FileSearchRequest{Query: "needle"})
+			res, err := scopedSvc(dir).SearchFilesScoped(context.Background(), "ws", service.ScopeWorkspace, "", "", service.FileSearchRequest{Query: "needle"})
 			if err != nil {
 				t.Fatalf("SearchFilesScoped: %v", err)
 			}
@@ -818,7 +981,7 @@ func TestFileServiceImpl_SearchFilesScoped_LimitHitCaps(t *testing.T) {
 			fileSearchMaxMatches = 10
 			dir := t.TempDir()
 			mustWrite(t, filepath.Join(dir, "a.txt"), "needle\n")
-			res, err := scopedSvc(dir).SearchFilesScoped(context.Background(), "ws", service.ScopeWorkspace, "", service.FileSearchRequest{Query: "needle"})
+			res, err := scopedSvc(dir).SearchFilesScoped(context.Background(), "ws", service.ScopeWorkspace, "", "", service.FileSearchRequest{Query: "needle"})
 			if err != nil {
 				t.Fatalf("SearchFilesScoped: %v", err)
 			}
@@ -834,7 +997,7 @@ func TestFileServiceImpl_SearchFilesScoped_LimitHitCaps(t *testing.T) {
 			fileSearchMaxMatches = 1
 			dir := t.TempDir()
 			mustWrite(t, filepath.Join(dir, "a.txt"), "needle needle\n")
-			res, err := scopedSvc(dir).SearchFilesScoped(context.Background(), "ws", service.ScopeWorkspace, "", service.FileSearchRequest{Query: "needle"})
+			res, err := scopedSvc(dir).SearchFilesScoped(context.Background(), "ws", service.ScopeWorkspace, "", "", service.FileSearchRequest{Query: "needle"})
 			if err != nil {
 				t.Fatalf("SearchFilesScoped: %v", err)
 			}
@@ -856,7 +1019,7 @@ func TestFileServiceImpl_IndexAndSearch_ScopeTargeting(t *testing.T) {
 	ctx := context.Background()
 	for _, sc := range scopes {
 		t.Run(sc.name, func(t *testing.T) {
-			index, err := svc.IndexFilesScoped(ctx, "ws", sc.scope, sc.target)
+			index, err := svc.IndexFilesScoped(ctx, "ws", sc.scope, sc.target, "")
 			if err != nil {
 				t.Fatalf("IndexFilesScoped: %v", err)
 			}
@@ -864,7 +1027,7 @@ func TestFileServiceImpl_IndexAndSearch_ScopeTargeting(t *testing.T) {
 				t.Fatalf("index paths = %+v, missing scoped file", index.Paths)
 			}
 
-			search, err := svc.SearchFilesScoped(ctx, "ws", sc.scope, sc.target, service.FileSearchRequest{Query: "target-" + sc.name})
+			search, err := svc.SearchFilesScoped(ctx, "ws", sc.scope, sc.target, "", service.FileSearchRequest{Query: "target-" + sc.name})
 			if err != nil {
 				t.Fatalf("SearchFilesScoped: %v", err)
 			}
@@ -879,10 +1042,10 @@ func TestFileServiceImpl_IndexCacheInvalidatedAfterCRUD(t *testing.T) {
 	root := t.TempDir()
 	svc := scopedSvc(root)
 	ctx := context.Background()
-	if err := svc.WriteFileScoped(ctx, "ws", service.ScopeWorkspace, "", "one.txt", "1"); err != nil {
+	if err := svc.WriteFileScoped(ctx, "ws", service.ScopeWorkspace, "", "", "one.txt", "1"); err != nil {
 		t.Fatalf("write one: %v", err)
 	}
-	index, err := svc.IndexFilesScoped(ctx, "ws", service.ScopeWorkspace, "")
+	index, err := svc.IndexFilesScoped(ctx, "ws", service.ScopeWorkspace, "", "")
 	if err != nil {
 		t.Fatalf("index one: %v", err)
 	}
@@ -890,10 +1053,10 @@ func TestFileServiceImpl_IndexCacheInvalidatedAfterCRUD(t *testing.T) {
 		t.Fatalf("index missing one.txt: %+v", index.Paths)
 	}
 
-	if err := svc.WriteFileScoped(ctx, "ws", service.ScopeWorkspace, "", "two.txt", "2"); err != nil {
+	if err := svc.WriteFileScoped(ctx, "ws", service.ScopeWorkspace, "", "", "two.txt", "2"); err != nil {
 		t.Fatalf("write two: %v", err)
 	}
-	index, err = svc.IndexFilesScoped(ctx, "ws", service.ScopeWorkspace, "")
+	index, err = svc.IndexFilesScoped(ctx, "ws", service.ScopeWorkspace, "", "")
 	if err != nil {
 		t.Fatalf("index after write: %v", err)
 	}
@@ -901,11 +1064,11 @@ func TestFileServiceImpl_IndexCacheInvalidatedAfterCRUD(t *testing.T) {
 		t.Fatalf("write did not invalidate index cache: %+v", index.Paths)
 	}
 
-	if err := svc.MkdirScoped(ctx, "ws", service.ScopeWorkspace, "", "dir"); err != nil {
+	if err := svc.MkdirScoped(ctx, "ws", service.ScopeWorkspace, "", "", "dir"); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
 	mustWrite(t, filepath.Join(root, "dir", "three.txt"), "3")
-	index, err = svc.IndexFilesScoped(ctx, "ws", service.ScopeWorkspace, "")
+	index, err = svc.IndexFilesScoped(ctx, "ws", service.ScopeWorkspace, "", "")
 	if err != nil {
 		t.Fatalf("index after mkdir/write: %v", err)
 	}
@@ -913,10 +1076,10 @@ func TestFileServiceImpl_IndexCacheInvalidatedAfterCRUD(t *testing.T) {
 		t.Fatalf("mkdir did not invalidate index cache: %+v", index.Paths)
 	}
 
-	if err := svc.MovePathScoped(ctx, "ws", service.ScopeWorkspace, "", "two.txt", "moved.txt", false); err != nil {
+	if err := svc.MovePathScoped(ctx, "ws", service.ScopeWorkspace, "", "", "two.txt", "moved.txt", false); err != nil {
 		t.Fatalf("move: %v", err)
 	}
-	index, err = svc.IndexFilesScoped(ctx, "ws", service.ScopeWorkspace, "")
+	index, err = svc.IndexFilesScoped(ctx, "ws", service.ScopeWorkspace, "", "")
 	if err != nil {
 		t.Fatalf("index after move: %v", err)
 	}
@@ -924,10 +1087,10 @@ func TestFileServiceImpl_IndexCacheInvalidatedAfterCRUD(t *testing.T) {
 		t.Fatalf("move did not invalidate index cache: %+v", index.Paths)
 	}
 
-	if err := svc.DeletePathScoped(ctx, "ws", service.ScopeWorkspace, "", "one.txt", false); err != nil {
+	if err := svc.DeletePathScoped(ctx, "ws", service.ScopeWorkspace, "", "", "one.txt", false); err != nil {
 		t.Fatalf("delete: %v", err)
 	}
-	index, err = svc.IndexFilesScoped(ctx, "ws", service.ScopeWorkspace, "")
+	index, err = svc.IndexFilesScoped(ctx, "ws", service.ScopeWorkspace, "", "")
 	if err != nil {
 		t.Fatalf("index after delete: %v", err)
 	}
@@ -948,7 +1111,7 @@ func TestFileServiceImpl_GitStatusScoped_TargetScopes(t *testing.T) {
 		commitAll(t, sc.root)
 		mustWrite(t, filepath.Join(sc.root, "tracked.txt"), "two\n")
 
-		status, err := svc.GitStatusScoped(ctx, "ws", sc.scope, sc.target)
+		status, err := svc.GitStatusScoped(ctx, "ws", sc.scope, sc.target, "")
 		if err != nil {
 			t.Fatalf("%s GitStatusScoped: %v", sc.name, err)
 		}
@@ -982,7 +1145,7 @@ func TestFileServiceImpl_GitStatusScoped_WorkspaceFanoutPrefixes(t *testing.T) {
 	initGitRepo(t, agentRoot)
 	mustWrite(t, filepath.Join(agentRoot, "new.txt"), "new\n")
 
-	status, err := svc.GitStatusScoped(ctx, "ws", service.ScopeWorkspace, "")
+	status, err := svc.GitStatusScoped(ctx, "ws", service.ScopeWorkspace, "", "")
 	if err != nil {
 		t.Fatalf("GitStatusScoped workspace: %v", err)
 	}
@@ -997,16 +1160,87 @@ func TestFileServiceImpl_GitStatusScoped_WorkspaceFanoutPrefixes(t *testing.T) {
 	}
 }
 
+func TestFileServiceImpl_ListFileCheckouts_IncludesMissingAndChangeCounts(t *testing.T) {
+	ctx := context.Background()
+	wsRoot := t.TempDir()
+	repoARoot := filepath.Join(wsRoot, "repo-a")
+	repoBRoot := filepath.Join(wsRoot, "repo-b")
+	agentARoot := filepath.Join(wsRoot, "worktrees", "repo-a", "agent-a")
+	for _, dir := range []string{repoARoot, repoBRoot, agentARoot} {
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	initGitRepo(t, repoARoot)
+	mustWrite(t, filepath.Join(repoARoot, "tracked.txt"), "one\n")
+	commitAll(t, repoARoot)
+	mustWrite(t, filepath.Join(repoARoot, "tracked.txt"), "two\n")
+
+	initGitRepo(t, agentARoot)
+	mustWrite(t, filepath.Join(agentARoot, "tracked.txt"), "one\n")
+	commitAll(t, agentARoot)
+	mustWrite(t, filepath.Join(agentARoot, "new.txt"), "new\n")
+
+	svc := NewFileService(scopedMockFileOps{
+		wsRoot:    wsRoot,
+		repoRoot:  repoARoot,
+		agentRoot: agentARoot,
+		wsData: &ops.WorkspaceData{
+			ID:   "ws",
+			Path: wsRoot,
+			Repos: []ops.WorkspaceRepo{
+				{Name: "repo-a", Path: repoARoot},
+				{Name: "repo-b", Path: repoBRoot},
+			},
+			Agents: []ops.WorkspaceAgentInfo{{Name: "agent-a", Repos: []string{"repo-a", "repo-b"}}},
+		},
+	})
+
+	result, err := svc.ListFileCheckouts(ctx, "ws")
+	if err != nil {
+		t.Fatalf("ListFileCheckouts: %v", err)
+	}
+	checkouts := map[string]service.FileCheckout{}
+	for _, checkout := range result.Checkouts {
+		key := checkout.Kind + ":" + checkout.Repo
+		if checkout.Agent != "" {
+			key = checkout.Kind + ":" + checkout.Agent + ":" + checkout.Repo
+		}
+		checkouts[key] = checkout
+	}
+
+	repoA := checkouts["repo:repo-a"]
+	if !repoA.Exists || repoA.ChangeCount != 1 || repoA.Branch == "" {
+		t.Fatalf("repo-a checkout = %+v", repoA)
+	}
+	repoB := checkouts["repo:repo-b"]
+	if repoB.Exists || repoB.ChangeCount != 0 || repoB.Branch != "" {
+		t.Fatalf("repo-b checkout = %+v", repoB)
+	}
+	agentA := checkouts["agent:agent-a:repo-a"]
+	if !agentA.Exists || agentA.ChangeCount != 1 || agentA.Branch == "" {
+		t.Fatalf("agent repo-a checkout = %+v", agentA)
+	}
+	agentB := checkouts["agent:agent-a:repo-b"]
+	if agentB.Exists || agentB.ChangeCount != 0 || agentB.Branch != "" {
+		t.Fatalf("agent repo-b checkout = %+v", agentB)
+	}
+	if len(checkouts) != 4 {
+		t.Fatalf("checkouts = %+v, want 4 entries", result.Checkouts)
+	}
+}
+
 func TestFileServiceImpl_GitStatusScoped_InvalidTargets(t *testing.T) {
 	ctx := context.Background()
 	svc, _ := setupScopedService(t)
 
-	_, err := svc.GitStatusScoped(ctx, "ws", service.ScopeRepo, "missing")
+	_, err := svc.GitStatusScoped(ctx, "ws", service.ScopeRepo, "missing", "")
 	wantKind(t, err, service.KindNotFound)
 
-	_, err = svc.GitStatusScoped(ctx, "ws", service.ScopeAgent, "missing")
+	_, err = svc.GitStatusScoped(ctx, "ws", service.ScopeAgent, "missing", "")
 	wantKind(t, err, service.KindNotFound)
 
-	_, err = svc.GitStatusScoped(ctx, "ws", service.ScopeWorkspace, "repo-a")
+	_, err = svc.GitStatusScoped(ctx, "ws", service.ScopeWorkspace, "repo-a", "")
 	wantKind(t, err, service.KindValidation)
 }

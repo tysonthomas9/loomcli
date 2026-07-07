@@ -79,8 +79,8 @@ type fileSearchAccumulator struct {
 	limitHit     bool
 }
 
-func (s *fileServiceImpl) IndexFilesScoped(ctx context.Context, wsID string, scope service.FileScope, target string) (*service.FileIndexResult, error) {
-	root, err := s.resolveScopeRoot(wsID, scope, target)
+func (s *fileServiceImpl) IndexFilesScoped(ctx context.Context, wsID string, scope service.FileScope, target, repo string) (*service.FileIndexResult, error) {
+	root, err := s.resolveScopeRoot(wsID, scope, target, repo)
 	if err != nil {
 		return nil, err
 	}
@@ -108,8 +108,11 @@ func (s *fileServiceImpl) IndexFilesScoped(ctx context.Context, wsID string, sco
 	return result, nil
 }
 
-func (s *fileServiceImpl) SearchFilesScoped(ctx context.Context, wsID string, scope service.FileScope, target string, req service.FileSearchRequest) (*service.FileSearchResult, error) {
-	root, err := s.resolveScopeRoot(wsID, scope, target)
+func (s *fileServiceImpl) SearchFilesScoped(ctx context.Context, wsID string, scope service.FileScope, target, repo string, req service.FileSearchRequest) (*service.FileSearchResult, error) {
+	if repo == "" {
+		repo = req.Repo
+	}
+	root, err := s.resolveScopeRoot(wsID, scope, target, repo)
 	if err != nil {
 		return nil, err
 	}

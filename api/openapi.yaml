@@ -2569,6 +2569,12 @@ paths:
           required: false
           schema:
             type: string
+        - name: repo
+          in: query
+          required: false
+          description: Optional repo qualifier, valid only when scope=agent.
+          schema:
+            type: string
         - name: path
           in: query
           required: false
@@ -2599,6 +2605,12 @@ paths:
         - name: target
           in: query
           required: false
+          schema:
+            type: string
+        - name: repo
+          in: query
+          required: false
+          description: Optional repo qualifier, valid only when scope=agent.
           schema:
             type: string
       responses:
@@ -2661,6 +2673,12 @@ paths:
           required: false
           schema:
             type: string
+        - name: repo
+          in: query
+          required: false
+          description: Optional repo qualifier, valid only when scope=agent.
+          schema:
+            type: string
       responses:
         "200":
           description: Root-relative file paths mapped to raw git porcelain XY codes
@@ -2668,6 +2686,21 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/FileGitStatusResponse"
+
+  /api/workspaces/{ws}/files/checkouts:
+    get:
+      operationId: getFileCheckouts
+      tags: [files]
+      summary: List workspace file checkouts and local change counts
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+      responses:
+        "200":
+          description: Known file checkouts
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FileCheckoutsResponse"
 
   /api/workspaces/{ws}/files/diff:
     get:
@@ -2686,6 +2719,12 @@ paths:
         - name: target
           in: query
           required: false
+          schema:
+            type: string
+        - name: repo
+          in: query
+          required: false
+          description: Optional repo qualifier, valid only when scope=agent.
           schema:
             type: string
         - name: path
@@ -2730,6 +2769,12 @@ paths:
           required: false
           schema:
             type: string
+        - name: repo
+          in: query
+          required: false
+          description: Optional repo qualifier, valid only when scope=agent.
+          schema:
+            type: string
         - name: path
           in: query
           required: true
@@ -2762,6 +2807,12 @@ paths:
           required: false
           schema:
             type: string
+        - name: repo
+          in: query
+          required: false
+          description: Optional repo qualifier, valid only when scope=agent.
+          schema:
+            type: string
         - name: path
           in: query
           required: true
@@ -2792,6 +2843,12 @@ paths:
         - name: target
           in: query
           required: false
+          schema:
+            type: string
+        - name: repo
+          in: query
+          required: false
+          description: Optional repo qualifier, valid only when scope=agent.
           schema:
             type: string
         - name: path
@@ -2865,6 +2922,12 @@ paths:
           required: false
           schema:
             type: string
+        - name: repo
+          in: query
+          required: false
+          description: Optional repo qualifier, valid only when scope=agent.
+          schema:
+            type: string
         - name: path
           in: query
           required: true
@@ -2902,11 +2965,23 @@ paths:
           required: false
           schema:
             type: string
+        - name: repo
+          in: query
+          required: false
+          description: Optional repo qualifier, valid only when scope=agent.
+          schema:
+            type: string
         - name: path
           in: query
           required: true
           schema:
             type: string
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/FileRepoQualifierRequest"
       responses:
         "200":
           description: Directory created
@@ -3744,6 +3819,9 @@ components:
       properties:
         query:
           type: string
+        repo:
+          type: string
+          description: Optional repo qualifier, valid only when scope=agent.
         regex:
           type: boolean
           default: false
@@ -3799,6 +3877,33 @@ components:
         type: string
         minLength: 2
         maxLength: 2
+
+    FileCheckout:
+      type: object
+      required: [kind, repo, exists, change_count]
+      properties:
+        kind:
+          type: string
+          enum: [agent, repo]
+        agent:
+          type: string
+        repo:
+          type: string
+        exists:
+          type: boolean
+        branch:
+          type: string
+        change_count:
+          type: integer
+
+    FileCheckoutsResponse:
+      type: object
+      required: [checkouts]
+      properties:
+        checkouts:
+          type: array
+          items:
+            $ref: "#/components/schemas/FileCheckout"
 
     FileDiffResponse:
       type: object
@@ -3887,6 +3992,16 @@ components:
       properties:
         content:
           type: string
+        repo:
+          type: string
+          description: Optional repo qualifier, valid only when scope=agent.
+
+    FileRepoQualifierRequest:
+      type: object
+      properties:
+        repo:
+          type: string
+          description: Optional repo qualifier, valid only when scope=agent.
 
     FileMoveRequest:
       type: object
@@ -3896,6 +4011,9 @@ components:
           type: string
         to:
           type: string
+        repo:
+          type: string
+          description: Optional repo qualifier, valid only when scope=agent.
         overwrite:
           type: boolean
           default: false

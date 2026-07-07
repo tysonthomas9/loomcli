@@ -3,7 +3,9 @@ package misc
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -98,8 +100,9 @@ func HandleFileTree(svc service.FileService) http.HandlerFunc {
 		agentName := r.PathValue("name")
 		wsID := middleware.WorkspaceFromContext(r.Context())
 		reqPath := r.URL.Query().Get("path")
+		repo := r.URL.Query().Get("repo")
 
-		result, err := svc.ListDirectoryScoped(r.Context(), wsID, service.ScopeAgent, agentName, reqPath)
+		result, err := svc.ListDirectoryScoped(r.Context(), wsID, service.ScopeAgent, agentName, repo, reqPath)
 		if err != nil {
 			handler.HandleServiceError(w, err)
 			return
@@ -115,8 +118,9 @@ func HandleFileRead(svc service.FileService) http.HandlerFunc {
 		agentName := r.PathValue("name")
 		wsID := middleware.WorkspaceFromContext(r.Context())
 		reqPath := r.URL.Query().Get("path")
+		repo := r.URL.Query().Get("repo")
 
-		result, err := svc.ReadFileScoped(r.Context(), wsID, service.ScopeAgent, agentName, reqPath)
+		result, err := svc.ReadFileScoped(r.Context(), wsID, service.ScopeAgent, agentName, repo, reqPath)
 		if err != nil {
 			handler.HandleServiceError(w, err)
 			return
@@ -128,22 +132,54 @@ func HandleFileRead(svc service.FileService) http.HandlerFunc {
 
 // scopeFromQuery parses the scope/target query params for the scoped file
 // browser, defaulting to the workspace scope when scope is omitted.
-func scopeFromQuery(r *http.Request) (service.FileScope, string) {
+func scopeFromQuery(r *http.Request) (service.FileScope, string, string) {
 	scope := service.FileScope(r.URL.Query().Get("scope"))
 	if scope == "" {
 		scope = service.ScopeWorkspace
 	}
-	return scope, r.URL.Query().Get("target")
+	return scope, r.URL.Query().Get("target"), r.URL.Query().Get("repo")
+}
+
+func repoFromQueryAndBody(queryRepo, bodyRepo string) (string, error) {
+	queryRepo = strings.TrimSpace(queryRepo)
+	bodyRepo = strings.TrimSpace(bodyRepo)
+	if queryRepo != "" && bodyRepo != "" && queryRepo != bodyRepo {
+		return "", service.ErrValidation("repo query and request body values differ")
+	}
+	if bodyRepo != "" {
+		return bodyRepo, nil
+	}
+	return queryRepo, nil
+}
+
+func decodeOptionalJSONBody(w http.ResponseWriter, r *http.Request, dst any) bool {
+	if r.Body == nil {
+		return true
+	}
+	defer r.Body.Close()
+	err := json.NewDecoder(http.MaxBytesReader(w, r.Body, handler.MaxRequestBody)).Decode(dst)
+	if err == nil {
+		return true
+	}
+	if errors.Is(err, io.EOF) {
+		return true
+	}
+	if strings.Contains(err.Error(), "http: request body too large") {
+		handler.RespondError(w, http.StatusRequestEntityTooLarge, "request body too large")
+		return false
+	}
+	handler.RespondError(w, http.StatusBadRequest, "invalid request body")
+	return false
 }
 
 // HandleScopedFileTree handles GET /api/workspaces/{ws}/files/tree?scope=&target=&path=.
 func HandleScopedFileTree(svc service.FileService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		wsID := middleware.WorkspaceFromContext(r.Context())
-		scope, target := scopeFromQuery(r)
+		scope, target, repo := scopeFromQuery(r)
 		reqPath := r.URL.Query().Get("path")
 
-		result, err := svc.ListDirectoryScoped(r.Context(), wsID, scope, target, reqPath)
+		result, err := svc.ListDirectoryScoped(r.Context(), wsID, scope, target, repo, reqPath)
 		if err != nil {
 			handler.HandleServiceError(w, err)
 			return
@@ -156,16 +192,16 @@ func HandleScopedFileTree(svc service.FileService) http.HandlerFunc {
 func HandleScopedFileRead(svc service.FileService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		wsID := middleware.WorkspaceFromContext(r.Context())
-		scope, target := scopeFromQuery(r)
+		scope, target, repo := scopeFromQuery(r)
 		reqPath := r.URL.Query().Get("path")
 		rev := r.URL.Query().Get("rev")
 
 		var result *service.FileReadResult
 		var err error
 		if strings.TrimSpace(rev) != "" {
-			result, err = svc.ReadFileAtRevScoped(r.Context(), wsID, scope, target, reqPath, rev)
+			result, err = svc.ReadFileAtRevScoped(r.Context(), wsID, scope, target, repo, reqPath, rev)
 		} else {
-			result, err = svc.ReadFileScoped(r.Context(), wsID, scope, target, reqPath)
+			result, err = svc.ReadFileScoped(r.Context(), wsID, scope, target, repo, reqPath)
 		}
 		if err != nil {
 			handler.HandleServiceError(w, err)
@@ -179,12 +215,12 @@ func HandleScopedFileRead(svc service.FileService) http.HandlerFunc {
 func HandleScopedFileDiff(svc service.FileService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		wsID := middleware.WorkspaceFromContext(r.Context())
-		scope, target := scopeFromQuery(r)
+		scope, target, repo := scopeFromQuery(r)
 		reqPath := r.URL.Query().Get("path")
 		from := r.URL.Query().Get("from")
 		to := r.URL.Query().Get("to")
 
-		result, err := svc.DiffFileScoped(r.Context(), wsID, scope, target, reqPath, from, to)
+		result, err := svc.DiffFileScoped(r.Context(), wsID, scope, target, repo, reqPath, from, to)
 		if err != nil {
 			handler.HandleServiceError(w, err)
 			return
@@ -197,10 +233,10 @@ func HandleScopedFileDiff(svc service.FileService) http.HandlerFunc {
 func HandleScopedFileHistory(svc service.FileService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		wsID := middleware.WorkspaceFromContext(r.Context())
-		scope, target := scopeFromQuery(r)
+		scope, target, repo := scopeFromQuery(r)
 		reqPath := r.URL.Query().Get("path")
 
-		result, err := svc.HistoryFileScoped(r.Context(), wsID, scope, target, reqPath)
+		result, err := svc.HistoryFileScoped(r.Context(), wsID, scope, target, repo, reqPath)
 		if err != nil {
 			handler.HandleServiceError(w, err)
 			return
@@ -213,10 +249,10 @@ func HandleScopedFileHistory(svc service.FileService) http.HandlerFunc {
 func HandleScopedFileBlame(svc service.FileService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		wsID := middleware.WorkspaceFromContext(r.Context())
-		scope, target := scopeFromQuery(r)
+		scope, target, repo := scopeFromQuery(r)
 		reqPath := r.URL.Query().Get("path")
 
-		result, err := svc.BlameFileScoped(r.Context(), wsID, scope, target, reqPath)
+		result, err := svc.BlameFileScoped(r.Context(), wsID, scope, target, repo, reqPath)
 		if err != nil {
 			handler.HandleServiceError(w, err)
 			return
@@ -229,9 +265,9 @@ func HandleScopedFileBlame(svc service.FileService) http.HandlerFunc {
 func HandleScopedFileIndex(svc service.FileService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		wsID := middleware.WorkspaceFromContext(r.Context())
-		scope, target := scopeFromQuery(r)
+		scope, target, repo := scopeFromQuery(r)
 
-		result, err := svc.IndexFilesScoped(r.Context(), wsID, scope, target)
+		result, err := svc.IndexFilesScoped(r.Context(), wsID, scope, target, repo)
 		if err != nil {
 			handler.HandleServiceError(w, err)
 			return
@@ -244,7 +280,7 @@ func HandleScopedFileIndex(svc service.FileService) http.HandlerFunc {
 func HandleScopedFileSearch(svc service.FileService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		wsID := middleware.WorkspaceFromContext(r.Context())
-		scope, target := scopeFromQuery(r)
+		scope, target, queryRepo := scopeFromQuery(r)
 
 		var req service.FileSearchRequest
 		if r.Body == nil {
@@ -261,7 +297,12 @@ func HandleScopedFileSearch(svc service.FileService) http.HandlerFunc {
 			return
 		}
 
-		result, err := svc.SearchFilesScoped(r.Context(), wsID, scope, target, req)
+		repo, err := repoFromQueryAndBody(queryRepo, req.Repo)
+		if err != nil {
+			handler.HandleServiceError(w, err)
+			return
+		}
+		result, err := svc.SearchFilesScoped(r.Context(), wsID, scope, target, repo, req)
 		if err != nil {
 			handler.HandleServiceError(w, err)
 			return
@@ -274,9 +315,23 @@ func HandleScopedFileSearch(svc service.FileService) http.HandlerFunc {
 func HandleScopedGitStatus(svc service.FileService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		wsID := middleware.WorkspaceFromContext(r.Context())
-		scope, target := scopeFromQuery(r)
+		scope, target, repo := scopeFromQuery(r)
 
-		result, err := svc.GitStatusScoped(r.Context(), wsID, scope, target)
+		result, err := svc.GitStatusScoped(r.Context(), wsID, scope, target, repo)
+		if err != nil {
+			handler.HandleServiceError(w, err)
+			return
+		}
+		handler.WriteJSON(w, http.StatusOK, result)
+	}
+}
+
+// HandleFileCheckouts handles GET /api/workspaces/{ws}/files/checkouts.
+func HandleFileCheckouts(svc service.FileService) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		wsID := middleware.WorkspaceFromContext(r.Context())
+
+		result, err := svc.ListFileCheckouts(r.Context(), wsID)
 		if err != nil {
 			handler.HandleServiceError(w, err)
 			return
@@ -288,6 +343,11 @@ func HandleScopedGitStatus(svc service.FileService) http.HandlerFunc {
 // fileWriteRequest is the JSON body for PUT /api/agents/{name}/files?path=
 type fileWriteRequest struct {
 	Content string `json:"content"`
+	Repo    string `json:"repo,omitempty"`
+}
+
+type fileRepoRequest struct {
+	Repo string `json:"repo,omitempty"`
 }
 
 // HandleFileWrite handles PUT /api/agents/{name}/files?path= as a deprecated
@@ -297,6 +357,7 @@ func HandleFileWrite(svc service.FileService) http.HandlerFunc {
 		agentName := r.PathValue("name")
 		wsID := middleware.WorkspaceFromContext(r.Context())
 		reqPath := r.URL.Query().Get("path")
+		queryRepo := r.URL.Query().Get("repo")
 
 		var req fileWriteRequest
 		if r.Body == nil {
@@ -313,7 +374,12 @@ func HandleFileWrite(svc service.FileService) http.HandlerFunc {
 			return
 		}
 
-		if err := svc.WriteFileScoped(r.Context(), wsID, service.ScopeAgent, agentName, reqPath, req.Content); err != nil {
+		repo, err := repoFromQueryAndBody(queryRepo, req.Repo)
+		if err != nil {
+			handler.HandleServiceError(w, err)
+			return
+		}
+		if err := svc.WriteFileScoped(r.Context(), wsID, service.ScopeAgent, agentName, repo, reqPath, req.Content); err != nil {
 			handler.HandleServiceError(w, err)
 			return
 		}
@@ -326,7 +392,7 @@ func HandleFileWrite(svc service.FileService) http.HandlerFunc {
 func HandleScopedFileWrite(svc service.FileService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		wsID := middleware.WorkspaceFromContext(r.Context())
-		scope, target := scopeFromQuery(r)
+		scope, target, queryRepo := scopeFromQuery(r)
 		reqPath := r.URL.Query().Get("path")
 
 		var req fileWriteRequest
@@ -344,7 +410,12 @@ func HandleScopedFileWrite(svc service.FileService) http.HandlerFunc {
 			return
 		}
 
-		if err := svc.WriteFileScoped(r.Context(), wsID, scope, target, reqPath, req.Content); err != nil {
+		repo, err := repoFromQueryAndBody(queryRepo, req.Repo)
+		if err != nil {
+			handler.HandleServiceError(w, err)
+			return
+		}
+		if err := svc.WriteFileScoped(r.Context(), wsID, scope, target, repo, reqPath, req.Content); err != nil {
 			handler.HandleServiceError(w, err)
 			return
 		}
@@ -356,11 +427,11 @@ func HandleScopedFileWrite(svc service.FileService) http.HandlerFunc {
 func HandleScopedFileDelete(svc service.FileService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		wsID := middleware.WorkspaceFromContext(r.Context())
-		scope, target := scopeFromQuery(r)
+		scope, target, repo := scopeFromQuery(r)
 		reqPath := r.URL.Query().Get("path")
 		recursive := r.URL.Query().Get("recursive") == "1" || r.URL.Query().Get("recursive") == "true"
 
-		if err := svc.DeletePathScoped(r.Context(), wsID, scope, target, reqPath, recursive); err != nil {
+		if err := svc.DeletePathScoped(r.Context(), wsID, scope, target, repo, reqPath, recursive); err != nil {
 			handler.HandleServiceError(w, err)
 			return
 		}
@@ -372,10 +443,19 @@ func HandleScopedFileDelete(svc service.FileService) http.HandlerFunc {
 func HandleScopedFileMkdir(svc service.FileService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		wsID := middleware.WorkspaceFromContext(r.Context())
-		scope, target := scopeFromQuery(r)
+		scope, target, queryRepo := scopeFromQuery(r)
 		reqPath := r.URL.Query().Get("path")
+		var req fileRepoRequest
+		if !decodeOptionalJSONBody(w, r, &req) {
+			return
+		}
+		repo, err := repoFromQueryAndBody(queryRepo, req.Repo)
+		if err != nil {
+			handler.HandleServiceError(w, err)
+			return
+		}
 
-		if err := svc.MkdirScoped(r.Context(), wsID, scope, target, reqPath); err != nil {
+		if err := svc.MkdirScoped(r.Context(), wsID, scope, target, repo, reqPath); err != nil {
 			handler.HandleServiceError(w, err)
 			return
 		}
@@ -387,7 +467,7 @@ func HandleScopedFileMkdir(svc service.FileService) http.HandlerFunc {
 func HandleScopedFileMove(svc service.FileService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		wsID := middleware.WorkspaceFromContext(r.Context())
-		scope, target := scopeFromQuery(r)
+		scope, target, queryRepo := scopeFromQuery(r)
 
 		var req service.FileMoveRequest
 		if r.Body == nil {
@@ -404,7 +484,12 @@ func HandleScopedFileMove(svc service.FileService) http.HandlerFunc {
 			return
 		}
 
-		if err := svc.MovePathScoped(r.Context(), wsID, scope, target, req.From, req.To, req.Overwrite); err != nil {
+		repo, err := repoFromQueryAndBody(queryRepo, req.Repo)
+		if err != nil {
+			handler.HandleServiceError(w, err)
+			return
+		}
+		if err := svc.MovePathScoped(r.Context(), wsID, scope, target, repo, req.From, req.To, req.Overwrite); err != nil {
 			handler.HandleServiceError(w, err)
 			return
 		}

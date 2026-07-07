@@ -32,6 +32,10 @@ func (m *mockFileOps) ResolveAgentWorktree(workspaceID, name string) (*ops.Agent
 	return nil, errors.New("not found")
 }
 
+func (m *mockFileOps) ResolveAgentWorktreeForRepo(workspaceID, name, repo string) (*ops.AgentWorktree, error) {
+	return m.ResolveAgentWorktree(workspaceID, name)
+}
+
 func (m *mockFileOps) ResolveAgentWorktreeOrPrimary(workspaceID, name string) (*ops.AgentWorktree, error) {
 	if m.resolveOrPrimaryFunc != nil {
 		return m.resolveOrPrimaryFunc(name)
@@ -80,6 +84,10 @@ func (m *mockFileOps) GitBlamePorcelain(worktreePath, path string) (string, erro
 
 func (m *mockFileOps) ResolveLoomDataDir() (string, error) {
 	return os.TempDir(), nil
+}
+
+func (m *mockFileOps) GetCurrentBranch(worktreePath string) (string, error) {
+	return "main", nil
 }
 
 // setupTestWorktree creates a temporary directory with test files.
