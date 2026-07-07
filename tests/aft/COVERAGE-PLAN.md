@@ -1,0 +1,78 @@
+# aft coverage plan for docs/qa/feature-user-stories.tsv
+
+Source: `docs/qa/feature-user-stories.tsv` @ `fe8816d4` — 127 stories, 10 feature groups,
+91 P0. Test status today: **all rows "not run"** (coverage exists as unit tests and the
+dormant `test/fleetdb/ui/01–19` Playwright specs, but nothing exercises the live product
+continuously). aft's role: run the **browser-observable** subset against the real e2e
+stack on every PR, with agent diagnosis on failure. CLI/runtime/infra stories stay with
+their existing Go/CLI coverage — aft should not duplicate them.
+
+Partition of the 127: ~34 browser-observable (aft target), ~93 CLI/runtime/release-gate
+(out of aft scope, listed at the bottom).
+
+Convention: every aft test declares the stories it covers in a `# covers: LCLI-...`
+comment at the top of its suite entry, so the TSV's "Automated coverage" column can
+reference aft suites.
+
+---
+
+## Tier 1 — implement now (no new aft features, no new runtime deps)
+
+Extends the 5 existing suites and adds 7 new ones. All data seeded via the workspace API
+or the New Issue modal; no agents, GitHub, or LLMs involved.
+
+| Suite (new*) | Covers | Tests |
+|---|---|---|
+| smoke (extend) | OPS-002 | assert `/health` + `/api/config` payloads via `run:` steps |
+| views (extend) | DV-002 | apply `?search=` filter, switch Kanban↔List↔table deep link, assert filter/route state survives the switch |
+| filters (extend) | DV-004 | deep-link with `?search=`+`?priority=` params applied on load; label/type params seeded via API issues |
+| sse-resilience* | DV-006, IW-004, RA-007, OPS-012 | `offline: on` → StaleDataBanner (`role=alert`) appears; create issue via API **while offline**; `offline: off` → banner clears **and the missed issue appears** (cursor catch-up) |
+| issue-detail* | WP-002, WP-003, WP-006 | open card → detail panel; edit description (markdown renders), change priority/labels, persist across reload; status change open→in_progress via detail triggers AssigneePrompt; close/reopen |
+| create-validation* (extend issue-create-ui) | WP-001 | submit disabled with empty title; full-field create (type/epic/status/description); duplicate title behavior |
+| dependencies-graph* | WP-004, DV-005 | seed A-blocks-B via API → B renders in Blocked column; open `/ws/E2E-WS/graph` → nodes+edges present (`.react-flow__node` count); remove dep → B returns to Open |
+| comments* | IW-013, RA-006 | POST comment via API → detail timeline shows author/time/order; add second → ordering holds; lifecycle events visible |
+| markdown-safety* | SEC-013 | create issue whose description contains `<script>`/`<img onerror>` payloads → open detail → `wait.fn` asserts no injected global fired and content is sanitized but safe formatting kept |
+| monitor* | OPS-006, DV-007 (partial) | `/ws/E2E-WS/monitor` loads workspace status/queue sections without error state; empty-queue rendering |
+| workspaces* | PS-002 | the stack seeds two workspaces (E2E-WS + e2e-ws-2): switch via workspace selector → route + board scope change; deep link to second workspace |
+
+Estimated: ~20 new tests, ~40s added runtime. No aft vocabulary gaps — everything maps to
+existing steps (`run:`, `offline:`, `wait.fn`, `expect.count/attr/visible/notText`).
+
+Deliberate choice: WP-003's ready→in_progress **drag** is replaced by the detail-panel
+status change (dnd-kit PointerSensor with 5px activation is a poor fit for deterministic
+CLI drags). A drag experiment can come later as a non-gating test.
+
+## Tier 2 — needs seeding scaffolding (still deterministic, no LLM)
+
+| Suite | Covers | Approach |
+|---|---|---|
+| files* | IW-007 | seed real files into the e2e workspace repo via `run:` git commands → Files view lists tree, opens content; traversal blocked paths return errors |
+| diff* | IW-010, RA-009 | seed a branch with commits in the workspace repo → git/diff surfaces show ahead/behind, changed files, patch view |
+| review-queue* | RA-001, DV-008 | PR queue page loads with review-stage issues (seed issues with status=review); GitHub enrichment absent → degrades to warning, not error |
+| agent-ux* | AD-015, IW-014, DV-007 | issue-detail Start Work with no daemon running → surfaced error (not silent); task-card agent/run indicator empty states |
+| session-history* | IW-011 | seed session records via API if a write path exists; otherwise assert empty-state rendering only |
+| onboarding | PS-003 | **blocked by logged defect** ("web-onboarding spec status endpoints are not registered") — write the test, expect failure, use it as the strict-mode diagnosis showcase; promote when fixed |
+
+Also blocked-by-defect: RA-010 (PR detail route not implemented — TSV logs it open).
+
+## Tier 3 — out of aft scope (keep with existing harnesses)
+
+- **Agent runtime execution** (AD-001..014, IW-005/006/008/009/012/015/016, RA-002..005,
+  RA-008/011..014, WP-005 runtime side): requires live agents/tmux/GitHub; covered by Go
+  tests, `e2e/` CLI harness with LLM stubs, and `.agent-skills/loom-pr-test`.
+- **Workflows engine** (AW-001..017): API/SDK-level; Go + SDK tests.
+- **Release gates** (RC-001..012): `make gate`, smokes, sandbox acceptance — pipelines,
+  not browser tests. Note RC-006 "FleetDB browser release smoke" overlaps aft: once
+  Tier 1 is green in CI, aft arguably *is* that smoke.
+- **Security runtime** (SEC-001..012/014/015), **Platform CLI setup** (PS-001/004..011),
+  **Ops CLI/daemon** (OPS-001/003/004/005/007..011/013), **DV-001, IW-001/002 CLI parts**:
+  CLI and backend contracts with existing Go coverage.
+
+## Execution order
+
+1. Tier 1 suites, P0 stories first (sse-resilience → issue-detail → dependencies-graph →
+   markdown-safety → create-validation → monitor → workspaces → view/filter extensions).
+2. Wire `# covers:` IDs and update the TSV's "Automated coverage" column for covered rows
+   (status stays conservative until CI runs them on every PR).
+3. Tier 2 scaffolding (git seeding helper in `tests/aft/scripts/`).
+4. Revisit blocked stories (PS-003, RA-010) when their defects close.
