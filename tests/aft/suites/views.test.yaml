@@ -1,0 +1,37 @@
+# View switching via the board toolbar's ViewSubSwitcher (role=tab buttons
+# "Kanban" and "List"; List routes to /ws/:id/list, the data table stays at
+# /ws/:id/table). The suite seeds one issue so the views have data.
+suite: views
+baseUrl: "${AFT_BASE_URL:-http://127.0.0.1:3100}"
+setup: >-
+  curl -sf -X POST "$AFT_BASE_URL/api/workspaces/${AFT_WS:-E2E-WS}/issues" -H "Content-Type: application/json"
+  -d "{\"title\":\"views seed $RUN_ID\",\"issue_type\":\"task\",\"priority\":2}" >/dev/null
+  && echo "seeded 1 issue"
+teardown: '"$AFT_TESTS_DIR/scripts/close-open-issues.sh"'
+
+tests:
+  - name: view tabs switch views and sync the URL
+    intent: Switching between the Kanban and List views via the toolbar tabs updates the route and renders each view
+    steps:
+      - open: /ws/E2E-WS/kanban
+      - wait:
+          fn: >-
+            !!document.querySelector('[data-testid=board-toolbar]')
+      - expect: { visible: { selector: "[role=tablist][aria-label='View mode']" } }
+      - wait: { text: views seed }
+      - click: { role: tab, name: List, exact: true }
+      - wait: { url: "**/ws/*/list**" }
+      - expect: { text: views seed }
+      - click: { role: tab, name: Kanban, exact: true }
+      - wait: { url: "**/ws/*/kanban**" }
+      - expect: { visible: { testid: board-toolbar } }
+
+  - name: a deep link straight to the table view works
+    intent: Opening /ws/E2E-WS/table directly renders the table without visiting the kanban first
+    steps:
+      - open: /ws/E2E-WS/table
+      - wait:
+          fn: >-
+            !!document.querySelector('[data-testid=issue-table]')
+      - expect: { visible: { testid: issue-table } }
+      - expect: { text: views seed }

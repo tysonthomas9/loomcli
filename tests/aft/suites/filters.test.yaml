@@ -1,0 +1,34 @@
+# Search filters the board, syncs to ?search= on the workspace route, and
+# survives a reload (URL is the source of truth for filter state). The v5
+# board toolbar has no group-by control, so this suite covers search only.
+suite: filters
+baseUrl: "${AFT_BASE_URL:-http://127.0.0.1:3100}"
+teardown: '"$AFT_TESTS_DIR/scripts/close-open-issues.sh"'
+
+tests:
+  - name: search filters the board and survives a reload
+    intent: Typing in the board search narrows the kanban to matching issues, is reflected in the URL, and persists across a reload
+    steps:
+      - open: /ws/E2E-WS/kanban
+      - wait:
+          fn: >-
+            !!document.querySelector('[data-testid=board-toolbar]')
+      - run: >-
+          curl -sf -X POST "$AFT_BASE_URL/api/workspaces/$AFT_WS/issues" -H "Content-Type: application/json"
+          -d "{\"title\":\"alpha $RUN_ID\",\"issue_type\":\"task\",\"priority\":1}" >/dev/null
+      - run: >-
+          curl -sf -X POST "$AFT_BASE_URL/api/workspaces/$AFT_WS/issues" -H "Content-Type: application/json"
+          -d "{\"title\":\"beta $RUN_ID\",\"issue_type\":\"task\",\"priority\":3}" >/dev/null
+      - wait:
+          fn: >-
+            document.querySelectorAll('section[data-status=ready] article').length === 2
+      - fill: { testid: search-input-field, value: alpha }
+      - wait: { url: "**search=alpha**" }
+      - expect: { count: { selector: "section[data-status=ready] article", equals: 1 } }
+      - reload: true
+      - wait:
+          fn: >-
+            !!document.querySelector('[data-testid=board-toolbar]')
+      - expect: { url: "**search=alpha**" }
+      - expect: { count: { selector: "section[data-status=ready] article", equals: 1 } }
+      - expect: { value: { testid: search-input-field, equals: alpha } }

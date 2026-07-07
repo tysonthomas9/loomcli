@@ -1,0 +1,34 @@
+# Smoke suite against the real v5 stack (loom serve + fleet-db + vite preview,
+# started by run-aft.sh). Auth is open; the board lives at /ws/E2E-WS/kanban and
+# renders epic-grouped swim lanes (issues without an epic land in "Ungrouped").
+# v5 renders no connection indicator, so SSE is asserted by observing the board.
+suite: smoke
+baseUrl: "${AFT_BASE_URL:-http://127.0.0.1:3100}"
+teardown: '"$AFT_TESTS_DIR/scripts/close-open-issues.sh"'
+
+tests:
+  - name: app boots to the workspace kanban
+    intent: The SPA redirects to the E2E workspace kanban and renders the board shell
+    steps:
+      - open: /
+      - wait: { url: "**/ws/*/kanban**" }
+      - expect: { title: Loom }
+      - wait:
+          fn: >-
+            !!document.querySelector('[data-testid=board-toolbar]')
+      - expect: { visible: { testid: new-issue-button } }
+
+  - name: api-created issue appears via SSE without reload
+    intent: An issue created through the workspace API while the board is open appears on the kanban via server push, with no reload
+    steps:
+      - open: /ws/E2E-WS/kanban
+      - wait:
+          fn: >-
+            !!document.querySelector('[data-testid=board-toolbar]')
+      - expect: { count: { selector: "section[data-status=ready] article", equals: 0 } }
+      - run: >-
+          curl -sf -X POST "$AFT_BASE_URL/api/workspaces/$AFT_WS/issues"
+          -H "Content-Type: application/json"
+          -d "{\"title\":\"sse smoke $RUN_ID\",\"issue_type\":\"task\",\"priority\":2}"
+      - wait: { text: sse smoke }
+      - expect: { count: { selector: "section[data-status=ready] article", equals: 1 } }
