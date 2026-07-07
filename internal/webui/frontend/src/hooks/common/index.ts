@@ -77,4 +77,8 @@ export {
   useFileBrowserStore,
   useFileBrowserStoreInstance,
 } from "@/stores";
-export type { FileBrowserGroup, FileBrowserStore } from "@/stores";
+export type {
+  FileBrowserGroup,
+  FileBrowserStore,
+  FileBrowserTab,
+} from "@/stores";

@@ -5,17 +5,16 @@ import {
   useRef,
   useState,
   type CSSProperties,
-  type FormEvent,
   type MouseEvent,
 } from "react";
 import { useStore } from "zustand";
 
-import { ErrorDisplay, LoadingSkeleton } from "@/components";
 import { DiffFileViewer } from "@/components/AgentDetailPanel";
 import { useFileEditorBuffer } from "@/components/FileEditorPanel";
 import { ResizeHandle } from "@/components/ResizeHandle";
 import type {
   FileBlameData,
+  FileCheckout,
   FileEntry,
   FileHistoryEntry,
   FileScopeRef,
@@ -27,6 +26,8 @@ import {
   gitStatusScoped,
   historyScopedFile,
   indexScopedFiles,
+  listScopedDir,
+  listFileCheckouts,
   mkdirScoped,
   moveScopedPath,
   readScopedFile,
@@ -39,11 +40,22 @@ import {
   useWorkspaceContext,
   useEventContext,
   FileBrowserStoreProvider,
-  fileBrowserTabsStorageKey,
   useFileBrowserStoreInstance,
   type FileBrowserGroup,
+  type FileBrowserTab,
 } from "@/hooks";
 import { wsGet, wsSet } from "@/utils/scopedStorage";
+import {
+  checkoutLabel,
+  checkoutRefKey,
+  checkoutTitle,
+  mapWorkspaceIndexPathToCheckout,
+  sameCheckoutRef,
+  tabIdentityKey,
+  type CheckoutRef,
+} from "@/utils/fileExplorerRefs";
+import { getCompactAvatarInitials } from "@/utils/compactAvatarInitials";
+import { getAvatarColor, shouldUseWhiteText } from "@/utils/colorUtils";
 
 import {
   FileTree,
@@ -54,7 +66,14 @@ import { FileSearchPanel } from "./FileSearchPanel";
 import { FileTabBar } from "./FileTabBar";
 import { QuickOpenPalette } from "./QuickOpenPalette";
 import { WorkspaceFilePane } from "./WorkspaceFilePane";
-import { gitDecorationForStatus, resolveTreeDropMove } from "./gitDecorations";
+import { resolveTreeDropMove } from "./gitDecorations";
+import {
+  buildFileTreeSections,
+  existingCheckoutRefs,
+  type FileBrowserMode,
+  type FileTreeRoot,
+} from "./treeRoots";
+import type { QuickOpenItem } from "./quickOpen";
 import {
   buildUnifiedPatchFromContents,
   computeGitGutterLineMarks,
@@ -145,17 +164,40 @@ function duplicateName(name: string, siblings: FileEntry[]): string {
 }
 
 interface FileBrowserProps {
-  scopeRef: FileScopeRef;
+  mode?: FileBrowserMode | undefined;
+  agentName?: string | undefined;
 }
 
 interface ContextMenuState {
+  ref: CheckoutRef;
   node: FileTreeNodeInfo;
   x: number;
   y: number;
 }
 
 interface DeleteConfirmState {
+  ref: CheckoutRef;
   node: FileTreeNodeInfo;
+}
+
+interface MoveDialogState {
+  ref: CheckoutRef;
+  node: FileTreeNodeInfo;
+}
+
+interface ScopedInlineEdit {
+  ref: CheckoutRef;
+  edit: FileTreeInlineEdit;
+}
+
+interface TreeRevealRequest {
+  path: string;
+  token: number;
+}
+
+interface TreeRefreshRequest {
+  paths: string[];
+  token: number;
 }
 
 interface LineTarget {
@@ -164,6 +206,7 @@ interface LineTarget {
 }
 
 interface DiffViewState {
+  ref: CheckoutRef;
   path: string;
   from?: string | undefined;
   to?: string | undefined;
@@ -175,107 +218,6 @@ interface DiffViewState {
 type OpenDiffRequest = Omit<DiffViewState, "title"> & {
   title?: string | undefined;
 };
-
-function OpenEditors({
-  groups,
-  dirty,
-  gitStatus,
-  collapsed,
-  onToggle,
-  onActivate,
-}: {
-  groups: FileBrowserGroup[];
-  dirty: Record<string, boolean>;
-  gitStatus: Record<string, string>;
-  collapsed: boolean;
-  onToggle: () => void;
-  onActivate: (groupIndex: number, path: string) => void;
-}) {
-  const openCount = groups.reduce((sum, group) => sum + group.tabs.length, 0);
-  return (
-    <section className={styles.openEditors}>
-      <button
-        type="button"
-        className={styles.openEditorsHeader}
-        aria-expanded={!collapsed}
-        onClick={onToggle}
-      >
-        <span
-          className={`${styles.chevron} ${!collapsed ? styles.chevronExpanded : ""}`}
-          aria-hidden="true"
-        >
-          <svg viewBox="0 0 16 16">
-            <path
-              d="M6 4l4 4-4 4"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="1.5"
-            />
-          </svg>
-        </span>
-        <span>Open Editors</span>
-        <span className={styles.openEditorsCount}>{openCount}</span>
-      </button>
-      {!collapsed && (
-        <div className={styles.openEditorsList}>
-          {openCount === 0 ? (
-            <div className={styles.openEditorsEmpty}>No open files</div>
-          ) : (
-            groups.map((group, groupIndex) => (
-              <div key={groupIndex} className={styles.openEditorsGroup}>
-                {groups.length > 1 && (
-                  <div className={styles.openEditorsGroupLabel}>
-                    Group {groupIndex + 1}
-                  </div>
-                )}
-                {group.tabs.map((tab) => (
-                  <OpenEditorItem
-                    key={`${groupIndex}:${tab.path}`}
-                    path={tab.path}
-                    active={group.active === tab.path}
-                    dirty={!!dirty[tab.path]}
-                    status={gitStatus[tab.path]}
-                    onClick={() => onActivate(groupIndex, tab.path)}
-                  />
-                ))}
-              </div>
-            ))
-          )}
-        </div>
-      )}
-    </section>
-  );
-}
-
-function OpenEditorItem({
-  path,
-  active,
-  dirty,
-  status,
-  onClick,
-}: {
-  path: string;
-  active: boolean;
-  dirty: boolean;
-  status?: string | undefined;
-  onClick: () => void;
-}) {
-  const decoration = gitDecorationForStatus(status);
-  return (
-    <button
-      type="button"
-      className={styles.openEditorItem}
-      data-active={active || undefined}
-      data-git-status-kind={decoration?.kind}
-      title={path}
-      onClick={onClick}
-    >
-      {dirty && <span className={styles.tabDirty} aria-hidden="true" />}
-      <span className={styles.openEditorName}>{basename(path)}</span>
-      <span className={styles.openEditorPath}>{dirname(path)}</span>
-    </button>
-  );
-}
 
 function formatTimelineTime(value: string): string {
   const date = new Date(value);
@@ -377,6 +319,7 @@ function TimelineSection({
                   if (!path) return;
                   if (entry.kind === "commit" && entry.sha) {
                     onOpenDiff({
+                      ref: scopeRef,
                       path,
                       from: `${entry.sha}^`,
                       to: entry.sha,
@@ -393,6 +336,7 @@ function TimelineSection({
                     );
                     if (current.binary || current.truncated) return;
                     onOpenDiff({
+                      ref: scopeRef,
                       path,
                       title: "Browser save",
                       patch: buildUnifiedPatchFromContents(
@@ -555,6 +499,7 @@ function ScmPanel({
                           title={`${item.xy} ${item.path}`}
                           onClick={() =>
                             onOpenDiff({
+                              ref: scopeRef,
                               path: item.path,
                               from: "HEAD",
                               title: item.relPath,
@@ -630,6 +575,7 @@ function ContextMenu({
   onNewFolder,
   onRename,
   onDelete,
+  onMove,
   onDuplicate,
   onCopyPath,
 }: {
@@ -638,6 +584,7 @@ function ContextMenu({
   onNewFolder: (node: FileTreeNodeInfo) => void;
   onRename: (node: FileTreeNodeInfo) => void;
   onDelete: (node: FileTreeNodeInfo) => void;
+  onMove: (node: FileTreeNodeInfo) => void;
   onDuplicate: (node: FileTreeNodeInfo) => void;
   onCopyPath: (node: FileTreeNodeInfo) => void;
 }) {
@@ -675,6 +622,9 @@ function ContextMenu({
       >
         Delete
       </button>
+      <button type="button" role="menuitem" onClick={() => onMove(state.node)}>
+        Move to...
+      </button>
       <button
         type="button"
         role="menuitem"
@@ -697,16 +647,408 @@ function ContextMenu({
   );
 }
 
+function ChangeBadge({ count }: { count: number }): JSX.Element | null {
+  if (count <= 0) return null;
+  return <span className={styles.checkoutBadge}>{count}</span>;
+}
+
+function AgentAvatar({ name }: { name: string }): JSX.Element {
+  const bg = getAvatarColor(name);
+  return (
+    <span
+      className={styles.agentAvatar}
+      style={{
+        background: bg,
+        color: shouldUseWhiteText(bg) ? "#fff" : "#1a1a1a",
+      }}
+      aria-hidden="true"
+    >
+      {getCompactAvatarInitials(name)}
+    </span>
+  );
+}
+
+function RootIcon({ icon }: { icon: "agent" | "repo" | "workspace" }) {
+  if (icon === "agent") return null;
+  return (
+    <span className={styles.rootIcon} aria-hidden="true">
+      {icon === "workspace" ? (
+        <svg viewBox="0 0 16 16">
+          <path
+            d="M2.5 4.5h11v8h-11zM4 3h8"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.3"
+            strokeLinejoin="round"
+          />
+        </svg>
+      ) : (
+        <svg viewBox="0 0 16 16">
+          <path
+            d="M2 3h4l2 2h6v8H2V3z"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.3"
+            strokeLinejoin="round"
+          />
+        </svg>
+      )}
+    </span>
+  );
+}
+
+function RootRow({
+  root,
+  expanded,
+  depth = 0,
+  onToggle,
+}: {
+  root: FileTreeRoot;
+  expanded: boolean;
+  depth?: number | undefined;
+  onToggle: () => void;
+}) {
+  const isAgent = root.kind === "agent";
+  const label = root.label;
+  const secondary = root.secondary;
+  const exists = root.exists;
+  const icon = isAgent ? "agent" : root.icon;
+  const disabledTitle = exists ? undefined : "not checked out on this machine";
+  return (
+    <button
+      type="button"
+      className={styles.rootRow}
+      data-dimmed={root.kind === "checkout" && root.dimmed ? true : undefined}
+      data-disabled={!exists || undefined}
+      style={{ paddingLeft: 8 + depth * 16 }}
+      disabled={!exists}
+      title={disabledTitle}
+      onClick={onToggle}
+    >
+      <span
+        className={`${styles.chevron} ${expanded ? styles.chevronExpanded : ""}`}
+        aria-hidden="true"
+      >
+        <svg viewBox="0 0 16 16">
+          <path
+            d="M6 4l4 4-4 4"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.5"
+          />
+        </svg>
+      </span>
+      {isAgent ? (
+        <AgentAvatar name={root.agentName} />
+      ) : (
+        <RootIcon icon={icon} />
+      )}
+      <span className={styles.rootLabel}>{label}</span>
+      {secondary && <span className={styles.rootSecondary}>· {secondary}</span>}
+      <ChangeBadge count={root.changeCount} />
+    </button>
+  );
+}
+
+function sameRefInlineEdit(
+  inlineEdit: ScopedInlineEdit | null,
+  ref: CheckoutRef,
+): FileTreeInlineEdit | null {
+  return inlineEdit && sameCheckoutRef(inlineEdit.ref, ref)
+    ? inlineEdit.edit
+    : null;
+}
+
+function CheckoutTreeBlock({
+  refInfo,
+  depthOffset,
+  selectedTab,
+  inlineEdit,
+  gitStatus,
+  revealRequest,
+  refreshRequest,
+  onOpenFile,
+  onContextMenu,
+  onRequestRename,
+  onRequestDelete,
+  onInlineEditChange,
+  onInlineEditCommit,
+  onInlineEditCancel,
+}: {
+  refInfo: CheckoutRef;
+  depthOffset: number;
+  selectedTab: FileBrowserTab | null;
+  inlineEdit: ScopedInlineEdit | null;
+  gitStatus: Record<string, string>;
+  revealRequest?: TreeRevealRequest | undefined;
+  refreshRequest?: TreeRefreshRequest | undefined;
+  onOpenFile: (ref: CheckoutRef, path: string) => void;
+  onContextMenu: (
+    ref: CheckoutRef,
+    node: FileTreeNodeInfo,
+    event: MouseEvent<HTMLDivElement>,
+  ) => void;
+  onRequestRename: (ref: CheckoutRef, node: FileTreeNodeInfo) => void;
+  onRequestDelete: (ref: CheckoutRef, node: FileTreeNodeInfo) => void;
+  onInlineEditChange: (value: string) => void;
+  onInlineEditCommit: () => void;
+  onInlineEditCancel: () => void;
+}) {
+  const {
+    expanded,
+    treeData,
+    isLoading,
+    error,
+    debouncedFilterText,
+    toggle,
+    loadDir,
+    revealPath,
+  } = useScopedFileTree(refInfo);
+  const [scrollTarget, setScrollTarget] = useState<string | null>(null);
+  const selectedPath =
+    selectedTab && sameCheckoutRef(selectedTab.ref, refInfo)
+      ? selectedTab.path
+      : null;
+
+  useEffect(() => {
+    if (!revealRequest) return;
+    void revealPath(revealRequest.path).then(() =>
+      setScrollTarget(revealRequest.path),
+    );
+  }, [revealPath, revealRequest]);
+
+  useEffect(() => {
+    if (!refreshRequest) return;
+    const parents = new Set(refreshRequest.paths.map(dirname));
+    void Promise.all([...parents].map((parent) => loadDir(parent)));
+  }, [loadDir, refreshRequest]);
+
+  if (isLoading) {
+    return (
+      <div
+        className={styles.checkoutTreeState}
+        style={{ paddingLeft: 8 + depthOffset * 16 }}
+      >
+        Loading...
+      </div>
+    );
+  }
+  if (error) {
+    return (
+      <div
+        className={styles.checkoutTreeError}
+        style={{ paddingLeft: 8 + depthOffset * 16 }}
+      >
+        {error}
+      </div>
+    );
+  }
+
+  return (
+    <FileTree
+      treeData={treeData}
+      expanded={expanded}
+      selectedPath={selectedPath}
+      filterText={debouncedFilterText}
+      onToggle={toggle}
+      onSelectFile={(path) => {
+        if (path) onOpenFile(refInfo, path);
+      }}
+      onContextMenuNode={(node, event) => onContextMenu(refInfo, node, event)}
+      onRequestRename={(node) => onRequestRename(refInfo, node)}
+      onRequestDelete={(node) => onRequestDelete(refInfo, node)}
+      inlineEdit={sameRefInlineEdit(inlineEdit, refInfo)}
+      onInlineEditChange={onInlineEditChange}
+      onInlineEditCommit={onInlineEditCommit}
+      onInlineEditCancel={onInlineEditCancel}
+      gitStatus={gitStatus}
+      scrollToPath={scrollTarget}
+      depthOffset={depthOffset}
+      idPrefix={`ft-${checkoutRefKey(refInfo).replace(/[^a-zA-Z0-9_-]/g, "-")}`}
+    />
+  );
+}
+
+function folderEntries(
+  treeData: Map<string, FileEntry[]>,
+  expanded: Set<string>,
+): FileTreeNodeInfo[] {
+  const out: FileTreeNodeInfo[] = [
+    { path: "", name: "Checkout root", isDir: true, depth: 0 },
+  ];
+  const walk = (parent: string, depth: number) => {
+    const entries = sortedEntries(treeData.get(parent) ?? []).filter(
+      (entry) => entry.is_dir,
+    );
+    for (const entry of entries) {
+      const path = joinPath(parent, entry.name);
+      out.push({ path, name: entry.name, isDir: true, depth });
+      if (expanded.has(path)) walk(path, depth + 1);
+    }
+  };
+  walk("", 1);
+  return out;
+}
+
+function resolveMoveToTarget(
+  fromPath: string,
+  targetFolderPath: string,
+): { from: string; to: string } | null {
+  if (targetFolderPath === "") {
+    const to = basename(fromPath);
+    return to && to !== fromPath ? { from: fromPath, to } : null;
+  }
+  return resolveTreeDropMove(fromPath, targetFolderPath);
+}
+
+function invalidMoveTarget(
+  node: FileTreeNodeInfo,
+  targetFolderPath: string,
+): boolean {
+  if (targetFolderPath === dirname(node.path)) return true;
+  if (!node.isDir) return false;
+  return (
+    targetFolderPath === node.path ||
+    targetFolderPath.startsWith(`${node.path}/`)
+  );
+}
+
+function MoveToDialog({
+  state,
+  onCancel,
+  onConfirm,
+}: {
+  state: MoveDialogState;
+  onCancel: () => void;
+  onConfirm: (targetFolderPath: string) => void;
+}) {
+  const { expanded, treeData, isLoading, error, toggle } = useScopedFileTree(
+    state.ref,
+  );
+  const [selected, setSelected] = useState("");
+  const folders = useMemo(
+    () => folderEntries(treeData, expanded),
+    [treeData, expanded],
+  );
+  const selectedInvalid = invalidMoveTarget(state.node, selected);
+  const selectedMove = selectedInvalid
+    ? null
+    : resolveMoveToTarget(state.node.path, selected);
+
+  return (
+    <div className={styles.dialogOverlay}>
+      <div
+        className={styles.moveDialog}
+        role="dialog"
+        aria-modal="true"
+        aria-label="Move to"
+      >
+        <div className={styles.moveDialogHeader}>
+          <div>
+            <div className={styles.moveDialogTitle}>Move to...</div>
+            <div className={styles.moveDialogMeta}>
+              {checkoutLabel(state.ref)} · {state.node.path}
+            </div>
+          </div>
+          <button
+            type="button"
+            className={styles.iconButton}
+            aria-label="Close move dialog"
+            onClick={onCancel}
+          >
+            <svg viewBox="0 0 16 16" aria-hidden="true">
+              <path
+                d="M4 4l8 8M12 4l-8 8"
+                stroke="currentColor"
+                strokeWidth="1.5"
+                strokeLinecap="round"
+              />
+            </svg>
+          </button>
+        </div>
+        <div className={styles.moveFolderList} role="tree">
+          {isLoading ? (
+            <div className={styles.emptyState}>Loading folders...</div>
+          ) : error ? (
+            <div className={styles.error}>{error}</div>
+          ) : (
+            folders.map((folder) => {
+              const disabled = invalidMoveTarget(state.node, folder.path);
+              const expandedFolder = expanded.has(folder.path);
+              const hasChildren = (treeData.get(folder.path) ?? []).some(
+                (entry) => entry.is_dir,
+              );
+              return (
+                <div
+                  key={folder.path || "__root__"}
+                  className={styles.moveFolderRow}
+                  style={{ paddingLeft: 8 + folder.depth * 16 }}
+                  role="treeitem"
+                  aria-selected={selected === folder.path}
+                  aria-disabled={disabled || undefined}
+                >
+                  <button
+                    type="button"
+                    className={styles.moveFolderToggle}
+                    aria-label={
+                      expandedFolder ? "Collapse folder" : "Expand folder"
+                    }
+                    disabled={!hasChildren}
+                    onClick={() => void toggle(folder.path)}
+                  >
+                    {hasChildren ? (expandedFolder ? "v" : ">") : ""}
+                  </button>
+                  <button
+                    type="button"
+                    className={styles.moveFolderSelect}
+                    data-selected={selected === folder.path || undefined}
+                    disabled={disabled}
+                    title={
+                      disabled
+                        ? "Cannot move into itself or a descendant"
+                        : undefined
+                    }
+                    onClick={() => setSelected(folder.path)}
+                  >
+                    {folder.name}
+                  </button>
+                </div>
+              );
+            })
+          )}
+        </div>
+        <div className={styles.dialogActions}>
+          <button
+            type="button"
+            className={styles.secondaryButton}
+            onClick={onCancel}
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            className={styles.saveButton}
+            disabled={!selectedMove}
+            onClick={() => onConfirm(selected)}
+          >
+            Move
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function DiffEditorPane({
-  scopeRef,
   diffView,
   onClose,
   onRestore,
 }: {
-  scopeRef: FileScopeRef;
   diffView: DiffViewState;
   onClose: () => void;
-  onRestore: ((path: string, content: string) => Promise<void>) | undefined;
+  onRestore:
+    | ((ref: CheckoutRef, path: string, content: string) => Promise<void>)
+    | undefined;
 }) {
   const { workspaceId } = useWorkspaceContext();
   const [patch, setPatch] = useState<string | null>(diffView.patch ?? null);
@@ -726,7 +1068,7 @@ function DiffEditorPane({
     setIsLoading(true);
     diffScopedFile(
       workspaceId,
-      scopeRef,
+      diffView.ref,
       diffView.path,
       diffView.from,
       diffView.to,
@@ -744,7 +1086,7 @@ function DiffEditorPane({
     return () => {
       canceled = true;
     };
-  }, [diffView, scopeRef, workspaceId]);
+  }, [diffView, workspaceId]);
 
   return (
     <div className={styles.viewerColumn}>
@@ -759,7 +1101,11 @@ function DiffEditorPane({
               type="button"
               className={styles.saveButton}
               onClick={() =>
-                void onRestore(diffView.path, diffView.restoreContent ?? "")
+                void onRestore(
+                  diffView.ref,
+                  diffView.path,
+                  diffView.restoreContent ?? "",
+                )
               }
             >
               Restore
@@ -808,7 +1154,6 @@ function DiffEditorPane({
 function EditorGroup({
   groupIndex,
   group,
-  scopeRef,
   diffView,
   isActiveGroup,
   dirty,
@@ -825,27 +1170,37 @@ function EditorGroup({
 }: {
   groupIndex: number;
   group: FileBrowserGroup;
-  scopeRef: FileScopeRef;
   diffView: DiffViewState | null;
   isActiveGroup: boolean;
   dirty: Record<string, boolean>;
-  onSelectTab: (groupIndex: number, path: string) => void;
-  onCloseTab: (groupIndex: number, path: string) => void;
+  onSelectTab: (groupIndex: number, tabKey: string) => void;
+  onCloseTab: (groupIndex: number, tabKey: string) => void;
   onSplitRight: (groupIndex: number) => void;
-  onNavigate: (dirPath: string) => void;
-  onSaved: (path: string) => void;
+  onNavigate: (ref: CheckoutRef, dirPath: string) => void;
+  onSaved: (tab: FileBrowserTab) => void;
   onOpenDiff: (groupIndex: number, request: OpenDiffRequest) => void;
   onCloseDiff: (groupIndex: number) => void;
-  onRestoreSnapshot: (path: string, content: string) => Promise<void>;
+  onRestoreSnapshot: (
+    ref: CheckoutRef,
+    path: string,
+    content: string,
+  ) => Promise<void>;
   lineTarget?: LineTarget | undefined;
-  onLineTargetApplied: (path: string, token: number) => void;
+  onLineTargetApplied: (tabKey: string, token: number) => void;
 }) {
   const { workspaceId } = useWorkspaceContext();
   const store = useFileBrowserStoreInstance();
+  const activeTab =
+    group.tabs.find((tab) => tabIdentityKey(tab) === group.active) ?? null;
+  const scopeRef = useMemo<CheckoutRef>(
+    () => activeTab?.ref ?? { scope: "workspace" },
+    [activeTab],
+  );
   const { fileData, isLoading, error, fetchFile, clearFile } =
     useScopedFileContent(scopeRef);
-  const activePath = group.active;
-  const pathDirty = activePath ? !!dirty[activePath] : false;
+  const activePath = activeTab?.path ?? null;
+  const activeKey = activeTab ? tabIdentityKey(activeTab) : null;
+  const pathDirty = activeKey ? !!dirty[activeKey] : false;
   const [searchOpen, setSearchOpen] = useState(false);
   const [basePath, setBasePath] = useState<string | null>(null);
   const [baseContent, setBaseContent] = useState<string | null>(null);
@@ -872,9 +1227,10 @@ function EditorGroup({
     [workspaceId, scopeRef],
   );
   const setDirty = useCallback(
-    (path: string, isDirty: boolean) =>
-      store.getState().setDirty(path, isDirty),
-    [store],
+    (_path: string, isDirty: boolean) => {
+      if (activeKey) store.getState().setDirty(activeKey, isDirty);
+    },
+    [activeKey, store],
   );
 
   const canSave =
@@ -907,8 +1263,8 @@ function EditorGroup({
     writeFile,
     onDirtyChange: setDirty,
     onSaved: () => {
-      if (activePath) {
-        onSaved(activePath);
+      if (activeTab && activePath) {
+        onSaved(activeTab);
         void loadBaseContent(activePath);
       }
     },
@@ -984,15 +1340,14 @@ function EditorGroup({
         data-active={isActiveGroup || undefined}
       >
         <FileTabBar
-          tabs={group.tabs.map((tab) => tab.path)}
-          activePath={activePath}
+          tabs={group.tabs}
+          activeKey={group.active}
           dirtyPaths={dirty}
           groupLabel={`group ${groupIndex + 1}`}
-          onSelect={(path) => onSelectTab(groupIndex, path)}
-          onClose={(path) => onCloseTab(groupIndex, path)}
+          onSelect={(key) => onSelectTab(groupIndex, key)}
+          onClose={(key) => onCloseTab(groupIndex, key)}
         />
         <DiffEditorPane
-          scopeRef={scopeRef}
           diffView={diffView}
           onClose={() => onCloseDiff(groupIndex)}
           onRestore={onRestoreSnapshot}
@@ -1007,12 +1362,12 @@ function EditorGroup({
       data-active={isActiveGroup || undefined}
     >
       <FileTabBar
-        tabs={group.tabs.map((tab) => tab.path)}
-        activePath={activePath}
+        tabs={group.tabs}
+        activeKey={group.active}
         dirtyPaths={dirty}
         groupLabel={`group ${groupIndex + 1}`}
-        onSelect={(path) => onSelectTab(groupIndex, path)}
-        onClose={(path) => onCloseTab(groupIndex, path)}
+        onSelect={(key) => onSelectTab(groupIndex, key)}
+        onClose={(key) => onCloseTab(groupIndex, key)}
       />
       <WorkspaceFilePane
         path={activePath}
@@ -1028,9 +1383,11 @@ function EditorGroup({
         onSave={() => void editor.save()}
         onToggleSearch={() => setSearchOpen((open) => !open)}
         onSplitRight={() => onSplitRight(groupIndex)}
-        onNavigate={onNavigate}
+        onNavigate={(dirPath) => onNavigate(scopeRef, dirPath)}
         lineTarget={lineTarget}
-        onLineTargetApplied={onLineTargetApplied}
+        onLineTargetApplied={(_path, token) => {
+          if (activeKey) onLineTargetApplied(activeKey, token);
+        }}
         gitGutterMarks={gitGutterMarks}
         blameEnabled={blameEnabled}
         blameLines={blameData?.skipped ? [] : blameData?.lines}
@@ -1042,6 +1399,7 @@ function EditorGroup({
         onOpenBlameCommit={(sha) => {
           if (!activePath) return;
           onOpenDiff(groupIndex, {
+            ref: scopeRef,
             path: activePath,
             from: `${sha}^`,
             to: sha,
@@ -1053,21 +1411,8 @@ function EditorGroup({
   );
 }
 
-function FileBrowserInner({ scopeRef }: FileBrowserProps) {
-  const {
-    expanded,
-    treeData,
-    isLoading,
-    error,
-    filterText,
-    debouncedFilterText,
-    toggle,
-    loadDir,
-    revealPath,
-    setFilterText,
-  } = useScopedFileTree(scopeRef);
-
-  const { workspaceId } = useWorkspaceContext();
+function FileBrowserInner({ mode = "workspace", agentName }: FileBrowserProps) {
+  const { workspaceId, agents, repos } = useWorkspaceContext();
   const eventContext = useEventContext();
   const { showToast } = useToast();
   const store = useFileBrowserStoreInstance();
@@ -1078,12 +1423,9 @@ function FileBrowserInner({ scopeRef }: FileBrowserProps) {
 
   const [treeWidth, setTreeWidth] = useState<number>(getStoredTreeWidth);
   const [splitLeftWidth, setSplitLeftWidth] = useState(DEFAULT_GROUP_WIDTH);
-  const [jumpText, setJumpText] = useState<string>("");
-  const [scrollTarget, setScrollTarget] = useState<string | null>(null);
   const [lineTargets, setLineTargets] = useState<Record<string, LineTarget>>(
     {},
   );
-  const [openEditorsCollapsed, setOpenEditorsCollapsed] = useState(false);
   const [timelineCollapsed, setTimelineCollapsed] = useState(false);
   const [scmCollapsed, setScmCollapsed] = useState(false);
   const [historyRefreshKey, setHistoryRefreshKey] = useState(0);
@@ -1091,35 +1433,89 @@ function FileBrowserInner({ scopeRef }: FileBrowserProps) {
     Record<number, DiffViewState | null>
   >({});
   const [quickOpenOpen, setQuickOpenOpen] = useState(false);
-  const [quickOpenPaths, setQuickOpenPaths] = useState<string[]>([]);
+  const [quickOpenItems, setQuickOpenItems] = useState<QuickOpenItem[]>([]);
   const [quickOpenTruncated, setQuickOpenTruncated] = useState(false);
   const [quickOpenFetchedAt, setQuickOpenFetchedAt] = useState(0);
   const [quickOpenLoading, setQuickOpenLoading] = useState(false);
   const [quickOpenError, setQuickOpenError] = useState<string | null>(null);
-  const [gitStatus, setGitStatus] = useState<Record<string, string>>({});
+  const [gitStatusByRef, setGitStatusByRef] = useState<
+    Record<string, Record<string, string>>
+  >({});
+  const [checkouts, setCheckouts] = useState<FileCheckout[]>([]);
+  const [checkoutError, setCheckoutError] = useState<string | null>(null);
   const [searchPanelOpen, setSearchPanelOpen] = useState(false);
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
-  const [inlineEdit, setInlineEdit] = useState<FileTreeInlineEdit | null>(null);
+  const [inlineEdit, setInlineEdit] = useState<ScopedInlineEdit | null>(null);
   const [deleteConfirm, setDeleteConfirm] = useState<DeleteConfirmState | null>(
     null,
   );
+  const [moveDialog, setMoveDialog] = useState<MoveDialogState | null>(null);
+  const [expandedRoots, setExpandedRoots] = useState<Set<string>>(new Set());
+  const [treeRevealRequests, setTreeRevealRequests] = useState<
+    Record<string, TreeRevealRequest>
+  >({});
+  const [treeRefreshRequests, setTreeRefreshRequests] = useState<
+    Record<string, TreeRefreshRequest>
+  >({});
   const inlineCommitKeyRef = useRef<string | null>(null);
   const reconnectAttemptsRef = useRef(eventContext.reconnectAttempts);
 
-  const activePath = groups[activeGroup]?.active ?? groups[0]?.active ?? null;
+  const sections = useMemo(
+    () =>
+      buildFileTreeSections({
+        mode,
+        agentName,
+        agents,
+        repos,
+        checkouts,
+      }),
+    [mode, agentName, agents, repos, checkouts],
+  );
+  const validRefs = useMemo(() => existingCheckoutRefs(sections), [sections]);
+  const knownRefs = validRefs;
+  const activeTab =
+    groups[activeGroup]?.tabs.find(
+      (tab) => tabIdentityKey(tab) === groups[activeGroup]?.active,
+    ) ??
+    groups[0]?.tabs.find((tab) => tabIdentityKey(tab) === groups[0]?.active) ??
+    null;
+  const activePath = activeTab?.path ?? null;
+  const activeScopeRef = activeTab?.ref ?? { scope: "workspace" };
+  const workspaceRef: CheckoutRef = { scope: "workspace" };
+  const workspaceGitStatus = gitStatusByRef[checkoutRefKey(workspaceRef)] ?? {};
+
+  useEffect(() => {
+    store.getState().pruneUnavailableRefs(validRefs);
+  }, [store, validRefs]);
 
   const markIndexStale = useCallback(() => {
     setQuickOpenFetchedAt(0);
   }, []);
 
-  const refreshGitStatus = useCallback(async () => {
+  const refreshCheckouts = useCallback(async () => {
     try {
-      const status = await gitStatusScoped(workspaceId, scopeRef);
-      setGitStatus(status);
-    } catch {
-      setGitStatus({});
+      const data = await listFileCheckouts(workspaceId);
+      setCheckouts(data.checkouts);
+      setCheckoutError(null);
+    } catch (err) {
+      setCheckoutError(err instanceof Error ? err.message : String(err));
     }
-  }, [scopeRef, workspaceId]);
+  }, [workspaceId]);
+
+  const refreshGitStatus = useCallback(async () => {
+    const next: Record<string, Record<string, string>> = {};
+    await Promise.all(
+      validRefs.map(async (ref) => {
+        const key = checkoutRefKey(ref);
+        try {
+          next[key] = await gitStatusScoped(workspaceId, ref);
+        } catch {
+          next[key] = {};
+        }
+      }),
+    );
+    setGitStatusByRef(next);
+  }, [validRefs, workspaceId]);
 
   const fetchQuickOpenIndex = useCallback(
     async (force = false) => {
@@ -1134,8 +1530,19 @@ function FileBrowserInner({ scopeRef }: FileBrowserProps) {
       setQuickOpenLoading(true);
       setQuickOpenError(null);
       try {
-        const index = await indexScopedFiles(workspaceId, scopeRef);
-        setQuickOpenPaths(index.paths);
+        const index = await indexScopedFiles(workspaceId, {
+          scope: "workspace",
+        });
+        const items = index.paths.map((rawPath) => {
+          const mapped = mapWorkspaceIndexPathToCheckout(rawPath, knownRefs);
+          return {
+            id: tabIdentityKey({ ref: mapped.ref, path: mapped.path }),
+            ref: mapped.ref,
+            path: mapped.path,
+            checkoutLabel: checkoutLabel(mapped.ref),
+          };
+        });
+        setQuickOpenItems(items);
         setQuickOpenTruncated(index.truncated);
         setQuickOpenFetchedAt(Date.now());
       } catch (err) {
@@ -1144,7 +1551,7 @@ function FileBrowserInner({ scopeRef }: FileBrowserProps) {
         setQuickOpenLoading(false);
       }
     },
-    [quickOpenFetchedAt, scopeRef, workspaceId],
+    [knownRefs, quickOpenFetchedAt, workspaceId],
   );
 
   useEffect(() => {
@@ -1159,30 +1566,27 @@ function FileBrowserInner({ scopeRef }: FileBrowserProps) {
   }, [contextMenu]);
 
   useEffect(() => {
-    if (activePath) {
-      void revealPath(activePath).then(() => setScrollTarget(activePath));
-    }
-  }, [activePath, revealPath]);
-
-  useEffect(() => {
     if (quickOpenOpen) {
       void fetchQuickOpenIndex();
     }
   }, [fetchQuickOpenIndex, quickOpenOpen]);
 
   useEffect(() => {
-    if (!isLoading && !error) {
-      void refreshGitStatus();
-    }
-  }, [error, isLoading, refreshGitStatus]);
+    void refreshCheckouts();
+  }, [refreshCheckouts]);
+
+  useEffect(() => {
+    void refreshGitStatus();
+  }, [refreshGitStatus]);
 
   useEffect(() => {
     const handleFocus = () => {
+      void refreshCheckouts();
       void refreshGitStatus();
     };
     window.addEventListener("focus", handleFocus);
     return () => window.removeEventListener("focus", handleFocus);
-  }, [refreshGitStatus]);
+  }, [refreshCheckouts, refreshGitStatus]);
 
   useEffect(() => {
     const previous = reconnectAttemptsRef.current;
@@ -1191,12 +1595,18 @@ function FileBrowserInner({ scopeRef }: FileBrowserProps) {
       eventContext.reconnectAttempts > 0 ||
       (previous > 0 && eventContext.state === "connected")
     ) {
+      void refreshCheckouts();
       void refreshGitStatus();
     }
-  }, [eventContext.reconnectAttempts, eventContext.state, refreshGitStatus]);
+  }, [
+    eventContext.reconnectAttempts,
+    eventContext.state,
+    refreshCheckouts,
+    refreshGitStatus,
+  ]);
 
   useEffect(() => {
-    const handleKeyDown = (event: KeyboardEvent) => {
+    const handleKeyDown = (event: globalThis.KeyboardEvent) => {
       const key = event.key.toLowerCase();
       const mod = event.metaKey || event.ctrlKey;
       if (mod && !event.shiftKey && key === "p") {
@@ -1211,23 +1621,49 @@ function FileBrowserInner({ scopeRef }: FileBrowserProps) {
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, []);
 
-  const refreshParents = useCallback(
-    async (...paths: string[]) => {
-      const parents = new Set(paths.map(dirname));
-      await Promise.all([...parents].map((parent) => loadDir(parent)));
+  const expandForRef = useCallback((ref: CheckoutRef) => {
+    setExpandedRoots((prev) => {
+      const next = new Set(prev);
+      next.add(checkoutRefKey(ref));
+      if (ref.scope === "agent" && ref.target) {
+        next.add(`agent:${ref.target}`);
+      }
+      return next;
+    });
+  }, []);
+
+  const revealInTree = useCallback(
+    (ref: CheckoutRef, path: string) => {
+      expandForRef(ref);
+      const key = checkoutRefKey(ref);
+      setTreeRevealRequests((prev) => ({
+        ...prev,
+        [key]: { path, token: (prev[key]?.token ?? 0) + 1 },
+      }));
     },
-    [loadDir],
+    [expandForRef],
   );
 
+  const refreshParents = useCallback((ref: CheckoutRef, ...paths: string[]) => {
+    const key = checkoutRefKey(ref);
+    setTreeRefreshRequests((prev) => ({
+      ...prev,
+      [key]: { paths, token: (prev[key]?.token ?? 0) + 1 },
+    }));
+  }, []);
+
   const discardActiveIfNeeded = useCallback(
-    (groupIndex: number, nextPath?: string): boolean => {
+    (groupIndex: number, nextKey?: string): boolean => {
       const state = store.getState();
       const current = state.groups[groupIndex]?.active;
-      if (!current || current === nextPath || !state.dirty[current])
-        return true;
+      if (!current || current === nextKey || !state.dirty[current]) return true;
+      const tab = state.groups[groupIndex]?.tabs.find(
+        (candidate) => tabIdentityKey(candidate) === current,
+      );
       const ok = window.confirm(`Discard unsaved changes in ${current}?`);
       if (!ok) return false;
       state.setDirty(current, false);
+      if (tab) state.setDirty(tabIdentityKey(tab), false);
       return true;
     },
     [store],
@@ -1235,79 +1671,106 @@ function FileBrowserInner({ scopeRef }: FileBrowserProps) {
 
   const openFile = useCallback(
     (
+      ref: CheckoutRef,
       path: string,
       groupIndex = store.getState().activeGroup,
       lineNumber?: number,
     ) => {
-      if (!discardActiveIfNeeded(groupIndex, path)) return;
+      const tab = { ref, path };
+      const key = tabIdentityKey(tab);
+      if (!discardActiveIfNeeded(groupIndex, key)) return;
       setDiffViews((prev) => ({ ...prev, [groupIndex]: null }));
-      store.getState().openTab(path, groupIndex);
+      store.getState().openTab(tab, groupIndex);
+      revealInTree(ref, path);
       if (lineNumber && lineNumber > 0) {
         setLineTargets((prev) => ({
           ...prev,
-          [path]: { line: lineNumber, token: (prev[path]?.token ?? 0) + 1 },
+          [key]: { line: lineNumber, token: (prev[key]?.token ?? 0) + 1 },
         }));
       }
     },
-    [discardActiveIfNeeded, store],
+    [discardActiveIfNeeded, revealInTree, store],
   );
 
-  const handleLineTargetApplied = useCallback((path: string, token: number) => {
+  const handleLineTargetApplied = useCallback((key: string, token: number) => {
     setLineTargets((prev) => {
-      if (prev[path]?.token !== token) return prev;
+      if (prev[key]?.token !== token) return prev;
       const next = { ...prev };
-      delete next[path];
+      delete next[key];
       return next;
     });
   }, []);
 
   const selectTab = useCallback(
-    (groupIndex: number, path: string) => {
-      if (!discardActiveIfNeeded(groupIndex, path)) return;
+    (groupIndex: number, key: string) => {
+      if (!discardActiveIfNeeded(groupIndex, key)) return;
       setDiffViews((prev) => ({ ...prev, [groupIndex]: null }));
-      store.getState().activateTab(groupIndex, path);
+      store.getState().activateTab(groupIndex, key);
+      const tab = store
+        .getState()
+        .groups[
+          groupIndex
+        ]?.tabs.find((candidate) => tabIdentityKey(candidate) === key);
+      if (tab) revealInTree(tab.ref, tab.path);
     },
-    [discardActiveIfNeeded, store],
+    [discardActiveIfNeeded, revealInTree, store],
   );
 
   const closeTab = useCallback(
-    (groupIndex: number, path: string) => {
-      if (store.getState().dirty[path]) {
-        const ok = window.confirm(`Discard unsaved changes in ${path}?`);
+    (groupIndex: number, key: string) => {
+      if (store.getState().dirty[key]) {
+        const tab = store
+          .getState()
+          .groups[
+            groupIndex
+          ]?.tabs.find((candidate) => tabIdentityKey(candidate) === key);
+        const label = tab ? checkoutTitle(tab.ref, tab.path) : key;
+        const ok = window.confirm(`Discard unsaved changes in ${label}?`);
         if (!ok) return;
-        store.getState().setDirty(path, false);
+        store.getState().setDirty(key, false);
       }
       setDiffViews((prev) => ({ ...prev, [groupIndex]: null }));
-      store.getState().closeTab(groupIndex, path);
+      store.getState().closeTab(groupIndex, key);
     },
     [store],
   );
 
   const splitRight = useCallback(
     (groupIndex: number) => {
-      const path = store.getState().groups[groupIndex]?.active;
-      if (!path) return;
-      if (store.getState().dirty[path]) {
+      const state = store.getState();
+      const key = state.groups[groupIndex]?.active;
+      const tab = state.groups[groupIndex]?.tabs.find(
+        (candidate) => tabIdentityKey(candidate) === key,
+      );
+      if (!key || !tab) return;
+      if (state.dirty[key]) {
         const ok = window.confirm(
-          `Discard unsaved changes in ${path} before splitting?`,
+          `Discard unsaved changes in ${checkoutTitle(tab.ref, tab.path)} before splitting?`,
         );
         if (!ok) return;
-        store.getState().setDirty(path, false);
+        state.setDirty(key, false);
       }
-      store.getState().splitRight(path);
+      state.splitRight(tab);
     },
     [store],
   );
 
   const handleSaved = useCallback(
-    (path: string) => {
+    (tab: FileBrowserTab) => {
       markIndexStale();
+      void refreshCheckouts();
       void refreshGitStatus();
       setHistoryRefreshKey((key) => key + 1);
       showToast("File saved", { type: "success" });
-      void refreshParents(path);
+      refreshParents(tab.ref, tab.path);
     },
-    [markIndexStale, refreshGitStatus, refreshParents, showToast],
+    [
+      markIndexStale,
+      refreshCheckouts,
+      refreshGitStatus,
+      refreshParents,
+      showToast,
+    ],
   );
 
   const openDiff = useCallback(
@@ -1330,22 +1793,24 @@ function FileBrowserInner({ scopeRef }: FileBrowserProps) {
   }, []);
 
   const restoreSnapshot = useCallback(
-    async (path: string, content: string) => {
-      await writeScopedFile(workspaceId, scopeRef, path, content);
-      store.getState().setDirty(path, false);
+    async (ref: CheckoutRef, path: string, content: string) => {
+      const key = tabIdentityKey({ ref, path });
+      await writeScopedFile(workspaceId, ref, path, content);
+      store.getState().setDirty(key, false);
       setDiffViews({});
       markIndexStale();
+      void refreshCheckouts();
       void refreshGitStatus();
       setHistoryRefreshKey((key) => key + 1);
-      await refreshParents(path);
+      refreshParents(ref, path);
       showToast("Restored", { type: "success" });
-      openFile(path);
+      openFile(ref, path);
     },
     [
       workspaceId,
-      scopeRef,
       store,
       markIndexStale,
+      refreshCheckouts,
       refreshGitStatus,
       refreshParents,
       showToast,
@@ -1372,90 +1837,92 @@ function FileBrowserInner({ scopeRef }: FileBrowserProps) {
     );
   }, []);
 
-  const handleJump = useCallback(
-    (e: FormEvent) => {
-      e.preventDefault();
-      const target = jumpText.trim();
-      if (!target) return;
-      void revealPath(target).then(() => setScrollTarget(target));
-      setJumpText("");
-    },
-    [jumpText, revealPath],
-  );
-
   const navigateToDir = useCallback(
-    (dirPath: string) => {
-      void revealPath(dirPath).then(() => setScrollTarget(dirPath));
+    (ref: CheckoutRef, dirPath: string) => {
+      revealInTree(ref, dirPath);
     },
-    [revealPath],
+    [revealInTree],
   );
 
   const beginCreate = useCallback(
-    (kind: "create-file" | "create-folder", node: FileTreeNodeInfo) => {
+    (
+      ref: CheckoutRef,
+      kind: "create-file" | "create-folder",
+      node: FileTreeNodeInfo,
+    ) => {
       setContextMenu(null);
       const parentPath = node.isDir ? node.path : dirname(node.path);
       setInlineEdit({
-        kind,
-        parentPath,
-        value: kind === "create-file" ? "untitled.txt" : "new-folder",
-        isDir: kind === "create-folder",
+        ref,
+        edit: {
+          kind,
+          parentPath,
+          value: kind === "create-file" ? "untitled.txt" : "new-folder",
+          isDir: kind === "create-folder",
+        },
       });
     },
     [],
   );
 
-  const beginRename = useCallback((node: FileTreeNodeInfo) => {
-    setContextMenu(null);
-    setInlineEdit({
-      kind: "rename",
-      parentPath: dirname(node.path),
-      path: node.path,
-      value: node.name,
-      isDir: node.isDir,
-    });
-  }, []);
+  const beginRename = useCallback(
+    (ref: CheckoutRef, node: FileTreeNodeInfo) => {
+      setContextMenu(null);
+      setInlineEdit({
+        ref,
+        edit: {
+          kind: "rename",
+          parentPath: dirname(node.path),
+          path: node.path,
+          value: node.name,
+          isDir: node.isDir,
+        },
+      });
+    },
+    [],
+  );
 
   const commitInlineEdit = useCallback(async () => {
     if (!inlineEdit) return;
-    const value = inlineEdit.value.trim();
+    const edit = inlineEdit.edit;
+    const ref = inlineEdit.ref;
+    const value = edit.value.trim();
     if (!value) {
       setInlineEdit(null);
       return;
     }
-    const commitKey = `${inlineEdit.kind}:${inlineEdit.path ?? inlineEdit.parentPath}:${value}`;
+    const commitKey = `${checkoutRefKey(ref)}:${edit.kind}:${edit.path ?? edit.parentPath}:${value}`;
     if (inlineCommitKeyRef.current === commitKey) return;
     inlineCommitKeyRef.current = commitKey;
     setInlineEdit(null);
     try {
-      if (inlineEdit.kind === "create-file") {
-        const path = joinPath(inlineEdit.parentPath, value);
-        await writeScopedFile(workspaceId, scopeRef, path, "");
+      if (edit.kind === "create-file") {
+        const path = joinPath(edit.parentPath, value);
+        await writeScopedFile(workspaceId, ref, path, "");
         markIndexStale();
+        void refreshCheckouts();
         void refreshGitStatus();
-        await refreshParents(path);
-        openFile(path);
-        void revealPath(path).then(() => setScrollTarget(path));
-      } else if (inlineEdit.kind === "create-folder") {
-        const path = joinPath(inlineEdit.parentPath, value);
-        await mkdirScoped(workspaceId, scopeRef, path);
+        refreshParents(ref, path);
+        openFile(ref, path);
+        revealInTree(ref, path);
+      } else if (edit.kind === "create-folder") {
+        const path = joinPath(edit.parentPath, value);
+        await mkdirScoped(workspaceId, ref, path);
         markIndexStale();
+        void refreshCheckouts();
         void refreshGitStatus();
-        await refreshParents(path);
-        void revealPath(path).then(() => setScrollTarget(path));
-      } else if (inlineEdit.path) {
-        const nextPath = joinPath(inlineEdit.parentPath, value);
-        if (nextPath !== inlineEdit.path) {
-          await moveScopedPath(
-            workspaceId,
-            scopeRef,
-            inlineEdit.path,
-            nextPath,
-          );
-          store.getState().retargetPathPrefix(inlineEdit.path, nextPath);
+        refreshParents(ref, path);
+        revealInTree(ref, path);
+      } else if (edit.path) {
+        const nextPath = joinPath(edit.parentPath, value);
+        if (nextPath !== edit.path) {
+          await moveScopedPath(workspaceId, ref, edit.path, nextPath);
+          store.getState().retargetPathPrefix(ref, edit.path, nextPath);
           markIndexStale();
+          void refreshCheckouts();
           void refreshGitStatus();
-          await refreshParents(inlineEdit.path, nextPath);
-          void revealPath(nextPath).then(() => setScrollTarget(nextPath));
+          refreshParents(ref, edit.path, nextPath);
+          revealInTree(ref, nextPath);
         }
       }
     } catch (err) {
@@ -1468,27 +1935,40 @@ function FileBrowserInner({ scopeRef }: FileBrowserProps) {
   }, [
     inlineEdit,
     workspaceId,
-    scopeRef,
     refreshParents,
     openFile,
-    revealPath,
+    revealInTree,
     store,
     showToast,
     markIndexStale,
+    refreshCheckouts,
     refreshGitStatus,
   ]);
 
   const dirtyTabsForPath = useCallback(
-    (path: string): string[] =>
-      Object.keys(store.getState().dirty).filter((tabPath) =>
-        pathMatchesPrefix(tabPath, path),
-      ),
+    (ref: CheckoutRef, path: string): string[] => {
+      const state = store.getState();
+      const dirtyKeys = new Set(Object.keys(state.dirty));
+      return state.groups
+        .flatMap((group) => group.tabs)
+        .filter(
+          (tab) =>
+            dirtyKeys.has(tabIdentityKey(tab)) &&
+            sameCheckoutRef(tab.ref, ref) &&
+            pathMatchesPrefix(tab.path, path),
+        )
+        .map(tabIdentityKey);
+    },
     [store],
   );
 
   const performDelete = useCallback(
-    async (node: FileTreeNodeInfo, skipFutureFileConfirms = false) => {
-      const dirtyTabs = dirtyTabsForPath(node.path);
+    async (
+      ref: CheckoutRef,
+      node: FileTreeNodeInfo,
+      skipFutureFileConfirms = false,
+    ) => {
+      const dirtyTabs = dirtyTabsForPath(ref, node.path);
       if (dirtyTabs.length > 0) {
         const ok = window.confirm(
           `Discard unsaved changes in ${dirtyTabs.length} open file${dirtyTabs.length === 1 ? "" : "s"}?`,
@@ -1499,14 +1979,15 @@ function FileBrowserInner({ scopeRef }: FileBrowserProps) {
         }
       }
       try {
-        await deleteScopedPath(workspaceId, scopeRef, node.path, node.isDir);
+        await deleteScopedPath(workspaceId, ref, node.path, node.isDir);
         markIndexStale();
+        void refreshCheckouts();
         void refreshGitStatus();
         if (!node.isDir && skipFutureFileConfirms) {
           wsSet(workspaceId, DELETE_FILE_SKIP_KEY, "1");
         }
-        store.getState().closePathPrefix(node.path);
-        await refreshParents(node.path);
+        store.getState().closePathPrefix(ref, node.path);
+        refreshParents(ref, node.path);
         showToast("Deleted", { type: "success" });
       } catch (err) {
         showToast(err instanceof Error ? err.message : String(err), {
@@ -1519,35 +2000,35 @@ function FileBrowserInner({ scopeRef }: FileBrowserProps) {
     [
       dirtyTabsForPath,
       workspaceId,
-      scopeRef,
       store,
       refreshParents,
       showToast,
       markIndexStale,
+      refreshCheckouts,
       refreshGitStatus,
     ],
   );
 
   const requestDelete = useCallback(
-    (node: FileTreeNodeInfo) => {
+    (ref: CheckoutRef, node: FileTreeNodeInfo) => {
       setContextMenu(null);
       const skipFileConfirm =
         !node.isDir && wsGet(workspaceId, DELETE_FILE_SKIP_KEY) === "1";
       if (skipFileConfirm) {
-        void performDelete(node);
+        void performDelete(ref, node);
       } else {
-        setDeleteConfirm({ node });
+        setDeleteConfirm({ ref, node });
       }
     },
     [performDelete, workspaceId],
   );
 
   const duplicateFile = useCallback(
-    async (node: FileTreeNodeInfo) => {
+    async (ref: CheckoutRef, node: FileTreeNodeInfo) => {
       setContextMenu(null);
       if (node.isDir) return;
       try {
-        const data = await readScopedFile(workspaceId, scopeRef, node.path);
+        const data = await readScopedFile(workspaceId, ref, node.path);
         if (data.binary || data.truncated) {
           showToast("Only complete text files can be duplicated", {
             type: "error",
@@ -1555,19 +2036,17 @@ function FileBrowserInner({ scopeRef }: FileBrowserProps) {
           return;
         }
         const parent = dirname(node.path);
-        const entries = sortedEntries(treeData.get(parent) ?? []);
+        const entries = sortedEntries(
+          (await listScopedDir(workspaceId, ref, parent)).entries,
+        );
         const nextName = duplicateName(basename(node.path), entries);
         const nextPath = joinPath(parent, nextName);
-        await writeScopedFile(
-          workspaceId,
-          scopeRef,
-          nextPath,
-          data.content ?? "",
-        );
+        await writeScopedFile(workspaceId, ref, nextPath, data.content ?? "");
         markIndexStale();
+        void refreshCheckouts();
         void refreshGitStatus();
-        await refreshParents(nextPath);
-        openFile(nextPath);
+        refreshParents(ref, nextPath);
+        openFile(ref, nextPath);
       } catch (err) {
         showToast(err instanceof Error ? err.message : String(err), {
           type: "error",
@@ -1576,12 +2055,11 @@ function FileBrowserInner({ scopeRef }: FileBrowserProps) {
     },
     [
       workspaceId,
-      scopeRef,
-      treeData,
       refreshParents,
       openFile,
       showToast,
       markIndexStale,
+      refreshCheckouts,
       refreshGitStatus,
     ],
   );
@@ -1597,24 +2075,26 @@ function FileBrowserInner({ scopeRef }: FileBrowserProps) {
   );
 
   const handleContextMenu = useCallback(
-    (node: FileTreeNodeInfo, event: MouseEvent<HTMLDivElement>) => {
-      setContextMenu({ node, x: event.clientX, y: event.clientY });
+    (
+      ref: CheckoutRef,
+      node: FileTreeNodeInfo,
+      event: MouseEvent<HTMLDivElement>,
+    ) => {
+      setContextMenu({ ref, node, x: event.clientX, y: event.clientY });
     },
     [],
   );
 
-  const handleMoveNode = useCallback(
-    async (fromPath: string, targetFolderPath: string) => {
-      const move = resolveTreeDropMove(fromPath, targetFolderPath);
+  const performMove = useCallback(
+    async (
+      ref: CheckoutRef,
+      node: FileTreeNodeInfo,
+      targetFolderPath: string,
+    ) => {
+      const move = resolveMoveToTarget(node.path, targetFolderPath);
       if (!move) return;
       const applyMove = async (overwrite: boolean) => {
-        await moveScopedPath(
-          workspaceId,
-          scopeRef,
-          move.from,
-          move.to,
-          overwrite,
-        );
+        await moveScopedPath(workspaceId, ref, move.from, move.to, overwrite);
       };
       try {
         await applyMove(false);
@@ -1640,26 +2120,159 @@ function FileBrowserInner({ scopeRef }: FileBrowserProps) {
         }
       }
 
-      store.getState().retargetPathPrefix(move.from, move.to);
+      store.getState().retargetPathPrefix(ref, move.from, move.to);
       markIndexStale();
+      void refreshCheckouts();
       void refreshGitStatus();
-      await refreshParents(move.from, move.to);
-      void revealPath(move.to).then(() => setScrollTarget(move.to));
+      refreshParents(ref, move.from, move.to);
+      revealInTree(ref, move.to);
       showToast("Moved", { type: "success" });
+      setMoveDialog(null);
     },
     [
       workspaceId,
-      scopeRef,
       store,
       markIndexStale,
+      refreshCheckouts,
       refreshGitStatus,
       refreshParents,
-      revealPath,
+      revealInTree,
       showToast,
     ],
   );
 
-  const selectedPath = activePath;
+  const selectedTab = activeTab;
+  const mruKeys = useMemo(() => mru.map(tabIdentityKey), [mru]);
+
+  const toggleRoot = useCallback((key: string) => {
+    setExpandedRoots((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  }, []);
+
+  const renderCheckoutRoot = useCallback(
+    (root: Extract<FileTreeRoot, { kind: "checkout" }>, depth: number) => {
+      const key = checkoutRefKey(root.ref);
+      const expanded = expandedRoots.has(key);
+      return (
+        <div key={root.id}>
+          <RootRow
+            root={root}
+            depth={depth}
+            expanded={expanded}
+            onToggle={() => toggleRoot(key)}
+          />
+          {expanded && root.exists && (
+            <CheckoutTreeBlock
+              refInfo={root.ref}
+              depthOffset={depth + 1}
+              selectedTab={selectedTab}
+              inlineEdit={inlineEdit}
+              gitStatus={gitStatusByRef[key] ?? {}}
+              revealRequest={treeRevealRequests[key]}
+              refreshRequest={treeRefreshRequests[key]}
+              onOpenFile={openFile}
+              onContextMenu={handleContextMenu}
+              onRequestRename={beginRename}
+              onRequestDelete={requestDelete}
+              onInlineEditChange={(value) =>
+                setInlineEdit((prev) =>
+                  prev ? { ...prev, edit: { ...prev.edit, value } } : prev,
+                )
+              }
+              onInlineEditCommit={() => void commitInlineEdit()}
+              onInlineEditCancel={() => setInlineEdit(null)}
+            />
+          )}
+        </div>
+      );
+    },
+    [
+      beginRename,
+      commitInlineEdit,
+      expandedRoots,
+      gitStatusByRef,
+      handleContextMenu,
+      inlineEdit,
+      openFile,
+      requestDelete,
+      selectedTab,
+      toggleRoot,
+      treeRefreshRequests,
+      treeRevealRequests,
+    ],
+  );
+
+  const renderRoot = useCallback(
+    (root: FileTreeRoot) => {
+      if (root.kind === "checkout") return renderCheckoutRoot(root, 0);
+      if (root.flattenedRef) {
+        const key = checkoutRefKey(root.flattenedRef);
+        const expanded = expandedRoots.has(key);
+        return (
+          <div key={root.id}>
+            <RootRow
+              root={root}
+              expanded={expanded}
+              onToggle={() => toggleRoot(key)}
+            />
+            {expanded && root.exists && (
+              <CheckoutTreeBlock
+                refInfo={root.flattenedRef}
+                depthOffset={1}
+                selectedTab={selectedTab}
+                inlineEdit={inlineEdit}
+                gitStatus={gitStatusByRef[key] ?? {}}
+                revealRequest={treeRevealRequests[key]}
+                refreshRequest={treeRefreshRequests[key]}
+                onOpenFile={openFile}
+                onContextMenu={handleContextMenu}
+                onRequestRename={beginRename}
+                onRequestDelete={requestDelete}
+                onInlineEditChange={(value) =>
+                  setInlineEdit((prev) =>
+                    prev ? { ...prev, edit: { ...prev.edit, value } } : prev,
+                  )
+                }
+                onInlineEditCommit={() => void commitInlineEdit()}
+                onInlineEditCancel={() => setInlineEdit(null)}
+              />
+            )}
+          </div>
+        );
+      }
+      const expanded = expandedRoots.has(root.id);
+      return (
+        <div key={root.id}>
+          <RootRow
+            root={root}
+            expanded={expanded}
+            onToggle={() => toggleRoot(root.id)}
+          />
+          {expanded &&
+            root.children.map((child) => renderCheckoutRoot(child, 1))}
+        </div>
+      );
+    },
+    [
+      beginRename,
+      commitInlineEdit,
+      expandedRoots,
+      gitStatusByRef,
+      handleContextMenu,
+      inlineEdit,
+      openFile,
+      renderCheckoutRoot,
+      requestDelete,
+      selectedTab,
+      toggleRoot,
+      treeRefreshRequests,
+      treeRevealRequests,
+    ],
+  );
 
   return (
     <div className={styles.container}>
@@ -1670,120 +2283,86 @@ function FileBrowserInner({ scopeRef }: FileBrowserProps) {
         {searchPanelOpen ? (
           <FileSearchPanel
             workspaceId={workspaceId}
-            scopeRef={scopeRef}
-            onOpenResult={(path, line) => openFile(path, undefined, line)}
+            scopeRef={workspaceRef}
+            onOpenResult={(path, line) =>
+              openFile(workspaceRef, path, undefined, line)
+            }
             onFilesChanged={(paths) => {
               markIndexStale();
+              void refreshCheckouts();
               void refreshGitStatus();
-              void refreshParents(...paths);
+              refreshParents(workspaceRef, ...paths);
               showToast("Replace applied", { type: "success" });
             }}
             onClose={() => setSearchPanelOpen(false)}
           />
         ) : (
           <>
-            <OpenEditors
-              groups={groups}
-              dirty={dirty}
-              gitStatus={gitStatus}
-              collapsed={openEditorsCollapsed}
-              onToggle={() =>
-                setOpenEditorsCollapsed((collapsed) => !collapsed)
-              }
-              onActivate={selectTab}
-            />
-            <ScmPanel
-              gitStatus={gitStatus}
-              scopeRef={scopeRef}
-              collapsed={scmCollapsed}
-              onToggle={() => setScmCollapsed((collapsed) => !collapsed)}
-              onOpenDiff={(request) =>
-                openDiff(store.getState().activeGroup, request)
-              }
-            />
-            <TimelineSection
-              path={activePath}
-              scopeRef={scopeRef}
-              collapsed={timelineCollapsed}
-              refreshKey={historyRefreshKey}
-              onToggle={() => setTimelineCollapsed((collapsed) => !collapsed)}
-              onOpenDiff={(request) =>
-                openDiff(store.getState().activeGroup, request)
-              }
-            />
             <div className={styles.toolbar}>
-              <form onSubmit={handleJump} style={{ display: "contents" }}>
-                <input
-                  className={styles.filterInput}
-                  type="text"
-                  value={jumpText}
-                  onChange={(e) => setJumpText(e.target.value)}
-                  placeholder="Jump to folder... (e.g. src/api)"
-                  aria-label="Jump to folder"
-                />
-              </form>
-              <input
-                className={styles.filterInput}
-                type="text"
-                value={filterText}
-                onChange={(e) => setFilterText(e.target.value)}
-                placeholder="Filter files..."
-                aria-label="Filter files"
+              <button
+                type="button"
+                className={styles.quickOpenButton}
+                onClick={() => setQuickOpenOpen(true)}
+              >
+                <svg viewBox="0 0 16 16" aria-hidden="true">
+                  <circle
+                    cx="7"
+                    cy="7"
+                    r="4"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="1.4"
+                  />
+                  <path
+                    d="M10.5 10.5L14 14"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="1.4"
+                    strokeLinecap="round"
+                  />
+                </svg>
+                <span>Go to file...</span>
+                <kbd>Cmd+P</kbd>
+              </button>
+            </div>
+            <div className={styles.treeScroll}>
+              {checkoutError && (
+                <div className={styles.checkoutError}>{checkoutError}</div>
+              )}
+              {sections.map((section) => (
+                <section
+                  key={section.id}
+                  className={styles.rootSection}
+                  data-dimmed={section.dimmed || undefined}
+                >
+                  <h2 className={styles.rootSectionHeading}>{section.title}</h2>
+                  {section.roots.length === 0 ? (
+                    <div className={styles.rootSectionEmpty}>None</div>
+                  ) : (
+                    section.roots.map(renderRoot)
+                  )}
+                </section>
+              ))}
+              <ScmPanel
+                gitStatus={workspaceGitStatus}
+                scopeRef={workspaceRef}
+                collapsed={scmCollapsed}
+                onToggle={() => setScmCollapsed((collapsed) => !collapsed)}
+                onOpenDiff={(request) =>
+                  openDiff(store.getState().activeGroup, request)
+                }
+              />
+              <TimelineSection
+                path={activePath}
+                scopeRef={activeScopeRef}
+                collapsed={timelineCollapsed}
+                refreshKey={historyRefreshKey}
+                onToggle={() => setTimelineCollapsed((collapsed) => !collapsed)}
+                onOpenDiff={(request) =>
+                  openDiff(store.getState().activeGroup, request)
+                }
               />
             </div>
-            {isLoading ? (
-              <div className={styles.treeScroll}>
-                {Array.from({ length: 6 }, (_, i) => (
-                  <div
-                    key={i}
-                    style={{
-                      padding: "4px 8px",
-                      paddingLeft: `${(i % 3) * 16 + 8}px`,
-                    }}
-                  >
-                    <LoadingSkeleton
-                      shape="text"
-                      width={100 + (i % 4) * 20}
-                      height={12}
-                    />
-                  </div>
-                ))}
-              </div>
-            ) : error ? (
-              <div className={styles.treeScroll}>
-                <ErrorDisplay
-                  variant="fetch-error"
-                  title="Failed to load files"
-                  error={new Error(error)}
-                  showDetails
-                />
-              </div>
-            ) : (
-              <div className={styles.treeScroll}>
-                <FileTree
-                  treeData={treeData}
-                  expanded={expanded}
-                  selectedPath={selectedPath}
-                  filterText={debouncedFilterText}
-                  onToggle={toggle}
-                  onSelectFile={(p) => {
-                    if (p) openFile(p);
-                  }}
-                  onContextMenuNode={handleContextMenu}
-                  onRequestRename={beginRename}
-                  onRequestDelete={requestDelete}
-                  inlineEdit={inlineEdit}
-                  onInlineEditChange={(value) =>
-                    setInlineEdit((prev) => (prev ? { ...prev, value } : prev))
-                  }
-                  onInlineEditCommit={() => void commitInlineEdit()}
-                  onInlineEditCancel={() => setInlineEdit(null)}
-                  gitStatus={gitStatus}
-                  onMoveNode={handleMoveNode}
-                  scrollToPath={scrollTarget}
-                />
-              </div>
-            )}
           </>
         )}
       </div>
@@ -1814,7 +2393,6 @@ function FileBrowserInner({ scopeRef }: FileBrowserProps) {
             <EditorGroup
               groupIndex={0}
               group={groups[0] ?? { tabs: [], active: null }}
-              scopeRef={scopeRef}
               diffView={diffViews[0] ?? null}
               isActiveGroup={activeGroup === 0}
               dirty={dirty}
@@ -1849,7 +2427,6 @@ function FileBrowserInner({ scopeRef }: FileBrowserProps) {
                 <EditorGroup
                   groupIndex={1}
                   group={groups[1]}
-                  scopeRef={scopeRef}
                   diffView={diffViews[1] ?? null}
                   isActiveGroup={activeGroup === 1}
                   dirty={dirty}
@@ -1876,11 +2453,19 @@ function FileBrowserInner({ scopeRef }: FileBrowserProps) {
       {contextMenu && (
         <ContextMenu
           state={contextMenu}
-          onNewFile={(node) => beginCreate("create-file", node)}
-          onNewFolder={(node) => beginCreate("create-folder", node)}
-          onRename={beginRename}
-          onDelete={requestDelete}
-          onDuplicate={duplicateFile}
+          onNewFile={(node) =>
+            beginCreate(contextMenu.ref, "create-file", node)
+          }
+          onNewFolder={(node) =>
+            beginCreate(contextMenu.ref, "create-folder", node)
+          }
+          onRename={(node) => beginRename(contextMenu.ref, node)}
+          onDelete={(node) => requestDelete(contextMenu.ref, node)}
+          onMove={(node) => {
+            setContextMenu(null);
+            setMoveDialog({ ref: contextMenu.ref, node });
+          }}
+          onDuplicate={(node) => duplicateFile(contextMenu.ref, node)}
           onCopyPath={copyPath}
         />
       )}
@@ -1888,43 +2473,53 @@ function FileBrowserInner({ scopeRef }: FileBrowserProps) {
         <DeleteConfirmDialog
           node={deleteConfirm.node}
           onCancel={() => setDeleteConfirm(null)}
-          onConfirm={(skip) => void performDelete(deleteConfirm.node, skip)}
+          onConfirm={(skip) =>
+            void performDelete(deleteConfirm.ref, deleteConfirm.node, skip)
+          }
+        />
+      )}
+      {moveDialog && (
+        <MoveToDialog
+          state={moveDialog}
+          onCancel={() => setMoveDialog(null)}
+          onConfirm={(target) =>
+            void performMove(moveDialog.ref, moveDialog.node, target)
+          }
         />
       )}
       <QuickOpenPalette
         isOpen={quickOpenOpen}
-        paths={quickOpenPaths}
-        mru={mru}
+        items={quickOpenItems}
+        mruKeys={mruKeys}
         isLoading={quickOpenLoading}
         error={quickOpenError}
         truncated={quickOpenTruncated}
         onClose={() => setQuickOpenOpen(false)}
-        onOpen={(path) => openFile(path)}
+        onOpen={(item) => openFile(item.ref, item.path)}
       />
     </div>
   );
 }
 
-export function FileBrowser({ scopeRef }: FileBrowserProps) {
+export function FileBrowser({
+  mode = "workspace",
+  agentName,
+}: FileBrowserProps) {
   const { workspaceId } = useWorkspaceContext();
-  const key = `${workspaceId}:${fileBrowserTabsStorageKey(scopeRef)}`;
   return (
-    <FileBrowserStoreProvider
-      key={key}
-      workspaceId={workspaceId}
-      scopeRef={scopeRef}
-    >
-      <FileBrowserInner scopeRef={scopeRef} />
+    <FileBrowserStoreProvider key={workspaceId} workspaceId={workspaceId}>
+      <FileBrowserInner mode={mode} agentName={agentName} />
     </FileBrowserStoreProvider>
   );
 }
 
 /**
  * WorkspaceFileBrowser remains the exported compatibility wrapper for the
- * Files page lazy import. Passing scopeRef enables the v2 scoped browser.
+ * Files page lazy import.
  */
 export function WorkspaceFileBrowser({
-  scopeRef = { scope: "workspace" },
-}: Partial<FileBrowserProps>) {
-  return <FileBrowser scopeRef={scopeRef} />;
+  mode = "workspace",
+  agentName,
+}: FileBrowserProps) {
+  return <FileBrowser mode={mode} agentName={agentName} />;
 }

@@ -34,49 +34,16 @@ const mocks = vi.hoisted(() => ({
   indexScopedFiles: vi.fn(() =>
     Promise.resolve({ paths: [] as string[], truncated: false }),
   ),
+  listFileCheckouts: vi.fn(() => Promise.resolve({ checkouts: [] })),
+  listScopedDir: vi.fn(() => Promise.resolve({ path: "", entries: [] })),
   searchScopedFiles: vi.fn(() =>
     Promise.resolve({ results: [], limitHit: false }),
   ),
   scrollApplied: vi.fn(),
-  dndOnDragEnd: undefined as
-    | ((event: {
-        active: { data: { current?: unknown } };
-        over?: { data: { current?: unknown } } | null;
-      }) => void)
-    | undefined,
   fileMap: {} as Record<string, FileReadData>,
   headFileMap: {} as Record<string, FileReadData>,
   rootEntries: [] as FileEntry[],
 }));
-
-vi.mock("@dnd-kit/core", async () => {
-  const React = await import("react");
-  return {
-    DndContext: ({
-      onDragEnd,
-      children,
-    }: {
-      onDragEnd: NonNullable<typeof mocks.dndOnDragEnd>;
-      children: React.ReactNode;
-    }) => {
-      mocks.dndOnDragEnd = onDragEnd;
-      return <>{children}</>;
-    },
-    useDraggable: () => ({
-      setNodeRef: vi.fn(),
-      listeners: {},
-      isDragging: false,
-      transform: null,
-    }),
-    useDroppable: () => ({
-      setNodeRef: vi.fn(),
-      isOver: false,
-    }),
-    PointerSensor: function PointerSensor() {},
-    useSensor: (sensor: unknown) => sensor,
-    useSensors: (...sensors: unknown[]) => sensors,
-  };
-});
 
 vi.mock("@/components/CodeMirrorEditor", async () => {
   const React = await import("react");
@@ -177,6 +144,8 @@ vi.mock("@/hooks/api", () => ({
   gitStatusScoped: mocks.gitStatusScoped,
   historyScopedFile: mocks.historyScopedFile,
   indexScopedFiles: mocks.indexScopedFiles,
+  listFileCheckouts: mocks.listFileCheckouts,
+  listScopedDir: mocks.listScopedDir,
   mkdirScoped: mocks.mkdirScoped,
   moveScopedPath: mocks.moveScopedPath,
   readScopedFile: mocks.readScopedFile,
@@ -192,7 +161,26 @@ vi.mock("@/hooks", async () => {
     fileBrowserTabsStorageKey: stores.fileBrowserTabsStorageKey,
     useFileBrowserStore: stores.useFileBrowserStore,
     useFileBrowserStoreInstance: stores.useFileBrowserStoreInstance,
-    useWorkspaceContext: () => ({ workspaceId: "ws-1" }),
+    useWorkspaceContext: () => ({
+      workspaceId: "ws-1",
+      repos: [
+        {
+          name: "loomcli",
+          path: "/tmp/loomcli",
+          default_branch: "main",
+          remote: "origin",
+          groups: [],
+        },
+      ],
+      agents: [
+        {
+          name: "atlas",
+          repos: ["loomcli"],
+          repo_groups: [],
+          cross_repo: false,
+        },
+      ],
+    }),
     useEventContext: () => ({
       state: "connected",
       reconnectAttempts: 0,
@@ -249,11 +237,22 @@ function entry(name: string, isDir = false): FileEntry {
   };
 }
 
+async function expandWorkspaceFiles(): Promise<void> {
+  fireEvent.click(
+    await screen.findByRole("button", { name: /^Workspace files$/ }),
+  );
+  await screen.findByLabelText("main.ts");
+}
+
+async function expandRepoRoot(): Promise<void> {
+  fireEvent.click(await screen.findByRole("button", { name: /^loomcli$/ }));
+  await screen.findByLabelText("main.ts");
+}
+
 describe("WorkspaceFileBrowser", () => {
   beforeEach(() => {
     localStorage.clear();
     vi.clearAllMocks();
-    mocks.dndOnDragEnd = undefined;
     mocks.rootEntries = [
       entry("main.ts"),
       entry("symbols.ts"),
@@ -330,6 +329,30 @@ describe("WorkspaceFileBrowser", () => {
       paths: ["src/recent.ts", "src/other.ts"],
       truncated: false,
     });
+    mocks.listFileCheckouts.mockResolvedValue({
+      checkouts: [
+        {
+          kind: "agent",
+          agent: "atlas",
+          repo: "loomcli",
+          exists: true,
+          change_count: 0,
+        },
+        {
+          kind: "repo",
+          repo: "loomcli",
+          exists: true,
+          change_count: 0,
+        },
+      ],
+    });
+    mocks.listScopedDir.mockImplementation(
+      (_workspaceId: string, _scopeRef: unknown, path?: string) =>
+        Promise.resolve({
+          path: path ?? "",
+          entries: path ? [] : mocks.rootEntries,
+        }),
+    );
     mocks.searchScopedFiles.mockResolvedValue({
       results: [
         {
@@ -343,9 +366,8 @@ describe("WorkspaceFileBrowser", () => {
   });
 
   it("calls scoped CRUD APIs from tree context menu actions", async () => {
-    render(
-      <WorkspaceFileBrowser scopeRef={{ scope: "repo", target: "loomcli" }} />,
-    );
+    render(<WorkspaceFileBrowser mode="workspace" />);
+    await expandRepoRoot();
 
     fireEvent.contextMenu(screen.getByLabelText("main.ts"));
     fireEvent.click(screen.getByRole("menuitem", { name: "New File" }));
@@ -406,7 +428,8 @@ describe("WorkspaceFileBrowser", () => {
   });
 
   it("renders truncated files read-only with a banner", async () => {
-    render(<WorkspaceFileBrowser scopeRef={{ scope: "workspace" }} />);
+    render(<WorkspaceFileBrowser mode="workspace" />);
+    await expandWorkspaceFiles();
 
     fireEvent.click(screen.getByLabelText("large.txt"));
 
@@ -421,7 +444,8 @@ describe("WorkspaceFileBrowser", () => {
   });
 
   it("opens Quick Open with Cmd+P and Enter opens the highlighted file", async () => {
-    render(<WorkspaceFileBrowser scopeRef={{ scope: "workspace" }} />);
+    render(<WorkspaceFileBrowser mode="workspace" />);
+    await expandWorkspaceFiles();
 
     fireEvent.keyDown(window, { key: "p", metaKey: true });
 
@@ -446,7 +470,8 @@ describe("WorkspaceFileBrowser", () => {
   });
 
   it("applies search result lines after newly opened file content loads", async () => {
-    render(<WorkspaceFileBrowser scopeRef={{ scope: "workspace" }} />);
+    render(<WorkspaceFileBrowser mode="workspace" />);
+    await expandWorkspaceFiles();
 
     fireEvent.keyDown(window, { key: "f", metaKey: true, shiftKey: true });
     fireEvent.change(screen.getByLabelText("Search files"), {
@@ -476,7 +501,8 @@ describe("WorkspaceFileBrowser", () => {
   });
 
   it("previews replacements and writes each affected file through scoped PUT", async () => {
-    render(<WorkspaceFileBrowser scopeRef={{ scope: "workspace" }} />);
+    render(<WorkspaceFileBrowser mode="workspace" />);
+    await expandWorkspaceFiles();
 
     fireEvent.keyDown(window, { key: "f", metaKey: true, shiftKey: true });
     fireEvent.change(screen.getByLabelText("Search files"), {
@@ -506,16 +532,15 @@ describe("WorkspaceFileBrowser", () => {
     });
   });
 
-  it("moves a dragged tree node onto a folder and guards self-drop", async () => {
-    render(<WorkspaceFileBrowser scopeRef={{ scope: "workspace" }} />);
+  it("moves a tree node through Move to... and guards self-targets", async () => {
+    render(<WorkspaceFileBrowser mode="workspace" />);
+    await expandWorkspaceFiles();
 
-    await waitFor(() => expect(mocks.dndOnDragEnd).toBeDefined());
-    mocks.dndOnDragEnd?.({
-      active: {
-        data: { current: { type: "file-tree-node", path: "main.ts" } },
-      },
-      over: { data: { current: { type: "file-tree-folder", path: "src" } } },
-    });
+    fireEvent.contextMenu(screen.getByLabelText("main.ts"));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Move to..." }));
+    const dialog = await screen.findByRole("dialog", { name: /move to/i });
+    fireEvent.click(within(dialog).getByRole("button", { name: "src" }));
+    fireEvent.click(within(dialog).getByRole("button", { name: "Move" }));
 
     await waitFor(() => {
       expect(mocks.moveScopedPath).toHaveBeenCalledWith(
@@ -528,16 +553,21 @@ describe("WorkspaceFileBrowser", () => {
     });
 
     mocks.moveScopedPath.mockClear();
-    mocks.dndOnDragEnd?.({
-      active: { data: { current: { type: "file-tree-node", path: "src" } } },
-      over: { data: { current: { type: "file-tree-folder", path: "src" } } },
+    fireEvent.contextMenu(screen.getByLabelText("src"));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Move to..." }));
+    const selfDialog = await screen.findByRole("dialog", {
+      name: /move to/i,
     });
 
+    expect(
+      within(selfDialog).getByRole("button", { name: "src" }),
+    ).toBeDisabled();
     expect(mocks.moveScopedPath).not.toHaveBeenCalled();
   });
 
   it("opens the in-file symbol palette with Cmd+Shift+O and jumps to the symbol line", async () => {
-    render(<WorkspaceFileBrowser scopeRef={{ scope: "workspace" }} />);
+    render(<WorkspaceFileBrowser mode="workspace" />);
+    await expandWorkspaceFiles();
 
     fireEvent.click(screen.getByLabelText("symbols.ts"));
     await screen.findByDisplayValue(/function jumpTarget/);
@@ -559,7 +589,8 @@ describe("WorkspaceFileBrowser", () => {
   it("opens a unified diff editor from the SCM panel", async () => {
     mocks.gitStatusScoped.mockResolvedValue({ "main.ts": " M" });
 
-    render(<WorkspaceFileBrowser scopeRef={{ scope: "workspace" }} />);
+    render(<WorkspaceFileBrowser mode="workspace" />);
+    await expandWorkspaceFiles();
 
     fireEvent.click(
       await screen.findByRole("button", {
@@ -581,7 +612,8 @@ describe("WorkspaceFileBrowser", () => {
   });
 
   it("toggles blame and opens the clicked commit diff", async () => {
-    render(<WorkspaceFileBrowser scopeRef={{ scope: "workspace" }} />);
+    render(<WorkspaceFileBrowser mode="workspace" />);
+    await expandWorkspaceFiles();
 
     fireEvent.click(screen.getByLabelText("main.ts"));
     await screen.findByDisplayValue(/console\.log/);
@@ -632,7 +664,8 @@ describe("WorkspaceFileBrowser", () => {
       ],
     });
 
-    render(<WorkspaceFileBrowser scopeRef={{ scope: "workspace" }} />);
+    render(<WorkspaceFileBrowser mode="workspace" />);
+    await expandWorkspaceFiles();
 
     fireEvent.click(screen.getByLabelText("main.ts"));
     expect(await screen.findByText("commit summary")).toBeInTheDocument();
@@ -661,7 +694,8 @@ describe("WorkspaceFileBrowser", () => {
       "worktrees/repo-a/agent-a/b.ts": "??",
     });
 
-    render(<WorkspaceFileBrowser scopeRef={{ scope: "workspace" }} />);
+    render(<WorkspaceFileBrowser mode="workspace" />);
+    await expandWorkspaceFiles();
 
     expect(await screen.findByText("repo-a")).toBeInTheDocument();
     expect(screen.getByText("worktrees/repo-a/agent-a")).toBeInTheDocument();
@@ -672,7 +706,8 @@ describe("WorkspaceFileBrowser", () => {
   });
 
   it("passes quick-diff gutter marks from HEAD to the visible editor", async () => {
-    render(<WorkspaceFileBrowser scopeRef={{ scope: "workspace" }} />);
+    render(<WorkspaceFileBrowser mode="workspace" />);
+    await expandWorkspaceFiles();
 
     fireEvent.click(screen.getByLabelText("main.ts"));
     const editor = await screen.findByTestId("mock-codemirror");

@@ -1,5 +1,20 @@
+import type { CheckoutRef } from "@/utils/fileExplorerRefs";
+
 export interface QuickOpenMatch {
   path: string;
+  score: number;
+  mruRank: number | null;
+}
+
+export interface QuickOpenItem {
+  id: string;
+  ref: CheckoutRef;
+  path: string;
+  checkoutLabel: string;
+}
+
+export interface QuickOpenItemMatch {
+  item: QuickOpenItem;
   score: number;
   mruRank: number | null;
 }
@@ -81,6 +96,40 @@ export function rankQuickOpenPaths(
         );
       }
       return a.path.localeCompare(b.path);
+    })
+    .slice(0, limit);
+}
+
+export function rankQuickOpenItems(
+  items: QuickOpenItem[],
+  query: string,
+  mruKeys: string[],
+  limit = 80,
+): QuickOpenItemMatch[] {
+  const mruRanks = new Map<string, number>();
+  mruKeys.forEach((key, index) => mruRanks.set(key, index));
+  return items
+    .map((item) => {
+      const searchText = `${item.path} ${item.checkoutLabel}`;
+      const match = scoreQuickOpenPath(
+        searchText,
+        query,
+        mruRanks.get(item.id) ?? null,
+      );
+      return match
+        ? { item, score: match.score, mruRank: match.mruRank }
+        : null;
+    })
+    .filter((match): match is QuickOpenItemMatch => match !== null)
+    .sort((a, b) => {
+      if (b.score !== a.score) return b.score - a.score;
+      if (a.mruRank !== null || b.mruRank !== null) {
+        return (
+          (a.mruRank ?? Number.POSITIVE_INFINITY) -
+          (b.mruRank ?? Number.POSITIVE_INFINITY)
+        );
+      }
+      return a.item.path.localeCompare(b.item.path);
     })
     .slice(0, limit);
 }
