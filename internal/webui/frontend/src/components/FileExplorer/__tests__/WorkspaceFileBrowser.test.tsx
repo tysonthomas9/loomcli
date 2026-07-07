@@ -586,29 +586,151 @@ describe("WorkspaceFileBrowser", () => {
     });
   });
 
-  it("opens a unified diff editor from the SCM panel", async () => {
+  it("toggles the Changes lens, aggregates checkout counts, and persists per workspace", async () => {
+    mocks.listFileCheckouts.mockResolvedValue({
+      checkouts: [
+        {
+          kind: "agent",
+          agent: "atlas",
+          repo: "loomcli",
+          exists: true,
+          change_count: 2,
+        },
+        {
+          kind: "repo",
+          repo: "loomcli",
+          exists: true,
+          change_count: 3,
+        },
+      ],
+    });
     mocks.gitStatusScoped.mockResolvedValue({ "main.ts": " M" });
 
     render(<WorkspaceFileBrowser mode="workspace" />);
-    await expandWorkspaceFiles();
 
+    const changesTab = await screen.findByRole("tab", {
+      name: /Changes\s+5/,
+    });
+    expect(screen.queryByText("Source Control")).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /^Workspace files$/ }),
+    ).toBeInTheDocument();
+
+    fireEvent.click(changesTab);
+
+    expect(
+      screen.queryByRole("button", { name: /^Workspace files$/ }),
+    ).not.toBeInTheDocument();
+    expect(await screen.findByText("atlas · loomcli · 2")).toBeInTheDocument();
+    expect(
+      screen.getByText("loomcli · shared checkout · 3"),
+    ).toBeInTheDocument();
+    expect(localStorage.getItem("loom:ws-1:file-explorer-lens")).toBe(
+      "changes",
+    );
+  });
+
+  it("shows an all-zero Changes empty state", async () => {
+    render(<WorkspaceFileBrowser mode="workspace" />);
+
+    fireEvent.click(await screen.findByRole("tab", { name: /Changes\s+0/ }));
+
+    expect(
+      await screen.findByText("No uncommitted changes across this workspace."),
+    ).toBeInTheDocument();
+  });
+
+  it("opens a checkout-qualified unified diff from the Changes lens", async () => {
+    mocks.fileMap["src/main.ts"] = {
+      path: "src/main.ts",
+      content: "console.log('changed')\n",
+      size: 23,
+      binary: false,
+    };
+    mocks.listFileCheckouts.mockResolvedValue({
+      checkouts: [
+        {
+          kind: "agent",
+          agent: "atlas",
+          repo: "loomcli",
+          exists: true,
+          change_count: 1,
+        },
+        {
+          kind: "repo",
+          repo: "loomcli",
+          exists: true,
+          change_count: 0,
+        },
+      ],
+    });
+    mocks.gitStatusScoped.mockImplementation(
+      (_workspaceId: string, ref: { scope: string }) =>
+        Promise.resolve(ref.scope === "agent" ? { "src/main.ts": " M" } : {}),
+    );
+
+    render(<WorkspaceFileBrowser mode="workspace" />);
+
+    fireEvent.click(await screen.findByRole("tab", { name: /Changes\s+1/ }));
+    expect(await screen.findByText("Modified")).toBeInTheDocument();
+    expect(screen.getByText("src")).toBeInTheDocument();
     fireEvent.click(
       await screen.findByRole("button", {
-        name: "Open diff for main.ts (M)",
+        name: "Open diff for src/main.ts (Modified)",
       }),
     );
 
     await waitFor(() => {
       expect(mocks.diffScopedFile).toHaveBeenCalledWith(
         "ws-1",
-        { scope: "workspace" },
-        "main.ts",
+        { scope: "agent", target: "atlas", repo: "loomcli" },
+        "src/main.ts",
         "HEAD",
         undefined,
       );
     });
+    expect(screen.getByText("atlas · loomcli")).toBeInTheDocument();
     expect(await screen.findByText("-old")).toBeInTheDocument();
     expect(screen.getByText("+new")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Open file" }));
+    expect(
+      await screen.findByDisplayValue(/console\.log\('changed'\)/),
+    ).toBeInTheDocument();
+  });
+
+  it("keeps deleted files diff-only in the Changes lens", async () => {
+    mocks.listFileCheckouts.mockResolvedValue({
+      checkouts: [
+        {
+          kind: "repo",
+          repo: "loomcli",
+          exists: true,
+          change_count: 1,
+        },
+      ],
+    });
+    mocks.gitStatusScoped.mockResolvedValue({ "gone.ts": " D" });
+
+    render(<WorkspaceFileBrowser mode="workspace" />);
+
+    fireEvent.click(await screen.findByRole("tab", { name: /Changes\s+1/ }));
+    fireEvent.click(
+      await screen.findByRole("button", {
+        name: "Open diff for gone.ts (Deleted)",
+      }),
+    );
+
+    await waitFor(() => {
+      expect(mocks.diffScopedFile).toHaveBeenCalledWith(
+        "ws-1",
+        { scope: "repo", target: "loomcli" },
+        "gone.ts",
+        "HEAD",
+        undefined,
+      );
+    });
+    expect(screen.queryByRole("button", { name: "Open file" })).toBeNull();
   });
 
   it("toggles blame and opens the clicked commit diff", async () => {
@@ -684,25 +806,6 @@ describe("WorkspaceFileBrowser", () => {
         "previous\n",
       );
     });
-  });
-
-  it("groups SCM changes by checkout and status", async () => {
-    mocks.gitStatusScoped.mockResolvedValue({
-      "repo-a/src/a.ts": " M",
-      "repo-a/staged.ts": "A ",
-      "repo-a/conflict.txt": "UU",
-      "worktrees/repo-a/agent-a/b.ts": "??",
-    });
-
-    render(<WorkspaceFileBrowser mode="workspace" />);
-    await expandWorkspaceFiles();
-
-    expect(await screen.findByText("repo-a")).toBeInTheDocument();
-    expect(screen.getByText("worktrees/repo-a/agent-a")).toBeInTheDocument();
-    expect(screen.getByText("Merge conflicts")).toBeInTheDocument();
-    expect(screen.getByText("Staged")).toBeInTheDocument();
-    expect(screen.getByText("Changes")).toBeInTheDocument();
-    expect(screen.getByText("Untracked")).toBeInTheDocument();
   });
 
   it("passes quick-diff gutter marks from HEAD to the visible editor", async () => {
