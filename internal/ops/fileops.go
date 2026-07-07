@@ -1,5 +1,16 @@
 package ops
 
+import "errors"
+
+var (
+	// ErrAgentRepoNotAllowed indicates that a repo qualifier is unknown or not
+	// part of the agent's allowed repo set.
+	ErrAgentRepoNotAllowed = errors.New("agent repo not allowed")
+	// ErrAgentWorktreeNotFound indicates that a valid agent+repo checkout is not
+	// present on this machine.
+	ErrAgentWorktreeNotFound = errors.New("agent worktree not found")
+)
+
 // FileOps defines the interface for resolving the roots that file operations
 // run against. This interface breaks the import cycle between webui and cli
 // packages; the cli package provides the concrete implementation.
@@ -13,6 +24,12 @@ type FileOps interface {
 	// Reuses the same AgentWorktree type from gitops.go.
 	// workspaceID scopes discovery to a specific workspace (empty = default).
 	ResolveAgentWorktree(workspaceID, name string) (*AgentWorktree, error)
+
+	// ResolveAgentWorktreeForRepo resolves a specific agent+repo checkout under
+	// <workspace>/worktrees/<repo>/<agent>. The repo must be known and allowed
+	// for the agent; invalid repo qualifiers return ErrAgentRepoNotAllowed, and
+	// missing local checkouts return ErrAgentWorktreeNotFound.
+	ResolveAgentWorktreeForRepo(workspaceID, name, repo string) (*AgentWorktree, error)
 
 	// ResolveAgentWorktreeOrPrimary resolves an agent name to its worktree,
 	// falling back to the workspace's primary repo worktree when the agent is
@@ -58,6 +75,10 @@ type FileOps interface {
 	// ResolveLoomDataDir resolves the local loom data/config directory using
 	// the established CLI resolver instead of callers reading env directly.
 	ResolveLoomDataDir() (string, error)
+
+	// GetCurrentBranch returns the current branch for a git checkout. It is
+	// best-effort metadata for file checkout enumeration.
+	GetCurrentBranch(worktreePath string) (string, error)
 }
 
 // GitFileContentAtRev contains bounded content returned from a git revision.

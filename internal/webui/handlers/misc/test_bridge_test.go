@@ -134,19 +134,22 @@ func (s *testFileServiceImpl) resolveAgentForWrite(wsID, agentName string) (*ops
 }
 
 func (s *testFileServiceImpl) ListDirectory(_ context.Context, wsID, agentName, path string) (*service.FileTreeResult, error) {
-	return s.ListDirectoryScoped(context.Background(), wsID, service.ScopeAgent, agentName, path)
+	return s.ListDirectoryScoped(context.Background(), wsID, service.ScopeAgent, agentName, "", path)
 }
 
 func (s *testFileServiceImpl) ReadFile(_ context.Context, wsID, agentName, path string) (*service.FileReadResult, error) {
-	return s.ReadFileScoped(context.Background(), wsID, service.ScopeAgent, agentName, path)
+	return s.ReadFileScoped(context.Background(), wsID, service.ScopeAgent, agentName, "", path)
 }
 
 func (s *testFileServiceImpl) WriteFile(_ context.Context, wsID, agentName, path, content string) error {
-	return s.WriteFileScoped(context.Background(), wsID, service.ScopeAgent, agentName, path, content)
+	return s.WriteFileScoped(context.Background(), wsID, service.ScopeAgent, agentName, "", path, content)
 }
 
 // resolveScopeRootTest mirrors svcimpl.fileServiceImpl.resolveScopeRoot.
-func (s *testFileServiceImpl) resolveScopeRootTest(wsID string, scope service.FileScope, target string) (string, error) {
+func (s *testFileServiceImpl) resolveScopeRootTest(wsID string, scope service.FileScope, target, repo string) (string, error) {
+	if repo != "" && scope != service.ScopeAgent {
+		return "", service.ErrValidation("repo qualifier is only supported for agent scope")
+	}
 	switch scope {
 	case service.ScopeWorkspace:
 		if target != "" {
@@ -198,7 +201,12 @@ func (s *testFileServiceImpl) resolveScopeRootTest(wsID string, scope service.Fi
 		if !found {
 			return "", service.ErrNotFound(fmt.Sprintf("agent %q not found", target))
 		}
-		wt, err := s.fileOps.ResolveAgentWorktree(wsID, target)
+		var wt *ops.AgentWorktree
+		if repo != "" {
+			wt, err = s.fileOps.ResolveAgentWorktreeForRepo(wsID, target, repo)
+		} else {
+			wt, err = s.fileOps.ResolveAgentWorktree(wsID, target)
+		}
 		if err != nil {
 			return "", service.ErrNotFound(fmt.Sprintf("agent worktree %q not found", target))
 		}
@@ -208,8 +216,8 @@ func (s *testFileServiceImpl) resolveScopeRootTest(wsID string, scope service.Fi
 	}
 }
 
-func (s *testFileServiceImpl) ListDirectoryScoped(_ context.Context, wsID string, scope service.FileScope, target, path string) (*service.FileTreeResult, error) {
-	root, err := s.resolveScopeRootTest(wsID, scope, target)
+func (s *testFileServiceImpl) ListDirectoryScoped(_ context.Context, wsID string, scope service.FileScope, target, repo, path string) (*service.FileTreeResult, error) {
+	root, err := s.resolveScopeRootTest(wsID, scope, target, repo)
 	if err != nil {
 		return nil, err
 	}
@@ -268,8 +276,8 @@ func (s *testFileServiceImpl) ListDirectoryScoped(_ context.Context, wsID string
 	return &service.FileTreeResult{Path: relPath, Entries: entries}, nil
 }
 
-func (s *testFileServiceImpl) ReadFileScoped(_ context.Context, wsID string, scope service.FileScope, target, path string) (*service.FileReadResult, error) {
-	root, err := s.resolveScopeRootTest(wsID, scope, target)
+func (s *testFileServiceImpl) ReadFileScoped(_ context.Context, wsID string, scope service.FileScope, target, repo, path string) (*service.FileReadResult, error) {
+	root, err := s.resolveScopeRootTest(wsID, scope, target, repo)
 	if err != nil {
 		return nil, err
 	}
@@ -312,66 +320,70 @@ func (s *testFileServiceImpl) ReadFileScoped(_ context.Context, wsID string, sco
 	return &service.FileReadResult{Path: cleanPath, Content: string(data), Size: fi.Size(), Truncated: truncated}, nil
 }
 
-func (s *testFileServiceImpl) ReadFileAtRevScoped(_ context.Context, _ string, _ service.FileScope, _, _, _ string) (*service.FileReadResult, error) {
+func (s *testFileServiceImpl) ReadFileAtRevScoped(_ context.Context, _ string, _ service.FileScope, _, _, _, _ string) (*service.FileReadResult, error) {
 	return &service.FileReadResult{}, nil
 }
 
-func (s *testFileServiceImpl) IndexFilesScoped(_ context.Context, wsID string, scope service.FileScope, target string) (*service.FileIndexResult, error) {
-	if _, err := s.resolveScopeRootTest(wsID, scope, target); err != nil {
+func (s *testFileServiceImpl) IndexFilesScoped(_ context.Context, wsID string, scope service.FileScope, target, repo string) (*service.FileIndexResult, error) {
+	if _, err := s.resolveScopeRootTest(wsID, scope, target, repo); err != nil {
 		return nil, err
 	}
 	return &service.FileIndexResult{Paths: []string{}, Truncated: false}, nil
 }
 
-func (s *testFileServiceImpl) SearchFilesScoped(_ context.Context, wsID string, scope service.FileScope, target string, _ service.FileSearchRequest) (*service.FileSearchResult, error) {
-	if _, err := s.resolveScopeRootTest(wsID, scope, target); err != nil {
+func (s *testFileServiceImpl) SearchFilesScoped(_ context.Context, wsID string, scope service.FileScope, target, repo string, _ service.FileSearchRequest) (*service.FileSearchResult, error) {
+	if _, err := s.resolveScopeRootTest(wsID, scope, target, repo); err != nil {
 		return nil, err
 	}
 	return &service.FileSearchResult{Results: []service.FileSearchFileResult{}, LimitHit: false}, nil
 }
 
-func (s *testFileServiceImpl) GitStatusScoped(_ context.Context, _ string, _ service.FileScope, _ string) (service.FileGitStatusResult, error) {
+func (s *testFileServiceImpl) GitStatusScoped(_ context.Context, _ string, _ service.FileScope, _, _ string) (service.FileGitStatusResult, error) {
 	return service.FileGitStatusResult{}, nil
 }
 
-func (s *testFileServiceImpl) DiffFileScoped(_ context.Context, _ string, _ service.FileScope, _, _, _, _ string) (*service.FileDiffResult, error) {
+func (s *testFileServiceImpl) ListFileCheckouts(_ context.Context, _ string) (*service.FileCheckoutsResult, error) {
+	return &service.FileCheckoutsResult{}, nil
+}
+
+func (s *testFileServiceImpl) DiffFileScoped(_ context.Context, _ string, _ service.FileScope, _, _, _, _, _ string) (*service.FileDiffResult, error) {
 	return &service.FileDiffResult{}, nil
 }
 
-func (s *testFileServiceImpl) BlameFileScoped(_ context.Context, _ string, _ service.FileScope, _, _ string) (*service.FileBlameResult, error) {
+func (s *testFileServiceImpl) BlameFileScoped(_ context.Context, _ string, _ service.FileScope, _, _, _ string) (*service.FileBlameResult, error) {
 	return &service.FileBlameResult{}, nil
 }
 
-func (s *testFileServiceImpl) HistoryFileScoped(_ context.Context, _ string, _ service.FileScope, _, _ string) (*service.FileHistoryResult, error) {
+func (s *testFileServiceImpl) HistoryFileScoped(_ context.Context, _ string, _ service.FileScope, _, _, _ string) (*service.FileHistoryResult, error) {
 	return &service.FileHistoryResult{}, nil
 }
 
-func (s *testFileServiceImpl) WriteFileScoped(_ context.Context, wsID string, scope service.FileScope, target, path, content string) error {
-	root, err := s.resolveScopeRootTest(wsID, scope, target)
+func (s *testFileServiceImpl) WriteFileScoped(_ context.Context, wsID string, scope service.FileScope, target, repo, path, content string) error {
+	root, err := s.resolveScopeRootTest(wsID, scope, target, repo)
 	if err != nil {
 		return err
 	}
 	return testWriteFileAt(root, path, content)
 }
 
-func (s *testFileServiceImpl) DeletePathScoped(_ context.Context, wsID string, scope service.FileScope, target, path string, recursive bool) error {
-	root, err := s.resolveScopeRootTest(wsID, scope, target)
+func (s *testFileServiceImpl) DeletePathScoped(_ context.Context, wsID string, scope service.FileScope, target, repo, path string, recursive bool) error {
+	root, err := s.resolveScopeRootTest(wsID, scope, target, repo)
 	if err != nil {
 		return err
 	}
 	return testDeletePathAt(root, path, recursive)
 }
 
-func (s *testFileServiceImpl) MkdirScoped(_ context.Context, wsID string, scope service.FileScope, target, path string) error {
-	root, err := s.resolveScopeRootTest(wsID, scope, target)
+func (s *testFileServiceImpl) MkdirScoped(_ context.Context, wsID string, scope service.FileScope, target, repo, path string) error {
+	root, err := s.resolveScopeRootTest(wsID, scope, target, repo)
 	if err != nil {
 		return err
 	}
 	return testMkdirAt(root, path)
 }
 
-func (s *testFileServiceImpl) MovePathScoped(_ context.Context, wsID string, scope service.FileScope, target, from, to string, overwrite bool) error {
-	root, err := s.resolveScopeRootTest(wsID, scope, target)
+func (s *testFileServiceImpl) MovePathScoped(_ context.Context, wsID string, scope service.FileScope, target, repo, from, to string, overwrite bool) error {
+	root, err := s.resolveScopeRootTest(wsID, scope, target, repo)
 	if err != nil {
 		return err
 	}
@@ -696,43 +708,46 @@ func (s *stubFileService) ReadFile(_ context.Context, _, _, _ string) (*service.
 	return &service.FileReadResult{}, nil
 }
 func (s *stubFileService) WriteFile(_ context.Context, _, _, _, _ string) error { return nil }
-func (s *stubFileService) ListDirectoryScoped(_ context.Context, _ string, _ service.FileScope, _, _ string) (*service.FileTreeResult, error) {
+func (s *stubFileService) ListDirectoryScoped(_ context.Context, _ string, _ service.FileScope, _, _, _ string) (*service.FileTreeResult, error) {
 	return &service.FileTreeResult{}, nil
 }
-func (s *stubFileService) ReadFileScoped(_ context.Context, _ string, _ service.FileScope, _, _ string) (*service.FileReadResult, error) {
+func (s *stubFileService) ReadFileScoped(_ context.Context, _ string, _ service.FileScope, _, _, _ string) (*service.FileReadResult, error) {
 	return &service.FileReadResult{}, nil
 }
-func (s *stubFileService) ReadFileAtRevScoped(_ context.Context, _ string, _ service.FileScope, _, _, _ string) (*service.FileReadResult, error) {
+func (s *stubFileService) ReadFileAtRevScoped(_ context.Context, _ string, _ service.FileScope, _, _, _, _ string) (*service.FileReadResult, error) {
 	return &service.FileReadResult{}, nil
 }
-func (s *stubFileService) IndexFilesScoped(_ context.Context, _ string, _ service.FileScope, _ string) (*service.FileIndexResult, error) {
+func (s *stubFileService) IndexFilesScoped(_ context.Context, _ string, _ service.FileScope, _, _ string) (*service.FileIndexResult, error) {
 	return &service.FileIndexResult{}, nil
 }
-func (s *stubFileService) SearchFilesScoped(_ context.Context, _ string, _ service.FileScope, _ string, _ service.FileSearchRequest) (*service.FileSearchResult, error) {
+func (s *stubFileService) SearchFilesScoped(_ context.Context, _ string, _ service.FileScope, _, _ string, _ service.FileSearchRequest) (*service.FileSearchResult, error) {
 	return &service.FileSearchResult{}, nil
 }
-func (s *stubFileService) GitStatusScoped(_ context.Context, _ string, _ service.FileScope, _ string) (service.FileGitStatusResult, error) {
+func (s *stubFileService) GitStatusScoped(_ context.Context, _ string, _ service.FileScope, _, _ string) (service.FileGitStatusResult, error) {
 	return service.FileGitStatusResult{}, nil
 }
-func (s *stubFileService) DiffFileScoped(_ context.Context, _ string, _ service.FileScope, _, _, _, _ string) (*service.FileDiffResult, error) {
+func (s *stubFileService) ListFileCheckouts(_ context.Context, _ string) (*service.FileCheckoutsResult, error) {
+	return &service.FileCheckoutsResult{}, nil
+}
+func (s *stubFileService) DiffFileScoped(_ context.Context, _ string, _ service.FileScope, _, _, _, _, _ string) (*service.FileDiffResult, error) {
 	return &service.FileDiffResult{}, nil
 }
-func (s *stubFileService) BlameFileScoped(_ context.Context, _ string, _ service.FileScope, _, _ string) (*service.FileBlameResult, error) {
+func (s *stubFileService) BlameFileScoped(_ context.Context, _ string, _ service.FileScope, _, _, _ string) (*service.FileBlameResult, error) {
 	return &service.FileBlameResult{}, nil
 }
-func (s *stubFileService) HistoryFileScoped(_ context.Context, _ string, _ service.FileScope, _, _ string) (*service.FileHistoryResult, error) {
+func (s *stubFileService) HistoryFileScoped(_ context.Context, _ string, _ service.FileScope, _, _, _ string) (*service.FileHistoryResult, error) {
 	return &service.FileHistoryResult{}, nil
 }
-func (s *stubFileService) WriteFileScoped(_ context.Context, _ string, _ service.FileScope, _, _, _ string) error {
+func (s *stubFileService) WriteFileScoped(_ context.Context, _ string, _ service.FileScope, _, _, _, _ string) error {
 	return nil
 }
-func (s *stubFileService) DeletePathScoped(_ context.Context, _ string, _ service.FileScope, _, _ string, _ bool) error {
+func (s *stubFileService) DeletePathScoped(_ context.Context, _ string, _ service.FileScope, _, _, _ string, _ bool) error {
 	return nil
 }
-func (s *stubFileService) MkdirScoped(_ context.Context, _ string, _ service.FileScope, _, _ string) error {
+func (s *stubFileService) MkdirScoped(_ context.Context, _ string, _ service.FileScope, _, _, _ string) error {
 	return nil
 }
-func (s *stubFileService) MovePathScoped(_ context.Context, _ string, _ service.FileScope, _, _, _ string, _ bool) error {
+func (s *stubFileService) MovePathScoped(_ context.Context, _ string, _ service.FileScope, _, _, _, _ string, _ bool) error {
 	return nil
 }
 

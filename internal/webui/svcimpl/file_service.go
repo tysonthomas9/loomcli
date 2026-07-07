@@ -2,6 +2,7 @@ package svcimpl
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -36,7 +37,7 @@ func NewFileService(fileOps ops.FileOps) service.FileService {
 }
 
 func (s *fileServiceImpl) ListDirectory(ctx context.Context, wsID, agentName, path string) (*service.FileTreeResult, error) {
-	return s.ListDirectoryScoped(ctx, wsID, service.ScopeAgent, agentName, path)
+	return s.ListDirectoryScoped(ctx, wsID, service.ScopeAgent, agentName, "", path)
 }
 
 // listDirectoryAt lists one level under rootDir. hidden names path segments to
@@ -122,7 +123,7 @@ func convertDirEntries(dirEntries []os.DirEntry, hidden map[string]bool) []servi
 }
 
 func (s *fileServiceImpl) ReadFile(ctx context.Context, wsID, agentName, path string) (*service.FileReadResult, error) {
-	return s.ReadFileScoped(ctx, wsID, service.ScopeAgent, agentName, path)
+	return s.ReadFileScoped(ctx, wsID, service.ScopeAgent, agentName, "", path)
 }
 
 // readFileAt reads a single file under rootDir.
@@ -157,14 +158,18 @@ var hiddenScopeSegments = map[string]bool{".git": true}
 
 // resolveScopeRoot resolves a scope+target to the absolute root directory that
 // scoped file operations are confined to.
-func (s *fileServiceImpl) resolveScopeRoot(wsID string, scope service.FileScope, target string) (string, error) {
+func (s *fileServiceImpl) resolveScopeRoot(wsID string, scope service.FileScope, target, repo string) (string, error) {
+	repo = strings.TrimSpace(repo)
+	if repo != "" && scope != service.ScopeAgent {
+		return "", service.ErrValidation("repo qualifier is only supported for agent scope")
+	}
 	switch scope {
 	case service.ScopeWorkspace:
 		return s.resolveWorkspaceScopeRoot(wsID, target)
 	case service.ScopeRepo:
 		return s.resolveRepoScopeRoot(wsID, target)
 	case service.ScopeAgent:
-		return s.resolveAgentScopeRoot(wsID, target)
+		return s.resolveAgentScopeRoot(wsID, target, repo)
 	default:
 		return "", service.ErrValidation(fmt.Sprintf("unsupported scope %q", scope))
 	}
@@ -213,7 +218,7 @@ func repoTargetName(ws *ops.WorkspaceData, target string) string {
 	return ""
 }
 
-func (s *fileServiceImpl) resolveAgentScopeRoot(wsID, target string) (string, error) {
+func (s *fileServiceImpl) resolveAgentScopeRoot(wsID, target, repo string) (string, error) {
 	if err := validateAgentName(target); err != nil {
 		return "", err
 	}
@@ -224,8 +229,19 @@ func (s *fileServiceImpl) resolveAgentScopeRoot(wsID, target string) (string, er
 	if !agentTargetExists(ws, target) {
 		return "", service.ErrNotFound(fmt.Sprintf("agent %q not found", target))
 	}
-	wt, err := s.fileOps.ResolveAgentWorktree(wsID, target)
+	var wt *ops.AgentWorktree
+	if repo != "" {
+		wt, err = s.fileOps.ResolveAgentWorktreeForRepo(wsID, target, repo)
+	} else {
+		wt, err = s.fileOps.ResolveAgentWorktree(wsID, target)
+	}
 	if err != nil {
+		if errors.Is(err, ops.ErrAgentRepoNotAllowed) {
+			return "", service.ErrValidation(err.Error())
+		}
+		if errors.Is(err, ops.ErrAgentWorktreeNotFound) {
+			return "", service.ErrNotFound(err.Error())
+		}
 		return "", service.ErrNotFound(fmt.Sprintf("agent worktree %q not found", target))
 	}
 	return wt.Path, nil
@@ -251,16 +267,16 @@ func (s *fileServiceImpl) resolveWorkspaceData(wsID string) (*ops.WorkspaceData,
 	return ws, nil
 }
 
-func (s *fileServiceImpl) ListDirectoryScoped(_ context.Context, wsID string, scope service.FileScope, target, path string) (*service.FileTreeResult, error) {
-	root, err := s.resolveScopeRoot(wsID, scope, target)
+func (s *fileServiceImpl) ListDirectoryScoped(_ context.Context, wsID string, scope service.FileScope, target, repo, path string) (*service.FileTreeResult, error) {
+	root, err := s.resolveScopeRoot(wsID, scope, target, repo)
 	if err != nil {
 		return nil, err
 	}
 	return listDirectoryAt(root, path, hiddenScopeSegments)
 }
 
-func (s *fileServiceImpl) ReadFileScoped(_ context.Context, wsID string, scope service.FileScope, target, path string) (*service.FileReadResult, error) {
-	root, err := s.resolveScopeRoot(wsID, scope, target)
+func (s *fileServiceImpl) ReadFileScoped(_ context.Context, wsID string, scope service.FileScope, target, repo, path string) (*service.FileReadResult, error) {
+	root, err := s.resolveScopeRoot(wsID, scope, target, repo)
 	if err != nil {
 		return nil, err
 	}
@@ -268,15 +284,15 @@ func (s *fileServiceImpl) ReadFileScoped(_ context.Context, wsID string, scope s
 }
 
 func (s *fileServiceImpl) WriteFile(ctx context.Context, wsID, agentName, path, content string) error {
-	return s.WriteFileScoped(ctx, wsID, service.ScopeAgent, agentName, path, content)
+	return s.WriteFileScoped(ctx, wsID, service.ScopeAgent, agentName, "", path, content)
 }
 
-func (s *fileServiceImpl) WriteFileScoped(_ context.Context, wsID string, scope service.FileScope, target, path, content string) error {
-	root, err := s.resolveScopeRoot(wsID, scope, target)
+func (s *fileServiceImpl) WriteFileScoped(_ context.Context, wsID string, scope service.FileScope, target, repo, path, content string) error {
+	root, err := s.resolveScopeRoot(wsID, scope, target, repo)
 	if err != nil {
 		return err
 	}
-	if err := s.snapshotBeforeOverwrite(wsID, scope, target, root, path); err != nil {
+	if err := s.snapshotBeforeOverwrite(wsID, scope, target, repo, root, path); err != nil {
 		return err
 	}
 	if err := writeFileAt(root, path, content); err != nil {
@@ -286,8 +302,8 @@ func (s *fileServiceImpl) WriteFileScoped(_ context.Context, wsID string, scope 
 	return nil
 }
 
-func (s *fileServiceImpl) DeletePathScoped(_ context.Context, wsID string, scope service.FileScope, target, path string, recursive bool) error {
-	root, err := s.resolveScopeRoot(wsID, scope, target)
+func (s *fileServiceImpl) DeletePathScoped(_ context.Context, wsID string, scope service.FileScope, target, repo, path string, recursive bool) error {
+	root, err := s.resolveScopeRoot(wsID, scope, target, repo)
 	if err != nil {
 		return err
 	}
@@ -298,8 +314,8 @@ func (s *fileServiceImpl) DeletePathScoped(_ context.Context, wsID string, scope
 	return nil
 }
 
-func (s *fileServiceImpl) MkdirScoped(_ context.Context, wsID string, scope service.FileScope, target, path string) error {
-	root, err := s.resolveScopeRoot(wsID, scope, target)
+func (s *fileServiceImpl) MkdirScoped(_ context.Context, wsID string, scope service.FileScope, target, repo, path string) error {
+	root, err := s.resolveScopeRoot(wsID, scope, target, repo)
 	if err != nil {
 		return err
 	}
@@ -310,8 +326,8 @@ func (s *fileServiceImpl) MkdirScoped(_ context.Context, wsID string, scope serv
 	return nil
 }
 
-func (s *fileServiceImpl) MovePathScoped(_ context.Context, wsID string, scope service.FileScope, target, from, to string, overwrite bool) error {
-	root, err := s.resolveScopeRoot(wsID, scope, target)
+func (s *fileServiceImpl) MovePathScoped(_ context.Context, wsID string, scope service.FileScope, target, repo, from, to string, overwrite bool) error {
+	root, err := s.resolveScopeRoot(wsID, scope, target, repo)
 	if err != nil {
 		return err
 	}

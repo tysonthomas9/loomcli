@@ -180,6 +180,10 @@ func (m *mockFileOps) ResolveAgentWorktree(_, name string) (*ops.AgentWorktree, 
 	return nil, errors.New("not found")
 }
 
+func (m *mockFileOps) ResolveAgentWorktreeForRepo(_, name, _ string) (*ops.AgentWorktree, error) {
+	return m.ResolveAgentWorktree("", name)
+}
+
 func (m *mockFileOps) ResolveAgentWorktreeOrPrimary(_, name string) (*ops.AgentWorktree, error) {
 	if m.resolveOrPrimaryFunc != nil {
 		return m.resolveOrPrimaryFunc(name)
@@ -226,6 +230,10 @@ func (m *mockFileOps) GitBlamePorcelain(worktreePath, path string) (string, erro
 
 func (m *mockFileOps) ResolveLoomDataDir() (string, error) {
 	return os.TempDir(), nil
+}
+
+func (m *mockFileOps) GetCurrentBranch(_ string) (string, error) {
+	return "main", nil
 }
 
 // mockGitOps implements ops.GitOps for testing in the root package.

@@ -32,6 +32,7 @@ func (m *Module) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/workspaces/{ws}/files/index", HandleScopedFileIndex(m.fileSvc))
 	mux.HandleFunc("POST /api/workspaces/{ws}/files/search", HandleScopedFileSearch(m.fileSvc))
 	mux.HandleFunc("GET /api/workspaces/{ws}/files/git-status", HandleScopedGitStatus(m.fileSvc))
+	mux.HandleFunc("GET /api/workspaces/{ws}/files/checkouts", HandleFileCheckouts(m.fileSvc))
 	mux.HandleFunc("GET /api/workspaces/{ws}/files/diff", HandleScopedFileDiff(m.fileSvc))
 	mux.HandleFunc("GET /api/workspaces/{ws}/files/history", HandleScopedFileHistory(m.fileSvc))
 	mux.HandleFunc("GET /api/workspaces/{ws}/files/blame", HandleScopedFileBlame(m.fileSvc))

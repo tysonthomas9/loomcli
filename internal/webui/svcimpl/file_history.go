@@ -32,6 +32,7 @@ type fileSaveSnapshot struct {
 	Path      string `json:"path"`
 	Scope     string `json:"scope"`
 	Target    string `json:"target,omitempty"`
+	Repo      string `json:"repo,omitempty"`
 	Time      string `json:"time"`
 	Content   string `json:"content"`
 	Size      int64  `json:"size"`
@@ -41,8 +42,8 @@ type fileSaveSnapshot struct {
 
 var errNoSaveSnapshot = errors.New("no save snapshot")
 
-func (s *fileServiceImpl) ReadFileAtRevScoped(_ context.Context, wsID string, scope service.FileScope, target, path, rev string) (*service.FileReadResult, error) {
-	root, cleanPath, checkout, err := s.resolveScopedContainingCheckout(wsID, scope, target, path)
+func (s *fileServiceImpl) ReadFileAtRevScoped(_ context.Context, wsID string, scope service.FileScope, target, repo, path, rev string) (*service.FileReadResult, error) {
+	root, cleanPath, checkout, err := s.resolveScopedContainingCheckout(wsID, scope, target, repo, path)
 	if err != nil {
 		return nil, err
 	}
@@ -64,8 +65,8 @@ func (s *fileServiceImpl) ReadFileAtRevScoped(_ context.Context, wsID string, sc
 	}, nil
 }
 
-func (s *fileServiceImpl) DiffFileScoped(_ context.Context, wsID string, scope service.FileScope, target, path, from, to string) (*service.FileDiffResult, error) {
-	_, cleanPath, checkout, err := s.resolveScopedContainingCheckout(wsID, scope, target, path)
+func (s *fileServiceImpl) DiffFileScoped(_ context.Context, wsID string, scope service.FileScope, target, repo, path, from, to string) (*service.FileDiffResult, error) {
+	_, cleanPath, checkout, err := s.resolveScopedContainingCheckout(wsID, scope, target, repo, path)
 	if err != nil {
 		return nil, err
 	}
@@ -76,8 +77,8 @@ func (s *fileServiceImpl) DiffFileScoped(_ context.Context, wsID string, scope s
 	return &service.FileDiffResult{Path: cleanPath, Patch: patch}, nil
 }
 
-func (s *fileServiceImpl) BlameFileScoped(_ context.Context, wsID string, scope service.FileScope, target, path string) (*service.FileBlameResult, error) {
-	root, cleanPath, checkout, err := s.resolveScopedContainingCheckout(wsID, scope, target, path)
+func (s *fileServiceImpl) BlameFileScoped(_ context.Context, wsID string, scope service.FileScope, target, repo, path string) (*service.FileBlameResult, error) {
+	root, cleanPath, checkout, err := s.resolveScopedContainingCheckout(wsID, scope, target, repo, path)
 	if err != nil {
 		return nil, err
 	}
@@ -118,8 +119,8 @@ func (s *fileServiceImpl) BlameFileScoped(_ context.Context, wsID string, scope 
 	}, nil
 }
 
-func (s *fileServiceImpl) HistoryFileScoped(_ context.Context, wsID string, scope service.FileScope, target, path string) (*service.FileHistoryResult, error) {
-	root, cleanPath, checkout, err := s.resolveScopedContainingCheckout(wsID, scope, target, path)
+func (s *fileServiceImpl) HistoryFileScoped(_ context.Context, wsID string, scope service.FileScope, target, repo, path string) (*service.FileHistoryResult, error) {
+	root, cleanPath, checkout, err := s.resolveScopedContainingCheckout(wsID, scope, target, repo, path)
 	if err != nil {
 		return nil, err
 	}
@@ -128,7 +129,7 @@ func (s *fileServiceImpl) HistoryFileScoped(_ context.Context, wsID string, scop
 		return nil, service.ErrInternal("failed to run git log", err)
 	}
 	entries := parseGitLogHistory(logOutput)
-	saves, err := s.loadSaveHistory(wsID, scope, target, cleanPath)
+	saves, err := s.loadSaveHistory(wsID, scope, target, repo, cleanPath)
 	if err != nil {
 		return nil, err
 	}
@@ -150,8 +151,8 @@ func blameSkipped(path, reason, message string) *service.FileBlameResult {
 	}
 }
 
-func (s *fileServiceImpl) resolveScopedContainingCheckout(wsID string, scope service.FileScope, target, path string) (string, string, fileCheckoutRef, error) {
-	root, err := s.resolveScopeRoot(wsID, scope, target)
+func (s *fileServiceImpl) resolveScopedContainingCheckout(wsID string, scope service.FileScope, target, repo, path string) (string, string, fileCheckoutRef, error) {
+	root, err := s.resolveScopeRoot(wsID, scope, target, repo)
 	if err != nil {
 		return "", "", fileCheckoutRef{}, err
 	}
@@ -366,7 +367,7 @@ func countLines(content string) int {
 	return count
 }
 
-func (s *fileServiceImpl) snapshotBeforeOverwrite(wsID string, scope service.FileScope, target, root, path string) error {
+func (s *fileServiceImpl) snapshotBeforeOverwrite(wsID string, scope service.FileScope, target, repo, root, path string) error {
 	snapshot, err := readSaveSnapshotCandidate(root, path)
 	if errors.Is(err, errNoSaveSnapshot) {
 		return nil
@@ -382,7 +383,7 @@ func (s *fileServiceImpl) snapshotBeforeOverwrite(wsID string, scope service.Fil
 	if err != nil {
 		return service.ErrInternal("failed to resolve loom data directory", err)
 	}
-	dir := saveHistoryDir(dataDir, wsID, scope, target, cleanPath)
+	dir := saveHistoryDir(dataDir, wsID, scope, target, repo, cleanPath)
 	if err := os.MkdirAll(dir, 0750); err != nil {
 		return service.ErrInternal("failed to create file history directory", err)
 	}
@@ -390,6 +391,7 @@ func (s *fileServiceImpl) snapshotBeforeOverwrite(wsID string, scope service.Fil
 	snapshot.Path = cleanPath
 	snapshot.Scope = string(scope)
 	snapshot.Target = target
+	snapshot.Repo = repo
 	snapshot.Time = time.Now().UTC().Format(time.RFC3339Nano)
 	data, err := json.MarshalIndent(snapshot, "", "  ")
 	if err != nil {
@@ -437,12 +439,12 @@ func readSaveSnapshotCandidate(root, path string) (*fileSaveSnapshot, error) {
 	}, nil
 }
 
-func (s *fileServiceImpl) loadSaveHistory(wsID string, scope service.FileScope, target, path string) ([]service.FileHistoryEntry, error) {
+func (s *fileServiceImpl) loadSaveHistory(wsID string, scope service.FileScope, target, repo, path string) ([]service.FileHistoryEntry, error) {
 	dataDir, err := s.fileOps.ResolveLoomDataDir()
 	if err != nil {
 		return nil, service.ErrInternal("failed to resolve loom data directory", err)
 	}
-	dir := saveHistoryDir(dataDir, wsID, scope, target, path)
+	dir := saveHistoryDir(dataDir, wsID, scope, target, repo, path)
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -487,15 +489,22 @@ func (s *fileServiceImpl) loadSaveHistory(wsID string, scope service.FileScope, 
 	return out, nil
 }
 
-func saveHistoryDir(dataDir, wsID string, scope service.FileScope, target, path string) string {
+func saveHistoryDir(dataDir, wsID string, scope service.FileScope, target, repo, path string) string {
 	return filepath.Join(
 		dataDir,
 		"file-history",
 		safeHistorySegment(wsID),
 		safeHistorySegment(string(scope)),
-		safeHistorySegment(target),
+		safeHistorySegment(saveHistoryTargetKey(scope, target, repo)),
 		fileHistoryPathKey(path),
 	)
+}
+
+func saveHistoryTargetKey(scope service.FileScope, target, repo string) string {
+	if scope == service.ScopeAgent && strings.TrimSpace(repo) != "" {
+		return target + "@" + strings.TrimSpace(repo)
+	}
+	return target
 }
 
 func safeHistorySegment(value string) string {
