@@ -1,14 +1,16 @@
 import { useEffect, useMemo, useRef, type MouseEvent } from "react";
+import type { FileBrowserTab } from "@/stores";
+import { checkoutSuffix, tabIdentityKey } from "@/utils/fileExplorerRefs";
 import styles from "./FileExplorer.module.css";
 
 interface FileTabBarProps {
-  /** Open file paths, in tab order. */
-  tabs: string[];
-  activePath: string | null;
+  /** Open file tabs, in tab order. */
+  tabs: FileBrowserTab[];
+  activeKey: string | null;
   dirtyPaths?: Record<string, boolean> | undefined;
   groupLabel?: string | undefined;
-  onSelect: (path: string) => void;
-  onClose: (path: string) => void;
+  onSelect: (tabKey: string) => void;
+  onClose: (tabKey: string) => void;
 }
 
 function basename(p: string): string {
@@ -27,7 +29,7 @@ function parentDirName(p: string): string {
  */
 export function FileTabBar({
   tabs,
-  activePath,
+  activeKey,
   dirtyPaths,
   groupLabel,
   onSelect,
@@ -38,8 +40,8 @@ export function FileTabBar({
   // Basenames that appear on more than one tab — those get a parent-dir hint.
   const duplicateNames = useMemo(() => {
     const counts = new Map<string, number>();
-    for (const p of tabs) {
-      const b = basename(p);
+    for (const tab of tabs) {
+      const b = basename(tab.path);
       counts.set(b, (counts.get(b) ?? 0) + 1);
     }
     return counts;
@@ -51,7 +53,7 @@ export function FileTabBar({
     if (el && typeof el.scrollIntoView === "function") {
       el.scrollIntoView({ block: "nearest", inline: "nearest" });
     }
-  }, [activePath]);
+  }, [activeKey]);
 
   if (tabs.length === 0) return null;
 
@@ -61,24 +63,27 @@ export function FileTabBar({
       role="tablist"
       aria-label={groupLabel ? `Open files ${groupLabel}` : "Open files"}
     >
-      {tabs.map((path) => {
-        const active = path === activePath;
-        const name = basename(path);
+      {tabs.map((tab) => {
+        const key = tabIdentityKey(tab);
+        const active = key === activeKey;
+        const name = basename(tab.path);
         const hint =
-          (duplicateNames.get(name) ?? 0) > 1 ? parentDirName(path) : "";
+          (duplicateNames.get(name) ?? 0) > 1
+            ? checkoutSuffix(tab.ref) || parentDirName(tab.path)
+            : "";
         const closeOnMiddle = (e: MouseEvent) => {
           if (e.button === 1) {
             e.preventDefault();
-            onClose(path);
+            onClose(key);
           }
         };
         return (
           <div
-            key={path}
+            key={key}
             ref={active ? activeRef : undefined}
             className={styles.tab}
             data-active={active}
-            title={path}
+            title={`${checkoutSuffix(tab.ref)}: ${tab.path}`}
             onAuxClick={closeOnMiddle}
           >
             <button
@@ -86,9 +91,9 @@ export function FileTabBar({
               role="tab"
               aria-selected={active}
               className={styles.tabSelect}
-              onClick={() => onSelect(path)}
+              onClick={() => onSelect(key)}
             >
-              {dirtyPaths?.[path] && (
+              {dirtyPaths?.[key] && (
                 <span className={styles.tabDirty} aria-hidden="true" />
               )}
               <span className={styles.tabName}>{name}</span>
@@ -98,7 +103,7 @@ export function FileTabBar({
               type="button"
               className={styles.tabClose}
               aria-label={`Close ${name}`}
-              onClick={() => onClose(path)}
+              onClick={() => onClose(key)}
             >
               <svg
                 viewBox="0 0 16 16"

@@ -73,5 +73,6 @@ export type {
   FileBrowserTab,
   FileBrowserGroup,
   PersistedFileBrowserTabsV2,
+  PersistedFileBrowserTabsV3,
   FileBrowserStoreConfig,
 } from "./fileBrowserStore";

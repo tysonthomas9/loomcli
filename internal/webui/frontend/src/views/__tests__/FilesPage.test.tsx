@@ -2,12 +2,12 @@
  * @vitest-environment jsdom
  */
 
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, it, expect, vi } from "vitest";
 import "@testing-library/jest-dom";
 
 const mocks = vi.hoisted(() => ({
-  browserProps: [] as Array<{ scopeRef?: { scope: string; target?: string } }>,
+  browserProps: [] as Array<{ mode?: string; agentName?: string }>,
 }));
 
 vi.mock("@/hooks", () => ({
@@ -18,25 +18,18 @@ vi.mock("@/hooks", () => ({
   }),
   useWorkspaceContext: () => ({
     workspaceId: "test-ws",
-    repos: [
-      { name: "loomcli", is_linked_worktree: false },
-      { name: "atlas-worktree", is_linked_worktree: true },
-    ],
-    agents: [{ name: "atlas" }],
   }),
 }));
 
 // Mock the lazy-loaded component module
 vi.mock("@/components/FileExplorer", () => ({
-  WorkspaceFileBrowser: (props: {
-    scopeRef?: { scope: string; target?: string };
-  }) => {
+  WorkspaceFileBrowser: (props: { mode?: string; agentName?: string }) => {
     mocks.browserProps.push(props);
     return (
       <div
         data-testid="workspace-file-browser"
-        data-scope={props.scopeRef?.scope}
-        data-target={props.scopeRef?.target ?? ""}
+        data-mode={props.mode}
+        data-agent={props.agentName ?? ""}
       />
     );
   },
@@ -72,40 +65,14 @@ describe("FilesPage", () => {
     });
   });
 
-  it("switches browser scope from workspace to repo and agent", async () => {
+  it("renders one workspace-mode browser without a scope select", async () => {
     render(<FilesPage />);
 
     const browser = await screen.findByTestId("workspace-file-browser");
-    expect(browser).toHaveAttribute("data-scope", "workspace");
-
-    fireEvent.change(screen.getByLabelText("File browser scope"), {
-      target: { value: "repo:loomcli" },
-    });
-
-    await waitFor(() => {
-      expect(screen.getByTestId("workspace-file-browser")).toHaveAttribute(
-        "data-scope",
-        "repo",
-      );
-      expect(screen.getByTestId("workspace-file-browser")).toHaveAttribute(
-        "data-target",
-        "loomcli",
-      );
-    });
-
-    fireEvent.change(screen.getByLabelText("File browser scope"), {
-      target: { value: "agent:atlas" },
-    });
-
-    await waitFor(() => {
-      expect(screen.getByTestId("workspace-file-browser")).toHaveAttribute(
-        "data-scope",
-        "agent",
-      );
-      expect(screen.getByTestId("workspace-file-browser")).toHaveAttribute(
-        "data-target",
-        "atlas",
-      );
-    });
+    expect(browser).toHaveAttribute("data-mode", "workspace");
+    expect(
+      screen.queryByLabelText("File browser scope"),
+    ).not.toBeInTheDocument();
+    expect(mocks.browserProps).toHaveLength(1);
   });
 });
