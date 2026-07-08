@@ -1,0 +1,73 @@
+import type { FileTreeInlineEdit, FileTreeNodeInfo } from "./FileTree";
+import type {
+  HistoryOpenDiffRequest,
+  HistoryOpenRevisionRequest,
+} from "./FileHistoryPanel";
+import type { RevisionViewState } from "./FileRevisionPane";
+import type { FileBrowserMode } from "./treeRoots";
+import type { CheckoutRef } from "@/utils/fileExplorerRefs";
+
+export type ExplorerLens = "files" | "changes";
+
+export interface FileBrowserProps {
+  mode?: FileBrowserMode | undefined;
+  agentName?: string | undefined;
+  isActive?: boolean | undefined;
+}
+
+export interface ContextMenuState {
+  ref: CheckoutRef;
+  node: FileTreeNodeInfo;
+  x: number;
+  y: number;
+}
+
+export interface DeleteConfirmState {
+  ref: CheckoutRef;
+  node: FileTreeNodeInfo;
+}
+
+export interface MoveDialogState {
+  ref: CheckoutRef;
+  node: FileTreeNodeInfo;
+}
+
+export interface ScopedInlineEdit {
+  ref: CheckoutRef;
+  edit: FileTreeInlineEdit;
+}
+
+export interface TreeRevealRequest {
+  path: string;
+  token: number;
+}
+
+export interface TreeRefreshRequest {
+  paths: string[];
+  token: number;
+}
+
+export interface LineTarget {
+  line: number;
+  token: number;
+}
+
+export interface FileReloadRequest {
+  key: string | null;
+  token: number | undefined;
+}
+
+export interface DiffViewState {
+  ref: CheckoutRef;
+  path: string;
+  from?: string | undefined;
+  to?: string | undefined;
+  title: string;
+  patch?: string | undefined;
+  restoreContent?: string | undefined;
+  canOpenFile?: boolean | undefined;
+}
+
+export type OpenDiffRequest = HistoryOpenDiffRequest;
+export type OpenRevisionRequest = HistoryOpenRevisionRequest;
+export type { RevisionViewState };

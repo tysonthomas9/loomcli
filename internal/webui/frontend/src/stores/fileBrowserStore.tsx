@@ -76,6 +76,7 @@ export type FileBrowserStore = FileBrowserStoreState & FileBrowserStoreActions;
 export interface FileBrowserStoreConfig {
   workspaceId: string;
   validRefs?: CheckoutRef[] | undefined;
+  storageKey?: string | undefined;
 }
 
 export const EMPTY_FILE_BROWSER_STATE: PersistedFileBrowserTabsV3 = {
@@ -86,6 +87,10 @@ export const EMPTY_FILE_BROWSER_STATE: PersistedFileBrowserTabsV3 = {
 
 export function fileBrowserTabsStorageKey(): string {
   return FILE_BROWSER_TABS_STORAGE_KEY;
+}
+
+export function agentFileBrowserTabsStorageKey(agentName: string): string {
+  return `${FILE_BROWSER_TABS_STORAGE_KEY}:agent:${agentName}`;
 }
 
 function tabKey(tab: FileBrowserTab): string {
@@ -429,13 +434,14 @@ function mergePersistedStates(
 export function loadFileBrowserTabs(
   workspaceId: string,
   validRefs?: CheckoutRef[] | undefined,
+  storageKey = FILE_BROWSER_TABS_STORAGE_KEY,
 ): PersistedFileBrowserTabsV3 {
   const refs = validRefSet(validRefs);
-  const loaded = parsePersistedV3(
-    wsGet(workspaceId, FILE_BROWSER_TABS_STORAGE_KEY),
-    refs,
-  );
+  const loaded = parsePersistedV3(wsGet(workspaceId, storageKey), refs);
   if (loaded) return loaded;
+  if (storageKey !== FILE_BROWSER_TABS_STORAGE_KEY) {
+    return EMPTY_FILE_BROWSER_STATE;
+  }
 
   const migrated: PersistedFileBrowserTabsV3[] = [];
   for (const ref of findLegacyV2Refs(workspaceId)) {
@@ -450,14 +456,18 @@ export function loadFileBrowserTabs(
 
   const folded = mergePersistedStates(migrated, refs);
   if (folded) {
-    persist(workspaceId, folded);
+    persist(workspaceId, storageKey, folded);
     return folded;
   }
   return EMPTY_FILE_BROWSER_STATE;
 }
 
-function persist(workspaceId: string, state: PersistedFileBrowserTabsV3): void {
-  wsSet(workspaceId, FILE_BROWSER_TABS_STORAGE_KEY, JSON.stringify(state));
+function persist(
+  workspaceId: string,
+  storageKey: string,
+  state: PersistedFileBrowserTabsV3,
+): void {
+  wsSet(workspaceId, storageKey, JSON.stringify(state));
 }
 
 function touchMru(
@@ -470,18 +480,23 @@ function touchMru(
 
 function withPersistedState(
   workspaceId: string,
+  storageKey: string,
   partial: Omit<PersistedFileBrowserTabsV3, "v">,
 ): PersistedFileBrowserTabsV3 {
   const persisted = persistedFromGroups(partial.groups, partial.mru, null);
-  persist(workspaceId, persisted);
+  persist(workspaceId, storageKey, persisted);
   return persisted;
 }
 
 export function createFileBrowserStore(
   config: FileBrowserStoreConfig,
 ): StoreApi<FileBrowserStore> {
-  const { workspaceId, validRefs } = config;
-  const initial = loadFileBrowserTabs(workspaceId, validRefs);
+  const {
+    workspaceId,
+    validRefs,
+    storageKey = FILE_BROWSER_TABS_STORAGE_KEY,
+  } = config;
+  const initial = loadFileBrowserTabs(workspaceId, validRefs, storageKey);
 
   return createStore<FileBrowserStore>((set, get) => ({
     ...initial,
@@ -506,7 +521,7 @@ export function createFileBrowserStore(
         group.tabs = [...group.tabs, tab];
       }
       group.active = key;
-      const persisted = withPersistedState(workspaceId, {
+      const persisted = withPersistedState(workspaceId, storageKey, {
         groups,
         mru: touchMru(get().mru, tab),
       });
@@ -519,7 +534,7 @@ export function createFileBrowserStore(
       if (!group || !group.tabs.some((tab) => tabKey(tab) === key)) return;
       group.active = key;
       const tab = group.tabs.find((item) => tabKey(item) === key);
-      const persisted = withPersistedState(workspaceId, {
+      const persisted = withPersistedState(workspaceId, storageKey, {
         groups,
         mru: tab ? touchMru(get().mru, tab) : get().mru,
       });
@@ -543,7 +558,7 @@ export function createFileBrowserStore(
       groups[groupIndex] = { tabs: nextTabs, active: nextActive };
       const dirty = { ...get().dirty };
       delete dirty[key];
-      const persisted = withPersistedState(workspaceId, {
+      const persisted = withPersistedState(workspaceId, storageKey, {
         groups,
         mru: get().mru.filter((tab) => tabKey(tab) !== key),
       });
@@ -579,7 +594,7 @@ export function createFileBrowserStore(
           if (tab && matchesPathPrefix(tab, ref, path)) delete dirty[key];
         }
       }
-      const persisted = withPersistedState(workspaceId, {
+      const persisted = withPersistedState(workspaceId, storageKey, {
         groups,
         mru: get().mru.filter((tab) => !matchesPathPrefix(tab, ref, path)),
       });
@@ -611,7 +626,7 @@ export function createFileBrowserStore(
         rightGroup.tabs = [...rightGroup.tabs, sourceTab];
       }
       rightGroup.active = key;
-      const persisted = withPersistedState(workspaceId, {
+      const persisted = withPersistedState(workspaceId, storageKey, {
         groups,
         mru: touchMru(state.mru, sourceTab),
       });
@@ -670,7 +685,7 @@ export function createFileBrowserStore(
       for (const [key, isDirty] of Object.entries(state.dirty)) {
         dirty[oldToNewKeys.get(key) ?? key] = isDirty;
       }
-      const persisted = withPersistedState(workspaceId, {
+      const persisted = withPersistedState(workspaceId, storageKey, {
         groups,
         mru: state.mru.map((tab) =>
           sameCheckoutRef(tab.ref, ref) && matchesPathPrefix(tab, ref, from)
@@ -699,7 +714,7 @@ export function createFileBrowserStore(
       for (const [key, isDirty] of Object.entries(state.dirty)) {
         if (open.has(key)) dirty[key] = isDirty;
       }
-      persist(workspaceId, persisted);
+      persist(workspaceId, storageKey, persisted);
       set({
         ...persisted,
         dirty,
@@ -708,7 +723,7 @@ export function createFileBrowserStore(
     },
 
     reset: () => {
-      persist(workspaceId, EMPTY_FILE_BROWSER_STATE);
+      persist(workspaceId, storageKey, EMPTY_FILE_BROWSER_STATE);
       set({ ...EMPTY_FILE_BROWSER_STATE, dirty: {}, activeGroup: 0 });
     },
   }));
@@ -725,10 +740,11 @@ export interface FileBrowserStoreProviderProps extends FileBrowserStoreConfig {
 export function FileBrowserStoreProvider({
   workspaceId,
   validRefs,
+  storageKey,
   children,
 }: FileBrowserStoreProviderProps): JSX.Element {
   const [store] = useState(() =>
-    createFileBrowserStore({ workspaceId, validRefs }),
+    createFileBrowserStore({ workspaceId, validRefs, storageKey }),
   );
 
   useEffect(() => {

@@ -178,7 +178,9 @@ export function buildFileTreeSections({
         secondary: repo,
         exists: checkout?.exists ?? exists,
         changeCount,
-        flattenedRef: { scope: "agent", target: agent.name },
+        flattenedRef: repo
+          ? { scope: "agent", target: agent.name, repo }
+          : { scope: "agent", target: agent.name },
         children: [],
       };
     }
@@ -232,7 +234,7 @@ export function buildFileTreeSections({
 export function existingCheckoutRefs(
   sections: FileTreeSection[],
 ): CheckoutRef[] {
-  const refs: CheckoutRef[] = [{ scope: "workspace" }];
+  const refs: CheckoutRef[] = [];
   for (const section of sections) {
     for (const root of section.roots) {
       if (root.kind === "checkout" && root.exists) {
