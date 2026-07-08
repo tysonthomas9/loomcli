@@ -61,18 +61,23 @@ tests:
           fn: >-
             document.querySelector('[data-testid=metadata-type]')?.textContent?.includes('Bug')
       - expect: { text: "full-field description ${RUN_ID:-local}" }
-      # deferred issues are EXCLUDED from the default list (fleet-db adds
-      # status != 'deferred' when no filter is given), so the lookup must ask
-      # for them explicitly. For the same reason the Backlog column is not a
-      # stable assertion surface: the freshly created card renders from local
-      # store state but the next projection refetch omits deferred issues and
-      # evicts it. The API status below is the source of truth for the
-      # create-time-status fix.
+      # deferred issues are excluded from the PLAIN list (fleet-db adds
+      # status != 'deferred' when no filter is given) — a lookup must either
+      # pass status=deferred or use the board's enriched query
+      # (include_blocked=true routes through the kanban path, which merges a
+      # deferred overlay). The board itself always sends include_blocked=true,
+      # so the Backlog column shows deferred issues even across reloads.
       - run: >-
           issue_id=$(curl -sf "$AFT_BASE_URL/api/workspaces/${AFT_WS:-E2E-WS}/issues?status=deferred&limit=100"
           | python3 -c "import os,sys,json; data=json.load(sys.stdin)['data']; title='ui-full-field-' + os.environ['RUN_ID']; matches=[issue for issue in data if issue.get('title') == title]; assert matches, data; print(matches[0]['id'])");
           curl -sf "$AFT_BASE_URL/api/workspaces/${AFT_WS:-E2E-WS}/issues/$issue_id"
           | python3 -c "import os,sys,json; issue=json.load(sys.stdin)['data']; assert issue.get('issue_type') == 'bug', issue; assert issue.get('description') == 'full-field description ' + os.environ['RUN_ID'], issue; assert issue.get('status') == 'deferred', issue"
+      # server-side proof in the UI: a fresh load (not local store state) puts
+      # the deferred card in the Backlog column via the enriched board query
+      - reload: true
+      - wait:
+          fn: >-
+            document.querySelectorAll("section[data-status=backlog] article[aria-label*='ui-full-field-${RUN_ID:-local}']").length === 1
 
   # covers: LCLI-WP-001
   # BEHAVIOR CHANGE (fleet-db origin/main): creating an issue with an existing title
