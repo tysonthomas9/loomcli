@@ -121,6 +121,50 @@ describe("treeRoots", () => {
     ]);
   });
 
+  it("does not roll up unavailable checkout change counts", () => {
+    const sections = buildFileTreeSections({
+      mode: "workspace",
+      agents: [
+        agent({
+          name: "local-planner",
+          repos: ["source-repo", "docs-repo"],
+          cross_repo: true,
+        }),
+      ],
+      repos: [repo("source-repo"), repo("docs-repo")],
+      checkouts: [
+        checkout({
+          kind: "agent",
+          agent: "local-planner",
+          repo: "source-repo",
+          exists: true,
+          change_count: 2,
+        }),
+        checkout({
+          kind: "agent",
+          agent: "local-planner",
+          repo: "docs-repo",
+          exists: true,
+          change_count: 5,
+          status_error: true,
+        }),
+      ],
+    });
+
+    const agentRoot = sections[0]?.roots[0];
+    expect(agentRoot).toMatchObject({
+      kind: "agent",
+      changeCount: 2,
+    });
+    expect(
+      agentRoot?.kind === "agent" ? agentRoot.children[1] : undefined,
+    ).toMatchObject({
+      label: "docs-repo",
+      exists: true,
+      changeCount: 0,
+    });
+  });
+
   it("expands repo groups and includes shared repo and workspace sections", () => {
     const sections = buildFileTreeSections({
       mode: "workspace",

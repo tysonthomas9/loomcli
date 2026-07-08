@@ -1,6 +1,8 @@
 import type { FileCheckout } from "@/api/workspace";
 import { checkoutRefKey, type CheckoutRef } from "@/utils/fileExplorerRefs";
 
+import { hasAvailableCheckoutStatus } from "./checkoutAvailability";
+
 export type ChangeStatusKind = "modified" | "new" | "deleted" | "renamed";
 
 export interface ChangeStatusChip {
@@ -81,7 +83,10 @@ export function buildChangeGroups(
   gitStatusByRef: Record<string, Record<string, string>>,
 ): ChangeCheckoutGroup[] {
   return checkouts
-    .filter((checkout) => checkout.exists && checkout.change_count > 0)
+    .filter(
+      (checkout) =>
+        hasAvailableCheckoutStatus(checkout) && checkout.change_count > 0,
+    )
     .sort(compareCheckouts)
     .map((checkout) => {
       const ref = checkoutRefFromCheckout(checkout);

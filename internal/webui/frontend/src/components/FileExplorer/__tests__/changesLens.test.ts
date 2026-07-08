@@ -18,6 +18,7 @@ function checkout(
     agent: partial.agent,
     exists: partial.exists ?? true,
     change_count: partial.change_count ?? 1,
+    status_error: partial.status_error,
   };
 }
 
@@ -71,5 +72,35 @@ describe("changesLens", () => {
       "shared-a · shared checkout · 1",
       "shared-b · shared checkout · 1",
     ]);
+  });
+
+  it("omits unavailable and missing checkouts", () => {
+    const checkouts: FileCheckout[] = [
+      checkout({ kind: "repo", repo: "healthy", change_count: 1 }),
+      checkout({
+        kind: "agent",
+        agent: "local-coder",
+        repo: "broken",
+        change_count: 4,
+        status_error: true,
+      }),
+      checkout({
+        kind: "repo",
+        repo: "missing",
+        exists: false,
+        change_count: 3,
+      }),
+    ];
+    const statuses = Object.fromEntries(
+      checkouts.map((item) => [
+        checkoutRefKey(checkoutRefFromCheckout(item)),
+        { "src/main.ts": " M" },
+      ]),
+    );
+
+    expect(buildChangeGroups(checkouts, statuses)).toHaveLength(1);
+    expect(buildChangeGroups(checkouts, statuses)[0]?.label).toBe(
+      "healthy · shared checkout · 1",
+    );
   });
 });

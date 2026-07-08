@@ -159,6 +159,7 @@ type FileCheckout struct {
 	Exists      bool   `json:"exists"`
 	Branch      string `json:"branch,omitempty"`
 	ChangeCount int    `json:"change_count"`
+	StatusError bool   `json:"status_error,omitempty"`
 }
 
 // FileCheckoutsResult is the response for checkout enumeration.

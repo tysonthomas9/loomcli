@@ -6,6 +6,8 @@ import type {
 } from "@/api/workspace";
 import { checkoutRefKey, type CheckoutRef } from "@/utils/fileExplorerRefs";
 
+import { checkoutChangeCount } from "./checkoutAvailability";
+
 export type FileBrowserMode = "workspace" | "agent";
 
 export interface CheckoutTreeRoot {
@@ -128,7 +130,7 @@ function checkoutRoot(
     secondary: options?.secondary,
     icon,
     exists: checkout?.exists ?? options?.existsFallback ?? true,
-    changeCount: checkout?.change_count ?? 0,
+    changeCount: checkoutChangeCount(checkout),
     dimmed: options?.dimmed,
   };
 }

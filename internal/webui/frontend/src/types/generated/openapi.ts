@@ -2199,6 +2199,7 @@ export interface components {
       exists: boolean;
       branch?: string;
       change_count: number;
+      status_error?: boolean;
     };
     FileCheckoutsResponse: {
       checkouts: components["schemas"]["FileCheckout"][];

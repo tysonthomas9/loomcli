@@ -3895,6 +3895,8 @@ components:
           type: string
         change_count:
           type: integer
+        status_error:
+          type: boolean
 
     FileCheckoutsResponse:
       type: object
