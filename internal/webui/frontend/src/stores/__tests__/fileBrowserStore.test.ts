@@ -5,6 +5,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 
 import {
+  agentFileBrowserTabsStorageKey,
   createFileBrowserStore,
   fileBrowserTabsStorageKey,
 } from "../fileBrowserStore";
@@ -102,6 +103,32 @@ describe("fileBrowserStore", () => {
       { ref: { scope: "workspace" }, path: "workspace.txt" },
       { ref: { scope: "repo", target: "loomcli" }, path: "repo.txt" },
     ]);
+  });
+
+  it("keeps agent-scoped stores on distinct v3 storage keys", () => {
+    const atlasKey = agentFileBrowserTabsStorageKey("atlas");
+    const novaKey = agentFileBrowserTabsStorageKey("nova");
+    const atlas = createFileBrowserStore({
+      workspaceId: "ws-1",
+      storageKey: atlasKey,
+    });
+
+    atlas.getState().openTab({
+      ref: { scope: "agent", target: "atlas", repo: "loomcli" },
+      path: "README.md",
+    });
+    const nova = createFileBrowserStore({
+      workspaceId: "ws-1",
+      storageKey: novaKey,
+    });
+
+    expect(nova.getState().groups[0]?.tabs).toEqual([]);
+    expect(localStorage.getItem(wsKey("ws-1", atlasKey))).toContain(
+      "README.md",
+    );
+    expect(
+      localStorage.getItem(wsKey("ws-1", fileBrowserTabsStorageKey())),
+    ).toBeNull();
   });
 
   it("retargets and closes tabs for one checkout only", () => {

@@ -45,6 +45,12 @@ export type {
   UseFolderPickerReturn,
 } from "./useFolderPicker";
 
+export { useFileEditorBuffer } from "./useFileEditorBuffer";
+export type {
+  UseFileEditorBufferOptions,
+  UseFileEditorBufferReturn,
+} from "./useFileEditorBuffer";
+
 export { usePollingWithBackoff } from "./usePollingWithBackoff";
 export type {
   UsePollingWithBackoffOptions,
@@ -72,6 +78,7 @@ export {
 export type { StoreContextValue, StoreProviderProps } from "./useStoreContext";
 
 export {
+  agentFileBrowserTabsStorageKey,
   FileBrowserStoreProvider,
   fileBrowserTabsStorageKey,
   useFileBrowserStore,

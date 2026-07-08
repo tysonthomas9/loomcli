@@ -54,7 +54,11 @@ describe("treeRoots", () => {
       label: "local-coder",
       secondary: "source-repo",
       changeCount: 3,
-      flattenedRef: { scope: "agent", target: "local-coder" },
+      flattenedRef: {
+        scope: "agent",
+        target: "local-coder",
+        repo: "source-repo",
+      },
       children: [],
     });
   });
@@ -92,8 +96,8 @@ describe("treeRoots", () => {
     expect(agentRoot).toMatchObject({
       kind: "agent",
       changeCount: 1,
-      flattenedRef: undefined,
     });
+    expect(agentRoot).not.toHaveProperty("flattenedRef");
     expect(agentRoot?.kind === "agent" ? agentRoot.children : []).toEqual([
       expect.objectContaining({
         label: "source-repo",
@@ -146,6 +150,49 @@ describe("treeRoots", () => {
       label: "docs-repo",
       changeCount: 2,
       ref: { scope: "repo", target: "docs-repo" },
+    });
+  });
+
+  it("agent mode returns only the selected agent checkout roots", () => {
+    const sections = buildFileTreeSections({
+      mode: "agent",
+      agentName: "atlas",
+      agents: [
+        agent({ name: "atlas", repos: ["source-repo"] }),
+        agent({ name: "nova", repos: ["docs-repo"] }),
+      ],
+      repos: [repo("source-repo"), repo("docs-repo")],
+      checkouts: [
+        checkout({
+          kind: "agent",
+          agent: "atlas",
+          repo: "source-repo",
+          exists: true,
+          change_count: 1,
+        }),
+        checkout({
+          kind: "agent",
+          agent: "nova",
+          repo: "docs-repo",
+          exists: true,
+          change_count: 3,
+        }),
+        checkout({
+          kind: "repo",
+          repo: "source-repo",
+          exists: true,
+          change_count: 5,
+        }),
+      ],
+    });
+
+    expect(sections.map((section) => section.id)).toEqual(["agents"]);
+    expect(sections[0]?.roots).toHaveLength(1);
+    expect(sections[0]?.roots[0]).toMatchObject({
+      kind: "agent",
+      label: "atlas",
+      secondary: "source-repo",
+      changeCount: 1,
     });
   });
 });
