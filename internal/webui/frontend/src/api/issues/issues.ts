@@ -390,6 +390,7 @@ export async function createIssue(
     id: reqData.id,
     parent: reqData.parent,
     description: reqData.description,
+    status: reqData.status,
     design: reqData.design,
     acceptance_criteria: reqData.acceptance_criteria,
     notes: reqData.notes,

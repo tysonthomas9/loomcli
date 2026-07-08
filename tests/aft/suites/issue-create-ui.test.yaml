@@ -38,13 +38,11 @@ tests:
       - expect: { visible: { testid: create-issue-title } }
       - expect: { enabled: { testid: create-issue-submit, equals: false } }
 
-  # covers: LCLI-WP-001 (type + description; NOT create-time status — see DEFECT below)
-  # DEFECT (found by this suite, confirmed via review): the modal sends
-  # status "deferred" but the server drops it and the issue lands in Open.
-  # Create-time status is deliberately NOT selected here so this test doesn't
-  # assert the bug as correct; cover it once the defect is fixed.
+  # covers: LCLI-WP-001 (type + description + create-time deferred status)
+  # DEFECT FIXED: the frontend createIssue() client omitted status from the
+  # POST body. The server and fleet-db preserve create-time status once sent.
   - name: full-field create preserves type and description
-    intent: Creating an issue with type and description renders the saved values in the detail panel and on the board
+    intent: Creating an issue with type, description, and deferred status renders the saved values in the detail panel and Backlog column
     steps:
       - open: /ws/E2E-WS/kanban
       - wait:
@@ -54,6 +52,7 @@ tests:
       - expect: { visible: { testid: create-issue-title } }
       - fill: { testid: create-issue-title, value: "ui-full-field-${RUN_ID:-local}" }
       - select: { testid: create-issue-type, value: bug }
+      - select: { testid: create-issue-status, value: deferred }
       - fill: { testid: create-issue-description, value: "full-field description ${RUN_ID:-local}" }
       - click: { testid: create-issue-submit }
       - wait: { text: "ui-full-field-${RUN_ID:-local}" }
@@ -62,7 +61,15 @@ tests:
           fn: >-
             document.querySelector('[data-testid=metadata-type]')?.textContent?.includes('Bug')
       - expect: { text: "full-field description ${RUN_ID:-local}" }
-      - expect: { count: { selector: "section[data-status=ready] article[aria-label*='ui-full-field-${RUN_ID:-local}']", equals: 1 } }
+      - run: >-
+          issue_id=$(curl -sf "$AFT_BASE_URL/api/workspaces/${AFT_WS:-E2E-WS}/issues?title_contains=ui-full-field-$RUN_ID&limit=10"
+          | python3 -c "import os,sys,json; data=json.load(sys.stdin)['data']; title='ui-full-field-' + os.environ['RUN_ID']; matches=[issue for issue in data if issue.get('title') == title]; assert matches, data; print(matches[0]['id'])");
+          curl -sf "$AFT_BASE_URL/api/workspaces/${AFT_WS:-E2E-WS}/issues/$issue_id"
+          | python3 -c "import os,sys,json; issue=json.load(sys.stdin)['data']; assert issue.get('issue_type') == 'bug', issue; assert issue.get('description') == 'full-field description ' + os.environ['RUN_ID'], issue; assert issue.get('status') == 'deferred', issue"
+      - wait:
+          fn: >-
+            document.querySelectorAll("section[data-status=backlog] article[aria-label*='ui-full-field-${RUN_ID:-local}']").length === 1
+      - expect: { count: { selector: "section[data-status=backlog] article[aria-label*='ui-full-field-${RUN_ID:-local}']", equals: 1 } }
 
   # covers: LCLI-WP-001
   # BEHAVIOR CHANGE (fleet-db origin/main): creating an issue with an existing title

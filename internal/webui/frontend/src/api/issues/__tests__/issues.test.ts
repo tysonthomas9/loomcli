@@ -1461,6 +1461,7 @@ describe("issues API", () => {
         id: "custom-id",
         parent: "parent-123",
         description: "Detailed description",
+        status: "deferred",
         design: "Design notes",
         acceptance_criteria: "Must pass tests",
         notes: "Additional notes",
@@ -1492,6 +1493,7 @@ describe("issues API", () => {
             id: "custom-id",
             parent: "parent-123",
             description: "Detailed description",
+            status: "deferred",
           }),
         }),
       );
