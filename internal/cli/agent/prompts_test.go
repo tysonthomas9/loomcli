@@ -636,6 +636,49 @@ func TestGenerateConflictResolutionPrompt_DelegatesToInternal(t *testing.T) {
 	}
 }
 
+func TestGenerateTerminalPromptUsesBuiltInLeadWhenPromptFileEmpty(t *testing.T) {
+	prompt, err := GenerateTerminalPrompt("")
+	if err != nil {
+		t.Fatalf("GenerateTerminalPrompt empty: %v", err)
+	}
+	if prompt != GenerateLeadPrompt() {
+		t.Fatal("GenerateTerminalPrompt empty did not preserve built-in lead prompt")
+	}
+}
+
+func TestGenerateTerminalPromptCustomReplacesBaseAndAppendsSafety(t *testing.T) {
+	t.Setenv("LOOM_AGENT_NAME", "nova")
+	t.Setenv("LOOM_AGENT_ROLE", "operator")
+	promptFile := filepath.Join(t.TempDir(), "terminal.md")
+	if err := os.WriteFile(promptFile, []byte("Custom terminal for {{.AgentName}}/{{.WorktreeName}} as {{.Role}}"), 0644); err != nil {
+		t.Fatalf("write prompt: %v", err)
+	}
+
+	prompt, err := GenerateTerminalPrompt(promptFile)
+	if err != nil {
+		t.Fatalf("GenerateTerminalPrompt custom: %v", err)
+	}
+	if !strings.HasPrefix(prompt, "Custom terminal for nova/nova as operator") {
+		t.Fatalf("prompt = %q, want custom prompt as base", prompt)
+	}
+	if strings.Contains(prompt, "Lead Mode") {
+		t.Fatalf("prompt contains built-in lead template, want custom prompt replacement")
+	}
+	if !strings.Contains(prompt, "Multi-Agent Safety Rules") {
+		t.Fatalf("prompt missing appended safety guardrails")
+	}
+}
+
+func TestGenerateTerminalPromptMissingFileErrors(t *testing.T) {
+	_, err := GenerateTerminalPrompt(filepath.Join(t.TempDir(), "missing.md"))
+	if err == nil {
+		t.Fatal("GenerateTerminalPrompt missing file error = nil, want error")
+	}
+	if !strings.Contains(err.Error(), "reading prompt template") && !strings.Contains(err.Error(), "not found") {
+		t.Fatalf("error = %q, want clear prompt file error", err.Error())
+	}
+}
+
 func TestGenerateFleetPlanningPrompt(t *testing.T) {
 	tests := []struct {
 		name      string

@@ -39,19 +39,24 @@ const leadStoreOpTimeout = 10 * time.Second
 // prompt so the agent starts with a concrete task to address. Populated by the
 // --message flag.
 var leadMessage string
+var leadPromptFile string
 
 var leadCmd = &cobra.Command{
 	Use:     "lead",
-	Short:   "Interactive project management with AI agent",
+	Short:   "Run the interactive terminal-agent runtime",
 	GroupID: "agents",
-	Long: `Launch an interactive AI agent session for project management.
+	Long: `Launch an interactive terminal-agent session.
 
-Unlike 'plan' and 'task' (which are autonomous agents), 'lead' is a
-human-collaborative mode where the AI agent helps you:
+Unlike 'plan' and 'task' (which are autonomous worker agents), 'lead' is the
+interactive terminal-agent runtime. The default persona is lead/project
+management mode, where the AI agent helps you:
   - Review and approve/reject plans from planning agents
   - Create new tickets (tasks, bugs, features, epics)
   - Triage and prioritize the backlog
   - Manage dependencies between tickets
+
+Pass --prompt to replace the default lead prompt with a role prompt_file while
+keeping terminal-agent guardrails and orchestration behavior.
 
 This command does not require a worktree - it can run from the main
 repository or any worktree.
@@ -66,6 +71,7 @@ lead-mode startup and then addresses the request using lead-mode conventions.`,
 func init() {
 	cli.RegisterCommand(leadCmd)
 	leadCmd.Flags().StringVar(&leadMessage, "message", "", "Initial user request to address in lead mode")
+	leadCmd.Flags().StringVar(&leadPromptFile, "prompt", "", "Path to terminal-agent prompt template")
 }
 
 func runLead(cmd *cobra.Command, args []string) {
@@ -97,8 +103,14 @@ func runLead(cmd *cobra.Command, args []string) {
 	registration := registerLeadOrchestratorSession(context.Background(), workDir)
 	defer registration.Finalize()
 
-	// Generate the lead prompt and append the user's initial request if provided.
-	prompt := agent.GenerateLeadPrompt()
+	// Generate the terminal-agent prompt and append the user's initial request if provided.
+	prompt, err := agent.GenerateTerminalPrompt(leadPromptFile)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error loading terminal prompt: %v\n", err)
+		fmt.Fprintf(os.Stderr, "\nDropping into a shell. Fix the prompt file and run 'loom lead' to retry.\n\n")
+		execShell(workDir)
+		return
+	}
 	if assignment := currentLeadAssignmentPrompt(context.Background()); assignment != "" {
 		prompt += "\n\n## Loom Backend Assignment\n\n" + assignment
 	}

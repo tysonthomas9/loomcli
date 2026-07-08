@@ -1,9 +1,11 @@
 package supervisor
 
 import (
+	"strings"
 	"testing"
 
 	cfgpkg "github.com/tysonthomas9/loomcli/internal/cli/config"
+	"github.com/tysonthomas9/loomcli/internal/domain"
 )
 
 // TestMergeRoleConfig_MaxBudgetUSD guards the per-role budget override: a role's
@@ -32,4 +34,23 @@ func TestMergeRoleConfig_MaxBudgetUSD(t *testing.T) {
 			t.Errorf("MaxBudgetUSD = %v, want %v (base preserved)", *got.MaxBudgetUSD, baseBudget)
 		}
 	})
+}
+
+func TestResolveRoleConfigStaticRejectsTerminalKindRole(t *testing.T) {
+	cfg := &cfgpkg.DaemonConfig{
+		Roles: map[string]cfgpkg.RoleConfig{
+			"operator": {
+				Kind:       string(domain.RoleKindTerminal),
+				PromptFile: "operator.md",
+			},
+		},
+	}
+
+	_, err := ResolveRoleConfigStatic("operator", cfg, t.TempDir())
+	if err == nil {
+		t.Fatal("ResolveRoleConfigStatic error = nil, want terminal role error")
+	}
+	if !strings.Contains(err.Error(), "terminal role") || !strings.Contains(err.Error(), "daemon-supervised") {
+		t.Fatalf("error = %q, want terminal daemon-supervised message", err.Error())
+	}
 }

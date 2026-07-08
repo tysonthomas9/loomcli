@@ -39,6 +39,7 @@ func (s *roleStore) Create(_ context.Context, in store.RoleCreate) (*domain.Role
 	r := &domain.Role{
 		WorkspaceKey:   in.WorkspaceKey,
 		Name:           in.Name,
+		Kind:           domain.RoleKind(in.Kind),
 		Description:    in.Description,
 		PromptFile:     in.PromptFile,
 		Model:          in.Model,
@@ -91,6 +92,9 @@ func (s *roleStore) Update(_ context.Context, ws, name string, patch store.RoleU
 	}
 	if patch.Description != nil {
 		r.Description = *patch.Description
+	}
+	if patch.Kind != nil {
+		r.Kind = domain.RoleKind(*patch.Kind)
 	}
 	if patch.PromptFile != nil {
 		r.PromptFile = *patch.PromptFile

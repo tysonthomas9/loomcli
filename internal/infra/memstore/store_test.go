@@ -114,6 +114,41 @@ func TestRepoCRUD(t *testing.T) {
 	}
 }
 
+func TestRoleStoreKindCreatePatchClear(t *testing.T) {
+	ctx := context.Background()
+	s := New()
+
+	role, err := s.Roles().Create(ctx, store.RoleCreate{
+		WorkspaceKey: "WS",
+		Name:         "operator",
+		Kind:         string(domain.RoleKindTerminal),
+	})
+	if err != nil {
+		t.Fatalf("Create role: %v", err)
+	}
+	if role.Kind != domain.RoleKindTerminal {
+		t.Fatalf("created kind = %q, want terminal", role.Kind)
+	}
+
+	worker := string(domain.RoleKindWorker)
+	role, err = s.Roles().Update(ctx, "WS", "operator", store.RoleUpdate{Kind: &worker})
+	if err != nil {
+		t.Fatalf("Update role kind: %v", err)
+	}
+	if role.Kind != domain.RoleKindWorker {
+		t.Fatalf("updated kind = %q, want worker", role.Kind)
+	}
+
+	clear := ""
+	role, err = s.Roles().Update(ctx, "WS", "operator", store.RoleUpdate{Kind: &clear})
+	if err != nil {
+		t.Fatalf("Clear role kind: %v", err)
+	}
+	if role.Kind != "" {
+		t.Fatalf("cleared kind = %q, want empty", role.Kind)
+	}
+}
+
 // TestDaemonProfileGetReturnsDefaults verifies that Get on a workspace
 // with no explicit Upsert returns sensible defaults rather than
 // ErrNotFound — the API contract is "every workspace has a profile".

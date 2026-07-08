@@ -384,7 +384,11 @@ func (s *agentServiceImpl) CreateAgent(ctx context.Context, in service.AgentCrea
 }
 
 func (s *agentServiceImpl) ensureLocalAgentWorktrees(ctx context.Context, agent domain.Agent) error {
-	if isLeadAgentRole(agent.RoleName) {
+	role, err := s.loadAgentRoleForKind(ctx, agent.WorkspaceKey, agent.RoleName)
+	if err != nil {
+		return err
+	}
+	if domain.ResolveRoleKind(role, agent.RoleName) == domain.RoleKindTerminal {
 		return nil
 	}
 	ws, err := storeadapter.BuildWorkspaceDataForKey(ctx, s.store, agent.WorkspaceKey)
@@ -430,6 +434,17 @@ func (s *agentServiceImpl) ensureLocalAgentWorktrees(ctx context.Context, agent 
 	return nil
 }
 
+func (s *agentServiceImpl) loadAgentRoleForKind(ctx context.Context, workspaceKey, roleName string) (*domain.Role, error) {
+	role, err := s.store.Roles().Get(ctx, workspaceKey, roleName)
+	if errors.Is(err, domain.ErrNotFound) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, service.ErrInternal("load agent role", err)
+	}
+	return role, nil
+}
+
 func (s *agentServiceImpl) ensureFirstClassAgentRole(ctx context.Context, workspaceKey, roleName string) error {
 	if !isLeadAgentRole(roleName) {
 		return nil
@@ -442,6 +457,7 @@ func (s *agentServiceImpl) ensureFirstClassAgentRole(ctx context.Context, worksp
 	if _, err := s.store.Roles().Create(ctx, store.RoleCreate{
 		WorkspaceKey: workspaceKey,
 		Name:         roleName,
+		Kind:         string(domain.RoleKindTerminal),
 		Description:  "Lead/orchestrator terminal",
 	}); err != nil && !errors.Is(err, domain.ErrAlreadyExists) {
 		return classifyStoreError("create lead role", err)
@@ -460,12 +476,7 @@ func normalizeFirstClassAgentRole(roleName string) string {
 }
 
 func isLeadAgentRole(roleName string) bool {
-	switch strings.ToLower(strings.TrimSpace(roleName)) {
-	case "lead", "orchestrator":
-		return true
-	default:
-		return false
-	}
+	return domain.IsTerminalRoleName(roleName)
 }
 
 // UpdateAgent applies a partial update to an existing agent.

@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 
 	cfgpkg "github.com/tysonthomas9/loomcli/internal/cli/config"
+	"github.com/tysonthomas9/loomcli/internal/domain"
 )
 
 // ResolveRoleConfigStatic looks up a role by name without requiring a Supervisor instance.
@@ -15,6 +16,9 @@ func ResolveRoleConfigStatic(roleName string, config *cfgpkg.DaemonConfig, proje
 	if BuiltInRoles[roleName] {
 		rc := builtInRoleConfig(roleName)
 		if userRC, ok := config.ResolveRole(roleName); ok {
+			if roleConfigIsTerminal(roleName, userRC) {
+				return cfgpkg.RoleConfig{}, fmt.Errorf("terminal role %q cannot be daemon-supervised; launch it from a terminal", roleName)
+			}
 			if userRC.PromptFile != "" {
 				return cfgpkg.RoleConfig{}, fmt.Errorf("built-in role %q cannot set prompt_file; use a custom role name for prompt-based agents", roleName)
 			}
@@ -26,6 +30,9 @@ func ResolveRoleConfigStatic(roleName string, config *cfgpkg.DaemonConfig, proje
 	rc, ok := config.ResolveRole(roleName)
 	if !ok {
 		return cfgpkg.RoleConfig{}, fmt.Errorf("role %q not found (not a built-in role and not defined in config.Roles)", roleName)
+	}
+	if roleConfigIsTerminal(roleName, rc) {
+		return cfgpkg.RoleConfig{}, fmt.Errorf("terminal role %q cannot be daemon-supervised; launch it from a terminal", roleName)
 	}
 
 	if rc.PromptFile == "" {
@@ -44,6 +51,11 @@ func ResolveRoleConfigStatic(roleName string, config *cfgpkg.DaemonConfig, proje
 	return rc, nil
 }
 
+func roleConfigIsTerminal(roleName string, rc cfgpkg.RoleConfig) bool {
+	role := &domain.Role{Kind: domain.RoleKind(rc.Kind)}
+	return domain.ResolveRoleKind(role, roleName) == domain.RoleKindTerminal
+}
+
 func builtInRoleConfig(roleName string) cfgpkg.RoleConfig {
 	rc := cfgpkg.RoleConfig{Description: fmt.Sprintf("Built-in %s agent", roleName)}
 	switch roleName {
@@ -59,6 +71,9 @@ func builtInRoleConfig(roleName string) cfgpkg.RoleConfig {
 // Description falls back to base when overlay has none.
 // PromptFile is NOT merged (built-in roles don't use prompt files).
 func MergeRoleConfig(base, overlay cfgpkg.RoleConfig) cfgpkg.RoleConfig {
+	if overlay.Kind != "" {
+		base.Kind = overlay.Kind
+	}
 	if overlay.Description != "" {
 		base.Description = overlay.Description
 	}

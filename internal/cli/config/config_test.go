@@ -84,17 +84,42 @@ func TestAgentEntryShouldSuperviseSkipsLeadRoles(t *testing.T) {
 	tests := []struct {
 		name  string
 		entry AgentEntry
+		roles map[string]RoleConfig
 		want  bool
 	}{
 		{name: "task default runs", entry: AgentEntry{Worktree: "worker", Role: "task"}, want: true},
 		{name: "lead terminal is not daemon supervised", entry: AgentEntry{Worktree: "lead", Role: "lead"}, want: false},
 		{name: "orchestrator terminal is not daemon supervised", entry: AgentEntry{Worktree: "lead", Role: "orchestrator"}, want: false},
+		{
+			name:  "custom terminal kind is not daemon supervised",
+			entry: AgentEntry{Worktree: "operator", Role: "operator"},
+			roles: map[string]RoleConfig{
+				"operator": {Kind: string(domain.RoleKindTerminal)},
+			},
+			want: false,
+		},
+		{
+			name:  "terminal kind ignores running desired state",
+			entry: AgentEntry{Worktree: "operator", Role: "operator", DesiredState: domain.AgentDesiredRunning},
+			roles: map[string]RoleConfig{
+				"operator": {Kind: string(domain.RoleKindTerminal)},
+			},
+			want: false,
+		},
+		{
+			name:  "worker kind uses desired state",
+			entry: AgentEntry{Worktree: "operator", Role: "operator", DesiredState: domain.AgentDesiredRunning},
+			roles: map[string]RoleConfig{
+				"operator": {Kind: string(domain.RoleKindWorker)},
+			},
+			want: true,
+		},
 		{name: "stopped worker does not run", entry: AgentEntry{Worktree: "worker", Role: "task", DesiredState: domain.AgentDesiredStopped}, want: false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := tt.entry.ShouldSupervise(); got != tt.want {
-				t.Fatalf("ShouldSupervise() = %v, want %v", got, tt.want)
+			if got := tt.entry.ShouldSuperviseWithRoles(tt.roles); got != tt.want {
+				t.Fatalf("ShouldSuperviseWithRoles() = %v, want %v", got, tt.want)
 			}
 		})
 	}

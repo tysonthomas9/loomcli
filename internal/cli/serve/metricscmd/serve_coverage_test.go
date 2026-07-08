@@ -579,6 +579,45 @@ func TestMonitorStoreDataSource_CachesWorkspaceMetadataAcrossEndpoints(t *testin
 	}
 }
 
+func TestMonitorStoreDataSourcePopulatesRoleKind(t *testing.T) {
+	ctx := context.Background()
+	st := memstore.New()
+	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "WS1", Name: "Workspace"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.Roles().Create(ctx, store.RoleCreate{
+		WorkspaceKey: "WS1",
+		Name:         "operator",
+		Kind:         string(domain.RoleKindTerminal),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	for _, agent := range []store.AgentCreate{
+		{WorkspaceKey: "WS1", Name: "lead-a", RoleName: "lead"},
+		{WorkspaceKey: "WS1", Name: "operator-a", RoleName: "operator"},
+		{WorkspaceKey: "WS1", Name: "task-a", RoleName: "task"},
+	} {
+		if _, err := st.Agents().Create(ctx, agent); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	data := collectMonitorStoreData(ctx, st, "WS1")
+	got := map[string]string{}
+	for _, agent := range data.Agents {
+		got[agent.Name] = agent.RoleKind
+	}
+	if got["lead-a"] != string(domain.RoleKindTerminal) {
+		t.Fatalf("lead-a role_kind = %q, want terminal", got["lead-a"])
+	}
+	if got["operator-a"] != string(domain.RoleKindTerminal) {
+		t.Fatalf("operator-a role_kind = %q, want terminal", got["operator-a"])
+	}
+	if got["task-a"] != string(domain.RoleKindWorker) {
+		t.Fatalf("task-a role_kind = %q, want worker", got["task-a"])
+	}
+}
+
 type countingStore struct {
 	store.Store
 	workspaces *countingWorkspaceStore

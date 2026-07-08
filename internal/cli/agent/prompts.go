@@ -339,6 +339,60 @@ func GenerateLeadPrompt() string {
 	})
 }
 
+// GenerateTerminalPrompt creates the base prompt for the interactive terminal
+// agent runtime. Empty promptFile preserves the built-in lead prompt; a custom
+// prompt file replaces that base and still receives the terminal safety rules.
+func GenerateTerminalPrompt(promptFile string) (string, error) {
+	if strings.TrimSpace(promptFile) == "" {
+		return GenerateLeadPrompt(), nil
+	}
+	path, err := resolveTerminalPromptPath(promptFile)
+	if err != nil {
+		return "", err
+	}
+	agentName := strings.TrimSpace(os.Getenv("LOOM_AGENT_NAME"))
+	if agentName == "" {
+		agentName = "lead"
+	}
+	role := strings.TrimSpace(os.Getenv("LOOM_AGENT_ROLE"))
+	if role == "" {
+		role = "lead"
+	}
+	prompt, err := LoadPromptTemplate(path, PromptData{
+		AgentName:    agentName,
+		WorktreeName: agentName,
+		Role:         role,
+	})
+	if err != nil {
+		return "", err
+	}
+	return prompt + "\n\n" + buildSafetyGuardrailsBlock(), nil
+}
+
+func resolveTerminalPromptPath(promptFile string) (string, error) {
+	promptFile = strings.TrimSpace(promptFile)
+	if filepath.IsAbs(promptFile) {
+		return promptFile, nil
+	}
+	if cwd, err := os.Getwd(); err == nil {
+		candidate := filepath.Join(cwd, promptFile)
+		if _, statErr := os.Stat(candidate); statErr == nil {
+			return candidate, nil
+		} else if !os.IsNotExist(statErr) {
+			return "", fmt.Errorf("resolve prompt file %q relative to cwd: %w", promptFile, statErr)
+		}
+	}
+	if ws, err := config.ResolveActiveWorkspace(); err == nil && ws != nil && strings.TrimSpace(ws.Path) != "" {
+		candidate := filepath.Join(ws.Path, promptFile)
+		if _, statErr := os.Stat(candidate); statErr == nil {
+			return candidate, nil
+		} else if !os.IsNotExist(statErr) {
+			return "", fmt.Errorf("resolve prompt file %q relative to workspace %q: %w", promptFile, ws.Path, statErr)
+		}
+	}
+	return "", fmt.Errorf("prompt file %q not found relative to current directory or active workspace root", promptFile)
+}
+
 // injectCheckpointIfNotResuming adds the prior-attempt checkpoint to the prompt
 // as a FALLBACK, but SKIPS it when a session resume is armed
 // (backends.GetResumeSessionID() != ""). Resume-first / checkpoint-fallback (P4):
