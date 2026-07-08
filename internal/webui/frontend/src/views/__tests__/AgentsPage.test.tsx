@@ -3,6 +3,7 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import "@testing-library/jest-dom";
 
 import { startWorkflowRun } from "@/api";
 
@@ -18,6 +19,7 @@ const mocks = vi.hoisted(() => {
     startWorkflowRun: vi.fn(),
     localSettings: { settings: null },
     workspaceContext: { repos: [] },
+    agents: [] as Array<Record<string, unknown>>,
     agentStore: {
       getState: () => ({ fetchData }),
     },
@@ -35,8 +37,10 @@ vi.mock("react-router-dom", async (importOriginal) => {
 });
 
 vi.mock("zustand", () => ({
-  useStore: <T,>(_: unknown, selector: (state: { agents: never[] }) => T) =>
-    selector({ agents: [] }),
+  useStore: <T,>(
+    _: unknown,
+    selector: (state: { agents: Array<Record<string, unknown>> }) => T,
+  ) => selector({ agents: mocks.agents }),
 }));
 
 vi.mock("@/api", () => ({
@@ -52,6 +56,12 @@ vi.mock("@/api", () => ({
 
 vi.mock("@/hooks", () => ({
   useAgentStoreInstance: () => mocks.agentStore,
+  useAgentDiffStat: () => ({
+    data: null,
+    isLoading: false,
+    error: null,
+    refetch: vi.fn(),
+  }),
 }));
 
 vi.mock("@/hooks/workspace", () => ({
@@ -72,6 +82,70 @@ vi.mock("@/components", () => ({
 
 vi.mock("@/components/AgentDetailMain/AgentDetailMain", () => ({
   AgentDetailMain: () => <div data-testid="agent-detail" />,
+}));
+
+vi.mock("@/components/AgentDetailPanel", () => ({
+  GitTab: ({
+    agent,
+    isActive,
+  }: {
+    agent: { name: string };
+    isActive?: boolean;
+  }) => (
+    <div
+      data-testid="git-tab"
+      data-agent={agent.name}
+      data-active={String(isActive)}
+    />
+  ),
+  AgentLogsTab: ({
+    agentName,
+    isActive,
+  }: {
+    agentName: string;
+    isActive: boolean;
+  }) => (
+    <div
+      data-testid="agent-logs-tab"
+      data-agent={agentName}
+      data-active={String(isActive)}
+    />
+  ),
+  DiffTab: ({
+    agent,
+    isActive,
+  }: {
+    agent: { name: string };
+    isActive: boolean;
+  }) => (
+    <div
+      data-testid="diff-tab"
+      data-agent={agent.name}
+      data-active={String(isActive)}
+    />
+  ),
+}));
+
+vi.mock("@/components/FileEditorPanel", () => ({
+  FileEditorPanel: ({
+    agentName,
+    isActive,
+  }: {
+    agentName: string;
+    isActive: boolean;
+  }) => (
+    <div
+      data-testid="file-editor-panel"
+      data-agent={agentName}
+      data-active={String(isActive)}
+    />
+  ),
+}));
+
+vi.mock("@/components/OpenInEditor", () => ({
+  OpenInEditor: ({ path }: { path: string }) => (
+    <div data-testid="open-in-editor" data-path={path} />
+  ),
 }));
 
 vi.mock("@/components/AgentWorkPanel/AgentWorkPanel", () => ({
@@ -105,6 +179,7 @@ describe("AgentsPage", () => {
     vi.clearAllMocks();
     mocks.localSettings = { settings: null };
     mocks.workspaceContext = { repos: [] };
+    mocks.agents = [];
     mocks.startWorkflowRun.mockResolvedValue({
       run_id: "run-1",
       status: "queued",
@@ -224,5 +299,50 @@ describe("AgentsPage", () => {
         },
       );
     });
+  });
+
+  it("renders a Logs tab and shows the logs pane when clicked", async () => {
+    mocks.agents = [
+      {
+        name: "lead-1",
+        status: "ready",
+        role: "lead",
+        branch: "agent/lead-1",
+        repo: "loomcli",
+      },
+    ];
+
+    render(<AgentsPage />);
+
+    const logsTab = await screen.findByRole("button", { name: "Logs" });
+    fireEvent.click(logsTab);
+
+    expect(logsTab).toHaveAttribute("aria-current", "page");
+    expect(screen.getByTestId("agent-logs-tab")).toHaveAttribute(
+      "data-agent",
+      "lead-1",
+    );
+    expect(screen.getByTestId("agent-logs-tab")).toHaveAttribute(
+      "data-active",
+      "true",
+    );
+  });
+
+  it("renders OpenInEditor in Info when worktree_path is set", async () => {
+    mocks.agents = [
+      {
+        name: "lead-1",
+        status: "ready",
+        role: "lead",
+        branch: "agent/lead-1",
+        repo: "loomcli",
+        worktree_path: "/tmp/loomcli/lead-1",
+      },
+    ];
+
+    render(<AgentsPage />);
+
+    const openInEditor = await screen.findByTestId("open-in-editor");
+    expect(openInEditor).toHaveAttribute("data-path", "/tmp/loomcli/lead-1");
   });
 });

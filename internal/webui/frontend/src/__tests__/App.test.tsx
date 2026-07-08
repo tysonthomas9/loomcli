@@ -3170,37 +3170,6 @@ describe("App", () => {
         expect.stringContaining("/agents/agent-2"),
       );
     });
-
-    it("agent panel close calls closePanel", () => {
-      const mockReturn = createMockUseIssuesReturn({
-        agents: [
-          {
-            name: "agent-1",
-            status: "idle",
-            current_task: null,
-            workspace: "/test",
-            started_at: "2024-01-01T00:00:00Z",
-          },
-        ],
-      });
-      mockStoreState = mockReturn;
-
-      // Set panel to open state so close button is visible
-      mockUsePanelManager.mockReturnValue({
-        activePanel: { type: "agent", name: "agent-1" },
-        pendingPanel: null,
-        openPanel: mockOpenPanel,
-        closePanel: mockClosePanel,
-        isOpen: vi.fn(() => true),
-      });
-
-      render(<App />);
-
-      // Close the panel using the close button
-      const closeButton = screen.getByRole("button", { name: "Close panel" });
-      fireEvent.click(closeButton);
-      expect(mockClosePanel).toHaveBeenCalled();
-    });
   });
 
   describe("handleApprove and handleReject", () => {

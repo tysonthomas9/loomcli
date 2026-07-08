@@ -77,7 +77,7 @@ import { ResizeDivider } from "./actions";
 import { ErrorToast } from "../ErrorToast";
 import { useSplitRatio, useToast } from "@/hooks/ui";
 import { CollapsibleSection } from "./CollapsibleSection";
-import { SessionsTab } from "./sessions";
+import { SessionsTab, SessionHistorySection } from "./sessions";
 import styles from "./IssueDetailPanel.module.css";
 import { formatDate, formatIssueType, isIssueDetails } from "./utils";
 
@@ -1501,6 +1501,20 @@ function DefaultContent({
                 </ul>
               </section>
             )}
+
+            <CollapsibleSection
+              title="Terminal History"
+              defaultExpanded={false}
+              testId="session-history-section"
+            >
+              <SessionHistorySection
+                issueId={issue.id}
+                onJumpToSession={(sessionName) => {
+                  const tabId = `terminal-${sessionName}`;
+                  if (tabs.find((t) => t.id === tabId)) setActiveTabId(tabId);
+                }}
+              />
+            </CollapsibleSection>
 
             {/* Activity Log (comments + events) */}
             <ActivityLog

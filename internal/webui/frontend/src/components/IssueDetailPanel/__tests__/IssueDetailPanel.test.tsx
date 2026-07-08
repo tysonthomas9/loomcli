@@ -38,6 +38,8 @@ const {
   mockUseWorkspaceContext,
   mockUseAgentStoreInstance,
   mockGetTaskSessions,
+  mockListSessionHistory,
+  mockGetSessionScrollback,
   mockShowToast,
   mockUseToast,
 } = vi.hoisted(() => ({
@@ -94,6 +96,10 @@ const {
   })),
   mockUseAgentStoreInstance: vi.fn(),
   mockGetTaskSessions: vi.fn(() => Promise.resolve([])),
+  mockListSessionHistory: vi.fn(() => Promise.resolve([])),
+  mockGetSessionScrollback: vi.fn(() =>
+    Promise.resolve({ content: "", lines: 0 }),
+  ),
   mockShowToast: vi.fn(),
   mockUseToast: vi.fn(() => ({
     toasts: [],
@@ -137,6 +143,8 @@ vi.mock("@/api/terminal", () => ({
   scheduleSessionKill: mockScheduleSessionKill,
   getTaskSessions: mockGetTaskSessions,
   listIssueSessions: vi.fn().mockImplementation(() => new Promise(() => {})),
+  listSessionHistory: mockListSessionHistory,
+  getSessionScrollback: mockGetSessionScrollback,
 }));
 
 // Mock tab persistence hook for terminal tab restoration tests
@@ -333,6 +341,10 @@ describe("IssueDetailPanel", () => {
     mockUseWorkspaceContext.mockImplementation(() => createWorkspaceContext());
     mockGetTaskSessions.mockReset();
     mockGetTaskSessions.mockResolvedValue([]);
+    mockListSessionHistory.mockReset();
+    mockListSessionHistory.mockResolvedValue([]);
+    mockGetSessionScrollback.mockReset();
+    mockGetSessionScrollback.mockResolvedValue({ content: "", lines: 0 });
     mockShowToast.mockReset();
     mockUseToast.mockReset();
     mockUseToast.mockImplementation(() => ({
@@ -1232,6 +1244,32 @@ describe("IssueDetailPanel", () => {
 
       const detailsTab = screen.getByRole("tab", { name: "Details" });
       expect(detailsTab).toHaveAttribute("aria-selected", "true");
+    });
+
+    it("renders terminal history section and shows empty state when expanded", async () => {
+      mockListSessionHistory.mockResolvedValue([]);
+      const mockIssue = createTestIssueDetails({
+        id: "test-123",
+        description: "Test issue description",
+      });
+
+      render(
+        <IssueDetailPanel isOpen={true} issue={mockIssue} onClose={() => {}} />,
+      );
+
+      const section = screen.getByTestId("session-history-section");
+      expect(section).toBeInTheDocument();
+
+      fireEvent.click(
+        within(section).getByRole("button", { name: "Terminal History" }),
+      );
+
+      await waitFor(() => {
+        expect(
+          within(section).getByText("No terminal sessions yet"),
+        ).toBeInTheDocument();
+      });
+      expect(mockListSessionHistory).toHaveBeenCalledWith("", "test-123");
     });
 
     it("Details tab close button is not shown", () => {

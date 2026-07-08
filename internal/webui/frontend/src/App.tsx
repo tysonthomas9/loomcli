@@ -54,7 +54,6 @@ import { ToastContainer } from "@/components/Toast/ToastContainer";
 import { SearchInput } from "@/components/search/SearchInput";
 import { SearchScopeIndicator } from "@/components/search/SearchScopeIndicator";
 import { IssueDetailPanel } from "@/components/IssueDetailPanel/IssueDetailPanel";
-import { AgentDetailPanel } from "@/components/AgentDetailPanel/AgentDetailPanel";
 import { WorkspaceTree } from "@/components/WorkspaceTree/WorkspaceTree";
 import { NavRail } from "@/components/NavRail/NavRail";
 import { ThemeToggle } from "@/components/ThemeToggle/ThemeToggle";
@@ -422,25 +421,15 @@ function App() {
   const { toasts, showToast, dismissToast } = useToast();
   const mountedRef = useRef(true);
 
-  // Centralized panel state (issue detail panel + agent detail panel).
+  // Centralized panel state for issue detail overlays.
   // Enforces mutual exclusivity with 300ms close-then-open transitions.
-  const { activePanel, pendingPanel, openPanel, closePanel } =
-    usePanelManager();
+  const { activePanel, openPanel, closePanel } = usePanelManager();
 
   // Derive panel visibility booleans from the centralized panel state.
   const isPanelOpen = activePanel?.type === "issue";
-  const isAgentPanelOpen = activePanel?.type === "agent";
-  const selectedAgentName =
-    activePanel?.type === "agent"
-      ? activePanel.name
-      : pendingPanel?.type === "agent"
-        ? pendingPanel.name
-        : null;
 
   const sidebarSelectedAgentName =
-    activeView === "agents" && routeAgentName
-      ? routeAgentName
-      : selectedAgentName;
+    activeView === "agents" && routeAgentName ? routeAgentName : null;
 
   // Ref to main scrollable container for workspace state snapshot.
   // NOTE: Must be declared BEFORE useWorkspaceState below — React runs effects
@@ -787,11 +776,6 @@ function App() {
     [navigate, workspaceId, closeAllPanels],
   );
 
-  // Handle agent panel close
-  const handleAgentPanelClose = useCallback(() => {
-    closePanel();
-  }, [closePanel]);
-
   useEffect(() => {
     if (activeView === "terminal") {
       closeAllPanels();
@@ -1128,16 +1112,6 @@ function App() {
     [workspace, workspaceId, closeAllPanels, navigate],
   );
 
-  // Handle task click from agent panel (opens issue panel overlay)
-  const handleAgentTaskClick = useCallback(
-    (taskId: string) => {
-      // Mutual exclusivity handled by usePanelManager (closes agent panel first)
-      openPanel({ type: "issue", id: taskId });
-      fetchIssue(taskId);
-    },
-    [openPanel, fetchIssue],
-  );
-
   // -----------------------------------------------------------------------
   // WorkspaceViewContext: data + actions for view components
   // -----------------------------------------------------------------------
@@ -1208,8 +1182,6 @@ function App() {
       handleIssueClick,
       handlePanelClose,
       handleAgentClick,
-      handleAgentPanelClose,
-      handleAgentTaskClick,
       handleApprove,
       handleReject,
       handleCopyLink,
@@ -1228,8 +1200,6 @@ function App() {
       handleIssueClick,
       handlePanelClose,
       handleAgentClick,
-      handleAgentPanelClose,
-      handleAgentTaskClick,
       handleApprove,
       handleReject,
       handleCopyLink,
@@ -1463,14 +1433,6 @@ function App() {
             onIssueUpdate={updateIssueDetails}
             onCopyLink={handleCopyLink}
             onNavigateToIssue={handleIssueClick}
-          />
-          <AgentDetailPanel
-            isOpen={isAgentPanelOpen}
-            agentName={selectedAgentName}
-            agents={agents}
-            agentTasks={agentTasks}
-            onClose={handleAgentPanelClose}
-            onTaskClick={handleAgentTaskClick}
           />
           <CreateIssueModal
             isOpen={showCreateIssue}

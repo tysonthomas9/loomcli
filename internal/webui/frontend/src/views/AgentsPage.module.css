@@ -444,6 +444,35 @@
   color: var(--color-text-tertiary);
 }
 
+.cardHeaderRow {
+  margin: 0 0 var(--space-4);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.cardHeaderRow .cardLabel {
+  margin: 0;
+}
+
+.diffStatSummary {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-family: var(--font-family-mono);
+  font-size: var(--font-size-xs);
+  font-weight: 800;
+}
+
+.diffStatAdded {
+  color: var(--color-success);
+}
+
+.diffStatRemoved {
+  color: var(--color-danger);
+}
+
 .tagRow {
   display: flex;
   flex-wrap: wrap;

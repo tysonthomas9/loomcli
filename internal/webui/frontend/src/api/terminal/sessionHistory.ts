@@ -47,16 +47,21 @@ export async function getSessionScrollback(
   issueId: string,
   recordId: string,
 ): Promise<{ content: string; lines: number }> {
+  type ScrollbackResponse = { content: string; lines: number };
+  type ScrollbackEnvelope = {
+    success: boolean;
+    data?: ScrollbackResponse;
+    error?: string;
+  };
   const { data, error, response } = await api.GET(
     "/api/workspaces/{ws}/issues/{issueId}/sessions/{recordId}/scrollback",
     {
       params: { path: { ws: workspaceId, issueId, recordId } },
-      parseAs: "text",
     },
   );
   if (error) throw apiErrorFromResponse(error, response);
-  // scrollback endpoint returns text/plain; wrap it for callers
-  const content = typeof data === "string" ? data : "";
-  const lines = content ? content.split("\n").length : 0;
-  return { content, lines };
+  return unwrapResponse<ScrollbackResponse>(
+    data as unknown as ScrollbackEnvelope,
+    response,
+  );
 }
