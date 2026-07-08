@@ -38,7 +38,9 @@ agent verdicts).
 
 Coverage is measured, not declared. Each run regenerates a **census** of the web UI's
 surface straight from the frontend source (`scripts/gen-census.py`: routes from
-`router.tsx`, `data-testid`s, API endpoints from `src/api`), and aft records a **trace**
+`router.tsx`, `data-testid`s + `testId=` props, API endpoints from `wsUrl()` calls and
+`/api` literals across `src` — tests, mocks, and the generated OpenAPI contract
+excluded, so only UI-reachable endpoints count), and aft records a **trace**
 of what each test actually touched (browser URLs, the page's own network requests, API
 calls from `run:` steps, executed-step testids/selectors). The join — covered and
 uncovered routes/endpoints/testids, with the tests that touched each — prints after the

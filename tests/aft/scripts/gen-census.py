@@ -15,8 +15,12 @@ import re
 import sys
 from pathlib import Path
 
-# Files whose strings describe test fixtures, not app surface.
-EXCLUDE = re.compile(r"__tests__|__mocks__|\.test\.|\.stories\.|/test/|TestFixtures")
+# Files whose strings describe test fixtures or generated contracts, not UI surface.
+# types/generated/ holds the OpenAPI contract: it lists every backend endpoint including
+# server-to-server ones the browser can never call — census must reflect UI usage only.
+EXCLUDE = re.compile(
+    r"__tests__|__mocks__|\.test\.|\.stories\.|/test/|test-utils|/mocks?/|TestFixtures|/generated/"
+)
 
 
 def source_files(root: Path) -> list[Path]:
@@ -30,9 +34,9 @@ def source_files(root: Path) -> list[Path]:
 def extract_routes(router: Path) -> list[str]:
     """Route table from router.tsx: root paths start with '/'; the rest are
     children of /ws/:workspaceId (the App shell). Wildcard/index entries skipped."""
-    src = router.read_text()
+    src = router.read_text(encoding="utf-8", errors="ignore")
     routes: set[str] = set()
-    for m in re.finditer(r'path:\s*"([^"]+)"', src):
+    for m in re.finditer(r"""path:\s*["']([^"']+)["']""", src):
         path = m.group(1)
         if path in ("*",) or path.endswith("*"):
             continue
@@ -50,7 +54,7 @@ def normalize_dynamic(s: str) -> str:
 def extract_testids(files: list[Path]) -> list[str]:
     ids: set[str] = set()
     for f in files:
-        src = f.read_text()
+        src = f.read_text(encoding="utf-8", errors="ignore")
         for m in re.finditer(r'data-testid="([^"]+)"', src):
             ids.add(m.group(1))
         # data-testid={`prefix-${expr}`} -> prefix-*  (glob; aft matches * within a segment)
@@ -59,13 +63,17 @@ def extract_testids(files: list[Path]) -> list[str]:
         # data-testid={cond ? "a" : "b"} and other brace expressions with string literals
         for m in re.finditer(r'data-testid=\{[^`}]*?"([^"]+)"[^}]*\}', src):
             ids.add(m.group(1))
+        # components that take the id as a prop (testId= / overlayTestId= / closeTestId=)
+        # and render data-testid={testId}: the literal lives at the call site
+        for m in re.finditer(r'\b[a-zA-Z]*[tT]estId=\{?["\'`]([A-Za-z0-9_.:-]+)["\'`]\}?', src):
+            ids.add(m.group(1))
     return sorted(ids)
 
 
 def extract_endpoints(files: list[Path]) -> list[str]:
     eps: set[str] = set()
     for f in files:
-        src = f.read_text()
+        src = f.read_text(encoding="utf-8", errors="ignore")
         # wsUrl(ws, "/path") / wsUrl(ws, `/path/${x}`) -> /api/workspaces/:param/path
         # (same :param name as literal-string extraction so duplicate shapes merge)
         for m in re.finditer(r'wsUrl\([^,)]+,\s*(?:"(/[^"]*)"|`(/[^`]*)`)', src):
@@ -75,7 +83,6 @@ def extract_endpoints(files: list[Path]) -> list[str]:
         for m in re.finditer(r'["`](/api/[^"`\s]*)["`]', src):
             path = normalize_dynamic(m.group(1)).split("?")[0]
             eps.add(path)
-    # drop entries shadowed by their own :param form to keep the census deduplicated
     return sorted(eps)
 
 
