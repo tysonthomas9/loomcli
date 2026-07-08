@@ -5,7 +5,9 @@ baseUrl: "${AFT_BASE_URL:-http://127.0.0.1:3100}"
 teardown: '"$AFT_TESTS_DIR/scripts/close-open-issues.sh"'
 
 tests:
-  # covers: LCLI-WP-004, LCLI-DV-005
+  # covers: LCLI-WP-004 partial (API-driven create/remove + board/graph reflection —
+  # issue-detail dependency controls and invalid-edit prevention untested);
+  # LCLI-DV-005 partial (graph surface only — BlockedSummary/ready-highlighting untested)
   - name: blocking dependency drives board column and graph edge
     intent: A blocking dependency created through the workspace API moves the blocked issue to the Blocked column, renders nodes and edges in GraphView, and removal returns it to Open
     steps:

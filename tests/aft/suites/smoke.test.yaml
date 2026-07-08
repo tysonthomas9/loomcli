@@ -43,3 +43,6 @@ tests:
       - run: >-
           curl -sf "$AFT_BASE_URL/api/config" |
           python3 -c 'import json,sys; data=json.load(sys.stdin); assert data.get("mode") == "open", data; assert data.get("issue_backend") == "fleet", data'
+      - run: >-
+          curl -sf "$AFT_BASE_URL/api/workspaces/${AFT_WS:-E2E-WS}/readyz" |
+          python3 -c 'import json,sys; data=json.load(sys.stdin); assert data.get("ready") is True, data; assert data.get("mode") == "fleet", data'

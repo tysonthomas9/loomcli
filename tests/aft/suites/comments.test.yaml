@@ -53,15 +53,19 @@ tests:
           fn: >-
             document.querySelectorAll('[data-testid=activity-comment] time[datetime]').length >= 2
       - expect: { count: { testid: activity-comment, atLeast: 2 } }
-      # comments posted via the API carry the fleet actor (loom-e2e), not web-ui
-      - expect: { text: loom-e2e }
+      # author metadata must be asserted INSIDE a comment node: lifecycle events
+      # also render the actor text, so a page-wide match cannot catch an author
+      # regression. API comments carry the fleet actor (loom-e2e), not web-ui.
+      - wait:
+          fn: >-
+            Array.from(document.querySelectorAll('[data-testid=activity-comment]')).some((n) => n.textContent.includes('loom-e2e'))
       - expect: { text: first api comment }
       - expect: { text: second api comment }
       - wait:
           fn: >-
             (() => { const text = document.querySelector('[data-testid=activity-log]')?.textContent || ''; return text.indexOf('first api comment') >= 0 && text.indexOf('second api comment') > text.indexOf('first api comment'); })()
-      # lifecycle events render as generic "performed an action" activity-event
-      # nodes — reason text is NOT displayed (verified: distinct reason strings
-      # never appear). Assert the events exist rather than their reasons.
+      # lifecycle events render as activity-event nodes (close reason text is not
+      # displayed; the reopen reason may surface as an extra comment via the
+      # backend's best-effort comment post). Assert event existence, not reasons.
       - expect: { count: { testid: activity-event, atLeast: 2 } }
       - expect: { visible: { testid: comment-form } }

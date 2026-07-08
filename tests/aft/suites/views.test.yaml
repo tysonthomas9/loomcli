@@ -10,6 +10,7 @@ setup: >-
 teardown: '"$AFT_TESTS_DIR/scripts/close-open-issues.sh"'
 
 tests:
+  # covers: LCLI-DV-002
   - name: view tabs switch views and sync the URL
     intent: Switching between the Kanban and List views via the toolbar tabs updates the route and renders each view
     steps:
@@ -26,6 +27,7 @@ tests:
       - wait: { url: "**/ws/*/kanban**" }
       - expect: { visible: { testid: board-toolbar } }
 
+  # covers: LCLI-DV-002
   - name: a deep link straight to the table view works
     intent: Opening /ws/E2E-WS/table directly renders the table without visiting the kanban first
     steps:

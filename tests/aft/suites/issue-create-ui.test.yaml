@@ -5,6 +5,7 @@ baseUrl: "${AFT_BASE_URL:-http://127.0.0.1:3100}"
 teardown: '"$AFT_TESTS_DIR/scripts/close-open-issues.sh"'
 
 tests:
+  # covers: LCLI-WP-001
   - name: create an issue through the New Issue modal
     intent: A user creates an issue via the New Issue modal and it appears in the Open column
     steps:
@@ -22,7 +23,8 @@ tests:
       - fill: { testid: create-issue-title, value: "ui created ${RUN_ID:-local}" }
       - click: { testid: create-issue-submit }
       - wait: { text: ui created }
-      - expect: { count: { selector: "section[data-status=ready] article", equals: 1 } }
+      # title-scoped: board-global counts break on reorder or teardown leaks
+      - expect: { count: { selector: "section[data-status=ready] article[aria-label*='ui created ${RUN_ID:-local}']", equals: 1 } }
 
   # covers: LCLI-WP-001
   - name: empty title keeps submit disabled

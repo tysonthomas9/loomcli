@@ -6,9 +6,10 @@ baseUrl: "${AFT_BASE_URL:-http://127.0.0.1:3100}"
 teardown: '"$AFT_TESTS_DIR/scripts/close-open-issues.sh"'
 
 tests:
-  # covers: LCLI-WP-002, LCLI-WP-006; LCLI-WP-003 partial (metadata/assignment
-  # persistence only — the AssigneePrompt is wired to kanban DRAG open->in_progress
-  # in v5, not to panel status changes, so it cannot fire on this path)
+  # covers: LCLI-WP-002; LCLI-WP-006 partial (markdown description only — the
+  # DesignPanel's design notes / acceptance criteria are untested); LCLI-WP-003
+  # partial (metadata/assignment persistence only — the AssigneePrompt is wired
+  # to kanban DRAG open->in_progress in v5, not to panel status changes)
   - name: detail panel edits markdown status and persists metadata
     intent: A card opens the detail panel, description markdown saves and survives reload, priority and labels persist, and panel status changes close and reopen the issue
     steps:

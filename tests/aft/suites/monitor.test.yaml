@@ -21,4 +21,8 @@ tests:
       # "Bottlenecks" only renders with queue data — assert the always-present panels instead
       # (no-backends-empty-state exists in DOM but belongs to the hidden terminal view)
       - expect: { visible: { testid: usage-dashboard } }
+      # positive connected-empty contract: "No agents found" renders ONLY when the
+      # agent panel is connected with zero agents — every disconnected/loading/
+      # reconnecting state fails this, unlike the always-present wrappers above
+      - wait: { text: No agents found }
       - expect: { notText: Loom server not available }

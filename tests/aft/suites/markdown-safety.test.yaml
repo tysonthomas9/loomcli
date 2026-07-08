@@ -16,7 +16,7 @@ tests:
             !!document.querySelector('[data-testid=board-toolbar]')
       - expect: { count: { selector: "section[data-status=ready] article", equals: 0 } }
       - run: >-
-          python3 -c 'import json,os; print(json.dumps({"title":"markdown safety "+os.environ.get("RUN_ID","local"),"issue_type":"task","priority":2,"description":"safe **bold** signal\n<img src=x onerror=\"window.__aftXss=1\">\n<script>window.__aftXss=1</script>"}))'
+          python3 -c 'import json,os; print(json.dumps({"title":"markdown safety "+os.environ.get("RUN_ID","local"),"issue_type":"task","priority":2,"description":"safe **bold** signal\n[click me](javascript:window.__aftXss=1)\n<img src=x onerror=\"window.__aftXss=1\">\n<script>window.__aftXss=1</script>"}))'
           | curl -sf -X POST "$AFT_BASE_URL/api/workspaces/${AFT_WS:-E2E-WS}/issues"
           -H "Content-Type: application/json" -d @-
           | python3 -c "import sys,json; print(json.load(sys.stdin)['data']['id'])"
@@ -40,4 +40,5 @@ tests:
           fn: >-
             window.__aftXss === undefined &&
             !document.querySelector('[data-testid=editable-description] script') &&
-            !document.querySelector('[data-testid=editable-description] img[onerror]')
+            !document.querySelector('[data-testid=editable-description] img[onerror]') &&
+            !document.querySelector('[data-testid=markdown-content] a[href^="javascript:"]')
