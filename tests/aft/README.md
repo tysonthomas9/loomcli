@@ -13,6 +13,7 @@ SSE.
 
 ```bash
 make test-aft                      # deterministic, no model calls (what CI runs)
+make test-aft-real                 # opt-in real codex epic-runner tier
 make test-aft-strict               # failures get an agent diagnosis + suggested fix
 make test-aft-heal                 # local dev: agent may complete a broken step's intent
 tests/aft/run-aft.sh --record ...  # or call the harness directly with any aft flags
@@ -32,6 +33,25 @@ origin/main — is preferred when present because the epic-runner needs the driv
 domain), an aft checkout (default `../testing-app`, override `AFT_DIR`), a **flue**
 checkout at `../flue` (pinned commit in `internal/workflows/FLUE_COMMIT`, built with
 pnpm) for the agent-flow suite, and `claude` unless `--no-agent`.
+
+## Real codex tier
+
+`make test-aft-real` runs the opt-in real-codex tier: the server keeps `claude`
+stubbed, but lets the epic-runner resolve the operator's real `codex` CLI from
+`PATH`. It requires `codex` on `PATH` and a logged-in `~/.codex/auth.json`
+(`codex login`). The target passes `--no-agent`; only the server-side codex run is
+real.
+
+This does not spend marginal API dollars for a ChatGPT-account codex login, but it
+does consume that account's codex rate-limit window. Do not loop it casually.
+CI never runs this tier because CI has no operator `~/.codex`, the run is
+nondeterministic, and it touches a real account limit.
+
+Accidental triggering is blocked three ways: `AFT_REAL_CODEX=1` must be set, the
+separate `make test-aft-real` target sets it, and real scenarios live in
+`tests/aft/real-suites/` instead of the default `tests/aft/suites/` directory.
+In real mode the harness also unsets `OPENAI_API_KEY`, defaults `AFT_TIMEOUT` to
+`600000`, and fails fast if `codex` or `~/.codex/auth.json` is missing.
 
 **Suite ordering is an invariant**: aft runs suite files alphabetically. The
 `zz-agent-flow` suite is named to run LAST — it creates an agent definition and run

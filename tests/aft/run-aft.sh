@@ -32,6 +32,30 @@ API_URL="http://127.0.0.1:${E2E_PORT}"             # loom serve API
 REPORT_DIR="$SCRIPT_DIR/reports"
 mkdir -p "$REPORT_DIR"
 
+if [[ "${AFT_REAL_CODEX:-}" == "1" ]]; then
+    echo "[aft] ====================================================================="
+    echo "[aft] REAL CODEX MODE -- server codex is the operator's real CLI"
+    echo "[aft] Requires codex on PATH and a logged-in ~/.codex/auth.json."
+    echo "[aft] Claude remains stubbed; codex consumes the account rate-limit window."
+    echo "[aft] ====================================================================="
+    if ! CODEX_BIN="$(command -v codex 2>/dev/null)"; then
+        echo "[aft] real codex tier needs codex on PATH" >&2
+        exit 1
+    fi
+    case "$CODEX_BIN" in
+        "$REPO_ROOT"/e2e/stubs/*|"$REPO_ROOT"/e2e/stubs-claude-only/*)
+            echo "[aft] codex resolved to a test stub ($CODEX_BIN); real tier needs the operator's real codex CLI" >&2
+            exit 1
+            ;;
+    esac
+    if [[ ! -f "$HOME/.codex/auth.json" ]]; then
+        echo "[aft] ~/.codex/auth.json missing -- run 'codex login' before make test-aft-real" >&2
+        exit 1
+    fi
+    : "${AFT_TIMEOUT:=600000}"
+    : "${AFT_SUITES:=$SCRIPT_DIR/real-suites}"
+fi
+
 if [[ ! -f "$AFT_DIR/dist/cli.js" ]]; then
     echo "[aft] building aft in $AFT_DIR..."
     (cd "$AFT_DIR" && npm install --silent && npm run build --silent)
@@ -77,10 +101,17 @@ FLUE_CMD_JSON=""
 if [[ -n "$FLUE_REPO" && -f "$FLUE_REPO/packages/cli/bin/flue.mjs" ]]; then
     FLUE_CMD_JSON="[\"node\",\"$FLUE_REPO/packages/cli/bin/flue.mjs\"]"
 fi
-E2E_PORT="$E2E_PORT" E2E_FRONTEND_PORT="$E2E_FRONTEND_PORT" FLEET_DB_REPO="$FLEET_DB_REPO" \
-    PATH="$REPO_ROOT/e2e/stubs:$PATH" OPENAI_API_KEY="stub-e2e" FLUE_REPO="$FLUE_REPO" \
-    LOOM_REAL_FLUE_CMD_JSON="$FLUE_CMD_JSON" \
-    bash "$REPO_ROOT/scripts/start-e2e-server.sh" >"$REPORT_DIR/server.log" 2>&1 &
+if [[ "${AFT_REAL_CODEX:-}" == "1" ]]; then
+    env -u OPENAI_API_KEY E2E_PORT="$E2E_PORT" E2E_FRONTEND_PORT="$E2E_FRONTEND_PORT" FLEET_DB_REPO="$FLEET_DB_REPO" \
+        PATH="$REPO_ROOT/e2e/stubs-claude-only:$PATH" FLUE_REPO="$FLUE_REPO" \
+        LOOM_REAL_FLUE_CMD_JSON="$FLUE_CMD_JSON" \
+        bash "$REPO_ROOT/scripts/start-e2e-server.sh" >"$REPORT_DIR/server.log" 2>&1 &
+else
+    E2E_PORT="$E2E_PORT" E2E_FRONTEND_PORT="$E2E_FRONTEND_PORT" FLEET_DB_REPO="$FLEET_DB_REPO" \
+        PATH="$REPO_ROOT/e2e/stubs:$PATH" OPENAI_API_KEY="stub-e2e" FLUE_REPO="$FLUE_REPO" \
+        LOOM_REAL_FLUE_CMD_JSON="$FLUE_CMD_JSON" \
+        bash "$REPO_ROOT/scripts/start-e2e-server.sh" >"$REPORT_DIR/server.log" 2>&1 &
+fi
 SERVER_PID=$!
 
 READY=""

@@ -1,0 +1,83 @@
+# REAL codex tier — runs the operator's real `codex` CLI through the serve epic-runner.
+# Gated: only runs under AFT_REAL_CODEX=1 (run-aft.sh points AFT_SUITES at real-suites/).
+# Needs a logged-in ~/.codex. Named zz- defensively. NOT part of the default suites/ dir.
+suite: zz-real-codex-epic
+baseUrl: "${AFT_BASE_URL:-http://127.0.0.1:3100}"
+teardown: >-
+  "$AFT_TESTS_DIR/scripts/close-open-issues.sh";
+  "$AFT_TESTS_DIR/scripts/real-codex-teardown.sh" || true
+
+tests:
+  - name: real codex epic-runner creates HELLO.md and closes the task
+    intent: The real codex CLI, selected as the workspace default backend, claims the seeded child task via epic-runner, creates HELLO.md in a resolved task worktree, patches it back, records a real transcript+diff, and closes the task
+    steps:
+      # 1) seed epic + one child task carrying a tiny, deterministic DESIGN (the codex prompt).
+      - run: >-
+          curl -sf -X POST "$AFT_BASE_URL/api/workspaces/${AFT_WS:-E2E-WS}/issues"
+          -H "Content-Type: application/json"
+          -d "{\"title\":\"real-codex epic $RUN_ID\",\"issue_type\":\"epic\",\"priority\":2}"
+          | python3 -c "import sys,json;print(json.load(sys.stdin)['data']['id'])"
+          > "$AFT_WORK_DIR/rc-epic.id"
+      - run: >-
+          curl -sf -X POST "$AFT_BASE_URL/api/workspaces/${AFT_WS:-E2E-WS}/issues"
+          -H "Content-Type: application/json"
+          -d "{\"title\":\"real-codex task $RUN_ID\",\"issue_type\":\"task\",\"priority\":2,\"parent\":\"$(cat "$AFT_WORK_DIR/rc-epic.id")\",\"design\":\"Create a file named HELLO.md at the repository root whose entire contents are exactly the line: hello world. Do not create any other files. Do not modify any other files.\"}"
+          | python3 -c "import sys,json;print(json.load(sys.stdin)['data']['id'])"
+          > "$AFT_WORK_DIR/rc-task.id"
+      # 2) confirm the card is on the board (SSE) before triggering.
+      - open: /ws/E2E-WS/kanban
+      - wait: { fn: "!!document.querySelector('[data-testid=board-toolbar]')" }
+      - wait: { text: real-codex task }
+      # 3) trigger epic-runner (default backend = codex). POST carries the one-time flue bundle
+      #    build; still well under the 120s run-step ceiling.
+      - run: >-
+          curl -sf -X POST "$AFT_BASE_URL/api/workspaces/${AFT_WS:-E2E-WS}/workflows/epic-runner"
+          -H "Content-Type: application/json"
+          -d "{\"epicId\":\"$(cat "$AFT_WORK_DIR/rc-epic.id")\"}"
+          > "$AFT_WORK_DIR/rc-run.json"
+      # 4) WAIT for completion by polling the API for status:closed. The board is NOT a usable
+      #    completion signal here: ready-absence happens at CLAIM (minutes early), and the
+      #    epic-grouped board HIDES closed children entirely (product finding: an epic lane
+      #    whose tasks are all closed renders no lane, so the Done column never shows them —
+      #    verified live; the flat groupBy=none board renders them fine). aft caps each run:
+      #    step at 120s, so the poll is chained: two grace polls (always exit 0) then a final
+      #    assert — ~5.5 min total budget; a real codex HELLO.md run measured ~53s.
+      - run: >-
+          for i in $(seq 1 55); do curl -sf "$AFT_BASE_URL/api/workspaces/${AFT_WS:-E2E-WS}/issues/$(cat "$AFT_WORK_DIR/rc-task.id")" | grep -q '"status":"closed"' && exit 0; sleep 2; done; echo "not closed yet (grace window 1)"; exit 0
+      - run: >-
+          for i in $(seq 1 55); do curl -sf "$AFT_BASE_URL/api/workspaces/${AFT_WS:-E2E-WS}/issues/$(cat "$AFT_WORK_DIR/rc-task.id")" | grep -q '"status":"closed"' && exit 0; sleep 2; done; echo "not closed yet (grace window 2)"; exit 0
+      - run: >-
+          for i in $(seq 1 55); do curl -sf "$AFT_BASE_URL/api/workspaces/${AFT_WS:-E2E-WS}/issues/$(cat "$AFT_WORK_DIR/rc-task.id")" | grep -q '"status":"closed"' && exit 0; sleep 2; done; echo "task never closed"; exit 1
+      # 5) board-level UX assert on the FLAT board, where closed cards do render in Done.
+      - open: /ws/E2E-WS/kanban?groupBy=none
+      - wait:
+          fn: >-
+            Array.from(document.querySelectorAll("section[data-status=done] article"))
+              .some((el) => el.textContent.includes('real-codex task ${RUN_ID:-local}'))
+      # 6) a session was recorded, and it is a codex/local run with a real diff (files_changed>=1).
+      #    Also capture the session id for the transcript check.
+      - run: >-
+          curl -sf "$AFT_BASE_URL/api/workspaces/${AFT_WS:-E2E-WS}/tasks/$(cat "$AFT_WORK_DIR/rc-task.id")/sessions"
+          | python3 -c "import sys,json,os; d=json.load(sys.stdin); items=(d.get('data') or {}).get('sessions') or []; assert items, 'no session recorded'; s=items[0]; assert s.get('backend')=='codex', 'backend='+str(s.get('backend')); assert s.get('exit_code')==0, 'exit_code='+str(s.get('exit_code')); assert int(s.get('files_changed') or 0) >= 1, 'files_changed='+str(s.get('files_changed'))+' (STUB would be 0)'; open(os.environ['AFT_WORK_DIR']+'/rc-session.id','w').write(s['session_id'])"
+      # 7) transcript is real: >=1 non-system entry AND references the file it created / tool
+      #    activity. Shape: {success, data: {session_id, entries: [{seq, ts, role, ...}]}}.
+      #    KNOWN ISSUE (tolerated as xfail): serve reads artifact-backed transcripts via
+      #    GET /artifacts/{id}/content, but fleet-db only registers PUT for that route
+      #    (fleet-db internal/api/control_plane.go:60 vs loom infra/fleetdb/control_plane.go:405)
+      #    -> the endpoint 500s for epic-runner runs in fleetdb mode. Accept HTTP 500 with a
+      #    loud marker; any OTHER failure (404, empty entries, stub signature) still fails.
+      #    Tighten to a hard assert once fleet-db grows the GET content route.
+      - run: >-
+          code=$(curl -s -o "$AFT_WORK_DIR/rc-transcript.json" -w "%{http_code}" "$AFT_BASE_URL/api/workspaces/${AFT_WS:-E2E-WS}/tasks/$(cat "$AFT_WORK_DIR/rc-task.id")/sessions/$(cat "$AFT_WORK_DIR/rc-session.id")/transcript");
+          if [ "$code" = "500" ]; then echo "KNOWN ISSUE (xfail): transcript read 500s - fleet-db lacks GET /artifacts/{id}/content (405); tolerated"; exit 0; fi;
+          [ "$code" = "200" ] || { echo "transcript endpoint returned $code"; cat "$AFT_WORK_DIR/rc-transcript.json"; exit 1; };
+          python3 -c "import json,os; d=json.load(open(os.environ['AFT_WORK_DIR']+'/rc-transcript.json')); ents=(d.get('data') or {}).get('entries') or []; nonsys=[e for e in ents if e.get('role')!='system']; assert nonsys, 'no non-system transcript entries'; blob=json.dumps(ents).lower(); assert 'hello.md' in blob or any(e.get('role')=='tool' for e in ents) or 'tool_use' in blob, 'transcript lacks tool activity / HELLO.md reference (stub signature)'"
+      # 8) NEGATIVE GUARD via filesystem: the real codex physically created HELLO.md with the
+      #    exact content. The stub (default JSON mode) creates NO file. This is the strongest
+      #    real-vs-stub discriminator and is independent of any serve projection gap.
+      - run: >-
+          ws="$AFT_TESTS_DIR/../../tmp/e2e-workspace";
+          f="$(find "$ws" -name HELLO.md -print 2>/dev/null | head -n1)";
+          test -n "$f" || { echo "HELLO.md not found on disk — stub likely ran, not real codex"; exit 1; };
+          grep -qx "hello world" "$f" || { echo "HELLO.md content wrong: $(cat "$f")"; exit 1; };
+          echo "real codex wrote $f"
