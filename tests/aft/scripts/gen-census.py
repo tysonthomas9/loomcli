@@ -41,7 +41,10 @@ def extract_routes(router: Path) -> list[str]:
         if path in ("*",) or path.endswith("*"):
             continue
         routes.add(path if path.startswith("/") else f"/ws/:workspaceId/{path}")
-    return sorted(routes)
+    # Redirect/layout shims immediately forward elsewhere ("/" -> last workspace,
+    # "/ws/:id" -> kanban): the browser never rests on them, so a URL sample can never
+    # match — listing them as coverable routes would be permanent false-uncovered noise.
+    return sorted(routes - {"/", "/ws/:workspaceId"})
 
 
 def normalize_dynamic(s: str) -> str:
@@ -51,23 +54,37 @@ def normalize_dynamic(s: str) -> str:
     return re.sub(r"(:param)+", ":param", s)  # adjacent interpolations are still one segment
 
 
-def extract_testids(files: list[Path]) -> list[str]:
+def component_name(f: Path, frontend: Path) -> str:
+    """Group testids by owning component: src/components/<Name>/… or src/views/<Name>."""
+    rel = f.relative_to(frontend).parts
+    if len(rel) >= 2 and rel[0] in ("components", "views"):
+        return rel[1].removesuffix(".tsx").removesuffix(".ts")
+    return f.stem
+
+
+def extract_testids(files: list[Path], frontend: Path) -> tuple[list[str], dict[str, list[str]]]:
+    """All testid patterns, plus a component -> testids grouping (by owning source dir)."""
     ids: set[str] = set()
+    components: dict[str, set[str]] = {}
     for f in files:
         src = f.read_text(encoding="utf-8", errors="ignore")
+        file_ids: set[str] = set()
         for m in re.finditer(r'data-testid="([^"]+)"', src):
-            ids.add(m.group(1))
+            file_ids.add(m.group(1))
         # data-testid={`prefix-${expr}`} -> prefix-*  (glob; aft matches * within a segment)
         for m in re.finditer(r"data-testid=\{`([^`]+)`\}", src):
-            ids.add(re.sub(r"\$\{[^}]*\}", "*", m.group(1)))
+            file_ids.add(re.sub(r"\$\{[^}]*\}", "*", m.group(1)))
         # data-testid={cond ? "a" : "b"} and other brace expressions with string literals
         for m in re.finditer(r'data-testid=\{[^`}]*?"([^"]+)"[^}]*\}', src):
-            ids.add(m.group(1))
+            file_ids.add(m.group(1))
         # components that take the id as a prop (testId= / overlayTestId= / closeTestId=)
         # and render data-testid={testId}: the literal lives at the call site
         for m in re.finditer(r'\b[a-zA-Z]*[tT]estId=\{?["\'`]([A-Za-z0-9_.:-]+)["\'`]\}?', src):
-            ids.add(m.group(1))
-    return sorted(ids)
+            file_ids.add(m.group(1))
+        if file_ids:
+            ids |= file_ids
+            components.setdefault(component_name(f, frontend), set()).update(file_ids)
+    return sorted(ids), {name: sorted(v) for name, v in sorted(components.items())}
 
 
 def extract_endpoints(files: list[Path]) -> list[str]:
@@ -99,15 +116,17 @@ def main() -> int:
         return 1
 
     files = source_files(args.frontend)
+    testids, components = extract_testids(files, args.frontend)
     census = {
         "routes": extract_routes(router),
-        "testids": extract_testids(files),
+        "components": components,
+        "testids": testids,
         "endpoints": extract_endpoints(files),
     }
     args.out.write_text(json.dumps(census, indent=2) + "\n")
     print(
-        f"{args.out}: {len(census['routes'])} routes, "
-        f"{len(census['testids'])} testids, {len(census['endpoints'])} endpoints"
+        f"{args.out}: {len(census['routes'])} routes, {len(components)} components, "
+        f"{len(testids)} testids, {len(census['endpoints'])} endpoints"
     )
     return 0
 

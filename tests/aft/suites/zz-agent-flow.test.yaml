@@ -1,0 +1,85 @@
+# Agent execution flow with a STUB backend (e2e/stubs/codex on the server's PATH —
+# wired by run-aft.sh; exits 0, no real LLM). Engine B: `loom serve` already runs the
+# driver executor + task workers, so POST /workflows/epic-runner drives the whole
+# claim → execute → close cycle in-process. No daemon required.
+#
+# Named zz- so it runs LAST: it creates an agent definition and run artifacts that
+# earlier suites' empty-state assertions (monitor "No agents found", agents-page
+# "Select an agent", observability zero-metrics) assume absent.
+suite: zz-agent-flow
+baseUrl: "${AFT_BASE_URL:-http://127.0.0.1:3100}"
+teardown: '"$AFT_TESTS_DIR/scripts/close-open-issues.sh"'
+
+tests:
+  # covers: agent-definition visibility (LCLI-AD group, UI surface slice)
+  - name: created agent definition appears in agents page and monitor
+    intent: An agent definition created through the workspace API renders in the agents rail and the monitor activity panel, and start is accepted
+    steps:
+      - run: >-
+          curl -sf -X POST "$AFT_BASE_URL/api/workspaces/${AFT_WS:-E2E-WS}/agents"
+          -H "Content-Type: application/json"
+          -d '{"name":"nova","role_name":"lead"}'
+          >/dev/null
+      - open: /ws/E2E-WS/agents
+      # with an agent present the page auto-selects the first one
+      - wait: { url: "**/ws/*/agents/nova**" }
+      - expect: { visible: { testid: agents-page } }
+      # textContent, not rendered text: the rail capitalizes names via CSS text-transform
+      - wait:
+          fn: >-
+            document.body.textContent.includes('nova')
+      - open: /ws/E2E-WS/monitor
+      - wait:
+          fn: >-
+            !!document.querySelector('[data-testid=agent-activity-panel]')
+      - wait:
+          fn: >-
+            document.body.textContent.includes('nova')
+      - expect: { notText: No agents found }
+      # store-backed serve accepts start and flips desired state (no daemon involved)
+      - run: >-
+          curl -sf -X POST "$AFT_BASE_URL/api/workspaces/${AFT_WS:-E2E-WS}/agents/nova/start" >/dev/null
+
+  # covers: LCLI-RA group partial — serve-driven epic run with stub backend
+  - name: epic runner drives a stub agent to complete a task
+    intent: Triggering the epic-runner workflow makes a stub-backed worker claim the seeded task, execute, and close it, with the board and session records following
+    steps:
+      - run: >-
+          curl -sf -X POST "$AFT_BASE_URL/api/workspaces/${AFT_WS:-E2E-WS}/issues"
+          -H "Content-Type: application/json"
+          -d "{\"title\":\"agent-flow epic $RUN_ID\",\"issue_type\":\"epic\",\"priority\":2}"
+          | python3 -c "import sys,json;print(json.load(sys.stdin)['data']['id'])"
+          > "$AFT_WORK_DIR/agent-epic.id"
+      - run: >-
+          curl -sf -X POST "$AFT_BASE_URL/api/workspaces/${AFT_WS:-E2E-WS}/issues"
+          -H "Content-Type: application/json"
+          -d "{\"title\":\"agent-flow task $RUN_ID\",\"issue_type\":\"task\",\"priority\":2,\"parent\":\"$(cat "$AFT_WORK_DIR/agent-epic.id")\"}"
+          | python3 -c "import sys,json;print(json.load(sys.stdin)['data']['id'])"
+          > "$AFT_WORK_DIR/agent-task.id"
+      - open: /ws/E2E-WS/kanban
+      - wait:
+          fn: >-
+            !!document.querySelector('[data-testid=board-toolbar]')
+      - wait: { text: agent-flow task }
+      - run: >-
+          curl -sf -X POST "$AFT_BASE_URL/api/workspaces/${AFT_WS:-E2E-WS}/workflows/epic-runner"
+          -H "Content-Type: application/json"
+          -d "{\"epicId\":\"$(cat "$AFT_WORK_DIR/agent-epic.id")\"}"
+          > "$AFT_WORK_DIR/agent-run.json"
+      # the run is asynchronous and the first invocation builds the workflow bundle —
+      # poll the API for the task to close (well past the browser step timeout)
+      - run: >-
+          for i in $(seq 1 50); do
+          status=$(curl -sf "$AFT_BASE_URL/api/workspaces/${AFT_WS:-E2E-WS}/issues/$(cat "$AFT_WORK_DIR/agent-task.id")"
+          | python3 -c "import sys,json;print(json.load(sys.stdin)['data']['status'])");
+          [ "$status" = "closed" ] && break; sleep 2; done;
+          [ "$status" = "closed" ] || { echo "task never closed (last: $status)"; exit 1; }
+      # a task session was recorded during execution — this is what the Runs tab reads
+      - run: >-
+          curl -sf "$AFT_BASE_URL/api/workspaces/${AFT_WS:-E2E-WS}/tasks/$(cat "$AFT_WORK_DIR/agent-task.id")/sessions"
+          | python3 -c "import sys,json; d=json.load(sys.stdin); items=d.get('data', d if isinstance(d, list) else []); assert len(items) >= 1, d"
+      # board followed via SSE: the closed card is removed from the board entirely
+      - wait:
+          fn: >-
+            !Array.from(document.querySelectorAll("section[data-status=ready] article")).some((el) => el.textContent.includes('agent-flow task'))
+      - expect: { count: { selector: "section[data-status=ready] article[aria-label*='agent-flow task ${RUN_ID:-local}']", equals: 0 } }

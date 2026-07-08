@@ -11,6 +11,20 @@ setup: >-
 teardown: '"$AFT_TESTS_DIR/scripts/close-open-issues.sh"'
 
 tests:
+  # covers: LCLI-PS-001 partial (API create + board reachable; CLI create untested)
+  - name: workspace api creates a workspace with a routable board
+    intent: Creating a workspace through the API yields an uppercased id whose kanban route renders an empty board
+    steps:
+      - run: >-
+          curl -sf -X POST "$AFT_BASE_URL/api/workspaces" -H "Content-Type: application/json"
+          -d '{"name":"e2e-ws-3","type":"empty"}'
+          | python3 -c "import sys,json; data=json.load(sys.stdin)['data']; assert data['id'] == 'E2E-WS-3', data"
+      - open: /ws/E2E-WS-3/kanban
+      - wait:
+          fn: >-
+            !!document.querySelector('[data-testid=board-toolbar]')
+      - expect: { visible: { testid: empty-workspace-board } }
+
   # covers: LCLI-PS-002
   - name: workspace selector switches route and board scope
     intent: Switching from E2E-WS to e2e-ws-2 updates the workspace route and removes primary-workspace issues from the board

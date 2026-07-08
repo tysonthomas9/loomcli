@@ -1,0 +1,80 @@
+# Review queue coverage: loom-backed rows (issues with status=review) render in
+# /prs and open the in-app PRReviewWorkspace; Approve closes the issue, Request
+# changes reopens it. GitHub-PR rows are out of scope on this stack (no gh).
+suite: review-queue
+baseUrl: "${AFT_BASE_URL:-http://127.0.0.1:3100}"
+teardown: '"$AFT_TESTS_DIR/scripts/close-open-issues.sh"'
+
+tests:
+  # covers: LCLI-RA-001 partial (loom review rows; GitHub metadata rows untested)
+  - name: empty queue shows the no-pull-requests state
+    intent: With no review-stage issues the queue explains itself instead of rendering an empty list
+    steps:
+      - open: /ws/E2E-WS/prs
+      - wait: { text: Pull Requests }
+      - expect: { text: No pull requests }
+      - expect: { text: When a task moves to review or an agent opens a PR on GitHub, it appears here for review. }
+
+  # covers: LCLI-RA-001 partial
+  - name: approving a review issue closes it and clears the queue
+    intent: An issue moved to review appears as a queue row, its review workspace opens in-app, and Approve closes the issue
+    steps:
+      - run: >-
+          curl -sf -X POST "$AFT_BASE_URL/api/workspaces/${AFT_WS:-E2E-WS}/issues"
+          -H "Content-Type: application/json"
+          -d "{\"title\":\"review-approve-$RUN_ID\",\"issue_type\":\"task\",\"priority\":2}"
+          | python3 -c "import sys,json;print(json.load(sys.stdin)['data']['id'])"
+          > "$AFT_WORK_DIR/review-approve.id"
+      - run: >-
+          curl -sf -X PATCH "$AFT_BASE_URL/api/workspaces/${AFT_WS:-E2E-WS}/issues/$(cat "$AFT_WORK_DIR/review-approve.id")"
+          -H "Content-Type: application/json" -d '{"status":"review"}'
+          >/dev/null
+      - open: /ws/E2E-WS/prs
+      - wait: { text: "review-approve-${RUN_ID:-local}" }
+      # rows are li[role=button] aria-label="Review <title>"
+      - click: { role: button, name: "review-approve-${RUN_ID:-local}" }
+      - wait: { url: "**review=**" }
+      - wait:
+          fn: >-
+            !!document.querySelector('[data-testid=pr-review-workspace]')
+      - expect: { visible: { testid: pr-review-workspace } }
+      # unassigned review issue: the assign-a-reviewer control renders
+      - expect: { visible: { testid: review-agent-button } }
+      # button text is "✓ Approve"; accessible-name matching is substring
+      - click: { role: button, name: Approve }
+      - wait:
+          fn: >-
+            !document.querySelector('[data-testid=pr-review-workspace]')
+      - run: >-
+          curl -sf "$AFT_BASE_URL/api/workspaces/${AFT_WS:-E2E-WS}/issues/$(cat "$AFT_WORK_DIR/review-approve.id")"
+          | python3 -c "import sys,json; data=json.load(sys.stdin)['data']; assert data['status'] == 'closed', data['status']"
+      - expect: { notText: "review-approve-${RUN_ID:-local}" }
+
+  # covers: LCLI-RA-001 partial
+  - name: requesting changes sends the issue back to open
+    intent: Request changes in the review workspace reopens the issue and removes it from the review queue
+    steps:
+      - run: >-
+          curl -sf -X POST "$AFT_BASE_URL/api/workspaces/${AFT_WS:-E2E-WS}/issues"
+          -H "Content-Type: application/json"
+          -d "{\"title\":\"review-changes-$RUN_ID\",\"issue_type\":\"task\",\"priority\":2}"
+          | python3 -c "import sys,json;print(json.load(sys.stdin)['data']['id'])"
+          > "$AFT_WORK_DIR/review-changes.id"
+      - run: >-
+          curl -sf -X PATCH "$AFT_BASE_URL/api/workspaces/${AFT_WS:-E2E-WS}/issues/$(cat "$AFT_WORK_DIR/review-changes.id")"
+          -H "Content-Type: application/json" -d '{"status":"review"}'
+          >/dev/null
+      - open: /ws/E2E-WS/prs
+      - wait: { text: "review-changes-${RUN_ID:-local}" }
+      - click: { role: button, name: "review-changes-${RUN_ID:-local}" }
+      - wait:
+          fn: >-
+            !!document.querySelector('[data-testid=pr-review-workspace]')
+      - click: { role: button, name: Request changes }
+      - wait:
+          fn: >-
+            !document.querySelector('[data-testid=pr-review-workspace]')
+      - run: >-
+          curl -sf "$AFT_BASE_URL/api/workspaces/${AFT_WS:-E2E-WS}/issues/$(cat "$AFT_WORK_DIR/review-changes.id")"
+          | python3 -c "import sys,json; data=json.load(sys.stdin)['data']; assert data['status'] == 'open', data['status']"
+      - expect: { notText: "review-changes-${RUN_ID:-local}" }

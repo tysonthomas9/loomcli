@@ -1,0 +1,124 @@
+# Route-level coverage for the pages outside the kanban/list/table/graph/monitor set.
+# Each test asserts the page's verified empty-state anchors on a fresh workspace
+# (no agents, no AI backends). Anchor sources: SettingsView.tsx, ErrorDisplay.tsx,
+# TerminalView.tsx + NoBackendsEmptyState.tsx, FileExplorer.tsx, WorkspacePage.tsx,
+# AgentsPage.tsx + AgentDetailMain.tsx, IssueDetailView.tsx.
+suite: pages
+baseUrl: "${AFT_BASE_URL:-http://127.0.0.1:3100}"
+teardown: '"$AFT_TESTS_DIR/scripts/close-open-issues.sh"'
+
+tests:
+  - name: standalone issue page renders from a deep link
+    intent: An issue opened directly at /ws/:id/issues/:issueId renders the standalone detail view without visiting the board first
+    steps:
+      - run: >-
+          curl -sf -X POST "$AFT_BASE_URL/api/workspaces/${AFT_WS:-E2E-WS}/issues"
+          -H "Content-Type: application/json"
+          -d "{\"title\":\"pages detail $RUN_ID\",\"issue_type\":\"task\",\"priority\":2}"
+          | python3 -c "import sys,json;print(json.load(sys.stdin)['data']['id'])"
+          > "$AFT_WORK_DIR/pages-detail.id"
+      # a first regular open gives the session a page; the deep link then navigates
+      # in-page via eval (keeps any recording alive and works with the dynamic id)
+      - open: /ws/E2E-WS/kanban
+      - wait:
+          fn: >-
+            !!document.querySelector('[data-testid=board-toolbar]')
+      - run: >-
+          agent-browser --session "$AFT_SESSION" eval
+          "location.href='$AFT_BASE_URL/ws/${AFT_WS:-E2E-WS}/issues/$(cat "$AFT_WORK_DIR/pages-detail.id")'"
+      - wait: { url: "**/ws/*/issues/**" }
+      # the standalone page renders IssueDetailView (issue-detail-view), NOT the
+      # slide-over's issue-detail-panel — asserting the right root catches route breakage
+      - wait:
+          fn: >-
+            !!document.querySelector('[data-testid=issue-detail-view]')
+      - expect: { visible: { testid: issue-detail-view } }
+      - expect: { visible: { testid: detail-title } }
+      - expect: { text: "pages detail ${RUN_ID:-local}" }
+      - expect: { visible: { testid: detail-issue-id } }
+
+  - name: settings page renders config panels
+    intent: The settings route renders backend configuration with the fresh-workspace empty override state
+    steps:
+      - open: /ws/E2E-WS/settings
+      - wait:
+          fn: >-
+            !!document.querySelector('[data-testid=settings-view]')
+      - expect: { visible: { testid: settings-view } }
+      - expect: { text: Project Default Backend }
+      - expect: { visible: { testid: backend-select } }
+      - expect: { text: Agent Runtime }
+      # fresh workspace: no per-agent overrides exist
+      - expect: { visible: { testid: no-overrides-message } }
+      - expect: { text: No per-agent overrides configured. }
+
+  - name: observability renders zeroed metrics on an idle workspace
+    intent: The observability dashboard renders its metric panels with explicit zero/empty states when no agent work has happened
+    steps:
+      - open: /ws/E2E-WS/observability
+      # this stack serves /api/observability/metrics with zeroed data (200, not 503),
+      # so the dashboard renders panels rather than the not-configured error state
+      - wait: { text: Tasks / Hour }
+      - expect: { text: Avg Duration }
+      - expect: { text: Error Rate }
+      - expect: { text: Hourly Completions (24h) }
+      - expect: { text: No task completions in the last 24 hours }
+      - expect: { text: Agent Utilization }
+
+  - name: terminal view resolves to a lead tab or the no-backends state
+    intent: Activating the terminal view either auto-spawns a Talk-to-Lead tab (stubbed backend) or explains that a backend is needed — never a crash or blank pane
+    steps:
+      - open: /ws/E2E-WS/terminal
+      - wait:
+          fn: >-
+            !!document.querySelector('[data-testid=terminal-view]')
+      - expect: { visible: { testid: terminal-view } }
+      # The harness puts stub CLIs on the SERVER's PATH, so backends are detected and
+      # the view auto-spawns a lead tab running the harmless stub (never a real LLM —
+      # a real codex session was observed here before the stub wiring). Where tmux is
+      # unavailable the spawn can fail and the no-backends state renders instead; both
+      # are healthy terminal states, so assert the disjunction.
+      - wait:
+          fn: >-
+            !!document.querySelector('[data-testid=terminal-tab-bar]') ||
+            !!document.querySelector('[data-testid=no-backends-empty-state]')
+      - expect: { notText: Something went wrong }
+
+  - name: files page renders the explorer toolbar
+    intent: The files route renders the file explorer scaffold (agent selector + filter) on a fresh workspace
+    steps:
+      - open: /ws/E2E-WS/files
+      - wait:
+          fn: >-
+            !!document.querySelector("input[aria-label='Filter files']")
+      # toolbar anchors only — the body's empty text depends on whether any agent
+      # config exists, which other suites may create; the toolbar is unconditional
+      - expect: { visible: { selector: "input[aria-label='Filter files']" } }
+      - expect: { visible: { selector: "select[aria-label='Select agent']" } }
+
+  - name: workspace route loads without crashing
+    intent: The workspace route resolves and keeps the app shell (WorkspacePage renders null for single-repo workspaces by design)
+    steps:
+      - open: /ws/E2E-WS/workspace
+      - wait: { url: "**/ws/*/workspace**" }
+      # single-repo: page body is intentionally empty; the sidebar shell proves the
+      # route mounted rather than crashing to the error boundary
+      - wait:
+          fn: >-
+            !!document.querySelector('[data-testid=workspace-tree-resize-handle]')
+      - expect: { text: REPOS }
+      - expect: { count: { testid: workspace-view, equals: 0 } }
+      - expect: { notText: Something went wrong }
+
+  - name: agents page renders its empty state with no agents
+    intent: With zero agents the agents route stays put (no redirect) and shows the select-an-agent scaffolding
+    steps:
+      - open: /ws/E2E-WS/agents
+      - wait:
+          fn: >-
+            !!document.querySelector('[data-testid=agents-page]')
+      - expect: { url: "**/ws/*/agents**" }
+      - expect: { visible: { testid: agents-page } }
+      - expect: { visible: { testid: agent-editor-groups } }
+      - expect: { text: Select an agent }
+      - expect: { text: Pick an agent from the rail to attach to their terminal session. }

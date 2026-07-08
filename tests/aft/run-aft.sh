@@ -13,8 +13,20 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 
 : "${E2E_PORT:=8090}"
 : "${E2E_FRONTEND_PORT:=3100}"
+# fleet-db must include the driver-runs domain (Engine B / epic-runner); prefer a
+# sibling fleet-db-main checkout (e.g. a `git worktree` of origin/main) when the
+# primary sibling checkout is older
+if [[ -z "${FLEET_DB_REPO:-}" && -d "$REPO_ROOT/../fleet-db-main" ]]; then
+    FLEET_DB_REPO="$REPO_ROOT/../fleet-db-main"
+fi
 : "${FLEET_DB_REPO:=$REPO_ROOT/../fleet-db}"
 : "${AFT_DIR:=$REPO_ROOT/../testing-app}"
+# flue runtime for building the builtin epic-runner workflow bundle (sibling checkout
+# at internal/workflows/FLUE_COMMIT, built with: pnpm install && pnpm --filter
+# @flue/runtime --filter @flue/cli build). Empty when absent: agent-flow tests fail
+# with a clear workflow error, everything else runs.
+: "${FLUE_REPO:=$REPO_ROOT/../flue}"
+[[ -d "$FLUE_REPO/packages/runtime" ]] || FLUE_REPO=""
 BASE_URL="http://127.0.0.1:${E2E_FRONTEND_PORT}"   # browser entry (vite preview, proxies /api)
 API_URL="http://127.0.0.1:${E2E_PORT}"             # loom serve API
 REPORT_DIR="$SCRIPT_DIR/reports"
@@ -40,7 +52,22 @@ cleanup() {
 trap cleanup EXIT INT TERM
 
 echo "[aft] starting e2e stack (api :${E2E_PORT}, frontend :${E2E_FRONTEND_PORT}; log: $REPORT_DIR/server.log)..."
+# Stub AI backends — scoped to the SERVER process only, never this script's env:
+#  - e2e/stubs first on serve's PATH makes `codex`/`claude` resolve to the harmless
+#    stubs, so agent runs (and the terminal view's auto-spawned lead) never invoke a
+#    real LLM. The driver env allowlist strips LOOM_CODEX_BIN, so PATH is the lever.
+#  - OPENAI_API_KEY satisfies the codex HealthCheck in the workflow-run preflight;
+#    the stub never reads it.
+# aft itself must NOT see this PATH: the recovery agent's `claude` is the real one.
+# The builtin-workflow bundle build also needs the flue CLI itself; point serve at
+# the built cli entry (node script) so nothing has to be on PATH.
+FLUE_CMD_JSON=""
+if [[ -n "$FLUE_REPO" && -f "$FLUE_REPO/packages/cli/bin/flue.mjs" ]]; then
+    FLUE_CMD_JSON="[\"node\",\"$FLUE_REPO/packages/cli/bin/flue.mjs\"]"
+fi
 E2E_PORT="$E2E_PORT" E2E_FRONTEND_PORT="$E2E_FRONTEND_PORT" FLEET_DB_REPO="$FLEET_DB_REPO" \
+    PATH="$REPO_ROOT/e2e/stubs:$PATH" OPENAI_API_KEY="stub-e2e" FLUE_REPO="$FLUE_REPO" \
+    LOOM_REAL_FLUE_CMD_JSON="$FLUE_CMD_JSON" \
     bash "$REPO_ROOT/scripts/start-e2e-server.sh" >"$REPORT_DIR/server.log" 2>&1 &
 SERVER_PID=$!
 
