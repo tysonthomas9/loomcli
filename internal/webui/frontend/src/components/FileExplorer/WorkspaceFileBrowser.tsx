@@ -13,19 +13,12 @@ import { useStore } from "zustand";
 import { DiffFileViewer } from "@/components/AgentDetailPanel";
 import { useFileEditorBuffer } from "@/components/FileEditorPanel";
 import { ResizeHandle } from "@/components/ResizeHandle";
-import type {
-  FileBlameData,
-  FileCheckout,
-  FileEntry,
-  FileHistoryEntry,
-  FileScopeRef,
-} from "@/api/workspace";
+import type { FileBlameData, FileCheckout, FileEntry } from "@/api/workspace";
 import {
   blameScopedFile,
   deleteScopedPath,
   diffScopedFile,
   gitStatusScoped,
-  historyScopedFile,
   indexScopedFiles,
   listScopedDir,
   listFileCheckouts,
@@ -63,6 +56,13 @@ import {
   type FileTreeInlineEdit,
   type FileTreeNodeInfo,
 } from "./FileTree";
+import {
+  FileHistoryPanel,
+  type HistoryOpenDiffRequest,
+  type HistoryOpenRevisionRequest,
+  type HistorySubject,
+} from "./FileHistoryPanel";
+import { FileRevisionPane, type RevisionViewState } from "./FileRevisionPane";
 import { FileSearchPanel } from "./FileSearchPanel";
 import { FileTabBar } from "./FileTabBar";
 import { QuickOpenPalette } from "./QuickOpenPalette";
@@ -80,11 +80,7 @@ import {
   type ChangeCheckoutGroup,
 } from "./changesLens";
 import type { QuickOpenItem } from "./quickOpen";
-import {
-  buildUnifiedPatchFromContents,
-  computeGitGutterLineMarks,
-  type GitGutterLineMark,
-} from "./gitGutter";
+import { computeGitGutterLineMarks, type GitGutterLineMark } from "./gitGutter";
 import styles from "./FileExplorer.module.css";
 
 const TREE_WIDTH_KEY = "loom:file-browser:tree-width";
@@ -235,6 +231,11 @@ interface LineTarget {
   token: number;
 }
 
+interface FileReloadRequest {
+  key: string | null;
+  token: number | undefined;
+}
+
 interface DiffViewState {
   ref: CheckoutRef;
   path: string;
@@ -246,154 +247,7 @@ interface DiffViewState {
   canOpenFile?: boolean | undefined;
 }
 
-type OpenDiffRequest = Omit<DiffViewState, "title"> & {
-  title?: string | undefined;
-};
-
-function formatTimelineTime(value: string): string {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
-  return date.toLocaleString();
-}
-
-function TimelineSection({
-  path,
-  scopeRef,
-  collapsed,
-  refreshKey,
-  onToggle,
-  onOpenDiff,
-}: {
-  path: string | null;
-  scopeRef: FileScopeRef;
-  collapsed: boolean;
-  refreshKey: number;
-  onToggle: () => void;
-  onOpenDiff: (request: OpenDiffRequest) => void;
-}) {
-  const { workspaceId } = useWorkspaceContext();
-  const [entries, setEntries] = useState<FileHistoryEntry[]>([]);
-  const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    let canceled = false;
-    if (!path || collapsed) {
-      setEntries([]);
-      setError(null);
-      setIsLoading(false);
-      return () => {
-        canceled = true;
-      };
-    }
-    setIsLoading(true);
-    setError(null);
-    historyScopedFile(workspaceId, scopeRef, path)
-      .then((history) => {
-        if (!canceled) setEntries(history.entries);
-      })
-      .catch((err) => {
-        if (!canceled) {
-          setEntries([]);
-          setError(err instanceof Error ? err.message : String(err));
-        }
-      })
-      .finally(() => {
-        if (!canceled) setIsLoading(false);
-      });
-    return () => {
-      canceled = true;
-    };
-  }, [collapsed, path, refreshKey, scopeRef, workspaceId]);
-
-  return (
-    <section className={styles.openEditors}>
-      <button
-        type="button"
-        className={styles.openEditorsHeader}
-        aria-expanded={!collapsed}
-        onClick={onToggle}
-      >
-        <span
-          className={`${styles.chevron} ${!collapsed ? styles.chevronExpanded : ""}`}
-          aria-hidden="true"
-        >
-          <svg viewBox="0 0 16 16">
-            <path
-              d="M6 4l4 4-4 4"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="1.5"
-            />
-          </svg>
-        </span>
-        <span>Timeline</span>
-        <span className={styles.openEditorsCount}>{entries.length}</span>
-      </button>
-      {!collapsed && (
-        <div className={styles.timelineList}>
-          {!path ? (
-            <div className={styles.openEditorsEmpty}>No active file</div>
-          ) : isLoading ? (
-            <div className={styles.openEditorsEmpty}>Loading...</div>
-          ) : error ? (
-            <div className={styles.timelineError}>{error}</div>
-          ) : entries.length === 0 ? (
-            <div className={styles.openEditorsEmpty}>No history</div>
-          ) : (
-            entries.map((entry) => (
-              <button
-                type="button"
-                key={`${entry.kind}:${entry.id ?? entry.sha ?? entry.time}`}
-                className={styles.timelineItem}
-                onClick={async () => {
-                  if (!path) return;
-                  if (entry.kind === "commit" && entry.sha) {
-                    onOpenDiff({
-                      ref: scopeRef,
-                      path,
-                      from: `${entry.sha}^`,
-                      to: entry.sha,
-                      title: entry.summary || entry.sha.slice(0, 8),
-                    });
-                  } else if (
-                    entry.kind === "save" &&
-                    entry.content !== undefined
-                  ) {
-                    const current = await readScopedFile(
-                      workspaceId,
-                      scopeRef,
-                      path,
-                    );
-                    if (current.binary || current.truncated) return;
-                    onOpenDiff({
-                      ref: scopeRef,
-                      path,
-                      title: "Browser save",
-                      patch: buildUnifiedPatchFromContents(
-                        path,
-                        entry.content,
-                        current.content ?? "",
-                      ),
-                      restoreContent: entry.content,
-                    });
-                  }
-                }}
-              >
-                <span className={styles.timelineKind}>{entry.kind}</span>
-                <span className={styles.timelineSummary}>{entry.summary}</span>
-                <span className={styles.timelineMeta}>
-                  {entry.author ? `${entry.author} · ` : ""}
-                  {formatTimelineTime(entry.time)}
-                </span>
-              </button>
-            ))
-          )}
-        </div>
-      )}
-    </section>
-  );
-}
+type OpenDiffRequest = HistoryOpenDiffRequest;
 
 function LensToggle({
   lens,
@@ -1040,11 +894,15 @@ function MoveToDialog({
 
 function DiffEditorPane({
   diffView,
+  historyOpen,
+  onToggleHistory,
   onClose,
   onOpenFile,
   onRestore,
 }: {
   diffView: DiffViewState;
+  historyOpen: boolean;
+  onToggleHistory: () => void;
   onClose: () => void;
   onOpenFile: (ref: CheckoutRef, path: string) => void;
   onRestore:
@@ -1097,6 +955,32 @@ function DiffEditorPane({
           <span className={styles.diffTitleMeta}>{diffView.title}</span>
         </div>
         <div className={styles.viewerActions}>
+          <button
+            type="button"
+            className={`${styles.saveButton} ${styles.historyToggle}`}
+            aria-pressed={historyOpen}
+            onClick={onToggleHistory}
+          >
+            <svg viewBox="0 0 16 16" aria-hidden="true">
+              <circle
+                cx="8"
+                cy="8"
+                r="5.5"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.4"
+              />
+              <path
+                d="M8 4.8V8l2.2 1.4"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.4"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </svg>
+            <span>History</span>
+          </button>
           {diffView.canOpenFile && (
             <button
               type="button"
@@ -1165,6 +1049,7 @@ function EditorGroup({
   groupIndex,
   group,
   diffView,
+  revisionView,
   isActiveGroup,
   dirty,
   onSelectTab,
@@ -1174,14 +1059,19 @@ function EditorGroup({
   onSaved,
   onOpenDiff,
   onCloseDiff,
+  onOpenRevision,
+  onCloseRevision,
   onOpenEditableFile,
   onRestoreSnapshot,
+  historyRefreshKey,
+  reloadToken,
   lineTarget,
   onLineTargetApplied,
 }: {
   groupIndex: number;
   group: FileBrowserGroup;
   diffView: DiffViewState | null;
+  revisionView: RevisionViewState | null;
   isActiveGroup: boolean;
   dirty: Record<string, boolean>;
   onSelectTab: (groupIndex: number, tabKey: string) => void;
@@ -1191,6 +1081,11 @@ function EditorGroup({
   onSaved: (tab: FileBrowserTab) => void;
   onOpenDiff: (groupIndex: number, request: OpenDiffRequest) => void;
   onCloseDiff: (groupIndex: number) => void;
+  onOpenRevision: (
+    groupIndex: number,
+    request: HistoryOpenRevisionRequest,
+  ) => void;
+  onCloseRevision: (groupIndex: number) => void;
   onOpenEditableFile: (
     groupIndex: number,
     ref: CheckoutRef,
@@ -1201,6 +1096,8 @@ function EditorGroup({
     path: string,
     content: string,
   ) => Promise<void>;
+  historyRefreshKey: number;
+  reloadToken?: number | undefined;
   lineTarget?: LineTarget | undefined;
   onLineTargetApplied: (tabKey: string, token: number) => void;
 }) {
@@ -1222,6 +1119,10 @@ function EditorGroup({
   const activeKey = activeTab ? tabIdentityKey(activeTab) : null;
   const scopeKey = checkoutRefKey(scopeRef);
   const pathDirty = activeKey ? !!dirty[activeKey] : false;
+  const appliedReloadRef = useRef<FileReloadRequest>({
+    key: null,
+    token: undefined,
+  });
   const [searchOpen, setSearchOpen] = useState(false);
   const [basePath, setBasePath] = useState<string | null>(null);
   const [baseContent, setBaseContent] = useState<string | null>(null);
@@ -1230,17 +1131,44 @@ function EditorGroup({
   const [blameData, setBlameData] = useState<FileBlameData | null>(null);
   const [blameLoading, setBlameLoading] = useState(false);
   const [blameError, setBlameError] = useState<string | null>(null);
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const historySubject = useMemo<HistorySubject | null>(() => {
+    if (diffView || revisionView || !activeTab || !activePath) return null;
+    return { ref: scopeRef, path: activePath };
+  }, [activePath, activeTab, diffView, revisionView, scopeRef]);
+  const toggleHistory = useCallback(() => setHistoryOpen((open) => !open), []);
+  const closeHistory = useCallback(() => setHistoryOpen(false), []);
+  const renderHistoryPanel = () =>
+    historyOpen ? (
+      <FileHistoryPanel
+        subject={historySubject}
+        refreshKey={historyRefreshKey}
+        onClose={closeHistory}
+        onOpenDiff={(request) => onOpenDiff(groupIndex, request)}
+        onOpenRevision={(request) => onOpenRevision(groupIndex, request)}
+        onRestoreSnapshot={onRestoreSnapshot}
+      />
+    ) : null;
 
   useEffect(() => {
     setSearchOpen(false);
+    const hasReloadRequest =
+      activeKey !== null &&
+      reloadToken !== undefined &&
+      (appliedReloadRef.current.key !== activeKey ||
+        appliedReloadRef.current.token !== reloadToken);
+    if (hasReloadRequest) {
+      appliedReloadRef.current = { key: activeKey, token: reloadToken };
+    }
     if (activePath) {
-      if (!pathDirty) {
+      if (!pathDirty || hasReloadRequest) {
         void fetchFileRef.current(activePath);
       }
     } else {
+      appliedReloadRef.current = { key: null, token: undefined };
       clearFileRef.current();
     }
-  }, [activePath, pathDirty, scopeKey]);
+  }, [activeKey, activePath, pathDirty, reloadToken, scopeKey]);
 
   const writeFile = useCallback(
     (path: string, content: string) =>
@@ -1368,12 +1296,50 @@ function EditorGroup({
           onSelect={(key) => onSelectTab(groupIndex, key)}
           onClose={(key) => onCloseTab(groupIndex, key)}
         />
-        <DiffEditorPane
-          diffView={diffView}
-          onClose={() => onCloseDiff(groupIndex)}
-          onOpenFile={(ref, path) => onOpenEditableFile(groupIndex, ref, path)}
-          onRestore={onRestoreSnapshot}
+        <div className={styles.editorGroupBody}>
+          <div className={styles.editorPrimaryPane}>
+            <DiffEditorPane
+              diffView={diffView}
+              historyOpen={historyOpen}
+              onToggleHistory={toggleHistory}
+              onClose={() => onCloseDiff(groupIndex)}
+              onOpenFile={(ref, path) =>
+                onOpenEditableFile(groupIndex, ref, path)
+              }
+              onRestore={onRestoreSnapshot}
+            />
+          </div>
+          {renderHistoryPanel()}
+        </div>
+      </section>
+    );
+  }
+
+  if (revisionView) {
+    return (
+      <section
+        className={styles.editorGroup}
+        data-active={isActiveGroup || undefined}
+      >
+        <FileTabBar
+          tabs={group.tabs}
+          activeKey={group.active}
+          dirtyPaths={dirty}
+          groupLabel={`group ${groupIndex + 1}`}
+          onSelect={(key) => onSelectTab(groupIndex, key)}
+          onClose={(key) => onCloseTab(groupIndex, key)}
         />
+        <div className={styles.editorGroupBody}>
+          <div className={styles.editorPrimaryPane}>
+            <FileRevisionPane
+              revisionView={revisionView}
+              historyOpen={historyOpen}
+              onToggleHistory={toggleHistory}
+              onClose={() => onCloseRevision(groupIndex)}
+            />
+          </div>
+          {renderHistoryPanel()}
+        </div>
       </section>
     );
   }
@@ -1391,44 +1357,51 @@ function EditorGroup({
         onSelect={(key) => onSelectTab(groupIndex, key)}
         onClose={(key) => onCloseTab(groupIndex, key)}
       />
-      <WorkspaceFilePane
-        path={activePath}
-        fileData={fileData}
-        isActive={isActiveGroup}
-        isLoading={isLoading}
-        error={error}
-        content={editor.content}
-        isDirty={editor.isDirty}
-        isSaving={editor.isSaving}
-        searchOpen={searchOpen}
-        onContentChange={editor.handleContentChange}
-        onSave={() => void editor.save()}
-        onToggleSearch={() => setSearchOpen((open) => !open)}
-        onSplitRight={() => onSplitRight(groupIndex)}
-        onNavigate={(dirPath) => onNavigate(scopeRef, dirPath)}
-        lineTarget={lineTarget}
-        onLineTargetApplied={(_path, token) => {
-          if (activeKey) onLineTargetApplied(activeKey, token);
-        }}
-        gitGutterMarks={gitGutterMarks}
-        blameEnabled={blameEnabled}
-        blameLines={blameData?.skipped ? [] : blameData?.lines}
-        blameLoading={blameLoading}
-        blameSkippedMessage={
-          blameError ?? (blameData?.skipped ? blameData.message : undefined)
-        }
-        onToggleBlame={() => setBlameEnabled((enabled) => !enabled)}
-        onOpenBlameCommit={(sha) => {
-          if (!activePath) return;
-          onOpenDiff(groupIndex, {
-            ref: scopeRef,
-            path: activePath,
-            from: `${sha}^`,
-            to: sha,
-            title: sha.slice(0, 8),
-          });
-        }}
-      />
+      <div className={styles.editorGroupBody}>
+        <div className={styles.editorPrimaryPane}>
+          <WorkspaceFilePane
+            path={activePath}
+            fileData={fileData}
+            isActive={isActiveGroup}
+            isLoading={isLoading}
+            error={error}
+            content={editor.content}
+            isDirty={editor.isDirty}
+            isSaving={editor.isSaving}
+            searchOpen={searchOpen}
+            onContentChange={editor.handleContentChange}
+            onSave={() => void editor.save()}
+            historyOpen={historyOpen}
+            onToggleHistory={toggleHistory}
+            onToggleSearch={() => setSearchOpen((open) => !open)}
+            onSplitRight={() => onSplitRight(groupIndex)}
+            onNavigate={(dirPath) => onNavigate(scopeRef, dirPath)}
+            lineTarget={lineTarget}
+            onLineTargetApplied={(_path, token) => {
+              if (activeKey) onLineTargetApplied(activeKey, token);
+            }}
+            gitGutterMarks={gitGutterMarks}
+            blameEnabled={blameEnabled}
+            blameLines={blameData?.skipped ? [] : blameData?.lines}
+            blameLoading={blameLoading}
+            blameSkippedMessage={
+              blameError ?? (blameData?.skipped ? blameData.message : undefined)
+            }
+            onToggleBlame={() => setBlameEnabled((enabled) => !enabled)}
+            onOpenBlameCommit={(sha) => {
+              if (!activePath) return;
+              onOpenDiff(groupIndex, {
+                ref: scopeRef,
+                path: activePath,
+                from: `${sha}^`,
+                to: sha,
+                title: sha.slice(0, 8),
+              });
+            }}
+          />
+        </div>
+        {renderHistoryPanel()}
+      </div>
     </section>
   );
 }
@@ -1451,10 +1424,15 @@ function FileBrowserInner({ mode = "workspace", agentName }: FileBrowserProps) {
   const [lineTargets, setLineTargets] = useState<Record<string, LineTarget>>(
     {},
   );
-  const [timelineCollapsed, setTimelineCollapsed] = useState(false);
+  const [fileReloadTokens, setFileReloadTokens] = useState<
+    Record<string, number>
+  >({});
   const [historyRefreshKey, setHistoryRefreshKey] = useState(0);
   const [diffViews, setDiffViews] = useState<
     Record<number, DiffViewState | null>
+  >({});
+  const [revisionViews, setRevisionViews] = useState<
+    Record<number, RevisionViewState | null>
   >({});
   const [quickOpenOpen, setQuickOpenOpen] = useState(false);
   const [quickOpenItems, setQuickOpenItems] = useState<QuickOpenItem[]>([]);
@@ -1483,6 +1461,9 @@ function FileBrowserInner({ mode = "workspace", agentName }: FileBrowserProps) {
   >({});
   const inlineCommitKeyRef = useRef<string | null>(null);
   const reconnectAttemptsRef = useRef(eventContext.reconnectAttempts);
+  const lastLoadedChangeGroupsRef = useRef<Map<string, ChangeCheckoutGroup>>(
+    new Map(),
+  );
 
   const sections = useMemo(
     () =>
@@ -1539,15 +1520,34 @@ function FileBrowserInner({ mode = "workspace", agentName }: FileBrowserProps) {
     () => buildChangeGroups(checkouts, gitStatusByRef),
     [checkouts, gitStatusByRef],
   );
+  const visibleChangeGroups = useMemo(
+    () =>
+      changeGroups.map((group) => {
+        if (group.loaded) return group;
+        const previous = lastLoadedChangeGroupsRef.current.get(group.id);
+        return previous
+          ? {
+              ...previous,
+              label: group.label,
+              changeCount: group.changeCount,
+            }
+          : group;
+      }),
+    [changeGroups],
+  );
   const activeTab =
     groups[activeGroup]?.tabs.find(
       (tab) => tabIdentityKey(tab) === groups[activeGroup]?.active,
     ) ??
     groups[0]?.tabs.find((tab) => tabIdentityKey(tab) === groups[0]?.active) ??
     null;
-  const activePath = activeTab?.path ?? null;
   const workspaceRef = useMemo<CheckoutRef>(() => ({ scope: "workspace" }), []);
-  const activeScopeRef = activeTab?.ref ?? workspaceRef;
+
+  useEffect(() => {
+    for (const group of visibleChangeGroups) {
+      if (group.loaded) lastLoadedChangeGroupsRef.current.set(group.id, group);
+    }
+  }, [visibleChangeGroups]);
 
   useEffect(() => {
     store.getState().pruneUnavailableRefs(validRefs);
@@ -1739,6 +1739,14 @@ function FileBrowserInner({ mode = "workspace", agentName }: FileBrowserProps) {
     }));
   }, []);
 
+  const requestFileReload = useCallback((ref: CheckoutRef, path: string) => {
+    const key = tabIdentityKey({ ref, path });
+    setFileReloadTokens((prev) => ({
+      ...prev,
+      [key]: (prev[key] ?? 0) + 1,
+    }));
+  }, []);
+
   const discardActiveIfNeeded = useCallback(
     (groupIndex: number, nextKey?: string): boolean => {
       const state = store.getState();
@@ -1767,6 +1775,7 @@ function FileBrowserInner({ mode = "workspace", agentName }: FileBrowserProps) {
       const key = tabIdentityKey(tab);
       if (!discardActiveIfNeeded(groupIndex, key)) return;
       setDiffViews((prev) => ({ ...prev, [groupIndex]: null }));
+      setRevisionViews((prev) => ({ ...prev, [groupIndex]: null }));
       store.getState().openTab(tab, groupIndex);
       revealInTree(ref, path);
       if (lineNumber && lineNumber > 0) {
@@ -1792,6 +1801,7 @@ function FileBrowserInner({ mode = "workspace", agentName }: FileBrowserProps) {
     (groupIndex: number, key: string) => {
       if (!discardActiveIfNeeded(groupIndex, key)) return;
       setDiffViews((prev) => ({ ...prev, [groupIndex]: null }));
+      setRevisionViews((prev) => ({ ...prev, [groupIndex]: null }));
       store.getState().activateTab(groupIndex, key);
       const tab = store
         .getState()
@@ -1817,6 +1827,7 @@ function FileBrowserInner({ mode = "workspace", agentName }: FileBrowserProps) {
         store.getState().setDirty(key, false);
       }
       setDiffViews((prev) => ({ ...prev, [groupIndex]: null }));
+      setRevisionViews((prev) => ({ ...prev, [groupIndex]: null }));
       store.getState().closeTab(groupIndex, key);
     },
     [store],
@@ -1871,6 +1882,7 @@ function FileBrowserInner({ mode = "workspace", agentName }: FileBrowserProps) {
         ...prev,
         [groupIndex]: { ...request, title },
       }));
+      setRevisionViews((prev) => ({ ...prev, [groupIndex]: null }));
     },
     [],
   );
@@ -1879,23 +1891,53 @@ function FileBrowserInner({ mode = "workspace", agentName }: FileBrowserProps) {
     setDiffViews((prev) => ({ ...prev, [groupIndex]: null }));
   }, []);
 
+  const openRevision = useCallback(
+    (groupIndex: number, request: HistoryOpenRevisionRequest) => {
+      setRevisionViews((prev) => ({
+        ...prev,
+        [groupIndex]: { ...request },
+      }));
+      setDiffViews((prev) => ({ ...prev, [groupIndex]: null }));
+    },
+    [],
+  );
+
+  const closeRevision = useCallback((groupIndex: number) => {
+    setRevisionViews((prev) => ({ ...prev, [groupIndex]: null }));
+  }, []);
+
   const restoreSnapshot = useCallback(
     async (ref: CheckoutRef, path: string, content: string) => {
       const key = tabIdentityKey({ ref, path });
+      const state = store.getState();
+      const isOpen = state.groups.some((group) =>
+        group.tabs.some((tab) => tabIdentityKey(tab) === key),
+      );
+      const unsavedWarning =
+        isOpen && state.dirty[key]
+          ? "\n\nUnsaved edits in the open tab will be replaced."
+          : "";
+      const ok = window.confirm(
+        `Restore ${checkoutTitle(ref, path)}?${unsavedWarning}`,
+      );
+      if (!ok) return;
       await writeScopedFile(workspaceId, ref, path, content);
       store.getState().setDirty(key, false);
+      if (isOpen) requestFileReload(ref, path);
       setDiffViews({});
+      setRevisionViews({});
       markIndexStale();
       void refreshCheckouts();
       void refreshGitStatus();
       setHistoryRefreshKey((key) => key + 1);
       refreshParents(ref, path);
-      showToast("Restored", { type: "success" });
+      showToast(`Restored ${basename(path)}`, { type: "success" });
       openFile(ref, path);
     },
     [
       workspaceId,
       store,
+      requestFileReload,
       markIndexStale,
       refreshCheckouts,
       refreshGitStatus,
@@ -2503,7 +2545,7 @@ function FileBrowserInner({ mode = "workspace", agentName }: FileBrowserProps) {
               )}
               {lens === "changes" ? (
                 <ChangesList
-                  groups={changeGroups}
+                  groups={visibleChangeGroups}
                   onOpenDiff={(request) =>
                     openDiff(store.getState().activeGroup, request)
                   }
@@ -2544,16 +2586,6 @@ function FileBrowserInner({ mode = "workspace", agentName }: FileBrowserProps) {
                   );
                 })
               )}
-              <TimelineSection
-                path={activePath}
-                scopeRef={activeScopeRef}
-                collapsed={timelineCollapsed}
-                refreshKey={historyRefreshKey}
-                onToggle={() => setTimelineCollapsed((collapsed) => !collapsed)}
-                onOpenDiff={(request) =>
-                  openDiff(store.getState().activeGroup, request)
-                }
-              />
             </div>
           </>
         )}
@@ -2586,6 +2618,7 @@ function FileBrowserInner({ mode = "workspace", agentName }: FileBrowserProps) {
               groupIndex={0}
               group={groups[0] ?? { tabs: [], active: null }}
               diffView={diffViews[0] ?? null}
+              revisionView={revisionViews[0] ?? null}
               isActiveGroup={activeGroup === 0}
               dirty={dirty}
               onSelectTab={selectTab}
@@ -2595,10 +2628,18 @@ function FileBrowserInner({ mode = "workspace", agentName }: FileBrowserProps) {
               onSaved={handleSaved}
               onOpenDiff={openDiff}
               onCloseDiff={closeDiff}
+              onOpenRevision={openRevision}
+              onCloseRevision={closeRevision}
               onOpenEditableFile={(groupIndex, ref, path) =>
                 openFile(ref, path, groupIndex)
               }
               onRestoreSnapshot={restoreSnapshot}
+              historyRefreshKey={historyRefreshKey}
+              reloadToken={
+                groups[0]?.active
+                  ? fileReloadTokens[groups[0].active]
+                  : undefined
+              }
               onLineTargetApplied={handleLineTargetApplied}
               lineTarget={
                 groups[0]?.active ? lineTargets[groups[0].active] : undefined
@@ -2623,6 +2664,7 @@ function FileBrowserInner({ mode = "workspace", agentName }: FileBrowserProps) {
                   groupIndex={1}
                   group={groups[1]}
                   diffView={diffViews[1] ?? null}
+                  revisionView={revisionViews[1] ?? null}
                   isActiveGroup={activeGroup === 1}
                   dirty={dirty}
                   onSelectTab={selectTab}
@@ -2632,10 +2674,18 @@ function FileBrowserInner({ mode = "workspace", agentName }: FileBrowserProps) {
                   onSaved={handleSaved}
                   onOpenDiff={openDiff}
                   onCloseDiff={closeDiff}
+                  onOpenRevision={openRevision}
+                  onCloseRevision={closeRevision}
                   onOpenEditableFile={(groupIndex, ref, path) =>
                     openFile(ref, path, groupIndex)
                   }
                   onRestoreSnapshot={restoreSnapshot}
+                  historyRefreshKey={historyRefreshKey}
+                  reloadToken={
+                    groups[1]?.active
+                      ? fileReloadTokens[groups[1].active]
+                      : undefined
+                  }
                   onLineTargetApplied={handleLineTargetApplied}
                   lineTarget={
                     groups[1]?.active

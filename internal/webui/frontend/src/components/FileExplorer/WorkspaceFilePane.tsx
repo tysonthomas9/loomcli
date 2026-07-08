@@ -33,6 +33,8 @@ interface WorkspaceFilePaneProps {
   searchOpen: boolean;
   onContentChange: (value: string) => void;
   onSave: () => void;
+  historyOpen: boolean;
+  onToggleHistory: () => void;
   onToggleSearch: () => void;
   onSplitRight: () => void;
   /** Reveal a folder in the tree when its breadcrumb segment is clicked. */
@@ -129,6 +131,8 @@ export function WorkspaceFilePane({
   searchOpen,
   onContentChange,
   onSave,
+  historyOpen,
+  onToggleHistory,
   onToggleSearch,
   onSplitRight,
   onNavigate,
@@ -311,6 +315,32 @@ export function WorkspaceFilePane({
                   strokeWidth="1.2"
                 />
               </svg>
+            </button>
+            <button
+              type="button"
+              className={`${styles.saveButton} ${styles.historyToggle}`}
+              aria-pressed={historyOpen}
+              onClick={onToggleHistory}
+            >
+              <svg viewBox="0 0 16 16" aria-hidden="true">
+                <circle
+                  cx="8"
+                  cy="8"
+                  r="5.5"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.4"
+                />
+                <path
+                  d="M8 4.8V8l2.2 1.4"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.4"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </svg>
+              <span>History</span>
             </button>
             <button
               type="button"

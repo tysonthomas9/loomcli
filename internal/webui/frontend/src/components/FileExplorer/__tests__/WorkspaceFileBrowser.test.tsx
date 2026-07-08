@@ -764,7 +764,46 @@ describe("WorkspaceFileBrowser", () => {
     });
   });
 
-  it("shows Timeline commits and saves, and restores a browser save", async () => {
+  it("toggles the History panel and follows active tab changes", async () => {
+    mocks.historyScopedFile.mockImplementation(
+      (_workspaceId: string, _ref: unknown, path: string) =>
+        Promise.resolve({
+          path,
+          entries: [
+            {
+              kind: "commit",
+              sha: path === "symbols.ts" ? "feed123" : "def5678",
+              author: "Test User",
+              time: "2026-01-02T00:00:00Z",
+              summary: `${path} commit`,
+            },
+          ],
+        }),
+    );
+
+    render(<WorkspaceFileBrowser mode="workspace" />);
+    await expandWorkspaceFiles();
+
+    fireEvent.click(screen.getByLabelText("main.ts"));
+    await screen.findByDisplayValue(/console\.log/);
+    fireEvent.click(screen.getByRole("button", { name: "History" }));
+
+    expect(await screen.findByLabelText("File history")).toBeInTheDocument();
+    expect(screen.getByText("main.ts commit")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByLabelText("symbols.ts"));
+    expect(await screen.findByText("symbols.ts commit")).toBeInTheDocument();
+    expect(
+      within(screen.getByLabelText("File history")).getByText("symbols.ts"),
+    ).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "History" }));
+    await waitFor(() => {
+      expect(screen.queryByLabelText("File history")).not.toBeInTheDocument();
+    });
+  });
+
+  it("opens commit diff and read-only file-at-rev from History", async () => {
     mocks.historyScopedFile.mockResolvedValue({
       path: "main.ts",
       entries: [
@@ -775,13 +814,67 @@ describe("WorkspaceFileBrowser", () => {
           time: "2026-01-02T00:00:00Z",
           summary: "commit summary",
         },
+      ],
+    });
+
+    render(<WorkspaceFileBrowser mode="workspace" />);
+    await expandWorkspaceFiles();
+
+    fireEvent.click(screen.getByLabelText("main.ts"));
+    fireEvent.click(await screen.findByRole("button", { name: "History" }));
+    fireEvent.click(await screen.findByRole("button", { name: "View diff" }));
+
+    await waitFor(() => {
+      expect(mocks.diffScopedFile).toHaveBeenCalledWith(
+        "ws-1",
+        { scope: "workspace" },
+        "main.ts",
+        "def5678^",
+        "def5678",
+      );
+    });
+    expect(
+      screen.getByText("Workspace files · commit summary"),
+    ).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Close diff" }));
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Open at commit" }),
+    );
+
+    await waitFor(() => {
+      expect(mocks.readScopedFile).toHaveBeenCalledWith(
+        "ws-1",
+        { scope: "workspace" },
+        "main.ts",
+        "def5678",
+      );
+    });
+    expect(
+      await screen.findByText("Workspace files · def5678"),
+    ).toBeInTheDocument();
+  });
+
+  it("collapses consecutive History saves and restores an expanded save", async () => {
+    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
+    mocks.historyScopedFile.mockResolvedValue({
+      path: "main.ts",
+      entries: [
         {
           kind: "save",
           id: "save-1",
           author: "browser",
           time: "2026-01-03T00:00:00Z",
           summary: "Browser save",
-          content: "previous\n",
+          content: "previous 1\n",
+        },
+        {
+          kind: "save",
+          id: "save-2",
+          author: "browser",
+          time: "2026-01-03T00:01:00Z",
+          summary: "Browser save",
+          content: "previous 2\n",
         },
       ],
     });
@@ -790,22 +883,146 @@ describe("WorkspaceFileBrowser", () => {
     await expandWorkspaceFiles();
 
     fireEvent.click(screen.getByLabelText("main.ts"));
-    expect(await screen.findByText("commit summary")).toBeInTheDocument();
-    fireEvent.click(screen.getByText("Browser save"));
+    fireEvent.click(await screen.findByRole("button", { name: "History" }));
+    fireEvent.click(await screen.findByRole("button", { name: /2 saves/ }));
+    const restoreButtons = await screen.findAllByRole("button", {
+      name: /Restore save from/,
+    });
+    fireEvent.click(restoreButtons[0]!);
 
+    await waitFor(() => {
+      expect(confirmSpy).toHaveBeenCalledWith(
+        "Restore Workspace files: main.ts?",
+      );
+      expect(mocks.writeScopedFile).toHaveBeenCalledWith(
+        "ws-1",
+        { scope: "workspace" },
+        "main.ts",
+        "previous 1\n",
+      );
+    });
+    confirmSpy.mockRestore();
+  });
+
+  it("refreshes the open editor buffer after restoring a History save", async () => {
+    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
+    mocks.historyScopedFile.mockResolvedValue({
+      path: "main.ts",
+      entries: [
+        {
+          kind: "save",
+          id: "save-restore",
+          author: "browser",
+          time: "2026-01-03T00:00:00Z",
+          summary: "Browser save",
+          content: "restored from history\n",
+        },
+      ],
+    });
+    mocks.writeScopedFile.mockImplementationOnce(
+      (_workspaceId: string, _ref: unknown, path: string, content: string) => {
+        mocks.fileMap[path] = {
+          path,
+          content,
+          size: content.length,
+          binary: false,
+        };
+        return Promise.resolve();
+      },
+    );
+
+    render(<WorkspaceFileBrowser mode="workspace" />);
+    await expandWorkspaceFiles();
+
+    fireEvent.click(screen.getByLabelText("main.ts"));
     expect(
-      await screen.findByRole("button", { name: "Restore" }),
+      await screen.findByDisplayValue(/console\.log\('hi'\)/),
     ).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Restore" }));
+    fireEvent.click(await screen.findByRole("button", { name: "History" }));
+    fireEvent.click(
+      await screen.findByRole("button", { name: /Restore save from/ }),
+    );
 
     await waitFor(() => {
       expect(mocks.writeScopedFile).toHaveBeenCalledWith(
         "ws-1",
         { scope: "workspace" },
         "main.ts",
-        "previous\n",
+        "restored from history\n",
       );
     });
+    await waitFor(() => {
+      expect(screen.getByTestId("mock-codemirror")).toHaveValue(
+        "restored from history\n",
+      );
+    });
+    expect(mocks.showToast).toHaveBeenCalledWith("Restored main.ts", {
+      type: "success",
+    });
+    confirmSpy.mockRestore();
+  });
+
+  it("warns that dirty open editor buffers will be replaced before restoring", async () => {
+    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(false);
+    mocks.historyScopedFile.mockResolvedValue({
+      path: "main.ts",
+      entries: [
+        {
+          kind: "save",
+          id: "save-dirty",
+          author: "browser",
+          time: "2026-01-03T00:00:00Z",
+          summary: "Browser save",
+          content: "previous content\n",
+        },
+      ],
+    });
+
+    render(<WorkspaceFileBrowser mode="workspace" />);
+    await expandWorkspaceFiles();
+
+    fireEvent.click(screen.getByLabelText("main.ts"));
+    const editor = await screen.findByTestId("mock-codemirror");
+    fireEvent.change(editor, { target: { value: "unsaved edits\n" } });
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Save" })).toBeEnabled();
+    });
+    fireEvent.click(await screen.findByRole("button", { name: "History" }));
+    fireEvent.click(
+      await screen.findByRole("button", { name: /Restore save from/ }),
+    );
+
+    await waitFor(() => {
+      expect(confirmSpy).toHaveBeenCalledWith(
+        expect.stringContaining(
+          "Unsaved edits in the open tab will be replaced.",
+        ),
+      );
+    });
+    expect(mocks.writeScopedFile).not.toHaveBeenCalled();
+    confirmSpy.mockRestore();
+  });
+
+  it("does not render the old Timeline sidebar section", async () => {
+    render(<WorkspaceFileBrowser mode="workspace" />);
+    await expandWorkspaceFiles();
+
+    expect(screen.queryByText("Timeline")).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /^Workspace files$/ }),
+    ).toBeInTheDocument();
+  });
+
+  it("shows an empty History state when the open panel has no file subject", async () => {
+    render(<WorkspaceFileBrowser mode="workspace" />);
+    await expandWorkspaceFiles();
+
+    fireEvent.click(screen.getByLabelText("main.ts"));
+    fireEvent.click(await screen.findByRole("button", { name: "History" }));
+    expect(await screen.findByLabelText("File history")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Close main.ts" }));
+
+    expect(await screen.findByText("No file selected.")).toBeInTheDocument();
   });
 
   it("passes quick-diff gutter marks from HEAD to the visible editor", async () => {
