@@ -24,6 +24,7 @@ jobs:
     env:
       AFT_DIR: ${{ github.workspace }}/.aft
       FLEET_DB_REPO: ${{ github.workspace }}/.fleet-db
+      FLUE_REPO: ${{ github.workspace }}/.flue
     steps:
       - uses: actions/checkout@v4
 
@@ -40,6 +41,29 @@ jobs:
           repository: tysonthomas9/fleet-db
           token: ${{ secrets.AFT_CHECKOUT_TOKEN }}
           path: .fleet-db
+
+      # flue runtime + cli, needed to build the builtin epic-runner workflow bundle
+      # (zz-agent-flow suite). Public repo, pinned like the main CI bundle job.
+      - name: Read pinned flue commit
+        id: flue-pin
+        run: |
+          set -euo pipefail
+          sha="$(tr -d '[:space:]' < internal/workflows/FLUE_COMMIT)"
+          printf '%s' "$sha" | grep -Eq '^[0-9a-f]{40}$'
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ vars.FLUE_REPOSITORY || 'withastro/flue' }}
+          ref: ${{ steps.flue-pin.outputs.sha }}
+          path: .flue
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: '11.1.1'
+
+      - name: Build flue
+        run: cd .flue && pnpm install --frozen-lockfile && pnpm --filter @flue/runtime --filter @flue/cli build
 
       - uses: actions/setup-go@v5
         with:

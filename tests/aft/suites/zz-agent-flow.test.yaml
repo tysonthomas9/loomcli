@@ -20,15 +20,27 @@ tests:
           -H "Content-Type: application/json"
           -d '{"name":"nova","role_name":"lead"}'
           >/dev/null
-      - open: /ws/E2E-WS/agents
-      # with an agent present the page auto-selects the first one
-      - wait: { url: "**/ws/*/agents/nova**" }
+      # deep link straight to the agent detail route — the bare /agents auto-select
+      # depends on the agent store's first fetch and can exceed the step timeout
+      - open: /ws/E2E-WS/agents/nova
+      - wait:
+          fn: >-
+            !!document.querySelector('[data-testid=agents-page]')
+      - expect: { url: "**/ws/*/agents/nova**" }
       - expect: { visible: { testid: agents-page } }
       # textContent, not rendered text: the rail capitalizes names via CSS text-transform
       - wait:
           fn: >-
             document.body.textContent.includes('nova')
       - open: /ws/E2E-WS/monitor
+      - wait:
+          fn: >-
+            !!document.querySelector('[data-testid=agent-activity-panel]')
+      # the panel renders from the agent store, which refreshes on a 5s poll; after a
+      # long run its first fetch can lag past the step timeout — let one poll cycle
+      # pass, then reload so the mount fetch (server already lists nova) renders it
+      - wait: { ms: 5500 }
+      - reload: true
       - wait:
           fn: >-
             !!document.querySelector('[data-testid=agent-activity-panel]')

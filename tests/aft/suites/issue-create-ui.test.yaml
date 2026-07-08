@@ -65,8 +65,12 @@ tests:
       - expect: { count: { selector: "section[data-status=ready] article[aria-label*='ui-full-field-${RUN_ID:-local}']", equals: 1 } }
 
   # covers: LCLI-WP-001
-  - name: duplicate titles create separate cards
-    intent: The UI and API accept duplicate titles, so two submissions with the same title render as two issue cards
+  # BEHAVIOR CHANGE (fleet-db origin/main): creating an issue with an existing title
+  # now returns the EXISTING issue (title upsert) instead of a duplicate — verified
+  # via API: the second POST responds with the first issue's id. Earlier fleet-db
+  # accepted duplicates; this test asserted two cards then.
+  - name: duplicate titles merge into one card
+    intent: Submitting the same title twice yields a single issue card — the second create returns the existing issue
     steps:
       - open: /ws/E2E-WS/kanban
       - wait:
@@ -87,7 +91,7 @@ tests:
       - expect: { visible: { testid: create-issue-title } }
       - fill: { testid: create-issue-title, value: "ui-duplicate-${RUN_ID:-local}" }
       - click: { testid: create-issue-submit }
-      - wait:
-          fn: >-
-            document.querySelectorAll("section[data-status=ready] article[aria-label*='ui-duplicate-${RUN_ID:-local}']").length === 2
-      - expect: { count: { selector: "section[data-status=ready] article[aria-label*='ui-duplicate-${RUN_ID:-local}']", equals: 2 } }
+      # the upsert re-yields the existing issue: still exactly one card, no error UI
+      - wait: { ms: 1500 }
+      - expect: { count: { selector: "section[data-status=ready] article[aria-label*='ui-duplicate-${RUN_ID:-local}']", equals: 1 } }
+      - expect: { notText: Something went wrong }
