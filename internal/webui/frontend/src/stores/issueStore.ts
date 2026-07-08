@@ -264,6 +264,19 @@ export function createIssueStore(
             const createdTime = Date.parse(currentIssue.created_at);
             if (!isNaN(createdTime) && createdTime >= fetchTimestamp) {
               mergedMap.set(id, currentIssue);
+              continue;
+            }
+
+            // A close mutation can beat the projection refetch that it
+            // schedules. Preserve that terminal local state until the
+            // projection catches up, mirroring recently-created preservation.
+            const updatedTime = Date.parse(currentIssue.updated_at);
+            if (
+              currentIssue.status === "closed" &&
+              !isNaN(updatedTime) &&
+              updatedTime >= fetchTimestamp
+            ) {
+              mergedMap.set(id, currentIssue);
             }
             continue;
           }

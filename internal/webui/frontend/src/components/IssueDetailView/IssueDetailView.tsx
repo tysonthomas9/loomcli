@@ -396,6 +396,11 @@ export function IssueDetailView({
           onStatusChange={handleStatusChange}
           isSaving={isSavingStatus}
         />
+        {issue.status === "closed" && issue.close_reason && (
+          <span className={styles.closeReason} data-testid="issue-close-reason">
+            {issue.close_reason}
+          </span>
+        )}
         <h1 className={styles.headerTitle} data-testid="detail-title">
           {issue.title}
         </h1>

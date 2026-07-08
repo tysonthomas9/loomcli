@@ -47,6 +47,9 @@ test.describe("12 close / reopen fleetdb-regression", () => {
     const after = closed?.data ?? closed;
     expect(after.status).toBe("closed");
     expect(after.close_reason).toBe("fixed-by-fleetdb-regression-12");
+    await expect(tabs.fleet.getByTestId("issue-close-reason")).toHaveText(
+      "fixed-by-fleetdb-regression-12",
+    );
 
     // Reopen — routing verified again. Body is deliberately absent so the
     // helper emits a header-only POST matching the production UI.

@@ -213,6 +213,42 @@ describe("IssueDetailView", () => {
       expect(dropdown).toHaveValue("in_progress");
     });
 
+    it("renders close reason for closed issues", () => {
+      const issue = createTestIssue({
+        status: "closed",
+        close_reason: "fixed by detail test",
+      });
+
+      render(<IssueDetailView {...createDefaultProps({ issue })} />);
+
+      expect(screen.getByTestId("issue-close-reason")).toHaveTextContent(
+        "fixed by detail test",
+      );
+    });
+
+    it("does not render close reason for non-closed issues", () => {
+      const issue = createTestIssue({
+        status: "open",
+        close_reason: "not visible",
+      });
+
+      render(<IssueDetailView {...createDefaultProps({ issue })} />);
+
+      expect(
+        screen.queryByTestId("issue-close-reason"),
+      ).not.toBeInTheDocument();
+    });
+
+    it("does not render close reason when a closed issue has no reason", () => {
+      const issue = createTestIssue({ status: "closed" });
+
+      render(<IssueDetailView {...createDefaultProps({ issue })} />);
+
+      expect(
+        screen.queryByTestId("issue-close-reason"),
+      ).not.toBeInTheDocument();
+    });
+
     it("defaults to open when issue has no status", () => {
       const issue = createTestIssue({ status: undefined });
       render(<IssueDetailView {...createDefaultProps({ issue })} />);

@@ -34,12 +34,15 @@ tests:
       - wait:
           fn: >-
             document.querySelectorAll('section[data-status=in_progress] article').length === 0
-      # positive confirmation of the close: the server state is closed. NOTE
-      # (verified live): a card closed via SSE is REMOVED from the board rather
-      # than relocated to Done — Done only shows closed issues present at page
-      # load. So the honest live assertions are API status + column absence.
+      # positive confirmation of the close: the server state is closed and the
+      # SSE-closed card lands in Done. Scope to this run's title because closed
+      # issues accumulate across suites and Done only renders the newest cards.
       - run: >-
           curl -sf "$AFT_BASE_URL/api/workspaces/${AFT_WS:-E2E-WS}/issues/$(cat "$AFT_WORK_DIR/lifecycle.id")"
           | python3 -c "import sys,json; data=json.load(sys.stdin)['data']; assert data['status'] == 'closed', data['status']"
+      - wait:
+          fn: >-
+            document.querySelectorAll("section[data-status=done] article[aria-label*='lifecycle ${RUN_ID:-local}']").length === 1
+      - expect: { count: { selector: "section[data-status=done] article[aria-label*='lifecycle ${RUN_ID:-local}']", equals: 1 } }
       - expect: { count: { selector: "section[data-status=ready] article[aria-label*='lifecycle ${RUN_ID:-local}']", equals: 0 } }
       - expect: { count: { selector: "section[data-status=ready] article", equals: 0 } }

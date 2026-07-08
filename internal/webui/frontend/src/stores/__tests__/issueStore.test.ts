@@ -695,6 +695,41 @@ describe("issueStore", () => {
       expect(store.getState().issuesMap.get("a")!.status).toBe("in_progress");
     });
 
+    it("preserves freshly closed issue omitted from projection refetch", async () => {
+      vi.setSystemTime(new Date("2026-02-01T00:00:00Z"));
+      store.setState({
+        issuesMap: new Map([
+          [
+            "a",
+            makeIssue({
+              id: "a",
+              status: "open",
+              updated_at: "2026-01-31T23:59:00Z",
+            }),
+          ],
+        ]),
+      });
+
+      store.getState().applyMutation(
+        makeMutation({
+          type: "status",
+          issue_id: "a",
+          new_status: "closed",
+          timestamp: "2026-02-01T00:00:00Z",
+        }),
+      );
+      mockGetKanbanIssues.mockResolvedValue([]);
+
+      await store.getState().fetchIssues({
+        workspaceId: "ws1",
+        mode: "kanban",
+      });
+
+      const issue = store.getState().issuesMap.get("a");
+      expect(issue).toBeDefined();
+      expect(issue!.status).toBe("closed");
+    });
+
     it("applies same-second status mutations when subsecond timestamp is newer", () => {
       store.setState({
         issuesMap: new Map([
