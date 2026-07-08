@@ -2,7 +2,6 @@ package svcimpl
 
 import (
 	"bytes"
-	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -16,7 +15,6 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/sessions"
 	"github.com/tysonthomas9/loomcli/internal/sessions/eventstore"
 	"github.com/tysonthomas9/loomcli/internal/store"
-	"github.com/tysonthomas9/loomcli/internal/webui/service"
 )
 
 func TestSessionServiceListTaskSessionsUsesControlPlane(t *testing.T) {
@@ -54,7 +52,7 @@ func TestSessionServiceListTaskSessionsUsesControlPlane(t *testing.T) {
 		t.Fatalf("complete control-plane session: %v", err)
 	}
 
-	svc := NewSessionService(st, nil)
+	svc := NewSessionService(st)
 	items, err := svc.ListTaskSessions(t.Context(), "WS", "TASK-1")
 	if err != nil {
 		t.Fatalf("ListTaskSessions: %v", err)
@@ -122,7 +120,7 @@ func TestSessionServiceControlPlaneTranscriptRef(t *testing.T) {
 		t.Fatalf("create flue control-plane session: %v", err)
 	}
 
-	svc := NewSessionService(st, nil)
+	svc := NewSessionService(st)
 	items, err := svc.ListTaskSessions(ctx, "WS", "TASK-FLUE-1")
 	if err != nil {
 		t.Fatalf("ListTaskSessions: %v", err)
@@ -205,7 +203,7 @@ func TestSessionServiceListTaskSessionsEnrichesControlPlaneWithLocalUsage(t *tes
 		t.Fatalf("complete control-plane session: %v", err)
 	}
 
-	svc := NewSessionServiceWithRuntimeDir(st, nil, runtimeDir)
+	svc := NewSessionServiceWithRuntimeDir(st, runtimeDir)
 	items, err := svc.ListTaskSessions(ctx, "WS", "TASK-USAGE-1")
 	if err != nil {
 		t.Fatalf("ListTaskSessions: %v", err)
@@ -288,7 +286,7 @@ func TestSessionServiceListTaskSessionsFallsBackToFileStores(t *testing.T) {
 		t.Fatalf("finalize session: %v", err)
 	}
 
-	svc := NewSessionService(st, nil)
+	svc := NewSessionService(st)
 	items, err := svc.ListTaskSessions(ctx, "WS", "TASK-2")
 	if err != nil {
 		t.Fatalf("ListTaskSessions: %v", err)
@@ -342,7 +340,7 @@ func TestSessionServiceListTaskSessionsSearchesRuntimeDir(t *testing.T) {
 		t.Fatalf("finalize session: %v", err)
 	}
 
-	svc := NewSessionServiceWithRuntimeDir(st, nil, runtimeDir)
+	svc := NewSessionServiceWithRuntimeDir(st, runtimeDir)
 	items, err := svc.ListTaskSessions(ctx, "WS", "DESKTOP-QA-3")
 	if err != nil {
 		t.Fatalf("ListTaskSessions: %v", err)
@@ -386,7 +384,7 @@ func TestSessionServiceEventStoreSubagentsAreDiscoverable(t *testing.T) {
 		t.Fatalf("append eventstore subagent: %v", err)
 	}
 
-	svc := NewSessionServiceWithRuntimeDir(nil, nil, runtimeDir)
+	svc := NewSessionServiceWithRuntimeDir(nil, runtimeDir)
 	ids, err := svc.ListSessionSubagents(t.Context(), "WS", "TASK-3", sessionID)
 	if err != nil {
 		t.Fatalf("ListSessionSubagents: %v", err)
@@ -400,25 +398,5 @@ func TestSessionServiceEventStoreSubagentsAreDiscoverable(t *testing.T) {
 	}
 	if len(events) != 1 || events[0].Text != "subagent from event store" {
 		t.Fatalf("subagent events = %+v", events)
-	}
-}
-
-func TestReadScrollbackFileReturnsInternalWhenHomeDirUnavailable(t *testing.T) {
-	oldUserHomeDir := userHomeDir
-	userHomeDir = func() (string, error) {
-		return "", errors.New("home unavailable")
-	}
-	t.Cleanup(func() { userHomeDir = oldUserHomeDir })
-
-	_, err := readScrollbackFile("/.loom/session-scrollback/session.log")
-	if err == nil {
-		t.Fatal("expected error")
-	}
-	var svcErr *service.ServiceError
-	if !errors.As(err, &svcErr) {
-		t.Fatalf("error = %T %v, want ServiceError", err, err)
-	}
-	if svcErr.Kind != service.KindInternal {
-		t.Fatalf("error kind = %q, want %q", svcErr.Kind, service.KindInternal)
 	}
 }

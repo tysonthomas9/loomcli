@@ -19,7 +19,6 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/sessions/transcript"
 	"github.com/tysonthomas9/loomcli/internal/sessions/transcript/backends"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
-	"github.com/tysonthomas9/loomcli/internal/webui/sessionhistory"
 )
 
 // logger is a package-level variable used by test code to capture log output.
@@ -394,14 +393,13 @@ func (s *stubFileService) WriteFile(_ context.Context, _, _, _, _ string) error 
 // testSessionServiceImpl mirrors the root webui.sessionServiceImpl for tests.
 type testSessionServiceImpl struct {
 	sessStore *sessions.Store
-	histStore *sessionhistory.Store
 }
 
 // NewSessionService creates a test-local SessionService implementation.
 // This mirrors the root webui.NewSessionService, duplicated here to avoid
 // a circular import (webui → handlers/misc → webui).
-func NewSessionService(sessStore *sessions.Store, histStore *sessionhistory.Store) service.SessionService {
-	return &testSessionServiceImpl{sessStore: sessStore, histStore: histStore}
+func NewSessionService(sessStore *sessions.Store) service.SessionService {
+	return &testSessionServiceImpl{sessStore: sessStore}
 }
 
 func (s *testSessionServiceImpl) ListTaskSessions(_ context.Context, _, taskID string) ([]service.SessionListItem, error) {
@@ -562,22 +560,4 @@ func (s *testSessionServiceImpl) GetSessionDiff(_ context.Context, _, taskID, se
 		return "", service.ErrInternal("failed to read diff", diffErr)
 	}
 	return diff, nil
-}
-
-func (s *testSessionServiceImpl) ListSessionHistory(ctx context.Context, wsID, issueID string) ([]sessionhistory.SessionRecord, error) {
-	if s.histStore == nil {
-		return nil, service.ErrUnavailable("session history not available (no Redis)")
-	}
-	if err := sessionhistory.ValidateIssueID(issueID); err != nil {
-		return nil, service.ErrValidation(err.Error())
-	}
-	records, err := s.histStore.List(ctx, wsID, issueID)
-	if err != nil {
-		return nil, service.ErrInternal("failed to list session history", err)
-	}
-	return records, nil
-}
-
-func (s *testSessionServiceImpl) GetSessionScrollback(ctx context.Context, wsID, issueID, recordID string) (*service.SessionScrollbackResult, error) {
-	return nil, service.ErrUnavailable("not implemented in test")
 }

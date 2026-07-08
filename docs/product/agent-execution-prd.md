@@ -57,7 +57,7 @@ This creates confusing product behavior:
 - Provide one coherent execution model for local, daemon-managed, direct
   CLI, and distributed/container agent runs.
 - Make every run visible in the UI before the backend model starts work.
-- Preserve session history, logs, transcript, and artifacts after the run
+- Preserve run metadata, logs, transcripts, and artifacts after the run
   exits.
 - Show task claim, status, and run lifecycle in one task timeline.
 - Give clear preflight errors before launching an agent.

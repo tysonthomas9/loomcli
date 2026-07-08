@@ -88,7 +88,7 @@ func ensureAgentTerminalSession(ctx context.Context, svc service.TerminalService
 	}
 
 	if isDaemonOwnedEphemeralWorker(agent) {
-		return nil, service.ErrValidation("daemon-owned ephemeral worker terminals cannot be started from the agents page; use worker logs or task session history")
+		return nil, service.ErrValidation("daemon-owned ephemeral worker terminals cannot be started from the agents page; use worker logs or the Runs tab")
 	}
 
 	tabs, err := svc.ListTabs(ctx, workspace)

@@ -13,5 +13,3 @@ export type { SessionTimelineProps } from "./SessionTimeline";
 
 export { SessionTimelineRow } from "./SessionTimelineRow";
 export type { SessionTimelineRowProps } from "./SessionTimelineRow";
-
-export { SessionHistorySection } from "./SessionHistorySection";

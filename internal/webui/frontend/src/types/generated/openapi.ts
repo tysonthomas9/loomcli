@@ -594,40 +594,6 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
-  "/api/workspaces/{ws}/issues/{issueId}/sessions": {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    /** List session history records for an issue */
-    get: operations["listSessionHistory"];
-    put?: never;
-    post?: never;
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
-  "/api/workspaces/{ws}/issues/{issueId}/sessions/{recordId}/scrollback": {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    /** Get scrollback content for a session history record */
-    get: operations["getSessionScrollback"];
-    put?: never;
-    post?: never;
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
   "/api/workspaces/{ws}/tasks/{taskId}/sessions": {
     parameters: {
       query?: never;
@@ -2369,22 +2335,6 @@ export interface components {
       tool_input?: string;
       raw?: string;
     };
-    /** @description Session history record (Redis-backed, per-issue) */
-    SessionHistoryRecord: {
-      id: string;
-      session_name: string;
-      issue_id: string;
-      backend: string;
-      /** @enum {string} */
-      status: "active" | "completed";
-      /** @enum {string} */
-      launcher: "user" | "start-work";
-      /** Format: date-time */
-      started_at: string;
-      /** Format: date-time */
-      ended_at?: string | null;
-      scrollback_path?: string;
-    };
     TerminalSessionInfo: {
       name: string;
       label: string;
@@ -4122,65 +4072,6 @@ export interface operations {
             disabled?: boolean;
           };
         };
-      };
-    };
-  };
-  listSessionHistory: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path: {
-        /** @description Workspace identifier */
-        ws: components["parameters"]["WorkspaceId"];
-        issueId: string;
-      };
-      cookie?: never;
-    };
-    requestBody?: never;
-    responses: {
-      /** @description Session history */
-      200: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": {
-            success: boolean;
-            data?: components["schemas"]["SessionHistoryRecord"][];
-          };
-        };
-      };
-    };
-  };
-  getSessionScrollback: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path: {
-        /** @description Workspace identifier */
-        ws: components["parameters"]["WorkspaceId"];
-        issueId: string;
-        recordId: string;
-      };
-      cookie?: never;
-    };
-    requestBody?: never;
-    responses: {
-      /** @description Scrollback content */
-      200: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "text/plain": string;
-        };
-      };
-      /** @description Record not found */
-      404: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content?: never;
       };
     };
   };

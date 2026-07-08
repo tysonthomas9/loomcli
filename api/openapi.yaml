@@ -38,8 +38,6 @@ tags:
     description: Issue audit events and SSE mutation stream
   - name: sessions
     description: Session audit trail (task-scoped)
-  - name: session-history
-    description: Session history (issue-scoped, Redis-backed)
   - name: logs
     description: Agent and task log retrieval
   - name: terminal
@@ -1189,62 +1187,6 @@ paths:
                   disabled:
                     type: boolean
                     description: True when SSE token exchange is disabled in open mode
-
-  # ── Session History (Issue-Scoped) ──────────────────────────────────────
-  /api/workspaces/{ws}/issues/{issueId}/sessions:
-    get:
-      operationId: listSessionHistory
-      tags: [session-history]
-      summary: List session history records for an issue
-      parameters:
-        - $ref: "#/components/parameters/WorkspaceId"
-        - name: issueId
-          in: path
-          required: true
-          schema:
-            type: string
-      responses:
-        "200":
-          description: Session history
-          content:
-            application/json:
-              schema:
-                type: object
-                required: [success]
-                properties:
-                  success:
-                    type: boolean
-                  data:
-                    type: array
-                    items:
-                      $ref: "#/components/schemas/SessionHistoryRecord"
-
-  /api/workspaces/{ws}/issues/{issueId}/sessions/{recordId}/scrollback:
-    get:
-      operationId: getSessionScrollback
-      tags: [session-history]
-      summary: Get scrollback content for a session history record
-      parameters:
-        - $ref: "#/components/parameters/WorkspaceId"
-        - name: issueId
-          in: path
-          required: true
-          schema:
-            type: string
-        - name: recordId
-          in: path
-          required: true
-          schema:
-            type: string
-      responses:
-        "200":
-          description: Scrollback content
-          content:
-            text/plain:
-              schema:
-                type: string
-        "404":
-          description: Record not found
 
   # ── Sessions (Task-Scoped Audit Trail) ──────────────────────────────────
   /api/workspaces/{ws}/tasks/{taskId}/sessions:
@@ -4116,34 +4058,6 @@ components:
         tool_input:
           type: string
         raw:
-          type: string
-
-    SessionHistoryRecord:
-      type: object
-      description: Session history record (Redis-backed, per-issue)
-      required: [id, session_name, issue_id, backend, status, launcher, started_at]
-      properties:
-        id:
-          type: string
-        session_name:
-          type: string
-        issue_id:
-          type: string
-        backend:
-          type: string
-        status:
-          type: string
-          enum: [active, completed]
-        launcher:
-          type: string
-          enum: [user, start-work]
-        started_at:
-          type: string
-          format: date-time
-        ended_at:
-          type: [string, "null"]
-          format: date-time
-        scrollback_path:
           type: string
 
     # ── Terminal Schemas ────────────────────────────────────────────────

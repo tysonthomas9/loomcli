@@ -197,7 +197,7 @@ func runServe(cmd *cobra.Command, args []string) {
 
 	// When no external Redis address is configured, run an in-process
 	// miniredis so the terminal-state stores (tabmeta, issuetabs,
-	// sessionhistory, terminal:ui-state) keep working. State is snapshotted
+	// terminal:ui-state) keep working. State is snapshotted
 	// to ~/.loom/terminal-state/snapshot.json every 30s and on shutdown.
 	if serveRedisAddr == "" {
 		if mgr := daemonwire.StartLocalRedis(ctx, serveFleetMode); mgr != nil {

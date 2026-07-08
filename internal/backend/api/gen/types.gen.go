@@ -608,60 +608,24 @@ func (e RuntimeReadyResponseMode) Valid() bool {
 	}
 }
 
-// Defines values for SessionHistoryRecordLauncher.
-const (
-	SessionHistoryRecordLauncherStartWork SessionHistoryRecordLauncher = "start-work"
-	SessionHistoryRecordLauncherUser      SessionHistoryRecordLauncher = "user"
-)
-
-// Valid indicates whether the value is a known member of the SessionHistoryRecordLauncher enum.
-func (e SessionHistoryRecordLauncher) Valid() bool {
-	switch e {
-	case SessionHistoryRecordLauncherStartWork:
-		return true
-	case SessionHistoryRecordLauncherUser:
-		return true
-	default:
-		return false
-	}
-}
-
-// Defines values for SessionHistoryRecordStatus.
-const (
-	Active    SessionHistoryRecordStatus = "active"
-	Completed SessionHistoryRecordStatus = "completed"
-)
-
-// Valid indicates whether the value is a known member of the SessionHistoryRecordStatus enum.
-func (e SessionHistoryRecordStatus) Valid() bool {
-	switch e {
-	case Active:
-		return true
-	case Completed:
-		return true
-	default:
-		return false
-	}
-}
-
 // Defines values for TranscriptEntryRole.
 const (
-	TranscriptEntryRoleAssistant TranscriptEntryRole = "assistant"
-	TranscriptEntryRoleSystem    TranscriptEntryRole = "system"
-	TranscriptEntryRoleTool      TranscriptEntryRole = "tool"
-	TranscriptEntryRoleUser      TranscriptEntryRole = "user"
+	Assistant TranscriptEntryRole = "assistant"
+	System    TranscriptEntryRole = "system"
+	Tool      TranscriptEntryRole = "tool"
+	User      TranscriptEntryRole = "user"
 )
 
 // Valid indicates whether the value is a known member of the TranscriptEntryRole enum.
 func (e TranscriptEntryRole) Valid() bool {
 	switch e {
-	case TranscriptEntryRoleAssistant:
+	case Assistant:
 		return true
-	case TranscriptEntryRoleSystem:
+	case System:
 		return true
-	case TranscriptEntryRoleTool:
+	case Tool:
 		return true
-	case TranscriptEntryRoleUser:
+	case User:
 		return true
 	default:
 		return false
@@ -1696,25 +1660,6 @@ type SeedRequest struct {
 	IssueId     string  `json:"issue_id"`
 	Title       string  `json:"title"`
 }
-
-// SessionHistoryRecord Session history record (Redis-backed, per-issue)
-type SessionHistoryRecord struct {
-	Backend        string                       `json:"backend"`
-	EndedAt        *time.Time                   `json:"ended_at,omitempty"`
-	Id             string                       `json:"id"`
-	IssueId        string                       `json:"issue_id"`
-	Launcher       SessionHistoryRecordLauncher `json:"launcher"`
-	ScrollbackPath *string                      `json:"scrollback_path,omitempty"`
-	SessionName    string                       `json:"session_name"`
-	StartedAt      time.Time                    `json:"started_at"`
-	Status         SessionHistoryRecordStatus   `json:"status"`
-}
-
-// SessionHistoryRecordLauncher defines model for SessionHistoryRecord.Launcher.
-type SessionHistoryRecordLauncher string
-
-// SessionHistoryRecordStatus defines model for SessionHistoryRecord.Status.
-type SessionHistoryRecordStatus string
 
 // SessionResponse Session audit record from dto.SessionResponse
 type SessionResponse struct {

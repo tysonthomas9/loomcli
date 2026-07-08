@@ -31,7 +31,7 @@ The panel renders as `position: fixed` anchored right, width `min(100%, 840px)` 
 
 URL: `/ws/:workspaceId/issue/:issueId`
 
-A lighter read-mostly component without the tabbed interface, embedded terminal, session history, or editable fields for owner/assignee. Includes "Open in Terminal" action that switches to Terminal view with issue context seeded via `pendingIssueContext`.
+A lighter read-mostly component without the tabbed interface, embedded terminal, or editable fields for owner/assignee. Includes "Open in Terminal" action that switches to Terminal view with issue context seeded via `pendingIssueContext`.
 
 ---
 
@@ -53,7 +53,6 @@ IssueDetailPanel (slide-out overlay)
       |   +-- DesignPanel (collapsible H2 sections, fullscreen mode)
       |   +-- Notes (CollapsibleSection)
       |   +-- DependencySection (editable, navigable chips)
-      |   +-- SessionHistorySection
       |   +-- ActivityLog (unified comment+event timeline)
       |   +-- CommentForm
       |   +-- LabelEditor
@@ -151,12 +150,6 @@ User clicks "New Terminal" or agent badge
 `TerminalInstance` emits `ConnectionState` ("connected" | "disconnected" | "reconnecting"):
 1. `EmbeddedTerminal` stores local state for `TerminalHeader` display
 2. Bubbles up to `DefaultContent` → updates `tabs[i].connectionState` → tab bar renders colored dot
-
-### Session History
-
-`SessionHistorySection` lists past sessions via `GET /api/issues/{id}/sessions`. Active sessions show "Jump to tab", completed sessions show "View scrollback" (fetches from `/api/issues/{id}/sessions/{recordId}/scrollback`).
-
----
 
 ## 5. Split View (Terminal in Panel)
 
@@ -286,7 +279,6 @@ Renders markdown design content with:
 | GET | `/api/terminal/ws` | WebSocket upgrade for terminal relay |
 | DELETE | `/api/terminal/tabs/{session}` | Remove tab metadata |
 | POST | `/api/terminal/sessions/{session}/kill` | Deferred session kill |
-| GET | `/api/issues/{id}/sessions` | Session history records |
 
 ### Backend Registry
 
@@ -319,7 +311,6 @@ Renders markdown design content with:
 | `components/IssueDetailPanel/AgentStatusBadge.tsx` | Real-time agent status pill |
 | `components/IssueDetailPanel/AssigneeDropdown.tsx` | Agent/human assignment |
 | `components/IssueDetailPanel/StartWorkButton.tsx` | Agent picker for "Start Work" |
-| `components/IssueDetailPanel/SessionHistorySection.tsx` | Past terminal sessions with scrollback |
 | `components/IssueDetailPanel/SessionsTab.tsx` | Agent session audit trail container |
 | `components/IssueDetailPanel/SessionTimeline.tsx` | Session list sorted newest-first |
 | `components/IssueDetailPanel/SessionTimelineRow.tsx` | Individual session row with status/cost |
@@ -352,4 +343,3 @@ Renders markdown design content with:
 |------|-------------|
 | `internal/webui/handlers_terminal_spawn.go` | POST /api/terminal/spawn |
 | `internal/webui/issuetabs/store.go` | Redis store for tab state |
-| `internal/webui/sessionhistory/store.go` | Redis store for session history |

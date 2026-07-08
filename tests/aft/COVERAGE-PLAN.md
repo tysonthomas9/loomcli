@@ -57,7 +57,6 @@ candidate "Defect status" entry for LCLI-WP-001 in the TSV.
 | diff* | IW-010, RA-009 | seed a branch with commits in the workspace repo → git/diff surfaces show ahead/behind, changed files, patch view |
 | review-queue* | RA-001, DV-008 | PR queue page loads with review-stage issues (seed issues with status=review); GitHub enrichment absent → degrades to warning, not error |
 | agent-ux* | AD-015, IW-014, DV-007 | issue-detail Start Work with no daemon running → surfaced error (not silent); task-card agent/run indicator empty states |
-| session-history* | IW-011 | seed session records via API if a write path exists; otherwise assert empty-state rendering only |
 | onboarding | PS-003 | **blocked by logged defect** ("web-onboarding spec status endpoints are not registered") — write the test, expect failure, use it as the strict-mode diagnosis showcase; promote when fixed |
 
 Also blocked-by-defect: RA-010 (PR detail route not implemented — TSV logs it open).
