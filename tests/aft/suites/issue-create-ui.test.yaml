@@ -42,7 +42,7 @@ tests:
   # DEFECT FIXED: the frontend createIssue() client omitted status from the
   # POST body. The server and fleet-db preserve create-time status once sent.
   - name: full-field create preserves type and description
-    intent: Creating an issue with type, description, and deferred status renders the saved values in the detail panel and Backlog column
+    intent: Creating an issue with type, description, and deferred status renders the saved values in the detail panel and persists them via the API
     steps:
       - open: /ws/E2E-WS/kanban
       - wait:
@@ -61,15 +61,18 @@ tests:
           fn: >-
             document.querySelector('[data-testid=metadata-type]')?.textContent?.includes('Bug')
       - expect: { text: "full-field description ${RUN_ID:-local}" }
+      # deferred issues are EXCLUDED from the default list (fleet-db adds
+      # status != 'deferred' when no filter is given), so the lookup must ask
+      # for them explicitly. For the same reason the Backlog column is not a
+      # stable assertion surface: the freshly created card renders from local
+      # store state but the next projection refetch omits deferred issues and
+      # evicts it. The API status below is the source of truth for the
+      # create-time-status fix.
       - run: >-
-          issue_id=$(curl -sf "$AFT_BASE_URL/api/workspaces/${AFT_WS:-E2E-WS}/issues?title_contains=ui-full-field-$RUN_ID&limit=10"
+          issue_id=$(curl -sf "$AFT_BASE_URL/api/workspaces/${AFT_WS:-E2E-WS}/issues?status=deferred&limit=100"
           | python3 -c "import os,sys,json; data=json.load(sys.stdin)['data']; title='ui-full-field-' + os.environ['RUN_ID']; matches=[issue for issue in data if issue.get('title') == title]; assert matches, data; print(matches[0]['id'])");
           curl -sf "$AFT_BASE_URL/api/workspaces/${AFT_WS:-E2E-WS}/issues/$issue_id"
           | python3 -c "import os,sys,json; issue=json.load(sys.stdin)['data']; assert issue.get('issue_type') == 'bug', issue; assert issue.get('description') == 'full-field description ' + os.environ['RUN_ID'], issue; assert issue.get('status') == 'deferred', issue"
-      - wait:
-          fn: >-
-            document.querySelectorAll("section[data-status=backlog] article[aria-label*='ui-full-field-${RUN_ID:-local}']").length === 1
-      - expect: { count: { selector: "section[data-status=backlog] article[aria-label*='ui-full-field-${RUN_ID:-local}']", equals: 1 } }
 
   # covers: LCLI-WP-001
   # BEHAVIOR CHANGE (fleet-db origin/main): creating an issue with an existing title
