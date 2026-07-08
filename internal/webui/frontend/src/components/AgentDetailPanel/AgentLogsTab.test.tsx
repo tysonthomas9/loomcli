@@ -11,7 +11,7 @@
  * misleading "connected" label over a blank viewer.
  */
 
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import "@testing-library/jest-dom";
 
@@ -19,6 +19,12 @@ import { AgentLogsTab } from "./AgentLogsTab";
 
 const getAgentTerminalInfo = vi.fn();
 const getAgentLogArchive = vi.fn();
+
+type ArchiveFixture = {
+  lines: string[];
+  lineCount: number;
+  startLine: number;
+};
 
 vi.mock("@/hooks/api", () => ({
   getAgentTerminalInfo: (...args: unknown[]) => getAgentTerminalInfo(...args),
@@ -35,6 +41,15 @@ vi.mock("@/components/EmbeddedTerminal", () => ({
 
 function statusEl(): Element | null {
   return screen.getByTestId("log-viewer").querySelector("[data-state]");
+}
+
+function archiveScrollContainer(): HTMLElement {
+  const container =
+    screen.getByTestId("log-viewer").parentElement?.parentElement;
+  if (!(container instanceof HTMLElement)) {
+    throw new Error("expected archive scroll container");
+  }
+  return container;
 }
 
 describe("AgentLogsTab", () => {
@@ -76,6 +91,74 @@ describe("AgentLogsTab", () => {
     expect(pre).toHaveTextContent("beta");
     expect(statusEl()).toHaveAttribute("data-state", "connected");
     expect(screen.queryByTestId("archive-empty")).toBeNull();
+  });
+
+  it("scrolls the archive container to the bottom after load and refresh", async () => {
+    getAgentTerminalInfo.mockResolvedValue("archive");
+
+    let resolveInitialArchive: ((archive: ArchiveFixture) => void) | undefined;
+    let resolveRefreshArchive: ((archive: ArchiveFixture) => void) | undefined;
+
+    getAgentLogArchive
+      .mockReturnValueOnce(
+        new Promise((resolve) => {
+          resolveInitialArchive = resolve;
+        }),
+      )
+      .mockReturnValueOnce(
+        new Promise((resolve) => {
+          resolveRefreshArchive = resolve;
+        }),
+      );
+
+    render(<AgentLogsTab agentName="ember" isActive />);
+
+    const scrollContainer = archiveScrollContainer();
+    let scrollHeight = 480;
+    let scrollTop = 0;
+    Object.defineProperties(scrollContainer, {
+      scrollHeight: {
+        configurable: true,
+        get: () => scrollHeight,
+      },
+      scrollTop: {
+        configurable: true,
+        get: () => scrollTop,
+        set: (value: number) => {
+          scrollTop = value;
+        },
+      },
+    });
+
+    resolveInitialArchive?.({
+      lines: ["alpha", "beta"],
+      lineCount: 2,
+      startLine: 1,
+    });
+
+    await screen.findByTestId("terminal-container");
+    await waitFor(() => {
+      expect(scrollContainer.scrollTop).toBe(480);
+    });
+
+    scrollHeight = 960;
+    scrollContainer.scrollTop = 0;
+    fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
+
+    resolveRefreshArchive?.({
+      lines: ["alpha", "beta", "gamma"],
+      lineCount: 3,
+      startLine: 1,
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId("terminal-container")).toHaveTextContent(
+        "gamma",
+      );
+    });
+    await waitFor(() => {
+      expect(scrollContainer.scrollTop).toBe(960);
+    });
   });
 
   it("reports disconnected when the terminal-info lookup fails", async () => {

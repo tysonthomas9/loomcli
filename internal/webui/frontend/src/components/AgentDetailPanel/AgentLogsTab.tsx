@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import {
   ensureAgentTerminalSession,
@@ -36,6 +36,7 @@ export function AgentLogsTab({
   } | null>(null);
   const [lines, setLines] = useState<string[]>([]);
   const [state, setState] = useState<LogViewState>("connecting");
+  const archiveScrollRef = useRef<HTMLDivElement | null>(null);
 
   const load = useCallback(async () => {
     setState("connecting");
@@ -71,10 +72,17 @@ export function AgentLogsTab({
     void load();
   }, [isActive, load]);
 
+  useEffect(() => {
+    if (mode !== "archive") return;
+    const scrollContainer = archiveScrollRef.current;
+    if (!scrollContainer) return;
+    scrollContainer.scrollTop = scrollContainer.scrollHeight;
+  }, [lines, mode]);
+
   const stateLabel = state === "empty" ? "no logs" : state;
 
   return (
-    <div className={styles.scrollableContent}>
+    <div className={styles.scrollableContent} ref={archiveScrollRef}>
       <div className={styles.section}>
         <h3 className={styles.sectionTitle}>
           {mode === "tmux" ? "Live terminal" : "Archive snapshot"}

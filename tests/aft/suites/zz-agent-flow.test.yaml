@@ -36,6 +36,19 @@ tests:
       - wait:
           fn: >-
             document.body.textContent.includes('nova')
+      - click: { role: button, name: Logs, exact: true }
+      - wait:
+          fn: >-
+            !!document.querySelector('[data-testid=log-viewer]')
+      - expect: { visible: { testid: archive-empty } }
+      - expect: { text: No logs available for this agent yet. }
+      - run: >-
+          d="$AFT_TESTS_DIR/../../tmp/e2e-workspace/.loom-config/.loom/logs/E2E-WS/agents";
+          mkdir -p "$d";
+          printf '%s\n' "nova lead log line one" "nova lead AFT-LOG-MARKER $RUN_ID" > "$d/nova.log"
+      - click: { selector: "div:has(> [data-testid='log-viewer']) > button" }
+      - wait: { text: AFT-LOG-MARKER }
+      - expect: { visible: { testid: terminal-container } }
       - open: /ws/E2E-WS/monitor
       - wait:
           fn: >-
