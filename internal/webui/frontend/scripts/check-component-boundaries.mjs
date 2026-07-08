@@ -21,10 +21,6 @@ export const ALLOWLIST = [
     target: "@/components/table/columns",
   },
   {
-    source: "src/components/RepoSelector/RepoSelector.tsx",
-    target: "../FilterBar/FilterBar.module.css",
-  },
-  {
     source: "src/components/IssueDetailPanel/fields/PriorityDropdown.tsx",
     target: "@/components/VisuallyHidden/VisuallyHidden",
   },

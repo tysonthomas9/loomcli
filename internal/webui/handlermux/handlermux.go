@@ -124,12 +124,6 @@ func HandleGetWorkspaceJob(svc service.WorkspaceService) http.HandlerFunc {
 func HandleWorkspaceReorder(svc service.WorkspaceService) http.HandlerFunc {
 	return workspace.HandleWorkspaceReorder(svc)
 }
-func HandleSetDefaultWorkspace(svc service.WorkspaceService) http.HandlerFunc {
-	return workspace.HandleSetDefaultWorkspace(svc)
-}
-func HandleClearDefaultWorkspace(svc service.WorkspaceService) http.HandlerFunc {
-	return workspace.HandleClearDefaultWorkspace(svc)
-}
 func HandleWorkspaceDelete(svc service.WorkspaceService) http.HandlerFunc {
 	return workspace.HandleWorkspaceDelete(svc)
 }

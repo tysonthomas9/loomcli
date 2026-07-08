@@ -29,14 +29,12 @@ var workspaceBackendOptions = []string{"claude", defaultWorkspaceBackend, "openc
 
 // WorkspaceServiceConfig holds the dependencies for workspace service construction.
 type WorkspaceServiceConfig struct {
-	Store          store.Store         // FleetDB-backed store; authoritative workspace source
-	MultiPool      *daemon.MultiPool   // For daemon-pool stats when local daemons are running
-	CreateFn       WorkspaceCreateFn   // Already wrapped with registry hooks
-	AddReposFn     WorkspaceAddReposFn // Store-backed repo attachment
-	DeleteFn       func(string) error  // Already wrapped with cleanup hooks
-	JobStore       JobStore            // For async creation; nil = async unavailable
-	SetDefaultFn   func(string) error  // Deprecated compatibility hook; default workspace selection is disabled.
-	ClearDefaultFn func() error        // Deprecated compatibility hook; default workspace selection is disabled.
+	Store      store.Store         // FleetDB-backed store; authoritative workspace source
+	MultiPool  *daemon.MultiPool   // For daemon-pool stats when local daemons are running
+	CreateFn   WorkspaceCreateFn   // Already wrapped with registry hooks
+	AddReposFn WorkspaceAddReposFn // Store-backed repo attachment
+	DeleteFn   func(string) error  // Already wrapped with cleanup hooks
+	JobStore   JobStore            // For async creation; nil = async unavailable
 }
 
 type workspaceServiceImpl struct {
@@ -46,8 +44,6 @@ type workspaceServiceImpl struct {
 	addReposFn     WorkspaceAddReposFn
 	deleteFn       func(string) error
 	jobStore       JobStore
-	setDefaultFn   func(string) error
-	clearDefaultFn func() error
 	workspaceCache *workspaceDataCache
 }
 
@@ -60,8 +56,6 @@ func NewWorkspaceService(cfg WorkspaceServiceConfig) WorkspaceService {
 		addReposFn:     cfg.AddReposFn,
 		deleteFn:       cfg.DeleteFn,
 		jobStore:       cfg.JobStore,
-		setDefaultFn:   cfg.SetDefaultFn,
-		clearDefaultFn: cfg.ClearDefaultFn,
 		workspaceCache: newWorkspaceDataCache(defaultWorkspaceDataCacheTTL),
 	}
 }
@@ -443,17 +437,6 @@ func (s *workspaceServiceImpl) RenameWorkspace(ctx context.Context, wsID string,
 func (s *workspaceServiceImpl) ReorderWorkspaces(_ context.Context, order []string) (*ops.WorkspaceData, error) {
 	_ = order
 	return nil, ErrNotImplemented("workspace ordering is not implemented in FleetDB")
-}
-
-func (s *workspaceServiceImpl) SetDefaultWorkspace(ctx context.Context, name string) (*ops.WorkspaceData, error) {
-	_ = ctx
-	_ = name
-	return nil, ErrUnavailable("default workspace selection has been removed; use explicit workspace routes, --workspace, or LOOM_WORKSPACE")
-}
-
-func (s *workspaceServiceImpl) ClearDefaultWorkspace(ctx context.Context) (*ops.WorkspaceData, error) {
-	_ = ctx
-	return nil, ErrUnavailable("default workspace selection has been removed; use explicit workspace routes, --workspace, or LOOM_WORKSPACE")
 }
 
 func (s *workspaceServiceImpl) resolveStoreWorkspaceForDefault(ctx context.Context, name string) (*domain.Workspace, *ServiceError) {

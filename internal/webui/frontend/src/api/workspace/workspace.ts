@@ -196,29 +196,6 @@ export async function reorderWorkspaces(
   return unwrap(response);
 }
 
-/**
- * Deprecated: default workspace selection has been removed.
- */
-export async function setDefaultWorkspace(
-  name: string,
-): Promise<WorkspaceData> {
-  const response = await put<ApiResult<WorkspaceData>>(
-    "/api/workspaces/default",
-    { name },
-  );
-  return unwrap(response);
-}
-
-/**
- * Deprecated: default workspace selection has been removed.
- */
-export async function clearDefaultWorkspace(): Promise<WorkspaceData> {
-  const response = await del<ApiResult<WorkspaceData>>(
-    "/api/workspaces/default",
-  );
-  return unwrap(response);
-}
-
 // ============= Workspace Creation =============
 
 export interface CreateWorkspaceRequest {

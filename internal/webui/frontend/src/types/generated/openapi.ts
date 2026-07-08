@@ -227,24 +227,6 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
-  "/api/workspaces/default": {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    get?: never;
-    /** Set the default workspace */
-    put: operations["setDefaultWorkspace"];
-    post?: never;
-    /** Clear the default workspace */
-    delete: operations["clearDefaultWorkspace"];
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
   "/api/workspaces/{ws}/name": {
     parameters: {
       query?: never;
@@ -3295,52 +3277,6 @@ export interface operations {
     };
     responses: {
       /** @description Order updated */
-      200: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["MessageResponse"];
-        };
-      };
-    };
-  };
-  setDefaultWorkspace: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    requestBody: {
-      content: {
-        "application/json": {
-          workspace: string;
-        };
-      };
-    };
-    responses: {
-      /** @description Default set */
-      200: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["MessageResponse"];
-        };
-      };
-    };
-  };
-  clearDefaultWorkspace: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    requestBody?: never;
-    responses: {
-      /** @description Default cleared */
       200: {
         headers: {
           [name: string]: unknown;

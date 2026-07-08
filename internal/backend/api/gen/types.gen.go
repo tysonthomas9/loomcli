@@ -2092,11 +2092,6 @@ type CreateWorkspaceJSONBody struct {
 	Path string `json:"path"`
 }
 
-// SetDefaultWorkspaceJSONBody defines parameters for SetDefaultWorkspace.
-type SetDefaultWorkspaceJSONBody struct {
-	Workspace string `json:"workspace"`
-}
-
 // ReorderWorkspacesJSONBody defines parameters for ReorderWorkspaces.
 type ReorderWorkspacesJSONBody struct {
 	Order []string `json:"order"`
@@ -2354,9 +2349,6 @@ type NotifySessionChangeJSONRequestBody NotifySessionChangeJSONBody
 
 // CreateWorkspaceJSONRequestBody defines body for CreateWorkspace for application/json ContentType.
 type CreateWorkspaceJSONRequestBody CreateWorkspaceJSONBody
-
-// SetDefaultWorkspaceJSONRequestBody defines body for SetDefaultWorkspace for application/json ContentType.
-type SetDefaultWorkspaceJSONRequestBody SetDefaultWorkspaceJSONBody
 
 // ReorderWorkspacesJSONRequestBody defines body for ReorderWorkspaces for application/json ContentType.
 type ReorderWorkspacesJSONRequestBody ReorderWorkspacesJSONBody

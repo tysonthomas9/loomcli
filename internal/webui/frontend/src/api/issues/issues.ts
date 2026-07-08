@@ -8,7 +8,6 @@ import type {
   Issue,
   IssueDetails,
   BlockedIssue,
-  Statistics,
   WorkFilter,
   Priority,
   IssueType,
@@ -177,19 +176,6 @@ export async function getReadyIssues(
   );
   if (error) throw apiErrorFromResponse(error, response);
   return normalizeIssueRepos(unwrap(data, response) as unknown as Issue[]);
-}
-
-/**
- * Get project statistics.
- */
-export async function getStats(workspaceId: string): Promise<Statistics> {
-  const { data, error, response } = await api.GET(
-    "/api/workspaces/{ws}/stats",
-    { params: { path: { ws: workspaceId } } },
-  );
-  if (error) throw apiErrorFromResponse(error, response);
-  // This endpoint returns Statistics directly, not wrapped
-  return data as unknown as Statistics;
 }
 
 /**

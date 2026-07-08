@@ -3,7 +3,6 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import type {
   Issue,
   IssueDetails,
-  Statistics,
   WorkFilter,
   BlockedIssue,
   Comment,
@@ -14,7 +13,6 @@ import {
   getIssue,
   getReadyIssues,
   getKanbanIssues,
-  getStats,
   getBlockedIssues,
   createIssue,
   updateIssue,
@@ -737,64 +735,6 @@ describe("issues API", () => {
         "/api/workspaces/{ws}/issues",
         expect.anything(),
       );
-    });
-  });
-
-  describe("getStats", () => {
-    const mockStats: Statistics = {
-      total_issues: 100,
-      open_issues: 45,
-      closed_issues: 55,
-      blocked_issues: 10,
-      issues_by_type: {
-        bug: 30,
-        feature: 40,
-        task: 20,
-        chore: 10,
-      },
-      issues_by_priority: {
-        high: 25,
-        medium: 50,
-        low: 25,
-      },
-    };
-
-    it("calls api.GET with /api/workspaces/{ws}/stats", async () => {
-      // getStats returns data directly (not via unwrap)
-      mockApiGet.mockResolvedValue(okResponse(mockStats));
-
-      await getStats("test-ws-id");
-
-      expect(mockApiGet).toHaveBeenCalledWith(
-        "/api/workspaces/{ws}/stats",
-        expect.objectContaining({
-          params: { path: { ws: "test-ws-id" } },
-        }),
-      );
-    });
-
-    it("returns Statistics directly from successful response", async () => {
-      mockApiGet.mockResolvedValue(okResponse(mockStats));
-
-      const result = await getStats("test-ws-id");
-
-      expect(result).toEqual(mockStats);
-    });
-
-    it("throws ApiError on HTTP error response", async () => {
-      mockApiGet.mockResolvedValue(
-        errorResponse(503, "Service Unavailable", {
-          error: "Stats unavailable",
-        }),
-      );
-
-      await expect(getStats("test-ws-id")).rejects.toThrow(ApiError);
-    });
-
-    it("propagates ApiError from HTTP error response", async () => {
-      mockApiGet.mockResolvedValue(errorResponse(503, "Service Unavailable"));
-
-      await expect(getStats("test-ws-id")).rejects.toThrow(ApiError);
     });
   });
 
@@ -2124,7 +2064,6 @@ describe("issues API", () => {
       await expect(getIssue("test-ws-id", "123")).rejects.toThrow(ApiError);
       await expect(getReadyIssues("test-ws-id")).rejects.toThrow(ApiError);
       await expect(getKanbanIssues("test-ws-id")).rejects.toThrow(ApiError);
-      await expect(getStats("test-ws-id")).rejects.toThrow(ApiError);
       await expect(getBlockedIssues("test-ws-id")).rejects.toThrow(ApiError);
       await expect(fetchGraphIssues("test-ws-id")).rejects.toThrow(ApiError);
     });

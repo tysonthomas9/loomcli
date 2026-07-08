@@ -5,7 +5,6 @@
 
 import type {
   LoomAgentStatus,
-  LoomAgentsResponse,
   LoomTaskSummary,
   LoomTaskInfo,
   LoomTaskLists,
@@ -15,33 +14,6 @@ import type {
   LoomStatusResponse,
 } from "@/types";
 import { api, apiErrorFromResponse, get, post, wsUrl } from "@/api/common";
-
-function monitorPath(path: string, workspaceId?: string): string {
-  if (!workspaceId) return path;
-  return `${path}?workspace=${encodeURIComponent(workspaceId)}`;
-}
-
-/**
- * Fetch agents from the loom server.
- * Throws on network errors or non-OK responses so callers can handle connection state.
- */
-export async function fetchAgents(
-  workspaceId?: string,
-): Promise<LoomAgentStatus[]> {
-  if (workspaceId) {
-    const data = await get<LoomAgentsResponse>(
-      monitorPath("/api/monitor/agents", workspaceId),
-      { signal: AbortSignal.timeout(15000) },
-    );
-    return (data.agents ?? []) as unknown as LoomAgentStatus[];
-  }
-
-  const { data, error, response } = await api.GET("/api/monitor/agents", {
-    signal: AbortSignal.timeout(15000),
-  });
-  if (error) throw apiErrorFromResponse(error, response);
-  return (data!.agents ?? []) as unknown as LoomAgentStatus[];
-}
 
 /**
  * Check if the loom server is available.
@@ -119,26 +91,6 @@ function statusResponseToResult(d: LoomStatusResponse): FetchStatusResult {
     stats: d.stats as unknown as LoomStats,
     timestamp: d.timestamp,
   };
-}
-
-/**
- * Fetch task lists from the loom server.
- * Throws on network errors or invalid responses so callers can handle connection state.
- */
-export async function fetchTasks(workspaceId?: string): Promise<LoomTaskLists> {
-  if (workspaceId) {
-    const d = await get<LoomTasksResponse>(
-      monitorPath("/api/monitor/tasks", workspaceId),
-      { signal: AbortSignal.timeout(15000) },
-    );
-    return tasksResponseToLists(d);
-  }
-
-  const { data, error, response } = await api.GET("/api/monitor/tasks", {
-    signal: AbortSignal.timeout(15000),
-  });
-  if (error) throw apiErrorFromResponse(error, response);
-  return tasksResponseToLists(data! as unknown as LoomTasksResponse);
 }
 
 type MonitorTaskListFields = Partial<

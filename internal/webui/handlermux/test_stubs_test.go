@@ -42,12 +42,6 @@ func (m *mockWorkspaceService) RenameWorkspace(_ context.Context, _ string, _ st
 func (m *mockWorkspaceService) ReorderWorkspaces(_ context.Context, _ []string) (*ops.WorkspaceData, error) {
 	return nil, service.ErrUnavailable("not available")
 }
-func (m *mockWorkspaceService) SetDefaultWorkspace(_ context.Context, _ string) (*ops.WorkspaceData, error) {
-	return nil, service.ErrUnavailable("not available")
-}
-func (m *mockWorkspaceService) ClearDefaultWorkspace(_ context.Context) (*ops.WorkspaceData, error) {
-	return nil, service.ErrUnavailable("not available")
-}
 func (m *mockWorkspaceService) GetWorkspaceBackend(_ context.Context, _ string) (*service.BackendConfigData, error) {
 	return nil, service.ErrUnavailable("not available")
 }

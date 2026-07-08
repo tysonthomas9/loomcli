@@ -408,14 +408,12 @@ func NewServer(ctx context.Context, config webui.ServerConfig) (_ *Server, retEr
 	// Initialize workspace service layer. FleetDB Store is the authoritative
 	// workspace source in both local and distributed modes.
 	app.workspaceSvc = service.NewWorkspaceService(service.WorkspaceServiceConfig{
-		Store:          config.Store,
-		MultiPool:      app.multiPool,
-		CreateFn:       app.wrappedCreateFn,
-		AddReposFn:     config.WorkspaceAddReposFn,
-		DeleteFn:       app.wrappedDeleteFn,
-		JobStore:       app.jobStore,
-		SetDefaultFn:   config.SetDefaultWorkspaceFn,
-		ClearDefaultFn: config.ClearDefaultWorkspaceFn,
+		Store:      config.Store,
+		MultiPool:  app.multiPool,
+		CreateFn:   app.wrappedCreateFn,
+		AddReposFn: config.WorkspaceAddReposFn,
+		DeleteFn:   app.wrappedDeleteFn,
+		JobStore:   app.jobStore,
 	})
 
 	// Generate and persist notify token for session change endpoint auth.

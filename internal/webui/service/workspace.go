@@ -64,12 +64,6 @@ type WorkspaceService interface {
 	// Returns refreshed workspace data.
 	ReorderWorkspaces(ctx context.Context, order []string) (*ops.WorkspaceData, error)
 
-	// SetDefaultWorkspace is retained for API compatibility. The feature is disabled.
-	SetDefaultWorkspace(ctx context.Context, name string) (*ops.WorkspaceData, error)
-
-	// ClearDefaultWorkspace is retained for API compatibility. The feature is disabled.
-	ClearDefaultWorkspace(ctx context.Context) (*ops.WorkspaceData, error)
-
 	// GetWorkspaceBackend returns a workspace's AI backend config setting.
 	GetWorkspaceBackend(ctx context.Context, wsID string) (*BackendConfigData, error)
 

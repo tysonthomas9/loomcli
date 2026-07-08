@@ -373,40 +373,6 @@ paths:
               schema:
                 $ref: "#/components/schemas/MessageResponse"
 
-  /api/workspaces/default:
-    put:
-      operationId: setDefaultWorkspace
-      tags: [workspaces]
-      summary: Set the default workspace
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [workspace]
-              properties:
-                workspace:
-                  type: string
-      responses:
-        "200":
-          description: Default set
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/MessageResponse"
-    delete:
-      operationId: clearDefaultWorkspace
-      tags: [workspaces]
-      summary: Clear the default workspace
-      responses:
-        "200":
-          description: Default cleared
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/MessageResponse"
-
   /api/workspaces/{ws}/name:
     patch:
       operationId: renameWorkspace

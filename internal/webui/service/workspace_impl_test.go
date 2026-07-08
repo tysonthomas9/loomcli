@@ -350,47 +350,6 @@ func TestPatchWorkspaceBackend_StoreBackedWritesDaemonProfile(t *testing.T) {
 	}
 }
 
-func TestSetDefaultWorkspace_Removed(t *testing.T) {
-	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
-
-	ctx := context.Background()
-	st := memstore.New()
-	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "ALPHA", Name: "Alpha Project"}); err != nil {
-		t.Fatalf("create alpha: %v", err)
-	}
-
-	svc := NewWorkspaceService(WorkspaceServiceConfig{Store: st})
-
-	data, err := svc.SetDefaultWorkspace(ctx, "Alpha Project")
-	if data != nil {
-		t.Fatalf("data = %+v, want nil", data)
-	}
-	var serr *ServiceError
-	if !errors.As(err, &serr) || serr.Kind != KindUnavailable {
-		t.Fatalf("SetDefaultWorkspace err = %v, want unavailable ServiceError", err)
-	}
-}
-
-func TestClearDefaultWorkspace_Removed(t *testing.T) {
-	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
-
-	ctx := context.Background()
-	st := memstore.New()
-	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "ALPHA", Name: "Alpha Project"}); err != nil {
-		t.Fatalf("create alpha: %v", err)
-	}
-	svc := NewWorkspaceService(WorkspaceServiceConfig{Store: st})
-
-	data, err := svc.ClearDefaultWorkspace(ctx)
-	if data != nil {
-		t.Fatalf("data = %+v, want nil", data)
-	}
-	var serr *ServiceError
-	if !errors.As(err, &serr) || serr.Kind != KindUnavailable {
-		t.Fatalf("ClearDefaultWorkspace err = %v, want unavailable ServiceError", err)
-	}
-}
-
 func TestGetWorkspaceJob_StoreFallbackSurvivesJobStoreLoss(t *testing.T) {
 	ctx := context.Background()
 	st := memstore.New()

@@ -20,8 +20,6 @@ var handleActiveWorkspace = HandleActiveWorkspace
 var handleListWorkspaces = HandleListWorkspaces
 var handleGetWorkspace = HandleGetWorkspace
 var handleGetWorkspaceJob = HandleGetWorkspaceJob
-var handleSetDefaultWorkspace = HandleSetDefaultWorkspace
-var handleClearDefaultWorkspace = HandleClearDefaultWorkspace
 
 // ---------------------------------------------------------------------------
 // mockWorkspaceService — local copy for handler-level testing
@@ -38,8 +36,6 @@ type mockWorkspaceService struct {
 	deleteWorkspaceFn       func(ctx context.Context, wsID string) (*ops.WorkspaceData, error)
 	renameWorkspaceFn       func(ctx context.Context, wsID string, newName string) (*ops.WorkspaceData, error)
 	reorderWorkspacesFn     func(ctx context.Context, order []string) (*ops.WorkspaceData, error)
-	setDefaultWorkspaceFn   func(ctx context.Context, name string) (*ops.WorkspaceData, error)
-	clearDefaultWorkspaceFn func(ctx context.Context) (*ops.WorkspaceData, error)
 	getWorkspaceBackendFn   func(ctx context.Context, wsID string) (*service.BackendConfigData, error)
 	patchWorkspaceBackendFn func(ctx context.Context, wsID string, backend string) (*ops.WorkspaceData, error)
 }
@@ -101,18 +97,6 @@ func (m *mockWorkspaceService) RenameWorkspace(ctx context.Context, wsID string,
 func (m *mockWorkspaceService) ReorderWorkspaces(ctx context.Context, order []string) (*ops.WorkspaceData, error) {
 	if m.reorderWorkspacesFn != nil {
 		return m.reorderWorkspacesFn(ctx, order)
-	}
-	return nil, service.ErrUnavailable("not available")
-}
-func (m *mockWorkspaceService) SetDefaultWorkspace(ctx context.Context, name string) (*ops.WorkspaceData, error) {
-	if m.setDefaultWorkspaceFn != nil {
-		return m.setDefaultWorkspaceFn(ctx, name)
-	}
-	return nil, service.ErrUnavailable("not available")
-}
-func (m *mockWorkspaceService) ClearDefaultWorkspace(ctx context.Context) (*ops.WorkspaceData, error) {
-	if m.clearDefaultWorkspaceFn != nil {
-		return m.clearDefaultWorkspaceFn(ctx)
 	}
 	return nil, service.ErrUnavailable("not available")
 }
