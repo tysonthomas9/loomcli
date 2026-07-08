@@ -34,6 +34,17 @@ Every run writes `tests/aft/reports/report.html` — a self-contained run browse
 navigation, run history + trend, step screenshots, video playback with a step timeline,
 agent verdicts).
 
+## Coverage
+
+Coverage is measured, not declared. Each run regenerates a **census** of the web UI's
+surface straight from the frontend source (`scripts/gen-census.py`: routes from
+`router.tsx`, `data-testid`s, API endpoints from `src/api`), and aft records a **trace**
+of what each test actually touched (browser URLs, the page's own network requests, API
+calls from `run:` steps, executed-step testids/selectors). The join — covered and
+uncovered routes/endpoints/testids, with the tests that touched each — prints after the
+run summary and renders at the top of the HTML report. A new route or endpoint added to
+the app shows up as uncovered automatically; no list to maintain.
+
 ## CI
 
 `.github/workflows/aft.yml` runs `make test-aft` (plus `--record --screenshots --junit`)

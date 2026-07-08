@@ -76,7 +76,13 @@ export AFT_TESTS_DIR="$SCRIPT_DIR"
 export AFT_WORK_DIR="$REPORT_DIR/work/$RUN_ID"   # scratch space for run-step state (issue ids etc.)
 mkdir -p "$AFT_WORK_DIR"
 
+# Regenerate the coverage census from the frontend source so it always matches
+# this checkout; aft joins run traces against it and reports untouched surface.
+CENSUS="$AFT_WORK_DIR/census.json"
+python3 "$SCRIPT_DIR/scripts/gen-census.py" --frontend "$REPO_ROOT/internal/webui/frontend/src" --out "$CENSUS" \
+    || CENSUS=""   # census is reporting-only; never fail the run over it
+
 # Loom's six-column board is dense — the agent-browser default viewport (1280x577)
 # cuts it off; 1920x1080 shows the full board in screenshots and recordings.
 node "$AFT_DIR/dist/cli.js" run "${AFT_SUITES:-$SCRIPT_DIR/suites}" --report-dir "$REPORT_DIR" \
-    --viewport "${AFT_VIEWPORT:-1920x1080}" "$@"
+    --viewport "${AFT_VIEWPORT:-1920x1080}" ${CENSUS:+--census "$CENSUS"} "$@"
