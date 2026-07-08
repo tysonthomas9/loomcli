@@ -1231,6 +1231,77 @@ func TestFileServiceImpl_ListFileCheckouts_IncludesMissingAndChangeCounts(t *tes
 	}
 }
 
+func TestFileServiceImpl_CheckoutsAndWorkspaceGitStatusSkipBrokenCheckout(t *testing.T) {
+	ctx := context.Background()
+	wsRoot := t.TempDir()
+	repoRoot := filepath.Join(wsRoot, "repo-a")
+	agentRoot := filepath.Join(wsRoot, "worktrees", "repo-a", "agent-a")
+	for _, dir := range []string{repoRoot, agentRoot} {
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	initGitRepo(t, repoRoot)
+	mustWrite(t, filepath.Join(repoRoot, "tracked.txt"), "one\n")
+	commitAll(t, repoRoot)
+	mustWrite(t, filepath.Join(repoRoot, "tracked.txt"), "two\n")
+
+	if err := os.WriteFile(filepath.Join(agentRoot, ".git"), []byte("gitdir: /missing/git/admin/dir\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	svc := NewFileService(scopedMockFileOps{
+		wsRoot:    wsRoot,
+		repoRoot:  repoRoot,
+		agentRoot: agentRoot,
+		wsData: &ops.WorkspaceData{
+			ID:   "ws",
+			Path: wsRoot,
+			Repos: []ops.WorkspaceRepo{{
+				Name: "repo-a",
+				Path: repoRoot,
+			}},
+			Agents: []ops.WorkspaceAgentInfo{{Name: "agent-a", Repos: []string{"repo-a"}}},
+		},
+	})
+
+	result, err := svc.ListFileCheckouts(ctx, "ws")
+	if err != nil {
+		t.Fatalf("ListFileCheckouts: %v", err)
+	}
+	checkouts := map[string]service.FileCheckout{}
+	for _, checkout := range result.Checkouts {
+		key := checkout.Kind + ":" + checkout.Repo
+		if checkout.Agent != "" {
+			key = checkout.Kind + ":" + checkout.Agent + ":" + checkout.Repo
+		}
+		checkouts[key] = checkout
+	}
+
+	repoCheckout := checkouts["repo:repo-a"]
+	if !repoCheckout.Exists || repoCheckout.ChangeCount != 1 || repoCheckout.StatusError {
+		t.Fatalf("healthy repo checkout = %+v", repoCheckout)
+	}
+	agentCheckout := checkouts["agent:agent-a:repo-a"]
+	if !agentCheckout.Exists || agentCheckout.ChangeCount != 0 || !agentCheckout.StatusError {
+		t.Fatalf("broken agent checkout = %+v", agentCheckout)
+	}
+
+	status, err := svc.GitStatusScoped(ctx, "ws", service.ScopeWorkspace, "", "")
+	if err != nil {
+		t.Fatalf("GitStatusScoped workspace: %v", err)
+	}
+	if got := status["repo-a/tracked.txt"]; got != " M" {
+		t.Fatalf("status[repo-a/tracked.txt] = %q, want %q; full=%#v", got, " M", status)
+	}
+	for path := range status {
+		if strings.HasPrefix(path, "worktrees/repo-a/agent-a/") {
+			t.Fatalf("workspace status included broken checkout path %q; full=%#v", path, status)
+		}
+	}
+}
+
 func TestFileServiceImpl_GitStatusScoped_InvalidTargets(t *testing.T) {
 	ctx := context.Background()
 	svc, _ := setupScopedService(t)

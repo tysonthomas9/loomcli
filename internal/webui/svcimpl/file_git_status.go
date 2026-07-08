@@ -71,7 +71,15 @@ func (s *fileServiceImpl) workspaceGitStatus(ctx context.Context, wsID, target, 
 		}
 		status, err := s.fileOps.GitStatusPorcelain(checkout.path)
 		if err != nil {
-			return nil, service.ErrInternal("failed to run git status", err)
+			logger.DebugContext(ctx, "skipping checkout with unavailable git status",
+				"workspace", wsID,
+				"kind", checkout.kind,
+				"agent", checkout.agent,
+				"repo", checkout.repo,
+				"path", checkout.path,
+				"err", err,
+			)
+			continue
 		}
 		mergePrefixedGitStatus(result, checkout.prefix, status)
 	}
@@ -131,7 +139,17 @@ func (s *fileServiceImpl) ListFileCheckouts(ctx context.Context, wsID string) (*
 			item.Exists = true
 			status, err := s.fileOps.GitStatusPorcelain(checkout.path)
 			if err != nil {
-				return nil, service.ErrInternal("failed to run git status", err)
+				item.StatusError = true
+				logger.DebugContext(ctx, "checkout git status unavailable",
+					"workspace", wsID,
+					"kind", checkout.kind,
+					"agent", checkout.agent,
+					"repo", checkout.repo,
+					"path", checkout.path,
+					"err", err,
+				)
+				out = append(out, item)
+				continue
 			}
 			item.ChangeCount = len(status)
 			if branch, err := s.fileOps.GetCurrentBranch(checkout.path); err == nil {

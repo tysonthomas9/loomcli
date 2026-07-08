@@ -825,6 +825,44 @@ describe("WorkspaceFileBrowser", () => {
     );
   });
 
+  it("skips unavailable checkouts in Changes counts and shows a notice", async () => {
+    mocks.listFileCheckouts.mockResolvedValue({
+      checkouts: [
+        {
+          kind: "repo",
+          repo: "loomcli",
+          exists: true,
+          change_count: 2,
+        },
+        {
+          kind: "agent",
+          agent: "atlas",
+          repo: "loomcli",
+          exists: true,
+          change_count: 3,
+          status_error: true,
+        },
+        {
+          kind: "repo",
+          repo: "missing",
+          exists: false,
+          change_count: 5,
+        },
+      ],
+    });
+    mocks.gitStatusScoped.mockResolvedValue({ "main.ts": " M" });
+
+    render(<WorkspaceFileBrowser mode="workspace" />);
+
+    fireEvent.click(await screen.findByRole("tab", { name: /Changes\s+2/ }));
+
+    expect(await screen.findByText("1 checkout unavailable")).toBeVisible();
+    expect(
+      screen.getByText("loomcli · shared checkout · 2"),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("atlas · loomcli · 3")).not.toBeInTheDocument();
+  });
+
   it("shows an all-zero Changes empty state", async () => {
     render(<WorkspaceFileBrowser mode="workspace" />);
 

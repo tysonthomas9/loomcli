@@ -1515,6 +1515,7 @@ type FileCheckout struct {
 	Exists      bool             `json:"exists"`
 	Kind        FileCheckoutKind `json:"kind"`
 	Repo        string           `json:"repo"`
+	StatusError *bool            `json:"status_error,omitempty"`
 }
 
 // FileCheckoutKind defines model for FileCheckout.Kind.

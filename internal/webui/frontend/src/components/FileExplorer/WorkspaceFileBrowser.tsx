@@ -54,6 +54,10 @@ import { FileExplorerTreePanel } from "./FileExplorerTreePanel";
 import { FileSearchPanel } from "./FileSearchPanel";
 import { QuickOpenPalette } from "./QuickOpenPalette";
 import {
+  hasAvailableCheckoutStatus,
+  unavailableCheckoutCount,
+} from "./checkoutAvailability";
+import {
   basename,
   clampTreeWidth,
   DEFAULT_GROUP_WIDTH,
@@ -235,15 +239,25 @@ function FileBrowserInner({
   const checkoutChangeCount = useMemo(
     () =>
       visibleCheckouts.reduce(
-        (sum, checkout) => sum + checkout.change_count,
+        (sum, checkout) =>
+          hasAvailableCheckoutStatus(checkout)
+            ? sum + checkout.change_count
+            : sum,
         0,
       ),
+    [visibleCheckouts],
+  );
+  const unavailableChangeCheckoutCount = useMemo(
+    () => unavailableCheckoutCount(visibleCheckouts),
     [visibleCheckouts],
   );
   const changesRefs = useMemo(() => {
     const seen = new Set<string>();
     return visibleCheckouts
-      .filter((checkout) => checkout.exists && checkout.change_count > 0)
+      .filter(
+        (checkout) =>
+          hasAvailableCheckoutStatus(checkout) && checkout.change_count > 0,
+      )
       .map(checkoutRefFromCheckout)
       .filter((ref) => {
         const key = checkoutRefKey(ref);
@@ -1108,6 +1122,7 @@ function FileBrowserInner({
             checkoutError={checkoutError}
             sections={sections}
             changeGroups={visibleChangeGroups}
+            unavailableCheckoutCount={unavailableChangeCheckoutCount}
             expandedRoots={expandedRoots}
             selectedTab={selectedTab}
             inlineEdit={inlineEdit}

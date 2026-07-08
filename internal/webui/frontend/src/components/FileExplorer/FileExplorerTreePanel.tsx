@@ -97,12 +97,14 @@ function LensToggle({
 
 function ChangesList({
   groups,
+  unavailableCount,
   onOpenDiff,
 }: {
   groups: ChangeCheckoutGroup[];
+  unavailableCount: number;
   onOpenDiff: (request: OpenDiffRequest) => void;
 }) {
-  if (groups.length === 0) {
+  if (groups.length === 0 && unavailableCount === 0) {
     return (
       <div className={styles.changesEmpty}>
         No uncommitted changes across this workspace.
@@ -112,6 +114,18 @@ function ChangesList({
 
   return (
     <div className={styles.changesList} aria-label="Workspace changes">
+      {unavailableCount > 0 && (
+        <div className={styles.changesNotice} role="status">
+          {unavailableCount === 1
+            ? "1 checkout unavailable"
+            : `${unavailableCount} checkouts unavailable`}
+        </div>
+      )}
+      {groups.length === 0 && (
+        <div className={styles.changesEmpty}>
+          No uncommitted changes across this workspace.
+        </div>
+      )}
       {groups.map((group) => (
         <section key={group.id} className={styles.changesGroup}>
           <h2 className={styles.changesGroupHeader}>{group.label}</h2>
@@ -387,6 +401,7 @@ export function FileExplorerTreePanel({
   checkoutError,
   sections,
   changeGroups,
+  unavailableCheckoutCount,
   expandedRoots,
   selectedTab,
   inlineEdit,
@@ -411,6 +426,7 @@ export function FileExplorerTreePanel({
   checkoutError: string | null;
   sections: FileTreeSection[];
   changeGroups: ChangeCheckoutGroup[];
+  unavailableCheckoutCount: number;
   expandedRoots: Set<string>;
   selectedTab: FileBrowserTab | null;
   inlineEdit: ScopedInlineEdit | null;
@@ -615,7 +631,11 @@ export function FileExplorerTreePanel({
           <div className={styles.checkoutError}>{checkoutError}</div>
         )}
         {lens === "changes" ? (
-          <ChangesList groups={changeGroups} onOpenDiff={onOpenDiff} />
+          <ChangesList
+            groups={changeGroups}
+            unavailableCount={unavailableCheckoutCount}
+            onOpenDiff={onOpenDiff}
+          />
         ) : (
           sections.map((section) => {
             const workspaceRoot =
