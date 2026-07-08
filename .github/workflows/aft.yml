@@ -42,8 +42,21 @@ jobs:
           token: ${{ secrets.AFT_CHECKOUT_TOKEN }}
           path: .fleet-db
 
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24 # agent-browser requires >= 24; flue needs >= 22.19
+          cache: npm
+          cache-dependency-path: |
+            internal/webui/frontend/package-lock.json
+            .aft/package-lock.json
+
       # flue runtime + cli, needed to build the builtin epic-runner workflow bundle
-      # (zz-agent-flow suite). Public repo, pinned like the main CI bundle job.
+      # (zz-agent-flow suite). Public repo, pinned like ci.yml's builtin-bundle-pin
+      # job — and like it, built AFTER setup-node so pnpm runs on node 24.
       - name: Read pinned flue commit
         id: flue-pin
         run: |
@@ -64,18 +77,6 @@ jobs:
 
       - name: Build flue
         run: cd .flue && pnpm install --frozen-lockfile && pnpm --filter @flue/runtime --filter @flue/cli build
-
-      - uses: actions/setup-go@v5
-        with:
-          go-version-file: go.mod
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 24 # agent-browser requires >= 24
-          cache: npm
-          cache-dependency-path: |
-            internal/webui/frontend/package-lock.json
-            .aft/package-lock.json
 
       - name: Install agent-browser, Chrome, and ffmpeg
         run: |

@@ -8,7 +8,11 @@
 # "Select an agent", observability zero-metrics) assume absent.
 suite: zz-agent-flow
 baseUrl: "${AFT_BASE_URL:-http://127.0.0.1:3100}"
-teardown: '"$AFT_TESTS_DIR/scripts/close-open-issues.sh"'
+# also best-effort delete the agentdef so anything ordered after zz- (or a rerun
+# against a warm server) starts agent-free like every other suite expects
+teardown: >-
+  "$AFT_TESTS_DIR/scripts/close-open-issues.sh";
+  curl -s -X DELETE "$AFT_BASE_URL/api/workspaces/${AFT_WS:-E2E-WS}/agents/nova" >/dev/null || true
 
 tests:
   # covers: agent-definition visibility (LCLI-AD group, UI surface slice)
@@ -78,14 +82,14 @@ tests:
           -H "Content-Type: application/json"
           -d "{\"epicId\":\"$(cat "$AFT_WORK_DIR/agent-epic.id")\"}"
           > "$AFT_WORK_DIR/agent-run.json"
-      # the run is asynchronous and the first invocation builds the workflow bundle —
-      # poll the API for the task to close (well past the browser step timeout)
+      # The POST above carries the (synchronous) workflow-bundle build; this step only
+      # covers execution. Keep the poll well under the 120s run-step ceiling: 40 x ~2s
+      # plus cheap grep instead of a python startup per iteration.
       - run: >-
-          for i in $(seq 1 50); do
-          status=$(curl -sf "$AFT_BASE_URL/api/workspaces/${AFT_WS:-E2E-WS}/issues/$(cat "$AFT_WORK_DIR/agent-task.id")"
-          | python3 -c "import sys,json;print(json.load(sys.stdin)['data']['status'])");
-          [ "$status" = "closed" ] && break; sleep 2; done;
-          [ "$status" = "closed" ] || { echo "task never closed (last: $status)"; exit 1; }
+          for i in $(seq 1 40); do
+          curl -sf "$AFT_BASE_URL/api/workspaces/${AFT_WS:-E2E-WS}/issues/$(cat "$AFT_WORK_DIR/agent-task.id")"
+          | grep -q '"status":"closed"' && exit 0; sleep 2; done;
+          echo "task never closed"; exit 1
       # a task session was recorded during execution — this is what the Runs tab reads
       - run: >-
           curl -sf "$AFT_BASE_URL/api/workspaces/${AFT_WS:-E2E-WS}/tasks/$(cat "$AFT_WORK_DIR/agent-task.id")/sessions"

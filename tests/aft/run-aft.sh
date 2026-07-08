@@ -37,6 +37,18 @@ if [[ ! -f "$AFT_DIR/dist/cli.js" ]]; then
     (cd "$AFT_DIR" && npm install --silent && npm run build --silent)
 fi
 
+# The e2e script builds tmp/fleet-db only when MISSING — switching FLEET_DB_REPO (or
+# advancing its checkout) would silently reuse a binary with different behavior
+# (driver-runs domain, title upsert). Stamp the source repo+SHA and rebuild on change.
+FLEET_DB_BIN="$REPO_ROOT/tmp/fleet-db"
+FLEET_DB_STAMP="$REPO_ROOT/tmp/fleet-db.source"
+FLEET_DB_SRC="$FLEET_DB_REPO@$(git -C "$FLEET_DB_REPO" rev-parse HEAD 2>/dev/null || echo unknown)"
+if [[ -x "$FLEET_DB_BIN" && "$(cat "$FLEET_DB_STAMP" 2>/dev/null || true)" != "$FLEET_DB_SRC" ]]; then
+    echo "[aft] fleet-db source changed ($FLEET_DB_SRC) — rebuilding binary..."
+    (cd "$FLEET_DB_REPO" && CGO_ENABLED=0 go build -o "$FLEET_DB_BIN" ./cmd/fleet-db)
+fi
+mkdir -p "$REPO_ROOT/tmp" && printf '%s\n' "$FLEET_DB_SRC" > "$FLEET_DB_STAMP"
+
 SERVER_PID=""
 cleanup() {
     if [[ -n "$SERVER_PID" ]] && kill -0 "$SERVER_PID" 2>/dev/null; then
@@ -111,6 +123,18 @@ python3 "$SCRIPT_DIR/scripts/gen-census.py" --frontend "$REPO_ROOT/internal/webu
 
 # Loom's six-column board is dense — the agent-browser default viewport (1280x577)
 # cuts it off; 1920x1080 shows the full board in screenshots and recordings.
-node "$AFT_DIR/dist/cli.js" run "${AFT_SUITES:-$SCRIPT_DIR/suites}" --report-dir "$REPORT_DIR" \
-    --viewport "${AFT_VIEWPORT:-1920x1080}" ${CENSUS:+--census "$CENSUS"} \
+# macOS: a sleeping display freezes Chrome's compositor — rendering frames stop, CSS
+# @starting-style transitions never complete (elements stuck at opacity:0 read as
+# invisible), Playwright actionability waits time out, and screenshots fail. Verified:
+# 0 rAF frames/3s with the display asleep vs 182 awake. Keep the display awake for
+# the duration of the run; -u wakes it at start. No-op on Linux/CI.
+CAFFEINATE=""
+command -v caffeinate >/dev/null 2>&1 && CAFFEINATE="caffeinate -dimsu"
+
+# 15s step timeout (aft default is 8s): the Loom SPA leans on SSE + polling stores,
+# and under CI/host load its reactions legitimately stretch past 8s — measured as
+# whole-suite flake storms on a busy machine.
+$CAFFEINATE node "$AFT_DIR/dist/cli.js" run "${AFT_SUITES:-$SCRIPT_DIR/suites}" --report-dir "$REPORT_DIR" \
+    --viewport "${AFT_VIEWPORT:-1920x1080}" --timeout "${AFT_TIMEOUT:-15000}" \
+    ${CENSUS:+--census "$CENSUS"} \
     ${AFT_MAX_BROWSERS:+--max-browsers "$AFT_MAX_BROWSERS"} "$@"

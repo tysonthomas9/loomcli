@@ -27,8 +27,17 @@ runs every suite in `tests/aft/suites/`, and tears the stack down. The primary w
 is `e2e-ws` with id **`E2E-WS`** — exported to suites/hooks as `AFT_WS`.
 
 Requirements: `go`, `node` >= 20 (24 for agent-browser), `agent-browser`, a **fleet-db**
-checkout (default `../fleet-db`, override `FLEET_DB_REPO`), an aft checkout (default
-`../testing-app`, override `AFT_DIR`), and `claude` unless `--no-agent`.
+checkout (default `../fleet-db`; a sibling `../fleet-db-main` — e.g. a git worktree of
+origin/main — is preferred when present because the epic-runner needs the driver-runs
+domain), an aft checkout (default `../testing-app`, override `AFT_DIR`), a **flue**
+checkout at `../flue` (pinned commit in `internal/workflows/FLUE_COMMIT`, built with
+pnpm) for the agent-flow suite, and `claude` unless `--no-agent`.
+
+**Suite ordering is an invariant**: aft runs suite files alphabetically. The
+`zz-agent-flow` suite is named to run LAST — it creates an agent definition and run
+artifacts that earlier suites' empty-state assertions (monitor "No agents found",
+agents-page "Select an agent", observability zero metrics) assume absent. Keep new
+suites' names alphabetically before `zz-`, or make them agent-tolerant.
 
 Every run writes `tests/aft/reports/report.html` — a self-contained run browser (suite
 navigation, run history + trend, step screenshots, video playback with a step timeline,

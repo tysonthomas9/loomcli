@@ -91,7 +91,17 @@ tests:
       - expect: { visible: { testid: create-issue-title } }
       - fill: { testid: create-issue-title, value: "ui-duplicate-${RUN_ID:-local}" }
       - click: { testid: create-issue-submit }
-      # the upsert re-yields the existing issue: still exactly one card, no error UI
-      - wait: { ms: 1500 }
+      # deterministic upsert proof: creating the same title again returns the SAME id
+      # (a timed board-count alone couldn't distinguish upsert from slow rendering)
+      - run: >-
+          id1=$(curl -sf -X POST "$AFT_BASE_URL/api/workspaces/${AFT_WS:-E2E-WS}/issues"
+          -H "Content-Type: application/json"
+          -d "{\"title\":\"ui-duplicate-$RUN_ID\",\"issue_type\":\"task\",\"priority\":2}"
+          | python3 -c "import sys,json;print(json.load(sys.stdin)['data']['id'])");
+          id2=$(curl -sf -X POST "$AFT_BASE_URL/api/workspaces/${AFT_WS:-E2E-WS}/issues"
+          -H "Content-Type: application/json"
+          -d "{\"title\":\"ui-duplicate-$RUN_ID\",\"issue_type\":\"task\",\"priority\":2}"
+          | python3 -c "import sys,json;print(json.load(sys.stdin)['data']['id'])");
+          [ -n "$id1" ] && [ "$id1" = "$id2" ] || { echo "expected upsert, got '$id1' vs '$id2'"; exit 1; }
       - expect: { count: { selector: "section[data-status=ready] article[aria-label*='ui-duplicate-${RUN_ID:-local}']", equals: 1 } }
       - expect: { notText: Something went wrong }
