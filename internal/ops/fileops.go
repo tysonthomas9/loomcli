@@ -9,6 +9,9 @@ var (
 	// ErrAgentWorktreeNotFound indicates that a valid agent+repo checkout is not
 	// present on this machine.
 	ErrAgentWorktreeNotFound = errors.New("agent worktree not found")
+	// ErrCheckoutTargetNotAllowed indicates that a requested checkout target is
+	// unknown, not allowed for the agent, or otherwise outside the workspace map.
+	ErrCheckoutTargetNotAllowed = errors.New("checkout target not allowed")
 )
 
 // FileOps defines the interface for resolving the roots that file operations
@@ -79,6 +82,12 @@ type FileOps interface {
 	// GetCurrentBranch returns the current branch for a git checkout. It is
 	// best-effort metadata for file checkout enumeration.
 	GetCurrentBranch(worktreePath string) (string, error)
+
+	// RepairCheckout repairs or provisions a known workspace checkout. scope is
+	// "agent" or "repo"; target is the agent name or repo name; repo qualifies
+	// agent scope. Implementations must validate target/repo against workspace
+	// topology and never accept arbitrary paths from callers.
+	RepairCheckout(workspaceID, scope, target, repo string, force bool) (RepairResult, error)
 }
 
 // GitFileContentAtRev contains bounded content returned from a git revision.
@@ -86,4 +95,13 @@ type GitFileContentAtRev struct {
 	Content   []byte
 	Size      int64
 	Truncated bool
+}
+
+// RepairResult is returned by file checkout repair/provision operations.
+type RepairResult struct {
+	Repaired      bool   `json:"repaired"`
+	Method        string `json:"method"`
+	RequiresForce bool   `json:"requires_force,omitempty"`
+	BackupPath    string `json:"backup_path,omitempty"`
+	Message       string `json:"message"`
 }

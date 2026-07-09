@@ -109,6 +109,10 @@ export interface FileScopeRef {
 }
 
 export type FileCheckout = components["schemas"]["FileCheckout"];
+export type FileCheckoutRepairRequest =
+  components["schemas"]["FileCheckoutRepairRequest"];
+export type FileCheckoutRepairResponse =
+  components["schemas"]["FileCheckoutRepairResponse"];
 
 export interface FileCheckoutsResponse {
   checkouts: FileCheckout[];
@@ -283,6 +287,20 @@ export async function listFileCheckouts(
   workspaceId: string,
 ): Promise<FileCheckoutsResponse> {
   return get<FileCheckoutsResponse>(wsUrl(workspaceId, "/files/checkouts"));
+}
+
+/**
+ * Repair or provision a known file checkout.
+ * POST /api/workspaces/{ws}/files/checkouts/repair
+ */
+export async function repairFileCheckout(
+  workspaceId: string,
+  request: FileCheckoutRepairRequest,
+): Promise<FileCheckoutRepairResponse> {
+  return post<FileCheckoutRepairResponse>(
+    wsUrl(workspaceId, "/files/checkouts/repair"),
+    request,
+  );
 }
 
 /**

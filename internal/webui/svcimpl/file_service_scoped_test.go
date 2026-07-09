@@ -154,6 +154,10 @@ func (m scopedMockFileOps) GetCurrentBranch(worktreePath string) (string, error)
 	return strings.TrimSpace(string(out)), nil
 }
 
+func (m scopedMockFileOps) RepairCheckout(_, _, _, _ string, _ bool) (ops.RepairResult, error) {
+	return ops.RepairResult{Repaired: false, Method: "none", Message: "not implemented"}, nil
+}
+
 func parseTestPorcelainStatus(output string) map[string]string {
 	trimmed := strings.Trim(output, "\r\n")
 	if trimmed == "" {
@@ -1166,7 +1170,7 @@ func TestFileServiceImpl_ListFileCheckouts_IncludesMissingAndChangeCounts(t *tes
 	repoARoot := filepath.Join(wsRoot, "repo-a")
 	repoBRoot := filepath.Join(wsRoot, "repo-b")
 	agentARoot := filepath.Join(wsRoot, "worktrees", "repo-a", "agent-a")
-	for _, dir := range []string{repoARoot, repoBRoot, agentARoot} {
+	for _, dir := range []string{repoARoot, agentARoot} {
 		if err := os.MkdirAll(dir, 0755); err != nil {
 			t.Fatal(err)
 		}

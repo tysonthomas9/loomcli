@@ -2702,6 +2702,33 @@ paths:
               schema:
                 $ref: "#/components/schemas/FileCheckoutsResponse"
 
+  /api/workspaces/{ws}/files/checkouts/repair:
+    post:
+      operationId: repairFileCheckout
+      tags: [files]
+      summary: Repair or provision a known workspace file checkout
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/FileCheckoutRepairRequest"
+      responses:
+        "200":
+          description: Checkout repair result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FileCheckoutRepairResponse"
+        "400":
+          description: Unknown or disallowed checkout target
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
   /api/workspaces/{ws}/files/diff:
     get:
       operationId: getScopedFileDiff
@@ -3906,6 +3933,37 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/FileCheckout"
+
+    FileCheckoutRepairRequest:
+      type: object
+      required: [scope, target]
+      properties:
+        scope:
+          type: string
+          enum: [agent, repo]
+        target:
+          type: string
+        repo:
+          type: string
+          description: Repo qualifier, valid when scope=agent.
+        force:
+          type: boolean
+
+    FileCheckoutRepairResponse:
+      type: object
+      required: [repaired, method, message]
+      properties:
+        repaired:
+          type: boolean
+        method:
+          type: string
+          enum: [repair, recreate, provision, none]
+        requires_force:
+          type: boolean
+        backup_path:
+          type: string
+        message:
+          type: string
 
     FileDiffResponse:
       type: object

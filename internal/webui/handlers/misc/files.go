@@ -340,6 +340,35 @@ func HandleFileCheckouts(svc service.FileService) http.HandlerFunc {
 	}
 }
 
+// HandleFileCheckoutRepair handles POST /api/workspaces/{ws}/files/checkouts/repair.
+func HandleFileCheckoutRepair(svc service.FileService) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		wsID := middleware.WorkspaceFromContext(r.Context())
+		if r.Body == nil {
+			handler.RespondError(w, http.StatusBadRequest, "request body is required")
+			return
+		}
+		defer r.Body.Close()
+
+		var req service.FileCheckoutRepairRequest
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, handler.MaxRequestBody)).Decode(&req); err != nil {
+			if strings.Contains(err.Error(), "http: request body too large") {
+				handler.RespondError(w, http.StatusRequestEntityTooLarge, "request body too large")
+				return
+			}
+			handler.RespondError(w, http.StatusBadRequest, "invalid request body")
+			return
+		}
+
+		result, err := svc.RepairCheckout(r.Context(), wsID, req)
+		if err != nil {
+			handler.HandleServiceError(w, err)
+			return
+		}
+		handler.WriteJSON(w, http.StatusOK, result)
+	}
+}
+
 // fileWriteRequest is the JSON body for PUT /api/agents/{name}/files?path=
 type fileWriteRequest struct {
 	Content string `json:"content"`

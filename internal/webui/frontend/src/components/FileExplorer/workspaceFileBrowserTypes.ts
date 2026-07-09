@@ -22,6 +22,13 @@ export interface ContextMenuState {
   y: number;
 }
 
+export interface CheckoutRepairMenuState {
+  ref: CheckoutRef;
+  label: string;
+  x: number;
+  y: number;
+}
+
 export interface DeleteConfirmState {
   ref: CheckoutRef;
   node: FileTreeNodeInfo;
@@ -30,6 +37,11 @@ export interface DeleteConfirmState {
 export interface MoveDialogState {
   ref: CheckoutRef;
   node: FileTreeNodeInfo;
+}
+
+export interface RepairConfirmState {
+  ref: CheckoutRef;
+  label: string;
 }
 
 export interface ScopedInlineEdit {

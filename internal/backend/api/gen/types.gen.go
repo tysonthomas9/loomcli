@@ -221,6 +221,48 @@ func (e FileCheckoutKind) Valid() bool {
 	}
 }
 
+// Defines values for FileCheckoutRepairRequestScope.
+const (
+	FileCheckoutRepairRequestScopeAgent FileCheckoutRepairRequestScope = "agent"
+	FileCheckoutRepairRequestScopeRepo  FileCheckoutRepairRequestScope = "repo"
+)
+
+// Valid indicates whether the value is a known member of the FileCheckoutRepairRequestScope enum.
+func (e FileCheckoutRepairRequestScope) Valid() bool {
+	switch e {
+	case FileCheckoutRepairRequestScopeAgent:
+		return true
+	case FileCheckoutRepairRequestScopeRepo:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for FileCheckoutRepairResponseMethod.
+const (
+	None      FileCheckoutRepairResponseMethod = "none"
+	Provision FileCheckoutRepairResponseMethod = "provision"
+	Recreate  FileCheckoutRepairResponseMethod = "recreate"
+	Repair    FileCheckoutRepairResponseMethod = "repair"
+)
+
+// Valid indicates whether the value is a known member of the FileCheckoutRepairResponseMethod enum.
+func (e FileCheckoutRepairResponseMethod) Valid() bool {
+	switch e {
+	case None:
+		return true
+	case Provision:
+		return true
+	case Recreate:
+		return true
+	case Repair:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for FileHistoryEntryKind.
 const (
 	Commit FileHistoryEntryKind = "commit"
@@ -1078,19 +1120,19 @@ func (e SearchScopedFilesParamsScope) Valid() bool {
 
 // Defines values for GetScopedFileTreeParamsScope.
 const (
-	Agent     GetScopedFileTreeParamsScope = "agent"
-	Repo      GetScopedFileTreeParamsScope = "repo"
-	Workspace GetScopedFileTreeParamsScope = "workspace"
+	GetScopedFileTreeParamsScopeAgent     GetScopedFileTreeParamsScope = "agent"
+	GetScopedFileTreeParamsScopeRepo      GetScopedFileTreeParamsScope = "repo"
+	GetScopedFileTreeParamsScopeWorkspace GetScopedFileTreeParamsScope = "workspace"
 )
 
 // Valid indicates whether the value is a known member of the GetScopedFileTreeParamsScope enum.
 func (e GetScopedFileTreeParamsScope) Valid() bool {
 	switch e {
-	case Agent:
+	case GetScopedFileTreeParamsScopeAgent:
 		return true
-	case Repo:
+	case GetScopedFileTreeParamsScopeRepo:
 		return true
-	case Workspace:
+	case GetScopedFileTreeParamsScopeWorkspace:
 		return true
 	default:
 		return false
@@ -1520,6 +1562,31 @@ type FileCheckout struct {
 
 // FileCheckoutKind defines model for FileCheckout.Kind.
 type FileCheckoutKind string
+
+// FileCheckoutRepairRequest defines model for FileCheckoutRepairRequest.
+type FileCheckoutRepairRequest struct {
+	Force *bool `json:"force,omitempty"`
+
+	// Repo Repo qualifier, valid when scope=agent.
+	Repo   *string                        `json:"repo,omitempty"`
+	Scope  FileCheckoutRepairRequestScope `json:"scope"`
+	Target string                         `json:"target"`
+}
+
+// FileCheckoutRepairRequestScope defines model for FileCheckoutRepairRequest.Scope.
+type FileCheckoutRepairRequestScope string
+
+// FileCheckoutRepairResponse defines model for FileCheckoutRepairResponse.
+type FileCheckoutRepairResponse struct {
+	BackupPath    *string                          `json:"backup_path,omitempty"`
+	Message       string                           `json:"message"`
+	Method        FileCheckoutRepairResponseMethod `json:"method"`
+	Repaired      bool                             `json:"repaired"`
+	RequiresForce *bool                            `json:"requires_force,omitempty"`
+}
+
+// FileCheckoutRepairResponseMethod defines model for FileCheckoutRepairResponse.Method.
+type FileCheckoutRepairResponseMethod string
 
 // FileCheckoutsResponse defines model for FileCheckoutsResponse.
 type FileCheckoutsResponse struct {
@@ -2965,6 +3032,9 @@ type PatchWorkspaceBackendJSONRequestBody = WorkspaceBackendPatchRequest
 
 // WriteScopedFileJSONRequestBody defines body for WriteScopedFile for application/json ContentType.
 type WriteScopedFileJSONRequestBody = FileWriteRequest
+
+// RepairFileCheckoutJSONRequestBody defines body for RepairFileCheckout for application/json ContentType.
+type RepairFileCheckoutJSONRequestBody = FileCheckoutRepairRequest
 
 // MkdirScopedFileJSONRequestBody defines body for MkdirScopedFile for application/json ContentType.
 type MkdirScopedFileJSONRequestBody = FileRepoQualifierRequest

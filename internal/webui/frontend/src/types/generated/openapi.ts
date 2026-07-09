@@ -1549,6 +1549,23 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/workspaces/{ws}/files/checkouts/repair": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Repair or provision a known workspace file checkout */
+    post: operations["repairFileCheckout"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/workspaces/{ws}/files/diff": {
     parameters: {
       query?: never;
@@ -2203,6 +2220,22 @@ export interface components {
     };
     FileCheckoutsResponse: {
       checkouts: components["schemas"]["FileCheckout"][];
+    };
+    FileCheckoutRepairRequest: {
+      /** @enum {string} */
+      scope: "agent" | "repo";
+      target: string;
+      /** @description Repo qualifier, valid when scope=agent. */
+      repo?: string;
+      force?: boolean;
+    };
+    FileCheckoutRepairResponse: {
+      repaired: boolean;
+      /** @enum {string} */
+      method: "repair" | "recreate" | "provision" | "none";
+      requires_force?: boolean;
+      backup_path?: string;
+      message: string;
     };
     FileDiffResponse: {
       path: string;
@@ -6209,6 +6242,42 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["FileCheckoutsResponse"];
+        };
+      };
+    };
+  };
+  repairFileCheckout: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["FileCheckoutRepairRequest"];
+      };
+    };
+    responses: {
+      /** @description Checkout repair result */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["FileCheckoutRepairResponse"];
+        };
+      };
+      /** @description Unknown or disallowed checkout target */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
         };
       };
     };

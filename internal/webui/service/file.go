@@ -1,6 +1,10 @@
 package service
 
-import "context"
+import (
+	"context"
+
+	"github.com/tysonthomas9/loomcli/internal/ops"
+)
 
 // FileScope identifies the root a scoped file operation resolves against.
 // Phase 1 supports only ScopeWorkspace (the workspace folder, read-only). The
@@ -65,6 +69,11 @@ type FileService interface {
 	// ListFileCheckouts returns every known file-browser checkout and best-effort
 	// local status metadata for each.
 	ListFileCheckouts(ctx context.Context, wsID string) (*FileCheckoutsResult, error)
+
+	// RepairCheckout repairs or provisions a known file-browser checkout. The
+	// concrete ops layer owns git/worktree mechanics; service keeps HTTP-facing
+	// validation and error categorization.
+	RepairCheckout(ctx context.Context, wsID string, req FileCheckoutRepairRequest) (*ops.RepairResult, error)
 
 	// DiffFileScoped returns a unified diff for one file in the containing checkout.
 	DiffFileScoped(ctx context.Context, wsID string, scope FileScope, target, repo, path, from, to string) (*FileDiffResult, error)
@@ -165,6 +174,14 @@ type FileCheckout struct {
 // FileCheckoutsResult is the response for checkout enumeration.
 type FileCheckoutsResult struct {
 	Checkouts []FileCheckout `json:"checkouts"`
+}
+
+// FileCheckoutRepairRequest is the JSON body for checkout repair.
+type FileCheckoutRepairRequest struct {
+	Scope  string `json:"scope"`
+	Target string `json:"target"`
+	Repo   string `json:"repo,omitempty"`
+	Force  bool   `json:"force,omitempty"`
 }
 
 // FileDiffResult contains a unified diff patch for one file.

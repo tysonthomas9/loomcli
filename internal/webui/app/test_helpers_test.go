@@ -236,6 +236,10 @@ func (m *mockFileOps) GetCurrentBranch(_ string) (string, error) {
 	return "main", nil
 }
 
+func (m *mockFileOps) RepairCheckout(_, _, _, _ string, _ bool) (ops.RepairResult, error) {
+	return ops.RepairResult{Repaired: false, Method: "none", Message: "not implemented"}, nil
+}
+
 // mockGitOps implements ops.GitOps for testing in the root package.
 type mockGitOps struct {
 	resolveFunc            func(name string) (*ops.AgentWorktree, error)

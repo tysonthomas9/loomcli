@@ -35,6 +35,13 @@ const mocks = vi.hoisted(() => ({
     Promise.resolve({ paths: [] as string[], truncated: false }),
   ),
   listFileCheckouts: vi.fn(() => Promise.resolve({ checkouts: [] })),
+  repairFileCheckout: vi.fn(() =>
+    Promise.resolve({
+      repaired: true,
+      method: "repair",
+      message: "Repaired checkout",
+    }),
+  ),
   listScopedDir: vi.fn(() => Promise.resolve({ path: "", entries: [] })),
   searchScopedFiles: vi.fn(() =>
     Promise.resolve({ results: [], limitHit: false }),
@@ -157,6 +164,7 @@ vi.mock("@/hooks/api", () => ({
   listScopedDir: mocks.listScopedDir,
   mkdirScoped: mocks.mkdirScoped,
   moveScopedPath: mocks.moveScopedPath,
+  repairFileCheckout: mocks.repairFileCheckout,
   readScopedFile: mocks.readScopedFile,
   searchScopedFiles: mocks.searchScopedFiles,
   writeScopedFile: mocks.writeScopedFile,
@@ -357,6 +365,11 @@ describe("WorkspaceFileBrowser", () => {
           change_count: 0,
         },
       ],
+    });
+    mocks.repairFileCheckout.mockResolvedValue({
+      repaired: true,
+      method: "repair",
+      message: "Repaired checkout",
     });
     mocks.listScopedDir.mockImplementation(
       (_workspaceId: string, _scopeRef: unknown, path?: string) =>
@@ -858,14 +871,16 @@ describe("WorkspaceFileBrowser", () => {
 
     fireEvent.click(await screen.findByRole("tab", { name: /Changes\s+2/ }));
 
-    expect(await screen.findByText("1 checkout unavailable")).toBeVisible();
+    expect(
+      await screen.findByText("atlas · loomcli unavailable"),
+    ).toBeVisible();
     expect(
       screen.getByText("loomcli · shared checkout · 2"),
     ).toBeInTheDocument();
     expect(screen.queryByText("atlas · loomcli · 3")).not.toBeInTheDocument();
   });
 
-  it("shows a git-status warning for status_error checkouts and still expands files", async () => {
+  it("shows an unavailable repair chip for status_error checkouts and still expands files", async () => {
     mocks.listFileCheckouts.mockResolvedValue({
       checkouts: [
         {
@@ -881,11 +896,10 @@ describe("WorkspaceFileBrowser", () => {
 
     render(<WorkspaceFileBrowser mode="agent" agentName="atlas" />);
 
-    expect(
-      await screen.findByLabelText(
-        "Git status unavailable - decorations and changes are hidden for this checkout",
-      ),
-    ).toBeInTheDocument();
+    const repairButton = await screen.findByRole("button", {
+      name: /Repair checkout for atlas loomcli: Git status unavailable/,
+    });
+    expect(repairButton).toHaveTextContent("Unavailable");
 
     fireEvent.click(await screen.findByRole("button", { name: /^atlas/ }));
 
@@ -910,15 +924,246 @@ describe("WorkspaceFileBrowser", () => {
 
     render(<WorkspaceFileBrowser mode="agent" agentName="atlas" />);
 
-    fireEvent.click(await screen.findByRole("button", { name: /^atlas/ }));
-
     expect(
-      await screen.findByText("This checkout isn't available on this machine"),
-    ).toBeVisible();
-    expect(screen.queryByLabelText("main.ts")).not.toBeInTheDocument();
+      await screen.findByRole("button", {
+        name: /Repair checkout for atlas loomcli: This checkout is not checked out/,
+      }),
+    ).toHaveTextContent("Not checked out");
+    expect(
+      screen.queryByText("This checkout is not checked out"),
+    ).not.toBeInTheDocument();
     expect(
       screen.queryByText(/agent worktree .* not found/i),
     ).not.toBeInTheDocument();
+  });
+
+  it("renders the unavailable chip as a keyboard-focusable repair button", async () => {
+    mocks.listFileCheckouts.mockResolvedValue({
+      checkouts: [
+        {
+          kind: "agent",
+          agent: "atlas",
+          repo: "loomcli",
+          exists: true,
+          change_count: 0,
+          status_error: true,
+        },
+      ],
+    });
+
+    render(<WorkspaceFileBrowser mode="agent" agentName="atlas" />);
+
+    const repairButton = await screen.findByRole("button", {
+      name: /Repair checkout for atlas loomcli: Git status unavailable/,
+    });
+    repairButton.focus();
+    expect(repairButton).toHaveFocus();
+  });
+
+  it("repairs a status_error checkout from the unavailable chip", async () => {
+    mocks.listFileCheckouts.mockResolvedValue({
+      checkouts: [
+        {
+          kind: "agent",
+          agent: "atlas",
+          repo: "loomcli",
+          exists: true,
+          change_count: 0,
+          status_error: true,
+        },
+      ],
+    });
+
+    render(<WorkspaceFileBrowser mode="agent" agentName="atlas" />);
+
+    fireEvent.click(
+      await screen.findByRole("button", {
+        name: /Repair checkout for atlas loomcli: Git status unavailable/,
+      }),
+    );
+
+    await waitFor(() =>
+      expect(mocks.repairFileCheckout).toHaveBeenCalledWith("ws-1", {
+        scope: "agent",
+        target: "atlas",
+        repo: "loomcli",
+        force: false,
+      }),
+    );
+    await waitFor(() =>
+      expect(mocks.showToast).toHaveBeenCalledWith("Repaired checkout", {
+        type: "success",
+      }),
+    );
+    expect(mocks.listFileCheckouts.mock.calls.length).toBeGreaterThan(1);
+    expect(mocks.gitStatusScoped).toHaveBeenCalled();
+  });
+
+  it("prompts for force and retries checkout repair with force", async () => {
+    mocks.listFileCheckouts.mockResolvedValue({
+      checkouts: [
+        {
+          kind: "agent",
+          agent: "atlas",
+          repo: "loomcli",
+          exists: true,
+          change_count: 0,
+          status_error: true,
+        },
+      ],
+    });
+    mocks.repairFileCheckout
+      .mockResolvedValueOnce({
+        repaired: false,
+        method: "none",
+        requires_force: true,
+        message: "recreate required",
+      })
+      .mockResolvedValueOnce({
+        repaired: true,
+        method: "recreate",
+        backup_path: "/tmp/atlas.broken-123",
+        message: "recreated",
+      });
+
+    render(<WorkspaceFileBrowser mode="agent" agentName="atlas" />);
+
+    fireEvent.click(
+      await screen.findByRole("button", {
+        name: /Repair checkout for atlas loomcli: Git status unavailable/,
+      }),
+    );
+
+    expect(await screen.findByRole("dialog")).toHaveTextContent(
+      "timestamped backup folder",
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Recreate" }));
+
+    await waitFor(() =>
+      expect(mocks.repairFileCheckout).toHaveBeenCalledTimes(2),
+    );
+    expect(mocks.repairFileCheckout).toHaveBeenNthCalledWith(1, "ws-1", {
+      scope: "agent",
+      target: "atlas",
+      repo: "loomcli",
+      force: false,
+    });
+    expect(mocks.repairFileCheckout).toHaveBeenNthCalledWith(2, "ws-1", {
+      scope: "agent",
+      target: "atlas",
+      repo: "loomcli",
+      force: true,
+    });
+    await waitFor(() =>
+      expect(mocks.showToast).toHaveBeenCalledWith("recreated", {
+        type: "success",
+      }),
+    );
+  });
+
+  it("offers repair from the checkout row context menu", async () => {
+    mocks.listFileCheckouts.mockResolvedValue({
+      checkouts: [
+        {
+          kind: "agent",
+          agent: "atlas",
+          repo: "loomcli",
+          exists: true,
+          change_count: 0,
+          status_error: true,
+        },
+      ],
+    });
+
+    render(<WorkspaceFileBrowser mode="agent" agentName="atlas" />);
+
+    fireEvent.contextMenu(
+      await screen.findByRole("button", { name: /^atlas/ }),
+    );
+    fireEvent.click(
+      await screen.findByRole("menuitem", { name: "Repair checkout" }),
+    );
+
+    await waitFor(() => expect(mocks.repairFileCheckout).toHaveBeenCalled());
+  });
+
+  it("shows an inline repair error without dumping backend text into the tree", async () => {
+    mocks.listFileCheckouts.mockResolvedValue({
+      checkouts: [
+        {
+          kind: "agent",
+          agent: "atlas",
+          repo: "loomcli",
+          exists: true,
+          change_count: 0,
+          status_error: true,
+        },
+      ],
+    });
+    mocks.repairFileCheckout.mockRejectedValueOnce(
+      new Error("fatal: raw backend stack"),
+    );
+
+    render(<WorkspaceFileBrowser mode="agent" agentName="atlas" />);
+
+    fireEvent.click(
+      await screen.findByRole("button", {
+        name: /Repair checkout for atlas loomcli: Git status unavailable/,
+      }),
+    );
+
+    expect(
+      await screen.findByText("Repair failed for atlas loomcli."),
+    ).toBeVisible();
+    expect(screen.queryByText(/raw backend stack/)).not.toBeInTheDocument();
+  });
+
+  it("expands status_error checkouts even when repair is available", async () => {
+    mocks.listFileCheckouts.mockResolvedValue({
+      checkouts: [
+        {
+          kind: "agent",
+          agent: "atlas",
+          repo: "loomcli",
+          exists: true,
+          change_count: 0,
+          status_error: true,
+        },
+      ],
+    });
+
+    render(<WorkspaceFileBrowser mode="agent" agentName="atlas" />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /^atlas/ }));
+
+    expect(await screen.findByLabelText("main.ts")).toBeInTheDocument();
+    expect(
+      screen.queryByText(/agent worktree .* not found/i),
+    ).not.toBeInTheDocument();
+  });
+
+  it("keeps missing checkouts visually distinct from git status errors", async () => {
+    mocks.listFileCheckouts.mockResolvedValue({
+      checkouts: [
+        {
+          kind: "agent",
+          agent: "atlas",
+          repo: "loomcli",
+          exists: false,
+          change_count: 0,
+        },
+      ],
+    });
+
+    render(<WorkspaceFileBrowser mode="agent" agentName="atlas" />);
+
+    expect(
+      await screen.findByRole("button", {
+        name: /This checkout is not checked out/,
+      }),
+    ).toBeVisible();
+    expect(screen.queryByLabelText("main.ts")).not.toBeInTheDocument();
+    expect(screen.queryByText("Unavailable")).not.toBeInTheDocument();
   });
 
   it("maps tree list failures to the friendly unavailable state", async () => {
@@ -929,7 +1174,7 @@ describe("WorkspaceFileBrowser", () => {
     fireEvent.click(await screen.findByRole("button", { name: /^atlas/ }));
 
     expect(
-      await screen.findByText("This checkout isn't available on this machine"),
+      await screen.findByText("This checkout is not checked out"),
     ).toBeVisible();
     expect(screen.queryByText('agent worktree "atlas" not found')).toBeNull();
   });

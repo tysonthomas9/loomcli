@@ -22,6 +22,7 @@ import {
   type FileTreeNodeInfo,
 } from "./FileTree";
 import type { ChangeCheckoutGroup } from "./changesLens";
+import { unavailableCheckoutSummary } from "./checkoutAvailability";
 import { dirname } from "./fileExplorerLocalUtils";
 import styles from "./FileExplorer.module.css";
 import type {
@@ -33,8 +34,7 @@ import type {
 } from "./workspaceFileBrowserTypes";
 import type { FileTreeRoot, FileTreeSection } from "./treeRoots";
 
-const CHECKOUT_UNAVAILABLE_MESSAGE =
-  "This checkout isn't available on this machine";
+const CHECKOUT_UNAVAILABLE_MESSAGE = "This checkout is not checked out";
 const GIT_STATUS_UNAVAILABLE_MESSAGE =
   "Git status unavailable - decorations and changes are hidden for this checkout";
 
@@ -102,14 +102,15 @@ function LensToggle({
 
 function ChangesList({
   groups,
-  unavailableCount,
+  unavailableLabels,
   onOpenDiff,
 }: {
   groups: ChangeCheckoutGroup[];
-  unavailableCount: number;
+  unavailableLabels: string[];
   onOpenDiff: (request: OpenDiffRequest) => void;
 }) {
-  if (groups.length === 0 && unavailableCount === 0) {
+  const unavailableText = unavailableCheckoutSummary(unavailableLabels);
+  if (groups.length === 0 && unavailableLabels.length === 0) {
     return (
       <div className={styles.changesEmpty}>
         No uncommitted changes across this workspace.
@@ -119,11 +120,9 @@ function ChangesList({
 
   return (
     <div className={styles.changesList} aria-label="Workspace changes">
-      {unavailableCount > 0 && (
+      {unavailableText && (
         <div className={styles.changesNotice} role="status">
-          {unavailableCount === 1
-            ? "1 checkout unavailable"
-            : `${unavailableCount} checkouts unavailable`}
+          {unavailableText}
         </div>
       )}
       {groups.length === 0 && (
@@ -183,14 +182,64 @@ function ChangeBadge({ count }: { count: number }): JSX.Element | null {
   return <span className={styles.checkoutBadge}>{count}</span>;
 }
 
-function GitStatusWarning(): JSX.Element {
+function WarningIcon(): JSX.Element {
   return (
-    <span
-      className={styles.checkoutStatusWarning}
-      role="img"
-      aria-label={GIT_STATUS_UNAVAILABLE_MESSAGE}
-      title={GIT_STATUS_UNAVAILABLE_MESSAGE}
-    />
+    <svg
+      viewBox="0 0 16 16"
+      className={styles.checkoutStatusWarningIcon}
+      aria-hidden="true"
+    >
+      <path
+        d="M8 2.4 14 13H2L8 2.4z"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.4"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M8 6v3.2M8 11.5h.01"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.4"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}
+
+function CheckoutRepairButton({
+  state,
+  label,
+  busy,
+  onRepair,
+}: {
+  state: "unavailable" | "missing";
+  label: string;
+  busy: boolean;
+  onRepair: () => void;
+}): JSX.Element {
+  const text = busy
+    ? "Repairing..."
+    : state === "unavailable"
+      ? "Unavailable"
+      : "Not checked out";
+  const detail =
+    state === "unavailable"
+      ? GIT_STATUS_UNAVAILABLE_MESSAGE
+      : CHECKOUT_UNAVAILABLE_MESSAGE;
+  return (
+    <button
+      type="button"
+      className={styles.checkoutRepairButton}
+      data-state={state}
+      aria-label={`Repair checkout for ${label}: ${detail}`}
+      title={`Repair checkout: ${detail}`}
+      disabled={busy}
+      onClick={onRepair}
+    >
+      {state === "unavailable" && <WarningIcon />}
+      <span>{text}</span>
+    </button>
   );
 }
 
@@ -258,12 +307,22 @@ function RootRow({
   root,
   expanded,
   depth = 0,
+  repairing,
   onToggle,
+  onRepairCheckout,
+  onCheckoutContextMenu,
 }: {
   root: FileTreeRoot;
   expanded: boolean;
   depth?: number | undefined;
+  repairing: boolean;
   onToggle: () => void;
+  onRepairCheckout: (ref: CheckoutRef, label: string) => void;
+  onCheckoutContextMenu: (
+    ref: CheckoutRef,
+    label: string,
+    event: MouseEvent<HTMLDivElement>,
+  ) => void;
 }) {
   const isAgent = root.kind === "agent";
   const label = root.label;
@@ -271,39 +330,68 @@ function RootRow({
   const exists = root.exists;
   const icon = isAgent ? "agent" : root.icon;
   const rowTitle = exists ? undefined : CHECKOUT_UNAVAILABLE_MESSAGE;
+  const repairState = root.gitStatusUnavailable
+    ? "unavailable"
+    : !root.exists
+      ? "missing"
+      : null;
+  const repairRef =
+    root.kind === "checkout" ? root.ref : (root.flattenedRef ?? null);
+  const canRepair =
+    repairState != null && repairRef != null && repairRef.scope !== "workspace";
+  const repairLabel = secondary ? `${label} ${secondary}` : label;
   return (
-    <button
-      type="button"
+    <div
       className={styles.rootRow}
       data-dimmed={root.kind === "checkout" && root.dimmed ? true : undefined}
       data-disabled={!exists || undefined}
-      style={{ paddingLeft: 8 + depth * 16 }}
       title={rowTitle}
-      onClick={onToggle}
+      onContextMenu={(event) => {
+        if (!canRepair || !repairRef) return;
+        event.preventDefault();
+        onCheckoutContextMenu(repairRef, repairLabel, event);
+      }}
     >
-      <span
-        className={`${styles.chevron} ${expanded ? styles.chevronExpanded : ""}`}
-        aria-hidden="true"
+      <button
+        type="button"
+        className={styles.rootRowToggle}
+        style={{ paddingLeft: 8 + depth * 16 }}
+        disabled={!exists}
+        onClick={onToggle}
       >
-        <svg viewBox="0 0 16 16">
-          <path
-            d="M6 4l4 4-4 4"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="1.5"
-          />
-        </svg>
-      </span>
-      {isAgent ? (
-        <AgentAvatar name={root.agentName} />
-      ) : (
-        <RootIcon icon={icon} />
+        <span
+          className={`${styles.chevron} ${expanded ? styles.chevronExpanded : ""}`}
+          aria-hidden="true"
+        >
+          <svg viewBox="0 0 16 16">
+            <path
+              d="M6 4l4 4-4 4"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.5"
+            />
+          </svg>
+        </span>
+        {isAgent ? (
+          <AgentAvatar name={root.agentName} />
+        ) : (
+          <RootIcon icon={icon} />
+        )}
+        <span className={styles.rootLabel}>{label}</span>
+        {secondary && (
+          <span className={styles.rootSecondary}>· {secondary}</span>
+        )}
+        {!repairState && <ChangeBadge count={root.changeCount} />}
+      </button>
+      {repairState && canRepair && repairRef && (
+        <CheckoutRepairButton
+          state={repairState}
+          label={repairLabel}
+          busy={repairing}
+          onRepair={() => onRepairCheckout(repairRef, repairLabel)}
+        />
       )}
-      <span className={styles.rootLabel}>{label}</span>
-      {secondary && <span className={styles.rootSecondary}>· {secondary}</span>}
-      {root.gitStatusUnavailable && <GitStatusWarning />}
-      <ChangeBadge count={root.changeCount} />
-    </button>
+    </div>
   );
 }
 
@@ -423,10 +511,12 @@ export function FileExplorerTreePanel({
   lens,
   changeCount,
   checkoutError,
+  repairError,
   sections,
   changeGroups,
-  unavailableCheckoutCount,
+  unavailableCheckoutLabels,
   expandedRoots,
+  repairingCheckoutKey,
   selectedTab,
   inlineEdit,
   gitStatusByRef,
@@ -437,6 +527,8 @@ export function FileExplorerTreePanel({
   onQuickOpen,
   onOpenDiff,
   onToggleRoot,
+  onRepairCheckout,
+  onCheckoutContextMenu,
   onOpenFile,
   onContextMenu,
   onRequestRename,
@@ -448,10 +540,12 @@ export function FileExplorerTreePanel({
   lens: ExplorerLens;
   changeCount: number;
   checkoutError: string | null;
+  repairError: string | null;
   sections: FileTreeSection[];
   changeGroups: ChangeCheckoutGroup[];
-  unavailableCheckoutCount: number;
+  unavailableCheckoutLabels: string[];
   expandedRoots: Set<string>;
+  repairingCheckoutKey: string | null;
   selectedTab: FileBrowserTab | null;
   inlineEdit: ScopedInlineEdit | null;
   gitStatusByRef: Record<string, Record<string, string>>;
@@ -462,6 +556,12 @@ export function FileExplorerTreePanel({
   onQuickOpen: () => void;
   onOpenDiff: (request: OpenDiffRequest) => void;
   onToggleRoot: (key: string) => void;
+  onRepairCheckout: (ref: CheckoutRef, label: string) => void;
+  onCheckoutContextMenu: (
+    ref: CheckoutRef,
+    label: string,
+    event: MouseEvent<HTMLDivElement>,
+  ) => void;
   onOpenFile: (ref: CheckoutRef, path: string) => void;
   onContextMenu: (
     ref: CheckoutRef,
@@ -486,7 +586,10 @@ export function FileExplorerTreePanel({
           root={root}
           depth={depth}
           expanded={expanded}
+          repairing={repairingCheckoutKey === key}
           onToggle={() => onToggleRoot(key)}
+          onRepairCheckout={onRepairCheckout}
+          onCheckoutContextMenu={onCheckoutContextMenu}
         />
         {expanded &&
           (root.exists ? (
@@ -523,7 +626,10 @@ export function FileExplorerTreePanel({
           <RootRow
             root={root}
             expanded={expanded}
+            repairing={repairingCheckoutKey === key}
             onToggle={() => onToggleRoot(key)}
+            onRepairCheckout={onRepairCheckout}
+            onCheckoutContextMenu={onCheckoutContextMenu}
           />
           {expanded &&
             (root.exists ? (
@@ -555,7 +661,10 @@ export function FileExplorerTreePanel({
         <RootRow
           root={root}
           expanded={expanded}
+          repairing={repairingCheckoutKey === root.id}
           onToggle={() => onToggleRoot(root.id)}
+          onRepairCheckout={onRepairCheckout}
+          onCheckoutContextMenu={onCheckoutContextMenu}
         />
         {expanded && root.children.map((child) => renderCheckoutRoot(child, 1))}
       </div>
@@ -663,10 +772,13 @@ export function FileExplorerTreePanel({
         {checkoutError && (
           <div className={styles.checkoutError}>{checkoutError}</div>
         )}
+        {repairError && (
+          <div className={styles.checkoutError}>{repairError}</div>
+        )}
         {lens === "changes" ? (
           <ChangesList
             groups={changeGroups}
-            unavailableCount={unavailableCheckoutCount}
+            unavailableLabels={unavailableCheckoutLabels}
             onOpenDiff={onOpenDiff}
           />
         ) : (
