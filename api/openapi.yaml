@@ -2550,6 +2550,21 @@ paths:
                 type: object
 
   # ── Files ───────────────────────────────────────────────────────────────
+  /api/workspaces/{ws}/files/capabilities:
+    get:
+      operationId: getFileCapabilities
+      tags: [files]
+      summary: Get effective workspace file-browser capabilities
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+      responses:
+        "200":
+          description: Effective file-browser capabilities
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FileCapabilitiesResponse"
+
   /api/workspaces/{ws}/files/tree:
     get:
       operationId: getScopedFileTree
@@ -3801,6 +3816,17 @@ components:
         mod_time:
           type: string
           format: date-time
+
+    FileCapabilitiesResponse:
+      type: object
+      required: [read, write, sensitive]
+      properties:
+        read:
+          type: boolean
+        write:
+          type: boolean
+        sensitive:
+          type: boolean
 
     FileTreeResponse:
       type: object

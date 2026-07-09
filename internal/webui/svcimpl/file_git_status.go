@@ -36,7 +36,7 @@ func (s *fileServiceImpl) GitStatusScoped(ctx context.Context, wsID string, scop
 		if err != nil {
 			return nil, service.ErrInternal("failed to run git status", err)
 		}
-		return service.FileGitStatusResult(status), nil
+		return filterSensitiveGitStatus(ctx, service.FileGitStatusResult(status)), nil
 	default:
 		return nil, service.ErrValidation("unsupported scope " + string(scope))
 	}
@@ -83,7 +83,7 @@ func (s *fileServiceImpl) workspaceGitStatus(ctx context.Context, wsID, target, 
 			)
 			continue
 		}
-		mergePrefixedGitStatus(result, checkout.prefix, status)
+		mergePrefixedGitStatus(ctx, result, checkout.prefix, status)
 	}
 	return result, nil
 }
@@ -153,7 +153,7 @@ func (s *fileServiceImpl) ListFileCheckouts(ctx context.Context, wsID string) (*
 				out = append(out, item)
 				continue
 			}
-			item.ChangeCount = len(status)
+			item.ChangeCount = len(filterSensitiveGitStatus(ctx, service.FileGitStatusResult(status)))
 			if branch, err := s.fileOps.GetCurrentBranch(checkout.path); err == nil {
 				item.Branch = branch
 			}
@@ -220,13 +220,29 @@ func agentCheckoutRepos(repos []ops.WorkspaceRepo, agent ops.WorkspaceAgentInfo)
 	return out
 }
 
-func mergePrefixedGitStatus(dst service.FileGitStatusResult, prefix string, status map[string]string) {
+func mergePrefixedGitStatus(ctx context.Context, dst service.FileGitStatusResult, prefix string, status map[string]string) {
 	for path, xy := range status {
 		if prefix != "" {
 			path = prefix + "/" + path
 		}
+		if !service.FilePathAllowsSensitive(ctx, path) {
+			continue
+		}
 		dst[path] = xy
 	}
+}
+
+func filterSensitiveGitStatus(ctx context.Context, status service.FileGitStatusResult) service.FileGitStatusResult {
+	if fileRequestAllowsSensitive(ctx) {
+		return status
+	}
+	filtered := make(service.FileGitStatusResult, len(status))
+	for path, xy := range status {
+		if service.FilePathAllowsSensitive(ctx, path) {
+			filtered[path] = xy
+		}
+	}
+	return filtered
 }
 
 func validateGitCheckoutRoot(root string) error {
