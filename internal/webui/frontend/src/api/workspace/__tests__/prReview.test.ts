@@ -63,6 +63,7 @@ vi.mock("@/api/common", () => {
 
 let getPullRequestDiff: typeof import("../prReview").getPullRequestDiff;
 let getPullRequestDetail: typeof import("../prReview").getPullRequestDetail;
+let getReviewerConversation: typeof import("../prReview").getReviewerConversation;
 let postPullRequestReview: typeof import("../prReview").postPullRequestReview;
 let mockApiGet: ReturnType<typeof vi.fn>;
 let mockApiPost: ReturnType<typeof vi.fn>;
@@ -79,6 +80,7 @@ describe("prReview API", () => {
     const prReview = await import("../prReview");
     getPullRequestDiff = prReview.getPullRequestDiff;
     getPullRequestDetail = prReview.getPullRequestDetail;
+    getReviewerConversation = prReview.getReviewerConversation;
     postPullRequestReview = prReview.postPullRequestReview;
   });
 
@@ -143,6 +145,37 @@ describe("prReview API", () => {
       },
     );
     expect(result).toEqual(detail);
+  });
+
+  it("fetches and unwraps the reviewer conversation", async () => {
+    const conversation = {
+      state: "idle",
+      messages: [
+        {
+          turn_id: "t1",
+          item_id: "i1",
+          role: "user",
+          text: "hello",
+        },
+      ],
+    };
+    mockApiGet.mockResolvedValueOnce({
+      data: { success: true, data: conversation },
+      error: undefined,
+      response: new Response(null, { status: 200, statusText: "OK" }),
+    });
+
+    const result = await getReviewerConversation("WS", "octocat", "hello", 7);
+
+    expect(mockApiGet).toHaveBeenCalledWith(
+      "/api/workspaces/{ws}/pull-requests/{owner}/{repo}/{number}/conversation",
+      {
+        params: {
+          path: { ws: "WS", owner: "octocat", repo: "hello", number: 7 },
+        },
+      },
+    );
+    expect(result).toEqual(conversation);
   });
 
   it("posts and unwraps a pull request review", async () => {

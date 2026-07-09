@@ -1,0 +1,183 @@
+import { useCallback, useEffect, useRef, useState } from "react";
+
+import {
+  ensureReviewer,
+  getReviewerConversation,
+  sendReviewerMessage,
+  type ReviewerMessage,
+} from "@/api/workspace/prReview";
+
+const POLL_INTERVAL = 1_500;
+
+export interface UsePRReviewConversationParams {
+  workspaceId: string;
+  owner: string;
+  repo: string;
+  number: number;
+  enabled: boolean;
+}
+
+export interface UsePRReviewConversationResult {
+  agentName: string | null;
+  messages: ReviewerMessage[];
+  state: string;
+  sending: boolean;
+  /** Resolves true when the message was accepted; false on failure/no-op. */
+  send: (text: string) => Promise<boolean>;
+  /** Re-attempt standing up the reviewer after an ensure failure. */
+  retry: () => void;
+  error: string | null;
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+export function usePRReviewConversation({
+  workspaceId,
+  owner,
+  repo,
+  number,
+  enabled,
+}: UsePRReviewConversationParams): UsePRReviewConversationResult {
+  const [agentName, setAgentName] = useState<string | null>(null);
+  const [messages, setMessages] = useState<ReviewerMessage[]>([]);
+  const [state, setState] = useState("starting");
+  const [sending, setSending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [retryNonce, setRetryNonce] = useState(0);
+
+  const retry = useCallback(() => {
+    setError(null);
+    setRetryNonce((n) => n + 1);
+  }, []);
+
+  const requestSeqRef = useRef(0);
+  const ensureKeyRef = useRef<string | null>(null);
+  const pollInFlightRef = useRef(false);
+  const mountedRef = useRef(false);
+  const key = `${workspaceId}|${owner}|${repo}|${number}`;
+
+  const invalidateRequests = useCallback(() => {
+    requestSeqRef.current += 1;
+    pollInFlightRef.current = false;
+  }, []);
+
+  const refetchConversation = useCallback(async () => {
+    if (!enabled || !agentName) return;
+    if (pollInFlightRef.current) return;
+    pollInFlightRef.current = true;
+    const seq = ++requestSeqRef.current;
+
+    try {
+      const conversation = await getReviewerConversation(
+        workspaceId,
+        owner,
+        repo,
+        number,
+      );
+      if (mountedRef.current && seq === requestSeqRef.current) {
+        setMessages(conversation.messages);
+        setState(conversation.state);
+        setError(null);
+      }
+    } catch (err) {
+      if (mountedRef.current && seq === requestSeqRef.current) {
+        setError(errorMessage(err));
+      }
+    } finally {
+      pollInFlightRef.current = false;
+    }
+  }, [agentName, enabled, number, owner, repo, workspaceId]);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      invalidateRequests();
+    };
+  }, [invalidateRequests]);
+
+  useEffect(() => {
+    setAgentName(null);
+    setMessages([]);
+    setState("starting");
+    setError(null);
+    setSending(false);
+    ensureKeyRef.current = null;
+    requestSeqRef.current++;
+    pollInFlightRef.current = false;
+  }, [key]);
+
+  useEffect(() => {
+    if (!enabled) return;
+    if (ensureKeyRef.current === key) return;
+
+    let ignore = false;
+    ensureKeyRef.current = key;
+    setState("starting");
+    setError(null);
+
+    void (async () => {
+      try {
+        const result = await ensureReviewer(workspaceId, owner, repo, number);
+        if (!ignore && mountedRef.current) {
+          setAgentName(result.agent_name);
+          setError(null);
+        }
+      } catch (err) {
+        if (!ignore && mountedRef.current) {
+          ensureKeyRef.current = null;
+          setError(errorMessage(err));
+        }
+      }
+    })();
+
+    return () => {
+      ignore = true;
+    };
+    // retryNonce lets retry() re-run ensure after a failure (the catch above
+    // clears ensureKeyRef, so this effect proceeds instead of short-circuiting).
+  }, [enabled, key, number, owner, repo, workspaceId, retryNonce]);
+
+  useEffect(() => {
+    if (!enabled || !agentName) return;
+
+    void refetchConversation();
+    const intervalId = setInterval(refetchConversation, POLL_INTERVAL);
+    return () => {
+      clearInterval(intervalId);
+      invalidateRequests();
+    };
+  }, [agentName, enabled, invalidateRequests, refetchConversation]);
+
+  const send = useCallback(
+    async (text: string): Promise<boolean> => {
+      const trimmed = text.trim();
+      if (!trimmed || !agentName) return false;
+
+      setSending(true);
+      setError(null);
+      try {
+        await sendReviewerMessage(workspaceId, owner, repo, number, trimmed);
+        // Clear any in-flight poll gate so the optimistic refetch isn't dropped
+        // and the user's message shows immediately.
+        pollInFlightRef.current = false;
+        await refetchConversation();
+        return true;
+      } catch (err) {
+        if (mountedRef.current) {
+          setError(errorMessage(err));
+        }
+        return false;
+      } finally {
+        if (mountedRef.current) {
+          setSending(false);
+        }
+      }
+    },
+    [agentName, number, owner, refetchConversation, repo, workspaceId],
+  );
+
+  return { agentName, messages, state, sending, send, retry, error };
+}

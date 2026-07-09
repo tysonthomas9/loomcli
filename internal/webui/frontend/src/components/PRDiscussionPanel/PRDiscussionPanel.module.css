@@ -1,0 +1,213 @@
+.panel {
+  min-width: 360px;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  border-left: 1px solid var(--color-border);
+  background: var(--color-bg);
+}
+
+.header {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.titleBlock {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.title {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--color-text);
+}
+
+.status {
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 2px 7px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  font-size: 11px;
+  color: var(--color-text-secondary);
+  background: var(--color-bg-subtle);
+}
+
+.tabs {
+  display: inline-flex;
+  padding: 2px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-subtle);
+}
+
+.tab,
+.tabActive {
+  padding: 5px 9px;
+  border: 0;
+  border-radius: calc(var(--radius-sm) - 2px);
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--color-text-secondary);
+  background: transparent;
+  cursor: pointer;
+}
+
+.tabActive {
+  color: var(--color-text);
+  background: var(--color-bg);
+  box-shadow: 0 1px 2px rgb(0 0 0 / 8%);
+}
+
+.closeButton {
+  width: 28px;
+  height: 28px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  color: var(--color-text-secondary);
+  background: var(--color-bg);
+  cursor: pointer;
+}
+
+.closeButton:hover {
+  color: var(--color-text);
+  border-color: var(--color-border-strong);
+}
+
+.error {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 12px;
+  border-bottom: 1px solid rgb(239 68 68 / 25%);
+  color: var(--color-danger);
+  background: rgb(239 68 68 / 8%);
+  font-size: 12px;
+}
+
+.retryButton {
+  flex: none;
+  padding: 2px 10px;
+  border: 1px solid rgb(239 68 68 / 40%);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--color-danger);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.chatTab {
+  flex: 1;
+  min-height: 0;
+  flex-direction: column;
+}
+
+.messages {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  overflow: auto;
+  padding: 12px;
+}
+
+.empty {
+  margin: auto;
+  max-width: 260px;
+  color: var(--color-text-muted);
+  font-size: 13px;
+  line-height: 1.5;
+  text-align: center;
+}
+
+.messageUser,
+.messageAssistant {
+  max-width: 86%;
+  padding: 9px 11px;
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.messageUser {
+  align-self: flex-end;
+  color: #fff;
+  background: var(--color-accent);
+}
+
+.messageAssistant {
+  align-self: flex-start;
+  color: var(--color-text);
+  border: 1px solid var(--color-border);
+  background: var(--color-bg-subtle);
+}
+
+.messageText {
+  min-width: 0;
+}
+
+.composer {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  padding: 10px 12px;
+  border-top: 1px solid var(--color-border);
+}
+
+.textarea {
+  min-width: 0;
+  resize: vertical;
+  max-height: 140px;
+  padding: 8px 10px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  color: var(--color-text);
+  background: var(--color-bg);
+  font: inherit;
+  font-size: 13px;
+}
+
+.textarea:focus {
+  outline: 2px solid rgb(59 130 246 / 35%);
+  outline-offset: 1px;
+  border-color: var(--color-accent);
+}
+
+.sendButton {
+  align-self: end;
+  min-width: 68px;
+  height: 34px;
+  padding: 0 12px;
+  border: 1px solid var(--color-accent);
+  border-radius: var(--radius-sm);
+  color: #fff;
+  background: var(--color-accent);
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.sendButton:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.terminalTab {
+  flex: 1;
+  min-height: 0;
+  height: 100%;
+}

@@ -23,7 +23,6 @@ const mocks = vi.hoisted(() => ({
   startAgent: vi.fn(),
   getPullRequestDetail: vi.fn(),
   postPullRequestReview: vi.fn(),
-  ensureReviewer: vi.fn(),
   data: {
     agents: [] as unknown[],
     issues: [] as unknown[],
@@ -56,7 +55,6 @@ vi.mock("@/api", () => ({
 vi.mock("@/api/workspace/prReview", () => ({
   getPullRequestDetail: mocks.getPullRequestDetail,
   postPullRequestReview: mocks.postPullRequestReview,
-  ensureReviewer: mocks.ensureReviewer,
 }));
 
 vi.mock("@/hooks/api", () => ({
@@ -74,6 +72,10 @@ vi.mock("@/contexts/WorkspaceViewContext", () => ({
 
 vi.mock("@/components/CreateAgentModal/CreateAgentModal", () => ({
   CreateAgentModal: () => <div data-testid="create-agent-modal" />,
+}));
+
+vi.mock("@/components/PRDiscussionPanel", () => ({
+  PRDiscussionPanel: () => <div data-testid="pr-discussion-panel" />,
 }));
 
 vi.mock("@/components/IssueDetailPanel", () => ({
@@ -151,7 +153,7 @@ function renderWorkspace(
   }> = {},
 ) {
   const issue =
-    props.issue === null ? undefined : props.issue ?? makePullRequestIssue();
+    props.issue === null ? undefined : (props.issue ?? makePullRequestIssue());
   return render(
     <PRReviewWorkspace
       {...(issue ? { issue } : {})}
@@ -184,30 +186,29 @@ describe("PRReviewWorkspace decisions", () => {
     });
     mocks.createIssue.mockResolvedValue(makeIssue({ id: "TASK-99" }));
     mocks.updateIssue.mockResolvedValue(makeIssue({ id: "TASK-99" }));
-    mocks.ensureReviewer.mockResolvedValue({
-      agent_name: "review-hello-pr-7",
-      checked_out_sha: "sha-old",
-      seeded: true,
-    });
     mocks.actions.updateIssueStatus.mockResolvedValue(undefined);
   });
 
-  it("starts the review agent and opens its terminal", async () => {
+  it("toggles the PR discussion panel", async () => {
     renderWorkspace();
 
-    fireEvent.click(screen.getByTestId("pr-discuss-button"));
-
     await waitFor(() => {
-      expect(mocks.ensureReviewer).toHaveBeenCalledWith(
+      expect(mocks.getPullRequestDetail).toHaveBeenCalledWith(
         "WS",
         "octocat",
         "hello",
         7,
       );
     });
-    expect(mocks.navigate).toHaveBeenCalledWith(
-      "/ws/WS/agents?agent=review-hello-pr-7",
-    );
+
+    fireEvent.click(screen.getByTestId("pr-discuss-button"));
+
+    expect(screen.getByTestId("pr-discussion-panel")).toBeInTheDocument();
+    expect(mocks.navigate).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByTestId("pr-discuss-button"));
+
+    expect(screen.queryByTestId("pr-discussion-panel")).not.toBeInTheDocument();
   });
 
   it("approves on GitHub before closing the ticket", async () => {

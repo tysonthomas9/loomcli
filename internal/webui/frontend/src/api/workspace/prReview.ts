@@ -10,6 +10,9 @@ export type ReviewerEnsureResult =
   components["schemas"]["ReviewerEnsureResult"];
 export type ReviewerMessageResult =
   components["schemas"]["ReviewerMessageResult"];
+export type ReviewerConversation =
+  components["schemas"]["ReviewerConversation"];
+export type ReviewerMessage = components["schemas"]["ReviewerMessage"];
 
 export async function getPullRequestDetail(
   ws: string,
@@ -95,6 +98,22 @@ export async function sendReviewerMessage(
     {
       params: { path: { ws, owner, repo, number } },
       body: { text },
+    },
+  );
+  if (error) throw apiErrorFromResponse(error, response);
+  return unwrapResponse(data, response);
+}
+
+export async function getReviewerConversation(
+  ws: string,
+  owner: string,
+  repo: string,
+  number: number,
+): Promise<ReviewerConversation> {
+  const { data, error, response } = await api.GET(
+    "/api/workspaces/{ws}/pull-requests/{owner}/{repo}/{number}/conversation",
+    {
+      params: { path: { ws, owner, repo, number } },
     },
   );
   if (error) throw apiErrorFromResponse(error, response);

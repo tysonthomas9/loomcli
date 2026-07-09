@@ -39,6 +39,12 @@ export type {
   UsePullRequestDiffResult,
 } from "./usePullRequestDiff";
 
+export { usePRReviewConversation } from "./usePRReviewConversation";
+export type {
+  UsePRReviewConversationParams,
+  UsePRReviewConversationResult,
+} from "./usePRReviewConversation";
+
 export { useRepoFilter, parseReposFromUrl } from "./useRepoFilter";
 export type {
   UseRepoFilterOptions,

@@ -16,7 +16,6 @@ import { useNavigate } from "react-router-dom";
 
 import { createIssue, updateIssue } from "@/api";
 import {
-  ensureReviewer,
   getPullRequestDetail,
   postPullRequestReview,
 } from "@/api/workspace/prReview";
@@ -26,6 +25,7 @@ import {
   buildWorkerByTaskId,
   isWorkerTerminalOpenable,
 } from "@/components/AgentWorkPanel/AgentWorkPanel";
+import { PRDiscussionPanel } from "@/components/PRDiscussionPanel";
 import { PRCompareDiffPane, PRFilesTab } from "@/components/IssueDetailPanel";
 import { TaskSessionDiffPane } from "@/components/IssueDetailPanel/sessions/TaskSessionDiffPane";
 import {
@@ -152,7 +152,7 @@ export function PRReviewWorkspace({
   const [reviewComment, setReviewComment] = useState("");
   const [stale, setStale] = useState(false);
   const [creatingTicket, setCreatingTicket] = useState(false);
-  const [startingReviewer, setStartingReviewer] = useState(false);
+  const [discussOpen, setDiscussOpen] = useState(false);
 
   const diffAgent = useMemo(
     () => (issue ? resolveDiffAgentForIssue(issue, agents) : undefined),
@@ -344,10 +344,9 @@ export function PRReviewWorkspace({
           number,
         ));
       if (!sha) {
-        showToast(
-          "Couldn't verify the PR's current head — try again.",
-          { type: "error" },
-        );
+        showToast("Couldn't verify the PR's current head — try again.", {
+          type: "error",
+        });
         return;
       }
       await postPullRequestReview(
@@ -386,11 +385,7 @@ export function PRReviewWorkspace({
         (err.status === 409 || err.status === 428)
       ) {
         setStale(true);
-        await loadHeadSha(
-          pullRequestRepo.owner,
-          pullRequestRepo.repo,
-          number,
-        );
+        await loadHeadSha(pullRequestRepo.owner, pullRequestRepo.repo, number);
         showToast(
           "The PR changed since you loaded it — refreshed. Review again.",
           {
@@ -432,44 +427,24 @@ export function PRReviewWorkspace({
       showToast(`Created ${created.id} for this pull request`);
       onLinkedTicket?.(created.id);
     } catch (err) {
-      showToast(err instanceof Error ? err.message : "Failed to create ticket", {
-        type: "error",
-      });
+      showToast(
+        err instanceof Error ? err.message : "Failed to create ticket",
+        {
+          type: "error",
+        },
+      );
     } finally {
       setCreatingTicket(false);
     }
   };
 
-  // Stand up the per-PR codex review agent (checked out at the PR head) and
-  // open its terminal — mounting that agent's TerminalView is what boots codex,
-  // at which point the seeded review turn + any messages are delivered.
-  const startReviewer = async (): Promise<void> => {
-    const number = prNumber ? Number(prNumber) : NaN;
-    if (!pullRequestRepo || !Number.isFinite(number)) return;
-    setStartingReviewer(true);
-    try {
-      const result = await ensureReviewer(
-        workspaceId,
-        pullRequestRepo.owner,
-        pullRequestRepo.repo,
-        number,
-      );
-      showToast(`Review agent ${result.agent_name} is ready`);
-      navigate(
-        `/ws/${encodeURIComponent(workspaceId)}/agents?agent=${encodeURIComponent(result.agent_name)}`,
-      );
-    } catch (err) {
-      showToast(
-        err instanceof Error ? err.message : "Failed to start review agent",
-        { type: "error" },
-      );
-    } finally {
-      setStartingReviewer(false);
-    }
-  };
-
   const canDiscussPR = Boolean(pullRequestRepo && prNumber);
   const freeAgents = agents.filter((a) => !busyAgentTask.has(a.name));
+  const showDiscussion =
+    discussOpen &&
+    pullRequestRepo &&
+    prNumber &&
+    Number.isFinite(Number(prNumber));
 
   return (
     <div className={styles.workspace} data-testid="pr-review-workspace">
@@ -622,11 +597,10 @@ export function PRReviewWorkspace({
               type="button"
               className={styles.agentButton}
               data-testid="pr-discuss-button"
-              disabled={startingReviewer}
-              onClick={() => void startReviewer()}
-              title="Open a PR-aware review agent in a terminal"
+              onClick={() => setDiscussOpen((v) => !v)}
+              title="Open a PR-aware review discussion"
             >
-              {startingReviewer ? "Starting…" : "💬 Discuss PR"}
+              Discuss PR
             </button>
           )}
 
@@ -676,31 +650,48 @@ export function PRReviewWorkspace({
       </header>
 
       {/* The focus: full-bleed file diff (design DiffPane). */}
-      <div className={styles.diffArea}>
-        {diffAgent && issue ? (
-          <PRFilesTab
-            agent={diffAgent}
-            isActive
-            emptyFallback={
-              <TaskSessionDiffPane
-                taskId={issue.id}
-                worktreeAgentName={diffAgent.name}
-              />
-            }
-          />
-        ) : pullRequest && pullRequestRepo ? (
-          <PRCompareDiffPane
+      <div
+        className={
+          showDiscussion
+            ? `${styles.diffArea} ${styles.diffAreaSplit}`
+            : styles.diffArea
+        }
+      >
+        <div className={styles.diffPane}>
+          {diffAgent && issue ? (
+            <PRFilesTab
+              agent={diffAgent}
+              isActive
+              emptyFallback={
+                <TaskSessionDiffPane
+                  taskId={issue.id}
+                  worktreeAgentName={diffAgent.name}
+                />
+              }
+            />
+          ) : pullRequest && pullRequestRepo ? (
+            <PRCompareDiffPane
+              workspaceId={workspaceId}
+              owner={pullRequestRepo.owner}
+              repo={pullRequestRepo.repo}
+              number={pullRequest.number}
+            />
+          ) : issue ? (
+            <TaskSessionDiffPane taskId={issue.id} />
+          ) : (
+            <div className={styles.diffEmpty}>
+              No diff available for this pull request.
+            </div>
+          )}
+        </div>
+        {showDiscussion && (
+          <PRDiscussionPanel
             workspaceId={workspaceId}
             owner={pullRequestRepo.owner}
             repo={pullRequestRepo.repo}
-            number={pullRequest.number}
+            number={Number(prNumber)}
+            onClose={() => setDiscussOpen(false)}
           />
-        ) : issue ? (
-          <TaskSessionDiffPane taskId={issue.id} />
-        ) : (
-          <div className={styles.diffEmpty}>
-            No diff available for this pull request.
-          </div>
         )}
       </div>
 
