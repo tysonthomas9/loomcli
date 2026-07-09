@@ -348,6 +348,9 @@ func (s *driverRunStore) List(ctx context.Context, ws string, filter store.Drive
 	if filter.BindingID != "" {
 		q.Set("trigger_binding_id", filter.BindingID)
 	}
+	if filter.AgentServiceID != "" {
+		q.Set("agent_service_id", filter.AgentServiceID)
+	}
 	if filter.Status != "" {
 		q.Set("status", string(filter.Status))
 	}

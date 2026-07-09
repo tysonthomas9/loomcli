@@ -87,11 +87,36 @@ func TestAgentServiceMemstoreLifecycle(t *testing.T) {
 	if err := s.AgentServices().Delete(ctx, "WS", "lead"); err != nil {
 		t.Fatalf("Delete: %v", err)
 	}
-	if _, err := s.AgentServices().Get(ctx, "WS", "lead"); !errors.Is(err, domain.ErrNotFound) {
-		t.Fatalf("Get after delete err = %v, want ErrNotFound", err)
+	// Wave B semantics (mirrors fleet-db): DELETE archives. Get still returns
+	// the record (attribution/history) with DeletedAt set; default List hides it.
+	archived, err := s.AgentServices().Get(ctx, "WS", "lead")
+	if err != nil {
+		t.Fatalf("Get after delete err = %v, want archived record", err)
 	}
-	if err := s.AgentServices().Delete(ctx, "WS", "lead"); !errors.Is(err, domain.ErrNotFound) {
-		t.Fatalf("duplicate Delete err = %v, want ErrNotFound", err)
+	if archived.DeletedAt == nil {
+		t.Fatalf("archived record DeletedAt = nil, want set")
+	}
+	listed, err := s.AgentServices().List(ctx, "WS", store.AgentServiceFilter{})
+	if err != nil {
+		t.Fatalf("List after delete: %v", err)
+	}
+	for _, svc := range listed {
+		if svc.ServiceID == "lead" {
+			t.Fatalf("default List returned archived record")
+		}
+	}
+	withDeleted, err := s.AgentServices().List(ctx, "WS", store.AgentServiceFilter{IncludeDeleted: true})
+	if err != nil {
+		t.Fatalf("List include-deleted: %v", err)
+	}
+	found := false
+	for _, svc := range withDeleted {
+		if svc.ServiceID == "lead" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("IncludeDeleted List missing archived record")
 	}
 }
 

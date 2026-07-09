@@ -169,10 +169,15 @@ func (s *agentServiceStore) Delete(_ context.Context, ws, serviceID string) erro
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if _, ok := s.items[ws][serviceID]; !ok {
+	svc, ok := s.items[ws][serviceID]
+	if !ok {
 		return fmt.Errorf("agent service %q in workspace %q: %w", serviceID, ws, domain.ErrNotFound)
 	}
-	delete(s.items[ws], serviceID)
+	// Wave B semantics (mirrors fleet-db): DELETE archives, never erases — the
+	// record stays GET-able for run attribution; List hides it by default.
+	now := time.Now().UTC()
+	svc.DeletedAt = &now
+	svc.UpdatedAt = now
 	return nil
 }
 
@@ -303,7 +308,8 @@ func cloneAgentService(svc *domain.AgentService) *domain.AgentService {
 }
 
 func agentServiceMatchesMem(svc *domain.AgentService, filter store.AgentServiceFilter) bool {
-	return (filter.Kind == "" || svc.Kind == filter.Kind) &&
+	return (filter.IncludeDeleted || svc.DeletedAt == nil) &&
+		(filter.Kind == "" || svc.Kind == filter.Kind) &&
 		(filter.DesiredState == "" || svc.DesiredState == filter.DesiredState) &&
 		(filter.RoleName == "" || svc.RoleName == filter.RoleName) &&
 		(filter.ProfileName == "" || svc.ProfileName == filter.ProfileName)

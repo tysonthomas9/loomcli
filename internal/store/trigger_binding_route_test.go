@@ -7,9 +7,10 @@ import (
 )
 
 // WithDerivedRoute is the single canonical rule (applied by every store Create):
-// a cron binding's route_key is derived from its unique binding_id, so scheduled
-// bindings never collide on a shared hand-picked route. Event sources are never
-// derived (they carry a meaningful external route).
+// a cron OR internal binding's route_key is derived from its unique binding_id,
+// so scheduled bindings (and pattern-matched internal-event siblings) never
+// collide on a shared hand-picked route. External event sources are never derived
+// (they carry a meaningful external route).
 func TestTriggerBindingCreate_WithDerivedRoute(t *testing.T) {
 	cases := []struct {
 		name string
@@ -27,6 +28,16 @@ func TestTriggerBindingCreate_WithDerivedRoute(t *testing.T) {
 			want: "custom",
 		},
 		{
+			name: "internal derives route from binding_id",
+			in:   store.TriggerBindingCreate{SourceKind: store.InternalSourceKind, BindingID: "ts-planner"},
+			want: "internal:ts-planner",
+		},
+		{
+			name: "internal keeps an explicitly supplied route (exact-owner opt-in)",
+			in:   store.TriggerBindingCreate{SourceKind: store.InternalSourceKind, BindingID: "ts-p", RouteKey: "internal.task.ready"},
+			want: "internal.task.ready",
+		},
+		{
 			name: "event source is never derived",
 			in:   store.TriggerBindingCreate{SourceKind: "github", BindingID: "b1"},
 			want: "",
@@ -34,6 +45,11 @@ func TestTriggerBindingCreate_WithDerivedRoute(t *testing.T) {
 		{
 			name: "cron without a binding_id is left empty (rejected downstream)",
 			in:   store.TriggerBindingCreate{SourceKind: store.CronSourceKind},
+			want: "",
+		},
+		{
+			name: "internal without a binding_id is left empty (rejected downstream)",
+			in:   store.TriggerBindingCreate{SourceKind: store.InternalSourceKind},
 			want: "",
 		},
 	}

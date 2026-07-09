@@ -2474,6 +2474,10 @@ paths:
         - name: profile_name
           in: query
           schema: { type: string }
+        - name: include_deleted
+          in: query
+          description: Include archived agent services whose deleted_at is set.
+          schema: { type: boolean, default: false }
         - name: limit
           in: query
           schema:
@@ -2529,11 +2533,11 @@ paths:
           $ref: "#/components/responses/Conflict"
     delete:
       tags: [Agent Services]
-      summary: Delete an agent service
+      summary: Archive an agent service
       operationId: deleteAgentService
       responses:
         "204":
-          description: Agent service deleted
+          description: Agent service archived by setting deleted_at
         "404":
           $ref: "#/components/responses/NotFound"
         "409":
@@ -3378,6 +3382,10 @@ paths:
           in: query
           description: >-
             Filter to runs a trigger-dispatch leg stamped with this binding id.
+          schema: { type: string }
+        - name: agent_service_id
+          in: query
+          description: Filter to runs stamped with this agent service at dispatch.
           schema: { type: string }
         - name: status
           in: query
@@ -7403,13 +7411,20 @@ components:
 
     AgentService:
       type: object
+      oneOf:
+        - required: [role_name]
+          properties:
+            role_name: { type: string, minLength: 1 }
+        - required: [driver_id, driver_version_id]
+          properties:
+            driver_id: { type: string, minLength: 1 }
+            driver_version_id: { type: string, minLength: 1 }
       required:
         - workspace_key
         - service_id
         - name
         - kind
         - desired_state
-        - role_name
         - max_instances
         - created_at
         - updated_at
@@ -7422,6 +7437,8 @@ components:
         desired_state:
           $ref: "#/components/schemas/AgentServiceDesiredState"
         role_name: { type: string }
+        driver_id: { type: string }
+        driver_version_id: { type: string }
         profile_name: { type: string }
         schedule_id: { type: string }
         event_sources:
@@ -7443,12 +7460,28 @@ components:
         state_ref: { type: string }
         metadata:
           $ref: "#/components/schemas/StringMap"
+        created_by: { type: string }
+        deleted_at:
+          type: string
+          format: date-time
+          nullable: true
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
 
     CreateAgentServiceRequest:
       type: object
-      required: [service_id, kind, role_name]
+      required: [service_id, kind]
+      oneOf:
+        - required: [role_name]
+          properties:
+            role_name: { type: string, minLength: 1 }
+        - required: [driver_id, driver_version_id]
+          properties:
+            driver_id: { type: string, minLength: 1 }
+            driver_version_id: { type: string, minLength: 1 }
+      description: >-
+        Exactly one behavior reference is required: role_name or driver_id plus
+        driver_version_id.
       properties:
         service_id: { type: string }
         name: { type: string }
@@ -7457,6 +7490,8 @@ components:
         desired_state:
           $ref: "#/components/schemas/AgentServiceDesiredState"
         role_name: { type: string }
+        driver_id: { type: string }
+        driver_version_id: { type: string }
         profile_name: { type: string }
         schedule_id: { type: string }
         event_sources:
@@ -7488,6 +7523,8 @@ components:
         desired_state:
           $ref: "#/components/schemas/AgentServiceDesiredState"
         role_name: { type: string }
+        driver_id: { type: string }
+        driver_version_id: { type: string }
         profile_name: { type: string }
         schedule_id: { type: string }
         event_sources:
@@ -8053,6 +8090,12 @@ components:
             Binding whose trigger-dispatch leg admitted this run (empty for
             non-trigger runs). The runs-list trigger_binding_id filter matches
             on this field.
+        agent_service_id:
+          type: string
+          description: >-
+            Agent service targeted by the trigger binding at dispatch time
+            (empty for runs without an attached agent service). The runs-list
+            agent_service_id filter matches on this field.
         parent_run_id:
           type: string
           description: >-
