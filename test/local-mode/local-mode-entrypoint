@@ -33,6 +33,20 @@ DAEMON_SCAN_INTERVAL="${LOOM_LOCAL_MODE_DAEMON_SCAN_INTERVAL:-5}"
 DAEMON_STDOUT_DIR="${LOOM_LOCAL_MODE_DAEMON_STDOUT_DIR:-/tmp/loom-local-mode-daemons}"
 export LOOM_BACKEND="$AGENT_BACKEND"
 
+# LOOM_LOCAL_MODE_PLANE selects which agent plane local mode seeds (Decision 5,
+# OPT-IN — default unchanged). Unset/empty keeps current behavior: seed the Go
+# role agents (planner/coder daemons) plus their worktrees. "ts" skips that Go
+# seeding entirely so the TS/workflow plane (prompt-agent bindings on
+# internal.task.ready) owns the task queue uncontested — the interim two-plane
+# arbitration for the TS-parity loop. Any other value falls back to the Go plane.
+LOCAL_MODE_PLANE="${LOOM_LOCAL_MODE_PLANE:-}"
+
+# plane_is_ts reports whether the TS/workflow plane is selected, i.e. the Go
+# role-agent seeding (agentdefs + worktrees) must be suppressed.
+plane_is_ts() {
+  [ "$LOCAL_MODE_PLANE" = "ts" ]
+}
+
 http_get() {
   url="$1"
   if command -v curl >/dev/null 2>&1; then
@@ -498,10 +512,14 @@ prepare_claude_credentials
 prepare_daytona_credentials
 create_source_repo
 create_workspace
-create_agent_worktree "$PLAN_AGENT"
-create_agent_worktree "$CODE_AGENT"
+if plane_is_ts; then
+  echo "[local-mode] plane=ts: skipping Go role-agent seeding (${PLAN_AGENT}/${CODE_AGENT}) and their worktrees; the TS/workflow plane owns the task queue"
+else
+  create_agent_worktree "$PLAN_AGENT"
+  create_agent_worktree "$CODE_AGENT"
+fi
 trust_codex_local_mode_paths
-register_agents
+plane_is_ts || register_agents
 start_serve
 seed_tasks
 

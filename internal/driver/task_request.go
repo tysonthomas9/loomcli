@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -54,9 +55,43 @@ type TaskRunRequestOptions struct {
 	SandboxPlacement   domain.TaskRunPlacement
 	HeartbeatInterval  time.Duration
 	DeferCompletion    bool
+	// CloseTaskOnSuccess overrides, per request, whether the serve task worker
+	// closes the underlying task issue when this run completes. Nil preserves
+	// the worker's default (true) byte-for-byte; a non-nil value is persisted on
+	// the queued run (RuntimeMetadata) and honored after claim so an
+	// asynchronously-executed run (enqueueOnly) can suppress the close — e.g. a
+	// planner run that must leave the card in design+review, not done.
+	CloseTaskOnSuccess *bool
 	// Input is the optional task-run payload (e.g. a review diff+rubric)
 	// persisted on the run and delivered to the runner.
 	Input json.RawMessage
+}
+
+// TaskRunCloseOnSuccessMetaKey persists a per-request CloseTaskOnSuccess
+// override on the queued task run's RuntimeMetadata ("true"/"false"). The serve
+// task worker claims any queued run without knowing its id in advance, so the
+// override travels with the run rather than the worker options; it is resolved
+// after claim (resolveCloseTaskOnSuccess). Absent key => the caller's default is
+// used unchanged.
+const TaskRunCloseOnSuccessMetaKey = "close_task_on_success"
+
+// resolveCloseTaskOnSuccess returns the effective close-on-success decision for
+// a claimed run: the value persisted on the run's RuntimeMetadata wins when
+// present (set from a per-request CloseTaskOnSuccess override), otherwise the
+// caller's default (fallback) is preserved unchanged.
+func resolveCloseTaskOnSuccess(fallback bool, metadata map[string]string) bool {
+	if metadata == nil {
+		return fallback
+	}
+	raw, ok := metadata[TaskRunCloseOnSuccessMetaKey]
+	if !ok {
+		return fallback
+	}
+	parsed, err := strconv.ParseBool(strings.TrimSpace(raw))
+	if err != nil {
+		return fallback
+	}
+	return parsed
 }
 
 type TaskRunWorkerOptions struct {
@@ -568,6 +603,11 @@ func createQueuedTaskRun(ctx context.Context, s store.Store, opts TaskRunRequest
 	if opts.ParentSessionID != "" {
 		runtimeMetadata["parent_session_id"] = opts.ParentSessionID
 	}
+	if opts.CloseTaskOnSuccess != nil {
+		// Persist the per-request override so the worker (which claims any queued
+		// run) can honor it after claim. Absent => worker default preserved.
+		runtimeMetadata[TaskRunCloseOnSuccessMetaKey] = strconv.FormatBool(*opts.CloseTaskOnSuccess)
+	}
 	return s.TaskRuns().Create(ctx, store.TaskRunCreate{
 		WorkspaceKey:     opts.WorkspaceKey,
 		TaskRunID:        refs.TaskRunID,
@@ -690,7 +730,11 @@ func executeClaimedTaskRunWithResult(ctx context.Context, s store.Store, claimed
 	if opts.DeferCompletion && completion.Status == domain.TaskRunCompleted {
 		return deferClaimedTaskRunCompletion(ctx, s, claimed, opts, execResult, completion, metadata)
 	}
-	if opts.CloseTaskOnSuccess && completion.Status == domain.TaskRunCompleted {
+	// The per-request CloseTaskOnSuccess override (persisted on the queued run's
+	// RuntimeMetadata) wins over the caller's default when present, so an
+	// enqueued planner run leaves its card in design+review instead of closing.
+	closeTaskOnSuccess := resolveCloseTaskOnSuccess(opts.CloseTaskOnSuccess, claimed.RuntimeMetadata)
+	if closeTaskOnSuccess && completion.Status == domain.TaskRunCompleted {
 		return completeAndCloseClaimedTaskRun(ctx, s, claimed, opts, refs, execResult, completion, metadata, evctx)
 	}
 	if retryTaskRun := taskRunRetryDecision(claimed, opts, completion); retryTaskRun.Retry {
