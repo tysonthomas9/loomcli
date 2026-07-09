@@ -86,7 +86,7 @@ func (r *Reconciler) StackStatus(ctx context.Context, ws string, id sl.StackID, 
 	nextSet := sl.NextToMergeUnits(ordered)
 
 	var statuses map[string]PRStatus
-	if strings.TrimSpace(repoPath) != "" {
+	if strings.TrimSpace(repoPath) != "" && forgeSupportsPullRequests(r.Forge) {
 		owner, repo, rerr := repoSlug(ctx, repoPath)
 		if rerr != nil {
 			return nil, rerr

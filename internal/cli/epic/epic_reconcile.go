@@ -34,7 +34,11 @@ func reconcileEpicStack(ctx context.Context, ws string, proj *EpicStackProjectio
 		return fmt.Errorf("stack %s has no repo origin url to reconcile from", proj.StackID)
 	}
 	token := resolveGitHubToken(ctx)
-	if token == "" {
+	forge, origin, err := stackpublish.NewForgeForOrigin(proj.RepoURL, token)
+	if err != nil {
+		return err
+	}
+	if origin.Kind == stackpublish.OriginKindGitHub && token == "" {
 		return fmt.Errorf("no GitHub token (set GITHUB_TOKEN/GH_TOKEN or run `gh auth login`)")
 	}
 	sstore, err := stackstore.Default()
@@ -43,7 +47,7 @@ func reconcileEpicStack(ctx context.Context, ws string, proj *EpicStackProjectio
 	}
 	rec := &stackpublish.Reconciler{
 		Store: sstore,
-		Forge: stackpublish.NewGitHubForge(token, nil, ""),
+		Forge: forge,
 	}
 	opts := stackpublish.Options{Resolver: stack.HeadlessResolver()}
 
@@ -65,9 +69,12 @@ func reconcileEpicStack(ctx context.Context, ws string, proj *EpicStackProjectio
 	}
 
 	if report != nil {
-		fmt.Printf("[epic-run] reconciled stack %s: created=%d reparented=%d skipped=%d closed=%d merged=%d empty=%d\n",
+		fmt.Printf("[epic-run] reconciled stack %s: created=%d reparented=%d skipped=%d closed=%d merged=%d empty=%d pushed=%d\n",
 			proj.StackID, len(report.Created), len(report.Reparented), len(report.Skipped),
-			len(report.Closed), len(report.Merged), len(report.Empty))
+			len(report.Closed), len(report.Merged), len(report.Empty), len(report.Pushed))
+		if msg := report.Message; msg != "" {
+			fmt.Printf("[epic-run]   %s\n", msg)
+		}
 		for task, url := range report.PRURLs {
 			fmt.Printf("[epic-run]   %s  %s\n", task, url)
 		}

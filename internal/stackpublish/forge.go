@@ -52,6 +52,17 @@ type Forge interface {
 	UpdatePRBody(ctx context.Context, owner, repo string, number int, body string) error
 }
 
+type pullRequestSupporter interface {
+	SupportsPullRequests() bool
+}
+
+func forgeSupportsPullRequests(f Forge) bool {
+	if s, ok := f.(pullRequestSupporter); ok {
+		return s.SupportsPullRequests()
+	}
+	return true
+}
+
 // BranchPush is one branch to push, with the SHA the remote ref is expected to
 // be at (for `--force-with-lease=<ref>:<sha>`). Empty ExpectedSHA = new branch.
 type BranchPush struct {
