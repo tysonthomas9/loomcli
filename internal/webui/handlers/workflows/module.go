@@ -16,11 +16,17 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/driver"
 	"github.com/tysonthomas9/loomcli/internal/store"
+	"github.com/tysonthomas9/loomcli/internal/webui/handlers/runhistory"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
 	workflowdefs "github.com/tysonthomas9/loomcli/internal/workflows"
 )
 
 const maxRunPayloadBytes = 4 << 20
+
+const (
+	defaultRunsLimit = runhistory.DefaultRunsLimit
+	maxRunsLimit     = runhistory.MaxRunsLimit
+)
 
 type Module struct {
 	store store.Store
@@ -119,11 +125,6 @@ func (m *Module) listWorkflowVersions(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-const (
-	defaultRunsLimit = 50
-	maxRunsLimit     = 200
-)
-
 // listWorkflowRuns returns a workflow's run history, newest first, over
 // DriverRunStore.List. It resolves the workflow with ResolveDriver (never
 // EnsureAndResolveDriver): listing runs is a read and must not self-heal or
@@ -139,7 +140,7 @@ func (m *Module) listWorkflowRuns(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	limit, ok := parseRunLimit(w, r)
+	limit, ok := runhistory.ParseRunLimit(w, r)
 	if !ok {
 		return
 	}
@@ -162,10 +163,7 @@ func (m *Module) listWorkflowRuns(w http.ResponseWriter, r *http.Request) {
 		writeDomainError(w, err, "list workflow runs failed")
 		return
 	}
-	sortDriverRunsNewestFirst(runs)
-	if len(runs) > limit {
-		runs = runs[:limit]
-	}
+	runs = runhistory.SortAndTrim(runs, limit)
 	handler.WriteJSON(w, http.StatusOK, map[string]any{
 		"driver_id":         drv.DriverID,
 		"active_version_id": drv.ActiveVersionID,
@@ -198,32 +196,6 @@ func isKnownRunStatus(s domain.DriverRunStatus) bool {
 	default:
 		return false
 	}
-}
-
-// parseRunLimit reads the optional ?limit= (default 50, capped at 200). A
-// non-numeric or < 1 value is a 400; a value above the cap is clamped, not
-// rejected. On error it writes the response and returns ok=false.
-func parseRunLimit(w http.ResponseWriter, r *http.Request) (int, bool) {
-	raw := strings.TrimSpace(r.URL.Query().Get("limit"))
-	if raw == "" {
-		return defaultRunsLimit, true
-	}
-	limit, err := strconv.Atoi(raw)
-	if err != nil || limit < 1 {
-		writeError(w, http.StatusBadRequest, "invalid limit: "+raw)
-		return 0, false
-	}
-	if limit > maxRunsLimit {
-		limit = maxRunsLimit
-	}
-	return limit, true
-}
-
-// sortDriverRunsNewestFirst orders runs newest-first (StartedAt desc, unstarted
-// last, CreatedAt tiebreak). Thin wrapper over store.SortDriverRunsNewestFirst
-// so run history and the trigger-bindings failure decorator share one order.
-func sortDriverRunsNewestFirst(runs []*domain.DriverRun) {
-	store.SortDriverRunsNewestFirst(runs)
 }
 
 // approveWorkflowVersion / activateWorkflowVersion expose the operator actions
@@ -400,12 +372,60 @@ func (m *Module) resolveWorkflowDriverID(ctx context.Context, ws, name string) (
 }
 
 func (m *Module) getRun(w http.ResponseWriter, r *http.Request) {
-	run, err := m.store.DriverRuns().Get(r.Context(), r.PathValue("ws"), r.PathValue("runId"))
+	ws := r.PathValue("ws")
+	run, err := m.store.DriverRuns().Get(r.Context(), ws, r.PathValue("runId"))
 	if err != nil {
 		writeDomainError(w, err, "run not found")
 		return
 	}
-	handler.WriteJSON(w, http.StatusOK, run)
+	steps, err := m.runStepSummaries(r.Context(), ws, run.RunID)
+	if err != nil {
+		writeDomainError(w, err, "run steps unavailable")
+		return
+	}
+	handler.WriteJSON(w, http.StatusOK, runDetailResponse{DriverRun: run, Steps: steps})
+}
+
+type runDetailResponse struct {
+	*domain.DriverRun
+	Steps []runStepSummary `json:"steps,omitempty"`
+}
+
+type runStepSummary struct {
+	ID        string                  `json:"id"`
+	StepKind  string                  `json:"step_kind"`
+	TaskRunID string                  `json:"task_run_id,omitempty"`
+	TaskID    string                  `json:"task_id,omitempty"`
+	Status    domain.DriverStepStatus `json:"status"`
+}
+
+func (m *Module) runStepSummaries(ctx context.Context, ws, runID string) ([]runStepSummary, error) {
+	steps, err := m.store.DriverSteps().ListForRun(ctx, ws, runID, store.DriverStepFilter{})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]runStepSummary, 0, len(steps))
+	for _, step := range steps {
+		if step == nil {
+			continue
+		}
+		summary := runStepSummary{
+			ID:        step.StepID,
+			StepKind:  step.StepKind,
+			TaskRunID: step.TaskRunID,
+			Status:    step.Status,
+		}
+		if step.TaskRunID != "" {
+			// Task IDs are best-effort enrichment: older or partial stores may have
+			// the step before the task-run row is readable, but the step link itself
+			// should still reach the UI.
+			if taskRun, err := m.store.TaskRuns().Get(ctx, ws, step.TaskRunID); err == nil && taskRun != nil {
+				summary.TaskID = taskRun.TaskID
+			}
+		}
+		out = append(out, summary)
+	}
+	return out, nil
 }
 
 func (m *Module) getRunEvents(w http.ResponseWriter, r *http.Request) {

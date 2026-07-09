@@ -20,6 +20,12 @@ volumes:
     driver: local
   loom-workspace:
     driver: local
+  # Durable artifact-content blobs (transcripts, logs, patches). fleet-db's
+  # filesystem content store writes here; without a volume the blobs die on
+  # container rebuild while their redis metadata survives, so a run's transcript
+  # 500s "failed to load" after any fleet-db rebuild (#30).
+  fleetdb-artifacts:
+    driver: local
 
 services:
   redis:
@@ -42,6 +48,13 @@ services:
     depends_on:
       redis:
         condition: service_healthy
+    # Run as root in local-mode ONLY so the artifact-content volume below is
+    # writable (the distroless image is nonroot UID 65532; a named volume is
+    # root-owned and docker-compose does not honor podman's :U chown). The
+    # explicit content dir removes any dependency on $HOME/UserCacheDir.
+    user: "0:0"
+    environment:
+      FLEETDB_ARTIFACT_CONTENT_DIR: /var/lib/fleetdb/artifacts
     command:
       - "--redis-addr"
       - "redis:6379"
@@ -50,6 +63,8 @@ services:
       - "--auth-dev-mode"
       - "--authz-enabled=false"
     networks: [local-mode]
+    volumes:
+      - fleetdb-artifacts:/var/lib/fleetdb/artifacts
     ports:
       - "${LOCAL_MODE_FLEETDB_PORT:-8280}:8080"
 
@@ -88,6 +103,11 @@ services:
       # prompt-agent binding on internal.task.ready fires on task creation
       # (Phase 4 prompt-agent packaging, ITEM E). Default-off elsewhere.
       LOOM_TASK_READY_EVENTS: "1"
+      # Agent-plane selector (WS2c, Decision 5 — OPT-IN, default unchanged).
+      # Unset seeds the Go role agents (planner/coder). Set to run the TS/workflow
+      # plane uncontested (interim two-plane arbitration):
+      #   LOOM_LOCAL_MODE_PLANE=ts make local-mode-up
+      LOOM_LOCAL_MODE_PLANE: "${LOOM_LOCAL_MODE_PLANE:-}"
     networks: [local-mode]
     ports:
       - "${LOCAL_MODE_API_PORT:-8282}:8080"

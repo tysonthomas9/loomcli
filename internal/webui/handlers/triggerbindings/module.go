@@ -18,6 +18,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/driver"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/trigger"
+	"github.com/tysonthomas9/loomcli/internal/webui/handlers/runhistory"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
 	workflowdefs "github.com/tysonthomas9/loomcli/internal/workflows"
 )
@@ -55,6 +56,7 @@ func (m *Module) Register(mux *http.ServeMux) {
 	// binding's driver, STAMPED with the binding, carrying NO client-supplied
 	// run-input. The run reads its own config via loom.binding.config().
 	mux.HandleFunc("POST /api/workspaces/{ws}/trigger-bindings/{id}/run", m.runBinding)
+	mux.HandleFunc("GET /api/workspaces/{ws}/trigger-bindings/{id}/runs", m.listBindingRuns)
 }
 
 type createBindingRequest struct {
@@ -118,6 +120,18 @@ type bindingWithNextFire struct {
 	ConsecutiveFailures int    `json:"consecutive_failures,omitempty"`
 }
 
+type BindingDecorators struct {
+	NextFireAt          *time.Time `json:"next_fire_at,omitempty"`
+	LastRunStatus       string     `json:"last_run_status,omitempty"`
+	ConsecutiveFailures int        `json:"consecutive_failures,omitempty"`
+}
+
+type DeleteBindingResult struct {
+	BindingID     string `json:"binding_id"`
+	Deleted       bool   `json:"deleted"`
+	GrantsRevoked int    `json:"grants_revoked"`
+}
+
 func (m *Module) listBindings(w http.ResponseWriter, r *http.Request) {
 	ws := strings.TrimSpace(r.PathValue("ws"))
 	bindings, err := m.store.TriggerBindings().List(r.Context(), ws, store.TriggerBindingFilter{})
@@ -128,15 +142,24 @@ func (m *Module) listBindings(w http.ResponseWriter, r *http.Request) {
 	now := time.Now()
 	out := make([]bindingWithNextFire, 0, len(bindings))
 	for _, b := range bindings {
-		lastStatus, consecutiveFailures := m.bindingRunHealth(r.Context(), ws, b)
+		decorators := DecorateBinding(r.Context(), m.store, ws, b, now)
 		out = append(out, bindingWithNextFire{
 			TriggerBinding:      b,
-			NextFireAt:          nextFireFor(b, now),
-			LastRunStatus:       lastStatus,
-			ConsecutiveFailures: consecutiveFailures,
+			NextFireAt:          decorators.NextFireAt,
+			LastRunStatus:       decorators.LastRunStatus,
+			ConsecutiveFailures: decorators.ConsecutiveFailures,
 		})
 	}
 	handler.WriteJSON(w, http.StatusOK, map[string]any{"bindings": out})
+}
+
+func DecorateBinding(ctx context.Context, st store.Store, ws string, b *domain.TriggerBinding, now time.Time) BindingDecorators {
+	lastStatus, consecutiveFailures := bindingRunHealth(ctx, st, ws, b)
+	return BindingDecorators{
+		NextFireAt:          nextFireFor(b, now),
+		LastRunStatus:       lastStatus,
+		ConsecutiveFailures: consecutiveFailures,
+	}
 }
 
 // bindingRunHealth computes a binding's failure health from ITS OWN runs.
@@ -154,12 +177,12 @@ func (m *Module) listBindings(w http.ResponseWriter, r *http.Request) {
 // newest-first by StartedAt before limiting, so this fetches only the newest
 // bindingRunScanLimit runs rather than the whole history. The client-side sort
 // below stays as defense in depth against an unordered backend.
-func (m *Module) bindingRunHealth(ctx context.Context, ws string, b *domain.TriggerBinding) (lastStatus string, consecutiveFailures int) {
+func bindingRunHealth(ctx context.Context, st store.Store, ws string, b *domain.TriggerBinding) (lastStatus string, consecutiveFailures int) {
 	// Cheap guard: an unsaved/identifier-less binding has no runs to scan.
-	if b == nil || strings.TrimSpace(b.BindingID) == "" {
+	if st == nil || b == nil || strings.TrimSpace(b.BindingID) == "" {
 		return "", 0
 	}
-	runs, err := m.store.DriverRuns().List(ctx, ws, store.DriverRunFilter{
+	runs, err := st.DriverRuns().List(ctx, ws, store.DriverRunFilter{
 		BindingID: b.BindingID,
 		Limit:     bindingRunScanLimit,
 	})
@@ -236,19 +259,30 @@ func (m *Module) createBinding(w http.ResponseWriter, r *http.Request) {
 
 	// route_key is a binding's unique routing ADDRESS: the scheduler stamps it on
 	// each cron.tick and the router resolves it 1:1 (GetByRouteKey), so two
-	// bindings can never share one. Event sources carry a meaningful external
-	// route (e.g. github.pull_request.opened) and must supply it. A cron binding
-	// has no external route — it fires by schedule — so route_key is optional: the
-	// store derives it from the (unique) binding_id (TriggerBindingCreate.
-	// WithDerivedRoute), so here a cron binding only needs a binding_id.
-	if source == store.CronSourceKind {
+	// bindings can never share one. External event sources carry a meaningful
+	// external route (e.g. github.pull_request.opened) and must supply it. A cron
+	// binding (fires by schedule) and an internal-event binding (matches by
+	// event_type_patterns, e.g. internal.task.ready) have no external route to
+	// own, so route_key is optional for them: the store derives a unique address
+	// from the (unique) binding_id (TriggerBindingCreate.WithDerivedRoute). This
+	// is what lets several prompt-agent bindings pattern-match the SAME event
+	// route without fighting over its 1:1 exact-owner slot.
+	switch source {
+	case store.CronSourceKind:
 		if bindingID == "" && routeKey == "" {
 			handler.RespondError(w, http.StatusBadRequest, "binding_id is required for a cron trigger binding")
 			return
 		}
-	} else if routeKey == "" {
-		handler.RespondError(w, http.StatusBadRequest, "route_key is required")
-		return
+	case store.InternalSourceKind:
+		if bindingID == "" && routeKey == "" {
+			handler.RespondError(w, http.StatusBadRequest, "binding_id or route_key is required for an internal trigger binding")
+			return
+		}
+	default:
+		if routeKey == "" {
+			handler.RespondError(w, http.StatusBadRequest, "route_key is required")
+			return
+		}
 	}
 	if bindingID == "" {
 		bindingID = store.DefaultBindingID(routeKey)
@@ -333,6 +367,15 @@ func (m *Module) setEnabled(enabled bool) http.HandlerFunc {
 			handler.RespondError(w, http.StatusBadRequest, "binding id is required")
 			return
 		}
+		existing, err := m.store.TriggerBindings().Get(r.Context(), ws, id)
+		if err != nil {
+			handler.WriteDomainError(w, err, "get trigger binding failed")
+			return
+		}
+		if agentID := strings.TrimSpace(existing.TargetAgentServiceID); agentID != "" {
+			handler.RespondError(w, http.StatusConflict, "managed by agent "+agentID)
+			return
+		}
 		flag := enabled
 		binding, err := m.store.TriggerBindings().Update(r.Context(), ws, id, store.TriggerBindingUpdate{Enabled: &flag})
 		if err != nil {
@@ -383,6 +426,44 @@ func (m *Module) runBinding(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	handler.WriteJSON(w, http.StatusAccepted, run)
+}
+
+// listBindingRuns is the agent-owned run history surface. It filters by
+// trigger_binding_id only; unattributed runs from bare `loom workflow run`
+// calls stay on the workflow-scoped runs endpoint and never appear here.
+func (m *Module) listBindingRuns(w http.ResponseWriter, r *http.Request) {
+	ws := strings.TrimSpace(r.PathValue("ws"))
+	id := strings.TrimSpace(r.PathValue("id"))
+	if ws == "" || id == "" {
+		handler.RespondError(w, http.StatusBadRequest, "workspace and binding id are required")
+		return
+	}
+	binding, err := m.store.TriggerBindings().Get(r.Context(), ws, id)
+	if err != nil {
+		handler.WriteDomainError(w, err, "get trigger binding failed")
+		return
+	}
+	limit, ok := runhistory.ParseRunLimit(w, r)
+	if !ok {
+		return
+	}
+	runs, err := m.store.DriverRuns().List(r.Context(), ws, store.DriverRunFilter{
+		BindingID: binding.BindingID,
+		Limit:     limit,
+	})
+	if err != nil {
+		handler.WriteDomainError(w, err, "list trigger binding runs failed")
+		return
+	}
+	runs = runhistory.SortAndTrim(runs, limit)
+	// Agent-scoped envelope, deliberately NOT driver-rooted (see
+	// docs/design/2026-07-07-agent-identity-record.md §4.3): the driver is an
+	// implementation detail carried per-run and on the binding record the
+	// caller already holds — this surface later becomes /agents/{id}/runs.
+	handler.WriteJSON(w, http.StatusOK, map[string]any{
+		"binding_id": binding.BindingID,
+		"runs":       runs,
+	})
 }
 
 // updateBindingRequest is the PATCH body: only the operator-editable fields are
@@ -494,29 +575,49 @@ func (m *Module) deleteBinding(w http.ResponseWriter, r *http.Request) {
 		handler.RespondError(w, http.StatusBadRequest, "binding id is required")
 		return
 	}
-	if err := m.store.TriggerBindings().Delete(r.Context(), ws, id); err != nil {
-		handler.WriteDomainError(w, err, "delete trigger binding failed")
-		return
-	}
-	revoked, err := m.revokeBindingGrants(r.Context(), ws, id)
+	result, err := DeleteBindingAndRevokeGrants(r.Context(), m.store, ws, id)
 	if err != nil {
-		handler.RespondError(w, http.StatusInternalServerError,
-			fmt.Sprintf("binding deleted but grant revocation failed: %v", err))
+		if result.Deleted {
+			handler.RespondError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		if errors.Is(err, domain.ErrNotFound) || errors.Is(err, domain.ErrInvalid) ||
+			errors.Is(err, domain.ErrConflict) || errors.Is(err, domain.ErrAlreadyExists) {
+			handler.WriteDomainError(w, err, "delete trigger binding failed")
+			return
+		}
+		handler.RespondError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	handler.WriteJSON(w, http.StatusOK, map[string]any{
-		"binding_id":     id,
-		"deleted":        true,
-		"grants_revoked": revoked,
-	})
+	handler.WriteJSON(w, http.StatusOK, result)
+}
+
+func DeleteBindingAndRevokeGrants(ctx context.Context, st store.Store, ws, bindingID string) (DeleteBindingResult, error) {
+	result := DeleteBindingResult{BindingID: bindingID}
+	if st == nil {
+		return result, fmt.Errorf("store is required: %w", domain.ErrInvalid)
+	}
+	if err := st.TriggerBindings().Delete(ctx, ws, bindingID); err != nil {
+		return result, err
+	}
+	result.Deleted = true
+	revoked, err := RevokeBindingGrants(ctx, st, ws, bindingID)
+	result.GrantsRevoked = revoked
+	if err != nil {
+		return result, fmt.Errorf("binding deleted but grant revocation failed: %w", err)
+	}
+	return result, nil
 }
 
 // revokeBindingGrants revokes every active connector grant scoped to the
 // binding and returns the count revoked. ListByBinding already excludes
 // already-revoked grants; a grant revoked concurrently (ErrGrantRevoked) is
 // treated as success. Other revoke errors are joined and returned.
-func (m *Module) revokeBindingGrants(ctx context.Context, ws, bindingID string) (int, error) {
-	grants, err := m.store.ConnectorGrants().ListByBinding(ctx, ws, bindingID)
+func RevokeBindingGrants(ctx context.Context, st store.Store, ws, bindingID string) (int, error) {
+	if st == nil {
+		return 0, fmt.Errorf("store is required: %w", domain.ErrInvalid)
+	}
+	grants, err := st.ConnectorGrants().ListByBinding(ctx, ws, bindingID)
 	if err != nil {
 		return 0, fmt.Errorf("list connector grants: %w", err)
 	}
@@ -526,7 +627,7 @@ func (m *Module) revokeBindingGrants(ctx context.Context, ws, bindingID string) 
 		if g == nil {
 			continue
 		}
-		if err := m.store.ConnectorGrants().Revoke(ctx, ws, g.GrantID); err != nil {
+		if err := st.ConnectorGrants().Revoke(ctx, ws, g.GrantID); err != nil {
 			if errors.Is(err, domain.ErrGrantRevoked) {
 				continue
 			}

@@ -88,6 +88,42 @@ func TestCreateBinding_CreatesThenDisables(t *testing.T) {
 	}
 }
 
+func TestSetEnabledRejectsAgentManagedBinding(t *testing.T) {
+	mux, st := seededMux(t)
+	ctx := context.Background()
+	if _, err := st.Roles().Create(ctx, store.RoleCreate{WorkspaceKey: "WS", Name: "docs-assistant"}); err != nil {
+		t.Fatalf("create role: %v", err)
+	}
+	if _, err := st.AgentServices().Create(ctx, store.AgentServiceCreate{
+		WorkspaceKey: "WS", ServiceID: "agt-docs", Name: "Docs",
+		Kind: domain.AgentServiceKindEvent, DesiredState: domain.AgentServiceDesiredRunning, RoleName: "docs-assistant",
+	}); err != nil {
+		t.Fatalf("create agent service: %v", err)
+	}
+	if _, err := st.TriggerBindings().Create(ctx, store.TriggerBindingCreate{
+		WorkspaceKey: "WS", BindingID: "agt-docs-1", Name: "Docs",
+		SourceKind: store.InternalSourceKind, DriverID: "driver-1", DriverVersionID: "version-1",
+		TargetAgentServiceID: "agt-docs", Enabled: false,
+	}); err != nil {
+		t.Fatalf("create attached binding: %v", err)
+	}
+
+	rec := do(t, mux, http.MethodPost, "/api/workspaces/WS/trigger-bindings/agt-docs-1/enable", "")
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("enable status = %d, want 409; body=%s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "managed by agent agt-docs") {
+		t.Fatalf("enable body = %s, want managed-by-agent message", rec.Body.String())
+	}
+	binding, err := st.TriggerBindings().Get(ctx, "WS", "agt-docs-1")
+	if err != nil {
+		t.Fatalf("get binding: %v", err)
+	}
+	if binding.Enabled {
+		t.Fatalf("binding enabled despite guard: %+v", binding)
+	}
+}
+
 // TestCreateBinding_IsIdempotent pins the ensure contract the create-agent
 // gallery relies on: re-activating the same template (same binding_id) returns
 // 200 with the existing binding rather than a 409 that would fail activation
@@ -147,6 +183,61 @@ func TestCreateBinding_CronDerivesRouteKey(t *testing.T) {
 	rec3 := do(t, mux, http.MethodPost, "/api/workspaces/WS/trigger-bindings", `{`+base+`}`)
 	if rec3.Code != http.StatusBadRequest {
 		t.Fatalf("cron without binding_id status = %d, want 400; body=%s", rec3.Code, rec3.Body.String())
+	}
+}
+
+// TestCreateBinding_InternalDerivesRouteKey pins the WS2a fix: an internal-event
+// binding needs no route_key — like cron it derives a unique 1:1 address from its
+// binding_id — so several prompt-agent bindings can pattern-match the SAME event
+// route (internal.task.ready) via event_type_patterns without colliding on the
+// exact-owner route slot.
+func TestCreateBinding_InternalDerivesRouteKey(t *testing.T) {
+	mux, _ := seededMux(t)
+	base := `"driver_id":"driver-1","driver_version_id":"version-1","source_kind":"internal","event_type_patterns":["internal.task.ready"],"enabled":true`
+
+	rec := do(t, mux, http.MethodPost, "/api/workspaces/WS/trigger-bindings",
+		`{`+base+`,"binding_id":"ts-planner","run_input":{"roleName":"plan","backend":"codex"}}`)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("internal create status = %d, want 201; body=%s", rec.Code, rec.Body.String())
+	}
+	var b domain.TriggerBinding
+	if err := json.Unmarshal(rec.Body.Bytes(), &b); err != nil {
+		t.Fatalf("decode binding: %v", err)
+	}
+	if b.RouteKey != "internal:ts-planner" {
+		t.Fatalf("derived route_key = %q, want internal:ts-planner", b.RouteKey)
+	}
+	if len(b.EventTypePatterns) != 1 || b.EventTypePatterns[0] != "internal.task.ready" {
+		t.Fatalf("event_type_patterns = %v, want [internal.task.ready]", b.EventTypePatterns)
+	}
+
+	// A second prompt-agent binding on the SAME event route (different binding_id,
+	// no route_key) must coexist — distinct derived routes, no 409 on the shared
+	// event pattern.
+	rec2 := do(t, mux, http.MethodPost, "/api/workspaces/WS/trigger-bindings",
+		`{`+base+`,"binding_id":"ts-coder","run_input":{"roleName":"task","backend":"codex"}}`)
+	if rec2.Code != http.StatusCreated {
+		t.Fatalf("second internal create status = %d, want 201 (coexist); body=%s", rec2.Code, rec2.Body.String())
+	}
+
+	// Neither binding_id nor route_key is a 400 (nothing to address the binding).
+	rec3 := do(t, mux, http.MethodPost, "/api/workspaces/WS/trigger-bindings", `{`+base+`}`)
+	if rec3.Code != http.StatusBadRequest {
+		t.Fatalf("internal without binding_id/route_key status = %d, want 400; body=%s", rec3.Code, rec3.Body.String())
+	}
+
+	// An explicit route_key still wins (exact-owner opt-in), unchanged.
+	rec4 := do(t, mux, http.MethodPost, "/api/workspaces/WS/trigger-bindings",
+		`{`+base+`,"binding_id":"ts-exact","route_key":"internal.task.ready"}`)
+	if rec4.Code != http.StatusCreated {
+		t.Fatalf("internal explicit-route create status = %d, want 201; body=%s", rec4.Code, rec4.Body.String())
+	}
+	var b4 domain.TriggerBinding
+	if err := json.Unmarshal(rec4.Body.Bytes(), &b4); err != nil {
+		t.Fatalf("decode binding: %v", err)
+	}
+	if b4.RouteKey != "internal.task.ready" {
+		t.Fatalf("explicit route_key = %q, want internal.task.ready (not overridden by derivation)", b4.RouteKey)
 	}
 }
 
@@ -240,6 +331,110 @@ func TestCreateBinding_GithubRequiresSecret(t *testing.T) {
 	}
 	if !strings.Contains(rec.Body.String(), "secret") {
 		t.Fatalf("expected secret-required error, got %s", rec.Body.String())
+	}
+}
+
+func TestListBindingRuns_FiltersToBindingRuns(t *testing.T) {
+	mux, st := seededMux(t)
+	ctx := context.Background()
+	seedBindingRecord(t, st, "agent-a")
+	seedBindingRecord(t, st, "agent-b")
+	seedDriverRun(t, st, "run-agent-a-1", "agent-a")
+	seedDriverRun(t, st, "run-agent-b-1", "agent-b")
+	seedDriverRun(t, st, "run-bare-1", "")
+	seedDriverRun(t, st, "run-agent-a-2", "agent-a")
+
+	rec := do(t, mux, http.MethodGet, "/api/workspaces/WS/trigger-bindings/agent-a/runs", "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("list binding runs status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	var out struct {
+		BindingID string             `json:"binding_id"`
+		Runs      []domain.DriverRun `json:"runs"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+		t.Fatalf("decode binding runs: %v", err)
+	}
+	// Envelope is deliberately NOT driver-rooted (agent identity design §4.3):
+	// binding_id + runs only; driver identity is per-run provenance.
+	if out.BindingID != "agent-a" {
+		t.Fatalf("metadata = %+v, want binding agent-a", out)
+	}
+	if len(out.Runs) != 2 {
+		t.Fatalf("runs = %d (%+v), want only agent-a's 2 runs", len(out.Runs), out.Runs)
+	}
+	for _, run := range out.Runs {
+		if run.TriggerBindingID != "agent-a" {
+			t.Fatalf("run %s trigger_binding_id = %q, want agent-a", run.RunID, run.TriggerBindingID)
+		}
+	}
+	if _, err := st.DriverRuns().Get(ctx, "WS", "run-bare-1"); err != nil {
+		t.Fatalf("bare run setup vanished: %v", err)
+	}
+}
+
+func TestListBindingRuns_UnknownBinding404(t *testing.T) {
+	mux, _ := seededMux(t)
+	rec := do(t, mux, http.MethodGet, "/api/workspaces/WS/trigger-bindings/missing/runs", "")
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("missing binding status = %d, want 404; body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestListBindingRuns_LimitHonored(t *testing.T) {
+	mux, st := seededMux(t)
+	seedBindingRecord(t, st, "agent-limited")
+	seedDriverRun(t, st, "run-limited-1", "agent-limited")
+	seedDriverRun(t, st, "run-limited-2", "agent-limited")
+	seedDriverRun(t, st, "run-limited-3", "agent-limited")
+
+	rec := do(t, mux, http.MethodGet, "/api/workspaces/WS/trigger-bindings/agent-limited/runs?limit=2", "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("limited list status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	var out struct {
+		Runs []domain.DriverRun `json:"runs"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+		t.Fatalf("decode limited runs: %v", err)
+	}
+	if len(out.Runs) != 2 {
+		t.Fatalf("runs = %d (%+v), want limit 2", len(out.Runs), out.Runs)
+	}
+}
+
+func seedBindingRecord(t *testing.T, st store.Store, bindingID string) {
+	t.Helper()
+	if _, err := st.TriggerBindings().Create(context.Background(), store.TriggerBindingCreate{
+		WorkspaceKey:     "WS",
+		BindingID:        bindingID,
+		Name:             bindingID,
+		SourceKind:       store.CronSourceKind,
+		RouteKey:         "cron:" + bindingID,
+		DriverID:         "driver-1",
+		DriverVersionID:  "version-1",
+		Enabled:          true,
+		Schedule:         "*/10 * * * *",
+		ScheduleTimezone: "UTC",
+	}); err != nil {
+		t.Fatalf("seed binding %s: %v", bindingID, err)
+	}
+}
+
+func seedDriverRun(t *testing.T, st store.Store, runID, bindingID string) {
+	t.Helper()
+	if _, err := st.DriverRuns().Create(context.Background(), store.DriverRunCreate{
+		WorkspaceKey:     "WS",
+		RunID:            runID,
+		DriverID:         "driver-1",
+		DriverVersionID:  "version-1",
+		TriggerBindingID: bindingID,
+		SourceKind:       "test",
+		SourceRef:        "test:" + runID,
+		IdempotencyKey:   "",
+		Payload:          nil,
+	}); err != nil {
+		t.Fatalf("seed run %s: %v", runID, err)
 	}
 }
 

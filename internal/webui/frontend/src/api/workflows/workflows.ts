@@ -8,7 +8,24 @@ export type WorkflowRunStatus =
   | "completed"
   | "failed"
   | "needs_review"
-  | "cancelled";
+  | "cancelled"
+  | "suspended_awaiting_event";
+
+export type WorkflowRunStepStatus =
+  | "queued"
+  | "running"
+  | "waiting"
+  | "completed"
+  | "failed"
+  | "skipped";
+
+export interface WorkflowRunStep {
+  id: string;
+  step_kind: string;
+  task_run_id?: string;
+  task_id?: string;
+  status: WorkflowRunStepStatus;
+}
 
 export interface WorkflowRun {
   workspace_key: string;
@@ -19,6 +36,7 @@ export interface WorkflowRun {
   source_kind?: string;
   source_ref?: string;
   epic_id?: string;
+  trigger_binding_id?: string;
   status: WorkflowRunStatus;
   node_id?: string;
   lease_id?: string;
@@ -26,6 +44,7 @@ export interface WorkflowRun {
   idempotency_key?: string;
   payload?: unknown;
   output?: Record<string, string>;
+  steps?: WorkflowRunStep[];
   summary?: string;
   error_class?: string;
   started_at?: string;
@@ -71,6 +90,17 @@ export function isTerminalWorkflowRunStatus(
 export interface WorkflowRunsResponse {
   driver_id: string;
   active_version_id: string;
+  runs: WorkflowRun[];
+}
+
+/**
+ * GET /trigger-bindings/{id}/runs response. Deliberately NOT driver-rooted
+ * (no driver_id/active_version_id envelope): this is the AGENT's run history —
+ * driver identity is per-run provenance and lives on the binding the caller
+ * already holds. Future home: /agents/{id}/runs (agent identity record design).
+ */
+export interface TriggerBindingRunsResponse {
+  binding_id: string;
   runs: WorkflowRun[];
 }
 
@@ -129,6 +159,14 @@ export interface TriggerBinding {
    * {"roleName":..,"backend":..}; parse it with promptAgentRoleName().
    */
   source_config_ref?: string;
+  /**
+   * The owning Agent identity record's id, when this binding is ATTACHED
+   * config on an agent (the serve-start migration attaches every prompt-agent
+   * binding). Attached bindings reject direct enable/disable with 409
+   * ("managed by agent") — callers must drive the agent-scoped routes instead;
+   * see setTriggerBindingEnabled's dispatch in useAutomations.
+   */
+  target_agent_service_id?: string;
   /** Computed next fire time (ISO 8601) for an enabled cron binding. */
   next_fire_at?: string;
   /**
@@ -238,6 +276,23 @@ export async function runTriggerBinding(
       `/trigger-bindings/${encodeURIComponent(bindingId)}/run`,
     ),
     {},
+  );
+}
+
+/** List runs attributed to one trigger binding, newest-first and capped by `limit`. */
+export async function listTriggerBindingRuns(
+  workspaceId: string,
+  bindingId: string,
+  opts?: { limit?: number },
+): Promise<TriggerBindingRunsResponse> {
+  const params = new URLSearchParams();
+  if (opts?.limit !== undefined) params.set("limit", String(opts.limit));
+  const query = params.toString();
+  return get<TriggerBindingRunsResponse>(
+    wsUrl(
+      workspaceId,
+      `/trigger-bindings/${encodeURIComponent(bindingId)}/runs${query ? `?${query}` : ""}`,
+    ),
   );
 }
 

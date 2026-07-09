@@ -1,20 +1,20 @@
 /**
  * useWorkflowAgentDetail — run history + live status for a workflow-plane agent
  * (trigger binding). Mirrors the epic-runner pattern in AgentsPage: it fetches
- * the run list once (GET /workflows/{name}/runs, newest-first), then keeps any
- * non-terminal run live via the shared per-run SSE stream and refreshes the
+ * the run list once (GET /trigger-bindings/{id}/runs, newest-first), then keeps
+ * any non-terminal run live via the shared per-run SSE stream and refreshes the
  * whole page when a run reaches a terminal status (so finished_at / summary /
  * error_class settle in).
  *
- * `workflowName` is the binding's driver id (the builtin workflow name); the
- * runs endpoint resolves it to the driver without self-healing.
+ * `bindingId` is the trigger binding id. Runs are scoped by trigger_binding_id,
+ * not driver id, because prompt agents share one driver.
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import {
   isTerminalWorkflowRunStatus,
-  listWorkflowRuns,
+  listTriggerBindingRuns,
   type WorkflowRun,
 } from "@/api";
 import { useWorkflowRunStreams } from "@/hooks/workflows/useWorkflowRunStreams";
@@ -30,10 +30,6 @@ export interface UseWorkflowAgentDetailReturn {
   runs: WorkflowRun[];
   loading: boolean;
   error: string | null;
-  /** The resolved driver id for this workflow (from the runs response). */
-  driverId: string;
-  /** The driver's active version id (from the runs response). */
-  activeVersionId: string;
   stats: WorkflowAgentRunStats;
   refresh: () => Promise<void>;
 }
@@ -42,31 +38,29 @@ const DEFAULT_LIMIT = 25;
 
 export function useWorkflowAgentDetail(
   workspaceId: string,
-  workflowName: string,
+  bindingId: string,
   opts?: { limit?: number },
 ): UseWorkflowAgentDetailReturn {
   const limit = opts?.limit ?? DEFAULT_LIMIT;
   const [runs, setRuns] = useState<WorkflowRun[]>([]);
-  const [driverId, setDriverId] = useState("");
-  const [activeVersionId, setActiveVersionId] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
-    if (!workspaceId || !workflowName) return;
+    if (!workspaceId || !bindingId) return;
     setLoading(true);
     setError(null);
     try {
-      const res = await listWorkflowRuns(workspaceId, workflowName, { limit });
+      const res = await listTriggerBindingRuns(workspaceId, bindingId, {
+        limit,
+      });
       setRuns(res.runs ?? []);
-      setDriverId(res.driver_id ?? "");
-      setActiveVersionId(res.active_version_id ?? "");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load runs");
     } finally {
       setLoading(false);
     }
-  }, [workspaceId, workflowName, limit]);
+  }, [workspaceId, bindingId, limit]);
 
   useEffect(() => {
     void refresh();
@@ -121,8 +115,6 @@ export function useWorkflowAgentDetail(
     runs,
     loading,
     error,
-    driverId,
-    activeVersionId,
     stats,
     refresh,
   };
