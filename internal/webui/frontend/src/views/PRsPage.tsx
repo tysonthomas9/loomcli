@@ -111,6 +111,10 @@ export function rowState(row: PullRequestRow): { label: string; key: string } {
   return { label: "Review", key: "review" };
 }
 
+export function prReviewRef(pr: GitPullRequest): string | null {
+  return pr.repo_name && pr.number ? `${pr.repo_name}#${pr.number}` : null;
+}
+
 /**
  * Build the review queue: loom issues first (status=review or PR-linked),
  * enriched with GitHub metadata by owner/repo#number; then unlinked GitHub
@@ -199,6 +203,7 @@ export function PRsPage(): JSX.Element {
   const [groupMode, setGroupMode] = useState<GroupMode>("none");
   const [searchParams, setSearchParams] = useSearchParams();
   const reviewId = searchParams.get("review");
+  const reviewPrParam = searchParams.get("review-pr");
 
   const rows = useMemo(
     () => buildPullRequestRows(issues, pullRequests),
@@ -253,6 +258,11 @@ export function PRsPage(): JSX.Element {
       return;
     }
     if (row.pr) {
+      const ref = prReviewRef(row.pr);
+      if (ref) {
+        setSearchParams({ "review-pr": ref });
+        return;
+      }
       window.open(row.pr.url, "_blank", "noopener,noreferrer");
     }
   };
@@ -343,6 +353,24 @@ export function PRsPage(): JSX.Element {
         issue={reviewIssue}
         {...(reviewPr ? { pullRequest: reviewPr } : {})}
         onBack={() => setSearchParams({}, { replace: true })}
+      />
+    );
+  }
+
+  const reviewPrRow = reviewPrParam
+    ? rows.find((r) => r.pr && prReviewRef(r.pr) === reviewPrParam)
+    : undefined;
+
+  if (reviewPrParam && reviewPrRow?.pr) {
+    // If a hand-edited/bookmarked ?review-pr points at a PR that DOES have a
+    // linked ticket, render it issue-linked so we don't offer "Create ticket"
+    // on an already-ticketed PR (which would make a duplicate).
+    return (
+      <PRReviewWorkspace
+        pullRequest={reviewPrRow.pr}
+        {...(reviewPrRow.issue ? { issue: reviewPrRow.issue } : {})}
+        onBack={() => setSearchParams({}, { replace: true })}
+        onLinkedTicket={(issueId) => setSearchParams({ review: issueId })}
       />
     );
   }

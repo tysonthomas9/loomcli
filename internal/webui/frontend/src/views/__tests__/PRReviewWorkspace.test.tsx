@@ -17,6 +17,8 @@ import {
 const mocks = vi.hoisted(() => ({
   navigate: vi.fn(),
   onBack: vi.fn(),
+  onLinkedTicket: vi.fn(),
+  createIssue: vi.fn(),
   updateIssue: vi.fn(),
   startAgent: vi.fn(),
   getPullRequestDetail: vi.fn(),
@@ -46,6 +48,7 @@ vi.mock("react-router-dom", async (importOriginal) => {
 });
 
 vi.mock("@/api", () => ({
+  createIssue: mocks.createIssue,
   updateIssue: mocks.updateIssue,
 }));
 
@@ -72,7 +75,7 @@ vi.mock("@/components/CreateAgentModal/CreateAgentModal", () => ({
 }));
 
 vi.mock("@/components/IssueDetailPanel", () => ({
-  PRCompareDiffPane: () => <div data-testid="pr-compare-diff" />,
+  PRCompareDiffPane: () => <div data-testid="pr-compare-diff-pane" />,
   PRFilesTab: () => <div data-testid="pr-files-tab" />,
 }));
 
@@ -139,16 +142,20 @@ function makePullRequestIssue(overrides: Partial<Issue> = {}): Issue {
 
 function renderWorkspace(
   props: Partial<{
-    issue: Issue;
+    issue: Issue | null;
     pullRequest: GitPullRequest;
     onBack: () => void;
+    onLinkedTicket: (issueId: string) => void;
   }> = {},
 ) {
+  const issue =
+    props.issue === null ? undefined : props.issue ?? makePullRequestIssue();
   return render(
     <PRReviewWorkspace
-      issue={props.issue ?? makePullRequestIssue()}
+      {...(issue ? { issue } : {})}
       pullRequest={props.pullRequest ?? makePullRequest()}
       onBack={props.onBack ?? mocks.onBack}
+      onLinkedTicket={props.onLinkedTicket ?? mocks.onLinkedTicket}
     />,
   );
 }
@@ -173,6 +180,8 @@ describe("PRReviewWorkspace decisions", () => {
       review_id: 123,
       state: "APPROVED",
     });
+    mocks.createIssue.mockResolvedValue(makeIssue({ id: "TASK-99" }));
+    mocks.updateIssue.mockResolvedValue(makeIssue({ id: "TASK-99" }));
     mocks.actions.updateIssueStatus.mockResolvedValue(undefined);
   });
 
@@ -210,6 +219,75 @@ describe("PRReviewWorkspace decisions", () => {
       "Approved on GitHub — ticket closed",
     );
     expect(mocks.onBack).toHaveBeenCalledTimes(1);
+  });
+
+  it("reviews a ticketless pull request without ticket controls or ticket status updates", async () => {
+    const onBack = vi.fn();
+    renderWorkspace({ issue: null, onBack });
+
+    expect(screen.getByTestId("pr-compare-diff-pane")).toBeInTheDocument();
+    expect(screen.queryByText("TASK-1")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("review-agent-button")).not.toBeInTheDocument();
+    expect(screen.getByTestId("pr-create-ticket")).toBeInTheDocument();
+
+    await waitFor(() => {
+      expect(mocks.getPullRequestDetail).toHaveBeenCalledWith(
+        "WS",
+        "octocat",
+        "hello",
+        7,
+      );
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: /approve/i }));
+
+    await waitFor(() => {
+      expect(mocks.postPullRequestReview).toHaveBeenCalledWith(
+        "WS",
+        "octocat",
+        "hello",
+        7,
+        {
+          event: "approve",
+          expected_head_sha: "sha-old",
+        },
+      );
+    });
+    expect(mocks.actions.updateIssueStatus).not.toHaveBeenCalled();
+    expect(mocks.actions.showToast).toHaveBeenCalledWith("Approved on GitHub");
+    expect(onBack).toHaveBeenCalledTimes(1);
+  });
+
+  it("creates and links a ticket for a ticketless pull request", async () => {
+    const onLinkedTicket = vi.fn();
+    mocks.createIssue.mockResolvedValueOnce(makeIssue({ id: "TASK-99" }));
+
+    renderWorkspace({ issue: null, onLinkedTicket });
+
+    fireEvent.click(screen.getByTestId("pr-create-ticket"));
+
+    await waitFor(() => {
+      expect(mocks.createIssue).toHaveBeenCalledWith(
+        "WS",
+        expect.objectContaining({
+          title: "Review PR",
+          external_ref: "https://github.com/octocat/hello/pull/7",
+          source_repo: "octocat/hello",
+          issue_type: "task",
+          priority: 3,
+        }),
+      );
+    });
+    expect(mocks.updateIssue).toHaveBeenCalledWith("WS", "TASK-99", {
+      status: "review",
+    });
+    // Must refetch before linking so the new issue is loaded when the parent
+    // navigates to ?review=<newId> (else the review gate misses and bounces).
+    expect(mocks.actions.refetch).toHaveBeenCalled();
+    expect(mocks.actions.showToast).toHaveBeenCalledWith(
+      "Created TASK-99 for this pull request",
+    );
+    expect(onLinkedTicket).toHaveBeenCalledWith("TASK-99");
   });
 
   it("shows stale banner on stale GitHub review and does not flip the ticket", async () => {

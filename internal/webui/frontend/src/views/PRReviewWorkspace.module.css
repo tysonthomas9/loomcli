@@ -381,6 +381,17 @@
   flex-direction: column;
 }
 
+.diffEmpty {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 32px;
+  color: var(--color-text-muted);
+  font-size: 13px;
+  text-align: center;
+}
+
 /* Review-with-agent CTA (design pr-agent-cta) when no reviewer yet */
 .cta {
   flex: 1;

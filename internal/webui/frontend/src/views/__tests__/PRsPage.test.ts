@@ -4,6 +4,7 @@ import type { GitPullRequest } from "@/api/workspace";
 import type { Issue } from "@/types";
 import {
   buildPullRequestRows,
+  prReviewRef,
   prStateFromGithub,
   rowState,
 } from "@/views/PRsPage";
@@ -46,6 +47,30 @@ describe("prStateFromGithub", () => {
         review_decision: "CHANGES_REQUESTED",
       }).label,
     ).toBe("Changes");
+  });
+});
+
+describe("prReviewRef", () => {
+  const base: GitPullRequest = {
+    number: 7,
+    title: "Fix bug",
+    url: "https://github.com/octocat/hello/pull/7",
+    state: "OPEN",
+    is_draft: false,
+    head_ref_name: "feat",
+    base_ref_name: "main",
+    repo_name: "octocat/hello",
+  };
+
+  it("builds the review route ref from repo name and number", () => {
+    expect(prReviewRef(base)).toBe("octocat/hello#7");
+  });
+
+  it("returns null when repo name or number is missing", () => {
+    expect(prReviewRef({ ...base, repo_name: "" })).toBeNull();
+    expect(
+      prReviewRef({ ...base, number: undefined as unknown as number }),
+    ).toBeNull();
   });
 });
 
