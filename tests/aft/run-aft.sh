@@ -31,6 +31,78 @@ BASE_URL="http://127.0.0.1:${E2E_FRONTEND_PORT}"   # browser entry (vite preview
 API_URL="http://127.0.0.1:${E2E_PORT}"             # loom serve API
 REPORT_DIR="$SCRIPT_DIR/reports"
 mkdir -p "$REPORT_DIR"
+STACK_LOCK="$REPO_ROOT/tmp/aft-stack.${E2E_FRONTEND_PORT}.lock"
+LOCK_WRITTEN=""
+
+port_listener_pids() {
+    command -v lsof >/dev/null 2>&1 || return 0
+    lsof -ti "TCP:$1" -sTCP:LISTEN 2>/dev/null || true
+}
+
+is_our_stack_cmd() {
+    local cmd="$1"
+    case "$cmd" in
+        *"$REPO_ROOT/tmp/loom-e2e"*|*"$REPO_ROOT/tmp/fleet-db"*) return 0 ;;
+        *"vite preview"*"--port ${E2E_FRONTEND_PORT}"*) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+lock_owner_alive() {
+    [[ -f "$STACK_LOCK" ]] || return 1
+    local pid
+    pid="$(cat "$STACK_LOCK" 2>/dev/null || true)"
+    [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null
+}
+
+preflight_port() {
+    local port="$1"
+    local role="$2"
+    local pid cmd owner ours=0 foreign=0
+    local mine=()
+
+    for pid in $(port_listener_pids "$port"); do
+        cmd="$(ps -o command= -p "$pid" 2>/dev/null || true)"
+        if is_our_stack_cmd "$cmd"; then
+            ours=1
+            mine+=("$pid")
+        else
+            foreign=1
+            echo "[aft] port $port ($role) held by foreign process: pid $pid - $cmd" >&2
+        fi
+    done
+
+    if [[ "$foreign" == "1" ]]; then
+        echo "[aft] refusing to start: $role port $port is owned by a process that is not this harness's stack." >&2
+        echo "[aft] stop it, or rerun with E2E_PORT=/E2E_FRONTEND_PORT= on a free port (demos: 'make demo' uses 8190/3190)." >&2
+        exit 1
+    fi
+
+    if [[ "$ours" == "1" ]]; then
+        if lock_owner_alive; then
+            owner="$(cat "$STACK_LOCK" 2>/dev/null || true)"
+            echo "[aft] refusing to start: another run-aft owns port $port (lock pid $owner)." >&2
+            exit 1
+        fi
+
+        echo "[aft] reaping our own leftover stack on $role port $port (pids: ${mine[*]})..."
+        kill "${mine[@]}" 2>/dev/null || true
+        for _ in $(seq 1 10); do
+            [[ -z "$(port_listener_pids "$port")" ]] && break
+            sleep 1
+        done
+        if [[ -n "$(port_listener_pids "$port")" ]]; then
+            echo "[aft] port $port still busy after reap" >&2
+            exit 1
+        fi
+    fi
+}
+
+preflight_ports() {
+    command -v lsof >/dev/null 2>&1 || return 0
+    preflight_port "$E2E_PORT" api
+    preflight_port "$E2E_FRONTEND_PORT" frontend
+}
 
 if [[ "${AFT_REAL_CODEX:-}" == "1" ]]; then
     echo "[aft] ====================================================================="
@@ -75,17 +147,28 @@ mkdir -p "$REPO_ROOT/tmp" && printf '%s\n' "$FLEET_DB_SRC" > "$FLEET_DB_STAMP"
 
 SERVER_PID=""
 cleanup() {
+    local port pid cmd
     if [[ -n "$SERVER_PID" ]] && kill -0 "$SERVER_PID" 2>/dev/null; then
         echo "[aft] stopping e2e stack (pid $SERVER_PID)..."
         kill "$SERVER_PID" 2>/dev/null || true   # fires the script's own trap (kills loom + preview)
         wait "$SERVER_PID" 2>/dev/null || true
     fi
-    # belt-and-braces: nothing from this run's isolated binaries may outlive it
-    pkill -f "$REPO_ROOT/tmp/loom-e2e" 2>/dev/null || true
-    pkill -f "$REPO_ROOT/tmp/fleet-db" 2>/dev/null || true
-    pkill -f "vite preview --port ${E2E_FRONTEND_PORT}" 2>/dev/null || true
+    if [[ "$LOCK_WRITTEN" == "1" ]]; then
+        # belt-and-braces, but only our-signature listeners on this run's ports
+        for port in "$E2E_PORT" "$E2E_FRONTEND_PORT"; do
+            for pid in $(port_listener_pids "$port"); do
+                cmd="$(ps -o command= -p "$pid" 2>/dev/null || true)"
+                is_our_stack_cmd "$cmd" && kill "$pid" 2>/dev/null || true
+            done
+        done
+        rm -f "$STACK_LOCK"
+    fi
 }
 trap cleanup EXIT INT TERM
+
+preflight_ports
+echo "$$" > "$STACK_LOCK"
+LOCK_WRITTEN=1
 
 echo "[aft] starting e2e stack (api :${E2E_PORT}, frontend :${E2E_FRONTEND_PORT}; log: $REPORT_DIR/server.log)..."
 # Stub AI backends — scoped to the SERVER process only, never this script's env:

@@ -3,16 +3,21 @@
 # driver executor + task workers, so POST /workflows/epic-runner drives the whole
 # claim → execute → close cycle in-process. No daemon required.
 #
-# Named zz- so it runs LAST: it creates an agent definition and run artifacts that
-# earlier suites' empty-state assertions (monitor "No agents found", agents-page
-# "Select an agent", observability zero-metrics) assume absent.
+# This suite creates an agent definition and run artifacts, so it owns a dedicated
+# workspace instead of leaking agent state into the shared E2E-WS empty-state suites.
 suite: zz-agent-flow
 baseUrl: "${AFT_BASE_URL:-http://127.0.0.1:3100}"
-# also best-effort delete the agentdef so anything ordered after zz- (or a rerun
-# against a warm server) starts agent-free like every other suite expects
+setup: >-
+  d="$AFT_WORK_DIR/agent-repo";
+  mkdir -p "$d"; git -C "$d" init -q;
+  git -C "$d" -c user.email=e2e@x -c user.name=e2e commit --allow-empty -m init -q;
+  curl -sf -X POST "$AFT_BASE_URL/api/workspaces"
+  -H "Content-Type: application/json"
+  -d "{\"name\":\"e2e-ws-agent\",\"type\":\"empty\",\"repos\":[\"$d\"]}"
+  >/dev/null
 teardown: >-
-  "$AFT_TESTS_DIR/scripts/close-open-issues.sh";
-  curl -s -X DELETE "$AFT_BASE_URL/api/workspaces/${AFT_WS:-E2E-WS}/agents/nova" >/dev/null || true
+  AFT_WS=E2E-WS-AGENT "$AFT_TESTS_DIR/scripts/close-open-issues.sh";
+  curl -s -X DELETE "$AFT_BASE_URL/api/workspaces/E2E-WS-AGENT" >/dev/null || true
 
 tests:
   # covers: agent-definition visibility (LCLI-AD group, UI surface slice)
@@ -20,13 +25,13 @@ tests:
     intent: An agent definition created through the workspace API renders in the agents rail and the monitor activity panel, and start is accepted
     steps:
       - run: >-
-          curl -sf -X POST "$AFT_BASE_URL/api/workspaces/${AFT_WS:-E2E-WS}/agents"
+          curl -sf -X POST "$AFT_BASE_URL/api/workspaces/E2E-WS-AGENT/agents"
           -H "Content-Type: application/json"
           -d '{"name":"nova","role_name":"lead"}'
           >/dev/null
       # deep link straight to the agent detail route — the bare /agents auto-select
       # depends on the agent store's first fetch and can exceed the step timeout
-      - open: /ws/E2E-WS/agents/nova
+      - open: /ws/E2E-WS-AGENT/agents/nova
       - wait:
           fn: >-
             !!document.querySelector('[data-testid=agents-page]')
@@ -43,13 +48,13 @@ tests:
       - expect: { visible: { testid: archive-empty } }
       - expect: { text: No logs available for this agent yet. }
       - run: >-
-          d="$AFT_TESTS_DIR/../../tmp/e2e-workspace/.loom-config/.loom/logs/E2E-WS/agents";
+          d="$AFT_TESTS_DIR/../../tmp/e2e-workspace/.loom-config/.loom/logs/E2E-WS-AGENT/agents";
           mkdir -p "$d";
           printf '%s\n' "nova lead log line one" "nova lead AFT-LOG-MARKER $RUN_ID" > "$d/nova.log"
       - click: { selector: "div:has(> [data-testid='log-viewer']) > button" }
       - wait: { text: AFT-LOG-MARKER }
       - expect: { visible: { testid: terminal-container } }
-      - open: /ws/E2E-WS/monitor
+      - open: /ws/E2E-WS-AGENT/monitor
       - wait:
           fn: >-
             !!document.querySelector('[data-testid=agent-activity-panel]')
@@ -67,31 +72,31 @@ tests:
       - expect: { notText: No agents found }
       # store-backed serve accepts start and flips desired state (no daemon involved)
       - run: >-
-          curl -sf -X POST "$AFT_BASE_URL/api/workspaces/${AFT_WS:-E2E-WS}/agents/nova/start" >/dev/null
+          curl -sf -X POST "$AFT_BASE_URL/api/workspaces/E2E-WS-AGENT/agents/nova/start" >/dev/null
 
   # covers: LCLI-RA group partial — serve-driven epic run with stub backend
   - name: epic runner drives a stub agent to complete a task
     intent: Triggering the epic-runner workflow makes a stub-backed worker claim the seeded task, execute, and close it, with the board and session records following
     steps:
       - run: >-
-          curl -sf -X POST "$AFT_BASE_URL/api/workspaces/${AFT_WS:-E2E-WS}/issues"
+          curl -sf -X POST "$AFT_BASE_URL/api/workspaces/E2E-WS-AGENT/issues"
           -H "Content-Type: application/json"
           -d "{\"title\":\"agent-flow epic $RUN_ID\",\"issue_type\":\"epic\",\"priority\":2}"
           | python3 -c "import sys,json;print(json.load(sys.stdin)['data']['id'])"
           > "$AFT_WORK_DIR/agent-epic.id"
       - run: >-
-          curl -sf -X POST "$AFT_BASE_URL/api/workspaces/${AFT_WS:-E2E-WS}/issues"
+          curl -sf -X POST "$AFT_BASE_URL/api/workspaces/E2E-WS-AGENT/issues"
           -H "Content-Type: application/json"
           -d "{\"title\":\"agent-flow task $RUN_ID\",\"issue_type\":\"task\",\"priority\":2,\"parent\":\"$(cat "$AFT_WORK_DIR/agent-epic.id")\"}"
           | python3 -c "import sys,json;print(json.load(sys.stdin)['data']['id'])"
           > "$AFT_WORK_DIR/agent-task.id"
-      - open: /ws/E2E-WS/kanban
+      - open: /ws/E2E-WS-AGENT/kanban
       - wait:
           fn: >-
             !!document.querySelector('[data-testid=board-toolbar]')
       - wait: { text: agent-flow task }
       - run: >-
-          curl -sf -X POST "$AFT_BASE_URL/api/workspaces/${AFT_WS:-E2E-WS}/workflows/epic-runner"
+          curl -sf -X POST "$AFT_BASE_URL/api/workspaces/E2E-WS-AGENT/workflows/epic-runner"
           -H "Content-Type: application/json"
           -d "{\"epicId\":\"$(cat "$AFT_WORK_DIR/agent-epic.id")\"}"
           > "$AFT_WORK_DIR/agent-run.json"
@@ -100,12 +105,12 @@ tests:
       # plus cheap grep instead of a python startup per iteration.
       - run: >-
           for i in $(seq 1 40); do
-          curl -sf "$AFT_BASE_URL/api/workspaces/${AFT_WS:-E2E-WS}/issues/$(cat "$AFT_WORK_DIR/agent-task.id")"
+          curl -sf "$AFT_BASE_URL/api/workspaces/E2E-WS-AGENT/issues/$(cat "$AFT_WORK_DIR/agent-task.id")"
           | grep -q '"status":"closed"' && exit 0; sleep 2; done;
           echo "task never closed"; exit 1
       # a task session was recorded during execution — this is what the Runs tab reads
       - run: >-
-          curl -sf "$AFT_BASE_URL/api/workspaces/${AFT_WS:-E2E-WS}/tasks/$(cat "$AFT_WORK_DIR/agent-task.id")/sessions"
+          curl -sf "$AFT_BASE_URL/api/workspaces/E2E-WS-AGENT/tasks/$(cat "$AFT_WORK_DIR/agent-task.id")/sessions"
           | python3 -c "import sys,json; d=json.load(sys.stdin); items=d.get('data', d if isinstance(d, list) else []); assert len(items) >= 1, d"
       # board followed via SSE: the closed card is removed from the board entirely
       - wait:

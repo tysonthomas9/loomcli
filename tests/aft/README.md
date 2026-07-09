@@ -53,11 +53,10 @@ separate `make test-aft-real` target sets it, and real scenarios live in
 In real mode the harness also unsets `OPENAI_API_KEY`, defaults `AFT_TIMEOUT` to
 `600000`, and fails fast if `codex` or `~/.codex/auth.json` is missing.
 
-**Suite ordering is an invariant**: aft runs suite files alphabetically. The
-`zz-agent-flow` suite is named to run LAST — it creates an agent definition and run
-artifacts that earlier suites' empty-state assertions (monitor "No agents found",
-agents-page "Select an agent", observability zero metrics) assume absent. Keep new
-suites' names alphabetically before `zz-`, or make them agent-tolerant.
+aft runs suite files alphabetically. `zz-agent-flow` creates an agent definition and
+run artifacts, but it now runs in its own workspace, **`E2E-WS-AGENT`**, so agent
+artifacts no longer leak into the shared **`E2E-WS`** workspace used by empty-state
+suites. New suites that create persistent agents should use their own workspace too.
 
 Every run writes `tests/aft/reports/report.html` — a self-contained run browser (suite
 navigation, run history + trend, step screenshots, video playback with a step timeline,
