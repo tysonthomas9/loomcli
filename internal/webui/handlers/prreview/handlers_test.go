@@ -541,7 +541,10 @@ func TestEnsureReviewerCreatesAgentWorktreeAndSeed(t *testing.T) {
 	if _, err := h.store.Roles().Get(context.Background(), prReviewTestWorkspace, "lead"); err != nil {
 		t.Fatalf("lead role missing: %v", err)
 	}
-	worktreePath := localworkspace.AgentWorktreePath(workspacePath, "hello", agentName)
+	worktreePath, err := localworkspace.PRReviewWorktreePath(workspacePath, "hello", 7)
+	if err != nil {
+		t.Fatalf("PRReviewWorktreePath: %v", err)
+	}
 	if _, err := os.Stat(filepath.Join(worktreePath, ".git")); err != nil {
 		t.Fatalf("worktree .git missing: %v", err)
 	}

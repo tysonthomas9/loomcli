@@ -134,7 +134,15 @@ func (m *Module) ensureReviewer(w http.ResponseWriter, r *http.Request) {
 	}
 
 	agentName := reviewerAgentName(params.repo, params.number)
-	target := localworkspace.AgentWorktreePath(wsPath, repoName, agentName)
+	// Isolated PR-checkout namespace (.loom/pr-worktrees/<repo>/pr-N), distinct
+	// from the agent-worktree tree so PR review checkouts never collide with a
+	// working agent's branch worktree.
+	target, pathErr := localworkspace.PRReviewWorktreePath(wsPath, repoName, params.number)
+	if pathErr != nil {
+		slog.Error("pr-review: worktree path failed", "ws", ws, "agent", agentName, "err", pathErr)
+		writePRReviewErrorCode(w, http.StatusInternalServerError, "worktree_failed", "failed to resolve the PR review worktree path", false)
+		return
+	}
 	checkedOutSHA, err := localworkspace.EnsureDetachedGitWorktreeAtPRHead(repoPath, target, remote, params.number, headSHA)
 	if err != nil {
 		// Keep the client message terse; the git error can embed local paths.
@@ -195,7 +203,13 @@ func (m *Module) ensureReviewerAgent(ctx context.Context, ws, agentName string) 
 
 func reviewerSeedText(owner, repo string, number int, title, sha, baseRef, remote string) string {
 	url := fmt.Sprintf("https://github.com/%s/%s/pull/%d", owner, repo, number)
-	return fmt.Sprintf("You are reviewing GitHub PR #%d %q at %s. Your current working directory is a detached checkout of the PR head (%s). The base branch is %s; to see the changes, run `git fetch %s %s && git diff FETCH_HEAD...HEAD`. Summarize the change, flag risks or bugs, and answer the user's questions.",
+	return fmt.Sprintf("You are a READ-ONLY code reviewer for GitHub PR #%d %q (%s). "+
+		"Your working directory is a detached checkout of the PR head (%s); the base branch is %s. "+
+		"Do NOT edit files, commit, push, or attempt to approve/merge — a human posts the actual review "+
+		"decision through the UI. Inspect the change by running `git fetch %s %s && git diff FETCH_HEAD...HEAD` "+
+		"and by reading files directly in this checkout. Then give a concise, specific review: first summarize "+
+		"what the PR does, then call out risks, bugs, and edge cases with file/line references, and answer the "+
+		"user's questions grounded in the actual diff.",
 		number, title, url, sha, baseRef, remote, baseRef)
 }
 
