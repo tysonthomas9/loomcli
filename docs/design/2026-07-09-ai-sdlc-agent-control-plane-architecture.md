@@ -1,4 +1,4 @@
-# AI SDLC Agent Control Plane Architecture
+# Harness-Neutral AI SDLC Agent Control Plane Architecture
 
 **Status:** Proposed target architecture
 
@@ -12,31 +12,40 @@
 
 ## Executive summary
 
-Loom should continue toward a shared agent platform, but the abstraction
-boundary needs one correction: the execution plane may become unified; the
-organizational concepts of Role, Agent, and policy must not be collapsed into
-workflow or runtime records.
+Loom is an AI SDLC control plane, not an agent harness. It governs work across
+ideation, planning, implementation, review, deployment, and post-deployment
+operations while supporting multiple execution systems.
 
-The target architecture makes **Agent** the neutral, durable identity of a
-responsibility-bearing actor. An immutable **AgentRevision** resolves its Role,
-persona, behavior, policy, prompts, harness, skills, model, and tool references.
-A **Flow** coordinates agents and deterministic steps. A **Driver** packages
-executable behavior. A **Trigger** or **AgentSubscription** starts work. An
-optional **AgentDeployment** manages persistent runtime lifecycle. These are
-separate because they change at different rates and answer different control
-plane questions.
+FleetDB owns the canonical public formats for Agent identity and revisions,
+Role and policy, execution intent, Execution and attempts, AgentSession,
+TranscriptEvent, approvals, artifacts, evaluations, and normalized SDLC state.
+External harnesses never become the product data authority.
 
-Every path—lead terminal, Flue chat, Kanban pull, GitHub event, Slack event,
-scheduled maintenance, and delegated background work—converges on the same
-admission, run, session, transcript, artifact, policy, and approval contracts.
-That common evidence model is what makes later analytics and improvements to
-agents, harnesses, skills, prompts, tools, and models possible.
+The target architecture is harness-neutral:
+
+- Flue is the first full framework adapter;
+- Codex and Claude Code CLIs use direct adapters;
+- Codex/OpenAI and Claude SDKs can use SDK adapters;
+- Vercel eve is an expected next framework adapter;
+- a future Loom-native harness implements the same contract.
+
+An immutable `AgentRevision` references a registered implementation rather than
+copying a framework's authoring schema. `ExecutionIntent` admits work.
+`Execution` is the generic, accountable business unit. `ExecutionAttempt`
+records runtime ownership, retries, resume, leases, native correlation, and
+checkpoints. `AgentSession` is FleetDB-canonical continuity. Harness adapters
+translate native events into FleetDB-canonical TranscriptEvents.
+
+This corrects two errors in the earlier direction:
+
+1. a workflow/runtime plane can replace duplicated execution plumbing, but it
+   cannot replace organizational Agent, Role, or policy;
+2. Flue concepts such as AgentDefinition, AgentInstance, Session, Operation,
+   and WorkflowRun cannot be relabeled as universal Loom `AgentRun` semantics.
 
 ## Original purpose of Loom
 
-Loom is an AI SDLC control plane. Its job is not merely to launch coding CLIs or
-execute workflow graphs. It manages governed work across the complete software
-delivery lifecycle:
+Loom manages governed AI work across the complete SDLC:
 
 1. capture ideas, signals, requirements, and constraints;
 2. plan and decompose work;
@@ -44,103 +53,153 @@ delivery lifecycle:
 4. review, approve, merge, and release;
 5. deploy and observe production;
 6. respond to regressions and incidents;
-7. retain evidence so people and systems can evaluate and improve the process.
+7. retain evidence so people and systems can evaluate and improve agents,
+   harnesses, prompts, skills, tools, models, and policies.
 
-The control plane must answer, for any action: who was responsible, why work
-started, what authority applied, which immutable definition ran, what tools and
-external objects were involved, what it cost, what evidence it produced, and
-which human approved protected effects.
+The control plane must answer, for any work:
+
+- who was responsible;
+- why it started and which SDLC objects it concerned;
+- which immutable Agent, policy, implementation, and component revisions ran;
+- which harness, deployment, session, and runtime attempts were involved;
+- what tools/effects occurred, what it cost, and what evidence it produced;
+- which human approved protected effects;
+- whether a retry, resume, or framework upgrade changed the outcome.
+
+These questions must have the same answers whether execution came from Flue,
+Vercel eve, Codex CLI, Claude Code, an SDK, or Loom's future harness.
 
 ## Assessment of the current direction
 
-### What is going in the right direction
+### Foundations worth keeping
 
-The `unified-agents` work establishes several necessary foundations:
+The `unified-agents` branches add necessary control-plane capabilities:
 
 - FleetDB-backed shared records instead of local-only runtime truth;
-- drivers and immutable driver versions;
-- triggers, deliveries, idempotency, retry, and concurrency controls;
-- driver and task runs with leases, fencing, placement, and usage;
-- connectors with explicit grants and append-only call audit;
-- node-owned local effects with shared desired and observed state;
-- a UI direction that presents interactive, background, event, and scheduled
-  agents together;
-- attribution fields that begin to connect a run to the agent-like record that
-  caused it.
+- immutable DriverVersion artifacts;
+- normalized trigger events, deliveries, idempotency, retry, and concurrency;
+- driver/task execution with leases, fencing, placement, usage, and artifacts;
+- connector grants and append-only call audit;
+- Node-owned local effects with shared desired/observed state;
+- a unified product view across interactive, background, event, and scheduled
+  agents;
+- early run attribution to agent-like records.
 
-These are the right ingredients for a distributed AI SDLC control plane.
+### Identity/runtime concerns that must be separated
 
-### What needs correction
+The current model mixes independent concerns:
 
-The current model mixes four independent concerns:
-
-1. `Agent` is a role-backed persona and also contains runtime intent.
-2. `AgentService` is a behavior identity, trigger target, permission container,
-   and desired-state service record.
+1. `Agent` contains organizational identity plus backend, eligibility, budget,
+   desired state, and observed runtime fields.
+2. `AgentService` combines agent-like identity, Role/Driver behavior, triggers,
+   permissions, deployment intent, restart, placement, and runtime state.
 3. `TriggerBinding` routes events but also carries behavior and authorization.
-4. `DriverRun`, `TaskRun`, control-plane `AgentSession`, local filesystem
-   sessions, and terminal sessions each represent overlapping notions of a run
-   or session.
+4. `DriverRun`, `TaskRun`, control-plane `AgentSession`, filesystem sessions,
+   and `TerminalSession` overlap execution, continuity, transport, and history.
+5. `/agents` unions old Agent, AgentService, and unattached bindings into a
+   useful UI projection but not a durable identity model.
 
-The claim that the workflow plane should supersede the role plane goes too far.
-Shared execution plumbing should supersede duplicate runtime implementations.
-It should not erase the organizational object that explains responsibility,
-eligibility, escalation, and expected outcomes.
+The execution plane should converge, but Agent, Role, policy, implementation,
+subscription, deployment, session, and execution remain separate resources.
 
-`AgentService` is also too deployment-shaped to be universal identity. An
-event-driven GitHub remediation agent may execute only when a failed check
-arrives; it still has identity and policy but has no continuously desired
-process. Conversely, a lead terminal agent may require a supervised runtime.
-The difference belongs in AgentDeployment, not in two kinds of agent identity.
+### Flue boundary correction
+
+Flue is an external open-source Agent Harness Framework. Loom pins Flue commit
+`492bf47b9f3d6c379d00471523987b8fe9511f7d`. At that revision Flue owns:
+
+- AgentProfile, AgentDefinition, agent modules, and AgentInstance;
+- Harness, Session, Operation, Turn, skills, tools, subagents, and sandbox;
+- direct/dispatched submission durability and session persistence;
+- Workflow and WorkflowRun;
+- FlueEvent and durable event streams;
+- framework build output and Node/Cloudflare runtime behavior;
+- channel packages for verified provider ingress.
+
+Flue explicitly says runs are workflow-only. Direct prompts and `dispatch(...)`
+inputs operate inside persistent sessions and are not WorkflowRuns. The prior
+universal AgentRun proposal therefore encoded a false abstraction.
+
+Loom's existing [native Flue integration](native-flue-driver-integration.md)
+already states the correct package boundary: Flue owns authoring, dependency
+resolution, build output, and runtime semantics; Loom/FleetDB own registration,
+control-plane state, policy, orchestration, task ownership, and evidence.
 
 ### Directional verdict
 
-Continue the shared Driver/Trigger/Run/TaskRun/Connector/Node execution work.
-Before retiring the existing role-backed Agent plane, introduce the neutral
-Agent, immutable revisions, separate PolicySet, canonical AgentRunIntent,
-universal TranscriptEvent, and optional AgentDeployment. Then migrate both old
-agent forms into that model.
+Continue the Driver/Trigger/TaskRun/Connector/Node work, but make it the first
+implementation of a harness-neutral adapter architecture. Before retiring the
+old Agent plane, add the canonical Agent/AgentRevision, PolicySet,
+HarnessArtifactRevision, ExecutionIntent, Execution, ExecutionAttempt,
+AgentSession, RuntimeSessionBinding, and TranscriptEvent contracts.
 
 ## Architectural principles
 
-1. **Responsibility defines an Agent.** Runtime duration and ingress type do not.
-2. **Role describes; policy enforces.** Prompts and personas never grant authority.
-3. **Definitions are immutable at execution time.** Every run pins revisions and
-   digests needed to reproduce its effective configuration.
-4. **External systems remain authoritative.** Loom stores normalized references,
-   projections, relationships, and evidence.
-5. **All ingress converges before admission.** Ready work and external events use
-   different discovery mechanisms but the same policy and run contract.
-6. **All runtimes emit one evidence vocabulary.** UI transport or provider-native
-   formats are adapters, not canonical history.
-7. **Local effects have one owner.** Shared state coordinates; a leased Node or
-   TaskRun performs the effect and fencing rejects stale writers.
-8. **Protected effects stop for humans.** Approval is a durable state transition,
-   not a chat convention.
-9. **No hidden cross-session memory.** Later work may explicitly retrieve durable
-   evidence, but an Agent does not silently accumulate private memory.
-10. **Migration is observable and reversible by phase.** Dual writes require
-    reconciliation metrics and an explicit cutover flag.
+1. **FleetDB is canonical.** Harness-native state is mapped data or private
+   checkpoint state, never the product authority.
+2. **Responsibility defines a Loom Agent.** Runtime duration, framework type,
+   ingress, and process topology do not.
+3. **Harnesses are adapters.** Flue, eve, CLIs, SDKs, and Loom-native execution
+   plug into one versioned contract.
+4. **Semantic execution kinds are harness-neutral.** `interaction`, `workflow`,
+   `task`, and `action` describe why a unit exists, not which implementation ran.
+5. **Definitions are immutable at execution time.** Every Execution pins Agent
+   or Workflow revision, policy snapshot, artifact revision, and components.
+6. **Role describes; policy enforces.** Prompts, personas, routes, and harness
+   tool lists never grant Loom authority.
+7. **External SDLC systems remain authoritative.** Loom owns normalized refs,
+   projections, relationships, decisions, and evidence.
+8. **All ingress converges before admission.** Ready work and external events
+   differ in discovery but share intent, policy, execution, and audit.
+9. **Every adapter produces one evidence vocabulary.** Native events remain
+   provenance; TranscriptEvent is the FleetDB query/analytics contract.
+10. **Private recovery state stays private.** Store it through namespaced,
+    versioned RuntimeCheckpoints; do not expose it as canonical session history.
+11. **Protected effects stop for humans.** Approval is enforced at a broker or
+    equivalent effect boundary, not implied by a prompt.
+12. **No hidden cross-session memory.** Cross-session evidence retrieval is
+    explicit, policy-governed, and recorded.
 
 ## Logical architecture
 
-Loom has four operating planes and a cross-cutting evidence ledger.
+Loom has four operating planes with a cross-cutting evidence contract:
 
-### 1. SDLC state plane
+```text
+                    Loom / FleetDB canonical control plane
 
-The state plane represents the work and delivery graph across systems:
+ SDLC state       Organization/policy       Orchestration
+ refs/projections Agent/Role/Policy         intent/subscription/workflow
+        \                 |                         /
+         +----------------+------------------------+
+                          |
+                       Execution
+                          |
+                HarnessAdapter contract
+                          |
+       +------------------+------------------+----------------+
+       |                  |                  |                |
+     Flue            Codex/Claude         SDK agents      Vercel eve /
+  framework             CLIs                                Loom native
+       |                  |                  |                |
+ native sessions, attempts, events, checkpoints, artifacts, outcomes
+       \__________________|__________________|_______________/
+                          |
+             FleetDB TranscriptEvent / Artifact / Evaluation
+```
+
+## 1. SDLC state plane
+
+The state plane represents the delivery graph across systems:
 
 - ideas, requirements, specifications, plans, epics, issues, and tasks;
-- repositories, branches, changes, pull requests, and reviews;
-- checks, builds, releases, deployments, incidents, alerts, and conversations;
-- typed relationships such as decomposes-to, implements, reviews, blocks,
-  deploys, caused-by, fixes, duplicates, and supersedes.
+- repositories, branches, changes, pull requests, reviews, checks, and builds;
+- releases, deployments, environments, incidents, alerts, and conversations;
+- relationships such as decomposes-to, implements, reviews, blocks, deploys,
+  caused-by, fixes, duplicates, and supersedes.
 
-FleetDB issues remain the canonical ready-work source for Loom-managed work.
-Provider-native objects remain canonical in their providers. `SDLCObjectRef`
-gives Loom a stable identity; `SDLCProjection` stores only normalized fields
-needed for routing, policy, UI, and analytics; `SDLCRelationship` joins the
-graph without copying provider ownership.
+FleetDB issues remain canonical for Loom-managed ready work. Provider-native
+objects remain canonical in their providers. `SDLCObjectRef` gives Loom a
+stable ID; `SDLCProjection` stores normalized fields needed for routing,
+policy, display, and analytics; `SDLCRelationship` joins the graph.
 
 An external reference is uniquely identified by:
 
@@ -148,14 +207,11 @@ An external reference is uniquely identified by:
 (workspace, provider, provider_scope, object_kind, external_id)
 ```
 
-Every projection records the provider version or ETag where available,
-observed time, and freshness. Writes use connector calls with provider
-preconditions. Loom never assumes a cached projection is current enough for a
-destructive action.
+Every projection records source version/ETag where available, observed time,
+and freshness. Destructive writes re-read provider state and use provider
+preconditions; a cached projection is never sufficient authority.
 
-### 2. Organization and policy plane
-
-The organization plane separates identity and responsibility from enforcement:
+## 2. Organization and policy plane
 
 ```text
 Organization -> Workspace -> PrincipalRef / membership
@@ -167,347 +223,488 @@ Role --versioned-by--> RoleRevision
   +-- assigned-to ------> Agent --versioned-by--> AgentRevision
                                                |
 PolicySet --versioned-by--> PolicyRevision -----+
+                                               |
+                                  AgentImplementationRef
+                                               |
+                                  HarnessArtifactRevision
 ```
 
-#### Role
+### Role
 
-A Role names a job, responsibility, expected outcomes, escalation expectations,
-and default eligibility. It may recommend skills, harnesses, prompts, and
-models. It is understandable to an organization independent of a runtime.
+Role names a responsibility, expected outcomes, escalation expectations, and
+default work eligibility. It may recommend implementation profiles, but it is
+understandable independently of Flue, a CLI, an SDK, or a model.
 
-#### Agent and AgentRevision
+### Agent and AgentRevision
 
-Agent is a durable, workspace-scoped identity. Names can change; IDs do not.
-AgentRevision is immutable and contains the resolved definition used for a run:
+Agent is a durable workspace-scoped Loom identity. Names can change; IDs do not.
+Editing configuration creates an immutable AgentRevision. A revision contains:
 
-- RoleRevision and explicit responsibility statement;
+- RoleRevision and explicit responsibility;
 - persona reference;
-- behavior reference: prompt/harness for direct agents, DriverVersion, or a
-  FlowRevision entrypoint;
-- PolicyRevision references and narrower agent restrictions;
-- model/provider preferences and fallback policy;
-- skill, tool, prompt, harness, and runtime adapter references with versions or
-  content digests;
-- eligible SDLC object types/scopes;
-- provenance, creator, timestamp, and superseded revision.
+- PolicyRevision references and narrower restrictions;
+- AgentImplementationRef;
+- normalized eligible SDLC scopes;
+- normalized ComponentRefs/digests for model, prompt/instructions, skills,
+  tools, harness, adapter, and sandbox where the adapter can report them;
+- provenance, creator, timestamp, and supersession metadata.
 
-Editing an agent creates a revision. It does not mint a new Agent. A running or
-completed run never changes revisions retroactively.
+AgentRevision does not copy Flue AgentRuntimeConfig, eve directory layout, CLI
+config, or SDK types. The immutable artifact and implementation reference are
+the execution truth. ComponentRefs are Loom-owned normalized projections for
+reproducibility and analytics.
 
-#### PolicySet and effective policy
+### PolicySet and effective policy
 
-Policy is evaluated in layers:
+Policy resolves in layers:
 
 ```text
 organization
   -> workspace/project
     -> role defaults
       -> agent restrictions
-        -> run-scoped capability grant
+        -> execution-scoped capability grant
 ```
 
-By default, lower layers may only narrow higher layers. Widening requires an
-explicitly authorized grant with scope, issuer, reason, and expiry. Deny wins.
-Admission stores an EffectivePolicySnapshot digest on the run; relevant
-expanded rules are retained so later audit is not dependent on mutable policy.
+Lower layers narrow by default. Widening requires an explicitly authorized,
+scoped, expiring grant. Deny wins. Admission stores an
+EffectivePolicySnapshot digest and required expanded rules on Execution.
 
-Policy governs:
-
-- eligible work types, labels, priorities, repositories, environments, and data;
-- allowed and denied tools and connector actions;
-- model/provider choices and reasoning/effort ceilings;
-- monetary, token, time, concurrency, and retry budgets;
-- sandbox, filesystem, network egress, and data-retention boundaries;
-- secret classes and access conditions;
-- delegation and escalation limits;
-- required approvals and eligible approvers.
+Policy governs work eligibility, repositories/environments/data, tools and
+connector actions, models, spend/tokens/time/concurrency/retry, sandbox and
+egress, secret classes, delegation/escalation, and approvals.
 
 Organization is the highest tenant/governance scope. Workspaces belong to one
-Organization. Human and service approvers are recorded through stable
-PrincipalRefs and membership/authority snapshots so an old decision remains
-attributable after identity-provider membership changes.
+Organization. Approvers use stable PrincipalRefs and decision-time membership
+and authority evidence.
 
-Enforcement occurs at admission and again at the point of effect. A run admitted
-to inspect a pull request is not thereby authorized to merge it.
+## 3. Implementation registry and harness adapters
 
-### 3. Orchestration plane
+### Registered artifacts
 
-The orchestration plane normalizes ingress and coordinates actors.
+`HarnessArtifact` is the stable registration identity. An immutable
+`HarnessArtifactRevision` records:
 
-#### Unified ingress
+- harness kind and version;
+- compatible HarnessAdapterRevision and native-version range;
+- source reference/digest and build/bundle reference/digest;
+- trust, validation, signature/attestation, and provenance;
+- normalized manifest entries for agents, workflows, capabilities, transports,
+  checkpoint schema, and required runtime features;
+- ComponentRefs extracted by the adapter;
+- native manifest as a versioned protected payload when needed.
+
+Existing Driver and DriverVersion are retained as the first storage and API
+form, then renamed/projected without losing immutable history.
+
+### HarnessAdapter contract
+
+`HarnessAdapter` is the stable integration identity. Each immutable
+`HarnessAdapterRevision` pins its implementation/code digest, supported native
+versions, capabilities, mapping schema, and contract-test evidence. An adapter
+revision declares capabilities rather than pretending every harness behaves the
+same:
+
+| Capability | Contract |
+|---|---|
+| Artifact | inspect, validate, register, and project manifest/components |
+| Session | create/bind/resume/delete native context under canonical AgentSession |
+| Execute | start an ExecutionAttempt idempotently from canonical Execution |
+| Observe | report status/heartbeat, usage, artifacts, errors, and native refs |
+| Control | cancel, pause/resume, drain, or report unsupported operations |
+| Evidence | translate native events to TranscriptEvent with loss/provenance markers |
+| Checkpoint | store/load opaque versioned private recovery state |
+| Policy | consume execution-scoped token/grants and route protected effects through Loom |
+| Health | report adapter/runtime/artifact compatibility and deployment health |
+
+Unsupported capabilities fail explicitly. For example, a one-shot CLI adapter
+may not support native pause/resume, and a hosted SDK may expose no filesystem
+checkpoint. The canonical model records that truth.
+
+### Initial and expected adapters
+
+| Adapter | Native concepts mapped |
+|---|---|
+| Flue | AgentDefinition/module, AgentInstance, Harness, Session, submission/dispatch, Operation, WorkflowRun, FlueEvent, persistence/checkpoints |
+| Codex CLI | CLI config/version, session/thread, prompt/task invocation, process attempt, stream JSON, patch/artifacts |
+| Claude Code CLI | CLI config/version, session/resume ID, prompt/task invocation, process attempt, stream JSON, artifacts |
+| Codex/OpenAI SDK | SDK agent/thread/response/trace/tool events and provider usage |
+| Claude Agent SDK | SDK session/query/messages/tool events and provider usage |
+| Vercel eve | agent directory/build/deployment, durable session/workflow, channels, tools, approvals, events |
+| Loom native | Loom-owned harness implementation that writes canonical formats directly |
+
+Adapter support does not mean external frameworks own control-plane data. It
+means Loom can execute them without throwing away their runtime semantics.
+
+## 4. Orchestration plane
+
+### Unified ingress
 
 ```text
 FleetDB ready frontier -> pull scheduler -------\
-provider webhook ------> normalized event ------+
-cron/manual command -----------------------------+--> AgentRunIntent
-terminal/Flue/Slack conversation ----------------+
-agent delegation --------------------------------/
+provider webhook/channel -> normalized event ---+
+cron/manual command -----------------------------+--> ExecutionIntent
+terminal/chat conversation ----------------------+
+Agent delegation --------------------------------/
 ```
 
-`AgentRunIntent` is created before execution and contains:
+ExecutionIntent contains:
 
-- target Agent or Flow and requested revision/channel;
-- source kind and normalized TriggerEvent or conversation reference;
-- related SDLC object references and an optional ready-work candidate;
-- requested action/capabilities;
+- target Agent or Workflow and requested revision/channel;
+- source kind, TriggerEvent/conversation/delegation, and SDLC refs;
+- optional ready-work candidate;
+- requested semantic execution kind, outcome, and capabilities;
 - idempotency and concurrency subject keys;
-- initiator, delegator, parent run, and trace context;
-- admission deadline, priority, and budget request.
+- initiator, delegator, parent Execution, and trace context;
+- priority, budget request, and admission deadline.
 
-The admission service resolves revisions, evaluates policy, checks approvals or
-creates ApprovalRequests, selects concurrency behavior, and either rejects,
-queues, or admits a run.
+Admission resolves immutable revisions and artifacts, evaluates policy and
+budget, creates ApprovalRequests when required, applies concurrency rules, and
+rejects, queues, or creates Execution.
 
-#### Ready work is pull-based
+### Ready work remains pull-based
 
-FleetDB's ready frontier, dependency graph, status, priority, claim, and lease
-rules remain authoritative. A task change event may wake the scheduler, but it
-must not directly synthesize a run from `status=open`. The scheduler re-queries
-the canonical frontier and atomically claims eligible work before admission.
-This preserves Kanban semantics and prevents a replayed journal event from
-becoming an independent queue.
+FleetDB's ready frontier, dependencies, status, priority, filters, claim, and
+lease semantics remain authoritative. Task events wake the scheduler. The
+scheduler re-queries the canonical frontier and atomically claims eligible work
+before admission. A journal snapshot with `status=open` is not another queue.
 
-#### External events are event-driven
+### External events remain event-driven
 
-GitHub checks, pull-request comments, Slack messages, alerts, and deployment
-signals do not need to become Kanban issues before routing. A connector verifies
-and normalizes the event; subscriptions fan it out to Agents or Flows; each leg
-creates an idempotent AgentRunIntent. If durable planned work is needed, the
-agent or flow may create or relate an Issue under policy.
+GitHub checks/comments, Slack events, alerts, and deployment signals need not
+become Kanban issues. One component owns provider ingress for a configured
+route:
 
-#### Flow and delegation
+- a Loom Connector may verify/normalize it and create TriggerEvent; or
+- an external harness channel such as Flue/eve may verify it and call a
+  Loom-authenticated ingestion/dispatch boundary.
 
-A FlowRevision defines a graph of:
+Never terminate the same webhook independently in both. FleetDB owns delivery
+deduplication, routing, intent, policy, and canonical evidence after acceptance.
+If planned work emerges, the Agent may create/link an Issue under policy.
 
-- agent steps, which create bounded delegations and child AgentRuns;
-- deterministic Driver steps;
-- waits, approval gates, joins, retries, and compensation steps;
-- inputs, outputs, artifacts, and transition conditions.
+### Workflow and delegation
 
-Agent steps retain the participating Agent's identity and policy. The Flow does
-not impersonate them. Delegation records who requested what, constraints,
-expected result, deadline, budget, accepted revision, and completion outcome.
+Workflow is a registered finite coordination identity. WorkflowRevision pins an
+implementation reference and normalized input/output/capability projection.
+The harness owns its private code/graph representation.
 
-### 4. Execution plane
+Responsibility changes between Loom Agents are explicit Delegations and child
+Executions. A Flue subagent profile or SDK-internal helper remains native
+transcript activity unless it has its own Loom Agent identity/policy boundary.
 
-The execution plane runs admitted work without becoming the source of
-organizational identity.
+## 5. Execution plane
 
-#### Driver and DriverVersion
+### Execution
 
-Driver is an executable package definition. DriverVersion is immutable and
-validated, with source/bundle digests and trust metadata. Drivers can implement
-direct agent behavior, deterministic Flow steps, or task runners. A Driver may
-be replaced without changing the Agent responsible for the work.
+Execution is one admitted, accountable unit. Core fields include:
 
-#### AgentRun, FlowRun, and TaskRun
+```text
+execution_id
+intent_id
+kind                        # interaction | workflow | task | action
+agent_id + agent_revision_id
+workflow_revision_id?       # for registered finite workflow
+session_id?
+parent_execution_id?
+delegation_id?
+effective_policy_snapshot_id
+implementation_ref + artifact_revision_id
+source + SDLC refs
+requested_outcome
+status + reason/error
+usage/cost summary
+result/artifact refs
+created/started/finished timestamps
+```
 
-- `AgentRun` is one bounded attempt by one AgentRevision under one effective
-  policy snapshot.
-- `FlowRun` is one bounded execution of one FlowRevision.
-- `TaskRun` is a finite, leased/fenced execution against one task. It is the
-  only run record allowed to commit the task completion transition.
+Canonical status describes control-plane truth: queued, awaiting_approval,
+admitted, running, suspended, completed, failed, cancelled, or expired. Adapter
+native states are recorded separately and reconciled into these transitions.
 
-A direct coding AgentRun may own a TaskRun. A FlowRun may contain deterministic
-Driver steps and delegated child AgentRuns; those AgentRuns may own TaskRuns.
-This preserves accountability while sharing execution machinery.
+### ExecutionAttempt
 
-The current `DriverRun` can back the first AgentRun/FlowRun projection during
-migration, but product APIs should stop making Driver the top-level identity.
+ExecutionAttempt is runtime ownership, not a second business request:
 
-#### AgentDeployment
+```text
+attempt_id + ordinal
+execution_id
+adapter_revision_id
+runtime deployment / node
+lease_id + fencing_token
+native execution type + native IDs
+runtime session binding
+checkpoint ref
+observed state and heartbeat
+start/end/error/outcome
+```
 
-Only agents needing a persistent runtime have an AgentDeployment. Examples are
-an interactive project lead, an always-on Slack monitor, or a resident incident
-coordinator. AgentDeployment records:
+FleetDB creates/authorizes attempts. The adapter starts native work idempotently
+using Execution/Attempt correlation. Stale owners cannot update status or append
+attempt-fenced effects. A recovery may transfer or create attempt ownership
+according to adapter capability while preserving one Execution.
 
-- Agent and selected AgentRevision/channel;
-- desired state, instance count, placement, restart, drain, and update policy;
-- observed instances, health, Node, leases, and runtime adapter;
-- terminal/chat attachment capabilities;
-- deployment-scoped resource limits.
+### Mapping without semantic distortion
 
-An event-only GitHub remediation agent has Agent and AgentSubscription records
-but no deployment. A schedule is a subscription, not proof of a process.
-
-#### Example compositions
-
-| Product concept | Identity and responsibility | Activation | Deployment/session/run shape |
-|---|---|---|---|
-| Project lead terminal | Agent with project-lead Role | Human conversation/manual work | AgentDeployment + AgentSession; bounded AgentRuns inside the session |
-| GitHub CI remediation agent | Agent with CI-remediation Role | GitHub check-failure subscription | No deployment required; one AgentRun per admitted event, with optional TaskRun |
-| Slack monitoring/delegation agent | Agent with support/on-call Role | Slack events and/or resident monitoring | Optional AgentDeployment; AgentSession per thread/incident; explicit Delegations to other Agents |
-| Kanban implementation agent | Agent with implementer Role | Canonical ready-frontier pull | Usually no deployment; claimed issue -> AgentRun -> fenced TaskRun |
-| Release coordination | FlowRevision involving release/review/operations Agents | Release candidate or manual trigger | FlowRun with child AgentRuns and mandatory deploy approval; the Flow is not another Agent |
-
-#### Node, lease, and side-effect ownership
-
-Nodes advertise capacity and capabilities. Shared controllers assign work; the
-leased Node owns process, sandbox, filesystem, PTY, and local repository effects.
-Fencing tokens reject completion, logs, or state changes from expired owners.
-Controller commands are idempotent and desired state is distinct from observed
-state.
-
-## Cross-cutting evidence and learning contract
-
-### Session versus run
-
-An AgentSession groups bounded continuity: a terminal conversation, Flue chat
-thread, Slack thread, incident-room interaction, or similar context. It can
-contain multiple AgentRuns. AgentRun is the attempt and policy boundary.
-TerminalSession is only a PTY transport attachment.
-
-Background runs can exist without a conversational session. If a provider gives
-useful continuity, Loom can create an AgentSession for it; session absence must
-not prevent transcript collection.
-
-### Universal TranscriptEvent
-
-Every runtime adapter converts provider-native output into the same ordered,
-append-only envelope. At minimum it carries:
-
-- event ID, monotonic sequence, event time, observed time, and schema version;
-- workspace, Agent, AgentRevision, AgentSession, AgentRun/FlowRun/TaskRun, parent
-  run, delegator, trace ID, and span ID;
-- event type and structured content parts;
-- source event and SDLC object references;
-- tool name/version, call ID, sanitized input, result, duration, and decision;
-- policy evaluation, capability grant, ApprovalRequest/Decision, and effect;
-- provider/model, token usage, estimated/actual cost, latency, and retry data;
-- prompt, harness, skill, driver, tool, and runtime adapter versions/digests;
-- artifact references, state transitions, summary, outcome, and error class;
-- redaction classification, retention class, and integrity/provenance metadata.
-
-Canonical event types include session/run lifecycle, user/agent message, tool
-call/result, delegation, policy decision, approval requested/decided, artifact,
-usage, state transition, external effect, summary, and error.
-
-Loom does not store hidden chain-of-thought. Adapters store provider-safe
-reasoning summaries when available, explicit decisions, tool evidence, and
-outcomes. Raw provider payloads may be retained as access-controlled artifacts
-when policy permits; they are not the portable query model.
-
-OpenTelemetry GenAI semantic conventions are an export vocabulary, not the
-FleetDB schema. Loom owns a stable canonical event version and maps it to traces,
-logs, and metrics.
-
-### Analytics dimensions
-
-The normalized contract enables comparison by AgentRevision, RoleRevision,
-PolicyRevision, model, provider, prompt, harness, skill set, DriverVersion, tool
-version, ingress, SDLC object type, environment, and outcome. Evaluation and
-feedback records should reference immutable runs and revisions rather than
-mutating them.
-
-## Human approval architecture
-
-Human approval is mandatory by default for:
-
-| Protected action class | Approval attaches to |
+| Scenario | Canonical mapping |
 |---|---|
-| Merge | exact repository, pull request, and expected head/base revisions |
-| Production deploy | release/artifact digest, environment, and deployment plan |
-| Rollback | environment, target revision, impact scope, and rollback plan |
+| Flue direct prompt or `dispatch(...)` | interaction Execution; Flue submission, dispatch, operation, instance, harness, and session IDs are native refs/events |
+| Flue workflow invocation | workflow Execution; Flue runId is the native execution ref |
+| Interactive Codex/Claude terminal turn | interaction Execution in AgentSession; one or more CLI process attempts |
+| Background coding task via CLI/SDK | task Execution, linked TaskRun, adapter attempt and artifacts |
+| GitHub CI remediation | task or action Execution based on requested outcome; GitHub event is source, not execution kind |
+| Slack monitoring/delegation | interaction Execution in provider-thread AgentSession; Delegation creates child Execution when responsibility changes |
+| Vercel eve scheduled work | workflow Execution through eve adapter; native durable run/session refs retained |
+
+Native model turns, tool calls, compactions, subagent calls, and logs normally
+become TranscriptEvents/spans, not nested Executions. This keeps Execution at a
+business/accountability boundary.
+
+### TaskRun
+
+TaskRun remains a specialized leased/fenced record for executing a Loom task
+and the only execution record authorized to commit task completion. It links to
+its parent Execution and ExecutionAttempt. This preserves current atomic
+completion semantics while generic execution matures.
+
+### AgentSession and runtime bindings
+
+AgentSession is FleetDB-canonical continuity for one Agent. It can span many
+Executions and process restarts. `RuntimeSessionBinding` maps the session to the
+native context used by each adapter:
+
+- Flue agent module, AgentInstance ID, harness name, session name, storage key,
+  and native stream cursor;
+- Codex/Claude CLI session/resume IDs;
+- SDK thread/session IDs;
+- eve conversation/session IDs;
+- future Loom harness native session ID.
+
+A single Flue AgentInstance can host multiple named Flue sessions. The adapter
+therefore stores the exact binding rather than assuming AgentInstance equals
+AgentSession. FleetDB owns canonical session ID, participants, source/thread
+refs, lifecycle, retention, and transcript.
+
+### RuntimeCheckpoint
+
+Private harness state required for resumption is stored under:
+
+```text
+(adapter, adapter_version, schema_version, session/execution/attempt, digest)
+```
+
+For Flue this can include SessionData, submission/turn journal state, durable
+stream cursors, or a storage adapter namespace. For a CLI it may be a resume
+token and protected provider transcript. Checkpoints are encrypted and
+retention-controlled. They are not portable memory and are never queried as the
+canonical session/transcript API.
+
+### RuntimeDeployment and AgentDeployment
+
+RuntimeDeployment deploys a HarnessArtifactRevision and records desired state,
+instances, endpoint/placement, rollout/restart/drain, health, and leases. One
+Flue/eve artifact can expose multiple agent/workflow definitions.
+
+AgentDeployment is optional and represents a dedicated/resident Loom Agent
+instance requirement, such as a supervised lead terminal. It references a
+RuntimeDeployment or a direct local adapter placement. Event-only Agents need
+no dedicated AgentDeployment, but their shared harness runtime is still
+deployed somewhere.
+
+Nodes own process, sandbox, PTY, filesystem, and worktree effects. Fencing
+rejects logs/completions/state changes from stale attempts.
+
+## Canonical evidence and learning contract
+
+### TranscriptEvent
+
+Every adapter translates native output to the same FleetDB-owned ordered,
+append-only envelope. Required dimensions include:
+
+- canonical event ID, stream/sequence, event/observed time, schema version;
+- Organization/workspace, Agent/AgentRevision, AgentSession,
+  Execution/ExecutionAttempt/TaskRun, parent/delegator, trace/span;
+- normalized event type and structured content parts;
+- TriggerEvent and SDLC refs;
+- tool/call/effect, sanitized input/result, duration, and decision;
+- policy evaluation, grant, ApprovalRequest/Decision, and protected effect;
+- model/provider, usage/cost, latency, retry, and cache data;
+- ComponentRefs for artifact, harness, adapter, prompt/instructions, skills,
+  tools, model, and sandbox;
+- artifacts, state changes, summary, outcome, and normalized error;
+- redaction, classification, retention, integrity, and provenance;
+- native adapter/framework, event type/version, IDs/cursors, mapping version,
+  and optional redacted native payload/artifact ref.
+
+Canonical event families include execution/session/attempt lifecycle,
+user/agent message, model turn, tool/effect, delegation, policy, approval,
+artifact, usage, state change, summary, and error.
+
+FleetDB assigns canonical sequence and is the history authority. Adapters must
+be idempotent under native replay and record mapping loss. For example, Flue's
+stable event envelope maps directly where possible; provider-shaped message
+payloads remain versioned provenance until normalized.
+
+Loom does not store hidden chain-of-thought. It may store provider-safe
+reasoning summaries, explicit decisions, tools/evidence, and outcomes. Raw
+payloads are protected artifacts when policy permits.
+
+OpenTelemetry and harness-native events are import/export vocabularies, not the
+FleetDB schema.
+
+### Analytics
+
+Executions can be compared by AgentRevision, RoleRevision, PolicyRevision,
+HarnessArtifactRevision, adapter/framework version, ComponentRefs, model,
+provider, prompt, skills, tools, sandbox, ingress, SDLC type, environment,
+budget, approval path, and outcome. AgentEvaluation references immutable IDs
+and never mutates historical evidence.
+
+## Policy enforcement and human approval
+
+### Admission and effect enforcement
+
+Admission answers whether work may start. Effect enforcement separately
+answers whether a particular tool/connector action may occur now.
+
+Harness integrations receive an Execution-scoped credential/capability token.
+Protected tools call the Loom tool/connector broker, which checks:
+
+- Execution and current attempt identity;
+- effective policy and resource scope;
+- required ApprovalDecision and exact subject version;
+- budget and rate/concurrency limits;
+- source freshness and provider preconditions;
+- idempotency and action ledger.
+
+Harness-native tools capable of bypassing the broker are not considered
+governed. Production policy must remove their credentials and constrain
+sandbox/egress, or the adapter must provide an equivalent enforceable boundary.
+
+### Mandatory approvals
+
+| Protected action | Approval subject |
+|---|---|
+| Merge | repository, pull request, expected head/base revisions |
+| Production deploy | artifact/release digest, environment, deployment plan |
+| Rollback | environment, target revision, impact scope, rollback plan |
 | Incident communication | audience/channel and proposed message or bounded template |
-| Destructive infrastructure change | resource selection, command/plan digest, and blast radius |
-| Secret access | secret class/name scope, purpose, grantee, and duration; never secret value |
-| Budget escalation | previous limit, requested limit, run/delegation scope, and expiry |
+| Destructive infrastructure change | exact resource plan/command digest and blast radius |
+| Secret access | secret reference/class, purpose, grantee, and duration; never value |
+| Budget escalation | prior/requested limit, Execution/Delegation scope, expiry |
 
-An approval is action- and revision-specific, has an expiry, and is consumed or
-revalidated at the point of effect. Material changes to the subject invalidate
-it. Approvers cannot approve outside their own policy authority. The transcript
-and action ledger record both denied and granted attempts.
+Approval expires and is revalidated at the effect boundary. Subject changes
+invalidate it. Approvers cannot exceed their own policy. Granted and denied
+attempts are recorded.
 
-Emergency or break-glass operation is a separate explicit policy with stronger
-authentication, a reason, short expiry, mandatory audit, and post-action review;
-it is not an implicit bypass.
+## No implicit cross-session memory
 
-## Product/API projections
+An AgentSession can continue and resume its own canonical history. That is
+session continuity, not cross-session memory. A new AgentSession receives prior
+evidence only through an explicit retrieval operation that records query,
+source artifacts/events, policy decision, and injected summary/content.
 
-The primary product resources should be:
+Harness checkpoints cannot be attached to another canonical session as hidden
+memory. There is no AgentMemory profile in this architecture.
 
-- `/agents`, `/agents/{id}/revisions`, `/agents/{id}/subscriptions`, and optional
-  `/agents/{id}/deployments`;
-- `/roles` and `/policy-sets` with immutable revision endpoints;
-- `/flows` and `/flows/{id}/revisions`;
-- `/run-intents`, `/agent-runs`, `/flow-runs`, and `/task-runs`;
-- `/sessions/{id}/transcript-events` and `/artifacts`;
-- `/approvals`, `/delegations`, and `/messages`;
-- `/organizations`, `/principal-refs`, and membership/authority projections;
-- `/sdlc-objects` and relationship/projection endpoints.
+## Product and API projections
 
-The UI presents Agents and Flows as separate first-class concepts. Driver,
-binding, lease, and placement details remain available in advanced/operator
-views. Agent screens may show interaction modes—interactive, background,
-event-driven, scheduled—but those are capabilities/projections, not identities.
+Primary product resources should be:
+
+- `/agents`, `/agents/{id}/revisions`, implementation refs, subscriptions, and
+  optional dedicated deployments;
+- `/roles`, `/policy-sets`, immutable revisions, and effective snapshots;
+- `/harness-adapters`, immutable adapter revisions, `/harness-artifacts`,
+  artifact revisions, and `/runtime-deployments`;
+- `/workflows` and immutable WorkflowRevisions;
+- `/execution-intents`, `/executions`, `/executions/{id}/attempts`, and
+  `/task-runs`;
+- `/sessions`, runtime bindings/checkpoints through privileged APIs, and
+  `/sessions/{id}/transcript-events`;
+- `/approvals`, `/delegations`, `/messages`, `/artifacts`, and `/evaluations`;
+- `/organizations`, `/principal-refs`, `/sdlc-objects`, and relationships.
+
+The UI presents Agents and Workflows separately. It shows framework/adapter,
+runtime deployment, native IDs, and checkpoints as implementation/operator
+details. Agent screens can show interactive, background, event, and scheduled
+activation modes without creating identity subclasses.
 
 ## Ownership boundaries
 
-| Concern | Source of truth |
+| Concern | Authority |
 |---|---|
-| Agent, Role, revisions, policy, run intent, approvals, transcript index | FleetDB through Loom control-plane APIs |
-| Human/service identity authentication and group membership | Configured identity provider; Loom stores PrincipalRefs and decision-time authority evidence |
+| Agent, Role, policy, revisions, subscriptions, intent | FleetDB through Loom APIs |
+| Execution, attempts, session, transcript, approvals, lineage, usage summary | FleetDB |
+| Harness source authoring and private runtime semantics | Harness/framework project and immutable registered artifact |
+| Harness-private resume/checkpoint payload interpretation | Versioned HarnessAdapter |
+| Storage/lifecycle/retention of checkpoint envelopes | FleetDB |
+| Flue/eve/CLI/SDK native IDs and events | Native runtime as observed input; FleetDB stores mappings/provenance |
 | Ready-work graph and Loom task status | FleetDB |
-| GitHub pull request/check/branch truth | GitHub; Loom keeps refs/projections |
-| Slack channel/thread/message truth | Slack; Loom keeps refs/projections |
-| Build/deploy/incident/monitoring native state | The provider; Loom keeps refs/projections |
-| Local process, sandbox, PTY, worktree, and filesystem effects | The leased Node, reporting observed state |
-| Provider-native raw transcript | Provider or protected artifact store; Loom keeps canonical TranscriptEvents |
-| Cross-session memory | None |
+| GitHub/Slack/CI/deploy/incident native objects | External provider; FleetDB owns normalized refs/projections |
+| Local process, sandbox, PTY, worktree, filesystem effects | Leased Node/ExecutionAttempt |
+| Human/service authentication and group membership | Identity provider; FleetDB retains PrincipalRefs and decision-time evidence |
+| Cross-session memory | None; explicit evidence retrieval only |
 
 ## Non-negotiable invariants
 
-1. A run always names exactly one immutable AgentRevision or FlowRevision.
-2. A completed run retains the effective policy digest and executable/config
-   version references used at admission.
-3. TriggerBinding/AgentSubscription never defines identity or grants authority.
-4. An Agent does not need an AgentDeployment to exist or run.
-5. Only a valid leased/fenced TaskRun commits task completion.
-6. External destructive effects re-check source freshness and policy immediately
-   before execution.
-7. Every protected action has a matching valid human ApprovalDecision.
-8. Every runtime emits canonical TranscriptEvents, including denied actions.
-9. A terminal transport failure cannot erase the canonical transcript.
-10. No model, prompt, persona, or skill can widen policy.
-11. No cross-session memory is read or written implicitly.
-12. Dual-written migration records reconcile to zero unexplained divergence
-    before a read-path cutover.
+1. Every Execution pins exactly one AgentRevision or WorkflowRevision and one
+   EffectivePolicySnapshot.
+2. Every AgentRevision references an immutable implementation/artifact or an
+   explicitly versioned native Loom definition.
+3. Every ExecutionAttempt pins an immutable HarnessAdapterRevision; Execution
+   kinds and statuses never contain adapter/framework names.
+4. Native IDs are correlation refs, never FleetDB primary identity.
+5. Every runtime attempt is owned/authorized by FleetDB and stale fenced owners
+   cannot mutate canonical state.
+6. AgentSession and TranscriptEvent are FleetDB-canonical even when private
+   harness checkpoints exist.
+7. Native replay cannot duplicate canonical TranscriptEvents or external
+   effects.
+8. Trigger/subscription does not define Agent identity or grant authority.
+9. RuntimeDeployment may serve multiple Agents/Workflows; AgentDeployment is
+   optional and dedicated.
+10. Only a valid fenced TaskRun completion commits a task completion.
+11. Protected effects re-check policy, approval, freshness, and preconditions.
+12. No prompt, tool list, framework route, or artifact can widen Loom policy.
+13. No implicit cross-session memory is read or written.
+14. Dual-written migration records reconcile before read-path cutover.
 
 ## Explicit non-goals
 
-- Mirroring every provider field or replacing GitHub, Slack, CI, deployment, or
-  incident-management authority.
-- Treating every webhook, cron job, script, or workflow step as an Agent.
-- Making one universal runtime process shape mandatory for all agents.
-- Persisting hidden model reasoning or introducing autonomous cross-session
-  memory.
-- Encoding organizational authority in UI labels, prompts, or connector secrets.
-- Requiring event-driven operational work to become a Kanban issue first.
+- Reimplementing Flue, eve, Codex, Claude, or SDK internal schemas in FleetDB.
+- Using one external framework's vocabulary as the canonical Loom model.
+- Mirroring every provider field or replacing provider object authority.
+- Treating every webhook, cron, subagent profile, tool call, or workflow step as
+  a Loom Agent or Execution.
+- Requiring all harnesses to support pause/resume, durable checkpoints, or the
+  same native deployment topology.
+- Persisting hidden model reasoning or autonomous cross-session memory.
+- Trusting policy that is not enforced at an effect/broker or sandbox boundary.
 
 ## Relationship to existing proposals
 
-This proposal preserves the shared execution, trigger, connector, task-run,
-lease, and distributed-control-plane investments in:
+This proposal preserves the distributed control-plane, immutable artifact,
+trigger, task-run, connector, lease, and Node investments in:
 
 - [FleetDB Agent Platform V2](fleetdb-agent-platform-v2-proposal.md);
 - [Distributed Control Plane](distributed-control-plane.md);
+- [Native Flue Driver Integration](native-flue-driver-integration.md);
 - [Unified Agent UX](2026-07-01-unified-agent-ux-proposal.md);
 - [Agent Identity Record](2026-07-07-agent-identity-record.md).
 
-It supersedes their end-state claims where they make `AgentService` the
-universal identity, make a trigger binding the owner of authority, treat a
-workflow plane as a replacement for Role, or conflate session continuity with
-an execution attempt. The older documents remain valuable implementation and
-historical context.
+It supersedes end-state claims that make AgentService universal identity,
+workflow execution a replacement for Role, TriggerBinding an authority owner,
+DriverRun a universal agent history model, or Flue an internal Loom subsystem.
 
-## External design references
+## External references
 
-These references influenced interoperability vocabulary; Loom's schema remains
-its own stable contract.
-
-- [GitLab Duo Agent Platform: agents, flows, triggers, and sessions](https://docs.gitlab.com/user/get_started/get_started_agent_platform/)
-- [Slack agent concepts and workflow distinction](https://docs.slack.dev/ai/agents/)
-- [GitHub coding-agent entry points](https://docs.github.com/en/copilot/concepts/agents/about-third-party-coding-agents)
-- [A2A Protocol: Agent Card, Task, Message, Artifact, and Context](https://a2a-protocol.org/dev/specification/)
+- [Flue README at Loom's pinned commit](https://github.com/withastro/flue/blob/492bf47b9f3d6c379d00471523987b8fe9511f7d/README.md)
+- [Flue canonical terminology at the pinned commit](https://github.com/withastro/flue/blob/492bf47b9f3d6c379d00471523987b8fe9511f7d/AGENTS.md)
+- [Flue agent model](https://github.com/withastro/flue/blob/492bf47b9f3d6c379d00471523987b8fe9511f7d/apps/docs/src/content/docs/concepts/agents.mdx)
+- [Flue workflows and workflow-run semantics](https://github.com/withastro/flue/blob/492bf47b9f3d6c379d00471523987b8fe9511f7d/apps/docs/src/content/docs/guide/workflows.md)
+- [Flue events and direct-agent activity](https://github.com/withastro/flue/blob/492bf47b9f3d6c379d00471523987b8fe9511f7d/apps/docs/src/content/docs/api/events-reference.md)
+- [Flue channel ownership boundary](https://github.com/withastro/flue/blob/492bf47b9f3d6c379d00471523987b8fe9511f7d/apps/docs/src/content/docs/guide/channels.md)
+- [Vercel eve](https://vercel.com/eve)
+- [Vercel AI SDK harness adapters](https://vercel.com/blog/ai-sdk-7)
 - [CloudEvents specification](https://github.com/cloudevents/spec/blob/main/cloudevents/spec.md)
 - [OpenTelemetry generative AI attributes](https://opentelemetry.io/docs/specs/semconv/registry/attributes/gen-ai/)
