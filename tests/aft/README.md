@@ -63,6 +63,9 @@ Every run writes `tests/aft/reports/report.html` — a self-contained run browse
 navigation, run history + trend, step screenshots, video playback with a step timeline,
 agent verdicts).
 
+Product bugs and stack-improvement work surfaced by these runs are tracked in
+[`FINDINGS.md`](FINDINGS.md).
+
 ## Coverage
 
 Coverage is measured, not declared. Each run regenerates a **census** of the web UI's
