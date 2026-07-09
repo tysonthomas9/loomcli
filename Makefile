@@ -360,6 +360,9 @@ test-aft-real:
 	@echo "Running aft REAL-CODEX tier (spends nothing on a ChatGPT-account codex; needs ~/.codex login)..."
 	@AFT_REAL_CODEX=1 tests/aft/run-aft.sh --no-agent $(AFT_ARGS)
 
+test-aft-podman:
+	@AFT_STACK=podman AFT_REAL_CODEX=1 tests/aft/run-aft-podman.sh --no-agent $(AFT_ARGS)
+
 # Run aft with agent diagnosis on failures (needs claude CLI)
 test-aft-strict:
 	@echo "Running aft browser e2e tests (strict: agent diagnoses failures)..."

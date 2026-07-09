@@ -53,6 +53,28 @@ separate `make test-aft-real` target sets it, and real scenarios live in
 In real mode the harness also unsets `OPENAI_API_KEY`, defaults `AFT_TIMEOUT` to
 `600000`, and fails fast if `codex` or `~/.codex/auth.json` is missing.
 
+### Podman cloud tier
+
+`make test-aft-podman` runs the real-codex scenario against `loom-serve`,
+fleet-db, and Redis in separate Podman containers. It proves that Loom selects
+ModeCloud and projects session artifacts across the container/Redis boundary.
+Runner-filesystem isolation is architectural: Codex writes to the `loom-work`
+named volume mounted at `/work`, while the host credential and frontend mounts
+(`~/.codex` and the built frontend) are read-only. The suite verifies that
+architecture structurally by inspecting the serve container and requiring the
+`/work` mount to have type `volume`, never `bind`. It also checks that `HELLO.md`
+does not appear under host `tmp/` as a cheap guard against a future host-bind
+regression; that absence check is not, by itself, proof of filesystem isolation.
+
+This manual tier requires a running Podman machine, a real `codex` CLI with a
+logged-in `~/.codex/auth.json`, and the normal local AFT checkout. The first run
+builds the four stack images and can take several minutes; later runs reuse them
+unless `AFT_PODMAN_REBUILD=1` is set. On Apple silicon, the capped `loom-serve`
+container is the isolation boundary; per-task nested-container sandboxing is not
+available through the macOS Podman machine. CI cannot run this tier because it
+has neither the Podman machine nor operator Codex credentials, and the real run
+consumes an account rate-limit window.
+
 aft runs suite files alphabetically. `zz-agent-flow` creates an agent definition and
 run artifacts, but it now runs in its own workspace, **`E2E-WS-AGENT`**, so agent
 artifacts no longer leak into the shared **`E2E-WS`** workspace used by empty-state
