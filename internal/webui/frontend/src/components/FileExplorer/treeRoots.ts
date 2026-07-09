@@ -19,6 +19,7 @@ export interface CheckoutTreeRoot {
   icon: "agent" | "repo" | "workspace";
   exists: boolean;
   changeCount: number;
+  gitStatusUnavailable: boolean;
   dimmed?: boolean | undefined;
 }
 
@@ -30,6 +31,7 @@ export interface AgentTreeRoot {
   secondary?: string | undefined;
   exists: boolean;
   changeCount: number;
+  gitStatusUnavailable: boolean;
   flattenedRef?: CheckoutRef | undefined;
   children: CheckoutTreeRoot[];
 }
@@ -131,6 +133,7 @@ function checkoutRoot(
     icon,
     exists: checkout?.exists ?? options?.existsFallback ?? true,
     changeCount: checkoutChangeCount(checkout),
+    gitStatusUnavailable: checkout?.status_error === true,
     dimmed: options?.dimmed,
   };
 }
@@ -180,6 +183,7 @@ export function buildFileTreeSections({
         secondary: repo,
         exists: checkout?.exists ?? exists,
         changeCount,
+        gitStatusUnavailable: checkout?.status_error === true,
         flattenedRef: repo
           ? { scope: "agent", target: agent.name, repo }
           : { scope: "agent", target: agent.name },
@@ -193,6 +197,7 @@ export function buildFileTreeSections({
       label: agent.name,
       exists,
       changeCount,
+      gitStatusUnavailable: false,
       children,
     };
   });

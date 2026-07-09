@@ -321,6 +321,80 @@ func TestResolveAgentWorktreeForRepo_StoreBackedFleetDB(t *testing.T) {
 	}
 }
 
+func TestResolveAgentWorktree_BrokenGitMetadataReturnsUnknownBranch(t *testing.T) {
+	ctx := context.Background()
+	loomDir := t.TempDir()
+	wsRoot := t.TempDir()
+	t.Setenv("LOOM_CONFIG_DIR", loomDir)
+
+	st := memstore.New()
+	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "WS1", Name: "Workspace One"}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	if _, err := st.Repos().Create(ctx, store.RepoCreate{
+		WorkspaceKey:  "WS1",
+		Name:          "api",
+		DefaultBranch: "main",
+		Remote:        "origin",
+		Groups:        []string{"backend"},
+	}); err != nil {
+		t.Fatalf("create repo: %v", err)
+	}
+	if _, err := st.Roles().Create(ctx, store.RoleCreate{WorkspaceKey: "WS1", Name: "task"}); err != nil {
+		t.Fatalf("create role: %v", err)
+	}
+	if _, err := st.Agents().Create(ctx, store.AgentCreate{
+		WorkspaceKey: "WS1",
+		Name:         "broken",
+		RoleName:     "task",
+		RepoGroups:   []string{"backend"},
+	}); err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
+
+	wtPath := filepath.Join(wsRoot, "worktrees", "api", "broken")
+	if err := os.MkdirAll(wtPath, 0755); err != nil {
+		t.Fatalf("mkdir worktree: %v", err)
+	}
+	missingAdminDir := filepath.Join(wsRoot, ".git", "worktrees", "broken")
+	if err := os.WriteFile(filepath.Join(wtPath, ".git"), []byte("gitdir: "+missingAdminDir+"\n"), 0644); err != nil {
+		t.Fatalf("write broken git pointer: %v", err)
+	}
+	if err := bootstrap.SaveStateCache(&bootstrap.StateCache{
+		Version:       1,
+		LastWorkspace: "WS1",
+		Workspaces: map[string]bootstrap.WorkspaceLocalState{
+			"WS1": {
+				Path:  wsRoot,
+				Repos: map[string]string{"api": filepath.Join(wsRoot, "api")},
+			},
+		},
+	}); err != nil {
+		t.Fatalf("save state cache: %v", err)
+	}
+
+	g := NewGitOps().WithStore(st)
+	for name, resolve := range map[string]func() (*ops.AgentWorktree, error){
+		"ResolveAgentWorktree": func() (*ops.AgentWorktree, error) {
+			return g.ResolveAgentWorktree("WS1", "broken")
+		},
+		"ResolveAgentWorktreeForRepo": func() (*ops.AgentWorktree, error) {
+			return g.ResolveAgentWorktreeForRepo("WS1", "broken", "api")
+		},
+		"ResolveAgentWorktreeOrPrimary": func() (*ops.AgentWorktree, error) {
+			return g.ResolveAgentWorktreeOrPrimary("WS1", "broken")
+		},
+	} {
+		got, err := resolve()
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if got.Path != wtPath || got.Branch != "unknown" || got.RepoName != "api" {
+			t.Fatalf("%s = %+v, want path %q branch unknown repo api", name, got, wtPath)
+		}
+	}
+}
+
 func runGit(t *testing.T, dir string, args ...string) error {
 	t.Helper()
 	if args[0] == "init" {

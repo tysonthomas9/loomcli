@@ -162,6 +162,7 @@ describe("treeRoots", () => {
       label: "docs-repo",
       exists: true,
       changeCount: 0,
+      gitStatusUnavailable: true,
     });
   });
 

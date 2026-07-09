@@ -51,6 +51,7 @@ const mocks = vi.hoisted(() => ({
   fileMap: {} as Record<string, FileReadData>,
   headFileMap: {} as Record<string, FileReadData>,
   rootEntries: [] as FileEntry[],
+  scopedTreeError: null as string | null,
 }));
 
 vi.mock("@/components/CodeMirrorEditor", async () => {
@@ -199,7 +200,7 @@ vi.mock("@/hooks", async () => {
       expanded: new Set([""]),
       treeData: new Map<string, FileEntry[]>([["", mocks.rootEntries]]),
       isLoading: false,
-      error: null,
+      error: mocks.scopedTreeError,
       filterText: "",
       debouncedFilterText: "",
       toggle: vi.fn(() => Promise.resolve()),
@@ -261,6 +262,7 @@ describe("WorkspaceFileBrowser", () => {
       entry("large.txt"),
       entry("src", true),
     ];
+    mocks.scopedTreeError = null;
     mocks.agents = [
       {
         name: "atlas",
@@ -861,6 +863,75 @@ describe("WorkspaceFileBrowser", () => {
       screen.getByText("loomcli · shared checkout · 2"),
     ).toBeInTheDocument();
     expect(screen.queryByText("atlas · loomcli · 3")).not.toBeInTheDocument();
+  });
+
+  it("shows a git-status warning for status_error checkouts and still expands files", async () => {
+    mocks.listFileCheckouts.mockResolvedValue({
+      checkouts: [
+        {
+          kind: "agent",
+          agent: "atlas",
+          repo: "loomcli",
+          exists: true,
+          change_count: 0,
+          status_error: true,
+        },
+      ],
+    });
+
+    render(<WorkspaceFileBrowser mode="agent" agentName="atlas" />);
+
+    expect(
+      await screen.findByLabelText(
+        "Git status unavailable - decorations and changes are hidden for this checkout",
+      ),
+    ).toBeInTheDocument();
+
+    fireEvent.click(await screen.findByRole("button", { name: /^atlas/ }));
+
+    expect(await screen.findByLabelText("main.ts")).toBeInTheDocument();
+    expect(
+      screen.queryByText(/agent worktree .* not found/i),
+    ).not.toBeInTheDocument();
+  });
+
+  it("expands exists:false checkouts to a friendly unavailable state", async () => {
+    mocks.listFileCheckouts.mockResolvedValue({
+      checkouts: [
+        {
+          kind: "agent",
+          agent: "atlas",
+          repo: "loomcli",
+          exists: false,
+          change_count: 0,
+        },
+      ],
+    });
+
+    render(<WorkspaceFileBrowser mode="agent" agentName="atlas" />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /^atlas/ }));
+
+    expect(
+      await screen.findByText("This checkout isn't available on this machine"),
+    ).toBeVisible();
+    expect(screen.queryByLabelText("main.ts")).not.toBeInTheDocument();
+    expect(
+      screen.queryByText(/agent worktree .* not found/i),
+    ).not.toBeInTheDocument();
+  });
+
+  it("maps tree list failures to the friendly unavailable state", async () => {
+    mocks.scopedTreeError = 'agent worktree "atlas" not found';
+
+    render(<WorkspaceFileBrowser mode="agent" agentName="atlas" />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /^atlas/ }));
+
+    expect(
+      await screen.findByText("This checkout isn't available on this machine"),
+    ).toBeVisible();
+    expect(screen.queryByText('agent worktree "atlas" not found')).toBeNull();
   });
 
   it("shows an all-zero Changes empty state", async () => {
