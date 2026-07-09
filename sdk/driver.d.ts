@@ -56,7 +56,27 @@ export type DriverApiErrorCode =
   | "await_instance_key_malformed"
   | "await_actor_forbidden"
   | "driver_run_already_resumed"
-  | "composition_depth_exceeded";
+  | "composition_depth_exceeded"
+  // Local review diff source.
+  | "task_diff_task_id_required"
+  | "task_diff_external_ref_missing"
+  | "task_diff_external_ref_unsupported"
+  | "task_diff_external_ref_invalid"
+  | "task_diff_sha_invalid"
+  | "task_diff_repo_missing"
+  | "task_diff_repo_ambiguous"
+  | "task_diff_origin_missing"
+  | "task_diff_origin_invalid"
+  | "task_diff_origin_not_filesystem"
+  | "task_diff_origin_not_git"
+  | "task_diff_branch_invalid"
+  | "task_diff_branch_missing"
+  | "task_diff_sha_mismatch"
+  | "task_diff_default_branch_missing"
+  | "task_diff_base_missing"
+  | "task_diff_too_large"
+  | "task_diff_git_failed"
+  | "task_diff_git_timeout";
 
 export interface LoomDriverResult {
   status: LoomDriverResultStatus;
@@ -110,6 +130,22 @@ export interface LoomTaskClaimReadyInput extends LoomEpicInput {
   limit?: number;
 }
 
+export interface LoomTaskDiffResult {
+  taskId: string;
+  externalRef: string;
+  repoName: string;
+  sourceRepo?: string;
+  branch: string;
+  headSha: string;
+  resolvedHead: string;
+  baseRef: string;
+  baseSha: string;
+  diff: string;
+  sizeBytes: number;
+  limitBytes: number;
+  egressMechanism: "filesystem-origin" | string;
+}
+
 export interface LoomTaskRunRequest {
   taskId?: string;
   taskRunId?: string;
@@ -139,6 +175,13 @@ export interface LoomTaskRunRequest {
    * Passed verbatim (not compacted).
    */
   input?: unknown;
+  /**
+   * Optional override of whether the serve task worker closes the underlying
+   * task issue on success. Omitted => worker default (true, close on success);
+   * pass false to leave the card open (e.g. a planner run that hands off a
+   * design to review instead of closing the task).
+   */
+  closeTask?: boolean;
 }
 
 export interface LoomEpicInput {
@@ -443,6 +486,8 @@ export declare class LoomDriverClient {
     claimReady(input?: LoomTaskClaimReadyInput): Promise<Record<string, unknown> | null>;
     /** Claim one SPECIFIC ready task by id; rejects DriverApiError code "conflict" when not ready or already claimed. */
     claim(input: LoomTaskClaimInput | string): Promise<Record<string, unknown> | null>;
+    /** Bounded diff for a review card stamped external_ref="local-branch:<branch>@<sha>". */
+    diff(input: LoomTaskSelector | string): Promise<LoomTaskDiffResult | null>;
     complete(input?: LoomTaskSelector | string): Promise<Record<string, unknown> | null>;
     release(input?: LoomTaskSelector | string): Promise<Record<string, unknown> | null>;
   };

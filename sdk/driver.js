@@ -92,6 +92,7 @@ export class LoomDriverClient {
     this.tasks = Object.freeze({
       claimReady: (input = {}) => this.claimReady(input),
       claim: (input = {}) => this.claimTask(input),
+      diff: (input = {}) => this.taskDiff(input),
       complete: (input = {}) => this.completeTask(input),
       release: (input = {}) => this.releaseTask(input),
     });
@@ -186,6 +187,19 @@ export class LoomDriverClient {
       epicId: input.epicId || "",
       limit: input.limit || "",
     });
+  }
+
+  // taskDiff returns the bounded review diff for a card stamped with
+  // external_ref="local-branch:<branch>@<sha>". The server resolves the
+  // workspace repo's filesystem origin and computes defaultBranch...sha there;
+  // non-local origins and missing refs fail closed with DriverApiError.code
+  // task_diff_*.
+  async taskDiff(input = {}) {
+    const taskId = taskPayloadID(input);
+    if (!taskId) {
+      throw new Error("tasks.diff requires taskId");
+    }
+    return this.#httpCall("task-diff", { taskId: String(taskId) });
   }
 
   async getEpic(input = {}) {
@@ -347,7 +361,14 @@ export class LoomDriverClient {
     if (input.input !== undefined && input.input !== null) {
       params.input = input.input;
     }
-    const result = await this.#httpCall("exec-task", { ...params, enqueueOnly: true }, { rawKeys: ["input"] });
+    // closeTask (optional) overrides whether the serve task worker closes the
+    // task issue on success. Omitted => worker default (true); a planner run
+    // passes false so the card stays in design+review. Sent only when the caller
+    // set it, and via rawKeys so a boolean false is never dropped by compaction.
+    if (input.closeTask !== undefined && input.closeTask !== null) {
+      params.closeTask = booleanInput(input.closeTask);
+    }
+    const result = await this.#httpCall("exec-task", { ...params, enqueueOnly: true }, { rawKeys: ["input", "closeTask"] });
     rememberTaskRunResult(this, result || {});
     return result;
   }
@@ -821,6 +842,17 @@ function splitConnectorInput(input) {
 // compactParams strips empty values so the wire payload only carries what the
 // caller actually set; nested objects are compacted recursively and dropped
 // when empty.
+// booleanInput coerces an optional boolean param that may arrive as a real
+// boolean (workflow dispatch) or a string (workflow-run --input): "false"/0/no/
+// off read false, everything else truthy reads by JS truthiness.
+function booleanInput(v) {
+  if (typeof v === "boolean") return v;
+  if (typeof v === "string") {
+    return !["", "0", "false", "no", "off"].includes(v.trim().toLowerCase());
+  }
+  return Boolean(v);
+}
+
 function compactParams(params) {
   const out = {};
   for (const [key, value] of Object.entries(params || {})) {

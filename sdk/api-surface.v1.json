@@ -54,7 +54,26 @@
       "await_instance_key_malformed",
       "await_actor_forbidden",
       "driver_run_already_resumed",
-      "composition_depth_exceeded"
+      "composition_depth_exceeded",
+      "task_diff_task_id_required",
+      "task_diff_external_ref_missing",
+      "task_diff_external_ref_unsupported",
+      "task_diff_external_ref_invalid",
+      "task_diff_sha_invalid",
+      "task_diff_repo_missing",
+      "task_diff_repo_ambiguous",
+      "task_diff_origin_missing",
+      "task_diff_origin_invalid",
+      "task_diff_origin_not_filesystem",
+      "task_diff_origin_not_git",
+      "task_diff_branch_invalid",
+      "task_diff_branch_missing",
+      "task_diff_sha_mismatch",
+      "task_diff_default_branch_missing",
+      "task_diff_base_missing",
+      "task_diff_too_large",
+      "task_diff_git_failed",
+      "task_diff_git_timeout"
     ],
     "neverRetryable": [
       "token_expired"
@@ -178,7 +197,14 @@
         "leaseToken",
         "deferCompletion",
         "enqueueOnly",
+        "closeTask",
         "input"
+      ]
+    },
+    "task-diff": {
+      "method": "POST",
+      "fields": [
+        "taskId"
       ]
     },
     "task-run-get": {
@@ -345,6 +371,7 @@
       "tasks": [
         "claimReady",
         "claim",
+        "diff",
         "complete",
         "release"
       ],

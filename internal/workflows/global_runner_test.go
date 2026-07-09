@@ -21,8 +21,8 @@ func TestBuiltinWorkflowsDeclaringRunner(t *testing.T) {
 	if got := strings.Join(builtinWorkflowsDeclaringRunner("local-task-runner"), ","); got != "bug-fix-agent,epic-runner,prompt-agent" {
 		t.Fatalf("local-task-runner owners = %q, want bug-fix-agent,epic-runner,prompt-agent", got)
 	}
-	if got := strings.Join(builtinWorkflowsDeclaringRunner("github-review-task-runner"), ","); got != "github-review-agent,review-loop-agent" {
-		t.Fatalf("github-review-task-runner owners = %q, want github-review-agent,review-loop-agent", got)
+	if got := strings.Join(builtinWorkflowsDeclaringRunner("github-review-task-runner"), ","); got != "github-review-agent,local-review-agent,review-loop-agent" {
+		t.Fatalf("github-review-task-runner owners = %q, want github-review-agent,local-review-agent,review-loop-agent", got)
 	}
 	if got := builtinWorkflowsDeclaringRunner("no-such-runner"); len(got) != 0 {
 		t.Fatalf("unknown runner owners = %v, want none", got)

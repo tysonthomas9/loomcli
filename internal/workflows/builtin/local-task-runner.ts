@@ -142,12 +142,26 @@ export async function run(ctx = {}) {
   const usesStdinPrompt = backendUsesStdinPrompt(backend);
 
   const openPR = booleanValue(inputValue(request, "openPullRequest"));
+  const deliveryMode = stringValue(inputValue(request, "deliveryMode"));
+  const originRemoteUrl = await resolveOriginRemoteUrl(execWorktree);
+  const filesystemOrigin = isFilesystemOrigin(originRemoteUrl);
+  const localBranchRequested = deliveryMode === "local-branch";
+  // Local-branch delivery is intentionally narrow: it is allowed only for local
+  // filesystem remotes, where `git push origin HEAD:...` publishes to the bare
+  // repo used by local-mode. An explicit deliveryMode on a GitHub/http/ssh origin
+  // does NOT activate this path; those deployments keep the existing patch-back
+  // or PR behavior instead of silently inventing a "local" publish.
+  const localBranchDelivery = !stacked && filesystemOrigin && localBranchRequested;
+  if (localBranchRequested && !filesystemOrigin) {
+    logs.push("local-branch delivery requested but origin is not a filesystem path; keeping existing delivery behavior");
+  }
   let exitCode;
   let stdout = "";
   let stderr = "";
   let patchInfo;
   let prInfo = null;
   let stackInfo = null;
+  let localBranchInfo = null;
   let prFailure = null;
   try {
     let result;
@@ -181,9 +195,30 @@ export async function run(ctx = {}) {
 
     patchInfo = await capturePatch(execWorktree, baseRef);
 
+    // Local filesystem-origin delivery: commit (if needed) in the isolated
+    // worktree and push the task branch to the ACTUAL origin remote. This path
+    // gives the local review lane a real ref to inspect without pretending a
+    // GitHub PR exists.
+    if (localBranchDelivery && exitCode === 0) {
+      if (!isolated) {
+        prFailure = { class: "local_branch_worktree_missing", message: "local-branch delivery requires a git isolated worktree" };
+      } else if (patchInfo.filesChanged === 0) {
+        logs.push("local-branch: the agent produced no changes; no branch pushed");
+      } else {
+        const branch = localBranchName(taskId, taskRunId);
+        const title = stringValue(inputValue(request, "branchTitle"))
+          || stringValue(inputValue(request, "prTitle"))
+          || stringValue((task && (task.title || task.name)) || ("Loom task " + (taskId || taskRunId)));
+        try {
+          localBranchInfo = await deliverLocalBranch({ worktreePath: execWorktree, branch, title });
+          logs.push("pushed local branch " + localBranchInfo.branch + " @ " + localBranchInfo.head.slice(0, 12));
+        } catch (error) {
+          prFailure = { class: "local_branch_push_failed", message: "failed to push local branch: " + errorMessage(error) };
+        }
+      }
     // Stacked delivery: commit in place and push the canonical branch on the
     // predecessor base. No PR is opened here — the post-drain reconcile does it.
-    if (stacked && exitCode === 0) {
+    } else if (stacked && exitCode === 0) {
       if (patchInfo.filesChanged === 0) {
         logs.push("stacked: the agent produced no changes; no branch pushed (empty unit)");
       } else {
@@ -287,7 +322,7 @@ export async function run(ctx = {}) {
     exec_worktree_path: execWorktree,
     base_ref: baseRef,
     repo_head_before: headBefore,
-    repo_head_after: patchInfo.head,
+    repo_head_after: localBranchInfo ? localBranchInfo.head : stackInfo ? stackInfo.head : patchInfo.head,
     files_changed: String(patchInfo.filesChanged),
     lines_added: String(patchInfo.linesAdded),
     lines_removed: String(patchInfo.linesRemoved),
@@ -306,6 +341,10 @@ export async function run(ctx = {}) {
     if (stackId) {
       metadata.stack_id = stackId;
     }
+  } else if (localBranchInfo) {
+    metadata.delivery = "local_branch";
+    metadata.local_branch = localBranchInfo.branch;
+    metadata.head_sha = localBranchInfo.head;
   } else if (prInfo) {
     metadata.delivery = "pull_request";
     metadata.github_pr_url = prInfo.url;
@@ -349,8 +388,8 @@ export async function run(ctx = {}) {
     transcript_entries: transcriptEntries,
     runtimeMetadata: metadata,
   };
-  if (prInfo || stackInfo || stacked) {
-    // PR / stacked mode: the pull request or pushed branch IS the delivery (and
+  if (prInfo || stackInfo || localBranchInfo || stacked) {
+    // PR / stacked / local-branch mode: the published ref IS the delivery (and
     // stacked mode runs in place, so there is nothing to patch-back) — return no
     // top-level patch so the driver host-bridge skips patch-back.
     return completed;
@@ -931,6 +970,62 @@ async function deliverStackBranch({ worktreePath, token, owner, repo, branch, ti
     throw new Error("git push failed: " + scrubToken(textTail(pushRes.stderr || pushRes.stdout, 400), token));
   }
   return { branch, head };
+}
+
+// deliverLocalBranch is the local-mode counterpart to PR delivery: the task's
+// isolated worktree becomes loom/<task>, and the branch is pushed to the repo's
+// actual `origin` remote. There is deliberately no owner/repo parsing or GitHub
+// URL construction here; activation is gated before this helper on a filesystem
+// origin, so `git push origin ...` is the correct primitive.
+async function deliverLocalBranch({ worktreePath, branch, title }) {
+  const git = async (...args) => {
+    const r = await execBackend("git", ["-C", worktreePath, ...args], { cwd: worktreePath });
+    if (r.code !== 0) {
+      throw new Error("git " + args[0] + " failed: " + textTail(r.stderr || r.stdout, 400));
+    }
+    return r;
+  };
+  await git("checkout", "-B", branch);
+  await git("add", "-A");
+  const staged = await execBackend("git", ["-C", worktreePath, "diff", "--cached", "--quiet"], { cwd: worktreePath });
+  if (staged.code === 1) {
+    await git("-c", "user.email=loom@example.test", "-c", "user.name=Loom", "commit", "-m", title);
+  } else if (staged.code !== 0) {
+    throw new Error("git diff failed: " + textTail(staged.stderr || staged.stdout, 400));
+  }
+  const head = stringValue((await git("rev-parse", "HEAD")).stdout).trim();
+  // Each task owns its canonical loom/<task> branch. Rework runs start from the
+  // host base again, so their isolated commits can diverge from the previous
+  // pushed branch; a non-force push would reject and loop failed rework forever.
+  const pushRes = await execBackend(
+    "git",
+    ["-C", worktreePath, "push", "--force", "origin", "HEAD:refs/heads/" + branch],
+    { cwd: worktreePath, env: { ...process.env, GIT_TERMINAL_PROMPT: "0" } },
+  );
+  if (pushRes.code !== 0) {
+    throw new Error("git push failed: " + textTail(pushRes.stderr || pushRes.stdout, 400));
+  }
+  return { branch, head };
+}
+
+function localBranchName(taskId, taskRunId) {
+  const raw = stringValue(taskId || taskRunId || "task");
+  const safe = raw.replace(/[^A-Za-z0-9_.-]/g, "-").replace(/^-+|-+$/g, "") || "task";
+  return "loom/" + safe;
+}
+
+async function resolveOriginRemoteUrl(worktree) {
+  try {
+    const r = await execBackend("git", ["-C", worktree, "remote", "get-url", "origin"], { cwd: worktree });
+    return r.code === 0 ? stringValue(r.stdout).trim() : "";
+  } catch {
+    return "";
+  }
+}
+
+function isFilesystemOrigin(url) {
+  const text = stringValue(url).trim();
+  return text.startsWith("/") || text.startsWith("file://");
 }
 
 async function gitHead(worktree) {

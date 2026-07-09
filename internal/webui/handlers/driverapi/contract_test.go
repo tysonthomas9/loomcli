@@ -41,6 +41,7 @@ var frozenDriverOps = []string{
 	"recover-stale-tasks",
 	"release-task",
 	"role-get",
+	"task-diff",
 	"task-run-get",
 	"update-agent-parent",
 }

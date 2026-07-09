@@ -27,6 +27,7 @@ const (
 	BuiltinGitHubReviewTaskRunnerName    = "github-review-task-runner"
 	BuiltinBugFixAgentWorkflowName       = "bug-fix-agent"
 	BuiltinReviewLoopAgentWorkflowName   = "review-loop-agent"
+	BuiltinLocalReviewAgentWorkflowName  = "local-review-agent"
 	BuiltinPromptAgentWorkflowName       = "prompt-agent"
 )
 
@@ -53,6 +54,9 @@ var builtinBugFixAgentWorkflowSource string
 
 //go:embed builtin/review-loop-agent.ts
 var builtinReviewLoopAgentWorkflowSource string
+
+//go:embed builtin/local-review-agent.ts
+var builtinLocalReviewAgentWorkflowSource string
 
 //go:embed builtin/prompt-agent.ts
 var builtinPromptAgentWorkflowSource string
@@ -94,6 +98,7 @@ var builtinWorkflows = map[string]Spec{
 	BuiltinGitHubReviewAgentWorkflowName: builtinGitHubReviewAgentSpec(),
 	BuiltinBugFixAgentWorkflowName:       builtinBugFixAgentSpec(),
 	BuiltinReviewLoopAgentWorkflowName:   builtinReviewLoopAgentSpec(),
+	BuiltinLocalReviewAgentWorkflowName:  builtinLocalReviewAgentSpec(),
 	BuiltinPromptAgentWorkflowName:       builtinPromptAgentSpec(),
 }
 
@@ -139,6 +144,15 @@ func builtinBugFixAgentSpec() Spec {
 // version manifest declares it and resolveDriverRunner can find it.
 func builtinReviewLoopAgentSpec() Spec {
 	spec := builtinSpec(BuiltinReviewLoopAgentWorkflowName, builtinReviewLoopAgentWorkflowSource)
+	spec.Files["workflows/"+BuiltinGitHubReviewTaskRunnerName+".ts"] = builtinGitHubReviewTaskRunnerWorkflowSource
+	return spec
+}
+
+// builtinLocalReviewAgentSpec is the local-branch review loop. It has no
+// GitHub connector dependency, but it still uses the trusted review task-runner
+// as a diff-as-data code-review brain, so it declares the runner as a sibling.
+func builtinLocalReviewAgentSpec() Spec {
+	spec := builtinSpec(BuiltinLocalReviewAgentWorkflowName, builtinLocalReviewAgentWorkflowSource)
 	spec.Files["workflows/"+BuiltinGitHubReviewTaskRunnerName+".ts"] = builtinGitHubReviewTaskRunnerWorkflowSource
 	return spec
 }

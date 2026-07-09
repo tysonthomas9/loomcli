@@ -156,6 +156,7 @@ func NewModule(cfg Config) *Module {
 		"active-task-runs":            m.activeTaskRuns,
 		"recover-stale-tasks":         m.recoverStaleTasks,
 		"complete-task":               m.completeTask,
+		"task-diff":                   m.taskDiff,
 		"release-task":                m.releaseTask,
 		"connector-dispatch":          m.connectorDispatch,
 		"emit-event":                  m.emitEvent,
@@ -623,6 +624,11 @@ type execTaskParams struct {
 	} `json:"sandboxPlacement"`
 	DeferCompletion bool `json:"deferCompletion"`
 	EnqueueOnly     bool `json:"enqueueOnly"`
+	// CloseTask optionally overrides whether the serve task worker closes the
+	// underlying task issue on success. Pointer so an absent field preserves the
+	// worker default (true) byte-for-byte; a planner run passes false to leave
+	// the card in design+review. Precedent: taskrunapi completeParams.CloseTask.
+	CloseTask *bool `json:"closeTask,omitempty"`
 	// Input is the optional task-run payload (camelCase driver wire). It is
 	// persisted on the run and delivered verbatim to the runner.
 	Input json.RawMessage `json:"input,omitempty"`
@@ -648,6 +654,7 @@ func (p execTaskParams) requestOptions(ws string, id driverIdentity, fencingToke
 		SupportedProviders: p.SupportedProviders,
 		Capabilities:       p.Capabilities,
 		DeferCompletion:    p.DeferCompletion,
+		CloseTaskOnSuccess: p.CloseTask,
 		Input:              p.Input,
 		SandboxPlacement: domain.TaskRunPlacement{
 			Provider:  p.SandboxPlacement.Provider,
@@ -676,6 +683,30 @@ func (m *Module) execTask(ctx context.Context, ws string, id driverIdentity, bod
 		return nil, err
 	}
 	opts := params.requestOptions(ws, id, fencingToken)
+	// Auto-create the run→task-run linkage step when the caller supplied none.
+	// The DriverStep is the STRUCTURED edge the unified agent detail resolves a
+	// run's transcript through (getRun embeds steps; the workflow's own JSON
+	// result is buried as a string in output.flue_stdout_tail, so without a
+	// step a bare exec-task dispatch is invisible to the UI). fleet-db requires
+	// a client-minted step_id and fences creation to the run's owner, so the
+	// id is deterministic per (run, task) — a durable-resume re-dispatch hits
+	// already-exists and REUSES the same step instead of duplicating it.
+	// Best-effort beyond that: a step-create failure must never block the
+	// dispatch — the linkage degrades, the work proceeds.
+	if strings.TrimSpace(opts.DriverStepID) == "" {
+		stepID := "step-" + id.RunID + "-" + strings.TrimSpace(params.TaskID)
+		_, stepErr := m.store.DriverSteps().CreateForRun(ctx, ws, id.RunID, store.DriverStepCreate{
+			StepID:       stepID,
+			StepKind:     "task_run",
+			Status:       domain.DriverStepQueued,
+			NodeID:       id.NodeID,
+			LeaseID:      id.LeaseID,
+			FencingToken: fencingToken,
+		})
+		if stepErr == nil || errors.Is(stepErr, domain.ErrConflict) || errors.Is(stepErr, domain.ErrAlreadyExists) {
+			opts.DriverStepID = stepID
+		}
+	}
 	executor := driverpkg.HostBridgeTaskExecutor{
 		Store:            m.store,
 		WorktreePath:     m.worktreePath,
@@ -1080,6 +1111,11 @@ func writeDomainOpError(w http.ResponseWriter, err error) {
 		return
 	}
 	if writeAwaitOpError(w, err) {
+		return
+	}
+	var coded *codedOpError
+	if errors.As(err, &coded) {
+		writeOpErrorDetails(w, coded.status, coded.code, coded.Error(), coded.retryable, coded.details)
 		return
 	}
 	switch {

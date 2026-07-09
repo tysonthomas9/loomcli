@@ -114,6 +114,7 @@ test("contract: every op sends only frozen camelCase wire fields to its frozen p
     });
     await client.tasks.release({ taskId: "TASK-1", actor: "lead" });
     await client.tasks.claim({ taskId: "TASK-1", actor: "lead", epicId: "EPIC-1", limit: 5 });
+    await client.tasks.diff({ taskId: "TASK-1" });
     await client.connectors.dispatch({
       action: "github.pull_request.read",
       connectorId: "conn-1",
