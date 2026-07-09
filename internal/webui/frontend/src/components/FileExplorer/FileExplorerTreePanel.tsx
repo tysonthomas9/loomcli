@@ -33,6 +33,11 @@ import type {
 } from "./workspaceFileBrowserTypes";
 import type { FileTreeRoot, FileTreeSection } from "./treeRoots";
 
+const CHECKOUT_UNAVAILABLE_MESSAGE =
+  "This checkout isn't available on this machine";
+const GIT_STATUS_UNAVAILABLE_MESSAGE =
+  "Git status unavailable - decorations and changes are hidden for this checkout";
+
 function LensToggle({
   lens,
   changeCount,
@@ -178,6 +183,17 @@ function ChangeBadge({ count }: { count: number }): JSX.Element | null {
   return <span className={styles.checkoutBadge}>{count}</span>;
 }
 
+function GitStatusWarning(): JSX.Element {
+  return (
+    <span
+      className={styles.checkoutStatusWarning}
+      role="img"
+      aria-label={GIT_STATUS_UNAVAILABLE_MESSAGE}
+      title={GIT_STATUS_UNAVAILABLE_MESSAGE}
+    />
+  );
+}
+
 function AgentAvatar({ name }: { name: string }): JSX.Element {
   const bg = getAvatarColor(name);
   return (
@@ -223,6 +239,21 @@ function RootIcon({ icon }: { icon: "agent" | "repo" | "workspace" }) {
   );
 }
 
+function CheckoutUnavailableState({
+  depthOffset,
+}: {
+  depthOffset: number;
+}): JSX.Element {
+  return (
+    <div
+      className={styles.checkoutTreeState}
+      style={{ paddingLeft: 8 + depthOffset * 16 }}
+    >
+      {CHECKOUT_UNAVAILABLE_MESSAGE}
+    </div>
+  );
+}
+
 function RootRow({
   root,
   expanded,
@@ -239,7 +270,7 @@ function RootRow({
   const secondary = root.secondary;
   const exists = root.exists;
   const icon = isAgent ? "agent" : root.icon;
-  const disabledTitle = exists ? undefined : "not checked out on this machine";
+  const rowTitle = exists ? undefined : CHECKOUT_UNAVAILABLE_MESSAGE;
   return (
     <button
       type="button"
@@ -247,8 +278,7 @@ function RootRow({
       data-dimmed={root.kind === "checkout" && root.dimmed ? true : undefined}
       data-disabled={!exists || undefined}
       style={{ paddingLeft: 8 + depth * 16 }}
-      disabled={!exists}
-      title={disabledTitle}
+      title={rowTitle}
       onClick={onToggle}
     >
       <span
@@ -271,6 +301,7 @@ function RootRow({
       )}
       <span className={styles.rootLabel}>{label}</span>
       {secondary && <span className={styles.rootSecondary}>· {secondary}</span>}
+      {root.gitStatusUnavailable && <GitStatusWarning />}
       <ChangeBadge count={root.changeCount} />
     </button>
   );
@@ -360,14 +391,7 @@ function CheckoutTreeBlock({
     );
   }
   if (error) {
-    return (
-      <div
-        className={styles.checkoutTreeError}
-        style={{ paddingLeft: 8 + depthOffset * 16 }}
-      >
-        {error}
-      </div>
-    );
+    return <CheckoutUnavailableState depthOffset={depthOffset} />;
   }
 
   return (
@@ -464,24 +488,27 @@ export function FileExplorerTreePanel({
           expanded={expanded}
           onToggle={() => onToggleRoot(key)}
         />
-        {expanded && root.exists && (
-          <CheckoutTreeBlock
-            refInfo={root.ref}
-            depthOffset={depth + 1}
-            selectedTab={selectedTab}
-            inlineEdit={inlineEdit}
-            gitStatus={gitStatusByRef[key] ?? {}}
-            revealRequest={treeRevealRequests[key]}
-            refreshRequest={treeRefreshRequests[key]}
-            onOpenFile={onOpenFile}
-            onContextMenu={onContextMenu}
-            onRequestRename={onRequestRename}
-            onRequestDelete={onRequestDelete}
-            onInlineEditChange={onInlineEditChange}
-            onInlineEditCommit={onInlineEditCommit}
-            onInlineEditCancel={onInlineEditCancel}
-          />
-        )}
+        {expanded &&
+          (root.exists ? (
+            <CheckoutTreeBlock
+              refInfo={root.ref}
+              depthOffset={depth + 1}
+              selectedTab={selectedTab}
+              inlineEdit={inlineEdit}
+              gitStatus={gitStatusByRef[key] ?? {}}
+              revealRequest={treeRevealRequests[key]}
+              refreshRequest={treeRefreshRequests[key]}
+              onOpenFile={onOpenFile}
+              onContextMenu={onContextMenu}
+              onRequestRename={onRequestRename}
+              onRequestDelete={onRequestDelete}
+              onInlineEditChange={onInlineEditChange}
+              onInlineEditCommit={onInlineEditCommit}
+              onInlineEditCancel={onInlineEditCancel}
+            />
+          ) : (
+            <CheckoutUnavailableState depthOffset={depth + 1} />
+          ))}
       </div>
     );
   };
@@ -498,24 +525,27 @@ export function FileExplorerTreePanel({
             expanded={expanded}
             onToggle={() => onToggleRoot(key)}
           />
-          {expanded && root.exists && (
-            <CheckoutTreeBlock
-              refInfo={root.flattenedRef}
-              depthOffset={1}
-              selectedTab={selectedTab}
-              inlineEdit={inlineEdit}
-              gitStatus={gitStatusByRef[key] ?? {}}
-              revealRequest={treeRevealRequests[key]}
-              refreshRequest={treeRefreshRequests[key]}
-              onOpenFile={onOpenFile}
-              onContextMenu={onContextMenu}
-              onRequestRename={onRequestRename}
-              onRequestDelete={onRequestDelete}
-              onInlineEditChange={onInlineEditChange}
-              onInlineEditCommit={onInlineEditCommit}
-              onInlineEditCancel={onInlineEditCancel}
-            />
-          )}
+          {expanded &&
+            (root.exists ? (
+              <CheckoutTreeBlock
+                refInfo={root.flattenedRef}
+                depthOffset={1}
+                selectedTab={selectedTab}
+                inlineEdit={inlineEdit}
+                gitStatus={gitStatusByRef[key] ?? {}}
+                revealRequest={treeRevealRequests[key]}
+                refreshRequest={treeRefreshRequests[key]}
+                onOpenFile={onOpenFile}
+                onContextMenu={onContextMenu}
+                onRequestRename={onRequestRename}
+                onRequestDelete={onRequestDelete}
+                onInlineEditChange={onInlineEditChange}
+                onInlineEditCommit={onInlineEditCommit}
+                onInlineEditCancel={onInlineEditCancel}
+              />
+            ) : (
+              <CheckoutUnavailableState depthOffset={1} />
+            ))}
         </div>
       );
     }
@@ -570,24 +600,27 @@ export function FileExplorerTreePanel({
             )}
           </button>
         </h2>
-        {expanded && root.exists && (
-          <CheckoutTreeBlock
-            refInfo={root.ref}
-            depthOffset={0}
-            selectedTab={selectedTab}
-            inlineEdit={inlineEdit}
-            gitStatus={gitStatusByRef[key] ?? {}}
-            revealRequest={treeRevealRequests[key]}
-            refreshRequest={treeRefreshRequests[key]}
-            onOpenFile={onOpenFile}
-            onContextMenu={onContextMenu}
-            onRequestRename={onRequestRename}
-            onRequestDelete={onRequestDelete}
-            onInlineEditChange={onInlineEditChange}
-            onInlineEditCommit={onInlineEditCommit}
-            onInlineEditCancel={onInlineEditCancel}
-          />
-        )}
+        {expanded &&
+          (root.exists ? (
+            <CheckoutTreeBlock
+              refInfo={root.ref}
+              depthOffset={0}
+              selectedTab={selectedTab}
+              inlineEdit={inlineEdit}
+              gitStatus={gitStatusByRef[key] ?? {}}
+              revealRequest={treeRevealRequests[key]}
+              refreshRequest={treeRefreshRequests[key]}
+              onOpenFile={onOpenFile}
+              onContextMenu={onContextMenu}
+              onRequestRename={onRequestRename}
+              onRequestDelete={onRequestDelete}
+              onInlineEditChange={onInlineEditChange}
+              onInlineEditCommit={onInlineEditCommit}
+              onInlineEditCancel={onInlineEditCancel}
+            />
+          ) : (
+            <CheckoutUnavailableState depthOffset={0} />
+          ))}
       </section>
     );
   };

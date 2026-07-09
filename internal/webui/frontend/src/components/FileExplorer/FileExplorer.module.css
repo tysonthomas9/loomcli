@@ -353,9 +353,12 @@
   outline: none;
 }
 
+.rootRow:disabled {
+  cursor: default;
+}
+
 .rootRow:disabled,
 .rootRow[data-disabled] {
-  cursor: default;
   opacity: 0.48;
 }
 
@@ -402,6 +405,15 @@
   text-overflow: ellipsis;
   white-space: nowrap;
   color: var(--color-text-muted);
+}
+
+.checkoutStatusWarning {
+  width: 7px;
+  height: 7px;
+  flex: 0 0 7px;
+  border-radius: 999px;
+  background: var(--color-warning, #b45309);
+  box-shadow: 0 0 0 2px var(--color-bg-card, var(--color-bg));
 }
 
 .checkoutBadge {

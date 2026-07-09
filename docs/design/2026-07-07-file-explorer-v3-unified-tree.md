@@ -64,6 +64,10 @@ existing v2 addresses keep working.
    fan-out machinery (`file_git_status.go` already enumerates checkouts and
    prefixes paths); `change_count` = number of porcelain entries. Missing
    local checkouts report `exists:false, change_count:0` — never an error.
+   File browsing is independent of git health: a checkout whose working
+   directory exists remains browsable/readable/editable even when git metadata
+   is unreadable. Only git overlays (status decorations, Changes lens,
+   history, blame, diff) degrade.
 3. **DTO/codegen**: `make gen-go-api`, `npm run generate:types`,
    `check:generated` as in v2.
 4. No other backend changes. v2 invariants stand: structural validation only

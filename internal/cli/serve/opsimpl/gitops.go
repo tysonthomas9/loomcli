@@ -220,7 +220,7 @@ func resolveAgentWorktreeFromWSForRepo(ws *ops.WorkspaceData, name string, repo 
 	}
 	branch, err := cli.GetCurrentBranch(wtPath)
 	if err != nil {
-		return nil, fmt.Errorf("get current branch for agent %q: %w", name, err)
+		branch = "unknown"
 	}
 	return newWorkspaceWorktree(name, wtPath, branch, repo), nil
 }
