@@ -52,6 +52,10 @@ Read these in order:
 
 Related design docs:
 
+- `../design/2026-07-09-ai-sdlc-agent-control-plane-architecture.md`
+- `../adr/0001-agent-identity-role-policy-flow-and-deployment.md`
+- `../design/2026-07-09-agent-data-model-inventory-and-migration.md`
+- `../loom-glossary.md`
 - `../design/agent-run-visibility-plan.md`
 - `../design/distributed-control-plane.md`
 - `../design/distributed-control-plane-data-model.md`
