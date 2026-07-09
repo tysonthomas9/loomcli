@@ -26,7 +26,43 @@ shared source-of-truth for the event-kind enum. See §3.1.
 
 ---
 
-## 1. Product bugs — OPEN
+## 0a. Resolution — 2026-07-09
+
+All eleven §1 items are now fixed (or reclassified). Implemented via codex, then put
+through four adversarial Opus reviews (which caught a HIGH SSRF, a HIGH dead-feature, and
+a net-negative "fix" — none visible to the green test runs), re-fixed, and validated end to
+end: full aft **34/34** and the real-codex tier passing with the transcript now returning
+200 and the session diff containing the created file, both against the hardened fleet-db.
+
+| # | Item | Resolution |
+|---|---|---|
+| 1.1 | Activity feed all-generic + comment double-render | **FIXED** loom `c0636010d`/`668a80a8c` — kind normalization + old/new/field values + per-action text + drift-guard test |
+| 1.2 | Transcript 500 | **FIXED** fleet-db `b7cb667` (GET content route) + loom `c0636010d` (405 fallback) |
+| 1.3 | Diff tab permanently disabled | **FIXED** loom `c0636010d` — `patch_artifact_id` + control-plane fallback |
+| 1.4 | Token/cost/files show 0 (cloud) | **FIXED** loom `c0636010d` — TaskRun→session projection, symmetric fill |
+| 1.5 | Epic board hides completed children | **FIXED** loom `668a80a8c` — closed-only lanes render (default-on, consistent with flat board) |
+| 1.6 | "Duplicate titles merge" | **RECLASSIFIED** — it's fleet-db's intentional soft-duplicate guard; the real bug was the UI dropping the warning. **FIXED** loom `c0636010d`/`668a80a8c` — warning surfaced + "Create anyway" (force) |
+| 1.7 | Reorder silently reverts | **FIXED** loom `c0636010d`/`668a80a8c` — persisted as a local-settings pref; error toast on failure |
+| 1.8 | Table multi-select dead end | **FIXED** loom `668a80a8c` — bulk close/status/priority/assign |
+| 1.9 | No inline metadata editing | **FIXED** loom `668a80a8c` — priority/type/labels/owner inline (labels incremental) |
+| 1.10 | Repo can't be removed | **FIXED** loom `c0636010d`/`668a80a8c` — `DELETE /repos/{repo}` + confirm dialog |
+| 1.11 | Double-complete 409 | **ACCEPTED / WON'T FIX** — the unification was reverted; the benign 409 is a defensive signal guarding against a payload-losing replay |
+
+**Found by the reviews (fixed):**
+- **SSRF + object-store token exfiltration** on the new artifact-content route (HIGH) — **FIXED** fleet-db `a390f50`: URI-base allowlist, no credentials off-base, redirect refusal, create-time validation.
+- **Cross-tenant local `file://` read** (MED) — **FIXED** fleet-db `a390f50`: reads scoped to `<baseDir>/<workspace>`.
+- **Soft-dup warning dropped at the loom backend seam** (HIGH — the "Create anyway" feature was dead) — **FIXED** loom `c0636010d`.
+- **Inline labels used full-replace** (MED data loss) — **FIXED** loom `c0636010d`/`668a80a8c`: incremental add/remove.
+- **Token zero-conflation**, **404-vs-500 contract**, **unbounded TaskRun list** — **FIXED** loom `c0636010d`.
+
+**DISCONFIRMED / ACCEPTED** (unchanged): BlockedBadge renders on cards; rename keeps id; PR queue degrades gracefully; comments XSS-safe; `/terminal` auto-spawn accepted. The swim-lane board now shows completed lanes **by default** — a deliberate consistency choice with the flat board, not a regression.
+
+fleet-db lives on branch `fix/artifact-content-get-and-title-dupes` (`b7cb667` → `a390f50`),
+left unpushed for a PR. The stack-improvement items in §3 remain open follow-ups.
+
+---
+
+## 1. Product bugs — OPEN (see §0a for resolution status)
 
 ### 1.1 Activity feed renders every event as "Someone performed an action" ✅
 - **Severity:** HIGH (UX) · **Fix:** loom

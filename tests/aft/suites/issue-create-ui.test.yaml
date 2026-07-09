@@ -80,12 +80,15 @@ tests:
             document.querySelectorAll("section[data-status=backlog] article[aria-label*='ui-full-field-${RUN_ID:-local}']").length === 1
 
   # covers: LCLI-WP-001
-  # BEHAVIOR CHANGE (fleet-db origin/main): creating an issue with an existing title
-  # now returns the EXISTING issue (title upsert) instead of a duplicate — verified
-  # via API: the second POST responds with the first issue's id. Earlier fleet-db
-  # accepted duplicates; this test asserted two cards then.
-  - name: duplicate titles merge into one card
-    intent: Submitting the same title twice yields a single issue card — the second create returns the existing issue
+  # This is fleet-db's documented SOFT-DUPLICATE GUARD, not a title upsert: when the
+  # same actor creates an open issue with the same title and type within 60 seconds,
+  # the existing issue is returned (200 + `X-Idempotency-Warning: soft-duplicate`)
+  # rather than minting a duplicate. Bypass with `X-Idempotency-Force: true`.
+  # It is deliberate anti-double-submit protection (fleet-db c758a0e). The UI now
+  # surfaces the warning and offers "Create anyway"; earlier it swallowed the header,
+  # which made the guard look like silent data loss.
+  - name: duplicate titles hit the soft-duplicate guard
+    intent: Submitting the same title twice within the guard window yields a single card — the second create returns the existing issue with a soft-duplicate warning
     steps:
       - open: /ws/E2E-WS/kanban
       - wait:
@@ -106,8 +109,8 @@ tests:
       - expect: { visible: { testid: create-issue-title } }
       - fill: { testid: create-issue-title, value: "ui-duplicate-${RUN_ID:-local}" }
       - click: { testid: create-issue-submit }
-      # deterministic upsert proof: creating the same title again returns the SAME id
-      # (a timed board-count alone couldn't distinguish upsert from slow rendering)
+      # deterministic guard proof: creating the same title again returns the SAME id
+      # (a timed board-count alone couldn't distinguish the guard from slow rendering)
       - run: >-
           id1=$(curl -sf -X POST "$AFT_BASE_URL/api/workspaces/${AFT_WS:-E2E-WS}/issues"
           -H "Content-Type: application/json"

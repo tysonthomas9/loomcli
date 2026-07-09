@@ -61,17 +61,19 @@ tests:
           | python3 -c "import sys,json,os; d=json.load(sys.stdin); items=(d.get('data') or {}).get('sessions') or []; assert items, 'no session recorded'; s=items[0]; assert s.get('backend')=='codex', 'backend='+str(s.get('backend')); assert s.get('exit_code')==0, 'exit_code='+str(s.get('exit_code')); assert int(s.get('files_changed') or 0) >= 1, 'files_changed='+str(s.get('files_changed'))+' (STUB would be 0)'; open(os.environ['AFT_WORK_DIR']+'/rc-session.id','w').write(s['session_id'])"
       # 7) transcript is real: >=1 non-system entry AND references the file it created / tool
       #    activity. Shape: {success, data: {session_id, entries: [{seq, ts, role, ...}]}}.
-      #    KNOWN ISSUE (tolerated as xfail): serve reads artifact-backed transcripts via
-      #    GET /artifacts/{id}/content, but fleet-db only registers PUT for that route
-      #    (fleet-db internal/api/control_plane.go:60 vs loom infra/fleetdb/control_plane.go:405)
-      #    -> the endpoint 500s for epic-runner runs in fleetdb mode. Accept HTTP 500 with a
-      #    loud marker; any OTHER failure (404, empty entries, stub signature) still fails.
-      #    Tighten to a hard assert once fleet-db grows the GET content route.
+      #    HARD ASSERT: serve reads artifact-backed transcripts via GET /artifacts/{id}/content,
+      #    which fleet-db now registers. This previously 500'd (fleet-db had only PUT, so the
+      #    405 defeated loom's not-found-only fallback) and was tolerated as an xfail.
       - run: >-
           code=$(curl -s -o "$AFT_WORK_DIR/rc-transcript.json" -w "%{http_code}" "$AFT_BASE_URL/api/workspaces/${AFT_WS:-E2E-WS}/tasks/$(cat "$AFT_WORK_DIR/rc-task.id")/sessions/$(cat "$AFT_WORK_DIR/rc-session.id")/transcript");
-          if [ "$code" = "500" ]; then echo "KNOWN ISSUE (xfail): transcript read 500s - fleet-db lacks GET /artifacts/{id}/content (405); tolerated"; exit 0; fi;
-          [ "$code" = "200" ] || { echo "transcript endpoint returned $code"; cat "$AFT_WORK_DIR/rc-transcript.json"; exit 1; };
+          [ "$code" = "200" ] || { echo "transcript endpoint returned $code (expected 200)"; cat "$AFT_WORK_DIR/rc-transcript.json"; exit 1; };
           python3 -c "import json,os; d=json.load(open(os.environ['AFT_WORK_DIR']+'/rc-transcript.json')); ents=(d.get('data') or {}).get('entries') or []; nonsys=[e for e in ents if e.get('role')!='system']; assert nonsys, 'no non-system transcript entries'; blob=json.dumps(ents).lower(); assert 'hello.md' in blob or any(e.get('role')=='tool' for e in ents) or 'tool_use' in blob, 'transcript lacks tool activity / HELLO.md reference (stub signature)'"
+      # 7b) the session diff is now readable too (has_diff keyed off patch_artifact_id, and
+      #     GetSessionDiff gained a control-plane fallback). Content assertion, not a flag check.
+      - run: >-
+          code=$(curl -s -o "$AFT_WORK_DIR/rc-diff.json" -w "%{http_code}" "$AFT_BASE_URL/api/workspaces/${AFT_WS:-E2E-WS}/tasks/$(cat "$AFT_WORK_DIR/rc-task.id")/sessions/$(cat "$AFT_WORK_DIR/rc-session.id")/diff");
+          [ "$code" = "200" ] || { echo "session diff returned $code (expected 200)"; cat "$AFT_WORK_DIR/rc-diff.json"; exit 1; };
+          grep -q 'HELLO.md' "$AFT_WORK_DIR/rc-diff.json" || { echo "diff does not mention HELLO.md"; head -c 400 "$AFT_WORK_DIR/rc-diff.json"; exit 1; }
       # 8) NEGATIVE GUARD via filesystem: the real codex physically created HELLO.md with the
       #    exact content. The stub (default JSON mode) creates NO file. This is the strongest
       #    real-vs-stub discriminator and is independent of any serve projection gap.
