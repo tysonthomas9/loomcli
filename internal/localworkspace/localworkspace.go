@@ -12,6 +12,7 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/gitbranch"
 )
 
 // Repo is the local filesystem view of a workspace repository.
@@ -153,11 +154,26 @@ func EnsureGitWorktreeFromBranch(repoPath, targetPath, branchName, remoteName, d
 		return fmt.Errorf("creating worktree parent: %w", err)
 	}
 
+	branch, err := gitbranch.Inspect(repoPath, branchName)
+	if err != nil {
+		return err
+	}
+	if branch.State == gitbranch.StateBroken {
+		recovery, err := gitbranch.Recover(repoPath, branchName, defaultBranch, branch)
+		if err != nil {
+			return err
+		}
+		return addBranchWorktree(repoPath, targetPath, branchName, recovery.BaseSHA)
+	}
+
 	baseRef, err := resolveFreshBaseRef(repoPath, remoteName, defaultBranch)
 	if err != nil {
 		return err
 	}
+	return addBranchWorktree(repoPath, targetPath, branchName, baseRef)
+}
 
+func addBranchWorktree(repoPath, targetPath, branchName, baseRef string) error {
 	args := []string{"worktree", "add", targetPath, "-b", branchName}
 	if baseRef != "" {
 		args = append(args, baseRef)
