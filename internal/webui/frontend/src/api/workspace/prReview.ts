@@ -6,6 +6,10 @@ export type PullRequestDiff = components["schemas"]["PullRequestDiff"];
 export type PullRequestReviewResult =
   components["schemas"]["PullRequestReviewResult"];
 export type PullRequestReviewEvent = "approve" | "request_changes" | "comment";
+export type ReviewerEnsureResult =
+  components["schemas"]["ReviewerEnsureResult"];
+export type ReviewerMessageResult =
+  components["schemas"]["ReviewerMessageResult"];
 
 export async function getPullRequestDetail(
   ws: string,
@@ -55,6 +59,42 @@ export async function postPullRequestReview(
     {
       params: { path: { ws, owner, repo, number } },
       body: input,
+    },
+  );
+  if (error) throw apiErrorFromResponse(error, response);
+  return unwrapResponse(data, response);
+}
+
+/** Stand up (or reuse) the per-PR codex review agent on a PR-head checkout. */
+export async function ensureReviewer(
+  ws: string,
+  owner: string,
+  repo: string,
+  number: number,
+): Promise<ReviewerEnsureResult> {
+  const { data, error, response } = await api.POST(
+    "/api/workspaces/{ws}/pull-requests/{owner}/{repo}/{number}/reviewer",
+    {
+      params: { path: { ws, owner, repo, number } },
+    },
+  );
+  if (error) throw apiErrorFromResponse(error, response);
+  return unwrapResponse(data, response);
+}
+
+/** Send a chat turn to the per-PR review agent (must be started first). */
+export async function sendReviewerMessage(
+  ws: string,
+  owner: string,
+  repo: string,
+  number: number,
+  text: string,
+): Promise<ReviewerMessageResult> {
+  const { data, error, response } = await api.POST(
+    "/api/workspaces/{ws}/pull-requests/{owner}/{repo}/{number}/messages",
+    {
+      params: { path: { ws, owner, repo, number } },
+      body: { text },
     },
   );
   if (error) throw apiErrorFromResponse(error, response);

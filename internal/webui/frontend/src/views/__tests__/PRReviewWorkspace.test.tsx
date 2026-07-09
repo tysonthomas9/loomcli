@@ -23,6 +23,7 @@ const mocks = vi.hoisted(() => ({
   startAgent: vi.fn(),
   getPullRequestDetail: vi.fn(),
   postPullRequestReview: vi.fn(),
+  ensureReviewer: vi.fn(),
   data: {
     agents: [] as unknown[],
     issues: [] as unknown[],
@@ -55,6 +56,7 @@ vi.mock("@/api", () => ({
 vi.mock("@/api/workspace/prReview", () => ({
   getPullRequestDetail: mocks.getPullRequestDetail,
   postPullRequestReview: mocks.postPullRequestReview,
+  ensureReviewer: mocks.ensureReviewer,
 }));
 
 vi.mock("@/hooks/api", () => ({
@@ -182,7 +184,30 @@ describe("PRReviewWorkspace decisions", () => {
     });
     mocks.createIssue.mockResolvedValue(makeIssue({ id: "TASK-99" }));
     mocks.updateIssue.mockResolvedValue(makeIssue({ id: "TASK-99" }));
+    mocks.ensureReviewer.mockResolvedValue({
+      agent_name: "review-hello-pr-7",
+      checked_out_sha: "sha-old",
+      seeded: true,
+    });
     mocks.actions.updateIssueStatus.mockResolvedValue(undefined);
+  });
+
+  it("starts the review agent and opens its terminal", async () => {
+    renderWorkspace();
+
+    fireEvent.click(screen.getByTestId("pr-discuss-button"));
+
+    await waitFor(() => {
+      expect(mocks.ensureReviewer).toHaveBeenCalledWith(
+        "WS",
+        "octocat",
+        "hello",
+        7,
+      );
+    });
+    expect(mocks.navigate).toHaveBeenCalledWith(
+      "/ws/WS/agents?agent=review-hello-pr-7",
+    );
   });
 
   it("approves on GitHub before closing the ticket", async () => {

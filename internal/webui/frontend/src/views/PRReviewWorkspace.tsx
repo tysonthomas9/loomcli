@@ -16,6 +16,7 @@ import { useNavigate } from "react-router-dom";
 
 import { createIssue, updateIssue } from "@/api";
 import {
+  ensureReviewer,
   getPullRequestDetail,
   postPullRequestReview,
 } from "@/api/workspace/prReview";
@@ -151,6 +152,7 @@ export function PRReviewWorkspace({
   const [reviewComment, setReviewComment] = useState("");
   const [stale, setStale] = useState(false);
   const [creatingTicket, setCreatingTicket] = useState(false);
+  const [startingReviewer, setStartingReviewer] = useState(false);
 
   const diffAgent = useMemo(
     () => (issue ? resolveDiffAgentForIssue(issue, agents) : undefined),
@@ -438,6 +440,35 @@ export function PRReviewWorkspace({
     }
   };
 
+  // Stand up the per-PR codex review agent (checked out at the PR head) and
+  // open its terminal — mounting that agent's TerminalView is what boots codex,
+  // at which point the seeded review turn + any messages are delivered.
+  const startReviewer = async (): Promise<void> => {
+    const number = prNumber ? Number(prNumber) : NaN;
+    if (!pullRequestRepo || !Number.isFinite(number)) return;
+    setStartingReviewer(true);
+    try {
+      const result = await ensureReviewer(
+        workspaceId,
+        pullRequestRepo.owner,
+        pullRequestRepo.repo,
+        number,
+      );
+      showToast(`Review agent ${result.agent_name} is ready`);
+      navigate(
+        `/ws/${encodeURIComponent(workspaceId)}/agents?agent=${encodeURIComponent(result.agent_name)}`,
+      );
+    } catch (err) {
+      showToast(
+        err instanceof Error ? err.message : "Failed to start review agent",
+        { type: "error" },
+      );
+    } finally {
+      setStartingReviewer(false);
+    }
+  };
+
+  const canDiscussPR = Boolean(pullRequestRepo && prNumber);
   const freeAgents = agents.filter((a) => !busyAgentTask.has(a.name));
 
   return (
@@ -581,6 +612,21 @@ export function PRReviewWorkspace({
               onClick={() => void createTicket()}
             >
               {creatingTicket ? "Creating ticket…" : "＋ Create ticket"}
+            </button>
+          )}
+
+          {/* Conversational reviewer: start a codex agent checked out at the PR
+              head and open its terminal. Available for any resolvable PR. */}
+          {canDiscussPR && (
+            <button
+              type="button"
+              className={styles.agentButton}
+              data-testid="pr-discuss-button"
+              disabled={startingReviewer}
+              onClick={() => void startReviewer()}
+              title="Open a PR-aware review agent in a terminal"
+            >
+              {startingReviewer ? "Starting…" : "💬 Discuss PR"}
             </button>
           )}
 
