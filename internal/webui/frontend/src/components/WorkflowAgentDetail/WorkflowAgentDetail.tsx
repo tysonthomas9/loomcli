@@ -3,8 +3,8 @@
  * binding), rendered inside the same AgentsPage shell that role agents use.
  *
  * Capability-based content (a binding has runs + config, but no worktree):
- *  - Runs tab (terminal-tab equivalent): run history from listWorkflowRuns with
- *    live status via the per-run SSE stream; idle state shows the next fire.
+ *  - Runs tab (terminal-tab equivalent): binding-scoped run history with live
+ *    status via the per-run SSE stream; idle state shows the next fire.
  *  - Info tab: driver + active version + trigger cadence + run stats, plus an
  *    "Edit configuration" button opening WorkflowSourceModal for the driver.
  *  - Button bar: Run now, Enable/Disable.
@@ -13,10 +13,16 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 
+import { SessionRunDetail } from "@/components/SessionRunDetail";
 import { WorkflowSourceModal } from "@/components/WorkflowSourceModal";
-import { useWorkflowAgentDetail } from "@/hooks/workflows/useWorkflowAgentDetail";
+import { useTaskSessions } from "@/hooks/terminal";
+import {
+  useWorkflowAgentDetail,
+  type WorkflowAgentRunStats,
+} from "@/hooks/workflows/useWorkflowAgentDetail";
 import { useToast } from "@/hooks/ui/useToast";
 import {
+  getWorkflowRun,
   getWorkspaceRole,
   isTerminalWorkflowRunStatus,
   promptAgentRoleName,
@@ -26,10 +32,12 @@ import {
   type WorkflowRun,
   type WorkflowRunStatus,
 } from "@/api";
+import type { SessionRecord } from "@/types/agent";
 import { getCompactAvatarInitials } from "@/utils/compactAvatarInitials";
 import { getAvatarColor, shouldUseWhiteText } from "@/utils/colorUtils";
 import {
   bindingCadenceLabel,
+  bindingDisplayName,
   bindingHealth,
   bindingKindLabel,
   describeCronSchedule,
@@ -79,7 +87,8 @@ export interface WorkflowAgentDetailProps {
   onDeleted: () => void;
 }
 
-type DetailTab = "runs" | "info";
+
+type BindingHealth = ReturnType<typeof bindingHealth>;
 
 /** CSS custom-property color per run status, for the run status dot. */
 const RUN_STATUS_COLOR: Record<WorkflowRunStatus, string> = {
@@ -89,6 +98,7 @@ const RUN_STATUS_COLOR: Record<WorkflowRunStatus, string> = {
   failed: "var(--color-danger, #d14545)",
   needs_review: "var(--color-primary, #4477aa)",
   cancelled: "var(--color-text-tertiary, #888)",
+  suspended_awaiting_event: "var(--color-warning, #d99700)",
 };
 
 function runStatusLabel(status: WorkflowRunStatus): string {
@@ -102,20 +112,48 @@ function formatRunTime(iso: string | null | undefined): string {
   return formatFireTime(iso) || "—";
 }
 
-export function WorkflowAgentDetail({
+export interface WorkflowAgentDetailState {
+  runs: WorkflowRun[];
+  loading: boolean;
+  error: string | null;
+  stats: WorkflowAgentRunStats;
+  selectedRunId: string | null;
+  setSelectedRunId: (runId: string) => void;
+  focusRun: WorkflowRun | null;
+  showSource: boolean;
+  setShowSource: (show: boolean) => void;
+  busy: boolean;
+  handleRunNow: () => Promise<void>;
+  handleToggleEnabled: () => Promise<void>;
+  promptRoleName: string;
+  displayName: string;
+  avatarBg: string;
+  avatarFg: string;
+  cadence: string;
+  nextFire: string;
+  health: BindingHealth;
+}
+
+export interface UseWorkflowAgentDetailStateArgs {
+  workspaceId: string;
+  binding: TriggerBinding | undefined;
+  onSetEnabled: WorkflowAgentDetailProps["onSetEnabled"];
+  onRunBinding: WorkflowAgentDetailProps["onRunBinding"];
+}
+
+export function useWorkflowAgentDetailState({
   workspaceId,
   binding,
   onSetEnabled,
   onRunBinding,
-  onUpdate,
-  onDelete,
-  onDeleted,
-}: WorkflowAgentDetailProps): JSX.Element {
-  const { runs, loading, error, driverId, activeVersionId, stats, refresh } =
-    useWorkflowAgentDetail(workspaceId, binding.driver_id);
+}: UseWorkflowAgentDetailStateArgs): WorkflowAgentDetailState {
+  const bindingId = binding?.binding_id ?? "";
+  const { runs, loading, error, stats, refresh } = useWorkflowAgentDetail(
+    workspaceId,
+    bindingId,
+  );
   const { showToast } = useToast();
 
-  const [tab, setTab] = useState<DetailTab>("runs");
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
   const [showSource, setShowSource] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -123,13 +161,18 @@ export function WorkflowAgentDetail({
   // A prompt agent carries its roleName in the binding's run-input
   // (source_config_ref). When present, the Info tab shows the ROLE prompt editor
   // (the primary edit surface) alongside the source editor (advanced).
-  const promptRoleName = promptAgentRoleName(binding);
+  const promptRoleName = binding ? promptAgentRoleName(binding) : "";
 
-  const avatarBg = getAvatarColor(binding.binding_id);
+  // Color stays keyed on the stable binding_id (a rename must not recolor the
+  // avatar); the initials + title show the operator-entered Name (fix a).
+  const displayName = binding ? bindingDisplayName(binding) : "";
+  const avatarBg = getAvatarColor(binding?.binding_id ?? "agent");
   const avatarFg = shouldUseWhiteText(avatarBg) ? "#fff" : "#171717";
-  const cadence = bindingCadenceLabel(binding);
-  const nextFire = formatFireTime(binding.next_fire_at);
-  const health = bindingHealth(binding);
+  const cadence = binding ? bindingCadenceLabel(binding) : "";
+  const nextFire = formatFireTime(binding?.next_fire_at);
+  const health = binding
+    ? bindingHealth(binding)
+    : ({ state: "idle", label: "Idle", tooltip: "" } as BindingHealth);
 
   // Focus the selected run, else the newest (runs are newest-first).
   const focusRun = useMemo<WorkflowRun | null>(() => {
@@ -139,7 +182,14 @@ export function WorkflowAgentDetail({
     return runs[0] ?? null;
   }, [selectedRunId, runs]);
 
+  useEffect(() => {
+    setSelectedRunId(null);
+    setShowSource(false);
+    setBusy(false);
+  }, [bindingId]);
+
   const handleRunNow = useCallback(async () => {
+    if (!binding) return;
     setBusy(true);
     try {
       // Config-by-reference: the binding-scoped run-now endpoint stamps the
@@ -157,9 +207,10 @@ export function WorkflowAgentDetail({
     } finally {
       setBusy(false);
     }
-  }, [binding.binding_id, onRunBinding, refresh, showToast]);
+  }, [binding, onRunBinding, refresh, showToast]);
 
   const handleToggleEnabled = useCallback(async () => {
+    if (!binding) return;
     setBusy(true);
     try {
       await onSetEnabled(binding.binding_id, !binding.enabled);
@@ -173,132 +224,187 @@ export function WorkflowAgentDetail({
     } finally {
       setBusy(false);
     }
-  }, [binding.binding_id, binding.enabled, onSetEnabled, showToast]);
+  }, [binding, onSetEnabled, showToast]);
 
+  return {
+    runs,
+    loading,
+    error,
+    stats,
+    selectedRunId,
+    setSelectedRunId,
+    focusRun,
+    showSource,
+    setShowSource,
+    busy,
+    handleRunNow,
+    handleToggleEnabled,
+    promptRoleName,
+    displayName,
+    avatarBg,
+    avatarFg,
+    cadence,
+    nextFire,
+    health,
+  };
+}
+
+export function WorkflowAgentHeader({
+  binding,
+  detail,
+}: {
+  binding: TriggerBinding;
+  detail: WorkflowAgentDetailState;
+}): JSX.Element {
   return (
-    <div className={styles.root} data-testid="workflow-agent-detail">
-      <div className={styles.header}>
-        <span
-          className={styles.avatar}
-          style={{ backgroundColor: avatarBg, color: avatarFg }}
-          aria-hidden="true"
-        >
-          {getCompactAvatarInitials(binding.binding_id)}
-        </span>
-        <div className={styles.headText}>
-          <h1 className={styles.title}>{binding.binding_id}</h1>
-          <p className={styles.sub}>
-            <span>Autonomous agent</span>
-            <span aria-hidden="true">·</span>
-            <span>{cadence || bindingKindLabel(binding)}</span>
-          </p>
-        </div>
-        <span
-          className={styles.statusPill}
-          data-enabled={binding.enabled}
-          data-state={health.state}
-          title={health.tooltip}
-          data-testid="workflow-agent-status-pill"
-        >
-          {health.label}
-        </span>
+    <div className={styles.header}>
+      <span
+        className={styles.avatar}
+        style={{ backgroundColor: detail.avatarBg, color: detail.avatarFg }}
+        aria-hidden="true"
+      >
+        {getCompactAvatarInitials(detail.displayName)}
+      </span>
+      <div className={styles.headText}>
+        <h1 className={styles.title}>{detail.displayName}</h1>
+        <p className={styles.sub}>
+          <span>Autonomous agent</span>
+          <span aria-hidden="true">·</span>
+          <span>{detail.cadence || bindingKindLabel(binding)}</span>
+        </p>
       </div>
-
-      <div className={styles.buttonBar}>
-        <button
-          type="button"
-          className={styles.btnPrimary}
-          onClick={handleRunNow}
-          disabled={busy}
-          data-testid="workflow-agent-run-now"
-        >
-          Run now
-        </button>
-        <button
-          type="button"
-          className={styles.btn}
-          onClick={handleToggleEnabled}
-          disabled={busy}
-          data-testid="workflow-agent-toggle-enabled"
-        >
-          {binding.enabled ? "Disable" : "Enable"}
-        </button>
-        <button
-          type="button"
-          className={styles.btn}
-          onClick={() => setShowSource(true)}
-          data-testid="workflow-agent-edit-config"
-        >
-          Edit configuration
-        </button>
-      </div>
-
-      <div className={styles.tabStrip} role="tablist">
-        <button
-          type="button"
-          role="tab"
-          className={styles.tab}
-          data-active={tab === "runs" || undefined}
-          aria-selected={tab === "runs"}
-          onClick={() => setTab("runs")}
-          data-testid="workflow-agent-tab-runs"
-        >
-          Runs
-        </button>
-        <button
-          type="button"
-          role="tab"
-          className={styles.tab}
-          data-active={tab === "info" || undefined}
-          aria-selected={tab === "info"}
-          onClick={() => setTab("info")}
-          data-testid="workflow-agent-tab-info"
-        >
-          Info
-        </button>
-      </div>
-
-      <div className={styles.body}>
-        {tab === "runs" ? (
-          <RunsTab
-            runs={runs}
-            loading={loading}
-            error={error}
-            enabled={binding.enabled}
-            nextFire={nextFire}
-            cadence={cadence}
-            focusRun={focusRun}
-            selectedRunId={selectedRunId}
-            onSelectRun={setSelectedRunId}
-          />
-        ) : (
-          <InfoTab
-            workspaceId={workspaceId}
-            binding={binding}
-            roleName={promptRoleName}
-            driverId={driverId || binding.driver_id}
-            activeVersionId={activeVersionId || binding.driver_version_id}
-            nextFire={nextFire}
-            stats={stats}
-            onEditConfig={() => setShowSource(true)}
-            onUpdate={onUpdate}
-            onDelete={onDelete}
-            onDeleted={onDeleted}
-          />
-        )}
-      </div>
-
-      <WorkflowSourceModal
-        isOpen={showSource}
-        workspaceId={workspaceId}
-        workflowName={binding.driver_id}
-        onClose={() => setShowSource(false)}
-      />
+      <span
+        className={styles.statusPill}
+        data-enabled={binding.enabled}
+        data-state={detail.health.state}
+        title={detail.health.tooltip}
+        data-testid="workflow-agent-status-pill"
+      >
+        {detail.health.label}
+      </span>
     </div>
   );
 }
 
+export function WorkflowAgentActionBar({
+  binding,
+  detail,
+}: {
+  binding: TriggerBinding;
+  detail: WorkflowAgentDetailState;
+}): JSX.Element {
+  return (
+    <div className={styles.buttonBar}>
+      <button
+        type="button"
+        className={styles.btnPrimary}
+        onClick={() => void detail.handleRunNow()}
+        disabled={detail.busy}
+        data-testid="workflow-agent-run-now"
+      >
+        Run now
+      </button>
+      <button
+        type="button"
+        className={styles.btn}
+        onClick={() => void detail.handleToggleEnabled()}
+        disabled={detail.busy}
+        data-testid="workflow-agent-toggle-enabled"
+      >
+        {binding.enabled ? "Disable" : "Enable"}
+      </button>
+      <button
+        type="button"
+        className={styles.btn}
+        onClick={() => detail.setShowSource(true)}
+        data-testid="workflow-agent-edit-config"
+      >
+        Edit configuration
+      </button>
+    </div>
+  );
+}
+
+export function WorkflowAgentRunsPane({
+  workspaceId,
+  binding,
+  detail,
+}: {
+  workspaceId: string;
+  binding: TriggerBinding;
+  detail: WorkflowAgentDetailState;
+}): JSX.Element {
+  return (
+    <RunsTab
+      workspaceId={workspaceId}
+      runs={detail.runs}
+      loading={detail.loading}
+      error={detail.error}
+      enabled={binding.enabled}
+      nextFire={detail.nextFire}
+      cadence={detail.cadence}
+      focusRun={detail.focusRun}
+      selectedRunId={detail.selectedRunId}
+      onSelectRun={detail.setSelectedRunId}
+    />
+  );
+}
+
+export function WorkflowAgentInfoPane({
+  workspaceId,
+  binding,
+  detail,
+  onUpdate,
+  onDelete,
+  onDeleted,
+}: {
+  workspaceId: string;
+  binding: TriggerBinding;
+  detail: WorkflowAgentDetailState;
+  onUpdate: WorkflowAgentDetailProps["onUpdate"];
+  onDelete: WorkflowAgentDetailProps["onDelete"];
+  onDeleted: WorkflowAgentDetailProps["onDeleted"];
+}): JSX.Element {
+  return (
+    <InfoTab
+      workspaceId={workspaceId}
+      binding={binding}
+      roleName={detail.promptRoleName}
+      driverId={binding.driver_id}
+      activeVersionId={binding.driver_version_id}
+      nextFire={detail.nextFire}
+      stats={detail.stats}
+      onEditConfig={() => detail.setShowSource(true)}
+      onUpdate={onUpdate}
+      onDelete={onDelete}
+      onDeleted={onDeleted}
+    />
+  );
+}
+
+export function WorkflowAgentSourceModal({
+  workspaceId,
+  binding,
+  isOpen,
+  onClose,
+}: {
+  workspaceId: string;
+  binding: TriggerBinding | undefined;
+  isOpen: boolean;
+  onClose: () => void;
+}): JSX.Element | null {
+  if (!binding) return null;
+  return (
+    <WorkflowSourceModal
+      isOpen={isOpen}
+      workspaceId={workspaceId}
+      workflowName={binding.driver_id}
+      onClose={onClose}
+    />
+  );
+}
 function RunsTab({
+  workspaceId,
   runs,
   loading,
   error,
@@ -309,6 +415,7 @@ function RunsTab({
   selectedRunId,
   onSelectRun,
 }: {
+  workspaceId: string;
   runs: WorkflowRun[];
   loading: boolean;
   error: string | null;
@@ -330,7 +437,7 @@ function RunsTab({
       </div>
 
       {focusRun ? (
-        <RunDetailCard run={focusRun} />
+        <RunDetailCard workspaceId={workspaceId} run={focusRun} />
       ) : null}
 
       <section className={styles.card}>
@@ -342,7 +449,10 @@ function RunsTab({
         ) : loading && runs.length === 0 ? (
           <div className={styles.emptyText}>Loading runs…</div>
         ) : runs.length === 0 ? (
-          <div className={styles.emptyText} data-testid="workflow-agent-no-runs">
+          <div
+            className={styles.emptyText}
+            data-testid="workflow-agent-no-runs"
+          >
             No runs yet.{" "}
             {enabled
               ? nextFire
@@ -407,25 +517,76 @@ function RunsTab({
   );
 }
 
-function RunDetailCard({ run }: { run: WorkflowRun }): JSX.Element {
-  const live = !isTerminalWorkflowRunStatus(run.status);
+interface LinkedRunSession {
+  taskRunId: string;
+  taskId: string;
+  sessionId: string;
+}
+
+function RunDetailCard({
+  workspaceId,
+  run,
+}: {
+  workspaceId: string;
+  run: WorkflowRun;
+}): JSX.Element {
+  const [detailRun, setDetailRun] = useState(run);
+
+  useEffect(() => {
+    setDetailRun(run);
+  }, [run]);
+
+  useEffect(() => {
+    if (!workspaceId || !run.run_id) return;
+    let cancelled = false;
+    void getWorkflowRun(workspaceId, run.run_id)
+      .then((fresh) => {
+        if (!cancelled) setDetailRun(fresh);
+      })
+      .catch(() => {
+        // The history row is still useful if the detail enrichment fetch races a
+        // deleted run or a transient backend error.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [workspaceId, run.run_id, run.status]);
+
+  const live = !isTerminalWorkflowRunStatus(detailRun.status);
+  const linkedSession = useMemo(
+    () => linkedSessionForRun(detailRun),
+    [detailRun],
+  );
+  const {
+    sessions,
+    isLoading: sessionsLoading,
+    error: sessionsError,
+  } = useTaskSessions(linkedSession?.taskId || null);
+  const session = useMemo(() => {
+    if (!linkedSession?.taskId || !linkedSession.sessionId) return null;
+    return (
+      sessions.find((s) => s.session_id === linkedSession.sessionId) ??
+      fallbackSessionFromRun(detailRun, linkedSession)
+    );
+  }, [detailRun, linkedSession, sessions]);
+
   // Zero-time (unset) instants format to "" and render as "—" / are omitted.
-  const started = formatFireTime(run.started_at);
-  const heartbeat = formatFireTime(run.last_heartbeat);
+  const started = formatFireTime(detailRun.started_at);
+  const heartbeat = formatFireTime(detailRun.last_heartbeat);
   return (
     <section className={styles.card} data-testid="workflow-agent-run-detail">
       <div className={styles.runDetailHead}>
         <span
           className={styles.runDot}
-          style={{ background: RUN_STATUS_COLOR[run.status] }}
+          style={{ background: RUN_STATUS_COLOR[detailRun.status] }}
           data-live={live || undefined}
           aria-hidden="true"
         />
         <span className={styles.runDetailStatus}>
-          {runStatusLabel(run.status)}
+          {runStatusLabel(detailRun.status)}
         </span>
         {live ? <span className={styles.liveTag}>live</span> : null}
-        <code className={styles.runId}>{run.run_id}</code>
+        <code className={styles.runId}>{detailRun.run_id}</code>
       </div>
       <dl className={styles.detailGrid}>
         {started ? (
@@ -436,12 +597,12 @@ function RunDetailCard({ run }: { run: WorkflowRun }): JSX.Element {
         ) : (
           <div>
             <dt>Created</dt>
-            <dd>{formatRunTime(run.created_at)}</dd>
+            <dd>{formatRunTime(detailRun.created_at)}</dd>
           </div>
         )}
         <div>
           <dt>Finished</dt>
-          <dd>{formatRunTime(run.finished_at)}</dd>
+          <dd>{formatRunTime(detailRun.finished_at)}</dd>
         </div>
         {heartbeat && live ? (
           <div>
@@ -449,16 +610,155 @@ function RunDetailCard({ run }: { run: WorkflowRun }): JSX.Element {
             <dd>{heartbeat}</dd>
           </div>
         ) : null}
-        {run.error_class ? (
+        {detailRun.error_class ? (
           <div>
             <dt>Error</dt>
-            <dd className={styles.runErr}>{run.error_class}</dd>
+            <dd className={styles.runErr}>{detailRun.error_class}</dd>
           </div>
         ) : null}
       </dl>
-      {run.summary ? <p className={styles.detailSummary}>{run.summary}</p> : null}
+      {detailRun.summary ? (
+        <p className={styles.detailSummary}>{detailRun.summary}</p>
+      ) : null}
+
+      <div className={styles.runTranscript}>
+        {linkedSession?.taskId && session ? (
+          <SessionRunDetail taskId={linkedSession.taskId} session={session} />
+        ) : linkedSession?.taskRunId ? (
+          <div className={styles.transcriptEmpty}>
+            Transcript link pending for task run{" "}
+            <code>{linkedSession.taskRunId}</code>.
+          </div>
+        ) : sessionsError ? (
+          <div className={styles.transcriptEmpty}>
+            Failed to load transcript metadata: {sessionsError.message}
+          </div>
+        ) : sessionsLoading ? (
+          <div className={styles.transcriptEmpty}>Loading transcript…</div>
+        ) : (
+          <div className={styles.transcriptEmpty}>
+            No task-run transcript linked to this run yet.
+          </div>
+        )}
+      </div>
     </section>
   );
+}
+
+function linkedSessionForRun(run: WorkflowRun): LinkedRunSession | null {
+  const output = run.output ?? {};
+  const step = (run.steps ?? []).find((s) => firstString(s.task_run_id) !== "");
+  const taskRunId = firstString(
+    output.taskRunId,
+    output.task_run_id,
+    step?.task_run_id,
+  );
+  const sessionId = firstString(
+    output.sessionId,
+    output.session_id,
+    taskRunId ? `flue-${taskRunId}` : "",
+  );
+  if (!taskRunId && !sessionId) return null;
+  return {
+    taskRunId,
+    taskId: firstString(
+      output.issueId,
+      output.issue_id,
+      output.taskId,
+      output.task_id,
+      step?.task_id,
+      taskIdFromPayload(run.payload),
+    ),
+    sessionId,
+  };
+}
+
+function taskIdFromPayload(payload: unknown): string {
+  const root = asRecord(payload);
+  if (!root) return "";
+  return firstString(
+    root.taskId,
+    root.task_id,
+    root.issueId,
+    root.issue_id,
+    asRecord(root.event)?.taskId,
+    asRecord(root.event)?.task_id,
+    asRecord(root.event)?.issueId,
+    asRecord(root.event)?.issue_id,
+    asRecord(root.input)?.taskId,
+    asRecord(root.input)?.task_id,
+    asRecord(root.input)?.issueId,
+    asRecord(root.input)?.issue_id,
+  );
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  if (value == null || typeof value !== "object" || Array.isArray(value)) {
+    return null;
+  }
+  return value as Record<string, unknown>;
+}
+
+function firstString(...values: unknown[]): string {
+  for (const value of values) {
+    if (typeof value === "string") {
+      const trimmed = value.trim();
+      if (trimmed) return trimmed;
+    }
+  }
+  return "";
+}
+
+function fallbackSessionFromRun(
+  run: WorkflowRun,
+  link: LinkedRunSession,
+): SessionRecord {
+  const sessionStatus = workflowRunToSessionStatus(run.status);
+  const live = !isTerminalWorkflowRunStatus(run.status);
+  const session: SessionRecord = {
+    session_id: link.sessionId,
+    task_id: link.taskId,
+    agent_name: run.driver_id,
+    backend: run.output?.backend ?? "flue",
+    started_at: run.started_at || run.created_at,
+    ended_at: run.finished_at ?? null,
+    duration_s: 0,
+    status: sessionStatus,
+    exit_code: sessionStatus === "failed" ? 1 : 0,
+    input_tokens: 0,
+    output_tokens: 0,
+    cache_read_tokens: 0,
+    cache_write_tokens: 0,
+    estimated_cost_usd: 0,
+    files_changed: 0,
+    lines_added: 0,
+    lines_removed: 0,
+    files_touched: [],
+    attempt_num: 0,
+    is_active: live,
+    has_transcript: true,
+    has_diff: false,
+  };
+  if (run.error_class) {
+    session.error_class = run.error_class;
+    session.last_error = run.error_class;
+  }
+  return session;
+}
+
+function workflowRunToSessionStatus(status: WorkflowRunStatus): string {
+  switch (status) {
+    case "failed":
+      return "failed";
+    case "cancelled":
+      return "aborted";
+    case "queued":
+    case "running":
+    case "suspended_awaiting_event":
+      return "running";
+    default:
+      return "completed";
+  }
 }
 
 function InfoTab({
@@ -528,7 +828,9 @@ function InfoTab({
                 <dd>
                   {describeCronSchedule(binding.schedule)}
                   {binding.schedule ? (
-                    <code className={styles.inlineCode}>{binding.schedule}</code>
+                    <code className={styles.inlineCode}>
+                      {binding.schedule}
+                    </code>
                   ) : null}
                 </dd>
               </div>
@@ -741,7 +1043,11 @@ function ManageCard({
       </div>
 
       {editError && (
-        <div className={styles.errorText} role="alert" data-testid="workflow-agent-edit-error">
+        <div
+          className={styles.errorText}
+          role="alert"
+          data-testid="workflow-agent-edit-error"
+        >
           {editError}
         </div>
       )}
@@ -768,7 +1074,10 @@ function ManageCard({
 
       <div className={styles.dangerZone}>
         {confirmingDelete ? (
-          <div className={styles.confirmRow} data-testid="workflow-agent-delete-confirm">
+          <div
+            className={styles.confirmRow}
+            data-testid="workflow-agent-delete-confirm"
+          >
             <span className={styles.confirmText}>
               Delete this agent? This revokes its connector grants and cannot be
               undone.
@@ -844,7 +1153,8 @@ function RolePromptCard({
         setBaseline(res.prompt ?? "");
       })
       .catch((err) => {
-        if (!cancelled) setError((err as Error).message || "Failed to load role");
+        if (!cancelled)
+          setError((err as Error).message || "Failed to load role");
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
@@ -881,7 +1191,10 @@ function RolePromptCard({
         <>
           <textarea
             className={styles.manageInput}
-            style={{ minHeight: "12rem", fontFamily: "var(--font-mono, monospace)" }}
+            style={{
+              minHeight: "12rem",
+              fontFamily: "var(--font-mono, monospace)",
+            }}
             value={prompt}
             onChange={(e) => setPrompt(e.target.value)}
             spellCheck={false}

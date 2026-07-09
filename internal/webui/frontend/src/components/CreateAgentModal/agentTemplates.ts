@@ -1,41 +1,23 @@
 /**
- * Agent template catalog — the kind-tagged descriptors that power the
- * CreateAgentModal gallery.
+ * Agent template catalog for the CreateAgentModal behavior gallery.
  *
- * Each template declares which agent "lane" it belongs to via `kind`, which is
- * the seam the submit handler routes on:
- *
- *   lead         → POST /agents (role=lead) + open the lead terminal
- *   builtin-role → POST /agents (role=plan|task)
- *   custom-role  → ensure Role + prompt file (role API), then POST /agents
- *   workflow     → create a cron trigger binding (which self-heals + activates
- *                  the builtin workflow); the review loop also provisions a
- *                  github connector + grants. No agent row is created, but the
- *                  binding surfaces as an autonomous agent in the sidebar +
- *                  WorkflowAgentDetail (which owns run history, toggle, edit,
- *                  and delete — the retired AutomationsModal's job).
- *
- * Event-driven (webhook) binding creation stays CLI-only for now
- * (`loom trigger bindings create`), per the proposal's visibility-only scope
- * for webhook UX; such bindings are still listed + managed once they exist.
+ * Main cards are organized by what the user wants the agent to do:
+ * role-backed behavior cards (Planner, Coder, custom roles, + New role) and
+ * scripted workflow behaviors. The old daemon-supervised cards remain available
+ * in an advanced section because they still hit the legacy agentdef endpoint.
  */
 
 export type AgentTemplateKind =
+  | "role"
+  | "role-create"
+  | "workflow"
   | "lead"
   | "builtin-role"
-  | "custom-role"
-  | "workflow"
-  // prompt-agent → ensure a Role (prompt as data), then create a cron trigger
-  // binding on the `prompt-agent` builtin whose run-input carries the roleName.
-  // The fired run claims a ready task and dispatches the local-task-runner with
-  // the role's prompt — no daemon supervisor. The binding surfaces as an
-  // autonomous agent (sidebar + WorkflowAgentDetail); the role prompt is edited
-  // from the detail textarea, so one edit updates every agent wearing the role.
-  | "prompt-agent";
+  | "custom-role";
 
-export type TemplateSection = "background" | "workflows" | "lead";
+export type TemplateSection = "behavior" | "advanced";
 
-/** Provisioning data for a `custom-role` template. */
+/** Provisioning data for a legacy `custom-role` daemon template. */
 export interface CustomRoleSpec {
   /** Canonical role name to ensure (e.g. "bug-triage"). */
   roleName: string;
@@ -57,20 +39,11 @@ export interface CustomRoleSpec {
   deniedTools?: string[];
 }
 
-/** Provisioning data for a `prompt-agent` template (defaults for the form). */
-export interface PromptAgentSpec {
-  /** Default role name pre-filled in the "new role" field. */
-  roleName: string;
-  /** Prompt filename seeded under the workspace prompt dir on first use. */
+/** Defaults used when the + New role card creates a role transactionally. */
+export interface RoleCreateDefaults {
   promptFilename: string;
-  /** Default prompt body pre-filled in the new-role textarea. */
-  promptContent: string;
-  /** Optional role description. */
-  description?: string;
-  /** Task-phase filter for the ensured role ("any" | "needs_plan" | ...). */
   taskFilter?: string;
-  /** Stable trigger-binding id prefix; the concrete id folds in the role name. */
-  bindingIdPrefix: string;
+  description?: string;
 }
 
 /** A single deny-by-default connector grant provisioned for a `workflow`. */
@@ -110,16 +83,13 @@ export interface WorkflowSpec {
    */
   workflow: string;
   /**
-   * Stable trigger-binding id (also the grants' binding_id for review). For a
-   * cron binding the backend derives the routing route_key from this, so two
-   * scheduled workflows never collide on a shared route.
+   * Stable trigger-binding id. For cron bindings the backend derives the route
+   * key from this so scheduled workflows do not collide on a shared route.
    */
   bindingId: string;
   /**
    * When set, the submit path also provisions a github connector (reusing the
    * Settings runtime credential) plus these grants, scoped to the target repo.
-   * Presence signals the connector path; it is gated on the Settings GitHub
-   * token being configured.
    */
   grants?: WorkflowGrantSpec[];
 }
@@ -132,20 +102,19 @@ export interface AgentTemplate {
   description: string;
   glyph: string;
   accentColor: string;
+  /** Optional small visual tag, e.g. "custom code". */
+  tag?: string;
   /** Placeholder shown in the name field when this template is selected. */
   defaultName: string;
   testId: string;
-  /**
-   * Canonical role the created agent takes (lead | plan | task | a custom
-   * role). Empty for `workflow` templates, which create a binding, not an agent.
-   */
+  /** Canonical role name for role and legacy daemon templates. */
   roleName: string;
+  /** Set when kind === "role-create". */
+  roleCreate?: RoleCreateDefaults;
   /** Set when kind === "custom-role". */
   customRole?: CustomRoleSpec;
   /** Set when kind === "workflow". */
   workflow?: WorkflowSpec;
-  /** Set when kind === "prompt-agent". */
-  promptAgent?: PromptAgentSpec;
 }
 
 export interface TemplateSectionMeta {
@@ -158,22 +127,16 @@ export interface TemplateSectionMeta {
 
 export const TEMPLATE_SECTIONS: TemplateSectionMeta[] = [
   {
-    id: "background",
-    label: "Background agents",
-    hint: "Supervised workers that run automatically",
-    labelId: "create-agent-background-label",
+    id: "behavior",
+    label: "Behavior",
+    hint: "Pick what this agent should do.",
+    labelId: "create-agent-behavior-label",
   },
   {
-    id: "workflows",
-    label: "Background workflows",
-    hint: "Scheduled workflows that run on a cadence",
-    labelId: "create-agent-workflows-label",
-  },
-  {
-    id: "lead",
-    label: "Lead agent",
-    hint: "Interactive orchestrator in a terminal",
-    labelId: "create-agent-lead-label",
+    id: "advanced",
+    label: "Advanced: daemon-supervised (legacy)",
+    hint: "Older Go-daemon agents kept for compatibility.",
+    labelId: "create-agent-advanced-label",
   },
 ];
 
@@ -184,30 +147,14 @@ const ACCENTS = {
   triage: "#9333ea",
   bugfix: "#2563eb",
   review: "#16a34a",
-  prompt: "#7c3aed",
+  localReview: "#0891b2",
+  custom: "#7c3aed",
+  newRole: "#475569",
 } as const;
 
 /**
- * Default prompt seeded for a new prompt-agent role. Editable in the create
- * form and, after creation, from the agent detail's role-prompt textarea.
- */
-export const PROMPT_AGENT_DEFAULT_PROMPT = `# Docs assistant
-
-You are a documentation assistant. You claim a ready task and improve the
-project's documentation for it.
-
-For the task you claim:
-1. Read the task and the code or feature it refers to.
-2. Make the smallest doc change that resolves the task — fix inaccuracies,
-   fill gaps, clarify wording. Keep the project's existing tone and structure.
-3. Do not change product code; edit docs/comments only.
-
-Be concise and precise.
-`;
-
-/**
- * Prompt seeded for the bug-triage custom role on first use. Kept here so the
- * descriptor is the single source of truth for the template.
+ * Prompt seeded for the legacy bug-triage daemon role on first use. The main
+ * behavior grid only shows bug triage when a workspace role exists for it.
  */
 export const BUG_TRIAGE_PROMPT = `# Bug triage agent
 
@@ -226,39 +173,141 @@ For each bug ticket you claim:
 Be concise and evidence-based. Prefer reading code and logs over speculation.
 `;
 
-const PLANNER_TEMPLATE: AgentTemplate = {
-  id: "planner",
-  kind: "builtin-role",
-  section: "background",
+const PLANNER_ROLE_TEMPLATE: AgentTemplate = {
+  id: "role-plan",
+  kind: "role",
+  section: "behavior",
   roleName: "plan",
   title: "Planner",
-  description: "Breaks epics into tasks under daemon supervision.",
+  description: "Plans ready tasks into implementation designs.",
   glyph: "P",
   accentColor: ACCENTS.plan,
   defaultName: "planner",
   testId: "create-agent-template-planner",
 };
 
-const TASK_TEMPLATE: AgentTemplate = {
-  id: "task",
-  kind: "builtin-role",
-  section: "background",
+const CODER_ROLE_TEMPLATE: AgentTemplate = {
+  id: "role-task",
+  kind: "role",
+  section: "behavior",
   roleName: "task",
-  title: "Task Runner",
-  description: "Claims and runs ready tasks under daemon supervision.",
-  glyph: "T",
+  title: "Coder",
+  description: "Implements approved designs when tasks become ready.",
+  glyph: "C",
   accentColor: ACCENTS.task,
-  defaultName: "worker",
+  defaultName: "coder",
   testId: "create-agent-template-task",
 };
 
-const BUG_TRIAGE_TEMPLATE: AgentTemplate = {
-  id: "bug-triage",
+export const NEW_ROLE_TEMPLATE: AgentTemplate = {
+  id: "role-new",
+  kind: "role-create",
+  section: "behavior",
+  roleName: "",
+  title: "+ New role...",
+  description: "Define a new role prompt and run it on ready tasks.",
+  glyph: "+",
+  accentColor: ACCENTS.newRole,
+  defaultName: "custom-agent",
+  testId: "create-agent-template-new-role",
+  roleCreate: {
+    promptFilename: "custom-role.md",
+    taskFilter: "any",
+  },
+};
+
+const BUG_FIX_WORKFLOW_TEMPLATE: AgentTemplate = {
+  id: "bug-fix-agent",
+  kind: "workflow",
+  section: "behavior",
+  roleName: "",
+  title: "Bug-fix",
+  description: "Runs a scheduled custom-code loop to fix ready bugs.",
+  glyph: "F",
+  accentColor: ACCENTS.bugfix,
+  tag: "custom code",
+  defaultName: "bug-fix",
+  testId: "create-agent-template-bug-fix",
+  workflow: {
+    workflow: "bug-fix-agent",
+    bindingId: "s1-bug-fix",
+  },
+};
+
+const REVIEW_LOOP_WORKFLOW_TEMPLATE: AgentTemplate = {
+  id: "review-loop-agent",
+  kind: "workflow",
+  section: "behavior",
+  roleName: "",
+  title: "Review loop",
+  description: "Runs scheduled custom code to review GitHub PR cards.",
+  glyph: "R",
+  accentColor: ACCENTS.review,
+  tag: "custom code",
+  defaultName: "review-loop",
+  testId: "create-agent-template-review-loop",
+  workflow: {
+    workflow: "review-loop-agent",
+    bindingId: "s2-review-loop",
+    grants: [
+      { action: "github.pull_request.read", resource: "repo:<owner/name>" },
+      { action: "github.compare.read", resource: "repo:<owner/name>" },
+      { action: "github.review.post", resource: "repo:<owner/name>" },
+    ],
+  },
+};
+
+const LOCAL_REVIEW_WORKFLOW_TEMPLATE: AgentTemplate = {
+  id: "local-review-agent",
+  kind: "workflow",
+  section: "behavior",
+  roleName: "",
+  title: "Local review",
+  description: "Runs scheduled custom code to review local-branch deliveries.",
+  glyph: "L",
+  accentColor: ACCENTS.localReview,
+  tag: "custom code",
+  defaultName: "local-review",
+  testId: "create-agent-template-local-review",
+  workflow: {
+    workflow: "local-review-agent",
+    bindingId: "s3-local-review",
+  },
+};
+
+const LEGACY_PLANNER_TEMPLATE: AgentTemplate = {
+  id: "legacy-planner",
+  kind: "builtin-role",
+  section: "advanced",
+  roleName: "plan",
+  title: "Planner",
+  description: "Legacy Go-daemon planner.",
+  glyph: "P",
+  accentColor: ACCENTS.plan,
+  defaultName: "planner",
+  testId: "create-agent-template-legacy-planner",
+};
+
+const LEGACY_TASK_TEMPLATE: AgentTemplate = {
+  id: "legacy-task",
+  kind: "builtin-role",
+  section: "advanced",
+  roleName: "task",
+  title: "Task Runner",
+  description: "Legacy Go-daemon task runner.",
+  glyph: "T",
+  accentColor: ACCENTS.task,
+  defaultName: "worker",
+  testId: "create-agent-template-legacy-task",
+};
+
+const LEGACY_BUG_TRIAGE_TEMPLATE: AgentTemplate = {
+  id: "legacy-bug-triage",
   kind: "custom-role",
-  section: "background",
+  section: "advanced",
   roleName: "bug-triage",
   title: "Bug triage",
-  description: "Reproduces and triages ready tickets (read-only).",
+  description: "Legacy Go-daemon triage worker (read-only).",
   glyph: "B",
   accentColor: ACCENTS.triage,
   defaultName: "triage",
@@ -273,115 +322,88 @@ const BUG_TRIAGE_TEMPLATE: AgentTemplate = {
   },
 };
 
-const BUG_FIX_WORKFLOW_TEMPLATE: AgentTemplate = {
-  id: "bug-fix-agent",
-  kind: "workflow",
-  section: "workflows",
-  roleName: "",
-  title: "Bug-fix",
-  description: "Claims a ready bug on a schedule and opens a fix PR.",
-  glyph: "F",
-  accentColor: ACCENTS.bugfix,
-  defaultName: "bug-fix",
-  testId: "create-agent-template-bug-fix",
-  workflow: {
-    workflow: "bug-fix-agent",
-    bindingId: "s1-bug-fix",
-  },
-};
-
-const REVIEW_LOOP_WORKFLOW_TEMPLATE: AgentTemplate = {
-  id: "review-loop-agent",
-  kind: "workflow",
-  section: "workflows",
-  roleName: "",
-  title: "Review loop",
-  description: "Reviews cards in review on a schedule, capped per card.",
-  glyph: "R",
-  accentColor: ACCENTS.review,
-  defaultName: "review-loop",
-  testId: "create-agent-template-review-loop",
-  workflow: {
-    workflow: "review-loop-agent",
-    bindingId: "s2-review-loop",
-    grants: [
-      { action: "github.pull_request.read", resource: "repo:<owner/name>" },
-      { action: "github.compare.read", resource: "repo:<owner/name>" },
-      { action: "github.review.post", resource: "repo:<owner/name>" },
-    ],
-  },
-};
-
-const PROMPT_AGENT_TEMPLATE: AgentTemplate = {
-  id: "prompt-agent",
-  kind: "prompt-agent",
-  section: "workflows",
-  roleName: "",
-  title: "Prompt agent",
-  description:
-    "A role (prompt as data) that claims ready tasks on a schedule — no daemon.",
-  glyph: "◆",
-  accentColor: ACCENTS.prompt,
-  defaultName: "docs-agent",
-  testId: "create-agent-template-prompt-agent",
-  promptAgent: {
-    roleName: "docs-assistant",
-    promptFilename: "docs-assistant.md",
-    promptContent: PROMPT_AGENT_DEFAULT_PROMPT,
-    description: "Improves documentation for ready tasks.",
-    taskFilter: "any",
-    bindingIdPrefix: "prompt-agent",
-  },
-};
-
-const LEAD_TEMPLATE: AgentTemplate = {
+const LEGACY_LEAD_TEMPLATE: AgentTemplate = {
   id: "lead",
   kind: "lead",
-  section: "lead",
+  section: "advanced",
   roleName: "lead",
   title: "Lead",
-  description: "Orchestrates an epic interactively in a terminal.",
+  description: "Legacy interactive lead terminal.",
   glyph: "L",
   accentColor: ACCENTS.lead,
   defaultName: "lead",
   testId: "create-agent-template-lead",
 };
 
-/** The gallery catalog, in display order. */
-export const AGENT_TEMPLATES: AgentTemplate[] = [
-  PLANNER_TEMPLATE,
-  TASK_TEMPLATE,
-  BUG_TRIAGE_TEMPLATE,
-  PROMPT_AGENT_TEMPLATE,
-  BUG_FIX_WORKFLOW_TEMPLATE,
-  REVIEW_LOOP_WORKFLOW_TEMPLATE,
-  LEAD_TEMPLATE,
+export const BUILTIN_ROLE_TEMPLATES: AgentTemplate[] = [
+  PLANNER_ROLE_TEMPLATE,
+  CODER_ROLE_TEMPLATE,
 ];
 
-/** A stable trigger-binding id for a prompt agent wearing `roleName`. */
-export function promptAgentBindingId(
-  spec: PromptAgentSpec,
-  roleName: string,
-): string {
-  const slug = roleName
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "");
-  return `${spec.bindingIdPrefix}-${slug || "role"}`;
-}
+export const SCRIPTED_WORKFLOW_TEMPLATES: AgentTemplate[] = [
+  BUG_FIX_WORKFLOW_TEMPLATE,
+  REVIEW_LOOP_WORKFLOW_TEMPLATE,
+  LOCAL_REVIEW_WORKFLOW_TEMPLATE,
+];
+
+export const LEGACY_DAEMON_TEMPLATES: AgentTemplate[] = [
+  LEGACY_PLANNER_TEMPLATE,
+  LEGACY_TASK_TEMPLATE,
+  LEGACY_BUG_TRIAGE_TEMPLATE,
+  LEGACY_LEAD_TEMPLATE,
+];
+
+/** The static catalog, excluding dynamic custom-role cards from the roles API. */
+export const AGENT_TEMPLATES: AgentTemplate[] = [
+  ...BUILTIN_ROLE_TEMPLATES,
+  NEW_ROLE_TEMPLATE,
+  ...SCRIPTED_WORKFLOW_TEMPLATES,
+  ...LEGACY_DAEMON_TEMPLATES,
+];
 
 export type DefaultRole = "lead" | "plan" | "task";
 
 /**
- * Resolve the template a `defaultRole` prop should pre-select (Task by default).
- * Collapses the legacy `defaultRoleName` + `defaultKind` pair: a single role
- * string maps to exactly one template.
+ * Resolve the template a `defaultRole` prop should pre-select. plan/task select
+ * the TS role-backed behavior cards; lead remains legacy/advanced for Phase 5.
  */
 export function templateForRole(role: DefaultRole | undefined): AgentTemplate {
-  return AGENT_TEMPLATES.find((t) => t.roleName === role) ?? TASK_TEMPLATE;
+  if (role === "plan") return PLANNER_ROLE_TEMPLATE;
+  if (role === "lead") return LEGACY_LEAD_TEMPLATE;
+  return CODER_ROLE_TEMPLATE;
 }
 
 export function templatesForSection(section: TemplateSection): AgentTemplate[] {
-  return AGENT_TEMPLATES.filter((t) => t.section === section);
+  if (section === "advanced") return LEGACY_DAEMON_TEMPLATES;
+  return [
+    ...BUILTIN_ROLE_TEMPLATES,
+    NEW_ROLE_TEMPLATE,
+    ...SCRIPTED_WORKFLOW_TEMPLATES,
+  ];
+}
+
+export function customRoleTemplate(role: {
+  name: string;
+  description?: string;
+}): AgentTemplate {
+  const roleName = role.name.trim();
+  return {
+    id: `role-${roleName}`,
+    kind: "role",
+    section: "behavior",
+    roleName,
+    title: roleName,
+    description:
+      role.description?.trim() ||
+      `Runs the ${roleName} role when a task becomes ready.`,
+    glyph: roleName.slice(0, 1).toUpperCase() || "R",
+    accentColor: ACCENTS.custom,
+    defaultName: roleName || "custom-agent",
+    testId: `create-agent-template-role-${roleName}`,
+  };
+}
+
+export function rolePromptFilename(roleName: string): string {
+  const slug = roleName.trim() || "custom-role";
+  return `${slug}.md`;
 }

@@ -380,6 +380,37 @@
   white-space: pre-wrap;
 }
 
+.runTranscript {
+  margin-top: var(--space-4);
+  min-height: 420px;
+  height: min(62vh, 720px);
+  display: flex;
+  overflow: hidden;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-panel-bg, var(--color-bg-secondary));
+}
+
+.transcriptEmpty {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-5);
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+  text-align: center;
+}
+
+.transcriptEmpty code {
+  margin: 0 4px;
+  font-family: var(--font-family-mono);
+  font-size: 11px;
+  color: var(--color-text-primary);
+  background: transparent;
+  padding: 0;
+}
+
 /* ---- info: config grid ---- */
 .configGrid {
   margin: 0;

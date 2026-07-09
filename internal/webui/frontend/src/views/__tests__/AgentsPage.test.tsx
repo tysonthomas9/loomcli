@@ -15,7 +15,27 @@ const mocks = vi.hoisted(() => {
     navigate: vi.fn(),
     showToast: vi.fn(),
     getWorkflowRun: vi.fn(),
+    getWorkspaceRole: vi.fn(),
+    listTriggerBindingRuns: vi.fn(),
+    promptAgentRoleName: vi.fn(),
     startWorkflowRun: vi.fn(),
+    updateWorkspaceRole: vi.fn(),
+    setBindingEnabled: vi.fn(),
+    updateBinding: vi.fn(),
+    deleteBinding: vi.fn(),
+    runBinding: vi.fn(),
+    routeAgentName: "lead-1",
+    agents: [
+      {
+        name: "lead-1",
+        role: "plan",
+        status: "ready",
+        branch: "main",
+        repo: "sandbox",
+        worktree_path: "/tmp/lead-1",
+      },
+    ],
+    bindings: [],
     localSettings: { settings: null },
     workspaceContext: { repos: [] },
     agentStore: {
@@ -29,25 +49,32 @@ vi.mock("react-router-dom", async (importOriginal) => {
   return {
     ...actual,
     useNavigate: () => mocks.navigate,
-    useParams: () => ({ workspaceId: "DESKTOP-QA", agentName: "lead-1" }),
+    useParams: () => ({
+      workspaceId: "DESKTOP-QA",
+      agentName: mocks.routeAgentName,
+    }),
     useSearchParams: () => [new URLSearchParams(), vi.fn()],
   };
 });
 
 vi.mock("zustand", () => ({
-  useStore: <T,>(_: unknown, selector: (state: { agents: never[] }) => T) =>
-    selector({ agents: [] }),
+  useStore: <T,>(_: unknown, selector: (state: any) => T) =>
+    selector({ agents: mocks.agents }),
 }));
 
 vi.mock("@/api", () => ({
   EPIC_RUNNER_WORKFLOW_NAME: "epic-runner",
   getWorkflowRun: mocks.getWorkflowRun,
+  getWorkspaceRole: mocks.getWorkspaceRole,
   isTerminalWorkflowRunStatus: (status: string | undefined) =>
     status === "completed" ||
     status === "failed" ||
     status === "needs_review" ||
     status === "cancelled",
+  listTriggerBindingRuns: mocks.listTriggerBindingRuns,
+  promptAgentRoleName: mocks.promptAgentRoleName,
   startWorkflowRun: mocks.startWorkflowRun,
+  updateWorkspaceRole: mocks.updateWorkspaceRole,
 }));
 
 vi.mock("@/hooks", () => ({
@@ -55,8 +82,21 @@ vi.mock("@/hooks", () => ({
 }));
 
 vi.mock("@/hooks/workspace", () => ({
+  useAutomations: () => ({
+    bindings: mocks.bindings,
+    initialized: true,
+    setEnabled: mocks.setBindingEnabled,
+    updateBinding: mocks.updateBinding,
+    deleteBinding: mocks.deleteBinding,
+    runBinding: mocks.runBinding,
+  }),
   useLocalSettings: () => mocks.localSettings,
   useWorkspaceContext: () => mocks.workspaceContext,
+}));
+
+vi.mock("@/components/WorkflowSourceModal", () => ({
+  WorkflowSourceModal: ({ isOpen }: { isOpen: boolean }) =>
+    isOpen ? <div data-testid="workflow-source-modal" /> : null,
 }));
 
 vi.mock("@/hooks/ui/useToast", () => ({
@@ -72,6 +112,15 @@ vi.mock("@/components", () => ({
 
 vi.mock("@/components/AgentDetailMain/AgentDetailMain", () => ({
   AgentDetailMain: () => <div data-testid="agent-detail" />,
+}));
+
+vi.mock("@/components/AgentDetailPanel", () => ({
+  DiffTab: () => <div data-testid="diff-tab" />,
+  GitTab: () => <div data-testid="git-tab" />,
+}));
+
+vi.mock("@/components/FileEditorPanel", () => ({
+  FileEditorPanel: () => <div data-testid="files-tab" />,
 }));
 
 vi.mock("@/components/AgentWorkPanel/AgentWorkPanel", () => ({
@@ -103,8 +152,22 @@ vi.mock("@/components/IssueDetailPanel/IssueDetailPanel", () => ({
 describe("AgentsPage", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.routeAgentName = "lead-1";
+    mocks.agents = [
+      {
+        name: "lead-1",
+        role: "plan",
+        status: "ready",
+        branch: "main",
+        repo: "sandbox",
+        worktree_path: "/tmp/lead-1",
+      },
+    ];
+    mocks.bindings = [];
     mocks.localSettings = { settings: null };
     mocks.workspaceContext = { repos: [] };
+    mocks.listTriggerBindingRuns.mockResolvedValue({ runs: [] });
+    mocks.promptAgentRoleName.mockReturnValue("");
     mocks.startWorkflowRun.mockResolvedValue({
       run_id: "run-1",
       status: "queued",
@@ -149,6 +212,33 @@ describe("AgentsPage", () => {
     expect(screen.getByTestId("epic-runner-run-state").textContent).toBe(
       "run-1:queued",
     );
+  });
+
+  it("renders a binding through the shared editor-group tabs", async () => {
+    mocks.routeAgentName = "binding-1";
+    mocks.agents = [];
+    mocks.bindings = [
+      {
+        workspace_key: "DESKTOP-QA",
+        binding_id: "binding-1",
+        name: "Planner binding",
+        source_kind: "cron",
+        route_key: "binding-1",
+        driver_id: "prompt-agent",
+        driver_version_id: "v1",
+        enabled: true,
+        schedule: "*/10 * * * *",
+      },
+    ];
+
+    render(<AgentsPage />);
+
+    expect(await screen.findByTestId("agent-editor-groups")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Runs" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Info" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Terminal" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Git" })).toBeNull();
+    expect(screen.getByTestId("workflow-agent-run-now")).toBeTruthy();
   });
 
   it("passes local PR runtime payload from the lead-panel Run button", async () => {

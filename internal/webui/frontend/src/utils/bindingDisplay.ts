@@ -10,6 +10,18 @@
 import type { TriggerBinding } from "@/api";
 
 /**
+ * Display name for a binding "agent": the operator-entered Name when set, else
+ * the binding_id as an honest fallback. One source of truth so the sidebar row,
+ * the detail header/avatar, and the assignee dropdown all read the same label
+ * (the Name a user types on create IS persisted on domain.TriggerBinding.Name —
+ * it was just never surfaced before).
+ */
+export function bindingDisplayName(b: TriggerBinding): string {
+  const name = (b.name ?? "").trim();
+  return name !== "" ? name : b.binding_id;
+}
+
+/**
  * Human-readable cadence for a 5-field cron expression. Covers the common
  * shapes (every-N-minutes, hourly, every-N-hours, daily-at-HH:MM) and falls
  * back to the raw expression verbatim — never a fabricated description.

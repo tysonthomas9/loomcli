@@ -4,16 +4,38 @@
 
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { MemoryRouter } from "react-router-dom";
 import "@testing-library/jest-dom";
 
 import { CreateAgentModal } from "./CreateAgentModal";
 
 const mockCreateAgent = vi.fn();
 const mockEnsureRole = vi.fn().mockResolvedValue({ name: "bug-triage" });
+const mockListWorkspaceRoles = vi.fn();
+const mockCreateBinding = vi.fn();
+const mockEnsureConnector = vi.fn();
+const mockAddGrant = vi.fn();
 
 vi.mock("@/hooks/agents", () => ({
   useCreateWorkspaceAgent: () => mockCreateAgent,
   useEnsureWorkspaceRole: () => mockEnsureRole,
+}));
+vi.mock("@/api/workspace", () => ({
+  listWorkspaceRoles: (...args: unknown[]) => mockListWorkspaceRoles(...args),
+}));
+vi.mock("@/hooks/workspace", () => ({
+  GITHUB_CONNECTOR_ID: "github",
+  useAutomations: () => ({ createBinding: mockCreateBinding }),
+  useBackends: () => ({
+    backends: [{ name: "codex", displayName: "codex" }],
+  }),
+  useConnectorProvisioning: () => ({
+    ensureConnector: mockEnsureConnector,
+    addGrant: mockAddGrant,
+  }),
+  useLocalSettings: () => ({
+    settings: { runtime_credentials: { github: { configured: true } } },
+  }),
 }));
 
 describe("CreateAgentModal", () => {
@@ -29,6 +51,8 @@ describe("CreateAgentModal", () => {
 
   beforeEach(() => {
     mockCreateAgent.mockReset();
+    mockListWorkspaceRoles.mockReset();
+    mockListWorkspaceRoles.mockResolvedValue([]);
     mockCreateAgent.mockResolvedValue({
       name: "lead-nova",
       repos: [],
@@ -41,14 +65,16 @@ describe("CreateAgentModal", () => {
     const onSuccess = vi.fn();
 
     render(
-      <CreateAgentModal
-        isOpen
-        workspaceId="E2E"
-        repos={repos}
-        defaultBackend="codex"
-        onClose={vi.fn()}
-        onSuccess={onSuccess}
-      />,
+      <MemoryRouter initialEntries={["/ws/E2E/agents"]}>
+        <CreateAgentModal
+          isOpen
+          workspaceId="E2E"
+          repos={repos}
+          defaultBackend="codex"
+          onClose={vi.fn()}
+          onSuccess={onSuccess}
+        />
+      </MemoryRouter>,
     );
 
     fireEvent.change(screen.getByTestId("create-agent-name"), {

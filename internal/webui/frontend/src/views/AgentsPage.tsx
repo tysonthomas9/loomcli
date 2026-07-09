@@ -34,7 +34,14 @@ import { useStore } from "zustand";
 import { ErrorBoundary, LoadingSkeleton } from "@/components";
 import { AgentDetailMain } from "@/components/AgentDetailMain/AgentDetailMain";
 import { AgentConfigModal } from "@/components/AgentConfigModal";
-import { WorkflowAgentDetail } from "@/components/WorkflowAgentDetail";
+import {
+  WorkflowAgentActionBar,
+  WorkflowAgentHeader,
+  WorkflowAgentInfoPane,
+  WorkflowAgentRunsPane,
+  WorkflowAgentSourceModal,
+  useWorkflowAgentDetailState,
+} from "@/components/WorkflowAgentDetail";
 import { GitTab } from "@/components/AgentDetailPanel";
 import { AgentWorkPanel } from "@/components/AgentWorkPanel/AgentWorkPanel";
 import { PanelWidthResizeHandle } from "@/components/AgentWorkPanel/PanelWidthResizeHandle";
@@ -83,7 +90,12 @@ import {
   saveAgentWorkPanelView,
 } from "@/utils/agentWorkPanelStorage";
 
-import { AgentEditorGroups, type AgentEditorTab } from "./AgentEditorGroups";
+import {
+  AgentEditorGroups,
+  agentTabsForCapabilities,
+  type AgentCapabilities,
+  type AgentEditorTab,
+} from "./AgentEditorGroups";
 import styles from "./AgentsPage.module.css";
 
 // Heavy tabs (CodeMirror/diff) are code-split, mirroring AgentDetailPanel.
@@ -174,6 +186,31 @@ function AgentsPageInner(): JSX.Element {
         : undefined,
     [agentName, selected, bindings],
   );
+  const agentCapabilities = useMemo<AgentCapabilities>(() => {
+    if (selectedBinding) {
+      return { worktree: false, pty: false, runs: true, config: true };
+    }
+    if (selected) {
+      const hasWorktree = Boolean(
+        selected.worktree_path ||
+        selected.path ||
+        selected.branch ||
+        selected.repo,
+      );
+      return { worktree: hasWorktree, pty: true, runs: false, config: true };
+    }
+    return { worktree: false, pty: false, runs: false, config: true };
+  }, [selected, selectedBinding]);
+  const agentTabs = useMemo(
+    () => agentTabsForCapabilities(agentCapabilities),
+    [agentCapabilities],
+  );
+  const workflowDetail = useWorkflowAgentDetailState({
+    workspaceId,
+    binding: selectedBinding,
+    onSetEnabled: setBindingEnabled,
+    onRunBinding: runBinding,
+  });
   // While the URL points at an unknown name and bindings have not yet loaded,
   // hold the shell (don't flash the role terminal for a name that is a binding).
   const resolvingBinding =
@@ -352,6 +389,10 @@ function AgentsPageInner(): JSX.Element {
     [persistSelectedTaskId],
   );
 
+  const handleBindingDeleted = useCallback(() => {
+    navigate(`/ws/${workspaceId}/kanban`);
+  }, [navigate, workspaceId]);
+
   const inlinePanelIssue = useMemo(() => {
     if (!selectedTask) return null;
     if (issueDetails?.id === selectedTask.id) return issueDetails;
@@ -390,7 +431,12 @@ function AgentsPageInner(): JSX.Element {
         value: counts.inProgress,
         tone: "warning",
       },
-      { id: "blocked", label: "Blocked", value: counts.blocked, tone: "danger" },
+      {
+        id: "blocked",
+        label: "Blocked",
+        value: counts.blocked,
+        tone: "danger",
+      },
       { id: "queued", label: "Queued", value: counts.queued, tone: "info" },
     ],
     [counts],
@@ -407,7 +453,29 @@ function AgentsPageInner(): JSX.Element {
   const renderAgentPane = useCallback(
     (tab: AgentEditorTab, isActive: boolean) => {
       switch (tab) {
+        case "runs":
+          if (!selectedBinding) {
+            return (
+              <div className={styles.tabFallback}>
+                This agent has no run history.
+              </div>
+            );
+          }
+          return (
+            <WorkflowAgentRunsPane
+              workspaceId={workspaceId}
+              binding={selectedBinding}
+              detail={workflowDetail}
+            />
+          );
         case "terminal":
+          if (!agentCapabilities.pty) {
+            return (
+              <div className={styles.tabFallback}>
+                This agent has no live terminal.
+              </div>
+            );
+          }
           return (
             <div className={styles.realTabBody}>
               <AgentDetailMain
@@ -420,6 +488,18 @@ function AgentsPageInner(): JSX.Element {
             </div>
           );
         case "info":
+          if (selectedBinding) {
+            return (
+              <WorkflowAgentInfoPane
+                workspaceId={workspaceId}
+                binding={selectedBinding}
+                detail={workflowDetail}
+                onUpdate={updateBinding}
+                onDelete={deleteBinding}
+                onDeleted={handleBindingDeleted}
+              />
+            );
+          }
           if (!selected) {
             return (
               <div className={styles.tabFallback}>
@@ -507,7 +587,7 @@ function AgentsPageInner(): JSX.Element {
             </div>
           );
         case "git":
-          if (!selected) {
+          if (!selected || !agentCapabilities.worktree) {
             return (
               <div className={styles.tabFallback}>
                 Select an agent to view git.
@@ -522,7 +602,7 @@ function AgentsPageInner(): JSX.Element {
             </div>
           );
         case "diff":
-          if (!selected) {
+          if (!selected || !agentCapabilities.worktree) {
             return (
               <div className={styles.tabFallback}>
                 Select an agent to view diff.
@@ -541,7 +621,7 @@ function AgentsPageInner(): JSX.Element {
             </div>
           );
         case "files":
-          if (!selected) {
+          if (!selected || !agentCapabilities.worktree) {
             return (
               <div className={styles.tabFallback}>
                 Select an agent to browse files.
@@ -570,8 +650,16 @@ function AgentsPageInner(): JSX.Element {
     },
     [
       agentName,
+      workspaceId,
       pendingTerminalInput,
       selected,
+      selectedBinding,
+      workflowDetail,
+      updateBinding,
+      deleteBinding,
+      handleBindingDeleted,
+      agentCapabilities.pty,
+      agentCapabilities.worktree,
       selColor,
       selText,
       roleName,
@@ -580,28 +668,6 @@ function AgentsPageInner(): JSX.Element {
       canEditConfig,
     ],
   );
-
-  // Workflow-plane agent (trigger binding): same page shell, capability-based
-  // content (runs + config, no worktree). Role-agent rendering below is
-  // unchanged. Resolution order already preferred a role agent when the name
-  // matched one, so this branch only fires for a genuine binding id.
-  if (selectedBinding) {
-    return (
-      <div className={styles.page} data-testid="agents-page">
-        <section className={styles.main} aria-label="Agent details">
-          <WorkflowAgentDetail
-            workspaceId={workspaceId}
-            binding={selectedBinding}
-            onSetEnabled={setBindingEnabled}
-            onRunBinding={runBinding}
-            onUpdate={updateBinding}
-            onDelete={deleteBinding}
-            onDeleted={() => navigate(`/ws/${workspaceId}/kanban`)}
-          />
-        </section>
-      </div>
-    );
-  }
 
   if (resolvingBinding) {
     return (
@@ -617,11 +683,33 @@ function AgentsPageInner(): JSX.Element {
     <div className={styles.page} data-testid="agents-page">
       {/* Main panel: Aether tab strip over the live agent surfaces */}
       <section className={styles.main} aria-label="Agent details">
-        <AgentEditorGroups resetKey={agentName} renderPane={renderAgentPane} />
+        {selectedBinding ? (
+          <>
+            <WorkflowAgentHeader
+              binding={selectedBinding}
+              detail={workflowDetail}
+            />
+            <WorkflowAgentActionBar
+              binding={selectedBinding}
+              detail={workflowDetail}
+            />
+          </>
+        ) : null}
+        <AgentEditorGroups
+          resetKey={agentName}
+          tabs={agentTabs}
+          renderPane={renderAgentPane}
+        />
+        <WorkflowAgentSourceModal
+          isOpen={workflowDetail.showSource}
+          workspaceId={workspaceId}
+          binding={selectedBinding}
+          onClose={() => workflowDetail.setShowSource(false)}
+        />
       </section>
 
       {/* Right column: epic-runner Open Queue or inline task detail */}
-      {selectedTask ? (
+      {selectedBinding ? null : selectedTask ? (
         <div className={styles.inlineDetail} style={{ width: openQueueWidth }}>
           <PanelWidthResizeHandle
             width={openQueueWidth}

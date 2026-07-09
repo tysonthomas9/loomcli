@@ -13,6 +13,7 @@
 
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { MemoryRouter } from "react-router-dom";
 import "@testing-library/jest-dom";
 
 import { CreateAgentModal } from "../CreateAgentModal";
@@ -25,9 +26,40 @@ import type { RepoInfo, WorkspaceAgentInfo } from "@/api/workspace";
 // Tests swap the function per case via mockCreateAgent.mockImplementation.
 const mockCreateAgent = vi.fn();
 const mockEnsureRole = vi.fn();
+const mockCreatePromptAgentRecord = vi.fn();
+const mockListWorkspaceRoles = vi.fn();
+const mockCreateBinding = vi.fn();
+const mockEnsureConnector = vi.fn();
+const mockAddGrant = vi.fn();
+
 vi.mock("@/hooks/agents", () => ({
   useCreateWorkspaceAgent: () => mockCreateAgent,
   useEnsureWorkspaceRole: () => mockEnsureRole,
+}));
+vi.mock("@/api/agents", () => ({
+  createPromptAgentRecord: (...args: unknown[]) =>
+    mockCreatePromptAgentRecord(...args),
+}));
+vi.mock("@/api/workspace", () => ({
+  listWorkspaceRoles: (...args: unknown[]) => mockListWorkspaceRoles(...args),
+}));
+vi.mock("@/hooks/workspace", () => ({
+  GITHUB_CONNECTOR_ID: "github",
+  dispatchBindingsChanged: vi.fn(),
+  useAutomations: () => ({ createBinding: mockCreateBinding }),
+  useBackends: () => ({
+    backends: [
+      { name: "codex", displayName: "codex" },
+      { name: "claude", displayName: "claude" },
+    ],
+  }),
+  useConnectorProvisioning: () => ({
+    ensureConnector: mockEnsureConnector,
+    addGrant: mockAddGrant,
+  }),
+  useLocalSettings: () => ({
+    settings: { runtime_credentials: { github: { configured: true } } },
+  }),
 }));
 
 // ---------- Helpers ----------
@@ -44,27 +76,56 @@ const sampleAgent: WorkspaceAgentInfo = {
   cross_repo: false,
 };
 
+const sampleAgentRecord = {
+  id: "agt-coder",
+  name: "coder",
+  kind: "prompt",
+  enabled: true,
+  behavior: { role_name: "task" },
+  workspace_key: "ws-1",
+  bindings: [{ binding_id: "agt-coder-1" }],
+};
+
 function renderModal(
   overrides: Partial<React.ComponentProps<typeof CreateAgentModal>> = {},
 ) {
   const onClose = vi.fn();
   const onSuccess = vi.fn();
   const utils = render(
-    <CreateAgentModal
-      isOpen
-      workspaceId="ws-1"
-      repos={repos}
-      onClose={onClose}
-      onSuccess={onSuccess}
-      {...overrides}
-    />,
+    <MemoryRouter initialEntries={["/ws/ws-1/agents"]}>
+      <CreateAgentModal
+        isOpen
+        workspaceId="ws-1"
+        repos={repos}
+        onClose={onClose}
+        onSuccess={onSuccess}
+        {...overrides}
+      />
+    </MemoryRouter>,
   );
   return { ...utils, onClose, onSuccess };
 }
 
+function modalWithRouter(
+  props: React.ComponentProps<typeof CreateAgentModal>,
+): JSX.Element {
+  return (
+    <MemoryRouter initialEntries={["/ws/ws-1/agents"]}>
+      <CreateAgentModal {...props} />
+    </MemoryRouter>
+  );
+}
+
 beforeEach(() => {
   mockCreateAgent.mockReset();
+  mockCreatePromptAgentRecord.mockReset();
+  mockCreateBinding.mockReset();
+  mockEnsureConnector.mockReset();
+  mockAddGrant.mockReset();
+  mockListWorkspaceRoles.mockReset();
   mockEnsureRole.mockReset();
+  mockCreatePromptAgentRecord.mockResolvedValue(sampleAgentRecord);
+  mockListWorkspaceRoles.mockResolvedValue([]);
   mockEnsureRole.mockResolvedValue({
     name: "bug-triage",
     workspace_key: "ws-1",
@@ -76,13 +137,13 @@ beforeEach(() => {
 describe("CreateAgentModal: open/close gate", () => {
   it("renders nothing when isOpen is false", () => {
     const { container } = render(
-      <CreateAgentModal
-        isOpen={false}
-        workspaceId="ws-1"
-        repos={repos}
-        onClose={vi.fn()}
-        onSuccess={vi.fn()}
-      />,
+      modalWithRouter({
+        isOpen: false,
+        workspaceId: "ws-1",
+        repos,
+        onClose: vi.fn(),
+        onSuccess: vi.fn(),
+      }),
     );
     expect(container.firstChild).toBeNull();
   });
@@ -118,7 +179,7 @@ describe("CreateAgentModal: default prop seeding", () => {
     );
   });
 
-  it("defaults to Task Runner template when defaultRole is omitted", () => {
+  it("defaults to Coder template when defaultRole is omitted", () => {
     renderModal();
     expect(screen.getByTestId("create-agent-template-task")).toHaveAttribute(
       "aria-pressed",
@@ -142,14 +203,14 @@ describe("CreateAgentModal: default prop seeding", () => {
 describe("CreateAgentModal: state preservation across re-renders", () => {
   it("does not clobber typed name when parent re-renders with same isOpen", () => {
     const { rerender } = render(
-      <CreateAgentModal
-        isOpen
-        workspaceId="ws-1"
-        repos={repos}
-        defaultName="seeded"
-        onClose={vi.fn()}
-        onSuccess={vi.fn()}
-      />,
+      modalWithRouter({
+        isOpen: true,
+        workspaceId: "ws-1",
+        repos,
+        defaultName: "seeded",
+        onClose: vi.fn(),
+        onSuccess: vi.fn(),
+      }),
     );
     const nameInput = screen.getByTestId("create-agent-name");
     expect(nameInput).toHaveValue("seeded");
@@ -160,14 +221,14 @@ describe("CreateAgentModal: state preservation across re-renders", () => {
 
     // Parent re-renders (e.g., a sibling state changed) with same props.
     rerender(
-      <CreateAgentModal
-        isOpen
-        workspaceId="ws-1"
-        repos={repos}
-        defaultName="seeded"
-        onClose={vi.fn()}
-        onSuccess={vi.fn()}
-      />,
+      modalWithRouter({
+        isOpen: true,
+        workspaceId: "ws-1",
+        repos,
+        defaultName: "seeded",
+        onClose: vi.fn(),
+        onSuccess: vi.fn(),
+      }),
     );
 
     // The wasOpenRef gate must prevent the effect from re-seeding.
@@ -178,14 +239,14 @@ describe("CreateAgentModal: state preservation across re-renders", () => {
 
   it("re-seeds defaults on close → open transition", () => {
     const { rerender } = render(
-      <CreateAgentModal
-        isOpen
-        workspaceId="ws-1"
-        repos={repos}
-        defaultName="first-default"
-        onClose={vi.fn()}
-        onSuccess={vi.fn()}
-      />,
+      modalWithRouter({
+        isOpen: true,
+        workspaceId: "ws-1",
+        repos,
+        defaultName: "first-default",
+        onClose: vi.fn(),
+        onSuccess: vi.fn(),
+      }),
     );
     // User edits.
     fireEvent.change(screen.getByTestId("create-agent-name"), {
@@ -193,25 +254,25 @@ describe("CreateAgentModal: state preservation across re-renders", () => {
     });
     // Close.
     rerender(
-      <CreateAgentModal
-        isOpen={false}
-        workspaceId="ws-1"
-        repos={repos}
-        defaultName="first-default"
-        onClose={vi.fn()}
-        onSuccess={vi.fn()}
-      />,
+      modalWithRouter({
+        isOpen: false,
+        workspaceId: "ws-1",
+        repos,
+        defaultName: "first-default",
+        onClose: vi.fn(),
+        onSuccess: vi.fn(),
+      }),
     );
     // Re-open with a NEW default — should seed the new value.
     rerender(
-      <CreateAgentModal
-        isOpen
-        workspaceId="ws-1"
-        repos={repos}
-        defaultName="second-default"
-        onClose={vi.fn()}
-        onSuccess={vi.fn()}
-      />,
+      modalWithRouter({
+        isOpen: true,
+        workspaceId: "ws-1",
+        repos,
+        defaultName: "second-default",
+        onClose: vi.fn(),
+        onSuccess: vi.fn(),
+      }),
     );
     expect(screen.getByTestId("create-agent-name")).toHaveValue(
       "second-default",
@@ -222,24 +283,32 @@ describe("CreateAgentModal: state preservation across re-renders", () => {
 // ---------- validation ----------
 
 describe("CreateAgentModal: client-side validation", () => {
-  it("disables Create until a name is entered (does not call API)", () => {
+  it("disables Activate until a name is entered (does not call API)", () => {
     const { onSuccess } = renderModal();
-    expect(
-      screen.getByRole("button", { name: /create agent/i }),
-    ).toBeDisabled();
+    expect(screen.getByRole("button", { name: /activate/i })).toBeDisabled();
     expect(mockCreateAgent).not.toHaveBeenCalled();
+    expect(mockCreatePromptAgentRecord).not.toHaveBeenCalled();
     expect(onSuccess).not.toHaveBeenCalled();
   });
 
-  it("keeps Create disabled for a whitespace-only name", () => {
+  it("keeps Activate disabled for a whitespace-only name", () => {
     renderModal();
     fireEvent.change(screen.getByTestId("create-agent-name"), {
       target: { value: "   " },
     });
-    expect(
-      screen.getByRole("button", { name: /create agent/i }),
-    ).toBeDisabled();
+    expect(screen.getByRole("button", { name: /activate/i })).toBeDisabled();
     expect(mockCreateAgent).not.toHaveBeenCalled();
+    expect(mockCreatePromptAgentRecord).not.toHaveBeenCalled();
+  });
+
+  it("shows invalid name feedback inline", () => {
+    renderModal();
+    fireEvent.change(screen.getByTestId("create-agent-name"), {
+      target: { value: "two words" },
+    });
+    expect(screen.getByTestId("create-agent-name-error")).toHaveTextContent(
+      /lowercase letters, numbers, hyphens, dots, or underscores/i,
+    );
   });
 
   it("treats a workspace with no repos as workspace scope (cross_repo)", async () => {
@@ -247,6 +316,7 @@ describe("CreateAgentModal: client-side validation", () => {
     // created with workspace scope rather than erroring.
     mockCreateAgent.mockResolvedValueOnce(sampleAgent);
     renderModal({ defaultName: "agent-x", repos: [] });
+    fireEvent.click(screen.getByTestId("create-agent-template-legacy-task"));
     fireEvent.click(screen.getByRole("button", { name: /create agent/i }));
     await waitFor(() => expect(mockCreateAgent).toHaveBeenCalled());
     expect(mockCreateAgent.mock.calls[0][0]).toMatchObject({
@@ -260,36 +330,42 @@ describe("CreateAgentModal: client-side validation", () => {
 
 describe("CreateAgentModal: submission", () => {
   it("submits mixed-case names as lowercase", async () => {
-    mockCreateAgent.mockResolvedValueOnce(sampleAgent);
     renderModal();
     fireEvent.change(screen.getByTestId("create-agent-name"), {
       target: { value: "Test-lead" },
     });
-    fireEvent.click(screen.getByRole("button", { name: /create agent/i }));
-    await waitFor(() => expect(mockCreateAgent).toHaveBeenCalled());
-    expect(mockCreateAgent.mock.calls[0][0]).toMatchObject({
+    fireEvent.click(screen.getByRole("button", { name: /activate/i }));
+    await waitFor(() => expect(mockCreatePromptAgentRecord).toHaveBeenCalled());
+    expect(mockCreatePromptAgentRecord.mock.calls[0][1]).toMatchObject({
       name: "test-lead",
+      kind: "prompt",
+      behavior: { role_name: "task" },
     });
   });
 
-  it("submits repo-scoped agent with trimmed values + invokes onSuccess", async () => {
-    mockCreateAgent.mockResolvedValueOnce(sampleAgent);
-    const { onSuccess } = renderModal({
+  it("submits Coder role card through transactional prompt create", async () => {
+    const { onClose, onSuccess } = renderModal({
       defaultName: "  planner  ",
       defaultBackend: " claude ",
     });
-    fireEvent.click(screen.getByRole("button", { name: /create agent/i }));
+    fireEvent.click(screen.getByRole("button", { name: /activate/i }));
 
-    await waitFor(() => expect(mockCreateAgent).toHaveBeenCalledTimes(1));
-    expect(mockCreateAgent).toHaveBeenCalledWith({
+    await waitFor(() =>
+      expect(mockCreatePromptAgentRecord).toHaveBeenCalledTimes(1),
+    );
+    expect(mockCreatePromptAgentRecord).toHaveBeenCalledWith("ws-1", {
+      kind: "prompt",
       name: "planner",
-      role_name: "task",
-      auto: false,
-      cross_repo: false,
-      repos: ["alpha"], // first repo is the default
       backend: "claude",
+      behavior: { role_name: "task" },
+      trigger: {
+        source_kind: "internal",
+        event_type_patterns: ["internal.task.ready"],
+      },
+      enabled: true,
     });
-    await waitFor(() => expect(onSuccess).toHaveBeenCalledWith(sampleAgent));
+    expect(onClose).toHaveBeenCalledTimes(1);
+    expect(onSuccess).not.toHaveBeenCalled();
   });
 
   // (The "omit backend when empty" case is unreachable now that AI Backend is a
@@ -298,6 +374,7 @@ describe("CreateAgentModal: submission", () => {
   it("sends cross_repo with empty repos when every repo chip is deselected", async () => {
     mockCreateAgent.mockResolvedValueOnce(sampleAgent);
     renderModal({ defaultName: "global" });
+    fireEvent.click(screen.getByTestId("create-agent-template-legacy-task"));
     // The first repo ("alpha") is selected by default — deselect it so nothing
     // is picked, which maps to workspace scope.
     fireEvent.click(screen.getByRole("button", { name: /alpha/i }));
@@ -312,6 +389,7 @@ describe("CreateAgentModal: submission", () => {
   it("sends every selected repo (multi-repo agent)", async () => {
     mockCreateAgent.mockResolvedValueOnce(sampleAgent);
     renderModal({ defaultName: "spanner" });
+    fireEvent.click(screen.getByTestId("create-agent-template-legacy-task"));
     // "alpha" is pre-selected; add "beta" so the agent spans both repos.
     fireEvent.click(screen.getByRole("button", { name: /beta/i }));
     fireEvent.click(screen.getByRole("button", { name: /create agent/i }));
@@ -377,16 +455,15 @@ describe("CreateAgentModal: submission", () => {
   });
 
   it("resets the form to the configured defaults after a successful submit", async () => {
-    mockCreateAgent.mockResolvedValueOnce(sampleAgent);
     renderModal({ defaultName: "seed-name", defaultRole: "plan" });
 
     // User overrides the name.
     fireEvent.change(screen.getByTestId("create-agent-name"), {
       target: { value: "one-off" },
     });
-    fireEvent.click(screen.getByRole("button", { name: /create agent/i }));
+    fireEvent.click(screen.getByRole("button", { name: /activate/i }));
 
-    await waitFor(() => expect(mockCreateAgent).toHaveBeenCalled());
+    await waitFor(() => expect(mockCreatePromptAgentRecord).toHaveBeenCalled());
     // After success the form returns to the defaults the parent supplied,
     // not the prior v5-era hard-coded blank/"task".
     await waitFor(() => {
@@ -403,27 +480,29 @@ describe("CreateAgentModal: submission", () => {
 
 describe("CreateAgentModal: error handling", () => {
   it("surfaces ApiError messages from the backend", async () => {
-    mockCreateAgent.mockRejectedValueOnce(
+    mockCreatePromptAgentRecord.mockRejectedValueOnce(
       new ApiError("conflict: agent already exists", 409),
     );
     renderModal({ defaultName: "dup" });
-    fireEvent.click(screen.getByRole("button", { name: /create agent/i }));
+    fireEvent.click(screen.getByRole("button", { name: /activate/i }));
     expect(await screen.findByRole("alert")).toHaveTextContent(
       /conflict: agent already exists/i,
     );
   });
 
   it("surfaces generic Error messages", async () => {
-    mockCreateAgent.mockRejectedValueOnce(new Error("network down"));
+    mockCreatePromptAgentRecord.mockRejectedValueOnce(
+      new Error("network down"),
+    );
     renderModal({ defaultName: "x" });
-    fireEvent.click(screen.getByRole("button", { name: /create agent/i }));
+    fireEvent.click(screen.getByRole("button", { name: /activate/i }));
     expect(await screen.findByRole("alert")).toHaveTextContent(/network down/i);
   });
 
   it("falls back to a generic message for non-Error throws", async () => {
-    mockCreateAgent.mockRejectedValueOnce("oops");
+    mockCreatePromptAgentRecord.mockRejectedValueOnce("oops");
     renderModal({ defaultName: "x" });
-    fireEvent.click(screen.getByRole("button", { name: /create agent/i }));
+    fireEvent.click(screen.getByRole("button", { name: /activate/i }));
     expect(await screen.findByRole("alert")).toHaveTextContent(
       /failed to create agent/i,
     );

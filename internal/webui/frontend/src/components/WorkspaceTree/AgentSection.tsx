@@ -24,6 +24,7 @@ import {
 } from "@/utils/agentRole";
 import {
   bindingCadenceLabel,
+  bindingDisplayName,
   bindingDotState,
   bindingDotTooltip,
 } from "@/utils/bindingDisplay";
@@ -202,7 +203,9 @@ export function AgentSection({
                     aria-hidden="true"
                   />
                   <span className={styles.workflowText}>
-                    <span className={styles.workflowName}>{b.binding_id}</span>
+                    <span className={styles.workflowName}>
+                    {bindingDisplayName(b)}
+                  </span>
                     <span className={styles.workflowMeta}>
                       {bindingCadenceLabel(b)}
                     </span>
