@@ -47,9 +47,7 @@ func (s *fileServiceImpl) ReadFileAtRevScoped(_ context.Context, wsID string, sc
 	if err != nil {
 		return nil, err
 	}
-	if root == "" {
-		return nil, service.ErrInternal("scope root was not resolved", nil)
-	}
+	defer root.Close()
 	result, err := s.fileOps.GitShowFileAtRev(checkout.root, strings.TrimSpace(rev), checkout.relPath, maxRequestBody)
 	if err != nil {
 		return nil, service.ErrInternal("failed to read file at revision", err)
@@ -66,10 +64,11 @@ func (s *fileServiceImpl) ReadFileAtRevScoped(_ context.Context, wsID string, sc
 }
 
 func (s *fileServiceImpl) DiffFileScoped(_ context.Context, wsID string, scope service.FileScope, target, repo, path, from, to string) (*service.FileDiffResult, error) {
-	_, cleanPath, checkout, err := s.resolveScopedContainingCheckout(wsID, scope, target, repo, path)
+	root, cleanPath, checkout, err := s.resolveScopedContainingCheckout(wsID, scope, target, repo, path)
 	if err != nil {
 		return nil, err
 	}
+	defer root.Close()
 	patch, err := s.fileOps.GitDiffFile(checkout.root, checkout.relPath, from, to)
 	if err != nil {
 		return nil, service.ErrInternal("failed to run git diff", err)
@@ -82,23 +81,13 @@ func (s *fileServiceImpl) BlameFileScoped(_ context.Context, wsID string, scope 
 	if err != nil {
 		return nil, err
 	}
-	_, fullPath, err := scopedFullPath(root, path, false)
-	if err != nil {
-		return nil, err
-	}
-	if err := validateNoSymlinkComponents(root, fullPath); err != nil {
-		return nil, err
-	}
-	fi, err := validateFilePath(fullPath)
+	defer root.Close()
+	data, fi, truncated, err := root.store.Read(cleanPath, maxRequestBody)
 	if err != nil {
 		return nil, err
 	}
 	if fi.Size() > maxRequestBody {
 		return blameSkipped(cleanPath, "too_large", "File is over the 1 MB blame limit."), nil
-	}
-	data, truncated, err := readFileContent(fullPath, root, fi.Size())
-	if err != nil {
-		return nil, err
 	}
 	if truncated {
 		return blameSkipped(cleanPath, "too_large", "File is over the 1 MB blame limit."), nil
@@ -124,6 +113,7 @@ func (s *fileServiceImpl) HistoryFileScoped(_ context.Context, wsID string, scop
 	if err != nil {
 		return nil, err
 	}
+	defer root.Close()
 	logOutput, err := s.fileOps.GitLogFile(checkout.root, checkout.relPath, fileHistoryGitLogLimit)
 	if err != nil {
 		return nil, service.ErrInternal("failed to run git log", err)
@@ -137,7 +127,6 @@ func (s *fileServiceImpl) HistoryFileScoped(_ context.Context, wsID string, scop
 	sort.SliceStable(entries, func(i, j int) bool {
 		return entries[i].Time > entries[j].Time
 	})
-	_ = root
 	return &service.FileHistoryResult{Path: cleanPath, Entries: entries}, nil
 }
 
@@ -151,84 +140,65 @@ func blameSkipped(path, reason, message string) *service.FileBlameResult {
 	}
 }
 
-func (s *fileServiceImpl) resolveScopedContainingCheckout(wsID string, scope service.FileScope, target, repo, path string) (string, string, fileCheckoutRef, error) {
-	root, err := s.resolveScopeRoot(wsID, scope, target, repo)
+func (s *fileServiceImpl) resolveScopedContainingCheckout(wsID string, scope service.FileScope, target, repo, path string) (*scopedRoot, string, fileCheckoutRef, error) {
+	root, err := s.resolveScopedRoot(wsID, scope, target, repo)
 	if err != nil {
-		return "", "", fileCheckoutRef{}, err
+		return nil, "", fileCheckoutRef{}, err
 	}
-	cleanPath, fullPath, err := scopedFullPath(root, path, false)
+	cleanPath, err := normalizeFilePath(path, false)
 	if err != nil {
-		return "", "", fileCheckoutRef{}, err
+		root.Close()
+		return nil, "", fileCheckoutRef{}, err
 	}
-	if err := validateNoSymlinkComponents(root, fullPath); err != nil {
-		return "", "", fileCheckoutRef{}, err
+	if err := root.store.ensureNoSymlinks(cleanPath, true); err != nil {
+		root.Close()
+		return nil, "", fileCheckoutRef{}, err
 	}
 	var checkout fileCheckoutRef
 	switch scope {
 	case service.ScopeRepo, service.ScopeAgent:
-		if err := validateGitCheckoutRoot(root); err != nil {
-			return "", "", fileCheckoutRef{}, err
+		if err := validateGitCheckoutRoot(root.path); err != nil {
+			root.Close()
+			return nil, "", fileCheckoutRef{}, err
 		}
-		repoRel, err := filepath.Rel(root, fullPath)
+		repoRel, err := filepath.Rel(root.path, root.store.absolute(cleanPath))
 		if err != nil || repoRel == "." || strings.HasPrefix(repoRel, ".."+string(filepath.Separator)) || filepath.IsAbs(repoRel) {
-			return "", "", fileCheckoutRef{}, service.ErrForbidden("path outside git checkout")
+			root.Close()
+			return nil, "", fileCheckoutRef{}, service.ErrForbidden("path outside git checkout")
 		}
-		checkout = fileCheckoutRef{root: root, relPath: filepath.ToSlash(repoRel)}
+		checkout = fileCheckoutRef{root: root.path, relPath: filepath.ToSlash(repoRel)}
 	case service.ScopeWorkspace:
 		checkout, err = resolveContainingCheckout(root, cleanPath)
 		if err != nil {
-			return "", "", fileCheckoutRef{}, err
+			root.Close()
+			return nil, "", fileCheckoutRef{}, err
 		}
 	default:
-		return "", "", fileCheckoutRef{}, service.ErrValidation("unsupported scope " + string(scope))
+		root.Close()
+		return nil, "", fileCheckoutRef{}, service.ErrValidation("unsupported scope " + string(scope))
 	}
 	return root, cleanPath, checkout, nil
 }
 
-func resolveContainingCheckout(rootDir, relPath string) (fileCheckoutRef, error) {
-	_, fullPath, err := scopedFullPath(rootDir, relPath, false)
-	if err != nil {
-		return fileCheckoutRef{}, err
-	}
-	if err := validateNoSymlinkComponents(rootDir, fullPath); err != nil {
-		return fileCheckoutRef{}, err
-	}
-	start := fullPath
-	if fi, err := os.Lstat(fullPath); err != nil || !fi.IsDir() {
-		start = filepath.Dir(fullPath)
-	}
-	rootAbs, err := filepath.Abs(rootDir)
-	if err != nil {
-		return fileCheckoutRef{}, service.ErrInternal("failed to resolve scope root", err)
+func resolveContainingCheckout(root *scopedRoot, relPath string) (fileCheckoutRef, error) {
+	start := relPath
+	if fi, err := root.store.stat(relPath); err != nil || !fi.IsDir() {
+		start = filepath.Dir(relPath)
 	}
 	for current := start; ; current = filepath.Dir(current) {
-		currentAbs, err := filepath.Abs(current)
-		if err != nil {
-			return fileCheckoutRef{}, service.ErrInternal("failed to resolve checkout path", err)
-		}
-		if !pathWithin(currentAbs, rootAbs) {
-			break
-		}
-		if err := validateNoSymlinkComponents(rootAbs, currentAbs); err != nil {
-			return fileCheckoutRef{}, err
-		}
+		currentAbs := root.store.absolute(current)
 		if err := validateGitCheckoutRoot(currentAbs); err == nil {
-			repoRel, relErr := filepath.Rel(currentAbs, fullPath)
+			repoRel, relErr := filepath.Rel(currentAbs, root.store.absolute(relPath))
 			if relErr != nil || repoRel == "." || strings.HasPrefix(repoRel, ".."+string(filepath.Separator)) || filepath.IsAbs(repoRel) {
 				return fileCheckoutRef{}, service.ErrForbidden("path outside git checkout")
 			}
 			return fileCheckoutRef{root: currentAbs, relPath: filepath.ToSlash(repoRel)}, nil
 		}
-		if currentAbs == rootAbs || filepath.Dir(currentAbs) == currentAbs {
+		if current == "." || filepath.Dir(current) == current {
 			break
 		}
 	}
 	return fileCheckoutRef{}, service.ErrNotFound("containing git checkout not found")
-}
-
-func pathWithin(path, root string) bool {
-	rel, err := filepath.Rel(root, path)
-	return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) && !filepath.IsAbs(rel)
 }
 
 func parseGitLogHistory(output string) []service.FileHistoryEntry {
@@ -367,18 +337,15 @@ func countLines(content string) int {
 	return count
 }
 
-func (s *fileServiceImpl) snapshotBeforeOverwrite(wsID string, scope service.FileScope, target, repo, root, path string) error {
-	snapshot, err := readSaveSnapshotCandidate(root, path)
+func (s *fileServiceImpl) snapshotBeforeOverwrite(wsID string, scope service.FileScope, target, repo string, store *rootedFileStore, path string) error {
+	snapshot, err := readSaveSnapshotCandidate(store, path)
 	if errors.Is(err, errNoSaveSnapshot) {
 		return nil
 	}
 	if err != nil {
 		return err
 	}
-	cleanPath, _, err := scopedFullPath(root, path, false)
-	if err != nil {
-		return err
-	}
+	cleanPath := path
 	dataDir, err := s.fileOps.ResolveLoomDataDir()
 	if err != nil {
 		return service.ErrInternal("failed to resolve loom data directory", err)
@@ -403,32 +370,13 @@ func (s *fileServiceImpl) snapshotBeforeOverwrite(wsID string, scope service.Fil
 	return pruneSaveHistory(dir)
 }
 
-func readSaveSnapshotCandidate(root, path string) (*fileSaveSnapshot, error) {
-	_, fullPath, err := scopedFullPath(root, path, false)
+func readSaveSnapshotCandidate(store *rootedFileStore, path string) (*fileSaveSnapshot, error) {
+	data, fi, truncated, err := store.Read(path, maxRequestBody)
 	if err != nil {
-		return nil, err
-	}
-	if err := validateNoSymlinkComponents(root, fullPath); err != nil {
-		return nil, err
-	}
-	fi, err := os.Lstat(fullPath)
-	if err != nil {
-		if os.IsNotExist(err) {
+		var serviceErr *service.ServiceError
+		if errors.As(err, &serviceErr) && serviceErr.Kind == service.KindNotFound {
 			return nil, errNoSaveSnapshot
 		}
-		return nil, service.ErrInternal("failed to stat file before overwrite", err)
-	}
-	if fi.Mode()&os.ModeSymlink != 0 {
-		return nil, service.ErrForbidden("refusing to overwrite symlink")
-	}
-	if fi.IsDir() {
-		return nil, service.ErrValidation("path is a directory, not a file")
-	}
-	if !fi.Mode().IsRegular() {
-		return nil, service.ErrValidation("path is not a regular file")
-	}
-	data, truncated, err := readFileContent(fullPath, root, fi.Size())
-	if err != nil {
 		return nil, err
 	}
 	return &fileSaveSnapshot{
