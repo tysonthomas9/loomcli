@@ -33,6 +33,12 @@ export type {
   UsePullRequestsReturn,
 } from "./usePullRequests";
 
+export { usePullRequestDiff } from "./usePullRequestDiff";
+export type {
+  UsePullRequestDiffParams,
+  UsePullRequestDiffResult,
+} from "./usePullRequestDiff";
+
 export { useRepoFilter, parseReposFromUrl } from "./useRepoFilter";
 export type {
   UseRepoFilterOptions,

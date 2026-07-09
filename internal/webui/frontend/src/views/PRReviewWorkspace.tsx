@@ -21,7 +21,7 @@ import {
   buildWorkerByTaskId,
   isWorkerTerminalOpenable,
 } from "@/components/AgentWorkPanel/AgentWorkPanel";
-import { PRFilesTab } from "@/components/IssueDetailPanel";
+import { PRCompareDiffPane, PRFilesTab } from "@/components/IssueDetailPanel";
 import { TaskSessionDiffPane } from "@/components/IssueDetailPanel/sessions/TaskSessionDiffPane";
 import {
   useWorkspaceViewData,
@@ -88,16 +88,53 @@ export function resolveDiffAgentForIssue(
   return linked[0];
 }
 
+interface PullRequestRepoRef {
+  owner: string;
+  repo: string;
+}
+
+function repoRefFromName(
+  repoName: string | undefined,
+): PullRequestRepoRef | null {
+  const [owner, repo, extra] = repoName?.split("/") ?? [];
+  if (!owner || !repo || extra) return null;
+  return { owner, repo };
+}
+
+function repoRefFromUrl(url: string | undefined): PullRequestRepoRef | null {
+  if (!url) return null;
+
+  try {
+    const parsed = new URL(url);
+    const [owner, repo, marker] = parsed.pathname.split("/").filter(Boolean);
+    if (owner && repo && marker === "pull") {
+      return { owner, repo };
+    }
+  } catch {
+    return null;
+  }
+
+  return null;
+}
+
+function resolvePullRequestRepo(
+  pullRequest: GitPullRequest | undefined,
+): PullRequestRepoRef | null {
+  return (
+    repoRefFromName(pullRequest?.repo_name) ?? repoRefFromUrl(pullRequest?.url)
+  );
+}
+
 export function PRReviewWorkspace({
   issue,
   pullRequest,
   onBack,
 }: PRReviewWorkspaceProps): JSX.Element {
   const navigate = useNavigate();
-  const { agents, issues, workspaceId } = useWorkspaceViewData();
+  const { agents, issues } = useWorkspaceViewData();
   const { refetch, showToast, updateIssueStatus, handleIssueClick } =
     useWorkspaceViewActions();
-  const { repos } = useWorkspaceContext();
+  const { repos, workspaceId } = useWorkspaceContext();
 
   const [agentMenuOpen, setAgentMenuOpen] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
@@ -141,6 +178,10 @@ export function PRReviewWorkspace({
     pullRequest?.number?.toString() ??
     prUrl?.match(/\/pulls?\/(\d+)/)?.[1] ??
     null;
+  const pullRequestRepo = useMemo(
+    () => resolvePullRequestRepo(pullRequest),
+    [pullRequest],
+  );
   const displayTitle = pullRequest?.title || issue.title;
   const reviewStateLabel = (() => {
     if (pullRequest?.is_draft) return "Draft";
@@ -364,6 +405,13 @@ export function PRReviewWorkspace({
                 worktreeAgentName={diffAgent.name}
               />
             }
+          />
+        ) : pullRequest && pullRequestRepo ? (
+          <PRCompareDiffPane
+            workspaceId={workspaceId}
+            owner={pullRequestRepo.owner}
+            repo={pullRequestRepo.repo}
+            number={pullRequest.number}
           />
         ) : (
           <TaskSessionDiffPane taskId={issue.id} />
