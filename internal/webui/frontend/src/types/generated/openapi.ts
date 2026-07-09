@@ -1396,6 +1396,40 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/workspaces/{ws}/pull-requests/{owner}/{repo}/{number}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Get pull request detail via the GitHub connector */
+    get: operations["getPullRequestDetail"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/workspaces/{ws}/pull-requests/{owner}/{repo}/{number}/diff": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Get pull request diff via the GitHub connector */
+    get: operations["getPullRequestDiff"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/workspaces/{ws}/agents/{name}/git/diff-stat": {
     parameters: {
       query?: never;
@@ -1948,6 +1982,27 @@ export interface components {
       mode: "daemon" | "fleet";
       workspace: string;
       reason?: string;
+    };
+    PullRequestDetail: {
+      number: number;
+      state: string;
+      title: string;
+      is_draft: boolean;
+      head_ref_name: string;
+      base_ref_name: string;
+      head_sha: string;
+      merged: boolean;
+    };
+    PullRequestDiff: {
+      files: components["schemas"]["PullRequestDiffFile"][];
+      diff: string;
+    };
+    PullRequestDiffFile: {
+      path: string;
+      status: string;
+      additions: number;
+      deletions: number;
+      patch: string;
     };
     /**
      * @description Core issue type used in list endpoints. Maps to `types.Issue` json
@@ -5653,6 +5708,120 @@ export interface operations {
         };
         content: {
           "application/json": Record<string, never>;
+        };
+      };
+    };
+  };
+  getPullRequestDetail: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+        owner: string;
+        repo: string;
+        number: number;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Pull request detail */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": {
+            /** @constant */
+            success: true;
+            data: components["schemas"]["PullRequestDetail"];
+          };
+        };
+      };
+      /** @description Invalid path parameter */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Repository is not registered in the workspace */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Connector egress unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+    };
+  };
+  getPullRequestDiff: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+        owner: string;
+        repo: string;
+        number: number;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Pull request diff */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": {
+            /** @constant */
+            success: true;
+            data: components["schemas"]["PullRequestDiff"];
+          };
+        };
+      };
+      /** @description Invalid path parameter */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Repository is not registered in the workspace */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Connector egress unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
         };
       };
     };

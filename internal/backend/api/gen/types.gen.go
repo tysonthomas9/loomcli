@@ -1674,6 +1674,33 @@ type PatchIssueRequestAgentState string
 // PatchIssueRequestStatus defines model for PatchIssueRequest.Status.
 type PatchIssueRequestStatus string
 
+// PullRequestDetail defines model for PullRequestDetail.
+type PullRequestDetail struct {
+	BaseRefName string `json:"base_ref_name"`
+	HeadRefName string `json:"head_ref_name"`
+	HeadSha     string `json:"head_sha"`
+	IsDraft     bool   `json:"is_draft"`
+	Merged      bool   `json:"merged"`
+	Number      int    `json:"number"`
+	State       string `json:"state"`
+	Title       string `json:"title"`
+}
+
+// PullRequestDiff defines model for PullRequestDiff.
+type PullRequestDiff struct {
+	Diff  string                `json:"diff"`
+	Files []PullRequestDiffFile `json:"files"`
+}
+
+// PullRequestDiffFile defines model for PullRequestDiffFile.
+type PullRequestDiffFile struct {
+	Additions int    `json:"additions"`
+	Deletions int    `json:"deletions"`
+	Patch     string `json:"patch"`
+	Path      string `json:"path"`
+	Status    string `json:"status"`
+}
+
 // RuntimeReadyResponse defines model for RuntimeReadyResponse.
 type RuntimeReadyResponse struct {
 	Mode      RuntimeReadyResponseMode `json:"mode"`

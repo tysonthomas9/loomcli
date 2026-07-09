@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"testing"
 
+	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	"github.com/tysonthomas9/loomcli/internal/webui/daemon"
 	"github.com/tysonthomas9/loomcli/internal/webui/fleet"
 	"github.com/tysonthomas9/loomcli/internal/webui/issuetabs"
@@ -62,6 +63,37 @@ func TestServer_BuildModules_AllDeps(t *testing.T) {
 	// Terminal(termSvc) + Fleet(fleetRegistry) + Git(diffSvc) + File(fileSvc) = 11
 	if got := len(app.wsModules); got != 11 {
 		t.Fatalf("len(wsModules) = %d, want 11", got)
+	}
+}
+
+func TestServer_BuildModules_StoreBacked(t *testing.T) {
+	app := Server{}
+	app.config.Store = memstore.New()
+
+	app.buildModules()
+
+	if got := len(app.wsModules); got != 12 {
+		t.Fatalf("len(wsModules) = %d, want 12", got)
+	}
+	wantTypes := []string{
+		"*handlermux.WorkspaceOpsModule",
+		"*issues.IssueModule",
+		"*issues.SessionModule",
+		"*log.Module",
+		"*agents.Module",
+		"*onboarding.Module",
+		"*workflows.Module",
+		"*webhooks.Module",
+		"*prreview.Module",
+		"*approvals.Module",
+		"*taskrunapi.Module",
+		"*driverapi.Module",
+	}
+	for i, mod := range app.wsModules {
+		got := fmt.Sprintf("%T", mod)
+		if got != wantTypes[i] {
+			t.Errorf("wsModules[%d] type = %s, want %s", i, got, wantTypes[i])
+		}
 	}
 }
 

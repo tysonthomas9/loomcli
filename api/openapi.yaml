@@ -54,6 +54,8 @@ tags:
     description: Agent lifecycle (start/stop/restart/yield)
   - name: git
     description: Git operations (status, push, pull, sync, PR, reset)
+  - name: pull-requests
+    description: Pull request review read APIs
   - name: diff
     description: Diff and commit inspection
   - name: files
@@ -2479,6 +2481,117 @@ paths:
               schema:
                 type: object
 
+  # ── Pull Requests ───────────────────────────────────────────────────────
+  /api/workspaces/{ws}/pull-requests/{owner}/{repo}/{number}:
+    get:
+      operationId: getPullRequestDetail
+      tags: [pull-requests]
+      summary: Get pull request detail via the GitHub connector
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: owner
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: repo
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: number
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Pull request detail
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success, data]
+                properties:
+                  success:
+                    type: boolean
+                    const: true
+                  data:
+                    $ref: "#/components/schemas/PullRequestDetail"
+        "400":
+          description: Invalid path parameter
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Repository is not registered in the workspace
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: Connector egress unavailable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/workspaces/{ws}/pull-requests/{owner}/{repo}/{number}/diff:
+    get:
+      operationId: getPullRequestDiff
+      tags: [pull-requests]
+      summary: Get pull request diff via the GitHub connector
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: owner
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: repo
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: number
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Pull request diff
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success, data]
+                properties:
+                  success:
+                    type: boolean
+                    const: true
+                  data:
+                    $ref: "#/components/schemas/PullRequestDiff"
+        "400":
+          description: Invalid path parameter
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Repository is not registered in the workspace
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: Connector egress unavailable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
   /api/workspaces/{ws}/agents/{name}/git/diff-stat:
     get:
       operationId: getAgentDiffStat
@@ -3303,6 +3416,62 @@ components:
         workspace:
           type: string
         reason:
+          type: string
+
+    # ── Pull Request Schemas ────────────────────────────────────────────
+    PullRequestDetail:
+      type: object
+      required:
+        - number
+        - state
+        - title
+        - is_draft
+        - head_ref_name
+        - base_ref_name
+        - head_sha
+        - merged
+      properties:
+        number:
+          type: integer
+        state:
+          type: string
+        title:
+          type: string
+        is_draft:
+          type: boolean
+        head_ref_name:
+          type: string
+        base_ref_name:
+          type: string
+        head_sha:
+          type: string
+        merged:
+          type: boolean
+
+    PullRequestDiff:
+      type: object
+      required: [files, diff]
+      properties:
+        files:
+          type: array
+          items:
+            $ref: "#/components/schemas/PullRequestDiffFile"
+        diff:
+          type: string
+
+    PullRequestDiffFile:
+      type: object
+      required: [path, status, additions, deletions, patch]
+      properties:
+        path:
+          type: string
+        status:
+          type: string
+        additions:
+          type: integer
+        deletions:
+          type: integer
+        patch:
           type: string
 
     # ── Issue Schemas ───────────────────────────────────────────────────
