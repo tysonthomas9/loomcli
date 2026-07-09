@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/domain"
@@ -62,6 +63,32 @@ func TaskRunWorktreePath(workspacePath, repoName, taskRunID string) (string, err
 	}
 	if !PathContains(root, target) || root == target {
 		return "", fmt.Errorf("task worktree path escapes workspace: %s", target)
+	}
+	return target, nil
+}
+
+// PRReviewWorktreePath returns the canonical isolated worktree path for a PR
+// review checkout.
+func PRReviewWorktreePath(workspacePath, repoName string, prNumber int) (string, error) {
+	if strings.TrimSpace(workspacePath) == "" {
+		return "", fmt.Errorf("workspace path is empty")
+	}
+	if strings.TrimSpace(repoName) == "" {
+		return "", fmt.Errorf("repo name is empty")
+	}
+	if prNumber <= 0 {
+		return "", fmt.Errorf("pr number must be positive")
+	}
+	root, err := filepath.Abs(workspacePath)
+	if err != nil {
+		return "", err
+	}
+	target, err := filepath.Abs(filepath.Join(root, ".loom", "pr-worktrees", safePathSegment(repoName), fmt.Sprintf("pr-%d", prNumber)))
+	if err != nil {
+		return "", err
+	}
+	if !PathContains(root, target) || root == target {
+		return "", fmt.Errorf("pr review worktree path escapes workspace: %s", target)
 	}
 	return target, nil
 }
@@ -139,6 +166,108 @@ func EnsureDetachedGitWorktreeFromBranch(repoPath, targetPath, remoteName, defau
 	}
 	_, err = runGit(repoPath, args...)
 	return err
+}
+
+// EnsureDetachedGitWorktreeAtPRHead creates or updates a detached git worktree
+// at targetPath for the fetched PR head.
+// prWorktreeLocks serializes EnsureDetachedGitWorktreeAtPRHead per target path
+// within a process, so a second concurrent call for the same PR can't tear down
+// (worktree remove --force) a checkout the first call is actively serving.
+var prWorktreeLocks sync.Map
+
+func EnsureDetachedGitWorktreeAtPRHead(repoPath, targetPath, remoteName string, prNumber int, headSHA string) (string, error) {
+	if strings.TrimSpace(repoPath) == "" {
+		return "", fmt.Errorf("repo path is empty")
+	}
+	if strings.TrimSpace(targetPath) == "" {
+		return "", fmt.Errorf("target path is empty")
+	}
+	if prNumber <= 0 {
+		return "", fmt.Errorf("pr number must be positive")
+	}
+	remoteName = strings.TrimSpace(remoteName)
+	if remoteName == "" {
+		remoteName = "origin"
+	}
+
+	lockAny, _ := prWorktreeLocks.LoadOrStore(targetPath, &sync.Mutex{})
+	lock := lockAny.(*sync.Mutex)
+	lock.Lock()
+	defer lock.Unlock()
+
+	checkoutRef := fmt.Sprintf("refs/loom/pr/%d/head", prNumber)
+	fetchRef := fmt.Sprintf("+refs/pull/%d/head:%s", prNumber, checkoutRef)
+	if _, err := runGit(repoPath, "fetch", remoteName, fetchRef); err != nil {
+		return "", fmt.Errorf("fetch PR #%d head from %q: %w", prNumber, remoteName, err)
+	}
+
+	// Pin to the exact reviewed sha when it survived the fetch; otherwise fall
+	// back to the fetched tip (e.g. the requested sha was orphaned by a force
+	// push). The actually-checked-out sha is returned so the caller can detect
+	// the substitution and tell the user which head was reviewed.
+	checkout := checkoutRef
+	headSHA = strings.TrimSpace(headSHA)
+	if headSHA != "" {
+		if _, err := runGit(repoPath, "rev-parse", "--verify", headSHA+"^{commit}"); err == nil {
+			checkout = headSHA
+		}
+	}
+	expectOut, err := runGit(repoPath, "rev-parse", "--verify", checkout+"^{commit}")
+	if err != nil {
+		return "", fmt.Errorf("resolve PR #%d checkout %q: %w", prNumber, checkout, err)
+	}
+	expectHEAD := strings.TrimSpace(expectOut)
+
+	addWorktree := func() error {
+		if err := os.MkdirAll(filepath.Dir(targetPath), 0o755); err != nil {
+			return fmt.Errorf("creating PR worktree parent: %w", err)
+		}
+		out, err := runGit(repoPath, "worktree", "add", "--detach", targetPath, checkout)
+		if err == nil {
+			return nil
+		}
+		if !branchAlreadyExists(out, err) {
+			return fmt.Errorf("add PR worktree at %s: %w", targetPath, err)
+		}
+		_, _ = runGit(repoPath, "worktree", "remove", "--force", targetPath)
+		if _, err := runGit(repoPath, "worktree", "add", "--detach", targetPath, checkout); err != nil {
+			return fmt.Errorf("add PR worktree at %s after removing stale registration: %w", targetPath, err)
+		}
+		return nil
+	}
+
+	if _, err := os.Stat(filepath.Join(targetPath, ".git")); err != nil {
+		if !os.IsNotExist(err) {
+			return "", fmt.Errorf("stat PR worktree git dir: %w", err)
+		}
+		if err := addWorktree(); err != nil {
+			return "", err
+		}
+		return expectHEAD, nil
+	}
+
+	// Cache hit only when the worktree is at the target sha AND pristine — a
+	// review checkout must faithfully match the PR head, so drift left by a
+	// prior session (untracked/modified files, interrupted clean) is scrubbed
+	// via the reset+clean path rather than handed back dirty.
+	head, _ := runGit(targetPath, "rev-parse", "HEAD")
+	if strings.TrimSpace(head) == expectHEAD {
+		if status, err := runGit(targetPath, "status", "--porcelain"); err == nil && strings.TrimSpace(status) == "" {
+			return expectHEAD, nil
+		}
+	}
+
+	if _, err := runGit(targetPath, "reset", "--hard", checkout); err != nil {
+		_, _ = runGit(repoPath, "worktree", "remove", "--force", targetPath)
+		if err := addWorktree(); err != nil {
+			return "", fmt.Errorf("recreate PR worktree at %s after reset failure: %w", targetPath, err)
+		}
+		return expectHEAD, nil
+	}
+	if _, err := runGit(targetPath, "clean", "-fdx"); err != nil {
+		return "", fmt.Errorf("clean PR worktree at %s: %w", targetPath, err)
+	}
+	return expectHEAD, nil
 }
 
 // EnsureGitWorktreeFromBranch creates a git worktree at targetPath. When
@@ -233,6 +362,7 @@ func branchAlreadyExists(out string, err error) bool {
 		msg += "\n" + err.Error()
 	}
 	return strings.Contains(msg, "already exists") ||
+		strings.Contains(msg, "already registered") ||
 		strings.Contains(msg, "already a worktree") ||
 		strings.Contains(msg, "already checked out")
 }
