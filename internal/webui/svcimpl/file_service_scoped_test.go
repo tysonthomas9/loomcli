@@ -188,6 +188,15 @@ func scopedSvc(root string) service.FileService {
 	return NewFileService(scopedMockFileOps{wsRoot: root})
 }
 
+func mustScopedVersion(t *testing.T, svc service.FileService, ctx context.Context, scope service.FileScope, target, path string) string {
+	t.Helper()
+	result, err := svc.StatPathScoped(ctx, "ws", scope, target, "", path)
+	if err != nil {
+		t.Fatalf("stat %q for version: %v", path, err)
+	}
+	return result.Version
+}
+
 func TestFileServiceImpl_ViewerFiltersSensitiveSurfaces(t *testing.T) {
 	root := t.TempDir()
 	for path, content := range map[string]string{
@@ -590,9 +599,10 @@ func TestFileServiceImpl_PhaseA_CRUDAndVisibilityAllScopes(t *testing.T) {
 			wantKind(t, svc.DeletePathScoped(ctx, "ws", sc.scope, sc.target, "", ".git/config", false), service.KindForbidden)
 
 			mustWrite(t, filepath.Join(sc.root, "nonempty", "file.txt"), "x")
-			err = svc.DeletePathScoped(ctx, "ws", sc.scope, sc.target, "", "nonempty", false)
+			nonemptyVersion := mustScopedVersion(t, svc, ctx, sc.scope, sc.target, "nonempty")
+			err = svc.DeletePathVersionedScoped(ctx, "ws", sc.scope, sc.target, "", "nonempty", false, nonemptyVersion)
 			wantKind(t, err, service.KindConflict)
-			if err := svc.DeletePathScoped(ctx, "ws", sc.scope, sc.target, "", "nonempty", true); err != nil {
+			if err := svc.DeletePathVersionedScoped(ctx, "ws", sc.scope, sc.target, "", "nonempty", true, nonemptyVersion); err != nil {
 				t.Fatalf("recursive delete: %v", err)
 			}
 			if _, err := os.Stat(filepath.Join(sc.root, "nonempty")); !os.IsNotExist(err) {
@@ -608,9 +618,11 @@ func TestFileServiceImpl_PhaseA_CRUDAndVisibilityAllScopes(t *testing.T) {
 
 			mustWrite(t, filepath.Join(sc.root, "move-src.txt"), "src")
 			mustWrite(t, filepath.Join(sc.root, "move-dst.txt"), "dst")
-			err = svc.MovePathScoped(ctx, "ws", sc.scope, sc.target, "", "move-src.txt", "move-dst.txt", false)
+			sourceVersion := mustScopedVersion(t, svc, ctx, sc.scope, sc.target, "move-src.txt")
+			destinationVersion := mustScopedVersion(t, svc, ctx, sc.scope, sc.target, "move-dst.txt")
+			_, err = svc.MovePathVersionedScoped(ctx, "ws", sc.scope, sc.target, "", "move-src.txt", "move-dst.txt", false, sourceVersion, "")
 			wantKind(t, err, service.KindConflict)
-			if err := svc.MovePathScoped(ctx, "ws", sc.scope, sc.target, "", "move-src.txt", "move-dst.txt", true); err != nil {
+			if _, err := svc.MovePathVersionedScoped(ctx, "ws", sc.scope, sc.target, "", "move-src.txt", "move-dst.txt", true, sourceVersion, destinationVersion); err != nil {
 				t.Fatalf("move overwrite: %v", err)
 			}
 			got, err := os.ReadFile(filepath.Join(sc.root, "move-dst.txt"))
@@ -735,7 +747,10 @@ func TestFileServiceImpl_RecursiveDeleteDoesNotFollowDescendantSymlink(t *testin
 	if err := os.Symlink(outside, filepath.Join(dir, "delete-me", "outside")); err != nil {
 		t.Skip("cannot create symlinks on this platform")
 	}
-	if err := scopedSvc(dir).DeletePathScoped(context.Background(), "ws", service.ScopeWorkspace, "", "", "delete-me", true); err != nil {
+	svc := scopedSvc(dir)
+	ctx := context.Background()
+	version := mustScopedVersion(t, svc, ctx, service.ScopeWorkspace, "", "delete-me")
+	if err := svc.DeletePathVersionedScoped(ctx, "ws", service.ScopeWorkspace, "", "", "delete-me", true, version); err != nil {
 		t.Fatalf("recursive delete: %v", err)
 	}
 	if got, err := os.ReadFile(filepath.Join(outside, "keep.txt")); err != nil || string(got) != "keep" {
@@ -1333,7 +1348,8 @@ func TestFileServiceImpl_IndexCacheInvalidatedAfterCRUD(t *testing.T) {
 		t.Fatalf("mkdir did not invalidate index cache: %+v", index.Paths)
 	}
 
-	if err := svc.MovePathScoped(ctx, "ws", service.ScopeWorkspace, "", "", "two.txt", "moved.txt", false); err != nil {
+	version := mustScopedVersion(t, svc, ctx, service.ScopeWorkspace, "", "two.txt")
+	if _, err := svc.MovePathVersionedScoped(ctx, "ws", service.ScopeWorkspace, "", "", "two.txt", "moved.txt", false, version, ""); err != nil {
 		t.Fatalf("move: %v", err)
 	}
 	index, err = svc.IndexFilesScoped(ctx, "ws", service.ScopeWorkspace, "", "")
@@ -1344,7 +1360,8 @@ func TestFileServiceImpl_IndexCacheInvalidatedAfterCRUD(t *testing.T) {
 		t.Fatalf("move did not invalidate index cache: %+v", index.Paths)
 	}
 
-	if err := svc.DeletePathScoped(ctx, "ws", service.ScopeWorkspace, "", "", "one.txt", false); err != nil {
+	version = mustScopedVersion(t, svc, ctx, service.ScopeWorkspace, "", "one.txt")
+	if err := svc.DeletePathVersionedScoped(ctx, "ws", service.ScopeWorkspace, "", "", "one.txt", false, version); err != nil {
 		t.Fatalf("delete: %v", err)
 	}
 	index, err = svc.IndexFilesScoped(ctx, "ws", service.ScopeWorkspace, "", "")

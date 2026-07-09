@@ -11,20 +11,22 @@ import (
 // kindToStatus maps each service.ErrorKind to its HTTP status code.
 // This must stay in sync with service/errors.go (task .9).
 var kindToStatus = map[service.ErrorKind]int{
-	service.KindNotFound:        http.StatusNotFound,
-	service.KindValidation:      http.StatusBadRequest,
-	service.KindUnavailable:     http.StatusServiceUnavailable,
-	service.KindTimeout:         http.StatusGatewayTimeout,
-	service.KindConflict:        http.StatusConflict,
-	service.KindInternal:        http.StatusInternalServerError,
-	service.KindForbidden:       http.StatusForbidden,
-	service.KindUnauthorized:    http.StatusUnauthorized,
-	service.KindLocked:          http.StatusLocked,
-	service.KindPayloadTooLarge: http.StatusRequestEntityTooLarge,
-	service.KindRateLimited:     http.StatusTooManyRequests,
-	service.KindBadGateway:      http.StatusBadGateway,
-	service.KindNotImplemented:  http.StatusNotImplemented,
-	service.KindStarting:        http.StatusServiceUnavailable,
+	service.KindNotFound:             http.StatusNotFound,
+	service.KindValidation:           http.StatusBadRequest,
+	service.KindUnavailable:          http.StatusServiceUnavailable,
+	service.KindTimeout:              http.StatusGatewayTimeout,
+	service.KindConflict:             http.StatusConflict,
+	service.KindInternal:             http.StatusInternalServerError,
+	service.KindForbidden:            http.StatusForbidden,
+	service.KindUnauthorized:         http.StatusUnauthorized,
+	service.KindLocked:               http.StatusLocked,
+	service.KindPayloadTooLarge:      http.StatusRequestEntityTooLarge,
+	service.KindRateLimited:          http.StatusTooManyRequests,
+	service.KindBadGateway:           http.StatusBadGateway,
+	service.KindNotImplemented:       http.StatusNotImplemented,
+	service.KindStarting:             http.StatusServiceUnavailable,
+	service.KindPreconditionFailed:   http.StatusPreconditionFailed,
+	service.KindPreconditionRequired: http.StatusPreconditionRequired,
 }
 
 // HandleServiceError extracts a *service.ServiceError from err, maps its

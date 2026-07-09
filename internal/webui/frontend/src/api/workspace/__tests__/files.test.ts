@@ -12,6 +12,7 @@ import {
   readScopedFile,
   readWorktreeFile,
   searchScopedFiles,
+  statScopedPath,
   writeScopedFile,
   writeWorktreeFile,
 } from "../files";
@@ -330,6 +331,38 @@ describe("files API", () => {
       );
     });
 
+    it("forwards explicit write preconditions", async () => {
+      mockPut.mockResolvedValue({ success: true, version: "sha256:new" });
+
+      await writeScopedFile(
+        "test-ws-id",
+        { scope: "workspace" },
+        "new.txt",
+        "body",
+        { ifMatch: "sha256:old" },
+      );
+
+      expect(mockPut).toHaveBeenCalledWith(
+        "/api/workspaces/test-ws-id/files?scope=workspace&path=new.txt",
+        { content: "body" },
+        { headers: { "If-Match": '"sha256:old"' } },
+      );
+    });
+
+    it("stats a scoped path for its mutation version", async () => {
+      mockGet.mockResolvedValue({
+        path: "dir",
+        is_dir: true,
+        version: "dir-sha256:x",
+      });
+
+      await statScopedPath("test-ws-id", { scope: "workspace" }, "dir");
+
+      expect(mockGet).toHaveBeenCalledWith(
+        "/api/workspaces/test-ws-id/files/stat?scope=workspace&path=dir",
+      );
+    });
+
     it("deletes recursively when requested", async () => {
       mockDel.mockResolvedValue({ success: true });
 
@@ -342,6 +375,23 @@ describe("files API", () => {
 
       expect(mockDel).toHaveBeenCalledWith(
         "/api/workspaces/test-ws-id/files?scope=agent&target=nova&path=dir&recursive=1",
+      );
+    });
+
+    it("sends the source version when deleting", async () => {
+      mockDel.mockResolvedValue({ success: true });
+
+      await deleteScopedPath(
+        "test-ws-id",
+        { scope: "workspace" },
+        "file.txt",
+        false,
+        "sha256:current",
+      );
+
+      expect(mockDel).toHaveBeenCalledWith(
+        "/api/workspaces/test-ws-id/files?scope=workspace&path=file.txt",
+        { headers: { "If-Match": '"sha256:current"' } },
       );
     });
 
@@ -370,6 +420,31 @@ describe("files API", () => {
       expect(mockPatch).toHaveBeenCalledWith(
         "/api/workspaces/test-ws-id/files/move?scope=repo&target=loomcli",
         { from: "old.txt", to: "new.txt", overwrite: true },
+      );
+    });
+
+    it("sends source and destination versions when moving", async () => {
+      mockPatch.mockResolvedValue({ success: true, version: "sha256:source" });
+
+      await moveScopedPath(
+        "test-ws-id",
+        { scope: "workspace" },
+        "old.txt",
+        "new.txt",
+        true,
+        "sha256:source",
+        "sha256:destination",
+      );
+
+      expect(mockPatch).toHaveBeenCalledWith(
+        "/api/workspaces/test-ws-id/files/move?scope=workspace",
+        {
+          from: "old.txt",
+          to: "new.txt",
+          overwrite: true,
+          source_version: "sha256:source",
+          destination_version: "sha256:destination",
+        },
       );
     });
 

@@ -2,6 +2,7 @@ package svcimpl
 
 import (
 	"context"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"os"
@@ -22,9 +23,10 @@ var _ service.FileService = (*fileServiceImpl)(nil)
 
 // fileServiceImpl is the concrete implementation of FileService.
 type fileServiceImpl struct {
-	fileOps      ops.FileOps
-	indexCacheMu sync.Mutex
-	indexCache   map[string]fileIndexCacheEntry
+	fileOps       ops.FileOps
+	indexCacheMu  sync.Mutex
+	indexCache    map[string]fileIndexCacheEntry
+	mutationLocks pathLockSet
 }
 
 // NewFileService creates a new FileService implementation.
@@ -119,15 +121,15 @@ func readFileAt(ctx context.Context, store *rootedFileStore, path string) (*serv
 	if err := requireSensitiveFileAccess(ctx, cleanPath); err != nil {
 		return nil, err
 	}
-	data, fi, truncated, err := store.Read(cleanPath, maxRequestBody)
+	data, fi, truncated, sum, err := store.ReadVersioned(cleanPath, maxRequestBody)
 	if err != nil {
 		return nil, err
 	}
 
 	if misc.IsBinaryContent(data) {
-		return &service.FileReadResult{Path: cleanPath, Size: fi.Size(), Binary: true, Truncated: truncated}, nil
+		return &service.FileReadResult{Path: cleanPath, Size: fi.Size(), Binary: true, Truncated: truncated, Version: "sha256:" + hex.EncodeToString(sum)}, nil
 	}
-	return &service.FileReadResult{Path: cleanPath, Content: string(data), Size: fi.Size(), Truncated: truncated}, nil
+	return &service.FileReadResult{Path: cleanPath, Content: string(data), Size: fi.Size(), Truncated: truncated, Version: "sha256:" + hex.EncodeToString(sum)}, nil
 }
 
 // hiddenScopeSegments names path segments omitted from workspace listings.
@@ -280,31 +282,87 @@ func (s *fileServiceImpl) ReadFileScoped(ctx context.Context, wsID string, scope
 	return readFileAt(ctx, root.store, path)
 }
 
+func (s *fileServiceImpl) StatPathScoped(ctx context.Context, wsID string, scope service.FileScope, target, repo, path string) (*service.FileStatResult, error) {
+	root, err := s.resolveScopedRoot(wsID, scope, target, repo)
+	if err != nil {
+		return nil, err
+	}
+	defer root.Close()
+	cleanPath, err := normalizeFilePath(path, false)
+	if err != nil {
+		return nil, err
+	}
+	if err := requireSensitiveFileAccess(ctx, cleanPath); err != nil {
+		return nil, err
+	}
+	version, info, err := versionForPath(root.store, cleanPath)
+	if err != nil {
+		return nil, err
+	}
+	return &service.FileStatResult{
+		Path: cleanPath, IsDir: info.IsDir(), Size: info.Size(),
+		ModTime: info.ModTime().UTC().Format(time.RFC3339), Version: version,
+	}, nil
+}
+
 func (s *fileServiceImpl) WriteFile(ctx context.Context, wsID, agentName, path, content string) error {
 	return s.WriteFileScoped(ctx, wsID, service.ScopeAgent, agentName, "", path, content)
 }
 
 func (s *fileServiceImpl) WriteFileScoped(ctx context.Context, wsID string, scope service.FileScope, target, repo, path, content string) error {
+	_, err := s.WriteFileConditionalScoped(ctx, wsID, scope, target, repo, path, content, service.FileWritePreconditions{})
+	return err
+}
+
+func (s *fileServiceImpl) WriteFileConditionalScoped(ctx context.Context, wsID string, scope service.FileScope, target, repo, path, content string, preconditions service.FileWritePreconditions) (*service.FileMutationResult, error) {
 	root, err := s.resolveScopedRoot(wsID, scope, target, repo)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer root.Close()
 	cleanPath, err := normalizeFilePath(path, false)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if err := requireSensitiveFileAccess(ctx, cleanPath); err != nil {
-		return err
+		return nil, err
+	}
+	if preconditions.IfMatch != "" && preconditions.IfNoneMatch {
+		return nil, service.ErrValidation("If-Match and If-None-Match cannot be combined")
+	}
+	unlock := s.mutationLocks.lock(root.identity, cleanPath)
+	defer unlock()
+	if preconditions.IfNoneMatch {
+		if _, err := root.store.stat(cleanPath); err == nil {
+			return nil, service.ErrPreconditionFailed("path already exists")
+		} else if !isNotFound(err) {
+			return nil, err
+		}
+	}
+	if preconditions.IfMatch != "" {
+		current, _, err := versionForPath(root.store, cleanPath)
+		if err != nil {
+			if isNotFound(err) {
+				return nil, service.ErrPreconditionFailed("file version no longer matches")
+			}
+			return nil, err
+		}
+		if current != preconditions.IfMatch {
+			return nil, service.ErrPreconditionFailed("file version no longer matches")
+		}
 	}
 	if err := s.snapshotBeforeOverwrite(wsID, scope, target, repo, root.store, cleanPath); err != nil {
-		return err
+		return nil, err
 	}
 	if err := root.store.WriteAtomic(cleanPath, []byte(content)); err != nil {
-		return err
+		return nil, err
 	}
 	s.invalidateIndex(root.path)
-	return nil
+	version, _, err := versionForPath(root.store, cleanPath)
+	if err != nil {
+		return nil, err
+	}
+	return &service.FileMutationResult{Success: true, Version: version}, nil
 }
 
 func (s *fileServiceImpl) DeletePathScoped(ctx context.Context, wsID string, scope service.FileScope, target, repo, path string, recursive bool) error {
@@ -319,6 +377,37 @@ func (s *fileServiceImpl) DeletePathScoped(ctx context.Context, wsID string, sco
 	}
 	if err := requireSensitiveFileAccess(ctx, cleanPath); err != nil {
 		return err
+	}
+	if _, _, err := versionForPath(root.store, cleanPath); err != nil {
+		return err
+	}
+	return service.ErrPreconditionRequired("current source version is required")
+}
+
+func (s *fileServiceImpl) DeletePathVersionedScoped(ctx context.Context, wsID string, scope service.FileScope, target, repo, path string, recursive bool, version string) error {
+	if strings.TrimSpace(version) == "" {
+		return service.ErrPreconditionRequired("current source version is required")
+	}
+	root, err := s.resolveScopedRoot(wsID, scope, target, repo)
+	if err != nil {
+		return err
+	}
+	defer root.Close()
+	cleanPath, err := normalizeFilePath(path, false)
+	if err != nil {
+		return err
+	}
+	if err := requireSensitiveFileAccess(ctx, cleanPath); err != nil {
+		return err
+	}
+	unlock := s.mutationLocks.lock(root.identity, cleanPath)
+	defer unlock()
+	current, _, err := versionForPath(root.store, cleanPath)
+	if err != nil {
+		return err
+	}
+	if current != version {
+		return service.ErrPreconditionFailed("source version no longer matches")
 	}
 	if err := root.store.Delete(cleanPath, recursive); err != nil {
 		return err
@@ -340,6 +429,8 @@ func (s *fileServiceImpl) MkdirScoped(ctx context.Context, wsID string, scope se
 	if err := requireSensitiveFileAccess(ctx, cleanPath); err != nil {
 		return err
 	}
+	unlock := s.mutationLocks.lock(root.identity, cleanPath)
+	defer unlock()
 	if err := root.store.MkdirAll(cleanPath); err != nil {
 		return err
 	}
@@ -357,20 +448,92 @@ func (s *fileServiceImpl) MovePathScoped(ctx context.Context, wsID string, scope
 	if err != nil {
 		return err
 	}
-	if err := requireSensitiveFileAccess(ctx, cleanFrom); err != nil {
-		return err
-	}
 	cleanTo, err := normalizeFilePath(to, false)
 	if err != nil {
+		return err
+	}
+	if err := requireSensitiveFileAccess(ctx, cleanFrom); err != nil {
 		return err
 	}
 	if err := requireSensitiveFileAccess(ctx, cleanTo); err != nil {
 		return err
 	}
-	if err := root.store.Move(cleanFrom, cleanTo, overwrite); err != nil {
+	if _, _, err := versionForPath(root.store, cleanFrom); err != nil {
 		return err
 	}
+	return service.ErrPreconditionRequired("current source version is required")
+}
+
+func (s *fileServiceImpl) MovePathVersionedScoped(ctx context.Context, wsID string, scope service.FileScope, target, repo, from, to string, overwrite bool, sourceVersion, destinationVersion string) (*service.FileMutationResult, error) {
+	if strings.TrimSpace(sourceVersion) == "" {
+		return nil, service.ErrPreconditionRequired("current source version is required")
+	}
+	root, err := s.resolveScopedRoot(wsID, scope, target, repo)
+	if err != nil {
+		return nil, err
+	}
+	defer root.Close()
+	cleanFrom, err := normalizeFilePath(from, false)
+	if err != nil {
+		return nil, err
+	}
+	if err := requireSensitiveFileAccess(ctx, cleanFrom); err != nil {
+		return nil, err
+	}
+	cleanTo, err := normalizeFilePath(to, false)
+	if err != nil {
+		return nil, err
+	}
+	if err := requireSensitiveFileAccess(ctx, cleanTo); err != nil {
+		return nil, err
+	}
+	unlock := s.mutationLocks.lock(root.identity, cleanFrom, cleanTo)
+	defer unlock()
+	currentSource, _, err := versionForPath(root.store, cleanFrom)
+	if err != nil {
+		return nil, err
+	}
+	if currentSource != sourceVersion {
+		return nil, service.ErrPreconditionFailed("source version no longer matches")
+	}
+	destinationInfo, destinationErr := root.store.stat(cleanTo)
+	if err := validateMoveDestinationVersion(root.store, cleanTo, overwrite, destinationVersion, destinationInfo, destinationErr); err != nil {
+		return nil, err
+	}
+	if err := root.store.Move(cleanFrom, cleanTo, overwrite); err != nil {
+		return nil, err
+	}
 	s.invalidateIndex(root.path)
+	version, _, err := versionForPath(root.store, cleanTo)
+	if err != nil {
+		return nil, err
+	}
+	return &service.FileMutationResult{Success: true, Version: version}, nil
+}
+
+func validateMoveDestinationVersion(store *rootedFileStore, path string, overwrite bool, version string, info os.FileInfo, statErr error) error {
+	if isNotFound(statErr) {
+		if version != "" {
+			return service.ErrPreconditionFailed("destination no longer exists")
+		}
+		return nil
+	}
+	if statErr != nil {
+		return statErr
+	}
+	if !overwrite || !info.Mode().IsRegular() {
+		return nil
+	}
+	if strings.TrimSpace(version) == "" {
+		return service.ErrPreconditionRequired("current destination version is required when overwriting a file")
+	}
+	current, _, err := versionForPath(store, path)
+	if err != nil {
+		return err
+	}
+	if current != version {
+		return service.ErrPreconditionFailed("destination version no longer matches")
+	}
 	return nil
 }
 

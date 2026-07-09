@@ -50,6 +50,10 @@ type FileService interface {
 	// metadata only.
 	ReadFileScoped(ctx context.Context, wsID string, scope FileScope, target, repo, path string) (*FileReadResult, error)
 
+	// StatPathScoped returns metadata and a strong version for a regular file or
+	// bounded deterministic manifest version for a directory.
+	StatPathScoped(ctx context.Context, wsID string, scope FileScope, target, repo, path string) (*FileStatResult, error)
+
 	// ReadFileAtRevScoped reads a file from a git revision in the containing
 	// checkout. Binary files return metadata only.
 	ReadFileAtRevScoped(ctx context.Context, wsID string, scope FileScope, target, repo, path, rev string) (*FileReadResult, error)
@@ -87,14 +91,25 @@ type FileService interface {
 	// WriteFileScoped creates or updates a file under a scope root.
 	WriteFileScoped(ctx context.Context, wsID string, scope FileScope, target, repo, path, content string) error
 
+	// WriteFileConditionalScoped applies optional HTTP-style preconditions. An
+	// empty precondition preserves ordinary editor last-write-wins behavior.
+	WriteFileConditionalScoped(ctx context.Context, wsID string, scope FileScope, target, repo, path, content string, preconditions FileWritePreconditions) (*FileMutationResult, error)
+
 	// DeletePathScoped deletes a file or directory under a scope root.
 	DeletePathScoped(ctx context.Context, wsID string, scope FileScope, target, repo, path string, recursive bool) error
+
+	// DeletePathVersionedScoped requires the current source version.
+	DeletePathVersionedScoped(ctx context.Context, wsID string, scope FileScope, target, repo, path string, recursive bool, version string) error
 
 	// MkdirScoped creates a directory path under a scope root.
 	MkdirScoped(ctx context.Context, wsID string, scope FileScope, target, repo, path string) error
 
 	// MovePathScoped renames or moves a path within one scope root.
 	MovePathScoped(ctx context.Context, wsID string, scope FileScope, target, repo, from, to string, overwrite bool) error
+
+	// MovePathVersionedScoped requires the current source version and, when an
+	// existing regular-file destination is overwritten, its current version.
+	MovePathVersionedScoped(ctx context.Context, wsID string, scope FileScope, target, repo, from, to string, overwrite bool, sourceVersion, destinationVersion string) (*FileMutationResult, error)
 }
 
 // FileTreeEntry describes a directory entry in a file tree listing.
@@ -118,6 +133,28 @@ type FileReadResult struct {
 	Size      int64  `json:"size"`
 	Binary    bool   `json:"binary"`
 	Truncated bool   `json:"truncated"`
+	Version   string `json:"version"`
+}
+
+// FileStatResult contains mutation-relevant metadata and a strong version.
+type FileStatResult struct {
+	Path    string `json:"path"`
+	IsDir   bool   `json:"is_dir"`
+	Size    int64  `json:"size"`
+	ModTime string `json:"mod_time"`
+	Version string `json:"version"`
+}
+
+// FileWritePreconditions represents optional conditional PUT semantics.
+type FileWritePreconditions struct {
+	IfMatch     string
+	IfNoneMatch bool
+}
+
+// FileMutationResult reports the version produced by a successful write/move.
+type FileMutationResult struct {
+	Success bool   `json:"success"`
+	Version string `json:"version"`
 }
 
 // FileIndexResult is the response for scoped quick-open indexing.
@@ -231,8 +268,10 @@ type FileHistoryResult struct {
 
 // FileMoveRequest is the JSON body for a scoped file move/rename operation.
 type FileMoveRequest struct {
-	From      string `json:"from"`
-	To        string `json:"to"`
-	Repo      string `json:"repo,omitempty"`
-	Overwrite bool   `json:"overwrite,omitempty"`
+	From               string `json:"from"`
+	To                 string `json:"to"`
+	Repo               string `json:"repo,omitempty"`
+	Overwrite          bool   `json:"overwrite,omitempty"`
+	SourceVersion      string `json:"source_version"`
+	DestinationVersion string `json:"destination_version,omitempty"`
 }
