@@ -340,6 +340,53 @@ func TestFileServiceImpl_ListDirectoryScoped_HidesGit(t *testing.T) {
 	}
 }
 
+func TestFileServiceImpl_ListDirectoryScoped_HidesCaseVariantGit(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, ".GIT"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	res, err := scopedSvc(dir).ListDirectoryScoped(context.Background(), "ws", service.ScopeWorkspace, "", "", "")
+	if err != nil {
+		t.Fatalf("ListDirectoryScoped: %v", err)
+	}
+	for _, entry := range res.Entries {
+		if strings.EqualFold(entry.Name, ".git") {
+			t.Fatalf("case-variant .git listed: %+v", res.Entries)
+		}
+	}
+}
+
+func TestRootedFileStore_RemainsAnchoredWhenScopePathIsReplaced(t *testing.T) {
+	parent := t.TempDir()
+	rootPath := filepath.Join(parent, "scope")
+	if err := os.Mkdir(rootPath, 0755); err != nil {
+		t.Fatal(err)
+	}
+	mustWrite(t, filepath.Join(rootPath, "file.txt"), "original")
+	root, err := openScopedRoot("test", rootPath)
+	if err != nil {
+		t.Fatalf("openScopedRoot: %v", err)
+	}
+	defer root.Close()
+
+	movedPath := filepath.Join(parent, "moved-scope")
+	if err := os.Rename(rootPath, movedPath); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(rootPath, 0755); err != nil {
+		t.Fatal(err)
+	}
+	mustWrite(t, filepath.Join(rootPath, "file.txt"), "replacement")
+
+	data, _, _, err := root.store.Read("file.txt", maxRequestBody)
+	if err != nil {
+		t.Fatalf("rooted read after rename: %v", err)
+	}
+	if string(data) != "original" {
+		t.Fatalf("rooted read = %q, want original", data)
+	}
+}
+
 func TestFileServiceImpl_ReadFileScoped_ReadsContent(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "f.txt"), []byte("body"), 0644); err != nil {
@@ -355,7 +402,7 @@ func TestFileServiceImpl_ReadFileScoped_ReadsContent(t *testing.T) {
 	}
 }
 
-func TestFileServiceImpl_ReadFileScoped_GitExplicitReadAllowed(t *testing.T) {
+func TestFileServiceImpl_ReadFileScoped_GitExplicitReadForbidden(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(dir, ".git"), 0755); err != nil {
 		t.Fatal(err)
@@ -364,12 +411,9 @@ func TestFileServiceImpl_ReadFileScoped_GitExplicitReadAllowed(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	res, err := scopedSvc(dir).ReadFileScoped(context.Background(), "ws", service.ScopeWorkspace, "", "", ".git/config")
-	if err != nil {
-		t.Fatalf("ReadFileScoped .git/config: %v", err)
-	}
-	if res.Content != "x" {
-		t.Fatalf("content = %q, want x", res.Content)
+	for _, path := range []string{".git/config", ".GIT/config", ".GiT/config"} {
+		_, err := scopedSvc(dir).ReadFileScoped(context.Background(), "ws", service.ScopeWorkspace, "", "", path)
+		wantKind(t, err, service.KindForbidden)
 	}
 }
 
@@ -434,25 +478,13 @@ func TestFileServiceImpl_PhaseA_CRUDAndVisibilityAllScopes(t *testing.T) {
 				t.Fatalf("written .env content = %q", readEnv.Content)
 			}
 
-			if err := svc.WriteFileScoped(ctx, "ws", sc.scope, sc.target, "", ".git/config", "mutated"); err != nil {
-				t.Fatalf("write .git/config: %v", err)
-			}
-			readGit, err := svc.ReadFileScoped(ctx, "ws", sc.scope, sc.target, "", ".git/config")
-			if err != nil {
-				t.Fatalf("read .git/config: %v", err)
-			}
-			if readGit.Content != "mutated" {
-				t.Fatalf(".git/config content = %q", readGit.Content)
-			}
-			if err := svc.MkdirScoped(ctx, "ws", sc.scope, sc.target, "", ".git/refs/heads"); err != nil {
-				t.Fatalf("mkdir .git path: %v", err)
-			}
-			if err := svc.MovePathScoped(ctx, "ws", sc.scope, sc.target, "", ".git/config", ".git/config.moved", false); err != nil {
-				t.Fatalf("move .git path: %v", err)
-			}
-			if err := svc.DeletePathScoped(ctx, "ws", sc.scope, sc.target, "", ".git/config.moved", false); err != nil {
-				t.Fatalf("delete .git path: %v", err)
-			}
+			wantKind(t, svc.WriteFileScoped(ctx, "ws", sc.scope, sc.target, "", ".git/config", "mutated"), service.KindForbidden)
+			_, err = svc.ReadFileScoped(ctx, "ws", sc.scope, sc.target, "", ".GIT/config")
+			wantKind(t, err, service.KindForbidden)
+			wantKind(t, svc.MkdirScoped(ctx, "ws", sc.scope, sc.target, "", ".git/refs/heads"), service.KindForbidden)
+			wantKind(t, svc.MovePathScoped(ctx, "ws", sc.scope, sc.target, "", ".git/config", "config.moved", false), service.KindForbidden)
+			wantKind(t, svc.MovePathScoped(ctx, "ws", sc.scope, sc.target, "", ".env", ".GiT/config", false), service.KindForbidden)
+			wantKind(t, svc.DeletePathScoped(ctx, "ws", sc.scope, sc.target, "", ".git/config", false), service.KindForbidden)
 
 			mustWrite(t, filepath.Join(sc.root, "nonempty", "file.txt"), "x")
 			err = svc.DeletePathScoped(ctx, "ws", sc.scope, sc.target, "", "nonempty", false)
@@ -514,6 +546,13 @@ func TestFileServiceImpl_PhaseA_StructuralGuardsAllScopes(t *testing.T) {
 			if err := os.Symlink(filepath.Join(sc.root, "existing.txt"), filepath.Join(sc.root, "link.txt")); err != nil {
 				t.Skip("cannot create symlinks on this platform")
 			}
+			if err := os.MkdirAll(filepath.Join(sc.root, "real-parent"), 0755); err != nil {
+				t.Fatal(err)
+			}
+			mustWrite(t, filepath.Join(sc.root, "real-parent", "nested.txt"), "nested")
+			if err := os.Symlink(filepath.Join(sc.root, "real-parent"), filepath.Join(sc.root, "parent-link")); err != nil {
+				t.Skip("cannot create directory symlinks on this platform")
+			}
 
 			_, err := svc.ReadFileScoped(ctx, "ws", sc.scope, sc.target, "", "../outside.txt")
 			wantKind(t, err, service.KindForbidden)
@@ -536,7 +575,87 @@ func TestFileServiceImpl_PhaseA_StructuralGuardsAllScopes(t *testing.T) {
 			wantKind(t, err, service.KindForbidden)
 			err = svc.MovePathScoped(ctx, "ws", sc.scope, sc.target, "", "link.txt", "moved-link.txt", false)
 			wantKind(t, err, service.KindForbidden)
+
+			_, err = svc.ReadFileScoped(ctx, "ws", sc.scope, sc.target, "", "parent-link/nested.txt")
+			wantKind(t, err, service.KindForbidden)
+			err = svc.WriteFileScoped(ctx, "ws", sc.scope, sc.target, "", "parent-link/new.txt", "bad")
+			wantKind(t, err, service.KindForbidden)
 		})
+	}
+}
+
+func TestFileServiceImpl_MutationsRejectScopeRootAliases(t *testing.T) {
+	dir := t.TempDir()
+	svc := scopedSvc(dir)
+	ctx := context.Background()
+	for _, path := range []string{"", ".", "./", "dir/..", "dir/../."} {
+		wantKind(t, svc.DeletePathScoped(ctx, "ws", service.ScopeWorkspace, "", "", path, true), service.KindValidation)
+		wantKind(t, svc.MkdirScoped(ctx, "ws", service.ScopeWorkspace, "", "", path), service.KindValidation)
+	}
+	if _, err := os.Stat(dir); err != nil {
+		t.Fatalf("scope root was changed: %v", err)
+	}
+}
+
+func TestFileServiceImpl_ProtectsGitMetadataUnderAncestorMutation(t *testing.T) {
+	dir := t.TempDir()
+	mustWrite(t, filepath.Join(dir, "checkout", ".git", "config"), "secret")
+	mustWrite(t, filepath.Join(dir, "checkout", "file.txt"), "body")
+	svc := scopedSvc(dir)
+	ctx := context.Background()
+
+	wantKind(t, svc.DeletePathScoped(ctx, "ws", service.ScopeWorkspace, "", "", "checkout", true), service.KindForbidden)
+	wantKind(t, svc.MovePathScoped(ctx, "ws", service.ScopeWorkspace, "", "", "checkout", "renamed", false), service.KindForbidden)
+	if _, err := os.Stat(filepath.Join(dir, "checkout", ".git", "config")); err != nil {
+		t.Fatalf("protected metadata changed: %v", err)
+	}
+}
+
+func TestFileServiceImpl_RejectsSymlinkAliasToGit(t *testing.T) {
+	dir := t.TempDir()
+	mustWrite(t, filepath.Join(dir, ".git", "config"), "secret")
+	if err := os.Symlink(filepath.Join(dir, ".git"), filepath.Join(dir, "metadata")); err != nil {
+		t.Skip("cannot create symlinks on this platform")
+	}
+	svc := scopedSvc(dir)
+	_, err := svc.ReadFileScoped(context.Background(), "ws", service.ScopeWorkspace, "", "", "metadata/config")
+	wantKind(t, err, service.KindForbidden)
+}
+
+func TestFileServiceImpl_RecursiveDeleteDoesNotFollowDescendantSymlink(t *testing.T) {
+	dir := t.TempDir()
+	outside := t.TempDir()
+	mustWrite(t, filepath.Join(outside, "keep.txt"), "keep")
+	if err := os.Mkdir(filepath.Join(dir, "delete-me"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, filepath.Join(dir, "delete-me", "outside")); err != nil {
+		t.Skip("cannot create symlinks on this platform")
+	}
+	if err := scopedSvc(dir).DeletePathScoped(context.Background(), "ws", service.ScopeWorkspace, "", "", "delete-me", true); err != nil {
+		t.Fatalf("recursive delete: %v", err)
+	}
+	if got, err := os.ReadFile(filepath.Join(outside, "keep.txt")); err != nil || string(got) != "keep" {
+		t.Fatalf("outside symlink target changed: content=%q err=%v", got, err)
+	}
+}
+
+func TestFileServiceImpl_AtomicWritePreservesPermissions(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "script.sh")
+	mustWrite(t, path, "old")
+	if err := os.Chmod(path, 0750); err != nil {
+		t.Fatal(err)
+	}
+	if err := scopedSvc(dir).WriteFileScoped(context.Background(), "ws", service.ScopeWorkspace, "", "", "script.sh", "new"); err != nil {
+		t.Fatalf("WriteFileScoped: %v", err)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := info.Mode().Perm(); got != 0750 {
+		t.Fatalf("permissions = %o, want 750", got)
 	}
 }
 
@@ -632,10 +751,11 @@ func TestResolveScopedContainingCheckout(t *testing.T) {
 	_ = ctx
 	for _, sc := range scopes {
 		t.Run(sc.name, func(t *testing.T) {
-			_, cleanPath, checkout, err := impl.resolveScopedContainingCheckout("ws", sc.scope, sc.target, "", "src/file.txt")
+			root, cleanPath, checkout, err := impl.resolveScopedContainingCheckout("ws", sc.scope, sc.target, "", "src/file.txt")
 			if err != nil {
 				t.Fatalf("resolveScopedContainingCheckout: %v", err)
 			}
+			defer root.Close()
 			if cleanPath != "src/file.txt" {
 				t.Fatalf("cleanPath = %q", cleanPath)
 			}
@@ -896,6 +1016,33 @@ func TestFileServiceImpl_IndexFilesScoped_DefaultExcludesSymlinksAndTruncates(t 
 	})
 }
 
+func TestFileServiceImpl_IndexAndSearchExcludeGitMetadataFile(t *testing.T) {
+	dir := t.TempDir()
+	mustWrite(t, filepath.Join(dir, ".git"), "gitdir: /outside/admin\nneedle\n")
+	mustWrite(t, filepath.Join(dir, "visible.txt"), "needle\n")
+	svc := scopedSvc(dir)
+	ctx := context.Background()
+
+	index, err := svc.IndexFilesScoped(ctx, "ws", service.ScopeWorkspace, "", "")
+	if err != nil {
+		t.Fatalf("IndexFilesScoped: %v", err)
+	}
+	if containsPath(index.Paths, ".git") {
+		t.Fatalf("index exposed .git metadata file: %+v", index.Paths)
+	}
+	emptyExclude := []string{}
+	search, err := svc.SearchFilesScoped(ctx, "ws", service.ScopeWorkspace, "", "", service.FileSearchRequest{
+		Query:   "needle",
+		Exclude: &emptyExclude,
+	})
+	if err != nil {
+		t.Fatalf("SearchFilesScoped: %v", err)
+	}
+	if got := resultPaths(search.Results); strings.Join(got, ",") != "visible.txt" {
+		t.Fatalf("search paths = %+v, want visible.txt", got)
+	}
+}
+
 func TestFileServiceImpl_SearchFilesScoped_DefaultExcludesAndOverride(t *testing.T) {
 	dir := t.TempDir()
 	mustWrite(t, filepath.Join(dir, "src", "main.go"), "needle\n")
@@ -922,7 +1069,10 @@ func TestFileServiceImpl_SearchFilesScoped_DefaultExcludesAndOverride(t *testing
 		t.Fatalf("SearchFilesScoped override excludes: %v", err)
 	}
 	got := resultPaths(res.Results)
-	for _, want := range []string{".git/config", "node_modules/pkg/index.js"} {
+	if containsPath(got, ".git/config") {
+		t.Fatalf("override search exposed .git/config: %+v", got)
+	}
+	for _, want := range []string{"node_modules/pkg/index.js"} {
 		if !containsPath(got, want) {
 			t.Fatalf("override search missing %s: %+v", want, got)
 		}

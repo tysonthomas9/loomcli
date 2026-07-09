@@ -56,10 +56,9 @@ type boundedFileWalkResult struct {
 	truncated    bool
 }
 
-type fileWalkVisitor func(relPath, fullPath string, info os.FileInfo) error
+type fileWalkVisitor func(relPath string, info os.FileInfo) error
 
 type boundedFileWalker struct {
-	root    string
 	opts    boundedFileWalkOptions
 	started time.Time
 	result  *boundedFileWalkResult
@@ -72,6 +71,7 @@ type fileSearchExecution struct {
 }
 
 type fileSearchAccumulator struct {
+	store        *rootedFileStore
 	matcher      *searchMatcher
 	results      []service.FileSearchFileResult
 	bytesScanned int64
@@ -80,20 +80,21 @@ type fileSearchAccumulator struct {
 }
 
 func (s *fileServiceImpl) IndexFilesScoped(ctx context.Context, wsID string, scope service.FileScope, target, repo string) (*service.FileIndexResult, error) {
-	root, err := s.resolveScopeRoot(wsID, scope, target, repo)
+	root, err := s.resolveScopedRoot(wsID, scope, target, repo)
 	if err != nil {
 		return nil, err
 	}
-	if cached, ok := s.cachedIndex(root); ok {
+	defer root.Close()
+	if cached, ok := s.cachedIndex(root.path); ok {
 		return cached, nil
 	}
 
 	paths := make([]string, 0, 1024)
-	walkResult, err := walkScopeFiles(ctx, root, boundedFileWalkOptions{
+	walkResult, err := walkScopeFiles(ctx, root.store, boundedFileWalkOptions{
 		maxFiles:        fileIndexMaxEntries,
 		timeBudget:      fileIndexWalkBudget,
 		excludeSegments: defaultFileWalkExcludeSegments,
-	}, func(relPath, _ string, _ os.FileInfo) error {
+	}, func(relPath string, _ os.FileInfo) error {
 		paths = append(paths, relPath)
 		return nil
 	})
@@ -104,7 +105,7 @@ func (s *fileServiceImpl) IndexFilesScoped(ctx context.Context, wsID string, sco
 		Paths:     paths,
 		Truncated: walkResult.truncated,
 	}
-	s.storeIndex(root, result)
+	s.storeIndex(root.path, result)
 	return result, nil
 }
 
@@ -112,7 +113,7 @@ func (s *fileServiceImpl) SearchFilesScoped(ctx context.Context, wsID string, sc
 	if repo == "" {
 		repo = req.Repo
 	}
-	root, err := s.resolveScopeRoot(wsID, scope, target, repo)
+	root, err := s.resolveScopedRoot(wsID, scope, target, repo)
 	if err != nil {
 		return nil, err
 	}
@@ -121,7 +122,8 @@ func (s *fileServiceImpl) SearchFilesScoped(ctx context.Context, wsID string, sc
 	if err != nil {
 		return nil, err
 	}
-	return runFileSearch(ctx, root, search)
+	defer root.Close()
+	return runFileSearch(ctx, root.store, search)
 }
 
 func newFileSearchExecution(req service.FileSearchRequest) (fileSearchExecution, error) {
@@ -161,16 +163,16 @@ func newFileSearchExecution(req service.FileSearchRequest) (fileSearchExecution,
 	}, nil
 }
 
-func runFileSearch(ctx context.Context, root string, search fileSearchExecution) (*service.FileSearchResult, error) {
-	accumulator := &fileSearchAccumulator{matcher: search.matcher}
-	walkResult, err := walkScopeFiles(ctx, root, search.walkOpts, accumulator.visit)
+func runFileSearch(ctx context.Context, store *rootedFileStore, search fileSearchExecution) (*service.FileSearchResult, error) {
+	accumulator := &fileSearchAccumulator{store: store, matcher: search.matcher}
+	walkResult, err := walkScopeFiles(ctx, store, search.walkOpts, accumulator.visit)
 	if err != nil {
 		return nil, err
 	}
 	return accumulator.result(walkResult), nil
 }
 
-func (a *fileSearchAccumulator) visit(relPath, fullPath string, info os.FileInfo) error {
+func (a *fileSearchAccumulator) visit(relPath string, info os.FileInfo) error {
 	if info.Size() > fileSearchMaxFileBytes {
 		a.limitHit = true
 		return nil
@@ -180,7 +182,7 @@ func (a *fileSearchAccumulator) visit(relPath, fullPath string, info os.FileInfo
 		return errBoundedWalkLimit
 	}
 
-	data, err := os.ReadFile(fullPath) //nolint:gosec // fullPath is produced by WalkDir under the resolved scope root.
+	data, _, _, err := a.store.Read(filepath.FromSlash(relPath), fileSearchMaxFileBytes)
 	if err != nil {
 		return service.ErrInternal("failed to read file during search", err)
 	}
@@ -250,18 +252,23 @@ func (s *fileServiceImpl) invalidateIndex(root string) {
 	delete(s.indexCache, root)
 }
 
-func walkScopeFiles(ctx context.Context, root string, opts boundedFileWalkOptions, visit func(relPath, fullPath string, info os.FileInfo) error) (boundedFileWalkResult, error) {
+func walkScopeFiles(ctx context.Context, store *rootedFileStore, opts boundedFileWalkOptions, visit fileWalkVisitor) (boundedFileWalkResult, error) {
 	result := boundedFileWalkResult{}
 	walker := &boundedFileWalker{
-		root:    root,
 		opts:    opts,
 		started: time.Now(),
 		result:  &result,
 		visit:   visit,
 	}
-	err := filepath.WalkDir(root, func(fullPath string, entry os.DirEntry, walkErr error) error {
-		return walker.walk(ctx, fullPath, entry, walkErr)
-	})
+	err := store.Walk(
+		ctx.Err,
+		func(relPath string, entry os.DirEntry) (bool, error) {
+			return walker.walkDirectory(ctx, filepath.ToSlash(relPath), entry)
+		},
+		func(relPath string, info os.FileInfo) error {
+			return walker.walkFile(ctx, filepath.ToSlash(relPath), info)
+		},
+	)
 	if errors.Is(err, errBoundedWalkLimit) {
 		return result, nil
 	}
@@ -274,24 +281,18 @@ func walkScopeFiles(ctx context.Context, root string, opts boundedFileWalkOption
 	return result, nil
 }
 
-func (w *boundedFileWalker) walk(ctx context.Context, fullPath string, entry os.DirEntry, walkErr error) error {
-	if err := w.checkWalkState(ctx, walkErr); err != nil {
+func (w *boundedFileWalker) walkDirectory(ctx context.Context, relPath string, entry os.DirEntry) (bool, error) {
+	if err := w.checkWalkState(ctx, nil); err != nil {
+		return false, err
+	}
+	return w.handleDirectory(entry, relPath)
+}
+
+func (w *boundedFileWalker) walkFile(ctx context.Context, relPath string, info os.FileInfo) error {
+	if err := w.checkWalkState(ctx, nil); err != nil {
 		return err
 	}
-	if fullPath == w.root {
-		return nil
-	}
-	relPath, err := rootRelativeWalkPath(w.root, fullPath)
-	if err != nil {
-		return err
-	}
-	if entry.Type()&os.ModeSymlink != 0 {
-		return skipWalkSymlink(entry)
-	}
-	if entry.IsDir() {
-		return w.handleDirectory(entry, relPath)
-	}
-	return w.handleFile(entry, relPath, fullPath)
+	return w.handleFile(info, relPath)
 }
 
 func (w *boundedFileWalker) checkWalkState(ctx context.Context, walkErr error) error {
@@ -308,36 +309,20 @@ func (w *boundedFileWalker) checkWalkState(ctx context.Context, walkErr error) e
 	return nil
 }
 
-func rootRelativeWalkPath(root, fullPath string) (string, error) {
-	relPath, err := filepath.Rel(root, fullPath)
-	if err != nil {
-		return "", service.ErrForbidden("path outside root")
+func (w *boundedFileWalker) handleDirectory(entry os.DirEntry, relPath string) (bool, error) {
+	if strings.EqualFold(entry.Name(), ".git") {
+		return false, nil
 	}
-	return filepath.ToSlash(relPath), nil
-}
-
-func skipWalkSymlink(entry os.DirEntry) error {
-	if entry.IsDir() {
-		return filepath.SkipDir
-	}
-	return nil
-}
-
-func (w *boundedFileWalker) handleDirectory(entry os.DirEntry, relPath string) error {
 	if w.opts.excludeSegments != nil && w.opts.excludeSegments[entry.Name()] {
-		return filepath.SkipDir
+		return false, nil
 	}
 	if globMatchesAny(w.opts.excludePatterns, relPath) {
-		return filepath.SkipDir
+		return false, nil
 	}
-	return nil
+	return true, nil
 }
 
-func (w *boundedFileWalker) handleFile(entry os.DirEntry, relPath, fullPath string) error {
-	info, err := entry.Info()
-	if err != nil {
-		return service.ErrInternal("failed to stat file", err)
-	}
+func (w *boundedFileWalker) handleFile(info os.FileInfo, relPath string) error {
 	if !w.shouldVisitFile(info, relPath) {
 		return nil
 	}
@@ -346,7 +331,7 @@ func (w *boundedFileWalker) handleFile(entry os.DirEntry, relPath, fullPath stri
 		return errBoundedWalkLimit
 	}
 	w.result.filesVisited++
-	return w.visit(relPath, fullPath, info)
+	return w.visit(relPath, info)
 }
 
 func (w *boundedFileWalker) shouldVisitFile(info os.FileInfo, relPath string) bool {
