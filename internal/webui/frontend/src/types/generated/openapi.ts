@@ -1430,6 +1430,23 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/workspaces/{ws}/pull-requests/{owner}/{repo}/{number}/review": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Post a pull request review via the GitHub connector */
+    post: operations["postPullRequestReview"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/workspaces/{ws}/agents/{name}/git/diff-stat": {
     parameters: {
       query?: never;
@@ -2003,6 +2020,16 @@ export interface components {
       additions: number;
       deletions: number;
       patch: string;
+    };
+    PullRequestReviewRequest: {
+      /** @enum {string} */
+      event: "approve" | "request_changes" | "comment";
+      body?: string;
+      expected_head_sha: string;
+    };
+    PullRequestReviewResult: {
+      review_id?: number;
+      state?: string;
     };
     /**
      * @description Core issue type used in list endpoints. Maps to `types.Issue` json
@@ -5808,6 +5835,94 @@ export interface operations {
       };
       /** @description Repository is not registered in the workspace */
       404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Connector egress unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+    };
+  };
+  postPullRequestReview: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+        owner: string;
+        repo: string;
+        number: number;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["PullRequestReviewRequest"];
+      };
+    };
+    responses: {
+      /** @description Pull request review result */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": {
+            /** @constant */
+            success: true;
+            data: components["schemas"]["PullRequestReviewResult"];
+          };
+        };
+      };
+      /** @description Invalid request body or path parameter */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Connector grant denied */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Repository is not registered in the workspace */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Pull request head changed before review was posted */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Expected head SHA precondition is required */
+      428: {
         headers: {
           [name: string]: unknown;
         };

@@ -11,10 +11,14 @@
  *   - New review agent: real createWorkspaceAgent → assign → startAgent
  */
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
 import { updateIssue } from "@/api";
+import {
+  getPullRequestDetail,
+  postPullRequestReview,
+} from "@/api/workspace/prReview";
 import { startAgent } from "@/hooks/api";
 import { CreateAgentModal } from "@/components/CreateAgentModal/CreateAgentModal";
 import {
@@ -30,6 +34,7 @@ import {
 import { useWorkspaceContext } from "@/hooks/workspace";
 import type { GitPullRequest } from "@/api/workspace";
 import type { Issue, LoomAgentStatus } from "@/types";
+import { ApiError } from "@/types/common/errors";
 import { parseLoomStatus } from "@/types";
 import { isPRUrl } from "@/utils/issue";
 import { getAvatarColor, shouldUseWhiteText } from "@/utils/colorUtils";
@@ -140,6 +145,9 @@ export function PRReviewWorkspace({
   const [createOpen, setCreateOpen] = useState(false);
   const [isAssigning, setIsAssigning] = useState(false);
   const [isDeciding, setIsDeciding] = useState(false);
+  const [headSha, setHeadSha] = useState<string | null>(null);
+  const [reviewComment, setReviewComment] = useState("");
+  const [stale, setStale] = useState(false);
 
   const diffAgent = useMemo(
     () => resolveDiffAgentForIssue(issue, agents),
@@ -193,6 +201,57 @@ export function PRReviewWorkspace({
     return "Review";
   })();
 
+  useEffect(() => {
+    let ignore = false;
+    const number = prNumber ? Number(prNumber) : NaN;
+    if (!pullRequestRepo || !Number.isFinite(number)) {
+      setHeadSha(null);
+      return;
+    }
+
+    void (async () => {
+      try {
+        const detail = await getPullRequestDetail(
+          workspaceId,
+          pullRequestRepo.owner,
+          pullRequestRepo.repo,
+          number,
+        );
+        if (!ignore) setHeadSha(detail.head_sha);
+      } catch {
+        if (!ignore) setHeadSha(null);
+      }
+    })();
+
+    return () => {
+      ignore = true;
+    };
+  }, [workspaceId, pullRequestRepo, prNumber]);
+
+  // Fetch the PR's authoritative head sha (the value the review precondition
+  // compares against), commit it to state, and return it — so a decision can
+  // fetch on demand when the mount-time effect hasn't resolved yet. Returns
+  // null when the PR head can't be determined.
+  const loadHeadSha = async (
+    owner: string,
+    repo: string,
+    number: number,
+  ): Promise<string | null> => {
+    try {
+      const detail = await getPullRequestDetail(
+        workspaceId,
+        owner,
+        repo,
+        number,
+      );
+      setHeadSha(detail.head_sha);
+      return detail.head_sha;
+    } catch {
+      setHeadSha(null);
+      return null;
+    }
+  };
+
   const assignReviewer = async (agentName: string): Promise<void> => {
     setAgentMenuOpen(false);
     setIsAssigning(true);
@@ -220,7 +279,9 @@ export function PRReviewWorkspace({
     }
   };
 
-  const decide = async (decision: "approve" | "changes"): Promise<void> => {
+  const applyLocalDecision = async (
+    decision: "approve" | "changes",
+  ): Promise<void> => {
     setIsDeciding(true);
     try {
       if (decision === "approve") {
@@ -236,6 +297,88 @@ export function PRReviewWorkspace({
         err instanceof Error ? err.message : "Failed to record decision",
         { type: "error" },
       );
+    } finally {
+      setIsDeciding(false);
+    }
+  };
+
+  const decide = async (decision: "approve" | "changes"): Promise<void> => {
+    const number = prNumber ? Number(prNumber) : NaN;
+    // Only fall back to a local-only board flip when there is genuinely no PR
+    // to review (issue-only tickets). A resolvable PR whose head sha simply
+    // hasn't loaded must NOT silently flip the board without a GitHub review —
+    // we fetch the sha on demand below and hard-fail if it can't be obtained.
+    if (!pullRequestRepo || !Number.isFinite(number)) {
+      await applyLocalDecision(decision);
+      return;
+    }
+
+    const event = decision === "approve" ? "approve" : "request_changes";
+    const body = reviewComment.trim();
+    if (event === "request_changes" && body === "") {
+      showToast("Add a comment to request changes", { type: "warning" });
+      return;
+    }
+
+    setIsDeciding(true);
+    try {
+      const sha =
+        headSha ??
+        (await loadHeadSha(
+          pullRequestRepo.owner,
+          pullRequestRepo.repo,
+          number,
+        ));
+      if (!sha) {
+        showToast(
+          "Couldn't verify the PR's current head — try again.",
+          { type: "error" },
+        );
+        return;
+      }
+      await postPullRequestReview(
+        workspaceId,
+        pullRequestRepo.owner,
+        pullRequestRepo.repo,
+        number,
+        {
+          event,
+          expected_head_sha: sha,
+          ...(body ? { body } : {}),
+        },
+      );
+      setStale(false);
+      if (decision === "approve") {
+        await updateIssueStatus(issue.id, "closed");
+        showToast("Approved on GitHub — ticket closed");
+      } else {
+        await updateIssueStatus(issue.id, "open");
+        showToast("Changes requested on GitHub — ticket reopened");
+      }
+      onBack();
+    } catch (err) {
+      if (
+        err instanceof ApiError &&
+        (err.status === 409 || err.status === 428)
+      ) {
+        setStale(true);
+        await loadHeadSha(
+          pullRequestRepo.owner,
+          pullRequestRepo.repo,
+          number,
+        );
+        showToast(
+          "The PR changed since you loaded it — refreshed. Review again.",
+          {
+            type: "warning",
+          },
+        );
+      } else {
+        showToast(
+          err instanceof Error ? err.message : "Failed to record decision",
+          { type: "error" },
+        );
+      }
     } finally {
       setIsDeciding(false);
     }
@@ -374,22 +517,47 @@ export function PRReviewWorkspace({
           )}
 
           {/* Decision bar (design rw-decision, adapted to real statuses). */}
-          <button
-            type="button"
-            className={styles.changesButton}
-            disabled={isDeciding}
-            onClick={() => void decide("changes")}
-          >
-            ✗ Request changes
-          </button>
-          <button
-            type="button"
-            className={styles.approveButton}
-            disabled={isDeciding}
-            onClick={() => void decide("approve")}
-          >
-            ✓ Approve
-          </button>
+          <div className={styles.decisionBar}>
+            {stale && (
+              <div
+                className={styles.staleBanner}
+                data-testid="pr-review-stale-banner"
+              >
+                <span>
+                  This PR was updated after you opened it. The diff/head were
+                  refreshed — submit your review again.
+                </span>
+                <button type="button" onClick={() => setStale(false)}>
+                  Dismiss
+                </button>
+              </div>
+            )}
+            <textarea
+              className={styles.reviewComment}
+              data-testid="pr-review-comment"
+              value={reviewComment}
+              onChange={(event) => setReviewComment(event.target.value)}
+              placeholder="Add a review comment (required to request changes)"
+            />
+            <div className={styles.decisionActions}>
+              <button
+                type="button"
+                className={styles.changesButton}
+                disabled={isDeciding}
+                onClick={() => void decide("changes")}
+              >
+                ✗ Request changes
+              </button>
+              <button
+                type="button"
+                className={styles.approveButton}
+                disabled={isDeciding}
+                onClick={() => void decide("approve")}
+              >
+                ✓ Approve
+              </button>
+            </div>
+          </div>
         </div>
       </header>
 

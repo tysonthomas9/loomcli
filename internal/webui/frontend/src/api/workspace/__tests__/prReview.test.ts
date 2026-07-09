@@ -20,7 +20,7 @@ vi.mock("@/api/common", () => {
   }
 
   return {
-    api: { GET: vi.fn() },
+    api: { GET: vi.fn(), POST: vi.fn() },
     apiErrorFromResponse: vi.fn((error: unknown, response?: Response) => {
       return new MockApiError(
         response?.status ?? 0,
@@ -63,7 +63,9 @@ vi.mock("@/api/common", () => {
 
 let getPullRequestDiff: typeof import("../prReview").getPullRequestDiff;
 let getPullRequestDetail: typeof import("../prReview").getPullRequestDetail;
+let postPullRequestReview: typeof import("../prReview").postPullRequestReview;
 let mockApiGet: ReturnType<typeof vi.fn>;
+let mockApiPost: ReturnType<typeof vi.fn>;
 
 describe("prReview API", () => {
   beforeEach(async () => {
@@ -72,10 +74,12 @@ describe("prReview API", () => {
 
     const common = await import("@/api/common");
     mockApiGet = vi.mocked(common.api.GET);
+    mockApiPost = vi.mocked(common.api.POST);
 
     const prReview = await import("../prReview");
     getPullRequestDiff = prReview.getPullRequestDiff;
     getPullRequestDetail = prReview.getPullRequestDetail;
+    postPullRequestReview = prReview.postPullRequestReview;
   });
 
   it("fetches and unwraps a pull request diff", async () => {
@@ -139,6 +143,40 @@ describe("prReview API", () => {
       },
     );
     expect(result).toEqual(detail);
+  });
+
+  it("posts and unwraps a pull request review", async () => {
+    const review = {
+      review_id: 123,
+      state: "APPROVED",
+    };
+    mockApiPost.mockResolvedValueOnce({
+      data: { success: true, data: review },
+      error: undefined,
+      response: new Response(null, { status: 200, statusText: "OK" }),
+    });
+
+    const result = await postPullRequestReview("WS", "octocat", "hello", 7, {
+      event: "approve",
+      body: "Looks good",
+      expected_head_sha: "abc123",
+    });
+
+    expect(mockApiPost).toHaveBeenCalledTimes(1);
+    expect(mockApiPost).toHaveBeenCalledWith(
+      "/api/workspaces/{ws}/pull-requests/{owner}/{repo}/{number}/review",
+      {
+        params: {
+          path: { ws: "WS", owner: "octocat", repo: "hello", number: 7 },
+        },
+        body: {
+          event: "approve",
+          body: "Looks good",
+          expected_head_sha: "abc123",
+        },
+      },
+    );
+    expect(result).toEqual(review);
   });
 
   it("surfaces openapi-fetch errors as ApiError", async () => {
