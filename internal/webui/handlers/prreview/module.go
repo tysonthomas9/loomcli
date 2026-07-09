@@ -6,6 +6,7 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/connector"
 	"github.com/tysonthomas9/loomcli/internal/store"
+	"github.com/tysonthomas9/loomcli/internal/webui/service"
 )
 
 const (
@@ -19,6 +20,7 @@ const (
 type Module struct {
 	store      store.Store
 	dispatcher *connector.Dispatcher
+	agentSvc   service.AgentService
 	// seeded caches "connector+grants already ensured" per canonical
 	// ws|owner/repo so a polled read API does not re-seal + re-Create on
 	// every request. Key is the canonical resource; value struct{}{}.
@@ -26,8 +28,8 @@ type Module struct {
 }
 
 // NewModule constructs the pull request review route module.
-func NewModule(st store.Store, disp *connector.Dispatcher) *Module {
-	return &Module{store: st, dispatcher: disp}
+func NewModule(st store.Store, disp *connector.Dispatcher, agentSvc service.AgentService) *Module {
+	return &Module{store: st, dispatcher: disp, agentSvc: agentSvc}
 }
 
 // Register adds the workspace-scoped pull request review routes.
@@ -35,6 +37,7 @@ func (m *Module) Register(mux *http.ServeMux) {
 	if m == nil || m.store == nil {
 		return
 	}
+	mux.HandleFunc("GET /api/workspaces/{ws}/pull-requests", m.listPullRequests)
 	mux.HandleFunc("GET /api/workspaces/{ws}/pull-requests/{owner}/{repo}/{number}", m.getPullRequest)
 	mux.HandleFunc("GET /api/workspaces/{ws}/pull-requests/{owner}/{repo}/{number}/diff", m.getPullRequestDiff)
 	mux.HandleFunc("POST /api/workspaces/{ws}/pull-requests/{owner}/{repo}/{number}/review", m.postReview)

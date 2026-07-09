@@ -17,6 +17,7 @@ import (
 
 var prReviewActions = []string{
 	providers.ActionGitHubPullRequestRead,
+	providers.ActionGitHubPullsList,
 	providers.ActionGitHubCompareRead,
 	providers.ActionGitHubReviewPost,
 }

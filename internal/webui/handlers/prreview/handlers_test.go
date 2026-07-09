@@ -21,8 +21,10 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	"github.com/tysonthomas9/loomcli/internal/localworkspace"
+	"github.com/tysonthomas9/loomcli/internal/ops"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
+	"github.com/tysonthomas9/loomcli/internal/webui/service"
 )
 
 const (
@@ -38,16 +40,24 @@ type fakeGitHubCall struct {
 }
 
 type fakeGitHub struct {
-	mu      sync.Mutex
-	calls   []fakeGitHubCall
+	mu    sync.Mutex
+	calls []fakeGitHubCall
+
 	headSha string
 	state   string
-	server  *httptest.Server
+	lists   map[string]fakePullList
+
+	server *httptest.Server
+}
+
+type fakePullList struct {
+	status int
+	pulls  []map[string]any
 }
 
 func newFakeGitHub(t *testing.T) *fakeGitHub {
 	t.Helper()
-	g := &fakeGitHub{headSha: "headsha-123", state: "open"}
+	g := &fakeGitHub{headSha: "headsha-123", state: "open", lists: make(map[string]fakePullList)}
 	g.server = httptest.NewServer(http.HandlerFunc(g.handle))
 	t.Cleanup(g.server.Close)
 	return g
@@ -68,9 +78,19 @@ func (g *fakeGitHub) handle(w http.ResponseWriter, r *http.Request) {
 	})
 	headSha := g.headSha
 	state := g.state
+	list, hasList := g.lists[r.URL.Path]
 	g.mu.Unlock()
 
 	switch {
+	case r.Method == http.MethodGet && hasList:
+		if list.status == 0 {
+			list.status = http.StatusOK
+		}
+		if list.status != http.StatusOK {
+			writeUpstreamJSON(w, list.status, map[string]any{"message": "list failed"})
+			return
+		}
+		writeUpstreamJSON(w, http.StatusOK, list.pulls)
 	case r.Method == http.MethodGet && r.URL.Path == "/repos/octocat/hello/pulls/7":
 		writeUpstreamJSON(w, http.StatusOK, map[string]any{
 			"number": 7,
@@ -113,6 +133,18 @@ func (g *fakeGitHub) setHead(headSha string) {
 	g.headSha = headSha
 }
 
+func (g *fakeGitHub) setListPayload(owner, repo string, pulls []map[string]any) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.lists["/repos/"+owner+"/"+repo+"/pulls"] = fakePullList{status: http.StatusOK, pulls: pulls}
+}
+
+func (g *fakeGitHub) setListStatus(owner, repo string, status int) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.lists["/repos/"+owner+"/"+repo+"/pulls"] = fakePullList{status: status}
+}
+
 func (g *fakeGitHub) snapshot() []fakeGitHubCall {
 	g.mu.Lock()
 	defer g.mu.Unlock()
@@ -131,7 +163,28 @@ type prReviewHarness struct {
 	mux    *http.ServeMux
 }
 
+type fallbackAgentService struct {
+	service.AgentService
+
+	called bool
+	ws     string
+	state  string
+	result *ops.GitPullRequestList
+	err    error
+}
+
+func (s *fallbackAgentService) ListPullRequests(ctx context.Context, wsID, state string) (*ops.GitPullRequestList, error) {
+	s.called = true
+	s.ws = wsID
+	s.state = state
+	return s.result, s.err
+}
+
 func newPRReviewHarness(t *testing.T, withDispatcher bool) *prReviewHarness {
+	return newPRReviewHarnessWithAgent(t, withDispatcher, nil)
+}
+
+func newPRReviewHarnessWithAgent(t *testing.T, withDispatcher bool, agentSvc service.AgentService) *prReviewHarness {
 	t.Helper()
 	h := &prReviewHarness{store: memstore.New(), github: newFakeGitHub(t), mux: http.NewServeMux()}
 	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
@@ -154,7 +207,7 @@ func newPRReviewHarness(t *testing.T, withDispatcher bool) *prReviewHarness {
 			Providers:  connector.DefaultProviderRegistry(h.github.server.Client()),
 		}
 	}
-	NewModule(h.store, dispatcher).Register(h.mux)
+	NewModule(h.store, dispatcher, agentSvc).Register(h.mux)
 	return h
 }
 
@@ -173,6 +226,17 @@ func (h *prReviewHarness) seedWorkspace(t *testing.T) {
 		RemoteURL:    "https://github.com/octocat/hello",
 	}); err != nil {
 		t.Fatalf("Create repo: %v", err)
+	}
+}
+
+func (h *prReviewHarness) addRepo(t *testing.T, name, remoteURL string) {
+	t.Helper()
+	if _, err := h.store.Repos().Create(context.Background(), store.RepoCreate{
+		WorkspaceKey: prReviewTestWorkspace,
+		Name:         name,
+		RemoteURL:    remoteURL,
+	}); err != nil {
+		t.Fatalf("Create repo %s: %v", name, err)
 	}
 }
 
@@ -231,6 +295,163 @@ func TestGetPullRequestDetail(t *testing.T) {
 	}
 	if calls[0].authorization != "Bearer "+prReviewTestToken {
 		t.Fatalf("authorization = %q, want bearer token", calls[0].authorization)
+	}
+}
+
+func TestListPullRequestsConnector(t *testing.T) {
+	h := newPRReviewHarness(t, true)
+	h.github.setListPayload("octocat", "hello", []map[string]any{
+		{
+			"number": 11,
+			"state":  "open",
+			"title":  "First PR",
+			"draft":  false,
+			"merged": false,
+			"head":   map[string]any{"sha": "head-11", "ref": "feature/one"},
+			"base":   map[string]any{"sha": "base-11", "ref": "main"},
+		},
+		{
+			"number": 12,
+			"state":  "open",
+			"title":  "Draft PR",
+			"draft":  true,
+			"merged": false,
+			"head":   map[string]any{"sha": "head-12", "ref": "feature/two"},
+			"base":   map[string]any{"sha": "base-12", "ref": "main"},
+		},
+	})
+
+	status, raw := h.get(t, "/api/workspaces/WS/pull-requests?state=all")
+	if status != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (body %s)", status, raw)
+	}
+	var decoded struct {
+		Success bool `json:"success"`
+		Data    struct {
+			PullRequests []ops.GitPullRequest `json:"pull_requests"`
+			Warnings     []string             `json:"warnings,omitempty"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		t.Fatalf("decode response: %v (body %s)", err, raw)
+	}
+	if !decoded.Success || len(decoded.Data.PullRequests) != 2 {
+		t.Fatalf("response = %+v, want success with two PRs", decoded)
+	}
+	first := decoded.Data.PullRequests[0]
+	if first.Number != 11 || first.URL != "https://github.com/octocat/hello/pull/11" || first.RepoName != "octocat/hello" {
+		t.Fatalf("first PR = %+v, want URL and repo name populated", first)
+	}
+	if got := decoded.Data.PullRequests[1]; !got.IsDraft || got.HeadRefName != "feature/two" || got.BaseRefName != "main" {
+		t.Fatalf("second PR = %+v, want draft/head/base mapped", got)
+	}
+	calls := h.github.snapshot()
+	if len(calls) != 1 || calls[0].path != "/repos/octocat/hello/pulls" {
+		t.Fatalf("calls = %+v, want one PR list", calls)
+	}
+}
+
+func TestListPullRequestsMergedRoutesToGh(t *testing.T) {
+	fallback := &fallbackAgentService{
+		result: &ops.GitPullRequestList{
+			PullRequests: []ops.GitPullRequest{{Number: 9, Title: "Merged PR", State: "merged", RepoName: "octocat/hello"}},
+		},
+	}
+	// Connector IS available, but "merged" can't be served by the pulls API, so
+	// it must route straight to gh without hitting the connector list endpoint.
+	h := newPRReviewHarnessWithAgent(t, true, fallback)
+	status, raw := h.get(t, "/api/workspaces/WS/pull-requests?state=merged")
+	if status != http.StatusOK {
+		t.Fatalf("status = %d (body %s)", status, raw)
+	}
+	if !fallback.called || fallback.state != "merged" {
+		t.Fatalf("fallback = called:%v state:%q, want merged via gh", fallback.called, fallback.state)
+	}
+	for _, c := range h.github.snapshot() {
+		if strings.HasSuffix(c.path, "/pulls") {
+			t.Fatalf("connector pulls list was called for merged; want gh only")
+		}
+	}
+}
+
+func TestListPullRequestsFallsBackToGhWhenNoConnector(t *testing.T) {
+	fallback := &fallbackAgentService{
+		result: &ops.GitPullRequestList{
+			PullRequests: []ops.GitPullRequest{{
+				Number:   21,
+				Title:    "Fallback PR",
+				URL:      "https://github.com/octocat/hello/pull/21",
+				State:    "open",
+				RepoName: "octocat/hello",
+			}},
+			Warnings: []string{"local gh warning"},
+		},
+	}
+	h := newPRReviewHarnessWithAgent(t, false, fallback)
+
+	status, raw := h.get(t, "/api/workspaces/WS/pull-requests?state=review")
+	if status != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (body %s)", status, raw)
+	}
+	if !fallback.called || fallback.ws != prReviewTestWorkspace || fallback.state != "review" {
+		t.Fatalf("fallback call = called:%v ws:%q state:%q, want WS review", fallback.called, fallback.ws, fallback.state)
+	}
+	var decoded struct {
+		Success bool `json:"success"`
+		Data    struct {
+			PullRequests []ops.GitPullRequest `json:"pull_requests"`
+			Warnings     []string             `json:"warnings,omitempty"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		t.Fatalf("decode response: %v (body %s)", err, raw)
+	}
+	if len(decoded.Data.PullRequests) != 1 || decoded.Data.PullRequests[0].Number != 21 {
+		t.Fatalf("pull_requests = %+v, want fallback PR", decoded.Data.PullRequests)
+	}
+	if len(decoded.Data.Warnings) != 1 || decoded.Data.Warnings[0] != "local gh warning" {
+		t.Fatalf("warnings = %+v, want fallback warning", decoded.Data.Warnings)
+	}
+}
+
+func TestListPullRequestsPartialRepoErrorWarns(t *testing.T) {
+	h := newPRReviewHarness(t, true)
+	h.addRepo(t, "widgets", "https://github.com/acme/widgets")
+	h.github.setListPayload("octocat", "hello", []map[string]any{
+		{
+			"number": 31,
+			"state":  "open",
+			"title":  "Good PR",
+			"draft":  false,
+			"head":   map[string]any{"sha": "head-31", "ref": "feature/good"},
+			"base":   map[string]any{"sha": "base-31", "ref": "main"},
+		},
+	})
+	h.github.setListStatus("acme", "widgets", http.StatusInternalServerError)
+
+	status, raw := h.get(t, "/api/workspaces/WS/pull-requests")
+	if status != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (body %s)", status, raw)
+	}
+	var decoded struct {
+		Success bool `json:"success"`
+		Data    struct {
+			PullRequests []ops.GitPullRequest `json:"pull_requests"`
+			Warnings     []string             `json:"warnings,omitempty"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		t.Fatalf("decode response: %v (body %s)", err, raw)
+	}
+	if len(decoded.Data.PullRequests) != 1 || decoded.Data.PullRequests[0].RepoName != "octocat/hello" {
+		t.Fatalf("pull_requests = %+v, want only successful repo PR", decoded.Data.PullRequests)
+	}
+	if len(decoded.Data.Warnings) != 1 || !strings.Contains(decoded.Data.Warnings[0], "acme/widgets") {
+		t.Fatalf("warnings = %+v, want failed repo warning", decoded.Data.Warnings)
+	}
+	calls := h.github.snapshot()
+	if len(calls) != 2 {
+		t.Fatalf("calls = %+v, want both repo list attempts", calls)
 	}
 }
 
