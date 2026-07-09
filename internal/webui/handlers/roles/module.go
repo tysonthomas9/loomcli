@@ -8,6 +8,7 @@ package roles
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -15,6 +16,7 @@ import (
 	"strings"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/roleprompts"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
 	"github.com/tysonthomas9/loomcli/internal/webui/storeadapter"
@@ -62,6 +64,21 @@ type createRoleRequest struct {
 	Skills         []string `json:"skills,omitempty"`
 }
 
+type EnsureRoleRequest struct {
+	Name           string
+	Description    string
+	Prompt         string
+	PromptFilename string
+	Model          string
+	TaskFilter     string
+	Backend        string
+	Effort         string
+	ReadOnly       bool
+	AllowedTools   []string
+	DeniedTools    []string
+	Skills         []string
+}
+
 // roleWithPrompt is the GET/PATCH single-role response: the stored role plus its
 // current prompt body (read back from PromptFile; empty for builtin roles that
 // carry no prompt file).
@@ -100,6 +117,53 @@ func (m *Module) listRoles(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	handler.WriteJSON(w, http.StatusOK, roles)
+}
+
+func EnsureRole(ctx context.Context, st store.Store, ws string, req EnsureRoleRequest) (*domain.Role, bool, error) {
+	if st == nil {
+		return nil, false, fmt.Errorf("store is required: %w", domain.ErrInvalid)
+	}
+	name := strings.TrimSpace(req.Name)
+	if ws == "" || name == "" {
+		return nil, false, fmt.Errorf("workspace and role name are required: %w", domain.ErrInvalid)
+	}
+	if existing, err := st.Roles().Get(ctx, ws, name); err == nil && existing != nil {
+		return existing, false, nil
+	} else if err != nil && !errors.Is(err, domain.ErrNotFound) {
+		return nil, false, err
+	}
+
+	in := store.RoleCreate{
+		WorkspaceKey: ws,
+		Name:         name,
+		Description:  strings.TrimSpace(req.Description),
+		Model:        strings.TrimSpace(req.Model),
+		TaskFilter:   strings.TrimSpace(req.TaskFilter),
+		Backend:      strings.TrimSpace(req.Backend),
+		Effort:       strings.TrimSpace(req.Effort),
+		ReadOnly:     req.ReadOnly,
+		AllowedTools: req.AllowedTools,
+		DeniedTools:  req.DeniedTools,
+		Skills:       req.Skills,
+	}
+	if strings.TrimSpace(req.Prompt) != "" {
+		promptPath, err := writeRolePrompt(ctx, st, ws, name, req.PromptFilename, req.Prompt)
+		if err != nil {
+			return nil, false, err
+		}
+		in.PromptFile = promptPath
+	}
+	role, err := st.Roles().Create(ctx, in)
+	if err != nil {
+		if errors.Is(err, domain.ErrAlreadyExists) {
+			existing, getErr := st.Roles().Get(ctx, ws, name)
+			if getErr == nil && existing != nil {
+				return existing, false, nil
+			}
+		}
+		return nil, false, err
+	}
+	return role, true, nil
 }
 
 // createRole is an idempotent "ensure": if the named role already exists it is
@@ -370,28 +434,18 @@ func trimPtr(p *string) *string {
 }
 
 // writeRolePrompt writes the prompt body to <workspace>/.loom/prompts/<file>
-// and returns the absolute path. The filename is sanitized to its base to
-// prevent path traversal out of the prompts directory.
+// and returns the absolute path. The path/write logic is shared with the serve
+// workspacemgr seed/backfill via roleprompts.WritePromptFile so both writers
+// agree on layout (this handler must not be imported by workspacemgr, hence the
+// neutral shared package).
 func (m *Module) writeRolePrompt(ctx context.Context, ws, roleName, filename, content string) (string, error) {
-	wsPath := strings.TrimSpace(storeadapter.ResolveOrHealWorkspacePath(ctx, m.store, ws))
+	return writeRolePrompt(ctx, m.store, ws, roleName, filename, content)
+}
+
+func writeRolePrompt(ctx context.Context, st store.Store, ws, roleName, filename, content string) (string, error) {
+	wsPath := strings.TrimSpace(storeadapter.ResolveOrHealWorkspacePath(ctx, st, ws))
 	if wsPath == "" {
 		return "", fmt.Errorf("workspace path unavailable; cannot persist role prompt")
 	}
-	fname := strings.TrimSpace(filename)
-	if fname == "" {
-		fname = roleName + ".md"
-	}
-	fname = filepath.Base(fname)
-	if fname == "." || fname == string(filepath.Separator) {
-		return "", fmt.Errorf("invalid prompt filename")
-	}
-	dir := filepath.Join(wsPath, ".loom", "prompts")
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return "", fmt.Errorf("create prompt dir: %w", err)
-	}
-	path := filepath.Join(dir, fname)
-	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
-		return "", fmt.Errorf("write prompt file: %w", err)
-	}
-	return path, nil
+	return roleprompts.WritePromptFile(wsPath, roleName, filename, content)
 }
