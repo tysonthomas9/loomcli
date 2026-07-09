@@ -355,6 +355,9 @@ func TestGitHubReviewTaskRunnerSourceContract(t *testing.T) {
 		`review_findings: JSON.stringify(findings)`,
 		`"--output-schema"`,
 		`"--output-last-message"`,
+		`LOOM_FLUE_AGENT_MODEL`,
+		`args.splice(1, 0, "--model", CODEX_MODEL)`,
+		`const prefix = "openai-codex/"`,
 		`execFileSync(CODEX`,
 	} {
 		if !strings.Contains(source, want) {

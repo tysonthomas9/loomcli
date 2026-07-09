@@ -487,6 +487,29 @@ func TestStackScriptsUseGenericTaskRunnerInvoker(t *testing.T) {
 	}
 }
 
+func TestGitHubReviewStackBuildsPinnedRealFlueArtifact(t *testing.T) {
+	const path = "../../scripts/run-github-review-codex-stack.sh"
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+	source := string(data)
+	for _, want := range []string{
+		"internal/workflows/FLUE_COMMIT",
+		"packages/cli/bin/flue.mjs",
+		"build \\",
+		"--target node",
+		"--output \"$dist\"",
+	} {
+		if !strings.Contains(source, want) {
+			t.Fatalf("%s does not build the pinned real Flue artifact; missing %q", path, want)
+		}
+	}
+	if strings.Contains(source, `cat > "${dist}/server.mjs"`) {
+		t.Fatalf("%s still hand-writes a Flue protocol shim instead of using the pinned builder", path)
+	}
+}
+
 func TestHostBridgeTaskExecutorPreflightsBuiltInFlueWorkflowWithoutCommand(t *testing.T) {
 	executor := HostBridgeTaskExecutor{}
 	if _, err := executor.PreflightTaskProvider(context.Background(), TaskRunRequestOptions{

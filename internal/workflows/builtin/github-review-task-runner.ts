@@ -5,6 +5,7 @@ import path from "node:path";
 import { defineAgent, defineWorkflow } from "@flue/runtime";
 
 const CODEX = process.env.LOOM_CODEX_BIN || "codex";
+const CODEX_MODEL = codexModel(process.env.LOOM_FLUE_AGENT_MODEL);
 
 // Flue HEAD requires every workflow module to default-export defineWorkflow();
 // keep the named run export (invoker/shim path) AND add the flue-native default
@@ -44,7 +45,7 @@ export async function run(ctx = {}) {
 
   const prompt = reviewPrompt(input, rubric, diff);
   try {
-    execFileSync(CODEX, [
+    const args = [
       "exec",
       "--skip-git-repo-check",
       "--dangerously-bypass-approvals-and-sandbox",
@@ -52,7 +53,11 @@ export async function run(ctx = {}) {
       "--output-schema", schemaPath,
       "--output-last-message", outPath,
       "-",
-    ], { input: prompt, stdio: ["pipe", "ignore", "inherit"], timeout: 5 * 60 * 1000 });
+    ];
+    if (CODEX_MODEL) {
+      args.splice(1, 0, "--model", CODEX_MODEL);
+    }
+    execFileSync(CODEX, args, { input: prompt, stdio: ["pipe", "ignore", "inherit"], timeout: 5 * 60 * 1000 });
   } catch (err) {
     return failed("codex_exec_failed", "codex exec failed: " + errorMessage(err), taskRunId, request);
   }
@@ -75,6 +80,16 @@ export async function run(ctx = {}) {
       review_findings: JSON.stringify(findings),
     },
   };
+}
+
+// The live stack already pins its review model through LOOM_FLUE_AGENT_MODEL.
+// Codex CLI expects only the model slug, while Flue accepts provider/model.
+// Honor that existing setting so a newer model in the operator's copied
+// config.toml cannot make an older, otherwise compatible container CLI fail.
+function codexModel(value) {
+  const model = String(value || "").trim();
+  const prefix = "openai-codex/";
+  return model.startsWith(prefix) ? model.slice(prefix.length) : model;
 }
 
 function requestPayload(ctx) {
