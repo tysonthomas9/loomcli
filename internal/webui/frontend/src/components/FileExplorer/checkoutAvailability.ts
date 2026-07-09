@@ -16,3 +16,28 @@ export function checkoutChangeCount(
 export function unavailableCheckoutCount(checkouts: FileCheckout[]): number {
   return checkouts.filter((checkout) => checkout.status_error === true).length;
 }
+
+export function checkoutDisplayName(checkout: FileCheckout): string {
+  if (checkout.kind === "agent") {
+    return checkout.agent
+      ? `${checkout.agent} · ${checkout.repo}`
+      : `agent · ${checkout.repo}`;
+  }
+  return checkout.repo;
+}
+
+export function unavailableCheckoutLabels(checkouts: FileCheckout[]): string[] {
+  return checkouts
+    .filter((checkout) => checkout.status_error === true)
+    .map(checkoutDisplayName);
+}
+
+export function unavailableCheckoutSummary(labels: string[]): string {
+  if (labels.length === 0) return "";
+  const visible = labels.slice(0, 3);
+  const suffix =
+    labels.length > visible.length
+      ? ` and ${labels.length - visible.length} more`
+      : "";
+  return `${visible.join(", ")}${suffix} unavailable`;
+}

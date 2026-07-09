@@ -23,6 +23,7 @@ type mockFileOps struct {
 	resolveOrPrimaryFunc func(name string) (*ops.AgentWorktree, error)
 	resolveWsRootFunc    func() (string, error)
 	resolveWsDataFunc    func() (*ops.WorkspaceData, error)
+	repairFunc           func(workspaceID, scope, target, repo string, force bool) (ops.RepairResult, error)
 }
 
 func (m *mockFileOps) ResolveAgentWorktree(workspaceID, name string) (*ops.AgentWorktree, error) {
@@ -88,6 +89,35 @@ func (m *mockFileOps) ResolveLoomDataDir() (string, error) {
 
 func (m *mockFileOps) GetCurrentBranch(worktreePath string) (string, error) {
 	return "main", nil
+}
+
+func (m *mockFileOps) RepairCheckout(workspaceID, scope, target, repo string, force bool) (ops.RepairResult, error) {
+	if m.repairFunc != nil {
+		return m.repairFunc(workspaceID, scope, target, repo, force)
+	}
+	return ops.RepairResult{Repaired: false, Method: "none", Message: "not implemented"}, nil
+}
+
+func TestHandleFileCheckoutRepair_DisallowedRepoReturns400(t *testing.T) {
+	fileOps := &mockFileOps{
+		repairFunc: func(workspaceID, scope, target, repo string, force bool) (ops.RepairResult, error) {
+			if workspaceID != "ws-1" || scope != "agent" || target != "nova" || repo != "docs" || force {
+				t.Fatalf("RepairCheckout args = (%q,%q,%q,%q,%v)", workspaceID, scope, target, repo, force)
+			}
+			return ops.RepairResult{}, ops.ErrAgentRepoNotAllowed
+		},
+	}
+	svc := NewFileService(fileOps)
+	body := strings.NewReader(`{"scope":"agent","target":"nova","repo":"docs"}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/workspaces/ws-1/files/checkouts/repair", body)
+	req = req.WithContext(middleware.WithWorkspace(req.Context(), "ws-1"))
+	rec := httptest.NewRecorder()
+
+	HandleFileCheckoutRepair(svc).ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d; body=%s", rec.Code, http.StatusBadRequest, rec.Body.String())
+	}
 }
 
 // setupTestWorktree creates a temporary directory with test files.

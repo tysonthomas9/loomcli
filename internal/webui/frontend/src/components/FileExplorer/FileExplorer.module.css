@@ -334,36 +334,55 @@
 .rootRow {
   display: flex;
   align-items: center;
-  gap: var(--space-1);
   width: 100%;
   min-height: 28px;
-  padding: 4px var(--space-3) 4px var(--space-2);
+  padding: 0 var(--space-2) 0 0;
   border: none;
   background: transparent;
   color: var(--color-text-primary);
   font-family: var(--font-family-base);
   font-size: var(--font-size-sm);
   text-align: left;
-  cursor: pointer;
 }
 
-.rootRow:hover:not(:disabled),
-.rootRow:focus-visible {
+.rootRow:hover,
+.rootRow:focus-within {
   background: var(--color-bg-hover);
   outline: none;
 }
 
-.rootRow:disabled {
-  cursor: default;
-}
-
-.rootRow:disabled,
 .rootRow[data-disabled] {
   opacity: 0.48;
 }
 
 .rootRow[data-dimmed] {
   color: var(--color-text-secondary);
+}
+
+.rootRowToggle {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  flex: 1;
+  min-width: 0;
+  min-height: 28px;
+  padding: 4px var(--space-1) 4px var(--space-2);
+  border: none;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.rootRowToggle:disabled {
+  cursor: default;
+}
+
+.rootRowToggle:focus-visible,
+.checkoutRepairButton:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: -2px;
 }
 
 .rootIcon,
@@ -407,13 +426,47 @@
   color: var(--color-text-muted);
 }
 
-.checkoutStatusWarning {
-  width: 7px;
-  height: 7px;
-  flex: 0 0 7px;
+.checkoutStatusWarningIcon {
+  width: 14px;
+  height: 14px;
+  flex: 0 0 14px;
+  color: var(--color-warning-text, #9a6700);
+}
+
+.checkoutRepairButton {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  flex: 0 0 auto;
+  max-width: 124px;
+  min-height: 22px;
+  margin-left: var(--space-1);
+  padding: 1px 7px;
+  border: 1px solid var(--color-border-light);
   border-radius: 999px;
-  background: var(--color-warning, #b45309);
-  box-shadow: 0 0 0 2px var(--color-bg-card, var(--color-bg));
+  background: var(--color-bg-card, var(--color-bg));
+  color: var(--color-text-secondary);
+  font: inherit;
+  font-size: var(--font-size-xs, 11px);
+  font-weight: 700;
+  line-height: 16px;
+  cursor: pointer;
+}
+
+.checkoutRepairButton span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.checkoutRepairButton[data-state="unavailable"] {
+  color: var(--color-warning-text, #9a6700);
+}
+
+.checkoutRepairButton:disabled {
+  cursor: wait;
+  opacity: 0.72;
 }
 
 .checkoutBadge {

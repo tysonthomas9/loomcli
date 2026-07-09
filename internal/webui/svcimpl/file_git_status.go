@@ -2,8 +2,10 @@ package svcimpl
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/tysonthomas9/loomcli/internal/ops"
 	webuilog "github.com/tysonthomas9/loomcli/internal/webui/log"
@@ -66,7 +68,7 @@ func (s *fileServiceImpl) workspaceGitStatus(ctx context.Context, wsID, target, 
 			continue
 		}
 		seen[checkout.path] = struct{}{}
-		if !checkoutExists(wsRoot, checkout.path) {
+		if !checkoutPathPresent(wsRoot, checkout.path) {
 			continue
 		}
 		status, err := s.fileOps.GitStatusPorcelain(checkout.path)
@@ -135,7 +137,7 @@ func (s *fileServiceImpl) ListFileCheckouts(ctx context.Context, wsID string) (*
 			Agent: checkout.agent,
 			Repo:  checkout.repo,
 		}
-		if checkoutExists(wsRoot, checkout.path) {
+		if checkoutPathPresent(wsRoot, checkout.path) {
 			item.Exists = true
 			status, err := s.fileOps.GitStatusPorcelain(checkout.path)
 			if err != nil {
@@ -159,6 +161,29 @@ func (s *fileServiceImpl) ListFileCheckouts(ctx context.Context, wsID string) (*
 		out = append(out, item)
 	}
 	return &service.FileCheckoutsResult{Checkouts: out}, nil
+}
+
+func (s *fileServiceImpl) RepairCheckout(ctx context.Context, wsID string, req service.FileCheckoutRepairRequest) (*ops.RepairResult, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, service.ErrTimeout("checkout repair canceled")
+	}
+	scope := strings.TrimSpace(req.Scope)
+	target := strings.TrimSpace(req.Target)
+	repo := strings.TrimSpace(req.Repo)
+	if scope == "" {
+		return nil, service.ErrValidation("scope is required")
+	}
+	if target == "" {
+		return nil, service.ErrValidation("target is required")
+	}
+	result, err := s.fileOps.RepairCheckout(wsID, scope, target, repo, req.Force)
+	if err != nil {
+		if errors.Is(err, ops.ErrCheckoutTargetNotAllowed) || errors.Is(err, ops.ErrAgentRepoNotAllowed) {
+			return nil, service.ErrValidation(err.Error())
+		}
+		return nil, service.ErrInternal("failed to repair checkout", err)
+	}
+	return &result, nil
 }
 
 func repoCheckoutPath(wsRoot string, repo ops.WorkspaceRepo) string {
@@ -256,7 +281,7 @@ func workspaceCheckoutWithinRoot(wsRoot, checkoutPath string) (gitStatusCheckout
 	return gitStatusCheckout{path: absCheckout, prefix: filepath.ToSlash(rel)}, true
 }
 
-func checkoutExists(wsRoot, checkoutPath string) bool {
+func checkoutPathPresent(wsRoot, checkoutPath string) bool {
 	if checkoutPath == "" {
 		return false
 	}
@@ -274,5 +299,12 @@ func checkoutExists(wsRoot, checkoutPath string) bool {
 	if err := validateNoSymlinkComponents(absRoot, absCheckout); err != nil {
 		return false
 	}
-	return validateGitCheckoutRoot(absCheckout) == nil
+	fi, err := os.Lstat(absCheckout)
+	if err != nil {
+		return false
+	}
+	if fi.Mode()&os.ModeSymlink != 0 {
+		return false
+	}
+	return true
 }

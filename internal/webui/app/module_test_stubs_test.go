@@ -125,6 +125,9 @@ func (s *stubFileService) GitStatusScoped(_ context.Context, _ string, _ service
 func (s *stubFileService) ListFileCheckouts(_ context.Context, _ string) (*service.FileCheckoutsResult, error) {
 	return &service.FileCheckoutsResult{}, nil
 }
+func (s *stubFileService) RepairCheckout(_ context.Context, _ string, _ service.FileCheckoutRepairRequest) (*ops.RepairResult, error) {
+	return &ops.RepairResult{}, nil
+}
 func (s *stubFileService) DiffFileScoped(_ context.Context, _ string, _ service.FileScope, _, _, _, _, _ string) (*service.FileDiffResult, error) {
 	return &service.FileDiffResult{}, nil
 }

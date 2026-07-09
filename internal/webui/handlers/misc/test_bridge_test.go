@@ -346,6 +346,17 @@ func (s *testFileServiceImpl) ListFileCheckouts(_ context.Context, _ string) (*s
 	return &service.FileCheckoutsResult{}, nil
 }
 
+func (s *testFileServiceImpl) RepairCheckout(_ context.Context, wsID string, req service.FileCheckoutRepairRequest) (*ops.RepairResult, error) {
+	result, err := s.fileOps.RepairCheckout(wsID, req.Scope, req.Target, req.Repo, req.Force)
+	if err != nil {
+		if errors.Is(err, ops.ErrCheckoutTargetNotAllowed) || errors.Is(err, ops.ErrAgentRepoNotAllowed) {
+			return nil, service.ErrValidation("checkout target is not allowed")
+		}
+		return nil, err
+	}
+	return &result, nil
+}
+
 func (s *testFileServiceImpl) DiffFileScoped(_ context.Context, _ string, _ service.FileScope, _, _, _, _, _ string) (*service.FileDiffResult, error) {
 	return &service.FileDiffResult{}, nil
 }
@@ -728,6 +739,9 @@ func (s *stubFileService) GitStatusScoped(_ context.Context, _ string, _ service
 }
 func (s *stubFileService) ListFileCheckouts(_ context.Context, _ string) (*service.FileCheckoutsResult, error) {
 	return &service.FileCheckoutsResult{}, nil
+}
+func (s *stubFileService) RepairCheckout(_ context.Context, _ string, _ service.FileCheckoutRepairRequest) (*ops.RepairResult, error) {
+	return &ops.RepairResult{}, nil
 }
 func (s *stubFileService) DiffFileScoped(_ context.Context, _ string, _ service.FileScope, _, _, _, _, _ string) (*service.FileDiffResult, error) {
 	return &service.FileDiffResult{}, nil

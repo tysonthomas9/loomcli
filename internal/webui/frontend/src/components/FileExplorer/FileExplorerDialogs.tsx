@@ -64,6 +64,44 @@ export function DeleteConfirmDialog({
   );
 }
 
+export function RepairCheckoutConfirmDialog({
+  label,
+  onCancel,
+  onConfirm,
+}: {
+  label: string;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  return (
+    <div className={styles.dialogOverlay}>
+      <div className={styles.dialog} role="dialog" aria-modal="true">
+        <p className={styles.dialogMessage}>
+          Recreate {label}? Its current contents will be preserved in a
+          timestamped backup folder, then copied back over a fresh checkout. Git
+          history is untouched.
+        </p>
+        <div className={styles.dialogActions}>
+          <button
+            type="button"
+            className={styles.secondaryButton}
+            onClick={onCancel}
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            className={styles.saveButton}
+            onClick={onConfirm}
+          >
+            Recreate
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function ContextMenu({
   state,
   onNewFile,

@@ -24,6 +24,7 @@ func TestFileModule_RegisterRoutes(t *testing.T) {
 		{"PUT", "/api/workspaces/test-ws/agents/agent1/files"},
 		{"GET", "/api/workspaces/test-ws/files/git-status"},
 		{"GET", "/api/workspaces/test-ws/files/checkouts"},
+		{"POST", "/api/workspaces/test-ws/files/checkouts/repair"},
 		{"GET", "/api/workspaces/test-ws/files/diff"},
 		{"GET", "/api/workspaces/test-ws/files/history"},
 		{"GET", "/api/workspaces/test-ws/files/blame"},

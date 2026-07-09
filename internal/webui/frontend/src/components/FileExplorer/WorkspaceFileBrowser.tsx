@@ -19,6 +19,7 @@ import {
   listFileCheckouts,
   mkdirScoped,
   moveScopedPath,
+  repairFileCheckout,
   readScopedFile,
   writeScopedFile,
 } from "@/hooks/api";
@@ -48,6 +49,7 @@ import {
   ContextMenu,
   DeleteConfirmDialog,
   MoveToDialog,
+  RepairCheckoutConfirmDialog,
 } from "./FileExplorerDialogs";
 import { FileExplorerEditorGroup } from "./FileExplorerEditorGroup";
 import { FileExplorerTreePanel } from "./FileExplorerTreePanel";
@@ -55,7 +57,7 @@ import { FileSearchPanel } from "./FileSearchPanel";
 import { QuickOpenPalette } from "./QuickOpenPalette";
 import {
   hasAvailableCheckoutStatus,
-  unavailableCheckoutCount,
+  unavailableCheckoutLabels,
 } from "./checkoutAvailability";
 import {
   basename,
@@ -91,6 +93,7 @@ import type { QuickOpenItem } from "./quickOpen";
 import styles from "./FileExplorer.module.css";
 import type {
   ContextMenuState,
+  CheckoutRepairMenuState,
   DeleteConfirmState,
   DiffViewState,
   ExplorerLens,
@@ -99,11 +102,32 @@ import type {
   MoveDialogState,
   OpenDiffRequest,
   OpenRevisionRequest,
+  RepairConfirmState,
   RevisionViewState,
   ScopedInlineEdit,
   TreeRefreshRequest,
   TreeRevealRequest,
 } from "./workspaceFileBrowserTypes";
+
+function checkoutRepairRequest(ref: CheckoutRef, force = false) {
+  if (ref.scope === "agent" && ref.target) {
+    const request = {
+      scope: "agent" as const,
+      target: ref.target,
+      force,
+    };
+    if (ref.repo) {
+      return { ...request, repo: ref.repo };
+    }
+    return {
+      ...request,
+    };
+  }
+  if (ref.scope === "repo" && ref.target) {
+    return { scope: "repo" as const, target: ref.target, force };
+  }
+  return null;
+}
 
 function FileBrowserInner({
   mode = "workspace",
@@ -148,8 +172,18 @@ function FileBrowserInner({
   >({});
   const [checkouts, setCheckouts] = useState<FileCheckout[]>([]);
   const [checkoutError, setCheckoutError] = useState<string | null>(null);
+  const [repairError, setRepairError] = useState<string | null>(null);
+  const [repairingCheckoutKey, setRepairingCheckoutKey] = useState<
+    string | null
+  >(null);
+  const [repairConfirm, setRepairConfirm] = useState<RepairConfirmState | null>(
+    null,
+  );
   const [searchPanelOpen, setSearchPanelOpen] = useState(false);
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
+  const [repairMenu, setRepairMenu] = useState<CheckoutRepairMenuState | null>(
+    null,
+  );
   const [inlineEdit, setInlineEdit] = useState<ScopedInlineEdit | null>(null);
   const [deleteConfirm, setDeleteConfirm] = useState<DeleteConfirmState | null>(
     null,
@@ -247,8 +281,8 @@ function FileBrowserInner({
       ),
     [visibleCheckouts],
   );
-  const unavailableChangeCheckoutCount = useMemo(
-    () => unavailableCheckoutCount(visibleCheckouts),
+  const unavailableChangeCheckoutLabels = useMemo(
+    () => unavailableCheckoutLabels(visibleCheckouts),
     [visibleCheckouts],
   );
   const changesRefs = useMemo(() => {
@@ -448,15 +482,20 @@ function FileBrowserInner({
   );
 
   useEffect(() => {
-    if (!contextMenu) return;
+    if (!contextMenu && !repairMenu) return;
     const close = () => setContextMenu(null);
+    const closeRepair = () => setRepairMenu(null);
     window.addEventListener("click", close);
+    window.addEventListener("click", closeRepair);
     window.addEventListener("keydown", close);
+    window.addEventListener("keydown", closeRepair);
     return () => {
       window.removeEventListener("click", close);
+      window.removeEventListener("click", closeRepair);
       window.removeEventListener("keydown", close);
+      window.removeEventListener("keydown", closeRepair);
     };
-  }, [contextMenu]);
+  }, [contextMenu, repairMenu]);
 
   useEffect(() => {
     if (quickOpenOpen) {
@@ -1021,6 +1060,61 @@ function FileBrowserInner({
     [],
   );
 
+  const performCheckoutRepair = useCallback(
+    async (ref: CheckoutRef, label: string, force = false) => {
+      const request = checkoutRepairRequest(ref, force);
+      if (!request) {
+        setRepairError("Only agent and repo checkouts can be repaired.");
+        return;
+      }
+      const key = checkoutRefKey(ref);
+      if (repairingCheckoutKey) return;
+      setRepairingCheckoutKey(key);
+      setRepairError(null);
+      try {
+        const result = await repairFileCheckout(workspaceId, request);
+        if (result.requires_force) {
+          setRepairConfirm({ ref, label });
+          return;
+        }
+        if (!result.repaired) {
+          setRepairError(result.message || `Could not repair ${label}.`);
+          return;
+        }
+        markIndexStale();
+        await refreshCheckouts();
+        void refreshGitStatus();
+        refreshParents(ref, "");
+        showToast(result.message || `Repaired ${label}.`, {
+          type: "success",
+        });
+      } catch {
+        const message = `Repair failed for ${label}.`;
+        setRepairError(message);
+        showToast(message, { type: "error" });
+      } finally {
+        setRepairingCheckoutKey(null);
+      }
+    },
+    [
+      workspaceId,
+      repairingCheckoutKey,
+      markIndexStale,
+      refreshCheckouts,
+      refreshGitStatus,
+      refreshParents,
+      showToast,
+    ],
+  );
+
+  const handleCheckoutContextMenu = useCallback(
+    (ref: CheckoutRef, label: string, event: MouseEvent<HTMLDivElement>) => {
+      setContextMenu(null);
+      setRepairMenu({ ref, label, x: event.clientX, y: event.clientY });
+    },
+    [],
+  );
+
   const performMove = useCallback(
     async (
       ref: CheckoutRef,
@@ -1120,10 +1214,12 @@ function FileBrowserInner({
             lens={lens}
             changeCount={checkoutChangeCount}
             checkoutError={checkoutError}
+            repairError={repairError}
             sections={sections}
             changeGroups={visibleChangeGroups}
-            unavailableCheckoutCount={unavailableChangeCheckoutCount}
+            unavailableCheckoutLabels={unavailableChangeCheckoutLabels}
             expandedRoots={expandedRoots}
+            repairingCheckoutKey={repairingCheckoutKey}
             selectedTab={selectedTab}
             inlineEdit={inlineEdit}
             gitStatusByRef={gitStatusByRef}
@@ -1136,6 +1232,10 @@ function FileBrowserInner({
               openDiff(store.getState().activeGroup, request)
             }
             onToggleRoot={toggleRoot}
+            onRepairCheckout={(ref, label) =>
+              void performCheckoutRepair(ref, label)
+            }
+            onCheckoutContextMenu={handleCheckoutContextMenu}
             onOpenFile={openFile}
             onContextMenu={handleContextMenu}
             onRequestRename={beginRename}
@@ -1275,6 +1375,36 @@ function FileBrowserInner({
           }}
           onDuplicate={(node) => duplicateFile(contextMenu.ref, node)}
           onCopyPath={copyPath}
+        />
+      )}
+      {repairMenu && (
+        <div
+          className={styles.contextMenu}
+          style={{ left: repairMenu.x, top: repairMenu.y }}
+          role="menu"
+        >
+          <button
+            type="button"
+            role="menuitem"
+            onClick={() => {
+              const { ref, label } = repairMenu;
+              setRepairMenu(null);
+              void performCheckoutRepair(ref, label);
+            }}
+          >
+            Repair checkout
+          </button>
+        </div>
+      )}
+      {repairConfirm && (
+        <RepairCheckoutConfirmDialog
+          label={repairConfirm.label}
+          onCancel={() => setRepairConfirm(null)}
+          onConfirm={() => {
+            const { ref, label } = repairConfirm;
+            setRepairConfirm(null);
+            void performCheckoutRepair(ref, label, true);
+          }}
         />
       )}
       {deleteConfirm && (
