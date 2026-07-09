@@ -11,7 +11,7 @@ export type { UseLocalSettingsReturn } from "./useLocalSettings";
 export { useBackends } from "./useBackends";
 export type { UseBackendsReturn } from "./useBackends";
 
-export { useAutomations } from "./useAutomations";
+export { dispatchBindingsChanged, useAutomations } from "./useAutomations";
 export type { UseAutomationsReturn } from "./useAutomations";
 
 export {

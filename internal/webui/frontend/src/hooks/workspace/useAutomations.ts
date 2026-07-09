@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 
+import { setAgentRecordEnabled } from "@/api/agents";
 import {
   createTriggerBinding,
   deleteTriggerBinding,
@@ -25,7 +26,11 @@ import {
  */
 const BINDINGS_CHANGED_EVENT = "loom:trigger-bindings-changed";
 
-function dispatchBindingsChanged(workspaceId: string): void {
+// Exported so out-of-hook binding mutations (the transactional agent create in
+// CreateAgentModal) can nudge every mounted useAutomations instance — without
+// it, navigating to a just-created agent on an already-mounted AgentsPage hits
+// a stale bindings list and renders an empty shell.
+export function dispatchBindingsChanged(workspaceId: string): void {
   window.dispatchEvent(
     new CustomEvent<{ workspaceId: string }>(BINDINGS_CHANGED_EVENT, {
       detail: { workspaceId },
@@ -139,11 +144,23 @@ export function useAutomations(
 
   const setEnabled = useCallback(
     async (bindingId: string, on: boolean): Promise<void> => {
-      await setTriggerBindingEnabled(workspaceId, bindingId, on);
+      // ATTACHED bindings (target_agent_service_id set — every prompt-agent
+      // binding after the identity migration) are managed by their Agent
+      // record: the binding-scoped enable route 409s them, so drive the
+      // agent-scoped route instead, which sets desired_state and fans out to
+      // every attached binding. Unattached (legacy) bindings keep the direct
+      // route.
+      const binding = bindings.find((b) => b.binding_id === bindingId);
+      const agentId = binding?.target_agent_service_id?.trim();
+      if (agentId) {
+        await setAgentRecordEnabled(workspaceId, agentId, on);
+      } else {
+        await setTriggerBindingEnabled(workspaceId, bindingId, on);
+      }
       await refreshBindings();
       dispatchBindingsChanged(workspaceId);
     },
-    [workspaceId, refreshBindings],
+    [workspaceId, bindings, refreshBindings],
   );
 
   const updateBinding = useCallback(
