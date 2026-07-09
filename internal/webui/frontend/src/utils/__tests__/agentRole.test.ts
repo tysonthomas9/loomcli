@@ -6,8 +6,8 @@ import {
   agentRailRank,
   buildEpicLeadClaims,
   isBackgroundAgent,
+  isInteractiveAgent,
   isLeadRole,
-  isTerminalAgent,
   isWorkerRole,
   splitAgentsByRuntime,
 } from "../agentRole";
@@ -42,31 +42,31 @@ describe("isWorkerRole", () => {
   });
 });
 
-describe("isTerminalAgent", () => {
+describe("isInteractiveAgent", () => {
   it("uses role_kind when present", () => {
     expect(
-      isTerminalAgent(
+      isInteractiveAgent(
         makeAgent({
           name: "operator-a",
           role: "operator",
-          role_kind: "terminal",
+          role_kind: "interactive",
         }),
       ),
     ).toBe(true);
     expect(
-      isTerminalAgent(
+      isInteractiveAgent(
         makeAgent({ name: "lead-a", role: "lead", role_kind: "worker" }),
       ),
     ).toBe(false);
   });
 
   it("falls back to lead role names when role_kind is absent", () => {
-    expect(isTerminalAgent(makeAgent({ name: "lead-a", role: "lead" }))).toBe(
-      true,
-    );
-    expect(isTerminalAgent(makeAgent({ name: "task-a", role: "task" }))).toBe(
-      false,
-    );
+    expect(
+      isInteractiveAgent(makeAgent({ name: "lead-a", role: "lead" })),
+    ).toBe(true);
+    expect(
+      isInteractiveAgent(makeAgent({ name: "task-a", role: "task" })),
+    ).toBe(false);
   });
 });
 
@@ -96,13 +96,13 @@ describe("isBackgroundAgent", () => {
     );
   });
 
-  it("treats terminal-kind custom agents as regular", () => {
+  it("treats interactive-kind custom agents as regular", () => {
     expect(
       isBackgroundAgent(
         makeAgent({
           name: "operator-a",
           role: "operator",
-          role_kind: "terminal",
+          role_kind: "interactive",
           daemon_managed: true,
         }),
       ),
@@ -124,13 +124,13 @@ describe("splitAgentsByRuntime", () => {
 });
 
 describe("agentRailRank", () => {
-  it("ranks terminal-kind agents first", () => {
+  it("ranks interactive-kind agents first", () => {
     expect(
       agentRailRank(
         makeAgent({
           name: "operator-a",
           role: "operator",
-          role_kind: "terminal",
+          role_kind: "interactive",
         }),
       ),
     ).toBe(0);
@@ -141,12 +141,12 @@ describe("agentRailRank", () => {
 });
 
 describe("buildEpicLeadClaims", () => {
-  it("claims epics for terminal-kind agents and legacy leads", () => {
+  it("claims epics for interactive-kind agents and legacy leads", () => {
     const claims = buildEpicLeadClaims([
       makeAgent({
         name: "operator-a",
         role: "operator",
-        role_kind: "terminal",
+        role_kind: "interactive",
         parent: "EPIC-1",
       }),
       makeAgent({ name: "lead-a", role: "lead", parent: "EPIC-2" }),

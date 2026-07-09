@@ -121,13 +121,13 @@ func TestRoleStoreKindCreatePatchClear(t *testing.T) {
 	role, err := s.Roles().Create(ctx, store.RoleCreate{
 		WorkspaceKey: "WS",
 		Name:         "operator",
-		Kind:         string(domain.RoleKindTerminal),
+		Kind:         string(domain.RoleKindInteractive),
 	})
 	if err != nil {
 		t.Fatalf("Create role: %v", err)
 	}
-	if role.Kind != domain.RoleKindTerminal {
-		t.Fatalf("created kind = %q, want terminal", role.Kind)
+	if role.Kind != domain.RoleKindInteractive {
+		t.Fatalf("created kind = %q, want interactive", role.Kind)
 	}
 
 	worker := string(domain.RoleKindWorker)

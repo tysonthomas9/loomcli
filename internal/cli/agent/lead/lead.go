@@ -111,13 +111,7 @@ func runLead(cmd *cobra.Command, args []string) {
 		execShell(workDir)
 		return
 	}
-	if assignment := currentLeadAssignmentPrompt(context.Background()); assignment != "" {
-		prompt += "\n\n## Loom Backend Assignment\n\n" + assignment
-	}
-	if leadMessage != "" {
-		prompt += "\n\n## User's Initial Request\n\n" + leadMessage +
-			"\n\nAddress this request using the lead mode conventions above."
-	}
+	prompt = applyLeadPromptContext(prompt)
 
 	// Invoke agent interactively (no agent name needed - lead mode doesn't claim tasks).
 	// Backends with a controlled runtime (codex app-server, harness-wrapper PTY
@@ -141,6 +135,19 @@ func runLead(cmd *cobra.Command, args []string) {
 		fmt.Fprintf(os.Stderr, "\nDropping into a shell. Fix the issue and run 'loom lead' to retry.\n\n")
 		execShell(workDir)
 	}
+}
+
+// applyLeadPromptContext appends the backend assignment context and the
+// optional --message initial request onto the base terminal-agent prompt.
+func applyLeadPromptContext(prompt string) string {
+	if assignment := currentLeadAssignmentPrompt(context.Background()); assignment != "" {
+		prompt += "\n\n## Loom Backend Assignment\n\n" + assignment
+	}
+	if leadMessage != "" {
+		prompt += "\n\n## User's Initial Request\n\n" + leadMessage +
+			"\n\nAddress this request using the lead mode conventions above."
+	}
+	return prompt
 }
 
 func currentLeadAssignmentPrompt(ctx context.Context) string {

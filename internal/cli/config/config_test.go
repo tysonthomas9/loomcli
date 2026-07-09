@@ -88,21 +88,21 @@ func TestAgentEntryShouldSuperviseSkipsLeadRoles(t *testing.T) {
 		want  bool
 	}{
 		{name: "task default runs", entry: AgentEntry{Worktree: "worker", Role: "task"}, want: true},
-		{name: "lead terminal is not daemon supervised", entry: AgentEntry{Worktree: "lead", Role: "lead"}, want: false},
-		{name: "orchestrator terminal is not daemon supervised", entry: AgentEntry{Worktree: "lead", Role: "orchestrator"}, want: false},
+		{name: "lead interactive is not daemon supervised", entry: AgentEntry{Worktree: "lead", Role: "lead"}, want: false},
+		{name: "orchestrator interactive is not daemon supervised", entry: AgentEntry{Worktree: "lead", Role: "orchestrator"}, want: false},
 		{
-			name:  "custom terminal kind is not daemon supervised",
+			name:  "custom interactive kind is not daemon supervised",
 			entry: AgentEntry{Worktree: "operator", Role: "operator"},
 			roles: map[string]RoleConfig{
-				"operator": {Kind: string(domain.RoleKindTerminal)},
+				"operator": {Kind: string(domain.RoleKindInteractive)},
 			},
 			want: false,
 		},
 		{
-			name:  "terminal kind ignores running desired state",
+			name:  "interactive kind ignores running desired state",
 			entry: AgentEntry{Worktree: "operator", Role: "operator", DesiredState: domain.AgentDesiredRunning},
 			roles: map[string]RoleConfig{
-				"operator": {Kind: string(domain.RoleKindTerminal)},
+				"operator": {Kind: string(domain.RoleKindInteractive)},
 			},
 			want: false,
 		},

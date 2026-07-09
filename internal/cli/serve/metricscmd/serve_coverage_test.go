@@ -588,7 +588,7 @@ func TestMonitorStoreDataSourcePopulatesRoleKind(t *testing.T) {
 	if _, err := st.Roles().Create(ctx, store.RoleCreate{
 		WorkspaceKey: "WS1",
 		Name:         "operator",
-		Kind:         string(domain.RoleKindTerminal),
+		Kind:         string(domain.RoleKindInteractive),
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -607,11 +607,11 @@ func TestMonitorStoreDataSourcePopulatesRoleKind(t *testing.T) {
 	for _, agent := range data.Agents {
 		got[agent.Name] = agent.RoleKind
 	}
-	if got["lead-a"] != string(domain.RoleKindTerminal) {
-		t.Fatalf("lead-a role_kind = %q, want terminal", got["lead-a"])
+	if got["lead-a"] != string(domain.RoleKindInteractive) {
+		t.Fatalf("lead-a role_kind = %q, want interactive", got["lead-a"])
 	}
-	if got["operator-a"] != string(domain.RoleKindTerminal) {
-		t.Fatalf("operator-a role_kind = %q, want terminal", got["operator-a"])
+	if got["operator-a"] != string(domain.RoleKindInteractive) {
+		t.Fatalf("operator-a role_kind = %q, want interactive", got["operator-a"])
 	}
 	if got["task-a"] != string(domain.RoleKindWorker) {
 		t.Fatalf("task-a role_kind = %q, want worker", got["task-a"])

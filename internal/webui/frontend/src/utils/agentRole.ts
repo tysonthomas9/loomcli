@@ -10,11 +10,11 @@ export function isLeadRole(role: string | undefined): boolean {
   return normalized === "lead" || normalized === "orchestrator";
 }
 
-export function isTerminalAgent(
+export function isInteractiveAgent(
   agent: Pick<LoomAgentStatus, "role" | "role_kind">,
 ): boolean {
   const kind = (agent.role_kind ?? "").trim().toLowerCase();
-  if (kind !== "") return kind === "terminal";
+  if (kind !== "") return kind === "interactive";
   return isLeadRole(agent.role);
 }
 
@@ -36,7 +36,7 @@ export function isWorkerRole(role: string | undefined): boolean {
  * stay in the regular section because they run interactively in a terminal.
  */
 export function isBackgroundAgent(agent: LoomAgentStatus): boolean {
-  if (isTerminalAgent(agent)) return false;
+  if (isInteractiveAgent(agent)) return false;
   if (agent.daemon_managed === true) return true;
   return isWorkerRole(agent.role);
 }
@@ -54,7 +54,7 @@ export function splitAgentsByRuntime(agents: LoomAgentStatus[]): {
 }
 
 export function agentRailRank(agent: LoomAgentStatus): number {
-  if (isTerminalAgent(agent)) return 0;
+  if (isInteractiveAgent(agent)) return 0;
   if (agent.orchestrator_session_id || agent.parent) return 1;
   return 2;
 }
@@ -84,7 +84,7 @@ export function buildEpicLeadClaims(
 ): Map<string, string> {
   const claims = new Map<string, string>();
   for (const agent of agents) {
-    if (!agent || !isTerminalAgent(agent)) continue;
+    if (!agent || !isInteractiveAgent(agent)) continue;
     if (!agent.parent) continue;
     claims.set(agent.parent, agent.name);
   }

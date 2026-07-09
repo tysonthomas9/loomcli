@@ -36,11 +36,11 @@ func TestMergeRoleConfig_MaxBudgetUSD(t *testing.T) {
 	})
 }
 
-func TestResolveRoleConfigStaticRejectsTerminalKindRole(t *testing.T) {
+func TestResolveRoleConfigStaticRejectsInteractiveKindRole(t *testing.T) {
 	cfg := &cfgpkg.DaemonConfig{
 		Roles: map[string]cfgpkg.RoleConfig{
 			"operator": {
-				Kind:       string(domain.RoleKindTerminal),
+				Kind:       string(domain.RoleKindInteractive),
 				PromptFile: "operator.md",
 			},
 		},
@@ -48,9 +48,9 @@ func TestResolveRoleConfigStaticRejectsTerminalKindRole(t *testing.T) {
 
 	_, err := ResolveRoleConfigStatic("operator", cfg, t.TempDir())
 	if err == nil {
-		t.Fatal("ResolveRoleConfigStatic error = nil, want terminal role error")
+		t.Fatal("ResolveRoleConfigStatic error = nil, want interactive role error")
 	}
-	if !strings.Contains(err.Error(), "terminal role") || !strings.Contains(err.Error(), "daemon-supervised") {
-		t.Fatalf("error = %q, want terminal daemon-supervised message", err.Error())
+	if !strings.Contains(err.Error(), "interactive role") || !strings.Contains(err.Error(), "daemon-supervised") {
+		t.Fatalf("error = %q, want interactive daemon-supervised message", err.Error())
 	}
 }

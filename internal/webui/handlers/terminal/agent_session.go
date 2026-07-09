@@ -201,7 +201,7 @@ func newAgentTerminalTabPlacement(tabs []tabmeta.TabMetadata, existing *tabmeta.
 // and store.OrchestrationSessionIDFor.
 func ensureTerminalOrchestratorLink(ctx context.Context, st store.Store, workspace, sessionName string, agent *domain.Agent, kind domain.RoleKind) (domain.Agent, string, error) {
 	agentForLaunch := *agent
-	if kind != domain.RoleKindTerminal {
+	if kind != domain.RoleKindInteractive {
 		return agentForLaunch, "", nil
 	}
 	// Skip when this terminal agent already has an active orchestration session.
@@ -252,7 +252,7 @@ func agentTerminalLaunchAllowed(agent *domain.Agent, kind domain.RoleKind) bool 
 	if agent == nil {
 		return false
 	}
-	if kind == domain.RoleKindTerminal {
+	if kind == domain.RoleKindInteractive {
 		return true
 	}
 	return agent.State != domain.AgentStateStopped && agent.DesiredState != domain.AgentDesiredStopped
@@ -262,7 +262,7 @@ func isDaemonOwnedEphemeralWorker(agent *domain.Agent, kind domain.RoleKind) boo
 	if agent == nil {
 		return false
 	}
-	return agent.Mode == domain.AgentModeEphemeral && kind != domain.RoleKindTerminal
+	return agent.Mode == domain.AgentModeEphemeral && kind != domain.RoleKindInteractive
 }
 
 func disableStoredAgentLaunch(ctx context.Context, svc service.TerminalService, workspace string, existing *tabmeta.TabMetadata) (*tabmeta.TabMetadata, error) {
@@ -402,7 +402,7 @@ func agentLaunchBaseArgs(workspace, backend string) []string {
 
 func agentLaunchCommandArgs(kind domain.RoleKind, agent *domain.Agent, role *domain.Role) ([]string, error) {
 	roleName := strings.ToLower(strings.TrimSpace(agent.RoleName))
-	if kind == domain.RoleKindTerminal {
+	if kind == domain.RoleKindInteractive {
 		args := []string{"lead"}
 		if role != nil && strings.TrimSpace(role.PromptFile) != "" {
 			args = append(args, "--prompt", role.PromptFile)

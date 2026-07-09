@@ -4655,7 +4655,7 @@ components:
           type: string
         role_kind:
           type: string
-          enum: [terminal, worker]
+          enum: [interactive, worker]
         repo:
           type: string
         workspace:

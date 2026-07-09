@@ -122,7 +122,7 @@ func (a AgentEntry) Equal(b AgentEntry) bool {
 // ShouldSupervise reports whether the local daemon should run this agent.
 // Empty desired_state preserves legacy behavior for existing agent definitions.
 func (a AgentEntry) ShouldSupervise() bool {
-	if domain.IsTerminalRoleName(a.Role) {
+	if domain.IsInteractiveRoleName(a.Role) {
 		return false
 	}
 	return a.shouldSuperviseByDesiredState()
@@ -133,7 +133,7 @@ func (a AgentEntry) ShouldSupervise() bool {
 func (a AgentEntry) ShouldSuperviseWithRoles(roles map[string]RoleConfig) bool {
 	if rc, ok := roles[a.Role]; ok {
 		role := &domain.Role{Kind: domain.RoleKind(rc.Kind)}
-		if domain.ResolveRoleKind(role, a.Role) == domain.RoleKindTerminal {
+		if domain.ResolveRoleKind(role, a.Role) == domain.RoleKindInteractive {
 			return false
 		}
 		return a.shouldSuperviseByDesiredState()

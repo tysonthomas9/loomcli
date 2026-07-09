@@ -71,7 +71,7 @@ var roleSetCmd = &cobra.Command{
 	Short: "Set a single field on an existing role",
 	Long: `Set a role field by key. Supported keys:
   description     string
-  kind            string (terminal/worker)
+  kind            string (interactive/worker)
   prompt_file     string
   model           string
   task_filter     string
@@ -105,7 +105,7 @@ var roleUnsetCmd = &cobra.Command{
 
 func init() {
 	roleAddCmd.Flags().StringVar(&roleAddDescription, "description", "", "Description")
-	roleAddCmd.Flags().StringVar(&roleAddKind, "kind", "", "Role runtime kind (terminal or worker)")
+	roleAddCmd.Flags().StringVar(&roleAddKind, "kind", "", "Role runtime kind (interactive or worker)")
 	roleAddCmd.Flags().StringVar(&roleAddPromptFile, "prompt-file", "", "Path to prompt file (relative to workspace)")
 	roleAddCmd.Flags().StringVar(&roleAddModel, "model", "", "Model identifier")
 	roleAddCmd.Flags().StringVar(&roleAddBackend, "backend", "", "AI backend (e.g., claude, codex)")
@@ -354,10 +354,10 @@ func normalizeRoleKindValue(value string) string {
 
 func validateRoleKindValue(value string) error {
 	switch normalizeRoleKindValue(value) {
-	case "", string(domain.RoleKindTerminal), string(domain.RoleKindWorker):
+	case "", string(domain.RoleKindInteractive), string(domain.RoleKindWorker):
 		return nil
 	default:
-		return fmt.Errorf("kind must be terminal or worker")
+		return fmt.Errorf("kind must be interactive or worker")
 	}
 }
 

@@ -9,9 +9,9 @@ func TestBuildRolePatchKind(t *testing.T) {
 		unset bool
 		want  string
 	}{
-		{name: "terminal", value: "terminal", want: "terminal"},
+		{name: "interactive", value: "interactive", want: "interactive"},
 		{name: "worker", value: "worker", want: "worker"},
-		{name: "normalized", value: " Terminal ", want: "terminal"},
+		{name: "normalized", value: " Interactive ", want: "interactive"},
 		{name: "unset", unset: true, want: ""},
 	}
 

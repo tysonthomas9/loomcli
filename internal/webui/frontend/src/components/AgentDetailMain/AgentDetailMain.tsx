@@ -34,7 +34,7 @@ import type {
 import { useAgentStoreInstance } from "@/hooks";
 import { wsUrl } from "@/hooks/api";
 import { type LoomAgentStatus, parseLoomStatus } from "@/types";
-import { isTerminalAgent } from "@/utils/agentRole";
+import { isInteractiveAgent } from "@/utils/agentRole";
 import { getCompactAvatarInitials } from "@/utils/compactAvatarInitials";
 import { getAvatarColor, shouldUseWhiteText } from "@/utils/colorUtils";
 
@@ -95,7 +95,7 @@ export function AgentDetailMain({
   const terminalUnavailable = agent != null && isTerminalUnavailable(agent);
   const ephemeralWorker = agent != null && isEphemeralWorker(agent);
   const shouldResolveLeadTerminal =
-    agent != null && isTerminalAgent(agent) && terminalUnavailable;
+    agent != null && isInteractiveAgent(agent) && terminalUnavailable;
   const terminalEmptyState =
     agent != null && terminalUnavailable
       ? terminalUnavailableEmptyState(agent)
@@ -181,7 +181,7 @@ function terminalUnavailableEmptyState(_agent: LoomAgentStatus): {
 }
 
 function isEphemeralWorker(agent: LoomAgentStatus): boolean {
-  return agent.mode === "ephemeral" && !isTerminalAgent(agent);
+  return agent.mode === "ephemeral" && !isInteractiveAgent(agent);
 }
 
 function EphemeralWorkerSummary({
@@ -409,7 +409,7 @@ function Header({
   const branch = displayBranch(agent?.branch);
   const role = (agent?.role ?? "").trim();
   const assignedEpic = (agent?.parent ?? "").trim();
-  const isLead = agent != null && isTerminalAgent(agent);
+  const isLead = agent != null && isInteractiveAgent(agent);
   const deliveryLabel = isLead
     ? leadDeliveryStateLabel(agent?.delivery_state)
     : "";

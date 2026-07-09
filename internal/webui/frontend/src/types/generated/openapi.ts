@@ -2645,7 +2645,7 @@ export interface components {
       behind: number;
       role?: string;
       /** @enum {string} */
-      role_kind?: "terminal" | "worker";
+      role_kind?: "interactive" | "worker";
       repo?: string;
       workspace: string;
       daemon_managed?: boolean;

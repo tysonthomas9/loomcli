@@ -388,7 +388,7 @@ func (s *agentServiceImpl) ensureLocalAgentWorktrees(ctx context.Context, agent 
 	if err != nil {
 		return err
 	}
-	if domain.ResolveRoleKind(role, agent.RoleName) == domain.RoleKindTerminal {
+	if domain.ResolveRoleKind(role, agent.RoleName) == domain.RoleKindInteractive {
 		return nil
 	}
 	ws, err := storeadapter.BuildWorkspaceDataForKey(ctx, s.store, agent.WorkspaceKey)
@@ -457,8 +457,8 @@ func (s *agentServiceImpl) ensureFirstClassAgentRole(ctx context.Context, worksp
 	if _, err := s.store.Roles().Create(ctx, store.RoleCreate{
 		WorkspaceKey: workspaceKey,
 		Name:         roleName,
-		Kind:         string(domain.RoleKindTerminal),
-		Description:  "Lead/orchestrator terminal",
+		Kind:         string(domain.RoleKindInteractive),
+		Description:  "Lead/orchestrator interactive",
 	}); err != nil && !errors.Is(err, domain.ErrAlreadyExists) {
 		return classifyStoreError("create lead role", err)
 	}
@@ -476,7 +476,7 @@ func normalizeFirstClassAgentRole(roleName string) string {
 }
 
 func isLeadAgentRole(roleName string) bool {
-	return domain.IsTerminalRoleName(roleName)
+	return domain.IsInteractiveRoleName(roleName)
 }
 
 // UpdateAgent applies a partial update to an existing agent.

@@ -355,22 +355,22 @@ func (e IssueResponseStatus) Valid() bool {
 
 // Defines values for IssueTabType.
 const (
-	IssueTabTypeDetails  IssueTabType = "details"
-	IssueTabTypeLogs     IssueTabType = "logs"
-	IssueTabTypeSessions IssueTabType = "sessions"
-	IssueTabTypeTerminal IssueTabType = "terminal"
+	Details  IssueTabType = "details"
+	Logs     IssueTabType = "logs"
+	Sessions IssueTabType = "sessions"
+	Terminal IssueTabType = "terminal"
 )
 
 // Valid indicates whether the value is a known member of the IssueTabType enum.
 func (e IssueTabType) Valid() bool {
 	switch e {
-	case IssueTabTypeDetails:
+	case Details:
 		return true
-	case IssueTabTypeLogs:
+	case Logs:
 		return true
-	case IssueTabTypeSessions:
+	case Sessions:
 		return true
-	case IssueTabTypeTerminal:
+	case Terminal:
 		return true
 	default:
 		return false
@@ -394,16 +394,16 @@ func (e MessageResponseSuccess) Valid() bool {
 
 // Defines values for MonitorAgentStatusRoleKind.
 const (
-	MonitorAgentStatusRoleKindTerminal MonitorAgentStatusRoleKind = "terminal"
-	MonitorAgentStatusRoleKindWorker   MonitorAgentStatusRoleKind = "worker"
+	Interactive MonitorAgentStatusRoleKind = "interactive"
+	Worker      MonitorAgentStatusRoleKind = "worker"
 )
 
 // Valid indicates whether the value is a known member of the MonitorAgentStatusRoleKind enum.
 func (e MonitorAgentStatusRoleKind) Valid() bool {
 	switch e {
-	case MonitorAgentStatusRoleKindTerminal:
+	case Interactive:
 		return true
-	case MonitorAgentStatusRoleKindWorker:
+	case Worker:
 		return true
 	default:
 		return false

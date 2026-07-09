@@ -8,8 +8,8 @@ import (
 type RoleKind string
 
 const (
-	RoleKindTerminal RoleKind = "terminal"
-	RoleKindWorker   RoleKind = "worker"
+	RoleKindInteractive RoleKind = "interactive"
+	RoleKindWorker      RoleKind = "worker"
 )
 
 // Role is the configuration shared by all Agents that take this role —
@@ -41,22 +41,22 @@ type Role struct {
 
 // ResolveRoleKind returns the effective kind for a role. Explicit Kind wins;
 // roles with no kind fall back to the legacy name convention where
-// "lead"/"orchestrator" are terminal and everything else is a worker.
+// "lead"/"orchestrator" are interactive and everything else is a worker.
 func ResolveRoleKind(role *Role, roleName string) RoleKind {
 	if role != nil {
 		if kind := RoleKind(strings.ToLower(strings.TrimSpace(string(role.Kind)))); kind != "" {
 			return kind
 		}
 	}
-	if IsTerminalRoleName(roleName) {
-		return RoleKindTerminal
+	if IsInteractiveRoleName(roleName) {
+		return RoleKindInteractive
 	}
 	return RoleKindWorker
 }
 
-// IsTerminalRoleName reports whether a role name uses the legacy terminal-agent
-// naming convention.
-func IsTerminalRoleName(name string) bool {
+// IsInteractiveRoleName reports whether a role name uses the legacy
+// interactive-agent naming convention.
+func IsInteractiveRoleName(name string) bool {
 	switch strings.ToLower(strings.TrimSpace(name)) {
 	case "lead", "orchestrator":
 		return true

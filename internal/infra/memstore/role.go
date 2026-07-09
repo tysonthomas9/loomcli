@@ -83,6 +83,7 @@ func (s *roleStore) List(_ context.Context, ws string) ([]*domain.Role, error) {
 	return out, nil
 }
 
+//nolint:funlen // Patch application mirrors the store.RoleUpdate surface area.
 func (s *roleStore) Update(_ context.Context, ws, name string, patch store.RoleUpdate) (*domain.Role, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

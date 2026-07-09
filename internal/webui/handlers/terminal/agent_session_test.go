@@ -119,13 +119,13 @@ func TestEnsureAgentTerminalSessionCreatesLeadLaunchSpec(t *testing.T) {
 	}
 }
 
-func TestBuildAgentLaunchSpecIncludesPromptForTerminalRole(t *testing.T) {
+func TestBuildAgentLaunchSpecIncludesPromptForInteractiveRole(t *testing.T) {
 	ctx := context.Background()
 	st := memstore.New()
 	if _, err := st.Roles().Create(ctx, store.RoleCreate{
 		WorkspaceKey: "E2E",
 		Name:         "lead",
-		Kind:         string(domain.RoleKindTerminal),
+		Kind:         string(domain.RoleKindInteractive),
 		PromptFile:   "prompts/lead.md",
 	}); err != nil {
 		t.Fatalf("create role: %v", err)
@@ -144,13 +144,13 @@ func TestBuildAgentLaunchSpecIncludesPromptForTerminalRole(t *testing.T) {
 	}
 }
 
-func TestBuildAgentLaunchSpecCustomTerminalRoleUsesLeadRuntime(t *testing.T) {
+func TestBuildAgentLaunchSpecCustomInteractiveRoleUsesLeadRuntime(t *testing.T) {
 	ctx := context.Background()
 	st := memstore.New()
 	if _, err := st.Roles().Create(ctx, store.RoleCreate{
 		WorkspaceKey: "E2E",
 		Name:         "operator",
-		Kind:         string(domain.RoleKindTerminal),
+		Kind:         string(domain.RoleKindInteractive),
 		PromptFile:   "prompts/operator.md",
 	}); err != nil {
 		t.Fatalf("create role: %v", err)
@@ -328,13 +328,13 @@ func TestAgentTerminalLaunchSpecStale_DetectsBackendChange(t *testing.T) {
 	}
 }
 
-func TestAgentTerminalLaunchSpecStaleDetectsTerminalPromptFileChange(t *testing.T) {
+func TestAgentTerminalLaunchSpecStaleDetectsInteractivePromptFileChange(t *testing.T) {
 	ctx := context.Background()
 	st := memstore.New()
 	if _, err := st.Roles().Create(ctx, store.RoleCreate{
 		WorkspaceKey: "E2E",
 		Name:         "operator",
-		Kind:         string(domain.RoleKindTerminal),
+		Kind:         string(domain.RoleKindInteractive),
 		PromptFile:   "prompts/old.md",
 	}); err != nil {
 		t.Fatalf("create role: %v", err)
@@ -354,7 +354,7 @@ func TestAgentTerminalLaunchSpecStaleDetectsTerminalPromptFileChange(t *testing.
 		t.Fatalf("update role prompt: %v", err)
 	}
 	if !agentTerminalLaunchSpecStale(ctx, st, "E2E", existing, agent) {
-		t.Fatal("terminal role prompt_file change should invalidate cached launch spec")
+		t.Fatal("interactive role prompt_file change should invalidate cached launch spec")
 	}
 }
 
@@ -546,7 +546,7 @@ func TestEnsureAgentTerminalSessionRejectsActiveEphemeralWorkerWithoutRelaunch(t
 	}
 }
 
-func TestEnsureAgentTerminalSessionAllowsStoppedCustomTerminalRole(t *testing.T) {
+func TestEnsureAgentTerminalSessionAllowsStoppedCustomInteractiveRole(t *testing.T) {
 	ctx := context.Background()
 	st, tabStore, rdb := newAgentSessionTestDeps(t)
 	svc := webuiterminal.NewTerminalService(
@@ -561,7 +561,7 @@ func TestEnsureAgentTerminalSessionAllowsStoppedCustomTerminalRole(t *testing.T)
 	if _, err := st.Roles().Create(ctx, store.RoleCreate{
 		WorkspaceKey: "E2E",
 		Name:         "operator",
-		Kind:         string(domain.RoleKindTerminal),
+		Kind:         string(domain.RoleKindInteractive),
 		PromptFile:   "prompts/operator.md",
 	}); err != nil {
 		t.Fatalf("create role: %v", err)
@@ -584,11 +584,11 @@ func TestEnsureAgentTerminalSessionAllowsStoppedCustomTerminalRole(t *testing.T)
 		t.Fatalf("ensureAgentTerminalSession: %v", err)
 	}
 	if meta.Launch == nil || !meta.Writable {
-		t.Fatalf("launch/writable = %#v/%v, want stopped terminal-kind agent launchable", meta.Launch, meta.Writable)
+		t.Fatalf("launch/writable = %#v/%v, want stopped interactive-kind agent launchable", meta.Launch, meta.Writable)
 	}
 }
 
-func TestEnsureAgentTerminalSessionAllowsEphemeralCustomTerminalRole(t *testing.T) {
+func TestEnsureAgentTerminalSessionAllowsEphemeralCustomInteractiveRole(t *testing.T) {
 	ctx := context.Background()
 	st, tabStore, rdb := newAgentSessionTestDeps(t)
 	svc := webuiterminal.NewTerminalService(
@@ -603,7 +603,7 @@ func TestEnsureAgentTerminalSessionAllowsEphemeralCustomTerminalRole(t *testing.
 	if _, err := st.Roles().Create(ctx, store.RoleCreate{
 		WorkspaceKey: "E2E",
 		Name:         "operator",
-		Kind:         string(domain.RoleKindTerminal),
+		Kind:         string(domain.RoleKindInteractive),
 	}); err != nil {
 		t.Fatalf("create role: %v", err)
 	}
@@ -626,11 +626,11 @@ func TestEnsureAgentTerminalSessionAllowsEphemeralCustomTerminalRole(t *testing.
 		t.Fatalf("ensureAgentTerminalSession: %v", err)
 	}
 	if meta.Launch == nil {
-		t.Fatal("launch spec = nil, want ephemeral terminal-kind agent to be launchable")
+		t.Fatal("launch spec = nil, want ephemeral interactive-kind agent to be launchable")
 	}
 }
 
-func TestEnsureAgentTerminalSessionCreatesOrchestrationForCustomTerminalRole(t *testing.T) {
+func TestEnsureAgentTerminalSessionCreatesOrchestrationForCustomInteractiveRole(t *testing.T) {
 	ctx := context.Background()
 	st, tabStore, rdb := newAgentSessionTestDeps(t)
 	svc := webuiterminal.NewTerminalService(
@@ -645,7 +645,7 @@ func TestEnsureAgentTerminalSessionCreatesOrchestrationForCustomTerminalRole(t *
 	if _, err := st.Roles().Create(ctx, store.RoleCreate{
 		WorkspaceKey: "E2E",
 		Name:         "operator",
-		Kind:         string(domain.RoleKindTerminal),
+		Kind:         string(domain.RoleKindInteractive),
 	}); err != nil {
 		t.Fatalf("create role: %v", err)
 	}
