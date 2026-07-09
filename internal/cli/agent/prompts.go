@@ -16,6 +16,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/cli/backends"
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
 	"github.com/tysonthomas9/loomcli/internal/cli/git"
+	"github.com/tysonthomas9/loomcli/internal/domain"
 )
 
 //go:embed prompts/*.md
@@ -24,6 +25,7 @@ var promptFS embed.FS
 // promptTemplateData holds all template context fields for prompt rendering.
 type promptTemplateData struct {
 	AgentName         string
+	Role              string
 	WorkspaceBlock    string
 	EpicScope         string
 	SafetyBlock       string
@@ -37,6 +39,14 @@ type promptTemplateData struct {
 	TargetBranch      string
 	ConflictList      string
 	PushRef           string
+}
+
+// BuiltinInteractivePrompt is a selectable built-in terminal-agent prompt.
+type BuiltinInteractivePrompt = domain.BuiltinInteractivePrompt
+
+// BuiltinInteractivePrompts returns the built-in interactive terminal prompts.
+func BuiltinInteractivePrompts() []BuiltinInteractivePrompt {
+	return domain.BuiltinInteractivePrompts()
 }
 
 // renderPrompt loads a template by name, checks for per-project override,
@@ -343,21 +353,22 @@ func GenerateLeadPrompt() string {
 // agent runtime. Empty promptFile preserves the built-in lead prompt; a custom
 // prompt file replaces that base and still receives the terminal safety rules.
 func GenerateTerminalPrompt(promptFile string) (string, error) {
-	if strings.TrimSpace(promptFile) == "" {
+	promptFile = strings.TrimSpace(promptFile)
+	if promptFile == "" {
 		return GenerateLeadPrompt(), nil
+	}
+	if strings.HasPrefix(promptFile, "builtin:") {
+		id := strings.TrimSpace(strings.TrimPrefix(promptFile, "builtin:"))
+		if !isBuiltinInteractivePrompt(id) {
+			return "", fmt.Errorf("unknown built-in interactive prompt %q", id)
+		}
+		return renderPrompt(id, terminalPromptTemplateData()), nil
 	}
 	path, err := resolveTerminalPromptPath(promptFile)
 	if err != nil {
 		return "", err
 	}
-	agentName := strings.TrimSpace(os.Getenv("LOOM_AGENT_NAME"))
-	if agentName == "" {
-		agentName = "lead"
-	}
-	role := strings.TrimSpace(os.Getenv("LOOM_AGENT_ROLE"))
-	if role == "" {
-		role = "lead"
-	}
+	agentName, role := terminalPromptIdentity()
 	prompt, err := LoadPromptTemplate(path, PromptData{
 		AgentName:    agentName,
 		WorktreeName: agentName,
@@ -367,6 +378,31 @@ func GenerateTerminalPrompt(promptFile string) (string, error) {
 		return "", err
 	}
 	return prompt + "\n\n" + buildSafetyGuardrailsBlock(), nil
+}
+
+func isBuiltinInteractivePrompt(id string) bool {
+	return domain.IsBuiltinInteractivePrompt(id)
+}
+
+func terminalPromptTemplateData() promptTemplateData {
+	agentName, role := terminalPromptIdentity()
+	return promptTemplateData{
+		AgentName:   agentName,
+		Role:        role,
+		SafetyBlock: buildSafetyGuardrailsBlock(),
+	}
+}
+
+func terminalPromptIdentity() (agentName, role string) {
+	agentName = strings.TrimSpace(os.Getenv("LOOM_AGENT_NAME"))
+	if agentName == "" {
+		agentName = "lead"
+	}
+	role = strings.TrimSpace(os.Getenv("LOOM_AGENT_ROLE"))
+	if role == "" {
+		role = "lead"
+	}
+	return agentName, role
 }
 
 func resolveTerminalPromptPath(promptFile string) (string, error) {

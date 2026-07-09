@@ -12,6 +12,14 @@ const mockCreateAgent = vi.fn();
 
 vi.mock("@/hooks/agents", () => ({
   useCreateWorkspaceAgent: () => mockCreateAgent,
+  useInteractivePrompts: () => ({
+    prompts: [
+      { id: "lead", label: "Lead" },
+      { id: "pr-review", label: "PR Review" },
+    ],
+    isLoading: false,
+    error: null,
+  }),
 }));
 
 describe("CreateAgentModal", () => {

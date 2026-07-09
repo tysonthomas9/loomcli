@@ -206,6 +206,42 @@
   opacity: 0.65;
 }
 
+.promptSourceGroup {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.promptSourceOption {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 6px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-panel-bg);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+}
+
+.promptSourceOption:has(input:checked) {
+  border-color: var(--color-primary);
+  background: var(--color-bg-active);
+  color: var(--color-text-primary);
+}
+
+.promptSourceOption:has(input:disabled) {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.promptSourceOption input {
+  margin: 0;
+}
+
 .repoChips {
   display: flex;
   flex-wrap: wrap;

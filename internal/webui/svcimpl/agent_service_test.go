@@ -81,6 +81,171 @@ func TestCreateAgentLeadEnsuresRoleAndDoesNotRequireRepo(t *testing.T) {
 	if _, err := st.Roles().Get(ctx, "TEST2", "lead"); err != nil {
 		t.Fatalf("lead role was not created: %v", err)
 	}
+	role, err := st.Roles().Get(ctx, "TEST2", "lead")
+	if err != nil {
+		t.Fatalf("load lead role: %v", err)
+	}
+	if role.Kind != domain.RoleKindInteractive {
+		t.Fatalf("lead role kind = %q, want interactive", role.Kind)
+	}
+	if role.PromptFile != "" {
+		t.Fatalf("lead prompt_file = %q, want empty", role.PromptFile)
+	}
+}
+
+func TestCreateAgentInteractiveKindEnsuresRoleWithPromptFile(t *testing.T) {
+	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
+
+	ctx := context.Background()
+	st := memstore.New()
+	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{
+		Key:           "TEST2",
+		Name:          "Test 2",
+		DefaultBranch: "main",
+	}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+
+	svc := NewAgentService(nil, nil, nil, st)
+	created, err := svc.CreateAgent(ctx, service.AgentCreateInput{
+		WorkspaceKey: "TEST2",
+		Name:         "review-nova",
+		RoleName:     "pr-review",
+		Kind:         "interactive",
+		PromptFile:   "builtin:pr-review",
+		Backend:      "codex",
+	})
+	if err != nil {
+		t.Fatalf("CreateAgent returned error: %v", err)
+	}
+	if created.RoleName != "pr-review" {
+		t.Fatalf("created.RoleName = %q, want pr-review", created.RoleName)
+	}
+	role, err := st.Roles().Get(ctx, "TEST2", "pr-review")
+	if err != nil {
+		t.Fatalf("interactive role was not created: %v", err)
+	}
+	if role.Kind != domain.RoleKindInteractive {
+		t.Fatalf("role kind = %q, want interactive", role.Kind)
+	}
+	if role.PromptFile != "builtin:pr-review" {
+		t.Fatalf("role prompt_file = %q, want builtin:pr-review", role.PromptFile)
+	}
+}
+
+func TestCreateAgentInteractiveRoleCreationIsIdempotent(t *testing.T) {
+	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
+
+	ctx := context.Background()
+	st := memstore.New()
+	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{
+		Key:           "TEST2",
+		Name:          "Test 2",
+		DefaultBranch: "main",
+	}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	if _, err := st.Roles().Create(ctx, store.RoleCreate{
+		WorkspaceKey: "TEST2",
+		Name:         "reviewer",
+		Kind:         string(domain.RoleKindInteractive),
+		PromptFile:   "existing.md",
+	}); err != nil {
+		t.Fatalf("create role: %v", err)
+	}
+
+	svc := NewAgentService(nil, nil, nil, st)
+	// Creating another agent on the same interactive role with the SAME prompt
+	// is a no-op on the role (idempotent), never a mutation.
+	if _, err := svc.CreateAgent(ctx, service.AgentCreateInput{
+		WorkspaceKey: "TEST2",
+		Name:         "reviewer-one",
+		RoleName:     "reviewer",
+		Kind:         "interactive",
+		PromptFile:   "existing.md",
+		Backend:      "codex",
+	}); err != nil {
+		t.Fatalf("CreateAgent returned error: %v", err)
+	}
+	role, err := st.Roles().Get(ctx, "TEST2", "reviewer")
+	if err != nil {
+		t.Fatalf("load role: %v", err)
+	}
+	if role.PromptFile != "existing.md" {
+		t.Fatalf("existing role prompt_file = %q, want unchanged existing.md", role.PromptFile)
+	}
+}
+
+// TestCreateAgentInteractiveRoleConflict guards the reconcile path: creating an
+// interactive agent whose role name collides with a pre-existing role of a
+// different kind, or an interactive role with a different prompt, must surface a
+// validation error rather than silently launching under the wrong role/prompt.
+func TestCreateAgentInteractiveRoleConflict(t *testing.T) {
+	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
+
+	ctx := context.Background()
+	st := memstore.New()
+	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{
+		Key:           "TEST3",
+		Name:          "Test 3",
+		DefaultBranch: "main",
+	}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	// A seeded worker role, and an interactive role with a fixed prompt.
+	if _, err := st.Roles().Create(ctx, store.RoleCreate{
+		WorkspaceKey: "TEST3", Name: "task", Kind: string(domain.RoleKindWorker),
+	}); err != nil {
+		t.Fatalf("create worker role: %v", err)
+	}
+	if _, err := st.Roles().Create(ctx, store.RoleCreate{
+		WorkspaceKey: "TEST3", Name: "reviewer",
+		Kind: string(domain.RoleKindInteractive), PromptFile: "builtin:pr-review",
+	}); err != nil {
+		t.Fatalf("create interactive role: %v", err)
+	}
+
+	svc := NewAgentService(nil, nil, nil, st)
+
+	// Interactive agent colliding with the worker role "task" → error.
+	if _, err := svc.CreateAgent(ctx, service.AgentCreateInput{
+		WorkspaceKey: "TEST3", Name: "task", RoleName: "task",
+		Kind: "interactive", PromptFile: "prompts/x.md", Backend: "codex",
+	}); err == nil {
+		t.Fatal("CreateAgent on worker-role collision: error = nil, want validation error")
+	}
+
+	// Interactive agent on an existing interactive role but a different prompt → error.
+	if _, err := svc.CreateAgent(ctx, service.AgentCreateInput{
+		WorkspaceKey: "TEST3", Name: "reviewer-two", RoleName: "reviewer",
+		Kind: "interactive", PromptFile: "prompts/other.md", Backend: "codex",
+	}); err == nil {
+		t.Fatal("CreateAgent on prompt conflict: error = nil, want validation error")
+	}
+}
+
+func TestCreateAgentRejectsInvalidKind(t *testing.T) {
+	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
+
+	ctx := context.Background()
+	st := memstore.New()
+	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{
+		Key:           "TEST2",
+		Name:          "Test 2",
+		DefaultBranch: "main",
+	}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+
+	svc := NewAgentService(nil, nil, nil, st)
+	if _, err := svc.CreateAgent(ctx, service.AgentCreateInput{
+		WorkspaceKey: "TEST2",
+		Name:         "bad-kind",
+		RoleName:     "reviewer",
+		Kind:         "daemon",
+	}); err == nil {
+		t.Fatal("CreateAgent invalid kind error = nil, want error")
+	}
 }
 
 func TestCreateAgentNormalizesMixedCaseName(t *testing.T) {

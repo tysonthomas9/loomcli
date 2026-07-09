@@ -354,10 +354,12 @@ func (s *agentServiceImpl) CreateAgent(ctx context.Context, in service.AgentCrea
 	}
 	in.RoleName = normalizeFirstClassAgentRole(in.RoleName)
 	in.Name = normalizeStoredAgentName(in.Name)
+	in.Kind = normalizeAgentRoleKind(in.Kind)
+	in.PromptFile = strings.TrimSpace(in.PromptFile)
 	if err := validateAgentCreateInput(in); err != nil {
 		return nil, err
 	}
-	if err := s.ensureFirstClassAgentRole(ctx, in.WorkspaceKey, in.RoleName); err != nil {
+	if err := s.ensureAgentRole(ctx, in.WorkspaceKey, in.RoleName, in.Kind, in.PromptFile); err != nil {
 		return nil, err
 	}
 	created, err := s.store.Agents().Create(ctx, store.AgentCreate{
@@ -445,24 +447,58 @@ func (s *agentServiceImpl) loadAgentRoleForKind(ctx context.Context, workspaceKe
 	return role, nil
 }
 
-func (s *agentServiceImpl) ensureFirstClassAgentRole(ctx context.Context, workspaceKey, roleName string) error {
-	if !isLeadAgentRole(roleName) {
+func (s *agentServiceImpl) ensureAgentRole(ctx context.Context, workspaceKey, roleName, kind, promptFile string) error {
+	if existing, err := s.store.Roles().Get(ctx, workspaceKey, roleName); err == nil {
+		return reconcileExistingAgentRole(existing, roleName, kind, promptFile)
+	} else if !errors.Is(err, domain.ErrNotFound) {
+		return service.ErrInternal("load agent role", err)
+	}
+
+	resolved := domain.ResolveRoleKind(&domain.Role{Kind: domain.RoleKind(kind)}, roleName)
+	if kind == string(domain.RoleKindWorker) {
+		return service.ErrValidation(fmt.Sprintf("role %q must exist before creating a worker agent", roleName))
+	}
+	if resolved != domain.RoleKindInteractive {
 		return nil
 	}
-	if _, err := s.store.Roles().Get(ctx, workspaceKey, roleName); err == nil {
-		return nil
-	} else if !errors.Is(err, domain.ErrNotFound) {
-		return service.ErrInternal("load lead role", err)
+
+	description := "Interactive terminal agent"
+	if isLeadAgentRole(roleName) {
+		description = "Lead/orchestrator interactive"
 	}
 	if _, err := s.store.Roles().Create(ctx, store.RoleCreate{
 		WorkspaceKey: workspaceKey,
 		Name:         roleName,
 		Kind:         string(domain.RoleKindInteractive),
-		Description:  "Lead/orchestrator interactive",
+		Description:  description,
+		PromptFile:   promptFile,
 	}); err != nil && !errors.Is(err, domain.ErrAlreadyExists) {
-		return classifyStoreError("create lead role", err)
+		return classifyStoreError("create agent role", err)
 	}
 	return nil
+}
+
+// reconcileExistingAgentRole guards against silently launching an interactive
+// agent under a pre-existing role of a different kind or prompt. Agent creation
+// never mutates an existing role — so when the caller explicitly asks for an
+// interactive role (e.g. a custom-file agent whose name collides with the
+// seeded "task"/"plan" worker roles) that conflicts with the stored role, we
+// surface the conflict instead of quietly running the agent as the wrong kind.
+func reconcileExistingAgentRole(existing *domain.Role, roleName, kind, promptFile string) error {
+	if kind != string(domain.RoleKindInteractive) {
+		return nil
+	}
+	if domain.ResolveRoleKind(existing, roleName) != domain.RoleKindInteractive {
+		return service.ErrValidation(fmt.Sprintf("role %q already exists and is not interactive; choose a different agent name", roleName))
+	}
+	if pf := strings.TrimSpace(promptFile); pf != "" && strings.TrimSpace(existing.PromptFile) != pf {
+		return service.ErrValidation(fmt.Sprintf("role %q already exists with a different prompt; choose a different agent name or reuse its prompt", roleName))
+	}
+	return nil
+}
+
+func normalizeAgentRoleKind(kind string) string {
+	return strings.ToLower(strings.TrimSpace(kind))
 }
 
 func normalizeFirstClassAgentRole(roleName string) string {
@@ -575,7 +611,12 @@ func validateAgentCreateInput(in service.AgentCreateInput) error {
 	if in.RoleName == "" {
 		return service.ErrValidation("role_name required")
 	}
-	return nil
+	switch in.Kind {
+	case "", string(domain.RoleKindInteractive), string(domain.RoleKindWorker):
+		return nil
+	default:
+		return service.ErrValidation("invalid role kind")
+	}
 }
 
 func (s *agentServiceImpl) SetTargetBranch(_ context.Context, wsID, agentName, branch string) error {

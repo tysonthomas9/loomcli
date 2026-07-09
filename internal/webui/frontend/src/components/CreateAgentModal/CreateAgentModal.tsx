@@ -1,8 +1,12 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 
 import { AetherModal, aetherModalStyles } from "@/components/AetherModal";
-import type { RepoInfo, WorkspaceAgentInfo } from "@/api/workspace";
-import { useCreateWorkspaceAgent } from "@/hooks/agents";
+import type {
+  InteractivePromptInfo,
+  RepoInfo,
+  WorkspaceAgentInfo,
+} from "@/api/workspace";
+import { useCreateWorkspaceAgent, useInteractivePrompts } from "@/hooks/agents";
 import { useBackends } from "@/hooks/workspace";
 import { ApiError } from "@/types/common";
 import {
@@ -13,14 +17,21 @@ import {
 import { AgentTemplateCard } from "./AgentTemplateCard";
 import styles from "./CreateAgentModal.module.css";
 
-type AgentKind = "background" | "lead";
+type AgentKind = "background" | "lead" | "interactive";
 type BackgroundRole = "plan" | "task";
+type PromptSource = "builtin" | "file";
 
 const TEMPLATE_ACCENTS = {
   plan: "#0d9488",
   task: "#ea580c",
   lead: "#db2777",
+  interactive: "#2563eb",
 } as const;
+
+const DEFAULT_INTERACTIVE_PROMPTS: InteractivePromptInfo[] = [
+  { id: "lead", label: "Lead" },
+  { id: "pr-review", label: "PR Review" },
+];
 
 const BACKGROUND_TEMPLATES: {
   role: BackgroundRole;
@@ -60,12 +71,24 @@ const LEAD_TEMPLATE = {
   accentColor: TEMPLATE_ACCENTS.lead,
 };
 
+const INTERACTIVE_TEMPLATE = {
+  title: "Interactive",
+  description: "Custom terminal teammate with a built-in or workspace prompt.",
+  glyph: "I",
+  placeholder: "reviewer",
+  testId: "create-agent-template-interactive",
+  accentColor: TEMPLATE_ACCENTS.interactive,
+};
+
 function resolveInitialSelection(
   defaultKind: AgentKind | undefined,
   defaultRoleName: BackgroundRole,
 ): { kind: AgentKind; backgroundRole: BackgroundRole } {
   if (defaultKind === "lead") {
     return { kind: "lead", backgroundRole: defaultRoleName };
+  }
+  if (defaultKind === "interactive") {
+    return { kind: "interactive", backgroundRole: defaultRoleName };
   }
   return { kind: "background", backgroundRole: defaultRoleName };
 }
@@ -110,22 +133,44 @@ export function CreateAgentModal({
   );
   const [backend, setBackend] = useState(resolvedDefaultBackend);
   const [selectedRepos, setSelectedRepos] = useState<string[]>([]);
+  const [promptSource, setPromptSource] = useState<PromptSource>("builtin");
+  const [selectedBuiltinPromptID, setSelectedBuiltinPromptID] =
+    useState("pr-review");
+  const [workspacePromptFile, setWorkspacePromptFile] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const wasOpenRef = useRef(false);
   const nameRef = useRef<HTMLInputElement>(null);
   const createAgent = useCreateWorkspaceAgent(workspaceId);
   const { backends } = useBackends();
+  const { prompts: fetchedInteractivePrompts, error: promptLoadError } =
+    useInteractivePrompts(workspaceId);
 
-  const roleName = selectedKind === "lead" ? "lead" : backgroundRole;
+  const interactivePrompts = useMemo(
+    () =>
+      fetchedInteractivePrompts.length > 0
+        ? fetchedInteractivePrompts
+        : DEFAULT_INTERACTIVE_PROMPTS,
+    [fetchedInteractivePrompts],
+  );
 
   const namePlaceholder = useMemo(() => {
     if (selectedKind === "lead") return LEAD_TEMPLATE.placeholder;
+    if (selectedKind === "interactive") return INTERACTIVE_TEMPLATE.placeholder;
     const template = BACKGROUND_TEMPLATES.find(
       (t) => t.role === backgroundRole,
     );
     return template?.placeholder ?? "agent";
   }, [selectedKind, backgroundRole]);
+
+  useEffect(() => {
+    if (
+      interactivePrompts.some((prompt) => prompt.id === selectedBuiltinPromptID)
+    ) {
+      return;
+    }
+    setSelectedBuiltinPromptID(interactivePrompts[0]?.id ?? "lead");
+  }, [interactivePrompts, selectedBuiltinPromptID]);
 
   const repoOptions = useMemo(
     () =>
@@ -168,6 +213,9 @@ export function CreateAgentModal({
     setBackgroundRole(selection.backgroundRole);
     setBackend(resolvedDefaultBackend);
     setSelectedRepos(defaultRepos);
+    setPromptSource("builtin");
+    setSelectedBuiltinPromptID("pr-review");
+    setWorkspacePromptFile("");
     setIsSubmitting(false);
     setError(null);
   }, [
@@ -185,7 +233,14 @@ export function CreateAgentModal({
     }
   }, [isOpen]);
 
-  const canSubmit = validateStoredAgentName(name) === null && !isSubmitting;
+  const hasPromptSelection =
+    selectedKind !== "interactive" ||
+    (promptSource === "builtin" && selectedBuiltinPromptID.trim() !== "") ||
+    (promptSource === "file" && workspacePromptFile.trim() !== "");
+  const canSubmit =
+    validateStoredAgentName(name) === null &&
+    hasPromptSelection &&
+    !isSubmitting;
 
   const selectBackground = (role: BackgroundRole): void => {
     setSelectedKind("background");
@@ -194,6 +249,10 @@ export function CreateAgentModal({
 
   const selectLead = (): void => {
     setSelectedKind("lead");
+  };
+
+  const selectInteractive = (): void => {
+    setSelectedKind("interactive");
   };
 
   const handleSubmit = async (event: FormEvent) => {
@@ -209,13 +268,33 @@ export function CreateAgentModal({
 
     setIsSubmitting(true);
     try {
+      let roleName: string;
+      let promptFile: string | undefined;
+      if (selectedKind === "lead") {
+        roleName = "lead";
+      } else if (selectedKind === "interactive") {
+        if (promptSource === "builtin") {
+          roleName = selectedBuiltinPromptID;
+          promptFile = `builtin:${selectedBuiltinPromptID}`;
+        } else {
+          // Custom-file interactive roles use the agent name as the role slug so
+          // repeated submissions are deterministic without another field.
+          roleName = trimmedName;
+          promptFile = workspacePromptFile.trim();
+        }
+      } else {
+        roleName = backgroundRole;
+      }
+
       const request = {
         name: trimmedName,
-        // roleName is a non-empty union ("lead" | "plan" | "task").
         role_name: roleName,
         auto: false,
-        cross_repo: crossRepo,
-        repos: crossRepo ? [] : selectedRepos,
+        cross_repo: selectedKind === "interactive" ? false : crossRepo,
+        repos: selectedKind === "interactive" || crossRepo ? [] : selectedRepos,
+        ...(selectedKind === "interactive"
+          ? { kind: "interactive", prompt_file: promptFile ?? "" }
+          : {}),
       };
       const agent = await createAgent({
         ...request,
@@ -231,6 +310,9 @@ export function CreateAgentModal({
       setBackgroundRole(selection.backgroundRole);
       setBackend(resolvedDefaultBackend);
       setSelectedRepos(defaultRepos);
+      setPromptSource("builtin");
+      setSelectedBuiltinPromptID("pr-review");
+      setWorkspacePromptFile("");
     } catch (err) {
       if (err instanceof ApiError) {
         setError(err.message);
@@ -347,6 +429,35 @@ export function CreateAgentModal({
               />
             </div>
           </div>
+
+          <div
+            className={styles.group}
+            role="group"
+            aria-labelledby="create-agent-interactive-label"
+          >
+            <span
+              className={styles.groupLabel}
+              id="create-agent-interactive-label"
+            >
+              Interactive agents
+            </span>
+            <p className={styles.groupHint}>
+              Terminal teammates you talk to directly
+            </p>
+            <div className={styles.templateList}>
+              <AgentTemplateCard
+                title={INTERACTIVE_TEMPLATE.title}
+                description={INTERACTIVE_TEMPLATE.description}
+                glyph={INTERACTIVE_TEMPLATE.glyph}
+                accentColor={INTERACTIVE_TEMPLATE.accentColor}
+                selected={selectedKind === "interactive"}
+                disabled={isSubmitting}
+                ariaLabel={`${INTERACTIVE_TEMPLATE.title}, interactive agent`}
+                testId={INTERACTIVE_TEMPLATE.testId}
+                onSelect={selectInteractive}
+              />
+            </div>
+          </div>
         </div>
 
         <div className={styles.panel}>
@@ -390,48 +501,120 @@ export function CreateAgentModal({
             </div>
           </div>
 
-          <div className={`${styles.fieldGroup} ${styles.fieldGroupSpaced}`}>
-            <span className={styles.label} id="agent-repos-label">
-              Repos
-            </span>
-            {repoOptions.length === 0 ? (
-              <p
-                className={styles.emptyHint}
-                data-testid="create-agent-no-repos"
-              >
-                No repos yet — add one from the sidebar first. This agent will
-                run with workspace scope.
-              </p>
-            ) : (
+          {selectedKind === "interactive" && (
+            <div className={`${styles.fieldGroup} ${styles.fieldGroupSpaced}`}>
+              <span className={styles.label} id="agent-prompt-source-label">
+                Prompt source
+              </span>
               <div
-                className={styles.repoChips}
-                role="group"
-                aria-labelledby="agent-repos-label"
-                data-testid="create-agent-repo-chips"
+                className={styles.promptSourceGroup}
+                role="radiogroup"
+                aria-labelledby="agent-prompt-source-label"
               >
-                {repoOptions.map((repo) => {
-                  const on = selectedRepos.includes(repo);
-                  return (
-                    <button
-                      key={repo}
-                      type="button"
-                      className={styles.repoChip}
-                      data-active={on || undefined}
-                      aria-pressed={on}
-                      onClick={() => toggleRepo(repo)}
-                      disabled={isSubmitting}
-                    >
-                      <span className={styles.repoChipBox} aria-hidden="true">
-                        {on ? "✓" : ""}
-                      </span>
-                      {repo}
-                    </button>
-                  );
-                })}
+                <label className={styles.promptSourceOption}>
+                  <input
+                    type="radio"
+                    name="agent-prompt-source"
+                    value="builtin"
+                    checked={promptSource === "builtin"}
+                    onChange={() => setPromptSource("builtin")}
+                    disabled={isSubmitting}
+                  />
+                  Built-in prompt
+                </label>
+                <label className={styles.promptSourceOption}>
+                  <input
+                    type="radio"
+                    name="agent-prompt-source"
+                    value="file"
+                    checked={promptSource === "file"}
+                    onChange={() => setPromptSource("file")}
+                    disabled={isSubmitting}
+                  />
+                  Workspace file
+                </label>
               </div>
-            )}
-            <p className={styles.hint}>{repoHint}</p>
-          </div>
+
+              {promptSource === "builtin" ? (
+                <select
+                  className={styles.select}
+                  value={selectedBuiltinPromptID}
+                  onChange={(event) =>
+                    setSelectedBuiltinPromptID(event.target.value)
+                  }
+                  disabled={isSubmitting}
+                  data-testid="create-agent-interactive-builtin"
+                >
+                  {interactivePrompts.map((prompt) => (
+                    <option key={prompt.id} value={prompt.id}>
+                      {prompt.label}
+                    </option>
+                  ))}
+                </select>
+              ) : (
+                <input
+                  className={styles.input}
+                  value={workspacePromptFile}
+                  onChange={(event) =>
+                    setWorkspacePromptFile(event.target.value)
+                  }
+                  placeholder="prompts/pr-review.md"
+                  disabled={isSubmitting}
+                  data-testid="create-agent-interactive-file"
+                />
+              )}
+              {promptLoadError && (
+                <p className={styles.hint}>
+                  Prompt list unavailable; showing built-in defaults.
+                </p>
+              )}
+            </div>
+          )}
+
+          {selectedKind !== "interactive" && (
+            <div className={`${styles.fieldGroup} ${styles.fieldGroupSpaced}`}>
+              <span className={styles.label} id="agent-repos-label">
+                Repos
+              </span>
+              {repoOptions.length === 0 ? (
+                <p
+                  className={styles.emptyHint}
+                  data-testid="create-agent-no-repos"
+                >
+                  No repos yet — add one from the sidebar first. This agent will
+                  run with workspace scope.
+                </p>
+              ) : (
+                <div
+                  className={styles.repoChips}
+                  role="group"
+                  aria-labelledby="agent-repos-label"
+                  data-testid="create-agent-repo-chips"
+                >
+                  {repoOptions.map((repo) => {
+                    const on = selectedRepos.includes(repo);
+                    return (
+                      <button
+                        key={repo}
+                        type="button"
+                        className={styles.repoChip}
+                        data-active={on || undefined}
+                        aria-pressed={on}
+                        onClick={() => toggleRepo(repo)}
+                        disabled={isSubmitting}
+                      >
+                        <span className={styles.repoChipBox} aria-hidden="true">
+                          {on ? "✓" : ""}
+                        </span>
+                        {repo}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+              <p className={styles.hint}>{repoHint}</p>
+            </div>
+          )}
         </div>
 
         {error && (

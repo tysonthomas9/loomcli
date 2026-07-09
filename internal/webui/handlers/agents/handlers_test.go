@@ -1,11 +1,89 @@
 package agents
 
 import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
+	"github.com/tysonthomas9/loomcli/internal/store"
+	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
+	"github.com/tysonthomas9/loomcli/internal/webui/svcimpl"
 )
+
+func TestHandleInteractivePromptsListsBuiltins(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/TEST2/interactive-prompts", nil)
+	rr := httptest.NewRecorder()
+
+	HandleInteractivePrompts().ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d body = %s, want 200", rr.Code, rr.Body.String())
+	}
+	var got interactivePromptsResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(got.Prompts) < 2 {
+		t.Fatalf("prompts = %#v, want built-ins", got.Prompts)
+	}
+	seen := map[string]string{}
+	for _, prompt := range got.Prompts {
+		seen[prompt.ID] = prompt.Label
+	}
+	if seen["lead"] != "Lead" || seen["pr-review"] != "PR Review" {
+		t.Fatalf("prompts = %#v, want lead and pr-review", got.Prompts)
+	}
+}
+
+func TestHandleCreateCarriesInteractiveKindAndPromptFile(t *testing.T) {
+	ctx := context.Background()
+	st := memstore.New()
+	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{
+		Key:           "TEST2",
+		Name:          "Test 2",
+		DefaultBranch: "main",
+	}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	agentSvc := svcimpl.NewAgentService(nil, nil, nil, st)
+	body := []byte(`{
+		"name":"review-nova",
+		"role_name":"pr-review",
+		"kind":"interactive",
+		"prompt_file":"builtin:pr-review",
+		"backend":"codex"
+	}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/workspaces/TEST2/agents", bytes.NewReader(body))
+	req = req.WithContext(middleware.WithWorkspace(req.Context(), "TEST2"))
+	rr := httptest.NewRecorder()
+
+	HandleCreate(agentSvc, nil).ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("status = %d body = %s, want 201", rr.Code, rr.Body.String())
+	}
+	var created domain.Agent
+	if err := json.Unmarshal(rr.Body.Bytes(), &created); err != nil {
+		t.Fatalf("decode created agent: %v", err)
+	}
+	if created.Name != "review-nova" || created.RoleName != "pr-review" {
+		t.Fatalf("created agent = %#v, want review-nova/pr-review", created)
+	}
+	role, err := st.Roles().Get(ctx, "TEST2", "pr-review")
+	if err != nil {
+		t.Fatalf("load created role: %v", err)
+	}
+	if role.Kind != domain.RoleKindInteractive || role.PromptFile != "builtin:pr-review" {
+		t.Fatalf("role = kind:%q prompt:%q, want interactive builtin:pr-review", role.Kind, role.PromptFile)
+	}
+}
 
 func TestBroadcastAgentRefreshEmitsGenericAgentEvent(t *testing.T) {
 	hub := realtime.NewHub()

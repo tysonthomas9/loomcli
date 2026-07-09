@@ -42,11 +42,22 @@ export interface WorkspaceAgentInfo {
 export interface CreateAgentRequest {
   name: string;
   role_name: string;
+  kind?: string;
+  prompt_file?: string;
   auto?: boolean;
   backend?: string;
   repos?: string[];
   repo_groups?: string[];
   cross_repo?: boolean;
+}
+
+export interface InteractivePromptInfo {
+  id: string;
+  label: string;
+}
+
+interface InteractivePromptsResponse {
+  prompts: InteractivePromptInfo[];
 }
 
 export interface RunOnboardingFirstTaskRequest {
@@ -315,6 +326,15 @@ export async function createWorkspaceAgent(
     req,
     { timeout: 120_000 },
   );
+}
+
+export async function fetchInteractivePrompts(
+  workspaceId: string,
+): Promise<InteractivePromptInfo[]> {
+  const response = await get<InteractivePromptsResponse>(
+    `/api/workspaces/${encodeURIComponent(workspaceId)}/interactive-prompts`,
+  );
+  return Array.isArray(response.prompts) ? response.prompts : [];
 }
 
 export async function deleteWorkspaceAgent(

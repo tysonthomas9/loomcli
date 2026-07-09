@@ -1170,6 +1170,23 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/workspaces/{ws}/interactive-prompts": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** List built-in interactive terminal prompt options */
+    get: operations["listInteractivePrompts"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/workspaces/{ws}/agents": {
     parameters: {
       query?: never;
@@ -1180,7 +1197,8 @@ export interface paths {
     /** List agents via daemon control socket */
     get: operations["listAgents"];
     put?: never;
-    post?: never;
+    /** Create an agent assignment */
+    post: operations["createAgent"];
     delete?: never;
     options?: never;
     head?: never;
@@ -5264,6 +5282,34 @@ export interface operations {
       };
     };
   };
+  listInteractivePrompts: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Built-in interactive prompts */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": {
+            prompts: {
+              id: string;
+              label: string;
+            }[];
+          };
+        };
+      };
+    };
+  };
   listAgents: {
     parameters: {
       query?: never;
@@ -5289,6 +5335,70 @@ export interface operations {
         };
       };
       /** @description Daemon unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+    };
+  };
+  createAgent: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": {
+          workspace_key?: string;
+          name: string;
+          role_name: string;
+          /** @description Optional role kind for creating an interactive role. */
+          kind?: string;
+          /** @description Custom or builtin prompt selector for interactive roles. */
+          prompt_file?: string;
+          auto?: boolean;
+          backend?: string;
+          fallback_backends?: string[];
+          repos?: string[];
+          repo_groups?: string[];
+          cross_repo?: boolean;
+          parent?: string;
+          desired_state?: string;
+        };
+      };
+    };
+    responses: {
+      /** @description Agent created */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["WorkspaceAgentInfo"];
+        };
+      };
+      /** @description Invalid agent create request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Agent already exists */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Agent service unavailable */
       503: {
         headers: {
           [name: string]: unknown;

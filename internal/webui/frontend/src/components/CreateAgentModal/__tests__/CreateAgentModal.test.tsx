@@ -24,8 +24,10 @@ import type { RepoInfo, WorkspaceAgentInfo } from "@/api/workspace";
 // useCreateWorkspaceAgent returns a function (request) => Promise<agent>.
 // Tests swap the function per case via mockCreateAgent.mockImplementation.
 const mockCreateAgent = vi.fn();
+const mockUseInteractivePrompts = vi.fn();
 vi.mock("@/hooks/agents", () => ({
   useCreateWorkspaceAgent: () => mockCreateAgent,
+  useInteractivePrompts: () => mockUseInteractivePrompts(),
 }));
 
 // ---------- Helpers ----------
@@ -62,6 +64,15 @@ function renderModal(
 
 beforeEach(() => {
   mockCreateAgent.mockReset();
+  mockUseInteractivePrompts.mockReset();
+  mockUseInteractivePrompts.mockReturnValue({
+    prompts: [
+      { id: "lead", label: "Lead" },
+      { id: "pr-review", label: "PR Review" },
+    ],
+    isLoading: false,
+    error: null,
+  });
 });
 
 // ---------- isOpen gate ----------
@@ -324,6 +335,51 @@ describe("CreateAgentModal: submission", () => {
     expect(mockCreateAgent.mock.calls[0][0]).toMatchObject({
       name: "lead-nova",
       role_name: "lead",
+    });
+  });
+
+  it("submits interactive agent with a built-in prompt", async () => {
+    mockCreateAgent.mockResolvedValueOnce(sampleAgent);
+    renderModal({ defaultName: "review-nova" });
+
+    fireEvent.click(screen.getByTestId("create-agent-template-interactive"));
+    expect(screen.getByLabelText(/built-in prompt/i)).toBeChecked();
+    const promptSelect = screen.getByTestId("create-agent-interactive-builtin");
+    expect(promptSelect).toHaveTextContent("Lead");
+    expect(promptSelect).toHaveTextContent("PR Review");
+    fireEvent.change(promptSelect, { target: { value: "pr-review" } });
+    fireEvent.click(screen.getByRole("button", { name: /create agent/i }));
+
+    await waitFor(() => expect(mockCreateAgent).toHaveBeenCalled());
+    expect(mockCreateAgent.mock.calls[0][0]).toMatchObject({
+      name: "review-nova",
+      role_name: "pr-review",
+      kind: "interactive",
+      prompt_file: "builtin:pr-review",
+      cross_repo: false,
+      repos: [],
+    });
+  });
+
+  it("submits interactive agent with a workspace prompt file", async () => {
+    mockCreateAgent.mockResolvedValueOnce(sampleAgent);
+    renderModal({ defaultName: "custom-review" });
+
+    fireEvent.click(screen.getByTestId("create-agent-template-interactive"));
+    fireEvent.click(screen.getByLabelText(/workspace file/i));
+    fireEvent.change(screen.getByTestId("create-agent-interactive-file"), {
+      target: { value: "prompts/review.md" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /create agent/i }));
+
+    await waitFor(() => expect(mockCreateAgent).toHaveBeenCalled());
+    expect(mockCreateAgent.mock.calls[0][0]).toMatchObject({
+      name: "custom-review",
+      role_name: "custom-review",
+      kind: "interactive",
+      prompt_file: "prompts/review.md",
+      cross_repo: false,
+      repos: [],
     });
   });
 

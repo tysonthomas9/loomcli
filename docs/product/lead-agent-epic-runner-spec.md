@@ -29,7 +29,7 @@ the right.
 
 | Decision | Product rule |
 |---|---|
-| Lead agent is first-class | A `LeadAgent` is represented by an agent row with `role_name=lead` or equivalent lead role metadata. |
+| Lead agent is first-class | A lead/interactive agent is represented by an agent row whose role has `kind=interactive` or, for legacy rows, role name `lead`/`orchestrator`. |
 | Lead is terminal-backed | The lead must have a resumable terminal/session because users interact with the lead through the terminal. |
 | Active epic uses existing field | `agent.parent = <epic_id>` is the active epic assignment for the lead. |
 | One epic per lead | A lead cannot run two different epics at the same time. |
@@ -110,7 +110,7 @@ The MVP should use existing shared fields where possible.
 ```text
 agent.workspace_key             workspace scope
 agent.name                      lead identity
-agent.role_name                 lead role
+agent.role_name                 interactive role (default: lead)
 agent.state                     idle | active | stopped
 agent.parent                    active epic id, or empty
 agent.orchestrator_session_id   resumable lead terminal/session id
@@ -704,8 +704,8 @@ Do not include in MVP:
 
 ## Open Implementation Notes
 
-- Decide whether lead role is a built-in role name (`lead`) or a role category
-  on top of existing custom roles.
+- RESOLVED: lead is a role `kind`, not only a built-in role name. Any role can
+  be `kind=interactive`; `lead` is the default interactive role.
 - Add `--lead` to `loom epic run` only if terminal env inference is not always
   available.
 - Ensure worker terminal session names are stable enough for clicking nested
