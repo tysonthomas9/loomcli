@@ -13,6 +13,9 @@ type rootedPlatform interface {
 	Stat(name string) (os.FileInfo, error)
 	List(name string) ([]os.DirEntry, error)
 	Read(name string, limit int64) ([]byte, os.FileInfo, bool, error)
+	ReadVersioned(name string, limit int64) ([]byte, os.FileInfo, bool, []byte, error)
+	Hash(name string) ([]byte, os.FileInfo, error)
+	Readlink(name string) (string, error)
 	WriteAtomic(name string, content []byte) error
 	MkdirAll(name string) error
 	Remove(name string, directory bool) error

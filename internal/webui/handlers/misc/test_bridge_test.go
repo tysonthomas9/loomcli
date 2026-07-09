@@ -320,6 +320,10 @@ func (s *testFileServiceImpl) ReadFileScoped(_ context.Context, wsID string, sco
 	return &service.FileReadResult{Path: cleanPath, Content: string(data), Size: fi.Size(), Truncated: truncated}, nil
 }
 
+func (s *testFileServiceImpl) StatPathScoped(_ context.Context, _ string, _ service.FileScope, _, _, _ string) (*service.FileStatResult, error) {
+	return &service.FileStatResult{}, nil
+}
+
 func (s *testFileServiceImpl) ReadFileAtRevScoped(_ context.Context, _ string, _ service.FileScope, _, _, _, _ string) (*service.FileReadResult, error) {
 	return &service.FileReadResult{}, nil
 }
@@ -377,12 +381,23 @@ func (s *testFileServiceImpl) WriteFileScoped(_ context.Context, wsID string, sc
 	return testWriteFileAt(root, path, content)
 }
 
+func (s *testFileServiceImpl) WriteFileConditionalScoped(ctx context.Context, wsID string, scope service.FileScope, target, repo, path, content string, _ service.FileWritePreconditions) (*service.FileMutationResult, error) {
+	if err := s.WriteFileScoped(ctx, wsID, scope, target, repo, path, content); err != nil {
+		return nil, err
+	}
+	return &service.FileMutationResult{Success: true, Version: "sha256:test"}, nil
+}
+
 func (s *testFileServiceImpl) DeletePathScoped(_ context.Context, wsID string, scope service.FileScope, target, repo, path string, recursive bool) error {
 	root, err := s.resolveScopeRootTest(wsID, scope, target, repo)
 	if err != nil {
 		return err
 	}
 	return testDeletePathAt(root, path, recursive)
+}
+
+func (s *testFileServiceImpl) DeletePathVersionedScoped(ctx context.Context, wsID string, scope service.FileScope, target, repo, path string, recursive bool, _ string) error {
+	return s.DeletePathScoped(ctx, wsID, scope, target, repo, path, recursive)
 }
 
 func (s *testFileServiceImpl) MkdirScoped(_ context.Context, wsID string, scope service.FileScope, target, repo, path string) error {
@@ -399,6 +414,13 @@ func (s *testFileServiceImpl) MovePathScoped(_ context.Context, wsID string, sco
 		return err
 	}
 	return testMovePathAt(root, from, to, overwrite)
+}
+
+func (s *testFileServiceImpl) MovePathVersionedScoped(ctx context.Context, wsID string, scope service.FileScope, target, repo, from, to string, overwrite bool, _, _ string) (*service.FileMutationResult, error) {
+	if err := s.MovePathScoped(ctx, wsID, scope, target, repo, from, to, overwrite); err != nil {
+		return nil, err
+	}
+	return &service.FileMutationResult{Success: true, Version: "sha256:test"}, nil
 }
 
 func testScopedFullPath(rootDir, path string, allowEmpty bool) (string, string, error) {
@@ -730,6 +752,9 @@ func (s *stubFileService) ListDirectoryScoped(_ context.Context, _ string, _ ser
 func (s *stubFileService) ReadFileScoped(_ context.Context, _ string, _ service.FileScope, _, _, _ string) (*service.FileReadResult, error) {
 	return &service.FileReadResult{}, nil
 }
+func (s *stubFileService) StatPathScoped(_ context.Context, _ string, _ service.FileScope, _, _, _ string) (*service.FileStatResult, error) {
+	return &service.FileStatResult{}, nil
+}
 func (s *stubFileService) ReadFileAtRevScoped(_ context.Context, _ string, _ service.FileScope, _, _, _, _ string) (*service.FileReadResult, error) {
 	return &service.FileReadResult{}, nil
 }
@@ -760,7 +785,13 @@ func (s *stubFileService) HistoryFileScoped(_ context.Context, _ string, _ servi
 func (s *stubFileService) WriteFileScoped(_ context.Context, _ string, _ service.FileScope, _, _, _, _ string) error {
 	return nil
 }
+func (s *stubFileService) WriteFileConditionalScoped(_ context.Context, _ string, _ service.FileScope, _, _, _, _ string, _ service.FileWritePreconditions) (*service.FileMutationResult, error) {
+	return &service.FileMutationResult{Success: true}, nil
+}
 func (s *stubFileService) DeletePathScoped(_ context.Context, _ string, _ service.FileScope, _, _, _ string, _ bool) error {
+	return nil
+}
+func (s *stubFileService) DeletePathVersionedScoped(_ context.Context, _ string, _ service.FileScope, _, _, _ string, _ bool, _ string) error {
 	return nil
 }
 func (s *stubFileService) MkdirScoped(_ context.Context, _ string, _ service.FileScope, _, _, _ string) error {
@@ -768,6 +799,9 @@ func (s *stubFileService) MkdirScoped(_ context.Context, _ string, _ service.Fil
 }
 func (s *stubFileService) MovePathScoped(_ context.Context, _ string, _ service.FileScope, _, _, _, _ string, _ bool) error {
 	return nil
+}
+func (s *stubFileService) MovePathVersionedScoped(_ context.Context, _ string, _ service.FileScope, _, _, _, _ string, _ bool, _, _ string) (*service.FileMutationResult, error) {
+	return &service.FileMutationResult{Success: true}, nil
 }
 
 // ---------------------------------------------------------------------------

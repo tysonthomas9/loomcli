@@ -107,7 +107,6 @@ func HandleFileTree(svc service.FileService) http.HandlerFunc {
 			handler.HandleServiceError(w, err)
 			return
 		}
-
 		handler.WriteJSON(w, http.StatusOK, result)
 	}
 }
@@ -125,7 +124,9 @@ func HandleFileRead(svc service.FileService) http.HandlerFunc {
 			handler.HandleServiceError(w, err)
 			return
 		}
-
+		if result.Version != "" {
+			w.Header().Set("ETag", quotedETag(result.Version))
+		}
 		handler.WriteJSON(w, http.StatusOK, result)
 	}
 }
@@ -150,6 +151,25 @@ func repoFromQueryAndBody(queryRepo, bodyRepo string) (string, error) {
 		return bodyRepo, nil
 	}
 	return queryRepo, nil
+}
+
+func parseStrongETag(value string) (string, error) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return "", nil
+	}
+	if strings.Contains(value, ",") || strings.HasPrefix(value, "W/") || len(value) < 2 || value[0] != '"' || value[len(value)-1] != '"' {
+		return "", service.ErrValidation("precondition must contain one strong quoted ETag")
+	}
+	value = value[1 : len(value)-1]
+	if value == "" || strings.ContainsAny(value, "\r\n\"") {
+		return "", service.ErrValidation("invalid ETag precondition")
+	}
+	return value, nil
+}
+
+func quotedETag(version string) string {
+	return `"` + version + `"`
 }
 
 func decodeOptionalJSONBody(w http.ResponseWriter, r *http.Request, dst any) bool {
@@ -200,6 +220,21 @@ func HandleScopedFileTree(svc service.FileService) http.HandlerFunc {
 	}
 }
 
+// HandleScopedFileStat handles GET /api/workspaces/{ws}/files/stat?scope=&target=&path=.
+func HandleScopedFileStat(svc service.FileService) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		wsID := middleware.WorkspaceFromContext(r.Context())
+		scope, target, repo := scopeFromQuery(r)
+		result, err := svc.StatPathScoped(r.Context(), wsID, scope, target, repo, r.URL.Query().Get("path"))
+		if err != nil {
+			handler.HandleServiceError(w, err)
+			return
+		}
+		w.Header().Set("ETag", quotedETag(result.Version))
+		handler.WriteJSON(w, http.StatusOK, result)
+	}
+}
+
 // HandleScopedFileRead handles GET /api/workspaces/{ws}/files?scope=&target=&path=.
 func HandleScopedFileRead(svc service.FileService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -218,6 +253,9 @@ func HandleScopedFileRead(svc service.FileService) http.HandlerFunc {
 		if err != nil {
 			handler.HandleServiceError(w, err)
 			return
+		}
+		if strings.TrimSpace(rev) == "" && result.Version != "" {
+			w.Header().Set("ETag", quotedETag(result.Version))
 		}
 		handler.WriteJSON(w, http.StatusOK, result)
 	}
@@ -420,12 +458,24 @@ func HandleFileWrite(svc service.FileService) http.HandlerFunc {
 			handler.HandleServiceError(w, err)
 			return
 		}
-		if err := svc.WriteFileScoped(r.Context(), wsID, service.ScopeAgent, agentName, repo, reqPath, req.Content); err != nil {
+		ifMatch, err := parseStrongETag(r.Header.Get("If-Match"))
+		if err != nil {
+			handler.HandleServiceError(w, err)
+			return
+		}
+		ifNoneMatch := strings.TrimSpace(r.Header.Get("If-None-Match"))
+		if ifNoneMatch != "" && ifNoneMatch != "*" {
+			handler.HandleServiceError(w, service.ErrValidation("If-None-Match only supports *"))
+			return
+		}
+		result, err := svc.WriteFileConditionalScoped(r.Context(), wsID, service.ScopeAgent, agentName, repo, reqPath, req.Content, service.FileWritePreconditions{IfMatch: ifMatch, IfNoneMatch: ifNoneMatch == "*"})
+		if err != nil {
 			handler.HandleServiceError(w, err)
 			return
 		}
 
-		handler.WriteJSON(w, http.StatusOK, map[string]bool{"success": true})
+		w.Header().Set("ETag", quotedETag(result.Version))
+		handler.WriteJSON(w, http.StatusOK, result)
 	}
 }
 
@@ -456,11 +506,23 @@ func HandleScopedFileWrite(svc service.FileService) http.HandlerFunc {
 			handler.HandleServiceError(w, err)
 			return
 		}
-		if err := svc.WriteFileScoped(r.Context(), wsID, scope, target, repo, reqPath, req.Content); err != nil {
+		ifMatch, err := parseStrongETag(r.Header.Get("If-Match"))
+		if err != nil {
 			handler.HandleServiceError(w, err)
 			return
 		}
-		handler.WriteJSON(w, http.StatusOK, map[string]bool{"success": true})
+		ifNoneMatch := strings.TrimSpace(r.Header.Get("If-None-Match"))
+		if ifNoneMatch != "" && ifNoneMatch != "*" {
+			handler.HandleServiceError(w, service.ErrValidation("If-None-Match only supports *"))
+			return
+		}
+		result, err := svc.WriteFileConditionalScoped(r.Context(), wsID, scope, target, repo, reqPath, req.Content, service.FileWritePreconditions{IfMatch: ifMatch, IfNoneMatch: ifNoneMatch == "*"})
+		if err != nil {
+			handler.HandleServiceError(w, err)
+			return
+		}
+		w.Header().Set("ETag", quotedETag(result.Version))
+		handler.WriteJSON(w, http.StatusOK, result)
 	}
 }
 
@@ -472,7 +534,12 @@ func HandleScopedFileDelete(svc service.FileService) http.HandlerFunc {
 		reqPath := r.URL.Query().Get("path")
 		recursive := r.URL.Query().Get("recursive") == "1" || r.URL.Query().Get("recursive") == "true"
 
-		if err := svc.DeletePathScoped(r.Context(), wsID, scope, target, repo, reqPath, recursive); err != nil {
+		version, err := parseStrongETag(r.Header.Get("If-Match"))
+		if err != nil {
+			handler.HandleServiceError(w, err)
+			return
+		}
+		if err := svc.DeletePathVersionedScoped(r.Context(), wsID, scope, target, repo, reqPath, recursive, version); err != nil {
 			handler.HandleServiceError(w, err)
 			return
 		}
@@ -530,10 +597,12 @@ func HandleScopedFileMove(svc service.FileService) http.HandlerFunc {
 			handler.HandleServiceError(w, err)
 			return
 		}
-		if err := svc.MovePathScoped(r.Context(), wsID, scope, target, repo, req.From, req.To, req.Overwrite); err != nil {
+		result, err := svc.MovePathVersionedScoped(r.Context(), wsID, scope, target, repo, req.From, req.To, req.Overwrite, req.SourceVersion, req.DestinationVersion)
+		if err != nil {
 			handler.HandleServiceError(w, err)
 			return
 		}
-		handler.WriteJSON(w, http.StatusOK, map[string]bool{"success": true})
+		w.Header().Set("ETag", quotedETag(result.Version))
+		handler.WriteJSON(w, http.StatusOK, result)
 	}
 }

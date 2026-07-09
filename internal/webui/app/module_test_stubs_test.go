@@ -110,6 +110,9 @@ func (s *stubFileService) ListDirectoryScoped(_ context.Context, _ string, _ ser
 func (s *stubFileService) ReadFileScoped(_ context.Context, _ string, _ service.FileScope, _, _, _ string) (*service.FileReadResult, error) {
 	return &service.FileReadResult{}, nil
 }
+func (s *stubFileService) StatPathScoped(_ context.Context, _ string, _ service.FileScope, _, _, _ string) (*service.FileStatResult, error) {
+	return &service.FileStatResult{}, nil
+}
 func (s *stubFileService) ReadFileAtRevScoped(_ context.Context, _ string, _ service.FileScope, _, _, _, _ string) (*service.FileReadResult, error) {
 	return &service.FileReadResult{}, nil
 }
@@ -140,7 +143,13 @@ func (s *stubFileService) HistoryFileScoped(_ context.Context, _ string, _ servi
 func (s *stubFileService) WriteFileScoped(_ context.Context, _ string, _ service.FileScope, _, _, _, _ string) error {
 	return nil
 }
+func (s *stubFileService) WriteFileConditionalScoped(_ context.Context, _ string, _ service.FileScope, _, _, _, _ string, _ service.FileWritePreconditions) (*service.FileMutationResult, error) {
+	return &service.FileMutationResult{Success: true}, nil
+}
 func (s *stubFileService) DeletePathScoped(_ context.Context, _ string, _ service.FileScope, _, _, _ string, _ bool) error {
+	return nil
+}
+func (s *stubFileService) DeletePathVersionedScoped(_ context.Context, _ string, _ service.FileScope, _, _, _ string, _ bool, _ string) error {
 	return nil
 }
 func (s *stubFileService) MkdirScoped(_ context.Context, _ string, _ service.FileScope, _, _, _ string) error {
@@ -148,4 +157,7 @@ func (s *stubFileService) MkdirScoped(_ context.Context, _ string, _ service.Fil
 }
 func (s *stubFileService) MovePathScoped(_ context.Context, _ string, _ service.FileScope, _, _, _, _ string, _ bool) error {
 	return nil
+}
+func (s *stubFileService) MovePathVersionedScoped(_ context.Context, _ string, _ service.FileScope, _, _, _, _ string, _ bool, _, _ string) (*service.FileMutationResult, error) {
+	return &service.FileMutationResult{Success: true}, nil
 }

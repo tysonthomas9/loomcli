@@ -48,6 +48,7 @@ func (m *Module) Register(mux *http.ServeMux) {
 	handle("GET /api/workspaces/{ws}/files/history", HandleScopedFileHistory(m.fileSvc))
 	handle("GET /api/workspaces/{ws}/files/blame", HandleScopedFileBlame(m.fileSvc))
 	handle("GET /api/workspaces/{ws}/files", HandleScopedFileRead(m.fileSvc))
+	handle("GET /api/workspaces/{ws}/files/stat", HandleScopedFileStat(m.fileSvc))
 	handle("PUT /api/workspaces/{ws}/files", HandleScopedFileWrite(m.fileSvc))
 	handle("DELETE /api/workspaces/{ws}/files", HandleScopedFileDelete(m.fileSvc))
 	handle("POST /api/workspaces/{ws}/files/mkdir", HandleScopedFileMkdir(m.fileSvc))

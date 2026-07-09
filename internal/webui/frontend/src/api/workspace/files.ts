@@ -27,6 +27,25 @@ export interface FileReadData {
   size: number;
   binary: boolean;
   truncated?: boolean;
+  version: string;
+}
+
+export interface FileStatData {
+  path: string;
+  is_dir: boolean;
+  size: number;
+  mod_time: string;
+  version: string;
+}
+
+export interface FileMutationData {
+  success: boolean;
+  version: string;
+}
+
+export interface FileWritePreconditions {
+  ifMatch?: string;
+  createOnly?: boolean;
 }
 
 export interface FileIndexData {
@@ -271,6 +290,17 @@ export async function readScopedFile(
   );
 }
 
+/** Get the strong mutation version for a file or bounded directory manifest. */
+export async function statScopedPath(
+  workspaceId: string,
+  scopeRef: FileScopeRef,
+  path: string,
+): Promise<FileStatData> {
+  return get<FileStatData>(
+    scopedUrl(workspaceId, "/files/stat", scopeRef, path),
+  );
+}
+
 /**
  * Fetch the quick-open file index for any scoped file browser root.
  * GET /api/workspaces/{ws}/files/index?scope=&target=
@@ -396,10 +426,15 @@ export async function writeScopedFile(
   scopeRef: FileScopeRef,
   path: string,
   content: string,
-): Promise<void> {
-  await put<ApiSuccess>(scopedUrl(workspaceId, "/files", scopeRef, path), {
-    content,
-  });
+  preconditions: FileWritePreconditions = {},
+): Promise<FileMutationData> {
+  const headers: Record<string, string> = {};
+  if (preconditions.ifMatch) headers["If-Match"] = `"${preconditions.ifMatch}"`;
+  if (preconditions.createOnly) headers["If-None-Match"] = "*";
+  const url = scopedUrl(workspaceId, "/files", scopeRef, path);
+  return Object.keys(headers).length > 0
+    ? put<FileMutationData>(url, { content }, { headers })
+    : put<FileMutationData>(url, { content });
 }
 
 /**
@@ -411,16 +446,22 @@ export async function deleteScopedPath(
   scopeRef: FileScopeRef,
   path: string,
   recursive = false,
+  version?: string,
 ): Promise<void> {
-  await del<ApiSuccess>(
-    scopedUrl(
-      workspaceId,
-      "/files",
-      scopeRef,
-      path,
-      recursive ? { recursive: 1 } : undefined,
-    ),
+  const url = scopedUrl(
+    workspaceId,
+    "/files",
+    scopeRef,
+    path,
+    recursive ? { recursive: 1 } : undefined,
   );
+  if (version) {
+    await del<ApiSuccess>(url, {
+      headers: { "If-Match": `"${version}"` },
+    });
+  } else {
+    await del<ApiSuccess>(url);
+  }
 }
 
 /**
@@ -448,10 +489,14 @@ export async function moveScopedPath(
   from: string,
   to: string,
   overwrite = false,
+  sourceVersion?: string,
+  destinationVersion?: string,
 ): Promise<void> {
   await patch<ApiSuccess>(scopedUrl(workspaceId, "/files/move", scopeRef), {
     from,
     to,
     overwrite,
+    ...(sourceVersion ? { source_version: sourceVersion } : {}),
+    ...(destinationVersion ? { destination_version: destinationVersion } : {}),
   });
 }

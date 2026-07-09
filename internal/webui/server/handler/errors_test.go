@@ -315,6 +315,8 @@ func TestStatusForKind(t *testing.T) {
 		{service.KindBadGateway, http.StatusBadGateway},
 		{service.KindNotImplemented, http.StatusNotImplemented},
 		{service.KindStarting, http.StatusServiceUnavailable},
+		{service.KindPreconditionFailed, http.StatusPreconditionFailed},
+		{service.KindPreconditionRequired, http.StatusPreconditionRequired},
 	}
 	for _, tt := range tests {
 		t.Run(string(tt.kind), func(t *testing.T) {
@@ -333,7 +335,7 @@ func TestStatusForKind_UnknownKind(t *testing.T) {
 }
 
 func TestKindToStatus_Completeness(t *testing.T) {
-	// All 14 ErrorKind constants defined in service/errors.go.
+	// All ErrorKind constants defined in service/errors.go.
 	allKinds := []service.ErrorKind{
 		service.KindNotFound,
 		service.KindValidation,
@@ -349,6 +351,8 @@ func TestKindToStatus_Completeness(t *testing.T) {
 		service.KindBadGateway,
 		service.KindNotImplemented,
 		service.KindStarting,
+		service.KindPreconditionFailed,
+		service.KindPreconditionRequired,
 	}
 
 	for _, kind := range allKinds {

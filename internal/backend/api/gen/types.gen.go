@@ -1118,21 +1118,42 @@ func (e SearchScopedFilesParamsScope) Valid() bool {
 	}
 }
 
+// Defines values for StatScopedFileParamsScope.
+const (
+	StatScopedFileParamsScopeAgent     StatScopedFileParamsScope = "agent"
+	StatScopedFileParamsScopeRepo      StatScopedFileParamsScope = "repo"
+	StatScopedFileParamsScopeWorkspace StatScopedFileParamsScope = "workspace"
+)
+
+// Valid indicates whether the value is a known member of the StatScopedFileParamsScope enum.
+func (e StatScopedFileParamsScope) Valid() bool {
+	switch e {
+	case StatScopedFileParamsScopeAgent:
+		return true
+	case StatScopedFileParamsScopeRepo:
+		return true
+	case StatScopedFileParamsScopeWorkspace:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for GetScopedFileTreeParamsScope.
 const (
-	GetScopedFileTreeParamsScopeAgent     GetScopedFileTreeParamsScope = "agent"
-	GetScopedFileTreeParamsScopeRepo      GetScopedFileTreeParamsScope = "repo"
-	GetScopedFileTreeParamsScopeWorkspace GetScopedFileTreeParamsScope = "workspace"
+	Agent     GetScopedFileTreeParamsScope = "agent"
+	Repo      GetScopedFileTreeParamsScope = "repo"
+	Workspace GetScopedFileTreeParamsScope = "workspace"
 )
 
 // Valid indicates whether the value is a known member of the GetScopedFileTreeParamsScope enum.
 func (e GetScopedFileTreeParamsScope) Valid() bool {
 	switch e {
-	case GetScopedFileTreeParamsScopeAgent:
+	case Agent:
 		return true
-	case GetScopedFileTreeParamsScopeRepo:
+	case Repo:
 		return true
-	case GetScopedFileTreeParamsScopeWorkspace:
+	case Workspace:
 		return true
 	default:
 		return false
@@ -1640,12 +1661,23 @@ type FileIndexResponse struct {
 
 // FileMoveRequest defines model for FileMoveRequest.
 type FileMoveRequest struct {
-	From      string `json:"from"`
-	Overwrite *bool  `json:"overwrite,omitempty"`
+	// DestinationVersion Required when overwriting an existing regular file.
+	DestinationVersion *string `json:"destination_version,omitempty"`
+	From               string  `json:"from"`
+	Overwrite          *bool   `json:"overwrite,omitempty"`
 
 	// Repo Optional repo qualifier, valid only when scope=agent.
 	Repo *string `json:"repo,omitempty"`
-	To   string  `json:"to"`
+
+	// SourceVersion Required by the server; current strong version of the source path.
+	SourceVersion *string `json:"source_version,omitempty"`
+	To            string  `json:"to"`
+}
+
+// FileMutationResponse defines model for FileMutationResponse.
+type FileMutationResponse struct {
+	Success bool   `json:"success"`
+	Version string `json:"version"`
 }
 
 // FileReadResponse defines model for FileReadResponse.
@@ -1655,6 +1687,7 @@ type FileReadResponse struct {
 	Path      string  `json:"path"`
 	Size      int64   `json:"size"`
 	Truncated bool    `json:"truncated"`
+	Version   string  `json:"version"`
 }
 
 // FileRepoQualifierRequest defines model for FileRepoQualifierRequest.
@@ -1692,6 +1725,15 @@ type FileSearchRequest struct {
 type FileSearchResponse struct {
 	LimitHit bool                   `json:"limitHit"`
 	Results  []FileSearchFileResult `json:"results"`
+}
+
+// FileStatResponse defines model for FileStatResponse.
+type FileStatResponse struct {
+	IsDir   bool      `json:"is_dir"`
+	ModTime time.Time `json:"mod_time"`
+	Path    string    `json:"path"`
+	Size    int64     `json:"size"`
+	Version string    `json:"version"`
 }
 
 // FileTreeEntry defines model for FileTreeEntry.
@@ -2630,7 +2672,11 @@ type ReadFileParams struct {
 
 // WriteFileParams defines parameters for WriteFile.
 type WriteFileParams struct {
-	Path string `form:"path" json:"path"`
+	Path    string  `form:"path" json:"path"`
+	IfMatch *string `json:"If-Match,omitempty"`
+
+	// IfNoneMatch Use * for create-only writes.
+	IfNoneMatch *string `json:"If-None-Match,omitempty"`
 }
 
 // GitPullJSONBody defines parameters for GitPull.
@@ -2696,6 +2742,9 @@ type DeleteScopedFileParams struct {
 	Repo      *string `form:"repo,omitempty" json:"repo,omitempty"`
 	Path      string  `form:"path" json:"path"`
 	Recursive *bool   `form:"recursive,omitempty" json:"recursive,omitempty"`
+
+	// IfMatch Strong current source version from file stat/read.
+	IfMatch string `json:"If-Match"`
 }
 
 // DeleteScopedFileParamsScope defines parameters for DeleteScopedFile.
@@ -2720,6 +2769,12 @@ type WriteScopedFileParams struct {
 	Scope  *WriteScopedFileParamsScope `form:"scope,omitempty" json:"scope,omitempty"`
 	Target *string                     `form:"target,omitempty" json:"target,omitempty"`
 	Path   string                      `form:"path" json:"path"`
+
+	// IfMatch Optional strong version for replace/restore callers. Ordinary editor saves omit it and remain last-write-wins.
+	IfMatch *string `json:"If-Match,omitempty"`
+
+	// IfNoneMatch Use * for create-only writes.
+	IfNoneMatch *string `json:"If-None-Match,omitempty"`
 }
 
 // WriteScopedFileParamsScope defines parameters for WriteScopedFile.
@@ -2820,6 +2875,17 @@ type SearchScopedFilesParams struct {
 
 // SearchScopedFilesParamsScope defines parameters for SearchScopedFiles.
 type SearchScopedFilesParamsScope string
+
+// StatScopedFileParams defines parameters for StatScopedFile.
+type StatScopedFileParams struct {
+	Scope  *StatScopedFileParamsScope `form:"scope,omitempty" json:"scope,omitempty"`
+	Target *string                    `form:"target,omitempty" json:"target,omitempty"`
+	Repo   *string                    `form:"repo,omitempty" json:"repo,omitempty"`
+	Path   string                     `form:"path" json:"path"`
+}
+
+// StatScopedFileParamsScope defines parameters for StatScopedFile.
+type StatScopedFileParamsScope string
 
 // GetScopedFileTreeParams defines parameters for GetScopedFileTree.
 type GetScopedFileTreeParams struct {
