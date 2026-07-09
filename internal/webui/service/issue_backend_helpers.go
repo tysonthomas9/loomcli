@@ -318,10 +318,41 @@ func commentDataToTypesComment(d *backend.CommentData) *types.Comment {
 func eventDataToTypesEvent(d backend.EventData) *types.Event {
 	id, _ := strconv.ParseInt(d.ID, 10, 64)
 	return &types.Event{
-		ID:        id,
-		IssueID:   d.IssueID,
-		EventType: types.EventType(d.Kind),
-		Actor:     d.Actor,
-		CreatedAt: d.CreatedAt,
+		ID:         id,
+		IssueID:    d.IssueID,
+		EventType:  normalizeEventKind(d.Kind),
+		Actor:      d.Actor,
+		Field:      d.Field,
+		Fields:     append([]string(nil), d.Fields...),
+		FieldCount: d.FieldCount,
+		OldValue:   d.OldValue,
+		NewValue:   d.NewValue,
+		Comment:    d.Comment,
+		CreatedAt:  d.CreatedAt,
 	}
+}
+
+var fleetEventKindMap = map[string]types.EventType{
+	"issue.create":  types.EventCreated,
+	"issue.update":  types.EventUpdated,
+	"issue.close":   types.EventClosed,
+	"issue.reopen":  types.EventReopened,
+	"issue.delete":  types.EventDeleted,
+	"issue.claim":   types.EventClaimed,
+	"issue.release": types.EventReleased,
+	"issue.assign":  types.EventAssigned,
+	"issue.defer":   types.EventDeferred,
+	"issue.undefer": types.EventUndeferred,
+	"dep.add":       types.EventDependencyAdded,
+	"dep.remove":    types.EventDependencyRemoved,
+	"label.add":     types.EventLabelAdded,
+	"label.remove":  types.EventLabelRemoved,
+	"comment.add":   types.EventCommented,
+}
+
+func normalizeEventKind(kind string) types.EventType {
+	if normalized, ok := fleetEventKindMap[kind]; ok {
+		return normalized
+	}
+	return types.EventType(kind)
 }

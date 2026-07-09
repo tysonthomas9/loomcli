@@ -474,6 +474,42 @@ func TestHandleCreateIssueW_WithParent(t *testing.T) {
 	}
 }
 
+func TestHandleCreateIssue_ReemitsIdempotencyHeadersAndForwardsForce(t *testing.T) {
+	forceSeen := false
+	svc := &mockIssueService{
+		createIssueResultFunc: func(ctx context.Context, params service.CreateIssueParams) (*service.CreateIssueResult, error) {
+			forceSeen = params.Force
+			return &service.CreateIssueResult{
+				Data:                json.RawMessage(`{"id":"dup-1","title":"Duplicate"}`),
+				IdempotencyWarning:  "soft-duplicate",
+				IdempotencyReplayed: true,
+			}, nil
+		},
+	}
+	handler := handleCreateIssue(svc)
+
+	body := `{"title":"Duplicate","issue_type":"task","priority":2}`
+	req := httptest.NewRequest(http.MethodPost, "/api/issues", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Idempotency-Force", "true")
+	w := httptest.NewRecorder()
+
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want %d", w.Code, http.StatusCreated)
+	}
+	if !forceSeen {
+		t.Fatalf("CreateIssue() Force = false, want true")
+	}
+	if got := w.Header().Get("X-Idempotency-Warning"); got != "soft-duplicate" {
+		t.Fatalf("X-Idempotency-Warning = %q, want soft-duplicate", got)
+	}
+	if got := w.Header().Get("X-Idempotency-Replayed"); got != "true" {
+		t.Fatalf("X-Idempotency-Replayed = %q, want true", got)
+	}
+}
+
 func TestHandleCreateIssueW_WithStatus(t *testing.T) {
 	svc := &mockIssueService{
 		createIssueFunc: func(ctx context.Context, params service.CreateIssueParams) (json.RawMessage, error) {

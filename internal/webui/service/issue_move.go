@@ -153,11 +153,12 @@ func (s *issueServiceImpl) moveIssueViaBackend(ctx context.Context, params MoveI
 		slog.Error("backend create error in MoveIssue", "source_issue_id", params.IssueID, "target_workspace", params.TargetWorkspace, "err", err)
 		return nil, translateBackendError(err)
 	}
-	if created == nil || created.ID == "" {
+	if created == nil || created.Issue.ID == "" {
 		return nil, ErrInternal("issue created but backend returned no issue ID", nil)
 	}
+	createdIssue := created.Issue
 
-	commentText := fmt.Sprintf("Moved to %s in workspace %q", created.ID, params.TargetWorkspace)
+	commentText := fmt.Sprintf("Moved to %s in workspace %q", createdIssue.ID, params.TargetWorkspace)
 	if _, commentErr := sourceBackend.AddComment(ctx, backend.CommentAddParams{
 		IssueID: params.IssueID,
 		Author:  "web-ui",
@@ -168,7 +169,7 @@ func (s *issueServiceImpl) moveIssueViaBackend(ctx context.Context, params MoveI
 	}
 
 	if _, closeErr := sourceBackend.Close(ctx, params.IssueID, backend.CloseParams{
-		Reason: fmt.Sprintf("Moved to %s", created.ID),
+		Reason: fmt.Sprintf("Moved to %s", createdIssue.ID),
 		Force:  true,
 	}); closeErr != nil {
 		slog.Error("failed to close source", "issue_id", params.IssueID, "err", closeErr)
@@ -177,7 +178,7 @@ func (s *issueServiceImpl) moveIssueViaBackend(ctx context.Context, params MoveI
 
 	return &MoveIssueResult{
 		SourceID: params.IssueID,
-		TargetID: created.ID,
+		TargetID: createdIssue.ID,
 		Warnings: warnings,
 	}, nil
 }

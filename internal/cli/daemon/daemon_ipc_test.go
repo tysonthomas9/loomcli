@@ -117,7 +117,7 @@ func (m *mockIPCBackend) GetChildren(context.Context, string) ([]backend.IssueDa
 func (m *mockIPCBackend) SearchIssues(context.Context, string, int) ([]backend.IssueData, error) {
 	panic("not implemented")
 }
-func (m *mockIPCBackend) Create(context.Context, backend.CreateParams) (*backend.IssueData, error) {
+func (m *mockIPCBackend) Create(context.Context, backend.CreateParams) (*backend.CreateResult, error) {
 	panic("not implemented")
 }
 func (m *mockIPCBackend) Reopen(context.Context, string, backend.ReopenParams) error {

@@ -408,6 +408,8 @@ func NewServer(ctx context.Context, config webui.ServerConfig) (_ *Server, retEr
 		AddReposFn: config.WorkspaceAddReposFn,
 		DeleteFn:   app.wrappedDeleteFn,
 		JobStore:   app.jobStore,
+
+		LocalSettingsDir: config.LocalSettingsDir,
 	})
 
 	// Generate and persist notify token for session change endpoint auth.

@@ -27,6 +27,9 @@ func (m *mockWorkspaceService) CreateWorkspace(_ context.Context, _ service.Work
 func (m *mockWorkspaceService) AddWorkspaceRepos(_ context.Context, _ service.WorkspaceAddReposRequest) (*ops.WorkspaceData, error) {
 	return nil, service.ErrUnavailable("not available")
 }
+func (m *mockWorkspaceService) RemoveWorkspaceRepo(_ context.Context, _ service.WorkspaceRemoveRepoRequest) (*ops.WorkspaceData, error) {
+	return nil, service.ErrUnavailable("not available")
+}
 func (m *mockWorkspaceService) StartAsyncCreate(_ context.Context, _ service.WorkspaceCreateRequest) (string, error) {
 	return "", service.ErrUnavailable("not available")
 }

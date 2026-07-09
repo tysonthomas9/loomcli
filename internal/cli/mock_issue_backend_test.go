@@ -68,7 +68,7 @@ type MockIssueBackend struct {
 	// Create
 	CreateResult *backend.IssueData
 	CreateErr    error
-	CreateFn     func(ctx context.Context, params backend.CreateParams) (*backend.IssueData, error)
+	CreateFn     func(ctx context.Context, params backend.CreateParams) (*backend.CreateResult, error)
 
 	// Update
 	UpdateErr error
@@ -273,7 +273,7 @@ func (m *MockIssueBackend) SearchIssues(ctx context.Context, query string, limit
 }
 
 // Create implements backend.IssueBackend.
-func (m *MockIssueBackend) Create(ctx context.Context, params backend.CreateParams) (*backend.IssueData, error) {
+func (m *MockIssueBackend) Create(ctx context.Context, params backend.CreateParams) (*backend.CreateResult, error) {
 	m.mu.Lock()
 	m.record("Create", params)
 	fn := m.CreateFn
@@ -282,7 +282,10 @@ func (m *MockIssueBackend) Create(ctx context.Context, params backend.CreatePara
 	if fn != nil {
 		return fn(ctx, params)
 	}
-	return result, resultErr
+	if result == nil || resultErr != nil {
+		return nil, resultErr
+	}
+	return &backend.CreateResult{Issue: *result}, nil
 }
 
 // Update implements backend.IssueBackend.

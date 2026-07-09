@@ -373,8 +373,8 @@ func (b *fleetDBIssueBackend) SearchIssues(ctx context.Context, query string, li
 	return out, err
 }
 
-func (b *fleetDBIssueBackend) Create(ctx context.Context, params backend.CreateParams) (*backend.IssueData, error) {
-	var out *backend.IssueData
+func (b *fleetDBIssueBackend) Create(ctx context.Context, params backend.CreateParams) (*backend.CreateResult, error) {
+	var out *backend.CreateResult
 	err := b.withBackend(ctx, "Create", func(ib backend.IssueBackend) error {
 		var err error
 		out, err = ib.Create(ctx, params)
@@ -600,7 +600,7 @@ func (b *unavailableIssueBackend) GetChildren(context.Context, string) ([]backen
 func (b *unavailableIssueBackend) SearchIssues(context.Context, string, int) ([]backend.IssueData, error) {
 	return nil, b.unavailable("SearchIssues")
 }
-func (b *unavailableIssueBackend) Create(context.Context, backend.CreateParams) (*backend.IssueData, error) {
+func (b *unavailableIssueBackend) Create(context.Context, backend.CreateParams) (*backend.CreateResult, error) {
 	return nil, b.unavailable("Create")
 }
 func (b *unavailableIssueBackend) Update(context.Context, string, backend.UpdateParams) error {

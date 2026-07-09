@@ -102,7 +102,7 @@ func (f *fakeBackend) GetChildren(ctx context.Context, id string) ([]backend.Iss
 func (f *fakeBackend) SearchIssues(ctx context.Context, query string, limit int) ([]backend.IssueData, error) {
 	return nil, errors.New("not implemented")
 }
-func (f *fakeBackend) Create(ctx context.Context, params backend.CreateParams) (*backend.IssueData, error) {
+func (f *fakeBackend) Create(ctx context.Context, params backend.CreateParams) (*backend.CreateResult, error) {
 	return nil, errors.New("not implemented")
 }
 func (f *fakeBackend) Update(ctx context.Context, id string, params backend.UpdateParams) error {

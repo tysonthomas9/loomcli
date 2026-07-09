@@ -332,11 +332,17 @@ func commentToData(c *types.Comment) backend.CommentData {
 // eventToData converts types.Event to backend.EventData.
 func eventToData(e *types.Event) backend.EventData {
 	return backend.EventData{
-		ID:        strconv.FormatInt(e.ID, 10),
-		IssueID:   e.IssueID,
-		Kind:      string(e.EventType),
-		Actor:     e.Actor,
-		CreatedAt: e.CreatedAt,
+		ID:         strconv.FormatInt(e.ID, 10),
+		IssueID:    e.IssueID,
+		Kind:       string(e.EventType),
+		Actor:      e.Actor,
+		Field:      e.Field,
+		Fields:     append([]string(nil), e.Fields...),
+		FieldCount: e.FieldCount,
+		OldValue:   e.OldValue,
+		NewValue:   e.NewValue,
+		Comment:    e.Comment,
+		CreatedAt:  e.CreatedAt,
 	}
 }
 

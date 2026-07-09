@@ -1226,14 +1226,17 @@ type IssueStatus string
 
 // IssueEvent Audit trail entry for an issue
 type IssueEvent struct {
-	Actor     string    `json:"actor"`
-	Comment   *string   `json:"comment,omitempty"`
-	CreatedAt time.Time `json:"created_at"`
-	EventType string    `json:"event_type"`
-	Id        int64     `json:"id"`
-	IssueId   string    `json:"issue_id"`
-	NewValue  *string   `json:"new_value,omitempty"`
-	OldValue  *string   `json:"old_value,omitempty"`
+	Actor      string    `json:"actor"`
+	Comment    *string   `json:"comment,omitempty"`
+	CreatedAt  time.Time `json:"created_at"`
+	EventType  string    `json:"event_type"`
+	Field      *string   `json:"field,omitempty"`
+	FieldCount *int      `json:"field_count,omitempty"`
+	Fields     *[]string `json:"fields,omitempty"`
+	Id         int64     `json:"id"`
+	IssueId    string    `json:"issue_id"`
+	NewValue   *string   `json:"new_value,omitempty"`
+	OldValue   *string   `json:"old_value,omitempty"`
 }
 
 // IssueResponse Full issue detail returned by get-single-issue endpoint. Includes dependency/dependent refs, comments, and counts.

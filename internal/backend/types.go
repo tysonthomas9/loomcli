@@ -57,6 +57,15 @@ type IssueData struct {
 	BlockedBy      []string `json:"blocked_by,omitempty"`
 }
 
+// CreateResult carries the created issue plus transport metadata from
+// idempotent create handling. Backends that do not support idempotency return
+// the issue with empty metadata.
+type CreateResult struct {
+	Issue              IssueData
+	IdempotencyWarning string
+	Replayed           bool
+}
+
 // IssueDetailData is the full issue projection returned by Get.
 // It embeds IssueData and adds content fields and relational data.
 //
@@ -111,13 +120,19 @@ type CommentData struct {
 
 // EventData represents an event/history entry for an issue.
 type EventData struct {
-	ID        string    `json:"id"`
-	IssueID   string    `json:"issue_id"`
-	Kind      string    `json:"kind"`
-	Actor     string    `json:"actor,omitempty"`
-	Target    string    `json:"target,omitempty"`
-	Payload   string    `json:"payload,omitempty"`
-	CreatedAt time.Time `json:"created_at"`
+	ID         string    `json:"id"`
+	IssueID    string    `json:"issue_id"`
+	Kind       string    `json:"kind"`
+	Actor      string    `json:"actor,omitempty"`
+	Target     string    `json:"target,omitempty"`
+	Payload    string    `json:"payload,omitempty"`
+	Field      *string   `json:"field,omitempty"`
+	Fields     []string  `json:"fields,omitempty"`
+	FieldCount int       `json:"field_count,omitempty"`
+	OldValue   *string   `json:"old_value,omitempty"`
+	NewValue   *string   `json:"new_value,omitempty"`
+	Comment    *string   `json:"comment,omitempty"`
+	CreatedAt  time.Time `json:"created_at"`
 }
 
 // StatsData contains aggregate issue statistics.

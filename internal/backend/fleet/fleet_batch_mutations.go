@@ -44,6 +44,21 @@ func (w fleetCommentWire) toTypesComment() types.Comment {
 
 // --- Event operations ---
 
+type fleetHistoryChangeWire struct {
+	Field  string `json:"field"`
+	Before string `json:"before,omitempty"`
+	After  string `json:"after,omitempty"`
+}
+
+type fleetHistoryEventWire struct {
+	ID        string                   `json:"id"`
+	Timestamp time.Time                `json:"timestamp"`
+	Actor     string                   `json:"actor"`
+	Action    string                   `json:"action"`
+	Changes   []fleetHistoryChangeWire `json:"changes,omitempty"`
+	Metadata  map[string]string        `json:"metadata,omitempty"`
+}
+
 func (b *FleetBackend) ListEvents(ctx context.Context, id string, limit int) ([]backend.EventData, error) {
 	path := "/issues/" + url.PathEscape(id) + "/history"
 	if limit > 0 {
@@ -57,27 +72,109 @@ func (b *FleetBackend) ListEvents(ctx context.Context, id string, limit int) ([]
 		return []backend.EventData{}, nil
 	}
 	var history struct {
-		History []struct {
-			ID        string    `json:"id"`
-			Timestamp time.Time `json:"timestamp"`
-			Actor     string    `json:"actor"`
-			Action    string    `json:"action"`
-		} `json:"history"`
+		History []fleetHistoryEventWire `json:"history"`
 	}
 	if err := json.Unmarshal(resp.Data, &history); err != nil {
 		return nil, backend.ErrInternal("ListEvents", "unmarshal response", err)
 	}
 	result := make([]backend.EventData, 0, len(history.History))
 	for _, e := range history.History {
+		values := fleetHistoryValues(e)
 		result = append(result, backend.EventData{
-			ID:        e.ID,
-			IssueID:   id,
-			Kind:      e.Action,
-			Actor:     e.Actor,
-			CreatedAt: e.Timestamp,
+			ID:         e.ID,
+			IssueID:    id,
+			Kind:       e.Action,
+			Actor:      e.Actor,
+			Field:      values.field,
+			Fields:     values.fields,
+			FieldCount: values.fieldCount,
+			OldValue:   values.oldValue,
+			NewValue:   values.newValue,
+			Comment:    values.comment,
+			CreatedAt:  e.Timestamp,
 		})
 	}
 	return result, nil
+}
+
+type fleetHistoryValuesResult struct {
+	oldValue   *string
+	newValue   *string
+	comment    *string
+	field      *string
+	fields     []string
+	fieldCount int
+}
+
+func fleetHistoryValues(e fleetHistoryEventWire) fleetHistoryValuesResult {
+	oldValue, newValue, field, fields, fieldCount := valuesFromChanges(e.Changes)
+	result := fleetHistoryValuesResult{
+		oldValue:   oldValue,
+		newValue:   newValue,
+		field:      field,
+		fields:     fields,
+		fieldCount: fieldCount,
+	}
+	switch e.Action {
+	case "dep.add":
+		result.newValue = metadataValue(e.Metadata, "depends_on_id")
+	case "dep.remove":
+		result.oldValue = metadataValue(e.Metadata, "depends_on_id")
+	case "label.add":
+		result.newValue = metadataValue(e.Metadata, "label")
+	case "label.remove":
+		result.oldValue = metadataValue(e.Metadata, "label")
+	case "comment.add":
+		result.comment = metadataValue(e.Metadata, "text")
+	case "issue.defer":
+		result.newValue = metadataValue(e.Metadata, "defer_until")
+	case "issue.assign":
+		result.newValue = metadataValue(e.Metadata, "assignee")
+	}
+	return result
+}
+
+func valuesFromChanges(changes []fleetHistoryChangeWire) (*string, *string, *string, []string, int) {
+	fields := fieldsFromChanges(changes)
+	if len(changes) != 1 {
+		return nil, nil, nil, fields, len(changes)
+	}
+	return stringPtrIfNotEmpty(changes[0].Before),
+		stringPtrIfNotEmpty(changes[0].After),
+		stringPtrIfNotEmpty(changes[0].Field),
+		fields,
+		1
+}
+
+func fieldsFromChanges(changes []fleetHistoryChangeWire) []string {
+	if len(changes) == 0 {
+		return nil
+	}
+	fields := make([]string, 0, len(changes))
+	for _, change := range changes {
+		if change.Field == "" {
+			continue
+		}
+		fields = append(fields, change.Field)
+	}
+	if len(fields) == 0 {
+		return nil
+	}
+	return fields
+}
+
+func metadataValue(metadata map[string]string, key string) *string {
+	if metadata == nil {
+		return nil
+	}
+	return stringPtrIfNotEmpty(metadata[key])
+}
+
+func stringPtrIfNotEmpty(s string) *string {
+	if s == "" {
+		return nil
+	}
+	return &s
 }
 
 // --- Batch operations ---

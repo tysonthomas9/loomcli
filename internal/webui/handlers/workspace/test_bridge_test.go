@@ -19,6 +19,7 @@ var handleWorkspaceReorder = HandleWorkspaceReorder
 var handleActiveWorkspace = HandleActiveWorkspace
 var handleListWorkspaces = HandleListWorkspaces
 var handleGetWorkspace = HandleGetWorkspace
+var handleRemoveWorkspaceRepo = HandleRemoveWorkspaceRepo
 var handleGetWorkspaceJob = HandleGetWorkspaceJob
 
 // ---------------------------------------------------------------------------
@@ -31,6 +32,7 @@ type mockWorkspaceService struct {
 	getWorkspaceFn          func(ctx context.Context, wsID string) (*ops.WorkspaceData, error)
 	createWorkspaceFn       func(ctx context.Context, req service.WorkspaceCreateRequest) (*ops.WorkspaceData, []string, error)
 	addWorkspaceReposFn     func(ctx context.Context, req service.WorkspaceAddReposRequest) (*ops.WorkspaceData, error)
+	removeWorkspaceRepoFn   func(ctx context.Context, req service.WorkspaceRemoveRepoRequest) (*ops.WorkspaceData, error)
 	startAsyncCreateFn      func(ctx context.Context, req service.WorkspaceCreateRequest) (string, error)
 	getWorkspaceJobFn       func(ctx context.Context, jobID string) (*service.WorkspaceJob, error)
 	deleteWorkspaceFn       func(ctx context.Context, wsID string) (*ops.WorkspaceData, error)
@@ -67,6 +69,12 @@ func (m *mockWorkspaceService) CreateWorkspace(ctx context.Context, req service.
 func (m *mockWorkspaceService) AddWorkspaceRepos(ctx context.Context, req service.WorkspaceAddReposRequest) (*ops.WorkspaceData, error) {
 	if m.addWorkspaceReposFn != nil {
 		return m.addWorkspaceReposFn(ctx, req)
+	}
+	return nil, service.ErrUnavailable("not available")
+}
+func (m *mockWorkspaceService) RemoveWorkspaceRepo(ctx context.Context, req service.WorkspaceRemoveRepoRequest) (*ops.WorkspaceData, error) {
+	if m.removeWorkspaceRepoFn != nil {
+		return m.removeWorkspaceRepoFn(ctx, req)
 	}
 	return nil, service.ErrUnavailable("not available")
 }

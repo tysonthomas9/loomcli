@@ -15,10 +15,13 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/connector"
 )
+
+var settingsMu sync.Mutex
 
 const (
 	fileName                     = "local-settings.json"
@@ -43,6 +46,7 @@ type Settings struct {
 	AgentRuntime       AgentRuntimeConfig         `json:"agent_runtime"`
 	LocalTaskRunner    LocalTaskRunnerConfig      `json:"local_task_runner,omitempty"`
 	RuntimeCredentials RuntimeCredentialSetConfig `json:"runtime_credentials,omitempty"`
+	UIPreferences      UIPreferencesConfig        `json:"ui_preferences,omitempty"`
 }
 
 // RedisConfig configures the Redis backing store used by embedded fleet-db.
@@ -76,6 +80,11 @@ type RuntimeCredentialConfig struct {
 	UpdatedAt time.Time `json:"updated_at,omitempty"`
 }
 
+// UIPreferencesConfig stores non-secret desktop-local UI preferences.
+type UIPreferencesConfig struct {
+	WorkspaceOrder []string `json:"workspace_order,omitempty"`
+}
+
 // SanitizedSettings is safe to return to the UI.
 type SanitizedSettings struct {
 	Version            int                            `json:"version"`
@@ -83,6 +92,7 @@ type SanitizedSettings struct {
 	AgentRuntime       SanitizedAgentRuntimeConfig    `json:"agent_runtime"`
 	LocalTaskRunner    SanitizedLocalTaskRunnerConfig `json:"local_task_runner"`
 	RuntimeCredentials SanitizedRuntimeCredentialSet  `json:"runtime_credentials"`
+	UIPreferences      SanitizedUIPreferences         `json:"ui_preferences"`
 }
 
 // SanitizedRedisConfig omits Redis credentials.
@@ -116,6 +126,11 @@ type SanitizedRuntimeCredential struct {
 	UpdatedAt  string `json:"updated_at,omitempty"`
 }
 
+// SanitizedUIPreferences exposes non-secret UI preference values.
+type SanitizedUIPreferences struct {
+	WorkspaceOrder []string `json:"workspace_order,omitempty"`
+}
+
 // Path returns the settings file path under the local data directory.
 func Path(dataDir string) string {
 	return filepath.Join(dataDir, fileName)
@@ -131,6 +146,12 @@ func Default() Settings {
 
 // Load reads settings from dataDir. A missing file returns defaults.
 func Load(dataDir string) (Settings, error) {
+	settingsMu.Lock()
+	defer settingsMu.Unlock()
+	return loadUnlocked(dataDir)
+}
+
+func loadUnlocked(dataDir string) (Settings, error) {
 	if dataDir == "" {
 		return Default(), errors.New("local settings data dir is required")
 	}
@@ -150,42 +171,70 @@ func Load(dataDir string) (Settings, error) {
 	}
 	settings.AgentRuntime.Default = normalizeAgentRuntime(settings.AgentRuntime.Default)
 	settings.LocalTaskRunner.OpenCodeModel = strings.TrimSpace(settings.LocalTaskRunner.OpenCodeModel)
+	settings.UIPreferences.WorkspaceOrder = sanitizeStringList(settings.UIPreferences.WorkspaceOrder)
 	return settings, nil
 }
 
 // Save validates and writes settings to dataDir with user-only permissions.
 func Save(dataDir string, settings Settings) error {
+	settingsMu.Lock()
+	defer settingsMu.Unlock()
+	_, err := saveUnlocked(dataDir, settings)
+	return err
+}
+
+// Update serializes a read-modify-write of local-settings.json within this process.
+// The settings file is still written via temp+rename; this mutex prevents local
+// callers from losing each other's whole-file updates.
+func Update(dataDir string, mutate func(*Settings) error) (Settings, error) {
+	settingsMu.Lock()
+	defer settingsMu.Unlock()
+
+	settings, err := loadUnlocked(dataDir)
+	if err != nil {
+		return Settings{}, err
+	}
+	if mutate != nil {
+		if err := mutate(&settings); err != nil {
+			return Settings{}, err
+		}
+	}
+	return saveUnlocked(dataDir, settings)
+}
+
+func saveUnlocked(dataDir string, settings Settings) (Settings, error) {
 	if dataDir == "" {
-		return errors.New("local settings data dir is required")
+		return Settings{}, errors.New("local settings data dir is required")
 	}
 	settings.Version = 1
 	settings.AgentRuntime.Default = normalizeAgentRuntime(settings.AgentRuntime.Default)
 	settings.LocalTaskRunner.OpenCodeModel = strings.TrimSpace(settings.LocalTaskRunner.OpenCodeModel)
+	settings.UIPreferences.WorkspaceOrder = sanitizeStringList(settings.UIPreferences.WorkspaceOrder)
 	if err := Validate(settings.FleetDBRedis); err != nil {
-		return err
+		return Settings{}, err
 	}
 	if err := ValidateAgentRuntime(settings.AgentRuntime); err != nil {
-		return err
+		return Settings{}, err
 	}
 	if err := os.MkdirAll(dataDir, 0700); err != nil {
-		return fmt.Errorf("mkdir local settings dir: %w", err)
+		return Settings{}, fmt.Errorf("mkdir local settings dir: %w", err)
 	}
 	_ = os.Chmod(dataDir, 0700) //nolint:gosec // directory needs execute bit; rwx for owner only
 	data, err := json.MarshalIndent(settings, "", "  ")
 	if err != nil {
-		return fmt.Errorf("marshal local settings: %w", err)
+		return Settings{}, fmt.Errorf("marshal local settings: %w", err)
 	}
 	path := Path(dataDir)
 	tmp := path + ".tmp"
 	if err := os.WriteFile(tmp, data, 0600); err != nil { //nolint:gosec // contains local Redis credential
-		return fmt.Errorf("write local settings: %w", err)
+		return Settings{}, fmt.Errorf("write local settings: %w", err)
 	}
 	if err := os.Rename(tmp, path); err != nil {
 		_ = os.Remove(tmp)
-		return fmt.Errorf("rename local settings: %w", err)
+		return Settings{}, fmt.Errorf("rename local settings: %w", err)
 	}
 	_ = os.Chmod(path, 0600)
-	return nil
+	return settings, nil
 }
 
 // Validate rejects unusable Redis settings.
@@ -233,6 +282,9 @@ func Sanitize(settings Settings) SanitizedSettings {
 			Daytona: sanitizeRuntimeCredential(settings.RuntimeCredentials.Daytona),
 			GitHub:  sanitizeRuntimeCredential(settings.RuntimeCredentials.GitHub),
 		},
+		UIPreferences: SanitizedUIPreferences{
+			WorkspaceOrder: append([]string(nil), settings.UIPreferences.WorkspaceOrder...),
+		},
 	}
 }
 
@@ -260,6 +312,23 @@ func normalizeAgentRuntime(value string) string {
 	default:
 		return strings.ToLower(strings.TrimSpace(value))
 	}
+}
+
+func sanitizeStringList(values []string) []string {
+	if len(values) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(values))
+	seen := make(map[string]bool, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" || seen[value] {
+			continue
+		}
+		seen[value] = true
+		out = append(out, value)
+	}
+	return out
 }
 
 func sanitizeRuntimeCredential(credential RuntimeCredentialConfig) SanitizedRuntimeCredential {

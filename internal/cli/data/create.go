@@ -74,7 +74,10 @@ real failure, so success is checkable from the exit code alone.`,
 			if err != nil {
 				return err
 			}
-			return printCreatedIssue(os.Stdout, os.Stderr, created, outputFormat)
+			if created == nil {
+				return fmt.Errorf("backend returned no issue after create")
+			}
+			return printCreatedIssue(os.Stdout, os.Stderr, &created.Issue, outputFormat)
 		},
 	}
 

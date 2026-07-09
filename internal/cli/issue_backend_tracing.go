@@ -184,7 +184,7 @@ func (t *tracedIssueBackend) SearchIssues(ctx context.Context, query string, lim
 
 // --- Mutation operations ---
 
-func (t *tracedIssueBackend) Create(ctx context.Context, params backend.CreateParams) (*backend.IssueData, error) {
+func (t *tracedIssueBackend) Create(ctx context.Context, params backend.CreateParams) (*backend.CreateResult, error) {
 	// NB: only structural attributes — no title, description, or labels
 	// content (titles may contain secrets per §6).
 	ctx, span := t.startSpan(ctx, "Create")

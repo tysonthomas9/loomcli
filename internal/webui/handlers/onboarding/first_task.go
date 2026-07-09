@@ -138,7 +138,10 @@ func createAndQueueFirstTask(
 	if err != nil {
 		return nil, err
 	}
-	issueID, err := decodeIssueID(created)
+	if created == nil {
+		return nil, service.ErrInternal("create issue returned no result", nil)
+	}
+	issueID, err := decodeIssueID(created.Data)
 	if err != nil {
 		return nil, err
 	}
@@ -146,7 +149,7 @@ func createAndQueueFirstTask(
 		deleteCreatedFirstTask(issueSvc, issueID)
 		return nil, err
 	}
-	return created, nil
+	return created.Data, nil
 }
 
 func queueFirstTask(ctx context.Context, agentSvc service.AgentService, ws, agentName, issueID string) error {

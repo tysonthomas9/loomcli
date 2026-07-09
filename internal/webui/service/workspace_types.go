@@ -24,6 +24,12 @@ type WorkspaceAddReposRequest struct {
 	Branch      string   `json:"branch"`
 }
 
+// WorkspaceRemoveRepoRequest identifies a repo attachment to remove from a workspace.
+type WorkspaceRemoveRepoRequest struct {
+	WorkspaceID string
+	RepoName    string
+}
+
 // BackendConfigData is the response payload for workspace backend settings.
 type BackendConfigData struct {
 	Backend   string                 `json:"backend"`

@@ -156,22 +156,23 @@ type graphClient interface {
 // ---------------------------------------------------------------------------
 
 type mockIssueService struct {
-	getIssueFunc         func(ctx context.Context, issueID string) (json.RawMessage, error)
-	listIssuesFunc       func(ctx context.Context, params service.ListIssuesParams) (*service.ListIssuesResult, error)
-	createIssueFunc      func(ctx context.Context, params service.CreateIssueParams) (json.RawMessage, error)
-	patchIssueFunc       func(ctx context.Context, params service.PatchIssueParams) error
-	closeIssueFunc       func(ctx context.Context, params service.CloseIssueParams) (json.RawMessage, error)
-	reopenIssueFunc      func(ctx context.Context, params service.ReopenIssueParams) error
-	claimIssueFunc       func(ctx context.Context, params service.ClaimIssueParams) (json.RawMessage, error)
-	deleteIssueFunc      func(ctx context.Context, issueID string) (json.RawMessage, error)
-	addCommentFunc       func(ctx context.Context, params service.AddCommentParams) (*types.Comment, error)
-	listCommentsFunc     func(ctx context.Context, issueID string) ([]*types.Comment, error)
-	addDependencyFunc    func(ctx context.Context, params service.AddDependencyParams) error
-	removeDependencyFunc func(ctx context.Context, params service.RemoveDependencyParams) error
-	listDependenciesFunc func(ctx context.Context, issueID string) (json.RawMessage, error)
-	listEventsFunc       func(ctx context.Context, params service.EventListParams) ([]*types.Event, error)
-	moveIssueFunc        func(ctx context.Context, params service.MoveIssueParams) (*service.MoveIssueResult, error)
-	searchIssuesFunc     func(ctx context.Context, params service.SearchIssuesParams) (json.RawMessage, error)
+	getIssueFunc          func(ctx context.Context, issueID string) (json.RawMessage, error)
+	listIssuesFunc        func(ctx context.Context, params service.ListIssuesParams) (*service.ListIssuesResult, error)
+	createIssueFunc       func(ctx context.Context, params service.CreateIssueParams) (json.RawMessage, error)
+	createIssueResultFunc func(ctx context.Context, params service.CreateIssueParams) (*service.CreateIssueResult, error)
+	patchIssueFunc        func(ctx context.Context, params service.PatchIssueParams) error
+	closeIssueFunc        func(ctx context.Context, params service.CloseIssueParams) (json.RawMessage, error)
+	reopenIssueFunc       func(ctx context.Context, params service.ReopenIssueParams) error
+	claimIssueFunc        func(ctx context.Context, params service.ClaimIssueParams) (json.RawMessage, error)
+	deleteIssueFunc       func(ctx context.Context, issueID string) (json.RawMessage, error)
+	addCommentFunc        func(ctx context.Context, params service.AddCommentParams) (*types.Comment, error)
+	listCommentsFunc      func(ctx context.Context, issueID string) ([]*types.Comment, error)
+	addDependencyFunc     func(ctx context.Context, params service.AddDependencyParams) error
+	removeDependencyFunc  func(ctx context.Context, params service.RemoveDependencyParams) error
+	listDependenciesFunc  func(ctx context.Context, issueID string) (json.RawMessage, error)
+	listEventsFunc        func(ctx context.Context, params service.EventListParams) ([]*types.Event, error)
+	moveIssueFunc         func(ctx context.Context, params service.MoveIssueParams) (*service.MoveIssueResult, error)
+	searchIssuesFunc      func(ctx context.Context, params service.SearchIssuesParams) (json.RawMessage, error)
 }
 
 func (m *mockIssueService) GetIssue(ctx context.Context, issueID string) (json.RawMessage, error) {
@@ -186,9 +187,16 @@ func (m *mockIssueService) ListIssues(ctx context.Context, params service.ListIs
 	}
 	return &service.ListIssuesResult{Issues: []service.IssueWithParent{}}, nil
 }
-func (m *mockIssueService) CreateIssue(ctx context.Context, params service.CreateIssueParams) (json.RawMessage, error) {
+func (m *mockIssueService) CreateIssue(ctx context.Context, params service.CreateIssueParams) (*service.CreateIssueResult, error) {
+	if m.createIssueResultFunc != nil {
+		return m.createIssueResultFunc(ctx, params)
+	}
 	if m.createIssueFunc != nil {
-		return m.createIssueFunc(ctx, params)
+		data, err := m.createIssueFunc(ctx, params)
+		if err != nil {
+			return nil, err
+		}
+		return &service.CreateIssueResult{Data: data}, nil
 	}
 	return nil, nil
 }

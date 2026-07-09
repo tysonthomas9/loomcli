@@ -524,7 +524,7 @@ func (b *FleetBackend) SearchIssues(ctx context.Context, query string, limit int
 
 // --- Mutation operations ---
 
-func (b *FleetBackend) Create(ctx context.Context, params backend.CreateParams) (*backend.IssueData, error) {
+func (b *FleetBackend) Create(ctx context.Context, params backend.CreateParams) (*backend.CreateResult, error) {
 	body := createParamsToBody(params)
 	apiResp, statusCode, respHeaders, err := b.doRequestHeaders(ctx, "POST", "/issues", body, params.IdempotencyHeaders())
 	if err != nil {
@@ -542,12 +542,17 @@ func (b *FleetBackend) Create(ctx context.Context, params backend.CreateParams) 
 	}
 	logIdempotencyResponse(respHeaders, issue.ID)
 	result := issueToData(&issue)
+	createResult := &backend.CreateResult{
+		Issue:              result,
+		IdempotencyWarning: respHeaders.Get("X-Idempotency-Warning"),
+		Replayed:           respHeaders.Get("X-Idempotency-Replayed") == "true",
+	}
 	if err := b.addCreateDependencies(ctx, result.ID, params.Dependencies); err != nil {
 		// The issue itself was created; return it alongside the error so
 		// callers that inspect the partial result can still see the ID.
-		return &result, err
+		return createResult, err
 	}
-	return &result, nil
+	return createResult, nil
 }
 
 // shouldAssignBeforeStatus reports whether a requested assignee change must be

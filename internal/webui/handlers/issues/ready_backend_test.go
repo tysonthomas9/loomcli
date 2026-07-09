@@ -51,7 +51,7 @@ func (s *stubReadyBackend) GetChildren(_ context.Context, _ string) ([]backend.I
 func (s *stubReadyBackend) SearchIssues(_ context.Context, _ string, _ int) ([]backend.IssueData, error) {
 	return nil, fmt.Errorf("SearchIssues not implemented in stubReadyBackend")
 }
-func (s *stubReadyBackend) Create(_ context.Context, _ backend.CreateParams) (*backend.IssueData, error) {
+func (s *stubReadyBackend) Create(_ context.Context, _ backend.CreateParams) (*backend.CreateResult, error) {
 	return nil, fmt.Errorf("Create not implemented in stubReadyBackend")
 }
 func (s *stubReadyBackend) Update(_ context.Context, _ string, _ backend.UpdateParams) error {

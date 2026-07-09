@@ -62,12 +62,12 @@ func (b *localBackendStub) GetChildren(context.Context, string) ([]backend.Issue
 func (b *localBackendStub) SearchIssues(context.Context, string, int) ([]backend.IssueData, error) {
 	return nil, nil
 }
-func (b *localBackendStub) Create(_ context.Context, params backend.CreateParams) (*backend.IssueData, error) {
+func (b *localBackendStub) Create(_ context.Context, params backend.CreateParams) (*backend.CreateResult, error) {
 	b.record("Create", "", params)
 	if b.createItem != nil {
-		return b.createItem, nil
+		return &backend.CreateResult{Issue: *b.createItem}, nil
 	}
-	return &backend.IssueData{
+	return &backend.CreateResult{Issue: backend.IssueData{
 		ID:         params.ID,
 		Title:      params.Title,
 		Status:     params.Status,
@@ -76,7 +76,7 @@ func (b *localBackendStub) Create(_ context.Context, params backend.CreateParams
 		Parent:     params.Parent,
 		Labels:     append([]string(nil), params.Labels...),
 		SourceRepo: params.SourceRepo,
-	}, nil
+	}}, nil
 }
 func (b *localBackendStub) Update(_ context.Context, id string, params backend.UpdateParams) error {
 	b.record("Update", id, params)

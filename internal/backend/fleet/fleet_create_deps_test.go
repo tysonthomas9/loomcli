@@ -92,8 +92,8 @@ func TestCreate_WithDependencies_ComposesDepsCalls(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
-	if result.ID != "new-1" {
-		t.Errorf("ID = %q, want %q", result.ID, "new-1")
+	if result.Issue.ID != "new-1" {
+		t.Errorf("ID = %q, want %q", result.Issue.ID, "new-1")
 	}
 
 	mu.Lock()
@@ -157,7 +157,7 @@ func TestCreate_DependencyAddFails_ErrorNamesCreatedIssue(t *testing.T) {
 	if !backend.IsKind(err, backend.KindNotFound) {
 		t.Errorf("error kind = %v, want KindNotFound preserved from the deps call", err)
 	}
-	if result == nil || result.ID != "new-2" {
+	if result == nil || result.Issue.ID != "new-2" {
 		t.Errorf("result = %#v, want partially-created issue new-2 returned alongside the error", result)
 	}
 }

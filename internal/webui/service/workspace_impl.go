@@ -8,10 +8,12 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/localsettings"
 	"github.com/tysonthomas9/loomcli/internal/ops"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui/daemon"
@@ -35,6 +37,8 @@ type WorkspaceServiceConfig struct {
 	AddReposFn WorkspaceAddReposFn // Store-backed repo attachment
 	DeleteFn   func(string) error  // Already wrapped with cleanup hooks
 	JobStore   JobStore            // For async creation; nil = async unavailable
+
+	LocalSettingsDir string // Desktop-local settings dir for per-user UI preferences
 }
 
 type workspaceServiceImpl struct {
@@ -44,7 +48,11 @@ type workspaceServiceImpl struct {
 	addReposFn     WorkspaceAddReposFn
 	deleteFn       func(string) error
 	jobStore       JobStore
+	localSettings  string
 	workspaceCache *workspaceDataCache
+	orderCacheMu   sync.RWMutex
+	orderCache     []string
+	orderCacheOK   bool
 }
 
 // NewWorkspaceService creates a new WorkspaceService from the given config.
@@ -56,6 +64,7 @@ func NewWorkspaceService(cfg WorkspaceServiceConfig) WorkspaceService {
 		addReposFn:     cfg.AddReposFn,
 		deleteFn:       cfg.DeleteFn,
 		jobStore:       cfg.JobStore,
+		localSettings:  cfg.LocalSettingsDir,
 		workspaceCache: newWorkspaceDataCache(defaultWorkspaceDataCacheTTL),
 	}
 }
@@ -91,9 +100,54 @@ func (s *workspaceServiceImpl) AddWorkspaceRepos(ctx context.Context, req Worksp
 			return nil, ErrInternal("failed to load workspace data", buildErr)
 		}
 		normalizeWorkspaceData(data)
+		s.applyWorkspaceOrderToData(data)
 		return data, nil
 	}
 	return s.GetWorkspace(ctx, req.WorkspaceID)
+}
+
+func (s *workspaceServiceImpl) RemoveWorkspaceRepo(ctx context.Context, req WorkspaceRemoveRepoRequest) (*ops.WorkspaceData, error) {
+	if s.store == nil {
+		return nil, ErrUnavailable("workspace store unavailable")
+	}
+	req.WorkspaceID = strings.TrimSpace(req.WorkspaceID)
+	req.RepoName = strings.TrimSpace(req.RepoName)
+	if req.WorkspaceID == "" {
+		return nil, ErrValidation("workspace ID is required")
+	}
+	if req.RepoName == "" {
+		return nil, ErrValidation("repo name is required")
+	}
+
+	ws, serr := s.resolveStoreWorkspaceForDefault(ctx, req.WorkspaceID)
+	if serr != nil {
+		return nil, serr
+	}
+	if _, err := s.store.Repos().Get(ctx, ws.Key, req.RepoName); err != nil {
+		if errors.Is(err, domain.ErrNotFound) {
+			return nil, ErrNotFound(fmt.Sprintf("repo %q not found in workspace %q", req.RepoName, ws.Key))
+		}
+		return nil, ErrInternal("failed to load workspace repo", err)
+	}
+	if err := s.store.Repos().Delete(ctx, ws.Key, req.RepoName); err != nil {
+		if errors.Is(err, domain.ErrNotFound) {
+			return nil, ErrNotFound(fmt.Sprintf("repo %q not found in workspace %q", req.RepoName, ws.Key))
+		}
+		msg := strings.ToLower(err.Error())
+		if strings.Contains(msg, "http 403") || strings.Contains(msg, "forbidden") || strings.Contains(msg, "permission denied") {
+			return nil, ErrForbidden("repo removal is not permitted")
+		}
+		return nil, ErrInternal("failed to remove workspace repo", err)
+	}
+	s.invalidateWorkspaceCache()
+
+	data, err := s.loadWorkspaceByID(ctx, ws.Key)
+	if err != nil {
+		return nil, ErrInternal("failed to load workspace data", err)
+	}
+	normalizeWorkspaceData(data)
+	s.applyWorkspaceOrderToData(data)
+	return data, nil
 }
 
 // loadActiveWorkspace returns the active workspace topology from FleetDB.
@@ -132,6 +186,7 @@ func (s *workspaceServiceImpl) GetActiveWorkspace(ctx context.Context) (*ops.Wor
 		data = &ops.WorkspaceData{}
 	}
 	normalizeWorkspaceData(data)
+	s.applyWorkspaceOrderToData(data)
 	for i := range data.Repos {
 		if b := readGitHeadBranch(data.Repos[i].Path); b != "" {
 			data.Repos[i].CurrentBranch = b
@@ -179,6 +234,7 @@ func (s *workspaceServiceImpl) ListWorkspaces(ctx context.Context) ([]WorkspaceL
 				}
 				items = append(items, item)
 			}
+			s.applyWorkspaceOrderToList(items)
 			return items, nil
 		}
 		return nil, ErrInternal("failed to list workspaces from store", err)
@@ -225,6 +281,7 @@ func (s *workspaceServiceImpl) GetWorkspace(ctx context.Context, wsID string) (*
 	}
 
 	normalizeWorkspaceData(data)
+	s.applyWorkspaceOrderToData(data)
 	for i := range data.Repos {
 		if b := readGitHeadBranch(data.Repos[i].Path); b != "" {
 			data.Repos[i].CurrentBranch = b
@@ -244,6 +301,7 @@ func (s *workspaceServiceImpl) lookupWorkspace(ctx context.Context, wsID string)
 		data, err := s.loadWorkspaceByID(ctx, wsID)
 		if err == nil && data != nil {
 			normalizeWorkspaceData(data)
+			s.applyWorkspaceOrderToData(data)
 			for i := range data.Repos {
 				if b := readGitHeadBranch(data.Repos[i].Path); b != "" {
 					data.Repos[i].CurrentBranch = b
@@ -296,6 +354,7 @@ func (s *workspaceServiceImpl) CreateWorkspace(ctx context.Context, req Workspac
 			return nil, nil, ErrInternal("failed to load created workspace data", buildErr)
 		}
 		normalizeWorkspaceData(d)
+		s.applyWorkspaceOrderToData(d)
 		data = d
 	}
 	warnings := GetCreateWarnings(ctx)
@@ -396,6 +455,7 @@ func (s *workspaceServiceImpl) DeleteWorkspace(ctx context.Context, wsID string)
 		data = &ops.WorkspaceData{}
 	}
 	normalizeWorkspaceData(data)
+	s.applyWorkspaceOrderToData(data)
 	return data, nil
 }
 
@@ -416,6 +476,7 @@ func (s *workspaceServiceImpl) RenameWorkspace(ctx context.Context, wsID string,
 			return nil, ErrInternal("failed to load workspace data", err)
 		}
 		normalizeWorkspaceData(data)
+		s.applyWorkspaceOrderToData(data)
 		return data, nil
 	}
 	if existing, err := s.store.Workspaces().GetByName(ctx, newName); err == nil && existing.Key != ws.Key {
@@ -431,12 +492,38 @@ func (s *workspaceServiceImpl) RenameWorkspace(ctx context.Context, wsID string,
 		return nil, ErrInternal("failed to load workspace data", err)
 	}
 	normalizeWorkspaceData(data)
+	s.applyWorkspaceOrderToData(data)
 	return data, nil
 }
 
-func (s *workspaceServiceImpl) ReorderWorkspaces(_ context.Context, order []string) (*ops.WorkspaceData, error) {
-	_ = order
-	return nil, ErrNotImplemented("workspace ordering is not implemented in FleetDB")
+func (s *workspaceServiceImpl) ReorderWorkspaces(ctx context.Context, order []string) (*ops.WorkspaceData, error) {
+	if strings.TrimSpace(s.localSettings) == "" {
+		return nil, ErrUnavailable("local settings are not configured")
+	}
+	if s.store == nil {
+		return nil, ErrUnavailable("workspace store unavailable")
+	}
+	order = normalizeWorkspaceOrder(order)
+
+	settings, err := localsettings.Update(s.localSettings, func(settings *localsettings.Settings) error {
+		settings.UIPreferences.WorkspaceOrder = order
+		return nil
+	})
+	if err != nil {
+		return nil, ErrInternal("failed to save workspace order", err)
+	}
+	s.setWorkspaceOrderPreference(settings.UIPreferences.WorkspaceOrder)
+
+	data, err := s.loadActiveWorkspace(ctx)
+	if err != nil {
+		return nil, ErrInternal("failed to load workspace data", err)
+	}
+	if data == nil {
+		data = &ops.WorkspaceData{}
+	}
+	normalizeWorkspaceData(data)
+	s.applyWorkspaceOrderToData(data)
+	return data, nil
 }
 
 func (s *workspaceServiceImpl) resolveStoreWorkspaceForDefault(ctx context.Context, name string) (*domain.Workspace, *ServiceError) {
@@ -532,6 +619,7 @@ func (s *workspaceServiceImpl) PatchWorkspaceBackend(ctx context.Context, wsID s
 		return nil, ErrInternal("failed to load workspace data", err)
 	}
 	normalizeWorkspaceData(data)
+	s.applyWorkspaceOrderToData(data)
 	return data, nil
 }
 
@@ -539,6 +627,145 @@ func (s *workspaceServiceImpl) invalidateWorkspaceCache() {
 	if s.workspaceCache != nil {
 		s.workspaceCache.invalidateAll()
 	}
+}
+
+func (s *workspaceServiceImpl) loadWorkspaceOrderPreference() []string {
+	if strings.TrimSpace(s.localSettings) == "" {
+		return nil
+	}
+	if order, ok := s.cachedWorkspaceOrderPreference(); ok {
+		return order
+	}
+	settings, err := localsettings.Load(s.localSettings)
+	if err != nil {
+		slog.Warn("failed to load workspace order preference", "err", err)
+		return nil
+	}
+	order := normalizeWorkspaceOrder(settings.UIPreferences.WorkspaceOrder)
+	s.setWorkspaceOrderPreference(order)
+	return order
+}
+
+func (s *workspaceServiceImpl) cachedWorkspaceOrderPreference() ([]string, bool) {
+	s.orderCacheMu.RLock()
+	defer s.orderCacheMu.RUnlock()
+	if !s.orderCacheOK {
+		return nil, false
+	}
+	return append([]string(nil), s.orderCache...), true
+}
+
+func (s *workspaceServiceImpl) setWorkspaceOrderPreference(order []string) {
+	s.orderCacheMu.Lock()
+	defer s.orderCacheMu.Unlock()
+	s.orderCache = append([]string(nil), normalizeWorkspaceOrder(order)...)
+	s.orderCacheOK = true
+}
+
+func (s *workspaceServiceImpl) applyWorkspaceOrderToData(data *ops.WorkspaceData) {
+	if data == nil {
+		return
+	}
+	order := s.loadWorkspaceOrderPreference()
+	if len(order) == 0 {
+		data.WorkspaceOrder = nil
+		return
+	}
+	data.Workspaces = orderWorkspaceSummaries(data.Workspaces, order)
+	data.WorkspaceOrder = workspaceSummaryIDs(data.Workspaces)
+}
+
+func (s *workspaceServiceImpl) applyWorkspaceOrderToList(items []WorkspaceListItem) {
+	order := s.loadWorkspaceOrderPreference()
+	if len(order) == 0 {
+		return
+	}
+	ordered := orderWorkspaceList(items, order)
+	copy(items, ordered)
+}
+
+func normalizeWorkspaceOrder(order []string) []string {
+	if len(order) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(order))
+	seen := make(map[string]bool, len(order))
+	for _, id := range order {
+		id = strings.TrimSpace(id)
+		if id == "" || seen[id] {
+			continue
+		}
+		seen[id] = true
+		out = append(out, id)
+	}
+	return out
+}
+
+func orderWorkspaceSummaries(workspaces []ops.WorkspaceSummary, order []string) []ops.WorkspaceSummary {
+	if len(workspaces) == 0 || len(order) == 0 {
+		return workspaces
+	}
+	byID := make(map[string]ops.WorkspaceSummary, len(workspaces))
+	for _, ws := range workspaces {
+		byID[ws.ID] = ws
+	}
+	out := make([]ops.WorkspaceSummary, 0, len(workspaces))
+	used := make(map[string]bool, len(workspaces))
+	for _, id := range order {
+		ws, ok := byID[id]
+		if !ok {
+			continue
+		}
+		out = append(out, ws)
+		used[id] = true
+	}
+	for _, ws := range workspaces {
+		if used[ws.ID] {
+			continue
+		}
+		out = append(out, ws)
+	}
+	return out
+}
+
+func orderWorkspaceList(items []WorkspaceListItem, order []string) []WorkspaceListItem {
+	if len(items) == 0 || len(order) == 0 {
+		return items
+	}
+	byID := make(map[string]WorkspaceListItem, len(items))
+	for _, item := range items {
+		byID[item.ID] = item
+	}
+	out := make([]WorkspaceListItem, 0, len(items))
+	used := make(map[string]bool, len(items))
+	for _, id := range order {
+		item, ok := byID[id]
+		if !ok {
+			continue
+		}
+		out = append(out, item)
+		used[id] = true
+	}
+	for _, item := range items {
+		if used[item.ID] {
+			continue
+		}
+		out = append(out, item)
+	}
+	return out
+}
+
+func workspaceSummaryIDs(workspaces []ops.WorkspaceSummary) []string {
+	if len(workspaces) == 0 {
+		return nil
+	}
+	ids := make([]string, 0, len(workspaces))
+	for _, ws := range workspaces {
+		if ws.ID != "" {
+			ids = append(ids, ws.ID)
+		}
+	}
+	return ids
 }
 
 func poolStatsFromDaemon(d daemon.PoolStats) PoolStats {

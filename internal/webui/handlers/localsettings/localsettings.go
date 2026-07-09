@@ -83,33 +83,45 @@ func HandlePatch(dataDir string) http.HandlerFunc {
 			return
 		}
 
-		settings, err := load(dataDir)
-		if err != nil {
-			handler.WriteJSON(w, http.StatusInternalServerError, response{Success: false, Error: err.Error()})
+		if strings.TrimSpace(dataDir) == "" {
+			handler.WriteJSON(w, http.StatusInternalServerError, response{Success: false, Error: "local settings data dir is not configured"})
 			return
 		}
-		if req.FleetDBRedis != nil {
-			if err := applyRedisPatch(&settings, *req.FleetDBRedis); err != nil {
+
+		var patchErr error
+		settings, err := runtimesettings.Update(dataDir, func(settings *runtimesettings.Settings) error {
+			if req.FleetDBRedis != nil {
+				if err := applyRedisPatch(settings, *req.FleetDBRedis); err != nil {
+					patchErr = err
+					return err
+				}
+			}
+			if req.AgentRuntime != nil {
+				if err := applyAgentRuntimePatch(settings, *req.AgentRuntime); err != nil {
+					patchErr = err
+					return err
+				}
+			}
+			if req.LocalTaskRunner != nil {
+				applyLocalTaskRunnerPatch(settings, *req.LocalTaskRunner)
+			}
+			if req.RuntimeCredentials != nil {
+				if err := applyRuntimeCredentialsPatch(dataDir, settings, *req.RuntimeCredentials); err != nil {
+					patchErr = err
+					return err
+				}
+			}
+			return nil
+		})
+		if err != nil {
+			if patchErr != nil {
 				handler.WriteJSON(w, http.StatusBadRequest, response{Success: false, Error: err.Error()})
 				return
 			}
-		}
-		if req.AgentRuntime != nil {
-			if err := applyAgentRuntimePatch(&settings, *req.AgentRuntime); err != nil {
-				handler.WriteJSON(w, http.StatusBadRequest, response{Success: false, Error: err.Error()})
+			if strings.HasPrefix(err.Error(), "read local settings") || strings.HasPrefix(err.Error(), "parse local settings") {
+				handler.WriteJSON(w, http.StatusInternalServerError, response{Success: false, Error: err.Error()})
 				return
 			}
-		}
-		if req.LocalTaskRunner != nil {
-			applyLocalTaskRunnerPatch(&settings, *req.LocalTaskRunner)
-		}
-		if req.RuntimeCredentials != nil {
-			if err := applyRuntimeCredentialsPatch(dataDir, &settings, *req.RuntimeCredentials); err != nil {
-				handler.WriteJSON(w, http.StatusBadRequest, response{Success: false, Error: err.Error()})
-				return
-			}
-		}
-		if err := runtimesettings.Save(dataDir, settings); err != nil {
 			handler.WriteJSON(w, http.StatusBadRequest, response{Success: false, Error: err.Error()})
 			return
 		}

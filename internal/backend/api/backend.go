@@ -100,27 +100,28 @@ func (b *APIBackend) workspaceBasePath() string {
 // doRequest executes an HTTP request against the workspace-scoped API and
 // parses the JSON envelope. Path must start with "/".
 func (b *APIBackend) doRequest(ctx context.Context, method, path string, body interface{}) (*apiResponse, int, error) {
-	return b.doRequestHeaders(ctx, method, path, body, nil)
+	resp, statusCode, _, err := b.doRequestHeaders(ctx, method, path, body, nil)
+	return resp, statusCode, err
 }
 
 // doRequestHeaders is doRequest with extra request headers (e.g. the
 // idempotency headers on create, which must travel out-of-band because
 // fleet-db's strict JSON decode rejects unknown body fields).
-func (b *APIBackend) doRequestHeaders(ctx context.Context, method, path string, body interface{}, headers map[string]string) (*apiResponse, int, error) {
+func (b *APIBackend) doRequestHeaders(ctx context.Context, method, path string, body interface{}, headers map[string]string) (*apiResponse, int, http.Header, error) {
 	fullURL := b.baseURL + b.workspaceBasePath() + path
 
 	var bodyReader io.Reader
 	if body != nil {
 		data, err := json.Marshal(body)
 		if err != nil {
-			return nil, 0, fmt.Errorf("marshal request body: %w", err)
+			return nil, 0, nil, fmt.Errorf("marshal request body: %w", err)
 		}
 		bodyReader = bytes.NewReader(data)
 	}
 
 	req, err := http.NewRequestWithContext(ctx, method, fullURL, bodyReader)
 	if err != nil {
-		return nil, 0, fmt.Errorf("create request: %w", err)
+		return nil, 0, nil, fmt.Errorf("create request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json")
@@ -130,20 +131,20 @@ func (b *APIBackend) doRequestHeaders(ctx context.Context, method, path string, 
 
 	resp, err := b.client.Do(req)
 	if err != nil {
-		return nil, 0, err
+		return nil, 0, nil, err
 	}
 	defer resp.Body.Close()
 
 	respBody, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBody))
 	if err != nil {
-		return nil, resp.StatusCode, fmt.Errorf("read response body: %w", err)
+		return nil, resp.StatusCode, resp.Header, fmt.Errorf("read response body: %w", err)
 	}
 
 	var parsed apiResponse
 	if err := json.Unmarshal(respBody, &parsed); err != nil {
-		return nil, resp.StatusCode, fmt.Errorf("server returned non-JSON response (HTTP %d)", resp.StatusCode)
+		return nil, resp.StatusCode, resp.Header, fmt.Errorf("server returned non-JSON response (HTTP %d)", resp.StatusCode)
 	}
-	return &parsed, resp.StatusCode, nil
+	return &parsed, resp.StatusCode, resp.Header, nil
 }
 
 // exec wraps doRequest with error classification.
@@ -153,7 +154,7 @@ func (b *APIBackend) exec(ctx context.Context, op, method, path string, body int
 
 // execHeaders is exec with extra request headers.
 func (b *APIBackend) execHeaders(ctx context.Context, op, method, path string, body interface{}, headers map[string]string) (*apiResponse, error) {
-	resp, statusCode, err := b.doRequestHeaders(ctx, method, path, body, headers)
+	resp, statusCode, _, err := b.doRequestHeaders(ctx, method, path, body, headers)
 	if err != nil {
 		return nil, classifyTransportError(op, err)
 	}
@@ -161,6 +162,17 @@ func (b *APIBackend) execHeaders(ctx context.Context, op, method, path string, b
 		return nil, cerr
 	}
 	return resp, nil
+}
+
+func (b *APIBackend) execHeadersResponse(ctx context.Context, op, method, path string, body interface{}, headers map[string]string) (*apiResponse, http.Header, error) {
+	resp, statusCode, respHeaders, err := b.doRequestHeaders(ctx, method, path, body, headers)
+	if err != nil {
+		return nil, nil, classifyTransportError(op, err)
+	}
+	if cerr := classifyHTTPError(op, statusCode, *resp); cerr != nil {
+		return nil, nil, cerr
+	}
+	return resp, respHeaders, nil
 }
 
 // hasData returns true if the response Data field is present and non-null.
@@ -324,9 +336,9 @@ func (b *APIBackend) SearchIssues(ctx context.Context, query string, limit int) 
 
 // --- Mutation operations ---
 
-func (b *APIBackend) Create(ctx context.Context, params backend.CreateParams) (*backend.IssueData, error) {
+func (b *APIBackend) Create(ctx context.Context, params backend.CreateParams) (*backend.CreateResult, error) {
 	req := createParamsToCreateRequest(params)
-	resp, err := b.execHeaders(ctx, "Create", http.MethodPost, "/issues", req, params.IdempotencyHeaders())
+	resp, respHeaders, err := b.execHeadersResponse(ctx, "Create", http.MethodPost, "/issues", req, params.IdempotencyHeaders())
 	if err != nil {
 		return nil, err
 	}
@@ -338,7 +350,11 @@ func (b *APIBackend) Create(ctx context.Context, params backend.CreateParams) (*
 		return nil, backend.ErrInternal("Create", "unmarshal response", err)
 	}
 	result := issueResponseToData(issue)
-	return &result, nil
+	return &backend.CreateResult{
+		Issue:              result,
+		IdempotencyWarning: respHeaders.Get("X-Idempotency-Warning"),
+		Replayed:           respHeaders.Get("X-Idempotency-Replayed") == "true",
+	}, nil
 }
 
 func (b *APIBackend) Update(ctx context.Context, id string, params backend.UpdateParams) error {

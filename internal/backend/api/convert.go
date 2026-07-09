@@ -191,12 +191,26 @@ func commentToData(c gen.Comment) backend.CommentData {
 
 // eventToData converts gen.IssueEvent to backend.EventData.
 func eventToData(e gen.IssueEvent) backend.EventData {
+	var fields []string
+	if e.Fields != nil {
+		fields = append([]string(nil), (*e.Fields)...)
+	}
+	fieldCount := 0
+	if e.FieldCount != nil {
+		fieldCount = *e.FieldCount
+	}
 	return backend.EventData{
-		ID:        strconv.FormatInt(e.Id, 10),
-		IssueID:   e.IssueId,
-		Kind:      e.EventType,
-		Actor:     e.Actor,
-		CreatedAt: e.CreatedAt,
+		ID:         strconv.FormatInt(e.Id, 10),
+		IssueID:    e.IssueId,
+		Kind:       e.EventType,
+		Actor:      e.Actor,
+		Field:      e.Field,
+		Fields:     fields,
+		FieldCount: fieldCount,
+		OldValue:   e.OldValue,
+		NewValue:   e.NewValue,
+		Comment:    e.Comment,
+		CreatedAt:  e.CreatedAt,
 	}
 }
 

@@ -231,9 +231,13 @@ func (s *stubIssueService) GetIssue(context.Context, string) (json.RawMessage, e
 func (s *stubIssueService) ListIssues(context.Context, service.ListIssuesParams) (*service.ListIssuesResult, error) {
 	return nil, service.ErrNotImplemented("not implemented")
 }
-func (s *stubIssueService) CreateIssue(ctx context.Context, params service.CreateIssueParams) (json.RawMessage, error) {
+func (s *stubIssueService) CreateIssue(ctx context.Context, params service.CreateIssueParams) (*service.CreateIssueResult, error) {
 	if s.createFunc != nil {
-		return s.createFunc(ctx, params)
+		data, err := s.createFunc(ctx, params)
+		if err != nil {
+			return nil, err
+		}
+		return &service.CreateIssueResult{Data: data}, nil
 	}
 	return nil, service.ErrNotImplemented("not implemented")
 }

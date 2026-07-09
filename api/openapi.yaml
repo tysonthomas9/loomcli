@@ -3547,6 +3547,14 @@ components:
           type: string
         actor:
           type: string
+        field:
+          type: [string, "null"]
+        fields:
+          type: array
+          items:
+            type: string
+        field_count:
+          type: integer
         old_value:
           type: [string, "null"]
         new_value:

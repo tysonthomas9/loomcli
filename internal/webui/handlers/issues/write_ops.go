@@ -27,15 +27,24 @@ func HandleCreateIssue(svc service.IssueService) http.HandlerFunc {
 			return
 		}
 
-		data, err := svc.CreateIssue(r.Context(), createParamsFromRequest(r, &req))
+		result, err := svc.CreateIssue(r.Context(), createParamsFromRequest(r, &req))
 		if err != nil {
 			handler.HandleServiceError(w, err)
 			return
 		}
+		if result == nil {
+			result = &service.CreateIssueResult{}
+		}
+		if result.IdempotencyWarning != "" {
+			w.Header().Set("X-Idempotency-Warning", result.IdempotencyWarning)
+		}
+		if result.IdempotencyReplayed {
+			w.Header().Set("X-Idempotency-Replayed", "true")
+		}
 
 		handler.WriteJSON(w, http.StatusCreated, IssuesResponse{
 			Success: true,
-			Data:    data,
+			Data:    result.Data,
 		})
 	}
 }

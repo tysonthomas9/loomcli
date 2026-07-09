@@ -333,11 +333,17 @@ func TestCommentToData(t *testing.T) {
 
 func TestEventToData(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Second)
+	oldValue := "open"
+	newValue := "in_progress"
+	comment := "status moved"
 	e := &types.Event{
 		ID:        99,
 		IssueID:   "test-1",
 		EventType: types.EventCreated,
 		Actor:     "user",
+		OldValue:  &oldValue,
+		NewValue:  &newValue,
+		Comment:   &comment,
 		CreatedAt: now,
 	}
 
@@ -347,6 +353,15 @@ func TestEventToData(t *testing.T) {
 	}
 	if d.Kind != "issue.created" {
 		t.Errorf("Kind = %q, want %q", d.Kind, "issue.created")
+	}
+	if d.OldValue == nil || *d.OldValue != oldValue {
+		t.Errorf("OldValue = %v, want %q", d.OldValue, oldValue)
+	}
+	if d.NewValue == nil || *d.NewValue != newValue {
+		t.Errorf("NewValue = %v, want %q", d.NewValue, newValue)
+	}
+	if d.Comment == nil || *d.Comment != comment {
+		t.Errorf("Comment = %v, want %q", d.Comment, comment)
 	}
 }
 

@@ -449,8 +449,8 @@ func TestIPCIssueBackend_Create_DelegatesToDirectBackend(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if got.ID != "new-1" {
-		t.Errorf("got ID %q, want new-1", got.ID)
+	if got.Issue.ID != "new-1" {
+		t.Errorf("got ID %q, want new-1", got.Issue.ID)
 	}
 }
 
