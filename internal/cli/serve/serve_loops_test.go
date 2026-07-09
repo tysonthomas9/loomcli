@@ -52,10 +52,10 @@ func TestStartIssueJournalBridge_MemstoreGatedNoLoop(t *testing.T) {
 
 	// memstore does not implement store.IssueJournalReader, so the bridge must
 	// not start: no cursor state file is ever created.
-	startIssueJournalBridge(ctx, memstore.New())
+	startIssueJournalBridge(ctx, memstore.New(), nil)
 
 	// Also a nil store is a clean no-op.
-	startIssueJournalBridge(ctx, nil)
+	startIssueJournalBridge(ctx, nil, nil)
 
 	if _, err := os.Stat(statePath); !os.IsNotExist(err) {
 		t.Fatalf("cursor state file created for memstore-gated serve: stat err = %v", err)
@@ -73,7 +73,7 @@ func TestStartIssueJournalBridge_DisabledFlagHonored(t *testing.T) {
 
 	// Even with a reader-capable store the disabled flag wins: no loop, no
 	// cursor file.
-	startIssueJournalBridge(ctx, readerCapableStore{Store: memstore.New()})
+	startIssueJournalBridge(ctx, readerCapableStore{Store: memstore.New()}, nil)
 
 	if _, err := os.Stat(statePath); !os.IsNotExist(err) {
 		t.Fatalf("cursor state file created while bridge disabled: stat err = %v", err)
@@ -97,7 +97,7 @@ func TestStartIssueJournalBridge_EnabledLoopWritesCursorState(t *testing.T) {
 	// A reader-capable store passes the gate; the first pass fast-forwards the
 	// seeded workspace to the (empty) journal tail and persists its cursor, so
 	// the state file appears.
-	startIssueJournalBridge(ctx, readerCapableStore{Store: mem})
+	startIssueJournalBridge(ctx, readerCapableStore{Store: mem}, nil)
 
 	deadline := time.Now().Add(3 * time.Second)
 	for time.Now().Before(deadline) {

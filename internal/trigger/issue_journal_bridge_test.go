@@ -260,6 +260,43 @@ func TestIssueJournalBridgeEmitFailureHoldsCursor(t *testing.T) {
 	}
 }
 
+// TestIssueJournalBridgeDrainsPastFilteredPage proves the bridge advances past a
+// page the reader filtered out ENTIRELY — a raw window of non-issue mutations
+// (driver_run/task_run/role churn) with no issue event. fleet-db filters
+// entity_type=issue server-side and reports has_more against the POST-FILTER
+// count, so such a page arrives as {events:[], nextCursor:<advanced>,
+// hasMore:false}. The old drain advanced the cursor only by the last EMITTED id
+// (empty here) and stopped on !hasMore, pinning the cursor and stalling the lane
+// forever; the bridge must resume from the reader's nextCursor instead.
+func TestIssueJournalBridgeDrainsPastFilteredPage(t *testing.T) {
+	reader := &fakeIssueJournalReader{pages: map[string]journalPage{
+		// A full raw window of non-issue mutations: zero issue events returned, the
+		// cursor advanced, has_more=false (post-filter count 0 != page limit).
+		"": {events: nil, next: "50", hasMore: false},
+		// The next window finally carries the real issue.create.
+		"50": {events: []store.JournalEvent{
+			issueEvent("100", "issue.create", "user:alice", "42", `{"status":"open"}`),
+		}, next: "100", hasMore: false},
+	}}
+	cursors := newFixedCursorStore()
+	seenStart(cursors, "WS")
+	bridge, s := newBridge(t, reader, cursors)
+
+	out, err := bridge.RunOnce(t.Context())
+	if err != nil {
+		t.Fatalf("RunOnce: %v", err)
+	}
+	if out.Emitted != 1 {
+		t.Fatalf("emitted = %d, want 1 (drained past the filtered page to the issue event)", out.Emitted)
+	}
+	if events, runs := internalCounts(t, s); events != 1 || runs != 1 {
+		t.Fatalf("store = %d events %d runs, want 1/1", events, runs)
+	}
+	if got, _ := cursors.Load("WS"); got != "100" {
+		t.Fatalf("cursor = %q, want 100 (advanced past the all-filtered page)", got)
+	}
+}
+
 func TestIssueJournalBridgeActionAllowlistSkips(t *testing.T) {
 	reader := &fakeIssueJournalReader{pages: map[string]journalPage{
 		"": {events: []store.JournalEvent{

@@ -1,6 +1,7 @@
 package trigger_test
 
 import (
+	"context"
 	"encoding/json"
 	"testing"
 
@@ -30,8 +31,8 @@ func setupTaskReadyBinding(t *testing.T, s *memstore.Store) {
 	if _, err := s.TriggerBindings().Create(ctx, store.TriggerBindingCreate{
 		WorkspaceKey: "WS", BindingID: "b-task-ready", Name: "b-task-ready",
 		SourceKind: "internal", RouteKey: "internal." + trigger.TaskReadyEventType,
-		SourceConfigRef:   `{"roleName":"docs-assistant"}`,
-		DriverID:          "prompt-agent", DriverVersionID: "v1", TargetEntrypoint: "run",
+		SourceConfigRef: `{"roleName":"docs-assistant"}`,
+		DriverID:        "prompt-agent", DriverVersionID: "v1", TargetEntrypoint: "run",
 		ConcurrencyPolicy: domain.TriggerBindingConcurrencyAllow, Enabled: true,
 	}); err != nil {
 		t.Fatalf("Create trigger binding: %v", err)
@@ -106,6 +107,114 @@ func TestIssueJournalBridgeEmitsTaskReady(t *testing.T) {
 	}
 	if ev["taskId"] != "SANDBOX-7" {
 		t.Fatalf("emitter payload taskId = %v, want SANDBOX-7 (claim target)", ev["taskId"])
+	}
+}
+
+// TestIssueJournalBridgeTaskReadyPayloadEnrichment proves the pinned claim-gate
+// contract: the task.ready emitter payload carries taskId, status, hasDesign,
+// labels and issueType pulled from the journal After snapshot (fleet-db wire
+// keys design/labels/type). A task WITH a design and labels reports hasDesign
+// true and its labels/type; the fields are always present with a stable type.
+func TestIssueJournalBridgeTaskReadyPayloadEnrichment(t *testing.T) {
+	reader := &fakeIssueJournalReader{pages: map[string]journalPage{
+		"": {events: []store.JournalEvent{
+			issueEvent("500", "issue.update", "user:alice", "SANDBOX-11",
+				`{"status":"open","title":"Fix it","type":"bug","design":"approved plan","labels":["urgent","backend"]}`),
+		}, next: "500"},
+	}}
+	cursors := newFixedCursorStore()
+	seenStart(cursors, "WS")
+	s := memstore.New()
+	setupTaskReadyBinding(t, s)
+	bridge := &trigger.IssueJournalBridge{
+		Store: s, Source: &trigger.InternalSource{Store: s}, Reader: reader,
+		WorkspaceKey: "WS", Cursors: cursors, EmitTaskReady: true,
+	}
+	if _, err := bridge.RunOnce(t.Context()); err != nil {
+		t.Fatalf("RunOnce: %v", err)
+	}
+
+	runs, err := s.DriverRuns().List(t.Context(), "WS", store.DriverRunFilter{})
+	if err != nil || len(runs) != 1 {
+		t.Fatalf("List runs = %v, %v; want 1 run", runs, err)
+	}
+	var envelope struct {
+		Event json.RawMessage `json:"event"`
+	}
+	if err := json.Unmarshal(runs[0].Payload, &envelope); err != nil {
+		t.Fatalf("decode envelope: %v", err)
+	}
+	var ev struct {
+		TaskID    string   `json:"taskId"`
+		Status    string   `json:"status"`
+		HasDesign bool     `json:"hasDesign"`
+		Labels    []string `json:"labels"`
+		IssueType string   `json:"issueType"`
+	}
+	if err := json.Unmarshal(envelope.Event, &ev); err != nil {
+		t.Fatalf("decode emitter payload: %v", err)
+	}
+	if ev.TaskID != "SANDBOX-11" || ev.Status != "open" {
+		t.Fatalf("taskId/status = %q/%q, want SANDBOX-11/open", ev.TaskID, ev.Status)
+	}
+	if !ev.HasDesign {
+		t.Fatalf("hasDesign = false, want true (design body present)")
+	}
+	if ev.IssueType != "bug" {
+		t.Fatalf("issueType = %q, want bug", ev.IssueType)
+	}
+	if len(ev.Labels) != 2 || ev.Labels[0] != "urgent" || ev.Labels[1] != "backend" {
+		t.Fatalf("labels = %v, want [urgent backend]", ev.Labels)
+	}
+}
+
+// TestIssueJournalBridgeTaskReadyPayloadZeroValues proves the contract fields are
+// present with stable zero values for a bare task (no design/labels/type): a
+// planner-lane task created empty reports hasDesign false and labels [] (never
+// null), so the claim gate can compare without nil checks.
+func TestIssueJournalBridgeTaskReadyPayloadZeroValues(t *testing.T) {
+	reader := &fakeIssueJournalReader{pages: map[string]journalPage{
+		"": {events: []store.JournalEvent{
+			issueEvent("501", "issue.create", "user:alice", "SANDBOX-12", `{"status":"open","title":"Plan me"}`),
+		}, next: "501"},
+	}}
+	cursors := newFixedCursorStore()
+	seenStart(cursors, "WS")
+	s := memstore.New()
+	setupTaskReadyBinding(t, s)
+	bridge := &trigger.IssueJournalBridge{
+		Store: s, Source: &trigger.InternalSource{Store: s}, Reader: reader,
+		WorkspaceKey: "WS", Cursors: cursors, EmitTaskReady: true,
+	}
+	if _, err := bridge.RunOnce(t.Context()); err != nil {
+		t.Fatalf("RunOnce: %v", err)
+	}
+	runs, _ := s.DriverRuns().List(t.Context(), "WS", store.DriverRunFilter{})
+	if len(runs) != 1 {
+		t.Fatalf("want 1 run, got %d", len(runs))
+	}
+	var envelope struct {
+		Event json.RawMessage `json:"event"`
+	}
+	if err := json.Unmarshal(runs[0].Payload, &envelope); err != nil {
+		t.Fatalf("decode envelope: %v", err)
+	}
+	// labels must serialize as [] not null: assert on the raw JSON.
+	if !json.Valid(envelope.Event) {
+		t.Fatalf("emitter payload is not valid JSON: %s", envelope.Event)
+	}
+	var probe map[string]json.RawMessage
+	if err := json.Unmarshal(envelope.Event, &probe); err != nil {
+		t.Fatalf("decode emitter payload: %v", err)
+	}
+	if got := string(probe["labels"]); got != "[]" {
+		t.Fatalf("labels raw = %s, want [] (stable empty array, never null)", got)
+	}
+	if got := string(probe["hasDesign"]); got != "false" {
+		t.Fatalf("hasDesign raw = %s, want false", got)
+	}
+	if got := string(probe["issueType"]); got != `""` {
+		t.Fatalf("issueType raw = %s, want empty string", got)
 	}
 }
 
@@ -188,5 +297,110 @@ func TestIssueJournalBridgeTaskReadyOnUnblock(t *testing.T) {
 	}
 	if out.TaskReadyEmitted != 1 {
 		t.Fatalf("result = %+v, want 1 task-ready on unblock", out)
+	}
+}
+
+// TestIssueJournalBridgeTaskReadyDeltaUsesIssueLookup is the regression test
+// for the 2026-07-07 approve-transition bug: an issue.update entry's After is a
+// DELTA (here only {"status":"open"} — the plan-approval move), which says
+// NOTHING about the card's design. The payload must be enriched from
+// IssueLookup (the live card, which HAS a design) — emitting hasDesign=false
+// would send the coder away and invite the planner to re-plan.
+func TestIssueJournalBridgeTaskReadyDeltaUsesIssueLookup(t *testing.T) {
+	reader := &fakeIssueJournalReader{pages: map[string]journalPage{
+		"": {events: []store.JournalEvent{
+			issueEvent("600", "issue.update", "user:alice", "SANDBOX-13", `{"status":"open"}`),
+		}, next: "600"},
+	}}
+	cursors := newFixedCursorStore()
+	seenStart(cursors, "WS")
+	s := memstore.New()
+	setupTaskReadyBinding(t, s)
+	var lookedUpWS, lookedUpID string
+	bridge := &trigger.IssueJournalBridge{
+		Store: s, Source: &trigger.InternalSource{Store: s}, Reader: reader,
+		WorkspaceKey: "WS", Cursors: cursors, EmitTaskReady: true,
+		IssueLookup: func(_ context.Context, ws, id string) (string, []string, string, error) {
+			lookedUpWS, lookedUpID = ws, id
+			return "an approved design body", []string{"backend"}, "task", nil
+		},
+	}
+	if _, err := bridge.RunOnce(t.Context()); err != nil {
+		t.Fatalf("RunOnce: %v", err)
+	}
+	if lookedUpWS != "WS" || lookedUpID != "SANDBOX-13" {
+		t.Fatalf("lookup called with %q/%q, want WS/SANDBOX-13", lookedUpWS, lookedUpID)
+	}
+	runs, _ := s.DriverRuns().List(t.Context(), "WS", store.DriverRunFilter{})
+	if len(runs) != 1 {
+		t.Fatalf("want 1 run, got %d", len(runs))
+	}
+	var envelope struct {
+		Event json.RawMessage `json:"event"`
+	}
+	if err := json.Unmarshal(runs[0].Payload, &envelope); err != nil {
+		t.Fatalf("decode envelope: %v", err)
+	}
+	var ev struct {
+		HasDesign bool     `json:"hasDesign"`
+		Labels    []string `json:"labels"`
+		IssueType string   `json:"issueType"`
+	}
+	if err := json.Unmarshal(envelope.Event, &ev); err != nil {
+		t.Fatalf("decode emitter payload: %v", err)
+	}
+	if !ev.HasDesign {
+		t.Fatalf("hasDesign = false, want true (live card has a design)")
+	}
+	if len(ev.Labels) != 1 || ev.Labels[0] != "backend" {
+		t.Fatalf("labels = %v, want [backend]", ev.Labels)
+	}
+	if ev.IssueType != "task" {
+		t.Fatalf("issueType = %q, want task", ev.IssueType)
+	}
+}
+
+// TestIssueJournalBridgeTaskReadyDeltaWithoutLookupOmitsUnknowns proves the
+// fail-honest half of the delta semantics: with no IssueLookup wired (or when
+// it fails), the gating keys are OMITTED — absent means UNKNOWN, and the claim
+// gate falls back to claim-then-check — never a lying false.
+func TestIssueJournalBridgeTaskReadyDeltaWithoutLookupOmitsUnknowns(t *testing.T) {
+	reader := &fakeIssueJournalReader{pages: map[string]journalPage{
+		"": {events: []store.JournalEvent{
+			issueEvent("601", "issue.update", "user:alice", "SANDBOX-14", `{"status":"open"}`),
+		}, next: "601"},
+	}}
+	cursors := newFixedCursorStore()
+	seenStart(cursors, "WS")
+	s := memstore.New()
+	setupTaskReadyBinding(t, s)
+	bridge := &trigger.IssueJournalBridge{
+		Store: s, Source: &trigger.InternalSource{Store: s}, Reader: reader,
+		WorkspaceKey: "WS", Cursors: cursors, EmitTaskReady: true,
+	}
+	if _, err := bridge.RunOnce(t.Context()); err != nil {
+		t.Fatalf("RunOnce: %v", err)
+	}
+	runs, _ := s.DriverRuns().List(t.Context(), "WS", store.DriverRunFilter{})
+	if len(runs) != 1 {
+		t.Fatalf("want 1 run, got %d", len(runs))
+	}
+	var envelope struct {
+		Event json.RawMessage `json:"event"`
+	}
+	if err := json.Unmarshal(runs[0].Payload, &envelope); err != nil {
+		t.Fatalf("decode envelope: %v", err)
+	}
+	var probe map[string]json.RawMessage
+	if err := json.Unmarshal(envelope.Event, &probe); err != nil {
+		t.Fatalf("decode emitter payload: %v", err)
+	}
+	for _, key := range []string{"hasDesign", "labels", "issueType"} {
+		if _, present := probe[key]; present {
+			t.Fatalf("%s present in delta payload without lookup — absent means unknown, a zero value here is a lie", key)
+		}
+	}
+	if string(probe["taskId"]) != `"SANDBOX-14"` {
+		t.Fatalf("taskId = %s, want SANDBOX-14", probe["taskId"])
 	}
 }

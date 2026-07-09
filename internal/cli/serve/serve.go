@@ -235,15 +235,36 @@ func runServe(cmd *cobra.Command, args []string) {
 		log.Fatalf("failed to open fleet-db store: %v", storeErr)
 	}
 	defer func() { _ = storeHandle.Close() }()
+	// Backfill TS-contract prompt bodies for the builtin plan/task roles in
+	// existing workspaces (idempotent; never clobbers a customized prompt), so
+	// the prompt-agent role-reuse lane works for workspaces created before the
+	// bodies were seeded. Best-effort — a failure logs and serve continues.
+	if err := workspacemgr.EnsureBuiltinRolePrompts(ctx, storeHandle.Store); err != nil {
+		slog.Warn("builtin role prompt backfill failed", "err", err)
+	}
+	if err := workspacemgr.EnsurePromptAgentIdentityRecords(ctx, storeHandle.Store); err != nil {
+		slog.Warn("prompt-agent identity backfill failed", "err", err)
+	}
 	startDriverExecutorIfEnabled(ctx, storeHandle.Store)
 	startStaleTaskSweeper(ctx, storeHandle.Store)
 	startOutboxDispatcher(ctx, storeHandle.Store)
 	startTriggerCronScheduler(ctx, storeHandle.Store)
 	startTriggerDeliverySweeper(ctx, storeHandle.Store)
 	startAwaitTimeoutSweeper(ctx, storeHandle.Store)
-	startIssueJournalBridge(ctx, storeHandle.Store)
-
 	issueBackendFn := cli.WorkspaceAwareIssueBackendForURL(storeHandle.URL(), fleetState.clientCfg.Actor)
+	// task.ready payload enrichment: an issue.update journal delta can't say
+	// whether the card has a design, so the bridge looks the live card up
+	// through the same per-workspace issue backend the monitor uses.
+	startIssueJournalBridge(ctx, storeHandle.Store, func(lctx context.Context, ws, issueID string) (string, []string, string, error) {
+		detail, err := issueBackendFn(middleware.WithWorkspace(lctx, ws)).Get(lctx, issueID)
+		if err != nil {
+			return "", nil, "", err
+		}
+		if detail == nil {
+			return "", nil, "", fmt.Errorf("issue %q not found in workspace %q", issueID, ws)
+		}
+		return detail.Design, detail.Labels, detail.IssueType, nil
+	})
 	monitorDefaultWorkspace := resolveMonitorCollectorWorkspace(storeHandle.Store, fleetState.clientCfg.Workspace)
 	collectDataFn := buildMonitorCollectDataFn(monitorDefaultWorkspace, issueBackendFn)
 	monitorHandlers := buildMonitorHandlers(collectDataFn, staleDetectorHandler, storeHandle.Store, issueBackendFn, monitorDefaultWorkspace)

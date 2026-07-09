@@ -231,7 +231,7 @@ func startAwaitTimeoutSweeper(ctx context.Context, st store.Store) {
 // matching the sweepers, capped at one hour); LOOM_ISSUE_BRIDGE_STATE_PATH
 // overrides the cursor file; LOOM_ISSUE_BRIDGE_REPLAY=1 opts into
 // replay-from-zero on first observation (handled inside the bridge).
-func startIssueJournalBridge(ctx context.Context, st store.Store) {
+func startIssueJournalBridge(ctx context.Context, st store.Store, issueLookup func(ctx context.Context, workspace, issueID string) (string, []string, string, error)) {
 	if st == nil {
 		return
 	}
@@ -262,6 +262,7 @@ func startIssueJournalBridge(ctx context.Context, st store.Store) {
 		WorkspaceKey:  driverAutomationWorkspaceScope(),
 		Cursors:       cursors,
 		EmitTaskReady: taskReadyEventsEnabled(),
+		IssueLookup:   issueLookup,
 	}
 	interval := issueBridgeInterval()
 	slog.Info("Issue journal bridge enabled", "workspace", bridge.WorkspaceKey, "interval", interval, "state_path", issueBridgeStatePath())

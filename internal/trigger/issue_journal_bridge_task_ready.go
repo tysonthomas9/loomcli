@@ -95,7 +95,7 @@ func journalSnapshotStatus(after json.RawMessage) string {
 // binding never stalls the bridge, mirroring emitOne. Any other Emit error is
 // returned so the drain stops and the entry is retried.
 func (b *IssueJournalBridge) emitTaskReady(ctx context.Context, ws string, ev store.JournalEvent) error {
-	_, err := b.Source.Emit(ctx, ws, b.toTaskReadyEvent(ev))
+	_, err := b.Source.Emit(ctx, ws, b.toTaskReadyEvent(ctx, ws, ev))
 	switch {
 	case err == nil:
 		return nil
@@ -112,12 +112,9 @@ func (b *IssueJournalBridge) emitTaskReady(ctx context.Context, ws string, ev st
 // task.ready InternalEvent. EventID is deterministic (fleet-journal-{id}-ready)
 // so replay dedups; Origin is system (a depth-0 root); ActorRef is the journal
 // actor verbatim; SubjectRef is issue:{entityID}; Payload carries the task id
-// explicitly so the fired run can claim by id.
-func (b *IssueJournalBridge) toTaskReadyEvent(ev store.JournalEvent) InternalEvent {
-	payload, _ := json.Marshal(map[string]string{
-		"taskId": ev.EntityID,
-		"status": journalSnapshotStatus(ev.After),
-	})
+// explicitly so the fired run can claim by id, plus the role-gating hints below.
+func (b *IssueJournalBridge) toTaskReadyEvent(ctx context.Context, ws string, ev store.JournalEvent) InternalEvent {
+	payload, _ := json.Marshal(b.taskReadyPayload(ctx, ws, ev))
 	return InternalEvent{
 		EventID:      IssueJournalEventIDPrefix + ev.ID + taskReadyEventIDSuffix,
 		EventType:    TaskReadyEventType,
@@ -127,4 +124,116 @@ func (b *IssueJournalBridge) toTaskReadyEvent(ev store.JournalEvent) InternalEve
 		Payload:      payload,
 		SubjectAttrs: issueSubjectAttrs(ev.After),
 	}
+}
+
+// taskReadyPayload assembles the task.ready emitter payload. Beyond the task id
+// (the claim target) and ready status it carries the role-gating hints the
+// prompt-agent claim lane compares against a worn role's task filter BEFORE
+// spending any backend tokens — hasDesign, labels and issueType — so a planner
+// binding (needs no design) and a coder binding (needs a design) can each
+// decline a mismatched task without a claim-and-release round trip.
+//
+// SNAPSHOT SEMANTICS (the 2026-07-07 approve bug): an issue.create entry's
+// After is the FULL card, so an absent key is a genuine zero value (fleet-db
+// omits an empty design). An issue.update entry's After is a DELTA — only the
+// changed fields — so an absent key means UNKNOWN, not false. For deltas the
+// gating hints are enriched from IssueLookup (the live card); when lookup is
+// unavailable/fails, unknowable keys are OMITTED so the claim gate falls back
+// to claim-then-check instead of trusting a lying false. Pinned contract with
+// the claim gate: { taskId, status, hasDesign?, labels?, issueType? } — an
+// absent gating key means unknown, never false.
+func (b *IssueJournalBridge) taskReadyPayload(ctx context.Context, ws string, ev store.JournalEvent) map[string]any {
+	fields := snapshotFields(ev.After)
+	payload := map[string]any{
+		"taskId": ev.EntityID,
+		"status": journalSnapshotStatus(ev.After),
+	}
+	_, designKnown := fields["design"]
+	_, labelsKnown := fields["labels"]
+	_, typeKnown := fields["type"]
+	fullSnapshot := ev.Action == "issue.create"
+	if !fullSnapshot && b.IssueLookup != nil && !(designKnown && labelsKnown && typeKnown) {
+		if design, labels, issueType, err := b.IssueLookup(ctx, ws, ev.EntityID); err == nil {
+			payload["hasDesign"] = strings.TrimSpace(design) != ""
+			payload["labels"] = normalizeLabelSlice(labels)
+			payload["issueType"] = issueType
+			return payload
+		}
+		// lookup failed: fall through to the presence-aware partials below
+	}
+	if fullSnapshot || designKnown {
+		payload["hasDesign"] = snapshotFieldNonEmpty(fields, "design")
+	}
+	if fullSnapshot || labelsKnown {
+		payload["labels"] = snapshotStringSlice(fields, "labels")
+	}
+	if fullSnapshot || typeKnown {
+		payload["issueType"] = snapshotFieldScalar(fields, "type")
+	}
+	return payload
+}
+
+// normalizeLabelSlice mirrors snapshotStringSlice's stable-[] guarantee for
+// lookup-sourced labels: never nil, blanks dropped.
+func normalizeLabelSlice(labels []string) []string {
+	out := []string{}
+	for _, l := range labels {
+		if strings.TrimSpace(l) != "" {
+			out = append(out, l)
+		}
+	}
+	return out
+}
+
+// snapshotFields decodes a journal After snapshot into its top-level field map;
+// a nil/empty/non-object snapshot yields nil, which every accessor below treats
+// as "no fields present".
+func snapshotFields(after json.RawMessage) map[string]json.RawMessage {
+	if len(after) == 0 {
+		return nil
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(after, &fields); err != nil {
+		return nil
+	}
+	return fields
+}
+
+// snapshotFieldScalar renders one scalar snapshot field to its string form,
+// yielding "" when the key is absent or its value is not a scalar.
+func snapshotFieldScalar(fields map[string]json.RawMessage, key string) string {
+	if raw, ok := fields[key]; ok {
+		if v, ok := scalarString(raw); ok {
+			return v
+		}
+	}
+	return ""
+}
+
+// snapshotFieldNonEmpty reports whether a snapshot field is a non-empty scalar
+// string. Used for hasDesign: a task carries a design when its design body is
+// set (fleet-db omits an empty design from the snapshot).
+func snapshotFieldNonEmpty(fields map[string]json.RawMessage, key string) bool {
+	return snapshotFieldScalar(fields, key) != ""
+}
+
+// snapshotStringSlice decodes a snapshot field as a JSON string array, dropping
+// non-string/blank elements. It always returns a non-nil slice so the wire field
+// is a stable [] (never null) when the snapshot carries no labels.
+func snapshotStringSlice(fields map[string]json.RawMessage, key string) []string {
+	out := []string{}
+	raw, ok := fields[key]
+	if !ok {
+		return out
+	}
+	var arr []json.RawMessage
+	if err := json.Unmarshal(raw, &arr); err != nil {
+		return out
+	}
+	for _, item := range arr {
+		if v, ok := scalarString(item); ok {
+			out = append(out, v)
+		}
+	}
+	return out
 }
