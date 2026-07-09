@@ -390,6 +390,174 @@ describe("ActivityLog", () => {
       expect(screen.getByText("grace updated this issue")).toBeInTheDocument();
     });
 
+    it.each([
+      ["issue.created", {}, "alice created this issue"],
+      ["issue.status_changed", {}, "alice changed the status"],
+      ["issue.claimed", {}, "alice claimed this issue"],
+      ["issue.released", {}, "alice released this issue"],
+      [
+        "issue.deferred",
+        { new_value: "2026-05-01T00:00:00Z" },
+        "alice deferred this issue until 2026-05-01T00:00:00Z",
+      ],
+      ["issue.undeferred", {}, "alice un-deferred this issue"],
+      ["issue.closed", {}, "alice closed this issue"],
+      ["issue.reopened", {}, "alice reopened this issue"],
+      [
+        "issue.assigned",
+        { new_value: "worker-1" },
+        "alice assigned this issue to worker-1",
+      ],
+      ["issue.deleted", {}, "alice deleted this issue"],
+      ["issue.updated", {}, "alice updated this issue"],
+      [
+        "issue.dependency_added",
+        { new_value: "issue-42" },
+        "alice added dependency issue-42",
+      ],
+      [
+        "issue.dependency_removed",
+        { old_value: "issue-42" },
+        "alice removed dependency issue-42",
+      ],
+      ["issue.label_added", { new_value: "bug" }, "alice added label bug"],
+      [
+        "issue.label_removed",
+        { old_value: "wontfix" },
+        "alice removed label wontfix",
+      ],
+      ["issue.compacted", {}, "Earlier activity was summarized"],
+    ])(
+      "renders specific text for %s events",
+      (eventType, overrides, expectedText) => {
+        render(
+          <ActivityLog
+            comments={[]}
+            events={[
+              createTestEvent({
+                event_type: eventType as EventType,
+                actor: "alice",
+                ...(overrides as Partial<Event>),
+              }),
+            ]}
+            issueId="test-issue"
+          />,
+        );
+
+        expect(screen.getByText(expectedText)).toBeInTheDocument();
+        expect(
+          screen.queryByText("alice performed an action"),
+        ).not.toBeInTheDocument();
+      },
+    );
+
+    it("describes deferred events without a date using fallback text", () => {
+      render(
+        <ActivityLog
+          comments={[]}
+          events={[
+            createTestEvent({
+              event_type: "issue.deferred",
+              actor: "alice",
+            }),
+          ]}
+          issueId="test-issue"
+        />,
+      );
+
+      expect(screen.getByText("alice deferred this issue")).toBeInTheDocument();
+    });
+
+    it("describes single-field updates with the field name", () => {
+      render(
+        <ActivityLog
+          comments={[]}
+          events={[
+            createTestEvent({
+              event_type: "issue.updated",
+              actor: "alice",
+              field: "priority",
+              fields: ["priority"],
+              field_count: 1,
+              old_value: "P2",
+              new_value: "P0",
+            }),
+          ]}
+          issueId="test-issue"
+        />,
+      );
+
+      expect(
+        screen.getByText("alice updated priority from P2 to P0"),
+      ).toBeInTheDocument();
+    });
+
+    it("humanises known update field names", () => {
+      render(
+        <ActivityLog
+          comments={[]}
+          events={[
+            createTestEvent({
+              event_type: "issue.updated",
+              actor: "alice",
+              field: "issue_type",
+              fields: ["issue_type"],
+              field_count: 1,
+              old_value: "task",
+              new_value: "bug",
+            }),
+          ]}
+          issueId="test-issue"
+        />,
+      );
+
+      expect(
+        screen.getByText("alice updated type from task to bug"),
+      ).toBeInTheDocument();
+    });
+
+    it("lists multi-field update names without before or after values", () => {
+      render(
+        <ActivityLog
+          comments={[]}
+          events={[
+            createTestEvent({
+              event_type: "issue.updated",
+              actor: "alice",
+              fields: ["priority", "owner"],
+              field_count: 2,
+              old_value: "P2",
+              new_value: "P0",
+            }),
+          ]}
+          issueId="test-issue"
+        />,
+      );
+
+      expect(
+        screen.getByText("alice updated priority, owner"),
+      ).toBeInTheDocument();
+      expect(screen.queryByText(/from P2 to P0/)).not.toBeInTheDocument();
+    });
+
+    it("summarizes multi-field updates by count when names are unavailable", () => {
+      render(
+        <ActivityLog
+          comments={[]}
+          events={[
+            createTestEvent({
+              event_type: "issue.updated",
+              actor: "alice",
+              field_count: 3,
+            }),
+          ]}
+          issueId="test-issue"
+        />,
+      );
+
+      expect(screen.getByText("alice updated 3 fields")).toBeInTheDocument();
+    });
+
     it("uses 'Someone' when actor is empty", () => {
       const events = [
         createTestEvent({

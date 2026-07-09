@@ -2082,6 +2082,9 @@ export interface components {
       issue_id: string;
       event_type: string;
       actor: string;
+      field?: string | null;
+      fields?: string[];
+      field_count?: number;
       old_value?: string | null;
       new_value?: string | null;
       comment?: string | null;

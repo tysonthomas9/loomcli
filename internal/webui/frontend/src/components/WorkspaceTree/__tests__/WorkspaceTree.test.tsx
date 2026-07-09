@@ -17,8 +17,9 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import "@testing-library/jest-dom";
 import { WorkspaceTree } from "../WorkspaceTree";
 
-const { mockAddWorkspaceRepos } = vi.hoisted(() => ({
+const { mockAddWorkspaceRepos, mockDeleteWorkspaceRepo } = vi.hoisted(() => ({
   mockAddWorkspaceRepos: vi.fn(),
+  mockDeleteWorkspaceRepo: vi.fn(),
 }));
 
 // Default mock return values
@@ -137,6 +138,7 @@ vi.mock("@/hooks", async (importOriginal) => {
 
 vi.mock("@/hooks/api", () => ({
   addWorkspaceRepos: (...args: unknown[]) => mockAddWorkspaceRepos(...args),
+  deleteWorkspaceRepo: (...args: unknown[]) => mockDeleteWorkspaceRepo(...args),
 }));
 
 vi.mock("@/components/WorkspaceSwitcher", () => ({
@@ -183,6 +185,7 @@ describe("WorkspaceTree", () => {
     reposOverride = {};
     agentOverride = {};
     mockAddWorkspaceRepos.mockReset();
+    mockDeleteWorkspaceRepo.mockReset();
   });
 
   describe("repo list rendering", () => {

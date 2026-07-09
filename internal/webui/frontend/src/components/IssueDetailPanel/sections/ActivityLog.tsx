@@ -17,12 +17,50 @@ type ActivityItem =
   | { kind: "comment"; data: Comment }
   | { kind: "event"; data: Event };
 
+const FIELD_LABELS: Record<string, string> = {
+  issue_type: "type",
+  defer_until: "defer date",
+};
+
 function getTimestamp(item: ActivityItem): number {
   return new Date(item.data.created_at).getTime();
 }
 
+function fieldLabel(field: string): string {
+  return FIELD_LABELS[field] ?? field;
+}
+
+function updateFieldSummary(event: Event, who: string): string {
+  const { field, fields, field_count, old_value, new_value } = event;
+  if ((field_count ?? 0) > 1) {
+    if (Array.isArray(fields) && fields.length > 0) {
+      return `${who} updated ${fields.map(fieldLabel).join(", ")}`;
+    }
+    return `${who} updated ${field_count} fields`;
+  }
+  if (Array.isArray(fields) && fields.length > 1) {
+    return `${who} updated ${fields.map(fieldLabel).join(", ")}`;
+  }
+  if (Array.isArray(fields) && fields.length === 1 && !field) {
+    const onlyField = fields[0];
+    if (onlyField) {
+      return `${who} updated ${fieldLabel(onlyField)}`;
+    }
+  }
+  if (field && old_value && new_value) {
+    return `${who} updated ${fieldLabel(field)} from ${old_value} to ${new_value}`;
+  }
+  if (old_value && new_value) {
+    return `${who} updated ${old_value} to ${new_value}`;
+  }
+  if (Array.isArray(fields) && fields.length > 0) {
+    return `${who} updated ${fields.map(fieldLabel).join(", ")}`;
+  }
+  return `${who} updated this issue`;
+}
+
 /** Human-readable description for system events. */
-function describeEvent(event: Event): string {
+export function describeEvent(event: Event): string {
   const { event_type, actor, old_value, new_value } = event;
   const who = actor || "Someone";
 
@@ -34,15 +72,30 @@ function describeEvent(event: Event): string {
         return `${who} changed status from ${old_value} to ${new_value}`;
       }
       return `${who} changed the status`;
+    case "issue.claimed":
+      return `${who} claimed this issue`;
+    case "issue.released":
+      return `${who} released this issue`;
+    case "issue.deferred":
+      if (new_value) {
+        return `${who} deferred this issue until ${new_value}`;
+      }
+      return `${who} deferred this issue`;
+    case "issue.undeferred":
+      return `${who} un-deferred this issue`;
     case "issue.closed":
       return `${who} closed this issue`;
     case "issue.reopened":
       return `${who} reopened this issue`;
-    case "issue.updated":
-      if (old_value && new_value) {
-        return `${who} updated ${old_value} to ${new_value}`;
+    case "issue.assigned":
+      if (new_value) {
+        return `${who} assigned this issue to ${new_value}`;
       }
-      return `${who} updated this issue`;
+      return `${who} assigned this issue`;
+    case "issue.deleted":
+      return `${who} deleted this issue`;
+    case "issue.updated":
+      return updateFieldSummary(event, who);
     case "issue.dependency_added":
       return `${who} added dependency ${new_value || ""}`.trim();
     case "issue.dependency_removed":
@@ -64,6 +117,8 @@ function describeEvent(event: Event): string {
 function EventIcon({ eventType }: { eventType: EventType }): JSX.Element {
   switch (eventType) {
     case "issue.status_changed":
+    case "issue.deferred":
+    case "issue.undeferred":
     case "issue.closed":
     case "issue.reopened":
       return (
@@ -75,6 +130,38 @@ function EventIcon({ eventType }: { eventType: EventType }): JSX.Element {
             strokeWidth="1.5"
             strokeLinecap="round"
             strokeLinejoin="round"
+          />
+        </svg>
+      );
+    case "issue.deleted":
+      return (
+        <svg className={styles.eventIcon} viewBox="0 0 16 16" fill="none">
+          <path
+            d="M5.25 5.75v6.5m2.75-6.5v6.5m2.75-6.5v6.5M3.75 4h8.5M6.25 4V2.75h3.5V4m-5 0 .45 9.25h5.6L11.25 4"
+            stroke="currentColor"
+            strokeWidth="1.25"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+        </svg>
+      );
+    case "issue.claimed":
+    case "issue.released":
+    case "issue.assigned":
+      return (
+        <svg className={styles.eventIcon} viewBox="0 0 16 16" fill="none">
+          <circle
+            cx="8"
+            cy="5"
+            r="2.25"
+            stroke="currentColor"
+            strokeWidth="1.3"
+          />
+          <path
+            d="M3.75 13c.55-2.25 2-3.4 4.25-3.4s3.7 1.15 4.25 3.4"
+            stroke="currentColor"
+            strokeWidth="1.3"
+            strokeLinecap="round"
           />
         </svg>
       );

@@ -1443,14 +1443,49 @@ describe("issues API", () => {
       );
     });
 
-    it("unwraps successful response and returns Issue", async () => {
+    it("unwraps successful response and returns issue metadata", async () => {
       mockApiPost.mockResolvedValue(
         okResponse({ success: true, data: mockCreatedIssue }),
       );
 
       const result = await createIssue("test-ws-id", validCreateRequest);
 
-      expect(result).toEqual(mockCreatedIssue);
+      expect(result).toEqual({
+        issue: mockCreatedIssue,
+        softDuplicate: false,
+      });
+    });
+
+    it("marks create responses with the soft-duplicate warning header", async () => {
+      mockApiPost.mockResolvedValue({
+        data: { success: true, data: mockCreatedIssue },
+        error: undefined,
+        response: new Response(null, {
+          headers: { "X-Idempotency-Warning": "soft-duplicate" },
+        }),
+      });
+
+      const result = await createIssue("test-ws-id", validCreateRequest);
+
+      expect(result).toEqual({
+        issue: mockCreatedIssue,
+        softDuplicate: true,
+      });
+    });
+
+    it("sends the force idempotency header only when requested", async () => {
+      mockApiPost.mockResolvedValue(
+        okResponse({ success: true, data: mockCreatedIssue }),
+      );
+
+      await createIssue("test-ws-id", validCreateRequest, { force: true });
+
+      expect(mockApiPost).toHaveBeenCalledWith(
+        "/api/workspaces/{ws}/issues",
+        expect.objectContaining({
+          headers: { "X-Idempotency-Force": "true" },
+        }),
+      );
     });
 
     it("handles create request with all optional fields", async () => {

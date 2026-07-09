@@ -355,6 +355,15 @@ export interface CreateIssueRequest {
   defer_until?: string;
 }
 
+export interface CreateIssueOptions {
+  force?: boolean;
+}
+
+export interface CreateIssueResult {
+  issue: Issue;
+  softDuplicate: boolean;
+}
+
 export interface UpdateIssueRequest {
   title?: string;
   description?: string;
@@ -377,7 +386,8 @@ export interface UpdateIssueRequest {
 export async function createIssue(
   workspaceId: string,
   reqData: CreateIssueRequest,
-): Promise<Issue> {
+  options?: CreateIssueOptions,
+): Promise<CreateIssueResult> {
   const body = cleanQuery({
     title: reqData.title,
     issue_type: reqData.issue_type as
@@ -410,10 +420,25 @@ export async function createIssue(
     {
       params: { path: { ws: workspaceId } },
       body,
+      ...(options?.force ? { headers: { "X-Idempotency-Force": "true" } } : {}),
     },
   );
   if (error) throw apiErrorFromResponse(error, response);
-  return normalizeIssueRepo(unwrap(data, response) as unknown as Issue);
+  const issue = normalizeIssueRepo(unwrap(data, response) as unknown as Issue);
+  return {
+    issue,
+    softDuplicate:
+      response.headers.get("x-idempotency-warning") === "soft-duplicate",
+  };
+}
+
+export async function createIssueOnly(
+  workspaceId: string,
+  reqData: CreateIssueRequest,
+  options?: CreateIssueOptions,
+): Promise<Issue> {
+  const result = await createIssue(workspaceId, reqData, options);
+  return result.issue;
 }
 
 /**

@@ -13,7 +13,7 @@ import {
   del,
   ApiError,
 } from "@/api/common";
-import { createIssue } from "@/api/issues";
+import { createIssueOnly } from "@/api/issues";
 import type { Issue } from "@/types";
 
 // ============= Types =============
@@ -283,6 +283,16 @@ export async function addWorkspaceRepos(
   return unwrap(response);
 }
 
+export async function deleteWorkspaceRepo(
+  workspaceId: string,
+  repoName: string,
+): Promise<WorkspaceData> {
+  const response = await del<ApiResult<WorkspaceData>>(
+    `/api/workspaces/${encodeURIComponent(workspaceId)}/repos/${encodeURIComponent(repoName)}`,
+  );
+  return unwrap(response);
+}
+
 export async function createWorkspaceAgent(
   workspaceId: string,
   req: CreateAgentRequest,
@@ -348,7 +358,7 @@ export async function createWorkspaceTask(
   epicId: string,
   title: string,
 ): Promise<Issue> {
-  return createIssue(workspaceId, {
+  return createIssueOnly(workspaceId, {
     title,
     issue_type: "task",
     priority: 3,
@@ -363,7 +373,7 @@ export async function createWorkspaceEpic(
   workspaceId: string,
   title: string,
 ): Promise<Issue> {
-  return createIssue(workspaceId, {
+  return createIssueOnly(workspaceId, {
     title,
     issue_type: "epic",
     priority: 2,

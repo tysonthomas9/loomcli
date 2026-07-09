@@ -20,6 +20,8 @@ interface TypeOption {
   label: string;
 }
 
+type DisabledTypeOptions = Partial<Record<KnownIssueType, string>>;
+
 /**
  * Type options for the dropdown.
  */
@@ -43,6 +45,10 @@ export interface TypeDropdownProps {
   isSaving?: boolean;
   /** Whether editing is disabled */
   disabled?: boolean;
+  /** Per-target reasons for transitions the client can prove are invalid */
+  disabledTypeOptions?: DisabledTypeOptions;
+  /** Whether save failures should render next to the dropdown */
+  showInlineError?: boolean;
   /** Additional CSS class name */
   className?: string;
 }
@@ -68,6 +74,8 @@ export function TypeDropdown({
   onSave,
   isSaving,
   disabled,
+  disabledTypeOptions,
+  showInlineError = true,
   className,
 }: TypeDropdownProps): JSX.Element {
   const [isOpen, setIsOpen] = useState(false);
@@ -129,6 +137,12 @@ export function TypeDropdown({
 
   const handleSelect = useCallback(
     async (newType: IssueType) => {
+      const disabledReason =
+        disabledTypeOptions?.[newType as KnownIssueType] ?? "";
+      if (disabledReason) {
+        return;
+      }
+
       // Skip if same type selected
       if (newType === type) {
         setIsOpen(false);
@@ -153,7 +167,7 @@ export function TypeDropdown({
         setError(message);
       }
     },
-    [type, onSave],
+    [disabledTypeOptions, type, onSave],
   );
 
   const handleKeyDown = useCallback(
@@ -185,7 +199,8 @@ export function TypeDropdown({
           if (
             focusedIndex >= 0 &&
             focusedIndex < TYPE_OPTIONS.length &&
-            selectedOption
+            selectedOption &&
+            !disabledTypeOptions?.[selectedOption.value]
           ) {
             handleSelect(selectedOption.value);
           }
@@ -201,7 +216,13 @@ export function TypeDropdown({
           break;
       }
     },
-    [isOpen, focusedIndex, handleTriggerClick, handleSelect],
+    [
+      isOpen,
+      focusedIndex,
+      handleTriggerClick,
+      handleSelect,
+      disabledTypeOptions,
+    ],
   );
 
   const displayType = optimisticType ?? "task";
@@ -247,31 +268,42 @@ export function TypeDropdown({
           data-testid="type-dropdown-menu"
           onKeyDown={handleDropdownKeyDown}
         >
-          {TYPE_OPTIONS.map((option, index) => (
-            <div
-              key={option.value}
-              className={styles.option}
-              data-type={option.value}
-              data-selected={option.value === optimisticType || undefined}
-              data-focused={index === focusedIndex || undefined}
-              role="option"
-              aria-selected={option.value === optimisticType}
-              onClick={() => handleSelect(option.value)}
-              data-testid={`type-option-${option.value}`}
-            >
-              <TypeIcon
-                type={option.value}
-                size={16}
-                className={styles.optionIcon ?? ""}
-              />
-              <span className={styles.optionText}>{option.label}</span>
-              {option.value === optimisticType && (
-                <span className={styles.checkmark} aria-hidden="true">
-                  ✓
-                </span>
-              )}
-            </div>
-          ))}
+          {TYPE_OPTIONS.map((option, index) => {
+            const disabledReason = disabledTypeOptions?.[option.value] ?? "";
+            const isOptionDisabled = disabledReason !== "";
+            return (
+              <div
+                key={option.value}
+                className={styles.option}
+                data-type={option.value}
+                data-selected={option.value === optimisticType || undefined}
+                data-focused={index === focusedIndex || undefined}
+                data-disabled={isOptionDisabled || undefined}
+                role="option"
+                aria-selected={option.value === optimisticType}
+                aria-disabled={isOptionDisabled || undefined}
+                title={disabledReason || undefined}
+                onClick={() => {
+                  if (!isOptionDisabled) {
+                    handleSelect(option.value);
+                  }
+                }}
+                data-testid={`type-option-${option.value}`}
+              >
+                <TypeIcon
+                  type={option.value}
+                  size={16}
+                  className={styles.optionIcon ?? ""}
+                />
+                <span className={styles.optionText}>{option.label}</span>
+                {option.value === optimisticType && (
+                  <span className={styles.checkmark} aria-hidden="true">
+                    ✓
+                  </span>
+                )}
+              </div>
+            );
+          })}
         </div>
       )}
 
@@ -283,7 +315,7 @@ export function TypeDropdown({
         />
       )}
 
-      {error && (
+      {showInlineError && error && (
         <span className={styles.error} role="alert" data-testid="type-error">
           {error}
         </span>

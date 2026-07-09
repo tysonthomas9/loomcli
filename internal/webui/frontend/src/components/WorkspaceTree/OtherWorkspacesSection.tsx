@@ -61,10 +61,11 @@ export function OtherWorkspacesSection({
 
   // Workspace ordering state for drag-and-drop reorder
   const [workspaceOrder, setWorkspaceOrder] = useState<string[]>([]);
+  const reorderAttemptRef = useRef(0);
 
   // Initialize/sync order from prop data
   useEffect(() => {
-    setWorkspaceOrder(otherWorkspaces.map((ws) => ws.name));
+    setWorkspaceOrder(otherWorkspaces.map((ws) => ws.id));
   }, [otherWorkspaces]);
 
   // DnD sensors with 5px activation distance to prevent accidental drags
@@ -73,10 +74,22 @@ export function OtherWorkspacesSection({
     useSensor(KeyboardSensor),
   );
 
-  // Re-fetch order from server on error via parent-provided refetch
-  const rollbackOrder = useCallback(() => {
-    refetchWorkspaces();
-  }, [refetchWorkspaces]);
+  const persistWorkspaceOrder = useCallback(
+    (previousOrder: string[], nextOrder: string[]) => {
+      const attempt = reorderAttemptRef.current + 1;
+      reorderAttemptRef.current = attempt;
+      reorderWorkspaces(nextOrder).catch((err) => {
+        if (reorderAttemptRef.current === attempt) {
+          setWorkspaceOrder(previousOrder);
+        }
+        const message =
+          err instanceof Error ? err.message : "Failed to reorder workspaces";
+        showToast(message, { type: "error" });
+        refetchWorkspaces();
+      });
+    },
+    [refetchWorkspaces, showToast],
+  );
 
   const handleDragEnd = useCallback(
     (event: DragEndEvent) => {
@@ -88,38 +101,38 @@ export function OtherWorkspacesSection({
         const newIndex = prev.indexOf(over.id as string);
         if (oldIndex < 0 || newIndex < 0) return prev;
         const newOrder = arrayMove(prev, oldIndex, newIndex);
-        reorderWorkspaces(newOrder).catch(rollbackOrder);
+        persistWorkspaceOrder(prev, newOrder);
         return newOrder;
       });
     },
-    [rollbackOrder],
+    [persistWorkspaceOrder],
   );
 
   // Alt+Up/Down keyboard reorder
   const handleMoveUp = useCallback(
-    (name: string) => {
+    (id: string) => {
       setWorkspaceOrder((prev) => {
-        const idx = prev.indexOf(name);
+        const idx = prev.indexOf(id);
         if (idx <= 0) return prev;
         const newOrder = arrayMove(prev, idx, idx - 1);
-        reorderWorkspaces(newOrder).catch(rollbackOrder);
+        persistWorkspaceOrder(prev, newOrder);
         return newOrder;
       });
     },
-    [rollbackOrder],
+    [persistWorkspaceOrder],
   );
 
   const handleMoveDown = useCallback(
-    (name: string) => {
+    (id: string) => {
       setWorkspaceOrder((prev) => {
-        const idx = prev.indexOf(name);
+        const idx = prev.indexOf(id);
         if (idx < 0 || idx >= prev.length - 1) return prev;
         const newOrder = arrayMove(prev, idx, idx + 1);
-        reorderWorkspaces(newOrder).catch(rollbackOrder);
+        persistWorkspaceOrder(prev, newOrder);
         return newOrder;
       });
     },
-    [rollbackOrder],
+    [persistWorkspaceOrder],
   );
 
   // Workspace rename state
@@ -312,8 +325,8 @@ export function OtherWorkspacesSection({
             items={workspaceOrder}
             strategy={verticalListSortingStrategy}
           >
-            {workspaceOrder.map((name, idx) => {
-              const ws = otherWorkspaces.find((w) => w.name === name);
+            {workspaceOrder.map((id, idx) => {
+              const ws = otherWorkspaces.find((w) => w.id === id);
               if (!ws) return null;
               return (
                 <SortableWorkspaceEntry
@@ -331,10 +344,10 @@ export function OtherWorkspacesSection({
                   onRenameKeyDown={handleRenameKeyDown}
                   onContextMenu={handleContextMenu}
                   onOverflowClick={handleOverflowClick}
-                  onMoveUp={idx > 0 ? () => handleMoveUp(name) : undefined}
+                  onMoveUp={idx > 0 ? () => handleMoveUp(id) : undefined}
                   onMoveDown={
                     idx < workspaceOrder.length - 1
-                      ? () => handleMoveDown(name)
+                      ? () => handleMoveDown(id)
                       : undefined
                   }
                 />

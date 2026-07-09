@@ -34,7 +34,7 @@
   border: none;
   border-radius: 9px;
   background: transparent;
-  cursor: pointer;
+  cursor: default;
   font: inherit;
   color: var(--color-text-primary);
   text-align: left;
@@ -68,6 +68,34 @@
   text-overflow: ellipsis;
   white-space: nowrap;
   font-weight: 500;
+}
+
+.repoMenuButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.5rem;
+  height: 1.5rem;
+  flex: 0 0 1.5rem;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text-tertiary);
+  cursor: pointer;
+  font: inherit;
+  line-height: 1;
+}
+
+.repoMenuButton:hover,
+.repoMenuButton:focus-visible {
+  border-color: var(--color-border);
+  background: var(--color-bg-card);
+  color: var(--color-text-primary);
+}
+
+.repoMenuButton:focus-visible {
+  outline: 2px solid var(--color-focus);
+  outline-offset: 1px;
 }
 
 /* Ghost "+ Add Repo" entry at the section bottom (Aether V3 add-repo-wrap). */

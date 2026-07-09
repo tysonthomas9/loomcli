@@ -383,7 +383,11 @@ export function WorkspaceTree({
           {/* Repo inventory with the Add Repo entry at its bottom (Aether V3) */}
           <ReposSection
             repos={workspaceRepos}
-            {...(workspaceId && { onAddRepo: () => setAddRepoOpen(true) })}
+            {...(workspaceId && {
+              workspaceId,
+              onAddRepo: () => setAddRepoOpen(true),
+              onRepoRemoved: refetch,
+            })}
           />
         </div>
       )}

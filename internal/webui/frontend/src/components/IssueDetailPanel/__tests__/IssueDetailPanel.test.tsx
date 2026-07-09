@@ -379,6 +379,14 @@ describe("IssueDetailPanel", () => {
     >;
     mockDeleteWorkspaceAgent.mockReset();
     mockDeleteWorkspaceAgent.mockResolvedValue(undefined);
+    const mockUpdateIssue = updateIssue as ReturnType<typeof vi.fn>;
+    mockUpdateIssue.mockReset();
+    mockUpdateIssue.mockImplementation(
+      async (_workspaceId: string, id: string, updates: Partial<Issue>) => ({
+        ...createTestIssueDetails({ id }),
+        ...updates,
+      }),
+    );
   });
 
   // Reset body overflow after each test
@@ -875,16 +883,16 @@ describe("IssueDetailPanel", () => {
       expect(typeItem).toHaveTextContent("Task");
     });
 
-    it("does not render owner dropdown in metadata bar", () => {
+    it("renders owner dropdown in metadata bar", () => {
       const mockIssue = createTestIssueDetails({
         owner: "john-doe",
       });
       render(
         <IssueDetailPanel isOpen={true} issue={mockIssue} onClose={() => {}} />,
       );
-      expect(
-        screen.queryByTestId("owner-dropdown-trigger"),
-      ).not.toBeInTheDocument();
+      expect(screen.getByTestId("owner-dropdown-trigger")).toHaveTextContent(
+        "john-doe",
+      );
     });
 
     it("renders assignee dropdown with assignee name when provided", () => {
@@ -961,6 +969,227 @@ describe("IssueDetailPanel", () => {
         expect(screen.getByTestId("metadata-type")).toHaveTextContent(expected);
         unmount();
       }
+    });
+
+    it("renders priority, type, label, and owner editors", () => {
+      const mockIssue = createTestIssueDetails({
+        issue_type: "bug",
+        priority: 1,
+        labels: ["frontend"],
+        owner: "owner-1",
+      });
+
+      render(
+        <IssueDetailPanel isOpen={true} issue={mockIssue} onClose={() => {}} />,
+      );
+
+      expect(screen.getByTestId("type-dropdown-trigger")).toHaveTextContent(
+        "Bug",
+      );
+      expect(screen.getByTestId("priority-dropdown-trigger")).toHaveTextContent(
+        "P1 - High",
+      );
+      expect(screen.getByTestId("label-editor")).toBeInTheDocument();
+      expect(screen.getByTestId("owner-dropdown-trigger")).toHaveTextContent(
+        "owner-1",
+      );
+    });
+
+    it("saves priority changes with updateIssue", async () => {
+      const mockUpdateIssue = updateIssue as ReturnType<typeof vi.fn>;
+      const mockIssue = createTestIssueDetails({ priority: 2 });
+
+      render(
+        <IssueDetailPanel isOpen={true} issue={mockIssue} onClose={() => {}} />,
+      );
+
+      fireEvent.click(screen.getByTestId("priority-dropdown-trigger"));
+      fireEvent.click(screen.getByTestId("priority-option-1"));
+
+      await waitFor(() => {
+        expect(mockUpdateIssue).toHaveBeenCalledWith("", "test-123", {
+          priority: 1,
+        });
+      });
+    });
+
+    it("saves type changes with updateIssue", async () => {
+      const mockUpdateIssue = updateIssue as ReturnType<typeof vi.fn>;
+      const mockIssue = createTestIssueDetails({ issue_type: "task" });
+
+      render(
+        <IssueDetailPanel isOpen={true} issue={mockIssue} onClose={() => {}} />,
+      );
+
+      fireEvent.click(screen.getByTestId("type-dropdown-trigger"));
+      fireEvent.click(screen.getByTestId("type-option-bug"));
+
+      await waitFor(() => {
+        expect(mockUpdateIssue).toHaveBeenCalledWith("", "test-123", {
+          issue_type: "bug",
+        });
+      });
+    });
+
+    it("disables non-epic type targets for an epic with child issues", () => {
+      const mockIssue = createTestIssueDetails({
+        issue_type: "epic",
+        dependents: [
+          createTestDependency({
+            id: "child-1",
+            issue_type: "task",
+            dependency_type: "parent-child",
+          }),
+        ],
+      });
+
+      render(
+        <IssueDetailPanel isOpen={true} issue={mockIssue} onClose={() => {}} />,
+      );
+
+      fireEvent.click(screen.getByTestId("type-dropdown-trigger"));
+      const taskOption = screen.getByTestId("type-option-task");
+      expect(taskOption).toHaveAttribute("aria-disabled", "true");
+      expect(taskOption).toHaveAttribute(
+        "title",
+        "Epics with child issues cannot be changed to another type.",
+      );
+    });
+
+    it("shows one error and rolls back when type save fails", async () => {
+      const mockUpdateIssue = updateIssue as ReturnType<typeof vi.fn>;
+      mockUpdateIssue.mockRejectedValueOnce(new Error("Cannot change type"));
+      const mockIssue = createTestIssueDetails({ issue_type: "task" });
+
+      render(
+        <IssueDetailPanel isOpen={true} issue={mockIssue} onClose={() => {}} />,
+      );
+
+      fireEvent.click(screen.getByTestId("type-dropdown-trigger"));
+      fireEvent.click(screen.getByTestId("type-option-bug"));
+
+      await waitFor(() => {
+        expect(screen.getByTestId("metadata-error-toast")).toHaveTextContent(
+          "Cannot change type",
+        );
+      });
+      expect(screen.queryByTestId("type-error")).not.toBeInTheDocument();
+      expect(screen.getAllByRole("alert")).toHaveLength(1);
+      expect(screen.getByTestId("type-dropdown-trigger")).toHaveTextContent(
+        "Task",
+      );
+    });
+
+    it("saves owner changes with updateIssue", async () => {
+      const mockUpdateIssue = updateIssue as ReturnType<typeof vi.fn>;
+      const mockIssue = createTestIssueDetails({ owner: undefined });
+
+      render(
+        <IssueDetailPanel isOpen={true} issue={mockIssue} onClose={() => {}} />,
+      );
+
+      fireEvent.click(screen.getByTestId("owner-dropdown-trigger"));
+      fireEvent.change(screen.getByTestId("owner-input"), {
+        target: { value: "owner-2" },
+      });
+      fireEvent.click(screen.getByTestId("owner-submit"));
+
+      await waitFor(() => {
+        expect(mockUpdateIssue).toHaveBeenCalledWith("", "test-123", {
+          owner: "owner-2",
+        });
+      });
+    });
+
+    it("saves label changes with updateIssue add-label payloads", async () => {
+      const mockUpdateIssue = updateIssue as ReturnType<typeof vi.fn>;
+      const mockIssue = createTestIssueDetails({ labels: ["frontend"] });
+
+      render(
+        <IssueDetailPanel isOpen={true} issue={mockIssue} onClose={() => {}} />,
+      );
+
+      fireEvent.click(screen.getByTestId("add-label-button"));
+      fireEvent.change(screen.getByTestId("label-input"), {
+        target: { value: "backend" },
+      });
+      fireEvent.keyDown(screen.getByTestId("label-input"), { key: "Enter" });
+
+      await waitFor(() => {
+        expect(mockUpdateIssue).toHaveBeenCalledWith("", "test-123", {
+          add_labels: ["backend"],
+        });
+      });
+    });
+
+    it("does not send stale full label replacements when adding labels", async () => {
+      const mockUpdateIssue = updateIssue as ReturnType<typeof vi.fn>;
+      const mockIssue = createTestIssueDetails({ labels: ["frontend"] });
+
+      render(
+        <IssueDetailPanel isOpen={true} issue={mockIssue} onClose={() => {}} />,
+      );
+
+      fireEvent.click(screen.getByTestId("add-label-button"));
+      fireEvent.change(screen.getByTestId("label-input"), {
+        target: { value: "backend" },
+      });
+      fireEvent.keyDown(screen.getByTestId("label-input"), { key: "Enter" });
+
+      await waitFor(() => {
+        expect(mockUpdateIssue).toHaveBeenCalledWith("", "test-123", {
+          add_labels: ["backend"],
+        });
+      });
+      expect(mockUpdateIssue).not.toHaveBeenCalledWith(
+        "",
+        "test-123",
+        expect.objectContaining({ labels: expect.any(Array) }),
+      );
+    });
+
+    it("saves label removals with updateIssue remove-label payloads", async () => {
+      const mockUpdateIssue = updateIssue as ReturnType<typeof vi.fn>;
+      const mockIssue = createTestIssueDetails({ labels: ["frontend", "bug"] });
+
+      render(
+        <IssueDetailPanel isOpen={true} issue={mockIssue} onClose={() => {}} />,
+      );
+
+      fireEvent.click(screen.getByTestId("remove-label-bug"));
+
+      await waitFor(() => {
+        expect(mockUpdateIssue).toHaveBeenCalledWith("", "test-123", {
+          remove_labels: ["bug"],
+        });
+      });
+      expect(mockUpdateIssue).not.toHaveBeenCalledWith(
+        "",
+        "test-123",
+        expect.objectContaining({ labels: expect.any(Array) }),
+      );
+    });
+
+    it("rolls back priority edits and shows an error toast on failed save", async () => {
+      const mockUpdateIssue = updateIssue as ReturnType<typeof vi.fn>;
+      mockUpdateIssue.mockRejectedValueOnce(new Error("Network error"));
+      const mockIssue = createTestIssueDetails({ priority: 2 });
+
+      render(
+        <IssueDetailPanel isOpen={true} issue={mockIssue} onClose={() => {}} />,
+      );
+
+      fireEvent.click(screen.getByTestId("priority-dropdown-trigger"));
+      fireEvent.click(screen.getByTestId("priority-option-1"));
+
+      await waitFor(() => {
+        expect(screen.getByTestId("metadata-error-toast")).toHaveTextContent(
+          "Network error",
+        );
+      });
+      expect(screen.getByTestId("priority-dropdown-trigger")).toHaveTextContent(
+        "P2 - Medium",
+      );
     });
   });
 

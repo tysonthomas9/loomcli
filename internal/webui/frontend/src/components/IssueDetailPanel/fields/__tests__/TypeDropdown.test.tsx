@@ -186,6 +186,33 @@ describe("TypeDropdown", () => {
       );
     });
 
+    it("disables configured target types with a tooltip reason", async () => {
+      const reason = "Epics with child issues cannot be changed.";
+      const onSave = vi.fn().mockResolvedValue(undefined);
+      render(
+        <TypeDropdown
+          {...defaultProps}
+          type="epic"
+          onSave={onSave}
+          disabledTypeOptions={{ task: reason }}
+        />,
+      );
+
+      fireEvent.click(screen.getByTestId("type-dropdown-trigger"));
+      const taskOption = screen.getByTestId("type-option-task");
+      expect(taskOption).toHaveAttribute("aria-disabled", "true");
+      expect(taskOption).toHaveAttribute("title", reason);
+
+      await act(async () => {
+        fireEvent.click(taskOption);
+      });
+
+      expect(onSave).not.toHaveBeenCalled();
+      expect(screen.getByTestId("type-dropdown-trigger")).toHaveTextContent(
+        "Epic",
+      );
+    });
+
     it("each option shows icon and label", () => {
       render(<TypeDropdown {...defaultProps} />);
       fireEvent.click(screen.getByTestId("type-dropdown-trigger"));
@@ -418,6 +445,30 @@ describe("TypeDropdown", () => {
           "Network error",
         );
       });
+    });
+
+    it("can suppress inline error text while still rolling back", async () => {
+      const onSave = vi.fn().mockRejectedValue(new Error("Network error"));
+      render(
+        <TypeDropdown
+          {...defaultProps}
+          type="task"
+          onSave={onSave}
+          showInlineError={false}
+        />,
+      );
+
+      fireEvent.click(screen.getByTestId("type-dropdown-trigger"));
+      await act(async () => {
+        fireEvent.click(screen.getByTestId("type-option-bug"));
+      });
+
+      await waitFor(() => {
+        expect(screen.getByTestId("type-dropdown-trigger")).toHaveTextContent(
+          "Task",
+        );
+      });
+      expect(screen.queryByTestId("type-error")).not.toBeInTheDocument();
     });
 
     it("displays generic error for non-Error exceptions", async () => {

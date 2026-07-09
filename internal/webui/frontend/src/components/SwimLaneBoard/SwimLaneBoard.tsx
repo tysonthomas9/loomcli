@@ -256,8 +256,8 @@ function SwimLaneBoardContent({
   const [activeIssue, setActiveIssue] = useState<Issue | null>(null);
   const [sourceColumnId, setSourceColumnId] = useState<string | null>(null);
   const [showCompletedLanes, setShowCompletedLanes] = useState(() => {
-    if (!workspaceId) return false;
-    return wsGet(workspaceId, "swimlane-show-completed") === "true";
+    if (!workspaceId) return true;
+    return wsGet(workspaceId, "swimlane-show-completed") !== "false";
   });
   // Track lanes that have been toggled from their default state.
   // When defaultCollapsed=true, this tracks lanes that were EXPANDED (toggled to open).

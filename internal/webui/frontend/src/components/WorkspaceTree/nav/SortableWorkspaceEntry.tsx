@@ -53,7 +53,7 @@ export function SortableWorkspaceEntry({
     transform,
     transition,
     isDragging,
-  } = useSortable({ id: ws.name });
+  } = useSortable({ id: ws.id });
 
   const style: React.CSSProperties = {
     transform: transform

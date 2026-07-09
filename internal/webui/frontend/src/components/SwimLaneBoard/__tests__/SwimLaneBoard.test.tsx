@@ -323,6 +323,36 @@ describe("SwimLaneBoard", () => {
       ).toBeInTheDocument();
     });
 
+    it("shows epic lanes whose child issues are all closed in the Done column", () => {
+      const issues = [
+        createMockIssue({
+          id: "epic-1",
+          title: "Finished Epic",
+          issue_type: "epic",
+          status: "open",
+        }),
+        createMockIssue({
+          id: "task-1",
+          title: "Finished Task",
+          issue_type: "task",
+          parent: "epic-1",
+          parent_title: "Finished Epic",
+          status: "closed",
+        }),
+      ];
+
+      render(<SwimLaneBoard issues={issues} groupBy="epic" />);
+
+      expect(
+        screen.getByRole("heading", { name: "Finished Epic" }),
+      ).toBeInTheDocument();
+      const doneColumn = document.querySelector('section[data-status="done"]');
+      expect(doneColumn).not.toBeNull();
+      expect(
+        within(doneColumn as HTMLElement).getByText("Finished Task"),
+      ).toBeInTheDocument();
+    });
+
     it("shows correct lane titles for label grouping", () => {
       const issues = [
         createMockIssue({ id: "issue-1", labels: ["frontend"] }),

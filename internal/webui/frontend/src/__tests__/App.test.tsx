@@ -1002,7 +1002,10 @@ describe("App", () => {
     // Set up default API mocks (resolve by default so existing tests aren't affected)
     mockUpdateIssue.mockResolvedValue({});
     mockAddComment.mockResolvedValue({});
-    mockCreateIssue.mockResolvedValue(createMockIssue({ id: "created-issue" }));
+    mockCreateIssue.mockResolvedValue({
+      issue: createMockIssue({ id: "created-issue" }),
+      softDuplicate: false,
+    });
     mockStartAgent.mockResolvedValue(undefined);
     mockRunOnboardingFirstTask.mockResolvedValue({
       success: true,
@@ -2765,7 +2768,10 @@ describe("App", () => {
         title: "Manual first task",
         issue_type: "task",
       });
-      mockCreateIssue.mockResolvedValue(createdIssue);
+      mockCreateIssue.mockResolvedValue({
+        issue: createdIssue,
+        softDuplicate: false,
+      });
       mockStoreState = createMockUseIssuesReturn({
         issues: [],
         refetch,
