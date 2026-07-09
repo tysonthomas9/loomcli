@@ -506,3 +506,70 @@ The fleet-db batch therefore SHRINKS to: DELETE route (+ openapi.yaml),
 server newest-N run ordering + `trigger_binding_id` list filter, and
 spec-verifying the loomcli client (which also picks up `trigger_binding_id`
 decode). The run_input merge item drops out of fleet-db entirely.
+
+## Phase 4.5 — TS-plane parity (2026-07-07, Tyson) — the missing phase before Phase 5
+
+A full-loop E2E browser test (matrix + verdicts:
+`2026-07-03-unified-agent-ui-test-matrix.tsv`) exposed a sequencing hole in
+this proposal: Phases 1–4 delivered the unified *surfaces*, but Phase 5
+assumes a TS-plane *behavioral parity* that does not exist. Observed: the
+autonomous loop (task → auto-plan → approve → auto-code) closes only on the
+Go plane; the TS plane cannot wear the builtin roles at all
+(`prompt_agent_missing_prompt` — builtin roles are seeded with no prompt
+body), cannot win a pickup race (cron-only UI bindings vs the daemon's
+seconds-fast claims), cannot publish locally (`stackpublish` is GitHub-only),
+has no review→reopen→fix lane, and offers no live transcript. Phase 5's
+acceptance is untestable in this state.
+
+Phase 4.5 closes that gap. Full plan with verified root causes, workstreams,
+decisions, and acceptance mapping: `2026-07-07-e2e-feature-parity-plan.md`.
+Workstreams: WS1 builtin-role TS-contract prompt bodies + planner
+close-suppression/design handoff; WS2 event-driven pickup
+(`internal.task.ready` bindings from the UI, role-aware claim gating,
+interim `LOOM_LOCAL_MODE_PLANE=ts` toggle); WS3 local publish (TS
+local-branch delivery + Go LocalForge); WS4 live transcript + per-binding
+run attribution; WS5 local review lane (`task-run-diff` op +
+`local-review-agent`); WS6 UI fixes; WS7 capability-based tab convergence.
+All loomcli-side; no fleet-db changes.
+
+**Phase-5 entry criteria (= Phase 4.5 exit):** the E2E matrix rerun is green
+with Go role-agent seeding disabled — a UI-created TS planner auto-plans a
+new task within seconds, approval hands off to the TS coder, the change
+publishes to the local origin, the review agent comments and reopens, the
+coder fixes, and every stage is watchable live per agent per task.
+
+**What Phase 5 still owns after 4.5:** flipping `LOOM_DAEMON_LEAF=ts`
+default-on; the shared prompt-body rendering contract (Decision 2's full
+end-state — one body both planes compose from); the real task-type
+arbitration design (WS2c's toggle is the priced interim); AgentService for
+lead/interactive; supervisor retirement once preflight/concurrency/restart/
+PTY parity is proven.
+
+### Decision — durable agent identity (Tyson, 2026-07-07)
+
+An agent is a FIRST-CLASS RECORD with its own lifecycle (create / enable /
+disable / delete), modeled on the identity the Go plane already has (the
+agentdef row exists independently of any process, task, or claim). Bindings,
+driver versions, and role references are CONFIGURATION ATTACHED TO the agent
+— replaceable without changing who the agent is. The TS plane converges
+toward the existing agent-identity model; identity is never the trigger
+plumbing.
+
+Consequences:
+- Run history, grants, and budget attribute to the AGENT; `trigger_binding_id`
+  remains dispatch-level provenance beneath it. Config churn (trigger swap,
+  driver-version upgrade, binding delete+recreate) happens under a stable
+  identity — the id-reuse/history-adoption ambiguity found in the wave-1 live
+  run stops existing.
+- Deleting the agent is the meaningful lifecycle event (revoke grants,
+  archive history); deleting a binding is detaching config.
+- `AgentService` (`internal/domain/platform.go:147-168`) is the shape: the
+  IDENTITY RECORD comes forward now for background agents too; the
+  desired-state CONTROLLER (restart policy, instances, PTY attach) stays
+  Phase 5.
+- Create-agent flows create an AGENT (identity + role ref + trigger config),
+  not a bare binding. Interim until the record lands: the binding row is the
+  identity PROXY for TS agents, and the agent-scoped runs surface is rooted
+  on it (`GET /trigger-bindings/{id}/runs`), becoming a sub-resource of the
+  agent record later — this is why the runs surface must not stay rooted on
+  the driver.
