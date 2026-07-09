@@ -1738,6 +1738,24 @@ type PullRequestReviewResult struct {
 	State    *string `json:"state,omitempty"`
 }
 
+// ReviewerEnsureResult defines model for ReviewerEnsureResult.
+type ReviewerEnsureResult struct {
+	AgentName     string `json:"agent_name"`
+	CheckedOutSha string `json:"checked_out_sha"`
+	Seeded        bool   `json:"seeded"`
+}
+
+// ReviewerMessageRequest defines model for ReviewerMessageRequest.
+type ReviewerMessageRequest struct {
+	Text string `json:"text"`
+}
+
+// ReviewerMessageResult defines model for ReviewerMessageResult.
+type ReviewerMessageResult struct {
+	Reason string `json:"reason"`
+	State  string `json:"state"`
+}
+
 // RuntimeReadyResponse defines model for RuntimeReadyResponse.
 type RuntimeReadyResponse struct {
 	Mode      RuntimeReadyResponseMode `json:"mode"`
@@ -2472,6 +2490,9 @@ type RenameWorkspaceJSONRequestBody = WorkspaceRenameRequest
 
 // RunOnboardingFirstTaskJSONRequestBody defines body for RunOnboardingFirstTask for application/json ContentType.
 type RunOnboardingFirstTaskJSONRequestBody RunOnboardingFirstTaskJSONBody
+
+// PostPullRequestReviewerMessageJSONRequestBody defines body for PostPullRequestReviewerMessage for application/json ContentType.
+type PostPullRequestReviewerMessageJSONRequestBody = ReviewerMessageRequest
 
 // PostPullRequestReviewJSONRequestBody defines body for PostPullRequestReview for application/json ContentType.
 type PostPullRequestReviewJSONRequestBody = PullRequestReviewRequest

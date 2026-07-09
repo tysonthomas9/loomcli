@@ -2671,6 +2671,134 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
+  /api/workspaces/{ws}/pull-requests/{owner}/{repo}/{number}/reviewer:
+    post:
+      operationId: ensurePullRequestReviewer
+      tags: [pull-requests]
+      summary: Ensure a per-PR terminal reviewer agent
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: owner
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: repo
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: number
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Reviewer agent and checkout
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success, data]
+                properties:
+                  success:
+                    type: boolean
+                    const: true
+                  data:
+                    $ref: "#/components/schemas/ReviewerEnsureResult"
+        "400":
+          description: Invalid path parameter
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Repository is not registered or not checked out locally
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Worktree or reviewer setup failed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "502":
+          description: Upstream pull request metadata was incomplete
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: Connector egress unavailable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/workspaces/{ws}/pull-requests/{owner}/{repo}/{number}/messages:
+    post:
+      operationId: postPullRequestReviewerMessage
+      tags: [pull-requests]
+      summary: Send a message to a per-PR terminal reviewer agent
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: owner
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: repo
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: number
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ReviewerMessageRequest"
+      responses:
+        "200":
+          description: Reviewer message delivery result
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success, data]
+                properties:
+                  success:
+                    type: boolean
+                    const: true
+                  data:
+                    $ref: "#/components/schemas/ReviewerMessageResult"
+        "400":
+          description: Invalid request body or path parameter
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Repository is not registered or reviewer was not started
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Reviewer message delivery failed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
   /api/workspaces/{ws}/agents/{name}/git/diff-stat:
     get:
       operationId: getAgentDiffStat
@@ -3571,6 +3699,33 @@ components:
         review_id:
           type: integer
         state:
+          type: string
+
+    ReviewerEnsureResult:
+      type: object
+      required: [agent_name, checked_out_sha, seeded]
+      properties:
+        agent_name:
+          type: string
+        checked_out_sha:
+          type: string
+        seeded:
+          type: boolean
+
+    ReviewerMessageRequest:
+      type: object
+      required: [text]
+      properties:
+        text:
+          type: string
+
+    ReviewerMessageResult:
+      type: object
+      required: [state, reason]
+      properties:
+        state:
+          type: string
+        reason:
           type: string
 
     # ── Issue Schemas ───────────────────────────────────────────────────

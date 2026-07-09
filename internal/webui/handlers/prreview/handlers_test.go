@@ -8,12 +8,19 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 
 	"github.com/tysonthomas9/loomcli/internal/backend/api/gen"
+	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/connector"
+	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
+	"github.com/tysonthomas9/loomcli/internal/localworkspace"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 )
@@ -127,6 +134,7 @@ type prReviewHarness struct {
 func newPRReviewHarness(t *testing.T, withDispatcher bool) *prReviewHarness {
 	t.Helper()
 	h := &prReviewHarness{store: memstore.New(), github: newFakeGitHub(t), mux: http.NewServeMux()}
+	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
 	t.Setenv(connector.VaultKeyEnvVar, base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{0x42}, 32)))
 	t.Setenv(connector.GitHubBaseURLEnvVar, h.github.server.URL)
 	t.Setenv(webuiGitHubTokenEnv, prReviewTestToken)
@@ -165,6 +173,20 @@ func (h *prReviewHarness) seedWorkspace(t *testing.T) {
 		RemoteURL:    "https://github.com/octocat/hello",
 	}); err != nil {
 		t.Fatalf("Create repo: %v", err)
+	}
+}
+
+func (h *prReviewHarness) rememberLocalPaths(t *testing.T, workspacePath, repoName, repoPath string) {
+	t.Helper()
+	if err := bootstrap.SaveStateCache(&bootstrap.StateCache{
+		Workspaces: map[string]bootstrap.WorkspaceLocalState{
+			prReviewTestWorkspace: {
+				Path:  workspacePath,
+				Repos: map[string]string{repoName: repoPath},
+			},
+		},
+	}); err != nil {
+		t.Fatalf("SaveStateCache: %v", err)
 	}
 }
 
@@ -382,6 +404,168 @@ func TestGetPullRequestCanonicalizesCasing(t *testing.T) {
 	}
 }
 
+func TestReviewerAgentNameSanitizesRepo(t *testing.T) {
+	if got := reviewerAgentName("Hello.World_repo", 7); got != "review-hello-world-repo-pr-7" {
+		t.Fatalf("reviewerAgentName() = %q, want review-hello-world-repo-pr-7", got)
+	}
+	if got := reviewerAgentName("...///", 7); got != "review-repo-pr-7" {
+		t.Fatalf("reviewerAgentName(empty segment) = %q, want review-repo-pr-7", got)
+	}
+}
+
+func TestPostReviewerMessageQueuesPending(t *testing.T) {
+	h := newPRReviewHarness(t, false)
+	agentName := createReviewerAgentForTest(t, h, "hello", 7)
+
+	status, raw := h.post(t, "/api/workspaces/WS/pull-requests/octocat/hello/7/messages", `{"text":"hello"}`)
+	if status != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (body %s)", status, raw)
+	}
+	var decoded struct {
+		Success bool                      `json:"success"`
+		Data    gen.ReviewerMessageResult `json:"data"`
+	}
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		t.Fatalf("decode response: %v (body %s)", err, raw)
+	}
+	if !decoded.Success || decoded.Data.State != "pending" {
+		t.Fatalf("response = %+v, want pending delivery", decoded)
+	}
+	queued := queuedReviewerMessagesForTest(t, h.store, agentName)
+	if len(queued) != 1 {
+		t.Fatalf("queued messages = %d, want 1", len(queued))
+	}
+	if queued[0].Body != "hello" || queued[0].SourceKind != "user_chat" {
+		t.Fatalf("queued message = %+v, want user_chat hello", queued[0])
+	}
+}
+
+func TestPostReviewerMessageRequiresStartedReviewer(t *testing.T) {
+	h := newPRReviewHarness(t, false)
+	status, raw := h.post(t, "/api/workspaces/WS/pull-requests/octocat/hello/7/messages", `{"text":"hello"}`)
+	if status != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404 (body %s)", status, raw)
+	}
+	if code := decodeErrorCode(t, raw); code != "reviewer_not_started" {
+		t.Fatalf("code = %q, want reviewer_not_started", code)
+	}
+}
+
+func TestPostReviewerMessageRejectsEmptyText(t *testing.T) {
+	h := newPRReviewHarness(t, false)
+	createReviewerAgentForTest(t, h, "hello", 7)
+	status, raw := h.post(t, "/api/workspaces/WS/pull-requests/octocat/hello/7/messages", `{"text":"   "}`)
+	if status != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400 (body %s)", status, raw)
+	}
+	if code := decodeErrorCode(t, raw); code != "invalid" {
+		t.Fatalf("code = %q, want invalid", code)
+	}
+}
+
+func TestPostReviewerMessageUnregisteredRepoDoesNotEnqueue(t *testing.T) {
+	h := newPRReviewHarness(t, false)
+	createReviewerAgentForTest(t, h, "hello", 7)
+	status, raw := h.post(t, "/api/workspaces/WS/pull-requests/acme/widgets/7/messages", `{"text":"hello"}`)
+	if status != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404 (body %s)", status, raw)
+	}
+	if code := decodeErrorCode(t, raw); code != "repo_not_registered" {
+		t.Fatalf("code = %q, want repo_not_registered", code)
+	}
+	if queued := queuedReviewerMessagesForTest(t, h.store, reviewerAgentName("hello", 7)); len(queued) != 0 {
+		t.Fatalf("queued messages = %d, want 0", len(queued))
+	}
+}
+
+func TestEnsureReviewerCreatesAgentWorktreeAndSeed(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+
+	h := newPRReviewHarness(t, true)
+	root := t.TempDir()
+	remote := filepath.Join(root, "remote.git")
+	seed := filepath.Join(root, "seed")
+	workspacePath := filepath.Join(root, "workspace")
+	repoPath := filepath.Join(workspacePath, "hello")
+
+	git(t, "", "init", "--bare", remote)
+	git(t, "", "init", seed)
+	git(t, seed, "checkout", "-b", "main")
+	git(t, seed, "config", "user.name", "Test User")
+	git(t, seed, "config", "user.email", "test@example.test")
+	writeTestFile(t, filepath.Join(seed, "base.txt"), "base\n")
+	git(t, seed, "add", "base.txt")
+	git(t, seed, "commit", "-m", "base")
+	git(t, seed, "remote", "add", "origin", remote)
+	git(t, seed, "push", "origin", "HEAD:refs/heads/main")
+
+	writeTestFile(t, filepath.Join(seed, "pr.txt"), "pr head\n")
+	git(t, seed, "add", "pr.txt")
+	git(t, seed, "commit", "-m", "pr head")
+	headSHA := gitOutput(t, seed, "rev-parse", "HEAD")
+	git(t, seed, "push", "origin", "HEAD:refs/pull/7/head")
+
+	if err := os.MkdirAll(workspacePath, 0o755); err != nil {
+		t.Fatalf("mkdir workspace path: %v", err)
+	}
+	git(t, "", "clone", remote, repoPath)
+	git(t, repoPath, "checkout", "main")
+	h.rememberLocalPaths(t, workspacePath, "hello", repoPath)
+	h.github.setHead(headSHA)
+
+	status, raw := h.post(t, "/api/workspaces/WS/pull-requests/octocat/hello/7/reviewer", `{}`)
+	if status != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (body %s)", status, raw)
+	}
+	var decoded struct {
+		Success bool                     `json:"success"`
+		Data    gen.ReviewerEnsureResult `json:"data"`
+	}
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		t.Fatalf("decode response: %v (body %s)", err, raw)
+	}
+	agentName := reviewerAgentName("hello", 7)
+	if !decoded.Success || decoded.Data.AgentName != agentName || decoded.Data.CheckedOutSha != headSHA || !decoded.Data.Seeded {
+		t.Fatalf("response = %+v, want agent %s sha %s seeded", decoded, agentName, headSHA)
+	}
+
+	agent, err := h.store.Agents().Get(context.Background(), prReviewTestWorkspace, agentName)
+	if err != nil {
+		t.Fatalf("get reviewer agent: %v", err)
+	}
+	if agent.Backend != "codex" || agent.RoleName != "lead" || agent.DesiredState != domain.AgentDesiredRunning {
+		t.Fatalf("agent = %+v, want codex lead running", agent)
+	}
+	if _, err := h.store.Roles().Get(context.Background(), prReviewTestWorkspace, "lead"); err != nil {
+		t.Fatalf("lead role missing: %v", err)
+	}
+	worktreePath := localworkspace.AgentWorktreePath(workspacePath, "hello", agentName)
+	if _, err := os.Stat(filepath.Join(worktreePath, ".git")); err != nil {
+		t.Fatalf("worktree .git missing: %v", err)
+	}
+	if got := gitOutput(t, worktreePath, "rev-parse", "HEAD"); got != headSHA {
+		t.Fatalf("worktree HEAD = %s, want %s", got, headSHA)
+	}
+	queued := queuedReviewerMessagesForTest(t, h.store, agentName)
+	if len(queued) != 1 {
+		t.Fatalf("queued seed messages = %d, want 1", len(queued))
+	}
+	wantSeed := reviewerSeedText("octocat", "hello", 7, "Add review API", headSHA, "main", "origin")
+	if queued[0].Body != wantSeed {
+		t.Fatalf("seed body = %q, want %q", queued[0].Body, wantSeed)
+	}
+
+	status, raw = h.post(t, "/api/workspaces/WS/pull-requests/octocat/hello/7/reviewer", `{}`)
+	if status != http.StatusOK {
+		t.Fatalf("second status = %d, want 200 (body %s)", status, raw)
+	}
+	if queued := queuedReviewerMessagesForTest(t, h.store, agentName); len(queued) != 1 {
+		t.Fatalf("queued seed messages after second ensure = %d, want 1", len(queued))
+	}
+}
+
 func TestGetPullRequestEgressUnavailable(t *testing.T) {
 	t.Run("nil dispatcher", func(t *testing.T) {
 		h := newPRReviewHarness(t, false)
@@ -405,6 +589,74 @@ func TestGetPullRequestEgressUnavailable(t *testing.T) {
 			t.Fatalf("code = %q, want egress_unavailable", code)
 		}
 	})
+}
+
+func createReviewerAgentForTest(t *testing.T, h *prReviewHarness, repo string, number int) string {
+	t.Helper()
+	ctx := context.Background()
+	if _, err := h.store.Roles().Create(ctx, store.RoleCreate{
+		WorkspaceKey: prReviewTestWorkspace,
+		Name:         "lead",
+		Description:  "Lead/orchestrator terminal",
+	}); err != nil {
+		t.Fatalf("Create lead role: %v", err)
+	}
+	agentName := reviewerAgentName(repo, number)
+	if _, err := h.store.Agents().Create(ctx, store.AgentCreate{
+		WorkspaceKey: prReviewTestWorkspace,
+		Name:         agentName,
+		RoleName:     "lead",
+		Backend:      "codex",
+		DesiredState: domain.AgentDesiredRunning,
+	}); err != nil {
+		t.Fatalf("Create reviewer agent: %v", err)
+	}
+	return agentName
+}
+
+func queuedReviewerMessagesForTest(t *testing.T, st store.Store, agentName string) []*domain.AgentInboxMessage {
+	t.Helper()
+	items, err := st.AgentInboxMessages().List(context.Background(), prReviewTestWorkspace, store.AgentInboxMessageFilter{
+		TargetAgentID: agentName,
+		Status:        domain.AgentInboxMessageQueued,
+		Limit:         100,
+	})
+	if err != nil {
+		t.Fatalf("List queued inbox messages: %v", err)
+	}
+	return items
+}
+
+func writeTestFile(t *testing.T, path, contents string) {
+	t.Helper()
+	if err := os.WriteFile(path, []byte(contents), 0o644); err != nil {
+		t.Fatalf("write %s: %v", path, err)
+	}
+}
+
+func git(t *testing.T, dir string, args ...string) {
+	t.Helper()
+	cmd := exec.Command("git", args...) //nolint:gosec // fixed test helper command; args are test-controlled.
+	if dir != "" {
+		cmd.Dir = dir
+	}
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %s failed: %v\n%s", strings.Join(args, " "), err, strings.TrimSpace(string(out)))
+	}
+}
+
+func gitOutput(t *testing.T, dir string, args ...string) string {
+	t.Helper()
+	cmd := exec.Command("git", args...) //nolint:gosec // fixed test helper command; args are test-controlled.
+	if dir != "" {
+		cmd.Dir = dir
+	}
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %s failed: %v\n%s", strings.Join(args, " "), err, strings.TrimSpace(string(out)))
+	}
+	return strings.TrimSpace(string(out))
 }
 
 func decodeErrorCode(t *testing.T, raw []byte) string {
