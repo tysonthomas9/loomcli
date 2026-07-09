@@ -2799,6 +2799,98 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
+  /api/workspaces/{ws}/pull-requests/{owner}/{repo}/{number}/stream:
+    get:
+      operationId: streamPullRequestReviewer
+      tags: [pull-requests]
+      summary: Stream the per-PR reviewer conversation
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: owner
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: repo
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: number
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: SSE event stream of reviewer status and messages
+          content:
+            text/event-stream:
+              schema:
+                type: string
+                description: Newline-delimited SSE status, message, and heartbeat events
+        "400":
+          description: Invalid path parameter
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Repository is not registered or reviewer was not started
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/workspaces/{ws}/pull-requests/{owner}/{repo}/{number}/conversation:
+    get:
+      operationId: getPullRequestReviewerConversation
+      tags: [pull-requests]
+      summary: Snapshot of the per-PR reviewer conversation (poll target)
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: owner
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: repo
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: number
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Reviewer conversation snapshot
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success, data]
+                properties:
+                  success:
+                    type: boolean
+                    const: true
+                  data:
+                    $ref: "#/components/schemas/ReviewerConversation"
+        "400":
+          description: Invalid path parameter
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Repository is not registered or reviewer was not started
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
   /api/workspaces/{ws}/agents/{name}/git/diff-stat:
     get:
       operationId: getAgentDiffStat
@@ -3727,6 +3819,34 @@ components:
           type: string
         reason:
           type: string
+
+    ReviewerMessage:
+      type: object
+      required: [turn_id, item_id, role, text]
+      properties:
+        turn_id:
+          type: string
+        item_id:
+          type: string
+        role:
+          type: string
+          enum: [user, assistant]
+        text:
+          type: string
+        phase:
+          type: string
+
+    ReviewerConversation:
+      type: object
+      required: [state, messages]
+      properties:
+        state:
+          type: string
+          description: starting | reconnecting | idle | running
+        messages:
+          type: array
+          items:
+            $ref: "#/components/schemas/ReviewerMessage"
 
     # ── Issue Schemas ───────────────────────────────────────────────────
     Issue:

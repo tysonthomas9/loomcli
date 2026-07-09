@@ -611,6 +611,24 @@ func (e PullRequestReviewRequestEvent) Valid() bool {
 	}
 }
 
+// Defines values for ReviewerMessageRole.
+const (
+	ReviewerMessageRoleAssistant ReviewerMessageRole = "assistant"
+	ReviewerMessageRoleUser      ReviewerMessageRole = "user"
+)
+
+// Valid indicates whether the value is a known member of the ReviewerMessageRole enum.
+func (e ReviewerMessageRole) Valid() bool {
+	switch e {
+	case ReviewerMessageRoleAssistant:
+		return true
+	case ReviewerMessageRoleUser:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for RuntimeReadyResponseMode.
 const (
 	Daemon RuntimeReadyResponseMode = "daemon"
@@ -667,22 +685,22 @@ func (e SessionHistoryRecordStatus) Valid() bool {
 
 // Defines values for TranscriptEntryRole.
 const (
-	TranscriptEntryRoleAssistant TranscriptEntryRole = "assistant"
-	TranscriptEntryRoleSystem    TranscriptEntryRole = "system"
-	TranscriptEntryRoleTool      TranscriptEntryRole = "tool"
-	TranscriptEntryRoleUser      TranscriptEntryRole = "user"
+	Assistant TranscriptEntryRole = "assistant"
+	System    TranscriptEntryRole = "system"
+	Tool      TranscriptEntryRole = "tool"
+	User      TranscriptEntryRole = "user"
 )
 
 // Valid indicates whether the value is a known member of the TranscriptEntryRole enum.
 func (e TranscriptEntryRole) Valid() bool {
 	switch e {
-	case TranscriptEntryRoleAssistant:
+	case Assistant:
 		return true
-	case TranscriptEntryRoleSystem:
+	case System:
 		return true
-	case TranscriptEntryRoleTool:
+	case Tool:
 		return true
-	case TranscriptEntryRoleUser:
+	case User:
 		return true
 	default:
 		return false
@@ -1738,12 +1756,32 @@ type PullRequestReviewResult struct {
 	State    *string `json:"state,omitempty"`
 }
 
+// ReviewerConversation defines model for ReviewerConversation.
+type ReviewerConversation struct {
+	Messages []ReviewerMessage `json:"messages"`
+
+	// State starting | reconnecting | idle | running
+	State string `json:"state"`
+}
+
 // ReviewerEnsureResult defines model for ReviewerEnsureResult.
 type ReviewerEnsureResult struct {
 	AgentName     string `json:"agent_name"`
 	CheckedOutSha string `json:"checked_out_sha"`
 	Seeded        bool   `json:"seeded"`
 }
+
+// ReviewerMessage defines model for ReviewerMessage.
+type ReviewerMessage struct {
+	ItemId string              `json:"item_id"`
+	Phase  *string             `json:"phase,omitempty"`
+	Role   ReviewerMessageRole `json:"role"`
+	Text   string              `json:"text"`
+	TurnId string              `json:"turn_id"`
+}
+
+// ReviewerMessageRole defines model for ReviewerMessage.Role.
+type ReviewerMessageRole string
 
 // ReviewerMessageRequest defines model for ReviewerMessageRequest.
 type ReviewerMessageRequest struct {

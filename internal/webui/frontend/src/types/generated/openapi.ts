@@ -1481,6 +1481,40 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/workspaces/{ws}/pull-requests/{owner}/{repo}/{number}/stream": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Stream the per-PR reviewer conversation */
+    get: operations["streamPullRequestReviewer"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/workspaces/{ws}/pull-requests/{owner}/{repo}/{number}/conversation": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Snapshot of the per-PR reviewer conversation (poll target) */
+    get: operations["getPullRequestReviewerConversation"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/workspaces/{ws}/agents/{name}/git/diff-stat": {
     parameters: {
       query?: never;
@@ -2076,6 +2110,19 @@ export interface components {
     ReviewerMessageResult: {
       state: string;
       reason: string;
+    };
+    ReviewerMessage: {
+      turn_id: string;
+      item_id: string;
+      /** @enum {string} */
+      role: "user" | "assistant";
+      text: string;
+      phase?: string;
+    };
+    ReviewerConversation: {
+      /** @description starting | reconnecting | idle | running */
+      state: string;
+      messages: components["schemas"]["ReviewerMessage"][];
     };
     /**
      * @description Core issue type used in list endpoints. Maps to `types.Issue` json
@@ -6114,6 +6161,98 @@ export interface operations {
       };
       /** @description Reviewer message delivery failed */
       500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+    };
+  };
+  streamPullRequestReviewer: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+        owner: string;
+        repo: string;
+        number: number;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description SSE event stream of reviewer status and messages */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "text/event-stream": string;
+        };
+      };
+      /** @description Invalid path parameter */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Repository is not registered or reviewer was not started */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+    };
+  };
+  getPullRequestReviewerConversation: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+        owner: string;
+        repo: string;
+        number: number;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Reviewer conversation snapshot */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": {
+            /** @constant */
+            success: true;
+            data: components["schemas"]["ReviewerConversation"];
+          };
+        };
+      };
+      /** @description Invalid path parameter */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Repository is not registered or reviewer was not started */
+      404: {
         headers: {
           [name: string]: unknown;
         };

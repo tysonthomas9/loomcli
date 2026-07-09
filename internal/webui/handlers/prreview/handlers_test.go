@@ -14,12 +14,14 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/backend/api/gen"
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/connector"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
+	"github.com/tysonthomas9/loomcli/internal/leadcontrol"
 	"github.com/tysonthomas9/loomcli/internal/localworkspace"
 	"github.com/tysonthomas9/loomcli/internal/ops"
 	"github.com/tysonthomas9/loomcli/internal/store"
@@ -161,6 +163,7 @@ type prReviewHarness struct {
 	store  store.Store
 	github *fakeGitHub
 	mux    *http.ServeMux
+	module *Module
 }
 
 type fallbackAgentService struct {
@@ -207,7 +210,8 @@ func newPRReviewHarnessWithAgent(t *testing.T, withDispatcher bool, agentSvc ser
 			Providers:  connector.DefaultProviderRegistry(h.github.server.Client()),
 		}
 	}
-	NewModule(h.store, dispatcher, agentSvc).Register(h.mux)
+	h.module = NewModule(h.store, dispatcher, agentSvc)
+	h.module.Register(h.mux)
 	return h
 }
 
@@ -257,6 +261,15 @@ func (h *prReviewHarness) rememberLocalPaths(t *testing.T, workspacePath, repoNa
 func (h *prReviewHarness) get(t *testing.T, path string) (int, []byte) {
 	t.Helper()
 	req := httptest.NewRequest(http.MethodGet, path, nil)
+	req = req.WithContext(middleware.WithUserIdentity(req.Context(), middleware.UserIdentity{UserID: "user-1"}))
+	rec := httptest.NewRecorder()
+	h.mux.ServeHTTP(rec, req)
+	return rec.Code, rec.Body.Bytes()
+}
+
+func (h *prReviewHarness) streamWithContext(t *testing.T, ctx context.Context, path string) (int, []byte) {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodGet, path, nil).WithContext(ctx)
 	req = req.WithContext(middleware.WithUserIdentity(req.Context(), middleware.UserIdentity{UserID: "user-1"}))
 	rec := httptest.NewRecorder()
 	h.mux.ServeHTTP(rec, req)
@@ -699,6 +712,153 @@ func TestPostReviewerMessageUnregisteredRepoDoesNotEnqueue(t *testing.T) {
 	}
 }
 
+func TestStreamReviewerStartingWhenNoSession(t *testing.T) {
+	h := newPRReviewHarness(t, false)
+	createReviewerAgentForTest(t, h, "hello", 7)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	time.AfterFunc(10*time.Millisecond, cancel)
+	status, raw := h.streamWithContext(t, ctx, "/api/workspaces/WS/pull-requests/octocat/hello/7/stream")
+	if status != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (body %s)", status, raw)
+	}
+	body := string(raw)
+	if !strings.Contains(body, "event: status") || !strings.Contains(body, `"state":"starting"`) {
+		t.Fatalf("stream body = %q, want starting status event", body)
+	}
+}
+
+func TestStreamReviewerEmitsMessages(t *testing.T) {
+	h := newPRReviewHarness(t, false)
+	agentName := createReviewerAgentForTest(t, h, "hello", 7)
+	createReviewerOrchestrationSessionForTest(t, h, agentName, map[string]string{
+		leadcontrol.MetadataCodexEndpoint: "ws://codex.test",
+		leadcontrol.MetadataCodexThreadID: "thread-1",
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	h.module.streamPollInterval = time.Millisecond
+	onRead := cancelAfterReads(2, cancel)
+	h.module.dialCodex = func(ctx context.Context, endpoint string) (codexThreadReader, error) {
+		if endpoint != "ws://codex.test" {
+			t.Fatalf("endpoint = %q, want ws://codex.test", endpoint)
+		}
+		return &fakeReviewerCodexReader{
+			onRead: onRead,
+			thread: &leadcontrol.CodexThread{
+				ID:     "thread-1",
+				Status: leadcontrol.CodexThreadStatus{Type: "idle"},
+				Turns: []leadcontrol.CodexTurn{{
+					ID:     "turn-1",
+					Status: "completed",
+					Items: []leadcontrol.CodexTurnItem{
+						{
+							Type:    "userMessage",
+							ID:      "item-user",
+							Content: []leadcontrol.CodexContentBlock{{Type: "text", Text: "hello"}},
+						},
+						{
+							Type:  "agentMessage",
+							ID:    "item-agent",
+							Text:  "hi there",
+							Phase: "final_answer",
+						},
+					},
+				}},
+			},
+		}, nil
+	}
+
+	status, raw := h.streamWithContext(t, ctx, "/api/workspaces/WS/pull-requests/octocat/hello/7/stream")
+	if status != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (body %s)", status, raw)
+	}
+	body := string(raw)
+	if strings.Count(body, `"role":"user"`) != 1 || strings.Count(body, `"text":"hello"`) != 1 {
+		t.Fatalf("stream body = %q, want one user hello message", body)
+	}
+	if strings.Count(body, `"role":"assistant"`) != 1 || strings.Count(body, `"text":"hi there"`) != 1 {
+		t.Fatalf("stream body = %q, want one assistant hi there message", body)
+	}
+	if strings.Count(body, "event: message") != 2 {
+		t.Fatalf("stream body = %q, want exactly two message events", body)
+	}
+}
+
+func TestGetReviewerConversationStartingWhenNoSession(t *testing.T) {
+	h := newPRReviewHarness(t, false)
+	createReviewerAgentForTest(t, h, "hello", 7)
+
+	status, raw := h.get(t, "/api/workspaces/WS/pull-requests/octocat/hello/7/conversation")
+	if status != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (body %s)", status, raw)
+	}
+	var decoded struct {
+		Data struct {
+			State    string           `json:"state"`
+			Messages []map[string]any `json:"messages"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		t.Fatalf("decode: %v (body %s)", err, raw)
+	}
+	if decoded.Data.State != "starting" || len(decoded.Data.Messages) != 0 {
+		t.Fatalf("conversation = %+v, want starting + no messages", decoded.Data)
+	}
+}
+
+func TestGetReviewerConversationSnapshot(t *testing.T) {
+	h := newPRReviewHarness(t, false)
+	agentName := createReviewerAgentForTest(t, h, "hello", 7)
+	createReviewerOrchestrationSessionForTest(t, h, agentName, map[string]string{
+		leadcontrol.MetadataCodexEndpoint: "ws://codex.test",
+		leadcontrol.MetadataCodexThreadID: "thread-1",
+	})
+	h.module.dialCodex = func(ctx context.Context, endpoint string) (codexThreadReader, error) {
+		return &fakeReviewerCodexReader{
+			thread: &leadcontrol.CodexThread{
+				ID:     "thread-1",
+				Status: leadcontrol.CodexThreadStatus{Type: "idle"},
+				Turns: []leadcontrol.CodexTurn{{
+					ID:     "turn-1",
+					Status: "completed",
+					Items: []leadcontrol.CodexTurnItem{
+						{Type: "userMessage", ID: "item-user", Content: []leadcontrol.CodexContentBlock{{Type: "text", Text: "hello"}}},
+						{Type: "agentMessage", ID: "item-agent", Text: "hi there", Phase: "final_answer"},
+					},
+				}},
+			},
+		}, nil
+	}
+
+	status, raw := h.get(t, "/api/workspaces/WS/pull-requests/octocat/hello/7/conversation")
+	if status != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (body %s)", status, raw)
+	}
+	var decoded struct {
+		Data struct {
+			State    string `json:"state"`
+			Messages []struct {
+				Role string `json:"role"`
+				Text string `json:"text"`
+			} `json:"messages"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		t.Fatalf("decode: %v (body %s)", err, raw)
+	}
+	if decoded.Data.State != "idle" || len(decoded.Data.Messages) != 2 {
+		t.Fatalf("conversation = %+v, want idle + 2 messages", decoded.Data)
+	}
+	if decoded.Data.Messages[0].Role != "user" || decoded.Data.Messages[0].Text != "hello" {
+		t.Fatalf("message[0] = %+v, want user/hello", decoded.Data.Messages[0])
+	}
+	if decoded.Data.Messages[1].Role != "assistant" || decoded.Data.Messages[1].Text != "hi there" {
+		t.Fatalf("message[1] = %+v, want assistant/hi there", decoded.Data.Messages[1])
+	}
+}
+
 func TestEnsureReviewerCreatesAgentWorktreeAndSeed(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git not available")
@@ -836,6 +996,46 @@ func createReviewerAgentForTest(t *testing.T, h *prReviewHarness, repo string, n
 		t.Fatalf("Create reviewer agent: %v", err)
 	}
 	return agentName
+}
+
+func createReviewerOrchestrationSessionForTest(t *testing.T, h *prReviewHarness, agentName string, metadata map[string]string) {
+	t.Helper()
+	if _, err := h.store.AgentSessions().Create(context.Background(), store.AgentSessionCreate{
+		WorkspaceKey: prReviewTestWorkspace,
+		SessionID:    "session-" + agentName,
+		AgentID:      agentName,
+		Kind:         domain.AgentSessionKindOrchestration,
+		Status:       domain.AgentSessionRunning,
+		Metadata:     metadata,
+	}); err != nil {
+		t.Fatalf("Create reviewer orchestration session: %v", err)
+	}
+}
+
+type fakeReviewerCodexReader struct {
+	thread *leadcontrol.CodexThread
+	onRead func()
+}
+
+func (r *fakeReviewerCodexReader) ReadThreadWithTurns(context.Context, string) (*leadcontrol.CodexThread, error) {
+	if r.onRead != nil {
+		r.onRead()
+	}
+	return r.thread, nil
+}
+
+func (r *fakeReviewerCodexReader) Close(string) error {
+	return nil
+}
+
+func cancelAfterReads(want int, cancel context.CancelFunc) func() {
+	count := 0
+	return func() {
+		count++
+		if count >= want {
+			cancel()
+		}
+	}
 }
 
 func queuedReviewerMessagesForTest(t *testing.T, st store.Store, agentName string) []*domain.AgentInboxMessage {
