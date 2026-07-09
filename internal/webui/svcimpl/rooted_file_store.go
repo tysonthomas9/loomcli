@@ -57,24 +57,33 @@ func openScopedRoot(identity, rootPath string) (*scopedRoot, error) {
 		_ = root.Close()
 		return nil, service.ErrForbidden("scope root changed while it was opened")
 	}
+	platform, err := openRootedPlatform(rootPath, info)
+	if err != nil {
+		_ = root.Close()
+		return nil, err
+	}
 	return &scopedRoot{
 		identity: identity,
 		path:     rootPath,
-		store:    &rootedFileStore{root: root},
+		store:    &rootedFileStore{root: root, platform: platform},
 	}, nil
 }
 
 func (r *scopedRoot) Close() {
 	if r != nil && r.store != nil && r.store.root != nil {
+		if r.store.platform != nil {
+			_ = r.store.platform.Close()
+		}
 		_ = r.store.root.Close()
 	}
 }
 
-// rootedFileStore confines every operation to an os.Root and rejects symbolic
-// links in user-selected path components. os.Root supplies the containment
-// boundary even if an external process changes a component after validation.
+// rootedFileStore confines every operation to one scope. Unix operations use
+// descriptor-relative no-follow primitives; other platforms use os.Root with
+// explicit component validation as the containment fallback.
 type rootedFileStore struct {
-	root *os.Root
+	root     *os.Root
+	platform rootedPlatform
 }
 
 func normalizeFilePath(name string, allowRoot bool) (string, error) {
@@ -140,6 +149,13 @@ func (s *rootedFileStore) ensureNoSymlinks(name string, allowMissing bool) error
 	if name == "." {
 		return nil
 	}
+	if s.platform != nil {
+		_, err := s.platform.Stat(name)
+		if allowMissing && isNotFound(err) {
+			return nil
+		}
+		return err
+	}
 	current := ""
 	parts := strings.Split(name, string(filepath.Separator))
 	for i, part := range parts {
@@ -172,7 +188,7 @@ func (s *rootedFileStore) stat(name string) (os.FileInfo, error) {
 	if err := s.ensureNoSymlinks(name, false); err != nil {
 		return nil, err
 	}
-	info, err := s.root.Lstat(name)
+	info, err := s.lstat(name)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, service.ErrNotFound("path not found")
@@ -185,9 +201,29 @@ func (s *rootedFileStore) stat(name string) (os.FileInfo, error) {
 	return info, nil
 }
 
+func (s *rootedFileStore) lstat(name string) (os.FileInfo, error) {
+	if s.platform != nil {
+		return s.platform.Stat(name)
+	}
+	return s.root.Lstat(name)
+}
+
+func isNotFound(err error) bool {
+	var serviceErr *service.ServiceError
+	return errors.As(err, &serviceErr) && serviceErr.Kind == service.KindNotFound
+}
+
+func isServiceError(err error) bool {
+	var serviceErr *service.ServiceError
+	return errors.As(err, &serviceErr)
+}
+
 func (s *rootedFileStore) List(name string) ([]os.DirEntry, error) {
 	if err := s.ensureNoSymlinks(name, false); err != nil {
 		return nil, err
+	}
+	if s.platform != nil {
+		return s.platform.List(name)
 	}
 	f, err := s.root.Open(name)
 	if err != nil {
@@ -214,6 +250,9 @@ func (s *rootedFileStore) List(name string) ([]os.DirEntry, error) {
 func (s *rootedFileStore) Read(name string, limit int64) ([]byte, os.FileInfo, bool, error) {
 	if err := s.ensureNoSymlinks(name, false); err != nil {
 		return nil, nil, false, err
+	}
+	if s.platform != nil {
+		return s.platform.Read(name, limit)
 	}
 	f, err := s.root.Open(name)
 	if err != nil {
@@ -249,6 +288,13 @@ func (s *rootedFileStore) WriteAtomic(name string, content []byte) error {
 	if err := validateRootedName(name); err != nil {
 		return err
 	}
+	if s.platform != nil {
+		return s.platform.WriteAtomic(name, content)
+	}
+	return s.writeAtomicFallback(name, content)
+}
+
+func (s *rootedFileStore) writeAtomicFallback(name string, content []byte) error {
 	parent := filepath.Dir(name)
 	if err := s.ensureNoSymlinks(parent, false); err != nil {
 		return err
@@ -343,6 +389,9 @@ func (s *rootedFileStore) MkdirAll(name string) error {
 	if err := validateRootedName(name); err != nil {
 		return err
 	}
+	if s.platform != nil {
+		return s.platform.MkdirAll(name)
+	}
 	current := ""
 	for _, part := range strings.Split(name, string(filepath.Separator)) {
 		if current == "" {
@@ -400,13 +449,23 @@ func (s *rootedFileStore) Delete(name string, recursive bool) error {
 			}
 		}
 	}
-	if err := s.root.Remove(name); err != nil {
-		if os.IsNotExist(err) {
+	if err := s.remove(name, info.IsDir()); err != nil {
+		if os.IsNotExist(err) || isNotFound(err) {
 			return service.ErrNotFound("path not found")
+		}
+		if isServiceError(err) {
+			return err
 		}
 		return service.ErrInternal("failed to delete path", err)
 	}
 	return nil
+}
+
+func (s *rootedFileStore) remove(name string, directory bool) error {
+	if s.platform != nil {
+		return s.platform.Remove(name, directory)
+	}
+	return s.root.Remove(name)
 }
 
 func (s *rootedFileStore) removeTreeContents(name string) error {
@@ -415,27 +474,49 @@ func (s *rootedFileStore) removeTreeContents(name string) error {
 		return err
 	}
 	for _, entry := range entries {
-		if strings.EqualFold(entry.Name(), ".git") {
-			return service.ErrForbidden("directory contains .git metadata")
-		}
-		child := filepath.Join(name, entry.Name())
-		info, err := s.root.Lstat(child)
-		if err != nil {
-			if os.IsNotExist(err) {
-				continue
-			}
-			return service.ErrInternal("failed to stat path during delete", err)
-		}
-		if info.IsDir() && info.Mode()&os.ModeSymlink == 0 {
-			if err := s.removeTreeContents(child); err != nil {
-				return err
-			}
-		}
-		if err := s.root.Remove(child); err != nil && !os.IsNotExist(err) {
-			return service.ErrInternal("failed to delete path", err)
+		if err := s.removeTreeEntry(name, entry); err != nil {
+			return err
 		}
 	}
 	return nil
+}
+
+func (s *rootedFileStore) removeTreeEntry(parent string, entry os.DirEntry) error {
+	if strings.EqualFold(entry.Name(), ".git") {
+		return service.ErrForbidden("directory contains .git metadata")
+	}
+	child := filepath.Join(parent, entry.Name())
+	if entry.Type()&os.ModeSymlink != 0 {
+		return ignoreMissing(s.remove(child, false))
+	}
+	info, err := s.lstat(child)
+	if err != nil {
+		return normalizeDeleteError("failed to stat path during delete", err)
+	}
+	isDirectory := info.IsDir() && info.Mode()&os.ModeSymlink == 0
+	if isDirectory {
+		if err := s.removeTreeContents(child); err != nil {
+			return err
+		}
+	}
+	return normalizeDeleteError("failed to delete path", s.remove(child, isDirectory))
+}
+
+func ignoreMissing(err error) error {
+	if err == nil || os.IsNotExist(err) || isNotFound(err) {
+		return nil
+	}
+	return err
+}
+
+func normalizeDeleteError(message string, err error) error {
+	if err == nil || os.IsNotExist(err) || isNotFound(err) {
+		return nil
+	}
+	if isServiceError(err) {
+		return err
+	}
+	return service.ErrInternal(message, err)
 }
 
 func (s *rootedFileStore) Move(from, to string, overwrite bool) error {
@@ -461,16 +542,26 @@ func (s *rootedFileStore) Move(from, to string, overwrite bool) error {
 	if err := s.rejectProtectedTree(from, info); err != nil {
 		return err
 	}
-	if err := s.root.Rename(from, to); err != nil {
-		if os.IsNotExist(err) {
+	if err := s.rename(from, to); err != nil {
+		if os.IsNotExist(err) || isNotFound(err) {
 			return service.ErrNotFound("path not found")
 		}
 		if os.IsExist(err) {
 			return service.ErrConflict("destination exists")
 		}
+		if isServiceError(err) {
+			return err
+		}
 		return service.ErrInternal("failed to move path", err)
 	}
 	return nil
+}
+
+func (s *rootedFileStore) rename(from, to string) error {
+	if s.platform != nil {
+		return s.platform.Rename(from, to)
+	}
+	return s.root.Rename(from, to)
 }
 
 func (s *rootedFileStore) rejectProtectedTree(name string, info os.FileInfo) error {
@@ -488,11 +579,14 @@ func (s *rootedFileStore) rejectProtectedTree(name string, info os.FileInfo) err
 }
 
 func (s *rootedFileStore) validateMoveDestination(name string, overwrite bool) error {
-	dest, err := s.root.Lstat(name)
-	if os.IsNotExist(err) {
+	dest, err := s.lstat(name)
+	if os.IsNotExist(err) || isNotFound(err) {
 		return nil
 	}
 	if err != nil {
+		if isServiceError(err) {
+			return err
+		}
 		return service.ErrInternal("failed to stat destination path", err)
 	}
 	if dest.Mode()&os.ModeSymlink != 0 {
