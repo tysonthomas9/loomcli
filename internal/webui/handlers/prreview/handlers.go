@@ -1,6 +1,7 @@
 package prreview
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"strings"
@@ -100,6 +101,62 @@ func (m *Module) getPullRequestDiff(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, pullRequestDiffFromBody(res.Body))
 }
 
+func (m *Module) postReview(w http.ResponseWriter, r *http.Request) {
+	ws := r.PathValue("ws")
+	params, ok := parsePullRequestPath(r.PathValue("owner"), r.PathValue("repo"), r.PathValue("number"))
+	if !ok {
+		writePRReviewErrorCode(w, http.StatusBadRequest, "invalid", "invalid pull request path", false)
+		return
+	}
+	canonOwner, canonRepo, ok := m.authorizeRepo(w, r, ws, params.owner, params.repo)
+	if !ok {
+		return
+	}
+	params.owner, params.repo = canonOwner, canonRepo
+
+	var req gen.PullRequestReviewRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writePRReviewErrorCode(w, http.StatusBadRequest, "invalid", "invalid review request body", false)
+		return
+	}
+	expectedHeadSha := strings.TrimSpace(req.ExpectedHeadSha)
+	if expectedHeadSha == "" {
+		writePRReviewErrorCode(w, http.StatusPreconditionRequired, "precondition_required", "expected_head_sha is required", false)
+		return
+	}
+	event, ok := githubReviewEvent(req.Event)
+	if !ok {
+		writePRReviewErrorCode(w, http.StatusBadRequest, "invalid", "invalid review event", false)
+		return
+	}
+
+	if err := m.ensureConnectorAndGrants(r.Context(), ws, params.owner, params.repo, prReviewActions); err != nil {
+		writePRReviewError(w, err)
+		return
+	}
+	args := pullRequestArgs(params)
+	args["event"] = event
+	if req.Body != nil {
+		args["body"] = *req.Body
+	}
+	res, err := m.dispatcher.Dispatch(r.Context(), connector.Request{
+		WorkspaceKey:  ws,
+		RunID:         syntheticRunID(r, params, providers.ActionGitHubReviewPost),
+		BindingID:     bindingID,
+		ConnectorID:   connectorID,
+		Action:        providers.ActionGitHubReviewPost,
+		Resource:      prResource(params.owner, params.repo),
+		Args:          args,
+		Preconditions: providers.Preconditions{ExpectedHeadSha: expectedHeadSha},
+		CallSeq:       0,
+	})
+	if err != nil {
+		writePRReviewError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, pullRequestReviewResultFromBody(res.Body))
+}
+
 // authorizeRepo enforces workspace membership and returns the CANONICAL
 // owner/repo (as registered) for the caller to use everywhere downstream —
 // grant resource/pattern/id and the dispatch resource — so casing can never
@@ -180,6 +237,42 @@ func pullRequestDiffFileFromBody(body map[string]any) gen.PullRequestDiffFile {
 		Deletions: intValue(body["deletions"]),
 		Patch:     stringValue(body["patch"]),
 	}
+}
+
+func githubReviewEvent(event gen.PullRequestReviewRequestEvent) (string, bool) {
+	switch event {
+	case gen.PullRequestReviewRequestEventApprove:
+		return "APPROVE", true
+	case gen.PullRequestReviewRequestEventRequestChanges:
+		return "REQUEST_CHANGES", true
+	case gen.PullRequestReviewRequestEventComment:
+		return "COMMENT", true
+	default:
+		return "", false
+	}
+}
+
+func pullRequestReviewResultFromBody(body map[string]any) gen.PullRequestReviewResult {
+	return gen.PullRequestReviewResult{
+		ReviewId: intPtrFromValue(body["id"]),
+		State:    stringPtrFromValue(body["state"]),
+	}
+}
+
+func stringPtrFromValue(v any) *string {
+	s := stringValue(v)
+	if s == "" {
+		return nil
+	}
+	return &s
+}
+
+func intPtrFromValue(v any) *int {
+	i := intValue(v)
+	if i == 0 {
+		return nil
+	}
+	return &i
 }
 
 func stringValue(v any) string {

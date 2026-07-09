@@ -2592,6 +2592,85 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
+  /api/workspaces/{ws}/pull-requests/{owner}/{repo}/{number}/review:
+    post:
+      operationId: postPullRequestReview
+      tags: [pull-requests]
+      summary: Post a pull request review via the GitHub connector
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: owner
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: repo
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: number
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PullRequestReviewRequest"
+      responses:
+        "200":
+          description: Pull request review result
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success, data]
+                properties:
+                  success:
+                    type: boolean
+                    const: true
+                  data:
+                    $ref: "#/components/schemas/PullRequestReviewResult"
+        "400":
+          description: Invalid request body or path parameter
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Connector grant denied
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Repository is not registered in the workspace
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Pull request head changed before review was posted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "428":
+          description: Expected head SHA precondition is required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: Connector egress unavailable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
   /api/workspaces/{ws}/agents/{name}/git/diff-stat:
     get:
       operationId: getAgentDiffStat
@@ -3472,6 +3551,26 @@ components:
         deletions:
           type: integer
         patch:
+          type: string
+
+    PullRequestReviewRequest:
+      type: object
+      required: [event, expected_head_sha]
+      properties:
+        event:
+          type: string
+          enum: [approve, request_changes, comment]
+        body:
+          type: string
+        expected_head_sha:
+          type: string
+
+    PullRequestReviewResult:
+      type: object
+      properties:
+        review_id:
+          type: integer
+        state:
           type: string
 
     # ── Issue Schemas ───────────────────────────────────────────────────

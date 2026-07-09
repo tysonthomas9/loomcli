@@ -18,6 +18,7 @@ import (
 var prReviewActions = []string{
 	providers.ActionGitHubPullRequestRead,
 	providers.ActionGitHubCompareRead,
+	providers.ActionGitHubReviewPost,
 }
 
 func (m *Module) ensureConnectorAndGrants(ctx context.Context, ws, owner, repo string, actions []string) error {

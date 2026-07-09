@@ -27,41 +27,51 @@ type fakeGitHubCall struct {
 	method        string
 	path          string
 	authorization string
+	body          map[string]any
 }
 
 type fakeGitHub struct {
-	mu     sync.Mutex
-	calls  []fakeGitHubCall
-	server *httptest.Server
+	mu      sync.Mutex
+	calls   []fakeGitHubCall
+	headSha string
+	state   string
+	server  *httptest.Server
 }
 
 func newFakeGitHub(t *testing.T) *fakeGitHub {
 	t.Helper()
-	g := &fakeGitHub{}
+	g := &fakeGitHub{headSha: "headsha-123", state: "open"}
 	g.server = httptest.NewServer(http.HandlerFunc(g.handle))
 	t.Cleanup(g.server.Close)
 	return g
 }
 
 func (g *fakeGitHub) handle(w http.ResponseWriter, r *http.Request) {
-	_, _ = io.Copy(io.Discard, r.Body)
+	bodyBytes, _ := io.ReadAll(r.Body)
+	var body map[string]any
+	if len(bytes.TrimSpace(bodyBytes)) > 0 {
+		_ = json.Unmarshal(bodyBytes, &body)
+	}
 	g.mu.Lock()
 	g.calls = append(g.calls, fakeGitHubCall{
 		method:        r.Method,
 		path:          r.URL.Path,
 		authorization: r.Header.Get("Authorization"),
+		body:          body,
 	})
+	headSha := g.headSha
+	state := g.state
 	g.mu.Unlock()
 
 	switch {
 	case r.Method == http.MethodGet && r.URL.Path == "/repos/octocat/hello/pulls/7":
 		writeUpstreamJSON(w, http.StatusOK, map[string]any{
 			"number": 7,
-			"state":  "open",
+			"state":  state,
 			"title":  "Add review API",
 			"draft":  false,
 			"merged": false,
-			"head":   map[string]any{"sha": "headsha-123", "ref": "feature/review-api"},
+			"head":   map[string]any{"sha": headSha, "ref": "feature/review-api"},
 			"base":   map[string]any{"sha": "basesha-123", "ref": "main"},
 		})
 	case r.Method == http.MethodGet && r.URL.Path == "/repos/octocat/hello/compare/main...headsha-123":
@@ -80,9 +90,20 @@ func (g *fakeGitHub) handle(w http.ResponseWriter, r *http.Request) {
 				},
 			},
 		})
+	case r.Method == http.MethodPost && r.URL.Path == "/repos/octocat/hello/pulls/7/reviews":
+		writeUpstreamJSON(w, http.StatusCreated, map[string]any{
+			"id":    101,
+			"state": "APPROVED",
+		})
 	default:
 		writeUpstreamJSON(w, http.StatusNotFound, map[string]any{"message": "Not Found"})
 	}
+}
+
+func (g *fakeGitHub) setHead(headSha string) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.headSha = headSha
 }
 
 func (g *fakeGitHub) snapshot() []fakeGitHubCall {
@@ -156,6 +177,16 @@ func (h *prReviewHarness) get(t *testing.T, path string) (int, []byte) {
 	return rec.Code, rec.Body.Bytes()
 }
 
+func (h *prReviewHarness) post(t *testing.T, path, body string) (int, []byte) {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodPost, path, bytes.NewBufferString(body))
+	req.Header.Set("Content-Type", "application/json")
+	req = req.WithContext(middleware.WithUserIdentity(req.Context(), middleware.UserIdentity{UserID: "user-1"}))
+	rec := httptest.NewRecorder()
+	h.mux.ServeHTTP(rec, req)
+	return rec.Code, rec.Body.Bytes()
+}
+
 func TestGetPullRequestDetail(t *testing.T) {
 	h := newPRReviewHarness(t, true)
 	status, raw := h.get(t, "/api/workspaces/WS/pull-requests/octocat/hello/7")
@@ -218,6 +249,103 @@ func TestGetPullRequestDiff(t *testing.T) {
 func TestGetPullRequestUnregisteredRepoDoesNotDispatch(t *testing.T) {
 	h := newPRReviewHarness(t, true)
 	status, raw := h.get(t, "/api/workspaces/WS/pull-requests/acme/widgets/7")
+	if status != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404 (body %s)", status, raw)
+	}
+	if code := decodeErrorCode(t, raw); code != "repo_not_registered" {
+		t.Fatalf("code = %q, want repo_not_registered", code)
+	}
+	if calls := h.github.snapshot(); len(calls) != 0 {
+		t.Fatalf("upstream calls = %+v, want none", calls)
+	}
+}
+
+func TestPostPullRequestReviewApprove(t *testing.T) {
+	h := newPRReviewHarness(t, true)
+	status, raw := h.post(t, "/api/workspaces/WS/pull-requests/octocat/hello/7/review",
+		`{"event":"approve","body":"LGTM","expected_head_sha":"headsha-123"}`)
+	if status != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (body %s)", status, raw)
+	}
+	var decoded struct {
+		Success bool                        `json:"success"`
+		Data    gen.PullRequestReviewResult `json:"data"`
+	}
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		t.Fatalf("decode response: %v (body %s)", err, raw)
+	}
+	if !decoded.Success || decoded.Data.ReviewId == nil || *decoded.Data.ReviewId != 101 || decoded.Data.State == nil || *decoded.Data.State != "APPROVED" {
+		t.Fatalf("response = %+v, want success with review id/state", decoded)
+	}
+	calls := h.github.snapshot()
+	if len(calls) != 2 {
+		t.Fatalf("calls = %+v, want liveness GET then review POST", calls)
+	}
+	if calls[0].method != http.MethodGet || calls[0].path != "/repos/octocat/hello/pulls/7" {
+		t.Fatalf("first call = %+v, want PR liveness read", calls[0])
+	}
+	if calls[1].method != http.MethodPost || calls[1].path != "/repos/octocat/hello/pulls/7/reviews" {
+		t.Fatalf("second call = %+v, want review POST", calls[1])
+	}
+	if calls[1].body["event"] != "APPROVE" || calls[1].body["body"] != "LGTM" {
+		t.Fatalf("review payload = %+v, want APPROVE body", calls[1].body)
+	}
+}
+
+func TestPostPullRequestReviewAfterReadUsesSeededReviewGrant(t *testing.T) {
+	h := newPRReviewHarness(t, true)
+	status, raw := h.get(t, "/api/workspaces/WS/pull-requests/octocat/hello/7")
+	if status != http.StatusOK {
+		t.Fatalf("read status = %d, want 200 (body %s)", status, raw)
+	}
+
+	status, raw = h.post(t, "/api/workspaces/WS/pull-requests/octocat/hello/7/review",
+		`{"event":"approve","body":"LGTM","expected_head_sha":"headsha-123"}`)
+	if status != http.StatusOK {
+		t.Fatalf("review status = %d, want 200 (body %s)", status, raw)
+	}
+	calls := h.github.snapshot()
+	if len(calls) != 3 || calls[2].method != http.MethodPost || calls[2].path != "/repos/octocat/hello/pulls/7/reviews" {
+		t.Fatalf("calls = %+v, want read GET, liveness GET, review POST", calls)
+	}
+}
+
+func TestPostPullRequestReviewMissingExpectedHeadShaDoesNotDispatch(t *testing.T) {
+	h := newPRReviewHarness(t, true)
+	status, raw := h.post(t, "/api/workspaces/WS/pull-requests/octocat/hello/7/review",
+		`{"event":"approve","body":"LGTM"}`)
+	if status != http.StatusPreconditionRequired {
+		t.Fatalf("status = %d, want 428 (body %s)", status, raw)
+	}
+	if code := decodeErrorCode(t, raw); code != "precondition_required" {
+		t.Fatalf("code = %q, want precondition_required", code)
+	}
+	if calls := h.github.snapshot(); len(calls) != 0 {
+		t.Fatalf("upstream calls = %+v, want none", calls)
+	}
+}
+
+func TestPostPullRequestReviewStaleSubject(t *testing.T) {
+	h := newPRReviewHarness(t, true)
+	h.github.setHead("headsha-456")
+	status, raw := h.post(t, "/api/workspaces/WS/pull-requests/octocat/hello/7/review",
+		`{"event":"approve","body":"LGTM","expected_head_sha":"headsha-123"}`)
+	if status != http.StatusConflict {
+		t.Fatalf("status = %d, want 409 (body %s)", status, raw)
+	}
+	if code := decodeErrorCode(t, raw); code != "stale_subject" {
+		t.Fatalf("code = %q, want stale_subject", code)
+	}
+	calls := h.github.snapshot()
+	if len(calls) != 1 || calls[0].method != http.MethodGet || calls[0].path != "/repos/octocat/hello/pulls/7" {
+		t.Fatalf("calls = %+v, want only liveness GET", calls)
+	}
+}
+
+func TestPostPullRequestReviewUnregisteredRepoDoesNotDispatch(t *testing.T) {
+	h := newPRReviewHarness(t, true)
+	status, raw := h.post(t, "/api/workspaces/WS/pull-requests/acme/widgets/7/review",
+		`{"event":"approve","body":"LGTM","expected_head_sha":"headsha-123"}`)
 	if status != http.StatusNotFound {
 		t.Fatalf("status = %d, want 404 (body %s)", status, raw)
 	}

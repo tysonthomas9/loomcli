@@ -590,6 +590,27 @@ func (e PatchIssueRequestStatus) Valid() bool {
 	}
 }
 
+// Defines values for PullRequestReviewRequestEvent.
+const (
+	PullRequestReviewRequestEventApprove        PullRequestReviewRequestEvent = "approve"
+	PullRequestReviewRequestEventComment        PullRequestReviewRequestEvent = "comment"
+	PullRequestReviewRequestEventRequestChanges PullRequestReviewRequestEvent = "request_changes"
+)
+
+// Valid indicates whether the value is a known member of the PullRequestReviewRequestEvent enum.
+func (e PullRequestReviewRequestEvent) Valid() bool {
+	switch e {
+	case PullRequestReviewRequestEventApprove:
+		return true
+	case PullRequestReviewRequestEventComment:
+		return true
+	case PullRequestReviewRequestEventRequestChanges:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for RuntimeReadyResponseMode.
 const (
 	Daemon RuntimeReadyResponseMode = "daemon"
@@ -1701,6 +1722,22 @@ type PullRequestDiffFile struct {
 	Status    string `json:"status"`
 }
 
+// PullRequestReviewRequest defines model for PullRequestReviewRequest.
+type PullRequestReviewRequest struct {
+	Body            *string                       `json:"body,omitempty"`
+	Event           PullRequestReviewRequestEvent `json:"event"`
+	ExpectedHeadSha string                        `json:"expected_head_sha"`
+}
+
+// PullRequestReviewRequestEvent defines model for PullRequestReviewRequest.Event.
+type PullRequestReviewRequestEvent string
+
+// PullRequestReviewResult defines model for PullRequestReviewResult.
+type PullRequestReviewResult struct {
+	ReviewId *int    `json:"review_id,omitempty"`
+	State    *string `json:"state,omitempty"`
+}
+
 // RuntimeReadyResponse defines model for RuntimeReadyResponse.
 type RuntimeReadyResponse struct {
 	Mode      RuntimeReadyResponseMode `json:"mode"`
@@ -2435,6 +2472,9 @@ type RenameWorkspaceJSONRequestBody = WorkspaceRenameRequest
 
 // RunOnboardingFirstTaskJSONRequestBody defines body for RunOnboardingFirstTask for application/json ContentType.
 type RunOnboardingFirstTaskJSONRequestBody RunOnboardingFirstTaskJSONBody
+
+// PostPullRequestReviewJSONRequestBody defines body for PostPullRequestReview for application/json ContentType.
+type PostPullRequestReviewJSONRequestBody = PullRequestReviewRequest
 
 // SeedTerminalSessionJSONRequestBody defines body for SeedTerminalSession for application/json ContentType.
 type SeedTerminalSessionJSONRequestBody = SeedRequest
