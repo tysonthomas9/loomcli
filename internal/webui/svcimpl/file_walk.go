@@ -49,6 +49,7 @@ type boundedFileWalkOptions struct {
 	excludeSegments map[string]bool
 	includePatterns []string
 	excludePatterns []string
+	allowSensitive  bool
 }
 
 type boundedFileWalkResult struct {
@@ -85,7 +86,8 @@ func (s *fileServiceImpl) IndexFilesScoped(ctx context.Context, wsID string, sco
 		return nil, err
 	}
 	defer root.Close()
-	if cached, ok := s.cachedIndex(root.path); ok {
+	allowSensitive := fileRequestAllowsSensitive(ctx)
+	if cached, ok := s.cachedIndex(root.path, allowSensitive); ok {
 		return cached, nil
 	}
 
@@ -94,6 +96,7 @@ func (s *fileServiceImpl) IndexFilesScoped(ctx context.Context, wsID string, sco
 		maxFiles:        fileIndexMaxEntries,
 		timeBudget:      fileIndexWalkBudget,
 		excludeSegments: defaultFileWalkExcludeSegments,
+		allowSensitive:  allowSensitive,
 	}, func(relPath string, _ os.FileInfo) error {
 		paths = append(paths, relPath)
 		return nil
@@ -105,7 +108,7 @@ func (s *fileServiceImpl) IndexFilesScoped(ctx context.Context, wsID string, sco
 		Paths:     paths,
 		Truncated: walkResult.truncated,
 	}
-	s.storeIndex(root.path, result)
+	s.storeIndex(root.path, allowSensitive, result)
 	return result, nil
 }
 
@@ -159,11 +162,13 @@ func newFileSearchExecution(req service.FileSearchRequest) (fileSearchExecution,
 			excludeSegments: excludeSegments,
 			includePatterns: includePatterns,
 			excludePatterns: excludePatterns,
+			allowSensitive:  true,
 		},
 	}, nil
 }
 
 func runFileSearch(ctx context.Context, store *rootedFileStore, search fileSearchExecution) (*service.FileSearchResult, error) {
+	search.walkOpts.allowSensitive = fileRequestAllowsSensitive(ctx)
 	accumulator := &fileSearchAccumulator{store: store, matcher: search.matcher}
 	walkResult, err := walkScopeFiles(ctx, store, search.walkOpts, accumulator.visit)
 	if err != nil {
@@ -220,13 +225,14 @@ func (a *fileSearchAccumulator) result(walkResult boundedFileWalkResult) *servic
 	}
 }
 
-func (s *fileServiceImpl) cachedIndex(root string) (*service.FileIndexResult, bool) {
+func (s *fileServiceImpl) cachedIndex(root string, allowSensitive bool) (*service.FileIndexResult, bool) {
 	s.indexCacheMu.Lock()
 	defer s.indexCacheMu.Unlock()
-	entry, ok := s.indexCache[root]
+	key := fileIndexCacheKey(root, allowSensitive)
+	entry, ok := s.indexCache[key]
 	if !ok || time.Now().After(entry.expiresAt) {
 		if ok {
-			delete(s.indexCache, root)
+			delete(s.indexCache, key)
 		}
 		return nil, false
 	}
@@ -236,10 +242,10 @@ func (s *fileServiceImpl) cachedIndex(root string) (*service.FileIndexResult, bo
 	}, true
 }
 
-func (s *fileServiceImpl) storeIndex(root string, result *service.FileIndexResult) {
+func (s *fileServiceImpl) storeIndex(root string, allowSensitive bool, result *service.FileIndexResult) {
 	s.indexCacheMu.Lock()
 	defer s.indexCacheMu.Unlock()
-	s.indexCache[root] = fileIndexCacheEntry{
+	s.indexCache[fileIndexCacheKey(root, allowSensitive)] = fileIndexCacheEntry{
 		paths:     append([]string(nil), result.Paths...),
 		truncated: result.Truncated,
 		expiresAt: time.Now().Add(fileIndexCacheTTL),
@@ -249,7 +255,20 @@ func (s *fileServiceImpl) storeIndex(root string, result *service.FileIndexResul
 func (s *fileServiceImpl) invalidateIndex(root string) {
 	s.indexCacheMu.Lock()
 	defer s.indexCacheMu.Unlock()
-	delete(s.indexCache, root)
+	delete(s.indexCache, fileIndexCacheKey(root, false))
+	delete(s.indexCache, fileIndexCacheKey(root, true))
+}
+
+func fileIndexCacheKey(root string, allowSensitive bool) string {
+	if allowSensitive {
+		return root + "\x00sensitive"
+	}
+	return root + "\x00filtered"
+}
+
+func fileRequestAllowsSensitive(ctx context.Context) bool {
+	capabilities, ok := service.FileCapabilitiesFromContext(ctx)
+	return !ok || capabilities.Sensitive
 }
 
 func walkScopeFiles(ctx context.Context, store *rootedFileStore, opts boundedFileWalkOptions, visit fileWalkVisitor) (boundedFileWalkResult, error) {
@@ -316,6 +335,9 @@ func (w *boundedFileWalker) handleDirectory(entry os.DirEntry, relPath string) (
 	if w.opts.excludeSegments != nil && w.opts.excludeSegments[entry.Name()] {
 		return false, nil
 	}
+	if !w.opts.allowSensitive && service.IsSensitiveFilePath(relPath) {
+		return false, nil
+	}
 	if globMatchesAny(w.opts.excludePatterns, relPath) {
 		return false, nil
 	}
@@ -339,6 +361,9 @@ func (w *boundedFileWalker) shouldVisitFile(info os.FileInfo, relPath string) bo
 		return false
 	}
 	if len(w.opts.includePatterns) > 0 && !globMatchesAny(w.opts.includePatterns, relPath) {
+		return false
+	}
+	if !w.opts.allowSensitive && service.IsSensitiveFilePath(relPath) {
 		return false
 	}
 	return !globMatchesAny(w.opts.excludePatterns, relPath)

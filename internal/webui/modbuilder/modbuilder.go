@@ -15,6 +15,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/taskrunapi"
 	hterminal "github.com/tysonthomas9/loomcli/internal/webui/handlers/terminal"
 	"github.com/tysonthomas9/loomcli/internal/webui/issuetabs"
+	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
 	"github.com/tysonthomas9/loomcli/internal/webui/tabmeta"
@@ -74,8 +75,8 @@ func NewDiffModule(agentSvc service.AgentService, diffSvc service.DiffService) i
 }
 
 // NewFileModule creates the file operations module.
-func NewFileModule(fileSvc service.FileService) interface{ Register(*http.ServeMux) } {
-	return misc.NewModule(fileSvc)
+func NewFileModule(fileSvc service.FileService, accessCfg ...middleware.FileAccessConfig) interface{ Register(*http.ServeMux) } {
+	return misc.NewModule(fileSvc, accessCfg...)
 }
 
 // NewApprovalsModule creates the await approval-resolution module

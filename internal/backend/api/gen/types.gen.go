@@ -1549,6 +1549,13 @@ type FileBlameResponse struct {
 	Skipped bool            `json:"skipped"`
 }
 
+// FileCapabilitiesResponse defines model for FileCapabilitiesResponse.
+type FileCapabilitiesResponse struct {
+	Read      bool `json:"read"`
+	Sensitive bool `json:"sensitive"`
+	Write     bool `json:"write"`
+}
+
 // FileCheckout defines model for FileCheckout.
 type FileCheckout struct {
 	Agent       *string          `json:"agent,omitempty"`

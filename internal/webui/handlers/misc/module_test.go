@@ -1,9 +1,14 @@
 package misc
 
 import (
+	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
+	"github.com/tysonthomas9/loomcli/internal/webui/service"
 )
 
 // Compile-time assertion: *FileModule implements the module interface.
@@ -22,6 +27,7 @@ func TestFileModule_RegisterRoutes(t *testing.T) {
 		{"GET", "/api/workspaces/test-ws/agents/agent1/files/tree"},
 		{"GET", "/api/workspaces/test-ws/agents/agent1/files"},
 		{"PUT", "/api/workspaces/test-ws/agents/agent1/files"},
+		{"GET", "/api/workspaces/test-ws/files/capabilities"},
 		{"GET", "/api/workspaces/test-ws/files/git-status"},
 		{"GET", "/api/workspaces/test-ws/files/checkouts"},
 		{"POST", "/api/workspaces/test-ws/files/checkouts/repair"},
@@ -64,4 +70,37 @@ func TestFileModule_NilDeps(t *testing.T) {
 
 	mux := http.NewServeMux()
 	mod.Register(mux) // must not panic during registration
+}
+
+func TestFileModule_ViewerCapabilities(t *testing.T) {
+	accessCfg := middleware.FileAccessConfig{
+		RemoteAuth: true,
+		ResolveRole: func(context.Context, string, middleware.UserIdentity) (string, error) {
+			return "viewer", nil
+		},
+	}
+	mod := NewFileModule(&stubFileService{}, accessCfg)
+	mux := http.NewServeMux()
+	mod.Register(mux)
+
+	capReq := authorizedFileModuleRequest(http.MethodGet, "/api/workspaces/ws/files/capabilities")
+	capRR := httptest.NewRecorder()
+	mux.ServeHTTP(capRR, capReq)
+	if capRR.Code != http.StatusOK {
+		t.Fatalf("capabilities status=%d body=%s", capRR.Code, capRR.Body.String())
+	}
+	var capabilities service.FileCapabilities
+	if err := json.NewDecoder(capRR.Body).Decode(&capabilities); err != nil {
+		t.Fatal(err)
+	}
+	if capabilities != (service.FileCapabilities{Read: true}) {
+		t.Fatalf("capabilities=%+v", capabilities)
+	}
+}
+
+func authorizedFileModuleRequest(method, target string) *http.Request {
+	req := httptest.NewRequest(method, target, nil)
+	ctx := middleware.WithWorkspace(req.Context(), "ws")
+	ctx = middleware.WithUserIdentity(ctx, middleware.UserIdentity{UserID: "viewer-1"})
+	return req.WithContext(ctx)
 }
