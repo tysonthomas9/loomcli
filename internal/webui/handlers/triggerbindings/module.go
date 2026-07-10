@@ -222,6 +222,7 @@ func nextFireFor(b *domain.TriggerBinding, now time.Time) *time.Time {
 	return &next
 }
 
+//nolint:cyclop,funlen // Validation mirrors the source-specific binding invariants in one request path.
 func (m *Module) createBinding(w http.ResponseWriter, r *http.Request) {
 	ws := strings.TrimSpace(r.PathValue("ws"))
 	if ws == "" {

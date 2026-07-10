@@ -8,21 +8,18 @@ import {
 } from "react";
 import { useNavigate } from "react-router-dom";
 
-import {
-  createPromptAgentRecord,
-  type CreatePromptAgentRecordRequest,
-} from "@/api/agents";
+import type { CreatePromptAgentRecordRequest } from "@/api/agents";
 import { AetherModal, aetherModalStyles } from "@/components/AetherModal";
 import type {
   RepoInfo,
   WorkspaceAgentInfo,
   WorkspaceRole,
 } from "@/api/workspace";
-import { listWorkspaceRoles } from "@/api/workspace";
 import {
   useCreateWorkspaceAgent,
   useEnsureWorkspaceRole,
 } from "@/hooks/agents";
+import { createPromptAgentRecord, listWorkspaceRoles } from "@/hooks/api";
 import {
   GITHUB_CONNECTOR_ID,
   dispatchBindingsChanged,

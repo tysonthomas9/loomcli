@@ -39,8 +39,13 @@ export function WorkflowSourceModal({
   workflowName,
   onClose,
 }: WorkflowSourceModalProps): JSX.Element | null {
-  const { getSource, listVersions, saveSource, approveVersion, activateVersion } =
-    useWorkflowSource(workspaceId);
+  const {
+    getSource,
+    listVersions,
+    saveSource,
+    approveVersion,
+    activateVersion,
+  } = useWorkflowSource(workspaceId);
   const { showToast } = useToast();
 
   const [loading, setLoading] = useState(false);
@@ -51,9 +56,8 @@ export function WorkflowSourceModal({
 
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
-  const [saveResult, setSaveResult] = useState<CreateWorkflowVersionResult | null>(
-    null,
-  );
+  const [saveResult, setSaveResult] =
+    useState<CreateWorkflowVersionResult | null>(null);
 
   const [versions, setVersions] = useState<DriverVersion[]>([]);
   const [activeVersionId, setActiveVersionId] = useState("");
@@ -122,12 +126,9 @@ export function WorkflowSourceModal({
     };
   }, [isOpen, workflowName, getSource, refreshVersions]);
 
-  const setFileContent = useCallback(
-    (path: string, content: string) => {
-      setFiles((prev) => ({ ...prev, [path]: content }));
-    },
-    [],
-  );
+  const setFileContent = useCallback((path: string, content: string) => {
+    setFiles((prev) => ({ ...prev, [path]: content }));
+  }, []);
 
   const handleSave = useCallback(async () => {
     setSaving(true);
@@ -344,25 +345,35 @@ export function WorkflowSourceModal({
                         <span className={styles.versionName}>
                           Version {v.version}
                         </span>
-                        <span className={styles.versionSub}>{v.version_id}</span>
+                        <span className={styles.versionSub}>
+                          {v.version_id}
+                        </span>
                       </div>
                       {isActive ? (
-                        <span className={`${styles.badge} ${styles.badgeActive}`}>
+                        <span
+                          className={`${styles.badge} ${styles.badgeActive}`}
+                        >
                           Active
                         </span>
                       ) : v.validation_status === "failed" ? (
-                        <span className={`${styles.badge} ${styles.badgeFailed}`}>
+                        <span
+                          className={`${styles.badge} ${styles.badgeFailed}`}
+                        >
                           Failed
                         </span>
                       ) : (
-                        <span className={`${styles.badge} ${styles.badgePassed}`}>
+                        <span
+                          className={`${styles.badge} ${styles.badgePassed}`}
+                        >
                           {v.validation_status}
                         </span>
                       )}
                       <button
                         type="button"
                         className={styles.secondaryButton}
-                        onClick={() => runVersionAction(v.version_id, "approve")}
+                        onClick={() =>
+                          runVersionAction(v.version_id, "approve")
+                        }
                         disabled={busy}
                         data-testid={`workflow-version-approve-${v.version_id}`}
                       >
@@ -371,7 +382,9 @@ export function WorkflowSourceModal({
                       <button
                         type="button"
                         className={styles.secondaryButton}
-                        onClick={() => runVersionAction(v.version_id, "activate")}
+                        onClick={() =>
+                          runVersionAction(v.version_id, "activate")
+                        }
                         disabled={busy || isActive}
                         data-testid={`workflow-version-activate-${v.version_id}`}
                       >

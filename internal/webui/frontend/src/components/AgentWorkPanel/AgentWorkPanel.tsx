@@ -35,7 +35,7 @@ import {
   OPEN_QUEUE_PANEL_MIN_WIDTH,
 } from "@/hooks/ui/useOpenQueuePanelWidth";
 
-import { SearchInput } from "@/components/search/SearchInput";
+import { SearchInput } from "@/components/search";
 
 import { PanelWidthResizeHandle } from "./PanelWidthResizeHandle";
 import styles from "./AgentWorkPanel.module.css";

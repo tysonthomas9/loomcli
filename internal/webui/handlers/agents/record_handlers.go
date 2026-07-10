@@ -139,6 +139,7 @@ type patchAgentBehaviorRecord struct {
 	RoleName *string `json:"role_name,omitempty"`
 }
 
+//nolint:funlen // One response intentionally projects supervised, durable, and legacy agent records together.
 func (m *Module) listAgents(w http.ResponseWriter, r *http.Request) {
 	if m.store == nil {
 		if m.agentSvc == nil {
@@ -235,6 +236,7 @@ func (m *Module) createSupervisedAgent(w http.ResponseWriter, r *http.Request) {
 	HandleCreate(m.agentSvc, m.hub)(w, r)
 }
 
+//nolint:funlen // Transaction keeps record, binding, grants, and compensation ordering explicit.
 func (m *Module) createPromptAgent(w http.ResponseWriter, r *http.Request, body []byte) {
 	if m.store == nil {
 		handler.HandleServiceError(w, service.ErrUnavailable("fleet-db store not configured"))
@@ -458,6 +460,7 @@ func (m *Module) getAgent(w http.ResponseWriter, r *http.Request) {
 	handler.WriteJSON(w, http.StatusOK, out)
 }
 
+//nolint:funlen // Handler keeps supervised dispatch and durable record/binding updates in one request flow.
 func (m *Module) patchAgent(w http.ResponseWriter, r *http.Request) {
 	if m.store == nil {
 		handler.HandleServiceError(w, service.ErrUnavailable("fleet-db store not configured"))
@@ -529,6 +532,7 @@ func (m *Module) patchAgent(w http.ResponseWriter, r *http.Request) {
 	handler.WriteJSON(w, http.StatusOK, out)
 }
 
+//nolint:funlen // Archive transaction coordinates binding deletion, grant revocation, and record state.
 func (m *Module) deleteAgent(w http.ResponseWriter, r *http.Request) {
 	if m.store == nil {
 		handler.HandleServiceError(w, service.ErrUnavailable("fleet-db store not configured"))

@@ -73,8 +73,9 @@ const {
 }));
 
 // Create hoisted mocks for modal API functions.
-const { mockCreateIssue } = vi.hoisted(() => ({
+const { mockCreateIssue, mockCreatePromptAgentRecord } = vi.hoisted(() => ({
   mockCreateIssue: vi.fn(),
+  mockCreatePromptAgentRecord: vi.fn(),
 }));
 
 // Create hoisted mocks for usePanelManager return values
@@ -142,6 +143,7 @@ vi.mock("@/hooks/api", async (importOriginal) => {
   return {
     ...actual,
     createIssue: mockCreateIssue,
+    createPromptAgentRecord: mockCreatePromptAgentRecord,
   };
 });
 
@@ -978,6 +980,15 @@ describe("App", () => {
     mockUpdateIssue.mockResolvedValue({});
     mockAddComment.mockResolvedValue({});
     mockCreateIssue.mockResolvedValue(createMockIssue({ id: "created-issue" }));
+    mockCreatePromptAgentRecord.mockResolvedValue({
+      id: "agt-planner",
+      name: "planner",
+      kind: "prompt",
+      enabled: true,
+      behavior: { role_name: "plan" },
+      workspace_key: "test-ws-id",
+      bindings: [{ binding_id: "agt-planner-binding" }],
+    });
     mockStartAgent.mockResolvedValue(undefined);
     mockRunOnboardingFirstTask.mockResolvedValue({
       success: true,
@@ -1278,7 +1289,7 @@ describe("App", () => {
       // Verify KanbanBoard is rendered (we can't easily test the drag event
       // but we verify the component structure is correct)
       expect(screen.getByRole("heading", { name: "Open" })).toBeInTheDocument();
-      expect(screen.getByText("Test")).toBeInTheDocument();
+      expect(screen.getByRole("heading", { name: "Test" })).toBeInTheDocument();
     });
   });
 
@@ -2557,7 +2568,7 @@ describe("App", () => {
       });
     });
 
-    it("does not navigate to a terminal after creating a background worker", async () => {
+    it("activates a background worker as a prompt agent", async () => {
       localStorage.clear();
       // Default mock resolves a plan worker (role_name: "plan").
       mockStoreState = createMockUseIssuesReturn({
@@ -2570,15 +2581,20 @@ describe("App", () => {
       fireEvent.click(screen.getByRole("button", { name: "Create Agent" }));
       const dialog = await screen.findByRole("dialog", { name: "New Agent" });
       mockNavigate.mockClear();
-      fireEvent.click(
-        within(dialog).getByRole("button", { name: "Create Agent" }),
-      );
+      fireEvent.click(within(dialog).getByRole("button", { name: "Activate" }));
 
       await waitFor(() => {
-        expect(mockCreateWorkspaceAgent).toHaveBeenCalled();
+        expect(mockCreatePromptAgentRecord).toHaveBeenCalledWith(
+          "test-ws-id",
+          expect.objectContaining({
+            name: "planner",
+            behavior: { role_name: "plan" },
+          }),
+        );
       });
-      expect(mockNavigate).not.toHaveBeenCalledWith(
-        expect.stringContaining("/agents/"),
+      expect(mockCreateWorkspaceAgent).not.toHaveBeenCalled();
+      expect(mockNavigate).toHaveBeenCalledWith(
+        "/ws/test-ws-id/agents/agt-planner-binding",
       );
     });
   });
@@ -2602,24 +2618,23 @@ describe("App", () => {
         name: "New Agent",
       });
       fireEvent.click(
-        within(agentDialog).getByRole("button", { name: "Create Agent" }),
+        within(agentDialog).getByRole("button", { name: "Activate" }),
       );
 
       await waitFor(() => {
-        expect(mockCreateWorkspaceAgent).toHaveBeenCalledWith(
+        expect(mockCreatePromptAgentRecord).toHaveBeenCalledWith(
           "test-ws-id",
           expect.objectContaining({
             name: "planner",
-            role_name: "plan",
             backend: "opencode",
+            behavior: { role_name: "plan" },
           }),
         );
       });
 
-      expect(upsertAgent).toHaveBeenCalledWith(
-        expect.objectContaining({ name: "planner", role_name: "plan" }),
-      );
-      expect(refetchWorkspace).toHaveBeenCalled();
+      expect(mockCreateWorkspaceAgent).not.toHaveBeenCalled();
+      expect(upsertAgent).not.toHaveBeenCalled();
+      expect(refetchWorkspace).not.toHaveBeenCalled();
 
       expect(
         screen.queryByRole("dialog", {

@@ -96,6 +96,8 @@ type taskDiffResponse struct {
 // workflow run may read only cards/repos inside its workspace. The operation is
 // read-only and fail-closed: malformed stamps, missing refs, non-filesystem
 // origins, and over-large diffs all return precise structured error codes.
+//
+//nolint:funlen // Read-only pipeline validates provenance, refs, SHAs, and size in fail-closed order.
 func (m *Module) taskDiff(ctx context.Context, ws string, id driverIdentity, body []byte) (any, error) {
 	params, err := decodeParams[taskDiffParams](body)
 	if err != nil {

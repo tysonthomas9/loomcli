@@ -102,7 +102,7 @@ vi.mock("@/hooks", () => ({
     activeWorkspaceName: null,
     defaultWorkspaceName: null,
     setDefaultWorkspace: vi.fn(),
-    agents: [],
+    agents: defaultAgentContext.agents,
     workspace: reposOverride.workspace ?? null,
     repos: reposOverride.repos ?? [],
     isLoading: reposOverride.isLoading ?? defaultReposReturn.isLoading,
@@ -159,23 +159,17 @@ vi.mock("@/hooks", () => ({
   LAYER_ISSUE_PANEL: 10,
 }));
 
-vi.mock("@/hooks/workspace", async () => {
-  const actual =
-    await vi.importActual<typeof import("@/hooks/workspace")>(
-      "@/hooks/workspace",
-    );
-  return {
-    ...actual,
-    useWorkspaceTree: () => ({
-      epics: [],
-      orphanTasks: [],
-      closedEpicCount: 0,
-      isLoading: false,
-      error: null,
-      refetch: vi.fn(),
-    }),
-  };
-});
+vi.mock("@/hooks/workspace", () => ({
+  useAutomations: () => ({ bindings: [] }),
+  useWorkspaceTree: () => ({
+    epics: [],
+    orphanTasks: [],
+    closedEpicCount: 0,
+    isLoading: false,
+    error: null,
+    refetch: vi.fn(),
+  }),
+}));
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 

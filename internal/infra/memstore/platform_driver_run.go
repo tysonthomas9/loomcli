@@ -72,10 +72,10 @@ func (s *driverRunStore) Create(_ context.Context, in store.DriverRunCreate) (*d
 	}
 	now := time.Now().UTC()
 	run := &domain.DriverRun{
-		WorkspaceKey:    in.WorkspaceKey,
-		RunID:           in.RunID,
-		DriverID:        in.DriverID,
-		DriverVersionID: in.DriverVersionID,
+		WorkspaceKey:     in.WorkspaceKey,
+		RunID:            in.RunID,
+		DriverID:         in.DriverID,
+		DriverVersionID:  in.DriverVersionID,
 		Entrypoint:       in.Entrypoint,
 		SourceKind:       in.SourceKind,
 		SourceRef:        in.SourceRef,
@@ -84,9 +84,9 @@ func (s *driverRunStore) Create(_ context.Context, in store.DriverRunCreate) (*d
 		ParentRunID:      in.ParentRunID,
 		Status:           domain.DriverRunQueued,
 		IdempotencyKey:   in.IdempotencyKey,
-		Payload:         cloneJSON(in.Payload),
-		CreatedAt:       now,
-		UpdatedAt:       now,
+		Payload:          cloneJSON(in.Payload),
+		CreatedAt:        now,
+		UpdatedAt:        now,
 	}
 	s.items[in.WorkspaceKey][in.RunID] = run
 	return cloneDriverRun(run), nil

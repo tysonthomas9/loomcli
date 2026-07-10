@@ -50,7 +50,9 @@ export interface UseWorkflowSourceReturn {
  * Phase B "View/Edit source" surface: load builtin TS, rebuild a version from
  * edits (surfacing build diagnostics honestly), and approve/activate versions.
  */
-export function useWorkflowSource(workspaceId: string): UseWorkflowSourceReturn {
+export function useWorkflowSource(
+  workspaceId: string,
+): UseWorkflowSourceReturn {
   const getSource = useCallback(
     (name: string): Promise<WorkflowSource> =>
       getWorkflowSource(workspaceId, name),

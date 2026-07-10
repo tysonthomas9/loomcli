@@ -92,16 +92,29 @@ export function AgentSection({
   const agentNamesKey = agentNames.join("\0");
 
   useEffect(() => {
+    const updateOrder = (nextOrder: string[]) => {
+      setAgentOrder((currentOrder) =>
+        currentOrder.length === nextOrder.length &&
+        currentOrder.every((name, index) => name === nextOrder[index])
+          ? currentOrder
+          : nextOrder,
+      );
+    };
+
     if (!workspaceId) {
-      setAgentOrder(agentNames);
+      updateOrder(agentNames);
       return;
     }
 
     const stored = parseStoredAgentSectionOrder(
       wsGet(workspaceId, SK_AGENT_SECTION_ORDER),
     );
-    setAgentOrder(mergeAgentSectionOrder(agentNames, stored));
-  }, [workspaceId, agentNamesKey, agentNames]);
+    updateOrder(mergeAgentSectionOrder(agentNames, stored));
+    // agentNamesKey is the content signature. Depending on agentNames itself
+    // would rerun this state-writing effect whenever a provider returns an
+    // equivalent array with a new identity.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [workspaceId, agentNamesKey]);
 
   const persistAgentOrder = useCallback(
     (nextOrder: string[]) => {
@@ -204,8 +217,8 @@ export function AgentSection({
                   />
                   <span className={styles.workflowText}>
                     <span className={styles.workflowName}>
-                    {bindingDisplayName(b)}
-                  </span>
+                      {bindingDisplayName(b)}
+                    </span>
                     <span className={styles.workflowMeta}>
                       {bindingCadenceLabel(b)}
                     </span>
