@@ -54,6 +54,14 @@ FLEET_DB_BIN="${FLEET_DB_BIN:-${ROOT_DIR}/tmp/podman/fleet-db-linux}"
 BUILD_FLEET_DB="${BUILD_FLEET_DB:-auto}"
 BUILD_IMAGE="${BUILD_IMAGE:-auto}"
 
+# Build the review bundle with the exact Flue revision Loom pins. Normal
+# checkouts keep loomcli and flue as siblings; the unified-agents workspace
+# nests loomcli one directory deeper, so accept that real checkout layout too.
+FLUE_REPO="${FLUE_REPO:-${ROOT_DIR}/../flue}"
+if [[ ! -f "${FLUE_REPO}/packages/cli/bin/flue.mjs" && -f "${ROOT_DIR}/../../flue/packages/cli/bin/flue.mjs" ]]; then
+  FLUE_REPO="${ROOT_DIR}/../../flue"
+fi
+
 CODEX_HOME="${CODEX_HOME:-${HOME}/.codex}"
 CONTAINER_CODEX_AUTH_FILE="${CONTAINER_CODEX_AUTH_FILE:-/root/.codex/auth.json}"
 CONTAINER_TASK_RUNNER="${CONTAINER_TASK_RUNNER:-/usr/local/bin/loom-task-runner-invoker.mjs}"
@@ -217,19 +225,60 @@ console.log("sha256:" + hash.digest("hex"));
     "workflows/github-review-task-runner.ts=${REVIEW_TASK_RUNNER_SOURCE}"
 }
 
-# write_review_dist packages the workflow and its sibling runner into one
-# native Flue-style dist. The server dispatches by FLUE_CLI_NAME, so the same
-# bundle can run the driver workflow or the named task runner via the generic
-# invoker.
+# ensure_flue verifies that the external framework checkout matches Loom's
+# exact pin. A drifted or unbuilt checkout is a hard environment failure, not
+# permission to fall back to a hand-written Flue protocol shim.
+ensure_flue() {
+  require_path "${FLUE_REPO}/packages/cli/bin/flue.mjs"
+  require_path "${FLUE_REPO}/packages/runtime/dist/index.mjs"
+  require_path "${ROOT_DIR}/internal/workflows/FLUE_COMMIT"
+
+  local pinned head
+  pinned="$(tr -d '[:space:]' < "${ROOT_DIR}/internal/workflows/FLUE_COMMIT")"
+  head="$(git -C "$FLUE_REPO" rev-parse HEAD 2>/dev/null || true)"
+  if [[ -z "$head" || "$head" != "$pinned" ]]; then
+    printf 'flue checkout HEAD %s does not match Loom pin %s\n' "${head:-unknown}" "$pinned" >&2
+    exit 1
+  fi
+}
+
+# write_review_dist builds the workflow and its sibling runner into one real,
+# self-contained Flue node artifact. The generated server dispatches by
+# FLUE_CLI_NAME, so the same bundle can run the driver workflow or the named
+# task runner through the generic invoker.
 write_review_dist() {
   local dist="$1"
-  mkdir -p "${dist}/node_modules/@loom/sdk" "${dist}/workflows"
-  cp "${LOOM_SDK_DIR}/package.json" "${dist}/node_modules/@loom/sdk/package.json"
-  cp "${LOOM_SDK_DIR}/driver.js" "${dist}/node_modules/@loom/sdk/driver.js"
-  cp "${LOOM_SDK_DIR}/runner.js" "${dist}/node_modules/@loom/sdk/runner.js"
-  cp "${LOOM_SDK_DIR}/internal.js" "${dist}/node_modules/@loom/sdk/internal.js"
-  cp "$REVIEW_WORKFLOW_SOURCE" "${dist}/workflows/github-review-agent.mjs"
-  cp "$REVIEW_TASK_RUNNER_SOURCE" "${dist}/workflows/github-review-task-runner.mjs"
+  local stage
+  stage="$(mktemp -d "${TMPDIR:-/tmp}/loom-github-review-flue.XXXXXX")"
+  mkdir -p "${stage}/workflows" "${stage}/node_modules/@loom" "${stage}/node_modules/@flue"
+  ln -s "$LOOM_SDK_DIR" "${stage}/node_modules/@loom/sdk"
+  ln -s "${FLUE_REPO}/packages/runtime" "${stage}/node_modules/@flue/runtime"
+  cp "$REVIEW_WORKFLOW_SOURCE" "${stage}/workflows/github-review-agent.ts"
+  cp "$REVIEW_TASK_RUNNER_SOURCE" "${stage}/workflows/github-review-task-runner.ts"
+  node -e '
+const fs = require("node:fs");
+const stage = process.argv[1];
+fs.writeFileSync(stage + "/package.json", JSON.stringify({
+  type: "module",
+  dependencies: {
+    "@loom/sdk": "file:./node_modules/@loom/sdk",
+    "@flue/runtime": "file:./node_modules/@flue/runtime"
+  }
+}, null, 2) + "\n");
+' "$stage"
+
+  (
+    cd "$stage"
+    node "${FLUE_REPO}/packages/cli/bin/flue.mjs" build \
+      --target node \
+      --root "$stage" \
+      --output "$dist"
+  )
+  [[ -f "${dist}/server.mjs" ]] || {
+    printf 'Flue build produced no server.mjs in %s\n' "$dist" >&2
+    exit 1
+  }
+
   node -e '
 const fs = require("node:fs");
 const dist = process.argv[1];
@@ -239,68 +288,6 @@ fs.writeFileSync(dist + "/loom-driver.json", JSON.stringify({
   ])
 }, null, 2) + "\n");
 ' "$dist"
-  cat > "${dist}/server.mjs" <<'EOF'
-const workflowLoaders = {
-  "github-review-agent": () => import("./workflows/github-review-agent.mjs"),
-  "github-review-task-runner": () => import("./workflows/github-review-task-runner.mjs"),
-};
-
-let completed = false;
-
-function send(message) {
-  if (typeof process.send === "function") {
-    process.send({ version: 1, ...message });
-  } else {
-    console.log(JSON.stringify(message.result || message.error || message));
-  }
-}
-
-function normalizeResult(result) {
-  if (!result || typeof result !== "object") {
-    return { status: "completed", summary: "completed" };
-  }
-  return result;
-}
-
-async function invoke(message) {
-  if (completed) return;
-  completed = true;
-  try {
-    const workflowName = process.env.FLUE_CLI_NAME || "github-review-agent";
-    const loader = workflowLoaders[workflowName];
-    if (!loader) {
-      throw new Error("unknown workflow " + JSON.stringify(workflowName));
-    }
-    const mod = await loader();
-    if (!mod || typeof mod.run !== "function") {
-      throw new Error("workflow " + JSON.stringify(workflowName) + " does not export run()");
-    }
-    const result = await mod.run({
-      payload: message.payload || {},
-      requestId: message.requestId,
-      env: process.env,
-    });
-    send({ type: "result", requestId: message.requestId, result: normalizeResult(result) });
-  } catch (error) {
-    send({
-      type: "error",
-      requestId: message.requestId,
-      error: {
-        type: "driver_runtime",
-        message: error && error.message ? error.message : String(error),
-        details: error && error.stack ? error.stack : "",
-      },
-    });
-  }
-}
-
-process.on("message", (message) => {
-  if (!message || message.type !== "invoke") return;
-  void invoke(message);
-});
-
-send({ type: "ready" });
-EOF
 }
 
 # register_review_workflow — clones the slack stack's
@@ -401,6 +388,7 @@ main() {
   require_path "${CODEX_HOME}/auth.json"
 
   resolve_secrets
+  ensure_flue
   ensure_fleet_db
   ensure_image
 

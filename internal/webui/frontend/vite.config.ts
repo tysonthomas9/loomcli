@@ -1,19 +1,19 @@
 /// <reference types="vitest" />
-import { defineConfig } from "vite"
-import react from "@vitejs/plugin-react"
-import path from "path"
+import { defineConfig } from "vite";
+import react from "@vitejs/plugin-react";
+import path from "path";
 
 // Dev proxy target: forward /api and /health requests to this URL.
 // Defaults to the local Go server when VITE_API_BASE_URL is unset.
 const apiProxyTarget = process.env.VITE_API_BASE_URL || "http://localhost:8080";
 
 function includesAny(id: string, needles: string[]): boolean {
-  return needles.some((needle) => id.includes(needle))
+  return needles.some((needle) => id.includes(needle));
 }
 
 function manualChunks(id: string): string | undefined {
-  const normalizedId = id.split(path.sep).join("/")
-  if (!normalizedId.includes("/node_modules/")) return undefined
+  const normalizedId = id.split(path.sep).join("/");
+  if (!normalizedId.includes("/node_modules/")) return undefined;
 
   if (
     includesAny(normalizedId, [
@@ -22,35 +22,35 @@ function manualChunks(id: string): string | undefined {
       "/node_modules/scheduler/",
     ])
   ) {
-    return "react"
+    return "react";
   }
 
   if (normalizedId.includes("/node_modules/react-router")) {
-    return "react-router"
+    return "react-router";
   }
 
   if (normalizedId.includes("/node_modules/@xyflow/")) {
-    return "react-flow"
+    return "react-flow";
   }
 
   if (normalizedId.includes("/node_modules/better-auth/")) {
-    return "better-auth"
+    return "better-auth";
   }
 
   if (normalizedId.includes("/node_modules/@wterm/")) {
-    return "terminal-vendor"
+    return "terminal-vendor";
   }
 
   if (normalizedId.includes("/node_modules/@dnd-kit/")) {
-    return "dnd-kit"
+    return "dnd-kit";
   }
 
   if (normalizedId.includes("/node_modules/@tanstack/")) {
-    return "virtual-list"
+    return "virtual-list";
   }
 
   if (normalizedId.includes("/node_modules/@dagrejs/")) {
-    return "graph-layout"
+    return "graph-layout";
   }
 
   if (
@@ -63,7 +63,7 @@ function manualChunks(id: string): string | undefined {
       "/node_modules/@marijn/",
     ])
   ) {
-    return "codemirror-view"
+    return "codemirror-view";
   }
 
   if (
@@ -77,7 +77,7 @@ function manualChunks(id: string): string | undefined {
       "/node_modules/codemirror-lang-diff/",
     ])
   ) {
-    return "codemirror-language"
+    return "codemirror-language";
   }
 
   if (
@@ -103,15 +103,15 @@ function manualChunks(id: string): string | undefined {
       "/node_modules/zwitch/",
     ])
   ) {
-    return "markdown"
+    return "markdown";
   }
 
   if (normalizedId.includes("/node_modules/dompurify/")) {
-    return "sanitize"
+    return "sanitize";
   }
 
   if (normalizedId.includes("/node_modules/openapi-fetch/")) {
-    return "openapi"
+    return "openapi";
   }
 
   if (
@@ -120,10 +120,10 @@ function manualChunks(id: string): string | undefined {
       "/node_modules/immer/",
     ])
   ) {
-    return "state"
+    return "state";
   }
 
-  return "vendor"
+  return "vendor";
 }
 
 export default defineConfig(({ mode }) => ({
@@ -200,6 +200,10 @@ export default defineConfig(({ mode }) => ({
     environment: "node",
     exclude: ["tests/e2e/**", "node_modules/**"],
     pool: "forks",
+    // GitHub-hosted runners OOM when Vitest sizes this 8k-test suite from all
+    // advertised CPUs. Two forks keep both unit and coverage jobs within the
+    // runner memory limit while preserving file-level parallelism.
+    maxWorkers: 2,
     coverage: {
       provider: "v8",
       include: ["src/**/*.{ts,tsx}"],
@@ -210,12 +214,18 @@ export default defineConfig(({ mode }) => ({
         "src/vite-env.d.ts",
         "src/main.tsx",
       ],
-      thresholds: {
-        lines: 60,
-        branches: 60,
-        functions: 60,
-        statements: 60,
-      },
+      // Individual shard reports contain only a fraction of the suite. Enforce
+      // thresholds once Vitest merges every blob into the global report.
+      ...(process.env.VITEST_COVERAGE_SHARD
+        ? {}
+        : {
+            thresholds: {
+              lines: 60,
+              branches: 60,
+              functions: 60,
+              statements: 60,
+            },
+          }),
     },
   },
-}))
+}));

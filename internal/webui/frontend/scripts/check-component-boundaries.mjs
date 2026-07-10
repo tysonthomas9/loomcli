@@ -32,6 +32,11 @@ export const ALLOWLIST = [
     source: "src/components/AppLayout/AppLayout.tsx",
     target: "@/components/LiveRegion/LiveRegion",
   },
+  {
+    source: "src/components/SessionRunDetail/SessionRunDetail.tsx",
+    target:
+      "@/components/IssueDetailPanel/sessions/SessionsTab.module.css",
+  },
 ];
 
 /**

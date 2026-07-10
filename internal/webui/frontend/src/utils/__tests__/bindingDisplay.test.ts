@@ -60,7 +60,10 @@ describe("bindingCadenceLabel", () => {
         binding({
           source_kind: "github",
           schedule: undefined,
-          event_type_patterns: ["pull_request.opened", "pull_request.synchronize"],
+          event_type_patterns: [
+            "pull_request.opened",
+            "pull_request.synchronize",
+          ],
         }),
       ),
     ).toBe("pull_request.opened, pull_request.synchronize");
@@ -112,9 +115,9 @@ describe("bindingDotState / tooltip", () => {
 
   it("tooltip reflects enabled + next fire, and failure state", () => {
     expect(bindingDotTooltip(binding({ enabled: false }))).toBe("Disabled");
-    expect(bindingDotTooltip(binding({ enabled: true, next_fire_at: undefined }))).toBe(
-      "Enabled",
-    );
+    expect(
+      bindingDotTooltip(binding({ enabled: true, next_fire_at: undefined })),
+    ).toBe("Enabled");
     expect(
       bindingDotTooltip(
         binding({ enabled: true, next_fire_at: "2026-07-02T02:10:00Z" }),

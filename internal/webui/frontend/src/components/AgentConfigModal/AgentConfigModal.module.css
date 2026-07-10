@@ -142,7 +142,11 @@
 }
 
 .dangerSection {
-  border-color: color-mix(in srgb, var(--color-danger) 30%, var(--color-border-light));
+  border-color: color-mix(
+    in srgb,
+    var(--color-danger) 30%,
+    var(--color-border-light)
+  );
 }
 
 /* The load-bearing honesty note: prompt/config edits are NOT hot-reloaded. */

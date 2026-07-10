@@ -14,7 +14,7 @@ import (
 //
 // The hash input is the fleet-db body projection (CreateParams.FleetCreateBody),
 // NOT the full CreateParams: fields fleet-db drops (id, acceptance_criteria,
-// created_by, external_ref, estimated_minutes, dependencies) must not
+// created_by, estimated_minutes, dependencies) must not
 // differentiate keys, or two requests that persist identically would mint
 // duplicates. Using the same projection the wire request is built from also
 // keeps the key aligned byte-for-byte with the body fleet-db fingerprints,

@@ -51,12 +51,20 @@ func TestCreateCommand_DefaultIdempotencyKey(t *testing.T) {
 		t.Error("different description must produce a different key")
 	}
 
-	// …but fields fleet-db drops from the create body must NOT (they
-	// persist identically, so they must dedup identically).
+	// …but a field fleet-db drops from the create body must NOT (the
+	// requests persist identically, so they must dedup identically).
 	p4 := runCreate(t, &localBackendStub{createItem: &backend.IssueData{ID: "x-4"}},
-		append(args, "--external-ref", "gh-42", "--estimated-minutes", "45")...)
+		append(args, "--estimated-minutes", "45")...)
 	if p4.IdempotencyKey != p1.IdempotencyKey {
 		t.Error("fleet-db-dropped fields must not differentiate the idempotency key")
+	}
+
+	// external_ref is persisted in fleet-db's create body, so it must
+	// differentiate the key just like every other persisted field.
+	p5 := runCreate(t, &localBackendStub{createItem: &backend.IssueData{ID: "x-5"}},
+		append(args, "--external-ref", "gh-42")...)
+	if p5.IdempotencyKey == p1.IdempotencyKey {
+		t.Error("persisted external_ref must produce a different idempotency key")
 	}
 }
 

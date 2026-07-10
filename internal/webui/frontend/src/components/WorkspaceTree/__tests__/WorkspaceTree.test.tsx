@@ -15,6 +15,11 @@ import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 import "@testing-library/jest-dom";
+import {
+  useWorkspaceTreeWidth,
+  WORKSPACE_TREE_MIN_WIDTH,
+  WORKSPACE_TREE_MAX_WIDTH,
+} from "@/hooks/ui/useWorkspaceTreeWidth";
 import { WorkspaceTree } from "../WorkspaceTree";
 
 const { mockAddWorkspaceRepos } = vi.hoisted(() => ({
@@ -71,69 +76,65 @@ vi.mock("zustand", () => ({
     selector({ ...defaultAgentContext, ...agentOverride }),
 }));
 
-vi.mock("@/hooks", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@/hooks")>();
-  return {
-    ...actual,
-    useDebouncedCallback: (fn: (...args: unknown[]) => unknown) => fn,
-    useWorkspaceRepos: () => ({ ...defaultReposReturn, ...reposOverride }),
-    useAgentStoreInstance: () => ({}), // dummy — useStore mock ignores store arg
-    useWorkspaceContext: () => ({
-      workspaceId: TEST_WS_ID,
-      activeWorkspaceName: null,
-      defaultWorkspaceName: null,
-      setDefaultWorkspace: vi.fn(),
-      agents: [],
-      workspace: reposOverride.workspace ?? null,
-      repos: reposOverride.repos ?? [],
-      isLoading: reposOverride.isLoading ?? defaultReposReturn.isLoading,
-      error: reposOverride.error ?? defaultReposReturn.error,
-      refetch: reposOverride.refetch ?? defaultReposReturn.refetch,
-    }),
-    useWorkspaceTree: () => ({
-      epics: [],
-      orphanTasks: [],
-      closedEpicCount: 0,
-      isLoading: false,
-      error: null,
-      refetch: vi.fn(),
-    }),
-    useWorkspaceTreeWidth: actual.useWorkspaceTreeWidth,
-    WORKSPACE_TREE_MIN_WIDTH: actual.WORKSPACE_TREE_MIN_WIDTH,
-    WORKSPACE_TREE_MAX_WIDTH: actual.WORKSPACE_TREE_MAX_WIDTH,
-    useToast: () => ({ showToast: vi.fn() }),
-    useIssueDiffStat: () => ({
-      data: null,
-      isLoading: false,
-      error: null,
-      refetch: vi.fn(),
-    }),
-    useAgentDiffStat: () => ({
-      data: null,
-      isLoading: false,
-      error: null,
-      refetch: vi.fn(),
-    }),
-    useRegisterEscapeLayer: vi.fn(),
-    useKeyboardShortcuts: vi.fn(() => ({
-      isCheatsheetOpen: false,
-      toggleCheatsheet: vi.fn(),
-      closeCheatsheet: vi.fn(),
-    })),
-    KeyboardShortcutProvider: ({ children }: { children: React.ReactNode }) =>
-      children,
-    LAYER_CONFIRM_DIALOG: 60,
-    LAYER_TOAST: 50,
-    LAYER_CHEATSHEET: 45,
-    LAYER_MODAL: 40,
-    LAYER_TERMINAL_PANEL: 30,
-    LAYER_AGENT_PANEL: 20,
-    LAYER_ISSUE_PANEL: 10,
-    LAYER_WORKSPACE_SWITCHER: 42,
-    useFocusTrap: vi.fn(),
-    useFocusReturn: vi.fn(),
-  };
-});
+vi.mock("@/hooks", () => ({
+  useDebouncedCallback: (fn: (...args: unknown[]) => unknown) => fn,
+  useWorkspaceRepos: () => ({ ...defaultReposReturn, ...reposOverride }),
+  useAgentStoreInstance: () => ({}), // dummy — useStore mock ignores store arg
+  useWorkspaceContext: () => ({
+    workspaceId: TEST_WS_ID,
+    activeWorkspaceName: null,
+    defaultWorkspaceName: null,
+    setDefaultWorkspace: vi.fn(),
+    agents: defaultAgentContext.agents,
+    workspace: reposOverride.workspace ?? null,
+    repos: reposOverride.repos ?? [],
+    isLoading: reposOverride.isLoading ?? defaultReposReturn.isLoading,
+    error: reposOverride.error ?? defaultReposReturn.error,
+    refetch: reposOverride.refetch ?? defaultReposReturn.refetch,
+  }),
+  useWorkspaceTree: () => ({
+    epics: [],
+    orphanTasks: [],
+    closedEpicCount: 0,
+    isLoading: false,
+    error: null,
+    refetch: vi.fn(),
+  }),
+  useWorkspaceTreeWidth,
+  WORKSPACE_TREE_MIN_WIDTH,
+  WORKSPACE_TREE_MAX_WIDTH,
+  useToast: () => ({ showToast: vi.fn() }),
+  useIssueDiffStat: () => ({
+    data: null,
+    isLoading: false,
+    error: null,
+    refetch: vi.fn(),
+  }),
+  useAgentDiffStat: () => ({
+    data: null,
+    isLoading: false,
+    error: null,
+    refetch: vi.fn(),
+  }),
+  useRegisterEscapeLayer: vi.fn(),
+  useKeyboardShortcuts: vi.fn(() => ({
+    isCheatsheetOpen: false,
+    toggleCheatsheet: vi.fn(),
+    closeCheatsheet: vi.fn(),
+  })),
+  KeyboardShortcutProvider: ({ children }: { children: React.ReactNode }) =>
+    children,
+  LAYER_CONFIRM_DIALOG: 60,
+  LAYER_TOAST: 50,
+  LAYER_CHEATSHEET: 45,
+  LAYER_MODAL: 40,
+  LAYER_TERMINAL_PANEL: 30,
+  LAYER_AGENT_PANEL: 20,
+  LAYER_ISSUE_PANEL: 10,
+  LAYER_WORKSPACE_SWITCHER: 42,
+  useFocusTrap: vi.fn(),
+  useFocusReturn: vi.fn(),
+}));
 
 vi.mock("@/hooks/api", () => ({
   addWorkspaceRepos: (...args: unknown[]) => mockAddWorkspaceRepos(...args),
@@ -143,27 +144,28 @@ vi.mock("@/components/WorkspaceSwitcher", () => ({
   WorkspaceSwitcher: () => null,
 }));
 
+// Repository/sidebar tests do not exercise the terminal view. Keep its
+// runtime graph out of this suite so collecting WorkspaceTree cannot pull in
+// terminal sessions, panes, and CodeMirror.
+vi.mock("../TerminalSection", () => ({
+  TerminalSection: () => null,
+}));
+
 vi.mock("@/hooks/useWorkspaceRepos", () => ({
   useWorkspaceRepos: () => ({ ...defaultReposReturn, ...reposOverride }),
 }));
 
-vi.mock("@/hooks/workspace", async () => {
-  const actual =
-    await vi.importActual<typeof import("@/hooks/workspace")>(
-      "@/hooks/workspace",
-    );
-  return {
-    ...actual,
-    useWorkspaceTree: () => ({
-      epics: [],
-      orphanTasks: [],
-      closedEpicCount: 0,
-      isLoading: false,
-      error: null,
-      refetch: vi.fn(),
-    }),
-  };
-});
+vi.mock("@/hooks/workspace", () => ({
+  useAutomations: () => ({ bindings: [] }),
+  useWorkspaceTree: () => ({
+    epics: [],
+    orphanTasks: [],
+    closedEpicCount: 0,
+    isLoading: false,
+    error: null,
+    refetch: vi.fn(),
+  }),
+}));
 
 describe("WorkspaceTree", () => {
   beforeEach(() => {

@@ -13,4 +13,5 @@ export type {
 } from "./useDragEnd";
 
 export { DEFAULT_COLUMNS, createColumns } from "./columnConfigs";
+export { visibleKanbanColumns } from "./columnVisibility";
 export type { KanbanColumnConfig } from "./types";

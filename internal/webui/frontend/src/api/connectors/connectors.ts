@@ -75,10 +75,7 @@ export async function createConnectorGrant(
   req: CreateConnectorGrantRequest,
 ): Promise<ConnectorGrant> {
   return post<ConnectorGrant>(
-    wsUrl(
-      workspaceId,
-      `/connectors/${encodeURIComponent(connectorId)}/grants`,
-    ),
+    wsUrl(workspaceId, `/connectors/${encodeURIComponent(connectorId)}/grants`),
     req,
   );
 }

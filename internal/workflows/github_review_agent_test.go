@@ -222,8 +222,10 @@ func TestGitHubReviewAgentWorkflowSourceContract(t *testing.T) {
 		{name: "findings validated", want: "validateFindings(review.findings)"},
 		{name: "invalid findings error class", want: `errorClass: "invalid_review_findings"`},
 		{name: "posts review", want: "loom.connectors.github.postReview({"},
+		{name: "posts normalized inline comments", want: "comments: findings.comments,"},
 		{name: "comment-only event", want: `event: "COMMENT",`},
 		{name: "completed with review url", want: "reviewUrl:"},
+		{name: "completed with inline count", want: "inlineCommentCount:"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -355,6 +357,9 @@ func TestGitHubReviewTaskRunnerSourceContract(t *testing.T) {
 		`review_findings: JSON.stringify(findings)`,
 		`"--output-schema"`,
 		`"--output-last-message"`,
+		`LOOM_FLUE_AGENT_MODEL`,
+		`args.splice(1, 0, "--model", CODEX_MODEL)`,
+		`const prefix = "openai-codex/"`,
 		`execFileSync(CODEX`,
 	} {
 		if !strings.Contains(source, want) {

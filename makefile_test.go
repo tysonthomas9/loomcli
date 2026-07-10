@@ -608,7 +608,7 @@ func TestGitignoreIncludesFrontendCoverage(t *testing.T) {
 }
 
 // TestFrontendPackageJsonHasTestCoverageScript verifies that package.json
-// defines a test:coverage script that runs vitest with --coverage.
+// routes coverage through the process-sharded Vitest runner.
 func TestFrontendPackageJsonHasTestCoverageScript(t *testing.T) {
 	t.Parallel()
 
@@ -621,8 +621,8 @@ func TestFrontendPackageJsonHasTestCoverageScript(t *testing.T) {
 	if !strings.Contains(content, `"test:coverage"`) {
 		t.Errorf("package.json should define a test:coverage script")
 	}
-	if !strings.Contains(content, "vitest run --coverage") {
-		t.Errorf("package.json test:coverage should run 'vitest run --coverage'")
+	if !strings.Contains(content, "node scripts/run-vitest-shards.mjs --coverage") {
+		t.Errorf("package.json test:coverage should run the sharded Vitest coverage runner")
 	}
 }
 

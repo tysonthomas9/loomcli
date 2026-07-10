@@ -3,9 +3,9 @@
  * Constants and helpers for tab naming, backend detection, and session naming.
  */
 
-import { KNOWN_BACKEND_DEFAULTS } from "@/utils/workspace";
-
 import type { ConnectionState } from "@/components/TerminalView/instances";
+
+export { BACKEND_BRAND_COLORS } from "@/utils/backendBrandColors";
 
 // Match the PTY manager's default per-workspace session cap.
 export const MAX_TABS = 40;
@@ -15,11 +15,6 @@ export const MIN_SPLIT_RATIO = 0.2;
 export const MAX_SPLIT_RATIO = 0.8;
 export const DEFAULT_SPLIT_RATIO = 0.5;
 export const MIN_SPLIT_WIDTH_PX = 900;
-
-/** Brand colors for each known backend, derived from KNOWN_BACKEND_DEFAULTS. */
-export const BACKEND_BRAND_COLORS: Record<string, string> = Object.fromEntries(
-  Object.entries(KNOWN_BACKEND_DEFAULTS).map(([k, v]) => [k, v.brandColor]),
-);
 
 export interface TabState {
   id: string;

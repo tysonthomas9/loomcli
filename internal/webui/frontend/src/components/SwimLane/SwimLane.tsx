@@ -12,7 +12,7 @@ import type { BlockedInfo } from "@/types/issue";
 import type { KanbanColumnConfig } from "@/components/KanbanBoard/types";
 import { StatusColumn } from "@/components/StatusColumn";
 import type { Issue } from "@/types";
-import { visibleKanbanColumns } from "@/components/KanbanBoard/columnVisibility";
+import { visibleKanbanColumns } from "@/components/KanbanBoard";
 import { formatIssueId, isPRUrl } from "@/utils/issue";
 
 import styles from "./SwimLane.module.css";

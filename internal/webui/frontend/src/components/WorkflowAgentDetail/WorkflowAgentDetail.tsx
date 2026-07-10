@@ -21,17 +21,19 @@ import {
   type WorkflowAgentRunStats,
 } from "@/hooks/workflows/useWorkflowAgentDetail";
 import { useToast } from "@/hooks/ui/useToast";
+import type {
+  TriggerBinding,
+  UpdateTriggerBindingRequest,
+  WorkflowRun,
+  WorkflowRunStatus,
+} from "@/api";
 import {
   getWorkflowRun,
   getWorkspaceRole,
   isTerminalWorkflowRunStatus,
   promptAgentRoleName,
   updateWorkspaceRole,
-  type TriggerBinding,
-  type UpdateTriggerBindingRequest,
-  type WorkflowRun,
-  type WorkflowRunStatus,
-} from "@/api";
+} from "@/hooks/api";
 import type { SessionRecord } from "@/types/agent";
 import { getCompactAvatarInitials } from "@/utils/compactAvatarInitials";
 import { getAvatarColor, shouldUseWhiteText } from "@/utils/colorUtils";
@@ -86,7 +88,6 @@ export interface WorkflowAgentDetailProps {
   /** Called after a successful delete so the shell can navigate back. */
   onDeleted: () => void;
 }
-
 
 type BindingHealth = ReturnType<typeof bindingHealth>;
 

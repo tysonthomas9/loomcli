@@ -371,10 +371,7 @@ export function CreateIssueModal({
                 {bindings.length > 0 && (
                   <optgroup label="Autonomous agents">
                     {bindings.map((b) => (
-                      <option
-                        key={b.binding_id}
-                        value={bindingDisplayName(b)}
-                      >
+                      <option key={b.binding_id} value={bindingDisplayName(b)}>
                         {bindingDisplayName(b)}
                       </option>
                     ))}

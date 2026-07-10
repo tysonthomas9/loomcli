@@ -94,6 +94,12 @@ vi.mock("zustand", () => ({
     selector({ ...defaultAgentContext, ...agentOverride }),
 }));
 
+// Connection-state coverage never renders the terminal view. Isolate that
+// runtime graph so this suite collects only the sidebar surface under test.
+vi.mock("../TerminalSection", () => ({
+  TerminalSection: () => null,
+}));
+
 vi.mock("@/hooks", () => ({
   useDebouncedCallback: (fn: (...args: unknown[]) => unknown) => fn,
   useWorkspaceRepos: () => ({ ...defaultReposReturn, ...reposOverride }),
@@ -103,7 +109,7 @@ vi.mock("@/hooks", () => ({
     activeWorkspaceName: null,
     defaultWorkspaceName: null,
     setDefaultWorkspace: vi.fn(),
-    agents: [],
+    agents: defaultAgentContext.agents,
     workspace: reposOverride.workspace ?? null,
     repos: reposOverride.repos ?? [],
     isLoading: reposOverride.isLoading ?? defaultReposReturn.isLoading,
@@ -160,23 +166,17 @@ vi.mock("@/hooks", () => ({
   LAYER_ISSUE_PANEL: 10,
 }));
 
-vi.mock("@/hooks/workspace", async () => {
-  const actual =
-    await vi.importActual<typeof import("@/hooks/workspace")>(
-      "@/hooks/workspace",
-    );
-  return {
-    ...actual,
-    useWorkspaceTree: () => ({
-      epics: [],
-      orphanTasks: [],
-      closedEpicCount: 0,
-      isLoading: false,
-      error: null,
-      refetch: vi.fn(),
-    }),
-  };
-});
+vi.mock("@/hooks/workspace", () => ({
+  useAutomations: () => ({ bindings: [] }),
+  useWorkspaceTree: () => ({
+    epics: [],
+    orphanTasks: [],
+    closedEpicCount: 0,
+    isLoading: false,
+    error: null,
+    refetch: vi.fn(),
+  }),
+}));
 
 describe("WorkspaceTree connection state", () => {
   beforeEach(() => {
@@ -314,7 +314,10 @@ describe("WorkspaceTree connection state", () => {
       const errorBadge = container.querySelector('[class*="errorBadge"]');
       expect(errorBadge).toBeInTheDocument();
       expect(errorBadge!.textContent).toBe("!");
-      expect(errorBadge).toHaveAttribute("title", "Workspace connection error");
+      expect(errorBadge).toHaveAttribute(
+        "aria-label",
+        "Workspace connection error",
+      );
     });
 
     it("renders error badge when collapsed and connectionState is error_lost_connection", () => {

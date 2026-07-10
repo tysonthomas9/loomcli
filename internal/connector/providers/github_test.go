@@ -111,6 +111,9 @@ func reviewSpec() CallSpec {
 		Args: map[string]any{
 			"owner": "octocat", "repo": "hello", "number": float64(7),
 			"event": "APPROVE", "body": "lgtm",
+			"comments": []any{
+				map[string]any{"path": "main.go", "line": float64(12), "body": "handle this error"},
+			},
 		},
 		Preconditions:  Preconditions{ExpectedHeadSha: "deadbeef"},
 		IdempotencyKey: "run-1#github.review.post#0",
@@ -389,7 +392,7 @@ func TestGitHubReviewPost(t *testing.T) {
 			fake.route(http.MethodGet, prPath, tt.prResponse)
 			fake.route(http.MethodPost, prPath+"/reviews", fakeResponse{
 				status: http.StatusOK,
-				body:   `{"id":42,"state":"APPROVED"}`,
+				body:   `{"id":42,"state":"APPROVED","html_url":"https://github.test/review/42"}`,
 			})
 
 			result, err := fake.provider().Call(context.Background(), reviewSpec())
@@ -426,16 +429,43 @@ func TestGitHubReviewPost(t *testing.T) {
 			if result.Decision != domain.ConnectorCallGranted {
 				t.Errorf("decision = %q, want granted", result.Decision)
 			}
-			if result.Body["id"] != float64(42) || result.Body["state"] != "APPROVED" {
+			if result.Body["id"] != float64(42) || result.Body["state"] != "APPROVED" || result.Body["htmlUrl"] != "https://github.test/review/42" {
 				t.Errorf("body = %+v", result.Body)
 			}
 			if len(reqs) != 2 || reqs[0].Method != http.MethodGet || reqs[1].Method != http.MethodPost {
 				t.Fatalf("requests = %+v, want GET then POST", reqs)
 			}
-			if reqs[1].Body["event"] != "APPROVE" || reqs[1].Body["body"] != "lgtm" {
+			if reqs[1].Body["event"] != "APPROVE" || reqs[1].Body["body"] != "lgtm" || reqs[1].Body["commit_id"] != "deadbeef" {
 				t.Errorf("review payload = %+v", reqs[1].Body)
 			}
+			comments, ok := reqs[1].Body["comments"].([]any)
+			if !ok || len(comments) != 1 {
+				t.Fatalf("review comments = %#v, want one inline comment", reqs[1].Body["comments"])
+			}
+			comment, ok := comments[0].(map[string]any)
+			if !ok || comment["path"] != "main.go" || comment["line"] != float64(12) || comment["side"] != "RIGHT" || comment["body"] != "handle this error" {
+				t.Errorf("inline review comment = %#v", comments[0])
+			}
 		})
+	}
+}
+
+func TestGitHubReviewPostRejectsMalformedInlineCommentsBeforeEgress(t *testing.T) {
+	fake := newFakeGitHub(t)
+	spec := reviewSpec()
+	spec.Args["comments"] = []any{
+		map[string]any{"path": "main.go", "line": float64(0), "body": "bad location"},
+	}
+
+	result, err := fake.provider().Call(context.Background(), spec)
+	if err == nil || !errors.Is(err, domain.ErrInvalid) {
+		t.Fatalf("error = %v, want domain.ErrInvalid", err)
+	}
+	if result.Decision != domain.ConnectorCallUpstreamError {
+		t.Errorf("decision = %q, want upstream_error", result.Decision)
+	}
+	if n := len(fake.recorded()); n != 0 {
+		t.Errorf("fake saw %d requests, want malformed comments rejected before egress", n)
 	}
 }
 

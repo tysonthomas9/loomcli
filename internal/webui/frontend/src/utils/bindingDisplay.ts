@@ -45,7 +45,8 @@ export function describeCronSchedule(expr: string | undefined): string {
   }
   if (min === "0" && hour === "*" && wildcardDate) return "Hourly";
   const everyHour = /^\*\/(\d+)$/.exec(hour);
-  if (min === "0" && everyHour && wildcardDate) return `Every ${everyHour[1]} h`;
+  if (min === "0" && everyHour && wildcardDate)
+    return `Every ${everyHour[1]} h`;
   if (/^\d{1,2}$/.test(min) && /^\d{1,2}$/.test(hour) && wildcardDate) {
     return `Daily at ${hour.padStart(2, "0")}:${min.padStart(2, "0")}`;
   }
