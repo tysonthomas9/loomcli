@@ -51,7 +51,16 @@ export interface FileWritePreconditions {
 export interface FileIndexData {
   paths: string[];
   truncated: boolean;
+  partial_reasons: FilePartialReason[];
 }
+
+export type FilePartialReason =
+  | "file_count"
+  | "result_count"
+  | "byte_limit"
+  | "file_size"
+  | "deadline"
+  | "canceled";
 
 export interface FileSearchRequest {
   query: string;
@@ -75,6 +84,7 @@ export interface FileSearchFileResult {
 export interface FileSearchData {
   results: FileSearchFileResult[];
   limitHit: boolean;
+  partial_reasons: FilePartialReason[];
 }
 
 export type FileGitStatusData = Record<string, string>;

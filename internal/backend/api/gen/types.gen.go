@@ -281,6 +281,36 @@ func (e FileHistoryEntryKind) Valid() bool {
 	}
 }
 
+// Defines values for FilePartialReason.
+const (
+	ByteLimit   FilePartialReason = "byte_limit"
+	Canceled    FilePartialReason = "canceled"
+	Deadline    FilePartialReason = "deadline"
+	FileCount   FilePartialReason = "file_count"
+	FileSize    FilePartialReason = "file_size"
+	ResultCount FilePartialReason = "result_count"
+)
+
+// Valid indicates whether the value is a known member of the FilePartialReason enum.
+func (e FilePartialReason) Valid() bool {
+	switch e {
+	case ByteLimit:
+		return true
+	case Canceled:
+		return true
+	case Deadline:
+		return true
+	case FileCount:
+		return true
+	case FileSize:
+		return true
+	case ResultCount:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for IssueAgentState.
 const (
 	IssueAgentStateDead     IssueAgentState = "dead"
@@ -1655,8 +1685,9 @@ type FileHistoryResponse struct {
 
 // FileIndexResponse defines model for FileIndexResponse.
 type FileIndexResponse struct {
-	Paths     []string `json:"paths"`
-	Truncated bool     `json:"truncated"`
+	PartialReasons []FilePartialReason `json:"partial_reasons"`
+	Paths          []string            `json:"paths"`
+	Truncated      bool                `json:"truncated"`
 }
 
 // FileMoveRequest defines model for FileMoveRequest.
@@ -1679,6 +1710,9 @@ type FileMutationResponse struct {
 	Success bool   `json:"success"`
 	Version string `json:"version"`
 }
+
+// FilePartialReason defines model for FilePartialReason.
+type FilePartialReason string
 
 // FileReadResponse defines model for FileReadResponse.
 type FileReadResponse struct {
@@ -1723,8 +1757,9 @@ type FileSearchRequest struct {
 
 // FileSearchResponse defines model for FileSearchResponse.
 type FileSearchResponse struct {
-	LimitHit bool                   `json:"limitHit"`
-	Results  []FileSearchFileResult `json:"results"`
+	LimitHit       bool                   `json:"limitHit"`
+	PartialReasons []FilePartialReason    `json:"partial_reasons"`
+	Results        []FileSearchFileResult `json:"results"`
 }
 
 // FileStatResponse defines model for FileStatResponse.

@@ -3970,7 +3970,7 @@ components:
 
     FileIndexResponse:
       type: object
-      required: [paths, truncated]
+      required: [paths, truncated, partial_reasons]
       properties:
         paths:
           type: array
@@ -3978,6 +3978,14 @@ components:
             type: string
         truncated:
           type: boolean
+        partial_reasons:
+          type: array
+          items:
+            $ref: "#/components/schemas/FilePartialReason"
+
+    FilePartialReason:
+      type: string
+      enum: [file_count, result_count, byte_limit, file_size, deadline, canceled]
 
     FileSearchRequest:
       type: object
@@ -4028,7 +4036,7 @@ components:
 
     FileSearchResponse:
       type: object
-      required: [results, limitHit]
+      required: [results, limitHit, partial_reasons]
       properties:
         results:
           type: array
@@ -4036,6 +4044,10 @@ components:
             $ref: "#/components/schemas/FileSearchFileResult"
         limitHit:
           type: boolean
+        partial_reasons:
+          type: array
+          items:
+            $ref: "#/components/schemas/FilePartialReason"
 
     FileGitStatusResponse:
       type: object

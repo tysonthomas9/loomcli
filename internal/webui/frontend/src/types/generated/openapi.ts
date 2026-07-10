@@ -2233,7 +2233,16 @@ export interface components {
     FileIndexResponse: {
       paths: string[];
       truncated: boolean;
+      partial_reasons: components["schemas"]["FilePartialReason"][];
     };
+    /** @enum {string} */
+    FilePartialReason:
+      | "file_count"
+      | "result_count"
+      | "byte_limit"
+      | "file_size"
+      | "deadline"
+      | "canceled";
     FileSearchRequest: {
       query: string;
       /** @description Optional repo qualifier, valid only when scope=agent. */
@@ -2257,6 +2266,7 @@ export interface components {
     FileSearchResponse: {
       results: components["schemas"]["FileSearchFileResult"][];
       limitHit: boolean;
+      partial_reasons: components["schemas"]["FilePartialReason"][];
     };
     FileGitStatusResponse: {
       [key: string]: string;

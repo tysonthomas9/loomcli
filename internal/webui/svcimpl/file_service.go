@@ -9,8 +9,9 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
-	"sync"
 	"time"
+
+	"golang.org/x/sync/singleflight"
 
 	"github.com/tysonthomas9/loomcli/internal/ops"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/misc"
@@ -24,17 +25,20 @@ var _ service.FileService = (*fileServiceImpl)(nil)
 // fileServiceImpl is the concrete implementation of FileService.
 type fileServiceImpl struct {
 	fileOps       ops.FileOps
-	indexCacheMu  sync.Mutex
-	indexCache    map[string]fileIndexCacheEntry
+	indexCache    *fileIndexCache
+	indexBuilds   singleflight.Group
+	indexBuilder  func(context.Context, string, string, bool) (*service.FileIndexResult, error)
 	mutationLocks pathLockSet
 }
 
 // NewFileService creates a new FileService implementation.
 func NewFileService(fileOps ops.FileOps) service.FileService {
-	return &fileServiceImpl{
+	svc := &fileServiceImpl{
 		fileOps:    fileOps,
-		indexCache: make(map[string]fileIndexCacheEntry),
+		indexCache: newFileIndexCache(fileIndexCacheMaxEntries, fileIndexCacheMaxBytes, fileIndexCacheTTL),
 	}
+	svc.indexBuilder = svc.buildFileIndex
+	return svc
 }
 
 func (s *fileServiceImpl) ListDirectory(ctx context.Context, wsID, agentName, path string) (*service.FileTreeResult, error) {
@@ -356,7 +360,7 @@ func (s *fileServiceImpl) WriteFileConditionalScoped(ctx context.Context, wsID s
 	if err := root.store.WriteAtomic(cleanPath, []byte(content)); err != nil {
 		return nil, err
 	}
-	s.invalidateIndex(root.path)
+	s.invalidateIndex(root.identity)
 	version, _, err := versionForPath(root.store, cleanPath)
 	if err != nil {
 		return nil, err
@@ -411,7 +415,7 @@ func (s *fileServiceImpl) DeletePathVersionedScoped(ctx context.Context, wsID st
 	if err := root.store.Delete(cleanPath, recursive); err != nil {
 		return err
 	}
-	s.invalidateIndex(root.path)
+	s.invalidateIndex(root.identity)
 	return nil
 }
 
@@ -433,7 +437,7 @@ func (s *fileServiceImpl) MkdirScoped(ctx context.Context, wsID string, scope se
 	if err := root.store.MkdirAll(cleanPath); err != nil {
 		return err
 	}
-	s.invalidateIndex(root.path)
+	s.invalidateIndex(root.identity)
 	return nil
 }
 
@@ -502,7 +506,7 @@ func (s *fileServiceImpl) MovePathVersionedScoped(ctx context.Context, wsID stri
 	if err := root.store.Move(cleanFrom, cleanTo, overwrite); err != nil {
 		return nil, err
 	}
-	s.invalidateIndex(root.path)
+	s.invalidateIndex(root.identity)
 	version, _, err := versionForPath(root.store, cleanTo)
 	if err != nil {
 		return nil, err

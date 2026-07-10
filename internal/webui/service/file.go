@@ -159,9 +159,23 @@ type FileMutationResult struct {
 
 // FileIndexResult is the response for scoped quick-open indexing.
 type FileIndexResult struct {
-	Paths     []string `json:"paths"`
-	Truncated bool     `json:"truncated"`
+	Paths          []string            `json:"paths"`
+	Truncated      bool                `json:"truncated"`
+	PartialReasons []FilePartialReason `json:"partial_reasons"`
 }
+
+// FilePartialReason identifies the enforced bound that made an index or search
+// response incomplete.
+type FilePartialReason string
+
+const (
+	FilePartialFileCount   FilePartialReason = "file_count"
+	FilePartialResultCount FilePartialReason = "result_count"
+	FilePartialByteLimit   FilePartialReason = "byte_limit"
+	FilePartialFileSize    FilePartialReason = "file_size"
+	FilePartialDeadline    FilePartialReason = "deadline"
+	FilePartialCanceled    FilePartialReason = "canceled"
+)
 
 // FileSearchRequest is the JSON body for a scoped global file search.
 type FileSearchRequest struct {
@@ -175,8 +189,9 @@ type FileSearchRequest struct {
 
 // FileSearchResult is the response for scoped global file search.
 type FileSearchResult struct {
-	Results  []FileSearchFileResult `json:"results"`
-	LimitHit bool                   `json:"limitHit"`
+	Results        []FileSearchFileResult `json:"results"`
+	LimitHit       bool                   `json:"limitHit"`
+	PartialReasons []FilePartialReason    `json:"partial_reasons"`
 }
 
 // FileSearchFileResult groups text matches by root-relative file path.
