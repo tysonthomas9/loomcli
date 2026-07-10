@@ -4,12 +4,13 @@ import (
 	"context"
 	"errors"
 	"os"
-	"path"
 	"path/filepath"
 	"regexp"
 	"strings"
 	"time"
 	"unicode/utf8"
+
+	"github.com/bmatcuk/doublestar/v4"
 
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/misc"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
@@ -29,32 +30,20 @@ var (
 	fileSearchWalkBudget   = 5 * time.Second
 )
 
-var (
-	errBoundedWalkLimit            = errors.New("bounded file walk limit reached")
-	defaultFileWalkExcludeSegments = map[string]bool{
-		".git":         true,
-		"node_modules": true,
-	}
-)
-
-type fileIndexCacheEntry struct {
-	paths     []string
-	truncated bool
-	expiresAt time.Time
-}
+var errBoundedWalkLimit = errors.New("bounded file walk limit reached")
 
 type boundedFileWalkOptions struct {
-	maxFiles        int
-	timeBudget      time.Duration
-	excludeSegments map[string]bool
-	includePatterns []string
-	excludePatterns []string
-	allowSensitive  bool
+	maxFiles           int
+	timeBudget         time.Duration
+	excludeNodeModules bool
+	includePatterns    []string
+	excludePatterns    []string
+	allowSensitive     bool
 }
 
 type boundedFileWalkResult struct {
-	filesVisited int
-	truncated    bool
+	filesVisited   int
+	partialReasons []service.FilePartialReason
 }
 
 type fileWalkVisitor func(relPath string, info os.FileInfo) error
@@ -72,12 +61,12 @@ type fileSearchExecution struct {
 }
 
 type fileSearchAccumulator struct {
-	store        *rootedFileStore
-	matcher      *searchMatcher
-	results      []service.FileSearchFileResult
-	bytesScanned int64
-	matchCount   int
-	limitHit     bool
+	store          *rootedFileStore
+	matcher        *searchMatcher
+	results        []service.FileSearchFileResult
+	bytesScanned   int64
+	matchCount     int
+	partialReasons []service.FilePartialReason
 }
 
 func (s *fileServiceImpl) IndexFilesScoped(ctx context.Context, wsID string, scope service.FileScope, target, repo string) (*service.FileIndexResult, error) {
@@ -87,16 +76,48 @@ func (s *fileServiceImpl) IndexFilesScoped(ctx context.Context, wsID string, sco
 	}
 	defer root.Close()
 	allowSensitive := fileRequestAllowsSensitive(ctx)
-	if cached, ok := s.cachedIndex(root.path, allowSensitive); ok {
+	if cached, ok := s.indexCache.get(root.identity, allowSensitive); ok {
 		return cached, nil
 	}
 
+	key := fileIndexCacheKey(root.identity, allowSensitive)
+	build := s.indexBuilds.DoChan(key, func() (any, error) {
+		if cached, ok := s.indexCache.get(root.identity, allowSensitive); ok {
+			return cached, nil
+		}
+		generation := s.indexCache.currentGeneration()
+		result, err := s.indexBuilder(context.Background(), root.path, root.identity, allowSensitive)
+		if err == nil {
+			s.indexCache.putIfGeneration(root.identity, allowSensitive, result, generation)
+		}
+		return result, err
+	})
+	select {
+	case <-ctx.Done():
+		return nil, service.ErrTimeout("file index canceled")
+	case outcome := <-build:
+		if outcome.Err != nil {
+			return nil, outcome.Err
+		}
+		return cloneFileIndexResult(outcome.Val.(*service.FileIndexResult)), nil
+	}
+}
+
+func (s *fileServiceImpl) buildFileIndex(ctx context.Context, rootPath, expectedIdentity string, allowSensitive bool) (*service.FileIndexResult, error) {
+	root, err := openScopedRoot(rootPath)
+	if err != nil {
+		return nil, err
+	}
+	defer root.Close()
+	if root.identity != expectedIdentity {
+		return nil, service.ErrForbidden("scope root changed before indexing")
+	}
 	paths := make([]string, 0, 1024)
 	walkResult, err := walkScopeFiles(ctx, root.store, boundedFileWalkOptions{
-		maxFiles:        fileIndexMaxEntries,
-		timeBudget:      fileIndexWalkBudget,
-		excludeSegments: defaultFileWalkExcludeSegments,
-		allowSensitive:  allowSensitive,
+		maxFiles:           fileIndexMaxEntries,
+		timeBudget:         fileIndexWalkBudget,
+		excludeNodeModules: true,
+		allowSensitive:     allowSensitive,
 	}, func(relPath string, _ os.FileInfo) error {
 		paths = append(paths, relPath)
 		return nil
@@ -104,12 +125,11 @@ func (s *fileServiceImpl) IndexFilesScoped(ctx context.Context, wsID string, sco
 	if err != nil {
 		return nil, err
 	}
-	result := &service.FileIndexResult{
-		Paths:     paths,
-		Truncated: walkResult.truncated,
-	}
-	s.storeIndex(root.path, allowSensitive, result)
-	return result, nil
+	return &service.FileIndexResult{
+		Paths:          paths,
+		Truncated:      len(walkResult.partialReasons) > 0,
+		PartialReasons: walkResult.partialReasons,
+	}, nil
 }
 
 func (s *fileServiceImpl) SearchFilesScoped(ctx context.Context, wsID string, scope service.FileScope, target, repo string, req service.FileSearchRequest) (*service.FileSearchResult, error) {
@@ -120,12 +140,12 @@ func (s *fileServiceImpl) SearchFilesScoped(ctx context.Context, wsID string, sc
 	if err != nil {
 		return nil, err
 	}
+	defer root.Close()
 
 	search, err := newFileSearchExecution(req)
 	if err != nil {
 		return nil, err
 	}
-	defer root.Close()
 	return runFileSearch(ctx, root.store, search)
 }
 
@@ -139,10 +159,10 @@ func newFileSearchExecution(req service.FileSearchRequest) (fileSearchExecution,
 	if err != nil {
 		return fileSearchExecution{}, err
 	}
-	excludeSegments := defaultFileWalkExcludeSegments
+	excludeNodeModules := true
 	var excludePatterns []string
 	if req.Exclude != nil {
-		excludeSegments = nil
+		excludeNodeModules = false
 		excludePatterns, err = normalizeGlobPatterns(*req.Exclude)
 		if err != nil {
 			return fileSearchExecution{}, err
@@ -157,12 +177,12 @@ func newFileSearchExecution(req service.FileSearchRequest) (fileSearchExecution,
 	return fileSearchExecution{
 		matcher: matcher,
 		walkOpts: boundedFileWalkOptions{
-			maxFiles:        fileSearchMaxFiles,
-			timeBudget:      fileSearchWalkBudget,
-			excludeSegments: excludeSegments,
-			includePatterns: includePatterns,
-			excludePatterns: excludePatterns,
-			allowSensitive:  true,
+			maxFiles:           fileSearchMaxFiles,
+			timeBudget:         fileSearchWalkBudget,
+			excludeNodeModules: excludeNodeModules,
+			includePatterns:    includePatterns,
+			excludePatterns:    excludePatterns,
+			allowSensitive:     true,
 		},
 	}, nil
 }
@@ -178,32 +198,43 @@ func runFileSearch(ctx context.Context, store *rootedFileStore, search fileSearc
 }
 
 func (a *fileSearchAccumulator) visit(relPath string, info os.FileInfo) error {
-	if info.Size() > fileSearchMaxFileBytes {
-		a.limitHit = true
-		return nil
-	}
-	if a.bytesScanned+info.Size() > fileSearchMaxBytes {
-		a.limitHit = true
+	remainingBytes := fileSearchMaxBytes - a.bytesScanned
+	if remainingBytes <= 0 {
+		a.addReason(service.FilePartialByteLimit)
 		return errBoundedWalkLimit
 	}
-
-	data, _, _, err := a.store.Read(filepath.FromSlash(relPath), fileSearchMaxFileBytes)
+	readLimit := fileSearchMaxFileBytes
+	if remainingBytes < readLimit {
+		readLimit = remainingBytes
+	}
+	data, _, truncated, err := a.store.Read(filepath.FromSlash(relPath), readLimit)
 	if err != nil {
 		return service.ErrInternal("failed to read file during search", err)
 	}
 	a.bytesScanned += int64(len(data))
-	if misc.IsBinaryContent(data) {
+	if truncated {
+		if readLimit < fileSearchMaxFileBytes {
+			a.addReason(service.FilePartialByteLimit)
+		} else {
+			a.addReason(service.FilePartialFileSize)
+		}
+	}
+	data, valid := validSearchUTF8(data, truncated)
+	if !valid || misc.IsBinaryContent(data) {
+		if truncated && readLimit < fileSearchMaxFileBytes {
+			return errBoundedWalkLimit
+		}
 		return nil
 	}
 
 	remaining := fileSearchMaxMatches - a.matchCount
 	if remaining <= 0 {
-		a.limitHit = true
+		a.addReason(service.FilePartialResultCount)
 		return errBoundedWalkLimit
 	}
 	matches, clipped := a.matcher.find(string(data), remaining)
 	if clipped {
-		a.limitHit = true
+		a.addReason(service.FilePartialResultCount)
 	}
 	if len(matches) > 0 {
 		a.matchCount += len(matches)
@@ -212,7 +243,7 @@ func (a *fileSearchAccumulator) visit(relPath string, info os.FileInfo) error {
 			Matches: matches,
 		})
 	}
-	if clipped {
+	if clipped || (truncated && readLimit < fileSearchMaxFileBytes) {
 		return errBoundedWalkLimit
 	}
 	return nil
@@ -220,50 +251,16 @@ func (a *fileSearchAccumulator) visit(relPath string, info os.FileInfo) error {
 
 func (a *fileSearchAccumulator) result(walkResult boundedFileWalkResult) *service.FileSearchResult {
 	return &service.FileSearchResult{
-		Results:  a.results,
-		LimitHit: a.limitHit || walkResult.truncated,
-	}
-}
-
-func (s *fileServiceImpl) cachedIndex(root string, allowSensitive bool) (*service.FileIndexResult, bool) {
-	s.indexCacheMu.Lock()
-	defer s.indexCacheMu.Unlock()
-	key := fileIndexCacheKey(root, allowSensitive)
-	entry, ok := s.indexCache[key]
-	if !ok || time.Now().After(entry.expiresAt) {
-		if ok {
-			delete(s.indexCache, key)
-		}
-		return nil, false
-	}
-	return &service.FileIndexResult{
-		Paths:     append([]string(nil), entry.paths...),
-		Truncated: entry.truncated,
-	}, true
-}
-
-func (s *fileServiceImpl) storeIndex(root string, allowSensitive bool, result *service.FileIndexResult) {
-	s.indexCacheMu.Lock()
-	defer s.indexCacheMu.Unlock()
-	s.indexCache[fileIndexCacheKey(root, allowSensitive)] = fileIndexCacheEntry{
-		paths:     append([]string(nil), result.Paths...),
-		truncated: result.Truncated,
-		expiresAt: time.Now().Add(fileIndexCacheTTL),
+		Results:        a.results,
+		LimitHit:       len(a.partialReasons) > 0 || len(walkResult.partialReasons) > 0,
+		PartialReasons: mergePartialReasons(a.partialReasons, walkResult.partialReasons),
 	}
 }
 
 func (s *fileServiceImpl) invalidateIndex(root string) {
-	s.indexCacheMu.Lock()
-	defer s.indexCacheMu.Unlock()
-	delete(s.indexCache, fileIndexCacheKey(root, false))
-	delete(s.indexCache, fileIndexCacheKey(root, true))
-}
-
-func fileIndexCacheKey(root string, allowSensitive bool) string {
-	if allowSensitive {
-		return root + "\x00sensitive"
+	if s.indexCache != nil {
+		s.indexCache.invalidateOverlapping(root)
 	}
-	return root + "\x00filtered"
 }
 
 func fileRequestAllowsSensitive(ctx context.Context) bool {
@@ -272,7 +269,7 @@ func fileRequestAllowsSensitive(ctx context.Context) bool {
 }
 
 func walkScopeFiles(ctx context.Context, store *rootedFileStore, opts boundedFileWalkOptions, visit fileWalkVisitor) (boundedFileWalkResult, error) {
-	result := boundedFileWalkResult{}
+	result := boundedFileWalkResult{partialReasons: make([]service.FilePartialReason, 0)}
 	walker := &boundedFileWalker{
 		opts:    opts,
 		started: time.Now(),
@@ -292,7 +289,12 @@ func walkScopeFiles(ctx context.Context, store *rootedFileStore, opts boundedFil
 		return result, nil
 	}
 	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-		return result, service.ErrTimeout("file walk canceled")
+		if errors.Is(err, context.DeadlineExceeded) {
+			result.addReason(service.FilePartialDeadline)
+		} else {
+			result.addReason(service.FilePartialCanceled)
+		}
+		return result, nil
 	}
 	if err != nil {
 		return result, err
@@ -311,7 +313,10 @@ func (w *boundedFileWalker) walkFile(ctx context.Context, relPath string, info o
 	if err := w.checkWalkState(ctx, nil); err != nil {
 		return err
 	}
-	return w.handleFile(info, relPath)
+	if err := w.handleFile(info, relPath); err != nil {
+		return err
+	}
+	return ctx.Err()
 }
 
 func (w *boundedFileWalker) checkWalkState(ctx context.Context, walkErr error) error {
@@ -322,7 +327,7 @@ func (w *boundedFileWalker) checkWalkState(ctx context.Context, walkErr error) e
 		return err
 	}
 	if w.opts.timeBudget > 0 && time.Since(w.started) > w.opts.timeBudget {
-		w.result.truncated = true
+		w.result.addReason(service.FilePartialDeadline)
 		return errBoundedWalkLimit
 	}
 	return nil
@@ -332,7 +337,7 @@ func (w *boundedFileWalker) handleDirectory(entry os.DirEntry, relPath string) (
 	if strings.EqualFold(entry.Name(), ".git") {
 		return false, nil
 	}
-	if w.opts.excludeSegments != nil && w.opts.excludeSegments[entry.Name()] {
+	if w.opts.excludeNodeModules && strings.EqualFold(entry.Name(), "node_modules") {
 		return false, nil
 	}
 	if !w.opts.allowSensitive && service.IsSensitiveFilePath(relPath) {
@@ -349,7 +354,7 @@ func (w *boundedFileWalker) handleFile(info os.FileInfo, relPath string) error {
 		return nil
 	}
 	if w.opts.maxFiles > 0 && w.result.filesVisited >= w.opts.maxFiles {
-		w.result.truncated = true
+		w.result.addReason(service.FilePartialFileCount)
 		return errBoundedWalkLimit
 	}
 	w.result.filesVisited++
@@ -376,7 +381,7 @@ func normalizeGlobPatterns(patterns []string) ([]string, error) {
 		if pattern == "" {
 			continue
 		}
-		if _, err := path.Match(pattern, ""); err != nil {
+		if _, err := doublestar.Match(pattern, ""); err != nil {
 			return nil, service.ErrValidation("invalid glob pattern")
 		}
 		normalized = append(normalized, pattern)
@@ -386,7 +391,7 @@ func normalizeGlobPatterns(patterns []string) ([]string, error) {
 
 func globMatchesAny(patterns []string, relPath string) bool {
 	for _, pattern := range patterns {
-		if ok, _ := path.Match(pattern, relPath); ok {
+		if ok, _ := doublestar.Match(pattern, relPath); ok {
 			return true
 		}
 	}
@@ -401,8 +406,11 @@ type searchMatcher struct {
 
 func newSearchMatcher(query string, regex, caseSensitive bool) (*searchMatcher, error) {
 	matcher := &searchMatcher{query: query, caseSensitive: caseSensitive}
-	if regex {
+	if regex || !caseSensitive {
 		pattern := query
+		if !regex {
+			pattern = regexp.QuoteMeta(pattern)
+		}
 		if !caseSensitive {
 			pattern = "(?i)" + pattern
 		}
@@ -423,16 +431,28 @@ func (m *searchMatcher) find(content string, maxMatches int) ([]service.FileSear
 	matches := make([]service.FileSearchMatch, 0)
 	for i, line := range lines {
 		line = strings.TrimSuffix(line, "\r")
+		remaining := maxMatches - len(matches)
+		probeLimit := remaining + 1
+		if remaining == 0 {
+			probeLimit = 1
+		}
 		var lineMatches []service.FileSearchMatch
 		if m.regex != nil {
-			lineMatches = m.regexLineMatches(i+1, line, maxMatches-len(matches))
+			lineMatches = m.regexLineMatches(i+1, line, probeLimit)
 		} else {
-			lineMatches = m.literalLineMatches(i+1, line, maxMatches-len(matches))
+			lineMatches = m.literalLineMatches(i+1, line, probeLimit)
 		}
-		matches = append(matches, lineMatches...)
-		if len(matches) >= maxMatches {
+		if remaining == 0 {
+			if len(lineMatches) > 0 {
+				return matches, true
+			}
+			continue
+		}
+		if len(lineMatches) > remaining {
+			matches = append(matches, lineMatches[:remaining]...)
 			return matches, true
 		}
+		matches = append(matches, lineMatches...)
 	}
 	return matches, false
 }
@@ -492,8 +512,56 @@ func (m *searchMatcher) regexLineMatches(lineNumber int, line string, remaining 
 func previewLine(line string) string {
 	line = strings.TrimSpace(line)
 	const maxPreview = 240
-	if len(line) <= maxPreview {
+	if utf8.RuneCountInString(line) <= maxPreview {
 		return line
 	}
-	return line[:maxPreview] + "..."
+	runes := []rune(line)
+	return string(runes[:maxPreview]) + "..."
+}
+
+func validSearchUTF8(data []byte, truncated bool) ([]byte, bool) {
+	if utf8.Valid(data) {
+		return data, true
+	}
+	if !truncated {
+		return nil, false
+	}
+	start := len(data) - 1
+	for start > 0 && len(data)-start < utf8.UTFMax && data[start]&0xc0 == 0x80 {
+		start--
+	}
+	if utf8.FullRune(data[start:]) {
+		return nil, false
+	}
+	if candidate := data[:start]; utf8.Valid(candidate) {
+		return candidate, true
+	}
+	return nil, false
+}
+
+func (a *fileSearchAccumulator) addReason(reason service.FilePartialReason) {
+	a.partialReasons = appendPartialReason(a.partialReasons, reason)
+}
+
+func (r *boundedFileWalkResult) addReason(reason service.FilePartialReason) {
+	r.partialReasons = appendPartialReason(r.partialReasons, reason)
+}
+
+func appendPartialReason(reasons []service.FilePartialReason, reason service.FilePartialReason) []service.FilePartialReason {
+	for _, existing := range reasons {
+		if existing == reason {
+			return reasons
+		}
+	}
+	return append(reasons, reason)
+}
+
+func mergePartialReasons(groups ...[]service.FilePartialReason) []service.FilePartialReason {
+	merged := make([]service.FilePartialReason, 0)
+	for _, group := range groups {
+		for _, reason := range group {
+			merged = appendPartialReason(merged, reason)
+		}
+	}
+	return merged
 }
