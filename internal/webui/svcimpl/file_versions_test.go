@@ -196,15 +196,56 @@ func TestFileVersions_TwoBrowserWritersWithSameVersion(t *testing.T) {
 		var serviceErr *service.ServiceError
 		if errors.As(err, &serviceErr) && serviceErr.Kind == service.KindPreconditionFailed {
 			failed++
+			continue
 		}
+		t.Fatalf("unexpected browser writer error: %v", err)
 	}
 	if successes != 1 || failed != 1 {
 		t.Fatalf("writer race successes=%d precondition_failures=%d", successes, failed)
 	}
 }
 
+func TestFileVersions_CaseAliasWritersSerialize(t *testing.T) {
+	root := t.TempDir()
+	mustWrite(t, filepath.Join(root, "Mixed.txt"), "base")
+	if _, err := os.Stat(filepath.Join(root, "mixed.txt")); err != nil {
+		t.Skip("filesystem is case-sensitive")
+	}
+	svc := scopedSvc(root)
+	ctx := context.Background()
+	version := mustScopedVersion(t, svc, ctx, service.ScopeWorkspace, "", "Mixed.txt")
+	start := make(chan struct{})
+	errs := make(chan error, 2)
+	paths := []string{"Mixed.txt", "mixed.TXT"}
+	for i, path := range paths {
+		go func(path, content string) {
+			<-start
+			_, err := svc.WriteFileConditionalScoped(ctx, "ws", service.ScopeWorkspace, "", "", path, content, service.FileWritePreconditions{IfMatch: version})
+			errs <- err
+		}(path, string(rune('a'+i)))
+	}
+	close(start)
+	var successes, failed int
+	for range paths {
+		err := <-errs
+		if err == nil {
+			successes++
+			continue
+		}
+		var serviceErr *service.ServiceError
+		if errors.As(err, &serviceErr) && serviceErr.Kind == service.KindPreconditionFailed {
+			failed++
+			continue
+		}
+		t.Fatalf("unexpected case-alias writer error: %v", err)
+	}
+	if successes != 1 || failed != 1 {
+		t.Fatalf("case-alias race successes=%d precondition_failures=%d", successes, failed)
+	}
+}
+
 func TestPathLockSet_DeterministicMultiPathOrdering(t *testing.T) {
-	want := []string{"scope\x00a", "scope\x00a/b", "scope\x00c", "scope\x00c/d"}
+	want := []string{"SCOPE\x00A", "SCOPE\x00A/B", "SCOPE\x00C", "SCOPE\x00C/D"}
 	if got := canonicalMutationLockKeys("scope", "c/d", "a/b"); !reflect.DeepEqual(got, want) {
 		t.Fatalf("keys = %#v, want %#v", got, want)
 	}
@@ -227,10 +268,61 @@ func TestPathLockSet_DeterministicMultiPathOrdering(t *testing.T) {
 	}
 }
 
+func TestPathLockSet_CaseAliasesShareKeys(t *testing.T) {
+	upper := canonicalMutationLockKeys("/Root/Repo", "Dir/File")
+	lower := canonicalMutationLockKeys("/root/repo", "dir/file")
+	if !reflect.DeepEqual(upper, lower) {
+		t.Fatalf("case-alias keys differ: %#v != %#v", upper, lower)
+	}
+
+	var locks pathLockSet
+	releaseFirst := locks.lock("/Root/Repo", "Dir/File")
+	acquired := make(chan func(), 1)
+	go func() { acquired <- locks.lock("/root/repo", "dir/file") }()
+	select {
+	case release := <-acquired:
+		release()
+		t.Fatal("case-alias acquisition did not serialize")
+	case <-time.After(20 * time.Millisecond):
+	}
+	releaseFirst()
+	select {
+	case release := <-acquired:
+		release()
+	case <-time.After(time.Second):
+		t.Fatal("case-alias acquisition deadlocked")
+	}
+}
+
+func TestOpenScopedRoot_UsesResolvedCanonicalIdentity(t *testing.T) {
+	realParent := t.TempDir()
+	realRoot := filepath.Join(realParent, "root")
+	if err := os.Mkdir(realRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	aliasBase := filepath.Join(t.TempDir(), "parent-alias")
+	if err := os.Symlink(realParent, aliasBase); err != nil {
+		t.Skip("cannot create symlinks on this platform")
+	}
+	direct, err := openScopedRoot(realRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer direct.Close()
+	alias, err := openScopedRoot(filepath.Join(aliasBase, "root"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer alias.Close()
+	if direct.identity != alias.identity {
+		t.Fatalf("root identities differ: %q != %q", direct.identity, alias.identity)
+	}
+}
+
 func TestDirectoryManifestBoundsFailClosed(t *testing.T) {
 	root := t.TempDir()
 	mustWrite(t, filepath.Join(root, "file.txt"), "x")
-	scoped, err := openScopedRoot("test", root)
+	scoped, err := openScopedRoot(root)
 	if err != nil {
 		t.Fatal(err)
 	}

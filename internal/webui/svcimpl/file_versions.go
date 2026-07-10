@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"unicode"
 
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
 )
@@ -68,9 +69,10 @@ func (s *pathLockSet) lock(identity string, paths ...string) func() {
 }
 
 func canonicalMutationLockKeys(identity string, paths ...string) []string {
+	identity = foldFilesystemCase(filepath.Clean(identity))
 	seen := make(map[string]struct{})
 	for _, path := range paths {
-		path = filepath.Clean(path)
+		path = foldFilesystemCase(filepath.Clean(path))
 		for path != "." && path != "" {
 			seen[identity+"\x00"+path] = struct{}{}
 			next := filepath.Dir(path)
@@ -86,6 +88,24 @@ func canonicalMutationLockKeys(identity string, paths ...string) []string {
 	}
 	sort.Strings(keys)
 	return keys
+}
+
+// foldFilesystemCase produces a stable key for Unicode simple case aliases.
+// Some scope roots live on case-sensitive filesystems, where this deliberately
+// over-serializes names that would be distinct on disk.
+func foldFilesystemCase(value string) string {
+	var folded strings.Builder
+	folded.Grow(len(value))
+	for _, r := range value {
+		minimum := r
+		for next := unicode.SimpleFold(r); next != r; next = unicode.SimpleFold(next) {
+			if next < minimum {
+				minimum = next
+			}
+		}
+		folded.WriteRune(minimum)
+	}
+	return folded.String()
 }
 
 func versionForPath(store *rootedFileStore, path string) (string, os.FileInfo, error) {

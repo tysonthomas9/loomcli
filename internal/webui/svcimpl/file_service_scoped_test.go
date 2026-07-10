@@ -475,7 +475,7 @@ func TestRootedFileStore_RemainsAnchoredWhenScopePathIsReplaced(t *testing.T) {
 		t.Fatal(err)
 	}
 	mustWrite(t, filepath.Join(rootPath, "file.txt"), "original")
-	root, err := openScopedRoot("test", rootPath)
+	root, err := openScopedRoot(rootPath)
 	if err != nil {
 		t.Fatalf("openScopedRoot: %v", err)
 	}

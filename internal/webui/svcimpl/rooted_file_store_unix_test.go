@@ -19,7 +19,7 @@ func TestUnixRootedFileStore_ConcurrentSymlinkSwapCannotReachProtectedTrees(t *t
 	prepareProtectedTree(t, filepath.Join(outside, "sub"), "outside-secret")
 	prepareSafeTree(t, filepath.Join(rootPath, "alias", "sub"))
 
-	root, err := openScopedRoot("stress", rootPath)
+	root, err := openScopedRoot(rootPath)
 	if err != nil {
 		t.Fatalf("openScopedRoot: %v", err)
 	}
