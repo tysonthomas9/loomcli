@@ -160,8 +160,7 @@ func (s *fileServiceImpl) resolveScopedRoot(wsID string, scope service.FileScope
 	if err != nil {
 		return nil, err
 	}
-	identity := strings.Join([]string{wsID, string(scope), target, strings.TrimSpace(repo)}, "\x00")
-	root, err := openScopedRoot(identity, rootPath)
+	root, err := openScopedRoot(rootPath)
 	if err != nil {
 		return nil, err
 	}
@@ -553,7 +552,7 @@ func validateNoSymlinkComponents(rootDir, fullPath string) error {
 	if err != nil {
 		return err
 	}
-	root, err := openScopedRoot("validation", rootDir)
+	root, err := openScopedRoot(rootDir)
 	if err != nil {
 		return err
 	}

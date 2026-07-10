@@ -27,7 +27,7 @@ type scopedRoot struct {
 	store       *rootedFileStore
 }
 
-func openScopedRoot(identity, rootPath string) (*scopedRoot, error) {
+func openScopedRoot(rootPath string) (*scopedRoot, error) {
 	rootPath, err := filepath.Abs(rootPath)
 	if err != nil {
 		return nil, service.ErrInternal("failed to resolve scope root", err)
@@ -58,6 +58,11 @@ func openScopedRoot(identity, rootPath string) (*scopedRoot, error) {
 		_ = root.Close()
 		return nil, service.ErrForbidden("scope root changed while it was opened")
 	}
+	identity, err := resolvedRootIdentity(rootPath, openedInfo)
+	if err != nil {
+		_ = root.Close()
+		return nil, err
+	}
 	platform, err := openRootedPlatform(rootPath, info)
 	if err != nil {
 		_ = root.Close()
@@ -68,6 +73,21 @@ func openScopedRoot(identity, rootPath string) (*scopedRoot, error) {
 		path:     rootPath,
 		store:    &rootedFileStore{root: root, platform: platform},
 	}, nil
+}
+
+func resolvedRootIdentity(rootPath string, openedInfo os.FileInfo) (string, error) {
+	resolvedRootPath, err := filepath.EvalSymlinks(rootPath)
+	if err != nil {
+		return "", service.ErrInternal("failed to resolve canonical scope root", err)
+	}
+	resolvedInfo, err := os.Stat(resolvedRootPath)
+	if err != nil {
+		return "", service.ErrInternal("failed to verify canonical scope root", err)
+	}
+	if !os.SameFile(openedInfo, resolvedInfo) {
+		return "", service.ErrForbidden("scope root changed while resolving canonical path")
+	}
+	return foldFilesystemCase(filepath.Clean(resolvedRootPath)), nil
 }
 
 func (r *scopedRoot) Close() {
