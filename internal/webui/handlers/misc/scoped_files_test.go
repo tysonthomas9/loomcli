@@ -232,6 +232,15 @@ func TestHandleScopedFileRead_InvalidRevisionIsBadRequest(t *testing.T) {
 	}
 }
 
+func TestHandleScopedFileRead_MissingRevisionPathIsNotFound(t *testing.T) {
+	h := HandleScopedFileRead(&failingRevisionFileService{err: service.ErrNotFound("file not found at revision")})
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, scopedReq("/api/workspaces/test-ws/files?scope=workspace&path=untracked.txt&rev=HEAD"))
+	if rr.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, body=%s", rr.Code, rr.Body.String())
+	}
+}
+
 func hasFilePartialReason(reasons []service.FilePartialReason, want service.FilePartialReason) bool {
 	for _, reason := range reasons {
 		if reason == want {
