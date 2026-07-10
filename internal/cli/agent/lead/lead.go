@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"os"
 	"os/exec"
+	"regexp"
 	"strings"
 	"sync"
 	"syscall"
@@ -97,14 +98,23 @@ func runLead(cmd *cobra.Command, args []string) {
 	registration := registerLeadOrchestratorSession(context.Background(), workDir)
 	defer registration.Finalize()
 
-	// Generate the lead prompt and append the user's initial request if provided.
-	prompt := agent.GenerateLeadPrompt()
-	if assignment := currentLeadAssignmentPrompt(context.Background()); assignment != "" {
-		prompt += "\n\n## Loom Backend Assignment\n\n" + assignment
-	}
-	if leadMessage != "" {
-		prompt += "\n\n## User's Initial Request\n\n" + leadMessage +
-			"\n\nAddress this request using the lead mode conventions above."
+	// Per-PR review agents (created by the web UI's pr-review module) get the
+	// read-only reviewer persona instead of the Project-Lead bootstrap, so they
+	// boot straight into review mode with no backlog/startup preamble. Their PR
+	// specifics arrive as the first delivered message, not via --message.
+	var prompt string
+	if isReviewerAgentID(resolveLeadAgentID()) {
+		prompt = agent.GenerateReviewPrompt()
+	} else {
+		// Generate the lead prompt and append the user's initial request if provided.
+		prompt = agent.GenerateLeadPrompt()
+		if assignment := currentLeadAssignmentPrompt(context.Background()); assignment != "" {
+			prompt += "\n\n## Loom Backend Assignment\n\n" + assignment
+		}
+		if leadMessage != "" {
+			prompt += "\n\n## User's Initial Request\n\n" + leadMessage +
+				"\n\nAddress this request using the lead mode conventions above."
+		}
 	}
 
 	// Invoke agent interactively (no agent name needed - lead mode doesn't claim tasks).
@@ -320,6 +330,19 @@ func resolveLeadAgentID() string {
 		return agentID
 	}
 	return "lead"
+}
+
+// reviewerAgentIDPattern matches the per-PR review agent name the web UI's
+// pr-review module creates (review-<repo>-pr-<N>). Detection is name-based
+// because this base lacks interactive roles / prompt_file plumbing; migrate to
+// a role/prompt_file signal when that machinery lands upstream (kept in sync
+// with prreview.reviewerAgentName).
+var reviewerAgentIDPattern = regexp.MustCompile(`^review-.+-pr-\d+$`)
+
+// isReviewerAgentID reports whether this lead process is a per-PR review agent,
+// which gets the read-only reviewer persona instead of the lead bootstrap.
+func isReviewerAgentID(agentID string) bool {
+	return reviewerAgentIDPattern.MatchString(strings.TrimSpace(agentID))
 }
 
 // heartbeatLeadSession periodically refreshes the lead session's last_heartbeat

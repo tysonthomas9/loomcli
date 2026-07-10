@@ -1300,3 +1300,19 @@ func TestStepBuilders_CapabilityDriven(t *testing.T) {
 		t.Errorf("buildInspectReviewStep without inspect review should be empty, got: %q", got)
 	}
 }
+
+func TestGenerateReviewPrompt(t *testing.T) {
+	got := GenerateReviewPrompt()
+	if !strings.Contains(got, "READ-ONLY") {
+		t.Fatalf("review prompt missing read-only persona:\n%s", got)
+	}
+	// The whole point: no lead/backlog bootstrap that triggers startup commands.
+	for _, forbidden := range []string{"INTERACTIVE MODE: Project Lead", "loom data list", "On Startup"} {
+		if strings.Contains(got, forbidden) {
+			t.Fatalf("review prompt leaks lead bootstrap %q:\n%s", forbidden, got)
+		}
+	}
+	if lead := GenerateLeadPrompt(); got == lead {
+		t.Fatal("review prompt must differ from the lead prompt")
+	}
+}

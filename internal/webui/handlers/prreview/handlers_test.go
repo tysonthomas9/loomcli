@@ -1158,3 +1158,37 @@ func TestParseGitHubOwnerRepo(t *testing.T) {
 		}
 	}
 }
+
+func TestTrimReviewerPreamble(t *testing.T) {
+	msgs := []reviewerStreamMessage{
+		{Role: "user", ItemID: "p", Text: "## READ-ONLY PR REVIEWER\n\nYou are a reviewer…"},
+		{Role: "user", ItemID: "s", Text: reviewerSeedSentinel + " Review GitHub PR #201 \"X\" (url). Base: main…"},
+		{Role: "assistant", ItemID: "r", Text: "The PR does Y; risk at foo.go:12."},
+		{Role: "user", ItemID: "q", Text: "why is that a risk?"},
+		{Role: "assistant", ItemID: "a", Text: "because…"},
+	}
+	got := trimReviewerPreamble(msgs)
+	if len(got) != 3 || got[0].ItemID != "r" || got[1].ItemID != "q" || got[2].ItemID != "a" {
+		t.Fatalf("trim = %+v, want [r,q,a] (preamble dropped, real user msg kept)", got)
+	}
+	// A real user message that merely mentions the markers is NOT dropped once
+	// the preamble is past.
+	if len(trimReviewerPreamble(msgs[2:])) != 3 {
+		t.Fatal("must not trim once the conversation has started")
+	}
+	// A user who types a seed-LOOKING message (no sentinel) in the pre-response
+	// window must NOT be hidden — only the sentinel-tagged seed is trimmed.
+	typed := []reviewerStreamMessage{
+		{Role: "user", ItemID: "p", Text: "## READ-ONLY PR REVIEWER\n…"},
+		{Role: "user", ItemID: "u", Text: "Review GitHub PR #502 too please"},
+	}
+	got = trimReviewerPreamble(typed)
+	if len(got) != 1 || got[0].ItemID != "u" {
+		t.Fatalf("trim = %+v, want the user's typed message kept", got)
+	}
+	// No preamble → unchanged.
+	plain := []reviewerStreamMessage{{Role: "assistant", ItemID: "x", Text: "hi"}}
+	if len(trimReviewerPreamble(plain)) != 1 {
+		t.Fatal("no-preamble case must be unchanged")
+	}
+}

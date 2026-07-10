@@ -339,6 +339,14 @@ func GenerateLeadPrompt() string {
 	})
 }
 
+// GenerateReviewPrompt renders the read-only PR-reviewer persona used by the
+// per-PR review agents the web UI stands up (name shape review-<repo>-pr-<N>).
+// Unlike the lead prompt it has no backlog/startup section, so the reviewer
+// boots straight into review mode with no project-management preamble.
+func GenerateReviewPrompt() string {
+	return renderPrompt("pr-review", promptTemplateData{})
+}
+
 // injectCheckpointIfNotResuming adds the prior-attempt checkpoint to the prompt
 // as a FALLBACK, but SKIPS it when a session resume is armed
 // (backends.GetResumeSessionID() != ""). Resume-first / checkpoint-fallback (P4):

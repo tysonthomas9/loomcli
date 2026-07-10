@@ -201,16 +201,18 @@ func (m *Module) ensureReviewerAgent(ctx context.Context, ws, agentName string) 
 	return nil
 }
 
+// reviewerSeedText is the first message delivered to the reviewer. The READ-ONLY
+// persona and review method live in the reviewer prompt (prompts/pr-review.md);
+// this only carries the specific PR + how to diff it, so the chat opens on a
+// short review request rather than a wall of boilerplate.
 func reviewerSeedText(owner, repo string, number int, title, sha, baseRef, remote string) string {
 	url := fmt.Sprintf("https://github.com/%s/%s/pull/%d", owner, repo, number)
-	return fmt.Sprintf("You are a READ-ONLY code reviewer for GitHub PR #%d %q (%s). "+
-		"Your working directory is a detached checkout of the PR head (%s); the base branch is %s. "+
-		"Do NOT edit files, commit, push, or attempt to approve/merge — a human posts the actual review "+
-		"decision through the UI. Inspect the change by running `git fetch %s %s && git diff FETCH_HEAD...HEAD` "+
-		"and by reading files directly in this checkout. Then give a concise, specific review: first summarize "+
-		"what the PR does, then call out risks, bugs, and edge cases with file/line references, and answer the "+
-		"user's questions grounded in the actual diff.",
-		number, title, url, sha, baseRef, remote, baseRef)
+	// The sentinel prefix lets the chat panel trim this injected seed without
+	// risking a real user message (see reviewerSeedSentinel in stream.go).
+	return fmt.Sprintf("%s Review GitHub PR #%d %q (%s). Base branch: %s; the PR head (%s) is checked "+
+		"out in your working directory. To see the changes run `git fetch %s %s && git diff FETCH_HEAD...HEAD`, "+
+		"then give your review.",
+		reviewerSeedSentinel, number, title, url, baseRef, sha, remote, baseRef)
 }
 
 func (m *Module) postReviewerMessage(w http.ResponseWriter, r *http.Request) {
