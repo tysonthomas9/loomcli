@@ -173,12 +173,24 @@ vi.mock("@/hooks/api", () => ({
 vi.mock("@/hooks", async () => {
   const React = await import("react");
   const stores = await import("@/stores");
+  const documentRegistry = {
+    get: () => ({ dirty: false }),
+    resetPathPrefix: vi.fn(),
+    retargetPathPrefix: vi.fn(),
+  };
   return {
+    FileDocumentRegistryProvider: ({
+      children,
+    }: {
+      children: React.ReactNode;
+    }) => children,
     FileBrowserStoreProvider: stores.FileBrowserStoreProvider,
     agentFileBrowserTabsStorageKey: stores.agentFileBrowserTabsStorageKey,
     fileBrowserTabsStorageKey: stores.fileBrowserTabsStorageKey,
     useFileBrowserStore: stores.useFileBrowserStore,
     useFileBrowserStoreInstance: stores.useFileBrowserStoreInstance,
+    useFileDocumentRegistry: () => documentRegistry,
+    useFileDocumentRegistryRevision: () => 0,
     useWorkspaceContext: () => ({
       workspaceId: "ws-1",
       repos: [
@@ -232,6 +244,47 @@ vi.mock("@/hooks", async () => {
           setIsLoading(false);
         },
         clearFile: () => setFileData(null),
+      };
+    },
+    useFileDocument: (
+      _workspaceId: string,
+      _scopeRef: unknown,
+      path: string,
+    ) => {
+      const [fileData, setFileData] = React.useState<FileReadData | null>(null);
+      const [content, setContent] = React.useState("");
+      const [baseContent, setBaseContent] = React.useState("");
+      const [isLoading, setIsLoading] = React.useState(false);
+      const [isSaving, setIsSaving] = React.useState(false);
+      const refresh = async () => {
+        setIsLoading(true);
+        const next = mocks.fileMap[path] ?? null;
+        setFileData(next);
+        const nextContent = next?.content ?? "";
+        setContent(nextContent);
+        setBaseContent(nextContent);
+        setIsLoading(false);
+      };
+      return {
+        fileData,
+        content,
+        dirty: content !== baseContent,
+        isLoading,
+        isSaving,
+        error: null,
+        externalConflict: null,
+        refresh,
+        edit: setContent,
+        save: async () => {
+          if (content === baseContent) return null;
+          setIsSaving(true);
+          await mocks.writeScopedFile("ws-1", _scopeRef, path, content);
+          setBaseContent(content);
+          setIsSaving(false);
+          return { success: true, version: "test-version" };
+        },
+        discard: () => setContent(baseContent),
+        useExternal: vi.fn(),
       };
     },
   };

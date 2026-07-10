@@ -33,6 +33,15 @@ export {
 export type { UseFileContentReturn } from "./useFileContent";
 
 export {
+  FileDocumentRegistryProvider,
+  getSessionFileDocumentRegistry,
+  useFileDocument,
+  useFileDocumentRegistry,
+  useFileDocumentRegistryRevision,
+} from "./useFileDocument";
+export type { UseFileDocumentReturn } from "./useFileDocument";
+
+export {
   useFileTree,
   useWorkspaceFileTree,
   useScopedFileTree,

@@ -28,8 +28,11 @@ import {
   useWorkspaceContext,
   useEventContext,
   agentFileBrowserTabsStorageKey,
+  FileDocumentRegistryProvider,
   FileBrowserStoreProvider,
   fileBrowserTabsStorageKey,
+  useFileDocumentRegistry,
+  useFileDocumentRegistryRevision,
   useFileBrowserStoreInstance,
   type FileBrowserTab,
 } from "@/hooks";
@@ -138,10 +141,26 @@ function FileBrowserInner({
   const eventContext = useEventContext();
   const { showToast } = useToast();
   const store = useFileBrowserStoreInstance();
+  const documentRegistry = useFileDocumentRegistry();
+  const documentRevision = useFileDocumentRegistryRevision();
   const groups = useStore(store, (s) => s.groups);
   const activeGroup = useStore(store, (s) => s.activeGroup);
   const dirty = useStore(store, (s) => s.dirty);
   const mru = useStore(store, (s) => s.mru);
+
+  useEffect(() => {
+    for (const tab of groups.flatMap((group) => group.tabs)) {
+      const state = documentRegistry.get({
+        workspaceId,
+        ...tab.ref,
+        path: tab.path,
+      });
+      const key = tabIdentityKey(tab);
+      if (!!store.getState().dirty[key] !== state.dirty) {
+        store.getState().setDirty(key, state.dirty);
+      }
+    }
+  }, [documentRegistry, documentRevision, groups, store, workspaceId]);
 
   const [treeWidth, setTreeWidth] = useState<number>(getStoredTreeWidth);
   const [lens, setLens] = useState<ExplorerLens>(() =>
@@ -903,6 +922,7 @@ function FileBrowserInner({
       }
       try {
         await deleteScopedPath(workspaceId, ref, node.path, node.isDir);
+        documentRegistry.resetPathPrefix(workspaceId, ref, node.path);
         markIndexStale();
         void refreshCheckouts();
         void refreshGitStatus();
@@ -929,6 +949,7 @@ function FileBrowserInner({
       markIndexStale,
       refreshCheckouts,
       refreshGitStatus,
+      documentRegistry,
     ],
   );
 
@@ -1098,6 +1119,7 @@ function FileBrowserInner({
         }
       }
 
+      documentRegistry.retargetPathPrefix(workspaceId, ref, move.from, move.to);
       store.getState().retargetPathPrefix(ref, move.from, move.to);
       markIndexStale();
       void refreshCheckouts();
@@ -1109,6 +1131,7 @@ function FileBrowserInner({
     },
     [
       workspaceId,
+      documentRegistry,
       store,
       markIndexStale,
       refreshCheckouts,
@@ -1386,13 +1409,19 @@ export function FileBrowser({
       ? agentFileBrowserTabsStorageKey(agentName)
       : fileBrowserTabsStorageKey();
   return (
-    <FileBrowserStoreProvider
-      key={`${workspaceId}:${storageKey}`}
-      workspaceId={workspaceId}
-      storageKey={storageKey}
-    >
-      <FileBrowserInner mode={mode} agentName={agentName} isActive={isActive} />
-    </FileBrowserStoreProvider>
+    <FileDocumentRegistryProvider>
+      <FileBrowserStoreProvider
+        key={`${workspaceId}:${storageKey}`}
+        workspaceId={workspaceId}
+        storageKey={storageKey}
+      >
+        <FileBrowserInner
+          mode={mode}
+          agentName={agentName}
+          isActive={isActive}
+        />
+      </FileBrowserStoreProvider>
+    </FileDocumentRegistryProvider>
   );
 }
 
