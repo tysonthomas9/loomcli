@@ -13,8 +13,8 @@
 #      inbound webhook endpoint with a valid HMAC-sha256 signature in the
 #      X-Hub-Signature-256 header (scheme read from
 #      internal/webui/handlers/webhooks/github.go: sha256= + hex(HMAC(body)));
-#   4. poll `gh api …/pulls/N/reviews` until a NEW COMMENT review appears, or
-#      a hard timeout fires.
+#   4. poll GitHub until a NEW COMMENT review with at least one real inline
+#      review comment appears, or a hard timeout fires.
 #
 # Teardown ALWAYS runs `podman rm -f <container>` (podman's own container
 # remove) — never shell `rm` on files. Secrets ride env/stdin, never argv.
@@ -22,6 +22,11 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 STACK_SCRIPT="${STACK_SCRIPT:-${ROOT_DIR}/scripts/run-github-review-codex-stack.sh}"
+
+# A live source-tree E2E must exercise the current connector binary, not a
+# same-tag image left by an earlier run. Operators can explicitly set 0/auto
+# when they intentionally want to reuse a prebuilt image.
+BUILD_IMAGE="${BUILD_IMAGE:-1}"
 
 CONTAINER="${CONTAINER:-loom-github-review}"
 HOST_PORT="${HOST_PORT:-8093}"
@@ -128,11 +133,11 @@ process.stdout.write("sha256=" + mac);
 '
 }
 
-# wait_for_review polls the PR reviews until a review id not present in the
-# baseline appears with state COMMENTED, or the hard timeout fires.
+# wait_for_review polls until a new COMMENTED review has a real GitHub line
+# comment. A summary-only review is not proof of inline PR feedback.
 wait_for_review() {
   local baseline="$1"
-  local deadline now reviews_json new_comment
+  local deadline now reviews_json new_comment review_id inline_json inline_comment summary_only_id=""
   deadline=$(( $(date +%s) + REVIEW_TIMEOUT_SECS ))
   while :; do
     reviews_json="$(gh api "repos/${A1_GITHUB_REPO}/pulls/${A1_PR_NUMBER}/reviews" --paginate 2>/dev/null || echo '[]')"
@@ -147,12 +152,31 @@ if (hit) {
 }
 ' <<<"$reviews_json")"
     if [[ -n "$new_comment" ]]; then
-      log "agent COMMENT review detected: ${new_comment}"
-      return 0
+      review_id="$(printf '%s' "$new_comment" | node -e '
+const fs = require("node:fs");
+process.stdout.write(String(JSON.parse(fs.readFileSync(0, "utf8")).id || ""));
+')"
+      inline_json="$(gh api "repos/${A1_GITHUB_REPO}/pulls/${A1_PR_NUMBER}/comments" --paginate 2>/dev/null || echo '[]')"
+      inline_comment="$(REVIEW_ID="$review_id" node -e '
+const fs = require("node:fs");
+const comments = JSON.parse(fs.readFileSync(0, "utf8"));
+const reviewId = String(process.env.REVIEW_ID || "");
+const hit = comments.find((c) => c && String(c.pull_request_review_id || "") === reviewId && c.path && c.body && Number(c.line || c.original_line) > 0);
+if (hit) process.stdout.write(JSON.stringify({ id: hit.id, path: hit.path, line: hit.line || hit.original_line, url: hit.html_url }));
+' <<<"$inline_json")"
+      if [[ -n "$inline_comment" ]]; then
+        log "agent COMMENT review detected: ${new_comment}"
+        log "real inline review comment detected: ${inline_comment}"
+        return 0
+      fi
+      if [[ "$summary_only_id" != "$review_id" ]]; then
+        log "review ${review_id} exists but has no inline line comments; continuing to poll"
+        summary_only_id="$review_id"
+      fi
     fi
     now=$(date +%s)
     if (( now >= deadline )); then
-      log "timed out after ${REVIEW_TIMEOUT_SECS}s waiting for a new COMMENT review"
+      log "timed out after ${REVIEW_TIMEOUT_SECS}s waiting for a new COMMENT review with inline feedback"
       log "recent container logs:"
       podman logs --tail 80 "$CONTAINER" 2>&1 || true
       return 1
@@ -182,6 +206,7 @@ main() {
   WORKSPACE_ID="$WORKSPACE_ID" \
   A1_GITHUB_REPO="$A1_GITHUB_REPO" \
   A1_WEBHOOK_ENDPOINT_PATH="$A1_WEBHOOK_ENDPOINT_PATH" \
+  BUILD_IMAGE="$BUILD_IMAGE" \
     bash "$STACK_SCRIPT"
 
   # The stack wrote A1_WEBHOOK_SECRET=… into SECRETS_FILE. Source it only if the
@@ -230,13 +255,13 @@ main() {
       ;;
   esac
 
-  # 4. Poll for the new COMMENT review.
-  log "polling for a new COMMENT review (timeout ${REVIEW_TIMEOUT_SECS}s)"
+  # 4. Poll for the new COMMENT review and its actual diff comment.
+  log "polling for a new COMMENT review with inline feedback (timeout ${REVIEW_TIMEOUT_SECS}s)"
   if wait_for_review "$baseline_ids"; then
-    log "PASS: A1 github-review-agent posted a COMMENT review on ${A1_GITHUB_REPO}#${A1_PR_NUMBER}"
+    log "PASS: A1 github-review-agent posted real inline feedback on ${A1_GITHUB_REPO}#${A1_PR_NUMBER}"
     exit 0
   fi
-  printf 'FAIL: no COMMENT review appeared within the timeout\n' >&2
+  printf 'FAIL: no COMMENT review with inline feedback appeared within the timeout\n' >&2
   exit 1
 }
 

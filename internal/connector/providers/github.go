@@ -177,15 +177,16 @@ func (g *GitHub) reviewPost(ctx context.Context, spec CallSpec) (CallResult, err
 		return CallResult{Decision: domain.ConnectorCallUpstreamError},
 			fmt.Errorf("%s requires args.event: %w", spec.Action, domain.ErrInvalid)
 	}
+	comments, hasComments, err := githubReviewCommentsArg(spec.Args)
+	if err != nil {
+		return CallResult{Decision: domain.ConnectorCallUpstreamError}, err
+	}
 
 	if result, err := g.reviewLivenessCheck(ctx, spec, owner, repo, number); err != nil {
 		return result, err
 	}
 
-	payload := map[string]any{"event": event}
-	if body, ok := stringArg(spec.Args, "body"); ok {
-		payload["body"] = body
-	}
+	payload := githubReviewPayload(spec, event, comments, hasComments)
 	res, err := g.do(ctx, spec, http.MethodPost,
 		fmt.Sprintf("/repos/%s/%s/pulls/%d/reviews", owner, repo, number), nil, payload)
 	if err != nil {
@@ -197,10 +198,69 @@ func (g *GitHub) reviewPost(ctx context.Context, spec CallSpec) (CallResult, err
 	}
 	obj := decodeObject(res.body)
 	return CallResult{
-		Status:   res.status,
-		Body:     map[string]any{"id": obj["id"], "state": obj["state"]},
+		Status: res.status,
+		Body: map[string]any{
+			"id":      obj["id"],
+			"state":   obj["state"],
+			"htmlUrl": obj["html_url"],
+		},
 		Decision: domain.ConnectorCallGranted,
 	}, nil
+}
+
+// githubReviewPayload pins the review and every inline comment to the head SHA
+// that passed the liveness check. githubReviewCommentsArg has already
+// translated Loom's new-file lines to GitHub's RIGHT-side wire shape.
+func githubReviewPayload(spec CallSpec, event string, comments []map[string]any, hasComments bool) map[string]any {
+	payload := map[string]any{
+		"event":     event,
+		"commit_id": spec.Preconditions.ExpectedHeadSha,
+	}
+	if body, ok := stringArg(spec.Args, "body"); ok {
+		payload["body"] = body
+	}
+	if hasComments {
+		payload["comments"] = comments
+	}
+	return payload
+}
+
+// githubReviewCommentsArg translates Loom's normalized inline finding shape
+// ({path, line, body}, where line is on the new file) into GitHub's review
+// comment wire shape. Invalid comments fail before any GitHub request so a
+// malformed model result cannot silently degrade into a summary-only review.
+func githubReviewCommentsArg(args map[string]any) ([]map[string]any, bool, error) {
+	raw, present := args["comments"]
+	if !present {
+		return nil, false, nil
+	}
+	items, ok := raw.([]any)
+	if !ok {
+		return nil, false, fmt.Errorf("args.comments must be an array: %w", domain.ErrInvalid)
+	}
+	comments := make([]map[string]any, 0, len(items))
+	for i, item := range items {
+		entry, ok := item.(map[string]any)
+		if !ok {
+			return nil, false, fmt.Errorf("args.comments[%d] must be an object: %w", i, domain.ErrInvalid)
+		}
+		path, okPath := stringArg(entry, "path")
+		body, okBody := stringArg(entry, "body")
+		line, okLine, err := intArg(entry, "line")
+		if err != nil {
+			return nil, false, fmt.Errorf("args.comments[%d].line: %w", i, err)
+		}
+		if !okPath || !okBody || !okLine || line <= 0 {
+			return nil, false, fmt.Errorf("args.comments[%d] requires non-empty path/body and positive line: %w", i, domain.ErrInvalid)
+		}
+		comments = append(comments, map[string]any{
+			"path": path,
+			"line": line,
+			"side": "RIGHT",
+			"body": body,
+		})
+	}
+	return comments, len(comments) > 0, nil
 }
 
 // reviewLivenessCheck is reviewPost's pre-egress liveness read: it GETs the

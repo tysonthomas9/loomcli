@@ -316,6 +316,7 @@ async function postReview(loom, subject, findings) {
       skipped: "",
       reviewUrl: stringValue(body.htmlUrl || body.html_url || body.url),
       reviewId: stringValue(body.id),
+      inlineCommentCount: findings.comments.length,
       headSha: subject.headSha,
     });
   } catch (err) {
@@ -326,11 +327,9 @@ async function postReview(loom, subject, findings) {
   }
 }
 
-// renderReviewBody composes the human-facing review summary. The github
-// connector's review post carries the body + event but not the per-line
-// comments array, so each inline finding is also rendered into the body as a
-// `path:line — body` bullet; that way every finding is visible on the posted
-// COMMENT review even when the provider does not attach line comments.
+// renderReviewBody composes the human-facing review summary. Inline findings
+// are attached separately by github.review.post; repeating their locations in
+// the summary keeps the top-level review useful in notification-only clients.
 function renderReviewBody(findings, subject) {
   const summary = stringValue(findings.summary) || "Automated review of " + subject.subjectRef + " at " + subject.headSha + ".";
   const count = findings.comments.length;
@@ -371,6 +370,7 @@ function reviewRubric() {
   return [
     "Review the pull request diff for correctness bugs, security issues, and clear regressions.",
     "Return JSON {summary, comments:[{path, line, body}]} only.",
+    "Every comment line must be a positive RIGHT-side new-file line visible in the diff hunk; use the exact diff path and never invent a location.",
     "Do not approve or request changes; this is a COMMENT-only advisory review.",
   ].join(" ");
 }
