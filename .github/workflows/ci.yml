@@ -199,6 +199,26 @@ jobs:
           ref: ${{ steps.pin.outputs.sha }}
           path: flue
 
+      - name: Read pinned meta-harness commit
+        id: mhpin
+        run: |
+          set -euo pipefail
+          sha="$(tr -d '[:space:]' < internal/workflows/META_HARNESS_COMMIT)"
+          # Validate before it flows into actions/checkout `ref:` — must be a 40-char hex SHA.
+          if ! printf '%s' "$sha" | grep -Eq '^[0-9a-f]{40}$'; then
+            echo "ERROR: META_HARNESS_COMMIT is not a 40-char hex SHA: '$sha'" >&2
+            exit 1
+          fi
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+
+      - name: Check out meta-harness
+        uses: actions/checkout@v4
+        with:
+          # Override via the META_HARNESS_REPOSITORY repo variable if the source moves.
+          repository: ${{ vars.META_HARNESS_REPOSITORY || 'olesho/meta-harness' }}
+          ref: ${{ steps.mhpin.outputs.sha }}
+          path: meta-harness
+
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
@@ -212,13 +232,23 @@ jobs:
       - name: Build flue
         run: cd flue && pnpm install --frozen-lockfile && pnpm --filter @flue/runtime --filter @flue/cli build
 
+      - name: Install meta-harness runtime deps
+        # dist/ is committed (the pin contract), so no build — but the runtime
+        # deps (@xterm/headless, node-pty incl. its native addon) must be present
+        # so the meta-harness module-resolution tests exercise the real import
+        # surface instead of skipping. No package-lock.json (bun project), hence
+        # npm install rather than npm ci.
+        run: cd meta-harness && npm install --omit=dev --no-audit --no-fund
+
       - name: Build builtin workflow bundle from source
         env:
           FLUE_REPO: ${{ github.workspace }}/flue
+          LOOM_META_HARNESS_ROOT: ${{ github.workspace }}/meta-harness
           BUILTIN_DIST_DEST: ${{ runner.temp }}/bundle-dist
         run: scripts/rebuild-builtin-bundle.sh
 
       - name: Builtin workflow node tests
         env:
           FLUE_REPO: ${{ github.workspace }}/flue
+          LOOM_META_HARNESS_ROOT: ${{ github.workspace }}/meta-harness
         run: make test-builtin-workflows
