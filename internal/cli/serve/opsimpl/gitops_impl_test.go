@@ -411,6 +411,36 @@ func runGit(t *testing.T, dir string, args ...string) error {
 	return err
 }
 
+func TestGitShowFileAtRevPreservesNotFoundKind(t *testing.T) {
+	repo := t.TempDir()
+	for _, args := range [][]string{
+		{"init", "-b", "main"},
+		{"config", "user.email", "test@example.com"},
+		{"config", "user.name", "Test"},
+	} {
+		if err := runGit(t, repo, args...); err != nil {
+			t.Fatalf("git %v: %v", args, err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(repo, "tracked.txt"), []byte("tracked\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	for _, args := range [][]string{{"add", "tracked.txt"}, {"commit", "-m", "seed"}} {
+		if err := runGit(t, repo, args...); err != nil {
+			t.Fatalf("git %v: %v", args, err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(repo, "untracked.txt"), []byte("untracked\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := NewGitOps().GitShowFileAtRev(context.Background(), repo, "HEAD", "untracked.txt", 1024)
+	var inspectionErr interface{ InspectionKind() string }
+	if !errors.As(err, &inspectionErr) || inspectionErr.InspectionKind() != "not_found" {
+		t.Fatalf("error = %T %v, want preserved not_found inspection kind", err, err)
+	}
+}
+
 // TestResolveAgentWorktreeOrPrimary_LeadFallsBackToPrimaryRepo verifies that a
 // lead agent (which has no local worktree) resolves to the workspace's primary
 // repo worktree via ResolveAgentWorktreeOrPrimary, while a non-lead agent with

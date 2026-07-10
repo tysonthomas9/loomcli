@@ -189,12 +189,14 @@ export default defineConfig(({ mode }) => ({
       : {
           "/api": {
             target: apiProxyTarget,
-            changeOrigin: true,
+            // Preserve the browser-facing Host. Local file access authorizes
+            // same-origin GETs by matching it to the configured frontend URL.
+            changeOrigin: false,
             ws: true,
           },
           "/health": {
             target: apiProxyTarget,
-            changeOrigin: true,
+            changeOrigin: false,
           },
         },
   },
@@ -208,12 +210,12 @@ export default defineConfig(({ mode }) => ({
     proxy: {
       "/api": {
         target: process.env.E2E_API_URL || "http://localhost:8080",
-        changeOrigin: true,
+        changeOrigin: false,
         ws: true,
       },
       "/health": {
         target: process.env.E2E_API_URL || "http://localhost:8080",
-        changeOrigin: true,
+        changeOrigin: false,
       },
     },
   },

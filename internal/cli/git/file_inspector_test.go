@@ -46,13 +46,16 @@ func TestParsePorcelainV1ZEntryCapIsExplicit(t *testing.T) {
 	}
 }
 
-func TestIsolatedGitEnvDropsInheritedGitVariables(t *testing.T) {
-	env := isolatedGitEnv([]string{"PATH=/bin", "GIT_DIR=/tmp/evil", "git_config_count=1", "HOME=/home/test"})
+func TestIsolatedGitEnvDropsInheritedGitVariablesAndPinsLocale(t *testing.T) {
+	env := isolatedGitEnv([]string{"PATH=/bin", "GIT_DIR=/tmp/evil", "git_config_count=1", "HOME=/home/test", "LANG=fr_FR.UTF-8", "LC_ALL=de_DE.UTF-8"})
 	joined := strings.Join(env, "\n")
 	if strings.Contains(joined, "GIT_DIR=/tmp/evil") || strings.Contains(strings.ToUpper(joined), "GIT_CONFIG_COUNT=1") {
 		t.Fatalf("inherited git environment survived: %s", joined)
 	}
-	for _, required := range []string{"GIT_TERMINAL_PROMPT=0", "GIT_OPTIONAL_LOCKS=0", "GIT_PAGER=cat", "GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL=" + os.DevNull} {
+	if strings.Contains(joined, "fr_FR") || strings.Contains(joined, "de_DE") {
+		t.Fatalf("inherited locale survived: %s", joined)
+	}
+	for _, required := range []string{"GIT_TERMINAL_PROMPT=0", "GIT_OPTIONAL_LOCKS=0", "GIT_PAGER=cat", "GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL=" + os.DevNull, "LANG=C", "LC_ALL=C"} {
 		if !strings.Contains(joined, required) {
 			t.Fatalf("missing %q in %s", required, joined)
 		}
@@ -73,6 +76,26 @@ func TestGitInspectorRejectsOptionAndRangeRevisionsBeforeExec(t *testing.T) {
 	}
 	if _, err := os.Stat(sentinel); !os.IsNotExist(err) {
 		t.Fatalf("git executed for invalid revision: %v", err)
+	}
+}
+
+func TestGitInspectorShowClassifiesMissingRevisionPath(t *testing.T) {
+	dir := t.TempDir()
+	mustInspectorGit(t, dir, "init")
+	mustInspectorGit(t, dir, "config", "user.email", "test@example.com")
+	mustInspectorGit(t, dir, "config", "user.name", "Test")
+	if err := os.WriteFile(filepath.Join(dir, "tracked.txt"), []byte("tracked\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	mustInspectorGit(t, dir, "add", "tracked.txt")
+	mustInspectorGit(t, dir, "commit", "-m", "seed")
+	if err := os.WriteFile(filepath.Join(dir, "untracked.txt"), []byte("untracked\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := NewGitInspector().Show(context.Background(), dir, "HEAD", "untracked.txt", 1024)
+	if got := inspectionKind(err); got != "not_found" {
+		t.Fatalf("inspection kind = %q, error = %v", got, err)
 	}
 }
 

@@ -30,6 +30,7 @@ type scopedMockFileOps struct {
 	dataDir       string
 	wsErr         error
 	gitStatusFunc func(context.Context, string) (ops.GitFileStatusResult, error)
+	gitShowFunc   func(context.Context, string, string, string, int64) (*ops.GitFileContentAtRev, error)
 	branchFunc    func(context.Context, string) (string, error)
 }
 
@@ -100,7 +101,10 @@ func (m scopedMockFileOps) GitStatusPorcelain(ctx context.Context, worktreePath 
 	return ops.GitFileStatusResult{Entries: parseTestPorcelainStatus(string(out))}, nil
 }
 
-func (m scopedMockFileOps) GitShowFileAtRev(_ context.Context, worktreePath, rev, path string, maxBytes int64) (*ops.GitFileContentAtRev, error) {
+func (m scopedMockFileOps) GitShowFileAtRev(ctx context.Context, worktreePath, rev, path string, maxBytes int64) (*ops.GitFileContentAtRev, error) {
+	if m.gitShowFunc != nil {
+		return m.gitShowFunc(ctx, worktreePath, rev, path, maxBytes)
+	}
 	spec := rev + ":" + path
 	sizeOut, err := exec.Command("git", "-C", worktreePath, "cat-file", "-s", spec).Output() //nolint:norawexec // Test mock runs fixed git command.
 	if err != nil {
@@ -932,6 +936,22 @@ func TestFileServiceImpl_ReadFileAtRevScoped(t *testing.T) {
 	}
 }
 
+func TestFileServiceImpl_ReadUntrackedFileAtRevIsNotFound(t *testing.T) {
+	root := t.TempDir()
+	svc := NewFileService(scopedMockFileOps{
+		wsRoot: root,
+		gitShowFunc: func(context.Context, string, string, string, int64) (*ops.GitFileContentAtRev, error) {
+			return nil, fakeInspectionError{kind: "not_found", message: "git cat-file: path exists on disk, but not in HEAD"}
+		},
+	})
+
+	_, err := svc.ReadFileAtRevScoped(context.Background(), "ws", service.ScopeWorkspace, "", "", "untracked.txt", "HEAD")
+	wantKind(t, err, service.KindNotFound)
+	if strings.Contains(err.Error(), "exists on disk") || strings.Contains(err.Error(), "cat-file") {
+		t.Fatalf("git stderr leaked through service error: %v", err)
+	}
+}
+
 func TestFileServiceImpl_DiffFileScoped(t *testing.T) {
 	svc, scopes := setupScopedService(t)
 	repo := scopes[1]
@@ -1026,9 +1046,17 @@ func TestParseGitLogHistoryUsesFixedNULFieldCount(t *testing.T) {
 	}
 }
 
-type fakeInspectionError struct{ kind string }
+type fakeInspectionError struct {
+	kind    string
+	message string
+}
 
-func (e fakeInspectionError) Error() string          { return "inspection failed" }
+func (e fakeInspectionError) Error() string {
+	if e.message != "" {
+		return e.message
+	}
+	return "inspection failed"
+}
 func (e fakeInspectionError) InspectionKind() string { return e.kind }
 
 func TestMapGitInspectionErrorPreservesKinds(t *testing.T) {
@@ -1039,6 +1067,7 @@ func TestMapGitInspectionErrorPreservesKinds(t *testing.T) {
 		{kind: "timeout", want: service.KindTimeout},
 		{kind: "canceled", want: service.KindTimeout},
 		{kind: "validation", want: service.KindValidation},
+		{kind: "not_found", want: service.KindNotFound},
 		{kind: "failed", want: service.KindInternal},
 	} {
 		err := mapGitInspectionError("git operation", fakeInspectionError{kind: tc.kind})
