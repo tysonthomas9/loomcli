@@ -1,6 +1,6 @@
 # Makefile for loomcli project
 
-.PHONY: all build build-frontend build-all test test-builtin-workflows test-integration test-all test-playground test-fleetdb-embedded test-fleetdb-supervisor test-fleetdb-ui test-fleetdb-empty-cli fleetdb-empty-up fleetdb-empty-down local-mode-frontend-dist local-mode-up local-mode-codex-up local-mode-claude-up local-mode-daytona-up local-mode-down local-mode-logs local-mode-verify local-mode-codex-verify test-local-mode-harness test-distributed-smoke lint lint-frontend test-frontend e2e test-e2e test-aft test-aft-strict test-aft-heal demo test-e2e-api test-e2e-api-local test-e2e-real-smoke test-e2e-real-smoke-local test-e2e-real-regression test-e2e-real-regression-local test-e2e-integration test-e2e-integration-local test-e2e-integration-full clean install help frontend check check-go check-frontend gate gate-e2e gate-e2e-full hooks ensure-hooks dev dev-check dev-loom dev-vite check-loc check-loc-stale check-control-plane-paths check-no-raw-exec check-no-beads-prod test-coverage test-forkwatch test-frontend-coverage test-race-cover test-integration-race-cover gen-go-api check-go-api-staleness local-mode-webhook-verify test-e2e-github-webhook test-e2e-github-webhook-live
+.PHONY: all build build-frontend build-all test test-builtin-workflows test-integration test-all test-playground test-fleetdb-embedded test-fleetdb-supervisor test-fleetdb-ui test-fleetdb-empty-cli fleetdb-empty-up fleetdb-empty-down local-mode-frontend-dist local-mode-up local-mode-codex-up local-mode-claude-up local-mode-daytona-up local-mode-down local-mode-logs local-mode-verify local-mode-codex-verify test-local-mode-harness test-distributed-smoke lint lint-frontend test-frontend e2e test-e2e test-aft test-aft-real test-aft-terminal test-aft-strict test-aft-heal demo test-e2e-api test-e2e-api-local test-e2e-real-smoke test-e2e-real-smoke-local test-e2e-real-regression test-e2e-real-regression-local test-e2e-integration test-e2e-integration-local test-e2e-integration-full clean install help frontend check check-go check-frontend gate gate-e2e gate-e2e-full hooks ensure-hooks dev dev-check dev-loom dev-vite check-loc check-loc-stale check-control-plane-paths check-no-raw-exec check-no-beads-prod test-coverage test-forkwatch test-frontend-coverage test-race-cover test-integration-race-cover gen-go-api check-go-api-staleness local-mode-webhook-verify test-e2e-github-webhook test-e2e-github-webhook-live
 
 # Default target
 all: build
@@ -359,6 +359,11 @@ test-aft:
 test-aft-real:
 	@echo "Running aft REAL-CODEX tier (spends nothing on a ChatGPT-account codex; needs ~/.codex login)..."
 	@AFT_REAL_CODEX=1 tests/aft/run-aft.sh --no-agent $(AFT_ARGS)
+
+# Opt-in: exercise the agents-page Logs tab's live-tmux terminal with real codex.
+test-aft-terminal:
+	@command -v tmux >/dev/null 2>&1 || { echo "test-aft-terminal requires tmux on PATH" >&2; exit 1; }
+	@AFT_REAL_CODEX=1 AFT_SUITES=$(PWD)/tests/aft/real-terminal-suites tests/aft/run-aft.sh --no-agent $(AFT_ARGS)
 
 test-aft-podman:
 	@AFT_STACK=podman AFT_REAL_CODEX=1 tests/aft/run-aft-podman.sh --no-agent $(AFT_ARGS)

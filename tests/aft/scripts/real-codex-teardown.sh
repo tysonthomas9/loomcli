@@ -68,6 +68,30 @@ for agent in data:
     curl -sf -X DELETE "$base/api/workspaces/$ws/agents/$agent" >/dev/null 2>&1 || true
 done
 
+# Stop this tier's detached auto-mode owner FIRST — it is a long-running loop
+# that will respawn the tmux session + codex child we reap below, so it must be
+# dead before (and not merely alongside) that reap. Match on the isolated loom
+# binary + workspace + agent name + --auto. The argv path can be unresolved
+# (e.g. tests/aft/../../tmp/loom-e2e), so anchor on the stable `tmp/loom-e2e`
+# substring rather than the realpath'd $repo_root, which would never match.
+# Escalate TERM -> KILL so a wedged loop cannot survive to respawn.
+stop_automode_owner() {
+    local sig="$1"
+    command -v ps >/dev/null 2>&1 || return 0
+    ps -axo pid=,command= 2>/dev/null | while read -r pid command; do
+        [[ -n "$pid" && -n "$command" ]] || continue
+        case "$command" in
+            *tmp/loom-e2e*"--workspace $ws"*"task real-codex-term"*"--auto"*)
+                echo "real-codex teardown: signaling $sig auto-mode loom pid $pid"
+                kill "$sig" "$pid" >/dev/null 2>&1 || true
+                ;;
+        esac
+    done
+}
+stop_automode_owner -TERM
+sleep 1
+stop_automode_owner -KILL
+
 # Kill only codex exec processes that are demonstrably tied to this isolated
 # workspace, either by command line or by open cwd/files under tmp/e2e-workspace.
 if command -v ps >/dev/null 2>&1; then

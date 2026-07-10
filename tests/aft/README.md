@@ -14,6 +14,7 @@ SSE.
 ```bash
 make test-aft                      # deterministic, no model calls (what CI runs)
 make test-aft-real                 # opt-in real codex epic-runner tier
+make test-aft-terminal             # opt-in live-tmux Logs tab tier (real codex)
 make test-aft-strict               # failures get an agent diagnosis + suggested fix
 make test-aft-heal                 # local dev: agent may complete a broken step's intent
 tests/aft/run-aft.sh --record ...  # or call the harness directly with any aft flags
@@ -52,6 +53,22 @@ separate `make test-aft-real` target sets it, and real scenarios live in
 `tests/aft/real-suites/` instead of the default `tests/aft/suites/` directory.
 In real mode the harness also unsets `OPENAI_API_KEY`, defaults `AFT_TIMEOUT` to
 `600000`, and fails fast if `codex` or `~/.codex/auth.json` is missing.
+
+### Live terminal tier
+
+`make test-aft-terminal` proves the agents-page Logs tab's live-tmux path:
+`AgentLogsTab` detects a real auto-mode tmux session, mounts
+`EmbeddedTerminal`, and renders non-empty real codex output through wterm. It
+requires the normal real-codex preflight (a real `codex` on `PATH` and a logged-in
+`~/.codex/auth.json`) plus `tmux` on `PATH`.
+
+This tier is opt-in by running the target; there is no extra environment flag.
+Its suites live in `tests/aft/real-terminal-suites/`, so `make test-aft-real`
+does not include them. Claude remains stubbed and the spawned agent is codex-only,
+so it spends zero Claude tokens. The run does auto-spawn a real agent and consumes
+the operator's codex account rate-limit window, so do not loop it casually. CI
+cannot run this tier because it has neither operator Codex credentials nor a
+supported interactive tmux environment.
 
 ### Podman cloud tier
 
