@@ -4,6 +4,7 @@
 
 import "@testing-library/jest-dom";
 import {
+  act,
   fireEvent,
   render,
   screen,
@@ -23,6 +24,15 @@ const mocks = vi.hoisted(() => ({
   moveScopedPath: vi.fn(() => Promise.resolve()),
   deleteScopedPath: vi.fn(() => Promise.resolve()),
   readScopedFile: vi.fn(() => Promise.resolve({})),
+  statScopedPath: vi.fn((_workspaceId, _scopeRef, path: string) =>
+    Promise.resolve({
+      path,
+      is_dir: false,
+      size: 1,
+      mod_time: "2026-01-01T00:00:00Z",
+      version: `version:${path}`,
+    }),
+  ),
   diffScopedFile: vi.fn(() => Promise.resolve({ path: "main.ts", patch: "" })),
   blameScopedFile: vi.fn(() =>
     Promise.resolve({ path: "main.ts", skipped: false, lines: [] }),
@@ -59,6 +69,21 @@ const mocks = vi.hoisted(() => ({
   headFileMap: {} as Record<string, FileReadData>,
   rootEntries: [] as FileEntry[],
   scopedTreeError: null as string | null,
+  capabilities: { read: true, write: true, sensitive: true },
+  capabilitiesLoading: false,
+  capabilitiesError: null as string | null,
+  retryCapabilities: vi.fn(),
+  documentExternalConflict: null as {
+    content: string;
+    version: string;
+    fileData: FileReadData;
+  } | null,
+  useExternal: vi.fn(),
+  overwriteExternal: vi.fn(() => Promise.resolve(null)),
+  registryDirtyPaths: [] as string[],
+  registryRefresh: vi.fn(() => Promise.resolve()),
+  registryRetarget: vi.fn(),
+  registryReset: vi.fn(),
 }));
 
 vi.mock("@/components/CodeMirrorEditor", async () => {
@@ -166,6 +191,7 @@ vi.mock("@/hooks/api", () => ({
   moveScopedPath: mocks.moveScopedPath,
   repairFileCheckout: mocks.repairFileCheckout,
   readScopedFile: mocks.readScopedFile,
+  statScopedPath: mocks.statScopedPath,
   searchScopedFiles: mocks.searchScopedFiles,
   writeScopedFile: mocks.writeScopedFile,
 }));
@@ -175,10 +201,14 @@ vi.mock("@/hooks", async () => {
   const stores = await import("@/stores");
   const documentRegistry = {
     get: () => ({ dirty: false }),
-    resetPathPrefix: vi.fn(),
-    retargetPathPrefix: vi.fn(),
+    dirtyPathsForPrefix: vi.fn(() => mocks.registryDirtyPaths),
+    refresh: mocks.registryRefresh,
+    resetPathPrefix: mocks.registryReset,
+    retargetPathPrefix: mocks.registryRetarget,
   };
   return {
+    FileCapabilitiesProvider: ({ children }: { children: React.ReactNode }) =>
+      children,
     FileDocumentRegistryProvider: ({
       children,
     }: {
@@ -191,6 +221,12 @@ vi.mock("@/hooks", async () => {
     useFileBrowserStoreInstance: stores.useFileBrowserStoreInstance,
     useFileDocumentRegistry: () => documentRegistry,
     useFileDocumentRegistryRevision: () => 0,
+    useFileCapabilities: () => ({
+      capabilities: mocks.capabilities,
+      isLoading: mocks.capabilitiesLoading,
+      error: mocks.capabilitiesError,
+      retry: mocks.retryCapabilities,
+    }),
     useWorkspaceContext: () => ({
       workspaceId: "ws-1",
       repos: [
@@ -272,7 +308,7 @@ vi.mock("@/hooks", async () => {
         isLoading,
         isSaving,
         error: null,
-        externalConflict: null,
+        externalConflict: mocks.documentExternalConflict,
         refresh,
         edit: setContent,
         save: async () => {
@@ -284,7 +320,8 @@ vi.mock("@/hooks", async () => {
           return { success: true, version: "test-version" };
         },
         discard: () => setContent(baseContent),
-        useExternal: vi.fn(),
+        useExternal: mocks.useExternal,
+        overwriteExternal: mocks.overwriteExternal,
       };
     },
   };
@@ -324,6 +361,11 @@ describe("WorkspaceFileBrowser", () => {
       entry("src", true),
     ];
     mocks.scopedTreeError = null;
+    mocks.capabilities = { read: true, write: true, sensitive: true };
+    mocks.capabilitiesLoading = false;
+    mocks.capabilitiesError = null;
+    mocks.documentExternalConflict = null;
+    mocks.registryDirtyPaths = [];
     mocks.agents = [
       {
         name: "atlas",
@@ -369,11 +411,16 @@ describe("WorkspaceFileBrowser", () => {
       "symbols.ts": mocks.fileMap["symbols.ts"],
     };
     mocks.readScopedFile.mockImplementation(
-      (_, __, path: string, rev?: string) =>
-        Promise.resolve(
+      (_, __, path: string, rev?: string) => {
+        const found =
           (rev === "HEAD" ? mocks.headFileMap[path] : mocks.fileMap[path]) ??
-            mocks.fileMap[path],
-        ),
+          mocks.fileMap[path];
+        return Promise.resolve(
+          found
+            ? { ...found, version: found.version ?? `version:${path}` }
+            : found,
+        );
+      },
     );
     mocks.diffScopedFile.mockResolvedValue({
       path: "main.ts",
@@ -464,6 +511,7 @@ describe("WorkspaceFileBrowser", () => {
         { scope: "repo", target: "loomcli" },
         "new.ts",
         "",
+        { createOnly: true },
       );
     });
 
@@ -493,6 +541,8 @@ describe("WorkspaceFileBrowser", () => {
         { scope: "repo", target: "loomcli" },
         "main.ts",
         "renamed.ts",
+        false,
+        "version:main.ts",
       );
     });
 
@@ -506,6 +556,7 @@ describe("WorkspaceFileBrowser", () => {
         { scope: "repo", target: "loomcli" },
         "main.ts",
         false,
+        "version:main.ts",
       );
     });
   });
@@ -801,6 +852,7 @@ describe("WorkspaceFileBrowser", () => {
         { scope: "workspace" },
         "main.ts",
         "alert.log('hi')\n",
+        { ifMatch: "version:main.ts" },
       );
     });
   });
@@ -822,6 +874,7 @@ describe("WorkspaceFileBrowser", () => {
         "main.ts",
         "src/main.ts",
         false,
+        "version:main.ts",
       );
     });
 
@@ -1522,5 +1575,367 @@ describe("WorkspaceFileBrowser", () => {
       ) as Array<{ kind: string }>;
       expect(marks.some((mark) => mark.kind === "changed")).toBe(true);
     });
+  });
+
+  it("keeps viewer sessions read-only and hides every mutation entry point", async () => {
+    mocks.capabilities = { read: true, write: false, sensitive: false };
+    render(<WorkspaceFileBrowser mode="workspace" />);
+    await expandWorkspaceFiles();
+
+    fireEvent.click(screen.getByLabelText("main.ts"));
+    expect(await screen.findByTestId("mock-codemirror")).toHaveAttribute(
+      "data-readonly",
+      "true",
+    );
+    expect(screen.queryByRole("button", { name: "Save" })).toBeNull();
+
+    fireEvent.contextMenu(screen.getByLabelText("main.ts"));
+    expect(screen.getByRole("menuitem", { name: "Copy Path" })).toBeVisible();
+    expect(screen.queryByRole("menuitem", { name: "Delete" })).toBeNull();
+    expect(screen.queryByRole("menuitem", { name: "Rename" })).toBeNull();
+    expect(
+      screen.queryByRole("menuitem", { name: "Duplicate text file" }),
+    ).toBeNull();
+
+    fireEvent.keyDown(window, { key: "f", metaKey: true, shiftKey: true });
+    expect(screen.getByLabelText("Search files")).toBeVisible();
+    expect(screen.queryByLabelText("Replace with")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Preview" })).toBeNull();
+  });
+
+  it("shows capability loading and fail-closed retry states", async () => {
+    mocks.capabilities = { read: true, write: false, sensitive: false };
+    mocks.capabilitiesLoading = true;
+    const { rerender } = render(<WorkspaceFileBrowser mode="workspace" />);
+    expect(screen.getByText("Checking file permissions...")).toBeVisible();
+    await screen.findByRole("button", { name: /^Workspace files$/ });
+
+    act(() => {
+      mocks.capabilitiesLoading = false;
+      mocks.capabilitiesError = "network error";
+      rerender(<WorkspaceFileBrowser mode="workspace" />);
+    });
+    expect(
+      screen.getByText("File permissions unavailable. Editing is disabled."),
+    ).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    expect(mocks.retryCapabilities).toHaveBeenCalledTimes(1);
+  });
+
+  it("retains the delete dialog and drafts when the version is stale", async () => {
+    mocks.deleteScopedPath.mockRejectedValueOnce(
+      Object.assign(new Error("file changed"), { status: 412 }),
+    );
+    render(<WorkspaceFileBrowser mode="workspace" />);
+    await expandWorkspaceFiles();
+    fireEvent.contextMenu(screen.getByLabelText("main.ts"));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Delete" }));
+    fireEvent.click(screen.getByRole("button", { name: "Delete" }));
+
+    expect(await screen.findByRole("dialog")).toBeVisible();
+    expect(mocks.registryReset).not.toHaveBeenCalled();
+    expect(mocks.deleteScopedPath).toHaveBeenCalledWith(
+      "ws-1",
+      { scope: "workspace" },
+      "main.ts",
+      false,
+      "version:main.ts",
+    );
+  });
+
+  it("includes source and destination versions when overwriting a move", async () => {
+    mocks.moveScopedPath
+      .mockRejectedValueOnce(
+        Object.assign(new Error("destination exists"), { status: 409 }),
+      )
+      .mockResolvedValueOnce(undefined);
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    render(<WorkspaceFileBrowser mode="workspace" />);
+    await expandWorkspaceFiles();
+    fireEvent.contextMenu(screen.getByLabelText("main.ts"));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Move to..." }));
+    const dialog = await screen.findByRole("dialog", { name: /move to/i });
+    fireEvent.click(within(dialog).getByRole("button", { name: "src" }));
+    fireEvent.click(within(dialog).getByRole("button", { name: "Move" }));
+
+    await waitFor(() => expect(mocks.moveScopedPath).toHaveBeenCalledTimes(2));
+    expect(mocks.moveScopedPath).toHaveBeenLastCalledWith(
+      "ws-1",
+      { scope: "workspace" },
+      "main.ts",
+      "src/main.ts",
+      true,
+      "version:main.ts",
+      "version:src/main.ts",
+    );
+  });
+
+  it("keeps both drafts when destination overwrite discard is canceled", async () => {
+    mocks.registryDirtyPaths = ["src/main.ts"];
+    mocks.moveScopedPath.mockRejectedValueOnce(
+      Object.assign(new Error("destination exists"), { status: 409 }),
+    );
+    const confirm = vi
+      .spyOn(window, "confirm")
+      .mockReturnValueOnce(true)
+      .mockReturnValueOnce(false);
+    render(<WorkspaceFileBrowser mode="workspace" />);
+    await expandWorkspaceFiles();
+    fireEvent.contextMenu(screen.getByLabelText("main.ts"));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Move to..." }));
+    const dialog = await screen.findByRole("dialog", { name: /move to/i });
+    fireEvent.click(within(dialog).getByRole("button", { name: "src" }));
+    fireEvent.click(within(dialog).getByRole("button", { name: "Move" }));
+
+    await waitFor(() => expect(confirm).toHaveBeenCalledTimes(2));
+    expect(confirm).toHaveBeenNthCalledWith(1, "Overwrite src/main.ts?");
+    expect(confirm).toHaveBeenNthCalledWith(
+      2,
+      "Discard unsaved changes in 1 destination file?",
+    );
+    expect(mocks.moveScopedPath).toHaveBeenCalledTimes(1);
+    expect(mocks.registryRetarget).not.toHaveBeenCalled();
+    expect(dialog).toBeVisible();
+  });
+
+  it("duplicates only complete text with deterministic create-only names", async () => {
+    mocks.rootEntries.push(entry("main copy.ts"));
+    render(<WorkspaceFileBrowser mode="workspace" />);
+    await expandWorkspaceFiles();
+    fireEvent.contextMenu(screen.getByLabelText("main.ts"));
+    fireEvent.click(
+      await screen.findByRole("menuitem", { name: "Duplicate text file" }),
+    );
+
+    await waitFor(() =>
+      expect(mocks.writeScopedFile).toHaveBeenCalledWith(
+        "ws-1",
+        { scope: "workspace" },
+        "main copy 2.ts",
+        "console.log('hi')\n",
+        { createOnly: true },
+      ),
+    );
+  });
+
+  it("does not offer duplicate for binary or truncated files", async () => {
+    mocks.rootEntries.push(entry("image.bin"));
+    mocks.fileMap["image.bin"] = {
+      path: "image.bin",
+      size: 4,
+      binary: true,
+      version: "binary-v1",
+    };
+    render(<WorkspaceFileBrowser mode="workspace" />);
+    await expandWorkspaceFiles();
+
+    fireEvent.contextMenu(screen.getByLabelText("image.bin"));
+    await waitFor(() => expect(mocks.readScopedFile).toHaveBeenCalled());
+    expect(
+      screen.queryByRole("menuitem", { name: "Duplicate text file" }),
+    ).toBeNull();
+    fireEvent.contextMenu(screen.getByLabelText("large.txt"));
+    await waitFor(() =>
+      expect(mocks.readScopedFile).toHaveBeenCalledWith(
+        "ws-1",
+        { scope: "workspace" },
+        "large.txt",
+      ),
+    );
+    expect(
+      screen.queryByRole("menuitem", { name: "Duplicate text file" }),
+    ).toBeNull();
+  });
+
+  it("reselects a duplicate name once after a create-only race", async () => {
+    mocks.writeScopedFile
+      .mockRejectedValueOnce(
+        Object.assign(new Error("already exists"), { status: 412 }),
+      )
+      .mockResolvedValueOnce({ success: true, version: "created" });
+    mocks.listScopedDir
+      .mockResolvedValueOnce({ path: "", entries: mocks.rootEntries })
+      .mockResolvedValueOnce({
+        path: "",
+        entries: [...mocks.rootEntries, entry("main copy.ts")],
+      });
+    render(<WorkspaceFileBrowser mode="workspace" />);
+    await expandWorkspaceFiles();
+    fireEvent.contextMenu(screen.getByLabelText("main.ts"));
+    fireEvent.click(
+      await screen.findByRole("menuitem", { name: "Duplicate text file" }),
+    );
+
+    await waitFor(() => expect(mocks.writeScopedFile).toHaveBeenCalledTimes(2));
+    expect(mocks.writeScopedFile).toHaveBeenLastCalledWith(
+      "ws-1",
+      { scope: "workspace" },
+      "main copy 2.ts",
+      "console.log('hi')\n",
+      { createOnly: true },
+    );
+  });
+
+  it("retargets shared dirty documents after an inline rename", async () => {
+    render(<WorkspaceFileBrowser mode="workspace" />);
+    await expandWorkspaceFiles();
+    fireEvent.contextMenu(screen.getByLabelText("main.ts"));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Rename" }));
+    const input = screen.getByLabelText("File name");
+    fireEvent.change(input, { target: { value: "renamed.ts" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    await waitFor(() =>
+      expect(mocks.registryRetarget).toHaveBeenCalledWith(
+        "ws-1",
+        { scope: "workspace" },
+        "main.ts",
+        "renamed.ts",
+      ),
+    );
+  });
+
+  it("checks registry-wide dirty documents before deleting", async () => {
+    mocks.registryDirtyPaths = ["main.ts"];
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
+    render(<WorkspaceFileBrowser mode="workspace" />);
+    await expandWorkspaceFiles();
+    fireEvent.contextMenu(screen.getByLabelText("main.ts"));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Delete" }));
+    fireEvent.click(screen.getByRole("button", { name: "Delete" }));
+
+    expect(confirm).toHaveBeenCalledWith(
+      "Discard unsaved changes in 1 open file?",
+    );
+    expect(mocks.deleteScopedPath).not.toHaveBeenCalled();
+    await waitFor(() => expect(screen.getByRole("dialog")).toBeVisible());
+  });
+
+  it("preserves replace conflicts and refreshes successful registry documents", async () => {
+    mocks.writeScopedFile.mockRejectedValueOnce(
+      Object.assign(new Error("file changed"), { status: 412 }),
+    );
+    render(<WorkspaceFileBrowser mode="workspace" />);
+    await expandWorkspaceFiles();
+    fireEvent.keyDown(window, { key: "f", metaKey: true, shiftKey: true });
+    fireEvent.change(screen.getByLabelText("Search files"), {
+      target: { value: "console" },
+    });
+    fireEvent.change(screen.getByLabelText("Replace with"), {
+      target: { value: "alert" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Search" }));
+    await screen.findByText("console.log('hi')");
+    fireEvent.click(screen.getByRole("button", { name: "Preview" }));
+    await screen.findByText(/- console\.log/);
+    fireEvent.click(screen.getByRole("button", { name: "Apply" }));
+    expect(
+      await screen.findByText(/Conflicting previews were preserved/),
+    ).toBeVisible();
+    expect(screen.getByRole("button", { name: "Apply" })).toBeVisible();
+
+    mocks.writeScopedFile.mockResolvedValueOnce({
+      success: true,
+      version: "replaced",
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Apply" }));
+    await waitFor(() =>
+      expect(mocks.registryRefresh).toHaveBeenCalledWith({
+        workspaceId: "ws-1",
+        scope: "workspace",
+        path: "main.ts",
+      }),
+    );
+  });
+
+  it("renders external conflict commands without clearing the draft", async () => {
+    mocks.documentExternalConflict = {
+      content: "external\n",
+      version: "external-v2",
+      fileData: {
+        path: "main.ts",
+        content: "external\n",
+        size: 9,
+        binary: false,
+        version: "external-v2",
+      },
+    };
+    render(<WorkspaceFileBrowser mode="workspace" />);
+    await expandWorkspaceFiles();
+    fireEvent.click(screen.getByLabelText("main.ts"));
+    await screen.findByText("This file changed outside the editor.");
+
+    fireEvent.click(screen.getByRole("button", { name: "Reload" }));
+    expect(mocks.useExternal).toHaveBeenCalledTimes(1);
+    fireEvent.click(screen.getByRole("button", { name: "Overwrite" }));
+    expect(mocks.overwriteExternal).toHaveBeenCalledTimes(1);
+    fireEvent.click(screen.getByRole("button", { name: "Compare" }));
+    expect(await screen.findByText("External vs local draft")).toBeVisible();
+    expect(screen.getByText("-external")).toBeVisible();
+  });
+
+  it("restores a commit conditionally against the current version", async () => {
+    mocks.historyScopedFile.mockResolvedValue({
+      path: "main.ts",
+      entries: [
+        {
+          kind: "commit",
+          sha: "def5678",
+          author: "Test User",
+          time: "2026-01-02T00:00:00Z",
+          summary: "commit summary",
+        },
+      ],
+    });
+    render(<WorkspaceFileBrowser mode="workspace" />);
+    await expandWorkspaceFiles();
+    fireEvent.click(screen.getByLabelText("main.ts"));
+    fireEvent.click(await screen.findByRole("button", { name: "History" }));
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Open at commit" }),
+    );
+    fireEvent.click(await screen.findByRole("button", { name: "Restore" }));
+
+    await waitFor(() =>
+      expect(mocks.writeScopedFile).toHaveBeenCalledWith(
+        "ws-1",
+        { scope: "workspace" },
+        "main.ts",
+        "console.log('hi')\n",
+        { ifMatch: "version:main.ts" },
+      ),
+    );
+  });
+
+  it("keeps the commit revision open when restore conflicts", async () => {
+    mocks.historyScopedFile.mockResolvedValue({
+      path: "main.ts",
+      entries: [
+        {
+          kind: "commit",
+          sha: "def5678",
+          author: "Test User",
+          time: "2026-01-02T00:00:00Z",
+          summary: "commit summary",
+        },
+      ],
+    });
+    mocks.writeScopedFile.mockRejectedValueOnce(
+      Object.assign(new Error("file changed"), { status: 412 }),
+    );
+    render(<WorkspaceFileBrowser mode="workspace" />);
+    await expandWorkspaceFiles();
+    fireEvent.click(screen.getByLabelText("main.ts"));
+    fireEvent.click(await screen.findByRole("button", { name: "History" }));
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Open at commit" }),
+    );
+    fireEvent.click(await screen.findByRole("button", { name: "Restore" }));
+
+    expect(await screen.findByText("file changed")).toBeVisible();
+    expect(screen.getByRole("button", { name: "Restore" })).toBeVisible();
+    expect(
+      screen.getByRole("button", { name: "Close revision" }),
+    ).toBeVisible();
   });
 });

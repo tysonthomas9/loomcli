@@ -1,7 +1,7 @@
 import { lazy, Suspense, useEffect, useMemo, useState } from "react";
 
 import type { FileReadData } from "@/api/workspace";
-import { readScopedFile } from "@/hooks/api";
+import { readScopedFile, statScopedPath, writeScopedFile } from "@/hooks/api";
 import { useWorkspaceContext } from "@/hooks";
 import { detectLanguage } from "@/utils/detectLanguage";
 import type { CheckoutRef } from "@/utils/fileExplorerRefs";
@@ -24,18 +24,24 @@ export interface RevisionViewState {
 export function FileRevisionPane({
   revisionView,
   historyOpen,
+  canWrite,
   onToggleHistory,
   onClose,
+  onRestored,
 }: {
   revisionView: RevisionViewState;
   historyOpen: boolean;
+  canWrite: boolean;
   onToggleHistory: () => void;
   onClose: () => void;
+  onRestored: () => void;
 }) {
   const { workspaceId } = useWorkspaceContext();
   const [fileData, setFileData] = useState<FileReadData | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [restoreError, setRestoreError] = useState<string | null>(null);
+  const [isRestoring, setIsRestoring] = useState(false);
   const language = useMemo(
     () => detectLanguage(revisionView.path),
     [revisionView.path],
@@ -67,6 +73,42 @@ export function FileRevisionPane({
     };
   }, [revisionView, workspaceId]);
 
+  const restore = async () => {
+    if (
+      !canWrite ||
+      !fileData ||
+      fileData.binary ||
+      fileData.truncated ||
+      fileData.content === undefined ||
+      isRestoring
+    ) {
+      return;
+    }
+    setIsRestoring(true);
+    setRestoreError(null);
+    try {
+      const current = await statScopedPath(
+        workspaceId,
+        revisionView.ref,
+        revisionView.path,
+      );
+      await writeScopedFile(
+        workspaceId,
+        revisionView.ref,
+        revisionView.path,
+        fileData.content,
+        { ifMatch: current.version },
+      );
+      onRestored();
+    } catch (reason) {
+      setRestoreError(
+        reason instanceof Error ? reason.message : String(reason),
+      );
+    } finally {
+      setIsRestoring(false);
+    }
+  };
+
   return (
     <div className={styles.viewerColumn}>
       <div className={styles.viewerHeader}>
@@ -75,6 +117,21 @@ export function FileRevisionPane({
           <span className={styles.diffTitleMeta}>{revisionView.title}</span>
         </div>
         <div className={styles.viewerActions}>
+          {canWrite && (
+            <button
+              type="button"
+              className={styles.saveButton}
+              disabled={
+                !fileData ||
+                fileData.binary ||
+                !!fileData.truncated ||
+                isRestoring
+              }
+              onClick={() => void restore()}
+            >
+              {isRestoring ? "Restoring..." : "Restore"}
+            </button>
+          )}
           <button
             type="button"
             className={`${styles.saveButton} ${styles.historyToggle}`}
@@ -121,6 +178,7 @@ export function FileRevisionPane({
         </div>
       </div>
       <div className={styles.viewerContent}>
+        {restoreError && <div className={styles.error}>{restoreError}</div>}
         {isLoading && <div className={styles.loading}>Loading file...</div>}
         {error && <div className={styles.error}>{error}</div>}
         {fileData?.binary && (

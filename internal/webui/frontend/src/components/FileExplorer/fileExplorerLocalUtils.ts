@@ -89,6 +89,34 @@ export function isConflictError(err: unknown): boolean {
   );
 }
 
+export function isPreconditionError(err: unknown): boolean {
+  return (
+    typeof err === "object" &&
+    err !== null &&
+    "status" in err &&
+    ((err as { status?: unknown }).status === 412 ||
+      (err as { status?: unknown }).status === 428)
+  );
+}
+
+export function buildContentDiffPatch(
+  path: string,
+  external: string,
+  local: string,
+): string {
+  const externalLines = external.split("\n");
+  const localLines = local.split("\n");
+  return [
+    `diff --git a/${path} b/${path}`,
+    `--- external/${path}`,
+    `+++ local/${path}`,
+    `@@ -1,${externalLines.length} +1,${localLines.length} @@`,
+    ...externalLines.map((line) => `-${line}`),
+    ...localLines.map((line) => `+${line}`),
+    "",
+  ].join("\n");
+}
+
 export function sortedEntries(entries: FileEntry[]): FileEntry[] {
   return [...entries].sort((a, b) => a.name.localeCompare(b.name));
 }

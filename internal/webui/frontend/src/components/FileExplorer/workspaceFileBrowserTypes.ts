@@ -20,6 +20,7 @@ export interface ContextMenuState {
   node: FileTreeNodeInfo;
   x: number;
   y: number;
+  duplicateEligible: boolean;
 }
 
 export interface CheckoutRepairMenuState {
