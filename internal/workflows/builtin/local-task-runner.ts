@@ -134,13 +134,27 @@ export async function run(ctx = {}) {
   const usesStdinPrompt = backendUsesStdinPrompt(backend);
 
   const openPR = booleanValue(inputValue(request, "openPullRequest"));
-  const viaMetaHarness = useMetaHarness(backend);
+  // Route through meta-harness when the backend is gated in AND the modules are
+  // actually staged in this bundle; otherwise degrade to the headless execFile
+  // path (staging is best-effort at build time — a missing optional dependency
+  // must never fail the run).
+  let mhModules = null;
+  if (useMetaHarness(backend)) {
+    mhModules = await loadMetaHarnessModules();
+    if (!mhModules) {
+      logs.push(`meta-harness modules not staged in this bundle; ${backend} falls back to the headless CLI path`);
+    }
+  }
+  const viaMetaHarness = mhModules !== null;
   let exitCode;
   let stdout = "";
   let stderr = "";
   // Canonical transcript entries from the meta-harness Readers (null on the
   // headless execBackend path, where entries are parsed from stdout below).
   let metaHarnessEntries = null;
+  // Token usage read back from the harness's on-disk session on the meta-harness
+  // path (the stream-json path computes it during parsing instead).
+  let metaHarnessUsage = null;
   let patchInfo;
   let prInfo = null;
   let stackInfo = null;
@@ -148,11 +162,12 @@ export async function run(ctx = {}) {
   try {
     if (viaMetaHarness) {
       try {
-        const mh = await runViaMetaHarness(backend, binary, prompt, execWorktree, logs);
+        const mh = await runViaMetaHarness(backend, binary, prompt, execWorktree, logs, mhModules);
         exitCode = mh.exitCode;
         stdout = mh.reply;
         stderr = "";
         metaHarnessEntries = mh.transcriptEntries;
+        metaHarnessUsage = mh.usage;
       } catch (error) {
         return failed("local_agent_failed", `meta-harness ${backend} run failed: ${errorMessage(error)}`, {
           taskRunId,
@@ -265,6 +280,15 @@ export async function run(ctx = {}) {
     transcriptEntries = metaHarnessEntries.some((e) => e.role !== "system")
       ? metaHarnessEntries
       : minimalTranscript(backend, taskId || taskRunId, prompt, stdout);
+    // Terminal result entry carrying the session's token usage (read back from
+    // the harness's on-disk session), mirroring the stream-json parsers — this is
+    // what taskUsageFromEntries recovers into the top-level usage fields below.
+    // Appended AFTER the fallback choice so usage survives an empty Reader read.
+    if (metaHarnessUsage) {
+      transcriptEntries = transcriptEntries.concat([
+        resultEntry(exitCode === 0 ? "completed" : "failed", metaHarnessUsage, new Date().toISOString()),
+      ]);
+    }
   } else if (STREAM_JSON_BACKENDS.has(backend)) {
     transcriptEntries = parseStreamJSONTranscript(backend, stdout);
     // Fall back to the prompt + stdout tail if a stream-json backend yielded no
@@ -592,15 +616,17 @@ async function execBackend(binary, args, options) {
 // meta-harness; the rest stay on the headless execBackend + stream-json path.
 const META_HARNESS_CAPABLE = new Set(["claude", "codex"]);
 
-// metaHarnessBackends resolves the OPT-IN set from LOOM_META_HARNESS_BACKENDS
-// (comma list, or "all"), intersected with META_HARNESS_CAPABLE. Default OFF: the
-// meta-harness path reports zero token usage (meta-harness canonical events carry
-// no token fields), a product-visible cost regression vs the stream-json parse, so
-// it stays opt-in per backend until a usage extractor lands.
+// metaHarnessBackends resolves the routed set from LOOM_META_HARNESS_BACKENDS
+// (comma list, "all", or "none"/"off" to disable), intersected with
+// META_HARNESS_CAPABLE. Default ON for every capable backend: token usage is
+// read back from the harness's on-disk session (meta-harness Reader.readUsage,
+// v0.1.4), closing the zero-usage regression that kept this opt-in. Cost
+// (estimated_cost_usd) is still unavailable on this path — the interactive
+// session records no cost, and cost is never estimated from a price table.
 function metaHarnessBackends() {
   const raw = stringValue(process.env.LOOM_META_HARNESS_BACKENDS).toLowerCase();
-  if (raw === "") return new Set();
-  if (raw === "all") return new Set(META_HARNESS_CAPABLE);
+  if (raw === "" || raw === "all") return new Set(META_HARNESS_CAPABLE);
+  if (raw === "none" || raw === "off") return new Set();
   return new Set(
     raw
       .split(",")
@@ -636,23 +662,36 @@ export function metaHarnessHarness(backend) {
   return backend === "claude" ? "claude-code" : "codex";
 }
 
+// loadMetaHarnessModules resolves the dynamic imports the meta-harness path needs,
+// or null when meta-harness isn't staged in this bundle. Staging is best-effort at
+// build time (a bundle built without the sibling clone simply lacks the modules),
+// and the backends route through meta-harness BY DEFAULT — so an unresolvable
+// import must degrade to the headless execFile path, never fail the run. The
+// imports are dynamic (a static string literal esbuild still inlines into the
+// bundle) so this file also loads under `node --test` without meta-harness.
+export async function loadMetaHarnessModules() {
+  try {
+    const [oneshot, asyncMod, transcript] = await Promise.all([
+      import("meta-harness/oneshot"),
+      import("meta-harness/async"),
+      import("meta-harness/transcript"),
+    ]);
+    return { oneshot, asyncMod, transcript };
+  } catch {
+    return null;
+  }
+}
+
 // runViaMetaHarness drives one backend turn through meta-harness (real PTY, clean
 // reply extraction, folder-trust auto-accept, canonical transcript) instead of the
-// headless execBackend path, and reads the canonical transcript back from the
-// harness's on-disk session. The meta-harness modules are imported dynamically (a
-// static string literal esbuild still inlines into the bundle) so this file loads
-// under `node --test` without meta-harness present — only a real meta-harness run
-// resolves them. Returns { exitCode, reply, transcriptEntries } shaped like the
-// execBackend result so run()'s downstream (patch, PR, redaction, result) is shared.
-async function runViaMetaHarness(backend, binary, prompt, execWorktree, logs) {
-  const [oneshot, async, transcript] = await Promise.all([
-    import("meta-harness/oneshot"),
-    import("meta-harness/async"),
-    import("meta-harness/transcript"),
-  ]);
-  const { runOneShotDetailed } = oneshot;
-  const { Context } = async;
-  const { ClaudeCodeReader, CodexReader, toPublicJSON } = transcript;
+// headless execBackend path, and reads the canonical transcript + token usage back
+// from the harness's on-disk session. Returns { exitCode, reply, transcriptEntries,
+// usage } shaped like the execBackend result so run()'s downstream (patch, PR,
+// redaction, result) is shared.
+async function runViaMetaHarness(backend, binary, prompt, execWorktree, logs, modules) {
+  const { runOneShotDetailed } = modules.oneshot;
+  const { Context } = modules.asyncMod;
+  const { ClaudeCodeReader, CodexReader, toPublicJSON } = modules.transcript;
 
   const timeoutMs = numberValue(process.env.LOOM_LOCAL_TASK_TIMEOUT_MS, 30 * 60 * 1000);
   const { ctx, cancel } = Context.withDeadline(Context.background(), timeoutMs);
@@ -672,16 +711,38 @@ async function runViaMetaHarness(backend, binary, prompt, execWorktree, logs) {
     cancel();
   }
 
-  // Read the canonical transcript back for EVERY outcome that established a session
-  // (the id is absent only on startup_error). Best-effort: a Reader failure must not
-  // erase a successful reply — keep the reply and note the read error.
+  // Read the canonical transcript + token usage back for EVERY outcome that
+  // established a session (the id is absent only on startup_error). Best-effort:
+  // a Reader failure must not erase a successful reply — keep the reply and note
+  // the read error.
   let transcriptEntries = [];
+  let usage = null;
   if (outcome.harnessSessionID) {
+    const reader = backend === "claude" ? new ClaudeCodeReader() : new CodexReader();
     try {
-      const reader = backend === "claude" ? new ClaudeCodeReader() : new CodexReader();
       transcriptEntries = reader.read(outcome.harnessSessionID, execWorktree).map(toPublicJSON);
     } catch (error) {
       logs.push("meta-harness transcript read failed (reply preserved): " + errorMessage(error));
+    }
+    // The session's own token accounting (Reader.readUsage; the canonical Event
+    // DTO carries no token fields by contract). Mapped to the same keys the
+    // stream-json parsers feed resultEntry, so taskUsageFromEntries surfaces it
+    // identically: cache_read/cache_write from the claude cache_* fields, codex
+    // input_tokens INCLUDES its cached subset (codex's own semantics). No cost:
+    // neither on-disk format reports one, and cost is never estimated here.
+    try {
+      const u = reader.readUsage(outcome.harnessSessionID, execWorktree);
+      if (u) {
+        usage = normalizeUsage({
+          input_tokens: u.inputTokens,
+          output_tokens: u.outputTokens,
+          cache_read_tokens: u.cacheReadInputTokens,
+          cache_write_tokens: u.cacheCreationInputTokens,
+          reasoning_tokens: u.reasoningOutputTokens,
+        });
+      }
+    } catch (error) {
+      logs.push("meta-harness usage read failed (run preserved): " + errorMessage(error));
     }
   }
 
@@ -693,6 +754,7 @@ async function runViaMetaHarness(backend, binary, prompt, execWorktree, logs) {
     exitCode,
     reply: outcome.status === "completed" ? outcome.reply : outcome.reason || "",
     transcriptEntries,
+    usage,
   };
 }
 

@@ -8,6 +8,7 @@ import { afterEach, beforeEach, describe, it } from "node:test";
 import {
   backendArgs,
   ensureSessionMetaLead,
+  loadMetaHarnessModules,
   metaHarnessArgs,
   metaHarnessEnv,
   metaHarnessHarness,
@@ -119,6 +120,7 @@ const ENV_KEYS = [
   "LOOM_COST_PER_MTOK_OUTPUT",
   "LOOM_TASK_RUNNER_STREAM_STDERR",
   "LOOM_TASK_RUN_PROMPT",
+  "LOOM_META_HARNESS_BACKENDS",
 ];
 
 // PATH is mutated by some tests; save/restore it separately so git stays callable.
@@ -154,6 +156,14 @@ beforeEach(() => {
   fs.writeFileSync(fakeBin, FAKE_CLI, { mode: 0o755 });
   fakeStdinBin = path.join(binDir, "fake-stdin-backend.mjs");
   fs.writeFileSync(fakeStdinBin, FAKE_STDIN_CLI, { mode: 0o755 });
+
+  // The run()-level tests drive stub CLIs that speak stream-json, i.e. the
+  // execFile path. meta-harness routes claude/codex by DEFAULT now (v0.1.4
+  // usage readback closed the gap that kept it opt-in), and would drive the
+  // stubs as interactive PTYs — pin it off here; the routing describe block
+  // clears this to assert the default, and the meta-harness path itself is
+  // covered by meta-harness's own suite + live e2e.
+  setEnv("LOOM_META_HARNESS_BACKENDS", "none");
 
   // Provide a request via env (no @loom/sdk in this context, so the runner
   // falls back to LOOM_TASK_RUN_REQUEST_JSON).
@@ -1039,13 +1049,25 @@ describe("local-task-runner meta-harness routing", () => {
     else process.env[KEY] = saved;
   });
 
-  it("useMetaHarness defaults OFF for every backend (usage regression guard)", () => {
-    for (const backend of ["claude", "codex", "opencode", "gemini", "cursor"]) {
-      assert.equal(useMetaHarness(backend), false, `${backend} must be off by default`);
+  it("useMetaHarness defaults ON for capable backends, OFF for the rest", () => {
+    for (const backend of ["claude", "codex"]) {
+      assert.equal(useMetaHarness(backend), true, `${backend} routes through meta-harness by default`);
+    }
+    for (const backend of ["opencode", "gemini", "cursor"]) {
+      assert.equal(useMetaHarness(backend), false, `${backend} has no meta-harness adapter`);
     }
   });
 
-  it("opts in per capable backend via LOOM_META_HARNESS_BACKENDS", () => {
+  it("'none'/'off' disables the meta-harness path entirely", () => {
+    for (const value of ["none", "off"]) {
+      process.env[KEY] = value;
+      for (const backend of ["claude", "codex"]) {
+        assert.equal(useMetaHarness(backend), false, `${value} must disable ${backend}`);
+      }
+    }
+  });
+
+  it("narrows to an explicit per-backend list via LOOM_META_HARNESS_BACKENDS", () => {
     process.env[KEY] = "claude";
     assert.equal(useMetaHarness("claude"), true);
     assert.equal(useMetaHarness("codex"), false);
@@ -1124,12 +1146,29 @@ describe("local-task-runner meta-harness transcript contract (DTO parity)", () =
     assert.equal(led[0].timestamp, entries[0].timestamp, "session_meta ts mirrors first real entry");
   });
 
-  it("taskUsageFromEntries returns {} for meta-harness entries — the documented zero-usage gap", () => {
+  it("taskUsageFromEntries returns {} when the terminal result entry is absent", () => {
     assert.deepEqual(
       taskUsageFromEntries(publicEntries()),
       {},
-      "meta-harness canonical events carry no token usage (result entry absent)",
+      "meta-harness canonical events carry no token usage; without the appended result entry usage is empty",
     );
+  });
+
+  it("taskUsageFromEntries recovers the usage the meta-harness path appends as a result entry", () => {
+    // Shape mirrors run()'s meta-harness branch: canonical Reader entries plus the
+    // terminal resultEntry carrying Reader.readUsage's totals (v0.1.3), mapped to
+    // the same keys the stream-json parsers use. This is what closed the
+    // zero-usage gap that kept the meta-harness path opt-in.
+    const usage = { input_tokens: 4605, output_tokens: 12, cache_read_tokens: 18871, cache_write_tokens: 10272, reasoning_tokens: 0 };
+    const entries = publicEntries().concat([
+      { role: "system", type: "result", text: "completed", output: JSON.stringify(usage), timestamp: "2026-07-05T00:00:05.000Z" },
+    ]);
+    const got = taskUsageFromEntries(entries);
+    assert.equal(got.input_tokens, 4605);
+    assert.equal(got.output_tokens, 12);
+    assert.equal(got.cache_read_tokens, 18871);
+    assert.equal(got.cache_write_tokens, 10272);
+    assert.equal(got.estimated_cost_usd, undefined, "no cost is reported or estimated on this path");
   });
 });
 
@@ -1158,5 +1197,21 @@ describe("local-task-runner meta-harness module resolution", () => {
     assert.equal(typeof transcript.ClaudeCodeReader, "function", "transcript.ClaudeCodeReader");
     assert.equal(typeof transcript.CodexReader, "function", "transcript.CodexReader");
     assert.equal(typeof transcript.toPublicJSON, "function", "transcript.toPublicJSON");
+    // Usage readback (v0.1.4) — runViaMetaHarness calls Reader.readUsage.
+    assert.equal(typeof transcript.ClaudeCodeReader.prototype.readUsage, "function", "ClaudeCodeReader.readUsage");
+    assert.equal(typeof transcript.CodexReader.prototype.readUsage, "function", "CodexReader.readUsage");
+  });
+
+  it("loadMetaHarnessModules never throws: the module surface when staged, null otherwise", async () => {
+    // The backends default to the meta-harness route, so an unstaged bundle MUST
+    // resolve to null (run() then falls back to the headless CLI path) rather
+    // than rejecting and failing the run.
+    const modules = await loadMetaHarnessModules();
+    if (modules === null) {
+      return; // CI staging without the clone — the fallback contract holds.
+    }
+    assert.equal(typeof modules.oneshot.runOneShotDetailed, "function");
+    assert.equal(typeof modules.asyncMod.Context, "function");
+    assert.equal(typeof modules.transcript.ClaudeCodeReader, "function");
   });
 });
