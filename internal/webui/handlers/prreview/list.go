@@ -167,11 +167,33 @@ func pullRequestFromSummary(owner, repo string, body map[string]any) ops.GitPull
 		Number:      number,
 		Title:       stringValue(body["title"]),
 		URL:         fmt.Sprintf("https://github.com/%s/pull/%d", repoName, number),
-		State:       stringValue(body["state"]),
+		State:       normalizePullState(stringValue(body["state"]), boolValue(body["merged"])),
 		IsDraft:     boolValue(body["draft"]),
 		HeadRefName: stringValue(body["headRef"]),
 		BaseRefName: stringValue(body["baseRef"]),
 		RepoName:    repoName,
+	}
+}
+
+// normalizePullState converts GitHub REST's lowercase pull state ("open" /
+// "closed") into the UPPERCASE form the rest of loom speaks (the `gh` path
+// emits OPEN/CLOSED/MERGED, and the frontend keys its open/merged filters off
+// those exact strings — a lowercase state renders an empty PR list).
+func normalizePullState(state string, merged bool) string {
+	if merged {
+		return "MERGED"
+	}
+	switch strings.ToLower(strings.TrimSpace(state)) {
+	case "open":
+		return "OPEN"
+	case "closed":
+		return "CLOSED"
+	case "merged":
+		return "MERGED"
+	case "":
+		return ""
+	default:
+		return strings.ToUpper(state)
 	}
 }
 

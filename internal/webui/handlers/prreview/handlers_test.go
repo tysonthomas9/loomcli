@@ -332,6 +332,15 @@ func TestListPullRequestsConnector(t *testing.T) {
 			"head":   map[string]any{"sha": "head-12", "ref": "feature/two"},
 			"base":   map[string]any{"sha": "base-12", "ref": "main"},
 		},
+		{
+			"number": 13,
+			"state":  "closed",
+			"title":  "Closed PR",
+			"draft":  false,
+			"merged": false,
+			"head":   map[string]any{"sha": "head-13", "ref": "feature/three"},
+			"base":   map[string]any{"sha": "base-13", "ref": "main"},
+		},
 	})
 
 	status, raw := h.get(t, "/api/workspaces/WS/pull-requests?state=all")
@@ -348,19 +357,47 @@ func TestListPullRequestsConnector(t *testing.T) {
 	if err := json.Unmarshal(raw, &decoded); err != nil {
 		t.Fatalf("decode response: %v (body %s)", err, raw)
 	}
-	if !decoded.Success || len(decoded.Data.PullRequests) != 2 {
-		t.Fatalf("response = %+v, want success with two PRs", decoded)
+	if !decoded.Success || len(decoded.Data.PullRequests) != 3 {
+		t.Fatalf("response = %+v, want success with three PRs", decoded)
 	}
 	first := decoded.Data.PullRequests[0]
 	if first.Number != 11 || first.URL != "https://github.com/octocat/hello/pull/11" || first.RepoName != "octocat/hello" {
 		t.Fatalf("first PR = %+v, want URL and repo name populated", first)
 	}
+	// The frontend filters on the UPPERCASE state the gh path emits
+	// (isOpenPr: pr.state === "OPEN"). GitHub REST returns lowercase, so the
+	// connector list MUST normalize or the PR list renders empty.
+	if first.State != "OPEN" {
+		t.Fatalf("first PR state = %q, want %q (frontend keys open rows off this)", first.State, "OPEN")
+	}
 	if got := decoded.Data.PullRequests[1]; !got.IsDraft || got.HeadRefName != "feature/two" || got.BaseRefName != "main" {
 		t.Fatalf("second PR = %+v, want draft/head/base mapped", got)
+	}
+	if got := decoded.Data.PullRequests[2]; got.State != "CLOSED" {
+		t.Fatalf("third PR state = %q, want %q", got.State, "CLOSED")
 	}
 	calls := h.github.snapshot()
 	if len(calls) != 1 || calls[0].path != "/repos/octocat/hello/pulls" {
 		t.Fatalf("calls = %+v, want one PR list", calls)
+	}
+}
+
+func TestNormalizePullState(t *testing.T) {
+	cases := []struct {
+		state  string
+		merged bool
+		want   string
+	}{
+		{"open", false, "OPEN"},
+		{"closed", false, "CLOSED"},
+		{"closed", true, "MERGED"},
+		{"OPEN", false, "OPEN"},
+		{"", false, ""},
+	}
+	for _, tc := range cases {
+		if got := normalizePullState(tc.state, tc.merged); got != tc.want {
+			t.Fatalf("normalizePullState(%q, %v) = %q, want %q", tc.state, tc.merged, got, tc.want)
+		}
 	}
 }
 
