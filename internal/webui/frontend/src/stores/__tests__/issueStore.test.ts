@@ -1378,16 +1378,18 @@ describe("issueStore", () => {
       expect(store.getState().showStaleBanner).toBe(true);
     });
 
-    it("clears stale banner on reconnection", () => {
+    it("clears stale banner only after canonical reconciliation", async () => {
       store.getState().setConnectionState("reconnecting");
       vi.advanceTimersByTime(5000);
       expect(store.getState().showStaleBanner).toBe(true);
 
       store.getState().setConnectionState("connected");
+      expect(store.getState().showStaleBanner).toBe(true);
+      await vi.advanceTimersByTimeAsync(0);
       expect(store.getState().showStaleBanner).toBe(false);
     });
 
-    it("clears stale banner when reconnecting passes through connecting", () => {
+    it("clears stale banner when reconnecting passes through connecting", async () => {
       const refetchSpy = vi
         .spyOn(store.getState(), "refetch")
         .mockResolvedValue();
@@ -1402,6 +1404,7 @@ describe("issueStore", () => {
       expect(store.getState().showStaleBanner).toBe(true);
 
       store.getState().setConnectionState("connected");
+      await vi.advanceTimersByTimeAsync(0);
       expect(store.getState().showStaleBanner).toBe(false);
       expect(store.getState().connectionLost).toBe(false);
       expect(store.getState().disconnectedSince).toBeNull();
@@ -1438,15 +1441,16 @@ describe("issueStore", () => {
       store.getState().setReconnectAttempts(3);
       store.getState().setConnectionState("reconnecting");
       store.getState().setConnectionState("connected");
+      await vi.advanceTimersByTimeAsync(0);
 
       expect(refetchSpy).toHaveBeenCalled();
       expect(toastFn).toHaveBeenCalledWith(
-        "Connection restored. Refreshing data...",
+        "Connection restored. Data refreshed.",
         { type: "info", duration: 3000 },
       );
     });
 
-    it("shows change count toast on simple reconnection", () => {
+    it("shows change count toast on simple reconnection", async () => {
       const toastFn = vi.fn();
       store.getState().configure({ onToast: toastFn });
 
@@ -1458,6 +1462,7 @@ describe("issueStore", () => {
 
       // Reconnect
       store.getState().setConnectionState("connected");
+      await vi.advanceTimersByTimeAsync(0);
 
       expect(toastFn).toHaveBeenCalledWith(
         "Connection restored. 5 changes synced.",
@@ -1485,9 +1490,10 @@ describe("issueStore", () => {
       expect(store.getState().disconnectedSince).toBe(now);
     });
 
-    it("clears disconnectedSince on reconnection", () => {
+    it("clears disconnectedSince after reconciliation", async () => {
       store.getState().setConnectionState("reconnecting");
       store.getState().setConnectionState("connected");
+      await vi.advanceTimersByTimeAsync(0);
       expect(store.getState().disconnectedSince).toBeNull();
     });
 

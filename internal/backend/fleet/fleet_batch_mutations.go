@@ -116,6 +116,8 @@ func fleetHistoryValues(e fleetHistoryEventWire) fleetHistoryValuesResult {
 		fieldCount: fieldCount,
 	}
 	switch e.Action {
+	case "issue.close":
+		result.comment = metadataValue(e.Metadata, "reason")
 	case "dep.add":
 		result.newValue = metadataValue(e.Metadata, "depends_on_id")
 	case "dep.remove":

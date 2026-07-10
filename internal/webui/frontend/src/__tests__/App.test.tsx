@@ -52,10 +52,16 @@ vi.mock("react-router-dom", () => ({
 }));
 
 // Create hoisted mocks for @/api functions used by handleApprove/handleReject
-const { mockCloseIssue, mockUpdateIssue, mockAddComment } = vi.hoisted(() => ({
+const {
+  mockCloseIssue,
+  mockUpdateIssue,
+  mockAddComment,
+  mockApplyReviewDecision,
+} = vi.hoisted(() => ({
   mockCloseIssue: vi.fn(),
   mockUpdateIssue: vi.fn(),
   mockAddComment: vi.fn(),
+  mockApplyReviewDecision: vi.fn(),
 }));
 
 const { mockStartAgent } = vi.hoisted(() => ({
@@ -121,6 +127,7 @@ vi.mock("@/api", async (importOriginal) => {
     updateIssue: mockUpdateIssue,
     addComment: mockAddComment,
     closeIssue: mockCloseIssue,
+    applyReviewDecision: mockApplyReviewDecision,
     startAgent: mockStartAgent,
     getIssueEvents: vi.fn().mockImplementation(() => new Promise(() => {})),
     getTaskLogPhases: vi.fn().mockResolvedValue([]),
@@ -2832,6 +2839,9 @@ describe("App", () => {
           expect.objectContaining({
             title: "Manual first task",
           }),
+          expect.objectContaining({
+            idempotencyKey: expect.stringMatching(/^loom-ui-/),
+          }),
         );
       });
 
@@ -3183,6 +3193,7 @@ describe("App", () => {
       mockCloseIssue.mockResolvedValue(undefined);
       mockUpdateIssue.mockResolvedValue(undefined);
       mockAddComment.mockResolvedValue(undefined);
+      mockApplyReviewDecision.mockResolvedValue({});
     });
 
     it("plan approve calls updateIssueStatus with open status", async () => {
@@ -3274,7 +3285,7 @@ describe("App", () => {
       expect(mockCloseIssue).not.toHaveBeenCalled();
     });
 
-    it("code approve calls closeIssue and then refetch", async () => {
+    it("code approve calls the coordinated review decision and then refetch", async () => {
       const updateIssueStatus = vi.fn().mockResolvedValue(undefined);
       const refetch = vi.fn().mockResolvedValue(undefined);
       const mockReturn = createMockUseIssuesReturn({
@@ -3308,11 +3319,13 @@ describe("App", () => {
       fireEvent.click(approveButton);
 
       await waitFor(() => {
-        expect(mockCloseIssue).toHaveBeenCalledTimes(1);
-        expect(mockCloseIssue).toHaveBeenCalledWith(
+        expect(mockApplyReviewDecision).toHaveBeenCalledTimes(1);
+        expect(mockApplyReviewDecision).toHaveBeenCalledWith(
           "test-ws-id",
           "code-issue",
+          "approve",
           "PR approved after code review",
+          expect.stringMatching(/^review-/),
         );
       });
 
@@ -3323,7 +3336,7 @@ describe("App", () => {
       expect(updateIssueStatus).not.toHaveBeenCalled();
     });
 
-    it("reject calls addComment, updateIssue, refetch and closes panel", async () => {
+    it("reject calls the coordinated review decision, refetches, and closes", async () => {
       const updateIssueStatus = vi.fn().mockResolvedValue(undefined);
       const refetch = vi.fn().mockResolvedValue(undefined);
       const mockReturn = createMockUseIssuesReturn({
@@ -3366,23 +3379,12 @@ describe("App", () => {
       fireEvent.click(submitButton);
 
       await waitFor(() => {
-        expect(mockAddComment).toHaveBeenCalledTimes(1);
-        expect(mockAddComment).toHaveBeenCalledWith(
+        expect(mockApplyReviewDecision).toHaveBeenCalledWith(
           "test-ws-id",
           "reject-issue",
-          "FEEDBACK: Needs more work on the design",
-        );
-      });
-
-      await waitFor(() => {
-        expect(mockUpdateIssue).toHaveBeenCalledTimes(1);
-        expect(mockUpdateIssue).toHaveBeenCalledWith(
-          "test-ws-id",
-          "reject-issue",
-          {
-            status: "open",
-            add_labels: ["needs-revision"],
-          },
+          "request_changes",
+          "Needs more work on the design",
+          expect.stringMatching(/^review-/),
         );
       });
 
@@ -3391,7 +3393,7 @@ describe("App", () => {
       });
     });
 
-    it("code review reject uses CODE REVIEW prefix in comment", async () => {
+    it("code review reject uses the coordinated review decision", async () => {
       const updateIssueStatus = vi.fn().mockResolvedValue(undefined);
       const refetch = vi.fn().mockResolvedValue(undefined);
       const mockReturn = createMockUseIssuesReturn({
@@ -3433,17 +3435,19 @@ describe("App", () => {
       fireEvent.click(submitButton);
 
       await waitFor(() => {
-        expect(mockAddComment).toHaveBeenCalledTimes(1);
-        expect(mockAddComment).toHaveBeenCalledWith(
+        expect(mockApplyReviewDecision).toHaveBeenCalledTimes(1);
+        expect(mockApplyReviewDecision).toHaveBeenCalledWith(
           "test-ws-id",
           "code-reject-issue",
-          "CODE REVIEW: Fix the lint errors",
+          "request_changes",
+          "Fix the lint errors",
+          expect.stringMatching(/^review-/),
         );
       });
     });
 
     it("approve shows error toast on failure for code review type", async () => {
-      const mockCloseIssueFn = mockCloseIssue.mockRejectedValue(
+      const mockDecisionFn = mockApplyReviewDecision.mockRejectedValue(
         new Error("Network error"),
       );
       const showToast = vi.fn();
@@ -3485,7 +3489,7 @@ describe("App", () => {
           type: "error",
         });
       });
-      mockCloseIssueFn.mockReset();
+      mockDecisionFn.mockReset();
     });
 
     it("approve does not show toast for plan review failures (handled by optimistic rollback)", async () => {

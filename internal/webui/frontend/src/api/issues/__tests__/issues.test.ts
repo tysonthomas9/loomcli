@@ -17,6 +17,7 @@ import {
   createIssue,
   updateIssue,
   closeIssue,
+  applyReviewDecision,
   addDependency,
   removeDependency,
   addComment,
@@ -1488,6 +1489,23 @@ describe("issues API", () => {
       );
     });
 
+    it("sends a stable caller-provided idempotency key", async () => {
+      mockApiPost.mockResolvedValue(
+        okResponse({ success: true, data: mockCreatedIssue }),
+      );
+
+      await createIssue("test-ws-id", validCreateRequest, {
+        idempotencyKey: "submit-123",
+      });
+
+      expect(mockApiPost).toHaveBeenCalledWith(
+        "/api/workspaces/{ws}/issues",
+        expect.objectContaining({
+          headers: { "X-Idempotency-Key": "submit-123" },
+        }),
+      );
+    });
+
     it("handles create request with all optional fields", async () => {
       const fullRequest: CreateIssueRequest = {
         title: "Full Issue",
@@ -1766,6 +1784,42 @@ describe("issues API", () => {
           params: { path: { ws: "test-ws-id", id: "issue-123" } },
           body: {},
         }),
+      );
+    });
+  });
+
+  describe("applyReviewDecision", () => {
+    it("sends the stable decision key and returns stage evidence", async () => {
+      const result = {
+        issue_id: "issue-123",
+        decision: "request_changes" as const,
+        decision_id: "decision-1",
+        github_stage: "not_applicable" as const,
+        loom_stage: "applied" as const,
+        replayed: false,
+      };
+      mockApiPost.mockResolvedValue(
+        okResponse({ success: true, data: result }),
+      );
+
+      await expect(
+        applyReviewDecision(
+          "test-ws-id",
+          "issue-123",
+          "request_changes",
+          "needs tests",
+          "decision-1",
+        ),
+      ).resolves.toEqual(result);
+      expect(mockApiPost).toHaveBeenCalledWith(
+        "/api/workspaces/{ws}/issues/{id}/review-decision",
+        {
+          params: {
+            path: { ws: "test-ws-id", id: "issue-123" },
+            header: { "X-Idempotency-Key": "decision-1" },
+          },
+          body: { decision: "request_changes", reason: "needs tests" },
+        },
       );
     });
   });

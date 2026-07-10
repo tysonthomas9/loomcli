@@ -50,13 +50,15 @@ function formatTimestamp(ts: string | undefined): string {
   return `${hh}:${mm}:${ss}.${ms}`;
 }
 
-function formatCost(usd: number): string {
+function formatCost(usd: number | null): string {
+  if (usd == null) return "—";
   if (usd === 0) return "$0";
   if (usd < 0.01) return `$${usd.toFixed(4)}`;
   return `$${usd.toFixed(2)}`;
 }
 
-function formatTokens(n: number): string {
+function formatTokens(n: number | null): string {
+  if (n == null) return "—";
   if (n < 1000) return String(n);
   if (n < 1000000) return `${(n / 1000).toFixed(1)}k`;
   return `${(n / 1000000).toFixed(1)}M`;
@@ -330,10 +332,15 @@ export function SessionDetailView({
   };
 
   const totalTokens =
-    (session.input_tokens ?? 0) +
-    (session.output_tokens ?? 0) +
-    (session.cache_read_tokens ?? 0) +
-    (session.cache_write_tokens ?? 0);
+    session.evidence?.usage_status === "unavailable" ||
+    (session.evidence == null &&
+      session.input_tokens == null &&
+      session.output_tokens == null)
+      ? null
+      : (session.input_tokens ?? 0) +
+        (session.output_tokens ?? 0) +
+        (session.cache_read_tokens ?? 0) +
+        (session.cache_write_tokens ?? 0);
   const runError = runErrorSummary(session);
 
   return (
@@ -376,6 +383,25 @@ export function SessionDetailView({
           >
             <div className={styles.runErrorTitle}>Run failed</div>
             <div className={styles.runErrorBody}>{runError}</div>
+          </div>
+        )}
+
+        {session.evidence?.status === "conflict" && (
+          <div
+            className={styles.runErrorBanner}
+            role="alert"
+            data-testid="run-evidence-conflict"
+          >
+            <div className={styles.runErrorTitle}>Run evidence conflict</div>
+            <div className={styles.runErrorBody}>
+              {session.evidence.conflicts.map((conflict) => (
+                <div key={`${conflict.field}-${conflict.incoming_source}`}>
+                  {conflict.field}: {conflict.existing_source} reported{" "}
+                  {conflict.existing_value}; {conflict.incoming_source} reported{" "}
+                  {conflict.incoming_value}
+                </div>
+              ))}
+            </div>
           </div>
         )}
 

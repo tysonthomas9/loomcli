@@ -39,10 +39,15 @@ tests:
       # issues accumulate across suites and Done only renders the newest cards.
       - run: >-
           curl -sf "$AFT_BASE_URL/api/workspaces/${AFT_WS:-E2E-WS}/issues/$(cat "$AFT_WORK_DIR/lifecycle.id")"
-          | python3 -c "import sys,json; data=json.load(sys.stdin)['data']; assert data['status'] == 'closed', data['status']"
+          | python3 -c "import sys,json; data=json.load(sys.stdin)['data']; assert data['status'] == 'closed', data; assert data.get('close_reason') == 'aft lifecycle test', data; assert data.get('closed_at'), data"
+      - run: >-
+          curl -sf "$AFT_BASE_URL/api/workspaces/${AFT_WS:-E2E-WS}/issues/$(cat "$AFT_WORK_DIR/lifecycle.id")/events"
+          | python3 -c "import sys,json; events=json.load(sys.stdin)['data']; closes=[e for e in events if e.get('event_type')=='issue.closed']; assert len(closes)==1, events; event=closes[0]; assert event.get('comment')=='aft lifecycle test', event"
       - wait:
           fn: >-
             document.querySelectorAll("section[data-status=done] article[aria-label*='lifecycle ${RUN_ID:-local}']").length === 1
       - expect: { count: { selector: "section[data-status=done] article[aria-label*='lifecycle ${RUN_ID:-local}']", equals: 1 } }
       - expect: { count: { selector: "section[data-status=ready] article[aria-label*='lifecycle ${RUN_ID:-local}']", equals: 0 } }
       - expect: { count: { selector: "section[data-status=ready] article", equals: 0 } }
+      - click: { selector: "section[data-status=done] article[aria-label*='lifecycle ${RUN_ID:-local}']", first: true }
+      - wait: { text: aft lifecycle test }

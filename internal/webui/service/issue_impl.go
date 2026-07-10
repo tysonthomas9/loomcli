@@ -316,8 +316,23 @@ func (s *issueServiceImpl) CloseIssue(ctx context.Context, params CloseIssuePara
 		// as a quiet no-op success instead of an ERROR-level failure (new
 		// fleet-db returns 200 and never reaches this branch).
 		if backend.IsAlreadyClosedConflict(err) {
-			slog.Info("close was a no-op: issue already closed", "issue_id", params.IssueID)
-			result = &backend.CloseResult{Closed: &backend.IssueData{ID: params.IssueID}}
+			detail, getErr := be.Get(ctx, params.IssueID)
+			if getErr != nil {
+				return nil, translateBackendError(getErr)
+			}
+			if detail == nil || detail.Status != "closed" {
+				return nil, ErrConflict("backend reported already closed but canonical closed state was unavailable")
+			}
+			if !closeReasonsMatch(detail.CloseReason, params.Reason) {
+				return nil, ErrConflict(fmt.Sprintf(
+					"issue is already closed with reason %q, not %q",
+					detail.CloseReason,
+					params.Reason,
+				))
+			}
+			slog.Info("close replay matched canonical closed state", "issue_id", params.IssueID)
+			closed := detail.IssueData
+			result = &backend.CloseResult{Closed: &closed}
 		} else {
 			// "blocker" / cycle conflicts surface as KindConflict via the backend's
 			// classifier; KindNotFound is mapped already. Fall through to translate.
@@ -336,6 +351,15 @@ func (s *issueServiceImpl) CloseIssue(ctx context.Context, params CloseIssuePara
 		return nil, ErrInternal("failed to marshal close result", err)
 	}
 	return out, nil
+}
+
+func closeReasonsMatch(persisted, requested string) bool {
+	persisted = strings.TrimSpace(persisted)
+	requested = strings.TrimSpace(requested)
+	if requested == "" {
+		return persisted == "" || persisted == "Closed"
+	}
+	return persisted == requested
 }
 
 // ClaimIssue atomically claims an issue by ID for the server-side actor.

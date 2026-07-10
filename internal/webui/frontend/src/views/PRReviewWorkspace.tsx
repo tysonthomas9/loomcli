@@ -7,14 +7,14 @@
  *
  * Fully data-backed:
  *   - Diff: the review agent's real branch diff (PRFilesTab → /agents/{name}/diff/*)
- *   - Decisions: real status transitions (closed / open)
+ *   - Decisions: one idempotent server-coordinated review operation
  *   - New review agent: real createWorkspaceAgent → assign → startAgent
  */
 
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
-import { updateIssue } from "@/api";
+import { applyReviewDecision, updateIssue } from "@/api";
 import { startAgent } from "@/hooks/api";
 import { CreateAgentModal } from "@/components/CreateAgentModal/CreateAgentModal";
 import {
@@ -95,14 +95,16 @@ export function PRReviewWorkspace({
 }: PRReviewWorkspaceProps): JSX.Element {
   const navigate = useNavigate();
   const { agents, issues, workspaceId } = useWorkspaceViewData();
-  const { refetch, showToast, updateIssueStatus, handleIssueClick } =
-    useWorkspaceViewActions();
+  const { refetch, showToast, handleIssueClick } = useWorkspaceViewActions();
   const { repos } = useWorkspaceContext();
 
   const [agentMenuOpen, setAgentMenuOpen] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
   const [isAssigning, setIsAssigning] = useState(false);
   const [isDeciding, setIsDeciding] = useState(false);
+  const decisionIntentRef = useRef<{ fingerprint: string; id: string } | null>(
+    null,
+  );
 
   const diffAgent = useMemo(
     () => resolveDiffAgentForIssue(issue, agents),
@@ -182,13 +184,31 @@ export function PRReviewWorkspace({
   const decide = async (decision: "approve" | "changes"): Promise<void> => {
     setIsDeciding(true);
     try {
+      const action = decision === "approve" ? "approve" : "request_changes";
+      const reason =
+        decision === "approve"
+          ? "PR approved after code review"
+          : "Changes requested from review workspace";
+      const fingerprint = `${issue.id}:${action}:${reason}`;
+      if (decisionIntentRef.current?.fingerprint !== fingerprint) {
+        decisionIntentRef.current = {
+          fingerprint,
+          id: `review-${crypto.randomUUID()}`,
+        };
+      }
+      await applyReviewDecision(
+        workspaceId,
+        issue.id,
+        action,
+        reason,
+        decisionIntentRef.current.id,
+      );
       if (decision === "approve") {
-        await updateIssueStatus(issue.id, "closed");
         showToast(`${issue.id} approved and closed`);
       } else {
-        await updateIssueStatus(issue.id, "open");
         showToast(`${issue.id} sent back — changes requested`);
       }
+      refetch();
       onBack();
     } catch (err) {
       showToast(

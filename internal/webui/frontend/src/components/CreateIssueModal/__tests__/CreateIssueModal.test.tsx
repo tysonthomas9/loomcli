@@ -270,12 +270,16 @@ describe("CreateIssueModal", () => {
       fireEvent.click(screen.getByTestId("create-issue-submit"));
 
       await waitFor(() => {
-        expect(mockCreateIssue).toHaveBeenCalledWith("test-ws-id", {
-          title: "Fix login bug",
-          issue_type: "bug",
-          priority: 2,
-          description: "Users cannot log in",
-        });
+        expect(mockCreateIssue).toHaveBeenCalledWith(
+          "test-ws-id",
+          {
+            title: "Fix login bug",
+            issue_type: "bug",
+            priority: 2,
+            description: "Users cannot log in",
+          },
+          { idempotencyKey: expect.stringMatching(/^loom-ui-/) },
+        );
       });
     });
 
@@ -389,6 +393,34 @@ describe("CreateIssueModal", () => {
       expect(onClose).not.toHaveBeenCalled();
     });
 
+    it("reuses the submit idempotency key after an ambiguous failure", async () => {
+      mockCreateIssue
+        .mockRejectedValueOnce(new Error("response lost"))
+        .mockResolvedValueOnce(MOCK_CREATE_RESULT);
+
+      render(
+        <CreateIssueModal
+          isOpen={true}
+          onClose={onClose}
+          onSuccess={onSuccess}
+        />,
+      );
+
+      fireEvent.change(screen.getByTestId("create-issue-title"), {
+        target: { value: "Retry-safe issue" },
+      });
+      fireEvent.click(screen.getByTestId("create-issue-submit"));
+      await screen.findByText("response lost");
+
+      fireEvent.click(screen.getByTestId("create-issue-submit"));
+      await waitFor(() => expect(onSuccess).toHaveBeenCalledWith(MOCK_ISSUE));
+
+      const firstKey = mockCreateIssue.mock.calls[0]?.[2]?.idempotencyKey;
+      const secondKey = mockCreateIssue.mock.calls[1]?.[2]?.idempotencyKey;
+      expect(firstKey).toMatch(/^loom-ui-/);
+      expect(secondKey).toBe(firstKey);
+    });
+
     it("surfaces soft duplicate creates and retries with force when requested", async () => {
       const forcedIssue = { ...MOCK_ISSUE, id: "TST-002" };
       mockCreateIssue
@@ -425,7 +457,10 @@ describe("CreateIssueModal", () => {
             issue_type: "task",
             priority: 2,
           },
-          { force: true },
+          {
+            force: true,
+            idempotencyKey: expect.stringMatching(/^loom-ui-/),
+          },
         );
       });
       await waitFor(() => {
@@ -451,11 +486,15 @@ describe("CreateIssueModal", () => {
       fireEvent.click(screen.getByTestId("create-issue-submit"));
 
       await waitFor(() => {
-        expect(mockCreateIssue).toHaveBeenCalledWith("test-ws-id", {
-          title: "No description issue",
-          issue_type: "task",
-          priority: 2,
-        });
+        expect(mockCreateIssue).toHaveBeenCalledWith(
+          "test-ws-id",
+          {
+            title: "No description issue",
+            issue_type: "task",
+            priority: 2,
+          },
+          { idempotencyKey: expect.stringMatching(/^loom-ui-/) },
+        );
       });
 
       // description key should not be present in the request
@@ -490,12 +529,16 @@ describe("CreateIssueModal", () => {
       fireEvent.click(screen.getByTestId("create-issue-submit"));
 
       await waitFor(() => {
-        expect(mockCreateIssue).toHaveBeenCalledWith("test-ws-id", {
-          title: "Repo scoped issue",
-          issue_type: "task",
-          priority: 2,
-          source_repo: "e2e-lib",
-        });
+        expect(mockCreateIssue).toHaveBeenCalledWith(
+          "test-ws-id",
+          {
+            title: "Repo scoped issue",
+            issue_type: "task",
+            priority: 2,
+            source_repo: "e2e-lib",
+          },
+          { idempotencyKey: expect.stringMatching(/^loom-ui-/) },
+        );
       });
     });
 
@@ -521,12 +564,16 @@ describe("CreateIssueModal", () => {
       fireEvent.click(screen.getByTestId("create-issue-submit"));
 
       await waitFor(() => {
-        expect(mockCreateIssue).toHaveBeenCalledWith("test-ws-id", {
-          title: "Single repo issue",
-          issue_type: "task",
-          priority: 2,
-          source_repo: "hello-world",
-        });
+        expect(mockCreateIssue).toHaveBeenCalledWith(
+          "test-ws-id",
+          {
+            title: "Single repo issue",
+            issue_type: "task",
+            priority: 2,
+            source_repo: "hello-world",
+          },
+          { idempotencyKey: expect.stringMatching(/^loom-ui-/) },
+        );
       });
     });
   });

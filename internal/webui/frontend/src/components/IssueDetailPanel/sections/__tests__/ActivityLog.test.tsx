@@ -402,6 +402,11 @@ describe("ActivityLog", () => {
       ],
       ["issue.undeferred", {}, "alice un-deferred this issue"],
       ["issue.closed", {}, "alice closed this issue"],
+      [
+        "issue.closed",
+        { comment: "shipped after review" },
+        "alice closed this issue: shipped after review",
+      ],
       ["issue.reopened", {}, "alice reopened this issue"],
       [
         "issue.assigned",

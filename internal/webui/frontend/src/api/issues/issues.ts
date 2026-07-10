@@ -357,6 +357,8 @@ export interface CreateIssueRequest {
 
 export interface CreateIssueOptions {
   force?: boolean;
+  /** Stable key for one user submit intent. Reuse after ambiguous failures. */
+  idempotencyKey?: string;
 }
 
 export interface CreateIssueResult {
@@ -388,6 +390,13 @@ export async function createIssue(
   reqData: CreateIssueRequest,
   options?: CreateIssueOptions,
 ): Promise<CreateIssueResult> {
+  const headers: Record<string, string> = {};
+  if (options?.idempotencyKey) {
+    headers["X-Idempotency-Key"] = options.idempotencyKey;
+  }
+  if (options?.force) {
+    headers["X-Idempotency-Force"] = "true";
+  }
   const body = cleanQuery({
     title: reqData.title,
     issue_type: reqData.issue_type as
@@ -420,7 +429,7 @@ export async function createIssue(
     {
       params: { path: { ws: workspaceId } },
       body,
-      ...(options?.force ? { headers: { "X-Idempotency-Force": "true" } } : {}),
+      ...(Object.keys(headers).length > 0 ? { headers } : {}),
     },
   );
   if (error) throw apiErrorFromResponse(error, response);
@@ -491,6 +500,37 @@ export async function closeIssue(
     },
   );
   if (error) throw apiErrorFromResponse(error, response);
+}
+
+export interface ReviewDecisionResult {
+  issue_id: string;
+  decision: "approve" | "request_changes";
+  decision_id: string;
+  github_stage: "not_applicable" | "applied" | "replayed";
+  loom_stage: "applied" | "replayed";
+  replayed: boolean;
+}
+
+/** Apply one stable, server-coordinated review decision intent. */
+export async function applyReviewDecision(
+  workspaceId: string,
+  id: string,
+  decision: "approve" | "request_changes",
+  reason: string,
+  idempotencyKey: string,
+): Promise<ReviewDecisionResult> {
+  const { data, error, response } = await api.POST(
+    "/api/workspaces/{ws}/issues/{id}/review-decision",
+    {
+      params: {
+        path: { ws: workspaceId, id },
+        header: { "X-Idempotency-Key": idempotencyKey },
+      },
+      body: reason ? { decision, reason } : { decision },
+    },
+  );
+  if (error) throw apiErrorFromResponse(error, response);
+  return unwrap(data, response) as ReviewDecisionResult;
 }
 
 // ============= DEPENDENCY OPERATIONS =============

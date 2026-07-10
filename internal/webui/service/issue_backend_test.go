@@ -1250,10 +1250,13 @@ func TestCloseIssue_Backend_AlreadyClosed_IsQuietNoOp(t *testing.T) {
 	// ERROR-level failure. New fleet-db returns 200 and never hits this.
 	fb := &fakeIssueBackend{
 		closeErr: backend.ErrConflict("Close", "issue is already closed"),
+		getResult: &backend.IssueDetailData{IssueData: backend.IssueData{
+			ID: "i-1", Status: "closed", CloseReason: "done",
+		}},
 	}
 	svc := newServiceWithFake(fb)
 
-	raw, err := svc.CloseIssue(context.Background(), CloseIssueParams{IssueID: "i-1"})
+	raw, err := svc.CloseIssue(context.Background(), CloseIssueParams{IssueID: "i-1", Reason: "done"})
 	if err != nil {
 		t.Fatalf("already-closed close must be a no-op success, got %v", err)
 	}
@@ -1264,6 +1267,25 @@ func TestCloseIssue_Backend_AlreadyClosed_IsQuietNoOp(t *testing.T) {
 	closedMap, ok := got["closed"].(map[string]any)
 	if !ok || closedMap["id"] != "i-1" {
 		t.Errorf("expected synthetic closed result for i-1, got %v", got["closed"])
+	}
+}
+
+func TestCloseIssue_Backend_AlreadyClosedReasonMismatchConflicts(t *testing.T) {
+	fb := &fakeIssueBackend{
+		closeErr: backend.ErrConflict("Close", "issue is already closed"),
+		getResult: &backend.IssueDetailData{IssueData: backend.IssueData{
+			ID: "i-1", Status: "closed", CloseReason: "original",
+		}},
+	}
+	svc := newServiceWithFake(fb)
+
+	_, err := svc.CloseIssue(context.Background(), CloseIssueParams{IssueID: "i-1", Reason: "different"})
+	var sErr *ServiceError
+	if !errors.As(err, &sErr) || sErr.Kind != KindConflict {
+		t.Fatalf("reason mismatch must be a conflict, got %v", err)
+	}
+	if !strings.Contains(sErr.Message, "original") || !strings.Contains(sErr.Message, "different") {
+		t.Fatalf("conflict must identify both reasons, got %q", sErr.Message)
 	}
 }
 

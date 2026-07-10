@@ -259,7 +259,7 @@ func TestSessionServiceControlPlaneTranscriptMissingUploadReturnsNotFound(t *tes
 
 	svc := NewSessionService(missingArtifactContentReadStore{Store: st}, nil)
 	_, err := svc.GetSessionTranscript(ctx, "WS", "TASK-DECLARED-1", "flue-task-run-declared")
-	if !serviceErrorKind(err, service.KindNotFound) {
+	if !serviceErrorIsNotFound(err) {
 		t.Fatalf("GetSessionTranscript err = %v, want not found", err)
 	}
 }
@@ -771,6 +771,38 @@ func assertMergedUsage(t *testing.T, rec sessions.SessionRecord) {
 	}
 }
 
+func TestSessionEvidenceReportsConflictingPersistedValues(t *testing.T) {
+	rec := sessions.SessionRecord{
+		TaskID: "TASK-1", Status: sessions.StatusCompleted,
+		InputTokens: 12, FilesChanged: 2,
+	}
+	local := sessions.SessionRecord{
+		TaskID: "TASK-1", Status: sessions.StatusCompleted,
+		InputTokens: 13, FilesChanged: 3,
+	}
+	conflicts := enrichSessionRecordFromLocal(&rec, local)
+	evidence := sessionEvidence(rec, conflicts)
+	if evidence.Status != "conflict" || evidence.UsageStatus != "conflict" {
+		t.Fatalf("evidence = %+v, want usage conflict", evidence)
+	}
+	if len(evidence.Conflicts) != 2 {
+		t.Fatalf("conflicts = %+v, want input_tokens and files_changed", evidence.Conflicts)
+	}
+	if rec.InputTokens != 12 || rec.FilesChanged != 2 {
+		t.Fatalf("conflicting source silently overwrote canonical values: %+v", rec)
+	}
+}
+
+func TestSessionEvidenceMarksZeroUsageUnavailable(t *testing.T) {
+	evidence := sessionEvidence(sessions.SessionRecord{}, nil)
+	if evidence.Status != "ok" || evidence.UsageStatus != "unavailable" {
+		t.Fatalf("evidence = %+v, want ok/unavailable", evidence)
+	}
+	if evidence.Conflicts == nil {
+		t.Fatal("conflicts must serialize as [] rather than null")
+	}
+}
+
 func TestSessionServiceListTaskSessionsFallsBackToFileStores(t *testing.T) {
 	loomConfigDir := t.TempDir()
 	t.Setenv("LOOM_CONFIG_DIR", loomConfigDir)
@@ -844,6 +876,51 @@ func TestSessionServiceListTaskSessionsFallsBackToFileStores(t *testing.T) {
 	}
 }
 
+func TestSessionServiceSharedRuntimeCannotLeakAcrossWorkspaces(t *testing.T) {
+	ctx := t.Context()
+	runtimeDir := t.TempDir()
+	sessStore, err := sessions.NewStore(runtimeDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sess, err := sessStore.CreateSession(sessions.CreateOptions{AgentName: "agent-a", Backend: "codex"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := sess.Finalize(sessions.FinalizeOptions{TaskID: "SHARED-TASK", ExitCode: 0}); err != nil {
+		t.Fatal(err)
+	}
+
+	st := memstore.New()
+	for _, key := range []string{"WS-A", "WS-B"} {
+		if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: key, Name: key}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := st.AgentSessions().Create(ctx, store.AgentSessionCreate{
+		WorkspaceKey: "WS-A", SessionID: sess.SessionID(), AgentID: "agent-a",
+		TaskID: "SHARED-TASK", Status: domain.AgentSessionCompleted,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	svc := NewSessionServiceWithRuntimeDir(st, nil, runtimeDir)
+	items, err := svc.ListTaskSessions(ctx, "WS-B", "SHARED-TASK")
+	if err != nil {
+		t.Fatalf("ListTaskSessions WS-B: %v", err)
+	}
+	if len(items) != 0 {
+		t.Fatalf("WS-B sessions = %+v, want none", items)
+	}
+	if _, err := svc.GetSession(ctx, "WS-B", "SHARED-TASK", sess.SessionID()); !serviceErrorIsNotFound(err) {
+		t.Fatalf("foreign GetSession error = %v, want not found", err)
+	}
+	items, err = svc.ListTaskSessions(ctx, "WS-A", "SHARED-TASK")
+	if err != nil || len(items) != 1 {
+		t.Fatalf("WS-A sessions = %+v err=%v, want one", items, err)
+	}
+}
+
 func TestSessionServiceListTaskSessionsSearchesRuntimeDir(t *testing.T) {
 	// Isolate the state cache to a temp config dir — bootstrap.SaveStateCache
 	// REPLACES the whole state.json, so without this it clobbers the developer's
@@ -879,6 +956,12 @@ func TestSessionServiceListTaskSessionsSearchesRuntimeDir(t *testing.T) {
 	}
 	if err := sess.Finalize(sessions.FinalizeOptions{TaskID: "DESKTOP-QA-3", ExitCode: 0}); err != nil {
 		t.Fatalf("finalize session: %v", err)
+	}
+	if _, err := st.AgentSessions().Create(ctx, store.AgentSessionCreate{
+		WorkspaceKey: "WS", SessionID: sess.SessionID(), AgentID: "desktopqa",
+		TaskID: "DESKTOP-QA-3", Status: domain.AgentSessionCompleted,
+	}); err != nil {
+		t.Fatalf("create workspace ownership record: %v", err)
 	}
 
 	svc := NewSessionServiceWithRuntimeDir(st, nil, runtimeDir)

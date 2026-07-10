@@ -25,6 +25,9 @@ tests:
       - wait: { text: ui created }
       # title-scoped: board-global counts break on reorder or teardown leaks
       - expect: { count: { selector: "section[data-status=ready] article[aria-label*='ui created ${RUN_ID:-local}']", equals: 1 } }
+      - run: >-
+          curl -sf "$AFT_BASE_URL/api/workspaces/${AFT_WS:-E2E-WS}/issues?limit=100"
+          | python3 -c "import os,sys,json,urllib.request; base=os.environ['AFT_BASE_URL']; ws=os.environ.get('AFT_WS','E2E-WS'); title='ui created '+os.environ['RUN_ID']; issues=json.load(sys.stdin)['data']; matches=[i for i in issues if i.get('title')==title]; assert len(matches)==1, matches; issue=matches[0]; events=json.load(urllib.request.urlopen(f'{base}/api/workspaces/{ws}/issues/{issue[\"id\"]}/events'))['data']; creates=[e for e in events if e.get('event_type')=='issue.created']; assert len(creates)==1, events"
 
   # covers: LCLI-WP-001
   - name: empty title keeps submit disabled

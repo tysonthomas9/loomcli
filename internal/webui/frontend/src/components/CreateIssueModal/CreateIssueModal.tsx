@@ -44,6 +44,12 @@ const ISSUE_TYPES: { value: IssueType; label: string }[] = [
 
 const DEFAULT_PRIORITY: Priority = 2;
 
+function newCreateIdempotencyKey(): string {
+  const bytes = new Uint8Array(16);
+  globalThis.crypto.getRandomValues(bytes);
+  return `loom-ui-${Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("")}`;
+}
+
 export function CreateIssueModal({
   isOpen,
   onClose,
@@ -71,6 +77,10 @@ export function CreateIssueModal({
   const titleRef = useRef<HTMLInputElement>(null);
   const mountedRef = useRef(true);
   const wasOpenRef = useRef(false);
+  const createIntentRef = useRef<{
+    fingerprint: string;
+    idempotencyKey: string;
+  } | null>(null);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -112,6 +122,7 @@ export function CreateIssueModal({
     setError("");
     setSoftDuplicateIssue(null);
     setPendingDuplicateRequest(null);
+    createIntentRef.current = null;
   }, [
     isOpen,
     initialValues?.title,
@@ -179,7 +190,16 @@ export function CreateIssueModal({
       }
 
       try {
-        const result = await createIssue(workspaceId, req);
+        const fingerprint = JSON.stringify(req);
+        if (createIntentRef.current?.fingerprint !== fingerprint) {
+          createIntentRef.current = {
+            fingerprint,
+            idempotencyKey: newCreateIdempotencyKey(),
+          };
+        }
+        const result = await createIssue(workspaceId, req, {
+          idempotencyKey: createIntentRef.current.idempotencyKey,
+        });
         if (!mountedRef.current) return;
         if (result.softDuplicate) {
           setSoftDuplicateIssue(result.issue);
@@ -250,6 +270,7 @@ export function CreateIssueModal({
     try {
       const result = await createIssue(workspaceId, pendingDuplicateRequest, {
         force: true,
+        idempotencyKey: newCreateIdempotencyKey(),
       });
       if (!mountedRef.current) return;
       await finishCreate(result.issue);

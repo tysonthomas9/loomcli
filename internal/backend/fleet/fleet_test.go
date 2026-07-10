@@ -1540,6 +1540,13 @@ func TestListEvents_HappyPath(t *testing.T) {
 					"action":    "issue.defer",
 					"metadata":  map[string]string{"defer_until": "2026-05-01T00:00:00Z"},
 				},
+				{
+					"id":        "8",
+					"timestamp": now,
+					"actor":     "user",
+					"action":    "issue.close",
+					"metadata":  map[string]string{"reason": "shipped"},
+				},
 			},
 		})
 	})
@@ -1549,8 +1556,8 @@ func TestListEvents_HappyPath(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListEvents: %v", err)
 	}
-	if len(result) != 7 {
-		t.Fatalf("len = %d, want 7", len(result))
+	if len(result) != 8 {
+		t.Fatalf("len = %d, want 8", len(result))
 	}
 	if result[0].Kind != "issue.update" {
 		t.Errorf("Kind = %q, want %q", result[0].Kind, "issue.update")
@@ -1590,6 +1597,9 @@ func TestListEvents_HappyPath(t *testing.T) {
 	}
 	if result[6].NewValue == nil || *result[6].NewValue != "2026-05-01T00:00:00Z" {
 		t.Errorf("defer NewValue = %v, want defer date", result[6].NewValue)
+	}
+	if result[7].Comment == nil || *result[7].Comment != "shipped" {
+		t.Errorf("close Comment = %v, want shipped", result[7].Comment)
 	}
 }
 

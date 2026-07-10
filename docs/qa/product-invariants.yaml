@@ -1,0 +1,165 @@
+version: 1
+invariants:
+  - id: PT-ISSUE-CREATE-001
+    title: Creating an issue produces one durable issue, event, and card
+    stories: [LCLI-WP-001]
+    source_of_truth:
+      - system: FleetDB
+        record: workspace-scoped issue record and issue event journal
+    transition:
+      from: no issue exists for the submit intent
+      action: submit create with one stable idempotency key
+      to: one issue exists in the requested initial status
+    ui:
+      surfaces: [kanban]
+      expected: exactly one card appears in the status-derived column and remains after reload
+    persistence:
+      query: read the issue, list matching issues, and list its history
+      assertions: one issue ID and one issue.created event exist
+    failure_retry:
+      failure: the create response is lost or the user retries the same submit intent
+      retry: reuse the idempotency key and return the original issue
+      idempotency: create-anyway is a new intent and receives a new key
+    implementation: {state: enforced}
+    proofs:
+      - {dimension: contract, kind: go, path: internal/backend/fleet/idempotency_test.go, selector: TestCreate_IdempotencyHeadersAndWireBody}
+      - {dimension: persistence, kind: aft, path: tests/aft/suites/issue-create-ui.test.yaml, selector: duplicate titles hit the soft-duplicate guard}
+      - {dimension: ui, kind: aft, path: tests/aft/suites/issue-create-ui.test.yaml, selector: create an issue through the New Issue modal}
+      - {dimension: retry, kind: go, path: internal/backend/fleet/idempotency_test.go, selector: TestCreate_ReplayedResponseStillReturnsIssue}
+
+  - id: PT-ISSUE-CLOSE-001
+    title: Closing an issue persists the reason and moves one card to Done
+    stories: [LCLI-WP-002, LCLI-RA-005]
+    source_of_truth:
+      - system: FleetDB
+        record: issue status, closed_at, close_reason, and issue.closed event
+    transition:
+      from: a non-terminal issue
+      action: close with a reason
+      to: closed with the same reason and one close event
+    ui:
+      surfaces: [kanban, issue_activity]
+      expected: the card is in Done and activity shows the close reason
+    persistence:
+      query: read the issue and its history after close
+      assertions: status, closed_at, close_reason, and the single event agree
+    failure_retry:
+      failure: the close response is lost and close is retried
+      retry: matching already-closed state is successful replay
+      idempotency: a different reason is a conflict and emits no event
+    implementation: {state: enforced}
+    proofs:
+      - {dimension: contract, kind: go, path: internal/backend/fleet/fleet_test.go, selector: TestClose_BareIssueResponse}
+      - {dimension: persistence, kind: aft, path: tests/aft/suites/issue-lifecycle.test.yaml, selector: issue travels open to in progress to closed}
+      - {dimension: ui, kind: aft, path: tests/aft/suites/issue-lifecycle.test.yaml, selector: issue travels open to in progress to closed}
+      - {dimension: retry, kind: go, path: internal/webui/service/issue_backend_test.go, selector: TestCloseIssue_Backend_AlreadyClosedReasonMismatchConflicts}
+
+  - id: PT-SSE-RECONNECT-001
+    title: SSE reconnect applies missed mutations once without state regression
+    stories: [LCLI-IW-004, LCLI-RA-007, LCLI-OPS-012]
+    source_of_truth:
+      - system: FleetDB
+        record: canonical workspace snapshot and durable mutation cursor
+    transition:
+      from: disconnected after cursor C
+      action: reconnect, catch up events after C, then reconcile
+      to: canonical newest state with every unseen cursor processed once
+    ui:
+      surfaces: [kanban, issue_detail, workspace_tree, review_queue]
+      expected: stale state clears only after catch-up and canonical reconciliation
+    persistence:
+      query: compare the final UI projection with a fresh FleetDB read
+      assertions: duplicate or older mutations never overwrite the latest record
+    failure_retry:
+      failure: stream loss, duplicate replay, or out-of-order delivery
+      retry: reconnect from the last accepted cursor with bounded backoff
+      idempotency: duplicate cursors are ignored and one refetch repairs projection state
+    implementation: {state: enforced}
+    proofs:
+      - {dimension: contract, kind: go, path: internal/webui/server/realtime/handler_test.go, selector: TestHandler_FleetDBOnlyReconnectCatchUpUsesLastEventID}
+      - {dimension: persistence, kind: frontend, path: internal/webui/frontend/src/api/common/__tests__/sse.test.ts, selector: does not move the reconnect cursor backwards}
+      - {dimension: ui, kind: aft, path: tests/aft/suites/sse-resilience.test.yaml, selector: stale banner clears and missed issue appears after reconnect}
+      - {dimension: retry, kind: frontend, path: internal/webui/frontend/src/api/common/__tests__/sse.test.ts, selector: reconnect}
+
+  - id: PT-AGENT-RUN-CONSISTENCY-001
+    title: Task, session, transcript, diff, artifacts, and usage describe one run
+    stories: [LCLI-AD-007, LCLI-IW-011, LCLI-IW-012, LCLI-OPS-008, LCLI-OPS-013]
+    source_of_truth:
+      - system: Loom control plane
+        record: AgentSession identity, TaskRun result, FleetDB issue, and artifact content
+    transition:
+      from: queued or running execution attempt
+      action: finalize the attempt and persist evidence before cleanup
+      to: one coherent terminal evidence graph
+    ui:
+      surfaces: [issue_sessions, run_detail, usage]
+      expected: all evidence shares workspace, task, session, attempt, and terminal state
+    persistence:
+      query: join AgentSession, TaskRun, issue, transcript, diff, and artifact records
+      assertions: links resolve and every reported usage source agrees
+    failure_retry:
+      failure: finalization repeats, evidence is absent, or sources conflict
+      retry: finalization is idempotent and cleanup waits for durable evidence
+      idempotency: unavailable usage is null; disagreement is an explicit conflict
+    implementation: {state: enforced}
+    proofs:
+      - {dimension: contract, kind: go, path: internal/webui/svcimpl/session_service_test.go, selector: TestSessionEvidenceReportsConflictingPersistedValues}
+      - {dimension: persistence, kind: aft, path: tests/aft/real-suites/zz-real-codex-epic.test.yaml, selector: real codex epic-runner creates HELLO.md and closes the task}
+      - {dimension: ui, kind: frontend, path: internal/webui/frontend/src/components/IssueDetailPanel/sessions/__tests__/SessionDetailView.test.tsx, selector: shows explicit run evidence conflicts}
+      - {dimension: retry, kind: go, path: internal/sessions/finalize_test.go, selector: Finalize}
+
+  - id: PT-WORKSPACE-ISOLATION-001
+    title: Workspace-scoped resources never cross workspace boundaries
+    stories: [LCLI-DV-003, LCLI-PS-002, LCLI-SEC-012]
+    source_of_truth:
+      - system: Loom workspace routing
+        record: path-derived workspace context propagated through every store call
+    transition:
+      from: two active workspaces with distinct resources
+      action: list, fetch, stream, and switch through each workspace
+      to: each workspace exposes only its own resources
+    ui:
+      surfaces: [workspace_switcher, kanban, agents, terminal, prs, usage]
+      expected: switching clears prior workspace data before the new snapshot renders
+    persistence:
+      query: exercise issues, events, agents, sessions, artifacts, terminals, usage, and reviews with foreign IDs
+      assertions: lists exclude foreign rows and direct foreign reads return not found
+    failure_retry:
+      failure: missing workspace context, foreign token, or delayed event from the previous workspace
+      retry: fail closed, discard the event, and reload only the active workspace
+      idempotency: workspace A tokens and cursors are never reused for workspace B
+    implementation: {state: enforced}
+    proofs:
+      - {dimension: contract, kind: go, path: internal/webui/app/multi_workspace_integration_test.go, selector: TestMultiWorkspace}
+      - {dimension: persistence, kind: go, path: internal/webui/svcimpl/session_service_test.go, selector: TestSessionServiceSharedRuntimeCannotLeakAcrossWorkspaces}
+      - {dimension: ui, kind: aft, path: tests/aft/suites/workspaces.test.yaml, selector: switch}
+      - {dimension: retry, kind: go, path: internal/webui/app/terminal_auth_test.go, selector: cross}
+
+  - id: PT-REVIEW-DECISION-001
+    title: Review decisions converge GitHub and Loom state
+    stories: [LCLI-RA-001, LCLI-RA-005, LCLI-RA-006, LCLI-RA-007]
+    source_of_truth:
+      - system: GitHub and FleetDB
+        record: GitHub PR decision and merge state plus Loom issue, audit event, and action ledger
+    transition:
+      from: a PR-linked issue awaiting review
+      action: approve-and-merge or request changes through a durable decision operation
+      to: GitHub and Loom reach the matching terminal or rework state
+    ui:
+      surfaces: [review_queue, review_workspace, issue_activity]
+      expected: completed and repairable partial stages are explicit; inconsistent success is impossible
+    persistence:
+      query: read GitHub PR state, Loom issue history, and decision stage records
+      assertions: decision, actor, time, reason, task state, and agent action agree
+    failure_retry:
+      failure: any stage fails after an earlier external stage committed
+      retry: resume only unfinished stages through a fenced attempt
+      idempotency: reconcile GitHub and skip already-applied stage records
+    implementation:
+      state: fail_closed
+      gap: GitHub approve, request-changes, and merge execution is not configured; linked decisions return 503 before Loom mutation
+    proofs:
+      - {dimension: contract, kind: go, path: internal/webui/handlers/issues/review_decision_test.go, selector: TestReviewDecisionGitHubRefFailsClosedBeforeLoomMutation}
+      - {dimension: persistence, kind: aft, path: tests/aft/suites/review-queue.test.yaml, selector: approving a review issue}
+      - {dimension: ui, kind: aft, path: tests/aft/suites/review-queue.test.yaml, selector: requesting changes}
+      - {dimension: retry, kind: go, path: internal/webui/handlers/issues/review_decision_test.go, selector: TestReviewDecisionReplaySkipsAlreadyAppliedPatch}

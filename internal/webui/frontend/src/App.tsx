@@ -19,7 +19,7 @@ import { useStore } from "zustand";
 
 import { useParams, useNavigate, Outlet } from "react-router-dom";
 
-import { updateIssue, addComment, closeIssue } from "@/api";
+import { applyReviewDecision } from "@/api";
 import {
   fetchWorkspaceApi,
   runOnboardingFirstTask,
@@ -117,6 +117,12 @@ const TerminalView = lazy(() =>
 );
 
 type OnboardingAction = "confirming-agent" | "running-first-task";
+
+function newReviewDecisionID(): string {
+  const bytes = new Uint8Array(16);
+  crypto.getRandomValues(bytes);
+  return `review-${Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("")}`;
+}
 
 function isOnboardingPlannerAgent(agent: WorkspaceAgentInfo): boolean {
   const roleName = agent.role_name?.trim();
@@ -691,17 +697,32 @@ function App() {
   }, [closePanel, clearIssue]);
 
   // Handle approve button click on review cards
+  const reviewDecisionIntentRef = useRef<{
+    fingerprint: string;
+    id: string;
+  } | null>(null);
+  const reviewDecisionID = useCallback((fingerprint: string): string => {
+    if (reviewDecisionIntentRef.current?.fingerprint === fingerprint) {
+      return reviewDecisionIntentRef.current.id;
+    }
+    const id = newReviewDecisionID();
+    reviewDecisionIntentRef.current = { fingerprint, id };
+    return id;
+  }, []);
+
   const handleApprove = useCallback(
     async (issue: Issue) => {
       try {
         const reviewType = getReviewType(issue);
 
         if (reviewType === "code") {
-          // Code review: Close the issue (PR was reviewed and approved)
-          await closeIssue(
+          const reason = "PR approved after code review";
+          await applyReviewDecision(
             workspaceId,
             issue.id,
-            "PR approved after code review",
+            "approve",
+            reason,
+            reviewDecisionID(`${issue.id}:approve:${reason}`),
           );
           await refetch();
         } else if (reviewType === "plan") {
@@ -726,24 +747,27 @@ function App() {
         }
       }
     },
-    [workspaceId, updateIssueStatus, refetch, handlePanelClose, showToast],
+    [
+      workspaceId,
+      updateIssueStatus,
+      refetch,
+      handlePanelClose,
+      showToast,
+      reviewDecisionID,
+    ],
   );
 
   // Handle reject button submission on review cards
   const handleReject = useCallback(
     async (issue: Issue, comment: string) => {
       try {
-        const reviewType = getReviewType(issue);
-
-        // Add feedback comment
-        const prefix = reviewType === "code" ? "CODE REVIEW" : "FEEDBACK";
-        await addComment(workspaceId, issue.id, `${prefix}: ${comment}`);
-
-        // Add needs-revision label and set status to open
-        await updateIssue(workspaceId, issue.id, {
-          status: "open",
-          add_labels: ["needs-revision"],
-        });
+        await applyReviewDecision(
+          workspaceId,
+          issue.id,
+          "request_changes",
+          comment,
+          reviewDecisionID(`${issue.id}:request_changes:${comment}`),
+        );
 
         // Refetch to reflect label/status changes and close panel
         await refetch();
@@ -754,7 +778,7 @@ function App() {
         showToast(message, { type: "error" });
       }
     },
-    [workspaceId, refetch, handlePanelClose, showToast],
+    [workspaceId, refetch, handlePanelClose, showToast, reviewDecisionID],
   );
 
   // Close all panels synchronously (no animation) for workspace switch

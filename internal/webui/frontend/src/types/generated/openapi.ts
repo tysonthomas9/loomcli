@@ -333,6 +333,26 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/workspaces/{ws}/issues/{id}/review-decision": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Apply one idempotent review decision
+     * @description GitHub-linked decisions fail before Loom mutation unless GitHub execution is configured.
+     */
+    post: operations["applyReviewDecision"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/workspaces/{ws}/issues/{id}/claim": {
     parameters: {
       query?: never;
@@ -2193,6 +2213,22 @@ export interface components {
       suggest_next?: boolean;
       force?: boolean;
     };
+    ReviewDecisionRequest: {
+      /** @enum {string} */
+      decision: "approve" | "request_changes";
+      reason?: string;
+    };
+    ReviewDecisionResult: {
+      issue_id: string;
+      /** @enum {string} */
+      decision: "approve" | "request_changes";
+      decision_id: string;
+      /** @enum {string} */
+      github_stage: "not_applicable" | "applied" | "replayed";
+      /** @enum {string} */
+      loom_stage: "applied" | "replayed";
+      replayed: boolean;
+    };
     MoveIssueRequest: {
       target_workspace: string;
     };
@@ -2322,15 +2358,15 @@ export interface components {
       status: string;
       exit_code: number;
       /** Format: int64 */
-      input_tokens: number;
+      input_tokens: number | null;
       /** Format: int64 */
-      output_tokens: number;
+      output_tokens: number | null;
       /** Format: int64 */
-      cache_read_tokens: number;
+      cache_read_tokens: number | null;
       /** Format: int64 */
-      cache_write_tokens: number;
+      cache_write_tokens: number | null;
       /** Format: double */
-      estimated_cost_usd: number;
+      estimated_cost_usd: number | null;
       files_changed: number;
       lines_added: number;
       lines_removed: number;
@@ -2340,7 +2376,22 @@ export interface components {
       is_active: boolean;
       has_transcript: boolean;
       has_diff: boolean;
+      evidence: components["schemas"]["SessionEvidence"];
       last_error?: string;
+    };
+    SessionEvidence: {
+      /** @enum {string} */
+      status: "ok" | "conflict";
+      /** @enum {string} */
+      usage_status: "unavailable" | "reported" | "conflict";
+      conflicts: components["schemas"]["SessionEvidenceConflict"][];
+    };
+    SessionEvidenceConflict: {
+      field: string;
+      existing_source: string;
+      existing_value: string;
+      incoming_source: string;
+      incoming_value: string;
     };
     /** @description Single transcript entry from a session */
     TranscriptEntry: {
@@ -3642,6 +3693,58 @@ export interface operations {
           [name: string]: unknown;
         };
         content?: never;
+      };
+    };
+  };
+  applyReviewDecision: {
+    parameters: {
+      query?: never;
+      header: {
+        "X-Idempotency-Key": string;
+      };
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+        /** @description Issue identifier */
+        id: components["parameters"]["IssueId"];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["ReviewDecisionRequest"];
+      };
+    };
+    responses: {
+      /** @description Decision applied or replayed */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": {
+            success: boolean;
+            data: components["schemas"]["ReviewDecisionResult"];
+          };
+        };
+      };
+      /** @description Invalid or missing decision intent */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description External review execution unavailable; Loom state unchanged */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
       };
     };
   };

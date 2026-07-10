@@ -61,7 +61,7 @@ function updateFieldSummary(event: Event, who: string): string {
 
 /** Human-readable description for system events. */
 export function describeEvent(event: Event): string {
-  const { event_type, actor, old_value, new_value } = event;
+  const { event_type, actor, old_value, new_value, comment } = event;
   const who = actor || "Someone";
 
   switch (event_type as EventType) {
@@ -84,7 +84,9 @@ export function describeEvent(event: Event): string {
     case "issue.undeferred":
       return `${who} un-deferred this issue`;
     case "issue.closed":
-      return `${who} closed this issue`;
+      return comment
+        ? `${who} closed this issue: ${comment}`
+        : `${who} closed this issue`;
     case "issue.reopened":
       return `${who} reopened this issue`;
     case "issue.assigned":

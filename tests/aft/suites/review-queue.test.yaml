@@ -76,5 +76,5 @@ tests:
             !document.querySelector('[data-testid=pr-review-workspace]')
       - run: >-
           curl -sf "$AFT_BASE_URL/api/workspaces/${AFT_WS:-E2E-WS}/issues/$(cat "$AFT_WORK_DIR/review-changes.id")"
-          | python3 -c "import sys,json; data=json.load(sys.stdin)['data']; assert data['status'] == 'open', data['status']"
+          | python3 -c "import sys,json; data=json.load(sys.stdin)['data']; assert data['status'] == 'open', data; assert 'needs-revision' in (data.get('labels') or []), data; assert 'requested changes' in (data.get('notes') or ''), data"
       - expect: { notText: "review-changes-${RUN_ID:-local}" }

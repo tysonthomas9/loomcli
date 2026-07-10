@@ -80,6 +80,8 @@ export class WorkspaceSSEClient {
   private state: ConnectionState = "disconnected";
   private reconnectAttempts = 0;
   private lastEventId: string | undefined;
+  private seenEventIds = new Set<string>();
+  private seenEventOrder: string[] = [];
   private manualDisconnect = false;
   private currentSourceRepos?: string[] | undefined;
   private workspaceId: string;
@@ -379,14 +381,52 @@ export class WorkspaceSSEClient {
       return;
     }
 
-    // Track the server-provided event ID for reconnection catch-up. Fleet-db
-    // emits opaque durable cursors here, so preserve the value as-is.
-    if (event.lastEventId) {
-      this.lastEventId = event.lastEventId;
+    // Process each durable cursor once for this client lifetime. SSE is
+    // at-least-once across reconnects; this makes store application exactly
+    // once without pretending the transport itself is exactly-once.
+    const eventId = event.lastEventId;
+    if (eventId && this.seenEventIds.has(eventId)) {
+      return;
+    }
+    if (eventId) {
+      this.rememberEventId(eventId);
+      if (
+        this.lastEventId === undefined ||
+        durableCursorIsAtLeast(eventId, this.lastEventId)
+      ) {
+        this.lastEventId = eventId;
+      }
     }
 
     this.onMutation?.(mutation);
   }
+
+  private rememberEventId(eventId: string): void {
+    this.seenEventIds.add(eventId);
+    this.seenEventOrder.push(eventId);
+    // Bound memory while retaining enough reconnect history to absorb a
+    // large catch-up replay. The high-water cursor remains independent.
+    if (this.seenEventOrder.length > 4096) {
+      const evicted = this.seenEventOrder.shift();
+      if (evicted !== undefined) this.seenEventIds.delete(evicted);
+    }
+  }
+}
+
+function durableCursorIsAtLeast(candidate: string, current: string): boolean {
+  const parse = (value: string): [bigint, bigint] | null => {
+    const match = /^(\d+)(?:-(\d+))?$/.exec(value);
+    if (!match?.[1]) return null;
+    return [BigInt(match[1]), BigInt(match[2] ?? "0")];
+  };
+  const next = parse(candidate);
+  const previous = parse(current);
+  // Opaque cursors are ordered by server delivery. Numeric/Redis-stream
+  // cursors are comparable, so explicitly prevent a high-water regression.
+  if (!next || !previous) return true;
+  return (
+    next[0] > previous[0] || (next[0] === previous[0] && next[1] >= previous[1])
+  );
 }
 
 /**

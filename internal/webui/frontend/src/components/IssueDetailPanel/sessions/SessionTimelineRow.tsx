@@ -23,14 +23,16 @@ function formatDuration(seconds: number | undefined): string {
 }
 
 /** Format token count with K suffix for large numbers */
-function formatTokens(count: number): string {
+function formatTokens(count: number | null): string {
+  if (count == null) return "--";
   if (count >= 10_000) return `${(count / 1000).toFixed(1)}K`;
   if (count >= 1_000) return `${(count / 1000).toFixed(1)}K`;
   return String(count);
 }
 
 /** Format USD cost */
-function formatCost(usd: number): string {
+function formatCost(usd: number | null): string {
+  if (usd == null) return "--";
   if (usd === 0) return "$0.00";
   if (usd < 0.01) return "<$0.01";
   return `$${usd.toFixed(2)}`;
@@ -63,7 +65,13 @@ export function SessionTimelineRow({
   isSelected,
   onClick,
 }: SessionTimelineRowProps): JSX.Element {
-  const totalTokens = session.input_tokens + session.output_tokens;
+  const totalTokens =
+    session.evidence?.usage_status === "unavailable" ||
+    (session.evidence == null &&
+      session.input_tokens == null &&
+      session.output_tokens == null)
+      ? null
+      : (session.input_tokens ?? 0) + (session.output_tokens ?? 0);
   const errorSummary = runErrorSummary(session);
   const statusLabel = formatRunStatus(session.status);
 

@@ -608,6 +608,81 @@ func (e PatchIssueRequestStatus) Valid() bool {
 	}
 }
 
+// Defines values for ReviewDecisionRequestDecision.
+const (
+	ReviewDecisionRequestDecisionApprove        ReviewDecisionRequestDecision = "approve"
+	ReviewDecisionRequestDecisionRequestChanges ReviewDecisionRequestDecision = "request_changes"
+)
+
+// Valid indicates whether the value is a known member of the ReviewDecisionRequestDecision enum.
+func (e ReviewDecisionRequestDecision) Valid() bool {
+	switch e {
+	case ReviewDecisionRequestDecisionApprove:
+		return true
+	case ReviewDecisionRequestDecisionRequestChanges:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ReviewDecisionResultDecision.
+const (
+	ReviewDecisionResultDecisionApprove        ReviewDecisionResultDecision = "approve"
+	ReviewDecisionResultDecisionRequestChanges ReviewDecisionResultDecision = "request_changes"
+)
+
+// Valid indicates whether the value is a known member of the ReviewDecisionResultDecision enum.
+func (e ReviewDecisionResultDecision) Valid() bool {
+	switch e {
+	case ReviewDecisionResultDecisionApprove:
+		return true
+	case ReviewDecisionResultDecisionRequestChanges:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ReviewDecisionResultGithubStage.
+const (
+	ReviewDecisionResultGithubStageApplied       ReviewDecisionResultGithubStage = "applied"
+	ReviewDecisionResultGithubStageNotApplicable ReviewDecisionResultGithubStage = "not_applicable"
+	ReviewDecisionResultGithubStageReplayed      ReviewDecisionResultGithubStage = "replayed"
+)
+
+// Valid indicates whether the value is a known member of the ReviewDecisionResultGithubStage enum.
+func (e ReviewDecisionResultGithubStage) Valid() bool {
+	switch e {
+	case ReviewDecisionResultGithubStageApplied:
+		return true
+	case ReviewDecisionResultGithubStageNotApplicable:
+		return true
+	case ReviewDecisionResultGithubStageReplayed:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ReviewDecisionResultLoomStage.
+const (
+	ReviewDecisionResultLoomStageApplied  ReviewDecisionResultLoomStage = "applied"
+	ReviewDecisionResultLoomStageReplayed ReviewDecisionResultLoomStage = "replayed"
+)
+
+// Valid indicates whether the value is a known member of the ReviewDecisionResultLoomStage enum.
+func (e ReviewDecisionResultLoomStage) Valid() bool {
+	switch e {
+	case ReviewDecisionResultLoomStageApplied:
+		return true
+	case ReviewDecisionResultLoomStageReplayed:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for RuntimeReadyResponseMode.
 const (
 	Daemon RuntimeReadyResponseMode = "daemon"
@@ -620,6 +695,45 @@ func (e RuntimeReadyResponseMode) Valid() bool {
 	case Daemon:
 		return true
 	case Fleet:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for SessionEvidenceStatus.
+const (
+	SessionEvidenceStatusConflict SessionEvidenceStatus = "conflict"
+	SessionEvidenceStatusOk       SessionEvidenceStatus = "ok"
+)
+
+// Valid indicates whether the value is a known member of the SessionEvidenceStatus enum.
+func (e SessionEvidenceStatus) Valid() bool {
+	switch e {
+	case SessionEvidenceStatusConflict:
+		return true
+	case SessionEvidenceStatusOk:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for SessionEvidenceUsageStatus.
+const (
+	SessionEvidenceUsageStatusConflict    SessionEvidenceUsageStatus = "conflict"
+	SessionEvidenceUsageStatusReported    SessionEvidenceUsageStatus = "reported"
+	SessionEvidenceUsageStatusUnavailable SessionEvidenceUsageStatus = "unavailable"
+)
+
+// Valid indicates whether the value is a known member of the SessionEvidenceUsageStatus enum.
+func (e SessionEvidenceUsageStatus) Valid() bool {
+	switch e {
+	case SessionEvidenceUsageStatusConflict:
+		return true
+	case SessionEvidenceUsageStatusReported:
+		return true
+	case SessionEvidenceUsageStatusUnavailable:
 		return true
 	default:
 		return false
@@ -1663,6 +1777,34 @@ type PatchIssueRequestAgentState string
 // PatchIssueRequestStatus defines model for PatchIssueRequest.Status.
 type PatchIssueRequestStatus string
 
+// ReviewDecisionRequest defines model for ReviewDecisionRequest.
+type ReviewDecisionRequest struct {
+	Decision ReviewDecisionRequestDecision `json:"decision"`
+	Reason   *string                       `json:"reason,omitempty"`
+}
+
+// ReviewDecisionRequestDecision defines model for ReviewDecisionRequest.Decision.
+type ReviewDecisionRequestDecision string
+
+// ReviewDecisionResult defines model for ReviewDecisionResult.
+type ReviewDecisionResult struct {
+	Decision    ReviewDecisionResultDecision    `json:"decision"`
+	DecisionId  string                          `json:"decision_id"`
+	GithubStage ReviewDecisionResultGithubStage `json:"github_stage"`
+	IssueId     string                          `json:"issue_id"`
+	LoomStage   ReviewDecisionResultLoomStage   `json:"loom_stage"`
+	Replayed    bool                            `json:"replayed"`
+}
+
+// ReviewDecisionResultDecision defines model for ReviewDecisionResult.Decision.
+type ReviewDecisionResultDecision string
+
+// ReviewDecisionResultGithubStage defines model for ReviewDecisionResult.GithubStage.
+type ReviewDecisionResultGithubStage string
+
+// ReviewDecisionResultLoomStage defines model for ReviewDecisionResult.LoomStage.
+type ReviewDecisionResultLoomStage string
+
 // RuntimeReadyResponse defines model for RuntimeReadyResponse.
 type RuntimeReadyResponse struct {
 	Mode      RuntimeReadyResponseMode `json:"mode"`
@@ -1686,35 +1828,58 @@ type SeedRequest struct {
 	Title       string  `json:"title"`
 }
 
+// SessionEvidence defines model for SessionEvidence.
+type SessionEvidence struct {
+	Conflicts   []SessionEvidenceConflict  `json:"conflicts"`
+	Status      SessionEvidenceStatus      `json:"status"`
+	UsageStatus SessionEvidenceUsageStatus `json:"usage_status"`
+}
+
+// SessionEvidenceStatus defines model for SessionEvidence.Status.
+type SessionEvidenceStatus string
+
+// SessionEvidenceUsageStatus defines model for SessionEvidence.UsageStatus.
+type SessionEvidenceUsageStatus string
+
+// SessionEvidenceConflict defines model for SessionEvidenceConflict.
+type SessionEvidenceConflict struct {
+	ExistingSource string `json:"existing_source"`
+	ExistingValue  string `json:"existing_value"`
+	Field          string `json:"field"`
+	IncomingSource string `json:"incoming_source"`
+	IncomingValue  string `json:"incoming_value"`
+}
+
 // SessionResponse Session audit record from dto.SessionResponse
 type SessionResponse struct {
-	AgentName        string     `json:"agent_name"`
-	AttemptNum       int        `json:"attempt_num"`
-	Backend          string     `json:"backend"`
-	CacheReadTokens  int64      `json:"cache_read_tokens"`
-	CacheWriteTokens int64      `json:"cache_write_tokens"`
-	DurationS        *float64   `json:"duration_s,omitempty"`
-	EndedAt          *time.Time `json:"ended_at,omitempty"`
-	EpicId           *string    `json:"epic_id,omitempty"`
-	ErrorClass       *string    `json:"error_class,omitempty"`
-	EstimatedCostUsd float64    `json:"estimated_cost_usd"`
-	ExitCode         int        `json:"exit_code"`
-	FilesChanged     int        `json:"files_changed"`
-	FilesTouched     *[]string  `json:"files_touched,omitempty"`
-	HasDiff          bool       `json:"has_diff"`
-	HasTranscript    bool       `json:"has_transcript"`
-	InputTokens      int64      `json:"input_tokens"`
-	IsActive         bool       `json:"is_active"`
-	LastError        *string    `json:"last_error,omitempty"`
-	LinesAdded       int        `json:"lines_added"`
-	LinesRemoved     int        `json:"lines_removed"`
-	Model            *string    `json:"model,omitempty"`
-	OutputTokens     int64      `json:"output_tokens"`
-	Phase            *string    `json:"phase,omitempty"`
-	SessionId        string     `json:"session_id"`
-	StartedAt        time.Time  `json:"started_at"`
-	Status           string     `json:"status"`
-	TaskId           string     `json:"task_id"`
+	AgentName        string          `json:"agent_name"`
+	AttemptNum       int             `json:"attempt_num"`
+	Backend          string          `json:"backend"`
+	CacheReadTokens  *int64          `json:"cache_read_tokens"`
+	CacheWriteTokens *int64          `json:"cache_write_tokens"`
+	DurationS        *float64        `json:"duration_s,omitempty"`
+	EndedAt          *time.Time      `json:"ended_at,omitempty"`
+	EpicId           *string         `json:"epic_id,omitempty"`
+	ErrorClass       *string         `json:"error_class,omitempty"`
+	EstimatedCostUsd *float64        `json:"estimated_cost_usd"`
+	Evidence         SessionEvidence `json:"evidence"`
+	ExitCode         int             `json:"exit_code"`
+	FilesChanged     int             `json:"files_changed"`
+	FilesTouched     *[]string       `json:"files_touched,omitempty"`
+	HasDiff          bool            `json:"has_diff"`
+	HasTranscript    bool            `json:"has_transcript"`
+	InputTokens      *int64          `json:"input_tokens"`
+	IsActive         bool            `json:"is_active"`
+	LastError        *string         `json:"last_error,omitempty"`
+	LinesAdded       int             `json:"lines_added"`
+	LinesRemoved     int             `json:"lines_removed"`
+	Model            *string         `json:"model,omitempty"`
+	OutputTokens     *int64          `json:"output_tokens"`
+	Phase            *string         `json:"phase,omitempty"`
+	SessionId        string          `json:"session_id"`
+	StartedAt        time.Time       `json:"started_at"`
+	Status           string          `json:"status"`
+	TaskId           string          `json:"task_id"`
 }
 
 // StaleDetectorStatus defines model for StaleDetectorStatus.
@@ -2229,6 +2394,11 @@ type GetGraphParams struct {
 // GetGraphParamsStatus defines parameters for GetGraph.
 type GetGraphParamsStatus string
 
+// ApplyReviewDecisionParams defines parameters for ApplyReviewDecision.
+type ApplyReviewDecisionParams struct {
+	XIdempotencyKey string `json:"X-Idempotency-Key"`
+}
+
 // SaveIssueTabsJSONBody defines parameters for SaveIssueTabs.
 type SaveIssueTabsJSONBody struct {
 	ActiveTabId string     `json:"active_tab_id"`
@@ -2388,6 +2558,9 @@ type AddDependencyJSONRequestBody = AddDependencyRequest
 
 // MoveIssueJSONRequestBody defines body for MoveIssue for application/json ContentType.
 type MoveIssueJSONRequestBody = MoveIssueRequest
+
+// ApplyReviewDecisionJSONRequestBody defines body for ApplyReviewDecision for application/json ContentType.
+type ApplyReviewDecisionJSONRequestBody = ReviewDecisionRequest
 
 // SaveIssueTabsJSONRequestBody defines body for SaveIssueTabs for application/json ContentType.
 type SaveIssueTabsJSONRequestBody SaveIssueTabsJSONBody

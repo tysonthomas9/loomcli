@@ -12,6 +12,7 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/rpc"
 	"github.com/tysonthomas9/loomcli/internal/sessions/transcript"
+	"github.com/tysonthomas9/loomcli/internal/webui/server/dto"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
@@ -34,15 +35,15 @@ type SessionListResponse struct {
 
 // SessionListData contains the task ID and its sessions.
 type SessionListData struct {
-	TaskID   string                    `json:"task_id"`
-	Sessions []service.SessionListItem `json:"sessions"`
+	TaskID   string                `json:"task_id"`
+	Sessions []dto.SessionResponse `json:"sessions"`
 }
 
 // SessionDetailResponse is the JSON envelope for a single session's metadata.
 type SessionDetailResponse struct {
-	Success bool                       `json:"success"`
-	Data    *service.SessionDetailData `json:"data,omitempty"`
-	Error   string                     `json:"error,omitempty"`
+	Success bool                 `json:"success"`
+	Data    *dto.SessionResponse `json:"data,omitempty"`
+	Error   string               `json:"error,omitempty"`
 }
 
 // TranscriptResponse is the JSON envelope for a session transcript.
@@ -95,11 +96,15 @@ func HandleListTaskSessions(svc service.SessionService) http.HandlerFunc {
 			return
 		}
 
+		responses := make([]dto.SessionResponse, 0, len(items))
+		for _, item := range items {
+			responses = append(responses, dto.SessionResponseFromListItem(item))
+		}
 		handler.WriteJSON(w, http.StatusOK, SessionListResponse{
 			Success: true,
 			Data: &SessionListData{
 				TaskID:   taskID,
-				Sessions: items,
+				Sessions: responses,
 			},
 		})
 	}
@@ -128,9 +133,10 @@ func HandleGetSession(svc service.SessionService) http.HandlerFunc {
 			return
 		}
 
+		response := dto.SessionResponseFromDetail(*result)
 		handler.WriteJSON(w, http.StatusOK, SessionDetailResponse{
 			Success: true,
-			Data:    result,
+			Data:    &response,
 		})
 	}
 }

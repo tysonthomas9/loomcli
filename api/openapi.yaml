@@ -719,6 +719,52 @@ paths:
         "404":
           description: Issue not found
 
+  /api/workspaces/{ws}/issues/{id}/review-decision:
+    post:
+      operationId: applyReviewDecision
+      tags: [issues]
+      summary: Apply one idempotent review decision
+      description: GitHub-linked decisions fail before Loom mutation unless GitHub execution is configured.
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/IssueId"
+        - name: X-Idempotency-Key
+          in: header
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ReviewDecisionRequest"
+      responses:
+        "200":
+          description: Decision applied or replayed
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success, data]
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    $ref: "#/components/schemas/ReviewDecisionResult"
+        "400":
+          description: Invalid or missing decision intent
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: External review execution unavailable; Loom state unchanged
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
   /api/workspaces/{ws}/issues/{id}/claim:
     post:
       operationId: claimIssue
@@ -3812,6 +3858,36 @@ components:
         force:
           type: boolean
 
+    ReviewDecisionRequest:
+      type: object
+      required: [decision]
+      properties:
+        decision:
+          type: string
+          enum: [approve, request_changes]
+        reason:
+          type: string
+
+    ReviewDecisionResult:
+      type: object
+      required: [issue_id, decision, decision_id, github_stage, loom_stage, replayed]
+      properties:
+        issue_id:
+          type: string
+        decision:
+          type: string
+          enum: [approve, request_changes]
+        decision_id:
+          type: string
+        github_stage:
+          type: string
+          enum: [not_applicable, applied, replayed]
+        loom_stage:
+          type: string
+          enum: [applied, replayed]
+        replayed:
+          type: boolean
+
     MoveIssueRequest:
       type: object
       required: [target_workspace]
@@ -4068,6 +4144,7 @@ components:
         - is_active
         - has_transcript
         - has_diff
+        - evidence
       properties:
         session_id:
           type: string
@@ -4097,19 +4174,19 @@ components:
         exit_code:
           type: integer
         input_tokens:
-          type: integer
+          type: [integer, "null"]
           format: int64
         output_tokens:
-          type: integer
+          type: [integer, "null"]
           format: int64
         cache_read_tokens:
-          type: integer
+          type: [integer, "null"]
           format: int64
         cache_write_tokens:
-          type: integer
+          type: [integer, "null"]
           format: int64
         estimated_cost_usd:
-          type: number
+          type: [number, "null"]
           format: double
         files_changed:
           type: integer
@@ -4131,7 +4208,39 @@ components:
           type: boolean
         has_diff:
           type: boolean
+        evidence:
+          $ref: "#/components/schemas/SessionEvidence"
         last_error:
+          type: string
+
+    SessionEvidence:
+      type: object
+      required: [status, usage_status, conflicts]
+      properties:
+        status:
+          type: string
+          enum: [ok, conflict]
+        usage_status:
+          type: string
+          enum: [unavailable, reported, conflict]
+        conflicts:
+          type: array
+          items:
+            $ref: "#/components/schemas/SessionEvidenceConflict"
+
+    SessionEvidenceConflict:
+      type: object
+      required: [field, existing_source, existing_value, incoming_source, incoming_value]
+      properties:
+        field:
+          type: string
+        existing_source:
+          type: string
+        existing_value:
+          type: string
+        incoming_source:
+          type: string
+        incoming_value:
           type: string
 
     TranscriptEntry:

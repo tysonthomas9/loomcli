@@ -91,6 +91,20 @@ export function SessionsTab({ taskId }: SessionsTabProps): JSX.Element {
             </span>
           </span>
         )}
+        {summary.unavailableUsageSessions > 0 && (
+          <span className={styles.summaryItem}>
+            <span className={styles.warningBadge}>
+              {summary.unavailableUsageSessions} usage unavailable
+            </span>
+          </span>
+        )}
+        {summary.conflictingSessions > 0 && (
+          <span className={styles.summaryItem}>
+            <span className={styles.failedBadge}>
+              {summary.conflictingSessions} evidence conflict
+            </span>
+          </span>
+        )}
       </div>
       <div className={styles.container}>
         <SessionTimeline
@@ -115,6 +129,8 @@ interface CostSummary {
   totalCost: number;
   activeSessions: number;
   failedSessions: number;
+  unavailableUsageSessions: number;
+  conflictingSessions: number;
 }
 
 function computeCostSummary(sessions: SessionRecord[]): CostSummary {
@@ -122,9 +138,19 @@ function computeCostSummary(sessions: SessionRecord[]): CostSummary {
   let totalCost = 0;
   let activeSessions = 0;
   let failedSessions = 0;
+  let unavailableUsageSessions = 0;
+  let conflictingSessions = 0;
   for (const s of sessions) {
-    totalTokens += s.input_tokens + s.output_tokens;
-    totalCost += s.estimated_cost_usd;
+    const usageUnavailable =
+      s.evidence?.usage_status === "unavailable" ||
+      (s.evidence == null && s.input_tokens == null && s.output_tokens == null);
+    if (usageUnavailable) {
+      unavailableUsageSessions++;
+    } else {
+      totalTokens += (s.input_tokens ?? 0) + (s.output_tokens ?? 0);
+      totalCost += s.estimated_cost_usd ?? 0;
+    }
+    if (s.evidence?.status === "conflict") conflictingSessions++;
     if (s.is_active) activeSessions++;
     if (s.status === "failed") failedSessions++;
   }
@@ -134,6 +160,8 @@ function computeCostSummary(sessions: SessionRecord[]): CostSummary {
     totalCost,
     activeSessions,
     failedSessions,
+    unavailableUsageSessions,
+    conflictingSessions,
   };
 }
 

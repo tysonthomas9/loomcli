@@ -35,7 +35,8 @@ tests:
             !!document.querySelector('[data-testid=board-toolbar]')
       - run: >-
           curl -sf -X POST "$AFT_BASE_URL/api/workspaces/E2E-WS/issues" -H "Content-Type: application/json"
-          -d "{\"title\":\"workspace-primary-${RUN_ID:-local}\",\"issue_type\":\"task\",\"priority\":2}" >/dev/null
+          -d "{\"title\":\"workspace-primary-${RUN_ID:-local}\",\"issue_type\":\"task\",\"priority\":2}"
+          | python3 -c "import sys,json;print(json.load(sys.stdin)['data']['id'])" > "$AFT_WORK_DIR/workspace-primary.id"
       - wait: { text: "workspace-primary-${RUN_ID:-local}" }
       - expect: { count: { selector: "section[data-status=ready] article[aria-label*='workspace-primary-${RUN_ID:-local}']", equals: 1 } }
       - click: { selector: "button[aria-label*='Click to switch.']", first: true }
@@ -53,6 +54,12 @@ tests:
             !!document.querySelector('[data-testid=board-toolbar]')
       - expect: { visible: { testid: empty-workspace-board } }
       - expect: { notText: "workspace-primary-${RUN_ID:-local}" }
+      - run: >-
+          curl -sf "$AFT_BASE_URL/api/workspaces/E2E-WS-2/issues?include_blocked=true&limit=100"
+          | python3 -c "import os,sys,json; title='workspace-primary-'+os.environ['RUN_ID']; issues=json.load(sys.stdin)['data']; assert all(i.get('title') != title for i in issues), issues"
+      - run: >-
+          code=$(curl -s -o "$AFT_WORK_DIR/foreign-issue.json" -w "%{http_code}" "$AFT_BASE_URL/api/workspaces/E2E-WS-2/issues/$(cat "$AFT_WORK_DIR/workspace-primary.id")");
+          [ "$code" = "404" ] || { echo "foreign issue read returned $code"; cat "$AFT_WORK_DIR/foreign-issue.json"; exit 1; }
 
   # covers: LCLI-PS-002
   - name: second workspace deep link opens scoped empty board
