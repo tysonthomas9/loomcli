@@ -21,6 +21,7 @@ import { FileRevisionPane } from "./FileRevisionPane";
 import { FileTabBar } from "./FileTabBar";
 import { computeGitGutterLineMarks, type GitGutterLineMark } from "./gitGutter";
 import { WorkspaceFilePane } from "./WorkspaceFilePane";
+import { buildContentDiffPatch } from "./fileExplorerLocalUtils";
 import styles from "./FileExplorer.module.css";
 import type {
   DiffViewState,
@@ -183,6 +184,7 @@ export function FileExplorerEditorGroup({
   onCloseRevision,
   onOpenEditableFile,
   historyRefreshKey,
+  canWrite,
   reloadToken,
   lineTarget,
   onLineTargetApplied,
@@ -208,6 +210,7 @@ export function FileExplorerEditorGroup({
     path: string,
   ) => void;
   historyRefreshKey: number;
+  canWrite: boolean;
   reloadToken?: number | undefined;
   lineTarget?: LineTarget | undefined;
   onLineTargetApplied: (tabKey: string, token: number) => void;
@@ -278,8 +281,9 @@ export function FileExplorerEditorGroup({
     if (activeKey) store.getState().setDirty(activeKey, fileDocument.dirty);
   }, [activeKey, fileDocument.dirty, store]);
 
-  const canSave =
+  const canDisplayText =
     !!activePath && !!fileData && !fileData.binary && !fileData.truncated;
+  const canSave = canWrite && canDisplayText;
 
   const loadBaseContent = useCallback(
     async (path: string) => {
@@ -309,6 +313,37 @@ export function FileExplorerEditorGroup({
     }
   }, [activePath, activeTab, canSave, fileDocument, loadBaseContent, onSaved]);
 
+  const compareExternal = useCallback(() => {
+    if (!activePath || !fileDocument.externalConflict) return;
+    onOpenDiff(groupIndex, {
+      ref: scopeRef,
+      path: activePath,
+      title: "External vs local draft",
+      patch: buildContentDiffPatch(
+        activePath,
+        fileDocument.externalConflict.content,
+        fileDocument.content,
+      ),
+      canOpenFile: false,
+    });
+  }, [
+    activePath,
+    fileDocument.content,
+    fileDocument.externalConflict,
+    groupIndex,
+    onOpenDiff,
+    scopeRef,
+  ]);
+
+  const overwriteExternal = useCallback(async () => {
+    if (!canWrite || !activeTab || !activePath) return;
+    const result = await fileDocument.overwriteExternal();
+    if (result) {
+      onSaved(activeTab);
+      void loadBaseContent(activePath);
+    }
+  }, [activePath, activeTab, canWrite, fileDocument, loadBaseContent, onSaved]);
+
   const saveRef = useRef(save);
   saveRef.current = save;
   useEffect(() => {
@@ -330,21 +365,21 @@ export function FileExplorerEditorGroup({
     setBlameEnabled(false);
     setBlameData(null);
     setBlameError(null);
-    if (activePath && canSave) {
+    if (activePath && canDisplayText) {
       void loadBaseContent(activePath);
     }
-  }, [activePath, canSave, loadBaseContent]);
+  }, [activePath, canDisplayText, loadBaseContent]);
 
   useEffect(() => {
     const handleFocus = () => {
-      if (activePath && canSave) {
+      if (activePath && canDisplayText) {
         void refreshDocumentRef.current();
         void loadBaseContent(activePath);
       }
     };
     window.addEventListener("focus", handleFocus);
     return () => window.removeEventListener("focus", handleFocus);
-  }, [activePath, canSave, loadBaseContent]);
+  }, [activePath, canDisplayText, loadBaseContent]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -361,7 +396,7 @@ export function FileExplorerEditorGroup({
 
   useEffect(() => {
     let canceled = false;
-    if (!activePath || !blameEnabled || !canSave) {
+    if (!activePath || !blameEnabled || !canDisplayText) {
       setBlameData(null);
       setBlameLoading(false);
       setBlameError(null);
@@ -387,7 +422,7 @@ export function FileExplorerEditorGroup({
     return () => {
       canceled = true;
     };
-  }, [activePath, blameEnabled, canSave, scopeRef, workspaceId]);
+  }, [activePath, blameEnabled, canDisplayText, scopeRef, workspaceId]);
 
   if (diffView) {
     return (
@@ -439,9 +474,15 @@ export function FileExplorerEditorGroup({
           <div className={styles.editorPrimaryPane}>
             <FileRevisionPane
               revisionView={revisionView}
+              canWrite={canWrite}
               historyOpen={historyOpen}
               onToggleHistory={toggleHistory}
               onClose={() => onCloseRevision(groupIndex)}
+              onRestored={() => {
+                void fileDocument.refresh();
+                if (activeTab) onSaved(activeTab);
+                onCloseRevision(groupIndex);
+              }}
             />
           </div>
           {renderHistoryPanel()}
@@ -474,9 +515,17 @@ export function FileExplorerEditorGroup({
             content={fileDocument.content}
             isDirty={fileDocument.dirty}
             isSaving={fileDocument.isSaving}
+            canWrite={canWrite}
+            externalConflict={fileDocument.externalConflict}
             searchOpen={searchOpen}
             onContentChange={fileDocument.edit}
             onSave={() => void save()}
+            onReloadExternal={() => {
+              fileDocument.useExternal();
+              if (activePath) void loadBaseContent(activePath);
+            }}
+            onCompareExternal={compareExternal}
+            onOverwriteExternal={() => void overwriteExternal()}
             historyOpen={historyOpen}
             onToggleHistory={toggleHistory}
             onToggleSearch={() => setSearchOpen((open) => !open)}

@@ -43,6 +43,7 @@ export interface FileDocumentOperations {
     ref: FileDocumentRef,
     content: string,
     signal: AbortSignal,
+    ifMatch?: string,
   ) => Promise<FileMutationData>;
 }
 
@@ -108,6 +109,15 @@ function errorMessage(error: unknown): string {
 
 function isAbortError(error: unknown): boolean {
   return error instanceof DOMException && error.name === "AbortError";
+}
+
+function isPreconditionFailure(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "status" in error &&
+    (error as { status?: unknown }).status === 412
+  );
 }
 
 export class FileDocumentRegistry {
@@ -291,6 +301,85 @@ export class FileDocumentRegistry {
     }
   }
 
+  async overwriteExternal(
+    ref: FileDocumentRef,
+  ): Promise<FileMutationData | null> {
+    const before = this.get(ref);
+    if (!before.dirty || before.isSaving) return null;
+    const draft = before.content;
+    const draftRevision = before.draftRevision;
+    const started = this.beginRequest(ref, "save");
+    try {
+      const latest = await this.operations.read(started.ref, started.signal);
+      const result = await this.operations.write(
+        started.ref,
+        draft,
+        started.signal,
+        latest.version,
+      );
+      const current = this.states.get(started.key);
+      if (!current || current.requestGeneration !== started.generation) {
+        return null;
+      }
+      const draftUnchanged = current.draftRevision === draftRevision;
+      const savedFileData: FileReadData = {
+        ...latest,
+        content: draft,
+        size: new Blob([draft]).size,
+        version: result.version,
+      };
+      this.replace(started.key, {
+        ...current,
+        fileData: savedFileData,
+        content: draftUnchanged ? draft : current.content,
+        baseContent: draft,
+        baseVersion: result.version,
+        dirty: !draftUnchanged,
+        isSaving: false,
+        error: null,
+        externalConflict: draftUnchanged
+          ? null
+          : {
+              fileData: savedFileData,
+              content: draft,
+              version: result.version,
+            },
+      });
+      return result;
+    } catch (error) {
+      const current = this.states.get(started.key);
+      if (!current || current.requestGeneration !== started.generation) {
+        return null;
+      }
+      let latestConflict = current.externalConflict;
+      if (isPreconditionFailure(error)) {
+        try {
+          const latest = await this.operations.read(
+            started.ref,
+            started.signal,
+          );
+          latestConflict = {
+            fileData: latest,
+            content: latest.binary ? "" : (latest.content ?? ""),
+            version: latest.version,
+          };
+        } catch {
+          // Keep the prior conflict snapshot when the refresh also fails.
+        }
+      }
+      this.replace(started.key, {
+        ...current,
+        isSaving: false,
+        dirty: true,
+        error: isAbortError(error) ? current.error : errorMessage(error),
+        externalConflict: latestConflict,
+      });
+      return null;
+    } finally {
+      this.finishRequest(started.key, started.generation);
+    }
+  }
+
   discard(ref: FileDocumentRef): void {
     const current = this.get(ref);
     this.replace(current.key, {
@@ -346,6 +435,24 @@ export class FileDocumentRegistry {
       }
     }
     this.syncBeforeUnload();
+  }
+
+  dirtyPathsForPrefix(
+    workspaceId: string,
+    scopeRef: FileScopeRef,
+    path: string,
+  ): string[] {
+    const prefix = cleanPath(path);
+    return [...this.states.values()]
+      .filter(
+        (state) =>
+          state.dirty &&
+          state.ref.workspaceId === workspaceId &&
+          sameCheckoutRef(state.ref, scopeRef) &&
+          (state.ref.path === prefix ||
+            state.ref.path.startsWith(`${prefix}/`)),
+      )
+      .map((state) => state.ref.path);
   }
 
   retargetPathPrefix(

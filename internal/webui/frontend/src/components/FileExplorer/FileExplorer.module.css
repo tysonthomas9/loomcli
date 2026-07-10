@@ -16,6 +16,53 @@
   background: var(--color-chrome);
 }
 
+.capabilitiesNotice {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--color-border);
+  background: var(--color-warning-bg);
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-xs);
+}
+
+.capabilitiesNotice button {
+  border: none;
+  background: transparent;
+  color: var(--color-primary);
+  cursor: pointer;
+  font: inherit;
+  font-weight: 700;
+}
+
+.externalConflict {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--color-warning-border, var(--color-border));
+  background: var(--color-warning-bg);
+  color: var(--color-text-primary);
+  font-size: var(--font-size-sm);
+}
+
+.externalConflictActions {
+  display: flex;
+  gap: var(--space-1);
+}
+
+.externalConflictActions button {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg);
+  color: var(--color-text-primary);
+  cursor: pointer;
+  font: inherit;
+}
+
 .toolbar {
   display: flex;
   flex-direction: column;

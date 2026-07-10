@@ -7,6 +7,7 @@ import {
   Suspense,
 } from "react";
 import type { FileReadData } from "@/api/workspace";
+import type { ExternalFileConflict } from "@/stores/fileDocumentRegistry";
 import type { FileBlameLine } from "@/api/workspace";
 import { detectLanguage } from "@/utils/detectLanguage";
 import type { FileSymbol, FileSymbolState } from "@/utils/lezerSymbols";
@@ -30,9 +31,14 @@ interface WorkspaceFilePaneProps {
   content: string;
   isDirty: boolean;
   isSaving: boolean;
+  canWrite: boolean;
+  externalConflict: ExternalFileConflict | null;
   searchOpen: boolean;
   onContentChange: (value: string) => void;
   onSave: () => void;
+  onReloadExternal: () => void;
+  onCompareExternal: () => void;
+  onOverwriteExternal: () => void;
   historyOpen: boolean;
   onToggleHistory: () => void;
   onToggleSearch: () => void;
@@ -128,9 +134,14 @@ export function WorkspaceFilePane({
   content,
   isDirty,
   isSaving,
+  canWrite,
+  externalConflict,
   searchOpen,
   onContentChange,
   onSave,
+  onReloadExternal,
+  onCompareExternal,
+  onOverwriteExternal,
   historyOpen,
   onToggleHistory,
   onToggleSearch,
@@ -156,7 +167,8 @@ export function WorkspaceFilePane({
   const [symbolLineTarget, setSymbolLineTarget] = useState<
     { line: number; token: number } | undefined
   >(undefined);
-  const isReadOnly = isSaving || !!fileData?.truncated || !!fileData?.binary;
+  const isReadOnly =
+    !canWrite || isSaving || !!fileData?.truncated || !!fileData?.binary;
   const requestedLineTarget = lineTarget ?? symbolLineTarget;
   const usingLocalSymbolTarget = !lineTarget && !!symbolLineTarget;
   const editorLineTarget =
@@ -342,18 +354,42 @@ export function WorkspaceFilePane({
               </svg>
               <span>History</span>
             </button>
-            <button
-              type="button"
-              className={styles.saveButton}
-              onClick={onSave}
-              disabled={!isDirty || isReadOnly}
-            >
-              {isSaving ? "Saving..." : "Save"}
-            </button>
+            {canWrite && (
+              <button
+                type="button"
+                className={styles.saveButton}
+                onClick={onSave}
+                disabled={!isDirty || isReadOnly}
+              >
+                {isSaving ? "Saving..." : "Save"}
+              </button>
+            )}
           </div>
         </div>
       )}
       <div className={styles.viewerContent}>
+        {externalConflict && (
+          <div className={styles.externalConflict} role="alert">
+            <span>This file changed outside the editor.</span>
+            <div className={styles.externalConflictActions}>
+              <button type="button" onClick={onReloadExternal}>
+                Reload
+              </button>
+              <button type="button" onClick={onCompareExternal}>
+                Compare
+              </button>
+              {canWrite && (
+                <button
+                  type="button"
+                  onClick={onOverwriteExternal}
+                  disabled={isSaving}
+                >
+                  {isSaving ? "Overwriting..." : "Overwrite"}
+                </button>
+              )}
+            </div>
+          </div>
+        )}
         {!path && (
           <div className={styles.empty}>
             Select a file to view its contents.

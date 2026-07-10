@@ -104,6 +104,7 @@ export function RepairCheckoutConfirmDialog({
 
 export function ContextMenu({
   state,
+  canWrite,
   onNewFile,
   onNewFolder,
   onRename,
@@ -113,6 +114,7 @@ export function ContextMenu({
   onCopyPath,
 }: {
   state: ContextMenuState;
+  canWrite: boolean;
   onNewFile: (node: FileTreeNodeInfo) => void;
   onNewFolder: (node: FileTreeNodeInfo) => void;
   onRename: (node: FileTreeNodeInfo) => void;
@@ -127,48 +129,54 @@ export function ContextMenu({
       style={{ left: state.x, top: state.y }}
       role="menu"
     >
-      <button
-        type="button"
-        role="menuitem"
-        onClick={() => onNewFile(state.node)}
-      >
-        New File
-      </button>
-      <button
-        type="button"
-        role="menuitem"
-        onClick={() => onNewFolder(state.node)}
-      >
-        New Folder
-      </button>
-      <button
-        type="button"
-        role="menuitem"
-        onClick={() => onRename(state.node)}
-      >
-        Rename
-      </button>
-      <button
-        type="button"
-        role="menuitem"
-        onClick={() => onDelete(state.node)}
-      >
-        Delete
-      </button>
-      <button type="button" role="menuitem" onClick={() => onMove(state.node)}>
-        Move to...
-      </button>
-      <button
-        type="button"
-        role="menuitem"
-        onClick={() => onDuplicate(state.node)}
-        disabled={state.node.isDir}
-        title={
-          state.node.isDir ? "Duplicate is available for files" : undefined
-        }
-      >
-        Duplicate
-      </button>
+      {canWrite && (
+        <>
+          <button
+            type="button"
+            role="menuitem"
+            onClick={() => onNewFile(state.node)}
+          >
+            New File
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            onClick={() => onNewFolder(state.node)}
+          >
+            New Folder
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            onClick={() => onRename(state.node)}
+          >
+            Rename
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            onClick={() => onDelete(state.node)}
+          >
+            Delete
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            onClick={() => onMove(state.node)}
+          >
+            Move to...
+          </button>
+          {state.duplicateEligible && (
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => onDuplicate(state.node)}
+            >
+              Duplicate text file
+            </button>
+          )}
+        </>
+      )}
       <button
         type="button"
         role="menuitem"
