@@ -67,6 +67,14 @@ export {
   useFileBrowserStoreInstance,
   EMPTY_FILE_BROWSER_STATE,
 } from "./fileBrowserStore";
+
+export { FileDocumentRegistry, fileDocumentKey } from "./fileDocumentRegistry";
+export type {
+  ExternalFileConflict,
+  FileDocumentOperations,
+  FileDocumentRef,
+  FileDocumentState,
+} from "./fileDocumentRegistry";
 export type {
   FileBrowserStore,
   FileBrowserStoreState,
