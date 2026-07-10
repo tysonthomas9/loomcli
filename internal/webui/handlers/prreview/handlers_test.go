@@ -464,6 +464,50 @@ func TestListPullRequestsFallsBackToGhWhenNoConnector(t *testing.T) {
 	}
 }
 
+func TestListPullRequestsConnectorFailureSurfacesWarning(t *testing.T) {
+	fallback := &fallbackAgentService{
+		result: &ops.GitPullRequestList{
+			PullRequests: []ops.GitPullRequest{{Number: 5, RepoName: "octocat/hello", State: "OPEN"}},
+		},
+	}
+	// Connector IS available, but its list fails for the only repo → wholesale
+	// fallback to gh. The failure must be surfaced, not silent.
+	h := newPRReviewHarnessWithAgent(t, true, fallback)
+	h.github.setListStatus("octocat", "hello", http.StatusInternalServerError)
+
+	status, raw := h.get(t, "/api/workspaces/WS/pull-requests?state=open")
+	if status != http.StatusOK {
+		t.Fatalf("status = %d (body %s)", status, raw)
+	}
+	if !fallback.called {
+		t.Fatal("expected gh fallback after connector failure")
+	}
+	var decoded struct {
+		Data struct {
+			PullRequests []ops.GitPullRequest `json:"pull_requests"`
+			Warnings     []string             `json:"warnings"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		t.Fatalf("decode: %v (body %s)", err, raw)
+	}
+	if len(decoded.Data.Warnings) == 0 || decoded.Data.Warnings[0] != connectorUnavailableWarning {
+		t.Fatalf("warnings = %v, want the connector-unavailable notice first", decoded.Data.Warnings)
+	}
+	hasDetail := false
+	for _, wmsg := range decoded.Data.Warnings {
+		if strings.Contains(wmsg, "octocat/hello") {
+			hasDetail = true
+		}
+	}
+	if !hasDetail {
+		t.Fatalf("warnings %v missing the per-repo failure reason", decoded.Data.Warnings)
+	}
+	if len(decoded.Data.PullRequests) != 1 {
+		t.Fatalf("pull_requests = %+v, want the gh fallback list", decoded.Data.PullRequests)
+	}
+}
+
 func TestListPullRequestsPartialRepoErrorWarns(t *testing.T) {
 	h := newPRReviewHarness(t, true)
 	h.addRepo(t, "widgets", "https://github.com/acme/widgets")

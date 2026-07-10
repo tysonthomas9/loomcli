@@ -86,7 +86,15 @@ func (m *Module) listPullRequests(w http.ResponseWriter, r *http.Request) {
 	// parseable (attempted == 0 — e.g. ssh-scheme remotes the parser rejects,
 	// which the old gh-only route would have listed) or every repo errored.
 	if len(prs) == 0 && (attempted == 0 || failed == attempted) {
-		m.ghListFallback(w, r.Context(), ws, state)
+		// When the connector was configured and actually tried but failed for
+		// every repo, surface that (with the per-repo reasons) instead of
+		// silently pretending gh is the intended source. attempted == 0 means
+		// the repos simply aren't connector-eligible — stay quiet there.
+		var notice []string
+		if attempted > 0 {
+			notice = append([]string{connectorUnavailableWarning}, warnings...)
+		}
+		m.ghListFallback(w, r.Context(), ws, state, notice...)
 		return
 	}
 
@@ -104,7 +112,12 @@ func (m *Module) connectorListAvailable() bool {
 	return err == nil
 }
 
-func (m *Module) ghListFallback(w http.ResponseWriter, ctx context.Context, ws, state string) {
+// connectorUnavailableWarning is surfaced (via the response warnings the PR
+// list already renders) when the connector was configured but failed for every
+// repo and we fell back to gh — so a broken connector isn't invisible.
+const connectorUnavailableWarning = "GitHub connector unavailable — showing local pull requests instead"
+
+func (m *Module) ghListFallback(w http.ResponseWriter, ctx context.Context, ws, state string, priorWarnings ...string) {
 	if m == nil || m.agentSvc == nil {
 		writePRReviewError(w, errEgressUnavailable)
 		return
@@ -115,12 +128,12 @@ func (m *Module) ghListFallback(w http.ResponseWriter, ctx context.Context, ws, 
 		return
 	}
 	prs := []ops.GitPullRequest{}
-	var warnings []string
+	warnings := append([]string{}, priorWarnings...)
 	if res != nil {
 		if res.PullRequests != nil {
 			prs = res.PullRequests
 		}
-		warnings = res.Warnings
+		warnings = append(warnings, res.Warnings...)
 	}
 	writeJSON(w, http.StatusOK, pullRequestsData{PullRequests: prs, Warnings: warnings})
 }

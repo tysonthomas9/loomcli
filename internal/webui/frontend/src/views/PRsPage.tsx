@@ -210,12 +210,13 @@ export function PRsPage(): JSX.Element {
     [issues, pullRequests],
   );
 
-  // GitHub metadata is an enrichment: a fetch error or per-repo warning
-  // degrades to a banner while loom-backed rows keep rendering.
+  // GitHub metadata is an enrichment: a fetch error or a warning (e.g. the
+  // connector fell back to local gh, or a per-repo issue) degrades to a banner
+  // while loom-backed rows keep rendering. Warnings are already self-describing.
   const githubWarning = error
     ? `GitHub metadata unavailable: ${error.message}`
     : warnings.length > 0
-      ? `GitHub metadata incomplete: ${warnings[0]}${warnings.length > 1 ? ` (+${warnings.length - 1} more)` : ""}`
+      ? `${warnings[0]}${warnings.length > 1 ? ` (+${warnings.length - 1} more)` : ""}`
       : null;
 
   const openCount = useMemo(() => rows.filter(isOpenRow).length, [rows]);
