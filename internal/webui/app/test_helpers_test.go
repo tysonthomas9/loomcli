@@ -208,31 +208,31 @@ func (m *mockFileOps) ResolveWorkspaceData(_ string) (*ops.WorkspaceData, error)
 	return nil, errors.New("not found")
 }
 
-func (m *mockFileOps) GitStatusPorcelain(worktreePath string) (map[string]string, error) {
-	return map[string]string{}, nil
+func (m *mockFileOps) GitStatusPorcelain(_ context.Context, worktreePath string) (ops.GitFileStatusResult, error) {
+	return ops.GitFileStatusResult{Entries: map[string]string{}}, nil
 }
 
-func (m *mockFileOps) GitShowFileAtRev(worktreePath, rev, path string, maxBytes int64) (*ops.GitFileContentAtRev, error) {
+func (m *mockFileOps) GitShowFileAtRev(_ context.Context, worktreePath, rev, path string, maxBytes int64) (*ops.GitFileContentAtRev, error) {
 	return &ops.GitFileContentAtRev{Content: []byte(""), Size: 0}, nil
 }
 
-func (m *mockFileOps) GitDiffFile(worktreePath, path, from, to string) (string, error) {
-	return "", nil
+func (m *mockFileOps) GitDiffFile(_ context.Context, worktreePath, path, from, to string) (ops.GitBoundedTextResult, error) {
+	return ops.GitBoundedTextResult{}, nil
 }
 
-func (m *mockFileOps) GitLogFile(worktreePath, path string, limit int) (string, error) {
-	return "", nil
+func (m *mockFileOps) GitLogFile(_ context.Context, worktreePath, path string, limit int) (ops.GitBoundedTextResult, error) {
+	return ops.GitBoundedTextResult{}, nil
 }
 
-func (m *mockFileOps) GitBlamePorcelain(worktreePath, path string) (string, error) {
-	return "", nil
+func (m *mockFileOps) GitBlamePorcelain(_ context.Context, worktreePath, path string) (ops.GitBoundedTextResult, error) {
+	return ops.GitBoundedTextResult{}, nil
 }
 
 func (m *mockFileOps) ResolveLoomDataDir() (string, error) {
 	return os.TempDir(), nil
 }
 
-func (m *mockFileOps) GetCurrentBranch(_ string) (string, error) {
+func (m *mockFileOps) GitCurrentBranch(_ context.Context, _ string) (string, error) {
 	return "main", nil
 }
 

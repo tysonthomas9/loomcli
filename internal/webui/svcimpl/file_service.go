@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"golang.org/x/sync/singleflight"
@@ -24,11 +25,13 @@ var _ service.FileService = (*fileServiceImpl)(nil)
 
 // fileServiceImpl is the concrete implementation of FileService.
 type fileServiceImpl struct {
-	fileOps       ops.FileOps
-	indexCache    *fileIndexCache
-	indexBuilds   singleflight.Group
-	indexBuilder  func(context.Context, string, string, bool) (*service.FileIndexResult, error)
-	mutationLocks pathLockSet
+	fileOps            ops.FileOps
+	indexCache         *fileIndexCache
+	indexBuilds        singleflight.Group
+	indexBuilder       func(context.Context, string, string, bool) (*service.FileIndexResult, error)
+	mutationLocks      pathLockSet
+	historyCleanupOnce sync.Once
+	historyCleanupErr  error
 }
 
 // NewFileService creates a new FileService implementation.
@@ -354,7 +357,7 @@ func (s *fileServiceImpl) WriteFileConditionalScoped(ctx context.Context, wsID s
 			return nil, service.ErrPreconditionFailed("file version no longer matches")
 		}
 	}
-	if err := s.snapshotBeforeOverwrite(wsID, scope, target, repo, root.store, cleanPath); err != nil {
+	if err := s.ensureLegacyHistoryCleaned(); err != nil {
 		return nil, err
 	}
 	if err := root.store.WriteAtomic(cleanPath, []byte(content)); err != nil {

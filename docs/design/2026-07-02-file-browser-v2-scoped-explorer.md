@@ -86,7 +86,7 @@ POST   /api/workspaces/{ws}/files/search?scope=&target=          (global search,
 GET    /api/workspaces/{ws}/files/git-status?scope=&target=      (decorations + SCM, new)
 GET    /api/workspaces/{ws}/files?scope=&target=&path=&rev=      (content at a git rev, new param)
 GET    /api/workspaces/{ws}/files/diff?scope=&target=&path=&from=&to=  (unified diff, new)
-GET    /api/workspaces/{ws}/files/history?scope=&target=&path=   (timeline: commits + saves, new)
+GET    /api/workspaces/{ws}/files/history?scope=&target=&path=   (bounded commit history)
 GET    /api/workspaces/{ws}/files/blame?scope=&target=&path=     (blame, new)
 ```
 
@@ -287,18 +287,12 @@ resolver (§1); each server piece is a bounded `git` invocation plus a parse.
   clicking opens that commit's diff for the file. Skipped for files over the edit
   cap or >5k lines (blame cost grows with history).
 
-**Timeline (commits + saves).**
-- `GET .../files/history?path=` merges two sources, kind-tagged:
-  - **Commits**: `git log --follow -n 100 --format=…` for the file in its
-    containing checkout.
-  - **Saves (local history)**: on every `PUT` that overwrites an existing file, the
-    prior content is snapshotted under `$LOOM_CONFIG_DIR/file-history/<ws>/…`,
-    capped at 20 entries per file (oldest evicted). Honest limitation, consistent
-    with the no-watching stance: only saves made *through this browser* are
-    captured — agent and terminal writes bypass it.
-- FE: a collapsible **Timeline** section under the tree (VSCode's placement) for
-  the active file. Click a commit → diff vs its parent in the diff editor; click a
-  save → diff vs current, with a **Restore** action (an ordinary PUT).
+**Commit history.**
+- `GET .../files/history?path=` returns up to 100 commits from `git log --follow`
+  for the file in its containing checkout. Browser-save snapshots were removed
+  because they persisted plaintext workspace content outside the repository; the
+  dedicated `$LOOM_CONFIG_DIR/file-history` directory is cleaned up once.
+- FE: the History panel opens a commit diff or a read-only file revision.
 
 **Source-control panel.**
 - Built entirely on the §3.2 git-status endpoint (XY codes). A sidebar panel

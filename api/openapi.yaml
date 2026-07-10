@@ -2837,7 +2837,7 @@ paths:
     get:
       operationId: getScopedFileHistory
       tags: [files]
-      summary: Get commit and browser-save timeline for a file
+      summary: Get bounded commit history for a file
       parameters:
         - $ref: "#/components/parameters/WorkspaceId"
         - name: scope
@@ -4051,10 +4051,36 @@ components:
 
     FileGitStatusResponse:
       type: object
-      additionalProperties:
-        type: string
-        minLength: 2
-        maxLength: 2
+      required: [status, partial, limit_hit, errors]
+      properties:
+        status:
+          type: object
+          additionalProperties:
+            type: string
+            minLength: 2
+            maxLength: 2
+        partial:
+          type: boolean
+        limit_hit:
+          type: boolean
+        errors:
+          type: array
+          items:
+            $ref: "#/components/schemas/FileCheckoutError"
+
+    FileCheckoutError:
+      type: object
+      required: [kind, repo, error]
+      properties:
+        kind:
+          type: string
+          enum: [agent, repo]
+        agent:
+          type: string
+        repo:
+          type: string
+        error:
+          type: string
 
     FileCheckout:
       type: object
@@ -4075,15 +4101,29 @@ components:
           type: integer
         status_error:
           type: boolean
+        error:
+          type: string
+        partial:
+          type: boolean
+        limit_hit:
+          type: boolean
 
     FileCheckoutsResponse:
       type: object
-      required: [checkouts]
+      required: [checkouts, partial, limit_hit, errors]
       properties:
         checkouts:
           type: array
           items:
             $ref: "#/components/schemas/FileCheckout"
+        partial:
+          type: boolean
+        limit_hit:
+          type: boolean
+        errors:
+          type: array
+          items:
+            $ref: "#/components/schemas/FileCheckoutError"
 
     FileCheckoutRepairRequest:
       type: object
@@ -4118,12 +4158,16 @@ components:
 
     FileDiffResponse:
       type: object
-      required: [path, patch]
+      required: [path, patch, partial, limit_hit]
       properties:
         path:
           type: string
         patch:
           type: string
+        partial:
+          type: boolean
+        limit_hit:
+          type: boolean
 
     FileBlameLine:
       type: object
@@ -4144,7 +4188,7 @@ components:
 
     FileBlameResponse:
       type: object
-      required: [path, skipped, lines]
+      required: [path, skipped, lines, partial, limit_hit]
       properties:
         path:
           type: string
@@ -4158,16 +4202,18 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/FileBlameLine"
+        partial:
+          type: boolean
+        limit_hit:
+          type: boolean
 
     FileHistoryEntry:
       type: object
-      required: [kind, time, summary]
+      required: [kind, sha, author, time, summary]
       properties:
         kind:
           type: string
-          enum: [commit, save]
-        id:
-          type: string
+          enum: [commit]
         sha:
           type: string
         author:
@@ -4176,19 +4222,10 @@ components:
           type: string
         summary:
           type: string
-        content:
-          type: string
-        size:
-          type: integer
-          format: int64
-        binary:
-          type: boolean
-        truncated:
-          type: boolean
 
     FileHistoryResponse:
       type: object
-      required: [path, entries]
+      required: [path, entries, partial, limit_hit]
       properties:
         path:
           type: string
@@ -4196,6 +4233,10 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/FileHistoryEntry"
+        partial:
+          type: boolean
+        limit_hit:
+          type: boolean
 
     FileWriteRequest:
       type: object

@@ -1,6 +1,9 @@
 package ops
 
-import "errors"
+import (
+	"context"
+	"errors"
+)
 
 var (
 	// ErrAgentRepoNotAllowed indicates that a repo qualifier is unknown or not
@@ -59,21 +62,21 @@ type FileOps interface {
 	// GitStatusPorcelain returns git status --porcelain XY codes keyed by
 	// checkout-relative path. It is read-only decoration data for file-browser
 	// status and conflict badges.
-	GitStatusPorcelain(worktreePath string) (map[string]string, error)
+	GitStatusPorcelain(ctx context.Context, worktreePath string) (GitFileStatusResult, error)
 
 	// GitShowFileAtRev returns file content from a git revision, capped to
 	// maxBytes, keyed by checkout-relative path.
-	GitShowFileAtRev(worktreePath, rev, path string, maxBytes int64) (*GitFileContentAtRev, error)
+	GitShowFileAtRev(ctx context.Context, worktreePath, rev, path string, maxBytes int64) (*GitFileContentAtRev, error)
 
 	// GitDiffFile returns a unified diff for one checkout-relative file path.
 	// When to is empty, the diff compares from against the working tree.
-	GitDiffFile(worktreePath, path, from, to string) (string, error)
+	GitDiffFile(ctx context.Context, worktreePath, path, from, to string) (GitBoundedTextResult, error)
 
 	// GitLogFile returns bounded git log output for one checkout-relative file path.
-	GitLogFile(worktreePath, path string, limit int) (string, error)
+	GitLogFile(ctx context.Context, worktreePath, path string, limit int) (GitBoundedTextResult, error)
 
 	// GitBlamePorcelain returns git blame --porcelain output for one file path.
-	GitBlamePorcelain(worktreePath, path string) (string, error)
+	GitBlamePorcelain(ctx context.Context, worktreePath, path string) (GitBoundedTextResult, error)
 
 	// ResolveLoomDataDir resolves the local loom data/config directory using
 	// the established CLI resolver instead of callers reading env directly.
@@ -81,13 +84,27 @@ type FileOps interface {
 
 	// GetCurrentBranch returns the current branch for a git checkout. It is
 	// best-effort metadata for file checkout enumeration.
-	GetCurrentBranch(worktreePath string) (string, error)
+	GitCurrentBranch(ctx context.Context, worktreePath string) (string, error)
 
 	// RepairCheckout repairs or provisions a known workspace checkout. scope is
 	// "agent" or "repo"; target is the agent name or repo name; repo qualifies
 	// agent scope. Implementations must validate target/repo against workspace
 	// topology and never accept arbitrary paths from callers.
 	RepairCheckout(workspaceID, scope, target, repo string, force bool) (RepairResult, error)
+}
+
+// GitFileStatusResult is bounded, parsed porcelain status.
+type GitFileStatusResult struct {
+	Entries  map[string]string
+	Partial  bool
+	LimitHit bool
+}
+
+// GitBoundedTextResult is bounded Git text output.
+type GitBoundedTextResult struct {
+	Output   string
+	Partial  bool
+	LimitHit bool
 }
 
 // GitFileContentAtRev contains bounded content returned from a git revision.

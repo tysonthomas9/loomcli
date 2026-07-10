@@ -151,9 +151,6 @@ function FileBrowserInner({
   const [lineTargets, setLineTargets] = useState<Record<string, LineTarget>>(
     {},
   );
-  const [fileReloadTokens, setFileReloadTokens] = useState<
-    Record<string, number>
-  >({});
   const [historyRefreshKey, setHistoryRefreshKey] = useState(0);
   const [diffViews, setDiffViews] = useState<
     Record<number, DiffViewState | null>
@@ -405,7 +402,7 @@ function FileBrowserInner({
       stableStatusRefs.map(async (ref) => {
         const key = checkoutRefKey(ref);
         try {
-          next[key] = await gitStatusScoped(workspaceId, ref);
+          next[key] = (await gitStatusScoped(workspaceId, ref)).status;
         } catch {
           next[key] = {};
         }
@@ -585,14 +582,6 @@ function FileBrowserInner({
     }));
   }, []);
 
-  const requestFileReload = useCallback((ref: CheckoutRef, path: string) => {
-    const key = tabIdentityKey({ ref, path });
-    setFileReloadTokens((prev) => ({
-      ...prev,
-      [key]: (prev[key] ?? 0) + 1,
-    }));
-  }, []);
-
   const discardActiveIfNeeded = useCallback(
     (groupIndex: number, nextKey?: string): boolean => {
       const state = store.getState();
@@ -751,47 +740,6 @@ function FileBrowserInner({
   const closeRevision = useCallback((groupIndex: number) => {
     setRevisionViews((prev) => ({ ...prev, [groupIndex]: null }));
   }, []);
-
-  const restoreSnapshot = useCallback(
-    async (ref: CheckoutRef, path: string, content: string) => {
-      const key = tabIdentityKey({ ref, path });
-      const state = store.getState();
-      const isOpen = state.groups.some((group) =>
-        group.tabs.some((tab) => tabIdentityKey(tab) === key),
-      );
-      const unsavedWarning =
-        isOpen && state.dirty[key]
-          ? "\n\nUnsaved edits in the open tab will be replaced."
-          : "";
-      const ok = window.confirm(
-        `Restore ${checkoutTitle(ref, path)}?${unsavedWarning}`,
-      );
-      if (!ok) return;
-      await writeScopedFile(workspaceId, ref, path, content);
-      store.getState().setDirty(key, false);
-      if (isOpen) requestFileReload(ref, path);
-      setDiffViews({});
-      setRevisionViews({});
-      markIndexStale();
-      void refreshCheckouts();
-      void refreshGitStatus();
-      setHistoryRefreshKey((key) => key + 1);
-      refreshParents(ref, path);
-      showToast(`Restored ${basename(path)}`, { type: "success" });
-      openFile(ref, path);
-    },
-    [
-      workspaceId,
-      store,
-      requestFileReload,
-      markIndexStale,
-      refreshCheckouts,
-      refreshGitStatus,
-      refreshParents,
-      showToast,
-      openFile,
-    ],
-  );
 
   const handleResizeDelta = useCallback((deltaPx: number) => {
     setTreeWidth((w) => {
@@ -1293,13 +1241,7 @@ function FileBrowserInner({
               onOpenEditableFile={(groupIndex, ref, path) =>
                 openFile(ref, path, groupIndex)
               }
-              onRestoreSnapshot={restoreSnapshot}
               historyRefreshKey={historyRefreshKey}
-              reloadToken={
-                groups[0]?.active
-                  ? fileReloadTokens[groups[0].active]
-                  : undefined
-              }
               onLineTargetApplied={handleLineTargetApplied}
               lineTarget={
                 groups[0]?.active ? lineTargets[groups[0].active] : undefined
@@ -1339,13 +1281,7 @@ function FileBrowserInner({
                   onOpenEditableFile={(groupIndex, ref, path) =>
                     openFile(ref, path, groupIndex)
                   }
-                  onRestoreSnapshot={restoreSnapshot}
                   historyRefreshKey={historyRefreshKey}
-                  reloadToken={
-                    groups[1]?.active
-                      ? fileReloadTokens[groups[1].active]
-                      : undefined
-                  }
                   onLineTargetApplied={handleLineTargetApplied}
                   lineTarget={
                     groups[1]?.active
