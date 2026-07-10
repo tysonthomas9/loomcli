@@ -747,16 +747,13 @@ func (g *GitOpsImpl) Status(worktreePath, targetBranch string) (*ops.GitStatusRe
 	}, nil
 }
 
-func (g *GitOpsImpl) GitStatusPorcelain(worktreePath string) (map[string]string, error) {
-	status, err := git.GetPorcelainStatus(worktreePath)
-	if err != nil {
-		return nil, err
-	}
-	return map[string]string(status), nil
+func (g *GitOpsImpl) GitStatusPorcelain(ctx context.Context, worktreePath string) (ops.GitFileStatusResult, error) {
+	status, err := git.NewGitInspector().Status(ctx, worktreePath)
+	return ops.GitFileStatusResult{Entries: status.Entries, Partial: status.Partial, LimitHit: status.LimitHit}, err
 }
 
-func (g *GitOpsImpl) GitShowFileAtRev(worktreePath, rev, path string, maxBytes int64) (*ops.GitFileContentAtRev, error) {
-	result, err := git.ShowFileAtRev(worktreePath, rev, path, maxBytes)
+func (g *GitOpsImpl) GitShowFileAtRev(ctx context.Context, worktreePath, rev, path string, maxBytes int64) (*ops.GitFileContentAtRev, error) {
+	result, err := git.NewGitInspector().Show(ctx, worktreePath, rev, path, maxBytes)
 	if err != nil {
 		return nil, err
 	}
@@ -767,16 +764,19 @@ func (g *GitOpsImpl) GitShowFileAtRev(worktreePath, rev, path string, maxBytes i
 	}, nil
 }
 
-func (g *GitOpsImpl) GitDiffFile(worktreePath, path, from, to string) (string, error) {
-	return git.DiffFile(worktreePath, path, from, to)
+func (g *GitOpsImpl) GitDiffFile(ctx context.Context, worktreePath, path, from, to string) (ops.GitBoundedTextResult, error) {
+	result, err := git.NewGitInspector().Diff(ctx, worktreePath, path, from, to)
+	return ops.GitBoundedTextResult{Output: string(result.Output), Partial: result.Partial, LimitHit: result.LimitHit}, err
 }
 
-func (g *GitOpsImpl) GitLogFile(worktreePath, path string, limit int) (string, error) {
-	return git.LogFile(worktreePath, path, limit)
+func (g *GitOpsImpl) GitLogFile(ctx context.Context, worktreePath, path string, limit int) (ops.GitBoundedTextResult, error) {
+	result, err := git.NewGitInspector().Log(ctx, worktreePath, path, limit)
+	return ops.GitBoundedTextResult{Output: string(result.Output), Partial: result.Partial, LimitHit: result.LimitHit}, err
 }
 
-func (g *GitOpsImpl) GitBlamePorcelain(worktreePath, path string) (string, error) {
-	return git.BlamePorcelain(worktreePath, path)
+func (g *GitOpsImpl) GitBlamePorcelain(ctx context.Context, worktreePath, path string) (ops.GitBoundedTextResult, error) {
+	result, err := git.NewGitInspector().Blame(ctx, worktreePath, path)
+	return ops.GitBoundedTextResult{Output: string(result.Output), Partial: result.Partial, LimitHit: result.LimitHit}, err
 }
 
 func (g *GitOpsImpl) ResolveLoomDataDir() (string, error) {
@@ -785,6 +785,10 @@ func (g *GitOpsImpl) ResolveLoomDataDir() (string, error) {
 		return "", fmt.Errorf("cannot resolve loom data directory")
 	}
 	return filepath.Abs(dir)
+}
+
+func (g *GitOpsImpl) GitCurrentBranch(ctx context.Context, worktreePath string) (string, error) {
+	return git.NewGitInspector().CurrentBranch(ctx, worktreePath)
 }
 
 func (g *GitOpsImpl) GetCurrentBranch(worktreePath string) (string, error) {

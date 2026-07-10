@@ -43,16 +43,12 @@ function DiffEditorPane({
   onToggleHistory,
   onClose,
   onOpenFile,
-  onRestore,
 }: {
   diffView: DiffViewState;
   historyOpen: boolean;
   onToggleHistory: () => void;
   onClose: () => void;
   onOpenFile: (ref: CheckoutRef, path: string) => void;
-  onRestore:
-    | ((ref: CheckoutRef, path: string, content: string) => Promise<void>)
-    | undefined;
 }) {
   const { workspaceId } = useWorkspaceContext();
   const [patch, setPatch] = useState<string | null>(diffView.patch ?? null);
@@ -135,21 +131,6 @@ function DiffEditorPane({
               Open file
             </button>
           )}
-          {diffView.restoreContent !== undefined && onRestore && (
-            <button
-              type="button"
-              className={styles.saveButton}
-              onClick={() =>
-                void onRestore(
-                  diffView.ref,
-                  diffView.path,
-                  diffView.restoreContent ?? "",
-                )
-              }
-            >
-              Restore
-            </button>
-          )}
           <button
             type="button"
             className={styles.iconButton}
@@ -207,7 +188,6 @@ export function FileExplorerEditorGroup({
   onOpenRevision,
   onCloseRevision,
   onOpenEditableFile,
-  onRestoreSnapshot,
   historyRefreshKey,
   reloadToken,
   lineTarget,
@@ -233,11 +213,6 @@ export function FileExplorerEditorGroup({
     ref: CheckoutRef,
     path: string,
   ) => void;
-  onRestoreSnapshot: (
-    ref: CheckoutRef,
-    path: string,
-    content: string,
-  ) => Promise<void>;
   historyRefreshKey: number;
   reloadToken?: number | undefined;
   lineTarget?: LineTarget | undefined;
@@ -288,7 +263,6 @@ export function FileExplorerEditorGroup({
         onClose={closeHistory}
         onOpenDiff={(request) => onOpenDiff(groupIndex, request)}
         onOpenRevision={(request) => onOpenRevision(groupIndex, request)}
-        onRestoreSnapshot={onRestoreSnapshot}
       />
     ) : null;
 
@@ -449,7 +423,6 @@ export function FileExplorerEditorGroup({
               onOpenFile={(ref, path) =>
                 onOpenEditableFile(groupIndex, ref, path)
               }
-              onRestore={onRestoreSnapshot}
             />
           </div>
           {renderHistoryPanel()}

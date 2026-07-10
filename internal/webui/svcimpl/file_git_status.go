@@ -5,7 +5,10 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/ops"
 	webuilog "github.com/tysonthomas9/loomcli/internal/webui/log"
@@ -20,6 +23,11 @@ type gitStatusCheckout struct {
 	prefix string
 }
 
+const (
+	workspaceGitFanoutTimeout = 10 * time.Second
+	workspaceGitConcurrency   = 4
+)
+
 func (s *fileServiceImpl) GitStatusScoped(ctx context.Context, wsID string, scope service.FileScope, target, repo string) (service.FileGitStatusResult, error) {
 	switch scope {
 	case service.ScopeWorkspace:
@@ -27,43 +35,45 @@ func (s *fileServiceImpl) GitStatusScoped(ctx context.Context, wsID string, scop
 	case service.ScopeRepo, service.ScopeAgent:
 		root, err := s.resolveScopeRoot(wsID, scope, target, repo)
 		if err != nil {
-			return nil, err
+			return service.FileGitStatusResult{}, err
 		}
 		if err := validateGitCheckoutRoot(root); err != nil {
-			return nil, err
+			return service.FileGitStatusResult{}, err
 		}
-		status, err := s.fileOps.GitStatusPorcelain(root)
+		status, err := s.fileOps.GitStatusPorcelain(ctx, root)
 		if err != nil {
-			return nil, service.ErrInternal("failed to run git status", err)
+			return service.FileGitStatusResult{}, mapGitInspectionError("failed to run git status", err)
 		}
-		return filterSensitiveGitStatus(ctx, service.FileGitStatusResult(status)), nil
+		return service.FileGitStatusResult{
+			Status:  filterSensitiveGitStatus(ctx, status.Entries),
+			Partial: status.Partial, LimitHit: status.LimitHit,
+			Errors: []service.FileCheckoutError{},
+		}, nil
 	default:
-		return nil, service.ErrValidation("unsupported scope " + string(scope))
+		return service.FileGitStatusResult{}, service.ErrValidation("unsupported scope " + string(scope))
 	}
 }
 
 func (s *fileServiceImpl) workspaceGitStatus(ctx context.Context, wsID, target, repo string) (service.FileGitStatusResult, error) {
 	if target != "" {
-		return nil, service.ErrValidation("workspace scope does not take a target")
+		return service.FileGitStatusResult{}, service.ErrValidation("workspace scope does not take a target")
 	}
 	if repo != "" {
-		return nil, service.ErrValidation("repo qualifier is only supported for agent scope")
+		return service.FileGitStatusResult{}, service.ErrValidation("repo qualifier is only supported for agent scope")
 	}
 	wsRoot, err := s.resolveWorkspaceScopeRoot(wsID, target)
 	if err != nil {
-		return nil, err
+		return service.FileGitStatusResult{}, err
 	}
 	ws, err := s.resolveWorkspaceData(wsID)
 	if err != nil {
-		return nil, err
+		return service.FileGitStatusResult{}, err
 	}
 	checkouts := s.workspaceGitStatusCheckouts(wsID, wsRoot, ws)
-	result := service.FileGitStatusResult{}
+	result := &service.FileGitStatusResult{Status: map[string]string{}, Errors: []service.FileCheckoutError{}}
 	seen := make(map[string]struct{}, len(checkouts))
+	unique := make([]gitStatusCheckout, 0, len(checkouts))
 	for _, checkout := range checkouts {
-		if err := ctx.Err(); err != nil {
-			return nil, service.ErrTimeout("git status canceled")
-		}
 		if _, ok := seen[checkout.path]; ok {
 			continue
 		}
@@ -71,21 +81,20 @@ func (s *fileServiceImpl) workspaceGitStatus(ctx context.Context, wsID, target, 
 		if !checkoutPathPresent(wsRoot, checkout.path) {
 			continue
 		}
-		status, err := s.fileOps.GitStatusPorcelain(checkout.path)
-		if err != nil {
-			logger.DebugContext(ctx, "skipping checkout with unavailable git status",
-				"workspace", wsID,
-				"kind", checkout.kind,
-				"agent", checkout.agent,
-				"repo", checkout.repo,
-				"path", checkout.path,
-				"err", err,
-			)
+		unique = append(unique, checkout)
+	}
+	for _, item := range s.inspectWorkspaceCheckouts(ctx, unique, false) {
+		if item.err != nil {
+			result.Partial = true
+			result.Errors = append(result.Errors, checkoutError(item.checkout, item.err))
 			continue
 		}
-		mergePrefixedGitStatus(ctx, result, checkout.prefix, status)
+		result.Partial = result.Partial || item.status.Partial
+		result.LimitHit = result.LimitHit || item.status.LimitHit
+		mergePrefixedGitStatus(ctx, result.Status, item.checkout.prefix, item.status.Entries)
 	}
-	return result, nil
+	sortCheckoutErrors(result.Errors)
+	return *result, nil
 }
 
 func (s *fileServiceImpl) workspaceGitStatusCheckouts(wsID, wsRoot string, ws *ops.WorkspaceData) []gitStatusCheckout {
@@ -127,11 +136,15 @@ func (s *fileServiceImpl) ListFileCheckouts(ctx context.Context, wsID string) (*
 	}
 	wsRoot := ws.Path
 	checkouts := workspaceFileCheckouts(wsID, wsRoot, ws)
+	inspectable := presentGitCheckouts(wsRoot, checkouts)
+	items := s.inspectWorkspaceCheckouts(ctx, inspectable, true)
+	byPath := make(map[string]workspaceGitInspection, len(items))
+	for _, item := range items {
+		byPath[item.checkout.path] = item
+	}
 	out := make([]service.FileCheckout, 0, len(checkouts))
+	result := &service.FileCheckoutsResult{Errors: []service.FileCheckoutError{}}
 	for _, checkout := range checkouts {
-		if err := ctx.Err(); err != nil {
-			return nil, service.ErrTimeout("checkout listing canceled")
-		}
 		item := service.FileCheckout{
 			Kind:  checkout.kind,
 			Agent: checkout.agent,
@@ -139,28 +152,97 @@ func (s *fileServiceImpl) ListFileCheckouts(ctx context.Context, wsID string) (*
 		}
 		if checkoutPathPresent(wsRoot, checkout.path) {
 			item.Exists = true
-			status, err := s.fileOps.GitStatusPorcelain(checkout.path)
-			if err != nil {
+			inspection := byPath[checkout.path]
+			if inspection.err != nil {
 				item.StatusError = true
-				logger.DebugContext(ctx, "checkout git status unavailable",
-					"workspace", wsID,
-					"kind", checkout.kind,
-					"agent", checkout.agent,
-					"repo", checkout.repo,
-					"path", checkout.path,
-					"err", err,
-				)
+				item.Error = inspection.err.Error()
+				result.Partial = true
+				result.Errors = append(result.Errors, checkoutError(checkout, inspection.err))
 				out = append(out, item)
 				continue
 			}
-			item.ChangeCount = len(filterSensitiveGitStatus(ctx, service.FileGitStatusResult(status)))
-			if branch, err := s.fileOps.GetCurrentBranch(checkout.path); err == nil {
-				item.Branch = branch
+			item.Partial, item.LimitHit = inspection.status.Partial, inspection.status.LimitHit
+			result.Partial = result.Partial || item.Partial
+			result.LimitHit = result.LimitHit || item.LimitHit
+			item.ChangeCount = len(filterSensitiveGitStatus(ctx, inspection.status.Entries))
+			item.Branch = inspection.branch
+			if inspection.branchErr != nil {
+				item.Partial = true
+				item.Error = inspection.branchErr.Error()
+				result.Partial = true
+				result.Errors = append(result.Errors, checkoutError(checkout, inspection.branchErr))
 			}
 		}
 		out = append(out, item)
 	}
-	return &service.FileCheckoutsResult{Checkouts: out}, nil
+	result.Checkouts = out
+	sortCheckoutErrors(result.Errors)
+	return result, nil
+}
+
+func presentGitCheckouts(wsRoot string, checkouts []gitStatusCheckout) []gitStatusCheckout {
+	out := make([]gitStatusCheckout, 0, len(checkouts))
+	for _, checkout := range checkouts {
+		if checkoutPathPresent(wsRoot, checkout.path) {
+			out = append(out, checkout)
+		}
+	}
+	return out
+}
+
+type workspaceGitInspection struct {
+	checkout  gitStatusCheckout
+	status    ops.GitFileStatusResult
+	branch    string
+	branchErr error
+	err       error
+}
+
+func (s *fileServiceImpl) inspectWorkspaceCheckouts(ctx context.Context, checkouts []gitStatusCheckout, includeBranch bool) []workspaceGitInspection {
+	ctx, cancel := context.WithTimeout(ctx, workspaceGitFanoutTimeout)
+	defer cancel()
+	sem := make(chan struct{}, workspaceGitConcurrency)
+	results := make(chan workspaceGitInspection, len(checkouts))
+	var wg sync.WaitGroup
+	for _, checkout := range checkouts {
+		wg.Add(1)
+		go func(checkout gitStatusCheckout) {
+			defer wg.Done()
+			select {
+			case sem <- struct{}{}:
+				defer func() { <-sem }()
+			case <-ctx.Done():
+				results <- workspaceGitInspection{checkout: checkout, err: ctx.Err()}
+				return
+			}
+			status, err := s.fileOps.GitStatusPorcelain(ctx, checkout.path)
+			item := workspaceGitInspection{checkout: checkout, status: status, err: err}
+			if err == nil && includeBranch {
+				item.branch, item.branchErr = s.fileOps.GitCurrentBranch(ctx, checkout.path)
+			}
+			results <- item
+		}(checkout)
+	}
+	wg.Wait()
+	close(results)
+	out := make([]workspaceGitInspection, 0, len(checkouts))
+	for item := range results {
+		out = append(out, item)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].checkout.path < out[j].checkout.path })
+	return out
+}
+
+func checkoutError(checkout gitStatusCheckout, err error) service.FileCheckoutError {
+	return service.FileCheckoutError{Kind: checkout.kind, Agent: checkout.agent, Repo: checkout.repo, Error: err.Error()}
+}
+
+func sortCheckoutErrors(errors []service.FileCheckoutError) {
+	sort.Slice(errors, func(i, j int) bool {
+		left := errors[i].Kind + "\x00" + errors[i].Agent + "\x00" + errors[i].Repo
+		right := errors[j].Kind + "\x00" + errors[j].Agent + "\x00" + errors[j].Repo
+		return left < right
+	})
 }
 
 func (s *fileServiceImpl) RepairCheckout(ctx context.Context, wsID string, req service.FileCheckoutRepairRequest) (*ops.RepairResult, error) {
@@ -220,7 +302,7 @@ func agentCheckoutRepos(repos []ops.WorkspaceRepo, agent ops.WorkspaceAgentInfo)
 	return out
 }
 
-func mergePrefixedGitStatus(ctx context.Context, dst service.FileGitStatusResult, prefix string, status map[string]string) {
+func mergePrefixedGitStatus(ctx context.Context, dst map[string]string, prefix string, status map[string]string) {
 	for path, xy := range status {
 		if prefix != "" {
 			path = prefix + "/" + path
@@ -232,11 +314,11 @@ func mergePrefixedGitStatus(ctx context.Context, dst service.FileGitStatusResult
 	}
 }
 
-func filterSensitiveGitStatus(ctx context.Context, status service.FileGitStatusResult) service.FileGitStatusResult {
+func filterSensitiveGitStatus(ctx context.Context, status map[string]string) map[string]string {
 	if fileRequestAllowsSensitive(ctx) {
 		return status
 	}
-	filtered := make(service.FileGitStatusResult, len(status))
+	filtered := make(map[string]string, len(status))
 	for path, xy := range status {
 		if service.FilePathAllowsSensitive(ctx, path) {
 			filtered[path] = xy

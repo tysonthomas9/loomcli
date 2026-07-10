@@ -221,6 +221,24 @@ func (e FileCheckoutKind) Valid() bool {
 	}
 }
 
+// Defines values for FileCheckoutErrorKind.
+const (
+	FileCheckoutErrorKindAgent FileCheckoutErrorKind = "agent"
+	FileCheckoutErrorKindRepo  FileCheckoutErrorKind = "repo"
+)
+
+// Valid indicates whether the value is a known member of the FileCheckoutErrorKind enum.
+func (e FileCheckoutErrorKind) Valid() bool {
+	switch e {
+	case FileCheckoutErrorKindAgent:
+		return true
+	case FileCheckoutErrorKindRepo:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for FileCheckoutRepairRequestScope.
 const (
 	FileCheckoutRepairRequestScopeAgent FileCheckoutRepairRequestScope = "agent"
@@ -266,15 +284,12 @@ func (e FileCheckoutRepairResponseMethod) Valid() bool {
 // Defines values for FileHistoryEntryKind.
 const (
 	Commit FileHistoryEntryKind = "commit"
-	Save   FileHistoryEntryKind = "save"
 )
 
 // Valid indicates whether the value is a known member of the FileHistoryEntryKind enum.
 func (e FileHistoryEntryKind) Valid() bool {
 	switch e {
 	case Commit:
-		return true
-	case Save:
 		return true
 	default:
 		return false
@@ -1171,19 +1186,19 @@ func (e StatScopedFileParamsScope) Valid() bool {
 
 // Defines values for GetScopedFileTreeParamsScope.
 const (
-	Agent     GetScopedFileTreeParamsScope = "agent"
-	Repo      GetScopedFileTreeParamsScope = "repo"
-	Workspace GetScopedFileTreeParamsScope = "workspace"
+	GetScopedFileTreeParamsScopeAgent     GetScopedFileTreeParamsScope = "agent"
+	GetScopedFileTreeParamsScopeRepo      GetScopedFileTreeParamsScope = "repo"
+	GetScopedFileTreeParamsScopeWorkspace GetScopedFileTreeParamsScope = "workspace"
 )
 
 // Valid indicates whether the value is a known member of the GetScopedFileTreeParamsScope enum.
 func (e GetScopedFileTreeParamsScope) Valid() bool {
 	switch e {
-	case Agent:
+	case GetScopedFileTreeParamsScopeAgent:
 		return true
-	case Repo:
+	case GetScopedFileTreeParamsScopeRepo:
 		return true
-	case Workspace:
+	case GetScopedFileTreeParamsScopeWorkspace:
 		return true
 	default:
 		return false
@@ -1593,11 +1608,13 @@ type FileBlameLine struct {
 
 // FileBlameResponse defines model for FileBlameResponse.
 type FileBlameResponse struct {
-	Lines   []FileBlameLine `json:"lines"`
-	Message *string         `json:"message,omitempty"`
-	Path    string          `json:"path"`
-	Reason  *string         `json:"reason,omitempty"`
-	Skipped bool            `json:"skipped"`
+	LimitHit bool            `json:"limit_hit"`
+	Lines    []FileBlameLine `json:"lines"`
+	Message  *string         `json:"message,omitempty"`
+	Partial  bool            `json:"partial"`
+	Path     string          `json:"path"`
+	Reason   *string         `json:"reason,omitempty"`
+	Skipped  bool            `json:"skipped"`
 }
 
 // FileCapabilitiesResponse defines model for FileCapabilitiesResponse.
@@ -1612,14 +1629,28 @@ type FileCheckout struct {
 	Agent       *string          `json:"agent,omitempty"`
 	Branch      *string          `json:"branch,omitempty"`
 	ChangeCount int              `json:"change_count"`
+	Error       *string          `json:"error,omitempty"`
 	Exists      bool             `json:"exists"`
 	Kind        FileCheckoutKind `json:"kind"`
+	LimitHit    *bool            `json:"limit_hit,omitempty"`
+	Partial     *bool            `json:"partial,omitempty"`
 	Repo        string           `json:"repo"`
 	StatusError *bool            `json:"status_error,omitempty"`
 }
 
 // FileCheckoutKind defines model for FileCheckout.Kind.
 type FileCheckoutKind string
+
+// FileCheckoutError defines model for FileCheckoutError.
+type FileCheckoutError struct {
+	Agent *string               `json:"agent,omitempty"`
+	Error string                `json:"error"`
+	Kind  FileCheckoutErrorKind `json:"kind"`
+	Repo  string                `json:"repo"`
+}
+
+// FileCheckoutErrorKind defines model for FileCheckoutError.Kind.
+type FileCheckoutErrorKind string
 
 // FileCheckoutRepairRequest defines model for FileCheckoutRepairRequest.
 type FileCheckoutRepairRequest struct {
@@ -1648,30 +1679,35 @@ type FileCheckoutRepairResponseMethod string
 
 // FileCheckoutsResponse defines model for FileCheckoutsResponse.
 type FileCheckoutsResponse struct {
-	Checkouts []FileCheckout `json:"checkouts"`
+	Checkouts []FileCheckout      `json:"checkouts"`
+	Errors    []FileCheckoutError `json:"errors"`
+	LimitHit  bool                `json:"limit_hit"`
+	Partial   bool                `json:"partial"`
 }
 
 // FileDiffResponse defines model for FileDiffResponse.
 type FileDiffResponse struct {
-	Patch string `json:"patch"`
-	Path  string `json:"path"`
+	LimitHit bool   `json:"limit_hit"`
+	Partial  bool   `json:"partial"`
+	Patch    string `json:"patch"`
+	Path     string `json:"path"`
 }
 
 // FileGitStatusResponse defines model for FileGitStatusResponse.
-type FileGitStatusResponse map[string]string
+type FileGitStatusResponse struct {
+	Errors   []FileCheckoutError `json:"errors"`
+	LimitHit bool                `json:"limit_hit"`
+	Partial  bool                `json:"partial"`
+	Status   map[string]string   `json:"status"`
+}
 
 // FileHistoryEntry defines model for FileHistoryEntry.
 type FileHistoryEntry struct {
-	Author    *string              `json:"author,omitempty"`
-	Binary    *bool                `json:"binary,omitempty"`
-	Content   *string              `json:"content,omitempty"`
-	Id        *string              `json:"id,omitempty"`
-	Kind      FileHistoryEntryKind `json:"kind"`
-	Sha       *string              `json:"sha,omitempty"`
-	Size      *int64               `json:"size,omitempty"`
-	Summary   string               `json:"summary"`
-	Time      string               `json:"time"`
-	Truncated *bool                `json:"truncated,omitempty"`
+	Author  string               `json:"author"`
+	Kind    FileHistoryEntryKind `json:"kind"`
+	Sha     string               `json:"sha"`
+	Summary string               `json:"summary"`
+	Time    string               `json:"time"`
 }
 
 // FileHistoryEntryKind defines model for FileHistoryEntry.Kind.
@@ -1679,8 +1715,10 @@ type FileHistoryEntryKind string
 
 // FileHistoryResponse defines model for FileHistoryResponse.
 type FileHistoryResponse struct {
-	Entries []FileHistoryEntry `json:"entries"`
-	Path    string             `json:"path"`
+	Entries  []FileHistoryEntry `json:"entries"`
+	LimitHit bool               `json:"limit_hit"`
+	Partial  bool               `json:"partial"`
+	Path     string             `json:"path"`
 }
 
 // FileIndexResponse defines model for FileIndexResponse.

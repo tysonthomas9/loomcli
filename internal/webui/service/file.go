@@ -85,7 +85,7 @@ type FileService interface {
 	// BlameFileScoped returns parsed git blame line blocks or a bounded skip signal.
 	BlameFileScoped(ctx context.Context, wsID string, scope FileScope, target, repo, path string) (*FileBlameResult, error)
 
-	// HistoryFileScoped returns commit and browser-save timeline entries for a file.
+	// HistoryFileScoped returns bounded commit history for a file.
 	HistoryFileScoped(ctx context.Context, wsID string, scope FileScope, target, repo, path string) (*FileHistoryResult, error)
 
 	// WriteFileScoped creates or updates a file under a scope root.
@@ -207,9 +207,23 @@ type FileSearchMatch struct {
 	Preview string `json:"preview"`
 }
 
-// FileGitStatusResult maps root-relative file paths to raw two-character git
-// status --porcelain XY codes.
-type FileGitStatusResult map[string]string
+// FileGitStatusResult contains bounded status decoration data. Workspace scope
+// may be partial when one checkout fails or a bound is reached.
+type FileGitStatusResult struct {
+	Status   map[string]string   `json:"status"`
+	Partial  bool                `json:"partial"`
+	LimitHit bool                `json:"limit_hit"`
+	Errors   []FileCheckoutError `json:"errors"`
+}
+
+// FileCheckoutError reports one unavailable checkout without hiding healthy
+// status data from the rest of a workspace fan-out.
+type FileCheckoutError struct {
+	Kind  string `json:"kind"`
+	Agent string `json:"agent,omitempty"`
+	Repo  string `json:"repo"`
+	Error string `json:"error"`
+}
 
 // FileCheckout describes a concrete repo or agent checkout known to the
 // workspace file browser.
@@ -221,11 +235,17 @@ type FileCheckout struct {
 	Branch      string `json:"branch,omitempty"`
 	ChangeCount int    `json:"change_count"`
 	StatusError bool   `json:"status_error,omitempty"`
+	Error       string `json:"error,omitempty"`
+	Partial     bool   `json:"partial,omitempty"`
+	LimitHit    bool   `json:"limit_hit,omitempty"`
 }
 
 // FileCheckoutsResult is the response for checkout enumeration.
 type FileCheckoutsResult struct {
-	Checkouts []FileCheckout `json:"checkouts"`
+	Checkouts []FileCheckout      `json:"checkouts"`
+	Partial   bool                `json:"partial"`
+	LimitHit  bool                `json:"limit_hit"`
+	Errors    []FileCheckoutError `json:"errors"`
 }
 
 // FileCheckoutRepairRequest is the JSON body for checkout repair.
@@ -238,8 +258,10 @@ type FileCheckoutRepairRequest struct {
 
 // FileDiffResult contains a unified diff patch for one file.
 type FileDiffResult struct {
-	Path  string `json:"path"`
-	Patch string `json:"patch"`
+	Path     string `json:"path"`
+	Patch    string `json:"patch"`
+	Partial  bool   `json:"partial"`
+	LimitHit bool   `json:"limit_hit"`
 }
 
 // FileBlameLine describes a contiguous line block from git blame --porcelain.
@@ -254,31 +276,30 @@ type FileBlameLine struct {
 
 // FileBlameResult contains parsed blame data or a bounded skip signal.
 type FileBlameResult struct {
-	Path    string          `json:"path"`
-	Skipped bool            `json:"skipped"`
-	Reason  string          `json:"reason,omitempty"`
-	Message string          `json:"message,omitempty"`
-	Lines   []FileBlameLine `json:"lines"`
+	Path     string          `json:"path"`
+	Skipped  bool            `json:"skipped"`
+	Reason   string          `json:"reason,omitempty"`
+	Message  string          `json:"message,omitempty"`
+	Lines    []FileBlameLine `json:"lines"`
+	Partial  bool            `json:"partial"`
+	LimitHit bool            `json:"limit_hit"`
 }
 
-// FileHistoryEntry is one Timeline item, kind-tagged as commit or save.
+// FileHistoryEntry is one Git commit that changed a file.
 type FileHistoryEntry struct {
-	Kind      string `json:"kind"`
-	ID        string `json:"id,omitempty"`
-	SHA       string `json:"sha,omitempty"`
-	Author    string `json:"author,omitempty"`
-	Time      string `json:"time"`
-	Summary   string `json:"summary"`
-	Content   string `json:"content,omitempty"`
-	Size      int64  `json:"size,omitempty"`
-	Binary    bool   `json:"binary,omitempty"`
-	Truncated bool   `json:"truncated,omitempty"`
+	Kind    string `json:"kind"`
+	SHA     string `json:"sha"`
+	Author  string `json:"author"`
+	Time    string `json:"time"`
+	Summary string `json:"summary"`
 }
 
-// FileHistoryResult contains the merged file Timeline entries.
+// FileHistoryResult contains bounded commit history.
 type FileHistoryResult struct {
-	Path    string             `json:"path"`
-	Entries []FileHistoryEntry `json:"entries"`
+	Path     string             `json:"path"`
+	Entries  []FileHistoryEntry `json:"entries"`
+	Partial  bool               `json:"partial"`
+	LimitHit bool               `json:"limit_hit"`
 }
 
 // FileMoveRequest is the JSON body for a scoped file move/rename operation.
