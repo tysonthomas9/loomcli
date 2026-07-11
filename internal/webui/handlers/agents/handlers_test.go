@@ -85,6 +85,40 @@ func TestHandleCreateCarriesInteractiveKindAndPromptFile(t *testing.T) {
 	}
 }
 
+func TestHandleCreateCarriesInlinePrompt(t *testing.T) {
+	ctx := context.Background()
+	st := memstore.New()
+	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{
+		Key: "TEST2", Name: "Test 2", DefaultBranch: "main",
+	}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	agentSvc := svcimpl.NewAgentService(nil, nil, nil, st)
+	body := []byte(`{
+		"name":"custom-nova",
+		"role_name":"custom-nova",
+		"kind":"interactive",
+		"prompt":"Literal {{ marker }}",
+		"backend":"codex"
+	}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/workspaces/TEST2/agents", bytes.NewReader(body))
+	req = req.WithContext(middleware.WithWorkspace(req.Context(), "TEST2"))
+	rr := httptest.NewRecorder()
+
+	HandleCreate(agentSvc, nil).ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("status = %d body = %s, want 201", rr.Code, rr.Body.String())
+	}
+	role, err := st.Roles().Get(ctx, "TEST2", "custom-nova")
+	if err != nil {
+		t.Fatalf("load created role: %v", err)
+	}
+	if role.Prompt != "Literal {{ marker }}" {
+		t.Fatalf("role prompt = %q, want literal transport value", role.Prompt)
+	}
+}
+
 func TestBroadcastAgentRefreshEmitsGenericAgentEvent(t *testing.T) {
 	hub := realtime.NewHub()
 	go hub.Run()

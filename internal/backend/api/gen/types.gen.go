@@ -2137,6 +2137,9 @@ type CreateAgentJSONBody struct {
 	Name   string  `json:"name"`
 	Parent *string `json:"parent,omitempty"`
 
+	// Prompt Literal inline prompt text for interactive roles.
+	Prompt *string `json:"prompt,omitempty"`
+
 	// PromptFile Custom or builtin prompt selector for interactive roles.
 	PromptFile   *string   `json:"prompt_file,omitempty"`
 	RepoGroups   *[]string `json:"repo_groups,omitempty"`

@@ -104,7 +104,7 @@ func runLead(cmd *cobra.Command, args []string) {
 	defer registration.Finalize()
 
 	// Generate the terminal-agent prompt and append the user's initial request if provided.
-	prompt, err := agent.GenerateTerminalPrompt(leadPromptFile)
+	prompt, err := generateLeadTerminalPrompt(context.Background(), registration)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error loading terminal prompt: %v\n", err)
 		fmt.Fprintf(os.Stderr, "\nDropping into a shell. Fix the prompt file and run 'loom lead' to retry.\n\n")
@@ -135,6 +135,56 @@ func runLead(cmd *cobra.Command, args []string) {
 		fmt.Fprintf(os.Stderr, "\nDropping into a shell. Fix the issue and run 'loom lead' to retry.\n\n")
 		execShell(workDir)
 	}
+}
+
+func generateLeadTerminalPrompt(ctx context.Context, registration leadSessionRegistration) (string, error) {
+	if strings.TrimSpace(leadPromptFile) != "" {
+		return agent.GenerateTerminalPrompt(leadPromptFile)
+	}
+	if prompt := loadLeadRolePrompt(ctx, registration); strings.TrimSpace(prompt) != "" {
+		return agent.GenerateTerminalPromptText(prompt)
+	}
+	return agent.GenerateTerminalPrompt("")
+}
+
+func loadLeadRolePrompt(ctx context.Context, registration leadSessionRegistration) string {
+	roleName := strings.TrimSpace(os.Getenv("LOOM_AGENT_ROLE"))
+	if roleName == "" {
+		roleName = "lead"
+	}
+
+	st := registration.Store()
+	ws := strings.TrimSpace(registration.Workspace)
+	var handle *bootstrap.StoreHandle
+	if st == nil || ws == "" {
+		openCtx, cancel := context.WithTimeout(ctx, leadStoreOpTimeout)
+		defer cancel()
+		var ok bool
+		handle, ws, ok = openLeadSessionStore(openCtx)
+		if !ok {
+			return ""
+		}
+		defer func() { _ = handle.Close() }()
+		st = handle.Store
+	}
+	if st == nil || st.Roles() == nil || ws == "" {
+		return ""
+	}
+
+	loadCtx, cancel := context.WithTimeout(ctx, leadStoreOpTimeout)
+	defer cancel()
+	role, err := st.Roles().Get(loadCtx, ws, roleName)
+	if errors.Is(err, domain.ErrNotFound) {
+		return ""
+	}
+	if err != nil {
+		slog.Warn("lead inline prompt lookup failed, using default prompt", "workspace", ws, "role", roleName, "err", err)
+		return ""
+	}
+	if role == nil {
+		return ""
+	}
+	return role.Prompt
 }
 
 // applyLeadPromptContext appends the backend assignment context and the

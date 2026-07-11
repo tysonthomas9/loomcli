@@ -355,11 +355,12 @@ func (s *agentServiceImpl) CreateAgent(ctx context.Context, in service.AgentCrea
 	in.RoleName = normalizeFirstClassAgentRole(in.RoleName)
 	in.Name = normalizeStoredAgentName(in.Name)
 	in.Kind = normalizeAgentRoleKind(in.Kind)
+	in.Prompt = strings.TrimSpace(in.Prompt)
 	in.PromptFile = strings.TrimSpace(in.PromptFile)
 	if err := validateAgentCreateInput(in); err != nil {
 		return nil, err
 	}
-	if err := s.ensureAgentRole(ctx, in.WorkspaceKey, in.RoleName, in.Kind, in.PromptFile); err != nil {
+	if err := s.ensureAgentRole(ctx, in.WorkspaceKey, in.RoleName, in.Kind, in.Prompt, in.PromptFile); err != nil {
 		return nil, err
 	}
 	created, err := s.store.Agents().Create(ctx, store.AgentCreate{
@@ -447,9 +448,9 @@ func (s *agentServiceImpl) loadAgentRoleForKind(ctx context.Context, workspaceKe
 	return role, nil
 }
 
-func (s *agentServiceImpl) ensureAgentRole(ctx context.Context, workspaceKey, roleName, kind, promptFile string) error {
+func (s *agentServiceImpl) ensureAgentRole(ctx context.Context, workspaceKey, roleName, kind, prompt, promptFile string) error {
 	if existing, err := s.store.Roles().Get(ctx, workspaceKey, roleName); err == nil {
-		return reconcileExistingAgentRole(existing, roleName, kind, promptFile)
+		return reconcileExistingAgentRole(existing, roleName, kind, prompt, promptFile)
 	} else if !errors.Is(err, domain.ErrNotFound) {
 		return service.ErrInternal("load agent role", err)
 	}
@@ -471,9 +472,17 @@ func (s *agentServiceImpl) ensureAgentRole(ctx context.Context, workspaceKey, ro
 		Name:         roleName,
 		Kind:         string(domain.RoleKindInteractive),
 		Description:  description,
+		Prompt:       prompt,
 		PromptFile:   promptFile,
-	}); err != nil && !errors.Is(err, domain.ErrAlreadyExists) {
-		return classifyStoreError("create agent role", err)
+	}); err != nil {
+		if !errors.Is(err, domain.ErrAlreadyExists) {
+			return classifyStoreError("create agent role", err)
+		}
+		existing, getErr := s.store.Roles().Get(ctx, workspaceKey, roleName)
+		if getErr != nil {
+			return classifyStoreError("load concurrently created agent role", getErr)
+		}
+		return reconcileExistingAgentRole(existing, roleName, kind, prompt, promptFile)
 	}
 	return nil
 }
@@ -484,12 +493,15 @@ func (s *agentServiceImpl) ensureAgentRole(ctx context.Context, workspaceKey, ro
 // interactive role (e.g. a custom-file agent whose name collides with the
 // seeded "task"/"plan" worker roles) that conflicts with the stored role, we
 // surface the conflict instead of quietly running the agent as the wrong kind.
-func reconcileExistingAgentRole(existing *domain.Role, roleName, kind, promptFile string) error {
+func reconcileExistingAgentRole(existing *domain.Role, roleName, kind, prompt, promptFile string) error {
 	if kind != string(domain.RoleKindInteractive) {
 		return nil
 	}
 	if domain.ResolveRoleKind(existing, roleName) != domain.RoleKindInteractive {
 		return service.ErrValidation(fmt.Sprintf("role %q already exists and is not interactive; choose a different agent name", roleName))
+	}
+	if p := strings.TrimSpace(prompt); p != "" && strings.TrimSpace(existing.Prompt) != p {
+		return service.ErrValidation(fmt.Sprintf("role %q already exists with a different prompt; choose a different agent name or reuse its prompt", roleName))
 	}
 	if pf := strings.TrimSpace(promptFile); pf != "" && strings.TrimSpace(existing.PromptFile) != pf {
 		return service.ErrValidation(fmt.Sprintf("role %q already exists with a different prompt; choose a different agent name or reuse its prompt", roleName))

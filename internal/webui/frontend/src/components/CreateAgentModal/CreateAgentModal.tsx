@@ -17,15 +17,17 @@ import {
 import { AgentTemplateCard } from "./AgentTemplateCard";
 import styles from "./CreateAgentModal.module.css";
 
-type AgentKind = "background" | "lead" | "interactive";
+type AgentKind = "background" | "interactive";
 type BackgroundRole = "plan" | "task";
-type PromptSource = "builtin" | "file";
+
+const CUSTOM_PROMPT_ID = "custom";
 
 const TEMPLATE_ACCENTS = {
   plan: "#0d9488",
   task: "#ea580c",
   lead: "#db2777",
   interactive: "#2563eb",
+  custom: "#7c3aed",
 } as const;
 
 const DEFAULT_INTERACTIVE_PROMPTS: InteractivePromptInfo[] = [
@@ -62,31 +64,48 @@ const BACKGROUND_TEMPLATES: {
   },
 ];
 
-const LEAD_TEMPLATE = {
-  title: "Lead",
-  description: "Orchestrates an epic interactively in a terminal.",
-  glyph: "L",
-  placeholder: "lead",
-  testId: "create-agent-template-lead",
-  accentColor: TEMPLATE_ACCENTS.lead,
+const CUSTOM_PROMPT_TEMPLATE = {
+  title: "Custom prompt",
+  description: "Define a terminal teammate with your own inline instructions.",
+  glyph: "✦",
+  placeholder: "reviewer",
+  testId: "create-agent-template-custom-prompt",
+  accentColor: TEMPLATE_ACCENTS.custom,
 };
 
-const INTERACTIVE_TEMPLATE = {
-  title: "Interactive",
-  description: "Custom terminal teammate with a built-in or workspace prompt.",
-  glyph: "I",
-  placeholder: "reviewer",
-  testId: "create-agent-template-interactive",
-  accentColor: TEMPLATE_ACCENTS.interactive,
-};
+function interactivePromptCard(prompt: InteractivePromptInfo) {
+  if (prompt.id === "lead") {
+    return {
+      description: "Orchestrates work interactively in a terminal.",
+      glyph: "L",
+      placeholder: "lead",
+      testId: "create-agent-template-lead",
+      accentColor: TEMPLATE_ACCENTS.lead,
+    };
+  }
+  if (prompt.id === "pr-review") {
+    return {
+      description: "Reviews pull requests with focused terminal guidance.",
+      glyph: "R",
+      placeholder: "reviewer",
+      testId: "create-agent-template-interactive-pr-review",
+      accentColor: TEMPLATE_ACCENTS.interactive,
+    };
+  }
+  return {
+    description:
+      "Starts an interactive terminal agent with this built-in prompt.",
+    glyph: prompt.label.trim().charAt(0).toUpperCase() || "I",
+    placeholder: prompt.id,
+    testId: `create-agent-template-interactive-${prompt.id}`,
+    accentColor: TEMPLATE_ACCENTS.interactive,
+  };
+}
 
 function resolveInitialSelection(
   defaultKind: AgentKind | undefined,
   defaultRoleName: BackgroundRole,
 ): { kind: AgentKind; backgroundRole: BackgroundRole } {
-  if (defaultKind === "lead") {
-    return { kind: "lead", backgroundRole: defaultRoleName };
-  }
   if (defaultKind === "interactive") {
     return { kind: "interactive", backgroundRole: defaultRoleName };
   }
@@ -133,10 +152,9 @@ export function CreateAgentModal({
   );
   const [backend, setBackend] = useState(resolvedDefaultBackend);
   const [selectedRepos, setSelectedRepos] = useState<string[]>([]);
-  const [promptSource, setPromptSource] = useState<PromptSource>("builtin");
   const [selectedBuiltinPromptID, setSelectedBuiltinPromptID] =
     useState("pr-review");
-  const [workspacePromptFile, setWorkspacePromptFile] = useState("");
+  const [customPrompt, setCustomPrompt] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const wasOpenRef = useRef(false);
@@ -155,15 +173,32 @@ export function CreateAgentModal({
   );
 
   const namePlaceholder = useMemo(() => {
-    if (selectedKind === "lead") return LEAD_TEMPLATE.placeholder;
-    if (selectedKind === "interactive") return INTERACTIVE_TEMPLATE.placeholder;
+    if (selectedKind === "interactive") {
+      if (selectedBuiltinPromptID === CUSTOM_PROMPT_ID) {
+        return CUSTOM_PROMPT_TEMPLATE.placeholder;
+      }
+      const selectedPrompt = interactivePrompts.find(
+        (prompt) => prompt.id === selectedBuiltinPromptID,
+      );
+      return selectedPrompt
+        ? interactivePromptCard(selectedPrompt).placeholder
+        : "reviewer";
+    }
     const template = BACKGROUND_TEMPLATES.find(
       (t) => t.role === backgroundRole,
     );
     return template?.placeholder ?? "agent";
-  }, [selectedKind, backgroundRole]);
+  }, [
+    selectedKind,
+    backgroundRole,
+    interactivePrompts,
+    selectedBuiltinPromptID,
+  ]);
 
   useEffect(() => {
+    if (selectedBuiltinPromptID === CUSTOM_PROMPT_ID) {
+      return;
+    }
     if (
       interactivePrompts.some((prompt) => prompt.id === selectedBuiltinPromptID)
     ) {
@@ -213,9 +248,8 @@ export function CreateAgentModal({
     setBackgroundRole(selection.backgroundRole);
     setBackend(resolvedDefaultBackend);
     setSelectedRepos(defaultRepos);
-    setPromptSource("builtin");
     setSelectedBuiltinPromptID("pr-review");
-    setWorkspacePromptFile("");
+    setCustomPrompt("");
     setIsSubmitting(false);
     setError(null);
   }, [
@@ -235,8 +269,9 @@ export function CreateAgentModal({
 
   const hasPromptSelection =
     selectedKind !== "interactive" ||
-    (promptSource === "builtin" && selectedBuiltinPromptID.trim() !== "") ||
-    (promptSource === "file" && workspacePromptFile.trim() !== "");
+    (selectedBuiltinPromptID === CUSTOM_PROMPT_ID
+      ? customPrompt.trim() !== ""
+      : selectedBuiltinPromptID.trim() !== "");
   const canSubmit =
     validateStoredAgentName(name) === null &&
     hasPromptSelection &&
@@ -247,12 +282,9 @@ export function CreateAgentModal({
     setBackgroundRole(role);
   };
 
-  const selectLead = (): void => {
-    setSelectedKind("lead");
-  };
-
-  const selectInteractive = (): void => {
+  const selectInteractive = (promptID: string): void => {
     setSelectedKind("interactive");
+    setSelectedBuiltinPromptID(promptID);
   };
 
   const handleSubmit = async (event: FormEvent) => {
@@ -269,18 +301,30 @@ export function CreateAgentModal({
     setIsSubmitting(true);
     try {
       let roleName: string;
-      let promptFile: string | undefined;
-      if (selectedKind === "lead") {
-        roleName = "lead";
-      } else if (selectedKind === "interactive") {
-        if (promptSource === "builtin") {
-          roleName = selectedBuiltinPromptID;
-          promptFile = `builtin:${selectedBuiltinPromptID}`;
-        } else {
-          // Custom-file interactive roles use the agent name as the role slug so
-          // repeated submissions are deterministic without another field.
+      let interactiveFields: {
+        kind?: "interactive";
+        prompt?: string;
+        prompt_file?: string;
+      } = {};
+      const isLeadSelection =
+        selectedKind === "interactive" && selectedBuiltinPromptID === "lead";
+      const isPromptDrivenInteractive =
+        selectedKind === "interactive" && !isLeadSelection;
+      if (selectedKind === "interactive") {
+        if (selectedBuiltinPromptID === CUSTOM_PROMPT_ID) {
           roleName = trimmedName;
-          promptFile = workspacePromptFile.trim();
+          interactiveFields = {
+            kind: "interactive",
+            prompt: customPrompt.trim(),
+          };
+        } else if (isLeadSelection) {
+          roleName = "lead";
+        } else {
+          roleName = selectedBuiltinPromptID;
+          interactiveFields = {
+            kind: "interactive",
+            prompt_file: `builtin:${selectedBuiltinPromptID}`,
+          };
         }
       } else {
         roleName = backgroundRole;
@@ -290,11 +334,9 @@ export function CreateAgentModal({
         name: trimmedName,
         role_name: roleName,
         auto: false,
-        cross_repo: selectedKind === "interactive" ? false : crossRepo,
-        repos: selectedKind === "interactive" || crossRepo ? [] : selectedRepos,
-        ...(selectedKind === "interactive"
-          ? { kind: "interactive", prompt_file: promptFile ?? "" }
-          : {}),
+        cross_repo: isPromptDrivenInteractive ? false : crossRepo,
+        repos: isPromptDrivenInteractive || crossRepo ? [] : selectedRepos,
+        ...interactiveFields,
       };
       const agent = await createAgent({
         ...request,
@@ -310,9 +352,8 @@ export function CreateAgentModal({
       setBackgroundRole(selection.backgroundRole);
       setBackend(resolvedDefaultBackend);
       setSelectedRepos(defaultRepos);
-      setPromptSource("builtin");
       setSelectedBuiltinPromptID("pr-review");
-      setWorkspacePromptFile("");
+      setCustomPrompt("");
     } catch (err) {
       if (err instanceof ApiError) {
         setError(err.message);
@@ -407,32 +448,6 @@ export function CreateAgentModal({
           <div
             className={styles.group}
             role="group"
-            aria-labelledby="create-agent-lead-label"
-          >
-            <span className={styles.groupLabel} id="create-agent-lead-label">
-              Lead agent
-            </span>
-            <p className={styles.groupHint}>
-              Interactive orchestrator in a terminal
-            </p>
-            <div className={styles.templateList}>
-              <AgentTemplateCard
-                title={LEAD_TEMPLATE.title}
-                description={LEAD_TEMPLATE.description}
-                glyph={LEAD_TEMPLATE.glyph}
-                accentColor={LEAD_TEMPLATE.accentColor}
-                selected={selectedKind === "lead"}
-                disabled={isSubmitting}
-                ariaLabel={`${LEAD_TEMPLATE.title}, lead agent`}
-                testId={LEAD_TEMPLATE.testId}
-                onSelect={selectLead}
-              />
-            </div>
-          </div>
-
-          <div
-            className={styles.group}
-            role="group"
             aria-labelledby="create-agent-interactive-label"
           >
             <span
@@ -445,18 +460,46 @@ export function CreateAgentModal({
               Terminal teammates you talk to directly
             </p>
             <div className={styles.templateList}>
+              {interactivePrompts.map((prompt) => {
+                const card = interactivePromptCard(prompt);
+                return (
+                  <AgentTemplateCard
+                    key={prompt.id}
+                    title={prompt.label}
+                    description={card.description}
+                    glyph={card.glyph}
+                    accentColor={card.accentColor}
+                    selected={
+                      selectedKind === "interactive" &&
+                      selectedBuiltinPromptID === prompt.id
+                    }
+                    disabled={isSubmitting}
+                    ariaLabel={`${prompt.label}, built-in interactive prompt`}
+                    testId={card.testId}
+                    onSelect={() => selectInteractive(prompt.id)}
+                  />
+                );
+              })}
               <AgentTemplateCard
-                title={INTERACTIVE_TEMPLATE.title}
-                description={INTERACTIVE_TEMPLATE.description}
-                glyph={INTERACTIVE_TEMPLATE.glyph}
-                accentColor={INTERACTIVE_TEMPLATE.accentColor}
-                selected={selectedKind === "interactive"}
+                title={CUSTOM_PROMPT_TEMPLATE.title}
+                description={CUSTOM_PROMPT_TEMPLATE.description}
+                glyph={CUSTOM_PROMPT_TEMPLATE.glyph}
+                accentColor={CUSTOM_PROMPT_TEMPLATE.accentColor}
+                selected={
+                  selectedKind === "interactive" &&
+                  selectedBuiltinPromptID === CUSTOM_PROMPT_ID
+                }
                 disabled={isSubmitting}
-                ariaLabel={`${INTERACTIVE_TEMPLATE.title}, interactive agent`}
-                testId={INTERACTIVE_TEMPLATE.testId}
-                onSelect={selectInteractive}
+                ariaLabel="Custom prompt, interactive agent"
+                testId={CUSTOM_PROMPT_TEMPLATE.testId}
+                onSelect={() => selectInteractive(CUSTOM_PROMPT_ID)}
               />
             </div>
+            {promptLoadError && (
+              <p className={styles.hint}>
+                Prompt list unavailable; showing built-in defaults.
+              </p>
+            )}
           </div>
         </div>
 
@@ -501,77 +544,28 @@ export function CreateAgentModal({
             </div>
           </div>
 
-          {selectedKind === "interactive" && (
-            <div className={`${styles.fieldGroup} ${styles.fieldGroupSpaced}`}>
-              <span className={styles.label} id="agent-prompt-source-label">
-                Prompt source
-              </span>
+          {selectedKind === "interactive" &&
+            selectedBuiltinPromptID === CUSTOM_PROMPT_ID && (
               <div
-                className={styles.promptSourceGroup}
-                role="radiogroup"
-                aria-labelledby="agent-prompt-source-label"
+                className={`${styles.fieldGroup} ${styles.fieldGroupSpaced}`}
               >
-                <label className={styles.promptSourceOption}>
-                  <input
-                    type="radio"
-                    name="agent-prompt-source"
-                    value="builtin"
-                    checked={promptSource === "builtin"}
-                    onChange={() => setPromptSource("builtin")}
-                    disabled={isSubmitting}
-                  />
-                  Built-in prompt
+                <label className={styles.label} htmlFor="agent-custom-prompt">
+                  Custom prompt
                 </label>
-                <label className={styles.promptSourceOption}>
-                  <input
-                    type="radio"
-                    name="agent-prompt-source"
-                    value="file"
-                    checked={promptSource === "file"}
-                    onChange={() => setPromptSource("file")}
-                    disabled={isSubmitting}
-                  />
-                  Workspace file
-                </label>
-              </div>
-
-              {promptSource === "builtin" ? (
-                <select
-                  className={styles.select}
-                  value={selectedBuiltinPromptID}
-                  onChange={(event) =>
-                    setSelectedBuiltinPromptID(event.target.value)
-                  }
+                <textarea
+                  id="agent-custom-prompt"
+                  className={styles.textarea}
+                  value={customPrompt}
+                  onChange={(event) => setCustomPrompt(event.target.value)}
+                  placeholder="Describe how this interactive agent should help..."
                   disabled={isSubmitting}
-                  data-testid="create-agent-interactive-builtin"
-                >
-                  {interactivePrompts.map((prompt) => (
-                    <option key={prompt.id} value={prompt.id}>
-                      {prompt.label}
-                    </option>
-                  ))}
-                </select>
-              ) : (
-                <input
-                  className={styles.input}
-                  value={workspacePromptFile}
-                  onChange={(event) =>
-                    setWorkspacePromptFile(event.target.value)
-                  }
-                  placeholder="prompts/pr-review.md"
-                  disabled={isSubmitting}
-                  data-testid="create-agent-interactive-file"
+                  data-testid="create-agent-interactive-prompt"
                 />
-              )}
-              {promptLoadError && (
-                <p className={styles.hint}>
-                  Prompt list unavailable; showing built-in defaults.
-                </p>
-              )}
-            </div>
-          )}
+              </div>
+            )}
 
-          {selectedKind !== "interactive" && (
+          {(selectedKind !== "interactive" ||
+            selectedBuiltinPromptID === "lead") && (
             <div className={`${styles.fieldGroup} ${styles.fieldGroupSpaced}`}>
               <span className={styles.label} id="agent-repos-label">
                 Repos

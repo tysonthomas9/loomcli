@@ -21,6 +21,7 @@ type Role struct {
 	Name           string   `json:"name"`
 	Kind           RoleKind `json:"kind,omitempty"`
 	Description    string   `json:"description,omitempty"`
+	Prompt         string   `json:"prompt,omitempty"`
 	PromptFile     string   `json:"prompt_file,omitempty"`
 	Model          string   `json:"model,omitempty"`
 	TaskFilter     string   `json:"task_filter,omitempty"`

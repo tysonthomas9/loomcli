@@ -68,6 +68,7 @@ type RestartPolicy struct {
 type RoleConfig struct {
 	Kind           string   `yaml:"kind,omitempty"`
 	Description    string   `yaml:"description,omitempty"`
+	Prompt         string   `yaml:"prompt,omitempty"`
 	PromptFile     string   `yaml:"prompt_file,omitempty"`
 	Model          string   `yaml:"model,omitempty"`
 	TaskFilter     string   `yaml:"task_filter,omitempty"`
@@ -299,6 +300,7 @@ func roleConfigFromDomain(r *domain.Role) RoleConfig {
 	return RoleConfig{
 		Kind:           string(r.Kind),
 		Description:    r.Description,
+		Prompt:         r.Prompt,
 		PromptFile:     r.PromptFile,
 		Model:          r.Model,
 		TaskFilter:     r.TaskFilter,

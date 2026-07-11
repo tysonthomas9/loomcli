@@ -43,6 +43,7 @@ export interface CreateAgentRequest {
   name: string;
   role_name: string;
   kind?: string;
+  prompt?: string;
   prompt_file?: string;
   auto?: boolean;
   backend?: string;

@@ -2,6 +2,7 @@ package svcimpl
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
@@ -9,6 +10,25 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
 )
+
+type roleCreateRaceStore struct {
+	store.Store
+	roles store.RoleStore
+}
+
+func (s roleCreateRaceStore) Roles() store.RoleStore { return s.roles }
+
+type alreadyExistsAfterWinnerRoleStore struct {
+	store.RoleStore
+	winner store.RoleCreate
+}
+
+func (s alreadyExistsAfterWinnerRoleStore) Create(ctx context.Context, _ store.RoleCreate) (*domain.Role, error) {
+	if _, err := s.RoleStore.Create(ctx, s.winner); err != nil {
+		return nil, err
+	}
+	return nil, fmt.Errorf("concurrent role create: %w", domain.ErrAlreadyExists)
+}
 
 func TestCreateAgentAllowsDistributedWorkspaceWithoutLocalPath(t *testing.T) {
 	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
@@ -133,6 +153,40 @@ func TestCreateAgentInteractiveKindEnsuresRoleWithPromptFile(t *testing.T) {
 	}
 }
 
+func TestCreateAgentInteractiveKindEnsuresRoleWithInlinePrompt(t *testing.T) {
+	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
+
+	ctx := context.Background()
+	st := memstore.New()
+	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{
+		Key: "TEST2", Name: "Test 2", DefaultBranch: "main",
+	}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+
+	svc := NewAgentService(nil, nil, nil, st)
+	if _, err := svc.CreateAgent(ctx, service.AgentCreateInput{
+		WorkspaceKey: "TEST2",
+		Name:         "custom-nova",
+		RoleName:     "custom-nova",
+		Kind:         "interactive",
+		Prompt:       "  Literal {{ marker }}  ",
+		Backend:      "codex",
+	}); err != nil {
+		t.Fatalf("CreateAgent returned error: %v", err)
+	}
+	role, err := st.Roles().Get(ctx, "TEST2", "custom-nova")
+	if err != nil {
+		t.Fatalf("load interactive role: %v", err)
+	}
+	if role.Prompt != "Literal {{ marker }}" {
+		t.Fatalf("role prompt = %q, want trimmed literal prompt", role.Prompt)
+	}
+	if role.PromptFile != "" {
+		t.Fatalf("role prompt_file = %q, want empty", role.PromptFile)
+	}
+}
+
 func TestCreateAgentInteractiveRoleCreationIsIdempotent(t *testing.T) {
 	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
 
@@ -204,6 +258,12 @@ func TestCreateAgentInteractiveRoleConflict(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("create interactive role: %v", err)
 	}
+	if _, err := st.Roles().Create(ctx, store.RoleCreate{
+		WorkspaceKey: "TEST3", Name: "blank-reviewer",
+		Kind: string(domain.RoleKindInteractive),
+	}); err != nil {
+		t.Fatalf("create empty-prompt interactive role: %v", err)
+	}
 
 	svc := NewAgentService(nil, nil, nil, st)
 
@@ -221,6 +281,56 @@ func TestCreateAgentInteractiveRoleConflict(t *testing.T) {
 		Kind: "interactive", PromptFile: "prompts/other.md", Backend: "codex",
 	}); err == nil {
 		t.Fatal("CreateAgent on prompt conflict: error = nil, want validation error")
+	}
+
+	// A requested inline prompt must not silently reuse an existing role whose
+	// stored inline prompt is empty.
+	if _, err := svc.CreateAgent(ctx, service.AgentCreateInput{
+		WorkspaceKey: "TEST3", Name: "blank-reviewer-two", RoleName: "blank-reviewer",
+		Kind: "interactive", Prompt: "requested inline prompt", Backend: "codex",
+	}); err == nil {
+		t.Fatal("CreateAgent on empty stored inline prompt conflict: error = nil, want validation error")
+	}
+}
+
+func TestCreateAgentRoleCreateRaceRefetchesAndReconciles(t *testing.T) {
+	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
+
+	ctx := context.Background()
+	base := memstore.New()
+	if _, err := base.Workspaces().Create(ctx, store.WorkspaceCreate{
+		Key: "TEST4", Name: "Test 4", DefaultBranch: "main",
+	}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	racingRoles := alreadyExistsAfterWinnerRoleStore{
+		RoleStore: base.Roles(),
+		winner: store.RoleCreate{
+			WorkspaceKey: "TEST4",
+			Name:         "operator",
+			Kind:         string(domain.RoleKindInteractive),
+			Prompt:       "concurrent prompt",
+		},
+	}
+	st := roleCreateRaceStore{Store: base, roles: racingRoles}
+	svc := NewAgentService(nil, nil, nil, st)
+
+	if _, err := svc.CreateAgent(ctx, service.AgentCreateInput{
+		WorkspaceKey: "TEST4",
+		Name:         "operator-a",
+		RoleName:     "operator",
+		Kind:         "interactive",
+		Prompt:       "requested prompt",
+		Backend:      "codex",
+	}); err == nil {
+		t.Fatal("CreateAgent race with conflicting winner: error = nil, want validation error")
+	}
+	role, err := base.Roles().Get(ctx, "TEST4", "operator")
+	if err != nil {
+		t.Fatalf("load race winner role: %v", err)
+	}
+	if role.Prompt != "concurrent prompt" {
+		t.Fatalf("race winner prompt = %q, want concurrent prompt", role.Prompt)
 	}
 }
 

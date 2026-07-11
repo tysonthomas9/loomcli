@@ -79,6 +79,7 @@ type AgentCreateInput struct {
 	Name             string                   `json:"name"`
 	RoleName         string                   `json:"role_name"`
 	Kind             string                   `json:"kind,omitempty"`
+	Prompt           string                   `json:"prompt,omitempty"`
 	PromptFile       string                   `json:"prompt_file,omitempty"`
 	Auto             bool                     `json:"auto"`
 	Backend          string                   `json:"backend,omitempty"`

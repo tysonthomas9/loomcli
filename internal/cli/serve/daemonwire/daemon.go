@@ -258,6 +258,7 @@ func roleConfigFromDomain(r *domain.Role) config.RoleConfig {
 	return config.RoleConfig{
 		Kind:           string(r.Kind),
 		Description:    r.Description,
+		Prompt:         r.Prompt,
 		PromptFile:     r.PromptFile,
 		Model:          r.Model,
 		TaskFilter:     r.TaskFilter,

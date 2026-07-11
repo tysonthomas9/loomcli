@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/agent"
 	"github.com/tysonthomas9/loomcli/internal/cli/clitest"
@@ -160,6 +161,40 @@ func TestRunLeadUsesCustomTerminalPrompt(t *testing.T) {
 	}
 	if !strings.Contains(prompt, "Multi-Agent Safety Rules") {
 		t.Fatalf("prompt missing safety guardrails")
+	}
+}
+
+func TestGenerateLeadTerminalPromptUsesLiteralRolePrompt(t *testing.T) {
+	t.Setenv("LOOM_AGENT_ROLE", "operator")
+	st := memstore.New()
+	if _, err := st.Roles().Create(context.Background(), store.RoleCreate{
+		WorkspaceKey: "E2E",
+		Name:         "operator",
+		Kind:         string(domain.RoleKindInteractive),
+		Prompt:       "Literal {{ marker }}",
+		PromptFile:   "prompts/ignored.md",
+	}); err != nil {
+		t.Fatalf("create role: %v", err)
+	}
+	oldPromptFile := leadPromptFile
+	leadPromptFile = ""
+	t.Cleanup(func() { leadPromptFile = oldPromptFile })
+
+	prompt, err := generateLeadTerminalPrompt(context.Background(), leadSessionRegistration{
+		handle:    &bootstrap.StoreHandle{Store: st},
+		Workspace: "E2E",
+	})
+	if err != nil {
+		t.Fatalf("generateLeadTerminalPrompt: %v", err)
+	}
+	if !strings.HasPrefix(prompt, "Literal {{ marker }}") {
+		t.Fatalf("prompt = %q, want literal inline role prompt", prompt)
+	}
+	if strings.Contains(prompt, "prompts/ignored.md") {
+		t.Fatalf("prompt = %q, should not use role prompt_file", prompt)
+	}
+	if got := strings.Count(prompt, "Multi-Agent Safety Rules"); got != 1 {
+		t.Fatalf("safety block count = %d, want 1", got)
 	}
 }
 

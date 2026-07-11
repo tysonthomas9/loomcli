@@ -404,7 +404,7 @@ func agentLaunchCommandArgs(kind domain.RoleKind, agent *domain.Agent, role *dom
 	roleName := strings.ToLower(strings.TrimSpace(agent.RoleName))
 	if kind == domain.RoleKindInteractive {
 		args := []string{"lead"}
-		if role != nil && strings.TrimSpace(role.PromptFile) != "" {
+		if role != nil && strings.TrimSpace(role.Prompt) == "" && strings.TrimSpace(role.PromptFile) != "" {
 			args = append(args, "--prompt", role.PromptFile)
 		}
 		return args, nil

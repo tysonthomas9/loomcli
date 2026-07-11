@@ -18,6 +18,7 @@ type roleWire struct {
 	Name           string    `json:"name"`
 	Kind           string    `json:"kind,omitempty"`
 	Description    string    `json:"description,omitempty"`
+	Prompt         string    `json:"prompt,omitempty"`
 	PromptFile     string    `json:"prompt_file,omitempty"`
 	Model          string    `json:"model,omitempty"`
 	TaskFilter     string    `json:"task_filter,omitempty"`
@@ -41,6 +42,7 @@ func (r roleWire) toDomain() *domain.Role {
 		Name:           r.Name,
 		Kind:           domain.RoleKind(r.Kind),
 		Description:    r.Description,
+		Prompt:         r.Prompt,
 		PromptFile:     r.PromptFile,
 		Model:          r.Model,
 		TaskFilter:     r.TaskFilter,
@@ -64,6 +66,7 @@ func (s *roleStore) Create(ctx context.Context, in store.RoleCreate) (*domain.Ro
 		Name           string   `json:"name"`
 		Kind           string   `json:"kind,omitempty"`
 		Description    string   `json:"description,omitempty"`
+		Prompt         string   `json:"prompt,omitempty"`
 		PromptFile     string   `json:"prompt_file,omitempty"`
 		Model          string   `json:"model,omitempty"`
 		TaskFilter     string   `json:"task_filter,omitempty"`
@@ -81,6 +84,7 @@ func (s *roleStore) Create(ctx context.Context, in store.RoleCreate) (*domain.Ro
 		Name:           in.Name,
 		Kind:           in.Kind,
 		Description:    in.Description,
+		Prompt:         in.Prompt,
 		PromptFile:     in.PromptFile,
 		Model:          in.Model,
 		TaskFilter:     in.TaskFilter,
@@ -134,6 +138,7 @@ func (s *roleStore) Update(ctx context.Context, ws, name string, patch store.Rol
 	body := struct {
 		Description       *string   `json:"description,omitempty"`
 		Kind              *string   `json:"kind,omitempty"`
+		Prompt            *string   `json:"prompt,omitempty"`
 		PromptFile        *string   `json:"prompt_file,omitempty"`
 		Model             *string   `json:"model,omitempty"`
 		TaskFilter        *string   `json:"task_filter,omitempty"`
@@ -153,6 +158,7 @@ func (s *roleStore) Update(ctx context.Context, ws, name string, patch store.Rol
 	}{
 		Description:  patch.Description,
 		Kind:         patch.Kind,
+		Prompt:       patch.Prompt,
 		PromptFile:   patch.PromptFile,
 		Model:        patch.Model,
 		TaskFilter:   patch.TaskFilter,

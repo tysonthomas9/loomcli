@@ -5361,6 +5361,8 @@ export interface operations {
           role_name: string;
           /** @description Optional role kind for creating an interactive role. */
           kind?: string;
+          /** @description Literal inline prompt text for interactive roles. */
+          prompt?: string;
           /** @description Custom or builtin prompt selector for interactive roles. */
           prompt_file?: string;
           auto?: boolean;

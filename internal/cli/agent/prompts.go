@@ -380,6 +380,13 @@ func GenerateTerminalPrompt(promptFile string) (string, error) {
 	return prompt + "\n\n" + buildSafetyGuardrailsBlock(), nil
 }
 
+// GenerateTerminalPromptText uses literal inline text as the terminal-agent
+// base prompt and appends the standard safety guardrails exactly once. Inline
+// text is intentionally not parsed as a Go template.
+func GenerateTerminalPromptText(text string) (string, error) {
+	return text + "\n\n" + buildSafetyGuardrailsBlock(), nil
+}
+
 func isBuiltinInteractivePrompt(id string) bool {
 	return domain.IsBuiltinInteractivePrompt(id)
 }

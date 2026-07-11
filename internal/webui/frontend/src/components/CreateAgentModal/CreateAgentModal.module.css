@@ -183,7 +183,8 @@
 }
 
 .input,
-.select {
+.select,
+.textarea {
   /* Explicit height so <input> and native <select> line up in the config row —
      a native select renders ~4px taller than an input at the same padding. */
   height: 36px;
@@ -200,50 +201,24 @@
   transition: border-color var(--transition-fast);
 }
 
+.textarea {
+  min-height: 108px;
+  height: auto;
+  padding: 9px 10px;
+  line-height: 1.45;
+  resize: vertical;
+}
+
 .input:focus,
-.select:focus {
+.select:focus,
+.textarea:focus {
   border-color: var(--color-primary);
 }
 
-.input::placeholder {
+.input::placeholder,
+.textarea::placeholder {
   color: var(--color-text-muted);
   opacity: 0.65;
-}
-
-.promptSourceGroup {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin-bottom: 8px;
-}
-
-.promptSourceOption {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  padding: 6px 10px;
-  font-size: 12px;
-  font-weight: 600;
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-sm);
-  background: var(--color-panel-bg);
-  color: var(--color-text-secondary);
-  cursor: pointer;
-}
-
-.promptSourceOption:has(input:checked) {
-  border-color: var(--color-primary);
-  background: var(--color-bg-active);
-  color: var(--color-text-primary);
-}
-
-.promptSourceOption:has(input:disabled) {
-  cursor: not-allowed;
-  opacity: 0.6;
-}
-
-.promptSourceOption input {
-  margin: 0;
 }
 
 .repoChips {

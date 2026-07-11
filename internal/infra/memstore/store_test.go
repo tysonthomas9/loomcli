@@ -122,12 +122,25 @@ func TestRoleStoreKindCreatePatchClear(t *testing.T) {
 		WorkspaceKey: "WS",
 		Name:         "operator",
 		Kind:         string(domain.RoleKindInteractive),
+		Prompt:       "literal inline prompt",
 	})
 	if err != nil {
 		t.Fatalf("Create role: %v", err)
 	}
 	if role.Kind != domain.RoleKindInteractive {
 		t.Fatalf("created kind = %q, want interactive", role.Kind)
+	}
+	if role.Prompt != "literal inline prompt" {
+		t.Fatalf("created prompt = %q, want literal inline prompt", role.Prompt)
+	}
+
+	nextPrompt := "updated inline prompt"
+	role, err = s.Roles().Update(ctx, "WS", "operator", store.RoleUpdate{Prompt: &nextPrompt})
+	if err != nil {
+		t.Fatalf("Update role prompt: %v", err)
+	}
+	if role.Prompt != nextPrompt {
+		t.Fatalf("updated prompt = %q, want %q", role.Prompt, nextPrompt)
 	}
 
 	worker := string(domain.RoleKindWorker)

@@ -716,6 +716,20 @@ func TestGenerateTerminalPromptCustomReplacesBaseAndAppendsSafety(t *testing.T) 
 	}
 }
 
+func TestGenerateTerminalPromptTextPreservesLiteralTextAndAppendsSafetyOnce(t *testing.T) {
+	text := "Literal {{ .AgentName }} marker"
+	prompt, err := GenerateTerminalPromptText(text)
+	if err != nil {
+		t.Fatalf("GenerateTerminalPromptText: %v", err)
+	}
+	if !strings.HasPrefix(prompt, text) {
+		t.Fatalf("prompt = %q, want literal prefix %q", prompt, text)
+	}
+	if got := strings.Count(prompt, "Multi-Agent Safety Rules"); got != 1 {
+		t.Fatalf("safety block count = %d, want 1", got)
+	}
+}
+
 func TestGenerateTerminalPromptMissingFileErrors(t *testing.T) {
 	_, err := GenerateTerminalPrompt(filepath.Join(t.TempDir(), "missing.md"))
 	if err == nil {
