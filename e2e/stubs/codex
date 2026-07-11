@@ -49,41 +49,44 @@ validate_relative_path() {
 }
 
 run_epic_runner_task() {
-    prompt_file="$(mktemp)"
-    if [ ! -t 0 ]; then
-        cat > "$prompt_file"
-    else
-        : > "$prompt_file"
+    prompt_file="${1:-}"
+    if [ -z "$prompt_file" ]; then
+        prompt_file="$(mktemp)"
+        if [ ! -t 0 ]; then
+            cat > "$prompt_file"
+        else
+            : > "$prompt_file"
+        fi
     fi
 
-    task_id="${LOOM_ASSIGNED_TASK_ID:-}"
+    task_id="${LOOM_ASSIGNED_TASK_ID:-${LOOM_TASK_ID:-}}"
     if [ -z "$task_id" ]; then
         task_id="$(sed -n 's/.*pre-assigned[^:]*: \([^[:space:]]*\).*/\1/p' "$prompt_file" | head -n 1)"
+    fi
+    if [ -z "$task_id" ]; then
+        task_id="$(sed -n 's/^Task ID: *//p' "$prompt_file" | head -n 1)"
     fi
     if [ -z "$task_id" ]; then
         echo "STUB_CODEX_EPIC_RUNNER requires LOOM_ASSIGNED_TASK_ID or a pre-assigned task in the prompt" >&2
         exit 1
     fi
 
-    agent_name="${LOOM_AGENT_NAME:-}"
-    if [ -z "$agent_name" ]; then
-        echo "STUB_CODEX_EPIC_RUNNER requires LOOM_AGENT_NAME" >&2
-        exit 1
-    fi
+    agent_name="${LOOM_AGENT_NAME:-task-run-$task_id}"
 
-    if [ -n "${STUB_CODEX_INVOCATIONS:-}" ]; then
+    invocations="${STUB_CODEX_INVOCATIONS:-/tmp/loom-epic-runner-codex-invocations.log}"
+    if [ -n "$invocations" ]; then
         {
             printf 'task=%s\n' "$task_id"
             printf 'agent=%s\n' "$agent_name"
             printf 'workdir=%s\n' "$(pwd)"
             printf '\n'
-        } >> "$STUB_CODEX_INVOCATIONS"
+        } >> "$invocations"
     fi
 
-    if [ -z "${LOOM_ASSIGNED_TASK_ID:-}" ]; then
-        loom claim "$task_id"
-    fi
-    DESIGN="$(loom data --output json show "$task_id" | jq -r '.design // ""')"
+    # The v5 host bridge intentionally withholds FleetDB credentials from the
+    # backend process. Read the deterministic test directives from the real
+    # task prompt instead of bypassing the driver lifecycle with `loom data`.
+    DESIGN="$(grep -oE 'STUB_CODEX_(WRITE|REQUIRE)=[^[:space:]]+' "$prompt_file" || true)"
 
     require_path="$(extract_design_value STUB_CODEX_REQUIRE)"
     if [ -n "$require_path" ]; then
@@ -115,22 +118,20 @@ run_epic_runner_task() {
     git status --short
     git add -- "$write_path" epic-runner-output/order.log
     git commit -m "Complete ${task_id}"
-    loom push "$agent_name"
-    loom data close "$task_id" --reason "Completed by Codex E2E stub"
-    loom complete
 
     jq -nc --arg o "completed ${task_id}" '{"status":"completed","output":$o}'
 }
 
 if [ "$IS_EXEC" = "true" ] && [ "$IS_JSON" = "true" ]; then
-    if [ "${STUB_CODEX_EPIC_RUNNER:-0}" = "1" ]; then
-        run_epic_runner_task
-        exit "$EXIT_CODE"
-    fi
-
-    # Non-interactive JSON mode: read prompt from stdin
+    prompt_file="$(mktemp)"
     if [ ! -t 0 ]; then
-        cat > /dev/null
+        cat > "$prompt_file"
+    else
+        : > "$prompt_file"
+    fi
+    if [ "${STUB_CODEX_EPIC_RUNNER:-0}" = "1" ] || grep -q 'STUB_CODEX_WRITE=' "$prompt_file"; then
+        run_epic_runner_task "$prompt_file"
+        exit "$EXIT_CODE"
     fi
 
     jq -nc --arg o "$RESPONSE" '{"status":"completed","output":$o}'
