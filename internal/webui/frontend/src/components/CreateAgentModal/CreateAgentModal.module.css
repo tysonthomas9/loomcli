@@ -184,9 +184,13 @@
 
 .input,
 .select {
+  /* Explicit height so <input> and native <select> line up in the config row —
+     a native select renders ~4px taller than an input at the same padding. */
+  height: 36px;
   width: 100%;
-  padding: 8px 10px;
+  padding: 0 10px;
   font-size: 13px;
+  line-height: normal;
   border-radius: var(--radius-sm);
   border: 1px solid var(--color-border);
   background: var(--color-panel-bg);
