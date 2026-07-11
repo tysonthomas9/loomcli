@@ -11,7 +11,10 @@ import {
 import styles from "./TerminalPaneArea.module.css";
 
 interface TerminalPaneAreaProps {
+  /** Tabs shown in the left pane (and in single-pane mode). */
   tabs: TabState[];
+  /** Tabs available in the right split pane; defaults to `tabs`. */
+  rightPaneTabs?: TabState[];
   activeTabId: string;
   isSplitView: boolean;
   rightPaneTabId: string;
@@ -24,6 +27,7 @@ interface TerminalPaneAreaProps {
 
 export function TerminalPaneArea({
   tabs,
+  rightPaneTabs,
   activeTabId,
   isSplitView,
   rightPaneTabId,
@@ -33,6 +37,7 @@ export function TerminalPaneArea({
   onRightPaneTabChange,
   renderPane,
 }: TerminalPaneAreaProps): JSX.Element {
+  const splitRightTabs = rightPaneTabs ?? tabs;
   return (
     <div className={styles.terminalsContainer}>
       {isSplitView && rightPaneTabId ? (
@@ -73,7 +78,7 @@ export function TerminalPaneArea({
           />
           <div className={styles.splitPaneRight}>
             <SplitPaneSelector
-              tabs={tabs.map((t) => ({
+              tabs={splitRightTabs.map((t) => ({
                 id: t.id,
                 label: t.label,
                 brandColor: BACKEND_BRAND_COLORS[t.backendName],
@@ -82,7 +87,7 @@ export function TerminalPaneArea({
               rightPaneTabId={rightPaneTabId}
               onTabChange={onRightPaneTabChange}
             />
-            {tabs.map((tab) => {
+            {splitRightTabs.map((tab) => {
               const active = tab.id === rightPaneTabId;
               return (
                 <div

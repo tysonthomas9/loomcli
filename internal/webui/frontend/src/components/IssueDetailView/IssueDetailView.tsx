@@ -31,6 +31,8 @@ export interface IssueDetailViewProps {
   onApprove: (issue: Issue) => Promise<void>;
   onReject: (issue: Issue, comment: string) => Promise<void>;
   onOpenInTerminal?: (issue: Issue | IssueDetails) => void;
+  onRunEpic?: (issue: Issue | IssueDetails) => void | Promise<void>;
+  isRunningEpic?: boolean;
   onCopyLink?: () => void;
   onNavigateToIssue?: (issue: Issue) => void;
   onIssueUpdate?: (issue: Issue) => void;
@@ -166,6 +168,8 @@ export function IssueDetailView({
   onApprove,
   onReject,
   onOpenInTerminal,
+  onRunEpic,
+  isRunningEpic = false,
   onCopyLink,
   onNavigateToIssue,
   onIssueUpdate,
@@ -421,6 +425,23 @@ export function IssueDetailView({
               />
             </svg>
             Open in Terminal
+          </button>
+        )}
+        {issue.issue_type === "epic" && onRunEpic && (
+          <button
+            type="button"
+            className={styles.openTerminalButton}
+            onClick={() => onRunEpic(issue)}
+            disabled={isRunningEpic}
+            aria-label={
+              isRunningEpic ? "Starting epic runner" : "Run epic workflow"
+            }
+            data-testid="detail-run-epic-button"
+          >
+            <svg viewBox="0 0 16 16" fill="none" aria-hidden="true">
+              <path d="M5 3.5v9l7-4.5-7-4.5z" fill="currentColor" />
+            </svg>
+            {isRunningEpic ? "Starting" : "Run epic"}
           </button>
         )}
         {onCopyLink && (

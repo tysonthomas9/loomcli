@@ -16,6 +16,10 @@ import {
   deleteTabMetadata,
   getTaskLogPhases,
   startAgent,
+  EPIC_RUNNER_WORKFLOW_NAME,
+  createWorkspaceAgent,
+  deleteWorkspaceAgent,
+  startWorkflowRun,
 } from "@/hooks/api";
 import type { IssueTab } from "@/api/issues";
 import {
@@ -26,21 +30,24 @@ import {
 } from "@/hooks";
 import { useStore } from "zustand";
 
-import { useAgentStoreInstance } from "@/hooks/common";
-import { useWorkspaceContext } from "@/hooks/workspace";
+import { useAgentStoreInstance, useIssueStoreInstance } from "@/hooks/common";
+import { useLocalSettings, useWorkspaceContext } from "@/hooks/workspace";
 import { useIssueTabPersistence } from "@/hooks/issues";
 import type {
   Issue,
   IssueDetails,
   IssueWithDependencyMetadata,
-  Priority,
-  IssueType,
   DependencyType,
   Comment,
   Event,
 } from "@/types";
 import type { Status } from "@/types/issue";
-import { getOpenStatus, getReviewType, isPRUrl } from "@/utils/issue";
+import { formatStatusLabel, getReviewType, isPRUrl } from "@/utils/issue";
+import {
+  epicRunnerRuntimePayload,
+  issueRepoName,
+  leadAgentRepoNames,
+} from "@/utils/epicRunnerPayload";
 
 import {
   getBackendFromSessionName,
@@ -55,28 +62,22 @@ import {
   DependencySection,
   EditableDescription,
   DesignPanel,
+  EpicRollup,
   MarkdownRenderer,
+  PRSection,
   RejectCommentForm,
 } from "./sections";
-import { AgentStatusBadge, IssueHeader } from "./header";
-import {
-  AssigneeDropdown,
-  OwnerDropdown,
-  PriorityDropdown,
-  RepoDropdown,
-  TypeDropdown,
-  LabelEditor,
-} from "./fields";
-import { StartWorkButton } from "./actions";
+import { IssueHeader } from "./header";
+import { AssigneeDropdown, RepoDropdown } from "./fields";
 import { ConfirmDialog } from "../ConfirmDialog";
 import { MoveIssueDialog } from "./actions";
 import { SplitDetailSummary } from "./SplitDetailSummary";
 import { EmbeddedTerminal } from "../EmbeddedTerminal";
 import { ResizeDivider } from "./actions";
 import { ErrorToast } from "../ErrorToast";
-import { useSplitRatio } from "@/hooks/ui";
+import { useSplitRatio, useToast } from "@/hooks/ui";
 import { CollapsibleSection } from "./CollapsibleSection";
-import { SessionHistorySection, SessionsTab } from "./sessions";
+import { SessionsTab } from "./sessions";
 import styles from "./IssueDetailPanel.module.css";
 import { formatDate, formatIssueType, isIssueDetails } from "./utils";
 
@@ -151,6 +152,13 @@ export interface IssueDetailPanelProps {
   onCopyLink?: () => void;
   /** Callback when a dependency/dependent issue is clicked for navigation */
   onNavigateToIssue?: (issue: Issue) => void;
+  /**
+   * When true, renders the panel inline (no fixed-position overlay, no
+   * slide-out animation, no backdrop). Used by the /agents view to embed
+   * task details as a regular layout column. Default is false — every
+   * other surface keeps the slide-out behavior.
+   */
+  inline?: boolean;
 }
 
 /**
@@ -203,7 +211,9 @@ function renderDependencyChip(
       <span className={styles.dependencyId}>{dep.id}</span>
       <span className={styles.dependencyTitle}>{dep.title}</span>
       {dep.dependency_type && (
-        <span className={styles.dependencyType}>{dep.dependency_type}</span>
+        <span className={styles.dependencyType}>
+          {formatStatusLabel(dep.dependency_type.replace(/-/g, "_"))}
+        </span>
       )}
     </li>
   );
@@ -228,6 +238,10 @@ interface DefaultContentProps {
   onCopyLink?: () => void;
   /** Callback when a dependency/dependent issue is clicked for navigation */
   onNavigateToIssue?: (issue: Issue) => void;
+  /** Whether the panel is maximized to full-page */
+  isMaximized?: boolean;
+  /** Toggle full-page maximize */
+  onToggleMaximize?: () => void;
 }
 
 /**
@@ -275,6 +289,49 @@ function latestFailedRun(sessions: SessionRecord[]): SessionRecord | null {
 
 function runFailureMessage(run: SessionRecord): string {
   return run.last_error || run.error_class || "Agent run failed.";
+}
+
+function formatUnknownError(error: unknown, fallback: string): string {
+  return error instanceof Error && error.message ? error.message : fallback;
+}
+
+const MAX_EPIC_LEAD_NAME_SLUG_LENGTH = 48;
+
+function epicLeadNameSlug(epicId: string): string {
+  const slug = epicId
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, MAX_EPIC_LEAD_NAME_SLUG_LENGTH)
+    .replace(/-+$/g, "");
+
+  return slug || "epic";
+}
+
+function nextEpicLeadName(
+  epicId: string,
+  existingNames: Iterable<string>,
+): string {
+  const existing = new Set(
+    Array.from(existingNames, (name) => name.toLowerCase()),
+  );
+  const base = `lead-${epicLeadNameSlug(epicId)}`;
+  if (!existing.has(base.toLowerCase())) return base;
+
+  for (let i = 2; ; i += 1) {
+    const candidate = `${base}-${i}`;
+    if (!existing.has(candidate.toLowerCase())) return candidate;
+  }
+}
+
+function isAgentNameConflict(error: unknown): boolean {
+  const message = formatUnknownError(error, "").toLowerCase();
+  return (
+    message.includes("already") ||
+    message.includes("conflict") ||
+    message.includes("exists")
+  );
 }
 
 function LatestRunFailureBanner({
@@ -358,7 +415,7 @@ function TaskPhaseLogPanel({
       <div className={styles.section}>
         <h3 className={styles.sectionTitle}>{formatPhaseLabel(phase)}</h3>
         <div data-testid="log-viewer">
-          <span data-state={state}>{state}</span>
+          <span data-state={state}>{formatStatusLabel(state)}</span>
           <pre data-testid="terminal-container">{text}</pre>
         </div>
       </div>
@@ -380,14 +437,20 @@ function DefaultContent({
   onReject,
   onCopyLink,
   onNavigateToIssue,
+  isMaximized: isPanelMaximized,
+  onToggleMaximize,
 }: DefaultContentProps): JSX.Element {
-  const { workspaceId, workspace, repos } = useWorkspaceContext();
+  const {
+    workspaceId,
+    workspace,
+    repos,
+    agents: workspaceAgents,
+    upsertAgent,
+  } = useWorkspaceContext();
+  const { settings: localSettings } = useLocalSettings();
   const [isSavingTitle, setIsSavingTitle] = useState(false);
   const [isSavingStatus, setIsSavingStatus] = useState(false);
-  const [isSavingPriority, setIsSavingPriority] = useState(false);
-  const [isSavingType, setIsSavingType] = useState(false);
   const [isSavingAssignee, setIsSavingAssignee] = useState(false);
-  const [isSavingOwner, setIsSavingOwner] = useState(false);
   const [isSavingRepo, setIsSavingRepo] = useState(false);
   const [statusError, setStatusError] = useState<string | null>(null);
   const [titleError, setTitleError] = useState<string | null>(null);
@@ -397,30 +460,30 @@ function DefaultContent({
   const [rejectError, setRejectError] = useState<string | null>(null);
   const [showMoveDialog, setShowMoveDialog] = useState(false);
   const [moveError, setMoveError] = useState<string | null>(null);
+  const [isStartingEpicRun, setIsStartingEpicRun] = useState(false);
+  const { showToast } = useToast();
 
   // Split view state for terminal tabs
   const splitContainerRef = useRef<HTMLDivElement>(null);
   const { ratio, applyDelta, resetRatio, isMaximized, toggleMaximize } =
     useSplitRatio();
 
-  // Workspace data for move dialog
+  // Workspace data for move dialog — use stable workspace ids, not display names.
   const workspaces = workspace?.workspaces ?? [];
-  const currentWorkspace = workspace?.name ?? "";
+  const currentWorkspace = workspaceId;
   const canMove = workspaces.length > 1 && issue?.status !== "closed";
   const taskRunId = issue?.issue_type === "task" ? issue.id : null;
   const { sessions: taskRuns } = useTaskSessions(taskRunId);
   const failedRun = useMemo(() => latestFailedRun(taskRuns), [taskRuns]);
 
-  const currentRepo = useMemo(() => {
-    if (issue?.repo) return issue.repo;
-    if (issue?.source_repo) return issue.source_repo;
-    const repoLabel = issue?.labels?.find((l) => l.startsWith("repo:"));
-    return repoLabel ? repoLabel.slice(5) : null;
-  }, [issue?.labels, issue?.repo, issue?.source_repo]);
+  const currentRepo = useMemo(() => issueRepoName(issue), [issue]);
+
   const [taskLogPhases, setTaskLogPhases] = useState<
     ("planning" | "implementation")[]
   >([]);
 
+  // Child tickets of an epic (issues whose parent is this epic), for the
+  // EpicRollup progress + ticket list. Empty for non-epics.
   // Tab persistence hook - loads/saves tab state to Redis
   const issueId = issue?.id ?? "";
   const {
@@ -526,8 +589,22 @@ function DefaultContent({
   const agentStore = useAgentStoreInstance();
   const agents = useStore(agentStore, (s) => s.agents);
   const agentTasks = useStore(agentStore, (s) => s.agentTasks);
-  const isLoomConnected = useStore(agentStore, (s) => s.isConnected);
-  const refetchAgents = useStore(agentStore, (s) => s.fetchData);
+
+  // Epic overview data (Aether design, pin 25): the epic's child tickets
+  // from the already-fetched issue store, plus the lead currently running
+  // the epic (lead.parent === epic id) for the claim badge.
+  const issueStore = useIssueStoreInstance();
+  const issuesMap = useStore(issueStore, (s) => s.issuesMap);
+  const epicChildren = useMemo<Issue[]>(() => {
+    if (!issue || issue.issue_type !== "epic") return [];
+    const children: Issue[] = [];
+    for (const candidate of issuesMap.values()) {
+      if (candidate.parent !== issue.id) continue;
+      if (candidate.issue_type === "epic") continue;
+      children.push(candidate);
+    }
+    return children;
+  }, [issuesMap, issue]);
 
   // Reset tabs when issue changes — clean up orphaned terminal sessions first
   useEffect(() => {
@@ -581,16 +658,16 @@ function DefaultContent({
     if (!restoredTabs.some((t) => t.id === "details")) {
       restoredTabs.unshift(DETAILS_TAB);
     }
-    // Ensure sessions tab is always present
     if (!restoredTabs.some((t) => t.id === "sessions")) {
-      // Insert after details tab
       const detailsIdx = restoredTabs.findIndex((t) => t.id === "details");
       restoredTabs.splice(detailsIdx + 1, 0, SESSIONS_TAB);
     }
-
     if (restoredTabs.length > 0) {
       setTabs(restoredTabs);
-      const activeId = persistedTabState.active_tab_id;
+      const activeId =
+        persistedTabState.active_tab_id === "diff"
+          ? "details"
+          : persistedTabState.active_tab_id;
       if (activeId && restoredTabs.some((t) => t.id === activeId)) {
         setActiveTabId(activeId);
       }
@@ -607,7 +684,7 @@ function DefaultContent({
     ) {
       return;
     }
-    // Only persist if there's something beyond the default tabs (details + sessions)
+    // Only persist if there's something beyond the default Details + Runs tabs
     const isDefault =
       tabs.length === 2 &&
       tabs[0]?.id === "details" &&
@@ -771,72 +848,58 @@ function DefaultContent({
     [issue, onIssueUpdate],
   );
 
-  const handlePrioritySave = useCallback(
-    async (newPriority: Priority) => {
-      if (!issue) return;
-
-      setIsSavingPriority(true);
-      try {
-        const updatedIssue = await updateIssue(workspaceId, issue.id, {
-          priority: newPriority,
-        });
-        onIssueUpdate?.(updatedIssue);
-      } finally {
-        setIsSavingPriority(false);
-      }
-    },
-    [issue, onIssueUpdate],
-  );
-
-  const handleTypeSave = useCallback(
-    async (newType: IssueType) => {
-      if (!issue) return;
-
-      setIsSavingType(true);
-      try {
-        const updatedIssue = await updateIssue(workspaceId, issue.id, {
-          issue_type: newType,
-        });
-        onIssueUpdate?.(updatedIssue);
-      } finally {
-        setIsSavingType(false);
-      }
-    },
-    [issue, onIssueUpdate],
-  );
-
   const handleAssigneeSave = useCallback(
     async (newAssignee: string) => {
       if (!issue) return;
 
       setIsSavingAssignee(true);
       try {
+        // Assigning an agent to an open or review issue starts work, like
+        // the old Start Work flow: an open issue moves to in_progress and
+        // the agent daemon claims the task; a review issue keeps its status
+        // (the PR stays in the review queue while the agent works it).
+        const isAgentAssignment =
+          newAssignee !== "" &&
+          !newAssignee.startsWith("[H]") &&
+          agents.some((a) => a.name === newAssignee);
+        const startsWork =
+          isAgentAssignment &&
+          (issue.status === "open" || issue.status === "review");
+
+        if (!startsWork) {
+          const updatedIssue = await updateIssue(workspaceId, issue.id, {
+            assignee: newAssignee,
+          });
+          onIssueUpdate?.(updatedIssue);
+          return;
+        }
+
+        const previousAssignee = issue.assignee ?? "";
+        const previousStatus = issue.status ?? "open";
         const updatedIssue = await updateIssue(workspaceId, issue.id, {
           assignee: newAssignee,
+          ...(issue.status === "review" ? {} : { status: "in_progress" }),
         });
-        onIssueUpdate?.(updatedIssue);
+        try {
+          await startAgent(workspaceId, newAssignee, { taskId: issue.id });
+          onIssueUpdate?.(updatedIssue);
+        } catch (err) {
+          try {
+            const rolledBackIssue = await updateIssue(workspaceId, issue.id, {
+              assignee: previousAssignee,
+              status: previousStatus,
+            });
+            onIssueUpdate?.(rolledBackIssue);
+          } catch {
+            // Keep the original start failure visible to the dropdown.
+          }
+          throw err;
+        }
       } finally {
         setIsSavingAssignee(false);
       }
     },
-    [issue, onIssueUpdate],
-  );
-
-  const handleOwnerSave = useCallback(
-    async (newOwner: string) => {
-      if (!issue) return;
-
-      setIsSavingOwner(true);
-      try {
-        const updatedIssue = await updateIssue(workspaceId, issue.id, {
-          owner: newOwner,
-        });
-        onIssueUpdate?.(updatedIssue);
-      } finally {
-        setIsSavingOwner(false);
-      }
-    },
-    [issue, onIssueUpdate],
+    [agents, issue, onIssueUpdate, workspaceId],
   );
 
   const handleRepoSave = useCallback(
@@ -860,36 +923,100 @@ function DefaultContent({
         setIsSavingRepo(false);
       }
     },
-    [issue, onIssueUpdate],
+    [issue, onIssueUpdate, workspaceId],
   );
 
-  const handleStartWork = useCallback(
-    async (agentName: string) => {
-      if (!issue) return;
+  const handleRunEpicWorkflow = useCallback(async () => {
+    if (!issue || issue.issue_type !== "epic" || isStartingEpicRun) return;
 
-      const updatedIssue = await updateIssue(workspaceId, issue.id, {
-        assignee: agentName,
-        status: "in_progress",
+    setIsStartingEpicRun(true);
+    try {
+      const runtimePayload = epicRunnerRuntimePayload({
+        localSettings,
+        repos,
+        currentRepo,
       });
-      try {
-        await startAgent(workspaceId, agentName, { taskId: issue.id });
-        onIssueUpdate?.(updatedIssue);
-        void refetchAgents();
-      } catch (err) {
+      const repoNames = leadAgentRepoNames(repos, currentRepo);
+      const leadNames = new Set<string>([
+        ...workspaceAgents.map((agent) => agent.name),
+        ...agents.map((agent) => agent.name),
+      ]);
+      let leadAgentName = "";
+      let createdLeadAgentName = "";
+      let lastCreateError: unknown = null;
+
+      for (let attempt = 0; attempt < 5; attempt += 1) {
+        const candidate = nextEpicLeadName(issue.id, leadNames);
+        leadNames.add(candidate);
+
         try {
-          const rolledBackIssue = await updateIssue(workspaceId, issue.id, {
-            assignee: "",
-            status: "open",
+          const leadAgent = await createWorkspaceAgent(workspaceId, {
+            name: candidate,
+            role_name: "lead",
+            auto: false,
+            cross_repo: repoNames.length === 0,
+            repos: repoNames,
           });
-          onIssueUpdate?.(rolledBackIssue);
-        } catch {
-          // Keep the original start failure visible to the Start Work control.
+          upsertAgent?.(leadAgent);
+          leadAgentName = leadAgent.name;
+          createdLeadAgentName = leadAgent.name;
+          break;
+        } catch (err) {
+          lastCreateError = err;
+          if (!isAgentNameConflict(err)) throw err;
+        }
+      }
+
+      if (!leadAgentName) {
+        throw lastCreateError instanceof Error
+          ? lastCreateError
+          : new Error("Unable to create lead agent");
+      }
+
+      let run;
+      try {
+        run = await startWorkflowRun(workspaceId, EPIC_RUNNER_WORKFLOW_NAME, {
+          epicId: issue.id,
+          leadName: leadAgentName,
+          requestedBy: "ui",
+          ...runtimePayload,
+        });
+      } catch (err) {
+        if (createdLeadAgentName) {
+          deleteWorkspaceAgent(workspaceId, createdLeadAgentName).catch(
+            (cleanupErr: unknown) => {
+              console.warn(
+                "failed to delete epic-runner lead after workflow start failed",
+                cleanupErr,
+              );
+            },
+          );
         }
         throw err;
       }
-    },
-    [issue, onIssueUpdate, refetchAgents, workspaceId],
-  );
+      showToast(`Epic runner queued for ${leadAgentName}: ${run.run_id}`, {
+        type: "success",
+      });
+    } catch (err) {
+      showToast(
+        `Epic runner failed: ${formatUnknownError(err, "Unable to start workflow")}`,
+        { type: "error" },
+      );
+    } finally {
+      setIsStartingEpicRun(false);
+    }
+  }, [
+    agents,
+    currentRepo,
+    issue,
+    isStartingEpicRun,
+    localSettings?.agent_runtime.default,
+    repos,
+    showToast,
+    upsertAgent,
+    workspaceAgents,
+    workspaceId,
+  ]);
 
   const handleAddDependency = useCallback(
     async (dependsOnId: string, type: DependencyType) => {
@@ -907,34 +1034,6 @@ function DefaultContent({
       // The parent component should refresh issue details via SSE or manual refetch
     },
     [issue],
-  );
-
-  const handleAddLabel = useCallback(
-    async (label: string) => {
-      if (!issue) return;
-      const updatedIssue = await updateIssue(workspaceId, issue.id, {
-        add_labels: [label],
-      });
-      const labels = updatedIssue.labels?.includes(label)
-        ? updatedIssue.labels
-        : [...(updatedIssue.labels ?? issue.labels ?? []), label];
-      onIssueUpdate?.({ ...updatedIssue, labels });
-    },
-    [issue, onIssueUpdate],
-  );
-
-  const handleRemoveLabel = useCallback(
-    async (label: string) => {
-      if (!issue) return;
-      const updatedIssue = await updateIssue(workspaceId, issue.id, {
-        remove_labels: [label],
-      });
-      const labels = (updatedIssue.labels ?? issue.labels ?? []).filter(
-        (current) => current !== label,
-      );
-      onIssueUpdate?.({ ...updatedIssue, labels });
-    },
-    [issue, onIssueUpdate],
   );
 
   // Approve handler
@@ -994,7 +1093,7 @@ function DefaultContent({
         );
       }
     },
-    [issue, onClose],
+    [issue, onClose, workspaceId],
   );
 
   // Reset reject form state when issue changes
@@ -1005,6 +1104,7 @@ function DefaultContent({
     setRejectError(null);
     setShowMoveDialog(false);
     setMoveError(null);
+    setIsStartingEpicRun(false);
   }, [issue?.id]);
 
   // Loading state
@@ -1043,6 +1143,13 @@ function DefaultContent({
   const issueHasDetails = isIssueDetails(issue);
   const dependencies = issueHasDetails ? issue.dependencies : undefined;
   const dependents = issueHasDetails ? issue.dependents : undefined;
+  // "Blocks" should list genuine blocking relations only. Parent-child edges
+  // are a containment relation (an epic's children / a task's subtasks), not a
+  // block — and for epics they fully duplicate the EpicRollup ticket list, a
+  // redundancy the design's epic panel doesn't have. Exclude them here.
+  const blockingDependents = dependents?.filter(
+    (dep) => dep.dependency_type !== "parent-child",
+  );
 
   // Determine if this is a review item
   const reviewType = getReviewType(issue);
@@ -1058,6 +1165,8 @@ function DefaultContent({
       ? issue.external_ref.match(/\/pulls?\/(\d+)/)?.[1]
       : undefined;
   const prProps = prNumber ? { prUrl: issue.external_ref!, prNumber } : {};
+  const canRunEpicWorkflow =
+    issue.issue_type === "epic" && issue.status !== "closed";
 
   // Auto-collapse logic for Notes (collapse if long, but keep expanded for review items)
   const shouldCollapseNotes =
@@ -1068,7 +1177,7 @@ function DefaultContent({
     <>
       {/* Sticky Header Wrapper */}
       <div className={styles.stickyHeaderWrapper}>
-        {/* Header with ID, status dropdown, priority badge, close button, and title */}
+        {/* Header with ID, status dropdown, close button, and title */}
         <IssueHeader
           issue={issue}
           onClose={onClose}
@@ -1076,10 +1185,22 @@ function DefaultContent({
           isSavingTitle={isSavingTitle}
           onStatusChange={handleStatusChange}
           isSavingStatus={isSavingStatus}
-          showPriority={true}
+          {...(canRunEpicWorkflow && {
+            onRunEpic: handleRunEpicWorkflow,
+            isRunningEpic: isStartingEpicRun,
+          })}
           {...(onCopyLink !== undefined && { onCopyLink })}
-          {...(canMove && { onMove: () => setShowMoveDialog(true) })}
+          {...(canMove && {
+            onMove: () => {
+              setMoveError(null);
+              setShowMoveDialog(true);
+            },
+          })}
           {...prProps}
+          {...(onToggleMaximize !== undefined && {
+            onToggleMaximize,
+            isMaximized: isPanelMaximized ?? false,
+          })}
           sticky={true}
         />
 
@@ -1096,11 +1217,6 @@ function DefaultContent({
             </svg>
             {formatIssueType(issue.issue_type)}
           </span>
-          <OwnerDropdown
-            owner={issue.owner}
-            onSave={handleOwnerSave}
-            isSaving={isSavingOwner}
-          />
           <AssigneeDropdown
             assignee={issue.assignee}
             onSave={handleAssigneeSave}
@@ -1108,6 +1224,14 @@ function DefaultContent({
             agents={agents}
             agentTasks={agentTasks}
           />
+          {(repos.length > 0 || currentRepo !== null) && (
+            <RepoDropdown
+              currentRepo={currentRepo}
+              repos={repos.map((r) => r.name)}
+              onSave={handleRepoSave}
+              isSaving={isSavingRepo}
+            />
+          )}
           {issue.created_at && (
             <span
               className={styles.metadataItem}
@@ -1244,14 +1368,6 @@ function DefaultContent({
               >
                 <SplitDetailSummary
                   issue={issue}
-                  isSavingPriority={isSavingPriority}
-                  isSavingType={isSavingType}
-                  isSavingAssignee={isSavingAssignee}
-                  agents={agents}
-                  agentTasks={agentTasks}
-                  onPrioritySave={handlePrioritySave}
-                  onTypeSave={handleTypeSave}
-                  onAssigneeSave={handleAssigneeSave}
                   onIssueUpdate={onIssueUpdate}
                 />
               </div>
@@ -1300,53 +1416,6 @@ function DefaultContent({
                     : styles.detailColumnFull
                 }
               >
-                {/* Priority/Type dropdowns for editing */}
-                <div className={styles.statusRow}>
-                  <PriorityDropdown
-                    priority={issue.priority as Priority}
-                    onSave={handlePrioritySave}
-                    isSaving={isSavingPriority}
-                  />
-                  <TypeDropdown
-                    type={issue.issue_type}
-                    onSave={handleTypeSave}
-                    isSaving={isSavingType}
-                  />
-                  <AssigneeDropdown
-                    assignee={issue.assignee}
-                    onSave={handleAssigneeSave}
-                    isSaving={isSavingAssignee}
-                    agents={agents}
-                    agentTasks={agentTasks}
-                  />
-                  {(repos.length > 0 || currentRepo !== null) && (
-                    <RepoDropdown
-                      currentRepo={currentRepo}
-                      repos={repos.map((r) => r.name)}
-                      onSave={handleRepoSave}
-                      isSaving={isSavingRepo}
-                    />
-                  )}
-                  {issue.assignee && !issue.assignee.startsWith("[H]") && (
-                    <AgentStatusBadge
-                      agentName={issue.assignee}
-                      onOpenTerminal={() => setActiveTabId("sessions")}
-                    />
-                  )}
-                  <StartWorkButton
-                    issueId={issue.id}
-                    issueStatus={issue.status}
-                    currentAssignee={issue.assignee}
-                    agents={agents}
-                    agentTasks={agentTasks}
-                    isConnected={isLoomConnected}
-                    preferredRole={
-                      getOpenStatus(issue) === "needs_plan" ? "plan" : "task"
-                    }
-                    onAssign={handleStartWork}
-                  />
-                </div>
-
                 {/* Description */}
                 <section className={styles.section}>
                   <h3 className={styles.sectionTitle}>Description</h3>
@@ -1365,6 +1434,10 @@ function DefaultContent({
                     }}
                   />
                 </section>
+
+                {/* Pull request card / "no PR yet" placeholder (design
+                    pr-card + pr-empty) — non-epics only. */}
+                {issue.issue_type !== "epic" && <PRSection issue={issue} />}
               </div>
 
               {/* Design in right column */}
@@ -1379,6 +1452,16 @@ function DefaultContent({
             </div>
 
             {/* Full-width sections below the columns */}
+
+            {/* Epic roll-up: progress distribution + child tickets */}
+            {issue.issue_type === "epic" && (
+              <EpicRollup
+                tickets={epicChildren}
+                {...(onNavigateToIssue !== undefined && {
+                  onTicketClick: onNavigateToIssue,
+                })}
+              />
+            )}
 
             {/* Notes (collapsible) */}
             {issue.notes && (
@@ -1403,37 +1486,21 @@ function DefaultContent({
               />
             )}
 
-            {/* Dependents (this issue blocks) */}
-            {dependents && dependents.length > 0 && (
+            {/* Dependents (this issue blocks) — parent-child containment edges
+                excluded (see blockingDependents); the EpicRollup already lists
+                an epic's children. */}
+            {blockingDependents && blockingDependents.length > 0 && (
               <section className={styles.section}>
                 <h3 className={styles.sectionTitle}>
-                  Blocks ({dependents.length})
+                  Blocks ({blockingDependents.length})
                 </h3>
                 <ul className={styles.dependencyList}>
-                  {dependents.map((dep) =>
+                  {blockingDependents.map((dep) =>
                     renderDependencyChip(dep, onNavigateToIssue),
                   )}
                 </ul>
               </section>
             )}
-
-            {/* Terminal history */}
-            <CollapsibleSection
-              title="Terminal History"
-              defaultExpanded={false}
-              testId="session-history-section"
-            >
-              <SessionHistorySection
-                issueId={issue.id}
-                onJumpToSession={(sessionName) => {
-                  const tabId = `terminal-${sessionName}`;
-                  const tab = tabs.find((t) => t.id === tabId);
-                  if (tab) {
-                    setActiveTabId(tabId);
-                  }
-                }}
-              />
-            </CollapsibleSection>
 
             {/* Activity Log (comments + events) */}
             <ActivityLog
@@ -1444,14 +1511,6 @@ function DefaultContent({
             <CommentForm
               issueId={issue.id}
               onCommentAdded={handleCommentAdded}
-            />
-
-            {/* Labels */}
-            <LabelEditor
-              labels={issue.labels ?? []}
-              onAddLabel={handleAddLabel}
-              onRemoveLabel={handleRemoveLabel}
-              disabled={isLoading}
             />
           </div>
         </div>
@@ -1517,7 +1576,10 @@ function DefaultContent({
         dependencies={dependencies}
         error={moveError}
         onConfirm={handleMoveConfirm}
-        onCancel={() => setShowMoveDialog(false)}
+        onCancel={() => {
+          setMoveError(null);
+          setShowMoveDialog(false);
+        }}
       />
     </>
   );
@@ -1546,33 +1608,41 @@ export function IssueDetailPanel({
   onIssueUpdate,
   onCopyLink,
   onNavigateToIssue,
+  inline = false,
 }: IssueDetailPanelProps): JSX.Element {
   const panelRef = useRef<HTMLElement>(null);
 
-  // Handle Escape key to close panel via global shortcut layer system
-  useRegisterEscapeLayer(LAYER_ISSUE_PANEL, onClose, isOpen);
-
-  // Lock body scroll when open, restoring previous value on close.
-  // Note: Only ONE panel should be open at a time. Multiple concurrent panels
-  // would require a scroll lock manager to handle overflow restoration properly.
+  // Full-page maximize toggle for the slide-over.
+  const [isMaximized, setIsMaximized] = useState(false);
+  const toggleMaximize = useCallback(() => setIsMaximized((v) => !v), []);
+  // Reset to the default slide-over width when the panel closes or the
+  // selected issue changes, so a maximized panel doesn't "stick" across opens.
   useEffect(() => {
-    if (isOpen) {
+    if (!isOpen) setIsMaximized(false);
+  }, [isOpen]);
+  useEffect(() => {
+    setIsMaximized(false);
+  }, [issue?.id]);
+
+  // Handle Escape key to close panel via global shortcut layer system.
+  // Inline mode skips this — the embedding view owns close semantics.
+  useRegisterEscapeLayer(LAYER_ISSUE_PANEL, onClose, isOpen && !inline);
+
+  // Lock body scroll when open as a slide-out overlay. Inline mode is part
+  // of the page flow, so don't lock scroll.
+  useEffect(() => {
+    if (isOpen && !inline) {
       const previousOverflow = document.body.style.overflow;
       document.body.style.overflow = "hidden";
       return () => {
         document.body.style.overflow = previousOverflow;
       };
     }
-  }, [isOpen]);
+  }, [isOpen, inline]);
 
-  // Focus management: focus the panel when opened, restore focus on close
-  useFocusReturn(isOpen, { focusTarget: panelRef });
-  useFocusTrap(panelRef, isOpen);
-
-  // Build root class name
-  const rootClassName = [styles.overlay, isOpen && styles.open, className]
-    .filter(Boolean)
-    .join(" ");
+  // Focus management: only meaningful for the slide-out overlay.
+  useFocusReturn(isOpen && !inline, { focusTarget: panelRef });
+  useFocusTrap(panelRef, isOpen && !inline);
 
   // Determine content: children override default, otherwise render default content
   const content = children ?? (
@@ -1586,8 +1656,46 @@ export function IssueDetailPanel({
       {...(onIssueUpdate !== undefined && { onIssueUpdate })}
       {...(onCopyLink !== undefined && { onCopyLink })}
       {...(onNavigateToIssue !== undefined && { onNavigateToIssue })}
+      {...(!inline && {
+        isMaximized,
+        onToggleMaximize: toggleMaximize,
+      })}
     />
   );
+
+  // Inline mode: render a regular column without overlay, backdrop, or
+  // slide-out animation. The embedding layout reserves the space.
+  if (inline) {
+    return (
+      <aside
+        ref={panelRef}
+        className={[styles.panel, className].filter(Boolean).join(" ")}
+        role="region"
+        aria-label={issue ? `Details for ${issue.title}` : "Issue details"}
+        data-testid="issue-detail-panel"
+        data-state={isOpen ? "open" : "closed"}
+        data-loading={isLoading ? "true" : "false"}
+        data-error={error ? "true" : "false"}
+        data-inline="true"
+        style={{
+          position: "static",
+          width: "100%",
+          height: "100%",
+          maxWidth: "none",
+          flexShrink: 0,
+          transform: "none",
+          boxShadow: "none",
+        }}
+      >
+        <div className={styles.content}>{content}</div>
+      </aside>
+    );
+  }
+
+  // Build root class name
+  const rootClassName = [styles.overlay, isOpen && styles.open, className]
+    .filter(Boolean)
+    .join(" ");
 
   return (
     <div
@@ -1598,8 +1706,11 @@ export function IssueDetailPanel({
     >
       <aside
         ref={panelRef}
-        className={styles.panel}
+        className={[styles.panel, isMaximized && styles.panelMaximized]
+          .filter(Boolean)
+          .join(" ")}
         onClick={(e) => e.stopPropagation()}
+        data-maximized={isMaximized || undefined}
         role="dialog"
         aria-modal="true"
         aria-label={issue ? `Details for ${issue.title}` : "Issue details"}

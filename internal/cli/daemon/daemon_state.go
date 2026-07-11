@@ -140,7 +140,7 @@ func toDaemonAgentStatus(ap supervisor.SupervisedAgentStatus, maxRetries int) Da
 		WorktreePath:           ap.WorktreePath,
 		LastErrorClass:         ap.LastErrorClass,
 		NoWorkCount:            ap.NoWorkCount,
-		ParkCount:              ap.ParkCount,
+		BlockCount:             ap.BlockCount,
 		BackoffUntil:           ap.BackoffUntil,
 		RemoteBranch:           ap.RemoteBranch,
 		OwnershipLeaseID:       ap.OwnershipLeaseID,
@@ -163,15 +163,15 @@ func computeAgentStatus(ap supervisor.SupervisedAgentStatus, maxRetries int) str
 	if ap.PID > 0 && lockfile.IsProcessRunning(ap.PID) {
 		return "running"
 	}
-	// Parked (exhausted its restart budget, retrying on a fixed interval):
+	// Blocked (exhausted its restart budget, retrying on a fixed interval):
 	// the supervise goroutine is alive and the agent self-resumes, so it is
 	// not "failed". Checked after the running guard so a re-spawned agent
 	// reads as "running".
-	if ap.StopReason == supervisor.StopReasonMaxRetriesParked {
-		return "parked"
+	if ap.StopReason == supervisor.StopReasonMaxRetriesBlocked {
+		return "blocked"
 	}
 	// Not running - check if it failed via stop reason or restart count.
-	// FastFail is a terminal deterministic failure (policy refused to park).
+	// FastFail is a terminal deterministic failure (policy refused to block).
 	if ap.StopReason == supervisor.StopReasonFatalError ||
 		ap.StopReason == supervisor.StopReasonMaxRetries ||
 		ap.StopReason == supervisor.StopReasonFastFail {

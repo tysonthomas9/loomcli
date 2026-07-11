@@ -1,6 +1,7 @@
 package data
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -8,6 +9,38 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
 )
+
+func strptr(s string) *string { return &s }
+
+// TestEnforceBlockReason guards the rule that an issue can't be moved to
+// "blocked" without a reason — so a blocked card always carries a human-readable
+// note the board surfaces (isBlockedWithNotes), instead of a silent blocked chip.
+func TestEnforceBlockReason(t *testing.T) {
+	withNotes := &backend.IssueDetailData{IssueData: backend.IssueData{Notes: "prev reason"}}
+	noNotes := &backend.IssueDetailData{}
+	cases := []struct {
+		name    string
+		params  backend.UpdateParams
+		detail  *backend.IssueDetailData
+		wantErr bool
+	}{
+		{"non-block status is ignored", backend.UpdateParams{Status: strptr("open")}, noNotes, false},
+		{"block with inline notes ok", backend.UpdateParams{Status: strptr("blocked"), Notes: strptr("BLOCKED: x")}, noNotes, false},
+		{"block with existing notes ok", backend.UpdateParams{Status: strptr("blocked")}, withNotes, false},
+		{"block with empty inline notes + none existing errors", backend.UpdateParams{Status: strptr("blocked"), Notes: strptr("  ")}, noNotes, true},
+		{"bare block, no reason errors", backend.UpdateParams{Status: strptr("blocked")}, noNotes, true},
+		{"bare block, issue not found fails open", backend.UpdateParams{Status: strptr("blocked")}, nil, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			stub := &localBackendStub{detail: tc.detail}
+			err := enforceBlockReason(context.Background(), stub, "WEB-1", tc.params)
+			if (err != nil) != tc.wantErr {
+				t.Fatalf("enforceBlockReason err=%v, wantErr=%v", err, tc.wantErr)
+			}
+		})
+	}
+}
 
 func TestDataUpdate_TitleAndDescriptionFlags(t *testing.T) {
 	stub := &localBackendStub{}
@@ -145,6 +178,92 @@ func TestDataUpdate_EmptyDescriptionClearsField(t *testing.T) {
 		}
 		if *params.Description != "" {
 			t.Fatalf("Update description = %q, want empty string", *params.Description)
+		}
+	})
+}
+
+// resetUpdateFieldFlags clears any Changed state leaked onto updateCmd's
+// field flags by earlier tests in the package, so dependency-flag tests see
+// a deterministic "no field flags set" baseline.
+func resetUpdateFieldFlags(t *testing.T) {
+	t.Helper()
+	for _, name := range []string{
+		"status", "assignee", "notes", "design", "priority",
+		"title", "description", "description-from-file",
+	} {
+		setTestFlagChanged(t, updateCmd.Flags(), name, false)
+	}
+}
+
+func TestDataUpdate_DependsOnOnly_SkipsFieldUpdate(t *testing.T) {
+	stub := &localBackendStub{}
+	withLocalBackend(t, stub, func() {
+		resetUpdateFieldFlags(t)
+		outputFormat = "text"
+		updateAddDeps = []string{"dep-1", "dep-2"}
+		t.Cleanup(func() { updateAddDeps = nil })
+
+		out, err := captureDataStdout(t, func() error {
+			return updateCmd.RunE(updateCmd, []string{"loom-7"})
+		})
+		if err != nil {
+			t.Fatalf("update: %v", err)
+		}
+		if !strings.Contains(out, "updated loom-7") {
+			t.Fatalf("update output = %q, want success message", out)
+		}
+		if len(stub.calls) != 2 {
+			t.Fatalf("calls = %#v, want exactly two AddDependency calls (no field Update)", stub.calls)
+		}
+		for i, wantDep := range []string{"dep-1", "dep-2"} {
+			call := stub.calls[i]
+			if call.method != "AddDependency" {
+				t.Fatalf("calls[%d].method = %q, want AddDependency", i, call.method)
+			}
+			params := call.args.(backend.DepAddParams)
+			if params.FromID != "loom-7" || params.ToID != wantDep || params.DepType != "blocks" {
+				t.Errorf("calls[%d] params = %#v, want loom-7 -> %s (blocks)", i, params, wantDep)
+			}
+		}
+	})
+}
+
+func TestDataUpdate_FieldsAndDependencyFlags_BothApplied(t *testing.T) {
+	stub := &localBackendStub{}
+	withLocalBackend(t, stub, func() {
+		resetUpdateFieldFlags(t)
+		outputFormat = "text"
+		updateTitle = "retitled"
+		updateAddDeps = []string{"dep-3"}
+		updateRemoveDeps = []string{"dep-4"}
+		t.Cleanup(func() {
+			updateTitle = ""
+			updateAddDeps = nil
+			updateRemoveDeps = nil
+		})
+		setTestFlagChanged(t, updateCmd.Flags(), "title", true)
+
+		if _, err := captureDataStdout(t, func() error {
+			return updateCmd.RunE(updateCmd, []string{"loom-8"})
+		}); err != nil {
+			t.Fatalf("update: %v", err)
+		}
+		if len(stub.calls) != 3 {
+			t.Fatalf("calls = %#v, want Update + AddDependency + RemoveDependency", stub.calls)
+		}
+		if stub.calls[0].method != "Update" {
+			t.Fatalf("calls[0].method = %q, want Update (fields apply before dependency edges)", stub.calls[0].method)
+		}
+		if got := stub.calls[1]; got.method != "AddDependency" || got.args.(backend.DepAddParams).ToID != "dep-3" {
+			t.Fatalf("calls[1] = %#v, want AddDependency dep-3", got)
+		}
+		rm := stub.calls[2]
+		if rm.method != "RemoveDependency" {
+			t.Fatalf("calls[2].method = %q, want RemoveDependency", rm.method)
+		}
+		rmParams := rm.args.(backend.DepRemoveParams)
+		if rmParams.FromID != "loom-8" || rmParams.ToID != "dep-4" {
+			t.Errorf("RemoveDependency params = %#v, want loom-8 -> dep-4", rmParams)
 		}
 	})
 }

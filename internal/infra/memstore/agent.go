@@ -88,6 +88,12 @@ func (s *agentStore) Update(_ context.Context, ws, name string, patch store.Agen
 	if !ok {
 		return nil, fmt.Errorf("agent %q in workspace %q: %w", name, ws, domain.ErrNotFound)
 	}
+	applyAgentPatch(a, patch)
+	a.UpdatedAt = time.Now().UTC()
+	return cloneAgent(a), nil
+}
+
+func applyAgentPatch(a *domain.Agent, patch store.AgentUpdate) {
 	if patch.RoleName != nil {
 		a.RoleName = *patch.RoleName
 	}
@@ -97,6 +103,11 @@ func (s *agentStore) Update(_ context.Context, ws, name string, patch store.Agen
 	if patch.Backend != nil {
 		a.Backend = *patch.Backend
 	}
+	applyAgentRoutingPatch(a, patch)
+	applyAgentRuntimePatch(a, patch)
+}
+
+func applyAgentRoutingPatch(a *domain.Agent, patch store.AgentUpdate) {
 	if patch.FallbackBackends != nil {
 		a.FallbackBackends = append([]string(nil), (*patch.FallbackBackends)...)
 	}
@@ -109,15 +120,6 @@ func (s *agentStore) Update(_ context.Context, ws, name string, patch store.Agen
 	if patch.CrossRepo != nil {
 		a.CrossRepo = *patch.CrossRepo
 	}
-	if patch.Parent != nil {
-		a.Parent = *patch.Parent
-	}
-	if patch.State != nil {
-		a.State = *patch.State
-	}
-	if patch.Mode != nil {
-		a.Mode = *patch.Mode
-	}
 	if patch.TaskFilter != nil {
 		a.TaskFilter = *patch.TaskFilter
 	}
@@ -127,11 +129,21 @@ func (s *agentStore) Update(_ context.Context, ws, name string, patch store.Agen
 	if patch.BudgetPolicy != nil {
 		a.BudgetPolicy = *patch.BudgetPolicy
 	}
+}
+
+func applyAgentRuntimePatch(a *domain.Agent, patch store.AgentUpdate) {
+	if patch.Parent != nil {
+		a.Parent = *patch.Parent
+	}
+	if patch.State != nil {
+		a.State = *patch.State
+	}
+	if patch.Mode != nil {
+		a.Mode = *patch.Mode
+	}
 	if patch.DesiredState != nil {
 		a.DesiredState = *patch.DesiredState
 	}
-	a.UpdatedAt = time.Now().UTC()
-	return cloneAgent(a), nil
 }
 
 func (s *agentStore) Delete(_ context.Context, ws, name string) error {

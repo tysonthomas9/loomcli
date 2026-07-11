@@ -3,9 +3,12 @@
  * Constants and helpers for tab naming, backend detection, and session naming.
  */
 
-import { KNOWN_BACKEND_DEFAULTS } from "@/utils/workspace";
-
 import type { ConnectionState } from "@/components/TerminalView/instances";
+
+// BACKEND_BRAND_COLORS now lives in utils/workspace (next to its data source)
+// so non-terminal consumers can import it without pulling in the terminal
+// component graph. Re-exported here to preserve the tabs barrel surface.
+export { BACKEND_BRAND_COLORS } from "@/utils/workspace";
 
 // Match the PTY manager's default per-workspace session cap.
 export const MAX_TABS = 40;
@@ -16,11 +19,6 @@ export const MAX_SPLIT_RATIO = 0.8;
 export const DEFAULT_SPLIT_RATIO = 0.5;
 export const MIN_SPLIT_WIDTH_PX = 900;
 
-/** Brand colors for each known backend, derived from KNOWN_BACKEND_DEFAULTS. */
-export const BACKEND_BRAND_COLORS: Record<string, string> = Object.fromEntries(
-  Object.entries(KNOWN_BACKEND_DEFAULTS).map(([k, v]) => [k, v.brandColor]),
-);
-
 export interface TabState {
   id: string;
   label: string;
@@ -29,8 +27,40 @@ export interface TabState {
   backendName: string;
   pinned?: boolean;
   crashReason?: string | null;
-  /** When set, this tab observes an agent's terminal via the agent WebSocket endpoint. */
+  kind?: string;
+  role?: string;
+  /** When set, this tab represents an agent's PTY-backed terminal session. */
   agentName?: string;
+  writable?: boolean;
+}
+
+/**
+ * True when persisted metadata describes an agent harness PTY.
+ * The session-name prefix is a fallback for legacy sessions persisted before
+ * kind/agent_id existed; the user-editable label is deliberately NOT
+ * consulted, so renaming a plain tab to "agent-…" can't reclassify it.
+ */
+export function isAgentMetadata(meta: {
+  kind?: string;
+  agent_id?: string;
+  session_name?: string;
+}): boolean {
+  return (
+    meta.kind === "agent" ||
+    (meta.agent_id != null && meta.agent_id !== "") ||
+    (meta.session_name?.startsWith("agent-") ?? false)
+  );
+}
+
+/** True when the tab is an agent harness PTY (Agents view only). */
+export function isAgentTab(
+  tab: Pick<TabState, "kind" | "agentName" | "sessionName">,
+): boolean {
+  return (
+    tab.kind === "agent" ||
+    tab.agentName != null ||
+    tab.sessionName.startsWith("agent-")
+  );
 }
 
 /**

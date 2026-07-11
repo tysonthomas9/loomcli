@@ -28,6 +28,19 @@ import (
 // discovery skips PATH and the standard locations.
 const EnvFleetDBBin = "FLEET_DB_BIN"
 
+const (
+	// EnvFleetRedisPoolSize and EnvFleetRedisMinIdleConns are fleet-db child
+	// process settings. Embedded loom runs the web UI, workspace APIs, and the
+	// mutation long-poll path against the same local FleetDB process, so the
+	// upstream fleet-db production default of 10 connections is too tight for
+	// interactive local use.
+	EnvFleetRedisPoolSize     = "FLEET_REDIS_POOL_SIZE"
+	EnvFleetRedisMinIdleConns = "FLEET_REDIS_MIN_IDLE_CONNS"
+
+	defaultEmbeddedFleetRedisPoolSize     = "100"
+	defaultEmbeddedFleetRedisMinIdleConns = "10"
+)
+
 // ErrEmbeddedAlreadyRunning is returned when another process owns the local
 // embedded fleet-db runtime for this loom data directory.
 var ErrEmbeddedAlreadyRunning = errors.New("embedded fleet-db already running")
@@ -367,6 +380,7 @@ func StartEmbedded(ctx context.Context, dataDir string, logger *slog.Logger) (*E
 		"FLEET_SERVER_ADDR="+httpAddr,
 		"FLEET_REDIS_ADDR="+redisAddr,
 	)
+	cmd.Env = appendEmbeddedFleetDBEnvDefaults(cmd.Env)
 	// Propagate the active trace context to the spawned fleet-db so its
 	// bootstrap work shows up as a child of the loom span that triggered
 	// the spawn. Per-request tracing flows through the inbound HTTP header
@@ -577,6 +591,28 @@ func validateFleetDBBinaryPath(path string) error {
 		return fmt.Errorf("not executable")
 	}
 	return nil
+}
+
+func appendEmbeddedFleetDBEnvDefaults(env []string) []string {
+	env = withDefaultEnv(env, EnvFleetRedisPoolSize, defaultEmbeddedFleetRedisPoolSize)
+	env = withDefaultEnv(env, EnvFleetRedisMinIdleConns, defaultEmbeddedFleetRedisMinIdleConns)
+	return env
+}
+
+func withDefaultEnv(env []string, key, value string) []string {
+	prefix := key + "="
+	for i, kv := range env {
+		if !strings.HasPrefix(kv, prefix) {
+			continue
+		}
+		if strings.TrimSpace(strings.TrimPrefix(kv, prefix)) == "" {
+			out := append([]string(nil), env...)
+			out[i] = prefix + value
+			return out
+		}
+		return env
+	}
+	return append(env, prefix+value)
 }
 
 func probeFleetDBBinary(path string, checked []string, remediation string) FleetDBBinaryDiagnostic {

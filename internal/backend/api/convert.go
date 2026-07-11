@@ -44,6 +44,9 @@ func issueToData(issue gen.Issue) backend.IssueData {
 	if issue.Design != nil {
 		d.Design = *issue.Design
 	}
+	if issue.ExternalRef != nil {
+		d.ExternalRef = *issue.ExternalRef
+	}
 	d.DueAt = cloneTimePtr(issue.DueAt)
 	d.DeferUntil = cloneTimePtr(issue.DeferUntil)
 	return d
@@ -80,6 +83,9 @@ func issueResponseToData(r gen.IssueResponse) backend.IssueData {
 	}
 	if r.Design != nil {
 		d.Design = *r.Design
+	}
+	if r.ExternalRef != nil {
+		d.ExternalRef = *r.ExternalRef
 	}
 	d.DueAt = cloneTimePtr(r.DueAt)
 	d.DeferUntil = cloneTimePtr(r.DeferUntil)
@@ -247,6 +253,9 @@ func blockedIssueToData(b gen.BlockedIssue) backend.IssueData {
 	}
 	if b.Design != nil {
 		d.Design = *b.Design
+	}
+	if b.ExternalRef != nil {
+		d.ExternalRef = *b.ExternalRef
 	}
 	d.DueAt = cloneTimePtr(b.DueAt)
 	d.DeferUntil = cloneTimePtr(b.DeferUntil)

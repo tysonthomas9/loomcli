@@ -80,9 +80,9 @@ describe("shouldUseWhiteText", () => {
     expect(shouldUseWhiteText("#F59E87")).toBe(false);
   });
 
-  it("returns false for all AVATAR_COLORS (they are light pastels)", () => {
+  it("returns true for all AVATAR_COLORS (they are saturated/dark)", () => {
     for (const color of AVATAR_COLORS) {
-      expect(shouldUseWhiteText(color)).toBe(false);
+      expect(shouldUseWhiteText(color)).toBe(true);
     }
   });
 

@@ -247,7 +247,7 @@ func TestRecordTaskExit_DesignOrNotesDeltaCountsAsProgress(t *testing.T) {
 	mock := clitest.NewMockIssueBackend()
 	design := "v1"
 	mock.GetFn = func(_ context.Context, _ string) (*backend.IssueDetailData, error) {
-		return &backend.IssueDetailData{Description: "x", Notes: "n", IssueData: backend.IssueData{Design: design}}, nil
+		return &backend.IssueDetailData{Description: "x", IssueData: backend.IssueData{Design: design, Notes: "n"}}, nil
 	}
 	s := newQuarantineSupervisor(mock)
 	ap := newKilledAgent(t, "falcon", "T-7", timeoutOutcome())

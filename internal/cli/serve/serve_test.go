@@ -16,6 +16,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
+	"github.com/tysonthomas9/loomcli/internal/testutil"
 	"github.com/tysonthomas9/loomcli/internal/webui"
 	"github.com/tysonthomas9/loomcli/internal/webui/fleet"
 )
@@ -83,6 +84,102 @@ func TestBuildMonitorCollectDataFnIsLazy(t *testing.T) {
 
 	if got := backendCalls.Load(); got != 0 {
 		t.Fatalf("buildMonitorCollectDataFn called issue backend before first request: got %d calls", got)
+	}
+}
+
+func TestConfigureServeLocalRuntimeModeDefaultsHeadless(t *testing.T) {
+	t.Setenv(envLocalRuntimeMode, "")
+	t.Setenv(envDesktopDataDir, "")
+
+	configureServeLocalRuntimeMode()
+
+	if got := os.Getenv(envLocalRuntimeMode); got != localRuntimeModeHeadless {
+		t.Fatalf("%s = %q, want %q", envLocalRuntimeMode, got, localRuntimeModeHeadless)
+	}
+}
+
+func TestConfigureServeLocalRuntimeModePreservesExplicitMode(t *testing.T) {
+	t.Setenv(envLocalRuntimeMode, "disabled")
+	t.Setenv(envDesktopDataDir, "/tmp/desktop")
+
+	configureServeLocalRuntimeMode()
+
+	if got := os.Getenv(envLocalRuntimeMode); got != "disabled" {
+		t.Fatalf("%s = %q, want explicit value preserved", envLocalRuntimeMode, got)
+	}
+}
+
+func TestConfigureServeLocalRuntimeModeMarksDesktopService(t *testing.T) {
+	t.Setenv(envLocalRuntimeMode, "")
+	t.Setenv(envDesktopDataDir, "/tmp/desktop")
+
+	configureServeLocalRuntimeMode()
+
+	if got := os.Getenv(envLocalRuntimeMode); got != localRuntimeModeDesktop {
+		t.Fatalf("%s = %q, want %q", envLocalRuntimeMode, got, localRuntimeModeDesktop)
+	}
+}
+
+func TestDriverExecutorEnabled(t *testing.T) {
+	for _, value := range []string{"", "1", "true", "TRUE", "yes", "on", "unexpected"} {
+		t.Run(value, func(t *testing.T) {
+			t.Setenv(envLoomDriverExecutor, value)
+			if !driverExecutorEnabled() {
+				t.Fatalf("driverExecutorEnabled() = false for %q", value)
+			}
+		})
+	}
+	for _, value := range []string{"0", "false", "FALSE", "off", "no"} {
+		t.Run("disabled_"+value, func(t *testing.T) {
+			t.Setenv(envLoomDriverExecutor, value)
+			if driverExecutorEnabled() {
+				t.Fatalf("driverExecutorEnabled() = true for %q", value)
+			}
+		})
+	}
+}
+
+func TestDriverTaskWorkerConcurrency(t *testing.T) {
+	tests := []struct {
+		value string
+		want  int
+	}{
+		{"", 2},
+		{"4", 4},
+		{"0", 1},
+		{"-3", 1},
+		{"invalid", 2},
+		{"100", 32},
+	}
+	for _, tt := range tests {
+		t.Run(tt.value, func(t *testing.T) {
+			t.Setenv(envLoomDriverTaskWorkerConcurrency, tt.value)
+			if got := driverTaskWorkerConcurrency(); got != tt.want {
+				t.Fatalf("driverTaskWorkerConcurrency() = %d, want %d", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestDriverTaskRunMaxAttempts(t *testing.T) {
+	tests := []struct {
+		value string
+		want  int
+	}{
+		{"", 2},
+		{"4", 4},
+		{"0", 1},
+		{"-3", 1},
+		{"invalid", 2},
+		{"100", 10},
+	}
+	for _, tt := range tests {
+		t.Run(tt.value, func(t *testing.T) {
+			t.Setenv(envLoomDriverTaskRunMaxAttempts, tt.value)
+			if got := driverTaskRunMaxAttempts(); got != tt.want {
+				t.Fatalf("driverTaskRunMaxAttempts() = %d, want %d", got, tt.want)
+			}
+		})
 	}
 }
 
@@ -767,7 +864,22 @@ func TestResponseTypes(t *testing.T) {
 }
 
 func TestServeFlags_Defaults(t *testing.T) {
+	testutil.ClearLoomEnv(t)
+
 	f := serveCmd.Flags()
+	frontendDirFlag := f.Lookup("frontend-dir")
+	if frontendDirFlag == nil {
+		t.Fatal("frontend-dir flag not registered on serveCmd")
+	}
+	origFrontendDir := frontendDirFlag.Value.String()
+	t.Cleanup(func() {
+		if err := f.Set("frontend-dir", origFrontendDir); err != nil {
+			t.Fatalf("restore frontend-dir flag: %v", err)
+		}
+	})
+	if err := f.Set("frontend-dir", ""); err != nil {
+		t.Fatalf("reset frontend-dir flag: %v", err)
+	}
 
 	port, err := f.GetInt("port")
 	if err != nil {

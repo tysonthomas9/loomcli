@@ -1,6 +1,10 @@
 import { useCallback, useEffect, useState } from "react";
 
-import { getAgentLogArchive, getAgentTerminalInfo } from "@/hooks/api";
+import {
+  ensureAgentTerminalSession,
+  getAgentLogArchive,
+  getAgentTerminalInfo,
+} from "@/hooks/api";
 import { EmbeddedTerminal } from "@/components/EmbeddedTerminal";
 import type { ConnectionState } from "@/components/TerminalView";
 import { useWorkspaceContext } from "@/hooks/workspace";
@@ -25,19 +29,32 @@ export function AgentLogsTab({
 }: AgentLogsTabProps): JSX.Element {
   const { workspaceId } = useWorkspaceContext();
   const [mode, setMode] = useState<"tmux" | "archive" | null>(null);
+  const [terminalSession, setTerminalSession] = useState<{
+    sessionName: string;
+    backend: string;
+    agentName: string;
+  } | null>(null);
   const [lines, setLines] = useState<string[]>([]);
   const [state, setState] = useState<LogViewState>("connecting");
 
   const load = useCallback(async () => {
     setState("connecting");
+    setTerminalSession(null);
     try {
       const nextMode = await getAgentTerminalInfo(workspaceId, agentName);
-      setMode(nextMode);
       if (nextMode === "tmux") {
+        const meta = await ensureAgentTerminalSession(workspaceId, agentName);
+        setTerminalSession({
+          sessionName: meta.session_name,
+          backend: meta.backend ?? "agent",
+          agentName: meta.agent_id ?? agentName,
+        });
+        setMode("tmux");
         setLines([]);
         // tmux connection state is driven by EmbeddedTerminal below.
       } else {
         const archive = await getAgentLogArchive(workspaceId, agentName);
+        setMode("archive");
         setLines(archive.lines);
         // "connected" only when there is actually something to show; an empty
         // archive reports "empty" so the UI never claims a populated log when
@@ -54,31 +71,35 @@ export function AgentLogsTab({
     void load();
   }, [isActive, load]);
 
+  const stateLabel = state === "empty" ? "no logs" : state;
+
   return (
-    <div className={styles.section}>
-      <h3 className={styles.sectionTitle}>
-        {mode === "tmux" ? "Live (tmux)" : "Archive snapshot"}
-      </h3>
-      <button type="button" onClick={load}>
-        Refresh
-      </button>
-      <div data-testid="log-viewer">
-        <span data-state={state}>{state === "empty" ? "no logs" : state}</span>
-        {mode === "tmux" ? (
-          <EmbeddedTerminal
-            sessionName={`agent-${agentName}`}
-            backend="agent"
-            agentName={agentName}
-            isActive={isActive}
-            onConnectionStateChange={(next) => setState(next)}
-          />
-        ) : state === "empty" ? (
-          <p data-testid="archive-empty" className={styles.emptyState}>
-            No logs available for this agent yet.
-          </p>
-        ) : (
-          <pre data-testid="terminal-container">{lines.join("\n")}</pre>
-        )}
+    <div className={styles.scrollableContent}>
+      <div className={styles.section}>
+        <h3 className={styles.sectionTitle}>
+          {mode === "tmux" ? "Live terminal" : "Archive snapshot"}
+        </h3>
+        <button type="button" onClick={load}>
+          Refresh
+        </button>
+        <div data-testid="log-viewer">
+          <span data-state={state}>{stateLabel}</span>
+          {mode === "tmux" && terminalSession ? (
+            <EmbeddedTerminal
+              sessionName={terminalSession.sessionName}
+              backend={terminalSession.backend}
+              agentName={terminalSession.agentName}
+              isActive={isActive}
+              onConnectionStateChange={setState}
+            />
+          ) : state === "empty" ? (
+            <p data-testid="archive-empty" className={styles.emptyState}>
+              No logs available for this agent yet.
+            </p>
+          ) : (
+            <pre data-testid="terminal-container">{lines.join("\n")}</pre>
+          )}
+        </div>
       </div>
     </div>
   );

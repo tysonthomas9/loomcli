@@ -4,9 +4,9 @@
  */
 
 .markdown {
-  font-size: var(--font-size-sm);
+  font-size: var(--font-size-base);
   color: var(--color-text-secondary);
-  line-height: 1.6;
+  line-height: 1.55;
   padding-top: 10px;
   padding-bottom: 10px;
 }

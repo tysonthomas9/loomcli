@@ -11,12 +11,16 @@ import (
 
 	// Sub-package registrations — each package's init() calls cli.RegisterCommand().
 	_ "github.com/tysonthomas9/loomcli/internal/cli/agent"
+	_ "github.com/tysonthomas9/loomcli/internal/cli/agent/lead"
 	_ "github.com/tysonthomas9/loomcli/internal/cli/agentdef"
 	_ "github.com/tysonthomas9/loomcli/internal/cli/automode"
 	_ "github.com/tysonthomas9/loomcli/internal/cli/backends"
 	_ "github.com/tysonthomas9/loomcli/internal/cli/cleanup"
+	_ "github.com/tysonthomas9/loomcli/internal/cli/connector"
 	_ "github.com/tysonthomas9/loomcli/internal/cli/daemon"
 	_ "github.com/tysonthomas9/loomcli/internal/cli/doctor"
+	_ "github.com/tysonthomas9/loomcli/internal/cli/driver"
+	_ "github.com/tysonthomas9/loomcli/internal/cli/epic"
 	_ "github.com/tysonthomas9/loomcli/internal/cli/git"
 	_ "github.com/tysonthomas9/loomcli/internal/cli/hooks"
 	_ "github.com/tysonthomas9/loomcli/internal/cli/local"
@@ -27,6 +31,9 @@ import (
 	_ "github.com/tysonthomas9/loomcli/internal/cli/serve/install"
 	_ "github.com/tysonthomas9/loomcli/internal/cli/serve/logroutercmd"
 	_ "github.com/tysonthomas9/loomcli/internal/cli/serve/worker"
+	_ "github.com/tysonthomas9/loomcli/internal/cli/stack"
+	_ "github.com/tysonthomas9/loomcli/internal/cli/trigger"
+	_ "github.com/tysonthomas9/loomcli/internal/cli/workflow"
 	_ "github.com/tysonthomas9/loomcli/internal/cli/workspace"
 )
 

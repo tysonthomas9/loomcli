@@ -25,6 +25,7 @@ func addListCoreFilters(q url.Values, opts backend.ListOpts) {
 	setOptInt(q, "priority", opts.Priority)
 	setNonEmpty(q, "type", opts.IssueType)
 	setNonEmpty(q, "assignee", opts.Assignee)
+	setNonEmpty(q, "parent_id", opts.ParentID)
 	joinCSV(q, "labels", opts.Labels)
 	joinCSV(q, "source_repos", opts.SourceRepos)
 	if opts.Limit > 0 {
@@ -69,7 +70,6 @@ func readyOptsToQuery(opts backend.ReadyOpts) string {
 	joinCSV(q, "labels", opts.Labels)
 	joinCSV(q, "labels_any", opts.LabelsAny)
 	setNonEmpty(q, "mol_type", opts.MolType)
-	setBoolIfTrue(q, "include_deferred", opts.IncludeDeferred)
 	joinCSV(q, "source_repos", opts.SourceRepos)
 	return q.Encode()
 }

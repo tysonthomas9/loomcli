@@ -123,6 +123,13 @@ vi.mock("@/hooks", () => ({
     error: null,
     refetch: vi.fn(),
   }),
+  useWorkspaceTreeWidth: () => ({
+    width: 210,
+    applyDelta: vi.fn(),
+    resetWidth: vi.fn(),
+  }),
+  WORKSPACE_TREE_MIN_WIDTH: 160,
+  WORKSPACE_TREE_MAX_WIDTH: 420,
   useToast: () => ({ showToast: vi.fn() }),
   useIssueDiffStat: () => ({
     data: null,
@@ -170,6 +177,10 @@ vi.mock("@/hooks/workspace", async () => {
     }),
   };
 });
+
+// AgentSection's module import triggers a vitest-4 mock-allocation blowup;
+// stub it here (this suite tests connection state, not the agent list).
+vi.mock("../AgentSection", () => ({ AgentSection: () => null }));
 
 describe("WorkspaceTree connection state", () => {
   beforeEach(() => {
@@ -307,7 +318,10 @@ describe("WorkspaceTree connection state", () => {
       const errorBadge = container.querySelector('[class*="errorBadge"]');
       expect(errorBadge).toBeInTheDocument();
       expect(errorBadge!.textContent).toBe("!");
-      expect(errorBadge).toHaveAttribute("title", "Workspace connection error");
+      expect(errorBadge).toHaveAttribute(
+        "aria-label",
+        "Workspace connection error",
+      );
     });
 
     it("renders error badge when collapsed and connectionState is error_lost_connection", () => {

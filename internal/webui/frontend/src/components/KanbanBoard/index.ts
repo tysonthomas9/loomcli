@@ -14,3 +14,5 @@ export type {
 
 export { DEFAULT_COLUMNS, createColumns } from "./columnConfigs";
 export type { KanbanColumnConfig } from "./types";
+
+export { visibleKanbanColumns } from "./columnVisibility";

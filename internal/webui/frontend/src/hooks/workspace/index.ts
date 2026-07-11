@@ -27,6 +27,12 @@ export type {
 export { useGitStatus } from "./useGitStatus";
 export type { UseGitStatusOptions, UseGitStatusReturn } from "./useGitStatus";
 
+export { usePullRequests } from "./usePullRequests";
+export type {
+  UsePullRequestsOptions,
+  UsePullRequestsReturn,
+} from "./usePullRequests";
+
 export { useRepoFilter, parseReposFromUrl } from "./useRepoFilter";
 export type {
   UseRepoFilterOptions,
@@ -73,3 +79,6 @@ export type {
 
 export { useWorkspaceTree } from "./useWorkspaceTree";
 export type { EpicWithTasks, UseWorkspaceTreeReturn } from "./useWorkspaceTree";
+
+export { useRunEpicWorkflow } from "./useRunEpicWorkflow";
+export type { UseRunEpicWorkflowOptions } from "./useRunEpicWorkflow";

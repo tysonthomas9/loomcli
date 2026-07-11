@@ -23,7 +23,9 @@
   padding: 14px 16px;
   border-bottom: 1px solid var(--color-border);
   flex-shrink: 0;
-  background-color: var(--color-bg-tertiary);
+  background-color: var(
+    --color-chrome
+  ); /* Aether column-header strip (#1a1a1a) */
 }
 
 .headerLabel {
@@ -89,8 +91,10 @@
 
 .title {
   margin: 0;
-  font-size: 1rem;
-  font-weight: 700;
+  font-size: var(
+    --font-size-sm
+  ); /* 14px — Aether column header (text-sm font-black) */
+  font-weight: 900;
   letter-spacing: -0.01em;
   color: var(--color-text);
   line-height: var(--line-height-tight);
@@ -129,6 +133,11 @@
     border-color 0.15s ease;
   border: 1px solid transparent;
   overflow-y: auto; /* Scroll when cards overflow column height */
+  /* Cards must keep intrinsic height; otherwise flex shrink squashes them
+     when swim-lane columns are viewport-capped. */
+  > * {
+    flex-shrink: 0;
+  }
   /* Smooth momentum scrolling on iOS */
   -webkit-overflow-scrolling: touch;
   /* Firefox scrollbar styling */

@@ -18,6 +18,23 @@ const minLivenessThreshold = 60 * time.Second
 // computing the per-agent threshold.
 const agentLivenessSlack = 30 * time.Second
 
+// livenessStaleScansBeforeFatal is how many consecutive scans a tick must be
+// observed stale before the watchdog signals fatal. At livenessScanInterval
+// (10s) this adds ~20s of grace beyond the per-name threshold, so a single
+// transient stall (one slow control-plane cycle, a brief lock contention, a GC
+// blip) is tolerated while a genuinely wedged goroutine — stale every scan — is
+// still caught within ~threshold+20s.
+const livenessStaleScansBeforeFatal = 3
+
+// livenessFreezeGap is the scan-to-scan wall-clock gap above which the watchdog
+// concludes the whole process was suspended (laptop sleep, swap thrash,
+// SIGSTOP/debugger) rather than that any goroutine misbehaved. The watchdog
+// scans every livenessScanInterval (10s), so a gap this large cannot occur
+// under normal scheduling. On such a gap every tick looks ancient through no
+// fault of its goroutine, so the watchdog clears all streaks and skips the
+// fatal for that scan, giving goroutines a cadence to refresh after thaw.
+const livenessFreezeGap = 30 * time.Second
+
 // livenessWatchdog runs forever, scanning every registered tick stamp on
 // livenessScanInterval. When any tick is older than its per-name threshold,
 // it logs a full goroutine dump and routes a fatal error so the daemon exits
@@ -39,18 +56,52 @@ func (s *Supervisor) livenessWatchdog() {
 }
 
 // scanTicks evaluates every registered tick against its threshold and signals
-// fatal on the first staleness it finds.
+// fatal once a tick has been stale for livenessStaleScansBeforeFatal scans in a
+// row. A tick that recovers (fresh again this scan) has its streak reset, so
+// only sustained staleness — a genuinely wedged goroutine — crashes the daemon;
+// transient stalls are ridden out. If the scan-to-scan gap exceeds
+// livenessFreezeGap the process was suspended, not misbehaving, so all streaks
+// are cleared and the scan is skipped.
 func (s *Supervisor) scanTicks(now time.Time) {
+	// Process-suspension guard: a watchdog that did not run for far longer than
+	// its interval means the whole process was frozen. Every tick then looks
+	// ancient regardless of goroutine health — skip the fatal and reset streaks.
+	prev := s.lastLivenessScan
+	s.lastLivenessScan = now
+	if !prev.IsZero() && now.Sub(prev) > livenessFreezeGap {
+		slog.Warn("supervisor liveness check skipped: process suspension detected",
+			"gap", now.Sub(prev).Truncate(time.Second))
+		s.livenessStreak = nil
+		return
+	}
+
 	var stale []string
+	staleNow := make(map[string]struct{})
 
 	s.RangeTicks(func(name string, t time.Time) {
 		threshold := s.thresholdFor(name)
 		age := now.Sub(t)
-		if age > threshold {
-			stale = append(stale, fmt.Sprintf("%s (age=%s, threshold=%s)",
-				name, age.Truncate(time.Second), threshold))
+		if age <= threshold {
+			return
+		}
+		staleNow[name] = struct{}{}
+		if s.livenessStreak == nil {
+			s.livenessStreak = make(map[string]int)
+		}
+		s.livenessStreak[name]++
+		if s.livenessStreak[name] >= livenessStaleScansBeforeFatal {
+			stale = append(stale, fmt.Sprintf("%s (age=%s, threshold=%s, consecutive_scans=%d)",
+				name, age.Truncate(time.Second), threshold, s.livenessStreak[name]))
 		}
 	})
+
+	// Reset the streak for any tick that was stale before but recovered this
+	// scan, so a goroutine that briefly stalled then resumed starts fresh.
+	for name := range s.livenessStreak {
+		if _, ok := staleNow[name]; !ok {
+			delete(s.livenessStreak, name)
+		}
+	}
 
 	if len(stale) == 0 {
 		return

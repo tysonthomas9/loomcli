@@ -412,7 +412,6 @@ describe("RedirectToWorkspace", () => {
         expect.objectContaining({
           initialValues: expect.objectContaining({
             name: "Hello-World",
-            type: "clone",
             urlInput: "https://github.com/octocat/Hello-World",
           }),
         }),

@@ -228,6 +228,15 @@ export async function getBlockedIssues(
 }
 
 /**
+ * The kanban board renders the workspace's full working set; without an
+ * explicit limit the server defaults to 50, silently truncating boards past
+ * 50 issues (sort order decides which cards vanish — live incident: the only
+ * in_progress issue, at position 88 of 98, left the In Progress column empty
+ * while an agent worked it). 500 matches the issue-events endpoint cap.
+ */
+const KANBAN_ISSUE_FETCH_LIMIT = 500;
+
+/**
  * Get issues for the Kanban board view.
  */
 export async function getKanbanIssues(
@@ -243,7 +252,7 @@ export async function getKanbanIssues(
     type: mapped.type as string | undefined,
     assignee: mapped.assignee as string | undefined,
     priority: mapped.priority as number | undefined,
-    limit: mapped.limit as number | undefined,
+    limit: (mapped.limit as number | undefined) ?? KANBAN_ISSUE_FETCH_LIMIT,
     labels: mapped.labels ? String(mapped.labels) : undefined,
     source_repos: mapped.source_repos
       ? Array.isArray(mapped.source_repos)
@@ -369,6 +378,7 @@ export interface UpdateIssueRequest {
   status?: Status;
   assignee?: string;
   owner?: string;
+  external_ref?: string;
   labels?: string[];
   add_labels?: string[];
   remove_labels?: string[];
@@ -436,6 +446,7 @@ export async function updateIssue(
     status: reqData.status as string | undefined,
     assignee: reqData.assignee,
     owner: reqData.owner,
+    external_ref: reqData.external_ref,
     set_labels: reqData.labels,
     add_labels: reqData.add_labels,
     remove_labels: reqData.remove_labels,

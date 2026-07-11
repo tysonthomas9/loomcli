@@ -11,10 +11,15 @@
   box-sizing: border-box;
 }
 
+[hidden] {
+  display: none !important;
+}
+
 body {
   margin: 0;
   min-width: 420px;
   min-height: 260px;
+  font-size: 14px;
 }
 
 button {
@@ -81,14 +86,14 @@ body[data-mode="ready"] .spinner {
 
 h1 {
   margin: 0;
-  font-size: 20px;
+  font-size: 18px;
   line-height: 1.2;
 }
 
 p {
   margin: 5px 0 0;
   color: #596579;
-  font-size: 13px;
+  font-size: 11px;
   line-height: 1.45;
   overflow-wrap: anywhere;
 }
@@ -111,7 +116,7 @@ body[data-mode="error"] .details {
 summary {
   color: #596579;
   cursor: pointer;
-  font-size: 13px;
+  font-size: 11px;
   font-weight: 700;
 }
 
@@ -129,7 +134,7 @@ dl > div {
 dt {
   margin-bottom: 4px;
   color: #596579;
-  font-size: 11px;
+  font-size: 9px;
   font-weight: 700;
   text-transform: uppercase;
 }
@@ -138,7 +143,7 @@ dd {
   margin: 0;
   overflow-wrap: anywhere;
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 12px;
+  font-size: 10px;
 }
 
 .output {
@@ -151,7 +156,7 @@ dd {
   color: #e5e7eb;
   padding: 12px;
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 12px;
+  font-size: 10px;
   line-height: 1.45;
   white-space: pre-wrap;
 }

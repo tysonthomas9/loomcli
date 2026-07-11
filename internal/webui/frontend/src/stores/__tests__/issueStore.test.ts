@@ -282,6 +282,37 @@ describe("issueStore", () => {
       expect(store.getState().issuesMap.get("a")).toBe(original);
     });
 
+    it("replaces issues when only kanban projection fields change", async () => {
+      const original = makeIssue({
+        id: "a",
+        status: "open",
+        is_blocked: true,
+        blocked_by_count: 1,
+        blocked_by: ["blocker-1"],
+        blocked_by_details: [
+          { id: "blocker-1", title: "Blocking task", priority: 2 },
+        ],
+      });
+      store.setState({ issuesMap: new Map([["a", original]]) });
+
+      const apiIssue = makeIssue({
+        id: "a",
+        status: "open",
+        is_blocked: false,
+        blocked_by_count: 0,
+        blocked_by: [],
+      });
+      mockGetKanbanIssues.mockResolvedValue([apiIssue]);
+
+      await store.getState().fetchIssues({
+        workspaceId: "ws1",
+        mode: "kanban",
+      });
+
+      expect(store.getState().issuesMap.get("a")).toBe(apiIssue);
+      expect(store.getState().issuesMap.get("a")!.is_blocked).toBe(false);
+    });
+
     it("skips issues deleted during fetch window", async () => {
       // We need to intercept during the fetch. Use a delayed mock that triggers a delete.
       mockGetReadyIssues.mockImplementation(async () => {
@@ -834,6 +865,118 @@ describe("issueStore", () => {
       expect(refetchSpy).toHaveBeenCalledTimes(1);
     });
 
+    it("schedules projection refetch for generic issue-affecting entity events", () => {
+      const refetchSpy = vi
+        .spyOn(store.getState(), "refetch")
+        .mockResolvedValue();
+
+      store.getState().applyMutation(
+        makeMutation({
+          type: "update",
+          entity_type: "dependency",
+          entity_id: "dep-1",
+          action: "dep.add",
+          issue_id: "",
+          timestamp: "2026-01-01T00:00:00Z",
+        }),
+      );
+
+      expect(refetchSpy).not.toHaveBeenCalled();
+
+      vi.advanceTimersByTime(1000);
+
+      expect(refetchSpy).toHaveBeenCalledTimes(1);
+      expect(store.getState().mutationCount).toBe(0);
+    });
+
+    it("ignores generic non-issue entity events even when legacy issue_id is present", () => {
+      const refetchSpy = vi
+        .spyOn(store.getState(), "refetch")
+        .mockResolvedValue();
+
+      store.setState({
+        issuesMap: new Map([
+          [
+            "task-1",
+            makeIssue({
+              id: "task-1",
+              updated_at: "2026-01-01T00:00:00Z",
+            }),
+          ],
+        ]),
+      });
+
+      store.getState().applyMutation(
+        makeMutation({
+          type: "terminal_session_change",
+          entity_type: "terminal",
+          entity_id: "session-1",
+          action: "terminal.session_change",
+          issue_id: "task-1",
+          timestamp: "2026-01-02T00:00:00Z",
+        }),
+      );
+
+      vi.advanceTimersByTime(1000);
+
+      expect(refetchSpy).not.toHaveBeenCalled();
+      expect(store.getState().issuesMap.get("task-1")!.updated_at).toBe(
+        "2026-01-01T00:00:00Z",
+      );
+      expect(store.getState().mutationCount).toBe(0);
+    });
+
+    it("ignores generic agent status and refresh events in the issue store", () => {
+      const refetchSpy = vi
+        .spyOn(store.getState(), "refetch")
+        .mockResolvedValue();
+
+      store.setState({
+        issuesMap: new Map([
+          [
+            "task-1",
+            makeIssue({
+              id: "task-1",
+              title: "Issue state should not move",
+              updated_at: "2026-01-01T00:00:00Z",
+            }),
+          ],
+        ]),
+      });
+
+      store.getState().applyMutation(
+        makeMutation({
+          type: "status",
+          entity_type: "agent",
+          entity_id: "agent-alpha",
+          action: "agent.status",
+          issue_id: "task-1",
+          title: "agent-alpha",
+          timestamp: "2026-01-02T00:00:00Z",
+        }),
+      );
+
+      store.getState().applyMutation(
+        makeMutation({
+          type: "refresh",
+          entity_type: "agent",
+          entity_id: "agent-alpha",
+          action: "agent.refresh",
+          issue_id: "task-1",
+          title: "agent-alpha",
+          timestamp: "2026-01-02T00:00:01Z",
+        }),
+      );
+
+      vi.advanceTimersByTime(1000);
+
+      const issue = store.getState().issuesMap.get("task-1")!;
+      expect(refetchSpy).not.toHaveBeenCalled();
+      expect(issue.title).toBe("Issue state should not move");
+      expect(issue.updated_at).toBe("2026-01-01T00:00:00Z");
+      expect(store.getState().mutationCount).toBe(0);
+    });
+
     it("ignores mutations with empty issue_id (non-refresh)", () => {
       store.getState().applyMutation(
         makeMutation({
@@ -960,7 +1103,7 @@ describe("issueStore", () => {
       expect(store.getState().issuesMap.has("new-1")).toBe(true);
     });
 
-    it("moves a kanban issue to in_progress from an SSE status mutation without refetching", async () => {
+    it("moves a kanban issue immediately from an SSE status mutation and schedules projection refetch", async () => {
       mockGetKanbanIssues.mockResolvedValue([
         makeIssue({
           id: "task-1",
@@ -991,6 +1134,9 @@ describe("issueStore", () => {
       capturedCallback!(
         makeMutation({
           type: "status",
+          entity_type: "issue",
+          entity_id: "task-1",
+          action: "issue.update",
           issue_id: "task-1",
           workspace_id: "ws1",
           old_status: "open",
@@ -1004,6 +1150,9 @@ describe("issueStore", () => {
       );
       expect(store.getState().mutationCount).toBe(1);
       expect(mockGetKanbanIssues).toHaveBeenCalledTimes(1);
+
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(mockGetKanbanIssues).toHaveBeenCalledTimes(2);
 
       unsubscribe();
     });
@@ -1050,6 +1199,27 @@ describe("issueStore", () => {
       const s = store.getState();
       expect(s.issuesMap.get("a")!.status).toBe("in_progress");
       expect(s.pendingIds.size).toBe(0);
+    });
+
+    it("schedules projection refetch after confirmed optimistic status update", async () => {
+      const issue = makeIssue({ id: "a", status: "open" });
+      mockGetKanbanIssues.mockResolvedValue([issue]);
+
+      await store.getState().fetchIssues({
+        workspaceId: "ws1",
+        mode: "kanban",
+      });
+
+      mockGetKanbanIssues.mockClear();
+      mockUpdateIssue.mockResolvedValue(
+        makeIssue({ id: "a", status: "in_progress" }),
+      );
+
+      await store.getState().updateIssueStatus("a", "in_progress", "ws1");
+
+      expect(mockGetKanbanIssues).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(mockGetKanbanIssues).toHaveBeenCalledTimes(1);
     });
 
     it("rolls back on API failure and calls onToast", async () => {
@@ -1180,6 +1350,31 @@ describe("issueStore", () => {
 
       store.getState().setConnectionState("connected");
       expect(store.getState().showStaleBanner).toBe(false);
+    });
+
+    it("clears stale banner when reconnecting passes through connecting", () => {
+      const refetchSpy = vi
+        .spyOn(store.getState(), "refetch")
+        .mockResolvedValue();
+      const toastFn = vi.fn();
+      store.getState().configure({ onToast: toastFn });
+
+      store.getState().setConnectionState("reconnecting");
+      vi.advanceTimersByTime(5000);
+      expect(store.getState().showStaleBanner).toBe(true);
+
+      store.getState().setConnectionState("connecting");
+      expect(store.getState().showStaleBanner).toBe(true);
+
+      store.getState().setConnectionState("connected");
+      expect(store.getState().showStaleBanner).toBe(false);
+      expect(store.getState().connectionLost).toBe(false);
+      expect(store.getState().disconnectedSince).toBeNull();
+      expect(refetchSpy).toHaveBeenCalled();
+      expect(toastFn).toHaveBeenCalledWith("Connection restored.", {
+        type: "info",
+        duration: 3000,
+      });
     });
 
     it("sets connectionLost when reconnectAttempts >= 10", () => {
@@ -1451,6 +1646,30 @@ describe("issueStore", () => {
       expect(issuesAreEqual(makeIssue({ labels: ["a"] }), makeIssue({}))).toBe(
         false,
       );
+    });
+
+    it("returns false when kanban projection fields differ", () => {
+      expect(
+        issuesAreEqual(
+          makeIssue({
+            is_blocked: true,
+            blocked_by_count: 1,
+            blocked_by: ["a"],
+          }),
+          makeIssue({
+            is_blocked: false,
+            blocked_by_count: 0,
+            blocked_by: [],
+          }),
+        ),
+      ).toBe(false);
+    });
+
+    it("returns false when new enumerable issue fields differ", () => {
+      const a = { ...makeIssue(), derived_projection: 1 } as Issue;
+      const b = { ...makeIssue(), derived_projection: 2 } as Issue;
+
+      expect(issuesAreEqual(a, b)).toBe(false);
     });
   });
 

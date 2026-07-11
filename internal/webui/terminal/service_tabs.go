@@ -81,12 +81,18 @@ func (s *terminalServiceImpl) PatchTab(ctx context.Context, wsID, session string
 	if s.hub != nil {
 		s.hub.Broadcast(&realtime.MutationPayload{
 			Type:        "terminal_metadata",
+			EntityType:  "terminal",
+			EntityID:    session,
+			Action:      "terminal.metadata",
 			Timestamp:   time.Now().UTC().Format(time.RFC3339),
 			WorkspaceID: wsID,
 		})
 		if issueIDChanged {
 			s.hub.Broadcast(&realtime.MutationPayload{
 				Type:        "terminal_session_change",
+				EntityType:  "terminal",
+				EntityID:    session,
+				Action:      "terminal.session_change",
 				Timestamp:   time.Now().UTC().Format(time.RFC3339),
 				WorkspaceID: wsID,
 			})
@@ -126,6 +132,9 @@ func (s *terminalServiceImpl) PutTab(ctx context.Context, wsID string, meta *tab
 	if s.hub != nil {
 		s.hub.Broadcast(&realtime.MutationPayload{
 			Type:        "terminal_metadata",
+			EntityType:  "terminal",
+			EntityID:    meta.SessionName,
+			Action:      "terminal.metadata",
 			Timestamp:   time.Now().UTC().Format(time.RFC3339),
 			WorkspaceID: wsID,
 		})
@@ -159,6 +168,9 @@ func (s *terminalServiceImpl) DeleteTab(ctx context.Context, wsID, session strin
 	if s.hub != nil {
 		s.hub.Broadcast(&realtime.MutationPayload{
 			Type:        "terminal_metadata",
+			EntityType:  "terminal",
+			EntityID:    session,
+			Action:      "terminal.metadata",
 			Timestamp:   time.Now().UTC().Format(time.RFC3339),
 			WorkspaceID: wsID,
 		})

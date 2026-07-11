@@ -972,6 +972,11 @@ paths:
       operationId: listReady
       tags: [ready]
       summary: List ready (unblocked) issues
+      description: |
+        Returns the canonical ready availability view from the issue backend:
+        open, non-epic work that is not canonically blocked and not currently
+        deferred. Filters may narrow this view, but they must not make
+        non-open statuses or epics ready.
       parameters:
         - $ref: "#/components/parameters/WorkspaceId"
         - name: assignee
@@ -980,6 +985,7 @@ paths:
             type: string
         - name: type
           in: query
+          description: Filter by issue type. Epics are always excluded from the ready view.
           schema:
             type: string
             enum: [bug, feature, task, epic, chore]
@@ -998,10 +1004,6 @@ paths:
             type: string
             enum: [hybrid, priority, oldest]
         - name: unassigned
-          in: query
-          schema:
-            type: boolean
-        - name: include_deferred
           in: query
           schema:
             type: boolean
@@ -1054,6 +1056,13 @@ paths:
       operationId: listBlocked
       tags: [blocked]
       summary: List blocked issues with blocker details
+      description: |
+        Returns canonical blocked work from the issue backend. For FleetDB-backed
+        workspaces this includes explicit status=blocked issues, issues blocked
+        by non-terminal dependencies, and descendants of blocked parents.
+        Dependency blocker IDs/details are returned when known; explicit
+        status-only and parent-only blocked issues may have no dependency
+        blocker IDs.
       parameters:
         - $ref: "#/components/parameters/WorkspaceId"
         - name: parent_id
@@ -1151,6 +1160,9 @@ paths:
         ```json
         {
           "type": "update",
+          "entity_type": "issue",
+          "entity_id": "proj-abc.5",
+          "action": "issue.update",
           "issue_id": "proj-abc.5",
           "title": "Fix login bug",
           "assignee": "agent-1",
@@ -1167,7 +1179,8 @@ paths:
         ```
 
         **Mutation types**: `create`, `update`, `delete`, `comment`, `status`,
-        `bonded`, `squashed`, `burned`, `refresh`, `terminal_session_change`
+        `bonded`, `squashed`, `burned`, `refresh`, `terminal_metadata`,
+        `terminal_session_change`, `issue_tabs`, `session_change`
 
         **Authentication**: Accepts Bearer token via `Authorization` header or
         one-time token via `token` query parameter (for EventSource which
@@ -3568,7 +3581,7 @@ components:
 
     BlockedIssue:
       type: object
-      description: Issue with blocking information
+      description: Canonically blocked issue with blocking information when available.
       allOf:
         - $ref: "#/components/schemas/Issue"
         - type: object
@@ -3578,6 +3591,7 @@ components:
               type: integer
             blocked_by:
               type: array
+              description: Dependency blocker IDs when known. May be empty for explicit status-only or parent-propagated blocking.
               items:
                 type: string
             blocked_by_details:
@@ -3895,6 +3909,8 @@ components:
         default_branch:
           type: string
         remote:
+          type: string
+        remote_url:
           type: string
         source_repo_id:
           type: string
@@ -4387,12 +4403,15 @@ components:
     MutationPayload:
       type: object
       description: |
-        SSE mutation event payload. All fields except type, issue_id, and
-        timestamp are context-dependent. For status events: old_status and
-        new_status are present. For bonded events: parent_id and step_count
+        SSE mutation event payload. `type` is the legacy coarse mutation kind.
+        New consumers should prefer the generic `entity_type`, `entity_id`, and
+        `action` envelope fields when deciding which local state to invalidate.
+        `issue_id` is retained for backward-compatible issue-scoped consumers
+        and may be omitted for non-issue entities. For status events: old_status
+        and new_status are present. For bonded events: parent_id and step_count
         are present. This is documented as a flat schema (no discriminator)
         because the SSE stream is not validated by generated clients.
-      required: [type, issue_id, timestamp]
+      required: [type, timestamp]
       properties:
         type:
           type: string
@@ -4406,9 +4425,22 @@ components:
             - squashed
             - burned
             - refresh
+            - terminal_metadata
             - terminal_session_change
+            - issue_tabs
+            - session_change
+        entity_type:
+          type: string
+          description: Generic changed entity type, for example issue, dependency, comment, label, agent, terminal, session, or workspace.
+        entity_id:
+          type: string
+          description: Generic changed entity identifier.
+        action:
+          type: string
+          description: Source action for the mutation, usually the fleet-db action such as issue.update or dep.add.
         issue_id:
           type: string
+          description: Legacy issue identifier for issue-scoped consumers; omitted for non-issue entities.
         title:
           type: string
         assignee:
@@ -4627,6 +4659,24 @@ components:
           type: string
         daemon_managed:
           type: boolean
+        parent:
+          type: string
+          description: Active epic assignment for lead/workers.
+        orchestrator_session_id:
+          type: string
+          description: Lead/orchestrator session that spawned or owns the agent.
+        task_id:
+          type: string
+          description: Latest task session associated with this agent.
+        session_id:
+          type: string
+          description: Latest control-plane session associated with this agent.
+        mode:
+          type: string
+          description: Assignment mode, such as persistent or ephemeral.
+        desired_state:
+          type: string
+          description: Requested daemon state for the agent.
         commits:
           type: array
           items:

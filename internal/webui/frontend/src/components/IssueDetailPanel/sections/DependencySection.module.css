@@ -18,7 +18,7 @@
 }
 
 .sectionTitle {
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 700;
   color: var(--color-text-muted);
   margin: 0;
@@ -31,7 +31,7 @@
   align-items: center;
   gap: 4px;
   padding: 4px 8px;
-  font-size: 11px;
+  font-size: var(--font-size-xs);
   font-weight: 600;
   color: var(--color-text-secondary);
   background: var(--color-panel-bg);
@@ -73,7 +73,7 @@
 .input {
   width: 100%;
   padding: 8px 12px;
-  font-size: 14px;
+  font-size: var(--font-size-base);
   font-family: inherit;
   border: 1px solid var(--color-border);
   border-radius: 8px;
@@ -108,7 +108,7 @@
 
 .cancelButton {
   padding: 6px 12px;
-  font-size: 12px;
+  font-size: var(--font-size-xs);
   font-weight: 600;
   color: var(--color-text-secondary);
   background: none;
@@ -132,7 +132,7 @@
 
 .confirmButton {
   padding: 6px 12px;
-  font-size: 12px;
+  font-size: var(--font-size-xs);
   font-weight: 600;
   color: white;
   background-color: var(--color-primary);
@@ -167,7 +167,7 @@
   gap: 6px;
   padding: 6px 10px;
   margin: 0 6px 6px 0;
-  font-size: 13px;
+  font-size: var(--font-size-base);
   background-color: var(--color-bg-subtle, #f6f8fa);
   border: 1px solid var(--color-border-light);
   border-radius: 16px;
@@ -226,13 +226,15 @@
 
 .dependencyId {
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: var(--font-size-xs);
   color: var(--color-text-muted);
   flex-shrink: 0;
 }
 
 .dependencyTitle {
-  color: var(--color-text);
+  font-size: var(--font-size-base);
+  font-weight: var(--font-weight-normal);
+  color: var(--color-text-primary);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -240,7 +242,7 @@
 }
 
 .dependencyType {
-  font-size: 11px;
+  font-size: var(--font-size-xs);
   color: var(--color-text-muted);
   flex-shrink: 0;
 }
@@ -296,7 +298,7 @@
 
 .showMoreButton {
   padding: 4px 8px;
-  font-size: 12px;
+  font-size: var(--font-size-xs);
   font-weight: 500;
   color: var(--color-primary, #0969da);
   background: none;
@@ -314,7 +316,7 @@
 /* ============= Empty State ============= */
 
 .emptyMessage {
-  font-size: 13px;
+  font-size: var(--font-size-base);
   color: var(--color-text-muted);
   margin: 0;
   padding: 8px 0;

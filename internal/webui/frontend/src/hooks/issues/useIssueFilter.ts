@@ -6,12 +6,13 @@
 import { useMemo } from "react";
 
 import type { Issue, Status, Priority, IssueType } from "@/types";
+import { filterIssuesBySearch } from "@/utils/issueSearch";
 
 /**
  * Options for the useIssueFilter hook.
  */
 export interface UseIssueFilterOptions {
-  /** Search term for text matching (title/description/notes) */
+  /** Search term for text matching (id, title, description, notes, epic metadata, etc.) */
   searchTerm?: string;
   /** Filter by status */
   status?: Status;
@@ -49,41 +50,6 @@ export interface UseIssueFilterReturn {
   hasActiveFilters: boolean;
   /** List of active filter names for UI display */
   activeFilters: string[];
-}
-
-/**
- * Check if an issue matches the search term.
- * Searches title, description, and notes fields (case-insensitive).
- * Defensively handles null/undefined values that may occur at runtime.
- */
-function matchesSearchTerm(issue: Issue, term: string): boolean {
-  const normalizedTerm = term.toLowerCase();
-
-  // Check title (guard against null/undefined)
-  if (
-    typeof issue.title === "string" &&
-    issue.title.toLowerCase().includes(normalizedTerm)
-  ) {
-    return true;
-  }
-
-  // Check description (guard against null/undefined)
-  if (
-    typeof issue.description === "string" &&
-    issue.description.toLowerCase().includes(normalizedTerm)
-  ) {
-    return true;
-  }
-
-  // Check notes (guard against null/undefined)
-  if (
-    typeof issue.notes === "string" &&
-    issue.notes.toLowerCase().includes(normalizedTerm)
-  ) {
-    return true;
-  }
-
-  return false;
 }
 
 /**
@@ -262,17 +228,12 @@ export function useIssueFilter(
       return issues;
     }
 
-    return issues.filter((issue) => {
-      // Check search term first (if provided)
-      if (normalizedSearchTerm !== "") {
-        if (!matchesSearchTerm(issue, normalizedSearchTerm)) {
-          return false;
-        }
-      }
+    let result = issues;
+    if (normalizedSearchTerm !== "") {
+      result = filterIssuesBySearch(result, normalizedSearchTerm);
+    }
 
-      // Check all other filters
-      return matchesFilters(issue, options);
-    });
+    return result.filter((issue) => matchesFilters(issue, options));
   }, [issues, normalizedSearchTerm, hasActiveFilters, options]);
 
   return {

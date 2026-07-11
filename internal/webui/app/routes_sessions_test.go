@@ -11,6 +11,7 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
+	"github.com/tysonthomas9/loomcli/internal/sessions"
 	storepkg "github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui"
 
@@ -317,7 +318,7 @@ func TestSessionRouteMigration_WorkspaceScopedTranscriptEndpoint(t *testing.T) {
 	if err := os.WriteFile(nativePath, payload, 0o600); err != nil {
 		t.Fatalf("write native: %v", err)
 	}
-	if err := sessStore.SyncNativeTranscript(sess.SessionID(), nativePath); err != nil {
+	if err := sessStore.SyncNativeTranscript(sess.SessionID(), nativePath, sessions.TranscriptFormatRaw); err != nil {
 		t.Fatalf("SyncNativeTranscript: %v", err)
 	}
 

@@ -1,27 +1,36 @@
 /**
- * ThemeToggle component styles.
+ * ThemeToggle — Aether wireframe theme-toggle (pin 2).
  */
 
 .toggle {
   display: inline-flex;
   align-items: center;
-  justify-content: center;
-  width: 32px;
-  height: 32px;
-  padding: 0;
+  gap: 3px;
+  padding: 3px 5px;
   border: none;
-  border-radius: var(--radius-md);
-  background: transparent;
-  color: var(--color-text-secondary);
+  border-radius: var(--radius-full);
+  background: var(--color-status-open, #3b82f6);
+  color: #ffffff;
   cursor: pointer;
-  transition:
-    background-color var(--transition-fast),
-    color var(--transition-fast);
 }
 
-.toggle:hover {
-  background-color: var(--color-bg-hover);
-  color: var(--color-text-primary);
+.icon {
+  display: block;
+  flex-shrink: 0;
+}
+
+.knob {
+  width: 13px;
+  height: 13px;
+  border-radius: 50%;
+  background: #ffffff;
+  flex-shrink: 0;
+  order: 0;
+  transition: order 0.1s ease;
+}
+
+.toggle.dark .knob {
+  order: 2;
 }
 
 .toggle:focus:not(:focus-visible) {
@@ -33,12 +42,8 @@
   outline-offset: 2px;
 }
 
-.toggle:active {
-  background-color: var(--color-bg-active);
-}
-
 @media (prefers-reduced-motion: reduce) {
-  .toggle {
+  .knob {
     transition: none;
   }
 }

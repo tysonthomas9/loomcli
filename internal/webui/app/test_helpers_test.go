@@ -166,10 +166,21 @@ func testWorktree() *ops.AgentWorktree {
 
 // mockFileOps implements ops.FileOps for testing.
 type mockFileOps struct {
-	resolveFunc func(name string) (*ops.AgentWorktree, error)
+	resolveFunc          func(name string) (*ops.AgentWorktree, error)
+	resolveOrPrimaryFunc func(name string) (*ops.AgentWorktree, error)
 }
 
 func (m *mockFileOps) ResolveAgentWorktree(_, name string) (*ops.AgentWorktree, error) {
+	if m.resolveFunc != nil {
+		return m.resolveFunc(name)
+	}
+	return nil, errors.New("not found")
+}
+
+func (m *mockFileOps) ResolveAgentWorktreeOrPrimary(_, name string) (*ops.AgentWorktree, error) {
+	if m.resolveOrPrimaryFunc != nil {
+		return m.resolveOrPrimaryFunc(name)
+	}
 	if m.resolveFunc != nil {
 		return m.resolveFunc(name)
 	}
@@ -219,6 +230,11 @@ func (m *mockGitOps) CreatePR(worktreePath, sourceBranch, targetBranch, remote s
 	}
 	return &ops.GitPRResult{URL: "https://github.com/test/pr/1", Created: true}, nil
 }
+
+func (m *mockGitOps) ListWorkspacePullRequests(string, string, int) (*ops.GitPullRequestList, error) {
+	return &ops.GitPullRequestList{PullRequests: []ops.GitPullRequest{}}, nil
+}
+
 func (m *mockGitOps) Reset(worktreePath, worktreeName, targetBranch string, force, push bool) (*ops.GitResetResult, error) {
 	if m.resetFunc != nil {
 		return m.resetFunc(worktreePath, worktreeName, targetBranch, force, push)

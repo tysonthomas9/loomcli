@@ -298,6 +298,14 @@ linters:
         linters:
           - gosec
         text: "G602"
+      # var-naming: both driver packages (internal/driver epic-runner drivers,
+      # internal/cli/driver CLI surface) intentionally share the name "driver";
+      # the stdlib conflict (database/sql/driver) is nested and never imported
+      # alongside these. Renaming would churn every importer for no clarity win.
+      - path: '(internal/driver|internal/cli/driver)/.*\.go'
+        linters:
+          - revive
+        text: "var-naming: avoid package names that conflict with Go standard library"
       # funlen/cyclop/gocognit: Large files with dedicated cleanup tasks
       # Remove exclusions as cleanup tasks complete
       # handlers split files — tracked by loomcli-6yk.5
@@ -373,6 +381,20 @@ linters:
         linters: [funlen, cyclop, gocognit]
       - path: "internal/webui/sse\\.go"
         linters: [gocognit]
+      # stack-aware PR publisher + epic-stack feature — pre-existing complexity,
+      # cleanup tracked with the feature (introduced before the TS-leaf work).
+      - path: "internal/stackpublish/reconciler\\.go"
+        linters: [funlen, cyclop, gocognit]
+      - path: "internal/cli/epic/epic_stack\\.go"
+        linters: [funlen, cyclop, gocognit]
+      - path: "internal/cli/epic/run\\.go"
+        linters: [funlen, cyclop, gocognit]
+      - path: "internal/cli/stack/stack_cmd\\.go"
+        linters: [funlen, cyclop, gocognit]
+      - path: "internal/driver/task_worktree_resolver\\.go"
+        linters: [funlen, cyclop, gocognit, unparam]
+      - path: "internal/driver/task_bridge\\.go"
+        linters: [funlen, cyclop, gocognit]
       # funlen: Existing functions exceeding 50-line limit — cleanup tracked separately
       - path: "internal/cli/backend_.*\\.go"
         linters: [funlen]

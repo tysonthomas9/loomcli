@@ -4,12 +4,14 @@ import (
 	"context"
 	"log/slog"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/cli/monitor"
 	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/epicrunner"
 	"github.com/tysonthomas9/loomcli/internal/ops"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui/storeadapter"
@@ -28,6 +30,13 @@ type MonitorStoreDataSource struct {
 type monitorStoreData struct {
 	Workspace WorkspaceInfo
 	Agents    []monitor.AgentStatus
+}
+
+type agentInboxSummary struct {
+	QueuedCount   int
+	FailedCount   int
+	LatestMessage string
+	LatestCursor  int64
 }
 
 type monitorStoreCacheEntry struct {
@@ -129,17 +138,54 @@ func collectMonitorStoreData(ctx context.Context, st store.Store, workspaceHint 
 	}
 
 	workspaceData := monitorWorkspaceDataForAgents(ctx, st, wsKey, wsName)
+	latestSessions := latestAgentSessionsForMonitor(ctx, st, wsKey)
+	orchestrationByAgent := latestOrchestrationSessionsForMonitor(ctx, st, wsKey)
+	inboxByAgent := agentInboxSummariesForMonitor(ctx, st, wsKey)
+	data.Agents = monitorAgentStatuses(assignments, workspaceData, latestSessions, orchestrationByAgent, inboxByAgent, wsName)
+	return data
+}
+
+func monitorAgentStatuses(
+	assignments []*domain.Agent,
+	workspaceData *ops.WorkspaceData,
+	latestSessions map[string]*domain.AgentSession,
+	orchestrationByAgent map[string]*domain.AgentSession,
+	inboxByAgent map[string]agentInboxSummary,
+	wsName string,
+) []monitor.AgentStatus {
+	agents := []monitor.AgentStatus{}
 	for _, assignment := range assignments {
 		if assignment == nil {
 			continue
 		}
-		data.Agents = append(data.Agents, monitor.AgentStatus{
-			Name:      assignment.Name,
-			Branch:    monitorBranchFromAgent(workspaceData, assignment),
-			Status:    monitorStatusFromAgentState(assignment.State),
-			Role:      assignment.RoleName,
-			Repo:      monitorRepoFromAgent(assignment),
-			Workspace: wsName,
+		var taskID, sessionID string
+		if session := latestSessions[assignment.Name]; session != nil {
+			taskID = session.TaskID
+			sessionID = session.SessionID
+		}
+		var orchID string
+		if sess := orchestrationByAgent[assignment.Name]; sess != nil {
+			orchID = sess.SessionID
+		}
+		inboxSummary := inboxByAgent[assignment.Name]
+		agents = append(agents, monitor.AgentStatus{
+			Name:                  assignment.Name,
+			Branch:                monitorBranchFromAgent(workspaceData, assignment),
+			Status:                monitorStatusFromAgentState(assignment.State),
+			Role:                  assignment.RoleName,
+			Repo:                  monitorRepoFromAgent(assignment),
+			Workspace:             wsName,
+			DaemonManaged:         assignment.Auto,
+			Parent:                assignment.Parent,
+			DeliveryState:         monitorLeadDeliveryState(assignment, orchestrationByAgent[assignment.Name]),
+			InboxQueuedCount:      inboxSummary.QueuedCount,
+			InboxFailedCount:      inboxSummary.FailedCount,
+			InboxLatestMessage:    inboxSummary.LatestMessage,
+			OrchestratorSessionID: orchID,
+			TaskID:                taskID,
+			SessionID:             sessionID,
+			Mode:                  string(assignment.Mode),
+			DesiredState:          string(assignment.DesiredState),
 			// Carry fleet-db's derived liveness through unchanged. The lock-derived
 			// Status above never advances to "working" on the store-only serve path,
 			// so the UI reads live_status to flip a provably-working agent off "idle".
@@ -149,7 +195,72 @@ func collectMonitorStoreData(ctx context.Context, st store.Store, workspaceHint 
 			LastErrorClass: assignment.LastErrorClass,
 		})
 	}
-	return data
+	return agents
+}
+
+func agentInboxSummariesForMonitor(ctx context.Context, st store.Store, wsKey string) map[string]agentInboxSummary {
+	out := make(map[string]agentInboxSummary)
+	if st == nil || st.AgentInboxMessages() == nil || wsKey == "" {
+		return out
+	}
+	for _, status := range []domain.AgentInboxMessageStatus{domain.AgentInboxMessageQueued, domain.AgentInboxMessageFailed} {
+		items, err := st.AgentInboxMessages().List(ctx, wsKey, store.AgentInboxMessageFilter{Status: status, Limit: 10000})
+		if err != nil {
+			slog.Warn("monitor: list agent inbox messages failed", "workspace", wsKey, "status", status, "err", err)
+			continue
+		}
+		for _, item := range items {
+			if item == nil || item.TargetAgentID == "" {
+				continue
+			}
+			summary := out[item.TargetAgentID]
+			if status == domain.AgentInboxMessageQueued {
+				summary.QueuedCount++
+			} else if status == domain.AgentInboxMessageFailed {
+				summary.FailedCount++
+			}
+			if item.Cursor >= summary.LatestCursor {
+				summary.LatestCursor = item.Cursor
+				summary.LatestMessage = item.Body
+			}
+			out[item.TargetAgentID] = summary
+		}
+	}
+	return out
+}
+
+func monitorLeadDeliveryState(agent *domain.Agent, session *domain.AgentSession) string {
+	if agent == nil || !epicrunner.IsLeadRole(agent.RoleName) || strings.TrimSpace(agent.Parent) == "" {
+		return ""
+	}
+	version := monitorLeadAssignmentVersion(agent)
+	if version == "" {
+		return "pending"
+	}
+	if monitorSessionMetadataVersionMatches(session, "lead_assignment_acknowledged_version", version) {
+		return "acknowledged"
+	}
+	if monitorSessionMetadataVersionMatches(session, "lead_assignment_delivered_version", version) {
+		return "delivered"
+	}
+	return "pending"
+}
+
+func monitorLeadAssignmentVersion(agent *domain.Agent) string {
+	if agent == nil {
+		return ""
+	}
+	if !agent.UpdatedAt.IsZero() {
+		return agent.UpdatedAt.UTC().Format(time.RFC3339Nano)
+	}
+	return strings.TrimSpace(agent.Parent)
+}
+
+func monitorSessionMetadataVersionMatches(session *domain.AgentSession, key, version string) bool {
+	if session == nil || session.Metadata == nil || version == "" {
+		return false
+	}
+	return strings.TrimSpace(session.Metadata[key]) == version
 }
 
 func workspaceNames(workspaces []*domain.Workspace) []string {

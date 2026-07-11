@@ -20,6 +20,8 @@ export {
   sanitizeSessionName,
   extractBaseName,
   getNextDuplicateName,
+  isAgentTab,
+  isAgentMetadata,
 } from "./terminalTabUtils";
 export type { TabState } from "./terminalTabUtils";
 

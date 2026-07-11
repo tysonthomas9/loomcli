@@ -8,6 +8,7 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/agenterr"
 	"github.com/tysonthomas9/loomcli/internal/agentpolicy"
+	"github.com/tysonthomas9/loomcli/internal/domain"
 )
 
 const primaryBackendRetryCooldown = time.Minute
@@ -18,18 +19,18 @@ const primaryBackendRetryCooldown = time.Minute
 // than an exponential backoff, and never count these retries toward max_retries.
 const backendUnavailableRecheckInterval = 30 * time.Second
 
-// defaultMaxRetriesParkInterval is the fixed delay between re-attempts after
-// an agent has exhausted its restart budget and parked (policy OnExhaustion
-// Park). Rather than abandoning the agent (silent loss until a daemon
-// restart), the supervise goroutine parks and retries on this interval so a
+// defaultMaxRetriesBlockInterval is the fixed delay between re-attempts after
+// an agent has exhausted its restart budget and blocked (policy OnExhaustion
+// Block). Rather than abandoning the agent (silent loss until a daemon
+// restart), the supervise goroutine blocks and retries on this interval so a
 // transient root cause (a prerequisite landing, a rate-limit window passing,
 // a flaky dependency recovering) lets it self-resume.
-const defaultMaxRetriesParkInterval = 60 * time.Second
+const defaultMaxRetriesBlockInterval = 60 * time.Second
 
 // shouldRestart determines if the agent should restart by consulting the
 // policy disposition for the classified outcome of the most recent exit
 // (agentpolicy.Decide). The table owns the per-class verdict; this layer
-// owns its counters (RestartCount/RateRetryCount/NoWorkCount/ParkCount) and
+// owns its counters (RestartCount/RateRetryCount/NoWorkCount/BlockCount) and
 // its configured budgets.
 func (s *Supervisor) shouldRestart(ap *AgentProcess) bool {
 	maxRetries := s.getMaxRetries()
@@ -37,8 +38,12 @@ func (s *Supervisor) shouldRestart(ap *AgentProcess) bool {
 	ap.Mu.Lock()
 	defer ap.Mu.Unlock()
 
+	if stopAfterEphemeralTask(ap) {
+		return false
+	}
+
 	// Clean success (exit 0, no error): always restart, reset counters —
-	// including the park-escalation budget ("progress" ends a park spiral).
+	// including the block-escalation budget ("progress" ends a block spiral).
 	if ap.LastExitCode == 0 && ap.LastError == nil {
 		s.applyCleanSuccessRestart(ap)
 		return true
@@ -58,7 +63,7 @@ func (s *Supervisor) shouldRestart(ap *AgentProcess) bool {
 		s.applyFastFailStop(ap, outcome)
 		return false
 
-	case agentpolicy.Park:
+	case agentpolicy.Block:
 		// BackendUnavailable: fixed recheck without eroding the restart
 		// budget — recoverable once the binary returns.
 		s.applyBackendUnavailableRestart(ap)
@@ -85,6 +90,21 @@ func (s *Supervisor) shouldRestart(ap *AgentProcess) bool {
 	default: // Retry
 		return s.applyCountedRestart(ap, d, maxRetries)
 	}
+}
+
+// stopAfterEphemeralTask stops the supervisor once an ephemeral agent has
+// completed its one assigned task cycle cleanly. A NoWork exit still falls
+// through so it can re-poll until a task arrives. Caller holds ap.Mu.
+func stopAfterEphemeralTask(ap *AgentProcess) bool {
+	if ap.Entry.Mode != domain.AgentModeEphemeral || ap.LastExitCode != 0 || ap.LastError != nil || ap.AssignedTaskID == "" {
+		return false
+	}
+	ap.RestartCount = 0
+	ap.RateRetryCount = 0
+	ap.NoWorkCount = 0
+	ap.StopReason = StopReasonEphemeralDone
+	log.Printf("[daemon] Agent %s: ephemeral task complete, exiting supervisor", ap.Entry.Worktree)
+	return true
 }
 
 // applyFatalStop stops for auth/billing errors that need human intervention.
@@ -116,13 +136,13 @@ func (s *Supervisor) applyFailoverExhaustedStop(ap *AgentProcess, outcome agente
 }
 
 // applyCleanSuccessRestart resets every retry counter after a clean exit —
-// including the park-escalation budget ("progress" ends a park spiral). Long
+// including the block-escalation budget ("progress" ends a block spiral). Long
 // runs (>1 minute) also reset to the primary backend. Caller holds ap.Mu.
 func (s *Supervisor) applyCleanSuccessRestart(ap *AgentProcess) {
 	ap.RestartCount = 0
 	ap.RateRetryCount = 0
 	ap.NoWorkCount = 0
-	ap.ParkCount = 0
+	ap.BlockCount = 0
 	ap.StopReason = ""
 	if time.Since(ap.LastStart) > time.Minute {
 		ap.CurrentBackendIdx = 0 // reset to primary backend
@@ -140,8 +160,8 @@ func (s *Supervisor) applyRateLimitedRestart(ap *AgentProcess) {
 
 // applyCountedRestart handles a counted retry (policy Decision Retry or
 // Failover): the failure erodes max_retries, and once the budget is spent the
-// disposition's OnExhaustion decides — Park (with ParkBudget escalating to
-// FastFail when the agent never makes progress between parks) or FastFail.
+// disposition's OnExhaustion decides — Block (with BlockBudget escalating to
+// FastFail when the agent never makes progress between blocks) or FastFail.
 // max_retries == 0 stays an explicit fail-fast opt-out; the guard sits after
 // the increment so its counter side effect (RestartCount lands at 1) is
 // unchanged. Caller holds ap.Mu.
@@ -158,14 +178,14 @@ func (s *Supervisor) applyCountedRestart(ap *AgentProcess, d agentpolicy.Disposi
 		return false
 	}
 	switch d.OnExhaustion {
-	case agentpolicy.Park:
-		if d.ParkBudget > 0 && ap.ParkCount >= d.ParkBudget {
-			log.Printf("[daemon] Agent %s: %d park cycles without progress, stopping supervisor (fast-fail)",
-				ap.Entry.Worktree, ap.ParkCount)
+	case agentpolicy.Block:
+		if d.BlockBudget > 0 && ap.BlockCount >= d.BlockBudget {
+			log.Printf("[daemon] Agent %s: %d block cycles without progress, stopping supervisor (fast-fail)",
+				ap.Entry.Worktree, ap.BlockCount)
 			ap.StopReason = StopReasonFastFail
 			return false
 		}
-		s.applyMaxRetriesPark(ap)
+		s.applyMaxRetriesBlock(ap)
 		return true
 	case agentpolicy.FastFail:
 		log.Printf("[daemon] Agent %s: restart budget exhausted on a deterministic failure, stopping supervisor (fast-fail)",
@@ -178,33 +198,33 @@ func (s *Supervisor) applyCountedRestart(ap *AgentProcess, d agentpolicy.Disposi
 	}
 }
 
-// applyMaxRetriesPark parks an agent that has exhausted its restart budget so
+// applyMaxRetriesBlock blocks an agent that has exhausted its restart budget so
 // it keeps retrying on a fixed interval instead of being abandoned (silent
 // loss until a daemon restart). It mirrors applyBackendUnavailableRestart:
-// reset the retry counters, set a visible parked stop reason, and let
-// computeBackoff return the fixed park interval. RestartCount resets so each
-// park cycle gets a fresh max_retries burst and status readers never mistake
-// a live parked agent for a failed one. LastError is deliberately left intact
-// so last_error_class still surfaces why the agent parked. ParkCount
-// increments to drive the ParkBudget escalation and resets only on a clean
+// reset the retry counters, set a visible blocked stop reason, and let
+// computeBackoff return the fixed block interval. RestartCount resets so each
+// block cycle gets a fresh max_retries burst and status readers never mistake
+// a live blocked agent for a failed one. LastError is deliberately left intact
+// so last_error_class still surfaces why the agent blocked. BlockCount
+// increments to drive the BlockBudget escalation and resets only on a clean
 // run. Caller holds ap.Mu.
-func (s *Supervisor) applyMaxRetriesPark(ap *AgentProcess) {
-	ap.ParkCount++
+func (s *Supervisor) applyMaxRetriesBlock(ap *AgentProcess) {
+	ap.BlockCount++
 	ap.RestartCount = 0
 	ap.RateRetryCount = 0
 	ap.NoWorkCount = 0
-	ap.StopReason = StopReasonMaxRetriesParked
-	log.Printf("[daemon] Agent %s: restart budget exhausted, parking (cycle %d) — will recheck in %s",
-		ap.Entry.Worktree, ap.ParkCount, s.maxRetriesParkBackoff())
+	ap.StopReason = StopReasonMaxRetriesBlocked
+	log.Printf("[daemon] Agent %s: restart budget exhausted, blocking (cycle %d) — will recheck in %s",
+		ap.Entry.Worktree, ap.BlockCount, s.maxRetriesBlockBackoff())
 }
 
-// maxRetriesParkBackoff is the fixed delay between re-attempts for a parked
-// agent (configurable via maxRetriesParkInterval; package default otherwise).
-func (s *Supervisor) maxRetriesParkBackoff() time.Duration {
-	if s.maxRetriesParkInterval > 0 {
-		return s.maxRetriesParkInterval
+// maxRetriesBlockBackoff is the fixed delay between re-attempts for a blocked
+// agent (configurable via maxRetriesBlockInterval; package default otherwise).
+func (s *Supervisor) maxRetriesBlockBackoff() time.Duration {
+	if s.maxRetriesBlockInterval > 0 {
+		return s.maxRetriesBlockInterval
 	}
-	return defaultMaxRetriesParkInterval
+	return defaultMaxRetriesBlockInterval
 }
 
 // applyNoWorkRestart resets retry counters for a NoWork exit and, if the
@@ -254,13 +274,13 @@ func (s *Supervisor) computeBackoff(ap *AgentProcess) time.Duration {
 	lastErr := ap.LastError
 	count := ap.RestartCount
 	rateCount := ap.RateRetryCount
-	parked := ap.StopReason == StopReasonMaxRetriesParked
+	blocked := ap.StopReason == StopReasonMaxRetriesBlocked
 	ap.Mu.Unlock()
 
-	// A parked agent sleeps the fixed park interval — keyed on StopReason,
+	// A blocked agent sleeps the fixed block interval — keyed on StopReason,
 	// not error class, because any counted class can exhaust the budget.
-	if parked {
-		return s.maxRetriesParkBackoff()
+	if blocked {
+		return s.maxRetriesBlockBackoff()
 	}
 
 	var outcome agenterr.Outcome
@@ -279,8 +299,8 @@ func (s *Supervisor) computeBackoff(ap *AgentProcess) time.Duration {
 		// Fixed recheck: waiting for the backend CLI to reappear, not
 		// backing off a flaky run.
 		return s.backendRecheckBackoff()
-	case agentpolicy.BPPark:
-		return s.maxRetriesParkBackoff()
+	case agentpolicy.BPBlock:
+		return s.maxRetriesBlockBackoff()
 	case agentpolicy.BPRateLimit:
 		initial = s.getRateLimitBackoff()
 		retryN = rateCount

@@ -145,13 +145,20 @@ func (s *agentSessionStore) List(ctx context.Context, ws string, filter store.Ag
 	if filter.Status != "" {
 		q.Set("status", string(filter.Status))
 	}
-	if filter.Limit > 0 {
+	// fleet-db's listAgentSessions doesn't yet accept kind / parent_session_id
+	// as query params (see fleet-db/api/openapi.yaml :: listAgentSessions),
+	// so we ask for the broader set and filter client-side below. When fleet-db
+	// adds those params, append them here and drop the post-filter pass.
+	clientSideKind := filter.Kind
+	clientSideParent := filter.ParentSessionID
+	// Limit must be applied *after* the client-side filter, otherwise we
+	// could return fewer than the requested count when the server-side
+	// page contains many non-matching kinds/parents.
+	clientSideLimit := filter.Limit
+	if clientSideKind == "" && clientSideParent == "" && filter.Limit > 0 {
 		q.Set("limit", strconv.Itoa(filter.Limit))
 	}
-	path := "/api/v1/" + pathEscape(ws) + "/agent-sessions"
-	if encoded := q.Encode(); encoded != "" {
-		path += "?" + encoded
-	}
+	path := withQuery("/api/v1/"+pathEscape(ws)+"/agent-sessions", q)
 	var resp struct {
 		AgentSessions []*domain.AgentSession `json:"agent_sessions"`
 	}
@@ -161,7 +168,31 @@ func (s *agentSessionStore) List(ctx context.Context, ws string, filter store.Ag
 	if resp.AgentSessions == nil {
 		resp.AgentSessions = []*domain.AgentSession{}
 	}
+	if clientSideKind != "" || clientSideParent != "" {
+		resp.AgentSessions = filterAgentSessionsClientSide(resp.AgentSessions, clientSideKind, clientSideParent, clientSideLimit)
+	}
 	return resp.AgentSessions, nil
+}
+
+// Client-side filter for Kind / ParentSessionID; see List comment above.
+func filterAgentSessionsClientSide(sessions []*domain.AgentSession, kind domain.AgentSessionKind, parent string, limit int) []*domain.AgentSession {
+	filtered := make([]*domain.AgentSession, 0, len(sessions))
+	for _, sess := range sessions {
+		if sess == nil {
+			continue
+		}
+		if kind != "" && sess.Kind != kind {
+			continue
+		}
+		if parent != "" && sess.ParentSessionID != parent {
+			continue
+		}
+		filtered = append(filtered, sess)
+		if limit > 0 && len(filtered) >= limit {
+			break
+		}
+	}
+	return filtered
 }
 
 func (s *agentSessionStore) Heartbeat(ctx context.Context, ws, sessionID string) (*domain.AgentSession, error) {
@@ -259,10 +290,7 @@ func (s *terminalSessionStore) List(ctx context.Context, ws string, filter store
 	if filter.Limit > 0 {
 		q.Set("limit", strconv.Itoa(filter.Limit))
 	}
-	path := "/api/v1/" + pathEscape(ws) + "/terminal-sessions"
-	if encoded := q.Encode(); encoded != "" {
-		path += "?" + encoded
-	}
+	path := withQuery("/api/v1/"+pathEscape(ws)+"/terminal-sessions", q)
 	var resp struct {
 		TerminalSessions []*domain.TerminalSession `json:"terminal_sessions"`
 	}
@@ -286,21 +314,28 @@ func (s *terminalSessionStore) Update(ctx context.Context, ws, terminalID string
 type artifactStore struct{ client *Client }
 
 var _ store.ArtifactStore = (*artifactStore)(nil)
+var _ store.ArtifactContentReader = (*artifactStore)(nil)
 
 func (s *artifactStore) Create(ctx context.Context, in store.ArtifactCreate) (*domain.Artifact, error) {
 	body := map[string]any{
-		"artifact_id": in.ArtifactID,
-		"agent_id":    in.AgentID,
-		"session_id":  in.SessionID,
-		"terminal_id": in.TerminalID,
-		"task_id":     in.TaskID,
-		"type":        in.Type,
-		"uri":         in.URI,
-		"summary":     in.Summary,
-		"mime_type":   in.MIMEType,
-		"size_bytes":  in.SizeBytes,
-		"checksum":    in.Checksum,
-		"metadata":    in.Metadata,
+		"artifact_id":      in.ArtifactID,
+		"agent_id":         in.AgentID,
+		"session_id":       in.SessionID,
+		"terminal_id":      in.TerminalID,
+		"task_id":          in.TaskID,
+		"owner_type":       in.OwnerType,
+		"owner_id":         in.OwnerID,
+		"type":             in.Type,
+		"uri":              in.URI,
+		"summary":          in.Summary,
+		"mime_type":        in.MIMEType,
+		"size_bytes":       in.SizeBytes,
+		"checksum":         in.Checksum,
+		"content_hash":     in.ContentHash,
+		"visibility":       in.Visibility,
+		"redaction_status": in.RedactionStatus,
+		"durable_status":   in.DurableStatus,
+		"metadata":         in.Metadata,
 	}
 	var out domain.Artifact
 	if err := s.client.do(ctx, "POST", "/api/v1/"+pathEscape(in.WorkspaceKey)+"/artifacts", body, &out); err != nil {
@@ -331,16 +366,22 @@ func (s *artifactStore) List(ctx context.Context, ws string, filter store.Artifa
 	if filter.TaskID != "" {
 		q.Set("task_id", filter.TaskID)
 	}
+	if filter.OwnerType != "" {
+		q.Set("owner_type", filter.OwnerType)
+	}
+	if filter.OwnerID != "" {
+		q.Set("owner_id", filter.OwnerID)
+	}
 	if filter.Type != "" {
 		q.Set("type", filter.Type)
+	}
+	if filter.Status != "" {
+		q.Set("durable_status", filter.Status)
 	}
 	if filter.Limit > 0 {
 		q.Set("limit", strconv.Itoa(filter.Limit))
 	}
-	path := "/api/v1/" + pathEscape(ws) + "/artifacts"
-	if encoded := q.Encode(); encoded != "" {
-		path += "?" + encoded
-	}
+	path := withQuery("/api/v1/"+pathEscape(ws)+"/artifacts", q)
 	var resp struct {
 		Artifacts []*domain.Artifact `json:"artifacts"`
 	}
@@ -351,6 +392,26 @@ func (s *artifactStore) List(ctx context.Context, ws string, filter store.Artifa
 		resp.Artifacts = []*domain.Artifact{}
 	}
 	return resp.Artifacts, nil
+}
+
+func (s *artifactStore) UploadContent(ctx context.Context, ws, artifactID string, upload store.ArtifactContentUpload) (*domain.Artifact, error) {
+	var out domain.Artifact
+	if err := s.client.doRaw(ctx, "PUT", "/api/v1/"+pathEscape(ws)+"/artifacts/"+pathEscape(artifactID)+"/content", upload.Body, upload.MIMEType, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+func (s *artifactStore) ReadContent(ctx context.Context, ws, artifactID string) ([]byte, error) {
+	return s.client.doBytes(ctx, "GET", "/api/v1/"+pathEscape(ws)+"/artifacts/"+pathEscape(artifactID)+"/content")
+}
+
+func (s *artifactStore) Finalize(ctx context.Context, ws, artifactID string, finalize store.ArtifactFinalize) (*domain.Artifact, error) {
+	var out domain.Artifact
+	if err := s.client.do(ctx, "POST", "/api/v1/"+pathEscape(ws)+"/artifacts/"+pathEscape(artifactID)+"/finalize", artifactFinalizeBody(finalize), &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
 }
 
 func (s *artifactStore) Update(ctx context.Context, ws, artifactID string, patch store.ArtifactUpdate) (*domain.Artifact, error) {
@@ -477,38 +538,55 @@ func terminalSessionUpdateBody(patch store.TerminalSessionUpdate) map[string]any
 
 func artifactUpdateBody(patch store.ArtifactUpdate) map[string]any {
 	body := map[string]any{}
-	if patch.AgentID != nil {
-		body["agent_id"] = *patch.AgentID
+	bodyPtr(body, "agent_id", patch.AgentID)
+	bodyPtr(body, "session_id", patch.SessionID)
+	bodyPtr(body, "terminal_id", patch.TerminalID)
+	bodyPtr(body, "task_id", patch.TaskID)
+	bodyPtr(body, "owner_type", patch.OwnerType)
+	bodyPtr(body, "owner_id", patch.OwnerID)
+	bodyPtr(body, "type", patch.Type)
+	bodyPtr(body, "uri", patch.URI)
+	bodyPtr(body, "summary", patch.Summary)
+	bodyPtr(body, "mime_type", patch.MIMEType)
+	bodyPtr(body, "size_bytes", patch.SizeBytes)
+	bodyPtr(body, "checksum", patch.Checksum)
+	bodyPtr(body, "content_hash", patch.ContentHash)
+	bodyPtr(body, "visibility", patch.Visibility)
+	bodyPtr(body, "redaction_status", patch.RedactionStatus)
+	bodyPtr(body, "durable_status", patch.DurableStatus)
+	bodyPtr(body, "metadata", patch.Metadata)
+	bodyTimeRFC3339NanoPtr(body, "finalized_at", patch.FinalizedAt)
+	return body
+}
+
+func artifactFinalizeBody(finalize store.ArtifactFinalize) map[string]any {
+	body := map[string]any{}
+	if finalize.URI != nil {
+		body["uri"] = *finalize.URI
 	}
-	if patch.SessionID != nil {
-		body["session_id"] = *patch.SessionID
+	if finalize.Summary != nil {
+		body["summary"] = *finalize.Summary
 	}
-	if patch.TerminalID != nil {
-		body["terminal_id"] = *patch.TerminalID
+	if finalize.MIMEType != nil {
+		body["mime_type"] = *finalize.MIMEType
 	}
-	if patch.TaskID != nil {
-		body["task_id"] = *patch.TaskID
+	if finalize.SizeBytes != nil {
+		body["size_bytes"] = *finalize.SizeBytes
 	}
-	if patch.Type != nil {
-		body["type"] = *patch.Type
+	if finalize.Checksum != nil {
+		body["checksum"] = *finalize.Checksum
 	}
-	if patch.URI != nil {
-		body["uri"] = *patch.URI
+	if finalize.ContentHash != nil {
+		body["content_hash"] = *finalize.ContentHash
 	}
-	if patch.Summary != nil {
-		body["summary"] = *patch.Summary
+	if finalize.Visibility != nil {
+		body["visibility"] = *finalize.Visibility
 	}
-	if patch.MIMEType != nil {
-		body["mime_type"] = *patch.MIMEType
+	if finalize.RedactionStatus != nil {
+		body["redaction_status"] = *finalize.RedactionStatus
 	}
-	if patch.SizeBytes != nil {
-		body["size_bytes"] = *patch.SizeBytes
-	}
-	if patch.Checksum != nil {
-		body["checksum"] = *patch.Checksum
-	}
-	if patch.Metadata != nil {
-		body["metadata"] = *patch.Metadata
+	if finalize.Metadata != nil {
+		body["metadata"] = *finalize.Metadata
 	}
 	return body
 }
@@ -551,10 +629,7 @@ func (s *agentLeaseStore) List(ctx context.Context, ws string, filter store.Agen
 	if filter.Limit > 0 {
 		q.Set("limit", strconv.Itoa(filter.Limit))
 	}
-	path := "/api/v1/" + pathEscape(ws) + "/agent-leases"
-	if encoded := q.Encode(); encoded != "" {
-		path += "?" + encoded
-	}
+	path := withQuery("/api/v1/"+pathEscape(ws)+"/agent-leases", q)
 	var resp struct {
 		AgentLeases []*domain.AgentLease `json:"agent_leases"`
 	}
@@ -631,10 +706,7 @@ func (s *agentOwnershipLeaseStore) List(ctx context.Context, ws string, filter s
 	if filter.Limit > 0 {
 		q.Set("limit", strconv.Itoa(filter.Limit))
 	}
-	path := "/api/v1/" + pathEscape(ws) + "/agent-ownership-leases"
-	if encoded := q.Encode(); encoded != "" {
-		path += "?" + encoded
-	}
+	path := withQuery("/api/v1/"+pathEscape(ws)+"/agent-ownership-leases", q)
 	var resp struct {
 		AgentOwnershipLeases []*domain.AgentOwnershipLease `json:"agent_ownership_leases"`
 	}
@@ -677,6 +749,9 @@ func (s *agentCommandStore) Create(ctx context.Context, in store.AgentCommandCre
 	if err := s.client.do(ctx, "POST", "/api/v1/"+pathEscape(in.WorkspaceKey)+"/agent-commands", body, &out); err != nil {
 		return nil, err
 	}
+	if out.Status == "" {
+		out.Status = domain.AgentCommandQueued
+	}
 	return &out, nil
 }
 
@@ -705,10 +780,7 @@ func (s *agentCommandStore) List(ctx context.Context, ws string, filter store.Ag
 	if filter.Limit > 0 {
 		q.Set("limit", strconv.Itoa(filter.Limit))
 	}
-	path := "/api/v1/" + pathEscape(ws) + "/agent-commands"
-	if encoded := q.Encode(); encoded != "" {
-		path += "?" + encoded
-	}
+	path := withQuery("/api/v1/"+pathEscape(ws)+"/agent-commands", q)
 	var resp struct {
 		AgentCommands []*domain.AgentCommand `json:"agent_commands"`
 	}
@@ -732,6 +804,108 @@ func (s *agentCommandStore) Ack(ctx context.Context, ws, commandID string) (*dom
 func (s *agentCommandStore) Complete(ctx context.Context, ws, commandID string, update store.AgentCommandComplete) (*domain.AgentCommand, error) {
 	var out domain.AgentCommand
 	if err := s.client.do(ctx, "POST", "/api/v1/"+pathEscape(ws)+"/agent-commands/"+pathEscape(commandID)+"/complete", update, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+type agentInboxMessageStore struct{ client *Client }
+
+var _ store.AgentInboxMessageStore = (*agentInboxMessageStore)(nil)
+
+func (s *agentInboxMessageStore) Create(ctx context.Context, in store.AgentInboxMessageCreate) (*domain.AgentInboxMessage, error) {
+	body := map[string]any{
+		"inbox_message_id":    in.InboxMessageID,
+		"target_agent_id":     in.TargetAgentID,
+		"session_id":          in.SessionID,
+		"body":                in.Body,
+		"source_kind":         in.SourceKind,
+		"source_ref":          in.SourceRef,
+		"driver_run_id":       in.DriverRunID,
+		"task_run_id":         in.TaskRunID,
+		"trigger_event_id":    in.TriggerEventID,
+		"trigger_delivery_id": in.TriggerDeliveryID,
+		"dedupe_key":          in.DedupeKey,
+	}
+	var out domain.AgentInboxMessage
+	if err := s.client.do(ctx, "POST", "/api/v1/"+pathEscape(in.WorkspaceKey)+"/agent-inbox-messages", body, &out); err != nil {
+		return nil, err
+	}
+	if out.Status == "" {
+		out.Status = domain.AgentInboxMessageQueued
+	}
+	return &out, nil
+}
+
+func (s *agentInboxMessageStore) Get(ctx context.Context, ws, inboxMessageID string) (*domain.AgentInboxMessage, error) {
+	var out domain.AgentInboxMessage
+	if err := s.client.do(ctx, "GET", "/api/v1/"+pathEscape(ws)+"/agent-inbox-messages/"+pathEscape(inboxMessageID), nil, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+func (s *agentInboxMessageStore) List(ctx context.Context, ws string, filter store.AgentInboxMessageFilter) ([]*domain.AgentInboxMessage, error) {
+	q := url.Values{}
+	if filter.TargetAgentID != "" {
+		q.Set("target_agent_id", filter.TargetAgentID)
+	}
+	if filter.SessionID != "" {
+		q.Set("session_id", filter.SessionID)
+	}
+	if filter.Status != "" {
+		q.Set("status", string(filter.Status))
+	}
+	if filter.SourceKind != "" {
+		q.Set("source_kind", filter.SourceKind)
+	}
+	if filter.SourceRef != "" {
+		q.Set("source_ref", filter.SourceRef)
+	}
+	if filter.DriverRunID != "" {
+		q.Set("driver_run_id", filter.DriverRunID)
+	}
+	if filter.TaskRunID != "" {
+		q.Set("task_run_id", filter.TaskRunID)
+	}
+	if filter.AfterCursor > 0 {
+		q.Set("after_cursor", strconv.FormatInt(filter.AfterCursor, 10))
+	}
+	if filter.Limit > 0 {
+		q.Set("limit", strconv.Itoa(filter.Limit))
+	}
+	path := withQuery("/api/v1/"+pathEscape(ws)+"/agent-inbox-messages", q)
+	var resp struct {
+		AgentInboxMessages []*domain.AgentInboxMessage `json:"agent_inbox_messages"`
+	}
+	if err := s.client.do(ctx, "GET", path, nil, &resp); err != nil {
+		return nil, err
+	}
+	if resp.AgentInboxMessages == nil {
+		resp.AgentInboxMessages = []*domain.AgentInboxMessage{}
+	}
+	return resp.AgentInboxMessages, nil
+}
+
+func (s *agentInboxMessageStore) ClaimNext(ctx context.Context, in store.AgentInboxMessageClaim) (*domain.AgentInboxMessage, error) {
+	body := map[string]any{
+		"target_agent_id": in.TargetAgentID,
+		"session_id":      in.SessionID,
+		"claimed_by":      in.ClaimedBy,
+	}
+	if in.LeaseTTL > 0 {
+		body["lease_ttl_ms"] = in.LeaseTTL.Milliseconds()
+	}
+	var out domain.AgentInboxMessage
+	if err := s.client.do(ctx, "POST", "/api/v1/"+pathEscape(in.WorkspaceKey)+"/agent-inbox-messages/claim-next", body, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+func (s *agentInboxMessageStore) Complete(ctx context.Context, ws, inboxMessageID string, update store.AgentInboxMessageComplete) (*domain.AgentInboxMessage, error) {
+	var out domain.AgentInboxMessage
+	if err := s.client.do(ctx, "POST", "/api/v1/"+pathEscape(ws)+"/agent-inbox-messages/"+pathEscape(inboxMessageID)+"/complete", update, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil

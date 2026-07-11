@@ -19,10 +19,23 @@ import (
 
 // mockFileOps implements ops.FileOps for testing.
 type mockFileOps struct {
-	resolveFunc func(name string) (*ops.AgentWorktree, error)
+	resolveFunc          func(name string) (*ops.AgentWorktree, error)
+	resolveOrPrimaryFunc func(name string) (*ops.AgentWorktree, error)
 }
 
 func (m *mockFileOps) ResolveAgentWorktree(workspaceID, name string) (*ops.AgentWorktree, error) {
+	if m.resolveFunc != nil {
+		return m.resolveFunc(name)
+	}
+	return nil, errors.New("not found")
+}
+
+func (m *mockFileOps) ResolveAgentWorktreeOrPrimary(workspaceID, name string) (*ops.AgentWorktree, error) {
+	if m.resolveOrPrimaryFunc != nil {
+		return m.resolveOrPrimaryFunc(name)
+	}
+	// Fall back to the agent resolver so existing tests that only wire
+	// resolveFunc keep working for List/Read.
 	if m.resolveFunc != nil {
 		return m.resolveFunc(name)
 	}
@@ -86,6 +99,31 @@ func resolveToDir(dir string) *mockFileOps {
 				Path:          resolved,
 				Branch:        "test-branch",
 				DefaultBranch: "main",
+			}, nil
+		},
+	}
+}
+
+// resolveLeadToDir simulates a lead agent: the agent worktree is missing
+// (ResolveAgentWorktree errors), but the lead-aware resolver falls back to the
+// workspace primary worktree at dir. Used to verify List/Read browse the
+// primary tree while Write is refused (no agent worktree to write to).
+func resolveLeadToDir(dir string) *mockFileOps {
+	resolved, err := filepath.EvalSymlinks(dir)
+	if err != nil {
+		resolved = dir
+	}
+	return &mockFileOps{
+		resolveFunc: func(string) (*ops.AgentWorktree, error) {
+			return nil, errors.New("agent worktree not found")
+		},
+		resolveOrPrimaryFunc: func(name string) (*ops.AgentWorktree, error) {
+			return &ops.AgentWorktree{
+				Name:          name,
+				Path:          resolved,
+				Branch:        "main",
+				DefaultBranch: "main",
+				IsWorkspace:   true,
 			}, nil
 		},
 	}
@@ -538,6 +576,96 @@ func TestFileRead_Symlink(t *testing.T) {
 }
 
 // --- File Write tests ---
+
+// Lead agents have no local worktree, so the file viewer falls back to the
+// workspace primary worktree for browsing. List/Read use the lead-aware
+// resolver and succeed against the primary tree; Write uses the strict agent
+// resolver and is refused (a lead must not mutate the primary worktree from
+// the read-only viewer).
+
+func TestFileTree_LeadFallsBackToPrimaryWorktree(t *testing.T) {
+	dir := setupTestWorktree(t)
+	fileOps := resolveLeadToDir(dir)
+	handler := handleFileTree(NewFileService(fileOps))
+
+	req := httptest.NewRequest(http.MethodGet, "/api/agents/lead-b/files/tree", nil)
+	req.SetPathValue("name", "lead-b")
+	req = req.WithContext(middleware.WithWorkspace(req.Context(), "test-ws"))
+	w := httptest.NewRecorder()
+
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body: %s", w.Code, http.StatusOK, w.Body.String())
+	}
+	var resp FileTreeResult
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode error: %v", err)
+	}
+	if resp.Path != "." {
+		t.Errorf("path = %q, want %q", resp.Path, ".")
+	}
+	found := false
+	for _, e := range resp.Entries {
+		if e.Name == "hello.txt" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("expected to browse primary worktree (hello.txt), got nothing")
+	}
+}
+
+func TestFileRead_LeadFallsBackToPrimaryWorktree(t *testing.T) {
+	dir := setupTestWorktree(t)
+	fileOps := resolveLeadToDir(dir)
+	handler := handleFileRead(NewFileService(fileOps))
+
+	req := httptest.NewRequest(http.MethodGet, "/api/agents/lead-b/files?path=hello.txt", nil)
+	req.SetPathValue("name", "lead-b")
+	req = req.WithContext(middleware.WithWorkspace(req.Context(), "test-ws"))
+	w := httptest.NewRecorder()
+
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body: %s", w.Code, http.StatusOK, w.Body.String())
+	}
+	var resp FileReadResult
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode error: %v", err)
+	}
+	if resp.Content != "Hello, world!\n" {
+		t.Errorf("content = %q, want %q", resp.Content, "Hello, world!\n")
+	}
+}
+
+func TestFileWrite_LeadRefused(t *testing.T) {
+	dir := setupTestWorktree(t)
+	fileOps := resolveLeadToDir(dir)
+	handler := handleFileWrite(NewFileService(fileOps))
+
+	body := `{"content": "mutated"}`
+	req := httptest.NewRequest(http.MethodPut, "/api/agents/lead-b/files?path=hello.txt", strings.NewReader(body))
+	req.SetPathValue("name", "lead-b")
+	req = req.WithContext(middleware.WithWorkspace(req.Context(), "test-ws"))
+	w := httptest.NewRecorder()
+
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want %d (lead must not write to primary worktree)", w.Code, http.StatusNotFound)
+	}
+	// Confirm the primary worktree file was NOT mutated.
+	data, err := os.ReadFile(filepath.Join(dir, "hello.txt"))
+	if err != nil {
+		t.Fatalf("read primary file: %v", err)
+	}
+	if string(data) != "Hello, world!\n" {
+		t.Errorf("primary file mutated: %q", string(data))
+	}
+}
 
 func TestFileWrite_NewFile(t *testing.T) {
 	dir := setupTestWorktree(t)

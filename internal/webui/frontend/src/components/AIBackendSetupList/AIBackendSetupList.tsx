@@ -157,7 +157,6 @@ export function AIBackendSetupList({
                       />
                       <span>{backend.displayName}</span>
                     </div>
-                    <span className={styles.provider}>{backend.provider}</span>
                   </td>
                   <td>{installedLabel(backend)}</td>
                   <td>{authLabel(backend)}</td>
@@ -205,10 +204,6 @@ export function AIBackendSetupList({
                 >
                   {isDefault && backend.available ? "Default" : readiness.label}
                 </span>
-              </div>
-              <div className={styles.cliMeta}>
-                <span>{backend.provider}</span>
-                {backend.version && <span>{backend.version}</span>}
               </div>
             </div>
             <button

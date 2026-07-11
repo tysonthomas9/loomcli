@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/tysonthomas9/loomcli/internal/testutil"
 )
 
 func TestGeneratePlanningPrompt(t *testing.T) {
@@ -63,7 +65,8 @@ func TestGenerateTaskPrompt(t *testing.T) {
 				"--assignee ember", // Reclaiming stale tasks still sets assignee.
 				"Implementation Task",
 				"--design",
-				"git push origin HEAD",
+				"loom stack publish <stack-id>",
+				"git branch -f <output-branch> HEAD",
 				"loom plan",
 			},
 		},
@@ -580,6 +583,21 @@ func TestGenerateConflictResolutionPromptWithPush(t *testing.T) {
 				"git push origin loom-push-temp-123:release",
 			},
 		},
+		{
+			name:         "empty pushRef keeps local-only conflict resolution local",
+			sourceBranch: "feature/local",
+			targetBranch: "Slack_UI",
+			conflicts:    []string{"src/data.js"},
+			pushRef:      "",
+			wantParts: []string{
+				"No remote is configured for this repo",
+				"Do not run git push origin",
+				"git commit -m \"Resolve merge conflicts: feature/local -> Slack_UI",
+			},
+			notWantParts: []string{
+				"\ngit push origin",
+			},
+		},
 	}
 
 	for _, tc := range tests {
@@ -687,10 +705,11 @@ func TestGenerateFleetTaskPrompt(t *testing.T) {
 				"pre-assigned",
 				"Fleet API",
 				"loom claim loomcli-kv6.4",
-				"loom data show loomcli-kv6.4",
+				"loom data show loomcli-kv6.4 --output json",
 				"already claimed",
-				"--design",
-				"git push origin HEAD",
+				"JSON `design`",
+				"loom stack publish <stack-id>",
+				"git branch -f <output-branch> HEAD",
 			},
 		},
 		{
@@ -716,6 +735,41 @@ func TestGenerateFleetTaskPrompt(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestTaskPromptsRequireStackedPRDelivery(t *testing.T) {
+	prompts := map[string]string{
+		"task":       GenerateTaskPrompt("test", nil, "", "claude"),
+		"fleet_task": GenerateFleetTaskPrompt("test", "loom-test.1", nil, "claude"),
+	}
+
+	wantParts := []string{
+		"Publish through Loom stacked PR delivery (MANDATORY)",
+		"loom stack init <stack-id>",
+		"loom stack add <task-id>",
+		"loom stack publish <stack-id>",
+		"git branch -f <output-branch> HEAD",
+		"Do not use direct integration or direct branch pushes as the completion path.",
+	}
+	notWantParts := []string{
+		"loom push \"test\"",
+		"git push origin HEAD",
+		"Stage and commit: git add -A",
+		"git add -A && git commit",
+	}
+
+	for name, prompt := range prompts {
+		for _, part := range wantParts {
+			if !strings.Contains(prompt, part) {
+				t.Errorf("%s prompt missing expected stacked PR instruction: %q", name, part)
+			}
+		}
+		for _, part := range notWantParts {
+			if strings.Contains(prompt, part) {
+				t.Errorf("%s prompt should not contain direct publish instruction: %q", name, part)
+			}
+		}
 	}
 }
 
@@ -1146,6 +1200,8 @@ func TestReadOnlyPreamble(t *testing.T) {
 }
 
 func TestResolveActiveWorkspace_NoConfig(t *testing.T) {
+	testutil.ClearLoomEnv(t)
+
 	// Create a temp empty directory and point LOOM_CONFIG_DIR to it
 	tmpDir := t.TempDir()
 	configDir := filepath.Join(tmpDir, "loomcfg")
@@ -1171,5 +1227,76 @@ func TestResolveActiveWorkspace_NoConfig(t *testing.T) {
 	}
 	if ws != nil {
 		t.Errorf("expected nil workspace when config dir is empty, got: %+v", ws)
+	}
+}
+
+func TestCapabilitiesFor(t *testing.T) {
+	tests := []struct {
+		name        string
+		backendName string
+		want        backendCapabilities
+	}{
+		{
+			name:        "claude has all capabilities",
+			backendName: "claude",
+			want: backendCapabilities{
+				supportsSubagentSpawn: true,
+				supportsInspectReview: true,
+			},
+		},
+		{
+			name:        "codex has no special capabilities",
+			backendName: "codex",
+			want:        backendCapabilities{},
+		},
+		{
+			name:        "opencode has no special capabilities",
+			backendName: "opencode",
+			want:        backendCapabilities{},
+		},
+		{
+			name:        "unknown backend has no special capabilities",
+			backendName: "some-future-backend",
+			want:        backendCapabilities{},
+		},
+		{
+			name:        "empty backend name has no special capabilities",
+			backendName: "",
+			want:        backendCapabilities{},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := capabilitiesFor(tc.backendName); got != tc.want {
+				t.Errorf("capabilitiesFor(%q) = %+v, want %+v", tc.backendName, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestStepBuilders_CapabilityDriven(t *testing.T) {
+	spawn := backendCapabilities{supportsSubagentSpawn: true, supportsInspectReview: true}
+	none := backendCapabilities{}
+
+	if got := buildTestStep(spawn); !strings.Contains(got, "spawn agent") {
+		t.Errorf("buildTestStep with subagent spawn should mention spawning an agent, got: %q", got)
+	}
+	if got := buildTestStep(none); strings.Contains(got, "spawn") || strings.Contains(got, "Task tool") {
+		t.Errorf("buildTestStep without subagent spawn should not mention spawn/Task tool, got: %q", got)
+	}
+
+	if got := buildReviewStep(spawn); !strings.Contains(got, "Task tool") {
+		t.Errorf("buildReviewStep with subagent spawn should mention the Task tool, got: %q", got)
+	}
+	if got := buildReviewStep(none); strings.Contains(got, "spawn") || strings.Contains(got, "Task tool") {
+		t.Errorf("buildReviewStep without subagent spawn should not mention spawn/Task tool, got: %q", got)
+	}
+
+	if got := buildInspectReviewStep(spawn); !strings.Contains(got, "inspect-reviewer") {
+		t.Errorf("buildInspectReviewStep with inspect review should mention inspect-reviewer, got: %q", got)
+	}
+	if got := buildInspectReviewStep(none); got != "" {
+		t.Errorf("buildInspectReviewStep without inspect review should be empty, got: %q", got)
 	}
 }

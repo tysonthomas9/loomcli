@@ -335,12 +335,17 @@ func TestReady_HappyPath(t *testing.T) {
 
 func TestBlocked_HappyPath(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Second)
-	var gotPath string
+	seen := map[string]bool{}
 	ab, ts := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
-		gotPath = r.URL.Path
-		respondOK(w, []gen.BlockedIssue{
-			{Id: "b-1", Title: "Blocked", Priority: 2, CreatedAt: now, UpdatedAt: now, BlockedBy: []string{"b-0"}},
-		})
+		seen[r.URL.Path] = true
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/blocked"):
+			respondOK(w, []gen.BlockedIssue{
+				{Id: "b-1", Title: "Blocked", Priority: 2, CreatedAt: now, UpdatedAt: now, BlockedBy: []string{"b-0"}},
+			})
+		default:
+			t.Fatalf("unexpected request: %s", r.URL.String())
+		}
 	})
 	defer ts.Close()
 
@@ -348,11 +353,53 @@ func TestBlocked_HappyPath(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Blocked: %v", err)
 	}
-	if !strings.HasSuffix(gotPath, "/blocked") {
-		t.Errorf("path = %q", gotPath)
+	if !seen["/api/workspaces/test-ws/blocked"] {
+		t.Errorf("missing /blocked request; seen=%v", seen)
+	}
+	if len(seen) != 1 {
+		t.Errorf("requests = %v, want only canonical /blocked request", seen)
 	}
 	if len(result) != 1 || result[0].ID != "b-1" {
 		t.Errorf("result: %+v", result)
+	}
+}
+
+func TestBlockedIncludesExplicitBlockedStatusIssues(t *testing.T) {
+	now := time.Now().UTC().Truncate(time.Second)
+	parent := "epic-1"
+	seen := map[string]bool{}
+	ab, ts := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		seen[r.URL.Path+"?"+r.URL.RawQuery] = true
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/blocked"):
+			respondOK(w, []gen.BlockedIssue{
+				{Id: "dep-blocked", Title: "Dependency blocked", Priority: 2, CreatedAt: now, UpdatedAt: now, BlockedBy: []string{"dep-1"}},
+				{Id: "explicit-blocked", Title: "Explicitly blocked", Priority: 2, CreatedAt: now, UpdatedAt: now},
+			})
+		default:
+			t.Fatalf("unexpected request: %s", r.URL.String())
+		}
+	})
+	defer ts.Close()
+
+	result, err := ab.Blocked(context.Background(), backend.BlockedOpts{ParentID: parent, Limit: 5})
+	if err != nil {
+		t.Fatalf("Blocked: %v", err)
+	}
+	if len(result) != 2 {
+		t.Fatalf("len = %d, want dependency-blocked plus explicit status blocked: %+v", len(result), result)
+	}
+	gotIDs := map[string]bool{}
+	for _, issue := range result {
+		gotIDs[issue.ID] = true
+	}
+	for _, want := range []string{"dep-blocked", "explicit-blocked"} {
+		if !gotIDs[want] {
+			t.Fatalf("Blocked result missing %q: %+v", want, result)
+		}
+	}
+	if len(seen) != 1 {
+		t.Fatalf("requests = %#v, want only canonical /blocked", seen)
 	}
 }
 

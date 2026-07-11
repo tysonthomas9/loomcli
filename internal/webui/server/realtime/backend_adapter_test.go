@@ -20,6 +20,9 @@ var sharedFixtureTimestamp = time.Date(2026, 4, 25, 10, 30, 45, 0, time.UTC)
 func makeSharedFixture() (backend.MutationData, rpc.MutationEvent) {
 	bm := backend.MutationData{
 		Type:       "status",
+		EntityType: "issue",
+		EntityID:   "loom-fleet-42",
+		Action:     "issue.close",
 		IssueID:    "loom-fleet-42",
 		Title:      "Implement SSE fleet subscriber",
 		Assignee:   "agent-alpha",
@@ -33,6 +36,9 @@ func makeSharedFixture() (backend.MutationData, rpc.MutationEvent) {
 	}
 	rm := rpc.MutationEvent{
 		Type:       "status",
+		EntityType: "issue",
+		EntityID:   "loom-fleet-42",
+		Action:     "issue.close",
 		IssueID:    "loom-fleet-42",
 		Title:      "Implement SSE fleet subscriber",
 		Assignee:   "agent-alpha",
@@ -58,6 +64,9 @@ func TestBackendMutationToPayload_AllFields(t *testing.T) {
 		actual, expected any
 	}{
 		"Type":        {got.Type, "status"},
+		"EntityType":  {got.EntityType, "issue"},
+		"EntityID":    {got.EntityID, "loom-fleet-42"},
+		"Action":      {got.Action, "issue.close"},
 		"IssueID":     {got.IssueID, "loom-fleet-42"},
 		"Title":       {got.Title, "Implement SSE fleet subscriber"},
 		"Assignee":    {got.Assignee, "agent-alpha"},
@@ -76,6 +85,40 @@ func TestBackendMutationToPayload_AllFields(t *testing.T) {
 	}
 
 	// Timestamp is stringified; assert exact RFC3339 form (UTC).
+	if got.Timestamp != "2026-04-25T10:30:45Z" {
+		t.Errorf("Timestamp = %q, want %q", got.Timestamp, "2026-04-25T10:30:45Z")
+	}
+}
+
+func TestBackendMutationToPayload_GenericAgentEvent(t *testing.T) {
+	bm := backend.MutationData{
+		Type:       "status",
+		EntityType: "agent",
+		EntityID:   "agent-alpha",
+		Action:     "agent.status",
+		Title:      "agent-alpha",
+		Actor:      "tester",
+		Timestamp:  sharedFixtureTimestamp,
+	}
+	got := BackendMutationToPayload(bm, "ws-agent-1")
+
+	checks := map[string]struct {
+		actual, expected any
+	}{
+		"Type":        {got.Type, "status"},
+		"EntityType":  {got.EntityType, "agent"},
+		"EntityID":    {got.EntityID, "agent-alpha"},
+		"Action":      {got.Action, "agent.status"},
+		"IssueID":     {got.IssueID, ""},
+		"Title":       {got.Title, "agent-alpha"},
+		"Actor":       {got.Actor, "tester"},
+		"WorkspaceID": {got.WorkspaceID, "ws-agent-1"},
+	}
+	for name, c := range checks {
+		if c.actual != c.expected {
+			t.Errorf("%s = %v, want %v", name, c.actual, c.expected)
+		}
+	}
 	if got.Timestamp != "2026-04-25T10:30:45Z" {
 		t.Errorf("Timestamp = %q, want %q", got.Timestamp, "2026-04-25T10:30:45Z")
 	}
@@ -202,7 +245,9 @@ func TestRPCEventToMutationData_AllFields(t *testing.T) {
 	_, rm := makeSharedFixture()
 
 	got := RPCEventToMutationData(rm)
-	if got.Type != rm.Type || got.IssueID != rm.IssueID ||
+	if got.Type != rm.Type || got.EntityType != rm.EntityType ||
+		got.EntityID != rm.EntityID || got.Action != rm.Action ||
+		got.IssueID != rm.IssueID ||
 		got.Title != rm.Title || got.Assignee != rm.Assignee ||
 		got.Actor != rm.Actor || got.OldStatus != rm.OldStatus ||
 		got.NewStatus != rm.NewStatus || got.ParentID != rm.ParentID ||

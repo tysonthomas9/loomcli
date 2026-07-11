@@ -34,7 +34,7 @@ func TestFleetIssueWire_FieldDriftGuard(t *testing.T) {
 			wireKeys["kind"] = true
 			continue
 		}
-		if key == "repo" {
+		if key == "repo" || key == "source_repo" {
 			wireKeys["repo_canonical"] = true
 			continue
 		}
@@ -48,6 +48,7 @@ func TestFleetIssueWire_FieldDriftGuard(t *testing.T) {
 		"id": true, "title": true, "status": true, "priority": true,
 		"kind": true, "assignee": true, "owner": true, "labels": true,
 		"repo_canonical": true, "parent": true, "design": true, "description": true,
+		"acceptance_criteria": true, "notes": true, "external_ref": true,
 		"created_at": true, "created_by": true, "updated_at": true,
 		"due_at": true, "defer_until": true, "closed_at": true,
 		"close_reason": true,
@@ -93,6 +94,7 @@ func TestFleetIssueWire_RoundTrip(t *testing.T) {
 		Repo:        "repo",
 		ParentID:    "EPIC-1",
 		Design:      "design notes",
+		Notes:       "BLOCKED: dep missing",
 		Description: "desc",
 		CreatedAt:   now,
 		CreatedBy:   "creator",
@@ -108,6 +110,7 @@ func TestFleetIssueWire_RoundTrip(t *testing.T) {
 		"Priority": 1, "IssueType": "bug",
 		"Assignee": "agent-a", "Owner": "owner@example.com",
 		"SourceRepo": "repo", "Parent": "EPIC-1", "Design": "design notes",
+		"Notes":     "BLOCKED: dep missing",
 		"CreatedBy": "creator", "CloseReason": "fixed",
 	}
 	got := map[string]any{
@@ -115,6 +118,7 @@ func TestFleetIssueWire_RoundTrip(t *testing.T) {
 		"Priority": d.Priority, "IssueType": d.IssueType,
 		"Assignee": d.Assignee, "Owner": d.Owner,
 		"SourceRepo": d.SourceRepo, "Parent": d.Parent, "Design": d.Design,
+		"Notes":     d.Notes,
 		"CreatedBy": d.CreatedBy, "CloseReason": d.CloseReason,
 	}
 	for k, v := range want {
@@ -146,6 +150,7 @@ func TestIssueToData(t *testing.T) {
 		Labels:     []string{"bug", "urgent"},
 		SourceRepo: "repo-1",
 		Design:     "some design",
+		Notes:      "BLOCKED: waiting on upstream",
 		CreatedAt:  now,
 		UpdatedAt:  now,
 	}
@@ -169,6 +174,11 @@ func TestIssueToData(t *testing.T) {
 	}
 	if d.Design != "some design" {
 		t.Errorf("Design = %q, want %q", d.Design, "some design")
+	}
+	// Notes is in the slim list projection so the kanban "blocked with notes"
+	// needs-attention state works without a detail fetch (regression guard).
+	if d.Notes != "BLOCKED: waiting on upstream" {
+		t.Errorf("Notes = %q, want %q", d.Notes, "BLOCKED: waiting on upstream")
 	}
 }
 
@@ -425,5 +435,17 @@ func TestFleetIssueWire_RepoProjection(t *testing.T) {
 	w := fleetIssueWire{Repo: "org/repo"}
 	if got := w.toIssue().SourceRepo; got != "org/repo" {
 		t.Errorf("SourceRepo = %q, want %q", got, "org/repo")
+	}
+}
+
+func TestFleetIssueWire_ExternalRefProjection(t *testing.T) {
+	ref := "https://github.com/owner/repo/pull/42"
+	got := fleetIssueWire{ExternalRef: ref}.toIssue().ExternalRef
+	if got == nil || *got != ref {
+		t.Errorf("ExternalRef = %v, want %q", got, ref)
+	}
+	// Empty wire value projects to nil (omitted), not a pointer to "".
+	if got := (fleetIssueWire{}).toIssue().ExternalRef; got != nil {
+		t.Errorf("empty ExternalRef = %v, want nil", got)
 	}
 }

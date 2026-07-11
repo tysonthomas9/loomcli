@@ -23,14 +23,14 @@ import (
 // no-progress kills. When a backend silently stalls, the watchdog (or the
 // ownership/lease path) kills the session, recovery resets the task to open,
 // and the picker re-selects the same task — an infinite boomerang that
-// agent-level machinery (restart budgets, parks) cannot break, because the
+// agent-level machinery (restart budgets, blocks) cannot break, because the
 // task returns to open every cycle and a sibling re-picks it. The ledger
 // counts consecutive quarantine-eligible kills per task ACROSS agents; once a
 // task accumulates quarantineThreshold() of them with no progress in between,
 // the sweep sets it to blocked (status + label + kill-timeline comment).
 //
 // Eligibility is declared in the policy seat (agentpolicy.QuarantineEligible);
-// this file owns the state — mirroring how ParkBudget is declared in the
+// this file owns the state — mirroring how BlockBudget is declared in the
 // policy table but counted agent-side by the supervisor.
 
 const (
@@ -422,7 +422,7 @@ func (s *Supervisor) checkQuarantineTarget(ctx context.Context, due dueTask) qua
 	default:
 		// closed/tombstone: done. review: completed work awaiting approval.
 		// blocked: already quarantined or human-blocked. deferred: a human
-		// or scheduler parked it — defer to that decision. Latch without
+		// or scheduler deferred it — defer to that decision. Latch without
 		// writing: no label, no comment, excluded from daemon status.
 		return quarantineLatchResolved
 	}
@@ -586,7 +586,7 @@ func (q *taskQuarantine) evictOldestLocked() {
 
 // QuarantinedTaskInfo is the JSON-serializable snapshot of one quarantined
 // (or quarantine-pending) task, surfaced in daemon-agents.json and
-// `loom daemon status` — mirroring how agent parks surface daemon-status-only.
+// `loom daemon status` — mirroring how agent blocks surface daemon-status-only.
 type QuarantinedTaskInfo struct {
 	TaskID string `json:"task_id"`
 	// Count is the number of no-progress kills behind the quarantine: the

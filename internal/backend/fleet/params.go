@@ -142,12 +142,35 @@ func listOptsToQuery(opts backend.ListOpts) string {
 	return q.Encode()
 }
 
+func listServerOpts(opts backend.ListOpts) backend.ListOpts {
+	server := opts
+	if len(opts.Labels) > 1 {
+		server.Labels = nil
+	}
+	if len(opts.SourceRepos) > 1 {
+		server.SourceRepos = nil
+	}
+	if needsListClientFilter(opts) {
+		server.Limit = 0
+	}
+	return server
+}
+
+func needsListClientFilter(opts backend.ListOpts) bool {
+	return len(opts.Labels) > 1 || len(opts.SourceRepos) > 1
+}
+
 func addListCoreFilters(q url.Values, opts backend.ListOpts) {
 	setNonEmpty(q, "status", opts.Status)
 	setOptInt(q, "priority", opts.Priority)
-	setNonEmpty(q, "issue_type", opts.IssueType)
+	// fleet-db's listIssues endpoint expects "type", not "issue_type"
+	// (see fleet-db/api/openapi.yaml listIssues). The count endpoint already
+	// uses "type" in addCountCoreFilters; this matches it.
+	setNonEmpty(q, "type", opts.IssueType)
 	setNonEmpty(q, "assignee", opts.Assignee)
-	addAll(q, "labels", opts.Labels)
+	if len(opts.Labels) > 0 {
+		q.Set("label", opts.Labels[0])
+	}
 	addAll(q, "labels_any", opts.LabelsAny)
 	setNonEmpty(q, "parent_id", opts.ParentID)
 	if opts.Limit > 0 {
@@ -190,7 +213,9 @@ func addListAdvancedFilters(q url.Values, opts backend.ListOpts) {
 	addAll(q, "exclude_types", opts.ExcludeTypes)
 	setBoolIfTrue(q, "deferred", opts.Deferred)
 	setBoolIfTrue(q, "overdue", opts.Overdue)
-	addAll(q, "source_repos", opts.SourceRepos)
+	if len(opts.SourceRepos) > 0 {
+		q.Set("repo", opts.SourceRepos[0])
+	}
 	setBoolIfTrue(q, "allow_stale", opts.AllowStale)
 }
 
@@ -205,12 +230,23 @@ func readyOptsToQuery(opts backend.ReadyOpts) string {
 		q.Set("limit", strconv.Itoa(opts.Limit))
 	}
 	setNonEmpty(q, "sort", opts.SortPolicy)
-	addAll(q, "labels", opts.Labels)
-	addAll(q, "labels_any", opts.LabelsAny)
+	if len(opts.Labels) > 0 {
+		q.Set("label", strings.Join(opts.Labels, ","))
+	}
+	if len(opts.LabelsAny) > 0 {
+		q.Set("label_any", strings.Join(opts.LabelsAny, ","))
+	}
 	setNonEmpty(q, "mol_type", opts.MolType)
-	setBoolIfTrue(q, "include_deferred", opts.IncludeDeferred)
-	addAll(q, "source_repos", opts.SourceRepos)
 	return q.Encode()
+}
+
+func readyServerOpts(opts backend.ReadyOpts) backend.ReadyOpts {
+	server := opts
+	server.SourceRepos = nil
+	if len(opts.SourceRepos) > 0 {
+		server.Limit = 0
+	}
+	return server
 }
 
 // countOptsToQuery serializes the subset of backend.CountOpts fields that the
@@ -265,6 +301,16 @@ func blockedOptsToQuery(opts backend.BlockedOpts) string {
 	return q.Encode()
 }
 
+func blockedServerOpts(opts backend.BlockedOpts) backend.BlockedOpts {
+	server := opts
+	server.Labels = nil
+	server.SourceRepos = nil
+	if len(opts.Labels) > 0 || len(opts.SourceRepos) > 0 {
+		server.Limit = 0
+	}
+	return server
+}
+
 // updateParamsToPatchRequest converts backend.UpdateParams to the PATCH request
 // format expected by the fleet server (UpdateIssueRequest shape).
 //
@@ -286,57 +332,22 @@ func updateParamsToPatchRequest(params backend.UpdateParams) map[string]interfac
 	// UpdateIssueRequest names the same field "type".
 	setStrField(req, "type", params.IssueType)
 	setStrField(req, "due_at", params.DueAt)
+	setStrField(req, "external_ref", params.ExternalRef)
 	return req
 }
 
 // createParamsToBody converts backend.CreateParams to the POST /issues body
-// shape fleet-db's CreateIssueRequest expects. Same dialect concerns as
-// updateParamsToPatchRequest — strict JSON validation rejects unknown
-// fields, so we drop loom-only fields rather than shipping them as-is.
+// shape fleet-db's CreateIssueRequest expects. The projection itself lives on
+// backend.CreateParams (FleetCreateBody) because the CLI hashes the identical
+// bytes into the default X-Idempotency-Key -- cli/data may not import this
+// package (depguard data-isolation), so the shared source of truth sits in
+// the backend package.
 //
-// Field renames vs CreateParams:
-//   - "issue_type"  → "type"
-//   - "parent"      → "parent_id"
-//   - "owner" stays "owner" but fleet-db expects *string (we send the
-//     scalar value directly; omitempty handles the unset case)
-//   - "source_repo" → "repo"
-//
-// Dropped (no equivalent on fleet-db's CreateIssueRequest):
-//   - id, acceptance_criteria, created_by, external_ref,
-//     estimated_minutes, dependencies
-//
-// If any of those need round-tripping, file a fleet-db ticket to extend
-// the CreateIssueRequest schema rather than smuggling them through here.
+// Dependencies are intentionally absent here too: they are not part of the
+// create body. Create composes them after the issue exists via the dedicated
+// POST /issues/{id}/deps endpoint (see addCreateDependencies).
 func createParamsToBody(params backend.CreateParams) map[string]interface{} {
-	req := make(map[string]interface{})
-	setNonEmptyStr(req, "title", params.Title)
-	setNonEmptyStr(req, "description", params.Description)
-	setNonEmptyStr(req, "status", params.Status)
-	if params.Priority != 0 {
-		req["priority"] = params.Priority
-	}
-	setNonEmptyStr(req, "type", params.IssueType)
-	setNonEmptyStr(req, "assignee", params.Assignee)
-	setNonEmptyStr(req, "owner", params.Owner)
-	if len(params.Labels) > 0 {
-		req["labels"] = params.Labels
-	}
-	setNonEmptyStr(req, "parent_id", params.Parent)
-	setNonEmptyStr(req, "repo", params.SourceRepo)
-	setNonEmptyStr(req, "design", params.Design)
-	setNonEmptyStr(req, "notes", params.Notes)
-	setNonEmptyStr(req, "defer_until", params.DeferUntil)
-	setNonEmptyStr(req, "due_at", params.DueAt)
-	return req
-}
-
-// setNonEmptyStr sets m[key] = val if val is non-empty. Companion to
-// setStrField (which is *string-based for PATCH semantics where nil
-// distinguishes "unset" from "empty").
-func setNonEmptyStr(m map[string]interface{}, key, val string) {
-	if val != "" {
-		m[key] = val
-	}
+	return params.FleetCreateBody()
 }
 
 // --- Helpers ---

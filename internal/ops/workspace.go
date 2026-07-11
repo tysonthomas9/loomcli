@@ -33,6 +33,7 @@ type WorkspaceRepo struct {
 	DefaultBranch    string   `json:"default_branch"`
 	CurrentBranch    string   `json:"current_branch,omitempty"`
 	Remote           string   `json:"remote"`
+	RemoteURL        string   `json:"remote_url,omitempty"`
 	SourceRepoID     string   `json:"source_repo_id,omitempty"`
 	Groups           []string `json:"groups"`
 	IsLinkedWorktree bool     `json:"is_linked_worktree,omitempty"`
@@ -41,6 +42,7 @@ type WorkspaceRepo struct {
 // WorkspaceAgentInfo represents an agent's repo/group assignments.
 type WorkspaceAgentInfo struct {
 	Name       string   `json:"name"`
+	RoleName   string   `json:"role_name,omitempty"`
 	Repos      []string `json:"repos"`
 	RepoGroups []string `json:"repo_groups"`
 	CrossRepo  bool     `json:"cross_repo"`

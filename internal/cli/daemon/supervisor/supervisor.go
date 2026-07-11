@@ -64,6 +64,18 @@ type Supervisor struct {
 	// for the liveness watchdog. Zero means use built-in defaults.
 	LivenessTimeout time.Duration
 
+	// livenessStreak counts how many consecutive scans each goroutine's tick
+	// has been observed stale. The watchdog only signals fatal once a tick has
+	// been stale for livenessStaleScansBeforeFatal scans in a row, so a single
+	// transient stall (a slow control-plane cycle, brief mutex contention) does
+	// not crash the daemon. lastLivenessScan records when scanTicks last ran so
+	// it can detect a process-wide suspension (sleep/swap/SIGSTOP) — after which
+	// every tick looks ancient — and skip the fatal for that scan. Both fields
+	// are owned exclusively by the single livenessWatchdog goroutine (tests call
+	// scanTicks serially), so they need no synchronization.
+	livenessStreak   map[string]int
+	lastLivenessScan time.Time
+
 	Concurrency *ConcurrencyTracker
 	EventBus    EventEmitter
 	EmitEvent   func(events.Event)
@@ -94,16 +106,16 @@ type Supervisor struct {
 	NodeInterval time.Duration
 
 	// backendRecheckInterval is the fixed delay computeBackoff returns for a
-	// BackendUnavailable park (agent's backend CLI missing from PATH). Zero
+	// BackendUnavailable block (agent's backend CLI missing from PATH). Zero
 	// means use the package default (backendUnavailableRecheckInterval). Tests set a
 	// small value to avoid the 30s wait.
 	backendRecheckInterval time.Duration
 
-	// maxRetriesParkInterval is the fixed delay computeBackoff returns once an
-	// agent has exhausted its restart budget and parked (StopReasonMaxRetriesParked).
-	// Zero means use the package default (defaultMaxRetriesParkInterval). Tests set
+	// maxRetriesBlockInterval is the fixed delay computeBackoff returns once an
+	// agent has exhausted its restart budget and blocked (StopReasonMaxRetriesBlocked).
+	// Zero means use the package default (defaultMaxRetriesBlockInterval). Tests set
 	// a small value to avoid the 60s wait.
-	maxRetriesParkInterval time.Duration
+	maxRetriesBlockInterval time.Duration
 }
 
 // NewAgent creates an AgentProcess from an agent entry, resolving the worktree path
@@ -208,7 +220,12 @@ func (s *Supervisor) startAgentSupervisor(ap *AgentProcess) {
 const (
 	defaultNodeTTL      = 2 * time.Minute
 	defaultNodeInterval = 30 * time.Second
-	defaultLeaseTTL     = 2 * time.Minute
+	// defaultLeaseTTL must outlive a typical real-codex turn (often 5+
+	// minutes) so the lease is still Active when the worker calls
+	// loom data close. There is no periodic heartbeat loop on the agent
+	// lease today (only IPC mutations renew it), so a short TTL silently
+	// fails task completion after a long codex session.
+	defaultLeaseTTL = 30 * time.Minute
 )
 
 var controlPlaneOperationTimeout = 2 * time.Second
@@ -240,6 +257,8 @@ func (s *Supervisor) Stop() {
 //nolint:funlen // The restart loop keeps lifecycle ordering visible.
 func (s *Supervisor) superviseAgent(ap *AgentProcess) {
 	slog.Info("starting agent supervisor", "worktree", ap.Entry.Worktree, "role", ap.Entry.Role)
+	s.markAgentActive(ap)
+	defer s.markAgentStoppedOnExit(ap)
 	tickName := agentTickName(ap)
 
 	for {
@@ -301,9 +320,9 @@ func (s *Supervisor) superviseAgent(ap *AgentProcess) {
 
 		if !s.shouldRestart(ap) {
 			// Terminal stops only: fatal (auth/billing), fast-fail
-			// (deterministic / park-budget escalation), or the
+			// (deterministic / block-budget escalation), or the
 			// max_retries=0 fail-fast opt-out. Budget exhaustion on
-			// retryable classes parks-and-retries instead (returns true).
+			// retryable classes blocks-and-retries instead (returns true).
 			slog.Warn("supervisor stopping (terminal)", "worktree", ap.Entry.Worktree)
 			return
 		}
@@ -503,16 +522,17 @@ func (s *Supervisor) createControlPlaneAgentSession(ap *AgentProcess, sessionID,
 	metadata := s.agentSessionMetadata(ap, epicID)
 	createCtx, createCancel := context.WithTimeout(context.Background(), controlPlaneOperationTimeout)
 	if _, err := s.ControlStore.AgentSessions().Create(createCtx, store.AgentSessionCreate{
-		WorkspaceKey: s.WorkspaceID,
-		SessionID:    sessionID,
-		AgentID:      ap.Entry.Worktree,
-		NodeID:       s.NodeID,
-		Kind:         domain.AgentSessionKindTask,
-		TaskID:       taskID,
-		Status:       domain.AgentSessionStarting,
-		Phase:        phase,
-		Attempt:      attempt,
-		Metadata:     metadata,
+		WorkspaceKey:    s.WorkspaceID,
+		SessionID:       sessionID,
+		AgentID:         ap.Entry.Worktree,
+		NodeID:          s.NodeID,
+		Kind:            domain.AgentSessionKindTask,
+		TaskID:          taskID,
+		ParentSessionID: ap.ParentSessionID,
+		Status:          domain.AgentSessionStarting,
+		Phase:           phase,
+		Attempt:         attempt,
+		Metadata:        metadata,
 	}); err != nil {
 		createCancel()
 		slog.Warn("control-plane agent session creation failed", "worktree", ap.Entry.Worktree, "session_id", sessionID, "err", err)
@@ -609,6 +629,10 @@ func (s *Supervisor) agentSessionMetadataLocked(ap *AgentProcess, backend string
 	if ap.AssignedTaskID != "" {
 		metadata["task_id"] = ap.AssignedTaskID
 	}
+	if ap.Entry.Mode == domain.AgentModeEphemeral {
+		metadata["attempt_kind"] = "ephemeral_task_attempt"
+		metadata["cleanup_state"] = "retained"
+	}
 	if ap.Entry.Repo != "" {
 		metadata["repo"] = ap.Entry.Repo
 	}
@@ -629,8 +653,14 @@ type agentSessionCompletionInput struct {
 	errClass   string
 	taskID     string
 	diffResult sessionfinalize.WithWorktreeResult
+	// transcriptData is the leaf's on-disk transcript (read once in
+	// finalizeAgentSession). When present it is uploaded as a control-plane artifact
+	// and referenced via metadata["transcript_ref"], so a non-owning serve node can
+	// surface it (controlPlaneSessionTranscript). Empty on the backend-unavailable path.
+	transcriptData []byte
 }
 
+//nolint:funlen // Completion writes status, metadata, transcript artifact, and retry-safe control-plane updates together.
 func (s *Supervisor) completeControlPlaneAgentSession(ap *AgentProcess, input agentSessionCompletionInput) {
 	if s.ControlStore == nil || s.WorkspaceID == "" || input.sessionID == "" {
 		return
@@ -656,6 +686,19 @@ func (s *Supervisor) completeControlPlaneAgentSession(ap *AgentProcess, input ag
 	ap.Mu.Unlock()
 	sessions.EncodeDiffStatsMetadata(metadata, input.diffResult.DiffStats, input.diffResult.FilesTouched, input.diffResult.HasDiffPatch)
 
+	// Upload the leaf transcript as a control-plane artifact and reference it via
+	// metadata["transcript_ref"] (the same convention the driver host-bridge uses),
+	// so a serve node that does NOT own this session locally can still surface it via
+	// controlPlaneSessionTranscript. Best-effort: a failed upload must not block the
+	// session completion. Own context so it can't eat the Update's timeout budget.
+	if len(input.transcriptData) > 0 {
+		upCtx, upCancel := context.WithTimeout(context.Background(), controlPlaneOperationTimeout)
+		if ref := s.uploadTranscriptArtifact(upCtx, input.sessionID, input.taskID, backend, input.transcriptData); ref != "" {
+			metadata["transcript_ref"] = ref
+		}
+		upCancel()
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), controlPlaneOperationTimeout)
 	defer cancel()
 	if _, err := s.ControlStore.AgentSessions().Update(ctx, s.WorkspaceID, input.sessionID, store.AgentSessionUpdate{
@@ -675,6 +718,35 @@ func (s *Supervisor) completeControlPlaneAgentSession(ap *AgentProcess, input ag
 	}
 	s.releaseAssignedTaskClaim(ap, input.taskID)
 	s.deregisterWorker(ap)
+}
+
+// uploadTranscriptArtifact uploads the daemon leaf's transcript as a content
+// artifact and returns its artifact:// ref (or "" on failure). The artifact id is
+// stable per session so a retried finalize reuses it (UploadContentArtifact is
+// idempotent). Owner is the agent session — the daemon leaf has no task_run, which
+// is the driver's owner type.
+func (s *Supervisor) uploadTranscriptArtifact(ctx context.Context, sessionID, taskID, backend string, data []byte) string {
+	if s.ControlStore == nil {
+		return ""
+	}
+	finalized, err := store.UploadContentArtifact(ctx, s.ControlStore.Artifacts(), store.ArtifactCreate{
+		WorkspaceKey:  s.WorkspaceID,
+		ArtifactID:    "transcript-" + sessionID,
+		SessionID:     sessionID,
+		TaskID:        taskID,
+		OwnerType:     "session", // fleet-db's valid owner type for a session-owned artifact (OwnerID=sessionID)
+		OwnerID:       sessionID,
+		Type:          "transcript",
+		Summary:       "agent session transcript",
+		MIMEType:      "application/x-ndjson",
+		DurableStatus: "declared",
+		Metadata:      map[string]string{"runtime": "daemon-leaf", "backend": backend},
+	}, data)
+	if err != nil {
+		slog.Warn("daemon transcript artifact upload failed", "session_id", sessionID, "err", err)
+		return ""
+	}
+	return "artifact://" + finalized.ArtifactID
 }
 
 // deregisterWorker removes the agent's fleet-db worker registration on exit,
@@ -705,7 +777,7 @@ func (s *Supervisor) spawnAndWait(ap *AgentProcess) {
 			// The normal pre-flight gate runs before task claim, but this spawn-time
 			// gate remains as a race guard for a backend disappearing after claim and
 			// before exec. Clean up any already-created session/claim/worker before
-			// parking so the task is immediately claimable again.
+			// blocking so the task is immediately claimable again.
 			s.completeBackendUnavailableCleanup(ap)
 			s.Concurrency.Release(ap.Entry.Role)
 			return
@@ -776,7 +848,7 @@ func (s *Supervisor) postExitCleanup(ap *AgentProcess) {
 // re-spawn that follows is its own daemon.supervisor.spawn child span (via
 // the next iteration of the supervise loop).
 // startBackoffHeartbeat keeps the agent's supervise tick fresh during a long
-// restart wait (a park, or a long exponential backoff). It returns a no-op
+// restart wait (a block, or a long exponential backoff). It returns a no-op
 // stopper for short waits that cannot approach the staleness threshold, so
 // callers can always defer the returned function.
 func (s *Supervisor) startBackoffHeartbeat(ap *AgentProcess, backoff time.Duration) func() {
@@ -809,7 +881,7 @@ func (s *Supervisor) sleepBeforeRestart(ap *AgentProcess) bool {
 		s.EmitEvent(evt)
 	}
 
-	// Keep the agent's liveness tick fresh during a long wait (a park, or a
+	// Keep the agent's liveness tick fresh during a long wait (a block, or a
 	// long exponential backoff) so the watchdog cannot mistake a healthy,
 	// waiting supervise goroutine for a wedged one. The select below is
 	// bounded by backoff, so this masks no real deadlock.
@@ -875,7 +947,7 @@ func (s *Supervisor) GetAgents() []SupervisedAgentStatus {
 			AssignedEpicID:         ap.AssignedEpicID,
 			StopReason:             ap.StopReason,
 			NoWorkCount:            ap.NoWorkCount,
-			ParkCount:              ap.ParkCount,
+			BlockCount:             ap.BlockCount,
 			BackoffUntil:           ap.BackoffUntil,
 			OwnershipLeaseID:       ap.OwnershipLeaseID,
 			OwnershipFencingToken:  ap.OwnershipFencingToken,

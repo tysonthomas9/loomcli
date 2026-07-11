@@ -12,6 +12,7 @@ import { useMemo, useState } from "react";
 import { CodeMirrorEditor } from "@/components/CodeMirrorEditor";
 import { useSessionTranscript, useSessionDiff } from "@/hooks/terminal";
 import type { SessionRecord, TranscriptEntry } from "@/types/agent";
+import { formatStatusLabel } from "@/utils/issue";
 
 import styles from "./SessionsTab.module.css";
 
@@ -381,7 +382,7 @@ export function SessionDetailView({
               className={`${styles.statValue} ${statusToClass(session.status)}`}
             >
               <span className={styles.statusDot} />
-              {session.status}
+              {formatStatusLabel(session.status)}
             </div>
           </div>
           <div className={styles.stat}>

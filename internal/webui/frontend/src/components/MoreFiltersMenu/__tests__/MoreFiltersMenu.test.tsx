@@ -161,30 +161,24 @@ describe("MoreFiltersMenu", () => {
   });
 
   describe("active indicator", () => {
-    it("shows active indicator (dot) when groupBy is not none", () => {
+    it("does NOT show active indicator when groupBy is epic (default)", () => {
       const { container } = render(
         <MoreFiltersMenu groupBy="epic" onGroupByChange={vi.fn()} />,
       );
 
-      const indicator = container.querySelector("span");
-      expect(indicator).toBeInTheDocument();
+      const indicator = container.querySelector('[class*="indicator"]');
+      expect(indicator).not.toBeInTheDocument();
     });
 
-    it("shows active indicator for each non-none groupBy value", () => {
-      const activeValues = [
-        "epic",
-        "assignee",
-        "priority",
-        "type",
-        "label",
-      ] as const;
+    it("shows active indicator for each non-default groupBy value", () => {
+      const activeValues = ["assignee", "priority", "type", "label"] as const;
 
       activeValues.forEach((groupByValue) => {
         const { container, unmount } = render(
           <MoreFiltersMenu groupBy={groupByValue} onGroupByChange={vi.fn()} />,
         );
 
-        const indicator = container.querySelector("span");
+        const indicator = container.querySelector('[class*="indicator"]');
         expect(indicator).toBeInTheDocument();
 
         unmount();
@@ -196,7 +190,7 @@ describe("MoreFiltersMenu", () => {
         <MoreFiltersMenu groupBy="none" onGroupByChange={vi.fn()} />,
       );
 
-      const indicator = container.querySelector("span");
+      const indicator = container.querySelector('[class*="indicator"]');
       expect(indicator).not.toBeInTheDocument();
     });
   });

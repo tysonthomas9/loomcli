@@ -479,13 +479,14 @@ describe("useFilterState", () => {
     });
 
     it("handles all known groupBy options", () => {
-      // "none" and "epic" (DEFAULT_GROUP_BY) are not stored in URL,
-      // so setGroupBy with those values clears the param.
+      // "epic" (DEFAULT_GROUP_BY) is not stored in URL — it clears the param.
+      // "none" is stored explicitly so flat kanban survives reloads.
       const storedOptions: GroupByOption[] = [
         "assignee",
         "priority",
         "type",
         "label",
+        "none",
       ];
       const { result } = renderHook(() => useFilterState(), {
         wrapper: RouterWrapper,
@@ -512,7 +513,7 @@ describe("useFilterState", () => {
       act(() => {
         result.current[1].setGroupBy("none");
       });
-      expect(result.current[0].groupBy).toBeUndefined();
+      expect(result.current[0].groupBy).toBe("none");
 
       // "epic" is the default, also clears the groupBy param
       act(() => {
@@ -714,9 +715,9 @@ describe("toQueryString", () => {
     expect(result).toBe("groupBy=assignee");
   });
 
-  it("omits groupBy when value is none", () => {
+  it("serializes groupBy when value is none", () => {
     const result = toQueryString({ groupBy: "none" });
-    expect(result).toBe("");
+    expect(result).toBe("groupBy=none");
   });
 
   it("omits groupBy when value is epic (the default)", () => {
@@ -724,8 +725,14 @@ describe("toQueryString", () => {
     expect(result).toBe("");
   });
 
-  it("serializes all groupBy options except none and epic", () => {
-    const options: GroupByOption[] = ["assignee", "priority", "type", "label"];
+  it("serializes all groupBy options except epic (the default)", () => {
+    const options: GroupByOption[] = [
+      "none",
+      "assignee",
+      "priority",
+      "type",
+      "label",
+    ];
     for (const option of options) {
       const result = toQueryString({ groupBy: option });
       expect(result).toBe(`groupBy=${option}`);

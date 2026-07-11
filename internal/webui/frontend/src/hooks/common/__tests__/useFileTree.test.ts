@@ -98,6 +98,8 @@ describe("useFileTree", () => {
     it("does not load when agentName is empty", () => {
       const { result } = renderHook(() => useFileTree(""));
 
+      expect(result.current.isWorkspaceTree).toBe(false);
+
       expect(result.current.isLoading).toBe(false);
       expect(mockListDir).not.toHaveBeenCalled();
     });
@@ -325,6 +327,21 @@ describe("useFileTree", () => {
       });
 
       expect(result.current.error).toBe("string error");
+    });
+  });
+
+  describe("Workspace tree mode", () => {
+    it("exposes isWorkspaceTree when requested", async () => {
+      const { result } = renderHook(() =>
+        useFileTree("lead-b", { useWorkspaceTree: true }),
+      );
+
+      await waitFor(() => {
+        expect(result.current.isLoading).toBe(false);
+      });
+
+      expect(result.current.isWorkspaceTree).toBe(true);
+      expect(mockListDir).toHaveBeenCalledWith("test-ws-id", "lead-b");
     });
   });
 

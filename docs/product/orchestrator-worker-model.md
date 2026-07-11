@@ -755,7 +755,7 @@ export default defineWorkflow({
     const review = ctx.step("review", "agent_gate", {
       role: "reviewer",
       pr: pr.output("url"),
-      decisionSchema: ["approved", "changes_requested", "rejected", "needs_human"],
+      decisionSchema: ["approved", "changes_requested", "rejected", "needs_review"],
     }).after(pr);
 
     ctx.step("merge", "merge_pr", {
@@ -796,7 +796,7 @@ They should not mutate the repository by default.
 
 ```ts
 type GateDecision = {
-  decision: "approved" | "changes_requested" | "rejected" | "needs_human";
+  decision: "approved" | "changes_requested" | "rejected" | "needs_review";
   summary: string;
   findings: Array<{
     severity: "blocker" | "major" | "minor";
@@ -817,7 +817,7 @@ Useful gatekeeper roles:
 - `release-manager` — gates multi-repo release sequencing.
 
 Review/fix loops must have a max-attempt cap and a deterministic
-fallback, usually `needs_human`.
+fallback, usually `needs_review`.
 
 ### Service agents
 
@@ -1233,7 +1233,7 @@ existing PR rather than creating another.
 | Wrong dependency unblock timing | Only close the issue when the workflow intentionally wants dependents unblocked. |
 | SDK code performs unsafe side effects | SDK emits IR; runtime executes typed, capability-checked actions. |
 | Direct push to protected branch | Protected-branch policy, required checks, explicit approval gate. |
-| Infinite review/fix loop | Max attempts and terminal `needs_human` fallback. |
+| Infinite review/fix loop | Max attempts and terminal `needs_review` fallback. |
 | External drift (PR exists, CI reran, box deleted) | Persist external refs and reconcile from provider APIs. |
 | Cost explosion from fanout | Max concurrency, max attempts, budget caps per run and service agent. |
 | Multi-repo partial delivery | One artifact per repo; close only when all required artifacts complete. |

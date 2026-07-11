@@ -429,9 +429,12 @@ const (
 	MutationPayloadTypeComment               MutationPayloadType = "comment"
 	MutationPayloadTypeCreate                MutationPayloadType = "create"
 	MutationPayloadTypeDelete                MutationPayloadType = "delete"
+	MutationPayloadTypeIssueTabs             MutationPayloadType = "issue_tabs"
 	MutationPayloadTypeRefresh               MutationPayloadType = "refresh"
+	MutationPayloadTypeSessionChange         MutationPayloadType = "session_change"
 	MutationPayloadTypeSquashed              MutationPayloadType = "squashed"
 	MutationPayloadTypeStatus                MutationPayloadType = "status"
+	MutationPayloadTypeTerminalMetadata      MutationPayloadType = "terminal_metadata"
 	MutationPayloadTypeTerminalSessionChange MutationPayloadType = "terminal_session_change"
 	MutationPayloadTypeUpdate                MutationPayloadType = "update"
 )
@@ -449,11 +452,17 @@ func (e MutationPayloadType) Valid() bool {
 		return true
 	case MutationPayloadTypeDelete:
 		return true
+	case MutationPayloadTypeIssueTabs:
+		return true
 	case MutationPayloadTypeRefresh:
+		return true
+	case MutationPayloadTypeSessionChange:
 		return true
 	case MutationPayloadTypeSquashed:
 		return true
 	case MutationPayloadTypeStatus:
+		return true
+	case MutationPayloadTypeTerminalMetadata:
 		return true
 	case MutationPayloadTypeTerminalSessionChange:
 		return true
@@ -1026,35 +1035,37 @@ type BlockedIssue struct {
 	AcceptanceCriteria *string                 `json:"acceptance_criteria,omitempty"`
 	AgentState         *BlockedIssueAgentState `json:"agent_state,omitempty"`
 	Assignee           *string                 `json:"assignee,omitempty"`
-	BlockedBy          []string                `json:"blocked_by"`
-	BlockedByCount     int                     `json:"blocked_by_count"`
-	BlockedByDetails   *[]BlockerRef           `json:"blocked_by_details,omitempty"`
-	CloseReason        *string                 `json:"close_reason,omitempty"`
-	ClosedAt           *time.Time              `json:"closed_at,omitempty"`
-	Comments           *[]Comment              `json:"comments,omitempty"`
-	CreatedAt          time.Time               `json:"created_at"`
-	CreatedBy          *string                 `json:"created_by,omitempty"`
-	DeferUntil         *time.Time              `json:"defer_until,omitempty"`
-	Dependencies       *[]Dependency           `json:"dependencies,omitempty"`
-	Description        *string                 `json:"description,omitempty"`
-	Design             *string                 `json:"design,omitempty"`
-	DueAt              *time.Time              `json:"due_at,omitempty"`
-	EstimatedMinutes   *int                    `json:"estimated_minutes,omitempty"`
-	ExternalRef        *string                 `json:"external_ref,omitempty"`
-	Id                 string                  `json:"id"`
-	IssueType          *BlockedIssueIssueType  `json:"issue_type,omitempty"`
-	Labels             *[]string               `json:"labels,omitempty"`
-	LastActivity       *time.Time              `json:"last_activity,omitempty"`
-	MolType            *string                 `json:"mol_type,omitempty"`
-	Notes              *string                 `json:"notes,omitempty"`
-	Owner              *string                 `json:"owner,omitempty"`
-	Parent             *string                 `json:"parent,omitempty"`
-	Pinned             *bool                   `json:"pinned,omitempty"`
-	Priority           int                     `json:"priority"`
-	Rig                *string                 `json:"rig,omitempty"`
-	RoleType           *string                 `json:"role_type,omitempty"`
-	SourceRepo         *string                 `json:"source_repo,omitempty"`
-	SourceSystem       *string                 `json:"source_system,omitempty"`
+
+	// BlockedBy Dependency blocker IDs when known. May be empty for explicit status-only or parent-propagated blocking.
+	BlockedBy        []string               `json:"blocked_by"`
+	BlockedByCount   int                    `json:"blocked_by_count"`
+	BlockedByDetails *[]BlockerRef          `json:"blocked_by_details,omitempty"`
+	CloseReason      *string                `json:"close_reason,omitempty"`
+	ClosedAt         *time.Time             `json:"closed_at,omitempty"`
+	Comments         *[]Comment             `json:"comments,omitempty"`
+	CreatedAt        time.Time              `json:"created_at"`
+	CreatedBy        *string                `json:"created_by,omitempty"`
+	DeferUntil       *time.Time             `json:"defer_until,omitempty"`
+	Dependencies     *[]Dependency          `json:"dependencies,omitempty"`
+	Description      *string                `json:"description,omitempty"`
+	Design           *string                `json:"design,omitempty"`
+	DueAt            *time.Time             `json:"due_at,omitempty"`
+	EstimatedMinutes *int                   `json:"estimated_minutes,omitempty"`
+	ExternalRef      *string                `json:"external_ref,omitempty"`
+	Id               string                 `json:"id"`
+	IssueType        *BlockedIssueIssueType `json:"issue_type,omitempty"`
+	Labels           *[]string              `json:"labels,omitempty"`
+	LastActivity     *time.Time             `json:"last_activity,omitempty"`
+	MolType          *string                `json:"mol_type,omitempty"`
+	Notes            *string                `json:"notes,omitempty"`
+	Owner            *string                `json:"owner,omitempty"`
+	Parent           *string                `json:"parent,omitempty"`
+	Pinned           *bool                  `json:"pinned,omitempty"`
+	Priority         int                    `json:"priority"`
+	Rig              *string                `json:"rig,omitempty"`
+	RoleType         *string                `json:"role_type,omitempty"`
+	SourceRepo       *string                `json:"source_repo,omitempty"`
+	SourceSystem     *string                `json:"source_system,omitempty"`
 
 	// Status User-facing statuses. Internal statuses (tombstone, pinned, hooked)
 	// are not settable via the API and excluded from this enum.
@@ -1372,6 +1383,9 @@ type MonitorAgentStatus struct {
 	CurrentTaskId *string `json:"current_task_id,omitempty"`
 	DaemonManaged *bool   `json:"daemon_managed,omitempty"`
 
+	// DesiredState Requested daemon state for the agent.
+	DesiredState *string `json:"desired_state,omitempty"`
+
 	// LastActivityAt Most recent PTY-output observation from the agent's supervised backend (claude/codex/gemini), forwarded over IPC. Compare to "now" to detect stuck agents. Zero/absent when no observation yet or agent isn't daemon-managed.
 	LastActivityAt *time.Time `json:"last_activity_at,omitempty"`
 
@@ -1380,11 +1394,26 @@ type MonitorAgentStatus struct {
 
 	// LiveStatus Fleet-db's DERIVED liveness signal ("working" or "idle"), computed server-side from the running-session + fresh-lease join (never re-derived by loom). "working" means the agent has a live session right now. Absent when liveness was not computed (no fleet-db store). The UI prefers this over the lock-derived status, which stays "idle" for a provably-working agent on serve-only deployments.
 	LiveStatus *string `json:"live_status,omitempty"`
-	Name       string  `json:"name"`
-	Repo       *string `json:"repo,omitempty"`
-	Role       *string `json:"role,omitempty"`
-	Status     string  `json:"status"`
-	Workspace  string  `json:"workspace"`
+
+	// Mode Assignment mode, such as persistent or ephemeral.
+	Mode *string `json:"mode,omitempty"`
+	Name string  `json:"name"`
+
+	// OrchestratorSessionId Lead/orchestrator session that spawned or owns the agent.
+	OrchestratorSessionId *string `json:"orchestrator_session_id,omitempty"`
+
+	// Parent Active epic assignment for lead/workers.
+	Parent *string `json:"parent,omitempty"`
+	Repo   *string `json:"repo,omitempty"`
+	Role   *string `json:"role,omitempty"`
+
+	// SessionId Latest control-plane session associated with this agent.
+	SessionId *string `json:"session_id,omitempty"`
+	Status    string  `json:"status"`
+
+	// TaskId Latest task session associated with this agent.
+	TaskId    *string `json:"task_id,omitempty"`
+	Workspace string  `json:"workspace"`
 }
 
 // MonitorAgentsResponse defines model for MonitorAgentsResponse.
@@ -1538,15 +1567,28 @@ type MoveResult struct {
 	Warnings *[]string `json:"warnings,omitempty"`
 }
 
-// MutationPayload SSE mutation event payload. All fields except type, issue_id, and
-// timestamp are context-dependent. For status events: old_status and
-// new_status are present. For bonded events: parent_id and step_count
+// MutationPayload SSE mutation event payload. `type` is the legacy coarse mutation kind.
+// New consumers should prefer the generic `entity_type`, `entity_id`, and
+// `action` envelope fields when deciding which local state to invalidate.
+// `issue_id` is retained for backward-compatible issue-scoped consumers
+// and may be omitted for non-issue entities. For status events: old_status
+// and new_status are present. For bonded events: parent_id and step_count
 // are present. This is documented as a flat schema (no discriminator)
 // because the SSE stream is not validated by generated clients.
 type MutationPayload struct {
+	// Action Source action for the mutation, usually the fleet-db action such as issue.update or dep.add.
+	Action   *string `json:"action,omitempty"`
 	Actor    *string `json:"actor,omitempty"`
 	Assignee *string `json:"assignee,omitempty"`
-	IssueId  string  `json:"issue_id"`
+
+	// EntityId Generic changed entity identifier.
+	EntityId *string `json:"entity_id,omitempty"`
+
+	// EntityType Generic changed entity type, for example issue, dependency, comment, label, agent, terminal, session, or workspace.
+	EntityType *string `json:"entity_type,omitempty"`
+
+	// IssueId Legacy issue identifier for issue-scoped consumers; omitted for non-issue entities.
+	IssueId *string `json:"issue_id,omitempty"`
 
 	// NewStatus Present for status mutation events
 	NewStatus *string `json:"new_status,omitempty"`
@@ -1962,6 +2004,7 @@ type WorkspaceRepo struct {
 	Name          string   `json:"name"`
 	Path          string   `json:"path"`
 	Remote        string   `json:"remote"`
+	RemoteUrl     *string  `json:"remote_url,omitempty"`
 	SourceRepoId  *string  `json:"source_repo_id,omitempty"`
 }
 
@@ -2215,15 +2258,16 @@ type RunOnboardingFirstTaskJSONBody struct {
 
 // ListReadyParams defines parameters for ListReady.
 type ListReadyParams struct {
-	Assignee        *string                 `form:"assignee,omitempty" json:"assignee,omitempty"`
-	Type            *ListReadyParamsType    `form:"type,omitempty" json:"type,omitempty"`
-	ParentId        *string                 `form:"parent_id,omitempty" json:"parent_id,omitempty"`
-	MolType         *ListReadyParamsMolType `form:"mol_type,omitempty" json:"mol_type,omitempty"`
-	Sort            *ListReadyParamsSort    `form:"sort,omitempty" json:"sort,omitempty"`
-	Unassigned      *bool                   `form:"unassigned,omitempty" json:"unassigned,omitempty"`
-	IncludeDeferred *bool                   `form:"include_deferred,omitempty" json:"include_deferred,omitempty"`
-	Priority        *int                    `form:"priority,omitempty" json:"priority,omitempty"`
-	Limit           *int                    `form:"limit,omitempty" json:"limit,omitempty"`
+	Assignee *string `form:"assignee,omitempty" json:"assignee,omitempty"`
+
+	// Type Filter by issue type. Epics are always excluded from the ready view.
+	Type       *ListReadyParamsType    `form:"type,omitempty" json:"type,omitempty"`
+	ParentId   *string                 `form:"parent_id,omitempty" json:"parent_id,omitempty"`
+	MolType    *ListReadyParamsMolType `form:"mol_type,omitempty" json:"mol_type,omitempty"`
+	Sort       *ListReadyParamsSort    `form:"sort,omitempty" json:"sort,omitempty"`
+	Unassigned *bool                   `form:"unassigned,omitempty" json:"unassigned,omitempty"`
+	Priority   *int                    `form:"priority,omitempty" json:"priority,omitempty"`
+	Limit      *int                    `form:"limit,omitempty" json:"limit,omitempty"`
 
 	// Labels Comma-separated labels (all must match)
 	Labels *string `form:"labels,omitempty" json:"labels,omitempty"`

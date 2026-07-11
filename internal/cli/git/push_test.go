@@ -601,7 +601,121 @@ func TestPushWorkspaceWorktrees_EmptyList(t *testing.T) {
 	}}
 
 	// Should not panic or call any commands
-	pushWorkspaceWorktrees(deps, worktrees, "", "main")
+	if err := pushWorkspaceWorktrees(deps, worktrees, "", "main"); err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+}
+
+func TestPushWorkspaceWorktrees_ReturnsErrorWhenAnyRepoFails(t *testing.T) {
+	t.Parallel()
+	deps, _, _, _, _ := NewTestDeps(t)
+
+	worktrees := []WorktreeInfo{
+		{
+			Name:   "repo-a",
+			Path:   "/ws/repo-a",
+			Branch: "feat-a",
+			Repo:   &RepoConfig{Name: "repo-a", DefaultBranch: "main", Remote: ""},
+		},
+	}
+
+	cmdMock := NewCommandMock(t, []CommandStub{})
+	cmdMock.InstallOn(deps)
+	outputMock := NewOutputCommandMock(t, []OutputCommandStub{
+		{Args: []string{"fetch", "origin"}, Err: errors.New("fetch failed")},
+	})
+	outputMock.InstallOn(deps)
+
+	err := pushWorkspaceWorktrees(deps, worktrees, "", "main")
+	if err == nil {
+		t.Fatal("expected pushWorkspaceWorktrees to return an error")
+	}
+	if !strings.Contains(err.Error(), "1 repo(s) failed") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestPushBranchInRepo_NoRemoteMergesLocalTarget(t *testing.T) {
+	t.Parallel()
+	deps, _, _, _, _ := NewTestDeps(t)
+
+	outputStubs := []OutputCommandStub{
+		{Args: []string{"stash"}, Err: nil},
+		{Args: []string{"checkout", "main"}, Err: nil},
+		{Args: nil, Err: nil}, // git merge command includes generated message.
+		{Args: []string{"checkout", "feature"}, Err: nil},
+	}
+	commandStubs := []CommandStub{
+		{Name: "git", Args: []string{"remote", "get-url", "origin"}, Err: errors.New("no remote")},
+		{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},
+		{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},
+		{Name: "git", Args: []string{"branch", "--show-current"}, Stdout: "feature\n"},
+		{Name: "git", Args: []string{"log", "main..feature", "--oneline"}, Stdout: "abc commit\n"},
+	}
+
+	cmdMock := NewCommandMock(t, commandStubs)
+	cmdMock.InstallOn(deps)
+	outputMock := NewOutputCommandMock(t, outputStubs)
+	outputMock.InstallOn(deps)
+
+	err := pushBranchInRepo(deps, "/repo", "feature", "main", "")
+	if err != nil {
+		t.Fatalf("pushBranchInRepo: %v", err)
+	}
+}
+
+func TestPushBranchInRepo_NoRemoteConflictsUseLocalResolutionPrompt(t *testing.T) {
+	deps, _, _, _, _ := NewTestDeps(t)
+
+	origPromptGen := ConflictPromptGen
+	origPromptGenWithPush := ConflictPromptGenWithPush
+	ConflictPromptGen = func(sourceBranch, targetBranch string, conflicts []string) string {
+		return "remote conflict prompt"
+	}
+	ConflictPromptGenWithPush = func(sourceBranch, targetBranch string, conflicts []string, pushRef string) string {
+		if pushRef != "" {
+			t.Fatalf("local-only conflict prompt pushRef = %q, want empty", pushRef)
+		}
+		return "local-only conflict prompt"
+	}
+	t.Cleanup(func() {
+		ConflictPromptGen = origPromptGen
+		ConflictPromptGenWithPush = origPromptGenWithPush
+	})
+
+	outputStubs := []OutputCommandStub{
+		{Args: []string{"stash"}, Err: nil},
+		{Args: []string{"checkout", "main"}, Err: nil},
+		{Args: nil, Err: errors.New("CONFLICT")},
+		{Args: []string{"checkout", "feature"}, Err: nil},
+	}
+	commandStubs := []CommandStub{
+		{Name: "git", Args: []string{"remote", "get-url", "origin"}, Err: errors.New("no remote")},
+		{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},
+		{Name: "git", Args: []string{"stash", "list"}, Stdout: ""},
+		{Name: "git", Args: []string{"branch", "--show-current"}, Stdout: "feature\n"},
+		{Name: "git", Args: []string{"log", "main..feature", "--oneline"}, Stdout: "abc commit\n"},
+		{Name: "git", Args: []string{"diff", "--name-only", "--diff-filter=U"}, Stdout: "src/data.js\n"},
+	}
+
+	cmdMock := NewCommandMock(t, commandStubs)
+	cmdMock.InstallOn(deps)
+	outputMock := NewOutputCommandMock(t, outputStubs)
+	outputMock.InstallOn(deps)
+
+	var capturedPrompt string
+	deps.Agent = &MockAgentInvoker{InteractiveFunc: func(workDir, prompt, agentName string) error {
+		capturedPrompt = prompt
+		return nil
+	}}
+
+	err := pushBranchInRepo(deps, "/repo", "feature", "main", "")
+	if err != nil {
+		t.Fatalf("pushBranchInRepo: %v", err)
+	}
+	if capturedPrompt != "local-only conflict prompt" {
+		t.Fatalf("captured prompt = %q, want local-only prompt", capturedPrompt)
+	}
 }
 
 func TestPushBranchInRepo_WorktreeConflict_UsesDetached(t *testing.T) {

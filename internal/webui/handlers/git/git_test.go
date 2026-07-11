@@ -61,6 +61,10 @@ func (m *mockGitOps) CreatePR(worktreePath, sourceBranch, targetBranch, remote s
 	return &ops.GitPRResult{URL: "https://github.com/test/pr/1", Created: true}, nil
 }
 
+func (m *mockGitOps) ListWorkspacePullRequests(string, string, int) (*ops.GitPullRequestList, error) {
+	return &ops.GitPullRequestList{PullRequests: []ops.GitPullRequest{}}, nil
+}
+
 func (m *mockGitOps) Reset(worktreePath, worktreeName, targetBranch string, force, push bool) (*ops.GitResetResult, error) {
 	if m.resetFunc != nil {
 		return m.resetFunc(worktreePath, worktreeName, targetBranch, force, push)

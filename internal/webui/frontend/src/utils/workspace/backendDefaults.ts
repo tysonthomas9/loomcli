@@ -74,6 +74,17 @@ export const KNOWN_BACKEND_DEFAULTS: Record<string, BackendDefaults> = {
 };
 
 /**
+ * Brand color per known backend, derived from KNOWN_BACKEND_DEFAULTS.
+ *
+ * Lives here (next to its data source) rather than inside the TerminalView
+ * component so non-terminal consumers can import the constant without pulling
+ * the terminal component graph (xterm, etc.) into their module/test graph.
+ */
+export const BACKEND_BRAND_COLORS: Record<string, string> = Object.fromEntries(
+  Object.entries(KNOWN_BACKEND_DEFAULTS).map(([k, v]) => [k, v.brandColor]),
+);
+
+/**
  * Merge API data with known defaults to produce a BackendInfo.
  * Falls back to sensible defaults for unknown backends.
  */

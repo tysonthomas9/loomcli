@@ -1,10 +1,10 @@
 /**
  * E2E: Agents sidebar rendered through WorkspaceTree.
  *
- * Tests agent rendering, card details, work queue, status bar, sidebar
- * collapse/expand, and connection states. All agent data flows through
- * the production sidebar (WorkspaceTree → AgentCard / WorkQueueSection /
- * SidebarStatusBar), NOT the standalone AgentsSidebar component.
+ * Tests agent rendering, card details, work queue, sidebar collapse/expand,
+ * and connection states. All agent data flows through the production sidebar
+ * (WorkspaceTree → AgentCard / WorkQueueSection), NOT the standalone
+ * AgentsSidebar component.
  *
  * Mocks: /api/config, /api/workspaces/active, workspace-scoped sub-routes,
  * /api/health, /api/auth/token, and all 3 loom endpoints
@@ -532,18 +532,12 @@ test.describe("Agents Sidebar", () => {
   // ------- agent rendering -------
 
   test.describe("agent rendering", () => {
-    test("agent section shows with Agents header and count", async ({
-      page,
-    }) => {
+    test("agent section shows with Agents header", async ({ page }) => {
       await setupMocks(page);
       await navigateAndWait(page);
 
       const sb = sidebar(page);
       await expect(sb.getByText("Agents")).toBeVisible({ timeout: 10000 });
-      // Section count badge nearest to "Agents" header
-      const agentHeader = sb.locator('[class*="agentSectionHeader"]');
-      const sectionCount = agentHeader.locator('[class*="sectionCount"]');
-      await expect(sectionCount).toContainText("2");
     });
 
     test("agent cards render for each agent", async ({ page }) => {
@@ -574,7 +568,7 @@ test.describe("Agents Sidebar", () => {
 
       const sb = sidebar(page);
       // Workspace tree still renders
-      await expect(sb.getByText("Workspaces").first()).toBeVisible({
+      await expect(sb.getByRole("heading", { name: "Repos" })).toBeVisible({
         timeout: 10000,
       });
       // Agent section header should NOT be visible (no fleet agents, no config agents)
@@ -658,177 +652,32 @@ test.describe("Agents Sidebar", () => {
     });
   });
 
-  // ------- work queue -------
+  // ------- repos -------
 
-  test.describe("work queue", () => {
-    test("work queue section renders with category labels", async ({
+  test.describe("repos", () => {
+    test("repos section renders repo rows with branch pills", async ({
       page,
     }) => {
       await setupMocks(page);
       await navigateAndWait(page);
 
       const sb = sidebar(page);
-      await expect(sb.getByText("Work Queue")).toBeVisible({
+      await expect(sb.getByRole("heading", { name: "Repos" })).toBeVisible({
         timeout: 10000,
       });
-
-      for (const label of [
-        "Backlog",
-        "Open",
-        "Blocked",
-        "In Progress",
-        "Needs Review",
-        "Done",
-      ]) {
-        await expect(sb.getByText(label, { exact: true })).toBeVisible();
-      }
+      await expect(sb.getByRole("button", { name: /Add repository/i })).toBeVisible();
     });
 
-    test("work queue shows correct counts from issues", async ({ page }) => {
+    test("repos section shows open issue count pill", async ({ page }) => {
       await setupMocks(page);
       await navigateAndWait(page);
 
-      // mockIssues: 1 open, 1 in_progress, 1 blocked
+      // mockIssues: 1 open, 1 in_progress, 1 blocked (3 open total)
       const sb = sidebar(page);
-      await expect(sb.getByText("Work Queue")).toBeVisible({
-        timeout: 10000,
+      const repoRow = sb.getByRole("button", {
+        name: /open issues/i,
       });
-
-      // Wait for issues to load and counts to populate
-      // Open count should eventually show "1"
-      const openLabel = sb.getByText("Open", { exact: true });
-      const openItem = openLabel.locator("..");
-      const openCount = openItem.locator('[class*="queueCount"]');
-      await expect(openCount).toContainText("1", { timeout: 10000 });
-      await expect(openCount).toHaveAttribute("data-highlight", "true");
-
-      // In Progress should show "1" with highlight
-      const ipLabel = sb.getByText("In Progress", { exact: true });
-      const ipItem = ipLabel.locator("..");
-      const ipCount = ipItem.locator('[class*="queueCount"]');
-      await expect(ipCount).toContainText("1");
-      await expect(ipCount).toHaveAttribute("data-highlight", "true");
-    });
-
-    test("work queue toggles expand/collapse", async ({ page }) => {
-      await setupMocks(page);
-      await navigateAndWait(page);
-
-      const sb = sidebar(page);
-      const workQueueHeader = sb
-        .locator('[class*="workQueueHeader"]')
-        .or(sb.getByRole("button", { name: /Work Queue/ }));
-      await expect(workQueueHeader).toBeVisible({ timeout: 10000 });
-
-      // Initially expanded — category labels visible
-      await expect(sb.getByText("Backlog", { exact: true })).toBeVisible();
-
-      // Click to collapse
-      await workQueueHeader.click();
-      await expect(sb.getByText("Backlog", { exact: true })).not.toBeVisible();
-
-      // Click again to expand
-      await workQueueHeader.click();
-      await expect(sb.getByText("Backlog", { exact: true })).toBeVisible();
-    });
-  });
-
-  // ------- status bar -------
-
-  test.describe("status bar", () => {
-    test("status bar shows working/reviewing/idle counts", async ({ page }) => {
-      await setupMocks(page);
-      await navigateAndWait(page);
-
-      // Default agents: nova=working, falcon=ready(→idle)
-      const statusBar = page.locator('[class*="statusBar"]');
-      await expect(statusBar).toBeVisible({ timeout: 10000 });
-      await expect(statusBar).toContainText("1 working");
-      await expect(statusBar).toContainText("0 reviewing");
-      await expect(statusBar).toContainText("1 idle");
-    });
-
-    test("status bar hidden when no agents", async ({ page }) => {
-      // Must also remove workspace config agents to get zero total agents
-      await setupMocks(page, { emptyAgents: true, workspaceAgents: [] });
-      await navigateAndWait(page);
-
-      // Wait for sidebar to render
-      const sb = sidebar(page);
-      await expect(sb.getByText("Workspaces").first()).toBeVisible({
-        timeout: 10000,
-      });
-
-      // Status bar should not be present (agents.length === 0)
-      await expect(page.locator('[class*="statusBar"]')).not.toBeVisible();
-    });
-
-    test("status bar counts update with multiple working agents", async ({
-      page,
-    }) => {
-      const threeAgents = [
-        {
-          name: "alpha",
-          branch: "feat-a",
-          status: "working: loom-201 (3m)",
-          ahead: 1,
-          behind: 0,
-          role: "task",
-          workspace: "",
-          repo: "loomcli",
-        },
-        {
-          name: "beta",
-          branch: "feat-b",
-          status: "working: loom-202 (7m)",
-          ahead: 0,
-          behind: 0,
-          role: "task",
-          workspace: "",
-          repo: "loomcli",
-        },
-        {
-          name: "gamma",
-          branch: "main",
-          status: "ready",
-          ahead: 0,
-          behind: 0,
-          role: "plan",
-          workspace: "",
-          repo: "loomcli",
-        },
-      ];
-
-      await setupMocks(page, {
-        agents: threeAgents,
-        workspaceAgents: [
-          {
-            name: "alpha",
-            repos: ["loomcli"],
-            repo_groups: [],
-            cross_repo: false,
-          },
-          {
-            name: "beta",
-            repos: ["loomcli"],
-            repo_groups: [],
-            cross_repo: false,
-          },
-          {
-            name: "gamma",
-            repos: ["loomcli"],
-            repo_groups: [],
-            cross_repo: false,
-          },
-        ],
-      });
-      await navigateAndWait(page);
-
-      const statusBar = page.locator('[class*="statusBar"]');
-      await expect(statusBar).toBeVisible({ timeout: 10000 });
-      await expect(statusBar).toContainText("2 working");
-      await expect(statusBar).toContainText("0 reviewing");
-      await expect(statusBar).toContainText("1 idle");
+      await expect(repoRow.first()).toBeVisible({ timeout: 10000 });
     });
   });
 
@@ -928,7 +777,7 @@ test.describe("Agents Sidebar", () => {
 
       const sb = sidebar(page);
       // Workspace tree renders
-      await expect(sb.getByText("Workspaces").first()).toBeVisible({
+      await expect(sb.getByRole("heading", { name: "Repos" })).toBeVisible({
         timeout: 10000,
       });
       // No agent section since agents.length === 0

@@ -25,6 +25,8 @@ export interface AppLayoutProps {
   sidebar?: ReactNode;
   /** Application title displayed in header (defaults to "Loom") */
   title?: ReactNode;
+  /** When set, the brand/title becomes a home button (design: logo → kanban) */
+  onTitleClick?: () => void;
   /** Additional CSS class name */
   className?: string;
 }
@@ -41,6 +43,7 @@ export function AppLayout({
   actions,
   sidebar,
   title = "Loom",
+  onTitleClick,
   className,
 }: AppLayoutProps): JSX.Element {
   const rootClassName = className
@@ -56,7 +59,18 @@ export function AppLayout({
       <header className={styles.header} role="banner">
         <div className={styles.headerContent}>
           <div className={styles.brand}>
-            <h1 className={styles.title}>{title}</h1>
+            {onTitleClick ? (
+              <button
+                type="button"
+                className={styles.brandButton}
+                onClick={onTitleClick}
+                aria-label="Go to board"
+              >
+                <h1 className={styles.title}>{title}</h1>
+              </button>
+            ) : (
+              <h1 className={styles.title}>{title}</h1>
+            )}
           </div>
           {navigation && (
             <nav className={styles.navigation} aria-label="Main navigation">

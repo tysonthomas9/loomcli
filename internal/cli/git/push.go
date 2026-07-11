@@ -75,8 +75,7 @@ func runPush(cmd *cobra.Command, args []string) error {
 		if len(args) == 1 {
 			targetBranch = args[0]
 		}
-		pushAllWorkspaces(deps, targetBranch)
-		return nil
+		return pushAllWorkspaces(deps, targetBranch)
 	}
 
 	sourceBranch = args[0]
@@ -98,6 +97,5 @@ func runPush(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	pushWorkspaceRepos(deps, resolver, sourceBranch, targetBranch)
-	return nil
+	return pushWorkspaceRepos(deps, resolver, sourceBranch, targetBranch)
 }

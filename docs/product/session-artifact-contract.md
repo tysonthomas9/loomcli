@@ -1,10 +1,11 @@
 # Session and Artifact Contract
 
 **Status:** Draft
-**Date:** 2026-05-04
+**Date:** 2026-05-11
 **Related:** `docs/product/agent-execution-prd.md`,
 `docs/product/agent-run-ux-spec.md`,
-`docs/product/container-runner-mvp-spec.md`
+`docs/product/container-runner-mvp-spec.md`,
+`docs/product/lead-agent-epic-runner-spec.md`
 
 ## Purpose
 
@@ -38,11 +39,14 @@ Every agent run should produce:
 | session_id | yes | Stable ID for transcript/log grouping. |
 | workspace_id | yes | Workspace scope. |
 | agent_name | yes | Actual claimant/executor identity. |
+| lead_agent_name | no | Required when the run was spawned by a lead agent. |
+| parent_session_id | no | Required when the run was spawned by another agent session. |
 | role | yes | Planner, task, reviewer, or custom role. |
 | backend | yes | Codex, Claude, OpenCode, shell, etc. |
 | model | no | Required when backend reports it. |
 | runtime_provider | yes | local, daemon, podman, remote, etc. |
 | task_id | no at create, yes after claim | Filled when task is selected. |
+| attempt_kind | no | `ephemeral_task_attempt` for single-use epic workers. |
 | status | yes | Lifecycle state. |
 | started_at | yes | Server or runner timestamp. |
 | ended_at | no | Required for terminal states. |
@@ -104,6 +108,59 @@ When files change:
 - generated/ignored file marker when known
 
 Diff artifacts should be captured before cleanup and before container exit.
+
+## Ephemeral Task Attempt Contract
+
+An ephemeral worker spawned by the epic runner is a single task attempt.
+
+Required behavior:
+
+```text
+create session before model invocation
+associate exactly one task_id before claim/model work
+record lead/orchestrator attribution when present
+complete session before worker is hidden from live-agent UI
+preserve evidence before worktree/container cleanup
+```
+
+Required metadata for an ephemeral task attempt:
+
+- `attempt_kind = ephemeral_task_attempt`
+- `agent_name` = worker agent name
+- `task_id` = assigned task
+- `lead_agent_name` or `parent_session_id`, when spawned by a lead
+- `workspace_id`
+- `runtime_provider`
+- `status`
+- `started_at`
+- `ended_at` for terminal states
+- `exit_code` or `error_class` for terminal states
+
+Ephemeral task attempts must not be reused for another task. A rerun creates a
+new session and a new worker attempt identity.
+
+## Cleanup Metadata
+
+Runs that retain local disk state must report cleanup metadata:
+
+- worktree/container path when server-visible
+- disk usage estimate
+- retained artifact kinds
+- cleanup state: retained, archived, worktree_deleted, artifacts_deleted
+- cleanup timestamp
+- cleanup actor
+
+Cleanup is allowed to delete worktrees or containers only after the evidence
+needed by the UI has been persisted. At minimum, cleanup must preserve:
+
+- session metadata
+- final status
+- task association
+- lead/orchestrator attribution
+- logs or transcript reference
+- diff summary or "no diff" marker
+- test/gate result when available
+- commit/push result when available
 
 ## Commit Artifact
 
@@ -177,6 +234,8 @@ Terminal state must include an explanation suitable for UI display.
 - Filesystem paths may be stored as local artifact references only when
   the server can read them.
 - Distributed/container artifacts should use server-visible storage.
+- Deleting an ephemeral worker worktree must not delete run/session metadata or
+  artifact references required for history views.
 
 ## FleetDB Control-Plane Requirements
 
@@ -204,10 +263,13 @@ The UI must be able to query:
 
 ```text
 GET /api/v1/{workspace}/agent-sessions?task_id={task_id}
+GET /api/v1/{workspace}/agent-sessions?agent_id={agent_id}
+GET /api/v1/{workspace}/agent-sessions?parent_session_id={session_id}
 ```
 
-and render the task Sessions tab without reconstructing ownership from local
-filesystem paths.
+and render the task Sessions tab, selected lead worker history, and workspace
+cleanup/history view without reconstructing ownership from local filesystem
+paths.
 
 PATCH payloads must use public snake_case JSON field names and omit fields
 that are not being changed. Uppercase Go struct fields or null values for
@@ -218,6 +280,11 @@ local and distributed readers.
 
 - Every run has metadata, status, and session ID.
 - Every failed run has an error class and user-readable message.
+- Every ephemeral worker attempt has exactly one task association.
+- Completed ephemeral worker attempts remain queryable after their worktree is
+  deleted.
+- Cleanup metadata tells the UI whether disk is still retained and which
+  cleanup actions are available.
 - Every file-changing run has diff metadata.
 - Every test/gate attempt has a recorded command and result.
 - Completed artifacts remain available after runner exit.

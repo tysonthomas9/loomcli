@@ -46,6 +46,7 @@ func setupWorkspaceConfig(t *testing.T, cfg *config.LoomConfig) {
 func setupWorkspaceConfigInDir(t *testing.T, configDir string, cfg *config.LoomConfig) {
 	t.Helper()
 	t.Setenv("LOOM_CONFIG_DIR", configDir)
+	t.Setenv("LOOM_WORKSPACE_RUNTIME_DIR", "")
 	t.Setenv("LOOM_FLEET_DB_ACTOR", "test")
 	config.InvalidateConfigCache()
 	cli.ResetWorkspaceRuntimeDirCache()
@@ -105,8 +106,19 @@ func setupWorkspaceConfigInDir(t *testing.T, configDir string, cfg *config.LoomC
 	if err := bootstrap.SaveStateCache(state); err != nil {
 		t.Fatalf("save state cache: %v", err)
 	}
+	if cfg.DefaultWorkspace != "" {
+		t.Setenv("LOOM_WORKSPACE", strings.ToUpper(cfg.DefaultWorkspace))
+	}
 	if _, err := config.TestingPrimeConfigCacheFromStore(ctx, st); err != nil {
 		t.Fatalf("prime config cache: %v", err)
+	}
+	if cfg.DefaultWorkspace != "" {
+		activeKey := strings.ToUpper(cfg.DefaultWorkspace)
+		if ws, ok := cfg.Workspaces[cfg.DefaultWorkspace]; ok {
+			if _, err := config.TestingPrimeDaemonConfigCacheFromStore(ctx, st, activeKey, ws.Path); err != nil {
+				t.Fatalf("prime daemon config cache: %v", err)
+			}
+		}
 	}
 	cli.ResetWorkspaceRuntimeDirCache()
 	cli.TestingResetDefaultResolver()

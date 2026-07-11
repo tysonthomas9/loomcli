@@ -10,15 +10,19 @@
  */
 export type ViewMode =
   | "kanban"
+  | "list"
   | "table"
   | "graph"
   | "monitor"
   | "observability"
   | "terminal"
+  | "agents"
+  | "prs"
   | "workspace"
   | "settings"
   | "files"
-  | "issue-detail";
+  | "issue-detail"
+  | "agents";
 
 /**
  * Default view when none is specified.
