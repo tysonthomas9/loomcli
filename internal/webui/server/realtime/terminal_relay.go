@@ -192,8 +192,9 @@ type AttachmentExitReader interface {
 // does not read from the PTY directly — that work is done once by the
 // session's drain goroutine and fanned out to the currently-attached
 // channel. On channel close it consults att.ExitReason so the handler can
-// distinguish an explicit kill (4002) from a backend crash (4001) or a
-// benign detach (1000).
+// distinguish an explicit kill (4002) from a completed child process
+// (1000) or a benign detach (also 1000). The tmux-backed PtyToWS path still
+// maps observed backend crashes to 4001.
 //
 // When an ExitReason is set (killed / exited), this function eagerly
 // writes the close frame via conn.Close *before* canceling ctx. That
@@ -218,9 +219,9 @@ func AttachmentToWS(ctx context.Context, cancel context.CancelFunc, conn *websoc
 					cancel()
 					return CrashInfo{Killed: true, Reason: "session killed"}
 				case "exited":
-					_ = conn.Close(websocket.StatusCode(WSCloseBackendExited), "backend process exited") //nolint:staticcheck // SA1019
+					_ = conn.Close(websocket.StatusNormalClosure, "session exited") //nolint:staticcheck // SA1019
 					cancel()
-					return CrashInfo{Crashed: true, Reason: "backend process exited"}
+					return CrashInfo{}
 				default:
 					// Attachment replaced by a newer WS, manager-wide
 					// Shutdown, or the session is still live and we lost a

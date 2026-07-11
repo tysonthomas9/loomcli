@@ -117,6 +117,20 @@ func TestHandleAgents_UsesStoreAgentsAsSourceOfTruth(t *testing.T) {
 		Name:         "falcon",
 		RoleName:     "task",
 		Repos:        []string{"repo-a"},
+		Parent:       "EPIC-1",
+		Mode:         domain.AgentModeEphemeral,
+		DesiredState: domain.AgentDesiredStopped,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	// Seed the orchestration AgentSession row — the monitor data source
+	// reads attribution via OrchestrationSessionIDFor.
+	if _, err := st.AgentSessions().Create(ctx, store.AgentSessionCreate{
+		WorkspaceKey: "WS1",
+		SessionID:    "lead-session",
+		AgentID:      "falcon",
+		Kind:         domain.AgentSessionKindOrchestration,
+		Status:       domain.AgentSessionRunning,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -130,6 +144,15 @@ func TestHandleAgents_UsesStoreAgentsAsSourceOfTruth(t *testing.T) {
 	}
 	active := domain.AgentStateActive
 	if _, err := st.Agents().Update(ctx, "WS1", "falcon", store.AgentUpdate{State: &active}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.AgentSessions().Create(ctx, store.AgentSessionCreate{
+		WorkspaceKey: "WS1",
+		SessionID:    "session-falcon",
+		AgentID:      "falcon",
+		TaskID:       "TASK-1",
+		Status:       domain.AgentSessionRunning,
+	}); err != nil {
 		t.Fatal(err)
 	}
 	falconWorktree := filepath.Join(wsRoot, "worktrees", "repo-a", "falcon")
@@ -199,6 +222,12 @@ func TestHandleAgents_UsesStoreAgentsAsSourceOfTruth(t *testing.T) {
 	}
 	if falcon.LastActivityAt == nil || !falcon.LastActivityAt.Equal(lastActivity) {
 		t.Fatalf("falcon LastActivityAt = %v, want %v", falcon.LastActivityAt, lastActivity)
+	}
+	if got := byName["falcon"]; got.Parent != "EPIC-1" || got.OrchestratorSessionID != "lead-session" || got.Mode != "ephemeral" || got.DesiredState != "stopped" {
+		t.Fatalf("falcon orchestration fields not sourced from store: %+v", got)
+	}
+	if got := byName["falcon"]; got.TaskID != "TASK-1" || got.SessionID != "session-falcon" {
+		t.Fatalf("falcon session fields not sourced from agent sessions: %+v", got)
 	}
 	if got := byName["nova"]; got.Role != "plan" || got.Status != "idle" || got.Workspace != "Test" {
 		t.Fatalf("nova not sourced from store: %+v", got)

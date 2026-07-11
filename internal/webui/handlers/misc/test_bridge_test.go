@@ -110,6 +110,22 @@ func (s *testFileServiceImpl) resolveAgent(wsID, agentName string) (*ops.AgentWo
 	if agentName == "" || !service.ValidAgentName.MatchString(agentName) {
 		return nil, service.ErrValidation("invalid agent name")
 	}
+	// List/Read use the lead-aware resolver so a lead (no local worktree) falls
+	// back to the workspace primary worktree. Mirrors svcimpl.fileServiceImpl.
+	wt, err := s.fileOps.ResolveAgentWorktreeOrPrimary(wsID, agentName)
+	if err != nil {
+		return nil, service.ErrNotFound(fmt.Sprintf("agent worktree %q not found", agentName))
+	}
+	return wt, nil
+}
+
+// resolveAgentForWrite resolves the agent's own worktree for writes — no lead
+// primary fallback, so a lead can't mutate the primary repo from the viewer.
+// Mirrors svcimpl.fileServiceImpl.resolveAgentForWrite.
+func (s *testFileServiceImpl) resolveAgentForWrite(wsID, agentName string) (*ops.AgentWorktree, error) {
+	if agentName == "" || !service.ValidAgentName.MatchString(agentName) {
+		return nil, service.ErrValidation("invalid agent name")
+	}
 	wt, err := s.fileOps.ResolveAgentWorktree(wsID, agentName)
 	if err != nil {
 		return nil, service.ErrNotFound(fmt.Sprintf("agent worktree %q not found", agentName))
@@ -230,7 +246,7 @@ func (s *testFileServiceImpl) ReadFile(_ context.Context, wsID, agentName, path 
 }
 
 func (s *testFileServiceImpl) WriteFile(_ context.Context, wsID, agentName, path, content string) error {
-	wt, err := s.resolveAgent(wsID, agentName)
+	wt, err := s.resolveAgentForWrite(wsID, agentName)
 	if err != nil {
 		return err
 	}
@@ -276,7 +292,7 @@ func ReadLastNLines(filepath string, n int) ([]string, int64, error) {
 // mockAgentService implements service.AgentService with no-op defaults.
 type mockAgentService struct {
 	getTerminalInfoFunc       func(ctx context.Context, wsID, agentName string) (*service.AgentTerminalInfoResult, error)
-	generateTerminalTokenFunc func(ctx context.Context, agentName, userID string) (string, error)
+	generateTerminalTokenFunc func(ctx context.Context, wsID, agentName, userID string) (string, error)
 	getLogFunc                func(ctx context.Context, wsID, agentName string, lines int, beforeLine int64) (*service.AgentLogResult, error)
 	getDiffStatFunc           func(ctx context.Context, wsID, agentName string) (*service.AgentDiffStatResult, error)
 	gitPushFunc               func(ctx context.Context, wsID, agentName, target string) (*ops.GitPushResult, error)
@@ -295,7 +311,10 @@ func (m *mockAgentService) GetTerminalInfo(ctx context.Context, wsID, agentName 
 	}
 	return &service.AgentTerminalInfoResult{Agent: agentName, Mode: "archive"}, nil
 }
-func (m *mockAgentService) GenerateTerminalToken(ctx context.Context, agentName, userID string) (string, error) {
+func (m *mockAgentService) GenerateTerminalToken(ctx context.Context, wsID, agentName, userID string) (string, error) {
+	if m.generateTerminalTokenFunc != nil {
+		return m.generateTerminalTokenFunc(ctx, wsID, agentName, userID)
+	}
 	return "test-token", nil
 }
 func (m *mockAgentService) GetLog(ctx context.Context, wsID, agentName string, lines int, beforeLine int64) (*service.AgentLogResult, error) {
@@ -322,6 +341,11 @@ func (m *mockAgentService) GitSync(ctx context.Context, wsID, agentName string) 
 func (m *mockAgentService) CreatePR(ctx context.Context, wsID, agentName, target string) (*ops.GitPRResult, error) {
 	return &ops.GitPRResult{}, nil
 }
+
+func (m *mockAgentService) ListPullRequests(context.Context, string, string) (*ops.GitPullRequestList, error) {
+	return &ops.GitPullRequestList{PullRequests: []ops.GitPullRequest{}}, nil
+}
+
 func (m *mockAgentService) GitReset(ctx context.Context, wsID, agentName, branch string, force, push bool) (*ops.GitResetResult, error) {
 	return &ops.GitResetResult{}, nil
 }

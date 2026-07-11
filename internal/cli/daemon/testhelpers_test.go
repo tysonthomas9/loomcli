@@ -29,12 +29,13 @@ var NewConcurrencyTracker = supervisor.NewConcurrencyTracker
 
 // Stop reason constants from supervisor
 const (
-	StopReasonShutdown         = supervisor.StopReasonShutdown
-	StopReasonMaxRetries       = supervisor.StopReasonMaxRetries
-	StopReasonMaxRetriesParked = supervisor.StopReasonMaxRetriesParked
-	StopReasonFastFail         = supervisor.StopReasonFastFail
-	StopReasonFatalError       = supervisor.StopReasonFatalError
-	StopReasonConfigRemoved    = supervisor.StopReasonConfigRemoved
+	StopReasonShutdown          = supervisor.StopReasonShutdown
+	StopReasonMaxRetries        = supervisor.StopReasonMaxRetries
+	StopReasonMaxRetriesParked  = supervisor.StopReasonMaxRetriesParked
+	StopReasonMaxRetriesBlocked = supervisor.StopReasonMaxRetriesBlocked
+	StopReasonFastFail          = supervisor.StopReasonFastFail
+	StopReasonFatalError        = supervisor.StopReasonFatalError
+	StopReasonConfigRemoved     = supervisor.StopReasonConfigRemoved
 )
 
 // --- Type aliases from cli ---

@@ -10,6 +10,20 @@ vi.mock("../useFileEditor", () => ({
   useFileEditor: vi.fn(),
 }));
 
+vi.mock("@/hooks/workspace", () => ({
+  useWorkspaceContext: () => ({
+    repos: [
+      {
+        name: "loomcli",
+        path: "/tmp/loomcli",
+        default_branch: "main",
+        remote: "origin",
+        groups: [],
+      },
+    ],
+  }),
+}));
+
 // Mock CodeMirrorEditor with a simple div
 vi.mock("@/components/CodeMirrorEditor", () => ({
   CodeMirrorEditor: (props: {
@@ -39,6 +53,7 @@ function createMockTree(
   overrides?: Partial<UseFileTreeReturn>,
 ): UseFileTreeReturn {
   return {
+    isWorkspaceTree: false,
     expanded: new Set([""] as string[]),
     treeData: new Map(),
     selectedPath: null,
@@ -73,6 +88,8 @@ function createMockEditorReturn(
   return {
     tree: createMockTree(),
     fileContent: createMockFileContent(),
+    isWorkspaceTree: false,
+    workspaceRepoLabel: null,
     content: "",
     language: undefined,
     isDirty: false,
@@ -118,6 +135,35 @@ describe("FileEditorPanel", () => {
       );
 
       expect(getByText("Select a file to edit")).toBeDefined();
+    });
+
+    it("shows workspace tree hint and enables workspace mode for lead agents", () => {
+      mockUseFileEditor.mockReturnValue(
+        createMockEditorReturn({
+          isWorkspaceTree: true,
+          workspaceRepoLabel: "loomcli",
+        }),
+      );
+
+      const { getByTestId } = render(
+        <FileEditorPanel
+          agentName="lead-b"
+          agentRole="lead"
+          agentRepo="loomcli"
+          isActive={true}
+        />,
+      );
+
+      expect(getByTestId("workspace-tree-hint").textContent).toContain(
+        "Workspace repository",
+      );
+      expect(getByTestId("workspace-tree-hint").textContent).toContain(
+        "loomcli",
+      );
+      expect(mockUseFileEditor).toHaveBeenCalledWith("lead-b", true, {
+        useWorkspaceTree: true,
+        workspaceRepoLabel: "loomcli",
+      });
     });
 
     it("shows file path and editor when file selected", () => {

@@ -64,6 +64,7 @@ func setupMonitorWorkspaceConfig(t *testing.T, workspaceDir string, agentNames .
 
 	const workspaceKey = "TEST"
 	const repoName = "repo"
+	t.Setenv("LOOM_WORKSPACE", workspaceKey)
 	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{
 		Key:           workspaceKey,
 		Name:          "test",

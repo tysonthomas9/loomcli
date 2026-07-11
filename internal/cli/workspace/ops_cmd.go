@@ -27,6 +27,8 @@ var (
 	workspaceOpsTimeoutSec int
 )
 
+const envLocalRuntimeMode = "LOOM_LOCAL_RUNTIME"
+
 var workspaceOpsCmd = &cobra.Command{
 	Use:   "ops",
 	Short: "Agent-safe workspace operations",
@@ -185,6 +187,9 @@ func runWorkspaceOpsEnsureRuntime(cmd *cobra.Command, args []string) error {
 	}
 	ctx, cancel := context.WithTimeout(cmd.Context(), timeout)
 	defer cancel()
+	if !shouldEnsureLocalRuntime(initial) {
+		return renderWorkspaceOpsStatus(cmd, initial)
+	}
 	if _, err := local.EnsureRuntimeStarted(ctx, initial.Daemon.DataDir, 0); err != nil {
 		return fmt.Errorf("ensure local runtime: %w", err)
 	}
@@ -376,12 +381,31 @@ func newWorkspaceOpsStatus(ws *domain.Workspace, localState bootstrap.WorkspaceL
 // RuntimeStatusSnapshot is mirrored field-for-field so consumers that
 // inspect Healthy / Runtime see exactly what they saw before.
 func buildLocalRuntime(runtime *local.RuntimeStatusSnapshot, runtimeErr error) *WorkspaceOpsLocalRuntime {
-	if cli.IsFleetActive() {
+	if applicable, reason, ok := localRuntimeModeOverride(); ok {
+		if applicable {
+			return buildApplicableLocalRuntime(runtime, runtimeErr)
+		}
 		return &WorkspaceOpsLocalRuntime{
 			Applicable: false,
-			Reason:     "fleet mode — local desktop runtime not required (agents talk to fleet-db directly)",
+			Reason:     reason,
 		}
 	}
+	if cli.IsFleetActive() || cli.IsAPIActive() {
+		return &WorkspaceOpsLocalRuntime{
+			Applicable: false,
+			Reason:     "remote issue backend active — local desktop runtime not required",
+		}
+	}
+	if strings.TrimSpace(os.Getenv(bootstrap.EnvFleetDBURL)) != "" {
+		return &WorkspaceOpsLocalRuntime{
+			Applicable: false,
+			Reason:     "external FleetDB URL configured — local desktop runtime not required",
+		}
+	}
+	return buildApplicableLocalRuntime(runtime, runtimeErr)
+}
+
+func buildApplicableLocalRuntime(runtime *local.RuntimeStatusSnapshot, runtimeErr error) *WorkspaceOpsLocalRuntime {
 	out := &WorkspaceOpsLocalRuntime{Applicable: true}
 	if runtime != nil {
 		out.Healthy = runtime.Healthy
@@ -396,6 +420,21 @@ func buildLocalRuntime(runtime *local.RuntimeStatusSnapshot, runtimeErr error) *
 		}
 	}
 	return out
+}
+
+func localRuntimeModeOverride() (bool, string, bool) {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv(envLocalRuntimeMode))) {
+	case "0", "false", "off", "disabled", "none", "headless":
+		return false, "local runtime disabled by " + envLocalRuntimeMode + " (headless/server deployment)", true
+	case "1", "true", "on", "enabled", "desktop", "local":
+		return true, "", true
+	default:
+		return false, "", false
+	}
+}
+
+func shouldEnsureLocalRuntime(status *WorkspaceOpsStatus) bool {
+	return status == nil || status.LocalRuntime == nil || status.LocalRuntime.Applicable
 }
 
 // collectOpsRepos appends a WorkspaceOpsRepo for each non-nil repo and
@@ -616,7 +655,7 @@ func workspaceOpsGlobalProblems(status *WorkspaceOpsStatus) []WorkspaceOpsProble
 			Severity: "error",
 			Code:     "daemon_not_running",
 			Message:  "workspace has runnable agents but no supervisor daemon is running for this workspace",
-			Fix:      "run `loom workspace ops ensure-runtime --json`",
+			Fix:      daemonNotRunningFix(status),
 		})
 	}
 	if status.Daemon.AppData.Running && status.Daemon.WorkspaceLocal.Running &&
@@ -630,6 +669,13 @@ func workspaceOpsGlobalProblems(status *WorkspaceOpsStatus) []WorkspaceOpsProble
 		})
 	}
 	return problems
+}
+
+func daemonNotRunningFix(status *WorkspaceOpsStatus) string {
+	if status != nil && status.LocalRuntime != nil && !status.LocalRuntime.Applicable {
+		return "start the workspace daemon for this deployment; local desktop runtime is not applicable"
+	}
+	return "run `loom workspace ops ensure-runtime --json`"
 }
 
 func workspaceDaemonRunning(status *WorkspaceOpsStatus) bool {

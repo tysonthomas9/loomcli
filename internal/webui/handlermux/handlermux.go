@@ -31,6 +31,7 @@ type WorkspaceOpsModule struct {
 	agentQueueH    http.HandlerFunc
 	issueBackendFn func(ctx context.Context) backend.IssueBackend
 	daemonExpected bool
+	localPathFn    healthhandlers.WorkspaceLocalPathFn
 }
 
 // NewWorkspaceOpsModule creates a WorkspaceOpsModule. Callers that support
@@ -72,6 +73,14 @@ func (m *WorkspaceOpsModule) WithDaemonExpected(b bool) *WorkspaceOpsModule {
 	return m
 }
 
+// WithLocalWorkspacePathFn injects the per-machine workspace path resolver used
+// by runtime readiness checks. Store-backed desktop mode needs this so a
+// FleetDB workspace with no local checkout path does not appear terminal-ready.
+func (m *WorkspaceOpsModule) WithLocalWorkspacePathFn(fn healthhandlers.WorkspaceLocalPathFn) *WorkspaceOpsModule {
+	m.localPathFn = fn
+	return m
+}
+
 // Register implements Module.
 func (m *WorkspaceOpsModule) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/workspaces/{ws}/repos", workspace.HandleListWorkspaceRepos(m.workspaceSvc))
@@ -85,7 +94,7 @@ func (m *WorkspaceOpsModule) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/workspaces/{ws}/issues/graph",
 		githandlers.HandleGraphWithBackend(m.multiPool, githandlers.IssueBackendFn(m.issueBackendFn)))
 	mux.HandleFunc("GET /api/workspaces/{ws}/readyz",
-		healthhandlers.HandleWorkspaceRuntimeReady(m.multiPool, m.daemonExpected, healthhandlers.IssueBackendFn(m.issueBackendFn)))
+		healthhandlers.HandleWorkspaceRuntimeReadyWithLocalPath(m.multiPool, m.daemonExpected, healthhandlers.IssueBackendFn(m.issueBackendFn), m.localPathFn))
 	mux.HandleFunc("GET /api/workspaces/{ws}/config/backend", workspace.HandleWorkspaceBackendGet(m.workspaceSvc))
 	if m.agentQueueH != nil {
 		mux.HandleFunc("GET /api/workspaces/{ws}/agents/{name}/queue", m.agentQueueH)

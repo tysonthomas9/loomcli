@@ -8,7 +8,10 @@ if [ "$branch" = "beads-sync" ]; then
 fi
 
 echo "[pre-push] Running quality gate..."
-# Unset GIT_DIR/GIT_WORK_TREE so tests that create temp repos don't
-# accidentally commit to the real repository.
-unset GIT_DIR GIT_WORK_TREE
+# Git exports repository-local environment into hooks. Clear it before running
+# tests so nested git commands in temp repos do not mutate this checkout.
+while IFS= read -r git_env; do
+  unset "$git_env"
+done < <(git rev-parse --local-env-vars)
+
 make check

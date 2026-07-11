@@ -33,7 +33,11 @@ type IssueData struct {
 	SourceRepo string   `json:"source_repo,omitempty"`
 	Parent     string   `json:"parent,omitempty"`
 	// Populated by backends that include design in list queries.
-	Design     string     `json:"design,omitempty"`
+	Design string `json:"design,omitempty"`
+	// Notes is in the slim list projection (not detail-only) so kanban/filter
+	// UIs can categorize a blocked issue that carries an external-blocker note
+	// (the "blocked with notes" needs-attention state) without a detail fetch.
+	Notes      string     `json:"notes,omitempty"`
 	CreatedAt  time.Time  `json:"created_at"`
 	UpdatedAt  time.Time  `json:"updated_at"`
 	DueAt      *time.Time `json:"due_at,omitempty"`
@@ -42,6 +46,9 @@ type IssueData struct {
 	CreatedBy   string     `json:"created_by,omitempty"`
 	ClosedAt    *time.Time `json:"closed_at,omitempty"`
 	CloseReason string     `json:"close_reason,omitempty"`
+	// ExternalRef is in the slim projection so kanban/list views can surface
+	// a linked PR (the card renders a "PR ↗" link from it).
+	ExternalRef string `json:"external_ref,omitempty"`
 	// Counts for list display (populated by backends that support them).
 	DependencyCount int `json:"dependency_count,omitempty"`
 	DependentCount  int `json:"dependent_count,omitempty"`
@@ -59,17 +66,17 @@ type IssueData struct {
 type IssueDetailData struct {
 	IssueData
 
-	// Content fields.
+	// Content fields. Notes is promoted from the embedded IssueData (it is in
+	// the slim list projection so the kanban "blocked with notes" state works).
 	Description        string `json:"description,omitempty"`
 	AcceptanceCriteria string `json:"acceptance_criteria,omitempty"`
-	Notes              string `json:"notes,omitempty"`
 
 	// Lifecycle (detail-only — IssueData carries the others).
 	ClosedBySession string `json:"closed_by_session,omitempty"`
 
-	// External integration.
-	ExternalRef      string `json:"external_ref,omitempty"`
-	EstimatedMinutes *int   `json:"estimated_minutes,omitempty"`
+	// External integration. ExternalRef is promoted from the embedded IssueData
+	// (it is in the slim list projection so kanban/list can render a PR link).
+	EstimatedMinutes *int `json:"estimated_minutes,omitempty"`
 
 	// Relational data.
 	Dependencies []DependencyData `json:"dependencies,omitempty"`
@@ -145,7 +152,10 @@ type CloseResult struct {
 type MutationData struct {
 	Cursor     string    `json:"cursor,omitempty"`
 	Type       string    `json:"type"`
-	IssueID    string    `json:"issue_id"`
+	EntityType string    `json:"entity_type,omitempty"`
+	EntityID   string    `json:"entity_id,omitempty"`
+	Action     string    `json:"action,omitempty"`
+	IssueID    string    `json:"issue_id,omitempty"`
 	Title      string    `json:"title,omitempty"`
 	Assignee   string    `json:"assignee,omitempty"`
 	Actor      string    `json:"actor,omitempty"`
@@ -232,29 +242,42 @@ type ListOpts struct {
 	AllowStale bool `json:"allow_stale,omitempty"` // fleet-db: unsupported (fleet-qx9c)
 }
 
-// ReadyOpts configures the Ready query (issues with no open blockers).
+// ReadyOpts configures the canonical Ready query.
 type ReadyOpts struct {
-	Assignee        string   `json:"assignee,omitempty"`
-	Unassigned      bool     `json:"unassigned,omitempty"`
-	Priority        *int     `json:"priority,omitempty"`
-	Type            string   `json:"type,omitempty"`
-	ParentID        string   `json:"parent_id,omitempty"`
-	Limit           int      `json:"limit,omitempty"`
-	SortPolicy      string   `json:"sort_policy,omitempty"`
-	Labels          []string `json:"labels,omitempty"`
-	LabelsAny       []string `json:"labels_any,omitempty"`
-	MolType         string   `json:"mol_type,omitempty"`
-	IncludeDeferred bool     `json:"include_deferred,omitempty"`
-	SourceRepos     []string `json:"source_repos,omitempty"`
+	Assignee    string   `json:"assignee,omitempty"`
+	Unassigned  bool     `json:"unassigned,omitempty"`
+	Priority    *int     `json:"priority,omitempty"`
+	Type        string   `json:"type,omitempty"`
+	ParentID    string   `json:"parent_id,omitempty"`
+	Limit       int      `json:"limit,omitempty"`
+	SortPolicy  string   `json:"sort_policy,omitempty"`
+	Labels      []string `json:"labels,omitempty"`
+	LabelsAny   []string `json:"labels_any,omitempty"`
+	MolType     string   `json:"mol_type,omitempty"`
+	SourceRepos []string `json:"source_repos,omitempty"`
 }
 
-// BlockedOpts configures the Blocked query (issues with open blockers).
+// DeferredOpts configures the canonical Deferred query. Backends may apply
+// narrowing filters client-side when the upstream deferred view is unfiltered.
+type DeferredOpts struct {
+	Assignee    string   `json:"assignee,omitempty"`
+	Priority    *int     `json:"priority,omitempty"`
+	Type        string   `json:"type,omitempty"`
+	ParentID    string   `json:"parent_id,omitempty"`
+	Labels      []string `json:"labels,omitempty"`
+	SourceRepos []string `json:"source_repos,omitempty"`
+	Limit       int      `json:"limit,omitempty"`
+}
+
+// BlockedOpts configures the canonical Blocked query.
 type BlockedOpts struct {
-	ParentID string `json:"parent_id,omitempty"`
-	Assignee string `json:"assignee,omitempty"`
-	Priority *int   `json:"priority,omitempty"`
-	Type     string `json:"type,omitempty"`
-	Limit    int    `json:"limit,omitempty"`
+	ParentID    string   `json:"parent_id,omitempty"`
+	Assignee    string   `json:"assignee,omitempty"`
+	Priority    *int     `json:"priority,omitempty"`
+	Type        string   `json:"type,omitempty"`
+	Labels      []string `json:"labels,omitempty"`
+	SourceRepos []string `json:"source_repos,omitempty"`
+	Limit       int      `json:"limit,omitempty"`
 }
 
 // CountOpts configures the Count query.
@@ -346,7 +369,7 @@ type CreateParams struct {
 //   - "source_repo" → "repo"
 //
 // Dropped (no equivalent on fleet-db's CreateIssueRequest):
-//   - id, acceptance_criteria, created_by, external_ref,
+//   - id, acceptance_criteria, created_by,
 //     estimated_minutes, dependencies
 //
 // If any of those need round-tripping, file a fleet-db ticket to extend
@@ -376,6 +399,7 @@ func (p CreateParams) FleetCreateBody() map[string]interface{} {
 	setNonEmptyMapStr(req, "repo", p.SourceRepo)
 	setNonEmptyMapStr(req, "design", p.Design)
 	setNonEmptyMapStr(req, "notes", p.Notes)
+	setNonEmptyMapStr(req, "external_ref", p.ExternalRef)
 	setNonEmptyMapStr(req, "defer_until", p.DeferUntil)
 	setNonEmptyMapStr(req, "due_at", p.DueAt)
 	return req

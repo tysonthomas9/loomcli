@@ -153,6 +153,9 @@ func (c *Client) discoverAuthMode() (*AuthMode, error) {
 	if !authmode.Valid(mode.Mode) {
 		return nil, fmt.Errorf("unsupported auth mode %q from server (client may need updating)", mode.Mode)
 	}
+	if mode.Mode == authmode.ModeOIDC && strings.TrimSpace(mode.AuthURL) == "" {
+		mode.AuthURL = c.serverURL
+	}
 
 	return &mode, nil
 }

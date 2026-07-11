@@ -6,19 +6,29 @@
 .sidebar {
   display: flex;
   flex-direction: column;
-  width: 282px;
-  min-width: 282px;
-  background: var(--color-bg-card);
+  width: var(--workspace-tree-sidebar-width, 210px);
+  min-width: var(--workspace-tree-sidebar-width, 210px);
+  min-height: 0;
+  background: var(--color-chrome);
   border-right: 1px solid var(--color-border);
   transition:
     width 0.2s ease,
     min-width 0.2s ease;
   position: relative;
+  /* Stay interactive above the issue-panel scrim — in the design, detail
+     panels overlay the board only; the sidebar remains usable. */
+  z-index: calc(var(--z-overlay) + 1);
 }
 
 .sidebar.collapsed {
-  width: 40px;
-  min-width: 40px;
+  width: 56px;
+  min-width: 56px;
+  align-items: center;
+  overflow: visible;
+}
+
+.sidebar.resizing {
+  transition: none;
 }
 
 .toggleButton {
@@ -79,28 +89,95 @@
   border-bottom: 1px solid var(--color-border);
 }
 
-.selectorRow .toggleButton {
+.selectorRow .collapseButton {
   flex-shrink: 0;
-  width: 32px;
-  border-bottom: none;
-  border-left: 1px solid var(--color-border);
+  width: 28px;
+  height: 36px;
+  border: none;
   padding: 0;
   justify-content: center;
+  background: transparent;
+}
+
+.collapsedChrome {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  padding: 10px 0;
+  flex-shrink: 0;
+}
+
+.collapsedBody {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  min-height: 0;
+  width: 100%;
+  overflow: hidden;
+}
+
+.collapsedSectionDivider {
+  width: 28px;
+  height: 1px;
+  margin: 6px 0 4px;
+  background: var(--color-border-light);
+  flex-shrink: 0;
+}
+
+.expandButton {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border: 1.6px solid var(--color-border);
+  border-radius: 9px;
+  background: var(--color-bg-card);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  transition:
+    border-color 0.15s ease,
+    color 0.15s ease;
+}
+
+.expandButton:hover {
+  border-color: var(--color-primary);
+  color: var(--color-primary);
+}
+
+.expandButton:focus-visible {
+  outline: 2px solid var(--color-focus);
+  outline-offset: 2px;
+}
+
+.railDivider {
+  width: 26px;
+  border-top: 1.6px solid var(--color-border);
+  margin: 3px 0;
+  flex-shrink: 0;
+}
+
+.chevronIcon {
+  display: block;
+  flex-shrink: 0;
 }
 
 .content {
   flex: 1;
-  display: flex;
-  flex-direction: column;
   overflow-y: auto;
+  min-height: 0;
 }
 
 .workspaceHeading {
   padding: 0.375rem 1rem 0.25rem;
   font-size: 0.6875rem;
-  font-weight: 600;
+  font-weight: 800;
   text-transform: uppercase;
-  letter-spacing: 0.05em;
+  letter-spacing: 0.06em;
   color: var(--color-text-tertiary);
 }
 
@@ -289,21 +366,23 @@
   }
 }
 
-.collapsedBadge {
+.collapsedConnectionBadge {
   position: absolute;
-  top: 50px;
+  bottom: var(--space-3);
   left: 50%;
   transform: translateX(-50%);
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 24px;
-  height: 24px;
-  background: var(--color-status-working);
+  width: 20px;
+  height: 20px;
+  background: var(--color-warning, #f59e0b);
   color: white;
-  border-radius: 50%;
-  font-size: 0.75rem;
-  font-weight: 600;
+  border-radius: var(--radius-full);
+  font-size: 0.6875rem;
+  font-weight: var(--font-weight-bold);
+  flex-shrink: 0;
+  z-index: 1;
 }
 
 /* Radio indicator for workspace/repo selection */
@@ -819,20 +898,6 @@
 .daemonPromptDesc {
   font-size: 0.6875rem;
   color: var(--color-text-tertiary);
-}
-
-/* Collapsed badge health-based colors */
-.collapsedBadge[data-health="green"] {
-  background: var(--color-success);
-}
-
-.collapsedBadge[data-health="red"] {
-  background: var(--color-status-error);
-}
-
-/* Collapsed badge in disconnected state (overrides health color) */
-.collapsedBadge[data-disconnected="true"] {
-  background: var(--color-warning, #f59e0b);
 }
 
 /* Error badge for collapsed sidebar */

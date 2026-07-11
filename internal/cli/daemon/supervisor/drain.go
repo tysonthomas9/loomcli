@@ -3,11 +3,13 @@ package supervisor
 import (
 	"fmt"
 	"log/slog"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
 	"github.com/tysonthomas9/loomcli/internal/cli/workspace"
+	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/lockfile"
 )
 
@@ -276,7 +278,15 @@ func (s *Supervisor) AddAgent(entry config.AgentEntry) error {
 
 // AddAgentForTask creates and starts a new agent with an optional first task
 // requested by the control plane.
-func (s *Supervisor) AddAgentForTask(entry config.AgentEntry, taskID string) error {
+func (s *Supervisor) AddAgentForTask(entry config.AgentEntry, taskID string, parentSessionIDs ...string) error {
+	if entry.Mode == domain.AgentModeEphemeral && taskID == "" {
+		return fmt.Errorf("ephemeral agent %q requires a task_id", entry.Worktree)
+	}
+	parentSessionID := ""
+	if len(parentSessionIDs) > 0 {
+		parentSessionID = strings.TrimSpace(parentSessionIDs[0])
+	}
+
 	if err := s.checkDuplicateAgent(entry.Worktree); err != nil {
 		return err
 	}
@@ -295,15 +305,7 @@ func (s *Supervisor) AddAgentForTask(entry config.AgentEntry, taskID string) err
 		return err
 	}
 
-	ap := &AgentProcess{
-		Entry:           entry,
-		RoleConfig:      roleConfig,
-		WorktreePath:    target.WorkDir,
-		RepoConfig:      s.FindRepoConfig(entry.Repo),
-		RequestedTaskID: taskID,
-		StopCh:          make(chan struct{}),
-		Done:            make(chan struct{}),
-	}
+	ap := s.newRuntimeAgentProcess(entry, roleConfig, target.WorkDir, taskID, parentSessionID)
 
 	// Authoritative duplicate check + slice append + WaitGroup increment under
 	// a single write lock so Wg.Add can't race with Stop()'s Wg.Wait.
@@ -330,6 +332,19 @@ func (s *Supervisor) AddAgentForTask(entry config.AgentEntry, taskID string) err
 
 	slog.Info("agent added and started", "worktree", entry.Worktree, "role", entry.Role)
 	return nil
+}
+
+func (s *Supervisor) newRuntimeAgentProcess(entry config.AgentEntry, roleConfig config.RoleConfig, workDir, taskID, parentSessionID string) *AgentProcess {
+	return &AgentProcess{
+		Entry:           entry,
+		RoleConfig:      roleConfig,
+		WorktreePath:    workDir,
+		RepoConfig:      s.FindRepoConfig(entry.Repo),
+		RequestedTaskID: taskID,
+		ParentSessionID: parentSessionID,
+		StopCh:          make(chan struct{}),
+		Done:            make(chan struct{}),
+	}
 }
 
 // checkDuplicateAgent probes for an existing agent with the same worktree.

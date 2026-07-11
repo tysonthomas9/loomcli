@@ -139,7 +139,7 @@ func toDaemonAgentStatus(ap supervisor.SupervisedAgentStatus, maxRetries int) Da
 		WorktreePath:           ap.WorktreePath,
 		LastErrorClass:         ap.LastErrorClass,
 		NoWorkCount:            ap.NoWorkCount,
-		ParkCount:              ap.ParkCount,
+		BlockCount:             ap.BlockCount,
 		BackoffUntil:           ap.BackoffUntil,
 		RemoteBranch:           ap.RemoteBranch,
 		OwnershipLeaseID:       ap.OwnershipLeaseID,
@@ -162,11 +162,14 @@ func computeAgentStatus(ap supervisor.SupervisedAgentStatus, maxRetries int) str
 	if ap.PID > 0 && lockfile.IsProcessRunning(ap.PID) {
 		return "running"
 	}
-	// Not running - check if it failed via stop reason or restart count
+	// Not running - check if it stopped because of a terminal error reason or
+	// legacy max-retry wait state. Running takes precedence above so stale stop
+	// reasons never hide a live process.
 	if ap.StopReason == supervisor.StopReasonFatalError ||
 		ap.StopReason == supervisor.StopReasonMaxRetries ||
 		ap.StopReason == supervisor.StopReasonFastFail ||
-		ap.StopReason == supervisor.StopReasonMaxRetriesParked {
+		ap.StopReason == supervisor.StopReasonMaxRetriesParked ||
+		ap.StopReason == supervisor.StopReasonMaxRetriesBlocked {
 		return "error"
 	}
 	// High restart count without stop reason still means error.

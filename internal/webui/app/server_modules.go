@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 
@@ -9,9 +10,13 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/webui/appstores"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlermux"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/agents"
+	"github.com/tysonthomas9/loomcli/internal/webui/handlers/driverapi"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/onboarding"
+	"github.com/tysonthomas9/loomcli/internal/webui/handlers/webhooks"
+	"github.com/tysonthomas9/loomcli/internal/webui/handlers/workflows"
 	"github.com/tysonthomas9/loomcli/internal/webui/modbuilder"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
+	"github.com/tysonthomas9/loomcli/internal/webui/storeadapter"
 	"github.com/tysonthomas9/loomcli/internal/webui/svcimpl"
 )
 
@@ -38,6 +43,14 @@ func (app *Server) buildModules() {
 	if app.config.IssueBackendFn != nil {
 		opsModule = opsModule.WithIssueBackendFn(app.config.IssueBackendFn)
 	}
+	if storeBacked {
+		// Healing variant: when readyz finds no local path, attempt a one-shot
+		// re-bind to an existing on-disk checkout before reporting "not ready".
+		store := app.config.Store
+		opsModule = opsModule.WithLocalWorkspacePathFn(func(wsKey string) string {
+			return storeadapter.ResolveOrHealWorkspacePath(context.Background(), store, wsKey)
+		})
+	}
 	app.wsModules = append(app.wsModules, opsModule)
 
 	// Issue + session modules
@@ -51,7 +64,7 @@ func (app *Server) buildModules() {
 	if app.hub != nil {
 		app.wsModules = append(app.wsModules,
 			appstores.NewSubscriptionModule(app.hub, app.getMutationsSince,
-				middleware.WorkspaceFromContext, app.sseTokens))
+				middleware.WorkspaceFromContext, app.activateSSESubscriber, app.sseTokens))
 	}
 
 	app.buildTerminalModules()
@@ -106,6 +119,19 @@ func (app *Server) buildInfraModules() {
 	if storeBacked {
 		app.wsModules = append(app.wsModules, agents.NewModule(app.agentSvc, app.hub))
 		app.wsModules = append(app.wsModules, onboarding.NewModule(app.issueSvc, app.agentSvc))
+		app.wsModules = append(app.wsModules, workflows.NewModule(app.config.Store))
+		app.wsModules = append(app.wsModules, webhooks.NewModule(app.config.Store))
+		app.wsModules = append(app.wsModules, modbuilder.NewApprovalsModule(app.config.Store))
+		app.wsModules = append(app.wsModules, modbuilder.NewTaskRunAPIModule(app.config.Store, app.config.FleetDBBaseURL, app.config.LocalSettingsDir))
+		app.wsModules = append(app.wsModules, driverapi.NewModule(driverapi.Config{
+			Store:            app.config.Store,
+			FleetBaseURL:     app.config.FleetDBBaseURL,
+			APIBaseURL:       app.config.DriverAPIBaseURL,
+			APIToken:         app.config.DriverAPIToken,
+			RunTokenKey:      app.config.DriverRunTokenKey,
+			LocalSettingsDir: app.config.LocalSettingsDir,
+			Dispatcher:       app.buildConnectorDispatcher(),
+		}))
 	} else if app.config.AgentControlFn != nil {
 		app.wsModules = append(app.wsModules, webui.NewAgentControlModule(app.config.AgentControlFn))
 	}

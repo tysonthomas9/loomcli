@@ -26,12 +26,15 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/creack/pty"
+
+	"github.com/tysonthomas9/loomcli/internal/webui/tabmeta"
 )
 
 // ErrPTYMaxSessionsReached is returned by AttachSession when the concurrent-
@@ -89,6 +92,35 @@ func terminalSessionEnv(base []string, key SessionKey) []string {
 	return env
 }
 
+func overlayTerminalEnv(base []string, extra map[string]string) []string {
+	if len(extra) == 0 {
+		return base
+	}
+	blocked := make(map[string]struct{}, len(extra))
+	for key := range extra {
+		blocked[key] = struct{}{}
+	}
+	env := make([]string, 0, len(base)+len(extra))
+	for _, entry := range base {
+		key, _, ok := strings.Cut(entry, "=")
+		if ok {
+			if _, found := blocked[key]; found {
+				continue
+			}
+		}
+		env = append(env, entry)
+	}
+	keys := make([]string, 0, len(extra))
+	for key := range extra {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	for _, key := range keys {
+		env = append(env, key+"="+extra[key])
+	}
+	return env
+}
+
 // SessionKey identifies a persistent terminal session. Two WebSockets opened
 // sequentially with the same key attach to the same underlying PTY.
 type SessionKey struct {
@@ -108,6 +140,7 @@ func (k SessionKey) String() string {
 type PTYManager struct {
 	mu       sync.Mutex
 	sessions map[SessionKey]*ptySession
+	ended    map[SessionKey]string
 
 	shell string   // absolute path to the login shell (e.g. /bin/bash)
 	argv  []string // default args when a session's argv is nil
@@ -162,6 +195,7 @@ func NewPTYManager(command string, maxSessions int, cwd string) *PTYManager {
 
 	m := &PTYManager{
 		sessions:    make(map[SessionKey]*ptySession),
+		ended:       make(map[SessionKey]string),
 		shell:       shell,
 		argv:        argv,
 		env:         env,
@@ -193,14 +227,14 @@ func (m *PTYManager) SetIdleTimeout(d time.Duration) {
 }
 
 // AttachSession returns an attachment to the session identified by key. If
-// the session does not exist, it is created with the given argv (nil = manager
-// default). If an attachment already exists, it is replaced — the previous
+// the session does not exist, it is created with the given launch spec
+// (nil or empty argv = manager default). If an attachment already exists, it is replaced — the previous
 // WebSocket's output channel is closed so its pump goroutine exits.
 //
 // reattached is true when the returned attachment is to a session that
 // existed before this call (typical for page refresh or network blip).
 // Callers should check Attachment.Scrollback() for replay bytes.
-func (m *PTYManager) AttachSession(key SessionKey, cols, rows uint16, argv []string) (att Attachment, reattached bool, err error) {
+func (m *PTYManager) AttachSession(key SessionKey, cols, rows uint16, launch *tabmeta.LaunchSpec) (att Attachment, reattached bool, err error) {
 	if cols == 0 {
 		cols = 80
 	}
@@ -229,12 +263,13 @@ func (m *PTYManager) AttachSession(key SessionKey, cols, rows uint16, argv []str
 				m.mu.Unlock()
 				return nil, false, ErrPTYMaxSessionsReached
 			}
-			newSess, spawnErr := m.spawnSession(key, cols, rows, argv)
+			newSess, spawnErr := m.spawnSession(key, cols, rows, launch)
 			if spawnErr != nil {
 				m.mu.Unlock()
 				return nil, false, spawnErr
 			}
 			m.sessions[key] = newSess
+			delete(m.ended, key)
 			sess = newSess
 		}
 		m.mu.Unlock()
@@ -276,7 +311,11 @@ func (m *PTYManager) EnsureSession(key SessionKey, cols, rows uint16, argv []str
 			m.mu.Unlock()
 			return false, ErrPTYMaxSessionsReached
 		}
-		newSess, spawnErr := m.spawnSession(key, cols, rows, argv)
+		var launch *tabmeta.LaunchSpec
+		if len(argv) > 0 {
+			launch = &tabmeta.LaunchSpec{Argv: argv}
+		}
+		newSess, spawnErr := m.spawnSession(key, cols, rows, launch)
 		if spawnErr != nil {
 			m.mu.Unlock()
 			return false, spawnErr
@@ -307,14 +346,24 @@ func (m *PTYManager) WriteToSession(key SessionKey, p []byte) error {
 }
 
 // spawnSession must be called with m.mu held.
-func (m *PTYManager) spawnSession(key SessionKey, cols, rows uint16, argv []string) (*ptySession, error) {
-	useArgv := argv
-	if useArgv == nil {
+func (m *PTYManager) spawnSession(key SessionKey, cols, rows uint16, launch *tabmeta.LaunchSpec) (*ptySession, error) {
+	var useArgv []string
+	if launch != nil {
+		useArgv = launch.Argv
+	}
+	if len(useArgv) == 0 {
 		useArgv = m.argv
 	}
 	cmd := exec.Command(m.shell, useArgv...) //nolint:gosec // shell + argv sourced from server config, not request data
-	cmd.Env = terminalSessionEnv(m.env, key)
+	env := terminalSessionEnv(m.env, key)
+	if launch != nil {
+		env = overlayTerminalEnv(env, launch.Env)
+	}
+	cmd.Env = env
 	cmd.Dir = m.cwd
+	if launch != nil && strings.TrimSpace(launch.Cwd) != "" {
+		cmd.Dir = launch.Cwd
+	}
 
 	ptmx, err := pty.StartWithSize(cmd, &pty.Winsize{Cols: cols, Rows: rows})
 	if err != nil {
@@ -352,6 +401,9 @@ func (m *PTYManager) killSession(key SessionKey, reason string) error {
 	sess, ok := m.sessions[key]
 	if ok {
 		delete(m.sessions, key)
+		if reason != "" {
+			m.ended[key] = reason
+		}
 	}
 	m.mu.Unlock()
 	if !ok {
@@ -383,6 +435,16 @@ func (m *PTYManager) HasSession(key SessionKey) bool {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	_, ok := m.sessions[key]
+	return ok
+}
+
+// SessionClosed reports whether key had a PTY in this process and that PTY
+// has since exited or been killed. A later explicit AttachSession clears the
+// tombstone after spawning a fresh PTY.
+func (m *PTYManager) SessionClosed(key SessionKey) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	_, ok := m.ended[key]
 	return ok
 }
 
@@ -435,6 +497,9 @@ func (m *PTYManager) Shutdown() error {
 	m.mu.Lock()
 	sessions := m.sessions
 	m.sessions = make(map[SessionKey]*ptySession)
+	for key := range sessions {
+		m.ended[key] = ExitReasonShutdown
+	}
 	m.mu.Unlock()
 
 	var firstErr error

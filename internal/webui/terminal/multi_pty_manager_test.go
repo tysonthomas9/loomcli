@@ -118,7 +118,7 @@ func TestRegister_ReplacesExisting(t *testing.T) {
 		t.Fatalf("Register A: %v", err)
 	}
 	key := SessionKey{Workspace: "ws1", Name: "s1"}
-	att, _, err := mm.AttachSession(key, 80, 24, []string{"-c", "cat"})
+	att, _, err := mm.AttachSession(key, 80, 24, &LaunchSpec{Argv: []string{"-c", "cat"}})
 	if err != nil {
 		t.Fatalf("AttachSession: %v", err)
 	}
@@ -152,6 +152,76 @@ func TestRegister_ReplacesExisting(t *testing.T) {
 	}
 }
 
+func TestEnsureRegistered_RegistersMissingWorkspace(t *testing.T) {
+	mm := newTestMultiManager(t, 0)
+	dir := t.TempDir()
+
+	if err := mm.EnsureRegistered("ws1", dir); err != nil {
+		t.Fatalf("EnsureRegistered: %v", err)
+	}
+	if mm.hasManager("ws1") {
+		t.Errorf("hasManager(ws1)=true immediately after EnsureRegistered; expected lazy")
+	}
+
+	_, _, err := mm.AttachSession(SessionKey{Workspace: "ws1", Name: "s"}, 80, 24, &LaunchSpec{Argv: []string{"-c", "cat"}})
+	if err != nil {
+		t.Fatalf("AttachSession after EnsureRegistered: %v", err)
+	}
+}
+
+func TestEnsureRegistered_SamePathPreservesExistingManager(t *testing.T) {
+	mm := newTestMultiManager(t, 0)
+	dir := t.TempDir()
+	if err := mm.Register("ws1", dir); err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+	key := SessionKey{Workspace: "ws1", Name: "s"}
+	if _, _, err := mm.AttachSession(key, 80, 24, &LaunchSpec{Argv: []string{"-c", "cat"}}); err != nil {
+		t.Fatalf("AttachSession: %v", err)
+	}
+	before := captureManager(t, mm, "ws1")
+
+	if err := mm.EnsureRegistered("ws1", dir); err != nil {
+		t.Fatalf("EnsureRegistered: %v", err)
+	}
+	after := captureManager(t, mm, "ws1")
+	if after != before {
+		t.Fatal("EnsureRegistered replaced existing manager for unchanged path")
+	}
+}
+
+func TestEnsureRegistered_PathChangeReplacesExistingManager(t *testing.T) {
+	mm := newTestMultiManager(t, 0)
+	dirA := t.TempDir()
+	dirB := t.TempDir()
+	if err := mm.Register("ws1", dirA); err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+	key := SessionKey{Workspace: "ws1", Name: "s"}
+	att, _, err := mm.AttachSession(key, 80, 24, &LaunchSpec{Argv: []string{"-c", "cat"}})
+	if err != nil {
+		t.Fatalf("AttachSession: %v", err)
+	}
+
+	if err := mm.EnsureRegistered("ws1", dirB); err != nil {
+		t.Fatalf("EnsureRegistered: %v", err)
+	}
+	if mm.hasManager("ws1") {
+		t.Errorf("hasManager(ws1)=true after path-change EnsureRegistered; new entry should be lazy")
+	}
+	deadline := time.After(2 * time.Second)
+	for {
+		select {
+		case _, ok := <-att.Output():
+			if !ok {
+				return
+			}
+		case <-deadline:
+			t.Fatal("timeout waiting for old attachment output to close")
+		}
+	}
+}
+
 func TestAttachSession_UnknownWorkspace(t *testing.T) {
 	mm := newTestMultiManager(t, 0)
 	_, _, err := mm.AttachSession(SessionKey{Workspace: "nope", Name: "s"}, 80, 24, nil)
@@ -178,7 +248,7 @@ func TestAttachSession_LazyCreate(t *testing.T) {
 		t.Fatal("hasManager(ws1)=true before AttachSession")
 	}
 	key := SessionKey{Workspace: "ws1", Name: "s1"}
-	_, _, err := mm.AttachSession(key, 80, 24, []string{"-c", "cat"})
+	_, _, err := mm.AttachSession(key, 80, 24, &LaunchSpec{Argv: []string{"-c", "cat"}})
 	if err != nil {
 		t.Fatalf("AttachSession: %v", err)
 	}
@@ -206,10 +276,10 @@ func TestAttachSession_RoutingByWorkspace(t *testing.T) {
 	k1 := SessionKey{Workspace: "ws1", Name: "s"}
 	k2 := SessionKey{Workspace: "ws2", Name: "s"}
 
-	if _, _, err := mm.AttachSession(k1, 80, 24, []string{"-c", "cat"}); err != nil {
+	if _, _, err := mm.AttachSession(k1, 80, 24, &LaunchSpec{Argv: []string{"-c", "cat"}}); err != nil {
 		t.Fatalf("attach ws1: %v", err)
 	}
-	if _, _, err := mm.AttachSession(k2, 80, 24, []string{"-c", "cat"}); err != nil {
+	if _, _, err := mm.AttachSession(k2, 80, 24, &LaunchSpec{Argv: []string{"-c", "cat"}}); err != nil {
 		t.Fatalf("attach ws2: %v", err)
 	}
 
@@ -244,7 +314,7 @@ func TestConcurrentAttachLazyCreate(t *testing.T) {
 		go func(i int) {
 			defer wg.Done()
 			key := SessionKey{Workspace: "ws1", Name: fmt.Sprintf("s-%d", i)}
-			if _, _, err := mm.AttachSession(key, 80, 24, []string{"-c", "cat"}); err != nil {
+			if _, _, err := mm.AttachSession(key, 80, 24, &LaunchSpec{Argv: []string{"-c", "cat"}}); err != nil {
 				errCount.Add(1)
 				t.Logf("attach %d: %v", i, err)
 			}
@@ -290,7 +360,7 @@ func TestConcurrentAttachAndGraceUpdate(t *testing.T) {
 		go func(i int) {
 			defer wg.Done()
 			key := SessionKey{Workspace: fmt.Sprintf("ws-%d", i%5), Name: fmt.Sprintf("s-%d", i)}
-			if _, _, err := mm.AttachSession(key, 80, 24, []string{"-c", "cat"}); err != nil {
+			if _, _, err := mm.AttachSession(key, 80, 24, &LaunchSpec{Argv: []string{"-c", "cat"}}); err != nil {
 				t.Errorf("attach %d: %v", i, err)
 			}
 		}(i)
@@ -331,19 +401,19 @@ func TestPerWorkspaceCap(t *testing.T) {
 	// Fill ws1 to cap.
 	for i := 0; i < 3; i++ {
 		k := SessionKey{Workspace: "ws1", Name: fmt.Sprintf("s-%d", i)}
-		if _, _, err := mm.AttachSession(k, 80, 24, []string{"-c", "cat"}); err != nil {
+		if _, _, err := mm.AttachSession(k, 80, 24, &LaunchSpec{Argv: []string{"-c", "cat"}}); err != nil {
 			t.Fatalf("ws1 attach %d: %v", i, err)
 		}
 	}
 	// ws1 over-cap.
 	over := SessionKey{Workspace: "ws1", Name: "over"}
-	if _, _, err := mm.AttachSession(over, 80, 24, []string{"-c", "cat"}); !errors.Is(err, ErrPTYMaxSessionsReached) {
+	if _, _, err := mm.AttachSession(over, 80, 24, &LaunchSpec{Argv: []string{"-c", "cat"}}); !errors.Is(err, ErrPTYMaxSessionsReached) {
 		t.Errorf("ws1 over-cap err = %v, want ErrPTYMaxSessionsReached", err)
 	}
 	// ws2 still has full cap of its own.
 	for i := 0; i < 3; i++ {
 		k := SessionKey{Workspace: "ws2", Name: fmt.Sprintf("s-%d", i)}
-		if _, _, err := mm.AttachSession(k, 80, 24, []string{"-c", "cat"}); err != nil {
+		if _, _, err := mm.AttachSession(k, 80, 24, &LaunchSpec{Argv: []string{"-c", "cat"}}); err != nil {
 			t.Errorf("ws2 attach %d: %v (per-ws cap leaked across workspaces)", i, err)
 		}
 	}
@@ -358,7 +428,7 @@ func TestDeregister_KillsSessions(t *testing.T) {
 	var keys []SessionKey
 	for i := 0; i < 3; i++ {
 		k := SessionKey{Workspace: "ws1", Name: fmt.Sprintf("s-%d", i)}
-		if _, _, err := mm.AttachSession(k, 80, 24, []string{"-c", "cat"}); err != nil {
+		if _, _, err := mm.AttachSession(k, 80, 24, &LaunchSpec{Argv: []string{"-c", "cat"}}); err != nil {
 			t.Fatalf("attach %d: %v", i, err)
 		}
 		keys = append(keys, k)
@@ -414,13 +484,13 @@ func TestSessionCount_Aggregates(t *testing.T) {
 	}
 	for i := 0; i < 2; i++ {
 		k := SessionKey{Workspace: "ws1", Name: fmt.Sprintf("s-%d", i)}
-		if _, _, err := mm.AttachSession(k, 80, 24, []string{"-c", "cat"}); err != nil {
+		if _, _, err := mm.AttachSession(k, 80, 24, &LaunchSpec{Argv: []string{"-c", "cat"}}); err != nil {
 			t.Fatalf("ws1 attach: %v", err)
 		}
 	}
 	for i := 0; i < 3; i++ {
 		k := SessionKey{Workspace: "ws2", Name: fmt.Sprintf("s-%d", i)}
-		if _, _, err := mm.AttachSession(k, 80, 24, []string{"-c", "cat"}); err != nil {
+		if _, _, err := mm.AttachSession(k, 80, 24, &LaunchSpec{Argv: []string{"-c", "cat"}}); err != nil {
 			t.Fatalf("ws2 attach: %v", err)
 		}
 	}
@@ -467,7 +537,7 @@ func TestClose_ShutsDownAll(t *testing.T) {
 	}
 	for _, ws := range []string{"ws1", "ws2"} {
 		k := SessionKey{Workspace: ws, Name: "s"}
-		if _, _, err := mm.AttachSession(k, 80, 24, []string{"-c", "cat"}); err != nil {
+		if _, _, err := mm.AttachSession(k, 80, 24, &LaunchSpec{Argv: []string{"-c", "cat"}}); err != nil {
 			t.Fatalf("attach %s: %v", ws, err)
 		}
 	}
@@ -497,7 +567,7 @@ func TestGraceAndIdle_Forward(t *testing.T) {
 	if err := mm.Register("ws1", t.TempDir()); err != nil {
 		t.Fatalf("Register ws1: %v", err)
 	}
-	if _, _, err := mm.AttachSession(SessionKey{Workspace: "ws1", Name: "s"}, 80, 24, []string{"-c", "cat"}); err != nil {
+	if _, _, err := mm.AttachSession(SessionKey{Workspace: "ws1", Name: "s"}, 80, 24, &LaunchSpec{Argv: []string{"-c", "cat"}}); err != nil {
 		t.Fatalf("AttachSession: %v", err)
 	}
 	mm.mu.RLock()
@@ -574,13 +644,13 @@ func TestSessionCountFor_PerWorkspace(t *testing.T) {
 	// ws1 holds 2 sessions; ws2 holds 3.
 	for i := 0; i < 2; i++ {
 		k := SessionKey{Workspace: "ws1", Name: fmt.Sprintf("s-%d", i)}
-		if _, _, err := mm.AttachSession(k, 80, 24, []string{"-c", "cat"}); err != nil {
+		if _, _, err := mm.AttachSession(k, 80, 24, &LaunchSpec{Argv: []string{"-c", "cat"}}); err != nil {
 			t.Fatalf("ws1 attach: %v", err)
 		}
 	}
 	for i := 0; i < 3; i++ {
 		k := SessionKey{Workspace: "ws2", Name: fmt.Sprintf("s-%d", i)}
-		if _, _, err := mm.AttachSession(k, 80, 24, []string{"-c", "cat"}); err != nil {
+		if _, _, err := mm.AttachSession(k, 80, 24, &LaunchSpec{Argv: []string{"-c", "cat"}}); err != nil {
 			t.Fatalf("ws2 attach: %v", err)
 		}
 	}
@@ -613,7 +683,7 @@ func TestDeregister_CapturedManagerRejectsAttach(t *testing.T) {
 		t.Fatalf("Register: %v", err)
 	}
 	// Force lazy-create so the per-ws *PTYManager actually exists.
-	if _, _, err := mm.AttachSession(SessionKey{Workspace: "ws1", Name: "warmup"}, 80, 24, []string{"-c", "cat"}); err != nil {
+	if _, _, err := mm.AttachSession(SessionKey{Workspace: "ws1", Name: "warmup"}, 80, 24, &LaunchSpec{Argv: []string{"-c", "cat"}}); err != nil {
 		t.Fatalf("warmup attach: %v", err)
 	}
 
@@ -623,7 +693,7 @@ func TestDeregister_CapturedManagerRejectsAttach(t *testing.T) {
 
 	_, _, err := captured.AttachSession(
 		SessionKey{Workspace: "ws1", Name: "post-dereg"},
-		80, 24, []string{"-c", "cat"},
+		80, 24, &LaunchSpec{Argv: []string{"-c", "cat"}},
 	)
 	if !errors.Is(err, ErrPTYManagerClosed) {
 		t.Errorf("post-Deregister captured.AttachSession err = %v, want ErrPTYManagerClosed", err)
@@ -641,7 +711,7 @@ func TestDeregister_ConcurrentAttach(t *testing.T) {
 	if err := mm.Register("ws1", t.TempDir()); err != nil {
 		t.Fatalf("Register: %v", err)
 	}
-	if _, _, err := mm.AttachSession(SessionKey{Workspace: "ws1", Name: "warmup"}, 80, 24, []string{"-c", "cat"}); err != nil {
+	if _, _, err := mm.AttachSession(SessionKey{Workspace: "ws1", Name: "warmup"}, 80, 24, &LaunchSpec{Argv: []string{"-c", "cat"}}); err != nil {
 		t.Fatalf("warmup attach: %v", err)
 	}
 
@@ -662,7 +732,7 @@ func TestDeregister_ConcurrentAttach(t *testing.T) {
 		go func(i int) {
 			defer wg.Done()
 			key := SessionKey{Workspace: "ws1", Name: fmt.Sprintf("attack-%d", i)}
-			_, _, err := mm.AttachSession(key, 80, 24, []string{"-c", "cat"})
+			_, _, err := mm.AttachSession(key, 80, 24, &LaunchSpec{Argv: []string{"-c", "cat"}})
 			if err != nil && !errors.Is(err, ErrWorkspaceNotRegistered) && !errors.Is(err, ErrPTYManagerClosed) {
 				t.Errorf("attack %d err = %v, want nil / ErrWorkspaceNotRegistered / ErrPTYManagerClosed", i, err)
 			}

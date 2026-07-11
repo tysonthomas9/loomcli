@@ -27,9 +27,15 @@ type fakeIssueBackend struct {
 	listResult          []backend.IssueData
 	listErr             error
 	listCalls           []backend.ListOpts
+	readyResult         []backend.IssueData
+	readyErr            error
+	readyCalls          []backend.ReadyOpts
 	blockedResult       []backend.IssueData
 	blockedErr          error
 	blockedCalls        []backend.BlockedOpts
+	deferredResult      []backend.IssueData
+	deferredErr         error
+	deferredCalls       []backend.DeferredOpts
 	createResult        *backend.IssueData
 	createErr           error
 	createParams        []backend.CreateParams
@@ -102,14 +108,23 @@ func (f *fakeIssueBackend) List(_ context.Context, opts backend.ListOpts) ([]bac
 	f.listCalls = append(f.listCalls, opts)
 	return f.listResult, f.listErr
 }
-func (f *fakeIssueBackend) Ready(_ context.Context, _ backend.ReadyOpts) ([]backend.IssueData, error) {
-	return nil, nil
+func (f *fakeIssueBackend) Ready(_ context.Context, opts backend.ReadyOpts) ([]backend.IssueData, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.readyCalls = append(f.readyCalls, opts)
+	return f.readyResult, f.readyErr
 }
 func (f *fakeIssueBackend) Blocked(_ context.Context, opts backend.BlockedOpts) ([]backend.IssueData, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.blockedCalls = append(f.blockedCalls, opts)
 	return f.blockedResult, f.blockedErr
+}
+func (f *fakeIssueBackend) Deferred(_ context.Context, opts backend.DeferredOpts) ([]backend.IssueData, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.deferredCalls = append(f.deferredCalls, opts)
+	return f.deferredResult, f.deferredErr
 }
 func (f *fakeIssueBackend) Stats(_ context.Context) (*backend.StatsData, error) { return nil, nil }
 func (f *fakeIssueBackend) Count(_ context.Context, _ backend.CountOpts) (int, error) {
@@ -814,9 +829,9 @@ func TestCreateIssue_Backend_Success_ReturnsIssueShape(t *testing.T) {
 			IssueData: backend.IssueData{
 				ID: "loom-x1", Title: "New", Status: "open", Priority: 2,
 				IssueType: "task", SourceRepo: "repo-a", CreatedAt: now, UpdatedAt: now,
+				Notes: "note",
 			},
 			Description: "body",
-			Notes:       "note",
 		},
 	}
 	svc := newServiceWithFake(fb)

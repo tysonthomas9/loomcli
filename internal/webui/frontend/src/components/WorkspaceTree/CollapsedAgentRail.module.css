@@ -1,0 +1,56 @@
+/**
+ * Vertical agent pill rail shown when WorkspaceTree is collapsed.
+ */
+
+.rail {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 11px;
+  padding: 2px 1px;
+  overflow-y: auto;
+  overflow-x: visible;
+  min-height: 0;
+  width: 100%;
+  position: relative;
+  z-index: calc(var(--z-overlay) + 2);
+}
+
+.emptyHint {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-muted);
+  padding: var(--space-2) 0;
+}
+
+.addButton {
+  position: relative;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border-radius: var(--radius-full);
+  background: var(--color-bg);
+  color: var(--color-text-primary);
+  border: 1px dashed var(--color-border);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.125rem;
+  line-height: 1;
+  font-weight: var(--font-weight-semibold);
+  cursor: pointer;
+  flex-shrink: 0;
+  transition:
+    background-color var(--transition-fast),
+    border-color var(--transition-fast);
+}
+
+.addButton:hover {
+  background: var(--color-bg-hover);
+  border-color: var(--color-border-strong, var(--color-border));
+}
+
+.addButton:focus-visible {
+  outline: 2px solid var(--color-focus);
+  outline-offset: 2px;
+}

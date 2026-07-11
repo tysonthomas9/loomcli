@@ -291,7 +291,7 @@ type stubAgentService struct {
 func (s *stubAgentService) GetTerminalInfo(context.Context, string, string) (*service.AgentTerminalInfoResult, error) {
 	return nil, service.ErrNotImplemented("not implemented")
 }
-func (s *stubAgentService) GenerateTerminalToken(context.Context, string, string) (string, error) {
+func (s *stubAgentService) GenerateTerminalToken(context.Context, string, string, string) (string, error) {
 	return "", service.ErrNotImplemented("not implemented")
 }
 func (s *stubAgentService) GetLog(context.Context, string, string, int, int64) (*service.AgentLogResult, error) {
@@ -315,6 +315,11 @@ func (s *stubAgentService) GitSync(context.Context, string, string) (*service.Gi
 func (s *stubAgentService) CreatePR(context.Context, string, string, string) (*ops.GitPRResult, error) {
 	return nil, service.ErrNotImplemented("not implemented")
 }
+
+func (s *stubAgentService) ListPullRequests(context.Context, string, string) (*ops.GitPullRequestList, error) {
+	return &ops.GitPullRequestList{PullRequests: []ops.GitPullRequest{}}, nil
+}
+
 func (s *stubAgentService) GitReset(context.Context, string, string, string, bool, bool) (*ops.GitResetResult, error) {
 	return nil, service.ErrNotImplemented("not implemented")
 }

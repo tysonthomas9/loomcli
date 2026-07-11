@@ -3,6 +3,7 @@ package fleet
 import (
 	"encoding/json"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
@@ -22,10 +23,14 @@ type fleetIssueWire struct {
 	Owner       string     `json:"owner,omitempty"`
 	Labels      []string   `json:"labels,omitempty"`
 	Repo        string     `json:"repo,omitempty"`
+	SourceRepo  string     `json:"source_repo,omitempty"`
 	ParentID    string     `json:"parent_id,omitempty"`
 	Parent      string     `json:"parent,omitempty"`
 	Design      string     `json:"design,omitempty"`
+	Notes       string     `json:"notes,omitempty"`
 	Description string     `json:"description,omitempty"`
+	Acceptance  string     `json:"acceptance_criteria,omitempty"`
+	ExternalRef string     `json:"external_ref,omitempty"`
 	CreatedAt   time.Time  `json:"created_at,omitempty"`
 	CreatedBy   string     `json:"created_by,omitempty"`
 	UpdatedAt   time.Time  `json:"updated_at,omitempty"`
@@ -38,25 +43,45 @@ type fleetIssueWire struct {
 // toIssue projects the wire shape to the canonical types.Issue.
 func (w fleetIssueWire) toIssue() types.Issue {
 	return types.Issue{
-		ID:          w.ID,
-		Title:       w.Title,
-		Description: w.Description,
-		Status:      types.Status(w.Status),
-		Priority:    w.Priority,
-		IssueType:   types.IssueType(w.Type),
-		Assignee:    w.Assignee,
-		Owner:       w.Owner,
-		Labels:      w.Labels,
-		SourceRepo:  w.Repo,
-		Design:      w.Design,
-		CreatedAt:   w.CreatedAt,
-		CreatedBy:   w.CreatedBy,
-		UpdatedAt:   w.UpdatedAt,
-		DueAt:       w.DueAt,
-		DeferUntil:  w.DeferUntil,
-		ClosedAt:    w.ClosedAt,
-		CloseReason: w.CloseReason,
+		ID:                 w.ID,
+		Title:              w.Title,
+		Description:        w.Description,
+		AcceptanceCriteria: w.Acceptance,
+		Notes:              w.Notes,
+		Status:             types.Status(w.Status),
+		Priority:           w.Priority,
+		IssueType:          types.IssueType(w.Type),
+		Assignee:           w.Assignee,
+		Owner:              w.Owner,
+		Labels:             w.Labels,
+		SourceRepo:         w.sourceRepo(),
+		Design:             w.Design,
+		ExternalRef:        strOrNil(w.ExternalRef),
+		CreatedAt:          w.CreatedAt,
+		CreatedBy:          w.CreatedBy,
+		UpdatedAt:          w.UpdatedAt,
+		DueAt:              w.DueAt,
+		DeferUntil:         w.DeferUntil,
+		ClosedAt:           w.ClosedAt,
+		CloseReason:        w.CloseReason,
 	}
+}
+
+// strOrNil maps a fleet-db wire string to the optional *string the canonical
+// types.Issue uses (empty -> nil). derefStr is its inverse for the slim
+// backend.IssueData projection (nil -> "").
+func strOrNil(s string) *string {
+	if s == "" {
+		return nil
+	}
+	return &s
+}
+
+func derefStr(p *string) string {
+	if p == nil {
+		return ""
+	}
+	return *p
 }
 
 func (w fleetIssueWire) parent() string {
@@ -64,6 +89,13 @@ func (w fleetIssueWire) parent() string {
 		return w.ParentID
 	}
 	return w.Parent
+}
+
+func (w fleetIssueWire) sourceRepo() string {
+	if w.Repo != "" {
+		return w.Repo
+	}
+	return w.SourceRepo
 }
 
 // fleetIssueWithCountsWire mirrors fleet-db's IssueWithCounts wrapper.
@@ -159,6 +191,8 @@ func issueToData(issue *types.Issue) backend.IssueData {
 		Labels:      labels,
 		SourceRepo:  issue.SourceRepo,
 		Design:      issue.Design,
+		Notes:       issue.Notes,
+		ExternalRef: derefStr(issue.ExternalRef),
 		CreatedAt:   issue.CreatedAt,
 		UpdatedAt:   issue.UpdatedAt,
 		DueAt:       issue.DueAt,
@@ -211,9 +245,7 @@ func detailsToDetailData(details *types.IssueDetails) backend.IssueDetailData {
 	d.ClosedBySession = details.ClosedBySession
 
 	// External integration.
-	if details.ExternalRef != nil {
-		d.ExternalRef = *details.ExternalRef
-	}
+	d.ExternalRef = derefStr(details.ExternalRef)
 	d.EstimatedMinutes = details.EstimatedMinutes
 
 	// Parent.
@@ -323,6 +355,9 @@ func readyIssuesToData(issues []*readyIssueWithParent) []backend.IssueData {
 		if riwp.Parent != nil {
 			d.Parent = *riwp.Parent
 		}
+		if riwp.Repo != nil {
+			d.SourceRepo = *riwp.Repo
+		}
 		result = append(result, d)
 	}
 	return result
@@ -339,9 +374,6 @@ func blockedIssuesToData(issues []*blockedIssueWire) []backend.IssueData {
 		d := issueToData(&issue)
 		if parent := bi.fleetIssueWire.parent(); parent != "" {
 			d.Parent = parent
-		}
-		if d.Status == "" || d.Status == string(types.StatusOpen) {
-			d.Status = string(types.StatusBlocked)
 		}
 		d.BlockedByCount = bi.BlockedByCount
 		d.BlockedBy = append([]string(nil), bi.BlockedBy...)
@@ -403,9 +435,6 @@ func blockedIssueResponsesToData(issues []blockedIssueResponseWire) []backend.Is
 		d := issueToData(&issue)
 		if parent := entry.Issue.parent(); parent != "" {
 			d.Parent = parent
-		}
-		if d.Status == "" || d.Status == string(types.StatusOpen) {
-			d.Status = string(types.StatusBlocked)
 		}
 		for _, blocker := range entry.Blockers {
 			if blocker.ID != "" {
@@ -497,11 +526,16 @@ func actionToMutationType(action, entityType string) string {
 // (StepCount, Assignee for non-assign actions) remain zero.
 func fleetEventToMutationData(e *fleetMutationEvent) backend.MutationData {
 	md := backend.MutationData{
-		Cursor:    e.ID,
-		Type:      actionToMutationType(e.Action, e.EntityType),
-		IssueID:   e.EntityID,
-		Actor:     e.Actor,
-		Timestamp: e.Timestamp,
+		Cursor:     e.ID,
+		Type:       actionToMutationType(e.Action, e.EntityType),
+		EntityType: e.EntityType,
+		EntityID:   e.EntityID,
+		Action:     e.Action,
+		Actor:      e.Actor,
+		Timestamp:  e.Timestamp,
+	}
+	if e.EntityType == "issue" || (e.EntityType == "" && strings.HasPrefix(e.Action, "issue.")) {
+		md.IssueID = e.EntityID
 	}
 	// Best-effort extraction from before/after snapshots. Errors are ignored —
 	// the minimum viable mutation already has Type/IssueID/Timestamp.

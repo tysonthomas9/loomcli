@@ -1,6 +1,7 @@
 package data
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -8,6 +9,38 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
 )
+
+func strptr(s string) *string { return &s }
+
+// TestEnforceBlockReason guards the rule that an issue can't be moved to
+// "blocked" without a reason — so a blocked card always carries a human-readable
+// note the board surfaces (isBlockedWithNotes), instead of a silent blocked chip.
+func TestEnforceBlockReason(t *testing.T) {
+	withNotes := &backend.IssueDetailData{IssueData: backend.IssueData{Notes: "prev reason"}}
+	noNotes := &backend.IssueDetailData{}
+	cases := []struct {
+		name    string
+		params  backend.UpdateParams
+		detail  *backend.IssueDetailData
+		wantErr bool
+	}{
+		{"non-block status is ignored", backend.UpdateParams{Status: strptr("open")}, noNotes, false},
+		{"block with inline notes ok", backend.UpdateParams{Status: strptr("blocked"), Notes: strptr("BLOCKED: x")}, noNotes, false},
+		{"block with existing notes ok", backend.UpdateParams{Status: strptr("blocked")}, withNotes, false},
+		{"block with empty inline notes + none existing errors", backend.UpdateParams{Status: strptr("blocked"), Notes: strptr("  ")}, noNotes, true},
+		{"bare block, no reason errors", backend.UpdateParams{Status: strptr("blocked")}, noNotes, true},
+		{"bare block, issue not found fails open", backend.UpdateParams{Status: strptr("blocked")}, nil, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			stub := &localBackendStub{detail: tc.detail}
+			err := enforceBlockReason(context.Background(), stub, "WEB-1", tc.params)
+			if (err != nil) != tc.wantErr {
+				t.Fatalf("enforceBlockReason err=%v, wantErr=%v", err, tc.wantErr)
+			}
+		})
+	}
+}
 
 func TestDataUpdate_TitleAndDescriptionFlags(t *testing.T) {
 	stub := &localBackendStub{}

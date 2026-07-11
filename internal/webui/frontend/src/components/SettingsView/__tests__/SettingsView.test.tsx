@@ -149,11 +149,22 @@ function createMockLocalSettingsReturn(
         tls: false,
         password_set: false,
       },
+      agent_runtime: {
+        default: "local",
+      },
+      local_task_runner: {},
+      runtime_credentials: {
+        daytona: { configured: false },
+        github: { configured: false },
+      },
     },
     isLoading: false,
     isSaving: false,
     error: null,
     updateRedis: vi.fn().mockResolvedValue(true),
+    updateAgentRuntime: vi.fn().mockResolvedValue(true),
+    updateLocalTaskRunner: vi.fn().mockResolvedValue(true),
+    updateRuntimeCredentials: vi.fn().mockResolvedValue(true),
     refetch: vi.fn(),
     ...overrides,
   };
@@ -427,6 +438,32 @@ describe("SettingsView", () => {
       expect(
         screen.getByText("No per-agent overrides configured."),
       ).toBeInTheDocument();
+    });
+  });
+
+  describe("local task runner settings", () => {
+    it("saves the opencode model setting", async () => {
+      const mockUpdateLocalTaskRunner = vi.fn().mockResolvedValue(true);
+      mockUseBackendConfig.mockReturnValue(createMockHookReturn());
+      mockUseLocalSettings.mockReturnValue(
+        createMockLocalSettingsReturn({
+          updateLocalTaskRunner: mockUpdateLocalTaskRunner,
+        }),
+      );
+
+      render(<SettingsView />);
+
+      fireEvent.change(screen.getByTestId("opencode-model-input"), {
+        target: { value: "anthropic/claude-sonnet-4-20250514" },
+      });
+
+      await act(async () => {
+        fireEvent.click(screen.getByTestId("local-task-runner-save-button"));
+      });
+
+      expect(mockUpdateLocalTaskRunner).toHaveBeenCalledWith({
+        opencode_model: "anthropic/claude-sonnet-4-20250514",
+      });
     });
   });
 

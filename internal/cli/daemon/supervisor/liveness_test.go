@@ -10,12 +10,22 @@ import (
 	cfgpkg "github.com/tysonthomas9/loomcli/internal/cli/config"
 )
 
+// scanRepeated runs scanTicks enough times to cross the consecutive-stale
+// threshold, so a tick that stays stale every scan triggers the watchdog's
+// fatal. The calls are back-to-back (gap well under livenessFreezeGap), so the
+// process-suspension guard never fires.
+func scanRepeated(s *Supervisor) {
+	for i := 0; i < livenessStaleScansBeforeFatal; i++ {
+		s.scanTicks(time.Now())
+	}
+}
+
 func TestScanTicksFlagsStaleCadenceGoroutine(t *testing.T) {
 	s := newHarnessSupervisor()
 	s.RegisterTick(GoroutineHealthChecker)
 	setTickForTest(s, GoroutineHealthChecker, time.Now().Add(-10*time.Minute))
 
-	s.scanTicks(time.Now())
+	scanRepeated(s)
 
 	select {
 	case err := <-s.FatalChannel():
@@ -81,7 +91,7 @@ func TestScanTicksQuarantinesStaleAgentInsteadOfFatal(t *testing.T) {
 	s.registerAgentTick(ap)
 	setTickForTest(s, name, time.Now().Add(-1*time.Hour))
 
-	s.scanTicks(time.Now())
+	scanRepeated(s)
 
 	// No fatal — one wedged agent must never crash the daemon.
 	select {
@@ -154,7 +164,7 @@ func TestScanTicksStopsStaleAgentProcess(t *testing.T) {
 	s.registerAgentTick(ap)
 	setTickForTest(s, name, time.Now().Add(-1*time.Hour))
 
-	s.scanTicks(time.Now())
+	scanRepeated(s)
 
 	select {
 	case <-waitDone:
@@ -176,7 +186,7 @@ func TestScanTicksFlagsStaleCoreGoroutine(t *testing.T) {
 	s.RegisterTick(GoroutineStateUpdater)
 	setTickForTest(s, GoroutineStateUpdater, time.Now().Add(-1*time.Hour))
 
-	s.scanTicks(time.Now())
+	scanRepeated(s)
 
 	select {
 	case err := <-s.FatalChannel():
@@ -217,7 +227,7 @@ func TestLivenessTimeoutHonoredAtFloor(t *testing.T) {
 	}
 
 	setTickForTest(s, GoroutineHealthChecker, time.Now().Add(-90*time.Second))
-	s.scanTicks(time.Now())
+	scanRepeated(s)
 	select {
 	case <-s.FatalChannel():
 	case <-time.After(500 * time.Millisecond):
@@ -272,6 +282,71 @@ func TestAgentWaitHeartbeatKeepsTickFresh(t *testing.T) {
 	again, _ := s.LoadTick(name)
 	if !again.Equal(last) {
 		t.Fatalf("heartbeat kept ticking after stop: %v -> %v", last, again)
+	}
+}
+
+// TestScanTicksToleratesTransientStall is the regression guard for the
+// daemon-self-kill fix: a tick that is stale for fewer than
+// livenessStaleScansBeforeFatal scans in a row, then recovers, must not crash
+// the daemon. A single slow control-plane cycle or brief lock contention is a
+// transient stall, not a wedged goroutine.
+func TestScanTicksToleratesTransientStall(t *testing.T) {
+	s := newHarnessSupervisor()
+	s.RegisterTick(GoroutineHealthChecker)
+
+	// Stale for (threshold-1) consecutive scans — one short of fatal.
+	setTickForTest(s, GoroutineHealthChecker, time.Now().Add(-10*time.Minute))
+	for i := 0; i < livenessStaleScansBeforeFatal-1; i++ {
+		s.scanTicks(time.Now())
+	}
+	select {
+	case err := <-s.FatalChannel():
+		t.Fatalf("scanTicks killed daemon before sustained staleness: %v", err)
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	// The goroutine recovers (fresh tick); the streak must reset so a later
+	// brief stall does not inherit the earlier count.
+	setTickForTest(s, GoroutineHealthChecker, time.Now())
+	s.scanTicks(time.Now())
+	if n := s.livenessStreak[GoroutineHealthChecker]; n != 0 {
+		t.Fatalf("streak not reset after recovery: got %d", n)
+	}
+
+	// One more stale scan after recovery must not be enough to fatal.
+	setTickForTest(s, GoroutineHealthChecker, time.Now().Add(-10*time.Minute))
+	s.scanTicks(time.Now())
+	select {
+	case err := <-s.FatalChannel():
+		t.Fatalf("scanTicks fatal after streak should have reset: %v", err)
+	case <-time.After(50 * time.Millisecond):
+	}
+}
+
+// TestScanTicksSkipsFatalOnProcessSuspension guards the sleep/swap/SIGSTOP case:
+// when the watchdog itself did not run for far longer than its interval, every
+// tick looks ancient through no fault of its goroutine, so the scan must skip
+// the fatal and clear streaks rather than crash the daemon on resume.
+func TestScanTicksSkipsFatalOnProcessSuspension(t *testing.T) {
+	s := newHarnessSupervisor()
+	s.RegisterTick(GoroutineHealthChecker)
+	setTickForTest(s, GoroutineHealthChecker, time.Now().Add(-10*time.Minute))
+
+	// Prime a stale streak that is one short of fatal...
+	for i := 0; i < livenessStaleScansBeforeFatal-1; i++ {
+		s.scanTicks(time.Now())
+	}
+	// ...then simulate the process being suspended between scans.
+	s.lastLivenessScan = time.Now().Add(-2 * livenessFreezeGap)
+	s.scanTicks(time.Now())
+
+	select {
+	case err := <-s.FatalChannel():
+		t.Fatalf("scanTicks crashed daemon on process-suspension gap: %v", err)
+	case <-time.After(50 * time.Millisecond):
+	}
+	if len(s.livenessStreak) != 0 {
+		t.Fatalf("streaks not cleared after suspension: %v", s.livenessStreak)
 	}
 }
 

@@ -24,6 +24,7 @@ export interface RepoInfo {
   default_branch: string;
   current_branch?: string;
   remote: string;
+  remote_url?: string;
   source_repo_id?: string;
   groups: string[];
   is_linked_worktree?: boolean;
@@ -313,6 +314,15 @@ export async function createWorkspaceAgent(
     `/api/workspaces/${encodeURIComponent(workspaceId)}/agents`,
     req,
     { timeout: 120_000 },
+  );
+}
+
+export async function deleteWorkspaceAgent(
+  workspaceId: string,
+  name: string,
+): Promise<void> {
+  await del<unknown>(
+    `/api/workspaces/${encodeURIComponent(workspaceId)}/agents/${encodeURIComponent(name)}`,
   );
 }
 

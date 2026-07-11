@@ -37,6 +37,7 @@ type ActivationReason = subscription.ActivationReason
 const (
 	ActivationReasonHTTP     = subscription.ActivationReasonHTTP
 	ActivationReasonRegistry = subscription.ActivationReasonRegistry
+	ActivationReasonSSE      = subscription.ActivationReasonSSE
 )
 
 // SessionRecord is a type alias for sessionhistory.SessionRecord.
@@ -113,6 +114,12 @@ func ValidateIssueID(issueID string) error {
 type SubscriptionModule = subscription.Module
 
 // NewSubscriptionModule creates a new SSE subscription module.
-func NewSubscriptionModule(hub *realtime.Hub, getMutationsSince func(string, string) []rpc.MutationEvent, wsFromCtx func(context.Context) string, sseTokens *realtime.TokenStore) *SubscriptionModule {
-	return subscription.NewModule(hub, getMutationsSince, wsFromCtx, sseTokens)
+func NewSubscriptionModule(
+	hub *realtime.Hub,
+	getMutationsSince func(string, string) []rpc.MutationEvent,
+	wsFromCtx func(context.Context) string,
+	activateWorkspace func(context.Context, string),
+	sseTokens *realtime.TokenStore,
+) *SubscriptionModule {
+	return subscription.NewModule(hub, getMutationsSince, wsFromCtx, activateWorkspace, sseTokens)
 }

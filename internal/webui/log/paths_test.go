@@ -10,10 +10,14 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/tysonthomas9/loomcli/internal/testutil"
 )
 
 // TestGetWorkspaceLogDir verifies workspace-scoped log directory resolution.
 func TestGetWorkspaceLogDir(t *testing.T) {
+	testutil.ClearLoomEnv(t)
+
 	tmpHome, err := filepath.EvalSymlinks(t.TempDir())
 	if err != nil {
 		t.Fatalf("failed to resolve temp dir: %v", err)
@@ -44,6 +48,8 @@ func TestGetWorkspaceLogDir(t *testing.T) {
 }
 
 func TestGetLogDirUsesWorkspaceRuntimeDir(t *testing.T) {
+	testutil.ClearLoomEnv(t)
+
 	runtimeDir, err := filepath.EvalSymlinks(t.TempDir())
 	if err != nil {
 		t.Fatalf("failed to resolve temp dir: %v", err)
@@ -62,6 +68,8 @@ func TestGetLogDirUsesWorkspaceRuntimeDir(t *testing.T) {
 
 // TestGetAgentLogPath_WithWorkspace verifies agent log path includes workspace ID.
 func TestGetAgentLogPath_WithWorkspace(t *testing.T) {
+	testutil.ClearLoomEnv(t)
+
 	tmpHome, err := filepath.EvalSymlinks(t.TempDir())
 	if err != nil {
 		t.Fatalf("failed to resolve temp dir: %v", err)
@@ -92,6 +100,8 @@ func TestGetAgentLogPath_WithWorkspace(t *testing.T) {
 
 // TestGetTaskLogPath_WithWorkspace verifies task log path includes workspace ID.
 func TestGetTaskLogPath_WithWorkspace(t *testing.T) {
+	testutil.ClearLoomEnv(t)
+
 	tmpHome, err := filepath.EvalSymlinks(t.TempDir())
 	if err != nil {
 		t.Fatalf("failed to resolve temp dir: %v", err)
@@ -122,6 +132,8 @@ func TestGetTaskLogPath_WithWorkspace(t *testing.T) {
 
 // TestGetTaskLogDir_WithWorkspace verifies task log directory includes workspace ID.
 func TestGetTaskLogDir_WithWorkspace(t *testing.T) {
+	testutil.ClearLoomEnv(t)
+
 	tmpHome, err := filepath.EvalSymlinks(t.TempDir())
 	if err != nil {
 		t.Fatalf("failed to resolve temp dir: %v", err)
@@ -153,6 +165,8 @@ func TestGetTaskLogDir_WithWorkspace(t *testing.T) {
 // TestListTaskPhases_WithWorkspace creates a workspace-scoped temp dir structure
 // and verifies that phases are listed correctly.
 func TestListTaskPhases_WithWorkspace(t *testing.T) {
+	testutil.ClearLoomEnv(t)
+
 	tmpHome, err := filepath.EvalSymlinks(t.TempDir())
 	if err != nil {
 		t.Fatalf("failed to resolve temp dir: %v", err)
@@ -204,6 +218,8 @@ func TestListTaskPhases_WithWorkspace(t *testing.T) {
 // TestGetAgentLogPath_EmptyWorkspace_UsesDefault verifies that an empty workspace
 // ID falls back to the _default directory.
 func TestGetAgentLogPath_EmptyWorkspace_UsesDefault(t *testing.T) {
+	testutil.ClearLoomEnv(t)
+
 	tmpHome, err := filepath.EvalSymlinks(t.TempDir())
 	if err != nil {
 		t.Fatalf("failed to resolve temp dir: %v", err)

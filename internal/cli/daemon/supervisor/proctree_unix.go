@@ -4,7 +4,9 @@ package supervisor
 
 import (
 	"fmt"
+	"os"
 	"os/exec"
+	"runtime"
 	"strconv"
 	"strings"
 )
@@ -12,7 +14,7 @@ import (
 func init() {
 	procInspector = processInspector{
 		List: psListProcesses,
-		CWD:  lsofProcessCWD,
+		CWD:  processCWD,
 	}
 }
 
@@ -43,6 +45,24 @@ func psListProcesses() ([]procInfo, error) {
 		procs = append(procs, procInfo{PID: pid, PPID: ppid, PGID: pgid})
 	}
 	return procs, nil
+}
+
+func processCWD(pid int) (string, error) {
+	if runtime.GOOS == "linux" {
+		return procProcessCWD(pid)
+	}
+	return lsofProcessCWD(pid)
+}
+
+func procProcessCWD(pid int) (string, error) {
+	if pid <= 1 {
+		return "", nil
+	}
+	cwd, err := os.Readlink("/proc/" + strconv.Itoa(pid) + "/cwd") //nolint:gosec // pid is an int, and the path stays under /proc.
+	if err != nil {
+		return "", nil
+	}
+	return strings.TrimSpace(cwd), nil
 }
 
 // lsofProcessCWD returns the cwd of pid using `lsof -p <pid> -d cwd -F n -a`.

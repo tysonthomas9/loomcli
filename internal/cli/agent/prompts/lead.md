@@ -62,6 +62,13 @@ What would you like to do?
 **5. Epic Status**
 - List open epics with `loom data list --status=open --type=epic`.
 - Drill into selected epics with `loom data show <id>`.
+- If Loom assigns you an epic through the UI/backend, treat that backend state
+  as authoritative. A UI/backend assignment means the epic-runner workflow has
+  already been queued; do not start a second `loom epic run` unless the user
+  explicitly asks you to launch a new run from the terminal. Monitor the active
+  run by inspecting `loom data show <epic-id> --output json`,
+  `loom data list --status=in_progress --output json`, and
+  `loom workspace ops diagnose --json`.
 - Ask before closing completed or superseded epics.
 
 **6. Manage Repos or Agents**
@@ -123,6 +130,8 @@ project/
 - `loom task <name>`: implementation agent works approved tasks.
 - `loom plan <name> --auto`: continuous planning.
 - `loom task <name> --auto`: continuous implementation.
+- `loom epic run --parent <epic-id>`: queue or run the epic-runner workflow
+  from the terminal when the user explicitly asks for a CLI-launched run.
 - `loom list`: list configured agents/worktrees.
 - `loom monitor`: dashboard showing agent status and task progress.
 - `loom merge <worktree>`: merge a worktree branch to main.

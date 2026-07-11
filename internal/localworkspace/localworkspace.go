@@ -16,9 +16,11 @@ import (
 
 // Repo is the local filesystem view of a workspace repository.
 type Repo struct {
-	Name   string
-	Path   string
-	Groups []string
+	Name          string
+	Path          string
+	Remote        string
+	DefaultBranch string
+	Groups        []string
 }
 
 // RepoPath returns the best-known local path for a repo in a workspace.
@@ -35,6 +37,33 @@ func RepoPath(local bootstrap.WorkspaceLocalState, repoName string) string {
 // AgentWorktreePath returns the canonical local worktree path for an agent.
 func AgentWorktreePath(workspacePath, repoName, agentName string) string {
 	return filepath.Join(workspacePath, "worktrees", repoName, agentName)
+}
+
+// TaskRunWorktreePath returns the canonical isolated worktree path for a task
+// run. The path is deliberately separate from agent worktrees so concurrent
+// local-task-runner executions never share a mutable checkout.
+func TaskRunWorktreePath(workspacePath, repoName, taskRunID string) (string, error) {
+	if strings.TrimSpace(workspacePath) == "" {
+		return "", fmt.Errorf("workspace path is empty")
+	}
+	if strings.TrimSpace(repoName) == "" {
+		return "", fmt.Errorf("repo name is empty")
+	}
+	if strings.TrimSpace(taskRunID) == "" {
+		return "", fmt.Errorf("task run id is empty")
+	}
+	root, err := filepath.Abs(workspacePath)
+	if err != nil {
+		return "", err
+	}
+	target, err := filepath.Abs(filepath.Join(root, ".loom", "task-worktrees", safePathSegment(repoName), safePathSegment(taskRunID)))
+	if err != nil {
+		return "", err
+	}
+	if !PathContains(root, target) || root == target {
+		return "", fmt.Errorf("task worktree path escapes workspace: %s", target)
+	}
+	return target, nil
 }
 
 // RepoCheckoutPath returns a safe direct child path under workspacePath.
@@ -86,13 +115,54 @@ func CloneRepoTo(ctx context.Context, cloneURL, targetPath string) error {
 
 // EnsureGitWorktree creates a git worktree at targetPath from repoPath.
 func EnsureGitWorktree(repoPath, targetPath, branchName string) error {
+	return EnsureGitWorktreeFromBranch(repoPath, targetPath, branchName, "", "")
+}
+
+// EnsureDetachedGitWorktreeFromBranch creates a detached git worktree at
+// targetPath from the latest available remote/defaultBranch ref. Existing
+// worktrees are left untouched.
+func EnsureDetachedGitWorktreeFromBranch(repoPath, targetPath, remoteName, defaultBranch string) error {
 	if _, err := os.Stat(filepath.Join(targetPath, ".git")); err == nil {
 		return nil
 	}
 	if err := os.MkdirAll(filepath.Dir(targetPath), 0o755); err != nil {
 		return fmt.Errorf("creating worktree parent: %w", err)
 	}
-	if out, err := runGit(repoPath, "worktree", "add", targetPath, "-b", branchName); err == nil {
+
+	baseRef, err := resolveFreshBaseRef(repoPath, remoteName, defaultBranch)
+	if err != nil {
+		return err
+	}
+	args := []string{"worktree", "add", "--detach", targetPath}
+	if baseRef != "" {
+		args = append(args, baseRef)
+	}
+	_, err = runGit(repoPath, args...)
+	return err
+}
+
+// EnsureGitWorktreeFromBranch creates a git worktree at targetPath. When
+// defaultBranch is provided, the new branch is created from the latest fetched
+// remote/defaultBranch ref when available, falling back to the local branch.
+// Existing worktrees are left untouched.
+func EnsureGitWorktreeFromBranch(repoPath, targetPath, branchName, remoteName, defaultBranch string) error {
+	if _, err := os.Stat(filepath.Join(targetPath, ".git")); err == nil {
+		return nil
+	}
+	if err := os.MkdirAll(filepath.Dir(targetPath), 0o755); err != nil {
+		return fmt.Errorf("creating worktree parent: %w", err)
+	}
+
+	baseRef, err := resolveFreshBaseRef(repoPath, remoteName, defaultBranch)
+	if err != nil {
+		return err
+	}
+
+	args := []string{"worktree", "add", targetPath, "-b", branchName}
+	if baseRef != "" {
+		args = append(args, baseRef)
+	}
+	if out, err := runGit(repoPath, args...); err == nil {
 		return nil
 	} else if !branchAlreadyExists(out, err) {
 		return err
@@ -101,6 +171,35 @@ func EnsureGitWorktree(repoPath, targetPath, branchName string) error {
 		return err
 	}
 	return nil
+}
+
+func resolveFreshBaseRef(repoPath, remoteName, defaultBranch string) (string, error) {
+	defaultBranch = strings.TrimSpace(defaultBranch)
+	if defaultBranch == "" {
+		return "", nil
+	}
+	remoteName = strings.TrimSpace(remoteName)
+	if remoteName == "" {
+		remoteName = "origin"
+	}
+
+	if _, err := runGit(repoPath, "remote", "get-url", remoteName); err == nil {
+		if _, err := runGit(repoPath, "fetch", remoteName, defaultBranch); err != nil {
+			if _, localErr := runGit(repoPath, "rev-parse", "--verify", defaultBranch); localErr == nil {
+				return defaultBranch, nil
+			}
+			return "", fmt.Errorf("fetch base branch %q from %q: %w", defaultBranch, remoteName, err)
+		}
+		return remoteName + "/" + defaultBranch, nil
+	}
+
+	if _, err := runGit(repoPath, "fetch", remoteName, defaultBranch); err == nil {
+		return remoteName + "/" + defaultBranch, nil
+	}
+	if _, err := runGit(repoPath, "rev-parse", "--verify", defaultBranch); err != nil {
+		return "", fmt.Errorf("resolve base branch %q: %w", defaultBranch, err)
+	}
+	return defaultBranch, nil
 }
 
 func runGit(dir string, args ...string) (string, error) {
@@ -113,6 +212,21 @@ func runGit(dir string, args ...string) (string, error) {
 	return string(out), nil
 }
 
+// GitRemoteURL returns the configured URL of the named remote (default "origin")
+// for the git checkout at dir. It returns an error when dir is not a git work
+// tree or the remote is unset — callers treat that as the "not a usable
+// checkout" signal (e.g. workspace local-path self-heal verification).
+func GitRemoteURL(dir, remote string) (string, error) {
+	if strings.TrimSpace(remote) == "" {
+		remote = "origin"
+	}
+	out, err := runGit(dir, "remote", "get-url", remote)
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(out), nil
+}
+
 func branchAlreadyExists(out string, err error) bool {
 	msg := out
 	if err != nil {
@@ -121,6 +235,30 @@ func branchAlreadyExists(out string, err error) bool {
 	return strings.Contains(msg, "already exists") ||
 		strings.Contains(msg, "already a worktree") ||
 		strings.Contains(msg, "already checked out")
+}
+
+func safePathSegment(value string) string {
+	value = strings.TrimSpace(value)
+	var b strings.Builder
+	for _, r := range value {
+		switch {
+		case r >= 'a' && r <= 'z':
+			b.WriteRune(r)
+		case r >= 'A' && r <= 'Z':
+			b.WriteRune(r)
+		case r >= '0' && r <= '9':
+			b.WriteRune(r)
+		case r == '.', r == '_', r == '-':
+			b.WriteRune(r)
+		default:
+			b.WriteByte('-')
+		}
+	}
+	out := strings.Trim(b.String(), ".-")
+	if out == "" {
+		return "unnamed"
+	}
+	return out
 }
 
 // SelectAgentRepos applies an agent's repo affinity to local repos.

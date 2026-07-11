@@ -140,9 +140,6 @@ type WorkFilter struct {
 	// Molecule type filtering
 	MolType *MolType // Filter by molecule type (nil = any, swarm/patrol/work)
 
-	// Time-based deferral filtering (GH#820)
-	IncludeDeferred bool // If true, include issues with future defer_until timestamps
-
 	// Molecule step filtering
 	// By default, GetReadyWork excludes mol/wisp steps (IDs containing -mol- or -wisp-)
 	// Set to true for internal callers that need to see mol steps (e.g., findGateReadyMolecules)

@@ -4,6 +4,7 @@
  */
 
 import type { Issue } from "@/types";
+import { formatStatusLabel } from "@/utils/issue";
 
 /**
  * Field by which to group issues into swim lanes.
@@ -149,7 +150,7 @@ function groupIssuesByEpic(issues: Issue[]): LaneGroup[] {
   for (const key of laneKeys) {
     const groupIssue = epicIssues.get(key);
     const groupIssues = childGroups.get(key) ?? [];
-    const title = groupIssue?.title ?? parentTitles.get(key) ?? key;
+    const title = groupIssue?.title ?? parentTitles.get(key) ?? "Untitled epic";
     lanes.push({
       id: getLaneId("epic", key),
       title,
@@ -242,7 +243,7 @@ function getLaneTitle(
     case "type": {
       if (key === "__no_type__") return "No Type";
       // Capitalize first letter
-      return key.charAt(0).toUpperCase() + key.slice(1);
+      return formatStatusLabel(key);
     }
     case "label": {
       if (key === "__no_labels__") return "No Labels";

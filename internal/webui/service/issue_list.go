@@ -73,9 +73,8 @@ func (s *issueServiceImpl) ListIssues(ctx context.Context, params ListIssuesPara
 }
 
 // buildResultFromKanbanRPC converts the composite RPC response into the
-// service-layer result shape. When includeBlocked is true, client-side blocker
-// refinement runs against the fetched set; blockers are considered resolved
-// only when closed.
+// service-layer result shape. Kanban state flags are passed through from the
+// RPC response; this layer does not rebuild computed queues from raw issue data.
 func buildResultFromKanbanRPC(resp *rpc.ListKanbanResponse, includeBlocked bool) *ListIssuesResult {
 	if !includeBlocked {
 		issuesWithParent := make([]IssueWithParent, len(resp.Issues))
@@ -85,15 +84,9 @@ func buildResultFromKanbanRPC(resp *rpc.ListKanbanResponse, includeBlocked bool)
 		return &ListIssuesResult{Issues: issuesWithParent}
 	}
 
-	iwcSlice := make([]*types.IssueWithCounts, len(resp.Issues))
-	for i, ki := range resp.Issues {
-		iwcSlice[i] = ki.IssueWithCounts
-	}
-	unclosedIDs, issueMap := buildUnclosedSetsFromFetched(iwcSlice)
-
 	kanbanIssues := make([]KanbanIssue, len(resp.Issues))
 	for i, ki := range resp.Issues {
-		kanbanIssues[i] = kanbanRPCToKanbanIssue(ki, unclosedIDs, issueMap)
+		kanbanIssues[i] = kanbanRPCToKanbanIssue(ki)
 	}
 	return &ListIssuesResult{KanbanIssues: kanbanIssues}
 }
@@ -112,7 +105,7 @@ func kanbanRPCToIssueWithParent(ki *rpc.KanbanIssueRPC) IssueWithParent {
 	return iwp
 }
 
-func kanbanRPCToKanbanIssue(ki *rpc.KanbanIssueRPC, unclosedIDs map[string]bool, issueMap map[string]*types.IssueWithCounts) KanbanIssue {
+func kanbanRPCToKanbanIssue(ki *rpc.KanbanIssueRPC) KanbanIssue {
 	out := KanbanIssue{IssueWithCounts: ki.IssueWithCounts}
 	if ki.ParentID != "" {
 		pid, pt := ki.ParentID, ki.ParentTitle
@@ -123,17 +116,16 @@ func kanbanRPCToKanbanIssue(ki *rpc.KanbanIssueRPC, unclosedIDs map[string]bool,
 		repo := ki.Repo
 		out.Repo = &repo
 	}
-	refs := getUnclosedBlockerRefs(ki.Issue.Dependencies, unclosedIDs, issueMap)
-	if len(refs) > 0 {
-		out.IsBlocked = true
-		out.BlockedByCount = len(refs)
-		out.BlockedBy = extractBlockerIDs(refs)
-		out.BlockedByDetails = refs
-	} else if ki.IsBlocked {
+	out.IsReady = ki.IsReady
+	out.IsDeferred = ki.IsDeferred
+	if ki.IsBlocked || ki.BlockedByCount > 0 || len(ki.BlockedBy) > 0 || len(ki.BlockedByDetails) > 0 {
 		out.IsBlocked = true
 		out.BlockedByCount = ki.BlockedByCount
 		out.BlockedBy = ki.BlockedBy
 		out.BlockedByDetails = ki.BlockedByDetails
+		if out.BlockedByCount == 0 {
+			out.BlockedByCount = len(out.BlockedBy)
+		}
 	}
 	return out
 }
@@ -171,9 +163,18 @@ func (s *issueServiceImpl) listIssuesViaBackend(
 	if err != nil {
 		return nil, err
 	}
+	readyByID, err := s.readyIssueIDMap(ctx, be, params.Args)
+	if err != nil {
+		return nil, err
+	}
+	deferredByID, err := s.deferredIssueMap(ctx, be, params.Args)
+	if err != nil {
+		return nil, err
+	}
 	issues = appendMissingBlockedIssues(issues, blockedByID)
+	issues = appendMissingDeferredIssues(issues, deferredByID)
 
-	return &ListIssuesResult{KanbanIssues: backendKanbanIssues(issues, blockedByID)}, nil
+	return &ListIssuesResult{KanbanIssues: backendKanbanIssues(issues, blockedByID, readyByID, deferredByID)}, nil
 }
 
 // Apply ExcludeStatus client-side. fleet-db's ListOpts has a single Status
@@ -222,14 +223,28 @@ func appendMissingBlockedIssues(
 	issues []backend.IssueData,
 	blockedByID map[string]backend.IssueData,
 ) []backend.IssueData {
-	if len(blockedByID) == 0 {
+	return appendMissingIssueData(issues, blockedByID)
+}
+
+func appendMissingDeferredIssues(
+	issues []backend.IssueData,
+	deferredByID map[string]backend.IssueData,
+) []backend.IssueData {
+	return appendMissingIssueData(issues, deferredByID)
+}
+
+func appendMissingIssueData(
+	issues []backend.IssueData,
+	byID map[string]backend.IssueData,
+) []backend.IssueData {
+	if len(byID) == 0 {
 		return issues
 	}
 	seen := make(map[string]bool, len(issues))
 	for _, d := range issues {
 		seen[d.ID] = true
 	}
-	for _, d := range blockedByID {
+	for _, d := range byID {
 		if !seen[d.ID] {
 			issues = append(issues, d)
 		}
@@ -240,19 +255,18 @@ func appendMissingBlockedIssues(
 func backendKanbanIssues(
 	issues []backend.IssueData,
 	blockedByID map[string]backend.IssueData,
+	readyByID map[string]bool,
+	deferredByID map[string]backend.IssueData,
 ) []KanbanIssue {
 	out := make([]KanbanIssue, len(issues))
 	for i, d := range issues {
-		out[i] = backendKanbanIssue(d, blockedByID[d.ID])
+		_, deferred := deferredByID[d.ID]
+		out[i] = backendKanbanIssue(d, blockedByID[d.ID], readyByID[d.ID], deferred)
 	}
 	return out
 }
 
-func backendKanbanIssue(d backend.IssueData, blocked backend.IssueData) KanbanIssue {
-	if blocked.ID != "" && (d.Status == "" || d.Status == string(types.StatusOpen)) {
-		d.Status = string(types.StatusBlocked)
-	}
-
+func backendKanbanIssue(d backend.IssueData, blocked backend.IssueData, ready bool, deferred bool) KanbanIssue {
 	iwc := backendIssueDataToWithCounts(&d)
 	ki := KanbanIssue{IssueWithCounts: iwc}
 	if d.Parent != "" {
@@ -266,6 +280,8 @@ func backendKanbanIssue(d backend.IssueData, blocked backend.IssueData) KanbanIs
 	if blocked.ID != "" {
 		applyBlockedSummary(&ki, blocked)
 	}
+	ki.IsDeferred = deferred || d.Status == string(types.StatusDeferred)
+	ki.IsReady = ready && !ki.IsBlocked && !ki.IsDeferred
 	return ki
 }
 
@@ -275,9 +291,6 @@ func applyBlockedSummary(ki *KanbanIssue, blocked backend.IssueData) {
 	ki.BlockedBy = append([]string(nil), blocked.BlockedBy...)
 	if ki.BlockedByCount == 0 {
 		ki.BlockedByCount = len(ki.BlockedBy)
-	}
-	if ki.BlockedByCount == 0 {
-		ki.BlockedByCount = 1
 	}
 }
 
@@ -298,15 +311,91 @@ func (s *issueServiceImpl) blockedIssueMap(
 	return out, nil
 }
 
+func (s *issueServiceImpl) readyIssueIDMap(
+	ctx context.Context,
+	be backend.IssueBackend,
+	args *rpc.ListArgs,
+) (map[string]bool, error) {
+	ready, err := be.Ready(ctx, readyOptsFromListArgs(args))
+	if err != nil {
+		slog.Error("backend error in ListIssues.Ready", "err", err)
+		return nil, translateBackendError(err)
+	}
+	return issueIDSet(ready), nil
+}
+
+func (s *issueServiceImpl) deferredIssueMap(
+	ctx context.Context,
+	be backend.IssueBackend,
+	args *rpc.ListArgs,
+) (map[string]backend.IssueData, error) {
+	deferredBackend, ok := be.(backend.DeferredIssueBackend)
+	if !ok {
+		return map[string]backend.IssueData{}, nil
+	}
+	deferred, err := deferredBackend.Deferred(ctx, deferredOptsFromListArgs(args))
+	if err != nil {
+		slog.Error("backend error in ListIssues.Deferred", "err", err)
+		return nil, translateBackendError(err)
+	}
+	return issueDataMap(deferred), nil
+}
+
+func issueIDSet(issues []backend.IssueData) map[string]bool {
+	out := make(map[string]bool, len(issues))
+	for _, d := range issues {
+		out[d.ID] = true
+	}
+	return out
+}
+
+func issueDataMap(issues []backend.IssueData) map[string]backend.IssueData {
+	out := make(map[string]backend.IssueData, len(issues))
+	for _, d := range issues {
+		out[d.ID] = d
+	}
+	return out
+}
+
+func readyOptsFromListArgs(args *rpc.ListArgs) backend.ReadyOpts {
+	if args == nil {
+		return backend.ReadyOpts{}
+	}
+	return backend.ReadyOpts{
+		ParentID:    args.ParentID,
+		Assignee:    args.Assignee,
+		Priority:    args.Priority,
+		Type:        args.IssueType,
+		Labels:      args.Labels,
+		SourceRepos: args.SourceRepos,
+	}
+}
+
+func deferredOptsFromListArgs(args *rpc.ListArgs) backend.DeferredOpts {
+	if args == nil {
+		return backend.DeferredOpts{}
+	}
+	return backend.DeferredOpts{
+		ParentID:    args.ParentID,
+		Assignee:    args.Assignee,
+		Priority:    args.Priority,
+		Type:        args.IssueType,
+		Labels:      args.Labels,
+		SourceRepos: args.SourceRepos,
+	}
+}
+
 func blockedOptsFromListArgs(args *rpc.ListArgs) backend.BlockedOpts {
 	if args == nil {
 		return backend.BlockedOpts{}
 	}
 	return backend.BlockedOpts{
-		ParentID: args.ParentID,
-		Assignee: args.Assignee,
-		Priority: args.Priority,
-		Type:     args.IssueType,
+		ParentID:    args.ParentID,
+		Assignee:    args.Assignee,
+		Priority:    args.Priority,
+		Type:        args.IssueType,
+		Labels:      args.Labels,
+		SourceRepos: args.SourceRepos,
 	}
 }
 
@@ -329,6 +418,7 @@ func backendIssueDataToWithCounts(d *backend.IssueData) *types.IssueWithCounts {
 		Owner:       d.Owner,
 		Labels:      d.Labels,
 		Design:      d.Design,
+		Notes:       d.Notes,
 		CreatedAt:   d.CreatedAt,
 		UpdatedAt:   d.UpdatedAt,
 		DueAt:       d.DueAt,
@@ -340,12 +430,20 @@ func backendIssueDataToWithCounts(d *backend.IssueData) *types.IssueWithCounts {
 	if d.SourceRepo != "" {
 		issue.SourceRepo = d.SourceRepo
 	}
+	if d.ExternalRef != "" {
+		ref := d.ExternalRef
+		issue.ExternalRef = &ref
+	}
 	return &types.IssueWithCounts{
 		Issue:           issue,
 		DependencyCount: d.DependencyCount,
 		DependentCount:  d.DependentCount,
 	}
 }
+
+// (note: backendIssueDataToWithCounts must carry Notes — see
+// TestBackendIssueDataToWithCounts_CarriesNotes — so the kanban board can
+// compute the "blocked with notes" needs-attention state.)
 
 // listArgsToBackendOpts converts the rpc.ListArgs the webui handler
 // composes for the daemon path into the backend.ListOpts shape. We map
@@ -358,11 +456,12 @@ func listArgsToBackendOpts(a *rpc.ListArgs) backend.ListOpts {
 		return backend.ListOpts{}
 	}
 	return backend.ListOpts{
-		Status:    a.Status,
-		IssueType: a.IssueType,
-		Assignee:  a.Assignee,
-		Labels:    a.Labels,
-		ParentID:  a.ParentID,
-		Limit:     a.Limit,
+		Status:      a.Status,
+		IssueType:   a.IssueType,
+		Assignee:    a.Assignee,
+		Labels:      a.Labels,
+		ParentID:    a.ParentID,
+		Limit:       a.Limit,
+		SourceRepos: a.SourceRepos,
 	}
 }

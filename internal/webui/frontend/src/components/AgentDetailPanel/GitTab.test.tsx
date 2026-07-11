@@ -568,6 +568,31 @@ describe("GitTab", () => {
     });
   });
 
+  describe("create PR action", () => {
+    it("shows Create PR in the history header", async () => {
+      mockGitStatusReturn = {
+        status: {
+          branch: "feature-x",
+          target_branch: "main",
+          is_clean: true,
+          ahead: 3,
+          behind: 0,
+          changed_files: [],
+          conflicted_files: [],
+          has_conflicts: false,
+          stash_count: 0,
+        },
+        loading: false,
+        error: null,
+      };
+
+      await renderGitTab(makeAgent());
+
+      expect(screen.getByText("Create PR")).toBeInTheDocument();
+      expect(screen.queryByText(/^Push/)).not.toBeInTheDocument();
+    });
+  });
+
   describe("hook invocation", () => {
     it("passes agent name and enabled=true to useGitStatus", async () => {
       await renderGitTab(makeAgent({ name: "nova" }));

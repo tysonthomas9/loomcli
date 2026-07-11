@@ -1,6 +1,7 @@
 package cmdstore
 
 import (
+	"bytes"
 	"context"
 	"testing"
 	"time"
@@ -9,6 +10,44 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
+
+// TestTracedArtifactStore_ForwardsReadContent guards the cross-node transcript path:
+// the tracing wrapper must expose ArtifactContentReader and forward to the inner store.
+// Without this the type assertion in session_service.readTranscriptRef fails and a
+// non-owning serve node silently falls back to the node-local artifact URI (which it
+// can't read) — exactly the 500 the distributed smoke caught.
+func TestTracedArtifactStore_ForwardsReadContent(t *testing.T) {
+	inner := memstore.New()
+	wrapped := WrapStoreWithTracing(inner)
+
+	reader, ok := wrapped.Artifacts().(store.ArtifactContentReader)
+	if !ok {
+		t.Fatal("traced Artifacts() does not implement ArtifactContentReader")
+	}
+
+	ctx := context.Background()
+	const ws, id = "WS", "transcript-1"
+	body := []byte(`{"role":"system","type":"session_meta"}` + "\n")
+	if _, err := store.UploadContentArtifact(ctx, inner.Artifacts(), store.ArtifactCreate{
+		WorkspaceKey:  ws,
+		ArtifactID:    id,
+		OwnerType:     "session",
+		OwnerID:       "s1",
+		Type:          "transcript",
+		MIMEType:      "application/x-ndjson",
+		DurableStatus: "declared",
+	}, body); err != nil {
+		t.Fatalf("seed inner artifact: %v", err)
+	}
+
+	got, err := reader.ReadContent(ctx, ws, id)
+	if err != nil {
+		t.Fatalf("ReadContent through tracing wrapper: %v", err)
+	}
+	if !bytes.Equal(got, body) {
+		t.Fatalf("ReadContent = %q, want %q", got, body)
+	}
+}
 
 // TestWrapStoreWithTracing_Smoke exercises every traced substore method so
 // the span-decorator paths are reached. We don't assert behavior — the
@@ -40,6 +79,15 @@ func TestWrapStoreWithTracing_Smoke(t *testing.T) {
 	_ = wrapped.AgentLeases()
 	_ = wrapped.AgentOwnershipLeases()
 	_ = wrapped.AgentCommands()
+	_ = wrapped.Drivers()
+	_ = wrapped.DriverVersions()
+	_ = wrapped.AgentServices()
+	_ = wrapped.TriggerBindings()
+	_ = wrapped.DriverRuns()
+	_ = wrapped.DriverSteps()
+	_ = wrapped.TaskRuns()
+	_ = wrapped.TaskRunEvents()
+	_ = wrapped.Outbox()
 	_ = wrapped.Roles()
 	_ = wrapped.Daemon()
 
@@ -71,9 +119,16 @@ func TestWrapStoreWithTracing_Smoke(t *testing.T) {
 
 	roles := wrapped.Roles()
 	_, _ = roles.Create(ctx, store.RoleCreate{WorkspaceKey: "TEST", Name: "worker"})
+	_, _ = roles.Create(ctx, store.RoleCreate{WorkspaceKey: "TEST", Name: "lead"})
 	_, _ = roles.Get(ctx, "TEST", "worker")
 	_, _ = roles.List(ctx, "TEST")
 	_, _ = roles.Update(ctx, "TEST", "worker", store.RoleUpdate{})
+
+	profiles := wrapped.WorkerProfiles()
+	_, _ = profiles.Create(ctx, store.WorkerProfileCreate{WorkspaceKey: "TEST", ProfileID: "falcon", Role: "lead"})
+	_, _ = profiles.Get(ctx, "TEST", "falcon")
+	_, _ = profiles.List(ctx, "TEST", store.WorkerProfileFilter{})
+	_, _ = profiles.Update(ctx, "TEST", "falcon", store.WorkerProfileUpdate{})
 
 	nodes := wrapped.Nodes()
 	_, _ = nodes.Create(ctx, store.NodeCreate{WorkspaceKey: "TEST", NodeID: "node-1", OwnerActor: "test", RuntimeProvider: domain.RuntimeProviderLocal, TTL: time.Minute})
@@ -98,6 +153,8 @@ func TestWrapStoreWithTracing_Smoke(t *testing.T) {
 	_, _ = artifacts.Create(ctx, store.ArtifactCreate{WorkspaceKey: "TEST", ArtifactID: "art-1", Type: "log"})
 	_, _ = artifacts.Get(ctx, "TEST", "art-1")
 	_, _ = artifacts.List(ctx, "TEST", store.ArtifactFilter{})
+	_, _ = artifacts.UploadContent(ctx, "TEST", "art-1", store.ArtifactContentUpload{Body: bytes.NewReader([]byte("artifact"))})
+	_, _ = artifacts.Finalize(ctx, "TEST", "art-1", store.ArtifactFinalize{})
 	_, _ = artifacts.Update(ctx, "TEST", "art-1", store.ArtifactUpdate{})
 
 	leases := wrapped.AgentLeases()
@@ -121,12 +178,130 @@ func TestWrapStoreWithTracing_Smoke(t *testing.T) {
 	_, _ = cmds.Ack(ctx, "TEST", "cmd-1")
 	_, _ = cmds.Complete(ctx, "TEST", "cmd-1", store.AgentCommandComplete{Status: domain.AgentCommandSucceeded})
 
+	drivers := wrapped.Drivers()
+	_, _ = drivers.Create(ctx, store.DriverCreate{WorkspaceKey: "TEST", DriverID: "driver-1", Name: "epic-runner", OwnerType: domain.DriverOwnerSystem, Status: domain.DriverStatusActive})
+	_, _ = drivers.Get(ctx, "TEST", "driver-1")
+	_, _ = drivers.List(ctx, "TEST", store.DriverFilter{})
+	_, _ = drivers.Update(ctx, "TEST", "driver-1", store.DriverUpdate{})
+
+	versions := wrapped.DriverVersions()
+	_, _ = versions.Create(ctx, store.DriverVersionCreate{
+		WorkspaceKey:     "TEST",
+		VersionID:        "version-1",
+		DriverID:         "driver-1",
+		Version:          1,
+		SourceDigest:     "sha256:source",
+		BundleDigest:     "sha256:bundle",
+		ValidationStatus: domain.DriverVersionValidationPassed,
+	})
+	_, _ = versions.Get(ctx, "TEST", "version-1")
+	_, _ = versions.List(ctx, "TEST", store.DriverVersionFilter{})
+
+	services := wrapped.AgentServices()
+	_, _ = services.Create(ctx, store.AgentServiceCreate{
+		WorkspaceKey:  "TEST",
+		ServiceID:     "lead",
+		Kind:          domain.AgentServiceKindLead,
+		DesiredState:  domain.AgentServiceDesiredRunning,
+		RoleName:      "lead",
+		ProfileName:   "falcon",
+		MaxInstances:  1,
+		EventSources:  []string{"github:issues"},
+		Permissions:   []string{"task_run.create"},
+		RestartPolicy: "always",
+	})
+	_, _ = services.Get(ctx, "TEST", "lead")
+	_, _ = services.List(ctx, "TEST", store.AgentServiceFilter{Kind: domain.AgentServiceKindLead})
+	paused := domain.AgentServiceDesiredPaused
+	_, _ = services.Update(ctx, "TEST", "lead", store.AgentServiceUpdate{DesiredState: &paused})
+
+	bindings := wrapped.TriggerBindings()
+	_, _ = bindings.Create(ctx, store.TriggerBindingCreate{
+		WorkspaceKey:      "TEST",
+		BindingID:         "binding-1",
+		Name:              "Epic runner",
+		SourceKind:        "http",
+		RouteKey:          "epics.runs.create",
+		Method:            "POST",
+		PathTemplate:      "/epics/{epic_id}/runs",
+		DriverID:          "driver-1",
+		DriverVersionID:   "version-1",
+		TargetEntrypoint:  "run",
+		ConcurrencyPolicy: domain.TriggerBindingConcurrencyOneActivePerEpic,
+		IdempotencyPolicy: "header:Idempotency-Key",
+		AuthPolicy:        "workspace_user",
+		Enabled:           true,
+	})
+	_, _ = bindings.Get(ctx, "TEST", "binding-1")
+	_, _ = bindings.GetByRouteKey(ctx, "TEST", "epics.runs.create")
+	_, _ = bindings.List(ctx, "TEST", store.TriggerBindingFilter{})
+	_, _ = bindings.Update(ctx, "TEST", "binding-1", store.TriggerBindingUpdate{})
+
+	driverRuns := wrapped.DriverRuns()
+	_, _ = driverRuns.Create(ctx, store.DriverRunCreate{
+		WorkspaceKey:    "TEST",
+		RunID:           "driver-run-1",
+		DriverID:        "driver-1",
+		DriverVersionID: "version-1",
+		EpicID:          "TEST-1",
+		IdempotencyKey:  "idem-driver-run-1",
+		Payload:         []byte(`{"epicId":"TEST-1"}`),
+	})
+	_, _ = driverRuns.CreateEpic(ctx, "TEST", "TEST-2", store.EpicRunCreate{
+		RunID:          "driver-run-epic",
+		IdempotencyKey: "idem-driver-run-epic",
+		Payload:        []byte(`{"epicId":"wrong"}`),
+	})
+	_, _ = driverRuns.Get(ctx, "TEST", "driver-run-1")
+	_, _ = driverRuns.List(ctx, "TEST", store.DriverRunFilter{})
+	if reader, ok := driverRuns.(store.DriverRunEventsReader); ok {
+		_, _ = reader.Events(ctx, "TEST", "driver-run-1", "", 10)
+	} else {
+		t.Error("traced DriverRuns store does not preserve event reader")
+	}
+	claimed, _ := driverRuns.Claim(ctx, "TEST", "driver-run-1", "node-1", "driver-lease-1")
+	fence := int64(1)
+	if claimed != nil {
+		fence = claimed.FencingToken
+	}
+	_, _ = driverRuns.Heartbeat(ctx, "TEST", "driver-run-1", "node-1", "driver-lease-1", fence)
+
+	driverSteps := wrapped.DriverSteps()
+	_, _ = driverSteps.Create(ctx, store.DriverStepCreate{WorkspaceKey: "TEST", StepID: "driver-step-1", DriverRunID: "driver-run-1", StepKind: "custom_vendor_gate", Status: domain.DriverStepWaiting, NodeID: "node-1", LeaseID: "driver-lease-1", FencingToken: fence})
+	_, _ = driverSteps.CreateForRun(ctx, "TEST", "driver-run-1", store.DriverStepCreate{StepID: "driver-step-2", StepKind: "run_agent", NodeID: "node-1", LeaseID: "driver-lease-1", FencingToken: fence})
+	_, _ = driverSteps.Get(ctx, "TEST", "driver-step-1")
+	_, _ = driverSteps.List(ctx, "TEST", store.DriverStepFilter{DriverRunID: "driver-run-1"})
+	_, _ = driverSteps.ListForRun(ctx, "TEST", "driver-run-1", store.DriverStepFilter{})
+	completedStep := domain.DriverStepCompleted
+	_, _ = driverSteps.Update(ctx, "TEST", "driver-step-1", store.DriverStepUpdate{Status: &completedStep, NodeID: "node-1", LeaseID: "driver-lease-1", FencingToken: fence})
+	_, _ = driverRuns.Finish(ctx, "TEST", "driver-run-1", store.DriverRunFinish{NodeID: "node-1", LeaseID: "driver-lease-1", FencingToken: fence, Status: domain.DriverRunCompleted})
+
+	taskRuns := wrapped.TaskRuns()
+	_, _ = taskRuns.Create(ctx, store.TaskRunCreate{WorkspaceKey: "TEST", TaskRunID: "task-run-1", DriverRunID: "driver-run-1", TaskID: "TEST-1", Status: domain.TaskRunRunning})
+	_, _ = taskRuns.Get(ctx, "TEST", "task-run-1")
+	_, _ = taskRuns.List(ctx, "TEST", store.TaskRunFilter{})
+	exitCode := 0
+	_, _ = taskRuns.Finish(ctx, "TEST", "task-run-1", store.TaskRunFinish{Status: domain.TaskRunCompleted, ExitCode: &exitCode, LogsRef: "logs://task-run-1"})
+
+	taskRunEvents := wrapped.TaskRunEvents()
+	_, _ = taskRunEvents.Append(ctx, store.TaskRunEventAppend{WorkspaceKey: "TEST", TaskRunID: "task-run-1", Type: domain.TaskRunEventQueued, Status: domain.TaskRunQueued, Attempt: 1, OccurredAt: time.Now().UTC()})
+	_, _ = taskRunEvents.ListSince(ctx, "TEST", store.TaskRunEventFilter{})
+
+	outbox := wrapped.Outbox()
+	_, _ = outbox.Create(ctx, store.OutboxCreate{WorkspaceKey: "TEST", OutboxID: "outbox-1", Kind: domain.OutboxKindLeadAssignment, EpicID: "TEST-1", TargetAgent: "lead", DedupeKey: "dk-1"})
+	_, _ = outbox.ListDue(ctx, "TEST", store.OutboxDueFilter{Now: time.Now().UTC()})
+	_, _ = outbox.MarkResult(ctx, "TEST", "outbox-1", store.OutboxDeliveryUpdate{Status: domain.OutboxStatusDelivered, Attempt: 1})
+	_, _ = outbox.Get(ctx, "TEST", "outbox-1")
+	// Error path on a missing key.
+	_, _ = outbox.Get(ctx, "TEST", "missing")
+
 	daemon := wrapped.Daemon()
 	_, _ = daemon.Get(ctx, "TEST")
 	_, _ = daemon.Upsert(ctx, &domain.DaemonProfile{WorkspaceKey: "TEST"})
 
 	// Cleanup paths.
 	_ = roles.Delete(ctx, "TEST", "worker")
+	_ = services.Delete(ctx, "TEST", "lead")
 	_ = agents.Delete(ctx, "TEST", "agent")
 	_ = repos.Delete(ctx, "TEST", "repo")
 	_ = ws.Delete(ctx, "TEST")

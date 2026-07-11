@@ -29,6 +29,24 @@ type Store interface {
 	AgentLeases() AgentLeaseStore
 	AgentOwnershipLeases() AgentOwnershipLeaseStore
 	AgentCommands() AgentCommandStore
+	AgentInboxMessages() AgentInboxMessageStore
+	Drivers() DriverStore
+	DriverVersions() DriverVersionStore
+	WorkerProfiles() WorkerProfileStore
+	AgentServices() AgentServiceStore
+	TriggerBindings() TriggerBindingStore
+	TriggerEvents() TriggerEventStore
+	TriggerDeliveries() TriggerDeliveryStore
+	TriggerRoutes() TriggerRouteDispatcher
+	DriverRuns() DriverRunStore
+	DriverSteps() DriverStepStore
+	TaskRuns() TaskRunStore
+	TaskRunEvents() TaskRunEventStore
+	Outbox() OutboxStore
+	Awaits() AwaitStore
+	Connectors() ConnectorStore
+	ConnectorGrants() ConnectorGrantStore
+	ConnectorCalls() ConnectorAuditStore
 	Workers() WorkerStore
 	Roles() RoleStore
 	Daemon() DaemonProfileStore

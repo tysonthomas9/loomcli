@@ -6,18 +6,44 @@
 .tabBar {
   display: flex;
   align-items: center;
-  height: 36px;
+  height: 40px;
+  min-width: 0;
+  position: relative;
+  z-index: var(--z-dropdown, 100);
+  overflow: visible;
   background-color: var(--terminal-surface);
   border-bottom: 1px solid var(--terminal-border);
   font-family: var(--font-family-base);
 }
 
+.tabStrip {
+  display: flex;
+  flex: 1 1 0;
+  align-items: stretch;
+  width: max-content;
+  max-width: 100%;
+  height: 100%;
+  min-width: 0;
+  /* tabList scrolls internally; do not clip the "+" backend menu */
+  overflow: visible;
+}
+
 .tabList {
   display: flex;
-  flex: 1;
+  flex: 0 1 auto;
+  min-width: 0;
   height: 100%;
   overflow-x: auto;
+  overflow-y: hidden;
   scrollbar-width: none;
+}
+
+.toolbarActions {
+  display: flex;
+  flex-shrink: 0;
+  align-items: stretch;
+  height: 100%;
+  margin-left: auto;
 }
 
 .tabList::-webkit-scrollbar {
@@ -28,7 +54,10 @@
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 0 12px;
+  flex: 0 0 var(--terminal-tab-width, 160px);
+  width: var(--terminal-tab-width, 160px);
+  max-width: var(--terminal-tab-width, 160px);
+  padding: 6px 12px;
   height: 100%;
   border: none;
   border-right: 1px solid var(--terminal-border);
@@ -38,7 +67,7 @@
   font-family: var(--font-family-base);
   font-size: var(--font-size-xs);
   white-space: nowrap;
-  min-width: 0;
+  box-sizing: border-box;
   transition: background-color var(--transition-fast, 150ms);
 }
 
@@ -58,6 +87,21 @@
 .tab.active {
   background-color: var(--terminal-tab-active);
   color: var(--terminal-text-bright);
+  /* Aether: active terminal tab marked with an amber underline */
+  box-shadow: inset 0 -2px 0 0 var(--color-warning);
+}
+
+.groupDraggable {
+  cursor: grab;
+}
+
+.groupDraggable:active {
+  cursor: grabbing;
+}
+
+.splitIcon {
+  display: block;
+  flex-shrink: 0;
 }
 
 /* ============= Status Dot ============= */
@@ -143,6 +187,8 @@
 /* ============= Tab Label ============= */
 
 .tabLabel {
+  flex: 1;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   cursor: pointer;

@@ -30,12 +30,31 @@ export type MutationType =
   | "session_change";
 
 /**
+ * Generic entity kinds carried by the SSE mutation envelope. The string
+ * fallback keeps the frontend tolerant of new fleet-db entity types.
+ */
+export type MutationEntityType =
+  | "issue"
+  | "dependency"
+  | "dep"
+  | "comment"
+  | "label"
+  | "agent"
+  | "terminal"
+  | "session"
+  | "workspace"
+  | string;
+
+/**
  * Server → Client mutation payload shape.
  * Matches the JSON delivered by GET /api/sse mutation events.
  */
 export interface MutationPayload {
   type: MutationType;
-  issue_id: string;
+  entity_type?: MutationEntityType;
+  entity_id?: string;
+  action?: string;
+  issue_id?: string;
   title?: string;
   assignee?: string;
   owner?: string;

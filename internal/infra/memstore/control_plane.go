@@ -291,5 +291,11 @@ func sessionMatches(s *domain.AgentSession, filter store.AgentSessionFilter) boo
 	if filter.Status != "" && s.Status != filter.Status {
 		return false
 	}
+	if filter.Kind != "" && s.Kind != filter.Kind {
+		return false
+	}
+	if filter.ParentSessionID != "" && s.ParentSessionID != filter.ParentSessionID {
+		return false
+	}
 	return true
 }

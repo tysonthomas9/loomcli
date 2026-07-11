@@ -6,13 +6,18 @@
 import type { FileEntry } from "@/api/workspace";
 import type { UseFileTreeReturn } from "@/hooks/common/useFileTree";
 import { CodeMirrorEditor } from "@/components/CodeMirrorEditor";
+import { useWorkspaceContext } from "@/hooks/workspace";
+import { resolveFileTreeViewMode } from "@/utils/fileTreeView";
 import { useFileEditor } from "./useFileEditor";
-import type { UseFileEditorReturn } from "./useFileEditor";
 import styles from "./FileEditorPanel.module.css";
 
 export interface FileEditorPanelProps {
   /** Agent name to browse/edit files for */
   agentName: string;
+  /** Agent role — lead agents browse the workspace primary repo */
+  agentRole?: string | undefined;
+  /** Repo scope for the agent (used to label workspace tree browsing) */
+  agentRepo?: string | undefined;
   /** Whether this panel is currently active (gates keyboard shortcuts) */
   isActive: boolean;
 }
@@ -118,12 +123,21 @@ function FileTreeNode({
 
 export function FileEditorPanel({
   agentName,
+  agentRole,
+  agentRepo,
   isActive,
 }: FileEditorPanelProps): JSX.Element {
-  const editor: UseFileEditorReturn = useFileEditor(agentName, isActive);
+  const { repos } = useWorkspaceContext();
+  const fileTreeView = resolveFileTreeViewMode(agentRole, agentRepo, repos);
+  const editor = useFileEditor(agentName, isActive, {
+    useWorkspaceTree: fileTreeView.useWorkspaceTree,
+    workspaceRepoLabel: fileTreeView.repoLabel,
+  });
   const {
     tree,
     fileContent,
+    isWorkspaceTree,
+    workspaceRepoLabel,
     content,
     language,
     isDirty,
@@ -143,6 +157,15 @@ export function FileEditorPanel({
       {/* File Tree Sidebar */}
       <div className={styles.sidebar}>
         <div className={styles.sidebarHeader}>
+          {isWorkspaceTree ? (
+            <p
+              className={styles.workspaceTreeHint}
+              data-testid="workspace-tree-hint"
+            >
+              Workspace repository
+              {workspaceRepoLabel ? ` · ${workspaceRepoLabel}` : ""}
+            </p>
+          ) : null}
           <input
             type="text"
             className={styles.filterInput}
@@ -190,7 +213,7 @@ export function FileEditorPanel({
               <button
                 className={styles.saveButton}
                 onClick={save}
-                disabled={!isDirty || isSaving}
+                disabled={!isDirty || isSaving || isWorkspaceTree}
                 type="button"
               >
                 {isSaving ? "Saving..." : "Save"}
@@ -212,7 +235,7 @@ export function FileEditorPanel({
                   value={content}
                   onChange={handleContentChange}
                   language={language}
-                  readOnly={isSaving}
+                  readOnly={isSaving || isWorkspaceTree}
                 />
               )}
             </div>

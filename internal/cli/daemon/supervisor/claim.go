@@ -14,6 +14,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
+	"github.com/tysonthomas9/loomcli/internal/domain"
 )
 
 // actorClaimBackend is the optional richer claim API: when the issue backend
@@ -66,6 +67,10 @@ func (s *Supervisor) claimTask(ap *AgentProcess, epicID string) bool {
 	ap.Mu.Lock()
 	requestedTaskID := ap.RequestedTaskID
 	ap.Mu.Unlock()
+	if ap.Entry.Mode == domain.AgentModeEphemeral && requestedTaskID == "" {
+		s.setPreflightError(ap, agenterr.OutcomeFromDomain(agenterr.NoWorkOutcome), "ephemeral worker requires a requested task")
+		return false
+	}
 	if requestedTaskID != "" {
 		return s.claimRequestedTask(ap, opts, requestedTaskID)
 	}
@@ -134,9 +139,6 @@ func (s *Supervisor) readyIssues(opts backend.ReadyOpts) ([]backend.IssueData, e
 }
 
 func (s *Supervisor) claimRequestedTask(ap *AgentProcess, opts backend.ReadyOpts, taskID string) bool {
-	if ap.Entry.Worktree != "" {
-		opts.Assignee = ap.Entry.Worktree
-	}
 	issues, err := s.readyIssues(opts)
 	if err != nil {
 		s.setPreflightError(ap, agenterr.OutcomeFromHarness(wrapper.ErrUnknown), fmt.Sprintf("ready query failed: %v", err))

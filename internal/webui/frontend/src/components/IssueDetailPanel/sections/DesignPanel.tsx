@@ -5,6 +5,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { createPortal } from "react-dom";
 
 import { MarkdownRenderer } from "./MarkdownRenderer";
 import styles from "./DesignPanel.module.css";
@@ -82,6 +83,7 @@ export function DesignPanel({
   // Reset collapsed sections when content changes (e.g., different issue selected)
   useEffect(() => {
     setCollapsedSections(new Set());
+    setIsFullscreen(false);
   }, [content]);
 
   // Body scroll lock for fullscreen mode — save and restore previous value
@@ -109,9 +111,13 @@ export function DesignPanel({
     return () => document.removeEventListener("keydown", handleKeyDown, true);
   }, [isFullscreen]);
 
-  const handleToggleFullscreen = useCallback(() => {
-    setIsFullscreen((prev) => !prev);
-  }, []);
+  const handleToggleFullscreen = useCallback(
+    (event: React.MouseEvent<HTMLButtonElement>) => {
+      event.stopPropagation();
+      setIsFullscreen((prev) => !prev);
+    },
+    [],
+  );
 
   const handleToggleSection = useCallback((index: number) => {
     setCollapsedSections((prev) => {
@@ -164,7 +170,7 @@ export function DesignPanel({
     );
   }
 
-  return (
+  const panel = (
     <div className={rootClassName} data-testid="design-panel">
       <div className={styles.designHeader}>
         <h3 className={styles.designTitle}>Design</h3>
@@ -254,4 +260,12 @@ export function DesignPanel({
       </div>
     </div>
   );
+
+  // Portal fullscreen to document.body so fixed positioning isn't clipped by
+  // the issue panel's transform/overflow ancestors.
+  if (isFullscreen) {
+    return createPortal(panel, document.body);
+  }
+
+  return panel;
 }

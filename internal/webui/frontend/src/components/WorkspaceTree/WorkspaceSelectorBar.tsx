@@ -6,12 +6,17 @@
 import { useState, useCallback } from "react";
 
 import type { WorkspaceSummary } from "@/api/workspace";
+import { CompactRailHost } from "@/components/CompactRail";
 import { WorkspaceSwitcher } from "@/components/WorkspaceSwitcher";
+import { getCompactAvatarInitials } from "@/utils/compactAvatarInitials";
+import { shouldUseWhiteText } from "@/utils/colorUtils";
 import { getWorkspaceColor } from "@/utils/workspace";
 
 import styles from "./WorkspaceSelectorBar.module.css";
 
 export interface WorkspaceSelectorBarProps {
+  /** Full selector row or collapsed avatar dot (wireframe pin 24). */
+  variant?: "full" | "collapsed" | undefined;
   /** Display name of the active workspace */
   workspaceName: string;
   /** All workspace summaries for the switcher */
@@ -25,6 +30,7 @@ export interface WorkspaceSelectorBarProps {
 }
 
 export function WorkspaceSelectorBar({
+  variant = "full",
   workspaceName,
   workspaces,
   activeWorkspaceId,
@@ -52,23 +58,48 @@ export function WorkspaceSelectorBar({
     [workspaces, onWorkspaceSwitch],
   );
 
+  const workspaceColor = getWorkspaceColor(workspaceName);
+  const initial = getCompactAvatarInitials(workspaceName);
+
   return (
     <>
-      <button
-        type="button"
-        className={styles.selector}
-        onClick={handleOpen}
-        aria-haspopup="dialog"
-        aria-expanded={isSwitcherOpen}
-        aria-label={`Active workspace: ${workspaceName}. Click to switch.`}
-      >
-        <span
-          className={styles.dot}
-          style={{ backgroundColor: getWorkspaceColor(workspaceName) }}
-        />
-        <span className={styles.name}>{workspaceName}</span>
-        <span className={styles.chevron}>&#x25BE;</span>
-      </button>
+      {variant === "collapsed" ? (
+        <CompactRailHost
+          as="button"
+          type="button"
+          label={workspaceName}
+          className={styles.collapsedWorkspaceDot}
+          onClick={handleOpen}
+          aria-haspopup="dialog"
+          aria-expanded={isSwitcherOpen}
+          aria-label={`Active workspace: ${workspaceName}. Click to switch.`}
+        >
+          <span
+            className={styles.collapsedWorkspaceAvatar}
+            style={{
+              backgroundColor: workspaceColor,
+              color: shouldUseWhiteText(workspaceColor) ? "#fff" : "#111",
+            }}
+          >
+            {initial}
+          </span>
+        </CompactRailHost>
+      ) : (
+        <button
+          type="button"
+          className={styles.selector}
+          onClick={handleOpen}
+          aria-haspopup="dialog"
+          aria-expanded={isSwitcherOpen}
+          aria-label={`Active workspace: ${workspaceName}. Click to switch.`}
+        >
+          <span
+            className={styles.dot}
+            style={{ backgroundColor: workspaceColor }}
+          />
+          <span className={styles.name}>{workspaceName}</span>
+        </button>
+      )}
 
       <WorkspaceSwitcher
         isOpen={isSwitcherOpen}

@@ -31,37 +31,31 @@ describe("ThemeToggle", () => {
     });
   });
 
-  describe("icons", () => {
-    it("renders moon icon in light mode", () => {
+  describe("pill switch", () => {
+    it("renders sun and moon icons with a sliding knob", () => {
       const { container } = render(
         <ThemeToggle theme="light" onToggle={() => {}} />,
       );
-      const svg = container.querySelector("svg");
-      expect(svg).toBeInTheDocument();
-      // Moon icon uses a path with the crescent shape, no circle element
-      const circle = svg?.querySelector("circle");
-      const path = svg?.querySelector("path");
-      expect(circle).toBeNull();
-      expect(path).toBeInTheDocument();
+      expect(container.querySelectorAll("svg")).toHaveLength(2);
+      expect(container.querySelector("span[aria-hidden]")).toBeInTheDocument();
     });
 
-    it("renders sun icon in dark mode", () => {
-      const { container } = render(
-        <ThemeToggle theme="dark" onToggle={() => {}} />,
-      );
-      const svg = container.querySelector("svg");
-      expect(svg).toBeInTheDocument();
-      // Sun icon has a circle element (the sun body)
-      const circle = svg?.querySelector("circle");
-      expect(circle).toBeInTheDocument();
+    it("marks dark state via dark class in dark mode", () => {
+      render(<ThemeToggle theme="dark" onToggle={() => {}} />);
+      expect(screen.getByRole("button").className).toMatch(/dark/);
     });
 
-    it("svg has aria-hidden true", () => {
-      const { container } = render(
-        <ThemeToggle theme="light" onToggle={() => {}} />,
+    it("does not use dark class in light mode", () => {
+      render(<ThemeToggle theme="light" onToggle={() => {}} />);
+      expect(screen.getByRole("button").className).not.toMatch(/\bdark\b/);
+    });
+
+    it("reflects state via aria-pressed (pressed = light)", () => {
+      render(<ThemeToggle theme="light" onToggle={() => {}} />);
+      expect(screen.getByRole("button")).toHaveAttribute(
+        "aria-pressed",
+        "true",
       );
-      const svg = container.querySelector("svg");
-      expect(svg).toHaveAttribute("aria-hidden", "true");
     });
   });
 
@@ -123,20 +117,16 @@ describe("ThemeToggle", () => {
   });
 
   describe("theme transitions", () => {
-    it("updates icon when theme prop changes from light to dark", () => {
-      const { container, rerender } = render(
+    it("updates the dark class when theme prop changes from light to dark", () => {
+      const { rerender } = render(
         <ThemeToggle theme="light" onToggle={() => {}} />,
       );
 
-      // Light mode: moon icon (no circle)
-      let svg = container.querySelector("svg");
-      expect(svg?.querySelector("circle")).toBeNull();
+      expect(screen.getByRole("button").className).not.toMatch(/\bdark\b/);
 
       rerender(<ThemeToggle theme="dark" onToggle={() => {}} />);
 
-      // Dark mode: sun icon (has circle)
-      svg = container.querySelector("svg");
-      expect(svg?.querySelector("circle")).toBeInTheDocument();
+      expect(screen.getByRole("button").className).toMatch(/dark/);
     });
 
     it("updates aria-label when theme prop changes", () => {

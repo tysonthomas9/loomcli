@@ -119,10 +119,6 @@ describe("CreateIssueModal", () => {
       expect(screen.getByTestId("create-issue-type")).toBeInTheDocument();
       expect(screen.getByLabelText("Type")).toBeInTheDocument();
 
-      // Priority select
-      expect(screen.getByTestId("create-issue-priority")).toBeInTheDocument();
-      expect(screen.getByLabelText("Priority")).toBeInTheDocument();
-
       // Description textarea
       expect(
         screen.getByTestId("create-issue-description"),
@@ -141,7 +137,7 @@ describe("CreateIssueModal", () => {
   });
 
   describe("default values", () => {
-    it("issue_type defaults to 'task' and priority defaults to 2", () => {
+    it("issue_type defaults to 'task'", () => {
       render(
         <CreateIssueModal
           isOpen={true}
@@ -151,7 +147,6 @@ describe("CreateIssueModal", () => {
       );
 
       expect(screen.getByTestId("create-issue-type")).toHaveValue("task");
-      expect(screen.getByTestId("create-issue-priority")).toHaveValue("2");
     });
 
     it("prefills provided issue values", () => {
@@ -264,9 +259,6 @@ describe("CreateIssueModal", () => {
       fireEvent.change(screen.getByTestId("create-issue-type"), {
         target: { value: "bug" },
       });
-      fireEvent.change(screen.getByTestId("create-issue-priority"), {
-        target: { value: "1" },
-      });
       fireEvent.change(screen.getByTestId("create-issue-description"), {
         target: { value: "Users cannot log in" },
       });
@@ -276,7 +268,7 @@ describe("CreateIssueModal", () => {
         expect(mockCreateIssue).toHaveBeenCalledWith("test-ws-id", {
           title: "Fix login bug",
           issue_type: "bug",
-          priority: 1,
+          priority: 2,
           description: "Users cannot log in",
         });
       });
@@ -522,9 +514,6 @@ describe("CreateIssueModal", () => {
       fireEvent.change(screen.getByTestId("create-issue-type"), {
         target: { value: "bug" },
       });
-      fireEvent.change(screen.getByTestId("create-issue-priority"), {
-        target: { value: "0" },
-      });
       fireEvent.change(screen.getByTestId("create-issue-description"), {
         target: { value: "Some description" },
       });
@@ -550,7 +539,6 @@ describe("CreateIssueModal", () => {
       // All fields should be reset to defaults
       expect(screen.getByTestId("create-issue-title")).toHaveValue("");
       expect(screen.getByTestId("create-issue-type")).toHaveValue("task");
-      expect(screen.getByTestId("create-issue-priority")).toHaveValue("2");
       expect(screen.getByTestId("create-issue-description")).toHaveValue("");
     });
   });

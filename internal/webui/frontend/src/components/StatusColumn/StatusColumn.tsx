@@ -5,7 +5,12 @@
  */
 
 import { useDroppable } from "@dnd-kit/core";
-import { useCallback, type ReactNode, type RefObject } from "react";
+import {
+  useCallback,
+  type CSSProperties,
+  type ReactNode,
+  type RefObject,
+} from "react";
 
 import type { Status } from "@/types";
 
@@ -42,6 +47,13 @@ export interface StatusColumnProps {
   footerAction?: ReactNode;
   /** Optional ref to the content scroll container (for virtualization) */
   contentRef?: RefObject<HTMLDivElement | null>;
+  /**
+   * Hide the column's own header. Used by SwimLane, which renders a single
+   * shared column-header row above the body grid (matching the Aether design).
+   */
+  hideHeader?: boolean;
+  /** Optional inline styles (e.g. grid placement in SwimLane) */
+  style?: CSSProperties;
 }
 
 /**
@@ -60,6 +72,8 @@ export function StatusColumn({
   headerIcon,
   footerAction,
   contentRef,
+  hideHeader = false,
+  style,
 }: StatusColumnProps): JSX.Element {
   const { setNodeRef, isOver } = useDroppable({
     id: status,
@@ -96,28 +110,31 @@ export function StatusColumn({
   return (
     <section
       className={rootClassName}
+      style={style}
       data-status={status}
       data-column-type={columnType}
       data-has-items={count > 0 ? "true" : undefined}
       aria-label={`${displayLabel} issues`}
     >
-      <header className={styles.header}>
-        <div className={styles.headerLabel}>
-          {headerIcon && (
-            <span
-              className={styles.columnIcon}
-              aria-hidden="true"
-              data-testid="status-column-icon"
-            >
-              {headerIcon}
-            </span>
-          )}
-          <h2 className={styles.title}>{displayLabel}</h2>
-        </div>
-        <span className={styles.count} aria-label={`${count} ${issueWord}`}>
-          {count}
-        </span>
-      </header>
+      {!hideHeader && (
+        <header className={styles.header}>
+          <div className={styles.headerLabel}>
+            {headerIcon && (
+              <span
+                className={styles.columnIcon}
+                aria-hidden="true"
+                data-testid="status-column-icon"
+              >
+                {headerIcon}
+              </span>
+            )}
+            <h2 className={styles.title}>{displayLabel}</h2>
+          </div>
+          <span className={styles.count} aria-label={`${count} ${issueWord}`}>
+            {count}
+          </span>
+        </header>
+      )}
       <div
         ref={mergedContentRef}
         className={contentClasses.join(" ")}

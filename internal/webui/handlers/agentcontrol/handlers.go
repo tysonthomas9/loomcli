@@ -162,7 +162,10 @@ func classifyAgentControlError(result *AgentControlResult) (int, string) {
 		return http.StatusNotFound, "agent_not_found"
 	case strings.Contains(e, "already stopped"),
 		strings.Contains(e, "already running"),
-		strings.Contains(e, "not stopped"):
+		strings.Contains(e, "not stopped"),
+		strings.Contains(e, "requires a task_id"),
+		strings.Contains(e, "terminal task attempt"),
+		strings.Contains(e, "cannot be restarted"):
 		return http.StatusConflict, "agent_conflict"
 	default:
 		return http.StatusBadGateway, "daemon_error"

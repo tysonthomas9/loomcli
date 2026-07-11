@@ -28,16 +28,22 @@ function makeAgent(overrides: Partial<LoomAgentStatus> = {}): LoomAgentStatus {
 
 describe("AgentCard", () => {
   describe("avatar", () => {
-    it("renders the first letter of the agent name", () => {
-      render(<AgentCard agent={makeAgent({ name: "nova" })} />);
+    it("renders two-letter initials for segmented agent names", () => {
+      render(<AgentCard agent={makeAgent({ name: "lead-b" })} />);
 
-      expect(screen.getByLabelText("nova avatar")).toHaveTextContent("n");
+      expect(screen.getByLabelText("lead-b avatar")).toHaveTextContent("LB");
     });
 
-    it("renders uppercase initial for uppercase name", () => {
+    it("renders two-letter initials for single-segment names", () => {
+      render(<AgentCard agent={makeAgent({ name: "nova" })} />);
+
+      expect(screen.getByLabelText("nova avatar")).toHaveTextContent("NO");
+    });
+
+    it("renders two-letter initials for uppercase names", () => {
       render(<AgentCard agent={makeAgent({ name: "Falcon" })} />);
 
-      expect(screen.getByLabelText("Falcon avatar")).toHaveTextContent("F");
+      expect(screen.getByLabelText("Falcon avatar")).toHaveTextContent("FA");
     });
 
     it("applies a background color style", () => {
@@ -133,6 +139,36 @@ describe("AgentCard", () => {
       );
 
       expect(screen.getByText("Ready")).toBeInTheDocument();
+    });
+
+    it('hides "Idle" for lead agents', () => {
+      render(
+        <AgentCard
+          agent={makeAgent({
+            status: "idle",
+            role: "lead",
+            branch: "dev",
+          })}
+        />,
+      );
+
+      expect(screen.queryByText("Idle")).not.toBeInTheDocument();
+    });
+
+    it('still shows "Working" for idle lead agents with live working status', () => {
+      render(
+        <AgentCard
+          agent={makeAgent({
+            status: "idle",
+            live_status: "working",
+            active_task_id: "loom-42",
+            role: "lead",
+            branch: "b",
+          })}
+        />,
+      );
+
+      expect(screen.getByText("Working")).toBeInTheDocument();
     });
 
     it('shows "Idle" for idle status', () => {
@@ -326,6 +362,33 @@ describe("AgentCard", () => {
       );
 
       expect(container.firstChild).toHaveAttribute("data-status", "changes");
+    });
+  });
+
+  describe("selected state", () => {
+    it("sets data-selected when selected is true", () => {
+      const { container } = render(
+        <AgentCard agent={makeAgent()} selected onClick={() => {}} />,
+      );
+
+      expect(container.firstChild).toHaveAttribute("data-selected", "true");
+    });
+
+    it("does not set data-selected when selected is false", () => {
+      const { container } = render(
+        <AgentCard agent={makeAgent()} onClick={() => {}} />,
+      );
+
+      expect(container.firstChild).not.toHaveAttribute("data-selected");
+    });
+
+    it("sets aria-current=page when selected and clickable", () => {
+      render(<AgentCard agent={makeAgent()} selected onClick={() => {}} />);
+
+      expect(screen.getByRole("button")).toHaveAttribute(
+        "aria-current",
+        "page",
+      );
     });
   });
 

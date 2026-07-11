@@ -151,8 +151,8 @@ func pendingTerminalAgentDone(ap *AgentProcess) (<-chan struct{}, bool) {
 // shouldRestart determines if the agent should restart by consulting the
 // policy disposition for the classified outcome of the most recent exit
 // (agentpolicy.Decide). The table owns the per-class verdict; this layer
-// owns its counters (RestartCount/RateRetryCount/NoWorkCount) and its
-// configured budgets.
+// owns its counters (RestartCount/RateRetryCount/NoWorkCount/BlockCount) and
+// its configured budgets.
 func (s *Supervisor) shouldRestart(ap *AgentProcess) bool {
 	maxRetries := s.getMaxRetries()
 
@@ -170,8 +170,12 @@ func (s *Supervisor) shouldRestart(ap *AgentProcess) bool {
 // shouldRestartLocked returns the restart decision and optional max-retry
 // exhaustion snapshot. Caller holds ap.Mu.
 func (s *Supervisor) shouldRestartLocked(ap *AgentProcess, maxRetries int) (bool, *maxRetriesExhausted) {
+	if stopAfterEphemeralTask(ap) {
+		return false, nil
+	}
+
 	// Clean success (exit 0, no error): always restart, reset counters —
-	// including legacy park counters. Long runs (>1 minute) also reset primary
+	// including the block-escalation counter. Long runs (>1 minute) also reset primary
 	// backend.
 	if ap.LastExitCode == 0 && ap.LastError == nil {
 		s.applyCleanSuccessRestart(ap)
@@ -192,7 +196,7 @@ func (s *Supervisor) shouldRestartLocked(ap *AgentProcess, maxRetries int) (bool
 		s.applyFastFailStop(ap, outcome)
 		return false, nil
 
-	case agentpolicy.Park:
+	case agentpolicy.Block:
 		// BackendUnavailable: fixed recheck without eroding the restart
 		// budget — recoverable once the binary returns.
 		s.applyBackendUnavailableRestart(ap)
@@ -219,6 +223,21 @@ func (s *Supervisor) shouldRestartLocked(ap *AgentProcess, maxRetries int) (bool
 	default: // Retry
 		return s.applyCountedRestart(ap, d, maxRetries)
 	}
+}
+
+// stopAfterEphemeralTask stops the supervisor once an ephemeral agent has
+// completed its one assigned task cycle cleanly. A NoWork exit still falls
+// through so it can re-poll until a task arrives. Caller holds ap.Mu.
+func stopAfterEphemeralTask(ap *AgentProcess) bool {
+	if ap.Entry.Mode != domain.AgentModeEphemeral || ap.LastExitCode != 0 || ap.LastError != nil || ap.AssignedTaskID == "" {
+		return false
+	}
+	ap.RestartCount = 0
+	ap.RateRetryCount = 0
+	ap.NoWorkCount = 0
+	ap.StopReason = StopReasonEphemeralDone
+	log.Printf("[daemon] Agent %s: ephemeral task complete, exiting supervisor", ap.Entry.Worktree)
+	return true
 }
 
 // applyFatalStop stops for auth/billing errors that need human intervention.
@@ -250,13 +269,13 @@ func (s *Supervisor) applyFailoverExhaustedStop(ap *AgentProcess, outcome agente
 }
 
 // applyCleanSuccessRestart resets every retry counter after a clean exit —
-// including the park-escalation budget ("progress" ends a park spiral). Long
+// including the block-escalation budget ("progress" ends a block spiral). Long
 // runs (>1 minute) also reset to the primary backend. Caller holds ap.Mu.
 func (s *Supervisor) applyCleanSuccessRestart(ap *AgentProcess) {
 	ap.RestartCount = 0
 	ap.RateRetryCount = 0
 	ap.NoWorkCount = 0
-	ap.ParkCount = 0
+	ap.BlockCount = 0
 	ap.StopReason = ""
 	if time.Since(ap.LastStart) > time.Minute {
 		ap.CurrentBackendIdx = 0 // reset to primary backend

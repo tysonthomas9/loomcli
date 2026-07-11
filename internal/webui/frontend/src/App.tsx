@@ -28,6 +28,7 @@ import {
 import type { IssueContext } from "@/api/terminal";
 import { buildShareUrl } from "@/utils/buildShareUrl";
 import { getReviewType } from "@/utils/issue";
+import { ViewSubSwitcher } from "@/components/ViewSubSwitcher/ViewSubSwitcher";
 import {
   isOnboardingRepo,
   ONBOARDING_AGENT_NAME,
@@ -48,20 +49,14 @@ import { requestCliSetup } from "@/utils/cliSetup";
 import { AppLayout } from "@/components/AppLayout/AppLayout";
 import { WorkspaceBreadcrumb } from "@/components/WorkspaceBreadcrumb/WorkspaceBreadcrumb";
 import { LoadingSkeleton } from "@/components/LoadingSkeleton/LoadingSkeleton";
-import { ConnectionStatus } from "@/components/ConnectionStatus/ConnectionStatus";
 import { StaleDataBanner } from "@/components/StaleDataBanner/StaleDataBanner";
-import { WorkspaceStatusBadge } from "@/components/WorkspaceStatusBadge/WorkspaceStatusBadge";
 import { ToastContainer } from "@/components/Toast/ToastContainer";
-import { FilterBar } from "@/components/FilterBar/FilterBar";
-import { MoreFiltersMenu } from "@/components/MoreFiltersMenu/MoreFiltersMenu";
 import { SearchInput } from "@/components/search/SearchInput";
 import { SearchScopeIndicator } from "@/components/search/SearchScopeIndicator";
 import { IssueDetailPanel } from "@/components/IssueDetailPanel/IssueDetailPanel";
 import { AgentDetailPanel } from "@/components/AgentDetailPanel/AgentDetailPanel";
 import { WorkspaceTree } from "@/components/WorkspaceTree/WorkspaceTree";
-import { TalkToLeadButton } from "@/components/TalkToLeadButton/TalkToLeadButton";
 import { NavRail } from "@/components/NavRail/NavRail";
-import { ViewSubSwitcher } from "@/components/ViewSubSwitcher/ViewSubSwitcher";
 import { ThemeToggle } from "@/components/ThemeToggle/ThemeToggle";
 import { KeyboardCheatsheet } from "@/components/KeyboardCheatsheet/KeyboardCheatsheet";
 import { WorkspaceSwitcher } from "@/components/WorkspaceSwitcher/WorkspaceSwitcher";
@@ -101,12 +96,12 @@ import { useIssueDetail } from "@/hooks/issues/useIssueDetail";
 import { useSearchScope } from "@/hooks/issues/useSearchScope";
 import { useToast } from "@/hooks/ui/useToast";
 import { useTheme } from "@/hooks/ui/useTheme";
+import { useTerminalFont } from "@/hooks/terminal/useTerminalFont";
 import { usePanelManager } from "@/hooks/ui/usePanelManager";
 import { KeyboardShortcutProvider } from "@/hooks/ui/useKeyboardShortcuts";
 import { useWorkspaceContext } from "@/hooks/workspace/useWorkspaceContext";
 import { useWorkspaceState } from "@/hooks/workspace/useWorkspaceState";
 import { useRepoFilterParam } from "@/hooks/workspace/useRepoFilterParam";
-import { useWorkspaceHealth } from "@/hooks/workspace/useWorkspaceHealth";
 import { useBackends } from "@/hooks/workspace/useBackends";
 import { useBackendConfig } from "@/hooks/workspace/useBackendConfig";
 import type { BackendInfo } from "@/utils/workspace";
@@ -154,24 +149,17 @@ function getSingleRepoSourceRepo(
 }
 
 function App() {
-  // Route params: issueId present on /ws/:id/issues/:issueId
-  const { issueId: routeIssueId } = useParams<{
+  // Route params: issueId on /ws/:id/issues/:issueId; agentName on /agents/:agentName
+  const { issueId: routeIssueId, agentName: routeAgentName } = useParams<{
     workspaceId: string;
-    issueId: string;
+    issueId?: string;
+    agentName?: string;
   }>();
   const navigate = useNavigate();
 
-  // Workspace service health monitoring
-  const {
-    isWorkspaceAvailable,
-    connectionMode,
-    retryCountdown,
-    lastError,
-    retryNow: workspaceRetryNow,
-  } = useWorkspaceHealth();
-
   // Theme state
   const { theme, toggleTheme } = useTheme();
+  useTerminalFont();
 
   // Workspace context for breadcrumb, single-repo guard, and workspace selection
   const {
@@ -204,12 +192,6 @@ function App() {
   // Repo filter URL param sync (deep linking for repo selection)
   const [repoFilterParam] = useRepoFilterParam();
 
-  // Available repo names for repo selector
-  const availableRepoNames = useMemo(
-    () => workspaceRepos.map((r) => r.name),
-    [workspaceRepos],
-  );
-
   const agentDefaultBackend = useMemo(() => {
     const configuredBackend = onboardingBackendConfig?.backend?.trim();
     if (configuredBackend) return configuredBackend;
@@ -232,12 +214,6 @@ function App() {
     aiBackends,
   ]);
   const hasMultipleWorkspaces = (workspace?.workspaces?.length ?? 0) > 1;
-
-  // Convert Set<string> to string[] for components that expect arrays
-  const selectedRepoNamesArray = useMemo(
-    () => [...selectedRepoNames],
-    [selectedRepoNames],
-  );
 
   // Search scope (workspace-scoped search indicator)
   const { scopeName: searchScopeName, clearScope: handleScopeClear } =
@@ -313,6 +289,7 @@ function App() {
   const issueModeByView: Partial<Record<ViewMode, "graph" | "kanban">> = {
     graph: "graph",
     kanban: "kanban",
+    list: "kanban",
     table: "kanban",
     "issue-detail": "kanban",
     terminal: "kanban",
@@ -320,6 +297,13 @@ function App() {
     workspace: "kanban",
     files: "kanban",
     observability: "kanban",
+    // PRs view needs every status (review issues are the PR queue), so use the
+    // full "kanban" fetch mode rather than the default "ready" (open-only).
+    prs: "kanban",
+    // Agents view needs every status too: the Open Queue shows epic groups
+    // (parent links), review/blocked tasks, and assigned (running) tasks —
+    // the default "ready" mode drops all of those.
+    agents: "kanban",
   };
   const issueMode = issueModeByView[activeView] ?? ("ready" as const);
 
@@ -435,52 +419,12 @@ function App() {
     return map;
   }, [activeView, issues, blockedIssuesData]);
 
-  // Compute Work Queue counts from workspace-scoped issues for sidebar display
-  const workQueueCounts = useMemo(() => {
-    let backlog = 0;
-    let open = 0;
-    let blocked = 0;
-    let inProgress = 0;
-    let needsReview = 0;
-    let done = 0;
-    for (const issue of issues) {
-      switch (issue.status) {
-        case "deferred":
-          backlog++;
-          break;
-        case "open":
-        case undefined:
-          if (issue.is_blocked) {
-            blocked++;
-          } else {
-            open++;
-          }
-          break;
-        case "blocked":
-          blocked++;
-          break;
-        case "in_progress":
-          inProgress++;
-          break;
-        case "review":
-          needsReview++;
-          break;
-        case "closed":
-          done++;
-          break;
-        default:
-          break;
-      }
-    }
-    return { backlog, open, blocked, inProgress, needsReview, done };
-  }, [issues]);
-
   const { toasts, showToast, dismissToast } = useToast();
   const mountedRef = useRef(true);
 
   // Centralized panel state (issue detail panel + agent detail panel).
   // Enforces mutual exclusivity with 300ms close-then-open transitions.
-  const { activePanel, pendingPanel, openPanel, closePanel, isOpen } =
+  const { activePanel, pendingPanel, openPanel, closePanel } =
     usePanelManager();
 
   // Derive panel visibility booleans from the centralized panel state.
@@ -492,6 +436,11 @@ function App() {
       : pendingPanel?.type === "agent"
         ? pendingPanel.name
         : null;
+
+  const sidebarSelectedAgentName =
+    activeView === "agents" && routeAgentName
+      ? routeAgentName
+      : selectedAgentName;
 
   // Ref to main scrollable container for workspace state snapshot.
   // NOTE: Must be declared BEFORE useWorkspaceState below — React runs effects
@@ -723,34 +672,6 @@ function App() {
     filterActions.setSearch(undefined);
   }, [filterActions]);
 
-  const syncedFilterActions = useMemo(
-    () => ({
-      ...filterActions,
-      setSearch: (search: string | undefined) => {
-        const nextSearch = search || undefined;
-        hasPendingSearchEditRef.current = false;
-        pendingSearchCommitRef.current = { value: nextSearch };
-        setSearchValueState(nextSearch ?? "");
-        filterActions.setSearch(nextSearch);
-      },
-      clearFilter: (key: keyof typeof filters) => {
-        if (key === "search") {
-          hasPendingSearchEditRef.current = false;
-          pendingSearchCommitRef.current = { value: undefined };
-          setSearchValueState("");
-        }
-        filterActions.clearFilter(key);
-      },
-      clearAll: () => {
-        hasPendingSearchEditRef.current = false;
-        pendingSearchCommitRef.current = { value: undefined };
-        setSearchValueState("");
-        filterActions.clearAll();
-      },
-    }),
-    [filterActions],
-  );
-
   // Handle issue click from SwimLaneBoard/IssueTable
   const handleIssueClick = useCallback(
     (issue: Issue) => {
@@ -847,33 +768,29 @@ function App() {
     [workspaceId, refetch, handlePanelClose, showToast],
   );
 
-  // Handle agent click from MonitorDashboard
+  // Close all panels synchronously (no animation) for workspace switch
+  const closeAllPanels = useCallback(() => {
+    closePanel();
+    clearIssue();
+  }, [closePanel, clearIssue]);
+
+  // Handle agent click (sidebar, monitor, etc.) — one consistent destination:
+  // the agents view with that agent selected (/agents/<name>), instead of the
+  // legacy minimal AgentDetailPanel slide-over.
   const handleAgentClick = useCallback(
     (agentName: string) => {
-      const hadIssuePanel = isOpen("issue");
-      // Mutual exclusivity + no-op guard handled by usePanelManager
-      openPanel({ type: "agent", name: agentName });
-      // Clear stale issue data after close animation when swapping from issue panel
-      if (hadIssuePanel) {
-        setTimeout(() => {
-          if (!mountedRef.current) return;
-          clearIssue();
-        }, 300);
-      }
+      closeAllPanels();
+      navigate(
+        `/ws/${encodeURIComponent(workspaceId)}/agents/${encodeURIComponent(agentName)}`,
+      );
     },
-    [openPanel, isOpen, clearIssue],
+    [navigate, workspaceId, closeAllPanels],
   );
 
   // Handle agent panel close
   const handleAgentPanelClose = useCallback(() => {
     closePanel();
   }, [closePanel]);
-
-  // Close all panels synchronously (no animation) for workspace switch
-  const closeAllPanels = useCallback(() => {
-    closePanel();
-    clearIssue();
-  }, [closePanel, clearIssue]);
 
   useEffect(() => {
     if (activeView === "terminal") {
@@ -900,16 +817,16 @@ function App() {
     [activeWorkspaceName, closeAllPanels, setActiveWorkspace],
   );
 
-  // Handle Talk to Lead button click
-  const handleTalkToLeadClick = useCallback(() => {
-    closeAllPanels();
-    navigateToView("terminal");
-  }, [closeAllPanels, navigateToView]);
-
   const hasWorkspaceRepo = workspaceRepos.length > 0;
-  const hasWorkspaceAgent = Boolean(
-    getOnboardingPlannerName(workspace?.agents),
-  );
+  const onboardingPlannerName = getOnboardingPlannerName(workspace?.agents);
+  // The "create agent" step is satisfied by ANY agent, but running the first
+  // task needs the planner specifically (handleRunFirstOnboardingTask assigns
+  // it). Track them separately so a workspace with only a non-planner agent
+  // (e.g. a Lead) marks create-agent complete yet keeps "Create & Run" disabled
+  // — instead of offering it and then dead-ending with "Planner agent is not
+  // available yet."
+  const hasWorkspaceAgent = (workspace?.agents?.length ?? 0) > 0;
+  const hasOnboardingPlanner = Boolean(onboardingPlannerName);
   const hasWorkspaceIssue = issues.length > 0 || (agentStats?.total ?? 0) > 0;
   const defaultBackend = onboardingBackendConfig?.backend;
   const defaultBackendStatus = aiBackends.find(
@@ -958,7 +875,7 @@ function App() {
     setOnboardingAction("running-first-task");
     setOnboardingActionError(null);
     try {
-      let onboardingAgent = getOnboardingPlannerName(workspace?.agents);
+      let onboardingAgent = onboardingPlannerName;
       try {
         const latestWorkspace = await fetchWorkspaceApi(workspaceId);
         onboardingAgent = getOnboardingPlannerName(latestWorkspace.agents);
@@ -1004,6 +921,7 @@ function App() {
     refetchWorkspace,
     showToast,
     workspace?.agents,
+    onboardingPlannerName,
     workspaceId,
     workspaceRepos,
   ]);
@@ -1019,6 +937,24 @@ function App() {
   const workspaceOnboardingSteps: OnboardingStep[] = useMemo(
     () => [
       {
+        id: "setup-backend",
+        title: "Set up AI CLIs",
+        description: isDefaultBackendReady
+          ? `${defaultBackendStatus?.displayName ?? "The default CLI"} is ready.`
+          : "Install, login, or choose a ready CLI.",
+        status: isDefaultBackendReady ? "complete" : "actionable",
+        detail: (
+          <AIBackendSetupList
+            backends={aiBackends}
+            defaultBackend={defaultBackend}
+            isLoading={aiBackendsLoading || onboardingBackendConfigLoading}
+            error={aiBackendsError}
+            isSavingDefault={isSavingOnboardingBackend}
+            onAction={handleBackendSetupAction}
+          />
+        ),
+      },
+      {
         id: "workspace-repo",
         title: "Create workspace with repo",
         description: hasWorkspaceRepo
@@ -1033,28 +969,6 @@ function App() {
           ? "The repo is visible to Loom and ready for the next setup step."
           : "Repository checks run after a repo has been attached.",
         status: hasWorkspaceRepo ? "complete" : "blocked",
-      },
-      {
-        id: "setup-backend",
-        title: "Set up AI CLIs",
-        description: isDefaultBackendReady
-          ? `${defaultBackendStatus?.displayName ?? "The default CLI"} is ready.`
-          : "Install, login, or choose a ready CLI.",
-        status: !hasWorkspaceRepo
-          ? "blocked"
-          : isDefaultBackendReady
-            ? "complete"
-            : "actionable",
-        detail: hasWorkspaceRepo ? (
-          <AIBackendSetupList
-            backends={aiBackends}
-            defaultBackend={defaultBackend}
-            isLoading={aiBackendsLoading || onboardingBackendConfigLoading}
-            error={aiBackendsError}
-            isSavingDefault={isSavingOnboardingBackend}
-            onAction={handleBackendSetupAction}
-          />
-        ) : undefined,
       },
       {
         id: "create-agent",
@@ -1097,7 +1011,7 @@ function App() {
             ? "pending"
             : hasWorkspaceIssue
               ? "complete"
-              : hasWorkspaceAgent && isDefaultBackendReady
+              : hasOnboardingPlanner && isDefaultBackendReady
                 ? "current"
                 : "blocked",
         actionLabel:
@@ -1113,6 +1027,7 @@ function App() {
     ],
     [
       hasWorkspaceAgent,
+      hasOnboardingPlanner,
       hasWorkspaceIssue,
       hasWorkspaceRepo,
       isDefaultBackendReady,
@@ -1327,64 +1242,83 @@ function App() {
   // Whether the current view depends on issue data (for stale banner suppression)
   const isIssueBasedView =
     activeView === "kanban" ||
+    activeView === "list" ||
     activeView === "table" ||
     activeView === "graph" ||
     activeView === "issue-detail";
+  const shouldRenderStaleDataBanner =
+    activeView !== "terminal" &&
+    (showStaleBanner || isConnectionLost) &&
+    staleBannerDisconnectedSince !== null &&
+    !(issues.length === 0 && !isLoading && !error && isIssueBasedView);
 
-  const headerNavigation = (
-    <div className={styles.headerControls}>
-      <div className={styles.searchWrapper}>
-        {searchScopeName && (
-          <SearchScopeIndicator
-            scopeName={searchScopeName}
-            onClear={handleScopeClear}
-          />
-        )}
-        <SearchInput
-          ref={searchInputRef as RefObject<HTMLInputElement>}
-          value={searchValue}
-          onChange={setSearchValue}
-          onClear={handleSearchClear}
-          placeholder={
-            searchScopeName
-              ? `Search in ${searchScopeName}...`
-              : "Search tasks..."
-          }
-          size="md"
+  // Issue controls (search · filters · New Issue) now live in the board toolbar
+  // (next to the Kanban/List tabs), not the top bar — matching the Aether design's
+  // minimal header. Composed below into `boardToolbar`.
+  const searchControl = (
+    <div className={styles.searchWrapper}>
+      {searchScopeName && (
+        <SearchScopeIndicator
+          scopeName={searchScopeName}
+          onClear={handleScopeClear}
         />
+      )}
+      <SearchInput
+        ref={searchInputRef as RefObject<HTMLInputElement>}
+        value={searchValue}
+        onChange={setSearchValue}
+        onClear={handleSearchClear}
+        placeholder={
+          searchScopeName
+            ? `Search in ${searchScopeName}...`
+            : "Search tasks..."
+        }
+        size="md"
+      />
+    </div>
+  );
+  const newIssueButton = (
+    <button
+      className={styles.newIssueButton}
+      onClick={() => setShowCreateIssue(true)}
+      aria-label="New Issue"
+      data-testid="new-issue-button"
+    >
+      + New Issue
+    </button>
+  );
+
+  // Board toolbar: view tabs on the left; search · New Issue on the right —
+  // exactly the Aether design's board-head (tabs / centered search / New
+  // Issue), with no extra filter controls. Shown only for issue-based views.
+  const showBoardToolbar =
+    activeView === "kanban" ||
+    activeView === "list" ||
+    activeView === "table" ||
+    activeView === "graph";
+  const boardToolbar = (
+    <div className={styles.boardToolbar} data-testid="board-toolbar">
+      <div className={styles.boardToolbarTabs}>
+        <ViewSubSwitcher activeView={activeView} onChange={navigateToView} />
       </div>
-      <div className={styles.filtersWrapper}>
-        <FilterBar
-          filters={filters}
-          actions={syncedFilterActions}
-          showPriority={true}
-          showType={true}
-          showLabels={false}
-          showGroupBy={false}
-          showRepos={availableRepoNames.length > 1}
-          availableRepos={availableRepoNames}
-          selectedRepos={selectedRepoNamesArray}
-          onRepoChange={selectRepos}
-          variant="header"
-          showClear={true}
-        />
-        <MoreFiltersMenu
-          groupBy={filters.groupBy ?? DEFAULT_GROUP_BY}
-          onGroupByChange={syncedFilterActions.setGroupBy}
-        />
-      </div>
-      <button
-        className={styles.newIssueButton}
-        onClick={() => setShowCreateIssue(true)}
-        aria-label="New Issue"
-        data-testid="new-issue-button"
-      >
-        + New Issue
-      </button>
+      <div className={styles.boardToolbarSearch}>{searchControl}</div>
+      <div className={styles.boardToolbarActions}>{newIssueButton}</div>
     </div>
   );
 
-  const headerTitle = (
+  const headerTitle = showBoardToolbar ? (
+    <button
+      type="button"
+      className={styles.brandButton}
+      onClick={() => navigateToView("kanban")}
+      aria-label="Loom home — return to Kanban board"
+    >
+      <span className={styles.brandMark} aria-hidden="true">
+        ◇
+      </span>
+      <span className={styles.brandName}>Loom</span>
+    </button>
+  ) : (
     <WorkspaceBreadcrumb
       workspaceName={isMultiRepo ? (workspace?.name ?? null) : null}
       activeView={activeView}
@@ -1393,33 +1327,16 @@ function App() {
 
   const headerActions = (
     <div className={styles.headerActions}>
-      <WorkspaceStatusBadge
-        isWorkspaceAvailable={isWorkspaceAvailable}
-        mode={connectionMode}
-        retryCountdown={retryCountdown}
-        lastError={lastError}
-        onRetry={workspaceRetryNow}
-      />
-      <UserMenu />
       <ThemeToggle theme={theme} onToggle={toggleTheme} />
-      <ConnectionStatus
-        state={connectionState}
-        onRetry={retryConnection}
-        reconnectAttempts={reconnectAttempts}
-        showText={false}
-        showRetryButton={false}
-        connectionLost={sseConnectionLost}
-        compact
-      />
+      <UserMenu />
     </div>
   );
 
-  // Sidebar: always show WorkspaceTree with agents nested inside.
-  // The tree includes agent list per workspace plus "+ New Workspace" button.
   const sidebarContent = (
     <WorkspaceTree
       onWorkspaceSwitch={handleWorkspaceSwitch}
       onAgentClick={handleAgentClick}
+      selectedAgentName={sidebarSelectedAgentName}
       agentTasks={agentTasks}
       onAddClick={() => setShowCreateAgent(true)}
       onAddWorkspaceClick={() => setShowCreateWorkspace(true)}
@@ -1427,8 +1344,8 @@ function App() {
       connectionLost={isConnectionLost}
       disconnectedSince={staleBannerDisconnectedSince}
       onRetryConnection={staleBannerRetry}
-      workQueueCounts={workQueueCounts}
       onTreeSelect={handleTreeIssueSelect}
+      activeView={activeView}
     />
   );
 
@@ -1452,7 +1369,7 @@ function App() {
       <SearchTermProvider value={activeSearchTerm}>
         <AppLayout
           title={headerTitle}
-          navigation={headerNavigation}
+          onTitleClick={() => navigateToView("kanban")}
           actions={headerActions}
           navRail={
             <NavRail
@@ -1460,6 +1377,13 @@ function App() {
               onChange={handleNavChange}
               sessionCount={activeSessionCount}
               badges={{ terminal: hasTerminalUnread }}
+              workspaces={(workspace?.workspaces ?? []).map((ws) => ({
+                id: ws.id,
+                name: ws.name,
+              }))}
+              activeWorkspaceId={workspaceId}
+              onWorkspaceSwitch={handleWorkspaceSwitcherSelect}
+              onAddWorkspace={() => setShowCreateWorkspace(true)}
             />
           }
           sidebar={sidebarContent}
@@ -1472,24 +1396,14 @@ function App() {
             }
           >
             <div className={styles.workspaceMainContent}>
-              <ViewSubSwitcher
-                activeView={activeView}
-                onChange={navigateToView}
-              />
-              {(showStaleBanner || isConnectionLost) &&
-                staleBannerDisconnectedSince !== null &&
-                !(
-                  issues.length === 0 &&
-                  !isLoading &&
-                  !error &&
-                  isIssueBasedView
-                ) && (
-                  <StaleDataBanner
-                    disconnectedSince={staleBannerDisconnectedSince}
-                    onRetry={staleBannerRetry}
-                    connectionLost={isConnectionLost}
-                  />
-                )}
+              {showBoardToolbar && boardToolbar}
+              {shouldRenderStaleDataBanner && (
+                <StaleDataBanner
+                  disconnectedSince={staleBannerDisconnectedSince}
+                  onRetry={staleBannerRetry}
+                  connectionLost={isConnectionLost}
+                />
+              )}
               <WorkspaceViewProvider
                 data={workspaceViewData}
                 actions={workspaceViewActions}
@@ -1498,26 +1412,28 @@ function App() {
                   <Outlet />
                 </Suspense>
               </WorkspaceViewProvider>
-              <div
-                className={terminalContainerClassName}
-                style={terminalContainerStyle}
-              >
-                <Suspense fallback={<LoadingSkeleton.Terminal />}>
-                  <TerminalView
-                    isActive={isTerminalActive}
-                    pendingIssueContext={pendingIssueContext}
-                    onIssueContextConsumed={handleIssueContextConsumed}
-                    pendingAgentName={pendingAgentName}
-                    onAgentNameConsumed={handleAgentNameConsumed}
-                    onActiveSessionCountChange={setActiveSessionCount}
-                    onUnreadChange={setHasTerminalUnread}
-                    onTabLimitReached={(message) =>
-                      showToast(message, { type: "error" })
-                    }
-                    onNavigateToSettings={() => navigateToView("settings")}
-                  />
-                </Suspense>
-              </div>
+              {activeView !== "agents" && (
+                <div
+                  className={terminalContainerClassName}
+                  style={terminalContainerStyle}
+                >
+                  <Suspense fallback={<LoadingSkeleton.Terminal />}>
+                    <TerminalView
+                      isActive={isTerminalActive}
+                      pendingIssueContext={pendingIssueContext}
+                      onIssueContextConsumed={handleIssueContextConsumed}
+                      pendingAgentName={pendingAgentName}
+                      onAgentNameConsumed={handleAgentNameConsumed}
+                      onActiveSessionCountChange={setActiveSessionCount}
+                      onUnreadChange={setHasTerminalUnread}
+                      onTabLimitReached={(message) =>
+                        showToast(message, { type: "error" })
+                      }
+                      onNavigateToSettings={() => navigateToView("settings")}
+                    />
+                  </Suspense>
+                </div>
+              )}
             </div>
             {shouldShowWorkspaceOnboarding && (
               <aside
@@ -1560,12 +1476,9 @@ function App() {
             isOpen={showCreateIssue}
             onClose={() => setShowCreateIssue(false)}
             onSuccess={handleCreateIssueSuccess}
-          />
-          <TalkToLeadButton
-            onClick={handleTalkToLeadClick}
-            isActive={activeView === "terminal"}
-            sessionCount={activeSessionCount}
-            avoidSidePanel={shouldShowWorkspaceOnboarding}
+            epics={issues
+              .filter((i) => i.issue_type === "epic" && i.status !== "closed")
+              .map((i) => ({ id: i.id, title: i.title }))}
           />
         </AppLayout>
       </SearchTermProvider>

@@ -167,7 +167,7 @@ func TestHandleWorkspaceRuntimeReady_DaemonMode_HealthRPCSucceeds(t *testing.T) 
 	pool := &stubRuntimeReadyPool{
 		client: &stubRuntimeReadyClient{resp: &rpc.HealthResponse{Status: "ok"}},
 	}
-	h := handleWorkspaceRuntimeReady(pool, true, nil)
+	h := handleWorkspaceRuntimeReady(pool, true, nil, nil)
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, newRuntimeReadyRequest("LOOM"))
 
@@ -190,7 +190,7 @@ func TestHandleWorkspaceRuntimeReady_DaemonMode_HealthRPCFails(t *testing.T) {
 	pool := &stubRuntimeReadyPool{
 		client: &stubRuntimeReadyClient{err: errors.New("rpc broken")},
 	}
-	h := handleWorkspaceRuntimeReady(pool, true, nil)
+	h := handleWorkspaceRuntimeReady(pool, true, nil, nil)
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, newRuntimeReadyRequest("LOOM"))
 
@@ -208,7 +208,7 @@ func TestHandleWorkspaceRuntimeReady_DaemonMode_HealthRPCFails(t *testing.T) {
 // 503 with a clear "issue backend not configured" reason so operators don't
 // silently see Ready=true with no underlying backend.
 func TestHandleWorkspaceRuntimeReady_FleetMode_NilBackend(t *testing.T) {
-	h := handleWorkspaceRuntimeReady(nil, false, nil)
+	h := handleWorkspaceRuntimeReady(nil, false, nil, nil)
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, newRuntimeReadyRequest("LOOM"))
 
@@ -231,7 +231,7 @@ func TestHandleWorkspaceRuntimeReady_FleetMode_BackendStatsErrors(t *testing.T) 
 	backendFn := func(_ context.Context) backend.IssueBackend {
 		return &stubIssueBackend{err: errors.New("backend down")}
 	}
-	h := handleWorkspaceRuntimeReady(nil, false, backendFn)
+	h := handleWorkspaceRuntimeReady(nil, false, backendFn, nil)
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, newRuntimeReadyRequest("LOOM"))
 
@@ -250,7 +250,7 @@ func TestHandleWorkspaceRuntimeReady_FleetMode_BackendStatsOK(t *testing.T) {
 	backendFn := func(_ context.Context) backend.IssueBackend {
 		return &stubIssueBackend{stats: &backend.StatsData{}}
 	}
-	h := handleWorkspaceRuntimeReady(nil, false, backendFn)
+	h := handleWorkspaceRuntimeReady(nil, false, backendFn, nil)
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, newRuntimeReadyRequest("LOOM"))
 
@@ -266,11 +266,62 @@ func TestHandleWorkspaceRuntimeReady_FleetMode_BackendStatsOK(t *testing.T) {
 	}
 }
 
+func TestHandleWorkspaceRuntimeReady_FleetMode_LocalPathMissing(t *testing.T) {
+	backendCalled := false
+	backendFn := func(_ context.Context) backend.IssueBackend {
+		backendCalled = true
+		return &stubIssueBackend{stats: &backend.StatsData{}}
+	}
+	h := handleWorkspaceRuntimeReady(nil, false, backendFn, func(ws string) string {
+		if ws != "LOOM" {
+			t.Errorf("local path resolver ws = %q, want LOOM", ws)
+		}
+		return ""
+	})
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, newRuntimeReadyRequest("LOOM"))
+
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want 503", rec.Code)
+	}
+	body := decodeRuntimeReady(t, rec.Body.Bytes())
+	if body.Ready {
+		t.Errorf("Ready = true, want false")
+	}
+	if body.Mode != "fleet" {
+		t.Errorf("Mode = %q, want fleet", body.Mode)
+	}
+	if body.Reason != "workspace has no local path on this machine" {
+		t.Errorf("Reason = %q, want missing local path", body.Reason)
+	}
+	if backendCalled {
+		t.Error("backendFn called despite missing local path")
+	}
+}
+
+func TestHandleWorkspaceRuntimeReady_FleetMode_LocalPathOK(t *testing.T) {
+	backendFn := func(_ context.Context) backend.IssueBackend {
+		return &stubIssueBackend{stats: &backend.StatsData{}}
+	}
+	dir := t.TempDir()
+	h := handleWorkspaceRuntimeReady(nil, false, backendFn, func(string) string { return dir })
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, newRuntimeReadyRequest("LOOM"))
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	body := decodeRuntimeReady(t, rec.Body.Bytes())
+	if !body.Ready {
+		t.Errorf("Ready = false, want true")
+	}
+}
+
 // TestHandleWorkspaceRuntimeReady_MissingPathValue ensures the handler
 // surfaces a 400 (not 503) when the {ws} path parameter is absent — a
 // programming error, not a runtime outage.
 func TestHandleWorkspaceRuntimeReady_MissingPathValue(t *testing.T) {
-	h := handleWorkspaceRuntimeReady(nil, true, nil)
+	h := handleWorkspaceRuntimeReady(nil, true, nil, nil)
 	req := httptest.NewRequest(http.MethodGet, "/api/workspaces//readyz", nil)
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)

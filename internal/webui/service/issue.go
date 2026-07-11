@@ -36,6 +36,8 @@ type KanbanIssue struct {
 	Parent           *string            `json:"parent,omitempty"`
 	ParentTitle      *string            `json:"parent_title,omitempty"`
 	IsBlocked        bool               `json:"is_blocked"`
+	IsReady          bool               `json:"is_ready"`
+	IsDeferred       bool               `json:"is_deferred"`
 	BlockedByCount   int                `json:"blocked_by_count"`
 	BlockedBy        []string           `json:"blocked_by,omitempty"`
 	BlockedByDetails []types.BlockerRef `json:"blocked_by_details,omitempty"`

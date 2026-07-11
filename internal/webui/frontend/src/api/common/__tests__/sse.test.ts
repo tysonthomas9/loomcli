@@ -83,6 +83,14 @@ class MockEventSource {
     }
   }
 
+  simulateRawMutation(data: string, eventId = ""): void {
+    const listeners = this.eventListeners.get("mutation") ?? [];
+    const event = { data, lastEventId: eventId } as MessageEvent;
+    for (const listener of listeners) {
+      listener(event);
+    }
+  }
+
   simulateConnectedEvent(): void {
     const listeners = this.eventListeners.get("connected") ?? [];
     const event = { data: "" } as MessageEvent;
@@ -310,6 +318,31 @@ describe("WorkspaceSSEClient", () => {
       expect(onMutation).toHaveBeenCalledWith(mutation);
     });
 
+    it("onMutation receives generic non-issue agent payloads", async () => {
+      const onMutation = vi.fn();
+      const client = new WorkspaceSSEClient("test-ws-id", { onMutation });
+
+      await client.connect();
+      MockEventSource.lastInstance?.simulateOpen();
+
+      const mutation: MutationPayload = {
+        type: "status",
+        entity_type: "agent",
+        entity_id: "agent-alpha",
+        action: "agent.status",
+        title: "agent-alpha",
+        timestamp: "2025-01-23T12:00:00Z",
+      };
+
+      MockEventSource.lastInstance?.simulateMutation(
+        mutation,
+        "agent-cursor-1",
+      );
+
+      expect(onMutation).toHaveBeenCalledWith(mutation);
+      expect(client.getLastEventId()).toBe("agent-cursor-1");
+    });
+
     it("malformed JSON is ignored with warning", async () => {
       const onMutation = vi.fn();
       const consoleWarnSpy = vi
@@ -320,15 +353,7 @@ describe("WorkspaceSSEClient", () => {
       await client.connect();
       MockEventSource.lastInstance?.simulateOpen();
 
-      // Simulate invalid JSON by directly calling the listener with malformed data
-      const listeners =
-        (MockEventSource.lastInstance as MockEventSource)["eventListeners"].get(
-          "mutation",
-        ) ?? [];
-      const event = { data: "not valid json" } as MessageEvent;
-      for (const listener of listeners) {
-        listener(event);
-      }
+      MockEventSource.lastInstance?.simulateRawMutation("not valid json");
 
       expect(onMutation).not.toHaveBeenCalled();
       expect(consoleWarnSpy).toHaveBeenCalledWith(

@@ -18,6 +18,11 @@
 import { act, render } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import {
+  TERMINAL_FONT_CHANGE_EVENT,
+  type TerminalFontChangeDetail,
+} from "@/hooks/terminal/useTerminalFont";
+
 // ── Hoisted shared state ─────────────────────────────────────────────────────
 //
 // Lives at module scope so vi.mock factories can reach it. Tests reset it in
@@ -244,6 +249,55 @@ describe("TerminalInstance", () => {
       expect(writeMock).toHaveBeenCalledWith("strict-mode-bytes");
 
       unmount();
+    });
+  });
+
+  describe("terminal font changes", () => {
+    it("re-measures and resizes when terminal font prefs change", async () => {
+      const element = document.createElement("div");
+      Object.defineProperty(element, "clientWidth", { value: 800 });
+      Object.defineProperty(element, "clientHeight", { value: 400 });
+      const grid = document.createElement("div");
+      grid.className = "term-grid";
+      element.appendChild(grid);
+      wtermState.stub.element = element;
+
+      const rectSpy = vi
+        .spyOn(HTMLElement.prototype, "getBoundingClientRect")
+        .mockReturnValue({
+          width: 10,
+          height: 20,
+          top: 0,
+          left: 0,
+          right: 10,
+          bottom: 20,
+          x: 0,
+          y: 0,
+          toJSON: () => ({}),
+        } as DOMRect);
+
+      const resizeMock = vi.fn();
+      wtermState.stub.resize = resizeMock;
+
+      render(<TerminalInstance sessionName="alpha" isActive />);
+      await flushPendingWork();
+
+      act(() => {
+        window.dispatchEvent(
+          new CustomEvent<TerminalFontChangeDetail>(
+            TERMINAL_FONT_CHANGE_EVENT,
+            {
+              detail: {
+                fontFamily: "Monaco, monospace",
+                fontSize: 20,
+              },
+            },
+          ),
+        );
+      });
+
+      expect(resizeMock).toHaveBeenCalled();
+      rectSpy.mockRestore();
     });
   });
 });

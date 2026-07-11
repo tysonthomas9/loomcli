@@ -106,7 +106,7 @@ test.describe("E2E Journey: Workspace lifecycle", () => {
   test("Workspace tree shows current workspace", async () => {
     // Verify workspace name appears in sidebar
     const sidebar = page.getByRole("complementary");
-    await expect(sidebar.getByText("Workspaces")).toBeVisible();
+    await expect(sidebar.getByRole("heading", { name: "Repos" })).toBeVisible();
     await expect(
       page.getByRole("button", { name: /Active workspace: Lifecycle Workspace/ }),
     ).toBeVisible();

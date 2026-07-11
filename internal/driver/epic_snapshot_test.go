@@ -1,0 +1,111 @@
+package driver
+
+import (
+	"context"
+	"testing"
+
+	"github.com/tysonthomas9/loomcli/internal/backend"
+	"github.com/tysonthomas9/loomcli/internal/cli/clitest"
+	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
+	"github.com/tysonthomas9/loomcli/internal/store"
+)
+
+func TestLoadEpicSnapshotCountsOnlyOpenChildren(t *testing.T) {
+	ib := clitest.NewMockIssueBackend()
+	ib.ReadyResult = []backend.IssueData{{ID: "TASK-1", Title: "Ready", Status: "open", Parent: "EPIC-1"}}
+	ib.BlockedResult = []backend.IssueData{{ID: "TASK-2", Title: "Blocked", Status: "blocked", Parent: "EPIC-1", BlockedBy: []string{"TASK-0"}, BlockedByCount: 1}}
+	ib.ListResult = []backend.IssueData{
+		{ID: "TASK-1", Status: "open", Parent: "EPIC-1"},
+		{ID: "TASK-2", Status: "blocked", Parent: "EPIC-1"},
+		{ID: "TASK-3", Status: "closed", Parent: "EPIC-1"},
+		{ID: "TASK-4", Status: "deferred", Parent: "EPIC-1"},
+	}
+
+	got, err := LoadEpicSnapshot(context.Background(), ib, EpicSnapshotOptions{EpicID: "EPIC-1"})
+	if err != nil {
+		t.Fatalf("LoadEpicSnapshot: %v", err)
+	}
+	if got.EpicID != "EPIC-1" || got.ReadyCount != 1 || got.BlockedCount != 1 || got.OpenChildrenCount != 2 {
+		t.Fatalf("snapshot = %+v, want ready=1 blocked=1 open=2", got)
+	}
+	if len(got.Blocked) != 1 || got.Blocked[0].BlockedByCount != 1 || got.Blocked[0].BlockedBy[0] != "TASK-0" {
+		t.Fatalf("blocked summary = %+v, want blocker metadata", got.Blocked)
+	}
+}
+
+func TestListActiveTaskRunsReturnsQueuedAndRunningOnly(t *testing.T) {
+	ctx := context.Background()
+	st := memstore.New()
+	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "WS", Name: "workspace"}); err != nil {
+		t.Fatalf("Create workspace: %v", err)
+	}
+	if _, err := st.Drivers().Create(ctx, store.DriverCreate{
+		WorkspaceKey:    "WS",
+		DriverID:        "driver-1",
+		Name:            "driver-1",
+		OwnerType:       domain.DriverOwnerSystem,
+		ActiveVersionID: "version-1",
+		Status:          domain.DriverStatusActive,
+	}); err != nil {
+		t.Fatalf("Create driver: %v", err)
+	}
+	if _, err := st.DriverVersions().Create(ctx, store.DriverVersionCreate{
+		WorkspaceKey:     "WS",
+		VersionID:        "version-1",
+		DriverID:         "driver-1",
+		Version:          1,
+		SourceDigest:     "sha256:source",
+		BundleDigest:     "sha256:bundle",
+		Runtime:          RuntimeFlueNode,
+		ValidationStatus: domain.DriverVersionValidationPassed,
+	}); err != nil {
+		t.Fatalf("Create driver version: %v", err)
+	}
+	if _, err := st.DriverRuns().Create(ctx, store.DriverRunCreate{
+		WorkspaceKey:    "WS",
+		RunID:           "run-1",
+		DriverID:        "driver-1",
+		DriverVersionID: "version-1",
+		EpicID:          "EPIC-1",
+	}); err != nil {
+		t.Fatalf("Create driver run: %v", err)
+	}
+	if _, err := st.DriverRuns().Create(ctx, store.DriverRunCreate{
+		WorkspaceKey:    "WS",
+		RunID:           "run-2",
+		DriverID:        "driver-1",
+		DriverVersionID: "version-1",
+		EpicID:          "EPIC-2",
+	}); err != nil {
+		t.Fatalf("Create other driver run: %v", err)
+	}
+	for _, run := range []store.TaskRunCreate{
+		{WorkspaceKey: "WS", TaskRunID: "task-run-queued", DriverRunID: "run-1", TaskID: "TASK-1", Status: domain.TaskRunQueued},
+		{WorkspaceKey: "WS", TaskRunID: "task-run-running", DriverRunID: "run-1", TaskID: "TASK-2", Status: domain.TaskRunRunning},
+		{WorkspaceKey: "WS", TaskRunID: "task-run-completed", DriverRunID: "run-1", TaskID: "TASK-3", Status: domain.TaskRunCompleted},
+		{WorkspaceKey: "WS", TaskRunID: "task-run-other", DriverRunID: "run-2", TaskID: "TASK-4", Status: domain.TaskRunRunning},
+	} {
+		if _, err := st.TaskRuns().Create(ctx, run); err != nil {
+			t.Fatalf("Create task run %s: %v", run.TaskRunID, err)
+		}
+	}
+
+	got, err := ListActiveTaskRuns(ctx, st, ActiveTaskRunsOptions{WorkspaceKey: "WS", DriverRunID: "run-1", EpicID: "EPIC-1"})
+	if err != nil {
+		t.Fatalf("ListActiveTaskRuns: %v", err)
+	}
+	if got.DriverRunID != "run-1" || got.EpicID != "EPIC-1" || got.ActiveCount != 2 {
+		t.Fatalf("active = %+v, want two active for run-1", got)
+	}
+	ids := map[string]bool{}
+	for _, taskRun := range got.TaskRuns {
+		ids[taskRun.ID] = true
+		if taskRun.Status != domain.TaskRunQueued && taskRun.Status != domain.TaskRunRunning {
+			t.Fatalf("task run %s has terminal status %s", taskRun.ID, taskRun.Status)
+		}
+	}
+	if !ids["task-run-queued"] || !ids["task-run-running"] || ids["task-run-completed"] || ids["task-run-other"] {
+		t.Fatalf("active ids = %+v, want queued/running for run-1 only", ids)
+	}
+}

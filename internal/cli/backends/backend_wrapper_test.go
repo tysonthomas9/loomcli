@@ -318,25 +318,38 @@ func TestContextFromShutdown_NilParentDefaultsToBackground(t *testing.T) {
 //     with the right binary, args, and Harness name. ---
 
 func TestDefaultClaudeNonInteractiveInvoker_UsesWrapperWithClaudeHarness(t *testing.T) {
-	requireBinaryOnPath(t, "claude")
-	fake := &fakeWrapperRun{result: wrapper.Result{Status: wrapper.StatusIdle}}
-	installWrapperRunMock(t, fake.Run)
+	var calls []claudeRunTurnConfig
+	installClaudeRunTurnMock(t, func(ctx context.Context, cfg claudeRunTurnConfig) (claudeRunTurnResult, error) {
+		calls = append(calls, cfg)
+		return completedClaudeTurn("done"), nil
+	})
 
 	collector := usage.NewCollector("claude", "agent-A")
 	if err := defaultClaudeNonInteractiveInvoker(t.TempDir(), "prompt body", "agent-A", nil, collector); err != nil {
 		t.Fatalf("invoker err: %v", err)
 	}
 
-	calls := fake.Calls()
 	if len(calls) != 1 {
-		t.Fatalf("wrapperRun calls: got %d, want 1", len(calls))
+		t.Fatalf("claudeRunTurn calls: got %d, want 1", len(calls))
 	}
 	cfg := calls[0]
 	if cfg.Harness != "claude" {
 		t.Errorf("Harness: got %q, want claude", cfg.Harness)
 	}
-	if !containsArg(cfg.Args, "-p") || !containsArg(cfg.Args, "--output-format") {
-		t.Errorf("Args: got %v, want to contain '-p' and '--output-format'", cfg.Args)
+	if cfg.BinaryPath != "claude" {
+		t.Errorf("BinaryPath: got %q, want claude", cfg.BinaryPath)
+	}
+	if cfg.Prompt != "prompt body" {
+		t.Errorf("Prompt: got %q, want prompt body", cfg.Prompt)
+	}
+	if containsArg(cfg.Args, "-p") || containsArg(cfg.Args, "--output-format") {
+		t.Errorf("Args: got %v, want no print-mode args", cfg.Args)
+	}
+	if !containsArg(cfg.Args, "--dangerously-skip-permissions") {
+		t.Errorf("Args: got %v, want --dangerously-skip-permissions", cfg.Args)
+	}
+	if !cfg.ExitAfterTurn {
+		t.Error("ExitAfterTurn = false, want true")
 	}
 }
 
@@ -359,6 +372,9 @@ func TestDefaultCodexNonInteractiveInvoker_UsesWrapperWithCodexHarness(t *testin
 	if !containsArg(calls[0].Args, "prompt body") {
 		t.Errorf("codex args: got %v, want final positional prompt", calls[0].Args)
 	}
+	if !containsArg(calls[0].Args, "prompt body") {
+		t.Errorf("codex args: got %v, want prompt passed as argv for PTY-backed exec", calls[0].Args)
+	}
 }
 
 func TestDefaultGeminiNonInteractiveInvoker_UsesWrapperWithGeminiHarness(t *testing.T) {
@@ -379,7 +395,7 @@ func TestDefaultGeminiNonInteractiveInvoker_UsesWrapperWithGeminiHarness(t *test
 }
 
 func TestDefaultCursorNonInteractiveInvoker_UsesWrapperWithGenericClassifier(t *testing.T) {
-	requireBinaryOnPath(t, "cursor")
+	requireBinaryOnPath(t, "cursor-agent")
 	fake := &fakeWrapperRun{result: wrapper.Result{Status: wrapper.StatusIdle}}
 	installWrapperRunMock(t, fake.Run)
 

@@ -883,7 +883,7 @@ describe("useGraphData", () => {
       expect(node.data.isReady).toBe(true);
     });
 
-    it("sets isReady: true for in_progress issues without blockers", () => {
+    it("sets isReady: false for in_progress issues without blockers", () => {
       const issue = createTestIssue({ id: "A", status: "in_progress" });
       const blockedIssueIds = new Set<string>();
 
@@ -892,7 +892,23 @@ describe("useGraphData", () => {
       );
 
       const node = result.current.nodes[0];
-      expect(node.data.isReady).toBe(true);
+      expect(node.data.isReady).toBe(false);
+    });
+
+    it("uses canonical is_ready when present", () => {
+      const issue = createTestIssue({
+        id: "A",
+        status: "open",
+        is_ready: false,
+      });
+      const blockedIssueIds = new Set<string>();
+
+      const { result } = renderHook(() =>
+        useGraphData([issue], { blockedIssueIds }),
+      );
+
+      const node = result.current.nodes[0];
+      expect(node.data.isReady).toBe(false);
     });
 
     it("correctly computes isReady for multiple issues", () => {
@@ -923,7 +939,7 @@ describe("useGraphData", () => {
       expect(nodeA?.data.isReady).toBe(true); // open, not blocked
       expect(nodeB?.data.isReady).toBe(false); // open, blocked
       expect(nodeC?.data.isReady).toBe(false); // closed
-      expect(nodeD?.data.isReady).toBe(true); // in_progress, not blocked
+      expect(nodeD?.data.isReady).toBe(false); // in_progress
     });
 
     it("memoizes correctly when blockedIssueIds changes", () => {

@@ -20,6 +20,16 @@ var configCache struct {
 
 const configCacheTTL = 5 * time.Second
 
+var daemonConfigCache struct {
+	sync.RWMutex
+	cfg          *DaemonConfig
+	err          error
+	expires      time.Time
+	dir          string
+	workspaceKey string
+	projectDir   string
+}
+
 // LoadConfigCached returns a cached config or reloads the FleetDB projection if stale.
 func LoadConfigCached() (*LoomConfig, error) {
 	dir := GetConfigDir()
@@ -51,6 +61,15 @@ func InvalidateConfigCache() {
 	configCache.expires = time.Time{}
 	configCache.dir = ""
 	configCache.Unlock()
+
+	daemonConfigCache.Lock()
+	daemonConfigCache.cfg = nil
+	daemonConfigCache.err = nil
+	daemonConfigCache.expires = time.Time{}
+	daemonConfigCache.dir = ""
+	daemonConfigCache.workspaceKey = ""
+	daemonConfigCache.projectDir = ""
+	daemonConfigCache.Unlock()
 }
 
 // TestingPrimeConfigCacheFromStore projects st into the LoadConfigCached cache.
@@ -68,4 +87,33 @@ func TestingPrimeConfigCacheFromStore(ctx context.Context, st store.Store) (*Loo
 	configCache.dir = GetConfigDir()
 	configCache.Unlock()
 	return cfg, nil
+}
+
+func lookupPrimedDaemonConfig(wsKey, projectDir string) (*DaemonConfig, error, bool) {
+	dir := GetConfigDir()
+	daemonConfigCache.RLock()
+	defer daemonConfigCache.RUnlock()
+	if daemonConfigCache.dir == dir &&
+		daemonConfigCache.workspaceKey == wsKey &&
+		daemonConfigCache.projectDir == projectDir &&
+		time.Now().Before(daemonConfigCache.expires) {
+		return daemonConfigCache.cfg, daemonConfigCache.err, true
+	}
+	return nil, nil, false
+}
+
+// TestingPrimeDaemonConfigCacheFromStore projects st into the LoadDaemonConfig cache.
+// It lets tests seed daemon config with memstore without starting fleet-db.
+func TestingPrimeDaemonConfigCacheFromStore(ctx context.Context, st store.Store, wsKey, projectDir string) (*DaemonConfig, error) {
+	cfg, err := loadDaemonConfigFromStore(ctx, st, wsKey, newDefaultDaemonConfig(), projectDir)
+
+	daemonConfigCache.Lock()
+	daemonConfigCache.cfg = cfg
+	daemonConfigCache.err = err
+	daemonConfigCache.expires = time.Now().Add(time.Hour)
+	daemonConfigCache.dir = GetConfigDir()
+	daemonConfigCache.workspaceKey = wsKey
+	daemonConfigCache.projectDir = projectDir
+	daemonConfigCache.Unlock()
+	return cfg, err
 }

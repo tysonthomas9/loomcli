@@ -91,9 +91,120 @@ desktop/src-tauri/target/release/bundle/macos/
 desktop/src-tauri/target/release/bundle/dmg/
 ```
 
-The current DMG is a development packaging artifact. Signing, notarization,
-release-channel metadata, and automatic update publication are still separate
-release tasks.
+`npm run build:dmg` produces an unsigned/ad-hoc DMG suitable for local testing
+only. For a DMG that launches on other Macs without Gatekeeper warnings, produce
+a Developer ID–signed, notarized, and stapled build — see
+[Signed Release Build](#signed-release-build) below. Release-channel metadata and
+automatic update publication are still separate release tasks.
+
+## Signed Release Build
+
+A distributable build must be signed with a Developer ID Application certificate,
+notarized by Apple, and stapled. There are two supported paths.
+
+### Local (one-shot)
+
+Requirements: the Developer ID Application certificate in your login keychain and
+a `notarytool` keychain profile created once with:
+
+```sh
+xcrun notarytool store-credentials <profile-name> \
+  --apple-id <you@example.com> --team-id BN879H59CY --password <app-specific-password>
+# or, with an App Store Connect API key:
+xcrun notarytool store-credentials <profile-name> \
+  --key AuthKey_XXXX.p8 --key-id <key-id> --issuer <issuer-id>
+```
+
+Then build, sign, notarize, staple, and verify a DMG with:
+
+```sh
+NOTARY_PROFILE=<profile-name> npm --prefix desktop run release:macos
+```
+
+This runs `desktop/scripts/release-macos.sh`, which signs the `.app` and the
+bundled `loom`/`fleet-db` sidecars with hardened runtime, notarizes and staples
+the app, wraps it in a DMG, then notarizes and staples the DMG. The verified
+artifact lands at `desktop/dist-release/Loom-Agents-<version>-aarch64.dmg`, and
+the script prints a ready-to-run `gh release create` command. Apple's notary
+service typically takes 2–15 minutes, during which the run blocks on `--wait`.
+
+Optional: `brew install create-dmg` for a prettier drag-to-Applications DMG
+layout (the `hdiutil` fallback already includes an `/Applications` symlink).
+
+**Installing the DMG — must go in `/Applications`.** Open the DMG and drag
+**Loom Agents** onto the **Applications** shortcut. Do **not** double-click the
+app inside the mounted DMG or run it from `~/Downloads`: macOS **App
+Translocation** runs a freshly-downloaded (quarantined) app from a read-only,
+randomized path, and the bundled `loom` sidecar cannot start there. The app
+detects this and shows a "Move Loom to Applications" notice instead of hanging.
+Once it lives in `/Applications`, translocation no longer applies and the
+runtime starts normally (first launch shows the usual Gatekeeper consent).
+
+### Cutting a release candidate (local)
+
+To produce a versioned RC artifact, set `APP_VERSION` so the DMG, the suggested
+tag, and the title all carry the `-rcN` suffix (this only renames the artifact;
+the bundle's `CFBundleShortVersionString` stays the `tauri.conf.json` value,
+because macOS `CFBundleVersion` must be numeric):
+
+```sh
+NOTARY_PROFILE=<profile-name> APP_VERSION=0.1.0-rc1 \
+  npm --prefix desktop run release:macos
+```
+
+Output: `desktop/dist-release/Loom-Agents-0.1.0-rc1-aarch64.dmg`. Write a checksum
+manifest next to it and publish as a GitHub **prerelease** with both files:
+
+```sh
+( cd desktop/dist-release && shasum -a 256 Loom-Agents-0.1.0-rc1-aarch64.dmg > SHA256SUMS.txt )
+
+gh release create desktop-v0.1.0-rc1 \
+  desktop/dist-release/Loom-Agents-0.1.0-rc1-aarch64.dmg \
+  desktop/dist-release/SHA256SUMS.txt \
+  --repo tysonthomas9/loomcli --target main --prerelease \
+  --title "Loom Agents 0.1.0-rc1 (Apple Silicon)" \
+  --notes "Release candidate. Signed + notarized, Apple Silicon (arm64). Install: open the DMG and drag Loom Agents to /Applications."
+```
+
+Notes:
+- The RC binary is built from the working tree, so the tagged commit does not
+  contain the exact source unless you commit the desktop changes first.
+- **Reinstalling over an existing `/Applications/Loom Agents.app`**: a scripted
+  `ditto`/`cp` overwrite fails with `Operation not permitted` (macOS App
+  Management protection on an already-launched bundle). Drag-replace via Finder
+  (it prompts for auth), or remove the old bundle first, then copy.
+
+### CI (tag-triggered)
+
+`.github/workflows/desktop-release.yml` builds, signs, notarizes, staples, and
+uploads the DMG to a draft GitHub release when a `desktop-v*` tag is pushed:
+
+```sh
+git tag desktop-v0.1.0 && git push origin desktop-v0.1.0
+```
+
+It requires these repository secrets (Settings → Secrets and variables → Actions):
+
+| Secret | Purpose |
+| --- | --- |
+| `APPLE_CERTIFICATE` | base64 of a `.p12` export of the Developer ID Application cert |
+| `APPLE_CERTIFICATE_PASSWORD` | password used when exporting the `.p12` |
+| `APPLE_SIGNING_IDENTITY` | e.g. `Developer ID Application: Tyson Kuthur Thomas (BN879H59CY)` |
+| `APPLE_API_ISSUER` | App Store Connect API key issuer id |
+| `APPLE_API_KEY_ID` | App Store Connect API key id |
+| `APPLE_API_KEY_P8` | contents of the `AuthKey_XXXX.p8` file |
+| `FLEET_DB_TOKEN` | optional; token to checkout the private `fleet-db` repo |
+
+Export the cert as base64 with:
+
+```sh
+security find-certificate -c "Developer ID Application" -p   # confirm it exists
+# In Keychain Access: export the identity (cert + private key) as cert.p12, then:
+base64 -i cert.p12 | pbcopy
+```
+
+Both paths currently build **Apple Silicon (arm64) only**; a universal (Intel +
+ARM) build is a future enhancement.
 
 ## Manual Installation
 
@@ -264,11 +375,13 @@ tokens, API keys, and repo credentials before sharing diagnostics.
 
 ## Release Gaps
 
-The current repository can build and manually install a development `.app`.
-Before shipping to users, finish:
+The current repository can build and manually install a development `.app`, and
+can produce a Developer ID–signed, notarized, stapled DMG (see
+[Signed Release Build](#signed-release-build)). Before shipping to users, finish:
 
-- code signing and notarization
-- signed DMG packaging
+- ~~code signing and notarization~~ — done (local `release:macos` + CI workflow)
+- ~~signed DMG packaging~~ — done (notarized + stapled DMG)
+- universal (Intel + ARM) build; current builds are arm64 only
 - update metadata generation and hosting
 - updater UI and rollback behavior
 - first-run background service consent

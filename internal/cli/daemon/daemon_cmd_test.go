@@ -1016,9 +1016,7 @@ func TestComputeAgentStatus_Error_RunningTakesPrecedence(t *testing.T) {
 	}
 }
 
-func TestComputeAgentStatus_Parked(t *testing.T) {
-	// The legacy parked stop reason is terminal in the v5/#134 policy and is
-	// surfaced as error.
+func TestComputeAgentStatus_MaxRetriesParkedLegacy(t *testing.T) {
 	ap := SupervisedAgentStatus{
 		PID:          0,
 		RestartCount: 0,
@@ -1032,19 +1030,32 @@ func TestComputeAgentStatus_Parked(t *testing.T) {
 	}
 }
 
-func TestComputeAgentStatus_Parked_RunningTakesPrecedence(t *testing.T) {
-	// A re-spawned parked agent (PID alive) reads as "running" — the running
-	// guard is checked before the parked stop reason.
+func TestComputeAgentStatus_MaxRetriesBlockedLegacy(t *testing.T) {
+	ap := SupervisedAgentStatus{
+		PID:          0,
+		RestartCount: 0,
+		StopReason:   StopReasonMaxRetriesBlocked,
+	}
+
+	status := computeAgentStatus(ap, 3)
+
+	if status != "error" {
+		t.Errorf("computeAgentStatus() = %q, want %q for StopReasonMaxRetriesBlocked", status, "error")
+	}
+}
+
+func TestComputeAgentStatus_MaxRetriesBlocked_RunningTakesPrecedence(t *testing.T) {
+	// A live process reads as running even if a legacy stop reason is present.
 	ap := SupervisedAgentStatus{
 		PID:          os.Getpid(), // a live process
 		RestartCount: 0,
-		StopReason:   StopReasonMaxRetriesParked,
+		StopReason:   StopReasonMaxRetriesBlocked,
 	}
 
 	status := computeAgentStatus(ap, 3)
 
 	if status != "running" {
-		t.Errorf("computeAgentStatus() = %q, want %q (running must override a stale parked reason)", status, "running")
+		t.Errorf("computeAgentStatus() = %q, want %q (running must override a stale max-retry reason)", status, "running")
 	}
 }
 

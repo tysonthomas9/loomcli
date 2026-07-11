@@ -387,7 +387,9 @@ func (d *Daemon) validateIPCLease(ctx context.Context, req AgentIPCRequest) (Age
 			Kind:  string(backend.KindValidation),
 		}, false
 	}
-	lease, err := d.store.AgentLeases().Heartbeat(ctx, d.sup.WorkspaceID, req.LeaseID, req.LeaseToken, 2*time.Minute)
+	// 30-minute TTL matches the supervisor's defaultLeaseTTL so a single
+	// IPC mutation extends the lease past a typical real-codex turn.
+	lease, err := d.store.AgentLeases().Heartbeat(ctx, d.sup.WorkspaceID, req.LeaseID, req.LeaseToken, 30*time.Minute)
 	if err != nil {
 		if errors.Is(err, domain.ErrAlreadyExists) || errors.Is(err, domain.ErrGone) {
 			slog.Warn("agent lease heartbeat returned already-exists/gone; verifying via get",

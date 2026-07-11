@@ -8,16 +8,16 @@
 }
 
 .sectionTitle {
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 700;
   color: var(--color-text-muted);
-  margin: 0 0 16px;
+  margin: 0 0 12px;
   text-transform: uppercase;
   letter-spacing: 0.08em;
 }
 
 .emptyState {
-  font-size: 13px;
+  font-size: var(--font-size-base);
   color: var(--color-text-muted);
   margin: 0;
   text-align: center;
@@ -63,21 +63,21 @@
 }
 
 .author {
-  font-size: 12px;
+  font-size: var(--font-size-xs);
   font-weight: 600;
   color: var(--color-text);
 }
 
 .timestamp {
-  font-size: 11px;
+  font-size: var(--font-size-xs);
   color: var(--color-text-muted);
   flex-shrink: 0;
 }
 
 .commentBodyWrap {
-  font-size: 14px;
+  font-size: var(--font-size-base);
   color: var(--color-text-secondary);
-  line-height: 1.5;
+  line-height: 1.55;
   word-break: break-word;
 }
 
@@ -100,7 +100,7 @@
 }
 
 .eventDescription {
-  font-size: 12px;
+  font-size: var(--font-size-base);
   color: var(--color-text-muted);
   flex: 1;
   min-width: 0;

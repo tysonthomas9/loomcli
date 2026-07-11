@@ -215,7 +215,9 @@ func broadcastAgentRefresh(hub *realtime.Hub, workspace, agentName, actor string
 	}
 	hub.Broadcast(&realtime.MutationPayload{
 		Type:        "refresh",
-		IssueID:     "",
+		EntityType:  "agent",
+		EntityID:    agentName,
+		Action:      "agent.refresh",
 		Title:       agentName,
 		Actor:       actor,
 		Timestamp:   time.Now().UTC().Format(time.RFC3339Nano),

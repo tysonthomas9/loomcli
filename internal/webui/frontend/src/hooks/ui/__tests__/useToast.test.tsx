@@ -32,10 +32,11 @@ describe("useToast", () => {
       expect(result.current.toasts).toEqual([]);
     });
 
-    it("throws error when used outside ToastProvider", () => {
-      expect(() => {
-        renderHook(() => useToast());
-      }).toThrow("useToast must be used within a ToastProvider");
+    it("returns a no-op API when used outside ToastProvider", () => {
+      const { result } = renderHook(() => useToast());
+
+      expect(result.current.toasts).toEqual([]);
+      expect(() => result.current.showToast("Test")).not.toThrow();
     });
   });
 

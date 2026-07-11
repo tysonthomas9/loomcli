@@ -165,7 +165,7 @@ func TestAttach_SpawnsFreshSession(t *testing.T) {
 	m := newTestManager(t)
 	key := SessionKey{Workspace: "ws1", Name: "lead-shell-1"}
 
-	att, reattach, err := m.AttachSession(key, 80, 24, []string{"-c", "cat"})
+	att, reattach, err := m.AttachSession(key, 80, 24, &LaunchSpec{Argv: []string{"-c", "cat"}})
 	if err != nil {
 		t.Fatalf("AttachSession: %v", err)
 	}
@@ -185,7 +185,7 @@ func TestDetachDoesNotKillImmediately(t *testing.T) {
 	m := newTestManager(t)
 	key := SessionKey{Workspace: "ws1", Name: "lead-shell-1"}
 
-	att, _, err := m.AttachSession(key, 80, 24, []string{"-c", "cat"})
+	att, _, err := m.AttachSession(key, 80, 24, &LaunchSpec{Argv: []string{"-c", "cat"}})
 	if err != nil {
 		t.Fatalf("AttachSession: %v", err)
 	}
@@ -202,7 +202,7 @@ func TestReattachWithinGraceReplaysScrollback(t *testing.T) {
 	m.SetGracePeriod(2 * time.Second) // wide enough to not race the test
 	key := SessionKey{Workspace: "ws1", Name: "lead-shell-1"}
 
-	att1, _, err := m.AttachSession(key, 80, 24, []string{"-c", "cat"})
+	att1, _, err := m.AttachSession(key, 80, 24, &LaunchSpec{Argv: []string{"-c", "cat"}})
 	if err != nil {
 		t.Fatalf("AttachSession: %v", err)
 	}
@@ -240,7 +240,7 @@ func TestGracePeriodExpiryKillsSession(t *testing.T) {
 	m.SetGracePeriod(50 * time.Millisecond)
 	key := SessionKey{Workspace: "ws1", Name: "lead-shell-1"}
 
-	att, _, err := m.AttachSession(key, 80, 24, []string{"-c", "cat"})
+	att, _, err := m.AttachSession(key, 80, 24, &LaunchSpec{Argv: []string{"-c", "cat"}})
 	if err != nil {
 		t.Fatalf("AttachSession: %v", err)
 	}
@@ -253,7 +253,7 @@ func TestExplicitKillTerminatesImmediately(t *testing.T) {
 	m := newTestManager(t)
 	key := SessionKey{Workspace: "ws1", Name: "lead-shell-1"}
 
-	att, _, err := m.AttachSession(key, 80, 24, []string{"-c", "cat"})
+	att, _, err := m.AttachSession(key, 80, 24, &LaunchSpec{Argv: []string{"-c", "cat"}})
 	if err != nil {
 		t.Fatalf("AttachSession: %v", err)
 	}
@@ -288,7 +288,7 @@ func TestIdleReapClosesDetachedSession(t *testing.T) {
 	m.SetIdleTimeout(50 * time.Millisecond)
 	key := SessionKey{Workspace: "ws1", Name: "lead-shell-1"}
 
-	att, _, err := m.AttachSession(key, 80, 24, []string{"-c", "cat"})
+	att, _, err := m.AttachSession(key, 80, 24, &LaunchSpec{Argv: []string{"-c", "cat"}})
 	if err != nil {
 		t.Fatalf("AttachSession: %v", err)
 	}
@@ -313,7 +313,7 @@ func TestSessionCountIncludesDetachedUpToMax(t *testing.T) {
 	var all []attached
 	for i := 0; i < m.MaxSessions(); i++ {
 		k := SessionKey{Workspace: "ws", Name: fmt.Sprintf("s-%d", i)}
-		att, _, err := m.AttachSession(k, 80, 24, []string{"-c", "cat"})
+		att, _, err := m.AttachSession(k, 80, 24, &LaunchSpec{Argv: []string{"-c", "cat"}})
 		if err != nil {
 			t.Fatalf("attach %d: %v", i, err)
 		}
@@ -330,7 +330,7 @@ func TestSessionCountIncludesDetachedUpToMax(t *testing.T) {
 	}
 
 	key := SessionKey{Workspace: "ws", Name: "over-cap"}
-	_, _, err := m.AttachSession(key, 80, 24, []string{"-c", "cat"})
+	_, _, err := m.AttachSession(key, 80, 24, &LaunchSpec{Argv: []string{"-c", "cat"}})
 	if err == nil {
 		t.Errorf("expected ErrPTYMaxSessionsReached, got nil")
 	}
@@ -345,7 +345,7 @@ func TestSecondAttachCoexistsAndReceivesScrollback(t *testing.T) {
 	m.SetGracePeriod(5 * time.Second)
 	key := SessionKey{Workspace: "ws1", Name: "lead-shell-1"}
 
-	att1, _, err := m.AttachSession(key, 80, 24, []string{"-c", "cat"})
+	att1, _, err := m.AttachSession(key, 80, 24, &LaunchSpec{Argv: []string{"-c", "cat"}})
 	if err != nil {
 		t.Fatalf("AttachSession: %v", err)
 	}
@@ -392,7 +392,7 @@ func TestMultiAttach_DetachToZeroArmsKillTimer(t *testing.T) {
 	m.SetGracePeriod(100 * time.Millisecond)
 	key := SessionKey{Workspace: "ws1", Name: "multi"}
 
-	att1, _, err := m.AttachSession(key, 80, 24, []string{"-c", "cat"})
+	att1, _, err := m.AttachSession(key, 80, 24, &LaunchSpec{Argv: []string{"-c", "cat"}})
 	if err != nil {
 		t.Fatalf("first attach: %v", err)
 	}
@@ -424,7 +424,7 @@ func TestMultiAttach_SlowClientDoesNotStallFast(t *testing.T) {
 	m.SetGracePeriod(5 * time.Second)
 	key := SessionKey{Workspace: "ws1", Name: "slow"}
 
-	slow, _, err := m.AttachSession(key, 80, 24, []string{"-c", "cat"})
+	slow, _, err := m.AttachSession(key, 80, 24, &LaunchSpec{Argv: []string{"-c", "cat"}})
 	if err != nil {
 		t.Fatalf("slow attach: %v", err)
 	}
@@ -467,7 +467,7 @@ func TestMultiAttach_AttachmentCount(t *testing.T) {
 		t.Errorf("initial AttachmentCount=%d; want 0", got)
 	}
 
-	att1, _, err := m.AttachSession(key, 80, 24, []string{"-c", "cat"})
+	att1, _, err := m.AttachSession(key, 80, 24, &LaunchSpec{Argv: []string{"-c", "cat"}})
 	if err != nil {
 		t.Fatalf("attach1: %v", err)
 	}
@@ -500,7 +500,7 @@ func TestChildExitRemovesSession(t *testing.T) {
 	key := SessionKey{Workspace: "ws1", Name: "lead-shell-1"}
 
 	// A command that exits immediately.
-	_, _, err := m.AttachSession(key, 80, 24, []string{"-c", "true"})
+	_, _, err := m.AttachSession(key, 80, 24, &LaunchSpec{Argv: []string{"-c", "true"}})
 	if err != nil {
 		t.Fatalf("AttachSession: %v", err)
 	}
@@ -515,7 +515,7 @@ func TestShutdown_RejectsFutureAttach(t *testing.T) {
 	if err := m.Shutdown(); err != nil {
 		t.Fatalf("Shutdown: %v", err)
 	}
-	_, _, err := m.AttachSession(SessionKey{Workspace: "ws1", Name: "s"}, 80, 24, []string{"-c", "cat"})
+	_, _, err := m.AttachSession(SessionKey{Workspace: "ws1", Name: "s"}, 80, 24, &LaunchSpec{Argv: []string{"-c", "cat"}})
 	if !errors.Is(err, ErrPTYManagerClosed) {
 		t.Errorf("post-Shutdown AttachSession err = %v, want ErrPTYManagerClosed", err)
 	}

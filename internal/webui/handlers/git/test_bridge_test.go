@@ -299,7 +299,7 @@ func (m *mockGraphPool) Discard(c GraphClient) {
 
 type mockAgentService struct {
 	getTerminalInfoFunc       func(ctx context.Context, wsID, agentName string) (*service.AgentTerminalInfoResult, error)
-	generateTerminalTokenFunc func(ctx context.Context, agentName, userID string) (string, error)
+	generateTerminalTokenFunc func(ctx context.Context, wsID, agentName, userID string) (string, error)
 	getLogFunc                func(ctx context.Context, wsID, agentName string, lines int, beforeLine int64) (*service.AgentLogResult, error)
 	getDiffStatFunc           func(ctx context.Context, wsID, agentName string) (*service.AgentDiffStatResult, error)
 	gitPushFunc               func(ctx context.Context, wsID, agentName, target string) (*ops.GitPushResult, error)
@@ -319,9 +319,9 @@ func (m *mockAgentService) GetTerminalInfo(ctx context.Context, wsID, agentName 
 	return &service.AgentTerminalInfoResult{Agent: agentName, Mode: "archive"}, nil
 }
 
-func (m *mockAgentService) GenerateTerminalToken(ctx context.Context, agentName, userID string) (string, error) {
+func (m *mockAgentService) GenerateTerminalToken(ctx context.Context, wsID, agentName, userID string) (string, error) {
 	if m.generateTerminalTokenFunc != nil {
-		return m.generateTerminalTokenFunc(ctx, agentName, userID)
+		return m.generateTerminalTokenFunc(ctx, wsID, agentName, userID)
 	}
 	return "test-token", nil
 }
@@ -376,6 +376,10 @@ func (m *mockAgentService) CreatePR(ctx context.Context, wsID, agentName, target
 		return m.createPRFunc(ctx, wsID, agentName, target)
 	}
 	return &ops.GitPRResult{URL: "https://github.com/test/pr/1", Created: true}, nil
+}
+
+func (m *mockAgentService) ListPullRequests(context.Context, string, string) (*ops.GitPullRequestList, error) {
+	return &ops.GitPullRequestList{PullRequests: []ops.GitPullRequest{}}, nil
 }
 
 func (m *mockAgentService) GitReset(ctx context.Context, wsID, agentName, branch string, force, push bool) (*ops.GitResetResult, error) {

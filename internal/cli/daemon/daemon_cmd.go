@@ -41,7 +41,7 @@ type DaemonAgentStatus struct {
 	WorktreePath           string    `json:"worktree_path,omitempty"`
 	LastErrorClass         string    `json:"last_error_class,omitempty"`
 	NoWorkCount            int       `json:"no_work_count,omitempty"`
-	ParkCount              int       `json:"park_count,omitempty"` // display-only: never hydrated back into supervision across daemon restarts
+	BlockCount             int       `json:"block_count,omitempty"` // display-only: never hydrated back into supervision across daemon restarts
 	BackoffUntil           time.Time `json:"backoff_until,omitempty"`
 	RemoteBranch           string    `json:"remote_branch,omitempty"`
 	OwnershipLeaseID       string    `json:"ownership_lease_id,omitempty"`
@@ -325,9 +325,13 @@ func initDaemonServices(config *cfgpkg.DaemonConfig, projectDir string, paths da
 
 	daemon, err := NewDaemon(config, projectDir, eventBus, cli.DefaultIssueBackend(), st)
 	if err != nil {
+		if storeHandle != nil {
+			_ = storeHandle.Close()
+		}
 		fmt.Fprintf(os.Stderr, "Error: creating daemon: %v\n", err)
 		os.Exit(1)
 	}
+	daemon.storeHandle = storeHandle
 
 	return shutdown, daemon
 }

@@ -197,10 +197,11 @@ func TestSupervisorMirrorsAgentSessionToControlPlane(t *testing.T) {
 	cli.ResetWorkspaceRuntimeDirCache()
 
 	ap := &AgentProcess{
-		Entry:          cfgpkg.AgentEntry{Worktree: "worker-1", Role: "task", Repo: "repo-a"},
-		RoleConfig:     cfgpkg.RoleConfig{Backend: "claude"},
-		WorktreePath:   worktree,
-		AssignedTaskID: "task-1",
+		Entry:           cfgpkg.AgentEntry{Worktree: "worker-1", Role: "task", Repo: "repo-a"},
+		RoleConfig:      cfgpkg.RoleConfig{Backend: "claude"},
+		WorktreePath:    worktree,
+		AssignedTaskID:  "task-1",
+		ParentSessionID: "lead-session-1",
 	}
 
 	s.createAgentSession(ap, "epic-1")
@@ -222,6 +223,9 @@ func TestSupervisorMirrorsAgentSessionToControlPlane(t *testing.T) {
 	}
 	if session.TaskID != "task-1" {
 		t.Fatalf("task id = %q, want task-1", session.TaskID)
+	}
+	if session.ParentSessionID != "lead-session-1" {
+		t.Fatalf("parent session id = %q, want lead-session-1", session.ParentSessionID)
 	}
 	if session.Metadata["epic_id"] != "epic-1" || session.Metadata["task_id"] != "task-1" || session.Metadata["repo"] != "repo-a" {
 		t.Fatalf("metadata = %#v, want epic/task/repo", session.Metadata)
@@ -353,16 +357,30 @@ func newControlPlaneTestSupervisor(st *memstore.Store) *Supervisor {
 
 type controlPlaneStoreOverrides struct {
 	*memstore.Store
-	sessions store.AgentSessionStore
-	leases   store.AgentLeaseStore
+	sessions  store.AgentSessionStore
+	leases    store.AgentLeaseStore
+	ownership store.AgentOwnershipLeaseStore
 }
 
 func (s *controlPlaneStoreOverrides) AgentSessions() store.AgentSessionStore {
+	if s.sessions == nil {
+		return s.Store.AgentSessions()
+	}
 	return s.sessions
 }
 
 func (s *controlPlaneStoreOverrides) AgentLeases() store.AgentLeaseStore {
+	if s.leases == nil {
+		return s.Store.AgentLeases()
+	}
 	return s.leases
+}
+
+func (s *controlPlaneStoreOverrides) AgentOwnershipLeases() store.AgentOwnershipLeaseStore {
+	if s.ownership == nil {
+		return s.Store.AgentOwnershipLeases()
+	}
+	return s.ownership
 }
 
 type contextConsumingAgentSessionStore struct {

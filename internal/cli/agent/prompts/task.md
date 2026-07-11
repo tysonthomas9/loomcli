@@ -140,16 +140,15 @@ Use this ONLY when nothing in this codebase can move the task forward:
 - A bug in code outside the design's scope blocks this work
 
 Procedure:
-1. Document the blocker:
-   loom data update <id> --notes "BLOCKED: <detailed external reason>"
-2. If blocked by another task, mention its ID in the notes.
-3. Change status to blocked:
-   loom data update <id> --status blocked
-4. Commit any partial work (if meaningful):
+1. Set the blocked status AND the reason in ONE call. The reason is REQUIRED —
+   `--status blocked` is rejected without notes — so the board shows a human why
+   it's blocked and what unblocks it (include any blocking task ID):
+   loom data update <id> --status blocked --notes "BLOCKED: <detailed external reason + any blocking task ID>"
+2. Commit any partial work (if meaningful):
    git add <files> && git commit -m "WIP: <task-id> - blocked on <reason>"
-   git push origin HEAD
-5. Signal completion: loom complete
-6. EXIT immediately
+5. If you committed partial work, publish it with the stacked PR commands in Step 9.
+6. Signal completion: loom complete
+7. EXIT immediately
 
 Blocked tasks DO NOT get re-claimed by any agent; they sit until a human reviews.
 
@@ -172,11 +171,11 @@ Procedure:
 2. Commit any salvageable infrastructure (tests, helpers, params) with
    feature flags OFF so a future implementation can re-enable them:
    git add <files> && git commit -m "WIP: <task-id> - design revision pending"
-   git push origin HEAD
-3. Flip the task back to the planner:
+3. If you committed salvageable work, publish it with the stacked PR commands in Step 9.
+4. Flip the task back to the planner:
    loom data update <id> --status open --labels +needs-revision
-4. Signal completion: loom complete
-5. EXIT immediately
+5. Signal completion: loom complete
+6. EXIT immediately
 
 The planner watches for `needs-revision` and will re-design against the
 existing design + your NEEDS-REVISION feedback without human intervention.
@@ -190,9 +189,23 @@ the planner is cheaper to re-engage than a human, and 8b is non-terminal
   make gate
 - If it fails, fix ALL failures and re-run until it passes
 - Do NOT commit or push with failing tests
-- Run 'loom data close <id> --reason "Completed with tests and code review"'
 - Stage and commit: git add <files> && git commit -m "<brief description> (<task-id>)"
-- Push: git push origin HEAD
+- Publish through Loom stacked PR delivery (MANDATORY):
+  - Determine the stack id: use `epic:<epic-id>` for child tasks; use `task:<task-id>` for standalone tasks.
+  - Determine the repo name and base branch from the task `source_repo`, the parent epic, or the workspace repo table. If they are ambiguous, add task notes explaining the missing stack inputs, do not close the task, and run `loom complete`.
+  - Ensure the stack exists:
+    `loom stack show <stack-id> --json` or `loom stack init <stack-id> --repo <repo-name> --base <base-branch> --commit-mode agent_commit`
+  - Ensure this task is registered in that stack. If it is absent, run:
+    `loom stack add <task-id> --stack <stack-id> --commit-mode agent_commit`
+  - Read this task's `outputBranch` from `loom stack show <stack-id> --json`.
+  - Materialize your committed HEAD onto that output branch without switching branches:
+    `git branch -f <output-branch> HEAD`
+  - Dry-run first:
+    `loom stack publish <stack-id> --repo-path <repo-path> --dry-run --json`
+  - If the dry-run succeeds, publish:
+    `loom stack publish <stack-id> --repo-path <repo-path> --json`
+  - Do not use direct integration or direct branch pushes as the completion path.
+- Run 'loom data close <id> --reason "Completed with tests and code review"'
 - Signal completion: loom complete
 
 ### CRITICAL: STOP

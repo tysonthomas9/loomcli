@@ -19,13 +19,16 @@ const (
 
 // MutationEvent represents a database mutation for event-driven sync
 type MutationEvent struct {
-	Cursor    string    `json:"cursor,omitempty"`   // Durable stream cursor for reconnect catch-up when available
-	Type      string    `json:"type"`               // One of the Mutation* constants
-	IssueID   string    `json:"issue_id"`           // Issue identifier
-	Title     string    `json:"title,omitempty"`    // Issue title for display context (may be empty for some operations)
-	Assignee  string    `json:"assignee,omitempty"` // Issue assignee for display context (may be empty)
-	Actor     string    `json:"actor,omitempty"`    // Who performed the action (may differ from assignee)
-	Timestamp time.Time `json:"timestamp"`
+	Cursor     string    `json:"cursor,omitempty"`      // Durable stream cursor for reconnect catch-up when available
+	Type       string    `json:"type"`                  // One of the Mutation* constants
+	EntityType string    `json:"entity_type,omitempty"` // Generic changed entity type (issue, dependency, terminal, ...)
+	EntityID   string    `json:"entity_id,omitempty"`   // Generic changed entity identifier
+	Action     string    `json:"action,omitempty"`      // Source action, usually fleet-db action (issue.update, dep.add, ...)
+	IssueID    string    `json:"issue_id,omitempty"`    // Legacy issue identifier for issue-scoped consumers
+	Title      string    `json:"title,omitempty"`       // Issue title for display context (may be empty for some operations)
+	Assignee   string    `json:"assignee,omitempty"`    // Issue assignee for display context (may be empty)
+	Actor      string    `json:"actor,omitempty"`       // Who performed the action (may differ from assignee)
+	Timestamp  time.Time `json:"timestamp"`
 	// Optional metadata for richer events (used by status, bonded, etc.)
 	OldStatus  string `json:"old_status,omitempty"`  // Previous status (for status events)
 	NewStatus  string `json:"new_status,omitempty"`  // New status (for status events)

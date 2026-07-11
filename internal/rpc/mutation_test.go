@@ -34,16 +34,19 @@ func TestMutationEvent_JSONRoundTrip(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Millisecond)
 
 	original := MutationEvent{
-		Type:      MutationUpdate,
-		IssueID:   "loom-123",
-		Title:     "Test Issue",
-		Assignee:  "alice",
-		Actor:     "bob",
-		Timestamp: now,
-		OldStatus: "open",
-		NewStatus: "in_progress",
-		ParentID:  "loom-parent",
-		StepCount: 5,
+		Type:       MutationUpdate,
+		EntityType: "issue",
+		EntityID:   "loom-123",
+		Action:     "issue.update",
+		IssueID:    "loom-123",
+		Title:      "Test Issue",
+		Assignee:   "alice",
+		Actor:      "bob",
+		Timestamp:  now,
+		OldStatus:  "open",
+		NewStatus:  "in_progress",
+		ParentID:   "loom-parent",
+		StepCount:  5,
 	}
 
 	data, err := json.Marshal(original)
@@ -58,6 +61,15 @@ func TestMutationEvent_JSONRoundTrip(t *testing.T) {
 
 	if restored.Type != original.Type {
 		t.Errorf("Type = %q, want %q", restored.Type, original.Type)
+	}
+	if restored.EntityType != original.EntityType {
+		t.Errorf("EntityType = %q, want %q", restored.EntityType, original.EntityType)
+	}
+	if restored.EntityID != original.EntityID {
+		t.Errorf("EntityID = %q, want %q", restored.EntityID, original.EntityID)
+	}
+	if restored.Action != original.Action {
+		t.Errorf("Action = %q, want %q", restored.Action, original.Action)
 	}
 	if restored.IssueID != original.IssueID {
 		t.Errorf("IssueID = %q, want %q", restored.IssueID, original.IssueID)
@@ -107,6 +119,9 @@ func TestMutationEvent_OmitEmpty(t *testing.T) {
 
 	// These fields have omitempty and should not appear when empty
 	omitEmptyFields := []string{
+		`"entity_type"`,
+		`"entity_id"`,
+		`"action"`,
 		`"title"`,
 		`"assignee"`,
 		`"actor"`,
@@ -141,16 +156,19 @@ func TestMutationEvent_JSONTagConsistency(t *testing.T) {
 
 	// Verify all fields use consistent snake_case JSON tags
 	event := MutationEvent{
-		Type:      MutationStatus,
-		IssueID:   "loom-123",
-		Title:     "Test Issue",
-		Assignee:  "alice",
-		Actor:     "bob",
-		Timestamp: time.Now(),
-		OldStatus: "open",
-		NewStatus: "closed",
-		ParentID:  "loom-parent",
-		StepCount: 3,
+		Type:       MutationStatus,
+		EntityType: "issue",
+		EntityID:   "loom-123",
+		Action:     "issue.close",
+		IssueID:    "loom-123",
+		Title:      "Test Issue",
+		Assignee:   "alice",
+		Actor:      "bob",
+		Timestamp:  time.Now(),
+		OldStatus:  "open",
+		NewStatus:  "closed",
+		ParentID:   "loom-parent",
+		StepCount:  3,
 	}
 
 	data, err := json.Marshal(event)
@@ -163,6 +181,9 @@ func TestMutationEvent_JSONTagConsistency(t *testing.T) {
 	// Verify snake_case JSON tags are used for all fields
 	expectedTags := []string{
 		`"type"`,
+		`"entity_type"`,
+		`"entity_id"`,
+		`"action"`,
 		`"issue_id"`,
 		`"title"`,
 		`"assignee"`,
@@ -183,6 +204,9 @@ func TestMutationEvent_JSONTagConsistency(t *testing.T) {
 	// Verify PascalCase keys are NOT present (regression test)
 	unexpectedTags := []string{
 		`"Type"`,
+		`"EntityType"`,
+		`"EntityID"`,
+		`"Action"`,
 		`"IssueID"`,
 		`"Title"`,
 		`"Assignee"`,

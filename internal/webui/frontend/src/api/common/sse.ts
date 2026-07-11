@@ -43,7 +43,11 @@ export type ConnectionState =
 // source per the Phase 7 frontend layer DAG). Re-exported here so existing
 // code that imports them from @/api/sse continues to compile.
 import type { MutationPayload } from "@/types/workspace";
-export type { MutationType, MutationPayload } from "@/types/workspace";
+export type {
+  MutationEntityType,
+  MutationType,
+  MutationPayload,
+} from "@/types/workspace";
 
 /**
  * Options for the WorkspaceSSEClient.

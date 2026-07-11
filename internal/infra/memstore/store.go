@@ -1,11 +1,19 @@
-// Package memstore provides an in-memory implementation of store.Store.
+// Package memstore provides a test-only in-memory implementation of store.Store.
 //
-// Used by tests and during early development before the fleet-db HTTP
-// client (internal/infra/fleetdb) is wired up. Not safe for production
-// — state is lost when the process exits.
+// Runtime code must use the fleet-db HTTP client. Local mode talks to an
+// embedded fleet-db subprocess backed by Redis/miniredis; cloud mode talks to a
+// fleet-db service backed by Redis/Postgres. This package exists only for unit
+// tests that need a lightweight store double.
 package memstore
 
-import "github.com/tysonthomas9/loomcli/internal/store"
+import (
+	"flag"
+	"os"
+	"path/filepath"
+	"strings"
+
+	"github.com/tysonthomas9/loomcli/internal/store"
+)
 
 // Store implements store.Store with all data held in memory. Safe for
 // concurrent use across goroutines. Each entity store carries its own
@@ -24,29 +32,116 @@ type Store struct {
 	leases     *agentLeaseStore
 	ownership  *agentOwnershipLeaseStore
 	commands   *agentCommandStore
+	inbox      *agentInboxMessageStore
+	drivers    *driverStore
+	versions   *driverVersionStore
+	profiles   *workerProfileStore
+	services   *agentServiceStore
+	bindings   *triggerBindingStore
+	events     *triggerEventStore
+	deliveries *triggerDeliveryStore
+	routes     *triggerRouteStore
+	runs       *driverRunStore
+	steps      *driverStepStore
+	taskRuns   *taskRunStore
+	taskEvents *taskRunEventStore
+	outbox     *outboxStore
+	awaits     *awaitStore
 	workers    *workerStore
 	roles      *roleStore
 	daemon     *daemonStore
+	conns      *connectorStore
+	grants     *connectorGrantStore
+	audits     *connectorAuditStore
 }
 
-// New constructs an empty in-memory store. Tests call this directly;
-// production code uses internal/infra/fleetdb.New instead.
+// New constructs an empty in-memory store for tests.
+//
+// Production code uses internal/infra/fleetdb.New instead. Calling New outside
+// a Go test process panics so memstore cannot become a real runtime control
+// plane by accident.
 func New() *Store {
+	requireTestProcess()
+
+	drivers, versions, profiles, roles, services, bindings := newCatalogGraph()
+	nodes := newNodeStore()
+	artifacts := newArtifactStore()
+	runs := newDriverRunStore(versions, bindings)
+	steps := newDriverStepStore(runs)
+	taskRuns := newTaskRunStore(runs, steps, artifacts, profiles, nodes)
+	runs.steps = steps
+	runs.taskRuns = taskRuns
+	steps.taskRuns = taskRuns
+	events := newTriggerEventStore()
+	deliveries := newTriggerDeliveryStore(bindings)
+	routes := &triggerRouteStore{bindings: bindings, events: events, deliveries: deliveries, runs: runs}
+	awaits := newAwaitStore(events)
+	// ResumeAwaiting's security gate: only a resolved (satisfied/timed_out)
+	// await releases its suspended run.
+	runs.setAwaitResumeEligible(awaits.resumeEligible)
 	return &Store{
 		workspaces: newWorkspaceStore(),
 		repos:      newRepoStore(),
 		agents:     newAgentStore(),
-		nodes:      newNodeStore(),
+		nodes:      nodes,
 		sessions:   newAgentSessionStore(),
 		terminals:  newTerminalSessionStore(),
-		artifacts:  newArtifactStore(),
+		artifacts:  artifacts,
 		leases:     newAgentLeaseStore(),
 		ownership:  newAgentOwnershipLeaseStore(),
 		commands:   newAgentCommandStore(),
+		inbox:      newAgentInboxMessageStore(),
+		drivers:    drivers,
+		versions:   versions,
+		profiles:   profiles,
+		services:   services,
+		bindings:   bindings,
+		events:     events,
+		deliveries: deliveries,
+		routes:     routes,
+		runs:       runs,
+		steps:      steps,
+		taskRuns:   taskRuns,
+		taskEvents: newTaskRunEventStore(),
+		outbox:     newOutboxStore(),
+		awaits:     awaits,
 		workers:    newWorkerStore(),
-		roles:      newRoleStore(),
+		roles:      roles,
 		daemon:     newDaemonStore(),
+		conns:      newConnectorStore(),
+		grants:     newConnectorGrantStore(),
+		audits:     newConnectorAuditStore(),
 	}
+}
+
+// newCatalogGraph wires the mutually-referencing catalog stores (drivers,
+// versions, profiles, roles, services, bindings) and returns the handles New
+// needs for the rest of the dependency graph.
+func newCatalogGraph() (*driverStore, *driverVersionStore, *workerProfileStore, *roleStore, *agentServiceStore, *triggerBindingStore) {
+	drivers := newDriverStore()
+	versions := newDriverVersionStore(drivers)
+	profiles := newWorkerProfileStore()
+	roles := newRoleStore()
+	services := newAgentServiceStore(roles, profiles)
+	bindings := newTriggerBindingStore(versions, services)
+	services.bindings = bindings
+	roles.services = services
+	profiles.services = services
+	return drivers, versions, profiles, roles, services, bindings
+}
+
+func requireTestProcess() {
+	if runningUnderGoTest() {
+		return
+	}
+	panic("memstore is test-only; runtime code must use fleet-db over HTTP")
+}
+
+func runningUnderGoTest() bool {
+	if strings.HasSuffix(filepath.Base(os.Args[0]), ".test") {
+		return true
+	}
+	return flag.Lookup("test.v") != nil
 }
 
 // clonePtr returns a copy of *p, or nil if p is nil. Used by the
@@ -83,6 +178,46 @@ func (s *Store) AgentLeases() store.AgentLeaseStore { return s.leases }
 func (s *Store) AgentOwnershipLeases() store.AgentOwnershipLeaseStore { return s.ownership }
 
 func (s *Store) AgentCommands() store.AgentCommandStore { return s.commands }
+
+func (s *Store) AgentInboxMessages() store.AgentInboxMessageStore { return s.inbox }
+
+func (s *Store) Drivers() store.DriverStore { return s.drivers }
+
+func (s *Store) DriverVersions() store.DriverVersionStore { return s.versions }
+
+func (s *Store) WorkerProfiles() store.WorkerProfileStore { return s.profiles }
+
+func (s *Store) AgentServices() store.AgentServiceStore { return s.services }
+
+func (s *Store) TriggerBindings() store.TriggerBindingStore { return s.bindings }
+
+func (s *Store) TriggerEvents() store.TriggerEventStore { return s.events }
+
+func (s *Store) TriggerDeliveries() store.TriggerDeliveryStore { return s.deliveries }
+
+func (s *Store) TriggerRoutes() store.TriggerRouteDispatcher { return s.routes }
+
+func (s *Store) DriverRuns() store.DriverRunStore { return s.runs }
+
+func (s *Store) DriverSteps() store.DriverStepStore { return s.steps }
+
+func (s *Store) TaskRuns() store.TaskRunStore { return s.taskRuns }
+
+// TaskBlocked reports whether a TaskRunFinish with BlockTask marked the given
+// task ID blocked. memstore has no issue model (issues live in fleet-db), so
+// this is the test-side observable for the blocked-issue transition.
+func (s *Store) TaskBlocked(ws, taskID string) bool { return s.taskRuns.TaskBlocked(ws, taskID) }
+
+// TaskRunEvents returns the TaskRunEventStore.
+func (s *Store) TaskRunEvents() store.TaskRunEventStore { return s.taskEvents }
+
+// Outbox returns the OutboxStore.
+func (s *Store) Outbox() store.OutboxStore { return s.outbox }
+
+// Awaits returns the AwaitStore (chunk AW4). The await index shares the
+// trigger-event journal's lock so register-and-check is atomic with event
+// appends; see awaitStore.
+func (s *Store) Awaits() store.AwaitStore { return s.awaits }
 
 // Workers returns the WorkerStore.
 func (s *Store) Workers() store.WorkerStore { return s.workers }
