@@ -331,6 +331,54 @@ func resolveFreshBaseRef(repoPath, remoteName, defaultBranch string) (string, er
 	return defaultBranch, nil
 }
 
+// RecordPRReviewContext makes a PR-head review worktree self-describing: it
+// fetches the PR's base branch into the checkout and records the base commit
+// (plus optional metadata) in PER-WORKTREE git config, so a generic reviewer
+// prompt can diff `git diff "$(git config loom.reviewBase)"...HEAD` without any
+// PR-specific data being injected into the prompt. Per-worktree config keeps
+// concurrent reviews of different PRs in the same repo from colliding. Returns
+// the resolved base commit sha.
+func RecordPRReviewContext(worktreePath, remoteName, baseRef string, meta map[string]string) (string, error) {
+	if strings.TrimSpace(worktreePath) == "" {
+		return "", fmt.Errorf("worktree path is empty")
+	}
+	remoteName = strings.TrimSpace(remoteName)
+	if remoteName == "" {
+		remoteName = "origin"
+	}
+	baseRef = strings.TrimSpace(baseRef)
+	if baseRef == "" {
+		return "", fmt.Errorf("base ref is empty")
+	}
+	// extensions.worktreeConfig must be enabled before --worktree config writes
+	// land in this worktree's private config (idempotent, main-repo scoped).
+	if out, err := runGit(worktreePath, "config", "extensions.worktreeConfig", "true"); err != nil {
+		return "", fmt.Errorf("enable worktree config: %w: %s", err, out)
+	}
+	// `--` terminates option parsing so a base ref can never be read as a git
+	// flag (baseRef comes from the connector's PR metadata).
+	if out, err := runGit(worktreePath, "fetch", remoteName, "--", baseRef); err != nil {
+		return "", fmt.Errorf("fetch review base %q from %q: %w: %s", baseRef, remoteName, err, out)
+	}
+	out, err := runGit(worktreePath, "rev-parse", "FETCH_HEAD")
+	if err != nil {
+		return "", fmt.Errorf("resolve review base sha: %w", err)
+	}
+	baseSHA := strings.TrimSpace(out)
+	if _, err := runGit(worktreePath, "config", "--worktree", "loom.reviewBase", baseSHA); err != nil {
+		return "", fmt.Errorf("record review base: %w", err)
+	}
+	for key, value := range meta {
+		value = strings.TrimSpace(value)
+		if value == "" || strings.TrimSpace(key) == "" {
+			continue
+		}
+		// Best-effort niceties (PR number/title/url) for the reviewer's summary.
+		_, _ = runGit(worktreePath, "config", "--worktree", "loom.review"+key, value)
+	}
+	return baseSHA, nil
+}
+
 func runGit(dir string, args ...string) (string, error) {
 	cmd := exec.Command("git", args...) //nolint:gosec // G204: fixed git executable; args are controlled by internal worktree callers.
 	cmd.Dir = dir

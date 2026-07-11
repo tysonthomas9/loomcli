@@ -1013,21 +1013,27 @@ func TestEnsureReviewerCreatesAgentWorktreeAndSeed(t *testing.T) {
 	if got := gitOutput(t, worktreePath, "rev-parse", "HEAD"); got != headSHA {
 		t.Fatalf("worktree HEAD = %s, want %s", got, headSHA)
 	}
-	queued := queuedReviewerMessagesForTest(t, h.store, agentName)
-	if len(queued) != 1 {
-		t.Fatalf("queued seed messages = %d, want 1", len(queued))
+	// The checkout is self-describing: the base is recorded in per-worktree git
+	// config and diffs cleanly against HEAD. No seed message is delivered — the
+	// prompt (codex's first turn) drives the review.
+	base := strings.TrimSpace(gitOutput(t, worktreePath, "config", "loom.reviewBase"))
+	if base == "" {
+		t.Fatal("loom.reviewBase not recorded in the review worktree")
 	}
-	wantSeed := reviewerSeedText("octocat", "hello", 7, "Add review API", headSHA, "main", "origin")
-	if queued[0].Body != wantSeed {
-		t.Fatalf("seed body = %q, want %q", queued[0].Body, wantSeed)
+	if diff := gitOutput(t, worktreePath, "diff", base+"...HEAD", "--name-only"); !strings.Contains(diff, "pr.txt") {
+		t.Fatalf("review diff = %q, want the PR's pr.txt change", diff)
+	}
+	if queued := queuedReviewerMessagesForTest(t, h.store, agentName); len(queued) != 0 {
+		t.Fatalf("queued messages = %d, want 0 (prompt drives the review, no seed)", len(queued))
 	}
 
+	// A second ensure is idempotent: still 200, base still recorded.
 	status, raw = h.post(t, "/api/workspaces/WS/pull-requests/octocat/hello/7/reviewer", `{}`)
 	if status != http.StatusOK {
 		t.Fatalf("second status = %d, want 200 (body %s)", status, raw)
 	}
-	if queued := queuedReviewerMessagesForTest(t, h.store, agentName); len(queued) != 1 {
-		t.Fatalf("queued seed messages after second ensure = %d, want 1", len(queued))
+	if got := strings.TrimSpace(gitOutput(t, worktreePath, "config", "loom.reviewBase")); got != base {
+		t.Fatalf("loom.reviewBase after second ensure = %q, want %q", got, base)
 	}
 }
 
@@ -1206,25 +1212,22 @@ func TestParseGitHubOwnerRepo(t *testing.T) {
 func TestTrimReviewerPreamble(t *testing.T) {
 	msgs := []reviewerStreamMessage{
 		{Role: "user", ItemID: "p", Text: "## READ-ONLY PR REVIEWER\n\nYou are a reviewer…"},
-		{Role: "user", ItemID: "s", Text: reviewerSeedSentinel + " Review GitHub PR #201 \"X\" (url). Base: main…"},
 		{Role: "assistant", ItemID: "r", Text: "The PR does Y; risk at foo.go:12."},
 		{Role: "user", ItemID: "q", Text: "why is that a risk?"},
 		{Role: "assistant", ItemID: "a", Text: "because…"},
 	}
 	got := trimReviewerPreamble(msgs)
 	if len(got) != 3 || got[0].ItemID != "r" || got[1].ItemID != "q" || got[2].ItemID != "a" {
-		t.Fatalf("trim = %+v, want [r,q,a] (preamble dropped, real user msg kept)", got)
+		t.Fatalf("trim = %+v, want [r,q,a] (prompt bubble dropped, real user msg kept)", got)
 	}
-	// A real user message that merely mentions the markers is NOT dropped once
-	// the preamble is past.
-	if len(trimReviewerPreamble(msgs[2:])) != 3 {
+	// Nothing is trimmed once the conversation has started.
+	if len(trimReviewerPreamble(msgs[1:])) != 3 {
 		t.Fatal("must not trim once the conversation has started")
 	}
-	// A user who types a seed-LOOKING message (no sentinel) in the pre-response
-	// window must NOT be hidden — only the sentinel-tagged seed is trimmed.
+	// A user message is never hidden, even one that looks like the prompt topic.
 	typed := []reviewerStreamMessage{
 		{Role: "user", ItemID: "p", Text: "## READ-ONLY PR REVIEWER\n…"},
-		{Role: "user", ItemID: "u", Text: "Review GitHub PR #502 too please"},
+		{Role: "user", ItemID: "u", Text: "what does the readonly reviewer rule mean?"},
 	}
 	got = trimReviewerPreamble(typed)
 	if len(got) != 1 || got[0].ItemID != "u" {

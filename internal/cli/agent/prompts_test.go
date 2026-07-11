@@ -1312,6 +1312,15 @@ func TestGenerateReviewPrompt(t *testing.T) {
 			t.Fatalf("review prompt leaks lead bootstrap %q:\n%s", forbidden, got)
 		}
 	}
+	// Self-describing checkout: the prompt diffs via the recorded base config, so
+	// no PR-specific data is injected into the prompt itself.
+	if !strings.Contains(got, "loom.reviewBase") {
+		t.Fatalf("review prompt must reference the recorded base (loom.reviewBase):\n%s", got)
+	}
+	// It must tell the reviewer to ignore the reviewed repo's contributor docs.
+	if !strings.Contains(got, "AGENTS.md") {
+		t.Fatalf("review prompt must tell the reviewer to ignore AGENTS.md/onboarding:\n%s", got)
+	}
 	if lead := GenerateLeadPrompt(); got == lead {
 		t.Fatal("review prompt must differ from the lead prompt")
 	}

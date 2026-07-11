@@ -282,3 +282,54 @@ func writeFile(t *testing.T, path, content string) {
 		t.Fatalf("write %s: %v", path, err)
 	}
 }
+
+func TestRecordPRReviewContext(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+	root := t.TempDir()
+	remote := filepath.Join(root, "remote.git")
+	seed := filepath.Join(root, "seed")
+	repo := filepath.Join(root, "repo")
+	target := filepath.Join(root, "wt", "pr-7")
+
+	git(t, "", "init", "--bare", remote)
+	git(t, "", "init", seed)
+	git(t, seed, "checkout", "-b", "main")
+	git(t, seed, "config", "user.name", "T")
+	git(t, seed, "config", "user.email", "t@t")
+	writeFile(t, filepath.Join(seed, "base.txt"), "base\n")
+	git(t, seed, "add", "base.txt")
+	git(t, seed, "commit", "-m", "base")
+	git(t, seed, "remote", "add", "origin", remote)
+	git(t, seed, "push", "origin", "HEAD:refs/heads/main")
+	baseSHA := gitOutput(t, seed, "rev-parse", "HEAD")
+	// A PR head commit on top of base.
+	writeFile(t, filepath.Join(seed, "pr.txt"), "pr\n")
+	git(t, seed, "add", "pr.txt")
+	git(t, seed, "commit", "-m", "pr head")
+	git(t, seed, "push", "origin", "HEAD:refs/pull/7/head")
+
+	git(t, "", "clone", remote, repo)
+	if _, err := EnsureDetachedGitWorktreeAtPRHead(repo, target, "origin", 7, ""); err != nil {
+		t.Fatalf("worktree: %v", err)
+	}
+
+	got, err := RecordPRReviewContext(target, "origin", "main", map[string]string{"Pr": "7", "Title": "Add X"})
+	if err != nil {
+		t.Fatalf("RecordPRReviewContext: %v", err)
+	}
+	if got != baseSHA {
+		t.Fatalf("returned base = %s, want %s", got, baseSHA)
+	}
+	// Recorded per-worktree, readable, and the review diff shows the PR change.
+	if rec := strings.TrimSpace(gitOutput(t, target, "config", "loom.reviewBase")); rec != baseSHA {
+		t.Fatalf("loom.reviewBase = %s, want %s", rec, baseSHA)
+	}
+	if diff := gitOutput(t, target, "diff", baseSHA+"...HEAD", "--name-only"); !strings.Contains(diff, "pr.txt") {
+		t.Fatalf("review diff = %q, want pr.txt", diff)
+	}
+	if pr := strings.TrimSpace(gitOutput(t, target, "config", "loom.reviewPr")); pr != "7" {
+		t.Fatalf("loom.reviewPr = %q, want 7", pr)
+	}
+}

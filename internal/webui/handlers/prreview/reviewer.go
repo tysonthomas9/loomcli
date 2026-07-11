@@ -158,26 +158,32 @@ func (m *Module) ensureReviewer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Make the checkout self-describing: fetch the base and record it (plus PR
+	// metadata) in per-worktree git config, so the generic reviewer prompt can
+	// diff the PR with no PR-specific data injected into the prompt. The prompt
+	// is codex's first turn, so the reviewer auto-reviews on boot — no delivered
+	// seed to dedupe (which is what broke re-opened reviewers on a fresh thread).
+	if _, err := localworkspace.RecordPRReviewContext(target, remote, baseRef, map[string]string{
+		"Pr":    strconv.Itoa(params.number),
+		"Title": title,
+		"Url":   fmt.Sprintf("https://github.com/%s/%s/pull/%d", params.owner, params.repo, params.number),
+		"Head":  checkedOutSHA,
+	}); err != nil {
+		slog.Error("pr-review: record review context failed", "ws", ws, "agent", agentName, "err", err)
+		writePRReviewErrorCode(w, http.StatusInternalServerError, "worktree_failed", "failed to prepare the PR review context", false)
+		return
+	}
+
 	if err := m.ensureReviewerAgent(r.Context(), ws, agentName); err != nil {
 		slog.Error("pr-review: ensure reviewer agent failed", "ws", ws, "agent", agentName, "err", err)
 		writePRReviewErrorCode(w, http.StatusInternalServerError, "internal", "failed to create the reviewer agent", false)
 		return
 	}
 
-	seeded := false
-	seedText := reviewerSeedText(params.owner, params.repo, params.number, title, checkedOutSHA, baseRef, remote)
-	result, deliveryErr := leadcontrol.DeliverLeadMessageWithOptions(r.Context(), m.store, ws, agentName, seedText, leadcontrol.LeadMessageDeliveryOptions{
-		SourceKind: "user_chat",
-		DedupeKey:  "pr-review-seed:" + prResource(params.owner, params.repo) + fmt.Sprintf("#%d", params.number),
-	})
-	if deliveryErr == nil && result != nil {
-		seeded = true
-	}
-
 	writeJSON(w, http.StatusOK, gen.ReviewerEnsureResult{
 		AgentName:     agentName,
 		CheckedOutSha: checkedOutSHA,
-		Seeded:        seeded,
+		Seeded:        true,
 	})
 }
 
@@ -199,20 +205,6 @@ func (m *Module) ensureReviewerAgent(ctx context.Context, ws, agentName string) 
 		return fmt.Errorf("create reviewer agent: %w", err)
 	}
 	return nil
-}
-
-// reviewerSeedText is the first message delivered to the reviewer. The READ-ONLY
-// persona and review method live in the reviewer prompt (prompts/pr-review.md);
-// this only carries the specific PR + how to diff it, so the chat opens on a
-// short review request rather than a wall of boilerplate.
-func reviewerSeedText(owner, repo string, number int, title, sha, baseRef, remote string) string {
-	url := fmt.Sprintf("https://github.com/%s/%s/pull/%d", owner, repo, number)
-	// The sentinel prefix lets the chat panel trim this injected seed without
-	// risking a real user message (see reviewerSeedSentinel in stream.go).
-	return fmt.Sprintf("%s Review GitHub PR #%d %q (%s). Base branch: %s; the PR head (%s) is checked "+
-		"out in your working directory. To see the changes run `git fetch %s %s && git diff FETCH_HEAD...HEAD`, "+
-		"then give your review.",
-		reviewerSeedSentinel, number, title, url, baseRef, sha, remote, baseRef)
 }
 
 func (m *Module) postReviewerMessage(w http.ResponseWriter, r *http.Request) {

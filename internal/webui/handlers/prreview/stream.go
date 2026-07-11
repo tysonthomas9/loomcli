@@ -236,29 +236,22 @@ func flattenReviewerMessages(thread *leadcontrol.CodexThread) []reviewerStreamMe
 	return trimReviewerPreamble(out)
 }
 
-// Markers for the injected review setup that codex echoes back as leading
-// `user` turns: the reviewer persona prompt (prompts/pr-review.md's first line)
-// and the seed request. The seed is prefixed with reviewerSeedSentinel — a tag
-// a human would never type — precisely so trimming it can't collide with a real
-// user message like "Review GitHub PR #502 too". The prompt marker is a heading
-// no one types by hand. If either drifts out of sync the trim simply stops
-// (the boilerplate reappears as noise) — it never hides real content.
-const (
-	reviewerPromptMarker = "## READ-ONLY PR REVIEWER"
-	reviewerSeedSentinel = "[loom pr-review]"
-)
+// reviewerPromptMarker is the first line of the reviewer prompt
+// (prompts/pr-review.md). Codex is launched with that prompt as its positional
+// argument, i.e. its FIRST turn, so it comes back as the leading `user` message.
+// It's a heading no human types, so trimming it can't hide a real user message.
+// Kept in sync with pr-review.md's first line.
+const reviewerPromptMarker = "## READ-ONLY PR REVIEWER"
 
-// trimReviewerPreamble drops the leading injected setup bubbles (the persona
-// prompt and the sentinel-tagged seed) so the chat opens on the actual review.
-// It only skips leading `user` messages matching a marker we inject, and stops
-// at the first non-matching message (in particular the first assistant reply),
-// so a real user message is never hidden.
+// trimReviewerPreamble drops the leading prompt bubble so the chat opens on the
+// actual review. It only skips leading `user` messages matching the prompt
+// marker and stops at the first non-match (in particular the first assistant
+// reply), so a real user message is never hidden.
 func trimReviewerPreamble(msgs []reviewerStreamMessage) []reviewerStreamMessage {
 	i := 0
 	for i < len(msgs) {
 		m := msgs[i]
-		text := strings.TrimSpace(m.Text)
-		if m.Role == "user" && (strings.HasPrefix(text, reviewerPromptMarker) || strings.HasPrefix(text, reviewerSeedSentinel)) {
+		if m.Role == "user" && strings.HasPrefix(strings.TrimSpace(m.Text), reviewerPromptMarker) {
 			i++
 			continue
 		}
