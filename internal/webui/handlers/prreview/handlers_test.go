@@ -210,7 +210,7 @@ func newPRReviewHarnessWithAgent(t *testing.T, withDispatcher bool, agentSvc ser
 			Providers:  connector.DefaultProviderRegistry(h.github.server.Client()),
 		}
 	}
-	h.module = NewModule(h.store, dispatcher, agentSvc)
+	h.module = NewModule(h.store, dispatcher, agentSvc, nil)
 	h.module.Register(h.mux)
 	return h
 }
@@ -1147,7 +1147,7 @@ func writeTestFile(t *testing.T, path, contents string) {
 
 func git(t *testing.T, dir string, args ...string) {
 	t.Helper()
-	cmd := exec.Command("git", args...) //nolint:gosec // fixed test helper command; args are test-controlled.
+	cmd := exec.Command("git", args...) //nolint:norawexec,gosec // fixed test helper command; args are test-controlled.
 	if dir != "" {
 		cmd.Dir = dir
 	}
@@ -1159,7 +1159,7 @@ func git(t *testing.T, dir string, args ...string) {
 
 func gitOutput(t *testing.T, dir string, args ...string) string {
 	t.Helper()
-	cmd := exec.Command("git", args...) //nolint:gosec // fixed test helper command; args are test-controlled.
+	cmd := exec.Command("git", args...) //nolint:norawexec,gosec // fixed test helper command; args are test-controlled.
 	if dir != "" {
 		cmd.Dir = dir
 	}

@@ -611,24 +611,6 @@ func (e PullRequestReviewRequestEvent) Valid() bool {
 	}
 }
 
-// Defines values for ReviewerMessageRole.
-const (
-	ReviewerMessageRoleAssistant ReviewerMessageRole = "assistant"
-	ReviewerMessageRoleUser      ReviewerMessageRole = "user"
-)
-
-// Valid indicates whether the value is a known member of the ReviewerMessageRole enum.
-func (e ReviewerMessageRole) Valid() bool {
-	switch e {
-	case ReviewerMessageRoleAssistant:
-		return true
-	case ReviewerMessageRoleUser:
-		return true
-	default:
-		return false
-	}
-}
-
 // Defines values for RuntimeReadyResponseMode.
 const (
 	Daemon RuntimeReadyResponseMode = "daemon"
@@ -685,22 +667,22 @@ func (e SessionHistoryRecordStatus) Valid() bool {
 
 // Defines values for TranscriptEntryRole.
 const (
-	Assistant TranscriptEntryRole = "assistant"
-	System    TranscriptEntryRole = "system"
-	Tool      TranscriptEntryRole = "tool"
-	User      TranscriptEntryRole = "user"
+	TranscriptEntryRoleAssistant TranscriptEntryRole = "assistant"
+	TranscriptEntryRoleSystem    TranscriptEntryRole = "system"
+	TranscriptEntryRoleTool      TranscriptEntryRole = "tool"
+	TranscriptEntryRoleUser      TranscriptEntryRole = "user"
 )
 
 // Valid indicates whether the value is a known member of the TranscriptEntryRole enum.
 func (e TranscriptEntryRole) Valid() bool {
 	switch e {
-	case Assistant:
+	case TranscriptEntryRoleAssistant:
 		return true
-	case System:
+	case TranscriptEntryRoleSystem:
 		return true
-	case Tool:
+	case TranscriptEntryRoleTool:
 		return true
-	case User:
+	case TranscriptEntryRoleUser:
 		return true
 	default:
 		return false
@@ -1758,9 +1740,11 @@ type PullRequestReviewResult struct {
 
 // ReviewerConversation defines model for ReviewerConversation.
 type ReviewerConversation struct {
+	// Detail Human-readable context for failed/unsupported states.
+	Detail   *string           `json:"detail,omitempty"`
 	Messages []ReviewerMessage `json:"messages"`
 
-	// State starting | reconnecting | idle | running
+	// State starting | reconnecting | idle | running | failed | unsupported. failed: the reviewer runtime died or its conversation is unreadable. unsupported: the reviewer's backend has no readable conversation (the terminal tab still works); detail says why.
 	State string `json:"state"`
 }
 
@@ -1773,15 +1757,14 @@ type ReviewerEnsureResult struct {
 
 // ReviewerMessage defines model for ReviewerMessage.
 type ReviewerMessage struct {
-	ItemId string              `json:"item_id"`
-	Phase  *string             `json:"phase,omitempty"`
-	Role   ReviewerMessageRole `json:"role"`
-	Text   string              `json:"text"`
-	TurnId string              `json:"turn_id"`
-}
+	ItemId string  `json:"item_id"`
+	Phase  *string `json:"phase,omitempty"`
 
-// ReviewerMessageRole defines model for ReviewerMessage.Role.
-type ReviewerMessageRole string
+	// Role user | assistant
+	Role   string `json:"role"`
+	Text   string `json:"text"`
+	TurnId string `json:"turn_id"`
+}
 
 // ReviewerMessageRequest defines model for ReviewerMessageRequest.
 type ReviewerMessageRequest struct {

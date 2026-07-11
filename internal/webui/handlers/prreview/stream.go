@@ -7,7 +7,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/leadcontrol"
+	"github.com/tysonthomas9/loomcli/internal/sessions/redact"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
 )
@@ -40,7 +42,8 @@ type reviewerStreamSession struct {
 }
 
 type reviewerStreamStatus struct {
-	State string `json:"state"`
+	State  string `json:"state"`
+	Detail string `json:"detail,omitempty"`
 }
 
 type reviewerStreamMessage struct {
@@ -123,23 +126,60 @@ func (m *Module) runReviewerStream(ctx context.Context, sw *realtime.Writer, ses
 	}
 }
 
-func (m *Module) pollReviewerStream(ctx context.Context, sw *realtime.Writer, session reviewerStreamSession, seen map[string]struct{}, lastStatus *string) bool {
+// readReviewerSnapshot resolves the reviewer's orchestration session and
+// dispatches on its runtime provider: codex conversations are read live over
+// the app-server socket; harness backends (claude, gemini) are read from the
+// harness's own transcript on disk; backends with no readable conversation
+// report "unsupported". Message text is redacted before it leaves this
+// function — every serving path (snapshot and SSE) goes through here.
+func (m *Module) readReviewerSnapshot(ctx context.Context, session reviewerStreamSession) (reviewerSnapshot, error) {
 	sess, err := store.OrchestrationSessionFor(ctx, m.store, session.ws, session.agentName)
 	if err != nil {
-		return false
+		return reviewerSnapshot{}, err
 	}
+	provider := ""
+	if sess != nil {
+		provider = strings.ToLower(strings.TrimSpace(sess.Metadata[leadcontrol.MetadataRuntimeProvider]))
+	}
+	var snap reviewerSnapshot
+	switch provider {
+	case "", leadcontrol.RuntimeProviderCodex:
+		snap = m.readCodexReviewerSnapshot(ctx, sess)
+	default:
+		snap = m.readHarnessReviewerSnapshot(session, sess, provider)
+	}
+	for i := range snap.messages {
+		snap.messages[i].Text = redact.String(snap.messages[i].Text)
+	}
+	return snap, nil
+}
+
+func (m *Module) readCodexReviewerSnapshot(ctx context.Context, sess *domain.AgentSession) reviewerSnapshot {
 	rt := leadcontrol.RuntimeMetadataFromSession(sess)
 	if sess == nil || rt.Endpoint == "" || rt.ThreadID == "" {
-		return writeReviewerStatus(sw, lastStatus, "starting")
+		// Reviewer's codex hasn't booted yet (terminal not attached / thread
+		// not discovered) — an empty conversation in the "starting" state.
+		return reviewerSnapshot{state: "starting"}
 	}
 	thread, err := m.readReviewerThread(ctx, rt)
 	if err != nil {
-		return writeReviewerStatus(sw, lastStatus, "reconnecting")
+		return reviewerSnapshot{state: "reconnecting"}
 	}
-	if !writeReviewerStatus(sw, lastStatus, reviewerThreadState(thread)) {
+	return reviewerSnapshot{
+		state:    reviewerThreadState(thread),
+		messages: flattenReviewerMessages(thread),
+	}
+}
+
+func (m *Module) pollReviewerStream(ctx context.Context, sw *realtime.Writer, session reviewerStreamSession, seen map[string]struct{}, lastStatus *string) bool {
+	snap, err := m.readReviewerSnapshot(ctx, session)
+	if err != nil {
 		return false
 	}
-	for _, msg := range flattenReviewerMessages(thread) {
+	if !writeReviewerStatus(sw, lastStatus, snap) {
+		return false
+	}
+	for _, msg := range snap.messages {
 		cursor := msg.TurnID + "/" + msg.ItemID
 		if _, ok := seen[cursor]; ok {
 			continue
@@ -158,6 +198,7 @@ func (m *Module) pollReviewerStream(ctx context.Context, sw *realtime.Writer, se
 
 type reviewerConversation struct {
 	State    string                  `json:"state"`
+	Detail   string                  `json:"detail,omitempty"`
 	Messages []reviewerStreamMessage `json:"messages"`
 }
 
@@ -170,44 +211,31 @@ func (m *Module) getReviewerConversation(w http.ResponseWriter, r *http.Request)
 	if !ok {
 		return
 	}
-	ctx := r.Context()
-	sess, err := store.OrchestrationSessionFor(ctx, m.store, session.ws, session.agentName)
+	snap, err := m.readReviewerSnapshot(r.Context(), session)
 	if err != nil {
 		writePRReviewErrorCode(w, http.StatusBadGateway, "upstream_error", "failed to resolve reviewer session", true)
 		return
 	}
-	rt := leadcontrol.RuntimeMetadataFromSession(sess)
-	if sess == nil || rt.Endpoint == "" || rt.ThreadID == "" {
-		// Reviewer's codex hasn't booted yet (terminal not attached / thread not
-		// discovered) — return an empty conversation with a "starting" state.
-		writeJSON(w, http.StatusOK, reviewerConversation{State: "starting", Messages: []reviewerStreamMessage{}})
-		return
-	}
-	thread, err := m.readReviewerThread(ctx, rt)
-	if err != nil {
-		writeJSON(w, http.StatusOK, reviewerConversation{State: "reconnecting", Messages: []reviewerStreamMessage{}})
-		return
-	}
-	msgs := flattenReviewerMessages(thread)
+	msgs := snap.messages
 	if msgs == nil {
 		msgs = []reviewerStreamMessage{}
 	}
-	writeJSON(w, http.StatusOK, reviewerConversation{State: reviewerThreadState(thread), Messages: msgs})
+	writeJSON(w, reviewerConversation{State: snap.state, Detail: snap.detail, Messages: msgs})
 }
 
-func writeReviewerStatus(sw *realtime.Writer, lastStatus *string, state string) bool {
-	if lastStatus != nil && *lastStatus == state {
+func writeReviewerStatus(sw *realtime.Writer, lastStatus *string, snap reviewerSnapshot) bool {
+	if lastStatus != nil && *lastStatus == snap.state {
 		return true
 	}
-	data, err := json.Marshal(reviewerStreamStatus{State: state})
+	data, err := json.Marshal(reviewerStreamStatus{State: snap.state, Detail: snap.detail})
 	if err != nil {
 		return false
 	}
-	if sw.WriteEventID(state, "status", string(data)) != nil {
+	if sw.WriteEventID(snap.state, "status", string(data)) != nil {
 		return false
 	}
 	if lastStatus != nil {
-		*lastStatus = state
+		*lastStatus = snap.state
 	}
 	return true
 }

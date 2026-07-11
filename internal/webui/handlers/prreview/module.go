@@ -16,7 +16,7 @@ const (
 	bindingID   = "webui-review"
 	connectorID = "github-webui"
 
-	webuiGitHubTokenEnv = "LOOM_WEBUI_GITHUB_TOKEN"
+	webuiGitHubTokenEnv = "LOOM_WEBUI_GITHUB_TOKEN" //nolint:gosec // G101: env var name, not a credential
 )
 
 // Module serves connector-backed, read-only pull request review routes.
@@ -24,6 +24,7 @@ type Module struct {
 	store                   store.Store
 	dispatcher              *connector.Dispatcher
 	agentSvc                service.AgentService
+	terminalSvc             service.TerminalService
 	dialCodex               func(ctx context.Context, endpoint string) (codexThreadReader, error)
 	streamPollInterval      time.Duration
 	streamHeartbeatInterval time.Duration
@@ -38,12 +39,15 @@ type codexThreadReader interface {
 	Close(reason string) error
 }
 
-// NewModule constructs the pull request review route module.
-func NewModule(st store.Store, disp *connector.Dispatcher, agentSvc service.AgentService) *Module {
+// NewModule constructs the pull request review route module. terminalSvc may
+// be nil (no PTY manager); backend migration then skips killing live reviewer
+// terminals, which is safe because without a terminal service none exist.
+func NewModule(st store.Store, disp *connector.Dispatcher, agentSvc service.AgentService, terminalSvc service.TerminalService) *Module {
 	return &Module{
 		store:                   st,
 		dispatcher:              disp,
 		agentSvc:                agentSvc,
+		terminalSvc:             terminalSvc,
 		streamPollInterval:      reviewerStreamPollInterval,
 		streamHeartbeatInterval: reviewerStreamHeartbeatInterval,
 		dialCodex: func(ctx context.Context, endpoint string) (codexThreadReader, error) {

@@ -45,11 +45,34 @@ func (m *Module) listPullRequests(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	prs := []ops.GitPullRequest{}
-	var warnings []string
-	attempted := 0
-	failed := 0
-	for _, workspaceRepo := range data.Repos {
+	prs, warnings, attempted, failed := m.connectorListPullRequests(r, ws, state, data.Repos)
+
+	// Fall back to gh when the connector learned nothing: either no repo was
+	// parseable (attempted == 0 — e.g. ssh-scheme remotes the parser rejects,
+	// which the old gh-only route would have listed) or every repo errored.
+	if len(prs) == 0 && (attempted == 0 || failed == attempted) {
+		// When the connector was configured and actually tried but failed for
+		// every repo, surface that (with the per-repo reasons) instead of
+		// silently pretending gh is the intended source. attempted == 0 means
+		// the repos simply aren't connector-eligible — stay quiet there.
+		var notice []string
+		if attempted > 0 {
+			notice = append([]string{connectorUnavailableWarning}, warnings...)
+		}
+		m.ghListFallback(w, r.Context(), ws, state, notice...)
+		return
+	}
+
+	writeJSON(w, pullRequestsData{PullRequests: prs, Warnings: warnings})
+}
+
+// connectorListPullRequests lists PRs for every connector-eligible workspace
+// repo, accumulating per-repo warnings instead of failing the whole list.
+// attempted/failed let the caller distinguish "no repo was eligible" from
+// "the connector tried and failed everywhere".
+func (m *Module) connectorListPullRequests(r *http.Request, ws, state string, repos []ops.WorkspaceRepo) (prs []ops.GitPullRequest, warnings []string, attempted, failed int) {
+	prs = []ops.GitPullRequest{}
+	for _, workspaceRepo := range repos {
 		owner, repo, ok := parseGitHubOwnerRepo(workspaceRepo.RemoteURL)
 		if !ok {
 			continue
@@ -81,24 +104,7 @@ func (m *Module) listPullRequests(w http.ResponseWriter, r *http.Request) {
 		}
 		prs = append(prs, pullRequestsFromBody(owner, repo, res.Body)...)
 	}
-
-	// Fall back to gh when the connector learned nothing: either no repo was
-	// parseable (attempted == 0 — e.g. ssh-scheme remotes the parser rejects,
-	// which the old gh-only route would have listed) or every repo errored.
-	if len(prs) == 0 && (attempted == 0 || failed == attempted) {
-		// When the connector was configured and actually tried but failed for
-		// every repo, surface that (with the per-repo reasons) instead of
-		// silently pretending gh is the intended source. attempted == 0 means
-		// the repos simply aren't connector-eligible — stay quiet there.
-		var notice []string
-		if attempted > 0 {
-			notice = append([]string{connectorUnavailableWarning}, warnings...)
-		}
-		m.ghListFallback(w, r.Context(), ws, state, notice...)
-		return
-	}
-
-	writeJSON(w, http.StatusOK, pullRequestsData{PullRequests: prs, Warnings: warnings})
+	return prs, warnings, attempted, failed
 }
 
 func (m *Module) connectorListAvailable() bool {
@@ -135,7 +141,7 @@ func (m *Module) ghListFallback(w http.ResponseWriter, ctx context.Context, ws, 
 		}
 		warnings = append(warnings, res.Warnings...)
 	}
-	writeJSON(w, http.StatusOK, pullRequestsData{PullRequests: prs, Warnings: warnings})
+	writeJSON(w, pullRequestsData{PullRequests: prs, Warnings: warnings})
 }
 
 func connectorListState(state string) string {

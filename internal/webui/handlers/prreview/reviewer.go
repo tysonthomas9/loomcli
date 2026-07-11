@@ -18,11 +18,17 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/leadcontrol"
 	"github.com/tysonthomas9/loomcli/internal/localworkspace"
+	"github.com/tysonthomas9/loomcli/internal/runtimepreflight"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui/storeadapter"
 )
 
 const reviewerAgentSegmentMaxLen = 48
+
+// terminalKindAgent mirrors the agent-terminal tab kind used by the terminal
+// handlers (internal/webui/handlers/terminal); tabs of this kind for the
+// reviewer's agent name are the reviewer's live PTYs.
+const terminalKindAgent = "agent"
 
 func reviewerAgentName(repo string, number int) string {
 	return "review-" + safeAgentSegment(repo) + "-pr-" + strconv.Itoa(number)
@@ -85,21 +91,57 @@ func (m *Module) resolveRepoCheckout(ctx context.Context, ws, owner, repo string
 }
 
 func (m *Module) ensureReviewer(w http.ResponseWriter, r *http.Request) {
-	ws := r.PathValue("ws")
-	params, ok := parsePullRequestPath(r.PathValue("owner"), r.PathValue("repo"), r.PathValue("number"))
-	if !ok {
-		writePRReviewErrorCode(w, http.StatusBadRequest, "invalid", "invalid pull request path", false)
-		return
-	}
-	canonOwner, canonRepo, ok := m.authorizeRepo(w, r, ws, params.owner, params.repo)
+	ws, params, ok := m.resolveAuthorizedPR(w, r)
 	if !ok {
 		return
 	}
-	params.owner, params.repo = canonOwner, canonRepo
 
-	if err := m.ensureConnectorAndGrants(r.Context(), ws, params.owner, params.repo, prReviewActions); err != nil {
+	headSHA, title, baseRef, ok := m.fetchPullRequestHead(w, r, ws, params)
+	if !ok {
+		return
+	}
+
+	repoPath, remote, repoName, wsPath, ok, err := m.resolveRepoCheckout(r.Context(), ws, params.owner, params.repo)
+	if err != nil {
 		writePRReviewError(w, err)
 		return
+	}
+	if !ok {
+		writePRReviewErrorCode(w, http.StatusNotFound, "repo_not_checked_out", "repository is registered but no local checkout path is available", false)
+		return
+	}
+
+	agentName := reviewerAgentName(params.repo, params.number)
+	checkedOutSHA, ok := prepareReviewerCheckout(w, reviewerCheckoutSpec{
+		ws: ws, agentName: agentName, params: params,
+		repoPath: repoPath, remote: remote, repoName: repoName, wsPath: wsPath,
+		headSHA: headSHA, title: title, baseRef: baseRef,
+	})
+	if !ok {
+		return
+	}
+
+	if err := m.ensureReviewerAgent(r.Context(), ws, agentName); err != nil {
+		slog.Error("pr-review: ensure reviewer agent failed", "ws", ws, "agent", agentName, "err", err)
+		writePRReviewErrorCode(w, http.StatusInternalServerError, "internal", "failed to create the reviewer agent", false)
+		return
+	}
+
+	writeJSON(w, gen.ReviewerEnsureResult{
+		AgentName:     agentName,
+		CheckedOutSha: checkedOutSHA,
+		Seeded:        true,
+	})
+}
+
+// fetchPullRequestHead seeds the connector grants and reads the PR's head
+// sha, title, and base ref through the connector. It writes the HTTP error
+// itself and returns ok=false on failure; a response without a head sha is an
+// upstream error because everything downstream (the pinned checkout) needs it.
+func (m *Module) fetchPullRequestHead(w http.ResponseWriter, r *http.Request, ws string, params pullRequestPath) (headSHA, title, baseRef string, ok bool) {
+	if err := m.ensureConnectorAndGrants(r.Context(), ws, params.owner, params.repo, prReviewActions); err != nil {
+		writePRReviewError(w, err)
+		return "", "", "", false
 	}
 	res, err := m.dispatcher.Dispatch(r.Context(), connector.Request{
 		WorkspaceKey: ws,
@@ -113,78 +155,70 @@ func (m *Module) ensureReviewer(w http.ResponseWriter, r *http.Request) {
 	})
 	if err != nil {
 		writePRReviewError(w, err)
-		return
+		return "", "", "", false
 	}
-	headSHA := stringValue(res.Body["headSha"])
+	headSHA = stringValue(res.Body["headSha"])
 	if headSHA == "" {
 		writePRReviewErrorCode(w, http.StatusBadGateway, "upstream_error", "pull request read response missing head sha", true)
-		return
+		return "", "", "", false
 	}
-	title := stringValue(res.Body["title"])
-	baseRef := stringValue(res.Body["baseRef"])
+	return headSHA, stringValue(res.Body["title"]), stringValue(res.Body["baseRef"]), true
+}
 
-	repoPath, remote, repoName, wsPath, ok, err := m.resolveRepoCheckout(r.Context(), ws, params.owner, params.repo)
-	if err != nil {
-		writePRReviewError(w, err)
-		return
-	}
-	if !ok {
-		writePRReviewErrorCode(w, http.StatusNotFound, "repo_not_checked_out", "repository is registered but no local checkout path is available", false)
-		return
-	}
+type reviewerCheckoutSpec struct {
+	ws        string
+	agentName string
+	params    pullRequestPath
+	repoPath  string
+	remote    string
+	repoName  string
+	wsPath    string
+	headSHA   string
+	title     string
+	baseRef   string
+}
 
-	agentName := reviewerAgentName(params.repo, params.number)
+// prepareReviewerCheckout stands up the reviewer's PR-head worktree, records
+// it as the agent's launch cwd, and makes the checkout self-describing. It
+// writes the HTTP error response itself and returns ok=false on failure.
+func prepareReviewerCheckout(w http.ResponseWriter, spec reviewerCheckoutSpec) (string, bool) {
+	fail := func(logMsg string, err error, clientMsg string) (string, bool) {
+		// Keep the client message terse; the git error can embed local paths.
+		slog.Error("pr-review: "+logMsg, "ws", spec.ws, "agent", spec.agentName, "err", err)
+		writePRReviewErrorCode(w, http.StatusInternalServerError, "worktree_failed", clientMsg, false)
+		return "", false
+	}
 	// Isolated PR-checkout namespace (.loom/pr-worktrees/<repo>/pr-N), distinct
 	// from the agent-worktree tree so PR review checkouts never collide with a
 	// working agent's branch worktree.
-	target, pathErr := localworkspace.PRReviewWorktreePath(wsPath, repoName, params.number)
-	if pathErr != nil {
-		slog.Error("pr-review: worktree path failed", "ws", ws, "agent", agentName, "err", pathErr)
-		writePRReviewErrorCode(w, http.StatusInternalServerError, "worktree_failed", "failed to resolve the PR review worktree path", false)
-		return
-	}
-	checkedOutSHA, err := localworkspace.EnsureDetachedGitWorktreeAtPRHead(repoPath, target, remote, params.number, headSHA)
+	target, err := localworkspace.PRReviewWorktreePath(spec.wsPath, spec.repoName, spec.params.number)
 	if err != nil {
-		// Keep the client message terse; the git error can embed local paths.
-		slog.Error("pr-review: prepare worktree failed", "ws", ws, "agent", agentName, "err", err)
-		writePRReviewErrorCode(w, http.StatusInternalServerError, "worktree_failed", "failed to prepare the PR review worktree", false)
-		return
+		return fail("worktree path failed", err, "failed to resolve the PR review worktree path")
+	}
+	checkedOutSHA, err := localworkspace.EnsureDetachedGitWorktreeAtPRHead(spec.repoPath, target, spec.remote, spec.params.number, spec.headSHA)
+	if err != nil {
+		return fail("prepare worktree failed", err, "failed to prepare the PR review worktree")
 	}
 	// The remembered worktree IS the reviewer's launch cwd — if we can't persist
 	// it the agent would boot in the wrong directory, so this is a hard failure.
-	if err := localworkspace.RememberAgentWorktree(ws, agentName, target); err != nil {
-		slog.Error("pr-review: remember worktree failed", "ws", ws, "agent", agentName, "err", err)
-		writePRReviewErrorCode(w, http.StatusInternalServerError, "worktree_failed", "failed to record the PR review worktree", false)
-		return
+	if err := localworkspace.RememberAgentWorktree(spec.ws, spec.agentName, target); err != nil {
+		return fail("remember worktree failed", err, "failed to record the PR review worktree")
 	}
-
 	// Make the checkout self-describing: fetch the base and record it (plus PR
 	// metadata) in per-worktree git config, so the generic reviewer prompt can
 	// diff the PR with no PR-specific data injected into the prompt. The prompt
-	// is codex's first turn, so the reviewer auto-reviews on boot — no delivered
-	// seed to dedupe (which is what broke re-opened reviewers on a fresh thread).
-	if _, err := localworkspace.RecordPRReviewContext(target, remote, baseRef, map[string]string{
-		"Pr":    strconv.Itoa(params.number),
-		"Title": title,
-		"Url":   fmt.Sprintf("https://github.com/%s/%s/pull/%d", params.owner, params.repo, params.number),
+	// is the backend CLI's positional first turn (codex and every harness
+	// backend alike), so the reviewer auto-reviews on boot — no delivered seed
+	// to dedupe (which is what broke re-opened reviewers on a fresh thread).
+	if _, err := localworkspace.RecordPRReviewContext(target, spec.remote, spec.baseRef, map[string]string{
+		"Pr":    strconv.Itoa(spec.params.number),
+		"Title": spec.title,
+		"Url":   fmt.Sprintf("https://github.com/%s/%s/pull/%d", spec.params.owner, spec.params.repo, spec.params.number),
 		"Head":  checkedOutSHA,
 	}); err != nil {
-		slog.Error("pr-review: record review context failed", "ws", ws, "agent", agentName, "err", err)
-		writePRReviewErrorCode(w, http.StatusInternalServerError, "worktree_failed", "failed to prepare the PR review context", false)
-		return
+		return fail("record review context failed", err, "failed to prepare the PR review context")
 	}
-
-	if err := m.ensureReviewerAgent(r.Context(), ws, agentName); err != nil {
-		slog.Error("pr-review: ensure reviewer agent failed", "ws", ws, "agent", agentName, "err", err)
-		writePRReviewErrorCode(w, http.StatusInternalServerError, "internal", "failed to create the reviewer agent", false)
-		return
-	}
-
-	writeJSON(w, http.StatusOK, gen.ReviewerEnsureResult{
-		AgentName:     agentName,
-		CheckedOutSha: checkedOutSHA,
-		Seeded:        true,
-	})
+	return checkedOutSHA, true
 }
 
 func (m *Module) ensureReviewerAgent(ctx context.Context, ws, agentName string) error {
@@ -195,30 +229,124 @@ func (m *Module) ensureReviewerAgent(ctx context.Context, ws, agentName string) 
 	}); err != nil && !errors.Is(err, domain.ErrAlreadyExists) {
 		return fmt.Errorf("create lead role: %w", err)
 	}
-	if _, err := m.store.Agents().Create(ctx, store.AgentCreate{
+	backend := m.reviewerBackend(ctx, ws)
+	_, err := m.store.Agents().Create(ctx, store.AgentCreate{
 		WorkspaceKey: ws,
 		Name:         agentName,
 		RoleName:     "lead",
-		Backend:      "codex",
+		Backend:      backend,
 		DesiredState: domain.AgentDesiredRunning,
-	}); err != nil && !errors.Is(err, domain.ErrAlreadyExists) {
+	})
+	if err == nil {
+		return nil
+	}
+	if !errors.Is(err, domain.ErrAlreadyExists) {
 		return fmt.Errorf("create reviewer agent: %w", err)
+	}
+	agent, getErr := m.store.Agents().Get(ctx, ws, agentName)
+	if getErr != nil {
+		return fmt.Errorf("load existing reviewer agent: %w", getErr)
+	}
+	if strings.EqualFold(strings.TrimSpace(agent.Backend), backend) {
+		return nil
+	}
+	return m.migrateReviewerBackend(ctx, ws, agentName, backend)
+}
+
+// reviewerBackend resolves the backend for a reviewer agent: the workspace's
+// configured agent backend when it names a controlled lead runtime, else
+// codex. Controlled is required because the chat routes deliver messages via
+// the lead inbox; an uncontrolled backend would strand them.
+func (m *Module) reviewerBackend(ctx context.Context, ws string) string {
+	backend := strings.ToLower(runtimepreflight.ResolveLocalBackend(ctx, m.store, ws))
+	if !leadcontrol.IsControlledLeadBackend(backend) {
+		return leadcontrol.RuntimeProviderCodex
+	}
+	return backend
+}
+
+// migrateReviewerBackend switches an existing reviewer agent to the
+// workspace's current backend. Order matters: the old runtime's PTY is killed
+// first so it cannot keep overwriting the orchestration session's runtime
+// metadata after the clear, then stale provider identity keys are removed so
+// the new runtime starts from a clean slate, then the agent record flips.
+func (m *Module) migrateReviewerBackend(ctx context.Context, ws, agentName, backend string) error {
+	if m.terminalSvc != nil {
+		tabs, err := m.terminalSvc.ListTabs(ctx, ws)
+		if err != nil {
+			// Without the tab list the old PTY may survive and fight the new
+			// runtime over session metadata — refuse rather than migrate dirty.
+			return fmt.Errorf("list reviewer terminals: %w", err)
+		}
+		for _, tab := range tabs {
+			if tab.Kind != terminalKindAgent || tab.AgentID != agentName {
+				continue
+			}
+			// DeleteTab kills the live PTY along with the tab metadata.
+			if err := m.terminalSvc.DeleteTab(ctx, ws, tab.SessionName); err != nil {
+				return fmt.Errorf("stop reviewer terminal %s: %w", tab.SessionName, err)
+			}
+		}
+	}
+	if err := m.clearReviewerRuntimeMetadata(ctx, ws, agentName); err != nil {
+		return err
+	}
+	running := domain.AgentDesiredRunning
+	if _, err := m.store.Agents().Update(ctx, ws, agentName, store.AgentUpdate{
+		Backend:      &backend,
+		DesiredState: &running,
+	}); err != nil {
+		return fmt.Errorf("update reviewer backend: %w", err)
 	}
 	return nil
 }
 
+// reviewerRuntimeMetadataPrefixes are the orchestration-session keys that
+// identify a specific runtime process/thread. They must not survive a backend
+// migration: a leftover codex endpoint or claude session id would point the
+// conversation reader at the previous backend's transcript.
+var reviewerRuntimeMetadataPrefixes = []string{"lead_runtime_", "codex_", "lead_harness_"}
+
+func (m *Module) clearReviewerRuntimeMetadata(ctx context.Context, ws, agentName string) error {
+	sess, err := store.OrchestrationSessionFor(ctx, m.store, ws, agentName)
+	if err != nil {
+		return fmt.Errorf("load reviewer orchestration session: %w", err)
+	}
+	if sess == nil || len(sess.Metadata) == 0 {
+		return nil
+	}
+	cleaned := make(map[string]string, len(sess.Metadata))
+	for key, value := range sess.Metadata {
+		if hasAnyPrefix(key, reviewerRuntimeMetadataPrefixes) {
+			continue
+		}
+		cleaned[key] = value
+	}
+	if len(cleaned) == len(sess.Metadata) {
+		return nil
+	}
+	if _, err := m.store.AgentSessions().Update(ctx, ws, sess.SessionID, store.AgentSessionUpdate{
+		Metadata: &cleaned,
+	}); err != nil {
+		return fmt.Errorf("clear reviewer runtime metadata: %w", err)
+	}
+	return nil
+}
+
+func hasAnyPrefix(s string, prefixes []string) bool {
+	for _, prefix := range prefixes {
+		if strings.HasPrefix(s, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
 func (m *Module) postReviewerMessage(w http.ResponseWriter, r *http.Request) {
-	ws := r.PathValue("ws")
-	params, ok := parsePullRequestPath(r.PathValue("owner"), r.PathValue("repo"), r.PathValue("number"))
-	if !ok {
-		writePRReviewErrorCode(w, http.StatusBadRequest, "invalid", "invalid pull request path", false)
-		return
-	}
-	canonOwner, canonRepo, ok := m.authorizeRepo(w, r, ws, params.owner, params.repo)
+	ws, params, ok := m.resolveAuthorizedPR(w, r)
 	if !ok {
 		return
 	}
-	params.owner, params.repo = canonOwner, canonRepo
 
 	var req gen.ReviewerMessageRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -255,7 +383,7 @@ func (m *Module) postReviewerMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, gen.ReviewerMessageResult{
+	writeJSON(w, gen.ReviewerMessageResult{
 		State:  string(result.State),
 		Reason: result.Reason,
 	})

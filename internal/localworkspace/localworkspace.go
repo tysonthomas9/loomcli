@@ -175,7 +175,9 @@ func EnsureDetachedGitWorktreeFromBranch(repoPath, targetPath, remoteName, defau
 // (worktree remove --force) a checkout the first call is actively serving.
 var prWorktreeLocks sync.Map
 
-func EnsureDetachedGitWorktreeAtPRHead(repoPath, targetPath, remoteName string, prNumber int, headSHA string) (string, error) {
+// validatePRWorktreeInputs checks the required inputs and returns the
+// effective remote name (default origin).
+func validatePRWorktreeInputs(repoPath, targetPath, remoteName string, prNumber int) (string, error) {
 	if strings.TrimSpace(repoPath) == "" {
 		return "", fmt.Errorf("repo path is empty")
 	}
@@ -189,6 +191,14 @@ func EnsureDetachedGitWorktreeAtPRHead(repoPath, targetPath, remoteName string, 
 	if remoteName == "" {
 		remoteName = "origin"
 	}
+	return remoteName, nil
+}
+
+func EnsureDetachedGitWorktreeAtPRHead(repoPath, targetPath, remoteName string, prNumber int, headSHA string) (string, error) {
+	remoteName, err := validatePRWorktreeInputs(repoPath, targetPath, remoteName, prNumber)
+	if err != nil {
+		return "", err
+	}
 
 	lockAny, _ := prWorktreeLocks.LoadOrStore(targetPath, &sync.Mutex{})
 	lock := lockAny.(*sync.Mutex)
@@ -197,7 +207,7 @@ func EnsureDetachedGitWorktreeAtPRHead(repoPath, targetPath, remoteName string, 
 
 	checkoutRef := fmt.Sprintf("refs/loom/pr/%d/head", prNumber)
 	fetchRef := fmt.Sprintf("+refs/pull/%d/head:%s", prNumber, checkoutRef)
-	if _, err := runGit(repoPath, "fetch", remoteName, fetchRef); err != nil {
+	if _, err = runGit(repoPath, "fetch", remoteName, fetchRef); err != nil {
 		return "", fmt.Errorf("fetch PR #%d head from %q: %w", prNumber, remoteName, err)
 	}
 
@@ -218,6 +228,13 @@ func EnsureDetachedGitWorktreeAtPRHead(repoPath, targetPath, remoteName string, 
 	}
 	expectHEAD := strings.TrimSpace(expectOut)
 
+	return syncPRWorktree(repoPath, targetPath, checkout, expectHEAD)
+}
+
+// syncPRWorktree materializes checkout at targetPath: create when absent,
+// cache-hit when already there and pristine, else scrub back to the exact
+// sha (reset+clean), recreating the worktree when even that fails.
+func syncPRWorktree(repoPath, targetPath, checkout, expectHEAD string) (string, error) {
 	addWorktree := func() error {
 		if err := os.MkdirAll(filepath.Dir(targetPath), 0o755); err != nil {
 			return fmt.Errorf("creating PR worktree parent: %w", err)
@@ -503,6 +520,31 @@ func RememberAgentWorktree(wsKey, agentName, worktreePath string) error {
 		local.Agents[agentName] = bootstrap.AgentLocalState{Worktree: worktreePath}
 		return nil
 	})
+}
+
+// RememberedAgentWorktree returns the agent's remembered worktree path,
+// validated to still be a directory containing a .git entry. Returns ("",
+// false) when no usable worktree is recorded. This is the single source of
+// an agent's launch cwd: the terminal launch path and any reader that must
+// mirror the agent's working directory (e.g. harness transcript lookup,
+// which indexes by cwd) both resolve through it so they can never disagree.
+func RememberedAgentWorktree(wsKey, agentName string) (string, bool) {
+	cache, err := bootstrap.LoadStateCache()
+	if err != nil || cache == nil {
+		return "", false
+	}
+	local := cache.Workspaces[wsKey]
+	worktree := strings.TrimSpace(local.Agents[agentName].Worktree)
+	if worktree == "" {
+		return "", false
+	}
+	if info, err := os.Stat(worktree); err != nil || !info.IsDir() {
+		return "", false
+	}
+	if _, err := os.Stat(filepath.Join(worktree, ".git")); err != nil {
+		return "", false
+	}
+	return worktree, true
 }
 
 // RememberRepoPath stores a repo's local checkout path.

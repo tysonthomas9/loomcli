@@ -159,4 +159,87 @@ describe("PRDiscussionPanel", () => {
       expect(screen.getByText("hello")).toBeInTheDocument();
     });
   });
+
+  it("shows the unsupported state, disables the composer, and offers the terminal", async () => {
+    mocks.getReviewerConversation.mockResolvedValue({
+      state: "unsupported",
+      detail: "The chat view is not available for the cursor backend.",
+      messages: [],
+    });
+    render(
+      <PRDiscussionPanel
+        workspaceId="WS"
+        owner="octocat"
+        repo="hello"
+        number={7}
+        onClose={vi.fn()}
+      />,
+    );
+
+    const notice = await screen.findByTestId("pr-chat-unavailable");
+    expect(notice).toHaveTextContent("cursor backend");
+    expect(screen.getByTestId("pr-chat-composer")).toBeDisabled();
+    expect(screen.getByTestId("pr-chat-send")).toBeDisabled();
+
+    // The shortcut lands the user on the terminal tab.
+    fireEvent.click(screen.getByTestId("pr-chat-open-terminal"));
+    expect(screen.getByTestId("pr-discussion-tab-terminal")).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+  });
+
+  it("shows the failed state with a disabled composer", async () => {
+    mocks.getReviewerConversation.mockResolvedValue({
+      state: "failed",
+      messages: [],
+    });
+    render(
+      <PRDiscussionPanel
+        workspaceId="WS"
+        owner="octocat"
+        repo="hello"
+        number={7}
+        onClose={vi.fn()}
+      />,
+    );
+
+    const notice = await screen.findByTestId("pr-chat-unavailable");
+    expect(notice).toHaveTextContent("stopped unexpectedly");
+    expect(screen.getByTestId("pr-chat-composer")).toBeDisabled();
+    expect(screen.queryByTestId("pr-chat-open-terminal")).toBeNull();
+  });
+
+  it("keeps the last good messages through a reconnecting snapshot", async () => {
+    render(
+      <PRDiscussionPanel
+        workspaceId="WS"
+        owner="octocat"
+        repo="hello"
+        number={7}
+        onClose={vi.fn()}
+      />,
+    );
+    const messages = await screen.findByTestId("pr-chat-messages");
+    await waitFor(() => {
+      expect(within(messages).getByText("hi")).toBeInTheDocument();
+    });
+
+    // The next poll fails transiently (torn transcript append): reconnecting
+    // with no messages. Trigger it via a send's optimistic refetch.
+    mocks.getReviewerConversation.mockResolvedValue({
+      state: "reconnecting",
+      messages: [],
+    });
+    fireEvent.change(screen.getByTestId("pr-chat-composer"), {
+      target: { value: "still there?" },
+    });
+    fireEvent.click(screen.getByTestId("pr-chat-send"));
+    await waitFor(() => {
+      expect(mocks.sendReviewerMessage).toHaveBeenCalled();
+    });
+
+    // The chat must not blank out.
+    expect(within(messages).getByText("hi")).toBeInTheDocument();
+  });
 });

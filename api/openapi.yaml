@@ -3830,7 +3830,10 @@ components:
           type: string
         role:
           type: string
-          enum: [user, assistant]
+          # user | assistant. Deliberately NOT an enum: oapi-codegen resolves
+          # enum value-name collisions globally, so an enum here renames the
+          # unrelated TranscriptEntryRole* constants in the generated package.
+          description: user | assistant
         text:
           type: string
         phase:
@@ -3842,7 +3845,14 @@ components:
       properties:
         state:
           type: string
-          description: starting | reconnecting | idle | running
+          description: >
+            starting | reconnecting | idle | running | failed | unsupported.
+            failed: the reviewer runtime died or its conversation is
+            unreadable. unsupported: the reviewer's backend has no readable
+            conversation (the terminal tab still works); detail says why.
+        detail:
+          type: string
+          description: Human-readable context for failed/unsupported states.
         messages:
           type: array
           items:

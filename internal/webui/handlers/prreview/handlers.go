@@ -12,18 +12,29 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 )
 
-func (m *Module) getPullRequest(w http.ResponseWriter, r *http.Request) {
+// resolveAuthorizedPR parses the {owner}/{repo}/{number} path and
+// canonicalizes owner/repo through the workspace membership check, writing
+// the HTTP error itself on failure. Every PR-scoped handler starts here.
+func (m *Module) resolveAuthorizedPR(w http.ResponseWriter, r *http.Request) (string, pullRequestPath, bool) {
 	ws := r.PathValue("ws")
 	params, ok := parsePullRequestPath(r.PathValue("owner"), r.PathValue("repo"), r.PathValue("number"))
 	if !ok {
 		writePRReviewErrorCode(w, http.StatusBadRequest, "invalid", "invalid pull request path", false)
-		return
+		return ws, params, false
 	}
 	canonOwner, canonRepo, ok := m.authorizeRepo(w, r, ws, params.owner, params.repo)
 	if !ok {
-		return
+		return ws, params, false
 	}
 	params.owner, params.repo = canonOwner, canonRepo
+	return ws, params, true
+}
+
+func (m *Module) getPullRequest(w http.ResponseWriter, r *http.Request) {
+	ws, params, ok := m.resolveAuthorizedPR(w, r)
+	if !ok {
+		return
+	}
 	if err := m.ensureConnectorAndGrants(r.Context(), ws, params.owner, params.repo, prReviewActions); err != nil {
 		writePRReviewError(w, err)
 		return
@@ -42,21 +53,14 @@ func (m *Module) getPullRequest(w http.ResponseWriter, r *http.Request) {
 		writePRReviewError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, pullRequestDetailFromBody(res.Body))
+	writeJSON(w, pullRequestDetailFromBody(res.Body))
 }
 
 func (m *Module) getPullRequestDiff(w http.ResponseWriter, r *http.Request) {
-	ws := r.PathValue("ws")
-	params, ok := parsePullRequestPath(r.PathValue("owner"), r.PathValue("repo"), r.PathValue("number"))
-	if !ok {
-		writePRReviewErrorCode(w, http.StatusBadRequest, "invalid", "invalid pull request path", false)
-		return
-	}
-	canonOwner, canonRepo, ok := m.authorizeRepo(w, r, ws, params.owner, params.repo)
+	ws, params, ok := m.resolveAuthorizedPR(w, r)
 	if !ok {
 		return
 	}
-	params.owner, params.repo = canonOwner, canonRepo
 	if err := m.ensureConnectorAndGrants(r.Context(), ws, params.owner, params.repo, prReviewActions); err != nil {
 		writePRReviewError(w, err)
 		return
@@ -98,21 +102,14 @@ func (m *Module) getPullRequestDiff(w http.ResponseWriter, r *http.Request) {
 		writePRReviewError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, pullRequestDiffFromBody(res.Body))
+	writeJSON(w, pullRequestDiffFromBody(res.Body))
 }
 
 func (m *Module) postReview(w http.ResponseWriter, r *http.Request) {
-	ws := r.PathValue("ws")
-	params, ok := parsePullRequestPath(r.PathValue("owner"), r.PathValue("repo"), r.PathValue("number"))
-	if !ok {
-		writePRReviewErrorCode(w, http.StatusBadRequest, "invalid", "invalid pull request path", false)
-		return
-	}
-	canonOwner, canonRepo, ok := m.authorizeRepo(w, r, ws, params.owner, params.repo)
+	ws, params, ok := m.resolveAuthorizedPR(w, r)
 	if !ok {
 		return
 	}
-	params.owner, params.repo = canonOwner, canonRepo
 
 	var req gen.PullRequestReviewRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -154,7 +151,7 @@ func (m *Module) postReview(w http.ResponseWriter, r *http.Request) {
 		writePRReviewError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, pullRequestReviewResultFromBody(res.Body))
+	writeJSON(w, pullRequestReviewResultFromBody(res.Body))
 }
 
 // authorizeRepo enforces workspace membership and returns the CANONICAL

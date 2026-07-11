@@ -7,11 +7,13 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/connector"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/approvals"
 	githandlers "github.com/tysonthomas9/loomcli/internal/webui/handlers/git"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/issues"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/misc"
+	"github.com/tysonthomas9/loomcli/internal/webui/handlers/prreview"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/taskrunapi"
 	hterminal "github.com/tysonthomas9/loomcli/internal/webui/handlers/terminal"
 	"github.com/tysonthomas9/loomcli/internal/webui/issuetabs"
@@ -83,6 +85,13 @@ func NewFileModule(fileSvc service.FileService) interface{ Register(*http.ServeM
 // session identity, never request data).
 func NewApprovalsModule(st store.Store) interface{ Register(*http.ServeMux) } {
 	return approvals.NewModule(st)
+}
+
+// NewPRReviewModule creates the connector-backed pull request review module.
+// terminalSvc may be nil (no PTY manager); reviewer backend migration then
+// skips killing live reviewer terminals.
+func NewPRReviewModule(st store.Store, dispatcher *connector.Dispatcher, agentSvc service.AgentService, terminalSvc service.TerminalService) interface{ Register(*http.ServeMux) } {
+	return prreview.NewModule(st, dispatcher, agentSvc, terminalSvc)
 }
 
 // NewTaskRunAPIModule creates the task-runner HTTP API module

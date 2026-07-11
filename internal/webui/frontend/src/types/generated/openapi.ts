@@ -2114,14 +2114,16 @@ export interface components {
     ReviewerMessage: {
       turn_id: string;
       item_id: string;
-      /** @enum {string} */
-      role: "user" | "assistant";
+      /** @description user | assistant */
+      role: string;
       text: string;
       phase?: string;
     };
     ReviewerConversation: {
-      /** @description starting | reconnecting | idle | running */
+      /** @description starting | reconnecting | idle | running | failed | unsupported. failed: the reviewer runtime died or its conversation is unreadable. unsupported: the reviewer's backend has no readable conversation (the terminal tab still works); detail says why. */
       state: string;
+      /** @description Human-readable context for failed/unsupported states. */
+      detail?: string;
       messages: components["schemas"]["ReviewerMessage"][];
     };
     /**

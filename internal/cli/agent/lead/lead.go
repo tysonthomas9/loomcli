@@ -69,6 +69,27 @@ func init() {
 	leadCmd.Flags().StringVar(&leadMessage, "message", "", "Initial user request to address in lead mode")
 }
 
+// leadStartupPrompt picks the lead's boot prompt. Per-PR review agents
+// (created by the web UI's pr-review module) get the read-only reviewer
+// persona instead of the Project-Lead bootstrap, so they boot straight into
+// review mode with no backlog/startup preamble — the checkout itself carries
+// the PR specifics (per-worktree git config), not the prompt.
+func leadStartupPrompt() string {
+	if isReviewerAgentID(resolveLeadAgentID()) {
+		return agent.GenerateReviewPrompt()
+	}
+	// Generate the lead prompt and append the user's initial request if provided.
+	prompt := agent.GenerateLeadPrompt()
+	if assignment := currentLeadAssignmentPrompt(context.Background()); assignment != "" {
+		prompt += "\n\n## Loom Backend Assignment\n\n" + assignment
+	}
+	if leadMessage != "" {
+		prompt += "\n\n## User's Initial Request\n\n" + leadMessage +
+			"\n\nAddress this request using the lead mode conventions above."
+	}
+	return prompt
+}
+
 func runLead(cmd *cobra.Command, args []string) {
 	// Get current working directory
 	workDir, err := os.Getwd()
@@ -98,24 +119,7 @@ func runLead(cmd *cobra.Command, args []string) {
 	registration := registerLeadOrchestratorSession(context.Background(), workDir)
 	defer registration.Finalize()
 
-	// Per-PR review agents (created by the web UI's pr-review module) get the
-	// read-only reviewer persona instead of the Project-Lead bootstrap, so they
-	// boot straight into review mode with no backlog/startup preamble. Their PR
-	// specifics arrive as the first delivered message, not via --message.
-	var prompt string
-	if isReviewerAgentID(resolveLeadAgentID()) {
-		prompt = agent.GenerateReviewPrompt()
-	} else {
-		// Generate the lead prompt and append the user's initial request if provided.
-		prompt = agent.GenerateLeadPrompt()
-		if assignment := currentLeadAssignmentPrompt(context.Background()); assignment != "" {
-			prompt += "\n\n## Loom Backend Assignment\n\n" + assignment
-		}
-		if leadMessage != "" {
-			prompt += "\n\n## User's Initial Request\n\n" + leadMessage +
-				"\n\nAddress this request using the lead mode conventions above."
-		}
-	}
+	prompt := leadStartupPrompt()
 
 	// Invoke agent interactively (no agent name needed - lead mode doesn't claim tasks).
 	// Backends with a controlled runtime (codex app-server, harness-wrapper PTY

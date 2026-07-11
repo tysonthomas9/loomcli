@@ -12,7 +12,6 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/agents"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/driverapi"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/onboarding"
-	"github.com/tysonthomas9/loomcli/internal/webui/handlers/prreview"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/webhooks"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/workflows"
 	"github.com/tysonthomas9/loomcli/internal/webui/modbuilder"
@@ -123,7 +122,7 @@ func (app *Server) buildInfraModules() {
 		app.wsModules = append(app.wsModules, onboarding.NewModule(app.issueSvc, app.agentSvc))
 		app.wsModules = append(app.wsModules, workflows.NewModule(app.config.Store))
 		app.wsModules = append(app.wsModules, webhooks.NewModule(app.config.Store))
-		app.wsModules = append(app.wsModules, prreview.NewModule(app.config.Store, app.connectorDispatcher, app.agentSvc))
+		app.wsModules = append(app.wsModules, modbuilder.NewPRReviewModule(app.config.Store, app.connectorDispatcher, app.agentSvc, app.termSvc))
 		app.wsModules = append(app.wsModules, modbuilder.NewApprovalsModule(app.config.Store))
 		app.wsModules = append(app.wsModules, modbuilder.NewTaskRunAPIModule(app.config.Store, app.config.FleetDBBaseURL, app.config.LocalSettingsDir))
 		app.wsModules = append(app.wsModules, driverapi.NewModule(driverapi.Config{

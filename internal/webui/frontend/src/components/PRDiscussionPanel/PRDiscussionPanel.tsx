@@ -1,6 +1,6 @@
 import { useState } from "react";
 
-import { TerminalView } from "@/components/TerminalView/TerminalView";
+import { TerminalView } from "@/components/TerminalView";
 import { usePRReviewConversation } from "@/hooks/workspace";
 
 import styles from "./PRDiscussionPanel.module.css";
@@ -24,7 +24,7 @@ export function PRDiscussionPanel({
 }: PRDiscussionPanelProps): JSX.Element {
   const [activeTab, setActiveTab] = useState<Tab>("chat");
   const [text, setText] = useState("");
-  const { agentName, messages, state, sending, send, retry, error } =
+  const { agentName, messages, state, detail, sending, send, retry, error } =
     usePRReviewConversation({
       workspaceId,
       owner,
@@ -32,7 +32,15 @@ export function PRDiscussionPanel({
       number,
       enabled: true,
     });
-  const canSend = Boolean(agentName) && text.trim().length > 0 && !sending;
+  // unsupported: this backend has no readable chat (terminal still works).
+  // failed: the reviewer runtime died — a sent message would only queue
+  // invisibly, so hold the composer shut in both states.
+  const chatUnavailable = state === "unsupported" || state === "failed";
+  const canSend =
+    Boolean(agentName) &&
+    text.trim().length > 0 &&
+    !sending &&
+    !chatUnavailable;
 
   const submit = async (): Promise<void> => {
     if (!canSend) return;
@@ -101,7 +109,26 @@ export function PRDiscussionPanel({
         style={{ display: activeTab === "chat" ? "flex" : "none" }}
       >
         <div className={styles.messages} data-testid="pr-chat-messages">
-          {messages.length === 0 ? (
+          {chatUnavailable ? (
+            <div className={styles.empty} data-testid="pr-chat-unavailable">
+              <p>
+                {detail ??
+                  (state === "failed"
+                    ? "The review agent stopped unexpectedly. Close and reopen the reviewer to restart it."
+                    : "The chat view is not available for this reviewer backend.")}
+              </p>
+              {state === "unsupported" && (
+                <button
+                  type="button"
+                  className={styles.retryButton}
+                  data-testid="pr-chat-open-terminal"
+                  onClick={() => setActiveTab("terminal")}
+                >
+                  Open Terminal
+                </button>
+              )}
+            </div>
+          ) : messages.length === 0 ? (
             <div className={styles.empty}>
               Starting the review agent — it will read the PR head and respond
               here.
@@ -125,6 +152,7 @@ export function PRDiscussionPanel({
           <textarea
             className={styles.textarea}
             data-testid="pr-chat-composer"
+            disabled={chatUnavailable}
             value={text}
             onChange={(event) => setText(event.target.value)}
             onKeyDown={(event) => {

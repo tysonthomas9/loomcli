@@ -21,6 +21,8 @@ export interface UsePRReviewConversationResult {
   agentName: string | null;
   messages: ReviewerMessage[];
   state: string;
+  /** Human-readable context for failed/unsupported states. */
+  detail: string | null;
   sending: boolean;
   /** Resolves true when the message was accepted; false on failure/no-op. */
   send: (text: string) => Promise<boolean>;
@@ -43,6 +45,7 @@ export function usePRReviewConversation({
   const [agentName, setAgentName] = useState<string | null>(null);
   const [messages, setMessages] = useState<ReviewerMessage[]>([]);
   const [state, setState] = useState("starting");
+  const [detail, setDetail] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [retryNonce, setRetryNonce] = useState(0);
@@ -77,8 +80,17 @@ export function usePRReviewConversation({
         number,
       );
       if (mountedRef.current && seq === requestSeqRef.current) {
-        setMessages(conversation.messages);
+        // A reconnecting snapshot has no messages by construction (the read
+        // failed transiently, e.g. a torn transcript append) — keep showing
+        // the last good conversation instead of blanking the chat.
+        if (
+          conversation.state !== "reconnecting" ||
+          conversation.messages.length > 0
+        ) {
+          setMessages(conversation.messages);
+        }
         setState(conversation.state);
+        setDetail(conversation.detail ?? null);
         setError(null);
       }
     } catch (err) {
@@ -102,6 +114,7 @@ export function usePRReviewConversation({
     setAgentName(null);
     setMessages([]);
     setState("starting");
+    setDetail(null);
     setError(null);
     setSending(false);
     ensureKeyRef.current = null;
@@ -179,5 +192,5 @@ export function usePRReviewConversation({
     [agentName, number, owner, refetchConversation, repo, workspaceId],
   );
 
-  return { agentName, messages, state, sending, send, retry, error };
+  return { agentName, messages, state, detail, sending, send, retry, error };
 }

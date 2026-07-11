@@ -12,9 +12,11 @@ import (
 
 var errEgressUnavailable = errors.New("pull request review connector egress is unavailable")
 
-func writeJSON(w http.ResponseWriter, status int, data any) {
+// writeJSON writes a 200 success envelope; every non-200 goes through the
+// error writers below.
+func writeJSON(w http.ResponseWriter, data any) {
 	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
+	w.WriteHeader(http.StatusOK)
 	_ = json.NewEncoder(w).Encode(struct {
 		Success bool `json:"success"`
 		Data    any  `json:"data"`
