@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/store"
+	"github.com/tysonthomas9/loomcli/internal/webui/agentmodules"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/approvals"
 	githandlers "github.com/tysonthomas9/loomcli/internal/webui/handlers/git"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/issues"
@@ -90,4 +91,10 @@ func NewApprovalsModule(st store.Store) interface{ Register(*http.ServeMux) } {
 // processes talk to serve instead of holding fleet-db credentials.
 func NewTaskRunAPIModule(st store.Store, fleetBaseURL string, localSettingsDir string) interface{ Register(*http.ServeMux) } {
 	return taskrunapi.NewModule(taskrunapi.Config{Store: st, FleetBaseURL: fleetBaseURL, LocalSettingsDir: localSettingsDir})
+}
+
+type UnifiedAgentModuleDeps = agentmodules.Deps
+
+func NewUnifiedAgentModules(deps UnifiedAgentModuleDeps) []interface{ Register(*http.ServeMux) } {
+	return agentmodules.New(deps)
 }

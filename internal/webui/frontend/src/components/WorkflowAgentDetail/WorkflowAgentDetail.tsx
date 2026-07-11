@@ -31,7 +31,7 @@ import {
   type UpdateTriggerBindingRequest,
   type WorkflowRun,
   type WorkflowRunStatus,
-} from "@/api";
+} from "@/api"; // eslint-disable-line boundaries/dependencies -- Pending hook migration.
 import type { SessionRecord } from "@/types/agent";
 import { getCompactAvatarInitials } from "@/utils/compactAvatarInitials";
 import { getAvatarColor, shouldUseWhiteText } from "@/utils/colorUtils";
@@ -86,7 +86,6 @@ export interface WorkflowAgentDetailProps {
   /** Called after a successful delete so the shell can navigate back. */
   onDeleted: () => void;
 }
-
 
 type BindingHealth = ReturnType<typeof bindingHealth>;
 

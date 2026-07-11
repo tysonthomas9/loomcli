@@ -10,13 +10,10 @@
 import { useMemo, useState } from "react";
 
 import { CodeMirrorEditor } from "@/components/CodeMirrorEditor";
+import { sessionTabStyles as styles } from "@/components/IssueDetailPanel";
 import { useSessionTranscript, useSessionDiff } from "@/hooks/terminal";
 import type { SessionRecord, TranscriptEntry } from "@/types/agent";
 import { formatStatusLabel } from "@/utils/issue";
-
-// Reuse the existing session-detail styles while WS7 moves ownership of the
-// full agent detail shell; this keeps the extraction behavioral.
-import styles from "@/components/IssueDetailPanel/sessions/SessionsTab.module.css";
 
 export interface SessionRunDetailProps {
   taskId: string;

@@ -96,7 +96,7 @@ type taskDiffResponse struct {
 // workflow run may read only cards/repos inside its workspace. The operation is
 // read-only and fail-closed: malformed stamps, missing refs, non-filesystem
 // origins, and over-large diffs all return precise structured error codes.
-func (m *Module) taskDiff(ctx context.Context, ws string, id driverIdentity, body []byte) (any, error) {
+func (m *Module) taskDiff(ctx context.Context, ws string, id driverIdentity, body []byte) (any, error) { //nolint:funlen // Validation and bounded diff assembly are one security boundary.
 	params, err := decodeParams[taskDiffParams](body)
 	if err != nil {
 		return nil, err

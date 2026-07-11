@@ -248,7 +248,7 @@ func (m *Module) getRole(w http.ResponseWriter, r *http.Request) {
 // role's prompt file (reusing its existing filename so the stored path stays
 // stable). The change takes effect on the agent's next spawn — a running agent
 // keeps the prompt it read at launch.
-func (m *Module) updateRole(w http.ResponseWriter, r *http.Request) {
+func (m *Module) updateRole(w http.ResponseWriter, r *http.Request) { //nolint:funlen // Partial role updates are intentionally explicit.
 	ws := strings.TrimSpace(r.PathValue("ws"))
 	name := strings.TrimSpace(r.PathValue("name"))
 	if ws == "" || name == "" {
@@ -310,7 +310,7 @@ func (m *Module) updateRole(w http.ResponseWriter, r *http.Request) {
 // written to its own file so edits to one do not affect the other. A name
 // collision is a 409 (the caller picked a taken name) — unlike createRole, clone
 // is not a silent ensure.
-func (m *Module) cloneRole(w http.ResponseWriter, r *http.Request) {
+func (m *Module) cloneRole(w http.ResponseWriter, r *http.Request) { //nolint:funlen // Clone validation and persistence stay in one handler.
 	ws := strings.TrimSpace(r.PathValue("ws"))
 	name := strings.TrimSpace(r.PathValue("name"))
 	if ws == "" || name == "" {

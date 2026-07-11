@@ -11,14 +11,14 @@ import { useNavigate } from "react-router-dom";
 import {
   createPromptAgentRecord,
   type CreatePromptAgentRecordRequest,
-} from "@/api/agents";
+} from "@/api/agents"; // eslint-disable-line boundaries/dependencies -- Pending hook migration.
 import { AetherModal, aetherModalStyles } from "@/components/AetherModal";
 import type {
   RepoInfo,
   WorkspaceAgentInfo,
   WorkspaceRole,
 } from "@/api/workspace";
-import { listWorkspaceRoles } from "@/api/workspace";
+import { listWorkspaceRoles } from "@/api/workspace"; // eslint-disable-line boundaries/dependencies -- Pending hook migration.
 import {
   useCreateWorkspaceAgent,
   useEnsureWorkspaceRole,

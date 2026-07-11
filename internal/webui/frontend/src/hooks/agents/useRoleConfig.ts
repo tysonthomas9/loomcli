@@ -19,10 +19,7 @@ export interface UseRoleConfigReturn {
    * takes effect on the agent's NEXT start/restart — a running agent keeps the
    * prompt it read at launch.
    */
-  updateRole: (
-    name: string,
-    req: UpdateRoleRequest,
-  ) => Promise<RoleWithPrompt>;
+  updateRole: (name: string, req: UpdateRoleRequest) => Promise<RoleWithPrompt>;
   /** Clone a role under a new name. Rejects with `ApiError` 409 when taken. */
   cloneRole: (name: string, req: CloneRoleRequest) => Promise<WorkspaceRole>;
   /** Delete a custom role. Rejects with `ApiError` 400 for builtins. */

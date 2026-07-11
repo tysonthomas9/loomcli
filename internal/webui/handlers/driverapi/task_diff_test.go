@@ -154,7 +154,7 @@ func runGit(t *testing.T, dir string, args ...string) string {
 	if strings.TrimSpace(dir) != "" {
 		fullArgs = append([]string{"-C", dir}, args...)
 	}
-	cmd := exec.Command("git", fullArgs...) //nolint:gosec // test helper invokes fixed git commands with temp paths.
+	cmd := exec.Command("git", fullArgs...) //nolint:norawexec,gosec // Test helper invokes fixed git commands with temp paths.
 	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
 	out, err := cmd.CombinedOutput()
 	if err != nil {

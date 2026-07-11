@@ -273,4 +273,3 @@ func writeAdapterError(w http.ResponseWriter, err error) {
 	}
 	writeError(w, http.StatusBadRequest, err.Error())
 }
-

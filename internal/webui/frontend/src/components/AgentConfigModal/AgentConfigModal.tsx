@@ -216,7 +216,9 @@ export function AgentConfigModal({
           <>
             {/* Edit prompt + config */}
             <section className={styles.section}>
-              <h3 className={styles.sectionHeader}>Prompt &amp; configuration</h3>
+              <h3 className={styles.sectionHeader}>
+                Prompt &amp; configuration
+              </h3>
               <p className={styles.sectionHint}>
                 Editing role <strong>{roleName}</strong> used by agent{" "}
                 <strong>{agentName}</strong>.

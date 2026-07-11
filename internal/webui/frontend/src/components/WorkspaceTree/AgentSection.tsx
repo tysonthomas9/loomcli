@@ -204,8 +204,8 @@ export function AgentSection({
                   />
                   <span className={styles.workflowText}>
                     <span className={styles.workflowName}>
-                    {bindingDisplayName(b)}
-                  </span>
+                      {bindingDisplayName(b)}
+                    </span>
                     <span className={styles.workflowMeta}>
                       {bindingCadenceLabel(b)}
                     </span>

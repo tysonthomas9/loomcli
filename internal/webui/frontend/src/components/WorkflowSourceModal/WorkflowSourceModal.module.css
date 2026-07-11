@@ -145,7 +145,10 @@
 
 .outcomeWarning {
   color: var(--color-text-primary);
-  background: var(--color-danger-bg, color-mix(in srgb, #d97706 12%, transparent));
+  background: var(
+    --color-danger-bg,
+    color-mix(in srgb, #d97706 12%, transparent)
+  );
   border-color: color-mix(in srgb, #d97706 40%, transparent);
 }
 

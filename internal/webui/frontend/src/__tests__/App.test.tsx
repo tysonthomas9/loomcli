@@ -2595,6 +2595,9 @@ describe("App", () => {
 
       fireEvent.click(screen.getByRole("button", { name: "Create Agent" }));
       const dialog = await screen.findByRole("dialog", { name: "New Agent" });
+      fireEvent.click(
+        within(dialog).getByTestId("create-agent-template-legacy-planner"),
+      );
       mockNavigate.mockClear();
       fireEvent.click(
         within(dialog).getByRole("button", { name: "Create Agent" }),
@@ -2627,6 +2630,9 @@ describe("App", () => {
       const agentDialog = await screen.findByRole("dialog", {
         name: "New Agent",
       });
+      fireEvent.click(
+        within(agentDialog).getByTestId("create-agent-template-legacy-planner"),
+      );
       fireEvent.click(
         within(agentDialog).getByRole("button", { name: "Create Agent" }),
       );

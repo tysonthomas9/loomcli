@@ -222,7 +222,7 @@ func nextFireFor(b *domain.TriggerBinding, now time.Time) *time.Time {
 	return &next
 }
 
-func (m *Module) createBinding(w http.ResponseWriter, r *http.Request) {
+func (m *Module) createBinding(w http.ResponseWriter, r *http.Request) { //nolint:cyclop,funlen // Request validation is intentionally linear.
 	ws := strings.TrimSpace(r.PathValue("ws"))
 	if ws == "" {
 		handler.RespondError(w, http.StatusBadRequest, "workspace is required")
