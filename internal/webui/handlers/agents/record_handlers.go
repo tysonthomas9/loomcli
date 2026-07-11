@@ -139,7 +139,7 @@ type patchAgentBehaviorRecord struct {
 	RoleName *string `json:"role_name,omitempty"`
 }
 
-func (m *Module) listAgents(w http.ResponseWriter, r *http.Request) {
+func (m *Module) listAgents(w http.ResponseWriter, r *http.Request) { //nolint:funlen // Unified response merges three agent representations.
 	if m.store == nil {
 		if m.agentSvc == nil {
 			handler.HandleServiceError(w, service.ErrUnavailable("fleet-db store not configured"))
@@ -235,7 +235,7 @@ func (m *Module) createSupervisedAgent(w http.ResponseWriter, r *http.Request) {
 	HandleCreate(m.agentSvc, m.hub)(w, r)
 }
 
-func (m *Module) createPromptAgent(w http.ResponseWriter, r *http.Request, body []byte) {
+func (m *Module) createPromptAgent(w http.ResponseWriter, r *http.Request, body []byte) { //nolint:funlen // Transaction and compensation stay visibly ordered.
 	if m.store == nil {
 		handler.HandleServiceError(w, service.ErrUnavailable("fleet-db store not configured"))
 		return
@@ -458,7 +458,7 @@ func (m *Module) getAgent(w http.ResponseWriter, r *http.Request) {
 	handler.WriteJSON(w, http.StatusOK, out)
 }
 
-func (m *Module) patchAgent(w http.ResponseWriter, r *http.Request) {
+func (m *Module) patchAgent(w http.ResponseWriter, r *http.Request) { //nolint:funlen // Kind routing and record patching share one endpoint.
 	if m.store == nil {
 		handler.HandleServiceError(w, service.ErrUnavailable("fleet-db store not configured"))
 		return
@@ -529,7 +529,7 @@ func (m *Module) patchAgent(w http.ResponseWriter, r *http.Request) {
 	handler.WriteJSON(w, http.StatusOK, out)
 }
 
-func (m *Module) deleteAgent(w http.ResponseWriter, r *http.Request) {
+func (m *Module) deleteAgent(w http.ResponseWriter, r *http.Request) { //nolint:funlen // Lifecycle deletion keeps binding cleanup and archival ordered.
 	if m.store == nil {
 		handler.HandleServiceError(w, service.ErrUnavailable("fleet-db store not configured"))
 		return
@@ -680,31 +680,62 @@ func (m *Module) listAgentRuns(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	bindings, err := m.store.TriggerBindings().List(r.Context(), ws, store.TriggerBindingFilter{TargetAgentServiceID: record.ServiceID})
+	runs, err := m.runsForAgent(r.Context(), ws, record.ServiceID, limit)
 	if err != nil {
-		handler.WriteDomainError(w, err, "list attached bindings failed")
+		handler.WriteDomainError(w, err, "list agent runs failed")
 		return
 	}
-	runs := []*domain.DriverRun{}
-	for _, b := range bindings {
-		if b == nil {
-			continue
-		}
-		bindingRuns, err := m.store.DriverRuns().List(r.Context(), ws, store.DriverRunFilter{
-			BindingID: b.BindingID,
-			Limit:     limit,
-		})
-		if err != nil {
-			handler.WriteDomainError(w, err, "list agent runs failed")
-			return
-		}
-		runs = append(runs, bindingRuns...)
-	}
-	runs = runhistory.SortAndTrim(runs, limit)
 	handler.WriteJSON(w, http.StatusOK, map[string]any{
 		"agent_id": record.ServiceID,
 		"runs":     runs,
 	})
+}
+
+func (m *Module) runsForAgent(ctx context.Context, ws, agentID string, limit int) ([]*domain.DriverRun, error) {
+	runs, err := m.store.DriverRuns().List(ctx, ws, store.DriverRunFilter{
+		AgentServiceID: agentID,
+		Limit:          limit,
+	})
+	if err != nil {
+		return nil, err
+	}
+	seen := make(map[string]struct{}, len(runs))
+	for _, run := range runs {
+		if run != nil {
+			seen[run.RunID] = struct{}{}
+		}
+	}
+
+	// Compatibility for runs created before fleet-db stamped agent_service_id:
+	// while their binding remains attached, retain the historical binding join.
+	bindings, err := m.store.TriggerBindings().List(ctx, ws, store.TriggerBindingFilter{TargetAgentServiceID: agentID})
+	if err != nil {
+		return nil, err
+	}
+	for _, b := range bindings {
+		if b == nil {
+			continue
+		}
+		bindingRuns, err := m.store.DriverRuns().List(ctx, ws, store.DriverRunFilter{
+			BindingID: b.BindingID,
+			Limit:     limit,
+		})
+		if err != nil {
+			return nil, err
+		}
+		for _, run := range bindingRuns {
+			if run == nil {
+				continue
+			}
+			if _, ok := seen[run.RunID]; ok {
+				continue
+			}
+			seen[run.RunID] = struct{}{}
+			runs = append(runs, run)
+		}
+	}
+	runs = runhistory.SortAndTrim(runs, limit)
+	return runs, nil
 }
 
 func (m *Module) supervisedByName(ctx context.Context, ws, name string) (*domain.Agent, bool, error) {

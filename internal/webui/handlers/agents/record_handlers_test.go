@@ -250,6 +250,24 @@ func TestAgentRunsNewestFirstAndExcludesUnattributedRuns(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("create new run: %v", err)
 	}
+	if _, err := st.TriggerBindings().Create(ctx, store.TriggerBindingCreate{
+		WorkspaceKey: agentRecordTestWS, BindingID: "legacy-binding", Name: "Legacy binding",
+		SourceKind: store.InternalSourceKind, DriverID: binding.DriverID, DriverVersionID: binding.DriverVersionID,
+		Enabled: true,
+	}); err != nil {
+		t.Fatalf("create legacy binding: %v", err)
+	}
+	time.Sleep(time.Millisecond)
+	if _, err := st.DriverRuns().Create(ctx, store.DriverRunCreate{
+		WorkspaceKey: agentRecordTestWS, RunID: "run-legacy", DriverID: binding.DriverID,
+		DriverVersionID: binding.DriverVersionID, TriggerBindingID: "legacy-binding",
+	}); err != nil {
+		t.Fatalf("create legacy run: %v", err)
+	}
+	legacyTarget := created.ID
+	if _, err := st.TriggerBindings().Update(ctx, agentRecordTestWS, "legacy-binding", store.TriggerBindingUpdate{TargetAgentServiceID: &legacyTarget}); err != nil {
+		t.Fatalf("attach legacy binding: %v", err)
+	}
 
 	rec := doAgentRequest(t, mux, http.MethodGet, "/api/workspaces/WS/agents/"+created.ID+"/runs", "")
 	if rec.Code != http.StatusOK {
@@ -263,8 +281,25 @@ func TestAgentRunsNewestFirstAndExcludesUnattributedRuns(t *testing.T) {
 	if out.AgentID != created.ID {
 		t.Fatalf("agent_id = %q, want %q", out.AgentID, created.ID)
 	}
+	if len(out.Runs) != 3 || out.Runs[0].RunID != "run-legacy" || out.Runs[1].RunID != "run-new" || out.Runs[2].RunID != "run-old" {
+		t.Fatalf("runs = %+v, want legacy compatibility plus deduplicated direct runs", out.Runs)
+	}
+
+	rec = doAgentRequest(t, mux, http.MethodDelete, "/api/workspaces/WS/agents/"+created.ID, "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("delete status = %d body=%s", rec.Code, rec.Body.String())
+	}
+	rec = doAgentRequest(t, mux, http.MethodGet, "/api/workspaces/WS/agents/"+created.ID+"/runs", "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("archived runs status = %d body=%s", rec.Code, rec.Body.String())
+	}
+	out = struct {
+		AgentID string              `json:"agent_id"`
+		Runs    []*domain.DriverRun `json:"runs"`
+	}{}
+	decodeJSON(t, rec.Body.Bytes(), &out)
 	if len(out.Runs) != 2 || out.Runs[0].RunID != "run-new" || out.Runs[1].RunID != "run-old" {
-		t.Fatalf("runs = %+v, want run-new then run-old only", out.Runs)
+		t.Fatalf("archived runs = %+v, want durable run-new then run-old", out.Runs)
 	}
 }
 

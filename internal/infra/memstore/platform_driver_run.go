@@ -41,12 +41,16 @@ var (
 	_ store.DriverRunCancelSupport = (*driverRunStore)(nil)
 )
 
-func (s *driverRunStore) Create(_ context.Context, in store.DriverRunCreate) (*domain.DriverRun, error) {
+func (s *driverRunStore) Create(ctx context.Context, in store.DriverRunCreate) (*domain.DriverRun, error) { //nolint:funlen // Validation and persisted run assembly stay adjacent.
 	if in.WorkspaceKey == "" || in.RunID == "" || in.DriverID == "" || in.DriverVersionID == "" {
 		return nil, fmt.Errorf("workspace_key + run_id + driver_id + driver_version_id required: %w", domain.ErrInvalid)
 	}
 	if s.versions != nil && !s.versions.belongsToDriver(in.WorkspaceKey, in.DriverVersionID, in.DriverID) {
 		return nil, fmt.Errorf("driver version %q for driver %q in workspace %q: %w", in.DriverVersionID, in.DriverID, in.WorkspaceKey, domain.ErrNotFound)
+	}
+	agentServiceID, err := s.resolveAgentServiceID(ctx, in)
+	if err != nil {
+		return nil, err
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -72,24 +76,42 @@ func (s *driverRunStore) Create(_ context.Context, in store.DriverRunCreate) (*d
 	}
 	now := time.Now().UTC()
 	run := &domain.DriverRun{
-		WorkspaceKey:    in.WorkspaceKey,
-		RunID:           in.RunID,
-		DriverID:        in.DriverID,
-		DriverVersionID: in.DriverVersionID,
+		WorkspaceKey:     in.WorkspaceKey,
+		RunID:            in.RunID,
+		DriverID:         in.DriverID,
+		DriverVersionID:  in.DriverVersionID,
 		Entrypoint:       in.Entrypoint,
 		SourceKind:       in.SourceKind,
 		SourceRef:        in.SourceRef,
 		EpicID:           in.EpicID,
 		TriggerBindingID: in.TriggerBindingID,
+		AgentServiceID:   agentServiceID,
 		ParentRunID:      in.ParentRunID,
 		Status:           domain.DriverRunQueued,
 		IdempotencyKey:   in.IdempotencyKey,
-		Payload:         cloneJSON(in.Payload),
-		CreatedAt:       now,
-		UpdatedAt:       now,
+		Payload:          cloneJSON(in.Payload),
+		CreatedAt:        now,
+		UpdatedAt:        now,
 	}
 	s.items[in.WorkspaceKey][in.RunID] = run
 	return cloneDriverRun(run), nil
+}
+
+func (s *driverRunStore) resolveAgentServiceID(ctx context.Context, in store.DriverRunCreate) (string, error) {
+	if in.TriggerBindingID == "" {
+		return "", nil
+	}
+	if s.bindings == nil {
+		return "", fmt.Errorf("trigger binding %q in workspace %q: %w", in.TriggerBindingID, in.WorkspaceKey, domain.ErrNotFound)
+	}
+	binding, err := s.bindings.Get(ctx, in.WorkspaceKey, in.TriggerBindingID)
+	if err != nil {
+		return "", err
+	}
+	if binding.DriverID != in.DriverID || binding.DriverVersionID != in.DriverVersionID {
+		return "", fmt.Errorf("trigger binding %q does not reference driver version %q/%q: %w", in.TriggerBindingID, in.DriverID, in.DriverVersionID, domain.ErrInvalid)
+	}
+	return binding.TargetAgentServiceID, nil
 }
 
 func (s *driverRunStore) CreateEpic(ctx context.Context, ws, epicID string, in store.EpicRunCreate) (*domain.DriverRun, error) {
