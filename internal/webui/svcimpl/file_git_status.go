@@ -69,7 +69,7 @@ func (s *fileServiceImpl) workspaceGitStatus(ctx context.Context, wsID, target, 
 	if err != nil {
 		return service.FileGitStatusResult{}, err
 	}
-	checkouts := s.workspaceGitStatusCheckouts(wsID, wsRoot, ws)
+	checkouts := workspaceFileCheckouts(wsID, wsRoot, ws)
 	result := &service.FileGitStatusResult{Status: map[string]string{}, Errors: []service.FileCheckoutError{}}
 	seen := make(map[string]struct{}, len(checkouts))
 	unique := make([]gitStatusCheckout, 0, len(checkouts))
@@ -95,10 +95,6 @@ func (s *fileServiceImpl) workspaceGitStatus(ctx context.Context, wsID, target, 
 	}
 	sortCheckoutErrors(result.Errors)
 	return *result, nil
-}
-
-func (s *fileServiceImpl) workspaceGitStatusCheckouts(wsID, wsRoot string, ws *ops.WorkspaceData) []gitStatusCheckout {
-	return workspaceFileCheckouts(wsID, wsRoot, ws)
 }
 
 func workspaceFileCheckouts(_ string, wsRoot string, ws *ops.WorkspaceData) []gitStatusCheckout {

@@ -45,7 +45,6 @@ func TestFileVersions_DeleteRequiresMatchingVersion(t *testing.T) {
 	svc := scopedSvc(root)
 	ctx := context.Background()
 
-	wantKind(t, svc.DeletePathScoped(ctx, "ws", service.ScopeWorkspace, "", "", "file.txt", false), service.KindPreconditionRequired)
 	wantKind(t, svc.DeletePathVersionedScoped(ctx, "ws", service.ScopeWorkspace, "", "", "file.txt", false, ""), service.KindPreconditionRequired)
 	version := mustScopedVersion(t, svc, ctx, service.ScopeWorkspace, "", "file.txt")
 	mustWrite(t, filepath.Join(root, "file.txt"), "two") // terminal/agent writer bypasses Loom's lock
@@ -65,7 +64,6 @@ func TestFileVersions_MoveRequiresSourceAndOverwriteDestinationVersions(t *testi
 	sourceVersion := mustScopedVersion(t, svc, ctx, service.ScopeWorkspace, "", "source.txt")
 	destinationVersion := mustScopedVersion(t, svc, ctx, service.ScopeWorkspace, "", "destination.txt")
 
-	wantKind(t, svc.MovePathScoped(ctx, "ws", service.ScopeWorkspace, "", "", "source.txt", "destination.txt", true), service.KindPreconditionRequired)
 	_, err := svc.MovePathVersionedScoped(ctx, "ws", service.ScopeWorkspace, "", "", "source.txt", "destination.txt", true, "", destinationVersion)
 	wantKind(t, err, service.KindPreconditionRequired)
 	_, err = svc.MovePathVersionedScoped(ctx, "ws", service.ScopeWorkspace, "", "", "source.txt", "destination.txt", true, "sha256:stale", destinationVersion)
@@ -137,7 +135,7 @@ func TestFileVersions_ConditionalWritesAndCreateRace(t *testing.T) {
 	}
 	_, err = svc.WriteFileConditionalScoped(ctx, "ws", service.ScopeWorkspace, "", "", "existing.txt", "stale", service.FileWritePreconditions{IfMatch: version})
 	wantKind(t, err, service.KindPreconditionFailed)
-	if err := svc.WriteFileScoped(ctx, "ws", service.ScopeWorkspace, "", "", "existing.txt", "lww"); err != nil {
+	if err := writeScopedFile(ctx, svc, "ws", service.ScopeWorkspace, "", "", "existing.txt", "lww"); err != nil {
 		t.Fatalf("ordinary save must remain LWW: %v", err)
 	}
 

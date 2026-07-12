@@ -10,43 +10,16 @@ import {
   fileBrowserTabsStorageKey,
 } from "../fileBrowserStore";
 import { wsKey } from "@/utils/scopedStorage";
-import {
-  legacyScopeStorageKey,
-  tabIdentityKey,
-} from "@/utils/fileExplorerRefs";
+import { tabIdentityKey } from "@/utils/fileExplorerRefs";
 
 describe("fileBrowserStore", () => {
   beforeEach(() => {
     localStorage.clear();
   });
 
-  it("migrates legacy v1 workspace tabs into v3 schema", () => {
+  it("ignores older persisted tab schemas", () => {
     localStorage.setItem(
-      wsKey("ws-1", "file-browser-tabs"),
-      JSON.stringify({ openTabs: ["a.ts", "b.ts"], activePath: "b.ts" }),
-    );
-
-    const store = createFileBrowserStore({ workspaceId: "ws-1" });
-    const workspaceB = {
-      ref: { scope: "workspace" as const },
-      path: "b.ts",
-    };
-
-    expect(store.getState().groups[0]?.tabs).toEqual([
-      { ref: { scope: "workspace" }, path: "a.ts" },
-      { ref: { scope: "workspace" }, path: "b.ts" },
-    ]);
-    expect(store.getState().groups[0]?.active).toBe(tabIdentityKey(workspaceB));
-
-    const migrated = localStorage.getItem(
       wsKey("ws-1", fileBrowserTabsStorageKey()),
-    );
-    expect(JSON.parse(migrated ?? "{}")).toMatchObject({ v: 3 });
-  });
-
-  it("folds v2 scoped stores into one workspace-keyed v3 store", () => {
-    localStorage.setItem(
-      wsKey("ws-1", legacyScopeStorageKey({ scope: "workspace" })),
       JSON.stringify({
         v: 2,
         groups: [
@@ -55,27 +28,11 @@ describe("fileBrowserStore", () => {
         mru: ["workspace.txt"],
       }),
     );
-    localStorage.setItem(
-      wsKey(
-        "ws-1",
-        legacyScopeStorageKey({ scope: "repo", target: "loomcli" }),
-      ),
-      JSON.stringify({
-        v: 2,
-        groups: [{ tabs: [{ path: "repo.txt" }], active: "repo.txt" }],
-        mru: ["repo.txt"],
-      }),
-    );
 
     const store = createFileBrowserStore({ workspaceId: "ws-1" });
 
-    expect(store.getState().groups[0]?.tabs).toEqual([
-      { ref: { scope: "workspace" }, path: "workspace.txt" },
-      { ref: { scope: "repo", target: "loomcli" }, path: "repo.txt" },
-    ]);
-    expect(
-      localStorage.getItem(wsKey("ws-1", fileBrowserTabsStorageKey())),
-    ).toContain('"v":3');
+    expect(store.getState().groups).toEqual([{ tabs: [], active: null }]);
+    expect(store.getState().mru).toEqual([]);
   });
 
   it("falls back to empty state on malformed persisted state", () => {
@@ -157,32 +114,6 @@ describe("fileBrowserStore", () => {
 
     expect(store.getState().groups[0]?.tabs).toEqual([
       { ref: repo, path: "src/old/a.ts" },
-    ]);
-  });
-
-  it("coerces legacy agent tabs to an existing multi-repo checkout before pruning", () => {
-    localStorage.setItem(
-      wsKey("ws-1", legacyScopeStorageKey({ scope: "agent", target: "atlas" })),
-      JSON.stringify({
-        v: 2,
-        groups: [{ tabs: [{ path: "README.md" }], active: "README.md" }],
-        mru: ["README.md"],
-      }),
-    );
-    const store = createFileBrowserStore({ workspaceId: "ws-1" });
-
-    store
-      .getState()
-      .pruneUnavailableRefs([
-        { scope: "workspace" },
-        { scope: "agent", target: "atlas", repo: "app" },
-      ]);
-
-    expect(store.getState().groups[0]?.tabs).toEqual([
-      {
-        ref: { scope: "agent", target: "atlas", repo: "app" },
-        path: "README.md",
-      },
     ]);
   });
 });

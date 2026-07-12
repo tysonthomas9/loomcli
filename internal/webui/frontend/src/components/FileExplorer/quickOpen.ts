@@ -76,30 +76,6 @@ export function scoreQuickOpenPath(
   };
 }
 
-export function rankQuickOpenPaths(
-  paths: string[],
-  query: string,
-  mru: string[],
-  limit = 80,
-): QuickOpenMatch[] {
-  const mruRanks = new Map<string, number>();
-  mru.forEach((path, index) => mruRanks.set(path, index));
-  return paths
-    .map((path) => scoreQuickOpenPath(path, query, mruRanks.get(path) ?? null))
-    .filter((match): match is QuickOpenMatch => match !== null)
-    .sort((a, b) => {
-      if (b.score !== a.score) return b.score - a.score;
-      if (a.mruRank !== null || b.mruRank !== null) {
-        return (
-          (a.mruRank ?? Number.POSITIVE_INFINITY) -
-          (b.mruRank ?? Number.POSITIVE_INFINITY)
-        );
-      }
-      return a.path.localeCompare(b.path);
-    })
-    .slice(0, limit);
-}
-
 export function rankQuickOpenItems(
   items: QuickOpenItem[],
   query: string,

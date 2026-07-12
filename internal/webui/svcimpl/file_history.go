@@ -3,7 +3,6 @@ package svcimpl
 import (
 	"context"
 	"errors"
-	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -107,9 +106,6 @@ func (s *fileServiceImpl) HistoryFileScoped(ctx context.Context, wsID string, sc
 		return nil, err
 	}
 	defer root.Close()
-	if err := s.ensureLegacyHistoryCleaned(); err != nil {
-		return nil, err
-	}
 	logOutput, err := s.fileOps.GitLogFile(ctx, checkout.root, checkout.relPath, fileHistoryGitLogLimit)
 	if err != nil {
 		return nil, mapGitInspectionError("failed to run git log", err)
@@ -337,48 +333,4 @@ func countLines(content string) int {
 		count++
 	}
 	return count
-}
-
-const legacySaveHistoryDirName = "file-history"
-
-func (s *fileServiceImpl) ensureLegacyHistoryCleaned() error {
-	s.historyCleanupOnce.Do(func() {
-		dataDir, err := s.fileOps.ResolveLoomDataDir()
-		if err != nil {
-			s.historyCleanupErr = service.ErrInternal("failed to resolve loom data directory", err)
-			return
-		}
-		s.historyCleanupErr = cleanupLegacySaveHistory(dataDir)
-	})
-	return s.historyCleanupErr
-}
-
-// cleanupLegacySaveHistory removes only the dedicated plaintext snapshot root.
-// Refusing a symlink keeps this one-time migration from following an alias.
-func cleanupLegacySaveHistory(dataDir string) error {
-	root, err := filepath.Abs(dataDir)
-	if err != nil {
-		return service.ErrInternal("failed to resolve legacy file history root", err)
-	}
-	target := filepath.Join(root, legacySaveHistoryDirName)
-	if filepath.Dir(target) != root || filepath.Base(target) != legacySaveHistoryDirName {
-		return service.ErrInternal("invalid legacy file history root", nil)
-	}
-	info, err := os.Lstat(target)
-	if os.IsNotExist(err) {
-		return nil
-	}
-	if err != nil {
-		return service.ErrInternal("failed to inspect legacy file history root", err)
-	}
-	if info.Mode()&os.ModeSymlink != 0 {
-		return service.ErrForbidden("legacy file history root is a symlink")
-	}
-	if !info.IsDir() {
-		return service.ErrInternal("legacy file history root is not a directory", nil)
-	}
-	if err := os.RemoveAll(target); err != nil {
-		return service.ErrInternal("failed to remove legacy file history", err)
-	}
-	return nil
 }

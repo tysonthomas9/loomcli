@@ -26,15 +26,7 @@ export type {
 } from "./useEventProvider";
 
 export {
-  useFileContent,
-  useWorkspaceFileContent,
-  useScopedFileContent,
-} from "./useFileContent";
-export type { UseFileContentReturn } from "./useFileContent";
-
-export {
   FileDocumentRegistryProvider,
-  getSessionFileDocumentRegistry,
   useFileDocument,
   useFileDocumentRegistry,
   useFileDocumentRegistryRevision,
@@ -47,12 +39,8 @@ export {
 } from "./useFileCapabilities";
 export type { FileCapabilitiesState } from "./useFileCapabilities";
 
-export {
-  useFileTree,
-  useWorkspaceFileTree,
-  useScopedFileTree,
-} from "./useFileTree";
-export type { UseFileTreeReturn, UseFileTreeOptions } from "./useFileTree";
+export { useScopedFileTree } from "./useScopedFileTree";
+export type { UseScopedFileTreeReturn } from "./useScopedFileTree";
 
 export { useFolderPicker } from "./useFolderPicker";
 export type {

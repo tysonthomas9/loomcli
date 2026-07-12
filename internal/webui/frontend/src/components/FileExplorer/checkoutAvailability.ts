@@ -13,10 +13,6 @@ export function checkoutChangeCount(
   return checkout.change_count;
 }
 
-export function unavailableCheckoutCount(checkouts: FileCheckout[]): number {
-  return checkouts.filter((checkout) => checkout.status_error === true).length;
-}
-
 export function checkoutDisplayName(checkout: FileCheckout): string {
   if (checkout.kind === "agent") {
     return checkout.agent

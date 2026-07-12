@@ -99,10 +99,6 @@ export function useFileDocument(
   );
 }
 
-export function getSessionFileDocumentRegistry(): FileDocumentRegistry {
-  return sessionFileDocumentRegistry;
-}
-
 export function useFileDocumentRegistry(): FileDocumentRegistry {
   return useContext(FileDocumentRegistryContext);
 }

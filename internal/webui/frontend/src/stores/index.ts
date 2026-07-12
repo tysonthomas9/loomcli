@@ -61,14 +61,12 @@ export {
   agentFileBrowserTabsStorageKey,
   createFileBrowserStore,
   fileBrowserTabsStorageKey,
-  loadFileBrowserTabs,
   FileBrowserStoreProvider,
   useFileBrowserStore,
   useFileBrowserStoreInstance,
-  EMPTY_FILE_BROWSER_STATE,
 } from "./fileBrowserStore";
 
-export { FileDocumentRegistry, fileDocumentKey } from "./fileDocumentRegistry";
+export { FileDocumentRegistry } from "./fileDocumentRegistry";
 export type {
   ExternalFileConflict,
   FileDocumentOperations,
@@ -81,7 +79,5 @@ export type {
   FileBrowserStoreActions,
   FileBrowserTab,
   FileBrowserGroup,
-  PersistedFileBrowserTabsV2,
-  PersistedFileBrowserTabsV3,
   FileBrowserStoreConfig,
 } from "./fileBrowserStore";

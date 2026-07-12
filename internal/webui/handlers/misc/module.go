@@ -31,11 +31,6 @@ func (m *Module) Register(mux *http.ServeMux) {
 	handle := func(pattern string, h http.HandlerFunc) {
 		mux.Handle(pattern, m.access(h))
 	}
-	// Deprecated agent-scoped routes: thin delegates to the scoped agent core.
-	handle("GET /api/workspaces/{ws}/agents/{name}/files/tree", HandleFileTree(m.fileSvc))
-	handle("GET /api/workspaces/{ws}/agents/{name}/files", HandleFileRead(m.fileSvc))
-	handle("PUT /api/workspaces/{ws}/agents/{name}/files", HandleFileWrite(m.fileSvc))
-
 	// Scope-rooted file browser. scope defaults to the workspace folder.
 	handle("GET /api/workspaces/{ws}/files/capabilities", HandleFileCapabilities())
 	handle("GET /api/workspaces/{ws}/files/tree", HandleScopedFileTree(m.fileSvc))

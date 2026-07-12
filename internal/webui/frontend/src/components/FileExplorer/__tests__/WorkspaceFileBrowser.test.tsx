@@ -81,6 +81,9 @@ const mocks = vi.hoisted(() => ({
   useExternal: vi.fn(),
   overwriteExternal: vi.fn(() => Promise.resolve(null)),
   registryDirtyPaths: [] as string[],
+  registryDirtyKeys: new Set<string>(),
+  registryListeners: new Set<() => void>(),
+  registryRevision: 0,
   registryRefresh: vi.fn(() => Promise.resolve()),
   registryRetarget: vi.fn(),
   registryReset: vi.fn(),
@@ -199,8 +202,55 @@ vi.mock("@/hooks/api", () => ({
 vi.mock("@/hooks", async () => {
   const React = await import("react");
   const stores = await import("@/stores");
+  const documentKey = (
+    workspaceId: string,
+    scopeRef: unknown,
+    path: string,
+  ): string => {
+    const ref = scopeRef as {
+      scope?: string;
+      target?: string;
+      repo?: string;
+    };
+    return [
+      workspaceId,
+      ref.scope ?? "workspace",
+      ref.target ?? "",
+      ref.repo ?? "",
+      path,
+    ].join(":");
+  };
+  const emitRegistryRevision = () => {
+    mocks.registryRevision += 1;
+    for (const listener of mocks.registryListeners) listener();
+  };
+  const setRegistryDirty = (
+    workspaceId: string,
+    scopeRef: unknown,
+    path: string,
+    dirty: boolean,
+  ) => {
+    const key = documentKey(workspaceId, scopeRef, path);
+    const had = mocks.registryDirtyKeys.has(key);
+    if (dirty) {
+      mocks.registryDirtyKeys.add(key);
+    } else {
+      mocks.registryDirtyKeys.delete(key);
+    }
+    if (had !== dirty) emitRegistryRevision();
+  };
   const documentRegistry = {
-    get: () => ({ dirty: false }),
+    get: (ref: {
+      workspaceId: string;
+      scope: string;
+      target?: string;
+      repo?: string;
+      path: string;
+    }) => ({
+      dirty: mocks.registryDirtyKeys.has(
+        documentKey(ref.workspaceId, ref, ref.path),
+      ),
+    }),
     dirtyPathsForPrefix: vi.fn(() => mocks.registryDirtyPaths),
     refresh: mocks.registryRefresh,
     resetPathPrefix: mocks.registryReset,
@@ -220,7 +270,17 @@ vi.mock("@/hooks", async () => {
     useFileBrowserStore: stores.useFileBrowserStore,
     useFileBrowserStoreInstance: stores.useFileBrowserStoreInstance,
     useFileDocumentRegistry: () => documentRegistry,
-    useFileDocumentRegistryRevision: () => 0,
+    useFileDocumentRegistryRevision: () =>
+      React.useSyncExternalStore(
+        (listener) => {
+          mocks.registryListeners.add(listener);
+          return () => {
+            mocks.registryListeners.delete(listener);
+          };
+        },
+        () => mocks.registryRevision,
+        () => mocks.registryRevision,
+      ),
     useFileCapabilities: () => ({
       capabilities: mocks.capabilities,
       isLoading: mocks.capabilitiesLoading,
@@ -250,8 +310,6 @@ vi.mock("@/hooks", async () => {
       disconnect: vi.fn(),
     }),
     useToast: () => ({ showToast: mocks.showToast }),
-    useFileTree: vi.fn(),
-    useFileContent: vi.fn(),
     useScopedFileTree: () => ({
       expanded: new Set([""]),
       treeData: new Map<string, FileEntry[]>([["", mocks.rootEntries]]),
@@ -267,21 +325,6 @@ vi.mock("@/hooks", async () => {
       selectFile: vi.fn(),
       isWorkspaceTree: false,
     }),
-    useScopedFileContent: () => {
-      const [fileData, setFileData] = React.useState<FileReadData | null>(null);
-      const [isLoading, setIsLoading] = React.useState(false);
-      return {
-        fileData,
-        isLoading,
-        error: null,
-        fetchFile: async (path: string) => {
-          setIsLoading(true);
-          setFileData(mocks.fileMap[path] ?? null);
-          setIsLoading(false);
-        },
-        clearFile: () => setFileData(null),
-      };
-    },
     useFileDocument: (
       _workspaceId: string,
       _scopeRef: unknown,
@@ -299,6 +342,7 @@ vi.mock("@/hooks", async () => {
         const nextContent = next?.content ?? "";
         setContent(nextContent);
         setBaseContent(nextContent);
+        setRegistryDirty(_workspaceId, _scopeRef, path, false);
         setIsLoading(false);
       };
       return {
@@ -310,16 +354,23 @@ vi.mock("@/hooks", async () => {
         error: null,
         externalConflict: mocks.documentExternalConflict,
         refresh,
-        edit: setContent,
+        edit: (next: string) => {
+          setContent(next);
+          setRegistryDirty(_workspaceId, _scopeRef, path, next !== baseContent);
+        },
         save: async () => {
           if (content === baseContent) return null;
           setIsSaving(true);
           await mocks.writeScopedFile("ws-1", _scopeRef, path, content);
           setBaseContent(content);
+          setRegistryDirty(_workspaceId, _scopeRef, path, false);
           setIsSaving(false);
           return { success: true, version: "test-version" };
         },
-        discard: () => setContent(baseContent),
+        discard: () => {
+          setContent(baseContent);
+          setRegistryDirty(_workspaceId, _scopeRef, path, false);
+        },
         useExternal: mocks.useExternal,
         overwriteExternal: mocks.overwriteExternal,
       };
@@ -366,6 +417,9 @@ describe("WorkspaceFileBrowser", () => {
     mocks.capabilitiesError = null;
     mocks.documentExternalConflict = null;
     mocks.registryDirtyPaths = [];
+    mocks.registryDirtyKeys.clear();
+    mocks.registryListeners.clear();
+    mocks.registryRevision = 0;
     mocks.agents = [
       {
         name: "atlas",

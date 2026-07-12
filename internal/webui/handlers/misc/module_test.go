@@ -24,9 +24,6 @@ func TestFileModule_RegisterRoutes(t *testing.T) {
 		method string
 		path   string
 	}{
-		{"GET", "/api/workspaces/test-ws/agents/agent1/files/tree"},
-		{"GET", "/api/workspaces/test-ws/agents/agent1/files"},
-		{"PUT", "/api/workspaces/test-ws/agents/agent1/files"},
 		{"GET", "/api/workspaces/test-ws/files/capabilities"},
 		{"GET", "/api/workspaces/test-ws/files/git-status"},
 		{"GET", "/api/workspaces/test-ws/files/checkouts"},
@@ -47,21 +44,6 @@ func TestFileModule_RegisterRoutes(t *testing.T) {
 		if rec.Code == http.StatusMethodNotAllowed {
 			t.Errorf("%s %s: got 405, wrong method registered", rt.method, rt.path)
 		}
-	}
-}
-
-func TestFileModule_WrongMethod_Returns405(t *testing.T) {
-	mod := NewFileModule(&stubFileService{})
-
-	mux := http.NewServeMux()
-	mod.Register(mux)
-
-	rec := httptest.NewRecorder()
-	req := httptest.NewRequest("DELETE", "/api/workspaces/test-ws/agents/agent1/files", nil)
-	mux.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusMethodNotAllowed {
-		t.Errorf("DELETE .../agents/agent1/files: expected 405, got %d", rec.Code)
 	}
 }
 
