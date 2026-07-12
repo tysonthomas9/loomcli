@@ -197,26 +197,6 @@ ensure_image() {
   exit 1
 }
 
-# source_digest — same digest scheme the slack stack uses (path NUL source
-# NUL), across the github-review-agent and sibling review task runner sources.
-source_digest() {
-  node -e '
-const crypto = require("node:crypto");
-const fs = require("node:fs");
-const hash = crypto.createHash("sha256");
-for (const pair of process.argv.slice(1)) {
-  const [name, file] = pair.split("=", 2);
-  hash.update(name);
-  hash.update(Buffer.from([0]));
-  hash.update(fs.readFileSync(file));
-  hash.update(Buffer.from([0]));
-}
-console.log("sha256:" + hash.digest("hex"));
-' \
-    "workflows/github-review-agent.ts=${REVIEW_WORKFLOW_SOURCE}" \
-    "workflows/github-review-task-runner.ts=${REVIEW_TASK_RUNNER_SOURCE}"
-}
-
 # write_review_dist packages the workflow and its sibling runner into one
 # native Flue-style dist. The server dispatches by FLUE_CLI_NAME, so the same
 # bundle can run the driver workflow or the named task runner via the generic
@@ -316,7 +296,9 @@ register_review_workflow() {
   local build_dir digest
   build_dir="$(mktemp -d "${TMPDIR:-/tmp}/loom-github-review-dist.XXXXXX")"
   write_review_dist "$build_dir"
-  digest="$(source_digest)"
+  # Canonical source digest from the container's loom binary (workflows.SourceDigest)
+  # — one recipe shared with serve's builtin self-heal; see the slack stack script.
+  digest="$(podman exec "$CONTAINER" loom workflow digest "$A1_WORKFLOW_NAME")"
 
   log "registering builtin ${A1_WORKFLOW_NAME} workflow"
   # The container is recreated fresh each run (podman rm -f then run), so the

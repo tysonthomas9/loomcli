@@ -2,8 +2,6 @@ package workflows
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -145,11 +143,24 @@ func EnsureBuiltinWorkflow(ctx context.Context, st store.Store, ws, name string)
 	digest := SourceDigest(spec.Files)
 	sourceRef := "builtin://workflows/" + name + "/versions/" + digest
 	freshRunners := workflowRunnerNameSet(spec)
-	reuse, reuseMissingRunners, err := builtinReuseDecision(ctx, st, ws, name, freshRunners)
+	reuse, current, reuseMissingRunners, err := builtinReuseDecision(ctx, st, ws, name, freshRunners)
 	if err != nil {
 		return err
 	}
 	if reuse {
+		// Registrations stamped via `loom workflow digest` carry the canonical
+		// SourceDigest and hit this fast path with current == digest. A usable
+		// driver at a different digest (pre-unification stacks, or a different
+		// source revision) is still reused — never rebuilt — but the mismatch is
+		// logged so version drift between the registered builtin and the serve
+		// binary stays visible instead of silent.
+		if current != digest {
+			slog.Warn("builtin digest drift: reusing registered version despite source-digest mismatch",
+				"workflow", name,
+				"workspace", ws,
+				"registered_digest", current,
+				"embedded_digest", digest)
+		}
 		return nil
 	}
 	if _, _, err := BuildAndRegister(ctx, st, BuildAndRegisterOptions{
@@ -201,25 +212,28 @@ func EnsureBuiltinWorkflow(ctx context.Context, st store.Store, ws, name string)
 // and to fail OPEN onto the still-usable subset version, with a warning, if
 // that rebuild cannot run here (the same toolchain-less serve), rather than
 // failing runs the registered driver can serve.
-func builtinReuseDecision(ctx context.Context, st store.Store, ws, name string, fresh map[string]struct{}) (reuse bool, missing []string, err error) {
+//
+// registeredDigest is the active version's recorded source_digest (empty when
+// there is no active version), so the caller can log digest drift on reuse.
+func builtinReuseDecision(ctx context.Context, st store.Store, ws, name string, fresh map[string]struct{}) (reuse bool, registeredDigest string, missing []string, err error) {
 	driverID, err := ResolveDriverID(ctx, st, ws, name)
 	if err != nil {
 		if errors.Is(err, domain.ErrNotFound) {
-			return false, nil, nil
+			return false, "", nil, nil
 		}
-		return false, nil, err
+		return false, "", nil, err
 	}
-	_, bundleAvailable, manifest, err := activeBuiltInWorkflowState(ctx, st, ws, driverID)
+	current, bundleAvailable, manifest, err := activeBuiltInWorkflowState(ctx, st, ws, driverID)
 	if err != nil {
-		return false, nil, err
+		return false, "", nil, err
 	}
 	if !bundleAvailable || activeManifestRunnersAreStale(manifest, fresh) {
-		return false, nil, nil
+		return false, current, nil, nil
 	}
 	if missing = manifestMissingFreshRunners(manifest, fresh); len(missing) > 0 {
-		return false, missing, nil
+		return false, current, missing, nil
 	}
-	return true, nil, nil
+	return true, current, nil, nil
 }
 
 func activeBuiltInWorkflowState(ctx context.Context, st store.Store, ws, driverID string) (string, bool, map[string]string, error) {
@@ -542,22 +556,6 @@ func ValidateWorkflowFiles(in map[string]string) (map[string]string, error) {
 		out[rel] = content
 	}
 	return out, nil
-}
-
-func SourceDigest(files map[string]string) string {
-	keys := make([]string, 0, len(files))
-	for key := range files {
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
-	hash := sha256.New()
-	for _, key := range keys {
-		hash.Write([]byte(key))
-		hash.Write([]byte{0})
-		hash.Write([]byte(files[key]))
-		hash.Write([]byte{0})
-	}
-	return "sha256:" + hex.EncodeToString(hash.Sum(nil))
 }
 
 func RedactBuildDiagnostics(input string) string {

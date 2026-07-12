@@ -36,6 +36,7 @@ var (
 	workflowListJSON     bool
 	workflowVersionsJSON bool
 	workflowReadyzJSON   bool
+	workflowDigestJSON   bool
 )
 
 var (
@@ -112,6 +113,21 @@ var workflowReadyzCmd = &cobra.Command{
 	RunE:  runWorkflowReadyz,
 }
 
+var workflowDigestCmd = &cobra.Command{
+	Use:   "digest <workflow>",
+	Short: "Print the canonical source digest of a built-in workflow",
+	Long: `Print the canonical source digest (workflows.SourceDigest) of a built-in
+workflow's embedded source tree.
+
+This is the SAME digest serve's builtin self-heal (EnsureBuiltinWorkflow)
+computes, so out-of-band registrations that stamp it — e.g.
+loom driver register --source-digest "$(loom workflow digest epic-runner)" —
+hit the self-heal's exact-match fast path instead of logging digest drift.
+Purely local: reads only the sources embedded in this binary.`,
+	Args: cobra.ExactArgs(1),
+	RunE: runWorkflowDigest,
+}
+
 func init() {
 	workflowCloneCmd.Flags().StringVar(&workflowCloneOut, "out", "", "Output source directory")
 	workflowCloneCmd.Flags().BoolVar(&workflowCloneJSON, "json", false, "JSON output")
@@ -137,8 +153,9 @@ func init() {
 	workflowListCmd.Flags().BoolVar(&workflowListJSON, "json", false, "JSON output")
 	workflowVersionsCmd.Flags().BoolVar(&workflowVersionsJSON, "json", false, "JSON output")
 	workflowReadyzCmd.Flags().BoolVar(&workflowReadyzJSON, "json", false, "JSON output")
+	workflowDigestCmd.Flags().BoolVar(&workflowDigestJSON, "json", false, "JSON output")
 
-	workflowCmd.AddCommand(workflowCloneCmd, workflowBuildCmd, workflowApproveCmd, workflowUnapproveCmd, workflowActivateCmd, workflowRunCmd, workflowListCmd, workflowVersionsCmd, workflowReadyzCmd)
+	workflowCmd.AddCommand(workflowCloneCmd, workflowBuildCmd, workflowApproveCmd, workflowUnapproveCmd, workflowActivateCmd, workflowRunCmd, workflowListCmd, workflowVersionsCmd, workflowReadyzCmd, workflowDigestCmd)
 	cli.RegisterCommand(workflowCmd)
 }
 
@@ -531,4 +548,26 @@ func packageRootAvailable(envRoot, fallback string) bool {
 		}
 	}
 	return false
+}
+
+// runWorkflowDigest prints the canonical source digest of a built-in
+// workflow's embedded source tree. It never opens a store or workspace: the
+// digest is a pure function of the sources compiled into this binary, so the
+// command works before any stack is up (the e2e register scripts call it to
+// stamp `loom driver register --source-digest`).
+func runWorkflowDigest(cmd *cobra.Command, args []string) error {
+	name := strings.TrimSpace(args[0])
+	spec, ok := workflows.BuiltinWorkflow(name)
+	if !ok {
+		return fmt.Errorf("unknown built-in workflow %q (known: %s)", name, strings.Join(workflows.BuiltinWorkflowNames(), ", "))
+	}
+	digest := workflows.SourceDigest(spec.Files)
+	if workflowDigestJSON {
+		return json.NewEncoder(cmd.OutOrStdout()).Encode(map[string]string{
+			"workflow":      name,
+			"source_digest": digest,
+		})
+	}
+	_, _ = fmt.Fprintln(cmd.OutOrStdout(), digest)
+	return nil
 }
