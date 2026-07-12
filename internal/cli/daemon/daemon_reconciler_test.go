@@ -27,6 +27,45 @@ func TestDiffAgents_NoChanges(t *testing.T) {
 	}
 }
 
+func TestIncludeRoleConfigChanges_ReconcilesAssignedAgents(t *testing.T) {
+	agents := []AgentEntry{{Worktree: "agent1", Role: "operator"}}
+
+	t.Run("worker to interactive drains worker", func(t *testing.T) {
+		oldRoles := map[string]RoleConfig{"operator": {Kind: "worker", PromptFile: "worker.md"}}
+		newRoles := map[string]RoleConfig{"operator": {Kind: "interactive", PromptFile: "worker.md"}}
+		got := includeRoleConfigChanges(oldRoles, newRoles, agents, agents, nil)
+		if len(got) != 1 || got[0].Worktree != "agent1" {
+			t.Fatalf("modified = %#v, want agent1", got)
+		}
+	})
+
+	t.Run("interactive to worker starts worker", func(t *testing.T) {
+		oldRoles := map[string]RoleConfig{"operator": {Kind: "interactive", PromptFile: "worker.md"}}
+		newRoles := map[string]RoleConfig{"operator": {Kind: "worker", PromptFile: "worker.md"}}
+		got := includeRoleConfigChanges(oldRoles, newRoles, agents, agents, nil)
+		if len(got) != 1 || got[0].Worktree != "agent1" {
+			t.Fatalf("modified = %#v, want agent1", got)
+		}
+	})
+
+	t.Run("worker prompt change restarts worker", func(t *testing.T) {
+		oldRoles := map[string]RoleConfig{"operator": {Kind: "worker", PromptFile: "old.md"}}
+		newRoles := map[string]RoleConfig{"operator": {Kind: "worker", PromptFile: "new.md"}}
+		got := includeRoleConfigChanges(oldRoles, newRoles, agents, agents, nil)
+		if len(got) != 1 || got[0].Worktree != "agent1" {
+			t.Fatalf("modified = %#v, want agent1", got)
+		}
+	})
+
+	t.Run("interactive prompt change does not touch daemon", func(t *testing.T) {
+		oldRoles := map[string]RoleConfig{"operator": {Kind: "interactive", PromptFile: "old.md"}}
+		newRoles := map[string]RoleConfig{"operator": {Kind: "interactive", PromptFile: "new.md"}}
+		if got := includeRoleConfigChanges(oldRoles, newRoles, agents, agents, nil); len(got) != 0 {
+			t.Fatalf("modified = %#v, want none", got)
+		}
+	})
+}
+
 func TestDiffAgents_Added(t *testing.T) {
 	old := []AgentEntry{
 		{Worktree: "agent1", Role: "task"},

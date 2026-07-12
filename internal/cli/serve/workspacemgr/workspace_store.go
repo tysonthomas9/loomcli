@@ -494,6 +494,7 @@ func seedBuiltInRoles(ctx context.Context, s storepkg.Store, key string) error {
 		{
 			WorkspaceKey: key,
 			Name:         "lead",
+			Kind:         string(domain.RoleKindInteractive),
 			Description:  "Lead/orchestrator terminal",
 		},
 	}
