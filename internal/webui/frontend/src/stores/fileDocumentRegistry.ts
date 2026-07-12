@@ -153,10 +153,6 @@ export class FileDocumentRegistry {
     return state;
   }
 
-  getByKey(key: string): FileDocumentState | undefined {
-    return this.states.get(key);
-  }
-
   getRevision(): number {
     return this.revision;
   }

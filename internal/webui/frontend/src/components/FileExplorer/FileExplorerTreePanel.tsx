@@ -24,10 +24,10 @@ import {
 import type { ChangeCheckoutGroup } from "./changesLens";
 import { unavailableCheckoutSummary } from "./checkoutAvailability";
 import { dirname } from "./fileExplorerLocalUtils";
+import type { HistoryOpenDiffRequest } from "./FileHistoryPanel";
 import styles from "./FileExplorer.module.css";
 import type {
   ExplorerLens,
-  OpenDiffRequest,
   ScopedInlineEdit,
   TreeRefreshRequest,
   TreeRevealRequest,
@@ -107,7 +107,7 @@ function ChangesList({
 }: {
   groups: ChangeCheckoutGroup[];
   unavailableLabels: string[];
-  onOpenDiff: (request: OpenDiffRequest) => void;
+  onOpenDiff: (request: HistoryOpenDiffRequest) => void;
 }) {
   const unavailableText = unavailableCheckoutSummary(unavailableLabels);
   if (groups.length === 0 && unavailableLabels.length === 0) {
@@ -575,7 +575,7 @@ export function FileExplorerTreePanel({
   hideAgentSectionHeading: boolean;
   onLensChange: (lens: ExplorerLens) => void;
   onQuickOpen: () => void;
-  onOpenDiff: (request: OpenDiffRequest) => void;
+  onOpenDiff: (request: HistoryOpenDiffRequest) => void;
   onToggleRoot: (key: string) => void;
   onRepairCheckout: (ref: CheckoutRef, label: string) => void;
   onCheckoutContextMenu: (

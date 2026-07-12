@@ -7,9 +7,7 @@ import (
 )
 
 // FileScope identifies the root a scoped file operation resolves against.
-// Phase 1 supports only ScopeWorkspace (the workspace folder, read-only). The
-// type is defined so repo/agent scopes and write operations can be added later
-// without reshaping the API contract.
+// Workspace, repo, and agent scopes are all wired through the scoped file API.
 type FileScope string
 
 const (
@@ -22,24 +20,9 @@ const (
 	ScopeAgent FileScope = "agent"
 )
 
-// FileService defines business logic for file operations within agent worktrees.
+// FileService defines business logic for scoped workspace file operations.
 // Handlers call this interface and map returned errors to HTTP responses.
-//
-// The *Scoped methods generalize listing/reading to an arbitrary scope root
-// (currently the workspace folder) for the dedicated file browser; the
-// agent-scoped methods remain for the per-agent file panel.
 type FileService interface {
-	// ListDirectory lists one level of a directory within an agent's worktree.
-	ListDirectory(ctx context.Context, wsID, agentName, path string) (*FileTreeResult, error)
-
-	// ReadFile reads a file within an agent's worktree. Binary files return metadata only.
-	ReadFile(ctx context.Context, wsID, agentName, path string) (*FileReadResult, error)
-
-	// WriteFile writes content to a file within an agent's worktree using atomic temp+rename.
-	//
-	// Deprecated: use WriteFileScoped with ScopeAgent.
-	WriteFile(ctx context.Context, wsID, agentName, path, content string) error
-
 	// ListDirectoryScoped lists one level of a directory under a scope root.
 	// target names the scope's resource (repo/agent name); it must be empty for
 	// ScopeWorkspace. repo optionally qualifies ScopeAgent to a specific
@@ -88,24 +71,15 @@ type FileService interface {
 	// HistoryFileScoped returns bounded commit history for a file.
 	HistoryFileScoped(ctx context.Context, wsID string, scope FileScope, target, repo, path string) (*FileHistoryResult, error)
 
-	// WriteFileScoped creates or updates a file under a scope root.
-	WriteFileScoped(ctx context.Context, wsID string, scope FileScope, target, repo, path, content string) error
-
 	// WriteFileConditionalScoped applies optional HTTP-style preconditions. An
 	// empty precondition preserves ordinary editor last-write-wins behavior.
 	WriteFileConditionalScoped(ctx context.Context, wsID string, scope FileScope, target, repo, path, content string, preconditions FileWritePreconditions) (*FileMutationResult, error)
-
-	// DeletePathScoped deletes a file or directory under a scope root.
-	DeletePathScoped(ctx context.Context, wsID string, scope FileScope, target, repo, path string, recursive bool) error
 
 	// DeletePathVersionedScoped requires the current source version.
 	DeletePathVersionedScoped(ctx context.Context, wsID string, scope FileScope, target, repo, path string, recursive bool, version string) error
 
 	// MkdirScoped creates a directory path under a scope root.
 	MkdirScoped(ctx context.Context, wsID string, scope FileScope, target, repo, path string) error
-
-	// MovePathScoped renames or moves a path within one scope root.
-	MovePathScoped(ctx context.Context, wsID string, scope FileScope, target, repo, from, to string, overwrite bool) error
 
 	// MovePathVersionedScoped requires the current source version and, when an
 	// existing regular-file destination is overwritten, its current version.

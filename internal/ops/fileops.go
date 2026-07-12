@@ -37,16 +37,6 @@ type FileOps interface {
 	// missing local checkouts return ErrAgentWorktreeNotFound.
 	ResolveAgentWorktreeForRepo(workspaceID, name, repo string) (*AgentWorktree, error)
 
-	// ResolveAgentWorktreeOrPrimary resolves an agent name to its worktree,
-	// falling back to the workspace's primary repo worktree when the agent is
-	// a lead with no local worktree of its own (leads intentionally have none
-	// — see svcimpl.ensureLocalAgentWorktrees). Non-lead agents keep
-	// ResolveAgentWorktree semantics (a missing worktree still errors). Used by
-	// the read-only file viewer so leads can browse the primary repo without a
-	// 404. Write paths must NOT use this — they resolve the agent worktree
-	// directly so leads cannot mutate the primary worktree from the viewer.
-	ResolveAgentWorktreeOrPrimary(workspaceID, name string) (*AgentWorktree, error)
-
 	// ResolveWorkspaceRoot resolves a workspace to its root folder — the
 	// directory that contains every repo checkout and agent worktree — so the
 	// file browser can navigate the whole workspace from a single root. Returns
@@ -77,10 +67,6 @@ type FileOps interface {
 
 	// GitBlamePorcelain returns git blame --porcelain output for one file path.
 	GitBlamePorcelain(ctx context.Context, worktreePath, path string) (GitBoundedTextResult, error)
-
-	// ResolveLoomDataDir resolves the local loom data/config directory using
-	// the established CLI resolver instead of callers reading env directly.
-	ResolveLoomDataDir() (string, error)
 
 	// GetCurrentBranch returns the current branch for a git checkout. It is
 	// best-effort metadata for file checkout enumeration.

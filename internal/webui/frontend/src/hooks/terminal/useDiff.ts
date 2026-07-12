@@ -4,8 +4,8 @@
  * file patches with Map-based caching, tracks viewed files, and derives
  * summary statistics. Resets all state when agent changes.
  *
- * Combines useGitStatus pattern (mountedRef, reset on agent change, enabled flag)
- * with useFileContent pattern (on-demand fetching, latest-wins semantics).
+ * Combines the useGitStatus mountedRef/reset pattern with on-demand fetching
+ * and latest-wins semantics.
  */
 
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";

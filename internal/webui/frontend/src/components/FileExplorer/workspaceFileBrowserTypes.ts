@@ -1,8 +1,4 @@
 import type { FileTreeInlineEdit, FileTreeNodeInfo } from "./FileTree";
-import type {
-  HistoryOpenDiffRequest,
-  HistoryOpenRevisionRequest,
-} from "./FileHistoryPanel";
 import type { RevisionViewState } from "./FileRevisionPane";
 import type { FileBrowserMode } from "./treeRoots";
 import type { CheckoutRef } from "@/utils/fileExplorerRefs";
@@ -65,11 +61,6 @@ export interface LineTarget {
   token: number;
 }
 
-export interface FileReloadRequest {
-  key: string | null;
-  token: number | undefined;
-}
-
 export interface DiffViewState {
   ref: CheckoutRef;
   path: string;
@@ -80,6 +71,4 @@ export interface DiffViewState {
   canOpenFile?: boolean | undefined;
 }
 
-export type OpenDiffRequest = HistoryOpenDiffRequest;
-export type OpenRevisionRequest = HistoryOpenRevisionRequest;
 export type { RevisionViewState };

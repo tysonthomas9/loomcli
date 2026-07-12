@@ -225,33 +225,6 @@ func resolveAgentWorktreeFromWSForRepo(ws *ops.WorkspaceData, name string, repo 
 	return newWorkspaceWorktree(name, wtPath, branch, repo), nil
 }
 
-// ResolveAgentWorktreeOrPrimary resolves an agent's worktree, falling back to
-// the workspace's primary repo worktree when the agent is a lead that has no
-// local worktree of its own. Non-lead agents get the same result (and errors)
-// as ResolveAgentWorktree. See ops.FileOps for the full contract.
-func (g *GitOpsImpl) ResolveAgentWorktreeOrPrimary(workspaceID, name string) (*ops.AgentWorktree, error) {
-	// Store-backed: load the workspace ONCE and try the agent's own worktree,
-	// then the lead-primary fallback, against the same snapshot — instead of
-	// loading the workspace a second time on the lead path.
-	if g != nil && g.store != nil {
-		ws, err := g.loadStoreWorkspace(context.Background(), workspaceID, name)
-		if err != nil {
-			return nil, err
-		}
-		wt, agentErr := resolveAgentWorktreeFromWS(ws, workspaceID, name)
-		if agentErr == nil {
-			return wt, nil
-		}
-		if primary, primaryErr := resolveLeadPrimaryFromWS(ws, workspaceID, name); primaryErr == nil {
-			return primary, nil
-		}
-		return nil, agentErr
-	}
-
-	// Non-store (resolver) path: no lead-primary fallback is available.
-	return g.ResolveAgentWorktree(workspaceID, name)
-}
-
 // ResolveWorkspaceRoot resolves the workspace root folder (ws.Path) as a browse
 // root for the read-only workspace file viewer. See ops.FileOps for the
 // contract. Store-backed deployments read the per-machine path from the local
@@ -373,47 +346,6 @@ func validateWorkspaceRoot(workspaceID, path string) (string, error) {
 		return "", fmt.Errorf("workspace %q root is not a directory: %s", workspaceID, path)
 	}
 	return path, nil
-}
-
-// resolveLeadPrimaryFromWS returns the primary (main) worktree of a lead agent's
-// primary repo from an already-loaded workspace, so the file viewer can browse
-// it when the lead has no agent worktree. Returns an error for non-leads or when
-// the primary worktree is unavailable, so callers fall back to the original
-// resolution error.
-func resolveLeadPrimaryFromWS(ws *ops.WorkspaceData, workspaceID, name string) (*ops.AgentWorktree, error) {
-	agent, err := findWorkspaceAgent(ws, workspaceID, name)
-	if err != nil {
-		return nil, err
-	}
-	if !isLeadRoleName(agent.RoleName) {
-		return nil, fmt.Errorf("agent %q is not a lead", name)
-	}
-	repo, err := selectAgentRepo(ws.Repos, *agent)
-	if err != nil {
-		return nil, err
-	}
-	if repo.Path == "" {
-		return nil, fmt.Errorf("primary repo %q has no local path on this machine", repo.Name)
-	}
-	if _, err := os.Stat(filepath.Join(repo.Path, ".git")); err != nil {
-		return nil, fmt.Errorf("primary worktree for repo %q not checked out: %w", repo.Name, err)
-	}
-	branch, err := cli.GetCurrentBranch(repo.Path)
-	if err != nil {
-		branch = "unknown"
-	}
-	return newWorkspaceWorktree(name, repo.Path, branch, repo), nil
-}
-
-// isLeadRoleName reports whether a role name denotes a lead/orchestrator agent.
-// Mirrors svcimpl.isLeadAgentRole without crossing package boundaries.
-func isLeadRoleName(roleName string) bool {
-	switch strings.ToLower(strings.TrimSpace(roleName)) {
-	case "lead", "orchestrator":
-		return true
-	default:
-		return false
-	}
 }
 
 func selectAgentRepo(repos []ops.WorkspaceRepo, agent ops.WorkspaceAgentInfo) (ops.WorkspaceRepo, error) {
@@ -777,14 +709,6 @@ func (g *GitOpsImpl) GitLogFile(ctx context.Context, worktreePath, path string, 
 func (g *GitOpsImpl) GitBlamePorcelain(ctx context.Context, worktreePath, path string) (ops.GitBoundedTextResult, error) {
 	result, err := git.NewGitInspector().Blame(ctx, worktreePath, path)
 	return ops.GitBoundedTextResult{Output: string(result.Output), Partial: result.Partial, LimitHit: result.LimitHit}, err
-}
-
-func (g *GitOpsImpl) ResolveLoomDataDir() (string, error) {
-	dir := config.GetConfigDir()
-	if strings.TrimSpace(dir) == "" {
-		return "", fmt.Errorf("cannot resolve loom data directory")
-	}
-	return filepath.Abs(dir)
 }
 
 func (g *GitOpsImpl) GitCurrentBranch(ctx context.Context, worktreePath string) (string, error) {

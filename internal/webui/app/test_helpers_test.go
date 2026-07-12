@@ -3,7 +3,6 @@ package app
 import (
 	"context"
 	"errors"
-	"os"
 	"testing"
 	"time"
 
@@ -167,10 +166,9 @@ func testWorktree() *ops.AgentWorktree {
 
 // mockFileOps implements ops.FileOps for testing.
 type mockFileOps struct {
-	resolveFunc          func(name string) (*ops.AgentWorktree, error)
-	resolveOrPrimaryFunc func(name string) (*ops.AgentWorktree, error)
-	resolveWsRootFunc    func() (string, error)
-	resolveWsDataFunc    func() (*ops.WorkspaceData, error)
+	resolveFunc       func(name string) (*ops.AgentWorktree, error)
+	resolveWsRootFunc func() (string, error)
+	resolveWsDataFunc func() (*ops.WorkspaceData, error)
 }
 
 func (m *mockFileOps) ResolveAgentWorktree(_, name string) (*ops.AgentWorktree, error) {
@@ -182,16 +180,6 @@ func (m *mockFileOps) ResolveAgentWorktree(_, name string) (*ops.AgentWorktree, 
 
 func (m *mockFileOps) ResolveAgentWorktreeForRepo(_, name, _ string) (*ops.AgentWorktree, error) {
 	return m.ResolveAgentWorktree("", name)
-}
-
-func (m *mockFileOps) ResolveAgentWorktreeOrPrimary(_, name string) (*ops.AgentWorktree, error) {
-	if m.resolveOrPrimaryFunc != nil {
-		return m.resolveOrPrimaryFunc(name)
-	}
-	if m.resolveFunc != nil {
-		return m.resolveFunc(name)
-	}
-	return nil, errors.New("not found")
 }
 
 func (m *mockFileOps) ResolveWorkspaceRoot(_ string) (string, error) {
@@ -226,10 +214,6 @@ func (m *mockFileOps) GitLogFile(_ context.Context, worktreePath, path string, l
 
 func (m *mockFileOps) GitBlamePorcelain(_ context.Context, worktreePath, path string) (ops.GitBoundedTextResult, error) {
 	return ops.GitBoundedTextResult{}, nil
-}
-
-func (m *mockFileOps) ResolveLoomDataDir() (string, error) {
-	return os.TempDir(), nil
 }
 
 func (m *mockFileOps) GitCurrentBranch(_ context.Context, _ string) (string, error) {

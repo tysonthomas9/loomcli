@@ -68,28 +68,3 @@ export function computeGitGutterLineMarks(
     .sort((a, b) => a[0] - b[0])
     .map(([line, kind]) => ({ line, kind }));
 }
-
-export function buildUnifiedPatchFromContents(
-  path: string,
-  before: string,
-  after: string,
-): string {
-  if (before === after) return "";
-  const beforeLines = before.split("\n");
-  const afterLines = after.split("\n");
-  const oldCount = beforeLines.length;
-  const newCount = afterLines.length;
-  const out = [
-    `diff --git a/${path} b/${path}`,
-    `--- a/${path}`,
-    `+++ b/${path}`,
-    `@@ -1,${oldCount} +1,${newCount} @@`,
-  ];
-  for (const line of beforeLines) {
-    out.push(`-${line}`);
-  }
-  for (const line of afterLines) {
-    out.push(`+${line}`);
-  }
-  return out.join("\n");
-}
