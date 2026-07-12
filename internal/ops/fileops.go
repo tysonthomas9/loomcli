@@ -49,6 +49,10 @@ type FileOps interface {
 	// repo/agent file-browser targets against workspace state.
 	ResolveWorkspaceData(workspaceID string) (*WorkspaceData, error)
 
+	// ResolveLoomDataDir resolves the local loom data/config directory using
+	// the established CLI resolver instead of callers reading env directly.
+	ResolveLoomDataDir() (string, error)
+
 	// GitStatusPorcelain returns git status --porcelain XY codes keyed by
 	// checkout-relative path. It is read-only decoration data for file-browser
 	// status and conflict badges.
