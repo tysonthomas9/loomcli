@@ -145,14 +145,24 @@ func EnsureBuiltinWorkflow(ctx context.Context, st store.Store, ws, name string)
 	sourceRef := "builtin://workflows/" + name + "/versions/" + digest
 	freshRunners := workflowRunnerNameSet(spec)
 	if driverID, err := ResolveDriverID(ctx, st, ws, name); err == nil {
-		current, bundleAvailable, manifest, err := activeBuiltInWorkflowState(ctx, st, ws, driverID)
+		_, bundleAvailable, manifest, err := activeBuiltInWorkflowState(ctx, st, ws, driverID)
 		if err != nil {
 			return err
 		}
-		// Refresh-on-deprecated (§4.6): a digest+bundle match still re-registers
-		// when the active manifest declares a deprecated/fabricated runner or a
-		// runner the freshly-derived set no longer contains.
-		if current == digest && bundleAvailable && !activeManifestRunnersAreStale(manifest, freshRunners) {
+		// Reuse an already-registered builtin when it still has a usable bundle on
+		// disk AND its manifest declares only current (non-deprecated) runners.
+		//
+		// We deliberately do NOT require the active version's source_digest to equal
+		// loom's embedded SourceDigest. A builtin staged out-of-band via `loom driver
+		// register` (the epic-runner smoke/e2e stack) records a different digest
+		// RECIPE for the SAME source, so demanding an exact match forced a source
+		// REBUILD of a perfectly good driver on every webui workflow-run. That rebuild
+		// fails closed in a `loom serve` process that has no bundling toolchain
+		// (@loom/sdk) on disk, surfacing as a misleading 500 "workflow not found" —
+		// while the CLI path (which resolves the same driver first) reused it and
+		// worked. Refresh-on-deprecated (§4.6) still fires: a stale/deprecated runner
+		// manifest, or a missing bundle, fails this check and re-registers.
+		if bundleAvailable && !activeManifestRunnersAreStale(manifest, freshRunners) {
 			return nil
 		}
 	} else if !errors.Is(err, domain.ErrNotFound) {
