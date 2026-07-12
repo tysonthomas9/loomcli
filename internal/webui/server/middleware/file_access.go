@@ -49,6 +49,10 @@ func FileAccess(cfg FileAccessConfig) Middleware {
 						writeJSONError(w, http.StatusUnauthorized, "authentication required")
 						return
 					}
+					if cfg.ResolveRole == nil {
+						writeJSONError(w, http.StatusForbidden, "file browser RBAC not configured")
+						return
+					}
 				}
 				writeJSONError(w, http.StatusForbidden, "forbidden")
 				return

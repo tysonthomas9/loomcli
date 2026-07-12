@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/tysonthomas9/loomcli/internal/webui/fileaccess"
@@ -33,6 +34,16 @@ func TestFileAccessRemoteRequiresIdentityAndWorkspaceResolver(t *testing.T) {
 				t.Fatalf("status = %d, want %d; body=%s", rr.Code, tc.want, rr.Body.String())
 			}
 		})
+	}
+}
+
+func TestFileAccessRemoteMissingResolverReportsRBACNotConfigured(t *testing.T) {
+	rr := serveFileAccess(t, FileAccessConfig{RemoteAuth: true}, http.MethodGet, "/api/workspaces/WS/files/tree", "api.example.com", "", "WS", &UserIdentity{UserID: "user-1"})
+	if rr.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403; body=%s", rr.Code, rr.Body.String())
+	}
+	if !strings.Contains(rr.Body.String(), "file browser RBAC not configured") {
+		t.Fatalf("body = %s, want RBAC diagnostic", rr.Body.String())
 	}
 }
 
@@ -125,6 +136,18 @@ func TestFileAccessLocalLoopbackPolicy(t *testing.T) {
 			rr := serveFileAccess(t, cfg, http.MethodPut, "/api/workspaces/WS/files", tc.host, tc.origin, "WS", nil)
 			if rr.Code != tc.want {
 				t.Fatalf("status=%d want=%d body=%s", rr.Code, tc.want, rr.Body.String())
+			}
+		})
+	}
+}
+
+func TestFileAccessLocalAllowsBundledSameOriginLoopback(t *testing.T) {
+	cfg := FileAccessConfig{FrontendOrigins: []string{"http://localhost:8080", "http://127.0.0.1:8080"}}
+	for _, host := range []string{"localhost:8080", "127.0.0.1:8080"} {
+		t.Run(host, func(t *testing.T) {
+			rr := serveFileAccess(t, cfg, http.MethodPut, "/api/workspaces/WS/files", host, "", "WS", nil)
+			if rr.Code != http.StatusNoContent {
+				t.Fatalf("status=%d want=204 body=%s", rr.Code, rr.Body.String())
 			}
 		})
 	}
