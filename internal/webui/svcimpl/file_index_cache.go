@@ -3,6 +3,7 @@ package svcimpl
 import (
 	"container/list"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -139,9 +140,9 @@ func cloneFileIndexResult(result *service.FileIndexResult) *service.FileIndexRes
 		return nil
 	}
 	return &service.FileIndexResult{
-		Paths:          append([]string(nil), result.Paths...),
+		Paths:          append(make([]string, 0, len(result.Paths)), result.Paths...),
 		Truncated:      result.Truncated,
-		PartialReasons: append([]service.FilePartialReason(nil), result.PartialReasons...),
+		PartialReasons: append(make([]service.FilePartialReason, 0, len(result.PartialReasons)), result.PartialReasons...),
 	}
 }
 
@@ -162,6 +163,10 @@ func fileIndexCacheKey(root string, allowSensitive bool) string {
 		return root + "\x00sensitive"
 	}
 	return root + "\x00filtered"
+}
+
+func fileIndexBuildKey(root string, allowSensitive bool, generation uint64) string {
+	return fileIndexCacheKey(root, allowSensitive) + "\x00generation:" + strconv.FormatUint(generation, 10)
 }
 
 func canonicalRootsOverlap(a, b string) bool {

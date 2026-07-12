@@ -534,6 +534,50 @@ func TestRootedFileStore_RemainsAnchoredWhenScopePathIsReplaced(t *testing.T) {
 	}
 }
 
+func TestWithGitCheckoutIdentityUsesHeldRootAfterPathReplacement(t *testing.T) {
+	parent := t.TempDir()
+	rootPath := filepath.Join(parent, "checkout")
+	if err := os.Mkdir(rootPath, 0755); err != nil {
+		t.Fatal(err)
+	}
+	root, err := openScopedRoot(rootPath)
+	if err != nil {
+		t.Fatalf("openScopedRoot: %v", err)
+	}
+	defer root.Close()
+
+	movedPath := filepath.Join(parent, "checkout-original")
+	if err := os.Rename(rootPath, movedPath); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(rootPath, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, err := withGitCheckoutIdentity(context.Background(), rootPath, root)
+	if err != nil {
+		t.Fatalf("withGitCheckoutIdentity: %v", err)
+	}
+	identity, ok := ops.GitWorktreeIdentityFromContext(ctx)
+	if !ok {
+		t.Fatal("git checkout identity missing from context")
+	}
+	heldInfo, err := root.store.root.Stat(".")
+	if err != nil {
+		t.Fatalf("stat held root: %v", err)
+	}
+	replacementInfo, err := os.Lstat(rootPath)
+	if err != nil {
+		t.Fatalf("stat replacement root: %v", err)
+	}
+	if !os.SameFile(identity.Info, heldInfo) {
+		t.Fatal("captured identity does not match the descriptor-held root")
+	}
+	if os.SameFile(identity.Info, replacementInfo) {
+		t.Fatal("captured identity followed the replacement checkout path")
+	}
+}
+
 func TestFileServiceImpl_ReadFileScoped_ReadsContent(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "f.txt"), []byte("body"), 0644); err != nil {
@@ -1383,6 +1427,64 @@ func TestFileServiceImpl_IndexAndSearch_ScopeTargeting(t *testing.T) {
 				t.Fatalf("search paths = %+v, missing scoped file", got)
 			}
 		})
+	}
+}
+
+func TestFileServiceImpl_RepoScopeUsesConfiguredRepoPath(t *testing.T) {
+	wsRoot := t.TempDir()
+	repoRoot := filepath.Join(wsRoot, "services", "api")
+	if err := os.MkdirAll(repoRoot, 0755); err != nil {
+		t.Fatal(err)
+	}
+	mustWrite(t, filepath.Join(repoRoot, "api.txt"), "api\n")
+	mustWrite(t, filepath.Join(wsRoot, "api", "wrong.txt"), "wrong\n")
+	svc := NewFileService(scopedMockFileOps{
+		wsRoot: wsRoot,
+		wsData: &ops.WorkspaceData{
+			ID:   "ws",
+			Path: wsRoot,
+			Repos: []ops.WorkspaceRepo{{
+				Name: "api",
+				Path: "services/api",
+			}},
+		},
+	})
+
+	index, err := svc.IndexFilesScoped(context.Background(), "ws", service.ScopeRepo, "api", "")
+	if err != nil {
+		t.Fatalf("IndexFilesScoped repo api: %v", err)
+	}
+	if !containsPath(index.Paths, "api.txt") || containsPath(index.Paths, "wrong.txt") {
+		t.Fatalf("repo index paths = %+v, want configured path only", index.Paths)
+	}
+}
+
+func TestFileServiceImpl_AgentScopeAllowsConfigBackedWorkspaceWithoutAgentRows(t *testing.T) {
+	wsRoot := t.TempDir()
+	agentRoot := filepath.Join(wsRoot, "worktrees", "repo-a", "agent-a")
+	if err := os.MkdirAll(agentRoot, 0755); err != nil {
+		t.Fatal(err)
+	}
+	mustWrite(t, filepath.Join(agentRoot, "agent.txt"), "agent\n")
+	svc := NewFileService(scopedMockFileOps{
+		wsRoot:    wsRoot,
+		agentRoot: agentRoot,
+		wsData: &ops.WorkspaceData{
+			ID:   "ws",
+			Path: wsRoot,
+			Repos: []ops.WorkspaceRepo{{
+				Name: "repo-a",
+				Path: filepath.Join(wsRoot, "repo-a"),
+			}},
+		},
+	})
+
+	index, err := svc.IndexFilesScoped(context.Background(), "ws", service.ScopeAgent, "agent-a", "")
+	if err != nil {
+		t.Fatalf("IndexFilesScoped agent-a: %v", err)
+	}
+	if !containsPath(index.Paths, "agent.txt") {
+		t.Fatalf("agent index paths = %+v, missing agent.txt", index.Paths)
 	}
 }
 

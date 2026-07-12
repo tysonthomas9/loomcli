@@ -194,28 +194,28 @@ func (s *fileServiceImpl) resolveRepoScopeRoot(wsID, target string) (string, err
 	if err != nil {
 		return "", err
 	}
-	repoName := repoTargetName(ws, target)
-	if repoName == "" {
+	repo, ok := repoTarget(ws, target)
+	if !ok {
 		return "", service.ErrNotFound(fmt.Sprintf("repo %q not found", target))
 	}
 	wsRoot, err := s.fileOps.ResolveWorkspaceRoot(wsID)
 	if err != nil {
 		return "", service.ErrNotFound(err.Error())
 	}
-	root := filepath.Join(wsRoot, repoName)
+	root := repoCheckoutPath(wsRoot, repo)
 	if err := webuilog.ValidatePathWithinDir(root, wsRoot); err != nil {
 		return "", service.ErrForbidden("repo root outside workspace")
 	}
 	return root, nil
 }
 
-func repoTargetName(ws *ops.WorkspaceData, target string) string {
+func repoTarget(ws *ops.WorkspaceData, target string) (ops.WorkspaceRepo, bool) {
 	for _, repo := range ws.Repos {
 		if repo.Name == target {
-			return repo.Name
+			return repo, true
 		}
 	}
-	return ""
+	return ops.WorkspaceRepo{}, false
 }
 
 func (s *fileServiceImpl) resolveAgentScopeRoot(wsID, target, repo string) (string, error) {
@@ -226,7 +226,7 @@ func (s *fileServiceImpl) resolveAgentScopeRoot(wsID, target, repo string) (stri
 	if err != nil {
 		return "", err
 	}
-	if !agentTargetExists(ws, target) {
+	if len(ws.Agents) > 0 && !agentTargetExists(ws, target) {
 		return "", service.ErrNotFound(fmt.Sprintf("agent %q not found", target))
 	}
 	var wt *ops.AgentWorktree

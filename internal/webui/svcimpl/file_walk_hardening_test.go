@@ -2,6 +2,7 @@ package svcimpl
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -283,6 +284,87 @@ func TestFileIndexCacheInvalidationFencesInflightStore(t *testing.T) {
 	cache.putIfGeneration("/workspace", true, &service.FileIndexResult{Paths: []string{"stale.txt"}}, generation)
 	if _, ok := cache.get("/workspace", true); ok {
 		t.Fatal("result from an invalidated in-flight build was cached")
+	}
+}
+
+func TestFileIndexSingleflightDoesNotReturnBuildInvalidatedMidFlight(t *testing.T) {
+	root := t.TempDir()
+	impl := scopedSvc(root).(*fileServiceImpl)
+	scoped, err := openScopedRoot(root)
+	if err != nil {
+		t.Fatalf("openScopedRoot: %v", err)
+	}
+	identity := scoped.identity
+	scoped.Close()
+
+	releaseFirst := make(chan struct{})
+	started := make(chan int, 2)
+	var starts atomic.Int32
+	impl.indexBuilder = func(context.Context, string, string, bool) (*service.FileIndexResult, error) {
+		start := int(starts.Add(1))
+		started <- start
+		if start == 1 {
+			<-releaseFirst
+			return &service.FileIndexResult{Paths: []string{"stale.txt"}}, nil
+		}
+		return &service.FileIndexResult{Paths: []string{"fresh.txt"}}, nil
+	}
+
+	firstResult := make(chan *service.FileIndexResult, 1)
+	firstErr := make(chan error, 1)
+	go func() {
+		res, err := impl.IndexFilesScoped(context.Background(), "ws", service.ScopeWorkspace, "", "")
+		firstResult <- res
+		firstErr <- err
+	}()
+	if got := <-started; got != 1 {
+		t.Fatalf("first build start = %d, want 1", got)
+	}
+	impl.invalidateIndex(identity)
+
+	secondResult := make(chan *service.FileIndexResult, 1)
+	secondErr := make(chan error, 1)
+	go func() {
+		res, err := impl.IndexFilesScoped(context.Background(), "ws", service.ScopeWorkspace, "", "")
+		secondResult <- res
+		secondErr <- err
+	}()
+	if got := <-started; got != 2 {
+		t.Fatalf("second build start = %d, want 2", got)
+	}
+	if err := <-secondErr; err != nil {
+		t.Fatalf("second index: %v", err)
+	}
+	if paths := (<-secondResult).Paths; !containsPath(paths, "fresh.txt") || containsPath(paths, "stale.txt") {
+		t.Fatalf("second paths = %+v, want fresh only", paths)
+	}
+
+	close(releaseFirst)
+	if err := <-firstErr; err != nil {
+		t.Fatalf("first index: %v", err)
+	}
+	if paths := (<-firstResult).Paths; !containsPath(paths, "fresh.txt") || containsPath(paths, "stale.txt") {
+		t.Fatalf("first paths = %+v, want fresh retry", paths)
+	}
+	if starts.Load() != 2 {
+		t.Fatalf("build starts = %d, want 2", starts.Load())
+	}
+}
+
+func TestFileIndexResultSerializesEmptySlicesAsArrays(t *testing.T) {
+	index, err := scopedSvc(t.TempDir()).IndexFilesScoped(context.Background(), "ws", service.ScopeWorkspace, "", "")
+	if err != nil {
+		t.Fatalf("IndexFilesScoped: %v", err)
+	}
+	data, err := json.Marshal(index)
+	if err != nil {
+		t.Fatalf("Marshal index: %v", err)
+	}
+	body := string(data)
+	for _, want := range []string{`"paths":[]`, `"partial_reasons":[]`} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("JSON = %s, missing %s", body, want)
+		}
 	}
 }
 
