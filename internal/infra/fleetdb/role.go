@@ -16,6 +16,7 @@ var _ store.RoleStore = (*roleStore)(nil)
 type roleWire struct {
 	WorkspaceKey   string    `json:"workspace_key"`
 	Name           string    `json:"name"`
+	Kind           string    `json:"kind,omitempty"`
 	Description    string    `json:"description,omitempty"`
 	PromptFile     string    `json:"prompt_file,omitempty"`
 	Model          string    `json:"model,omitempty"`
@@ -38,6 +39,7 @@ func (r roleWire) toDomain() *domain.Role {
 	return &domain.Role{
 		WorkspaceKey:   r.WorkspaceKey,
 		Name:           r.Name,
+		Kind:           domain.RoleKind(r.Kind),
 		Description:    r.Description,
 		PromptFile:     r.PromptFile,
 		Model:          r.Model,
@@ -60,6 +62,7 @@ func (r roleWire) toDomain() *domain.Role {
 func (s *roleStore) Create(ctx context.Context, in store.RoleCreate) (*domain.Role, error) {
 	body := struct {
 		Name           string   `json:"name"`
+		Kind           string   `json:"kind,omitempty"`
 		Description    string   `json:"description,omitempty"`
 		PromptFile     string   `json:"prompt_file,omitempty"`
 		Model          string   `json:"model,omitempty"`
@@ -76,6 +79,7 @@ func (s *roleStore) Create(ctx context.Context, in store.RoleCreate) (*domain.Ro
 		MaxBudgetUSD   *float64 `json:"max_budget_usd,omitempty"`
 	}{
 		Name:           in.Name,
+		Kind:           in.Kind,
 		Description:    in.Description,
 		PromptFile:     in.PromptFile,
 		Model:          in.Model,
@@ -129,6 +133,7 @@ func (s *roleStore) Update(ctx context.Context, ws, name string, patch store.Rol
 	// alone") into that wire shape.
 	body := struct {
 		Description       *string   `json:"description,omitempty"`
+		Kind              *string   `json:"kind,omitempty"`
 		PromptFile        *string   `json:"prompt_file,omitempty"`
 		Model             *string   `json:"model,omitempty"`
 		TaskFilter        *string   `json:"task_filter,omitempty"`
@@ -147,6 +152,7 @@ func (s *roleStore) Update(ctx context.Context, ws, name string, patch store.Rol
 		ClearMaxBudgetUSD bool      `json:"clear_max_budget_usd,omitempty"`
 	}{
 		Description:  patch.Description,
+		Kind:         patch.Kind,
 		PromptFile:   patch.PromptFile,
 		Model:        patch.Model,
 		TaskFilter:   patch.TaskFilter,

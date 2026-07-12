@@ -11,6 +11,7 @@ import (
 type RoleCreate struct {
 	WorkspaceKey   string
 	Name           string
+	Kind           string
 	Description    string
 	PromptFile     string
 	Model          string
@@ -29,6 +30,7 @@ type RoleCreate struct {
 
 // RoleUpdate is the partial-update payload for roles.
 type RoleUpdate struct {
+	Kind           *string
 	Description    *string
 	PromptFile     *string
 	Model          *string

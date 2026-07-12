@@ -7,7 +7,6 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
-	"strings"
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
@@ -67,6 +66,7 @@ type RestartPolicy struct {
 
 // RoleConfig defines an agent role (built-in like "plan"/"task", or custom).
 type RoleConfig struct {
+	Kind           string   `yaml:"kind,omitempty"`
 	Description    string   `yaml:"description,omitempty"`
 	PromptFile     string   `yaml:"prompt_file,omitempty"`
 	Model          string   `yaml:"model,omitempty"`
@@ -122,10 +122,26 @@ func (a AgentEntry) Equal(b AgentEntry) bool {
 // ShouldSupervise reports whether the local daemon should run this agent.
 // Empty desired_state preserves legacy behavior for existing agent definitions.
 func (a AgentEntry) ShouldSupervise() bool {
-	switch strings.ToLower(strings.TrimSpace(a.Role)) {
-	case "lead", "orchestrator":
+	if domain.IsInteractiveRoleName(a.Role) {
 		return false
 	}
+	return a.shouldSuperviseByDesiredState()
+}
+
+// ShouldSuperviseWithRoles reports whether the local daemon should run this
+// agent, using role kind metadata when the merged daemon config is available.
+func (a AgentEntry) ShouldSuperviseWithRoles(roles map[string]RoleConfig) bool {
+	if rc, ok := roles[a.Role]; ok {
+		role := &domain.Role{Kind: domain.RoleKind(rc.Kind)}
+		if domain.ResolveRoleKind(role, a.Role) == domain.RoleKindInteractive {
+			return false
+		}
+		return a.shouldSuperviseByDesiredState()
+	}
+	return a.ShouldSupervise()
+}
+
+func (a AgentEntry) shouldSuperviseByDesiredState() bool {
 	switch a.DesiredState {
 	case domain.AgentDesiredStopped, domain.AgentDesiredDraining:
 		return false
@@ -233,7 +249,7 @@ func loadDaemonConfigFromStore(ctx context.Context, st store.Store, wsKey string
 		dc.Agents = append(dc.Agents, agentEntryFromDomain(agent))
 	}
 
-	if err := validateAgents(dc.Agents, dc.Daemon.MaxAgents); err != nil {
+	if err := validateAgents(dc.Agents, dc.Daemon.MaxAgents, dc.Roles); err != nil {
 		return nil, err
 	}
 	if err := ValidateAgentRepos(dc.Agents); err != nil {
@@ -281,6 +297,7 @@ func roleConfigFromDomain(r *domain.Role) RoleConfig {
 		return RoleConfig{}
 	}
 	return RoleConfig{
+		Kind:           string(r.Kind),
 		Description:    r.Description,
 		PromptFile:     r.PromptFile,
 		Model:          r.Model,
@@ -358,7 +375,7 @@ func cloneFloatPtr(v *float64) *float64 {
 }
 
 // validateAgents checks that agent entries and max_agents limits are valid.
-func validateAgents(agents []AgentEntry, maxAgents *int) error {
+func validateAgents(agents []AgentEntry, maxAgents *int, roles map[string]RoleConfig) error {
 	for i, a := range agents {
 		if a.Worktree == "" {
 			return fmt.Errorf("agent[%d]: worktree is required", i)
@@ -377,7 +394,7 @@ func validateAgents(agents []AgentEntry, maxAgents *int) error {
 	}
 	runnable := 0
 	for _, a := range agents {
-		if a.ShouldSupervise() {
+		if a.ShouldSuperviseWithRoles(roles) {
 			runnable++
 		}
 	}

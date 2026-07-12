@@ -4653,6 +4653,9 @@ components:
           type: integer
         role:
           type: string
+        role_kind:
+          type: string
+          enum: [interactive, worker]
         repo:
           type: string
         workspace:

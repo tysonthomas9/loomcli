@@ -1,6 +1,16 @@
 package domain
 
-import "time"
+import (
+	"strings"
+	"time"
+)
+
+type RoleKind string
+
+const (
+	RoleKindInteractive RoleKind = "interactive"
+	RoleKindWorker      RoleKind = "worker"
+)
 
 // Role is the configuration shared by all Agents that take this role —
 // prompt template, AI backend, tool allowlist, concurrency cap, etc.
@@ -9,6 +19,7 @@ import "time"
 type Role struct {
 	WorkspaceKey   string   `json:"workspace_key"`
 	Name           string   `json:"name"`
+	Kind           RoleKind `json:"kind,omitempty"`
 	Description    string   `json:"description,omitempty"`
 	PromptFile     string   `json:"prompt_file,omitempty"`
 	Model          string   `json:"model,omitempty"`
@@ -26,4 +37,30 @@ type Role struct {
 
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
+}
+
+// ResolveRoleKind returns the effective kind for a role. Explicit Kind wins;
+// roles with no kind fall back to the legacy name convention where
+// "lead"/"orchestrator" are interactive and everything else is a worker.
+func ResolveRoleKind(role *Role, roleName string) RoleKind {
+	if role != nil {
+		if kind := RoleKind(strings.ToLower(strings.TrimSpace(string(role.Kind)))); kind != "" {
+			return kind
+		}
+	}
+	if IsInteractiveRoleName(roleName) {
+		return RoleKindInteractive
+	}
+	return RoleKindWorker
+}
+
+// IsInteractiveRoleName reports whether a role name uses the legacy
+// interactive-agent naming convention.
+func IsInteractiveRoleName(name string) bool {
+	switch strings.ToLower(strings.TrimSpace(name)) {
+	case "lead", "orchestrator":
+		return true
+	default:
+		return false
+	}
 }

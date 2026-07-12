@@ -392,6 +392,24 @@ func (e MessageResponseSuccess) Valid() bool {
 	}
 }
 
+// Defines values for MonitorAgentStatusRoleKind.
+const (
+	Interactive MonitorAgentStatusRoleKind = "interactive"
+	Worker      MonitorAgentStatusRoleKind = "worker"
+)
+
+// Valid indicates whether the value is a known member of the MonitorAgentStatusRoleKind enum.
+func (e MonitorAgentStatusRoleKind) Valid() bool {
+	switch e {
+	case Interactive:
+		return true
+	case Worker:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for MonitorWorkspaceInfoMode.
 const (
 	MonitorWorkspaceInfoModeWorkspace MonitorWorkspaceInfoMode = "workspace"
@@ -1403,9 +1421,10 @@ type MonitorAgentStatus struct {
 	OrchestratorSessionId *string `json:"orchestrator_session_id,omitempty"`
 
 	// Parent Active epic assignment for lead/workers.
-	Parent *string `json:"parent,omitempty"`
-	Repo   *string `json:"repo,omitempty"`
-	Role   *string `json:"role,omitempty"`
+	Parent   *string                     `json:"parent,omitempty"`
+	Repo     *string                     `json:"repo,omitempty"`
+	Role     *string                     `json:"role,omitempty"`
+	RoleKind *MonitorAgentStatusRoleKind `json:"role_kind,omitempty"`
 
 	// SessionId Latest control-plane session associated with this agent.
 	SessionId *string `json:"session_id,omitempty"`
@@ -1415,6 +1434,9 @@ type MonitorAgentStatus struct {
 	TaskId    *string `json:"task_id,omitempty"`
 	Workspace string  `json:"workspace"`
 }
+
+// MonitorAgentStatusRoleKind defines model for MonitorAgentStatus.RoleKind.
+type MonitorAgentStatusRoleKind string
 
 // MonitorAgentsResponse defines model for MonitorAgentsResponse.
 type MonitorAgentsResponse struct {
