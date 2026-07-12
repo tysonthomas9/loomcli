@@ -41,7 +41,12 @@ func TestBuildOneshotCommand_FullScript(t *testing.T) {
 		"export LOOM_FLEET_DB_API_KEY='sk-dev'\n",
 		"export LOOM_FLEET_DB_ACTOR='sandbox:ws-123:falcon:1'\n",
 		"export LOOM_WORKSPACE='ws-123'\n",
-		"/sandbox/loom 'task' 'worktrees/falcon' --backend 'claude' --parent 'epic-1'\n",
+		// Agent identity carried explicitly: the in-container target is the clone
+		// path, so LOOM_AGENT_NAME preserves the name for locks/prompts/events.
+		"export LOOM_AGENT_NAME='falcon'\n",
+		// Absolute clone path, NOT worktrees/<name>: the relative form forces the
+		// admin workspace route, which the scoped developer key is denied.
+		"/sandbox/loom 'task' '/sandbox/repo' --backend 'claude' --parent 'epic-1'\n",
 		"git diff --cached --quiet || git commit -m 'sandbox agent work [feature/x]'\n",
 		"git push origin 'feature/x'\n",
 	}
@@ -65,8 +70,11 @@ func TestBuildOneshotCommand_NoBackendNoParent(t *testing.T) {
 	cfg := SandboxOneshotConfig{AgentType: "plan", AgentName: "nova"}
 	script := buildOneshotCommand("main", cfg, "git@x:o/r.git", sandbox.Config{})
 
-	if !strings.Contains(script, "/sandbox/loom 'plan' 'worktrees/nova'\n") {
+	if !strings.Contains(script, "/sandbox/loom 'plan' '/sandbox/repo'\n") {
 		t.Errorf("expected bare loom invocation without flags\n%s", script)
+	}
+	if !strings.Contains(script, "export LOOM_AGENT_NAME='nova'\n") {
+		t.Errorf("expected LOOM_AGENT_NAME export for agent identity\n%s", script)
 	}
 	if strings.Contains(script, "--backend") {
 		t.Error("expected no --backend when backend override empty")

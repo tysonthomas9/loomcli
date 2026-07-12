@@ -41,43 +41,53 @@ func handleSandboxMode(agentType, agentName, worktreePath, parentID string, auto
 		fmt.Fprintf(os.Stderr, "Error: --sandbox and --auto are mutually exclusive\n")
 		cli.ExitWithFlush(1)
 	}
-	if err := runSandboxOneshot(SandboxOneshotConfig{
+	exitCode, err := runSandboxOneshot(SandboxOneshotConfig{
 		AgentType:    agentType,
 		AgentName:    agentName,
 		WorktreePath: worktreePath,
 		ParentID:     parentID,
-	}); err != nil {
+	})
+	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		cli.ExitWithFlush(1)
+	}
+	// ExitWithFlush (which calls os.Exit) runs only here, AFTER runSandboxOneshot
+	// has returned and its deferred cleanup — credential revoke, then sandbox
+	// delete — has completed. Calling it from inside runSandboxOneshot would skip
+	// those defers and leak a live scoped credential + a running sandbox.
+	if exitCode != 0 {
+		cli.ExitWithFlush(exitCode)
 	}
 }
 
 // runSandboxOneshot runs a single agent invocation inside an OpenShell sandbox:
 // push the branch, create the sandbox (cloning the branch and running loom
 // inside), wait for completion, fast-forward the results back, and clean up.
-func runSandboxOneshot(cfg SandboxOneshotConfig) error {
+// It returns the in-container agent's exit code and never calls os.Exit itself,
+// so its deferred cleanup always runs — the caller decides how to exit.
+func runSandboxOneshot(cfg SandboxOneshotConfig) (int, error) {
 	branch, err := cli.GetCurrentBranch(cfg.WorktreePath)
 	if err != nil {
-		return fmt.Errorf("getting current branch: %w", err)
+		return 0, fmt.Errorf("getting current branch: %w", err)
 	}
 	if branch == "" {
-		return fmt.Errorf("detached HEAD in %s; --sandbox requires a named branch", cfg.WorktreePath)
+		return 0, fmt.Errorf("detached HEAD in %s; --sandbox requires a named branch", cfg.WorktreePath)
 	}
 
 	projectDir, err := resolveSandboxProjectDir(cfg.WorktreePath)
 	if err != nil {
-		return fmt.Errorf("resolving project directory: %w", err)
+		return 0, fmt.Errorf("resolving project directory: %w", err)
 	}
 
 	repoURL := resolveSandboxRepoURL(projectDir)
 	if repoURL == "" {
-		return fmt.Errorf("could not determine git remote URL for %s", projectDir)
+		return 0, fmt.Errorf("could not determine git remote URL for %s", projectDir)
 	}
 
 	// v5 keeps task state in FleetDB, not in the repo, so the agent inside the
 	// sandbox must reach the FleetDB HTTP API. Fail fast if we can't.
 	if err := applySandboxFleetConfig(&cfg); err != nil {
-		return err
+		return 0, err
 	}
 
 	// Mint a short-TTL, workspace-scoped developer credential for this run (when
@@ -85,33 +95,36 @@ func runSandboxOneshot(cfg SandboxOneshotConfig) error {
 	// leaves no live credential.
 	revokeCred, err := provisionSandboxCredential(context.Background(), &cfg)
 	if err != nil {
-		return err
-	}
-	defer revokeCred()
-
-	if err := pushSandboxBranch(cfg.WorktreePath, branch); err != nil {
-		return err
+		return 0, err
 	}
 
 	sandboxName := fmt.Sprintf("loom-%s-%x", cfg.AgentName, time.Now().UnixMilli())
+	// Single teardown for every exit path (success, agent failure, or a Go error
+	// below): revoke the credential FIRST, then delete the sandbox — the same
+	// order the supervised path uses. Registered before create so a failure in
+	// create/upload/exec still tears down and revokes.
 	defer func() {
+		revokeCred()
 		fmt.Printf("[sandbox] Cleaning up sandbox %s...\n", sandboxName)
 		sandbox.DeleteSandbox(sandboxName)
 	}()
-	sandbox.DeleteSandbox(sandboxName) // best-effort cleanup of a stale sandbox from a prior crash
+
+	if err := pushSandboxBranch(cfg.WorktreePath, branch); err != nil {
+		return 0, err
+	}
 
 	fmt.Printf("[sandbox] Creating sandbox %s...\n", sandboxName)
 	exitCode, err := runSandboxAgent(sandboxName, sandbox.DefaultConfig(), branch, cfg, sandboxCloneURL(repoURL))
 	if err != nil {
-		return err
+		return 0, err
 	}
 
+	// Merge whatever the run pushed. On failure the bootstrap's push (its last
+	// step) never ran, so this is a harmless no-op fetch; on success it
+	// fast-forwards the agent's work into the host worktree.
 	mergeSandboxResults(projectDir, cfg.WorktreePath, branch)
 
-	if exitCode != 0 {
-		cli.ExitWithFlush(exitCode)
-	}
-	return nil
+	return exitCode, nil
 }
 
 // pushSandboxBranch pushes the worktree's branch to origin so the sandbox can
@@ -339,9 +352,22 @@ func buildOneshotCommand(branch string, oneshot SandboxOneshotConfig, repoURL st
 	if oneshot.WorkspaceID != "" {
 		sb.WriteString("export LOOM_WORKSPACE=" + sandbox.ShellQuote(oneshot.WorkspaceID) + "\n")
 	}
+	// The in-container target is the absolute clone path (below), so the agent
+	// name would otherwise degrade to filepath.Base("/sandbox/repo") = "repo".
+	// Carry the real name via LOOM_AGENT_NAME (used for locks, prompts, sessions,
+	// and event attribution); it sits below LOOM_FLEET_DB_ACTOR in actor
+	// precedence, so it never overrides the scoped credential's identity.
+	if oneshot.AgentName != "" {
+		sb.WriteString("export LOOM_AGENT_NAME=" + sandbox.ShellQuote(oneshot.AgentName) + "\n")
+	}
 
+	// Run loom against the absolute clone path, NOT a relative "worktrees/<name>":
+	// a relative target forces host-side workspace resolution (GET
+	// /api/v1/admin/workspaces), which the scoped developer key is forbidden to
+	// call (403). The absolute-path branch of ResolveAgentTarget short-circuits
+	// before any FleetDB call and uses the repo actually cloned into the sandbox.
 	loomCmd := fmt.Sprintf("%s %s %s", cfg.LoomCmd(),
-		sandbox.ShellQuote(oneshot.AgentType), sandbox.ShellQuote("worktrees/"+oneshot.AgentName))
+		sandbox.ShellQuote(oneshot.AgentType), sandbox.ShellQuote("/sandbox/repo"))
 	if cfg.Backend != "" {
 		loomCmd += " --backend " + sandbox.ShellQuote(cfg.Backend)
 	}

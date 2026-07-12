@@ -91,13 +91,17 @@ func TestSandboxOneshot_RoundTrip(t *testing.T) {
 	t.Setenv("LOOM_SANDBOX_LOOM_BIN", loomLinux)
 
 	// Run the real one-shot flow.
-	if err := runSandboxOneshot(SandboxOneshotConfig{
+	exitCode, err := runSandboxOneshot(SandboxOneshotConfig{
 		AgentType:    "task",
 		AgentName:    "falcon",
 		WorktreePath: proj,
 		ParentID:     "epic-9",
-	}); err != nil {
+	})
+	if err != nil {
 		t.Fatalf("runSandboxOneshot: %v", err)
+	}
+	if exitCode != 0 {
+		t.Fatalf("runSandboxOneshot exit code = %d, want 0", exitCode)
 	}
 
 	// 1. The sandbox's pushed work must have been fast-forwarded into the worktree.
