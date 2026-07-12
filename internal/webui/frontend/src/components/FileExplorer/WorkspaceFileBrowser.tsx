@@ -380,6 +380,20 @@ function FileBrowserInner({
     groups[0]?.tabs.find((tab) => tabIdentityKey(tab) === groups[0]?.active) ??
     null;
   const workspaceRef = useMemo<CheckoutRef>(() => ({ scope: "workspace" }), []);
+  const searchScopeRef = useMemo<CheckoutRef>(() => {
+    if (mode !== "agent") return workspaceRef;
+    const firstAgentRef = quickOpenIndexRefs[0];
+    if (quickOpenIndexRefs.length === 1 && firstAgentRef) {
+      return firstAgentRef;
+    }
+    if (
+      activeTab?.ref.scope === "agent" &&
+      quickOpenIndexRefs.some((ref) => sameCheckoutRef(ref, activeTab.ref))
+    ) {
+      return activeTab.ref;
+    }
+    return firstAgentRef ?? { scope: "agent", target: agentName ?? "" };
+  }, [activeTab, agentName, mode, quickOpenIndexRefs, workspaceRef]);
 
   useEffect(() => {
     for (const group of visibleChangeGroups) {
@@ -623,6 +637,21 @@ function FileBrowserInner({
     }));
   }, []);
 
+  const discardTabDraft = useCallback(
+    (tab: FileBrowserTab | undefined, key: string) => {
+      const state = store.getState();
+      state.setDirty(key, false);
+      if (!tab) return;
+      state.setDirty(tabIdentityKey(tab), false);
+      documentRegistry.discard({
+        workspaceId,
+        ...tab.ref,
+        path: tab.path,
+      });
+    },
+    [documentRegistry, store, workspaceId],
+  );
+
   const discardActiveIfNeeded = useCallback(
     (groupIndex: number, nextKey?: string): boolean => {
       const state = store.getState();
@@ -633,11 +662,10 @@ function FileBrowserInner({
       );
       const ok = window.confirm(`Discard unsaved changes in ${current}?`);
       if (!ok) return false;
-      state.setDirty(current, false);
-      if (tab) state.setDirty(tabIdentityKey(tab), false);
+      discardTabDraft(tab, current);
       return true;
     },
-    [store],
+    [discardTabDraft, store],
   );
 
   const openFile = useCallback(
@@ -700,13 +728,13 @@ function FileBrowserInner({
         const label = tab ? checkoutTitle(tab.ref, tab.path) : key;
         const ok = window.confirm(`Discard unsaved changes in ${label}?`);
         if (!ok) return;
-        store.getState().setDirty(key, false);
+        discardTabDraft(tab, key);
       }
       setDiffViews((prev) => ({ ...prev, [groupIndex]: null }));
       setRevisionViews((prev) => ({ ...prev, [groupIndex]: null }));
       store.getState().closeTab(groupIndex, key);
     },
-    [store],
+    [discardTabDraft, store],
   );
 
   const splitRight = useCallback(
@@ -722,11 +750,11 @@ function FileBrowserInner({
           `Discard unsaved changes in ${checkoutTitle(tab.ref, tab.path)} before splitting?`,
         );
         if (!ok) return;
-        state.setDirty(key, false);
+        discardTabDraft(tab, key);
       }
       state.splitRight(tab);
     },
-    [store],
+    [discardTabDraft, store],
   );
 
   const handleSaved = useCallback(
@@ -1195,6 +1223,7 @@ function FileBrowserInner({
       const move = resolveMoveToTarget(node.path, targetFolderPath);
       if (!move) return;
       let discardedDestinationTabs: string[] = [];
+      let overwroteDestination = false;
       try {
         const source = await statScopedPath(workspaceId, ref, move.from);
         await moveScopedPath(
@@ -1245,6 +1274,7 @@ function FileBrowserInner({
             source.version,
             destination.version,
           );
+          overwroteDestination = true;
         } catch (overwriteErr) {
           showToast(
             overwriteErr instanceof Error
@@ -1258,6 +1288,9 @@ function FileBrowserInner({
 
       for (const key of discardedDestinationTabs) {
         store.getState().setDirty(key, false);
+      }
+      if (overwroteDestination) {
+        documentRegistry.resetPathPrefix(workspaceId, ref, move.to);
       }
       documentRegistry.retargetPathPrefix(workspaceId, ref, move.from, move.to);
       store.getState().retargetPathPrefix(ref, move.from, move.to);
@@ -1323,23 +1356,23 @@ function FileBrowserInner({
         {searchPanelOpen ? (
           <FileSearchPanel
             workspaceId={workspaceId}
-            scopeRef={workspaceRef}
+            scopeRef={searchScopeRef}
             canWrite={canWrite}
             onOpenResult={(path, line) =>
-              openFile(workspaceRef, path, undefined, line)
+              openFile(searchScopeRef, path, undefined, line)
             }
             onFilesChanged={(paths, complete) => {
               for (const path of paths) {
                 void documentRegistry.refresh({
                   workspaceId,
-                  ...workspaceRef,
+                  ...searchScopeRef,
                   path,
                 });
               }
               markIndexStale();
               void refreshCheckouts();
               void refreshGitStatus();
-              refreshParents(workspaceRef, ...paths);
+              refreshParents(searchScopeRef, ...paths);
               if (complete) showToast("Replace applied", { type: "success" });
             }}
             onClose={() => setSearchPanelOpen(false)}

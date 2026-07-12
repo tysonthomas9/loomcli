@@ -84,6 +84,7 @@ const mocks = vi.hoisted(() => ({
   registryDirtyKeys: new Set<string>(),
   registryListeners: new Set<() => void>(),
   registryRevision: 0,
+  registryDiscard: vi.fn(),
   registryRefresh: vi.fn(() => Promise.resolve()),
   registryRetarget: vi.fn(),
   registryReset: vi.fn(),
@@ -252,6 +253,7 @@ vi.mock("@/hooks", async () => {
       ),
     }),
     dirtyPathsForPrefix: vi.fn(() => mocks.registryDirtyPaths),
+    discard: mocks.registryDiscard,
     refresh: mocks.registryRefresh,
     resetPathPrefix: mocks.registryReset,
     retargetPathPrefix: mocks.registryRetarget,
@@ -692,6 +694,27 @@ describe("WorkspaceFileBrowser", () => {
     confirmSpy.mockRestore();
   });
 
+  it("discards registry drafts when a dirty tab switch is confirmed", async () => {
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
+    render(<WorkspaceFileBrowser mode="workspace" />);
+    await expandWorkspaceFiles();
+
+    fireEvent.click(screen.getByLabelText("main.ts"));
+    const editor = await screen.findByTestId("mock-codemirror");
+    fireEvent.change(editor, { target: { value: "changed\n" } });
+    fireEvent.click(screen.getByLabelText("symbols.ts"));
+
+    await waitFor(() =>
+      expect(mocks.registryDiscard).toHaveBeenCalledWith({
+        workspaceId: "ws-1",
+        scope: "workspace",
+        path: "main.ts",
+      }),
+    );
+    expect(await screen.findByDisplayValue(/function jumpTarget/)).toBeVisible();
+    confirm.mockRestore();
+  });
+
   it("agent mode renders only the selected agent roots and scopes Changes", async () => {
     mocks.listFileCheckouts.mockResolvedValue({
       checkouts: [
@@ -759,6 +782,61 @@ describe("WorkspaceFileBrowser", () => {
     expect(mocks.indexScopedFiles).not.toHaveBeenCalledWith("ws-1", {
       scope: "workspace",
     });
+  });
+
+  it("agent mode search and replace uses the selected agent checkout", async () => {
+    const agentRef = { scope: "agent", target: "atlas", repo: "loomcli" };
+    mocks.writeScopedFile.mockResolvedValue({ success: true, version: "v2" });
+    render(<WorkspaceFileBrowser mode="agent" agentName="atlas" />);
+
+    fireEvent.keyDown(window, { key: "f", metaKey: true, shiftKey: true });
+    fireEvent.change(screen.getByLabelText("Search files"), {
+      target: { value: "console" },
+    });
+    fireEvent.change(screen.getByLabelText("Replace with"), {
+      target: { value: "alert" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Search" }));
+
+    await screen.findByText("console.log('hi')");
+    await waitFor(() =>
+      expect(mocks.searchScopedFiles).toHaveBeenCalledWith(
+        "ws-1",
+        agentRef,
+        expect.objectContaining({ query: "console" }),
+      ),
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Preview" }));
+    await screen.findByText(/- console\.log/);
+    expect(mocks.readScopedFile).toHaveBeenCalledWith(
+      "ws-1",
+      agentRef,
+      "main.ts",
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Apply" }));
+    await waitFor(() =>
+      expect(mocks.writeScopedFile).toHaveBeenCalledWith(
+        "ws-1",
+        agentRef,
+        "main.ts",
+        "alert.log('hi')\n",
+        { ifMatch: "version:main.ts" },
+      ),
+    );
+    await waitFor(() =>
+      expect(mocks.registryRefresh).toHaveBeenCalledWith({
+        workspaceId: "ws-1",
+        ...agentRef,
+        path: "main.ts",
+      }),
+    );
+    expect(mocks.searchScopedFiles).not.toHaveBeenCalledWith(
+      "ws-1",
+      { scope: "workspace" },
+      expect.anything(),
+    );
   });
 
   it("keeps open file tabs scoped to the selected agent", async () => {
@@ -1750,6 +1828,43 @@ describe("WorkspaceFileBrowser", () => {
     expect(mocks.moveScopedPath).toHaveBeenCalledTimes(1);
     expect(mocks.registryRetarget).not.toHaveBeenCalled();
     expect(dialog).toBeVisible();
+  });
+
+  it("resets discarded destination registry drafts before retargeting an overwrite move", async () => {
+    mocks.registryDirtyPaths = ["src/main.ts"];
+    mocks.moveScopedPath
+      .mockRejectedValueOnce(
+        Object.assign(new Error("destination exists"), { status: 409 }),
+      )
+      .mockResolvedValueOnce(undefined);
+    const confirm = vi
+      .spyOn(window, "confirm")
+      .mockReturnValueOnce(true)
+      .mockReturnValueOnce(true);
+    render(<WorkspaceFileBrowser mode="workspace" />);
+    await expandWorkspaceFiles();
+    fireEvent.contextMenu(screen.getByLabelText("main.ts"));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Move to..." }));
+    const dialog = await screen.findByRole("dialog", { name: /move to/i });
+    fireEvent.click(within(dialog).getByRole("button", { name: "src" }));
+    fireEvent.click(within(dialog).getByRole("button", { name: "Move" }));
+
+    await waitFor(() => expect(mocks.moveScopedPath).toHaveBeenCalledTimes(2));
+    expect(mocks.registryReset).toHaveBeenCalledWith(
+      "ws-1",
+      { scope: "workspace" },
+      "src/main.ts",
+    );
+    expect(mocks.registryRetarget).toHaveBeenCalledWith(
+      "ws-1",
+      { scope: "workspace" },
+      "main.ts",
+      "src/main.ts",
+    );
+    expect(
+      mocks.registryReset.mock.invocationCallOrder[0],
+    ).toBeLessThan(mocks.registryRetarget.mock.invocationCallOrder[0]);
+    confirm.mockRestore();
   });
 
   it("duplicates only complete text with deterministic create-only names", async () => {
