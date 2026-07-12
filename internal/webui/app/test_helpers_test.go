@@ -216,6 +216,10 @@ func (m *mockFileOps) GitBlamePorcelain(_ context.Context, worktreePath, path st
 	return ops.GitBoundedTextResult{}, nil
 }
 
+func (m *mockFileOps) ResolveLoomDataDir() (string, error) {
+	return "", errors.New("loom data directory not configured")
+}
+
 func (m *mockFileOps) GitCurrentBranch(_ context.Context, _ string) (string, error) {
 	return "main", nil
 }

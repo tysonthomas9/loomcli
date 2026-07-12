@@ -711,6 +711,14 @@ func (g *GitOpsImpl) GitBlamePorcelain(ctx context.Context, worktreePath, path s
 	return ops.GitBoundedTextResult{Output: string(result.Output), Partial: result.Partial, LimitHit: result.LimitHit}, err
 }
 
+func (g *GitOpsImpl) ResolveLoomDataDir() (string, error) {
+	dir := config.GetConfigDir()
+	if strings.TrimSpace(dir) == "" {
+		return "", fmt.Errorf("cannot resolve loom data directory")
+	}
+	return filepath.Abs(dir)
+}
+
 func (g *GitOpsImpl) GitCurrentBranch(ctx context.Context, worktreePath string) (string, error) {
 	return git.NewGitInspector().CurrentBranch(ctx, worktreePath)
 }
