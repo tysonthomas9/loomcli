@@ -47,7 +47,8 @@ Prompt values can be:
 ## Other Overloaded Names
 
 - **fleet / fleet-db**: The control-plane data service that stores Loom state.
-- **flue**: Loom workflow bundle/runtime code, not a generic glue layer.
+- **flue**: The agent harness framework Loom uses to build and run TypeScript
+  agents and workflows.
 - **aether**: The Loom UI/design system terminology used by the web UI.
 - **codex / claude**: AI backends or agent CLIs used by Loom, depending on
   context.
