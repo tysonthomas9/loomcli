@@ -24,8 +24,8 @@ services:
       LOOM_LOCAL_MODE_BACKEND: codex
       LOOM_LOCAL_MODE_PLAN_AGENT: codex-planner
       LOOM_LOCAL_MODE_CODE_AGENT: codex-coder
-      LOOM_LOCAL_MODE_PLAN_TASK_ID: LOCALMODE-1
-      LOOM_LOCAL_MODE_CODE_TASK_ID: LOCALMODE-2
+      LOOM_LOCAL_MODE_PLAN_TASK_ID: LOCALMODE-2
+      LOOM_LOCAL_MODE_CODE_TASK_ID: LOCALMODE-3
       # Phase U: TS leaf, routed to the Daytona runner.
       LOOM_DAEMON_LEAF: "${LOOM_DAEMON_LEAF:-ts}"
       LOOM_DAEMON_LEAF_RUNNER: "daytona-task-runner"

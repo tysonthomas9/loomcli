@@ -29,7 +29,7 @@ the right.
 
 | Decision | Product rule |
 |---|---|
-| Lead agent is first-class | A lead/interactive agent is represented by an agent row whose role has `kind=interactive` or, for legacy rows, role name `lead`/`orchestrator`. |
+| Lead agent is first-class | A lead agent is represented by an agent row with role name `lead`/`orchestrator`; that role resolves to `kind=interactive`. Other interactive roles are terminal agents but do not implicitly gain epic ownership. |
 | Lead is terminal-backed | The lead must have a resumable terminal/session because users interact with the lead through the terminal. |
 | Active epic uses existing field | `agent.parent = <epic_id>` is the active epic assignment for the lead. |
 | One epic per lead | A lead cannot run two different epics at the same time. |

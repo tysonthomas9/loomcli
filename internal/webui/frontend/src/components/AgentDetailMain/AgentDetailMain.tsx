@@ -34,7 +34,7 @@ import type {
 import { useAgentStoreInstance } from "@/hooks";
 import { wsUrl } from "@/hooks/api";
 import { type LoomAgentStatus, parseLoomStatus } from "@/types";
-import { isInteractiveAgent } from "@/utils/agentRole";
+import { isInteractiveAgent, isLeadRole } from "@/utils/agentRole";
 import { getCompactAvatarInitials } from "@/utils/compactAvatarInitials";
 import { getAvatarColor, shouldUseWhiteText } from "@/utils/colorUtils";
 
@@ -409,7 +409,7 @@ function Header({
   const branch = displayBranch(agent?.branch);
   const role = (agent?.role ?? "").trim();
   const assignedEpic = (agent?.parent ?? "").trim();
-  const isLead = agent != null && isInteractiveAgent(agent);
+  const isLead = isLeadRole(agent?.role);
   const deliveryLabel = isLead
     ? leadDeliveryStateLabel(agent?.delivery_state)
     : "";

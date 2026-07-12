@@ -373,7 +373,7 @@ describe("CreateAgentModal: submission", () => {
       kind: "interactive",
       prompt_file: "builtin:pr-review",
       cross_repo: false,
-      repos: [],
+      repos: ["alpha"],
     });
   });
 
@@ -396,7 +396,7 @@ describe("CreateAgentModal: submission", () => {
       kind: "interactive",
       prompt: "Review literally: {{ marker }}",
       cross_repo: false,
-      repos: [],
+      repos: ["alpha"],
     });
     expect(mockCreateAgent.mock.calls[0][0]).not.toHaveProperty("prompt_file");
   });

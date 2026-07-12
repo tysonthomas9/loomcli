@@ -13,7 +13,9 @@ not the video product or Java Project Loom.
 - **Agent**: A named assignment that uses a role. Worker agents are supervised
   by daemon/runtime loops; interactive agents are launched in terminal tabs.
 - **Lead**: The default interactive role and terminal agent. It is not the only
-  possible interactive agent.
+  possible interactive agent. Lead/orchestrator role names additionally opt
+  into epic ownership and assignment delivery; `kind=interactive` alone does
+  not grant those capabilities.
 - **Worker**: An autonomous role or agent intended to claim and complete tasks
   under daemon supervision.
 
@@ -31,6 +33,10 @@ not the video product or Java Project Loom.
 When `kind` is unset, `domain.ResolveRoleKind` preserves the legacy naming
 convention: roles named `lead` or `orchestrator` resolve to `interactive`; other
 names resolve to `worker`.
+
+Role kind selects runtime placement, not product authorization. In particular,
+epic-runner ownership remains deliberately name-based through
+`epicrunner.IsLeadRole` until Loom has an explicit capability/policy field.
 
 ## Prompt Selection
 

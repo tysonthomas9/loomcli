@@ -113,6 +113,34 @@ func TestCreateAgentLeadEnsuresRoleAndDoesNotRequireRepo(t *testing.T) {
 	}
 }
 
+func TestCreateAgentLeadReusesSeededDefaultRole(t *testing.T) {
+	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
+	ctx := context.Background()
+	st := memstore.New()
+	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{
+		Key: "TEST2", Name: "Test 2", DefaultBranch: "main",
+	}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	if _, err := st.Roles().Create(ctx, store.RoleCreate{
+		WorkspaceKey: "TEST2",
+		Name:         "lead",
+		Kind:         string(domain.RoleKindInteractive),
+	}); err != nil {
+		t.Fatalf("seed lead role: %v", err)
+	}
+
+	svc := NewAgentService(nil, nil, nil, st)
+	if _, err := svc.CreateAgent(ctx, service.AgentCreateInput{
+		WorkspaceKey: "TEST2",
+		Name:         "lead-two",
+		RoleName:     "lead",
+		Backend:      "codex",
+	}); err != nil {
+		t.Fatalf("CreateAgent with seeded default lead role: %v", err)
+	}
+}
+
 func TestCreateAgentInteractiveKindEnsuresRoleWithPromptFile(t *testing.T) {
 	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
 

@@ -49,8 +49,9 @@ start picking up work without restarting the stack.
 
 Expected dogfood flow:
 
-- `local-planner` claims `LM-PLAN-1`, writes a design, and moves it to review.
-- `local-coder` claims `LM-CODE-1`, writes and commits
+- `LOCALMODE-1` is the seeded epic lane.
+- `local-planner` claims `LOCALMODE-2`, writes a design, and moves it to review.
+- `local-coder` claims `LOCALMODE-3`, writes and commits
   `local-mode-agent-output.txt`, then closes the task.
 - The task Sessions tab should show daemon-created sessions with logs,
   transcript presence, diff stats, and final status after each run exits.
@@ -70,8 +71,8 @@ transcripts, and produced the coder diff artifact. Override
 `LOCAL_MODE_API_URL`, `LOOM_WORKSPACE`, `LOOM_LOCAL_MODE_PLAN_TASK_ID`, and
 `LOOM_LOCAL_MODE_CODE_TASK_ID` when verifying a non-default stack.
 Use `make local-mode-codex-verify` after `make local-mode-codex-up`; it
-defaults the verifier to the Codex stack's seeded `LOCALMODE-1` and
-`LOCALMODE-2` tasks.
+defaults the verifier to the Codex stack's seeded `LOCALMODE-2` and
+`LOCALMODE-3` tasks.
 
 The stack uses Docker/Podman volumes, so sessions and workspace files survive
 container restarts until `make local-mode-down` removes the stack volumes.

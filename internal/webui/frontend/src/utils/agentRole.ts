@@ -84,7 +84,7 @@ export function buildEpicLeadClaims(
 ): Map<string, string> {
   const claims = new Map<string, string>();
   for (const agent of agents) {
-    if (!agent || !isInteractiveAgent(agent)) continue;
+    if (!agent || !isLeadRole(agent.role)) continue;
     if (!agent.parent) continue;
     claims.set(agent.parent, agent.name);
   }
