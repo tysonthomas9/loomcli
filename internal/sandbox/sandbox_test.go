@@ -181,7 +181,8 @@ func TestHostPort(t *testing.T) {
 	}{
 		{"http://host.containers.internal:18099", "host.containers.internal", "18099", true},
 		{"https://fleet.example.com", "fleet.example.com", "443", true},
-		{"git://127.0.0.1/r.git", "127.0.0.1", "9418", true},
+		{"git://127.0.0.1/r.git", "", "", false},
+		{"git://127.0.0.1:9418/r.git", "", "", false},
 		{"git@github.com:o/r.git", "", "", false}, // ssh: no usable host:port
 		{"", "", "", false},
 	}

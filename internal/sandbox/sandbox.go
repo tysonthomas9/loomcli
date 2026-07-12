@@ -213,12 +213,12 @@ type Endpoint struct {
 	Port string
 }
 
-// HostPort extracts host + port from an http(s)/git URL for a policy endpoint.
+// HostPort extracts host + port from an HTTP(S) URL for a policy endpoint.
 // Returns ok=false for URLs without a usable host:port (e.g. ssh remotes, which
 // the operator must allow via an explicit LOOM_SANDBOX_POLICY).
 func HostPort(rawURL string) (host, port string, ok bool) {
 	u, err := url.Parse(strings.TrimSpace(rawURL))
-	if err != nil || u.Host == "" {
+	if err != nil || u.Host == "" || (u.Scheme != "http" && u.Scheme != "https") {
 		return "", "", false
 	}
 	host, port = u.Hostname(), u.Port()
@@ -228,8 +228,6 @@ func HostPort(rawURL string) (host, port string, ok bool) {
 			port = "443"
 		case "http":
 			port = "80"
-		case "git":
-			port = "9418"
 		default:
 			return "", "", false
 		}

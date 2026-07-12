@@ -7,21 +7,6 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/sandbox"
 )
 
-func TestSandboxCloneURL(t *testing.T) {
-	t.Run("explicit override wins", func(t *testing.T) {
-		t.Setenv("LOOM_SANDBOX_REPO_URL", "git://host.containers.internal:9418/repo")
-		if got := sandboxCloneURL("git://127.0.0.1:9418/repo"); got != "git://host.containers.internal:9418/repo" {
-			t.Errorf("got %q, want the override", got)
-		}
-	})
-	t.Run("localhost rewritten to host gateway", func(t *testing.T) {
-		t.Setenv("LOOM_SANDBOX_REPO_URL", "")
-		if got := sandboxCloneURL("http://127.0.0.1:9419/r.git"); got != "http://host.docker.internal:9419/r.git" {
-			t.Errorf("got %q, want host-gateway rewrite", got)
-		}
-	})
-}
-
 func TestBuildOneshotCommand_FullScript(t *testing.T) {
 	cfg := SandboxOneshotConfig{
 		AgentType: "task", AgentName: "falcon", ParentID: "epic-1",
@@ -117,7 +102,7 @@ func TestResolveSandboxFleetDBURL(t *testing.T) {
 
 // Without an admin fleet-db key on the host, credential provisioning is a no-op
 // (dev / auth-off path): no scoped key is minted and the run is left to use the
-// host's ambient credential. The returned revoke func must be safe to call.
+// host config's ambient credential. The returned revoke func must be safe to call.
 func TestProvisionSandboxCredential_NoopWithoutAdminKey(t *testing.T) {
 	t.Setenv("LOOM_FLEET_DB_API_KEY", "")
 	t.Setenv("LOOM_FLEET_DB_URL", "")

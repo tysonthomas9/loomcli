@@ -118,6 +118,7 @@ exit 0
 
 	openshellLog = filepath.Join(root, "openshell.log")
 	t.Setenv("OPENSHELL_LOG", openshellLog)
+	t.Setenv("LOOM_SANDBOX_REPO_URL", "https://git.example.com/repo.git")
 	t.Setenv("LOOM_CONFIG_DIR", filepath.Join(root, "loomcfg"))
 	t.Setenv("LOOM_WORKSPACE", "ws-test")
 
@@ -125,6 +126,39 @@ exit 0
 	mustWrite(t, loomLinux, "#!fake-linux-loom\n")
 	t.Setenv("LOOM_SANDBOX_LOOM_BIN", loomLinux)
 	return proj, openshellLog
+}
+
+// TestFix_InvalidRepoURLHasNoSideEffects verifies transport rejection occurs
+// before credential provisioning and before any OpenShell process is spawned.
+func TestFix_InvalidRepoURLHasNoSideEffects(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fake openshell is a /bin/sh script")
+	}
+	fleet := &recordingFleetDB{}
+	srv := httptest.NewServer(fleet.handler())
+	defer srv.Close()
+
+	root := t.TempDir()
+	proj, openshellLog := setupOneshotFixture(t, root, 0)
+	t.Setenv("LOOM_SANDBOX_REPO_URL", "file:///tmp/repo.git")
+	t.Setenv("LOOM_FLEET_DB_URL", srv.URL)
+	t.Setenv("LOOM_FLEET_DB_API_KEY", "admin-key")
+	t.Setenv("LOOM_SANDBOX_FLEETDB_URL", "http://host.containers.internal:8080")
+
+	_, err := runSandboxOneshot(SandboxOneshotConfig{
+		AgentType: "task", AgentName: "falcon", WorktreePath: proj,
+	})
+	if err == nil || !strings.Contains(err.Error(), "LOOM_SANDBOX_REPO_URL") {
+		t.Fatalf("runSandboxOneshot error = %v, want transport error naming LOOM_SANDBOX_REPO_URL", err)
+	}
+	if got := len(fleet.requests()); got != 0 {
+		t.Errorf("expected zero credential-provisioning HTTP calls, saw %v", fleet.requests())
+	}
+	if log, readErr := os.ReadFile(openshellLog); readErr == nil && len(log) != 0 {
+		t.Errorf("expected zero openshell invocations, log:\n%s", log)
+	} else if readErr != nil && !os.IsNotExist(readErr) {
+		t.Fatalf("read openshell log: %v", readErr)
+	}
 }
 
 // TestFix_CleanupOnAgentFailure: a failing in-sandbox agent must not leak. After

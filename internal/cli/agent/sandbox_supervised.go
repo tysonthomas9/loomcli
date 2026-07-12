@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"os"
 	"os/exec"
 	"strings"
 	"time"
@@ -65,7 +64,10 @@ func BuildSandboxExecCommand(spec SandboxExecSpec) (cmd *exec.Cmd, name string, 
 	if berr != nil || branch == "" {
 		return nil, "", nil, fmt.Errorf("sandbox agent %q: resolve worktree branch: %w", spec.Worktree, berr)
 	}
-	repoURL := sandboxSupervisedRepoURL(spec)
+	repoURL, err := sandbox.ResolveRepoURL(spec.WorktreePath, spec.RepoRemoteURL)
+	if err != nil {
+		return nil, "", nil, fmt.Errorf("sandbox agent %q: %w", spec.Worktree, err)
+	}
 	if repoURL == "" {
 		return nil, "", nil, fmt.Errorf("sandbox agent %q: no container-reachable repo URL", spec.Worktree)
 	}
@@ -158,30 +160,6 @@ func CleanupSandboxExec(projectDir, worktreePath, branch, name string, revoke fu
 		revoke()
 	}
 	sandbox.DeleteSandbox(name)
-}
-
-// sandboxSupervisedRepoURL returns a container-reachable git URL: the worktree's
-// origin remote rewritten to the container host gateway (or an explicit
-// LOOM_SANDBOX_REPO_URL). Falls back to spec.RepoRemoteURL.
-func sandboxSupervisedRepoURL(spec SandboxExecSpec) string {
-	if v := strings.TrimSpace(os.Getenv("LOOM_SANDBOX_REPO_URL")); v != "" {
-		return v
-	}
-	origin := ""
-	if out, err := exec.Command("git", "-C", spec.WorktreePath, "remote", "get-url", "origin").Output(); err == nil { //nolint:gosec // dir from resolved worktree
-		origin = strings.TrimSpace(string(out))
-	}
-	if origin == "" {
-		origin = spec.RepoRemoteURL
-	}
-	if origin == "" {
-		return ""
-	}
-	gw := sandbox.HostGateway()
-	for _, lh := range []string{"localhost", "127.0.0.1", "0.0.0.0"} {
-		origin = strings.ReplaceAll(origin, lh, gw)
-	}
-	return origin
 }
 
 // sandboxSupervisedBootstrap builds the in-container script: clone the branch,

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"net/url"
 	"os"
 	"strings"
 	"time"
@@ -29,11 +30,12 @@ func FleetDBURL() string {
 	if host == "" {
 		return ""
 	}
-	gw := HostGateway()
-	for _, lh := range []string{"localhost", "127.0.0.1", "0.0.0.0"} {
-		host = strings.ReplaceAll(host, lh, gw)
+	u, err := url.Parse(host)
+	if err != nil {
+		return host
 	}
-	return host
+	rewriteLocalhost(u)
+	return u.String()
 }
 
 // ProvisionCredential mints a short-TTL, workspace-scoped `developer` API key for

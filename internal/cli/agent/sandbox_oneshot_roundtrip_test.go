@@ -1,6 +1,9 @@
 package agent
 
 import (
+	"net"
+	"net/http/cgi"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -54,6 +57,9 @@ func TestSandboxOneshot_RoundTrip(t *testing.T) {
 
 	// Bare remote.
 	runGit(t, root, "init", "--bare", remote)
+	runGit(t, remote, "config", "http.receivepack", "true")
+	remoteServer := serveGitHTTP(t, root)
+	originURL := remoteServer.URL + "/remote.git"
 
 	// Project repo with a .loom marker, on branch "sbx", origin → bare remote.
 	mustMkdir(t, proj)
@@ -65,7 +71,7 @@ func TestSandboxOneshot_RoundTrip(t *testing.T) {
 	runGit(t, proj, "checkout", "-b", branch)
 	runGit(t, proj, "add", "-A")
 	runGit(t, proj, "commit", "-m", "seed")
-	runGit(t, proj, "remote", "add", "origin", remote)
+	runGit(t, proj, "remote", "add", "origin", originURL)
 
 	// Fake openshell on PATH.
 	binDir := filepath.Join(root, "bin")
@@ -153,6 +159,31 @@ func TestSandboxOneshot_RoundTrip(t *testing.T) {
 	if n := strings.Count(log, "sandbox delete "); n < 1 {
 		t.Errorf("expected sandbox delete to be invoked, log:\n%s", log)
 	}
+}
+
+func serveGitHTTP(t *testing.T, projectRoot string) *httptest.Server {
+	t.Helper()
+	cmd := exec.Command("git", "--exec-path")
+	out, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("git --exec-path: %v", err)
+	}
+	handler := &cgi.Handler{
+		Path: filepath.Join(strings.TrimSpace(string(out)), "git-http-backend"),
+		Env: []string{
+			"GIT_PROJECT_ROOT=" + projectRoot,
+			"GIT_HTTP_EXPORT_ALL=1",
+		},
+	}
+	listener, err := net.Listen("tcp4", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen for git HTTP server: %v", err)
+	}
+	srv := httptest.NewUnstartedServer(handler)
+	srv.Listener = listener
+	srv.Start()
+	t.Cleanup(srv.Close)
+	return srv
 }
 
 func runGit(t *testing.T, dir string, args ...string) {

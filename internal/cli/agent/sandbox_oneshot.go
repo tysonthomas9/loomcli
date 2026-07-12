@@ -79,7 +79,10 @@ func runSandboxOneshot(cfg SandboxOneshotConfig) (int, error) {
 		return 0, fmt.Errorf("resolving project directory: %w", err)
 	}
 
-	repoURL := resolveSandboxRepoURL(projectDir)
+	repoURL, err := sandbox.ResolveRepoURL(projectDir, "")
+	if err != nil {
+		return 0, err
+	}
 	if repoURL == "" {
 		return 0, fmt.Errorf("could not determine git remote URL for %s", projectDir)
 	}
@@ -114,7 +117,7 @@ func runSandboxOneshot(cfg SandboxOneshotConfig) (int, error) {
 	}
 
 	fmt.Printf("[sandbox] Creating sandbox %s...\n", sandboxName)
-	exitCode, err := runSandboxAgent(sandboxName, sandbox.DefaultConfig(), branch, cfg, sandboxCloneURL(repoURL))
+	exitCode, err := runSandboxAgent(sandboxName, sandbox.DefaultConfig(), branch, cfg, repoURL)
 	if err != nil {
 		return 0, err
 	}
@@ -201,30 +204,6 @@ func mergeSandboxResults(projectDir, worktreePath, branch string) {
 	if err := mergeCmd.Run(); err != nil {
 		fmt.Fprintf(os.Stderr, "[sandbox] Warning: fast-forward merge failed (may need manual resolution): %v\n", err)
 	}
-}
-
-// resolveSandboxRepoURL returns the origin remote URL for projectDir, or "" on error.
-func resolveSandboxRepoURL(projectDir string) string {
-	out, err := cli.RunGitCommand(projectDir, "remote", "get-url", "origin")
-	if err != nil {
-		return ""
-	}
-	return strings.TrimSpace(out)
-}
-
-// sandboxCloneURL returns the git URL the sandbox uses to clone the repo. The host
-// and the sandbox reach the host at different addresses, so a localhost origin is
-// rewritten to the container host gateway — or overridden via LOOM_SANDBOX_REPO_URL
-// with an address both sides can reach (e.g. the host LAN IP or a git endpoint).
-func sandboxCloneURL(origin string) string {
-	if v := strings.TrimSpace(os.Getenv("LOOM_SANDBOX_REPO_URL")); v != "" {
-		return v
-	}
-	out, gw := origin, sandbox.HostGateway()
-	for _, lh := range []string{"localhost", "127.0.0.1", "0.0.0.0"} {
-		out = strings.ReplaceAll(out, lh, gw)
-	}
-	return out
 }
 
 // applySandboxFleetConfig resolves the FleetDB endpoint + workspace the
