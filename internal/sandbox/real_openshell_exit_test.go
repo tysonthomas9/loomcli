@@ -26,7 +26,7 @@ func TestRealOpenshellExit_EndToEnd(t *testing.T) {
 		if err != nil {
 			t.Skip("live exit-code regression requires real openshell on PATH")
 		}
-		version, err := exec.Command(path, "--version").CombinedOutput()
+		version, err := exec.Command(path, "--version").CombinedOutput() //nolint:norawexec // live test drives the real openshell CLI
 		if err != nil {
 			t.Fatalf("openshell --version: %v: %s", err, version)
 		}

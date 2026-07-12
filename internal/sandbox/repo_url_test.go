@@ -45,12 +45,12 @@ func TestResolveRepoURL_TransportValidation(t *testing.T) {
 func TestResolveRepoURL_ResolutionOrder(t *testing.T) {
 	t.Setenv("LOOM_SANDBOX_HOST_GATEWAY", "gateway.internal")
 	worktree := t.TempDir()
-	cmd := exec.Command("git", "init")
+	cmd := exec.Command("git", "init") //nolint:norawexec // test creates a real local git repo
 	cmd.Dir = worktree
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("git init: %v\n%s", err, out)
 	}
-	cmd = exec.Command("git", "remote", "add", "origin", "http://localhost:3000/origin.git")
+	cmd = exec.Command("git", "remote", "add", "origin", "http://localhost:3000/origin.git") //nolint:norawexec // test creates a real local git repo
 	cmd.Dir = worktree
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("git remote add: %v\n%s", err, out)

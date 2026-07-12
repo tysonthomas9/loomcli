@@ -9,7 +9,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
-	"net/http/cgi"
+	"net/http/cgi" //nolint:gosec // G504: serves git http-backend in-test; CVE-2016-5386 applies to Go <1.6.3
 	"net/http/httptest"
 	"os"
 	"os/exec"
@@ -34,7 +34,7 @@ func TestE2E_OpenShellRBACLiveMatrix(t *testing.T) {
 	if _, err := exec.LookPath("redis-cli"); err != nil {
 		t.Skip("live OpenShell RBAC matrix requires redis-cli on PATH and Redis on 127.0.0.1:6379")
 	}
-	version, err := exec.Command(openshell, "--version").CombinedOutput()
+	version, err := exec.Command(openshell, "--version").CombinedOutput() //nolint:norawexec // live matrix drives the real openshell CLI
 	if err != nil {
 		t.Fatalf("openshell --version: %v: %s", err, version)
 	}
@@ -166,7 +166,7 @@ cd /sandbox/repo
 func waitLiveSandboxReady(name string) error {
 	deadline := time.Now().Add(90 * time.Second)
 	for time.Now().Before(deadline) {
-		out, err := exec.Command(sandbox.OpenshellBinary(), "sandbox", "get", name).CombinedOutput()
+		out, err := exec.Command(sandbox.OpenshellBinary(), "sandbox", "get", name).CombinedOutput() //nolint:norawexec // live matrix drives the real openshell CLI
 		if err == nil && strings.Contains(strings.ToLower(string(out)), "ready") {
 			return nil
 		}
@@ -178,7 +178,7 @@ func waitLiveSandboxReady(name string) error {
 func buildSandboxE2ELinuxLoom(t *testing.T, root string) string {
 	t.Helper()
 	bin := filepath.Join(root, "loom-linux")
-	cmd := exec.Command("go", "build", "-o", bin, "./cmd/loom")
+	cmd := exec.Command("go", "build", "-o", bin, "./cmd/loom") //nolint:norawexec // builds the real loom binary under test
 	cmd.Dir = sandboxE2ERepoRoot(t)
 	cmd.Env = append(os.Environ(), "GOOS=linux", "GOARCH="+runtime.GOARCH, "CGO_ENABLED=0")
 	if out, err := cmd.CombinedOutput(); err != nil {
@@ -189,14 +189,14 @@ func buildSandboxE2ELinuxLoom(t *testing.T, root string) string {
 
 func startLiveMatrixFleetDB(t *testing.T, bin, root string) (string, string, string) {
 	t.Helper()
-	ln, err := net.Listen("tcp4", "0.0.0.0:0")
+	ln, err := net.Listen("tcp4", "0.0.0.0:0") //nolint:gosec // sandbox containers must reach the host
 	if err != nil {
 		t.Fatal(err)
 	}
 	port := ln.Addr().(*net.TCPAddr).Port
 	_ = ln.Close()
 	const adminKey = "sandbox-e2e-admin-key"
-	cmd := exec.Command(bin, "--addr", fmt.Sprintf("0.0.0.0:%d", port), "--redis-addr", "127.0.0.1:6379", "--redis-db", "9", "--rpc-enabled=false", "--auth-enabled", "--authz-enabled", "--auth-bootstrap-admin-actor", "sandbox-e2e-admin", "--auth-bootstrap-admin-key", adminKey)
+	cmd := exec.Command(bin, "--addr", fmt.Sprintf("0.0.0.0:%d", port), "--redis-addr", "127.0.0.1:6379", "--redis-db", "9", "--rpc-enabled=false", "--auth-enabled", "--authz-enabled", "--auth-bootstrap-admin-actor", "sandbox-e2e-admin", "--auth-bootstrap-admin-key", adminKey) //nolint:norawexec // FLEET_DB_BIN is the explicit E2E gate
 	var log bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &log, &log
 	if err := cmd.Start(); err != nil {
@@ -220,7 +220,7 @@ func serveLiveMatrixGitHTTP(t *testing.T, root string) (string, string) {
 		gitHTTP = strings.TrimSpace(sandboxE2EGitOutput(t, root, "--exec-path")) + "/git-http-backend"
 	}
 	h := &cgi.Handler{Path: gitHTTP, Dir: root, Env: []string{"GIT_PROJECT_ROOT=" + root, "GIT_HTTP_EXPORT_ALL=1"}}
-	ln, err := net.Listen("tcp4", "0.0.0.0:0")
+	ln, err := net.Listen("tcp4", "0.0.0.0:0") //nolint:gosec // sandbox containers must reach the host
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -234,13 +234,13 @@ func serveLiveMatrixGitHTTP(t *testing.T, root string) (string, string) {
 
 func startLiveMatrixServeProxy(t *testing.T, loomBin, upstream string) (string, string) {
 	t.Helper()
-	ln, err := net.Listen("tcp4", "0.0.0.0:0")
+	ln, err := net.Listen("tcp4", "0.0.0.0:0") //nolint:gosec // sandbox containers must reach the host
 	if err != nil {
 		t.Fatal(err)
 	}
 	port := ln.Addr().(*net.TCPAddr).Port
 	_ = ln.Close()
-	cmd := exec.Command(loomBin, "serve", "--bind", "0.0.0.0", "--port", fmt.Sprint(port), "--no-daemon", "--fleet-db-proxy-url", upstream)
+	cmd := exec.Command(loomBin, "serve", "--bind", "0.0.0.0", "--port", fmt.Sprint(port), "--no-daemon", "--fleet-db-proxy-url", upstream) //nolint:norawexec // runs the loom binary built by this test
 	cmd.Env = append(os.Environ(), "LOOM_CONFIG_DIR="+t.TempDir())
 	var log bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &log, &log
@@ -275,7 +275,7 @@ func waitHTTPReady(t *testing.T, url string, log *bytes.Buffer) {
 	t.Helper()
 	deadline := time.Now().Add(15 * time.Second)
 	for time.Now().Before(deadline) {
-		if r, err := http.Get(url); err == nil {
+		if r, err := http.Get(url); err == nil { //nolint:gosec // test-owned loopback readiness URL
 			_ = r.Body.Close()
 			if r.StatusCode == http.StatusOK {
 				return

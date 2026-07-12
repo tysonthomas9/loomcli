@@ -2,7 +2,7 @@ package agent
 
 import (
 	"net"
-	"net/http/cgi"
+	"net/http/cgi" //nolint:gosec // G504: serves git http-backend in-test; CVE-2016-5386 applies to Go <1.6.3
 	"net/http/httptest"
 	"os"
 	"os/exec"
@@ -163,7 +163,7 @@ func TestSandboxOneshot_RoundTrip(t *testing.T) {
 
 func serveGitHTTP(t *testing.T, projectRoot string) *httptest.Server {
 	t.Helper()
-	cmd := exec.Command("git", "--exec-path")
+	cmd := exec.Command("git", "--exec-path") //nolint:norawexec // locates git http-backend for the in-test smart HTTP server
 	out, err := cmd.Output()
 	if err != nil {
 		t.Fatalf("git --exec-path: %v", err)
