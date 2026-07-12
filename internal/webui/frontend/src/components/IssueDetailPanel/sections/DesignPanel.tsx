@@ -8,11 +8,14 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 
 import { MarkdownRenderer } from "./MarkdownRenderer";
+import { sanitizeHtml } from "@/utils/sanitizeHtml";
 import styles from "./DesignPanel.module.css";
 
 export interface DesignPanelProps {
   /** Markdown design content */
   content: string | null | undefined;
+  /** Durable format from FleetDB artifact metadata. */
+  format?: "markdown" | "html" | string;
   /** Additional CSS class name */
   className?: string;
 }
@@ -92,6 +95,7 @@ export function splitIntoSections(markdown: string): Section[] {
  */
 export function DesignPanel({
   content,
+  format,
   className,
 }: DesignPanelProps): JSX.Element {
   const [isFullscreen, setIsFullscreen] = useState(false);
@@ -105,6 +109,23 @@ export function DesignPanel({
   );
 
   const hasH2Sections = sections.some((s) => s.heading !== "");
+  // Compatibility only for legacy inline HTML that predates format metadata.
+  const renderAsHTML =
+    format === "html" ||
+    (!format &&
+      /^\s*<(?:h[1-6]|p|ul|ol|div|section|table|pre|svg|figure)\b/i.test(
+        content ?? "",
+      ));
+  const renderDesignContent = (body: string, key?: string) =>
+    renderAsHTML ? (
+      <div
+        key={key}
+        data-testid="design-html-content"
+        dangerouslySetInnerHTML={{ __html: sanitizeHtml(body) }}
+      />
+    ) : (
+      <MarkdownRenderer key={key} content={body} />
+    );
 
   // Reset collapsed sections when content changes (e.g., different issue selected)
   useEffect(() => {
@@ -228,12 +249,9 @@ export function DesignPanel({
           ? sections.map((section, index) => {
               if (!section.heading) {
                 // Content before first H2 — render without collapse
-                return section.content ? (
-                  <MarkdownRenderer
-                    key={`preamble-${index}`}
-                    content={section.content}
-                  />
-                ) : null;
+                return section.content
+                  ? renderDesignContent(section.content, `preamble-${index}`)
+                  : null;
               }
 
               const isExpanded = !collapsedSections.has(index);
@@ -268,7 +286,7 @@ export function DesignPanel({
                   </button>
                   {isExpanded && section.content && (
                     <div className={styles.sectionContent}>
-                      <MarkdownRenderer content={section.content} />
+                      {renderDesignContent(section.content)}
                     </div>
                   )}
                 </div>
@@ -276,12 +294,9 @@ export function DesignPanel({
             })
           : // No H2 headings — render as single block
             sections.map((section, index) =>
-              section.content ? (
-                <MarkdownRenderer
-                  key={`block-${index}`}
-                  content={section.content}
-                />
-              ) : null,
+              section.content
+                ? renderDesignContent(section.content, `block-${index}`)
+                : null,
             )}
       </div>
     </div>

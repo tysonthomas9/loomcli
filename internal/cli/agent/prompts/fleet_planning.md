@@ -79,7 +79,7 @@ Write a comprehensive plan that includes:
 ### Step 4: Save the Plan
 Save your plan to the task's design field:
 ```
-loom data update <id> --design="<your complete plan here>"
+loom data update <id> --design="<your complete plan here>" --design-format={{ .DesignFormat }}
 ```
 
 IMPORTANT: Make sure the plan is complete and detailed enough that another agent

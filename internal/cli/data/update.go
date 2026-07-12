@@ -13,16 +13,17 @@ import (
 )
 
 var (
-	updateStatus      string
-	updateAssignee    string
-	updateNotes       string
-	updateDesign      string
-	updatePriority    int
-	updateTitle       string
-	updateDescription string
-	updateDescFile    string
-	updateAddDeps     []string
-	updateRemoveDeps  []string
+	updateStatus       string
+	updateAssignee     string
+	updateNotes        string
+	updateDesign       string
+	updateDesignFormat string
+	updatePriority     int
+	updateTitle        string
+	updateDescription  string
+	updateDescFile     string
+	updateAddDeps      []string
+	updateRemoveDeps   []string
 )
 
 var updateCmd = &cobra.Command{
@@ -86,6 +87,11 @@ func updateParamsFromFlags(cmd *cobra.Command) (backend.UpdateParams, bool, erro
 		params.Design = &updateDesign
 		changed = true
 	}
+	if applied, err := applyDesignFormatFlag(cmd, &params); err != nil {
+		return backend.UpdateParams{}, false, err
+	} else if applied {
+		changed = true
+	}
 	if cmd.Flags().Changed("priority") {
 		params.Priority = &updatePriority
 		changed = true
@@ -107,6 +113,24 @@ func updateParamsFromFlags(cmd *cobra.Command) (backend.UpdateParams, bool, erro
 		changed = true
 	}
 	return params, changed, nil
+}
+
+func applyDesignFormatFlag(cmd *cobra.Command, params *backend.UpdateParams) (bool, error) {
+	if !cmd.Flags().Changed("design-format") {
+		return false, nil
+	}
+	if err := validateDesignFormat(updateDesignFormat); err != nil {
+		return false, err
+	}
+	params.DesignFormat = &updateDesignFormat
+	return true, nil
+}
+
+func validateDesignFormat(format string) error {
+	if format != "markdown" && format != "html" {
+		return fmt.Errorf("--design-format must be markdown or html")
+	}
+	return nil
 }
 
 // enforceBlockReason refuses to move an issue to "blocked" without a reason, so
@@ -163,6 +187,7 @@ func init() {
 	updateCmd.Flags().StringVar(&updateAssignee, "assignee", "", "Set assignee")
 	updateCmd.Flags().StringVar(&updateNotes, "notes", "", "Set notes")
 	updateCmd.Flags().StringVar(&updateDesign, "design", "", "Set design")
+	updateCmd.Flags().StringVar(&updateDesignFormat, "design-format", "", "Set design format (markdown or html)")
 	updateCmd.Flags().IntVar(&updatePriority, "priority", 0, "Set priority")
 	updateCmd.Flags().StringVar(&updateTitle, "title", "", "Set title")
 	updateCmd.Flags().StringVar(&updateDescription, "description", "", "Set description")

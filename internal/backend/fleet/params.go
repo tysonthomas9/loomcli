@@ -326,6 +326,7 @@ func updateParamsToPatchRequest(params backend.UpdateParams) map[string]interfac
 	setStrField(req, "description", params.Description)
 	setIntField(req, "priority", params.Priority)
 	setStrField(req, "design", params.Design)
+	setStrField(req, "design_format", params.DesignFormat)
 	setStrField(req, "notes", params.Notes)
 	setStrField(req, "owner", params.Owner)
 	// Field rename: loom's IssueBackend uses "issue_type"; fleet-db's
