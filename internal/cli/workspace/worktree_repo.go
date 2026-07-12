@@ -76,7 +76,7 @@ func resolveWorkspaceTarget(resolver *cli.Resolver, name, repo string) (Resolved
 
 	wsConfig, ok := resolver.Config.Workspaces[resolver.Workspace]
 	if !ok || wsConfig.Path == "" {
-		return ResolvedTarget{}, fmt.Errorf("workspace %q has no path configured", resolver.Workspace)
+		return ResolvedTarget{}, fmt.Errorf("workspace %q has no local path configured; use an absolute path such as /sandbox/repo", resolver.Workspace)
 	}
 
 	// Per-repo worktree routing: create/find worktree under repo directory

@@ -12,9 +12,10 @@ package agent
 //  3. TestFix_AbsoluteTargetCarriesAgentName: an absolute target resolves with
 //     zero fleet-db calls and honors LOOM_AGENT_NAME instead of collapsing to
 //     filepath.Base.
-//  4. TestRegression_RelativeTargetHitsAdminRoute: documents WHY the switch was
-//     needed — a relative target still routes through the admin-only workspace
-//     list, which a scoped developer key is forbidden (403) to call.
+//  4. TestRelativeTargetModeCloudUsesScopedWorkspaceAndSuggestsAbsolutePath:
+//     Phase 4 flipped the old relative-target behavior: it resolves its active
+//     workspace through the scoped route, never the admin workspace list, then
+//     tells an in-container caller without a local Path to use an absolute path.
 
 import (
 	"fmt"
@@ -32,8 +33,9 @@ import (
 )
 
 // recordingFleetDB is a fake fleet-db that records every request line and serves
-// the apikey provision/revoke routes plus a 403 admin workspace list — matching
-// what real fleet-db (PR #76, authz on) returns for a workspace-scoped key.
+// the apikey provision/revoke routes, a scoped workspace, and a 403 admin
+// workspace list — matching what real fleet-db (PR #76, authz on) returns for
+// a workspace-scoped key.
 type recordingFleetDB struct {
 	mu   sync.Mutex
 	reqs []string
@@ -73,6 +75,9 @@ func (r *recordingFleetDB) handler() http.Handler {
 		case req.Method == "GET" && req.URL.Path == "/api/v1/admin/workspaces":
 			w.WriteHeader(http.StatusForbidden)
 			fmt.Fprint(w, `{"error":"forbidden: workspace.list requires a global role"}`)
+		case req.Method == "GET" && req.URL.Path == "/api/v1/ws-test/workspace":
+			w.Header().Set("Content-Type", "application/json")
+			fmt.Fprint(w, `{"key":"ws-test","name":"Workspace Test"}`)
 		default:
 			w.Header().Set("Content-Type", "application/json")
 			fmt.Fprint(w, `{}`)
@@ -304,10 +309,11 @@ func TestFix_AbsoluteTargetCarriesAgentName(t *testing.T) {
 	}
 }
 
-// TestRegression_RelativeTargetHitsAdminRoute documents the pre-fix failure mode
-// the switch to /sandbox/repo avoids: a relative target still routes through the
-// admin-only workspace list, which a scoped developer key is denied (403).
-func TestRegression_RelativeTargetHitsAdminRoute(t *testing.T) {
+// TestRelativeTargetModeCloudUsesScopedWorkspaceAndSuggestsAbsolutePath pins
+// Phase 4's replacement for the old admin-list hazard. Relative targets resolve
+// their active workspace through the scoped route; without a host-local Path,
+// they then receive an actionable absolute-path remedy.
+func TestRelativeTargetModeCloudUsesScopedWorkspaceAndSuggestsAbsolutePath(t *testing.T) {
 	fleet := &recordingFleetDB{}
 	srv := httptest.NewServer(fleet.handler())
 	defer srv.Close()
@@ -320,11 +326,17 @@ func TestRegression_RelativeTargetHitsAdminRoute(t *testing.T) {
 
 	_, err := workspace.ResolveAgentTarget("worktrees/falcon", "")
 	if err == nil {
-		t.Fatalf("expected relative target to fail under a scoped key")
+		t.Fatal("expected relative target without a local workspace path to fail")
 	}
-	if got := fleet.count("GET /api/v1/admin/workspaces"); got < 1 {
-		t.Errorf("expected the admin workspace route to be hit, saw: %v", fleet.requests())
+	if got := fleet.count("GET /api/v1/admin/workspaces"); got != 0 {
+		t.Errorf("admin workspace route hits = %d, want 0; saw: %v", got, fleet.requests())
+	}
+	if got := fleet.count("GET /api/v1/ws-test/workspace"); got != 1 {
+		t.Errorf("scoped workspace route hits = %d, want 1; saw: %v", got, fleet.requests())
+	}
+	if !strings.Contains(err.Error(), "absolute path") || !strings.Contains(err.Error(), "/sandbox/repo") {
+		t.Errorf("relative target error = %q, want actionable absolute-path remedy", err)
 	} else {
-		t.Logf("DOCUMENTED: relative target calls admin route and fails: %v", err)
+		t.Logf("VERIFIED: Phase 4 scopes relative-target resolution and returns an absolute-path remedy: %v", err)
 	}
 }
