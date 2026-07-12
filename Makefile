@@ -1,6 +1,6 @@
 # Makefile for loomcli project
 
-.PHONY: all build build-frontend build-all test test-integration test-all test-playground test-fleetdb-embedded test-fleetdb-supervisor test-fleetdb-ui test-fleetdb-empty-cli fleetdb-empty-up fleetdb-empty-down local-mode-frontend-dist local-mode-up local-mode-codex-up local-mode-down local-mode-logs local-mode-verify local-mode-codex-verify test-local-mode-harness test-distributed-smoke lint lint-frontend test-frontend e2e test-e2e test-e2e-api test-e2e-api-local test-e2e-real-smoke test-e2e-real-smoke-local test-e2e-real-regression test-e2e-real-regression-local test-e2e-integration test-e2e-integration-local test-e2e-integration-full clean install help frontend check check-go check-frontend gate gate-e2e gate-e2e-full hooks ensure-hooks dev dev-check dev-loom dev-vite check-loc check-loc-stale check-no-raw-exec check-no-beads-prod test-coverage test-frontend-coverage test-race-cover test-integration-race-cover gen-go-api check-go-api-staleness
+.PHONY: all build build-frontend build-all test test-integration test-all test-playground test-fleetdb-embedded test-fleetdb-supervisor test-fleetdb-ui test-fleetdb-empty-cli test-fleetdb-sandbox-rbac fleetdb-empty-up fleetdb-empty-down local-mode-frontend-dist local-mode-up local-mode-codex-up local-mode-down local-mode-logs local-mode-verify local-mode-codex-verify test-local-mode-harness test-distributed-smoke lint lint-frontend test-frontend e2e test-e2e test-e2e-api test-e2e-api-local test-e2e-real-smoke test-e2e-real-smoke-local test-e2e-real-regression test-e2e-real-regression-local test-e2e-integration test-e2e-integration-local test-e2e-integration-full clean install help frontend check check-go check-frontend gate gate-e2e gate-e2e-full hooks ensure-hooks dev dev-check dev-loom dev-vite check-loc check-loc-stale check-no-raw-exec check-no-beads-prod test-coverage test-frontend-coverage test-race-cover test-integration-race-cover gen-go-api check-go-api-staleness
 
 # Default target
 all: build
@@ -114,6 +114,11 @@ test-fleetdb-ui:
 # + doctor probe scenarios via podman exec, tears it down on exit.
 test-fleetdb-empty-cli:
 	@./scripts/test-fleetdb-empty-cli.sh
+
+# Auth/authz sandbox round-trip E2E. Requires an auth-capable fleet-db binary
+# in FLEET_DB_BIN and an empty dedicated Redis db 9; never part of unit CI.
+test-fleetdb-sandbox-rbac:
+	FLEET_DB_BIN="$(FLEET_DB_BIN)" go test ./internal/cli/agent/ -run '^TestE2E_SandboxOneshotFleetDBRBAC$$' -v -count=1
 
 # Start an empty fleet-db-only UI stack for manual new-user testing. This stack
 # has no seeded workspaces or issues; create a workspace from the UI.
@@ -544,6 +549,7 @@ help:
 	@echo "    LOCAL_MODE_COMPOSE_FILES=/path/override.yml LOCAL_MODE_COMPOSE_UP_FLAGS='--build -d' make local-mode-up"
 	@echo "    LOCAL_MODE_FLEETDB_IMAGE=tag LOCAL_MODE_LOOM_IMAGE=tag LOCAL_MODE_LOOM_CODEX_IMAGE=tag"
 	@echo "  make test-fleetdb-embedded - Run clean-checkout embedded fleet-db smoke"
+	@echo "  make test-fleetdb-sandbox-rbac - Run env-gated auth/authz sandbox round-trip E2E"
 	@echo "  make test-distributed-smoke - Run fleet-db distributed compose smoke"
 	@echo "  make test-e2e-api      - Run Playwright API e2e tests (self-contained)"
 	@echo "  make test-e2e-api-local - Run Playwright API e2e tests (needs loom serve)"
