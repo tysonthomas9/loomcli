@@ -2371,6 +2371,11 @@ export interface components {
       design?: string;
       /** @description Managed FleetDB artifact reference for the design body. */
       design_artifact_id?: string;
+      /**
+       * @description Durable format of the hydrated design body.
+       * @enum {string}
+       */
+      design_format?: "markdown" | "html";
       /** @description True for either a legacy inline or artifact-backed design. */
       has_design?: boolean;
       acceptance_criteria?: string;
@@ -2437,6 +2442,11 @@ export interface components {
       design?: string;
       /** @description Managed FleetDB artifact reference for the design body. */
       design_artifact_id?: string;
+      /**
+       * @description Durable format of the hydrated design body.
+       * @enum {string}
+       */
+      design_format?: "markdown" | "html";
       /** @description True for either a legacy inline or artifact-backed design. */
       has_design?: boolean;
       acceptance_criteria?: string;
@@ -2611,6 +2621,8 @@ export interface components {
       assignee?: string | null;
       owner?: string | null;
       design?: string | null;
+      /** @enum {string|null} */
+      design_format?: "markdown" | "html" | null;
       acceptance_criteria?: string | null;
       notes?: string | null;
       external_ref?: string | null;

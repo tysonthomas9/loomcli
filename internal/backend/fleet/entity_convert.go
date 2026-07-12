@@ -30,6 +30,7 @@ func issueCoreToEntity(issue *types.Issue) entity.Issue {
 		Description:        issue.Description,
 		Design:             issue.Design,
 		DesignArtifactID:   issue.DesignArtifactID,
+		DesignFormat:       issue.DesignFormat,
 		HasDesign:          issue.HasDesign || issue.Design != "",
 		AcceptanceCriteria: issue.AcceptanceCriteria,
 		Notes:              issue.Notes,

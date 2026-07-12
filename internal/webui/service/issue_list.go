@@ -419,6 +419,7 @@ func backendIssueDataToWithCounts(d *backend.IssueData) *types.IssueWithCounts {
 		Labels:           d.Labels,
 		Design:           d.Design,
 		DesignArtifactID: d.DesignArtifactID,
+		DesignFormat:     d.DesignFormat,
 		HasDesign:        d.HasDesign || d.Design != "",
 		Notes:            d.Notes,
 		CreatedAt:        d.CreatedAt,

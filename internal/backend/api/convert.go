@@ -47,6 +47,9 @@ func issueToData(issue gen.Issue) backend.IssueData {
 	if issue.DesignArtifactId != nil {
 		d.DesignArtifactID = *issue.DesignArtifactId
 	}
+	if issue.DesignFormat != nil {
+		d.DesignFormat = string(*issue.DesignFormat)
+	}
 	if issue.HasDesign != nil {
 		d.HasDesign = *issue.HasDesign
 	}
@@ -93,6 +96,9 @@ func issueResponseToData(r gen.IssueResponse) backend.IssueData {
 	}
 	if r.DesignArtifactId != nil {
 		d.DesignArtifactID = *r.DesignArtifactId
+	}
+	if r.DesignFormat != nil {
+		d.DesignFormat = string(*r.DesignFormat)
 	}
 	if r.HasDesign != nil {
 		d.HasDesign = *r.HasDesign

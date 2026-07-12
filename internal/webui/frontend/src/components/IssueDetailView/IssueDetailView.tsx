@@ -14,7 +14,7 @@ import { useRegisterEscapeLayer, LAYER_ISSUE_PANEL } from "@/hooks";
 import { getReviewType } from "@/utils/issue";
 import { StatusDropdown } from "@/components/StatusDropdown";
 import { ErrorToast } from "@/components/ErrorToast";
-import { MarkdownRenderer } from "@/components/IssueDetailPanel";
+import { DesignPanel, MarkdownRenderer } from "@/components/IssueDetailPanel";
 import { updateIssue } from "@/hooks/api";
 import { useWorkspaceContext } from "@/hooks/workspace";
 
@@ -606,9 +606,10 @@ export function IssueDetailView({
         {issue.design && (
           <section className={styles.section}>
             <h3 className={styles.sectionTitle}>Design</h3>
-            <MarkdownRenderer
+            <DesignPanel
               className={styles.description ?? ""}
               content={issue.design}
+              format={issue.design_format}
             />
           </section>
         )}

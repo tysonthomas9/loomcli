@@ -244,6 +244,7 @@ func issueDataToTypesIssue(d *backend.IssueData) *types.Issue {
 		SourceRepo:       d.SourceRepo,
 		Design:           d.Design,
 		DesignArtifactID: d.DesignArtifactID,
+		DesignFormat:     d.DesignFormat,
 		HasDesign:        d.HasDesign || d.Design != "",
 		CreatedAt:        d.CreatedAt,
 		UpdatedAt:        d.UpdatedAt,

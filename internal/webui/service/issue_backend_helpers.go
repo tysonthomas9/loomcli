@@ -64,6 +64,7 @@ func patchParamsToBackendUpdate(p *PatchIssueParams) backend.UpdateParams {
 		Assignee:           p.Assignee,
 		Owner:              p.Owner,
 		Design:             p.Design,
+		DesignFormat:       p.DesignFormat,
 		AcceptanceCriteria: p.AcceptanceCriteria,
 		Notes:              p.Notes,
 		ExternalRef:        p.ExternalRef,
@@ -133,6 +134,9 @@ func addOptionalIssueFields(out map[string]any, d *backend.IssueData) {
 	out["has_design"] = d.HasDesign || d.Design != ""
 	if d.DesignArtifactID != "" {
 		out["design_artifact_id"] = d.DesignArtifactID
+	}
+	if d.DesignFormat != "" {
+		out["design_format"] = d.DesignFormat
 	}
 	if d.DueAt != nil {
 		out["due_at"] = d.DueAt

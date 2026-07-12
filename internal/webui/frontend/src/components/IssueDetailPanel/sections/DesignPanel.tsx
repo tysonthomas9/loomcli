@@ -15,7 +15,7 @@ export interface DesignPanelProps {
   /** Markdown design content */
   content: string | null | undefined;
   /** Durable format from FleetDB artifact metadata. */
-  format?: "markdown" | "html" | string;
+  format?: "markdown" | "html" | string | undefined;
   /** Additional CSS class name */
   className?: string;
 }

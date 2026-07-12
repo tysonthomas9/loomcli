@@ -28,6 +28,7 @@ type fleetIssueWire struct {
 	Parent           string     `json:"parent,omitempty"`
 	Design           string     `json:"design,omitempty"`
 	DesignArtifactID string     `json:"design_artifact_id,omitempty"`
+	DesignFormat     string     `json:"design_format,omitempty"`
 	HasDesign        bool       `json:"has_design"`
 	Notes            string     `json:"notes,omitempty"`
 	Description      string     `json:"description,omitempty"`
@@ -59,6 +60,7 @@ func (w fleetIssueWire) toIssue() types.Issue {
 		SourceRepo:         w.sourceRepo(),
 		Design:             w.Design,
 		DesignArtifactID:   w.DesignArtifactID,
+		DesignFormat:       w.DesignFormat,
 		HasDesign:          w.HasDesign || w.Design != "",
 		ExternalRef:        strOrNil(w.ExternalRef),
 		CreatedAt:          w.CreatedAt,
@@ -196,6 +198,7 @@ func issueToData(issue *types.Issue) backend.IssueData {
 		SourceRepo:       issue.SourceRepo,
 		Design:           issue.Design,
 		DesignArtifactID: issue.DesignArtifactID,
+		DesignFormat:     issue.DesignFormat,
 		HasDesign:        issue.HasDesign || issue.Design != "",
 		Notes:            issue.Notes,
 		ExternalRef:      derefStr(issue.ExternalRef),

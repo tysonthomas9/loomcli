@@ -85,6 +85,7 @@ func IssueFromEntity(issue *entity.Issue, opts ...IssueMapOption) IssueResponse 
 	resp.Description = issue.Description
 	resp.Design = issue.Design
 	resp.DesignArtifactID = issue.DesignArtifactID
+	resp.DesignFormat = issue.DesignFormat
 	resp.HasDesign = issue.HasDesign || issue.Design != ""
 	resp.AcceptanceCriteria = issue.AcceptanceCriteria
 	resp.Notes = issue.Notes

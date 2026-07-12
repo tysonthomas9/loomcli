@@ -36,6 +36,7 @@ type IssueData struct {
 	// stable presence flag and managed-artifact reference.
 	Design           string `json:"design,omitempty"`
 	DesignArtifactID string `json:"design_artifact_id,omitempty"`
+	DesignFormat     string `json:"design_format,omitempty"`
 	HasDesign        bool   `json:"has_design"`
 	// Notes is in the slim list projection (not detail-only) so kanban/filter
 	// UIs can categorize a blocked issue that carries an external-blocker note
