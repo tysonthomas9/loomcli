@@ -53,8 +53,12 @@ scope fleet-db enforces uniformly.
 
 ### RW2 — repo materialization  `[loom #126]`
 `RepoConfig.RemoteURL` is projected from the fleet-db Repo row (`repoConfigFromStore`), so
-a sandbox clones from a container-reachable remote (host-gateway rewrite) and pushes work
-back. (No worktree self-resolution — the bootstrap clones explicitly.)
+a sandbox clones from a container-reachable remote and pushes work back. The override
+`LOOM_SANDBOX_REPO_URL` has the deliberately narrow meaning **container-reachable HTTP(S)
+clone-and-push URL**. `file:`, `git://`, scp-style URLs, and bare filesystem paths are rejected
+before credential provisioning. For loopback HTTP(S) URLs, only the URL host is rewritten to
+the container host gateway; a path containing `localhost` is unchanged. (No worktree
+self-resolution — the bootstrap clones explicitly.)
 
 ### RW3 — driver-aware reachability  `[loom #126]`
 `sandbox.HostGateway()` resolves Podman → `host.containers.internal`/`192.168.127.254`,
@@ -68,7 +72,9 @@ override). Applied to both the fleet-db URL and the repo clone URL. fleet-db mus
 `LOOM_SANDBOX_POLICY` is set. **Format (v0.0.53, validated live):** top-level
 `version: 1`; a `filesystem_policy` granting the default read/write surface; concrete
 hosts only (a wildcard `host: "**"` crashes provisioning); each Podman host also gets its
-`192.168.127.254` alias; `binaries` lists the loom + git + curl paths.
+`192.168.127.254` alias; `binaries` lists the loom + git + curl paths. The env-gated
+`TestE2E_OpenShellRBACLiveMatrix` (`make test-openshell-rbac-e2e`) is the per-version check
+that this generated policy is accepted by the real gateway's `sandbox create` operation.
 
 ### RW5 — deliver loom via a `--from` image  `[loom #126]`
 `Config.LoomBinPath` (from `LOOM_SANDBOX_LOOM_PATH`) → "loom baked in image, skip upload".
@@ -114,7 +120,21 @@ Unit tests were green; only driving the full path in a real sandbox surfaced the
 3. **RW4 policy dropped `filesystem_policy`** → nothing writable in-container (`/sandbox`, `/tmp`,
    `/home` all read-only) → clone/upload fail.
 
-## Verification (the proven recipe — reuse as the integration test)
+## Verification (what is proven, and by which test)
+
+The June 2026 Podman/macOS proof established the **data path**: an uploaded Loom binary ran
+`loom data create|claim|close` with a scoped developer key through direct FleetDB and the 2C
+proxy. It did not establish the literal one-shot `loom task --sandbox`; §F of
+`sandbox-daemon-port.md` records where that command stopped.
+
+This change adds two distinct proofs. `TestE2E_SandboxOneshotFleetDBRBAC`
+(`make test-fleetdb-sandbox-rbac`) is deterministic Phase 5 coverage: real Loom, an external
+probe backend, real auth/authz FleetDB, smart-HTTP clone/push, and fake OpenShell, including
+scoped RBAC and success/failure cleanup. `TestE2E_OpenShellRBACLiveMatrix`
+(`make test-openshell-rbac-e2e`) is operator-gated Phase 6 coverage using the real OpenShell
+CLI/gateway: generated-policy create/Ready, direct FleetDB, and serve-proxy-only egress.
+`TestRealOpenshellExit_EndToEnd` is run by the same target and regression-checks real
+`sandbox exec` exit-code propagation.
 
 Run against fleet-db with **authz ON** (production `X-API-Key` path, not `--auth-dev-mode`):
 1. fleet-db bound `0.0.0.0:<port>` with `-redis-durability-profile managed` (skips `CONFIG SET`,
@@ -129,7 +149,7 @@ Run against fleet-db with **authz ON** (production `X-API-Key` path, not `--auth
 5. **2C E2E:** repeat with `LOOM_SANDBOX_FLEETDB_URL` pointed at `loom serve --fleet-db-proxy-url`,
    OPA policy opening only serve → same lifecycle, fleet-db egress blocked.
 
-(Proven 2026-06 on Podman/macOS, both the direct-fleet-db and 2C-via-serve paths.)
+(Data path proven 2026-06 on Podman/macOS, both direct-fleet-db and 2C-via-serve.)
 
 ## Remaining (env-gated, not code-blocked)
 
@@ -140,10 +160,31 @@ generated OPA policy to also open the AI-provider endpoints (today it opens only
 git), or the token-free `playground` backend (which has its own drain blockers). Left as a
 follow-up.
 
-## Bring up the OpenShell test stack (macOS/arm64, no Docker)
+## OpenShell version contract and macOS/Podman setup
+
+- **0.0.53:** historical field notes in `sandbox-daemon-port.md` validate the policy shape and
+  data-path recipe.
+- **0.0.80:** real CLI + gateway JWT flow and `sandbox exec` exit-code propagation through the
+  supervisor were proven live. Generated-policy `create` is covered when the env-gated live
+  matrix above is run; its log records the exact `openshell --version` output.
+
+The gateway defaults to pulling `ghcr.io/nvidia/openshell/supervisor:latest` (observed as
+`Ensuring supervisor image … supervisor:latest policy=newer`). A claim that the supervisor is
+version-matched is valid only when the gateway config explicitly pins
+`ghcr.io/nvidia/openshell/supervisor:<same-version>`; pin `:0.0.53` for the historical contract
+or `:0.0.80` for the current contract. The live 0.0.80 CLI + supervisor proof confirmed that
+`sandbox exec` forwards arbitrary remote exit codes; `TestRealOpenshellExit_EndToEnd` keeps
+that contract honest per matrix run.
+
+Bring up the operator-managed stack (Loom does not start the gateway):
+
 - `brew install podman && podman machine init && podman machine start`
-- Install the OpenShell CLI + gateway (brew services).
-- `~/.config/openshell/gateway.env`:
-  `OPENSHELL_DRIVERS=podman` · `PATH=/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin` ·
-  `OPENSHELL_PODMAN_SOCKET=<podman machine inspect → ConnectionInfo.PodmanSocket.Path>`
-- `brew services restart openshell` → `openshell status` should show **Connected** (v0.0.53).
+- Download the checksum-verified native CLI and gateway release binaries from
+  `github.com/NVIDIA/OpenShell` for the version under test.
+- Run `openshell gateway generate-certs` (or that release's equivalent) to generate the mTLS
+  PKI and signing material.
+- Configure the Podman driver/socket and gateway TLS paths. The gateway TOML must include
+  `[openshell.gateway.gateway_jwt]` with its signing key so the supervisor receives a sandbox
+  token; also pin the supervisor image tag as described above.
+- Start the gateway, export `OPENSHELL_GATEWAY_ENDPOINT`, `FLEET_DB_BIN`, and a `PATH` containing
+  `openshell` and `redis-cli`, then run `make test-openshell-rbac-e2e`.
