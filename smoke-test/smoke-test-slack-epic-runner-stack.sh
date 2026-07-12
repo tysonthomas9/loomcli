@@ -339,31 +339,19 @@ ensure_fleet_db() {
   )
 }
 
-# Paths whose contents actually land in the loom image (the loom binary + the baked
-# web-ui). Uncommitted changes OUTSIDE these (docs, prompts, other scripts) do not
-# change the image, so they must not mark it dirty — otherwise a chronically
-# doc-dirty tree would rebuild the image every run. Keep in sync with aether's
-# loomSourceRev() (lib/loom-stack.ts).
-LOOM_IMAGE_BUILD_PATHS=(cmd internal go.mod go.sum Dockerfile.dev)
-
-# loom_source_rev prints the loomcli source revision baked into a build: the HEAD
-# commit, suffixed with "-dirty" when the build-relevant tree has uncommitted changes.
-# It is stamped onto the image as the loom.source.rev label so a consumer (aether's
-# loomImageNeedsRebuild) can tell whether a prebuilt image's binary matches the
-# current source — a check the image's Created timestamp cannot make reliably (an
-# image rebuilt after a commit can still carry a stale binary via a cached layer).
+# Print the canonical identity for the Loom source baked into Dockerfile.dev.
+# Dirty identities include a content fingerprint, so separate dirty worktrees at
+# the same HEAD cannot be mistaken for one another. Consumers should invoke this
+# helper rather than duplicate its build-path or hashing rules.
 loom_source_rev() {
-  local rev dirty=""
-  rev="$(git -C "$ROOT_DIR" rev-parse HEAD 2>/dev/null || echo unknown)"
-  if [[ -n "$(git -C "$ROOT_DIR" status --porcelain -- "${LOOM_IMAGE_BUILD_PATHS[@]}" 2>/dev/null)" ]]; then
-    dirty="-dirty"
-  fi
-  printf '%s%s' "$rev" "$dirty"
+  "${ROOT_DIR}/scripts/loom-image-source-rev.sh" "$ROOT_DIR"
 }
 
 build_image() {
-  log "building ${IMAGE} from Dockerfile.dev (loom.source.rev=$(loom_source_rev))"
-  podman build -f "${ROOT_DIR}/Dockerfile.dev" --label "loom.source.rev=$(loom_source_rev)" -t "$IMAGE" "$ROOT_DIR"
+  local source_rev
+  source_rev="$(loom_source_rev)"
+  log "building ${IMAGE} from Dockerfile.dev (loom.source.rev=${source_rev})"
+  podman build -f "${ROOT_DIR}/Dockerfile.dev" --label "loom.source.rev=${source_rev}" -t "$IMAGE" "$ROOT_DIR"
 }
 
 ensure_image() {
