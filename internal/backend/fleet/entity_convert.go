@@ -29,6 +29,8 @@ func issueCoreToEntity(issue *types.Issue) entity.Issue {
 		Title:              issue.Title,
 		Description:        issue.Description,
 		Design:             issue.Design,
+		DesignArtifactID:   issue.DesignArtifactID,
+		HasDesign:          issue.HasDesign || issue.Design != "",
 		AcceptanceCriteria: issue.AcceptanceCriteria,
 		Notes:              issue.Notes,
 		Status:             entity.IssueStatus(issue.Status),

@@ -44,6 +44,13 @@ func issueToData(issue gen.Issue) backend.IssueData {
 	if issue.Design != nil {
 		d.Design = *issue.Design
 	}
+	if issue.DesignArtifactId != nil {
+		d.DesignArtifactID = *issue.DesignArtifactId
+	}
+	if issue.HasDesign != nil {
+		d.HasDesign = *issue.HasDesign
+	}
+	d.HasDesign = d.HasDesign || d.Design != ""
 	if issue.ExternalRef != nil {
 		d.ExternalRef = *issue.ExternalRef
 	}
@@ -84,6 +91,13 @@ func issueResponseToData(r gen.IssueResponse) backend.IssueData {
 	if r.Design != nil {
 		d.Design = *r.Design
 	}
+	if r.DesignArtifactId != nil {
+		d.DesignArtifactID = *r.DesignArtifactId
+	}
+	if r.HasDesign != nil {
+		d.HasDesign = *r.HasDesign
+	}
+	d.HasDesign = d.HasDesign || d.Design != ""
 	if r.ExternalRef != nil {
 		d.ExternalRef = *r.ExternalRef
 	}

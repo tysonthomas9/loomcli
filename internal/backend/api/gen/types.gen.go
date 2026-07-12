@@ -1451,35 +1451,43 @@ type BlockedIssue struct {
 	Assignee           *string                 `json:"assignee,omitempty"`
 
 	// BlockedBy Dependency blocker IDs when known. May be empty for explicit status-only or parent-propagated blocking.
-	BlockedBy        []string               `json:"blocked_by"`
-	BlockedByCount   int                    `json:"blocked_by_count"`
-	BlockedByDetails *[]BlockerRef          `json:"blocked_by_details,omitempty"`
-	CloseReason      *string                `json:"close_reason,omitempty"`
-	ClosedAt         *time.Time             `json:"closed_at,omitempty"`
-	Comments         *[]Comment             `json:"comments,omitempty"`
-	CreatedAt        time.Time              `json:"created_at"`
-	CreatedBy        *string                `json:"created_by,omitempty"`
-	DeferUntil       *time.Time             `json:"defer_until,omitempty"`
-	Dependencies     *[]Dependency          `json:"dependencies,omitempty"`
-	Description      *string                `json:"description,omitempty"`
-	Design           *string                `json:"design,omitempty"`
-	DueAt            *time.Time             `json:"due_at,omitempty"`
-	EstimatedMinutes *int                   `json:"estimated_minutes,omitempty"`
-	ExternalRef      *string                `json:"external_ref,omitempty"`
-	Id               string                 `json:"id"`
-	IssueType        *BlockedIssueIssueType `json:"issue_type,omitempty"`
-	Labels           *[]string              `json:"labels,omitempty"`
-	LastActivity     *time.Time             `json:"last_activity,omitempty"`
-	MolType          *string                `json:"mol_type,omitempty"`
-	Notes            *string                `json:"notes,omitempty"`
-	Owner            *string                `json:"owner,omitempty"`
-	Parent           *string                `json:"parent,omitempty"`
-	Pinned           *bool                  `json:"pinned,omitempty"`
-	Priority         int                    `json:"priority"`
-	Rig              *string                `json:"rig,omitempty"`
-	RoleType         *string                `json:"role_type,omitempty"`
-	SourceRepo       *string                `json:"source_repo,omitempty"`
-	SourceSystem     *string                `json:"source_system,omitempty"`
+	BlockedBy        []string      `json:"blocked_by"`
+	BlockedByCount   int           `json:"blocked_by_count"`
+	BlockedByDetails *[]BlockerRef `json:"blocked_by_details,omitempty"`
+	CloseReason      *string       `json:"close_reason,omitempty"`
+	ClosedAt         *time.Time    `json:"closed_at,omitempty"`
+	Comments         *[]Comment    `json:"comments,omitempty"`
+	CreatedAt        time.Time     `json:"created_at"`
+	CreatedBy        *string       `json:"created_by,omitempty"`
+	DeferUntil       *time.Time    `json:"defer_until,omitempty"`
+	Dependencies     *[]Dependency `json:"dependencies,omitempty"`
+	Description      *string       `json:"description,omitempty"`
+
+	// Design Hydrated design body when available; collection responses may omit it.
+	Design *string `json:"design,omitempty"`
+
+	// DesignArtifactId Managed FleetDB artifact reference for the design body.
+	DesignArtifactId *string    `json:"design_artifact_id,omitempty"`
+	DueAt            *time.Time `json:"due_at,omitempty"`
+	EstimatedMinutes *int       `json:"estimated_minutes,omitempty"`
+	ExternalRef      *string    `json:"external_ref,omitempty"`
+
+	// HasDesign True for either a legacy inline or artifact-backed design.
+	HasDesign    *bool                  `json:"has_design,omitempty"`
+	Id           string                 `json:"id"`
+	IssueType    *BlockedIssueIssueType `json:"issue_type,omitempty"`
+	Labels       *[]string              `json:"labels,omitempty"`
+	LastActivity *time.Time             `json:"last_activity,omitempty"`
+	MolType      *string                `json:"mol_type,omitempty"`
+	Notes        *string                `json:"notes,omitempty"`
+	Owner        *string                `json:"owner,omitempty"`
+	Parent       *string                `json:"parent,omitempty"`
+	Pinned       *bool                  `json:"pinned,omitempty"`
+	Priority     int                    `json:"priority"`
+	Rig          *string                `json:"rig,omitempty"`
+	RoleType     *string                `json:"role_type,omitempty"`
+	SourceRepo   *string                `json:"source_repo,omitempty"`
+	SourceSystem *string                `json:"source_system,omitempty"`
 
 	// Status User-facing statuses. Internal statuses (tombstone, pinned, hooked)
 	// are not settable via the API and excluded from this enum.
@@ -1873,24 +1881,32 @@ type Issue struct {
 	DeferUntil         *time.Time       `json:"defer_until,omitempty"`
 	Dependencies       *[]Dependency    `json:"dependencies,omitempty"`
 	Description        *string          `json:"description,omitempty"`
-	Design             *string          `json:"design,omitempty"`
-	DueAt              *time.Time       `json:"due_at,omitempty"`
-	EstimatedMinutes   *int             `json:"estimated_minutes,omitempty"`
-	ExternalRef        *string          `json:"external_ref,omitempty"`
-	Id                 string           `json:"id"`
-	IssueType          *IssueIssueType  `json:"issue_type,omitempty"`
-	Labels             *[]string        `json:"labels,omitempty"`
-	LastActivity       *time.Time       `json:"last_activity,omitempty"`
-	MolType            *string          `json:"mol_type,omitempty"`
-	Notes              *string          `json:"notes,omitempty"`
-	Owner              *string          `json:"owner,omitempty"`
-	Parent             *string          `json:"parent,omitempty"`
-	Pinned             *bool            `json:"pinned,omitempty"`
-	Priority           int              `json:"priority"`
-	Rig                *string          `json:"rig,omitempty"`
-	RoleType           *string          `json:"role_type,omitempty"`
-	SourceRepo         *string          `json:"source_repo,omitempty"`
-	SourceSystem       *string          `json:"source_system,omitempty"`
+
+	// Design Hydrated design body when available; collection responses may omit it.
+	Design *string `json:"design,omitempty"`
+
+	// DesignArtifactId Managed FleetDB artifact reference for the design body.
+	DesignArtifactId *string    `json:"design_artifact_id,omitempty"`
+	DueAt            *time.Time `json:"due_at,omitempty"`
+	EstimatedMinutes *int       `json:"estimated_minutes,omitempty"`
+	ExternalRef      *string    `json:"external_ref,omitempty"`
+
+	// HasDesign True for either a legacy inline or artifact-backed design.
+	HasDesign    *bool           `json:"has_design,omitempty"`
+	Id           string          `json:"id"`
+	IssueType    *IssueIssueType `json:"issue_type,omitempty"`
+	Labels       *[]string       `json:"labels,omitempty"`
+	LastActivity *time.Time      `json:"last_activity,omitempty"`
+	MolType      *string         `json:"mol_type,omitempty"`
+	Notes        *string         `json:"notes,omitempty"`
+	Owner        *string         `json:"owner,omitempty"`
+	Parent       *string         `json:"parent,omitempty"`
+	Pinned       *bool           `json:"pinned,omitempty"`
+	Priority     int             `json:"priority"`
+	Rig          *string         `json:"rig,omitempty"`
+	RoleType     *string         `json:"role_type,omitempty"`
+	SourceRepo   *string         `json:"source_repo,omitempty"`
+	SourceSystem *string         `json:"source_system,omitempty"`
 
 	// Status User-facing statuses. Internal statuses (tombstone, pinned, hooked)
 	// are not settable via the API and excluded from this enum.
@@ -1923,35 +1939,41 @@ type IssueEvent struct {
 
 // IssueResponse Full issue detail returned by get-single-issue endpoint. Includes dependency/dependent refs, comments, and counts.
 type IssueResponse struct {
-	AcceptanceCriteria *string                `json:"acceptance_criteria,omitempty"`
-	Assignee           *string                `json:"assignee,omitempty"`
-	CloseReason        *string                `json:"close_reason,omitempty"`
-	ClosedAt           *time.Time             `json:"closed_at,omitempty"`
-	Comments           []CommentResponse      `json:"comments"`
-	CreatedAt          time.Time              `json:"created_at"`
-	DeferUntil         *time.Time             `json:"defer_until,omitempty"`
-	Dependencies       []DependencyRef        `json:"dependencies"`
-	DependencyCount    int                    `json:"dependency_count"`
-	DependentCount     int                    `json:"dependent_count"`
-	Dependents         []DependencyRef        `json:"dependents"`
-	Description        *string                `json:"description,omitempty"`
-	Design             *string                `json:"design,omitempty"`
-	DueAt              *time.Time             `json:"due_at,omitempty"`
-	EstimatedMinutes   *int                   `json:"estimated_minutes,omitempty"`
-	ExternalRef        *string                `json:"external_ref,omitempty"`
-	Id                 string                 `json:"id"`
-	IssueType          IssueResponseIssueType `json:"issue_type"`
-	Labels             []string               `json:"labels"`
-	Notes              *string                `json:"notes,omitempty"`
-	Owner              *string                `json:"owner,omitempty"`
-	Parent             *string                `json:"parent,omitempty"`
-	ParentTitle        *string                `json:"parent_title,omitempty"`
-	Pinned             bool                   `json:"pinned"`
-	Priority           int                    `json:"priority"`
-	SourceRepo         *string                `json:"source_repo,omitempty"`
-	Status             IssueResponseStatus    `json:"status"`
-	Title              string                 `json:"title"`
-	UpdatedAt          time.Time              `json:"updated_at"`
+	AcceptanceCriteria *string           `json:"acceptance_criteria,omitempty"`
+	Assignee           *string           `json:"assignee,omitempty"`
+	CloseReason        *string           `json:"close_reason,omitempty"`
+	ClosedAt           *time.Time        `json:"closed_at,omitempty"`
+	Comments           []CommentResponse `json:"comments"`
+	CreatedAt          time.Time         `json:"created_at"`
+	DeferUntil         *time.Time        `json:"defer_until,omitempty"`
+	Dependencies       []DependencyRef   `json:"dependencies"`
+	DependencyCount    int               `json:"dependency_count"`
+	DependentCount     int               `json:"dependent_count"`
+	Dependents         []DependencyRef   `json:"dependents"`
+	Description        *string           `json:"description,omitempty"`
+	Design             *string           `json:"design,omitempty"`
+
+	// DesignArtifactId Managed FleetDB artifact reference for the design body.
+	DesignArtifactId *string    `json:"design_artifact_id,omitempty"`
+	DueAt            *time.Time `json:"due_at,omitempty"`
+	EstimatedMinutes *int       `json:"estimated_minutes,omitempty"`
+	ExternalRef      *string    `json:"external_ref,omitempty"`
+
+	// HasDesign True for either a legacy inline or artifact-backed design.
+	HasDesign   *bool                  `json:"has_design,omitempty"`
+	Id          string                 `json:"id"`
+	IssueType   IssueResponseIssueType `json:"issue_type"`
+	Labels      []string               `json:"labels"`
+	Notes       *string                `json:"notes,omitempty"`
+	Owner       *string                `json:"owner,omitempty"`
+	Parent      *string                `json:"parent,omitempty"`
+	ParentTitle *string                `json:"parent_title,omitempty"`
+	Pinned      bool                   `json:"pinned"`
+	Priority    int                    `json:"priority"`
+	SourceRepo  *string                `json:"source_repo,omitempty"`
+	Status      IssueResponseStatus    `json:"status"`
+	Title       string                 `json:"title"`
+	UpdatedAt   time.Time              `json:"updated_at"`
 }
 
 // IssueResponseIssueType defines model for IssueResponse.IssueType.
@@ -2522,25 +2544,33 @@ type TreeNode struct {
 	Dependencies       *[]Dependency       `json:"dependencies,omitempty"`
 	Depth              int                 `json:"depth"`
 	Description        *string             `json:"description,omitempty"`
-	Design             *string             `json:"design,omitempty"`
-	DueAt              *time.Time          `json:"due_at,omitempty"`
-	EstimatedMinutes   *int                `json:"estimated_minutes,omitempty"`
-	ExternalRef        *string             `json:"external_ref,omitempty"`
-	Id                 string              `json:"id"`
-	IssueType          *TreeNodeIssueType  `json:"issue_type,omitempty"`
-	Labels             *[]string           `json:"labels,omitempty"`
-	LastActivity       *time.Time          `json:"last_activity,omitempty"`
-	MolType            *string             `json:"mol_type,omitempty"`
-	Notes              *string             `json:"notes,omitempty"`
-	Owner              *string             `json:"owner,omitempty"`
-	Parent             *string             `json:"parent,omitempty"`
-	ParentId           string              `json:"parent_id"`
-	Pinned             *bool               `json:"pinned,omitempty"`
-	Priority           int                 `json:"priority"`
-	Rig                *string             `json:"rig,omitempty"`
-	RoleType           *string             `json:"role_type,omitempty"`
-	SourceRepo         *string             `json:"source_repo,omitempty"`
-	SourceSystem       *string             `json:"source_system,omitempty"`
+
+	// Design Hydrated design body when available; collection responses may omit it.
+	Design *string `json:"design,omitempty"`
+
+	// DesignArtifactId Managed FleetDB artifact reference for the design body.
+	DesignArtifactId *string    `json:"design_artifact_id,omitempty"`
+	DueAt            *time.Time `json:"due_at,omitempty"`
+	EstimatedMinutes *int       `json:"estimated_minutes,omitempty"`
+	ExternalRef      *string    `json:"external_ref,omitempty"`
+
+	// HasDesign True for either a legacy inline or artifact-backed design.
+	HasDesign    *bool              `json:"has_design,omitempty"`
+	Id           string             `json:"id"`
+	IssueType    *TreeNodeIssueType `json:"issue_type,omitempty"`
+	Labels       *[]string          `json:"labels,omitempty"`
+	LastActivity *time.Time         `json:"last_activity,omitempty"`
+	MolType      *string            `json:"mol_type,omitempty"`
+	Notes        *string            `json:"notes,omitempty"`
+	Owner        *string            `json:"owner,omitempty"`
+	Parent       *string            `json:"parent,omitempty"`
+	ParentId     string             `json:"parent_id"`
+	Pinned       *bool              `json:"pinned,omitempty"`
+	Priority     int                `json:"priority"`
+	Rig          *string            `json:"rig,omitempty"`
+	RoleType     *string            `json:"role_type,omitempty"`
+	SourceRepo   *string            `json:"source_repo,omitempty"`
+	SourceSystem *string            `json:"source_system,omitempty"`
 
 	// Status User-facing statuses. Internal statuses (tombstone, pinned, hooked)
 	// are not settable via the API and excluded from this enum.

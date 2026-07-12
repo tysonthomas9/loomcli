@@ -130,6 +130,10 @@ func addOptionalIssueFields(out map[string]any, d *backend.IssueData) {
 	if d.Design != "" {
 		out["design"] = d.Design
 	}
+	out["has_design"] = d.HasDesign || d.Design != ""
+	if d.DesignArtifactID != "" {
+		out["design_artifact_id"] = d.DesignArtifactID
+	}
 	if d.DueAt != nil {
 		out["due_at"] = d.DueAt
 	}

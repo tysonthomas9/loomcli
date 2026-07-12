@@ -55,16 +55,18 @@ func TestIsOpen(t *testing.T) {
 
 func TestHasDesign(t *testing.T) {
 	tests := []struct {
-		name   string
-		design string
-		want   bool
+		name      string
+		design    string
+		hasDesign bool
+		want      bool
 	}{
-		{"has design", "## Design\nSome plan", true},
-		{"empty", "", false},
+		{"inline design", "## Design\nSome plan", false, true},
+		{"artifact-backed collection item", "", true, true},
+		{"empty", "", false, false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			issue := backend.IssueData{Design: tt.design}
+			issue := backend.IssueData{Design: tt.design, HasDesign: tt.hasDesign}
 			if got := HasDesign(issue); got != tt.want {
 				t.Errorf("HasDesign() = %v, want %v", got, tt.want)
 			}

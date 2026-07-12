@@ -19,6 +19,8 @@ func (i *Issue) ComputeContentHash() string {
 	w.str(i.Title)
 	w.str(i.Description)
 	w.str(i.Design)
+	w.str(i.DesignArtifactID)
+	w.boolField(i.HasDesign, "has_design")
 	w.str(i.AcceptanceCriteria)
 	w.str(i.Notes)
 	w.str(string(i.Status))

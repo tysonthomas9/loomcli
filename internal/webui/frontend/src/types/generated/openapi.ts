@@ -2367,7 +2367,12 @@ export interface components {
       id: string;
       title: string;
       description?: string;
+      /** @description Hydrated design body when available; collection responses may omit it. */
       design?: string;
+      /** @description Managed FleetDB artifact reference for the design body. */
+      design_artifact_id?: string;
+      /** @description True for either a legacy inline or artifact-backed design. */
+      has_design?: boolean;
       acceptance_criteria?: string;
       notes?: string;
       /**
@@ -2430,6 +2435,10 @@ export interface components {
       title: string;
       description?: string;
       design?: string;
+      /** @description Managed FleetDB artifact reference for the design body. */
+      design_artifact_id?: string;
+      /** @description True for either a legacy inline or artifact-backed design. */
+      has_design?: boolean;
       acceptance_criteria?: string;
       notes?: string;
       /** @enum {string} */

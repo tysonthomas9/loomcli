@@ -32,8 +32,11 @@ type IssueData struct {
 	Labels     []string `json:"labels,omitempty"`
 	SourceRepo string   `json:"source_repo,omitempty"`
 	Parent     string   `json:"parent,omitempty"`
-	// Populated by backends that include design in list queries.
-	Design string `json:"design,omitempty"`
+	// Collection responses may omit a large design body while retaining its
+	// stable presence flag and managed-artifact reference.
+	Design           string `json:"design,omitempty"`
+	DesignArtifactID string `json:"design_artifact_id,omitempty"`
+	HasDesign        bool   `json:"has_design"`
 	// Notes is in the slim list projection (not detail-only) so kanban/filter
 	// UIs can categorize a blocked issue that carries an external-blocker note
 	// (the "blocked with notes" needs-attention state) without a detail fetch.

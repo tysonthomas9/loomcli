@@ -16,6 +16,8 @@ type Issue struct {
 	Title              string `json:"title"`
 	Description        string `json:"description,omitempty"`
 	Design             string `json:"design,omitempty"`
+	DesignArtifactID   string `json:"design_artifact_id,omitempty"`
+	HasDesign          bool   `json:"has_design"`
 	AcceptanceCriteria string `json:"acceptance_criteria,omitempty"`
 	Notes              string `json:"notes,omitempty"`
 
