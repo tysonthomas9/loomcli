@@ -48,6 +48,7 @@ podman run --rm \
     -e "CODEX_CLI_VERSION=${CODEX_CLI_VERSION:-latest}" \
     -e "ARTIFACTS_OUT=/artifacts" \
     -e "LOOM_FLUE_RUNTIME_ROOT=/opt/flue/packages/runtime" \
+    -e "DAYTONA_SDK_ROOT=/opt/flue/node_modules/.pnpm/node_modules/@daytona/sdk" \
     -e 'LOOM_REAL_FLUE_CMD_JSON=["node","/opt/flue/packages/cli/bin/flue.mjs"]' \
     -v "$FLEET_DB_BIN:/usr/local/bin/fleet-db:ro" \
     -v "$FLUE_REPO:/opt/flue:ro" \
