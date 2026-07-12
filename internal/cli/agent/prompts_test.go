@@ -636,6 +636,110 @@ func TestGenerateConflictResolutionPrompt_DelegatesToInternal(t *testing.T) {
 	}
 }
 
+func TestGenerateTerminalPromptUsesBuiltInLeadWhenPromptFileEmpty(t *testing.T) {
+	prompt, err := GenerateTerminalPrompt("")
+	if err != nil {
+		t.Fatalf("GenerateTerminalPrompt empty: %v", err)
+	}
+	if prompt != GenerateLeadPrompt() {
+		t.Fatal("GenerateTerminalPrompt empty did not preserve built-in lead prompt")
+	}
+}
+
+func TestGenerateTerminalPromptBuiltinPRReview(t *testing.T) {
+	t.Setenv("LOOM_AGENT_NAME", "review-nova")
+	t.Setenv("LOOM_AGENT_ROLE", "pr-review")
+
+	prompt, err := GenerateTerminalPrompt("builtin:pr-review")
+	if err != nil {
+		t.Fatalf("GenerateTerminalPrompt builtin pr-review: %v", err)
+	}
+	for _, want := range []string{
+		"PR-REVIEW-READY",
+		"You are review-nova (role pr-review)",
+		"gh pr diff",
+		"ASK before posting",
+		"Multi-Agent Safety Rules",
+	} {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("builtin pr-review prompt missing %q", want)
+		}
+	}
+	if got := strings.Count(prompt, "Multi-Agent Safety Rules"); got != 1 {
+		t.Fatalf("safety block count = %d, want 1", got)
+	}
+}
+
+func TestGenerateTerminalPromptBuiltinLeadMatchesLeadPrompt(t *testing.T) {
+	prompt, err := GenerateTerminalPrompt("builtin:lead")
+	if err != nil {
+		t.Fatalf("GenerateTerminalPrompt builtin lead: %v", err)
+	}
+	if prompt != GenerateLeadPrompt() {
+		t.Fatal("builtin:lead did not render the built-in lead prompt")
+	}
+	if got := strings.Count(prompt, "Multi-Agent Safety Rules"); got != 1 {
+		t.Fatalf("safety block count = %d, want 1", got)
+	}
+}
+
+func TestGenerateTerminalPromptBuiltinUnknownErrors(t *testing.T) {
+	_, err := GenerateTerminalPrompt("builtin:nope")
+	if err == nil {
+		t.Fatal("GenerateTerminalPrompt builtin:nope error = nil, want error")
+	}
+	if !strings.Contains(err.Error(), `unknown built-in interactive prompt "nope"`) {
+		t.Fatalf("error = %q, want unknown built-in prompt", err.Error())
+	}
+}
+
+func TestGenerateTerminalPromptCustomReplacesBaseAndAppendsSafety(t *testing.T) {
+	t.Setenv("LOOM_AGENT_NAME", "nova")
+	t.Setenv("LOOM_AGENT_ROLE", "operator")
+	promptFile := filepath.Join(t.TempDir(), "terminal.md")
+	if err := os.WriteFile(promptFile, []byte("Custom terminal for {{.AgentName}}/{{.WorktreeName}} as {{.Role}}"), 0644); err != nil {
+		t.Fatalf("write prompt: %v", err)
+	}
+
+	prompt, err := GenerateTerminalPrompt(promptFile)
+	if err != nil {
+		t.Fatalf("GenerateTerminalPrompt custom: %v", err)
+	}
+	if !strings.HasPrefix(prompt, "Custom terminal for nova/nova as operator") {
+		t.Fatalf("prompt = %q, want custom prompt as base", prompt)
+	}
+	if strings.Contains(prompt, "Lead Mode") {
+		t.Fatalf("prompt contains built-in lead template, want custom prompt replacement")
+	}
+	if !strings.Contains(prompt, "Multi-Agent Safety Rules") {
+		t.Fatalf("prompt missing appended safety guardrails")
+	}
+}
+
+func TestGenerateTerminalPromptTextPreservesLiteralTextAndAppendsSafetyOnce(t *testing.T) {
+	text := "Literal {{ .AgentName }} marker"
+	prompt, err := GenerateTerminalPromptText(text)
+	if err != nil {
+		t.Fatalf("GenerateTerminalPromptText: %v", err)
+	}
+	if !strings.HasPrefix(prompt, text) {
+		t.Fatalf("prompt = %q, want literal prefix %q", prompt, text)
+	}
+	if got := strings.Count(prompt, "Multi-Agent Safety Rules"); got != 1 {
+		t.Fatalf("safety block count = %d, want 1", got)
+	}
+}
+
+func TestGenerateTerminalPromptMissingFileErrors(t *testing.T) {
+	_, err := GenerateTerminalPrompt(filepath.Join(t.TempDir(), "missing.md"))
+	if err == nil {
+		t.Fatal("GenerateTerminalPrompt missing file error = nil, want error")
+	}
+	if !strings.Contains(err.Error(), "reading prompt template") && !strings.Contains(err.Error(), "not found") {
+		t.Fatalf("error = %q, want clear prompt file error", err.Error())
+	}
+}
+
 func TestGenerateFleetPlanningPrompt(t *testing.T) {
 	tests := []struct {
 		name      string

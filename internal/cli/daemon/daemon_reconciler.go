@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"reflect"
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/cli"
@@ -60,6 +61,7 @@ func (d *Daemon) reloadAndReconcile() {
 
 	oldAgents := d.config.Agents
 	added, removed, modified := diffAgents(oldAgents, newConfig.Agents)
+	modified = includeRoleConfigChanges(d.config.Roles, newConfig.Roles, oldAgents, newConfig.Agents, modified)
 
 	if len(added) == 0 && len(removed) == 0 && len(modified) == 0 {
 		d.config = newConfig
@@ -245,8 +247,13 @@ func (d *Daemon) drainAgents(entries []config.AgentEntry, label string) {
 
 // addNewAgents starts agents, skipping those manually stopped.
 func (d *Daemon) addNewAgents(entries []config.AgentEntry, label string) {
+	cfg := d.configSnapshot()
+	var roles map[string]config.RoleConfig
+	if cfg != nil {
+		roles = cfg.Roles
+	}
 	for _, entry := range entries {
-		if !entry.ShouldSupervise() {
+		if !entry.ShouldSuperviseWithRoles(roles) {
 			slog.Info("skipping "+label+" of agent with non-running desired state", "worktree", entry.Worktree, "desired_state", entry.DesiredState)
 			continue
 		}
@@ -285,6 +292,37 @@ func diffAgents(old, new []config.AgentEntry) (added, removed, modified []config
 		}
 	}
 	return
+}
+
+// includeRoleConfigChanges marks unchanged agent rows as modified when their
+// referenced role configuration changes and either the old or new role is
+// daemon-supervised. Role configuration is load-bearing daemon input (kind,
+// prompt, model, policy, and limits), so changing it must reconcile every
+// assigned worker even when the agent row itself is unchanged.
+func includeRoleConfigChanges(oldRoles, newRoles map[string]config.RoleConfig, oldAgents, newAgents, modified []config.AgentEntry) []config.AgentEntry {
+	oldByName := make(map[string]config.AgentEntry, len(oldAgents))
+	for _, entry := range oldAgents {
+		oldByName[entry.Worktree] = entry
+	}
+	modifiedNames := make(map[string]bool, len(modified))
+	for _, entry := range modified {
+		modifiedNames[entry.Worktree] = true
+	}
+	for _, newEntry := range newAgents {
+		oldEntry, exists := oldByName[newEntry.Worktree]
+		if !exists || modifiedNames[newEntry.Worktree] || oldEntry.Role != newEntry.Role {
+			continue
+		}
+		if reflect.DeepEqual(oldRoles[newEntry.Role], newRoles[newEntry.Role]) {
+			continue
+		}
+		if !oldEntry.ShouldSuperviseWithRoles(oldRoles) && !newEntry.ShouldSuperviseWithRoles(newRoles) {
+			continue
+		}
+		modified = append(modified, newEntry)
+		modifiedNames[newEntry.Worktree] = true
+	}
+	return modified
 }
 
 // computeConfigHash returns a SHA-256 hex digest of the serialized config.DaemonConfig.

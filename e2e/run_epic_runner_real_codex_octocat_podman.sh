@@ -7,6 +7,7 @@ IMAGE="${IMAGE:-loomcli-epic-runner-e2e}"
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 FLEET_DB_REPO="${FLEET_DB_REPO:-$ROOT_DIR/../../fleet-db}"
 FLEET_DB_BIN="${FLEET_DB_BIN:-}"
+FLUE_REPO="${FLUE_REPO:-$ROOT_DIR/../flue}"
 CODEX_HOME="${CODEX_HOME:-/private/tmp/codex-e2e-home}"
 ARTIFACTS_DIR="${ARTIFACTS_DIR:-/private/tmp/loom-real-codex-epic-artifacts}"
 EPIC_RUNNER_TIMEOUT="${EPIC_RUNNER_TIMEOUT:-900s}"
@@ -34,12 +35,23 @@ if [[ ! -d "$CODEX_HOME" ]]; then
     exit 1
 fi
 
+if [[ ! -d "$FLUE_REPO/packages/runtime" ]]; then
+    echo "Flue repo not found at $FLUE_REPO" >&2
+    echo "Set FLUE_REPO to the checkout containing packages/runtime." >&2
+    exit 1
+fi
+
 mkdir -p "$ARTIFACTS_DIR"
 
 podman run --rm \
     -e "EPIC_RUNNER_TIMEOUT=$EPIC_RUNNER_TIMEOUT" \
+    -e "CODEX_CLI_VERSION=${CODEX_CLI_VERSION:-latest}" \
     -e "ARTIFACTS_OUT=/artifacts" \
+    -e "LOOM_FLUE_RUNTIME_ROOT=/opt/flue/packages/runtime" \
+    -e "DAYTONA_SDK_ROOT=/opt/flue/node_modules/.pnpm/node_modules/@daytona/sdk" \
+    -e 'LOOM_REAL_FLUE_CMD_JSON=["node","/opt/flue/packages/cli/bin/flue.mjs"]' \
     -v "$FLEET_DB_BIN:/usr/local/bin/fleet-db:ro" \
+    -v "$FLUE_REPO:/opt/flue:ro" \
     -v "$ROOT_DIR/e2e/epic_runner_real_codex_octocat.sh:/usr/local/bin/epic_runner_real_codex_octocat.sh:ro" \
     -v "$CODEX_HOME:/root/.codex" \
     -v "$ARTIFACTS_DIR:/artifacts" \

@@ -19,6 +19,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/sessions/transcript"
 	"github.com/tysonthomas9/loomcli/internal/sessions/transcript/backends"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
+	"github.com/tysonthomas9/loomcli/internal/webui/service/pathsec"
 	"github.com/tysonthomas9/loomcli/internal/webui/sessionhistory"
 )
 
@@ -201,14 +202,14 @@ func (s *testFileServiceImpl) ReadFile(_ context.Context, wsID, agentName, path 
 	if path == "" {
 		return nil, service.ErrValidation("path parameter is required")
 	}
-	if isDeniedPath(path) {
+	if pathsec.IsDeniedPath(path) {
 		return nil, service.ErrForbidden("access to this file type is denied")
 	}
 	fullPath := filepath.Join(wt.Path, filepath.Clean("/"+path))
 	if err := validatePathWithinDir(fullPath, wt.Path); err != nil {
 		return nil, service.ErrForbidden("path outside worktree")
 	}
-	if isDeniedPath(fullPath) {
+	if pathsec.IsDeniedPath(fullPath) {
 		return nil, service.ErrForbidden("access to this file type is denied")
 	}
 	fi, err := os.Lstat(fullPath)
@@ -253,14 +254,14 @@ func (s *testFileServiceImpl) WriteFile(_ context.Context, wsID, agentName, path
 	if path == "" {
 		return service.ErrValidation("path parameter is required")
 	}
-	if isDeniedPath(path) {
+	if pathsec.IsDeniedPath(path) {
 		return service.ErrForbidden("access to this file type is denied")
 	}
 	fullPath := filepath.Join(wt.Path, filepath.Clean("/"+path))
 	if err := validatePathWithinDir(fullPath, wt.Path); err != nil {
 		return service.ErrForbidden("path outside worktree")
 	}
-	if isDeniedPath(fullPath) {
+	if pathsec.IsDeniedPath(fullPath) {
 		return service.ErrForbidden("access to this file type is denied")
 	}
 	if writeErr := ValidateParentDir(fullPath, wt.Path); writeErr != nil {

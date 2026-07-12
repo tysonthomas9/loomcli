@@ -25,8 +25,6 @@ import (
 
 const (
 	terminalKindAgent = "agent"
-	roleLead          = "lead"
-	roleOrchestrator  = "orchestrator"
 	rolePlan          = "plan"
 	roleTask          = "task"
 )
@@ -84,8 +82,13 @@ func ensureAgentTerminalSession(ctx context.Context, svc service.TerminalService
 	if err != nil {
 		return nil, err
 	}
+	role, err := loadAgentLaunchRole(ctx, st, workspace, agent.RoleName)
+	if err != nil {
+		return nil, err
+	}
+	roleKind := domain.ResolveRoleKind(role, agent.RoleName)
 
-	if isDaemonOwnedEphemeralWorker(agent) {
+	if isDaemonOwnedEphemeralWorker(agent, roleKind) {
 		return nil, service.ErrValidation("daemon-owned ephemeral worker terminals cannot be started from the agents page; use worker logs or task session history")
 	}
 
@@ -107,12 +110,12 @@ func ensureAgentTerminalSession(ctx context.Context, svc service.TerminalService
 			return existing, nil
 		}
 	}
-	if !agentTerminalLaunchAllowed(agent) {
+	if !agentTerminalLaunchAllowed(agent, roleKind) {
 		return inactiveAgentTerminalSession(ctx, svc, workspace, existing)
 	}
 
 	sessionName, label, sortOrder := newAgentTerminalTabPlacement(tabs, existing, agentName)
-	agentForLaunch, orchestratorID, err := ensureLeadOrchestratorLink(ctx, st, workspace, sessionName, agent)
+	agentForLaunch, orchestratorID, err := ensureTerminalOrchestratorLink(ctx, st, workspace, sessionName, agent, roleKind)
 	if err != nil {
 		return nil, err
 	}
@@ -189,17 +192,17 @@ func newAgentTerminalTabPlacement(tabs []tabmeta.TabMetadata, existing *tabmeta.
 	return sessionName, label, sortOrder
 }
 
-// ensureLeadOrchestratorLink resolves (or creates) the lead's orchestration
-// session and returns its session id alongside the agent copy. The id is
+// ensureTerminalOrchestratorLink resolves (or creates) the terminal agent's
+// orchestration session and returns its session id alongside the agent copy. The id is
 // carried as a separate return value rather than on the domain.Agent struct
 // — AgentSession is the single source of truth, accessed via this function
 // and store.OrchestrationSessionIDFor.
-func ensureLeadOrchestratorLink(ctx context.Context, st store.Store, workspace, sessionName string, agent *domain.Agent) (domain.Agent, string, error) {
+func ensureTerminalOrchestratorLink(ctx context.Context, st store.Store, workspace, sessionName string, agent *domain.Agent, kind domain.RoleKind) (domain.Agent, string, error) {
 	agentForLaunch := *agent
-	if !isLeadRole(agentForLaunch.RoleName) {
+	if kind != domain.RoleKindInteractive {
 		return agentForLaunch, "", nil
 	}
-	// Skip when this lead already has an active orchestration session.
+	// Skip when this terminal agent already has an active orchestration session.
 	if existingID, err := store.OrchestrationSessionIDFor(ctx, st, workspace, agentForLaunch.Name); err == nil && existingID != "" {
 		return agentForLaunch, existingID, nil
 	}
@@ -243,21 +246,21 @@ func lockAgentTerminalSession(workspace, agentName string) func() {
 	return mu.Unlock
 }
 
-func agentTerminalLaunchAllowed(agent *domain.Agent) bool {
+func agentTerminalLaunchAllowed(agent *domain.Agent, kind domain.RoleKind) bool {
 	if agent == nil {
 		return false
 	}
-	if isLeadRole(agent.RoleName) {
+	if kind == domain.RoleKindInteractive {
 		return true
 	}
 	return agent.State != domain.AgentStateStopped && agent.DesiredState != domain.AgentDesiredStopped
 }
 
-func isDaemonOwnedEphemeralWorker(agent *domain.Agent) bool {
+func isDaemonOwnedEphemeralWorker(agent *domain.Agent, kind domain.RoleKind) bool {
 	if agent == nil {
 		return false
 	}
-	return agent.Mode == domain.AgentModeEphemeral && !isLeadRole(agent.RoleName)
+	return agent.Mode == domain.AgentModeEphemeral && kind != domain.RoleKindInteractive
 }
 
 func disableStoredAgentLaunch(ctx context.Context, svc service.TerminalService, workspace string, existing *tabmeta.TabMetadata) (*tabmeta.TabMetadata, error) {
@@ -311,16 +314,16 @@ func pruneStaleAgentTerminalTabs(ctx context.Context, svc service.TerminalServic
 
 // buildAgentLaunchSpec constructs the PTY launch spec for an agent terminal.
 // orchestratorID is the lead → orchestration session id resolved by
-// ensureLeadOrchestratorLink. It is passed in rather than read off the
+// ensureTerminalOrchestratorLink. It is passed in rather than read off the
 // agent struct because AgentSession is the single source of truth.
 func buildAgentLaunchSpec(ctx context.Context, st store.Store, workspace, sessionName string, agent *domain.Agent, orchestratorID string) (*tabmeta.LaunchSpec, string, error) {
-	roleName := strings.ToLower(strings.TrimSpace(agent.RoleName))
 	role, err := loadAgentLaunchRole(ctx, st, workspace, agent.RoleName)
 	if err != nil {
 		return nil, "", err
 	}
+	roleKind := domain.ResolveRoleKind(role, agent.RoleName)
 	backend := agentLaunchBackend(ctx, st, workspace, agent, role)
-	commandArgs, err := agentLaunchCommandArgs(roleName, agent, role)
+	commandArgs, err := agentLaunchCommandArgs(roleKind, agent, role)
 	if err != nil {
 		return nil, "", err
 	}
@@ -384,10 +387,16 @@ func agentLaunchBaseArgs(workspace, backend string) []string {
 	return args
 }
 
-func agentLaunchCommandArgs(roleName string, agent *domain.Agent, role *domain.Role) ([]string, error) {
+func agentLaunchCommandArgs(kind domain.RoleKind, agent *domain.Agent, role *domain.Role) ([]string, error) {
+	roleName := strings.ToLower(strings.TrimSpace(agent.RoleName))
+	if kind == domain.RoleKindInteractive {
+		args := []string{"lead"}
+		if role != nil && strings.TrimSpace(role.Prompt) == "" && strings.TrimSpace(role.PromptFile) != "" {
+			args = append(args, "--prompt", role.PromptFile)
+		}
+		return args, nil
+	}
 	switch roleName {
-	case roleLead, roleOrchestrator:
-		return []string{"lead"}, nil
 	case rolePlan, roleTask:
 		return builtInAgentLaunchArgs(roleName, agent), nil
 	default:
@@ -452,13 +461,4 @@ func createLeadOrchestratorSession(ctx context.Context, st store.Store, workspac
 		return service.ErrInternal("failed to create lead orchestrator session", err)
 	}
 	return nil
-}
-
-func isLeadRole(role string) bool {
-	switch strings.ToLower(strings.TrimSpace(role)) {
-	case roleLead, roleOrchestrator:
-		return true
-	default:
-		return false
-	}
 }

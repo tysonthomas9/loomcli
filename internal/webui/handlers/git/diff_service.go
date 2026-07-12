@@ -12,6 +12,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/rpc"
 	"github.com/tysonthomas9/loomcli/internal/webui/daemon"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
+	"github.com/tysonthomas9/loomcli/internal/webui/service/pathsec"
 )
 
 // Compile-time check.
@@ -128,7 +129,7 @@ func (s *diffServiceImpl) DiffFilePatch(ctx context.Context, wsID, agentName, fr
 	if filePath == "" {
 		return nil, service.ErrValidation("missing required parameter: path")
 	}
-	if !validateDiffPath(filePath) {
+	if !pathsec.ValidateDiffPath(filePath) {
 		return nil, service.ErrValidation("invalid path: must be relative with no '..' traversal")
 	}
 

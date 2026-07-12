@@ -16,6 +16,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/cli/backends"
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
 	"github.com/tysonthomas9/loomcli/internal/cli/git"
+	"github.com/tysonthomas9/loomcli/internal/domain"
 )
 
 //go:embed prompts/*.md
@@ -24,6 +25,7 @@ var promptFS embed.FS
 // promptTemplateData holds all template context fields for prompt rendering.
 type promptTemplateData struct {
 	AgentName         string
+	Role              string
 	WorkspaceBlock    string
 	EpicScope         string
 	SafetyBlock       string
@@ -37,6 +39,14 @@ type promptTemplateData struct {
 	TargetBranch      string
 	ConflictList      string
 	PushRef           string
+}
+
+// BuiltinInteractivePrompt is a selectable built-in terminal-agent prompt.
+type BuiltinInteractivePrompt = domain.BuiltinInteractivePrompt
+
+// BuiltinInteractivePrompts returns the built-in interactive terminal prompts.
+func BuiltinInteractivePrompts() []BuiltinInteractivePrompt {
+	return domain.BuiltinInteractivePrompts()
 }
 
 // renderPrompt loads a template by name, checks for per-project override,
@@ -342,9 +352,98 @@ func GenerateLeadPrompt() string {
 // GenerateReviewPrompt renders the read-only PR-reviewer persona used by the
 // per-PR review agents the web UI stands up (name shape review-<repo>-pr-<N>).
 // Unlike the lead prompt it has no backlog/startup section, so the reviewer
-// boots straight into review mode with no project-management preamble.
+// boots straight into review mode with no project-management preamble. Distinct
+// from the "pr-review" builtin interactive prompt: this persona is bound to a
+// detached PR-head checkout and auto-reviews on boot.
 func GenerateReviewPrompt() string {
-	return renderPrompt("pr-review", promptTemplateData{})
+	return renderPrompt("pr-review-checkout", promptTemplateData{})
+}
+
+// GenerateTerminalPrompt creates the base prompt for the interactive terminal
+// agent runtime. Empty promptFile preserves the built-in lead prompt; a custom
+// prompt file replaces that base and still receives the terminal safety rules.
+func GenerateTerminalPrompt(promptFile string) (string, error) {
+	promptFile = strings.TrimSpace(promptFile)
+	if promptFile == "" {
+		return GenerateLeadPrompt(), nil
+	}
+	if strings.HasPrefix(promptFile, "builtin:") {
+		id := strings.TrimSpace(strings.TrimPrefix(promptFile, "builtin:"))
+		if !isBuiltinInteractivePrompt(id) {
+			return "", fmt.Errorf("unknown built-in interactive prompt %q", id)
+		}
+		return renderPrompt(id, terminalPromptTemplateData()), nil
+	}
+	path, err := resolveTerminalPromptPath(promptFile)
+	if err != nil {
+		return "", err
+	}
+	agentName, role := terminalPromptIdentity()
+	prompt, err := LoadPromptTemplate(path, PromptData{
+		AgentName:    agentName,
+		WorktreeName: agentName,
+		Role:         role,
+	})
+	if err != nil {
+		return "", err
+	}
+	return prompt + "\n\n" + buildSafetyGuardrailsBlock(), nil
+}
+
+// GenerateTerminalPromptText uses literal inline text as the terminal-agent
+// base prompt and appends the standard safety guardrails exactly once. Inline
+// text is intentionally not parsed as a Go template.
+func GenerateTerminalPromptText(text string) (string, error) {
+	return text + "\n\n" + buildSafetyGuardrailsBlock(), nil
+}
+
+func isBuiltinInteractivePrompt(id string) bool {
+	return domain.IsBuiltinInteractivePrompt(id)
+}
+
+func terminalPromptTemplateData() promptTemplateData {
+	agentName, role := terminalPromptIdentity()
+	return promptTemplateData{
+		AgentName:   agentName,
+		Role:        role,
+		SafetyBlock: buildSafetyGuardrailsBlock(),
+	}
+}
+
+func terminalPromptIdentity() (agentName, role string) {
+	agentName = strings.TrimSpace(os.Getenv("LOOM_AGENT_NAME"))
+	if agentName == "" {
+		agentName = "lead"
+	}
+	role = strings.TrimSpace(os.Getenv("LOOM_AGENT_ROLE"))
+	if role == "" {
+		role = "lead"
+	}
+	return agentName, role
+}
+
+func resolveTerminalPromptPath(promptFile string) (string, error) {
+	promptFile = strings.TrimSpace(promptFile)
+	if filepath.IsAbs(promptFile) {
+		return promptFile, nil
+	}
+	if cwd, err := os.Getwd(); err == nil {
+		candidate := filepath.Join(cwd, promptFile)
+		if _, statErr := os.Stat(candidate); statErr == nil {
+			return candidate, nil
+		} else if !os.IsNotExist(statErr) {
+			return "", fmt.Errorf("resolve prompt file %q relative to cwd: %w", promptFile, statErr)
+		}
+	}
+	if ws, err := config.ResolveActiveWorkspace(); err == nil && ws != nil && strings.TrimSpace(ws.Path) != "" {
+		candidate := filepath.Join(ws.Path, promptFile)
+		if _, statErr := os.Stat(candidate); statErr == nil {
+			return candidate, nil
+		} else if !os.IsNotExist(statErr) {
+			return "", fmt.Errorf("resolve prompt file %q relative to workspace %q: %w", promptFile, ws.Path, statErr)
+		}
+	}
+	return "", fmt.Errorf("prompt file %q not found relative to current directory or active workspace root", promptFile)
 }
 
 // injectCheckpointIfNotResuming adds the prior-attempt checkpoint to the prompt

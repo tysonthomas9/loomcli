@@ -10,6 +10,9 @@ export type {
 
 export { useCreateWorkspaceAgent } from "./useCreateWorkspaceAgent";
 
+export { useInteractivePrompts } from "./useInteractivePrompts";
+export type { UseInteractivePromptsReturn } from "./useInteractivePrompts";
+
 export { useIssueSessionMap } from "./useIssueSessionMap";
 export type { UseIssueSessionMapReturn } from "./useIssueSessionMap";
 

@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/agent"
 	"github.com/tysonthomas9/loomcli/internal/cli/clitest"
@@ -108,6 +109,92 @@ func TestRunLead_InvokesClaude(t *testing.T) {
 	// AgentName should be empty for lead mode (not claiming tasks)
 	if inv.agentName != "" {
 		t.Errorf("expected empty agentName for lead mode, got %q", inv.agentName)
+	}
+}
+
+func TestRunLeadUsesCustomTerminalPrompt(t *testing.T) {
+	t.Setenv("LOOM_LEAD_CONTROLLED", "0")
+	t.Setenv(envAgentName, "nova")
+	t.Setenv("LOOM_AGENT_ROLE", "operator")
+
+	tmpDir := t.TempDir()
+	tmpDir, _ = filepath.EvalSymlinks(tmpDir)
+	origDir, _ := os.Getwd()
+	os.Chdir(tmpDir)
+	t.Cleanup(func() { os.Chdir(origDir) })
+
+	promptFile := filepath.Join(tmpDir, "operator.md")
+	if err := os.WriteFile(promptFile, []byte("Operator prompt for {{.AgentName}} as {{.Role}}"), 0644); err != nil {
+		t.Fatalf("write prompt: %v", err)
+	}
+	oldPromptFile := leadPromptFile
+	oldMessage := leadMessage
+	leadPromptFile = promptFile
+	leadMessage = ""
+	t.Cleanup(func() {
+		leadPromptFile = oldPromptFile
+		leadMessage = oldMessage
+	})
+
+	cli.TestingResetBackendState(t)
+	mock := &mockBackend{name: "claude"}
+	cli.RegisterBackend(mock)
+	_ = cli.SetBackend("claude")
+
+	oldStdout := os.Stdout
+	r, w, _ := os.Pipe()
+	os.Stdout = w
+
+	runLead(nil, nil)
+
+	w.Close()
+	os.Stdout = oldStdout
+	var buf bytes.Buffer
+	buf.ReadFrom(r)
+
+	if len(mock.interactiveCalls) != 1 {
+		t.Fatalf("expected 1 Claude invocation, got %d", len(mock.interactiveCalls))
+	}
+	prompt := mock.interactiveCalls[0].prompt
+	if !strings.HasPrefix(prompt, "Operator prompt for nova as operator") {
+		t.Fatalf("prompt = %q, want custom terminal prompt", prompt)
+	}
+	if !strings.Contains(prompt, "Multi-Agent Safety Rules") {
+		t.Fatalf("prompt missing safety guardrails")
+	}
+}
+
+func TestGenerateLeadTerminalPromptUsesLiteralRolePrompt(t *testing.T) {
+	t.Setenv("LOOM_AGENT_ROLE", "operator")
+	st := memstore.New()
+	if _, err := st.Roles().Create(context.Background(), store.RoleCreate{
+		WorkspaceKey: "E2E",
+		Name:         "operator",
+		Kind:         string(domain.RoleKindInteractive),
+		Prompt:       "Literal {{ marker }}",
+		PromptFile:   "prompts/ignored.md",
+	}); err != nil {
+		t.Fatalf("create role: %v", err)
+	}
+	oldPromptFile := leadPromptFile
+	leadPromptFile = ""
+	t.Cleanup(func() { leadPromptFile = oldPromptFile })
+
+	prompt, err := generateLeadTerminalPrompt(context.Background(), leadSessionRegistration{
+		handle:    &bootstrap.StoreHandle{Store: st},
+		Workspace: "E2E",
+	})
+	if err != nil {
+		t.Fatalf("generateLeadTerminalPrompt: %v", err)
+	}
+	if !strings.HasPrefix(prompt, "Literal {{ marker }}") {
+		t.Fatalf("prompt = %q, want literal inline role prompt", prompt)
+	}
+	if strings.Contains(prompt, "prompts/ignored.md") {
+		t.Fatalf("prompt = %q, should not use role prompt_file", prompt)
+	}
+	if got := strings.Count(prompt, "Multi-Agent Safety Rules"); got != 1 {
+		t.Fatalf("safety block count = %d, want 1", got)
 	}
 }
 

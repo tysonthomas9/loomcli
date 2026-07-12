@@ -77,30 +77,11 @@ func TestSessionServiceListTaskSessionsUsesControlPlane(t *testing.T) {
 	}
 }
 
-func TestSessionServiceControlPlaneTranscriptRef(t *testing.T) {
+func TestSessionServiceCloudControlPlaneTranscriptArtifactReadContent(t *testing.T) {
 	ctx := t.Context()
 	st := memstore.New()
 	transcriptBody := []byte(`{"seq":1,"timestamp":"2026-06-09T12:00:00Z","role":"assistant","type":"text","text":"done"}` + "\n")
-	if _, err := st.Artifacts().Create(ctx, store.ArtifactCreate{
-		WorkspaceKey:  "WS",
-		ArtifactID:    "transcript-task-run-1",
-		SessionID:     "flue-task-run-1",
-		TaskID:        "TASK-FLUE-1",
-		OwnerType:     "task_run",
-		OwnerID:       "task-run-1",
-		Type:          "transcript",
-		MIMEType:      "application/x-ndjson",
-		DurableStatus: "declared",
-	}); err != nil {
-		t.Fatalf("create transcript artifact: %v", err)
-	}
-	uploaded, err := st.Artifacts().UploadContent(ctx, "WS", "transcript-task-run-1", store.ArtifactContentUpload{Body: bytes.NewReader(transcriptBody), MIMEType: "application/x-ndjson"})
-	if err != nil {
-		t.Fatalf("upload transcript artifact: %v", err)
-	}
-	if _, err := st.Artifacts().Finalize(ctx, "WS", "transcript-task-run-1", store.ArtifactFinalize{ContentHash: &uploaded.ContentHash}); err != nil {
-		t.Fatalf("finalize transcript artifact: %v", err)
-	}
+	createFinalizedArtifact(t, st, "transcript-task-run-1", "flue-task-run-1", "TASK-FLUE-1", "task-run-1", "transcript", "application/x-ndjson", transcriptBody)
 	if _, err := st.AgentSessions().Create(ctx, store.AgentSessionCreate{
 		WorkspaceKey:    "WS",
 		SessionID:       "flue-task-run-1",
@@ -136,6 +117,238 @@ func TestSessionServiceControlPlaneTranscriptRef(t *testing.T) {
 	}
 	if len(events) != 1 || events[0].Role != "assistant" || events[0].Text != "done" {
 		t.Fatalf("events = %+v, want assistant transcript", events)
+	}
+}
+
+func TestSessionServiceControlPlaneDiffArtifactReadContent(t *testing.T) {
+	ctx := t.Context()
+	st := memstore.New()
+	patchBody := []byte("diff --git a/file.txt b/file.txt\n+changed\n")
+	createFinalizedArtifact(t, st, "patch-task-run-1", "flue-task-run-1", "TASK-FLUE-1", "task-run-1", "patch", "text/x-diff", patchBody)
+	if _, err := st.AgentSessions().Create(ctx, store.AgentSessionCreate{
+		WorkspaceKey:    "WS",
+		SessionID:       "flue-task-run-1",
+		AgentID:         "flue-task-agent",
+		Kind:            domain.AgentSessionKindTask,
+		TaskID:          "TASK-FLUE-1",
+		ParentSessionID: "lead-session-1",
+		Status:          domain.AgentSessionCompleted,
+		Phase:           "implementation",
+		Metadata: map[string]string{
+			"runtime":           "flue",
+			"task_run_id":       "task-run-1",
+			"patch_artifact_id": "patch-task-run-1",
+		},
+	}); err != nil {
+		t.Fatalf("create flue control-plane session: %v", err)
+	}
+
+	svc := NewSessionService(st, nil)
+	items, err := svc.ListTaskSessions(ctx, "WS", "TASK-FLUE-1")
+	if err != nil {
+		t.Fatalf("ListTaskSessions: %v", err)
+	}
+	if len(items) != 1 || !items[0].HasDiff {
+		t.Fatalf("items = %+v, want control-plane session with diff", items)
+	}
+	diff, err := svc.GetSessionDiff(ctx, "WS", "TASK-FLUE-1", "flue-task-run-1")
+	if err != nil {
+		t.Fatalf("GetSessionDiff: %v", err)
+	}
+	if diff != string(patchBody) {
+		t.Fatalf("diff = %q, want %q", diff, patchBody)
+	}
+}
+
+func TestSessionServiceControlPlaneDiffFallsBackToPatchArtifactByTaskRun(t *testing.T) {
+	ctx := t.Context()
+	st := memstore.New()
+	patchBody := []byte("diff --git a/fallback.txt b/fallback.txt\n+fallback\n")
+	createFinalizedArtifact(t, st, "patch-task-run-fallback", "flue-task-run-2", "TASK-FLUE-2", "task-run-2", "patch", "text/x-diff", patchBody)
+	if _, err := st.AgentSessions().Create(ctx, store.AgentSessionCreate{
+		WorkspaceKey: "WS",
+		SessionID:    "flue-task-run-2",
+		AgentID:      "flue-task-agent",
+		Kind:         domain.AgentSessionKindTask,
+		TaskID:       "TASK-FLUE-2",
+		Status:       domain.AgentSessionCompleted,
+		Phase:        "implementation",
+		Metadata: map[string]string{
+			"runtime":     "flue",
+			"task_run_id": "task-run-2",
+		},
+	}); err != nil {
+		t.Fatalf("create flue control-plane session: %v", err)
+	}
+
+	diff, err := NewSessionService(st, nil).GetSessionDiff(ctx, "WS", "TASK-FLUE-2", "flue-task-run-2")
+	if err != nil {
+		t.Fatalf("GetSessionDiff: %v", err)
+	}
+	if diff != string(patchBody) {
+		t.Fatalf("diff = %q, want %q", diff, patchBody)
+	}
+}
+
+func TestSessionServiceControlPlaneDiffRejectsWrongTask(t *testing.T) {
+	ctx := t.Context()
+	st := memstore.New()
+	createFinalizedArtifact(t, st, "patch-task-run-1", "flue-task-run-1", "TASK-FLUE-1", "task-run-1", "patch", "text/x-diff", []byte("diff --git a/file.txt b/file.txt\n"))
+	if _, err := st.AgentSessions().Create(ctx, store.AgentSessionCreate{
+		WorkspaceKey: "WS",
+		SessionID:    "flue-task-run-1",
+		AgentID:      "flue-task-agent",
+		Kind:         domain.AgentSessionKindTask,
+		TaskID:       "TASK-FLUE-1",
+		Status:       domain.AgentSessionCompleted,
+		Phase:        "implementation",
+		Metadata: map[string]string{
+			"task_run_id":       "task-run-1",
+			"patch_artifact_id": "patch-task-run-1",
+		},
+	}); err != nil {
+		t.Fatalf("create flue control-plane session: %v", err)
+	}
+
+	_, err := NewSessionService(st, nil).GetSessionDiff(ctx, "WS", "TASK-OTHER", "flue-task-run-1")
+	assertServiceErrorKind(t, err, service.KindNotFound)
+}
+
+func TestSessionServiceControlPlaneDiffMissingPatchArtifact(t *testing.T) {
+	ctx := t.Context()
+	st := memstore.New()
+	if _, err := st.AgentSessions().Create(ctx, store.AgentSessionCreate{
+		WorkspaceKey: "WS",
+		SessionID:    "flue-task-run-1",
+		AgentID:      "flue-task-agent",
+		Kind:         domain.AgentSessionKindTask,
+		TaskID:       "TASK-FLUE-1",
+		Status:       domain.AgentSessionCompleted,
+		Phase:        "implementation",
+		Metadata: map[string]string{
+			"task_run_id":       "task-run-1",
+			"patch_artifact_id": "missing-patch",
+		},
+	}); err != nil {
+		t.Fatalf("create flue control-plane session: %v", err)
+	}
+
+	_, err := NewSessionService(st, nil).GetSessionDiff(ctx, "WS", "TASK-FLUE-1", "flue-task-run-1")
+	assertServiceErrorKind(t, err, service.KindNotFound)
+}
+
+func TestSessionServiceLocalDiffMissingFallsBackToControlPlaneArtifact(t *testing.T) {
+	ctx := t.Context()
+	runtimeDir := t.TempDir()
+	sessStore, err := sessions.NewStore(runtimeDir)
+	if err != nil {
+		t.Fatalf("new session store: %v", err)
+	}
+	sess, err := sessStore.CreateSession(sessions.CreateOptions{
+		AgentName: "worker-1",
+		Backend:   "codex",
+		Phase:     "implementation",
+	})
+	if err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+	if err := sess.Finalize(sessions.FinalizeOptions{TaskID: "TASK-FLUE-1", ExitCode: 0}); err != nil {
+		t.Fatalf("finalize session: %v", err)
+	}
+
+	st := memstore.New()
+	patchBody := []byte("diff --git a/local.txt b/local.txt\n+from artifact\n")
+	createFinalizedArtifact(t, st, "patch-task-run-1", sess.SessionID(), "TASK-FLUE-1", "task-run-1", "patch", "text/x-diff", patchBody)
+	if _, err := st.AgentSessions().Create(ctx, store.AgentSessionCreate{
+		WorkspaceKey: "WS",
+		SessionID:    sess.SessionID(),
+		AgentID:      "worker-1",
+		Kind:         domain.AgentSessionKindTask,
+		TaskID:       "TASK-FLUE-1",
+		Status:       domain.AgentSessionCompleted,
+		Phase:        "implementation",
+		Metadata: map[string]string{
+			"task_run_id":       "task-run-1",
+			"patch_artifact_id": "patch-task-run-1",
+		},
+	}); err != nil {
+		t.Fatalf("create control-plane session: %v", err)
+	}
+
+	diff, err := NewSessionServiceWithRuntimeDir(st, nil, runtimeDir).GetSessionDiff(ctx, "WS", "TASK-FLUE-1", sess.SessionID())
+	if err != nil {
+		t.Fatalf("GetSessionDiff: %v", err)
+	}
+	if diff != string(patchBody) {
+		t.Fatalf("diff = %q, want %q", diff, patchBody)
+	}
+}
+
+func TestSessionServiceLocalDiffMissingWithoutControlPlaneReturnsDiffNotFound(t *testing.T) {
+	runtimeDir := t.TempDir()
+	sessStore, err := sessions.NewStore(runtimeDir)
+	if err != nil {
+		t.Fatalf("new session store: %v", err)
+	}
+	sess, err := sessStore.CreateSession(sessions.CreateOptions{
+		AgentName: "worker-1",
+		Backend:   "codex",
+		Phase:     "implementation",
+	})
+	if err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+	if err := sess.Finalize(sessions.FinalizeOptions{TaskID: "TASK-FLUE-1", ExitCode: 0}); err != nil {
+		t.Fatalf("finalize session: %v", err)
+	}
+
+	_, err = NewSessionServiceWithRuntimeDir(nil, nil, runtimeDir).GetSessionDiff(t.Context(), "WS", "TASK-FLUE-1", sess.SessionID())
+	assertServiceError(t, err, service.KindNotFound, "diff not found")
+}
+
+func createFinalizedArtifact(t *testing.T, st *memstore.Store, artifactID, sessionID, taskID, ownerID, artifactType, mimeType string, body []byte) {
+	t.Helper()
+	if _, err := st.Artifacts().Create(t.Context(), store.ArtifactCreate{
+		WorkspaceKey:  "WS",
+		ArtifactID:    artifactID,
+		SessionID:     sessionID,
+		TaskID:        taskID,
+		OwnerType:     "task_run",
+		OwnerID:       ownerID,
+		Type:          artifactType,
+		MIMEType:      mimeType,
+		DurableStatus: "declared",
+	}); err != nil {
+		t.Fatalf("create %s artifact: %v", artifactType, err)
+	}
+	uploaded, err := st.Artifacts().UploadContent(t.Context(), "WS", artifactID, store.ArtifactContentUpload{Body: bytes.NewReader(body), MIMEType: mimeType})
+	if err != nil {
+		t.Fatalf("upload %s artifact: %v", artifactType, err)
+	}
+	if _, err := st.Artifacts().Finalize(t.Context(), "WS", artifactID, store.ArtifactFinalize{ContentHash: &uploaded.ContentHash}); err != nil {
+		t.Fatalf("finalize %s artifact: %v", artifactType, err)
+	}
+}
+
+func assertServiceErrorKind(t *testing.T, err error, want service.ErrorKind) {
+	t.Helper()
+	assertServiceError(t, err, want, "")
+}
+
+func assertServiceError(t *testing.T, err error, want service.ErrorKind, wantMessage string) {
+	t.Helper()
+	if err == nil {
+		t.Fatalf("error = nil, want %q", want)
+	}
+	var svcErr *service.ServiceError
+	if !errors.As(err, &svcErr) {
+		t.Fatalf("error = %T %v, want ServiceError kind %q", err, err, want)
+	}
+	if svcErr.Kind != want {
+		t.Fatalf("error kind = %q, want %q", svcErr.Kind, want)
+	}
+	if wantMessage != "" && svcErr.Message != wantMessage {
+		t.Fatalf("error message = %q, want %q", svcErr.Message, wantMessage)
 	}
 }
 

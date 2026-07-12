@@ -222,8 +222,8 @@ local-mode-webhook-verify:
 	@test/local-mode/verify-webhook.sh
 
 local-mode-codex-verify:
-	@LOOM_LOCAL_MODE_PLAN_TASK_ID="$${LOOM_LOCAL_MODE_PLAN_TASK_ID:-LOCALMODE-1}" \
-	  LOOM_LOCAL_MODE_CODE_TASK_ID="$${LOOM_LOCAL_MODE_CODE_TASK_ID:-LOCALMODE-2}" \
+	@LOOM_LOCAL_MODE_PLAN_TASK_ID="$${LOOM_LOCAL_MODE_PLAN_TASK_ID:-LOCALMODE-2}" \
+	  LOOM_LOCAL_MODE_CODE_TASK_ID="$${LOOM_LOCAL_MODE_CODE_TASK_ID:-LOCALMODE-3}" \
 	  test/local-mode/verify-local-mode.sh
 
 test-local-mode-harness: local-mode-verify

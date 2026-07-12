@@ -49,7 +49,9 @@ type runtimeCredentialsPatch struct {
 }
 
 type runtimeCredentialPatch struct {
-	APIKey *string `json:"api_key,omitempty"` //nolint:gosec // G117: request DTO field name, not an embedded credential
+	// #nosec G117 -- this is a credential-input PATCH DTO; carrying the api_key
+	// the operator is setting is the field's purpose, not an accidental leak.
+	APIKey *string `json:"api_key,omitempty"`
 	Token  *string `json:"token,omitempty"`
 	Clear  bool    `json:"clear,omitempty"`
 }
