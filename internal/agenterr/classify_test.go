@@ -1053,3 +1053,14 @@ func TestErrorClassString(t *testing.T) {
 		})
 	}
 }
+
+func TestClassifyFromOutput_IncompatibleBackendCLIIsTerminalModelFailure(t *testing.T) {
+	message := `The 'gpt-5.6-sol' model requires a newer version of Codex. Please upgrade to the latest app or CLI and try again.`
+	got := ClassifyFromOutput(message, 1, "codex")
+	if got.Class != ModelNotFound {
+		t.Fatalf("class = %s, want ModelNotFound", got.Class)
+	}
+	if got.Message != "backend CLI is incompatible with the selected model" {
+		t.Fatalf("message = %q", got.Message)
+	}
+}

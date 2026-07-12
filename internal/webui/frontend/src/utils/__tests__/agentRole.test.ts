@@ -141,7 +141,7 @@ describe("agentRailRank", () => {
 });
 
 describe("buildEpicLeadClaims", () => {
-  it("claims epics for interactive-kind agents and legacy leads", () => {
+  it("claims epics only for lead-capable role names", () => {
     const claims = buildEpicLeadClaims([
       makeAgent({
         name: "operator-a",
@@ -153,7 +153,7 @@ describe("buildEpicLeadClaims", () => {
       makeAgent({ name: "task-a", role: "task", parent: "EPIC-3" }),
     ]);
 
-    expect(claims.get("EPIC-1")).toBe("operator-a");
+    expect(claims.has("EPIC-1")).toBe(false);
     expect(claims.get("EPIC-2")).toBe("lead-a");
     expect(claims.has("EPIC-3")).toBe(false);
   });

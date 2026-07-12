@@ -308,8 +308,6 @@ export function CreateAgentModal({
       } = {};
       const isLeadSelection =
         selectedKind === "interactive" && selectedBuiltinPromptID === "lead";
-      const isPromptDrivenInteractive =
-        selectedKind === "interactive" && !isLeadSelection;
       if (selectedKind === "interactive") {
         if (selectedBuiltinPromptID === CUSTOM_PROMPT_ID) {
           roleName = trimmedName;
@@ -334,8 +332,8 @@ export function CreateAgentModal({
         name: trimmedName,
         role_name: roleName,
         auto: false,
-        cross_repo: isPromptDrivenInteractive ? false : crossRepo,
-        repos: isPromptDrivenInteractive || crossRepo ? [] : selectedRepos,
+        cross_repo: crossRepo,
+        repos: crossRepo ? [] : selectedRepos,
         ...interactiveFields,
       };
       const agent = await createAgent({
@@ -564,51 +562,48 @@ export function CreateAgentModal({
               </div>
             )}
 
-          {(selectedKind !== "interactive" ||
-            selectedBuiltinPromptID === "lead") && (
-            <div className={`${styles.fieldGroup} ${styles.fieldGroupSpaced}`}>
-              <span className={styles.label} id="agent-repos-label">
-                Repos
-              </span>
-              {repoOptions.length === 0 ? (
-                <p
-                  className={styles.emptyHint}
-                  data-testid="create-agent-no-repos"
-                >
-                  No repos yet — add one from the sidebar first. This agent will
-                  run with workspace scope.
-                </p>
-              ) : (
-                <div
-                  className={styles.repoChips}
-                  role="group"
-                  aria-labelledby="agent-repos-label"
-                  data-testid="create-agent-repo-chips"
-                >
-                  {repoOptions.map((repo) => {
-                    const on = selectedRepos.includes(repo);
-                    return (
-                      <button
-                        key={repo}
-                        type="button"
-                        className={styles.repoChip}
-                        data-active={on || undefined}
-                        aria-pressed={on}
-                        onClick={() => toggleRepo(repo)}
-                        disabled={isSubmitting}
-                      >
-                        <span className={styles.repoChipBox} aria-hidden="true">
-                          {on ? "✓" : ""}
-                        </span>
-                        {repo}
-                      </button>
-                    );
-                  })}
-                </div>
-              )}
-              <p className={styles.hint}>{repoHint}</p>
-            </div>
-          )}
+          <div className={`${styles.fieldGroup} ${styles.fieldGroupSpaced}`}>
+            <span className={styles.label} id="agent-repos-label">
+              Repos
+            </span>
+            {repoOptions.length === 0 ? (
+              <p
+                className={styles.emptyHint}
+                data-testid="create-agent-no-repos"
+              >
+                No repos yet — add one from the sidebar first. This agent will
+                run with workspace scope.
+              </p>
+            ) : (
+              <div
+                className={styles.repoChips}
+                role="group"
+                aria-labelledby="agent-repos-label"
+                data-testid="create-agent-repo-chips"
+              >
+                {repoOptions.map((repo) => {
+                  const on = selectedRepos.includes(repo);
+                  return (
+                    <button
+                      key={repo}
+                      type="button"
+                      className={styles.repoChip}
+                      data-active={on || undefined}
+                      aria-pressed={on}
+                      onClick={() => toggleRepo(repo)}
+                      disabled={isSubmitting}
+                    >
+                      <span className={styles.repoChipBox} aria-hidden="true">
+                        {on ? "✓" : ""}
+                      </span>
+                      {repo}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+            <p className={styles.hint}>{repoHint}</p>
+          </div>
         </div>
 
         {error && (

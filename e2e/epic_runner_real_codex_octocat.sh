@@ -5,6 +5,7 @@ ROOT="${RESULT_ROOT:-$(mktemp -d /tmp/loom-real-epic.XXXXXX)}"
 ARTIFACTS_OUT="${ARTIFACTS_OUT:-}"
 DAEMON_PID=""
 EPIC_RUNNER_TIMEOUT="${EPIC_RUNNER_TIMEOUT:-900s}"
+CODEX_CLI_VERSION="${CODEX_CLI_VERSION:-latest}"
 WORKSPACE_PATH="$ROOT/workspace"
 
 cleanup() {
@@ -51,6 +52,7 @@ export LOOM_WORKSPACE="OCTOREAL"
 export LOOM_BACKEND="codex"
 export LOOM_ISSUE_BACKEND="fleetdb"
 export LOOM_FLEET_DB_ACTOR="real-epic-runner-e2e"
+export LOOM_SDK_ROOT="${LOOM_SDK_ROOT:-/src/sdk}"
 export LEAD_SESSION_ID="lead-session-real-octocat"
 export GIT_AUTHOR_NAME="Loom Real E2E"
 export GIT_AUTHOR_EMAIL="loom-real-e2e@example.test"
@@ -63,10 +65,10 @@ git config --global user.email "$GIT_AUTHOR_EMAIL"
 git config --global --add safe.directory '*'
 
 rm -f /usr/local/bin/codex
-npm install -g @openai/codex@0.129.0 >/tmp/codex-install.log
+npm install -g "@openai/codex@$CODEX_CLI_VERSION" >/tmp/codex-install.log
 codex --version
 
-SEED="$ROOT/Hello-World"
+SEED="$ROOT/hello-world"
 REMOTE="$ROOT/hello-world.git"
 
 git clone https://github.com/octocat/Hello-World.git "$SEED"
@@ -94,6 +96,18 @@ git -C "$SEED" remote set-url origin "$REMOTE"
 git -C "$SEED" push -u origin "HEAD:$DEFAULT_BRANCH" >/dev/null
 
 loom workspace create "$LOOM_WORKSPACE" --repos "$SEED" --path "$WORKSPACE_PATH" --branch "$DEFAULT_BRANCH"
+
+sleep 0.5
+for _ in {1..40}; do
+    if loom workspace show --json "$LOOM_WORKSPACE" >/dev/null 2>&1; then
+        break
+    fi
+    sleep 0.25
+done
+if ! loom workspace show --json "$LOOM_WORKSPACE" >/dev/null 2>&1; then
+    echo "workspace did not become readable after creation" >&2
+    exit 1
+fi
 cd "$WORKSPACE_PATH"
 
 loom daemon > "$ROOT/daemon.log" 2>&1 &
@@ -143,7 +157,12 @@ TASK_B="$(create_issue \
     --depends-on "$TASK_A" \
     --design "$DESIGN_B")"
 
-loom role add lead --description "Lead orchestration agent" --backend codex
+if loom role show lead >/dev/null 2>&1; then
+    loom role set lead description "Lead orchestration agent" >/dev/null
+    loom role set lead backend codex >/dev/null
+else
+    loom role add lead --description "Lead orchestration agent" --backend codex
+fi
 loom agentdef add nova --role lead --auto --repos "$REPO_NAME"
 
 echo "WORKSPACE=$LOOM_WORKSPACE"
@@ -161,8 +180,7 @@ LOOM_ORCHESTRATOR_SESSION_ID="$LEAD_SESSION_ID" timeout "$EPIC_RUNNER_TIMEOUT" l
     --lead nova \
     --max-concurrency 1 \
     --interval-seconds 2 \
-    --node-id "$NODE_ID" \
-    --role task | tee "$ROOT/runner.log"
+    --node-id "$NODE_ID" | tee "$ROOT/runner.log"
 
 loom data --output json show "$TASK_A" | jq -e '.status == "closed"' >/dev/null
 loom data --output json show "$TASK_B" | jq -e '.status == "closed"' >/dev/null
