@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"time"
 
@@ -92,6 +93,9 @@ func NewServer(ctx context.Context, config webui.ServerConfig) (_ *Server, retEr
 	if config.ExtAuthURL == "" && config.BindAddress != "127.0.0.1" && config.BindAddress != "::1" {
 		logger.Warn("no authentication configured and server is exposed to network", "bind_address", config.BindAddress)
 	}
+	if config.ExtAuthURL != "" && config.WorkspaceRoleResolver == nil {
+		logger.Warn("remote file-browser requests will be DENIED (403): file browser RBAC not configured; configure a workspace role resolver to enable remote file access")
+	}
 	if config.FrontendDir == "" {
 		logger.Info("api-only mode — frontend served externally")
 	} else {
@@ -111,6 +115,7 @@ func NewServer(ctx context.Context, config webui.ServerConfig) (_ *Server, retEr
 	if app.actualPort != config.Port {
 		logger.Info("configured port in use, using fallback", "requested_port", config.Port, "actual_port", app.actualPort)
 	}
+	addBundledLoopbackFrontendOrigins(&app.config, app.actualPort)
 
 	// MultiPool for workspace-aware connection routing.
 	app.multiPool = appinfra.NewMultiPool(middleware.WorkspaceFromContext, config.PoolSize)
@@ -456,6 +461,27 @@ func NewServer(ctx context.Context, config webui.ServerConfig) (_ *Server, retEr
 	app.registerWorkerAPIRoutes()
 
 	return app, nil
+}
+
+func addBundledLoopbackFrontendOrigins(config *webui.ServerConfig, actualPort int) {
+	if config == nil || config.ExtAuthURL != "" || config.FrontendDir == "" || len(config.FrontendOrigins) > 0 || actualPort <= 0 {
+		return
+	}
+	if !isLoopbackBindAddress(config.BindAddress) {
+		return
+	}
+	config.FrontendOrigins = append(config.FrontendOrigins,
+		fmt.Sprintf("http://localhost:%d", actualPort),
+		fmt.Sprintf("http://127.0.0.1:%d", actualPort),
+	)
+}
+
+func isLoopbackBindAddress(bindAddress string) bool {
+	if bindAddress == "localhost" {
+		return true
+	}
+	ip := net.ParseIP(bindAddress)
+	return ip != nil && ip.IsLoopback()
 }
 
 func (app *Server) activateSSESubscriber(ctx context.Context, wsID string) {
