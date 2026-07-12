@@ -33,14 +33,19 @@ func (s *fileServiceImpl) GitStatusScoped(ctx context.Context, wsID string, scop
 	case service.ScopeWorkspace:
 		return s.workspaceGitStatus(ctx, wsID, target, repo)
 	case service.ScopeRepo, service.ScopeAgent:
-		root, err := s.resolveScopeRoot(wsID, scope, target, repo)
+		root, err := s.resolveScopedRoot(wsID, scope, target, repo)
 		if err != nil {
 			return service.FileGitStatusResult{}, err
 		}
-		if err := validateGitCheckoutRoot(root); err != nil {
+		defer root.Close()
+		if err := validateGitCheckoutRoot(root.path); err != nil {
 			return service.FileGitStatusResult{}, err
 		}
-		status, err := s.fileOps.GitStatusPorcelain(ctx, root)
+		gitCtx, err := withGitCheckoutIdentity(ctx, root.path, root)
+		if err != nil {
+			return service.FileGitStatusResult{}, err
+		}
+		status, err := s.fileOps.GitStatusPorcelain(gitCtx, root.path)
 		if err != nil {
 			return service.FileGitStatusResult{}, mapGitInspectionError("failed to run git status", err)
 		}
@@ -211,10 +216,15 @@ func (s *fileServiceImpl) inspectWorkspaceCheckouts(ctx context.Context, checkou
 				results <- workspaceGitInspection{checkout: checkout, err: ctx.Err()}
 				return
 			}
-			status, err := s.fileOps.GitStatusPorcelain(ctx, checkout.path)
+			gitCtx, identityErr := withGitCheckoutIdentity(ctx, checkout.path, nil)
+			if identityErr != nil {
+				results <- workspaceGitInspection{checkout: checkout, err: identityErr}
+				return
+			}
+			status, err := s.fileOps.GitStatusPorcelain(gitCtx, checkout.path)
 			item := workspaceGitInspection{checkout: checkout, status: status, err: err}
 			if err == nil && includeBranch {
-				item.branch, item.branchErr = s.fileOps.GitCurrentBranch(ctx, checkout.path)
+				item.branch, item.branchErr = s.fileOps.GitCurrentBranch(gitCtx, checkout.path)
 			}
 			results <- item
 		}(checkout)
@@ -266,7 +276,10 @@ func (s *fileServiceImpl) RepairCheckout(ctx context.Context, wsID string, req s
 
 func repoCheckoutPath(wsRoot string, repo ops.WorkspaceRepo) string {
 	if repo.Path != "" {
-		return repo.Path
+		if filepath.IsAbs(repo.Path) {
+			return repo.Path
+		}
+		return filepath.Join(wsRoot, repo.Path)
 	}
 	return filepath.Join(wsRoot, repo.Name)
 }
@@ -348,6 +361,39 @@ func validateGitCheckoutRoot(root string) error {
 		return service.ErrForbidden("refusing to follow symlink")
 	}
 	return nil
+}
+
+func withGitCheckoutIdentity(ctx context.Context, checkoutRoot string, heldRoot *scopedRoot) (context.Context, error) {
+	absRoot, err := filepath.Abs(checkoutRoot)
+	if err != nil {
+		return nil, service.ErrInternal("failed to resolve git checkout", err)
+	}
+	if heldRoot != nil && heldRoot.store != nil && heldRoot.store.root != nil && filepath.Clean(heldRoot.path) == filepath.Clean(absRoot) {
+		info, err := heldRoot.store.root.Stat(".")
+		if err != nil {
+			return nil, service.ErrInternal("failed to stat held git checkout", err)
+		}
+		if !info.IsDir() {
+			return nil, service.ErrValidation("git checkout root is not a directory")
+		}
+		return ops.WithGitWorktreeIdentity(ctx, absRoot, info), nil
+	}
+	// Workspace fanout and workspace-scoped nested checkouts do not hold a
+	// checkout-specific root descriptor, so retain the best-effort path capture.
+	info, err := os.Lstat(absRoot)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, service.ErrNotFound("git checkout not found")
+		}
+		return nil, service.ErrInternal("failed to stat git checkout", err)
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		return nil, service.ErrForbidden("refusing to follow symlink")
+	}
+	if !info.IsDir() {
+		return nil, service.ErrValidation("git checkout root is not a directory")
+	}
+	return ops.WithGitWorktreeIdentity(ctx, absRoot, info), nil
 }
 
 func workspaceCheckoutWithinRoot(wsRoot, checkoutPath string) (gitStatusCheckout, bool) {

@@ -7,9 +7,12 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/tysonthomas9/loomcli/internal/ops"
 )
 
 const (
@@ -227,19 +230,31 @@ func (g *GitInspector) run(ctx context.Context, operation, dir string, timeout t
 func (g *GitInspector) runWithContext(ctx context.Context, operation, dir string, maxBytes int64, args ...string) (InspectorTextResult, error) {
 	runCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	config := []string{"-c", "core.fsmonitor=false", "-c", "submodule.recurse=false", "-c", "core.hooksPath=" + os.DevNull}
+	// For descriptor-backed callers, the expected identity remains pinned across
+	// path replacement. A narrow race remains between this final Lstat/SameFile
+	// check and the kernel resolving cmd.Dir while starting the subprocess.
+	validatedDir, err := validateInspectorCheckoutDir(ctx, operation, dir)
+	if err != nil {
+		return InspectorTextResult{}, err
+	}
+	config := []string{
+		"-c", "core.fsmonitor=false",
+		"-c", "submodule.recurse=false",
+		"-c", "core.hooksPath=" + os.DevNull,
+		"-c", "safe.directory=" + validatedDir,
+	}
 	binary := g.binary
 	if binary == "" {
 		binary = "git"
 	}
 	cmd := exec.CommandContext(runCtx, binary, append(config, args...)...) //nolint:gosec // arguments are fixed or validated above.
-	cmd.Dir = dir
+	cmd.Dir = validatedDir
 	cmd.Env = isolatedGitEnv(os.Environ())
 	stdout := &cappedBuffer{limit: maxBytes, onLimit: cancel}
 	stderr := &cappedBuffer{limit: gitStderrBytes, onLimit: cancel}
 	cmd.Stdout = stdout
 	cmd.Stderr = stderr
-	err := cmd.Run()
+	err = cmd.Run()
 	result := InspectorTextResult{Output: stdout.Bytes(), Partial: stdout.exceeded, LimitHit: stdout.exceeded}
 	if stdout.exceeded {
 		return result, nil
@@ -254,6 +269,27 @@ func (g *GitInspector) runWithContext(ctx context.Context, operation, dir string
 		kind = "canceled"
 	}
 	return result, &InspectorError{Operation: operation, Kind: kind, Stderr: strings.TrimSpace(string(stderr.Bytes())), Err: err}
+}
+
+func validateInspectorCheckoutDir(ctx context.Context, operation, dir string) (string, error) {
+	absDir, err := filepath.Abs(dir)
+	if err != nil {
+		return "", validationInspectorError(operation, fmt.Errorf("resolve checkout dir: %w", err))
+	}
+	info, err := os.Lstat(absDir)
+	if err != nil {
+		return "", validationInspectorError(operation, fmt.Errorf("stat checkout dir: %w", err))
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		return "", validationInspectorError(operation, errors.New("checkout dir is a symlink"))
+	}
+	if !info.IsDir() {
+		return "", validationInspectorError(operation, errors.New("checkout dir is not a directory"))
+	}
+	if expected, ok := ops.GitWorktreeIdentityFromContext(ctx); ok && !os.SameFile(expected.Info, info) {
+		return "", validationInspectorError(operation, errors.New("checkout dir identity changed before git inspection"))
+	}
+	return absDir, nil
 }
 
 func isolatedGitEnv(env []string) []string {

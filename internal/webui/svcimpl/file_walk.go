@@ -80,26 +80,31 @@ func (s *fileServiceImpl) IndexFilesScoped(ctx context.Context, wsID string, sco
 		return cached, nil
 	}
 
-	key := fileIndexCacheKey(root.identity, allowSensitive)
-	build := s.indexBuilds.DoChan(key, func() (any, error) {
-		if cached, ok := s.indexCache.get(root.identity, allowSensitive); ok {
-			return cached, nil
-		}
+	for {
 		generation := s.indexCache.currentGeneration()
-		result, err := s.indexBuilder(context.Background(), root.path, root.identity, allowSensitive)
-		if err == nil {
-			s.indexCache.putIfGeneration(root.identity, allowSensitive, result, generation)
+		key := fileIndexBuildKey(root.identity, allowSensitive, generation)
+		build := s.indexBuilds.DoChan(key, func() (any, error) {
+			if cached, ok := s.indexCache.get(root.identity, allowSensitive); ok {
+				return cached, nil
+			}
+			result, err := s.indexBuilder(context.Background(), root.path, root.identity, allowSensitive)
+			if err == nil {
+				s.indexCache.putIfGeneration(root.identity, allowSensitive, result, generation)
+			}
+			return result, err
+		})
+		select {
+		case <-ctx.Done():
+			return nil, service.ErrTimeout("file index canceled")
+		case outcome := <-build:
+			if outcome.Err != nil {
+				return nil, outcome.Err
+			}
+			if s.indexCache.currentGeneration() != generation {
+				continue
+			}
+			return cloneFileIndexResult(outcome.Val.(*service.FileIndexResult)), nil
 		}
-		return result, err
-	})
-	select {
-	case <-ctx.Done():
-		return nil, service.ErrTimeout("file index canceled")
-	case outcome := <-build:
-		if outcome.Err != nil {
-			return nil, outcome.Err
-		}
-		return cloneFileIndexResult(outcome.Val.(*service.FileIndexResult)), nil
 	}
 }
 

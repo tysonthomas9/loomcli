@@ -3,6 +3,7 @@ package ops
 import (
 	"context"
 	"errors"
+	"os"
 )
 
 var (
@@ -16,6 +17,34 @@ var (
 	// unknown, not allowed for the agent, or otherwise outside the workspace map.
 	ErrCheckoutTargetNotAllowed = errors.New("checkout target not allowed")
 )
+
+type gitWorktreeIdentityContextKey struct{}
+
+// GitWorktreeIdentity records the checkout directory identity validated by the
+// file-browser service before handing the path to the CLI git inspector.
+type GitWorktreeIdentity struct {
+	Path string
+	Info os.FileInfo
+}
+
+// WithGitWorktreeIdentity carries the already-validated checkout identity to
+// the git inspector without widening the FileOps method signatures.
+func WithGitWorktreeIdentity(ctx context.Context, path string, info os.FileInfo) context.Context {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return context.WithValue(ctx, gitWorktreeIdentityContextKey{}, GitWorktreeIdentity{Path: path, Info: info})
+}
+
+// GitWorktreeIdentityFromContext returns the expected checkout identity, when
+// the caller has one from fd-relative file-browser validation.
+func GitWorktreeIdentityFromContext(ctx context.Context) (GitWorktreeIdentity, bool) {
+	if ctx == nil {
+		return GitWorktreeIdentity{}, false
+	}
+	identity, ok := ctx.Value(gitWorktreeIdentityContextKey{}).(GitWorktreeIdentity)
+	return identity, ok && identity.Info != nil
+}
 
 // FileOps defines the interface for resolving the roots that file operations
 // run against. This interface breaks the import cycle between webui and cli
