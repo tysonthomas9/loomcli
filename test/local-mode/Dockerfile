@@ -7,7 +7,7 @@
 
 ARG GO_VERSION=1.25.6
 ARG INSTALL_CODEX=false
-ARG CODEX_CLI_VERSION=0.128.0
+ARG CODEX_CLI_VERSION=latest
 ARG INSTALL_CLAUDE=false
 ARG CLAUDE_CLI_VERSION=latest
 
@@ -24,7 +24,7 @@ RUN --mount=type=cache,target=/go/pkg/mod \
 
 FROM debian:bookworm-slim
 ARG INSTALL_CODEX=false
-ARG CODEX_CLI_VERSION=0.128.0
+ARG CODEX_CLI_VERSION=latest
 ARG INSTALL_CLAUDE=false
 ARG CLAUDE_CLI_VERSION=latest
 # Node 24 (via NodeSource) is installed when any Node-based backend CLI is

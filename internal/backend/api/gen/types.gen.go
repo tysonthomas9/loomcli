@@ -2124,6 +2124,30 @@ type ReorderWorkspacesJSONBody struct {
 	Order []string `json:"order"`
 }
 
+// CreateAgentJSONBody defines parameters for CreateAgent.
+type CreateAgentJSONBody struct {
+	Auto             *bool     `json:"auto,omitempty"`
+	Backend          *string   `json:"backend,omitempty"`
+	CrossRepo        *bool     `json:"cross_repo,omitempty"`
+	DesiredState     *string   `json:"desired_state,omitempty"`
+	FallbackBackends *[]string `json:"fallback_backends,omitempty"`
+
+	// Kind Optional role kind for creating an interactive role.
+	Kind   *string `json:"kind,omitempty"`
+	Name   string  `json:"name"`
+	Parent *string `json:"parent,omitempty"`
+
+	// Prompt Literal inline prompt text for interactive roles.
+	Prompt *string `json:"prompt,omitempty"`
+
+	// PromptFile Custom or builtin prompt selector for interactive roles.
+	PromptFile   *string   `json:"prompt_file,omitempty"`
+	RepoGroups   *[]string `json:"repo_groups,omitempty"`
+	Repos        *[]string `json:"repos,omitempty"`
+	RoleName     string    `json:"role_name"`
+	WorkspaceKey *string   `json:"workspace_key,omitempty"`
+}
+
 // GetDiffFileParams defines parameters for GetDiffFile.
 type GetDiffFileParams struct {
 	Path string `form:"path" json:"path"`
@@ -2382,6 +2406,9 @@ type SetDefaultWorkspaceJSONRequestBody SetDefaultWorkspaceJSONBody
 
 // ReorderWorkspacesJSONRequestBody defines body for ReorderWorkspaces for application/json ContentType.
 type ReorderWorkspacesJSONRequestBody ReorderWorkspacesJSONBody
+
+// CreateAgentJSONRequestBody defines body for CreateAgent for application/json ContentType.
+type CreateAgentJSONRequestBody CreateAgentJSONBody
 
 // WriteFileJSONRequestBody defines body for WriteFile for application/json ContentType.
 type WriteFileJSONRequestBody WriteFileJSONBody

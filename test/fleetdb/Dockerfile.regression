@@ -13,7 +13,7 @@
 # Context: the loomcli repo root.
 
 ARG GO_VERSION=1.25.6
-ARG CODEX_CLI_VERSION=0.128.0
+ARG CODEX_CLI_VERSION=latest
 
 # ── Stage 1: build loom ──
 FROM golang:${GO_VERSION}-bookworm AS builder

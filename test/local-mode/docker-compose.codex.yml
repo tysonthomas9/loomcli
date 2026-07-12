@@ -9,7 +9,7 @@ services:
     build:
       args:
         INSTALL_CODEX: "true"
-        CODEX_CLI_VERSION: "${LOCAL_MODE_CODEX_CLI_VERSION:-0.128.0}"
+        CODEX_CLI_VERSION: "${LOCAL_MODE_CODEX_CLI_VERSION:-latest}"
     environment:
       LOOM_BACKEND: codex
       LOOM_LOCAL_MODE_BACKEND: codex

@@ -13,6 +13,7 @@ type RoleCreate struct {
 	Name           string
 	Kind           string
 	Description    string
+	Prompt         string
 	PromptFile     string
 	Model          string
 	TaskFilter     string
@@ -32,6 +33,7 @@ type RoleCreate struct {
 type RoleUpdate struct {
 	Kind           *string
 	Description    *string
+	Prompt         *string
 	PromptFile     *string
 	Model          *string
 	TaskFilter     *string

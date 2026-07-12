@@ -144,6 +144,58 @@ func TestBuildAgentLaunchSpecIncludesPromptForInteractiveRole(t *testing.T) {
 	}
 }
 
+func TestBuildAgentLaunchSpecIncludesBuiltinPromptForInteractiveRole(t *testing.T) {
+	ctx := context.Background()
+	st := memstore.New()
+	if _, err := st.Roles().Create(ctx, store.RoleCreate{
+		WorkspaceKey: "E2E",
+		Name:         "pr-review",
+		Kind:         string(domain.RoleKindInteractive),
+		PromptFile:   "builtin:pr-review",
+	}); err != nil {
+		t.Fatalf("create role: %v", err)
+	}
+	agent := &domain.Agent{WorkspaceKey: "E2E", Name: "review-nova", RoleName: "pr-review"}
+
+	launch, _, err := buildAgentLaunchSpec(ctx, st, "E2E", "term_review", agent, "lead-1")
+	if err != nil {
+		t.Fatalf("buildAgentLaunchSpec: %v", err)
+	}
+	cmd := strings.Join(launch.Argv, " ")
+	for _, want := range []string{"'lead'", "'--prompt' 'builtin:pr-review'"} {
+		if !strings.Contains(cmd, want) {
+			t.Fatalf("launch command %q missing %q", cmd, want)
+		}
+	}
+}
+
+func TestBuildAgentLaunchSpecInlinePromptOmitsRolePromptFile(t *testing.T) {
+	ctx := context.Background()
+	st := memstore.New()
+	if _, err := st.Roles().Create(ctx, store.RoleCreate{
+		WorkspaceKey: "E2E",
+		Name:         "operator",
+		Kind:         string(domain.RoleKindInteractive),
+		Prompt:       "inline wins",
+		PromptFile:   "prompts/ignored.md",
+	}); err != nil {
+		t.Fatalf("create role: %v", err)
+	}
+	agent := &domain.Agent{WorkspaceKey: "E2E", Name: "operator-a", RoleName: "operator"}
+
+	launch, _, err := buildAgentLaunchSpec(ctx, st, "E2E", "term_operator", agent, "lead-1")
+	if err != nil {
+		t.Fatalf("buildAgentLaunchSpec: %v", err)
+	}
+	cmd := strings.Join(launch.Argv, " ")
+	if !strings.Contains(cmd, "'lead'") {
+		t.Fatalf("launch command %q missing lead runtime", cmd)
+	}
+	if strings.Contains(cmd, "'--prompt'") || strings.Contains(cmd, "prompts/ignored.md") {
+		t.Fatalf("launch command %q includes role prompt_file despite inline prompt", cmd)
+	}
+}
+
 func TestBuildAgentLaunchSpecCustomInteractiveRoleUsesLeadRuntime(t *testing.T) {
 	ctx := context.Background()
 	st := memstore.New()

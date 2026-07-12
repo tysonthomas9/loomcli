@@ -78,9 +78,12 @@ container restarts until `make local-mode-down` removes the stack volumes.
 
 Codex variant knobs:
 
+The Codex image installs the current npm `latest` release by default. Set
+`LOCAL_MODE_CODEX_CLI_VERSION` only when a reproducible version pin is needed.
+
 ```sh
 LOCAL_MODE_CODEX_HOME=<codex-home> make local-mode-codex-up
-LOCAL_MODE_CODEX_CLI_VERSION=0.128.0 make local-mode-codex-up
+LOCAL_MODE_CODEX_CLI_VERSION=0.144.1 make local-mode-codex-up
 ```
 
 Compose and parallel-stack knobs:
