@@ -79,6 +79,7 @@ func BuildWorkspaceDataForKey(ctx context.Context, s store.Store, key string) (*
 		Workspaces:       summaries,
 		WorkspaceOrder:   nil, // TODO(.16): persist order in DaemonProfile or similar
 		DefaultWorkspace: "",
+		DesignFormat:     ws.DesignFormat,
 	}, nil
 }
 
