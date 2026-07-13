@@ -194,6 +194,35 @@ describe("SessionDetailView", () => {
       expect(screen.getByText("do the thing")).toBeInTheDocument();
     });
 
+    it("renders the prompt as formatted Markdown (heading + inline code), not literal source", () => {
+      mockUseSessionTranscript.mockReturnValue({
+        entries: [
+          createEntry({
+            seq: 1,
+            role: "user",
+            type: "text",
+            text: "## WORKFLOW\n\nCall `foo.bar()` now.",
+          }),
+          createEntry({ seq: 2, role: "assistant", text: "ok" }),
+        ],
+        isLoading: false,
+        error: null,
+      });
+      const { container } = render(
+        <SessionDetailView taskId="task-1" session={defaultSession} />,
+      );
+      // Heading renders as <h2>, not literal "## WORKFLOW"
+      const heading = screen.getByRole("heading", { name: "WORKFLOW" });
+      expect(heading.tagName).toBe("H2");
+      // Inline code renders as <code>, not literal backticks
+      const code = container.querySelector("code");
+      expect(code).not.toBeNull();
+      expect(code).toHaveTextContent("foo.bar()");
+      // No literal markdown syntax survives in the DOM text
+      expect(container.textContent).not.toContain("## WORKFLOW");
+      expect(container.textContent).not.toContain("`foo.bar()`");
+    });
+
     it("does not render a Prompt block when no user text exists", () => {
       mockUseSessionTranscript.mockReturnValue({
         entries: [createEntry({ seq: 1, role: "assistant", text: "hi" })],
@@ -301,6 +330,53 @@ describe("SessionDetailView", () => {
       expect(screen.getByText("Hi there")).toBeInTheDocument();
       // No "assistant" byline in the body
       expect(screen.queryByText(/^assistant$/)).not.toBeInTheDocument();
+    });
+
+    it("renders assistant transcript text as formatted Markdown (bold + inline code)", () => {
+      mockUseSessionTranscript.mockReturnValue({
+        entries: [
+          createEntry({
+            seq: 1,
+            role: "assistant",
+            type: "text",
+            text: "I called **JsonlStateStore** via `add_state`.",
+          }),
+        ],
+        isLoading: false,
+        error: null,
+      });
+      const { container } = render(
+        <SessionDetailView taskId="task-1" session={defaultSession} />,
+      );
+      expect(container.querySelector("strong")).toHaveTextContent(
+        "JsonlStateStore",
+      );
+      expect(container.querySelector("code")).toHaveTextContent("add_state");
+      // Literal markdown syntax must not survive
+      expect(container.textContent).not.toContain("**JsonlStateStore**");
+      expect(container.textContent).not.toContain("`add_state`");
+    });
+
+    it("renders a user-message interjection as formatted Markdown", () => {
+      mockUseSessionTranscript.mockReturnValue({
+        entries: [
+          createEntry({ seq: 1, role: "user", type: "text", text: "first" }),
+          createEntry({ seq: 2, role: "assistant", text: "ok" }),
+          createEntry({
+            seq: 3,
+            role: "user",
+            type: "text",
+            text: "see `config.yaml`",
+          }),
+        ],
+        isLoading: false,
+        error: null,
+      });
+      render(<SessionDetailView taskId="task-1" session={defaultSession} />);
+      const interjection = screen.getByTestId("transcript-interjection");
+      expect(interjection.querySelector("code")).toHaveTextContent(
+        "config.yaml",
+      );
     });
 
     it("groups assistant text + tool_use events sharing a uuid into one turn", () => {

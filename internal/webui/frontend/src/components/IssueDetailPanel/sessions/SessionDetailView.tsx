@@ -14,6 +14,7 @@ import { useSessionTranscript, useSessionDiff } from "@/hooks/terminal";
 import type { SessionRecord, TranscriptEntry } from "@/types/agent";
 import { formatStatusLabel } from "@/utils/issue";
 
+import { MarkdownRenderer } from "../sections/MarkdownRenderer";
 import styles from "./SessionsTab.module.css";
 
 export interface SessionDetailViewProps {
@@ -360,7 +361,10 @@ export function SessionDetailView({
         {grouped.prompt && (
           <div className={styles.promptBlock}>
             <div className={styles.promptLabel}>Prompt</div>
-            <div className={styles.promptBody}>{grouped.prompt.text}</div>
+            <MarkdownRenderer
+              content={grouped.prompt.text}
+              className={styles.promptBody}
+            />
           </div>
         )}
 
@@ -497,7 +501,10 @@ export function SessionDetailView({
                       </span>
                     )}
                   </div>
-                  <div className={styles.msg}>{block.text}</div>
+                  <MarkdownRenderer
+                    content={block.text}
+                    className={styles.msg}
+                  />
                 </article>
               );
             }
@@ -528,9 +535,11 @@ export function SessionDetailView({
                 </div>
                 {block.items.map((item) =>
                   item.kind === "text" ? (
-                    <div key={item.seq} className={styles.msg}>
-                      {item.text}
-                    </div>
+                    <MarkdownRenderer
+                      key={item.seq}
+                      content={item.text}
+                      className={styles.msg}
+                    />
                   ) : (
                     <ToolBlock
                       key={item.seq}
