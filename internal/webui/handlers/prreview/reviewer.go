@@ -24,6 +24,7 @@ import (
 )
 
 const reviewerAgentNameMaxLen = 100
+const legacyReviewerRepoSegmentMaxLen = 48
 const reviewerRoleName = "pr-reviewer"
 const reviewerPromptFile = "builtin:pr-review-checkout"
 const reviewerRoleDescription = "PR review checkout terminal agent"
@@ -43,6 +44,14 @@ func reviewerAgentName(owner, repo string, number int) string {
 		segmentBudget,
 	)
 	return prefix + ownerSegment + "-" + repoSegment + suffix
+}
+
+func legacyReviewerAgentName(repo string, number int) string {
+	repoSegment := safeAgentSegment(repo)
+	if len(repoSegment) > legacyReviewerRepoSegmentMaxLen {
+		repoSegment = truncateAgentSegment(repoSegment, legacyReviewerRepoSegmentMaxLen)
+	}
+	return "review-" + repoSegment + "-pr-" + strconv.Itoa(number)
 }
 
 func fitReviewerAgentSegments(owner, repo string, budget int) (string, string) {
@@ -151,9 +160,9 @@ func (m *Module) ensureReviewer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := m.ensureReviewerAgent(r.Context(), ws, agentName); err != nil {
+	if err := m.ensureReviewerAgentAndRetireLegacy(r.Context(), ws, agentName, params.repo, params.number); err != nil {
 		slog.Error("pr-review: ensure reviewer agent failed", "ws", ws, "agent", agentName, "err", err)
-		writePRReviewErrorCode(w, http.StatusInternalServerError, "internal", "failed to create the reviewer agent", false)
+		writePRReviewErrorCode(w, http.StatusInternalServerError, "internal", "failed to prepare the reviewer agent", false)
 		return
 	}
 
@@ -291,9 +300,39 @@ func (m *Module) ensureReviewerAgent(ctx context.Context, ws, agentName string) 
 	return m.migrateReviewer(ctx, ws, agentName, backend, reviewerRoleName)
 }
 
+func (m *Module) ensureReviewerAgentAndRetireLegacy(
+	ctx context.Context,
+	ws, agentName, repo string,
+	number int,
+) error {
+	if err := m.ensureReviewerAgent(ctx, ws, agentName); err != nil {
+		return err
+	}
+	return m.retireLegacyReviewer(ctx, ws, agentName, legacyReviewerAgentName(repo, number))
+}
+
 func reviewerAgentCurrent(agent *domain.Agent, backend, roleName string) bool {
 	return strings.EqualFold(strings.TrimSpace(agent.Backend), backend) &&
 		strings.TrimSpace(agent.RoleName) == roleName
+}
+
+func (m *Module) retireLegacyReviewer(ctx context.Context, ws, agentName, legacyAgentName string) error {
+	if legacyAgentName == agentName {
+		return nil
+	}
+	if _, err := m.store.Agents().Get(ctx, ws, legacyAgentName); err != nil {
+		if errors.Is(err, domain.ErrNotFound) {
+			return nil
+		}
+		return fmt.Errorf("load legacy reviewer agent: %w", err)
+	}
+	if err := m.stopAndClearReviewerRuntime(ctx, ws, legacyAgentName); err != nil {
+		return err
+	}
+	if err := m.store.Agents().Delete(ctx, ws, legacyAgentName); err != nil {
+		return fmt.Errorf("delete legacy reviewer agent: %w", err)
+	}
+	return nil
 }
 
 func (m *Module) ensureReviewerRole(ctx context.Context, ws string) error {
@@ -363,6 +402,21 @@ func (m *Module) reviewerBackend(ctx context.Context, ws string) string {
 // metadata after the clear, then stale provider identity keys are removed so
 // the new runtime starts from a clean slate, then the agent record flips.
 func (m *Module) migrateReviewer(ctx context.Context, ws, agentName, backend, roleName string) error {
+	if err := m.stopAndClearReviewerRuntime(ctx, ws, agentName); err != nil {
+		return err
+	}
+	running := domain.AgentDesiredRunning
+	if _, err := m.store.Agents().Update(ctx, ws, agentName, store.AgentUpdate{
+		Backend:      &backend,
+		RoleName:     &roleName,
+		DesiredState: &running,
+	}); err != nil {
+		return fmt.Errorf("update reviewer agent: %w", err)
+	}
+	return nil
+}
+
+func (m *Module) stopAndClearReviewerRuntime(ctx context.Context, ws, agentName string) error {
 	if m.terminalSvc != nil {
 		tabs, err := m.terminalSvc.ListTabs(ctx, ws)
 		if err != nil {
@@ -382,14 +436,6 @@ func (m *Module) migrateReviewer(ctx context.Context, ws, agentName, backend, ro
 	}
 	if err := m.clearReviewerRuntimeMetadata(ctx, ws, agentName); err != nil {
 		return err
-	}
-	running := domain.AgentDesiredRunning
-	if _, err := m.store.Agents().Update(ctx, ws, agentName, store.AgentUpdate{
-		Backend:      &backend,
-		RoleName:     &roleName,
-		DesiredState: &running,
-	}); err != nil {
-		return fmt.Errorf("update reviewer agent: %w", err)
 	}
 	return nil
 }

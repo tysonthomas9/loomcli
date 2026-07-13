@@ -797,6 +797,17 @@ func TestReviewerAgentNameTruncatesToStoredNameLimit(t *testing.T) {
 	}
 }
 
+func TestLegacyReviewerAgentNameUsesOldRepoOnlyShape(t *testing.T) {
+	if got := legacyReviewerAgentName("Hello.World_repo", 7); got != "review-hello-world-repo-pr-7" {
+		t.Fatalf("legacyReviewerAgentName() = %q, want review-hello-world-repo-pr-7", got)
+	}
+	longRepo := strings.Repeat("a", legacyReviewerRepoSegmentMaxLen-1) + ".tail"
+	want := "review-" + strings.Repeat("a", legacyReviewerRepoSegmentMaxLen-1) + "-pr-7"
+	if got := legacyReviewerAgentName(longRepo, 7); got != want {
+		t.Fatalf("legacyReviewerAgentName(truncated) = %q, want %q", got, want)
+	}
+}
+
 func TestPostReviewerMessageQueuesPending(t *testing.T) {
 	h := newPRReviewHarness(t, false)
 	agentName := createReviewerAgentForTest(t, h, "octocat", "hello", 7)

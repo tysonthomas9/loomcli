@@ -68,6 +68,7 @@ export function usePRReviewConversation({
   const ensureKeyRef = useRef<string | null>(null);
   const pollInFlightRef = useRef(false);
   const mountedRef = useRef(false);
+  const onStaleSubjectRef = useRef(onStaleSubject);
   const key = `${workspaceId}|${owner}|${repo}|${number}`;
 
   const invalidateRequests = useCallback(() => {
@@ -120,6 +121,10 @@ export function usePRReviewConversation({
   }, [invalidateRequests]);
 
   useEffect(() => {
+    onStaleSubjectRef.current = onStaleSubject;
+  }, [onStaleSubject]);
+
+  useEffect(() => {
     setAgentName(null);
     setMessages([]);
     setState("starting");
@@ -136,6 +141,7 @@ export function usePRReviewConversation({
     if (ensureKeyRef.current === key) return;
 
     let ignore = false;
+    let completed = false;
     ensureKeyRef.current = key;
     setState("starting");
     setError(null);
@@ -151,28 +157,24 @@ export function usePRReviewConversation({
         if (!ignore && mountedRef.current) {
           ensureKeyRef.current = null;
           if (isStaleSubjectError(err)) {
-            void onStaleSubject?.();
+            void onStaleSubjectRef.current?.();
           }
           setError(errorMessage(err));
         }
+      } finally {
+        completed = true;
       }
     })();
 
     return () => {
       ignore = true;
+      if (!completed && ensureKeyRef.current === key) {
+        ensureKeyRef.current = null;
+      }
     };
     // retryNonce lets retry() re-run ensure after a failure (the catch above
     // clears ensureKeyRef, so this effect proceeds instead of short-circuiting).
-  }, [
-    enabled,
-    key,
-    number,
-    onStaleSubject,
-    owner,
-    repo,
-    retryNonce,
-    workspaceId,
-  ]);
+  }, [enabled, key, number, owner, repo, retryNonce, workspaceId]);
 
   useEffect(() => {
     if (!enabled || !agentName) return;

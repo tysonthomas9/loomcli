@@ -258,6 +258,89 @@ func TestEnsureReviewerAgentMigratesExistingLeadRole(t *testing.T) {
 	}
 }
 
+func TestEnsureReviewerAgentRetiresLegacyNamedAgent(t *testing.T) {
+	const repo = "hello"
+	const number = 7
+	ctx := context.Background()
+	env := newBackendTestEnv(t, "claude")
+	legacyName := legacyReviewerAgentName(repo, number)
+	currentName := reviewerAgentName("octocat", repo, number)
+	env.seedLegacyReviewer(t, legacyName, "codex")
+	if _, err := env.store.AgentSessions().Create(ctx, store.AgentSessionCreate{
+		WorkspaceKey: prReviewTestWorkspace,
+		SessionID:    "legacy-orch",
+		AgentID:      legacyName,
+		Kind:         domain.AgentSessionKindOrchestration,
+		Status:       domain.AgentSessionRunning,
+		Metadata: map[string]string{
+			"lead_runtime_provider":     "codex",
+			"codex_app_server_endpoint": "unix:///tmp/legacy.sock",
+			"source":                    "web-terminal",
+		},
+	}); err != nil {
+		t.Fatalf("create legacy orchestration session: %v", err)
+	}
+	env.term.tabs = []tabmeta.TabMetadata{
+		{SessionName: "agent-legacy-reviewer", Kind: terminalKindAgent, AgentID: legacyName, PTYAlive: true},
+		{SessionName: "agent-current-reviewer", Kind: terminalKindAgent, AgentID: currentName, PTYAlive: true},
+	}
+
+	if err := env.module.ensureReviewerAgentAndRetireLegacy(ctx, prReviewTestWorkspace, currentName, repo, number); err != nil {
+		t.Fatalf("ensureReviewerAgentAndRetireLegacy: %v", err)
+	}
+
+	current := env.agent(t, currentName)
+	if current.Backend != "claude" || current.RoleName != reviewerRoleName {
+		t.Fatalf("current agent = backend:%q role:%q, want claude/%s", current.Backend, current.RoleName, reviewerRoleName)
+	}
+	if _, err := env.store.Agents().Get(ctx, prReviewTestWorkspace, legacyName); !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("legacy agent lookup error = %v, want ErrNotFound", err)
+	}
+	if len(env.term.deleted) != 1 || env.term.deleted[0] != "agent-legacy-reviewer" {
+		t.Fatalf("deleted tabs = %v, want only legacy reviewer tab", env.term.deleted)
+	}
+	sess, err := env.store.AgentSessions().Get(ctx, prReviewTestWorkspace, "legacy-orch")
+	if err != nil {
+		t.Fatalf("get legacy session: %v", err)
+	}
+	if _, ok := sess.Metadata["lead_runtime_provider"]; ok {
+		t.Fatalf("legacy runtime metadata survived retirement: %v", sess.Metadata)
+	}
+	if _, ok := sess.Metadata["codex_app_server_endpoint"]; ok {
+		t.Fatalf("legacy codex metadata survived retirement: %v", sess.Metadata)
+	}
+	if _, ok := sess.Metadata["source"]; !ok {
+		t.Fatalf("non-runtime metadata was cleared: %v", sess.Metadata)
+	}
+}
+
+func TestEnsureReviewerAgentWithoutLegacyNameIsNoop(t *testing.T) {
+	const repo = "hello"
+	const number = 7
+	env := newBackendTestEnv(t, "codex")
+	currentName := reviewerAgentName("octocat", repo, number)
+
+	if err := env.module.ensureReviewerAgentAndRetireLegacy(
+		context.Background(), prReviewTestWorkspace, currentName, repo, number,
+	); err != nil {
+		t.Fatalf("ensureReviewerAgentAndRetireLegacy: %v", err)
+	}
+
+	if got := env.agent(t, currentName).RoleName; got != reviewerRoleName {
+		t.Fatalf("current role = %q, want %s", got, reviewerRoleName)
+	}
+	if env.term.listCalled || env.term.deleteCalls != 0 {
+		t.Fatalf("terminal service touched without a legacy agent (list=%v deletes=%d)", env.term.listCalled, env.term.deleteCalls)
+	}
+}
+
+func TestRetireLegacyReviewerSkipsLookupWhenNamesCoincide(t *testing.T) {
+	module := &Module{}
+	if err := module.retireLegacyReviewer(context.Background(), prReviewTestWorkspace, "same", "same"); err != nil {
+		t.Fatalf("retireLegacyReviewer: %v", err)
+	}
+}
+
 func TestEnsureReviewerAgentSameBackendIsNoop(t *testing.T) {
 	const agentName = "review-hello-pr-7"
 	env := newBackendTestEnv(t, "claude")
