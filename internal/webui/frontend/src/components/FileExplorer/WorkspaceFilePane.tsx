@@ -122,8 +122,7 @@ const emptySymbolState: FileSymbolState = { symbols: [], trail: [] };
 
 /**
  * WorkspaceFilePane is the docked, always-visible viewer column of the
- * workspace file browser. Unlike FileViewer (a modal drawer used by the agent
- * files tab), this is a persistent right-hand pane in a split layout.
+ * workspace file browser: a persistent right-hand pane in a split layout.
  */
 export function WorkspaceFilePane({
   path,

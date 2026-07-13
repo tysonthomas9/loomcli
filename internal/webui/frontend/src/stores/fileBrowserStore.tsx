@@ -14,18 +14,16 @@ import { useStore } from "zustand";
 import { createStore, type StoreApi } from "zustand/vanilla";
 
 import type { FileScopeRef } from "@/api/workspace";
-import { wsGet, wsSet, wsKey } from "@/utils/scopedStorage";
+import { wsGet, wsSet } from "@/utils/scopedStorage";
 import {
   checkoutRefKey,
   cleanPath,
-  legacyScopeStorageKey,
   normalizeCheckoutRef,
   sameCheckoutRef,
   tabIdentityKey,
   type CheckoutRef,
 } from "@/utils/fileExplorerRefs";
 
-const LEGACY_TABS_STORAGE_KEY = "file-browser-tabs";
 const FILE_BROWSER_TABS_STORAGE_KEY = "file-browser-tabs:v3";
 
 export interface FileBrowserTab {
@@ -37,15 +35,6 @@ export interface FileBrowserGroup {
   tabs: FileBrowserTab[];
   /** Stable tab key produced by tabIdentityKey(tab). */
   active: string | null;
-}
-
-export interface PersistedFileBrowserTabsV2 {
-  v: 2;
-  groups: Array<{
-    tabs: Array<{ path: string }>;
-    active: string | null;
-  }>;
-  mru: string[];
 }
 
 export interface PersistedFileBrowserTabsV3 {
@@ -79,7 +68,7 @@ export interface FileBrowserStoreConfig {
   storageKey?: string | undefined;
 }
 
-export const EMPTY_FILE_BROWSER_STATE: PersistedFileBrowserTabsV3 = {
+const EMPTY_FILE_BROWSER_STATE: PersistedFileBrowserTabsV3 = {
   v: 3,
   groups: [{ tabs: [], active: null }],
   mru: [],
@@ -289,149 +278,7 @@ function parsePersistedV3(
   return null;
 }
 
-function legacyTab(ref: CheckoutRef, path: string): FileBrowserTab {
-  return { ref: normalizeCheckoutRef(ref), path: cleanPath(path) };
-}
-
-function parsePersistedV2(
-  raw: string | null,
-  ref: CheckoutRef,
-): PersistedFileBrowserTabsV3 | null {
-  if (!raw) return null;
-  try {
-    const parsed = JSON.parse(raw) as {
-      v?: unknown;
-      groups?: unknown;
-      mru?: unknown;
-    };
-    if (parsed?.v !== 2 || !Array.isArray(parsed.groups)) return null;
-    const groups = parsed.groups.slice(0, 2).map((group) => {
-      const g = group as { tabs?: unknown; active?: unknown };
-      const tabs = Array.isArray(g.tabs)
-        ? g.tabs
-            .map((tab) =>
-              tab &&
-              typeof tab === "object" &&
-              typeof (tab as { path?: unknown }).path === "string"
-                ? legacyTab(ref, (tab as { path: string }).path)
-                : null,
-            )
-            .filter((tab): tab is FileBrowserTab => tab !== null)
-        : [];
-      const activePath = typeof g.active === "string" ? g.active : null;
-      const activeTab = activePath
-        ? tabs.find((tab) => tab.path === cleanPath(activePath))
-        : undefined;
-      return {
-        tabs,
-        active: activeTab
-          ? tabKey(activeTab)
-          : tabs[0]
-            ? tabKey(tabs[0])
-            : null,
-      };
-    });
-    const mru = Array.isArray(parsed.mru)
-      ? parsed.mru
-          .filter((path): path is string => typeof path === "string")
-          .map((path) => legacyTab(ref, path))
-      : [];
-    return persistedFromGroups(groups, mru, null);
-  } catch {
-    return null;
-  }
-}
-
-function migrateLegacyV1(
-  raw: string | null,
-): PersistedFileBrowserTabsV3 | null {
-  if (!raw) return null;
-  try {
-    const parsed = JSON.parse(raw) as {
-      openTabs?: unknown;
-      activePath?: unknown;
-    };
-    if (!Array.isArray(parsed.openTabs)) return null;
-    const ref: CheckoutRef = { scope: "workspace" };
-    const tabs = parsed.openTabs
-      .filter(
-        (path): path is string =>
-          typeof path === "string" && path.trim() !== "",
-      )
-      .map((path) => legacyTab(ref, path));
-    const activeTab =
-      typeof parsed.activePath === "string"
-        ? tabs.find(
-            (tab) => tab.path === cleanPath(parsed.activePath as string),
-          )
-        : undefined;
-    return persistedFromGroups(
-      [
-        {
-          tabs,
-          active: activeTab
-            ? tabKey(activeTab)
-            : tabs[0]
-              ? tabKey(tabs[0])
-              : null,
-        },
-      ],
-      activeTab ? [activeTab] : [],
-      null,
-    );
-  } catch {
-    return null;
-  }
-}
-
-function refFromLegacyKey(key: string): CheckoutRef | null {
-  const prefix = "file-browser-tabs:v2:";
-  if (!key.startsWith(prefix)) return null;
-  const rest = key.slice(prefix.length);
-  const [scope, target] = rest.split(":");
-  if (scope !== "workspace" && scope !== "repo" && scope !== "agent")
-    return null;
-  if (scope === "workspace") return { scope };
-  if (!target || target === "root") return null;
-  return { scope, target };
-}
-
-function findLegacyV2Refs(workspaceId: string): CheckoutRef[] {
-  const prefix = wsKey(workspaceId, "file-browser-tabs:v2:");
-  const refs: CheckoutRef[] = [];
-  try {
-    for (let i = 0; i < localStorage.length; i += 1) {
-      const fullKey = localStorage.key(i);
-      if (!fullKey?.startsWith(prefix)) continue;
-      const key = fullKey.slice(`loom:${workspaceId}:`.length);
-      const ref = refFromLegacyKey(key);
-      if (ref) refs.push(ref);
-    }
-  } catch {
-    return refs;
-  }
-  return refs;
-}
-
-function mergePersistedStates(
-  states: PersistedFileBrowserTabsV3[],
-  refs: Set<string> | null,
-): PersistedFileBrowserTabsV3 | null {
-  if (states.length === 0) return null;
-  const groups: FileBrowserGroup[] = [{ tabs: [], active: null }];
-  const mru: FileBrowserTab[] = [];
-  for (const state of states) {
-    state.groups.forEach((group, index) => {
-      while (groups.length <= index) groups.push({ tabs: [], active: null });
-      groups[index]!.tabs.push(...group.tabs);
-      if (!groups[index]!.active) groups[index]!.active = group.active;
-    });
-    mru.push(...state.mru);
-  }
-  return persistedFromGroups(groups, mru, refs);
-}
-
-export function loadFileBrowserTabs(
+function loadFileBrowserTabs(
   workspaceId: string,
   validRefs?: CheckoutRef[] | undefined,
   storageKey = FILE_BROWSER_TABS_STORAGE_KEY,
@@ -439,26 +286,6 @@ export function loadFileBrowserTabs(
   const refs = validRefSet(validRefs);
   const loaded = parsePersistedV3(wsGet(workspaceId, storageKey), refs);
   if (loaded) return loaded;
-  if (storageKey !== FILE_BROWSER_TABS_STORAGE_KEY) {
-    return EMPTY_FILE_BROWSER_STATE;
-  }
-
-  const migrated: PersistedFileBrowserTabsV3[] = [];
-  for (const ref of findLegacyV2Refs(workspaceId)) {
-    const state = parsePersistedV2(
-      wsGet(workspaceId, legacyScopeStorageKey(ref)),
-      ref,
-    );
-    if (state) migrated.push(state);
-  }
-  const legacyV1 = migrateLegacyV1(wsGet(workspaceId, LEGACY_TABS_STORAGE_KEY));
-  if (legacyV1) migrated.push(legacyV1);
-
-  const folded = mergePersistedStates(migrated, refs);
-  if (folded) {
-    persist(workspaceId, storageKey, folded);
-    return folded;
-  }
   return EMPTY_FILE_BROWSER_STATE;
 }
 

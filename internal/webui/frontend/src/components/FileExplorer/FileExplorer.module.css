@@ -539,16 +539,11 @@
   font-size: var(--font-size-sm);
 }
 
-.checkoutTreeState,
-.checkoutTreeError {
+.checkoutTreeState {
   padding-block: var(--space-1);
   padding-right: var(--space-3);
   color: var(--color-text-muted);
   font-size: var(--font-size-sm);
-}
-
-.checkoutTreeError {
-  color: var(--color-danger);
 }
 
 .tree {
@@ -956,46 +951,6 @@
   opacity: 0.6;
 }
 
-.historyClusterButton {
-  width: 100%;
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  padding: 0;
-  border: none;
-  background: transparent;
-  color: var(--color-text-primary);
-  font: inherit;
-  font-size: var(--font-size-sm);
-  font-weight: 700;
-  text-align: left;
-  cursor: pointer;
-}
-
-.historyClusterButton:focus-visible {
-  outline: 2px solid var(--color-primary);
-  outline-offset: 2px;
-}
-
-.historySaveList {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-2);
-  margin-top: var(--space-2);
-  padding-left: 18px;
-}
-
-.historySaveRow {
-  display: flex;
-  flex-direction: column;
-  gap: 5px;
-}
-
-.historySaveTime {
-  color: var(--color-text-muted);
-  font-size: var(--font-size-xs, 11px);
-}
-
 .historyError {
   margin: var(--space-3);
   padding: var(--space-2);
@@ -1101,51 +1056,6 @@
   background: currentColor;
 }
 
-/* === FileViewer overlay (matches IssueDetailPanel pattern) === */
-.overlay {
-  position: fixed;
-  inset: 0;
-  z-index: var(--z-overlay);
-  background-color: rgba(0, 0, 0, 0);
-  visibility: hidden;
-  transition:
-    background-color var(--transition-slow),
-    visibility 0s var(--transition-slow);
-}
-
-.overlayOpen {
-  background-color: rgb(0 0 0 / 32%);
-  visibility: visible;
-  transition:
-    background-color var(--transition-slow),
-    visibility 0s;
-}
-
-.viewerPanel {
-  position: absolute;
-  top: 0;
-  right: 0;
-  bottom: 0;
-  width: min(100%, var(--panel-width-max));
-  max-width: var(--panel-width-max);
-  background-color: var(--color-panel-bg);
-  box-shadow: var(--panel-shadow-strong);
-  transform: translateX(100%);
-  transition: transform var(--transition-slow);
-  display: flex;
-  flex-direction: column;
-}
-
-.overlayOpen .viewerPanel {
-  transform: translateX(0);
-}
-
-@media (width <= 520px) {
-  .viewerPanel {
-    width: 100%;
-  }
-}
-
 .viewerHeader {
   display: flex;
   align-items: center;
@@ -1218,17 +1128,6 @@
   cursor: default;
 }
 
-.viewerPath {
-  font-family: var(--font-family-mono);
-  font-size: var(--font-size-sm);
-  color: var(--color-text-secondary);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  flex: 1;
-  min-width: 0;
-}
-
 /* === Path breadcrumb (clickable folder segments) === */
 .breadcrumb {
   display: flex;
@@ -1268,32 +1167,6 @@
 
 .crumbCurrent {
   color: var(--color-text-primary);
-}
-
-.closeButton {
-  width: 28px;
-  height: 28px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border: none;
-  background: none;
-  color: var(--color-text-secondary);
-  cursor: pointer;
-  border-radius: var(--radius-sm);
-  flex-shrink: 0;
-  margin-left: var(--space-2);
-  transition: background-color var(--transition-fast);
-}
-
-.closeButton:hover {
-  background: var(--color-bg-hover);
-  color: var(--color-text-primary);
-}
-
-.closeButton svg {
-  width: 16px;
-  height: 16px;
 }
 
 .viewerContent {

@@ -1,1 +1,1 @@
-export { FileBrowser, WorkspaceFileBrowser } from "./WorkspaceFileBrowser";
+export { WorkspaceFileBrowser } from "./WorkspaceFileBrowser";

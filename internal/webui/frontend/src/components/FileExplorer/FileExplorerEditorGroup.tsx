@@ -4,7 +4,6 @@ import { DiffFileViewer } from "@/components/AgentDetailPanel";
 import type { FileBlameData } from "@/api/workspace";
 import { blameScopedFile, diffScopedFile, readScopedFile } from "@/hooks/api";
 import {
-  useFileBrowserStoreInstance,
   useFileDocument,
   useWorkspaceContext,
   type FileBrowserGroup,
@@ -16,7 +15,12 @@ import {
   type CheckoutRef,
 } from "@/utils/fileExplorerRefs";
 
-import { FileHistoryPanel, type HistorySubject } from "./FileHistoryPanel";
+import {
+  FileHistoryPanel,
+  type HistoryOpenDiffRequest,
+  type HistoryOpenRevisionRequest,
+  type HistorySubject,
+} from "./FileHistoryPanel";
 import { FileRevisionPane } from "./FileRevisionPane";
 import { FileTabBar } from "./FileTabBar";
 import { computeGitGutterLineMarks, type GitGutterLineMark } from "./gitGutter";
@@ -25,10 +29,7 @@ import { buildContentDiffPatch } from "./fileExplorerLocalUtils";
 import styles from "./FileExplorer.module.css";
 import type {
   DiffViewState,
-  FileReloadRequest,
   LineTarget,
-  OpenDiffRequest,
-  OpenRevisionRequest,
   RevisionViewState,
 } from "./workspaceFileBrowserTypes";
 
@@ -185,7 +186,6 @@ export function FileExplorerEditorGroup({
   onOpenEditableFile,
   historyRefreshKey,
   canWrite,
-  reloadToken,
   lineTarget,
   onLineTargetApplied,
 }: {
@@ -200,9 +200,12 @@ export function FileExplorerEditorGroup({
   onSplitRight: (groupIndex: number) => void;
   onNavigate: (ref: CheckoutRef, dirPath: string) => void;
   onSaved: (tab: FileBrowserTab) => void;
-  onOpenDiff: (groupIndex: number, request: OpenDiffRequest) => void;
+  onOpenDiff: (groupIndex: number, request: HistoryOpenDiffRequest) => void;
   onCloseDiff: (groupIndex: number) => void;
-  onOpenRevision: (groupIndex: number, request: OpenRevisionRequest) => void;
+  onOpenRevision: (
+    groupIndex: number,
+    request: HistoryOpenRevisionRequest,
+  ) => void;
   onCloseRevision: (groupIndex: number) => void;
   onOpenEditableFile: (
     groupIndex: number,
@@ -211,12 +214,10 @@ export function FileExplorerEditorGroup({
   ) => void;
   historyRefreshKey: number;
   canWrite: boolean;
-  reloadToken?: number | undefined;
   lineTarget?: LineTarget | undefined;
   onLineTargetApplied: (tabKey: string, token: number) => void;
 }) {
   const { workspaceId } = useWorkspaceContext();
-  const store = useFileBrowserStoreInstance();
   const activeTab =
     group.tabs.find((tab) => tabIdentityKey(tab) === group.active) ?? null;
   const scopeRef = useMemo<CheckoutRef>(
@@ -230,10 +231,6 @@ export function FileExplorerEditorGroup({
   const { fileData, isLoading, error } = fileDocument;
   const refreshDocumentRef = useRef(fileDocument.refresh);
   refreshDocumentRef.current = fileDocument.refresh;
-  const appliedReloadRef = useRef<FileReloadRequest>({
-    key: null,
-    token: undefined,
-  });
   const [searchOpen, setSearchOpen] = useState(false);
   const [basePath, setBasePath] = useState<string | null>(null);
   const [baseContent, setBaseContent] = useState<string | null>(null);
@@ -262,24 +259,10 @@ export function FileExplorerEditorGroup({
 
   useEffect(() => {
     setSearchOpen(false);
-    const hasReloadRequest =
-      activeKey !== null &&
-      reloadToken !== undefined &&
-      (appliedReloadRef.current.key !== activeKey ||
-        appliedReloadRef.current.token !== reloadToken);
-    if (hasReloadRequest) {
-      appliedReloadRef.current = { key: activeKey, token: reloadToken };
-    }
     if (activePath) {
       void refreshDocumentRef.current();
-    } else {
-      appliedReloadRef.current = { key: null, token: undefined };
     }
-  }, [activeKey, activePath, reloadToken, scopeKey]);
-
-  useEffect(() => {
-    if (activeKey) store.getState().setDirty(activeKey, fileDocument.dirty);
-  }, [activeKey, fileDocument.dirty, store]);
+  }, [activePath, scopeKey]);
 
   const canDisplayText =
     !!activePath && !!fileData && !fileData.binary && !fileData.truncated;

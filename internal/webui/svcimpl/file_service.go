@@ -25,27 +25,28 @@ var _ service.FileService = (*fileServiceImpl)(nil)
 
 // fileServiceImpl is the concrete implementation of FileService.
 type fileServiceImpl struct {
-	fileOps            ops.FileOps
-	indexCache         *fileIndexCache
-	indexBuilds        singleflight.Group
-	indexBuilder       func(context.Context, string, string, bool) (*service.FileIndexResult, error)
-	mutationLocks      pathLockSet
+	fileOps       ops.FileOps
+	indexCache    *fileIndexCache
+	indexBuilds   singleflight.Group
+	indexBuilder  func(context.Context, string, string, bool) (*service.FileIndexResult, error)
+	mutationLocks pathLockSet
+
 	historyCleanupOnce sync.Once
+	historyCleanupDone chan struct{}
+	historyCleanupMu   sync.Mutex
 	historyCleanupErr  error
 }
 
 // NewFileService creates a new FileService implementation.
 func NewFileService(fileOps ops.FileOps) service.FileService {
 	svc := &fileServiceImpl{
-		fileOps:    fileOps,
-		indexCache: newFileIndexCache(fileIndexCacheMaxEntries, fileIndexCacheMaxBytes, fileIndexCacheTTL),
+		fileOps:            fileOps,
+		indexCache:         newFileIndexCache(fileIndexCacheMaxEntries, fileIndexCacheMaxBytes, fileIndexCacheTTL),
+		historyCleanupDone: make(chan struct{}),
 	}
 	svc.indexBuilder = svc.buildFileIndex
+	svc.startLegacyHistoryCleanup()
 	return svc
-}
-
-func (s *fileServiceImpl) ListDirectory(ctx context.Context, wsID, agentName, path string) (*service.FileTreeResult, error) {
-	return s.ListDirectoryScoped(ctx, wsID, service.ScopeAgent, agentName, "", path)
 }
 
 // listDirectoryAt lists one level under rootDir. hidden names path segments to
@@ -113,10 +114,6 @@ func isHiddenEntry(name string, hidden map[string]bool) bool {
 		}
 	}
 	return false
-}
-
-func (s *fileServiceImpl) ReadFile(ctx context.Context, wsID, agentName, path string) (*service.FileReadResult, error) {
-	return s.ReadFileScoped(ctx, wsID, service.ScopeAgent, agentName, "", path)
 }
 
 // readFileAt reads a single file under rootDir.
@@ -311,15 +308,6 @@ func (s *fileServiceImpl) StatPathScoped(ctx context.Context, wsID string, scope
 	}, nil
 }
 
-func (s *fileServiceImpl) WriteFile(ctx context.Context, wsID, agentName, path, content string) error {
-	return s.WriteFileScoped(ctx, wsID, service.ScopeAgent, agentName, "", path, content)
-}
-
-func (s *fileServiceImpl) WriteFileScoped(ctx context.Context, wsID string, scope service.FileScope, target, repo, path, content string) error {
-	_, err := s.WriteFileConditionalScoped(ctx, wsID, scope, target, repo, path, content, service.FileWritePreconditions{})
-	return err
-}
-
 func (s *fileServiceImpl) WriteFileConditionalScoped(ctx context.Context, wsID string, scope service.FileScope, target, repo, path, content string, preconditions service.FileWritePreconditions) (*service.FileMutationResult, error) {
 	root, err := s.resolveScopedRoot(wsID, scope, target, repo)
 	if err != nil {
@@ -357,9 +345,6 @@ func (s *fileServiceImpl) WriteFileConditionalScoped(ctx context.Context, wsID s
 			return nil, service.ErrPreconditionFailed("file version no longer matches")
 		}
 	}
-	if err := s.ensureLegacyHistoryCleaned(); err != nil {
-		return nil, err
-	}
 	if err := root.store.WriteAtomic(cleanPath, []byte(content)); err != nil {
 		return nil, err
 	}
@@ -369,25 +354,6 @@ func (s *fileServiceImpl) WriteFileConditionalScoped(ctx context.Context, wsID s
 		return nil, err
 	}
 	return &service.FileMutationResult{Success: true, Version: version}, nil
-}
-
-func (s *fileServiceImpl) DeletePathScoped(ctx context.Context, wsID string, scope service.FileScope, target, repo, path string, recursive bool) error {
-	root, err := s.resolveScopedRoot(wsID, scope, target, repo)
-	if err != nil {
-		return err
-	}
-	defer root.Close()
-	cleanPath, err := normalizeFilePath(path, false)
-	if err != nil {
-		return err
-	}
-	if err := requireSensitiveFileAccess(ctx, cleanPath); err != nil {
-		return err
-	}
-	if _, _, err := versionForPath(root.store, cleanPath); err != nil {
-		return err
-	}
-	return service.ErrPreconditionRequired("current source version is required")
 }
 
 func (s *fileServiceImpl) DeletePathVersionedScoped(ctx context.Context, wsID string, scope service.FileScope, target, repo, path string, recursive bool, version string) error {
@@ -442,32 +408,6 @@ func (s *fileServiceImpl) MkdirScoped(ctx context.Context, wsID string, scope se
 	}
 	s.invalidateIndex(root.identity)
 	return nil
-}
-
-func (s *fileServiceImpl) MovePathScoped(ctx context.Context, wsID string, scope service.FileScope, target, repo, from, to string, overwrite bool) error {
-	root, err := s.resolveScopedRoot(wsID, scope, target, repo)
-	if err != nil {
-		return err
-	}
-	defer root.Close()
-	cleanFrom, err := normalizeFilePath(from, false)
-	if err != nil {
-		return err
-	}
-	cleanTo, err := normalizeFilePath(to, false)
-	if err != nil {
-		return err
-	}
-	if err := requireSensitiveFileAccess(ctx, cleanFrom); err != nil {
-		return err
-	}
-	if err := requireSensitiveFileAccess(ctx, cleanTo); err != nil {
-		return err
-	}
-	if _, _, err := versionForPath(root.store, cleanFrom); err != nil {
-		return err
-	}
-	return service.ErrPreconditionRequired("current source version is required")
 }
 
 func (s *fileServiceImpl) MovePathVersionedScoped(ctx context.Context, wsID string, scope service.FileScope, target, repo, from, to string, overwrite bool, sourceVersion, destinationVersion string) (*service.FileMutationResult, error) {

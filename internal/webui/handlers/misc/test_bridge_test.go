@@ -52,9 +52,6 @@ func handleAuthConfig(extAuthURL string, limiter *AuthConfigLimiter) http.Handle
 }
 
 var handleClientErrors = HandleClientErrors
-var handleFileRead = HandleFileRead
-var handleFileTree = HandleFileTree
-var handleFileWrite = HandleFileWrite
 var handleGetAgentLog = HandleGetAgentLog
 var handleGetBackendsHealth = HandleGetBackendsHealth
 var handleListEditors = HandleListEditors
@@ -81,7 +78,7 @@ type clientErrorLimiter = ClientErrorLimiter
 // AgentLogResult → service.AgentLogResult
 type AgentLogResult = service.AgentLogResult
 
-// FileReadResult → service.FileReadResult (used by files_coverage_test.go)
+// FileReadResult → service.FileReadResult
 type FileReadResult = service.FileReadResult
 
 // FileTreeResult → service.FileTreeResult
@@ -104,45 +101,6 @@ type testFileServiceImpl struct {
 // NewFileService creates a test-local FileService implementation.
 func NewFileService(fileOps ops.FileOps) service.FileService {
 	return &testFileServiceImpl{fileOps: fileOps}
-}
-
-func (s *testFileServiceImpl) resolveAgent(wsID, agentName string) (*ops.AgentWorktree, error) {
-	if agentName == "" || !service.ValidAgentName.MatchString(agentName) {
-		return nil, service.ErrValidation("invalid agent name")
-	}
-	// List/Read use the lead-aware resolver so a lead (no local worktree) falls
-	// back to the workspace primary worktree. Mirrors svcimpl.fileServiceImpl.
-	wt, err := s.fileOps.ResolveAgentWorktreeOrPrimary(wsID, agentName)
-	if err != nil {
-		return nil, service.ErrNotFound(fmt.Sprintf("agent worktree %q not found", agentName))
-	}
-	return wt, nil
-}
-
-// resolveAgentForWrite resolves the agent's own worktree for writes — no lead
-// primary fallback, so a lead can't mutate the primary repo from the viewer.
-// Mirrors svcimpl.fileServiceImpl.resolveAgentForWrite.
-func (s *testFileServiceImpl) resolveAgentForWrite(wsID, agentName string) (*ops.AgentWorktree, error) {
-	if agentName == "" || !service.ValidAgentName.MatchString(agentName) {
-		return nil, service.ErrValidation("invalid agent name")
-	}
-	wt, err := s.fileOps.ResolveAgentWorktree(wsID, agentName)
-	if err != nil {
-		return nil, service.ErrNotFound(fmt.Sprintf("agent worktree %q not found", agentName))
-	}
-	return wt, nil
-}
-
-func (s *testFileServiceImpl) ListDirectory(_ context.Context, wsID, agentName, path string) (*service.FileTreeResult, error) {
-	return s.ListDirectoryScoped(context.Background(), wsID, service.ScopeAgent, agentName, "", path)
-}
-
-func (s *testFileServiceImpl) ReadFile(_ context.Context, wsID, agentName, path string) (*service.FileReadResult, error) {
-	return s.ReadFileScoped(context.Background(), wsID, service.ScopeAgent, agentName, "", path)
-}
-
-func (s *testFileServiceImpl) WriteFile(_ context.Context, wsID, agentName, path, content string) error {
-	return s.WriteFileScoped(context.Background(), wsID, service.ScopeAgent, agentName, "", path, content)
 }
 
 // resolveScopeRootTest mirrors svcimpl.fileServiceImpl.resolveScopeRoot.
@@ -373,31 +331,23 @@ func (s *testFileServiceImpl) HistoryFileScoped(_ context.Context, _ string, _ s
 	return &service.FileHistoryResult{}, nil
 }
 
-func (s *testFileServiceImpl) WriteFileScoped(_ context.Context, wsID string, scope service.FileScope, target, repo, path, content string) error {
+func (s *testFileServiceImpl) WriteFileConditionalScoped(_ context.Context, wsID string, scope service.FileScope, target, repo, path, content string, _ service.FileWritePreconditions) (*service.FileMutationResult, error) {
 	root, err := s.resolveScopeRootTest(wsID, scope, target, repo)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	return testWriteFileAt(root, path, content)
-}
-
-func (s *testFileServiceImpl) WriteFileConditionalScoped(ctx context.Context, wsID string, scope service.FileScope, target, repo, path, content string, _ service.FileWritePreconditions) (*service.FileMutationResult, error) {
-	if err := s.WriteFileScoped(ctx, wsID, scope, target, repo, path, content); err != nil {
+	if err := testWriteFileAt(root, path, content); err != nil {
 		return nil, err
 	}
 	return &service.FileMutationResult{Success: true, Version: "sha256:test"}, nil
 }
 
-func (s *testFileServiceImpl) DeletePathScoped(_ context.Context, wsID string, scope service.FileScope, target, repo, path string, recursive bool) error {
+func (s *testFileServiceImpl) DeletePathVersionedScoped(_ context.Context, wsID string, scope service.FileScope, target, repo, path string, recursive bool, _ string) error {
 	root, err := s.resolveScopeRootTest(wsID, scope, target, repo)
 	if err != nil {
 		return err
 	}
 	return testDeletePathAt(root, path, recursive)
-}
-
-func (s *testFileServiceImpl) DeletePathVersionedScoped(ctx context.Context, wsID string, scope service.FileScope, target, repo, path string, recursive bool, _ string) error {
-	return s.DeletePathScoped(ctx, wsID, scope, target, repo, path, recursive)
 }
 
 func (s *testFileServiceImpl) MkdirScoped(_ context.Context, wsID string, scope service.FileScope, target, repo, path string) error {
@@ -408,16 +358,12 @@ func (s *testFileServiceImpl) MkdirScoped(_ context.Context, wsID string, scope 
 	return testMkdirAt(root, path)
 }
 
-func (s *testFileServiceImpl) MovePathScoped(_ context.Context, wsID string, scope service.FileScope, target, repo, from, to string, overwrite bool) error {
+func (s *testFileServiceImpl) MovePathVersionedScoped(_ context.Context, wsID string, scope service.FileScope, target, repo, from, to string, overwrite bool, _, _ string) (*service.FileMutationResult, error) {
 	root, err := s.resolveScopeRootTest(wsID, scope, target, repo)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	return testMovePathAt(root, from, to, overwrite)
-}
-
-func (s *testFileServiceImpl) MovePathVersionedScoped(ctx context.Context, wsID string, scope service.FileScope, target, repo, from, to string, overwrite bool, _, _ string) (*service.FileMutationResult, error) {
-	if err := s.MovePathScoped(ctx, wsID, scope, target, repo, from, to, overwrite); err != nil {
+	if err := testMovePathAt(root, from, to, overwrite); err != nil {
 		return nil, err
 	}
 	return &service.FileMutationResult{Success: true, Version: "sha256:test"}, nil
@@ -528,7 +474,7 @@ func testWriteFileAt(rootDir, path, content string) error {
 	} else if !os.IsNotExist(err) {
 		return service.ErrInternal("failed to stat file", err)
 	}
-	if err := AtomicWriteFile(fullPath, content, perm); err != nil {
+	if err := os.WriteFile(fullPath, []byte(content), perm); err != nil {
 		return service.ErrInternal("failed to save file", err)
 	}
 	return nil
@@ -739,13 +685,6 @@ func (m *mockAgentService) DeleteAgent(_ context.Context, _, _ string) error { r
 // stubFileService implements service.FileService with no-op defaults for module tests.
 type stubFileService struct{}
 
-func (s *stubFileService) ListDirectory(_ context.Context, _, _, _ string) (*service.FileTreeResult, error) {
-	return &service.FileTreeResult{}, nil
-}
-func (s *stubFileService) ReadFile(_ context.Context, _, _, _ string) (*service.FileReadResult, error) {
-	return &service.FileReadResult{}, nil
-}
-func (s *stubFileService) WriteFile(_ context.Context, _, _, _, _ string) error { return nil }
 func (s *stubFileService) ListDirectoryScoped(_ context.Context, _ string, _ service.FileScope, _, _, _ string) (*service.FileTreeResult, error) {
 	return &service.FileTreeResult{}, nil
 }
@@ -782,22 +721,13 @@ func (s *stubFileService) BlameFileScoped(_ context.Context, _ string, _ service
 func (s *stubFileService) HistoryFileScoped(_ context.Context, _ string, _ service.FileScope, _, _, _ string) (*service.FileHistoryResult, error) {
 	return &service.FileHistoryResult{}, nil
 }
-func (s *stubFileService) WriteFileScoped(_ context.Context, _ string, _ service.FileScope, _, _, _, _ string) error {
-	return nil
-}
 func (s *stubFileService) WriteFileConditionalScoped(_ context.Context, _ string, _ service.FileScope, _, _, _, _ string, _ service.FileWritePreconditions) (*service.FileMutationResult, error) {
 	return &service.FileMutationResult{Success: true}, nil
-}
-func (s *stubFileService) DeletePathScoped(_ context.Context, _ string, _ service.FileScope, _, _, _ string, _ bool) error {
-	return nil
 }
 func (s *stubFileService) DeletePathVersionedScoped(_ context.Context, _ string, _ service.FileScope, _, _, _ string, _ bool, _ string) error {
 	return nil
 }
 func (s *stubFileService) MkdirScoped(_ context.Context, _ string, _ service.FileScope, _, _, _ string) error {
-	return nil
-}
-func (s *stubFileService) MovePathScoped(_ context.Context, _ string, _ service.FileScope, _, _, _, _ string, _ bool) error {
 	return nil
 }
 func (s *stubFileService) MovePathVersionedScoped(_ context.Context, _ string, _ service.FileScope, _, _, _, _ string, _ bool, _, _ string) (*service.FileMutationResult, error) {

@@ -59,6 +59,10 @@ import {
 } from "./FileExplorerDialogs";
 import { FileExplorerEditorGroup } from "./FileExplorerEditorGroup";
 import { FileExplorerTreePanel } from "./FileExplorerTreePanel";
+import type {
+  HistoryOpenDiffRequest,
+  HistoryOpenRevisionRequest,
+} from "./FileHistoryPanel";
 import { FileSearchPanel } from "./FileSearchPanel";
 import { QuickOpenPalette } from "./QuickOpenPalette";
 import {
@@ -107,8 +111,6 @@ import type {
   FileBrowserProps,
   LineTarget,
   MoveDialogState,
-  OpenDiffRequest,
-  OpenRevisionRequest,
   RepairConfirmState,
   RevisionViewState,
   ScopedInlineEdit,
@@ -746,7 +748,7 @@ function FileBrowserInner({
   );
 
   const openDiff = useCallback(
-    (groupIndex: number, request: OpenDiffRequest) => {
+    (groupIndex: number, request: HistoryOpenDiffRequest) => {
       const title =
         request.title ??
         (request.to
@@ -766,7 +768,7 @@ function FileBrowserInner({
   }, []);
 
   const openRevision = useCallback(
-    (groupIndex: number, request: OpenRevisionRequest) => {
+    (groupIndex: number, request: HistoryOpenRevisionRequest) => {
       setRevisionViews((prev) => ({
         ...prev,
         [groupIndex]: { ...request },
@@ -1564,7 +1566,7 @@ function FileBrowserInner({
   );
 }
 
-export function FileBrowser({
+export function WorkspaceFileBrowser({
   mode = "workspace",
   agentName,
   isActive = true,
@@ -1591,16 +1593,4 @@ export function FileBrowser({
       </FileDocumentRegistryProvider>
     </FileCapabilitiesProvider>
   );
-}
-
-/**
- * WorkspaceFileBrowser remains the exported compatibility wrapper for the
- * Files page lazy import.
- */
-export function WorkspaceFileBrowser({
-  mode = "workspace",
-  agentName,
-  isActive = true,
-}: FileBrowserProps) {
-  return <FileBrowser mode={mode} agentName={agentName} isActive={isActive} />;
 }

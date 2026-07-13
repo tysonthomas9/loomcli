@@ -97,13 +97,6 @@ func (s *stubDiffService) GetIssueDiffStat(_ context.Context, _, _ string) (*ser
 // stubFileService implements FileService with no-op defaults for module tests.
 type stubFileService struct{}
 
-func (s *stubFileService) ListDirectory(_ context.Context, _, _, _ string) (*service.FileTreeResult, error) {
-	return &service.FileTreeResult{}, nil
-}
-func (s *stubFileService) ReadFile(_ context.Context, _, _, _ string) (*service.FileReadResult, error) {
-	return &service.FileReadResult{}, nil
-}
-func (s *stubFileService) WriteFile(_ context.Context, _, _, _, _ string) error { return nil }
 func (s *stubFileService) ListDirectoryScoped(_ context.Context, _ string, _ service.FileScope, _, _, _ string) (*service.FileTreeResult, error) {
 	return &service.FileTreeResult{}, nil
 }
@@ -140,22 +133,13 @@ func (s *stubFileService) BlameFileScoped(_ context.Context, _ string, _ service
 func (s *stubFileService) HistoryFileScoped(_ context.Context, _ string, _ service.FileScope, _, _, _ string) (*service.FileHistoryResult, error) {
 	return &service.FileHistoryResult{}, nil
 }
-func (s *stubFileService) WriteFileScoped(_ context.Context, _ string, _ service.FileScope, _, _, _, _ string) error {
-	return nil
-}
 func (s *stubFileService) WriteFileConditionalScoped(_ context.Context, _ string, _ service.FileScope, _, _, _, _ string, _ service.FileWritePreconditions) (*service.FileMutationResult, error) {
 	return &service.FileMutationResult{Success: true}, nil
-}
-func (s *stubFileService) DeletePathScoped(_ context.Context, _ string, _ service.FileScope, _, _, _ string, _ bool) error {
-	return nil
 }
 func (s *stubFileService) DeletePathVersionedScoped(_ context.Context, _ string, _ service.FileScope, _, _, _ string, _ bool, _ string) error {
 	return nil
 }
 func (s *stubFileService) MkdirScoped(_ context.Context, _ string, _ service.FileScope, _, _, _ string) error {
-	return nil
-}
-func (s *stubFileService) MovePathScoped(_ context.Context, _ string, _ service.FileScope, _, _, _, _ string, _ bool) error {
 	return nil
 }
 func (s *stubFileService) MovePathVersionedScoped(_ context.Context, _ string, _ service.FileScope, _, _, _, _ string, _ bool, _, _ string) (*service.FileMutationResult, error) {

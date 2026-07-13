@@ -2738,20 +2738,6 @@ type GetDiffFileParams struct {
 	Path string `form:"path" json:"path"`
 }
 
-// ReadFileParams defines parameters for ReadFile.
-type ReadFileParams struct {
-	Path string `form:"path" json:"path"`
-}
-
-// WriteFileParams defines parameters for WriteFile.
-type WriteFileParams struct {
-	Path    string  `form:"path" json:"path"`
-	IfMatch *string `json:"If-Match,omitempty"`
-
-	// IfNoneMatch Use * for create-only writes.
-	IfNoneMatch *string `json:"If-None-Match,omitempty"`
-}
-
 // GitPullJSONBody defines parameters for GitPull.
 type GitPullJSONBody struct {
 	// Source Remote branch source
@@ -3157,9 +3143,6 @@ type SetDefaultWorkspaceJSONRequestBody SetDefaultWorkspaceJSONBody
 
 // ReorderWorkspacesJSONRequestBody defines body for ReorderWorkspaces for application/json ContentType.
 type ReorderWorkspacesJSONRequestBody ReorderWorkspacesJSONBody
-
-// WriteFileJSONRequestBody defines body for WriteFile for application/json ContentType.
-type WriteFileJSONRequestBody = FileWriteRequest
 
 // GitPullJSONRequestBody defines body for GitPull for application/json ContentType.
 type GitPullJSONRequestBody GitPullJSONBody

@@ -3,6 +3,7 @@ package svcimpl
 import (
 	"context"
 	"errors"
+	"log"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -14,8 +15,9 @@ import (
 )
 
 const (
-	fileHistoryGitLogLimit = 100
-	fileBlameMaxLines      = 5000
+	fileHistoryGitLogLimit   = 100
+	fileBlameMaxLines        = 5000
+	legacySaveHistoryDirName = "file-history"
 )
 
 type fileCheckoutRef struct {
@@ -107,9 +109,6 @@ func (s *fileServiceImpl) HistoryFileScoped(ctx context.Context, wsID string, sc
 		return nil, err
 	}
 	defer root.Close()
-	if err := s.ensureLegacyHistoryCleaned(); err != nil {
-		return nil, err
-	}
 	logOutput, err := s.fileOps.GitLogFile(ctx, checkout.root, checkout.relPath, fileHistoryGitLogLimit)
 	if err != nil {
 		return nil, mapGitInspectionError("failed to run git log", err)
@@ -339,18 +338,30 @@ func countLines(content string) int {
 	return count
 }
 
-const legacySaveHistoryDirName = "file-history"
-
-func (s *fileServiceImpl) ensureLegacyHistoryCleaned() error {
+func (s *fileServiceImpl) startLegacyHistoryCleanup() {
 	s.historyCleanupOnce.Do(func() {
-		dataDir, err := s.fileOps.ResolveLoomDataDir()
-		if err != nil {
-			s.historyCleanupErr = service.ErrInternal("failed to resolve loom data directory", err)
-			return
-		}
-		s.historyCleanupErr = cleanupLegacySaveHistory(dataDir)
+		go func() {
+			defer close(s.historyCleanupDone)
+			err := s.cleanupLegacyHistoryOnce()
+			if err != nil {
+				log.Printf("file browser: legacy save-history cleanup skipped: %v", err)
+			}
+			s.historyCleanupMu.Lock()
+			s.historyCleanupErr = err
+			s.historyCleanupMu.Unlock()
+		}()
 	})
-	return s.historyCleanupErr
+}
+
+func (s *fileServiceImpl) cleanupLegacyHistoryOnce() error {
+	if s.fileOps == nil {
+		return service.ErrInternal("failed to resolve loom data directory", errors.New("file ops is nil"))
+	}
+	dataDir, err := s.fileOps.ResolveLoomDataDir()
+	if err != nil {
+		return service.ErrInternal("failed to resolve loom data directory", err)
+	}
+	return cleanupLegacySaveHistory(dataDir)
 }
 
 // cleanupLegacySaveHistory removes only the dedicated plaintext snapshot root.

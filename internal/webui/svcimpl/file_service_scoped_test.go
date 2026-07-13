@@ -61,9 +61,6 @@ func (m scopedMockFileOps) ResolveAgentWorktreeForRepo(_, name, repo string) (*o
 	}
 	return nil, ops.ErrAgentWorktreeNotFound
 }
-func (m scopedMockFileOps) ResolveAgentWorktreeOrPrimary(_, _ string) (*ops.AgentWorktree, error) {
-	return nil, errors.New("not used")
-}
 func (m scopedMockFileOps) ResolveWorkspaceRoot(_ string) (string, error) {
 	if m.wsErr != nil {
 		return "", m.wsErr
@@ -154,7 +151,7 @@ func (m scopedMockFileOps) ResolveLoomDataDir() (string, error) {
 	if m.dataDir != "" {
 		return m.dataDir, nil
 	}
-	return os.TempDir(), nil
+	return "", errors.New("loom data directory not configured")
 }
 
 func (m scopedMockFileOps) GitCurrentBranch(ctx context.Context, worktreePath string) (string, error) {
@@ -200,6 +197,31 @@ func parseTestPorcelainStatus(output string) map[string]string {
 
 func scopedSvc(root string) service.FileService {
 	return NewFileService(scopedMockFileOps{wsRoot: root})
+}
+
+func waitLegacyHistoryCleanupForTest(t *testing.T, svc service.FileService) {
+	t.Helper()
+	impl, ok := svc.(*fileServiceImpl)
+	if !ok {
+		t.Fatalf("service = %T, want *fileServiceImpl", svc)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	select {
+	case <-impl.historyCleanupDone:
+	case <-ctx.Done():
+		t.Fatalf("legacy history cleanup: %v", ctx.Err())
+	}
+	impl.historyCleanupMu.Lock()
+	defer impl.historyCleanupMu.Unlock()
+	if err := impl.historyCleanupErr; err != nil {
+		t.Fatalf("legacy history cleanup: %v", err)
+	}
+}
+
+func writeScopedFile(ctx context.Context, svc service.FileService, wsID string, scope service.FileScope, target, repo, path, content string) error {
+	_, err := svc.WriteFileConditionalScoped(ctx, wsID, scope, target, repo, path, content, service.FileWritePreconditions{})
+	return err
 }
 
 func mustScopedVersion(t *testing.T, svc service.FileService, ctx context.Context, scope service.FileScope, target, path string) string {
@@ -272,7 +294,7 @@ func TestFileServiceImpl_EditorCanAccessSensitiveFiles(t *testing.T) {
 	if err != nil || read.Content != "TOKEN=secret" {
 		t.Fatalf("editor read = %+v, err=%v", read, err)
 	}
-	if err := svc.WriteFileScoped(editor, "ws", service.ScopeWorkspace, "", "", ".env.production", "TOKEN=updated"); err != nil {
+	if err := writeScopedFile(editor, svc, "ws", service.ScopeWorkspace, "", "", ".env.production", "TOKEN=updated"); err != nil {
 		t.Fatalf("editor write: %v", err)
 	}
 }
@@ -335,7 +357,6 @@ func setupScopedService(t *testing.T) (service.FileService, []scopedCase) {
 		wsRoot:    wsRoot,
 		repoRoot:  repoRoot,
 		agentRoot: agentRoot,
-		dataDir:   t.TempDir(),
 	})
 	return svc, []scopedCase{
 		{name: "workspace", scope: service.ScopeWorkspace, root: wsRoot},
@@ -593,7 +614,7 @@ func TestFileServiceImpl_PhaseA_CRUDAndVisibilityAllScopes(t *testing.T) {
 			if readEnv.Content != "OLD=1" {
 				t.Fatalf(".env content = %q", readEnv.Content)
 			}
-			if err := svc.WriteFileScoped(ctx, "ws", sc.scope, sc.target, "", ".env", "NEW=1"); err != nil {
+			if err := writeScopedFile(ctx, svc, "ws", sc.scope, sc.target, "", ".env", "NEW=1"); err != nil {
 				t.Fatalf("write .env: %v", err)
 			}
 			readEnv, err = svc.ReadFileScoped(ctx, "ws", sc.scope, sc.target, "", ".env")
@@ -604,13 +625,16 @@ func TestFileServiceImpl_PhaseA_CRUDAndVisibilityAllScopes(t *testing.T) {
 				t.Fatalf("written .env content = %q", readEnv.Content)
 			}
 
-			wantKind(t, svc.WriteFileScoped(ctx, "ws", sc.scope, sc.target, "", ".git/config", "mutated"), service.KindForbidden)
+			wantKind(t, writeScopedFile(ctx, svc, "ws", sc.scope, sc.target, "", ".git/config", "mutated"), service.KindForbidden)
 			_, err = svc.ReadFileScoped(ctx, "ws", sc.scope, sc.target, "", ".GIT/config")
 			wantKind(t, err, service.KindForbidden)
 			wantKind(t, svc.MkdirScoped(ctx, "ws", sc.scope, sc.target, "", ".git/refs/heads"), service.KindForbidden)
-			wantKind(t, svc.MovePathScoped(ctx, "ws", sc.scope, sc.target, "", ".git/config", "config.moved", false), service.KindForbidden)
-			wantKind(t, svc.MovePathScoped(ctx, "ws", sc.scope, sc.target, "", ".env", ".GiT/config", false), service.KindForbidden)
-			wantKind(t, svc.DeletePathScoped(ctx, "ws", sc.scope, sc.target, "", ".git/config", false), service.KindForbidden)
+			_, err = svc.MovePathVersionedScoped(ctx, "ws", sc.scope, sc.target, "", ".git/config", "config.moved", false, "sha256:test", "")
+			wantKind(t, err, service.KindForbidden)
+			_, err = svc.MovePathVersionedScoped(ctx, "ws", sc.scope, sc.target, "", ".env", ".GiT/config", false, mustScopedVersion(t, svc, ctx, sc.scope, sc.target, ".env"), "")
+			wantKind(t, err, service.KindForbidden)
+			err = svc.DeletePathVersionedScoped(ctx, "ws", sc.scope, sc.target, "", ".git/config", false, "sha256:test")
+			wantKind(t, err, service.KindForbidden)
 
 			mustWrite(t, filepath.Join(sc.root, "nonempty", "file.txt"), "x")
 			nonemptyVersion := mustScopedVersion(t, svc, ctx, sc.scope, sc.target, "nonempty")
@@ -685,29 +709,29 @@ func TestFileServiceImpl_PhaseA_StructuralGuardsAllScopes(t *testing.T) {
 
 			_, err := svc.ReadFileScoped(ctx, "ws", sc.scope, sc.target, "", "../outside.txt")
 			wantKind(t, err, service.KindForbidden)
-			err = svc.WriteFileScoped(ctx, "ws", sc.scope, sc.target, "", "../outside.txt", "bad")
+			err = writeScopedFile(ctx, svc, "ws", sc.scope, sc.target, "", "../outside.txt", "bad")
 			wantKind(t, err, service.KindForbidden)
-			err = svc.DeletePathScoped(ctx, "ws", sc.scope, sc.target, "", "../outside.txt", false)
+			err = svc.DeletePathVersionedScoped(ctx, "ws", sc.scope, sc.target, "", "../outside.txt", false, "sha256:test")
 			wantKind(t, err, service.KindForbidden)
 			err = svc.MkdirScoped(ctx, "ws", sc.scope, sc.target, "", "../outside-dir")
 			wantKind(t, err, service.KindForbidden)
-			err = svc.MovePathScoped(ctx, "ws", sc.scope, sc.target, "", "existing.txt", "../outside-move.txt", false)
+			_, err = svc.MovePathVersionedScoped(ctx, "ws", sc.scope, sc.target, "", "existing.txt", "../outside-move.txt", false, mustScopedVersion(t, svc, ctx, sc.scope, sc.target, "existing.txt"), "")
 			wantKind(t, err, service.KindForbidden)
 
 			_, err = svc.ReadFileScoped(ctx, "ws", sc.scope, sc.target, "", "link.txt")
 			wantKind(t, err, service.KindForbidden)
-			err = svc.WriteFileScoped(ctx, "ws", sc.scope, sc.target, "", "link.txt", "bad")
+			err = writeScopedFile(ctx, svc, "ws", sc.scope, sc.target, "", "link.txt", "bad")
 			wantKind(t, err, service.KindForbidden)
-			err = svc.DeletePathScoped(ctx, "ws", sc.scope, sc.target, "", "link.txt", false)
+			err = svc.DeletePathVersionedScoped(ctx, "ws", sc.scope, sc.target, "", "link.txt", false, "sha256:test")
 			wantKind(t, err, service.KindForbidden)
 			err = svc.MkdirScoped(ctx, "ws", sc.scope, sc.target, "", "link.txt")
 			wantKind(t, err, service.KindForbidden)
-			err = svc.MovePathScoped(ctx, "ws", sc.scope, sc.target, "", "link.txt", "moved-link.txt", false)
+			_, err = svc.MovePathVersionedScoped(ctx, "ws", sc.scope, sc.target, "", "link.txt", "moved-link.txt", false, "sha256:test", "")
 			wantKind(t, err, service.KindForbidden)
 
 			_, err = svc.ReadFileScoped(ctx, "ws", sc.scope, sc.target, "", "parent-link/nested.txt")
 			wantKind(t, err, service.KindForbidden)
-			err = svc.WriteFileScoped(ctx, "ws", sc.scope, sc.target, "", "parent-link/new.txt", "bad")
+			err = writeScopedFile(ctx, svc, "ws", sc.scope, sc.target, "", "parent-link/new.txt", "bad")
 			wantKind(t, err, service.KindForbidden)
 		})
 	}
@@ -718,7 +742,7 @@ func TestFileServiceImpl_MutationsRejectScopeRootAliases(t *testing.T) {
 	svc := scopedSvc(dir)
 	ctx := context.Background()
 	for _, path := range []string{"", ".", "./", "dir/..", "dir/../."} {
-		wantKind(t, svc.DeletePathScoped(ctx, "ws", service.ScopeWorkspace, "", "", path, true), service.KindValidation)
+		wantKind(t, svc.DeletePathVersionedScoped(ctx, "ws", service.ScopeWorkspace, "", "", path, true, "sha256:test"), service.KindValidation)
 		wantKind(t, svc.MkdirScoped(ctx, "ws", service.ScopeWorkspace, "", "", path), service.KindValidation)
 	}
 	if _, err := os.Stat(dir); err != nil {
@@ -733,8 +757,9 @@ func TestFileServiceImpl_ProtectsGitMetadataUnderAncestorMutation(t *testing.T) 
 	svc := scopedSvc(dir)
 	ctx := context.Background()
 
-	wantKind(t, svc.DeletePathScoped(ctx, "ws", service.ScopeWorkspace, "", "", "checkout", true), service.KindForbidden)
-	wantKind(t, svc.MovePathScoped(ctx, "ws", service.ScopeWorkspace, "", "", "checkout", "renamed", false), service.KindForbidden)
+	wantKind(t, svc.DeletePathVersionedScoped(ctx, "ws", service.ScopeWorkspace, "", "", "checkout", true, "sha256:test"), service.KindForbidden)
+	_, err := svc.MovePathVersionedScoped(ctx, "ws", service.ScopeWorkspace, "", "", "checkout", "renamed", false, "sha256:test", "")
+	wantKind(t, err, service.KindForbidden)
 	if _, err := os.Stat(filepath.Join(dir, "checkout", ".git", "config")); err != nil {
 		t.Fatalf("protected metadata changed: %v", err)
 	}
@@ -779,8 +804,8 @@ func TestFileServiceImpl_AtomicWritePreservesPermissions(t *testing.T) {
 	if err := os.Chmod(path, 0750); err != nil {
 		t.Fatal(err)
 	}
-	if err := scopedSvc(dir).WriteFileScoped(context.Background(), "ws", service.ScopeWorkspace, "", "", "script.sh", "new"); err != nil {
-		t.Fatalf("WriteFileScoped: %v", err)
+	if err := writeScopedFile(context.Background(), scopedSvc(dir), "ws", service.ScopeWorkspace, "", "", "script.sh", "new"); err != nil {
+		t.Fatalf("ordinary save: %v", err)
 	}
 	info, err := os.Stat(path)
 	if err != nil {
@@ -1016,8 +1041,8 @@ func TestFileServiceImpl_HistoryContainsOnlyCommits(t *testing.T) {
 	mustWrite(t, filepath.Join(repo.root, "file.txt"), "committed\n")
 	commitAll(t, repo.root)
 
-	if err := svc.WriteFileScoped(context.Background(), "ws", repo.scope, repo.target, "", "file.txt", "ordinary save\n"); err != nil {
-		t.Fatalf("WriteFileScoped overwrite: %v", err)
+	if err := writeScopedFile(context.Background(), svc, "ws", repo.scope, repo.target, "", "file.txt", "ordinary save\n"); err != nil {
+		t.Fatalf("ordinary save overwrite: %v", err)
 	}
 	history, err := svc.HistoryFileScoped(context.Background(), "ws", repo.scope, repo.target, "", "file.txt")
 	if err != nil {
@@ -1078,11 +1103,40 @@ func TestMapGitInspectionErrorPreservesKinds(t *testing.T) {
 	}
 }
 
+func TestFileServiceImpl_StartupCleansLegacySaveHistoryOnce(t *testing.T) {
+	wsRoot := t.TempDir()
+	dataDir := t.TempDir()
+	legacy := filepath.Join(dataDir, legacySaveHistoryDirName)
+	sibling := filepath.Join(dataDir, "keep")
+	mustWrite(t, filepath.Join(legacy, "nested", "snapshot.json"), "plaintext")
+	mustWrite(t, filepath.Join(sibling, "data.txt"), "keep")
+
+	svc := NewFileService(scopedMockFileOps{wsRoot: wsRoot, dataDir: dataDir})
+	waitLegacyHistoryCleanupForTest(t, svc)
+
+	if _, err := os.Lstat(legacy); !os.IsNotExist(err) {
+		t.Fatalf("legacy history still exists: %v", err)
+	}
+	if got, err := os.ReadFile(filepath.Join(sibling, "data.txt")); err != nil || string(got) != "keep" {
+		t.Fatalf("sibling changed: %q, %v", got, err)
+	}
+
+	mustWrite(t, filepath.Join(legacy, "snapshot.json"), "plaintext-again")
+	if _, err := svc.WriteFileConditionalScoped(context.Background(), "ws", service.ScopeWorkspace, "", "", "file.txt", "secret plaintext", service.FileWritePreconditions{}); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+	if _, err := os.Lstat(legacy); err != nil {
+		t.Fatalf("legacy history was cleaned outside startup: %v", err)
+	}
+}
+
 func TestFileServiceImpl_SaveCreatesNoPlaintextSnapshot(t *testing.T) {
-	svc, scopes := setupScopedService(t)
-	repo := scopes[1]
-	dataDir := svc.(*fileServiceImpl).fileOps.(scopedMockFileOps).dataDir
-	if err := svc.WriteFileScoped(context.Background(), "ws", repo.scope, repo.target, "", "file.txt", "secret plaintext"); err != nil {
+	wsRoot := t.TempDir()
+	dataDir := t.TempDir()
+	svc := NewFileService(scopedMockFileOps{wsRoot: wsRoot, dataDir: dataDir})
+	waitLegacyHistoryCleanupForTest(t, svc)
+
+	if _, err := svc.WriteFileConditionalScoped(context.Background(), "ws", service.ScopeWorkspace, "", "", "file.txt", "secret plaintext", service.FileWritePreconditions{}); err != nil {
 		t.Fatalf("save: %v", err)
 	}
 	if _, err := os.Lstat(filepath.Join(dataDir, legacySaveHistoryDirName)); !os.IsNotExist(err) {
@@ -1336,7 +1390,7 @@ func TestFileServiceImpl_IndexCacheInvalidatedAfterCRUD(t *testing.T) {
 	root := t.TempDir()
 	svc := scopedSvc(root)
 	ctx := context.Background()
-	if err := svc.WriteFileScoped(ctx, "ws", service.ScopeWorkspace, "", "", "one.txt", "1"); err != nil {
+	if err := writeScopedFile(ctx, svc, "ws", service.ScopeWorkspace, "", "", "one.txt", "1"); err != nil {
 		t.Fatalf("write one: %v", err)
 	}
 	index, err := svc.IndexFilesScoped(ctx, "ws", service.ScopeWorkspace, "", "")
@@ -1347,7 +1401,7 @@ func TestFileServiceImpl_IndexCacheInvalidatedAfterCRUD(t *testing.T) {
 		t.Fatalf("index missing one.txt: %+v", index.Paths)
 	}
 
-	if err := svc.WriteFileScoped(ctx, "ws", service.ScopeWorkspace, "", "", "two.txt", "2"); err != nil {
+	if err := writeScopedFile(ctx, svc, "ws", service.ScopeWorkspace, "", "", "two.txt", "2"); err != nil {
 		t.Fatalf("write two: %v", err)
 	}
 	index, err = svc.IndexFilesScoped(ctx, "ws", service.ScopeWorkspace, "", "")
