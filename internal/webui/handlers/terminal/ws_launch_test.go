@@ -64,13 +64,11 @@ func TestEnsureWorkspacePTYRegisteredUsesLocalState(t *testing.T) {
 	stateDir := t.TempDir()
 	wsDir := t.TempDir()
 	t.Setenv("LOOM_CONFIG_DIR", stateDir)
-	if err := bootstrap.SaveStateCache(&bootstrap.StateCache{
-		Version: 1,
-		Workspaces: map[string]bootstrap.WorkspaceLocalState{
-			"E2E": {Path: wsDir},
-		},
+	if err := bootstrap.MutateStateCache(func(sc *bootstrap.StateCache) error {
+		sc.Workspaces["E2E"] = bootstrap.WorkspaceLocalState{Path: wsDir}
+		return nil
 	}); err != nil {
-		t.Fatalf("SaveStateCache: %v", err)
+		t.Fatalf("MutateStateCache: %v", err)
 	}
 
 	mm := webuterminal.NewMultiPTYManager("cat", 0)

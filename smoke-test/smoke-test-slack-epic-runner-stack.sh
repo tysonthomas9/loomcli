@@ -339,10 +339,24 @@ ensure_fleet_db() {
   )
 }
 
+# Print the canonical identity for the Loom source baked into Dockerfile.dev.
+# Dirty identities include a content fingerprint, so separate dirty worktrees at
+# the same HEAD cannot be mistaken for one another. Consumers should invoke this
+# helper rather than duplicate its build-path or hashing rules.
+loom_source_rev() {
+  "${ROOT_DIR}/scripts/loom-image-source-rev.sh" "$ROOT_DIR"
+}
+
+build_image() {
+  local source_rev
+  source_rev="$(loom_source_rev)"
+  log "building ${IMAGE} from Dockerfile.dev (loom.source.rev=${source_rev})"
+  podman build -f "${ROOT_DIR}/Dockerfile.dev" --label "loom.source.rev=${source_rev}" -t "$IMAGE" "$ROOT_DIR"
+}
+
 ensure_image() {
   if truthy "$BUILD_IMAGE"; then
-    log "building ${IMAGE} from Dockerfile.dev"
-    podman build -f "${ROOT_DIR}/Dockerfile.dev" -t "$IMAGE" "$ROOT_DIR"
+    build_image
     return 0
   fi
 
@@ -351,8 +365,8 @@ ensure_image() {
   fi
 
   if [[ "$BUILD_IMAGE" == "auto" ]]; then
-    log "building missing ${IMAGE} from Dockerfile.dev"
-    podman build -f "${ROOT_DIR}/Dockerfile.dev" -t "$IMAGE" "$ROOT_DIR"
+    log "building missing ${IMAGE}"
+    build_image
     return 0
   fi
 

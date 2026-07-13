@@ -1,14 +1,9 @@
 package svcimpl
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
-	"net/http"
-	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
@@ -20,27 +15,31 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/sessions/transcript/backends"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
+	"github.com/tysonthomas9/loomcli/internal/webui/sessionhistory"
 	"github.com/tysonthomas9/loomcli/internal/webui/storeadapter"
 )
 
 // Compile-time check.
 var _ service.SessionService = (*sessionServiceImpl)(nil)
 
+var userHomeDir = os.UserHomeDir
+
 // sessionServiceImpl is the concrete implementation of SessionService.
 type sessionServiceImpl struct {
 	store      store.Store
+	histStore  *sessionhistory.Store
 	runtimeDir string
 }
 
 // NewSessionService creates a new SessionService implementation.
-func NewSessionService(st store.Store) service.SessionService {
-	return NewSessionServiceWithRuntimeDir(st, "")
+func NewSessionService(st store.Store, histStore *sessionhistory.Store) service.SessionService {
+	return NewSessionServiceWithRuntimeDir(st, histStore, "")
 }
 
 // NewSessionServiceWithRuntimeDir creates a SessionService that also searches
 // the daemon/runtime session store used by local desktop mode.
-func NewSessionServiceWithRuntimeDir(st store.Store, runtimeDir string) service.SessionService {
-	return &sessionServiceImpl{store: st, runtimeDir: runtimeDir}
+func NewSessionServiceWithRuntimeDir(st store.Store, histStore *sessionhistory.Store, runtimeDir string) service.SessionService {
+	return &sessionServiceImpl{store: st, histStore: histStore, runtimeDir: runtimeDir}
 }
 
 // storesForWorkspace returns session stores for all repos in the workspace.
@@ -393,11 +392,8 @@ func fillControlPlaneArtifactFlags(item *service.SessionListItem, stores []*sess
 func controlPlaneSessionHasDiff(metadata map[string]string) bool {
 	return firstNonEmptySessionValue(
 		metadata["diff_path"],
-		metadata["diff_artifact_id"],
-		metadata["diff_ref"],
 		metadata["patch_path"],
-		metadata["patch_artifact_id"],
-		metadata["patch_ref"],
+		controlPlaneDiffArtifactRef(metadata),
 	) != ""
 }
 
@@ -477,7 +473,7 @@ func (s *sessionServiceImpl) GetSession(ctx context.Context, wsID, taskID, sessi
 		// Control-plane (flue task-run) sessions live in the agent-session store, not a file
 		// store. ListTaskSessions and GetSessionTranscript already resolve them; GetSession must
 		// too, else the single-session GET 404s on a session the list endpoint returned.
-		if serviceErrorKind(err, service.KindNotFound) {
+		if serviceErrorNotFound(err) {
 			return s.controlPlaneSession(ctx, wsID, taskID, sessionID)
 		}
 		return nil, err
@@ -497,7 +493,7 @@ func (s *sessionServiceImpl) GetSession(ctx context.Context, wsID, taskID, sessi
 		return nil, service.ErrNotFound("session not found")
 	}
 
-	if rec, err := s.controlPlaneAgentSession(ctx, wsID, taskID, sessionID); err == nil {
+	if rec, err := s.controlPlaneSessionRecord(ctx, wsID, taskID, sessionID); err == nil {
 		sessionRec := sessionRecordFromAgentSession(rec)
 		s.projectTaskRunOntoSessionRecord(ctx, wsID, &sessionRec, rec, nil)
 		enrichSessionRecordFromLocal(&sessionRec, meta.SessionRecord)
@@ -510,12 +506,28 @@ func (s *sessionServiceImpl) GetSession(ctx context.Context, wsID, taskID, sessi
 	}, nil
 }
 
+func (s *sessionServiceImpl) controlPlaneSessionRecord(ctx context.Context, wsID, taskID, sessionID string) (*domain.AgentSession, error) {
+	if s.store == nil {
+		return nil, service.ErrNotFound("session not found")
+	}
+	rec, err := s.store.AgentSessions().Get(ctx, wsID, sessionID)
+	if err != nil {
+		if errors.Is(err, domain.ErrNotFound) {
+			return nil, service.ErrNotFound("session not found")
+		}
+		return nil, service.ErrInternal("failed to load session", err)
+	}
+	if rec.TaskID != taskID && (rec.Metadata == nil || rec.Metadata["task_id"] != taskID) {
+		return nil, service.ErrNotFound("session not found")
+	}
+	return rec, nil
+}
+
 // controlPlaneSession resolves a session detail from the agent-session (control-plane) store,
-// the fallback for flue task-run sessions that have no file-store metadata. Mirrors
-// controlPlaneSessionTranscript's record lookup + task-ownership check, and reuses the same
+// the fallback for flue task-run sessions that have no file-store metadata. It reuses the
 // AgentSession->SessionRecord mapping ListTaskSessions uses, so list/get/transcript agree.
 func (s *sessionServiceImpl) controlPlaneSession(ctx context.Context, wsID, taskID, sessionID string) (*service.SessionDetailData, error) {
-	rec, err := s.controlPlaneAgentSession(ctx, wsID, taskID, sessionID)
+	rec, err := s.controlPlaneSessionRecord(ctx, wsID, taskID, sessionID)
 	if err != nil {
 		return nil, err
 	}
@@ -534,27 +546,10 @@ func (s *sessionServiceImpl) controlPlaneSession(ctx context.Context, wsID, task
 	}, nil
 }
 
-func (s *sessionServiceImpl) controlPlaneAgentSession(ctx context.Context, wsID, taskID, sessionID string) (*domain.AgentSession, error) {
-	if s.store == nil {
-		return nil, service.ErrNotFound("session not found")
-	}
-	rec, err := s.store.AgentSessions().Get(ctx, wsID, sessionID)
-	if err != nil {
-		if errors.Is(err, domain.ErrNotFound) {
-			return nil, service.ErrNotFound("session not found")
-		}
-		return nil, service.ErrInternal("failed to load session", err)
-	}
-	if rec.TaskID != taskID && (rec.Metadata == nil || rec.Metadata["task_id"] != taskID) {
-		return nil, service.ErrNotFound("session not found")
-	}
-	return rec, nil
-}
-
 func (s *sessionServiceImpl) GetSessionTranscript(ctx context.Context, wsID, taskID, sessionID string) ([]transcript.Event, error) {
 	store, _, err := s.authorizedSessionStore(ctx, wsID, taskID, sessionID)
 	if err != nil {
-		if !serviceErrorKind(err, service.KindNotFound) {
+		if !serviceErrorNotFound(err) {
 			return nil, err
 		}
 		return s.controlPlaneSessionTranscript(ctx, wsID, taskID, sessionID)
@@ -579,7 +574,7 @@ func (s *sessionServiceImpl) GetSessionTranscript(ctx context.Context, wsID, tas
 }
 
 func (s *sessionServiceImpl) controlPlaneSessionTranscript(ctx context.Context, wsID, taskID, sessionID string) ([]transcript.Event, error) {
-	rec, err := s.controlPlaneAgentSession(ctx, wsID, taskID, sessionID)
+	rec, err := s.controlPlaneSessionRecord(ctx, wsID, taskID, sessionID)
 	if err != nil {
 		return nil, err
 	}
@@ -607,145 +602,8 @@ func (s *sessionServiceImpl) controlPlaneSessionTranscript(ctx context.Context, 
 	return events, nil
 }
 
-const maxControlPlaneArtifactBytes = 16 << 20
-
-func (s *sessionServiceImpl) readArtifactRef(ctx context.Context, wsID, ref string) ([]byte, error) {
-	ref = strings.TrimSpace(ref)
-	if ref == "" {
-		return nil, errors.New("empty artifact ref")
-	}
-	if strings.HasPrefix(ref, "artifact://") {
-		artifactID := strings.TrimSpace(strings.TrimPrefix(ref, "artifact://"))
-		if artifactID == "" {
-			return nil, errors.New("empty artifact ref")
-		}
-		return s.readArtifactID(ctx, wsID, artifactID)
-	}
-	return readArtifactURI(ctx, ref)
-}
-
-func (s *sessionServiceImpl) readTranscriptRef(ctx context.Context, wsID, ref string) ([]byte, error) {
-	return s.readArtifactRef(ctx, wsID, ref)
-}
-
-func (s *sessionServiceImpl) readArtifactID(ctx context.Context, wsID, artifactID string) ([]byte, error) {
-	if artifactID == "" {
-		return nil, errors.New("empty artifact ID")
-	}
-	if s.store == nil {
-		return nil, errors.New("artifact store unavailable")
-	}
-	var contentErr error
-	if reader, ok := s.store.Artifacts().(store.ArtifactContentReader); ok {
-		data, err := reader.ReadContent(ctx, wsID, artifactID)
-		if err == nil {
-			return data, nil
-		}
-		contentErr = err
-		if !errors.Is(err, domain.ErrNotFound) {
-			logger.Warn("failed to read artifact content; falling back to artifact URI", "workspace", wsID, "artifact_id", artifactID, "err", err)
-		}
-	}
-	artifact, err := s.store.Artifacts().Get(ctx, wsID, artifactID)
-	if err != nil {
-		if errors.Is(err, domain.ErrNotFound) {
-			return nil, domain.ErrNotFound
-		}
-		if contentErr != nil {
-			return nil, fmt.Errorf("read artifact content failed: %w; artifact metadata lookup failed: %w", contentErr, err)
-		}
-		return nil, err
-	}
-	if strings.TrimSpace(artifact.URI) == "" {
-		if errors.Is(contentErr, domain.ErrNotFound) {
-			return nil, domain.ErrNotFound
-		}
-		if contentErr != nil {
-			return nil, fmt.Errorf("read artifact content failed: %w; artifact has no URI fallback", contentErr)
-		}
-		return nil, domain.ErrNotFound
-	}
-	data, err := readArtifactURI(ctx, artifact.URI)
-	if err != nil {
-		if errors.Is(err, domain.ErrNotFound) || errors.Is(err, os.ErrNotExist) {
-			return nil, domain.ErrNotFound
-		}
-		if contentErr != nil {
-			return nil, fmt.Errorf("read artifact content failed: %w; artifact URI fallback failed: %w", contentErr, err)
-		}
-		return nil, err
-	}
-	return data, nil
-}
-
-func readArtifactURI(ctx context.Context, rawURI string) ([]byte, error) {
-	rawURI = strings.TrimSpace(rawURI)
-	switch {
-	case strings.HasPrefix(rawURI, "file://"):
-		parsed, err := url.Parse(rawURI)
-		if err != nil {
-			return nil, err
-		}
-		path := parsed.Path
-		if path == "" {
-			path = parsed.Host
-		}
-		if path == "" {
-			return nil, errors.New("empty file artifact ref")
-		}
-		return os.ReadFile(path) //nolint:gosec // refs are emitted by the trusted runner/control-plane path.
-	case strings.HasPrefix(rawURI, "http://"), strings.HasPrefix(rawURI, "https://"):
-		req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURI, nil)
-		if err != nil {
-			return nil, err
-		}
-		resp, err := http.DefaultClient.Do(req)
-		if err != nil {
-			return nil, err
-		}
-		defer resp.Body.Close()
-		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-			return nil, errors.New("artifact ref returned non-success status")
-		}
-		body, err := io.ReadAll(io.LimitReader(resp.Body, maxControlPlaneArtifactBytes+1))
-		if err != nil {
-			return nil, err
-		}
-		if len(body) > maxControlPlaneArtifactBytes {
-			return nil, errors.New("artifact is too large")
-		}
-		return body, nil
-	default:
-		return nil, errors.New("unsupported artifact ref")
-	}
-}
-
-func parseCanonicalTranscriptBytes(data []byte) ([]transcript.Event, error) {
-	trimmed := bytes.TrimSpace(data)
-	if len(trimmed) == 0 {
-		return []transcript.Event{}, nil
-	}
-	if trimmed[0] == '[' {
-		var events []transcript.Event
-		if err := json.Unmarshal(trimmed, &events); err != nil {
-			return nil, err
-		}
-		return events, nil
-	}
-	lines := bytes.Split(trimmed, []byte("\n"))
-	events := make([]transcript.Event, 0, len(lines))
-	for _, line := range lines {
-		line = bytes.TrimSpace(line)
-		if len(line) == 0 {
-			continue
-		}
-		var event transcript.Event
-		if err := json.Unmarshal(line, &event); err != nil {
-			return nil, err
-		}
-		events = append(events, event)
-	}
-	return events, nil
+func serviceErrorNotFound(err error) bool {
+	return serviceErrorKind(err, service.KindNotFound)
 }
 
 func serviceErrorKind(err error, kind service.ErrorKind) bool {
@@ -847,72 +705,155 @@ func (s *sessionServiceImpl) authorizedSessionStore(ctx context.Context, wsID, t
 }
 
 func (s *sessionServiceImpl) GetSessionDiff(ctx context.Context, wsID, taskID, sessionID string) (string, error) {
-	if taskID == "" || !validTaskID.MatchString(taskID) {
-		return "", service.ErrValidation("invalid task ID")
-	}
-	if sessionID == "" || !validSessionID.MatchString(sessionID) {
-		return "", service.ErrValidation("invalid session ID")
-	}
-	store, err := s.findStoreForSession(ctx, wsID, sessionID)
+	store, _, err := s.authorizedSessionStore(ctx, wsID, taskID, sessionID)
 	if err != nil {
-		if serviceErrorKind(err, service.KindNotFound) {
-			return s.controlPlaneSessionDiff(ctx, wsID, taskID, sessionID)
+		if !serviceErrorNotFound(err) {
+			return "", err
 		}
-		return "", err
-	}
-
-	// Enforce task ownership
-	meta, err := store.LoadMetadata(sessionID)
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return "", service.ErrNotFound("session not found")
-		}
-		logger.Error("failed to load session metadata", "session_id", sessionID, "err", err)
-		return "", service.ErrInternal("failed to load session", err)
-	}
-	if meta.TaskID != taskID {
-		return "", service.ErrNotFound("session not found")
+		return s.controlPlaneSessionDiff(ctx, wsID, taskID, sessionID)
 	}
 
 	diff, diffErr := store.ReadDiff(sessionID)
 	if diffErr != nil {
 		if errors.Is(diffErr, os.ErrNotExist) {
-			return "", service.ErrNotFound("diff not found")
+			cpDiff, cpErr := s.controlPlaneSessionDiff(ctx, wsID, taskID, sessionID)
+			if cpErr == nil {
+				return cpDiff, nil
+			}
+			if serviceErrorNotFound(cpErr) {
+				return "", service.ErrNotFound("diff not found")
+			}
+			return "", cpErr
 		}
 		logger.Error("failed to read diff", "session_id", sessionID, "err", diffErr)
 		return "", service.ErrInternal("failed to read diff", diffErr)
+	}
+	if diff == "" {
+		if cpDiff, cpErr := s.controlPlaneSessionDiff(ctx, wsID, taskID, sessionID); cpErr == nil {
+			return cpDiff, nil
+		}
 	}
 	return diff, nil
 }
 
 func (s *sessionServiceImpl) controlPlaneSessionDiff(ctx context.Context, wsID, taskID, sessionID string) (string, error) {
-	rec, err := s.controlPlaneAgentSession(ctx, wsID, taskID, sessionID)
+	rec, err := s.controlPlaneSessionRecord(ctx, wsID, taskID, sessionID)
 	if err != nil {
 		return "", err
 	}
-	ref := controlPlaneSessionDiffRef(rec.Metadata)
-	if ref == "" {
+	artifactID := ""
+	if rec.Metadata != nil {
+		artifactID = controlPlaneDiffArtifactRef(rec.Metadata)
+	}
+	if artifactID == "" && rec.Metadata != nil {
+		artifactID, err = s.diffArtifactIDForTaskRun(ctx, wsID, rec.Metadata["task_run_id"])
+		if err != nil {
+			return "", err
+		}
+	}
+	if artifactID == "" {
 		return "", service.ErrNotFound("diff not found")
 	}
-	data, err := s.readArtifactRef(ctx, wsID, ref)
+	diff, err := s.readControlPlaneArtifactText(ctx, wsID, artifactID)
 	if err != nil {
 		if errors.Is(err, domain.ErrNotFound) {
 			return "", service.ErrNotFound("diff not found")
 		}
 		return "", service.ErrInternal("failed to read diff", err)
 	}
-	return string(data), nil
+	return diff, nil
 }
 
-func controlPlaneSessionDiffRef(metadata map[string]string) string {
-	if metadata == nil {
-		return ""
+func (s *sessionServiceImpl) ListSessionHistory(ctx context.Context, wsID, issueID string) ([]sessionhistory.SessionRecord, error) {
+	if s.histStore == nil {
+		return nil, service.ErrUnavailable("session history not available (no Redis)")
 	}
-	if artifactID := firstNonEmptySessionValue(metadata["patch_artifact_id"], metadata["diff_artifact_id"]); artifactID != "" {
-		if strings.HasPrefix(artifactID, "artifact://") {
-			return artifactID
+	if err := sessionhistory.ValidateIssueID(issueID); err != nil {
+		return nil, service.ErrValidation(err.Error())
+	}
+
+	records, err := s.histStore.List(ctx, wsID, issueID)
+	if err != nil {
+		logger.Error("failed to list session history", "issue_id", issueID, "err", err)
+		return nil, service.ErrInternal("failed to list session history", err)
+	}
+	return records, nil
+}
+
+func (s *sessionServiceImpl) GetSessionScrollback(ctx context.Context, wsID, issueID, recordID string) (*service.SessionScrollbackResult, error) {
+	if s.histStore == nil {
+		return nil, service.ErrUnavailable("session history not available (no Redis)")
+	}
+	if err := sessionhistory.ValidateIssueID(issueID); err != nil {
+		return nil, service.ErrValidation(err.Error())
+	}
+	if recordID == "" {
+		return nil, service.ErrValidation("record ID is required")
+	}
+
+	records, err := s.histStore.List(ctx, wsID, issueID)
+	if err != nil {
+		logger.Error("failed to get session history for scrollback", "issue_id", issueID, "err", err)
+		return nil, service.ErrInternal("failed to get session history", err)
+	}
+
+	found := findSessionRecord(records, recordID)
+	if found == nil {
+		return nil, service.ErrNotFound("session record not found")
+	}
+
+	if found.ScrollbackPath == "" {
+		return nil, service.ErrNotFound("no scrollback available for this session")
+	}
+
+	return readScrollbackFile(found.ScrollbackPath)
+}
+
+// findSessionRecord returns the record with the given ID, or nil if not found.
+func findSessionRecord(records []sessionhistory.SessionRecord, id string) *sessionhistory.SessionRecord {
+	for i := range records {
+		if records[i].ID == id {
+			return &records[i]
 		}
-		return "artifact://" + artifactID
 	}
-	return firstNonEmptySessionValue(metadata["patch_ref"], metadata["diff_ref"], metadata["patch_path"], metadata["diff_path"])
+	return nil
+}
+
+// readScrollbackFile validates the path, reads the file, and returns the result.
+func readScrollbackFile(scrollbackPath string) (*service.SessionScrollbackResult, error) {
+	homeDir, err := userHomeDir()
+	if err != nil {
+		return nil, service.ErrInternal("resolve home directory", err)
+	}
+	if strings.TrimSpace(homeDir) == "" {
+		return nil, service.ErrInternal("resolve home directory", errors.New("empty home directory"))
+	}
+	expectedPrefix := filepath.Clean(homeDir+"/.loom/session-scrollback") + string(os.PathSeparator)
+	cleanPath := filepath.Clean(scrollbackPath)
+	if !strings.HasPrefix(cleanPath+string(os.PathSeparator), expectedPrefix) {
+		return nil, service.ErrValidation("invalid scrollback path")
+	}
+
+	f, err := os.Open(cleanPath) //nolint:gosec // path cleaned and prefix-validated above
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, service.ErrNotFound("scrollback file not found")
+		}
+		logger.Error("failed to open scrollback file", "path", scrollbackPath, "err", err)
+		return nil, service.ErrInternal("failed to read scrollback", err)
+	}
+	defer f.Close()
+
+	content, err := io.ReadAll(f)
+	if err != nil {
+		logger.Error("failed to read scrollback file", "path", scrollbackPath, "err", err)
+		return nil, service.ErrInternal("failed to read scrollback", err)
+	}
+
+	text := string(content)
+	lines := 0
+	if text != "" {
+		lines = strings.Count(text, "\n") + 1
+	}
+	return &service.SessionScrollbackResult{Content: text, Lines: lines}, nil
 }

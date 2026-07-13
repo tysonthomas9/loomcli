@@ -5,9 +5,10 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/sessions"
 	"github.com/tysonthomas9/loomcli/internal/sessions/transcript"
+	"github.com/tysonthomas9/loomcli/internal/webui/sessionhistory"
 )
 
-// SessionService defines business logic for task-scoped session audit trail operations.
+// SessionService defines business logic for session audit trail operations.
 // Handlers call this interface and map returned errors to HTTP responses.
 type SessionService interface {
 	// ListTaskSessions returns all sessions for a given task with computed fields.
@@ -31,6 +32,12 @@ type SessionService interface {
 
 	// GetSessionDiff returns the diff.patch content for a session as plain text.
 	GetSessionDiff(ctx context.Context, wsID, taskID, sessionID string) (string, error)
+
+	// ListSessionHistory returns session history records for an issue.
+	ListSessionHistory(ctx context.Context, wsID, issueID string) ([]sessionhistory.SessionRecord, error)
+
+	// GetSessionScrollback returns scrollback content for a completed session.
+	GetSessionScrollback(ctx context.Context, wsID, issueID, recordID string) (*SessionScrollbackResult, error)
 }
 
 // SessionListItem extends a session record with computed UI fields.
@@ -45,4 +52,10 @@ type SessionListItem struct {
 type SessionDetailData struct {
 	sessions.SessionMetadata
 	IsActive bool `json:"is_active"`
+}
+
+// SessionScrollbackResult contains scrollback file content.
+type SessionScrollbackResult struct {
+	Content string
+	Lines   int
 }

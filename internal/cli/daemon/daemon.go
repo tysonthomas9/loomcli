@@ -110,7 +110,7 @@ func NewDaemon(config *cfgpkg.DaemonConfig, projectDir string, eventBus events.E
 	wireSupervisorCallbacks(sup, issueBackend)
 	loadSupervisorWorkspace(sup)
 
-	if err := initSupervisorAgents(sup, config.Agents); err != nil {
+	if err := initSupervisorAgents(sup, config.Agents, config.Roles); err != nil {
 		return nil, err
 	}
 
@@ -300,9 +300,9 @@ func loadSupervisorWorkspace(sup *supervisor.Supervisor) {
 }
 
 // initSupervisorAgents creates agent processes from config entries.
-func initSupervisorAgents(sup *supervisor.Supervisor, agents []cfgpkg.AgentEntry) error {
+func initSupervisorAgents(sup *supervisor.Supervisor, agents []cfgpkg.AgentEntry, roles map[string]cfgpkg.RoleConfig) error {
 	for i, entry := range agents {
-		if !entry.ShouldSupervise() {
+		if !entry.ShouldSuperviseWithRoles(roles) {
 			slog.Info("skipping agent with non-running desired state", "worktree", entry.Worktree, "desired_state", entry.DesiredState)
 			continue
 		}

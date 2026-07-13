@@ -85,7 +85,7 @@ func TestHandleFileRead_PathTraversalVariants(t *testing.T) {
 }
 
 func TestHandleFileRead_DeniedPathOnFullPath(t *testing.T) {
-	// Test that the second isDeniedPath check (on fullPath) catches denied files
+	// Test that the second pathsec.IsDeniedPath check (on fullPath) catches denied files
 	// even when the reqPath itself doesn't trigger it.
 	dir := t.TempDir()
 	// Create a file with denied extension in a subdirectory

@@ -49,6 +49,8 @@ type runtimeCredentialsPatch struct {
 }
 
 type runtimeCredentialPatch struct {
+	// #nosec G117 -- this is a credential-input PATCH DTO; carrying the api_key
+	// the operator is setting is the field's purpose, not an accidental leak.
 	APIKey *string `json:"api_key,omitempty"`
 	Token  *string `json:"token,omitempty"`
 	Clear  bool    `json:"clear,omitempty"`
@@ -71,58 +73,14 @@ func HandleGet(dataDir string) http.HandlerFunc {
 // restarting the local runtime because embedded fleet-db reads them at startup.
 func HandlePatch(dataDir string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		r.Body = http.MaxBytesReader(w, r.Body, handler.MaxRequestBody)
-		var req patchRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			var maxBytesErr *http.MaxBytesError
-			if errors.As(err, &maxBytesErr) {
-				handler.WriteJSON(w, http.StatusRequestEntityTooLarge, response{Success: false, Error: "request body too large"})
-				return
-			}
-			handler.WriteJSON(w, http.StatusBadRequest, response{Success: false, Error: "invalid request body"})
+		req, ok := decodePatchRequest(w, r)
+		if !ok {
 			return
 		}
 
-		if strings.TrimSpace(dataDir) == "" {
-			handler.WriteJSON(w, http.StatusInternalServerError, response{Success: false, Error: "local settings data dir is not configured"})
-			return
-		}
-
-		var patchErr error
-		settings, err := runtimesettings.Update(dataDir, func(settings *runtimesettings.Settings) error {
-			if req.FleetDBRedis != nil {
-				if err := applyRedisPatch(settings, *req.FleetDBRedis); err != nil {
-					patchErr = err
-					return err
-				}
-			}
-			if req.AgentRuntime != nil {
-				if err := applyAgentRuntimePatch(settings, *req.AgentRuntime); err != nil {
-					patchErr = err
-					return err
-				}
-			}
-			if req.LocalTaskRunner != nil {
-				applyLocalTaskRunnerPatch(settings, *req.LocalTaskRunner)
-			}
-			if req.RuntimeCredentials != nil {
-				if err := applyRuntimeCredentialsPatch(dataDir, settings, *req.RuntimeCredentials); err != nil {
-					patchErr = err
-					return err
-				}
-			}
-			return nil
-		})
+		settings, status, err := updateLocalSettings(dataDir, req)
 		if err != nil {
-			if patchErr != nil {
-				handler.WriteJSON(w, http.StatusBadRequest, response{Success: false, Error: err.Error()})
-				return
-			}
-			if strings.HasPrefix(err.Error(), "read local settings") || strings.HasPrefix(err.Error(), "parse local settings") {
-				handler.WriteJSON(w, http.StatusInternalServerError, response{Success: false, Error: err.Error()})
-				return
-			}
-			handler.WriteJSON(w, http.StatusBadRequest, response{Success: false, Error: err.Error()})
+			handler.WriteJSON(w, status, response{Success: false, Error: err.Error()})
 			return
 		}
 		sanitized := runtimesettings.Sanitize(settings)
@@ -132,6 +90,72 @@ func HandlePatch(dataDir string) http.HandlerFunc {
 			Message: "Local settings saved.",
 		})
 	}
+}
+
+func decodePatchRequest(w http.ResponseWriter, r *http.Request) (patchRequest, bool) {
+	r.Body = http.MaxBytesReader(w, r.Body, handler.MaxRequestBody)
+	var req patchRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		var maxBytesErr *http.MaxBytesError
+		if errors.As(err, &maxBytesErr) {
+			handler.WriteJSON(w, http.StatusRequestEntityTooLarge, response{Success: false, Error: "request body too large"})
+			return patchRequest{}, false
+		}
+		handler.WriteJSON(w, http.StatusBadRequest, response{Success: false, Error: "invalid request body"})
+		return patchRequest{}, false
+	}
+	return req, true
+}
+
+func updateLocalSettings(dataDir string, req patchRequest) (runtimesettings.Settings, int, error) {
+	if strings.TrimSpace(dataDir) == "" {
+		return runtimesettings.Settings{}, http.StatusInternalServerError, errors.New("local settings data dir is not configured")
+	}
+
+	var patchErr error
+	settings, err := runtimesettings.Update(dataDir, func(settings *runtimesettings.Settings) error {
+		if err := applyPatchRequest(dataDir, settings, req); err != nil {
+			patchErr = err
+			return err
+		}
+		return nil
+	})
+	if err != nil {
+		return runtimesettings.Settings{}, localSettingsErrorStatus(err, patchErr), err
+	}
+	return settings, http.StatusOK, nil
+}
+
+func applyPatchRequest(dataDir string, settings *runtimesettings.Settings, req patchRequest) error {
+	if req.FleetDBRedis != nil {
+		if err := applyRedisPatch(settings, *req.FleetDBRedis); err != nil {
+			return err
+		}
+	}
+	if req.AgentRuntime != nil {
+		if err := applyAgentRuntimePatch(settings, *req.AgentRuntime); err != nil {
+			return err
+		}
+	}
+	if req.LocalTaskRunner != nil {
+		applyLocalTaskRunnerPatch(settings, *req.LocalTaskRunner)
+	}
+	if req.RuntimeCredentials != nil {
+		if err := applyRuntimeCredentialsPatch(dataDir, settings, *req.RuntimeCredentials); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func localSettingsErrorStatus(err, patchErr error) int {
+	if patchErr != nil {
+		return http.StatusBadRequest
+	}
+	if strings.HasPrefix(err.Error(), "read local settings") || strings.HasPrefix(err.Error(), "parse local settings") {
+		return http.StatusInternalServerError
+	}
+	return http.StatusBadRequest
 }
 
 func load(dataDir string) (runtimesettings.Settings, error) {

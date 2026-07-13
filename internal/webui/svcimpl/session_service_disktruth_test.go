@@ -47,7 +47,7 @@ func TestSessionServiceListTaskSessionsControlPlaneUsesDiskTruth(t *testing.T) {
 		t.Fatalf("create control-plane session: %v", err)
 	}
 
-	svc := NewSessionServiceWithRuntimeDir(st, runtimeDir)
+	svc := NewSessionServiceWithRuntimeDir(st, nil, runtimeDir)
 
 	// Case A: no transcript file on disk -> HasTranscript must be false, even
 	// though metadata["transcript_path"] is set. (This fails before the fix.)

@@ -344,6 +344,12 @@ func NewServer(ctx context.Context, config webui.ServerConfig) (_ *Server, retEr
 		cleanups = append(cleanups, itCleanup)
 	}
 
+	if config.FleetRedis != nil {
+		var shCleanup func()
+		app.sessionHistoryStore, shCleanup = appstores.InitSessionHistory(ctx, config.FleetRedis, app.initialWorkspaceID, config.Logger)
+		cleanups = append(cleanups, shCleanup)
+	}
+
 	// Initialize external auth (JWKS cache + middleware)
 	app.extAuthMiddleware, app.jwksCleanup = initExtAuth(config)
 	if app.jwksCleanup != nil {
@@ -439,7 +445,7 @@ func NewServer(ctx context.Context, config webui.ServerConfig) (_ *Server, retEr
 	}
 
 	// Initialize session service layer (always constructed; stores may be nil internally)
-	app.sessSvc = svcimpl.NewSessionServiceWithRuntimeDir(config.Store, config.SessionRuntimeDir)
+	app.sessSvc = svcimpl.NewSessionServiceWithRuntimeDir(config.Store, app.sessionHistoryStore, config.SessionRuntimeDir)
 
 	app.buildHandlers()
 	app.buildModules()

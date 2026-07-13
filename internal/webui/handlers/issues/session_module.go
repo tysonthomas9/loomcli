@@ -6,8 +6,8 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
 )
 
-// SessionModule registers the workspace-scoped task session audit trail routes
-// on a [*http.ServeMux].
+// SessionModule registers the 6 workspace-scoped session history and audit
+// trail routes on a [*http.ServeMux].
 //
 // All routes are unconditional — the SessionService handles nil internal
 // stores gracefully. The module is always constructed when multiPool is
@@ -45,8 +45,12 @@ func NewSessionModule(sessSvc service.SessionService, opts SessionModuleOpts) *S
 	}
 }
 
-// Register implements [Module] by registering task-scoped session routes.
+// Register implements [Module] by registering 6 session routes.
 func (m *SessionModule) Register(mux *http.ServeMux) {
+	// Session history (issue-scoped)
+	mux.HandleFunc("GET /api/workspaces/{ws}/issues/{issueId}/sessions", handleListSessionHistory(m.sessSvc))
+	mux.HandleFunc("GET /api/workspaces/{ws}/issues/{issueId}/sessions/{recordId}/scrollback", handleGetSessionScrollback(m.sessSvc))
+
 	// Session audit trail (task-scoped) — handlers injected from sibling package
 	if m.listTaskSessionsHandler != nil {
 		mux.HandleFunc("GET /api/workspaces/{ws}/tasks/{taskId}/sessions", m.listTaskSessionsHandler)

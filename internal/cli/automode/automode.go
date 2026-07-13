@@ -547,7 +547,7 @@ func formatTimeout(timeout int) string {
 // resolveActiveWorkspaceForAutomode returns the active FleetDB workspace as a
 // *config.WorkspaceConfig.
 // The synthesized *config.WorkspaceConfig only carries fields used by
-// the prompt builders (Repos, Path, ID).
+// the prompt builders (Repos, Path, ID, DesignFormat).
 func resolveActiveWorkspaceForAutomode() *config.WorkspaceConfig {
 	ctx, cancel := cmdstore.SignalContext()
 	defer cancel()
@@ -559,8 +559,9 @@ func resolveActiveWorkspaceForAutomode() *config.WorkspaceConfig {
 			repos, _ := h.Store.Repos().List(ctx, key)
 			if ws != nil {
 				out := &config.WorkspaceConfig{
-					ID:   ws.Key,
-					Path: "", // resolved at call site via state cache; not material for prompts
+					ID:           ws.Key,
+					Path:         "", // resolved at call site via state cache; not material for prompts
+					DesignFormat: ws.DesignFormat,
 				}
 				for _, r := range repos {
 					out.Repos = append(out.Repos, config.RepoConfig{

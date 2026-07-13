@@ -13,11 +13,14 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
+	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
 var (
 	roleAddDescription string
+	roleAddKind        string
+	roleAddPrompt      string
 	roleAddPromptFile  string
 	roleAddModel       string
 	roleAddBackend     string
@@ -69,6 +72,8 @@ var roleSetCmd = &cobra.Command{
 	Short: "Set a single field on an existing role",
 	Long: `Set a role field by key. Supported keys:
   description     string
+  kind            string (interactive/worker)
+  prompt          inline prompt text
   prompt_file     string
   model           string
   task_filter     string
@@ -93,7 +98,7 @@ var roleUnsetCmd = &cobra.Command{
   max_priority    *int     (clear)
   max_concurrency *int     (clear)
   max_budget_usd  *float64 (clear)
-  description / prompt_file / model / task_filter / backend / effort  (set to "")
+  description / kind / prompt / prompt_file / model / task_filter / backend / effort  (set to "")
   skills / path_patterns / allowed_tools / denied_tools      (set to empty list)
   read_only                                                 (set to false)`,
 	Args: cobra.ExactArgs(2),
@@ -102,6 +107,8 @@ var roleUnsetCmd = &cobra.Command{
 
 func init() {
 	roleAddCmd.Flags().StringVar(&roleAddDescription, "description", "", "Description")
+	roleAddCmd.Flags().StringVar(&roleAddKind, "kind", "", "Role runtime kind (interactive or worker)")
+	roleAddCmd.Flags().StringVar(&roleAddPrompt, "prompt", "", "Inline prompt text")
 	roleAddCmd.Flags().StringVar(&roleAddPromptFile, "prompt-file", "", "Path to prompt file (relative to workspace)")
 	roleAddCmd.Flags().StringVar(&roleAddModel, "model", "", "Model identifier")
 	roleAddCmd.Flags().StringVar(&roleAddBackend, "backend", "", "AI backend (e.g., claude, codex)")
@@ -118,11 +125,16 @@ func init() {
 }
 
 func runRoleAdd(_ *cobra.Command, args []string) error {
+	if err := validateRoleKindValue(roleAddKind); err != nil {
+		return err
+	}
 	return cmdstore.WithActiveWorkspace(func(ctx context.Context, h *bootstrap.StoreHandle, ws string) error {
 		in := store.RoleCreate{
 			WorkspaceKey: ws,
 			Name:         args[0],
+			Kind:         normalizeRoleKindValue(roleAddKind),
 			Description:  roleAddDescription,
+			Prompt:       roleAddPrompt,
 			PromptFile:   roleAddPromptFile,
 			Model:        roleAddModel,
 			Backend:      roleAddBackend,
@@ -181,6 +193,9 @@ func runRoleShow(_ *cobra.Command, args []string) error {
 		if r.Description != "" {
 			fmt.Printf("Description:  %s\n", r.Description)
 		}
+		if r.Kind != "" {
+			fmt.Printf("Kind:         %s\n", r.Kind)
+		}
 		if r.Model != "" {
 			fmt.Printf("Model:        %s\n", r.Model)
 		}
@@ -189,6 +204,9 @@ func runRoleShow(_ *cobra.Command, args []string) error {
 		}
 		if r.Effort != "" {
 			fmt.Printf("Effort:       %s\n", r.Effort)
+		}
+		if r.Prompt != "" {
+			fmt.Printf("Prompt:       %s\n", r.Prompt)
 		}
 		if r.PromptFile != "" {
 			fmt.Printf("Prompt file:  %s\n", r.PromptFile)
@@ -256,6 +274,13 @@ func buildRolePatch(key, value string, unset bool) (store.RoleUpdate, error) {
 	switch key {
 	case "description":
 		patch.Description = strPtr(value)
+	case "kind":
+		if err := validateRoleKindValue(value); err != nil {
+			return patch, err
+		}
+		patch.Kind = strPtr(normalizeRoleKindValue(value))
+	case "prompt":
+		patch.Prompt = strPtr(value)
 	case "prompt_file":
 		patch.PromptFile = strPtr(value)
 	case "model":
@@ -331,6 +356,19 @@ func buildRolePatch(key, value string, unset bool) (store.RoleUpdate, error) {
 // yields a non-nil pointer to "" so unset of string fields lands as
 // "set to empty" on the wire.
 func strPtr(s string) *string { return &s }
+
+func normalizeRoleKindValue(value string) string {
+	return strings.ToLower(strings.TrimSpace(value))
+}
+
+func validateRoleKindValue(value string) error {
+	switch normalizeRoleKindValue(value) {
+	case "", string(domain.RoleKindInteractive), string(domain.RoleKindWorker):
+		return nil
+	default:
+		return fmt.Errorf("kind must be interactive or worker")
+	}
+}
 
 // sliceCSVPtr returns a non-nil *[]string for the patch. Empty input
 // becomes an empty slice (which fleet-db treats as "set to empty list",

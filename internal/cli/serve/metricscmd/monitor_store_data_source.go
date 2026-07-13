@@ -138,15 +138,17 @@ func collectMonitorStoreData(ctx context.Context, st store.Store, workspaceHint 
 	}
 
 	workspaceData := monitorWorkspaceDataForAgents(ctx, st, wsKey, wsName)
+	rolesByName := monitorRolesByName(ctx, st, wsKey)
 	latestSessions := latestAgentSessionsForMonitor(ctx, st, wsKey)
 	orchestrationByAgent := latestOrchestrationSessionsForMonitor(ctx, st, wsKey)
 	inboxByAgent := agentInboxSummariesForMonitor(ctx, st, wsKey)
-	data.Agents = monitorAgentStatuses(assignments, workspaceData, latestSessions, orchestrationByAgent, inboxByAgent, wsName)
+	data.Agents = monitorAgentStatuses(assignments, rolesByName, workspaceData, latestSessions, orchestrationByAgent, inboxByAgent, wsName)
 	return data
 }
 
 func monitorAgentStatuses(
 	assignments []*domain.Agent,
+	rolesByName map[string]*domain.Role,
 	workspaceData *ops.WorkspaceData,
 	latestSessions map[string]*domain.AgentSession,
 	orchestrationByAgent map[string]*domain.AgentSession,
@@ -173,6 +175,7 @@ func monitorAgentStatuses(
 			Branch:                monitorBranchFromAgent(workspaceData, assignment),
 			Status:                monitorStatusFromAgentState(assignment.State),
 			Role:                  assignment.RoleName,
+			RoleKind:              string(domain.ResolveRoleKind(rolesByName[assignment.RoleName], assignment.RoleName)),
 			Repo:                  monitorRepoFromAgent(assignment),
 			Workspace:             wsName,
 			DaemonManaged:         assignment.Auto,
@@ -196,6 +199,25 @@ func monitorAgentStatuses(
 		})
 	}
 	return agents
+}
+
+func monitorRolesByName(ctx context.Context, st store.Store, wsKey string) map[string]*domain.Role {
+	out := make(map[string]*domain.Role)
+	if st == nil || wsKey == "" {
+		return out
+	}
+	roles, err := st.Roles().List(ctx, wsKey)
+	if err != nil {
+		slog.Warn("monitor: list roles failed", "workspace", wsKey, "err", err)
+		return out
+	}
+	for _, role := range roles {
+		if role == nil {
+			continue
+		}
+		out[role.Name] = role
+	}
+	return out
 }
 
 func agentInboxSummariesForMonitor(ctx context.Context, st store.Store, wsKey string) map[string]agentInboxSummary {

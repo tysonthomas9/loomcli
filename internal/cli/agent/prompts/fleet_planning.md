@@ -39,6 +39,10 @@ Before creating a plan:
 
 ### Step 3: Create a Detailed Plan
 Write a comprehensive plan that includes:
+{{- if eq .DesignFormat "html"}}
+
+**Design format: HTML.** Author the design as semantic HTML instead of Markdown: `<h2>` for section headings, `<p>` for prose, `<ul>`/`<li>` for lists, and `<pre><code>` for code or commands. Produce the same sections listed below (Summary, Technical Approach, Files to Create, Files to Modify, Dependencies, Edge Cases & Error Handling, Testing Strategy, etc.). Do NOT include an `<html>`, `<head>`, or `<body>` wrapper, and do NOT use inline styles or scripts.
+{{- end}}
 
 #### 3a. Summary
 - One paragraph explaining what this task accomplishes
@@ -75,7 +79,7 @@ Write a comprehensive plan that includes:
 ### Step 4: Save the Plan
 Save your plan to the task's design field:
 ```
-loom data update <id> --design="<your complete plan here>"
+loom data update <id> --design="<your complete plan here>" --design-format={{ .DesignFormat }}
 ```
 
 IMPORTANT: Make sure the plan is complete and detailed enough that another agent

@@ -14,6 +14,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/misc"
 	webuilog "github.com/tysonthomas9/loomcli/internal/webui/log"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
+	"github.com/tysonthomas9/loomcli/internal/webui/service/pathsec"
 )
 
 // Compile-time check.
@@ -150,7 +151,7 @@ func (s *fileServiceImpl) ReadFile(_ context.Context, wsID, agentName, path stri
 	if path == "" {
 		return nil, service.ErrValidation("path parameter is required")
 	}
-	if isDeniedPath(path) {
+	if pathsec.IsDeniedPath(path) {
 		return nil, service.ErrForbidden("access to this file type is denied")
 	}
 
@@ -159,7 +160,7 @@ func (s *fileServiceImpl) ReadFile(_ context.Context, wsID, agentName, path stri
 	if err := webuilog.ValidatePathWithinDir(fullPath, wt.Path); err != nil {
 		return nil, service.ErrForbidden("path outside worktree")
 	}
-	if isDeniedPath(fullPath) {
+	if pathsec.IsDeniedPath(fullPath) {
 		return nil, service.ErrForbidden("access to this file type is denied")
 	}
 
@@ -227,7 +228,7 @@ func (s *fileServiceImpl) WriteFile(_ context.Context, wsID, agentName, path, co
 	if path == "" {
 		return service.ErrValidation("path parameter is required")
 	}
-	if isDeniedPath(path) {
+	if pathsec.IsDeniedPath(path) {
 		return service.ErrForbidden("access to this file type is denied")
 	}
 
@@ -236,7 +237,7 @@ func (s *fileServiceImpl) WriteFile(_ context.Context, wsID, agentName, path, co
 	if err := webuilog.ValidatePathWithinDir(fullPath, wt.Path); err != nil {
 		return service.ErrForbidden("path outside worktree")
 	}
-	if isDeniedPath(fullPath) {
+	if pathsec.IsDeniedPath(fullPath) {
 		return service.ErrForbidden("access to this file type is denied")
 	}
 

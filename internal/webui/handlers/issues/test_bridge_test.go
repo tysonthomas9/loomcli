@@ -4,9 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
@@ -19,6 +21,7 @@ import (
 	githandlers "github.com/tysonthomas9/loomcli/internal/webui/handlers/git"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
+	"github.com/tysonthomas9/loomcli/internal/webui/sessionhistory"
 )
 
 // Module is a local interface matching webui.Module for compile-time assertions.
@@ -379,12 +382,13 @@ func assertEnvelopeSuccess(t *testing.T, body map[string]interface{}) {
 
 type testSessionServiceImpl struct {
 	sessStore *sessions.Store
+	histStore *sessionhistory.Store
 }
 
 // NewSessionService creates a test-local SessionService, mirroring
 // svcimpl.NewSessionService to avoid a circular import.
-func NewSessionService(sessStore *sessions.Store) service.SessionService {
-	return &testSessionServiceImpl{sessStore: sessStore}
+func NewSessionService(sessStore *sessions.Store, histStore *sessionhistory.Store) service.SessionService {
+	return &testSessionServiceImpl{sessStore: sessStore, histStore: histStore}
 }
 
 func (s *testSessionServiceImpl) ListTaskSessions(_ context.Context, _, taskID string) ([]service.SessionListItem, error) {
@@ -453,6 +457,73 @@ func (s *testSessionServiceImpl) GetSessionDiff(_ context.Context, _, _, session
 	return diff, nil
 }
 
+func (s *testSessionServiceImpl) ListSessionHistory(ctx context.Context, wsID, issueID string) ([]sessionhistory.SessionRecord, error) {
+	if s.histStore == nil {
+		return nil, service.ErrUnavailable("session history not available (no Redis)")
+	}
+	if err := sessionhistory.ValidateIssueID(issueID); err != nil {
+		return nil, service.ErrValidation(err.Error())
+	}
+	records, err := s.histStore.List(ctx, wsID, issueID)
+	if err != nil {
+		return nil, service.ErrInternal("failed to list session history", err)
+	}
+	return records, nil
+}
+
+func (s *testSessionServiceImpl) GetSessionScrollback(ctx context.Context, wsID, issueID, recordID string) (*service.SessionScrollbackResult, error) {
+	if s.histStore == nil {
+		return nil, service.ErrUnavailable("session history not available (no Redis)")
+	}
+	if err := sessionhistory.ValidateIssueID(issueID); err != nil {
+		return nil, service.ErrValidation(err.Error())
+	}
+	if recordID == "" {
+		return nil, service.ErrValidation("record ID is required")
+	}
+	records, err := s.histStore.List(ctx, wsID, issueID)
+	if err != nil {
+		return nil, service.ErrInternal("failed to get session history", err)
+	}
+	var found *sessionhistory.SessionRecord
+	for i := range records {
+		if records[i].ID == recordID {
+			found = &records[i]
+			break
+		}
+	}
+	if found == nil {
+		return nil, service.ErrNotFound("session record not found")
+	}
+	if found.ScrollbackPath == "" {
+		return nil, service.ErrNotFound("no scrollback available for this session")
+	}
+	homeDir, _ := os.UserHomeDir()
+	expectedPrefix := filepath.Clean(homeDir+"/.loom/session-scrollback") + string(os.PathSeparator)
+	cleanPath := filepath.Clean(found.ScrollbackPath)
+	if !strings.HasPrefix(cleanPath+string(os.PathSeparator), expectedPrefix) {
+		return nil, service.ErrValidation("invalid scrollback path")
+	}
+	f, err := os.Open(cleanPath) //nolint:gosec
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, service.ErrNotFound("scrollback file not found")
+		}
+		return nil, service.ErrInternal("failed to read scrollback", err)
+	}
+	defer f.Close()
+	content, err := io.ReadAll(f)
+	if err != nil {
+		return nil, service.ErrInternal("failed to read scrollback", err)
+	}
+	text := string(content)
+	lines := 0
+	if text != "" {
+		lines = strings.Count(text, "\n") + 1
+	}
+	return &service.SessionScrollbackResult{Content: text, Lines: lines}, nil
+}
+
 func assertPlainError(t *testing.T, body map[string]interface{}) {
 	t.Helper()
 	errVal, ok := body["error"]
@@ -487,4 +558,10 @@ func (s *stubSessionService) GetSessionSubagentTranscript(_ context.Context, _, 
 }
 func (s *stubSessionService) GetSessionDiff(_ context.Context, _, _, _ string) (string, error) {
 	return "", nil
+}
+func (s *stubSessionService) ListSessionHistory(_ context.Context, _, _ string) ([]sessionhistory.SessionRecord, error) {
+	return nil, nil
+}
+func (s *stubSessionService) GetSessionScrollback(_ context.Context, _, _, _ string) (*service.SessionScrollbackResult, error) {
+	return &service.SessionScrollbackResult{}, nil
 }

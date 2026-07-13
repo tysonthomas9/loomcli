@@ -21,7 +21,7 @@ RUN --mount=type=cache,target=/go/pkg/mod \
     && CGO_ENABLED=0 go build -o /out/loom ./cmd/loom
 
 # ─── Stage 2: Build frontend ────────────────────────────────────────────────
-FROM node:20-alpine AS frontend
+FROM node:22-alpine AS frontend
 
 WORKDIR /app/internal/webui/frontend
 COPY internal/webui/frontend/ .
@@ -30,7 +30,7 @@ RUN --mount=type=cache,target=/app/internal/webui/frontend/node_modules \
     npm ci && npm run build
 
 # ─── Stage 3: Runtime ───────────────────────────────────────────────────────
-FROM node:20-alpine AS runtime
+FROM node:22-alpine AS runtime
 
 # System packages
 RUN apk add --no-cache \

@@ -41,6 +41,7 @@ func (s *workspaceStore) Create(_ context.Context, in store.WorkspaceCreate) (*d
 		Name:          in.Name,
 		Description:   in.Description,
 		DefaultBranch: in.DefaultBranch,
+		DesignFormat:  in.DesignFormat,
 		State:         domain.WorkspaceStateReady,
 		CreatedAt:     now,
 		UpdatedAt:     now,
@@ -99,6 +100,9 @@ func (s *workspaceStore) Update(_ context.Context, key string, patch store.Works
 	}
 	if patch.DefaultBranch != nil {
 		ws.DefaultBranch = *patch.DefaultBranch
+	}
+	if patch.DesignFormat != nil {
+		ws.DesignFormat = *patch.DesignFormat
 	}
 	if patch.State != nil {
 		ws.State = *patch.State

@@ -396,16 +396,23 @@
 }
 
 .promptBody {
-  font-size: 13px;
-  color: var(--color-text-primary);
-  line-height: 1.5;
-  white-space: pre-wrap;
   word-break: break-word;
   max-height: 4rem;
   overflow-y: auto;
   overscroll-behavior: contain;
   padding-right: 4px;
   scrollbar-gutter: stable;
+}
+
+/* Tighten the shared MarkdownRenderer padding inside the compact prompt block,
+   and preserve the prompt body's original primary-text typography (the shared
+   .markdown defaults are dimmer/secondary). */
+.promptBody.promptBody {
+  padding-top: 0;
+  padding-bottom: 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--color-text-primary);
 }
 
 .runErrorBanner {
@@ -662,12 +669,20 @@
 }
 
 .msg {
+  word-break: break-word;
+  max-width: 72ch;
+}
+
+/* Drop the shared MarkdownRenderer block padding so transcript turn spacing
+   stays governed by the explicit .msg adjacency margins below, and preserve the
+   transcript message's original primary-text typography (the shared .markdown
+   defaults are dimmer/secondary). */
+.msg.msg {
+  padding-top: 0;
+  padding-bottom: 0;
   font-size: 14px;
   line-height: 1.55;
   color: var(--color-text-primary);
-  white-space: pre-wrap;
-  word-break: break-word;
-  max-width: 72ch;
 }
 
 .msg + .msg,

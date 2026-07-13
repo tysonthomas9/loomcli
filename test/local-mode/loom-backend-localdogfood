@@ -20,7 +20,7 @@ write_transcript() {
 }
 
 run_planner() {
-  task_id="${LOOM_ASSIGNED_TASK_ID:-${LOOM_LOCAL_MODE_PLAN_TASK_ID:-${LOOM_WORKSPACE:-LOCALMODE}-1}}"
+  task_id="${LOOM_ASSIGNED_TASK_ID:-${LOOM_LOCAL_MODE_PLAN_TASK_ID:-${LOOM_WORKSPACE:-LOCALMODE}-2}}"
   agent="${LOOM_AGENT_NAME:-local-planner}"
   design="Approved design: local mode planner verified the supervised run loop. The coder should append a short result to local-mode-agent-output.txt, commit it, and close the task."
 
@@ -34,7 +34,7 @@ run_planner() {
 }
 
 run_coder() {
-  task_id="${LOOM_ASSIGNED_TASK_ID:-${LOOM_LOCAL_MODE_CODE_TASK_ID:-${LOOM_WORKSPACE:-LOCALMODE}-2}}"
+  task_id="${LOOM_ASSIGNED_TASK_ID:-${LOOM_LOCAL_MODE_CODE_TASK_ID:-${LOOM_WORKSPACE:-LOCALMODE}-3}}"
   agent="${LOOM_AGENT_NAME:-local-coder}"
   output_file="local-mode-agent-output.txt"
 
@@ -57,6 +57,15 @@ run_coder() {
   loom complete
 }
 
+run_interactive() {
+  agent="${LOOM_AGENT_NAME:-interactive-agent}"
+  role="${LOOM_AGENT_ROLE:-interactive}"
+  message="Interactive agent ${agent} (${role}) is ready."
+
+  echo "[localdogfood] ${message}"
+  write_transcript "$message"
+}
+
 case "$cmd" in
   meta)
     printf '{"display_name":"Local Dogfood","version":"1","description":"Deterministic local-mode backend","binary_name":"loom-backend-localdogfood"}\n'
@@ -65,20 +74,24 @@ case "$cmd" in
     printf '{"installed":true,"healthy":true,"message":"ready"}\n'
     ;;
   invoke)
-    case "${LOOM_ROLE:-}" in
-      plan)
-        run_planner
-        ;;
-      task)
-        run_coder
-        ;;
-      *)
-        case "${LOOM_AGENT_NAME:-}" in
-          *planner*) run_planner ;;
-          *) run_coder ;;
-        esac
-        ;;
-    esac
+    if [ "${LOOM_AGENT_ROLE:-}" != "" ]; then
+      run_interactive
+    else
+      case "${LOOM_ROLE:-}" in
+        plan)
+          run_planner
+          ;;
+        task)
+          run_coder
+          ;;
+        *)
+          case "${LOOM_AGENT_NAME:-}" in
+            *planner*) run_planner ;;
+            *) run_coder ;;
+          esac
+          ;;
+      esac
+    fi
     ;;
   *)
     echo "usage: loom-backend-localdogfood {meta|health|invoke}" >&2

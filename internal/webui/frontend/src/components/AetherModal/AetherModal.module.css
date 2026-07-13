@@ -24,7 +24,10 @@
   width: 90%;
   max-width: 480px;
   max-height: 88vh;
-  overflow-y: auto;
+  /* Clip to the fixed dialog height; the body scrolls internally so the
+     header and footer stay pinned. Scrolling the dialog as a whole let tall
+     body content overflow past the footer and become unreachable. */
+  overflow: hidden;
   display: flex;
   flex-direction: column;
   background: var(--color-panel-bg);
@@ -77,6 +80,7 @@
   padding: 0 24px;
   flex: 1;
   min-height: 0;
+  overflow-y: auto;
 }
 
 .foot {

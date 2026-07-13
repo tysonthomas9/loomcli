@@ -155,6 +155,14 @@ Second paragraph`;
   });
 });
 
+describe("MarkdownRenderer format boundary", () => {
+  it("does not promote HTML-looking ordinary markdown content into DOM elements", () => {
+    render(<MarkdownRenderer content='<p class="danger">text</p>' />);
+    const container = screen.getByTestId("markdown-content");
+    expect(container.querySelector("p.danger")).toBeNull();
+  });
+});
+
 describe("MarkdownRenderer XSS sanitization", () => {
   it("strips script tags from rendered output", () => {
     const malicious = `Hello <script>alert("xss")</script> World`;

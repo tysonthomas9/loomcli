@@ -82,10 +82,12 @@ func LoadStateCache() (*StateCache, error) {
 	return &sc, nil
 }
 
-// SaveStateCache writes the cache atomically. Callers must wrap
-// Load+mutate+Save in WithStateLock when concurrent CLI invocations are
-// possible (every interactive command path qualifies).
-func SaveStateCache(sc *StateCache) error {
+// saveStateCacheLocked writes the cache atomically. It is deliberately
+// unexported: the only public write path is MutateStateCache (or
+// MutateWorkspaceLocalState), which always loads the on-disk state
+// under the flock before mutating — so no caller can replace the whole
+// workspaces map from a stale or freshly-constructed struct.
+func saveStateCacheLocked(sc *StateCache) error {
 	if sc == nil {
 		return errors.New("statecache: nil cache")
 	}
@@ -121,6 +123,29 @@ func WithStateLock(fn func() error) error {
 	return configlock.WithLock(dir, fn)
 }
 
+// MutateStateCache is the single public mutation entry point for
+// state.json: it acquires the state lock, loads the on-disk cache,
+// applies fn, and saves the result. Read-modify-write under the flock
+// means callers can never drop other workspaces' entries by saving a
+// stale or fresh struct. Deletions stay explicit: delete map keys
+// inside fn. MutateStateCache acquires the state lock itself, so it
+// must NOT be called from inside a WithStateLock block.
+func MutateStateCache(fn func(*StateCache) error) error {
+	if fn == nil {
+		return errors.New("statecache: mutate function is required")
+	}
+	return WithStateLock(func() error {
+		sc, err := LoadStateCache()
+		if err != nil {
+			return err
+		}
+		if err := fn(sc); err != nil {
+			return err
+		}
+		return saveStateCacheLocked(sc)
+	})
+}
+
 // MutateWorkspaceLocalState wraps the common state-cache transaction for
 // updating one workspace's machine-local state.
 func MutateWorkspaceLocalState(wsKey string, fn func(*WorkspaceLocalState) error) error {
@@ -130,11 +155,7 @@ func MutateWorkspaceLocalState(wsKey string, fn func(*WorkspaceLocalState) error
 	if fn == nil {
 		return errors.New("statecache: mutate function is required")
 	}
-	return WithStateLock(func() error {
-		sc, err := LoadStateCache()
-		if err != nil {
-			return err
-		}
+	return MutateStateCache(func(sc *StateCache) error {
 		if sc.Workspaces == nil {
 			sc.Workspaces = make(map[string]WorkspaceLocalState)
 		}
@@ -143,6 +164,6 @@ func MutateWorkspaceLocalState(wsKey string, fn func(*WorkspaceLocalState) error
 			return err
 		}
 		sc.Workspaces[wsKey] = local
-		return SaveStateCache(sc)
+		return nil
 	})
 }

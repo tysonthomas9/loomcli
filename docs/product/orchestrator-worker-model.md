@@ -22,8 +22,9 @@ dispatches *short-lived* workers to fix specific tasks.
 
 This PRD proposes a small, additive split:
 
-- **Orchestrator** — a `loom lead` chat session, registered in fleet-db
-  as an `AgentSession{Kind: orchestration}`. Persistent. Talks to the
+- **Orchestrator** — an interactive terminal agent for any role with
+  `kind=interactive` (the built-in `lead` is the default), registered in
+  fleet-db as an `AgentSession{Kind: orchestration}`. Persistent. Talks to the
   user. Spawns workers via the existing `loom agentdef add` CLI.
 - **Worker** — a `domain.Agent` with `Mode = ephemeral`, scoped to one
   task by `parent` (epic) or `--task`. Exits cleanly after a single
@@ -123,7 +124,7 @@ nothing currently *uses* these fields. This PRD makes them load-bearing.
 
 | Term | Definition |
 |---|---|
-| **Orchestrator** | A `loom lead` interactive AI session, persisted as `AgentSession{Kind: orchestration}`. One per Terminal tab. |
+| **Orchestrator** | Any role with `kind=interactive` runs as an interactive terminal/orchestrator agent, persisted as `AgentSession{Kind: orchestration}`. The built-in `lead` is the default; custom ones can cover jobs like PR review. This interactive/worker split is by role `kind` and complements the ephemeral/service `AgentMode` axis. |
 | **Worker** | A `domain.Agent` with `Mode = ephemeral`. Spawned to handle a specific task and exits when that task completes. |
 | **Lead session** | The tmux + AI process that backs an orchestrator. Already exists; this PRD just gives it an identity. |
 | **Service agent** | A `domain.Agent` with `Mode = service` (or no mode). Today's default behavior: loops forever. Unchanged by this PRD. |
