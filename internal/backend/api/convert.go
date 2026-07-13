@@ -271,6 +271,18 @@ func blockedIssueToData(b gen.BlockedIssue) backend.IssueData {
 	if b.Parent != nil {
 		d.Parent = *b.Parent
 	}
+	copyBlockedDesign(&d, b)
+	if b.ExternalRef != nil {
+		d.ExternalRef = *b.ExternalRef
+	}
+	d.DueAt = cloneTimePtr(b.DueAt)
+	d.DeferUntil = cloneTimePtr(b.DeferUntil)
+	return d
+}
+
+// --- Helpers ---
+
+func copyBlockedDesign(d *backend.IssueData, b gen.BlockedIssue) {
 	if b.Design != nil {
 		d.Design = *b.Design
 	}
@@ -284,15 +296,7 @@ func blockedIssueToData(b gen.BlockedIssue) backend.IssueData {
 		d.HasDesign = *b.HasDesign
 	}
 	d.HasDesign = d.HasDesign || d.Design != "" || d.DesignArtifactID != ""
-	if b.ExternalRef != nil {
-		d.ExternalRef = *b.ExternalRef
-	}
-	d.DueAt = cloneTimePtr(b.DueAt)
-	d.DeferUntil = cloneTimePtr(b.DeferUntil)
-	return d
 }
-
-// --- Helpers ---
 
 func cloneTimePtr(t *time.Time) *time.Time {
 	if t == nil {
