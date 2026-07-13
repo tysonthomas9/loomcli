@@ -100,7 +100,10 @@ func statDirEntryAt(parent int, name string) (os.FileInfo, error) {
 	if err := unix.Fstatat(parent, name, &stat, unix.AT_SYMLINK_NOFOLLOW); err != nil {
 		return nil, err
 	}
-	switch uint32(stat.Mode) & unix.S_IFMT {
+	// Comparing the masked mode against the untyped S_IF* constants stays portable:
+	// Stat_t.Mode is uint16 on macOS and uint32 on Linux, so a fixed-width cast here
+	// is required on one platform and flagged as unnecessary by unconvert on the other.
+	switch stat.Mode & unix.S_IFMT {
 	case unix.S_IFLNK:
 		return symlinkFileInfo{name: name}, nil
 	case unix.S_IFREG, unix.S_IFDIR:
@@ -116,7 +119,18 @@ func statDirEntryAt(parent int, name string) (os.FileInfo, error) {
 		// returns ENXIO), so synthesize FileInfo from the stat we already hold.
 		// Without this, listing a directory that holds one — e.g. the workspace
 		// .loom folder with its live daemon.sock — fails the whole listing.
-		return specialDirEntryInfo{name: name, size: stat.Size, ifmt: uint32(stat.Mode) & unix.S_IFMT}, nil
+		mode := os.ModeIrregular
+		switch stat.Mode & unix.S_IFMT {
+		case unix.S_IFSOCK:
+			mode = os.ModeSocket
+		case unix.S_IFIFO:
+			mode = os.ModeNamedPipe
+		case unix.S_IFBLK:
+			mode = os.ModeDevice
+		case unix.S_IFCHR:
+			mode = os.ModeDevice | os.ModeCharDevice
+		}
+		return specialDirEntryInfo{name: name, size: stat.Size, mode: mode}, nil
 	}
 }
 
@@ -126,25 +140,12 @@ func statDirEntryAt(parent int, name string) (os.FileInfo, error) {
 type specialDirEntryInfo struct {
 	name string
 	size int64
-	ifmt uint32
+	mode os.FileMode
 }
 
-func (i specialDirEntryInfo) Name() string { return i.name }
-func (i specialDirEntryInfo) Size() int64  { return i.size }
-func (i specialDirEntryInfo) Mode() os.FileMode {
-	switch i.ifmt {
-	case unix.S_IFSOCK:
-		return os.ModeSocket
-	case unix.S_IFIFO:
-		return os.ModeNamedPipe
-	case unix.S_IFBLK:
-		return os.ModeDevice
-	case unix.S_IFCHR:
-		return os.ModeDevice | os.ModeCharDevice
-	default:
-		return os.ModeIrregular
-	}
-}
+func (i specialDirEntryInfo) Name() string       { return i.name }
+func (i specialDirEntryInfo) Size() int64        { return i.size }
+func (i specialDirEntryInfo) Mode() os.FileMode  { return i.mode }
 func (i specialDirEntryInfo) ModTime() time.Time { return time.Time{} }
 func (i specialDirEntryInfo) IsDir() bool        { return false }
 func (i specialDirEntryInfo) Sys() any           { return nil }
