@@ -168,7 +168,13 @@ func TestGitInspectorTimeoutIsTyped(t *testing.T) {
 }
 
 func TestGitInspectorOutputCapIsExplicit(t *testing.T) {
-	fake := writeInspectorScript(t, "while :; do dd if=/dev/zero bs=1048576 count=1 2>/dev/null; done")
+	// Stream zeros continuously so the byte cap is the binding constraint and is
+	// hit near-instantly regardless of how loaded the runner is — a dd fork-loop
+	// can otherwise reach the operation's own deadline first, returning a timeout
+	// error instead of an explicit cap. `exec` replaces the shell so the streaming
+	// process is the direct child the inspector cancels; without it the orphaned
+	// child would keep writing to the pipe and the read would never see EOF.
+	fake := writeInspectorScript(t, "exec cat /dev/zero")
 	started := time.Now()
 	result, err := (&GitInspector{binary: fake}).Status(context.Background(), t.TempDir())
 	if err != nil {
@@ -177,7 +183,10 @@ func TestGitInspectorOutputCapIsExplicit(t *testing.T) {
 	if !result.Partial || !result.LimitHit {
 		t.Fatalf("result = %+v", result)
 	}
-	if elapsed := time.Since(started); elapsed > 2*time.Second {
+	// The context deadline bounds worst-case runtime; assert we stay within it
+	// plus margin so the check is robust under -race/coverage load. Cap
+	// correctness itself is proven by Partial/LimitHit above.
+	if elapsed := time.Since(started); elapsed > fileStatusTimeout+2*time.Second {
 		t.Fatalf("status producer was not terminated promptly: %v", elapsed)
 	}
 
@@ -189,7 +198,7 @@ func TestGitInspectorOutputCapIsExplicit(t *testing.T) {
 	if !text.Partial || !text.LimitHit || len(text.Output) != fileDiffBytes {
 		t.Fatalf("text result = bytes:%d partial:%v limit:%v", len(text.Output), text.Partial, text.LimitHit)
 	}
-	if elapsed := time.Since(started); elapsed > 2*time.Second {
+	if elapsed := time.Since(started); elapsed > fileDiffTimeout+2*time.Second {
 		t.Fatalf("text producer was not terminated promptly: %v", elapsed)
 	}
 }

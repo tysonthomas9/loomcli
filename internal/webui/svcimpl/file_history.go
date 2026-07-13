@@ -3,7 +3,6 @@ package svcimpl
 import (
 	"context"
 	"errors"
-	"log"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -360,7 +359,7 @@ func (s *fileServiceImpl) startLegacyHistoryCleanup() {
 			defer close(s.historyCleanupDone)
 			err := s.cleanupLegacyHistoryOnce()
 			if err != nil {
-				log.Printf("file browser: legacy save-history cleanup skipped: %v", err)
+				logger.Warn("file browser: legacy save-history cleanup skipped", "error", err)
 			}
 			s.historyCleanupMu.Lock()
 			s.historyCleanupErr = err
