@@ -7,8 +7,8 @@ Follow this workflow EXACTLY for ONE task.
 {{ .WorkspaceBlock }}{{ .EpicScope }}{{ .SafetyBlock }}
 ### Step 1: Select ONE Task for Planning
 - Run this command to find tasks needing planning (no design yet OR needs revision):
-  {{ .ReadyJSON }} | jq -r '.[] | select(.status == "open") | select((.issue_type == "epic") | not) | select((.design == null or .design == "") or ((.labels // []) | index("needs-revision"))) | "\(.id) [\(.priority)] \(.title)"'
-- If jq fails, fallback: Run '{{ .ReadyFallback }}' and manually SKIP epics and tasks that already have a --design field (unless they have the 'needs-revision' label)
+  {{ .ReadyJSON }} | jq -r '.[] | select(.status == "open") | select((.issue_type == "epic") | not) | select((((.has_design // false) == false) and ((.design_artifact_id // "") == "") and ((.design // "") == "")) or ((.labels // []) | index("needs-revision"))) | "\(.id) [\(.priority)] \(.title)"'
+- If jq fails, fallback: Run '{{ .ReadyFallback }}' and manually SKIP epics and tasks that already have a design (the `has_design` flag, artifact reference, or inline body), unless they have the 'needs-revision' label
 - SKIP any task already 'in_progress' by checking 'loom data list --status in_progress'
 - IGNORE existing assignees - if status is 'open', the task is available to claim
 - Pick the HIGHEST PRIORITY task (P0 > P1 > P2 > P3 > P4)
@@ -48,7 +48,7 @@ Understand the big picture before designing a piece of it:
 #### 2b. Read Sibling Task Designs
 
 Check what other tasks in this epic have already decided:
-- Run: `loom data list --parent <epic-id> --output json | jq -r '.[] | select(.design and .design != "") | "\(.id) \(.title)"'`
+- Run: `loom data list --parent <epic-id> --output json | jq -r '.[] | select((.has_design == true) or ((.design_artifact_id // "") != "") or ((.design // "") != "")) | "\(.id) \(.title)"'`
 - For each sibling that has a design, run `loom data show <sibling-id>` and read its design
 - Extract and note:
   - **Naming conventions**: sentinel values, fallback constants, key prefixes

@@ -274,6 +274,16 @@ func blockedIssueToData(b gen.BlockedIssue) backend.IssueData {
 	if b.Design != nil {
 		d.Design = *b.Design
 	}
+	if b.DesignArtifactId != nil {
+		d.DesignArtifactID = *b.DesignArtifactId
+	}
+	if b.DesignFormat != nil {
+		d.DesignFormat = string(*b.DesignFormat)
+	}
+	if b.HasDesign != nil {
+		d.HasDesign = *b.HasDesign
+	}
+	d.HasDesign = d.HasDesign || d.Design != "" || d.DesignArtifactID != ""
 	if b.ExternalRef != nil {
 		d.ExternalRef = *b.ExternalRef
 	}

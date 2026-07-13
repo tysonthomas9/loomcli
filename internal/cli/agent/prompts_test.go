@@ -94,6 +94,22 @@ func TestGenerateTaskPrompt(t *testing.T) {
 	}
 }
 
+func TestGeneratedPromptsRecognizeArtifactBackedDesigns(t *testing.T) {
+	planning := GeneratePlanningPrompt("planner", nil, "")
+	task := GenerateTaskPrompt("coder", nil, "", "claude")
+
+	for name, prompt := range map[string]string{"planning": planning, "task": task} {
+		for _, field := range []string{".has_design", ".design_artifact_id", ".design"} {
+			if !strings.Contains(prompt, field) {
+				t.Errorf("%s prompt missing artifact-aware filter field %q", name, field)
+			}
+		}
+	}
+	if strings.Contains(task, "select(.design) |") {
+		t.Error("task prompt still requires an inline design body")
+	}
+}
+
 func TestGeneratePlanningPrompt_WithParent(t *testing.T) {
 	prompt := GeneratePlanningPrompt("falcon", nil, "my-epic-abc")
 
