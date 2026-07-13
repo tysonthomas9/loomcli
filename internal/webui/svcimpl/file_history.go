@@ -130,6 +130,8 @@ func mapGitInspectionError(operation string, err error) error {
 			return service.ErrTimeout(operation)
 		case "validation":
 			return service.ErrValidation(err.Error())
+		case "not_found":
+			return service.ErrNotFound(operation)
 		}
 	}
 	return service.ErrInternal(operation, err)

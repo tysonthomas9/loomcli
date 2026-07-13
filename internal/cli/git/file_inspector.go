@@ -159,7 +159,7 @@ func (g *GitInspector) Show(ctx context.Context, dir, rev, path string, maxBytes
 	spec := strings.TrimSpace(rev) + ":" + cleanPath
 	sizeResult, err := g.runWithContext(ctx, "show-size", dir, 128, "cat-file", "-s", spec)
 	if err != nil {
-		return InspectorShowResult{}, err
+		return InspectorShowResult{}, classifyShowError(err)
 	}
 	size, err := strconv.ParseInt(strings.TrimSpace(string(sizeResult.Output)), 10, 64)
 	if err != nil {
@@ -167,6 +167,32 @@ func (g *GitInspector) Show(ctx context.Context, dir, rev, path string, maxBytes
 	}
 	content, err := g.runWithContext(ctx, "show", dir, maxBytes, "cat-file", "blob", spec)
 	return InspectorShowResult{Content: content.Output, Size: size, Truncated: content.LimitHit || size > maxBytes}, err
+}
+
+func classifyShowError(err error) error {
+	var inspectorErr *InspectorError
+	if !errors.As(err, &inspectorErr) || inspectorErr.Kind != "failed" {
+		return err
+	}
+	stderr := strings.ToLower(inspectorErr.Stderr)
+	for _, marker := range []string{
+		"does not exist in",
+		"exists on disk, but not in",
+		"not a valid object name",
+		"invalid object name",
+		"bad object",
+		"could not get object info",
+	} {
+		if strings.Contains(stderr, marker) {
+			return &InspectorError{
+				Operation: inspectorErr.Operation,
+				Kind:      "not_found",
+				Stderr:    inspectorErr.Stderr,
+				Err:       inspectorErr.Err,
+			}
+		}
+	}
+	return err
 }
 
 func (g *GitInspector) CurrentBranch(ctx context.Context, dir string) (string, error) {
@@ -234,7 +260,8 @@ func isolatedGitEnv(env []string) []string {
 	out := make([]string, 0, len(env)+6)
 	for _, item := range env {
 		key, _, _ := strings.Cut(item, "=")
-		if strings.HasPrefix(strings.ToUpper(key), "GIT_") {
+		upperKey := strings.ToUpper(key)
+		if strings.HasPrefix(upperKey, "GIT_") || upperKey == "LANG" || upperKey == "LC_ALL" {
 			continue
 		}
 		out = append(out, item)
@@ -245,6 +272,8 @@ func isolatedGitEnv(env []string) []string {
 		"GIT_PAGER=cat",
 		"GIT_CONFIG_NOSYSTEM=1",
 		"GIT_CONFIG_GLOBAL="+os.DevNull,
+		"LANG=C",
+		"LC_ALL=C",
 	)
 }
 
