@@ -349,16 +349,6 @@ func GenerateLeadPrompt() string {
 	})
 }
 
-// GenerateReviewPrompt renders the read-only PR-reviewer persona used by the
-// per-PR review agents the web UI stands up (name shape review-<repo>-pr-<N>).
-// Unlike the lead prompt it has no backlog/startup section, so the reviewer
-// boots straight into review mode with no project-management preamble. Distinct
-// from the "pr-review" builtin interactive prompt: this persona is bound to a
-// detached PR-head checkout and auto-reviews on boot.
-func GenerateReviewPrompt() string {
-	return renderPrompt("pr-review-checkout", promptTemplateData{})
-}
-
 // GenerateTerminalPrompt creates the base prompt for the interactive terminal
 // agent runtime. Empty promptFile preserves the built-in lead prompt; a custom
 // prompt file replaces that base and still receives the terminal safety rules.

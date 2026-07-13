@@ -997,11 +997,15 @@ func TestEnsureReviewerCreatesAgentWorktreeAndSeed(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get reviewer agent: %v", err)
 	}
-	if agent.Backend != "codex" || agent.RoleName != "lead" || agent.DesiredState != domain.AgentDesiredRunning {
-		t.Fatalf("agent = %+v, want codex lead running", agent)
+	if agent.Backend != "codex" || agent.RoleName != reviewerRoleName || agent.DesiredState != domain.AgentDesiredRunning {
+		t.Fatalf("agent = %+v, want codex %s running", agent, reviewerRoleName)
 	}
-	if _, err := h.store.Roles().Get(context.Background(), prReviewTestWorkspace, "lead"); err != nil {
-		t.Fatalf("lead role missing: %v", err)
+	role, err := h.store.Roles().Get(context.Background(), prReviewTestWorkspace, reviewerRoleName)
+	if err != nil {
+		t.Fatalf("reviewer role missing: %v", err)
+	}
+	if role.Kind != domain.RoleKindInteractive || role.PromptFile != reviewerPromptFile || role.Prompt != "" {
+		t.Fatalf("reviewer role = kind:%q prompt_file:%q prompt:%q", role.Kind, role.PromptFile, role.Prompt)
 	}
 	worktreePath, err := localworkspace.PRReviewWorktreePath(workspacePath, "hello", 7)
 	if err != nil {
@@ -1067,16 +1071,18 @@ func createReviewerAgentForTest(t *testing.T, h *prReviewHarness, repo string, n
 	ctx := context.Background()
 	if _, err := h.store.Roles().Create(ctx, store.RoleCreate{
 		WorkspaceKey: prReviewTestWorkspace,
-		Name:         "lead",
-		Description:  "Lead/orchestrator terminal",
+		Name:         reviewerRoleName,
+		Kind:         string(domain.RoleKindInteractive),
+		Description:  reviewerRoleDescription,
+		PromptFile:   reviewerPromptFile,
 	}); err != nil {
-		t.Fatalf("Create lead role: %v", err)
+		t.Fatalf("Create reviewer role: %v", err)
 	}
 	agentName := reviewerAgentName(repo, number)
 	if _, err := h.store.Agents().Create(ctx, store.AgentCreate{
 		WorkspaceKey: prReviewTestWorkspace,
 		Name:         agentName,
-		RoleName:     "lead",
+		RoleName:     reviewerRoleName,
 		Backend:      "codex",
 		DesiredState: domain.AgentDesiredRunning,
 	}); err != nil {

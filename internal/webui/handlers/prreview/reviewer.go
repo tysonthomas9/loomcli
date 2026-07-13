@@ -24,6 +24,9 @@ import (
 )
 
 const reviewerAgentSegmentMaxLen = 48
+const reviewerRoleName = "pr-reviewer"
+const reviewerPromptFile = "builtin:pr-review-checkout"
+const reviewerRoleDescription = "PR review checkout terminal agent"
 
 // terminalKindAgent mirrors the agent-terminal tab kind used by the terminal
 // handlers (internal/webui/handlers/terminal); tabs of this kind for the
@@ -222,18 +225,14 @@ func prepareReviewerCheckout(w http.ResponseWriter, spec reviewerCheckoutSpec) (
 }
 
 func (m *Module) ensureReviewerAgent(ctx context.Context, ws, agentName string) error {
-	if _, err := m.store.Roles().Create(ctx, store.RoleCreate{
-		WorkspaceKey: ws,
-		Name:         "lead",
-		Description:  "Lead/orchestrator terminal",
-	}); err != nil && !errors.Is(err, domain.ErrAlreadyExists) {
-		return fmt.Errorf("create lead role: %w", err)
+	if err := m.ensureReviewerRole(ctx, ws); err != nil {
+		return err
 	}
 	backend := m.reviewerBackend(ctx, ws)
 	_, err := m.store.Agents().Create(ctx, store.AgentCreate{
 		WorkspaceKey: ws,
 		Name:         agentName,
-		RoleName:     "lead",
+		RoleName:     reviewerRoleName,
 		Backend:      backend,
 		DesiredState: domain.AgentDesiredRunning,
 	})
@@ -247,10 +246,64 @@ func (m *Module) ensureReviewerAgent(ctx context.Context, ws, agentName string) 
 	if getErr != nil {
 		return fmt.Errorf("load existing reviewer agent: %w", getErr)
 	}
-	if strings.EqualFold(strings.TrimSpace(agent.Backend), backend) {
+	if reviewerAgentCurrent(agent, backend, reviewerRoleName) {
 		return nil
 	}
-	return m.migrateReviewerBackend(ctx, ws, agentName, backend)
+	return m.migrateReviewer(ctx, ws, agentName, backend, reviewerRoleName)
+}
+
+func reviewerAgentCurrent(agent *domain.Agent, backend, roleName string) bool {
+	return strings.EqualFold(strings.TrimSpace(agent.Backend), backend) &&
+		strings.TrimSpace(agent.RoleName) == roleName
+}
+
+func (m *Module) ensureReviewerRole(ctx context.Context, ws string) error {
+	if _, err := m.store.Roles().Create(ctx, store.RoleCreate{
+		WorkspaceKey: ws,
+		Name:         reviewerRoleName,
+		Kind:         string(domain.RoleKindInteractive),
+		Description:  reviewerRoleDescription,
+		PromptFile:   reviewerPromptFile,
+	}); err == nil {
+		return nil
+	} else if !errors.Is(err, domain.ErrAlreadyExists) {
+		return fmt.Errorf("create reviewer role: %w", err)
+	}
+	role, err := m.store.Roles().Get(ctx, ws, reviewerRoleName)
+	if err != nil {
+		return fmt.Errorf("load reviewer role: %w", err)
+	}
+	return m.reconcileReviewerRole(ctx, ws, role)
+}
+
+func (m *Module) reconcileReviewerRole(ctx context.Context, ws string, role *domain.Role) error {
+	if role == nil {
+		return fmt.Errorf("load reviewer role: %w", domain.ErrNotFound)
+	}
+	kind := string(domain.RoleKindInteractive)
+	prompt := ""
+	promptFile := reviewerPromptFile
+	description := reviewerRoleDescription
+	patch := store.RoleUpdate{}
+	if role.Kind != domain.RoleKindInteractive {
+		patch.Kind = &kind
+	}
+	if role.Prompt != "" {
+		patch.Prompt = &prompt
+	}
+	if strings.TrimSpace(role.PromptFile) != reviewerPromptFile {
+		patch.PromptFile = &promptFile
+	}
+	if strings.TrimSpace(role.Description) == "" {
+		patch.Description = &description
+	}
+	if patch.Kind == nil && patch.Prompt == nil && patch.PromptFile == nil && patch.Description == nil {
+		return nil
+	}
+	if _, err := m.store.Roles().Update(ctx, ws, reviewerRoleName, patch); err != nil {
+		return fmt.Errorf("reconcile reviewer role: %w", err)
+	}
+	return nil
 }
 
 // reviewerBackend resolves the backend for a reviewer agent: the workspace's
@@ -265,12 +318,12 @@ func (m *Module) reviewerBackend(ctx context.Context, ws string) string {
 	return backend
 }
 
-// migrateReviewerBackend switches an existing reviewer agent to the
-// workspace's current backend. Order matters: the old runtime's PTY is killed
+// migrateReviewer switches an existing reviewer agent to the workspace's
+// current backend and role. Order matters: the old runtime's PTY is killed
 // first so it cannot keep overwriting the orchestration session's runtime
 // metadata after the clear, then stale provider identity keys are removed so
 // the new runtime starts from a clean slate, then the agent record flips.
-func (m *Module) migrateReviewerBackend(ctx context.Context, ws, agentName, backend string) error {
+func (m *Module) migrateReviewer(ctx context.Context, ws, agentName, backend, roleName string) error {
 	if m.terminalSvc != nil {
 		tabs, err := m.terminalSvc.ListTabs(ctx, ws)
 		if err != nil {
@@ -294,9 +347,10 @@ func (m *Module) migrateReviewerBackend(ctx context.Context, ws, agentName, back
 	running := domain.AgentDesiredRunning
 	if _, err := m.store.Agents().Update(ctx, ws, agentName, store.AgentUpdate{
 		Backend:      &backend,
+		RoleName:     &roleName,
 		DesiredState: &running,
 	}); err != nil {
-		return fmt.Errorf("update reviewer backend: %w", err)
+		return fmt.Errorf("update reviewer agent: %w", err)
 	}
 	return nil
 }

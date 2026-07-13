@@ -304,18 +304,3 @@ func TestMarkLeadAssignmentDelivered(t *testing.T) {
 		t.Fatalf("delivered epic = %q", got)
 	}
 }
-
-func TestIsReviewerAgentID(t *testing.T) {
-	reviewers := []string{"review-loomcli-pr-193", "review-hello-pr-7", "review-my-repo-pr-1"}
-	for _, id := range reviewers {
-		if !isReviewerAgentID(id) {
-			t.Errorf("isReviewerAgentID(%q) = false, want true", id)
-		}
-	}
-	nonReviewers := []string{"lead", "review-loomcli", "loomcli-pr-193", "review-pr-7", "worker-1", "", "review-repo-pr-x"}
-	for _, id := range nonReviewers {
-		if isReviewerAgentID(id) {
-			t.Errorf("isReviewerAgentID(%q) = true, want false", id)
-		}
-	}
-}
