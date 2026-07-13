@@ -711,7 +711,9 @@ describe("WorkspaceFileBrowser", () => {
         path: "main.ts",
       }),
     );
-    expect(await screen.findByDisplayValue(/function jumpTarget/)).toBeVisible();
+    expect(
+      await screen.findByDisplayValue(/function jumpTarget/),
+    ).toBeVisible();
     confirm.mockRestore();
   });
 
@@ -1861,9 +1863,9 @@ describe("WorkspaceFileBrowser", () => {
       "main.ts",
       "src/main.ts",
     );
-    expect(
-      mocks.registryReset.mock.invocationCallOrder[0],
-    ).toBeLessThan(mocks.registryRetarget.mock.invocationCallOrder[0]);
+    expect(mocks.registryReset.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.registryRetarget.mock.invocationCallOrder[0],
+    );
     confirm.mockRestore();
   });
 
