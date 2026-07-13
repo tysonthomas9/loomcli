@@ -255,7 +255,7 @@ func (s *testFileServiceImpl) ListDirectoryScoped(_ context.Context, wsID string
 	})
 	entries := make([]service.FileTreeEntry, 0, len(dirEntries))
 	for _, de := range dirEntries {
-		if de.Type()&os.ModeSymlink != 0 || de.Name() == ".git" {
+		if de.Type()&os.ModeSymlink != 0 || strings.EqualFold(de.Name(), ".git") {
 			continue
 		}
 		info, infoErr := de.Info()
@@ -412,6 +412,11 @@ func testScopedFullPath(rootDir, path string, allowEmpty bool) (string, string, 
 		return "", "", service.ErrForbidden("path outside root")
 	}
 	cleanPath := filepath.Clean(path)
+	for _, segment := range strings.Split(cleanPath, string(filepath.Separator)) {
+		if strings.EqualFold(segment, ".git") {
+			return "", "", service.ErrForbidden(".git paths are not available")
+		}
+	}
 	fullPath := filepath.Join(rootDir, cleanPath)
 	if err := validatePathWithinDir(fullPath, rootDir); err != nil {
 		return "", "", service.ErrForbidden("path outside root")

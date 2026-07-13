@@ -421,8 +421,8 @@ func TestHandleScopedFileCRUD_AllScopes(t *testing.T) {
 			}
 			w = httptest.NewRecorder()
 			writeHandler.ServeHTTP(w, scopedReqBody(http.MethodPut, scopedPathURL("/api/workspaces/test-ws/files", sc, ".git/config"), `{"content":"git-ok"}`))
-			if w.Code != http.StatusOK {
-				t.Fatalf("write .git/config status = %d, want 200; body: %s", w.Code, w.Body.String())
+			if w.Code != http.StatusForbidden {
+				t.Fatalf("write .git/config status = %d, want 403; body: %s", w.Code, w.Body.String())
 			}
 			w = httptest.NewRecorder()
 			treeHandler.ServeHTTP(w, scopedReq(scopedPathURL("/api/workspaces/test-ws/files/tree", sc, "")))
@@ -440,8 +440,8 @@ func TestHandleScopedFileCRUD_AllScopes(t *testing.T) {
 			}
 			w = httptest.NewRecorder()
 			readHandler.ServeHTTP(w, scopedReq(scopedPathURL("/api/workspaces/test-ws/files", sc, ".git/config")))
-			if w.Code != http.StatusOK {
-				t.Fatalf("read .git/config status = %d, want 200; body: %s", w.Code, w.Body.String())
+			if w.Code != http.StatusForbidden {
+				t.Fatalf("read .git/config status = %d, want 403; body: %s", w.Code, w.Body.String())
 			}
 
 			w = httptest.NewRecorder()
@@ -522,7 +522,7 @@ func TestHandleScopedFileTree_GitDirHiddenFromListing(t *testing.T) {
 	}
 }
 
-func TestHandleScopedFileRead_GitPathAllowed(t *testing.T) {
+func TestHandleScopedFileRead_GitPathForbidden(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(dir, ".git"), 0755); err != nil {
 		t.Fatal(err)
@@ -535,8 +535,8 @@ func TestHandleScopedFileRead_GitPathAllowed(t *testing.T) {
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, scopedReq("/api/workspaces/test-ws/files?scope=workspace&path=.git/config"))
 
-	if w.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200 for explicit .git path; body: %s", w.Code, w.Body.String())
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403 for explicit .git path; body: %s", w.Code, w.Body.String())
 	}
 }
 
@@ -546,8 +546,6 @@ func TestHandleScopedFileTree_PathTraversalDenied(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// filepath.Clean("/"+path) clamps traversal inside the root, so an escape
-	// attempt maps to a non-existent in-root path (never a file outside it).
 	h := HandleScopedFileTree(NewFileService(wsRootFor(dir)))
 	for _, p := range []string{"../../../etc/passwd", "subdir/../../../etc/shadow"} {
 		w := httptest.NewRecorder()
