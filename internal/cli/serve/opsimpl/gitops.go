@@ -97,6 +97,52 @@ func (g *GitOpsImpl) ResolveAgentWorktree(workspaceID, name string) (*ops.AgentW
 	return &aw, nil
 }
 
+// ResolveAgentWorktreeForRepo resolves one explicit agent+repo checkout under
+// <ws>/worktrees/<repo>/<agent>.
+func (g *GitOpsImpl) ResolveAgentWorktreeForRepo(workspaceID, name, repoName string) (*ops.AgentWorktree, error) {
+	repoName = strings.TrimSpace(repoName)
+	if repoName == "" {
+		return g.ResolveAgentWorktree(workspaceID, name)
+	}
+	if g != nil && g.store != nil {
+		ws, err := g.loadStoreWorkspace(context.Background(), workspaceID, name)
+		if err != nil {
+			return nil, err
+		}
+		agent, err := findWorkspaceAgent(ws, workspaceID, name)
+		if err != nil {
+			return nil, err
+		}
+		repo, err := selectAgentRepoByName(ws.Repos, *agent, repoName)
+		if err != nil {
+			return nil, err
+		}
+		return resolveAgentWorktreeFromWSForRepo(ws, name, repo)
+	}
+
+	resolver, err := cli.NewResolver()
+	if err != nil {
+		return nil, fmt.Errorf("creating resolver: %v", err)
+	}
+	if err := scopeResolverToWorkspace(resolver, workspaceID); err != nil {
+		return nil, err
+	}
+	ws, ok := resolver.Config.Workspaces[resolver.Workspace]
+	if !ok {
+		return nil, fmt.Errorf("workspace %q not found in config", resolver.Workspace)
+	}
+	root, err := validateWorkspaceRoot(workspaceID, ws.Path)
+	if err != nil {
+		return nil, err
+	}
+	repos, _ := configWorkspaceRepos(ws, root)
+	repo, ok := findWorkspaceRepo(repos, repoName)
+	if !ok {
+		return nil, fmt.Errorf("%w: repo %q is not known in workspace %q", ops.ErrAgentRepoNotAllowed, repoName, workspaceID)
+	}
+	return resolveAgentWorktreeFromWSForRepo(&ops.WorkspaceData{Path: root}, name, repo)
+}
+
 // loadStoreWorkspace loads the workspace topology for store-backed agent
 // resolution, applying the shared nil-guard and not-found mapping.
 func (g *GitOpsImpl) loadStoreWorkspace(ctx context.Context, workspaceID, name string) (*ops.WorkspaceData, error) {
@@ -161,16 +207,20 @@ func resolveAgentWorktreeFromWS(ws *ops.WorkspaceData, workspaceID, name string)
 	if err != nil {
 		return nil, err
 	}
+	return resolveAgentWorktreeFromWSForRepo(ws, name, repo)
+}
+
+func resolveAgentWorktreeFromWSForRepo(ws *ops.WorkspaceData, name string, repo ops.WorkspaceRepo) (*ops.AgentWorktree, error) {
 	wtPath := filepath.Join(ws.Path, "worktrees", repo.Name, name)
 	if _, err := os.Stat(filepath.Join(wtPath, ".git")); err != nil {
 		if os.IsNotExist(err) {
-			return nil, fmt.Errorf("agent %q worktree for repo %q is not checked out on this machine at %s", name, repo.Name, wtPath)
+			return nil, fmt.Errorf("%w: agent %q worktree for repo %q is not checked out on this machine at %s", ops.ErrAgentWorktreeNotFound, name, repo.Name, wtPath)
 		}
 		return nil, fmt.Errorf("inspect agent %q worktree: %w", name, err)
 	}
 	branch, err := cli.GetCurrentBranch(wtPath)
 	if err != nil {
-		return nil, fmt.Errorf("get current branch for agent %q: %w", name, err)
+		branch = "unknown"
 	}
 	return newWorkspaceWorktree(name, wtPath, branch, repo), nil
 }
@@ -393,6 +443,51 @@ func selectAgentRepo(repos []ops.WorkspaceRepo, agent ops.WorkspaceAgentInfo) (o
 		}
 	}
 	return ops.WorkspaceRepo{}, fmt.Errorf("agent %q repo affinity does not match any workspace repo", agent.Name)
+}
+
+func selectAgentRepoByName(repos []ops.WorkspaceRepo, agent ops.WorkspaceAgentInfo, repoName string) (ops.WorkspaceRepo, error) {
+	repo, ok := findWorkspaceRepo(repos, repoName)
+	if !ok {
+		return ops.WorkspaceRepo{}, fmt.Errorf("%w: repo %q is not known in workspace", ops.ErrAgentRepoNotAllowed, repoName)
+	}
+	if !agentRepoAllowed(repos, agent, repo.Name) {
+		return ops.WorkspaceRepo{}, fmt.Errorf("%w: repo %q is not allowed for agent %q", ops.ErrAgentRepoNotAllowed, repo.Name, agent.Name)
+	}
+	return repo, nil
+}
+
+func findWorkspaceRepo(repos []ops.WorkspaceRepo, repoName string) (ops.WorkspaceRepo, bool) {
+	for _, repo := range repos {
+		if repo.Name == repoName {
+			return repo, true
+		}
+	}
+	return ops.WorkspaceRepo{}, false
+}
+
+func agentRepoAllowed(repos []ops.WorkspaceRepo, agent ops.WorkspaceAgentInfo, repoName string) bool {
+	if len(agent.Repos) == 0 && len(agent.RepoGroups) == 0 {
+		_, ok := findWorkspaceRepo(repos, repoName)
+		return ok
+	}
+	for _, name := range agent.Repos {
+		if name == repoName {
+			return true
+		}
+	}
+	for _, group := range agent.RepoGroups {
+		for _, repo := range repos {
+			if repo.Name != repoName {
+				continue
+			}
+			for _, repoGroup := range repo.Groups {
+				if repoGroup == group {
+					return true
+				}
+			}
+		}
+	}
+	return false
 }
 
 func (g *GitOpsImpl) Push(worktreePath, sourceBranch, targetBranch, remote string) (*ops.GitPushResult, error) {

@@ -121,10 +121,10 @@ export function useScopedFileContent(
   const { workspaceId } = useWorkspaceContext();
   const scope = scopeRef.scope;
   const target = scopeRef.target ?? null;
+  const repo = scopeRef.repo ?? null;
   const readFile = useCallback<FileReader>(
-    (path) =>
-      readScopedFile(workspaceId, target ? { scope, target } : { scope }, path),
-    [workspaceId, scope, target],
+    (path) => readScopedFile(workspaceId, { scope, target, repo }, path),
+    [workspaceId, scope, target, repo],
   );
   const enabled = scope === "workspace" || !!target;
   return useFileContentCore(readFile, enabled);

@@ -1,5 +1,19 @@
 package ops
 
+import "errors"
+
+var (
+	// ErrAgentRepoNotAllowed indicates that a repo qualifier is unknown or not
+	// part of the agent's allowed repo set.
+	ErrAgentRepoNotAllowed = errors.New("agent repo not allowed")
+	// ErrAgentWorktreeNotFound indicates that a valid agent+repo checkout is not
+	// present on this machine.
+	ErrAgentWorktreeNotFound = errors.New("agent worktree not found")
+	// ErrCheckoutTargetNotAllowed indicates that a requested checkout target is
+	// unknown, not allowed for the agent, or otherwise outside the workspace map.
+	ErrCheckoutTargetNotAllowed = errors.New("checkout target not allowed")
+)
+
 // FileOps defines the interface for resolving the roots that file operations
 // run against. This interface breaks the import cycle between webui and cli
 // packages; the cli package provides the concrete implementation.
@@ -13,6 +27,12 @@ type FileOps interface {
 	// Reuses the same AgentWorktree type from gitops.go.
 	// workspaceID scopes discovery to a specific workspace (empty = default).
 	ResolveAgentWorktree(workspaceID, name string) (*AgentWorktree, error)
+
+	// ResolveAgentWorktreeForRepo resolves a specific agent+repo checkout under
+	// <workspace>/worktrees/<repo>/<agent>. The repo must be known and allowed
+	// for the agent; invalid repo qualifiers return ErrAgentRepoNotAllowed, and
+	// missing local checkouts return ErrAgentWorktreeNotFound.
+	ResolveAgentWorktreeForRepo(workspaceID, name, repo string) (*AgentWorktree, error)
 
 	// ResolveAgentWorktreeOrPrimary resolves an agent name to its worktree,
 	// falling back to the workspace's primary repo worktree when the agent is
@@ -58,6 +78,16 @@ type FileOps interface {
 	// ResolveLoomDataDir resolves the local loom data/config directory using
 	// the established CLI resolver instead of callers reading env directly.
 	ResolveLoomDataDir() (string, error)
+
+	// GetCurrentBranch returns the current branch for a git checkout. It is
+	// best-effort metadata for file checkout enumeration.
+	GetCurrentBranch(worktreePath string) (string, error)
+
+	// RepairCheckout repairs or provisions a known workspace checkout. scope is
+	// "agent" or "repo"; target is the agent name or repo name; repo qualifies
+	// agent scope. Implementations must validate target/repo against workspace
+	// topology and never accept arbitrary paths from callers.
+	RepairCheckout(workspaceID, scope, target, repo string, force bool) (RepairResult, error)
 }
 
 // GitFileContentAtRev contains bounded content returned from a git revision.
@@ -65,4 +95,13 @@ type GitFileContentAtRev struct {
 	Content   []byte
 	Size      int64
 	Truncated bool
+}
+
+// RepairResult is returned by file checkout repair/provision operations.
+type RepairResult struct {
+	Repaired      bool   `json:"repaired"`
+	Method        string `json:"method"`
+	RequiresForce bool   `json:"requires_force,omitempty"`
+	BackupPath    string `json:"backup_path,omitempty"`
+	Message       string `json:"message"`
 }

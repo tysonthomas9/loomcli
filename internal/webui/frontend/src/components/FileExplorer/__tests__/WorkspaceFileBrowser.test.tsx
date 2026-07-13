@@ -34,49 +34,32 @@ const mocks = vi.hoisted(() => ({
   indexScopedFiles: vi.fn(() =>
     Promise.resolve({ paths: [] as string[], truncated: false }),
   ),
+  listFileCheckouts: vi.fn(() => Promise.resolve({ checkouts: [] })),
+  repairFileCheckout: vi.fn(() =>
+    Promise.resolve({
+      repaired: true,
+      method: "repair",
+      message: "Repaired checkout",
+    }),
+  ),
+  listScopedDir: vi.fn(() => Promise.resolve({ path: "", entries: [] })),
   searchScopedFiles: vi.fn(() =>
     Promise.resolve({ results: [], limitHit: false }),
   ),
   scrollApplied: vi.fn(),
-  dndOnDragEnd: undefined as
-    | ((event: {
-        active: { data: { current?: unknown } };
-        over?: { data: { current?: unknown } } | null;
-      }) => void)
-    | undefined,
+  agents: [
+    {
+      name: "atlas",
+      repos: ["loomcli"],
+      repo_groups: [],
+      cross_repo: false,
+    },
+  ],
   fileMap: {} as Record<string, FileReadData>,
   headFileMap: {} as Record<string, FileReadData>,
   rootEntries: [] as FileEntry[],
+  scopedTreeError: null as string | null,
 }));
-
-vi.mock("@dnd-kit/core", async () => {
-  const React = await import("react");
-  return {
-    DndContext: ({
-      onDragEnd,
-      children,
-    }: {
-      onDragEnd: NonNullable<typeof mocks.dndOnDragEnd>;
-      children: React.ReactNode;
-    }) => {
-      mocks.dndOnDragEnd = onDragEnd;
-      return <>{children}</>;
-    },
-    useDraggable: () => ({
-      setNodeRef: vi.fn(),
-      listeners: {},
-      isDragging: false,
-      transform: null,
-    }),
-    useDroppable: () => ({
-      setNodeRef: vi.fn(),
-      isOver: false,
-    }),
-    PointerSensor: function PointerSensor() {},
-    useSensor: (sensor: unknown) => sensor,
-    useSensors: (...sensors: unknown[]) => sensors,
-  };
-});
 
 vi.mock("@/components/CodeMirrorEditor", async () => {
   const React = await import("react");
@@ -177,8 +160,11 @@ vi.mock("@/hooks/api", () => ({
   gitStatusScoped: mocks.gitStatusScoped,
   historyScopedFile: mocks.historyScopedFile,
   indexScopedFiles: mocks.indexScopedFiles,
+  listFileCheckouts: mocks.listFileCheckouts,
+  listScopedDir: mocks.listScopedDir,
   mkdirScoped: mocks.mkdirScoped,
   moveScopedPath: mocks.moveScopedPath,
+  repairFileCheckout: mocks.repairFileCheckout,
   readScopedFile: mocks.readScopedFile,
   searchScopedFiles: mocks.searchScopedFiles,
   writeScopedFile: mocks.writeScopedFile,
@@ -189,10 +175,23 @@ vi.mock("@/hooks", async () => {
   const stores = await import("@/stores");
   return {
     FileBrowserStoreProvider: stores.FileBrowserStoreProvider,
+    agentFileBrowserTabsStorageKey: stores.agentFileBrowserTabsStorageKey,
     fileBrowserTabsStorageKey: stores.fileBrowserTabsStorageKey,
     useFileBrowserStore: stores.useFileBrowserStore,
     useFileBrowserStoreInstance: stores.useFileBrowserStoreInstance,
-    useWorkspaceContext: () => ({ workspaceId: "ws-1" }),
+    useWorkspaceContext: () => ({
+      workspaceId: "ws-1",
+      repos: [
+        {
+          name: "loomcli",
+          path: "/tmp/loomcli",
+          default_branch: "main",
+          remote: "origin",
+          groups: [],
+        },
+      ],
+      agents: mocks.agents,
+    }),
     useEventContext: () => ({
       state: "connected",
       reconnectAttempts: 0,
@@ -209,7 +208,7 @@ vi.mock("@/hooks", async () => {
       expanded: new Set([""]),
       treeData: new Map<string, FileEntry[]>([["", mocks.rootEntries]]),
       isLoading: false,
-      error: null,
+      error: mocks.scopedTreeError,
       filterText: "",
       debouncedFilterText: "",
       toggle: vi.fn(() => Promise.resolve()),
@@ -249,16 +248,36 @@ function entry(name: string, isDir = false): FileEntry {
   };
 }
 
+async function expandWorkspaceFiles(): Promise<void> {
+  fireEvent.click(
+    await screen.findByRole("button", { name: /^Workspace files$/ }),
+  );
+  await screen.findByLabelText("main.ts");
+}
+
+async function expandRepoRoot(): Promise<void> {
+  fireEvent.click(await screen.findByRole("button", { name: /^loomcli$/ }));
+  await screen.findByLabelText("main.ts");
+}
+
 describe("WorkspaceFileBrowser", () => {
   beforeEach(() => {
     localStorage.clear();
     vi.clearAllMocks();
-    mocks.dndOnDragEnd = undefined;
     mocks.rootEntries = [
       entry("main.ts"),
       entry("symbols.ts"),
       entry("large.txt"),
       entry("src", true),
+    ];
+    mocks.scopedTreeError = null;
+    mocks.agents = [
+      {
+        name: "atlas",
+        repos: ["loomcli"],
+        repo_groups: [],
+        cross_repo: false,
+      },
     ];
     mocks.fileMap = {
       "main.ts": {
@@ -330,6 +349,35 @@ describe("WorkspaceFileBrowser", () => {
       paths: ["src/recent.ts", "src/other.ts"],
       truncated: false,
     });
+    mocks.listFileCheckouts.mockResolvedValue({
+      checkouts: [
+        {
+          kind: "agent",
+          agent: "atlas",
+          repo: "loomcli",
+          exists: true,
+          change_count: 0,
+        },
+        {
+          kind: "repo",
+          repo: "loomcli",
+          exists: true,
+          change_count: 0,
+        },
+      ],
+    });
+    mocks.repairFileCheckout.mockResolvedValue({
+      repaired: true,
+      method: "repair",
+      message: "Repaired checkout",
+    });
+    mocks.listScopedDir.mockImplementation(
+      (_workspaceId: string, _scopeRef: unknown, path?: string) =>
+        Promise.resolve({
+          path: path ?? "",
+          entries: path ? [] : mocks.rootEntries,
+        }),
+    );
     mocks.searchScopedFiles.mockResolvedValue({
       results: [
         {
@@ -343,9 +391,8 @@ describe("WorkspaceFileBrowser", () => {
   });
 
   it("calls scoped CRUD APIs from tree context menu actions", async () => {
-    render(
-      <WorkspaceFileBrowser scopeRef={{ scope: "repo", target: "loomcli" }} />,
-    );
+    render(<WorkspaceFileBrowser mode="workspace" />);
+    await expandRepoRoot();
 
     fireEvent.contextMenu(screen.getByLabelText("main.ts"));
     fireEvent.click(screen.getByRole("menuitem", { name: "New File" }));
@@ -406,7 +453,8 @@ describe("WorkspaceFileBrowser", () => {
   });
 
   it("renders truncated files read-only with a banner", async () => {
-    render(<WorkspaceFileBrowser scopeRef={{ scope: "workspace" }} />);
+    render(<WorkspaceFileBrowser mode="workspace" />);
+    await expandWorkspaceFiles();
 
     fireEvent.click(screen.getByLabelText("large.txt"));
 
@@ -421,7 +469,8 @@ describe("WorkspaceFileBrowser", () => {
   });
 
   it("opens Quick Open with Cmd+P and Enter opens the highlighted file", async () => {
-    render(<WorkspaceFileBrowser scopeRef={{ scope: "workspace" }} />);
+    render(<WorkspaceFileBrowser mode="workspace" />);
+    await expandWorkspaceFiles();
 
     fireEvent.keyDown(window, { key: "p", metaKey: true });
 
@@ -445,8 +494,194 @@ describe("WorkspaceFileBrowser", () => {
     ).toBeInTheDocument();
   });
 
+  it("opens, edits, saves, and guards discarding a dirty file", async () => {
+    const confirmSpy = vi.spyOn(window, "confirm");
+    render(<WorkspaceFileBrowser mode="workspace" />);
+    await expandWorkspaceFiles();
+
+    fireEvent.click(screen.getByLabelText("main.ts"));
+    const editor = await screen.findByTestId("mock-codemirror");
+    expect(editor).toHaveValue("console.log('hi')\n");
+
+    fireEvent.change(editor, { target: { value: "changed\n" } });
+    expect(screen.getByRole("button", { name: "Save" })).toBeEnabled();
+
+    confirmSpy.mockReturnValueOnce(false);
+    fireEvent.click(screen.getByLabelText("symbols.ts"));
+    expect(confirmSpy).toHaveBeenCalledWith(
+      expect.stringContaining("Discard unsaved changes"),
+    );
+    expect(screen.getByTestId("mock-codemirror")).toHaveValue("changed\n");
+
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => {
+      expect(mocks.writeScopedFile).toHaveBeenCalledWith(
+        "ws-1",
+        { scope: "workspace" },
+        "main.ts",
+        "changed\n",
+      );
+    });
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
+    });
+
+    confirmSpy.mockRestore();
+  });
+
+  it("agent mode renders only the selected agent roots and scopes Changes", async () => {
+    mocks.listFileCheckouts.mockResolvedValue({
+      checkouts: [
+        {
+          kind: "agent",
+          agent: "atlas",
+          repo: "loomcli",
+          exists: true,
+          change_count: 2,
+        },
+        {
+          kind: "repo",
+          repo: "loomcli",
+          exists: true,
+          change_count: 3,
+        },
+      ],
+    });
+    mocks.gitStatusScoped.mockResolvedValue({ "main.ts": " M" });
+
+    render(<WorkspaceFileBrowser mode="agent" agentName="atlas" />);
+
+    expect(
+      await screen.findByRole("button", { name: /atlas.*loomcli/ }),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("Agents")).not.toBeInTheDocument();
+    expect(screen.queryByText("Repos")).not.toBeInTheDocument();
+    expect(screen.queryByText("Workspace files")).not.toBeInTheDocument();
+    expect(
+      await screen.findByRole("tab", { name: /Changes\s+2/ }),
+    ).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("tab", { name: /Changes\s+2/ }));
+    expect(await screen.findByText("atlas · loomcli · 2")).toBeInTheDocument();
+    expect(
+      screen.queryByText("loomcli · shared checkout · 3"),
+    ).not.toBeInTheDocument();
+  });
+
+  it("agent mode Quick Open uses agent checkout indexes with repo qualifiers", async () => {
+    mocks.indexScopedFiles.mockResolvedValue({
+      paths: ["src/agent-only.ts"],
+      truncated: false,
+    });
+
+    render(<WorkspaceFileBrowser mode="agent" agentName="atlas" />);
+
+    fireEvent.keyDown(window, { key: "p", metaKey: true });
+
+    await screen.findByRole("dialog", { name: "Quick open" });
+    await waitFor(() => {
+      expect(mocks.indexScopedFiles).toHaveBeenCalledWith("ws-1", {
+        scope: "agent",
+        target: "atlas",
+        repo: "loomcli",
+      });
+    });
+    expect(screen.getByText("atlas · loomcli · src")).toBeInTheDocument();
+    expect(screen.getByText("agent-only.ts")).toBeInTheDocument();
+    expect(mocks.indexScopedFiles).not.toHaveBeenCalledWith("ws-1", {
+      scope: "workspace",
+    });
+  });
+
+  it("keeps open file tabs scoped to the selected agent", async () => {
+    mocks.agents = [
+      {
+        name: "atlas",
+        repos: ["loomcli"],
+        repo_groups: [],
+        cross_repo: false,
+      },
+      {
+        name: "nova",
+        repos: ["loomcli"],
+        repo_groups: [],
+        cross_repo: false,
+      },
+    ];
+    mocks.listFileCheckouts.mockResolvedValue({
+      checkouts: [
+        {
+          kind: "agent",
+          agent: "atlas",
+          repo: "loomcli",
+          exists: true,
+          change_count: 0,
+        },
+        {
+          kind: "agent",
+          agent: "nova",
+          repo: "loomcli",
+          exists: true,
+          change_count: 0,
+        },
+      ],
+    });
+
+    const { rerender } = render(
+      <WorkspaceFileBrowser mode="agent" agentName="atlas" />,
+    );
+    fireEvent.click(
+      await screen.findByRole("button", { name: /atlas.*loomcli/ }),
+    );
+    fireEvent.click(await screen.findByLabelText("main.ts"));
+    expect(
+      await screen.findByRole("tab", { name: "main.ts" }),
+    ).toBeInTheDocument();
+    expect(
+      localStorage.getItem("loom:ws-1:file-browser-tabs:v3:agent:atlas"),
+    ).toContain("main.ts");
+    expect(localStorage.getItem("loom:ws-1:file-browser-tabs:v3")).toBeNull();
+
+    rerender(<WorkspaceFileBrowser mode="agent" agentName="nova" />);
+
+    expect(
+      await screen.findByRole("button", { name: /nova.*loomcli/ }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("tab", { name: "main.ts" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("does not open global file shortcuts when inactive", async () => {
+    render(
+      <WorkspaceFileBrowser mode="agent" agentName="atlas" isActive={false} />,
+    );
+
+    fireEvent.keyDown(window, { key: "p", metaKey: true });
+
+    await waitFor(() => {
+      expect(
+        screen.queryByRole("dialog", { name: "Quick open" }),
+      ).not.toBeInTheDocument();
+    });
+    expect(mocks.indexScopedFiles).not.toHaveBeenCalled();
+  });
+
+  it("renders in compact layout at narrow embedded widths", async () => {
+    const { container } = render(
+      <div style={{ width: 500 }}>
+        <WorkspaceFileBrowser mode="agent" agentName="atlas" />
+      </div>,
+    );
+
+    await waitFor(() => {
+      expect(container.querySelector("[data-compact='true']")).toBeTruthy();
+    });
+  });
+
   it("applies search result lines after newly opened file content loads", async () => {
-    render(<WorkspaceFileBrowser scopeRef={{ scope: "workspace" }} />);
+    render(<WorkspaceFileBrowser mode="workspace" />);
+    await expandWorkspaceFiles();
 
     fireEvent.keyDown(window, { key: "f", metaKey: true, shiftKey: true });
     fireEvent.change(screen.getByLabelText("Search files"), {
@@ -476,7 +711,8 @@ describe("WorkspaceFileBrowser", () => {
   });
 
   it("previews replacements and writes each affected file through scoped PUT", async () => {
-    render(<WorkspaceFileBrowser scopeRef={{ scope: "workspace" }} />);
+    render(<WorkspaceFileBrowser mode="workspace" />);
+    await expandWorkspaceFiles();
 
     fireEvent.keyDown(window, { key: "f", metaKey: true, shiftKey: true });
     fireEvent.change(screen.getByLabelText("Search files"), {
@@ -506,16 +742,15 @@ describe("WorkspaceFileBrowser", () => {
     });
   });
 
-  it("moves a dragged tree node onto a folder and guards self-drop", async () => {
-    render(<WorkspaceFileBrowser scopeRef={{ scope: "workspace" }} />);
+  it("moves a tree node through Move to... and guards self-targets", async () => {
+    render(<WorkspaceFileBrowser mode="workspace" />);
+    await expandWorkspaceFiles();
 
-    await waitFor(() => expect(mocks.dndOnDragEnd).toBeDefined());
-    mocks.dndOnDragEnd?.({
-      active: {
-        data: { current: { type: "file-tree-node", path: "main.ts" } },
-      },
-      over: { data: { current: { type: "file-tree-folder", path: "src" } } },
-    });
+    fireEvent.contextMenu(screen.getByLabelText("main.ts"));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Move to..." }));
+    const dialog = await screen.findByRole("dialog", { name: /move to/i });
+    fireEvent.click(within(dialog).getByRole("button", { name: "src" }));
+    fireEvent.click(within(dialog).getByRole("button", { name: "Move" }));
 
     await waitFor(() => {
       expect(mocks.moveScopedPath).toHaveBeenCalledWith(
@@ -528,16 +763,21 @@ describe("WorkspaceFileBrowser", () => {
     });
 
     mocks.moveScopedPath.mockClear();
-    mocks.dndOnDragEnd?.({
-      active: { data: { current: { type: "file-tree-node", path: "src" } } },
-      over: { data: { current: { type: "file-tree-folder", path: "src" } } },
+    fireEvent.contextMenu(screen.getByLabelText("src"));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Move to..." }));
+    const selfDialog = await screen.findByRole("dialog", {
+      name: /move to/i,
     });
 
+    expect(
+      within(selfDialog).getByRole("button", { name: "src" }),
+    ).toBeDisabled();
     expect(mocks.moveScopedPath).not.toHaveBeenCalled();
   });
 
   it("opens the in-file symbol palette with Cmd+Shift+O and jumps to the symbol line", async () => {
-    render(<WorkspaceFileBrowser scopeRef={{ scope: "workspace" }} />);
+    render(<WorkspaceFileBrowser mode="workspace" />);
+    await expandWorkspaceFiles();
 
     fireEvent.click(screen.getByLabelText("symbols.ts"));
     await screen.findByDisplayValue(/function jumpTarget/);
@@ -556,32 +796,495 @@ describe("WorkspaceFileBrowser", () => {
     });
   });
 
-  it("opens a unified diff editor from the SCM panel", async () => {
+  it("toggles the Changes lens, aggregates checkout counts, and persists per workspace", async () => {
+    mocks.listFileCheckouts.mockResolvedValue({
+      checkouts: [
+        {
+          kind: "agent",
+          agent: "atlas",
+          repo: "loomcli",
+          exists: true,
+          change_count: 2,
+        },
+        {
+          kind: "repo",
+          repo: "loomcli",
+          exists: true,
+          change_count: 3,
+        },
+      ],
+    });
     mocks.gitStatusScoped.mockResolvedValue({ "main.ts": " M" });
 
-    render(<WorkspaceFileBrowser scopeRef={{ scope: "workspace" }} />);
+    render(<WorkspaceFileBrowser mode="workspace" />);
+
+    const changesTab = await screen.findByRole("tab", {
+      name: /Changes\s+5/,
+    });
+    expect(screen.queryByText("Source Control")).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /^Workspace files$/ }),
+    ).toBeInTheDocument();
+
+    fireEvent.click(changesTab);
+
+    expect(
+      screen.queryByRole("button", { name: /^Workspace files$/ }),
+    ).not.toBeInTheDocument();
+    expect(await screen.findByText("atlas · loomcli · 2")).toBeInTheDocument();
+    expect(
+      screen.getByText("loomcli · shared checkout · 3"),
+    ).toBeInTheDocument();
+    expect(localStorage.getItem("loom:ws-1:file-explorer-lens")).toBe(
+      "changes",
+    );
+  });
+
+  it("skips unavailable checkouts in Changes counts and shows a notice", async () => {
+    mocks.listFileCheckouts.mockResolvedValue({
+      checkouts: [
+        {
+          kind: "repo",
+          repo: "loomcli",
+          exists: true,
+          change_count: 2,
+        },
+        {
+          kind: "agent",
+          agent: "atlas",
+          repo: "loomcli",
+          exists: true,
+          change_count: 3,
+          status_error: true,
+        },
+        {
+          kind: "repo",
+          repo: "missing",
+          exists: false,
+          change_count: 5,
+        },
+      ],
+    });
+    mocks.gitStatusScoped.mockResolvedValue({ "main.ts": " M" });
+
+    render(<WorkspaceFileBrowser mode="workspace" />);
+
+    fireEvent.click(await screen.findByRole("tab", { name: /Changes\s+2/ }));
+
+    expect(
+      await screen.findByText("atlas · loomcli unavailable"),
+    ).toBeVisible();
+    expect(
+      screen.getByText("loomcli · shared checkout · 2"),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("atlas · loomcli · 3")).not.toBeInTheDocument();
+  });
+
+  it("shows an unavailable repair chip for status_error checkouts and still expands files", async () => {
+    mocks.listFileCheckouts.mockResolvedValue({
+      checkouts: [
+        {
+          kind: "agent",
+          agent: "atlas",
+          repo: "loomcli",
+          exists: true,
+          change_count: 0,
+          status_error: true,
+        },
+      ],
+    });
+
+    render(<WorkspaceFileBrowser mode="agent" agentName="atlas" />);
+
+    const repairButton = await screen.findByRole("button", {
+      name: /Repair checkout for atlas loomcli: Git status unavailable/,
+    });
+    expect(repairButton).toHaveTextContent("Unavailable");
+
+    fireEvent.click(await screen.findByRole("button", { name: /^atlas/ }));
+
+    expect(await screen.findByLabelText("main.ts")).toBeInTheDocument();
+    expect(
+      screen.queryByText(/agent worktree .* not found/i),
+    ).not.toBeInTheDocument();
+  });
+
+  it("expands exists:false checkouts to a friendly unavailable state", async () => {
+    mocks.listFileCheckouts.mockResolvedValue({
+      checkouts: [
+        {
+          kind: "agent",
+          agent: "atlas",
+          repo: "loomcli",
+          exists: false,
+          change_count: 0,
+        },
+      ],
+    });
+
+    render(<WorkspaceFileBrowser mode="agent" agentName="atlas" />);
+
+    expect(
+      await screen.findByRole("button", {
+        name: /Repair checkout for atlas loomcli: This checkout is not checked out/,
+      }),
+    ).toHaveTextContent("Not checked out");
+    expect(
+      screen.queryByText("This checkout is not checked out"),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByText(/agent worktree .* not found/i),
+    ).not.toBeInTheDocument();
+  });
+
+  it("renders the unavailable chip as a keyboard-focusable repair button", async () => {
+    mocks.listFileCheckouts.mockResolvedValue({
+      checkouts: [
+        {
+          kind: "agent",
+          agent: "atlas",
+          repo: "loomcli",
+          exists: true,
+          change_count: 0,
+          status_error: true,
+        },
+      ],
+    });
+
+    render(<WorkspaceFileBrowser mode="agent" agentName="atlas" />);
+
+    const repairButton = await screen.findByRole("button", {
+      name: /Repair checkout for atlas loomcli: Git status unavailable/,
+    });
+    repairButton.focus();
+    expect(repairButton).toHaveFocus();
+  });
+
+  it("repairs a status_error checkout from the unavailable chip", async () => {
+    mocks.listFileCheckouts.mockResolvedValue({
+      checkouts: [
+        {
+          kind: "agent",
+          agent: "atlas",
+          repo: "loomcli",
+          exists: true,
+          change_count: 0,
+          status_error: true,
+        },
+      ],
+    });
+
+    render(<WorkspaceFileBrowser mode="agent" agentName="atlas" />);
 
     fireEvent.click(
       await screen.findByRole("button", {
-        name: "Open diff for main.ts (M)",
+        name: /Repair checkout for atlas loomcli: Git status unavailable/,
+      }),
+    );
+
+    await waitFor(() =>
+      expect(mocks.repairFileCheckout).toHaveBeenCalledWith("ws-1", {
+        scope: "agent",
+        target: "atlas",
+        repo: "loomcli",
+        force: false,
+      }),
+    );
+    await waitFor(() =>
+      expect(mocks.showToast).toHaveBeenCalledWith("Repaired checkout", {
+        type: "success",
+      }),
+    );
+    expect(mocks.listFileCheckouts.mock.calls.length).toBeGreaterThan(1);
+    expect(mocks.gitStatusScoped).toHaveBeenCalled();
+  });
+
+  it("prompts for force and retries checkout repair with force", async () => {
+    mocks.listFileCheckouts.mockResolvedValue({
+      checkouts: [
+        {
+          kind: "agent",
+          agent: "atlas",
+          repo: "loomcli",
+          exists: true,
+          change_count: 0,
+          status_error: true,
+        },
+      ],
+    });
+    mocks.repairFileCheckout
+      .mockResolvedValueOnce({
+        repaired: false,
+        method: "none",
+        requires_force: true,
+        message: "recreate required",
+      })
+      .mockResolvedValueOnce({
+        repaired: true,
+        method: "recreate",
+        backup_path: "/tmp/atlas.broken-123",
+        message: "recreated",
+      });
+
+    render(<WorkspaceFileBrowser mode="agent" agentName="atlas" />);
+
+    fireEvent.click(
+      await screen.findByRole("button", {
+        name: /Repair checkout for atlas loomcli: Git status unavailable/,
+      }),
+    );
+
+    expect(await screen.findByRole("dialog")).toHaveTextContent(
+      "timestamped backup folder",
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Recreate" }));
+
+    await waitFor(() =>
+      expect(mocks.repairFileCheckout).toHaveBeenCalledTimes(2),
+    );
+    expect(mocks.repairFileCheckout).toHaveBeenNthCalledWith(1, "ws-1", {
+      scope: "agent",
+      target: "atlas",
+      repo: "loomcli",
+      force: false,
+    });
+    expect(mocks.repairFileCheckout).toHaveBeenNthCalledWith(2, "ws-1", {
+      scope: "agent",
+      target: "atlas",
+      repo: "loomcli",
+      force: true,
+    });
+    await waitFor(() =>
+      expect(mocks.showToast).toHaveBeenCalledWith("recreated", {
+        type: "success",
+      }),
+    );
+  });
+
+  it("offers repair from the checkout row context menu", async () => {
+    mocks.listFileCheckouts.mockResolvedValue({
+      checkouts: [
+        {
+          kind: "agent",
+          agent: "atlas",
+          repo: "loomcli",
+          exists: true,
+          change_count: 0,
+          status_error: true,
+        },
+      ],
+    });
+
+    render(<WorkspaceFileBrowser mode="agent" agentName="atlas" />);
+
+    fireEvent.contextMenu(
+      await screen.findByRole("button", { name: /^atlas/ }),
+    );
+    fireEvent.click(
+      await screen.findByRole("menuitem", { name: "Repair checkout" }),
+    );
+
+    await waitFor(() => expect(mocks.repairFileCheckout).toHaveBeenCalled());
+  });
+
+  it("shows an inline repair error without dumping backend text into the tree", async () => {
+    mocks.listFileCheckouts.mockResolvedValue({
+      checkouts: [
+        {
+          kind: "agent",
+          agent: "atlas",
+          repo: "loomcli",
+          exists: true,
+          change_count: 0,
+          status_error: true,
+        },
+      ],
+    });
+    mocks.repairFileCheckout.mockRejectedValueOnce(
+      new Error("fatal: raw backend stack"),
+    );
+
+    render(<WorkspaceFileBrowser mode="agent" agentName="atlas" />);
+
+    fireEvent.click(
+      await screen.findByRole("button", {
+        name: /Repair checkout for atlas loomcli: Git status unavailable/,
+      }),
+    );
+
+    expect(
+      await screen.findByText("Repair failed for atlas loomcli."),
+    ).toBeVisible();
+    expect(screen.queryByText(/raw backend stack/)).not.toBeInTheDocument();
+  });
+
+  it("expands status_error checkouts even when repair is available", async () => {
+    mocks.listFileCheckouts.mockResolvedValue({
+      checkouts: [
+        {
+          kind: "agent",
+          agent: "atlas",
+          repo: "loomcli",
+          exists: true,
+          change_count: 0,
+          status_error: true,
+        },
+      ],
+    });
+
+    render(<WorkspaceFileBrowser mode="agent" agentName="atlas" />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /^atlas/ }));
+
+    expect(await screen.findByLabelText("main.ts")).toBeInTheDocument();
+    expect(
+      screen.queryByText(/agent worktree .* not found/i),
+    ).not.toBeInTheDocument();
+  });
+
+  it("keeps missing checkouts visually distinct from git status errors", async () => {
+    mocks.listFileCheckouts.mockResolvedValue({
+      checkouts: [
+        {
+          kind: "agent",
+          agent: "atlas",
+          repo: "loomcli",
+          exists: false,
+          change_count: 0,
+        },
+      ],
+    });
+
+    render(<WorkspaceFileBrowser mode="agent" agentName="atlas" />);
+
+    expect(
+      await screen.findByRole("button", {
+        name: /This checkout is not checked out/,
+      }),
+    ).toBeVisible();
+    expect(screen.queryByLabelText("main.ts")).not.toBeInTheDocument();
+    expect(screen.queryByText("Unavailable")).not.toBeInTheDocument();
+  });
+
+  it("maps tree list failures to the friendly unavailable state", async () => {
+    mocks.scopedTreeError = 'agent worktree "atlas" not found';
+
+    render(<WorkspaceFileBrowser mode="agent" agentName="atlas" />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /^atlas/ }));
+
+    expect(
+      await screen.findByText("This checkout is not checked out"),
+    ).toBeVisible();
+    expect(screen.queryByText('agent worktree "atlas" not found')).toBeNull();
+  });
+
+  it("shows an all-zero Changes empty state", async () => {
+    render(<WorkspaceFileBrowser mode="workspace" />);
+
+    fireEvent.click(await screen.findByRole("tab", { name: /Changes\s+0/ }));
+
+    expect(
+      await screen.findByText("No uncommitted changes across this workspace."),
+    ).toBeInTheDocument();
+  });
+
+  it("opens a checkout-qualified unified diff from the Changes lens", async () => {
+    mocks.fileMap["src/main.ts"] = {
+      path: "src/main.ts",
+      content: "console.log('changed')\n",
+      size: 23,
+      binary: false,
+    };
+    mocks.listFileCheckouts.mockResolvedValue({
+      checkouts: [
+        {
+          kind: "agent",
+          agent: "atlas",
+          repo: "loomcli",
+          exists: true,
+          change_count: 1,
+        },
+        {
+          kind: "repo",
+          repo: "loomcli",
+          exists: true,
+          change_count: 0,
+        },
+      ],
+    });
+    mocks.gitStatusScoped.mockImplementation(
+      (_workspaceId: string, ref: { scope: string }) =>
+        Promise.resolve(ref.scope === "agent" ? { "src/main.ts": " M" } : {}),
+    );
+
+    render(<WorkspaceFileBrowser mode="workspace" />);
+
+    fireEvent.click(await screen.findByRole("tab", { name: /Changes\s+1/ }));
+    expect(await screen.findByText("Modified")).toBeInTheDocument();
+    expect(screen.getByText("src")).toBeInTheDocument();
+    fireEvent.click(
+      await screen.findByRole("button", {
+        name: "Open diff for src/main.ts (Modified)",
       }),
     );
 
     await waitFor(() => {
       expect(mocks.diffScopedFile).toHaveBeenCalledWith(
         "ws-1",
-        { scope: "workspace" },
-        "main.ts",
+        { scope: "agent", target: "atlas", repo: "loomcli" },
+        "src/main.ts",
         "HEAD",
         undefined,
       );
     });
+    expect(screen.getByText("atlas · loomcli")).toBeInTheDocument();
     expect(await screen.findByText("-old")).toBeInTheDocument();
     expect(screen.getByText("+new")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Open file" }));
+    expect(
+      await screen.findByDisplayValue(/console\.log\('changed'\)/),
+    ).toBeInTheDocument();
+  });
+
+  it("keeps deleted files diff-only in the Changes lens", async () => {
+    mocks.listFileCheckouts.mockResolvedValue({
+      checkouts: [
+        {
+          kind: "repo",
+          repo: "loomcli",
+          exists: true,
+          change_count: 1,
+        },
+      ],
+    });
+    mocks.gitStatusScoped.mockResolvedValue({ "gone.ts": " D" });
+
+    render(<WorkspaceFileBrowser mode="workspace" />);
+
+    fireEvent.click(await screen.findByRole("tab", { name: /Changes\s+1/ }));
+    fireEvent.click(
+      await screen.findByRole("button", {
+        name: "Open diff for gone.ts (Deleted)",
+      }),
+    );
+
+    await waitFor(() => {
+      expect(mocks.diffScopedFile).toHaveBeenCalledWith(
+        "ws-1",
+        { scope: "repo", target: "loomcli" },
+        "gone.ts",
+        "HEAD",
+        undefined,
+      );
+    });
+    expect(screen.queryByRole("button", { name: "Open file" })).toBeNull();
   });
 
   it("toggles blame and opens the clicked commit diff", async () => {
-    render(<WorkspaceFileBrowser scopeRef={{ scope: "workspace" }} />);
+    render(<WorkspaceFileBrowser mode="workspace" />);
+    await expandWorkspaceFiles();
 
     fireEvent.click(screen.getByLabelText("main.ts"));
     await screen.findByDisplayValue(/console\.log/);
@@ -610,7 +1313,46 @@ describe("WorkspaceFileBrowser", () => {
     });
   });
 
-  it("shows Timeline commits and saves, and restores a browser save", async () => {
+  it("toggles the History panel and follows active tab changes", async () => {
+    mocks.historyScopedFile.mockImplementation(
+      (_workspaceId: string, _ref: unknown, path: string) =>
+        Promise.resolve({
+          path,
+          entries: [
+            {
+              kind: "commit",
+              sha: path === "symbols.ts" ? "feed123" : "def5678",
+              author: "Test User",
+              time: "2026-01-02T00:00:00Z",
+              summary: `${path} commit`,
+            },
+          ],
+        }),
+    );
+
+    render(<WorkspaceFileBrowser mode="workspace" />);
+    await expandWorkspaceFiles();
+
+    fireEvent.click(screen.getByLabelText("main.ts"));
+    await screen.findByDisplayValue(/console\.log/);
+    fireEvent.click(screen.getByRole("button", { name: "History" }));
+
+    expect(await screen.findByLabelText("File history")).toBeInTheDocument();
+    expect(screen.getByText("main.ts commit")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByLabelText("symbols.ts"));
+    expect(await screen.findByText("symbols.ts commit")).toBeInTheDocument();
+    expect(
+      within(screen.getByLabelText("File history")).getByText("symbols.ts"),
+    ).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "History" }));
+    await waitFor(() => {
+      expect(screen.queryByLabelText("File history")).not.toBeInTheDocument();
+    });
+  });
+
+  it("opens commit diff and read-only file-at-rev from History", async () => {
     mocks.historyScopedFile.mockResolvedValue({
       path: "main.ts",
       entries: [
@@ -621,58 +1363,220 @@ describe("WorkspaceFileBrowser", () => {
           time: "2026-01-02T00:00:00Z",
           summary: "commit summary",
         },
+      ],
+    });
+
+    render(<WorkspaceFileBrowser mode="workspace" />);
+    await expandWorkspaceFiles();
+
+    fireEvent.click(screen.getByLabelText("main.ts"));
+    fireEvent.click(await screen.findByRole("button", { name: "History" }));
+    fireEvent.click(await screen.findByRole("button", { name: "View diff" }));
+
+    await waitFor(() => {
+      expect(mocks.diffScopedFile).toHaveBeenCalledWith(
+        "ws-1",
+        { scope: "workspace" },
+        "main.ts",
+        "def5678^",
+        "def5678",
+      );
+    });
+    expect(
+      screen.getByText("Workspace files · commit summary"),
+    ).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Close diff" }));
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Open at commit" }),
+    );
+
+    await waitFor(() => {
+      expect(mocks.readScopedFile).toHaveBeenCalledWith(
+        "ws-1",
+        { scope: "workspace" },
+        "main.ts",
+        "def5678",
+      );
+    });
+    expect(
+      await screen.findByText("Workspace files · def5678"),
+    ).toBeInTheDocument();
+  });
+
+  it("collapses consecutive History saves and restores an expanded save", async () => {
+    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
+    mocks.historyScopedFile.mockResolvedValue({
+      path: "main.ts",
+      entries: [
         {
           kind: "save",
           id: "save-1",
           author: "browser",
           time: "2026-01-03T00:00:00Z",
           summary: "Browser save",
-          content: "previous\n",
+          content: "previous 1\n",
+        },
+        {
+          kind: "save",
+          id: "save-2",
+          author: "browser",
+          time: "2026-01-03T00:01:00Z",
+          summary: "Browser save",
+          content: "previous 2\n",
         },
       ],
     });
 
-    render(<WorkspaceFileBrowser scopeRef={{ scope: "workspace" }} />);
+    render(<WorkspaceFileBrowser mode="workspace" />);
+    await expandWorkspaceFiles();
 
     fireEvent.click(screen.getByLabelText("main.ts"));
-    expect(await screen.findByText("commit summary")).toBeInTheDocument();
-    fireEvent.click(screen.getByText("Browser save"));
+    fireEvent.click(await screen.findByRole("button", { name: "History" }));
+    fireEvent.click(await screen.findByRole("button", { name: /2 saves/ }));
+    const restoreButtons = await screen.findAllByRole("button", {
+      name: /Restore save from/,
+    });
+    fireEvent.click(restoreButtons[0]!);
 
+    await waitFor(() => {
+      expect(confirmSpy).toHaveBeenCalledWith(
+        "Restore Workspace files: main.ts?",
+      );
+      expect(mocks.writeScopedFile).toHaveBeenCalledWith(
+        "ws-1",
+        { scope: "workspace" },
+        "main.ts",
+        "previous 1\n",
+      );
+    });
+    confirmSpy.mockRestore();
+  });
+
+  it("refreshes the open editor buffer after restoring a History save", async () => {
+    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
+    mocks.historyScopedFile.mockResolvedValue({
+      path: "main.ts",
+      entries: [
+        {
+          kind: "save",
+          id: "save-restore",
+          author: "browser",
+          time: "2026-01-03T00:00:00Z",
+          summary: "Browser save",
+          content: "restored from history\n",
+        },
+      ],
+    });
+    mocks.writeScopedFile.mockImplementationOnce(
+      (_workspaceId: string, _ref: unknown, path: string, content: string) => {
+        mocks.fileMap[path] = {
+          path,
+          content,
+          size: content.length,
+          binary: false,
+        };
+        return Promise.resolve();
+      },
+    );
+
+    render(<WorkspaceFileBrowser mode="workspace" />);
+    await expandWorkspaceFiles();
+
+    fireEvent.click(screen.getByLabelText("main.ts"));
     expect(
-      await screen.findByRole("button", { name: "Restore" }),
+      await screen.findByDisplayValue(/console\.log\('hi'\)/),
     ).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Restore" }));
+    fireEvent.click(await screen.findByRole("button", { name: "History" }));
+    fireEvent.click(
+      await screen.findByRole("button", { name: /Restore save from/ }),
+    );
 
     await waitFor(() => {
       expect(mocks.writeScopedFile).toHaveBeenCalledWith(
         "ws-1",
         { scope: "workspace" },
         "main.ts",
-        "previous\n",
+        "restored from history\n",
       );
     });
+    await waitFor(() => {
+      expect(screen.getByTestId("mock-codemirror")).toHaveValue(
+        "restored from history\n",
+      );
+    });
+    expect(mocks.showToast).toHaveBeenCalledWith("Restored main.ts", {
+      type: "success",
+    });
+    confirmSpy.mockRestore();
   });
 
-  it("groups SCM changes by checkout and status", async () => {
-    mocks.gitStatusScoped.mockResolvedValue({
-      "repo-a/src/a.ts": " M",
-      "repo-a/staged.ts": "A ",
-      "repo-a/conflict.txt": "UU",
-      "worktrees/repo-a/agent-a/b.ts": "??",
+  it("warns that dirty open editor buffers will be replaced before restoring", async () => {
+    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(false);
+    mocks.historyScopedFile.mockResolvedValue({
+      path: "main.ts",
+      entries: [
+        {
+          kind: "save",
+          id: "save-dirty",
+          author: "browser",
+          time: "2026-01-03T00:00:00Z",
+          summary: "Browser save",
+          content: "previous content\n",
+        },
+      ],
     });
 
-    render(<WorkspaceFileBrowser scopeRef={{ scope: "workspace" }} />);
+    render(<WorkspaceFileBrowser mode="workspace" />);
+    await expandWorkspaceFiles();
 
-    expect(await screen.findByText("repo-a")).toBeInTheDocument();
-    expect(screen.getByText("worktrees/repo-a/agent-a")).toBeInTheDocument();
-    expect(screen.getByText("Merge conflicts")).toBeInTheDocument();
-    expect(screen.getByText("Staged")).toBeInTheDocument();
-    expect(screen.getByText("Changes")).toBeInTheDocument();
-    expect(screen.getByText("Untracked")).toBeInTheDocument();
+    fireEvent.click(screen.getByLabelText("main.ts"));
+    const editor = await screen.findByTestId("mock-codemirror");
+    fireEvent.change(editor, { target: { value: "unsaved edits\n" } });
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Save" })).toBeEnabled();
+    });
+    fireEvent.click(await screen.findByRole("button", { name: "History" }));
+    fireEvent.click(
+      await screen.findByRole("button", { name: /Restore save from/ }),
+    );
+
+    await waitFor(() => {
+      expect(confirmSpy).toHaveBeenCalledWith(
+        expect.stringContaining(
+          "Unsaved edits in the open tab will be replaced.",
+        ),
+      );
+    });
+    expect(mocks.writeScopedFile).not.toHaveBeenCalled();
+    confirmSpy.mockRestore();
+  });
+
+  it("does not render the old Timeline sidebar section", async () => {
+    render(<WorkspaceFileBrowser mode="workspace" />);
+    await expandWorkspaceFiles();
+
+    expect(screen.queryByText("Timeline")).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /^Workspace files$/ }),
+    ).toBeInTheDocument();
+  });
+
+  it("shows an empty History state when the open panel has no file subject", async () => {
+    render(<WorkspaceFileBrowser mode="workspace" />);
+    await expandWorkspaceFiles();
+
+    fireEvent.click(screen.getByLabelText("main.ts"));
+    fireEvent.click(await screen.findByRole("button", { name: "History" }));
+    expect(await screen.findByLabelText("File history")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Close main.ts" }));
+
+    expect(await screen.findByText("No file selected.")).toBeInTheDocument();
   });
 
   it("passes quick-diff gutter marks from HEAD to the visible editor", async () => {
-    render(<WorkspaceFileBrowser scopeRef={{ scope: "workspace" }} />);
+    render(<WorkspaceFileBrowser mode="workspace" />);
+    await expandWorkspaceFiles();
 
     fireEvent.click(screen.getByLabelText("main.ts"));
     const editor = await screen.findByTestId("mock-codemirror");

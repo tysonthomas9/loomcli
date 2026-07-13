@@ -9,18 +9,18 @@ import { createPortal } from "react-dom";
 
 import { SearchInput } from "@/components/search";
 
-import { rankQuickOpenPaths } from "./quickOpen";
+import { rankQuickOpenItems, type QuickOpenItem } from "./quickOpen";
 import styles from "./FileExplorer.module.css";
 
 interface QuickOpenPaletteProps {
   isOpen: boolean;
-  paths: string[];
-  mru: string[];
+  items: QuickOpenItem[];
+  mruKeys: string[];
   isLoading: boolean;
   error: string | null;
   truncated: boolean;
   onClose: () => void;
-  onOpen: (path: string) => void;
+  onOpen: (item: QuickOpenItem) => void;
 }
 
 function dirname(path: string): string {
@@ -34,8 +34,8 @@ function basename(path: string): string {
 
 export function QuickOpenPalette({
   isOpen,
-  paths,
-  mru,
+  items,
+  mruKeys,
   isLoading,
   error,
   truncated,
@@ -47,8 +47,8 @@ export function QuickOpenPalette({
   const resultsRef = useRef<HTMLDivElement>(null);
 
   const matches = useMemo(
-    () => rankQuickOpenPaths(paths, query, mru),
-    [paths, query, mru],
+    () => rankQuickOpenItems(items, query, mruKeys),
+    [items, query, mruKeys],
   );
 
   useEffect(() => {
@@ -76,7 +76,7 @@ export function QuickOpenPalette({
   const openHighlighted = () => {
     const match = matches[highlightIndex];
     if (!match) return;
-    onOpen(match.path);
+    onOpen(match.item);
     onClose();
   };
 
@@ -135,22 +135,25 @@ export function QuickOpenPalette({
           ) : (
             matches.map((match, index) => (
               <button
-                key={match.path}
+                key={match.item.id}
                 type="button"
                 data-quick-open-item
                 className={styles.paletteItem}
                 data-highlighted={index === highlightIndex || undefined}
                 onClick={() => {
-                  onOpen(match.path);
+                  onOpen(match.item);
                   onClose();
                 }}
                 onMouseEnter={() => setHighlightIndex(index)}
               >
                 <span className={styles.paletteName}>
-                  {basename(match.path)}
+                  {basename(match.item.path)}
                 </span>
                 <span className={styles.palettePath}>
-                  {dirname(match.path)}
+                  {match.item.checkoutLabel}
+                  {dirname(match.item.path)
+                    ? ` · ${dirname(match.item.path)}`
+                    : ""}
                 </span>
               </button>
             ))

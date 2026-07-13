@@ -58,6 +58,7 @@ export type {
 } from "./workspaceStore";
 
 export {
+  agentFileBrowserTabsStorageKey,
   createFileBrowserStore,
   fileBrowserTabsStorageKey,
   loadFileBrowserTabs,
@@ -73,5 +74,6 @@ export type {
   FileBrowserTab,
   FileBrowserGroup,
   PersistedFileBrowserTabsV2,
+  PersistedFileBrowserTabsV3,
   FileBrowserStoreConfig,
 } from "./fileBrowserStore";

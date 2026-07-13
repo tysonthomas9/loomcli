@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/tysonthomas9/loomcli/internal/gitbranch"
 )
 
 func TestEnsureGitWorktreeFromBranchUsesFetchedDefaultBranch(t *testing.T) {
@@ -92,6 +94,40 @@ func TestEnsureGitWorktreeFromBranchFallsBackToLocalDefaultBranch(t *testing.T) 
 	}
 }
 
+func TestEnsureGitWorktreeFromBranchRecoversCorruptBranchRef(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+
+	root := t.TempDir()
+	repo := filepath.Join(root, "repo")
+	target := filepath.Join(root, "worktrees", "worker")
+
+	git(t, "", "init", "-b", "main", repo)
+	git(t, repo, "config", "user.name", "Test User")
+	git(t, repo, "config", "user.email", "test@example.test")
+	writeFile(t, filepath.Join(repo, "base.txt"), "main\n")
+	git(t, repo, "add", "base.txt")
+	git(t, repo, "commit", "-m", "base")
+	git(t, repo, "checkout", "-b", "worker")
+	writeFile(t, filepath.Join(repo, "worker.txt"), "worker\n")
+	git(t, repo, "add", "worker.txt")
+	git(t, repo, "commit", "-m", "worker")
+	workerSHA := gitOut(t, repo, "rev-parse", "HEAD")
+	git(t, repo, "checkout", "main")
+	corruptLocalBranchRef(t, repo, "worker")
+
+	if err := EnsureGitWorktreeFromBranch(repo, target, "worker", "", "main"); err != nil {
+		t.Fatalf("EnsureGitWorktreeFromBranch() error = %v", err)
+	}
+	if got := gitOut(t, target, "rev-parse", "HEAD"); got != workerSHA {
+		t.Fatalf("worktree HEAD = %s, want recovered reflog SHA %s", got, workerSHA)
+	}
+	if got := gitOut(t, target, "branch", "--show-current"); got != "worker" {
+		t.Fatalf("worktree branch = %q, want worker", got)
+	}
+}
+
 func TestGitRemoteURL(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git not available")
@@ -129,6 +165,34 @@ func git(t *testing.T, dir string, args ...string) {
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("git %s failed: %v\n%s", strings.Join(args, " "), err, strings.TrimSpace(string(out)))
+	}
+}
+
+func gitOut(t *testing.T, dir string, args ...string) string {
+	t.Helper()
+	cmd := exec.Command("git", args...) //nolint:norawexec,gosec // Test helper creates real git repos.
+	if dir != "" {
+		cmd.Dir = dir
+	}
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %s failed: %v\n%s", strings.Join(args, " "), err, strings.TrimSpace(string(out)))
+	}
+	return strings.TrimSpace(string(out))
+}
+
+func corruptLocalBranchRef(t *testing.T, repoPath, branch string) {
+	t.Helper()
+	common, err := gitbranch.CommonDir(repoPath)
+	if err != nil {
+		t.Fatalf("git common dir: %v", err)
+	}
+	refPath := filepath.Join(common, "refs", "heads", filepath.FromSlash(branch))
+	if err := os.MkdirAll(filepath.Dir(refPath), 0o755); err != nil {
+		t.Fatalf("mkdir branch ref parent: %v", err)
+	}
+	if err := os.WriteFile(refPath, nil, 0o644); err != nil {
+		t.Fatalf("corrupt branch ref: %v", err)
 	}
 }
 

@@ -59,26 +59,48 @@ type recordingNavigationFileService struct {
 	indexWS      string
 	indexScope   service.FileScope
 	indexTarget  string
+	indexRepo    string
 	searchWS     string
 	searchScope  service.FileScope
 	searchTarget string
+	searchRepo   string
 	searchReq    service.FileSearchRequest
 	statusWS     string
 	statusScope  service.FileScope
 	statusTarget string
+	statusRepo   string
 }
 
-func (s *recordingNavigationFileService) IndexFilesScoped(_ context.Context, wsID string, scope service.FileScope, target string) (*service.FileIndexResult, error) {
+type recordingCheckoutsFileService struct {
+	stubFileService
+	wsID string
+}
+
+func (s *recordingCheckoutsFileService) ListFileCheckouts(_ context.Context, wsID string) (*service.FileCheckoutsResult, error) {
+	s.wsID = wsID
+	return &service.FileCheckoutsResult{Checkouts: []service.FileCheckout{{
+		Kind:        "agent",
+		Agent:       "agent-a",
+		Repo:        "repo-a",
+		Exists:      true,
+		Branch:      "main",
+		ChangeCount: 2,
+	}}}, nil
+}
+
+func (s *recordingNavigationFileService) IndexFilesScoped(_ context.Context, wsID string, scope service.FileScope, target, repo string) (*service.FileIndexResult, error) {
 	s.indexWS = wsID
 	s.indexScope = scope
 	s.indexTarget = target
+	s.indexRepo = repo
 	return &service.FileIndexResult{Paths: []string{"src/main.go"}, Truncated: true}, nil
 }
 
-func (s *recordingNavigationFileService) SearchFilesScoped(_ context.Context, wsID string, scope service.FileScope, target string, req service.FileSearchRequest) (*service.FileSearchResult, error) {
+func (s *recordingNavigationFileService) SearchFilesScoped(_ context.Context, wsID string, scope service.FileScope, target, repo string, req service.FileSearchRequest) (*service.FileSearchResult, error) {
 	s.searchWS = wsID
 	s.searchScope = scope
 	s.searchTarget = target
+	s.searchRepo = repo
 	s.searchReq = req
 	return &service.FileSearchResult{
 		Results: []service.FileSearchFileResult{{
@@ -93,10 +115,11 @@ func (s *recordingNavigationFileService) SearchFilesScoped(_ context.Context, ws
 	}, nil
 }
 
-func (s *recordingNavigationFileService) GitStatusScoped(_ context.Context, wsID string, scope service.FileScope, target string) (service.FileGitStatusResult, error) {
+func (s *recordingNavigationFileService) GitStatusScoped(_ context.Context, wsID string, scope service.FileScope, target, repo string) (service.FileGitStatusResult, error) {
 	s.statusWS = wsID
 	s.statusScope = scope
 	s.statusTarget = target
+	s.statusRepo = repo
 	return service.FileGitStatusResult{"src/main.go": " M"}, nil
 }
 
@@ -181,6 +204,22 @@ func TestHandleScopedFileIndex_UsesScopeTarget(t *testing.T) {
 	}
 }
 
+func TestHandleScopedFileIndex_UsesRepoQualifier(t *testing.T) {
+	svc := &recordingNavigationFileService{}
+	h := HandleScopedFileIndex(svc)
+	req := scopedReq("/api/workspaces/test-ws/files/index?scope=agent&target=agent-a&repo=repo-b")
+	rr := httptest.NewRecorder()
+
+	h.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, body %s", rr.Code, rr.Body.String())
+	}
+	if svc.indexWS != "test-ws" || svc.indexScope != service.ScopeAgent || svc.indexTarget != "agent-a" || svc.indexRepo != "repo-b" {
+		t.Fatalf("recorded call = ws %q scope %q target %q repo %q", svc.indexWS, svc.indexScope, svc.indexTarget, svc.indexRepo)
+	}
+}
+
 func TestHandleScopedGitStatus_UsesScopeTarget(t *testing.T) {
 	svc := &recordingNavigationFileService{}
 	h := HandleScopedGitStatus(svc)
@@ -204,13 +243,29 @@ func TestHandleScopedGitStatus_UsesScopeTarget(t *testing.T) {
 	}
 }
 
+func TestHandleScopedGitStatus_UsesRepoQualifier(t *testing.T) {
+	svc := &recordingNavigationFileService{}
+	h := HandleScopedGitStatus(svc)
+	req := scopedReq("/api/workspaces/test-ws/files/git-status?scope=agent&target=agent-a&repo=repo-b")
+	rr := httptest.NewRecorder()
+
+	h.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, body %s", rr.Code, rr.Body.String())
+	}
+	if svc.statusWS != "test-ws" || svc.statusScope != service.ScopeAgent || svc.statusTarget != "agent-a" || svc.statusRepo != "repo-b" {
+		t.Fatalf("recorded call = ws %q scope %q target %q repo %q", svc.statusWS, svc.statusScope, svc.statusTarget, svc.statusRepo)
+	}
+}
+
 func TestHandleScopedFileSearch_DecodesRequest(t *testing.T) {
 	svc := &recordingNavigationFileService{}
 	h := HandleScopedFileSearch(svc)
 	req := scopedReqBody(
 		http.MethodPost,
 		"/api/workspaces/test-ws/files/search?scope=agent&target=agent-a",
-		`{"query":"needle","regex":true,"include":["src/*.go"],"exclude":["vendor/*"],"caseSensitive":true}`,
+		`{"query":"needle","repo":"repo-b","regex":true,"include":["src/*.go"],"exclude":["vendor/*"],"caseSensitive":true}`,
 	)
 	rr := httptest.NewRecorder()
 
@@ -219,8 +274,8 @@ func TestHandleScopedFileSearch_DecodesRequest(t *testing.T) {
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status = %d, body %s", rr.Code, rr.Body.String())
 	}
-	if svc.searchWS != "test-ws" || svc.searchScope != service.ScopeAgent || svc.searchTarget != "agent-a" {
-		t.Fatalf("recorded call = ws %q scope %q target %q", svc.searchWS, svc.searchScope, svc.searchTarget)
+	if svc.searchWS != "test-ws" || svc.searchScope != service.ScopeAgent || svc.searchTarget != "agent-a" || svc.searchRepo != "repo-b" {
+		t.Fatalf("recorded call = ws %q scope %q target %q repo %q", svc.searchWS, svc.searchScope, svc.searchTarget, svc.searchRepo)
 	}
 	if svc.searchReq.Query != "needle" || !svc.searchReq.Regex || !svc.searchReq.CaseSensitive {
 		t.Fatalf("search request flags = %+v", svc.searchReq)
@@ -236,6 +291,29 @@ func TestHandleScopedFileSearch_DecodesRequest(t *testing.T) {
 		t.Fatalf("decode body: %v", err)
 	}
 	if !body.LimitHit || len(body.Results) != 1 || body.Results[0].Matches[0].Line != 2 {
+		t.Fatalf("body = %+v", body)
+	}
+}
+
+func TestHandleFileCheckouts(t *testing.T) {
+	svc := &recordingCheckoutsFileService{}
+	h := HandleFileCheckouts(svc)
+	req := scopedReq("/api/workspaces/test-ws/files/checkouts")
+	rr := httptest.NewRecorder()
+
+	h.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, body %s", rr.Code, rr.Body.String())
+	}
+	if svc.wsID != "test-ws" {
+		t.Fatalf("wsID = %q", svc.wsID)
+	}
+	var body service.FileCheckoutsResult
+	if err := json.NewDecoder(rr.Body).Decode(&body); err != nil {
+		t.Fatalf("decode body: %v", err)
+	}
+	if len(body.Checkouts) != 1 || body.Checkouts[0].Kind != "agent" || body.Checkouts[0].Repo != "repo-a" || body.Checkouts[0].ChangeCount != 2 {
 		t.Fatalf("body = %+v", body)
 	}
 }

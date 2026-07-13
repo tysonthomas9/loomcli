@@ -269,14 +269,15 @@ export function useScopedFileTree(scopeRef: FileScopeRef): UseFileTreeReturn {
   const { workspaceId } = useWorkspaceContext();
   const scope = scopeRef.scope;
   const target = scopeRef.target ?? null;
+  const repo = scopeRef.repo ?? null;
   const loadEntries = useCallback<DirLoader>(
     (path) =>
       listScopedDir(
         workspaceId,
-        target ? { scope, target } : { scope },
+        target ? { scope, target, repo } : { scope, repo },
         path,
       ).then((r) => r.entries),
-    [workspaceId, scope, target],
+    [workspaceId, scope, target, repo],
   );
   const enabled = scope === "workspace" || !!target;
   return useFileTreeCore(loadEntries, enabled, scope === "workspace");

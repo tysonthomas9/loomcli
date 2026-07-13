@@ -1532,6 +1532,40 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/workspaces/{ws}/files/checkouts": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** List workspace file checkouts and local change counts */
+    get: operations["getFileCheckouts"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/workspaces/{ws}/files/checkouts/repair": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Repair or provision a known workspace file checkout */
+    post: operations["repairFileCheckout"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/workspaces/{ws}/files/diff": {
     parameters: {
       query?: never;
@@ -2149,6 +2183,8 @@ export interface components {
     };
     FileSearchRequest: {
       query: string;
+      /** @description Optional repo qualifier, valid only when scope=agent. */
+      repo?: string;
       /** @default false */
       regex: boolean;
       include?: string[];
@@ -2171,6 +2207,35 @@ export interface components {
     };
     FileGitStatusResponse: {
       [key: string]: string;
+    };
+    FileCheckout: {
+      /** @enum {string} */
+      kind: "agent" | "repo";
+      agent?: string;
+      repo: string;
+      exists: boolean;
+      branch?: string;
+      change_count: number;
+      status_error?: boolean;
+    };
+    FileCheckoutsResponse: {
+      checkouts: components["schemas"]["FileCheckout"][];
+    };
+    FileCheckoutRepairRequest: {
+      /** @enum {string} */
+      scope: "agent" | "repo";
+      target: string;
+      /** @description Repo qualifier, valid when scope=agent. */
+      repo?: string;
+      force?: boolean;
+    };
+    FileCheckoutRepairResponse: {
+      repaired: boolean;
+      /** @enum {string} */
+      method: "repair" | "recreate" | "provision" | "none";
+      requires_force?: boolean;
+      backup_path?: string;
+      message: string;
     };
     FileDiffResponse: {
       path: string;
@@ -2211,10 +2276,18 @@ export interface components {
     };
     FileWriteRequest: {
       content: string;
+      /** @description Optional repo qualifier, valid only when scope=agent. */
+      repo?: string;
+    };
+    FileRepoQualifierRequest: {
+      /** @description Optional repo qualifier, valid only when scope=agent. */
+      repo?: string;
     };
     FileMoveRequest: {
       from: string;
       to: string;
+      /** @description Optional repo qualifier, valid only when scope=agent. */
+      repo?: string;
       /** @default false */
       overwrite: boolean;
     };
@@ -6040,6 +6113,8 @@ export interface operations {
       query?: {
         scope?: "workspace" | "repo" | "agent";
         target?: string;
+        /** @description Optional repo qualifier, valid only when scope=agent. */
+        repo?: string;
         path?: string;
       };
       header?: never;
@@ -6067,6 +6142,8 @@ export interface operations {
       query?: {
         scope?: "workspace" | "repo" | "agent";
         target?: string;
+        /** @description Optional repo qualifier, valid only when scope=agent. */
+        repo?: string;
       };
       header?: never;
       path: {
@@ -6123,6 +6200,8 @@ export interface operations {
       query?: {
         scope?: "workspace" | "repo" | "agent";
         target?: string;
+        /** @description Optional repo qualifier, valid only when scope=agent. */
+        repo?: string;
       };
       header?: never;
       path: {
@@ -6144,11 +6223,72 @@ export interface operations {
       };
     };
   };
+  getFileCheckouts: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Known file checkouts */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["FileCheckoutsResponse"];
+        };
+      };
+    };
+  };
+  repairFileCheckout: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["FileCheckoutRepairRequest"];
+      };
+    };
+    responses: {
+      /** @description Checkout repair result */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["FileCheckoutRepairResponse"];
+        };
+      };
+      /** @description Unknown or disallowed checkout target */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+    };
+  };
   getScopedFileDiff: {
     parameters: {
       query: {
         scope?: "workspace" | "repo" | "agent";
         target?: string;
+        /** @description Optional repo qualifier, valid only when scope=agent. */
+        repo?: string;
         path: string;
         from?: string;
         to?: string;
@@ -6178,6 +6318,8 @@ export interface operations {
       query: {
         scope?: "workspace" | "repo" | "agent";
         target?: string;
+        /** @description Optional repo qualifier, valid only when scope=agent. */
+        repo?: string;
         path: string;
       };
       header?: never;
@@ -6205,6 +6347,8 @@ export interface operations {
       query: {
         scope?: "workspace" | "repo" | "agent";
         target?: string;
+        /** @description Optional repo qualifier, valid only when scope=agent. */
+        repo?: string;
         path: string;
       };
       header?: never;
@@ -6232,6 +6376,8 @@ export interface operations {
       query: {
         scope?: "workspace" | "repo" | "agent";
         target?: string;
+        /** @description Optional repo qualifier, valid only when scope=agent. */
+        repo?: string;
         path: string;
         rev?: string;
       };
@@ -6291,6 +6437,8 @@ export interface operations {
       query: {
         scope?: "workspace" | "repo" | "agent";
         target?: string;
+        /** @description Optional repo qualifier, valid only when scope=agent. */
+        repo?: string;
         path: string;
         recursive?: boolean;
       };
@@ -6319,6 +6467,8 @@ export interface operations {
       query: {
         scope?: "workspace" | "repo" | "agent";
         target?: string;
+        /** @description Optional repo qualifier, valid only when scope=agent. */
+        repo?: string;
         path: string;
       };
       header?: never;
@@ -6328,7 +6478,11 @@ export interface operations {
       };
       cookie?: never;
     };
-    requestBody?: never;
+    requestBody?: {
+      content: {
+        "application/json": components["schemas"]["FileRepoQualifierRequest"];
+      };
+    };
     responses: {
       /** @description Directory created */
       200: {

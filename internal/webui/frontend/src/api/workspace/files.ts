@@ -5,6 +5,7 @@
  */
 
 import { del, get, patch, post, put, wsUrl } from "@/api/common";
+import type { components } from "@/types/generated/openapi";
 
 // ============= Types =============
 
@@ -104,6 +105,17 @@ export type FileScope = "workspace" | "repo" | "agent";
 export interface FileScopeRef {
   scope: FileScope;
   target?: string | null | undefined;
+  repo?: string | null | undefined;
+}
+
+export type FileCheckout = components["schemas"]["FileCheckout"];
+export type FileCheckoutRepairRequest =
+  components["schemas"]["FileCheckoutRepairRequest"];
+export type FileCheckoutRepairResponse =
+  components["schemas"]["FileCheckoutRepairResponse"];
+
+export interface FileCheckoutsResponse {
+  checkouts: FileCheckout[];
 }
 
 interface ApiSuccess {
@@ -118,6 +130,9 @@ function scopedQuery(
   const parts = [`scope=${encodeURIComponent(scopeRef.scope)}`];
   if (scopeRef.target) {
     parts.push(`target=${encodeURIComponent(scopeRef.target)}`);
+  }
+  if (scopeRef.scope === "agent" && scopeRef.repo) {
+    parts.push(`repo=${encodeURIComponent(scopeRef.repo)}`);
   }
   if (path !== undefined && path !== "") {
     parts.push(`path=${encodeURIComponent(path)}`);
@@ -262,6 +277,30 @@ export async function indexScopedFiles(
   scopeRef: FileScopeRef,
 ): Promise<FileIndexData> {
   return get<FileIndexData>(scopedUrl(workspaceId, "/files/index", scopeRef));
+}
+
+/**
+ * List known file checkouts and their current local change counts.
+ * GET /api/workspaces/{ws}/files/checkouts
+ */
+export async function listFileCheckouts(
+  workspaceId: string,
+): Promise<FileCheckoutsResponse> {
+  return get<FileCheckoutsResponse>(wsUrl(workspaceId, "/files/checkouts"));
+}
+
+/**
+ * Repair or provision a known file checkout.
+ * POST /api/workspaces/{ws}/files/checkouts/repair
+ */
+export async function repairFileCheckout(
+  workspaceId: string,
+  request: FileCheckoutRepairRequest,
+): Promise<FileCheckoutRepairResponse> {
+  return post<FileCheckoutRepairResponse>(
+    wsUrl(workspaceId, "/files/checkouts/repair"),
+    request,
+  );
 }
 
 /**

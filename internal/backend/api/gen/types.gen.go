@@ -203,6 +203,66 @@ func (e ErrorResponseSuccess) Valid() bool {
 	}
 }
 
+// Defines values for FileCheckoutKind.
+const (
+	FileCheckoutKindAgent FileCheckoutKind = "agent"
+	FileCheckoutKindRepo  FileCheckoutKind = "repo"
+)
+
+// Valid indicates whether the value is a known member of the FileCheckoutKind enum.
+func (e FileCheckoutKind) Valid() bool {
+	switch e {
+	case FileCheckoutKindAgent:
+		return true
+	case FileCheckoutKindRepo:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for FileCheckoutRepairRequestScope.
+const (
+	FileCheckoutRepairRequestScopeAgent FileCheckoutRepairRequestScope = "agent"
+	FileCheckoutRepairRequestScopeRepo  FileCheckoutRepairRequestScope = "repo"
+)
+
+// Valid indicates whether the value is a known member of the FileCheckoutRepairRequestScope enum.
+func (e FileCheckoutRepairRequestScope) Valid() bool {
+	switch e {
+	case FileCheckoutRepairRequestScopeAgent:
+		return true
+	case FileCheckoutRepairRequestScopeRepo:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for FileCheckoutRepairResponseMethod.
+const (
+	None      FileCheckoutRepairResponseMethod = "none"
+	Provision FileCheckoutRepairResponseMethod = "provision"
+	Recreate  FileCheckoutRepairResponseMethod = "recreate"
+	Repair    FileCheckoutRepairResponseMethod = "repair"
+)
+
+// Valid indicates whether the value is a known member of the FileCheckoutRepairResponseMethod enum.
+func (e FileCheckoutRepairResponseMethod) Valid() bool {
+	switch e {
+	case None:
+		return true
+	case Provision:
+		return true
+	case Recreate:
+		return true
+	case Repair:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for FileHistoryEntryKind.
 const (
 	Commit FileHistoryEntryKind = "commit"
@@ -1489,6 +1549,50 @@ type FileBlameResponse struct {
 	Skipped bool            `json:"skipped"`
 }
 
+// FileCheckout defines model for FileCheckout.
+type FileCheckout struct {
+	Agent       *string          `json:"agent,omitempty"`
+	Branch      *string          `json:"branch,omitempty"`
+	ChangeCount int              `json:"change_count"`
+	Exists      bool             `json:"exists"`
+	Kind        FileCheckoutKind `json:"kind"`
+	Repo        string           `json:"repo"`
+	StatusError *bool            `json:"status_error,omitempty"`
+}
+
+// FileCheckoutKind defines model for FileCheckout.Kind.
+type FileCheckoutKind string
+
+// FileCheckoutRepairRequest defines model for FileCheckoutRepairRequest.
+type FileCheckoutRepairRequest struct {
+	Force *bool `json:"force,omitempty"`
+
+	// Repo Repo qualifier, valid when scope=agent.
+	Repo   *string                        `json:"repo,omitempty"`
+	Scope  FileCheckoutRepairRequestScope `json:"scope"`
+	Target string                         `json:"target"`
+}
+
+// FileCheckoutRepairRequestScope defines model for FileCheckoutRepairRequest.Scope.
+type FileCheckoutRepairRequestScope string
+
+// FileCheckoutRepairResponse defines model for FileCheckoutRepairResponse.
+type FileCheckoutRepairResponse struct {
+	BackupPath    *string                          `json:"backup_path,omitempty"`
+	Message       string                           `json:"message"`
+	Method        FileCheckoutRepairResponseMethod `json:"method"`
+	Repaired      bool                             `json:"repaired"`
+	RequiresForce *bool                            `json:"requires_force,omitempty"`
+}
+
+// FileCheckoutRepairResponseMethod defines model for FileCheckoutRepairResponse.Method.
+type FileCheckoutRepairResponseMethod string
+
+// FileCheckoutsResponse defines model for FileCheckoutsResponse.
+type FileCheckoutsResponse struct {
+	Checkouts []FileCheckout `json:"checkouts"`
+}
+
 // FileDiffResponse defines model for FileDiffResponse.
 type FileDiffResponse struct {
 	Patch string `json:"patch"`
@@ -1531,7 +1635,10 @@ type FileIndexResponse struct {
 type FileMoveRequest struct {
 	From      string `json:"from"`
 	Overwrite *bool  `json:"overwrite,omitempty"`
-	To        string `json:"to"`
+
+	// Repo Optional repo qualifier, valid only when scope=agent.
+	Repo *string `json:"repo,omitempty"`
+	To   string  `json:"to"`
 }
 
 // FileReadResponse defines model for FileReadResponse.
@@ -1541,6 +1648,12 @@ type FileReadResponse struct {
 	Path      string  `json:"path"`
 	Size      int64   `json:"size"`
 	Truncated bool    `json:"truncated"`
+}
+
+// FileRepoQualifierRequest defines model for FileRepoQualifierRequest.
+type FileRepoQualifierRequest struct {
+	// Repo Optional repo qualifier, valid only when scope=agent.
+	Repo *string `json:"repo,omitempty"`
 }
 
 // FileSearchFileResult defines model for FileSearchFileResult.
@@ -1563,6 +1676,9 @@ type FileSearchRequest struct {
 	Include       *[]string `json:"include,omitempty"`
 	Query         string    `json:"query"`
 	Regex         *bool     `json:"regex,omitempty"`
+
+	// Repo Optional repo qualifier, valid only when scope=agent.
+	Repo *string `json:"repo,omitempty"`
 }
 
 // FileSearchResponse defines model for FileSearchResponse.
@@ -1588,6 +1704,9 @@ type FileTreeResponse struct {
 // FileWriteRequest defines model for FileWriteRequest.
 type FileWriteRequest struct {
 	Content string `json:"content"`
+
+	// Repo Optional repo qualifier, valid only when scope=agent.
+	Repo *string `json:"repo,omitempty"`
 }
 
 // HourlyBucket defines model for HourlyBucket.
@@ -2563,10 +2682,13 @@ type SubscribeEventsParams struct {
 
 // DeleteScopedFileParams defines parameters for DeleteScopedFile.
 type DeleteScopedFileParams struct {
-	Scope     *DeleteScopedFileParamsScope `form:"scope,omitempty" json:"scope,omitempty"`
-	Target    *string                      `form:"target,omitempty" json:"target,omitempty"`
-	Path      string                       `form:"path" json:"path"`
-	Recursive *bool                        `form:"recursive,omitempty" json:"recursive,omitempty"`
+	Scope  *DeleteScopedFileParamsScope `form:"scope,omitempty" json:"scope,omitempty"`
+	Target *string                      `form:"target,omitempty" json:"target,omitempty"`
+
+	// Repo Optional repo qualifier, valid only when scope=agent.
+	Repo      *string `form:"repo,omitempty" json:"repo,omitempty"`
+	Path      string  `form:"path" json:"path"`
+	Recursive *bool   `form:"recursive,omitempty" json:"recursive,omitempty"`
 }
 
 // DeleteScopedFileParamsScope defines parameters for DeleteScopedFile.
@@ -2576,8 +2698,11 @@ type DeleteScopedFileParamsScope string
 type ReadScopedFileParams struct {
 	Scope  *ReadScopedFileParamsScope `form:"scope,omitempty" json:"scope,omitempty"`
 	Target *string                    `form:"target,omitempty" json:"target,omitempty"`
-	Path   string                     `form:"path" json:"path"`
-	Rev    *string                    `form:"rev,omitempty" json:"rev,omitempty"`
+
+	// Repo Optional repo qualifier, valid only when scope=agent.
+	Repo *string `form:"repo,omitempty" json:"repo,omitempty"`
+	Path string  `form:"path" json:"path"`
+	Rev  *string `form:"rev,omitempty" json:"rev,omitempty"`
 }
 
 // ReadScopedFileParamsScope defines parameters for ReadScopedFile.
@@ -2597,7 +2722,10 @@ type WriteScopedFileParamsScope string
 type GetScopedFileBlameParams struct {
 	Scope  *GetScopedFileBlameParamsScope `form:"scope,omitempty" json:"scope,omitempty"`
 	Target *string                        `form:"target,omitempty" json:"target,omitempty"`
-	Path   string                         `form:"path" json:"path"`
+
+	// Repo Optional repo qualifier, valid only when scope=agent.
+	Repo *string `form:"repo,omitempty" json:"repo,omitempty"`
+	Path string  `form:"path" json:"path"`
 }
 
 // GetScopedFileBlameParamsScope defines parameters for GetScopedFileBlame.
@@ -2607,9 +2735,12 @@ type GetScopedFileBlameParamsScope string
 type GetScopedFileDiffParams struct {
 	Scope  *GetScopedFileDiffParamsScope `form:"scope,omitempty" json:"scope,omitempty"`
 	Target *string                       `form:"target,omitempty" json:"target,omitempty"`
-	Path   string                        `form:"path" json:"path"`
-	From   *string                       `form:"from,omitempty" json:"from,omitempty"`
-	To     *string                       `form:"to,omitempty" json:"to,omitempty"`
+
+	// Repo Optional repo qualifier, valid only when scope=agent.
+	Repo *string `form:"repo,omitempty" json:"repo,omitempty"`
+	Path string  `form:"path" json:"path"`
+	From *string `form:"from,omitempty" json:"from,omitempty"`
+	To   *string `form:"to,omitempty" json:"to,omitempty"`
 }
 
 // GetScopedFileDiffParamsScope defines parameters for GetScopedFileDiff.
@@ -2619,6 +2750,9 @@ type GetScopedFileDiffParamsScope string
 type GetScopedFileGitStatusParams struct {
 	Scope  *GetScopedFileGitStatusParamsScope `form:"scope,omitempty" json:"scope,omitempty"`
 	Target *string                            `form:"target,omitempty" json:"target,omitempty"`
+
+	// Repo Optional repo qualifier, valid only when scope=agent.
+	Repo *string `form:"repo,omitempty" json:"repo,omitempty"`
 }
 
 // GetScopedFileGitStatusParamsScope defines parameters for GetScopedFileGitStatus.
@@ -2628,7 +2762,10 @@ type GetScopedFileGitStatusParamsScope string
 type GetScopedFileHistoryParams struct {
 	Scope  *GetScopedFileHistoryParamsScope `form:"scope,omitempty" json:"scope,omitempty"`
 	Target *string                          `form:"target,omitempty" json:"target,omitempty"`
-	Path   string                           `form:"path" json:"path"`
+
+	// Repo Optional repo qualifier, valid only when scope=agent.
+	Repo *string `form:"repo,omitempty" json:"repo,omitempty"`
+	Path string  `form:"path" json:"path"`
 }
 
 // GetScopedFileHistoryParamsScope defines parameters for GetScopedFileHistory.
@@ -2638,6 +2775,9 @@ type GetScopedFileHistoryParamsScope string
 type GetScopedFileIndexParams struct {
 	Scope  *GetScopedFileIndexParamsScope `form:"scope,omitempty" json:"scope,omitempty"`
 	Target *string                        `form:"target,omitempty" json:"target,omitempty"`
+
+	// Repo Optional repo qualifier, valid only when scope=agent.
+	Repo *string `form:"repo,omitempty" json:"repo,omitempty"`
 }
 
 // GetScopedFileIndexParamsScope defines parameters for GetScopedFileIndex.
@@ -2647,7 +2787,10 @@ type GetScopedFileIndexParamsScope string
 type MkdirScopedFileParams struct {
 	Scope  *MkdirScopedFileParamsScope `form:"scope,omitempty" json:"scope,omitempty"`
 	Target *string                     `form:"target,omitempty" json:"target,omitempty"`
-	Path   string                      `form:"path" json:"path"`
+
+	// Repo Optional repo qualifier, valid only when scope=agent.
+	Repo *string `form:"repo,omitempty" json:"repo,omitempty"`
+	Path string  `form:"path" json:"path"`
 }
 
 // MkdirScopedFileParamsScope defines parameters for MkdirScopedFile.
@@ -2675,7 +2818,10 @@ type SearchScopedFilesParamsScope string
 type GetScopedFileTreeParams struct {
 	Scope  *GetScopedFileTreeParamsScope `form:"scope,omitempty" json:"scope,omitempty"`
 	Target *string                       `form:"target,omitempty" json:"target,omitempty"`
-	Path   *string                       `form:"path,omitempty" json:"path,omitempty"`
+
+	// Repo Optional repo qualifier, valid only when scope=agent.
+	Repo *string `form:"repo,omitempty" json:"repo,omitempty"`
+	Path *string `form:"path,omitempty" json:"path,omitempty"`
 }
 
 // GetScopedFileTreeParamsScope defines parameters for GetScopedFileTree.
@@ -2886,6 +3032,12 @@ type PatchWorkspaceBackendJSONRequestBody = WorkspaceBackendPatchRequest
 
 // WriteScopedFileJSONRequestBody defines body for WriteScopedFile for application/json ContentType.
 type WriteScopedFileJSONRequestBody = FileWriteRequest
+
+// RepairFileCheckoutJSONRequestBody defines body for RepairFileCheckout for application/json ContentType.
+type RepairFileCheckoutJSONRequestBody = FileCheckoutRepairRequest
+
+// MkdirScopedFileJSONRequestBody defines body for MkdirScopedFile for application/json ContentType.
+type MkdirScopedFileJSONRequestBody = FileRepoQualifierRequest
 
 // MoveScopedFileJSONRequestBody defines body for MoveScopedFile for application/json ContentType.
 type MoveScopedFileJSONRequestBody = FileMoveRequest
