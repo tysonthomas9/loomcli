@@ -605,12 +605,7 @@ export function IssueDetailView({
         {/* Design */}
         {issue.design && (
           <section className={styles.section}>
-            <h3 className={styles.sectionTitle}>Design</h3>
-            <DesignPanel
-              className={styles.description ?? ""}
-              content={issue.design}
-              format={issue.design_format}
-            />
+            <DesignPanel content={issue.design} format={issue.design_format} />
           </section>
         )}
 

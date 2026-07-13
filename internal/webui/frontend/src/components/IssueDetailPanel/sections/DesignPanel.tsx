@@ -7,8 +7,8 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 
+import { HtmlDesignRenderer } from "./HtmlDesignRenderer";
 import { MarkdownRenderer } from "./MarkdownRenderer";
-import { sanitizeHtml } from "@/utils/sanitizeHtml";
 import styles from "./DesignPanel.module.css";
 
 export interface DesignPanelProps {
@@ -33,8 +33,7 @@ const HTML_H2_RE = /^\s*<h2(?:\s[^>]*)?>(.*?)<\/h2>\s*$/i;
 
 /**
  * Extract a section heading from a line, recognizing both the Markdown
- * `## ` syntax and a whole-line HTML `<h2>` element. Returns the heading
- * text (inline HTML tags stripped) or null if the line is not a heading.
+ * `## ` syntax and a whole-line HTML `<h2>` element.
  */
 function matchHeading(line: string): string | null {
   const mdMatch = line.match(/^## (.+?)\s*$/);
@@ -43,16 +42,13 @@ function matchHeading(line: string): string | null {
   }
   const htmlMatch = line.match(HTML_H2_RE);
   if (htmlMatch) {
-    // Strip any nested inline tags so the heading renders as plain text.
     return (htmlMatch[1] ?? "").replace(/<[^>]+>/g, "").trim();
   }
   return null;
 }
 
 /**
- * Split design content into sections delimited by H2 headings. Recognizes
- * both Markdown `## ` headings and whole-line HTML `<h2>` elements so that
- * HTML designs keep the same collapsible-section UX as Markdown designs.
+ * Split Markdown or HTML design content into sections delimited by H2s.
  * Content before the first H2 becomes a section with an empty heading.
  */
 export function splitIntoSections(markdown: string): Section[] {
@@ -103,12 +99,6 @@ export function DesignPanel({
     () => new Set(),
   );
 
-  const sections = useMemo(
-    () => (content ? splitIntoSections(content) : []),
-    [content],
-  );
-
-  const hasH2Sections = sections.some((s) => s.heading !== "");
   // Compatibility only for legacy inline HTML that predates format metadata.
   const renderAsHTML =
     format === "html" ||
@@ -116,16 +106,11 @@ export function DesignPanel({
       /^\s*<(?:h[1-6]|p|ul|ol|div|section|table|pre|svg|figure)\b/i.test(
         content ?? "",
       ));
-  const renderDesignContent = (body: string, key?: string) =>
-    renderAsHTML ? (
-      <div
-        key={key}
-        data-testid="design-html-content"
-        dangerouslySetInnerHTML={{ __html: sanitizeHtml(body) }}
-      />
-    ) : (
-      <MarkdownRenderer key={key} content={body} />
-    );
+  const sections = useMemo(
+    () => (content && !renderAsHTML ? splitIntoSections(content) : []),
+    [content, renderAsHTML],
+  );
+  const hasH2Sections = sections.some((s) => s.heading !== "");
 
   // Reset collapsed sections when content changes (e.g., different issue selected)
   useEffect(() => {
@@ -245,59 +230,65 @@ export function DesignPanel({
         </button>
       </div>
       <div className={styles.scrollContainer}>
-        {hasH2Sections
-          ? sections.map((section, index) => {
-              if (!section.heading) {
-                // Content before first H2 — render without collapse
-                return section.content
-                  ? renderDesignContent(section.content, `preamble-${index}`)
-                  : null;
-              }
+        {renderAsHTML ? (
+          <HtmlDesignRenderer content={content} />
+        ) : hasH2Sections ? (
+          sections.map((section, index) => {
+            if (!section.heading) {
+              // Content before first H2 — render without collapse
+              return section.content ? (
+                <MarkdownRenderer
+                  key={`preamble-${index}`}
+                  content={section.content}
+                />
+              ) : null;
+            }
 
-              const isExpanded = !collapsedSections.has(index);
-              return (
-                <div
-                  key={`section-${index}`}
-                  data-testid="design-panel-section"
+            const isExpanded = !collapsedSections.has(index);
+            return (
+              <div key={`section-${index}`} data-testid="design-panel-section">
+                <button
+                  type="button"
+                  className={styles.sectionHeader}
+                  onClick={() => handleToggleSection(index)}
+                  aria-expanded={isExpanded}
                 >
-                  <button
-                    type="button"
-                    className={styles.sectionHeader}
-                    onClick={() => handleToggleSection(index)}
-                    aria-expanded={isExpanded}
+                  <span className={styles.sectionHeadingText}>
+                    {section.heading}
+                  </span>
+                  <svg
+                    className={`${styles.chevron} ${isExpanded ? styles.chevronExpanded : ""}`}
+                    viewBox="0 0 16 16"
+                    fill="none"
+                    aria-hidden="true"
                   >
-                    <span className={styles.sectionHeadingText}>
-                      {section.heading}
-                    </span>
-                    <svg
-                      className={`${styles.chevron} ${isExpanded ? styles.chevronExpanded : ""}`}
-                      viewBox="0 0 16 16"
-                      fill="none"
-                      aria-hidden="true"
-                    >
-                      <path
-                        d="M6 4l4 4-4 4"
-                        stroke="currentColor"
-                        strokeWidth="2"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                      />
-                    </svg>
-                  </button>
-                  {isExpanded && section.content && (
-                    <div className={styles.sectionContent}>
-                      {renderDesignContent(section.content)}
-                    </div>
-                  )}
-                </div>
-              );
-            })
-          : // No H2 headings — render as single block
-            sections.map((section, index) =>
-              section.content
-                ? renderDesignContent(section.content, `block-${index}`)
-                : null,
-            )}
+                    <path
+                      d="M6 4l4 4-4 4"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
+                  </svg>
+                </button>
+                {isExpanded && section.content && (
+                  <div className={styles.sectionContent}>
+                    <MarkdownRenderer content={section.content} />
+                  </div>
+                )}
+              </div>
+            );
+          })
+        ) : (
+          sections.map((section, index) =>
+            section.content ? (
+              <MarkdownRenderer
+                key={`block-${index}`}
+                content={section.content}
+              />
+            ) : null,
+          )
+        )}
       </div>
     </div>
   );

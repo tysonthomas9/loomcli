@@ -4,7 +4,7 @@
 
 import { describe, it, expect } from "vitest";
 
-import { sanitizeHtml } from "../sanitizeHtml";
+import { sanitizeDesignHtml, sanitizeHtml } from "../sanitizeHtml";
 
 describe("sanitizeHtml", () => {
   it("strips script tags", () => {
@@ -86,5 +86,39 @@ describe("sanitizeHtml", () => {
     expect(out).not.toContain("onload");
     expect(out).not.toContain("onclick");
     expect(out.toLowerCase()).not.toContain("alert");
+  });
+
+  it("preserves styles only for isolated design HTML", () => {
+    const input =
+      '<style>.card{display:grid}</style><div class="card">content</div>';
+
+    expect(sanitizeHtml(input)).not.toContain("<style");
+    expect(sanitizeDesignHtml(input)).toContain(
+      "<style>.card{display:grid}</style>",
+    );
+  });
+
+  it("strips executable and interactive design HTML", () => {
+    const out = sanitizeDesignHtml(
+      '<script>alert(1)</script><form><input autofocus onfocus="alert(2)"></form><p>safe</p>',
+    );
+
+    expect(out).toContain("<p>safe</p>");
+    expect(out).not.toContain("<script");
+    expect(out).not.toContain("<form");
+    expect(out).not.toContain("<input");
+    expect(out).not.toContain("onfocus");
+  });
+
+  it("removes stylesheet network and execution escape paths", () => {
+    const out = sanitizeDesignHtml(
+      '<style>@import "https://evil.test/x.css";.a{background:url(https://evil.test/x);width:expression(alert(1));behavior:url(x)}</style><div class="a">safe</div>',
+    );
+
+    expect(out).not.toContain("@import");
+    expect(out).not.toContain("https://evil.test");
+    expect(out).not.toContain("expression(");
+    expect(out).not.toContain("behavior:");
+    expect(out).toContain('<div class="a">safe</div>');
   });
 });
