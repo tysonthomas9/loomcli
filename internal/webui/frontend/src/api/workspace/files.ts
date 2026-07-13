@@ -87,11 +87,25 @@ export interface FileSearchData {
   partial_reasons: FilePartialReason[];
 }
 
-export type FileGitStatusData = Record<string, string>;
+export interface FileCheckoutError {
+  kind: "agent" | "repo";
+  agent?: string;
+  repo: string;
+  error: string;
+}
+
+export interface FileGitStatusData {
+  status: Record<string, string>;
+  partial: boolean;
+  limit_hit: boolean;
+  errors: FileCheckoutError[];
+}
 
 export interface FileDiffData {
   path: string;
   patch: string;
+  partial: boolean;
+  limit_hit: boolean;
 }
 
 export interface FileBlameLine {
@@ -109,24 +123,23 @@ export interface FileBlameData {
   reason?: string;
   message?: string;
   lines: FileBlameLine[];
+  partial: boolean;
+  limit_hit: boolean;
 }
 
 export interface FileHistoryEntry {
-  kind: "commit" | "save";
-  id?: string;
-  sha?: string;
-  author?: string;
+  kind: "commit";
+  sha: string;
+  author: string;
   time: string;
   summary: string;
-  content?: string;
-  size?: number;
-  binary?: boolean;
-  truncated?: boolean;
 }
 
 export interface FileHistoryData {
   path: string;
   entries: FileHistoryEntry[];
+  partial: boolean;
+  limit_hit: boolean;
 }
 
 export type FileScope = "workspace" | "repo" | "agent";
@@ -414,7 +427,7 @@ export async function blameScopedFile(
 }
 
 /**
- * Fetch commit and browser-save history for a file in any scoped root.
+ * Fetch bounded commit history for a file in any scoped root.
  * GET /api/workspaces/{ws}/files/history?scope=&target=&path=
  */
 export async function historyScopedFile(

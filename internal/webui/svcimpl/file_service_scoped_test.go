@@ -3,12 +3,14 @@ package svcimpl
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -27,6 +29,8 @@ type scopedMockFileOps struct {
 	wsData        *ops.WorkspaceData
 	dataDir       string
 	wsErr         error
+	gitStatusFunc func(context.Context, string) (ops.GitFileStatusResult, error)
+	branchFunc    func(context.Context, string) (string, error)
 }
 
 func (m scopedMockFileOps) ResolveAgentWorktree(_, name string) (*ops.AgentWorktree, error) {
@@ -84,16 +88,19 @@ func (m scopedMockFileOps) ResolveWorkspaceData(_ string) (*ops.WorkspaceData, e
 	return ws, nil
 }
 
-func (m scopedMockFileOps) GitStatusPorcelain(worktreePath string) (map[string]string, error) {
+func (m scopedMockFileOps) GitStatusPorcelain(ctx context.Context, worktreePath string) (ops.GitFileStatusResult, error) {
+	if m.gitStatusFunc != nil {
+		return m.gitStatusFunc(ctx, worktreePath)
+	}
 	cmd := exec.Command("git", "-C", worktreePath, "status", "--porcelain") //nolint:norawexec // Test mock intentionally exercises real git status output.
 	out, err := cmd.Output()
 	if err != nil {
-		return nil, err
+		return ops.GitFileStatusResult{}, err
 	}
-	return parseTestPorcelainStatus(string(out)), nil
+	return ops.GitFileStatusResult{Entries: parseTestPorcelainStatus(string(out))}, nil
 }
 
-func (m scopedMockFileOps) GitShowFileAtRev(worktreePath, rev, path string, maxBytes int64) (*ops.GitFileContentAtRev, error) {
+func (m scopedMockFileOps) GitShowFileAtRev(_ context.Context, worktreePath, rev, path string, maxBytes int64) (*ops.GitFileContentAtRev, error) {
 	spec := rev + ":" + path
 	sizeOut, err := exec.Command("git", "-C", worktreePath, "cat-file", "-s", spec).Output() //nolint:norawexec // Test mock runs fixed git command.
 	if err != nil {
@@ -114,7 +121,7 @@ func (m scopedMockFileOps) GitShowFileAtRev(worktreePath, rev, path string, maxB
 	return &ops.GitFileContentAtRev{Content: out, Size: size, Truncated: truncated}, nil
 }
 
-func (m scopedMockFileOps) GitDiffFile(worktreePath, path, from, to string) (string, error) {
+func (m scopedMockFileOps) GitDiffFile(_ context.Context, worktreePath, path, from, to string) (ops.GitBoundedTextResult, error) {
 	if from == "" {
 		from = "HEAD"
 	}
@@ -126,17 +133,17 @@ func (m scopedMockFileOps) GitDiffFile(worktreePath, path, from, to string) (str
 	}
 	args = append(args, "--", path)
 	out, err := exec.Command("git", args...).CombinedOutput() //nolint:norawexec // Test mock runs fixed git command.
-	return string(out), err
+	return ops.GitBoundedTextResult{Output: string(out)}, err
 }
 
-func (m scopedMockFileOps) GitLogFile(worktreePath, path string, limit int) (string, error) {
-	out, err := exec.Command("git", "-C", worktreePath, "log", "--follow", "-n", strconv.Itoa(limit), "--format=%H%x1f%an%x1f%at%x1f%s%x1e", "--", path).CombinedOutput() //nolint:norawexec // Test mock runs fixed git command.
-	return string(out), err
+func (m scopedMockFileOps) GitLogFile(_ context.Context, worktreePath, path string, limit int) (ops.GitBoundedTextResult, error) {
+	out, err := exec.Command("git", "-C", worktreePath, "log", "--follow", "-n", strconv.Itoa(limit), "--format=%H%x00%an%x00%at%x00%s%x00", "--", path).CombinedOutput() //nolint:norawexec // Test mock runs fixed git command.
+	return ops.GitBoundedTextResult{Output: string(out)}, err
 }
 
-func (m scopedMockFileOps) GitBlamePorcelain(worktreePath, path string) (string, error) {
+func (m scopedMockFileOps) GitBlamePorcelain(_ context.Context, worktreePath, path string) (ops.GitBoundedTextResult, error) {
 	out, err := exec.Command("git", "-C", worktreePath, "blame", "--porcelain", "--", path).CombinedOutput() //nolint:norawexec // Test mock runs fixed git command.
-	return string(out), err
+	return ops.GitBoundedTextResult{Output: string(out)}, err
 }
 
 func (m scopedMockFileOps) ResolveLoomDataDir() (string, error) {
@@ -146,7 +153,10 @@ func (m scopedMockFileOps) ResolveLoomDataDir() (string, error) {
 	return os.TempDir(), nil
 }
 
-func (m scopedMockFileOps) GetCurrentBranch(worktreePath string) (string, error) {
+func (m scopedMockFileOps) GitCurrentBranch(ctx context.Context, worktreePath string) (string, error) {
+	if m.branchFunc != nil {
+		return m.branchFunc(ctx, worktreePath)
+	}
 	out, err := exec.Command("git", "-C", worktreePath, "rev-parse", "--abbrev-ref", "HEAD").Output() //nolint:norawexec // Test mock runs fixed git command.
 	if err != nil {
 		return "", err
@@ -287,7 +297,7 @@ func TestFileServiceImpl_ViewerFiltersGitStatusAndCheckoutCounts(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GitStatusScoped: %v", err)
 	}
-	if _, ok := status[".env"]; ok || status["public.txt"] != "??" {
+	if _, ok := status.Status[".env"]; ok || status.Status["public.txt"] != "??" {
 		t.Fatalf("viewer status = %#v", status)
 	}
 
@@ -979,126 +989,109 @@ func TestFileServiceImpl_BlameFileScoped(t *testing.T) {
 	}
 }
 
-func TestFileServiceImpl_HistoryMergesCommitsAndBrowserSaves(t *testing.T) {
+func TestFileServiceImpl_HistoryContainsOnlyCommits(t *testing.T) {
 	svc, scopes := setupScopedService(t)
 	repo := scopes[1]
 	initGitRepo(t, repo.root)
 	mustWrite(t, filepath.Join(repo.root, "file.txt"), "committed\n")
 	commitAll(t, repo.root)
 
-	if err := svc.WriteFileScoped(context.Background(), "ws", repo.scope, repo.target, "", "file.txt", "browser save\n"); err != nil {
+	if err := svc.WriteFileScoped(context.Background(), "ws", repo.scope, repo.target, "", "file.txt", "ordinary save\n"); err != nil {
 		t.Fatalf("WriteFileScoped overwrite: %v", err)
 	}
 	history, err := svc.HistoryFileScoped(context.Background(), "ws", repo.scope, repo.target, "", "file.txt")
 	if err != nil {
 		t.Fatalf("HistoryFileScoped: %v", err)
 	}
-	var sawCommit, sawSave bool
+	var sawCommit bool
 	for _, entry := range history.Entries {
 		if entry.Kind == "commit" && entry.Summary == "init" {
 			sawCommit = true
 		}
-		if entry.Kind == "save" && entry.Content == "committed\n" {
-			sawSave = true
+		if entry.Kind != "commit" {
+			t.Fatalf("non-commit history entry: %+v", entry)
 		}
 	}
-	if !sawCommit || !sawSave {
-		t.Fatalf("history entries = %+v, want commit and browser save", history.Entries)
+	if !sawCommit {
+		t.Fatalf("history entries = %+v, want commit", history.Entries)
 	}
 }
 
-func TestFileServiceImpl_SaveHistorySnapshotRules(t *testing.T) {
+func TestParseGitLogHistoryUsesFixedNULFieldCount(t *testing.T) {
+	summary := "subject with " + string(rune(0x1e)) + " and " + string(rune(0x1f))
+	output := "abc\x00Test User\x001700000000\x00" + summary + "\x00"
+	entries := parseGitLogHistory(output)
+	if len(entries) != 1 || entries[0].Summary != summary || entries[0].SHA != "abc" {
+		t.Fatalf("entries = %+v", entries)
+	}
+}
+
+type fakeInspectionError struct{ kind string }
+
+func (e fakeInspectionError) Error() string          { return "inspection failed" }
+func (e fakeInspectionError) InspectionKind() string { return e.kind }
+
+func TestMapGitInspectionErrorPreservesKinds(t *testing.T) {
+	for _, tc := range []struct {
+		kind string
+		want service.ErrorKind
+	}{
+		{kind: "timeout", want: service.KindTimeout},
+		{kind: "canceled", want: service.KindTimeout},
+		{kind: "validation", want: service.KindValidation},
+		{kind: "failed", want: service.KindInternal},
+	} {
+		err := mapGitInspectionError("git operation", fakeInspectionError{kind: tc.kind})
+		serviceErr, ok := err.(*service.ServiceError)
+		if !ok || serviceErr.Kind != tc.want {
+			t.Fatalf("kind %q mapped to %T %+v, want %q", tc.kind, err, err, tc.want)
+		}
+	}
+}
+
+func TestFileServiceImpl_SaveCreatesNoPlaintextSnapshot(t *testing.T) {
 	svc, scopes := setupScopedService(t)
-	impl := svc.(*fileServiceImpl)
 	repo := scopes[1]
-
-	if err := svc.WriteFileScoped(context.Background(), "ws", repo.scope, repo.target, "", "file.txt", "0"); err != nil {
-		t.Fatalf("create: %v", err)
+	dataDir := svc.(*fileServiceImpl).fileOps.(scopedMockFileOps).dataDir
+	if err := svc.WriteFileScoped(context.Background(), "ws", repo.scope, repo.target, "", "file.txt", "secret plaintext"); err != nil {
+		t.Fatalf("save: %v", err)
 	}
-	entries, err := impl.loadSaveHistory("ws", repo.scope, repo.target, "", "file.txt")
-	if err != nil {
-		t.Fatalf("loadSaveHistory after create: %v", err)
-	}
-	if len(entries) != 0 {
-		t.Fatalf("create recorded save history: %+v", entries)
-	}
-
-	for i := 1; i <= fileHistorySaveLimit+5; i++ {
-		if err := svc.WriteFileScoped(context.Background(), "ws", repo.scope, repo.target, "", "file.txt", strconv.Itoa(i)); err != nil {
-			t.Fatalf("overwrite %d: %v", i, err)
-		}
-	}
-	entries, err = impl.loadSaveHistory("ws", repo.scope, repo.target, "", "file.txt")
-	if err != nil {
-		t.Fatalf("loadSaveHistory: %v", err)
-	}
-	saves := entries
-	if len(saves) != fileHistorySaveLimit {
-		t.Fatalf("save count = %d, want %d: %+v", len(saves), fileHistorySaveLimit, saves)
-	}
-	for _, entry := range saves {
-		if entry.Content == "0" || entry.Content == "1" || entry.Content == "2" || entry.Content == "3" || entry.Content == "4" {
-			t.Fatalf("old snapshot was not evicted: %+v", saves)
-		}
+	if _, err := os.Lstat(filepath.Join(dataDir, legacySaveHistoryDirName)); !os.IsNotExist(err) {
+		t.Fatalf("legacy history path exists after save: %v", err)
 	}
 }
 
-func TestFileServiceImpl_SaveHistorySeparatesRepoQualifiedAgentCheckouts(t *testing.T) {
-	wsRoot := t.TempDir()
-	agentARoot := filepath.Join(wsRoot, "worktrees", "repo-a", "agent-a")
-	agentBRoot := filepath.Join(wsRoot, "worktrees", "repo-b", "agent-a")
-	mustWrite(t, filepath.Join(agentARoot, "file.txt"), "repo-a-old")
-	mustWrite(t, filepath.Join(agentBRoot, "file.txt"), "repo-b-old")
+func TestCleanupLegacySaveHistoryExactAndIdempotent(t *testing.T) {
 	dataDir := t.TempDir()
+	legacy := filepath.Join(dataDir, legacySaveHistoryDirName)
+	sibling := filepath.Join(dataDir, "keep")
+	mustWrite(t, filepath.Join(legacy, "nested", "snapshot.json"), "plaintext")
+	mustWrite(t, filepath.Join(sibling, "data.txt"), "keep")
+	for i := 0; i < 2; i++ {
+		if err := cleanupLegacySaveHistory(dataDir); err != nil {
+			t.Fatalf("cleanup %d: %v", i, err)
+		}
+	}
+	if _, err := os.Lstat(legacy); !os.IsNotExist(err) {
+		t.Fatalf("legacy history still exists: %v", err)
+	}
+	if got, err := os.ReadFile(filepath.Join(sibling, "data.txt")); err != nil || string(got) != "keep" {
+		t.Fatalf("sibling changed: %q, %v", got, err)
+	}
+}
 
-	svc := NewFileService(scopedMockFileOps{
-		wsRoot:    wsRoot,
-		agentRoot: agentARoot,
-		agentRoots: map[string]string{
-			"repo-a": agentARoot,
-			"repo-b": agentBRoot,
-		},
-		wsData: &ops.WorkspaceData{
-			ID:   "ws",
-			Path: wsRoot,
-			Repos: []ops.WorkspaceRepo{
-				{Name: "repo-a", Path: filepath.Join(wsRoot, "repo-a")},
-				{Name: "repo-b", Path: filepath.Join(wsRoot, "repo-b")},
-			},
-			Agents: []ops.WorkspaceAgentInfo{{Name: "agent-a", Repos: []string{"repo-a", "repo-b"}}},
-		},
-		dataDir: dataDir,
-	})
-	impl := svc.(*fileServiceImpl)
-	ctx := context.Background()
-
-	if err := svc.WriteFileScoped(ctx, "ws", service.ScopeAgent, "agent-a", "repo-a", "file.txt", "repo-a-new"); err != nil {
-		t.Fatalf("write repo-a: %v", err)
+func TestCleanupLegacySaveHistoryRefusesSymlink(t *testing.T) {
+	dataDir := t.TempDir()
+	outside := t.TempDir()
+	mustWrite(t, filepath.Join(outside, "snapshot.json"), "keep")
+	if err := os.Symlink(outside, filepath.Join(dataDir, legacySaveHistoryDirName)); err != nil {
+		t.Skipf("symlink unavailable: %v", err)
 	}
-	if err := svc.WriteFileScoped(ctx, "ws", service.ScopeAgent, "agent-a", "repo-b", "file.txt", "repo-b-new"); err != nil {
-		t.Fatalf("write repo-b: %v", err)
+	if err := cleanupLegacySaveHistory(dataDir); err == nil {
+		t.Fatal("cleanup followed legacy history symlink")
 	}
-
-	aHistory, err := impl.loadSaveHistory("ws", service.ScopeAgent, "agent-a", "repo-a", "file.txt")
-	if err != nil {
-		t.Fatalf("load repo-a history: %v", err)
-	}
-	bHistory, err := impl.loadSaveHistory("ws", service.ScopeAgent, "agent-a", "repo-b", "file.txt")
-	if err != nil {
-		t.Fatalf("load repo-b history: %v", err)
-	}
-	legacyHistory, err := impl.loadSaveHistory("ws", service.ScopeAgent, "agent-a", "", "file.txt")
-	if err != nil {
-		t.Fatalf("load legacy history: %v", err)
-	}
-	if len(aHistory) != 1 || aHistory[0].Content != "repo-a-old" {
-		t.Fatalf("repo-a history = %+v", aHistory)
-	}
-	if len(bHistory) != 1 || bHistory[0].Content != "repo-b-old" {
-		t.Fatalf("repo-b history = %+v", bHistory)
-	}
-	if len(legacyHistory) != 0 {
-		t.Fatalf("legacy history should not collide with repo-qualified saves: %+v", legacyHistory)
+	if got, err := os.ReadFile(filepath.Join(outside, "snapshot.json")); err != nil || string(got) != "keep" {
+		t.Fatalf("outside target changed: %q, %v", got, err)
 	}
 }
 
@@ -1389,10 +1382,10 @@ func TestFileServiceImpl_GitStatusScoped_TargetScopes(t *testing.T) {
 		if err != nil {
 			t.Fatalf("%s GitStatusScoped: %v", sc.name, err)
 		}
-		if got := status["tracked.txt"]; got != " M" {
+		if got := status.Status["tracked.txt"]; got != " M" {
 			t.Fatalf("%s status[tracked.txt] = %q, want %q; full=%#v", sc.name, got, " M", status)
 		}
-		if _, ok := status[filepath.ToSlash(filepath.Join(filepath.Base(sc.root), "tracked.txt"))]; ok {
+		if _, ok := status.Status[filepath.ToSlash(filepath.Join(filepath.Base(sc.root), "tracked.txt"))]; ok {
 			t.Fatalf("%s status should be scope-relative, got %#v", sc.name, status)
 		}
 	}
@@ -1423,14 +1416,113 @@ func TestFileServiceImpl_GitStatusScoped_WorkspaceFanoutPrefixes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GitStatusScoped workspace: %v", err)
 	}
-	if got := status["repo-a/tracked.txt"]; got != " M" {
+	if got := status.Status["repo-a/tracked.txt"]; got != " M" {
 		t.Fatalf("status[repo-a/tracked.txt] = %q, want %q; full=%#v", got, " M", status)
 	}
-	if got := status["worktrees/repo-a/agent-a/new.txt"]; got != "??" {
+	if got := status.Status["worktrees/repo-a/agent-a/new.txt"]; got != "??" {
 		t.Fatalf("status[worktrees/repo-a/agent-a/new.txt] = %q, want %q; full=%#v", got, "??", status)
 	}
-	if _, ok := status["tracked.txt"]; ok {
+	if _, ok := status.Status["tracked.txt"]; ok {
 		t.Fatalf("workspace status should prefix checkout paths, got %#v", status)
+	}
+}
+
+func TestFileServiceImpl_WorkspaceGitFanoutBoundedAndReportsPartial(t *testing.T) {
+	wsRoot := t.TempDir()
+	repos := make([]ops.WorkspaceRepo, 0, 8)
+	for i := 0; i < 8; i++ {
+		name := fmt.Sprintf("repo-%d", i)
+		path := filepath.Join(wsRoot, name)
+		if err := os.MkdirAll(path, 0755); err != nil {
+			t.Fatal(err)
+		}
+		repos = append(repos, ops.WorkspaceRepo{Name: name, Path: path})
+	}
+	var active, maxActive atomic.Int32
+	statusFunc := func(ctx context.Context, path string) (ops.GitFileStatusResult, error) {
+		current := active.Add(1)
+		defer active.Add(-1)
+		for {
+			previous := maxActive.Load()
+			if current <= previous || maxActive.CompareAndSwap(previous, current) {
+				break
+			}
+		}
+		select {
+		case <-time.After(25 * time.Millisecond):
+		case <-ctx.Done():
+			return ops.GitFileStatusResult{}, ctx.Err()
+		}
+		if filepath.Base(path) == "repo-3" {
+			return ops.GitFileStatusResult{}, errors.New("broken checkout")
+		}
+		return ops.GitFileStatusResult{Entries: map[string]string{"file.txt": " M"}, Partial: filepath.Base(path) == "repo-4", LimitHit: filepath.Base(path) == "repo-4"}, nil
+	}
+	svc := NewFileService(scopedMockFileOps{
+		wsRoot:        wsRoot,
+		wsData:        &ops.WorkspaceData{ID: "ws", Path: wsRoot, Repos: repos},
+		gitStatusFunc: statusFunc,
+	})
+	result, err := svc.GitStatusScoped(context.Background(), "ws", service.ScopeWorkspace, "", "")
+	if err != nil {
+		t.Fatalf("GitStatusScoped: %v", err)
+	}
+	if maxActive.Load() > workspaceGitConcurrency {
+		t.Fatalf("max concurrency = %d", maxActive.Load())
+	}
+	if !result.Partial || !result.LimitHit || len(result.Errors) != 1 || result.Errors[0].Repo != "repo-3" {
+		t.Fatalf("result = %+v", result)
+	}
+}
+
+func TestFileServiceImpl_WorkspaceGitFanoutHonorsCallerDeadline(t *testing.T) {
+	wsRoot := t.TempDir()
+	path := filepath.Join(wsRoot, "repo")
+	if err := os.MkdirAll(path, 0755); err != nil {
+		t.Fatal(err)
+	}
+	svc := NewFileService(scopedMockFileOps{
+		wsRoot: wsRoot,
+		wsData: &ops.WorkspaceData{ID: "ws", Path: wsRoot, Repos: []ops.WorkspaceRepo{{Name: "repo", Path: path}}},
+		gitStatusFunc: func(ctx context.Context, _ string) (ops.GitFileStatusResult, error) {
+			<-ctx.Done()
+			return ops.GitFileStatusResult{}, ctx.Err()
+		},
+	})
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Millisecond)
+	defer cancel()
+	result, err := svc.GitStatusScoped(ctx, "ws", service.ScopeWorkspace, "", "")
+	if err != nil {
+		t.Fatalf("GitStatusScoped: %v", err)
+	}
+	if !result.Partial || len(result.Errors) != 1 {
+		t.Fatalf("result = %+v", result)
+	}
+}
+
+func TestFileServiceImpl_CheckoutBranchFailurePreservesStatusAndReportsPartial(t *testing.T) {
+	wsRoot := t.TempDir()
+	path := filepath.Join(wsRoot, "repo")
+	if err := os.MkdirAll(path, 0755); err != nil {
+		t.Fatal(err)
+	}
+	svc := NewFileService(scopedMockFileOps{
+		wsRoot: wsRoot,
+		wsData: &ops.WorkspaceData{ID: "ws", Path: wsRoot, Repos: []ops.WorkspaceRepo{{Name: "repo", Path: path}}},
+		gitStatusFunc: func(context.Context, string) (ops.GitFileStatusResult, error) {
+			return ops.GitFileStatusResult{Entries: map[string]string{"changed.txt": " M"}}, nil
+		},
+		branchFunc: func(context.Context, string) (string, error) { return "", errors.New("branch unavailable") },
+	})
+	result, err := svc.ListFileCheckouts(context.Background(), "ws")
+	if err != nil {
+		t.Fatalf("ListFileCheckouts: %v", err)
+	}
+	if len(result.Checkouts) != 1 || result.Checkouts[0].ChangeCount != 1 || result.Checkouts[0].StatusError {
+		t.Fatalf("status was not preserved: %+v", result.Checkouts)
+	}
+	if !result.Partial || !result.Checkouts[0].Partial || len(result.Errors) != 1 || !strings.Contains(result.Errors[0].Error, "branch unavailable") {
+		t.Fatalf("branch failure not surfaced: %+v", result)
 	}
 }
 
@@ -1566,10 +1658,10 @@ func TestFileServiceImpl_CheckoutsAndWorkspaceGitStatusSkipBrokenCheckout(t *tes
 	if err != nil {
 		t.Fatalf("GitStatusScoped workspace: %v", err)
 	}
-	if got := status["repo-a/tracked.txt"]; got != " M" {
+	if got := status.Status["repo-a/tracked.txt"]; got != " M" {
 		t.Fatalf("status[repo-a/tracked.txt] = %q, want %q; full=%#v", got, " M", status)
 	}
-	for path := range status {
+	for path := range status.Status {
 		if strings.HasPrefix(path, "worktrees/repo-a/agent-a/") {
 			t.Fatalf("workspace status included broken checkout path %q; full=%#v", path, status)
 		}

@@ -1624,7 +1624,7 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** Get commit and browser-save timeline for a file */
+    /** Get bounded commit history for a file */
     get: operations["getScopedFileHistory"];
     put?: never;
     post?: never;
@@ -2269,7 +2269,19 @@ export interface components {
       partial_reasons: components["schemas"]["FilePartialReason"][];
     };
     FileGitStatusResponse: {
-      [key: string]: string;
+      status: {
+        [key: string]: string;
+      };
+      partial: boolean;
+      limit_hit: boolean;
+      errors: components["schemas"]["FileCheckoutError"][];
+    };
+    FileCheckoutError: {
+      /** @enum {string} */
+      kind: "agent" | "repo";
+      agent?: string;
+      repo: string;
+      error: string;
     };
     FileCheckout: {
       /** @enum {string} */
@@ -2280,9 +2292,15 @@ export interface components {
       branch?: string;
       change_count: number;
       status_error?: boolean;
+      error?: string;
+      partial?: boolean;
+      limit_hit?: boolean;
     };
     FileCheckoutsResponse: {
       checkouts: components["schemas"]["FileCheckout"][];
+      partial: boolean;
+      limit_hit: boolean;
+      errors: components["schemas"]["FileCheckoutError"][];
     };
     FileCheckoutRepairRequest: {
       /** @enum {string} */
@@ -2303,6 +2321,8 @@ export interface components {
     FileDiffResponse: {
       path: string;
       patch: string;
+      partial: boolean;
+      limit_hit: boolean;
     };
     FileBlameLine: {
       line: number;
@@ -2318,24 +2338,22 @@ export interface components {
       reason?: string;
       message?: string;
       lines: components["schemas"]["FileBlameLine"][];
+      partial: boolean;
+      limit_hit: boolean;
     };
     FileHistoryEntry: {
       /** @enum {string} */
-      kind: "commit" | "save";
-      id?: string;
-      sha?: string;
-      author?: string;
+      kind: "commit";
+      sha: string;
+      author: string;
       time: string;
       summary: string;
-      content?: string;
-      /** Format: int64 */
-      size?: number;
-      binary?: boolean;
-      truncated?: boolean;
     };
     FileHistoryResponse: {
       path: string;
       entries: components["schemas"]["FileHistoryEntry"][];
+      partial: boolean;
+      limit_hit: boolean;
     };
     FileWriteRequest: {
       content: string;

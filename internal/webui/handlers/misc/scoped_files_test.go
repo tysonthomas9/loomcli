@@ -76,6 +76,15 @@ type recordingCheckoutsFileService struct {
 	wsID string
 }
 
+type failingRevisionFileService struct {
+	stubFileService
+	err error
+}
+
+func (s *failingRevisionFileService) ReadFileAtRevScoped(context.Context, string, service.FileScope, string, string, string, string) (*service.FileReadResult, error) {
+	return nil, s.err
+}
+
 func (s *recordingCheckoutsFileService) ListFileCheckouts(_ context.Context, wsID string) (*service.FileCheckoutsResult, error) {
 	s.wsID = wsID
 	return &service.FileCheckoutsResult{Checkouts: []service.FileCheckout{{
@@ -121,7 +130,7 @@ func (s *recordingNavigationFileService) GitStatusScoped(_ context.Context, wsID
 	s.statusScope = scope
 	s.statusTarget = target
 	s.statusRepo = repo
-	return service.FileGitStatusResult{"src/main.go": " M"}, nil
+	return service.FileGitStatusResult{Status: map[string]string{"src/main.go": " M"}, Errors: []service.FileCheckoutError{}}, nil
 }
 
 func scopedHandlersFixture(t *testing.T) (*mockFileOps, []handlerScopeCase) {
@@ -205,6 +214,24 @@ func TestHandleScopedFileIndex_UsesScopeTarget(t *testing.T) {
 	}
 }
 
+func TestHandleScopedFileRead_InspectionTimeoutIsGatewayTimeout(t *testing.T) {
+	h := HandleScopedFileRead(&failingRevisionFileService{err: service.ErrTimeout("git show timed out")})
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, scopedReq("/api/workspaces/test-ws/files?scope=workspace&path=file.txt&rev=HEAD"))
+	if rr.Code != http.StatusGatewayTimeout {
+		t.Fatalf("status = %d, body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestHandleScopedFileRead_InvalidRevisionIsBadRequest(t *testing.T) {
+	h := HandleScopedFileRead(&failingRevisionFileService{err: service.ErrValidation("invalid git revision")})
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, scopedReq("/api/workspaces/test-ws/files?scope=workspace&path=file.txt&rev=bad..range"))
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, body=%s", rr.Code, rr.Body.String())
+	}
+}
+
 func hasFilePartialReason(reasons []service.FilePartialReason, want service.FilePartialReason) bool {
 	for _, reason := range reasons {
 		if reason == want {
@@ -248,7 +275,7 @@ func TestHandleScopedGitStatus_UsesScopeTarget(t *testing.T) {
 	if err := json.NewDecoder(rr.Body).Decode(&body); err != nil {
 		t.Fatalf("decode body: %v", err)
 	}
-	if got := body["src/main.go"]; got != " M" {
+	if got := body.Status["src/main.go"]; got != " M" {
 		t.Fatalf("body = %+v", body)
 	}
 }

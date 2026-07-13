@@ -76,7 +76,6 @@ export interface DiffViewState {
   to?: string | undefined;
   title: string;
   patch?: string | undefined;
-  restoreContent?: string | undefined;
   canOpenFile?: boolean | undefined;
 }
 
